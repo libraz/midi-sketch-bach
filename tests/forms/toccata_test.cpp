@@ -205,8 +205,8 @@ TEST(ToccataTest, OpeningSectionHasFastNotes) {
   // The majority of opening notes should be 16th notes.
   float fast_ratio = static_cast<float>(fast_note_count) /
                      static_cast<float>(opening_note_count);
-  EXPECT_GE(fast_ratio, 0.80f)
-      << "Expected >= 80% 16th notes in opening, got " << (fast_ratio * 100.0f) << "%";
+  EXPECT_GE(fast_ratio, 0.55f)
+      << "Expected >= 55% 16th notes in opening, got " << (fast_ratio * 100.0f) << "%";
 }
 
 // ---------------------------------------------------------------------------
@@ -641,6 +641,277 @@ TEST(ToccataTest, MultipleSeeds_AllSucceed) {
     EXPECT_TRUE(result.success) << "Failed with seed " << seed;
     EXPECT_GT(totalNoteCount(result), 0u) << "No notes with seed " << seed;
   }
+}
+
+// ---------------------------------------------------------------------------
+// BWV 565-style structural tests
+// ---------------------------------------------------------------------------
+
+TEST(ToccataTest, OpeningHasGrandPause) {
+  ToccataConfig config = makeTestConfig();
+  config.section_bars = 24;
+  ToccataResult result = generateToccata(config);
+  ASSERT_TRUE(result.success);
+  ASSERT_GT(result.tracks[0].notes.size(), 1u);
+
+  // Check for a 960+ tick gap in voice 0 within the first 4 bars.
+  Tick four_bars = 4u * kTicksPerBar;
+  bool found_gap = false;
+
+  const auto& notes = result.tracks[0].notes;
+  for (size_t i = 1; i < notes.size(); ++i) {
+    if (notes[i].start_tick >= four_bars) break;
+    Tick prev_end = notes[i - 1].start_tick + notes[i - 1].duration;
+    if (notes[i].start_tick > prev_end) {
+      Tick gap = notes[i].start_tick - prev_end;
+      if (gap >= 960u) {
+        found_gap = true;
+        break;
+      }
+    }
+  }
+
+  EXPECT_TRUE(found_gap)
+      << "Opening should have a grand pause (960+ tick gap) in the first 4 bars";
+}
+
+TEST(ToccataTest, OpeningHasOctaveDoubling) {
+  ToccataConfig config = makeTestConfig();
+  config.section_bars = 24;
+  ToccataResult result = generateToccata(config);
+  ASSERT_TRUE(result.success);
+  ASSERT_GE(result.tracks.size(), 2u);
+
+  // Check for notes at the same tick with 12-semitone difference across tracks.
+  Tick opening_end = 6u * kTicksPerBar;
+  bool found_octave = false;
+
+  for (const auto& n0 : result.tracks[0].notes) {
+    if (n0.start_tick >= opening_end) break;
+    for (const auto& n1 : result.tracks[1].notes) {
+      if (n1.start_tick > n0.start_tick) break;
+      if (n1.start_tick == n0.start_tick) {
+        int diff = absoluteInterval(n0.pitch, n1.pitch);
+        if (diff == 12) {
+          found_octave = true;
+          break;
+        }
+      }
+    }
+    if (found_octave) break;
+  }
+
+  EXPECT_TRUE(found_octave)
+      << "Opening should have octave doubling between Manual I and Manual II";
+}
+
+TEST(ToccataTest, OpeningHasBlockChord) {
+  ToccataConfig config = makeTestConfig();
+  config.section_bars = 24;
+  ToccataResult result = generateToccata(config);
+  ASSERT_TRUE(result.success);
+  ASSERT_GE(result.tracks.size(), 3u);
+
+  Tick opening_end = 6u * kTicksPerBar;
+  constexpr Tick kWholeNoteDur = kTicksPerBeat * 4;
+
+  // Find a whole-note-or-longer note in voice 0 during opening.
+  bool found_block = false;
+  for (const auto& n0 : result.tracks[0].notes) {
+    if (n0.start_tick >= opening_end) break;
+    if (n0.duration >= kWholeNoteDur) {
+      // Check if voices 1 and 2 also have notes at the same tick.
+      bool v1_present = false, v2_present = false;
+      for (const auto& n1 : result.tracks[1].notes) {
+        if (n1.start_tick == n0.start_tick && n1.duration >= kWholeNoteDur) {
+          v1_present = true;
+          break;
+        }
+      }
+      for (const auto& n2 : result.tracks[2].notes) {
+        if (n2.start_tick == n0.start_tick && n2.duration >= kWholeNoteDur / 2) {
+          v2_present = true;
+          break;
+        }
+      }
+      if (v1_present && v2_present) {
+        found_block = true;
+        break;
+      }
+    }
+  }
+
+  EXPECT_TRUE(found_block)
+      << "Opening should have a block chord (whole note) across 3+ voices";
+}
+
+TEST(ToccataTest, RecitativeHasRhythmicVariety) {
+  ToccataConfig config = makeTestConfig();
+  config.section_bars = 24;
+  ToccataResult result = generateToccata(config);
+  ASSERT_TRUE(result.success);
+
+  Tick recit_start = 6u * kTicksPerBar;
+  Tick recit_end = 18u * kTicksPerBar;
+
+  // Collect unique durations across both manual tracks in recitative.
+  std::set<Tick> durations;
+  for (size_t track_idx = 0; track_idx <= 1; ++track_idx) {
+    for (const auto& note : result.tracks[track_idx].notes) {
+      if (note.start_tick >= recit_start && note.start_tick < recit_end) {
+        durations.insert(note.duration);
+      }
+    }
+  }
+
+  EXPECT_GE(durations.size(), 4u)
+      << "Recitative should have at least 4 distinct note durations, found "
+      << durations.size();
+}
+
+TEST(ToccataTest, RecitativeHasLeaps) {
+  ToccataConfig config = makeTestConfig();
+  config.section_bars = 24;
+  ToccataResult result = generateToccata(config);
+  ASSERT_TRUE(result.success);
+
+  Tick recit_start = 6u * kTicksPerBar;
+  Tick recit_end = 18u * kTicksPerBar;
+
+  // Count consecutive note pairs with 5+ semitone leaps in manual tracks.
+  int leap_count = 0;
+  int pair_count = 0;
+
+  for (size_t track_idx = 0; track_idx <= 1; ++track_idx) {
+    const auto& notes = result.tracks[track_idx].notes;
+    for (size_t i = 1; i < notes.size(); ++i) {
+      if (notes[i].start_tick < recit_start || notes[i].start_tick >= recit_end)
+        continue;
+      if (notes[i - 1].start_tick < recit_start) continue;
+      ++pair_count;
+      int interval = absoluteInterval(notes[i].pitch, notes[i - 1].pitch);
+      if (interval >= 5) ++leap_count;
+    }
+  }
+
+  if (pair_count > 0) {
+    float leap_ratio = static_cast<float>(leap_count) /
+                       static_cast<float>(pair_count);
+    EXPECT_GE(leap_ratio, 0.10f)
+        << "Recitative should have >= 10% leaps (5+ semitones), got "
+        << (leap_ratio * 100.0f) << "% (" << leap_count << "/" << pair_count << ")";
+  }
+}
+
+TEST(ToccataTest, RecitativeUsesBothManuals) {
+  ToccataConfig config = makeTestConfig();
+  config.section_bars = 24;
+  ToccataResult result = generateToccata(config);
+  ASSERT_TRUE(result.success);
+  ASSERT_GE(result.tracks.size(), 2u);
+
+  Tick recit_start = 6u * kTicksPerBar;
+  Tick recit_end = 18u * kTicksPerBar;
+
+  size_t v0_count = countNotesInRange(result.tracks[0], recit_start, recit_end);
+  size_t v1_count = countNotesInRange(result.tracks[1], recit_start, recit_end);
+
+  EXPECT_GT(v0_count, 0u) << "Voice 0 should have notes in recitative";
+  EXPECT_GT(v1_count, 0u) << "Voice 1 should have notes in recitative";
+}
+
+TEST(ToccataTest, DriveRhythmicAcceleration) {
+  ToccataConfig config = makeTestConfig();
+  config.section_bars = 24;
+  ToccataResult result = generateToccata(config);
+  ASSERT_TRUE(result.success);
+
+  Tick drive_start = 18u * kTicksPerBar;
+  Tick drive_end = 24u * kTicksPerBar;
+  Tick drive_mid = drive_start + (drive_end - drive_start) / 2;
+
+  // Count notes in first half vs second half of drive (voice 0).
+  size_t first_half = countNotesInRange(result.tracks[0], drive_start, drive_mid);
+  size_t second_half = countNotesInRange(result.tracks[0], drive_mid, drive_end);
+
+  EXPECT_GT(second_half, first_half)
+      << "Drive second half should have higher note density than first half "
+      << "(first=" << first_half << ", second=" << second_half << ")";
+}
+
+TEST(ToccataTest, HarmonicPlanIsRich) {
+  ToccataConfig config = makeTestConfig();
+  ToccataResult result = generateToccata(config);
+  ASSERT_TRUE(result.success);
+
+  // Count distinct ChordQuality values in the timeline.
+  std::set<ChordQuality> qualities;
+  for (const auto& event : result.timeline.events()) {
+    qualities.insert(event.chord.quality);
+  }
+
+  EXPECT_GE(qualities.size(), 3u)
+      << "Harmonic plan should contain at least 3 distinct chord qualities, found "
+      << qualities.size();
+}
+
+TEST(ToccataTest, PedalSoloPresent) {
+  ToccataConfig config = makeTestConfig();
+  config.section_bars = 24;
+  ToccataResult result = generateToccata(config);
+  ASSERT_TRUE(result.success);
+  ASSERT_GE(result.tracks.size(), 3u);
+
+  // Check for 8th-note-or-shorter pedal activity near opening/recit boundary.
+  Tick opening_end = 6u * kTicksPerBar;
+  Tick search_start = opening_end - 2u * kTicksPerBar;
+  Tick search_end = opening_end;
+
+  int short_pedal_count = 0;
+  for (const auto& note : result.tracks[2].notes) {
+    if (note.start_tick >= search_start && note.start_tick < search_end) {
+      if (note.duration <= kTicksPerBeat / 2) {  // 8th note or shorter
+        ++short_pedal_count;
+      }
+    }
+  }
+
+  EXPECT_GT(short_pedal_count, 0)
+      << "Pedal solo should have 8th-note-or-shorter activity near opening end";
+}
+
+TEST(ToccataTest, FinalChordIsPicardy) {
+  ToccataConfig config = makeTestConfig();
+  config.key = {Key::D, true};  // D minor
+  config.section_bars = 24;
+  ToccataResult result = generateToccata(config);
+  ASSERT_TRUE(result.success);
+  ASSERT_GT(result.tracks[0].notes.size(), 0u);
+
+  // Find the last note in track 0 in the final bar.
+  Tick final_bar_start = (24u - 1) * kTicksPerBar;
+  uint8_t last_pitch = 0;
+  bool found_final = false;
+
+  for (auto it = result.tracks[0].notes.rbegin();
+       it != result.tracks[0].notes.rend(); ++it) {
+    if (it->start_tick >= final_bar_start) {
+      last_pitch = it->pitch;
+      found_final = true;
+      break;
+    }
+  }
+
+  ASSERT_TRUE(found_final) << "Should have notes in the final bar on track 0";
+
+  // For D minor, the Picardy 3rd means F# (pitch class 6 = D+4).
+  uint8_t tonic_pc = static_cast<uint8_t>(Key::D);
+  uint8_t major_third_pc = (tonic_pc + 4) % 12;  // F# = 6
+  uint8_t actual_pc = last_pitch % 12;
+
+  EXPECT_EQ(actual_pc, major_third_pc)
+      << "Final chord should contain Picardy third (F# for D minor), got pitch class "
+      << static_cast<int>(actual_pc) << " expected " << static_cast<int>(major_third_pc);
 }
 
 }  // namespace

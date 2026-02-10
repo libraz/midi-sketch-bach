@@ -153,6 +153,14 @@ class CollisionResolver {
   /// @param semitones Maximum distance to search (default: 12).
   void setMaxSearchRange(int semitones);
 
+  /// @brief Set the voice range tolerance (in semitones).
+  ///
+  /// Notes placed more than this many semitones outside their voice's
+  /// registered range are rejected by isSafeToPlace().
+  ///
+  /// @param semitones Maximum allowed excursion outside range (default: 6).
+  void setRangeTolerance(int semitones);
+
   /// @brief Set cadence tick positions for voice-leading enhancement.
   ///
   /// At cadence ticks, leading tone -> tonic resolution is prioritized.
@@ -165,6 +173,7 @@ class CollisionResolver {
 
  private:
   int max_search_range_ = 12;
+  int range_tolerance_ = 6;
   std::vector<Tick> cadence_ticks_;
 
   /// @brief Attempt a specific resolution strategy.

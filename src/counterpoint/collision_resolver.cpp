@@ -166,6 +166,28 @@ bool CollisionResolver::isSafeToPlace(const CounterpointState& state,
     }
   }
 
+  // Check voice crossing.
+  if (wouldCrossVoice(state, voice_id, pitch, tick)) {
+    return false;
+  }
+
+  // Minimum adjacent voice spacing on strong beats (Baroque practice).
+  bool is_strong_beat = (beatInBar(tick) == 0 || beatInBar(tick) == 2);
+  if (is_strong_beat) {
+    for (VoiceId other : voices) {
+      if (other == voice_id) continue;
+      const NoteEvent* other_note = state.getNoteAt(other, tick);
+      if (!other_note) continue;
+      // Only check adjacent voices (voice IDs differ by 1).
+      int voice_dist = std::abs(static_cast<int>(voice_id) -
+                                static_cast<int>(other));
+      if (voice_dist != 1) continue;
+      int pitch_dist = std::abs(static_cast<int>(pitch) -
+                                static_cast<int>(other_note->pitch));
+      if (pitch_dist > 0 && pitch_dist < 3) return false;  // < minor 3rd
+    }
+  }
+
   // Check voice range.
   const auto* range = state.getVoiceRange(voice_id);
   if (range && (pitch < range->low || pitch > range->high)) {
@@ -177,7 +199,7 @@ bool CollisionResolver::isSafeToPlace(const CounterpointState& state,
     } else {
       distance = pitch - range->high;
     }
-    if (distance > 12) return false;
+    if (distance > range_tolerance_) return false;
   }
 
   return true;
@@ -617,6 +639,12 @@ PlacementResult CollisionResolver::findSafePitchWithLookahead(
 void CollisionResolver::setMaxSearchRange(int semitones) {
   if (semitones > 0) {
     max_search_range_ = semitones;
+  }
+}
+
+void CollisionResolver::setRangeTolerance(int semitones) {
+  if (semitones > 0) {
+    range_tolerance_ = semitones;
   }
 }
 

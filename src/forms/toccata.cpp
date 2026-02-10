@@ -3,6 +3,7 @@
 #include "forms/toccata.h"
 
 #include <algorithm>
+#include <cmath>
 #include <random>
 #include <vector>
 
@@ -12,64 +13,46 @@
 #include "core/scale.h"
 #include "harmony/chord_types.h"
 #include "harmony/harmonic_event.h"
+#include "ornament/ornament_engine.h"
+#include "organ/registration.h"
 
 namespace bach {
 
 namespace {
 
-/// @brief Organ velocity (pipe organs have no velocity sensitivity).
+// ---------------------------------------------------------------------------
+// Constants
+// ---------------------------------------------------------------------------
+
 constexpr uint8_t kOrganVelocity = 80;
 
-/// @brief Duration of a 16th note in ticks.
-constexpr Tick kSixteenthNote = kTicksPerBeat / 4;  // 120
+constexpr Tick kThirtySecondNote = kTicksPerBeat / 8;                  // 60
+constexpr Tick kSixteenthNote = kTicksPerBeat / 4;                     // 120
+constexpr Tick kEighthNote = kTicksPerBeat / 2;                        // 240
+constexpr Tick kQuarterNote = kTicksPerBeat;                           // 480
+constexpr Tick kDottedQuarter = kTicksPerBeat + kTicksPerBeat / 2;     // 720
+constexpr Tick kHalfNote = kTicksPerBeat * 2;                          // 960
+// constexpr Tick kDottedHalf = kTicksPerBeat * 2 + kTicksPerBeat;  // 1440 (reserved)
+constexpr Tick kWholeNote = kTicksPerBeat * 4;                         // 1920
 
-/// @brief Duration of an 8th note in ticks.
-constexpr Tick kEighthNote = kTicksPerBeat / 2;  // 240
+constexpr Tick kGrandPauseDuration = kHalfNote;    // 960 ticks (2 beats)
+// constexpr Tick kFermataGrandPause = kTicksPerBar; // 1920 ticks (reserved)
 
-/// @brief Duration of a quarter note in ticks.
-constexpr Tick kQuarterNote = kTicksPerBeat;  // 480
-
-/// @brief Duration of a half note in ticks.
-constexpr Tick kHalfNote = kTicksPerBeat * 2;  // 960
-
-/// @brief Duration of a whole note in ticks.
-constexpr Tick kWholeNote = kTicksPerBeat * 4;  // 1920
-
-/// @brief MIDI channel for Manual I (Great).
 constexpr uint8_t kGreatChannel = 0;
-
-/// @brief MIDI channel for Manual II (Swell).
 constexpr uint8_t kSwellChannel = 1;
-
-/// @brief MIDI channel for Pedal.
 constexpr uint8_t kPedalChannel = 3;
 
-/// @brief Minimum allowed voice count for toccata generation.
 constexpr uint8_t kMinVoices = 2;
-
-/// @brief Maximum allowed voice count for toccata generation.
 constexpr uint8_t kMaxVoices = 5;
 
-/// @brief Proportion of total bars allocated to the opening gesture.
 constexpr float kOpeningProportion = 0.25f;
-
-/// @brief Proportion of total bars allocated to the recitative section.
 constexpr float kRecitativeProportion = 0.50f;
 
 // ---------------------------------------------------------------------------
-// Scale tone extraction
+// Scale / chord helpers
 // ---------------------------------------------------------------------------
 
 /// @brief Get scale tones within a pitch range for the given key context.
-///
-/// Collects all MIDI pitches in [low_pitch, high_pitch] that belong to the
-/// scale determined by the key and mode.
-///
-/// @param key Musical key (tonic pitch class).
-/// @param is_minor True for minor mode (uses harmonic minor), false for major.
-/// @param low_pitch Lowest MIDI pitch to include.
-/// @param high_pitch Highest MIDI pitch to include.
-/// @return Vector of scale-member MIDI pitches in ascending order.
 std::vector<uint8_t> getScaleTones(Key key, bool is_minor, uint8_t low_pitch,
                                    uint8_t high_pitch) {
   std::vector<uint8_t> tones;
@@ -86,13 +69,6 @@ std::vector<uint8_t> getScaleTones(Key key, bool is_minor, uint8_t low_pitch,
 }
 
 /// @brief Get chord tones as MIDI pitches for a given chord and base octave.
-///
-/// Returns root, third, and fifth of the chord in the specified octave,
-/// adjusting intervals for chord quality.
-///
-/// @param chord The chord to extract tones from.
-/// @param octave Base octave for pitch calculation.
-/// @return Vector of 3 MIDI pitch values (root, third, fifth).
 std::vector<uint8_t> getChordTones(const Chord& chord, int octave) {
   std::vector<uint8_t> tones;
   tones.reserve(3);
@@ -108,9 +84,9 @@ std::vector<uint8_t> getChordTones(const Chord& chord, int octave) {
 
   int fifth_offset = 7;  // Perfect fifth default.
   if (chord.quality == ChordQuality::Diminished) {
-    fifth_offset = 6;  // Diminished fifth.
+    fifth_offset = 6;
   } else if (chord.quality == ChordQuality::Augmented) {
-    fifth_offset = 8;  // Augmented fifth.
+    fifth_offset = 8;
   }
 
   auto clamp_midi = [](int pitch) -> uint8_t {
@@ -126,21 +102,40 @@ std::vector<uint8_t> getChordTones(const Chord& chord, int octave) {
   return tones;
 }
 
+/// @brief Collect all chord tones within a pitch range across octaves.
+std::vector<uint8_t> collectChordTonesInRange(const Chord& chord,
+                                              uint8_t low, uint8_t high) {
+  std::vector<uint8_t> tones;
+  int root_pc = static_cast<int>(chord.root_pitch) % 12;
+
+  int third_offset = 4;
+  if (chord.quality == ChordQuality::Minor ||
+      chord.quality == ChordQuality::Diminished ||
+      chord.quality == ChordQuality::Minor7) {
+    third_offset = 3;
+  }
+  int fifth_offset = 7;
+  if (chord.quality == ChordQuality::Diminished) fifth_offset = 6;
+  else if (chord.quality == ChordQuality::Augmented) fifth_offset = 8;
+
+  int intervals[] = {0, third_offset, fifth_offset};
+
+  for (int pitch = static_cast<int>(low); pitch <= static_cast<int>(high); ++pitch) {
+    int pc = pitch % 12;
+    for (int intv : intervals) {
+      if (pc == (root_pc + intv) % 12) {
+        tones.push_back(static_cast<uint8_t>(pitch));
+        break;
+      }
+    }
+  }
+  return tones;
+}
+
 // ---------------------------------------------------------------------------
 // Track creation
 // ---------------------------------------------------------------------------
 
-/// @brief Create MIDI tracks for a toccata.
-///
-/// Channel/program mapping per the organ system specification:
-///   Voice 0 -> Ch 0, Church Organ (Manual I / Great)
-///   Voice 1 -> Ch 1, Reed Organ   (Manual II / Swell)
-///   Voice 2 -> Ch 3, Church Organ (Pedal)
-///
-/// For 4+ voices, additional manual tracks are created on Ch 2.
-///
-/// @param num_voices Number of voices (2-5, clamped).
-/// @return Vector of Track objects with channel/program/name configured.
 std::vector<Track> createToccataTracks(uint8_t num_voices) {
   std::vector<Track> tracks;
   tracks.reserve(num_voices);
@@ -151,8 +146,6 @@ std::vector<Track> createToccataTracks(uint8_t num_voices) {
     const char* name;
   };
 
-  // Toccata mapping: voice 0=Great, voice 1=Swell, voice 2=Pedal.
-  // Additional voices map to Manual III, then Manual IV.
   static constexpr TrackSpec kSpecs[] = {
       {kGreatChannel, GmProgram::kChurchOrgan, "Manual I (Great)"},
       {kSwellChannel, GmProgram::kReedOrgan, "Manual II (Swell)"},
@@ -176,218 +169,450 @@ std::vector<Track> createToccataTracks(uint8_t num_voices) {
 // Pitch range helpers
 // ---------------------------------------------------------------------------
 
-/// @brief Get the low pitch bound for a toccata voice index.
-///
-/// Voice 0 = Manual I (Great), Voice 1 = Manual II (Swell),
-/// Voice 2 = Pedal, Voice 3+ = Manual III.
-///
-/// @param voice_idx Voice index (0-based).
-/// @return Low MIDI pitch bound.
 uint8_t getToccataLowPitch(uint8_t voice_idx) {
   switch (voice_idx) {
-    case 0: return organ_range::kManual1Low;   // 36
-    case 1: return organ_range::kManual2Low;   // 36
-    case 2: return organ_range::kPedalLow;     // 24
-    case 3: return organ_range::kManual3Low;   // 48
+    case 0: return organ_range::kManual1Low;
+    case 1: return organ_range::kManual2Low;
+    case 2: return organ_range::kPedalLow;
+    case 3: return organ_range::kManual3Low;
     default: return organ_range::kManual1Low;
   }
 }
 
-/// @brief Get the high pitch bound for a toccata voice index.
-/// @param voice_idx Voice index (0-based).
-/// @return High MIDI pitch bound.
 uint8_t getToccataHighPitch(uint8_t voice_idx) {
   switch (voice_idx) {
-    case 0: return organ_range::kManual1High;  // 96
-    case 1: return organ_range::kManual2High;  // 96
-    case 2: return organ_range::kPedalHigh;    // 50
-    case 3: return organ_range::kManual3High;  // 96
+    case 0: return organ_range::kManual1High;
+    case 1: return organ_range::kManual2High;
+    case 2: return organ_range::kPedalHigh;
+    case 3: return organ_range::kManual3High;
     default: return organ_range::kManual1High;
   }
 }
 
 // ---------------------------------------------------------------------------
-// Opening gesture generation (25% of section)
+// NoteEvent creation helper
 // ---------------------------------------------------------------------------
 
-/// @brief Generate the opening dramatic gesture with fast scale runs.
-///
-/// Creates rapid 16th-note scale passages on Manual I (voice 0), mimicking
-/// the virtuosic opening of BWV 565. Patterns alternate between ascending
-/// and descending runs with occasional arpeggio passages.
-///
-/// @param timeline Harmonic timeline for chord/key context.
-/// @param key_sig Key signature for scale tone lookup.
-/// @param start_tick Start tick of the opening section.
-/// @param end_tick End tick of the opening section (exclusive).
-/// @param rng Random number generator.
-/// @return Vector of NoteEvents for the opening gesture on voice 0.
+NoteEvent makeNote(Tick tick, Tick dur, uint8_t pitch, uint8_t voice,
+                   BachNoteSource source = BachNoteSource::FreeCounterpoint) {
+  NoteEvent n;
+  n.start_tick = tick;
+  n.duration = dur;
+  n.pitch = pitch;
+  n.velocity = kOrganVelocity;
+  n.voice = voice;
+  n.source = source;
+  return n;
+}
+
+// ---------------------------------------------------------------------------
+// Toccata harmonic plan -- baroque-faithful chord progression
+// ---------------------------------------------------------------------------
+
+HarmonicTimeline buildToccataHarmonicPlan(
+    const KeySignature& key_sig,
+    Tick opening_start, Tick opening_end,
+    Tick recit_start, Tick recit_end,
+    Tick drive_start, Tick drive_end) {
+  HarmonicTimeline timeline;
+  uint8_t tpc = static_cast<uint8_t>(key_sig.tonic);
+  bool minor = key_sig.is_minor;
+
+  auto addChord = [&](Tick tick, Tick end_tick, ChordDegree degree,
+                      ChordQuality quality, int root_offset,
+                      float weight = 1.0f) {
+    HarmonicEvent e;
+    e.tick = tick;
+    e.end_tick = end_tick;
+    e.key = key_sig.tonic;
+    e.is_minor = minor;
+    e.chord.degree = degree;
+    e.chord.quality = quality;
+    e.chord.root_pitch = static_cast<uint8_t>((tpc + root_offset) % 12);
+    e.bass_pitch = clampPitch(36 + (tpc + root_offset) % 12,
+                              organ_range::kPedalLow, organ_range::kPedalHigh);
+    e.weight = weight;
+    timeline.addEvent(e);
+  };
+
+  // Opening: V -> i -> V (dominant opening, BWV 565 style)
+  Tick o_dur = opening_end - opening_start;
+  Tick o_mid = opening_start + o_dur / 2;
+  Tick o_late = opening_start + o_dur * 4 / 5;
+
+  addChord(opening_start, o_mid,
+           ChordDegree::V, ChordQuality::Major, 7);
+  addChord(o_mid, o_late,
+           ChordDegree::I, minor ? ChordQuality::Minor : ChordQuality::Major, 0);
+  addChord(o_late, opening_end,
+           ChordDegree::V, ChordQuality::Major, 7);
+
+  // Recitative: i -> viio7/V -> V -> VI -> iv -> viio7 -> V
+  Tick r_dur = recit_end - recit_start;
+  Tick r15 = recit_start + r_dur * 15 / 100;
+  Tick r30 = recit_start + r_dur * 30 / 100;
+  Tick r45 = recit_start + r_dur * 45 / 100;
+  Tick r60 = recit_start + r_dur * 60 / 100;
+  Tick r75 = recit_start + r_dur * 75 / 100;
+  Tick r90 = recit_start + r_dur * 90 / 100;
+
+  addChord(recit_start, r15,
+           ChordDegree::I, minor ? ChordQuality::Minor : ChordQuality::Major, 0);
+  addChord(r15, r30,
+           ChordDegree::viiDim, ChordQuality::Diminished7, 6);  // viio7/V
+  addChord(r30, r45,
+           ChordDegree::V, ChordQuality::Major, 7);
+  addChord(r45, r60,
+           ChordDegree::vi, minor ? ChordQuality::Major : ChordQuality::Minor,
+           minor ? 8 : 9);  // VI (deceptive)
+  addChord(r60, r75,
+           ChordDegree::IV, minor ? ChordQuality::Minor : ChordQuality::Major, 5);
+  addChord(r75, r90,
+           ChordDegree::viiDim, ChordQuality::Diminished7, 11);  // viio7
+  addChord(r90, recit_end,
+           ChordDegree::V, ChordQuality::Major, 7);
+
+  // Drive: i -> iv -> V/V -> V7 -> I (Picardy third)
+  Tick d_dur = drive_end - drive_start;
+  Tick d25 = drive_start + d_dur * 25 / 100;
+  Tick d50 = drive_start + d_dur * 50 / 100;
+  Tick d75 = drive_start + d_dur * 75 / 100;
+  Tick d95 = drive_start + d_dur * 95 / 100;
+
+  addChord(drive_start, d25,
+           ChordDegree::I, minor ? ChordQuality::Minor : ChordQuality::Major, 0);
+  addChord(d25, d50,
+           ChordDegree::IV, minor ? ChordQuality::Minor : ChordQuality::Major, 5);
+  addChord(d50, d75,
+           ChordDegree::V_of_V, ChordQuality::Major, 2);
+  addChord(d75, d95,
+           ChordDegree::V, ChordQuality::Dominant7, 7);
+  // Picardy third: always Major for final chord
+  addChord(d95, drive_end,
+           ChordDegree::I, ChordQuality::Major, 0, 1.5f);
+
+  return timeline;
+}
+
+// ---------------------------------------------------------------------------
+// Opening helpers
+// ---------------------------------------------------------------------------
+
+/// @brief Generate a mordent wave pattern: held note + mordent + descending scale.
+/// @return Tick position after the wave ends.
+Tick generateMordentWave(uint8_t start_pitch,
+                         const std::vector<uint8_t>& scale_tones,
+                         Tick start_tick, Tick section_end,
+                         std::vector<NoteEvent>& notes,
+                         uint8_t low0, uint8_t high0,
+                         uint8_t low1, uint8_t high1) {
+  if (scale_tones.empty() || start_tick >= section_end) return start_tick;
+
+  Tick tick = start_tick;
+  uint8_t p0 = clampPitch(start_pitch, low0, high0);
+  uint8_t p1 = clampPitch(static_cast<int>(start_pitch) - 12, low1, high1);
+
+  // 1. Held note (dotted quarter) -- parallel octaves on voice 0 + voice 1
+  Tick held_dur = std::min(kDottedQuarter, section_end - tick);
+  if (held_dur == 0) return tick;
+  notes.push_back(makeNote(tick, held_dur, p0, 0));
+  notes.push_back(makeNote(tick, held_dur, p1, 1));
+  tick += held_dur;
+  if (tick >= section_end) return tick;
+
+  // 2. Mordent: main -> chromatic lower neighbor -> main (3 x 32nd)
+  uint8_t lower0 = clampPitch(static_cast<int>(p0) - 1, low0, high0);
+  uint8_t lower1 = clampPitch(static_cast<int>(p1) - 1, low1, high1);
+  uint8_t mordent_pitches0[] = {p0, lower0, p0};
+  uint8_t mordent_pitches1[] = {p1, lower1, p1};
+
+  for (int i = 0; i < 3 && tick < section_end; ++i) {
+    Tick dur = std::min(kThirtySecondNote, section_end - tick);
+    if (dur == 0) break;
+    notes.push_back(makeNote(tick, dur, mordent_pitches0[i], 0));
+    notes.push_back(makeNote(tick, dur, mordent_pitches1[i], 1));
+    tick += dur;
+  }
+  if (tick >= section_end) return tick;
+
+  // 3. Descending scale run from start_pitch down ~one octave (32nd notes)
+  // Find scale tone index nearest to p0
+  size_t top_idx = 0;
+  for (size_t i = 0; i < scale_tones.size(); ++i) {
+    if (scale_tones[i] <= p0) top_idx = i;
+  }
+
+  uint8_t target = clampPitch(static_cast<int>(p0) - 12, low0, high0);
+  for (size_t i = top_idx; i > 0 && tick < section_end; --i) {
+    if (scale_tones[i] < target) break;
+    Tick dur = std::min(kThirtySecondNote, section_end - tick);
+    if (dur == 0) break;
+    uint8_t sp0 = clampPitch(scale_tones[i], low0, high0);
+    uint8_t sp1 = clampPitch(static_cast<int>(scale_tones[i]) - 12, low1, high1);
+    notes.push_back(makeNote(tick, dur, sp0, 0));
+    notes.push_back(makeNote(tick, dur, sp1, 1));
+    tick += dur;
+  }
+
+  return tick;
+}
+
+/// @brief Generate a block chord across voices 0, 1, and optionally 2.
+void generateBlockChordNotes(const KeySignature& key_sig, Tick tick, Tick end_tick,
+                             std::vector<NoteEvent>& notes,
+                             uint8_t num_voices) {
+  Tick dur = std::min(kWholeNote, end_tick - tick);
+  if (dur == 0) return;
+
+  uint8_t tpc = static_cast<uint8_t>(key_sig.tonic);
+  uint8_t third = clampPitch(60 + tpc + (key_sig.is_minor ? 3 : 4),
+                             getToccataLowPitch(1), getToccataHighPitch(1));
+  uint8_t fifth = clampPitch(60 + tpc + 7,
+                             getToccataLowPitch(0), getToccataHighPitch(0));
+
+  notes.push_back(makeNote(tick, dur, fifth, 0));
+  notes.push_back(makeNote(tick, dur, third, 1));
+  if (num_voices >= 3) {
+    uint8_t bass = clampPitch(36 + tpc,
+                              getToccataLowPitch(2), getToccataHighPitch(2));
+    notes.push_back(makeNote(tick, dur, bass, 2, BachNoteSource::PedalPoint));
+  }
+}
+
+/// @brief Generate arpeggio flourish on voice 0 using chord tones.
+void generateArpeggioFlourish(const HarmonicTimeline& timeline,
+                              Tick start_tick, Tick end_tick,
+                              std::vector<NoteEvent>& notes,
+                              std::mt19937& rng) {
+  uint8_t low = getToccataLowPitch(0);
+  uint8_t high = getToccataHighPitch(0);
+
+  const HarmonicEvent& event = timeline.getAt(start_tick);
+  auto chord_tones = collectChordTonesInRange(event.chord, low, high);
+  if (chord_tones.empty()) return;
+
+  Tick tick = start_tick;
+  bool ascending = true;
+  size_t idx = chord_tones.size() / 2;
+
+  while (tick < end_tick) {
+    // Refresh chord tones at bar boundaries
+    if (tick > start_tick && positionInBar(tick) == 0) {
+      const HarmonicEvent& ev = timeline.getAt(tick);
+      auto new_tones = collectChordTonesInRange(ev.chord, low, high);
+      if (!new_tones.empty()) {
+        chord_tones = new_tones;
+        idx = std::min(idx, chord_tones.size() - 1);
+      }
+    }
+
+    Tick dur = std::min(kSixteenthNote, end_tick - tick);
+    if (dur == 0) break;
+
+    notes.push_back(makeNote(tick, dur, chord_tones[idx], 0));
+    tick += dur;
+
+    // Zigzag with occasional direction reversal
+    if (rng::rollProbability(rng, 0.10f)) ascending = !ascending;
+
+    if (ascending) {
+      if (idx + 1 < chord_tones.size()) ++idx;
+      else { ascending = false; if (idx > 0) --idx; }
+    } else {
+      if (idx > 0) --idx;
+      else { ascending = true; if (idx + 1 < chord_tones.size()) ++idx; }
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Opening gesture (BWV 565 style)
+// ---------------------------------------------------------------------------
+
 std::vector<NoteEvent> generateOpeningGesture(const HarmonicTimeline& timeline,
                                               const KeySignature& key_sig,
                                               Tick start_tick, Tick end_tick,
                                               std::mt19937& rng) {
-  (void)timeline;  // Available for future chord-aware passage generation.
   std::vector<NoteEvent> notes;
-  uint8_t low_pitch = getToccataLowPitch(0);
-  uint8_t high_pitch = getToccataHighPitch(0);
+  uint8_t low0 = getToccataLowPitch(0);
+  uint8_t high0 = getToccataHighPitch(0);
+  uint8_t low1 = getToccataLowPitch(1);
+  uint8_t high1 = getToccataHighPitch(1);
 
-  auto scale_tones = getScaleTones(key_sig.tonic, key_sig.is_minor, low_pitch, high_pitch);
-  if (scale_tones.empty()) {
-    return notes;
+  auto scale_tones0 = getScaleTones(key_sig.tonic, key_sig.is_minor, low0, high0);
+  if (scale_tones0.empty()) return notes;
+
+  Tick total_opening = end_tick - start_tick;
+  Tick opening_bars = total_opening / kTicksPerBar;
+
+  // Dominant in octave 5 for dramatic opening (BWV 565: A5)
+  uint8_t tpc = static_cast<uint8_t>(key_sig.tonic);
+  uint8_t dominant_pc = (tpc + 7) % 12;
+  uint8_t start_pitch1 = clampPitch(72 + dominant_pc, low0, high0);
+
+  // One scale step below dominant for second wave
+  size_t dom_idx = 0;
+  for (size_t i = 0; i < scale_tones0.size(); ++i) {
+    if (scale_tones0[i] <= start_pitch1) dom_idx = i;
   }
+  uint8_t start_pitch2 = (dom_idx > 0) ? scale_tones0[dom_idx - 1]
+                                        : scale_tones0[0];
 
-  Tick current_tick = start_tick;
-  bool ascending = true;
+  Tick tick = start_tick;
 
-  // Start high in the range for dramatic effect (BWV 565 opens high).
-  size_t tone_idx = scale_tones.size() * 3 / 4;
+  if (opening_bars >= 4) {
+    // Full pattern: wave1 + pause + wave2 + pause + block chord + arpeggio
+    tick = generateMordentWave(start_pitch1, scale_tones0, tick, end_tick,
+                               notes, low0, high0, low1, high1);
+    tick = std::min(tick + kGrandPauseDuration, end_tick);
 
-  while (current_tick < end_tick) {
-    Tick remaining = end_tick - current_tick;
-    Tick dur = kSixteenthNote;
-    if (dur > remaining) dur = remaining;
-    if (dur == 0) break;
-
-    NoteEvent note;
-    note.start_tick = current_tick;
-    note.duration = dur;
-    note.pitch = scale_tones[tone_idx];
-    note.velocity = kOrganVelocity;
-    note.voice = 0;
-    note.source = BachNoteSource::FreeCounterpoint;
-    notes.push_back(note);
-
-    current_tick += dur;
-
-    // Determine step size: mostly stepwise with occasional leaps.
-    int step = rng::rollProbability(rng, 0.15f) ? 2 : 1;
-
-    if (ascending) {
-      if (tone_idx + step < scale_tones.size()) {
-        tone_idx += step;
-      } else {
-        ascending = false;
-        if (tone_idx >= static_cast<size_t>(step)) {
-          tone_idx -= step;
-        } else {
-          tone_idx = 0;
-        }
-      }
-    } else {
-      if (tone_idx >= static_cast<size_t>(step)) {
-        tone_idx -= step;
-      } else {
-        ascending = true;
-        if (tone_idx + step < scale_tones.size()) {
-          tone_idx += step;
-        } else if (!scale_tones.empty()) {
-          tone_idx = scale_tones.size() - 1;
-        }
-      }
+    if (tick < end_tick - kTicksPerBar * 2) {
+      tick = generateMordentWave(start_pitch2, scale_tones0, tick, end_tick,
+                                 notes, low0, high0, low1, high1);
+      tick = std::min(tick + kGrandPauseDuration, end_tick);
     }
 
-    // Occasionally reverse direction for dramatic sweep.
-    if (rng::rollProbability(rng, 0.12f)) {
-      ascending = !ascending;
+    // Block chord (tonic, 1 bar)
+    if (tick < end_tick - kTicksPerBar) {
+      generateBlockChordNotes(key_sig, tick, end_tick, notes, 3);
+      tick += std::min(kWholeNote, end_tick - tick);
     }
+
+    // Arpeggio flourish (remaining bars, leave last 2 for pedal solo)
+    Tick arpeggio_end = end_tick;
+    if (opening_bars >= 6) arpeggio_end = end_tick - 2 * kTicksPerBar;
+    if (tick < arpeggio_end) {
+      generateArpeggioFlourish(timeline, tick, arpeggio_end, notes, rng);
+    }
+  } else if (opening_bars >= 2) {
+    // Simplified: single wave + arpeggio
+    tick = generateMordentWave(start_pitch1, scale_tones0, tick, end_tick,
+                               notes, low0, high0, low1, high1);
+    tick = std::min(tick + kGrandPauseDuration, end_tick);
+
+    if (tick < end_tick) {
+      generateArpeggioFlourish(timeline, tick, end_tick, notes, rng);
+    }
+  } else {
+    // Very short: just arpeggio
+    generateArpeggioFlourish(timeline, start_tick, end_tick, notes, rng);
   }
 
   return notes;
 }
 
 // ---------------------------------------------------------------------------
-// Recitative / exploration section (50% of section)
+// Recitative -- Stylus Phantasticus (free rhetorical style)
 // ---------------------------------------------------------------------------
 
-/// @brief Generate the recitative/exploration section with freer passages.
-///
-/// Creates alternating 8th-note passages on Manual II (voice 1), with
-/// dramatic pauses (rests) interspersed for rhetorical effect. The texture
-/// is more exploratory and speech-like compared to the opening runs.
-///
-/// @param timeline Harmonic timeline for chord/key context.
-/// @param key_sig Key signature for scale tone lookup.
-/// @param start_tick Start tick of the recitative section.
-/// @param end_tick End tick of the recitative section (exclusive).
-/// @param rng Random number generator.
-/// @return Vector of NoteEvents for the recitative on voice 1.
+/// @brief Select a duration from the recitative weighted table.
+Tick selectRecitDuration(std::mt19937& rng) {
+  float roll = rng::rollFloat(rng, 0.0f, 1.0f);
+  if (roll < 0.10f) return kThirtySecondNote;
+  if (roll < 0.30f) return kSixteenthNote;
+  if (roll < 0.60f) return kEighthNote;
+  if (roll < 0.80f) return kQuarterNote;
+  if (roll < 0.90f) return kDottedQuarter;
+  return kHalfNote;
+}
+
+/// @brief Select a signed interval for recitative melody.
+int selectRecitInterval(std::mt19937& rng, bool ascending) {
+  float roll = rng::rollFloat(rng, 0.0f, 1.0f);
+  int magnitude;
+  if (roll < 0.50f) magnitude = rng::rollRange(rng, 1, 2);        // Step
+  else if (roll < 0.75f) magnitude = rng::rollRange(rng, 3, 5);   // Skip
+  else if (roll < 0.90f) magnitude = rng::rollRange(rng, 7, 9);   // Leap
+  else magnitude = 12;                                              // Octave
+  return ascending ? magnitude : -magnitude;
+}
+
 std::vector<NoteEvent> generateRecitative(const HarmonicTimeline& timeline,
                                           const KeySignature& key_sig,
                                           Tick start_tick, Tick end_tick,
                                           std::mt19937& rng) {
-  (void)timeline;  // Available for future chord-aware passage generation.
   std::vector<NoteEvent> notes;
-  uint8_t low_pitch = getToccataLowPitch(1);
-  uint8_t high_pitch = getToccataHighPitch(1);
+  uint8_t low0 = getToccataLowPitch(0);
+  uint8_t high0 = getToccataHighPitch(0);
+  uint8_t low1 = getToccataLowPitch(1);
+  uint8_t high1 = getToccataHighPitch(1);
 
-  auto scale_tones = getScaleTones(key_sig.tonic, key_sig.is_minor, low_pitch, high_pitch);
-  if (scale_tones.empty()) {
-    return notes;
-  }
+  Tick recit_dur = end_tick - start_tick;
+  Tick recit_bars = recit_dur / kTicksPerBar;
+  if (recit_bars == 0) return notes;
 
-  Tick current_tick = start_tick;
+  // Grand pause positions (1/3 and 2/3, only for >= 8 bars)
+  Tick gp_bar1 = (recit_bars >= 8) ? (recit_bars / 3) : recit_bars + 1;
+  Tick gp_bar2 = (recit_bars >= 8) ? (recit_bars * 2 / 3) : recit_bars + 1;
 
-  // Start in the middle of the range for the recitative voice.
-  size_t tone_idx = scale_tones.size() / 2;
-  bool ascending = rng::rollProbability(rng, 0.5f);
+  // Starting pitches for melody (middle of range)
+  uint8_t tpc = static_cast<uint8_t>(key_sig.tonic);
+  int melody_pitch = clampPitch(60 + tpc, low0, high0);
+  bool ascending = true;
 
-  while (current_tick < end_tick) {
-    Tick remaining = end_tick - current_tick;
+  for (Tick bar = 0; bar < recit_bars; ++bar) {
+    Tick bar_start = start_tick + bar * kTicksPerBar;
+    Tick bar_end = bar_start + kTicksPerBar;
 
-    // Insert dramatic pauses (~20% of the time).
-    if (rng::rollProbability(rng, 0.20f)) {
-      Tick pause_dur = kEighthNote;
-      if (pause_dur > remaining) pause_dur = remaining;
-      current_tick += pause_dur;
-      continue;
+    // Grand pause: skip this bar (silence on all voices)
+    if (bar == gp_bar1 || bar == gp_bar2) continue;
+
+    // Determine voice assignment (swap every 2 bars for manual contrast)
+    uint8_t melody_voice = ((bar / 2) % 2 == 0) ? 0 : 1;
+    uint8_t chord_voice = 1 - melody_voice;
+    uint8_t mel_low = (melody_voice == 0) ? low0 : low1;
+    uint8_t mel_high = (melody_voice == 0) ? high0 : high1;
+    uint8_t ch_low = (chord_voice == 0) ? low0 : low1;
+    uint8_t ch_high = (chord_voice == 0) ? high0 : high1;
+
+    // --- Melody line ---
+    Tick tick = bar_start;
+    while (tick < bar_end) {
+      Tick dur = selectRecitDuration(rng);
+      if (tick + dur > bar_end) dur = bar_end - tick;
+      if (dur == 0) break;
+
+      int interval = selectRecitInterval(rng, ascending);
+      int next_pitch = melody_pitch + interval;
+      next_pitch = clampPitch(next_pitch, mel_low, mel_high);
+
+      notes.push_back(makeNote(tick, dur, static_cast<uint8_t>(next_pitch),
+                               melody_voice));
+      melody_pitch = next_pitch;
+      tick += dur;
+
+      if (rng::rollProbability(rng, 0.15f)) ascending = !ascending;
     }
 
-    // Alternate between 8th notes and occasional quarter notes.
-    Tick dur = rng::rollProbability(rng, 0.25f) ? kQuarterNote : kEighthNote;
-    if (dur > remaining) dur = remaining;
-    if (dur == 0) break;
+    // --- Chord layer (sustained tones) ---
+    tick = bar_start;
+    while (tick < bar_end) {
+      const HarmonicEvent& event = timeline.getAt(tick);
+      auto chord_tones = getChordTones(event.chord, 3);  // Octave 3
 
-    NoteEvent note;
-    note.start_tick = current_tick;
-    note.duration = dur;
-    note.pitch = scale_tones[tone_idx];
-    note.velocity = kOrganVelocity;
-    note.voice = 1;
-    note.source = BachNoteSource::FreeCounterpoint;
-    notes.push_back(note);
-
-    current_tick += dur;
-
-    // Move through scale tones with occasional leaps for recitative character.
-    int step = rng::rollProbability(rng, 0.20f) ? rng::rollRange(rng, 2, 3) : 1;
-
-    if (ascending) {
-      if (tone_idx + step < scale_tones.size()) {
-        tone_idx += step;
-      } else {
-        ascending = false;
-        if (tone_idx >= static_cast<size_t>(step)) {
-          tone_idx -= step;
-        } else {
-          tone_idx = 0;
+      std::vector<uint8_t> valid;
+      for (auto t : chord_tones) {
+        if (t >= ch_low && t <= ch_high) valid.push_back(t);
+      }
+      if (valid.empty()) {
+        // Try octave 4
+        chord_tones = getChordTones(event.chord, 4);
+        for (auto t : chord_tones) {
+          if (t >= ch_low && t <= ch_high) valid.push_back(t);
         }
       }
-    } else {
-      if (tone_idx >= static_cast<size_t>(step)) {
-        tone_idx -= step;
-      } else {
-        ascending = true;
-        if (tone_idx + step < scale_tones.size()) {
-          tone_idx += step;
-        } else if (!scale_tones.empty()) {
-          tone_idx = scale_tones.size() - 1;
-        }
+      if (valid.empty()) {
+        valid.push_back(clampPitch(static_cast<int>(event.bass_pitch),
+                                   ch_low, ch_high));
       }
-    }
 
-    // Frequently reverse direction for rhetorical speech-like contour.
-    if (rng::rollProbability(rng, 0.18f)) {
-      ascending = !ascending;
+      Tick dur = rng::rollProbability(rng, 0.5f) ? kHalfNote : kWholeNote;
+      if (tick + dur > bar_end) dur = bar_end - tick;
+      if (dur == 0) break;
+
+      notes.push_back(makeNote(tick, dur, rng::selectRandom(rng, valid),
+                               chord_voice));
+      tick += dur;
     }
   }
 
@@ -395,23 +620,9 @@ std::vector<NoteEvent> generateRecitative(const HarmonicTimeline& timeline,
 }
 
 // ---------------------------------------------------------------------------
-// Drive to cadence (25% of section)
+// Drive to cadence -- rhythmic acceleration + Picardy ending
 // ---------------------------------------------------------------------------
 
-/// @brief Generate the drive-to-cadence section with building energy.
-///
-/// Creates 16th-note passages with increasing density across all active
-/// voices. Voice 0 (Manual I) carries the primary rapid figuration,
-/// voice 1 (Manual II) adds supporting figures, and additional voices
-/// contribute energy buildup.
-///
-/// @param timeline Harmonic timeline for chord/key context.
-/// @param key_sig Key signature for scale tone lookup.
-/// @param num_voices Number of active voices.
-/// @param start_tick Start tick of the cadential drive.
-/// @param end_tick End tick of the cadential drive (exclusive).
-/// @param rng Random number generator.
-/// @return Vector of NoteEvents across multiple voices.
 std::vector<NoteEvent> generateDriveToCadence(const HarmonicTimeline& timeline,
                                               const KeySignature& key_sig,
                                               uint8_t num_voices,
@@ -419,139 +630,175 @@ std::vector<NoteEvent> generateDriveToCadence(const HarmonicTimeline& timeline,
                                               std::mt19937& rng) {
   std::vector<NoteEvent> notes;
 
-  // Voice 0 (Manual I): rapid 16th-note scale runs.
+  Tick drive_dur = end_tick - start_tick;
+  Tick p1_end = start_tick + drive_dur * 30 / 100;
+  Tick p2_end = start_tick + drive_dur * 60 / 100;
+  Tick p3_end = start_tick + drive_dur * 90 / 100;
+  // Phase 4: p3_end to end_tick
+
+  uint8_t low0 = getToccataLowPitch(0);
+  uint8_t high0 = getToccataHighPitch(0);
+  uint8_t low1 = getToccataLowPitch(1);
+  uint8_t high1 = getToccataHighPitch(1);
+
+  auto scale0 = getScaleTones(key_sig.tonic, key_sig.is_minor, low0, high0);
+  auto scale1 = getScaleTones(key_sig.tonic, key_sig.is_minor, low1, high1);
+  if (scale0.empty() || scale1.empty()) return notes;
+
+  // Voice 0: start low-mid, ascending
+  size_t idx0 = scale0.size() / 3;
+  bool asc0 = true;
+  // Voice 1: start mid-high, descending (contrary motion)
+  size_t idx1 = scale1.size() * 2 / 3;
+  bool asc1 = false;
+
+  // --- Phase 1 (30%): 8th note arpeggios, contrary motion ---
   {
-    uint8_t low_pitch = getToccataLowPitch(0);
-    uint8_t high_pitch = getToccataHighPitch(0);
-    auto scale_tones = getScaleTones(key_sig.tonic, key_sig.is_minor, low_pitch, high_pitch);
-
-    if (!scale_tones.empty()) {
-      Tick current_tick = start_tick;
-      size_t tone_idx = rng::rollRange(rng, 0,
-                                       static_cast<int>(scale_tones.size()) / 3);
-      bool ascending = true;
-
-      while (current_tick < end_tick) {
-        Tick remaining = end_tick - current_tick;
-        Tick dur = kSixteenthNote;
-        if (dur > remaining) dur = remaining;
-        if (dur == 0) break;
-
-        NoteEvent note;
-        note.start_tick = current_tick;
-        note.duration = dur;
-        note.pitch = scale_tones[tone_idx];
-        note.velocity = kOrganVelocity;
-        note.voice = 0;
-        note.source = BachNoteSource::FreeCounterpoint;
-        notes.push_back(note);
-
-        current_tick += dur;
-
-        if (ascending) {
-          if (tone_idx + 1 < scale_tones.size()) {
-            ++tone_idx;
-          } else {
-            ascending = false;
-            if (tone_idx > 0) --tone_idx;
-          }
-        } else {
-          if (tone_idx > 0) {
-            --tone_idx;
-          } else {
-            ascending = true;
-            ++tone_idx;
-          }
-        }
-      }
-    }
-  }
-
-  // Voice 1 (Manual II): supporting 16th-note figures.
-  if (num_voices >= 2) {
-    uint8_t low_pitch = getToccataLowPitch(1);
-    uint8_t high_pitch = getToccataHighPitch(1);
-    auto scale_tones = getScaleTones(key_sig.tonic, key_sig.is_minor, low_pitch, high_pitch);
-
-    if (!scale_tones.empty()) {
-      Tick current_tick = start_tick;
-      size_t tone_idx = scale_tones.size() / 2;
-      bool ascending = false;  // Start descending for contrary motion.
-
-      while (current_tick < end_tick) {
-        Tick remaining = end_tick - current_tick;
-        Tick dur = kSixteenthNote;
-        if (dur > remaining) dur = remaining;
-        if (dur == 0) break;
-
-        NoteEvent note;
-        note.start_tick = current_tick;
-        note.duration = dur;
-        note.pitch = scale_tones[tone_idx];
-        note.velocity = kOrganVelocity;
-        note.voice = 1;
-        note.source = BachNoteSource::FreeCounterpoint;
-        notes.push_back(note);
-
-        current_tick += dur;
-
-        int step = rng::rollProbability(rng, 0.10f) ? 2 : 1;
-        if (ascending) {
-          if (tone_idx + step < scale_tones.size()) {
-            tone_idx += step;
-          } else {
-            ascending = false;
-            if (tone_idx >= static_cast<size_t>(step)) tone_idx -= step;
-          }
-        } else {
-          if (tone_idx >= static_cast<size_t>(step)) {
-            tone_idx -= step;
-          } else {
-            ascending = true;
-            tone_idx += step;
-          }
-        }
-      }
-    }
-  }
-
-  // Additional voices (3+): chord-tone support with quarter/half notes.
-  for (uint8_t voice_idx = 3; voice_idx < num_voices && voice_idx < 5; ++voice_idx) {
-    uint8_t low_pitch = getToccataLowPitch(voice_idx);
-    uint8_t high_pitch = getToccataHighPitch(voice_idx);
-
-    Tick current_tick = start_tick;
-    while (current_tick < end_tick) {
-      const HarmonicEvent& event = timeline.getAt(current_tick);
-      auto chord_tones = getChordTones(event.chord, 4);
-
-      std::vector<uint8_t> valid_tones;
-      for (auto tone : chord_tones) {
-        if (tone >= low_pitch && tone <= high_pitch) {
-          valid_tones.push_back(tone);
-        }
-      }
-
-      if (valid_tones.empty()) {
-        valid_tones.push_back(clampPitch(static_cast<int>(event.bass_pitch),
-                                         low_pitch, high_pitch));
-      }
-
-      Tick remaining = end_tick - current_tick;
-      Tick dur = kQuarterNote;
-      if (dur > remaining) dur = remaining;
+    Tick tick = start_tick;
+    size_t i0 = idx0, i1 = idx1;
+    while (tick < p1_end) {
+      Tick dur = std::min(kEighthNote, p1_end - tick);
       if (dur == 0) break;
 
-      NoteEvent note;
-      note.start_tick = current_tick;
-      note.duration = dur;
-      note.pitch = rng::selectRandom(rng, valid_tones);
-      note.velocity = kOrganVelocity;
-      note.voice = voice_idx;
-      note.source = BachNoteSource::FreeCounterpoint;
-      notes.push_back(note);
+      notes.push_back(makeNote(tick, dur, scale0[i0], 0));
+      notes.push_back(makeNote(tick, dur, scale1[i1], 1));
+      tick += dur;
 
-      current_tick += dur;
+      // Voice 0 ascending, Voice 1 descending
+      if (i0 + 1 < scale0.size()) ++i0;
+      else { i0 = scale0.size() / 3; }  // Reset to mid-low
+
+      if (i1 > 0) --i1;
+      else { i1 = scale1.size() * 2 / 3; }  // Reset to mid-high
+    }
+    idx0 = i0;
+    idx1 = i1;
+  }
+
+  // --- Phase 2 (30%): 16th note arpeggios + pedal ---
+  {
+    Tick tick = p1_end;
+    size_t i0 = idx0, i1 = idx1;
+    while (tick < p2_end) {
+      Tick dur = std::min(kSixteenthNote, p2_end - tick);
+      if (dur == 0) break;
+
+      notes.push_back(makeNote(tick, dur, scale0[i0], 0));
+      notes.push_back(makeNote(tick, dur, scale1[i1], 1));
+      tick += dur;
+
+      int step = rng::rollProbability(rng, 0.15f) ? 2 : 1;
+      if (asc0) {
+        if (i0 + step < scale0.size()) i0 += step;
+        else { asc0 = false; if (i0 >= static_cast<size_t>(step)) i0 -= step; }
+      } else {
+        if (i0 >= static_cast<size_t>(step)) i0 -= step;
+        else { asc0 = true; if (i0 + step < scale0.size()) i0 += step; }
+      }
+
+      if (asc1) {
+        if (i1 + step < scale1.size()) i1 += step;
+        else { asc1 = false; if (i1 >= static_cast<size_t>(step)) i1 -= step; }
+      } else {
+        if (i1 >= static_cast<size_t>(step)) i1 -= step;
+        else { asc1 = true; if (i1 + step < scale1.size()) i1 += step; }
+      }
+    }
+    idx0 = i0;
+  }
+
+  // --- Phase 3 (30%): parallel 3rds/6ths in 16th notes ---
+  {
+    Tick tick = p2_end;
+    size_t i0 = idx0;
+    int parallel_offset = key_sig.is_minor ? 3 : 4;  // Minor 3rd or Major 3rd
+
+    while (tick < p3_end) {
+      Tick dur = std::min(kSixteenthNote, p3_end - tick);
+      if (dur == 0) break;
+
+      uint8_t p0 = scale0[i0];
+      uint8_t p1_par = clampPitch(static_cast<int>(p0) - parallel_offset,
+                                  low1, high1);
+
+      notes.push_back(makeNote(tick, dur, p0, 0));
+      notes.push_back(makeNote(tick, dur, p1_par, 1));
+      tick += dur;
+
+      if (i0 + 1 < scale0.size()) ++i0;
+      else i0 = scale0.size() / 2;  // Reset to mid
+    }
+  }
+
+  // --- Phase 4 (10%): V7 arpeggio sweep + Picardy block chord ---
+  {
+    Tick tick = p3_end;
+    uint8_t tpc = static_cast<uint8_t>(key_sig.tonic);
+
+    // V7 arpeggio (32nd notes ascending) on voice 0
+    Tick chord_start = end_tick - kWholeNote;
+    if (chord_start < p3_end + kTicksPerBar / 2) {
+      chord_start = p3_end + (end_tick - p3_end) / 2;
+    }
+
+    // V7 chord tones for arpeggio run
+    const HarmonicEvent& v7_event = timeline.getAt(tick);
+    auto v7_tones = collectChordTonesInRange(v7_event.chord, low0, high0);
+    if (!v7_tones.empty()) {
+      size_t vi = 0;
+      while (tick < chord_start) {
+        Tick dur = std::min(kThirtySecondNote, chord_start - tick);
+        if (dur == 0) break;
+        notes.push_back(makeNote(tick, dur, v7_tones[vi], 0));
+        tick += dur;
+        if (vi + 1 < v7_tones.size()) ++vi;
+        else vi = 0;
+      }
+    }
+
+    // Final Picardy block chord (I Major)
+    tick = chord_start;
+    if (tick < end_tick) {
+      Tick dur = end_tick - tick;
+      // Voice 0: major 3rd (the Picardy note)
+      uint8_t picardy_3rd = clampPitch(60 + (tpc + 4) % 12, low0, high0);
+      // Voice 1: 5th
+      uint8_t fifth = clampPitch(60 + (tpc + 7) % 12, low1, high1);
+      notes.push_back(makeNote(tick, dur, picardy_3rd, 0));
+      notes.push_back(makeNote(tick, dur, fifth, 1));
+
+      // Pedal: root
+      if (num_voices >= 3) {
+        uint8_t bass = clampPitch(36 + tpc,
+                                  getToccataLowPitch(2), getToccataHighPitch(2));
+        notes.push_back(makeNote(tick, dur, bass, 2, BachNoteSource::PedalPoint));
+      }
+    }
+  }
+
+  // --- Additional voices (3+): chord-tone support with quarter notes ---
+  for (uint8_t vi = 3; vi < num_voices && vi < 5; ++vi) {
+    uint8_t lo = getToccataLowPitch(vi);
+    uint8_t hi = getToccataHighPitch(vi);
+
+    Tick tick = start_tick;
+    while (tick < end_tick) {
+      const HarmonicEvent& event = timeline.getAt(tick);
+      auto chord_tones = getChordTones(event.chord, 4);
+
+      std::vector<uint8_t> valid;
+      for (auto t : chord_tones) {
+        if (t >= lo && t <= hi) valid.push_back(t);
+      }
+      if (valid.empty()) {
+        valid.push_back(clampPitch(static_cast<int>(event.bass_pitch), lo, hi));
+      }
+
+      Tick dur = std::min(kQuarterNote, end_tick - tick);
+      if (dur == 0) break;
+
+      notes.push_back(makeNote(tick, dur, rng::selectRandom(rng, valid), vi));
+      tick += dur;
     }
   }
 
@@ -559,75 +806,149 @@ std::vector<NoteEvent> generateDriveToCadence(const HarmonicTimeline& timeline,
 }
 
 // ---------------------------------------------------------------------------
-// Pedal point generation
+// Pedal helpers
 // ---------------------------------------------------------------------------
 
-/// @brief Generate sustained pedal point notes for the pedal voice.
-///
-/// Creates long held notes on the tonic and dominant in the pedal range,
-/// providing harmonic foundation during the opening and cadential sections.
-///
-/// @param key_sig Key signature for determining tonic/dominant pitches.
-/// @param voice_idx Pedal voice index (typically 2).
-/// @param start_tick Start tick of the pedal section.
-/// @param end_tick End tick of the pedal section (exclusive).
-/// @param rng Random number generator.
-/// @return Vector of NoteEvents for the pedal voice.
-std::vector<NoteEvent> generatePedalPoint(const KeySignature& key_sig,
-                                          uint8_t voice_idx,
-                                          Tick start_tick, Tick end_tick,
-                                          std::mt19937& rng) {
+/// @brief Generate pedal solo passage at end of opening (2 bars).
+std::vector<NoteEvent> generatePedalSolo(const KeySignature& key_sig,
+                                         Tick start_tick, Tick end_tick,
+                                         std::mt19937& rng) {
   std::vector<NoteEvent> notes;
-  uint8_t low_pitch = getToccataLowPitch(voice_idx);
-  uint8_t high_pitch = getToccataHighPitch(voice_idx);
+  uint8_t low = organ_range::kPedalLow;
+  uint8_t high = organ_range::kPedalHigh;
 
-  // Tonic pedal note in octave 2 (organ pedal register).
-  int tonic_midi = static_cast<int>(key_sig.tonic) + 36;  // Octave 2.
-  uint8_t tonic_pitch = clampPitch(tonic_midi, low_pitch, high_pitch);
+  auto scale = getScaleTones(key_sig.tonic, key_sig.is_minor, low, high);
+  if (scale.empty()) return notes;
 
-  // Dominant (perfect 5th above tonic).
-  int dominant_midi = tonic_midi + interval::kPerfect5th;
-  uint8_t dominant_pitch = clampPitch(dominant_midi, low_pitch, high_pitch);
+  Tick mid = start_tick + (end_tick - start_tick) / 2;
 
-  Tick current_tick = start_tick;
+  // Bar 1: descending scale from dominant area
+  uint8_t dominant_pc = (static_cast<uint8_t>(key_sig.tonic) + 7) % 12;
+  size_t start_idx = scale.size() - 1;
+  for (size_t i = 0; i < scale.size(); ++i) {
+    if (scale[i] % 12 == dominant_pc && scale[i] >= 36) {
+      start_idx = i;
+      break;
+    }
+  }
 
-  while (current_tick < end_tick) {
-    Tick remaining = end_tick - current_tick;
+  {
+    size_t idx = start_idx;
+    Tick tick = start_tick;
+    while (tick < mid && tick < end_tick) {
+      Tick dur = std::min(kEighthNote, mid - tick);
+      if (dur == 0) break;
+      notes.push_back(makeNote(tick, dur, scale[idx], 2, BachNoteSource::PedalPoint));
+      tick += dur;
+      if (idx > 0) --idx;
+      else idx = start_idx;
+    }
+  }
 
-    // Use whole notes or half notes for sustained pedal.
-    Tick dur = rng::rollProbability(rng, 0.6f) ? kWholeNote : kHalfNote;
-    if (dur > remaining) dur = remaining;
-    if (dur == 0) break;
+  // Bar 2: tonic-area arpeggiated motion
+  {
+    uint8_t tonic_pc = static_cast<uint8_t>(key_sig.tonic);
+    size_t tonic_idx = 0;
+    for (size_t i = 0; i < scale.size(); ++i) {
+      if (scale[i] % 12 == tonic_pc) { tonic_idx = i; break; }
+    }
 
-    // Alternate between tonic and dominant with tonic bias.
-    uint8_t chosen_pitch = rng::rollProbability(rng, 0.70f) ? tonic_pitch : dominant_pitch;
+    bool asc = true;
+    size_t idx = tonic_idx;
+    Tick tick = mid;
+    while (tick < end_tick) {
+      Tick dur = std::min(kEighthNote, end_tick - tick);
+      if (dur == 0) break;
+      notes.push_back(makeNote(tick, dur, scale[idx], 2, BachNoteSource::PedalPoint));
+      tick += dur;
 
-    NoteEvent note;
-    note.start_tick = current_tick;
-    note.duration = dur;
-    note.pitch = chosen_pitch;
-    note.velocity = kOrganVelocity;
-    note.voice = voice_idx;
-    note.source = BachNoteSource::PedalPoint;
-    notes.push_back(note);
-
-    current_tick += dur;
+      int step = rng::rollProbability(rng, 0.3f) ? 2 : 1;
+      if (asc) {
+        if (idx + step < scale.size()) idx += step;
+        else { asc = false; if (idx >= static_cast<size_t>(step)) idx -= step; }
+      } else {
+        if (idx >= static_cast<size_t>(step)) idx -= step;
+        else { asc = true; if (idx + step < scale.size()) idx += step; }
+      }
+    }
   }
 
   return notes;
 }
 
-/// @brief Clamp voice count to valid range [2, 5].
-/// @param num_voices Raw voice count from configuration.
-/// @return Clamped voice count.
+/// @brief Generate rhythmic pedal for the drive section.
+std::vector<NoteEvent> generateRhythmicPedal(const KeySignature& key_sig,
+                                             Tick start_tick, Tick end_tick,
+                                             Tick phase3_start) {
+  std::vector<NoteEvent> notes;
+  uint8_t low = organ_range::kPedalLow;
+  uint8_t high = organ_range::kPedalHigh;
+
+  uint8_t tpc = static_cast<uint8_t>(key_sig.tonic);
+  uint8_t tonic = clampPitch(36 + tpc, low, high);
+  uint8_t dominant = clampPitch(36 + (tpc + 7) % 12, low, high);
+
+  Tick tick = start_tick;
+  while (tick < end_tick) {
+    if (tick >= phase3_start) {
+      // Phase 3: 8th note tonic-dominant alternation
+      Tick dur = std::min(kEighthNote, end_tick - tick);
+      if (dur == 0) break;
+      bool use_tonic = ((tick / kEighthNote) % 2 == 0);
+      notes.push_back(makeNote(tick, dur, use_tonic ? tonic : dominant,
+                               2, BachNoteSource::PedalPoint));
+      tick += dur;
+    } else {
+      // Phase 2: quarter-quarter-half pattern (T-D-T)
+      struct Step { uint8_t pitch; Tick dur; };
+      Step pattern[] = {
+        {tonic, kQuarterNote},
+        {dominant, kQuarterNote},
+        {tonic, kHalfNote}
+      };
+      for (auto& s : pattern) {
+        if (tick >= end_tick || tick >= phase3_start) break;
+        Tick bound = std::min(end_tick, phase3_start);
+        Tick dur = std::min(s.dur, bound - tick);
+        if (dur == 0) break;
+        notes.push_back(makeNote(tick, dur, s.pitch, 2, BachNoteSource::PedalPoint));
+        tick += dur;
+      }
+    }
+  }
+
+  return notes;
+}
+
+/// @brief Generate sustained tonic pedal during opening waves.
+std::vector<NoteEvent> generateOpeningPedal(const KeySignature& key_sig,
+                                            Tick start_tick, Tick end_tick) {
+  std::vector<NoteEvent> notes;
+  uint8_t tpc = static_cast<uint8_t>(key_sig.tonic);
+  uint8_t tonic = clampPitch(36 + tpc,
+                             organ_range::kPedalLow, organ_range::kPedalHigh);
+
+  Tick tick = start_tick;
+  while (tick < end_tick) {
+    Tick dur = std::min(kWholeNote, end_tick - tick);
+    if (dur == 0) break;
+    notes.push_back(makeNote(tick, dur, tonic, 2, BachNoteSource::PedalPoint));
+    tick += dur;
+  }
+
+  return notes;
+}
+
+// ---------------------------------------------------------------------------
+// Utility
+// ---------------------------------------------------------------------------
+
 uint8_t clampToccataVoiceCount(uint8_t num_voices) {
   if (num_voices < kMinVoices) return kMinVoices;
   if (num_voices > kMaxVoices) return kMaxVoices;
   return num_voices;
 }
 
-/// @brief Sort notes in each track by start_tick for MIDI output.
-/// @param tracks Tracks whose notes will be sorted in place.
 void sortToccataTrackNotes(std::vector<Track>& tracks) {
   for (auto& track : tracks) {
     std::sort(track.notes.begin(), track.notes.end(),
@@ -650,7 +971,6 @@ ToccataResult generateToccata(const ToccataConfig& config) {
   ToccataResult result;
   result.success = false;
 
-  // Step 1: Validate and clamp configuration.
   uint8_t num_voices = clampToccataVoiceCount(config.num_voices);
 
   if (config.section_bars <= 0) {
@@ -660,7 +980,7 @@ ToccataResult generateToccata(const ToccataConfig& config) {
 
   std::mt19937 rng(config.seed);
 
-  // Step 2: Calculate total duration and segment boundaries.
+  // Section boundaries
   Tick total_duration = static_cast<Tick>(config.section_bars) * kTicksPerBar;
 
   Tick opening_bars = static_cast<Tick>(
@@ -671,10 +991,8 @@ ToccataResult generateToccata(const ToccataConfig& config) {
       static_cast<float>(config.section_bars) * kRecitativeProportion);
   if (recit_bars < 1) recit_bars = 1;
 
-  // Drive gets the remainder to ensure exact total.
   Tick drive_bars = static_cast<Tick>(config.section_bars) - opening_bars - recit_bars;
   if (drive_bars < 1) {
-    // For very short sections, steal from recitative.
     if (recit_bars > 1) {
       --recit_bars;
       ++drive_bars;
@@ -690,42 +1008,77 @@ ToccataResult generateToccata(const ToccataConfig& config) {
   Tick drive_start = recit_end;
   Tick drive_end = total_duration;
 
-  // Step 3: Create harmonic timeline with beat-level resolution.
-  HarmonicTimeline timeline =
-      HarmonicTimeline::createStandard(config.key, total_duration, HarmonicResolution::Beat);
+  // Build toccata-specific harmonic plan
+  HarmonicTimeline timeline = buildToccataHarmonicPlan(
+      config.key, opening_start, opening_end,
+      recit_start, recit_end, drive_start, drive_end);
 
-  // Step 4: Generate notes for each section.
-  std::vector<NoteEvent> all_notes;
-
-  // Opening gesture: fast scale runs on voice 0 (Manual I).
+  // Generate notes for each section (rng consumed in deterministic order)
   auto opening_notes = generateOpeningGesture(
       timeline, config.key, opening_start, opening_end, rng);
-  all_notes.insert(all_notes.end(), opening_notes.begin(), opening_notes.end());
 
-  // Recitative: freer passages on voice 1 (Manual II).
   auto recit_notes = generateRecitative(
       timeline, config.key, recit_start, recit_end, rng);
-  all_notes.insert(all_notes.end(), recit_notes.begin(), recit_notes.end());
 
-  // Drive to cadence: all voices active.
   auto drive_notes = generateDriveToCadence(
       timeline, config.key, num_voices, drive_start, drive_end, rng);
-  all_notes.insert(all_notes.end(), drive_notes.begin(), drive_notes.end());
 
-  // Step 5: Generate pedal points for opening and ending sections.
-  if (num_voices >= 3) {
-    // Pedal during opening.
-    auto opening_pedal = generatePedalPoint(
-        config.key, 2, opening_start, opening_end, rng);
-    all_notes.insert(all_notes.end(), opening_pedal.begin(), opening_pedal.end());
-
-    // Pedal during drive to cadence.
-    auto drive_pedal = generatePedalPoint(
-        config.key, 2, drive_start, drive_end, rng);
-    all_notes.insert(all_notes.end(), drive_pedal.begin(), drive_pedal.end());
+  // Pedal solo (last 2 bars of opening, consumes rng after drive for determinism)
+  std::vector<NoteEvent> pedal_solo_notes;
+  if (num_voices >= 3 && opening_bars >= 6) {
+    Tick solo_start = opening_end - 2 * kTicksPerBar;
+    pedal_solo_notes = generatePedalSolo(config.key, solo_start, opening_end, rng);
   }
 
-  // Step 6: Create tracks and assign notes by voice_id.
+  // Apply ornaments per section
+  auto applyOrnamentsToSection = [&](std::vector<NoteEvent>& section_notes,
+                                     float density, VoiceRole role,
+                                     const std::vector<Tick>& cadence_ticks) {
+    OrnamentContext ctx;
+    ctx.config.ornament_density = density;
+    ctx.role = role;
+    ctx.seed = config.seed;
+    ctx.timeline = &timeline;
+    ctx.cadence_ticks = cadence_ticks;
+    section_notes = applyOrnaments(section_notes, ctx);
+  };
+
+  applyOrnamentsToSection(opening_notes, 0.12f, VoiceRole::Propel, {});
+  applyOrnamentsToSection(recit_notes, 0.10f, VoiceRole::Respond,
+                          {recit_end});
+  applyOrnamentsToSection(drive_notes, 0.08f, VoiceRole::Propel,
+                          {drive_end - kTicksPerBar});
+
+  // Build all_notes from ornamented sections + pedal
+  std::vector<NoteEvent> all_notes;
+  all_notes.insert(all_notes.end(), opening_notes.begin(), opening_notes.end());
+  all_notes.insert(all_notes.end(), recit_notes.begin(), recit_notes.end());
+  all_notes.insert(all_notes.end(), drive_notes.begin(), drive_notes.end());
+
+  // Add pedal notes (generated separately, not ornamented)
+  if (num_voices >= 3) {
+    // Sustained tonic pedal during opening waves
+    Tick pedal_end_opening = (opening_bars >= 6) ? (opening_end - 2 * kTicksPerBar)
+                                                 : opening_end;
+    auto pedal_op = generateOpeningPedal(config.key, opening_start, pedal_end_opening);
+    all_notes.insert(all_notes.end(), pedal_op.begin(), pedal_op.end());
+
+    // Pedal solo
+    all_notes.insert(all_notes.end(), pedal_solo_notes.begin(),
+                     pedal_solo_notes.end());
+
+    // Rhythmic pedal for drive (phases 2+)
+    Tick drive_dur = drive_end - drive_start;
+    Tick rp_start = drive_start + drive_dur * 30 / 100;
+    Tick rp_phase3 = drive_start + drive_dur * 60 / 100;
+    Tick rp_end = drive_start + drive_dur * 90 / 100;
+    if (rp_start < rp_end) {
+      auto rp = generateRhythmicPedal(config.key, rp_start, rp_end, rp_phase3);
+      all_notes.insert(all_notes.end(), rp.begin(), rp.end());
+    }
+  }
+
+  // Create tracks and assign notes by voice
   std::vector<Track> tracks = createToccataTracks(num_voices);
   for (const auto& note : all_notes) {
     if (note.voice < tracks.size()) {
@@ -733,7 +1086,36 @@ ToccataResult generateToccata(const ToccataConfig& config) {
     }
   }
 
-  // Step 7: Sort notes within each track.
+  // Apply registration plan
+  ExtendedRegistrationPlan reg_plan;
+
+  Registration pleno;
+  pleno.velocity_hint = 100;
+  reg_plan.addPoint(opening_start, pleno, "pleno");
+
+  if (num_voices >= 3 && opening_bars >= 6) {
+    Registration pedal_solo_reg;
+    pedal_solo_reg.velocity_hint = 60;
+    reg_plan.addPoint(opening_end - 2 * kTicksPerBar, pedal_solo_reg, "pedal_solo");
+  }
+
+  Registration swell_solo;
+  swell_solo.velocity_hint = 65;
+  reg_plan.addPoint(recit_start, swell_solo, "swell_solo");
+
+  Registration coupled;
+  coupled.velocity_hint = 90;
+  reg_plan.addPoint(drive_start, coupled, "coupled");
+
+  if (drive_end > 2 * kTicksPerBar) {
+    Registration tutti;
+    tutti.velocity_hint = 110;
+    reg_plan.addPoint(drive_end - 2 * kTicksPerBar, tutti, "tutti");
+  }
+
+  applyExtendedRegistrationPlan(tracks, reg_plan);
+
+  // Sort notes within each track
   sortToccataTrackNotes(tracks);
 
   result.tracks = std::move(tracks);

@@ -626,5 +626,122 @@ TEST_F(CollisionResolverTest, NaturalHalfStepNoCrossRelation) {
   EXPECT_TRUE(resolver.isSafeToPlace(state, rules, 0, 65, kTicksPerBeat, kTicksPerBeat));
 }
 
+// ---------------------------------------------------------------------------
+// Voice crossing in isSafeToPlace (Change 1)
+// ---------------------------------------------------------------------------
+
+TEST_F(CollisionResolverTest, IsSafePlaceRejectsVoiceCrossing) {
+  // Voice 1 (alto) has G4(67) at tick 0.
+  state.addNote(1, {0, 480, 67, 80, 1});
+
+  // Voice 0 (soprano, higher voice) tries to place C4(60) — below alto's G4.
+  // This is a voice crossing: soprano went below alto.
+  EXPECT_FALSE(resolver.isSafeToPlace(state, rules, 0, 60, 0, 480));
+}
+
+TEST_F(CollisionResolverTest, ChordToneSkipsCrossingCandidate) {
+  // Voice 1 (alto) has E4(64) at tick 960 (strong beat).
+  state.addNote(1, {960, 480, 64, 80, 1});
+
+  // Voice 0 (soprano) wants Db4(61) — dissonant (m2 with E4) and below alto.
+  // chord_tone should find a non-crossing consonant pitch above E4(64).
+  auto result = resolver.findSafePitch(state, rules, 0, 61, 960, 480);
+  EXPECT_TRUE(result.accepted);
+  // Result must not cross below alto's pitch.
+  EXPECT_GE(result.pitch, 64);
+}
+
+TEST_F(CollisionResolverTest, StepShiftSkipsCrossingCandidate) {
+  // Voice 1 (alto) has C4(60) at tick 960 (strong beat).
+  state.addNote(1, {960, 480, 60, 80, 1});
+
+  // Voice 0 (soprano) wants Db4(61) — dissonant (m2 with C4).
+  // Candidates below C4(60) would cross. step_shift should avoid them.
+  auto result = resolver.findSafePitch(state, rules, 0, 61, 960, 480);
+  EXPECT_TRUE(result.accepted);
+  EXPECT_GE(result.pitch, 60);
+}
+
+// ---------------------------------------------------------------------------
+// Tighter range tolerance (Change 2)
+// ---------------------------------------------------------------------------
+
+TEST_F(CollisionResolverTest, TighterRangeRejectsExtremeExcursion) {
+  // Voice 0 range is [48, 84]. 8 semitones below = 40.
+  // With tolerance=6 (default), 8 > 6 → rejected.
+  EXPECT_FALSE(resolver.isSafeToPlace(state, rules, 0, 40, 0, 480));
+}
+
+TEST_F(CollisionResolverTest, RangeToleranceWithinSixAllowed) {
+  // Voice 0 range is [48, 84]. 4 semitones below = 44.
+  // With tolerance=6, 4 <= 6 → allowed.
+  EXPECT_TRUE(resolver.isSafeToPlace(state, rules, 0, 44, 0, 480));
+}
+
+// ---------------------------------------------------------------------------
+// Configurable range tolerance (Change 4)
+// ---------------------------------------------------------------------------
+
+TEST_F(CollisionResolverTest, SetRangeToleranceWorks) {
+  // Default tolerance=6 rejects pitch 39 (9 semitones below range low 48).
+  EXPECT_FALSE(resolver.isSafeToPlace(state, rules, 0, 39, 0, 480));
+
+  // Widen tolerance to 12 — now 9 <= 12, so it should be allowed.
+  resolver.setRangeTolerance(12);
+  EXPECT_TRUE(resolver.isSafeToPlace(state, rules, 0, 39, 0, 480));
+
+  // Tighten to 3 — 9 > 3, rejected. Also 4 semitones out (44) rejected.
+  resolver.setRangeTolerance(3);
+  EXPECT_FALSE(resolver.isSafeToPlace(state, rules, 0, 39, 0, 480));
+  EXPECT_FALSE(resolver.isSafeToPlace(state, rules, 0, 44, 0, 480));
+}
+
+// ---------------------------------------------------------------------------
+// Adjacent voice minimum spacing on strong beats (Change 3)
+// ---------------------------------------------------------------------------
+
+TEST_F(CollisionResolverTest, AdjacentVoiceMinSpacingOnStrongBeat) {
+  // Voice 1 (alto, adjacent to voice 0) has C4(60) at tick 0 (strong beat).
+  state.addNote(1, {0, 480, 60, 80, 1});
+
+  // Voice 0 (soprano) tries D4(62) — 2 semitones from C4, below minor 3rd.
+  // Should be rejected on strong beat even though interval is consonant
+  // (M2 is dissonant anyway, but Db4(61) = m2 also dissonant).
+  // Use Eb4(63) which with C4 = 3 semitones (m3) — consonant and at boundary.
+  // pitch_dist=3 is NOT < 3, so should be allowed.
+  EXPECT_TRUE(resolver.isSafeToPlace(state, rules, 0, 63, 0, 480));
+
+  // D4(62) with C4(60) = 2 semitones (M2). Dissonant AND too close.
+  // Rejected by consonance check first, but the spacing check also applies.
+  EXPECT_FALSE(resolver.isSafeToPlace(state, rules, 0, 62, 0, 480));
+
+  // Db4(61) with C4(60) = 1 semitone (m2). Too close on strong beat.
+  EXPECT_FALSE(resolver.isSafeToPlace(state, rules, 0, 61, 0, 480));
+}
+
+TEST_F(CollisionResolverTest, AdjacentVoiceCloseSpacingAllowedOnWeakBeat) {
+  // Voice 1 (alto) has C4(60) at tick 480 (beat 1, weak).
+  state.addNote(1, {480, 480, 60, 80, 1});
+
+  // Voice 0 (soprano) tries D4(62) — 2 semitones. On weak beat, spacing
+  // check does not apply. Also, weak beat allows dissonance.
+  EXPECT_TRUE(resolver.isSafeToPlace(state, rules, 0, 62, 480, 480));
+}
+
+TEST_F(CollisionResolverTest, NonAdjacentVoiceCloseSpacingAllowed) {
+  // Register 3 voices: V0 soprano, V1 alto, V2 tenor.
+  state.registerVoice(2, 36, 66);
+
+  // V2 (tenor) has C4(60) at tick 0 (strong beat).
+  state.addNote(2, {0, 480, 60, 80, 2});
+
+  // V0 (soprano) tries D4(62) — 2 semitones from V2.
+  // V0 and V2 differ by 2 (not adjacent), so no spacing check applies.
+  // D4(62) with C4(60) is dissonant (M2) on strong beat → rejected by
+  // consonance check. Use Eb4(63) instead: interval 3 (m3), consonant.
+  // Voice IDs 0 and 2 differ by 2, so spacing check skipped.
+  EXPECT_TRUE(resolver.isSafeToPlace(state, rules, 0, 63, 0, 480));
+}
+
 }  // namespace
 }  // namespace bach
