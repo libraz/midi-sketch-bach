@@ -43,15 +43,26 @@ set(BACH_LIB_SOURCES
 
   # fugue/
   fugue/fugue_config.cpp
+  fugue/fugue_structure.cpp
   fugue/subject.cpp
   fugue/subject_validator.cpp
   fugue/answer.cpp
+  fugue/countersubject.cpp
+  fugue/tonal_plan.cpp
+  fugue/episode.cpp
+  fugue/exposition.cpp
+  fugue/middle_entry.cpp
+  fugue/stretto.cpp
+  fugue/fugue_generator.cpp
+
+  # transform/
+  transform/motif_transform.cpp
+  transform/sequence.cpp
 
   # Future sources added here as modules are implemented:
   # harmony/
   # organ/
   # ornament/
-  # transform/
   # forms/
   # solo_string/flow/
   # solo_string/arch/

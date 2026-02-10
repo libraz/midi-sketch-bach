@@ -40,15 +40,25 @@ set(BACH_TEST_SOURCES
 
   # fugue/
   fugue/fugue_config_test.cpp
+  fugue/fugue_structure_test.cpp
   fugue/subject_test.cpp
   fugue/subject_validator_test.cpp
   fugue/answer_test.cpp
+  fugue/countersubject_test.cpp
+  fugue/tonal_plan_test.cpp
+  fugue/episode_test.cpp
+  fugue/exposition_test.cpp
+  fugue/middle_entry_test.cpp
+  fugue/stretto_test.cpp
+  fugue/fugue_generator_test.cpp
+
+  # transform/
+  transform/motif_transform_test.cpp
 
   # Future test sources added here as modules are implemented:
   # harmony/
   # organ/
   # ornament/
-  # transform/
   # forms/
   # solo_string/flow/
   # solo_string/arch/

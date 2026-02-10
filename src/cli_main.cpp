@@ -7,6 +7,8 @@
 #include <vector>
 
 #include "core/basic_types.h"
+#include "fugue/fugue_config.h"
+#include "fugue/fugue_generator.h"
 #include "midi/midi_writer.h"
 
 namespace {
@@ -16,6 +18,7 @@ struct CliOptions {
   uint32_t seed = 0;
   bach::Key key = bach::Key::C;
   bach::FormType form = bach::FormType::PreludeAndFugue;
+  bach::SubjectCharacter character = bach::SubjectCharacter::Severe;
   uint8_t voices = 3;
   uint16_t bpm = 72;
   std::string output = "output.mid";
@@ -33,6 +36,7 @@ void printUsage() {
   std::printf("  --seed N       Random seed (0 = auto)\n");
   std::printf("  --key KEY      Key (e.g. g_minor, C_major)\n");
   std::printf("  --form FORM    Form type\n");
+  std::printf("  --character CH Subject character: severe, playful, noble, restless\n");
   std::printf("  --voices N     Number of voices (2-5)\n");
   std::printf("  --bpm N        BPM (40-200)\n");
   std::printf("  --json         JSON output\n");
@@ -77,6 +81,18 @@ bool parseArgs(int argc, char* argv[], CliOptions& opts) {
       opts.verbose = true;
     } else if (std::strcmp(argv[idx], "--form") == 0 && idx + 1 < argc) {
       opts.form = bach::formTypeFromString(argv[++idx]);
+    } else if (std::strcmp(argv[idx], "--character") == 0 && idx + 1 < argc) {
+      ++idx;
+      const char* val = argv[idx];
+      if (std::strcmp(val, "severe") == 0) {
+        opts.character = bach::SubjectCharacter::Severe;
+      } else if (std::strcmp(val, "playful") == 0) {
+        opts.character = bach::SubjectCharacter::Playful;
+      } else if (std::strcmp(val, "noble") == 0) {
+        opts.character = bach::SubjectCharacter::Noble;
+      } else if (std::strcmp(val, "restless") == 0) {
+        opts.character = bach::SubjectCharacter::Restless;
+      }
     } else if (std::strcmp(argv[idx], "--key") == 0 && idx + 1 < argc) {
       // TODO: parse key string (e.g. "g_minor", "C_major")
       ++idx;
@@ -99,17 +115,43 @@ int main(int argc, char* argv[]) {
               bach::keyToString(opts.key),
               opts.bpm, opts.voices);
 
-  // Phase 0: Generate empty MIDI file with just a metadata track.
-  std::vector<bach::Track> tracks;
+  if (opts.form == bach::FormType::Fugue ||
+      opts.form == bach::FormType::PreludeAndFugue) {
+    bach::FugueConfig fconfig;
+    fconfig.key = opts.key;
+    fconfig.num_voices = opts.voices;
+    fconfig.bpm = opts.bpm;
+    fconfig.seed = opts.seed;
+    fconfig.character = opts.character;
 
-  bach::MidiWriter writer;
-  writer.build(tracks, opts.bpm, opts.key);
+    bach::FugueResult result = bach::generateFugue(fconfig);
 
-  if (writer.writeToFile(opts.output)) {
-    std::printf("Output: %s\n", opts.output.c_str());
+    if (result.success) {
+      std::printf("Generated %zu-voice fugue (%d attempts)\n",
+                  result.tracks.size(), result.attempts);
+      bach::MidiWriter writer;
+      writer.build(result.tracks, opts.bpm, opts.key);
+      if (writer.writeToFile(opts.output)) {
+        std::printf("Output: %s\n", opts.output.c_str());
+      } else {
+        std::fprintf(stderr, "Error: failed to write %s\n", opts.output.c_str());
+        return 1;
+      }
+    } else {
+      std::fprintf(stderr, "Error: %s\n", result.error_message.c_str());
+      return 1;
+    }
   } else {
-    std::fprintf(stderr, "Error: failed to write %s\n", opts.output.c_str());
-    return 1;
+    // Other forms: placeholder (generate empty MIDI).
+    std::vector<bach::Track> tracks;
+    bach::MidiWriter writer;
+    writer.build(tracks, opts.bpm, opts.key);
+    if (writer.writeToFile(opts.output)) {
+      std::printf("Output: %s\n", opts.output.c_str());
+    } else {
+      std::fprintf(stderr, "Error: failed to write %s\n", opts.output.c_str());
+      return 1;
+    }
   }
 
   return 0;
