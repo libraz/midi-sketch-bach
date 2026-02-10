@@ -40,6 +40,21 @@ const char* answerTypeToString(AnswerType type);
 /// @return True if the character is permitted at the given phase.
 bool isCharacterAvailable(SubjectCharacter character, int phase);
 
+/// @brief Check whether a SubjectCharacter is compatible with a FormType.
+///
+/// Forbidden combinations (return false):
+///   - Playful x ChoralePrelude
+///   - Restless x ChoralePrelude
+///   - Noble x ToccataAndFugue
+///
+/// All other combinations are allowed. Solo String forms (CelloPrelude,
+/// Chaconne) always return true because they do not use SubjectCharacter.
+///
+/// @param character The subject character to check.
+/// @param form The form type to check against.
+/// @return True if the combination is allowed, false if forbidden.
+bool isCharacterFormCompatible(SubjectCharacter character, FormType form);
+
 /// Configuration for fugue generation.
 struct FugueConfig {
   SubjectSource subject_source = SubjectSource::Generate;

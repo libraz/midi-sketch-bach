@@ -61,9 +61,13 @@ set(BACH_LIB_SOURCES
 
   # organ/
   organ/manual.cpp
+  organ/registration.cpp
 
   # analysis/
   analysis/voice_independence.cpp
+  analysis/fail_report.cpp
+  analysis/counterpoint_analyzer.cpp
+  analysis/fugue_analyzer.cpp
 
   # harmony/
   harmony/chord_types.cpp
@@ -73,12 +77,19 @@ set(BACH_LIB_SOURCES
   # forms/
   forms/prelude.cpp
   forms/trio_sonata.cpp
+  forms/chorale_prelude.cpp
 
   # generator (unified entry point)
   generator.cpp
 
-  # Future sources added here as modules are implemented:
   # ornament/
+  ornament/ornament_types.cpp
+  ornament/trill.cpp
+  ornament/mordent.cpp
+  ornament/turn.cpp
+  ornament/ornament_engine.cpp
+
+  # Future sources added here as modules are implemented:
   # solo_string/flow/
   # solo_string/arch/
 )

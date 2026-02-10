@@ -57,9 +57,13 @@ set(BACH_TEST_SOURCES
 
   # organ/
   organ/manual_test.cpp
+  organ/registration_test.cpp
 
   # analysis/
   analysis/voice_independence_test.cpp
+  analysis/fail_report_test.cpp
+  analysis/counterpoint_analyzer_test.cpp
+  analysis/fugue_analyzer_test.cpp
 
   # harmony/
   harmony/chord_types_test.cpp
@@ -70,12 +74,19 @@ set(BACH_TEST_SOURCES
   # forms/
   forms/prelude_test.cpp
   forms/trio_sonata_test.cpp
+  forms/chorale_prelude_test.cpp
 
   # generator (unified entry point)
   generator_test.cpp
 
-  # Future test sources added here as modules are implemented:
   # ornament/
+  ornament/ornament_types_test.cpp
+  ornament/trill_test.cpp
+  ornament/mordent_test.cpp
+  ornament/turn_test.cpp
+  ornament/ornament_engine_test.cpp
+
+  # Future test sources added here as modules are implemented:
   # solo_string/flow/
   # solo_string/arch/
 )

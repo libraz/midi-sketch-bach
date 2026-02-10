@@ -4,6 +4,7 @@
 
 #include <random>
 
+#include "forms/chorale_prelude.h"
 #include "forms/prelude.h"
 #include "fugue/fugue_config.h"
 #include "fugue/fugue_generator.h"
@@ -218,10 +219,37 @@ GeneratorResult generate(const GeneratorConfig& config) {
     }
 
     case FormType::ChoralePrelude: {
-      result.success = false;
+      // Validate character-form compatibility before generation.
+      if (!isCharacterFormCompatible(effective_config.character, FormType::ChoralePrelude)) {
+        result.success = false;
+        result.seed_used = effective_config.seed;
+        result.error_message =
+            "Incompatible character for ChoralePrelude: " +
+            std::string(subjectCharacterToString(effective_config.character));
+        return result;
+      }
+
+      ChoralePreludeConfig cpconfig;
+      cpconfig.key = effective_config.key;
+      cpconfig.bpm = effective_config.bpm;
+      cpconfig.seed = effective_config.seed;
+
+      ChoralePreludeResult cp_result = generateChoralePrelude(cpconfig);
+
+      if (!cp_result.success) {
+        result.success = false;
+        result.seed_used = effective_config.seed;
+        result.error_message = "ChoralePrelude generation failed";
+        return result;
+      }
+
+      result.tracks = std::move(cp_result.tracks);
+      result.total_duration_ticks = cp_result.total_duration_ticks;
+      result.tempo_events.push_back({0, effective_config.bpm});
+      result.success = true;
       result.seed_used = effective_config.seed;
-      result.error_message = "ChoralePrelude generation not yet implemented";
-      result.form_description = "Chorale Prelude (stub)";
+      result.form_description =
+          "Chorale Prelude in " + keySignatureToString(effective_config.key);
       return result;
     }
 

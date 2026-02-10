@@ -1,0 +1,52 @@
+{
+  "seed": 42,
+  "form": "fugue",
+  "key": "C_major",
+  "tracks": [
+    {
+      "name": "soprano",
+      "channel": 0,
+      "program": 19,
+      "notes": [
+        {"pitch": 72, "velocity": 80, "start_ticks": 0, "duration_ticks": 480, "voice": "soprano"},
+        {"pitch": 74, "velocity": 80, "start_ticks": 480, "duration_ticks": 480, "voice": "soprano"},
+        {"pitch": 76, "velocity": 80, "start_ticks": 960, "duration_ticks": 480, "voice": "soprano"},
+        {"pitch": 77, "velocity": 80, "start_ticks": 1440, "duration_ticks": 480, "voice": "soprano"},
+        {"pitch": 79, "velocity": 80, "start_ticks": 1920, "duration_ticks": 480, "voice": "soprano"},
+        {"pitch": 81, "velocity": 80, "start_ticks": 2400, "duration_ticks": 480, "voice": "soprano"},
+        {"pitch": 79, "velocity": 80, "start_ticks": 2880, "duration_ticks": 480, "voice": "soprano"},
+        {"pitch": 77, "velocity": 80, "start_ticks": 3360, "duration_ticks": 480, "voice": "soprano"}
+      ]
+    },
+    {
+      "name": "alto",
+      "channel": 1,
+      "program": 20,
+      "notes": [
+        {"pitch": 60, "velocity": 80, "start_ticks": 960, "duration_ticks": 480, "voice": "alto"},
+        {"pitch": 62, "velocity": 80, "start_ticks": 1440, "duration_ticks": 480, "voice": "alto"},
+        {"pitch": 64, "velocity": 80, "start_ticks": 1920, "duration_ticks": 480, "voice": "alto"},
+        {"pitch": 65, "velocity": 80, "start_ticks": 2400, "duration_ticks": 480, "voice": "alto"},
+        {"pitch": 67, "velocity": 80, "start_ticks": 2880, "duration_ticks": 480, "voice": "alto"},
+        {"pitch": 69, "velocity": 80, "start_ticks": 3360, "duration_ticks": 480, "voice": "alto"},
+        {"pitch": 67, "velocity": 80, "start_ticks": 3840, "duration_ticks": 480, "voice": "alto"},
+        {"pitch": 65, "velocity": 80, "start_ticks": 4320, "duration_ticks": 480, "voice": "alto"}
+      ]
+    },
+    {
+      "name": "bass",
+      "channel": 3,
+      "program": 19,
+      "notes": [
+        {"pitch": 48, "velocity": 80, "start_ticks": 1920, "duration_ticks": 480, "voice": "bass"},
+        {"pitch": 50, "velocity": 80, "start_ticks": 2400, "duration_ticks": 480, "voice": "bass"},
+        {"pitch": 52, "velocity": 80, "start_ticks": 2880, "duration_ticks": 480, "voice": "bass"},
+        {"pitch": 53, "velocity": 80, "start_ticks": 3360, "duration_ticks": 480, "voice": "bass"},
+        {"pitch": 55, "velocity": 80, "start_ticks": 3840, "duration_ticks": 480, "voice": "bass"},
+        {"pitch": 57, "velocity": 80, "start_ticks": 4320, "duration_ticks": 480, "voice": "bass"},
+        {"pitch": 55, "velocity": 80, "start_ticks": 4800, "duration_ticks": 480, "voice": "bass"},
+        {"pitch": 53, "velocity": 80, "start_ticks": 5280, "duration_ticks": 480, "voice": "bass"}
+      ]
+    }
+  ]
+}

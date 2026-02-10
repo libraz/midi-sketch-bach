@@ -30,4 +30,25 @@ bool isCharacterAvailable(SubjectCharacter character, int phase) {
   return false;
 }
 
+bool isCharacterFormCompatible(SubjectCharacter character, FormType form) {
+  // Chorale preludes are sacred, contemplative works -- Playful and Restless
+  // characters conflict with the genre's devotional nature.
+  if (form == FormType::ChoralePrelude) {
+    if (character == SubjectCharacter::Playful ||
+        character == SubjectCharacter::Restless) {
+      return false;
+    }
+  }
+
+  // Toccata and fugue demands virtuosic energy -- Noble character's stately
+  // pacing is incompatible with the genre's dramatic flair.
+  if (form == FormType::ToccataAndFugue) {
+    if (character == SubjectCharacter::Noble) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
 }  // namespace bach
