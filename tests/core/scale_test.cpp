@@ -191,5 +191,102 @@ TEST(PitchToScaleDegreeTest, HarmonicMinorDegrees) {
   EXPECT_EQ(degree, 2);
 }
 
+// ---------------------------------------------------------------------------
+// pitchToAbsoluteDegree / absoluteDegreeToPitch -- Round-trip
+// ---------------------------------------------------------------------------
+
+TEST(PitchToAbsoluteDegreeTest, RoundTripCMajorDiatonic) {
+  // All C major diatonic pitches in the octave 4-5 range (60..83).
+  // C major pitch classes: {0, 2, 4, 5, 7, 9, 11}.
+  const uint8_t diatonic_pitches[] = {
+      60, 62, 64, 65, 67, 69, 71,  // C4 D4 E4 F4 G4 A4 B4
+      72, 74, 76, 77, 79, 81, 83   // C5 D5 E5 F5 G5 A5 B5
+  };
+
+  for (uint8_t pitch : diatonic_pitches) {
+    int abs_deg = scale_util::pitchToAbsoluteDegree(pitch, Key::C, ScaleType::Major);
+    uint8_t recovered = scale_util::absoluteDegreeToPitch(abs_deg, Key::C, ScaleType::Major);
+    EXPECT_EQ(recovered, pitch)
+        << "Round-trip failed for MIDI pitch " << static_cast<int>(pitch);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// pitchToAbsoluteDegree -- Octave difference
+// ---------------------------------------------------------------------------
+
+TEST(PitchToAbsoluteDegreeTest, OctaveDifference) {
+  // C3 (48) and C5 (72) are 2 octaves apart = 14 scale degrees.
+  int deg_c3 = scale_util::pitchToAbsoluteDegree(48, Key::C, ScaleType::Major);
+  int deg_c5 = scale_util::pitchToAbsoluteDegree(72, Key::C, ScaleType::Major);
+  EXPECT_EQ(deg_c5 - deg_c3, 14);
+}
+
+// ---------------------------------------------------------------------------
+// pitchToAbsoluteDegree -- Non-scale tone snapping
+// ---------------------------------------------------------------------------
+
+TEST(PitchToAbsoluteDegreeTest, NonScaleToneSnap) {
+  // C#4 (61) is not in C major. After snapping and round-trip, the result
+  // must be a valid C major scale tone.
+  int abs_deg = scale_util::pitchToAbsoluteDegree(61, Key::C, ScaleType::Major);
+  uint8_t recovered = scale_util::absoluteDegreeToPitch(abs_deg, Key::C, ScaleType::Major);
+  EXPECT_TRUE(scale_util::isScaleTone(recovered, Key::C, ScaleType::Major))
+      << "Round-trip of non-scale tone should produce a scale tone, got "
+      << static_cast<int>(recovered);
+}
+
+// ---------------------------------------------------------------------------
+// absoluteDegreeToPitch -- Cross-octave arithmetic
+// ---------------------------------------------------------------------------
+
+TEST(AbsoluteDegreeToPitchTest, CrossOctaveArithmetic) {
+  // Adding 7 degrees to C4 (60) should yield C5 (72).
+  int deg_c4 = scale_util::pitchToAbsoluteDegree(60, Key::C, ScaleType::Major);
+  uint8_t one_octave_up = scale_util::absoluteDegreeToPitch(deg_c4 + 7, Key::C, ScaleType::Major);
+  EXPECT_EQ(one_octave_up, 72);
+}
+
+// ---------------------------------------------------------------------------
+// pitchToAbsoluteDegree -- G Major
+// ---------------------------------------------------------------------------
+
+TEST(PitchToAbsoluteDegreeTest, GMajorAbsoluteDegree) {
+  // G4 (67) in G major: octave = 67/12 = 5, scale degree = 0 (root).
+  // Absolute degree = 5*7 + 0 = 35.
+  int deg_g4 = scale_util::pitchToAbsoluteDegree(67, Key::G, ScaleType::Major);
+  EXPECT_EQ(deg_g4, 35);
+
+  // A4 (69) in G major: octave = 69/12 = 5, scale degree = 1 (2nd).
+  // Absolute degree = 5*7 + 1 = 36.
+  int deg_a4 = scale_util::pitchToAbsoluteDegree(69, Key::G, ScaleType::Major);
+  EXPECT_EQ(deg_a4, 36);
+
+  // Round-trip works for tones within the same MIDI octave as the tonic:
+  // G4=67, A4=69, B4=71 all have MIDI octave 5, same as G's position.
+  const uint8_t same_octave_pitches[] = {67, 69, 71};
+  for (uint8_t pitch : same_octave_pitches) {
+    int abs_deg = scale_util::pitchToAbsoluteDegree(pitch, Key::G, ScaleType::Major);
+    uint8_t recovered = scale_util::absoluteDegreeToPitch(abs_deg, Key::G, ScaleType::Major);
+    EXPECT_EQ(recovered, pitch)
+        << "G major round-trip failed for MIDI pitch " << static_cast<int>(pitch);
+  }
+
+  // Degree arithmetic: G4 + 7 degrees = G5 (one octave up).
+  uint8_t octave_up = scale_util::absoluteDegreeToPitch(deg_g4 + 7, Key::G, ScaleType::Major);
+  EXPECT_EQ(octave_up, 79);  // G5 = 79
+}
+
+// ---------------------------------------------------------------------------
+// absoluteDegreeToPitch -- Low pitch round-trip
+// ---------------------------------------------------------------------------
+
+TEST(AbsoluteDegreeToPitchTest, LowPitchRoundTrip) {
+  // C2 (36) should survive a round-trip through absolute degree conversion.
+  int abs_deg = scale_util::pitchToAbsoluteDegree(36, Key::C, ScaleType::Major);
+  uint8_t recovered = scale_util::absoluteDegreeToPitch(abs_deg, Key::C, ScaleType::Major);
+  EXPECT_EQ(recovered, 36);
+}
+
 }  // namespace
 }  // namespace bach

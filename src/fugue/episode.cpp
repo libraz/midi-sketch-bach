@@ -7,6 +7,7 @@
 #include <random>
 
 #include "core/rng_util.h"
+#include "core/scale.h"
 #include "fugue/fugue_config.h"
 #include "transform/motif_transform.h"
 #include "transform/sequence.h"
@@ -15,22 +16,26 @@ namespace bach {
 
 namespace {
 
-/// @brief Determine the sequence interval step based on subject character.
+/// @brief Determine the sequence degree step based on subject character.
+///
+/// Returns a diatonic degree step (not semitones). Standard Baroque practice
+/// is descending by one scale degree (-1). Playful/Restless may use -2.
+///
 /// @param character Subject character influencing episode style.
 /// @param rng Mersenne Twister instance for Playful/Restless randomization.
-/// @return Interval step in semitones (typically negative for descending).
-int sequenceIntervalForCharacter(SubjectCharacter character, std::mt19937& rng) {
+/// @return Degree step (typically -1 for stepwise descending sequence).
+int sequenceDegreeStepForCharacter(SubjectCharacter character, std::mt19937& rng) {
   switch (character) {
     case SubjectCharacter::Severe:
-      return -2;  // Strict descending 2nds (Baroque convention)
+      return -1;  // Strict descending by step (standard Baroque Zeugma)
     case SubjectCharacter::Playful:
-      return rng::rollRange(rng, -3, -1);  // Varied descending steps
+      return rng::rollRange(rng, -2, -1);  // Step or skip
     case SubjectCharacter::Noble:
-      return -2;  // Moderate, like Severe but with different voicing
+      return -1;  // Moderate, stepwise
     case SubjectCharacter::Restless:
-      return rng::rollRange(rng, -3, -1);  // Chromatic tendency
+      return rng::rollRange(rng, -2, -1);  // Varied
     default:
-      return -2;
+      return -1;
   }
 }
 
@@ -109,36 +114,40 @@ void applyInvertibleCounterpoint(std::vector<NoteEvent>& notes) {
 /// @brief Generate voice 0 and voice 1 for Severe character.
 ///
 /// Severe episodes use strict sequential patterns: the original motif in
-/// voice 0 with an inverted imitation in voice 1 (standard Baroque practice).
+/// voice 0 with a diatonically inverted imitation in voice 1.
 ///
 /// @param episode Episode to append notes to.
 /// @param motif Normalized motif.
 /// @param start_tick Episode start tick.
 /// @param motif_dur Duration of the motif.
-/// @param seq_interval Sequence interval step.
+/// @param deg_step Diatonic degree step for sequence.
 /// @param seq_reps Number of sequence repetitions.
 /// @param imitation_offset Offset for voice 1 entry.
 /// @param num_voices Number of active voices.
+/// @param key Musical key for diatonic operations.
+/// @param scale Scale type for diatonic operations.
 void generateSevereEpisode(Episode& episode, const std::vector<NoteEvent>& motif,
-                           Tick start_tick, Tick motif_dur, int seq_interval,
-                           int seq_reps, Tick imitation_offset, uint8_t num_voices) {
-  // Voice 0: Original motif + sequence.
+                           Tick start_tick, Tick motif_dur, int deg_step,
+                           int seq_reps, Tick imitation_offset, uint8_t num_voices,
+                           Key key, ScaleType scale) {
+  // Voice 0: Original motif + diatonic sequence.
   for (const auto& note : motif) {
     NoteEvent placed = note;
     placed.start_tick += start_tick;
     placed.voice = 0;
     episode.notes.push_back(placed);
   }
-  auto seq_notes = generateSequence(motif, seq_reps, seq_interval, start_tick + motif_dur);
+  auto seq_notes =
+      generateDiatonicSequence(motif, seq_reps, deg_step, start_tick + motif_dur, key, scale);
   for (auto& note : seq_notes) {
     note.voice = 0;
     episode.notes.push_back(note);
   }
 
-  // Voice 1: Inverted imitation + sequence.
+  // Voice 1: Diatonic inverted imitation + diatonic sequence.
   if (num_voices >= 2) {
     uint8_t pivot = motif[0].pitch;
-    auto inverted = invertMelody(motif, pivot);
+    auto inverted = invertMelodyDiatonic(motif, pivot, key, scale);
     Tick voice1_start = start_tick + imitation_offset;
     for (const auto& note : inverted) {
       NoteEvent placed = note;
@@ -147,8 +156,8 @@ void generateSevereEpisode(Episode& episode, const std::vector<NoteEvent>& motif
       episode.notes.push_back(placed);
     }
     int inv_reps = std::max(1, seq_reps - 1);
-    auto inv_seq =
-        generateSequence(inverted, inv_reps, seq_interval, voice1_start + motif_dur);
+    auto inv_seq = generateDiatonicSequence(inverted, inv_reps, deg_step,
+                                            voice1_start + motif_dur, key, scale);
     for (auto& note : inv_seq) {
       note.voice = 1;
       episode.notes.push_back(note);
@@ -165,21 +174,24 @@ void generateSevereEpisode(Episode& episode, const std::vector<NoteEvent>& motif
 /// @param motif Normalized motif.
 /// @param start_tick Episode start tick.
 /// @param motif_dur Duration of the motif.
-/// @param seq_interval Sequence interval step.
+/// @param deg_step Diatonic degree step for sequence.
 /// @param seq_reps Number of sequence repetitions.
 /// @param imitation_offset Offset for voice 1 entry.
 /// @param num_voices Number of active voices.
+/// @param key Musical key for diatonic operations.
+/// @param scale Scale type for diatonic operations.
 void generatePlayfulEpisode(Episode& episode, const std::vector<NoteEvent>& motif,
-                            Tick start_tick, Tick motif_dur, int seq_interval,
-                            int seq_reps, Tick imitation_offset, uint8_t num_voices) {
-  // Voice 0: Retrograde of motif + sequence of retrograde.
+                            Tick start_tick, Tick motif_dur, int deg_step,
+                            int seq_reps, Tick imitation_offset, uint8_t num_voices,
+                            Key key, ScaleType scale) {
+  // Voice 0: Retrograde of motif + diatonic sequence of retrograde.
   auto retrograde = retrogradeMelody(motif, start_tick);
   for (auto& note : retrograde) {
     note.voice = 0;
     episode.notes.push_back(note);
   }
-  auto seq_notes =
-      generateSequence(retrograde, seq_reps, seq_interval, start_tick + motif_dur);
+  auto seq_notes = generateDiatonicSequence(retrograde, seq_reps, deg_step,
+                                            start_tick + motif_dur, key, scale);
   for (auto& note : seq_notes) {
     note.voice = 0;
     episode.notes.push_back(note);
@@ -193,12 +205,12 @@ void generatePlayfulEpisode(Episode& episode, const std::vector<NoteEvent>& moti
       note.voice = 1;
       episode.notes.push_back(note);
     }
-    // Sequence of diminished motif (fits more reps due to shorter duration).
+    // Diatonic sequence of diminished motif (fits more reps due to shorter duration).
     Tick dim_dur = motifDuration(diminished);
     if (dim_dur == 0) dim_dur = motif_dur / 2;
     int dim_reps = calculateSequenceRepetitions(motif_dur * 2, dim_dur);
-    auto dim_seq =
-        generateSequence(diminished, dim_reps, seq_interval, voice1_start + dim_dur);
+    auto dim_seq = generateDiatonicSequence(diminished, dim_reps, deg_step,
+                                            voice1_start + dim_dur, key, scale);
     for (auto& note : dim_seq) {
       note.voice = 1;
       episode.notes.push_back(note);
@@ -216,21 +228,25 @@ void generatePlayfulEpisode(Episode& episode, const std::vector<NoteEvent>& moti
 /// @param motif Normalized motif.
 /// @param start_tick Episode start tick.
 /// @param motif_dur Duration of the motif.
-/// @param seq_interval Sequence interval step.
+/// @param deg_step Diatonic degree step for sequence.
 /// @param seq_reps Number of sequence repetitions.
 /// @param imitation_offset Offset for voice 1 entry.
 /// @param num_voices Number of active voices.
+/// @param key Musical key for diatonic operations.
+/// @param scale Scale type for diatonic operations.
 void generateNobleEpisode(Episode& episode, const std::vector<NoteEvent>& motif,
-                          Tick start_tick, Tick motif_dur, int seq_interval,
-                          int seq_reps, Tick imitation_offset, uint8_t num_voices) {
-  // Voice 0: Original motif + sequence (upper melodic line).
+                          Tick start_tick, Tick motif_dur, int deg_step,
+                          int seq_reps, Tick imitation_offset, uint8_t num_voices,
+                          Key key, ScaleType scale) {
+  // Voice 0: Original motif + diatonic sequence (upper melodic line).
   for (const auto& note : motif) {
     NoteEvent placed = note;
     placed.start_tick += start_tick;
     placed.voice = 0;
     episode.notes.push_back(placed);
   }
-  auto seq_notes = generateSequence(motif, seq_reps, seq_interval, start_tick + motif_dur);
+  auto seq_notes =
+      generateDiatonicSequence(motif, seq_reps, deg_step, start_tick + motif_dur, key, scale);
   for (auto& note : seq_notes) {
     note.voice = 0;
     episode.notes.push_back(note);
@@ -258,17 +274,20 @@ void generateNobleEpisode(Episode& episode, const std::vector<NoteEvent>& motif,
 /// @param motif Normalized motif.
 /// @param start_tick Episode start tick.
 /// @param motif_dur Duration of the motif.
-/// @param seq_interval Sequence interval step.
+/// @param deg_step Diatonic degree step for sequence.
 /// @param seq_reps Number of sequence repetitions.
 /// @param imitation_offset Offset for voice 1 entry.
 /// @param num_voices Number of active voices.
+/// @param key Musical key for diatonic operations.
+/// @param scale Scale type for diatonic operations.
 void generateRestlessEpisode(Episode& episode, const std::vector<NoteEvent>& motif,
-                             Tick start_tick, Tick motif_dur, int seq_interval,
-                             int seq_reps, Tick imitation_offset, uint8_t num_voices) {
+                             Tick start_tick, Tick motif_dur, int deg_step,
+                             int seq_reps, Tick imitation_offset, uint8_t num_voices,
+                             Key key, ScaleType scale) {
   // Fragment the motif into 2 pieces for tight imitation.
   auto fragments = fragmentMotif(motif, 2);
 
-  // Voice 0: First fragment + sequence.
+  // Voice 0: First fragment + diatonic sequence.
   std::vector<NoteEvent> frag0 = fragments.empty() ? motif : fragments[0];
   normalizeMotifToZero(frag0);
   Tick frag0_dur = motifDuration(frag0);
@@ -283,21 +302,21 @@ void generateRestlessEpisode(Episode& episode, const std::vector<NoteEvent>& mot
   // More repetitions since fragments are shorter.
   int frag_reps = calculateSequenceRepetitions(motif_dur * 2, frag0_dur);
   auto seq_notes =
-      generateSequence(frag0, frag_reps, seq_interval, start_tick + frag0_dur);
+      generateDiatonicSequence(frag0, frag_reps, deg_step, start_tick + frag0_dur, key, scale);
   for (auto& note : seq_notes) {
     note.voice = 0;
     episode.notes.push_back(note);
   }
 
-  // Voice 1: Second fragment (or inverted first) with tight overlap.
+  // Voice 1: Second fragment (or diatonically inverted first) with tight overlap.
   if (num_voices >= 2) {
     std::vector<NoteEvent> frag1;
     if (fragments.size() >= 2) {
       frag1 = fragments[1];
     } else {
-      // Fallback: invert the first fragment.
+      // Fallback: diatonic inversion of the first fragment.
       uint8_t pivot = frag0.empty() ? kMidiC4 : frag0[0].pitch;
-      frag1 = invertMelody(frag0, pivot);
+      frag1 = invertMelodyDiatonic(frag0, pivot, key, scale);
     }
     normalizeMotifToZero(frag1);
     Tick frag1_dur = motifDuration(frag1);
@@ -312,8 +331,8 @@ void generateRestlessEpisode(Episode& episode, const std::vector<NoteEvent>& mot
       episode.notes.push_back(placed);
     }
     int frag1_reps = calculateSequenceRepetitions(motif_dur * 2, frag1_dur);
-    auto frag1_seq =
-        generateSequence(frag1, frag1_reps, seq_interval, voice1_start + frag1_dur);
+    auto frag1_seq = generateDiatonicSequence(frag1, frag1_reps, deg_step,
+                                              voice1_start + frag1_dur, key, scale);
     for (auto& note : frag1_seq) {
       note.voice = 1;
       episode.notes.push_back(note);
@@ -379,9 +398,12 @@ Episode generateEpisode(const Subject& subject, Tick start_tick, Tick duration_t
   }
 
   // Determine transformation parameters based on character.
-  int seq_interval = sequenceIntervalForCharacter(subject.character, rng);
+  int deg_step = sequenceDegreeStepForCharacter(subject.character, rng);
   int seq_reps = calculateSequenceRepetitions(duration_ticks, motif_dur);
   Tick imitation_offset = imitationOffsetForCharacter(motif_dur, subject.character);
+
+  // Diatonic context: use major scale for the starting key.
+  ScaleType scale = ScaleType::Major;
 
   // Calculate transposition for key modulation.
   int key_diff = static_cast<int>(target_key) - static_cast<int>(start_key);
@@ -389,21 +411,21 @@ Episode generateEpisode(const Subject& subject, Tick start_tick, Tick duration_t
   // --- Character-specific voice generation ---
   switch (subject.character) {
     case SubjectCharacter::Playful:
-      generatePlayfulEpisode(episode, motif, start_tick, motif_dur, seq_interval, seq_reps,
-                             imitation_offset, num_voices);
+      generatePlayfulEpisode(episode, motif, start_tick, motif_dur, deg_step, seq_reps,
+                             imitation_offset, num_voices, start_key, scale);
       break;
     case SubjectCharacter::Noble:
-      generateNobleEpisode(episode, motif, start_tick, motif_dur, seq_interval, seq_reps,
-                           imitation_offset, num_voices);
+      generateNobleEpisode(episode, motif, start_tick, motif_dur, deg_step, seq_reps,
+                           imitation_offset, num_voices, start_key, scale);
       break;
     case SubjectCharacter::Restless:
-      generateRestlessEpisode(episode, motif, start_tick, motif_dur, seq_interval, seq_reps,
-                              imitation_offset, num_voices);
+      generateRestlessEpisode(episode, motif, start_tick, motif_dur, deg_step, seq_reps,
+                              imitation_offset, num_voices, start_key, scale);
       break;
     case SubjectCharacter::Severe:
     default:
-      generateSevereEpisode(episode, motif, start_tick, motif_dur, seq_interval, seq_reps,
-                            imitation_offset, num_voices);
+      generateSevereEpisode(episode, motif, start_tick, motif_dur, deg_step, seq_reps,
+                            imitation_offset, num_voices, start_key, scale);
       break;
   }
 
@@ -430,13 +452,13 @@ Episode generateEpisode(const Subject& subject, Tick start_tick, Tick duration_t
     }
   }
 
-  // --- Voice 4: Inverted tail motif with sequence (5 voices) ---
+  // --- Voice 4: Diatonically inverted tail motif with sequence (5 voices) ---
   if (num_voices >= 5) {
     auto tail = extractTailMotif(subject.notes, 3);
     if (!tail.empty()) {
       normalizeMotifToZero(tail);
       uint8_t pivot = tail[0].pitch;
-      auto inverted = invertMelody(tail, pivot);
+      auto inverted = invertMelodyDiatonic(tail, pivot, start_key, scale);
       Tick voice4_start = start_tick + imitation_offset;
       for (const auto& note : inverted) {
         NoteEvent placed = note;
@@ -447,8 +469,8 @@ Episode generateEpisode(const Subject& subject, Tick start_tick, Tick duration_t
       Tick inv_dur = motifDuration(inverted);
       if (inv_dur == 0) inv_dur = motif_dur;
       int inv_reps = std::max(1, seq_reps - 1);
-      auto inv_seq = generateSequence(inverted, inv_reps, seq_interval,
-                                       voice4_start + inv_dur);
+      auto inv_seq = generateDiatonicSequence(inverted, inv_reps, deg_step,
+                                              voice4_start + inv_dur, start_key, scale);
       for (auto& note : inv_seq) {
         note.voice = 4;
         episode.notes.push_back(note);
@@ -457,13 +479,14 @@ Episode generateEpisode(const Subject& subject, Tick start_tick, Tick duration_t
   }
 
   // --- Apply gradual key modulation ---
-  // Transpose the second half of all notes toward the target key.
+  // Transpose the second half of all notes toward the target key, then snap to
+  // the target key's diatonic scale to avoid chromatic artifacts.
   if (key_diff != 0) {
     Tick midpoint = start_tick + duration_ticks / 2;
     for (auto& note : episode.notes) {
       if (note.start_tick >= midpoint) {
         int new_pitch = static_cast<int>(note.pitch) + key_diff;
-        note.pitch = clampMidiPitch(new_pitch);
+        note.pitch = scale_util::nearestScaleTone(clampMidiPitch(new_pitch), target_key, scale);
       }
     }
   }

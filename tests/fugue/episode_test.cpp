@@ -7,6 +7,9 @@
 
 #include <algorithm>
 #include <set>
+#include <string>
+
+#include "core/scale.h"
 
 namespace bach {
 namespace {
@@ -26,6 +29,30 @@ Subject makeTestSubject(Key key = Key::C,
     note.start_tick = static_cast<Tick>(idx) * kTicksPerBeat;
     note.duration = kTicksPerBeat;
     note.pitch = static_cast<uint8_t>(60 + (idx % 5));  // C4 C#4 D4 D#4 E4 ...
+    note.velocity = 80;
+    note.voice = 0;
+    subject.notes.push_back(note);
+  }
+  return subject;
+}
+
+// ---------------------------------------------------------------------------
+// Helper: create a diatonic test subject (C major scale tones only)
+// ---------------------------------------------------------------------------
+
+Subject makeDiatonicTestSubject(Key key = Key::C,
+                                SubjectCharacter character = SubjectCharacter::Severe) {
+  Subject subject;
+  subject.key = key;
+  subject.character = character;
+  subject.length_ticks = kTicksPerBar * 2;
+  // C major diatonic: C4, D4, E4, F4, G4, A4, B4, C5
+  const uint8_t pitches[] = {60, 62, 64, 65, 67, 69, 71, 72};
+  for (int idx = 0; idx < 8; ++idx) {
+    NoteEvent note;
+    note.start_tick = static_cast<Tick>(idx) * kTicksPerBeat;
+    note.duration = kTicksPerBeat;
+    note.pitch = pitches[idx];
     note.velocity = 80;
     note.voice = 0;
     subject.notes.push_back(note);
@@ -663,6 +690,146 @@ TEST(GenerateEpisodeTest, InvertibleCounterpointIndex2NoSwap) {
         << "Even episode_index=2 should not swap voices";
   }
 }
+
+// ---------------------------------------------------------------------------
+// Diatonic episode generation -- integration tests
+//
+// episode.cpp now uses diatonic transforms internally. These tests verify
+// that when given a diatonic subject (all notes in C major), the generated
+// episode output is also fully diatonic.
+// ---------------------------------------------------------------------------
+
+TEST(DiatonicEpisodeTest, AllNotesDiatonicSevere) {
+  Subject subject = makeDiatonicTestSubject(Key::C, SubjectCharacter::Severe);
+  Episode episode = generateEpisode(subject, 0, kTicksPerBar * 4,
+                                    Key::C, Key::C, 3, 42);
+
+  ASSERT_FALSE(episode.notes.empty()) << "Episode should contain notes";
+  for (size_t idx = 0; idx < episode.notes.size(); ++idx) {
+    EXPECT_TRUE(scale_util::isScaleTone(episode.notes[idx].pitch, Key::C, ScaleType::Major))
+        << "Note " << idx << " pitch " << static_cast<int>(episode.notes[idx].pitch)
+        << " (voice " << static_cast<int>(episode.notes[idx].voice)
+        << ", tick " << episode.notes[idx].start_tick
+        << ") is not diatonic in C major";
+  }
+}
+
+TEST(DiatonicEpisodeTest, AllNotesDiatonicPlayful) {
+  Subject subject = makeDiatonicTestSubject(Key::C, SubjectCharacter::Playful);
+  Episode episode = generateEpisode(subject, 0, kTicksPerBar * 4,
+                                    Key::C, Key::C, 3, 42);
+
+  ASSERT_FALSE(episode.notes.empty()) << "Episode should contain notes";
+  for (size_t idx = 0; idx < episode.notes.size(); ++idx) {
+    EXPECT_TRUE(scale_util::isScaleTone(episode.notes[idx].pitch, Key::C, ScaleType::Major))
+        << "Note " << idx << " pitch " << static_cast<int>(episode.notes[idx].pitch)
+        << " (voice " << static_cast<int>(episode.notes[idx].voice)
+        << ", tick " << episode.notes[idx].start_tick
+        << ") is not diatonic in C major (Playful)";
+  }
+}
+
+TEST(DiatonicEpisodeTest, AllNotesDiatonicNoble) {
+  // Noble uses transposeMelody(augmented, -12) for bass voice, which is an
+  // octave shift -- chromatically correct, so output should still be diatonic.
+  Subject subject = makeDiatonicTestSubject(Key::C, SubjectCharacter::Noble);
+  Episode episode = generateEpisode(subject, 0, kTicksPerBar * 4,
+                                    Key::C, Key::C, 3, 42);
+
+  ASSERT_FALSE(episode.notes.empty()) << "Episode should contain notes";
+  for (size_t idx = 0; idx < episode.notes.size(); ++idx) {
+    EXPECT_TRUE(scale_util::isScaleTone(episode.notes[idx].pitch, Key::C, ScaleType::Major))
+        << "Note " << idx << " pitch " << static_cast<int>(episode.notes[idx].pitch)
+        << " (voice " << static_cast<int>(episode.notes[idx].voice)
+        << ", tick " << episode.notes[idx].start_tick
+        << ") is not diatonic in C major (Noble)";
+  }
+}
+
+TEST(DiatonicEpisodeTest, AllNotesDiatonicRestless) {
+  Subject subject = makeDiatonicTestSubject(Key::C, SubjectCharacter::Restless);
+  Episode episode = generateEpisode(subject, 0, kTicksPerBar * 4,
+                                    Key::C, Key::C, 3, 42);
+
+  ASSERT_FALSE(episode.notes.empty()) << "Episode should contain notes";
+  for (size_t idx = 0; idx < episode.notes.size(); ++idx) {
+    EXPECT_TRUE(scale_util::isScaleTone(episode.notes[idx].pitch, Key::C, ScaleType::Major))
+        << "Note " << idx << " pitch " << static_cast<int>(episode.notes[idx].pitch)
+        << " (voice " << static_cast<int>(episode.notes[idx].voice)
+        << ", tick " << episode.notes[idx].start_tick
+        << ") is not diatonic in C major (Restless)";
+  }
+}
+
+TEST(DiatonicEpisodeTest, AllCharactersDiatonicMultiSeed) {
+  const SubjectCharacter characters[] = {
+      SubjectCharacter::Severe,
+      SubjectCharacter::Playful,
+      SubjectCharacter::Noble,
+      SubjectCharacter::Restless,
+  };
+  const std::string character_names[] = {"Severe", "Playful", "Noble", "Restless"};
+
+  for (int char_idx = 0; char_idx < 4; ++char_idx) {
+    Subject subject = makeDiatonicTestSubject(Key::C, characters[char_idx]);
+
+    for (uint32_t seed = 1; seed <= 10; ++seed) {
+      Episode episode = generateEpisode(subject, 0, kTicksPerBar * 4,
+                                        Key::C, Key::C, 2, seed);
+
+      ASSERT_FALSE(episode.notes.empty())
+          << character_names[char_idx] << " seed=" << seed << " produced no notes";
+
+      for (size_t note_idx = 0; note_idx < episode.notes.size(); ++note_idx) {
+        EXPECT_TRUE(scale_util::isScaleTone(episode.notes[note_idx].pitch,
+                                            Key::C, ScaleType::Major))
+            << character_names[char_idx] << " seed=" << seed
+            << " note " << note_idx
+            << " pitch " << static_cast<int>(episode.notes[note_idx].pitch)
+            << " (voice " << static_cast<int>(episode.notes[note_idx].voice)
+            << ", tick " << episode.notes[note_idx].start_tick
+            << ") is not diatonic in C major";
+      }
+    }
+  }
+}
+
+TEST(DiatonicEpisodeTest, ModulatedEpisodeTargetKeyDiatonic) {
+  // Generate episode modulating from C to G. Notes in the second half
+  // (after the midpoint) should be diatonic in G major.
+  Subject subject = makeDiatonicTestSubject(Key::C, SubjectCharacter::Severe);
+  Tick duration = kTicksPerBar * 4;
+  Episode episode = generateEpisode(subject, 0, duration,
+                                    Key::C, Key::G, 3, 42);
+
+  ASSERT_FALSE(episode.notes.empty()) << "Modulated episode should contain notes";
+
+  Tick midpoint = duration / 2;
+
+  // Collect notes in the second half.
+  int second_half_count = 0;
+  int second_half_diatonic_g = 0;
+  for (const auto& note : episode.notes) {
+    if (note.start_tick >= midpoint) {
+      ++second_half_count;
+      if (scale_util::isScaleTone(note.pitch, Key::G, ScaleType::Major)) {
+        ++second_half_diatonic_g;
+      }
+    }
+  }
+
+  ASSERT_GT(second_half_count, 0) << "Should have notes in the second half";
+
+  // All notes in the second half should be diatonic in G major.
+  EXPECT_EQ(second_half_diatonic_g, second_half_count)
+      << second_half_count - second_half_diatonic_g << " of " << second_half_count
+      << " notes in the second half are not diatonic in G major";
+}
+
+// Note: Existing tests above validate backward compatibility since the episode
+// generation API (generateEpisode) has not changed -- only the internal
+// transforms now use diatonic operations. Running `make test` confirms that
+// all prior tests continue to pass.
 
 }  // namespace
 }  // namespace bach

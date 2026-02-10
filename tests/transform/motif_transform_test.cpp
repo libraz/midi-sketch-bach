@@ -4,6 +4,7 @@
 
 #include <gtest/gtest.h>
 
+#include "core/scale.h"
 #include "transform/sequence.h"
 
 namespace bach {
@@ -359,6 +360,138 @@ TEST(MotifDurationTest, WithGaps) {
   };
   // Duration = 720 - 0 = 720
   EXPECT_EQ(motifDuration(gapped), 720u);
+}
+
+// ---------------------------------------------------------------------------
+// InvertMelodyDiatonic tests
+// ---------------------------------------------------------------------------
+
+TEST(InvertMelodyDiatonicTest, DiatonicInversionCMajor) {
+  auto motif = makeTestMotif();  // C4(60)-E4(64)-G4(67)
+  // Invert around C4(60) in C major.
+  // C4 stays 60 (pivot).
+  // E4 is +2 scale degrees from C -> inverted = -2 degrees from C = A3 = 57.
+  // G4 is +4 scale degrees from C -> inverted = -4 degrees from C = F3 = 53.
+  auto result = invertMelodyDiatonic(motif, 60, Key::C, ScaleType::Major);
+  ASSERT_EQ(result.size(), 3u);
+  EXPECT_EQ(result[0].pitch, 60);  // C4 (pivot)
+  EXPECT_EQ(result[1].pitch, 57);  // A3
+  EXPECT_EQ(result[2].pitch, 53);  // F3
+}
+
+TEST(InvertMelodyDiatonicTest, AllOutputsAreDiatonic) {
+  auto motif = makeTestMotif();  // C4(60)-E4(64)-G4(67)
+  auto result = invertMelodyDiatonic(motif, 60, Key::C, ScaleType::Major);
+  ASSERT_EQ(result.size(), 3u);
+  for (size_t idx = 0; idx < result.size(); ++idx) {
+    EXPECT_TRUE(scale_util::isScaleTone(result[idx].pitch, Key::C, ScaleType::Major))
+        << "Pitch " << static_cast<int>(result[idx].pitch) << " at index " << idx
+        << " is not a C major scale tone";
+  }
+}
+
+TEST(InvertMelodyDiatonicTest, EmptyInput) {
+  std::vector<NoteEvent> empty;
+  auto result = invertMelodyDiatonic(empty, 60, Key::C, ScaleType::Major);
+  EXPECT_TRUE(result.empty());
+}
+
+TEST(InvertMelodyDiatonicTest, PreservesRhythm) {
+  auto motif = makeTestMotif(1920);
+  auto result = invertMelodyDiatonic(motif, 60, Key::C, ScaleType::Major);
+  ASSERT_EQ(result.size(), 3u);
+  for (size_t idx = 0; idx < 3; ++idx) {
+    EXPECT_EQ(result[idx].start_tick, motif[idx].start_tick);
+    EXPECT_EQ(result[idx].duration, motif[idx].duration);
+    EXPECT_EQ(result[idx].velocity, motif[idx].velocity);
+    EXPECT_EQ(result[idx].voice, motif[idx].voice);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// TransposeMelodyDiatonic tests
+// ---------------------------------------------------------------------------
+
+TEST(TransposeMelodyDiatonicTest, StepDown) {
+  auto motif = makeTestMotif();  // C4(60)-E4(64)-G4(67)
+  // Transpose by -1 degree step in C major.
+  // C4(60) -> B3(59), E4(64) -> D4(62), G4(67) -> F4(65)
+  auto result = transposeMelodyDiatonic(motif, -1, Key::C, ScaleType::Major);
+  ASSERT_EQ(result.size(), 3u);
+  EXPECT_EQ(result[0].pitch, 59);  // B3
+  EXPECT_EQ(result[1].pitch, 62);  // D4
+  EXPECT_EQ(result[2].pitch, 65);  // F4
+}
+
+TEST(TransposeMelodyDiatonicTest, StepUp) {
+  auto motif = makeTestMotif();  // C4(60)-E4(64)-G4(67)
+  // Transpose by +1 degree step in C major.
+  // C4(60) -> D4(62), E4(64) -> F4(65), G4(67) -> A4(69)
+  auto result = transposeMelodyDiatonic(motif, 1, Key::C, ScaleType::Major);
+  ASSERT_EQ(result.size(), 3u);
+  EXPECT_EQ(result[0].pitch, 62);  // D4
+  EXPECT_EQ(result[1].pitch, 65);  // F4
+  EXPECT_EQ(result[2].pitch, 69);  // A4
+}
+
+TEST(TransposeMelodyDiatonicTest, AllOutputsAreDiatonic) {
+  auto motif = makeTestMotif();  // C4(60)-E4(64)-G4(67)
+  auto result = transposeMelodyDiatonic(motif, 2, Key::C, ScaleType::Major);
+  ASSERT_EQ(result.size(), 3u);
+  for (size_t idx = 0; idx < result.size(); ++idx) {
+    EXPECT_TRUE(scale_util::isScaleTone(result[idx].pitch, Key::C, ScaleType::Major))
+        << "Pitch " << static_cast<int>(result[idx].pitch) << " at index " << idx
+        << " is not a C major scale tone";
+  }
+}
+
+TEST(TransposeMelodyDiatonicTest, EmptyInput) {
+  std::vector<NoteEvent> empty;
+  auto result = transposeMelodyDiatonic(empty, 1, Key::C, ScaleType::Major);
+  EXPECT_TRUE(result.empty());
+}
+
+// ---------------------------------------------------------------------------
+// GenerateDiatonicSequence tests
+// ---------------------------------------------------------------------------
+
+TEST(GenerateDiatonicSequenceTest, FourRepsAllDiatonic) {
+  auto motif = makeTestMotif();  // C4(60)-E4(64)-G4(67)
+  // 4 repetitions, degree_step=-1 in C major. All notes should be diatonic.
+  auto result = generateDiatonicSequence(motif, 4, -1, 1440, Key::C, ScaleType::Major);
+  // 4 repetitions * 3 notes = 12 notes
+  ASSERT_EQ(result.size(), 12u);
+  for (size_t idx = 0; idx < result.size(); ++idx) {
+    EXPECT_TRUE(scale_util::isScaleTone(result[idx].pitch, Key::C, ScaleType::Major))
+        << "Pitch " << static_cast<int>(result[idx].pitch) << " at index " << idx
+        << " is not a C major scale tone";
+  }
+}
+
+TEST(GenerateDiatonicSequenceTest, CorrectTiming) {
+  auto motif = makeTestMotif(0);  // Total duration = 1440
+  // Motif duration: max(0+480, 480+480, 960+480) - min(0) = 1440
+  auto result = generateDiatonicSequence(motif, 2, -1, 1440, Key::C, ScaleType::Major);
+  // Rep 1 starts at 1440
+  EXPECT_EQ(result[0].start_tick, 1440u);
+  EXPECT_EQ(result[1].start_tick, 1920u);
+  EXPECT_EQ(result[2].start_tick, 2400u);
+  // Rep 2 starts at 1440 + 1440 = 2880
+  EXPECT_EQ(result[3].start_tick, 2880u);
+  EXPECT_EQ(result[4].start_tick, 3360u);
+  EXPECT_EQ(result[5].start_tick, 3840u);
+}
+
+TEST(GenerateDiatonicSequenceTest, EmptyMotif) {
+  std::vector<NoteEvent> empty;
+  auto result = generateDiatonicSequence(empty, 3, -1, 0, Key::C, ScaleType::Major);
+  EXPECT_TRUE(result.empty());
+}
+
+TEST(GenerateDiatonicSequenceTest, ZeroRepetitions) {
+  auto motif = makeTestMotif();
+  auto result = generateDiatonicSequence(motif, 0, -1, 0, Key::C, ScaleType::Major);
+  EXPECT_TRUE(result.empty());
 }
 
 }  // namespace

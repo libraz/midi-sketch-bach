@@ -83,5 +83,39 @@ bool pitchToScaleDegree(uint8_t pitch, Key key, ScaleType scale,
   return false;
 }
 
+int pitchToAbsoluteDegree(uint8_t pitch, Key key, ScaleType scale) {
+  // Snap non-scale tones to the nearest scale pitch first.
+  uint8_t snapped = nearestScaleTone(pitch, key, scale);
+
+  int octave = static_cast<int>(snapped) / 12;
+  int degree_in_octave = 0;
+  pitchToScaleDegree(snapped, key, scale, degree_in_octave);
+
+  return octave * kScaleDegreeCount + degree_in_octave;
+}
+
+uint8_t absoluteDegreeToPitch(int abs_degree, Key key, ScaleType scale) {
+  // Handle negative degrees via floored division.
+  int octave;
+  int deg;
+  if (abs_degree >= 0) {
+    octave = abs_degree / kScaleDegreeCount;
+    deg = abs_degree % kScaleDegreeCount;
+  } else {
+    // For negative: floor division toward -infinity.
+    octave = (abs_degree - (kScaleDegreeCount - 1)) / kScaleDegreeCount;
+    deg = abs_degree - octave * kScaleDegreeCount;
+  }
+
+  int key_offset = static_cast<int>(key);
+  const int* intervals = getScaleIntervals(scale);
+  int midi_pitch = octave * 12 + key_offset + intervals[deg];
+
+  // Clamp to valid MIDI range.
+  if (midi_pitch < 0) return 0;
+  if (midi_pitch > 127) return 127;
+  return static_cast<uint8_t>(midi_pitch);
+}
+
 }  // namespace scale_util
 }  // namespace bach

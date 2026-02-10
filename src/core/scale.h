@@ -43,6 +43,30 @@ uint8_t nearestScaleTone(uint8_t pitch, Key key, ScaleType scale);
 bool pitchToScaleDegree(uint8_t pitch, Key key, ScaleType scale,
                         int& out_degree);
 
+/// @brief Convert a MIDI pitch to an absolute scale degree spanning octaves.
+///
+/// The absolute degree encodes both the octave and the within-octave degree:
+/// `abs_degree = octave * 7 + degree_in_octave`, where octave = pitch / 12.
+/// Non-scale pitches are snapped to the nearest scale tone before conversion.
+///
+/// @param pitch MIDI note number (0-127).
+/// @param key Musical key (tonic pitch class).
+/// @param scale Scale type.
+/// @return Absolute scale degree (always non-negative for valid MIDI pitches).
+int pitchToAbsoluteDegree(uint8_t pitch, Key key, ScaleType scale);
+
+/// @brief Convert an absolute scale degree back to a MIDI pitch.
+///
+/// Inverse of pitchToAbsoluteDegree. Computes the octave from `abs_degree / 7`
+/// and the within-octave degree from `abs_degree % 7`, then maps to the
+/// corresponding MIDI pitch via the scale interval table.
+///
+/// @param abs_degree Absolute scale degree (may be negative for very low pitches).
+/// @param key Musical key (tonic pitch class).
+/// @param scale Scale type.
+/// @return MIDI pitch clamped to [0, 127].
+uint8_t absoluteDegreeToPitch(int abs_degree, Key key, ScaleType scale);
+
 }  // namespace scale_util
 }  // namespace bach
 

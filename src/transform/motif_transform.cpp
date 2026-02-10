@@ -5,6 +5,8 @@
 #include <algorithm>
 #include <cstdint>
 
+#include "core/scale.h"
+
 namespace bach {
 
 namespace {
@@ -136,6 +138,40 @@ std::vector<NoteEvent> transposeMelody(const std::vector<NoteEvent>& notes, int 
     NoteEvent transposed = note;
     int new_pitch = static_cast<int>(note.pitch) + semitones;
     transposed.pitch = clampMidiPitch(new_pitch);
+    result.push_back(transposed);
+  }
+  return result;
+}
+
+std::vector<NoteEvent> invertMelodyDiatonic(const std::vector<NoteEvent>& notes, uint8_t pivot,
+                                            Key key, ScaleType scale) {
+  if (notes.empty()) return {};
+
+  int pivot_degree = scale_util::pitchToAbsoluteDegree(pivot, key, scale);
+
+  std::vector<NoteEvent> result;
+  result.reserve(notes.size());
+  for (const auto& note : notes) {
+    NoteEvent inverted = note;
+    int note_degree = scale_util::pitchToAbsoluteDegree(note.pitch, key, scale);
+    int inverted_degree = 2 * pivot_degree - note_degree;
+    inverted.pitch = scale_util::absoluteDegreeToPitch(inverted_degree, key, scale);
+    result.push_back(inverted);
+  }
+  return result;
+}
+
+std::vector<NoteEvent> transposeMelodyDiatonic(const std::vector<NoteEvent>& notes,
+                                               int degree_steps, Key key, ScaleType scale) {
+  if (notes.empty()) return {};
+
+  std::vector<NoteEvent> result;
+  result.reserve(notes.size());
+  for (const auto& note : notes) {
+    NoteEvent transposed = note;
+    int note_degree = scale_util::pitchToAbsoluteDegree(note.pitch, key, scale);
+    int new_degree = note_degree + degree_steps;
+    transposed.pitch = scale_util::absoluteDegreeToPitch(new_degree, key, scale);
     result.push_back(transposed);
   }
   return result;

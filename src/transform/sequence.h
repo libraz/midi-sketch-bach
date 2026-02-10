@@ -26,6 +26,24 @@ Tick motifDuration(const std::vector<NoteEvent>& notes);
 std::vector<NoteEvent> generateSequence(const std::vector<NoteEvent>& motif, int repetitions,
                                         int interval_step, Tick start_tick);
 
+/// @brief Generate a diatonic sequence (repeated transposition by scale degrees).
+///
+/// Like generateSequence but transposes by diatonic degree steps instead of
+/// semitones. This is the Baroque "Zeugma" technique as actually practiced by
+/// Bach: each repetition moves by a fixed number of scale degrees, so interval
+/// quality (major/minor) adjusts naturally to fit the key.
+///
+/// @param motif The source melodic fragment.
+/// @param repetitions Number of repetitions (excluding the original).
+/// @param degree_step Scale-degree interval for each step (e.g. -1 = descending by step).
+/// @param start_tick Starting tick for the first repetition.
+/// @param key Musical key for diatonic context.
+/// @param scale Scale type.
+/// @return All repetitions concatenated (does not include the original motif).
+std::vector<NoteEvent> generateDiatonicSequence(const std::vector<NoteEvent>& motif,
+                                                int repetitions, int degree_step,
+                                                Tick start_tick, Key key, ScaleType scale);
+
 }  // namespace bach
 
 #endif  // BACH_TRANSFORM_SEQUENCE_H

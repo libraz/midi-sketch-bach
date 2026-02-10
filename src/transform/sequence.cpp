@@ -60,4 +60,35 @@ std::vector<NoteEvent> generateSequence(const std::vector<NoteEvent>& motif, int
   return result;
 }
 
+std::vector<NoteEvent> generateDiatonicSequence(const std::vector<NoteEvent>& motif,
+                                                int repetitions, int degree_step,
+                                                Tick start_tick, Key key, ScaleType scale) {
+  if (motif.empty() || repetitions <= 0) return {};
+
+  Tick dur = motifDuration(motif);
+  Tick motif_start = motif.front().start_tick;
+  for (const auto& note : motif) {
+    if (note.start_tick < motif_start) {
+      motif_start = note.start_tick;
+    }
+  }
+
+  std::vector<NoteEvent> result;
+  result.reserve(motif.size() * static_cast<size_t>(repetitions));
+
+  for (int rep = 1; rep <= repetitions; ++rep) {
+    std::vector<NoteEvent> transposed =
+        transposeMelodyDiatonic(motif, degree_step * rep, key, scale);
+
+    Tick tick_offset = start_tick + dur * static_cast<Tick>(rep - 1) - motif_start;
+    for (auto& note : transposed) {
+      note.start_tick += tick_offset;
+    }
+
+    result.insert(result.end(), transposed.begin(), transposed.end());
+  }
+
+  return result;
+}
+
 }  // namespace bach
