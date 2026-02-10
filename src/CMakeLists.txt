@@ -71,6 +71,7 @@ set(BACH_LIB_SOURCES
   fugue/voice_registers.cpp
   fugue/motif_pool.cpp
   fugue/fortspinnung.cpp
+  fugue/motif_template.cpp
   fugue/fugue_generator.cpp
 
   # transform/

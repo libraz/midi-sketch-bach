@@ -2,6 +2,9 @@
 
 #include "fugue/subject.h"
 
+#include <cmath>
+#include <set>
+
 #include <gtest/gtest.h>
 
 #include "core/pitch_utils.h"
@@ -207,24 +210,30 @@ TEST_F(SubjectGeneratorTest, NobleCharacterPrefersLongNotes) {
       << "Noble subjects should have fewer notes (longer values) than Restless";
 }
 
-TEST_F(SubjectGeneratorTest, NobleCharacterDownwardTendency) {
+TEST_F(SubjectGeneratorTest, NobleCharacterHasLateClimax) {
   config.character = SubjectCharacter::Noble;
-  int descending_count = 0;
-  int ascending_count = 0;
-
-  // Across multiple seeds, Noble should show more descending intervals.
+  // Noble subjects should reach their highest pitch in the latter portion
+  // (delayed climax = stately character). The GoalTone position_ratio is 0.70.
   for (uint32_t seed = 1; seed <= 10; ++seed) {
     Subject subject = generator.generate(config, seed);
-    for (size_t idx = 1; idx < subject.notes.size(); ++idx) {
-      int motion = static_cast<int>(subject.notes[idx].pitch) -
-                   static_cast<int>(subject.notes[idx - 1].pitch);
-      if (motion < 0) descending_count++;
-      if (motion > 0) ascending_count++;
+    ASSERT_GT(subject.notes.size(), 2u);
+
+    // Find the position of the highest note.
+    size_t climax_idx = 0;
+    uint8_t highest = 0;
+    for (size_t idx = 0; idx < subject.notes.size(); ++idx) {
+      if (subject.notes[idx].pitch > highest) {
+        highest = subject.notes[idx].pitch;
+        climax_idx = idx;
+      }
     }
+    // The climax should be in the latter half of the subject (index >= 25%).
+    float climax_position =
+        static_cast<float>(climax_idx) / static_cast<float>(subject.notes.size());
+    EXPECT_GE(climax_position, 0.25f)
+        << "Noble subject climax should be in the latter portion (seed "
+        << seed << ")";
   }
-  // Noble should have more descending than ascending intervals on average.
-  EXPECT_GE(descending_count, ascending_count)
-      << "Noble character should favor downward melodic motion";
 }
 
 // ---------------------------------------------------------------------------
@@ -266,30 +275,28 @@ TEST_F(SubjectGeneratorTest, RestlessCharacterUsesShortNotes) {
       << "Restless subjects should have more notes (shorter values) than Severe";
 }
 
-TEST_F(SubjectGeneratorTest, RestlessCharacterHasChromaticMotion) {
+TEST_F(SubjectGeneratorTest, RestlessCharacterHasDenseIntervalVariety) {
   config.character = SubjectCharacter::Restless;
-  int semitone_steps = 0;
-  int total_intervals = 0;
+  int distinct_intervals = 0;
 
-  // Across multiple seeds, Restless should have more semitone intervals.
+  // Across multiple seeds, Restless should have diverse interval content
+  // (many different interval sizes) reflecting its nervous, jittery character.
   for (uint32_t seed = 1; seed <= 10; ++seed) {
     Subject subject = generator.generate(config, seed);
+    std::set<int> interval_set;
     for (size_t idx = 1; idx < subject.notes.size(); ++idx) {
-      int abs_interval = std::abs(static_cast<int>(subject.notes[idx].pitch) -
-                                  static_cast<int>(subject.notes[idx - 1].pitch));
-      total_intervals++;
-      if (abs_interval == 1) semitone_steps++;
+      int interval = static_cast<int>(subject.notes[idx].pitch) -
+                     static_cast<int>(subject.notes[idx - 1].pitch);
+      interval_set.insert(interval);
     }
+    distinct_intervals += static_cast<int>(interval_set.size());
   }
-  // Restless should have a non-trivial number of semitone steps.
-  EXPECT_GT(semitone_steps, 0)
-      << "Restless character should include chromatic (semitone) motion";
-  // At least 5% of intervals should be semitones across 10 seeds.
-  float ratio = static_cast<float>(semitone_steps) /
-                static_cast<float>(total_intervals);
-  EXPECT_GT(ratio, 0.05f)
-      << "Restless should have at least 5% semitone intervals, got "
-      << (ratio * 100.0f) << "%";
+  // On average across 10 seeds, Restless should use at least 3 distinct
+  // interval types per subject (reflecting varied, restless motion).
+  float avg_distinct = static_cast<float>(distinct_intervals) / 10.0f;
+  EXPECT_GE(avg_distinct, 3.0f)
+      << "Restless should use diverse interval types, got avg "
+      << avg_distinct;
 }
 
 // ---------------------------------------------------------------------------

@@ -78,6 +78,7 @@ set(BACH_TEST_SOURCES
   fugue/fugue_quality_gate_test.cpp
   fugue/motif_pool_test.cpp
   fugue/fortspinnung_test.cpp
+  fugue/motif_template_test.cpp
 
   # transform/
   transform/motif_transform_test.cpp
