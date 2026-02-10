@@ -12,6 +12,7 @@
 #include "core/scale.h"
 #include "harmony/chord_types.h"
 #include "harmony/harmonic_event.h"
+#include "harmony/scale_degree_utils.h"
 #include "solo_string/flow/arpeggio_pattern.h"
 
 namespace bach {
@@ -44,38 +45,9 @@ constexpr uint8_t kClimaxVelocityBoost = 16;
 constexpr uint8_t kViolinOpenStrings[] = {55, 62, 69, 76};
 constexpr int kViolinOpenStringCount = 4;
 
-/// @brief Major scale intervals in semitones (7 degrees).
-constexpr int kMajorIntervals[7] = {0, 2, 4, 5, 7, 9, 11};
-
-/// @brief Natural minor scale intervals in semitones (7 degrees).
-constexpr int kMinorIntervals[7] = {0, 2, 3, 5, 7, 8, 10};
-
 // ---------------------------------------------------------------------------
 // Helper: convert chord to MIDI pitches within a register range
 // ---------------------------------------------------------------------------
-
-/// @brief Get the scale intervals for a key mode.
-/// @param is_minor True for natural minor, false for major.
-/// @return Pointer to a 7-element array of semitone offsets.
-const int* scaleIntervalsForMode(bool is_minor) {
-  return is_minor ? kMinorIntervals : kMajorIntervals;
-}
-
-/// @brief Convert a scale degree (0-based, with octave wrap) to semitone offset.
-/// @param degree Scale degree (0=root, 1=2nd, ..., 6=7th; supports >= 7 for octaves).
-/// @param is_minor True for natural minor intervals.
-/// @return Semitone offset from tonic (may exceed 12 for higher degrees).
-int degreeToPitchOffset(int degree, bool is_minor) {
-  const int* intervals = scaleIntervalsForMode(is_minor);
-  if (degree < 0) {
-    int octave_down = (-degree + 6) / 7;
-    int wrapped = degree + octave_down * 7;
-    return intervals[wrapped % 7] - octave_down * 12;
-  }
-  int octave = degree / 7;
-  int scale_idx = degree % 7;
-  return intervals[scale_idx] + octave * 12;
-}
 
 /// @brief Convert a chord to concrete MIDI pitches within a register range.
 ///
@@ -263,6 +235,7 @@ NoteEvent makeTextureNote(Tick tick, Tick duration, uint8_t pitch,
   note.pitch = pitch;
   note.velocity = computeVelocity(tick_in_bar, kBaseVelocity, is_climax);
   note.voice = 0;  // Solo instrument
+  note.source = BachNoteSource::TextureNote;
   return note;
 }
 
@@ -291,33 +264,6 @@ uint8_t findNearestOpenString(uint8_t target, uint8_t reg_low, uint8_t reg_high)
   }
 
   return best;
-}
-
-/// @brief Get chord tone scale degrees for a chord quality.
-/// @param quality The chord quality.
-/// @return Vector of scale degrees (0=root, 2=3rd, 4=5th, optionally 6=7th).
-std::vector<int> getChordDegrees(ChordQuality quality) {
-  switch (quality) {
-    case ChordQuality::Major:
-    case ChordQuality::Minor:
-    case ChordQuality::Diminished:
-    case ChordQuality::Augmented:
-      return {0, 2, 4};
-
-    case ChordQuality::Dominant7:
-    case ChordQuality::Minor7:
-    case ChordQuality::MajorMajor7:
-    case ChordQuality::Diminished7:
-    case ChordQuality::HalfDiminished7:
-      return {0, 2, 4, 6};
-
-    case ChordQuality::AugmentedSixth:
-    case ChordQuality::AugSixthItalian:
-    case ChordQuality::AugSixthFrench:
-    case ChordQuality::AugSixthGerman:
-      return {0, 2, 4};
-  }
-  return {0, 2, 4};
 }
 
 }  // namespace

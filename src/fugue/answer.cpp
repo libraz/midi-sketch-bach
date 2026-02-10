@@ -95,16 +95,10 @@ NoteEvent applyTonalAdjustment(const NoteEvent& note,
     int pitch_class = getPitchClass(note.pitch);
 
     if (pitch_class == tonic_class) {
-      // Tonic in subject -> dominant in answer (transpose up P5, but
-      // then adjust so that the tonic-dominant relationship is inverted
-      // to dominant-tonic). Effectively: tonic -> stays at the same
-      // octave's dominant.
+      // Tonic in subject -> dominant in answer: tonic goes up a P4 instead
+      // of P5 to invert the tonic-dominant relationship.
       // C -> G in subject becomes G -> C' in answer.
-      // So tonic -> keep at tonic (dominant of dominant key = tonic).
-      int new_pitch = static_cast<int>(note.pitch) + interval::kPerfect5th;
-      // Then lower by an octave to make dominant->tonic: subtract P5
-      // adjustment. Net: tonic goes up a P4 instead of P5.
-      new_pitch = static_cast<int>(note.pitch) + interval::kPerfect4th;
+      int new_pitch = static_cast<int>(note.pitch) + interval::kPerfect4th;
       result.pitch = clampPitch(new_pitch, 0, 127);
     } else if (pitch_class == dominant_class) {
       // Dominant in subject -> tonic in answer.

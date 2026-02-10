@@ -12,8 +12,10 @@
 #include "harmony/harmonic_event.h"
 #include "harmony/harmonic_timeline.h"
 #include "harmony/key.h"
+#include "harmony/scale_degree_utils.h"
 #include "instrument/bowed/cello_model.h"
 #include "instrument/bowed/violin_model.h"
+#include "instrument/fretted/guitar_model.h"
 #include "solo_string/flow/arpeggio_pattern.h"
 
 namespace bach {
@@ -46,12 +48,6 @@ constexpr uint8_t kSoloChannel = 0;
 
 /// @brief Harmonic weight assigned to Peak sections (design value, not searched).
 constexpr float kPeakHarmonicWeight = 2.0f;
-
-/// @brief Major scale intervals in semitones (for degree-to-pitch mapping).
-constexpr int kMajorScaleIntervals[7] = {0, 2, 4, 5, 7, 9, 11};
-
-/// @brief Natural minor scale intervals in semitones.
-constexpr int kMinorScaleIntervals[7] = {0, 2, 3, 5, 7, 8, 10};
 
 // ---------------------------------------------------------------------------
 // Register range for arc-controlled register evolution
@@ -100,34 +96,6 @@ constexpr ProgressionEntry kProgression_C[4] = {
     {ChordDegree::viiDim, 0.9f},
     {ChordDegree::V, 1.0f}
 };
-
-// ---------------------------------------------------------------------------
-// Helper: map scale degree to semitone offset
-// ---------------------------------------------------------------------------
-
-/// @brief Convert a scale degree (0-based) to a semitone offset from tonic.
-///
-/// Handles octave wrapping: degree 7 = root+octave, degree 9 = 3rd+octave, etc.
-///
-/// @param degree 0-based scale degree (0=root, 1=2nd, 2=3rd, ..., 6=7th, 7=root+8va).
-/// @param is_minor True for natural minor scale intervals.
-/// @return Semitone offset from tonic (can exceed 12 for octave-wrapped degrees).
-int degreeToPitchOffset(int degree, bool is_minor) {
-  if (degree < 0) {
-    // Negative degrees: wrap downward.
-    int octave_down = (-degree + 6) / 7;
-    int wrapped = degree + octave_down * 7;
-    int base_offset = is_minor ? kMinorScaleIntervals[wrapped % 7]
-                               : kMajorScaleIntervals[wrapped % 7];
-    return base_offset - octave_down * 12;
-  }
-
-  int octave = degree / 7;
-  int scale_idx = degree % 7;
-  int base_offset = is_minor ? kMinorScaleIntervals[scale_idx]
-                             : kMajorScaleIntervals[scale_idx];
-  return base_offset + octave * 12;
-}
 
 /// @brief Compute the MIDI pitch for a chord degree in a given key and octave.
 ///
@@ -335,43 +303,6 @@ std::vector<PatternRole> assignPatternRoles(int bars_in_section) {
 }
 
 // ---------------------------------------------------------------------------
-// Helper: get chord tones as scale degrees
-// ---------------------------------------------------------------------------
-
-/// @brief Get the standard chord tones as scale degrees for a chord quality.
-///
-/// Returns pattern degrees (0-based from chord root) for the chord type:
-///   - Major/Minor triad: root(0), 3rd(2), 5th(4)
-///   - Diminished: root(0), 3rd(2), 5th(4)  (diminished 5th handled by scale)
-///   - Seventh chords: root(0), 3rd(2), 5th(4), 7th(6)
-///
-/// @param quality The chord quality.
-/// @return Vector of scale degrees for arpeggio generation.
-std::vector<int> getChordDegrees(ChordQuality quality) {
-  switch (quality) {
-    case ChordQuality::Major:
-    case ChordQuality::Minor:
-    case ChordQuality::Diminished:
-    case ChordQuality::Augmented:
-      return {0, 2, 4};  // Triad: root, 3rd, 5th
-
-    case ChordQuality::Dominant7:
-    case ChordQuality::Minor7:
-    case ChordQuality::MajorMajor7:
-    case ChordQuality::Diminished7:
-    case ChordQuality::HalfDiminished7:
-      return {0, 2, 4, 6};  // Seventh: root, 3rd, 5th, 7th
-
-    case ChordQuality::AugmentedSixth:
-    case ChordQuality::AugSixthItalian:
-    case ChordQuality::AugSixthFrench:
-    case ChordQuality::AugSixthGerman:
-      return {0, 2, 4};  // Triad approximation for augmented sixth
-  }
-  return {0, 2, 4};
-}
-
-// ---------------------------------------------------------------------------
 // Helper: check open string preference
 // ---------------------------------------------------------------------------
 
@@ -495,11 +426,12 @@ InstrumentProps getInstrumentProps(InstrumentType instrument) {
       break;
     }
     case InstrumentType::Guitar: {
-      // Guitar defaults (standard tuning: E2 A2 D3 G3 B3 E4).
-      props.lowest_pitch = 40;  // E2
-      props.highest_pitch = 83;  // B5
+      GuitarModel guitar;
+      props.lowest_pitch = guitar.getLowestPitch();
+      props.highest_pitch = guitar.getHighestPitch();
       props.gm_program = kGuitarProgram;
-      props.open_strings = {40, 45, 50, 55, 59, 64};  // E2 A2 D3 G3 B3 E4
+      // Standard tuning open strings: E2 A2 D3 G3 B3 E4.
+      props.open_strings = {40, 45, 50, 55, 59, 64};
       props.name = "Guitar";
       break;
     }
@@ -688,6 +620,9 @@ std::vector<NoteEvent> generateBarNotes(
       if (pitch < instrument.lowest_pitch) pitch = instrument.lowest_pitch;
       if (pitch > instrument.highest_pitch) pitch = instrument.highest_pitch;
 
+      // Save sub_idx before any rhythm simplification for accent check.
+      int original_sub_idx = sub_idx;
+
       // Determine note duration.
       Tick duration = kSixteenthDuration;
       if (simplify_rhythm && sub_idx % 2 == 0 &&
@@ -704,7 +639,7 @@ std::vector<NoteEvent> generateBarNotes(
             std::min(static_cast<int>(kBaseVelocity) + kWeightedVelocityBoost, 127));
       }
       // Slight accent on beat 1 and beat 3 (strong beats in 4/4).
-      if (sub_idx == 0 && (beat_idx == 0 || beat_idx == 2)) {
+      if (original_sub_idx == 0 && (beat_idx == 0 || beat_idx == 2)) {
         velocity = static_cast<uint8_t>(std::min(static_cast<int>(velocity) + 6, 127));
       }
 
@@ -714,6 +649,7 @@ std::vector<NoteEvent> generateBarNotes(
       note.pitch = pitch;
       note.velocity = velocity;
       note.voice = 0;  // Solo instrument, single voice
+      note.source = BachNoteSource::ArpeggioFlow;
 
       notes.push_back(note);
       ++note_idx;
@@ -784,6 +720,7 @@ std::vector<NoteEvent> generateFinalBar(Tick bar_tick,
     note.pitch = static_cast<uint8_t>(midi_pitch);
     note.velocity = static_cast<uint8_t>(kBaseVelocity - idx * 4);  // Diminuendo
     note.voice = 0;
+    note.source = BachNoteSource::ArpeggioFlow;
 
     notes.push_back(note);
   }

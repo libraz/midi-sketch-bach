@@ -25,6 +25,7 @@ std::vector<NoteEvent> generateAppoggiatura(const NoteEvent& note, uint8_t upper
   grace.pitch = upper_pitch;
   grace.velocity = note.velocity;
   grace.voice = note.voice;
+  grace.source = BachNoteSource::Ornament;
   result.push_back(grace);
 
   // Note 2: main pitch (resolution), remaining 75% duration.
@@ -34,9 +35,19 @@ std::vector<NoteEvent> generateAppoggiatura(const NoteEvent& note, uint8_t upper
   main_note.pitch = note.pitch;
   main_note.velocity = note.velocity;
   main_note.voice = note.voice;
+  main_note.source = BachNoteSource::Ornament;
   result.push_back(main_note);
 
   return result;
+}
+
+std::vector<NoteEvent> generateAppoggiatura(const NoteEvent& note, uint8_t neighbor_pitch,
+                                            ApproachDirection direction) {
+  // Both directions use the same duration split and structure.
+  // The direction parameter documents intent but the pitch is already resolved
+  // by the caller (ornament_engine selects upper or lower neighbor).
+  (void)direction;
+  return generateAppoggiatura(note, neighbor_pitch);
 }
 
 }  // namespace bach

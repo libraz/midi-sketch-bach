@@ -41,15 +41,15 @@ TEST(MordentTest, PitchPattern_MainLowerMain) {
   EXPECT_EQ(result[2].pitch, 64);  // Main
 }
 
-TEST(MordentTest, DurationSplit_50_25_25) {
+TEST(MordentTest, DurationSplit_MatchesPralltriller) {
   auto note = makeNote(0, 60, kTicksPerBeat);  // 480 ticks
   auto result = generateMordent(note, 58);
 
   ASSERT_EQ(result.size(), 3u);
-  EXPECT_EQ(result[0].duration, 240u);  // 50%
-  EXPECT_EQ(result[1].duration, 120u);  // 25%
-  // Third note absorbs rounding remainder.
-  EXPECT_EQ(result[2].duration, 120u);  // 25%
+  // Pralltriller pattern: short_dur = duration/12 = 40 ticks.
+  EXPECT_EQ(result[0].duration, 40u);   // ~8.3%
+  EXPECT_EQ(result[1].duration, 40u);   // ~8.3%
+  EXPECT_EQ(result[2].duration, 400u);  // remainder (sustain)
 }
 
 TEST(MordentTest, TotalDurationEqualsOriginal) {
@@ -89,7 +89,7 @@ TEST(MordentTest, PreservesVoiceAndVelocity) {
 // ---------------------------------------------------------------------------
 
 TEST(MordentTest, OddDurationAbsorbsRemainder) {
-  // 481 ticks: 240 + 120 + 121 = 481.
+  // 481 ticks: short_dur = 481/12 = 40, last_dur = 481 - 2*40 = 401.
   auto note = makeNote(0, 60, 481);
   auto result = generateMordent(note, 58);
 
@@ -130,9 +130,34 @@ TEST(MordentTest, HalfNoteProducesCorrectSplit) {
   auto result = generateMordent(note, 58);
 
   ASSERT_EQ(result.size(), 3u);
-  EXPECT_EQ(result[0].duration, 480u);  // 50%
-  EXPECT_EQ(result[1].duration, 240u);  // 25%
-  EXPECT_EQ(result[2].duration, 240u);  // 25%
+  // short_dur = 960/12 = 80 ticks.
+  EXPECT_EQ(result[0].duration, 80u);   // ~8.3%
+  EXPECT_EQ(result[1].duration, 80u);   // ~8.3%
+  EXPECT_EQ(result[2].duration, 800u);  // remainder (sustain)
+}
+
+// ---------------------------------------------------------------------------
+// Provenance
+// ---------------------------------------------------------------------------
+
+TEST(MordentTest, SubNotesHaveOrnamentProvenance) {
+  auto note = makeNote(0, 60, kTicksPerBeat);
+  auto result = generateMordent(note, 58);
+
+  ASSERT_EQ(result.size(), 3u);
+  for (const auto& sub : result) {
+    EXPECT_EQ(sub.source, BachNoteSource::Ornament);
+  }
+}
+
+TEST(MordentTest, ThirdNoteGetsMostDuration) {
+  auto note = makeNote(0, 60, kTicksPerBeat);
+  auto result = generateMordent(note, 58);
+
+  ASSERT_EQ(result.size(), 3u);
+  // The sustain note (third) should be much longer than the ornamental notes.
+  EXPECT_GT(result[2].duration, result[0].duration);
+  EXPECT_GT(result[2].duration, result[1].duration);
 }
 
 }  // namespace

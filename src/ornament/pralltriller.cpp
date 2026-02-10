@@ -29,6 +29,7 @@ std::vector<NoteEvent> generatePralltriller(const NoteEvent& note, uint8_t upper
     sub_note.pitch = pitches[idx];
     sub_note.velocity = note.velocity;
     sub_note.voice = note.voice;
+    sub_note.source = BachNoteSource::Ornament;
 
     // Last note absorbs any rounding remainder.
     if (idx == 3) {
