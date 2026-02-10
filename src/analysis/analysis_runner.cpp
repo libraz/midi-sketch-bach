@@ -68,6 +68,13 @@ AnalysisReport runAnalysis(const std::vector<Track>& tracks, FormType form,
     report.dissonance = analyzeSoloStringDissonance(all_notes, timeline, key_sig);
   }
 
+  // Info-level metrics (always computed for organ system).
+  if (system == AnalysisSystem::Organ) {
+    report.rhythm_diversity = rhythmDiversityScore(all_notes, num_voices);
+    report.texture_density_var = textureDensityVariance(all_notes, num_voices);
+    report.bass_stepwise_ratio = bassLineStepwiseRatio(all_notes, num_voices);
+  }
+
   // Determine overall pass: no High severity + counterpoint compliance > 0.8.
   report.overall_pass = (report.dissonance.summary.high_count == 0);
   if (report.has_counterpoint) {
@@ -132,12 +139,27 @@ std::string AnalysisReport::toJson(FormType form, uint8_t num_voices) const {
     oss << "    \"dissonance_resolution_rate\": " << buf << ",\n";
     std::snprintf(buf, sizeof(buf), "%.4f", counterpoint.overall_compliance_rate);
     oss << "    \"overall_compliance_rate\": " << buf << "\n";
-    oss << "  }\n";
-  } else {
-    oss << "\n";
+    oss << "  }";
   }
 
-  oss << "}\n";
+  // Info metrics.
+  if (rhythm_diversity >= 0.0f) {
+    char buf[16];
+    std::snprintf(buf, sizeof(buf), "%.4f", rhythm_diversity);
+    oss << ",\n  \"rhythm_diversity\": " << buf;
+  }
+  if (texture_density_var >= 0.0f) {
+    char buf[16];
+    std::snprintf(buf, sizeof(buf), "%.4f", texture_density_var);
+    oss << ",\n  \"texture_density_variance\": " << buf;
+  }
+  if (bass_stepwise_ratio >= 0.0f) {
+    char buf[16];
+    std::snprintf(buf, sizeof(buf), "%.4f", bass_stepwise_ratio);
+    oss << ",\n  \"bass_stepwise_ratio\": " << buf;
+  }
+
+  oss << "\n}\n";
   return oss.str();
 }
 

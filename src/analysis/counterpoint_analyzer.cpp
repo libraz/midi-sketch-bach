@@ -405,6 +405,91 @@ float leapResolutionRate(const std::vector<NoteEvent>& notes, uint8_t num_voices
 }
 
 // ---------------------------------------------------------------------------
+// Rhythm and texture metrics
+// ---------------------------------------------------------------------------
+
+float rhythmDiversityScore(const std::vector<NoteEvent>& notes,
+                           uint8_t num_voices) {
+  (void)num_voices;  // Score spans all voices collectively.
+  if (notes.empty()) return 1.0f;
+
+  // Count occurrences of each distinct duration.
+  std::vector<std::pair<Tick, int>> duration_counts;
+  for (const auto& note : notes) {
+    bool found = false;
+    for (auto& dcount : duration_counts) {
+      if (dcount.first == note.duration) {
+        ++dcount.second;
+        found = true;
+        break;
+      }
+    }
+    if (!found) {
+      duration_counts.push_back({note.duration, 1});
+    }
+  }
+
+  // Find the most common duration's ratio.
+  int max_count = 0;
+  for (const auto& dcount : duration_counts) {
+    if (dcount.second > max_count) max_count = dcount.second;
+  }
+
+  float max_ratio = static_cast<float>(max_count) / static_cast<float>(notes.size());
+
+  // Score: 1.0 when max_ratio <= 0.3, linearly decreasing to 0.0 at 1.0.
+  if (max_ratio <= 0.3f) return 1.0f;
+  float score = 1.0f - (max_ratio - 0.3f) / 0.7f;
+  if (score < 0.0f) score = 0.0f;
+  return score;
+}
+
+float textureDensityVariance(const std::vector<NoteEvent>& notes,
+                             uint8_t num_voices) {
+  (void)num_voices;  // Density is measured across all voices.
+  if (notes.empty()) return 0.0f;
+
+  // Find the tick range.
+  Tick min_tick = notes[0].start_tick;
+  Tick max_tick = 0;
+  for (const auto& note : notes) {
+    if (note.start_tick < min_tick) min_tick = note.start_tick;
+    Tick end = note.start_tick + note.duration;
+    if (end > max_tick) max_tick = end;
+  }
+
+  if (max_tick <= min_tick) return 0.0f;
+
+  // Count simultaneous notes per beat.
+  std::vector<int> beat_counts;
+  for (Tick tick = min_tick; tick < max_tick; tick += kTicksPerBeat) {
+    int count = 0;
+    for (const auto& note : notes) {
+      if (note.start_tick <= tick && tick < note.start_tick + note.duration) {
+        ++count;
+      }
+    }
+    beat_counts.push_back(count);
+  }
+
+  if (beat_counts.size() < 2) return 0.0f;
+
+  // Calculate mean and standard deviation.
+  float sum = 0.0f;
+  for (int cnt : beat_counts) sum += static_cast<float>(cnt);
+  float mean = sum / static_cast<float>(beat_counts.size());
+
+  float var_sum = 0.0f;
+  for (int cnt : beat_counts) {
+    float diff = static_cast<float>(cnt) - mean;
+    var_sum += diff * diff;
+  }
+  float variance = var_sum / static_cast<float>(beat_counts.size());
+
+  return std::sqrt(variance);
+}
+
+// ---------------------------------------------------------------------------
 // Cross-relation detection
 // ---------------------------------------------------------------------------
 

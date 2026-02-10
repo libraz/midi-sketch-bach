@@ -507,5 +507,32 @@ TEST(TonalConsistencyScoreTest, TonicMostFrequent_BonusApplied) {
   EXPECT_LT(score_d_major, score_with_tonic);
 }
 
+// ---------------------------------------------------------------------------
+// invertibleCounterpointScore
+// ---------------------------------------------------------------------------
+
+TEST(InvertibleCounterpointScoreTest, NoCountersubject) {
+  auto subject = makeSubject();
+  std::vector<NoteEvent> empty_counter;
+  float score = invertibleCounterpointScore(subject, empty_counter, 2);
+  EXPECT_NEAR(score, 1.0f, kEpsilon);
+}
+
+TEST(InvertibleCounterpointScoreTest, SimpleConsonance) {
+  // Subject: C4-D4-E4-F4, Counter: A3-B3-C4-D4 (3rds below).
+  // Inversion swaps: counter goes to upper, subject down an octave.
+  // The inverted intervals should remain mostly consonant (3rds/6ths).
+  auto subject = makeSubject();
+  std::vector<NoteEvent> counter = {
+      qn(0, 57, 1),              // A3
+      qn(kTicksPerBeat, 59, 1),  // B3
+      qn(kTicksPerBeat * 2, 60, 1),  // C4
+      qn(kTicksPerBeat * 3, 62, 1),  // D4
+  };
+  float score = invertibleCounterpointScore(subject, counter, 2);
+  // Should be near 1.0 since parallel 3rds invert to parallel 6ths (no forbidden parallels).
+  EXPECT_GT(score, 0.8f);
+}
+
 }  // namespace
 }  // namespace bach

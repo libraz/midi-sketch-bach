@@ -108,6 +108,34 @@ float contraryMotionRate(const std::vector<NoteEvent>& notes, uint8_t num_voices
 /// @return Fraction in [0,1]; 1.0 if no leaps exist.
 float leapResolutionRate(const std::vector<NoteEvent>& notes, uint8_t num_voices);
 
+/// @brief Calculate rhythm diversity score across all voices.
+///
+/// Measures how varied note durations are. A score near 1.0 indicates diverse
+/// rhythmic content (many different note values), while 0.0 indicates complete
+/// rhythmic uniformity (a single note value dominates).
+///
+/// Scoring: 1.0 - max(0, (max_ratio - 0.3) / 0.7)
+/// where max_ratio is the fraction of notes with the most common duration.
+/// If <= 30% of notes share the same duration: score = 1.0 (fully diverse).
+/// If 100% of notes share the same duration: score = 0.0 (uniform).
+///
+/// @param notes All notes across all voices.
+/// @param num_voices Number of voices.
+/// @return Score in [0,1].
+float rhythmDiversityScore(const std::vector<NoteEvent>& notes, uint8_t num_voices);
+
+/// @brief Calculate texture density variance across beats.
+///
+/// Measures how much the simultaneous note count varies over time.
+/// A higher value indicates more textural contrast (thick/thin alternation),
+/// while 0 indicates perfectly uniform density.
+///
+/// @param notes All notes across all voices.
+/// @param num_voices Number of voices.
+/// @return Standard deviation of per-beat simultaneous note count. Returns 0.0
+///         if fewer than 2 beats of material.
+float textureDensityVariance(const std::vector<NoteEvent>& notes, uint8_t num_voices);
+
 }  // namespace bach
 
 #endif  // BACH_ANALYSIS_COUNTERPOINT_ANALYZER_H

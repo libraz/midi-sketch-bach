@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "analysis/cadence_detector.h"
+#include "analysis/counterpoint_analyzer.h"
 #include "core/basic_types.h"
 #include "core/pitch_utils.h"
 #include "harmony/harmonic_timeline.h"
@@ -328,6 +329,56 @@ float computeTonalConsistencyScore(const std::vector<NoteEvent>& notes,
   }
 
   return clamp01(score);
+}
+
+// ---------------------------------------------------------------------------
+// invertibleCounterpointScore
+// ---------------------------------------------------------------------------
+
+float invertibleCounterpointScore(const std::vector<NoteEvent>& subject_notes,
+                                   const std::vector<NoteEvent>& counter_notes,
+                                   uint8_t num_voices) {
+  (void)num_voices;  // Inversion analysis is always between two voice parts.
+  if (subject_notes.empty() || counter_notes.empty()) return 1.0f;
+
+  // Create inverted version: swap octave relationship.
+  // Original: subject in upper, counter in lower.
+  // Inverted: counter as upper voice, subject transposed down an octave as lower.
+  std::vector<NoteEvent> inverted_notes;
+  inverted_notes.reserve(subject_notes.size() + counter_notes.size());
+
+  // Subject notes transposed down an octave (voice 1 = lower).
+  for (const auto& note : subject_notes) {
+    NoteEvent inv = note;
+    int new_pitch = static_cast<int>(note.pitch) - 12;
+    inv.pitch = static_cast<uint8_t>(std::max(0, std::min(127, new_pitch)));
+    inv.voice = 1;
+    inverted_notes.push_back(inv);
+  }
+
+  // Counter notes as upper voice (voice 0 = upper).
+  for (const auto& note : counter_notes) {
+    NoteEvent inv = note;
+    inv.voice = 0;
+    inverted_notes.push_back(inv);
+  }
+
+  // Count parallel perfect intervals in the inverted version.
+  uint32_t violations = countParallelPerfect(inverted_notes, 2);
+
+  // Score: deduct per violation relative to total beats.
+  Tick total_end = 0;
+  for (const auto& note : inverted_notes) {
+    Tick end = note.start_tick + note.duration;
+    if (end > total_end) total_end = end;
+  }
+  uint32_t total_beats = static_cast<uint32_t>(total_end / kTicksPerBeat);
+  if (total_beats == 0) return 1.0f;
+
+  float violation_rate = static_cast<float>(violations) / static_cast<float>(total_beats);
+  float score = 1.0f - violation_rate;
+  if (score < 0.0f) score = 0.0f;
+  return score;
 }
 
 }  // namespace bach

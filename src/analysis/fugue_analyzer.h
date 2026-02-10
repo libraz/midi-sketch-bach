@@ -86,6 +86,20 @@ float computeMotivicUnityScore(const std::vector<NoteEvent>& notes,
 float computeTonalConsistencyScore(const std::vector<NoteEvent>& notes,
                                     Key tonic_key, bool is_minor);
 
+/// @brief Compute invertible counterpoint score.
+///
+/// Evaluates whether the subject and countersubject can be inverted at the
+/// octave (double counterpoint) without creating forbidden parallels.
+/// Inverts the pitch relationship and checks for parallel 5ths/8ths.
+///
+/// @param subject_notes Subject melody notes.
+/// @param counter_notes Countersubject melody notes.
+/// @param num_voices Number of voices.
+/// @return Score in [0,1]; 1.0 = fully invertible, 0.0 = many violations.
+float invertibleCounterpointScore(const std::vector<NoteEvent>& subject_notes,
+                                   const std::vector<NoteEvent>& counter_notes,
+                                   uint8_t num_voices);
+
 }  // namespace bach
 
 #endif  // BACH_ANALYSIS_FUGUE_ANALYZER_H

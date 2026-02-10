@@ -32,6 +32,11 @@ struct AnalysisReport {
   DissonanceAnalysisResult dissonance;
   bool overall_pass = true;  ///< No High severity + compliance > 0.8.
 
+  // Info-level metrics (not quality gate).
+  float rhythm_diversity = -1.0f;     ///< [0,1] rhythm diversity (-1 = not computed).
+  float texture_density_var = -1.0f;  ///< Texture density std dev (-1 = not computed).
+  float bass_stepwise_ratio = -1.0f;  ///< [0,1] bass stepwise motion (-1 = not computed).
+
   /// @brief Generate a human-readable text summary.
   std::string toTextSummary(FormType form, uint8_t num_voices) const;
 

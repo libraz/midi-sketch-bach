@@ -670,5 +670,67 @@ TEST(LeapResolutionRateTest, EmptyReturnsOne) {
   EXPECT_FLOAT_EQ(leapResolutionRate(notes, 0), 1.0f);
 }
 
+// ---------------------------------------------------------------------------
+// rhythmDiversityScore
+// ---------------------------------------------------------------------------
+
+TEST(RhythmDiversityScoreTest, AllSameDuration) {
+  // All notes are quarter notes -- max_ratio = 1.0 -> score = 0.0.
+  std::vector<NoteEvent> notes;
+  for (int idx = 0; idx < 10; ++idx) {
+    notes.push_back(qn(static_cast<Tick>(idx) * kTicksPerBeat, 60, 0));
+  }
+  float score = rhythmDiversityScore(notes, 1);
+  EXPECT_NEAR(score, 0.0f, kEpsilon);
+}
+
+TEST(RhythmDiversityScoreTest, VeryDiverse) {
+  // Each note has a unique duration. Max ratio = 1/N, which is << 0.3 for N >= 4.
+  std::vector<NoteEvent> notes;
+  for (int idx = 0; idx < 8; ++idx) {
+    NoteEvent note;
+    note.start_tick = static_cast<Tick>(idx) * kTicksPerBeat;
+    note.duration = static_cast<Tick>((idx + 1) * 100);  // 100, 200, ..., 800.
+    note.pitch = 60;
+    note.velocity = 80;
+    note.voice = 0;
+    notes.push_back(note);
+  }
+  float score = rhythmDiversityScore(notes, 1);
+  EXPECT_GT(score, 0.9f);
+}
+
+TEST(RhythmDiversityScoreTest, Empty) {
+  std::vector<NoteEvent> empty;
+  EXPECT_NEAR(rhythmDiversityScore(empty, 1), 1.0f, kEpsilon);
+}
+
+// ---------------------------------------------------------------------------
+// textureDensityVariance
+// ---------------------------------------------------------------------------
+
+TEST(TextureDensityVarianceTest, UniformDensity) {
+  // Two voices, each with one note per beat spanning the entire piece.
+  // At every beat, exactly 2 notes are sounding -> variance = 0.
+  std::vector<NoteEvent> notes;
+  for (int idx = 0; idx < 4; ++idx) {
+    Tick tick = static_cast<Tick>(idx) * kTicksPerBeat;
+    notes.push_back(qn(tick, 72, 0));
+    notes.push_back(qn(tick, 60, 1));
+  }
+  float var = textureDensityVariance(notes, 2);
+  EXPECT_NEAR(var, 0.0f, kEpsilon);
+}
+
+TEST(TextureDensityVarianceTest, VaryingDensity) {
+  // Beat 0: 2 notes sounding, Beat 1: 1 note sounding -> variance > 0.
+  std::vector<NoteEvent> notes;
+  notes.push_back(qn(0, 72, 0));                  // beat 0, voice 0
+  notes.push_back(qn(0, 60, 1));                   // beat 0, voice 1
+  notes.push_back(qn(kTicksPerBeat, 74, 0));       // beat 1, voice 0 only
+  float var = textureDensityVariance(notes, 2);
+  EXPECT_GT(var, 0.0f);
+}
+
 }  // namespace
 }  // namespace bach
