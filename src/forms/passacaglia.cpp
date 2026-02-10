@@ -6,6 +6,7 @@
 #include <random>
 #include <vector>
 
+#include "analysis/counterpoint_analyzer.h"
 #include "core/gm_program.h"
 #include "core/pitch_utils.h"
 #include "core/rng_util.h"
@@ -754,6 +755,20 @@ PassacagliaResult generatePassacaglia(const PassacagliaConfig& config) {
 
   // Step 5: Sort notes within each track.
   sortTrackNotes(tracks);
+
+  // Step 6: Run pairwise counterpoint check and log violations as warnings.
+  if (num_voices >= 2) {
+    std::vector<NoteEvent> all_notes;
+    for (const auto& track : tracks) {
+      all_notes.insert(all_notes.end(), track.notes.begin(), track.notes.end());
+    }
+    auto cp_result = analyzeCounterpoint(all_notes, num_voices);
+    if (cp_result.parallel_perfect_count > 0 ||
+        cp_result.voice_crossing_count > 0) {
+      result.counterpoint_violations =
+          cp_result.parallel_perfect_count + cp_result.voice_crossing_count;
+    }
+  }
 
   result.tracks = std::move(tracks);
   result.timeline = std::move(timeline);

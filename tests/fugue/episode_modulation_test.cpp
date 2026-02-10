@@ -122,9 +122,9 @@ TEST(EpisodeModulationTest, MinorKeyPlanHasCorrectTargets) {
   EXPECT_FALSE(plan.targets[0].target_is_minor);
   EXPECT_EQ(plan.targets[0].phase, FuguePhase::Develop);
 
-  // Dominant of G minor = D minor (G=7, +7=14%12=2=D)
+  // Dominant of G minor = D major (Baroque: V is always major).
   EXPECT_EQ(plan.targets[1].target_key, Key::D);
-  EXPECT_TRUE(plan.targets[1].target_is_minor);
+  EXPECT_FALSE(plan.targets[1].target_is_minor);
   EXPECT_EQ(plan.targets[1].phase, FuguePhase::Develop);
 
   // Subdominant of G minor = C minor (G=7, +5=12%12=0=C)

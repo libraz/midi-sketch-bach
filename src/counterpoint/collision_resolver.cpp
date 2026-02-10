@@ -172,19 +172,23 @@ bool CollisionResolver::isSafeToPlace(const CounterpointState& state,
   }
 
   // Minimum adjacent voice spacing on strong beats (Baroque practice).
-  bool is_strong_beat = (beatInBar(tick) == 0 || beatInBar(tick) == 2);
-  if (is_strong_beat) {
-    for (VoiceId other : voices) {
-      if (other == voice_id) continue;
-      const NoteEvent* other_note = state.getNoteAt(other, tick);
-      if (!other_note) continue;
-      // Only check adjacent voices (voice IDs differ by 1).
-      int voice_dist = std::abs(static_cast<int>(voice_id) -
-                                static_cast<int>(other));
-      if (voice_dist != 1) continue;
-      int pitch_dist = std::abs(static_cast<int>(pitch) -
-                                static_cast<int>(other_note->pitch));
-      if (pitch_dist > 0 && pitch_dist < 3) return false;  // < minor 3rd
+  // BachRuleEvaluator treats this as a soft penalty (not rejection).
+  // FuxRuleEvaluator treats this as a hard rejection.
+  if (rules.isStrictSpacing()) {
+    bool is_strong_beat = (beatInBar(tick) == 0 || beatInBar(tick) == 2);
+    if (is_strong_beat) {
+      for (VoiceId other : voices) {
+        if (other == voice_id) continue;
+        const NoteEvent* other_note = state.getNoteAt(other, tick);
+        if (!other_note) continue;
+        // Only check adjacent voices (voice IDs differ by 1).
+        int voice_dist = std::abs(static_cast<int>(voice_id) -
+                                  static_cast<int>(other));
+        if (voice_dist != 1) continue;
+        int pitch_dist = std::abs(static_cast<int>(pitch) -
+                                  static_cast<int>(other_note->pitch));
+        if (pitch_dist > 0 && pitch_dist < 3) return false;  // < minor 3rd
+      }
     }
   }
 

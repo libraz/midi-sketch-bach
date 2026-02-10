@@ -59,10 +59,11 @@ ModulationPlan ModulationPlan::createForMinor(Key home) {
   relative_major.entry_cadence = CadenceType::Half;
   plan.targets.push_back(relative_major);
 
-  // Target 1: dominant (home + 7 semitones), minor, Develop phase, Perfect cadence
+  // Target 1: dominant (home + 7 semitones), MAJOR, Develop phase, Perfect cadence.
+  // In Baroque practice, V in minor keys is major (harmonic minor raised 7th).
   ModulationTarget dominant_minor;
   dominant_minor.target_key = static_cast<Key>((home_val + 7) % 12);
-  dominant_minor.target_is_minor = true;
+  dominant_minor.target_is_minor = false;
   dominant_minor.phase = FuguePhase::Develop;
   dominant_minor.entry_cadence = CadenceType::Perfect;
   plan.targets.push_back(dominant_minor);

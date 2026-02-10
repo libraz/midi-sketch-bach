@@ -84,7 +84,7 @@ TEST_F(CounterpointValidatorTest, ValidateTickRange) {
   // There should be no parallel perfect at tick 0 (only one beat checked).
   bool found_parallel_at_480 = false;
   for (const auto& viol : violations) {
-    if (viol.tick == 480 && viol.rule == "parallel_perfect") {
+    if (viol.tick == 480 && (viol.rule == "parallel_fifths" || viol.rule == "parallel_octaves")) {
       found_parallel_at_480 = true;
     }
   }

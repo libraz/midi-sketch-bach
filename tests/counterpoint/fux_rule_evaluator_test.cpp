@@ -231,7 +231,7 @@ TEST(FuxRuleEvaluatorTest, ValidateDetectsParallelFifths) {
   auto violations = rules.validate(state, 0, 960);
   bool found_parallel = false;
   for (const auto& viol : violations) {
-    if (viol.rule == "parallel_perfect") {
+    if (viol.rule == "parallel_fifths" || viol.rule == "parallel_octaves") {
       found_parallel = true;
       EXPECT_EQ(viol.tick, 480u);
     }

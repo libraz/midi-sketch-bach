@@ -98,6 +98,14 @@ class IRuleEvaluator {
   virtual std::vector<RuleViolation> validate(
       const CounterpointState& state,
       Tick from_tick, Tick to_tick) const = 0;
+
+  /// @brief Whether adjacent voice spacing < minor 3rd is a hard rejection.
+  ///
+  /// FuxRuleEvaluator returns true (strict spacing, hard rejection).
+  /// BachRuleEvaluator returns false (soft penalty, not rejected).
+  ///
+  /// @return True if spacing violations cause hard rejection.
+  virtual bool isStrictSpacing() const { return true; }
 };
 
 }  // namespace bach

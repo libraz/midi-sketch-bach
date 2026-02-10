@@ -30,6 +30,7 @@ struct PassacagliaResult {
   Tick total_duration_ticks = 0;
   bool success = false;
   std::string error_message;
+  uint32_t counterpoint_violations = 0;  ///< Warning count from inter-voice check.
 };
 
 /// @brief Generate a passacaglia (BWV 582 style).

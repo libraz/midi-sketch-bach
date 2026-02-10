@@ -75,11 +75,11 @@ TEST(ModulationPlanMinorTest, AMinor_FirstTargetIsRelativeMajor) {
   EXPECT_EQ(plan.targets[0].entry_cadence, CadenceType::Half);
 }
 
-TEST(ModulationPlanMinorTest, AMinor_SecondTargetIsDominantMinor) {
+TEST(ModulationPlanMinorTest, AMinor_SecondTargetIsDominantMajor) {
   auto plan = ModulationPlan::createForMinor(Key::A);
-  // Dominant of A = E minor
+  // Dominant of A minor = E major (Baroque practice: V is always major).
   EXPECT_EQ(plan.targets[1].target_key, Key::E);
-  EXPECT_TRUE(plan.targets[1].target_is_minor);
+  EXPECT_FALSE(plan.targets[1].target_is_minor);
 }
 
 TEST(ModulationPlanMinorTest, AMinor_ThirdTargetIsSubdominantMinor) {

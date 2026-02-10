@@ -99,6 +99,9 @@ class BachRuleEvaluator : public IRuleEvaluator {
       const CounterpointState& state,
       Tick from_tick, Tick to_tick) const override;
 
+  /// @brief Bach allows closer voice spacing (soft penalty, not rejection).
+  bool isStrictSpacing() const override { return false; }
+
  private:
   uint8_t num_voices_;
   bool free_counterpoint_ = false;

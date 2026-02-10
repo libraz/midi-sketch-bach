@@ -313,24 +313,36 @@ std::vector<RuleViolation> BachRuleEvaluator::validate(
           }
         }
 
-        // Parallel perfect consonances.
+        // Parallel perfect consonances (separate fifths vs octaves).
         if (hasParallelPerfect(state, va, vb, tick)) {
           RuleViolation viol;
           viol.voice1 = va;
           viol.voice2 = vb;
           viol.tick = tick;
-          viol.rule = "parallel_perfect";
+          const NoteEvent* ca = state.getNoteAt(va, tick);
+          const NoteEvent* cb = state.getNoteAt(vb, tick);
+          int ivl_mod = (ca && cb)
+              ? (std::abs(static_cast<int>(ca->pitch) -
+                          static_cast<int>(cb->pitch)) % 12)
+              : 0;
+          viol.rule = (ivl_mod == 7) ? "parallel_fifths" : "parallel_octaves";
           viol.severity = 1;
           violations.push_back(viol);
         }
 
-        // Hidden perfect consonances.
+        // Hidden perfect consonances (separate fifths vs octaves).
         if (hasHiddenPerfect(state, va, vb, tick)) {
           RuleViolation viol;
           viol.voice1 = va;
           viol.voice2 = vb;
           viol.tick = tick;
-          viol.rule = "hidden_perfect";
+          const NoteEvent* ca = state.getNoteAt(va, tick);
+          const NoteEvent* cb = state.getNoteAt(vb, tick);
+          int ivl_mod = (ca && cb)
+              ? (std::abs(static_cast<int>(ca->pitch) -
+                          static_cast<int>(cb->pitch)) % 12)
+              : 0;
+          viol.rule = (ivl_mod == 7) ? "hidden_fifths" : "hidden_octaves";
           viol.severity = 0;  // Warning, not error.
           violations.push_back(viol);
         }
