@@ -7,6 +7,8 @@
 #include <string>
 #include <vector>
 
+#include "core/note_source.h"
+
 namespace bach {
 
 /// Tick type for MIDI timing (absolute tick position).
@@ -219,6 +221,7 @@ struct NoteEvent {
   uint8_t pitch = 0;
   uint8_t velocity = 80;
   VoiceId voice = 0;
+  BachNoteSource source = BachNoteSource::Unknown;  ///< Provenance source for debugging.
 };
 
 /// Track: a collection of note events on a single MIDI channel.

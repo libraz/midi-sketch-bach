@@ -19,6 +19,22 @@ enum class HarmonicResolution : uint8_t {
   Section   // One event per section (coarse)
 };
 
+/// Harmonic progression template type.
+enum class ProgressionType : uint8_t {
+  Basic,          // I-IV-V-I (default)
+  CircleOfFifths, // I-vi-ii-V7-I
+  Subdominant,    // I-IV-ii-V7-I
+};
+
+/// Cadence type for progression endings.
+enum class CadenceType : uint8_t {
+  Perfect,      // V7->I (authentic cadence)
+  Deceptive,    // V->vi (deceptive cadence)
+  Half,         // ->V (half cadence)
+  Phrygian,     // iv6->V (minor key slow section endings)
+  PicardyThird  // Minor key final chord raised to major
+};
+
 /// @brief A time-ordered sequence of harmonic events.
 ///
 /// The HarmonicTimeline is the central harmonic data structure shared by
@@ -83,6 +99,21 @@ class HarmonicTimeline {
   /// @return A new HarmonicTimeline with the generated progression.
   static HarmonicTimeline createStandard(const KeySignature& key_sig, Tick duration,
                                          HarmonicResolution resolution);
+
+  /// @brief Generate a progression with specified template type.
+  /// @param key_sig Key signature.
+  /// @param duration Total duration in ticks.
+  /// @param resolution Harmonic event density.
+  /// @param prog_type Progression template to use.
+  /// @return A new HarmonicTimeline with the generated progression.
+  static HarmonicTimeline createProgression(const KeySignature& key_sig, Tick duration,
+                                            HarmonicResolution resolution,
+                                            ProgressionType prog_type);
+
+  /// @brief Apply a cadence modification to the last chord(s) of the timeline.
+  /// @param cadence The cadence type to apply.
+  /// @param key_sig The key context for cadence construction.
+  void applyCadence(CadenceType cadence, const KeySignature& key_sig);
 
  private:
   std::vector<HarmonicEvent> events_;

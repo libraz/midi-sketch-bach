@@ -3,6 +3,8 @@
 #include "organ/registration.h"
 
 #include <gtest/gtest.h>
+#include <utility>
+#include <vector>
 
 namespace bach {
 namespace {
@@ -334,6 +336,98 @@ TEST(RegistrationPlanTest, CustomPlanPreservesValues) {
 
   const auto& coda = getRegistrationForPhase(plan, FuguePhase::Resolve, true);
   EXPECT_EQ(coda.velocity_hint, 110);
+}
+
+// ---------------------------------------------------------------------------
+// generateEnergyRegistrationEvents
+// ---------------------------------------------------------------------------
+
+TEST(RegistrationTest, GenerateEnergyRegistrationEventsCorrectCount) {
+  std::vector<std::pair<Tick, float>> energy_levels = {
+      {0, 0.2f},
+      {kTicksPerBar * 4, 0.5f},
+      {kTicksPerBar * 8, 0.9f}
+  };
+  auto events = generateEnergyRegistrationEvents(energy_levels, 4);
+  // 3 time points x 4 channels = 12 events
+  EXPECT_EQ(events.size(), 12u);
+}
+
+TEST(RegistrationTest, GenerateEnergyRegistrationEventsCorrectCC) {
+  std::vector<std::pair<Tick, float>> energy_levels = {
+      {0, 0.5f}
+  };
+  auto events = generateEnergyRegistrationEvents(energy_levels, 4);
+  ASSERT_EQ(events.size(), 4u);
+  for (const auto& evt : events) {
+    EXPECT_EQ(evt.data1, 7u);  // CC#7 Volume
+  }
+}
+
+TEST(RegistrationTest, GenerateEnergyRegistrationEventsLowEnergyVolume) {
+  std::vector<std::pair<Tick, float>> energy_levels = {
+      {0, 0.1f}
+  };
+  auto events = generateEnergyRegistrationEvents(energy_levels, 1);
+  ASSERT_EQ(events.size(), 1u);
+  EXPECT_EQ(events[0].data2, 64u);  // Low energy -> volume 64
+}
+
+TEST(RegistrationTest, GenerateEnergyRegistrationEventsMidEnergyVolume) {
+  std::vector<std::pair<Tick, float>> energy_levels = {
+      {0, 0.5f}
+  };
+  auto events = generateEnergyRegistrationEvents(energy_levels, 1);
+  ASSERT_EQ(events.size(), 1u);
+  EXPECT_EQ(events[0].data2, 80u);  // Mid energy -> volume 80
+}
+
+TEST(RegistrationTest, GenerateEnergyRegistrationEventsHighEnergyVolume) {
+  std::vector<std::pair<Tick, float>> energy_levels = {
+      {0, 0.9f}
+  };
+  auto events = generateEnergyRegistrationEvents(energy_levels, 1);
+  ASSERT_EQ(events.size(), 1u);
+  EXPECT_EQ(events[0].data2, 120u);  // High energy -> volume 120
+}
+
+TEST(RegistrationTest, GenerateEnergyRegistrationEventsCorrectTicks) {
+  Tick target_tick = kTicksPerBar * 5;
+  std::vector<std::pair<Tick, float>> energy_levels = {
+      {target_tick, 0.5f}
+  };
+  auto events = generateEnergyRegistrationEvents(energy_levels, 2);
+  ASSERT_EQ(events.size(), 2u);
+  for (const auto& evt : events) {
+    EXPECT_EQ(evt.tick, target_tick);
+  }
+}
+
+TEST(RegistrationTest, GenerateEnergyRegistrationEventsCorrectChannels) {
+  std::vector<std::pair<Tick, float>> energy_levels = {
+      {0, 0.5f}
+  };
+  auto events = generateEnergyRegistrationEvents(energy_levels, 4);
+  ASSERT_EQ(events.size(), 4u);
+  for (uint8_t idx = 0; idx < 4; ++idx) {
+    uint8_t expected_channel = idx;
+    EXPECT_EQ(events[idx].status & 0x0F, expected_channel);
+    EXPECT_EQ(events[idx].status & 0xF0, 0xB0);  // Control Change
+  }
+}
+
+TEST(RegistrationTest, GenerateEnergyRegistrationEventsEmptyInput) {
+  std::vector<std::pair<Tick, float>> energy_levels;
+  auto events = generateEnergyRegistrationEvents(energy_levels, 4);
+  EXPECT_TRUE(events.empty());
+}
+
+TEST(RegistrationTest, GenerateEnergyRegistrationEventsZeroChannels) {
+  std::vector<std::pair<Tick, float>> energy_levels = {
+      {0, 0.5f}
+  };
+  auto events = generateEnergyRegistrationEvents(energy_levels, 0);
+  EXPECT_TRUE(events.empty());
 }
 
 }  // namespace

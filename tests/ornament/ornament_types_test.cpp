@@ -43,7 +43,9 @@ TEST(OrnamentConfigTest, DefaultValues) {
   OrnamentConfig config;
   EXPECT_TRUE(config.enable_trill);
   EXPECT_TRUE(config.enable_mordent);
-  EXPECT_FALSE(config.enable_turn);
+  EXPECT_TRUE(config.enable_turn);
+  EXPECT_TRUE(config.enable_appoggiatura);
+  EXPECT_TRUE(config.enable_pralltriller);
   EXPECT_FLOAT_EQ(config.ornament_density, 0.15f);
 }
 

@@ -171,5 +171,66 @@ TEST(NoteProvenanceTest, StepOrderPreserved) {
   EXPECT_EQ(prov.step_count, 4);
 }
 
+// ---------------------------------------------------------------------------
+// ProtectionLevel mapping tests
+// ---------------------------------------------------------------------------
+
+TEST(ProtectionLevelTest, ImmutableSources) {
+  EXPECT_EQ(getProtectionLevel(BachNoteSource::FugueSubject),
+            ProtectionLevel::Immutable);
+  EXPECT_EQ(getProtectionLevel(BachNoteSource::CantusFixed),
+            ProtectionLevel::Immutable);
+  EXPECT_EQ(getProtectionLevel(BachNoteSource::GroundBass),
+            ProtectionLevel::Immutable);
+}
+
+TEST(ProtectionLevelTest, StructuralSources) {
+  EXPECT_EQ(getProtectionLevel(BachNoteSource::FugueAnswer),
+            ProtectionLevel::Structural);
+  EXPECT_EQ(getProtectionLevel(BachNoteSource::Countersubject),
+            ProtectionLevel::Structural);
+  EXPECT_EQ(getProtectionLevel(BachNoteSource::PedalPoint),
+            ProtectionLevel::Structural);
+}
+
+TEST(ProtectionLevelTest, FlexibleSources) {
+  EXPECT_EQ(getProtectionLevel(BachNoteSource::EpisodeMaterial),
+            ProtectionLevel::Flexible);
+  EXPECT_EQ(getProtectionLevel(BachNoteSource::FreeCounterpoint),
+            ProtectionLevel::Flexible);
+  EXPECT_EQ(getProtectionLevel(BachNoteSource::Ornament),
+            ProtectionLevel::Flexible);
+  EXPECT_EQ(getProtectionLevel(BachNoteSource::ArpeggioFlow),
+            ProtectionLevel::Flexible);
+  EXPECT_EQ(getProtectionLevel(BachNoteSource::TextureNote),
+            ProtectionLevel::Flexible);
+  EXPECT_EQ(getProtectionLevel(BachNoteSource::CollisionAvoid),
+            ProtectionLevel::Flexible);
+  EXPECT_EQ(getProtectionLevel(BachNoteSource::PostProcess),
+            ProtectionLevel::Flexible);
+  EXPECT_EQ(getProtectionLevel(BachNoteSource::Unknown),
+            ProtectionLevel::Flexible);
+}
+
+TEST(ProtectionLevelTest, AllSourcesCovered) {
+  // Ensure every source maps to a valid protection level.
+  const BachNoteSource all[] = {
+      BachNoteSource::Unknown,          BachNoteSource::FugueSubject,
+      BachNoteSource::FugueAnswer,      BachNoteSource::Countersubject,
+      BachNoteSource::EpisodeMaterial,   BachNoteSource::FreeCounterpoint,
+      BachNoteSource::CantusFixed,       BachNoteSource::Ornament,
+      BachNoteSource::PedalPoint,        BachNoteSource::ArpeggioFlow,
+      BachNoteSource::TextureNote,       BachNoteSource::GroundBass,
+      BachNoteSource::CollisionAvoid,    BachNoteSource::PostProcess,
+  };
+  for (auto src : all) {
+    auto level = getProtectionLevel(src);
+    EXPECT_TRUE(level == ProtectionLevel::Immutable ||
+                level == ProtectionLevel::Structural ||
+                level == ProtectionLevel::Flexible)
+        << "Source " << bachNoteSourceToString(src) << " has invalid level";
+  }
+}
+
 }  // namespace
 }  // namespace bach

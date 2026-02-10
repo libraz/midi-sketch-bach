@@ -2,7 +2,9 @@
 
 #include "ornament/ornament_engine.h"
 
+#include "ornament/appoggiatura.h"
 #include "ornament/mordent.h"
+#include "ornament/pralltriller.h"
 #include "ornament/trill.h"
 #include "ornament/turn.h"
 
@@ -71,6 +73,10 @@ std::vector<NoteEvent> applyOrnamentToNote(const NoteEvent& note, OrnamentType t
       return generateMordent(note, lower);
     case OrnamentType::Turn:
       return generateTurn(note, upper, lower);
+    case OrnamentType::Appoggiatura:
+      return generateAppoggiatura(note, upper);
+    case OrnamentType::Pralltriller:
+      return generatePralltriller(note, upper);
     default:
       // Unsupported ornament types return the note unchanged.
       return {note};
@@ -95,15 +101,19 @@ OrnamentType selectOrnamentType(const NoteEvent& note, const OrnamentConfig& con
   const bool strong_beat = (beat == 0 || beat == 2);
 
   if (strong_beat) {
-    // Strong beats prefer trills.
+    // Strong beats prefer trills and appoggiaturas (on-beat emphasis).
     if (config.enable_trill) return OrnamentType::Trill;
+    if (config.enable_appoggiatura) return OrnamentType::Appoggiatura;
     if (config.enable_mordent) return OrnamentType::Mordent;
     if (config.enable_turn) return OrnamentType::Turn;
+    if (config.enable_pralltriller) return OrnamentType::Pralltriller;
   } else {
-    // Weak beats prefer mordents.
+    // Weak beats prefer mordents and pralltriller (lighter ornaments).
     if (config.enable_mordent) return OrnamentType::Mordent;
+    if (config.enable_pralltriller) return OrnamentType::Pralltriller;
     if (config.enable_trill) return OrnamentType::Trill;
     if (config.enable_turn) return OrnamentType::Turn;
+    if (config.enable_appoggiatura) return OrnamentType::Appoggiatura;
   }
 
   // Fallback: trill (always available as last resort).
@@ -126,7 +136,8 @@ std::vector<NoteEvent> applyOrnaments(const std::vector<NoteEvent>& notes,
 
   // Check if any ornament type is enabled.
   if (!context.config.enable_trill && !context.config.enable_mordent &&
-      !context.config.enable_turn) {
+      !context.config.enable_turn && !context.config.enable_appoggiatura &&
+      !context.config.enable_pralltriller) {
     return notes;
   }
 

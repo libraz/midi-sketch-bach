@@ -181,5 +181,43 @@ TEST(MinorKeyQualityTest, viiDim_IsDiminished) {
   EXPECT_EQ(minorKeyQuality(ChordDegree::viiDim), ChordQuality::Diminished);
 }
 
+// ---------------------------------------------------------------------------
+// isChordTone with inversions (inversion field doesn't affect chord tone check)
+// ---------------------------------------------------------------------------
+
+TEST(IsChordToneTest, InversionDoesNotAffectChordTones) {
+  HarmonicEvent event;
+  event.chord.root_pitch = 60;  // C4
+  event.chord.quality = ChordQuality::Major;
+  event.chord.inversion = 1;  // First inversion
+  // C major chord tones are still C, E, G regardless of inversion.
+  EXPECT_TRUE(isChordTone(60, event));   // C
+  EXPECT_TRUE(isChordTone(64, event));   // E
+  EXPECT_TRUE(isChordTone(67, event));   // G
+  EXPECT_FALSE(isChordTone(65, event));  // F is not a chord tone
+}
+
+TEST(IsChordToneTest, DiminishedTriad) {
+  HarmonicEvent event;
+  event.chord.root_pitch = 71;  // B4
+  event.chord.quality = ChordQuality::Diminished;
+  // B diminished: B(11), D(2), F(5) -- root + m3(3) + dim5(6)
+  EXPECT_TRUE(isChordTone(71, event));   // B4 (root)
+  EXPECT_TRUE(isChordTone(74, event));   // D5 (minor 3rd)
+  EXPECT_TRUE(isChordTone(77, event));   // F5 (diminished 5th)
+  EXPECT_FALSE(isChordTone(78, event));  // F#5 not a chord tone
+}
+
+TEST(IsChordToneTest, AugmentedTriad) {
+  HarmonicEvent event;
+  event.chord.root_pitch = 60;  // C4
+  event.chord.quality = ChordQuality::Augmented;
+  // C augmented: C(0), E(4), G#(8)
+  EXPECT_TRUE(isChordTone(60, event));   // C
+  EXPECT_TRUE(isChordTone(64, event));   // E
+  EXPECT_TRUE(isChordTone(68, event));   // G#
+  EXPECT_FALSE(isChordTone(67, event));  // G is not a chord tone of C augmented
+}
+
 }  // namespace
 }  // namespace bach

@@ -156,5 +156,66 @@ TEST(SpeciesRulesTest, NeighborToneNotAllowedInSecondSpecies) {
   EXPECT_FALSE(rules.isValidNeighborTone(60, 62, 60));
 }
 
+// ---------------------------------------------------------------------------
+// classifyNonHarmonicTone
+// ---------------------------------------------------------------------------
+
+TEST(ClassifyNonHarmonicToneTest, ChordTone) {
+  auto type = classifyNonHarmonicTone(60, 64, 67, true, true, true);
+  EXPECT_EQ(type, NonHarmonicToneType::ChordTone);
+}
+
+TEST(ClassifyNonHarmonicToneTest, PassingTone) {
+  // C->D->E where D is not a chord tone but C and E are.
+  auto type = classifyNonHarmonicTone(60, 62, 64, false, true, true);
+  EXPECT_EQ(type, NonHarmonicToneType::PassingTone);
+}
+
+TEST(ClassifyNonHarmonicToneTest, NeighborTone) {
+  // C->D->C where D is not a chord tone.
+  auto type = classifyNonHarmonicTone(60, 62, 60, false, true, true);
+  EXPECT_EQ(type, NonHarmonicToneType::NeighborTone);
+}
+
+TEST(ClassifyNonHarmonicToneTest, Suspension) {
+  // D held from prev beat, dissonant, resolves to C.
+  auto type = classifyNonHarmonicTone(62, 62, 60, false, false, true);
+  EXPECT_EQ(type, NonHarmonicToneType::Suspension);
+}
+
+TEST(ClassifyNonHarmonicToneTest, UnknownDissonance) {
+  // Large leap, not a passing or neighbor tone pattern.
+  auto type = classifyNonHarmonicTone(60, 66, 72, false, true, true);
+  EXPECT_EQ(type, NonHarmonicToneType::Unknown);
+}
+
+TEST(ClassifyNonHarmonicToneTest, PassingToneDescending) {
+  // E->D->C descending passing tone.
+  auto type = classifyNonHarmonicTone(64, 62, 60, false, true, true);
+  EXPECT_EQ(type, NonHarmonicToneType::PassingTone);
+}
+
+TEST(ClassifyNonHarmonicToneTest, NoPrevPitch) {
+  auto type = classifyNonHarmonicTone(0, 62, 64, false, false, true);
+  EXPECT_EQ(type, NonHarmonicToneType::Unknown);
+}
+
+TEST(ClassifyNonHarmonicToneTest, NoNextPitch) {
+  auto type = classifyNonHarmonicTone(60, 62, 0, false, true, false);
+  EXPECT_EQ(type, NonHarmonicToneType::Unknown);
+}
+
+TEST(ClassifyNonHarmonicToneTest, LowerNeighborTone) {
+  // E->D->E (D is lower neighbor).
+  auto type = classifyNonHarmonicTone(64, 62, 64, false, true, true);
+  EXPECT_EQ(type, NonHarmonicToneType::NeighborTone);
+}
+
+TEST(ClassifyNonHarmonicToneTest, SuspensionNonStepResolutionIsUnknown) {
+  // Held D but resolves to A (not stepwise).
+  auto type = classifyNonHarmonicTone(62, 62, 57, false, false, true);
+  EXPECT_EQ(type, NonHarmonicToneType::Unknown);
+}
+
 }  // namespace
 }  // namespace bach

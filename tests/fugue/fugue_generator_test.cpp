@@ -11,6 +11,7 @@
 
 #include "core/basic_types.h"
 #include "core/gm_program.h"
+#include "core/note_source.h"
 #include "core/pitch_utils.h"
 #include "fugue/fugue_config.h"
 #include "fugue/fugue_structure.h"
@@ -567,6 +568,212 @@ TEST(FugueGeneratorTest, GenerateFugue_TimelineCoversDuration) {
   // The timeline should have events covering the entire piece.
   Tick last_tick = result.timeline.events().back().end_tick;
   EXPECT_GT(last_tick, 0u);
+}
+
+// ---------------------------------------------------------------------------
+// Pedal point generation
+// ---------------------------------------------------------------------------
+
+TEST(FugueGeneratorTest, DominantPedalBeforeStretto) {
+  FugueConfig config = makeTestConfig();
+  config.num_voices = 3;
+  FugueResult result = generateFugue(config);
+  ASSERT_TRUE(result.success);
+
+  // Collect all pedal point notes across all tracks.
+  std::vector<NoteEvent> pedal_notes;
+  for (const auto& track : result.tracks) {
+    for (const auto& note : track.notes) {
+      if (note.source == BachNoteSource::PedalPoint) {
+        pedal_notes.push_back(note);
+      }
+    }
+  }
+  // Should have some pedal point notes (dominant + tonic).
+  EXPECT_GT(pedal_notes.size(), 0u);
+
+  // At least one pedal note should be before the stretto section.
+  auto strettos = result.structure.getSectionsByType(SectionType::Stretto);
+  ASSERT_EQ(strettos.size(), 1u);
+  Tick stretto_start = strettos[0].start_tick;
+
+  bool has_pre_stretto_pedal = false;
+  for (const auto& note : pedal_notes) {
+    if (note.start_tick < stretto_start) {
+      has_pre_stretto_pedal = true;
+      break;
+    }
+  }
+  EXPECT_TRUE(has_pre_stretto_pedal)
+      << "Expected dominant pedal point notes before stretto start";
+}
+
+TEST(FugueGeneratorTest, TonicPedalInCoda) {
+  FugueConfig config = makeTestConfig();
+  config.num_voices = 3;
+  FugueResult result = generateFugue(config);
+  ASSERT_TRUE(result.success);
+
+  // Find the coda section boundaries.
+  auto codas = result.structure.getSectionsByType(SectionType::Coda);
+  ASSERT_EQ(codas.size(), 1u);
+  Tick coda_start = codas[0].start_tick;
+  Tick coda_end = codas[0].end_tick;
+
+  // Check that there is at least one pedal point note in the coda.
+  bool has_coda_pedal = false;
+  for (const auto& track : result.tracks) {
+    for (const auto& note : track.notes) {
+      if (note.source == BachNoteSource::PedalPoint &&
+          note.start_tick >= coda_start && note.start_tick < coda_end) {
+        has_coda_pedal = true;
+        break;
+      }
+    }
+    if (has_coda_pedal) break;
+  }
+  EXPECT_TRUE(has_coda_pedal) << "Expected tonic pedal point notes in coda";
+}
+
+TEST(FugueGeneratorTest, PedalPointInLowestVoice) {
+  FugueConfig config = makeTestConfig();
+  config.num_voices = 3;
+  FugueResult result = generateFugue(config);
+  ASSERT_TRUE(result.success);
+
+  VoiceId expected_lowest = config.num_voices - 1;
+  for (const auto& track : result.tracks) {
+    for (const auto& note : track.notes) {
+      if (note.source == BachNoteSource::PedalPoint) {
+        EXPECT_EQ(note.voice, expected_lowest)
+            << "Pedal point at tick " << note.start_tick
+            << " should be in lowest voice (" << static_cast<int>(expected_lowest)
+            << ") but was in voice " << static_cast<int>(note.voice);
+      }
+    }
+  }
+}
+
+TEST(FugueGeneratorTest, PedalPointInLowestVoice_FourVoices) {
+  FugueConfig config = makeTestConfig();
+  config.num_voices = 4;
+  FugueResult result = generateFugue(config);
+  ASSERT_TRUE(result.success);
+
+  VoiceId expected_lowest = config.num_voices - 1;
+  bool found_pedal = false;
+  for (const auto& track : result.tracks) {
+    for (const auto& note : track.notes) {
+      if (note.source == BachNoteSource::PedalPoint) {
+        found_pedal = true;
+        EXPECT_EQ(note.voice, expected_lowest);
+      }
+    }
+  }
+  EXPECT_TRUE(found_pedal) << "4-voice fugue should have pedal point notes";
+}
+
+TEST(FugueGeneratorTest, DominantPedalPitchIsFifthAboveTonic) {
+  FugueConfig config = makeTestConfig();
+  config.num_voices = 3;
+  config.key = Key::C;
+  FugueResult result = generateFugue(config);
+  ASSERT_TRUE(result.success);
+
+  // For C major, tonic bass = C2 (MIDI 36), dominant = G2 (MIDI 43).
+  // The dominant pedal notes should all have pitch 43.
+  auto strettos = result.structure.getSectionsByType(SectionType::Stretto);
+  ASSERT_EQ(strettos.size(), 1u);
+  Tick stretto_start = strettos[0].start_tick;
+
+  for (const auto& track : result.tracks) {
+    for (const auto& note : track.notes) {
+      if (note.source == BachNoteSource::PedalPoint &&
+          note.start_tick < stretto_start) {
+        // C2 (36) + perfect 5th (7) = G2 (43).
+        EXPECT_EQ(note.pitch, 43u)
+            << "Dominant pedal in C major should be G2 (MIDI 43), got "
+            << static_cast<int>(note.pitch);
+      }
+    }
+  }
+}
+
+TEST(FugueGeneratorTest, TonicPedalPitchIsRoot) {
+  FugueConfig config = makeTestConfig();
+  config.num_voices = 3;
+  config.key = Key::C;
+  FugueResult result = generateFugue(config);
+  ASSERT_TRUE(result.success);
+
+  auto codas = result.structure.getSectionsByType(SectionType::Coda);
+  ASSERT_EQ(codas.size(), 1u);
+  Tick coda_start = codas[0].start_tick;
+  Tick coda_end = codas[0].end_tick;
+
+  for (const auto& track : result.tracks) {
+    for (const auto& note : track.notes) {
+      if (note.source == BachNoteSource::PedalPoint &&
+          note.start_tick >= coda_start && note.start_tick < coda_end) {
+        // C2 = MIDI 36.
+        EXPECT_EQ(note.pitch, 36u)
+            << "Tonic pedal in C major should be C2 (MIDI 36), got "
+            << static_cast<int>(note.pitch);
+      }
+    }
+  }
+}
+
+TEST(FugueGeneratorTest, PedalPointVelocityIsOrganDefault) {
+  FugueConfig config = makeTestConfig();
+  config.num_voices = 3;
+  FugueResult result = generateFugue(config);
+  ASSERT_TRUE(result.success);
+
+  for (const auto& track : result.tracks) {
+    for (const auto& note : track.notes) {
+      if (note.source == BachNoteSource::PedalPoint) {
+        EXPECT_EQ(note.velocity, 80u)
+            << "Pedal point velocity must be organ default (80)";
+      }
+    }
+  }
+}
+
+TEST(FugueGeneratorTest, DominantPedalSpansFourBars) {
+  FugueConfig config = makeTestConfig();
+  config.num_voices = 3;
+  FugueResult result = generateFugue(config);
+  ASSERT_TRUE(result.success);
+
+  // Find dominant pedal notes (those before stretto).
+  auto strettos = result.structure.getSectionsByType(SectionType::Stretto);
+  ASSERT_EQ(strettos.size(), 1u);
+  Tick stretto_start = strettos[0].start_tick;
+
+  std::vector<NoteEvent> dominant_pedals;
+  for (const auto& track : result.tracks) {
+    for (const auto& note : track.notes) {
+      if (note.source == BachNoteSource::PedalPoint &&
+          note.start_tick < stretto_start) {
+        dominant_pedals.push_back(note);
+      }
+    }
+  }
+
+  ASSERT_FALSE(dominant_pedals.empty());
+
+  // The dominant pedal should span exactly 4 bars (4 * 1920 = 7680 ticks).
+  // It is split into bar-length notes, so there should be 4 notes.
+  EXPECT_EQ(dominant_pedals.size(), 4u)
+      << "Dominant pedal should be split into 4 bar-length notes";
+
+  // Total duration should equal 4 bars.
+  Tick total_duration = 0;
+  for (const auto& note : dominant_pedals) {
+    total_duration += note.duration;
+  }
+  EXPECT_EQ(total_duration, kTicksPerBar * 4u);
 }
 
 }  // namespace

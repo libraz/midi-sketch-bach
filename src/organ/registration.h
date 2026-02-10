@@ -2,6 +2,7 @@
 #define BACH_ORGAN_REGISTRATION_H
 
 #include <cstdint>
+#include <utility>
 #include <vector>
 
 #include "core/basic_types.h"
@@ -70,6 +71,17 @@ void applyRegistrationPlan(std::vector<Track>& tracks,
                            Tick exposition_tick,
                            Tick stretto_tick = 0,
                            Tick coda_tick = 0);
+
+/// @brief Generate CC#7 (Volume) events from energy curve at section boundaries.
+///
+/// For each {tick, energy} pair, emits a CC#7 event on each organ channel.
+/// This provides a finer-grained dynamic curve than the 3-point RegistrationPlan.
+///
+/// @param energy_levels Vector of {tick, energy} pairs at section boundaries.
+/// @param num_channels Number of organ channels (typically 4).
+/// @return Vector of MidiEvents (CC#7) for volume control.
+std::vector<MidiEvent> generateEnergyRegistrationEvents(
+    const std::vector<std::pair<Tick, float>>& energy_levels, uint8_t num_channels);
 
 }  // namespace bach
 

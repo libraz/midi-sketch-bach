@@ -7,6 +7,7 @@
 #include <cstdint>
 
 #include "core/gm_program.h"
+#include "core/note_source.h"
 #include "core/pitch_utils.h"
 #include "fugue/answer.h"
 #include "fugue/countersubject.h"
@@ -18,6 +19,7 @@
 #include "fugue/subject_validator.h"
 #include "fugue/tonal_plan.h"
 #include "organ/manual.h"
+#include "organ/registration.h"
 
 namespace bach {
 
@@ -162,6 +164,76 @@ Subject generateValidSubject(const FugueConfig& config, int& attempts_out) {
   return best_subject;
 }
 
+/// @brief Duration of the dominant pedal in bars (placed before stretto).
+constexpr Tick kDominantPedalBars = 4;
+
+/// @brief Generate pedal point notes for a given pitch and duration.
+///
+/// The pedal is split into bar-length tied notes for better MIDI compatibility
+/// (many MIDI renderers handle shorter notes more reliably than very long ones).
+///
+/// @param pitch MIDI pitch of the pedal note.
+/// @param start_tick Start position in ticks.
+/// @param duration Total duration of the pedal in ticks.
+/// @param voice_id Voice for the pedal (lowest voice).
+/// @return Vector of pedal point NoteEvents, each one bar long (or shorter
+///         for the final segment).
+std::vector<NoteEvent> generatePedalPoint(uint8_t pitch, Tick start_tick,
+                                          Tick duration, VoiceId voice_id) {
+  std::vector<NoteEvent> notes;
+  Tick remaining = duration;
+  Tick tick = start_tick;
+  while (remaining > 0) {
+    Tick note_dur = std::min(remaining, static_cast<Tick>(kTicksPerBar));
+    NoteEvent evt;
+    evt.pitch = pitch;
+    evt.start_tick = tick;
+    evt.duration = note_dur;
+    evt.velocity = kOrganVelocity;
+    evt.voice = voice_id;
+    evt.source = BachNoteSource::PedalPoint;
+    notes.push_back(evt);
+    tick += note_dur;
+    remaining -= note_dur;
+  }
+  return notes;
+}
+
+/// @brief Remove notes from the lowest voice that overlap with a pedal region.
+///
+/// Any existing note in the specified voice whose start_tick falls within
+/// [region_start, region_end) is removed, making room for the pedal point.
+///
+/// @param all_notes The collection of all notes (modified in place).
+/// @param voice_id Voice whose notes should be removed.
+/// @param region_start Start tick of the pedal region (inclusive).
+/// @param region_end End tick of the pedal region (exclusive).
+void removeLowestVoiceNotes(std::vector<NoteEvent>& all_notes,
+                            VoiceId voice_id,
+                            Tick region_start, Tick region_end) {
+  all_notes.erase(
+      std::remove_if(all_notes.begin(), all_notes.end(),
+                     [voice_id, region_start, region_end](const NoteEvent& evt) {
+                       return evt.voice == voice_id &&
+                              evt.start_tick >= region_start &&
+                              evt.start_tick < region_end;
+                     }),
+      all_notes.end());
+}
+
+/// @brief Compute the tonic pitch in bass register for a given key.
+///
+/// Returns the tonic in octave 2 (e.g., C2 = MIDI 36 for Key::C).
+/// This is the standard register for organ pedal notes.
+///
+/// @param key Musical key.
+/// @return MIDI pitch number for the tonic in octave 2.
+uint8_t tonicBassPitch(Key key) {
+  // Octave 2 starts at MIDI 36 (C2). Add the key's pitch class offset.
+  int pitch = 36 + static_cast<int>(key);
+  return clampPitch(pitch, organ_range::kPedalLow, organ_range::kPedalHigh);
+}
+
 /// @brief Create coda notes: sustained tonic chord across all voices.
 ///
 /// Each voice receives a whole note forming a tonic chord:
@@ -296,10 +368,14 @@ FugueResult generateFugue(const FugueConfig& config) {
     Key target_key = near_keys[pair_idx % near_keys.size()];
     uint32_t pair_seed_base = config.seed + static_cast<uint32_t>(pair_idx) * 2000u + 2000u;
 
+    // Compute energy level for this episode from the energy curve.
+    float episode_energy = FugueEnergyCurve::getLevel(current_tick, estimated_duration);
+
     // Episode: transition from prev_key to target_key.
     Episode episode = generateEpisode(subject, current_tick, episode_duration,
                                       prev_key, target_key,
-                                      num_voices, pair_seed_base);
+                                      num_voices, pair_seed_base,
+                                      pair_idx, episode_energy);
     structure.addSection(SectionType::Episode, FuguePhase::Develop,
                          current_tick, current_tick + episode_duration, target_key);
     all_notes.insert(all_notes.end(), episode.notes.begin(), episode.notes.end());
@@ -326,10 +402,12 @@ FugueResult generateFugue(const FugueConfig& config) {
 
   // --- Return episode: transition back to home key ---
   {
+    float return_energy = FugueEnergyCurve::getLevel(current_tick, estimated_duration);
     Episode return_episode = generateEpisode(
         subject, current_tick, episode_duration,
         prev_key, config.key, num_voices,
-        config.seed + static_cast<uint32_t>(develop_pairs) * 2000u + 2000u);
+        config.seed + static_cast<uint32_t>(develop_pairs) * 2000u + 2000u,
+        develop_pairs, return_energy);
     structure.addSection(SectionType::Episode, FuguePhase::Develop,
                          current_tick, current_tick + episode_duration, config.key);
     all_notes.insert(all_notes.end(), return_episode.notes.begin(),
@@ -337,9 +415,30 @@ FugueResult generateFugue(const FugueConfig& config) {
     current_tick += episode_duration;
   }
 
+  // --- Dominant pedal: 4 bars before stretto (Develop -> Resolve transition) ---
+  VoiceId lowest_voice = num_voices - 1;
+  {
+    Tick pedal_duration = kTicksPerBar * kDominantPedalBars;
+    uint8_t dominant_pitch =
+        static_cast<uint8_t>(tonicBassPitch(config.key) + interval::kPerfect5th);
+    // Clamp to pedal range.
+    dominant_pitch = clampPitch(static_cast<int>(dominant_pitch),
+                                organ_range::kPedalLow, organ_range::kPedalHigh);
+
+    // Remove existing lowest-voice notes in the pedal region.
+    removeLowestVoiceNotes(all_notes, lowest_voice,
+                           current_tick, current_tick + pedal_duration);
+
+    auto dominant_pedal = generatePedalPoint(dominant_pitch, current_tick,
+                                             pedal_duration, lowest_voice);
+    all_notes.insert(all_notes.end(), dominant_pedal.begin(), dominant_pedal.end());
+    current_tick += pedal_duration;
+  }
+
   // --- Stretto (Resolve) ---
   Stretto stretto = generateStretto(subject, config.key, current_tick,
-                                    num_voices, config.seed + 4000);
+                                    num_voices, config.seed + 4000,
+                                    config.character);
   Tick stretto_end = stretto.end_tick;
   // Ensure stretto has non-zero duration.
   if (stretto_end <= current_tick) {
@@ -351,13 +450,26 @@ FugueResult generateFugue(const FugueConfig& config) {
   all_notes.insert(all_notes.end(), stretto_notes.begin(), stretto_notes.end());
   current_tick = stretto_end;
 
-  // --- Section 6: Coda (Resolve) ---
+  // --- Section 6: Coda (Resolve) with tonic pedal ---
   Tick coda_duration = kTicksPerBar * kCodaBars;
   structure.addSection(SectionType::Coda, FuguePhase::Resolve,
                        current_tick, current_tick + coda_duration, config.key);
   auto coda_notes = createCodaNotes(current_tick, coda_duration,
                                     config.key, num_voices);
   all_notes.insert(all_notes.end(), coda_notes.begin(), coda_notes.end());
+
+  // Tonic pedal in coda: lowest voice sustains the tonic.
+  {
+    uint8_t tonic_pitch = tonicBassPitch(config.key);
+
+    // Remove the lowest voice's coda chord note -- replaced by pedal point.
+    removeLowestVoiceNotes(all_notes, lowest_voice,
+                           current_tick, current_tick + coda_duration);
+
+    auto tonic_pedal = generatePedalPoint(tonic_pitch, current_tick,
+                                          coda_duration, lowest_voice);
+    all_notes.insert(all_notes.end(), tonic_pedal.begin(), tonic_pedal.end());
+  }
 
   // =========================================================================
   // Create tracks and assign notes
@@ -369,6 +481,30 @@ FugueResult generateFugue(const FugueConfig& config) {
   // Build timeline from the tonal plan (bar-resolution I-chord approximation).
   Tick total_ticks = current_tick + kTicksPerBar * kCodaBars;
   result.timeline = tonal_plan.toHarmonicTimeline(total_ticks);
+
+  // --- Apply energy-based dynamic registration ---
+  // Sample the energy curve at section boundaries for CC#7 volume automation.
+  {
+    std::vector<std::pair<Tick, float>> energy_samples;
+    const auto& sections = structure.sections;
+    energy_samples.reserve(sections.size());
+    for (const auto& section : sections) {
+      float energy = FugueEnergyCurve::getLevel(section.start_tick, total_ticks);
+      energy_samples.push_back({section.start_tick, energy});
+    }
+    auto energy_events = generateEnergyRegistrationEvents(
+        energy_samples, static_cast<uint8_t>(result.tracks.size()));
+    // Insert energy events into matching tracks by channel.
+    for (const auto& evt : energy_events) {
+      uint8_t event_channel = evt.status & 0x0F;
+      for (auto& track : result.tracks) {
+        if (track.channel == event_channel) {
+          track.events.push_back(evt);
+          break;
+        }
+      }
+    }
+  }
 
   result.success = true;
   return result;

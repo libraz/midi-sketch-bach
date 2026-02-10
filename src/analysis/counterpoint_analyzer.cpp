@@ -290,4 +290,118 @@ FailReport buildCounterpointReport(const std::vector<NoteEvent>& notes, uint8_t 
   return report;
 }
 
+float bassLineStepwiseRatio(const std::vector<NoteEvent>& notes, uint8_t num_voices) {
+  if (num_voices == 0) return 1.0f;
+  // Bass voice is the highest voice ID (lowest register).
+  auto bass_notes = voiceNotes(notes, num_voices - 1);
+  if (bass_notes.size() < 2) return 1.0f;
+
+  uint32_t total = 0;
+  uint32_t stepwise = 0;
+  for (size_t idx = 1; idx < bass_notes.size(); ++idx) {
+    int interval = std::abs(static_cast<int>(bass_notes[idx].pitch) -
+                            static_cast<int>(bass_notes[idx - 1].pitch));
+    ++total;
+    if (interval >= 1 && interval <= 2) ++stepwise;
+  }
+  return total == 0 ? 1.0f : static_cast<float>(stepwise) / static_cast<float>(total);
+}
+
+float voiceLeadingSmoothness(const std::vector<NoteEvent>& notes, uint8_t num_voices) {
+  if (num_voices == 0) return 0.0f;
+
+  float total_avg = 0.0f;
+  uint8_t voices_with_motion = 0;
+
+  for (uint8_t vid = 0; vid < num_voices; ++vid) {
+    auto sorted = voiceNotes(notes, vid);
+    if (sorted.size() < 2) continue;
+
+    float voice_sum = 0.0f;
+    uint32_t intervals = 0;
+    for (size_t idx = 1; idx < sorted.size(); ++idx) {
+      int leap = std::abs(static_cast<int>(sorted[idx].pitch) -
+                          static_cast<int>(sorted[idx - 1].pitch));
+      voice_sum += static_cast<float>(leap);
+      ++intervals;
+    }
+    if (intervals > 0) {
+      total_avg += voice_sum / static_cast<float>(intervals);
+      ++voices_with_motion;
+    }
+  }
+
+  return voices_with_motion == 0 ? 0.0f : total_avg / static_cast<float>(voices_with_motion);
+}
+
+float contraryMotionRate(const std::vector<NoteEvent>& notes, uint8_t num_voices) {
+  if (num_voices < 2) return 0.0f;
+  auto voices = buildVoiceCache(notes, num_voices);
+  Tick end = totalEndTick(notes);
+  if (end < kTicksPerBeat) return 0.0f;
+
+  uint32_t total_transitions = 0;
+  uint32_t contrary_count = 0;
+
+  for (uint8_t vid = 0; vid + 1 < num_voices; ++vid) {
+    int prev_a = -1, prev_b = -1;
+    for (Tick beat = 0; beat < end; beat += kTicksPerBeat) {
+      int cur_a = soundingPitch(voices[vid], beat);
+      int cur_b = soundingPitch(voices[vid + 1], beat);
+      if (cur_a < 0 || cur_b < 0 || prev_a < 0 || prev_b < 0) {
+        prev_a = cur_a;
+        prev_b = cur_b;
+        continue;
+      }
+      int motion_a = cur_a - prev_a;
+      int motion_b = cur_b - prev_b;
+      // Only count when both voices actually move.
+      if (motion_a != 0 && motion_b != 0) {
+        ++total_transitions;
+        bool contrary = (motion_a > 0 && motion_b < 0) || (motion_a < 0 && motion_b > 0);
+        if (contrary) ++contrary_count;
+      }
+      prev_a = cur_a;
+      prev_b = cur_b;
+    }
+  }
+
+  return total_transitions == 0
+             ? 0.0f
+             : static_cast<float>(contrary_count) / static_cast<float>(total_transitions);
+}
+
+float leapResolutionRate(const std::vector<NoteEvent>& notes, uint8_t num_voices) {
+  if (num_voices == 0) return 1.0f;
+
+  uint32_t total_leaps = 0;
+  uint32_t resolved_leaps = 0;
+
+  for (uint8_t vid = 0; vid < num_voices; ++vid) {
+    auto sorted = voiceNotes(notes, vid);
+    if (sorted.size() < 2) continue;
+
+    for (size_t idx = 1; idx < sorted.size(); ++idx) {
+      int leap = static_cast<int>(sorted[idx].pitch) -
+                 static_cast<int>(sorted[idx - 1].pitch);
+      int abs_leap = std::abs(leap);
+      if (abs_leap < 4) continue;  // Not a leap.
+
+      ++total_leaps;
+      // Check if the next note resolves by step in the opposite direction.
+      if (idx + 1 < sorted.size()) {
+        int resolution = static_cast<int>(sorted[idx + 1].pitch) -
+                         static_cast<int>(sorted[idx].pitch);
+        int abs_resolution = std::abs(resolution);
+        bool step = abs_resolution >= 1 && abs_resolution <= 2;
+        bool opposite = (leap > 0 && resolution < 0) || (leap < 0 && resolution > 0);
+        if (step && opposite) ++resolved_leaps;
+      }
+    }
+  }
+
+  return total_leaps == 0 ? 1.0f
+                          : static_cast<float>(resolved_leaps) / static_cast<float>(total_leaps);
+}
+
 }  // namespace bach

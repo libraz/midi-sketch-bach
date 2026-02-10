@@ -30,10 +30,11 @@ struct StrettoEntry {
 /// stretto belongs to FuguePhase::Resolve and typically uses the home key.
 ///
 /// Design values are output directly (Principle 4: Trust Design Values):
-///   - Entry interval: subject_length / num_voices (minimum 1 bar)
+///   - First entry interval: subject_length / num_voices (minimum 1 bar)
+///   - Each subsequent interval: 75% of the previous (progressive shortening)
 ///   - All entries in home key
 ///   - Entry count matches num_voices
-///   - Odd-indexed entries use inversion for variety
+///   - Odd-indexed entries use character-specific transforms
 struct Stretto {
   std::vector<StrettoEntry> entries;  ///< Voice entries in order of appearance.
   Tick start_tick = 0;                ///< Start of the stretto section.
@@ -53,28 +54,44 @@ struct Stretto {
   size_t entryCount() const { return entries.size(); }
 };
 
+/// @brief Find valid stretto entry intervals where overlapping subject entries are consonant.
+///
+/// Tests each beat-aligned offset from 1 beat up to max_offset. At each offset, checks
+/// whether all simultaneously sounding notes between the original and delayed entry form
+/// consonant intervals (unison, minor/major 3rd, perfect 5th, minor/major 6th, octave).
+///
+/// @param subject_notes The subject's notes.
+/// @param max_offset Maximum offset to test (in ticks).
+/// @return Vector of valid offsets (in ticks) sorted from shortest to longest.
+std::vector<Tick> findValidStrettoIntervals(const std::vector<NoteEvent>& subject_notes,
+                                            Tick max_offset);
+
 /// @brief Generate a stretto section.
 ///
-/// In a stretto, voices enter with the subject at shorter intervals than
-/// the full subject length, creating dense overlapping imitation.
+/// In a stretto, voices enter with the subject at progressively shorter
+/// intervals, creating increasingly dense overlapping imitation.
 /// The stretto belongs to FuguePhase::Resolve and uses design values
 /// directly (no search -- per design principle 4).
 ///
 /// Design values:
-///   - Entry interval: subject_length / num_voices (minimum 1 bar)
-///   - Interval snapped to beat boundary
+///   - First entry interval: subject_length / num_voices (minimum 1 bar)
+///   - Each subsequent interval: 75% of previous (minimum 1 bar, beat-snapped)
+///   - When valid consonant intervals exist, prefer those over raw calculation
 ///   - All entries in home key
 ///   - Entry count matches num_voices
-///   - Odd-indexed entries use melodic inversion for contrapuntal variety
+///   - Odd-indexed entries use character-specific transforms:
+///     Severe/Restless = inversion, Playful = retrograde, Noble = augmentation
 ///
 /// @param subject The fugue subject.
 /// @param home_key The home key (Resolve returns to tonic).
 /// @param start_tick Starting tick for the stretto.
 /// @param num_voices Number of voices (and stretto entries), clamped to [2, 5].
 /// @param seed Random seed for deterministic generation.
+/// @param character Subject character controlling odd-entry transform selection.
 /// @return Generated Stretto.
 Stretto generateStretto(const Subject& subject, Key home_key, Tick start_tick,
-                        uint8_t num_voices, uint32_t seed);
+                        uint8_t num_voices, uint32_t seed,
+                        SubjectCharacter character = SubjectCharacter::Severe);
 
 }  // namespace bach
 

@@ -27,7 +27,8 @@ BachCreateNoteResult createBachNote(
   // If counterpoint engine is available, use collision resolver.
   if (state && rules && resolver) {
     PlacementResult placement = resolver->findSafePitch(
-        *state, *rules, opts.voice, opts.desired_pitch, opts.tick, opts.duration);
+        *state, *rules, opts.voice, opts.desired_pitch, opts.tick, opts.duration,
+        opts.source);
 
     if (placement.accepted) {
       result.accepted = true;
@@ -40,6 +41,7 @@ BachCreateNoteResult createBachNote(
       result.note.pitch = placement.pitch;
       result.note.velocity = opts.velocity;
       result.note.voice = opts.voice;
+      result.note.source = opts.source;
 
       // Record the adjustment in provenance.
       if (result.was_adjusted) {
@@ -66,6 +68,7 @@ BachCreateNoteResult createBachNote(
   result.note.pitch = opts.desired_pitch;
   result.note.velocity = opts.velocity;
   result.note.voice = opts.voice;
+  result.note.source = opts.source;
 
   return result;
 }

@@ -32,6 +32,19 @@ enum class BachNoteSource : uint8_t {
 /// @return Null-terminated string representation.
 const char* bachNoteSourceToString(BachNoteSource source);
 
+/// @brief Protection level for collision resolution.
+/// Determines how aggressively the resolver may modify a note's pitch.
+enum class ProtectionLevel : uint8_t {
+  Immutable,   ///< No pitch change allowed (subject, cantus, ground bass).
+  Structural,  ///< Octave shift only (answer, countersubject, pedal point).
+  Flexible     ///< Full 5-stage cascade (free counterpoint, episodes, ornaments).
+};
+
+/// @brief Get the protection level for a given note source.
+/// @param source The note source enum value.
+/// @return Protection level governing collision resolution behavior.
+ProtectionLevel getProtectionLevel(BachNoteSource source);
+
 /// Transformation steps applied to a note during generation.
 /// Recorded in provenance for debugging the transform pipeline.
 enum class BachTransformStep : uint8_t {

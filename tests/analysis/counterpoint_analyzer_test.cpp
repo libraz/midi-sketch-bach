@@ -397,5 +397,278 @@ TEST(BuildCounterpointReportTest, JsonContainsAllIssues) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// bassLineStepwiseRatio
+// ---------------------------------------------------------------------------
+
+TEST(BassLineStepwiseRatioTest, AllStepwise) {
+  // Bass voice (voice 2 in 3-voice texture) moves by steps only.
+  std::vector<NoteEvent> notes;
+  NoteEvent n;
+  n.voice = 2; n.velocity = 80; n.duration = kTicksPerBeat;
+  n.pitch = 48; n.start_tick = 0; notes.push_back(n);
+  n.pitch = 50; n.start_tick = kTicksPerBeat; notes.push_back(n);
+  n.pitch = 48; n.start_tick = kTicksPerBeat * 2; notes.push_back(n);
+  n.pitch = 47; n.start_tick = kTicksPerBeat * 3; notes.push_back(n);
+  EXPECT_FLOAT_EQ(bassLineStepwiseRatio(notes, 3), 1.0f);
+}
+
+TEST(BassLineStepwiseRatioTest, MixedMotion) {
+  std::vector<NoteEvent> notes;
+  NoteEvent n;
+  n.voice = 1; n.velocity = 80; n.duration = kTicksPerBeat;
+  // Voice 1 is bass in 2-voice texture.
+  n.pitch = 48; n.start_tick = 0; notes.push_back(n);
+  n.pitch = 50; n.start_tick = kTicksPerBeat; notes.push_back(n);  // step (+2)
+  n.pitch = 55; n.start_tick = kTicksPerBeat * 2; notes.push_back(n);  // leap (+5)
+  n.pitch = 53; n.start_tick = kTicksPerBeat * 3; notes.push_back(n);  // step (-2)
+  // 2 steps out of 3 intervals = 0.667
+  float ratio = bassLineStepwiseRatio(notes, 2);
+  EXPECT_NEAR(ratio, 2.0f / 3.0f, 0.01f);
+}
+
+TEST(BassLineStepwiseRatioTest, SingleNote) {
+  std::vector<NoteEvent> notes;
+  NoteEvent n;
+  n.voice = 0; n.velocity = 80; n.duration = kTicksPerBeat;
+  n.pitch = 60; n.start_tick = 0; notes.push_back(n);
+  EXPECT_FLOAT_EQ(bassLineStepwiseRatio(notes, 1), 1.0f);
+}
+
+TEST(BassLineStepwiseRatioTest, NoNotes) {
+  std::vector<NoteEvent> notes;
+  EXPECT_FLOAT_EQ(bassLineStepwiseRatio(notes, 0), 1.0f);
+}
+
+// ---------------------------------------------------------------------------
+// voiceLeadingSmoothness
+// ---------------------------------------------------------------------------
+
+TEST(VoiceLeadingSmoothnessTest, PureStepwise) {
+  // All stepwise motion -> average should be ~1.5.
+  std::vector<NoteEvent> notes;
+  NoteEvent note;
+  note.voice = 0;
+  note.velocity = 80;
+  note.duration = kTicksPerBeat;
+
+  note.pitch = 60; note.start_tick = 0; notes.push_back(note);
+  note.pitch = 62; note.start_tick = kTicksPerBeat; notes.push_back(note);
+  note.pitch = 64; note.start_tick = kTicksPerBeat * 2; notes.push_back(note);
+  note.pitch = 65; note.start_tick = kTicksPerBeat * 3; notes.push_back(note);
+
+  float smoothness = voiceLeadingSmoothness(notes, 1);
+  EXPECT_LE(smoothness, 3.0f);
+}
+
+TEST(VoiceLeadingSmoothnessTest, LargeLeaps) {
+  std::vector<NoteEvent> notes;
+  NoteEvent note;
+  note.voice = 0;
+  note.velocity = 80;
+  note.duration = kTicksPerBeat;
+
+  note.pitch = 60; note.start_tick = 0; notes.push_back(note);
+  note.pitch = 72; note.start_tick = kTicksPerBeat; notes.push_back(note);      // octave leap
+  note.pitch = 60; note.start_tick = kTicksPerBeat * 2; notes.push_back(note);  // octave leap
+
+  float smoothness = voiceLeadingSmoothness(notes, 1);
+  EXPECT_GT(smoothness, 3.0f);
+}
+
+TEST(VoiceLeadingSmoothnessTest, NoNotes) {
+  std::vector<NoteEvent> notes;
+  EXPECT_FLOAT_EQ(voiceLeadingSmoothness(notes, 0), 0.0f);
+}
+
+TEST(VoiceLeadingSmoothnessTest, MultipleVoicesAveraged) {
+  // Voice 0: stepwise (avg 2.0), Voice 1: larger leaps (avg 5.0).
+  // Overall average: (2.0 + 5.0) / 2 = 3.5.
+  std::vector<NoteEvent> notes;
+  NoteEvent note;
+  note.velocity = 80;
+  note.duration = kTicksPerBeat;
+
+  // Voice 0: 60 -> 62 -> 64 (intervals: 2, 2; avg = 2.0).
+  note.voice = 0;
+  note.pitch = 60; note.start_tick = 0; notes.push_back(note);
+  note.pitch = 62; note.start_tick = kTicksPerBeat; notes.push_back(note);
+  note.pitch = 64; note.start_tick = kTicksPerBeat * 2; notes.push_back(note);
+
+  // Voice 1: 48 -> 53 -> 58 (intervals: 5, 5; avg = 5.0).
+  note.voice = 1;
+  note.pitch = 48; note.start_tick = 0; notes.push_back(note);
+  note.pitch = 53; note.start_tick = kTicksPerBeat; notes.push_back(note);
+  note.pitch = 58; note.start_tick = kTicksPerBeat * 2; notes.push_back(note);
+
+  float smoothness = voiceLeadingSmoothness(notes, 2);
+  EXPECT_NEAR(smoothness, 3.5f, kEpsilon);
+}
+
+TEST(VoiceLeadingSmoothnessTest, SingleNoteReturnsZero) {
+  std::vector<NoteEvent> notes = {qn(0, 60, 0)};
+  EXPECT_FLOAT_EQ(voiceLeadingSmoothness(notes, 1), 0.0f);
+}
+
+// ---------------------------------------------------------------------------
+// contraryMotionRate
+// ---------------------------------------------------------------------------
+
+TEST(ContraryMotionRateTest, AllContrary) {
+  // Two voices always moving in opposite directions.
+  std::vector<NoteEvent> notes;
+  NoteEvent note;
+  note.velocity = 80;
+  note.duration = kTicksPerBeat;
+
+  // Voice 0 goes up.
+  note.voice = 0;
+  note.pitch = 72; note.start_tick = 0; notes.push_back(note);
+  note.pitch = 74; note.start_tick = kTicksPerBeat; notes.push_back(note);
+  note.pitch = 76; note.start_tick = kTicksPerBeat * 2; notes.push_back(note);
+
+  // Voice 1 goes down.
+  note.voice = 1;
+  note.pitch = 60; note.start_tick = 0; notes.push_back(note);
+  note.pitch = 58; note.start_tick = kTicksPerBeat; notes.push_back(note);
+  note.pitch = 56; note.start_tick = kTicksPerBeat * 2; notes.push_back(note);
+
+  float rate = contraryMotionRate(notes, 2);
+  EXPECT_FLOAT_EQ(rate, 1.0f);
+}
+
+TEST(ContraryMotionRateTest, AllParallel) {
+  std::vector<NoteEvent> notes;
+  NoteEvent note;
+  note.velocity = 80;
+  note.duration = kTicksPerBeat;
+
+  note.voice = 0;
+  note.pitch = 72; note.start_tick = 0; notes.push_back(note);
+  note.pitch = 74; note.start_tick = kTicksPerBeat; notes.push_back(note);
+
+  note.voice = 1;
+  note.pitch = 60; note.start_tick = 0; notes.push_back(note);
+  note.pitch = 62; note.start_tick = kTicksPerBeat; notes.push_back(note);
+
+  float rate = contraryMotionRate(notes, 2);
+  EXPECT_FLOAT_EQ(rate, 0.0f);
+}
+
+TEST(ContraryMotionRateTest, SingleVoice) {
+  std::vector<NoteEvent> notes;
+  NoteEvent note;
+  note.voice = 0;
+  note.velocity = 80;
+  note.duration = kTicksPerBeat;
+  note.pitch = 60; note.start_tick = 0; notes.push_back(note);
+  EXPECT_FLOAT_EQ(contraryMotionRate(notes, 1), 0.0f);
+}
+
+TEST(ContraryMotionRateTest, ObliqueMotionNotCounted) {
+  // One voice stays still while the other moves -- not contrary, not parallel.
+  std::vector<NoteEvent> notes;
+  NoteEvent note;
+  note.velocity = 80;
+  note.duration = kTicksPerBeat;
+
+  note.voice = 0;
+  note.pitch = 72; note.start_tick = 0; notes.push_back(note);
+  note.pitch = 72; note.start_tick = kTicksPerBeat; notes.push_back(note);  // stays
+
+  note.voice = 1;
+  note.pitch = 60; note.start_tick = 0; notes.push_back(note);
+  note.pitch = 58; note.start_tick = kTicksPerBeat; notes.push_back(note);  // moves down
+
+  // Oblique motion: motion_a == 0, so this transition is not counted.
+  float rate = contraryMotionRate(notes, 2);
+  EXPECT_FLOAT_EQ(rate, 0.0f);
+}
+
+// ---------------------------------------------------------------------------
+// leapResolutionRate
+// ---------------------------------------------------------------------------
+
+TEST(LeapResolutionRateTest, AllResolved) {
+  std::vector<NoteEvent> notes;
+  NoteEvent note;
+  note.voice = 0;
+  note.velocity = 80;
+  note.duration = kTicksPerBeat;
+
+  note.pitch = 60; note.start_tick = 0; notes.push_back(note);
+  note.pitch = 67; note.start_tick = kTicksPerBeat; notes.push_back(note);      // leap up +7
+  note.pitch = 65; note.start_tick = kTicksPerBeat * 2; notes.push_back(note);  // step down -2
+
+  float rate = leapResolutionRate(notes, 1);
+  EXPECT_FLOAT_EQ(rate, 1.0f);
+}
+
+TEST(LeapResolutionRateTest, NoneResolved) {
+  std::vector<NoteEvent> notes;
+  NoteEvent note;
+  note.voice = 0;
+  note.velocity = 80;
+  note.duration = kTicksPerBeat;
+
+  note.pitch = 60; note.start_tick = 0; notes.push_back(note);
+  note.pitch = 67; note.start_tick = kTicksPerBeat; notes.push_back(note);      // leap up +7
+  note.pitch = 72; note.start_tick = kTicksPerBeat * 2; notes.push_back(note);  // continues up
+
+  float rate = leapResolutionRate(notes, 1);
+  EXPECT_FLOAT_EQ(rate, 0.0f);
+}
+
+TEST(LeapResolutionRateTest, NoLeaps) {
+  std::vector<NoteEvent> notes;
+  NoteEvent note;
+  note.voice = 0;
+  note.velocity = 80;
+  note.duration = kTicksPerBeat;
+
+  note.pitch = 60; note.start_tick = 0; notes.push_back(note);
+  note.pitch = 62; note.start_tick = kTicksPerBeat; notes.push_back(note);
+  note.pitch = 64; note.start_tick = kTicksPerBeat * 2; notes.push_back(note);
+
+  EXPECT_FLOAT_EQ(leapResolutionRate(notes, 1), 1.0f);
+}
+
+TEST(LeapResolutionRateTest, LeapAtEndUnresolved) {
+  // A leap as the last interval has no following note to resolve it.
+  std::vector<NoteEvent> notes;
+  NoteEvent note;
+  note.voice = 0;
+  note.velocity = 80;
+  note.duration = kTicksPerBeat;
+
+  note.pitch = 60; note.start_tick = 0; notes.push_back(note);
+  note.pitch = 62; note.start_tick = kTicksPerBeat; notes.push_back(note);      // step
+  note.pitch = 70; note.start_tick = kTicksPerBeat * 2; notes.push_back(note);  // leap up +8
+
+  // The leap has no following note, so it counts as unresolved.
+  float rate = leapResolutionRate(notes, 1);
+  EXPECT_FLOAT_EQ(rate, 0.0f);
+}
+
+TEST(LeapResolutionRateTest, DownwardLeapResolvedUpward) {
+  std::vector<NoteEvent> notes;
+  NoteEvent note;
+  note.voice = 0;
+  note.velocity = 80;
+  note.duration = kTicksPerBeat;
+
+  note.pitch = 72; note.start_tick = 0; notes.push_back(note);
+  note.pitch = 65; note.start_tick = kTicksPerBeat; notes.push_back(note);      // leap down -7
+  note.pitch = 67; note.start_tick = kTicksPerBeat * 2; notes.push_back(note);  // step up +2
+
+  float rate = leapResolutionRate(notes, 1);
+  EXPECT_FLOAT_EQ(rate, 1.0f);
+}
+
+TEST(LeapResolutionRateTest, EmptyReturnsOne) {
+  std::vector<NoteEvent> notes;
+  EXPECT_FLOAT_EQ(leapResolutionRate(notes, 0), 1.0f);
+}
+
 }  // namespace
 }  // namespace bach

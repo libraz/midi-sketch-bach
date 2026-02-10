@@ -81,7 +81,7 @@ if(BUILD_WASM)
     -sWASM=1
     -sMODULARIZE=1
     -sEXPORT_ES6=1
-    "-sEXPORTED_FUNCTIONS=['_malloc','_free','_bach_create','_bach_destroy','_bach_generate_from_json','_bach_get_midi','_bach_free_midi','_bach_get_events','_bach_free_events','_bach_get_info','_bach_form_count','_bach_form_name','_bach_form_display','_bach_instrument_count','_bach_instrument_name','_bach_character_count','_bach_character_name','_bach_key_count','_bach_key_name','_bach_default_instrument_for_form','_bach_error_string','_bach_version']"
+    "-sEXPORTED_FUNCTIONS=['_malloc','_free','_emscripten_stack_get_current','_bach_create','_bach_destroy','_bach_generate_from_json','_bach_get_midi','_bach_free_midi','_bach_get_events','_bach_free_events','_bach_get_info','_bach_form_count','_bach_form_name','_bach_form_display','_bach_instrument_count','_bach_instrument_name','_bach_character_count','_bach_character_name','_bach_key_count','_bach_key_name','_bach_scale_count','_bach_scale_name','_bach_default_instrument_for_form','_bach_error_string','_bach_version']"
     "-sEXPORTED_RUNTIME_METHODS=['cwrap','ccall','UTF8ToString','HEAPU8','HEAPU32']"
     -sALLOW_MEMORY_GROWTH=1
     -sSTACK_SIZE=1048576

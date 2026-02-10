@@ -67,6 +67,33 @@ uint32_t countAugmentedLeaps(const std::vector<NoteEvent>& notes, uint8_t num_vo
 /// @return FailReport containing one FailIssue per detected violation.
 FailReport buildCounterpointReport(const std::vector<NoteEvent>& notes, uint8_t num_voices);
 
+/// @brief Calculate the ratio of stepwise motion in the bass (lowest) voice.
+/// @param notes All notes across all voices.
+/// @param num_voices Number of voices.
+/// @return Fraction in [0,1]; 1.0 if all bass motion is stepwise (1-2 semitones).
+///         Returns 1.0 if fewer than 2 bass notes exist.
+float bassLineStepwiseRatio(const std::vector<NoteEvent>& notes, uint8_t num_voices);
+
+/// @brief Calculate average leap size across all voices.
+/// @param notes All notes across all voices.
+/// @param num_voices Number of voices.
+/// @return Average interval in semitones between consecutive notes across all voices.
+///         Returns 0.0 if fewer than 2 notes in any voice.
+float voiceLeadingSmoothness(const std::vector<NoteEvent>& notes, uint8_t num_voices);
+
+/// @brief Calculate the rate of contrary motion between adjacent voice pairs.
+/// @param notes All notes across all voices.
+/// @param num_voices Number of voices.
+/// @return Fraction in [0,1] of beat transitions where adjacent voices move in opposite directions.
+///         Returns 0.0 if fewer than 2 voices or insufficient notes.
+float contraryMotionRate(const std::vector<NoteEvent>& notes, uint8_t num_voices);
+
+/// @brief Calculate rate of leaps (>=4 semitones) followed by stepwise contrary motion.
+/// @param notes All notes across all voices.
+/// @param num_voices Number of voices.
+/// @return Fraction in [0,1]; 1.0 if no leaps exist.
+float leapResolutionRate(const std::vector<NoteEvent>& notes, uint8_t num_voices);
+
 }  // namespace bach
 
 #endif  // BACH_ANALYSIS_COUNTERPOINT_ANALYZER_H

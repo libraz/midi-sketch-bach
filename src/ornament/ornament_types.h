@@ -26,7 +26,9 @@ const char* ornamentTypeToString(OrnamentType type);
 struct OrnamentConfig {
   bool enable_trill = true;
   bool enable_mordent = true;
-  bool enable_turn = false;       // Enable in later phases
+  bool enable_turn = true;
+  bool enable_appoggiatura = true;
+  bool enable_pralltriller = true;
   float ornament_density = 0.15f; // Probability of adding ornament to eligible note
 };
 

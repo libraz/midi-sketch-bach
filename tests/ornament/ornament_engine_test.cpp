@@ -26,7 +26,9 @@ OrnamentContext makeContext(VoiceRole role, uint32_t seed = 42,
   OrnamentContext ctx;
   ctx.config.enable_trill = true;
   ctx.config.enable_mordent = true;
-  ctx.config.enable_turn = false;
+  ctx.config.enable_turn = true;
+  ctx.config.enable_appoggiatura = true;
+  ctx.config.enable_pralltriller = true;
   ctx.config.ornament_density = density;
   ctx.role = role;
   ctx.seed = seed;
@@ -108,20 +110,22 @@ TEST(OrnamentTypeSelectionTest, Beat3IsWeakBeat) {
   EXPECT_EQ(selectOrnamentType(note, config), OrnamentType::Mordent);
 }
 
-TEST(OrnamentTypeSelectionTest, StrongBeatFallsBackToMordentIfNoTrill) {
+TEST(OrnamentTypeSelectionTest, StrongBeatFallsBackToMordentIfNoTrillOrAppoggiatura) {
   auto note = makeNote(0, 60, kTicksPerBeat);
   OrnamentConfig config;
   config.enable_trill = false;
+  config.enable_appoggiatura = false;
   config.enable_mordent = true;
 
   EXPECT_EQ(selectOrnamentType(note, config), OrnamentType::Mordent);
 }
 
-TEST(OrnamentTypeSelectionTest, WeakBeatFallsBackToTrillIfNoMordent) {
+TEST(OrnamentTypeSelectionTest, WeakBeatFallsBackToTrillIfNoMordentOrPralltriller) {
   auto note = makeNote(kTicksPerBeat, 60, kTicksPerBeat);
   OrnamentConfig config;
   config.enable_trill = true;
   config.enable_mordent = false;
+  config.enable_pralltriller = false;
 
   EXPECT_EQ(selectOrnamentType(note, config), OrnamentType::Trill);
 }
@@ -132,6 +136,8 @@ TEST(OrnamentTypeSelectionTest, FallsBackToTurnIfOnlyTurnEnabled) {
   config.enable_trill = false;
   config.enable_mordent = false;
   config.enable_turn = true;
+  config.enable_appoggiatura = false;
+  config.enable_pralltriller = false;
 
   EXPECT_EQ(selectOrnamentType(note, config), OrnamentType::Turn);
 }
@@ -237,6 +243,8 @@ TEST(OrnamentEngineTest, NoTypesEnabledReturnsUnchanged) {
   ctx.config.enable_trill = false;
   ctx.config.enable_mordent = false;
   ctx.config.enable_turn = false;
+  ctx.config.enable_appoggiatura = false;
+  ctx.config.enable_pralltriller = false;
   ctx.config.ornament_density = 1.0f;
   ctx.role = VoiceRole::Respond;
   ctx.seed = 42;
@@ -326,6 +334,164 @@ TEST(OrnamentEngineTest, TotalDurationPreserved) {
     Tick note_end = note.start_tick + note.duration;
     EXPECT_LE(note_end, original_end);
   }
+}
+
+// ---------------------------------------------------------------------------
+// Appoggiatura
+// ---------------------------------------------------------------------------
+
+TEST(OrnamentEngineTest, ApplyAppoggiatura) {
+  // Appoggiatura creates 2 notes: upper neighbor then original pitch.
+  OrnamentConfig config;
+  config.enable_trill = false;
+  config.enable_mordent = false;
+  config.enable_turn = false;
+  config.enable_appoggiatura = true;
+  config.enable_pralltriller = false;
+  config.ornament_density = 1.0f;
+
+  // Place note on strong beat so selectOrnamentType picks appoggiatura.
+  auto note = makeNote(0, 60, kTicksPerBeat);  // Beat 0, quarter note.
+  std::vector<NoteEvent> notes = {note};
+
+  OrnamentContext ctx;
+  ctx.config = config;
+  ctx.role = VoiceRole::Respond;
+  ctx.seed = 42;
+
+  auto result = applyOrnaments(notes, ctx);
+
+  ASSERT_EQ(result.size(), 2u);
+
+  // First note: upper neighbor (pitch + 2), 25% duration.
+  EXPECT_EQ(result[0].pitch, 62);
+  EXPECT_EQ(result[0].start_tick, 0u);
+  EXPECT_EQ(result[0].duration, kTicksPerBeat / 4);
+  EXPECT_EQ(result[0].voice, 0);
+  EXPECT_EQ(result[0].velocity, 80);
+
+  // Second note: original pitch, 75% duration.
+  EXPECT_EQ(result[1].pitch, 60);
+  EXPECT_EQ(result[1].start_tick, kTicksPerBeat / 4);
+  EXPECT_EQ(result[1].duration, kTicksPerBeat - kTicksPerBeat / 4);
+  EXPECT_EQ(result[1].voice, 0);
+  EXPECT_EQ(result[1].velocity, 80);
+
+  // Total duration preserved.
+  EXPECT_EQ(result[0].duration + result[1].duration, kTicksPerBeat);
+}
+
+// ---------------------------------------------------------------------------
+// Pralltriller
+// ---------------------------------------------------------------------------
+
+TEST(OrnamentEngineTest, ApplyPralltriller) {
+  // Pralltriller creates 4 notes: upper, orig, upper, orig.
+  OrnamentConfig config;
+  config.enable_trill = false;
+  config.enable_mordent = false;
+  config.enable_turn = false;
+  config.enable_appoggiatura = false;
+  config.enable_pralltriller = true;
+  config.ornament_density = 1.0f;
+
+  // Place note on weak beat so selectOrnamentType picks pralltriller.
+  auto note = makeNote(kTicksPerBeat, 64, kTicksPerBeat);  // Beat 1, quarter note.
+  std::vector<NoteEvent> notes = {note};
+
+  OrnamentContext ctx;
+  ctx.config = config;
+  ctx.role = VoiceRole::Respond;
+  ctx.seed = 42;
+
+  auto result = applyOrnaments(notes, ctx);
+
+  ASSERT_EQ(result.size(), 4u);
+
+  const Tick short_dur = kTicksPerBeat / 12;  // 40 ticks each.
+  const Tick last_dur = kTicksPerBeat - (short_dur * 3);
+
+  // Note 0: upper neighbor.
+  EXPECT_EQ(result[0].pitch, 66);
+  EXPECT_EQ(result[0].start_tick, kTicksPerBeat);
+  EXPECT_EQ(result[0].duration, short_dur);
+
+  // Note 1: original pitch.
+  EXPECT_EQ(result[1].pitch, 64);
+  EXPECT_EQ(result[1].start_tick, kTicksPerBeat + short_dur);
+  EXPECT_EQ(result[1].duration, short_dur);
+
+  // Note 2: upper neighbor.
+  EXPECT_EQ(result[2].pitch, 66);
+  EXPECT_EQ(result[2].start_tick, kTicksPerBeat + short_dur * 2);
+  EXPECT_EQ(result[2].duration, short_dur);
+
+  // Note 3: original pitch (absorbs remainder).
+  EXPECT_EQ(result[3].pitch, 64);
+  EXPECT_EQ(result[3].start_tick, kTicksPerBeat + short_dur * 3);
+  EXPECT_EQ(result[3].duration, last_dur);
+
+  // Total duration preserved.
+  Tick total = 0;
+  for (const auto& sub : result) {
+    total += sub.duration;
+  }
+  EXPECT_EQ(total, kTicksPerBeat);
+}
+
+// ---------------------------------------------------------------------------
+// Turn enabled by default
+// ---------------------------------------------------------------------------
+
+TEST(OrnamentEngineTest, TurnIsNowEnabled) {
+  OrnamentConfig config;
+  EXPECT_TRUE(config.enable_turn);
+}
+
+// ---------------------------------------------------------------------------
+// Appoggiatura and Pralltriller enabled by default
+// ---------------------------------------------------------------------------
+
+TEST(OrnamentEngineTest, AppoggiaturaEnabledByDefault) {
+  OrnamentConfig config;
+  EXPECT_TRUE(config.enable_appoggiatura);
+}
+
+TEST(OrnamentEngineTest, PralltrillerEnabledByDefault) {
+  OrnamentConfig config;
+  EXPECT_TRUE(config.enable_pralltriller);
+}
+
+// ---------------------------------------------------------------------------
+// selectOrnamentType: Appoggiatura on strong beat when trill disabled
+// ---------------------------------------------------------------------------
+
+TEST(OrnamentTypeSelectionTest, StrongBeatFallsBackToAppoggiaturaIfNoTrill) {
+  auto note = makeNote(0, 60, kTicksPerBeat);  // Beat 0 = strong.
+  OrnamentConfig config;
+  config.enable_trill = false;
+  config.enable_mordent = false;
+  config.enable_turn = false;
+  config.enable_appoggiatura = true;
+  config.enable_pralltriller = false;
+
+  EXPECT_EQ(selectOrnamentType(note, config), OrnamentType::Appoggiatura);
+}
+
+// ---------------------------------------------------------------------------
+// selectOrnamentType: Pralltriller on weak beat when mordent disabled
+// ---------------------------------------------------------------------------
+
+TEST(OrnamentTypeSelectionTest, WeakBeatFallsBackToPralltrillerIfNoMordent) {
+  auto note = makeNote(kTicksPerBeat, 60, kTicksPerBeat);  // Beat 1 = weak.
+  OrnamentConfig config;
+  config.enable_trill = false;
+  config.enable_mordent = false;
+  config.enable_turn = false;
+  config.enable_appoggiatura = false;
+  config.enable_pralltriller = true;
+
+  EXPECT_EQ(selectOrnamentType(note, config), OrnamentType::Pralltriller);
 }
 
 }  // namespace

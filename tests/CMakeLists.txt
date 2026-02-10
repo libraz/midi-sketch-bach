@@ -34,6 +34,7 @@ set(BACH_TEST_SOURCES
   counterpoint/i_rule_evaluator_test.cpp
   counterpoint/voice_manager_test.cpp
   counterpoint/fux_rule_evaluator_test.cpp
+  counterpoint/bach_rule_evaluator_test.cpp
   counterpoint/species_rules_test.cpp
   counterpoint/motion_analyzer_test.cpp
   counterpoint/collision_resolver_test.cpp
@@ -56,6 +57,7 @@ set(BACH_TEST_SOURCES
   fugue/stretto_test.cpp
   fugue/fugue_generator_test.cpp
   fugue/fugue_duration_scale_test.cpp
+  fugue/fugue_energy_curve_test.cpp
 
   # transform/
   transform/motif_transform_test.cpp

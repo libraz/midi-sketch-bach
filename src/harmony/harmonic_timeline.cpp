@@ -112,8 +112,10 @@ bool HarmonicTimeline::isKeyChange(Tick tick) const {
 /// @param key_sig Key signature (tonic + mode).
 /// @param degree Chord degree to build.
 /// @param octave Octave for the root pitch.
+/// @param inversion Chord inversion (0=root, 1=first, 2=second).
 /// @return Chord with quality and root pitch populated.
-static Chord buildChord(const KeySignature& key_sig, ChordDegree degree, int octave) {
+static Chord buildChord(const KeySignature& key_sig, ChordDegree degree, int octave,
+                        uint8_t inversion = 0) {
   Chord chord;
   chord.degree = degree;
   chord.quality = key_sig.is_minor ? minorKeyQuality(degree)
@@ -123,19 +125,60 @@ static Chord buildChord(const KeySignature& key_sig, ChordDegree degree, int oct
                                              : degreeSemitones(degree);
   int root_midi = (octave + 1) * 12 + static_cast<int>(key_sig.tonic) + semitone_offset;
   chord.root_pitch = static_cast<uint8_t>(root_midi > 127 ? 127 : root_midi);
-  chord.inversion = 0;
+  chord.inversion = inversion;
 
   return chord;
 }
 
-/// @brief Calculate bass pitch for a chord.
-/// @param chord The chord.
+/// @brief Build a chord with a specific quality override.
+static Chord buildChordWithQuality(const KeySignature& key_sig, ChordDegree degree,
+                                   ChordQuality quality, int octave,
+                                   uint8_t inversion = 0) {
+  Chord chord = buildChord(key_sig, degree, octave, inversion);
+  chord.quality = quality;
+  return chord;
+}
+
+/// @brief Get the third interval in semitones for a chord quality.
+static int thirdInterval(ChordQuality quality) {
+  switch (quality) {
+    case ChordQuality::Major:
+    case ChordQuality::Dominant7:
+    case ChordQuality::MajorMajor7:
+    case ChordQuality::Augmented:
+      return 4;
+    default:
+      return 3;
+  }
+}
+
+/// @brief Get the fifth interval in semitones for a chord quality.
+static int fifthInterval(ChordQuality quality) {
+  switch (quality) {
+    case ChordQuality::Diminished:
+      return 6;
+    case ChordQuality::Augmented:
+      return 8;
+    default:
+      return 7;
+  }
+}
+
+/// @brief Calculate bass pitch for a chord, respecting inversions.
+/// @param chord The chord (inversion field determines bass note).
 /// @param bass_octave Octave for the bass note (typically 2 or 3).
 /// @return MIDI pitch for the bass.
 static uint8_t computeBassPitch(const Chord& chord, int bass_octave) {
-  // Root position: bass = root in bass octave.
   int root_pc = static_cast<int>(chord.root_pitch) % 12;
-  int bass_midi = (bass_octave + 1) * 12 + root_pc;
+  int bass_pc = root_pc;
+
+  if (chord.inversion == 1) {
+    bass_pc = (root_pc + thirdInterval(chord.quality)) % 12;
+  } else if (chord.inversion == 2) {
+    bass_pc = (root_pc + fifthInterval(chord.quality)) % 12;
+  }
+
+  int bass_midi = (bass_octave + 1) * 12 + bass_pc;
   if (bass_midi > 127) bass_midi = 127;
   if (bass_midi < 0) bass_midi = 0;
   return static_cast<uint8_t>(bass_midi);
@@ -166,11 +209,15 @@ HarmonicTimeline HarmonicTimeline::createStandard(const KeySignature& key_sig,
       break;
   }
 
-  // Standard progression: I - IV - V - I
+  // Standard progression: I - IV - V7 - I
   // This is the fundamental cadential skeleton used throughout Bach.
+  // V chord uses Dominant7 quality for stronger cadential function.
   constexpr int kProgressionLength = 4;
   constexpr ChordDegree kProgression[kProgressionLength] = {
       ChordDegree::I, ChordDegree::IV, ChordDegree::V, ChordDegree::I};
+
+  // Whether each chord should override to Dominant7 quality.
+  constexpr bool kDom7Override[kProgressionLength] = {false, false, true, false};
 
   // Metric weight pattern: strong - weak - strong - strong (cadential).
   constexpr float kWeights[kProgressionLength] = {1.0f, 0.5f, 0.75f, 1.0f};
@@ -184,8 +231,11 @@ HarmonicTimeline HarmonicTimeline::createStandard(const KeySignature& key_sig,
   while (current_tick < duration) {
     ChordDegree degree = kProgression[progression_idx % kProgressionLength];
     float weight = kWeights[progression_idx % kProgressionLength];
+    bool dom7 = kDom7Override[progression_idx % kProgressionLength];
 
-    Chord chord = buildChord(key_sig, degree, kChordOctave);
+    Chord chord = dom7 ? buildChordWithQuality(key_sig, degree, ChordQuality::Dominant7,
+                                               kChordOctave)
+                       : buildChord(key_sig, degree, kChordOctave);
     uint8_t bass = computeBassPitch(chord, kBassOctave);
 
     Tick event_end = current_tick + event_length;
@@ -210,6 +260,176 @@ HarmonicTimeline HarmonicTimeline::createStandard(const KeySignature& key_sig,
   }
 
   return timeline;
+}
+
+// ---------------------------------------------------------------------------
+// Progression templates
+// ---------------------------------------------------------------------------
+
+/// @brief Progression entry with degree, quality override, inversion, and weight.
+struct ProgEntry {
+  ChordDegree degree;
+  ChordQuality quality_override;   // If Augmented, use default key quality
+  uint8_t inversion;
+  float weight;
+  bool use_quality_override;
+};
+
+static const ProgEntry kCircleOfFifths[] = {
+    {ChordDegree::I,   ChordQuality::Major, 0, 1.0f, false},
+    {ChordDegree::vi,  ChordQuality::Minor, 0, 0.5f, false},
+    {ChordDegree::ii,  ChordQuality::Minor, 0, 0.5f, false},
+    {ChordDegree::V,   ChordQuality::Dominant7, 0, 0.75f, true},
+    {ChordDegree::I,   ChordQuality::Major, 0, 1.0f, false},
+};
+
+static const ProgEntry kSubdominant[] = {
+    {ChordDegree::I,   ChordQuality::Major, 0, 1.0f, false},
+    {ChordDegree::IV,  ChordQuality::Major, 0, 0.5f, false},
+    {ChordDegree::ii,  ChordQuality::Minor, 0, 0.5f, false},
+    {ChordDegree::V,   ChordQuality::Dominant7, 0, 0.75f, true},
+    {ChordDegree::I,   ChordQuality::Major, 0, 1.0f, false},
+};
+
+HarmonicTimeline HarmonicTimeline::createProgression(const KeySignature& key_sig,
+                                                      Tick duration,
+                                                      HarmonicResolution resolution,
+                                                      ProgressionType prog_type) {
+  if (prog_type == ProgressionType::Basic) {
+    return createStandard(key_sig, duration, resolution);
+  }
+
+  HarmonicTimeline timeline;
+  if (duration == 0) return timeline;
+
+  Tick event_length = 0;
+  switch (resolution) {
+    case HarmonicResolution::Beat:   event_length = kTicksPerBeat; break;
+    case HarmonicResolution::Bar:    event_length = kTicksPerBar;  break;
+    case HarmonicResolution::Section:
+      event_length = duration / 5;
+      if (event_length == 0) event_length = duration;
+      break;
+  }
+
+  const ProgEntry* prog = nullptr;
+  int prog_len = 0;
+  switch (prog_type) {
+    case ProgressionType::CircleOfFifths:
+      prog = kCircleOfFifths;
+      prog_len = 5;
+      break;
+    case ProgressionType::Subdominant:
+      prog = kSubdominant;
+      prog_len = 5;
+      break;
+    default:
+      return createStandard(key_sig, duration, resolution);
+  }
+
+  constexpr int kChordOctave = 4;
+  constexpr int kBassOctave = 2;
+
+  Tick current_tick = 0;
+  int progression_idx = 0;
+
+  while (current_tick < duration) {
+    const auto& entry = prog[progression_idx % prog_len];
+
+    Chord chord;
+    if (entry.use_quality_override) {
+      chord = buildChordWithQuality(key_sig, entry.degree, entry.quality_override,
+                                    kChordOctave, entry.inversion);
+    } else {
+      chord = buildChord(key_sig, entry.degree, kChordOctave, entry.inversion);
+    }
+
+    uint8_t bass = computeBassPitch(chord, kBassOctave);
+
+    Tick event_end = current_tick + event_length;
+    if (event_end > duration) event_end = duration;
+
+    HarmonicEvent event;
+    event.tick = current_tick;
+    event.end_tick = event_end;
+    event.key = key_sig.tonic;
+    event.is_minor = key_sig.is_minor;
+    event.chord = chord;
+    event.bass_pitch = bass;
+    event.weight = entry.weight;
+    event.is_immutable = false;
+
+    timeline.addEvent(event);
+
+    current_tick = event_end;
+    ++progression_idx;
+  }
+
+  return timeline;
+}
+
+// ---------------------------------------------------------------------------
+// Cadence application
+// ---------------------------------------------------------------------------
+
+void HarmonicTimeline::applyCadence(CadenceType cadence, const KeySignature& key_sig) {
+  if (events_.empty()) return;
+
+  constexpr int kChordOctave = 4;
+  constexpr int kBassOctave = 2;
+
+  auto& last = events_.back();
+
+  switch (cadence) {
+    case CadenceType::Perfect: {
+      // Make the penultimate chord V7 if we have at least 2 events.
+      if (events_.size() >= 2) {
+        auto& penult = events_[events_.size() - 2];
+        penult.chord = buildChordWithQuality(key_sig, ChordDegree::V,
+                                             ChordQuality::Dominant7, kChordOctave);
+        penult.bass_pitch = computeBassPitch(penult.chord, kBassOctave);
+      }
+      last.chord = buildChord(key_sig, ChordDegree::I, kChordOctave);
+      last.bass_pitch = computeBassPitch(last.chord, kBassOctave);
+      break;
+    }
+    case CadenceType::Deceptive: {
+      // V -> vi instead of V -> I
+      if (events_.size() >= 2) {
+        auto& penult = events_[events_.size() - 2];
+        penult.chord = buildChordWithQuality(key_sig, ChordDegree::V,
+                                             ChordQuality::Dominant7, kChordOctave);
+        penult.bass_pitch = computeBassPitch(penult.chord, kBassOctave);
+      }
+      last.chord = buildChord(key_sig, ChordDegree::vi, kChordOctave);
+      last.bass_pitch = computeBassPitch(last.chord, kBassOctave);
+      break;
+    }
+    case CadenceType::Half: {
+      // End on V
+      last.chord = buildChord(key_sig, ChordDegree::V, kChordOctave);
+      last.bass_pitch = computeBassPitch(last.chord, kBassOctave);
+      break;
+    }
+    case CadenceType::Phrygian: {
+      // iv6 -> V (minor key). Set penultimate to iv in first inversion.
+      if (events_.size() >= 2) {
+        auto& penult = events_[events_.size() - 2];
+        penult.chord = buildChord(key_sig, ChordDegree::IV, kChordOctave, 1);
+        penult.bass_pitch = computeBassPitch(penult.chord, kBassOctave);
+      }
+      last.chord = buildChord(key_sig, ChordDegree::V, kChordOctave);
+      last.bass_pitch = computeBassPitch(last.chord, kBassOctave);
+      break;
+    }
+    case CadenceType::PicardyThird: {
+      // Final chord is I major even in minor key.
+      last.chord = buildChordWithQuality(key_sig, ChordDegree::I,
+                                         ChordQuality::Major, kChordOctave);
+      last.bass_pitch = computeBassPitch(last.chord, kBassOctave);
+      break;
+    }
+  }
 }
 
 }  // namespace bach

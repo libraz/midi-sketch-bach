@@ -55,6 +55,47 @@ bool isCharacterAvailable(SubjectCharacter character, int phase);
 /// @return True if the combination is allowed, false if forbidden.
 bool isCharacterFormCompatible(SubjectCharacter character, FormType form);
 
+/// @brief Energy curve for fugue dynamics (Principle 4: design values).
+///
+/// Maps normalized position [0,1] within the fugue to an energy level [0,1].
+/// These are fixed design values (not generated) per Principle 4.
+struct FugueEnergyCurve {
+  /// @brief Get energy level at a given position in the fugue.
+  /// @param tick Current tick position.
+  /// @param total_duration Total fugue duration in ticks.
+  /// @return Energy level in [0.0, 1.0].
+  static float getLevel(Tick tick, Tick total_duration) {
+    if (total_duration == 0) return 0.5f;
+    float pos = static_cast<float>(tick) / static_cast<float>(total_duration);
+    if (pos < 0.0f) pos = 0.0f;
+    if (pos > 1.0f) pos = 1.0f;
+
+    // Establish (0-25%): steady 0.5
+    if (pos < 0.25f) return 0.5f;
+    // Develop (25-70%): 0.5 -> 0.7 with linear ramp
+    if (pos < 0.70f) {
+      float develop_pos = (pos - 0.25f) / 0.45f;  // 0..1 within Develop
+      return 0.5f + develop_pos * 0.2f;
+    }
+    // Stretto (70-90%): 0.8 -> 1.0
+    if (pos < 0.90f) {
+      float stretto_pos = (pos - 0.70f) / 0.20f;
+      return 0.8f + stretto_pos * 0.2f;
+    }
+    // Coda (90-100%): 0.9
+    return 0.9f;
+  }
+
+  /// @brief Get minimum note duration based on energy (rhythm density control).
+  /// @param energy Energy level from getLevel().
+  /// @return Minimum duration in ticks.
+  static Tick minDuration(float energy) {
+    if (energy < 0.4f) return kTicksPerBeat;      // quarter note
+    if (energy < 0.7f) return kTicksPerBeat / 2;  // eighth note
+    return kTicksPerBeat / 4;                      // sixteenth note
+  }
+};
+
 /// Configuration for fugue generation.
 struct FugueConfig {
   SubjectSource subject_source = SubjectSource::Generate;

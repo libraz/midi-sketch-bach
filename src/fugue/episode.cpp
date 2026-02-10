@@ -7,6 +7,7 @@
 #include <random>
 
 #include "core/rng_util.h"
+#include "fugue/fugue_config.h"
 #include "transform/motif_transform.h"
 #include "transform/sequence.h"
 
@@ -88,6 +89,238 @@ void normalizeMotifToZero(std::vector<NoteEvent>& motif) {
   }
 }
 
+/// @brief Apply invertible counterpoint by swapping voice 0 and voice 1 IDs.
+///
+/// This implements double counterpoint at the octave: material originally in
+/// the upper voice moves to the lower voice and vice versa, a standard
+/// Baroque compositional technique used in recurring episodes.
+///
+/// @param notes Episode notes to modify in place.
+void applyInvertibleCounterpoint(std::vector<NoteEvent>& notes) {
+  for (auto& note : notes) {
+    if (note.voice == 0) {
+      note.voice = 1;
+    } else if (note.voice == 1) {
+      note.voice = 0;
+    }
+  }
+}
+
+/// @brief Generate voice 0 and voice 1 for Severe character.
+///
+/// Severe episodes use strict sequential patterns: the original motif in
+/// voice 0 with an inverted imitation in voice 1 (standard Baroque practice).
+///
+/// @param episode Episode to append notes to.
+/// @param motif Normalized motif.
+/// @param start_tick Episode start tick.
+/// @param motif_dur Duration of the motif.
+/// @param seq_interval Sequence interval step.
+/// @param seq_reps Number of sequence repetitions.
+/// @param imitation_offset Offset for voice 1 entry.
+/// @param num_voices Number of active voices.
+void generateSevereEpisode(Episode& episode, const std::vector<NoteEvent>& motif,
+                           Tick start_tick, Tick motif_dur, int seq_interval,
+                           int seq_reps, Tick imitation_offset, uint8_t num_voices) {
+  // Voice 0: Original motif + sequence.
+  for (const auto& note : motif) {
+    NoteEvent placed = note;
+    placed.start_tick += start_tick;
+    placed.voice = 0;
+    episode.notes.push_back(placed);
+  }
+  auto seq_notes = generateSequence(motif, seq_reps, seq_interval, start_tick + motif_dur);
+  for (auto& note : seq_notes) {
+    note.voice = 0;
+    episode.notes.push_back(note);
+  }
+
+  // Voice 1: Inverted imitation + sequence.
+  if (num_voices >= 2) {
+    uint8_t pivot = motif[0].pitch;
+    auto inverted = invertMelody(motif, pivot);
+    Tick voice1_start = start_tick + imitation_offset;
+    for (const auto& note : inverted) {
+      NoteEvent placed = note;
+      placed.start_tick += voice1_start;
+      placed.voice = 1;
+      episode.notes.push_back(placed);
+    }
+    int inv_reps = std::max(1, seq_reps - 1);
+    auto inv_seq =
+        generateSequence(inverted, inv_reps, seq_interval, voice1_start + motif_dur);
+    for (auto& note : inv_seq) {
+      note.voice = 1;
+      episode.notes.push_back(note);
+    }
+  }
+}
+
+/// @brief Generate voice 0 and voice 1 for Playful character.
+///
+/// Playful episodes use retrograde of the motif for voice 0, and diminished
+/// fragments of the motif for voice 1 (contrasting rhythmic energy).
+///
+/// @param episode Episode to append notes to.
+/// @param motif Normalized motif.
+/// @param start_tick Episode start tick.
+/// @param motif_dur Duration of the motif.
+/// @param seq_interval Sequence interval step.
+/// @param seq_reps Number of sequence repetitions.
+/// @param imitation_offset Offset for voice 1 entry.
+/// @param num_voices Number of active voices.
+void generatePlayfulEpisode(Episode& episode, const std::vector<NoteEvent>& motif,
+                            Tick start_tick, Tick motif_dur, int seq_interval,
+                            int seq_reps, Tick imitation_offset, uint8_t num_voices) {
+  // Voice 0: Retrograde of motif + sequence of retrograde.
+  auto retrograde = retrogradeMelody(motif, start_tick);
+  for (auto& note : retrograde) {
+    note.voice = 0;
+    episode.notes.push_back(note);
+  }
+  auto seq_notes =
+      generateSequence(retrograde, seq_reps, seq_interval, start_tick + motif_dur);
+  for (auto& note : seq_notes) {
+    note.voice = 0;
+    episode.notes.push_back(note);
+  }
+
+  // Voice 1: Diminished fragments for rhythmic contrast.
+  if (num_voices >= 2) {
+    Tick voice1_start = start_tick + imitation_offset;
+    auto diminished = diminishMelody(motif, voice1_start);
+    for (auto& note : diminished) {
+      note.voice = 1;
+      episode.notes.push_back(note);
+    }
+    // Sequence of diminished motif (fits more reps due to shorter duration).
+    Tick dim_dur = motifDuration(diminished);
+    if (dim_dur == 0) dim_dur = motif_dur / 2;
+    int dim_reps = calculateSequenceRepetitions(motif_dur * 2, dim_dur);
+    auto dim_seq =
+        generateSequence(diminished, dim_reps, seq_interval, voice1_start + dim_dur);
+    for (auto& note : dim_seq) {
+      note.voice = 1;
+      episode.notes.push_back(note);
+    }
+  }
+}
+
+/// @brief Generate voice 0 and voice 1 for Noble character.
+///
+/// Noble episodes use the augmented motif (doubled duration) in the lowest
+/// voice, creating a stately bass foundation, with the original motif
+/// providing melodic interest in the upper voice.
+///
+/// @param episode Episode to append notes to.
+/// @param motif Normalized motif.
+/// @param start_tick Episode start tick.
+/// @param motif_dur Duration of the motif.
+/// @param seq_interval Sequence interval step.
+/// @param seq_reps Number of sequence repetitions.
+/// @param imitation_offset Offset for voice 1 entry.
+/// @param num_voices Number of active voices.
+void generateNobleEpisode(Episode& episode, const std::vector<NoteEvent>& motif,
+                          Tick start_tick, Tick motif_dur, int seq_interval,
+                          int seq_reps, Tick imitation_offset, uint8_t num_voices) {
+  // Voice 0: Original motif + sequence (upper melodic line).
+  for (const auto& note : motif) {
+    NoteEvent placed = note;
+    placed.start_tick += start_tick;
+    placed.voice = 0;
+    episode.notes.push_back(placed);
+  }
+  auto seq_notes = generateSequence(motif, seq_reps, seq_interval, start_tick + motif_dur);
+  for (auto& note : seq_notes) {
+    note.voice = 0;
+    episode.notes.push_back(note);
+  }
+
+  // Voice 1: Augmented motif in the bass (doubled duration for stately motion).
+  if (num_voices >= 2) {
+    Tick voice1_start = start_tick + imitation_offset;
+    auto augmented = augmentMelody(motif, voice1_start);
+    // Transpose down an octave for bass register placement.
+    augmented = transposeMelody(augmented, -12);
+    for (auto& note : augmented) {
+      note.voice = 1;
+      episode.notes.push_back(note);
+    }
+  }
+}
+
+/// @brief Generate voice 0 and voice 1 for Restless character.
+///
+/// Restless episodes fragment the motif into 2 pieces and use overlapping
+/// imitation with a shorter offset, creating rhythmic urgency.
+///
+/// @param episode Episode to append notes to.
+/// @param motif Normalized motif.
+/// @param start_tick Episode start tick.
+/// @param motif_dur Duration of the motif.
+/// @param seq_interval Sequence interval step.
+/// @param seq_reps Number of sequence repetitions.
+/// @param imitation_offset Offset for voice 1 entry.
+/// @param num_voices Number of active voices.
+void generateRestlessEpisode(Episode& episode, const std::vector<NoteEvent>& motif,
+                             Tick start_tick, Tick motif_dur, int seq_interval,
+                             int seq_reps, Tick imitation_offset, uint8_t num_voices) {
+  // Fragment the motif into 2 pieces for tight imitation.
+  auto fragments = fragmentMotif(motif, 2);
+
+  // Voice 0: First fragment + sequence.
+  std::vector<NoteEvent> frag0 = fragments.empty() ? motif : fragments[0];
+  normalizeMotifToZero(frag0);
+  Tick frag0_dur = motifDuration(frag0);
+  if (frag0_dur == 0) frag0_dur = motif_dur / 2;
+
+  for (const auto& note : frag0) {
+    NoteEvent placed = note;
+    placed.start_tick += start_tick;
+    placed.voice = 0;
+    episode.notes.push_back(placed);
+  }
+  // More repetitions since fragments are shorter.
+  int frag_reps = calculateSequenceRepetitions(motif_dur * 2, frag0_dur);
+  auto seq_notes =
+      generateSequence(frag0, frag_reps, seq_interval, start_tick + frag0_dur);
+  for (auto& note : seq_notes) {
+    note.voice = 0;
+    episode.notes.push_back(note);
+  }
+
+  // Voice 1: Second fragment (or inverted first) with tight overlap.
+  if (num_voices >= 2) {
+    std::vector<NoteEvent> frag1;
+    if (fragments.size() >= 2) {
+      frag1 = fragments[1];
+    } else {
+      // Fallback: invert the first fragment.
+      uint8_t pivot = frag0.empty() ? kMidiC4 : frag0[0].pitch;
+      frag1 = invertMelody(frag0, pivot);
+    }
+    normalizeMotifToZero(frag1);
+    Tick frag1_dur = motifDuration(frag1);
+    if (frag1_dur == 0) frag1_dur = frag0_dur;
+
+    // Restless uses tighter imitation offset (already computed).
+    Tick voice1_start = start_tick + imitation_offset;
+    for (const auto& note : frag1) {
+      NoteEvent placed = note;
+      placed.start_tick += voice1_start;
+      placed.voice = 1;
+      episode.notes.push_back(placed);
+    }
+    int frag1_reps = calculateSequenceRepetitions(motif_dur * 2, frag1_dur);
+    auto frag1_seq =
+        generateSequence(frag1, frag1_reps, seq_interval, voice1_start + frag1_dur);
+    for (auto& note : frag1_seq) {
+      note.voice = 1;
+      episode.notes.push_back(note);
+    }
+  }
+}
+
 }  // namespace
 
 std::vector<NoteEvent> extractMotif(const Subject& subject, size_t max_notes) {
@@ -100,8 +333,29 @@ std::vector<NoteEvent> extractMotif(const Subject& subject, size_t max_notes) {
   return motif;
 }
 
+std::vector<NoteEvent> extractTailMotif(const std::vector<NoteEvent>& notes, size_t num_notes) {
+  if (num_notes >= notes.size()) return notes;
+  return std::vector<NoteEvent>(notes.end() - static_cast<int>(num_notes), notes.end());
+}
+
+std::vector<std::vector<NoteEvent>> fragmentMotif(const std::vector<NoteEvent>& notes,
+                                                   size_t num_fragments) {
+  std::vector<std::vector<NoteEvent>> fragments;
+  if (num_fragments == 0 || notes.empty()) return fragments;
+  size_t frag_size = notes.size() / num_fragments;
+  if (frag_size == 0) frag_size = 1;
+  for (size_t idx = 0; idx < notes.size(); idx += frag_size) {
+    size_t end = std::min(idx + frag_size, notes.size());
+    fragments.emplace_back(notes.begin() + static_cast<int>(idx),
+                           notes.begin() + static_cast<int>(end));
+    if (fragments.size() >= num_fragments) break;
+  }
+  return fragments;
+}
+
 Episode generateEpisode(const Subject& subject, Tick start_tick, Tick duration_ticks,
-                        Key start_key, Key target_key, uint8_t num_voices, uint32_t seed) {
+                        Key start_key, Key target_key, uint8_t num_voices, uint32_t seed,
+                        int episode_index, float energy_level) {
   std::mt19937 rng(seed);
 
   Episode episode;
@@ -132,47 +386,28 @@ Episode generateEpisode(const Subject& subject, Tick start_tick, Tick duration_t
   // Calculate transposition for key modulation.
   int key_diff = static_cast<int>(target_key) - static_cast<int>(start_key);
 
-  // --- Voice 0: Primary sequential pattern (Zeugma) ---
-  // Place original motif at start_tick.
-  for (const auto& note : motif) {
-    NoteEvent placed = note;
-    placed.start_tick += start_tick;
-    placed.voice = 0;
-    episode.notes.push_back(placed);
+  // --- Character-specific voice generation ---
+  switch (subject.character) {
+    case SubjectCharacter::Playful:
+      generatePlayfulEpisode(episode, motif, start_tick, motif_dur, seq_interval, seq_reps,
+                             imitation_offset, num_voices);
+      break;
+    case SubjectCharacter::Noble:
+      generateNobleEpisode(episode, motif, start_tick, motif_dur, seq_interval, seq_reps,
+                           imitation_offset, num_voices);
+      break;
+    case SubjectCharacter::Restless:
+      generateRestlessEpisode(episode, motif, start_tick, motif_dur, seq_interval, seq_reps,
+                              imitation_offset, num_voices);
+      break;
+    case SubjectCharacter::Severe:
+    default:
+      generateSevereEpisode(episode, motif, start_tick, motif_dur, seq_interval, seq_reps,
+                            imitation_offset, num_voices);
+      break;
   }
 
-  // Generate sequence repetitions following the initial motif statement.
-  auto seq_notes = generateSequence(motif, seq_reps, seq_interval, start_tick + motif_dur);
-  for (auto& note : seq_notes) {
-    note.voice = 0;
-    episode.notes.push_back(note);
-  }
-
-  // --- Voice 1: Inverted imitation ---
-  if (num_voices >= 2) {
-    uint8_t pivot = motif[0].pitch;
-    auto inverted = invertMelody(motif, pivot);
-
-    // Place inverted motif at the imitation offset.
-    Tick voice1_start = start_tick + imitation_offset;
-    for (const auto& note : inverted) {
-      NoteEvent placed = note;
-      placed.start_tick += voice1_start;
-      placed.voice = 1;
-      episode.notes.push_back(placed);
-    }
-
-    // Sequence of inverted motif (one fewer rep to avoid overrunning duration).
-    int inv_reps = std::max(1, seq_reps - 1);
-    auto inv_seq = generateSequence(inverted, inv_reps, seq_interval,
-                                    voice1_start + motif_dur);
-    for (auto& note : inv_seq) {
-      note.voice = 1;
-      episode.notes.push_back(note);
-    }
-  }
-
-  // --- Voice 2: Diminished motif (rhythmic contrast) ---
+  // --- Voice 2: Diminished motif (rhythmic contrast, shared across characters) ---
   if (num_voices >= 3) {
     auto diminished = diminishMelody(motif, start_tick + motif_dur);
     for (auto& note : diminished) {
@@ -191,6 +426,21 @@ Episode generateEpisode(const Subject& subject, Tick start_tick, Tick duration_t
         note.pitch = clampMidiPitch(new_pitch);
       }
     }
+  }
+
+  // --- Apply energy-based rhythm density floor ---
+  // Clamp note durations to the minimum allowed by the current energy level.
+  Tick min_dur = FugueEnergyCurve::minDuration(energy_level);
+  for (auto& note : episode.notes) {
+    if (note.duration < min_dur) {
+      note.duration = min_dur;
+    }
+  }
+
+  // --- Invertible counterpoint for odd-indexed episodes ---
+  // Swap voice 0 and voice 1 material (double counterpoint at the octave).
+  if (episode_index % 2 != 0) {
+    applyInvertibleCounterpoint(episode.notes);
   }
 
   return episode;

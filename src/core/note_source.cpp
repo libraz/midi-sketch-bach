@@ -42,4 +42,29 @@ const char* bachTransformStepToString(BachTransformStep step) {
   return "unknown";
 }
 
+ProtectionLevel getProtectionLevel(BachNoteSource source) {
+  switch (source) {
+    case BachNoteSource::FugueSubject:
+    case BachNoteSource::CantusFixed:
+    case BachNoteSource::GroundBass:
+      return ProtectionLevel::Immutable;
+
+    case BachNoteSource::FugueAnswer:
+    case BachNoteSource::Countersubject:
+    case BachNoteSource::PedalPoint:
+      return ProtectionLevel::Structural;
+
+    case BachNoteSource::EpisodeMaterial:
+    case BachNoteSource::FreeCounterpoint:
+    case BachNoteSource::Ornament:
+    case BachNoteSource::ArpeggioFlow:
+    case BachNoteSource::TextureNote:
+    case BachNoteSource::CollisionAvoid:
+    case BachNoteSource::PostProcess:
+    case BachNoteSource::Unknown:
+      return ProtectionLevel::Flexible;
+  }
+  return ProtectionLevel::Flexible;
+}
+
 }  // namespace bach

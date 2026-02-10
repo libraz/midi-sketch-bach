@@ -299,10 +299,10 @@ TEST(HarmonicTimelineCreateStandardTest, MinorKeyQualities) {
   auto timeline = HarmonicTimeline::createStandard(a_minor, duration,
                                                    HarmonicResolution::Bar);
 
-  // i = Minor, iv = Minor, V = Major (harmonic minor practice), i = Minor.
+  // i = Minor, iv = Minor, V = Dominant7 (createStandard overrides V), i = Minor.
   EXPECT_EQ(timeline.getChordAt(0).quality, ChordQuality::Minor);
   EXPECT_EQ(timeline.getChordAt(kTicksPerBar).quality, ChordQuality::Minor);
-  EXPECT_EQ(timeline.getChordAt(kTicksPerBar * 2).quality, ChordQuality::Major);
+  EXPECT_EQ(timeline.getChordAt(kTicksPerBar * 2).quality, ChordQuality::Dominant7);
   EXPECT_EQ(timeline.getChordAt(kTicksPerBar * 3).quality, ChordQuality::Minor);
 }
 
@@ -381,6 +381,172 @@ TEST(HarmonicTimelineCreateStandardTest, WeightPattern) {
   EXPECT_FLOAT_EQ(evts[1].weight, 0.5f);
   EXPECT_FLOAT_EQ(evts[2].weight, 0.75f);
   EXPECT_FLOAT_EQ(evts[3].weight, 1.0f);
+}
+
+// ---------------------------------------------------------------------------
+// createStandard -- V chord is now Dominant7
+// ---------------------------------------------------------------------------
+
+TEST(HarmonicTimelineCreateStandardTest, VChordIsDominant7) {
+  KeySignature c_major = {Key::C, false};
+  auto timeline = HarmonicTimeline::createStandard(c_major, kTicksPerBar * 4,
+                                                   HarmonicResolution::Bar);
+  // V chord (3rd event, index 2) should now be Dominant7.
+  EXPECT_EQ(timeline.getChordAt(kTicksPerBar * 2).quality, ChordQuality::Dominant7);
+  EXPECT_EQ(timeline.getChordAt(kTicksPerBar * 2).degree, ChordDegree::V);
+}
+
+// ---------------------------------------------------------------------------
+// createProgression -- CircleOfFifths
+// ---------------------------------------------------------------------------
+
+TEST(HarmonicTimelineCreateProgressionTest, CircleOfFifths_BarResolution) {
+  KeySignature c_major = {Key::C, false};
+  auto timeline = HarmonicTimeline::createProgression(c_major, kTicksPerBar * 5,
+                                                      HarmonicResolution::Bar,
+                                                      ProgressionType::CircleOfFifths);
+  EXPECT_EQ(timeline.size(), 5u);
+  EXPECT_EQ(timeline.getChordAt(0).degree, ChordDegree::I);
+  EXPECT_EQ(timeline.getChordAt(kTicksPerBar).degree, ChordDegree::vi);
+  EXPECT_EQ(timeline.getChordAt(kTicksPerBar * 2).degree, ChordDegree::ii);
+  EXPECT_EQ(timeline.getChordAt(kTicksPerBar * 3).degree, ChordDegree::V);
+  EXPECT_EQ(timeline.getChordAt(kTicksPerBar * 3).quality, ChordQuality::Dominant7);
+  EXPECT_EQ(timeline.getChordAt(kTicksPerBar * 4).degree, ChordDegree::I);
+}
+
+TEST(HarmonicTimelineCreateProgressionTest, Subdominant_BarResolution) {
+  KeySignature c_major = {Key::C, false};
+  auto timeline = HarmonicTimeline::createProgression(c_major, kTicksPerBar * 5,
+                                                      HarmonicResolution::Bar,
+                                                      ProgressionType::Subdominant);
+  EXPECT_EQ(timeline.size(), 5u);
+  EXPECT_EQ(timeline.getChordAt(0).degree, ChordDegree::I);
+  EXPECT_EQ(timeline.getChordAt(kTicksPerBar).degree, ChordDegree::IV);
+  EXPECT_EQ(timeline.getChordAt(kTicksPerBar * 2).degree, ChordDegree::ii);
+  EXPECT_EQ(timeline.getChordAt(kTicksPerBar * 3).degree, ChordDegree::V);
+  EXPECT_EQ(timeline.getChordAt(kTicksPerBar * 3).quality, ChordQuality::Dominant7);
+  EXPECT_EQ(timeline.getChordAt(kTicksPerBar * 4).degree, ChordDegree::I);
+}
+
+TEST(HarmonicTimelineCreateProgressionTest, BasicFallsBackToStandard) {
+  KeySignature c_major = {Key::C, false};
+  auto timeline = HarmonicTimeline::createProgression(c_major, kTicksPerBar * 4,
+                                                      HarmonicResolution::Bar,
+                                                      ProgressionType::Basic);
+  EXPECT_EQ(timeline.size(), 4u);
+  EXPECT_EQ(timeline.getChordAt(0).degree, ChordDegree::I);
+  EXPECT_EQ(timeline.getChordAt(kTicksPerBar).degree, ChordDegree::IV);
+  EXPECT_EQ(timeline.getChordAt(kTicksPerBar * 2).degree, ChordDegree::V);
+  EXPECT_EQ(timeline.getChordAt(kTicksPerBar * 3).degree, ChordDegree::I);
+}
+
+TEST(HarmonicTimelineCreateProgressionTest, CircleOfFifths_MinorKey) {
+  KeySignature a_minor = {Key::A, true};
+  auto timeline = HarmonicTimeline::createProgression(a_minor, kTicksPerBar * 5,
+                                                      HarmonicResolution::Bar,
+                                                      ProgressionType::CircleOfFifths);
+  EXPECT_EQ(timeline.size(), 5u);
+  // i in minor should be Minor quality.
+  EXPECT_EQ(timeline.getChordAt(0).quality, ChordQuality::Minor);
+  // V7 override should still be Dominant7.
+  EXPECT_EQ(timeline.getChordAt(kTicksPerBar * 3).quality, ChordQuality::Dominant7);
+}
+
+TEST(HarmonicTimelineCreateProgressionTest, ZeroDuration) {
+  KeySignature c_major = {Key::C, false};
+  auto timeline = HarmonicTimeline::createProgression(c_major, 0,
+                                                      HarmonicResolution::Bar,
+                                                      ProgressionType::CircleOfFifths);
+  EXPECT_EQ(timeline.size(), 0u);
+}
+
+// ---------------------------------------------------------------------------
+// applyCadence
+// ---------------------------------------------------------------------------
+
+TEST(HarmonicTimelineCadenceTest, PerfectCadence) {
+  KeySignature c_major = {Key::C, false};
+  auto timeline = HarmonicTimeline::createStandard(c_major, kTicksPerBar * 4,
+                                                   HarmonicResolution::Bar);
+  timeline.applyCadence(CadenceType::Perfect, c_major);
+  const auto& evts = timeline.events();
+  // Penultimate should be V7.
+  EXPECT_EQ(evts[evts.size() - 2].chord.degree, ChordDegree::V);
+  EXPECT_EQ(evts[evts.size() - 2].chord.quality, ChordQuality::Dominant7);
+  // Last should be I.
+  EXPECT_EQ(evts.back().chord.degree, ChordDegree::I);
+}
+
+TEST(HarmonicTimelineCadenceTest, DeceptiveCadence) {
+  KeySignature c_major = {Key::C, false};
+  auto timeline = HarmonicTimeline::createStandard(c_major, kTicksPerBar * 4,
+                                                   HarmonicResolution::Bar);
+  timeline.applyCadence(CadenceType::Deceptive, c_major);
+  const auto& evts = timeline.events();
+  // Penultimate should be V7.
+  EXPECT_EQ(evts[evts.size() - 2].chord.degree, ChordDegree::V);
+  EXPECT_EQ(evts[evts.size() - 2].chord.quality, ChordQuality::Dominant7);
+  // Last should be vi.
+  EXPECT_EQ(evts.back().chord.degree, ChordDegree::vi);
+}
+
+TEST(HarmonicTimelineCadenceTest, HalfCadence) {
+  KeySignature c_major = {Key::C, false};
+  auto timeline = HarmonicTimeline::createStandard(c_major, kTicksPerBar * 4,
+                                                   HarmonicResolution::Bar);
+  timeline.applyCadence(CadenceType::Half, c_major);
+  // Last chord should be V.
+  EXPECT_EQ(timeline.events().back().chord.degree, ChordDegree::V);
+}
+
+TEST(HarmonicTimelineCadenceTest, PhrygianCadence) {
+  KeySignature a_minor = {Key::A, true};
+  auto timeline = HarmonicTimeline::createStandard(a_minor, kTicksPerBar * 4,
+                                                   HarmonicResolution::Bar);
+  timeline.applyCadence(CadenceType::Phrygian, a_minor);
+  const auto& evts = timeline.events();
+  // Penultimate should be IV in first inversion.
+  EXPECT_EQ(evts[evts.size() - 2].chord.degree, ChordDegree::IV);
+  EXPECT_EQ(evts[evts.size() - 2].chord.inversion, 1);
+  // Last should be V.
+  EXPECT_EQ(evts.back().chord.degree, ChordDegree::V);
+}
+
+TEST(HarmonicTimelineCadenceTest, PicardyThird) {
+  KeySignature a_minor = {Key::A, true};
+  auto timeline = HarmonicTimeline::createStandard(a_minor, kTicksPerBar * 4,
+                                                   HarmonicResolution::Bar);
+  timeline.applyCadence(CadenceType::PicardyThird, a_minor);
+  // Final chord should be Major quality (Picardy third).
+  EXPECT_EQ(timeline.events().back().chord.degree, ChordDegree::I);
+  EXPECT_EQ(timeline.events().back().chord.quality, ChordQuality::Major);
+}
+
+TEST(HarmonicTimelineCadenceTest, EmptyTimelineNoCrash) {
+  HarmonicTimeline timeline;
+  KeySignature c_major = {Key::C, false};
+  timeline.applyCadence(CadenceType::Perfect, c_major);  // Should not crash.
+  EXPECT_EQ(timeline.size(), 0u);
+}
+
+// ---------------------------------------------------------------------------
+// Chord inversions affect bass pitch
+// ---------------------------------------------------------------------------
+
+TEST(HarmonicTimelineCreateProgressionTest, InversionAffectsBassPitch) {
+  // Test that first inversion changes the bass pitch from root to third.
+  KeySignature c_major = {Key::C, false};
+  auto timeline = HarmonicTimeline::createStandard(c_major, kTicksPerBar * 4,
+                                                   HarmonicResolution::Bar);
+  // Apply Phrygian cadence which sets IV to first inversion.
+  timeline.applyCadence(CadenceType::Phrygian, c_major);
+  const auto& evts = timeline.events();
+  auto& penult = evts[evts.size() - 2];
+  // IV in C major = F major chord. First inversion = A in bass.
+  // A in octave 2 = MIDI 45.
+  // F root pitch class = 5, third interval for Major = 4, so bass_pc = (5+4)%12 = 9 = A
+  // A2 = (2+1)*12 + 9 = 45
+  EXPECT_EQ(penult.bass_pitch, 45);
 }
 
 }  // namespace

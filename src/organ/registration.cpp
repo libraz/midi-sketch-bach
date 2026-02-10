@@ -28,6 +28,16 @@ constexpr uint8_t kControlChangeBase = 0xB0;
 /// Maximum MIDI data value.
 constexpr uint8_t kMaxMidiValue = 127;
 
+/// @brief Map energy level to CC#7 (volume) value.
+/// @param energy Energy level in [0,1].
+/// @return CC#7 value (0-127).
+uint8_t energyToVolume(float energy) {
+  if (energy < 0.3f) return 64;
+  if (energy < 0.6f) return 80;
+  if (energy < 0.8f) return 100;
+  return 120;
+}
+
 /// @brief Insert registration CC events into matching tracks.
 /// @param tracks Track vector to search and modify.
 /// @param events CC events to insert (each has a channel in its status byte).
@@ -146,6 +156,26 @@ void applyRegistrationPlan(std::vector<Track>& tracks,
     auto coda_events = generateRegistrationEvents(plan.coda, coda_tick);
     insertEventsIntoTracks(tracks, coda_events);
   }
+}
+
+std::vector<MidiEvent> generateEnergyRegistrationEvents(
+    const std::vector<std::pair<Tick, float>>& energy_levels, uint8_t num_channels) {
+  std::vector<MidiEvent> events;
+  events.reserve(energy_levels.size() * num_channels);
+
+  for (const auto& [tick, energy] : energy_levels) {
+    uint8_t volume = energyToVolume(energy);
+    for (uint8_t channel = 0; channel < num_channels; ++channel) {
+      MidiEvent evt;
+      evt.tick = tick;
+      evt.status = kControlChangeBase | channel;
+      evt.data1 = kCcMainVolume;
+      evt.data2 = volume;
+      events.push_back(evt);
+    }
+  }
+
+  return events;
 }
 
 }  // namespace bach

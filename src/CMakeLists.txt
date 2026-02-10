@@ -39,6 +39,7 @@ set(BACH_LIB_SOURCES
   counterpoint/counterpoint_state.cpp
   counterpoint/i_rule_evaluator.cpp
   counterpoint/fux_rule_evaluator.cpp
+  counterpoint/bach_rule_evaluator.cpp
   counterpoint/species_rules.cpp
   counterpoint/collision_resolver.cpp
   counterpoint/voice_manager.cpp
@@ -96,6 +97,8 @@ set(BACH_LIB_SOURCES
   ornament/trill.cpp
   ornament/mordent.cpp
   ornament/turn.cpp
+  ornament/appoggiatura.cpp
+  ornament/pralltriller.cpp
   ornament/ornament_engine.cpp
 
   # solo_string/flow/

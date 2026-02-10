@@ -16,6 +16,15 @@ enum class SpeciesType : uint8_t {
   Fifth    // Florid (free combination of all species)
 };
 
+/// @brief Type of non-harmonic tone in a melodic context.
+enum class NonHarmonicToneType : uint8_t {
+  ChordTone,     ///< Pitch belongs to the current chord.
+  PassingTone,   ///< Stepwise motion connecting two different chord tones.
+  NeighborTone,  ///< Step away from and back to a chord tone.
+  Suspension,    ///< Held from previous beat, dissonant on current, resolves down by step.
+  Unknown        ///< Unclassified dissonance.
+};
+
 /// @brief Convert SpeciesType to a human-readable string.
 /// @param species The species type value.
 /// @return Null-terminated C string (e.g. "first_species").
@@ -78,6 +87,24 @@ class SpeciesRules {
   /// @brief Check if an interval is stepwise (1 or 2 semitones).
   static bool isStep(int semitones);
 };
+
+/// @brief Classify a non-harmonic tone based on melodic context.
+///
+/// Given a three-note window (prev, current, next) and chord-tone membership
+/// flags, determines whether the current pitch functions as a passing tone,
+/// neighbor tone, suspension, or unclassified dissonance.
+///
+/// @param prev_pitch Previous MIDI pitch (0 if none).
+/// @param current_pitch Current MIDI pitch being classified.
+/// @param next_pitch Next MIDI pitch (0 if unknown).
+/// @param is_chord_tone True if current_pitch belongs to the current chord.
+/// @param prev_is_chord_tone True if prev_pitch belongs to the current chord.
+/// @param next_is_chord_tone True if next_pitch belongs to the current chord.
+/// @return The classified non-harmonic tone type.
+NonHarmonicToneType classifyNonHarmonicTone(uint8_t prev_pitch, uint8_t current_pitch,
+                                             uint8_t next_pitch, bool is_chord_tone,
+                                             bool prev_is_chord_tone,
+                                             bool next_is_chord_tone);
 
 }  // namespace bach
 
