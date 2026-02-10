@@ -50,11 +50,11 @@ struct Episode {
 /// transformations: sequence (Zeugma), inversion, augmentation, diminution.
 /// The episode modulates from start_key toward target_key.
 ///
-/// Character influence on episode style:
-///   - Severe: sequence + inverted sequence (strict stepwise motion)
-///   - Playful: retrograde motif in voice 0, diminished fragments in voice 1
-///   - Noble: augmented motif in the lowest voice (doubled duration bass)
-///   - Restless: fragmented motif with overlapping imitation, shorter offset
+/// Character influence on episode style (dialogic Kopfmotiv hand-off):
+///   - Severe: original motif + direct Kopfmotiv imitation (2-beat delay)
+///   - Playful: retrograde motif + diatonic-inverted Kopfmotiv (1-beat delay)
+///   - Noble: original motif + augmented Kopfmotiv bass (2-beat delay)
+///   - Restless: fragmented motif + diminished Kopfmotiv (1-beat delay)
 ///
 /// Invertible counterpoint: when episode_index is odd, voice 0 and voice 1
 /// material is swapped, placing upper material in the lower voice and vice

@@ -42,6 +42,16 @@ size_t Subject::noteCount() const {
   return notes.size();
 }
 
+std::vector<NoteEvent> Subject::extractKopfmotiv(size_t max_notes) const {
+  std::vector<NoteEvent> result;
+  size_t count = std::min(max_notes, notes.size());
+  result.reserve(count);
+  for (size_t idx = 0; idx < count; ++idx) {
+    result.push_back(notes[idx]);
+  }
+  return result;
+}
+
 // ---------------------------------------------------------------------------
 // Duration tables per character
 // ---------------------------------------------------------------------------

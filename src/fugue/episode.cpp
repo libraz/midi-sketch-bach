@@ -52,25 +52,27 @@ int sequenceDegreeStepForCharacter(SubjectCharacter character, std::mt19937& rng
 
 /// @brief Determine the imitation offset for the second voice.
 ///
-/// In Baroque fugue episodes, voices often enter in staggered imitation.
-/// The offset controls how far behind voice 1 enters relative to voice 0.
+/// In Baroque fugue episodes, voices enter in staggered imitation (dialogic
+/// hand-off). The offset is character-specific to match the rhetorical pacing:
+///   - Severe/Noble: 2-beat delay (stately, measured discourse)
+///   - Playful/Restless: 1-beat delay (tighter, more energetic exchange)
 ///
-/// @param motif_dur Duration of the motif in ticks.
+/// @param motif_dur Duration of the motif in ticks (unused, kept for API stability).
 /// @param character Subject character.
 /// @return Imitation offset in ticks.
 Tick imitationOffsetForCharacter(Tick motif_dur, SubjectCharacter character) {
+  (void)motif_dur;  // Retained for API compatibility; offsets are now fixed per character.
   switch (character) {
-    case SubjectCharacter::Restless:
-      // Tighter imitation (quarter of motif)
-      return std::max(motif_dur / 4, static_cast<Tick>(kTicksPerBeat));
-    case SubjectCharacter::Playful:
-      // Slightly offset (third of motif)
-      return std::max(motif_dur / 3, static_cast<Tick>(kTicksPerBeat));
     case SubjectCharacter::Severe:
+      return kTicksPerBeat * 2;   // 2-beat delay
+    case SubjectCharacter::Playful:
+      return kTicksPerBeat;       // 1-beat delay (tight imitation)
     case SubjectCharacter::Noble:
+      return kTicksPerBeat * 2;   // 2-beat delay (stately)
+    case SubjectCharacter::Restless:
+      return kTicksPerBeat;       // 1-beat delay (urgent)
     default:
-      // Standard half-motif offset
-      return std::max(motif_dur / 2, static_cast<Tick>(kTicksPerBeat));
+      return kTicksPerBeat * 2;
   }
 }
 
@@ -129,7 +131,9 @@ namespace {  // NOLINT(google-build-namespaces) reopened for character-specific 
 /// @brief Generate voice 0 and voice 1 for Severe character.
 ///
 /// Severe episodes use strict sequential patterns: the original motif in
-/// voice 0 with a diatonically inverted imitation in voice 1.
+/// voice 0 with direct (uninverted) Kopfmotiv imitation in voice 1 at a
+/// 2-beat delay. This dialogic hand-off preserves the subject's identity
+/// in both voices (Baroque "strict" imitation practice).
 ///
 /// @param episode Episode to append notes to.
 /// @param motif Normalized motif.
@@ -159,21 +163,21 @@ void generateSevereEpisode(Episode& episode, const std::vector<NoteEvent>& motif
     episode.notes.push_back(note);
   }
 
-  // Voice 1: Diatonic inverted imitation + diatonic sequence.
+  // Voice 1: Kopfmotiv direct imitation (same position, no inversion) with
+  // diatonic sequence. Severe character uses strict dialogic hand-off where
+  // voice 1 restates the motif at a 2-beat delay without transformation.
   if (num_voices >= 2) {
-    uint8_t pivot = motif[0].pitch;
-    auto inverted = invertMelodyDiatonic(motif, pivot, key, scale);
     Tick voice1_start = start_tick + imitation_offset;
-    for (const auto& note : inverted) {
+    for (const auto& note : motif) {
       NoteEvent placed = note;
       placed.start_tick += voice1_start;
       placed.voice = 1;
       episode.notes.push_back(placed);
     }
     int inv_reps = std::max(1, seq_reps - 1);
-    auto inv_seq = generateDiatonicSequence(inverted, inv_reps, deg_step,
-                                            voice1_start + motif_dur, key, scale);
-    for (auto& note : inv_seq) {
+    auto seq = generateDiatonicSequence(motif, inv_reps, deg_step,
+                                        voice1_start + motif_dur, key, scale);
+    for (auto& note : seq) {
       note.voice = 1;
       episode.notes.push_back(note);
     }
@@ -182,8 +186,10 @@ void generateSevereEpisode(Episode& episode, const std::vector<NoteEvent>& motif
 
 /// @brief Generate voice 0 and voice 1 for Playful character.
 ///
-/// Playful episodes use retrograde of the motif for voice 0, and diminished
-/// fragments of the motif for voice 1 (contrasting rhythmic energy).
+/// Playful episodes use retrograde of the motif for voice 0, and a
+/// diatonically inverted Kopfmotiv in voice 1 at a 1-beat delay.
+/// The inversion against the retrograde creates melodic contrast while
+/// maintaining motivic coherence in the dialogic hand-off.
 ///
 /// @param episode Episode to append notes to.
 /// @param motif Normalized motif.
@@ -212,21 +218,23 @@ void generatePlayfulEpisode(Episode& episode, const std::vector<NoteEvent>& moti
     episode.notes.push_back(note);
   }
 
-  // Voice 1: Diminished fragments for rhythmic contrast.
+  // Voice 1: Diatonic inversion of Kopfmotiv with tighter imitation.
+  // Playful character uses inverted hand-off for melodic contrast against
+  // the retrograde voice 0 material.
   if (num_voices >= 2) {
+    uint8_t pivot = motif[0].pitch;
+    auto inverted = invertMelodyDiatonic(motif, pivot, key, scale);
     Tick voice1_start = start_tick + imitation_offset;
-    auto diminished = diminishMelody(motif, voice1_start);
-    for (auto& note : diminished) {
-      note.voice = 1;
-      episode.notes.push_back(note);
+    for (const auto& note : inverted) {
+      NoteEvent placed = note;
+      placed.start_tick += voice1_start;
+      placed.voice = 1;
+      episode.notes.push_back(placed);
     }
-    // Diatonic sequence of diminished motif (fits more reps due to shorter duration).
-    Tick dim_dur = motifDuration(diminished);
-    if (dim_dur == 0) dim_dur = motif_dur / 2;
-    int dim_reps = calculateSequenceRepetitions(motif_dur * 2, dim_dur);
-    auto dim_seq = generateDiatonicSequence(diminished, dim_reps, deg_step,
-                                            voice1_start + dim_dur, key, scale);
-    for (auto& note : dim_seq) {
+    int inv_reps = std::max(1, seq_reps - 1);
+    auto inv_seq = generateDiatonicSequence(inverted, inv_reps, deg_step,
+                                            voice1_start + motif_dur, key, scale);
+    for (auto& note : inv_seq) {
       note.voice = 1;
       episode.notes.push_back(note);
     }
@@ -282,8 +290,9 @@ void generateNobleEpisode(Episode& episode, const std::vector<NoteEvent>& motif,
 
 /// @brief Generate voice 0 and voice 1 for Restless character.
 ///
-/// Restless episodes fragment the motif into 2 pieces and use overlapping
-/// imitation with a shorter offset, creating rhythmic urgency.
+/// Restless episodes fragment the motif into 2 pieces for voice 0, and use
+/// a diminished (half-speed) Kopfmotiv in voice 1 at a 1-beat delay. The
+/// compressed imitation creates rhythmic urgency and overlapping density.
 ///
 /// @param episode Episode to append notes to.
 /// @param motif Normalized motif.
@@ -325,34 +334,24 @@ void generateRestlessEpisode(Episode& episode, const std::vector<NoteEvent>& mot
     episode.notes.push_back(note);
   }
 
-  // Voice 1: Second fragment (or diatonically inverted first) with tight overlap.
+  // Voice 1: Diminished Kopfmotiv (half speed) for rhythmic urgency.
+  // Restless character uses diminution to compress the motif, creating
+  // overlapping imitation with tighter rhythmic density.
   if (num_voices >= 2) {
-    std::vector<NoteEvent> frag1;
-    if (fragments.size() >= 2) {
-      frag1 = fragments[1];
-    } else {
-      // Fallback: diatonic inversion of the first fragment.
-      uint8_t pivot = frag0.empty() ? kMidiC4 : frag0[0].pitch;
-      frag1 = invertMelodyDiatonic(frag0, pivot, key, scale);
-    }
-    normalizeMotifToZero(frag1);
-    Tick frag1_dur = motifDuration(frag1);
-    if (frag1_dur == 0) frag1_dur = frag0_dur;
-
-    // Restless uses tighter imitation offset (already computed).
     Tick voice1_start = start_tick + imitation_offset;
-    for (const auto& note : frag1) {
-      NoteEvent placed = note;
-      placed.start_tick += voice1_start;
-      placed.voice = 1;
-      episode.notes.push_back(placed);
+    auto diminished = diminishMelody(motif, voice1_start);
+    for (auto& note : diminished) {
+      note.voice = 1;
+      episode.notes.push_back(note);
     }
-    int frag1_reps = std::min(
-        calculateSequenceRepetitions(motif_dur * 2, frag1_dur),
+    Tick dim_dur = motifDuration(diminished);
+    if (dim_dur == 0) dim_dur = motif_dur / 2;
+    int dim_reps = std::min(
+        calculateSequenceRepetitions(motif_dur * 2, dim_dur),
         seq_reps + 1);
-    auto frag1_seq = generateDiatonicSequence(frag1, frag1_reps, deg_step,
-                                              voice1_start + frag1_dur, key, scale);
-    for (auto& note : frag1_seq) {
+    auto dim_seq = generateDiatonicSequence(diminished, dim_reps, deg_step,
+                                            voice1_start + dim_dur, key, scale);
+    for (auto& note : dim_seq) {
       note.voice = 1;
       episode.notes.push_back(note);
     }

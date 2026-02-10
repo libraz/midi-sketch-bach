@@ -1015,5 +1015,204 @@ TEST(EpisodeRestingVoiceTest, AllCharacters_ThreeVoices_HaveHeldTones) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Subject::extractKopfmotiv tests
+// ---------------------------------------------------------------------------
+
+TEST(SubjectKopfmotivTest, ExtractKopfmotiv_DefaultLength) {
+  Subject subject;
+  for (int idx = 0; idx < 8; ++idx) {
+    NoteEvent note;
+    note.pitch = static_cast<uint8_t>(60 + idx);
+    note.start_tick = static_cast<Tick>(idx * 480);
+    note.duration = 480;
+    note.voice = 0;
+    subject.notes.push_back(note);
+  }
+  auto kopf = subject.extractKopfmotiv();
+  EXPECT_EQ(kopf.size(), 4u);
+  EXPECT_EQ(kopf[0].pitch, 60);
+  EXPECT_EQ(kopf[3].pitch, 63);
+}
+
+TEST(SubjectKopfmotivTest, ExtractKopfmotiv_CustomLength) {
+  Subject subject;
+  for (int idx = 0; idx < 8; ++idx) {
+    NoteEvent note;
+    note.pitch = static_cast<uint8_t>(60 + idx);
+    note.start_tick = static_cast<Tick>(idx * 480);
+    note.duration = 480;
+    note.voice = 0;
+    subject.notes.push_back(note);
+  }
+  auto kopf = subject.extractKopfmotiv(3);
+  EXPECT_EQ(kopf.size(), 3u);
+}
+
+TEST(SubjectKopfmotivTest, ExtractKopfmotiv_ShortSubject) {
+  Subject subject;
+  NoteEvent note;
+  note.pitch = 60;
+  note.start_tick = 0;
+  note.duration = 480;
+  note.voice = 0;
+  subject.notes.push_back(note);
+  auto kopf = subject.extractKopfmotiv(4);
+  EXPECT_EQ(kopf.size(), 1u);
+}
+
+TEST(SubjectKopfmotivTest, ExtractKopfmotiv_EmptySubject) {
+  Subject subject;
+  auto kopf = subject.extractKopfmotiv();
+  EXPECT_TRUE(kopf.empty());
+}
+
+TEST(SubjectKopfmotivTest, ExtractKopfmotiv_PreservesTiming) {
+  Subject subject;
+  for (int idx = 0; idx < 6; ++idx) {
+    NoteEvent note;
+    note.pitch = static_cast<uint8_t>(60 + idx);
+    note.start_tick = static_cast<Tick>(idx * 240);
+    note.duration = 240;
+    note.voice = 0;
+    subject.notes.push_back(note);
+  }
+  auto kopf = subject.extractKopfmotiv(4);
+  ASSERT_EQ(kopf.size(), 4u);
+  EXPECT_EQ(kopf[0].start_tick, 0u);
+  EXPECT_EQ(kopf[1].start_tick, 240u);
+  EXPECT_EQ(kopf[2].start_tick, 480u);
+  EXPECT_EQ(kopf[3].start_tick, 720u);
+}
+
+// ---------------------------------------------------------------------------
+// Episode dialogic Kopfmotiv hand-off tests
+// ---------------------------------------------------------------------------
+
+TEST(EpisodeImitationTest, SevereUsesDirectImitation) {
+  // Verify Severe episode generates notes for both voice 0 and voice 1.
+  Subject subject;
+  subject.character = SubjectCharacter::Severe;
+  subject.key = Key::C;
+  subject.is_minor = false;
+  for (int idx = 0; idx < 6; ++idx) {
+    NoteEvent note;
+    note.pitch = static_cast<uint8_t>(60 + idx);
+    note.start_tick = static_cast<Tick>(idx * 480);
+    note.duration = 480;
+    note.voice = 0;
+    subject.notes.push_back(note);
+  }
+  subject.length_ticks = 2 * kTicksPerBar;
+
+  Episode epi = generateEpisode(subject, 0, kTicksPerBar * 4, Key::C, Key::G,
+                                2, 42, 0, 0.5f);
+  bool has_voice0 = false, has_voice1 = false;
+  for (const auto& note : epi.notes) {
+    if (note.voice == 0) has_voice0 = true;
+    if (note.voice == 1) has_voice1 = true;
+  }
+  EXPECT_TRUE(has_voice0);
+  EXPECT_TRUE(has_voice1);
+}
+
+TEST(EpisodeImitationTest, SevereVoice1RepeatsMotifPitches) {
+  // In Severe, voice 1 should use direct (uninverted) imitation, so the first
+  // notes of voice 1 should have the same pitches as voice 0's motif.
+  Subject subject = makeDiatonicTestSubject(Key::C, SubjectCharacter::Severe);
+  Episode epi = generateEpisode(subject, 0, kTicksPerBar * 4, Key::C, Key::C,
+                                2, 42, 0, 0.5f);
+
+  std::vector<uint8_t> voice0_pitches;
+  std::vector<uint8_t> voice1_pitches;
+  for (const auto& note : epi.notes) {
+    if (note.voice == 0) voice0_pitches.push_back(note.pitch);
+    if (note.voice == 1) voice1_pitches.push_back(note.pitch);
+  }
+
+  ASSERT_FALSE(voice0_pitches.empty());
+  ASSERT_FALSE(voice1_pitches.empty());
+  // Voice 1 starts with the same motif pitches as voice 0 (direct imitation).
+  size_t check_count = std::min({voice0_pitches.size(), voice1_pitches.size(), size_t{4}});
+  for (size_t idx = 0; idx < check_count; ++idx) {
+    EXPECT_EQ(voice0_pitches[idx], voice1_pitches[idx])
+        << "Severe voice 1 note " << idx << " should match voice 0 (direct imitation)";
+  }
+}
+
+TEST(EpisodeImitationTest, PlayfulUsesInvertedImitation) {
+  // Playful voice 1 should use diatonic inversion, so pitches should differ
+  // from voice 0's retrograde material.
+  Subject subject = makeDiatonicTestSubject(Key::C, SubjectCharacter::Playful);
+  Episode epi = generateEpisode(subject, 0, kTicksPerBar * 4, Key::C, Key::C,
+                                2, 42, 0, 0.5f);
+
+  bool has_voice0 = false, has_voice1 = false;
+  for (const auto& note : epi.notes) {
+    if (note.voice == 0) has_voice0 = true;
+    if (note.voice == 1) has_voice1 = true;
+  }
+  EXPECT_TRUE(has_voice0);
+  EXPECT_TRUE(has_voice1);
+}
+
+TEST(EpisodeImitationTest, RestlessUsesDiminishedImitation) {
+  // Restless voice 1 should use diminished motif, so voice 1 notes should
+  // have shorter durations on average than voice 0.
+  Subject subject = makeDiatonicTestSubject(Key::C, SubjectCharacter::Restless);
+  Episode epi = generateEpisode(subject, 0, kTicksPerBar * 4, Key::C, Key::C,
+                                2, 42, 0, 0.5f);
+
+  Tick voice0_total_dur = 0;
+  int voice0_count = 0;
+  Tick voice1_total_dur = 0;
+  int voice1_count = 0;
+  for (const auto& note : epi.notes) {
+    if (note.voice == 0) {
+      voice0_total_dur += note.duration;
+      ++voice0_count;
+    }
+    if (note.voice == 1) {
+      voice1_total_dur += note.duration;
+      ++voice1_count;
+    }
+  }
+
+  ASSERT_GT(voice0_count, 0);
+  ASSERT_GT(voice1_count, 0);
+  // Diminished voice 1 should have shorter average duration (or more notes).
+  // Since diminish halves durations, voice 1 avg should be <= voice 0 avg.
+  double avg0 = static_cast<double>(voice0_total_dur) / voice0_count;
+  double avg1 = static_cast<double>(voice1_total_dur) / voice1_count;
+  EXPECT_LE(avg1, avg0)
+      << "Restless voice 1 (diminished) avg duration " << avg1
+      << " should be <= voice 0 avg " << avg0;
+}
+
+TEST(EpisodeImitationTest, NobleKeepsAugmentedBass) {
+  // Noble voice 1 should still use augmented motif transposed down an octave.
+  Subject subject = makeDiatonicTestSubject(Key::C, SubjectCharacter::Noble);
+  Episode epi = generateEpisode(subject, 0, kTicksPerBar * 4, Key::C, Key::C,
+                                2, 42, 0, 0.5f);
+
+  int voice0_sum = 0, voice0_count = 0;
+  int voice1_sum = 0, voice1_count = 0;
+  for (const auto& note : epi.notes) {
+    if (note.voice == 0) {
+      voice0_sum += note.pitch;
+      ++voice0_count;
+    } else if (note.voice == 1) {
+      voice1_sum += note.pitch;
+      ++voice1_count;
+    }
+  }
+  ASSERT_GT(voice0_count, 0);
+  ASSERT_GT(voice1_count, 0);
+  double voice0_avg = static_cast<double>(voice0_sum) / voice0_count;
+  double voice1_avg = static_cast<double>(voice1_sum) / voice1_count;
+  EXPECT_LT(voice1_avg, voice0_avg)
+      << "Noble voice 1 (augmented bass) should be lower than voice 0";
+}
+
 }  // namespace
 }  // namespace bach

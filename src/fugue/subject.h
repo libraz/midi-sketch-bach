@@ -39,6 +39,15 @@ struct Subject {
   /// @brief Get the number of notes in the subject.
   /// @return Note count.
   size_t noteCount() const;
+
+  /// @brief Extract the head motif (Kopfmotiv) from the subject.
+  ///
+  /// Returns the first max_notes notes, which form the characteristic opening
+  /// fragment used in episode development (Baroque Fortspinnung technique).
+  ///
+  /// @param max_notes Maximum notes to extract (default: 4).
+  /// @return Vector of the first min(max_notes, noteCount()) notes.
+  std::vector<NoteEvent> extractKopfmotiv(size_t max_notes = 4) const;
 };
 
 /// @brief Generates fugue subjects based on character and configuration.
