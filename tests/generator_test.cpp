@@ -407,22 +407,34 @@ TEST(GeneratorTest, TrioSonata_ReturnsStub) {
   EXPECT_FALSE(result.error_message.empty());
 }
 
-TEST(GeneratorTest, ChoralePrelude_ReturnsStub) {
+TEST(GeneratorTest, ChoralePrelude_Succeeds) {
   GeneratorConfig config = makeTestConfig();
   config.form = FormType::ChoralePrelude;
   GeneratorResult result = generate(config);
 
-  EXPECT_FALSE(result.success);
-  EXPECT_FALSE(result.error_message.empty());
+  EXPECT_TRUE(result.success) << result.error_message;
+  EXPECT_GT(result.tracks.size(), 0u);
+  EXPECT_GT(result.total_duration_ticks, 0u);
 }
 
-TEST(GeneratorTest, CelloPrelude_ReturnsStub) {
+TEST(GeneratorTest, CelloPrelude_Succeeds) {
   GeneratorConfig config = makeTestConfig();
   config.form = FormType::CelloPrelude;
+  config.instrument = InstrumentType::Cello;
   GeneratorResult result = generate(config);
 
-  EXPECT_FALSE(result.success);
-  EXPECT_FALSE(result.error_message.empty());
+  EXPECT_TRUE(result.success);
+  EXPECT_TRUE(result.error_message.empty());
+  EXPECT_GT(result.tracks.size(), 0u);
+  EXPECT_GT(result.total_duration_ticks, 0u);
+  // Should have notes in the track.
+  size_t total_notes = 0;
+  for (const auto& track : result.tracks) {
+    total_notes += track.notes.size();
+  }
+  EXPECT_GT(total_notes, 0u);
+  // Form description should reference cello prelude.
+  EXPECT_NE(result.form_description.find("Cello Prelude"), std::string::npos);
 }
 
 TEST(GeneratorTest, Chaconne_ReturnsStub) {

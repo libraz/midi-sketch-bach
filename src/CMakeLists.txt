@@ -28,6 +28,12 @@ set(BACH_LIB_SOURCES
   instrument/fretted/guitar_model.cpp
   instrument/fretted/fretted_note_factory.cpp
 
+  # instrument/bowed/
+  instrument/bowed/bowed_string_instrument_base.cpp
+  instrument/bowed/cello_model.cpp
+  instrument/bowed/violin_model.cpp
+  instrument/bowed/bowed_note_factory.cpp
+
   # counterpoint/
   counterpoint/counterpoint_state.cpp
   counterpoint/i_rule_evaluator.cpp
@@ -89,8 +95,13 @@ set(BACH_LIB_SOURCES
   ornament/turn.cpp
   ornament/ornament_engine.cpp
 
-  # Future sources added here as modules are implemented:
   # solo_string/flow/
+  solo_string/flow/arpeggio_flow_config.cpp
+  solo_string/flow/arpeggio_pattern.cpp
+  solo_string/flow/flow_analyzer.cpp
+  solo_string/flow/harmonic_arpeggio_engine.cpp
+
+  # Future sources added here as modules are implemented:
   # solo_string/arch/
 )
 

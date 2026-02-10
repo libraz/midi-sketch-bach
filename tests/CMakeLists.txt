@@ -24,6 +24,9 @@ set(BACH_TEST_SOURCES
   instrument/harpsichord_model_test.cpp
   instrument/piano_model_test.cpp
   instrument/playability_test.cpp
+  instrument/cello_model_test.cpp
+  instrument/violin_model_test.cpp
+  instrument/bowed_note_factory_test.cpp
 
   # counterpoint/
   counterpoint/counterpoint_state_test.cpp
@@ -86,8 +89,14 @@ set(BACH_TEST_SOURCES
   ornament/turn_test.cpp
   ornament/ornament_engine_test.cpp
 
-  # Future test sources added here as modules are implemented:
   # solo_string/flow/
+  solo_string/flow/arpeggio_flow_config_test.cpp
+  solo_string/flow/arpeggio_pattern_test.cpp
+  solo_string/flow/flow_analyzer_test.cpp
+  solo_string/flow/harmonic_arpeggio_engine_test.cpp
+  solo_string/flow/global_arc_test.cpp
+
+  # Future test sources added here as modules are implemented:
   # solo_string/arch/
 )
 

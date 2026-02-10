@@ -8,6 +8,7 @@
 #include "forms/prelude.h"
 #include "fugue/fugue_config.h"
 #include "fugue/fugue_generator.h"
+#include "solo_string/flow/harmonic_arpeggio_engine.h"
 
 namespace bach {
 
@@ -254,10 +255,29 @@ GeneratorResult generate(const GeneratorConfig& config) {
     }
 
     case FormType::CelloPrelude: {
-      result.success = false;
+      ArpeggioFlowConfig flow_config;
+      flow_config.key = effective_config.key;
+      flow_config.bpm = effective_config.bpm;
+      flow_config.seed = effective_config.seed;
+      flow_config.instrument = effective_config.instrument;
+
+      ArpeggioFlowResult flow_result = generateArpeggioFlow(flow_config);
+
+      if (!flow_result.success) {
+        result.success = false;
+        result.seed_used = effective_config.seed;
+        result.error_message = "CelloPrelude generation failed: " +
+                               flow_result.error_message;
+        return result;
+      }
+
+      result.tracks = std::move(flow_result.tracks);
+      result.total_duration_ticks = flow_result.total_duration_ticks;
+      result.tempo_events.push_back({0, effective_config.bpm});
+      result.success = true;
       result.seed_used = effective_config.seed;
-      result.error_message = "CelloPrelude generation not yet implemented";
-      result.form_description = "Cello Prelude (stub)";
+      result.form_description =
+          "Cello Prelude in " + keySignatureToString(effective_config.key);
       return result;
     }
 
