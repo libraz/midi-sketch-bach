@@ -548,7 +548,7 @@ Countersubject generateCountersubject(const Subject& subject,
   }
 
   CSCharacterParams params = getCSParams(subject.character);
-  ScaleType scale = ScaleType::Major;
+  ScaleType scale = subject.is_minor ? ScaleType::HarmonicMinor : ScaleType::Major;
 
   Countersubject best;
   best.key = subject.key;
@@ -614,7 +614,7 @@ Countersubject generateSecondCountersubject(const Subject& subject,
   CSCharacterParams params = getCSParams(subject.character);
   params.leap_prob = std::min(params.leap_prob + 0.10f, 0.60f);
   params.max_range = std::min(params.max_range + 2, 16);
-  ScaleType scale = ScaleType::Major;
+  ScaleType scale = subject.is_minor ? ScaleType::HarmonicMinor : ScaleType::Major;
 
   Countersubject best;
   best.key = subject.key;
@@ -646,6 +646,7 @@ Countersubject generateSecondCountersubject(const Subject& subject,
     cs1_as_subject.notes = first_cs.notes;
     cs1_as_subject.length_ticks = first_cs.length_ticks;
     cs1_as_subject.key = first_cs.key;
+    cs1_as_subject.is_minor = subject.is_minor;
     float cs1_score = validateConsonanceRate(cs2_notes, cs1_as_subject);
 
     // Combined score: both lines must be consonant.

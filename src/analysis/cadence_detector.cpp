@@ -81,6 +81,16 @@ std::vector<DetectedCadence> detectCadences(const HarmonicTimeline& timeline) {
       continue;
     }
 
+    // Plagal cadence: IV -> I
+    if (prev.chord.degree == ChordDegree::IV && curr.chord.degree == ChordDegree::I) {
+      DetectedCadence cadence;
+      cadence.type = CadenceType::Plagal;
+      cadence.tick = curr.tick;
+      cadence.confidence = 0.8f;
+      results.push_back(cadence);
+      continue;
+    }
+
     // Half cadence: * -> V (any chord moving to V)
     // Only detect if the previous chord is NOT V itself (avoid V->V).
     if (curr.chord.degree == ChordDegree::V && !isDominant(prev.chord)) {

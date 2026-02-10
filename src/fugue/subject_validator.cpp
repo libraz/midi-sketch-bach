@@ -259,7 +259,8 @@ float SubjectValidator::scoreTonalStability(const Subject& subject) const {
   }
 
   // Count scale-tone usage.
-  const int* scale = getScaleIntervals(ScaleType::Major);
+  const int* scale = getScaleIntervals(
+      subject.is_minor ? ScaleType::HarmonicMinor : ScaleType::Major);
   int scale_tone_count = 0;
   for (const auto& note : subject.notes) {
     int pc = (getPitchClass(note.pitch) - key_offset + 12) % 12;
@@ -282,7 +283,8 @@ float SubjectValidator::scoreAnswerCompatibility(const Subject& subject) const {
   if (subject.noteCount() < 2) return 0.5f;
 
   int key_offset = static_cast<int>(subject.key);
-  const int* scale = getScaleIntervals(ScaleType::Major);
+  const int* scale = getScaleIntervals(
+      subject.is_minor ? ScaleType::HarmonicMinor : ScaleType::Major);
 
   // Count chromatic notes (not in the scale).
   int chromatic_count = 0;

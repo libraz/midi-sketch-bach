@@ -160,6 +160,40 @@ TEST(CadenceDetectorTest, DetectPhrygianCadence) {
 }
 
 // ===========================================================================
+// detectCadences -- Plagal cadence
+// ===========================================================================
+
+TEST(CadenceDetectorTest, DetectPlagalCadence) {
+  HarmonicTimeline tl;
+  tl.addEvent(makeEvent(0, kTicksPerBar, ChordDegree::I));
+  tl.addEvent(makeEvent(kTicksPerBar, kTicksPerBar * 2, ChordDegree::IV));
+  tl.addEvent(makeEvent(kTicksPerBar * 2, kTicksPerBar * 3, ChordDegree::I));
+
+  auto cadences = detectCadences(tl);
+
+  bool found_plagal = false;
+  for (const auto& cad : cadences) {
+    if (cad.type == CadenceType::Plagal) {
+      found_plagal = true;
+      EXPECT_EQ(cad.tick, kTicksPerBar * 2);
+      EXPECT_FLOAT_EQ(cad.confidence, 0.8f);
+    }
+  }
+  EXPECT_TRUE(found_plagal) << "Plagal cadence IV->I not detected";
+}
+
+TEST(CadenceDetectorTest, PlagalNotConfusedWithPerfect) {
+  // IV->I should be Plagal, not Perfect (V->I).
+  HarmonicTimeline tl;
+  tl.addEvent(makeEvent(0, kTicksPerBar, ChordDegree::IV));
+  tl.addEvent(makeEvent(kTicksPerBar, kTicksPerBar * 2, ChordDegree::I));
+
+  auto cadences = detectCadences(tl);
+  ASSERT_GE(cadences.size(), 1u);
+  EXPECT_EQ(cadences[0].type, CadenceType::Plagal);
+}
+
+// ===========================================================================
 // detectCadences -- Edge cases
 // ===========================================================================
 

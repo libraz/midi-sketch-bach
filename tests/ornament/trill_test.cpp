@@ -55,17 +55,19 @@ TEST(TrillTest, UpperStartAlternatesBetweenUpperAndMain) {
   auto note = makeNote(0, 64, kTicksPerBeat);  // E4
   auto result = generateTrill(note, 66);        // Upper = F#4
 
-  ASSERT_GE(result.size(), 3u);
-  // Pattern: upper, main, upper, ..., main (last is always main).
-  for (size_t idx = 0; idx < result.size() - 1; ++idx) {
+  ASSERT_GE(result.size(), 5u);
+  // Pattern: upper, main, upper, ..., [nachschlag: lower, main].
+  // Core alternation region (excludes last 2 = Nachschlag).
+  for (size_t idx = 0; idx < result.size() - 2; ++idx) {
     if (idx % 2 == 0) {
       EXPECT_EQ(result[idx].pitch, 66) << "Even index should be upper note";
     } else {
       EXPECT_EQ(result[idx].pitch, 64) << "Odd index should be main note";
     }
   }
-  // Last note is always main.
-  EXPECT_EQ(result.back().pitch, 64);
+  // Nachschlag: lower chromatic neighbor, then main note.
+  EXPECT_EQ(result[result.size() - 2].pitch, 63);  // Lower neighbor (E4 - 1 = Eb4)
+  EXPECT_EQ(result[result.size() - 1].pitch, 64);   // Main note
 }
 
 TEST(TrillTest, LegacyStartsOnMainNote) {
@@ -80,13 +82,18 @@ TEST(TrillTest, LegacyAlternatesBetweenMainAndUpper) {
   auto note = makeNote(0, 64, kTicksPerBeat);
   auto result = generateTrill(note, 66, 4, false);  // Legacy mode
 
-  for (size_t idx = 0; idx < result.size(); ++idx) {
+  ASSERT_GE(result.size(), 5u);
+  // Core alternation region (excludes last 2 = Nachschlag).
+  for (size_t idx = 0; idx < result.size() - 2; ++idx) {
     if (idx % 2 == 0) {
       EXPECT_EQ(result[idx].pitch, 64) << "Even index should be main note";
     } else {
       EXPECT_EQ(result[idx].pitch, 66) << "Odd index should be upper note";
     }
   }
+  // Nachschlag: lower chromatic neighbor, then main note.
+  EXPECT_EQ(result[result.size() - 2].pitch, 63);  // Lower neighbor (E4 - 1 = Eb4)
+  EXPECT_EQ(result[result.size() - 1].pitch, 64);   // Main note
 }
 
 TEST(TrillTest, TotalDurationEqualsOriginal) {
@@ -170,6 +177,79 @@ TEST(TrillTest, SubnotesAreContiguous) {
     EXPECT_LE(result[idx].start_tick, prev_end + 1)
         << "Sub-note gap at index " << idx;
   }
+}
+
+// ---------------------------------------------------------------------------
+// Nachschlag (trill termination)
+// ---------------------------------------------------------------------------
+
+TEST(TrillNachschlagTest, QuarterNoteTrillHasNachschlag) {
+  auto note = makeNote(0, 60, kTicksPerBeat);  // C4, quarter note (>= 1 beat)
+  auto result = generateTrill(note, 62);
+
+  ASSERT_GE(result.size(), 5u);
+  // Last 2 sub-notes: lower neighbor (B3 = 59), then main note (C4 = 60).
+  EXPECT_EQ(result[result.size() - 2].pitch, 59);  // Lower chromatic neighbor
+  EXPECT_EQ(result[result.size() - 1].pitch, 60);   // Main note
+}
+
+TEST(TrillNachschlagTest, HalfNoteTrillHasNachschlag) {
+  auto note = makeNote(0, 67, kTicksPerBeat * 2);  // G4, half note
+  auto result = generateTrill(note, 69);
+
+  ASSERT_GE(result.size(), 5u);
+  // Last 2 sub-notes: lower neighbor (F#4 = 66), then main note (G4 = 67).
+  EXPECT_EQ(result[result.size() - 2].pitch, 66);
+  EXPECT_EQ(result[result.size() - 1].pitch, 67);
+}
+
+TEST(TrillNachschlagTest, ShortNoteNoNachschlag) {
+  // Duration less than kTicksPerBeat: no Nachschlag applied.
+  auto note = makeNote(0, 60, kTicksPerBeat / 2);  // Eighth note (240 ticks)
+  auto result = generateTrill(note, 62);
+
+  // Should still alternate without Nachschlag modification.
+  // With default speed=4 and 240 ticks, subnotes < 5 possible, but even if >= 5,
+  // the duration check (< kTicksPerBeat) prevents Nachschlag.
+  if (result.size() >= 3) {
+    // Last note should be main or upper per normal alternation, not forced lower neighbor.
+    // Specifically: no sub-note should have pitch 59 (lower neighbor of C4).
+    for (const auto& sub : result) {
+      EXPECT_NE(sub.pitch, 59) << "Short note should not have Nachschlag lower neighbor";
+    }
+  }
+}
+
+TEST(TrillNachschlagTest, PitchZeroSafeNachschlag) {
+  // Edge case: pitch 0 should not underflow.
+  auto note = makeNote(0, 0, kTicksPerBeat);
+  auto result = generateTrill(note, 2);
+
+  ASSERT_GE(result.size(), 5u);
+  // Lower neighbor of pitch 0 should be clamped to 0.
+  EXPECT_EQ(result[result.size() - 2].pitch, 0);
+  EXPECT_EQ(result[result.size() - 1].pitch, 0);
+}
+
+TEST(TrillNachschlagTest, NachschlagPreservesTotalDuration) {
+  auto note = makeNote(0, 60, kTicksPerBeat);
+  auto result = generateTrill(note, 62);
+
+  Tick total_dur = 0;
+  for (const auto& sub : result) {
+    total_dur += sub.duration;
+  }
+  EXPECT_EQ(total_dur, note.duration);
+}
+
+TEST(TrillNachschlagTest, WholeNoteNachschlagTermination) {
+  auto note = makeNote(0, 72, kTicksPerBar);  // C5, whole note
+  auto result = generateTrill(note, 74);
+
+  ASSERT_GE(result.size(), 5u);
+  // Nachschlag: B4 (71) -> C5 (72)
+  EXPECT_EQ(result[result.size() - 2].pitch, 71);
+  EXPECT_EQ(result[result.size() - 1].pitch, 72);
 }
 
 // ---------------------------------------------------------------------------

@@ -490,8 +490,8 @@ Episode generateEpisode(const Subject& subject, Tick start_tick, Tick duration_t
   int seq_reps = calculateSequenceRepetitions(duration_ticks, motif_dur);
   Tick imitation_offset = imitationOffsetForCharacter(motif_dur, subject.character);
 
-  // Diatonic context: use major scale for the starting key.
-  ScaleType scale = ScaleType::Major;
+  // Diatonic context: use harmonic minor for minor keys.
+  ScaleType scale = subject.is_minor ? ScaleType::HarmonicMinor : ScaleType::Major;
 
   // Calculate transposition for key modulation.
   int key_diff = static_cast<int>(target_key) - static_cast<int>(start_key);
@@ -766,7 +766,7 @@ Episode generateFortspinnungEpisode(const Subject& subject, const MotifPool& poo
   int key_diff = static_cast<int>(target_key) - static_cast<int>(start_key);
   if (key_diff != 0) {
     Tick midpoint = start_tick + duration_ticks / 2;
-    ScaleType scale = ScaleType::Major;
+    ScaleType scale = subject.is_minor ? ScaleType::HarmonicMinor : ScaleType::Major;
     for (auto& note : episode.notes) {
       if (note.start_tick >= midpoint) {
         int new_pitch = static_cast<int>(note.pitch) + key_diff;

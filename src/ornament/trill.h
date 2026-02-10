@@ -21,8 +21,13 @@ namespace bach {
 /// When false (legacy behavior):
 ///   main, upper, main, upper, ..., main
 ///
+/// For notes with duration >= kTicksPerBeat (1 beat) and at least 5 sub-notes,
+/// a Nachschlag (termination) is automatically appended: the last 2 sub-notes
+/// are replaced with lower chromatic neighbor -> main note. This follows
+/// C.P.E. Bach's standard trill termination practice.
+///
 /// @param note The original note to ornament.
-/// @param upper_pitch MIDI pitch of the upper neighbor (typically main + 2).
+/// @param upper_pitch MIDI pitch of the upper neighbor (typically main + 1 or +2).
 /// @param speed Number of full alternation cycles per beat (default 4).
 ///              Each cycle = 2 sub-notes (main + upper), so total sub-notes
 ///              are proportional to speed and the note's duration.

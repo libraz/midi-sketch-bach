@@ -35,7 +35,8 @@ enum class CadenceType : uint8_t {
   Deceptive,    // V->vi (deceptive cadence)
   Half,         // ->V (half cadence)
   Phrygian,     // iv6->V (minor key slow section endings)
-  PicardyThird  // Minor key final chord raised to major
+  PicardyThird, // Minor key final chord raised to major
+  Plagal        // IV->I (plagal/amen cadence)
 };
 
 /// @brief A time-ordered sequence of harmonic events.

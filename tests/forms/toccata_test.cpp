@@ -548,35 +548,43 @@ TEST(ToccataTest, EnergyCurve_UShape) {
   ToccataResult result = generateToccata(config);
   ASSERT_TRUE(result.success);
 
-  // Opening (first 25%): should have high note density on voice 0.
+  // U-shape energy: opening and drive have shorter average note durations (high
+  // energy) than the recitative (low energy, sustained chords + free melody).
+  // Metric: average note duration across both manual tracks (0 and 1).
   Tick opening_end = 6u * kTicksPerBar;
   Tick recit_start = opening_end;
   Tick recit_end = recit_start + 12u * kTicksPerBar;
   Tick drive_start = recit_end;
 
-  // Count notes per tick-unit in opening (voice 0) vs recitative (voice 1).
-  size_t opening_notes = countNotesInRange(result.tracks[0], 0, opening_end);
-  size_t recit_notes = countNotesInRange(result.tracks[1], recit_start, recit_end);
+  auto avgDuration = [&](Tick start, Tick end) -> float {
+    Tick total_dur = 0;
+    size_t count = 0;
+    for (size_t t = 0; t <= 1; ++t) {
+      for (const auto& note : result.tracks[t].notes) {
+        if (note.start_tick >= start && note.start_tick < end) {
+          total_dur += note.duration;
+          ++count;
+        }
+      }
+    }
+    return (count > 0) ? static_cast<float>(total_dur) / static_cast<float>(count)
+                       : 0.0f;
+  };
 
-  // Opening uses 16th notes (fast), recitative uses 8th notes (slower) with pauses.
-  // Density = notes per bar.
-  float opening_density = static_cast<float>(opening_notes) / 6.0f;
-  float recit_density = static_cast<float>(recit_notes) / 12.0f;
+  float opening_avg = avgDuration(0, opening_end);
+  float recit_avg = avgDuration(recit_start, recit_end);
+  float drive_avg = avgDuration(drive_start, result.total_duration_ticks);
 
-  EXPECT_GT(opening_density, recit_density)
-      << "Opening should have higher note density than recitative "
-      << "(opening=" << opening_density << "/bar, recit=" << recit_density << "/bar)";
+  // Opening has fast passages (32nd/16th notes) -> shorter average duration.
+  EXPECT_LT(opening_avg, recit_avg)
+      << "Opening should have shorter avg note duration than recitative "
+      << "(opening=" << opening_avg << ", recit=" << recit_avg << ")";
 
-  // Drive section should also have high density (voice 0 has 16th notes).
-  size_t drive_notes = countNotesInRange(result.tracks[0], drive_start,
-                                         result.total_duration_ticks);
-  Tick drive_bars = (result.total_duration_ticks - drive_start) / kTicksPerBar;
-  if (drive_bars > 0) {
-    float drive_density = static_cast<float>(drive_notes) /
-                          static_cast<float>(drive_bars);
-    EXPECT_GT(drive_density, recit_density)
-        << "Drive should have higher density than recitative "
-        << "(drive=" << drive_density << "/bar, recit=" << recit_density << "/bar)";
+  // Drive has accelerating passages -> shorter average duration.
+  if (drive_avg > 0.0f) {
+    EXPECT_LT(drive_avg, recit_avg)
+        << "Drive should have shorter avg note duration than recitative "
+        << "(drive=" << drive_avg << ", recit=" << recit_avg << ")";
   }
 }
 

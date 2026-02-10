@@ -83,18 +83,18 @@ uint8_t lowerNeighborPitch(uint8_t pitch, Key key, ScaleType scale) {
   return pitch;
 }
 
-/// @brief Calculate upper neighbor pitch (legacy whole step, no key context).
+/// @brief Calculate upper neighbor pitch (legacy chromatic half step, no key context).
 /// @param pitch Original MIDI pitch.
 /// @return Upper neighbor pitch, clamped to MIDI range.
 uint8_t upperNeighborPitch(uint8_t pitch) {
-  return (pitch <= 125) ? static_cast<uint8_t>(pitch + 2) : pitch;
+  return (pitch <= 126) ? static_cast<uint8_t>(pitch + 1) : pitch;
 }
 
-/// @brief Calculate lower neighbor pitch (legacy whole step, no key context).
+/// @brief Calculate lower neighbor pitch (legacy chromatic half step, no key context).
 /// @param pitch Original MIDI pitch.
 /// @return Lower neighbor pitch, clamped to MIDI range.
 uint8_t lowerNeighborPitch(uint8_t pitch) {
-  return (pitch >= 2) ? static_cast<uint8_t>(pitch - 2) : pitch;
+  return (pitch >= 1) ? static_cast<uint8_t>(pitch - 1) : pitch;
 }
 
 /// @brief Apply a single ornament to a note based on the selected type.

@@ -292,7 +292,7 @@ struct ProgEntry {
 
 static const ProgEntry kCircleOfFifths[] = {
     {ChordDegree::I,   ChordQuality::Major, 0, 1.0f, false},
-    {ChordDegree::vi,  ChordQuality::Minor, 0, 0.5f, false},
+    {ChordDegree::vi,  ChordQuality::Minor, 1, 0.5f, false},  // 1st inversion for bass smoothness
     {ChordDegree::ii,  ChordQuality::Minor, 0, 0.5f, false},
     {ChordDegree::V,   ChordQuality::Dominant7, 0, 0.75f, true},
     {ChordDegree::I,   ChordQuality::Major, 0, 1.0f, false},
@@ -301,7 +301,7 @@ static const ProgEntry kCircleOfFifths[] = {
 static const ProgEntry kSubdominant[] = {
     {ChordDegree::I,   ChordQuality::Major, 0, 1.0f, false},
     {ChordDegree::IV,  ChordQuality::Major, 0, 0.5f, false},
-    {ChordDegree::ii,  ChordQuality::Minor, 0, 0.5f, false},
+    {ChordDegree::ii,  ChordQuality::Minor, 1, 0.5f, false},  // 1st inversion for bass smoothness
     {ChordDegree::V,   ChordQuality::Dominant7, 0, 0.75f, true},
     {ChordDegree::I,   ChordQuality::Major, 0, 1.0f, false},
 };
@@ -309,7 +309,7 @@ static const ProgEntry kSubdominant[] = {
 static const ProgEntry kChromaticCircle[] = {
     {ChordDegree::I,      ChordQuality::Major,    0, 1.0f,  false},
     {ChordDegree::V_of_vi, ChordQuality::Dominant7, 0, 0.5f,  true},
-    {ChordDegree::vi,     ChordQuality::Minor,    0, 0.5f,  false},
+    {ChordDegree::vi,     ChordQuality::Minor,    1, 0.5f,  false},  // 1st inversion
     {ChordDegree::V_of_V, ChordQuality::Dominant7, 0, 0.75f, true},
     {ChordDegree::V,      ChordQuality::Major,    0, 0.75f, false},
     {ChordDegree::I,      ChordQuality::Major,    0, 1.0f,  false},
@@ -325,13 +325,14 @@ static const ProgEntry kBorrowedChord[] = {
 
 /// Descending 5th sequence: I-IV-vii°-iii-vi-ii-V7-I.
 /// A fundamental Baroque harmonic pattern found throughout Bach's works.
+/// Inversions on vii°, iii, and ii create a smooth descending bass line.
 static const ProgEntry kDescendingFifths[] = {
     {ChordDegree::I,      ChordQuality::Major,      0, 1.0f,  false},
     {ChordDegree::IV,     ChordQuality::Major,      0, 0.5f,  false},
-    {ChordDegree::viiDim, ChordQuality::Diminished, 0, 0.5f,  true},
-    {ChordDegree::iii,    ChordQuality::Minor,      0, 0.5f,  false},
+    {ChordDegree::viiDim, ChordQuality::Diminished, 1, 0.5f,  true},   // 1st inversion
+    {ChordDegree::iii,    ChordQuality::Minor,      1, 0.5f,  false},  // 1st inversion
     {ChordDegree::vi,     ChordQuality::Minor,      0, 0.5f,  false},
-    {ChordDegree::ii,     ChordQuality::Minor,      0, 0.5f,  false},
+    {ChordDegree::ii,     ChordQuality::Minor,      1, 0.5f,  false},  // 1st inversion
     {ChordDegree::V,      ChordQuality::Dominant7,  0, 0.75f, true},
     {ChordDegree::I,      ChordQuality::Major,      0, 1.0f,  false},
 };
@@ -483,6 +484,17 @@ void HarmonicTimeline::applyCadence(CadenceType cadence, const KeySignature& key
       // Final chord is I major even in minor key.
       last.chord = buildChordWithQuality(key_sig, ChordDegree::I,
                                          ChordQuality::Major, kChordOctave);
+      last.bass_pitch = computeBassPitch(last.chord, kBassOctave);
+      break;
+    }
+    case CadenceType::Plagal: {
+      // IV -> I (plagal cadence, sometimes called "amen cadence").
+      if (events_.size() >= 2) {
+        auto& penult = events_[events_.size() - 2];
+        penult.chord = buildChord(key_sig, ChordDegree::IV, kChordOctave);
+        penult.bass_pitch = computeBassPitch(penult.chord, kBassOctave);
+      }
+      last.chord = buildChord(key_sig, ChordDegree::I, kChordOctave);
       last.bass_pitch = computeBassPitch(last.chord, kBassOctave);
       break;
     }

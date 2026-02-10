@@ -158,6 +158,7 @@ Subject SubjectGenerator::generate(const FugueConfig& config,
                                    uint32_t seed) const {
   Subject subject;
   subject.key = config.key;
+  subject.is_minor = config.is_minor;
   subject.character = config.character;
 
   uint8_t bars = config.subject_bars;
@@ -187,7 +188,8 @@ Subject SubjectGenerator::generate(const FugueConfig& config,
     }
   }
 
-  subject.notes = generateNotes(config.character, config.key, bars, seed);
+  subject.notes = generateNotes(config.character, config.key, config.is_minor,
+                                bars, seed);
   subject.length_ticks = static_cast<Tick>(bars) * kTicksPerBar;
   subject.anacrusis_ticks = anacrusis_ticks;
 
@@ -214,11 +216,12 @@ Subject SubjectGenerator::generate(const FugueConfig& config,
 }
 
 std::vector<NoteEvent> SubjectGenerator::generateNotes(
-    SubjectCharacter character, Key key, uint8_t bars,
+    SubjectCharacter character, Key key, bool is_minor, uint8_t bars,
     uint32_t seed) const {
   std::mt19937 gen(seed);
   CharacterParams params = getCharacterParams(character);
   int key_offset = static_cast<int>(key);
+  ScaleType scale = is_minor ? ScaleType::HarmonicMinor : ScaleType::Major;
 
   // Total duration to fill.
   Tick total_ticks = static_cast<Tick>(bars) * kTicksPerBar;
@@ -233,7 +236,7 @@ std::vector<NoteEvent> SubjectGenerator::generateNotes(
   Tick current_tick = 0;
 
   // Track the range bounds relative to the starting pitch.
-  int start_pitch = degreeToPitch(current_degree, kBaseNote, key_offset);
+  int start_pitch = degreeToPitch(current_degree, kBaseNote, key_offset, scale);
   int min_pitch = start_pitch;
   int max_pitch = start_pitch;
 
@@ -250,7 +253,7 @@ std::vector<NoteEvent> SubjectGenerator::generateNotes(
     }
 
     // Compute pitch from current degree.
-    int pitch = degreeToPitch(current_degree, kBaseNote, key_offset);
+    int pitch = degreeToPitch(current_degree, kBaseNote, key_offset, scale);
 
     // Clamp to valid MIDI range.
     pitch = std::max(36, std::min(96, pitch));
@@ -298,7 +301,7 @@ std::vector<NoteEvent> SubjectGenerator::generateNotes(
     }
 
     int next_degree = current_degree + interval;
-    int next_pitch = degreeToPitch(next_degree, kBaseNote, key_offset);
+    int next_pitch = degreeToPitch(next_degree, kBaseNote, key_offset, scale);
 
     // Enforce range constraint: if the next note would exceed the maximum
     // allowed range, reverse the direction.
@@ -308,7 +311,7 @@ std::vector<NoteEvent> SubjectGenerator::generateNotes(
       // Reverse direction.
       interval = -interval;
       next_degree = current_degree + interval;
-      next_pitch = degreeToPitch(next_degree, kBaseNote, key_offset);
+      next_pitch = degreeToPitch(next_degree, kBaseNote, key_offset, scale);
 
       // If still out of range, just step back toward the start.
       tentative_min = std::min(min_pitch, next_pitch);
@@ -328,7 +331,7 @@ std::vector<NoteEvent> SubjectGenerator::generateNotes(
 
   // Ensure the last note ends on the tonic.
   if (!result.empty()) {
-    int tonic_pitch = degreeToPitch(0, kBaseNote, key_offset);
+    int tonic_pitch = degreeToPitch(0, kBaseNote, key_offset, scale);
     tonic_pitch = std::max(36, std::min(96, tonic_pitch));
     result.back().pitch = static_cast<uint8_t>(tonic_pitch);
   }

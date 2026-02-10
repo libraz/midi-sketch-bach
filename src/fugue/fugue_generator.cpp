@@ -272,8 +272,9 @@ std::vector<NoteEvent> createCodaNotes(Tick start_tick, Tick duration,
   // Voice 0: subject head fragment (rising from tonic to 5th and back).
   {
     Tick sub_dur = kTicksPerBeat;
-    int head_pitches[] = {tonic_pitch, tonic_pitch + 2, tonic_pitch + 4, tonic_pitch + 7,
-                          tonic_pitch + 4, tonic_pitch + 2, tonic_pitch, tonic_pitch};
+    int third = is_minor ? 3 : 4;
+    int head_pitches[] = {tonic_pitch, tonic_pitch + 2, tonic_pitch + third, tonic_pitch + 7,
+                          tonic_pitch + third, tonic_pitch + 2, tonic_pitch, tonic_pitch};
     int head_count = std::min(8, static_cast<int>(stage1_dur / sub_dur));
     for (int idx = 0; idx < head_count; ++idx) {
       NoteEvent note;
@@ -288,12 +289,13 @@ std::vector<NoteEvent> createCodaNotes(Tick start_tick, Tick duration,
   }
 
   // Other voices: sustained chord tones during stage 1.
-  static constexpr int kChordOffsets[] = {0, 7, 4, -12, 12};
+  int chord_third = is_minor ? 3 : 4;
+  int chord_offsets[] = {0, 7, chord_third, -12, 12};
   for (uint8_t v = 1; v < num_voices && v < 5; ++v) {
     NoteEvent note;
     note.start_tick = start_tick;
     note.duration = stage1_dur;
-    note.pitch = clampPitch(tonic_pitch + kChordOffsets[v],
+    note.pitch = clampPitch(tonic_pitch + chord_offsets[v],
                             organ_range::kPedalLow, organ_range::kManual1High);
     note.velocity = kOrganVelocity;
     note.voice = v;
@@ -322,7 +324,8 @@ std::vector<NoteEvent> createCodaNotes(Tick start_tick, Tick duration,
     }
 
     // I chord (second half): tonic resolution.
-    int tonic_offsets[] = {0, 4, 7, -12, 12};
+    int res_third = is_minor ? 3 : 4;
+    int tonic_offsets[] = {0, res_third, 7, -12, 12};
     for (uint8_t v = 0; v < num_voices && v < 5; ++v) {
       NoteEvent note;
       note.start_tick = stage2_start + half_bar;

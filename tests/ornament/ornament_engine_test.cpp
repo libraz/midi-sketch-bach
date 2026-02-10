@@ -374,8 +374,8 @@ TEST(OrnamentEngineTest, ApplyAppoggiatura) {
 
   ASSERT_EQ(result.size(), 2u);
 
-  // First note: upper neighbor (pitch + 2), 25% duration.
-  EXPECT_EQ(result[0].pitch, 62);
+  // First note: upper neighbor (chromatic half step, pitch + 1), 25% duration.
+  EXPECT_EQ(result[0].pitch, 61);
   EXPECT_EQ(result[0].start_tick, 0u);
   EXPECT_EQ(result[0].duration, kTicksPerBeat / 4);
   EXPECT_EQ(result[0].voice, 0);
@@ -422,8 +422,8 @@ TEST(OrnamentEngineTest, ApplyPralltriller) {
   const Tick short_dur = kTicksPerBeat / 12;  // 40 ticks each.
   const Tick last_dur = kTicksPerBeat - (short_dur * 3);
 
-  // Note 0: upper neighbor.
-  EXPECT_EQ(result[0].pitch, 66);
+  // Note 0: upper neighbor (chromatic half step).
+  EXPECT_EQ(result[0].pitch, 65);
   EXPECT_EQ(result[0].start_tick, kTicksPerBeat);
   EXPECT_EQ(result[0].duration, short_dur);
 
@@ -432,8 +432,8 @@ TEST(OrnamentEngineTest, ApplyPralltriller) {
   EXPECT_EQ(result[1].start_tick, kTicksPerBeat + short_dur);
   EXPECT_EQ(result[1].duration, short_dur);
 
-  // Note 2: upper neighbor.
-  EXPECT_EQ(result[2].pitch, 66);
+  // Note 2: upper neighbor (chromatic half step).
+  EXPECT_EQ(result[2].pitch, 65);
   EXPECT_EQ(result[2].start_tick, kTicksPerBeat + short_dur * 2);
   EXPECT_EQ(result[2].duration, short_dur);
 
@@ -765,11 +765,12 @@ TEST(ScaleAwareOrnamentTest, CMajorETrillUsesF) {
 
   auto result = applyOrnaments({note}, ctx);
 
-  // Should produce trill notes alternating between E4(64) and F4(65).
+  // Should produce trill notes alternating between E4(64) and F4(65),
+  // with Nachschlag lower neighbor Eb4(63) near the end.
   ASSERT_GT(result.size(), 1u);
   for (const auto& sub : result) {
-    EXPECT_TRUE(sub.pitch == 64 || sub.pitch == 65)
-        << "Expected E4(64) or F4(65), got " << static_cast<int>(sub.pitch);
+    EXPECT_TRUE(sub.pitch == 64 || sub.pitch == 65 || sub.pitch == 63)
+        << "Expected E4(64), F4(65), or Eb4(63), got " << static_cast<int>(sub.pitch);
   }
 }
 
@@ -797,15 +798,16 @@ TEST(ScaleAwareOrnamentTest, AMinorGSharpTrillUsesA) {
 
   auto result = applyOrnaments({note}, ctx);
 
+  // Trill between G#4(68) and A4(69), with Nachschlag lower neighbor G4(67).
   ASSERT_GT(result.size(), 1u);
   for (const auto& sub : result) {
-    EXPECT_TRUE(sub.pitch == 68 || sub.pitch == 69)
-        << "Expected G#4(68) or A4(69), got " << static_cast<int>(sub.pitch);
+    EXPECT_TRUE(sub.pitch == 68 || sub.pitch == 69 || sub.pitch == 67)
+        << "Expected G#4(68), A4(69), or G4(67), got " << static_cast<int>(sub.pitch);
   }
 }
 
-TEST(ScaleAwareOrnamentTest, LegacyWithoutTimelineUsesWholeStep) {
-  // Without timeline, legacy behavior: upper neighbor = pitch + 2.
+TEST(ScaleAwareOrnamentTest, LegacyWithoutTimelineUsesHalfStep) {
+  // Without timeline, legacy behavior: upper neighbor = pitch + 1 (chromatic).
   auto note = makeNote(0, 64, kTicksPerBeat);
 
   OrnamentContext ctx;
@@ -826,9 +828,9 @@ TEST(ScaleAwareOrnamentTest, LegacyWithoutTimelineUsesWholeStep) {
 
   ASSERT_GT(result.size(), 1u);
   for (const auto& sub : result) {
-    // Legacy: E4(64) + 2 = F#4(66)
-    EXPECT_TRUE(sub.pitch == 64 || sub.pitch == 66)
-        << "Expected E4(64) or F#4(66), got " << static_cast<int>(sub.pitch);
+    // Legacy chromatic: E4(64) + 1 = F4(65), or Nachschlag lower = Eb4(63).
+    EXPECT_TRUE(sub.pitch == 64 || sub.pitch == 65 || sub.pitch == 63)
+        << "Expected E4(64), F4(65), or Eb4(63), got " << static_cast<int>(sub.pitch);
   }
 }
 

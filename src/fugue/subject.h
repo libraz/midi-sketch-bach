@@ -19,6 +19,7 @@ struct SubjectScore;  // Forward declaration (see subject_validator.h).
 struct Subject {
   std::vector<NoteEvent> notes;
   Key key = Key::C;
+  bool is_minor = false;  ///< Whether the home key is minor.
   Tick length_ticks = 0;  ///< Total length including anacrusis.
   SubjectCharacter character = SubjectCharacter::Severe;
   Tick anacrusis_ticks = 0;  ///< Duration of the anacrusis (0 = no anacrusis).
@@ -64,7 +65,8 @@ class SubjectGenerator {
   /// @param seed Random seed.
   /// @return Vector of NoteEvent forming the subject.
   std::vector<NoteEvent> generateNotes(SubjectCharacter character,
-                                       Key key, uint8_t bars,
+                                       Key key, bool is_minor,
+                                       uint8_t bars,
                                        uint32_t seed) const;
 };
 

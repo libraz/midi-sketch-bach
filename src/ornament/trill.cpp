@@ -81,6 +81,15 @@ std::vector<NoteEvent> generateTrill(const NoteEvent& note, uint8_t upper_pitch,
     current_tick += subnote_duration;
   }
 
+  // Nachschlag (termination): for trills on notes >= 1 beat with at least 5 sub-notes,
+  // replace the last 2 sub-notes with lower neighbor -> main note.
+  // This follows C.P.E. Bach's standard trill termination practice.
+  if (note.duration >= kTicksPerBeat && result.size() >= 5) {
+    const uint8_t lower_pitch = (note.pitch > 0) ? static_cast<uint8_t>(note.pitch - 1) : 0;
+    result[result.size() - 2].pitch = lower_pitch;
+    result[result.size() - 1].pitch = note.pitch;
+  }
+
   return result;
 }
 

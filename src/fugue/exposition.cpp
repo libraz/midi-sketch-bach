@@ -208,12 +208,13 @@ void placeFreeCounterpoint(VoiceId voice_id,
                            Tick start_tick,
                            Tick duration_ticks,
                            Key key,
+                           bool is_minor,
                            VoiceRegister voice_reg,
                            std::mt19937& rng,  // NOLINT(runtime/references): mt19937 must be mutable
                            std::map<VoiceId, std::vector<NoteEvent>>& voice_notes) {
   if (duration_ticks == 0) return;
 
-  ScaleType scale = ScaleType::Major;
+  ScaleType scale = is_minor ? ScaleType::HarmonicMinor : ScaleType::Major;
   int center_pitch = (static_cast<int>(voice_reg.low) +
                       static_cast<int>(voice_reg.high)) / 2;
   int current_deg = scale_util::pitchToAbsoluteDegree(
@@ -359,7 +360,9 @@ Exposition buildExposition(const Subject& subject,
       // Adapt countersubject to answer key when accompanying an answer entry.
       std::vector<NoteEvent> cs_to_place = countersubject.notes;
       if (!entry.is_subject) {
-        cs_to_place = adaptCSToKey(cs_to_place, answer.key, ScaleType::Major);
+        cs_to_place = adaptCSToKey(cs_to_place, answer.key,
+                                   config.is_minor ? ScaleType::HarmonicMinor
+                                                   : ScaleType::Major);
       }
 
       placeCountersubjectNotes(cs_to_place, prev_voice,
@@ -372,8 +375,8 @@ Exposition buildExposition(const Subject& subject,
         VoiceId earlier_voice = expo.entries[earlier].voice_id;
         VoiceRegister earlier_reg = getVoiceRegister(earlier_voice, num_voices);
         placeFreeCounterpoint(earlier_voice, entry.entry_tick,
-                              entry_interval, config.key, earlier_reg, rng,
-                              expo.voice_notes);
+                              entry_interval, config.key, config.is_minor,
+                              earlier_reg, rng, expo.voice_notes);
       }
     }
   }
