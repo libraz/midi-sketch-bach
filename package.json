@@ -1,0 +1,70 @@
+{
+  "name": "@libraz/midi-sketch-bach",
+  "version": "0.1.0",
+  "type": "module",
+  "packageManager": "yarn@4.12.0",
+  "description": "Bach Instrumental MIDI Generator - WASM library",
+  "main": "dist/index.cjs",
+  "module": "dist/index.mjs",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "preinstall": "npx only-allow yarn",
+    "postinstall": "simple-git-hooks",
+    "prepare": "simple-git-hooks",
+    "build": "yarn build:wasm && yarn build:js",
+    "build:wasm": "emcmake cmake -B build-wasm -DBUILD_WASM=ON && cmake --build build-wasm",
+    "build:js": "node scripts/build-js.mjs",
+    "clean": "rm -rf dist",
+    "lint": "biome check js/ tests/wasm/",
+    "lint:fix": "biome check --write js/ tests/wasm/",
+    "format": "biome format --write js/ tests/wasm/",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "prepublishOnly": "yarn lint && yarn build"
+  },
+  "keywords": [
+    "midi",
+    "music",
+    "generator",
+    "bach",
+    "fugue",
+    "counterpoint",
+    "wasm",
+    "webassembly"
+  ],
+  "author": "libraz <libraz@libraz.net>",
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">=16.0.0"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.3.10",
+    "esbuild": "^0.27.2",
+    "lint-staged": "^16.2.7",
+    "simple-git-hooks": "^2.13.1",
+    "typescript": "^5.0.0",
+    "vitest": "^4.0.16"
+  },
+  "volta": {
+    "node": "22.21.1",
+    "yarn": "4.12.0"
+  },
+  "simple-git-hooks": {
+    "pre-commit": "yarn lint-staged"
+  },
+  "lint-staged": {
+    "*.{ts,js}": [
+      "biome check --write"
+    ]
+  }
+}

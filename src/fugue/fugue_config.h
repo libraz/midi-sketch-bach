@@ -66,6 +66,8 @@ struct FugueConfig {
   uint32_t seed = 0;
   uint8_t subject_bars = 2;       // Length in bars (2-4)
   int max_subject_retries = 10;   // Maximum generation attempts
+  int develop_pairs = 1;          ///< Number of Episode+MiddleEntry pairs in Develop phase.
+  int episode_bars = 2;           ///< Duration of each episode in bars.
 };
 
 }  // namespace bach

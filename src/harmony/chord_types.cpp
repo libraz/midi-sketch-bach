@@ -2,6 +2,9 @@
 
 #include "harmony/chord_types.h"
 
+#include "core/pitch_utils.h"
+#include "harmony/harmonic_event.h"
+
 namespace bach {
 
 ChordQuality majorKeyQuality(ChordDegree degree) {
@@ -19,15 +22,16 @@ ChordQuality majorKeyQuality(ChordDegree degree) {
 }
 
 ChordQuality minorKeyQuality(ChordDegree degree) {
-  // Natural minor diatonic triads: i=min, ii=dim, III=Maj, iv=min, v=min, VI=Maj, VII=Maj
+  // Minor key triads using harmonic minor practice (Bach standard):
+  // i=min, ii=dim, III=Maj, iv=min, V=Maj (raised 7th), VI=Maj, vii=dim (raised 7th)
   switch (degree) {
     case ChordDegree::I:       return ChordQuality::Minor;
     case ChordDegree::ii:      return ChordQuality::Diminished;
     case ChordDegree::iii:     return ChordQuality::Major;
     case ChordDegree::IV:      return ChordQuality::Minor;
-    case ChordDegree::V:       return ChordQuality::Minor;
+    case ChordDegree::V:       return ChordQuality::Major;
     case ChordDegree::vi:      return ChordQuality::Major;
-    case ChordDegree::viiDim:  return ChordQuality::Major;
+    case ChordDegree::viiDim:  return ChordQuality::Diminished;
   }
   return ChordQuality::Minor;
 }
@@ -84,6 +88,64 @@ const char* chordDegreeToString(ChordDegree degree) {
     case ChordDegree::viiDim:  return "viiDim";
   }
   return "?";
+}
+
+bool isChordTone(uint8_t pitch, const HarmonicEvent& event) {
+  int pitch_class = getPitchClass(pitch);
+  int root_pc = getPitchClass(event.chord.root_pitch);
+
+  if (pitch_class == root_pc) return true;
+
+  int third_interval = 0;
+  int fifth_interval = 0;
+
+  switch (event.chord.quality) {
+    case ChordQuality::Major:
+    case ChordQuality::Dominant7:
+    case ChordQuality::MajorMajor7:
+      third_interval = 4;
+      fifth_interval = 7;
+      break;
+    case ChordQuality::Minor:
+    case ChordQuality::Minor7:
+      third_interval = 3;
+      fifth_interval = 7;
+      break;
+    case ChordQuality::Diminished:
+      third_interval = 3;
+      fifth_interval = 6;
+      break;
+    case ChordQuality::Augmented:
+      third_interval = 4;
+      fifth_interval = 8;
+      break;
+  }
+
+  int third_pc = (root_pc + third_interval) % 12;
+  int fifth_pc = (root_pc + fifth_interval) % 12;
+
+  if (pitch_class == third_pc || pitch_class == fifth_pc) return true;
+
+  // Check 7th for seventh chord qualities.
+  int seventh_interval = -1;
+  switch (event.chord.quality) {
+    case ChordQuality::Dominant7:
+    case ChordQuality::Minor7:
+      seventh_interval = 10;  // Minor 7th
+      break;
+    case ChordQuality::MajorMajor7:
+      seventh_interval = 11;  // Major 7th
+      break;
+    default:
+      break;
+  }
+
+  if (seventh_interval >= 0) {
+    int seventh_pc = (root_pc + seventh_interval) % 12;
+    if (pitch_class == seventh_pc) return true;
+  }
+
+  return false;
 }
 
 }  // namespace bach

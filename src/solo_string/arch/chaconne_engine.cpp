@@ -216,10 +216,12 @@ ChaconneResult generateChaconne(const ChaconneConfig& config) {
   // Step 2: Variation plan -- use config or create standard plan.
   // -----------------------------------------------------------------------
   std::vector<ChaconneVariation> variations;
-  if (config.variations.empty()) {
-    variations = createStandardVariationPlan(config.key);
-  } else {
+  if (!config.variations.empty()) {
     variations = config.variations;
+  } else if (config.target_variations > 0) {
+    variations = createScaledVariationPlan(config.key, config.target_variations);
+  } else {
+    variations = createStandardVariationPlan(config.key);
   }
 
   if (!validateVariationPlan(variations)) {
@@ -240,6 +242,9 @@ ChaconneResult generateChaconne(const ChaconneConfig& config) {
       (ground_bass.noteCount() + static_cast<size_t>(bass_length / kTicksPerBar) * 12);
   all_notes.reserve(estimated_notes);
 
+  // Concatenated timeline across all variations.
+  HarmonicTimeline full_timeline;
+
   for (size_t var_idx = 0; var_idx < variations.size(); ++var_idx) {
     const auto& variation = variations[var_idx];
     Tick offset_tick = static_cast<Tick>(var_idx) * bass_length;
@@ -250,6 +255,14 @@ ChaconneResult generateChaconne(const ChaconneConfig& config) {
     // Step 4b: Build harmonic timeline for this variation's key.
     HarmonicTimeline timeline = HarmonicTimeline::createStandard(
         variation.key, bass_length, HarmonicResolution::Bar);
+
+    // Collect timeline events with offset for the full piece timeline.
+    for (const auto& ev : timeline.events()) {
+      HarmonicEvent offset_ev = ev;
+      offset_ev.tick += offset_tick;
+      offset_ev.end_tick += offset_tick;
+      full_timeline.addEvent(offset_ev);
+    }
 
     // Step 4c: Build texture context with constraints and design values.
     uint32_t var_seed = seed + static_cast<uint32_t>(var_idx) * 997u;
@@ -369,6 +382,7 @@ ChaconneResult generateChaconne(const ChaconneConfig& config) {
 
   result.tracks.push_back(std::move(track));
   result.total_duration_ticks = total_duration;
+  result.timeline = std::move(full_timeline);
   result.success = true;
   return result;
 }

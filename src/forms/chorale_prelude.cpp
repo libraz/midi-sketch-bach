@@ -425,6 +425,7 @@ ChoralePreludeResult generateChoralePrelude(const ChoralePreludeConfig& config) 
   }
 
   result.tracks = std::move(tracks);
+  result.timeline = std::move(timeline);
   result.success = true;
 
   return result;

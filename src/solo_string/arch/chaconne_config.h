@@ -92,6 +92,10 @@ struct ChaconneConfig {
 
   /// Maximum retries per variation before reporting failure.
   int max_variation_retries = 3;
+
+  /// Target number of variations (0 = use default plan).
+  /// When > 0, createScaledVariationPlan() is used instead of the standard plan.
+  int target_variations = 0;
 };
 
 /// @brief Create a standard variation plan for a chaconne.
@@ -109,6 +113,26 @@ struct ChaconneConfig {
 /// @param key The key signature (major section uses parallel major).
 /// @return Vector of ChaconneVariation with roles and types assigned.
 std::vector<ChaconneVariation> createStandardVariationPlan(const KeySignature& key);
+
+/// @brief Create a scaled variation plan for a chaconne with a target variation count.
+///
+/// Generates a plan for the specified number of variations following the BWV1004
+/// structural pattern. Fixed roles (Establish=1, Accumulate=3, Resolve=1) are
+/// preserved; the remaining variations are distributed across Develop,
+/// Destabilize, and Illuminate blocks using historical proportions.
+///
+/// For counts > Short (10), post-major Illuminate "islands" are inserted
+/// within Destabilize blocks at regular intervals. Islands use
+/// is_major_section=false and related major keys.
+///
+/// When target_variations <= 10, returns the same output as
+/// createStandardVariationPlan().
+///
+/// @param key The key signature (major section uses parallel major).
+/// @param target_variations Number of variations to generate (minimum 10).
+/// @return Vector of ChaconneVariation with roles and types assigned.
+std::vector<ChaconneVariation> createScaledVariationPlan(const KeySignature& key,
+                                                          int target_variations);
 
 /// @brief Validate a variation plan for structural correctness.
 ///

@@ -11,6 +11,7 @@ project(midi-sketch-bach
 # ============================================================================
 
 option(BUILD_CLI "Build the bach_cli executable" ON)
+option(BUILD_WASM "Build WebAssembly module" OFF)
 option(BUILD_TESTING "Build test suite" ON)
 
 # ============================================================================
@@ -66,6 +67,28 @@ configure_file(
 include_directories(${CMAKE_BINARY_DIR}/generated)
 
 # ============================================================================
+# WASM configuration
+# ============================================================================
+
+if(BUILD_WASM)
+  message(STATUS "Building for WebAssembly")
+  set(CMAKE_EXECUTABLE_SUFFIX ".js")
+
+  add_compile_options(-Os -flto)
+  add_link_options(-Os -flto)
+
+  add_link_options(
+    -sWASM=1
+    -sMODULARIZE=1
+    -sEXPORT_ES6=1
+    "-sEXPORTED_FUNCTIONS=['_malloc','_free','_bach_create','_bach_destroy','_bach_generate_from_json','_bach_get_midi','_bach_free_midi','_bach_get_events','_bach_free_events','_bach_get_info','_bach_form_count','_bach_form_name','_bach_form_display','_bach_instrument_count','_bach_instrument_name','_bach_character_count','_bach_character_name','_bach_key_count','_bach_key_name','_bach_default_instrument_for_form','_bach_error_string','_bach_version']"
+    "-sEXPORTED_RUNTIME_METHODS=['cwrap','ccall','UTF8ToString','HEAPU8','HEAPU32']"
+    -sALLOW_MEMORY_GROWTH=1
+    -sSTACK_SIZE=1048576
+  )
+endif()
+
+# ============================================================================
 # Source tree
 # ============================================================================
 
@@ -77,7 +100,7 @@ add_subdirectory(src)
 # Testing (Google Test via FetchContent)
 # ============================================================================
 
-if(BUILD_TESTING)
+if(BUILD_TESTING AND NOT BUILD_WASM)
   include(FetchContent)
   FetchContent_Declare(
     googletest

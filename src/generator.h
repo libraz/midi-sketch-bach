@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "core/basic_types.h"
+#include "harmony/harmonic_timeline.h"
 #include "harmony/key.h"
 
 namespace bach {
@@ -24,6 +25,8 @@ struct GeneratorConfig {
   bool analyze = false;
   bool strict = false;
   uint8_t max_retry = 3;
+  DurationScale scale = DurationScale::Short;  ///< Duration control.
+  uint16_t target_bars = 0;  ///< Override: target bar count (0 = use scale).
 };
 
 /// @brief Result from unified generation.
@@ -35,6 +38,7 @@ struct GeneratorResult {
   uint32_t seed_used = 0;
   std::string form_description;
   std::string error_message;
+  HarmonicTimeline timeline;  ///< Harmonic context for analysis.
 };
 
 /// @brief Generate a Bach composition based on configuration.

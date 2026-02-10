@@ -546,5 +546,28 @@ TEST(FugueGeneratorTest, GenerateFugue_AllSectionsPositiveDuration) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Timeline propagation
+// ---------------------------------------------------------------------------
+
+TEST(FugueGeneratorTest, GenerateFugue_HasTimeline) {
+  FugueConfig config = makeTestConfig();
+  FugueResult result = generateFugue(config);
+  ASSERT_TRUE(result.success);
+  EXPECT_GT(result.timeline.size(), 0u)
+      << "Fugue result should include a harmonic timeline from tonal plan";
+}
+
+TEST(FugueGeneratorTest, GenerateFugue_TimelineCoversDuration) {
+  FugueConfig config = makeTestConfig();
+  FugueResult result = generateFugue(config);
+  ASSERT_TRUE(result.success);
+  ASSERT_GT(result.timeline.size(), 0u);
+
+  // The timeline should have events covering the entire piece.
+  Tick last_tick = result.timeline.events().back().end_tick;
+  EXPECT_GT(last_tick, 0u);
+}
+
 }  // namespace
 }  // namespace bach

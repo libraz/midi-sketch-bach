@@ -299,10 +299,10 @@ TEST(HarmonicTimelineCreateStandardTest, MinorKeyQualities) {
   auto timeline = HarmonicTimeline::createStandard(a_minor, duration,
                                                    HarmonicResolution::Bar);
 
-  // i = Minor, iv = Minor, v = Minor, i = Minor (natural minor).
+  // i = Minor, iv = Minor, V = Major (harmonic minor practice), i = Minor.
   EXPECT_EQ(timeline.getChordAt(0).quality, ChordQuality::Minor);
   EXPECT_EQ(timeline.getChordAt(kTicksPerBar).quality, ChordQuality::Minor);
-  EXPECT_EQ(timeline.getChordAt(kTicksPerBar * 2).quality, ChordQuality::Minor);
+  EXPECT_EQ(timeline.getChordAt(kTicksPerBar * 2).quality, ChordQuality::Major);
   EXPECT_EQ(timeline.getChordAt(kTicksPerBar * 3).quality, ChordQuality::Minor);
 }
 

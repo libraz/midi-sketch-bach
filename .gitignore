@@ -99,6 +99,7 @@ third_party/*
 # Tools (Claude Code, Serena, etc.)
 # =============================================================================
 .claude/
+CLAUDE.md
 .serena/
 .cache/
 

@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "core/basic_types.h"
+#include "harmony/harmonic_timeline.h"
 #include "solo_string/arch/chaconne_config.h"
 
 namespace bach {
@@ -22,6 +23,7 @@ struct ChaconneResult {
   bool success = false;            ///< True if generation completed without error.
   std::string error_message;       ///< Describes the failure if success is false.
   uint32_t seed_used = 0;          ///< The actual seed used (after auto-resolution).
+  HarmonicTimeline timeline;       ///< Concatenated harmonic context across variations.
 };
 
 /// @brief Generate a BWV1004-style chaconne with ground bass variations.

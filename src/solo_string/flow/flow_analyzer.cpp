@@ -11,6 +11,7 @@
 
 #include "core/basic_types.h"
 #include "core/pitch_utils.h"
+#include "harmony/chord_types.h"
 #include "harmony/harmonic_event.h"
 #include "harmony/harmonic_timeline.h"
 #include "solo_string/flow/arpeggio_flow_config.h"
@@ -105,53 +106,6 @@ float averagePitch(const std::vector<NoteEvent>& notes) {
     sum += static_cast<float>(note.pitch);
   }
   return sum / static_cast<float>(notes.size());
-}
-
-/// @brief Check if a MIDI pitch is a chord tone of the given harmonic event.
-///
-/// A pitch is a chord tone if its pitch class matches the root, 3rd, or 5th
-/// of the chord (accounting for chord quality).
-///
-/// @param pitch MIDI note number.
-/// @param event Harmonic event with chord information.
-/// @return true if the pitch is a chord tone.
-bool isChordTone(uint8_t pitch, const HarmonicEvent& event) {
-  int pitch_class = getPitchClass(pitch);
-  int root_pc = getPitchClass(event.chord.root_pitch);
-
-  // Root always matches.
-  if (pitch_class == root_pc) return true;
-
-  // Determine 3rd and 5th intervals based on chord quality.
-  int third_interval = 0;
-  int fifth_interval = 0;
-
-  switch (event.chord.quality) {
-    case ChordQuality::Major:
-    case ChordQuality::Dominant7:
-    case ChordQuality::MajorMajor7:
-      third_interval = 4;  // Major 3rd
-      fifth_interval = 7;  // Perfect 5th
-      break;
-    case ChordQuality::Minor:
-    case ChordQuality::Minor7:
-      third_interval = 3;  // Minor 3rd
-      fifth_interval = 7;  // Perfect 5th
-      break;
-    case ChordQuality::Diminished:
-      third_interval = 3;  // Minor 3rd
-      fifth_interval = 6;  // Diminished 5th
-      break;
-    case ChordQuality::Augmented:
-      third_interval = 4;  // Major 3rd
-      fifth_interval = 8;  // Augmented 5th
-      break;
-  }
-
-  int third_pc = (root_pc + third_interval) % 12;
-  int fifth_pc = (root_pc + fifth_interval) % 12;
-
-  return pitch_class == third_pc || pitch_class == fifth_pc;
 }
 
 /// @brief Total duration of a piece from config.

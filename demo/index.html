@@ -1,0 +1,566 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>midi-sketch-bach Demo</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      font-family: 'Georgia', 'Times New Roman', serif;
+      max-width: 900px; margin: 0 auto; padding: 20px;
+      background: #faf6f0; color: #3c2f1e;
+    }
+    h1 {
+      color: #4a3728; border-bottom: 2px solid #8b6914;
+      padding-bottom: 10px; font-weight: normal; letter-spacing: 1px;
+    }
+    .version { color: #8b7355; font-size: 0.85em; }
+    .section {
+      background: #fff; border-radius: 8px; padding: 20px;
+      margin-bottom: 20px; box-shadow: 0 2px 8px rgba(60,47,30,0.08);
+      border: 1px solid #e8ddd0;
+    }
+    .section h2 {
+      margin-top: 0; color: #4a3728; font-size: 1.15em;
+      font-weight: normal; letter-spacing: 0.5px;
+    }
+    .form-group { margin-bottom: 15px; }
+    label { display: block; margin-bottom: 5px; font-weight: 500; color: #5a4a3a; font-size: 0.95em; }
+    select, input[type="number"] {
+      width: 100%; padding: 10px; border: 1px solid #d4c8b8;
+      border-radius: 4px; font-size: 14px; font-family: inherit;
+      background: #fff;
+    }
+    select:focus, input:focus { outline: none; border-color: #8b6914; }
+    select:disabled, input:disabled { background: #f0ebe3; color: #8b7355; cursor: not-allowed; }
+    .row { display: flex; gap: 15px; flex-wrap: wrap; }
+    .row > .form-group { flex: 1; min-width: 120px; }
+    .checkbox-group { display: flex; align-items: center; gap: 8px; }
+    .checkbox-group input { width: auto; }
+    button {
+      padding: 12px 24px; border: none; border-radius: 4px;
+      font-size: 15px; cursor: pointer; transition: all 0.2s;
+      font-family: inherit;
+    }
+    .btn-generate { background: #8b6914; color: #fff; }
+    .btn-generate:hover { background: #705510; }
+    .btn-generate:disabled { background: #c4b99a; cursor: not-allowed; }
+    .btn-play { background: #5b7a3a; color: #fff; }
+    .btn-play:hover { background: #4a6530; }
+    .btn-play:disabled { background: #c4b99a; cursor: not-allowed; }
+    .btn-stop { background: #a04030; color: #fff; }
+    .btn-stop:hover { background: #8a3428; }
+    .btn-stop:disabled { background: #c4b99a; cursor: not-allowed; }
+    .btn-download { background: #3a5a7a; color: #fff; }
+    .btn-download:hover { background: #2e4a65; }
+    .btn-download:disabled { background: #c4b99a; cursor: not-allowed; }
+    .buttons { display: flex; gap: 10px; flex-wrap: wrap; }
+    .result {
+      background: #f5f0e8; padding: 15px; border-radius: 4px;
+      font-family: 'Menlo', 'Consolas', monospace; font-size: 13px;
+      white-space: pre-wrap; color: #4a3728; border: 1px solid #e0d6c8;
+    }
+    .status { padding: 10px; border-radius: 4px; margin-bottom: 15px; font-size: 0.95em; }
+    .status.loading { background: #fef3cd; color: #856404; border: 1px solid #fde68a; }
+    .status.ready { background: #d4edda; color: #1a5928; border: 1px solid #b7dfc1; }
+    .status.error { background: #f8d7da; color: #721c24; border: 1px solid #f1b0b7; }
+    .hint { color: #8b7355; font-size: 0.85em; margin-top: 4px; }
+    .system-badge {
+      display: inline-block; padding: 2px 8px; border-radius: 3px;
+      font-size: 0.75em; font-weight: bold; letter-spacing: 0.5px; vertical-align: middle;
+    }
+    .badge-organ { background: #eee4d4; color: #6b5030; }
+    .badge-solo { background: #dde8d8; color: #3a5a30; }
+    .playback-info {
+      display: flex; align-items: center; gap: 15px; margin-top: 15px;
+      padding: 10px; background: #f5f0e8; border-radius: 4px;
+    }
+    .progress-bar {
+      flex: 1; height: 6px; background: #d4c8b8;
+      border-radius: 3px; overflow: hidden;
+    }
+    .progress-bar-fill {
+      height: 100%; background: #8b6914; transition: width 0.1s linear;
+    }
+    .time-display {
+      font-family: 'Menlo', 'Consolas', monospace;
+      font-size: 13px; min-width: 100px; text-align: right; color: #5a4a3a;
+    }
+    .bpm-slider { width: 100%; accent-color: #8b6914; }
+    .bpm-value { text-align: center; font-weight: bold; font-size: 1.1em; color: #4a3728; margin-top: 4px; }
+    .track-list { margin-top: 10px; }
+    .track-item {
+      display: inline-block; padding: 3px 10px; margin: 3px 4px 3px 0;
+      border-radius: 3px; font-size: 0.85em;
+    }
+    .track-organ { background: #f0e8d8; color: #6b5030; border: 1px solid #ddd0b8; }
+    .track-solo { background: #e4eee0; color: #3a5a30; border: 1px solid #c8dac0; }
+    .separator {
+      padding: 6px 0; font-size: 0.8em; color: #8b7355;
+      border-bottom: 1px solid #e8ddd0; margin-bottom: 5px;
+    }
+    optgroup { font-style: normal; font-weight: 600; color: #4a3728; }
+  </style>
+</head>
+<body>
+  <div id="app" v-scope @vue:mounted="init()">
+    <h1>midi-sketch-bach <span class="version">v{{ version }}</span></h1>
+    <div :class="['status', status.type]">{{ status.text }}</div>
+
+    <!-- Configuration -->
+    <div class="section">
+      <h2>Composition</h2>
+
+      <div class="row">
+        <div class="form-group" style="flex: 2;">
+          <label>Form</label>
+          <select v-model.number="config.formId" @change="onFormChange" :disabled="!ready">
+            <optgroup label="Organ System">
+              <option v-for="f in organForms" :value="f.id">{{ f.display || f.name }}</option>
+            </optgroup>
+            <optgroup label="Solo String System">
+              <option v-for="f in soloForms" :value="f.id">{{ f.display || f.name }}</option>
+            </optgroup>
+          </select>
+          <div class="hint">
+            <span v-if="isOrganForm" class="system-badge badge-organ">Organ</span>
+            <span v-else class="system-badge badge-solo">Solo String</span>
+            {{ formDescription }}
+          </div>
+        </div>
+        <div class="form-group">
+          <label>Instrument</label>
+          <select v-model.number="config.instrumentId" :disabled="!ready">
+            <option v-for="inst in instruments" :value="inst.id">{{ inst.name }}</option>
+          </select>
+          <div v-if="instrumentAutoDetected" class="hint">Auto-detected for this form</div>
+        </div>
+      </div>
+
+      <div class="row">
+        <div class="form-group">
+          <label>Key</label>
+          <select v-model.number="config.keyId" :disabled="!ready">
+            <option v-for="k in keys" :value="k.id">{{ k.name }}</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>&nbsp;</label>
+          <div class="checkbox-group" style="margin-top: 4px;">
+            <input type="checkbox" id="isMinor" v-model="config.isMinor" :disabled="!ready">
+            <label for="isMinor" style="margin-bottom: 0;">Minor</label>
+          </div>
+        </div>
+        <div class="form-group">
+          <label>Voices</label>
+          <select v-model.number="config.numVoices" :disabled="!ready || !isOrganForm">
+            <option value="2">2</option>
+            <option value="3">3</option>
+            <option value="4">4</option>
+            <option value="5">5</option>
+          </select>
+          <div v-if="!isOrganForm" class="hint">Solo string: single voice</div>
+        </div>
+        <div class="form-group">
+          <label>Character</label>
+          <select v-model.number="config.characterId" :disabled="!ready || !isOrganForm">
+            <option v-for="c in characters" :value="c.id">{{ c.name }}</option>
+          </select>
+          <div v-if="!isOrganForm" class="hint">Organ forms only</div>
+        </div>
+      </div>
+
+      <div class="row">
+        <div class="form-group">
+          <label>Scale</label>
+          <select v-model.number="config.scaleId" :disabled="!ready">
+            <option v-for="s in scales" :value="s.id">{{ s.name }}</option>
+          </select>
+          <div class="hint">Controls piece length (short=default, full=historical)</div>
+        </div>
+        <div class="form-group">
+          <label>Target Bars (0 = use scale)</label>
+          <input type="number" v-model.number="config.targetBars" min="0" max="999" :disabled="!ready">
+          <div v-if="config.targetBars > 0" class="hint">Overrides scale setting</div>
+        </div>
+      </div>
+
+      <div class="row">
+        <div class="form-group">
+          <label>BPM</label>
+          <input type="range" class="bpm-slider" v-model.number="config.bpm"
+            min="40" max="200" :disabled="!ready">
+          <div class="bpm-value">{{ config.bpm }} BPM</div>
+        </div>
+        <div class="form-group">
+          <label>Seed (0 = random)</label>
+          <input type="number" v-model.number="config.seed" min="0" :disabled="!ready">
+        </div>
+      </div>
+    </div>
+
+    <!-- Actions -->
+    <div class="section">
+      <h2>Actions</h2>
+      <div class="buttons">
+        <button class="btn-generate" :disabled="!ready || generating" @click="generate">
+          {{ generating ? 'Generating...' : 'Generate' }}
+        </button>
+        <button class="btn-play" :disabled="!eventData || isPlaying" @click="play">Play</button>
+        <button class="btn-stop" :disabled="!isPlaying" @click="stop">Stop</button>
+        <button class="btn-download" :disabled="!midiData" @click="downloadMidi">Download MIDI</button>
+      </div>
+
+      <div v-if="midiData" class="playback-info">
+        <div class="progress-bar">
+          <div class="progress-bar-fill" :style="{ width: playbackProgress + '%' }"></div>
+        </div>
+        <div class="time-display">{{ formatTime(playbackTime) }} / {{ formatTime(totalDuration) }}</div>
+      </div>
+    </div>
+
+    <!-- Result -->
+    <div v-if="resultText" class="section">
+      <h2>Result</h2>
+      <div class="result">{{ resultText }}</div>
+      <div v-if="eventData" class="track-list">
+        <div class="separator">Tracks</div>
+        <span v-for="track in eventData.tracks"
+          :class="['track-item', isOrganForm ? 'track-organ' : 'track-solo']">
+          {{ track.name }} ({{ track.note_count }} notes)
+        </span>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://unpkg.com/petite-vue@0.4.1/dist/petite-vue.iife.js"></script>
+  <script type="module">
+    import * as bach from '../dist/index.mjs';
+
+    const FORM_DESCRIPTIONS = {
+      'fugue': 'Strict 3-voice fugue with subject, answer, and countersubject',
+      'prelude_and_fugue': 'Prelude followed by fugue (BWV 532 style)',
+      'trio_sonata': 'Three-voice sonata (BWV 525-530 style)',
+      'chorale_prelude': 'Chorale melody with counterpoint (BWV 599-650 style)',
+      'toccata_and_fugue': 'Virtuosic toccata with fugue (BWV 565 style)',
+      'passacaglia': 'Variations over ground bass (BWV 582 style)',
+      'fantasia_and_fugue': 'Free fantasia followed by fugue (BWV 537 style)',
+      'cello_prelude': 'Arpeggiated prelude for solo cello (BWV 1007 style)',
+      'chaconne': 'Monumental arch-form variations for solo violin (BWV 1004 style)',
+    };
+
+    const ORGAN_FORM_NAMES = new Set([
+      'fugue', 'prelude_and_fugue', 'trio_sonata', 'chorale_prelude',
+      'toccata_and_fugue', 'passacaglia', 'fantasia_and_fugue',
+    ]);
+
+    // Simple Web Audio synth with organ-like timbre
+    function midiToFreq(midi) {
+      return 440 * Math.pow(2, (midi - 69) / 12);
+    }
+
+    function createOrganSynth(audioContext) {
+      const masterGain = audioContext.createGain();
+      masterGain.gain.value = 0.25;
+      masterGain.connect(audioContext.destination);
+      const activeOscs = [];
+
+      return {
+        play(pitch, startTime, duration, velocity = 80) {
+          // Fundamental
+          const osc1 = audioContext.createOscillator();
+          const osc2 = audioContext.createOscillator();
+          const env = audioContext.createGain();
+
+          osc1.type = 'sine';
+          osc1.frequency.value = midiToFreq(pitch);
+
+          // Soft octave overtone for organ-like quality
+          osc2.type = 'sine';
+          osc2.frequency.value = midiToFreq(pitch) * 2;
+
+          const mix = audioContext.createGain();
+          mix.gain.value = 0.3;
+
+          osc1.connect(env);
+          osc2.connect(mix);
+          mix.connect(env);
+          env.connect(masterGain);
+
+          const vol = (velocity / 127) * 0.4;
+          env.gain.setValueAtTime(0, startTime);
+          env.gain.linearRampToValueAtTime(vol, startTime + 0.015);
+          const releaseStart = startTime + Math.max(0.03, duration - 0.04);
+          env.gain.setValueAtTime(vol, releaseStart);
+          env.gain.linearRampToValueAtTime(0, releaseStart + 0.04);
+
+          osc1.start(startTime);
+          osc1.stop(startTime + duration + 0.1);
+          osc2.start(startTime);
+          osc2.stop(startTime + duration + 0.1);
+
+          activeOscs.push(osc1, osc2);
+          osc1.onended = () => {
+            const idx = activeOscs.indexOf(osc1);
+            if (idx !== -1) activeOscs.splice(idx, 1);
+          };
+          osc2.onended = () => {
+            const idx = activeOscs.indexOf(osc2);
+            if (idx !== -1) activeOscs.splice(idx, 1);
+          };
+        },
+        stopAll() {
+          const now = audioContext.currentTime;
+          for (const osc of activeOscs) {
+            try { osc.stop(now); } catch (e) { /* already stopped */ }
+          }
+          activeOscs.length = 0;
+        }
+      };
+    }
+
+    PetiteVue.createApp({
+      // State
+      version: '...',
+      ready: false,
+      generating: false,
+      status: { type: 'loading', text: 'Loading WASM module...' },
+
+      // Presets from WASM
+      forms: [],
+      instruments: [],
+      characters: [],
+      keys: [],
+      scales: [],
+
+      // Config
+      config: {
+        formId: 1,       // prelude_and_fugue
+        keyId: 0,        // C
+        isMinor: false,
+        numVoices: 3,
+        characterId: 0,  // severe
+        instrumentId: 0, // organ
+        bpm: 100,
+        seed: 0,
+        scaleId: 0,     // short
+        targetBars: 0,
+      },
+
+      // Generation output
+      bach: null,
+      midiData: null,
+      eventData: null,
+      resultText: '',
+      instrumentAutoDetected: true,
+
+      // Playback
+      audioContext: null,
+      synth: null,
+      isPlaying: false,
+      playbackTime: 0,
+      totalDuration: 0,
+      playStartTime: 0,
+      animationFrame: null,
+      stopTimeout: null,
+
+      // Computed
+      get organForms() {
+        return this.forms.filter(f => ORGAN_FORM_NAMES.has(f.name));
+      },
+      get soloForms() {
+        return this.forms.filter(f => !ORGAN_FORM_NAMES.has(f.name));
+      },
+      get currentForm() {
+        return this.forms.find(f => f.id === this.config.formId);
+      },
+      get isOrganForm() {
+        const f = this.currentForm;
+        return f ? ORGAN_FORM_NAMES.has(f.name) : true;
+      },
+      get formDescription() {
+        const f = this.currentForm;
+        return f ? (FORM_DESCRIPTIONS[f.name] || '') : '';
+      },
+      get playbackProgress() {
+        return this.totalDuration > 0 ? (this.playbackTime / this.totalDuration) * 100 : 0;
+      },
+
+      // Methods
+      ticksToSeconds(ticks, bpm) {
+        return (ticks / 480) * (60 / bpm);
+      },
+      formatTime(s) {
+        return `${Math.floor(s / 60)}:${Math.floor(s % 60).toString().padStart(2, '0')}`;
+      },
+
+      onFormChange() {
+        const defaultInst = bach.getDefaultInstrumentForForm(this.config.formId);
+        this.config.instrumentId = defaultInst;
+        this.instrumentAutoDetected = true;
+      },
+
+      generate() {
+        try {
+          this.generating = true;
+          this.stop();
+          if (this.bach) {
+            this.bach.destroy();
+            this.bach = null;
+          }
+
+          this.bach = new bach.BachGenerator();
+
+          const cfg = {
+            form: this.config.formId,
+            key: this.config.keyId,
+            isMinor: this.config.isMinor,
+            bpm: this.config.bpm,
+            seed: this.config.seed,
+            instrument: this.config.instrumentId,
+            scale: this.config.scaleId,
+          };
+          if (this.config.targetBars > 0) {
+            cfg.targetBars = this.config.targetBars;
+          }
+
+          // Only include organ-specific options for organ forms
+          if (this.isOrganForm) {
+            cfg.numVoices = this.config.numVoices;
+            cfg.character = this.config.characterId;
+          }
+
+          this.bach.generate(cfg);
+          this.midiData = this.bach.getMidi();
+          this.eventData = this.bach.getEvents();
+          const info = this.bach.getInfo();
+
+          this.totalDuration = this.ticksToSeconds(info.totalTicks, info.bpm);
+
+          const keyName = this.keys.find(k => k.id === this.config.keyId)?.name || '?';
+          const formName = this.currentForm?.display || this.currentForm?.name || '?';
+          const scaleName = this.scales.find(s => s.id === this.config.scaleId)?.name || 'short';
+          const lines = [
+            `Form: ${formName}`,
+            `Key: ${keyName}${this.config.isMinor ? ' minor' : ' major'}`,
+            `Scale: ${scaleName}${this.config.targetBars > 0 ? ` (override: ${this.config.targetBars} bars)` : ''}`,
+            `BPM: ${info.bpm}`,
+            `Bars: ${info.totalBars}`,
+            `Duration: ${this.formatTime(this.totalDuration)}`,
+            `Seed: ${info.seedUsed}`,
+            `MIDI: ${this.midiData.length} bytes`,
+          ];
+          if (this.eventData.description) {
+            lines.push(`\n${this.eventData.description}`);
+          }
+          this.resultText = lines.join('\n');
+        } catch (e) {
+          this.resultText = `Error: ${e.message}`;
+          console.error(e);
+        } finally {
+          this.generating = false;
+        }
+      },
+
+      initAudio() {
+        if (!this.audioContext) {
+          this.audioContext = new AudioContext();
+        }
+        this.synth = createOrganSynth(this.audioContext);
+      },
+
+      async play() {
+        if (!this.eventData || this.isPlaying) return;
+        try {
+          this.initAudio();
+          const ctx = this.audioContext;
+          if (ctx.state === 'suspended') await ctx.resume();
+
+          const bpm = this.eventData.bpm;
+          const now = ctx.currentTime + 0.1;
+          this.playStartTime = now;
+
+          for (const track of this.eventData.tracks) {
+            for (const note of track.notes || []) {
+              const start = this.ticksToSeconds(note.start_tick, bpm);
+              const dur = Math.max(0.05, this.ticksToSeconds(note.duration, bpm));
+              this.synth.play(note.pitch, now + start, dur, note.velocity);
+            }
+          }
+
+          this.isPlaying = true;
+          this.totalDuration = this.ticksToSeconds(this.eventData.total_ticks, bpm);
+          this.stopTimeout = setTimeout(() => this.stop(), this.totalDuration * 1000 + 500);
+          this.updateProgress();
+        } catch (e) {
+          console.error('Playback error:', e);
+          this.stop();
+        }
+      },
+
+      updateProgress() {
+        if (!this.isPlaying || !this.audioContext) return;
+        this.playbackTime = this.audioContext.currentTime - this.playStartTime;
+        if (this.playbackTime >= this.totalDuration) {
+          this.stop();
+          return;
+        }
+        this.animationFrame = requestAnimationFrame(() => this.updateProgress());
+      },
+
+      stop() {
+        this.isPlaying = false;
+        if (this.stopTimeout) {
+          clearTimeout(this.stopTimeout);
+          this.stopTimeout = null;
+        }
+        if (this.synth) {
+          this.synth.stopAll();
+        }
+        if (this.animationFrame) {
+          cancelAnimationFrame(this.animationFrame);
+          this.animationFrame = null;
+        }
+        this.playbackTime = 0;
+      },
+
+      downloadMidi() {
+        if (!this.midiData) return;
+        const blob = new Blob([this.midiData], { type: 'audio/midi' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        const formName = this.currentForm?.name || 'bach';
+        const keyName = this.keys.find(k => k.id === this.config.keyId)?.name || 'C';
+        const mode = this.config.isMinor ? 'minor' : 'major';
+        a.href = url;
+        a.download = `bach-${formName}-${keyName}-${mode}.mid`;
+        a.click();
+        URL.revokeObjectURL(url);
+      },
+
+      async init() {
+        try {
+          await bach.init({ wasmPath: '../dist/bach.wasm' });
+          this.version = bach.getVersion ? bach.getVersion() : '0.1.0';
+
+          this.forms = bach.getForms();
+          this.instruments = bach.getInstruments();
+          this.characters = bach.getCharacters();
+          this.keys = bach.getKeys();
+          this.scales = bach.getScales();
+
+          // Set default instrument for default form
+          this.onFormChange();
+
+          this.status = { type: 'ready', text: 'Ready' };
+          this.ready = true;
+        } catch (e) {
+          this.status = { type: 'error', text: `Failed to load: ${e.message}` };
+          console.error(e);
+        }
+      }
+    }).mount('#app');
+  </script>
+</body>
+</html>

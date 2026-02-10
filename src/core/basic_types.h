@@ -184,6 +184,22 @@ enum class ScaleType : uint8_t {
   Mixolydian
 };
 
+/// Duration scale for controlling piece length.
+/// Short = current defaults (backward-compatible), Full = historical length.
+enum class DurationScale : uint8_t {
+  Short,   ///< Current default (~2.5 min chaconne, ~1.3 min fugue)
+  Medium,  ///< Moderate length
+  Long,    ///< Near historical length
+  Full     ///< Full historical length
+};
+
+/// @brief Convert DurationScale to human-readable string.
+const char* durationScaleToString(DurationScale scale);
+
+/// @brief Parse DurationScale from string (e.g. "short", "medium", "long", "full").
+/// @return Parsed DurationScale. Defaults to DurationScale::Short on unrecognized input.
+DurationScale durationScaleFromString(const std::string& str);
+
 // ---------------------------------------------------------------------------
 // Data structures
 // ---------------------------------------------------------------------------

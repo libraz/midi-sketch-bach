@@ -8,6 +8,7 @@
 
 #include "core/basic_types.h"
 #include "fugue/fugue_config.h"
+#include "harmony/harmonic_timeline.h"
 
 namespace bach {
 
@@ -40,6 +41,16 @@ struct TonalPlan {
   /// @brief Get the number of modulations.
   /// @return Number of KeyChange entries in the modulations vector.
   size_t modulationCount() const;
+
+  /// @brief Convert the tonal plan to a bar-resolution HarmonicTimeline.
+  ///
+  /// Each modulation region maps to I-chord events in the active key at
+  /// bar resolution. The harmony is approximate (always I chord) but the
+  /// key changes are accurate.
+  ///
+  /// @param total_duration Total duration in ticks.
+  /// @return HarmonicTimeline at bar resolution.
+  HarmonicTimeline toHarmonicTimeline(Tick total_duration) const;
 
   /// @brief Convert to JSON representation.
   /// @return JSON string containing home_key, is_minor, and modulations array.

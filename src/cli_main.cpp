@@ -3,9 +3,11 @@
 
 #include <cstdio>
 #include <cstring>
+#include <fstream>
 #include <string>
 #include <vector>
 
+#include "analysis/analysis_runner.h"
 #include "core/basic_types.h"
 #include "generator.h"
 #include "harmony/key.h"
@@ -28,6 +30,9 @@ struct CliOptions {
   bool strict = false;
   bool verbose = false;
   bool instrument_specified = false;
+  bach::DurationScale scale = bach::DurationScale::Short;
+  uint16_t target_bars = 0;
+  bool scale_specified = false;
 };
 
 /// @brief Print usage information to stdout.
@@ -42,6 +47,8 @@ void printUsage() {
   std::printf("  --instrument INS Instrument: organ, harpsichord, piano, violin, cello, guitar\n");
   std::printf("  --voices N       Number of voices (2-5)\n");
   std::printf("  --bpm N          BPM (40-200)\n");
+  std::printf("  --scale SCALE    Duration scale: short, medium, long, full\n");
+  std::printf("  --bars N         Target bar count (overrides --scale)\n");
   std::printf("  --json           JSON output\n");
   std::printf("  --analyze        Generate + analysis\n");
   std::printf("  --strict         No retry\n");
@@ -101,6 +108,11 @@ bool parseArgs(int argc, char* argv[], CliOptions& opts) {
     } else if (std::strcmp(argv[idx], "--instrument") == 0 && idx + 1 < argc) {
       opts.instrument = bach::instrumentTypeFromString(argv[++idx]);
       opts.instrument_specified = true;
+    } else if (std::strcmp(argv[idx], "--scale") == 0 && idx + 1 < argc) {
+      opts.scale = bach::durationScaleFromString(argv[++idx]);
+      opts.scale_specified = true;
+    } else if (std::strcmp(argv[idx], "--bars") == 0 && idx + 1 < argc) {
+      opts.target_bars = static_cast<uint16_t>(std::atoi(argv[++idx]));
     }
   }
   return true;
@@ -128,6 +140,9 @@ bach::GeneratorConfig buildGeneratorConfig(const CliOptions& opts) {
     config.instrument = bach::defaultInstrumentForForm(opts.form);
   }
 
+  config.scale = opts.scale;
+  config.target_bars = opts.target_bars;
+
   return config;
 }
 
@@ -148,6 +163,10 @@ int main(int argc, char* argv[]) {
   std::printf("BPM:        %d\n", config.bpm);
   std::printf("Character:  %s\n", bach::subjectCharacterToString(config.character));
   std::printf("Instrument: %s\n", bach::instrumentTypeToString(config.instrument));
+  std::printf("Scale:      %s\n", bach::durationScaleToString(config.scale));
+  if (config.target_bars > 0) {
+    std::printf("Bars:       %u (override)\n", config.target_bars);
+  }
   std::printf("Seed:       %u%s\n", config.seed, config.seed == 0 ? " (auto)" : "");
   std::printf("\n");
 
@@ -175,6 +194,36 @@ int main(int argc, char* argv[]) {
     } else {
       std::fprintf(stderr, "Error: failed to write %s\n", opts.output.c_str());
       return 1;
+    }
+
+    // Run analysis if requested.
+    if (opts.analyze) {
+      bach::AnalysisReport analysis = bach::runAnalysis(
+          result.tracks, config.form, config.num_voices,
+          result.timeline, config.key);
+
+      std::printf("\n%s",
+                  analysis.toTextSummary(config.form, config.num_voices).c_str());
+
+      if (opts.json_output) {
+        // Write analysis JSON alongside the MIDI output.
+        std::string json_path = opts.output;
+        auto dot_pos = json_path.rfind('.');
+        if (dot_pos != std::string::npos) {
+          json_path = json_path.substr(0, dot_pos) + "_analysis.json";
+        } else {
+          json_path += "_analysis.json";
+        }
+
+        std::ofstream json_file(json_path);
+        if (json_file.is_open()) {
+          json_file << analysis.toJson(config.form, config.num_voices);
+          json_file.close();
+          std::printf("Analysis:  %s\n", json_path.c_str());
+        } else {
+          std::fprintf(stderr, "Warning: failed to write %s\n", json_path.c_str());
+        }
+      }
     }
   } else {
     std::fprintf(stderr, "Error: %s\n", result.error_message.c_str());

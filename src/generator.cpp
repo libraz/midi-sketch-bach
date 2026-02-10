@@ -2,12 +2,14 @@
 
 #include "generator.h"
 
+#include <algorithm>
 #include <random>
 
 #include "forms/chorale_prelude.h"
 #include "forms/prelude.h"
 #include "fugue/fugue_config.h"
 #include "fugue/fugue_generator.h"
+#include "harmony/harmonic_timeline.h"
 #include "solo_string/arch/chaconne_engine.h"
 #include "solo_string/flow/harmonic_arpeggio_engine.h"
 
@@ -28,6 +30,49 @@ uint32_t generateRandomSeed() {
   return result;
 }
 
+/// @brief Get fugue develop_pairs and episode_bars for a DurationScale.
+/// @param scale The duration scale.
+/// @param[out] pairs Output: number of Episode+MiddleEntry pairs.
+/// @param[out] ep_bars Output: bars per episode.
+void fugueDurationParams(DurationScale scale, int& pairs, int& ep_bars) {
+  switch (scale) {
+    case DurationScale::Short:
+      pairs = 1; ep_bars = 2; break;
+    case DurationScale::Medium:
+      pairs = 3; ep_bars = 3; break;
+    case DurationScale::Long:
+      pairs = 6; ep_bars = 3; break;
+    case DurationScale::Full:
+      pairs = 10; ep_bars = 4; break;
+  }
+}
+
+/// @brief Get chaconne target_variations for a DurationScale.
+/// @param scale The duration scale.
+/// @return Target number of variations.
+int chaconneVariationsForScale(DurationScale scale) {
+  switch (scale) {
+    case DurationScale::Short:  return 0;   // Use standard plan
+    case DurationScale::Medium: return 24;
+    case DurationScale::Long:   return 40;
+    case DurationScale::Full:   return 64;
+  }
+  return 0;
+}
+
+/// @brief Get flow section count for a DurationScale.
+/// @param scale The duration scale.
+/// @return Number of sections.
+int flowSectionsForScale(DurationScale scale) {
+  switch (scale) {
+    case DurationScale::Short:  return 6;
+    case DurationScale::Medium: return 10;
+    case DurationScale::Long:   return 16;
+    case DurationScale::Full:   return 20;
+  }
+  return 6;
+}
+
 /// @brief Map GeneratorConfig to FugueConfig for fugue-based forms.
 /// @param config The unified generator configuration.
 /// @return FugueConfig populated from the generator config.
@@ -38,6 +83,18 @@ FugueConfig toFugueConfig(const GeneratorConfig& config) {
   fconfig.bpm = config.bpm;
   fconfig.seed = config.seed;
   fconfig.character = config.character;
+
+  if (config.target_bars > 0) {
+    // Rough estimate: each pair adds ~episode_bars + subject_bars bars.
+    // Baseline without pairs: ~12 bars (exposition + return episode + stretto + coda).
+    int baseline = 12;
+    int bars_left = static_cast<int>(config.target_bars) - baseline;
+    int pair_cost = fconfig.episode_bars + fconfig.subject_bars + 2;
+    fconfig.develop_pairs = std::max(1, bars_left / pair_cost);
+  } else {
+    fugueDurationParams(config.scale, fconfig.develop_pairs, fconfig.episode_bars);
+  }
+
   return fconfig;
 }
 
@@ -100,6 +157,10 @@ GeneratorResult generateFugueForm(const GeneratorConfig& config) {
   result.tracks = std::move(fugue_result.tracks);
   result.total_duration_ticks = calculateTotalDuration(result.tracks);
   result.tempo_events.push_back({0, config.bpm});
+  result.timeline = fugue_result.timeline.size() > 0
+      ? std::move(fugue_result.timeline)
+      : HarmonicTimeline::createStandard(
+            config.key, result.total_duration_ticks, HarmonicResolution::Bar);
   result.success = true;
   result.form_description =
       std::string(formTypeToString(config.form)) + " in " +
@@ -175,6 +236,22 @@ GeneratorResult generatePreludeAndFugueForm(const GeneratorConfig& config) {
   result.tempo_events.push_back({prelude_duration, config.bpm});
 
   result.total_duration_ticks = prelude_duration + fugue_duration;
+  // Use the fugue's tonal plan timeline (offset by prelude duration) if available.
+  if (fugue_result.timeline.size() > 0) {
+    // Build a combined timeline: prelude uses standard, fugue uses tonal plan.
+    HarmonicTimeline combined = HarmonicTimeline::createStandard(
+        config.key, prelude_duration, HarmonicResolution::Bar);
+    for (const auto& ev : fugue_result.timeline.events()) {
+      HarmonicEvent offset_ev = ev;
+      offset_ev.tick += prelude_duration;
+      offset_ev.end_tick += prelude_duration;
+      combined.addEvent(offset_ev);
+    }
+    result.timeline = std::move(combined);
+  } else {
+    result.timeline = HarmonicTimeline::createStandard(
+        config.key, result.total_duration_ticks, HarmonicResolution::Bar);
+  }
   result.success = true;
   result.form_description =
       "Prelude and Fugue in " + keySignatureToString(config.key) + ", " +
@@ -248,6 +325,10 @@ GeneratorResult generate(const GeneratorConfig& config) {
       result.tracks = std::move(cp_result.tracks);
       result.total_duration_ticks = cp_result.total_duration_ticks;
       result.tempo_events.push_back({0, effective_config.bpm});
+      result.timeline = cp_result.timeline.size() > 0
+          ? std::move(cp_result.timeline)
+          : HarmonicTimeline::createStandard(
+                effective_config.key, result.total_duration_ticks, HarmonicResolution::Bar);
       result.success = true;
       result.seed_used = effective_config.seed;
       result.form_description =
@@ -262,6 +343,13 @@ GeneratorResult generate(const GeneratorConfig& config) {
       flow_config.seed = effective_config.seed;
       flow_config.instrument = effective_config.instrument;
 
+      if (effective_config.target_bars > 0) {
+        flow_config.num_sections = std::max(3, static_cast<int>(
+            effective_config.target_bars / flow_config.bars_per_section));
+      } else {
+        flow_config.num_sections = flowSectionsForScale(effective_config.scale);
+      }
+
       ArpeggioFlowResult flow_result = generateArpeggioFlow(flow_config);
 
       if (!flow_result.success) {
@@ -275,6 +363,10 @@ GeneratorResult generate(const GeneratorConfig& config) {
       result.tracks = std::move(flow_result.tracks);
       result.total_duration_ticks = flow_result.total_duration_ticks;
       result.tempo_events.push_back({0, effective_config.bpm});
+      result.timeline = flow_result.timeline.size() > 0
+          ? std::move(flow_result.timeline)
+          : HarmonicTimeline::createStandard(
+                effective_config.key, result.total_duration_ticks, HarmonicResolution::Bar);
       result.success = true;
       result.seed_used = effective_config.seed;
       result.form_description =
@@ -289,6 +381,14 @@ GeneratorResult generate(const GeneratorConfig& config) {
       ch_config.seed = effective_config.seed;
       ch_config.instrument = effective_config.instrument;
 
+      if (effective_config.target_bars > 0) {
+        // Each variation = 4 bars (ground bass cycle).
+        ch_config.target_variations = std::max(10, static_cast<int>(
+            effective_config.target_bars / 4));
+      } else {
+        ch_config.target_variations = chaconneVariationsForScale(effective_config.scale);
+      }
+
       ChaconneResult ch_result = generateChaconne(ch_config);
 
       if (!ch_result.success) {
@@ -301,6 +401,10 @@ GeneratorResult generate(const GeneratorConfig& config) {
       result.tracks = std::move(ch_result.tracks);
       result.total_duration_ticks = ch_result.total_duration_ticks;
       result.tempo_events.push_back({0, effective_config.bpm});
+      result.timeline = ch_result.timeline.size() > 0
+          ? std::move(ch_result.timeline)
+          : HarmonicTimeline::createStandard(
+                effective_config.key, result.total_duration_ticks, HarmonicResolution::Bar);
       result.success = true;
       result.seed_used = ch_result.seed_used;
       result.form_description = "Chaconne in " + keySignatureToString(effective_config.key);

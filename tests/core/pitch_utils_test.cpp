@@ -348,5 +348,60 @@ TEST(ScaleArraysTest, MixolydianHasFlatSeventh) {
   EXPECT_EQ(kScaleMixolydian[6], 10);  // Flat 7th (unlike major's 11)
 }
 
+// ---------------------------------------------------------------------------
+// isDiatonicInKey -- minor scale union (natural + harmonic + melodic)
+// ---------------------------------------------------------------------------
+
+TEST(IsDiatonicInKeyTest, MinorKey_RaisedSeventhIsDiatonic) {
+  // A minor: raised 7th = G# (pitch class 8, offset from A=9 is (8-9+12)%12=11)
+  // G#3 = MIDI 56
+  EXPECT_TRUE(isDiatonicInKey(56, Key::A, true));
+  // G#4 = MIDI 68
+  EXPECT_TRUE(isDiatonicInKey(68, Key::A, true));
+}
+
+TEST(IsDiatonicInKeyTest, MinorKey_RaisedSixthIsDiatonic) {
+  // A minor: raised 6th = F# (pitch class 6, offset from A=9 is (6-9+12)%12=9)
+  // F#4 = MIDI 66
+  EXPECT_TRUE(isDiatonicInKey(66, Key::A, true));
+}
+
+TEST(IsDiatonicInKeyTest, MinorKey_NaturalSeventhAlsoDiatonic) {
+  // A minor: natural 7th = G (pitch class 7)
+  // G4 = MIDI 67
+  EXPECT_TRUE(isDiatonicInKey(67, Key::A, true));
+}
+
+TEST(IsDiatonicInKeyTest, MinorKey_NaturalSixthAlsoDiatonic) {
+  // A minor: natural 6th = F (pitch class 5)
+  // F4 = MIDI 65
+  EXPECT_TRUE(isDiatonicInKey(65, Key::A, true));
+}
+
+TEST(IsDiatonicInKeyTest, MinorKey_ChromaticStillDetected) {
+  // A minor: D# is not in any minor scale form
+  // D#4 = MIDI 63
+  EXPECT_FALSE(isDiatonicInKey(63, Key::A, true));
+}
+
+TEST(IsDiatonicInKeyTest, DMinor_RaisedSeventhIsDiatonic) {
+  // D minor: raised 7th = C# (pitch class 1)
+  // C#4 = MIDI 61
+  EXPECT_TRUE(isDiatonicInKey(61, Key::D, true));
+}
+
+TEST(IsDiatonicInKeyTest, DMinor_RaisedSixthIsDiatonic) {
+  // D minor: raised 6th = B natural (pitch class 11)
+  // B3 = MIDI 59
+  EXPECT_TRUE(isDiatonicInKey(59, Key::D, true));
+}
+
+TEST(IsDiatonicInKeyTest, MajorKeyUnchanged) {
+  // C major: F# should NOT be diatonic
+  EXPECT_FALSE(isDiatonicInKey(66, Key::C, false));
+  // C major: C should be diatonic
+  EXPECT_TRUE(isDiatonicInKey(60, Key::C, false));
+}
+
 }  // namespace
 }  // namespace bach

@@ -562,5 +562,29 @@ TEST(HarmonicArpeggioEngineTest, AllNotesHaveVoiceZero) {
   }
 }
 
+// ===========================================================================
+// Timeline propagation
+// ===========================================================================
+
+TEST(HarmonicArpeggioEngineTest, ResultIncludesTimeline) {
+  auto config = makeEngineConfig();
+  auto result = generateArpeggioFlow(config);
+  ASSERT_TRUE(result.success) << result.error_message;
+  EXPECT_GT(result.timeline.size(), 0u)
+      << "Flow result should include the harmonic timeline used during generation";
+}
+
+TEST(HarmonicArpeggioEngineTest, TimelineMatchesBarCount) {
+  constexpr int kNumSections = 6;
+  constexpr int kBarsPerSection = 4;
+  auto config = makeEngineConfig(kNumSections, kBarsPerSection, InstrumentType::Cello, 42);
+  auto result = generateArpeggioFlow(config);
+  ASSERT_TRUE(result.success) << result.error_message;
+
+  // Should have one timeline event per bar.
+  int expected_bars = kNumSections * kBarsPerSection;
+  EXPECT_EQ(result.timeline.size(), static_cast<size_t>(expected_bars));
+}
+
 }  // namespace
 }  // namespace bach

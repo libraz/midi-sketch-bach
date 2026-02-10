@@ -994,6 +994,7 @@ ArpeggioFlowResult generateArpeggioFlow(const ArpeggioFlowConfig& config) {
 
   result.tracks.push_back(std::move(track));
   result.total_duration_ticks = total_duration;
+  result.timeline = std::move(timeline);
   result.success = true;
 
   return result;

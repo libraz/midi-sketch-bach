@@ -67,6 +67,18 @@ const char* chordQualityToString(ChordQuality quality);
 /// @return Null-terminated string such as "I", "ii", "V".
 const char* chordDegreeToString(ChordDegree degree);
 
+struct HarmonicEvent;
+
+/// @brief Check if a MIDI pitch is a chord tone of the given harmonic event.
+///
+/// A pitch is a chord tone if its pitch class matches the root, 3rd, or 5th
+/// of the chord (accounting for chord quality).
+///
+/// @param pitch MIDI note number.
+/// @param event Harmonic event with chord information.
+/// @return true if the pitch is a chord tone.
+bool isChordTone(uint8_t pitch, const HarmonicEvent& event);
+
 }  // namespace bach
 
 #endif  // BACH_HARMONY_CHORD_TYPES_H

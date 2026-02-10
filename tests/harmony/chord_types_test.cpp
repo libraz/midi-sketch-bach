@@ -4,6 +4,8 @@
 
 #include <gtest/gtest.h>
 
+#include "harmony/harmonic_event.h"
+
 namespace bach {
 namespace {
 
@@ -27,14 +29,14 @@ TEST(MajorKeyQualityTest, AllDegrees) {
 // ---------------------------------------------------------------------------
 
 TEST(MinorKeyQualityTest, AllDegrees) {
-  // i=min, ii=dim, III=Maj, iv=min, v=min, VI=Maj, VII=Maj
+  // Harmonic minor practice: i=min, ii=dim, III=Maj, iv=min, V=Maj, VI=Maj, vii=dim
   EXPECT_EQ(minorKeyQuality(ChordDegree::I), ChordQuality::Minor);
   EXPECT_EQ(minorKeyQuality(ChordDegree::ii), ChordQuality::Diminished);
   EXPECT_EQ(minorKeyQuality(ChordDegree::iii), ChordQuality::Major);
   EXPECT_EQ(minorKeyQuality(ChordDegree::IV), ChordQuality::Minor);
-  EXPECT_EQ(minorKeyQuality(ChordDegree::V), ChordQuality::Minor);
+  EXPECT_EQ(minorKeyQuality(ChordDegree::V), ChordQuality::Major);
   EXPECT_EQ(minorKeyQuality(ChordDegree::vi), ChordQuality::Major);
-  EXPECT_EQ(minorKeyQuality(ChordDegree::viiDim), ChordQuality::Major);
+  EXPECT_EQ(minorKeyQuality(ChordDegree::viiDim), ChordQuality::Diminished);
 }
 
 // ---------------------------------------------------------------------------
@@ -114,6 +116,69 @@ TEST(ChordStructTest, CustomValues) {
   EXPECT_EQ(chord.quality, ChordQuality::Dominant7);
   EXPECT_EQ(chord.root_pitch, 67);
   EXPECT_EQ(chord.inversion, 1);
+}
+
+// ---------------------------------------------------------------------------
+// isChordTone -- 7th chord recognition
+// ---------------------------------------------------------------------------
+
+TEST(IsChordToneTest, Dominant7_SeventhIsChordTone) {
+  HarmonicEvent event;
+  event.chord.root_pitch = 67;  // G4
+  event.chord.quality = ChordQuality::Dominant7;
+  // G dominant 7th chord tones: G(67), B(71), D(74), F(65)
+  // 7th = G + 10 semitones = F (pitch class 5)
+  EXPECT_TRUE(isChordTone(65, event));  // F4 (minor 7th)
+  EXPECT_TRUE(isChordTone(77, event));  // F5 (minor 7th, octave above)
+  EXPECT_TRUE(isChordTone(67, event));  // G4 (root)
+  EXPECT_TRUE(isChordTone(71, event));  // B4 (3rd)
+  EXPECT_TRUE(isChordTone(74, event));  // D5 (5th)
+}
+
+TEST(IsChordToneTest, Minor7_SeventhIsChordTone) {
+  HarmonicEvent event;
+  event.chord.root_pitch = 60;  // C4
+  event.chord.quality = ChordQuality::Minor7;
+  // C minor 7th: C(60), Eb(63), G(67), Bb(70)
+  EXPECT_TRUE(isChordTone(70, event));  // Bb4 (minor 7th)
+  EXPECT_TRUE(isChordTone(60, event));  // C4 (root)
+  EXPECT_TRUE(isChordTone(63, event));  // Eb4 (3rd)
+  EXPECT_TRUE(isChordTone(67, event));  // G4 (5th)
+}
+
+TEST(IsChordToneTest, MajorMajor7_SeventhIsChordTone) {
+  HarmonicEvent event;
+  event.chord.root_pitch = 60;  // C4
+  event.chord.quality = ChordQuality::MajorMajor7;
+  // C major 7th: C(60), E(64), G(67), B(71)
+  EXPECT_TRUE(isChordTone(71, event));  // B4 (major 7th)
+  EXPECT_TRUE(isChordTone(60, event));  // C4 (root)
+  EXPECT_TRUE(isChordTone(64, event));  // E4 (3rd)
+  EXPECT_TRUE(isChordTone(67, event));  // G4 (5th)
+}
+
+TEST(IsChordToneTest, MajorTriad_NoSeventhRecognized) {
+  HarmonicEvent event;
+  event.chord.root_pitch = 60;  // C4
+  event.chord.quality = ChordQuality::Major;
+  // C major triad: only C, E, G are chord tones
+  EXPECT_FALSE(isChordTone(70, event));  // Bb4 not a chord tone of C major triad
+  EXPECT_FALSE(isChordTone(71, event));  // B4 not a chord tone of C major triad
+}
+
+// ---------------------------------------------------------------------------
+// minorKeyQuality -- V is Major (harmonic minor practice)
+// ---------------------------------------------------------------------------
+
+TEST(MinorKeyQualityTest, V_IsMajor) {
+  // In Bach's minor key practice, V chord always uses the raised 7th (leading tone),
+  // making it a major triad.
+  EXPECT_EQ(minorKeyQuality(ChordDegree::V), ChordQuality::Major);
+}
+
+TEST(MinorKeyQualityTest, viiDim_IsDiminished) {
+  // The vii chord in harmonic minor is diminished (built on the raised 7th).
+  EXPECT_EQ(minorKeyQuality(ChordDegree::viiDim), ChordQuality::Diminished);
 }
 
 }  // namespace

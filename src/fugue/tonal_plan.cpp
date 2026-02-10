@@ -5,6 +5,9 @@
 #include <algorithm>
 
 #include "core/json_helpers.h"
+#include "core/pitch_utils.h"
+#include "harmony/chord_types.h"
+#include "harmony/harmonic_event.h"
 
 namespace bach {
 
@@ -103,6 +106,38 @@ std::vector<Key> TonalPlan::keySequence() const {
 
 size_t TonalPlan::modulationCount() const {
   return modulations.size();
+}
+
+HarmonicTimeline TonalPlan::toHarmonicTimeline(Tick total_duration) const {
+  HarmonicTimeline timeline;
+  if (total_duration == 0) return timeline;
+
+  // Generate bar-resolution events. Each bar gets an I-chord in the active key.
+  for (Tick bar_tick = 0; bar_tick < total_duration; bar_tick += kTicksPerBar) {
+    Key active_key = keyAtTick(bar_tick);
+
+    Chord chord;
+    chord.degree = ChordDegree::I;
+    chord.quality = is_minor ? ChordQuality::Minor : ChordQuality::Major;
+    int root_midi = 4 * 12 + static_cast<int>(active_key);  // Octave 3 (C3 base)
+    chord.root_pitch = static_cast<uint8_t>(
+        std::min(std::max(root_midi, 0), 127));
+    chord.inversion = 0;
+
+    HarmonicEvent ev;
+    ev.tick = bar_tick;
+    ev.end_tick = bar_tick + kTicksPerBar;
+    ev.key = active_key;
+    ev.is_minor = is_minor;
+    ev.chord = chord;
+    ev.bass_pitch = chord.root_pitch;
+    ev.weight = 1.0f;
+    ev.is_immutable = false;
+
+    timeline.addEvent(ev);
+  }
+
+  return timeline;
 }
 
 std::string TonalPlan::toJson() const {

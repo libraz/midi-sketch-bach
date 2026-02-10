@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "core/basic_types.h"
+#include "harmony/harmonic_timeline.h"
 #include "solo_string/flow/arpeggio_flow_config.h"
 
 namespace bach {
@@ -23,6 +24,7 @@ struct ArpeggioFlowResult {
   bool success = false;            ///< True if generation completed without error.
   std::string error_message;       ///< Describes the failure if success is false.
   uint32_t seed_used = 0;         ///< The actual seed used (after auto-resolution).
+  HarmonicTimeline timeline;       ///< Harmonic context built during generation.
 };
 
 /// @brief Generate a BWV1007-style harmonic arpeggio flow piece.

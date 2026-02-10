@@ -121,4 +121,22 @@ const char* instrumentTypeToString(InstrumentType inst) {
   return "unknown";
 }
 
+const char* durationScaleToString(DurationScale scale) {
+  switch (scale) {
+    case DurationScale::Short:  return "short";
+    case DurationScale::Medium: return "medium";
+    case DurationScale::Long:   return "long";
+    case DurationScale::Full:   return "full";
+  }
+  return "unknown";
+}
+
+DurationScale durationScaleFromString(const std::string& str) {
+  if (str == "short")  return DurationScale::Short;
+  if (str == "medium") return DurationScale::Medium;
+  if (str == "long")   return DurationScale::Long;
+  if (str == "full")   return DurationScale::Full;
+  return DurationScale::Short;  // Default
+}
+
 }  // namespace bach

@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "core/basic_types.h"
+#include "harmony/harmonic_timeline.h"
 #include "harmony/key.h"
 
 namespace bach {
@@ -22,6 +23,7 @@ struct ChoralePreludeResult {
   std::vector<Track> tracks;  ///< 3 tracks: cantus (Swell), counterpoint (Great), pedal.
   Tick total_duration_ticks = 0;
   bool success = false;
+  HarmonicTimeline timeline;  ///< Harmonic context used during generation.
 };
 
 /// @brief Generate a BWV 599-650 style chorale prelude.

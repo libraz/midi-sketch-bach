@@ -211,6 +211,18 @@ inline int directedInterval(uint8_t pitch_a, uint8_t pitch_b) {
   return static_cast<int>(pitch_b) - static_cast<int>(pitch_a);
 }
 
+/// @brief Check if a MIDI pitch belongs to the diatonic scale of the given key.
+/// @param pitch MIDI note number.
+/// @param key Tonic pitch class.
+/// @param is_minor True for natural minor, false for major.
+/// @return True if the pitch class falls on a diatonic degree of the key.
+bool isDiatonicInKey(int pitch, Key key, bool is_minor);
+
+/// @brief Convert an interval in semitones to a human-readable name.
+/// @param semitones Interval size (0-12+). Compound intervals are reduced mod 12.
+/// @return String such as "unison", "minor 2nd", "perfect 5th", "tritone".
+const char* intervalToName(int semitones);
+
 }  // namespace bach
 
 #endif  // BACH_CORE_PITCH_UTILS_H

@@ -7,6 +7,7 @@ include(GoogleTest)
 set(BACH_TEST_SOURCES
   # core/
   core/basic_types_test.cpp
+  core/duration_scale_test.cpp
   core/pitch_utils_test.cpp
   core/interval_test.cpp
   core/scale_test.cpp
@@ -54,6 +55,7 @@ set(BACH_TEST_SOURCES
   fugue/middle_entry_test.cpp
   fugue/stretto_test.cpp
   fugue/fugue_generator_test.cpp
+  fugue/fugue_duration_scale_test.cpp
 
   # transform/
   transform/motif_transform_test.cpp
@@ -67,6 +69,8 @@ set(BACH_TEST_SOURCES
   analysis/fail_report_test.cpp
   analysis/counterpoint_analyzer_test.cpp
   analysis/fugue_analyzer_test.cpp
+  analysis/dissonance_analyzer_test.cpp
+  analysis/analysis_runner_test.cpp
 
   # harmony/
   harmony/chord_types_test.cpp
@@ -102,6 +106,7 @@ set(BACH_TEST_SOURCES
   solo_string/arch/ground_bass_test.cpp
   solo_string/arch/variation_types_test.cpp
   solo_string/arch/chaconne_config_test.cpp
+  solo_string/arch/scaled_variation_plan_test.cpp
   solo_string/arch/chaconne_engine_test.cpp
   solo_string/arch/destruction_resistance_test.cpp
 )

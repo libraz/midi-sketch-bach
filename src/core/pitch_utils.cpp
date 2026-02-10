@@ -98,4 +98,45 @@ uint8_t transposePitch(uint8_t pitch, Key key) {
   return static_cast<uint8_t>(transposed);
 }
 
+bool isDiatonicInKey(int pitch, Key key, bool is_minor) {
+  int key_offset = static_cast<int>(key);
+  int pitch_class = (((pitch % 12) + 12) % 12 - key_offset + 12) % 12;
+
+  if (!is_minor) {
+    for (int i = 0; i < 7; ++i) {
+      if (kScaleMajor[i] == pitch_class) return true;
+    }
+    return false;
+  }
+
+  // Minor keys: check union of natural, harmonic, and melodic minor scales.
+  // Bach routinely uses raised 6th (melodic) and raised 7th (harmonic/melodic),
+  // so all three scale forms are valid diatonic pitch classes.
+  for (int i = 0; i < 7; ++i) {
+    if (kScaleNaturalMinor[i] == pitch_class) return true;
+    if (kScaleHarmonicMinor[i] == pitch_class) return true;
+    if (kScaleMelodicMinor[i] == pitch_class) return true;
+  }
+  return false;
+}
+
+const char* intervalToName(int semitones) {
+  int normalized = std::abs(semitones) % 12;
+  switch (normalized) {
+    case 0:  return "unison";
+    case 1:  return "minor 2nd";
+    case 2:  return "major 2nd";
+    case 3:  return "minor 3rd";
+    case 4:  return "major 3rd";
+    case 5:  return "perfect 4th";
+    case 6:  return "tritone";
+    case 7:  return "perfect 5th";
+    case 8:  return "minor 6th";
+    case 9:  return "major 6th";
+    case 10: return "minor 7th";
+    case 11: return "major 7th";
+  }
+  return "unknown";
+}
+
 }  // namespace bach

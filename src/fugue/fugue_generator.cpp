@@ -280,55 +280,64 @@ FugueResult generateFugue(const FugueConfig& config) {
   all_notes.insert(all_notes.end(), expo_notes.begin(), expo_notes.end());
   current_tick = expo.total_ticks;
 
-  // --- Section 2: Episode 1 (Develop) ---
-  Tick episode_duration = kTicksPerBar * kEpisodeBars;
+  // --- Develop phase: Episode+MiddleEntry pairs ---
+  Tick episode_duration = kTicksPerBar * static_cast<Tick>(config.episode_bars);
 
-  // Find the first development key from the tonal plan.
-  Key develop_key = getDominantKey(config.key);
-  for (const auto& mod : tonal_plan.modulations) {
-    if (mod.phase == FuguePhase::Develop) {
-      develop_key = mod.target_key;
-      break;
-    }
+  // Build key cycle from near-related keys.
+  std::vector<Key> near_keys = getNearRelatedKeys(config.key, /*is_minor=*/false);
+  if (near_keys.empty()) {
+    near_keys.push_back(getDominantKey(config.key));
   }
 
-  Episode episode1 = generateEpisode(subject, current_tick, episode_duration,
-                                     config.key, develop_key,
-                                     num_voices, config.seed + 2000);
-  structure.addSection(SectionType::Episode, FuguePhase::Develop,
-                       current_tick, current_tick + episode_duration, develop_key);
-  all_notes.insert(all_notes.end(), episode1.notes.begin(), episode1.notes.end());
-  current_tick += episode_duration;
+  int develop_pairs = config.develop_pairs;
+  Key prev_key = config.key;
 
-  // --- Section 3: Middle Entry (Develop) ---
-  MiddleEntry middle_entry = generateMiddleEntry(subject, develop_key,
-                                                 current_tick, /*voice_id=*/0);
-  Tick middle_end = middle_entry.end_tick;
-  // Ensure middle entry has non-zero duration even with empty subject.
-  if (middle_end <= current_tick) {
-    middle_end = current_tick + subject.length_ticks;
+  for (int pair_idx = 0; pair_idx < develop_pairs; ++pair_idx) {
+    Key target_key = near_keys[pair_idx % near_keys.size()];
+    uint32_t pair_seed_base = config.seed + static_cast<uint32_t>(pair_idx) * 2000u + 2000u;
+
+    // Episode: transition from prev_key to target_key.
+    Episode episode = generateEpisode(subject, current_tick, episode_duration,
+                                      prev_key, target_key,
+                                      num_voices, pair_seed_base);
+    structure.addSection(SectionType::Episode, FuguePhase::Develop,
+                         current_tick, current_tick + episode_duration, target_key);
+    all_notes.insert(all_notes.end(), episode.notes.begin(), episode.notes.end());
+    current_tick += episode_duration;
+
+    // MiddleEntry: voice rotates by pair index.
+    uint8_t entry_voice = static_cast<uint8_t>(pair_idx % num_voices);
+    MiddleEntry middle_entry = generateMiddleEntry(subject, target_key,
+                                                   current_tick, entry_voice);
+    Tick middle_end = middle_entry.end_tick;
     if (middle_end <= current_tick) {
-      middle_end = current_tick + kTicksPerBar * 2;
+      middle_end = current_tick + subject.length_ticks;
+      if (middle_end <= current_tick) {
+        middle_end = current_tick + kTicksPerBar * 2;
+      }
     }
+    structure.addSection(SectionType::MiddleEntry, FuguePhase::Develop,
+                         current_tick, middle_end, target_key);
+    all_notes.insert(all_notes.end(), middle_entry.notes.begin(),
+                     middle_entry.notes.end());
+    current_tick = middle_end;
+    prev_key = target_key;
   }
-  structure.addSection(SectionType::MiddleEntry, FuguePhase::Develop,
-                       current_tick, middle_end, develop_key);
-  all_notes.insert(all_notes.end(), middle_entry.notes.begin(),
-                   middle_entry.notes.end());
-  current_tick = middle_end;
 
-  // --- Section 4: Episode 2 (Develop) ---
-  // Find the last development key for the second episode destination.
-  Key episode2_target = config.key;  // Return toward home.
-  Episode episode2 = generateEpisode(subject, current_tick, episode_duration,
-                                     develop_key, episode2_target,
-                                     num_voices, config.seed + 3000);
-  structure.addSection(SectionType::Episode, FuguePhase::Develop,
-                       current_tick, current_tick + episode_duration, episode2_target);
-  all_notes.insert(all_notes.end(), episode2.notes.begin(), episode2.notes.end());
-  current_tick += episode_duration;
+  // --- Return episode: transition back to home key ---
+  {
+    Episode return_episode = generateEpisode(
+        subject, current_tick, episode_duration,
+        prev_key, config.key, num_voices,
+        config.seed + static_cast<uint32_t>(develop_pairs) * 2000u + 2000u);
+    structure.addSection(SectionType::Episode, FuguePhase::Develop,
+                         current_tick, current_tick + episode_duration, config.key);
+    all_notes.insert(all_notes.end(), return_episode.notes.begin(),
+                     return_episode.notes.end());
+    current_tick += episode_duration;
+  }
 
-  // --- Section 5: Stretto (Resolve) ---
+  // --- Stretto (Resolve) ---
   Stretto stretto = generateStretto(subject, config.key, current_tick,
                                     num_voices, config.seed + 4000);
   Tick stretto_end = stretto.end_tick;
@@ -356,6 +365,10 @@ FugueResult generateFugue(const FugueConfig& config) {
   result.tracks = createOrganTracks(num_voices);
   assignNotesToTracks(all_notes, result.tracks);
   sortTrackNotes(result.tracks);
+
+  // Build timeline from the tonal plan (bar-resolution I-chord approximation).
+  Tick total_ticks = current_tick + kTicksPerBar * kCodaBars;
+  result.timeline = tonal_plan.toHarmonicTimeline(total_ticks);
 
   result.success = true;
   return result;

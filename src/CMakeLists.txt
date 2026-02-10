@@ -9,6 +9,7 @@ set(BACH_LIB_SOURCES
   core/interval.cpp
   core/scale.cpp
   core/json_helpers.cpp
+  core/json_parser.cpp
   core/note_source.cpp
   core/note_creator.cpp
 
@@ -74,6 +75,8 @@ set(BACH_LIB_SOURCES
   analysis/fail_report.cpp
   analysis/counterpoint_analyzer.cpp
   analysis/fugue_analyzer.cpp
+  analysis/dissonance_analyzer.cpp
+  analysis/analysis_runner.cpp
 
   # harmony/
   harmony/chord_types.cpp
@@ -121,10 +124,31 @@ target_include_directories(bach_lib
 target_compile_features(bach_lib PUBLIC cxx_std_17)
 
 # ============================================================================
+# WASM executable
+# ============================================================================
+
+if(BUILD_WASM)
+  add_executable(bach ${BACH_LIB_SOURCES} bach_c.cpp)
+  target_include_directories(bach PUBLIC
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_BINARY_DIR}/generated
+  )
+  target_compile_definitions(bach PRIVATE BACH_WASM)
+  target_compile_features(bach PUBLIC cxx_std_17)
+
+  # Copy to dist directory
+  add_custom_command(TARGET bach POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_SOURCE_DIR}/dist
+    COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_FILE:bach> ${CMAKE_SOURCE_DIR}/dist/
+    COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_BINARY_DIR}/bin/bach.wasm ${CMAKE_SOURCE_DIR}/dist/
+    COMMENT "Copying WASM files to dist/"
+  )
+
+# ============================================================================
 # bach_cli - Command-line interface
 # ============================================================================
 
-if(BUILD_CLI)
+elseif(BUILD_CLI)
   add_executable(bach_cli cli_main.cpp)
   target_link_libraries(bach_cli PRIVATE bach_lib)
 endif()

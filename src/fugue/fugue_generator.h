@@ -14,6 +14,7 @@
 #include "core/basic_types.h"
 #include "fugue/fugue_config.h"
 #include "fugue/fugue_structure.h"
+#include "harmony/harmonic_timeline.h"
 
 namespace bach {
 
@@ -24,6 +25,7 @@ struct FugueResult {
   FugueStructure structure;           ///< Formal structure with sections.
   std::string error_message;          ///< Error description if failed.
   int attempts = 0;                   ///< Number of subject generation attempts.
+  HarmonicTimeline timeline;          ///< Harmonic context from tonal plan.
 };
 
 /// @brief Generate a complete fugue from the given configuration.

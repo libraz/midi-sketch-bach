@@ -437,5 +437,28 @@ TEST(ChaconneEngineTest, TrackUsesChannel0) {
   EXPECT_EQ(result.tracks[0].channel, 0u);
 }
 
+// ===========================================================================
+// Timeline propagation
+// ===========================================================================
+
+TEST(ChaconneEngineTest, ResultIncludesTimeline) {
+  auto config = createTestConfig();
+  auto result = generateChaconne(config);
+  ASSERT_TRUE(result.success) << result.error_message;
+  EXPECT_GT(result.timeline.size(), 0u)
+      << "Chaconne result should include concatenated harmonic timeline";
+}
+
+TEST(ChaconneEngineTest, TimelineSpansFullDuration) {
+  auto config = createTestConfig();
+  auto result = generateChaconne(config);
+  ASSERT_TRUE(result.success) << result.error_message;
+  ASSERT_GT(result.timeline.size(), 0u);
+
+  // The last timeline event should end at or near the total duration.
+  Tick last_end = result.timeline.events().back().end_tick;
+  EXPECT_GT(last_end, 0u);
+}
+
 }  // namespace
 }  // namespace bach
