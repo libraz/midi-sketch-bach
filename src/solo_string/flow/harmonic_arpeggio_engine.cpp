@@ -363,6 +363,9 @@ std::vector<int> getChordDegrees(ChordQuality quality) {
       return {0, 2, 4, 6};  // Seventh: root, 3rd, 5th, 7th
 
     case ChordQuality::AugmentedSixth:
+    case ChordQuality::AugSixthItalian:
+    case ChordQuality::AugSixthFrench:
+    case ChordQuality::AugSixthGerman:
       return {0, 2, 4};  // Triad approximation for augmented sixth
   }
   return {0, 2, 4};

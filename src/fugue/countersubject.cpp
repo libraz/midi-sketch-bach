@@ -316,6 +316,51 @@ bool hasParallelFifthsOrOctaves(uint8_t prev_cs, uint8_t prev_subj,
 /// @param cs_notes Countersubject notes.
 /// @param subject Subject to validate against.
 /// @return Fraction of strong-beat consonances (0.0 to 1.0).
+/// @brief Compute consonance rate between a countersubject and subject when
+/// the countersubject is inverted at the octave.
+///
+/// Transposes CS notes by 12 semitones (octave up) and checks consonance
+/// against the subject on strong beats. Bach frequently uses invertible
+/// counterpoint at the octave.
+///
+/// @param cs_notes The countersubject notes.
+/// @param subject The fugue subject.
+/// @return Consonance rate (0.0-1.0) for the inverted pairing.
+float validateInvertedConsonanceRate(const std::vector<NoteEvent>& cs_notes,
+                                     const Subject& subject) {
+  if (cs_notes.empty() || subject.notes.empty()) return 0.0f;
+
+  int strong_beat_checks = 0;
+  int consonant_count = 0;
+
+  for (const auto& cs_note : cs_notes) {
+    uint8_t beat = beatInBar(cs_note.start_tick);
+    if (beat != 0 && beat != 2) continue;
+
+    strong_beat_checks++;
+
+    // Invert at the octave: transpose CS up by 12 semitones.
+    int inverted_pitch = static_cast<int>(cs_note.pitch) + 12;
+    if (inverted_pitch > 127) inverted_pitch = cs_note.pitch;
+
+    // Find the subject note sounding at this tick.
+    for (const auto& subj_note : subject.notes) {
+      Tick subj_end = subj_note.start_tick + subj_note.duration;
+      if (subj_note.start_tick <= cs_note.start_tick &&
+          subj_end > cs_note.start_tick) {
+        if (isConsonant(static_cast<uint8_t>(inverted_pitch), subj_note.pitch)) {
+          consonant_count++;
+        }
+        break;
+      }
+    }
+  }
+
+  if (strong_beat_checks == 0) return 1.0f;
+  return static_cast<float>(consonant_count) /
+         static_cast<float>(strong_beat_checks);
+}
+
 float validateConsonanceRate(const std::vector<NoteEvent>& cs_notes,
                              const Subject& subject) {
   if (cs_notes.empty() || subject.notes.empty()) return 0.0f;
@@ -517,13 +562,18 @@ Countersubject generateCountersubject(const Subject& subject,
         generateCSAttempt(subject, params, subject.key, scale, gen);
     float score = validateConsonanceRate(cs_notes, subject);
 
-    if (score > best_score) {
-      best_score = score;
+    // Check invertibility at the octave: inverted consonance must be >= 60%.
+    float inverted_score = validateInvertedConsonanceRate(cs_notes, subject);
+    // Combine: weight original 70% and inverted 30% for a composite score.
+    float composite = score * 0.7f + inverted_score * 0.3f;
+
+    if (composite > best_score) {
+      best_score = composite;
       best.notes = std::move(cs_notes);
     }
 
-    // Accept if consonance rate is at least 70%.
-    if (best_score >= 0.70f) break;
+    // Accept if original consonance >= 70% AND inverted consonance >= 60%.
+    if (score >= 0.70f && inverted_score >= 0.60f) break;
   }
 
   return best;

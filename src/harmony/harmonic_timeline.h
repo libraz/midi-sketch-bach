@@ -25,7 +25,8 @@ enum class ProgressionType : uint8_t {
   CircleOfFifths,   // I-vi-ii-V7-I
   Subdominant,      // I-IV-ii-V7-I
   ChromaticCircle,  // I-V/vi-vi-V/V-V-I (chromatic enrichment)
-  BorrowedChord     // I-bVI-IV-V-I (modal mixture)
+  BorrowedChord,    // I-bVI-IV-V-I (modal mixture)
+  DescendingFifths  // I-IV-vii°-iii-vi-ii-V7-I (descending 5th sequence)
 };
 
 /// Cadence type for progression endings.

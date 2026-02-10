@@ -18,6 +18,7 @@ set(BACH_LIB_SOURCES
   midi/midi_writer.cpp
   midi/midi_reader.cpp
   midi/midi_stream.cpp
+  midi/velocity_curve.cpp
 
   # instrument/keyboard/
   instrument/keyboard/piano_model.cpp

@@ -32,12 +32,6 @@ constexpr Tick kQuarterNote = kTicksPerBeat;  // 480
 /// @brief Duration of a half note in ticks.
 constexpr Tick kHalfNote = kTicksPerBeat * 2;  // 960
 
-/// @brief Duration of a whole note in ticks.
-constexpr Tick kWholeNote = kTicksPerBeat * 4;  // 1920
-
-/// @brief Duration of a breve (double whole note) in ticks.
-constexpr Tick kBreve = kTicksPerBeat * 8;  // 3840
-
 /// @brief MIDI channel for Great manual (counterpoint voice).
 constexpr uint8_t kGreatChannel = 0;
 
@@ -252,6 +246,25 @@ std::vector<NoteEvent> generateFiguration(Tick cantus_tick, Tick cantus_dur,
     Tick remaining = end_tick - current_tick;
     if (dur > remaining) dur = remaining;
     if (dur == 0) break;
+
+    // On strong beats, prefer chord tones from the harmonic timeline.
+    if (current_tick % kTicksPerBeat == 0) {
+      const HarmonicEvent& event = timeline.getAt(current_tick);
+      if (!isChordTone(scale_tones[tone_idx], event)) {
+        for (size_t search = 1; search < scale_tones.size(); ++search) {
+          size_t up = tone_idx + search;
+          size_t down = (tone_idx >= search) ? tone_idx - search : scale_tones.size();
+          if (up < scale_tones.size() && isChordTone(scale_tones[up], event)) {
+            tone_idx = up;
+            break;
+          }
+          if (down < scale_tones.size() && isChordTone(scale_tones[down], event)) {
+            tone_idx = down;
+            break;
+          }
+        }
+      }
+    }
 
     NoteEvent note;
     note.start_tick = current_tick;

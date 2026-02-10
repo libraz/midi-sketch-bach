@@ -19,8 +19,9 @@ struct SubjectScore;  // Forward declaration (see subject_validator.h).
 struct Subject {
   std::vector<NoteEvent> notes;
   Key key = Key::C;
-  Tick length_ticks = 0;
+  Tick length_ticks = 0;  ///< Total length including anacrusis.
   SubjectCharacter character = SubjectCharacter::Severe;
+  Tick anacrusis_ticks = 0;  ///< Duration of the anacrusis (0 = no anacrusis).
 
   /// @brief Get the lowest MIDI pitch in the subject.
   /// @return Lowest pitch, or 127 if subject is empty.

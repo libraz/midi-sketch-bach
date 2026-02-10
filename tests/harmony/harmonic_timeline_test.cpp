@@ -549,5 +549,30 @@ TEST(HarmonicTimelineCreateProgressionTest, InversionAffectsBassPitch) {
   EXPECT_EQ(penult.bass_pitch, 45);
 }
 
+// ---------------------------------------------------------------------------
+// Descending fifths progression [Task G]
+// ---------------------------------------------------------------------------
+
+TEST(HarmonicTimelineTest, DescendingFifthsProgression8Chords) {
+  KeySignature key_sig{Key::C, false};
+  auto timeline = HarmonicTimeline::createProgression(
+      key_sig, kTicksPerBar * 8, HarmonicResolution::Bar,
+      ProgressionType::DescendingFifths);
+
+  // Should produce 8 events (I-IV-vii°-iii-vi-ii-V7-I).
+  ASSERT_GE(timeline.size(), 8u);
+
+  // Verify degree sequence.
+  auto events = timeline.events();
+  EXPECT_EQ(events[0].chord.degree, ChordDegree::I);
+  EXPECT_EQ(events[1].chord.degree, ChordDegree::IV);
+  EXPECT_EQ(events[2].chord.degree, ChordDegree::viiDim);
+  EXPECT_EQ(events[3].chord.degree, ChordDegree::iii);
+  EXPECT_EQ(events[4].chord.degree, ChordDegree::vi);
+  EXPECT_EQ(events[5].chord.degree, ChordDegree::ii);
+  EXPECT_EQ(events[6].chord.degree, ChordDegree::V);
+  EXPECT_EQ(events[7].chord.degree, ChordDegree::I);
+}
+
 }  // namespace
 }  // namespace bach

@@ -6,6 +6,8 @@ A MIDI generator dedicated to the instrumental works of Johann Sebastian Bach.
 
 Bach's instrumental music — organ fugues, solo string suites, chamber sonatas — is built on an extraordinary architecture of counterpoint, harmonic logic, and formal structure. This project focuses exclusively on these instrumental works, and attempts to reproduce their structural principles — strict voice-leading, the harmonic flow of the cello suites, the monumental arch of the Chaconne — as playable MIDI, as closely as possible.
 
+The ultimate goal is to generate a complete, structure-faithful Chaconne (BWV 1004-5).
+
 Built on the development insights from [midi-sketch](https://github.com/libraz/midi-sketch), a pop/contemporary music generator. Available as a **CLI tool**, **JavaScript/WASM library**, and **interactive web demo**.
 
 ## What It Generates

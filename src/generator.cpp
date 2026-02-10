@@ -16,6 +16,7 @@
 #include "harmony/modulation_plan.h"
 #include "harmony/tempo_map.h"
 #include "expression/articulation.h"
+#include "midi/velocity_curve.h"
 #include "solo_string/arch/chaconne_engine.h"
 #include "solo_string/flow/harmonic_arpeggio_engine.h"
 
@@ -92,11 +93,12 @@ FugueConfig toFugueConfig(const GeneratorConfig& config) {
   fconfig.character = config.character;
 
   if (config.target_bars > 0) {
-    // Rough estimate: each pair adds ~episode_bars + subject_bars bars.
-    // Baseline without pairs: ~12 bars (exposition + return episode + stretto + coda).
-    int baseline = 12;
+    // Estimate: each pair adds ~episode_bars + subject_bars bars.
+    // Baseline without pairs: ~10 bars (exposition + return episode + stretto + coda).
+    int baseline = 10;
     int bars_left = static_cast<int>(config.target_bars) - baseline;
-    int pair_cost = fconfig.episode_bars + fconfig.subject_bars + 2;
+    int pair_cost = fconfig.episode_bars + fconfig.subject_bars;
+    if (pair_cost < 2) pair_cost = 2;
     fconfig.develop_pairs = std::max(1, bars_left / pair_cost);
   } else {
     fugueDurationParams(config.scale, fconfig.develop_pairs, fconfig.episode_bars);
@@ -379,8 +381,16 @@ GeneratorResult generate(const GeneratorConfig& config) {
 
       Tick toc_duration = toc_result.total_duration_ticks;
 
-      // Generate the fugue section.
-      FugueConfig fconfig = toFugueConfig(effective_config);
+      // Generate the fugue section, subtracting toccata bars from target.
+      GeneratorConfig fugue_gen_config = effective_config;
+      if (fugue_gen_config.target_bars > 0) {
+        uint32_t toc_bars = tconfig.section_bars;
+        fugue_gen_config.target_bars =
+            (fugue_gen_config.target_bars > toc_bars)
+                ? fugue_gen_config.target_bars - toc_bars
+                : 12;  // minimum fugue baseline
+      }
+      FugueConfig fconfig = toFugueConfig(fugue_gen_config);
       FugueResult fugue_result = generateFugue(fconfig);
       if (!fugue_result.success) {
         result.success = false;
@@ -388,6 +398,9 @@ GeneratorResult generate(const GeneratorConfig& config) {
         result.error_message = "Fugue generation failed: " + fugue_result.error_message;
         break;
       }
+
+      // Compute fugue duration BEFORE offset (avoid double-counting).
+      Tick fugue_duration = calculateTotalDuration(fugue_result.tracks);
 
       // Offset fugue notes by toccata duration and merge tracks.
       offsetTrackNotes(fugue_result.tracks, toc_duration);
@@ -410,7 +423,6 @@ GeneratorResult generate(const GeneratorConfig& config) {
         }
       }
 
-      Tick fugue_duration = calculateTotalDuration(fugue_result.tracks);
       result.total_duration_ticks = toc_duration + fugue_duration;
 
       // Toccata tempo map + offset fugue tempo map.
@@ -465,8 +477,16 @@ GeneratorResult generate(const GeneratorConfig& config) {
 
       Tick fant_duration = fant_result.total_duration_ticks;
 
-      // Generate the fugue section.
-      FugueConfig fconfig = toFugueConfig(effective_config);
+      // Generate the fugue section, subtracting fantasia bars from target.
+      GeneratorConfig fugue_gen_config = effective_config;
+      if (fugue_gen_config.target_bars > 0) {
+        uint32_t fant_bars = fant_config.section_bars;
+        fugue_gen_config.target_bars =
+            (fugue_gen_config.target_bars > fant_bars)
+                ? fugue_gen_config.target_bars - fant_bars
+                : 12;  // minimum fugue baseline
+      }
+      FugueConfig fconfig = toFugueConfig(fugue_gen_config);
       FugueResult fugue_result = generateFugue(fconfig);
       if (!fugue_result.success) {
         result.success = false;
@@ -474,6 +494,9 @@ GeneratorResult generate(const GeneratorConfig& config) {
         result.error_message = "Fugue generation failed: " + fugue_result.error_message;
         break;
       }
+
+      // Compute fugue duration BEFORE offset (avoid double-counting).
+      Tick fugue_duration = calculateTotalDuration(fugue_result.tracks);
 
       // Offset fugue notes and merge tracks.
       offsetTrackNotes(fugue_result.tracks, fant_duration);
@@ -496,7 +519,6 @@ GeneratorResult generate(const GeneratorConfig& config) {
         }
       }
 
-      Tick fugue_duration = calculateTotalDuration(fugue_result.tracks);
       result.total_duration_ticks = fant_duration + fugue_duration;
 
       // Fantasia tempo map + offset fugue tempo map.
@@ -692,6 +714,24 @@ GeneratorResult generate(const GeneratorConfig& config) {
   // This adjusts note durations (gate ratio) and adds phrase breathing at cadences.
   // Skipped automatically for failed results (applyArticulationToResult checks success).
   applyArticulationToResult(result, effective_config.instrument);
+
+  // Apply velocity curves for non-organ instruments.
+  if (result.success && effective_config.instrument != InstrumentType::Organ) {
+    std::vector<Tick> cadence_ticks;
+    // Extract cadence ticks from timeline if available.
+    if (result.timeline.size() > 0) {
+      const auto& events = result.timeline.events();
+      for (size_t idx = 1; idx < events.size(); ++idx) {
+        if (events[idx].chord.degree == ChordDegree::I &&
+            events[idx - 1].chord.degree == ChordDegree::V) {
+          cadence_ticks.push_back(events[idx].tick);
+        }
+      }
+    }
+    for (auto& track : result.tracks) {
+      applyVelocityCurve(track.notes, effective_config.instrument, cadence_ticks);
+    }
+  }
 
   return result;
 }

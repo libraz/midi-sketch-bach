@@ -53,9 +53,9 @@ static void emitPhraseEvents(std::vector<ExpressionEvent>& output, uint8_t chann
   Tick span = phrase_end - phrase_start;
 
   // Q1 interpolation target: midpoint between start and peak.
-  constexpr uint8_t kQ1Value = 108;
+  uint8_t kQ1Value = interpolateValue(kPhraseStartValue, kPhrasePeakValue, 0.5f);
   // Q3 interpolation target: midpoint between peak and end.
-  constexpr uint8_t kQ3Value = 105;
+  uint8_t kQ3Value = interpolateValue(kPhrasePeakValue, kPhraseEndValue, 0.5f);
 
   // Start.
   output.push_back({phrase_start, channel, kPhraseStartValue});

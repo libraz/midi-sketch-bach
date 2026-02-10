@@ -314,8 +314,10 @@ void generateRestlessEpisode(Episode& episode, const std::vector<NoteEvent>& mot
     placed.voice = 0;
     episode.notes.push_back(placed);
   }
-  // More repetitions since fragments are shorter.
-  int frag_reps = calculateSequenceRepetitions(motif_dur * 2, frag0_dur);
+  // More repetitions since fragments are shorter, capped by overall sequence structure.
+  int frag_reps = std::min(
+      calculateSequenceRepetitions(motif_dur * 2, frag0_dur),
+      seq_reps + 1);
   auto seq_notes =
       generateDiatonicSequence(frag0, frag_reps, deg_step, start_tick + frag0_dur, key, scale);
   for (auto& note : seq_notes) {
@@ -345,7 +347,9 @@ void generateRestlessEpisode(Episode& episode, const std::vector<NoteEvent>& mot
       placed.voice = 1;
       episode.notes.push_back(placed);
     }
-    int frag1_reps = calculateSequenceRepetitions(motif_dur * 2, frag1_dur);
+    int frag1_reps = std::min(
+        calculateSequenceRepetitions(motif_dur * 2, frag1_dur),
+        seq_reps + 1);
     auto frag1_seq = generateDiatonicSequence(frag1, frag1_reps, deg_step,
                                               voice1_start + frag1_dur, key, scale);
     for (auto& note : frag1_seq) {

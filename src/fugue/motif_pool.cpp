@@ -133,7 +133,7 @@ std::vector<NoteEvent> findCharacteristicWindow(const std::vector<NoteEvent>& no
 
 void MotifPool::build(const std::vector<NoteEvent>& subject_notes,
                       const std::vector<NoteEvent>& countersubject_notes,
-                      SubjectCharacter character) {
+                      SubjectCharacter /*character*/) {
   motifs_.clear();
 
   if (subject_notes.empty()) return;

@@ -339,5 +339,72 @@ TEST_F(SubjectGeneratorTest, PitchesInValidMidiRange) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Anacrusis support [Task C]
+// ---------------------------------------------------------------------------
+
+TEST(SubjectAnacrusisTest, PlayfulHasHighAnacrusisProbability) {
+  // Playful character has 70% anacrusis probability.
+  // With many seeds, a significant portion should have anacrusis.
+  SubjectGenerator gen;
+  int anacrusis_count = 0;
+  constexpr int kTrials = 50;
+
+  for (int trial = 0; trial < kTrials; ++trial) {
+    FugueConfig config;
+    config.character = SubjectCharacter::Playful;
+    config.key = Key::C;
+    config.subject_bars = 2;
+
+    auto subject = gen.generate(config, static_cast<uint32_t>(trial * 100));
+    if (subject.anacrusis_ticks > 0) {
+      anacrusis_count++;
+    }
+  }
+  // With 70% probability, expect at least 20% to have anacrusis (conservative).
+  EXPECT_GT(anacrusis_count, kTrials / 5)
+      << "Expected many Playful subjects to have anacrusis";
+}
+
+TEST(SubjectAnacrusisTest, AnacrusisExtendsTotalLength) {
+  SubjectGenerator gen;
+
+  FugueConfig config;
+  config.character = SubjectCharacter::Playful;
+  config.key = Key::C;
+  config.subject_bars = 2;
+
+  // Try many seeds to find one with anacrusis.
+  for (uint32_t seed = 0; seed < 100; ++seed) {
+    auto subject = gen.generate(config, seed);
+    if (subject.anacrusis_ticks > 0) {
+      // Total length should be bars*kTicksPerBar + anacrusis_ticks.
+      EXPECT_GT(subject.length_ticks,
+                static_cast<Tick>(config.subject_bars) * kTicksPerBar);
+      break;
+    }
+  }
+}
+
+TEST(SubjectAnacrusisTest, NoAnacrusis_ZeroTicks) {
+  SubjectGenerator gen;
+
+  FugueConfig config;
+  config.character = SubjectCharacter::Severe;
+  config.key = Key::C;
+  config.subject_bars = 2;
+
+  // Many Severe subjects should have no anacrusis (only 30% probability).
+  // Find one without.
+  for (uint32_t seed = 0; seed < 100; ++seed) {
+    auto subject = gen.generate(config, seed);
+    if (subject.anacrusis_ticks == 0) {
+      EXPECT_EQ(subject.length_ticks,
+                static_cast<Tick>(config.subject_bars) * kTicksPerBar);
+      break;
+    }
+  }
+}
+
 }  // namespace
 }  // namespace bach

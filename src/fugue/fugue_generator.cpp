@@ -45,8 +45,8 @@ constexpr uint8_t kMaxVoices = 5;
 /// @brief Minimum total fugue length in bars.
 constexpr Tick kMinFugueBars = 12;
 
-/// @brief Duration of coda in bars.
-constexpr Tick kCodaBars = 2;
+/// @brief Duration of coda in bars (expanded from 2 to 4 for richer endings).
+constexpr Tick kCodaBars = 4;
 
 /// @brief Organ velocity (pipe organs have no velocity sensitivity).
 constexpr uint8_t kOrganVelocity = 80;
@@ -242,47 +242,117 @@ uint8_t tonicBassPitch(Key key) {
   return clampPitch(pitch, organ_range::kPedalLow, organ_range::kPedalHigh);
 }
 
-/// @brief Create coda notes: sustained tonic chord across all voices.
+/// @brief Create 3-stage coda notes for a richer fugue ending.
 ///
-/// Each voice receives a whole note forming a tonic chord:
-///   Voice 0: tonic (root)
-///   Voice 1: perfect 5th above
-///   Voice 2: major 3rd above
-///   Voice 3: octave below (bass register)
-///   Voice 4: root doubled at octave above
+/// Stage 1 (bars 1-2): Subject head fragment in voice 0 over tonic pedal.
+///   Upper voices play held chord tones.
+/// Stage 2 (bar 3): V7-I perfect cadence progression.
+///   Leading tone resolution in upper voices.
+/// Stage 3 (bar 4): Final sustained tonic chord (all voices).
+///   Minor keys get Picardy third (raised 3rd).
 ///
 /// @param start_tick When the coda begins.
-/// @param duration Coda duration in ticks.
+/// @param duration Total coda duration in ticks.
 /// @param key Musical key for the tonic chord.
 /// @param num_voices Number of voices.
+/// @param is_minor True for minor key (Picardy third in stage 3).
 /// @return Vector of coda notes.
 std::vector<NoteEvent> createCodaNotes(Tick start_tick, Tick duration,
-                                       Key key, uint8_t num_voices) {
+                                       Key key, uint8_t num_voices,
+                                       bool is_minor = false) {
   std::vector<NoteEvent> notes;
-  notes.reserve(num_voices);
 
   int tonic_pitch = static_cast<int>(kMidiC4) + static_cast<int>(key);
+  Tick bar_dur = kTicksPerBar;
 
-  // Pitch offsets for each voice to form a tonic chord.
-  static constexpr int kChordOffsets[] = {
-      0,    // Root
-      7,    // Perfect 5th
-      4,    // Major 3rd
-      -12,  // Octave below (pedal register)
-      12    // Octave above
-  };
+  // Stage 1 (bars 1-2): Subject head motif in voice 0 + held chord tones.
+  Tick stage1_dur = bar_dur * 2;
+  if (stage1_dur > duration) stage1_dur = duration;
 
-  for (uint8_t voice_idx = 0; voice_idx < num_voices && voice_idx < 5; ++voice_idx) {
+  // Voice 0: subject head fragment (rising from tonic to 5th and back).
+  {
+    Tick sub_dur = kTicksPerBeat;
+    int head_pitches[] = {tonic_pitch, tonic_pitch + 2, tonic_pitch + 4, tonic_pitch + 7,
+                          tonic_pitch + 4, tonic_pitch + 2, tonic_pitch, tonic_pitch};
+    int head_count = std::min(8, static_cast<int>(stage1_dur / sub_dur));
+    for (int idx = 0; idx < head_count; ++idx) {
+      NoteEvent note;
+      note.start_tick = start_tick + static_cast<Tick>(idx) * sub_dur;
+      note.duration = sub_dur;
+      note.pitch = clampPitch(head_pitches[idx], organ_range::kPedalLow, organ_range::kManual1High);
+      note.velocity = kOrganVelocity;
+      note.voice = 0;
+      note.source = BachNoteSource::FreeCounterpoint;
+      notes.push_back(note);
+    }
+  }
+
+  // Other voices: sustained chord tones during stage 1.
+  static constexpr int kChordOffsets[] = {0, 7, 4, -12, 12};
+  for (uint8_t v = 1; v < num_voices && v < 5; ++v) {
     NoteEvent note;
     note.start_tick = start_tick;
-    note.duration = duration;
-
-    int pitch = tonic_pitch + kChordOffsets[voice_idx];
-    // Clamp to valid organ range [24, 96].
-    note.pitch = clampPitch(pitch, organ_range::kPedalLow, organ_range::kManual1High);
+    note.duration = stage1_dur;
+    note.pitch = clampPitch(tonic_pitch + kChordOffsets[v],
+                            organ_range::kPedalLow, organ_range::kManual1High);
     note.velocity = kOrganVelocity;
-    note.voice = voice_idx;
+    note.voice = v;
     notes.push_back(note);
+  }
+
+  // Stage 2 (bar 3): V7-I cadence progression.
+  if (duration > stage1_dur) {
+    Tick stage2_start = start_tick + stage1_dur;
+    Tick stage2_dur = std::min(bar_dur, duration - stage1_dur);
+    Tick half_bar = stage2_dur / 2;
+
+    // V7 chord (first half): dominant 7th chord.
+    int dom_pitch = tonic_pitch + 7;  // Dominant
+    int dom7_offsets[] = {0, 4, 7, 10, -5};  // root, 3rd, 5th, 7th, bass 4th below
+    for (uint8_t v = 0; v < num_voices && v < 5; ++v) {
+      NoteEvent note;
+      note.start_tick = stage2_start;
+      note.duration = half_bar;
+      note.pitch = clampPitch(dom_pitch + dom7_offsets[v],
+                              organ_range::kPedalLow, organ_range::kManual1High);
+      note.velocity = kOrganVelocity;
+      note.voice = v;
+      note.source = BachNoteSource::FreeCounterpoint;
+      notes.push_back(note);
+    }
+
+    // I chord (second half): tonic resolution.
+    int tonic_offsets[] = {0, 4, 7, -12, 12};
+    for (uint8_t v = 0; v < num_voices && v < 5; ++v) {
+      NoteEvent note;
+      note.start_tick = stage2_start + half_bar;
+      note.duration = stage2_dur - half_bar;
+      note.pitch = clampPitch(tonic_pitch + tonic_offsets[v],
+                              organ_range::kPedalLow, organ_range::kManual1High);
+      note.velocity = kOrganVelocity;
+      note.voice = v;
+      note.source = BachNoteSource::FreeCounterpoint;
+      notes.push_back(note);
+    }
+  }
+
+  // Stage 3 (bar 4): Final sustained tonic chord.
+  Tick stage3_start = start_tick + stage1_dur + bar_dur;
+  if (stage3_start < start_tick + duration) {
+    Tick stage3_dur = start_tick + duration - stage3_start;
+    // Picardy third for minor keys: raise 3rd by 1 semitone.
+    int third_offset = is_minor ? 4 : 4;  // Major 3rd in both (Picardy)
+    int final_offsets[] = {0, 7, third_offset, -12, 12};
+    for (uint8_t v = 0; v < num_voices && v < 5; ++v) {
+      NoteEvent note;
+      note.start_tick = stage3_start;
+      note.duration = stage3_dur;
+      note.pitch = clampPitch(tonic_pitch + final_offsets[v],
+                              organ_range::kPedalLow, organ_range::kManual1High);
+      note.velocity = kOrganVelocity;
+      note.voice = v;
+      notes.push_back(note);
+    }
   }
 
   return notes;
@@ -574,7 +644,7 @@ FugueResult generateFugue(const FugueConfig& config) {
   structure.addSection(SectionType::Coda, FuguePhase::Resolve,
                        current_tick, current_tick + coda_duration, config.key);
   auto coda_notes = createCodaNotes(current_tick, coda_duration,
-                                    config.key, num_voices);
+                                    config.key, num_voices, config.is_minor);
   all_notes.insert(all_notes.end(), coda_notes.begin(), coda_notes.end());
 
   // Tonic pedal in coda: lowest voice sustains the tonic.

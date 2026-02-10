@@ -323,6 +323,19 @@ static const ProgEntry kBorrowedChord[] = {
     {ChordDegree::I,    ChordQuality::Major,    0, 1.0f,  false},
 };
 
+/// Descending 5th sequence: I-IV-vii°-iii-vi-ii-V7-I.
+/// A fundamental Baroque harmonic pattern found throughout Bach's works.
+static const ProgEntry kDescendingFifths[] = {
+    {ChordDegree::I,      ChordQuality::Major,      0, 1.0f,  false},
+    {ChordDegree::IV,     ChordQuality::Major,      0, 0.5f,  false},
+    {ChordDegree::viiDim, ChordQuality::Diminished, 0, 0.5f,  true},
+    {ChordDegree::iii,    ChordQuality::Minor,      0, 0.5f,  false},
+    {ChordDegree::vi,     ChordQuality::Minor,      0, 0.5f,  false},
+    {ChordDegree::ii,     ChordQuality::Minor,      0, 0.5f,  false},
+    {ChordDegree::V,      ChordQuality::Dominant7,  0, 0.75f, true},
+    {ChordDegree::I,      ChordQuality::Major,      0, 1.0f,  false},
+};
+
 HarmonicTimeline HarmonicTimeline::createProgression(const KeySignature& key_sig,
                                                       Tick duration,
                                                       HarmonicResolution resolution,
@@ -352,6 +365,10 @@ HarmonicTimeline HarmonicTimeline::createProgression(const KeySignature& key_sig
     case ProgressionType::BorrowedChord:
       prog = kBorrowedChord;
       prog_len = 5;
+      break;
+    case ProgressionType::DescendingFifths:
+      prog = kDescendingFifths;
+      prog_len = 8;
       break;
     default:
       return createStandard(key_sig, duration, resolution);

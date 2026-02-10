@@ -312,6 +312,9 @@ std::vector<int> getChordDegrees(ChordQuality quality) {
       return {0, 2, 4, 6};
 
     case ChordQuality::AugmentedSixth:
+    case ChordQuality::AugSixthItalian:
+    case ChordQuality::AugSixthFrench:
+    case ChordQuality::AugSixthGerman:
       return {0, 2, 4};
   }
   return {0, 2, 4};

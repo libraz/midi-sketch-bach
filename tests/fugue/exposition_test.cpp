@@ -777,5 +777,121 @@ TEST(ExpositionTest, BuildExposition_CSAdaptedToAnswerKey) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Voice entry order diversity [Task E]
+// ---------------------------------------------------------------------------
+
+TEST(ExpositionEntryOrderTest, PlayfulUsesMiddleFirst3Voice) {
+  // Playful character with 3 voices should use MiddleFirst: voice 1 enters first.
+  Subject subject;
+  subject.key = Key::C;
+  subject.character = SubjectCharacter::Playful;
+  subject.length_ticks = kTicksPerBar * 2;
+  for (int idx = 0; idx < 4; ++idx) {
+    NoteEvent note;
+    note.start_tick = static_cast<Tick>(idx) * kTicksPerBeat;
+    note.duration = kTicksPerBeat;
+    note.pitch = static_cast<uint8_t>(60 + idx);
+    note.voice = 0;
+    subject.notes.push_back(note);
+  }
+
+  Answer answer;
+  answer.notes = subject.notes;
+  answer.key = Key::C;
+
+  Countersubject cs;
+  cs.notes = subject.notes;
+  cs.key = Key::C;
+  cs.length_ticks = subject.length_ticks;
+
+  FugueConfig config;
+  config.num_voices = 3;
+  config.character = SubjectCharacter::Playful;
+  config.key = Key::C;
+
+  auto expo = buildExposition(subject, answer, cs, config, 42);
+
+  // First entry should be voice 1 (MiddleFirst: [1, 0, 2]).
+  ASSERT_GE(expo.entries.size(), 3u);
+  EXPECT_EQ(expo.entries[0].voice_id, 1);
+  EXPECT_EQ(expo.entries[1].voice_id, 0);
+  EXPECT_EQ(expo.entries[2].voice_id, 2);
+}
+
+TEST(ExpositionEntryOrderTest, NobleUsesBottomFirst3Voice) {
+  Subject subject;
+  subject.key = Key::C;
+  subject.character = SubjectCharacter::Noble;
+  subject.length_ticks = kTicksPerBar * 2;
+  for (int idx = 0; idx < 4; ++idx) {
+    NoteEvent note;
+    note.start_tick = static_cast<Tick>(idx) * kTicksPerBeat;
+    note.duration = kTicksPerBeat;
+    note.pitch = static_cast<uint8_t>(60 + idx);
+    note.voice = 0;
+    subject.notes.push_back(note);
+  }
+
+  Answer answer;
+  answer.notes = subject.notes;
+  answer.key = Key::C;
+
+  Countersubject cs;
+  cs.notes = subject.notes;
+  cs.key = Key::C;
+  cs.length_ticks = subject.length_ticks;
+
+  FugueConfig config;
+  config.num_voices = 3;
+  config.character = SubjectCharacter::Noble;
+  config.key = Key::C;
+
+  auto expo = buildExposition(subject, answer, cs, config, 42);
+
+  // Noble: BottomFirst [2, 1, 0].
+  ASSERT_GE(expo.entries.size(), 3u);
+  EXPECT_EQ(expo.entries[0].voice_id, 2);
+  EXPECT_EQ(expo.entries[1].voice_id, 1);
+  EXPECT_EQ(expo.entries[2].voice_id, 0);
+}
+
+TEST(ExpositionEntryOrderTest, SevereUsesDefaultOrder) {
+  Subject subject;
+  subject.key = Key::C;
+  subject.character = SubjectCharacter::Severe;
+  subject.length_ticks = kTicksPerBar * 2;
+  for (int idx = 0; idx < 4; ++idx) {
+    NoteEvent note;
+    note.start_tick = static_cast<Tick>(idx) * kTicksPerBeat;
+    note.duration = kTicksPerBeat;
+    note.pitch = static_cast<uint8_t>(60 + idx);
+    note.voice = 0;
+    subject.notes.push_back(note);
+  }
+
+  Answer answer;
+  answer.notes = subject.notes;
+  answer.key = Key::C;
+
+  Countersubject cs;
+  cs.notes = subject.notes;
+  cs.key = Key::C;
+  cs.length_ticks = subject.length_ticks;
+
+  FugueConfig config;
+  config.num_voices = 3;
+  config.character = SubjectCharacter::Severe;
+  config.key = Key::C;
+
+  auto expo = buildExposition(subject, answer, cs, config, 42);
+
+  // Severe: TopFirst [0, 1, 2] (default/backward compatible).
+  ASSERT_GE(expo.entries.size(), 3u);
+  EXPECT_EQ(expo.entries[0].voice_id, 0);
+  EXPECT_EQ(expo.entries[1].voice_id, 1);
+  EXPECT_EQ(expo.entries[2].voice_id, 2);
+}
+
 }  // namespace
 }  // namespace bach

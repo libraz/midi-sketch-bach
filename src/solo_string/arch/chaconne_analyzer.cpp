@@ -66,22 +66,6 @@ std::pair<Tick, Tick> variationTickRange(int variation_idx, Tick variation_lengt
   return {start, end};
 }
 
-/// @brief Get register range (max_pitch - min_pitch) for a set of notes.
-/// @param notes Notes to analyze.
-/// @return Range in semitones, or 0 if fewer than 2 notes.
-int registerRange(const std::vector<NoteEvent>& notes) {
-  if (notes.size() < 2) {
-    return 0;
-  }
-  uint8_t min_pitch = 127;
-  uint8_t max_pitch = 0;
-  for (const auto& note : notes) {
-    if (note.pitch < min_pitch) min_pitch = note.pitch;
-    if (note.pitch > max_pitch) max_pitch = note.pitch;
-  }
-  return static_cast<int>(max_pitch) - static_cast<int>(min_pitch);
-}
-
 /// @brief Get the average pitch of a set of notes.
 /// @param notes Notes to analyze.
 /// @return Average MIDI pitch, or 0.0 if empty.
@@ -92,17 +76,6 @@ float averagePitch(const std::vector<NoteEvent>& notes) {
     sum += static_cast<float>(note.pitch);
   }
   return sum / static_cast<float>(notes.size());
-}
-
-/// @brief Count the number of distinct texture types used across variations.
-/// @param config Chaconne config with variation plan.
-/// @return Number of distinct TextureType values.
-int countDistinctTextures(const ChaconneConfig& config) {
-  std::set<TextureType> seen;
-  for (const auto& var : config.variations) {
-    seen.insert(var.primary_texture);
-  }
-  return static_cast<int>(seen.size());
 }
 
 /// @brief Compute note density (notes per tick) for a set of notes in a tick range.

@@ -48,8 +48,6 @@ size_t Subject::noteCount() const {
 
 namespace {
 
-/// @brief Whole note duration in ticks.
-constexpr Tick kWholeNote = kTicksPerBar;          // 1920
 /// @brief Half note duration in ticks.
 constexpr Tick kHalfNote = kTicksPerBeat * 2;      // 960
 /// @brief Quarter note duration in ticks.
@@ -166,8 +164,51 @@ Subject SubjectGenerator::generate(const FugueConfig& config,
   if (bars < 2) bars = 2;
   if (bars > 4) bars = 4;
 
+  // Determine anacrusis based on character type.
+  std::mt19937 anacrusis_gen(seed ^ 0x41756674u);  // "Auft" in ASCII
+  float anacrusis_prob = 0.0f;
+  switch (config.character) {
+    case SubjectCharacter::Severe:  anacrusis_prob = 0.30f; break;
+    case SubjectCharacter::Playful: anacrusis_prob = 0.70f; break;
+    case SubjectCharacter::Noble:   anacrusis_prob = 0.40f; break;
+    case SubjectCharacter::Restless: anacrusis_prob = 0.60f; break;
+  }
+  bool has_anacrusis = rng::rollProbability(anacrusis_gen, anacrusis_prob);
+  Tick anacrusis_ticks = 0;
+  if (has_anacrusis) {
+    // Anacrusis length: 1 beat (Severe/Noble) or 1-2 beats (Playful/Restless).
+    if (config.character == SubjectCharacter::Playful ||
+        config.character == SubjectCharacter::Restless) {
+      anacrusis_ticks = rng::rollProbability(anacrusis_gen, 0.5f)
+                            ? kTicksPerBeat
+                            : kTicksPerBeat * 2;
+    } else {
+      anacrusis_ticks = kTicksPerBeat;
+    }
+  }
+
   subject.notes = generateNotes(config.character, config.key, bars, seed);
   subject.length_ticks = static_cast<Tick>(bars) * kTicksPerBar;
+  subject.anacrusis_ticks = anacrusis_ticks;
+
+  // If anacrusis is present, shift first note(s) to fill the anacrusis region.
+  // The anacrusis notes precede bar 0: they occupy [-anacrusis_ticks, 0).
+  // In practice, we keep notes at positive ticks but mark the anacrusis length
+  // so exposition can adjust entry_tick offsets.
+  if (anacrusis_ticks > 0 && !subject.notes.empty()) {
+    // Assign the anacrusis duration to the first note by splitting it.
+    Tick first_dur = subject.notes[0].duration;
+    if (first_dur > anacrusis_ticks) {
+      // Split first note: anacrusis part + remainder.
+      NoteEvent anacrusis_note = subject.notes[0];
+      anacrusis_note.duration = anacrusis_ticks;
+      subject.notes[0].start_tick = anacrusis_ticks;
+      subject.notes[0].duration = first_dur - anacrusis_ticks;
+      subject.notes.insert(subject.notes.begin(), anacrusis_note);
+    }
+    // Total length includes anacrusis.
+    subject.length_ticks += anacrusis_ticks;
+  }
 
   return subject;
 }

@@ -92,6 +92,42 @@ bool isSubjectEntry(uint8_t entry_index) {
   return (entry_index % 2) == 0;
 }
 
+/// @brief 3-voice entry order templates.
+static constexpr uint8_t kEntryOrder3_MiddleFirst[] = {1, 0, 2};  // alto->sop->bass
+static constexpr uint8_t kEntryOrder3_TopFirst[] = {0, 1, 2};      // sop->alto->bass
+static constexpr uint8_t kEntryOrder3_BottomFirst[] = {2, 1, 0};  // bass->alto->sop
+
+/// @brief 4-voice entry order templates.
+static constexpr uint8_t kEntryOrder4_ATSB[] = {1, 0, 2, 3};  // alto->sop->ten->bass
+static constexpr uint8_t kEntryOrder4_TASB[] = {2, 1, 0, 3};  // ten->alto->sop->bass
+static constexpr uint8_t kEntryOrder4_BTAS[] = {3, 2, 1, 0};  // bass->ten->alto->sop
+
+/// @brief Select entry voice order based on SubjectCharacter and voice count.
+/// @param character The subject character.
+/// @param num_voices Number of voices (2-5).
+/// @return Pointer to the voice order array.
+const uint8_t* selectEntryOrder(SubjectCharacter character, uint8_t num_voices) {
+  if (num_voices <= 2) {
+    return nullptr;  // Only one possible order for 2 voices.
+  }
+  if (num_voices == 3) {
+    switch (character) {
+      case SubjectCharacter::Severe:  return kEntryOrder3_TopFirst;      // Default order
+      case SubjectCharacter::Playful: return kEntryOrder3_MiddleFirst;   // Middle-start = lively
+      case SubjectCharacter::Noble:   return kEntryOrder3_BottomFirst;   // Bass-start = stately
+      case SubjectCharacter::Restless: return kEntryOrder3_MiddleFirst;  // Middle-start = tension
+    }
+  }
+  // 4-5 voices: use 4-voice templates (voice 4 appended at end if needed).
+  switch (character) {
+    case SubjectCharacter::Severe:  return nullptr;           // Default sequential order
+    case SubjectCharacter::Playful: return kEntryOrder4_ATSB; // Alto-start
+    case SubjectCharacter::Noble:   return kEntryOrder4_BTAS; // Bass-start
+    case SubjectCharacter::Restless: return kEntryOrder4_TASB; // Tenor-start
+  }
+  return nullptr;
+}
+
 /// @brief Place subject or answer notes for a voice entry, offset by entry tick.
 ///
 /// Copies source notes into the target voice's note list, adjusting
@@ -279,10 +315,21 @@ Exposition buildExposition(const Subject& subject,
     entry_interval = kTicksPerBar * 2;
   }
 
+  // Select entry order template based on character.
+  const uint8_t* order_template = selectEntryOrder(config.character, num_voices);
+
   // Build voice entry plan.
   for (uint8_t idx = 0; idx < num_voices; ++idx) {
     VoiceEntry entry;
-    entry.voice_id = idx;
+    // Apply entry order template for voice_id assignment.
+    if (order_template != nullptr && idx < 4) {
+      entry.voice_id = order_template[idx];
+    } else if (order_template != nullptr && idx == 4) {
+      // 5th voice: append the remaining voice not in the 4-element template.
+      entry.voice_id = 4;
+    } else {
+      entry.voice_id = idx;
+    }
     entry.role = assignVoiceRole(idx);
     entry.entry_tick = static_cast<Tick>(idx) * entry_interval;
     entry.is_subject = isSubjectEntry(idx);
@@ -364,7 +411,6 @@ Exposition buildExposition(const Subject& subject,
                            const HarmonicTimeline& timeline) {
   // Build using the original logic.
   Exposition expo = buildExposition(subject, answer, countersubject, config, seed);
-  uint8_t num_voices = clampVoiceCount(config.num_voices);
 
   // Post-validate free counterpoint notes through createBachNote.
   // Subject/answer/countersubject notes are kept as-is and registered in state.

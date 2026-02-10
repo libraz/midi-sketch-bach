@@ -83,19 +83,6 @@ int registerRange(const std::vector<NoteEvent>& notes) {
   return static_cast<int>(max_pitch) - static_cast<int>(min_pitch);
 }
 
-/// @brief Get the ArcPhase for a section from the config.
-/// @param config The flow config.
-/// @param section_idx 0-based section index.
-/// @return ArcPhase for the section, or Ascent if not found.
-ArcPhase getPhaseForSection(const ArpeggioFlowConfig& config, int section_idx) {
-  for (const auto& [sec_id, phase] : config.arc.phase_assignment) {
-    if (static_cast<int>(sec_id) == section_idx) {
-      return phase;
-    }
-  }
-  return ArcPhase::Ascent;  // Fallback
-}
-
 /// @brief Get the average pitch of a set of notes.
 /// @param notes Notes to analyze.
 /// @return Average MIDI pitch, or 0.0 if empty.

@@ -146,9 +146,15 @@ HarmonicTimeline TonalPlan::toDetailedTimeline(Tick total_duration) const {
     key_sig.tonic = region.key;
     key_sig.is_minor = is_minor;
 
+    // Alternate between CircleOfFifths and DescendingFifths for harmonic variety.
+    // Develop phase regions use DescendingFifths on even indices.
+    ProgressionType prog_type = ProgressionType::CircleOfFifths;
+    size_t region_idx = static_cast<size_t>(&region - &regions[0]);
+    if (region_idx > 0 && region_idx % 2 == 0) {
+      prog_type = ProgressionType::DescendingFifths;
+    }
     HarmonicTimeline region_timeline = HarmonicTimeline::createProgression(
-        key_sig, region_duration, HarmonicResolution::Beat,
-        ProgressionType::CircleOfFifths);
+        key_sig, region_duration, HarmonicResolution::Beat, prog_type);
 
     // Offset region timeline events to the region start and merge.
     for (const auto& ev : region_timeline.events()) {
