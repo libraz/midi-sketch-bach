@@ -83,6 +83,7 @@ set(BACH_LIB_SOURCES
   organ/registration.cpp
 
   # analysis/
+  analysis/analysis_utils.cpp
   analysis/voice_independence.cpp
   analysis/fail_report.cpp
   analysis/counterpoint_analyzer.cpp
@@ -103,6 +104,7 @@ set(BACH_LIB_SOURCES
   harmony/chord_tone_utils.cpp
   harmony/tempo_map.cpp
   harmony/harmonic_rhythm.cpp
+  harmony/scale_degree_utils.cpp
 
   # forms/
   forms/prelude.cpp

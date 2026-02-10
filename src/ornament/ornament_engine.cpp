@@ -13,6 +13,7 @@
 #include "ornament/mordent.h"
 #include "ornament/nachschlag.h"
 #include "ornament/pralltriller.h"
+#include "ornament/schleifer.h"
 #include "ornament/trill.h"
 #include "ornament/turn.h"
 #include "ornament/vorschlag.h"
@@ -123,8 +124,16 @@ std::vector<NoteEvent> applyOrnamentToNote(const NoteEvent& note, OrnamentType t
       return generateMordent(note, lower);
     case OrnamentType::Turn:
       return generateTurn(note, upper, lower);
-    case OrnamentType::Appoggiatura:
-      return generateAppoggiatura(note, upper);
+    case OrnamentType::Appoggiatura: {
+      // Select approach direction based on metric position:
+      // strong beats (0, 2) use upper approach, weak beats (1, 3) use lower.
+      uint8_t beat = beatInBar(note.start_tick);
+      bool use_lower = (beat == 1 || beat == 3);
+      uint8_t neighbor = use_lower ? lower : upper;
+      ApproachDirection dir = use_lower ? ApproachDirection::Lower
+                                        : ApproachDirection::Upper;
+      return generateAppoggiatura(note, neighbor, dir);
+    }
     case OrnamentType::Pralltriller:
       return generatePralltriller(note, upper);
     case OrnamentType::Vorschlag:
@@ -136,6 +145,13 @@ std::vector<NoteEvent> applyOrnamentToNote(const NoteEvent& note, OrnamentType t
                                       upper, lower);
     case OrnamentType::CompoundTurnTrill:
       return generateCompoundOrnament(note, CompoundOrnamentType::TurnThenTrill, upper, lower);
+    case OrnamentType::Schleifer:
+      if (has_key) {
+        return generateSchleifer(note, key, scale == ScaleType::NaturalMinor ||
+                                             scale == ScaleType::HarmonicMinor ||
+                                             scale == ScaleType::MelodicMinor);
+      }
+      return {note};  // Schleifer requires key context.
     default:
       // Unsupported ornament types return the note unchanged.
       return {note};

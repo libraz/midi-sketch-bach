@@ -9,6 +9,7 @@
 #include <string>
 #include <vector>
 
+#include "analysis/analysis_utils.h"
 #include "core/basic_types.h"
 #include "core/pitch_utils.h"
 #include "harmony/chord_types.h"
@@ -29,15 +30,7 @@ namespace {
 /// @param tracks Input tracks.
 /// @return All notes sorted by start_tick.
 std::vector<NoteEvent> collectAllNotes(const std::vector<Track>& tracks) {
-  std::vector<NoteEvent> all_notes;
-  for (const auto& track : tracks) {
-    all_notes.insert(all_notes.end(), track.notes.begin(), track.notes.end());
-  }
-  std::sort(all_notes.begin(), all_notes.end(),
-            [](const NoteEvent& lhs, const NoteEvent& rhs) {
-              return lhs.start_tick < rhs.start_tick;
-            });
-  return all_notes;
+  return analysis_util::collectAllNotes(tracks);
 }
 
 /// @brief Get the tick range for a section index.
@@ -57,14 +50,7 @@ std::pair<Tick, Tick> sectionTickRange(int section_idx, int bars_per_section) {
 /// @return Notes whose start_tick falls within the range.
 std::vector<NoteEvent> notesInRange(const std::vector<NoteEvent>& all_notes,
                                     Tick start, Tick end) {
-  std::vector<NoteEvent> result;
-  for (const auto& note : all_notes) {
-    if (note.start_tick >= end) break;
-    if (note.start_tick >= start) {
-      result.push_back(note);
-    }
-  }
-  return result;
+  return analysis_util::notesInRange(all_notes, start, end);
 }
 
 /// @brief Get register range (max_pitch - min_pitch) for a set of notes.
@@ -87,12 +73,7 @@ int registerRange(const std::vector<NoteEvent>& notes) {
 /// @param notes Notes to analyze.
 /// @return Average MIDI pitch, or 0.0 if empty.
 float averagePitch(const std::vector<NoteEvent>& notes) {
-  if (notes.empty()) return 0.0f;
-  float sum = 0.0f;
-  for (const auto& note : notes) {
-    sum += static_cast<float>(note.pitch);
-  }
-  return sum / static_cast<float>(notes.size());
+  return analysis_util::averagePitch(notes);
 }
 
 /// @brief Total duration of a piece from config.

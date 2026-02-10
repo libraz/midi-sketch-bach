@@ -156,6 +156,32 @@ void offsetTrackNotes(std::vector<Track>& tracks, Tick offset_ticks) {
   }
 }
 
+/// @brief Merge two sets of tracks, offsetting the second by a duration.
+///
+/// The second set of tracks (fugue/suffix) is offset in time and merged
+/// into the first set (prelude/prefix) by track index. Tracks beyond
+/// the first set's size inherit channel/program from the second set.
+///
+/// @param prefix_tracks The first form's tracks (modified in-place to receive merged result).
+/// @param suffix_tracks The second form's tracks (notes already offset).
+void mergeTracksInPlace(std::vector<Track>& prefix_tracks,
+                        std::vector<Track>& suffix_tracks) {
+  size_t track_count = std::max(prefix_tracks.size(), suffix_tracks.size());
+  prefix_tracks.resize(track_count);
+  for (size_t idx = 0; idx < track_count; ++idx) {
+    if (idx < suffix_tracks.size()) {
+      auto& dest = prefix_tracks[idx].notes;
+      auto& src = suffix_tracks[idx].notes;
+      dest.insert(dest.end(), src.begin(), src.end());
+      if (prefix_tracks[idx].name.empty()) {
+        prefix_tracks[idx].name = suffix_tracks[idx].name;
+        prefix_tracks[idx].channel = suffix_tracks[idx].channel;
+        prefix_tracks[idx].program = suffix_tracks[idx].program;
+      }
+    }
+  }
+}
+
 /// @brief Map a track index to a VoiceRole for articulation purposes.
 ///
 /// For organ-system multi-voice forms the mapping follows exposition entry order:
@@ -404,24 +430,8 @@ GeneratorResult generate(const GeneratorConfig& config) {
 
       // Offset fugue notes by toccata duration and merge tracks.
       offsetTrackNotes(fugue_result.tracks, toc_duration);
-
-      size_t track_count = std::max(toc_result.tracks.size(), fugue_result.tracks.size());
-      result.tracks.resize(track_count);
-      for (size_t idx = 0; idx < track_count; ++idx) {
-        if (idx < toc_result.tracks.size()) {
-          result.tracks[idx] = std::move(toc_result.tracks[idx]);
-        }
-        if (idx < fugue_result.tracks.size()) {
-          auto& dest = result.tracks[idx].notes;
-          auto& src = fugue_result.tracks[idx].notes;
-          dest.insert(dest.end(), src.begin(), src.end());
-          if (result.tracks[idx].name.empty()) {
-            result.tracks[idx].name = fugue_result.tracks[idx].name;
-            result.tracks[idx].channel = fugue_result.tracks[idx].channel;
-            result.tracks[idx].program = fugue_result.tracks[idx].program;
-          }
-        }
-      }
+      result.tracks = std::move(toc_result.tracks);
+      mergeTracksInPlace(result.tracks, fugue_result.tracks);
 
       result.total_duration_ticks = toc_duration + fugue_duration;
 
@@ -500,24 +510,8 @@ GeneratorResult generate(const GeneratorConfig& config) {
 
       // Offset fugue notes and merge tracks.
       offsetTrackNotes(fugue_result.tracks, fant_duration);
-
-      size_t track_count = std::max(fant_result.tracks.size(), fugue_result.tracks.size());
-      result.tracks.resize(track_count);
-      for (size_t idx = 0; idx < track_count; ++idx) {
-        if (idx < fant_result.tracks.size()) {
-          result.tracks[idx] = std::move(fant_result.tracks[idx]);
-        }
-        if (idx < fugue_result.tracks.size()) {
-          auto& dest = result.tracks[idx].notes;
-          auto& src = fugue_result.tracks[idx].notes;
-          dest.insert(dest.end(), src.begin(), src.end());
-          if (result.tracks[idx].name.empty()) {
-            result.tracks[idx].name = fugue_result.tracks[idx].name;
-            result.tracks[idx].channel = fugue_result.tracks[idx].channel;
-            result.tracks[idx].program = fugue_result.tracks[idx].program;
-          }
-        }
-      }
+      result.tracks = std::move(fant_result.tracks);
+      mergeTracksInPlace(result.tracks, fugue_result.tracks);
 
       result.total_duration_ticks = fant_duration + fugue_duration;
 
