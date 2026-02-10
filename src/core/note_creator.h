@@ -26,6 +26,7 @@ struct BachNoteOptions {
   uint8_t prev_pitches[3] = {0, 0, 0};  // Melodic context: last 3 pitches (0=unknown)
   uint8_t prev_count = 0;               // Number of valid previous pitches
   int8_t prev_direction = 0;            // Previous motion direction (-1/0/1)
+  uint8_t next_pitch = 0;               // Next pitch for NHT validation (0 = unknown)
 };
 
 /// Result of note creation via createBachNote().

@@ -36,6 +36,29 @@ uint8_t BachRuleEvaluator::numVoices() const {
 // Interval classification
 // ---------------------------------------------------------------------------
 
+/// @brief Check if a reduced interval (0-11) is consonant regardless of beat position.
+///
+/// Used for weak-beat dissonance gating in free counterpoint mode: consonances
+/// pass immediately, while dissonances are rejected so that the collision
+/// resolver's NHT check (passing tone / neighbor tone) can evaluate with
+/// next_pitch context.
+///
+/// @param reduced Interval modulo 12, in range [0, 11].
+/// @return True if the interval is a consonance (P1/P5/m3/M3/m6/M6).
+static bool isActuallyConsonant(int reduced) {
+  switch (reduced) {
+    case interval::kUnison:
+    case interval::kPerfect5th:
+    case interval::kMinor3rd:
+    case interval::kMajor3rd:
+    case interval::kMinor6th:
+    case interval::kMajor6th:
+      return true;
+    default:
+      return false;
+  }
+}
+
 bool BachRuleEvaluator::isPerfectConsonance(int semitones) {
   int reduced = ((semitones % 12) + 12) % 12;  // Normalize to [0, 11].
   return reduced == interval::kUnison ||
@@ -45,9 +68,12 @@ bool BachRuleEvaluator::isPerfectConsonance(int semitones) {
 
 bool BachRuleEvaluator::isIntervalConsonant(int semitones,
                                             bool is_strong_beat) const {
-  // Free counterpoint mode: weak-beat dissonances are always allowed.
+  // Free counterpoint mode: consonances always OK on weak beats.
+  // Dissonances on weak beats are rejected so that the collision resolver's
+  // NHT check (passing tone / neighbor tone) can evaluate with next_pitch context.
   if (free_counterpoint_ && !is_strong_beat) {
-    return true;
+    int reduced = ((semitones % 12) + 12) % 12;
+    return isActuallyConsonant(reduced);
   }
 
   // Normalize to single-octave interval.
@@ -288,7 +314,7 @@ std::vector<RuleViolation> BachRuleEvaluator::validate(
 
   // Check every beat position in the range.
   for (Tick tick = from_tick; tick < to_tick; tick += kTicksPerBeat) {
-    bool is_strong_beat = (beatInBar(tick) == 0 || beatInBar(tick) == 2);
+    bool is_strong_beat = (tick % kTicksPerBeat == 0);
 
     // Check all voice pairs.
     for (size_t idx_a = 0; idx_a < voices.size(); ++idx_a) {

@@ -98,8 +98,8 @@ bool CollisionResolver::isSafeToPlace(const CounterpointState& state,
     const NoteEvent* other_note = state.getNoteAt(other, tick);
     if (!other_note) continue;
 
-    // Check consonance on strong beats.
-    bool is_strong = (beatInBar(tick) == 0 || beatInBar(tick) == 2);
+    // Check consonance on strong beats (every quarter-note boundary).
+    bool is_strong = (tick % kTicksPerBeat == 0);
     int ivl = std::abs(static_cast<int>(pitch) -
                        static_cast<int>(other_note->pitch));
     if (is_strong && !rules.isIntervalConsonant(ivl, is_strong)) {
@@ -122,6 +122,34 @@ bool CollisionResolver::isSafeToPlace(const CounterpointState& state,
       }
       if (!allowed_as_nht) {
         return false;
+      }
+    }
+
+    // P4 involving the bass voice is dissonant in Baroque practice, even when
+    // the rule evaluator treats P4 as consonant (3+ voice context).  Only P4
+    // between two upper voices is acceptable.
+    if (is_strong && rules.isIntervalConsonant(ivl, is_strong)) {
+      int reduced = ((ivl % 12) + 12) % 12;
+      if (reduced == interval::kPerfect4th) {
+        const auto& active = state.getActiveVoices();
+        // Bass voice = highest voice_id (last in registration order).
+        VoiceId bass_voice = active.empty() ? 0 : active.back();
+        if (voice_id == bass_voice || other == bass_voice) {
+          // Reject unless justified as a non-harmonic tone (passing/neighbor).
+          bool p4_bass_allowed = false;
+          if (next_pitch > 0) {
+            const NoteEvent* prev_self = state.getLastNote(voice_id);
+            if (prev_self) {
+              SpeciesRules species_rules(SpeciesType::Fifth);
+              bool is_passing = species_rules.isValidPassingTone(
+                  prev_self->pitch, pitch, next_pitch);
+              bool is_neighbor = species_rules.isValidNeighborTone(
+                  prev_self->pitch, pitch, next_pitch);
+              if (is_passing || is_neighbor) p4_bass_allowed = true;
+            }
+          }
+          if (!p4_bass_allowed) return false;
+        }
       }
     }
 
@@ -175,7 +203,7 @@ bool CollisionResolver::isSafeToPlace(const CounterpointState& state,
   // BachRuleEvaluator treats this as a soft penalty (not rejection).
   // FuxRuleEvaluator treats this as a hard rejection.
   if (rules.isStrictSpacing()) {
-    bool is_strong_beat = (beatInBar(tick) == 0 || beatInBar(tick) == 2);
+    bool is_strong_beat = (tick % kTicksPerBeat == 0);
     if (is_strong_beat) {
       for (VoiceId other : voices) {
         if (other == voice_id) continue;
@@ -391,7 +419,7 @@ PlacementResult CollisionResolver::findSafePitch(
 PlacementResult CollisionResolver::findSafePitch(
     const CounterpointState& state, const IRuleEvaluator& rules,
     VoiceId voice_id, uint8_t desired_pitch, Tick tick, Tick duration,
-    BachNoteSource source) const {
+    BachNoteSource source, uint8_t next_pitch) const {
   ProtectionLevel level = getProtectionLevel(source);
 
   // Select allowed strategies based on protection level.
@@ -429,7 +457,7 @@ PlacementResult CollisionResolver::findSafePitch(
 
     PlacementResult result = tryStrategy(state, rules, voice_id,
                                          desired_pitch, tick, duration,
-                                         list.strategies[idx]);
+                                         list.strategies[idx], next_pitch);
     if (result.accepted) return result;
   }
 
@@ -474,7 +502,7 @@ PlacementResult CollisionResolver::trySuspension(
 
     int ivl = std::abs(static_cast<int>(held_pitch) -
                        static_cast<int>(other_note->pitch));
-    bool is_strong = (beatInBar(tick) == 0 || beatInBar(tick) == 2);
+    bool is_strong = (tick % kTicksPerBeat == 0);
     if (!rules.isIntervalConsonant(ivl, is_strong)) {
       // Verify the resolution: step down from held_pitch should be consonant.
       for (int step = 1; step <= 2; ++step) {

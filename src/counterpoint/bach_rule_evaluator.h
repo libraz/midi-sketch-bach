@@ -20,8 +20,10 @@ namespace bach {
 ///   (Fux only allows when the upper voice steps).
 /// - **Temporary voice crossing**: Crossings lasting 1 beat or less that
 ///   resolve to proper order are permitted.
-/// - **Weak-beat dissonance**: In free counterpoint mode, dissonances on
-///   weak beats are always treated as consonant (5th species tolerance).
+/// - **Weak-beat dissonance**: In free counterpoint mode, consonances on
+///   weak beats pass immediately. Dissonances on weak beats are rejected
+///   by isIntervalConsonant so that the CollisionResolver's NHT check
+///   (passing tone / neighbor tone) can evaluate with next_pitch context.
 class BachRuleEvaluator : public IRuleEvaluator {
  public:
   /// @brief Construct a Bach rule evaluator with voice count context.
@@ -44,8 +46,9 @@ class BachRuleEvaluator : public IRuleEvaluator {
   /// @param semitones Absolute interval in semitones.
   /// @param is_strong_beat True on beats 1 and 3 (4/4).
   /// @return True if the interval is consonant.
-  /// @note P4 is consonant with 3+ voices. Weak-beat dissonances are
-  ///       allowed in free counterpoint mode.
+  /// @note P4 is consonant with 3+ voices. In free counterpoint mode,
+  ///       weak-beat consonances pass; weak-beat dissonances return false
+  ///       to allow CollisionResolver NHT evaluation with next_pitch.
   bool isIntervalConsonant(int semitones,
                            bool is_strong_beat) const override;
 

@@ -189,16 +189,32 @@ TEST_F(BachVoiceCrossingTest, NoCrossingIsClean) {
 // Weak-beat dissonance in free counterpoint mode
 // ---------------------------------------------------------------------------
 
-TEST(BachRuleEvaluatorTest, WeakBeatDissonanceAllowedInFreeCounterpoint) {
+TEST(BachRuleEvaluatorTest, WeakBeatConsonancePassesInFreeCounterpoint) {
   BachRuleEvaluator rules(3);
   rules.setFreeCounterpoint(true);
 
-  // All intervals should be consonant on weak beats.
-  EXPECT_TRUE(rules.isIntervalConsonant(1, false));   // m2 on weak beat
-  EXPECT_TRUE(rules.isIntervalConsonant(2, false));   // M2 on weak beat
-  EXPECT_TRUE(rules.isIntervalConsonant(6, false));   // Tritone on weak beat
-  EXPECT_TRUE(rules.isIntervalConsonant(10, false));  // m7 on weak beat
-  EXPECT_TRUE(rules.isIntervalConsonant(11, false));  // M7 on weak beat
+  // Consonances on weak beats still pass.
+  EXPECT_TRUE(rules.isIntervalConsonant(0, false));   // P1 on weak beat
+  EXPECT_TRUE(rules.isIntervalConsonant(3, false));   // m3 on weak beat
+  EXPECT_TRUE(rules.isIntervalConsonant(4, false));   // M3 on weak beat
+  EXPECT_TRUE(rules.isIntervalConsonant(7, false));   // P5 on weak beat
+  EXPECT_TRUE(rules.isIntervalConsonant(8, false));   // m6 on weak beat
+  EXPECT_TRUE(rules.isIntervalConsonant(9, false));   // M6 on weak beat
+  EXPECT_TRUE(rules.isIntervalConsonant(12, false));  // P8 on weak beat
+}
+
+TEST(BachRuleEvaluatorTest, WeakBeatDissonanceRejectedInFreeCounterpoint) {
+  BachRuleEvaluator rules(3);
+  rules.setFreeCounterpoint(true);
+
+  // Dissonances on weak beats are now rejected so that the collision
+  // resolver's NHT check (passing tone / neighbor tone) can evaluate
+  // with next_pitch context.
+  EXPECT_FALSE(rules.isIntervalConsonant(1, false));   // m2 on weak beat
+  EXPECT_FALSE(rules.isIntervalConsonant(2, false));   // M2 on weak beat
+  EXPECT_FALSE(rules.isIntervalConsonant(6, false));   // Tritone on weak beat
+  EXPECT_FALSE(rules.isIntervalConsonant(10, false));  // m7 on weak beat
+  EXPECT_FALSE(rules.isIntervalConsonant(11, false));  // M7 on weak beat
 }
 
 TEST(BachRuleEvaluatorTest, StrongBeatDissonanceStillFlaggedInFreeCounterpoint) {

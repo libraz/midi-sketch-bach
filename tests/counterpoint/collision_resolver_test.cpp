@@ -5,6 +5,7 @@
 
 #include <gtest/gtest.h>
 
+#include "counterpoint/bach_rule_evaluator.h"
 #include "counterpoint/counterpoint_state.h"
 #include "counterpoint/fux_rule_evaluator.h"
 
@@ -619,11 +620,14 @@ TEST_F(CollisionResolverTest, CrossRelationPenaltyInStepShift) {
 
 TEST_F(CollisionResolverTest, NaturalHalfStepNoCrossRelation) {
   // E(64) and F(65) are natural half steps -- not a cross-relation.
-  // Voice 1 has E4(64). Voice 0 wants F4(65). On weak beat this should be fine.
-  state.addNote(1, {kTicksPerBeat, kTicksPerBeat, 64, 80, 1});  // Voice 1: E4
+  // Voice 1 has E4(64). Voice 0 wants F4(65). On a sub-beat (weak) this should be fine.
+  // Use tick 240 (8th-note position) which is a weak beat under the expanded definition
+  // where every quarter-note boundary (tick % kTicksPerBeat == 0) is strong.
+  Tick weak_tick = kTicksPerBeat / 2;  // 240: 8th-note subdivision, not a beat boundary
+  state.addNote(1, {weak_tick, kTicksPerBeat, 64, 80, 1});  // Voice 1: E4
 
-  // F4(65) at beat 1 (weak) -- should be safe (E/F is natural, not cross-relation).
-  EXPECT_TRUE(resolver.isSafeToPlace(state, rules, 0, 65, kTicksPerBeat, kTicksPerBeat));
+  // F4(65) at 8th-note position (weak) -- safe (E/F is natural, not cross-relation).
+  EXPECT_TRUE(resolver.isSafeToPlace(state, rules, 0, 65, weak_tick, kTicksPerBeat));
 }
 
 // ---------------------------------------------------------------------------
@@ -720,12 +724,15 @@ TEST_F(CollisionResolverTest, AdjacentVoiceMinSpacingOnStrongBeat) {
 }
 
 TEST_F(CollisionResolverTest, AdjacentVoiceCloseSpacingAllowedOnWeakBeat) {
-  // Voice 1 (alto) has C4(60) at tick 480 (beat 1, weak).
-  state.addNote(1, {480, 480, 60, 80, 1});
+  // Voice 1 (alto) has C4(60) at tick 240 (8th-note position, weak beat).
+  // Under the expanded strong beat definition (every quarter-note boundary is strong),
+  // only sub-beat positions (tick % kTicksPerBeat != 0) are weak.
+  Tick weak_tick = kTicksPerBeat / 2;  // 240: 8th-note subdivision
+  state.addNote(1, {weak_tick, 480, 60, 80, 1});
 
   // Voice 0 (soprano) tries D4(62) — 2 semitones. On weak beat, spacing
   // check does not apply. Also, weak beat allows dissonance.
-  EXPECT_TRUE(resolver.isSafeToPlace(state, rules, 0, 62, 480, 480));
+  EXPECT_TRUE(resolver.isSafeToPlace(state, rules, 0, 62, weak_tick, 480));
 }
 
 TEST_F(CollisionResolverTest, NonAdjacentVoiceCloseSpacingAllowed) {
@@ -741,6 +748,165 @@ TEST_F(CollisionResolverTest, NonAdjacentVoiceCloseSpacingAllowed) {
   // consonance check. Use Eb4(63) instead: interval 3 (m3), consonant.
   // Voice IDs 0 and 2 differ by 2, so spacing check skipped.
   EXPECT_TRUE(resolver.isSafeToPlace(state, rules, 0, 63, 0, 480));
+}
+
+// ---------------------------------------------------------------------------
+// P4-with-bass distinction (Baroque practice)
+// ---------------------------------------------------------------------------
+
+/// @brief Test fixture with 3-voice BachRuleEvaluator where P4 is consonant.
+class CollisionResolverP4BassTest : public ::testing::Test {
+ protected:
+  void SetUp() override {
+    // Soprano=0, Alto=1, Bass=2 (last registered = bass).
+    state.registerVoice(0, 60, 96);  // Soprano: C4-C7
+    state.registerVoice(1, 48, 84);  // Alto: C3-C6
+    state.registerVoice(2, 36, 60);  // Bass: C2-C4
+  }
+  CounterpointState state;
+  BachRuleEvaluator rules{3};  // 3 voices: P4 classified as consonant.
+  CollisionResolver resolver;
+};
+
+TEST_F(CollisionResolverP4BassTest, P4WithBassIsDissonant) {
+  // Bass (voice 2) has C3(48) at tick 0 (strong beat).
+  state.addNote(2, {0, 480, 48, 80, 2});
+
+  // Soprano (voice 0) wants F3(53) at tick 0 -- P4 above bass.
+  // BachRuleEvaluator says P4 is consonant with 3+ voices, but the new check
+  // in CollisionResolver should reject P4 when involving the bass voice.
+  EXPECT_FALSE(resolver.isSafeToPlace(state, rules, 0, 53, 0, 480));
+}
+
+TEST_F(CollisionResolverP4BassTest, P4BetweenUpperVoicesConsonant) {
+  // Bass (voice 2) has C3(48) at tick 0.
+  state.addNote(2, {0, 480, 48, 80, 2});
+
+  // Alto (voice 1) has C4(60) at tick 0.
+  state.addNote(1, {0, 480, 60, 80, 1});
+
+  // Soprano (voice 0) wants F4(65) at tick 0 -- P4 above alto (C4).
+  // Both are upper voices (neither is bass=voice 2).  P4 should be allowed.
+  // Interval with alto: |65-60| = 5 = P4 (consonant between upper voices).
+  // Interval with bass: |65-48| = 17, mod 12 = 5 = P4 with bass -> reject.
+  // Since the P4 is also with the bass, this should be rejected.
+  // To test pure upper-voice P4, ensure no P4 interval with bass.
+  // Alto at G4(67), Soprano at C5(72): |72-67| = 5 = P4 between upper voices.
+  // Bass at C3(48): |72-48| = 24 = P8 (consonant), |67-48| = 19, mod 12 = 7 = P5.
+  state.clear();
+  state.registerVoice(0, 60, 96);
+  state.registerVoice(1, 48, 84);
+  state.registerVoice(2, 36, 60);
+  state.addNote(2, {0, 480, 48, 80, 2});  // Bass: C3
+  state.addNote(1, {0, 480, 67, 80, 1});  // Alto: G4
+
+  // Soprano wants C5(72) -- P4 with alto G4 (upper voices only).
+  // Interval with bass C3: 72-48=24, mod 12=0 (P8) -- consonant, no P4 issue.
+  EXPECT_TRUE(resolver.isSafeToPlace(state, rules, 0, 72, 0, 480));
+}
+
+TEST_F(CollisionResolverP4BassTest, P4WithBassAllowedAsPassingTone) {
+  // Bass (voice 2) has C3(48) at tick 960 (strong beat).
+  state.addNote(2, {960, 480, 48, 80, 2});
+
+  // Soprano previously played E4(64).
+  state.addNote(0, {480, 480, 64, 80, 0});
+
+  // Soprano wants F4(65) at tick 960 with next_pitch G4(67).
+  // F4 with C3: |65-48| = 17, mod 12 = 5 = P4 with bass.
+  // But E4->F4->G4 is an ascending passing tone, so NHT allows it.
+  EXPECT_TRUE(resolver.isSafeToPlace(state, rules, 0, 65, 960, 480, 67));
+}
+
+TEST_F(CollisionResolverP4BassTest, P4WithBassRejectedWithoutNHT) {
+  // Bass (voice 2) has C3(48) at tick 0 (strong beat).
+  state.addNote(2, {0, 480, 48, 80, 2});
+
+  // Soprano wants F3(53) at tick 0 with no next_pitch info.
+  // P4 with bass, no NHT context -> rejected.
+  EXPECT_FALSE(resolver.isSafeToPlace(state, rules, 0, 53, 0, 480, 0));
+}
+
+// ---------------------------------------------------------------------------
+// Weak-beat dissonance with BachRuleEvaluator + next_pitch propagation
+// ---------------------------------------------------------------------------
+
+/// @brief Fixture for testing weak-beat NHT handling with BachRuleEvaluator.
+class WeakBeatNHTTest : public ::testing::Test {
+ protected:
+  void SetUp() override {
+    state.registerVoice(0, 48, 84);  // Soprano: C3-C6
+    state.registerVoice(1, 36, 72);  // Alto: C2-C5
+    bach_rules.setFreeCounterpoint(true);
+  }
+  CounterpointState state;
+  BachRuleEvaluator bach_rules{3};
+  CollisionResolver resolver;
+};
+
+TEST_F(WeakBeatNHTTest, WeakBeatPassingToneAcceptedWithNextPitch) {
+  // Voice 1 has C3(48) at tick 240 (8th-note position, weak beat).
+  // Under the expanded strong beat definition (every quarter-note boundary is strong),
+  // only sub-beat positions (tick % kTicksPerBeat != 0) are weak.
+  Tick weak_tick = kTicksPerBeat / 2;  // 240: 8th-note subdivision
+  state.addNote(1, {weak_tick, 480, 48, 80, 1});
+
+  // Voice 0 previously played C4(60).
+  state.addNote(0, {0, 480, 60, 80, 0});
+
+  // Voice 0 wants D4(62) at tick 240 (weak). D4 with C3 = 14 semitones, mod 12 = 2 (M2),
+  // dissonant. With BachRuleEvaluator + free counterpoint, the old code returned
+  // true for all weak-beat intervals. Now isIntervalConsonant returns false for
+  // dissonances on weak beats. However, isSafeToPlace only checks consonance
+  // on strong beats (is_strong && ...), so weak-beat dissonances still pass
+  // through isSafeToPlace without consonance blocking.
+  EXPECT_TRUE(resolver.isSafeToPlace(state, bach_rules, 0, 62, weak_tick, 480));
+
+  // With next_pitch context for a strong beat, passing tone should also work.
+  // Voice 1 has C3(48) at tick 960 (beat 2, strong).
+  state.addNote(1, {960, 480, 48, 80, 1});
+
+  // D4(62) at tick 960 (strong): interval 14, mod 12 = 2 (M2) dissonant.
+  // Without NHT -> rejected.
+  EXPECT_FALSE(resolver.isSafeToPlace(state, bach_rules, 0, 62, 960, 480));
+
+  // With next_pitch E4(64): C4->D4->E4 = ascending passing tone -> accepted.
+  EXPECT_TRUE(resolver.isSafeToPlace(state, bach_rules, 0, 62, 960, 480, 64));
+}
+
+TEST_F(WeakBeatNHTTest, WeakBeatConsonanceUnchanged) {
+  // Voice 1 has C3(48) at tick 480 (beat 1, weak beat).
+  state.addNote(1, {480, 480, 48, 80, 1});
+
+  // Voice 0 wants G4(67) at tick 480 (weak beat). Interval = 19, mod 12 = 7 (P5).
+  // P5 is consonant -- should always pass regardless of NHT context.
+  EXPECT_TRUE(resolver.isSafeToPlace(state, bach_rules, 0, 67, 480, 480));
+
+  // Also on strong beat with consonant interval: still pass.
+  state.addNote(1, {0, 480, 48, 80, 1});
+  EXPECT_TRUE(resolver.isSafeToPlace(state, bach_rules, 0, 67, 0, 480));
+}
+
+TEST_F(WeakBeatNHTTest, SourceAwareOverloadPassesNextPitch) {
+  // Verify the source-aware findSafePitch now propagates next_pitch.
+  // Voice 1 has C3(48) at tick 960 (strong beat).
+  state.addNote(1, {960, 480, 48, 80, 1});
+
+  // Voice 0 previously played C4(60).
+  state.addNote(0, {480, 480, 60, 80, 0});
+
+  // Flexible source with next_pitch: D4(62) at tick 960.
+  // D4(62) with C3(48) = 14 semitones, mod 12 = 2 (M2), dissonant on strong beat.
+  // Without next_pitch, rejected. With next_pitch=64 (passing tone C4->D4->E4),
+  // should be accepted via NHT classification.
+  auto result = resolver.findSafePitch(
+      state, bach_rules, 0, 62, 960, 480,
+      BachNoteSource::FreeCounterpoint, 64);
+  // The cascade tries "original" first with next_pitch=64. Since C4->D4->E4
+  // is a valid passing tone, isSafeToPlace should accept.
+  EXPECT_TRUE(result.accepted);
+  EXPECT_EQ(result.pitch, 62);
+  EXPECT_EQ(result.strategy, "original");
 }
 
 }  // namespace

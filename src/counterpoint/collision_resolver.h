@@ -93,11 +93,14 @@ class CollisionResolver {
   /// Flexible sources use the full cascade.
   ///
   /// @param source The note source (determines allowed strategies).
+  /// @param next_pitch Next pitch in the voice (0 if unknown, enables
+  ///        non-harmonic tone classification in isSafeToPlace).
   PlacementResult findSafePitch(const CounterpointState& state,
                                 const IRuleEvaluator& rules,
                                 VoiceId voice_id, uint8_t desired_pitch,
                                 Tick tick, Tick duration,
-                                BachNoteSource source) const;
+                                BachNoteSource source,
+                                uint8_t next_pitch = 0) const;
 
   /// @brief Find a safe pitch with pedal-range awareness.
   ///

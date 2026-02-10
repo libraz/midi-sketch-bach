@@ -200,7 +200,10 @@ void placeCountersubjectNotes(const std::vector<NoteEvent>& cs_notes,
   // Compute voice register center and octave shift needed.
   int voice_center = (static_cast<int>(voice_reg.low) +
                       static_cast<int>(voice_reg.high)) / 2;
-  int octave_shift = ((voice_center - cs_mean + 6) / 12) * 12;
+  // Round to nearest octave, handling negative values correctly.
+  int diff = voice_center - cs_mean;
+  int octave_shift = (diff >= 0) ? ((diff + 6) / 12) * 12
+                                 : -(((-diff + 5) / 12) * 12);
 
   for (const auto& cs_note : cs_notes) {
     NoteEvent note = cs_note;
@@ -468,17 +471,34 @@ Exposition buildExposition(const Subject& subject,
       bool is_structural = (note.start_tick < structural_end);
 
       if (is_structural) {
-        // Register structural notes in CP state without alteration.
-        cp_state.addNote(voice_id, note);
-        validated.push_back(note);
+        // Register structural notes in CP state, then check for voice crossing.
+        // If a crossing is detected, shift by one octave to restore proper order.
+        NoteEvent fixed_note = note;
+        for (VoiceId other_v : cp_state.getActiveVoices()) {
+          if (other_v == voice_id) continue;
+          const NoteEvent* other_note = cp_state.getNoteAt(other_v, note.start_tick);
+          if (!other_note) continue;
+          // Lower voice_id = higher voice (soprano=0, alto=1, ..., bass=N).
+          bool crossed = (voice_id < other_v && note.pitch < other_note->pitch) ||
+                         (voice_id > other_v && note.pitch > other_note->pitch);
+          if (crossed) {
+            int shift = (voice_id < other_v) ? 12 : -12;
+            int new_pitch = static_cast<int>(note.pitch) + shift;
+            if (new_pitch >= 0 && new_pitch <= 127) {
+              fixed_note.pitch = static_cast<uint8_t>(new_pitch);
+            }
+            break;
+          }
+        }
+        cp_state.addNote(voice_id, fixed_note);
+        validated.push_back(fixed_note);
         continue;
       }
 
       // Free counterpoint: validate through createBachNote.
       const auto& harm_ev = timeline.getAt(note.start_tick);
       uint8_t desired_pitch = note.pitch;
-      bool is_strong = (note.start_tick % kTicksPerBar == 0) ||
-                       (note.start_tick % (kTicksPerBar / 2) == 0);
+      bool is_strong = (note.start_tick % kTicksPerBeat == 0);
       if (is_strong && !isChordTone(note.pitch, harm_ev)) {
         desired_pitch = nearestChordTone(note.pitch, harm_ev);
       }

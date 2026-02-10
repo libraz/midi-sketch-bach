@@ -51,12 +51,18 @@ GoalTone goalToneForCharacter(SubjectCharacter character);
 
 /// @brief Get the pair of MotifTemplates (A and B) for a given character.
 ///
+/// Each character has 4 template pairs (16 total). Use template_idx to select
+/// among the variants; values are taken modulo 4. This expands subject diversity
+/// while keeping fixed design values (Principle 3: reduce generation).
+///
 /// Motif A is used for the ascending portion (toward the goal tone).
 /// Motif B is used for the descending portion (away from the goal tone).
 ///
 /// @param character Subject character type.
+/// @param template_idx Index to select among 4 template pairs (taken mod 4).
 /// @return Pair of templates: first = Motif A (ascending), second = Motif B (descending).
-std::pair<MotifTemplate, MotifTemplate> motifTemplatesForCharacter(SubjectCharacter character);
+std::pair<MotifTemplate, MotifTemplate> motifTemplatesForCharacter(
+    SubjectCharacter character, uint32_t template_idx = 0);
 
 }  // namespace bach
 

@@ -16,9 +16,9 @@ namespace {
 // FugueConfig defaults
 // ===========================================================================
 
-TEST(FugueDurationScaleTest, DefaultDevelopPairsIsOne) {
+TEST(FugueDurationScaleTest, DefaultDevelopPairsIsTwo) {
   FugueConfig config;
-  EXPECT_EQ(config.develop_pairs, 1);
+  EXPECT_EQ(config.develop_pairs, 2);
 }
 
 TEST(FugueDurationScaleTest, DefaultEpisodeBarsIsTwo) {
@@ -156,10 +156,10 @@ TEST_P(FugueDurationScaleParamTest, StructureHasCorrectPhaseOrder) {
 INSTANTIATE_TEST_SUITE_P(
     AllScales, FugueDurationScaleParamTest,
     ::testing::Values(
-        FugueScaleParam{1, 2, "Short"},
+        FugueScaleParam{2, 2, "Short"},
         FugueScaleParam{3, 3, "Medium"},
-        FugueScaleParam{6, 3, "Long"},
-        FugueScaleParam{10, 4, "Full"}
+        FugueScaleParam{5, 3, "Long"},
+        FugueScaleParam{8, 4, "Full"}
     ),
     [](const ::testing::TestParamInfo<FugueScaleParam>& info) {
       return info.param.label;

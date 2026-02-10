@@ -324,8 +324,7 @@ Stretto generateStretto(const Subject& subject, Key home_key, Tick start_tick,
         // Flexible: chord-tone snap + full cascade.
         const auto& harm_ev = timeline.getAt(note.start_tick);
         uint8_t desired_pitch = note.pitch;
-        bool is_strong = (note.start_tick % kTicksPerBar == 0) ||
-                         (note.start_tick % (kTicksPerBar / 2) == 0);
+        bool is_strong = (note.start_tick % kTicksPerBeat == 0);
         if (is_strong && !isChordTone(note.pitch, harm_ev)) {
           desired_pitch = nearestChordTone(note.pitch, harm_ev);
         }

@@ -472,8 +472,6 @@ FugueResult generateFugue(const FugueConfig& config) {
   current_tick = expo.total_ticks;
 
   // --- Develop phase: Episode+MiddleEntry pairs ---
-  Tick episode_duration = kTicksPerBar * static_cast<Tick>(config.episode_bars);
-
   int develop_pairs = config.develop_pairs;
   Key prev_key = config.key;
 
@@ -490,6 +488,14 @@ FugueResult generateFugue(const FugueConfig& config) {
   }
 
   for (int pair_idx = 0; pair_idx < develop_pairs; ++pair_idx) {
+    // Odd-indexed episodes get +1 bar for structural variety (Bach uses
+    // irregular episode lengths to avoid mechanical regularity).
+    int ep_bars = config.episode_bars;
+    if (pair_idx % 2 != 0) {
+      ep_bars += 1;
+    }
+    Tick episode_duration = kTicksPerBar * static_cast<Tick>(ep_bars);
+
     Key target_key = mod_plan.getTargetKey(pair_idx, config.key);
     uint32_t pair_seed_base = config.seed + static_cast<uint32_t>(pair_idx) * 2000u + 2000u;
 
@@ -567,18 +573,19 @@ FugueResult generateFugue(const FugueConfig& config) {
 
   // --- Return episode: transition back to home key ---
   {
+    Tick return_ep_duration = kTicksPerBar * static_cast<Tick>(config.episode_bars);
     float return_energy = FugueEnergyCurve::getLevel(current_tick, estimated_duration);
     Episode return_episode = generateEpisode(
-        subject, current_tick, episode_duration,
+        subject, current_tick, return_ep_duration,
         prev_key, config.key, num_voices,
         config.seed + static_cast<uint32_t>(develop_pairs) * 2000u + 2000u,
         develop_pairs, return_energy,
         cp_state, cp_rules, cp_resolver, detailed_timeline);
     structure.addSection(SectionType::Episode, FuguePhase::Develop,
-                         current_tick, current_tick + episode_duration, config.key);
+                         current_tick, current_tick + return_ep_duration, config.key);
     all_notes.insert(all_notes.end(), return_episode.notes.begin(),
                      return_episode.notes.end());
-    current_tick += episode_duration;
+    current_tick += return_ep_duration;
   }
 
   // --- Dominant pedal: 4 bars before stretto (Develop -> Resolve transition) ---
@@ -695,7 +702,8 @@ FugueResult generateFugue(const FugueConfig& config) {
     int dissonances = 0;
     int crossings = 0;
 
-    for (const auto& note : all_notes) {
+    for (size_t note_idx = 0; note_idx < all_notes.size(); ++note_idx) {
+      const auto& note = all_notes[note_idx];
       if (note.voice >= num_voices) {
         validated_notes.push_back(note);
         continue;
@@ -731,8 +739,7 @@ FugueResult generateFugue(const FugueConfig& config) {
         validated_notes.push_back(note);
 
         // Count dissonances for metrics even on structural notes.
-        bool is_strong = (note.start_tick % kTicksPerBar == 0) ||
-                         (note.start_tick % (kTicksPerBar / 2) == 0);
+        bool is_strong = (note.start_tick % kTicksPerBeat == 0);
         if (!is_chord_tone && is_strong) ++dissonances;
 
         // Check voice crossings.
@@ -748,11 +755,19 @@ FugueResult generateFugue(const FugueConfig& config) {
 
       // Flexible notes: chord-tone snapping + createBachNote cascade.
       uint8_t desired_pitch = note.pitch;
-      bool is_strong = (note.start_tick % kTicksPerBar == 0) ||
-                       (note.start_tick % (kTicksPerBar / 2) == 0);
+      bool is_strong = (note.start_tick % kTicksPerBeat == 0);
 
       if (is_strong && !is_chord_tone) {
         desired_pitch = nearestChordTone(note.pitch, harm_ev);
+      }
+
+      // Lookahead: find next pitch for the same voice for NHT validation.
+      uint8_t lookahead_pitch = 0;
+      for (size_t nxt = note_idx + 1; nxt < all_notes.size(); ++nxt) {
+        if (all_notes[nxt].voice == note.voice) {
+          lookahead_pitch = all_notes[nxt].pitch;
+          break;
+        }
       }
 
       BachNoteOptions opts;
@@ -762,6 +777,7 @@ FugueResult generateFugue(const FugueConfig& config) {
       opts.duration = note.duration;
       opts.velocity = note.velocity;
       opts.source = source;
+      opts.next_pitch = lookahead_pitch;
 
       BachCreateNoteResult cp_result = createBachNote(
           &post_state, &post_rules, &post_resolver, opts);

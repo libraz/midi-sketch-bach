@@ -44,13 +44,13 @@ uint32_t generateRandomSeed() {
 void fugueDurationParams(DurationScale scale, int& pairs, int& ep_bars) {
   switch (scale) {
     case DurationScale::Short:
-      pairs = 1; ep_bars = 2; break;
+      pairs = 2; ep_bars = 2; break;   // 2 pairs for ~18 bars develop section
     case DurationScale::Medium:
       pairs = 3; ep_bars = 3; break;
     case DurationScale::Long:
-      pairs = 6; ep_bars = 3; break;
+      pairs = 5; ep_bars = 3; break;   // Reduced from 6 for quality stability
     case DurationScale::Full:
-      pairs = 10; ep_bars = 4; break;
+      pairs = 8; ep_bars = 4; break;   // Reduced from 10 for quality stability
   }
 }
 

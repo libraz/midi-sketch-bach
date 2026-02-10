@@ -1116,9 +1116,10 @@ TEST(EpisodeImitationTest, SevereUsesDirectImitation) {
   EXPECT_TRUE(has_voice1);
 }
 
-TEST(EpisodeImitationTest, SevereVoice1RepeatsMotifPitches) {
-  // In Severe, voice 1 should use direct (uninverted) imitation, so the first
-  // notes of voice 1 should have the same pitches as voice 0's motif.
+TEST(EpisodeImitationTest, SevereVoice1RepeatsMotifIntervals) {
+  // In Severe, voice 1 should use direct (uninverted) imitation. After
+  // register placement the absolute pitches may differ by whole octaves,
+  // but the interval pattern (successive pitch differences) must match.
   Subject subject = makeDiatonicTestSubject(Key::C, SubjectCharacter::Severe);
   Episode epi = generateEpisode(subject, 0, kTicksPerBar * 4, Key::C, Key::C,
                                 2, 42, 0, 0.5f);
@@ -1132,11 +1133,17 @@ TEST(EpisodeImitationTest, SevereVoice1RepeatsMotifPitches) {
 
   ASSERT_FALSE(voice0_pitches.empty());
   ASSERT_FALSE(voice1_pitches.empty());
-  // Voice 1 starts with the same motif pitches as voice 0 (direct imitation).
+  // Compare interval patterns (direct imitation preserves intervals).
   size_t check_count = std::min({voice0_pitches.size(), voice1_pitches.size(), size_t{4}});
-  for (size_t idx = 0; idx < check_count; ++idx) {
-    EXPECT_EQ(voice0_pitches[idx], voice1_pitches[idx])
-        << "Severe voice 1 note " << idx << " should match voice 0 (direct imitation)";
+  ASSERT_GE(check_count, 2u) << "Need at least 2 notes to compare intervals";
+  for (size_t idx = 1; idx < check_count; ++idx) {
+    int v0_interval = static_cast<int>(voice0_pitches[idx]) -
+                      static_cast<int>(voice0_pitches[idx - 1]);
+    int v1_interval = static_cast<int>(voice1_pitches[idx]) -
+                      static_cast<int>(voice1_pitches[idx - 1]);
+    EXPECT_EQ(v0_interval, v1_interval)
+        << "Severe voice 1 interval " << idx
+        << " should match voice 0 (direct imitation)";
   }
 }
 

@@ -165,6 +165,31 @@ CharacterParams getCharacterParams(SubjectCharacter character) {
 /// @brief Number of entries in kRestlessLeapIntervals.
 [[maybe_unused]] constexpr int kRestlessLeapCount = 8;
 
+/// @brief Apply random rhythm variation to a template duration.
+/// @param base_dur Base duration from template.
+/// @param gen RNG.
+/// @return Varied duration, clamped to [kTicksPerBeat/4, kTicksPerBeat*3].
+Tick varyDuration(Tick base_dur, std::mt19937& gen) {
+  if (!rng::rollProbability(gen, 0.30f)) return base_dur;
+  // Duration step table.
+  constexpr Tick kDurSteps[] = {
+      kTicksPerBeat / 4, kTicksPerBeat / 2, kTicksPerBeat,
+      kTicksPerBeat * 3 / 2, kTicksPerBeat * 2, kTicksPerBeat * 3};
+  constexpr int kNumSteps = 6;
+  // Find current step index.
+  int cur_idx = 2;  // Default to quarter note.
+  for (int step = 0; step < kNumSteps; ++step) {
+    if (kDurSteps[step] >= base_dur) {
+      cur_idx = step;
+      break;
+    }
+  }
+  // Shift +/-1 step.
+  int shift = rng::rollProbability(gen, 0.5f) ? 1 : -1;
+  int new_idx = std::max(0, std::min(kNumSteps - 1, cur_idx + shift));
+  return kDurSteps[new_idx];
+}
+
 }  // namespace
 
 // ---------------------------------------------------------------------------
@@ -243,7 +268,10 @@ std::vector<NoteEvent> SubjectGenerator::generateNotes(
 
   // Get design values (Principle 4: fixed per character).
   GoalTone goal = goalToneForCharacter(character);
-  auto [motif_a, motif_b] = motifTemplatesForCharacter(character);
+
+  // Select template pair from 4 options (Principle 3: fixed set of choices).
+  uint32_t template_idx = gen() % 4;
+  auto [motif_a, motif_b] = motifTemplatesForCharacter(character, template_idx);
 
   // Start on tonic (degree 0) or dominant (degree 4).
   constexpr int kBaseNote = 60;
@@ -300,11 +328,18 @@ std::vector<NoteEvent> SubjectGenerator::generateNotes(
       degree_shift = (interp_pitch - target_pitch + 1) / 2;  // Rough degree approx
     }
     int adjusted_degree = target_degree + degree_shift;
+
+    // Interval fluctuation: +/-1 degree with 40% probability.
+    if (rng::rollProbability(gen, 0.40f)) {
+      adjusted_degree += rng::rollProbability(gen, 0.5f) ? 1 : -1;
+    }
+
     int pitch = degreeToPitch(adjusted_degree, kBaseNote, key_offset, scale);
     pitch = std::max(pitch_floor, std::min(pitch_ceil, pitch));
 
-    Tick duration =
-        (idx < motif_a.durations.size()) ? motif_a.durations[idx] : kTicksPerBeat;
+    Tick duration = (idx < motif_a.durations.size())
+                        ? varyDuration(motif_a.durations[idx], gen)
+                        : kTicksPerBeat;
     if (current_tick + duration > climax_tick) {
       duration = climax_tick - current_tick;
       if (duration < kTicksPerBeat / 4) break;
@@ -376,11 +411,18 @@ std::vector<NoteEvent> SubjectGenerator::generateNotes(
       degree_shift = 1;
     }
     int adjusted_degree = target_degree + degree_shift;
+
+    // Interval fluctuation: +/-1 degree with 40% probability.
+    if (rng::rollProbability(gen, 0.40f)) {
+      adjusted_degree += rng::rollProbability(gen, 0.5f) ? 1 : -1;
+    }
+
     int pitch = degreeToPitch(adjusted_degree, kBaseNote, key_offset, scale);
     pitch = std::max(pitch_floor, std::min(pitch_ceil, pitch));
 
-    Tick duration =
-        (idx < motif_b.durations.size()) ? motif_b.durations[idx] : kTicksPerBeat;
+    Tick duration = (idx < motif_b.durations.size())
+                        ? varyDuration(motif_b.durations[idx], gen)
+                        : kTicksPerBeat;
     if (current_tick + duration > total_ticks) {
       duration = total_ticks - current_tick;
       if (duration < kTicksPerBeat / 4) break;
@@ -432,9 +474,15 @@ std::vector<NoteEvent> SubjectGenerator::generateNotes(
     }
   }
 
-  // Ensure the last note ends on the tonic.
+  // Ending: 50% tonic, 50% dominant (degree 4) for variety.
   if (!result.empty()) {
-    result.back().pitch = static_cast<uint8_t>(tonic_pitch);
+    if (rng::rollProbability(gen, 0.50f)) {
+      result.back().pitch = static_cast<uint8_t>(tonic_pitch);
+    } else {
+      int dominant_pitch = degreeToPitch(4, kBaseNote, key_offset, scale);
+      dominant_pitch = std::max(pitch_floor, std::min(pitch_ceil, dominant_pitch));
+      result.back().pitch = static_cast<uint8_t>(dominant_pitch);
+    }
   }
 
   return result;

@@ -16,6 +16,7 @@
 #include "fugue/fortspinnung.h"
 #include "fugue/fugue_config.h"
 #include "fugue/motif_pool.h"
+#include "fugue/voice_registers.h"
 #include "harmony/chord_tone_utils.h"
 #include "harmony/chord_types.h"
 #include "harmony/harmonic_timeline.h"
@@ -88,6 +89,48 @@ int calculateSequenceRepetitions(Tick duration_ticks, Tick motif_dur) {
   return reps;
 }
 
+/// @brief Shift notes to fit within the appropriate voice register.
+///
+/// Calculates the average pitch of the notes, compares it to the center
+/// of the target voice's range (from getFugueVoiceRange()), and shifts
+/// all notes by the nearest whole octave. Final pitches are clamped to
+/// the voice range.
+///
+/// @param notes Notes to adjust (modified in place).
+/// @param voice_id Target voice.
+/// @param num_voices Total voices in the fugue.
+static void fitToVoiceRegister(std::vector<NoteEvent>& notes, VoiceId voice_id,
+                               uint8_t num_voices) {
+  if (notes.empty()) return;
+
+  auto [range_low, range_high] = getFugueVoiceRange(voice_id, num_voices);
+  int range_center = (static_cast<int>(range_low) + static_cast<int>(range_high)) / 2;
+
+  // Calculate average pitch of notes.
+  int sum = 0;
+  for (const auto& note : notes) {
+    sum += static_cast<int>(note.pitch);
+  }
+  int avg_pitch = sum / static_cast<int>(notes.size());
+
+  // Round shift to nearest octave (positive or negative).
+  int diff = range_center - avg_pitch;
+  int octave_shift = 0;
+  if (diff >= 0) {
+    octave_shift = ((diff + 6) / 12) * 12;
+  } else {
+    octave_shift = -(((- diff) + 6) / 12) * 12;
+  }
+
+  // Apply shift and clamp to voice range.
+  for (auto& note : notes) {
+    int new_pitch = static_cast<int>(note.pitch) + octave_shift;
+    if (new_pitch < static_cast<int>(range_low)) new_pitch = static_cast<int>(range_low);
+    if (new_pitch > static_cast<int>(range_high)) new_pitch = static_cast<int>(range_high);
+    note.pitch = static_cast<uint8_t>(new_pitch);
+  }
+}
+
 }  // namespace (anonymous -- reopened below after shared helpers)
 
 /// @brief Clamp a pitch value to valid MIDI range [0, 127].
@@ -150,16 +193,21 @@ void generateSevereEpisode(Episode& episode, const std::vector<NoteEvent>& motif
                            int seq_reps, Tick imitation_offset, uint8_t num_voices,
                            Key key, ScaleType scale) {
   // Voice 0: Original motif + diatonic sequence.
+  std::vector<NoteEvent> v0_notes;
   for (const auto& note : motif) {
     NoteEvent placed = note;
     placed.start_tick += start_tick;
     placed.voice = 0;
-    episode.notes.push_back(placed);
+    v0_notes.push_back(placed);
   }
   auto seq_notes =
       generateDiatonicSequence(motif, seq_reps, deg_step, start_tick + motif_dur, key, scale);
   for (auto& note : seq_notes) {
     note.voice = 0;
+    v0_notes.push_back(note);
+  }
+  fitToVoiceRegister(v0_notes, 0, num_voices);
+  for (auto& note : v0_notes) {
     episode.notes.push_back(note);
   }
 
@@ -167,18 +215,23 @@ void generateSevereEpisode(Episode& episode, const std::vector<NoteEvent>& motif
   // diatonic sequence. Severe character uses strict dialogic hand-off where
   // voice 1 restates the motif at a 2-beat delay without transformation.
   if (num_voices >= 2) {
+    std::vector<NoteEvent> v1_notes;
     Tick voice1_start = start_tick + imitation_offset;
     for (const auto& note : motif) {
       NoteEvent placed = note;
       placed.start_tick += voice1_start;
       placed.voice = 1;
-      episode.notes.push_back(placed);
+      v1_notes.push_back(placed);
     }
     int inv_reps = std::max(1, seq_reps - 1);
     auto seq = generateDiatonicSequence(motif, inv_reps, deg_step,
                                         voice1_start + motif_dur, key, scale);
     for (auto& note : seq) {
       note.voice = 1;
+      v1_notes.push_back(note);
+    }
+    fitToVoiceRegister(v1_notes, 1, num_voices);
+    for (auto& note : v1_notes) {
       episode.notes.push_back(note);
     }
   }
@@ -206,15 +259,20 @@ void generatePlayfulEpisode(Episode& episode, const std::vector<NoteEvent>& moti
                             int seq_reps, Tick imitation_offset, uint8_t num_voices,
                             Key key, ScaleType scale) {
   // Voice 0: Retrograde of motif + diatonic sequence of retrograde.
+  std::vector<NoteEvent> v0_notes;
   auto retrograde = retrogradeMelody(motif, start_tick);
   for (auto& note : retrograde) {
     note.voice = 0;
-    episode.notes.push_back(note);
+    v0_notes.push_back(note);
   }
   auto seq_notes = generateDiatonicSequence(retrograde, seq_reps, deg_step,
                                             start_tick + motif_dur, key, scale);
   for (auto& note : seq_notes) {
     note.voice = 0;
+    v0_notes.push_back(note);
+  }
+  fitToVoiceRegister(v0_notes, 0, num_voices);
+  for (auto& note : v0_notes) {
     episode.notes.push_back(note);
   }
 
@@ -222,6 +280,7 @@ void generatePlayfulEpisode(Episode& episode, const std::vector<NoteEvent>& moti
   // Playful character uses inverted hand-off for melodic contrast against
   // the retrograde voice 0 material.
   if (num_voices >= 2) {
+    std::vector<NoteEvent> v1_notes;
     uint8_t pivot = motif[0].pitch;
     auto inverted = invertMelodyDiatonic(motif, pivot, key, scale);
     Tick voice1_start = start_tick + imitation_offset;
@@ -229,13 +288,17 @@ void generatePlayfulEpisode(Episode& episode, const std::vector<NoteEvent>& moti
       NoteEvent placed = note;
       placed.start_tick += voice1_start;
       placed.voice = 1;
-      episode.notes.push_back(placed);
+      v1_notes.push_back(placed);
     }
     int inv_reps = std::max(1, seq_reps - 1);
     auto inv_seq = generateDiatonicSequence(inverted, inv_reps, deg_step,
                                             voice1_start + motif_dur, key, scale);
     for (auto& note : inv_seq) {
       note.voice = 1;
+      v1_notes.push_back(note);
+    }
+    fitToVoiceRegister(v1_notes, 1, num_voices);
+    for (auto& note : v1_notes) {
       episode.notes.push_back(note);
     }
   }
@@ -262,27 +325,37 @@ void generateNobleEpisode(Episode& episode, const std::vector<NoteEvent>& motif,
                           int seq_reps, Tick imitation_offset, uint8_t num_voices,
                           Key key, ScaleType scale) {
   // Voice 0: Original motif + diatonic sequence (upper melodic line).
+  std::vector<NoteEvent> v0_notes;
   for (const auto& note : motif) {
     NoteEvent placed = note;
     placed.start_tick += start_tick;
     placed.voice = 0;
-    episode.notes.push_back(placed);
+    v0_notes.push_back(placed);
   }
   auto seq_notes =
       generateDiatonicSequence(motif, seq_reps, deg_step, start_tick + motif_dur, key, scale);
   for (auto& note : seq_notes) {
     note.voice = 0;
+    v0_notes.push_back(note);
+  }
+  fitToVoiceRegister(v0_notes, 0, num_voices);
+  for (auto& note : v0_notes) {
     episode.notes.push_back(note);
   }
 
   // Voice 1: Augmented motif in the bass (doubled duration for stately motion).
   if (num_voices >= 2) {
+    std::vector<NoteEvent> v1_notes;
     Tick voice1_start = start_tick + imitation_offset;
     auto augmented = augmentMelody(motif, voice1_start);
     // Transpose down an octave for bass register placement.
     augmented = transposeMelody(augmented, -12);
     for (auto& note : augmented) {
       note.voice = 1;
+      v1_notes.push_back(note);
+    }
+    fitToVoiceRegister(v1_notes, 1, num_voices);
+    for (auto& note : v1_notes) {
       episode.notes.push_back(note);
     }
   }
@@ -317,11 +390,12 @@ void generateRestlessEpisode(Episode& episode, const std::vector<NoteEvent>& mot
   Tick frag0_dur = motifDuration(frag0);
   if (frag0_dur == 0) frag0_dur = motif_dur / 2;
 
+  std::vector<NoteEvent> v0_notes;
   for (const auto& note : frag0) {
     NoteEvent placed = note;
     placed.start_tick += start_tick;
     placed.voice = 0;
-    episode.notes.push_back(placed);
+    v0_notes.push_back(placed);
   }
   // More repetitions since fragments are shorter, capped by overall sequence structure.
   int frag_reps = std::min(
@@ -331,6 +405,10 @@ void generateRestlessEpisode(Episode& episode, const std::vector<NoteEvent>& mot
       generateDiatonicSequence(frag0, frag_reps, deg_step, start_tick + frag0_dur, key, scale);
   for (auto& note : seq_notes) {
     note.voice = 0;
+    v0_notes.push_back(note);
+  }
+  fitToVoiceRegister(v0_notes, 0, num_voices);
+  for (auto& note : v0_notes) {
     episode.notes.push_back(note);
   }
 
@@ -338,11 +416,12 @@ void generateRestlessEpisode(Episode& episode, const std::vector<NoteEvent>& mot
   // Restless character uses diminution to compress the motif, creating
   // overlapping imitation with tighter rhythmic density.
   if (num_voices >= 2) {
+    std::vector<NoteEvent> v1_notes;
     Tick voice1_start = start_tick + imitation_offset;
     auto diminished = diminishMelody(motif, voice1_start);
     for (auto& note : diminished) {
       note.voice = 1;
-      episode.notes.push_back(note);
+      v1_notes.push_back(note);
     }
     Tick dim_dur = motifDuration(diminished);
     if (dim_dur == 0) dim_dur = motif_dur / 2;
@@ -353,6 +432,10 @@ void generateRestlessEpisode(Episode& episode, const std::vector<NoteEvent>& mot
                                             voice1_start + dim_dur, key, scale);
     for (auto& note : dim_seq) {
       note.voice = 1;
+      v1_notes.push_back(note);
+    }
+    fitToVoiceRegister(v1_notes, 1, num_voices);
+    for (auto& note : v1_notes) {
       episode.notes.push_back(note);
     }
   }
@@ -377,27 +460,35 @@ static VoiceId selectRestingVoice(uint8_t num_voices, int episode_index) {
 /// @brief Generate sustained held tones for a resting voice.
 ///
 /// Creates whole-note held tones that alternate between the tonic and
-/// the fifth of the current key. These long tones provide a harmonic
+/// the fifth of the current key. The pitch is derived from the center
+/// of the target voice's register (via getFugueVoiceRange()), ensuring
+/// proper vertical separation. These long tones provide a harmonic
 /// foundation while reducing textural density, a standard Baroque
 /// episode technique for creating breathing space.
 ///
 /// @param episode Episode to append notes to.
-/// @param motif Source motif (for deriving a register-appropriate pitch).
 /// @param start_tick Episode start tick.
 /// @param duration_ticks Total episode duration.
 /// @param key Current key context.
 /// @param voice_id Voice ID for the held tones.
-static void generateHeldTones(Episode& episode, const std::vector<NoteEvent>& motif,
+/// @param num_voices Total number of voices in the fugue.
+static void generateHeldTones(Episode& episode,
                                Tick start_tick, Tick duration_ticks,
-                               Key key, VoiceId voice_id) {
+                               Key key, VoiceId voice_id, uint8_t num_voices) {
   // Use whole notes (kTicksPerBar) as held tone duration.
   constexpr Tick kHeldDuration = kTicksPerBar;  // Whole note
 
-  // Place held tones one octave below the motif starting pitch for register contrast.
-  int tonic_pitch = static_cast<int>(kMidiC4) + static_cast<int>(key);
-  if (!motif.empty()) {
-    tonic_pitch = static_cast<int>(motif[0].pitch) - 12;
-  }
+  // Derive tonic pitch from the center of the target voice register.
+  auto [range_low, range_high] = getFugueVoiceRange(voice_id, num_voices);
+  int register_center = (static_cast<int>(range_low) + static_cast<int>(range_high)) / 2;
+
+  // Snap to the nearest tonic pitch class in the voice register center.
+  int key_pc = static_cast<int>(key);
+  int center_pc = register_center % 12;
+  int pc_diff = key_pc - center_pc;
+  if (pc_diff > 6) pc_diff -= 12;
+  if (pc_diff < -6) pc_diff += 12;
+  int tonic_pitch = register_center + pc_diff;
 
   // Alternate between root and fifth for harmonic stability.
   int pitches[] = {tonic_pitch, tonic_pitch + 7};
@@ -409,9 +500,9 @@ static void generateHeldTones(Episode& episode, const std::vector<NoteEvent>& mo
     if (dur == 0) break;
 
     int pitch = pitches[idx % 2];
-    // Clamp to valid MIDI range.
-    if (pitch < 0) pitch = 0;
-    if (pitch > 127) pitch = 127;
+    // Clamp to voice range.
+    if (pitch < static_cast<int>(range_low)) pitch = static_cast<int>(range_low);
+    if (pitch > static_cast<int>(range_high)) pitch = static_cast<int>(range_high);
 
     NoteEvent note;
     note.start_tick = tick;
@@ -525,14 +616,19 @@ Episode generateEpisode(const Subject& subject, Tick start_tick, Tick duration_t
 
   // Generate held tones for the resting voice.
   if (resting_voice < num_voices) {
-    generateHeldTones(episode, motif, start_tick, duration_ticks, start_key, resting_voice);
+    generateHeldTones(episode, start_tick, duration_ticks, start_key, resting_voice, num_voices);
   }
 
   // --- Voice 2: Diminished motif (rhythmic contrast, shared across characters) ---
   if (num_voices >= 3 && resting_voice != 2) {
+    std::vector<NoteEvent> v2_notes;
     auto diminished = diminishMelody(motif, start_tick + motif_dur);
     for (auto& note : diminished) {
       note.voice = 2;
+      v2_notes.push_back(note);
+    }
+    fitToVoiceRegister(v2_notes, 2, num_voices);
+    for (auto& note : v2_notes) {
       episode.notes.push_back(note);
     }
   }
@@ -541,11 +637,16 @@ Episode generateEpisode(const Subject& subject, Tick start_tick, Tick duration_t
   if (num_voices >= 4 && resting_voice != 3) {
     auto tail = extractTailMotif(subject.notes, 3);
     if (!tail.empty()) {
+      std::vector<NoteEvent> v3_notes;
       normalizeMotifToZero(tail);
       auto augmented = augmentMelody(tail, start_tick);
       augmented = transposeMelody(augmented, -12);
       for (auto& note : augmented) {
         note.voice = 3;
+        v3_notes.push_back(note);
+      }
+      fitToVoiceRegister(v3_notes, 3, num_voices);
+      for (auto& note : v3_notes) {
         episode.notes.push_back(note);
       }
     }
@@ -555,6 +656,7 @@ Episode generateEpisode(const Subject& subject, Tick start_tick, Tick duration_t
   if (num_voices >= 5 && resting_voice != 4) {
     auto tail = extractTailMotif(subject.notes, 3);
     if (!tail.empty()) {
+      std::vector<NoteEvent> v4_notes;
       normalizeMotifToZero(tail);
       uint8_t pivot = tail[0].pitch;
       auto inverted = invertMelodyDiatonic(tail, pivot, start_key, scale);
@@ -563,7 +665,7 @@ Episode generateEpisode(const Subject& subject, Tick start_tick, Tick duration_t
         NoteEvent placed = note;
         placed.start_tick += voice4_start;
         placed.voice = 4;
-        episode.notes.push_back(placed);
+        v4_notes.push_back(placed);
       }
       Tick inv_dur = motifDuration(inverted);
       if (inv_dur == 0) inv_dur = motif_dur;
@@ -572,6 +674,10 @@ Episode generateEpisode(const Subject& subject, Tick start_tick, Tick duration_t
                                               voice4_start + inv_dur, start_key, scale);
       for (auto& note : inv_seq) {
         note.voice = 4;
+        v4_notes.push_back(note);
+      }
+      fitToVoiceRegister(v4_notes, 4, num_voices);
+      for (auto& note : v4_notes) {
         episode.notes.push_back(note);
       }
     }
@@ -714,8 +820,7 @@ Episode generateEpisode(const Subject& subject, Tick start_tick, Tick duration_t
 
     // Determine desired pitch: snap non-chord tones on strong beats.
     uint8_t desired_pitch = note.pitch;
-    bool is_strong = (note.start_tick % kTicksPerBar == 0) ||
-                     (note.start_tick % (kTicksPerBar / 2) == 0);
+    bool is_strong = (note.start_tick % kTicksPerBeat == 0);
     if (is_strong && !isChordTone(note.pitch, harm_ev)) {
       desired_pitch = nearestChordTone(note.pitch, harm_ev);
     }

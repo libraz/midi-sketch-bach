@@ -28,7 +28,7 @@ BachCreateNoteResult createBachNote(
   if (state && rules && resolver) {
     PlacementResult placement = resolver->findSafePitch(
         *state, *rules, opts.voice, opts.desired_pitch, opts.tick, opts.duration,
-        opts.source);
+        opts.source, opts.next_pitch);
 
     if (placement.accepted) {
       result.accepted = true;
