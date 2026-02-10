@@ -238,4 +238,21 @@ Stretto generateStretto(const Subject& subject, Key home_key, Tick start_tick,
   return stretto;
 }
 
+std::vector<NoteEvent> createStrettoFragment(const Subject& subject,
+                                              float fragment_ratio) {
+  if (subject.notes.empty()) return {};
+
+  // Clamp ratio to [0.1, 1.0].
+  if (fragment_ratio < 0.1f) fragment_ratio = 0.1f;
+  if (fragment_ratio > 1.0f) fragment_ratio = 1.0f;
+
+  size_t fragment_count = static_cast<size_t>(
+      static_cast<float>(subject.notes.size()) * fragment_ratio);
+  if (fragment_count < 1) fragment_count = 1;
+  if (fragment_count > subject.notes.size()) fragment_count = subject.notes.size();
+
+  return std::vector<NoteEvent>(subject.notes.begin(),
+                                 subject.notes.begin() + fragment_count);
+}
+
 }  // namespace bach

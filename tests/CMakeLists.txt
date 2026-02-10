@@ -15,6 +15,7 @@ set(BACH_TEST_SOURCES
   core/note_source_test.cpp
   core/note_creator_test.cpp
   core/rng_util_test.cpp
+  core/phrase_structure_test.cpp
 
   # midi/
   midi/midi_writer_test.cpp
@@ -36,9 +37,11 @@ set(BACH_TEST_SOURCES
   counterpoint/fux_rule_evaluator_test.cpp
   counterpoint/bach_rule_evaluator_test.cpp
   counterpoint/species_rules_test.cpp
+  counterpoint/species_rules_nht_test.cpp
   counterpoint/motion_analyzer_test.cpp
   counterpoint/collision_resolver_test.cpp
   counterpoint/counterpoint_validator_test.cpp
+  counterpoint/melodic_context_test.cpp
 
   # counterpoint/ (cantus firmus)
   counterpoint/cantus_firmus_test.cpp
@@ -58,6 +61,9 @@ set(BACH_TEST_SOURCES
   fugue/fugue_generator_test.cpp
   fugue/fugue_duration_scale_test.cpp
   fugue/fugue_energy_curve_test.cpp
+  fugue/cadence_plan_test.cpp
+  fugue/episode_characteristic_motif_test.cpp
+  fugue/stretto_fragment_test.cpp
 
   # transform/
   transform/motif_transform_test.cpp
@@ -73,11 +79,14 @@ set(BACH_TEST_SOURCES
   analysis/fugue_analyzer_test.cpp
   analysis/dissonance_analyzer_test.cpp
   analysis/analysis_runner_test.cpp
+  analysis/implied_voice_analyzer_test.cpp
+  analysis/cross_relation_test.cpp
 
   # harmony/
   harmony/chord_types_test.cpp
   harmony/key_test.cpp
   harmony/harmonic_event_test.cpp
+  harmony/harmonic_function_test.cpp
   harmony/harmonic_timeline_test.cpp
 
   # forms/
@@ -94,6 +103,7 @@ set(BACH_TEST_SOURCES
   ornament/mordent_test.cpp
   ornament/turn_test.cpp
   ornament/ornament_engine_test.cpp
+  ornament/schleifer_test.cpp
 
   # solo_string/flow/
   solo_string/flow/arpeggio_flow_config_test.cpp

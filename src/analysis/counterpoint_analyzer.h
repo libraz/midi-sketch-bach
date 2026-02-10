@@ -19,6 +19,7 @@ struct CounterpointAnalysisResult {
   uint32_t augmented_leap_count = 0;        ///< Augmented interval leaps.
   float dissonance_resolution_rate = 1.0f;  ///< Resolved / total dissonances [0,1].
   float overall_compliance_rate = 1.0f;     ///< 1 - (violations / total_beats) [0,1].
+  uint32_t cross_relation_count = 0;        ///< Cross-relations between voices.
 };
 
 /// @brief Analyze counterpoint quality of a set of notes.
@@ -60,6 +61,19 @@ float dissonanceResolutionRate(const std::vector<NoteEvent>& notes, uint8_t num_
 /// @param num_voices Number of voices.
 /// @return Number of consecutive-note pairs with a tritone (6 semitones) leap.
 uint32_t countAugmentedLeaps(const std::vector<NoteEvent>& notes, uint8_t num_voices);
+
+/// @brief Count cross-relations between voices.
+///
+/// A cross-relation occurs when two voices use conflicting chromatic
+/// alterations of the same pitch class within close temporal proximity
+/// (e.g., B-natural in soprano vs B-flat in alto within one beat).
+///
+/// @param notes All notes across all voices.
+/// @param num_voices Number of voices.
+/// @param proximity_threshold Maximum tick distance for cross-relation (default: 1 beat).
+/// @return Number of cross-relation violations.
+uint32_t countCrossRelations(const std::vector<NoteEvent>& notes, uint8_t num_voices,
+                              Tick proximity_threshold = kTicksPerBeat);
 
 /// @brief Build a FailReport from counterpoint analysis.
 /// @param notes All notes across all voices.

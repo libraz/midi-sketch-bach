@@ -358,7 +358,12 @@ std::vector<int> getChordDegrees(ChordQuality quality) {
     case ChordQuality::Dominant7:
     case ChordQuality::Minor7:
     case ChordQuality::MajorMajor7:
+    case ChordQuality::Diminished7:
+    case ChordQuality::HalfDiminished7:
       return {0, 2, 4, 6};  // Seventh: root, 3rd, 5th, 7th
+
+    case ChordQuality::AugmentedSixth:
+      return {0, 2, 4};  // Triad approximation for augmented sixth
   }
   return {0, 2, 4};
 }

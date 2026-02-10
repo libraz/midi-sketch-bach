@@ -550,6 +550,12 @@
           this.keys = bach.getKeys();
           this.scales = bach.getScales();
 
+          // Re-apply config defaults after options are populated
+          // (Petite Vue v-model doesn't sync selects when options arrive after mount)
+          const defaults = { ...this.config };
+          Object.assign(this.config, { keyId: -1, formId: -1, characterId: -1, scaleId: -1 });
+          Object.assign(this.config, defaults);
+
           // Set default instrument for default form
           this.onFormChange();
 

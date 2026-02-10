@@ -171,6 +171,36 @@ NonHarmonicToneType classifyNonHarmonicTone(uint8_t prev_pitch, uint8_t current_
     }
   }
 
+  if (has_prev && has_next) {
+    int step_from_prev =
+        std::abs(static_cast<int>(current_pitch) - static_cast<int>(prev_pitch));
+    int step_to_next =
+        std::abs(static_cast<int>(next_pitch) - static_cast<int>(current_pitch));
+    int dir_in = static_cast<int>(current_pitch) - static_cast<int>(prev_pitch);
+    int dir_out = static_cast<int>(next_pitch) - static_cast<int>(current_pitch);
+
+    // Escape tone: stepwise entry, leap exit in opposite direction.
+    if (step_from_prev <= 2 && step_to_next >= 3 && prev_is_chord_tone) {
+      if ((dir_in > 0 && dir_out < 0) || (dir_in < 0 && dir_out > 0)) {
+        return NonHarmonicToneType::EscapeTone;
+      }
+    }
+
+    // Anticipation: next chord tone sounded early, entered by step.
+    if (step_from_prev <= 2 && next_is_chord_tone &&
+        current_pitch == next_pitch) {
+      return NonHarmonicToneType::Anticipation;
+    }
+
+    // Changing tone (double neighbor): step in one direction, leap to other side.
+    if (step_from_prev <= 2 && step_to_next <= 2 && prev_is_chord_tone &&
+        next_is_chord_tone && prev_pitch != next_pitch) {
+      if ((dir_in > 0 && dir_out < 0) || (dir_in < 0 && dir_out > 0)) {
+        return NonHarmonicToneType::ChangingTone;
+      }
+    }
+  }
+
   return NonHarmonicToneType::Unknown;
 }
 

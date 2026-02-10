@@ -93,6 +93,18 @@ Stretto generateStretto(const Subject& subject, Key home_key, Tick start_tick,
                         uint8_t num_voices, uint32_t seed,
                         SubjectCharacter character = SubjectCharacter::Severe);
 
+/// @brief Create a stretto fragment from the subject head.
+///
+/// Extracts a portion of the subject for use in a fragmentary stretto
+/// entry, where only the opening motif is presented before the next
+/// voice enters. This intensifies the stretto effect.
+///
+/// @param subject The complete fugue subject.
+/// @param fragment_ratio Fraction of the subject to use (0.0-1.0, default 0.5).
+/// @return Vector of notes representing the subject fragment.
+std::vector<NoteEvent> createStrettoFragment(const Subject& subject,
+                                              float fragment_ratio = 0.5f);
+
 }  // namespace bach
 
 #endif  // BACH_FUGUE_STRETTO_H

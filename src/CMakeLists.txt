@@ -48,6 +48,7 @@ set(BACH_LIB_SOURCES
 
   # counterpoint/ (cantus firmus)
   counterpoint/cantus_firmus.cpp
+  counterpoint/melodic_context.cpp
 
   # fugue/
   fugue/fugue_config.cpp
@@ -61,6 +62,7 @@ set(BACH_LIB_SOURCES
   fugue/exposition.cpp
   fugue/middle_entry.cpp
   fugue/stretto.cpp
+  fugue/cadence_plan.cpp
   fugue/fugue_generator.cpp
 
   # transform/
@@ -78,16 +80,21 @@ set(BACH_LIB_SOURCES
   analysis/fugue_analyzer.cpp
   analysis/dissonance_analyzer.cpp
   analysis/analysis_runner.cpp
+  analysis/implied_voice_analyzer.cpp
 
   # harmony/
   harmony/chord_types.cpp
   harmony/key.cpp
   harmony/harmonic_timeline.cpp
+  harmony/harmonic_function.cpp
 
   # forms/
   forms/prelude.cpp
   forms/trio_sonata.cpp
   forms/chorale_prelude.cpp
+
+  # core/ (phrase)
+  core/phrase_structure.cpp
 
   # generator (unified entry point)
   generator.cpp
@@ -100,6 +107,7 @@ set(BACH_LIB_SOURCES
   ornament/appoggiatura.cpp
   ornament/pralltriller.cpp
   ornament/ornament_engine.cpp
+  ornament/schleifer.cpp
 
   # solo_string/flow/
   solo_string/flow/arpeggio_flow_config.cpp

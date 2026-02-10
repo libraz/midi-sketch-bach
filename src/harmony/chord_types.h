@@ -15,7 +15,10 @@ enum class ChordQuality : uint8_t {
   Augmented,
   Dominant7,
   Minor7,
-  MajorMajor7
+  MajorMajor7,
+  Diminished7,       // Fully diminished seventh (dim3 + dim3 + dim3)
+  HalfDiminished7,   // Half-diminished seventh (min3 + dim3 + maj3)
+  AugmentedSixth     // Italian/French/German augmented sixth
 };
 
 /// Roman numeral chord degree (functional harmony).
@@ -26,7 +29,12 @@ enum class ChordDegree : uint8_t {
   IV,
   V,
   vi,
-  viiDim
+  viiDim,
+  bII,       // Neapolitan (lowered II)
+  V_of_V,    // Secondary dominant: V/V
+  V_of_vi,   // Secondary dominant: V/vi
+  V_of_IV,   // Secondary dominant: V/IV
+  V_of_ii    // Secondary dominant: V/ii
 };
 
 /// A chord with degree, quality, root pitch, and inversion.

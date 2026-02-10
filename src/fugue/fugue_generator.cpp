@@ -10,6 +10,7 @@
 #include "core/note_source.h"
 #include "core/pitch_utils.h"
 #include "fugue/answer.h"
+#include "fugue/cadence_plan.h"
 #include "fugue/countersubject.h"
 #include "fugue/episode.h"
 #include "fugue/exposition.h"
@@ -396,6 +397,30 @@ FugueResult generateFugue(const FugueConfig& config) {
                          current_tick, middle_end, target_key);
     all_notes.insert(all_notes.end(), middle_entry.notes.begin(),
                      middle_entry.notes.end());
+
+    // Companion counterpoint: non-entry voices get episode material during
+    // the middle entry. In Bach's fugues, a subject re-entry in one voice is
+    // always accompanied by active counterpoint in the remaining voices.
+    {
+      Tick me_duration = middle_end - current_tick;
+      if (me_duration > 0 && num_voices >= 2) {
+        float me_energy = FugueEnergyCurve::getLevel(current_tick, estimated_duration);
+        Episode companion = generateEpisode(
+            subject, current_tick, me_duration,
+            target_key, target_key, num_voices,
+            pair_seed_base + 500u, pair_idx, me_energy);
+        // Remove notes for the entry voice to avoid doubling the subject.
+        companion.notes.erase(
+            std::remove_if(companion.notes.begin(), companion.notes.end(),
+                           [entry_voice](const NoteEvent& evt) {
+                             return evt.voice == entry_voice;
+                           }),
+            companion.notes.end());
+        all_notes.insert(all_notes.end(), companion.notes.begin(),
+                         companion.notes.end());
+      }
+    }
+
     current_tick = middle_end;
     prev_key = target_key;
   }
@@ -416,6 +441,9 @@ FugueResult generateFugue(const FugueConfig& config) {
   }
 
   // --- Dominant pedal: 4 bars before stretto (Develop -> Resolve transition) ---
+  // In Bach's fugues, the dominant pedal is a climactic point where the bass
+  // sustains the dominant while upper voices remain highly active with
+  // sequential episode material building toward the final stretto.
   VoiceId lowest_voice = num_voices - 1;
   {
     Tick pedal_duration = kTicksPerBar * kDominantPedalBars;
@@ -432,6 +460,19 @@ FugueResult generateFugue(const FugueConfig& config) {
     auto dominant_pedal = generatePedalPoint(dominant_pitch, current_tick,
                                              pedal_duration, lowest_voice);
     all_notes.insert(all_notes.end(), dominant_pedal.begin(), dominant_pedal.end());
+
+    // Generate upper voice counterpoint over the pedal. Use episode material
+    // with high energy (pre-stretto climax) for voices 0..num_voices-2.
+    uint8_t upper_voices = num_voices > 1 ? num_voices - 1 : 1;
+    float pedal_energy = FugueEnergyCurve::getLevel(current_tick, estimated_duration);
+    Episode pedal_episode = generateEpisode(
+        subject, current_tick, pedal_duration,
+        config.key, config.key, upper_voices,
+        config.seed + static_cast<uint32_t>(develop_pairs + 1) * 2000u + 7000u,
+        develop_pairs + 1, pedal_energy);
+    all_notes.insert(all_notes.end(), pedal_episode.notes.begin(),
+                     pedal_episode.notes.end());
+
     current_tick += pedal_duration;
   }
 
@@ -481,6 +522,14 @@ FugueResult generateFugue(const FugueConfig& config) {
   // Build timeline from the tonal plan (bar-resolution I-chord approximation).
   Tick total_ticks = current_tick + kTicksPerBar * kCodaBars;
   result.timeline = tonal_plan.toHarmonicTimeline(total_ticks);
+
+  // Apply cadence plan to the timeline (activates existing CadenceType/applyCadence).
+  KeySignature home_key_sig;
+  home_key_sig.tonic = config.key;
+  home_key_sig.is_minor = false;
+  CadencePlan cadence_plan = CadencePlan::createForFugue(
+      structure, home_key_sig, /*is_minor=*/false);
+  cadence_plan.applyTo(result.timeline);
 
   // --- Apply energy-based dynamic registration ---
   // Sample the energy curve at section boundaries for CC#7 volume automation.

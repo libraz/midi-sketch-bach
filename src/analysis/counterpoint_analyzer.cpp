@@ -404,4 +404,56 @@ float leapResolutionRate(const std::vector<NoteEvent>& notes, uint8_t num_voices
                           : static_cast<float>(resolved_leaps) / static_cast<float>(total_leaps);
 }
 
+// ---------------------------------------------------------------------------
+// Cross-relation detection
+// ---------------------------------------------------------------------------
+
+uint32_t countCrossRelations(const std::vector<NoteEvent>& notes, uint8_t num_voices,
+                              Tick proximity_threshold) {
+  if (num_voices < 2) return 0;
+
+  uint32_t count = 0;
+
+  // For each pair of voices, check for chromatic conflicts within proximity.
+  for (uint8_t va = 0; va < num_voices; ++va) {
+    auto va_notes = voiceNotes(notes, va);
+    for (uint8_t vb = va + 1; vb < num_voices; ++vb) {
+      auto vb_notes = voiceNotes(notes, vb);
+
+      for (const auto& na : va_notes) {
+        int na_pc = static_cast<int>(na.pitch) % 12;
+
+        for (const auto& nb : vb_notes) {
+          // Check temporal proximity.
+          Tick tick_dist = (na.start_tick > nb.start_tick)
+                               ? na.start_tick - nb.start_tick
+                               : nb.start_tick - na.start_tick;
+          if (tick_dist > proximity_threshold) continue;
+
+          int nb_pc = static_cast<int>(nb.pitch) % 12;
+
+          // Cross-relation: same letter name but different accidental.
+          // Detect by checking if the two pitch classes differ by exactly 1
+          // semitone (e.g., B-natural=11 vs B-flat=10, or F#=6 vs F=5).
+          int pc_diff = std::abs(na_pc - nb_pc);
+          if (pc_diff == 1 || pc_diff == 11) {
+            // Additional check: only count if they share the same diatonic
+            // base. Heuristic: both pitch classes map to adjacent slots in
+            // the chromatic scale that correspond to the same letter.
+            // Pairs: (0,1) C/C#, (2,3) D/Eb, (4,5) E/F excluded (different letter),
+            //        (5,6) F/F#, (7,8) G/Ab, (9,10) A/Bb, (10,11) Bb/B
+            int lower_pc = (na_pc < nb_pc) ? na_pc : nb_pc;
+            // Exclude E/F (4,5) and B/C (11,0) which are natural half steps.
+            if (lower_pc != 4 && !(lower_pc == 11 && pc_diff == 11)) {
+              ++count;
+            }
+          }
+        }
+      }
+    }
+  }
+
+  return count;
+}
+
 }  // namespace bach

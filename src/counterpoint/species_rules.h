@@ -22,7 +22,11 @@ enum class NonHarmonicToneType : uint8_t {
   PassingTone,   ///< Stepwise motion connecting two different chord tones.
   NeighborTone,  ///< Step away from and back to a chord tone.
   Suspension,    ///< Held from previous beat, dissonant on current, resolves down by step.
-  Unknown        ///< Unclassified dissonance.
+  Unknown,       ///< Unclassified dissonance.
+  EscapeTone,    ///< Stepwise entry, leap exit in opposite direction.
+  Anticipation,  ///< Next chord tone sounded early, entered by step.
+  ChangingTone,  ///< Double neighbor: upper->lower->main or lower->upper->main.
+  PedalTone      ///< Sustained bass note held through changing harmonies.
 };
 
 /// @brief Convert SpeciesType to a human-readable string.

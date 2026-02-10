@@ -79,6 +79,24 @@ Episode generateEpisode(const Subject& subject, Tick start_tick, Tick duration_t
 /// @return Vector of notes forming the motif, empty if subject is empty.
 std::vector<NoteEvent> extractMotif(const Subject& subject, size_t max_notes = 4);
 
+/// @brief Extract the most characteristic motif from the subject.
+///
+/// Instead of always taking the first N notes, scores each 4-note window
+/// of the subject by rhythmic diversity, intervallic interest, and
+/// proximity to the subject opening. Returns the highest-scoring window.
+///
+/// Scoring criteria:
+///   +0.3  Rhythmic diversity (distinct durations / window_size)
+///   +0.3  Intervallic interest (contains a leap >= 3 semitones)
+///   +0.2  Proximity to subject opening (front-weighted)
+///   +0.2  Tonal stability (contains root or fifth pitch class)
+///
+/// @param subject Source subject.
+/// @param motif_length Number of notes in the extracted motif (default: 4).
+/// @return Vector of notes forming the characteristic motif.
+std::vector<NoteEvent> extractCharacteristicMotif(const Subject& subject,
+                                                   size_t motif_length = 4);
+
 /// @brief Extract the tail portion of a melody (last N notes).
 /// @param notes Source melody notes.
 /// @param num_notes Number of notes from the tail to extract.

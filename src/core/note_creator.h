@@ -23,6 +23,9 @@ struct BachNoteOptions {
   uint8_t velocity = 80;       // MIDI velocity (organ default: 80)
   BachNoteSource source = BachNoteSource::Unknown;  // Provenance source
   uint8_t entry_number = 0;    // Fugue entry number (0 = not applicable)
+  uint8_t prev_pitches[3] = {0, 0, 0};  // Melodic context: last 3 pitches (0=unknown)
+  uint8_t prev_count = 0;               // Number of valid previous pitches
+  int8_t prev_direction = 0;            // Previous motion direction (-1/0/1)
 };
 
 /// Result of note creation via createBachNote().

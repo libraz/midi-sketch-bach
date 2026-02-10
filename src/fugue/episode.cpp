@@ -416,6 +416,46 @@ Episode generateEpisode(const Subject& subject, Tick start_tick, Tick duration_t
     }
   }
 
+  // --- Voice 3: Augmented tail motif as slow bass foundation (4+ voices) ---
+  if (num_voices >= 4) {
+    auto tail = extractTailMotif(subject.notes, 3);
+    if (!tail.empty()) {
+      normalizeMotifToZero(tail);
+      auto augmented = augmentMelody(tail, start_tick);
+      augmented = transposeMelody(augmented, -12);
+      for (auto& note : augmented) {
+        note.voice = 3;
+        episode.notes.push_back(note);
+      }
+    }
+  }
+
+  // --- Voice 4: Inverted tail motif with sequence (5 voices) ---
+  if (num_voices >= 5) {
+    auto tail = extractTailMotif(subject.notes, 3);
+    if (!tail.empty()) {
+      normalizeMotifToZero(tail);
+      uint8_t pivot = tail[0].pitch;
+      auto inverted = invertMelody(tail, pivot);
+      Tick voice4_start = start_tick + imitation_offset;
+      for (const auto& note : inverted) {
+        NoteEvent placed = note;
+        placed.start_tick += voice4_start;
+        placed.voice = 4;
+        episode.notes.push_back(placed);
+      }
+      Tick inv_dur = motifDuration(inverted);
+      if (inv_dur == 0) inv_dur = motif_dur;
+      int inv_reps = std::max(1, seq_reps - 1);
+      auto inv_seq = generateSequence(inverted, inv_reps, seq_interval,
+                                       voice4_start + inv_dur);
+      for (auto& note : inv_seq) {
+        note.voice = 4;
+        episode.notes.push_back(note);
+      }
+    }
+  }
+
   // --- Apply gradual key modulation ---
   // Transpose the second half of all notes toward the target key.
   if (key_diff != 0) {
@@ -444,6 +484,71 @@ Episode generateEpisode(const Subject& subject, Tick start_tick, Tick duration_t
   }
 
   return episode;
+}
+
+std::vector<NoteEvent> extractCharacteristicMotif(const Subject& subject,
+                                                   size_t motif_length) {
+  if (subject.notes.size() <= motif_length) {
+    return subject.notes;
+  }
+
+  float best_score = -1.0f;
+  size_t best_start = 0;
+
+  size_t window_count = subject.notes.size() - motif_length + 1;
+  for (size_t start = 0; start < window_count; ++start) {
+    float score = 0.0f;
+
+    // Rhythmic diversity: count distinct durations in window.
+    std::vector<Tick> durations;
+    for (size_t idx = start; idx < start + motif_length; ++idx) {
+      bool found = false;
+      for (Tick dur : durations) {
+        if (dur == subject.notes[idx].duration) {
+          found = true;
+          break;
+        }
+      }
+      if (!found) durations.push_back(subject.notes[idx].duration);
+    }
+    score += 0.3f * static_cast<float>(durations.size()) /
+             static_cast<float>(motif_length);
+
+    // Intervallic interest: contains a leap (>= 3 semitones).
+    bool has_leap = false;
+    for (size_t idx = start + 1; idx < start + motif_length; ++idx) {
+      int ivl = std::abs(static_cast<int>(subject.notes[idx].pitch) -
+                          static_cast<int>(subject.notes[idx - 1].pitch));
+      if (ivl >= 3) {
+        has_leap = true;
+        break;
+      }
+    }
+    if (has_leap) score += 0.3f;
+
+    // Proximity to opening.
+    float proximity = 1.0f - static_cast<float>(start) / static_cast<float>(window_count);
+    score += 0.2f * proximity;
+
+    // Tonal stability: contains root (pitch class 0 in subject context).
+    uint8_t root_pc = subject.notes[0].pitch % 12;
+    bool has_root = false;
+    for (size_t idx = start; idx < start + motif_length; ++idx) {
+      if (subject.notes[idx].pitch % 12 == root_pc) {
+        has_root = true;
+        break;
+      }
+    }
+    if (has_root) score += 0.2f;
+
+    if (score > best_score) {
+      best_score = score;
+      best_start = start;
+    }
+  }
+
+  return std::vector<NoteEvent>(subject.notes.begin() + best_start,
+                                 subject.notes.begin() + best_start + motif_length);
 }
 
 }  // namespace bach
