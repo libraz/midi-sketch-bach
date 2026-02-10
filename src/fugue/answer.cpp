@@ -36,6 +36,7 @@ Answer generateRealAnswer(const Subject& subject, Key dominant_key) {
     if (new_pitch < 0) new_pitch = 0;
 
     transposed.pitch = static_cast<uint8_t>(new_pitch);
+    transposed.source = BachNoteSource::FugueAnswer;
     answer.notes.push_back(transposed);
   }
 
@@ -90,6 +91,7 @@ NoteEvent applyTonalAdjustment(const NoteEvent& note,
                                int tonic_class, int dominant_class,
                                bool in_mutation_zone) {
   NoteEvent result = note;
+  result.source = BachNoteSource::FugueAnswer;
 
   if (in_mutation_zone) {
     int pitch_class = getPitchClass(note.pitch);

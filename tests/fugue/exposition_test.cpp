@@ -327,11 +327,13 @@ TEST(ExpositionTest, BuildExposition_SubjectNotesMatchOriginal) {
   ASSERT_GT(expo.voice_notes.count(0), 0u);
   const auto& voice0_notes = expo.voice_notes.at(0);
 
-  // First notes of voice 0 should match the subject pitches.
+  // Subject notes are shifted by whole octaves to fit the voice register.
+  // Voice 0 (soprano, range 60-96, center 78): notes at mean ~61 shift up by 12.
   ASSERT_GE(voice0_notes.size(), subject.notes.size());
   for (size_t idx = 0; idx < subject.notes.size(); ++idx) {
-    EXPECT_EQ(voice0_notes[idx].pitch, subject.notes[idx].pitch)
-        << "Subject note " << idx << " pitch mismatch";
+    int expected_pitch = static_cast<int>(subject.notes[idx].pitch) + 12;
+    EXPECT_EQ(voice0_notes[idx].pitch, static_cast<uint8_t>(expected_pitch))
+        << "Subject note " << idx << " pitch mismatch (expected +12 octave shift)";
     EXPECT_EQ(voice0_notes[idx].start_tick, subject.notes[idx].start_tick)
         << "Subject note " << idx << " timing mismatch";
     EXPECT_EQ(voice0_notes[idx].duration, subject.notes[idx].duration)

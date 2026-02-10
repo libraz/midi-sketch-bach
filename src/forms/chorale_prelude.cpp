@@ -188,6 +188,7 @@ void placeCantus(const ChoraleMelody& melody, Track& track) {
     note.pitch = pitch;
     note.velocity = kOrganVelocity;
     note.voice = 1;
+    note.source = BachNoteSource::CantusFixed;
     track.notes.push_back(note);
 
     current_tick += dur;
@@ -272,6 +273,7 @@ std::vector<NoteEvent> generateFiguration(Tick cantus_tick, Tick cantus_dur,
     note.pitch = scale_tones[tone_idx];
     note.velocity = kOrganVelocity;
     note.voice = 0;
+    note.source = BachNoteSource::FreeCounterpoint;
     notes.push_back(note);
 
     current_tick += dur;
@@ -362,6 +364,7 @@ std::vector<NoteEvent> generatePedalBass(Tick cantus_tick, Tick cantus_dur,
     note.pitch = chosen_pitch;
     note.velocity = kOrganVelocity;
     note.voice = 2;
+    note.source = BachNoteSource::PedalPoint;
     notes.push_back(note);
 
     current_tick += dur;

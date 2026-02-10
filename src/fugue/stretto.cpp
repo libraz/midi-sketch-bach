@@ -8,10 +8,12 @@
 #include <random>
 
 #include "core/note_creator.h"
+#include "core/pitch_utils.h"
 #include "core/rng_util.h"
 #include "counterpoint/collision_resolver.h"
 #include "counterpoint/counterpoint_state.h"
 #include "counterpoint/i_rule_evaluator.h"
+#include "fugue/voice_registers.h"
 #include "harmony/chord_tone_utils.h"
 #include "harmony/chord_types.h"
 #include "harmony/harmonic_timeline.h"
@@ -217,11 +219,26 @@ Stretto generateStretto(const Subject& subject, Key home_key, Tick start_tick,
     }
     const auto& source_notes = *source_ptr;
 
+    // Compute octave shift to fit the voice's register.
+    auto [lo, hi] = getFugueVoiceRange(idx, num_voices);
+    int src_total = 0;
+    for (const auto& n : source_notes) {
+      src_total += static_cast<int>(n.pitch);
+    }
+    int src_mean = source_notes.empty() ? 60
+        : src_total / static_cast<int>(source_notes.size());
+    int vc = (static_cast<int>(lo) + static_cast<int>(hi)) / 2;
+    int vdiff = vc - src_mean;
+    int oct_shift = (vdiff >= 0) ? ((vdiff + 6) / 12) * 12
+                                 : -(((-vdiff + 5) / 12) * 12);
+
     entry.notes.reserve(source_notes.size());
     for (const auto& note : source_notes) {
       NoteEvent placed = note;
       placed.start_tick = note.start_tick + entry.entry_tick;
       placed.voice = entry.voice_id;
+      int shifted_p = static_cast<int>(note.pitch) + oct_shift;
+      placed.pitch = clampPitch(shifted_p, lo, hi);
       entry.notes.push_back(placed);
     }
 

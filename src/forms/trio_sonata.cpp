@@ -171,6 +171,7 @@ std::vector<NoteEvent> generateRightHand(const HarmonicEvent& event, bool is_slo
     note.pitch = scale_tones[tone_idx];
     note.velocity = kOrganVelocity;
     note.voice = 0;
+    note.source = BachNoteSource::FreeCounterpoint;
     notes.push_back(note);
 
     current_tick += dur;
@@ -270,6 +271,7 @@ std::vector<NoteEvent> generateLeftHand(const HarmonicEvent& event, bool is_slow
     note.pitch = scale_tones[tone_idx];
     note.velocity = kOrganVelocity;
     note.voice = 1;
+    note.source = BachNoteSource::FreeCounterpoint;
     notes.push_back(note);
 
     current_tick += dur;
@@ -357,6 +359,7 @@ std::vector<NoteEvent> generatePedalLine(const HarmonicEvent& event, bool is_slo
     note.pitch = use_root ? bass : fifth;
     note.velocity = kOrganVelocity;
     note.voice = 2;
+    note.source = BachNoteSource::PedalPoint;
     notes.push_back(note);
 
     current_tick += dur;

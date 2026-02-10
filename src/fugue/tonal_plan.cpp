@@ -316,4 +316,54 @@ TonalPlan generateTonalPlan(const FugueConfig& config, bool is_minor,
   return plan;
 }
 
+TonalPlan generateStructureAlignedTonalPlan(const FugueConfig& config,
+                                            const ModulationPlan& mod_plan,
+                                            Tick subject_length_ticks,
+                                            Tick estimated_duration) {
+  TonalPlan plan;
+  plan.home_key = config.key;
+  plan.is_minor = config.is_minor;
+
+  // Structural section boundaries.
+  Tick expo_end = static_cast<Tick>(config.num_voices) * subject_length_ticks;
+  Tick episode_duration = kTicksPerBar * static_cast<Tick>(config.episode_bars);
+  Tick develop_pair_size = episode_duration + subject_length_ticks;
+  int develop_pairs = config.develop_pairs;
+
+  // 1. Establish phase: home key at tick 0.
+  plan.modulations.push_back({config.key, 0, FuguePhase::Establish});
+
+  // 2. Develop phase: place key changes at each episode's midpoint.
+  for (int pair_idx = 0; pair_idx < develop_pairs; ++pair_idx) {
+    Tick episode_start = expo_end + static_cast<Tick>(pair_idx) * develop_pair_size;
+    Tick midpoint = episode_start + episode_duration / 2;
+    // Snap to bar boundary.
+    midpoint = (midpoint / kTicksPerBar) * kTicksPerBar;
+    if (midpoint < kTicksPerBar) midpoint = kTicksPerBar;
+
+    Key target_key = mod_plan.getTargetKey(pair_idx, config.key);
+    plan.modulations.push_back({target_key, midpoint, FuguePhase::Develop});
+  }
+
+  // 3. Return episode: transition back to home key.
+  Tick return_start = expo_end + static_cast<Tick>(develop_pairs) * develop_pair_size;
+  Tick return_midpoint = return_start + episode_duration / 2;
+  return_midpoint = (return_midpoint / kTicksPerBar) * kTicksPerBar;
+  if (return_midpoint <= plan.modulations.back().tick) {
+    return_midpoint = plan.modulations.back().tick + kTicksPerBar;
+  }
+
+  // 4. Resolve phase: home key from the return episode onward.
+  plan.modulations.push_back({config.key, return_midpoint, FuguePhase::Resolve});
+
+  // Ensure all ticks are within estimated_duration.
+  for (auto& mod : plan.modulations) {
+    if (mod.tick >= estimated_duration && estimated_duration > kTicksPerBar) {
+      mod.tick = estimated_duration - kTicksPerBar;
+    }
+  }
+
+  return plan;
+}
+
 }  // namespace bach

@@ -67,8 +67,9 @@ TEST(MiddleEntryTest, GenerateMiddleEntry_CorrectVoice) {
 
 TEST(MiddleEntryTest, GenerateMiddleEntry_Transposed) {
   // Subject in C: C4 D4 E4 F4. Middle entry in G (7 semitones up).
+  // Use voice 1 (alto, center 67) so register shift is 0 for these pitches.
   Subject subject = makeSubjectQuarters({60, 62, 64, 65});
-  MiddleEntry entry = generateMiddleEntry(subject, Key::G, 0, 0);
+  MiddleEntry entry = generateMiddleEntry(subject, Key::G, 0, 1);
 
   ASSERT_EQ(entry.notes.size(), 4u);
   // Each note transposed up by 7 semitones (G - C = 7).
@@ -106,8 +107,9 @@ TEST(MiddleEntryTest, GenerateMiddleEntry_EmptySubject) {
 
 TEST(MiddleEntryTest, GenerateMiddleEntry_SameKey) {
   // When target == subject key, pitches should be unchanged.
+  // Use voice 1 (alto, center 67) so register shift is 0 for these pitches.
   Subject subject = makeSubjectQuarters({60, 62, 64, 65});
-  MiddleEntry entry = generateMiddleEntry(subject, Key::C, 0, 0);
+  MiddleEntry entry = generateMiddleEntry(subject, Key::C, 0, 1);
 
   ASSERT_EQ(entry.notes.size(), subject.notes.size());
   for (size_t idx = 0; idx < entry.notes.size(); ++idx) {
@@ -147,10 +149,11 @@ TEST(MiddleEntryTest, GenerateMiddleEntry_DurationsPreserved) {
 
 TEST(MiddleEntryTest, GenerateMiddleEntry_TransposeDown) {
   // Subject in G (key=7): G4 A4 B4. Middle entry in C (key=0) => -7 semitones.
+  // Use voice 1 (alto, center 67) so register shift is 0 for these pitches.
   Subject subject = makeSubjectQuarters({67, 69, 71});
   subject.key = Key::G;
 
-  MiddleEntry entry = generateMiddleEntry(subject, Key::C, 0, 0);
+  MiddleEntry entry = generateMiddleEntry(subject, Key::C, 0, 1);
   ASSERT_EQ(entry.notes.size(), 3u);
   EXPECT_EQ(entry.notes[0].pitch, 60);  // G4-7 = C4
   EXPECT_EQ(entry.notes[1].pitch, 62);  // A4-7 = D4
@@ -159,8 +162,9 @@ TEST(MiddleEntryTest, GenerateMiddleEntry_TransposeDown) {
 
 TEST(MiddleEntryTest, GenerateMiddleEntry_SubdominantKey) {
   // Subject in C: C4 E4 G4. Middle entry in F (key=5) => +5 semitones.
+  // Use voice 1 (alto, center 67) so register shift is 0 for these pitches.
   Subject subject = makeSubjectQuarters({60, 64, 67});
-  MiddleEntry entry = generateMiddleEntry(subject, Key::F, 0, 0);
+  MiddleEntry entry = generateMiddleEntry(subject, Key::F, 0, 1);
 
   ASSERT_EQ(entry.notes.size(), 3u);
   EXPECT_EQ(entry.notes[0].pitch, 65);  // C4+5 = F4
@@ -214,8 +218,9 @@ TEST(FalseEntryTest, FalseEntrySourceIsFalseEntry) {
 
 TEST(FalseEntryTest, FalseEntryTransposedToKey) {
   // Subject in C: C4 D4 E4 F4 G4. False entry in G (+7 semitones).
+  // Use voice 1 (alto, center 67) so register shift is 0 for these pitches.
   Subject subject = makeSubjectQuarters({60, 62, 64, 65, 67});
-  MiddleEntry entry = generateFalseEntry(subject, Key::G, 0, 0, 3);
+  MiddleEntry entry = generateFalseEntry(subject, Key::G, 0, 1, 3, 3);
 
   ASSERT_GE(entry.notes.size(), 3u);
   EXPECT_EQ(entry.key, Key::G);
@@ -229,8 +234,9 @@ TEST(FalseEntryTest, FalseEntryTransposedToKey) {
 TEST(FalseEntryTest, FalseEntryDefaultQuoteThreeNotes) {
   // Default quote_notes=3, with a 5-note subject -> 3 quoted + 2 divergent.
   // (subject <= 3 notes gives 2 divergent, but 5 notes > 3 gives 3 divergent).
+  // Use voice 1 (alto, center 67) so register shift is 0 for these pitches.
   Subject subject = makeSubjectQuarters({60, 62, 64, 65, 67});
-  MiddleEntry entry = generateFalseEntry(subject, Key::C, 0, 0);
+  MiddleEntry entry = generateFalseEntry(subject, Key::C, 0, 1);
 
   // With 5-note subject (>3), default is 3 quoted + 3 divergent = 6.
   EXPECT_EQ(entry.notes.size(), 6u);
@@ -275,8 +281,9 @@ TEST(FalseEntryTest, FalseEntryEmptySubject) {
 }
 
 TEST(FalseEntryTest, FalseEntryQuoteTwoNotes) {
+  // Use voice 1 (alto, center 67) so register shift is 0 for these pitches.
   Subject subject = makeSubjectQuarters({60, 62, 64, 65, 67});
-  MiddleEntry entry = generateFalseEntry(subject, Key::C, 0, 0, 2);
+  MiddleEntry entry = generateFalseEntry(subject, Key::C, 0, 1, 3, 2);
 
   // 2 quoted + 3 divergent (subject has 5 notes, > 3) = 5 total.
   EXPECT_EQ(entry.notes.size(), 5u);
@@ -287,8 +294,9 @@ TEST(FalseEntryTest, FalseEntryQuoteTwoNotes) {
 }
 
 TEST(FalseEntryTest, FalseEntryQuoteFourNotes) {
+  // Use voice 1 (alto, center 67) so register shift is 0 for these pitches.
   Subject subject = makeSubjectQuarters({60, 62, 64, 65, 67, 69});
-  MiddleEntry entry = generateFalseEntry(subject, Key::C, 0, 0, 4);
+  MiddleEntry entry = generateFalseEntry(subject, Key::C, 0, 1, 3, 4);
 
   // 4 quoted + 3 divergent = 7 total.
   EXPECT_EQ(entry.notes.size(), 7u);
@@ -302,8 +310,9 @@ TEST(FalseEntryTest, FalseEntryQuoteFourNotes) {
 
 TEST(FalseEntryTest, FalseEntryClampQuoteToSubjectSize) {
   // Subject with 3 notes, requesting quote_notes=4 -> clamped to 3.
+  // Use voice 1 (alto, center 67) so register shift is 0 for these pitches.
   Subject subject = makeSubjectQuarters({60, 62, 64});
-  MiddleEntry entry = generateFalseEntry(subject, Key::C, 0, 0, 4);
+  MiddleEntry entry = generateFalseEntry(subject, Key::C, 0, 1, 3, 4);
 
   // 3 quoted (clamped from 4) + 2 divergent (subject.size() <= 3) = 5.
   EXPECT_EQ(entry.notes.size(), 5u);
@@ -318,7 +327,7 @@ TEST(FalseEntryTest, FalseEntryDescendingSubjectDivergesUp) {
   // Descending subject: G4 F4 E4 D4 C4. Last quoted interval is negative.
   // Divergent notes should go UP (opposite direction).
   Subject subject = makeSubjectQuarters({67, 65, 64, 62, 60});
-  MiddleEntry entry = generateFalseEntry(subject, Key::C, 0, 0, 3);
+  MiddleEntry entry = generateFalseEntry(subject, Key::C, 0, 0, 3, 3);
 
   ASSERT_GE(entry.notes.size(), 4u);
 
@@ -352,7 +361,7 @@ TEST(MiddleEntryTest, ValidatedOverload_RegistersInState) {
       {Key::C, false}, kTicksPerBar * 12, HarmonicResolution::Bar);
 
   VoiceId voice = 1;
-  MiddleEntry entry = generateMiddleEntry(subject, Key::G, start, voice,
+  MiddleEntry entry = generateMiddleEntry(subject, Key::G, start, voice, num_voices,
                                           cp_state, cp_rules, cp_resolver, tl);
 
   EXPECT_FALSE(entry.notes.empty());

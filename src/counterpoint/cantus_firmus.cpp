@@ -146,6 +146,7 @@ CantusFirmus CantusFirmusGenerator::generate(Key key, uint8_t length_bars,
     note.pitch = static_cast<uint8_t>(pitch);
     note.velocity = 80;
     note.voice = 0;
+    note.source = BachNoteSource::CantusFixed;
 
     result.notes.push_back(note);
   }

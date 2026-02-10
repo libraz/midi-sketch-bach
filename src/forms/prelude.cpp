@@ -245,6 +245,7 @@ std::vector<NoteEvent> generateScalePassage(const HarmonicEvent& event,
     note.pitch = scale_tones[tone_idx];
     note.velocity = kOrganVelocity;
     note.voice = voice_idx;
+    note.source = BachNoteSource::FreeCounterpoint;
     notes.push_back(note);
 
     current_tick += dur;
@@ -339,6 +340,7 @@ std::vector<NoteEvent> generateArpeggioPassage(const HarmonicEvent& event,
     note.pitch = arp_pitches[arp_idx];
     note.velocity = kOrganVelocity;
     note.voice = voice_idx;
+    note.source = BachNoteSource::FreeCounterpoint;
     notes.push_back(note);
 
     current_tick += dur;
@@ -414,6 +416,7 @@ std::vector<NoteEvent> generateMiddleVoice(const HarmonicEvent& event,
     note.pitch = rng::selectRandom(rng, valid_tones);
     note.velocity = kOrganVelocity;
     note.voice = voice_idx;
+    note.source = BachNoteSource::FreeCounterpoint;
     notes.push_back(note);
 
     current_tick += dur;
@@ -459,6 +462,7 @@ std::vector<NoteEvent> generateBassVoice(const HarmonicEvent& event,
     note.pitch = bass;
     note.velocity = kOrganVelocity;
     note.voice = voice_idx;
+    note.source = BachNoteSource::FreeCounterpoint;
     notes.push_back(note);
 
     current_tick += dur;

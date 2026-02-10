@@ -9,6 +9,7 @@
 #include "core/basic_types.h"
 #include "fugue/fugue_config.h"
 #include "harmony/harmonic_timeline.h"
+#include "harmony/modulation_plan.h"
 
 namespace bach {
 
@@ -120,6 +121,23 @@ std::vector<Key> getNearRelatedKeys(Key key, bool is_minor);
 /// @return Generated TonalPlan.
 TonalPlan generateTonalPlan(const FugueConfig& config, bool is_minor,
                             Tick total_duration_ticks);
+
+/// @brief Generate a tonal plan aligned with actual fugue section boundaries.
+///
+/// Unlike generateTonalPlan() which estimates phase boundaries at 1/3 intervals,
+/// this function places key changes at the midpoint of each episode, matching
+/// the actual generation structure. Key targets come from the ModulationPlan
+/// rather than being independently computed.
+///
+/// @param config Fugue configuration (key, num_voices, episode_bars, develop_pairs).
+/// @param mod_plan Modulation plan providing target keys for each episode.
+/// @param subject_length_ticks Duration of the subject in ticks.
+/// @param estimated_duration Total estimated fugue duration in ticks.
+/// @return TonalPlan with key changes aligned to episode midpoints.
+TonalPlan generateStructureAlignedTonalPlan(const FugueConfig& config,
+                                            const ModulationPlan& mod_plan,
+                                            Tick subject_length_ticks,
+                                            Tick estimated_duration);
 
 }  // namespace bach
 

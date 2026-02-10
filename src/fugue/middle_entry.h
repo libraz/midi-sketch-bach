@@ -33,17 +33,18 @@ struct MiddleEntry {
 
 /// @brief Generate a middle entry by transposing the subject to a new key.
 ///
-/// The subject is transposed to the target key and placed at the given
-/// tick position in the specified voice. Middle entries belong to
+/// The subject is transposed to the target key, shifted to the target voice's
+/// register, and placed at the given tick position. Middle entries belong to
 /// FuguePhase::Develop.
 ///
 /// @param subject The original fugue subject.
 /// @param target_key The key to transpose to.
 /// @param start_tick When this entry begins.
 /// @param voice_id Which voice presents the entry.
+/// @param num_voices Total number of voices (for register lookup).
 /// @return Generated MiddleEntry.
 MiddleEntry generateMiddleEntry(const Subject& subject, Key target_key, Tick start_tick,
-                                VoiceId voice_id);
+                                VoiceId voice_id, uint8_t num_voices = 3);
 
 /// @brief Generate a middle entry with counterpoint validation.
 ///
@@ -55,13 +56,14 @@ MiddleEntry generateMiddleEntry(const Subject& subject, Key target_key, Tick sta
 /// @param target_key The key to transpose to.
 /// @param start_tick When this entry begins.
 /// @param voice_id Which voice presents the entry.
+/// @param num_voices Total number of voices (for register lookup).
 /// @param cp_state Counterpoint state for validation context.
 /// @param cp_rules Rule evaluator for counterpoint checks.
 /// @param cp_resolver Collision resolver.
 /// @param timeline Harmonic timeline for chord-tone context.
 /// @return Generated MiddleEntry with notes registered in cp_state.
 MiddleEntry generateMiddleEntry(const Subject& subject, Key target_key, Tick start_tick,
-                                VoiceId voice_id,
+                                VoiceId voice_id, uint8_t num_voices,
                                 CounterpointState& cp_state, IRuleEvaluator& cp_rules,
                                 CollisionResolver& cp_resolver,
                                 const HarmonicTimeline& timeline);
@@ -76,11 +78,12 @@ MiddleEntry generateMiddleEntry(const Subject& subject, Key target_key, Tick sta
 /// @param target_key Key for the false entry.
 /// @param start_tick Starting tick position.
 /// @param voice_id Voice to place the entry in.
+/// @param num_voices Total number of voices (for register lookup).
 /// @param quote_notes Number of subject notes to quote (2-4).
 /// @return MiddleEntry containing the truncated subject + divergent tail.
 MiddleEntry generateFalseEntry(const Subject& subject, Key target_key,
                                Tick start_tick, VoiceId voice_id,
-                               uint8_t quote_notes = 3);
+                               uint8_t num_voices = 3, uint8_t quote_notes = 3);
 
 }  // namespace bach
 

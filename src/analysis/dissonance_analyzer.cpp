@@ -589,6 +589,63 @@ std::vector<DissonanceEvent> detectNonDiatonicNotes(
   return results;
 }
 
+std::vector<DissonanceEvent> detectNonDiatonicNotes(
+    const std::vector<NoteEvent>& notes, const HarmonicTimeline& timeline) {
+  std::vector<DissonanceEvent> results;
+  if (notes.empty() || timeline.size() == 0) return results;
+
+  // Build per-voice sorted note lists for passing tone detection.
+  VoiceId max_voice = 0;
+  for (const auto& note : notes) {
+    if (note.voice > max_voice) max_voice = note.voice;
+  }
+  std::vector<std::vector<NoteEvent>> voices(max_voice + 1);
+  for (VoiceId v = 0; v <= max_voice; ++v) {
+    voices[v] = voiceNotes(notes, v);
+  }
+
+  for (const auto& note : notes) {
+    // Get the active key at this note's tick from the timeline.
+    const HarmonicEvent& event = timeline.getAt(note.start_tick);
+    KeySignature local_key;
+    local_key.tonic = event.key;
+    local_key.is_minor = event.is_minor;
+
+    if (!isDiatonicInKey(note.pitch, local_key.tonic, local_key.is_minor)) {
+      DissonanceSeverity severity = DissonanceSeverity::Medium;
+
+      // Bach chromatic passing/neighbor tones: stepwise + weak beat = Low severity.
+      bool is_weak = !isStrongBeat(note.start_tick);
+      bool is_ornamental = false;
+      if (note.voice < voices.size()) {
+        size_t idx = findNoteIndex(voices[note.voice], note.pitch, note.start_tick);
+        if (idx != SIZE_MAX) {
+          is_ornamental = isPassingTone(voices[note.voice], idx) ||
+                          isNeighborTone(voices[note.voice], idx);
+        }
+      }
+
+      if (is_weak && is_ornamental) {
+        severity = DissonanceSeverity::Low;
+      } else if (isStrongBeat(note.start_tick)) {
+        severity = DissonanceSeverity::High;
+      }
+
+      std::string desc = std::string(
+          dissonanceTypeToString(DissonanceType::NonDiatonicNote)) +
+          " - voice " + std::to_string(note.voice) + " (" +
+          pitchToNoteName(note.pitch) + ") not diatonic in " +
+          keySignatureToString(local_key);
+
+      results.push_back(makeEvent(
+          DissonanceType::NonDiatonicNote, severity, note.start_tick,
+          note.pitch, 0, note.voice, 0, 0, desc));
+    }
+  }
+
+  return results;
+}
+
 // ===========================================================================
 // Orchestrators
 // ===========================================================================
@@ -602,7 +659,12 @@ DissonanceAnalysisResult analyzeOrganDissonance(
   auto phase1 = detectSimultaneousClashes(notes, num_voices);
   auto phase2 = detectNonChordTones(notes, timeline, generation_timeline);
   auto phase3 = detectSustainedOverChordChange(notes, num_voices, timeline);
-  auto phase4 = detectNonDiatonicNotes(notes, key_sig);
+  // Use modulation-aware non-diatonic detection when a generation timeline
+  // is available, so notes in modulated sections are checked against the
+  // local key rather than the global key signature.
+  auto phase4 = generation_timeline
+      ? detectNonDiatonicNotes(notes, *generation_timeline)
+      : detectNonDiatonicNotes(notes, key_sig);
 
   result.events.reserve(phase1.size() + phase2.size() + phase3.size() + phase4.size());
   result.events.insert(result.events.end(), phase1.begin(), phase1.end());

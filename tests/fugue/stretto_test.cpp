@@ -264,13 +264,14 @@ TEST(StrettoTest, GenerateStretto_OddEntriesInverted) {
   ASSERT_GE(stretto.entryCount(), 2u);
   ASSERT_GE(stretto.entries[1].notes.size(), 3u);
 
-  // First entry (idx 0): original pitches 60, 64, 67
-  EXPECT_EQ(stretto.entries[0].notes[0].pitch, 60);
-  EXPECT_EQ(stretto.entries[0].notes[1].pitch, 64);
-  EXPECT_EQ(stretto.entries[0].notes[2].pitch, 67);
+  // First entry (idx 0, voice 0): original pitches shifted to voice 0 register.
+  // 2 voices: voice 0 range [55,84] center 69. Mean ~63, shift +12.
+  EXPECT_EQ(stretto.entries[0].notes[0].pitch, 72);  // 60+12
+  EXPECT_EQ(stretto.entries[0].notes[1].pitch, 76);  // 64+12
+  EXPECT_EQ(stretto.entries[0].notes[2].pitch, 79);  // 67+12
 
-  // Second entry (idx 1): inverted around pivot=60
-  // Inversion: 2*60 - pitch => 60, 56, 53
+  // Second entry (idx 1, voice 1): inverted around pivot=60 → 60, 56, 53.
+  // Voice 1 range [36,67] center 51. Mean 56, shift 0.
   EXPECT_EQ(stretto.entries[1].notes[0].pitch, 60);
   EXPECT_EQ(stretto.entries[1].notes[1].pitch, 56);
   EXPECT_EQ(stretto.entries[1].notes[2].pitch, 53);
@@ -368,11 +369,12 @@ TEST(StrettoTest, CharacterPlayful_OddEntriesRetrograde) {
   ASSERT_GE(stretto.entryCount(), 2u);
   ASSERT_GE(stretto.entries[1].notes.size(), 4u);
 
-  // Entry 1 should be retrograde: pitches reversed = 72, 67, 64, 60.
-  EXPECT_EQ(stretto.entries[1].notes[0].pitch, 72);
-  EXPECT_EQ(stretto.entries[1].notes[1].pitch, 67);
-  EXPECT_EQ(stretto.entries[1].notes[2].pitch, 64);
-  EXPECT_EQ(stretto.entries[1].notes[3].pitch, 60);
+  // Entry 1 (voice 1): retrograde {72,67,64,60} shifted to voice 1 register.
+  // Voice 1 range [36,67] center 51. Mean 65, shift -12.
+  EXPECT_EQ(stretto.entries[1].notes[0].pitch, 60);  // 72-12
+  EXPECT_EQ(stretto.entries[1].notes[1].pitch, 55);  // 67-12
+  EXPECT_EQ(stretto.entries[1].notes[2].pitch, 52);  // 64-12
+  EXPECT_EQ(stretto.entries[1].notes[3].pitch, 48);  // 60-12
 }
 
 TEST(StrettoTest, CharacterNoble_OddEntriesAugmented) {
@@ -384,10 +386,11 @@ TEST(StrettoTest, CharacterNoble_OddEntriesAugmented) {
   ASSERT_GE(stretto.entryCount(), 2u);
   ASSERT_GE(stretto.entries[1].notes.size(), 3u);
 
-  // Entry 1 should be augmented: same pitches, doubled duration.
-  EXPECT_EQ(stretto.entries[1].notes[0].pitch, 60);
-  EXPECT_EQ(stretto.entries[1].notes[1].pitch, 64);
-  EXPECT_EQ(stretto.entries[1].notes[2].pitch, 67);
+  // Entry 1 (voice 1): augmented {60,64,67} shifted to voice 1 register.
+  // Voice 1 range [36,67] center 51. Mean 63, shift -12.
+  EXPECT_EQ(stretto.entries[1].notes[0].pitch, 48);  // 60-12
+  EXPECT_EQ(stretto.entries[1].notes[1].pitch, 52);  // 64-12
+  EXPECT_EQ(stretto.entries[1].notes[2].pitch, 55);  // 67-12
 
   // Durations should be doubled (kTicksPerBeat * 2 = 960).
   EXPECT_EQ(stretto.entries[1].notes[0].duration, kTicksPerBeat * 2);
@@ -438,15 +441,17 @@ TEST(StrettoTest, EvenEntries_AlwaysOriginal_RegardlessOfCharacter) {
     Stretto stretto = generateStretto(subject, Key::C, 0, 3, 42, character);
     ASSERT_GE(stretto.entryCount(), 3u);
 
-    // Entry 0 (even): original pitches.
-    EXPECT_EQ(stretto.entries[0].notes[0].pitch, 60);
-    EXPECT_EQ(stretto.entries[0].notes[1].pitch, 64);
-    EXPECT_EQ(stretto.entries[0].notes[2].pitch, 67);
+    // Entry 0 (voice 0, even): shifted to voice 0 register.
+    // 3 voices: voice 0 range [60,96] center 78. Mean 63, shift +12.
+    EXPECT_EQ(stretto.entries[0].notes[0].pitch, 72);  // 60+12
+    EXPECT_EQ(stretto.entries[0].notes[1].pitch, 76);  // 64+12
+    EXPECT_EQ(stretto.entries[0].notes[2].pitch, 79);  // 67+12
 
-    // Entry 2 (even): original pitches.
-    EXPECT_EQ(stretto.entries[2].notes[0].pitch, 60);
-    EXPECT_EQ(stretto.entries[2].notes[1].pitch, 64);
-    EXPECT_EQ(stretto.entries[2].notes[2].pitch, 67);
+    // Entry 2 (voice 2, even): shifted to voice 2 register.
+    // 3 voices: voice 2 range [36,60] center 48. Mean 63, shift -12.
+    EXPECT_EQ(stretto.entries[2].notes[0].pitch, 48);  // 60-12
+    EXPECT_EQ(stretto.entries[2].notes[1].pitch, 52);  // 64-12
+    EXPECT_EQ(stretto.entries[2].notes[2].pitch, 55);  // 67-12
   }
 }
 

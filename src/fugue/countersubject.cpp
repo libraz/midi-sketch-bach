@@ -506,6 +506,7 @@ std::vector<NoteEvent> generateCSAttempt(const Subject& subject,
     cs_note.pitch = next_pitch;
     cs_note.velocity = 80;
     cs_note.voice = 1;  // Countersubject is typically voice 1.
+    cs_note.source = BachNoteSource::Countersubject;
 
     result.push_back(cs_note);
     current_pitch = next_pitch;

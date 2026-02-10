@@ -115,6 +115,19 @@ std::vector<DissonanceEvent> detectSustainedOverChordChange(
 std::vector<DissonanceEvent> detectNonDiatonicNotes(
     const std::vector<NoteEvent>& notes, const KeySignature& key_sig);
 
+/// @brief Phase 4 (modulation-aware): Detect non-diatonic notes using timeline.
+///
+/// Uses the harmonic timeline to determine the active key at each note's
+/// tick position, instead of using a single global key signature. This
+/// prevents false positives in modulated sections where notes are diatonic
+/// in the local key but not in the global key.
+///
+/// @param notes All notes.
+/// @param timeline Harmonic timeline providing per-tick key context.
+/// @return Detected non-diatonic events.
+std::vector<DissonanceEvent> detectNonDiatonicNotes(
+    const std::vector<NoteEvent>& notes, const HarmonicTimeline& timeline);
+
 // ---------------------------------------------------------------------------
 // Orchestrator functions
 // ---------------------------------------------------------------------------

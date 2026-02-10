@@ -4,12 +4,14 @@
 
 #include "core/note_creator.h"
 #include "core/note_source.h"
+#include "core/pitch_utils.h"
+#include "fugue/voice_registers.h"
 #include "transform/motif_transform.h"
 
 namespace bach {
 
 MiddleEntry generateMiddleEntry(const Subject& subject, Key target_key, Tick start_tick,
-                                VoiceId voice_id) {
+                                VoiceId voice_id, uint8_t num_voices) {
   MiddleEntry entry;
   entry.key = target_key;
   entry.start_tick = start_tick;
@@ -26,23 +28,37 @@ MiddleEntry generateMiddleEntry(const Subject& subject, Key target_key, Tick sta
   // Use transposeMelody from the transform module.
   entry.notes = transposeMelody(subject.notes, semitones);
 
+  // Compute octave shift to fit the target voice's register.
+  auto [lo, hi] = getFugueVoiceRange(voice_id, num_voices);
+  int total_pitch = 0;
+  for (const auto& n : entry.notes) {
+    total_pitch += static_cast<int>(n.pitch);
+  }
+  int mean_pitch = total_pitch / static_cast<int>(entry.notes.size());
+  int voice_center = (static_cast<int>(lo) + static_cast<int>(hi)) / 2;
+  int diff = voice_center - mean_pitch;
+  int octave_shift = (diff >= 0) ? ((diff + 6) / 12) * 12
+                                 : -(((-diff + 5) / 12) * 12);
+
   // Offset tick positions so the entry starts at start_tick.
   Tick original_start = subject.notes[0].start_tick;
   for (auto& note : entry.notes) {
     note.start_tick = note.start_tick - original_start + start_tick;
     note.voice = voice_id;
+    int shifted = static_cast<int>(note.pitch) + octave_shift;
+    note.pitch = clampPitch(shifted, lo, hi);
   }
 
   return entry;
 }
 
 MiddleEntry generateMiddleEntry(const Subject& subject, Key target_key, Tick start_tick,
-                                VoiceId voice_id,
+                                VoiceId voice_id, uint8_t num_voices,
                                 CounterpointState& cp_state, IRuleEvaluator& cp_rules,
                                 CollisionResolver& cp_resolver,
                                 const HarmonicTimeline& /*timeline*/) {
-  // Generate raw middle entry notes.
-  MiddleEntry entry = generateMiddleEntry(subject, target_key, start_tick, voice_id);
+  // Generate raw middle entry notes (with register adjustment).
+  MiddleEntry entry = generateMiddleEntry(subject, target_key, start_tick, voice_id, num_voices);
 
   // Validate each note through createBachNote with Immutable protection.
   std::vector<NoteEvent> validated;
@@ -70,7 +86,7 @@ MiddleEntry generateMiddleEntry(const Subject& subject, Key target_key, Tick sta
 
 MiddleEntry generateFalseEntry(const Subject& subject, Key target_key,
                                Tick start_tick, VoiceId voice_id,
-                               uint8_t quote_notes) {
+                               uint8_t num_voices, uint8_t quote_notes) {
   MiddleEntry entry;
   entry.key = target_key;
   entry.start_tick = start_tick;
@@ -98,6 +114,24 @@ MiddleEntry generateFalseEntry(const Subject& subject, Key target_key,
 
   // Transpose entire subject, then take only the quoted portion.
   std::vector<NoteEvent> transposed = transposeMelody(subject.notes, semitones);
+
+  // Compute octave shift to fit the target voice's register.
+  auto [lo, hi] = getFugueVoiceRange(voice_id, num_voices);
+  int total_pitch = 0;
+  for (const auto& n : transposed) {
+    total_pitch += static_cast<int>(n.pitch);
+  }
+  int mean_pitch = total_pitch / static_cast<int>(transposed.size());
+  int voice_center = (static_cast<int>(lo) + static_cast<int>(hi)) / 2;
+  int reg_diff = voice_center - mean_pitch;
+  int octave_shift = (reg_diff >= 0) ? ((reg_diff + 6) / 12) * 12
+                                     : -(((-reg_diff + 5) / 12) * 12);
+
+  // Apply octave shift to transposed notes.
+  for (auto& note : transposed) {
+    int shifted = static_cast<int>(note.pitch) + octave_shift;
+    note.pitch = clampPitch(shifted, lo, hi);
+  }
 
   // Offset tick positions so the entry starts at start_tick.
   Tick original_start = transposed[0].start_tick;
@@ -146,9 +180,8 @@ MiddleEntry generateFalseEntry(const Subject& subject, Key target_key,
     int step = (div_idx % 2 == 0) ? 2 : 1;
     int new_pitch = static_cast<int>(last_pitch) + diverge_direction * step;
 
-    // Clamp to valid MIDI range.
-    if (new_pitch < 0) new_pitch = 0;
-    if (new_pitch > 127) new_pitch = 127;
+    // Clamp to voice range.
+    new_pitch = clampPitch(new_pitch, lo, hi);
 
     NoteEvent div_note;
     div_note.start_tick = current_tick;

@@ -131,20 +131,42 @@ const uint8_t* selectEntryOrder(SubjectCharacter character, uint8_t num_voices) 
 /// @brief Place subject or answer notes for a voice entry, offset by entry tick.
 ///
 /// Copies source notes into the target voice's note list, adjusting
-/// start_tick by the entry offset and assigning the correct voice_id.
+/// start_tick by the entry offset, assigning the correct voice_id, and
+/// shifting pitches by whole octaves to fit the target voice's register.
 ///
 /// @param source_notes Notes to place (from subject or answer).
 /// @param voice_id Target voice identifier.
 /// @param entry_tick Tick offset for this entry.
+/// @param voice_reg Voice register boundaries for pitch placement.
 /// @param voice_notes Output map to append notes to.
 void placeEntryNotes(const std::vector<NoteEvent>& source_notes,
                      VoiceId voice_id,
                      Tick entry_tick,
+                     VoiceRegister voice_reg,
                      std::map<VoiceId, std::vector<NoteEvent>>& voice_notes) {
+  if (source_notes.empty()) return;
+
+  // Compute mean pitch of source notes.
+  int total_pitch = 0;
+  for (const auto& n : source_notes) {
+    total_pitch += static_cast<int>(n.pitch);
+  }
+  int mean_pitch = total_pitch / static_cast<int>(source_notes.size());
+
+  // Compute voice register center and octave shift needed.
+  int voice_center = (static_cast<int>(voice_reg.low) +
+                      static_cast<int>(voice_reg.high)) / 2;
+  int diff = voice_center - mean_pitch;
+  // Round to nearest octave, handling negative values correctly.
+  int octave_shift = (diff >= 0) ? ((diff + 6) / 12) * 12
+                                 : -(((-diff + 5) / 12) * 12);
+
   for (const auto& src_note : source_notes) {
     NoteEvent note = src_note;
     note.start_tick = src_note.start_tick + entry_tick;
     note.voice = voice_id;
+    int shifted = static_cast<int>(src_note.pitch) + octave_shift;
+    note.pitch = clampPitch(shifted, voice_reg.low, voice_reg.high);
     voice_notes[voice_id].push_back(note);
   }
 }
@@ -348,8 +370,9 @@ Exposition buildExposition(const Subject& subject,
         entry.is_subject ? subject.notes : answer.notes;
 
     // Place the main entry (subject or answer) for this voice.
+    VoiceRegister entry_reg = getVoiceRegister(entry.voice_id, num_voices);
     placeEntryNotes(source_notes, entry.voice_id, entry.entry_tick,
-                    expo.voice_notes);
+                    entry_reg, expo.voice_notes);
 
     // The voice that just finished its entry (idx - 1) plays the countersubject
     // against this new entry.

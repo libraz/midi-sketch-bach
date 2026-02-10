@@ -112,6 +112,10 @@ GroundBass GroundBass::createStandardDMinor() {
   notes.push_back({3 * kTicksPerBar, kHalfNote, kA2, kBassVelocity, kBassVoice});
   notes.push_back({3 * kTicksPerBar + kHalfNote, kHalfNote, kD3, kBassVelocity, kBassVoice});
 
+  for (auto& note : notes) {
+    note.source = BachNoteSource::GroundBass;
+  }
+
   return GroundBass(std::move(notes));
 }
 

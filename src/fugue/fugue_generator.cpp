@@ -418,8 +418,17 @@ FugueResult generateFugue(const FugueConfig& config) {
     estimated_duration = min_duration;
   }
 
-  TonalPlan tonal_plan = generateTonalPlan(config, config.is_minor,
-                                           estimated_duration);
+  // Create modulation plan early so the tonal plan can align to actual structure.
+  ModulationPlan mod_plan;
+  if (config.has_modulation_plan) {
+    mod_plan = config.modulation_plan;
+  } else {
+    mod_plan = config.is_minor ? ModulationPlan::createForMinor(config.key)
+                               : ModulationPlan::createForMajor(config.key);
+  }
+
+  TonalPlan tonal_plan = generateStructureAlignedTonalPlan(
+      config, mod_plan, subject.length_ticks, estimated_duration);
 
   // =========================================================================
   // Step 5: Create beat-resolution harmonic timeline
@@ -464,16 +473,6 @@ FugueResult generateFugue(const FugueConfig& config) {
 
   // --- Develop phase: Episode+MiddleEntry pairs ---
   Tick episode_duration = kTicksPerBar * static_cast<Tick>(config.episode_bars);
-
-  // Use modulation plan for episode key selection (Principle 4: design values).
-  ModulationPlan mod_plan;
-  if (config.has_modulation_plan) {
-    mod_plan = config.modulation_plan;
-  } else {
-    // Auto-create based on key mode.
-    mod_plan = config.is_minor ? ModulationPlan::createForMinor(config.key)
-                               : ModulationPlan::createForMajor(config.key);
-  }
 
   int develop_pairs = config.develop_pairs;
   Key prev_key = config.key;
@@ -521,9 +520,9 @@ FugueResult generateFugue(const FugueConfig& config) {
     bool use_false_entry = (pair_idx > 0) && (false_dist(false_entry_rng) < false_entry_prob);
 
     MiddleEntry middle_entry = use_false_entry
-        ? generateFalseEntry(subject, target_key, current_tick, entry_voice)
+        ? generateFalseEntry(subject, target_key, current_tick, entry_voice, num_voices)
         : generateMiddleEntry(subject, target_key,
-                              current_tick, entry_voice,
+                              current_tick, entry_voice, num_voices,
                               cp_state, cp_rules, cp_resolver,
                               detailed_timeline);
     Tick middle_end = middle_entry.end_tick;
