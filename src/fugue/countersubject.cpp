@@ -498,4 +498,85 @@ Countersubject generateCountersubject(const Subject& subject,
   return best;
 }
 
+Countersubject generateSecondCountersubject(const Subject& subject,
+                                             const Countersubject& first_cs,
+                                             uint32_t seed,
+                                             int max_retries) {
+  if (subject.notes.empty()) {
+    Countersubject empty;
+    empty.key = subject.key;
+    empty.length_ticks = subject.length_ticks;
+    return empty;
+  }
+
+  // Determine register for CS2: if CS1 is above subject, place CS2 below,
+  // and vice versa. This ensures registral separation between all three lines.
+  bool cs1_above_subject = true;
+  if (!first_cs.notes.empty() && !subject.notes.empty()) {
+    int cs1_avg = 0;
+    for (const auto& note : first_cs.notes) {
+      cs1_avg += static_cast<int>(note.pitch);
+    }
+    cs1_avg /= static_cast<int>(first_cs.notes.size());
+
+    int subj_avg = 0;
+    for (const auto& note : subject.notes) {
+      subj_avg += static_cast<int>(note.pitch);
+    }
+    subj_avg /= static_cast<int>(subject.notes.size());
+
+    cs1_above_subject = cs1_avg >= subj_avg;
+  }
+
+  // Use modified character params: slightly more leaps and wider range to
+  // differentiate from CS1.
+  CSCharacterParams params = getCSParams(subject.character);
+  params.leap_prob = std::min(params.leap_prob + 0.10f, 0.60f);
+  params.max_range = std::min(params.max_range + 2, 16);
+
+  Countersubject best;
+  best.key = subject.key;
+  best.length_ticks = subject.length_ticks;
+  float best_score = -1.0f;
+
+  for (int attempt = 0; attempt < max_retries; ++attempt) {
+    std::mt19937 gen(seed + static_cast<uint32_t>(attempt) * 1000003u);
+
+    // Generate a CS attempt against the subject.
+    std::vector<NoteEvent> cs2_notes = generateCSAttempt(subject, params, gen);
+
+    // Shift register: if CS1 is above, push CS2 down by an octave offset;
+    // otherwise push CS2 up.
+    int register_shift = cs1_above_subject ? -7 : 7;
+    for (auto& note : cs2_notes) {
+      int shifted = static_cast<int>(note.pitch) + register_shift;
+      note.pitch = clampPitch(shifted, kCSPitchLow, kCSPitchHigh);
+      note.voice = 2;  // CS2 is typically voice 2.
+    }
+
+    // Score against subject and CS1 consonance.
+    float subj_score = validateConsonanceRate(cs2_notes, subject);
+
+    // Also check consonance with CS1 (build a temporary "Subject" from CS1 notes).
+    Subject cs1_as_subject;
+    cs1_as_subject.notes = first_cs.notes;
+    cs1_as_subject.length_ticks = first_cs.length_ticks;
+    cs1_as_subject.key = first_cs.key;
+    float cs1_score = validateConsonanceRate(cs2_notes, cs1_as_subject);
+
+    // Combined score: both lines must be consonant.
+    float combined = subj_score * 0.6f + cs1_score * 0.4f;
+
+    if (combined > best_score) {
+      best_score = combined;
+      best.notes = std::move(cs2_notes);
+    }
+
+    // Accept if combined consonance rate is at least 60%.
+    if (best_score >= 0.60f) break;
+  }
+
+  return best;
+}
+
 }  // namespace bach

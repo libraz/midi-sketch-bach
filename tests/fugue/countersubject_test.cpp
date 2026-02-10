@@ -427,5 +427,106 @@ TEST(CountersubjectTest, VelocityIsStandard) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Second countersubject for 4+ voices
+// ---------------------------------------------------------------------------
+
+TEST(CountersubjectTest, SecondCS_GeneratesNotes) {
+  Subject subject = makeTestSubject();
+  Countersubject cs1 = generateCountersubject(subject, 42);
+  Countersubject cs2 = generateSecondCountersubject(subject, cs1, 100);
+  EXPECT_GT(cs2.noteCount(), 0u);
+}
+
+TEST(CountersubjectTest, SecondCS_SameLengthAsSubject) {
+  Subject subject = makeTestSubject();
+  Countersubject cs1 = generateCountersubject(subject, 42);
+  Countersubject cs2 = generateSecondCountersubject(subject, cs1, 100);
+  EXPECT_EQ(cs2.length_ticks, subject.length_ticks);
+}
+
+TEST(CountersubjectTest, SecondCS_SameKeyAsSubject) {
+  Subject subject = makeTestSubject();
+  subject.key = Key::G;
+  Countersubject cs1 = generateCountersubject(subject, 42);
+  Countersubject cs2 = generateSecondCountersubject(subject, cs1, 100);
+  EXPECT_EQ(cs2.key, Key::G);
+}
+
+TEST(CountersubjectTest, SecondCS_DifferentFromFirst) {
+  Subject subject = makeTestSubject();
+  Countersubject cs1 = generateCountersubject(subject, 42);
+  Countersubject cs2 = generateSecondCountersubject(subject, cs1, 100);
+
+  // CS2 should differ from CS1 (different register or pitches).
+  bool any_different = false;
+  size_t check_count = std::min(cs1.noteCount(), cs2.noteCount());
+  for (size_t idx = 0; idx < check_count; ++idx) {
+    if (cs1.notes[idx].pitch != cs2.notes[idx].pitch) {
+      any_different = true;
+      break;
+    }
+  }
+  EXPECT_TRUE(any_different)
+      << "Second countersubject should differ from first";
+}
+
+TEST(CountersubjectTest, SecondCS_Deterministic) {
+  Subject subject = makeTestSubject();
+  Countersubject cs1 = generateCountersubject(subject, 42);
+
+  Countersubject cs2a = generateSecondCountersubject(subject, cs1, 200);
+  Countersubject cs2b = generateSecondCountersubject(subject, cs1, 200);
+
+  ASSERT_EQ(cs2a.noteCount(), cs2b.noteCount());
+  for (size_t idx = 0; idx < cs2a.noteCount(); ++idx) {
+    EXPECT_EQ(cs2a.notes[idx].pitch, cs2b.notes[idx].pitch)
+        << "Second CS should be deterministic, mismatch at note " << idx;
+  }
+}
+
+TEST(CountersubjectTest, SecondCS_EmptySubjectProducesEmpty) {
+  Subject empty_subject;
+  empty_subject.key = Key::C;
+  empty_subject.length_ticks = kTicksPerBar;
+
+  Countersubject cs1;
+  cs1.key = Key::C;
+  cs1.length_ticks = kTicksPerBar;
+
+  Countersubject cs2 = generateSecondCountersubject(empty_subject, cs1, 42);
+  EXPECT_EQ(cs2.noteCount(), 0u);
+}
+
+TEST(CountersubjectTest, SecondCS_AllCharactersGenerate) {
+  const SubjectCharacter characters[] = {
+      SubjectCharacter::Severe, SubjectCharacter::Playful,
+      SubjectCharacter::Noble, SubjectCharacter::Restless};
+
+  for (auto character : characters) {
+    Subject subject = makeTestSubject(character);
+    Countersubject cs1 = generateCountersubject(subject, 42);
+    Countersubject cs2 = generateSecondCountersubject(subject, cs1, 100);
+    EXPECT_GT(cs2.noteCount(), 0u)
+        << "Second CS failed for character: "
+        << subjectCharacterToString(character);
+  }
+}
+
+TEST(CountersubjectTest, SecondCS_PitchInValidRange) {
+  Subject subject = makeTestSubject();
+  Countersubject cs1 = generateCountersubject(subject, 42);
+
+  for (uint32_t seed = 1; seed <= 10; ++seed) {
+    Countersubject cs2 = generateSecondCountersubject(subject, cs1, seed);
+    for (const auto& note : cs2.notes) {
+      EXPECT_GE(note.pitch, 36)
+          << "CS2 pitch below minimum (seed " << seed << ")";
+      EXPECT_LE(note.pitch, 127)
+          << "CS2 pitch above maximum (seed " << seed << ")";
+    }
+  }
+}
+
 }  // namespace
 }  // namespace bach

@@ -222,6 +222,150 @@ TEST(FugueGeneratorTest, GenerateFugue_PlayfulCharacter) {
   EXPECT_GT(result.tracks.size(), 0u);
 }
 
+TEST(FugueGeneratorTest, GenerateFugue_NobleCharacter) {
+  FugueConfig config = makeTestConfig(88);
+  config.character = SubjectCharacter::Noble;
+  FugueResult result = generateFugue(config);
+  EXPECT_TRUE(result.success);
+  EXPECT_GT(result.tracks.size(), 0u);
+}
+
+TEST(FugueGeneratorTest, GenerateFugue_RestlessCharacter) {
+  FugueConfig config = makeTestConfig(99);
+  config.character = SubjectCharacter::Restless;
+  FugueResult result = generateFugue(config);
+  EXPECT_TRUE(result.success);
+  EXPECT_GT(result.tracks.size(), 0u);
+}
+
+// ---------------------------------------------------------------------------
+// 4-5 voice generation
+// ---------------------------------------------------------------------------
+
+TEST(FugueGeneratorTest, GenerateFugue_FourVoices_HasAllTracks) {
+  FugueConfig config = makeTestConfig();
+  config.num_voices = 4;
+  FugueResult result = generateFugue(config);
+  ASSERT_TRUE(result.success);
+  EXPECT_EQ(result.tracks.size(), 4u);
+
+  // All 4 tracks should have notes.
+  for (size_t idx = 0; idx < result.tracks.size(); ++idx) {
+    EXPECT_GT(result.tracks[idx].notes.size(), 0u)
+        << "Track " << idx << " (" << result.tracks[idx].name << ") has no notes";
+  }
+}
+
+TEST(FugueGeneratorTest, GenerateFugue_FourVoices_HasPedalTrack) {
+  FugueConfig config = makeTestConfig();
+  config.num_voices = 4;
+  FugueResult result = generateFugue(config);
+  ASSERT_TRUE(result.success);
+  ASSERT_EQ(result.tracks.size(), 4u);
+  EXPECT_EQ(result.tracks[3].name, "Pedal");
+  EXPECT_EQ(result.tracks[3].channel, 3u);
+}
+
+TEST(FugueGeneratorTest, GenerateFugue_FourVoices_StructureValid) {
+  FugueConfig config = makeTestConfig();
+  config.num_voices = 4;
+  FugueResult result = generateFugue(config);
+  ASSERT_TRUE(result.success);
+
+  auto violations = result.structure.validate();
+  EXPECT_TRUE(violations.empty())
+      << "4-voice structure validation failed with " << violations.size()
+      << " violation(s)";
+}
+
+TEST(FugueGeneratorTest, GenerateFugue_FiveVoices_HasAllTracks) {
+  FugueConfig config = makeTestConfig();
+  config.num_voices = 5;
+  FugueResult result = generateFugue(config);
+  ASSERT_TRUE(result.success);
+  EXPECT_EQ(result.tracks.size(), 5u);
+
+  // All 5 tracks should have notes.
+  for (size_t idx = 0; idx < result.tracks.size(); ++idx) {
+    EXPECT_GT(result.tracks[idx].notes.size(), 0u)
+        << "Track " << idx << " (" << result.tracks[idx].name << ") has no notes";
+  }
+}
+
+TEST(FugueGeneratorTest, GenerateFugue_FiveVoices_TwoOnGreat) {
+  FugueConfig config = makeTestConfig();
+  config.num_voices = 5;
+  FugueResult result = generateFugue(config);
+  ASSERT_TRUE(result.success);
+  ASSERT_EQ(result.tracks.size(), 5u);
+
+  // 5-voice layout: voices 0,1 on Great; voice 2 on Swell; voice 3 on Positiv;
+  // voice 4 on Pedal. Channels: Great=0 (shared by 2 voices), Swell=1, Positiv=2, Pedal=3.
+  EXPECT_EQ(result.tracks[0].name, "Manual I (Great)");
+  EXPECT_EQ(result.tracks[1].name, "Manual I (Great)");
+  EXPECT_EQ(result.tracks[2].name, "Manual II (Swell)");
+  EXPECT_EQ(result.tracks[3].name, "Manual III (Positiv)");
+  EXPECT_EQ(result.tracks[4].name, "Pedal");
+}
+
+TEST(FugueGeneratorTest, GenerateFugue_FiveVoices_StructureValid) {
+  FugueConfig config = makeTestConfig();
+  config.num_voices = 5;
+  FugueResult result = generateFugue(config);
+  ASSERT_TRUE(result.success);
+
+  auto violations = result.structure.validate();
+  EXPECT_TRUE(violations.empty())
+      << "5-voice structure validation failed with " << violations.size()
+      << " violation(s)";
+}
+
+TEST(FugueGeneratorTest, GenerateFugue_FourVoices_NotesSorted) {
+  FugueConfig config = makeTestConfig();
+  config.num_voices = 4;
+  FugueResult result = generateFugue(config);
+  ASSERT_TRUE(result.success);
+
+  for (const auto& track : result.tracks) {
+    for (size_t idx = 1; idx < track.notes.size(); ++idx) {
+      EXPECT_LE(track.notes[idx - 1].start_tick, track.notes[idx].start_tick)
+          << "Notes not sorted in track " << track.name << " at index " << idx;
+    }
+  }
+}
+
+TEST(FugueGeneratorTest, GenerateFugue_FiveVoices_AllVelocity80) {
+  FugueConfig config = makeTestConfig();
+  config.num_voices = 5;
+  FugueResult result = generateFugue(config);
+  ASSERT_TRUE(result.success);
+
+  for (const auto& track : result.tracks) {
+    for (const auto& note : track.notes) {
+      EXPECT_EQ(note.velocity, 80u)
+          << "Organ velocity must be 80, found " << static_cast<int>(note.velocity);
+    }
+  }
+}
+
+TEST(FugueGeneratorTest, GenerateFugue_FourVoices_NobleCharacter) {
+  FugueConfig config = makeTestConfig(101);
+  config.num_voices = 4;
+  config.character = SubjectCharacter::Noble;
+  FugueResult result = generateFugue(config);
+  EXPECT_TRUE(result.success);
+  EXPECT_EQ(result.tracks.size(), 4u);
+}
+
+TEST(FugueGeneratorTest, GenerateFugue_FiveVoices_RestlessCharacter) {
+  FugueConfig config = makeTestConfig(102);
+  config.num_voices = 5;
+  config.character = SubjectCharacter::Restless;
+  FugueResult result = generateFugue(config);
+  EXPECT_TRUE(result.success);
+  EXPECT_EQ(result.tracks.size(), 5u);
+}
+
 // ---------------------------------------------------------------------------
 // Track configuration (organ system)
 // ---------------------------------------------------------------------------

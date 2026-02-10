@@ -55,14 +55,29 @@ set(BACH_TEST_SOURCES
   # transform/
   transform/motif_transform_test.cpp
 
-  # Future test sources added here as modules are implemented:
-  # harmony/
   # organ/
-  # ornament/
+  organ/manual_test.cpp
+
+  # analysis/
+  analysis/voice_independence_test.cpp
+
+  # harmony/
+  harmony/chord_types_test.cpp
+  harmony/key_test.cpp
+  harmony/harmonic_event_test.cpp
+  harmony/harmonic_timeline_test.cpp
+
   # forms/
+  forms/prelude_test.cpp
+  forms/trio_sonata_test.cpp
+
+  # generator (unified entry point)
+  generator_test.cpp
+
+  # Future test sources added here as modules are implemented:
+  # ornament/
   # solo_string/flow/
   # solo_string/arch/
-  # analysis/
 )
 
 add_executable(bach_tests ${BACH_TEST_SOURCES})

@@ -30,32 +30,32 @@ TEST(FugueConfigTest, AnswerTypeToStringTonal) {
 // isCharacterAvailable -- phase restrictions
 // ---------------------------------------------------------------------------
 
-TEST(FugueConfigTest, SevereAvailableInPhasesOneAndTwo) {
+TEST(FugueConfigTest, SevereAvailableInAllPhases) {
   EXPECT_TRUE(isCharacterAvailable(SubjectCharacter::Severe, 1));
   EXPECT_TRUE(isCharacterAvailable(SubjectCharacter::Severe, 2));
-  EXPECT_FALSE(isCharacterAvailable(SubjectCharacter::Severe, 3));
-  EXPECT_FALSE(isCharacterAvailable(SubjectCharacter::Severe, 4));
+  EXPECT_TRUE(isCharacterAvailable(SubjectCharacter::Severe, 3));
+  EXPECT_TRUE(isCharacterAvailable(SubjectCharacter::Severe, 4));
 }
 
-TEST(FugueConfigTest, PlayfulAvailableInPhasesOneAndTwo) {
+TEST(FugueConfigTest, PlayfulAvailableInAllPhases) {
   EXPECT_TRUE(isCharacterAvailable(SubjectCharacter::Playful, 1));
   EXPECT_TRUE(isCharacterAvailable(SubjectCharacter::Playful, 2));
-  EXPECT_FALSE(isCharacterAvailable(SubjectCharacter::Playful, 3));
-  EXPECT_FALSE(isCharacterAvailable(SubjectCharacter::Playful, 4));
+  EXPECT_TRUE(isCharacterAvailable(SubjectCharacter::Playful, 3));
+  EXPECT_TRUE(isCharacterAvailable(SubjectCharacter::Playful, 4));
 }
 
-TEST(FugueConfigTest, NobleAvailableFromPhaseThree) {
-  EXPECT_FALSE(isCharacterAvailable(SubjectCharacter::Noble, 1));
-  EXPECT_FALSE(isCharacterAvailable(SubjectCharacter::Noble, 2));
+TEST(FugueConfigTest, NobleAvailableInAllPhases) {
+  EXPECT_TRUE(isCharacterAvailable(SubjectCharacter::Noble, 1));
+  EXPECT_TRUE(isCharacterAvailable(SubjectCharacter::Noble, 2));
   EXPECT_TRUE(isCharacterAvailable(SubjectCharacter::Noble, 3));
   EXPECT_TRUE(isCharacterAvailable(SubjectCharacter::Noble, 4));
   EXPECT_TRUE(isCharacterAvailable(SubjectCharacter::Noble, 5));
 }
 
-TEST(FugueConfigTest, RestlessAvailableFromPhaseFour) {
-  EXPECT_FALSE(isCharacterAvailable(SubjectCharacter::Restless, 1));
-  EXPECT_FALSE(isCharacterAvailable(SubjectCharacter::Restless, 2));
-  EXPECT_FALSE(isCharacterAvailable(SubjectCharacter::Restless, 3));
+TEST(FugueConfigTest, RestlessAvailableInAllPhases) {
+  EXPECT_TRUE(isCharacterAvailable(SubjectCharacter::Restless, 1));
+  EXPECT_TRUE(isCharacterAvailable(SubjectCharacter::Restless, 2));
+  EXPECT_TRUE(isCharacterAvailable(SubjectCharacter::Restless, 3));
   EXPECT_TRUE(isCharacterAvailable(SubjectCharacter::Restless, 4));
   EXPECT_TRUE(isCharacterAvailable(SubjectCharacter::Restless, 5));
 }

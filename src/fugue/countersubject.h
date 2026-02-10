@@ -56,6 +56,26 @@ Countersubject generateCountersubject(const Subject& subject,
                                        uint32_t seed,
                                        int max_retries = 5);
 
+/// @brief Generate a second countersubject for 4+ voice fugues.
+///
+/// The second countersubject must contrast with both the subject and the
+/// first countersubject. It achieves this by:
+///   - Using a different pitch register (higher if CS1 is below subject,
+///     lower if CS1 is above)
+///   - Employing complementary rhythm to both subject and CS1
+///   - Maintaining consonant intervals with both existing lines
+///   - Avoiding parallel 5ths/8ths with both subject and CS1
+///
+/// @param subject The fugue subject.
+/// @param first_cs The first countersubject already generated.
+/// @param seed Random seed for deterministic generation.
+/// @param max_retries Maximum generation attempts (default 5).
+/// @return Generated second Countersubject.
+Countersubject generateSecondCountersubject(const Subject& subject,
+                                             const Countersubject& first_cs,
+                                             uint32_t seed,
+                                             int max_retries = 5);
+
 }  // namespace bach
 
 #endif  // BACH_FUGUE_COUNTERSUBJECT_H

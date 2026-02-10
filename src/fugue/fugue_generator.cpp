@@ -17,6 +17,7 @@
 #include "fugue/subject.h"
 #include "fugue/subject_validator.h"
 #include "fugue/tonal_plan.h"
+#include "organ/manual.h"
 
 namespace bach {
 
@@ -49,40 +50,41 @@ uint8_t clampVoiceCount(uint8_t num_voices) {
   return num_voices;
 }
 
-/// @brief Create MIDI tracks for an organ fugue.
+/// @brief Human-readable name for an organ manual.
+/// @param manual OrganManual enum value.
+/// @return Descriptive string for the manual.
+const char* manualTrackName(OrganManual manual) {
+  switch (manual) {
+    case OrganManual::Great:   return "Manual I (Great)";
+    case OrganManual::Swell:   return "Manual II (Swell)";
+    case OrganManual::Positiv: return "Manual III (Positiv)";
+    case OrganManual::Pedal:   return "Pedal";
+  }
+  return "Unknown Manual";
+}
+
+/// @brief Create MIDI tracks for an organ fugue using assignManuals().
 ///
-/// Channel/program mapping per the organ system spec:
-///   Voice 0 -> Ch 0, Church Organ (Manual I / Great)
-///   Voice 1 -> Ch 1, Reed Organ   (Manual II / Swell)
-///   Voice 2 -> Ch 2, Church Organ (Manual III / Positiv)
-///   Voice 3 -> Ch 3, Church Organ (Pedal)
+/// Delegates to the organ manual assignment system (organ/manual.h) which
+/// handles voice-to-manual routing for all voice counts (2-5):
+///   2 voices: Great + Swell
+///   3 voices: Great + Swell + Positiv
+///   4 voices: Great + Swell + Positiv + Pedal
+///   5 voices: Great (x2) + Swell + Positiv + Pedal
 ///
 /// @param num_voices Number of voices (2-5).
 /// @return Vector of Track objects with channel/program/name configured.
 std::vector<Track> createOrganTracks(uint8_t num_voices) {
+  auto assignments = assignManuals(num_voices, FormType::Fugue);
+
   std::vector<Track> tracks;
-  tracks.reserve(num_voices);
+  tracks.reserve(assignments.size());
 
-  // Track names and programs for each organ manual/pedal.
-  struct TrackSpec {
-    uint8_t channel;
-    uint8_t program;
-    const char* name;
-  };
-
-  static constexpr TrackSpec kSpecs[] = {
-      {0, GmProgram::kChurchOrgan, "Manual I (Great)"},
-      {1, GmProgram::kReedOrgan, "Manual II (Swell)"},
-      {2, GmProgram::kChurchOrgan, "Manual III (Positiv)"},
-      {3, GmProgram::kChurchOrgan, "Pedal"},
-      {4, GmProgram::kChurchOrgan, "Manual IV"},  // Rare 5th voice
-  };
-
-  for (uint8_t idx = 0; idx < num_voices && idx < 5; ++idx) {
+  for (const auto& assignment : assignments) {
     Track track;
-    track.channel = kSpecs[idx].channel;
-    track.program = kSpecs[idx].program;
-    track.name = kSpecs[idx].name;
+    track.channel = channelForAssignment(assignment);
+    track.program = programForAssignment(assignment);
+    track.name = manualTrackName(assignment.manual);
     tracks.push_back(track);
   }
 
@@ -232,10 +234,18 @@ FugueResult generateFugue(const FugueConfig& config) {
   Answer answer = generateAnswer(subject, config.answer_type);
 
   // =========================================================================
-  // Step 3: Generate countersubject
+  // Step 3: Generate countersubject(s)
   // =========================================================================
   Countersubject counter_subject =
       generateCountersubject(subject, config.seed + 1000);
+
+  // For 4+ voices, generate a second countersubject that contrasts with both
+  // the subject and the first countersubject.
+  Countersubject counter_subject_2;
+  if (num_voices >= 4) {
+    counter_subject_2 = generateSecondCountersubject(
+        subject, counter_subject, config.seed + 5000);
+  }
 
   // =========================================================================
   // Step 4: Build exposition (FuguePhase::Establish)

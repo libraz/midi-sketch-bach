@@ -59,14 +59,28 @@ set(BACH_LIB_SOURCES
   transform/motif_transform.cpp
   transform/sequence.cpp
 
-  # Future sources added here as modules are implemented:
-  # harmony/
   # organ/
-  # ornament/
+  organ/manual.cpp
+
+  # analysis/
+  analysis/voice_independence.cpp
+
+  # harmony/
+  harmony/chord_types.cpp
+  harmony/key.cpp
+  harmony/harmonic_timeline.cpp
+
   # forms/
+  forms/prelude.cpp
+  forms/trio_sonata.cpp
+
+  # generator (unified entry point)
+  generator.cpp
+
+  # Future sources added here as modules are implemented:
+  # ornament/
   # solo_string/flow/
   # solo_string/arch/
-  # analysis/
 )
 
 add_library(bach_lib STATIC ${BACH_LIB_SOURCES})

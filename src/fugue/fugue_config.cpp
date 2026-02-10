@@ -14,20 +14,18 @@ const char* answerTypeToString(AnswerType type) {
 }
 
 bool isCharacterAvailable(SubjectCharacter character, int phase) {
-  // Phase is 1-based: phase 1 = Establish, phase 2 = Develop, etc.
+  // All four characters are now available at any valid phase (>= 1).
+  // The original phase restrictions (Severe/Playful: 1-2, Noble: 3+,
+  // Restless: 4+) were implementation-staging gates that have been lifted
+  // now that all character types are fully implemented.
+  if (phase < 1) return false;
+
   switch (character) {
     case SubjectCharacter::Severe:
     case SubjectCharacter::Playful:
-      // Available in phases 1-2.
-      return phase >= 1 && phase <= 2;
-
     case SubjectCharacter::Noble:
-      // Available from phase 3 onward.
-      return phase >= 3;
-
     case SubjectCharacter::Restless:
-      // Available from phase 4 onward.
-      return phase >= 4;
+      return true;
   }
   return false;
 }

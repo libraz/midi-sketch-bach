@@ -7,8 +7,8 @@
 #include <vector>
 
 #include "core/basic_types.h"
-#include "fugue/fugue_config.h"
-#include "fugue/fugue_generator.h"
+#include "generator.h"
+#include "harmony/key.h"
 #include "midi/midi_writer.h"
 
 namespace {
@@ -16,9 +16,10 @@ namespace {
 /// @brief Command-line options parsed from argv.
 struct CliOptions {
   uint32_t seed = 0;
-  bach::Key key = bach::Key::C;
+  bach::KeySignature key = {bach::Key::C, false};
   bach::FormType form = bach::FormType::PreludeAndFugue;
   bach::SubjectCharacter character = bach::SubjectCharacter::Severe;
+  bach::InstrumentType instrument = bach::InstrumentType::Organ;
   uint8_t voices = 3;
   uint16_t bpm = 72;
   std::string output = "output.mid";
@@ -26,6 +27,7 @@ struct CliOptions {
   bool analyze = false;
   bool strict = false;
   bool verbose = false;
+  bool instrument_specified = false;
 };
 
 /// @brief Print usage information to stdout.
@@ -33,18 +35,19 @@ void printUsage() {
   std::printf("bach_cli - J.S. Bach Instrumental MIDI Generator\n\n");
   std::printf("Usage: bach_cli [options]\n\n");
   std::printf("Options:\n");
-  std::printf("  --seed N       Random seed (0 = auto)\n");
-  std::printf("  --key KEY      Key (e.g. g_minor, C_major)\n");
-  std::printf("  --form FORM    Form type\n");
-  std::printf("  --character CH Subject character: severe, playful, noble, restless\n");
-  std::printf("  --voices N     Number of voices (2-5)\n");
-  std::printf("  --bpm N        BPM (40-200)\n");
-  std::printf("  --json         JSON output\n");
-  std::printf("  --analyze      Generate + analysis\n");
-  std::printf("  --strict       No retry\n");
-  std::printf("  --verbose-retry Log retry process\n");
-  std::printf("  -o FILE        Output file path\n");
-  std::printf("  --help         Show this help\n");
+  std::printf("  --seed N         Random seed (0 = auto)\n");
+  std::printf("  --key KEY        Key (e.g. g_minor, C_major, d_minor, F_major)\n");
+  std::printf("  --form FORM      Form type\n");
+  std::printf("  --character CH   Subject character: severe, playful, noble, restless\n");
+  std::printf("  --instrument INS Instrument: organ, harpsichord, piano, violin, cello, guitar\n");
+  std::printf("  --voices N       Number of voices (2-5)\n");
+  std::printf("  --bpm N          BPM (40-200)\n");
+  std::printf("  --json           JSON output\n");
+  std::printf("  --analyze        Generate + analysis\n");
+  std::printf("  --strict         No retry\n");
+  std::printf("  --verbose-retry  Log retry process\n");
+  std::printf("  -o FILE          Output file path\n");
+  std::printf("  --help           Show this help\n");
   std::printf("\nForms:\n");
   std::printf("  fugue, prelude_and_fugue, trio_sonata, chorale_prelude\n");
   std::printf("  toccata_and_fugue, passacaglia, fantasia_and_fugue\n");
@@ -94,11 +97,38 @@ bool parseArgs(int argc, char* argv[], CliOptions& opts) {
         opts.character = bach::SubjectCharacter::Restless;
       }
     } else if (std::strcmp(argv[idx], "--key") == 0 && idx + 1 < argc) {
-      // TODO: parse key string (e.g. "g_minor", "C_major")
-      ++idx;
+      opts.key = bach::keySignatureFromString(argv[++idx]);
+    } else if (std::strcmp(argv[idx], "--instrument") == 0 && idx + 1 < argc) {
+      opts.instrument = bach::instrumentTypeFromString(argv[++idx]);
+      opts.instrument_specified = true;
     }
   }
   return true;
+}
+
+/// @brief Build a GeneratorConfig from parsed CLI options.
+/// @param opts Parsed command-line options.
+/// @return GeneratorConfig ready for generation.
+bach::GeneratorConfig buildGeneratorConfig(const CliOptions& opts) {
+  bach::GeneratorConfig config;
+  config.form = opts.form;
+  config.key = opts.key;
+  config.num_voices = opts.voices;
+  config.bpm = opts.bpm;
+  config.seed = opts.seed;
+  config.character = opts.character;
+  config.json_output = opts.json_output;
+  config.analyze = opts.analyze;
+  config.strict = opts.strict;
+
+  // Auto-detect instrument from form if not explicitly specified.
+  if (opts.instrument_specified) {
+    config.instrument = opts.instrument;
+  } else {
+    config.instrument = bach::defaultInstrumentForForm(opts.form);
+  }
+
+  return config;
 }
 
 }  // namespace
@@ -109,49 +139,46 @@ int main(int argc, char* argv[]) {
     return 0;
   }
 
-  std::printf("bach_cli v0.1.0\n");
-  std::printf("Form: %s, Key: %s, BPM: %d, Voices: %d\n",
-              bach::formTypeToString(opts.form),
-              bach::keyToString(opts.key),
-              opts.bpm, opts.voices);
+  bach::GeneratorConfig config = buildGeneratorConfig(opts);
 
-  if (opts.form == bach::FormType::Fugue ||
-      opts.form == bach::FormType::PreludeAndFugue) {
-    bach::FugueConfig fconfig;
-    fconfig.key = opts.key;
-    fconfig.num_voices = opts.voices;
-    fconfig.bpm = opts.bpm;
-    fconfig.seed = opts.seed;
-    fconfig.character = opts.character;
+  std::printf("bach_cli v0.2.0\n");
+  std::printf("Form:       %s\n", bach::formTypeToString(config.form));
+  std::printf("Key:        %s\n", bach::keySignatureToString(config.key).c_str());
+  std::printf("Voices:     %d\n", config.num_voices);
+  std::printf("BPM:        %d\n", config.bpm);
+  std::printf("Character:  %s\n", bach::subjectCharacterToString(config.character));
+  std::printf("Instrument: %s\n", bach::instrumentTypeToString(config.instrument));
+  std::printf("Seed:       %u%s\n", config.seed, config.seed == 0 ? " (auto)" : "");
+  std::printf("\n");
 
-    bach::FugueResult result = bach::generateFugue(fconfig);
+  bach::GeneratorResult result = bach::generate(config);
 
-    if (result.success) {
-      std::printf("Generated %zu-voice fugue (%d attempts)\n",
-                  result.tracks.size(), result.attempts);
-      bach::MidiWriter writer;
-      writer.build(result.tracks, opts.bpm, opts.key);
-      if (writer.writeToFile(opts.output)) {
-        std::printf("Output: %s\n", opts.output.c_str());
-      } else {
-        std::fprintf(stderr, "Error: failed to write %s\n", opts.output.c_str());
-        return 1;
-      }
-    } else {
-      std::fprintf(stderr, "Error: %s\n", result.error_message.c_str());
-      return 1;
+  if (result.success) {
+    std::printf("Generated: %s\n", result.form_description.c_str());
+    std::printf("Seed used: %u\n", result.seed_used);
+    std::printf("Duration:  %u ticks (%.1f bars)\n",
+                result.total_duration_ticks,
+                static_cast<float>(result.total_duration_ticks) /
+                    static_cast<float>(bach::kTicksPerBar));
+    std::printf("Tracks:    %zu\n", result.tracks.size());
+
+    size_t total_notes = 0;
+    for (const auto& track : result.tracks) {
+      total_notes += track.notes.size();
     }
-  } else {
-    // Other forms: placeholder (generate empty MIDI).
-    std::vector<bach::Track> tracks;
+    std::printf("Notes:     %zu\n", total_notes);
+
     bach::MidiWriter writer;
-    writer.build(tracks, opts.bpm, opts.key);
+    writer.build(result.tracks, config.bpm, config.key.tonic);
     if (writer.writeToFile(opts.output)) {
-      std::printf("Output: %s\n", opts.output.c_str());
+      std::printf("\nOutput:    %s\n", opts.output.c_str());
     } else {
       std::fprintf(stderr, "Error: failed to write %s\n", opts.output.c_str());
       return 1;
     }
+  } else {
+    std::fprintf(stderr, "Error: %s\n", result.error_message.c_str());
+    return 1;
   }
 
   return 0;

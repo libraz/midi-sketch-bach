@@ -70,13 +70,21 @@ constexpr Tick kPlayfulDurations[] = {
     kQuarterNote, kEighthNote, kDottedQuarter, kDottedEighth};
 constexpr int kPlayfulDurCount = 4;
 
-/// @brief Durations for Noble character: stately, longer values.
-constexpr Tick kNobleDurations[] = {kWholeNote, kHalfNote, kQuarterNote};
-constexpr int kNobleDurCount = 3;
+/// @brief Dotted half note duration in ticks.
+constexpr Tick kDottedHalf = kHalfNote + kQuarterNote;  // 1440
+/// @brief Sixteenth note duration in ticks.
+constexpr Tick kSixteenthNote = kTicksPerBeat / 4;  // 120
 
-/// @brief Durations for Restless character: uneven, syncopated.
+/// @brief Durations for Noble character: stately, longer values preferred.
+/// Half notes and dotted quarters dominate; no syncopation.
+constexpr Tick kNobleDurations[] = {kDottedHalf, kHalfNote, kDottedQuarter, kQuarterNote};
+constexpr int kNobleDurCount = 4;
+
+/// @brief Durations for Restless character: short, syncopated, nervous.
+/// Emphasizes eighth and sixteenth notes with occasional dotted values for
+/// off-beat syncopation.
 constexpr Tick kRestlessDurations[] = {
-    kQuarterNote, kEighthNote, kDottedQuarter, kDottedEighth, kHalfNote};
+    kEighthNote, kSixteenthNote, kDottedEighth, kQuarterNote, kDottedQuarter};
 constexpr int kRestlessDurCount = 5;
 
 /// @brief Parameters that shape subject generation for a given character type.
@@ -97,9 +105,13 @@ CharacterParams getCharacterParams(SubjectCharacter character) {
     case SubjectCharacter::Playful:
       return {0.45f, 12, kPlayfulDurations, kPlayfulDurCount};
     case SubjectCharacter::Noble:
+      // Noble: long note values, narrow range, few leaps (<= 30%).
+      // Downward tendency is handled in generateNotes().
       return {0.25f, 10, kNobleDurations, kNobleDurCount};
     case SubjectCharacter::Restless:
-      return {0.35f, 12, kRestlessDurations, kRestlessDurCount};
+      // Restless: shorter values, wider range, more leaps (>= 30%).
+      // Chromatic motion and syncopation handled in generateNotes().
+      return {0.40f, 12, kRestlessDurations, kRestlessDurCount};
   }
   return {0.20f, 10, kSevereDurations, kSevereDurCount};
 }
@@ -112,6 +124,31 @@ constexpr int kStepCount = 4;
 constexpr int kLeapIntervals[] = {-5, -4, -3, 3, 4, 5};
 /// @brief Number of entries in kLeapIntervals.
 constexpr int kLeapCount = 6;
+
+/// @brief Step intervals biased downward for Noble character.
+/// Favors descending motion (-2, -1) over ascending (+1).
+constexpr int kNobleStepIntervals[] = {-2, -2, -1, -1, 1};
+/// @brief Number of entries in kNobleStepIntervals.
+constexpr int kNobleStepCount = 5;
+
+/// @brief Leap intervals biased downward for Noble character.
+/// Favors descending leaps.
+constexpr int kNobleLeapIntervals[] = {-5, -4, -3, -3, 3, 4};
+/// @brief Number of entries in kNobleLeapIntervals.
+constexpr int kNobleLeapCount = 6;
+
+/// @brief Chromatic semitone intervals for Restless character.
+/// Encourages semitone steps (minor 2nds), including chromatic motion.
+constexpr int kRestlessChromaticSteps[] = {-1, 1, -1, 1, -2, 2};
+/// @brief Number of entries in kRestlessChromaticSteps.
+constexpr int kRestlessChromaticCount = 6;
+
+/// @brief Leap intervals for Restless character.
+/// Includes tritone (6 semitones = augmented 4th equivalent in degrees)
+/// and wide leaps for instability.
+constexpr int kRestlessLeapIntervals[] = {-5, -4, -3, 3, 4, 5, -6, 6};
+/// @brief Number of entries in kRestlessLeapIntervals.
+constexpr int kRestlessLeapCount = 8;
 
 }  // namespace
 
@@ -192,13 +229,31 @@ std::vector<NoteEvent> SubjectGenerator::generateNotes(
     if (pitch > max_pitch) max_pitch = pitch;
 
     // Choose next degree: step or leap.
+    // Interval selection is character-dependent:
+    //   Noble: biased downward, avoids syncopation
+    //   Restless: chromatic steps, unstable leaps
+    //   Default: standard diatonic intervals
     bool use_leap = rng::rollProbability(gen, params.leap_prob);
 
     int interval = 0;
-    if (use_leap) {
-      interval = kLeapIntervals[rng::rollRange(gen, 0, kLeapCount - 1)];
+    if (character == SubjectCharacter::Noble) {
+      if (use_leap) {
+        interval = kNobleLeapIntervals[rng::rollRange(gen, 0, kNobleLeapCount - 1)];
+      } else {
+        interval = kNobleStepIntervals[rng::rollRange(gen, 0, kNobleStepCount - 1)];
+      }
+    } else if (character == SubjectCharacter::Restless) {
+      if (use_leap) {
+        interval = kRestlessLeapIntervals[rng::rollRange(gen, 0, kRestlessLeapCount - 1)];
+      } else {
+        interval = kRestlessChromaticSteps[rng::rollRange(gen, 0, kRestlessChromaticCount - 1)];
+      }
     } else {
-      interval = kStepIntervals[rng::rollRange(gen, 0, kStepCount - 1)];
+      if (use_leap) {
+        interval = kLeapIntervals[rng::rollRange(gen, 0, kLeapCount - 1)];
+      } else {
+        interval = kStepIntervals[rng::rollRange(gen, 0, kStepCount - 1)];
+      }
     }
 
     int next_degree = current_degree + interval;

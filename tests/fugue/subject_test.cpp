@@ -167,6 +167,132 @@ TEST_F(SubjectGeneratorTest, PlayfulCharacterRange) {
 }
 
 // ---------------------------------------------------------------------------
+// Noble character
+// ---------------------------------------------------------------------------
+
+TEST_F(SubjectGeneratorTest, NobleCharacterRange) {
+  config.character = SubjectCharacter::Noble;
+  for (uint32_t seed = 1; seed <= 5; ++seed) {
+    Subject subject = generator.generate(config, seed);
+    EXPECT_LE(subject.range(), 14)
+        << "Noble subject range should not exceed 14 semitones (seed "
+        << seed << ")";
+  }
+}
+
+TEST_F(SubjectGeneratorTest, NobleCharacterPreservesCharacter) {
+  config.character = SubjectCharacter::Noble;
+  Subject subject = generator.generate(config, 42);
+  EXPECT_EQ(subject.character, SubjectCharacter::Noble);
+}
+
+TEST_F(SubjectGeneratorTest, NobleCharacterPrefersLongNotes) {
+  config.character = SubjectCharacter::Noble;
+  config.subject_bars = 3;
+  // Noble subjects should have relatively fewer notes (longer durations).
+  // Compared to Restless, Noble should have fewer notes per bar.
+  int noble_total = 0;
+  int restless_total = 0;
+  for (uint32_t seed = 1; seed <= 5; ++seed) {
+    config.character = SubjectCharacter::Noble;
+    Subject noble_subj = generator.generate(config, seed);
+    noble_total += static_cast<int>(noble_subj.noteCount());
+
+    config.character = SubjectCharacter::Restless;
+    Subject restless_subj = generator.generate(config, seed);
+    restless_total += static_cast<int>(restless_subj.noteCount());
+  }
+  // On average across 5 seeds, Noble should have fewer notes than Restless.
+  EXPECT_LT(noble_total, restless_total)
+      << "Noble subjects should have fewer notes (longer values) than Restless";
+}
+
+TEST_F(SubjectGeneratorTest, NobleCharacterDownwardTendency) {
+  config.character = SubjectCharacter::Noble;
+  int descending_count = 0;
+  int ascending_count = 0;
+
+  // Across multiple seeds, Noble should show more descending intervals.
+  for (uint32_t seed = 1; seed <= 10; ++seed) {
+    Subject subject = generator.generate(config, seed);
+    for (size_t idx = 1; idx < subject.notes.size(); ++idx) {
+      int motion = static_cast<int>(subject.notes[idx].pitch) -
+                   static_cast<int>(subject.notes[idx - 1].pitch);
+      if (motion < 0) descending_count++;
+      if (motion > 0) ascending_count++;
+    }
+  }
+  // Noble should have more descending than ascending intervals on average.
+  EXPECT_GE(descending_count, ascending_count)
+      << "Noble character should favor downward melodic motion";
+}
+
+// ---------------------------------------------------------------------------
+// Restless character
+// ---------------------------------------------------------------------------
+
+TEST_F(SubjectGeneratorTest, RestlessCharacterRange) {
+  config.character = SubjectCharacter::Restless;
+  for (uint32_t seed = 1; seed <= 5; ++seed) {
+    Subject subject = generator.generate(config, seed);
+    EXPECT_LE(subject.range(), 16)
+        << "Restless subject range should not exceed 16 semitones (seed "
+        << seed << ")";
+  }
+}
+
+TEST_F(SubjectGeneratorTest, RestlessCharacterPreservesCharacter) {
+  config.character = SubjectCharacter::Restless;
+  Subject subject = generator.generate(config, 42);
+  EXPECT_EQ(subject.character, SubjectCharacter::Restless);
+}
+
+TEST_F(SubjectGeneratorTest, RestlessCharacterUsesShortNotes) {
+  config.character = SubjectCharacter::Restless;
+  config.subject_bars = 2;
+  // Restless should have more notes per bar than Severe (shorter values).
+  int restless_total = 0;
+  int severe_total = 0;
+  for (uint32_t seed = 1; seed <= 5; ++seed) {
+    config.character = SubjectCharacter::Restless;
+    Subject restless_subj = generator.generate(config, seed);
+    restless_total += static_cast<int>(restless_subj.noteCount());
+
+    config.character = SubjectCharacter::Severe;
+    Subject severe_subj = generator.generate(config, seed);
+    severe_total += static_cast<int>(severe_subj.noteCount());
+  }
+  EXPECT_GT(restless_total, severe_total)
+      << "Restless subjects should have more notes (shorter values) than Severe";
+}
+
+TEST_F(SubjectGeneratorTest, RestlessCharacterHasChromaticMotion) {
+  config.character = SubjectCharacter::Restless;
+  int semitone_steps = 0;
+  int total_intervals = 0;
+
+  // Across multiple seeds, Restless should have more semitone intervals.
+  for (uint32_t seed = 1; seed <= 10; ++seed) {
+    Subject subject = generator.generate(config, seed);
+    for (size_t idx = 1; idx < subject.notes.size(); ++idx) {
+      int abs_interval = std::abs(static_cast<int>(subject.notes[idx].pitch) -
+                                  static_cast<int>(subject.notes[idx - 1].pitch));
+      total_intervals++;
+      if (abs_interval == 1) semitone_steps++;
+    }
+  }
+  // Restless should have a non-trivial number of semitone steps.
+  EXPECT_GT(semitone_steps, 0)
+      << "Restless character should include chromatic (semitone) motion";
+  // At least 5% of intervals should be semitones across 10 seeds.
+  float ratio = static_cast<float>(semitone_steps) /
+                static_cast<float>(total_intervals);
+  EXPECT_GT(ratio, 0.05f)
+      << "Restless should have at least 5% semitone intervals, got "
+      << (ratio * 100.0f) << "%";
+}
+
+// ---------------------------------------------------------------------------
 // Determinism
 // ---------------------------------------------------------------------------
 
