@@ -22,10 +22,20 @@ HarmonicFunction classifyFunction(ChordDegree degree, bool /*is_minor*/) {
       return HarmonicFunction::Tonic;
     case ChordDegree::viiDim:
       return HarmonicFunction::Dominant;
-    default:
-      // Extended degrees (bII, V_of_X) default to Dominant function.
-      return HarmonicFunction::Dominant;
+    case ChordDegree::bII:
+      return HarmonicFunction::Subdominant;
+    case ChordDegree::V_of_V:
+    case ChordDegree::V_of_vi:
+    case ChordDegree::V_of_IV:
+    case ChordDegree::V_of_ii:
+    case ChordDegree::V_of_iii:
+      return HarmonicFunction::Applied;
+    case ChordDegree::bVI:
+    case ChordDegree::bVII:
+    case ChordDegree::bIII:
+      return HarmonicFunction::Mediant;
   }
+  return HarmonicFunction::Dominant;
 }
 
 const char* harmonicFunctionToString(HarmonicFunction func) {
@@ -34,6 +44,7 @@ const char* harmonicFunctionToString(HarmonicFunction func) {
     case HarmonicFunction::Subdominant: return "Subdominant";
     case HarmonicFunction::Dominant:    return "Dominant";
     case HarmonicFunction::Mediant:     return "Mediant";
+    case HarmonicFunction::Applied:    return "Applied";
   }
   return "Unknown";
 }
@@ -85,7 +96,12 @@ bool isValidFunctionalProgression(HarmonicFunction from, HarmonicFunction to) {
   //   D -> T (cadential: V -> I)
   //   M -> anywhere (iii is ambiguous, always valid)
   //   anything -> M (color chords always valid as targets)
+  //   Applied -> anywhere (secondary dominants resolve freely)
+  //   anything -> Applied (tonicization is always valid)
   if (from == HarmonicFunction::Mediant || to == HarmonicFunction::Mediant) {
+    return true;
+  }
+  if (from == HarmonicFunction::Applied || to == HarmonicFunction::Applied) {
     return true;
   }
 
@@ -95,6 +111,36 @@ bool isValidFunctionalProgression(HarmonicFunction from, HarmonicFunction to) {
   }
 
   return true;
+}
+
+bool isValidDegreeProgression(ChordDegree from, ChordDegree to, bool is_minor) {
+  HarmonicFunction func_from = classifyFunction(from, is_minor);
+  HarmonicFunction func_to = classifyFunction(to, is_minor);
+  return isValidFunctionalProgression(func_from, func_to);
+}
+
+ChordDegree getSecondaryDominantTarget(ChordDegree degree) {
+  switch (degree) {
+    case ChordDegree::V_of_V:   return ChordDegree::V;
+    case ChordDegree::V_of_vi:  return ChordDegree::vi;
+    case ChordDegree::V_of_IV:  return ChordDegree::IV;
+    case ChordDegree::V_of_ii:  return ChordDegree::ii;
+    case ChordDegree::V_of_iii: return ChordDegree::iii;
+    default:                    return ChordDegree::I;
+  }
+}
+
+bool isSecondaryDominant(ChordDegree degree) {
+  switch (degree) {
+    case ChordDegree::V_of_V:
+    case ChordDegree::V_of_vi:
+    case ChordDegree::V_of_IV:
+    case ChordDegree::V_of_ii:
+    case ChordDegree::V_of_iii:
+      return true;
+    default:
+      return false;
+  }
 }
 
 }  // namespace bach

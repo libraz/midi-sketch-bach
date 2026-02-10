@@ -61,6 +61,25 @@ bool isEligibleForOrnament(const NoteEvent& note, VoiceRole role);
 /// @return The preferred OrnamentType, or Trill as default fallback.
 OrnamentType selectOrnamentType(const NoteEvent& note, const OrnamentConfig& config);
 
+/// @brief Context-aware ornament type selection using harmonic information.
+///
+/// When a HarmonicTimeline is available, the selection incorporates harmonic
+/// context:
+///   - Chord tones prefer Trill (stable, sustained ornament).
+///   - Non-chord tones prefer Vorschlag (approach from upper neighbor).
+///   - Notes with duration >= kTicksPerBeat are eligible for compound ornaments.
+///
+/// Falls back to metric-position-based selection when harmonic context does
+/// not change the preference.
+///
+/// @param note The note to analyze.
+/// @param config The ornament configuration (which types are enabled).
+/// @param timeline Harmonic timeline for chord tone analysis (must not be null).
+/// @param tick The tick position for harmonic lookup.
+/// @return The preferred OrnamentType based on harmonic and metric context.
+OrnamentType selectOrnamentType(const NoteEvent& note, const OrnamentConfig& config,
+                                const HarmonicTimeline& timeline, Tick tick);
+
 }  // namespace bach
 
 #endif  // BACH_ORNAMENT_ORNAMENT_ENGINE_H

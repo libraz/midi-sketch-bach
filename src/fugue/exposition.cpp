@@ -8,10 +8,72 @@
 
 #include "core/note_source.h"
 #include "core/rng_util.h"
+#include "core/scale.h"
 
 namespace bach {
 
 namespace {
+
+/// @brief Per-voice pitch register boundaries.
+struct VoiceRegister {
+  uint8_t low;
+  uint8_t high;
+};
+
+/// @brief Get the pitch register for a voice based on Bach organ fugue practice.
+///
+/// Voices are assigned non-overlapping (or minimally overlapping) registers
+/// to prevent voice crossings.
+///
+/// @param voice_id Voice identifier (0 = soprano/first, increasing = lower).
+/// @param num_voices Total number of voices in the fugue.
+/// @return VoiceRegister with low and high pitch bounds.
+VoiceRegister getVoiceRegister(VoiceId voice_id, uint8_t num_voices) {
+  if (num_voices == 2) {
+    constexpr VoiceRegister kRanges2[] = {
+        {55, 84},  // Voice 0 (upper): G3-C6
+        {36, 67},  // Voice 1 (lower): C2-G4
+    };
+    return kRanges2[voice_id < 2 ? voice_id : 1];
+  }
+  if (num_voices == 3) {
+    constexpr VoiceRegister kRanges3[] = {
+        {60, 96},  // Voice 0 (soprano): C4-C6
+        {55, 79},  // Voice 1 (alto): G3-G5
+        {36, 60},  // Voice 2 (bass): C2-C4
+    };
+    return kRanges3[voice_id < 3 ? voice_id : 2];
+  }
+  // 4+ voices
+  constexpr VoiceRegister kRanges4[] = {
+      {60, 96},  // Voice 0 (soprano): C4-C6
+      {55, 79},  // Voice 1 (alto): G3-G5
+      {48, 72},  // Voice 2 (tenor): C3-C5
+      {24, 50},  // Voice 3 (bass/pedal): C1-D3
+  };
+  return kRanges4[voice_id < 4 ? voice_id : 3];
+}
+
+/// @brief Adapt countersubject pitches from one key to another.
+///
+/// In Bach's practice, the countersubject is a fixed melodic identity
+/// with minimal pitch-class substitution for the dominant key.
+/// For C->G major: F(65,53,77...)→F#(66,54,78...) etc.
+///
+/// @param cs_notes Countersubject notes to adapt.
+/// @param to_key Target key.
+/// @param scale Scale type.
+/// @return Adapted notes with non-scale pitches snapped to the target key.
+std::vector<NoteEvent> adaptCSToKey(const std::vector<NoteEvent>& cs_notes,
+                                     Key to_key, ScaleType scale) {
+  auto adapted = cs_notes;
+  for (auto& note : adapted) {
+    if (!scale_util::isScaleTone(note.pitch, to_key, scale)) {
+      note.pitch = scale_util::nearestScaleTone(note.pitch, to_key, scale);
+    }
+  }
+  return adapted;
+}
 
 /// @brief Assign a VoiceRole based on entry index within the exposition.
 ///
@@ -69,79 +131,101 @@ void placeEntryNotes(const std::vector<NoteEvent>& source_notes,
 ///
 /// When a new voice enters with subject/answer, the voice that most recently
 /// completed its own entry plays the countersubject. The countersubject notes
-/// are offset to start at the new entry's tick position.
+/// are offset to start at the new entry's tick position and shifted to fit
+/// the voice's register.
 ///
 /// @param cs_notes Countersubject notes to place.
 /// @param voice_id Voice that plays the countersubject.
 /// @param start_tick Tick when the countersubject begins.
+/// @param voice_reg Voice register boundaries for pitch placement.
 /// @param voice_notes Output map to append notes to.
 void placeCountersubjectNotes(const std::vector<NoteEvent>& cs_notes,
                               VoiceId voice_id,
                               Tick start_tick,
+                              VoiceRegister voice_reg,
                               std::map<VoiceId, std::vector<NoteEvent>>& voice_notes) {
+  if (cs_notes.empty()) return;
+
+  // Compute mean pitch of the countersubject.
+  int cs_total = 0;
+  for (const auto& n : cs_notes) {
+    cs_total += static_cast<int>(n.pitch);
+  }
+  int cs_mean = cs_total / static_cast<int>(cs_notes.size());
+
+  // Compute voice register center and octave shift needed.
+  int voice_center = (static_cast<int>(voice_reg.low) +
+                      static_cast<int>(voice_reg.high)) / 2;
+  int octave_shift = ((voice_center - cs_mean + 6) / 12) * 12;
+
   for (const auto& cs_note : cs_notes) {
     NoteEvent note = cs_note;
     note.start_tick = cs_note.start_tick + start_tick;
     note.voice = voice_id;
+    int shifted = static_cast<int>(cs_note.pitch) + octave_shift;
+    note.pitch = clampPitch(shifted, voice_reg.low, voice_reg.high);
     voice_notes[voice_id].push_back(note);
   }
 }
 
-/// @brief Generate simple free counterpoint filler for earlier voices.
+/// @brief Generate diatonic scalar passage work as free counterpoint filler.
 ///
 /// When a voice is two or more entries behind the current entry, it plays
-/// free counterpoint material. Currently this generates sustained tonic
-/// notes as a placeholder. Full free counterpoint generation will be
-/// implemented with the counterpoint engine integration.
+/// free counterpoint material. This generates stepwise diatonic motion
+/// (quarter-note walking through scale degrees), characteristic of Bach's
+/// free counterpoint in fugue expositions.
 ///
 /// @param voice_id Voice to generate filler for.
 /// @param start_tick When the filler begins.
 /// @param duration_ticks How long the filler lasts.
 /// @param key Musical key for pitch selection.
+/// @param voice_reg Voice register boundaries.
 /// @param rng Random number generator for variation.
 /// @param voice_notes Output map to append notes to.
 void placeFreeCounterpoint(VoiceId voice_id,
                            Tick start_tick,
                            Tick duration_ticks,
                            Key key,
+                           VoiceRegister voice_reg,
                            std::mt19937& rng,  // NOLINT(runtime/references): mt19937 must be mutable
                            std::map<VoiceId, std::vector<NoteEvent>>& voice_notes) {
   if (duration_ticks == 0) return;
 
-  // Generate sustained notes on scale degrees as placeholder free counterpoint.
-  // Use whole-note durations (one per bar) at tonic pitch.
-  int tonic_pitch = 60 + static_cast<int>(key);  // C4 transposed by key offset.
+  ScaleType scale = ScaleType::Major;
+  int center_pitch = (static_cast<int>(voice_reg.low) +
+                      static_cast<int>(voice_reg.high)) / 2;
+  int current_deg = scale_util::pitchToAbsoluteDegree(
+      clampPitch(center_pitch, 0, 127), key, scale);
 
-  // Vary the pitch slightly based on voice and RNG for voice independence.
-  int pitch_offset = rng::rollRange(rng, -3, 3);
-  int pitch = tonic_pitch + pitch_offset;
-
-  // Clamp to valid range.
-  if (pitch < 36) pitch = 36;
-  if (pitch > 96) pitch = 96;
-
+  int direction = rng::rollProbability(rng, 0.5f) ? 1 : -1;
   Tick current_tick = start_tick;
   Tick remaining = duration_ticks;
+  constexpr Tick kStepDur = kTicksPerBeat;  // Quarter note steps.
 
   while (remaining > 0) {
-    Tick note_dur = std::min(remaining, kTicksPerBar);
+    Tick dur = std::min(remaining, kStepDur);
+    uint8_t pitch = scale_util::absoluteDegreeToPitch(current_deg, key, scale);
+    pitch = clampPitch(static_cast<int>(pitch), voice_reg.low, voice_reg.high);
 
     NoteEvent note;
     note.start_tick = current_tick;
-    note.duration = note_dur;
-    note.pitch = static_cast<uint8_t>(pitch);
+    note.duration = dur;
+    note.pitch = pitch;
     note.velocity = 80;
     note.voice = voice_id;
     voice_notes[voice_id].push_back(note);
 
-    current_tick += note_dur;
-    remaining -= note_dur;
+    current_tick += dur;
+    remaining -= dur;
 
-    // Slight pitch variation for next note.
-    pitch_offset = rng::rollRange(rng, -2, 2);
-    pitch = tonic_pitch + pitch_offset;
-    if (pitch < 36) pitch = 36;
-    if (pitch > 96) pitch = 96;
+    // Advance degree, reverse at range boundaries.
+    current_deg += direction;
+    uint8_t next_p = scale_util::absoluteDegreeToPitch(
+        current_deg, key, scale);
+    if (next_p > voice_reg.high || next_p < voice_reg.low) {
+      direction = -direction;
+      current_deg += direction * 2;
+    }
   }
 }
 
@@ -237,16 +321,25 @@ Exposition buildExposition(const Subject& subject,
     // against this new entry.
     if (idx > 0) {
       VoiceId prev_voice = expo.entries[idx - 1].voice_id;
-      placeCountersubjectNotes(countersubject.notes, prev_voice,
-                               entry.entry_tick, expo.voice_notes);
+      VoiceRegister prev_reg = getVoiceRegister(prev_voice, num_voices);
+
+      // Adapt countersubject to answer key when accompanying an answer entry.
+      std::vector<NoteEvent> cs_to_place = countersubject.notes;
+      if (!entry.is_subject) {
+        cs_to_place = adaptCSToKey(cs_to_place, answer.key, ScaleType::Major);
+      }
+
+      placeCountersubjectNotes(cs_to_place, prev_voice,
+                               entry.entry_tick, prev_reg, expo.voice_notes);
     }
 
     // Voices that are two or more entries behind play free counterpoint.
     if (idx >= 2) {
       for (uint8_t earlier = 0; earlier < idx - 1; ++earlier) {
         VoiceId earlier_voice = expo.entries[earlier].voice_id;
+        VoiceRegister earlier_reg = getVoiceRegister(earlier_voice, num_voices);
         placeFreeCounterpoint(earlier_voice, entry.entry_tick,
-                              entry_interval, config.key, rng,
+                              entry_interval, config.key, earlier_reg, rng,
                               expo.voice_notes);
       }
     }

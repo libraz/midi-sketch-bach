@@ -2,11 +2,16 @@
 
 #include "ornament/ornament_engine.h"
 
+#include "harmony/chord_types.h"
+#include "harmony/harmonic_timeline.h"
 #include "ornament/appoggiatura.h"
+#include "ornament/compound_ornament.h"
 #include "ornament/mordent.h"
+#include "ornament/nachschlag.h"
 #include "ornament/pralltriller.h"
 #include "ornament/trill.h"
 #include "ornament/turn.h"
+#include "ornament/vorschlag.h"
 
 namespace bach {
 namespace {
@@ -77,10 +82,28 @@ std::vector<NoteEvent> applyOrnamentToNote(const NoteEvent& note, OrnamentType t
       return generateAppoggiatura(note, upper);
     case OrnamentType::Pralltriller:
       return generatePralltriller(note, upper);
+    case OrnamentType::Vorschlag:
+      return generateVorschlag(note, upper);
+    case OrnamentType::Nachschlag:
+      return generateNachschlag(note, lower);
+    case OrnamentType::CompoundTrillNachschlag:
+      return generateCompoundOrnament(note, CompoundOrnamentType::TrillWithNachschlag,
+                                      upper, lower);
+    case OrnamentType::CompoundTurnTrill:
+      return generateCompoundOrnament(note, CompoundOrnamentType::TurnThenTrill, upper, lower);
     default:
       // Unsupported ornament types return the note unchanged.
       return {note};
   }
+}
+
+/// @brief Check if any ornament type is enabled in the config.
+/// @param config The ornament configuration.
+/// @return true if at least one ornament type is enabled.
+bool anyOrnamentEnabled(const OrnamentConfig& config) {
+  return config.enable_trill || config.enable_mordent || config.enable_turn ||
+         config.enable_appoggiatura || config.enable_pralltriller ||
+         config.enable_vorschlag || config.enable_nachschlag || config.enable_compound;
 }
 
 }  // namespace
@@ -104,6 +127,7 @@ OrnamentType selectOrnamentType(const NoteEvent& note, const OrnamentConfig& con
     // Strong beats prefer trills and appoggiaturas (on-beat emphasis).
     if (config.enable_trill) return OrnamentType::Trill;
     if (config.enable_appoggiatura) return OrnamentType::Appoggiatura;
+    if (config.enable_vorschlag) return OrnamentType::Vorschlag;
     if (config.enable_mordent) return OrnamentType::Mordent;
     if (config.enable_turn) return OrnamentType::Turn;
     if (config.enable_pralltriller) return OrnamentType::Pralltriller;
@@ -111,13 +135,45 @@ OrnamentType selectOrnamentType(const NoteEvent& note, const OrnamentConfig& con
     // Weak beats prefer mordents and pralltriller (lighter ornaments).
     if (config.enable_mordent) return OrnamentType::Mordent;
     if (config.enable_pralltriller) return OrnamentType::Pralltriller;
+    if (config.enable_nachschlag) return OrnamentType::Nachschlag;
     if (config.enable_trill) return OrnamentType::Trill;
     if (config.enable_turn) return OrnamentType::Turn;
     if (config.enable_appoggiatura) return OrnamentType::Appoggiatura;
+    if (config.enable_vorschlag) return OrnamentType::Vorschlag;
   }
 
   // Fallback: trill (always available as last resort).
   return OrnamentType::Trill;
+}
+
+OrnamentType selectOrnamentType(const NoteEvent& note, const OrnamentConfig& config,
+                                const HarmonicTimeline& timeline, Tick tick) {
+  const auto& event = timeline.getAt(tick);
+  const bool chord_tone = isChordTone(note.pitch, event);
+
+  // Compound ornaments for long notes (>= 1 beat).
+  if (note.duration >= kTicksPerBeat && config.enable_compound) {
+    const uint8_t beat = beatInBar(note.start_tick);
+    const bool strong_beat = (beat == 0 || beat == 2);
+
+    if (chord_tone && strong_beat) {
+      return OrnamentType::CompoundTrillNachschlag;
+    }
+    if (!chord_tone && !strong_beat) {
+      return OrnamentType::CompoundTurnTrill;
+    }
+  }
+
+  // Chord tones prefer sustained ornaments (trill).
+  if (chord_tone) {
+    if (config.enable_trill) return OrnamentType::Trill;
+  } else {
+    // Non-chord tones prefer approach ornaments (vorschlag).
+    if (config.enable_vorschlag) return OrnamentType::Vorschlag;
+  }
+
+  // Fall back to metric-position-based selection.
+  return selectOrnamentType(note, config);
 }
 
 std::vector<NoteEvent> applyOrnaments(const std::vector<NoteEvent>& notes,
@@ -135,9 +191,7 @@ std::vector<NoteEvent> applyOrnaments(const std::vector<NoteEvent>& notes,
   }
 
   // Check if any ornament type is enabled.
-  if (!context.config.enable_trill && !context.config.enable_mordent &&
-      !context.config.enable_turn && !context.config.enable_appoggiatura &&
-      !context.config.enable_pralltriller) {
+  if (!anyOrnamentEnabled(context.config)) {
     return notes;
   }
 
@@ -160,8 +214,13 @@ std::vector<NoteEvent> applyOrnaments(const std::vector<NoteEvent>& notes,
     const float roll = note_rng.next();
 
     if (roll < density) {
-      // Apply ornament.
-      OrnamentType type = selectOrnamentType(note, context.config);
+      // Select ornament type: use harmonic context if available.
+      OrnamentType type;
+      if (context.timeline != nullptr) {
+        type = selectOrnamentType(note, context.config, *context.timeline, note.start_tick);
+      } else {
+        type = selectOrnamentType(note, context.config);
+      }
       auto ornamented = applyOrnamentToNote(note, type);
       for (auto& sub_note : ornamented) {
         result.push_back(sub_note);

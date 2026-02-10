@@ -23,6 +23,8 @@ struct HarmonicEvent {
   uint8_t bass_pitch = 0; // Bass note MIDI pitch
   float weight = 1.0f;    // Harmonic weight (1.0 = strong beat, 0.5 = weak)
   bool is_immutable = false;  // If true, cannot be altered by generation
+  Key modulation_target = Key::C;  // Target key for modulation (same as key if none)
+  bool has_modulation = false;     // Whether this event represents a modulation point
 };
 
 }  // namespace bach

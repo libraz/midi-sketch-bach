@@ -22,6 +22,10 @@ ChordQuality majorKeyQuality(ChordDegree degree) {
     case ChordDegree::V_of_vi: return ChordQuality::Dominant7;
     case ChordDegree::V_of_IV: return ChordQuality::Dominant7;
     case ChordDegree::V_of_ii: return ChordQuality::Dominant7;
+    case ChordDegree::bVI:     return ChordQuality::Major;
+    case ChordDegree::bVII:    return ChordQuality::Major;
+    case ChordDegree::bIII:    return ChordQuality::Major;
+    case ChordDegree::V_of_iii: return ChordQuality::Dominant7;
   }
   return ChordQuality::Major;
 }
@@ -42,6 +46,10 @@ ChordQuality minorKeyQuality(ChordDegree degree) {
     case ChordDegree::V_of_vi: return ChordQuality::Dominant7;
     case ChordDegree::V_of_IV: return ChordQuality::Dominant7;
     case ChordDegree::V_of_ii: return ChordQuality::Dominant7;
+    case ChordDegree::bVI:     return ChordQuality::Major;   // Same as natural minor VI
+    case ChordDegree::bVII:    return ChordQuality::Major;   // Same as natural minor VII
+    case ChordDegree::bIII:    return ChordQuality::Major;   // Same as natural minor III
+    case ChordDegree::V_of_iii: return ChordQuality::Dominant7;
   }
   return ChordQuality::Minor;
 }
@@ -61,6 +69,10 @@ uint8_t degreeSemitones(ChordDegree degree) {
     case ChordDegree::V_of_vi: return 4;   // E in C major (V/vi root)
     case ChordDegree::V_of_IV: return 0;   // C in C major (V/IV root)
     case ChordDegree::V_of_ii: return 9;   // A in C major (V/ii root)
+    case ChordDegree::bVI:     return 8;   // Ab in C major
+    case ChordDegree::bVII:    return 10;  // Bb in C major
+    case ChordDegree::bIII:    return 3;   // Eb in C major
+    case ChordDegree::V_of_iii: return 11; // B in C major (V/iii root)
   }
   return 0;
 }
@@ -80,6 +92,10 @@ uint8_t degreeMinorSemitones(ChordDegree degree) {
     case ChordDegree::V_of_vi: return 3;
     case ChordDegree::V_of_IV: return 0;
     case ChordDegree::V_of_ii: return 8;
+    case ChordDegree::bVI:     return 8;   // Ab in A minor
+    case ChordDegree::bVII:    return 10;  // G in A minor (same as natural minor VII)
+    case ChordDegree::bIII:    return 3;   // C in A minor (same as natural minor III)
+    case ChordDegree::V_of_iii: return 11; // B in minor context (V/iii root)
   }
   return 0;
 }
@@ -96,6 +112,9 @@ const char* chordQualityToString(ChordQuality quality) {
     case ChordQuality::Diminished7:      return "Diminished7";
     case ChordQuality::HalfDiminished7:  return "HalfDiminished7";
     case ChordQuality::AugmentedSixth:   return "AugmentedSixth";
+    case ChordQuality::AugSixthItalian: return "AugSixthItalian";
+    case ChordQuality::AugSixthFrench:  return "AugSixthFrench";
+    case ChordQuality::AugSixthGerman:  return "AugSixthGerman";
   }
   return "Unknown";
 }
@@ -114,6 +133,10 @@ const char* chordDegreeToString(ChordDegree degree) {
     case ChordDegree::V_of_vi: return "V/vi";
     case ChordDegree::V_of_IV: return "V/IV";
     case ChordDegree::V_of_ii: return "V/ii";
+    case ChordDegree::bVI:     return "bVI";
+    case ChordDegree::bVII:    return "bVII";
+    case ChordDegree::bIII:    return "bIII";
+    case ChordDegree::V_of_iii: return "V/iii";
   }
   return "?";
 }
@@ -159,6 +182,21 @@ bool isChordTone(uint8_t pitch, const HarmonicEvent& event) {
       third_interval = 4;
       fifth_interval = 8;
       break;
+    case ChordQuality::AugSixthItalian:
+      // It+6: root(b6), +4(1), +6(#4) -> semitones 0, 4, 6 from root
+      third_interval = 4;
+      fifth_interval = 6;
+      break;
+    case ChordQuality::AugSixthFrench:
+      // Fr+6: root(b6), +4(1), +6(2), +8(#4) -> semitones 0, 4, 6, 8 from root
+      third_interval = 4;
+      fifth_interval = 6;
+      break;
+    case ChordQuality::AugSixthGerman:
+      // Ger+6: root(b6), +4(1), +5(b3), +8(#4) -> semitones 0, 4, 5, 8 from root
+      third_interval = 4;
+      fifth_interval = 5;
+      break;
   }
 
   int third_pc = (root_pc + third_interval) % 12;
@@ -179,6 +217,12 @@ bool isChordTone(uint8_t pitch, const HarmonicEvent& event) {
       break;
     case ChordQuality::Diminished7:
       seventh_interval = 9;   // Diminished 7th
+      break;
+    case ChordQuality::AugSixthFrench:
+      seventh_interval = 8;   // Fr+6 4th tone: #4 = root + 8 semitones
+      break;
+    case ChordQuality::AugSixthGerman:
+      seventh_interval = 8;   // Ger+6 4th tone: #4 = root + 8 semitones
       break;
     default:
       break;

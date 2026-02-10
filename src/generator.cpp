@@ -6,10 +6,14 @@
 #include <random>
 
 #include "forms/chorale_prelude.h"
+#include "forms/fantasia.h"
+#include "forms/passacaglia.h"
 #include "forms/prelude.h"
+#include "forms/toccata.h"
 #include "fugue/fugue_config.h"
 #include "fugue/fugue_generator.h"
 #include "harmony/harmonic_timeline.h"
+#include "harmony/modulation_plan.h"
 #include "solo_string/arch/chaconne_engine.h"
 #include "solo_string/flow/harmonic_arpeggio_engine.h"
 
@@ -79,6 +83,7 @@ int flowSectionsForScale(DurationScale scale) {
 FugueConfig toFugueConfig(const GeneratorConfig& config) {
   FugueConfig fconfig;
   fconfig.key = config.key.tonic;
+  fconfig.is_minor = config.key.is_minor;
   fconfig.num_voices = config.num_voices;
   fconfig.bpm = config.bpm;
   fconfig.seed = config.seed;
@@ -94,6 +99,14 @@ FugueConfig toFugueConfig(const GeneratorConfig& config) {
   } else {
     fugueDurationParams(config.scale, fconfig.develop_pairs, fconfig.episode_bars);
   }
+
+  // Create modulation plan based on key mode (Principle 4: design values).
+  if (config.key.is_minor) {
+    fconfig.modulation_plan = ModulationPlan::createForMinor(config.key.tonic);
+  } else {
+    fconfig.modulation_plan = ModulationPlan::createForMajor(config.key.tonic);
+  }
+  fconfig.has_modulation_plan = true;
 
   return fconfig;
 }
@@ -274,12 +287,164 @@ GeneratorResult generate(const GeneratorConfig& config) {
   result.seed_used = effective_config.seed;
 
   switch (effective_config.form) {
-    case FormType::Fugue:
-    case FormType::ToccataAndFugue:
-    case FormType::FantasiaAndFugue:
-    case FormType::Passacaglia: {
+    case FormType::Fugue: {
       result = generateFugueForm(effective_config);
       result.seed_used = effective_config.seed;
+      return result;
+    }
+
+    case FormType::ToccataAndFugue: {
+      // Generate toccata free section, then append a fugue.
+      ToccataConfig tconfig;
+      tconfig.key = effective_config.key;
+      tconfig.bpm = effective_config.bpm;
+      tconfig.seed = effective_config.seed;
+      tconfig.num_voices = effective_config.num_voices;
+      tconfig.section_bars = 24;
+
+      ToccataResult toc_result = generateToccata(tconfig);
+      if (!toc_result.success) {
+        result.success = false;
+        result.seed_used = effective_config.seed;
+        result.error_message = "Toccata generation failed: " + toc_result.error_message;
+        return result;
+      }
+
+      Tick toc_duration = toc_result.total_duration_ticks;
+
+      // Generate the fugue section.
+      FugueConfig fconfig = toFugueConfig(effective_config);
+      FugueResult fugue_result = generateFugue(fconfig);
+      if (!fugue_result.success) {
+        result.success = false;
+        result.seed_used = effective_config.seed;
+        result.error_message = "Fugue generation failed: " + fugue_result.error_message;
+        return result;
+      }
+
+      // Offset fugue notes by toccata duration and merge tracks.
+      offsetTrackNotes(fugue_result.tracks, toc_duration);
+
+      size_t track_count = std::max(toc_result.tracks.size(), fugue_result.tracks.size());
+      result.tracks.resize(track_count);
+      for (size_t idx = 0; idx < track_count; ++idx) {
+        if (idx < toc_result.tracks.size()) {
+          result.tracks[idx] = std::move(toc_result.tracks[idx]);
+        }
+        if (idx < fugue_result.tracks.size()) {
+          auto& dest = result.tracks[idx].notes;
+          auto& src = fugue_result.tracks[idx].notes;
+          dest.insert(dest.end(), src.begin(), src.end());
+          if (result.tracks[idx].name.empty()) {
+            result.tracks[idx].name = fugue_result.tracks[idx].name;
+            result.tracks[idx].channel = fugue_result.tracks[idx].channel;
+            result.tracks[idx].program = fugue_result.tracks[idx].program;
+          }
+        }
+      }
+
+      Tick fugue_duration = calculateTotalDuration(fugue_result.tracks);
+      result.total_duration_ticks = toc_duration + fugue_duration;
+      result.tempo_events.push_back({0, effective_config.bpm});
+      result.timeline = HarmonicTimeline::createStandard(
+          effective_config.key, result.total_duration_ticks, HarmonicResolution::Bar);
+      result.success = true;
+      result.seed_used = effective_config.seed;
+      result.form_description =
+          "Toccata and Fugue in " + keySignatureToString(effective_config.key) + ", " +
+          std::to_string(effective_config.num_voices) + " voices";
+      return result;
+    }
+
+    case FormType::FantasiaAndFugue: {
+      // Generate fantasia free section, then append a fugue.
+      FantasiaConfig fant_config;
+      fant_config.key = effective_config.key;
+      fant_config.bpm = effective_config.bpm;
+      fant_config.seed = effective_config.seed;
+      fant_config.num_voices = effective_config.num_voices;
+      fant_config.section_bars = 32;
+
+      FantasiaResult fant_result = generateFantasia(fant_config);
+      if (!fant_result.success) {
+        result.success = false;
+        result.seed_used = effective_config.seed;
+        result.error_message = "Fantasia generation failed: " + fant_result.error_message;
+        return result;
+      }
+
+      Tick fant_duration = fant_result.total_duration_ticks;
+
+      // Generate the fugue section.
+      FugueConfig fconfig = toFugueConfig(effective_config);
+      FugueResult fugue_result = generateFugue(fconfig);
+      if (!fugue_result.success) {
+        result.success = false;
+        result.seed_used = effective_config.seed;
+        result.error_message = "Fugue generation failed: " + fugue_result.error_message;
+        return result;
+      }
+
+      // Offset fugue notes and merge tracks.
+      offsetTrackNotes(fugue_result.tracks, fant_duration);
+
+      size_t track_count = std::max(fant_result.tracks.size(), fugue_result.tracks.size());
+      result.tracks.resize(track_count);
+      for (size_t idx = 0; idx < track_count; ++idx) {
+        if (idx < fant_result.tracks.size()) {
+          result.tracks[idx] = std::move(fant_result.tracks[idx]);
+        }
+        if (idx < fugue_result.tracks.size()) {
+          auto& dest = result.tracks[idx].notes;
+          auto& src = fugue_result.tracks[idx].notes;
+          dest.insert(dest.end(), src.begin(), src.end());
+          if (result.tracks[idx].name.empty()) {
+            result.tracks[idx].name = fugue_result.tracks[idx].name;
+            result.tracks[idx].channel = fugue_result.tracks[idx].channel;
+            result.tracks[idx].program = fugue_result.tracks[idx].program;
+          }
+        }
+      }
+
+      Tick fugue_duration = calculateTotalDuration(fugue_result.tracks);
+      result.total_duration_ticks = fant_duration + fugue_duration;
+      result.tempo_events.push_back({0, effective_config.bpm});
+      result.timeline = HarmonicTimeline::createStandard(
+          effective_config.key, result.total_duration_ticks, HarmonicResolution::Bar);
+      result.success = true;
+      result.seed_used = effective_config.seed;
+      result.form_description =
+          "Fantasia and Fugue in " + keySignatureToString(effective_config.key) + ", " +
+          std::to_string(effective_config.num_voices) + " voices";
+      return result;
+    }
+
+    case FormType::Passacaglia: {
+      PassacagliaConfig pconfig;
+      pconfig.key = effective_config.key;
+      pconfig.bpm = effective_config.bpm;
+      pconfig.seed = effective_config.seed;
+      pconfig.num_voices = effective_config.num_voices;
+
+      PassacagliaResult pass_result = generatePassacaglia(pconfig);
+      if (!pass_result.success) {
+        result.success = false;
+        result.seed_used = effective_config.seed;
+        result.error_message = "Passacaglia generation failed: " + pass_result.error_message;
+        return result;
+      }
+
+      result.tracks = std::move(pass_result.tracks);
+      result.total_duration_ticks = pass_result.total_duration_ticks;
+      result.tempo_events.push_back({0, effective_config.bpm});
+      result.timeline = pass_result.timeline.size() > 0
+          ? std::move(pass_result.timeline)
+          : HarmonicTimeline::createStandard(
+                effective_config.key, result.total_duration_ticks, HarmonicResolution::Bar);
+      result.success = true;
+      result.seed_used = effective_config.seed;
+      result.form_description =
+          "Passacaglia in " + keySignatureToString(effective_config.key);
       return result;
     }
 

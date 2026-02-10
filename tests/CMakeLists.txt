@@ -16,6 +16,7 @@ set(BACH_TEST_SOURCES
   core/note_creator_test.cpp
   core/rng_util_test.cpp
   core/phrase_structure_test.cpp
+  core/rhythm_pattern_test.cpp
 
   # midi/
   midi/midi_writer_test.cpp
@@ -29,6 +30,8 @@ set(BACH_TEST_SOURCES
   instrument/cello_model_test.cpp
   instrument/violin_model_test.cpp
   instrument/bowed_note_factory_test.cpp
+  instrument/bowed/bow_direction_test.cpp
+  instrument/bowed/harmonics_test.cpp
 
   # counterpoint/
   counterpoint/counterpoint_state_test.cpp
@@ -63,6 +66,7 @@ set(BACH_TEST_SOURCES
   fugue/fugue_energy_curve_test.cpp
   fugue/cadence_plan_test.cpp
   fugue/episode_characteristic_motif_test.cpp
+  fugue/episode_modulation_test.cpp
   fugue/stretto_fragment_test.cpp
 
   # transform/
@@ -81,6 +85,7 @@ set(BACH_TEST_SOURCES
   analysis/analysis_runner_test.cpp
   analysis/implied_voice_analyzer_test.cpp
   analysis/cross_relation_test.cpp
+  analysis/voice_harmony_analyzer_test.cpp
 
   # harmony/
   harmony/chord_types_test.cpp
@@ -88,11 +93,17 @@ set(BACH_TEST_SOURCES
   harmony/harmonic_event_test.cpp
   harmony/harmonic_function_test.cpp
   harmony/harmonic_timeline_test.cpp
+  harmony/chord_function_test.cpp
+  harmony/modulation_plan_test.cpp
+  harmony/extended_chord_test.cpp
 
   # forms/
   forms/prelude_test.cpp
   forms/trio_sonata_test.cpp
   forms/chorale_prelude_test.cpp
+  forms/toccata_test.cpp
+  forms/passacaglia_test.cpp
+  forms/fantasia_test.cpp
 
   # generator (unified entry point)
   generator_test.cpp
@@ -104,6 +115,10 @@ set(BACH_TEST_SOURCES
   ornament/turn_test.cpp
   ornament/ornament_engine_test.cpp
   ornament/schleifer_test.cpp
+  ornament/vorschlag_test.cpp
+  ornament/nachschlag_test.cpp
+  ornament/compound_ornament_test.cpp
+  ornament/context_ornament_test.cpp
 
   # solo_string/flow/
   solo_string/flow/arpeggio_flow_config_test.cpp
@@ -121,6 +136,11 @@ set(BACH_TEST_SOURCES
   solo_string/arch/scaled_variation_plan_test.cpp
   solo_string/arch/chaconne_engine_test.cpp
   solo_string/arch/destruction_resistance_test.cpp
+
+  # expression/
+  expression/articulation_test.cpp
+  expression/phrase_detector_test.cpp
+  expression/expression_curve_test.cpp
 )
 
 add_executable(bach_tests ${BACH_TEST_SOURCES})

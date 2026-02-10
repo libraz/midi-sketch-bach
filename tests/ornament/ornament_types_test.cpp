@@ -35,6 +35,24 @@ TEST(OrnamentTypesTest, SchleiferToString) {
   EXPECT_STREQ(ornamentTypeToString(OrnamentType::Schleifer), "schleifer");
 }
 
+TEST(OrnamentTypesTest, VorschlagToString) {
+  EXPECT_STREQ(ornamentTypeToString(OrnamentType::Vorschlag), "vorschlag");
+}
+
+TEST(OrnamentTypesTest, NachschlagToString) {
+  EXPECT_STREQ(ornamentTypeToString(OrnamentType::Nachschlag), "nachschlag");
+}
+
+TEST(OrnamentTypesTest, CompoundTrillNachschlagToString) {
+  EXPECT_STREQ(ornamentTypeToString(OrnamentType::CompoundTrillNachschlag),
+               "compound_trill_nachschlag");
+}
+
+TEST(OrnamentTypesTest, CompoundTurnTrillToString) {
+  EXPECT_STREQ(ornamentTypeToString(OrnamentType::CompoundTurnTrill),
+               "compound_turn_trill");
+}
+
 // ---------------------------------------------------------------------------
 // OrnamentConfig defaults
 // ---------------------------------------------------------------------------
@@ -46,6 +64,9 @@ TEST(OrnamentConfigTest, DefaultValues) {
   EXPECT_TRUE(config.enable_turn);
   EXPECT_TRUE(config.enable_appoggiatura);
   EXPECT_TRUE(config.enable_pralltriller);
+  EXPECT_TRUE(config.enable_vorschlag);
+  EXPECT_TRUE(config.enable_nachschlag);
+  EXPECT_TRUE(config.enable_compound);
   EXPECT_FLOAT_EQ(config.ornament_density, 0.15f);
 }
 

@@ -1,0 +1,588 @@
+// Tests for forms/passacaglia.h -- passacaglia generation, ground bass
+// immutability, variation complexity, track configuration, pitch ranges,
+// and determinism.
+
+#include "forms/passacaglia.h"
+
+#include <gtest/gtest.h>
+
+#include <algorithm>
+#include <cstdint>
+#include <vector>
+
+#include "core/basic_types.h"
+#include "core/gm_program.h"
+#include "core/pitch_utils.h"
+#include "harmony/key.h"
+
+namespace bach {
+namespace {
+
+// ---------------------------------------------------------------------------
+// Test helpers
+// ---------------------------------------------------------------------------
+
+/// @brief Create a default PassacagliaConfig for testing.
+/// @param seed Random seed (default 42 for deterministic tests).
+/// @return PassacagliaConfig with standard C minor settings.
+PassacagliaConfig makeTestConfig(uint32_t seed = 42) {
+  PassacagliaConfig config;
+  config.key = {Key::C, true};  // C minor (BWV 582 default).
+  config.bpm = 60;
+  config.seed = seed;
+  config.num_voices = 4;
+  config.num_variations = 12;
+  config.ground_bass_bars = 8;
+  config.append_fugue = false;  // No fugue section for unit tests.
+  return config;
+}
+
+/// @brief Count total notes across all tracks.
+/// @param result The passacaglia result to count.
+/// @return Total number of NoteEvents across all tracks.
+size_t totalNoteCount(const PassacagliaResult& result) {
+  size_t count = 0;
+  for (const auto& track : result.tracks) {
+    count += track.notes.size();
+  }
+  return count;
+}
+
+// ---------------------------------------------------------------------------
+// Basic generation
+// ---------------------------------------------------------------------------
+
+TEST(PassacagliaTest, GenerateSucceeds) {
+  PassacagliaConfig config = makeTestConfig();
+  PassacagliaResult result = generatePassacaglia(config);
+
+  EXPECT_TRUE(result.success);
+  EXPECT_TRUE(result.error_message.empty());
+  EXPECT_GT(result.total_duration_ticks, 0u);
+}
+
+TEST(PassacagliaTest, ProducesCorrectNumberOfTracks) {
+  PassacagliaConfig config = makeTestConfig();
+  PassacagliaResult result = generatePassacaglia(config);
+
+  ASSERT_TRUE(result.success);
+  EXPECT_EQ(result.tracks.size(), 4u);
+}
+
+TEST(PassacagliaTest, AllTracksHaveNotes) {
+  PassacagliaConfig config = makeTestConfig();
+  PassacagliaResult result = generatePassacaglia(config);
+
+  ASSERT_TRUE(result.success);
+  for (size_t idx = 0; idx < result.tracks.size(); ++idx) {
+    EXPECT_GT(result.tracks[idx].notes.size(), 0u)
+        << "Track " << idx << " (" << result.tracks[idx].name << ") is empty";
+  }
+}
+
+TEST(PassacagliaTest, ReasonableNoteCount) {
+  PassacagliaConfig config = makeTestConfig();
+  PassacagliaResult result = generatePassacaglia(config);
+
+  ASSERT_TRUE(result.success);
+  size_t total = totalNoteCount(result);
+  // 12 variations x 8 bars x at least 2 notes (ground bass) = 192 minimum.
+  // Upper voices add substantially more.
+  EXPECT_GT(total, 200u) << "Too few notes for a passacaglia";
+}
+
+TEST(PassacagliaTest, InvalidConfigReturnsError) {
+  PassacagliaConfig config = makeTestConfig();
+  config.num_variations = 0;
+  PassacagliaResult result = generatePassacaglia(config);
+
+  EXPECT_FALSE(result.success);
+  EXPECT_FALSE(result.error_message.empty());
+}
+
+// ---------------------------------------------------------------------------
+// Ground bass properties
+// ---------------------------------------------------------------------------
+
+TEST(PassacagliaTest, GroundBassLength) {
+  KeySignature key = {Key::C, true};
+  int bars = 8;
+  auto ground_bass = generatePassacagliaGroundBass(key, bars, 42);
+
+  // 2 half notes per bar x 8 bars = 16 notes.
+  EXPECT_EQ(ground_bass.size(), 16u);
+}
+
+TEST(PassacagliaTest, GroundBassHalfNoteDurations) {
+  KeySignature key = {Key::C, true};
+  auto ground_bass = generatePassacagliaGroundBass(key, 8, 42);
+
+  constexpr Tick kExpectedDuration = kTicksPerBeat * 2;  // Half note = 960.
+  for (const auto& note : ground_bass) {
+    EXPECT_EQ(note.duration, kExpectedDuration)
+        << "Ground bass note at tick " << note.start_tick
+        << " should be a half note (" << kExpectedDuration << " ticks)";
+  }
+}
+
+TEST(PassacagliaTest, GroundBassSourceTag) {
+  KeySignature key = {Key::C, true};
+  auto ground_bass = generatePassacagliaGroundBass(key, 8, 42);
+
+  for (const auto& note : ground_bass) {
+    EXPECT_EQ(note.source, BachNoteSource::GroundBass)
+        << "Ground bass note must have GroundBass source tag";
+  }
+}
+
+TEST(PassacagliaTest, GroundBassIsImmutable) {
+  PassacagliaConfig config = makeTestConfig();
+  PassacagliaResult result = generatePassacaglia(config);
+  ASSERT_TRUE(result.success);
+
+  // Extract the pedal track (last track).
+  const auto& pedal_track = result.tracks.back();
+
+  // Collect ground bass notes (source == GroundBass) grouped by variation.
+  int notes_per_variation = config.ground_bass_bars * 2;
+  Tick variation_duration =
+      static_cast<Tick>(config.ground_bass_bars) * kTicksPerBar;
+
+  // Extract just ground bass notes.
+  std::vector<NoteEvent> ground_bass_notes;
+  for (const auto& note : pedal_track.notes) {
+    if (note.source == BachNoteSource::GroundBass) {
+      ground_bass_notes.push_back(note);
+    }
+  }
+
+  // Should have notes_per_variation * num_variations ground bass notes.
+  ASSERT_EQ(ground_bass_notes.size(),
+            static_cast<size_t>(notes_per_variation * config.num_variations));
+
+  // Verify every variation has identical pitches and durations.
+  for (int var_idx = 1; var_idx < config.num_variations; ++var_idx) {
+    for (int note_idx = 0; note_idx < notes_per_variation; ++note_idx) {
+      size_t first_idx = static_cast<size_t>(note_idx);
+      size_t current_idx =
+          static_cast<size_t>(var_idx * notes_per_variation + note_idx);
+
+      EXPECT_EQ(ground_bass_notes[current_idx].pitch,
+                ground_bass_notes[first_idx].pitch)
+          << "Ground bass pitch differs in variation " << var_idx
+          << " note " << note_idx;
+      EXPECT_EQ(ground_bass_notes[current_idx].duration,
+                ground_bass_notes[first_idx].duration)
+          << "Ground bass duration differs in variation " << var_idx
+          << " note " << note_idx;
+
+      // Verify tick offset is correct for the variation.
+      Tick expected_tick = ground_bass_notes[first_idx].start_tick +
+                           static_cast<Tick>(var_idx) * variation_duration;
+      EXPECT_EQ(ground_bass_notes[current_idx].start_tick, expected_tick)
+          << "Ground bass tick offset wrong in variation " << var_idx;
+    }
+  }
+}
+
+TEST(PassacagliaTest, GroundBassPitchInPedalRange) {
+  KeySignature key = {Key::C, true};
+  auto ground_bass = generatePassacagliaGroundBass(key, 8, 42);
+
+  for (const auto& note : ground_bass) {
+    EXPECT_GE(note.pitch, organ_range::kPedalLow)
+        << "Ground bass pitch " << static_cast<int>(note.pitch)
+        << " below pedal range";
+    EXPECT_LE(note.pitch, organ_range::kPedalHigh)
+        << "Ground bass pitch " << static_cast<int>(note.pitch)
+        << " above pedal range";
+  }
+}
+
+TEST(PassacagliaTest, GroundBassEmptyForZeroBars) {
+  KeySignature key = {Key::C, true};
+  auto ground_bass = generatePassacagliaGroundBass(key, 0, 42);
+
+  EXPECT_TRUE(ground_bass.empty());
+}
+
+// ---------------------------------------------------------------------------
+// Variation complexity increases
+// ---------------------------------------------------------------------------
+
+TEST(PassacagliaTest, VariationComplexityIncreases) {
+  PassacagliaConfig config = makeTestConfig();
+  PassacagliaResult result = generatePassacaglia(config);
+  ASSERT_TRUE(result.success);
+
+  // Analyze the top voice (track 0 / Manual I) which has the primary figuration.
+  const auto& top_voice = result.tracks[0];
+  Tick variation_duration =
+      static_cast<Tick>(config.ground_bass_bars) * kTicksPerBar;
+
+  // Collect average durations for each variation stage.
+  // Stage 0 (Establish, vars 0-2): quarter notes
+  // Stage 1 (Develop early, vars 3-5): eighth notes
+  // Stage 2 (Develop late, vars 6-8): eighth note arpeggios
+  // Stage 3 (Accumulate, vars 9-11): sixteenth notes
+
+  auto avgDurationInRange = [&](Tick range_start, Tick range_end) -> double {
+    Tick total_dur = 0;
+    int count = 0;
+    for (const auto& note : top_voice.notes) {
+      if (note.start_tick >= range_start && note.start_tick < range_end) {
+        total_dur += note.duration;
+        ++count;
+      }
+    }
+    return count > 0 ? static_cast<double>(total_dur) / count : 0.0;
+  };
+
+  // Establish stage: variations 0-2.
+  double establish_avg = avgDurationInRange(0, 3 * variation_duration);
+  // Develop early: variations 3-5.
+  double develop_early_avg =
+      avgDurationInRange(3 * variation_duration, 6 * variation_duration);
+  // Accumulate/Resolve: variations 9-11.
+  double accumulate_avg =
+      avgDurationInRange(9 * variation_duration, 12 * variation_duration);
+
+  // Earlier stages should have longer average note durations (less complex).
+  EXPECT_GT(establish_avg, develop_early_avg)
+      << "Establish stage should have longer notes than Develop";
+  EXPECT_GT(develop_early_avg, accumulate_avg)
+      << "Develop stage should have longer notes than Accumulate";
+}
+
+// ---------------------------------------------------------------------------
+// Track channel and program mapping
+// ---------------------------------------------------------------------------
+
+TEST(PassacagliaTest, TracksHaveCorrectChannels) {
+  PassacagliaConfig config = makeTestConfig();
+  PassacagliaResult result = generatePassacaglia(config);
+
+  ASSERT_TRUE(result.success);
+  ASSERT_EQ(result.tracks.size(), 4u);
+
+  // Voice 0 -> Ch 0 (Manual I / Great).
+  EXPECT_EQ(result.tracks[0].channel, 0u);
+  // Voice 1 -> Ch 1 (Manual II / Swell).
+  EXPECT_EQ(result.tracks[1].channel, 1u);
+  // Voice 2 -> Ch 2 (Manual III / Positiv).
+  EXPECT_EQ(result.tracks[2].channel, 2u);
+  // Voice 3 -> Ch 3 (Pedal).
+  EXPECT_EQ(result.tracks[3].channel, 3u);
+}
+
+TEST(PassacagliaTest, TracksHaveCorrectPrograms) {
+  PassacagliaConfig config = makeTestConfig();
+  PassacagliaResult result = generatePassacaglia(config);
+
+  ASSERT_TRUE(result.success);
+  ASSERT_EQ(result.tracks.size(), 4u);
+
+  EXPECT_EQ(result.tracks[0].program, GmProgram::kChurchOrgan);
+  EXPECT_EQ(result.tracks[1].program, GmProgram::kReedOrgan);
+  EXPECT_EQ(result.tracks[2].program, GmProgram::kChurchOrgan);
+  EXPECT_EQ(result.tracks[3].program, GmProgram::kChurchOrgan);
+}
+
+TEST(PassacagliaTest, TracksHaveNames) {
+  PassacagliaConfig config = makeTestConfig();
+  PassacagliaResult result = generatePassacaglia(config);
+
+  ASSERT_TRUE(result.success);
+  for (const auto& track : result.tracks) {
+    EXPECT_FALSE(track.name.empty()) << "Track should have a name";
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Total duration
+// ---------------------------------------------------------------------------
+
+TEST(PassacagliaTest, CorrectTotalDuration) {
+  PassacagliaConfig config = makeTestConfig();
+  PassacagliaResult result = generatePassacaglia(config);
+
+  ASSERT_TRUE(result.success);
+  Tick expected = static_cast<Tick>(config.num_variations) *
+                  static_cast<Tick>(config.ground_bass_bars) * kTicksPerBar;
+  EXPECT_EQ(result.total_duration_ticks, expected);
+}
+
+TEST(PassacagliaTest, CorrectTotalDurationCustomConfig) {
+  PassacagliaConfig config = makeTestConfig();
+  config.num_variations = 6;
+  config.ground_bass_bars = 4;
+  PassacagliaResult result = generatePassacaglia(config);
+
+  ASSERT_TRUE(result.success);
+  Tick expected = 6u * 4u * kTicksPerBar;
+  EXPECT_EQ(result.total_duration_ticks, expected);
+}
+
+// ---------------------------------------------------------------------------
+// Determinism
+// ---------------------------------------------------------------------------
+
+TEST(PassacagliaTest, DeterministicOutput) {
+  PassacagliaConfig config = makeTestConfig(12345);
+  PassacagliaResult result1 = generatePassacaglia(config);
+  PassacagliaResult result2 = generatePassacaglia(config);
+
+  ASSERT_TRUE(result1.success);
+  ASSERT_TRUE(result2.success);
+  ASSERT_EQ(result1.tracks.size(), result2.tracks.size());
+
+  for (size_t track_idx = 0; track_idx < result1.tracks.size(); ++track_idx) {
+    const auto& notes1 = result1.tracks[track_idx].notes;
+    const auto& notes2 = result2.tracks[track_idx].notes;
+    ASSERT_EQ(notes1.size(), notes2.size())
+        << "Track " << track_idx << " note count differs";
+
+    for (size_t note_idx = 0; note_idx < notes1.size(); ++note_idx) {
+      EXPECT_EQ(notes1[note_idx].start_tick, notes2[note_idx].start_tick)
+          << "Tick mismatch in track " << track_idx << " note " << note_idx;
+      EXPECT_EQ(notes1[note_idx].pitch, notes2[note_idx].pitch)
+          << "Pitch mismatch in track " << track_idx << " note " << note_idx;
+      EXPECT_EQ(notes1[note_idx].duration, notes2[note_idx].duration)
+          << "Duration mismatch in track " << track_idx << " note " << note_idx;
+    }
+  }
+}
+
+TEST(PassacagliaTest, DifferentSeedsProduceDifferentOutput) {
+  PassacagliaConfig config1 = makeTestConfig(42);
+  PassacagliaConfig config2 = makeTestConfig(99);
+  PassacagliaResult result1 = generatePassacaglia(config1);
+  PassacagliaResult result2 = generatePassacaglia(config2);
+
+  ASSERT_TRUE(result1.success);
+  ASSERT_TRUE(result2.success);
+
+  // Upper voices should differ with different seeds.
+  bool any_difference = false;
+  const auto& notes1 = result1.tracks[0].notes;
+  const auto& notes2 = result2.tracks[0].notes;
+
+  if (notes1.size() != notes2.size()) {
+    any_difference = true;
+  } else {
+    for (size_t idx = 0; idx < notes1.size(); ++idx) {
+      if (notes1[idx].pitch != notes2[idx].pitch ||
+          notes1[idx].start_tick != notes2[idx].start_tick) {
+        any_difference = true;
+        break;
+      }
+    }
+  }
+  EXPECT_TRUE(any_difference) << "Different seeds should produce different output";
+}
+
+// ---------------------------------------------------------------------------
+// All notes in range
+// ---------------------------------------------------------------------------
+
+TEST(PassacagliaTest, AllNotesInRange) {
+  PassacagliaConfig config = makeTestConfig();
+  PassacagliaResult result = generatePassacaglia(config);
+  ASSERT_TRUE(result.success);
+
+  // Track 0: Manual I (Great) -- C2-C6 (36-96).
+  for (const auto& note : result.tracks[0].notes) {
+    EXPECT_GE(note.pitch, organ_range::kManual1Low)
+        << "Manual I pitch below range: " << static_cast<int>(note.pitch);
+    EXPECT_LE(note.pitch, organ_range::kManual1High)
+        << "Manual I pitch above range: " << static_cast<int>(note.pitch);
+  }
+
+  // Track 1: Manual II (Swell) -- C2-C6 (36-96).
+  for (const auto& note : result.tracks[1].notes) {
+    EXPECT_GE(note.pitch, organ_range::kManual2Low)
+        << "Manual II pitch below range: " << static_cast<int>(note.pitch);
+    EXPECT_LE(note.pitch, organ_range::kManual2High)
+        << "Manual II pitch above range: " << static_cast<int>(note.pitch);
+  }
+
+  // Track 2: Manual III (Positiv) -- C3-C6 (48-96).
+  for (const auto& note : result.tracks[2].notes) {
+    EXPECT_GE(note.pitch, organ_range::kManual3Low)
+        << "Manual III pitch below range: " << static_cast<int>(note.pitch);
+    EXPECT_LE(note.pitch, organ_range::kManual3High)
+        << "Manual III pitch above range: " << static_cast<int>(note.pitch);
+  }
+
+  // Track 3: Pedal -- C1-D3 (24-50).
+  for (const auto& note : result.tracks[3].notes) {
+    EXPECT_GE(note.pitch, organ_range::kPedalLow)
+        << "Pedal pitch below range: " << static_cast<int>(note.pitch);
+    EXPECT_LE(note.pitch, organ_range::kPedalHigh)
+        << "Pedal pitch above range: " << static_cast<int>(note.pitch);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Velocity
+// ---------------------------------------------------------------------------
+
+TEST(PassacagliaTest, AllNotesVelocity80) {
+  PassacagliaConfig config = makeTestConfig();
+  PassacagliaResult result = generatePassacaglia(config);
+  ASSERT_TRUE(result.success);
+
+  for (const auto& track : result.tracks) {
+    for (const auto& note : track.notes) {
+      EXPECT_EQ(note.velocity, 80u)
+          << "Organ velocity must be 80, found "
+          << static_cast<int>(note.velocity) << " in track " << track.name;
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Notes sorted
+// ---------------------------------------------------------------------------
+
+TEST(PassacagliaTest, NotesSortedByStartTick) {
+  PassacagliaConfig config = makeTestConfig();
+  PassacagliaResult result = generatePassacaglia(config);
+  ASSERT_TRUE(result.success);
+
+  for (const auto& track : result.tracks) {
+    for (size_t idx = 1; idx < track.notes.size(); ++idx) {
+      EXPECT_LE(track.notes[idx - 1].start_tick, track.notes[idx].start_tick)
+          << "Notes not sorted in track " << track.name << " at index " << idx;
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Non-zero durations
+// ---------------------------------------------------------------------------
+
+TEST(PassacagliaTest, AllNotesHavePositiveDuration) {
+  PassacagliaConfig config = makeTestConfig();
+  PassacagliaResult result = generatePassacaglia(config);
+  ASSERT_TRUE(result.success);
+
+  for (const auto& track : result.tracks) {
+    for (const auto& note : track.notes) {
+      EXPECT_GT(note.duration, 0u)
+          << "Note at tick " << note.start_tick << " has zero duration in track "
+          << track.name;
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Key handling
+// ---------------------------------------------------------------------------
+
+TEST(PassacagliaTest, MajorKeyGeneratesSuccessfully) {
+  PassacagliaConfig config = makeTestConfig();
+  config.key = {Key::D, false};  // D major.
+  PassacagliaResult result = generatePassacaglia(config);
+
+  ASSERT_TRUE(result.success);
+  EXPECT_GT(totalNoteCount(result), 0u);
+}
+
+TEST(PassacagliaTest, MinorKeyGeneratesSuccessfully) {
+  PassacagliaConfig config = makeTestConfig();
+  config.key = {Key::G, true};  // G minor.
+  PassacagliaResult result = generatePassacaglia(config);
+
+  ASSERT_TRUE(result.success);
+  EXPECT_GT(totalNoteCount(result), 0u);
+}
+
+// ---------------------------------------------------------------------------
+// Ground bass standalone API
+// ---------------------------------------------------------------------------
+
+TEST(PassacagliaTest, GroundBassStartsOnTick0) {
+  KeySignature key = {Key::C, true};
+  auto ground_bass = generatePassacagliaGroundBass(key, 8, 42);
+
+  ASSERT_FALSE(ground_bass.empty());
+  EXPECT_EQ(ground_bass[0].start_tick, 0u);
+}
+
+TEST(PassacagliaTest, GroundBassNotesContiguous) {
+  KeySignature key = {Key::C, true};
+  auto ground_bass = generatePassacagliaGroundBass(key, 8, 42);
+
+  constexpr Tick kHalf = kTicksPerBeat * 2;
+  for (size_t idx = 0; idx < ground_bass.size(); ++idx) {
+    EXPECT_EQ(ground_bass[idx].start_tick, static_cast<Tick>(idx) * kHalf)
+        << "Ground bass note " << idx << " is not contiguous";
+  }
+}
+
+TEST(PassacagliaTest, GroundBassDifferentKeys) {
+  auto bass_c = generatePassacagliaGroundBass({Key::C, true}, 8, 42);
+  auto bass_g = generatePassacagliaGroundBass({Key::G, true}, 8, 42);
+
+  ASSERT_EQ(bass_c.size(), bass_g.size());
+
+  // Different keys should produce at least some different pitches.
+  bool any_different = false;
+  for (size_t idx = 0; idx < bass_c.size(); ++idx) {
+    if (bass_c[idx].pitch != bass_g[idx].pitch) {
+      any_different = true;
+      break;
+    }
+  }
+  EXPECT_TRUE(any_different)
+      << "Different keys should produce different ground bass pitches";
+}
+
+// ---------------------------------------------------------------------------
+// Voice count handling
+// ---------------------------------------------------------------------------
+
+TEST(PassacagliaTest, ThreeVoiceGeneratesSuccessfully) {
+  PassacagliaConfig config = makeTestConfig();
+  config.num_voices = 3;
+  PassacagliaResult result = generatePassacaglia(config);
+
+  ASSERT_TRUE(result.success);
+  EXPECT_EQ(result.tracks.size(), 3u);
+}
+
+TEST(PassacagliaTest, FiveVoiceGeneratesSuccessfully) {
+  PassacagliaConfig config = makeTestConfig();
+  config.num_voices = 5;
+  PassacagliaResult result = generatePassacaglia(config);
+
+  ASSERT_TRUE(result.success);
+  EXPECT_EQ(result.tracks.size(), 5u);
+}
+
+TEST(PassacagliaTest, VoiceCountClampedToMinimum) {
+  PassacagliaConfig config = makeTestConfig();
+  config.num_voices = 1;  // Below minimum.
+  PassacagliaResult result = generatePassacaglia(config);
+
+  ASSERT_TRUE(result.success);
+  EXPECT_GE(result.tracks.size(), 3u);
+}
+
+// ---------------------------------------------------------------------------
+// Multiple seeds stability
+// ---------------------------------------------------------------------------
+
+TEST(PassacagliaTest, MultiSeedGenerationSucceeds) {
+  for (uint32_t seed = 0; seed < 10; ++seed) {
+    PassacagliaConfig config = makeTestConfig(seed);
+    PassacagliaResult result = generatePassacaglia(config);
+
+    EXPECT_TRUE(result.success) << "Failed for seed " << seed;
+    EXPECT_GT(totalNoteCount(result), 0u) << "No notes for seed " << seed;
+  }
+}
+
+}  // namespace
+}  // namespace bach

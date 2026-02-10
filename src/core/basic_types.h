@@ -222,6 +222,8 @@ struct NoteEvent {
   uint8_t velocity = 80;
   VoiceId voice = 0;
   BachNoteSource source = BachNoteSource::Unknown;  ///< Provenance source for debugging.
+  uint8_t bow_direction = 0;  ///< BowDirection cast (0=Natural, 1=Down, 2=Up).
+  uint8_t is_harmonic = 0;    ///< 0=normal, 1=natural harmonic.
 };
 
 /// Track: a collection of note events on a single MIDI channel.

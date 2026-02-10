@@ -16,7 +16,9 @@ const HarmonicEvent HarmonicTimeline::kDefaultEvent = {
     {ChordDegree::I, ChordQuality::Major, 60, 0},  // chord: C major root position
     48,           // bass_pitch: C3
     1.0f,         // weight
-    false         // is_immutable
+    false,        // is_immutable
+    Key::C,       // modulation_target (no modulation)
+    false         // has_modulation
 };
 
 // ---------------------------------------------------------------------------
@@ -146,6 +148,10 @@ static int thirdInterval(ChordQuality quality) {
     case ChordQuality::Dominant7:
     case ChordQuality::MajorMajor7:
     case ChordQuality::Augmented:
+    case ChordQuality::AugmentedSixth:
+    case ChordQuality::AugSixthItalian:
+    case ChordQuality::AugSixthFrench:
+    case ChordQuality::AugSixthGerman:
       return 4;
     default:
       return 3;
@@ -156,8 +162,12 @@ static int thirdInterval(ChordQuality quality) {
 static int fifthInterval(ChordQuality quality) {
   switch (quality) {
     case ChordQuality::Diminished:
+    case ChordQuality::AugSixthItalian:
+    case ChordQuality::AugSixthFrench:
       return 6;
     case ChordQuality::Augmented:
+    case ChordQuality::AugmentedSixth:
+    case ChordQuality::AugSixthGerman:
       return 8;
     default:
       return 7;
@@ -291,6 +301,23 @@ static const ProgEntry kSubdominant[] = {
     {ChordDegree::I,   ChordQuality::Major, 0, 1.0f, false},
 };
 
+static const ProgEntry kChromaticCircle[] = {
+    {ChordDegree::I,      ChordQuality::Major,    0, 1.0f,  false},
+    {ChordDegree::V_of_vi, ChordQuality::Dominant7, 0, 0.5f,  true},
+    {ChordDegree::vi,     ChordQuality::Minor,    0, 0.5f,  false},
+    {ChordDegree::V_of_V, ChordQuality::Dominant7, 0, 0.75f, true},
+    {ChordDegree::V,      ChordQuality::Major,    0, 0.75f, false},
+    {ChordDegree::I,      ChordQuality::Major,    0, 1.0f,  false},
+};
+
+static const ProgEntry kBorrowedChord[] = {
+    {ChordDegree::I,    ChordQuality::Major,    0, 1.0f,  false},
+    {ChordDegree::bVI,  ChordQuality::Major,    0, 0.5f,  true},
+    {ChordDegree::IV,   ChordQuality::Major,    0, 0.5f,  false},
+    {ChordDegree::V,    ChordQuality::Dominant7, 0, 0.75f, true},
+    {ChordDegree::I,    ChordQuality::Major,    0, 1.0f,  false},
+};
+
 HarmonicTimeline HarmonicTimeline::createProgression(const KeySignature& key_sig,
                                                       Tick duration,
                                                       HarmonicResolution resolution,
@@ -301,16 +328,6 @@ HarmonicTimeline HarmonicTimeline::createProgression(const KeySignature& key_sig
 
   HarmonicTimeline timeline;
   if (duration == 0) return timeline;
-
-  Tick event_length = 0;
-  switch (resolution) {
-    case HarmonicResolution::Beat:   event_length = kTicksPerBeat; break;
-    case HarmonicResolution::Bar:    event_length = kTicksPerBar;  break;
-    case HarmonicResolution::Section:
-      event_length = duration / 5;
-      if (event_length == 0) event_length = duration;
-      break;
-  }
 
   const ProgEntry* prog = nullptr;
   int prog_len = 0;
@@ -323,8 +340,26 @@ HarmonicTimeline HarmonicTimeline::createProgression(const KeySignature& key_sig
       prog = kSubdominant;
       prog_len = 5;
       break;
+    case ProgressionType::ChromaticCircle:
+      prog = kChromaticCircle;
+      prog_len = 6;
+      break;
+    case ProgressionType::BorrowedChord:
+      prog = kBorrowedChord;
+      prog_len = 5;
+      break;
     default:
       return createStandard(key_sig, duration, resolution);
+  }
+
+  Tick event_length = 0;
+  switch (resolution) {
+    case HarmonicResolution::Beat:   event_length = kTicksPerBeat; break;
+    case HarmonicResolution::Bar:    event_length = kTicksPerBar;  break;
+    case HarmonicResolution::Section:
+      event_length = duration / prog_len;
+      if (event_length == 0) event_length = duration;
+      break;
   }
 
   constexpr int kChordOctave = 4;

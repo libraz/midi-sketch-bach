@@ -13,9 +13,10 @@ namespace bach {
 /// Harmonic function categories for Riemann-style analysis.
 enum class HarmonicFunction : uint8_t {
   Tonic,        // I, vi (rest, stability)
-  Subdominant,  // IV, ii (forward motion)
+  Subdominant,  // IV, ii, bII (forward motion)
   Dominant,     // V, viiDim (tension, demands resolution)
-  Mediant       // iii, VI (color, ambiguity)
+  Mediant,      // iii, bVI, bVII, bIII (color, ambiguity)
+  Applied       // Secondary dominants V/x (tonicization)
 };
 
 /// @brief Classify a chord degree into its harmonic function.
@@ -50,13 +51,31 @@ Chord createNeapolitanSixth(const KeySignature& key_sig);
 
 /// @brief Check if a progression follows standard functional harmony rules.
 ///
-/// Valid progressions: T->S, T->D, S->D, S->T, D->T.
+/// Valid progressions: T->S, T->D, S->D, S->T, D->T, Applied->target.
 /// Invalid progressions: D->S (retrogression).
 ///
 /// @param from Source harmonic function.
 /// @param to Target harmonic function.
 /// @return True if the progression is standard.
 bool isValidFunctionalProgression(HarmonicFunction from, HarmonicFunction to);
+
+/// @brief Check if a specific degree transition is a valid functional progression.
+/// @param from Source chord degree.
+/// @param to Target chord degree.
+/// @param is_minor Whether the key context is minor.
+/// @return True if the progression is functionally valid.
+bool isValidDegreeProgression(ChordDegree from, ChordDegree to, bool is_minor = false);
+
+/// @brief Get the resolution target for a secondary dominant.
+/// @param degree The secondary dominant degree (V/V, V/vi, V/IV, V/ii, V/iii).
+/// @return The chord degree the secondary dominant resolves to.
+///         Returns ChordDegree::I if the degree is not a secondary dominant.
+ChordDegree getSecondaryDominantTarget(ChordDegree degree);
+
+/// @brief Check if a chord degree is a secondary dominant.
+/// @param degree The chord degree to check.
+/// @return True if the degree is V/V, V/vi, V/IV, V/ii, or V/iii.
+bool isSecondaryDominant(ChordDegree degree);
 
 }  // namespace bach
 

@@ -10,6 +10,7 @@
 #include <set>
 
 #include "core/pitch_utils.h"
+#include "core/scale.h"
 
 namespace bach {
 namespace {
@@ -524,6 +525,80 @@ TEST(CountersubjectTest, SecondCS_PitchInValidRange) {
           << "CS2 pitch below minimum (seed " << seed << ")";
       EXPECT_LE(note.pitch, 127)
           << "CS2 pitch above maximum (seed " << seed << ")";
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Diatonic enforcement
+// ---------------------------------------------------------------------------
+
+TEST(CountersubjectTest, AllNotesDiatonicInCMajor) {
+  Subject subject = makeTestSubject(SubjectCharacter::Severe);
+  // Test across multiple seeds: every CS note must be diatonic in C major.
+  for (uint32_t seed = 1; seed <= 20; ++seed) {
+    Countersubject cs = generateCountersubject(subject, seed);
+    for (const auto& note : cs.notes) {
+      EXPECT_TRUE(scale_util::isScaleTone(note.pitch, Key::C, ScaleType::Major))
+          << "Non-diatonic pitch " << static_cast<int>(note.pitch)
+          << " (" << pitchToNoteName(note.pitch) << ")"
+          << " at tick " << note.start_tick
+          << " (seed " << seed << ")";
+    }
+  }
+}
+
+TEST(CountersubjectTest, AllNotesDiatonicInGMajor) {
+  Subject subject = makeTestSubject(SubjectCharacter::Severe);
+  subject.key = Key::G;
+  // Transpose subject notes to G major (add 7 semitones).
+  for (auto& note : subject.notes) {
+    note.pitch = static_cast<uint8_t>(
+        std::min(static_cast<int>(note.pitch) + 7, 127));
+  }
+
+  for (uint32_t seed = 1; seed <= 20; ++seed) {
+    Countersubject cs = generateCountersubject(subject, seed);
+    for (const auto& note : cs.notes) {
+      EXPECT_TRUE(scale_util::isScaleTone(note.pitch, Key::G, ScaleType::Major))
+          << "Non-diatonic pitch " << static_cast<int>(note.pitch)
+          << " (" << pitchToNoteName(note.pitch) << ")"
+          << " in G major at tick " << note.start_tick
+          << " (seed " << seed << ")";
+    }
+  }
+}
+
+TEST(CountersubjectTest, AllNotesDiatonicAllCharacters) {
+  const SubjectCharacter characters[] = {
+      SubjectCharacter::Severe, SubjectCharacter::Playful,
+      SubjectCharacter::Noble, SubjectCharacter::Restless};
+
+  for (auto character : characters) {
+    Subject subject = makeTestSubject(character);
+    for (uint32_t seed = 1; seed <= 10; ++seed) {
+      Countersubject cs = generateCountersubject(subject, seed);
+      for (const auto& note : cs.notes) {
+        EXPECT_TRUE(
+            scale_util::isScaleTone(note.pitch, Key::C, ScaleType::Major))
+            << "Non-diatonic pitch " << static_cast<int>(note.pitch)
+            << " for character "
+            << subjectCharacterToString(character)
+            << " (seed " << seed << ")";
+      }
+    }
+  }
+}
+
+TEST(CountersubjectTest, SecondCS_AllNotesDiatonic) {
+  Subject subject = makeTestSubject();
+  for (uint32_t seed = 1; seed <= 10; ++seed) {
+    Countersubject cs1 = generateCountersubject(subject, seed);
+    Countersubject cs2 = generateSecondCountersubject(subject, cs1, seed + 500);
+    for (const auto& note : cs2.notes) {
+      EXPECT_TRUE(scale_util::isScaleTone(note.pitch, Key::C, ScaleType::Major))
+          << "Non-diatonic CS2 pitch " << static_cast<int>(note.pitch)
+          << " (seed " << seed << ")";
     }
   }
 }

@@ -13,17 +13,19 @@ namespace bach {
 
 /// @brief Bow stroke direction for bowed string instruments.
 enum class BowDirection : uint8_t {
-  Down,  // Downbow (typically stronger, used on strong beats)
-  Up     // Upbow (typically lighter, used on weak beats)
+  Natural = 0,  ///< Let performer decide (e.g., large string crossing)
+  Down = 1,     ///< Downbow (typically stronger, used on strong beats)
+  Up = 2        ///< Upbow (typically lighter, used on weak beats)
 };
 
 /// @brief Convert BowDirection to human-readable string.
 /// @param direction The bow direction to convert.
-/// @return "Down" or "Up".
+/// @return "Natural", "Down", or "Up".
 inline const char* bowDirectionToString(BowDirection direction) {
   switch (direction) {
-    case BowDirection::Down: return "Down";
-    case BowDirection::Up:   return "Up";
+    case BowDirection::Natural: return "Natural";
+    case BowDirection::Down:    return "Down";
+    case BowDirection::Up:      return "Up";
   }
   return "Unknown";  // NOLINT(clang-diagnostic-covered-switch-default): safety for cast values
 }

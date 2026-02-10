@@ -21,7 +21,7 @@ NoteEvent makeNote(Tick start, uint8_t pitch, Tick duration, uint8_t voice = 0) 
 }
 
 // ---------------------------------------------------------------------------
-// Basic trill generation
+// Basic trill generation (default: start from upper)
 // ---------------------------------------------------------------------------
 
 TEST(TrillTest, QuarterNoteTrillProducesMultipleSubnotes) {
@@ -30,17 +30,17 @@ TEST(TrillTest, QuarterNoteTrillProducesMultipleSubnotes) {
 
   // Should produce more than 1 note.
   EXPECT_GT(result.size(), 1u);
-  // Should produce an odd number of sub-notes so last index is even (main note).
-  // Pattern: idx 0=main, 1=upper, 2=main, ... last(even)=main.
+  // Should produce an odd number of sub-notes so last note is main.
   EXPECT_EQ(result.size() % 2, 1u);
 }
 
-TEST(TrillTest, StartsOnMainNote) {
+TEST(TrillTest, DefaultStartsOnUpperNote) {
   auto note = makeNote(0, 60, kTicksPerBeat);
   auto result = generateTrill(note, 62);
 
   ASSERT_FALSE(result.empty());
-  EXPECT_EQ(result.front().pitch, 60);  // Starts on main note.
+  // C.P.E. Bach default: starts on upper neighbor.
+  EXPECT_EQ(result.front().pitch, 62);
 }
 
 TEST(TrillTest, EndsOnMainNote) {
@@ -48,12 +48,37 @@ TEST(TrillTest, EndsOnMainNote) {
   auto result = generateTrill(note, 62);
 
   ASSERT_FALSE(result.empty());
-  EXPECT_EQ(result.back().pitch, 60);  // Ends on main note.
+  EXPECT_EQ(result.back().pitch, 60);  // Always ends on main note.
 }
 
-TEST(TrillTest, AlternatesBetweenMainAndUpper) {
+TEST(TrillTest, UpperStartAlternatesBetweenUpperAndMain) {
   auto note = makeNote(0, 64, kTicksPerBeat);  // E4
   auto result = generateTrill(note, 66);        // Upper = F#4
+
+  ASSERT_GE(result.size(), 3u);
+  // Pattern: upper, main, upper, ..., main (last is always main).
+  for (size_t idx = 0; idx < result.size() - 1; ++idx) {
+    if (idx % 2 == 0) {
+      EXPECT_EQ(result[idx].pitch, 66) << "Even index should be upper note";
+    } else {
+      EXPECT_EQ(result[idx].pitch, 64) << "Odd index should be main note";
+    }
+  }
+  // Last note is always main.
+  EXPECT_EQ(result.back().pitch, 64);
+}
+
+TEST(TrillTest, LegacyStartsOnMainNote) {
+  auto note = makeNote(0, 60, kTicksPerBeat);
+  auto result = generateTrill(note, 62, 4, false);  // Legacy mode
+
+  ASSERT_FALSE(result.empty());
+  EXPECT_EQ(result.front().pitch, 60);  // Starts on main note.
+}
+
+TEST(TrillTest, LegacyAlternatesBetweenMainAndUpper) {
+  auto note = makeNote(0, 64, kTicksPerBeat);
+  auto result = generateTrill(note, 66, 4, false);  // Legacy mode
 
   for (size_t idx = 0; idx < result.size(); ++idx) {
     if (idx % 2 == 0) {
@@ -145,6 +170,34 @@ TEST(TrillTest, SubnotesAreContiguous) {
     EXPECT_LE(result[idx].start_tick, prev_end + 1)
         << "Sub-note gap at index " << idx;
   }
+}
+
+// ---------------------------------------------------------------------------
+// computeTrillSpeed
+// ---------------------------------------------------------------------------
+
+TEST(TrillSpeedTest, SlowTempoGivesMinSpeed) {
+  EXPECT_EQ(computeTrillSpeed(40), 2);
+  EXPECT_EQ(computeTrillSpeed(59), 2);
+}
+
+TEST(TrillSpeedTest, MediumTempoGivesMediumSpeed) {
+  EXPECT_EQ(computeTrillSpeed(60), 2);
+  EXPECT_EQ(computeTrillSpeed(120), 4);
+}
+
+TEST(TrillSpeedTest, FastTempoGivesHighSpeed) {
+  EXPECT_EQ(computeTrillSpeed(180), 6);
+  EXPECT_EQ(computeTrillSpeed(200), 6);
+}
+
+TEST(TrillSpeedTest, VeryFastTempoClampedToMax) {
+  EXPECT_EQ(computeTrillSpeed(240), 8);
+  EXPECT_EQ(computeTrillSpeed(255), 8);
+}
+
+TEST(TrillSpeedTest, ZeroBpmGivesMinSpeed) {
+  EXPECT_EQ(computeTrillSpeed(0), 2);
 }
 
 }  // namespace

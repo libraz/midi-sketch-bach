@@ -21,9 +21,11 @@ enum class HarmonicResolution : uint8_t {
 
 /// Harmonic progression template type.
 enum class ProgressionType : uint8_t {
-  Basic,          // I-IV-V-I (default)
-  CircleOfFifths, // I-vi-ii-V7-I
-  Subdominant,    // I-IV-ii-V7-I
+  Basic,            // I-IV-V-I (default)
+  CircleOfFifths,   // I-vi-ii-V7-I
+  Subdominant,      // I-IV-ii-V7-I
+  ChromaticCircle,  // I-V/vi-vi-V/V-V-I (chromatic enrichment)
+  BorrowedChord     // I-bVI-IV-V-I (modal mixture)
 };
 
 /// Cadence type for progression endings.

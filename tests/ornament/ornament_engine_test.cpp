@@ -115,6 +115,7 @@ TEST(OrnamentTypeSelectionTest, StrongBeatFallsBackToMordentIfNoTrillOrAppoggiat
   OrnamentConfig config;
   config.enable_trill = false;
   config.enable_appoggiatura = false;
+  config.enable_vorschlag = false;
   config.enable_mordent = true;
 
   EXPECT_EQ(selectOrnamentType(note, config), OrnamentType::Mordent);
@@ -126,6 +127,7 @@ TEST(OrnamentTypeSelectionTest, WeakBeatFallsBackToTrillIfNoMordentOrPralltrille
   config.enable_trill = true;
   config.enable_mordent = false;
   config.enable_pralltriller = false;
+  config.enable_nachschlag = false;
 
   EXPECT_EQ(selectOrnamentType(note, config), OrnamentType::Trill);
 }
@@ -138,6 +140,9 @@ TEST(OrnamentTypeSelectionTest, FallsBackToTurnIfOnlyTurnEnabled) {
   config.enable_turn = true;
   config.enable_appoggiatura = false;
   config.enable_pralltriller = false;
+  config.enable_vorschlag = false;
+  config.enable_nachschlag = false;
+  config.enable_compound = false;
 
   EXPECT_EQ(selectOrnamentType(note, config), OrnamentType::Turn);
 }
@@ -245,6 +250,9 @@ TEST(OrnamentEngineTest, NoTypesEnabledReturnsUnchanged) {
   ctx.config.enable_turn = false;
   ctx.config.enable_appoggiatura = false;
   ctx.config.enable_pralltriller = false;
+  ctx.config.enable_vorschlag = false;
+  ctx.config.enable_nachschlag = false;
+  ctx.config.enable_compound = false;
   ctx.config.ornament_density = 1.0f;
   ctx.role = VoiceRole::Respond;
   ctx.seed = 42;

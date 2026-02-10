@@ -12,6 +12,7 @@ set(BACH_LIB_SOURCES
   core/json_parser.cpp
   core/note_source.cpp
   core/note_creator.cpp
+  core/rhythm_pattern.cpp
 
   # midi/
   midi/midi_writer.cpp
@@ -34,6 +35,8 @@ set(BACH_LIB_SOURCES
   instrument/bowed/cello_model.cpp
   instrument/bowed/violin_model.cpp
   instrument/bowed/bowed_note_factory.cpp
+  instrument/bowed/bow_direction.cpp
+  instrument/bowed/harmonics.cpp
 
   # counterpoint/
   counterpoint/counterpoint_state.cpp
@@ -81,17 +84,23 @@ set(BACH_LIB_SOURCES
   analysis/dissonance_analyzer.cpp
   analysis/analysis_runner.cpp
   analysis/implied_voice_analyzer.cpp
+  analysis/voice_harmony_analyzer.cpp
 
   # harmony/
   harmony/chord_types.cpp
   harmony/key.cpp
   harmony/harmonic_timeline.cpp
   harmony/harmonic_function.cpp
+  harmony/modulation_plan.cpp
+  harmony/voice_leading_planner.cpp
 
   # forms/
   forms/prelude.cpp
   forms/trio_sonata.cpp
   forms/chorale_prelude.cpp
+  forms/toccata.cpp
+  forms/passacaglia.cpp
+  forms/fantasia.cpp
 
   # core/ (phrase)
   core/phrase_structure.cpp
@@ -108,12 +117,16 @@ set(BACH_LIB_SOURCES
   ornament/pralltriller.cpp
   ornament/ornament_engine.cpp
   ornament/schleifer.cpp
+  ornament/vorschlag.cpp
+  ornament/nachschlag.cpp
+  ornament/compound_ornament.cpp
 
   # solo_string/flow/
   solo_string/flow/arpeggio_flow_config.cpp
   solo_string/flow/arpeggio_pattern.cpp
   solo_string/flow/flow_analyzer.cpp
   solo_string/flow/harmonic_arpeggio_engine.cpp
+  solo_string/flow/chromatic_passing.cpp
 
   # solo_string/arch/
   solo_string/arch/variation_types.cpp
@@ -122,6 +135,11 @@ set(BACH_LIB_SOURCES
   solo_string/arch/texture_generator.cpp
   solo_string/arch/chaconne_analyzer.cpp
   solo_string/arch/chaconne_engine.cpp
+
+  # expression/
+  expression/articulation.cpp
+  expression/phrase_detector.cpp
+  expression/expression_curve.cpp
 )
 
 add_library(bach_lib STATIC ${BACH_LIB_SOURCES})

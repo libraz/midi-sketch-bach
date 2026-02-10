@@ -19,6 +19,7 @@
 #include "fugue/subject.h"
 #include "fugue/subject_validator.h"
 #include "fugue/tonal_plan.h"
+#include "harmony/modulation_plan.h"
 #include "organ/manual.h"
 #include "organ/registration.h"
 
@@ -336,7 +337,7 @@ FugueResult generateFugue(const FugueConfig& config) {
     estimated_duration = min_duration;
   }
 
-  TonalPlan tonal_plan = generateTonalPlan(config, /*is_minor=*/false,
+  TonalPlan tonal_plan = generateTonalPlan(config, config.is_minor,
                                            estimated_duration);
 
   // =========================================================================
@@ -356,17 +357,21 @@ FugueResult generateFugue(const FugueConfig& config) {
   // --- Develop phase: Episode+MiddleEntry pairs ---
   Tick episode_duration = kTicksPerBar * static_cast<Tick>(config.episode_bars);
 
-  // Build key cycle from near-related keys.
-  std::vector<Key> near_keys = getNearRelatedKeys(config.key, /*is_minor=*/false);
-  if (near_keys.empty()) {
-    near_keys.push_back(getDominantKey(config.key));
+  // Use modulation plan for episode key selection (Principle 4: design values).
+  ModulationPlan mod_plan;
+  if (config.has_modulation_plan) {
+    mod_plan = config.modulation_plan;
+  } else {
+    // Auto-create based on key mode.
+    mod_plan = config.is_minor ? ModulationPlan::createForMinor(config.key)
+                               : ModulationPlan::createForMajor(config.key);
   }
 
   int develop_pairs = config.develop_pairs;
   Key prev_key = config.key;
 
   for (int pair_idx = 0; pair_idx < develop_pairs; ++pair_idx) {
-    Key target_key = near_keys[pair_idx % near_keys.size()];
+    Key target_key = mod_plan.getTargetKey(pair_idx, config.key);
     uint32_t pair_seed_base = config.seed + static_cast<uint32_t>(pair_idx) * 2000u + 2000u;
 
     // Compute energy level for this episode from the energy curve.
@@ -526,9 +531,9 @@ FugueResult generateFugue(const FugueConfig& config) {
   // Apply cadence plan to the timeline (activates existing CadenceType/applyCadence).
   KeySignature home_key_sig;
   home_key_sig.tonic = config.key;
-  home_key_sig.is_minor = false;
+  home_key_sig.is_minor = config.is_minor;
   CadencePlan cadence_plan = CadencePlan::createForFugue(
-      structure, home_key_sig, /*is_minor=*/false);
+      structure, home_key_sig, config.is_minor);
   cadence_plan.applyTo(result.timeline);
 
   // --- Apply energy-based dynamic registration ---

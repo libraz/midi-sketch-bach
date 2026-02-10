@@ -10,6 +10,7 @@
 
 #include "core/pitch_utils.h"
 #include "core/rng_util.h"
+#include "core/scale.h"
 
 namespace bach {
 
@@ -96,16 +97,20 @@ constexpr uint8_t kCSPitchHigh = 96;
 ///
 /// Selects from imperfect consonances (3rds, 6ths) preferentially, placing
 /// the countersubject note in the given direction (above or below) the
-/// subject pitch. The result is clamped to a valid range.
+/// subject pitch. The result is snapped to the nearest scale tone and
+/// clamped to a valid range.
 ///
 /// @param subject_pitch The current subject MIDI pitch.
 /// @param direction +1 for above, -1 for below the subject.
 /// @param low_range Lower pitch bound.
 /// @param high_range Upper pitch bound.
+/// @param key Musical key for diatonic enforcement.
+/// @param scale Scale type for diatonic enforcement.
 /// @param gen Random number generator.
-/// @return A consonant MIDI pitch, or subject_pitch +/- 3 as fallback.
+/// @return A consonant, diatonic MIDI pitch, or snapped fallback.
 uint8_t findConsonantPitch(uint8_t subject_pitch, int direction,
                            uint8_t low_range, uint8_t high_range,
+                           Key key, ScaleType scale,
                            std::mt19937& gen) {
   // Shuffle through imperfect consonances in the preferred direction.
   int offsets[kImperfectConsonanceCount];
@@ -113,7 +118,7 @@ uint8_t findConsonantPitch(uint8_t subject_pitch, int direction,
     offsets[idx] = kImperfectConsonances[idx] * direction;
   }
 
-  // Try each offset; pick the first one that stays in range.
+  // Try each offset; pick the first one that stays in range and is diatonic.
   // Shuffle order for variety.
   for (int idx = kImperfectConsonanceCount - 1; idx > 0; --idx) {
     int jdx = rng::rollRange(gen, 0, idx);
@@ -122,25 +127,29 @@ uint8_t findConsonantPitch(uint8_t subject_pitch, int direction,
 
   for (int idx = 0; idx < kImperfectConsonanceCount; ++idx) {
     int candidate = static_cast<int>(subject_pitch) + offsets[idx];
-    if (candidate >= static_cast<int>(low_range) &&
-        candidate <= static_cast<int>(high_range)) {
-      return static_cast<uint8_t>(candidate);
+    uint8_t snapped = scale_util::nearestScaleTone(
+        clampPitch(candidate, 0, 127), key, scale);
+    if (snapped >= low_range && snapped <= high_range) {
+      return snapped;
     }
   }
 
-  // Fallback: try all consonances.
+  // Fallback: try all consonances with diatonic snap.
   for (int idx = 0; idx < kAllConsonanceCount; ++idx) {
     int candidate = static_cast<int>(subject_pitch) +
                     kAllConsonances[idx] * direction;
-    if (candidate >= static_cast<int>(low_range) &&
-        candidate <= static_cast<int>(high_range)) {
-      return static_cast<uint8_t>(candidate);
+    uint8_t snapped = scale_util::nearestScaleTone(
+        clampPitch(candidate, 0, 127), key, scale);
+    if (snapped >= low_range && snapped <= high_range) {
+      return snapped;
     }
   }
 
-  // Last resort: minor 3rd in the given direction, clamped.
+  // Last resort: minor 3rd in the given direction, snapped and clamped.
   int fallback = static_cast<int>(subject_pitch) + 3 * direction;
-  return clampPitch(fallback, low_range, high_range);
+  uint8_t snapped = scale_util::nearestScaleTone(
+      clampPitch(fallback, 0, 127), key, scale);
+  return clampPitch(static_cast<int>(snapped), low_range, high_range);
 }
 
 /// @brief Generate complementary duration for a countersubject note.
@@ -191,45 +200,55 @@ int contraryDirection(int subject_direction, std::mt19937& gen) {
   return rng::rollProbability(gen, 0.5f) ? 1 : -1;
 }
 
-/// @brief Step-based motion: move current pitch by a step (2nd) in the
-/// given direction, staying diatonic and within range.
+/// @brief Step-based motion: move current pitch by a diatonic step in the
+/// given direction, staying within the scale and range.
 ///
 /// @param current_pitch Current countersubject pitch.
 /// @param direction +1 for ascending, -1 for descending.
 /// @param low_range Lower pitch bound.
 /// @param high_range Upper pitch bound.
+/// @param key Musical key for diatonic enforcement.
+/// @param scale Scale type for diatonic enforcement.
 /// @return New pitch after step motion.
 uint8_t stepMotion(uint8_t current_pitch, int direction,
-                   uint8_t low_range, uint8_t high_range) {
-  // Try a major 2nd (2 semitones), fall back to minor 2nd (1).
+                   uint8_t low_range, uint8_t high_range,
+                   Key key, ScaleType scale) {
+  // Try a major 2nd (2 semitones), check if it's diatonic in the key.
   int candidate = static_cast<int>(current_pitch) + 2 * direction;
   if (candidate >= static_cast<int>(low_range) &&
       candidate <= static_cast<int>(high_range) &&
-      isDiatonic(candidate)) {
+      scale_util::isScaleTone(static_cast<uint8_t>(candidate), key, scale)) {
     return static_cast<uint8_t>(candidate);
   }
 
+  // Try a minor 2nd (1 semitone), but only if it's diatonic.
   candidate = static_cast<int>(current_pitch) + 1 * direction;
   if (candidate >= static_cast<int>(low_range) &&
-      candidate <= static_cast<int>(high_range)) {
+      candidate <= static_cast<int>(high_range) &&
+      scale_util::isScaleTone(static_cast<uint8_t>(candidate), key, scale)) {
     return static_cast<uint8_t>(candidate);
   }
 
-  // Reverse direction if out of range.
+  // Snap fallback: reverse direction and snap to nearest scale tone.
   candidate = static_cast<int>(current_pitch) + 2 * (-direction);
-  return clampPitch(candidate, low_range, high_range);
+  uint8_t snapped = scale_util::nearestScaleTone(
+      clampPitch(candidate, 0, 127), key, scale);
+  return clampPitch(static_cast<int>(snapped), low_range, high_range);
 }
 
-/// @brief Leap motion: move by a 3rd or 4th in the given direction.
+/// @brief Leap motion: move by a diatonic 3rd or 4th in the given direction.
 ///
 /// @param current_pitch Current countersubject pitch.
 /// @param direction +1 for ascending, -1 for descending.
 /// @param low_range Lower pitch bound.
 /// @param high_range Upper pitch bound.
+/// @param key Musical key for diatonic enforcement.
+/// @param scale Scale type for diatonic enforcement.
 /// @param gen Random number generator.
-/// @return New pitch after leap.
+/// @return New pitch after leap, snapped to the nearest scale tone.
 uint8_t leapMotion(uint8_t current_pitch, int direction,
                    uint8_t low_range, uint8_t high_range,
+                   Key key, ScaleType scale,
                    std::mt19937& gen) {
   // Choose between minor 3rd, major 3rd, perfect 4th.
   constexpr int kLeapSizes[] = {3, 4, 5};
@@ -239,14 +258,18 @@ uint8_t leapMotion(uint8_t current_pitch, int direction,
   int leap = kLeapSizes[leap_idx] * direction;
   int candidate = static_cast<int>(current_pitch) + leap;
 
-  if (candidate >= static_cast<int>(low_range) &&
-      candidate <= static_cast<int>(high_range)) {
-    return static_cast<uint8_t>(candidate);
+  // Snap to nearest scale tone for diatonic output.
+  uint8_t snapped = scale_util::nearestScaleTone(
+      clampPitch(candidate, 0, 127), key, scale);
+  if (snapped >= low_range && snapped <= high_range) {
+    return snapped;
   }
 
-  // Reverse direction on range violation.
+  // Reverse direction on range violation, snap again.
   candidate = static_cast<int>(current_pitch) - leap;
-  return clampPitch(candidate, low_range, high_range);
+  snapped = scale_util::nearestScaleTone(
+      clampPitch(candidate, 0, 127), key, scale);
+  return clampPitch(static_cast<int>(snapped), low_range, high_range);
 }
 
 /// @brief Check whether two pitches form a consonant interval.
@@ -329,14 +352,18 @@ float validateConsonanceRate(const std::vector<NoteEvent>& cs_notes,
 ///
 /// Walks through the subject notes, generating countersubject notes with
 /// contrary motion and complementary rhythm. Uses imperfect consonances
-/// preferentially and avoids parallel 5ths/octaves.
+/// preferentially, avoids parallel 5ths/octaves, and enforces diatonic
+/// pitch selection in the given key.
 ///
 /// @param subject The fugue subject.
 /// @param params Character-based generation parameters.
+/// @param key Musical key for diatonic enforcement.
+/// @param scale Scale type for diatonic enforcement.
 /// @param gen Seeded random number generator.
 /// @return Vector of generated countersubject notes.
 std::vector<NoteEvent> generateCSAttempt(const Subject& subject,
                                          const CSCharacterParams& params,
+                                         Key key, ScaleType scale,
                                          std::mt19937& gen) {
   if (subject.notes.empty()) return {};
 
@@ -347,7 +374,7 @@ std::vector<NoteEvent> generateCSAttempt(const Subject& subject,
   int start_direction = rng::rollProbability(gen, 0.6f) ? 1 : -1;
   uint8_t current_pitch = findConsonantPitch(
       subject.notes[0].pitch, start_direction,
-      kCSPitchLow, kCSPitchHigh, gen);
+      kCSPitchLow, kCSPitchHigh, key, scale, gen);
 
   Tick current_tick = 0;
   Tick total_ticks = subject.length_ticks;
@@ -385,10 +412,10 @@ std::vector<NoteEvent> generateCSAttempt(const Subject& subject,
     uint8_t next_pitch;
     if (rng::rollProbability(gen, params.leap_prob)) {
       next_pitch = leapMotion(current_pitch, cs_direction,
-                              kCSPitchLow, kCSPitchHigh, gen);
+                              kCSPitchLow, kCSPitchHigh, key, scale, gen);
     } else {
       next_pitch = stepMotion(current_pitch, cs_direction,
-                              kCSPitchLow, kCSPitchHigh);
+                              kCSPitchLow, kCSPitchHigh, key, scale);
     }
 
     // Check for parallel 5ths/octaves against previous note pair.
@@ -409,7 +436,7 @@ std::vector<NoteEvent> generateCSAttempt(const Subject& subject,
                                      next_pitch, subj_note.pitch)) {
         // Adjust by a step to avoid parallels.
         next_pitch = stepMotion(next_pitch, cs_direction,
-                                kCSPitchLow, kCSPitchHigh);
+                                kCSPitchLow, kCSPitchHigh, key, scale);
       }
     }
 
@@ -419,7 +446,8 @@ std::vector<NoteEvent> generateCSAttempt(const Subject& subject,
     if ((beat == 0 || beat == 2) && !isConsonant(next_pitch, subj_note.pitch)) {
       // Try finding a consonant pitch near the desired direction.
       uint8_t consonant = findConsonantPitch(
-          subj_note.pitch, cs_direction, kCSPitchLow, kCSPitchHigh, gen);
+          subj_note.pitch, cs_direction, kCSPitchLow, kCSPitchHigh,
+          key, scale, gen);
       // Only use it if reasonably close to the intended pitch (within a 5th).
       if (absoluteInterval(consonant, current_pitch) <=
           interval::kPerfect5th) {
@@ -450,7 +478,8 @@ std::vector<NoteEvent> generateCSAttempt(const Subject& subject,
                         ? 1
                         : -1;
       result.back().pitch = findConsonantPitch(
-          last_subj_pitch, end_dir, kCSPitchLow, kCSPitchHigh, gen);
+          last_subj_pitch, end_dir, kCSPitchLow, kCSPitchHigh,
+          key, scale, gen);
     }
   }
 
@@ -474,6 +503,7 @@ Countersubject generateCountersubject(const Subject& subject,
   }
 
   CSCharacterParams params = getCSParams(subject.character);
+  ScaleType scale = ScaleType::Major;
 
   Countersubject best;
   best.key = subject.key;
@@ -483,7 +513,8 @@ Countersubject generateCountersubject(const Subject& subject,
   for (int attempt = 0; attempt < max_retries; ++attempt) {
     std::mt19937 gen(seed + static_cast<uint32_t>(attempt) * 1000003u);
 
-    std::vector<NoteEvent> cs_notes = generateCSAttempt(subject, params, gen);
+    std::vector<NoteEvent> cs_notes =
+        generateCSAttempt(subject, params, subject.key, scale, gen);
     float score = validateConsonanceRate(cs_notes, subject);
 
     if (score > best_score) {
@@ -533,6 +564,7 @@ Countersubject generateSecondCountersubject(const Subject& subject,
   CSCharacterParams params = getCSParams(subject.character);
   params.leap_prob = std::min(params.leap_prob + 0.10f, 0.60f);
   params.max_range = std::min(params.max_range + 2, 16);
+  ScaleType scale = ScaleType::Major;
 
   Countersubject best;
   best.key = subject.key;
@@ -543,14 +575,16 @@ Countersubject generateSecondCountersubject(const Subject& subject,
     std::mt19937 gen(seed + static_cast<uint32_t>(attempt) * 1000003u);
 
     // Generate a CS attempt against the subject.
-    std::vector<NoteEvent> cs2_notes = generateCSAttempt(subject, params, gen);
+    std::vector<NoteEvent> cs2_notes =
+        generateCSAttempt(subject, params, subject.key, scale, gen);
 
     // Shift register: if CS1 is above, push CS2 down by an octave offset;
-    // otherwise push CS2 up.
+    // otherwise push CS2 up. Snap to scale to preserve diatonic membership.
     int register_shift = cs1_above_subject ? -7 : 7;
     for (auto& note : cs2_notes) {
       int shifted = static_cast<int>(note.pitch) + register_shift;
-      note.pitch = clampPitch(shifted, kCSPitchLow, kCSPitchHigh);
+      uint8_t clamped = clampPitch(shifted, kCSPitchLow, kCSPitchHigh);
+      note.pitch = scale_util::nearestScaleTone(clamped, subject.key, scale);
       note.voice = 2;  // CS2 is typically voice 2.
     }
 

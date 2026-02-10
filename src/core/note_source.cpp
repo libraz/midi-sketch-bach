@@ -20,6 +20,7 @@ const char* bachNoteSourceToString(BachNoteSource source) {
     case BachNoteSource::GroundBass:       return "ground_bass";
     case BachNoteSource::CollisionAvoid:   return "collision_avoid";
     case BachNoteSource::PostProcess:      return "post_process";
+    case BachNoteSource::ChromaticPassing: return "chromatic_passing";
   }
   return "unknown";
 }
@@ -61,6 +62,7 @@ ProtectionLevel getProtectionLevel(BachNoteSource source) {
     case BachNoteSource::TextureNote:
     case BachNoteSource::CollisionAvoid:
     case BachNoteSource::PostProcess:
+    case BachNoteSource::ChromaticPassing:
     case BachNoteSource::Unknown:
       return ProtectionLevel::Flexible;
   }

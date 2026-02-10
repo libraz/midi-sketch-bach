@@ -24,7 +24,8 @@ enum class BachNoteSource : uint8_t {
   TextureNote,      // Arch texture (BWV1004)
   GroundBass,       // Ground bass (immutable)
   CollisionAvoid,   // Modified by collision avoidance
-  PostProcess       // Modified by post-processing
+  PostProcess,      // Modified by post-processing
+  ChromaticPassing  // Chromatic passing tone between chord tones
 };
 
 /// @brief Convert BachNoteSource to human-readable string.
