@@ -3,8 +3,11 @@
 #include "organ/registration.h"
 
 #include <gtest/gtest.h>
+#include <string>
 #include <utility>
 #include <vector>
+
+#include "fugue/fugue_structure.h"
 
 namespace bach {
 namespace {
@@ -428,6 +431,328 @@ TEST(RegistrationTest, GenerateEnergyRegistrationEventsZeroChannels) {
   };
   auto events = generateEnergyRegistrationEvents(energy_levels, 0);
   EXPECT_TRUE(events.empty());
+}
+
+// ---------------------------------------------------------------------------
+// ExtendedRegistrationPlan
+// ---------------------------------------------------------------------------
+
+TEST(ExtendedRegistrationPlanTest, AddPointStoresCorrectly) {
+  ExtendedRegistrationPlan plan;
+  Registration reg;
+  reg.velocity_hint = 85;
+
+  plan.addPoint(kTicksPerBar * 4, reg, "episode_1");
+
+  ASSERT_EQ(plan.size(), 1u);
+  EXPECT_EQ(plan.points[0].tick, kTicksPerBar * 4);
+  EXPECT_EQ(plan.points[0].registration.velocity_hint, 85);
+  EXPECT_EQ(plan.points[0].label, "episode_1");
+}
+
+TEST(ExtendedRegistrationPlanTest, EmptyPlanIsEmpty) {
+  ExtendedRegistrationPlan plan;
+  EXPECT_TRUE(plan.empty());
+  EXPECT_EQ(plan.size(), 0u);
+}
+
+TEST(ExtendedRegistrationPlanTest, MultiplePointsPreserveOrder) {
+  ExtendedRegistrationPlan plan;
+  Registration reg1;
+  reg1.velocity_hint = 75;
+  Registration reg2;
+  reg2.velocity_hint = 90;
+
+  plan.addPoint(0, reg1, "exposition");
+  plan.addPoint(kTicksPerBar * 8, reg2, "stretto");
+
+  ASSERT_EQ(plan.size(), 2u);
+  EXPECT_EQ(plan.points[0].label, "exposition");
+  EXPECT_EQ(plan.points[1].label, "stretto");
+}
+
+TEST(ExtendedRegistrationPlanTest, AddPointDefaultEmptyLabel) {
+  ExtendedRegistrationPlan plan;
+  Registration reg;
+  plan.addPoint(0, reg);
+
+  ASSERT_EQ(plan.size(), 1u);
+  EXPECT_TRUE(plan.points[0].label.empty());
+}
+
+// ---------------------------------------------------------------------------
+// createExtendedRegistrationPlan
+// ---------------------------------------------------------------------------
+
+TEST(ExtendedRegistrationPlanTest, FromSectionsHasCorrectPointCount) {
+  // Create a typical fugue section layout: Exposition + 2 Episodes + 2 MiddleEntries
+  // + Stretto + Coda = 7 sections
+  std::vector<FugueSection> sections;
+
+  FugueSection expo;
+  expo.type = SectionType::Exposition;
+  expo.start_tick = 0;
+  expo.end_tick = kTicksPerBar * 4;
+  sections.push_back(expo);
+
+  FugueSection ep1;
+  ep1.type = SectionType::Episode;
+  ep1.start_tick = kTicksPerBar * 4;
+  ep1.end_tick = kTicksPerBar * 6;
+  sections.push_back(ep1);
+
+  FugueSection me1;
+  me1.type = SectionType::MiddleEntry;
+  me1.start_tick = kTicksPerBar * 6;
+  me1.end_tick = kTicksPerBar * 8;
+  sections.push_back(me1);
+
+  FugueSection ep2;
+  ep2.type = SectionType::Episode;
+  ep2.start_tick = kTicksPerBar * 8;
+  ep2.end_tick = kTicksPerBar * 10;
+  sections.push_back(ep2);
+
+  FugueSection me2;
+  me2.type = SectionType::MiddleEntry;
+  me2.start_tick = kTicksPerBar * 10;
+  me2.end_tick = kTicksPerBar * 12;
+  sections.push_back(me2);
+
+  FugueSection stretto;
+  stretto.type = SectionType::Stretto;
+  stretto.start_tick = kTicksPerBar * 12;
+  stretto.end_tick = kTicksPerBar * 16;
+  sections.push_back(stretto);
+
+  FugueSection coda;
+  coda.type = SectionType::Coda;
+  coda.start_tick = kTicksPerBar * 16;
+  coda.end_tick = kTicksPerBar * 18;
+  sections.push_back(coda);
+
+  Tick total_duration = kTicksPerBar * 18;
+  auto plan = createExtendedRegistrationPlan(sections, total_duration);
+
+  // One point per section
+  EXPECT_EQ(plan.size(), 7u);
+}
+
+TEST(ExtendedRegistrationPlanTest, ExpositionVelocityIs75) {
+  std::vector<FugueSection> sections;
+  FugueSection expo;
+  expo.type = SectionType::Exposition;
+  expo.start_tick = 0;
+  expo.end_tick = kTicksPerBar * 4;
+  sections.push_back(expo);
+
+  auto plan = createExtendedRegistrationPlan(sections, kTicksPerBar * 20);
+
+  ASSERT_EQ(plan.size(), 1u);
+  EXPECT_EQ(plan.points[0].registration.velocity_hint, 75);
+  EXPECT_EQ(plan.points[0].label, "exposition");
+}
+
+TEST(ExtendedRegistrationPlanTest, CodaVelocityIs100) {
+  std::vector<FugueSection> sections;
+  FugueSection coda;
+  coda.type = SectionType::Coda;
+  coda.start_tick = kTicksPerBar * 16;
+  coda.end_tick = kTicksPerBar * 18;
+  sections.push_back(coda);
+
+  auto plan = createExtendedRegistrationPlan(sections, kTicksPerBar * 18);
+
+  ASSERT_EQ(plan.size(), 1u);
+  EXPECT_EQ(plan.points[0].registration.velocity_hint, 100);
+  EXPECT_EQ(plan.points[0].label, "coda");
+}
+
+TEST(ExtendedRegistrationPlanTest, StrettoVelocityIs95) {
+  std::vector<FugueSection> sections;
+  FugueSection stretto;
+  stretto.type = SectionType::Stretto;
+  stretto.start_tick = kTicksPerBar * 12;
+  stretto.end_tick = kTicksPerBar * 16;
+  sections.push_back(stretto);
+
+  auto plan = createExtendedRegistrationPlan(sections, kTicksPerBar * 18);
+
+  ASSERT_EQ(plan.size(), 1u);
+  EXPECT_EQ(plan.points[0].registration.velocity_hint, 95);
+  EXPECT_EQ(plan.points[0].label, "stretto");
+}
+
+TEST(ExtendedRegistrationPlanTest, EpisodesHaveGradualDynamic) {
+  // Place episodes at 20%, 50%, 80% of total duration to verify increasing velocity.
+  Tick total_duration = kTicksPerBar * 20;
+  std::vector<FugueSection> sections;
+
+  FugueSection ep1;
+  ep1.type = SectionType::Episode;
+  ep1.start_tick = kTicksPerBar * 4;   // 20%
+  ep1.end_tick = kTicksPerBar * 6;
+  sections.push_back(ep1);
+
+  FugueSection ep2;
+  ep2.type = SectionType::Episode;
+  ep2.start_tick = kTicksPerBar * 10;  // 50%
+  ep2.end_tick = kTicksPerBar * 12;
+  sections.push_back(ep2);
+
+  FugueSection ep3;
+  ep3.type = SectionType::Episode;
+  ep3.start_tick = kTicksPerBar * 16;  // 80%
+  ep3.end_tick = kTicksPerBar * 18;
+  sections.push_back(ep3);
+
+  auto plan = createExtendedRegistrationPlan(sections, total_duration);
+
+  ASSERT_EQ(plan.size(), 3u);
+
+  // Later episodes should have higher velocity (gradual crescendo).
+  uint8_t vel1 = plan.points[0].registration.velocity_hint;
+  uint8_t vel2 = plan.points[1].registration.velocity_hint;
+  uint8_t vel3 = plan.points[2].registration.velocity_hint;
+  EXPECT_LT(vel1, vel2);
+  EXPECT_LT(vel2, vel3);
+
+  // Verify range: episode velocity is 70 + energy * 20, energy in [0.2, 0.8].
+  EXPECT_GE(vel1, 70);
+  EXPECT_LE(vel3, 90);
+}
+
+TEST(ExtendedRegistrationPlanTest, MiddleEntryHasBoostedVelocity) {
+  Tick total_duration = kTicksPerBar * 20;
+  std::vector<FugueSection> sections;
+
+  FugueSection middle;
+  middle.type = SectionType::MiddleEntry;
+  middle.start_tick = kTicksPerBar * 10;  // 50%
+  middle.end_tick = kTicksPerBar * 12;
+  sections.push_back(middle);
+
+  auto plan = createExtendedRegistrationPlan(sections, total_duration);
+
+  ASSERT_EQ(plan.size(), 1u);
+  // At 50% energy: 80 + 0.5 * 15 = 87
+  EXPECT_EQ(plan.points[0].registration.velocity_hint, 87);
+  EXPECT_EQ(plan.points[0].label, "middle_entry");
+}
+
+TEST(ExtendedRegistrationPlanTest, EmptySectionsProducesEmptyPlan) {
+  std::vector<FugueSection> sections;
+  auto plan = createExtendedRegistrationPlan(sections, kTicksPerBar * 20);
+  EXPECT_TRUE(plan.empty());
+}
+
+TEST(ExtendedRegistrationPlanTest, ZeroDurationUsesDefaultEnergy) {
+  // When total_duration is 0, energy defaults to 0.5.
+  std::vector<FugueSection> sections;
+  FugueSection episode;
+  episode.type = SectionType::Episode;
+  episode.start_tick = 0;
+  episode.end_tick = kTicksPerBar * 2;
+  sections.push_back(episode);
+
+  auto plan = createExtendedRegistrationPlan(sections, 0);
+
+  ASSERT_EQ(plan.size(), 1u);
+  // energy = 0.5: velocity = 70 + 0.5 * 20 = 80
+  EXPECT_EQ(plan.points[0].registration.velocity_hint, 80);
+}
+
+// ---------------------------------------------------------------------------
+// applyExtendedRegistrationPlan
+// ---------------------------------------------------------------------------
+
+TEST(ExtendedRegistrationPlanTest, ApplyInsertsEventsIntoTracks) {
+  // Create 4 organ tracks (channels 0-3).
+  std::vector<Track> tracks(4);
+  for (uint8_t idx = 0; idx < 4; ++idx) {
+    tracks[idx].channel = idx;
+  }
+
+  // Create a plan with 3 points: exposition, episode, stretto.
+  ExtendedRegistrationPlan plan;
+  Registration reg_expo;
+  reg_expo.velocity_hint = 75;
+  plan.addPoint(0, reg_expo, "exposition");
+
+  Registration reg_ep;
+  reg_ep.velocity_hint = 82;
+  plan.addPoint(kTicksPerBar * 4, reg_ep, "episode");
+
+  Registration reg_stretto;
+  reg_stretto.velocity_hint = 95;
+  plan.addPoint(kTicksPerBar * 12, reg_stretto, "stretto");
+
+  applyExtendedRegistrationPlan(tracks, plan);
+
+  // Each point generates 2 events per channel (CC#7 + CC#11).
+  // 3 points x 2 events = 6 events per track.
+  for (const auto& track : tracks) {
+    EXPECT_EQ(track.events.size(), 6u);
+  }
+
+  // Verify first track's exposition events.
+  EXPECT_EQ(tracks[0].events[0].tick, 0u);
+  EXPECT_EQ(tracks[0].events[0].data1, 7u);   // CC#7
+  EXPECT_EQ(tracks[0].events[0].data2, 75u);
+  EXPECT_EQ(tracks[0].events[1].tick, 0u);
+  EXPECT_EQ(tracks[0].events[1].data1, 11u);  // CC#11
+  EXPECT_EQ(tracks[0].events[1].data2, 75u);
+
+  // Verify episode events at correct tick.
+  EXPECT_EQ(tracks[0].events[2].tick, kTicksPerBar * 4);
+  EXPECT_EQ(tracks[0].events[2].data2, 82u);
+
+  // Verify stretto events at correct tick.
+  EXPECT_EQ(tracks[0].events[4].tick, kTicksPerBar * 12);
+  EXPECT_EQ(tracks[0].events[4].data2, 95u);
+}
+
+TEST(ExtendedRegistrationPlanTest, ApplyEmptyPlanNoEvents) {
+  std::vector<Track> tracks(4);
+  for (uint8_t idx = 0; idx < 4; ++idx) {
+    tracks[idx].channel = idx;
+  }
+
+  ExtendedRegistrationPlan plan;
+  applyExtendedRegistrationPlan(tracks, plan);
+
+  for (const auto& track : tracks) {
+    EXPECT_TRUE(track.events.empty());
+  }
+}
+
+TEST(ExtendedRegistrationPlanTest, ApplyToEmptyTracksNoEffect) {
+  std::vector<Track> tracks;
+  ExtendedRegistrationPlan plan;
+  Registration reg;
+  plan.addPoint(0, reg, "test");
+
+  // Should not crash.
+  applyExtendedRegistrationPlan(tracks, plan);
+  EXPECT_TRUE(tracks.empty());
+}
+
+TEST(ExtendedRegistrationPlanTest, ApplySkipsUnmatchedChannels) {
+  // Only 2 tracks (channels 0 and 1).
+  std::vector<Track> tracks(2);
+  tracks[0].channel = 0;
+  tracks[1].channel = 1;
+
+  ExtendedRegistrationPlan plan;
+  Registration reg;
+  reg.velocity_hint = 85;
+  plan.addPoint(0, reg, "test");
+
+  applyExtendedRegistrationPlan(tracks, plan);
+
+  // Only channels 0 and 1 get events (not 2 and 3).
+  EXPECT_EQ(tracks[0].events.size(), 2u);  // CC#7 + CC#11
+  EXPECT_EQ(tracks[1].events.size(), 2u);
 }
 
 }  // namespace

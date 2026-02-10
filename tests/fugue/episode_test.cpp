@@ -831,5 +831,189 @@ TEST(DiatonicEpisodeTest, ModulatedEpisodeTargetKeyDiatonic) {
 // transforms now use diatonic operations. Running `make test` confirms that
 // all prior tests continue to pass.
 
+// ---------------------------------------------------------------------------
+// Episode resting voice -- texture lightening with held tones (B3)
+// ---------------------------------------------------------------------------
+
+TEST(EpisodeRestingVoiceTest, ThreeVoices_HasHeldTones) {
+  // With 3 voices, voice 2 should receive held tones (whole-note duration)
+  // instead of the normal diminished motif.
+  Subject subject = makeTestSubject(Key::C, SubjectCharacter::Severe);
+  Episode episode = generateEpisode(subject, 0, kTicksPerBar * 4,
+                                    Key::C, Key::C, 3, 42, /*episode_index=*/0);
+
+  ASSERT_FALSE(episode.notes.empty());
+
+  // Collect notes for the resting voice (voice 2 for 3-voice, episode_index=0).
+  std::vector<NoteEvent> voice2_notes;
+  for (const auto& note : episode.notes) {
+    if (note.voice == 2) {
+      voice2_notes.push_back(note);
+    }
+  }
+  ASSERT_FALSE(voice2_notes.empty()) << "Voice 2 should have held tone notes";
+
+  // Held tones should have long durations (whole note = kTicksPerBar or the
+  // remainder at the end).
+  for (const auto& note : voice2_notes) {
+    EXPECT_GE(note.duration, kTicksPerBar / 2)
+        << "Held tone at tick " << note.start_tick
+        << " has unexpectedly short duration " << note.duration;
+  }
+}
+
+TEST(EpisodeRestingVoiceTest, FourVoices_RotatesResting) {
+  // With 4 voices: voices 2 and 3 alternate as resting voice.
+  // episode_index=0 -> resting voice = 2 + (0 % 2) = 2
+  // episode_index=1 -> resting voice = 2 + (1 % 2) = 3
+  Subject subject = makeTestSubject(Key::C, SubjectCharacter::Severe);
+
+  Episode ep0 = generateEpisode(subject, 0, kTicksPerBar * 4,
+                                Key::C, Key::C, 4, 42, /*episode_index=*/0);
+  Episode ep1 = generateEpisode(subject, 0, kTicksPerBar * 4,
+                                Key::C, Key::C, 4, 42, /*episode_index=*/1);
+
+  // Episode 0: voice 2 should have held tones, voice 3 should have normal material.
+  bool ep0_v2_has_long = false;
+  bool ep0_v3_has_notes = false;
+  for (const auto& note : ep0.notes) {
+    if (note.voice == 2 && note.duration >= kTicksPerBar / 2) ep0_v2_has_long = true;
+    if (note.voice == 3) ep0_v3_has_notes = true;
+  }
+  EXPECT_TRUE(ep0_v2_has_long) << "Episode 0: voice 2 should have held tones";
+  EXPECT_TRUE(ep0_v3_has_notes) << "Episode 0: voice 3 should have normal material";
+
+  // Episode 1: voice 3 should have held tones, voice 2 should have normal material.
+  // (Note: episode_index=1 also triggers invertible counterpoint on voices 0/1,
+  //  but voice 2/3 are not affected by that.)
+  bool ep1_v3_has_long = false;
+  bool ep1_v2_has_notes = false;
+  for (const auto& note : ep1.notes) {
+    if (note.voice == 3 && note.duration >= kTicksPerBar / 2) ep1_v3_has_long = true;
+    if (note.voice == 2) ep1_v2_has_notes = true;
+  }
+  EXPECT_TRUE(ep1_v3_has_long) << "Episode 1: voice 3 should have held tones";
+  EXPECT_TRUE(ep1_v2_has_notes) << "Episode 1: voice 2 should have normal material";
+}
+
+TEST(EpisodeRestingVoiceTest, TwoVoices_NoHeldTones) {
+  // With only 2 voices, no resting voice mechanism applies.
+  // All notes should belong to voice 0 or 1 only.
+  Subject subject = makeTestSubject(Key::C, SubjectCharacter::Severe);
+  Episode episode = generateEpisode(subject, 0, kTicksPerBar * 4,
+                                    Key::C, Key::C, 2, 42, /*episode_index=*/0);
+
+  ASSERT_FALSE(episode.notes.empty());
+  for (const auto& note : episode.notes) {
+    EXPECT_LE(note.voice, 1u)
+        << "2-voice episode should only use voices 0 and 1, found voice "
+        << static_cast<int>(note.voice);
+  }
+}
+
+TEST(EpisodeRestingVoiceTest, HeldTones_ProducesWholeNotes) {
+  // Verify that the held tones have bar-length (whole note) duration.
+  Subject subject = makeTestSubject(Key::C, SubjectCharacter::Severe);
+  Tick total_duration = kTicksPerBar * 4;
+  Episode episode = generateEpisode(subject, 0, total_duration,
+                                    Key::C, Key::C, 3, 42, /*episode_index=*/0);
+
+  // Collect resting voice notes (voice 2 for 3-voice, episode_index=0).
+  std::vector<NoteEvent> held_notes;
+  for (const auto& note : episode.notes) {
+    if (note.voice == 2) {
+      held_notes.push_back(note);
+    }
+  }
+  ASSERT_FALSE(held_notes.empty()) << "Should have held tone notes on resting voice";
+
+  // All held notes except possibly the last should have duration = kTicksPerBar.
+  for (size_t idx = 0; idx < held_notes.size(); ++idx) {
+    if (idx < held_notes.size() - 1) {
+      EXPECT_EQ(held_notes[idx].duration, kTicksPerBar)
+          << "Held tone " << idx << " should be exactly one whole note (kTicksPerBar)";
+    } else {
+      // Last note may be shorter if duration doesn't divide evenly.
+      EXPECT_GT(held_notes[idx].duration, static_cast<Tick>(0))
+          << "Last held tone should have positive duration";
+      EXPECT_LE(held_notes[idx].duration, kTicksPerBar)
+          << "Last held tone should not exceed one whole note";
+    }
+  }
+}
+
+TEST(EpisodeRestingVoiceTest, HeldTones_SourceIsEpisodeMaterial) {
+  // Held tones should have BachNoteSource::EpisodeMaterial for provenance.
+  Subject subject = makeTestSubject(Key::C, SubjectCharacter::Severe);
+  Episode episode = generateEpisode(subject, 0, kTicksPerBar * 4,
+                                    Key::C, Key::C, 3, 42, /*episode_index=*/0);
+
+  for (const auto& note : episode.notes) {
+    if (note.voice == 2) {
+      EXPECT_EQ(note.source, BachNoteSource::EpisodeMaterial)
+          << "Held tone at tick " << note.start_tick
+          << " should have EpisodeMaterial source";
+    }
+  }
+}
+
+TEST(EpisodeRestingVoiceTest, FiveVoices_RotatesThroughThreeUpperVoices) {
+  // With 5 voices, rotation cycles through voices 2, 3, 4.
+  // episode_index=0 -> 2 + (0 % 3) = 2
+  // episode_index=1 -> 2 + (1 % 3) = 3
+  // episode_index=2 -> 2 + (2 % 3) = 4
+  // episode_index=3 -> 2 + (3 % 3) = 2  (wraps around)
+  Subject subject = makeTestSubject(Key::C, SubjectCharacter::Severe);
+
+  // Track which voice gets held tones for each episode index.
+  for (int ep_idx = 0; ep_idx < 6; ++ep_idx) {
+    VoiceId expected_resting = static_cast<VoiceId>(2 + (ep_idx % 3));
+
+    Episode episode = generateEpisode(subject, 0, kTicksPerBar * 4,
+                                      Key::C, Key::C, 5, 42, ep_idx);
+
+    // The expected resting voice should have held tones (long durations).
+    bool found_long_note = false;
+    for (const auto& note : episode.notes) {
+      if (note.voice == expected_resting && note.duration >= kTicksPerBar / 2) {
+        found_long_note = true;
+        break;
+      }
+    }
+    EXPECT_TRUE(found_long_note)
+        << "5-voice episode_index=" << ep_idx
+        << ": expected resting voice " << static_cast<int>(expected_resting)
+        << " to have held tones";
+  }
+}
+
+TEST(EpisodeRestingVoiceTest, AllCharacters_ThreeVoices_HaveHeldTones) {
+  // Held tones should work regardless of SubjectCharacter since the resting
+  // voice mechanism is applied after the character-specific voice 0/1 generation.
+  const SubjectCharacter characters[] = {
+      SubjectCharacter::Severe,
+      SubjectCharacter::Playful,
+      SubjectCharacter::Noble,
+      SubjectCharacter::Restless,
+  };
+  const char* names[] = {"Severe", "Playful", "Noble", "Restless"};
+
+  for (int char_idx = 0; char_idx < 4; ++char_idx) {
+    Subject subject = makeTestSubject(Key::C, characters[char_idx]);
+    Episode episode = generateEpisode(subject, 0, kTicksPerBar * 4,
+                                      Key::C, Key::C, 3, 42, /*episode_index=*/0);
+
+    bool has_voice2_held = false;
+    for (const auto& note : episode.notes) {
+      if (note.voice == 2 && note.duration >= kTicksPerBar / 2) {
+        has_voice2_held = true;
+        break;
+      }
+    }
+    EXPECT_TRUE(has_voice2_held)
+        << names[char_idx] << ": 3-voice episode should have held tones on voice 2";
+  }
+}
+
 }  // namespace
 }  // namespace bach

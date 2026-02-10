@@ -140,4 +140,31 @@ std::string FailReport::toJson() const {
   return writer.toPrettyString();
 }
 
+// ---------------------------------------------------------------------------
+// fugueAnalysisResultToJson
+// ---------------------------------------------------------------------------
+
+std::string fugueAnalysisResultToJson(const FugueAnalysisResult& result) {
+  JsonWriter writer;
+  writer.beginObject();
+
+  writer.key("answer_accuracy_score");
+  writer.value(static_cast<double>(result.answer_accuracy_score));
+  writer.key("exposition_completeness_score");
+  writer.value(static_cast<double>(result.exposition_completeness_score));
+  writer.key("episode_motif_usage_rate");
+  writer.value(static_cast<double>(result.episode_motif_usage_rate));
+  writer.key("tonal_plan_score");
+  writer.value(static_cast<double>(result.tonal_plan_score));
+  writer.key("cadence_detection_rate");
+  writer.value(static_cast<double>(result.cadence_detection_rate));
+  writer.key("motivic_unity_score");
+  writer.value(static_cast<double>(result.motivic_unity_score));
+  writer.key("tonal_consistency_score");
+  writer.value(static_cast<double>(result.tonal_consistency_score));
+
+  writer.endObject();
+  return writer.toPrettyString();
+}
+
 }  // namespace bach

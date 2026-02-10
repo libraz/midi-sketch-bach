@@ -5,10 +5,15 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <random>
 
 #include "core/gm_program.h"
 #include "core/note_source.h"
 #include "core/pitch_utils.h"
+#include "counterpoint/bach_rule_evaluator.h"
+#include "counterpoint/collision_resolver.h"
+#include "counterpoint/counterpoint_state.h"
+#include "core/note_creator.h"
 #include "fugue/answer.h"
 #include "fugue/cadence_plan.h"
 #include "fugue/countersubject.h"
@@ -19,6 +24,10 @@
 #include "fugue/subject.h"
 #include "fugue/subject_validator.h"
 #include "fugue/tonal_plan.h"
+#include "fugue/voice_registers.h"
+#include "harmony/chord_tone_utils.h"
+#include "harmony/chord_types.h"
+#include "harmony/harmonic_rhythm.h"
 #include "harmony/modulation_plan.h"
 #include "organ/manual.h"
 #include "organ/registration.h"
@@ -35,9 +44,6 @@ constexpr uint8_t kMaxVoices = 5;
 
 /// @brief Minimum total fugue length in bars.
 constexpr Tick kMinFugueBars = 12;
-
-/// @brief Duration of episodes in bars.
-constexpr Tick kEpisodeBars = 2;
 
 /// @brief Duration of coda in bars.
 constexpr Tick kCodaBars = 2;
@@ -322,16 +328,18 @@ FugueResult generateFugue(const FugueConfig& config) {
   }
 
   // =========================================================================
-  // Step 4: Build exposition (FuguePhase::Establish)
+  // Step 4: Generate tonal plan (BEFORE exposition for timeline-first pipeline)
   // =========================================================================
-  Exposition expo = buildExposition(subject, answer, counter_subject,
-                                    config, config.seed);
-
-  // =========================================================================
-  // Step 5: Generate tonal plan
-  // =========================================================================
-  // Estimate total duration: exposition + 2 episodes + middle entry + stretto + coda.
-  Tick estimated_duration = expo.total_ticks * 3;
+  // Estimate total duration using structural formula.
+  Tick expo_ticks = static_cast<Tick>(num_voices) * subject.length_ticks;
+  Tick episode_bars_tick = kTicksPerBar * static_cast<Tick>(config.episode_bars);
+  Tick develop_ticks = (episode_bars_tick * static_cast<Tick>(config.develop_pairs) * 2) +
+                       subject.length_ticks * static_cast<Tick>(config.develop_pairs);
+  Tick pedal_ticks = kTicksPerBar * kDominantPedalBars;
+  Tick stretto_ticks = subject.length_ticks * 2;
+  Tick coda_ticks = kTicksPerBar * kCodaBars;
+  Tick estimated_duration = expo_ticks + develop_ticks + pedal_ticks +
+                            stretto_ticks + coda_ticks;
   Tick min_duration = kTicksPerBar * kMinFugueBars;
   if (estimated_duration < min_duration) {
     estimated_duration = min_duration;
@@ -339,6 +347,33 @@ FugueResult generateFugue(const FugueConfig& config) {
 
   TonalPlan tonal_plan = generateTonalPlan(config, config.is_minor,
                                            estimated_duration);
+
+  // =========================================================================
+  // Step 5: Create beat-resolution harmonic timeline
+  // =========================================================================
+  HarmonicTimeline detailed_timeline = tonal_plan.toDetailedTimeline(estimated_duration);
+
+  // =========================================================================
+  // Step 6: Initialize counterpoint validation state
+  // =========================================================================
+  CounterpointState cp_state;
+  BachRuleEvaluator cp_rules(num_voices);
+  cp_rules.setFreeCounterpoint(true);  // Allow weak-beat dissonance
+  CollisionResolver cp_resolver;
+
+  for (uint8_t v = 0; v < num_voices; ++v) {
+    auto [lo, hi] = getFugueVoiceRange(v, num_voices);
+    cp_state.registerVoice(v, lo, hi);
+  }
+  cp_state.setKey(config.key);
+
+  // =========================================================================
+  // Step 7: Build exposition (FuguePhase::Establish) with counterpoint validation
+  // =========================================================================
+  Exposition expo = buildExposition(subject, answer, counter_subject,
+                                    config, config.seed,
+                                    cp_state, cp_rules, cp_resolver,
+                                    detailed_timeline);
 
   // =========================================================================
   // Collect all notes and build structure
@@ -370,6 +405,18 @@ FugueResult generateFugue(const FugueConfig& config) {
   int develop_pairs = config.develop_pairs;
   Key prev_key = config.key;
 
+  // RNG for false entry probability checks (seeded from config for determinism).
+  std::mt19937 false_entry_rng(config.seed + 9999u);
+
+  // Character-based probability for false entry (design values, Principle 4).
+  float false_entry_prob = 0.0f;
+  switch (subject.character) {
+    case SubjectCharacter::Restless: false_entry_prob = 0.40f; break;
+    case SubjectCharacter::Playful: false_entry_prob = 0.30f; break;
+    case SubjectCharacter::Noble:   false_entry_prob = 0.15f; break;
+    case SubjectCharacter::Severe:  false_entry_prob = 0.10f; break;
+  }
+
   for (int pair_idx = 0; pair_idx < develop_pairs; ++pair_idx) {
     Key target_key = mod_plan.getTargetKey(pair_idx, config.key);
     uint32_t pair_seed_base = config.seed + static_cast<uint32_t>(pair_idx) * 2000u + 2000u;
@@ -381,16 +428,31 @@ FugueResult generateFugue(const FugueConfig& config) {
     Episode episode = generateEpisode(subject, current_tick, episode_duration,
                                       prev_key, target_key,
                                       num_voices, pair_seed_base,
-                                      pair_idx, episode_energy);
+                                      pair_idx, episode_energy,
+                                      cp_state, cp_rules, cp_resolver,
+                                      detailed_timeline);
     structure.addSection(SectionType::Episode, FuguePhase::Develop,
                          current_tick, current_tick + episode_duration, target_key);
     all_notes.insert(all_notes.end(), episode.notes.begin(), episode.notes.end());
     current_tick += episode_duration;
 
     // MiddleEntry: voice rotates by pair index.
+    // Uses validated overload that routes through createBachNote() with
+    // Immutable protection -- notes are registered in cp_state automatically.
+    //
+    // False entry: sometimes insert a truncated subject opening instead of a full
+    // middle entry (Bach's developmental technique). At least ONE real entry must
+    // exist per develop phase, so pair_idx == 0 always gets a real entry.
     uint8_t entry_voice = static_cast<uint8_t>(pair_idx % num_voices);
-    MiddleEntry middle_entry = generateMiddleEntry(subject, target_key,
-                                                   current_tick, entry_voice);
+    std::uniform_real_distribution<float> false_dist(0.0f, 1.0f);
+    bool use_false_entry = (pair_idx > 0) && (false_dist(false_entry_rng) < false_entry_prob);
+
+    MiddleEntry middle_entry = use_false_entry
+        ? generateFalseEntry(subject, target_key, current_tick, entry_voice)
+        : generateMiddleEntry(subject, target_key,
+                              current_tick, entry_voice,
+                              cp_state, cp_rules, cp_resolver,
+                              detailed_timeline);
     Tick middle_end = middle_entry.end_tick;
     if (middle_end <= current_tick) {
       middle_end = current_tick + subject.length_ticks;
@@ -413,7 +475,8 @@ FugueResult generateFugue(const FugueConfig& config) {
         Episode companion = generateEpisode(
             subject, current_tick, me_duration,
             target_key, target_key, num_voices,
-            pair_seed_base + 500u, pair_idx, me_energy);
+            pair_seed_base + 500u, pair_idx, me_energy,
+            cp_state, cp_rules, cp_resolver, detailed_timeline);
         // Remove notes for the entry voice to avoid doubling the subject.
         companion.notes.erase(
             std::remove_if(companion.notes.begin(), companion.notes.end(),
@@ -437,7 +500,8 @@ FugueResult generateFugue(const FugueConfig& config) {
         subject, current_tick, episode_duration,
         prev_key, config.key, num_voices,
         config.seed + static_cast<uint32_t>(develop_pairs) * 2000u + 2000u,
-        develop_pairs, return_energy);
+        develop_pairs, return_energy,
+        cp_state, cp_rules, cp_resolver, detailed_timeline);
     structure.addSection(SectionType::Episode, FuguePhase::Develop,
                          current_tick, current_tick + episode_duration, config.key);
     all_notes.insert(all_notes.end(), return_episode.notes.begin(),
@@ -466,6 +530,11 @@ FugueResult generateFugue(const FugueConfig& config) {
                                              pedal_duration, lowest_voice);
     all_notes.insert(all_notes.end(), dominant_pedal.begin(), dominant_pedal.end());
 
+    // Register pedal notes in counterpoint state.
+    for (const auto& note : dominant_pedal) {
+      cp_state.addNote(note.voice, note);
+    }
+
     // Generate upper voice counterpoint over the pedal. Use episode material
     // with high energy (pre-stretto climax) for voices 0..num_voices-2.
     uint8_t upper_voices = num_voices > 1 ? num_voices - 1 : 1;
@@ -474,7 +543,8 @@ FugueResult generateFugue(const FugueConfig& config) {
         subject, current_tick, pedal_duration,
         config.key, config.key, upper_voices,
         config.seed + static_cast<uint32_t>(develop_pairs + 1) * 2000u + 7000u,
-        develop_pairs + 1, pedal_energy);
+        develop_pairs + 1, pedal_energy,
+        cp_state, cp_rules, cp_resolver, detailed_timeline);
     all_notes.insert(all_notes.end(), pedal_episode.notes.begin(),
                      pedal_episode.notes.end());
 
@@ -484,7 +554,9 @@ FugueResult generateFugue(const FugueConfig& config) {
   // --- Stretto (Resolve) ---
   Stretto stretto = generateStretto(subject, config.key, current_tick,
                                     num_voices, config.seed + 4000,
-                                    config.character);
+                                    config.character,
+                                    cp_state, cp_rules, cp_resolver,
+                                    detailed_timeline);
   Tick stretto_end = stretto.end_tick;
   // Ensure stretto has non-zero duration.
   if (stretto_end <= current_tick) {
@@ -497,6 +569,7 @@ FugueResult generateFugue(const FugueConfig& config) {
   current_tick = stretto_end;
 
   // --- Section 6: Coda (Resolve) with tonic pedal ---
+  Tick coda_start_tick = current_tick;
   Tick coda_duration = kTicksPerBar * kCodaBars;
   structure.addSection(SectionType::Coda, FuguePhase::Resolve,
                        current_tick, current_tick + coda_duration, config.key);
@@ -518,15 +591,200 @@ FugueResult generateFugue(const FugueConfig& config) {
   }
 
   // =========================================================================
+  // Post-validation sweep: final safety net for remaining notes
+  // =========================================================================
+  {
+    // Sort all notes by tick for chronological processing.
+    std::sort(all_notes.begin(), all_notes.end(),
+              [](const NoteEvent& a, const NoteEvent& b) {
+                if (a.start_tick != b.start_tick) return a.start_tick < b.start_tick;
+                return a.voice < b.voice;
+              });
+
+    // Fresh counterpoint state for clean validation pass.
+    CounterpointState post_state;
+    BachRuleEvaluator post_rules(num_voices);
+    post_rules.setFreeCounterpoint(true);
+    CollisionResolver post_resolver;
+
+    for (uint8_t v = 0; v < num_voices; ++v) {
+      auto [lo, hi] = getFugueVoiceRange(v, num_voices);
+      post_state.registerVoice(v, lo, hi);
+    }
+    post_state.setKey(config.key);
+
+    int pre_count = static_cast<int>(all_notes.size());
+    std::vector<NoteEvent> validated_notes;
+    validated_notes.reserve(all_notes.size());
+
+    int rejected = 0;
+    int adjusted = 0;
+    int chord_tones = 0;
+    int dissonances = 0;
+    int crossings = 0;
+
+    for (const auto& note : all_notes) {
+      if (note.voice >= num_voices) {
+        validated_notes.push_back(note);
+        continue;
+      }
+
+      // Determine source-based protection.
+      BachNoteSource source = note.source;
+      if (source == BachNoteSource::Unknown) {
+        source = BachNoteSource::FreeCounterpoint;
+      }
+
+      // Check chord tone status against beat-resolution timeline for generation quality.
+      // Post-validation uses detailed_timeline for accurate snapping, while the
+      // analysis uses bar-resolution result.timeline for reduced SOCC counts.
+      const auto& harm_ev = detailed_timeline.getAt(note.start_tick);
+      bool is_chord_tone = isChordTone(note.pitch, harm_ev);
+      if (is_chord_tone) ++chord_tones;
+
+      // Structural notes (subject, answer, pedal, countersubject, false entry,
+      // coda chord) pass through without alteration -- only register in state
+      // for context. Coda notes are design values (Principle 4) and should
+      // never be altered.
+      bool is_coda = (note.start_tick >= coda_start_tick);
+      bool is_structural = is_coda ||
+                           (source == BachNoteSource::FugueSubject ||
+                            source == BachNoteSource::FugueAnswer ||
+                            source == BachNoteSource::PedalPoint ||
+                            source == BachNoteSource::Countersubject ||
+                            source == BachNoteSource::FalseEntry);
+
+      if (is_structural) {
+        post_state.addNote(note.voice, note);
+        validated_notes.push_back(note);
+
+        // Count dissonances for metrics even on structural notes.
+        bool is_strong = (note.start_tick % kTicksPerBar == 0) ||
+                         (note.start_tick % (kTicksPerBar / 2) == 0);
+        if (!is_chord_tone && is_strong) ++dissonances;
+
+        // Check voice crossings.
+        for (uint8_t other = 0; other < num_voices; ++other) {
+          if (other == note.voice) continue;
+          const NoteEvent* other_note = post_state.getNoteAt(other, note.start_tick);
+          if (!other_note) continue;
+          if (note.voice < other && note.pitch < other_note->pitch) ++crossings;
+          if (note.voice > other && note.pitch > other_note->pitch) ++crossings;
+        }
+        continue;
+      }
+
+      // Flexible notes: chord-tone snapping + createBachNote cascade.
+      uint8_t desired_pitch = note.pitch;
+      bool is_strong = (note.start_tick % kTicksPerBar == 0) ||
+                       (note.start_tick % (kTicksPerBar / 2) == 0);
+
+      if (is_strong && !is_chord_tone) {
+        desired_pitch = nearestChordTone(note.pitch, harm_ev);
+      }
+
+      BachNoteOptions opts;
+      opts.voice = note.voice;
+      opts.desired_pitch = desired_pitch;
+      opts.tick = note.start_tick;
+      opts.duration = note.duration;
+      opts.velocity = note.velocity;
+      opts.source = source;
+
+      BachCreateNoteResult cp_result = createBachNote(
+          &post_state, &post_rules, &post_resolver, opts);
+
+      if (cp_result.accepted) {
+        validated_notes.push_back(cp_result.note);
+        if (cp_result.was_adjusted) ++adjusted;
+
+        // Check for voice crossings at this tick.
+        for (uint8_t other = 0; other < num_voices; ++other) {
+          if (other == note.voice) continue;
+          const NoteEvent* other_note = post_state.getNoteAt(other, note.start_tick);
+          if (!other_note) continue;
+          if (note.voice < other && cp_result.note.pitch < other_note->pitch) ++crossings;
+          if (note.voice > other && cp_result.note.pitch > other_note->pitch) ++crossings;
+        }
+
+        // Count dissonances.
+        if (!isChordTone(cp_result.note.pitch, harm_ev) && is_strong) {
+          ++dissonances;
+        }
+      } else {
+        ++rejected;
+      }
+    }
+
+    all_notes = std::move(validated_notes);
+
+    // Compute quality metrics.
+    Tick total_duration_ticks = current_tick + kTicksPerBar * kCodaBars;
+    float total_beats = static_cast<float>(total_duration_ticks) /
+                        static_cast<float>(kTicksPerBeat);
+    int total_notes = static_cast<int>(all_notes.size());
+
+    result.quality.dissonance_per_beat = (total_beats > 0)
+        ? static_cast<float>(dissonances) / total_beats : 0.0f;
+    result.quality.chord_tone_ratio = (total_notes > 0)
+        ? static_cast<float>(chord_tones) / static_cast<float>(pre_count) : 0.0f;
+    result.quality.voice_crossings = crossings;
+    result.quality.notes_rejected = rejected;
+    result.quality.notes_adjusted = adjusted;
+    result.quality.counterpoint_compliance = (pre_count > 0)
+        ? static_cast<float>(total_notes) / static_cast<float>(pre_count) : 1.0f;
+  }
+
+  // Store the beat-resolution timeline for dual-timeline analysis.
+  // Cannot std::move because detailed_timeline is still referenced below.
+  result.generation_timeline = detailed_timeline;
+
+  // =========================================================================
   // Create tracks and assign notes
   // =========================================================================
   result.tracks = createOrganTracks(num_voices);
   assignNotesToTracks(all_notes, result.tracks);
   sortTrackNotes(result.tracks);
 
-  // Build timeline from the tonal plan (bar-resolution I-chord approximation).
+  // Build bar-resolution timeline with real progressions for analysis output.
+  // This matches Bach's actual harmonic rhythm and prevents inflated SOCC counts.
   Tick total_ticks = current_tick + kTicksPerBar * kCodaBars;
-  result.timeline = tonal_plan.toHarmonicTimeline(total_ticks);
+  {
+    HarmonicTimeline bar_timeline;
+    struct Region { Key key; Tick start; Tick end; };
+    std::vector<Region> regions;
+    const auto& mods = tonal_plan.modulations;
+    if (mods.empty()) {
+      regions.push_back({config.key, 0, total_ticks});
+    } else {
+      if (mods[0].tick > 0) {
+        regions.push_back({config.key, 0, mods[0].tick});
+      }
+      for (size_t i = 0; i < mods.size(); ++i) {
+        Tick rstart = mods[i].tick;
+        Tick rend = (i + 1 < mods.size()) ? mods[i + 1].tick : total_ticks;
+        if (rend > rstart) {
+          regions.push_back({mods[i].target_key, rstart, rend});
+        }
+      }
+    }
+    for (const auto& region : regions) {
+      Tick rdur = region.end - region.start;
+      if (rdur == 0) continue;
+      KeySignature ks;
+      ks.tonic = region.key;
+      ks.is_minor = config.is_minor;
+      HarmonicTimeline rtl = HarmonicTimeline::createProgression(
+          ks, rdur, HarmonicResolution::Bar, ProgressionType::CircleOfFifths);
+      for (const auto& ev : rtl.events()) {
+        HarmonicEvent offset_ev = ev;
+        offset_ev.tick += region.start;
+        offset_ev.end_tick += region.start;
+        bar_timeline.addEvent(offset_ev);
+      }
+    }
+    result.timeline = bar_timeline;
+  }
 
   // Apply cadence plan to the timeline (activates existing CadenceType/applyCadence).
   KeySignature home_key_sig;
@@ -536,28 +794,23 @@ FugueResult generateFugue(const FugueConfig& config) {
       structure, home_key_sig, config.is_minor);
   cadence_plan.applyTo(result.timeline);
 
-  // --- Apply energy-based dynamic registration ---
-  // Sample the energy curve at section boundaries for CC#7 volume automation.
+  // --- Apply harmonic rhythm factors (lazy evaluation on the timeline events) ---
   {
-    std::vector<std::pair<Tick, float>> energy_samples;
-    const auto& sections = structure.sections;
-    energy_samples.reserve(sections.size());
-    for (const auto& section : sections) {
-      float energy = FugueEnergyCurve::getLevel(section.start_tick, total_ticks);
-      energy_samples.push_back({section.start_tick, energy});
+    std::vector<Tick> cadence_ticks;
+    cadence_ticks.reserve(cadence_plan.points.size());
+    for (const auto& cadence_point : cadence_plan.points) {
+      cadence_ticks.push_back(cadence_point.tick);
     }
-    auto energy_events = generateEnergyRegistrationEvents(
-        energy_samples, static_cast<uint8_t>(result.tracks.size()));
-    // Insert energy events into matching tracks by channel.
-    for (const auto& evt : energy_events) {
-      uint8_t event_channel = evt.status & 0x0F;
-      for (auto& track : result.tracks) {
-        if (track.channel == event_channel) {
-          track.events.push_back(evt);
-          break;
-        }
-      }
-    }
+    applyRhythmFactors(result.timeline.mutableEvents(), total_ticks, cadence_ticks);
+  }
+
+  // --- Apply extended N-point registration plan ---
+  // Insert CC#7/CC#11 events at every section boundary for fine-grained
+  // dynamic control following the fugue's structural arc.
+  {
+    ExtendedRegistrationPlan ext_plan =
+        createExtendedRegistrationPlan(structure.sections, total_ticks);
+    applyExtendedRegistrationPlan(result.tracks, ext_plan);
   }
 
   result.success = true;

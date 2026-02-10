@@ -39,6 +39,7 @@ struct GeneratorResult {
   std::string form_description;
   std::string error_message;
   HarmonicTimeline timeline;  ///< Harmonic context for analysis.
+  HarmonicTimeline generation_timeline;  ///< Beat-resolution timeline from generation (for analysis).
 };
 
 /// @brief Generate a Bach composition based on configuration.

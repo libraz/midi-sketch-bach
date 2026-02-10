@@ -739,6 +739,12 @@ ToccataResult generateToccata(const ToccataConfig& config) {
   result.tracks = std::move(tracks);
   result.timeline = std::move(timeline);
   result.total_duration_ticks = total_duration;
+  result.opening_start = opening_start;
+  result.opening_end = opening_end;
+  result.recit_start = recit_start;
+  result.recit_end = recit_end;
+  result.drive_start = drive_start;
+  result.drive_end = drive_end;
   result.success = true;
 
   return result;

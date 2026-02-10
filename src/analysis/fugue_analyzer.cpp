@@ -7,8 +7,10 @@
 #include <cstdint>
 #include <vector>
 
+#include "analysis/cadence_detector.h"
 #include "core/basic_types.h"
 #include "core/pitch_utils.h"
+#include "harmony/harmonic_timeline.h"
 
 namespace bach {
 namespace {
@@ -207,6 +209,125 @@ FugueAnalysisResult analyzeFugue(const std::vector<NoteEvent>& notes,
     }
   }
   return result;
+}
+
+// ---------------------------------------------------------------------------
+// computeCadenceDetectionRate
+// ---------------------------------------------------------------------------
+
+float computeCadenceDetectionRate(const HarmonicTimeline& timeline,
+                                  const std::vector<Tick>& section_end_ticks) {
+  if (section_end_ticks.empty()) return 0.0f;
+
+  auto detected = detectCadences(timeline);
+  return cadenceDetectionRate(detected, section_end_ticks);
+}
+
+// ---------------------------------------------------------------------------
+// computeMotivicUnityScore
+// ---------------------------------------------------------------------------
+
+float computeMotivicUnityScore(const std::vector<NoteEvent>& notes,
+                                const std::vector<NoteEvent>& subject_notes,
+                                uint8_t num_voices) {
+  if (notes.empty() || subject_notes.size() < 4 || num_voices == 0) return 0.0f;
+
+  // Extract a 3-interval fragment from the subject (first 4 notes -> 3 intervals).
+  auto sorted_subject = subject_notes;
+  std::sort(sorted_subject.begin(), sorted_subject.end(),
+            [](const NoteEvent& lhs, const NoteEvent& rhs) {
+              return lhs.start_tick < rhs.start_tick;
+            });
+  auto full_ivl = intervalSequence(sorted_subject);
+  if (full_ivl.size() < 3) return 0.0f;
+
+  std::vector<int> fragment(full_ivl.begin(), full_ivl.begin() + 3);
+
+  // Divide piece into 4 equal time quarters.
+  Tick end_tick = totalEndTick(notes);
+  if (end_tick == 0) return 0.0f;
+
+  constexpr int kQuarters = 4;
+  Tick quarter_len = std::max(end_tick / kQuarters, static_cast<Tick>(1));
+
+  uint32_t cells_hit = 0;
+  uint32_t total_cells = static_cast<uint32_t>(kQuarters) * static_cast<uint32_t>(num_voices);
+
+  for (int qtr = 0; qtr < kQuarters; ++qtr) {
+    Tick qtr_start = static_cast<Tick>(qtr) * quarter_len;
+    Tick qtr_end = (qtr == kQuarters - 1) ? end_tick : qtr_start + quarter_len;
+    auto qtr_notes = notesInRange(notes, qtr_start, qtr_end);
+
+    for (uint8_t vid = 0; vid < num_voices; ++vid) {
+      auto voice_notes = extractVoice(qtr_notes, vid);
+      if (voice_notes.size() < 4) continue;  // Need at least 4 notes for 3 intervals.
+      auto voice_ivl = intervalSequence(voice_notes);
+      if (matchesIntervalPattern(voice_ivl, fragment, 2)) {
+        ++cells_hit;
+      }
+    }
+  }
+
+  return clamp01(static_cast<float>(cells_hit) / static_cast<float>(total_cells));
+}
+
+// ---------------------------------------------------------------------------
+// computeTonalConsistencyScore
+// ---------------------------------------------------------------------------
+
+float computeTonalConsistencyScore(const std::vector<NoteEvent>& notes,
+                                    Key tonic_key, bool is_minor) {
+  if (notes.empty()) return 0.0f;
+
+  // Count pitch class distribution (12 bins).
+  uint32_t counts[12] = {};
+  uint32_t total_notes = 0;
+  for (const auto& note : notes) {
+    counts[static_cast<int>(note.pitch) % 12]++;
+    ++total_notes;
+  }
+  if (total_notes == 0) return 0.0f;
+
+  // Scale tone semitone offsets relative to tonic.
+  // Major: 0, 2, 4, 5, 7, 9, 11
+  // Minor (natural): 0, 2, 3, 5, 7, 8, 10
+  constexpr int kMajorScale[7] = {0, 2, 4, 5, 7, 9, 11};
+  constexpr int kMinorScale[7] = {0, 2, 3, 5, 7, 8, 10};
+
+  const int* scale_offsets = is_minor ? kMinorScale : kMajorScale;
+  int tonic_pc = static_cast<int>(tonic_key);
+
+  // Build a set of scale-tone pitch classes.
+  bool on_scale[12] = {};
+  for (int idx = 0; idx < 7; ++idx) {
+    int pitch_class = (tonic_pc + scale_offsets[idx]) % 12;
+    on_scale[pitch_class] = true;
+  }
+
+  // Count notes on scale tones.
+  uint32_t on_scale_count = 0;
+  for (int pitch_class = 0; pitch_class < 12; ++pitch_class) {
+    if (on_scale[pitch_class]) {
+      on_scale_count += counts[pitch_class];
+    }
+  }
+
+  float score = static_cast<float>(on_scale_count) / static_cast<float>(total_notes);
+
+  // Bonus: +0.1 if tonic pitch class is the most frequent.
+  uint32_t tonic_count = counts[tonic_pc];
+  bool tonic_is_max = true;
+  for (int pitch_class = 0; pitch_class < 12; ++pitch_class) {
+    if (pitch_class != tonic_pc && counts[pitch_class] > tonic_count) {
+      tonic_is_max = false;
+      break;
+    }
+  }
+  if (tonic_is_max && tonic_count > 0) {
+    score += 0.1f;
+  }
+
+  return clamp01(score);
 }
 
 }  // namespace bach

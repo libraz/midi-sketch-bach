@@ -45,6 +45,7 @@ set(BACH_LIB_SOURCES
   counterpoint/bach_rule_evaluator.cpp
   counterpoint/species_rules.cpp
   counterpoint/collision_resolver.cpp
+  counterpoint/suspension_chain.cpp
   counterpoint/voice_manager.cpp
   counterpoint/motion_analyzer.cpp
   counterpoint/counterpoint_validator.cpp
@@ -66,6 +67,9 @@ set(BACH_LIB_SOURCES
   fugue/middle_entry.cpp
   fugue/stretto.cpp
   fugue/cadence_plan.cpp
+  fugue/voice_registers.cpp
+  fugue/motif_pool.cpp
+  fugue/fortspinnung.cpp
   fugue/fugue_generator.cpp
 
   # transform/
@@ -85,6 +89,7 @@ set(BACH_LIB_SOURCES
   analysis/analysis_runner.cpp
   analysis/implied_voice_analyzer.cpp
   analysis/voice_harmony_analyzer.cpp
+  analysis/cadence_detector.cpp
 
   # harmony/
   harmony/chord_types.cpp
@@ -93,6 +98,9 @@ set(BACH_LIB_SOURCES
   harmony/harmonic_function.cpp
   harmony/modulation_plan.cpp
   harmony/voice_leading_planner.cpp
+  harmony/chord_tone_utils.cpp
+  harmony/tempo_map.cpp
+  harmony/harmonic_rhythm.cpp
 
   # forms/
   forms/prelude.cpp

@@ -28,6 +28,14 @@ struct ToccataResult {
   Tick total_duration_ticks = 0;
   bool success = false;
   std::string error_message;
+
+  // Section boundaries for tempo map generation.
+  Tick opening_start = 0;
+  Tick opening_end = 0;
+  Tick recit_start = 0;
+  Tick recit_end = 0;
+  Tick drive_start = 0;
+  Tick drive_end = 0;
 };
 
 /// @brief Generate a toccata free section (BWV 565 opening style).

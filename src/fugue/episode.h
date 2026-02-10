@@ -16,6 +16,13 @@
 
 namespace bach {
 
+// Forward declarations for counterpoint validation.
+class CounterpointState;
+class IRuleEvaluator;
+class CollisionResolver;
+class HarmonicTimeline;
+class MotifPool;
+
 /// @brief Episode material derived from subject fragments.
 ///
 /// An episode fills the space between subject entries in a fugue's development
@@ -68,6 +75,58 @@ struct Episode {
 Episode generateEpisode(const Subject& subject, Tick start_tick, Tick duration_ticks,
                         Key start_key, Key target_key, uint8_t num_voices, uint32_t seed,
                         int episode_index = 0, float energy_level = 0.5f);
+
+/// @brief Generate an episode with harmonic validation.
+///
+/// Generates episode material using the character-specific generator, then
+/// post-validates each note through createBachNote() with chord-tone snapping.
+/// Non-chord tones on strong beats are snapped to the nearest chord tone.
+/// Notes that fail counterpoint validation become rests.
+///
+/// @param subject The fugue subject (source material).
+/// @param start_tick Starting tick position.
+/// @param duration_ticks Length of the episode in ticks.
+/// @param start_key Key at episode start.
+/// @param target_key Key to modulate toward.
+/// @param num_voices Number of active voices (1-5).
+/// @param seed Random seed for deterministic generation.
+/// @param episode_index Episode ordinal within the fugue (0-based).
+/// @param energy_level Energy level in [0,1] for rhythm density control.
+/// @param cp_state Counterpoint state for validation (notes added in-place).
+/// @param cp_rules Rule evaluator for counterpoint checking.
+/// @param cp_resolver Collision resolver for pitch adjustment.
+/// @param timeline Harmonic timeline for chord-tone context.
+/// @return Generated Episode with validated notes.
+Episode generateEpisode(const Subject& subject, Tick start_tick, Tick duration_ticks,
+                        Key start_key, Key target_key, uint8_t num_voices, uint32_t seed,
+                        int episode_index, float energy_level,
+                        CounterpointState& cp_state, IRuleEvaluator& cp_rules,
+                        CollisionResolver& cp_resolver, const HarmonicTimeline& timeline);
+
+/// @brief Generate a Fortspinnung-style episode using motif pool fragments.
+///
+/// Wraps generateFortspinnung() into an Episode struct with proper key
+/// modulation, energy-based rhythm density, and invertible counterpoint
+/// for odd-indexed episodes. Falls back to standard character-specific
+/// generation (generateEpisode) if the pool is empty.
+///
+/// @param subject The fugue subject (for fallback and character context).
+/// @param pool The motif pool (read-only, must be built before calling).
+/// @param start_tick Starting tick position.
+/// @param duration_ticks Length of the episode in ticks.
+/// @param start_key Key at episode start.
+/// @param target_key Key to modulate toward.
+/// @param num_voices Number of active voices (1-5).
+/// @param seed Random seed for deterministic generation.
+/// @param episode_index Episode ordinal within the fugue (0-based). Odd indices
+///        trigger invertible counterpoint (voice swap).
+/// @param energy_level Energy level in [0,1] for rhythm density control.
+/// @return Generated Episode.
+Episode generateFortspinnungEpisode(const Subject& subject, const MotifPool& pool,
+                                    Tick start_tick, Tick duration_ticks,
+                                    Key start_key, Key target_key,
+                                    uint8_t num_voices, uint32_t seed,
+                                    int episode_index, float energy_level);
 
 /// @brief Extract a motif (fragment) from the beginning of the subject.
 ///

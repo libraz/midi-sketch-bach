@@ -6,9 +6,17 @@
 #include <algorithm>
 #include <random>
 
+#include "core/note_creator.h"
 #include "core/note_source.h"
 #include "core/rng_util.h"
 #include "core/scale.h"
+#include "counterpoint/collision_resolver.h"
+#include "counterpoint/counterpoint_state.h"
+#include "counterpoint/i_rule_evaluator.h"
+#include "fugue/voice_registers.h"
+#include "harmony/chord_tone_utils.h"
+#include "harmony/chord_types.h"
+#include "harmony/harmonic_timeline.h"
 
 namespace bach {
 
@@ -22,36 +30,14 @@ struct VoiceRegister {
 
 /// @brief Get the pitch register for a voice based on Bach organ fugue practice.
 ///
-/// Voices are assigned non-overlapping (or minimally overlapping) registers
-/// to prevent voice crossings.
+/// Delegates to the shared getFugueVoiceRange() for consistent ranges.
 ///
 /// @param voice_id Voice identifier (0 = soprano/first, increasing = lower).
 /// @param num_voices Total number of voices in the fugue.
 /// @return VoiceRegister with low and high pitch bounds.
 VoiceRegister getVoiceRegister(VoiceId voice_id, uint8_t num_voices) {
-  if (num_voices == 2) {
-    constexpr VoiceRegister kRanges2[] = {
-        {55, 84},  // Voice 0 (upper): G3-C6
-        {36, 67},  // Voice 1 (lower): C2-G4
-    };
-    return kRanges2[voice_id < 2 ? voice_id : 1];
-  }
-  if (num_voices == 3) {
-    constexpr VoiceRegister kRanges3[] = {
-        {60, 96},  // Voice 0 (soprano): C4-C6
-        {55, 79},  // Voice 1 (alto): G3-G5
-        {36, 60},  // Voice 2 (bass): C2-C4
-    };
-    return kRanges3[voice_id < 3 ? voice_id : 2];
-  }
-  // 4+ voices
-  constexpr VoiceRegister kRanges4[] = {
-      {60, 96},  // Voice 0 (soprano): C4-C6
-      {55, 79},  // Voice 1 (alto): G3-G5
-      {48, 72},  // Voice 2 (tenor): C3-C5
-      {24, 50},  // Voice 3 (bass/pedal): C1-D3
-  };
-  return kRanges4[voice_id < 4 ? voice_id : 3];
+  auto [lo, hi] = getFugueVoiceRange(voice_id, num_voices);
+  return {lo, hi};
 }
 
 /// @brief Adapt countersubject pitches from one key to another.
@@ -362,6 +348,84 @@ Exposition buildExposition(const Subject& subject,
     }
 
     expo.total_ticks = last_entry.entry_tick + last_material_length;
+  }
+
+  return expo;
+}
+
+Exposition buildExposition(const Subject& subject,
+                           const Answer& answer,
+                           const Countersubject& countersubject,
+                           const FugueConfig& config,
+                           uint32_t seed,
+                           CounterpointState& cp_state,
+                           IRuleEvaluator& cp_rules,
+                           CollisionResolver& cp_resolver,
+                           const HarmonicTimeline& timeline) {
+  // Build using the original logic.
+  Exposition expo = buildExposition(subject, answer, countersubject, config, seed);
+  uint8_t num_voices = clampVoiceCount(config.num_voices);
+
+  // Post-validate free counterpoint notes through createBachNote.
+  // Subject/answer/countersubject notes are kept as-is and registered in state.
+  // Free counterpoint (walking bass filler) is validated through the cascade.
+  for (auto& [voice_id, notes] : expo.voice_notes) {
+    std::vector<NoteEvent> validated;
+    validated.reserve(notes.size());
+
+    // Determine which tick ranges contain entry material (subject/answer/CS).
+    // Entry notes start at voice entry ticks and span entry_interval.
+    // Free counterpoint starts at later entries' tick positions for earlier voices.
+    // Since we can't easily distinguish by source field, we check if this voice_id
+    // had its entry at an earlier tick -- notes overlapping a later entry tick
+    // in a voice that already entered are free counterpoint candidates.
+    //
+    // Simple heuristic: the first (subject.length_ticks or answer.length_ticks)
+    // worth of notes from each voice's entry tick are structural. Everything else
+    // is free counterpoint.
+    Tick voice_entry_tick = 0;
+    for (const auto& entry : expo.entries) {
+      if (entry.voice_id == voice_id) {
+        voice_entry_tick = entry.entry_tick;
+        break;
+      }
+    }
+    Tick structural_end = voice_entry_tick + subject.length_ticks * 2;
+
+    for (const auto& note : notes) {
+      bool is_structural = (note.start_tick < structural_end);
+
+      if (is_structural) {
+        // Register structural notes in CP state without alteration.
+        cp_state.addNote(voice_id, note);
+        validated.push_back(note);
+        continue;
+      }
+
+      // Free counterpoint: validate through createBachNote.
+      const auto& harm_ev = timeline.getAt(note.start_tick);
+      uint8_t desired_pitch = note.pitch;
+      bool is_strong = (note.start_tick % kTicksPerBar == 0) ||
+                       (note.start_tick % (kTicksPerBar / 2) == 0);
+      if (is_strong && !isChordTone(note.pitch, harm_ev)) {
+        desired_pitch = nearestChordTone(note.pitch, harm_ev);
+      }
+
+      BachNoteOptions opts;
+      opts.voice = voice_id;
+      opts.desired_pitch = desired_pitch;
+      opts.tick = note.start_tick;
+      opts.duration = note.duration;
+      opts.velocity = note.velocity;
+      opts.source = BachNoteSource::FreeCounterpoint;
+
+      BachCreateNoteResult result = createBachNote(&cp_state, &cp_rules, &cp_resolver, opts);
+      if (result.accepted) {
+        validated.push_back(result.note);
+      }
+    }
+
+    notes = std::move(validated);
   }
 
   return expo;

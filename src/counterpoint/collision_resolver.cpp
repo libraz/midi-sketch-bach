@@ -16,6 +16,24 @@
 namespace bach {
 
 // ---------------------------------------------------------------------------
+// Internal helpers
+// ---------------------------------------------------------------------------
+
+/// @brief Check if a tick falls near a cadence position.
+/// @param tick The tick to check.
+/// @param cadence_ticks Sorted cadence tick positions.
+/// @return True if tick is within kTicksPerBeat of any cadence tick.
+static bool isNearCadence(Tick tick, const std::vector<Tick>& cadence_ticks) {
+  for (Tick cad_tick : cadence_ticks) {
+    Tick distance = (tick >= cad_tick) ? (tick - cad_tick) : (cad_tick - tick);
+    if (distance <= kTicksPerBeat) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// ---------------------------------------------------------------------------
 // Safety check
 // ---------------------------------------------------------------------------
 
@@ -168,6 +186,16 @@ PlacementResult CollisionResolver::tryStrategy(
   if (strategy == "step_shift") {
     float best_penalty = 2.0f;
 
+    // Cadence-aware voice leading: when near a cadence tick, compute a bonus
+    // for leading-tone resolution (pitch % 12 == 11 resolving up by semitone)
+    // or dominant 7th resolution (resolving stepwise down).
+    bool near_cadence = !cadence_ticks_.empty() && isNearCadence(tick, cadence_ticks_);
+    const NoteEvent* prev_note = state.getLastNote(voice_id);
+    int prev_pitch_class = -1;
+    if (prev_note) {
+      prev_pitch_class = static_cast<int>(prev_note->pitch) % 12;
+    }
+
     for (int delta = 1; delta <= max_search_range_; ++delta) {
       // Try both directions: up and down.
       for (int sign = -1; sign <= 1; sign += 2) {
@@ -178,6 +206,26 @@ PlacementResult CollisionResolver::tryStrategy(
         if (isSafeToPlace(state, rules, voice_id, cand_pitch, tick,
                           duration)) {
           float penalty = static_cast<float>(delta) / 12.0f * 0.5f;
+
+          // Apply cadence voice-leading bonus.
+          if (near_cadence && prev_note) {
+            int directed = static_cast<int>(cand_pitch) - static_cast<int>(prev_note->pitch);
+
+            // Leading tone (B in C major, pitch class 11) resolving up by semitone.
+            if (prev_pitch_class == 11 && directed == 1) {
+              penalty -= 0.3f;
+              if (penalty < 0.0f) penalty = 0.0f;
+            }
+
+            // 7th of V7 chord resolving stepwise downward (-1 or -2 semitones).
+            // The 7th of a V7 in C major is F (pitch class 5).
+            // More generally, any pitch that was the 7th resolving down.
+            if (prev_pitch_class == 5 && (directed == -1 || directed == -2)) {
+              penalty -= 0.3f;
+              if (penalty < 0.0f) penalty = 0.0f;
+            }
+          }
+
           if (penalty < best_penalty) {
             best_penalty = penalty;
             result.pitch = cand_pitch;
@@ -516,6 +564,14 @@ void CollisionResolver::setMaxSearchRange(int semitones) {
   if (semitones > 0) {
     max_search_range_ = semitones;
   }
+}
+
+// ---------------------------------------------------------------------------
+// Cadence-aware voice leading
+// ---------------------------------------------------------------------------
+
+void CollisionResolver::setCadenceTicks(const std::vector<Tick>& ticks) {
+  cadence_ticks_ = ticks;
 }
 
 }  // namespace bach

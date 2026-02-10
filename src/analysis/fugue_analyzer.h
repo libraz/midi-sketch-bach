@@ -10,12 +10,17 @@
 
 namespace bach {
 
+class HarmonicTimeline;
+
 /// Aggregated fugue analysis metrics.
 struct FugueAnalysisResult {
   float answer_accuracy_score = 0.0f;          ///< Transposition accuracy [0,1].
   float exposition_completeness_score = 0.0f;  ///< All voices enter with subject [0,1].
   float episode_motif_usage_rate = 0.0f;       ///< Motif-derived material in episodes [0,1].
   float tonal_plan_score = 0.0f;               ///< Tonal variety and correctness [0,1].
+  float cadence_detection_rate = 0.0f;         ///< Detected cadences / planned cadences [0,1].
+  float motivic_unity_score = 0.0f;            ///< Motif fragment reuse rate across piece [0,1].
+  float tonal_consistency_score = 0.0f;        ///< Tonal fit of pitch class distribution [0,1].
 };
 
 /// @brief Analyze fugue structure quality.
@@ -40,6 +45,46 @@ float expositionCompletenessScore(const std::vector<NoteEvent>& notes,
 /// @param notes All notes in the fugue.
 /// @return Score in [0,1]; higher means better variety of tonal centers.
 float tonalPlanScore(const std::vector<NoteEvent>& notes);
+
+/// @brief Compute cadence detection rate using the cadence detector.
+///
+/// Compares detected cadences (from harmonic timeline pattern matching)
+/// against planned cadence positions (from section boundaries).
+///
+/// @param timeline The harmonic timeline to analyze for cadences.
+/// @param section_end_ticks Section boundary ticks (planned cadence positions).
+/// @return Detection rate [0.0, 1.0]. Returns 0.0 if no planned cadences.
+float computeCadenceDetectionRate(const HarmonicTimeline& timeline,
+                                  const std::vector<Tick>& section_end_ticks);
+
+/// @brief Compute motivic unity score.
+///
+/// Measures how pervasively the subject's characteristic motif appears
+/// throughout the piece. Higher scores indicate better thematic integration.
+/// The piece is divided into 4 equal time quarters; for each quarter and voice,
+/// checks whether a 3-interval fragment extracted from the subject is present.
+///
+/// @param notes All notes in the fugue.
+/// @param subject_notes The original subject for motif extraction.
+/// @param num_voices Number of voices.
+/// @return Unity score [0.0, 1.0].
+float computeMotivicUnityScore(const std::vector<NoteEvent>& notes,
+                                const std::vector<NoteEvent>& subject_notes,
+                                uint8_t num_voices);
+
+/// @brief Compute tonal consistency score.
+///
+/// Evaluates how well the pitch class distribution fits the expected
+/// tonal center. A piece strongly in C major should have high counts for
+/// C, E, G and lower counts for chromatic tones. Awards a bonus of 0.1
+/// when the tonic pitch class is the most frequent.
+///
+/// @param notes All notes in the fugue.
+/// @param tonic_key The expected tonic key.
+/// @param is_minor Whether the key is minor.
+/// @return Consistency score [0.0, 1.0].
+float computeTonalConsistencyScore(const std::vector<NoteEvent>& notes,
+                                    Key tonic_key, bool is_minor);
 
 }  // namespace bach
 

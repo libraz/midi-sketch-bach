@@ -49,7 +49,8 @@ AnalysisSystem analysisSystemForForm(FormType form) {
 
 AnalysisReport runAnalysis(const std::vector<Track>& tracks, FormType form,
                            uint8_t num_voices, const HarmonicTimeline& timeline,
-                           const KeySignature& key_sig) {
+                           const KeySignature& key_sig,
+                           const HarmonicTimeline* generation_timeline) {
   AnalysisReport report;
   auto all_notes = collectAllNotes(tracks);
 
@@ -59,7 +60,8 @@ AnalysisReport runAnalysis(const std::vector<Track>& tracks, FormType form,
     // Organ: counterpoint + all 4 dissonance phases.
     report.has_counterpoint = true;
     report.counterpoint = analyzeCounterpoint(all_notes, num_voices);
-    report.dissonance = analyzeOrganDissonance(all_notes, num_voices, timeline, key_sig);
+    report.dissonance = analyzeOrganDissonance(all_notes, num_voices, timeline, key_sig,
+                                               generation_timeline);
   } else {
     // Solo String: dissonance phases 2 + 4 only.
     report.has_counterpoint = false;

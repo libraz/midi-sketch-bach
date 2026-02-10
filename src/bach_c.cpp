@@ -264,7 +264,8 @@ BachError bach_generate_from_json(BachHandle handle, const char* json, size_t le
 
   // Build MIDI bytes
   bach::MidiWriter writer;
-  writer.build(instance->result.tracks, instance->config.bpm, instance->config.key.tonic);
+  writer.build(instance->result.tracks, instance->result.tempo_events,
+               instance->config.key.tonic);
   instance->midi_bytes = writer.toBytes();
 
   // Build events JSON

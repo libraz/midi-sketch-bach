@@ -188,7 +188,7 @@ int main(int argc, char* argv[]) {
     std::printf("Notes:     %zu\n", total_notes);
 
     bach::MidiWriter writer;
-    writer.build(result.tracks, config.bpm, config.key.tonic);
+    writer.build(result.tracks, result.tempo_events, config.key.tonic);
     if (writer.writeToFile(opts.output)) {
       std::printf("\nOutput:    %s\n", opts.output.c_str());
     } else {
@@ -198,9 +198,11 @@ int main(int argc, char* argv[]) {
 
     // Run analysis if requested.
     if (opts.analyze) {
+      const bach::HarmonicTimeline* gen_tl =
+          result.generation_timeline.size() > 0 ? &result.generation_timeline : nullptr;
       bach::AnalysisReport analysis = bach::runAnalysis(
           result.tracks, config.form, config.num_voices,
-          result.timeline, config.key);
+          result.timeline, config.key, gen_tl);
 
       std::printf("\n%s",
                   analysis.toTextSummary(config.form, config.num_voices).c_str());

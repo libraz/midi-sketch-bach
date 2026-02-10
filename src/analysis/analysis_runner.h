@@ -45,10 +45,13 @@ struct AnalysisReport {
 /// @param num_voices Number of voices (used for organ analysis).
 /// @param timeline Harmonic timeline for chord context.
 /// @param key_sig Key signature for diatonic analysis.
+/// @param generation_timeline Optional beat-resolution timeline for dual-timeline
+///        NCT downgrade. nullptr preserves backward-compatible single-timeline behavior.
 /// @return Unified AnalysisReport.
 AnalysisReport runAnalysis(const std::vector<Track>& tracks, FormType form,
                            uint8_t num_voices, const HarmonicTimeline& timeline,
-                           const KeySignature& key_sig);
+                           const KeySignature& key_sig,
+                           const HarmonicTimeline* generation_timeline = nullptr);
 
 }  // namespace bach
 

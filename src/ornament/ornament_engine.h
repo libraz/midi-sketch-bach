@@ -3,6 +3,7 @@
 #ifndef BACH_ORNAMENT_ORNAMENT_ENGINE_H
 #define BACH_ORNAMENT_ORNAMENT_ENGINE_H
 
+#include <cstdint>
 #include <vector>
 
 #include "core/basic_types.h"
@@ -38,6 +39,25 @@ struct OrnamentContext {
 ///         are passed through unchanged.
 std::vector<NoteEvent> applyOrnaments(const std::vector<NoteEvent>& notes,
                                       const OrnamentContext& context);
+
+/// @brief Apply ornaments with optional counterpoint verification.
+///
+/// Same as the base applyOrnaments(), but when all_voice_notes is non-empty,
+/// performs post-application counterpoint verification. Ornaments that
+/// introduce parallel 5ths/8ths or voice crossings are reverted to the
+/// original unornamented notes.
+///
+/// Violating ornaments are REMOVED, not replaced with alternatives
+/// (Principle 3: Reduce Generation).
+///
+/// @param notes Input note sequence to ornament.
+/// @param context Ornament context with config, role, and seed.
+/// @param all_voice_notes All voices' notes for cross-voice checking.
+///        Pass empty vector to skip verification (backward compatible).
+/// @return New note sequence with ornaments applied and verified.
+std::vector<NoteEvent> applyOrnaments(const std::vector<NoteEvent>& notes,
+                                      const OrnamentContext& context,
+                                      const std::vector<std::vector<NoteEvent>>& all_voice_notes);
 
 /// @brief Check if a note is eligible for ornamentation.
 ///
@@ -79,6 +99,21 @@ OrnamentType selectOrnamentType(const NoteEvent& note, const OrnamentConfig& con
 /// @return The preferred OrnamentType based on harmonic and metric context.
 OrnamentType selectOrnamentType(const NoteEvent& note, const OrnamentConfig& config,
                                 const HarmonicTimeline& timeline, Tick tick);
+
+/// @brief Verify ornament-expanded notes against counterpoint rules.
+///
+/// Checks for parallel 5ths/8ths and voice crossings introduced by ornament
+/// expansion. Violating ornaments are removed (notes reverted to original).
+/// Does NOT search for alternative ornaments (Principle 3: Reduce Generation).
+///
+/// @param notes The notes with ornaments applied (modified in place).
+/// @param original_notes The notes before ornament application (for reversion).
+/// @param all_voices All voice notes for counterpoint checking.
+/// @param num_voices Number of active voices.
+void verifyOrnamentCounterpoint(std::vector<NoteEvent>& notes,
+                                const std::vector<NoteEvent>& original_notes,
+                                const std::vector<std::vector<NoteEvent>>& all_voices,
+                                uint8_t num_voices);
 
 }  // namespace bach
 

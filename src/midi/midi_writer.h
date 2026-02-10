@@ -22,11 +22,13 @@ class MidiWriter {
 
   /// @brief Build complete MIDI data from tracks.
   /// @param tracks Vector of Track objects containing notes and events.
-  /// @param bpm Tempo in beats per minute.
+  /// @param tempo_events Tempo map: sorted vector of TempoEvent (tick, bpm).
+  ///        Must contain at least one event. First event should be at tick 0.
   /// @param key Output key for transposition (C = no transposition).
   /// @param metadata Optional JSON metadata string to embed as a text event.
-  void build(const std::vector<Track>& tracks, uint16_t bpm, Key key = Key::C,
-             const std::string& metadata = "");
+  void build(const std::vector<Track>& tracks,
+             const std::vector<TempoEvent>& tempo_events,
+             Key key = Key::C, const std::string& metadata = "");
 
   /// @brief Get the binary MIDI data after build().
   /// @return Byte vector containing complete SMF Type 1 data.
@@ -44,10 +46,11 @@ class MidiWriter {
   void writeHeader(uint16_t num_tracks, uint16_t division);
 
   /// Write a single track as an MTrk chunk with note events.
-  void writeTrack(const Track& track, uint16_t bpm, Key key, bool is_first_track);
+  void writeTrack(const Track& track, Key key);
 
-  /// Write the metadata track (tempo, time signature, BACH metadata text).
-  void writeMetadataTrack(uint16_t bpm, const std::string& metadata);
+  /// Write the metadata track (tempo map, time signature, BACH metadata text).
+  void writeMetadataTrack(const std::vector<TempoEvent>& tempo_events,
+                          const std::string& metadata);
 };
 
 }  // namespace bach

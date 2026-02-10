@@ -12,6 +12,12 @@
 
 namespace bach {
 
+// Forward declarations for counterpoint validation.
+class CounterpointState;
+class IRuleEvaluator;
+class CollisionResolver;
+class HarmonicTimeline;
+
 /// @brief A single stretto voice entry.
 ///
 /// Each entry represents one voice's presentation of the subject
@@ -92,6 +98,31 @@ std::vector<Tick> findValidStrettoIntervals(const std::vector<NoteEvent>& subjec
 Stretto generateStretto(const Subject& subject, Key home_key, Tick start_tick,
                         uint8_t num_voices, uint32_t seed,
                         SubjectCharacter character = SubjectCharacter::Severe);
+
+/// @brief Generate a stretto section with counterpoint validation.
+///
+/// Same as the unvalidated overload, but routes stretto notes through
+/// createBachNote() for counterpoint checking. Even-indexed entries
+/// (original subject) use Immutable protection. Odd-indexed entries
+/// (transformed) use Flexible protection with full cascade.
+///
+/// @param subject The fugue subject.
+/// @param home_key The home key.
+/// @param start_tick Starting tick for the stretto.
+/// @param num_voices Number of voices.
+/// @param seed Random seed.
+/// @param character Subject character.
+/// @param cp_state Counterpoint state for validation.
+/// @param cp_rules Rule evaluator.
+/// @param cp_resolver Collision resolver.
+/// @param timeline Harmonic timeline for chord-tone context.
+/// @return Generated Stretto with validated notes.
+Stretto generateStretto(const Subject& subject, Key home_key, Tick start_tick,
+                        uint8_t num_voices, uint32_t seed,
+                        SubjectCharacter character,
+                        CounterpointState& cp_state, IRuleEvaluator& cp_rules,
+                        CollisionResolver& cp_resolver,
+                        const HarmonicTimeline& timeline);
 
 /// @brief Create a stretto fragment from the subject head.
 ///

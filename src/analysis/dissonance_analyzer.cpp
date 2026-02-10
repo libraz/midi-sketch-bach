@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "core/basic_types.h"
+#include "core/note_source.h"
 #include "core/pitch_utils.h"
 #include "harmony/chord_types.h"
 #include "harmony/harmonic_event.h"
@@ -68,6 +69,23 @@ int soundingPitch(const std::vector<NoteEvent>& sorted_voice, Tick tick) {
   return result;
 }
 
+/// @brief Check if any note sounding at tick in voice is structural (immutable).
+///
+/// Structural notes (subject, answer, pedal, countersubject) cannot be moved;
+/// clashes involving them are unavoidable and should be downgraded.
+bool hasStructuralNoteAt(const std::vector<NoteEvent>& sorted_voice, Tick tick) {
+  for (const auto& note : sorted_voice) {
+    if (note.start_tick <= tick && tick < note.start_tick + note.duration) {
+      ProtectionLevel level = getProtectionLevel(note.source);
+      if (level == ProtectionLevel::Immutable || level == ProtectionLevel::Structural) {
+        return true;
+      }
+    }
+    if (note.start_tick > tick) break;
+  }
+  return false;
+}
+
 /// @brief Get total end tick of all notes.
 Tick totalEndTick(const std::vector<NoteEvent>& notes) {
   Tick max_end = 0;
@@ -121,6 +139,59 @@ bool isNeighborTone(const std::vector<NoteEvent>& sorted_voice, size_t note_idx)
   // Departure must be stepwise (1-2 semitones).
   int departure = std::abs(curr_pitch - prev_pitch);
   return departure >= 1 && departure <= 2;
+}
+
+/// @brief Check if a note is an escape tone (stepwise approach, leap away).
+///
+/// An escape tone is approached by step (1-2 semitones) and left by leap
+/// (3+ semitones). This is a standard Baroque non-harmonic tone idiom.
+bool isEscapeTone(const std::vector<NoteEvent>& sorted_voice, size_t note_idx) {
+  if (note_idx == 0 || note_idx + 1 >= sorted_voice.size()) return false;
+
+  int prev_pitch = static_cast<int>(sorted_voice[note_idx - 1].pitch);
+  int curr_pitch = static_cast<int>(sorted_voice[note_idx].pitch);
+  int next_pitch = static_cast<int>(sorted_voice[note_idx + 1].pitch);
+
+  int approach = std::abs(curr_pitch - prev_pitch);
+  int departure = std::abs(next_pitch - curr_pitch);
+
+  return (approach >= 1 && approach <= 2) && (departure >= 3);
+}
+
+/// @brief Check if a note is an appoggiatura (strong-beat dissonance resolving by step).
+///
+/// An appoggiatura is a non-chord-tone on a strong beat that resolves by
+/// step (1-2 semitones) to a chord tone. This is one of the most characteristic
+/// dissonance types in Bach's counterpoint.
+bool isAppoggiatura(const std::vector<NoteEvent>& sorted_voice, size_t note_idx,
+                    const HarmonicTimeline& timeline) {
+  if (note_idx + 1 >= sorted_voice.size()) return false;
+  if (!isStrongBeat(sorted_voice[note_idx].start_tick)) return false;
+
+  int curr_pitch = static_cast<int>(sorted_voice[note_idx].pitch);
+  int next_pitch = static_cast<int>(sorted_voice[note_idx + 1].pitch);
+  int step = std::abs(next_pitch - curr_pitch);
+
+  // Resolution must be by step (1-2 semitones).
+  if (step < 1 || step > 2) return false;
+
+  // Resolution note must be a chord tone of the current chord.
+  const HarmonicEvent& event = timeline.getAt(sorted_voice[note_idx].start_tick);
+  return isChordTone(static_cast<uint8_t>(next_pitch), event);
+}
+
+/// @brief Check if a note is an anticipation (chord tone of the next chord).
+///
+/// An anticipation sounds a note that belongs to the upcoming chord before
+/// the chord change occurs. Common in Bach's counterpoint.
+bool isAnticipation(uint8_t pitch, Tick tick, Tick duration,
+                    const HarmonicTimeline& timeline) {
+  Tick next_event_tick = tick + duration;
+  const auto& next_event = timeline.getAt(next_event_tick);
+  // The next event must be at a different tick (i.e., a chord change happened).
+  const auto& curr_event = timeline.getAt(tick);
+  if (next_event.tick == curr_event.tick) return false;
+  return isChordTone(pitch, next_event);
 }
 
 /// @brief Find a note by matching pitch and tick in a sorted voice.
@@ -181,6 +252,9 @@ DissonanceAnalysisSummary buildSummary(const std::vector<DissonanceEvent>& event
   uint32_t total_beats = (total_duration > 0)
       ? static_cast<uint32_t>(total_duration / kTicksPerBeat) : 1;
   s.density_per_beat = static_cast<float>(s.total) / static_cast<float>(total_beats);
+  float weighted = static_cast<float>(s.high_count) +
+                   static_cast<float>(s.medium_count) * 0.5f;
+  s.weighted_density_per_beat = weighted / static_cast<float>(total_beats);
   return s;
 }
 
@@ -264,6 +338,14 @@ std::vector<DissonanceEvent> detectSimultaneousClashes(
           if (ivl >= 36) {
             severity = DissonanceSeverity::Low;
           }
+          // Clash involving a structural note (subject, answer, pedal) is
+          // unavoidable -- downgrade since the note cannot be moved.
+          if (severity != DissonanceSeverity::Low) {
+            if (hasStructuralNoteAt(voices[va], tick) ||
+                hasStructuralNoteAt(voices[vb], tick)) {
+              severity = DissonanceSeverity::Low;
+            }
+          }
 
           std::string desc = std::string(intervalToName(ivl)) + " clash - voice " +
               std::to_string(va) + " (" + pitchToNoteName(static_cast<uint8_t>(pitches[va])) +
@@ -288,7 +370,8 @@ std::vector<DissonanceEvent> detectSimultaneousClashes(
 // ===========================================================================
 
 std::vector<DissonanceEvent> detectNonChordTones(
-    const std::vector<NoteEvent>& notes, const HarmonicTimeline& timeline) {
+    const std::vector<NoteEvent>& notes, const HarmonicTimeline& timeline,
+    const HarmonicTimeline* generation_timeline) {
   std::vector<DissonanceEvent> results;
   if (notes.empty() || timeline.size() == 0) return results;
 
@@ -314,14 +397,49 @@ std::vector<DissonanceEvent> detectNonChordTones(
         severity = DissonanceSeverity::Medium;
       }
 
-      // Check for passing tone or neighbor tone -- downgrade if stepwise.
+      // Check for recognized non-harmonic tone idioms -- downgrade if recognized.
       if (note.voice < voices.size()) {
         size_t idx = findNoteIndex(voices[note.voice], note.pitch, note.start_tick);
         if (idx != SIZE_MAX) {
           if (isPassingTone(voices[note.voice], idx) ||
-              isNeighborTone(voices[note.voice], idx)) {
+              isNeighborTone(voices[note.voice], idx) ||
+              isEscapeTone(voices[note.voice], idx)) {
             severity = DissonanceSeverity::Low;
           }
+          // Appoggiatura: strong-beat dissonance resolving by step to chord tone.
+          if (severity == DissonanceSeverity::High) {
+            if (isAppoggiatura(voices[note.voice], idx, timeline)) {
+              severity = DissonanceSeverity::Low;
+            }
+          }
+        }
+      }
+
+      // Anticipation: note is a chord tone of the next chord.
+      if (severity != DissonanceSeverity::Low) {
+        if (isAnticipation(note.pitch, note.start_tick, note.duration, timeline)) {
+          severity = DissonanceSeverity::Low;
+        }
+      }
+
+      // Structural notes (subject, answer, pedal, false entry, etc.) cannot be
+      // moved; their NCT status is unavoidable and should not inflate the
+      // density metric.
+      if (severity != DissonanceSeverity::Low) {
+        ProtectionLevel level = getProtectionLevel(note.source);
+        if (level == ProtectionLevel::Immutable ||
+            level == ProtectionLevel::Structural) {
+          severity = DissonanceSeverity::Low;
+        }
+      }
+
+      // Dual-timeline fallback: if the note is a chord tone of the generation
+      // timeline (beat-resolution), downgrade to Low. The note was intentionally
+      // placed as a chord tone during generation.
+      if (severity != DissonanceSeverity::Low && generation_timeline != nullptr) {
+        const HarmonicEvent& gen_ev = generation_timeline->getAt(note.start_tick);
+        if (isChordTone(note.pitch, gen_ev)) {
+          severity = DissonanceSeverity::Low;
         }
       }
 
@@ -477,11 +595,12 @@ std::vector<DissonanceEvent> detectNonDiatonicNotes(
 
 DissonanceAnalysisResult analyzeOrganDissonance(
     const std::vector<NoteEvent>& notes, uint8_t num_voices,
-    const HarmonicTimeline& timeline, const KeySignature& key_sig) {
+    const HarmonicTimeline& timeline, const KeySignature& key_sig,
+    const HarmonicTimeline* generation_timeline) {
   DissonanceAnalysisResult result;
 
   auto phase1 = detectSimultaneousClashes(notes, num_voices);
-  auto phase2 = detectNonChordTones(notes, timeline);
+  auto phase2 = detectNonChordTones(notes, timeline, generation_timeline);
   auto phase3 = detectSustainedOverChordChange(notes, num_voices, timeline);
   auto phase4 = detectNonDiatonicNotes(notes, key_sig);
 
@@ -542,7 +661,9 @@ std::string DissonanceAnalysisResult::toTextSummary(
 
   char density_buf[32];
   std::snprintf(density_buf, sizeof(density_buf), "%.2f", summary.density_per_beat);
-  oss << "Density: " << density_buf << "/beat\n\n";
+  char weighted_buf[32];
+  std::snprintf(weighted_buf, sizeof(weighted_buf), "%.2f", summary.weighted_density_per_beat);
+  oss << "Density: " << density_buf << "/beat (weighted: " << weighted_buf << "/beat)\n\n";
 
   oss << "  SimultaneousClash:        " << summary.simultaneous_clash_count << "\n";
   oss << "  NonChordTone:             " << summary.non_chord_tone_count << "\n";
@@ -576,7 +697,10 @@ std::string DissonanceAnalysisResult::toJson() const {
 
   char density_buf[32];
   std::snprintf(density_buf, sizeof(density_buf), "%.4f", summary.density_per_beat);
+  char weighted_buf[32];
+  std::snprintf(weighted_buf, sizeof(weighted_buf), "%.4f", summary.weighted_density_per_beat);
   oss << "    \"density_per_beat\": " << density_buf << ",\n";
+  oss << "    \"weighted_density_per_beat\": " << weighted_buf << ",\n";
 
   oss << "    \"by_type\": {\n";
   oss << "      \"SimultaneousClash\": " << summary.simultaneous_clash_count << ",\n";

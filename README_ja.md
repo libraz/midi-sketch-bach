@@ -93,4 +93,4 @@ make wasm           # WASM + JSバインディング
 
 ## ライセンス
 
-Apache-2.0。詳細は [LICENSE](LICENSE) をご覧ください。
+[Apache-2.0](LICENSE) / [商用](LICENSE-COMMERCIAL) デュアルライセンス。商用利用のお問い合わせ: libraz@libraz.net

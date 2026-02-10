@@ -178,4 +178,64 @@ std::vector<MidiEvent> generateEnergyRegistrationEvents(
   return events;
 }
 
+// ---------------------------------------------------------------------------
+// Extended N-point registration plan
+// ---------------------------------------------------------------------------
+
+void ExtendedRegistrationPlan::addPoint(Tick tick, const Registration& reg,
+                                         const std::string& label) {
+  points.push_back({tick, reg, label});
+}
+
+ExtendedRegistrationPlan createExtendedRegistrationPlan(
+    const std::vector<FugueSection>& sections, Tick total_duration) {
+  ExtendedRegistrationPlan plan;
+
+  for (const auto& section : sections) {
+    Registration reg;
+    // Design value table for velocity by section type (Principle 4).
+    // These are fixed values, not searched.
+    float energy = (total_duration > 0)
+        ? static_cast<float>(section.start_tick) / static_cast<float>(total_duration)
+        : 0.5f;
+
+    switch (section.type) {
+      case SectionType::Exposition:
+        reg.velocity_hint = 75;
+        plan.addPoint(section.start_tick, reg, "exposition");
+        break;
+      case SectionType::Episode:
+        // Episodes: gradual dynamic curve following position in piece.
+        // Range: 70-90 based on energy (position-based).
+        reg.velocity_hint = static_cast<uint8_t>(70 + energy * 20);
+        plan.addPoint(section.start_tick, reg, "episode");
+        break;
+      case SectionType::MiddleEntry:
+        // Middle entries: slight boost above current level for subject prominence.
+        // Range: 80-95 based on energy.
+        reg.velocity_hint = static_cast<uint8_t>(80 + energy * 15);
+        plan.addPoint(section.start_tick, reg, "middle_entry");
+        break;
+      case SectionType::Stretto:
+        reg.velocity_hint = 95;
+        plan.addPoint(section.start_tick, reg, "stretto");
+        break;
+      case SectionType::Coda:
+        reg.velocity_hint = 100;
+        plan.addPoint(section.start_tick, reg, "coda");
+        break;
+    }
+  }
+
+  return plan;
+}
+
+void applyExtendedRegistrationPlan(std::vector<Track>& tracks,
+                                    const ExtendedRegistrationPlan& plan) {
+  for (const auto& point : plan.points) {
+    auto events = generateRegistrationEvents(point.registration, point.tick);
+    insertEventsIntoTracks(tracks, events);
+  }
+}
+
 }  // namespace bach

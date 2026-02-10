@@ -16,6 +16,7 @@ const HarmonicEvent HarmonicTimeline::kDefaultEvent = {
     {ChordDegree::I, ChordQuality::Major, 60, 0},  // chord: C major root position
     48,           // bass_pitch: C3
     1.0f,         // weight
+    1.0f,         // rhythm_factor (normal speed)
     false,        // is_immutable
     Key::C,       // modulation_target (no modulation)
     false         // has_modulation
@@ -36,6 +37,10 @@ void HarmonicTimeline::addEvent(const HarmonicEvent& event) {
 }
 
 const std::vector<HarmonicEvent>& HarmonicTimeline::events() const {
+  return events_;
+}
+
+std::vector<HarmonicEvent>& HarmonicTimeline::mutableEvents() {
   return events_;
 }
 

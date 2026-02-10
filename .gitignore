@@ -27,6 +27,7 @@ _deps/
 # =============================================================================
 output.json
 output.mid
+output_analysis.json
 analysis.json
 analysis_results/
 regenerated.mid

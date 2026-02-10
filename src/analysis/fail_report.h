@@ -7,6 +7,7 @@
 #include <string>
 #include <vector>
 
+#include "analysis/fugue_analyzer.h"
 #include "core/basic_types.h"
 
 namespace bach {
@@ -73,6 +74,15 @@ struct FailReport {
   /// @return Formatted JSON representation.
   std::string toJson() const;
 };
+
+/// @brief Serialize a FugueAnalysisResult to a JSON string.
+///
+/// Outputs all fields including cadence_detection_rate, motivic_unity_score,
+/// and tonal_consistency_score.
+///
+/// @param result The fugue analysis result to serialize.
+/// @return Pretty-printed JSON string.
+std::string fugueAnalysisResultToJson(const FugueAnalysisResult& result);
 
 }  // namespace bach
 

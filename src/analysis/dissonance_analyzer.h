@@ -59,7 +59,8 @@ struct DissonanceAnalysisSummary {
   uint32_t non_chord_tone_count = 0;
   uint32_t sustained_over_chord_change_count = 0;
   uint32_t non_diatonic_note_count = 0;
-  float density_per_beat = 0.0f;  ///< Events per beat.
+  float density_per_beat = 0.0f;           ///< Events per beat (raw).
+  float weighted_density_per_beat = 0.0f;  ///< Weighted: High=1.0, Medium=0.5, Low=0.0.
 };
 
 /// Complete result of a dissonance analysis pass.
@@ -89,9 +90,13 @@ std::vector<DissonanceEvent> detectSimultaneousClashes(
 /// @brief Phase 2: Detect non-chord tones against the harmonic timeline.
 /// @param notes All notes (may span multiple voices or single voice).
 /// @param timeline Harmonic timeline providing chord context.
+/// @param generation_timeline Optional beat-resolution timeline from generation.
+///        If provided, notes that are chord tones of this timeline are downgraded
+///        to Low severity (dual-timeline fix for bar-vs-beat resolution mismatch).
 /// @return Detected non-chord-tone events.
 std::vector<DissonanceEvent> detectNonChordTones(
-    const std::vector<NoteEvent>& notes, const HarmonicTimeline& timeline);
+    const std::vector<NoteEvent>& notes, const HarmonicTimeline& timeline,
+    const HarmonicTimeline* generation_timeline = nullptr);
 
 /// @brief Phase 3: Detect notes sustained over a chord change that clash.
 /// @param notes All notes across all voices.
@@ -119,10 +124,13 @@ std::vector<DissonanceEvent> detectNonDiatonicNotes(
 /// @param num_voices Number of voices.
 /// @param timeline Harmonic timeline.
 /// @param key_sig Key signature.
+/// @param generation_timeline Optional beat-resolution timeline for dual-timeline
+///        NCT downgrade. nullptr preserves backward-compatible single-timeline behavior.
 /// @return Complete dissonance analysis result.
 DissonanceAnalysisResult analyzeOrganDissonance(
     const std::vector<NoteEvent>& notes, uint8_t num_voices,
-    const HarmonicTimeline& timeline, const KeySignature& key_sig);
+    const HarmonicTimeline& timeline, const KeySignature& key_sig,
+    const HarmonicTimeline* generation_timeline = nullptr);
 
 /// @brief Run phases 2 + 4 for Solo String system.
 /// @param notes All notes (single melodic line).

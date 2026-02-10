@@ -14,6 +14,8 @@
 #include "fugue/fugue_generator.h"
 #include "harmony/harmonic_timeline.h"
 #include "harmony/modulation_plan.h"
+#include "harmony/tempo_map.h"
+#include "expression/articulation.h"
 #include "solo_string/arch/chaconne_engine.h"
 #include "solo_string/flow/harmonic_arpeggio_engine.h"
 
@@ -152,6 +154,55 @@ void offsetTrackNotes(std::vector<Track>& tracks, Tick offset_ticks) {
   }
 }
 
+/// @brief Map a track index to a VoiceRole for articulation purposes.
+///
+/// For organ-system multi-voice forms the mapping follows exposition entry order:
+///   0 -> Assert (subject voice)
+///   1 -> Respond (answer voice)
+///   2 -> Propel (free counterpoint)
+///   3+ -> Ground (pedal / bass foundation)
+///
+/// For solo-string forms there is typically a single track; Assert is used
+/// to give a moderate non-legato articulation.
+///
+/// @param track_index Zero-based index of the track.
+/// @param is_organ True for organ-system forms, false for solo-string.
+/// @return VoiceRole suitable for articulation rule lookup.
+VoiceRole voiceRoleForTrack(size_t track_index, bool is_organ) {
+  if (!is_organ) {
+    return VoiceRole::Assert;
+  }
+  switch (track_index) {
+    case 0:  return VoiceRole::Assert;
+    case 1:  return VoiceRole::Respond;
+    case 2:  return VoiceRole::Propel;
+    default: return VoiceRole::Ground;
+  }
+}
+
+/// @brief Apply articulation to every track in a GeneratorResult.
+///
+/// This must be called as the final processing step before the result is
+/// returned to the caller (and subsequently written to MIDI).  It adjusts
+/// note durations via gate ratios and adds phrase breathing at cadence points.
+///
+/// @param result The generation result whose tracks will be modified in place.
+/// @param instrument The instrument type (organ vs non-organ affects velocity).
+void applyArticulationToResult(GeneratorResult& result, InstrumentType instrument) {
+  if (!result.success) {
+    return;
+  }
+
+  bool is_organ = (instrument == InstrumentType::Organ);
+  const HarmonicTimeline* timeline_ptr =
+      result.timeline.size() > 0 ? &result.timeline : nullptr;
+
+  for (size_t idx = 0; idx < result.tracks.size(); ++idx) {
+    VoiceRole role = voiceRoleForTrack(idx, is_organ);
+    applyArticulation(result.tracks[idx].notes, role, timeline_ptr, is_organ);
+  }
+}
+
 /// @brief Generate a fugue-only form (Fugue, ToccataAndFugue, etc.).
 /// @param config Unified generator configuration.
 /// @return GeneratorResult with fugue tracks.
@@ -169,11 +220,12 @@ GeneratorResult generateFugueForm(const GeneratorConfig& config) {
 
   result.tracks = std::move(fugue_result.tracks);
   result.total_duration_ticks = calculateTotalDuration(result.tracks);
-  result.tempo_events.push_back({0, config.bpm});
+  result.tempo_events = generateFugueTempoMap(fugue_result.structure, config.bpm);
   result.timeline = fugue_result.timeline.size() > 0
       ? std::move(fugue_result.timeline)
       : HarmonicTimeline::createStandard(
             config.key, result.total_duration_ticks, HarmonicResolution::Bar);
+  result.generation_timeline = std::move(fugue_result.generation_timeline);
   result.success = true;
   result.form_description =
       std::string(formTypeToString(config.form)) + " in " +
@@ -244,9 +296,13 @@ GeneratorResult generatePreludeAndFugueForm(const GeneratorConfig& config) {
     }
   }
 
-  // Step 5: Build tempo events (prelude tempo at tick 0, fugue tempo at prelude end).
+  // Step 5: Build tempo events (prelude tempo at tick 0, fugue tempo map offset).
   result.tempo_events.push_back({0, config.bpm});
-  result.tempo_events.push_back({prelude_duration, config.bpm});
+  auto fugue_tempo = generateFugueTempoMap(fugue_result.structure, config.bpm);
+  for (auto& evt : fugue_tempo) {
+    evt.tick += prelude_duration;
+    result.tempo_events.push_back(evt);
+  }
 
   result.total_duration_ticks = prelude_duration + fugue_duration;
   // Use the fugue's tonal plan timeline (offset by prelude duration) if available.
@@ -264,6 +320,17 @@ GeneratorResult generatePreludeAndFugueForm(const GeneratorConfig& config) {
   } else {
     result.timeline = HarmonicTimeline::createStandard(
         config.key, result.total_duration_ticks, HarmonicResolution::Bar);
+  }
+  // Offset generation_timeline by prelude duration for dual-timeline analysis.
+  if (fugue_result.generation_timeline.size() > 0) {
+    HarmonicTimeline offset_gen_tl;
+    for (const auto& ev : fugue_result.generation_timeline.events()) {
+      HarmonicEvent offset_ev = ev;
+      offset_ev.tick += prelude_duration;
+      offset_ev.end_tick += prelude_duration;
+      offset_gen_tl.addEvent(offset_ev);
+    }
+    result.generation_timeline = std::move(offset_gen_tl);
   }
   result.success = true;
   result.form_description =
@@ -290,7 +357,7 @@ GeneratorResult generate(const GeneratorConfig& config) {
     case FormType::Fugue: {
       result = generateFugueForm(effective_config);
       result.seed_used = effective_config.seed;
-      return result;
+      break;
     }
 
     case FormType::ToccataAndFugue: {
@@ -307,7 +374,7 @@ GeneratorResult generate(const GeneratorConfig& config) {
         result.success = false;
         result.seed_used = effective_config.seed;
         result.error_message = "Toccata generation failed: " + toc_result.error_message;
-        return result;
+        break;
       }
 
       Tick toc_duration = toc_result.total_duration_ticks;
@@ -319,7 +386,7 @@ GeneratorResult generate(const GeneratorConfig& config) {
         result.success = false;
         result.seed_used = effective_config.seed;
         result.error_message = "Fugue generation failed: " + fugue_result.error_message;
-        return result;
+        break;
       }
 
       // Offset fugue notes by toccata duration and merge tracks.
@@ -345,15 +412,38 @@ GeneratorResult generate(const GeneratorConfig& config) {
 
       Tick fugue_duration = calculateTotalDuration(fugue_result.tracks);
       result.total_duration_ticks = toc_duration + fugue_duration;
-      result.tempo_events.push_back({0, effective_config.bpm});
+
+      // Toccata tempo map + offset fugue tempo map.
+      result.tempo_events = generateToccataTempoMap(
+          toc_result.opening_start, toc_result.opening_end,
+          toc_result.recit_start, toc_result.recit_end,
+          toc_result.drive_start, toc_result.drive_end,
+          effective_config.bpm);
+      auto fugue_tempo = generateFugueTempoMap(fugue_result.structure, effective_config.bpm);
+      for (auto& evt : fugue_tempo) {
+        evt.tick += toc_duration;
+        result.tempo_events.push_back(evt);
+      }
+
       result.timeline = HarmonicTimeline::createStandard(
           effective_config.key, result.total_duration_ticks, HarmonicResolution::Bar);
+      // Offset generation_timeline by toccata duration for dual-timeline analysis.
+      if (fugue_result.generation_timeline.size() > 0) {
+        HarmonicTimeline offset_gen_tl;
+        for (const auto& ev : fugue_result.generation_timeline.events()) {
+          HarmonicEvent offset_ev = ev;
+          offset_ev.tick += toc_duration;
+          offset_ev.end_tick += toc_duration;
+          offset_gen_tl.addEvent(offset_ev);
+        }
+        result.generation_timeline = std::move(offset_gen_tl);
+      }
       result.success = true;
       result.seed_used = effective_config.seed;
       result.form_description =
           "Toccata and Fugue in " + keySignatureToString(effective_config.key) + ", " +
           std::to_string(effective_config.num_voices) + " voices";
-      return result;
+      break;
     }
 
     case FormType::FantasiaAndFugue: {
@@ -370,7 +460,7 @@ GeneratorResult generate(const GeneratorConfig& config) {
         result.success = false;
         result.seed_used = effective_config.seed;
         result.error_message = "Fantasia generation failed: " + fant_result.error_message;
-        return result;
+        break;
       }
 
       Tick fant_duration = fant_result.total_duration_ticks;
@@ -382,7 +472,7 @@ GeneratorResult generate(const GeneratorConfig& config) {
         result.success = false;
         result.seed_used = effective_config.seed;
         result.error_message = "Fugue generation failed: " + fugue_result.error_message;
-        return result;
+        break;
       }
 
       // Offset fugue notes and merge tracks.
@@ -408,15 +498,35 @@ GeneratorResult generate(const GeneratorConfig& config) {
 
       Tick fugue_duration = calculateTotalDuration(fugue_result.tracks);
       result.total_duration_ticks = fant_duration + fugue_duration;
-      result.tempo_events.push_back({0, effective_config.bpm});
+
+      // Fantasia tempo map + offset fugue tempo map.
+      result.tempo_events = generateFantasiaTempoMap(
+          fant_duration, fant_config.section_bars, effective_config.bpm);
+      auto fugue_tempo = generateFugueTempoMap(fugue_result.structure, effective_config.bpm);
+      for (auto& evt : fugue_tempo) {
+        evt.tick += fant_duration;
+        result.tempo_events.push_back(evt);
+      }
+
       result.timeline = HarmonicTimeline::createStandard(
           effective_config.key, result.total_duration_ticks, HarmonicResolution::Bar);
+      // Offset generation_timeline by fantasia duration for dual-timeline analysis.
+      if (fugue_result.generation_timeline.size() > 0) {
+        HarmonicTimeline offset_gen_tl;
+        for (const auto& ev : fugue_result.generation_timeline.events()) {
+          HarmonicEvent offset_ev = ev;
+          offset_ev.tick += fant_duration;
+          offset_ev.end_tick += fant_duration;
+          offset_gen_tl.addEvent(offset_ev);
+        }
+        result.generation_timeline = std::move(offset_gen_tl);
+      }
       result.success = true;
       result.seed_used = effective_config.seed;
       result.form_description =
           "Fantasia and Fugue in " + keySignatureToString(effective_config.key) + ", " +
           std::to_string(effective_config.num_voices) + " voices";
-      return result;
+      break;
     }
 
     case FormType::Passacaglia: {
@@ -431,12 +541,13 @@ GeneratorResult generate(const GeneratorConfig& config) {
         result.success = false;
         result.seed_used = effective_config.seed;
         result.error_message = "Passacaglia generation failed: " + pass_result.error_message;
-        return result;
+        break;
       }
 
       result.tracks = std::move(pass_result.tracks);
       result.total_duration_ticks = pass_result.total_duration_ticks;
-      result.tempo_events.push_back({0, effective_config.bpm});
+      result.tempo_events = generatePassacagliaTempoMap(
+          pconfig.num_variations, pconfig.ground_bass_bars, effective_config.bpm);
       result.timeline = pass_result.timeline.size() > 0
           ? std::move(pass_result.timeline)
           : HarmonicTimeline::createStandard(
@@ -445,13 +556,13 @@ GeneratorResult generate(const GeneratorConfig& config) {
       result.seed_used = effective_config.seed;
       result.form_description =
           "Passacaglia in " + keySignatureToString(effective_config.key);
-      return result;
+      break;
     }
 
     case FormType::PreludeAndFugue: {
       result = generatePreludeAndFugueForm(effective_config);
       result.seed_used = effective_config.seed;
-      return result;
+      break;
     }
 
     case FormType::TrioSonata: {
@@ -459,7 +570,7 @@ GeneratorResult generate(const GeneratorConfig& config) {
       result.seed_used = effective_config.seed;
       result.error_message = "TrioSonata generation not yet implemented";
       result.form_description = "Trio Sonata (stub)";
-      return result;
+      break;
     }
 
     case FormType::ChoralePrelude: {
@@ -470,7 +581,7 @@ GeneratorResult generate(const GeneratorConfig& config) {
         result.error_message =
             "Incompatible character for ChoralePrelude: " +
             std::string(subjectCharacterToString(effective_config.character));
-        return result;
+        break;
       }
 
       ChoralePreludeConfig cpconfig;
@@ -484,7 +595,7 @@ GeneratorResult generate(const GeneratorConfig& config) {
         result.success = false;
         result.seed_used = effective_config.seed;
         result.error_message = "ChoralePrelude generation failed";
-        return result;
+        break;
       }
 
       result.tracks = std::move(cp_result.tracks);
@@ -498,7 +609,7 @@ GeneratorResult generate(const GeneratorConfig& config) {
       result.seed_used = effective_config.seed;
       result.form_description =
           "Chorale Prelude in " + keySignatureToString(effective_config.key);
-      return result;
+      break;
     }
 
     case FormType::CelloPrelude: {
@@ -522,7 +633,7 @@ GeneratorResult generate(const GeneratorConfig& config) {
         result.seed_used = effective_config.seed;
         result.error_message = "CelloPrelude generation failed: " +
                                flow_result.error_message;
-        return result;
+        break;
       }
 
       result.tracks = std::move(flow_result.tracks);
@@ -536,7 +647,7 @@ GeneratorResult generate(const GeneratorConfig& config) {
       result.seed_used = effective_config.seed;
       result.form_description =
           "Cello Prelude in " + keySignatureToString(effective_config.key);
-      return result;
+      break;
     }
 
     case FormType::Chaconne: {
@@ -560,7 +671,7 @@ GeneratorResult generate(const GeneratorConfig& config) {
         result.success = false;
         result.seed_used = effective_config.seed;
         result.error_message = ch_result.error_message;
-        return result;
+        break;
       }
 
       result.tracks = std::move(ch_result.tracks);
@@ -573,14 +684,15 @@ GeneratorResult generate(const GeneratorConfig& config) {
       result.success = true;
       result.seed_used = ch_result.seed_used;
       result.form_description = "Chaconne in " + keySignatureToString(effective_config.key);
-      return result;
+      break;
     }
   }
 
-  // Fallback for unknown form types.
-  result.success = false;
-  result.seed_used = effective_config.seed;
-  result.error_message = "Unknown form type";
+  // Apply articulation as the final processing step before returning.
+  // This adjusts note durations (gate ratio) and adds phrase breathing at cadences.
+  // Skipped automatically for failed results (applyArticulationToResult checks success).
+  applyArticulationToResult(result, effective_config.instrument);
+
   return result;
 }
 

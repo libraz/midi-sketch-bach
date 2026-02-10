@@ -2,10 +2,12 @@
 #define BACH_ORGAN_REGISTRATION_H
 
 #include <cstdint>
+#include <string>
 #include <utility>
 #include <vector>
 
 #include "core/basic_types.h"
+#include "fugue/fugue_structure.h"
 
 namespace bach {
 
@@ -82,6 +84,66 @@ void applyRegistrationPlan(std::vector<Track>& tracks,
 /// @return Vector of MidiEvents (CC#7) for volume control.
 std::vector<MidiEvent> generateEnergyRegistrationEvents(
     const std::vector<std::pair<Tick, float>>& energy_levels, uint8_t num_channels);
+
+// ---------------------------------------------------------------------------
+// Extended N-point registration plan
+// ---------------------------------------------------------------------------
+
+/// @brief A registration change point at a specific tick position.
+struct RegistrationPoint {
+  Tick tick = 0;                ///< Tick position for this registration change.
+  Registration registration;    ///< The registration settings to apply.
+  std::string label;            ///< Descriptive label (e.g., "exposition", "episode_1").
+};
+
+/// @brief Extended registration plan with N structural trigger points.
+///
+/// The N-point plan provides finer-grained registration changes at section
+/// boundaries (episode starts, middle entries) in addition to the standard
+/// 3-point plan (exposition, stretto, coda).
+struct ExtendedRegistrationPlan {
+  std::vector<RegistrationPoint> points;  ///< Registration points sorted by tick.
+
+  /// @brief Add a registration point.
+  /// @param tick Tick position.
+  /// @param reg Registration settings.
+  /// @param label Descriptive label.
+  void addPoint(Tick tick, const Registration& reg, const std::string& label = "");
+
+  /// @brief Get the number of registration points.
+  /// @return Number of points in the plan.
+  size_t size() const { return points.size(); }
+
+  /// @brief Check if the plan is empty.
+  /// @return True if no registration points exist.
+  bool empty() const { return points.empty(); }
+};
+
+/// @brief Create an extended registration plan from a fugue structure.
+///
+/// Generates registration points at every section boundary using design value
+/// tables (Principle 4: Trust Design Values). Velocity hints per section type:
+///   - Exposition: 75 (standard organ tone)
+///   - Episode: 70-90 (gradual curve following energy position)
+///   - MiddleEntry: 80-95 (slight boost for subject prominence)
+///   - Stretto: 95 (climactic section)
+///   - Coda: 100 (full registration)
+///
+/// @param sections Fugue structure sections for timing and type information.
+/// @param total_duration Total piece duration for energy curve computation.
+/// @return ExtendedRegistrationPlan with N points (one per section).
+ExtendedRegistrationPlan createExtendedRegistrationPlan(
+    const std::vector<FugueSection>& sections, Tick total_duration);
+
+/// @brief Apply an extended registration plan to tracks by inserting CC events.
+///
+/// For each RegistrationPoint, generates CC#7 (Volume) and CC#11 (Expression)
+/// events and inserts them into matching tracks by channel.
+///
+/// @param tracks Tracks to modify (events appended to matching channels).
+/// @param plan Extended registration plan.
+void applyExtendedRegistrationPlan(std::vector<Track>& tracks,
+                                    const ExtendedRegistrationPlan& plan);
 
 }  // namespace bach
 

@@ -52,6 +52,17 @@ struct TonalPlan {
   /// @return HarmonicTimeline at bar resolution.
   HarmonicTimeline toHarmonicTimeline(Tick total_duration) const;
 
+  /// @brief Convert to a beat-resolution HarmonicTimeline with real progressions.
+  ///
+  /// For each key region (between consecutive modulations), generates a
+  /// circle-of-fifths progression at beat resolution using
+  /// HarmonicTimeline::createProgression(). This provides harmonically rich
+  /// context for counterpoint validation during fugue generation.
+  ///
+  /// @param total_duration Total duration in ticks.
+  /// @return HarmonicTimeline at beat resolution with varied chord degrees.
+  HarmonicTimeline toDetailedTimeline(Tick total_duration) const;
+
   /// @brief Convert to JSON representation.
   /// @return JSON string containing home_key, is_minor, and modulations array.
   std::string toJson() const;

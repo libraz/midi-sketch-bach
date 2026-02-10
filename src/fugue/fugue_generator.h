@@ -18,6 +18,17 @@
 
 namespace bach {
 
+/// @brief Quality metrics for generated fugue output.
+struct FugueQualityMetrics {
+  float dissonance_per_beat = 0.0f;     ///< Average dissonances per beat.
+  float chord_tone_ratio = 0.0f;        ///< Fraction of notes that are chord tones.
+  int voice_crossings = 0;              ///< Number of voice crossing incidents.
+  int parallel_perfects = 0;            ///< Number of parallel 5ths/8ths.
+  float counterpoint_compliance = 0.0f; ///< Fraction of notes passing CP rules.
+  int notes_rejected = 0;               ///< Notes removed by post-validation.
+  int notes_adjusted = 0;               ///< Notes pitch-adjusted by validation.
+};
+
 /// @brief Result of fugue generation.
 struct FugueResult {
   bool success = false;               ///< True if generation succeeded.
@@ -26,6 +37,8 @@ struct FugueResult {
   std::string error_message;          ///< Error description if failed.
   int attempts = 0;                   ///< Number of subject generation attempts.
   HarmonicTimeline timeline;          ///< Harmonic context from tonal plan.
+  HarmonicTimeline generation_timeline;  ///< Beat-resolution timeline used during generation.
+  FugueQualityMetrics quality;        ///< Quality metrics from post-validation.
 };
 
 /// @brief Generate a complete fugue from the given configuration.

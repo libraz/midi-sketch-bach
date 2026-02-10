@@ -19,6 +19,12 @@
 
 namespace bach {
 
+// Forward declarations for counterpoint validation.
+class CounterpointState;
+class IRuleEvaluator;
+class CollisionResolver;
+class HarmonicTimeline;
+
 /// @brief Entry order for a single voice in the exposition.
 ///
 /// Each VoiceEntry records when and how a voice enters the fugue. Voices
@@ -87,6 +93,33 @@ Exposition buildExposition(const Subject& subject,
                            const Countersubject& countersubject,
                            const FugueConfig& config,
                            uint32_t seed);
+
+/// @brief Build an exposition with counterpoint validation.
+///
+/// Same as the unvalidated overload, but free counterpoint notes are
+/// routed through createBachNote() for counterpoint rule checking.
+/// Subject and answer notes are registered in the counterpoint state
+/// but not altered (immutable sources).
+///
+/// @param subject The fugue subject (dux).
+/// @param answer The fugue answer (comes), pre-generated.
+/// @param countersubject The countersubject, pre-generated.
+/// @param config Fugue configuration.
+/// @param seed Random seed.
+/// @param cp_state Counterpoint state for validation.
+/// @param cp_rules Rule evaluator.
+/// @param cp_resolver Collision resolver.
+/// @param timeline Harmonic timeline for chord-tone context.
+/// @return Complete Exposition with validated free counterpoint.
+Exposition buildExposition(const Subject& subject,
+                           const Answer& answer,
+                           const Countersubject& countersubject,
+                           const FugueConfig& config,
+                           uint32_t seed,
+                           CounterpointState& cp_state,
+                           IRuleEvaluator& cp_rules,
+                           CollisionResolver& cp_resolver,
+                           const HarmonicTimeline& timeline);
 
 }  // namespace bach
 

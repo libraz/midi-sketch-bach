@@ -38,8 +38,9 @@ uint8_t applyKeyTranspose(uint8_t pitch, Key key) {
 
 MidiWriter::MidiWriter() = default;
 
-void MidiWriter::build(const std::vector<Track>& tracks, uint16_t bpm, Key key,
-                        const std::string& metadata) {
+void MidiWriter::build(const std::vector<Track>& tracks,
+                        const std::vector<TempoEvent>& tempo_events,
+                        Key key, const std::string& metadata) {
   data_.clear();
 
   // Count non-empty tracks, plus one for the metadata track.
@@ -52,11 +53,11 @@ void MidiWriter::build(const std::vector<Track>& tracks, uint16_t bpm, Key key,
   uint16_t total_tracks = num_content_tracks + 1;  // +1 for metadata track
 
   writeHeader(total_tracks, kTicksPerBeat);
-  writeMetadataTrack(bpm, metadata);
+  writeMetadataTrack(tempo_events, metadata);
 
   for (const auto& track : tracks) {
     if (!track.notes.empty() || !track.events.empty()) {
-      writeTrack(track, bpm, key, false);
+      writeTrack(track, key);
     }
   }
 }
@@ -95,8 +96,7 @@ void MidiWriter::writeHeader(uint16_t num_tracks, uint16_t division) {
   writeBE16(data_, division);
 }
 
-void MidiWriter::writeTrack(const Track& track, uint16_t bpm, Key key,
-                             bool is_first_track) {
+void MidiWriter::writeTrack(const Track& track, Key key) {
   std::vector<uint8_t> track_buf;
 
   // Program change at tick 0
@@ -183,7 +183,8 @@ void MidiWriter::writeTrack(const Track& track, uint16_t bpm, Key key,
   data_.insert(data_.end(), track_buf.begin(), track_buf.end());
 }
 
-void MidiWriter::writeMetadataTrack(uint16_t bpm, const std::string& metadata) {
+void MidiWriter::writeMetadataTrack(const std::vector<TempoEvent>& tempo_events,
+                                     const std::string& metadata) {
   std::vector<uint8_t> track_buf;
 
   // Track name: "BACH"
@@ -197,15 +198,31 @@ void MidiWriter::writeMetadataTrack(uint16_t bpm, const std::string& metadata) {
   track_buf.push_back('C');
   track_buf.push_back('H');
 
-  // Tempo meta-event: FF 51 03 tt tt tt
-  uint32_t usec_per_beat = kMicrosecondsPerMinute / bpm;
-  writeVariableLength(track_buf, 0);  // Delta time = 0
-  track_buf.push_back(0xFF);
-  track_buf.push_back(0x51);
-  track_buf.push_back(0x03);          // Length = 3 bytes
-  track_buf.push_back(static_cast<uint8_t>((usec_per_beat >> 16) & 0xFF));
-  track_buf.push_back(static_cast<uint8_t>((usec_per_beat >> 8) & 0xFF));
-  track_buf.push_back(static_cast<uint8_t>(usec_per_beat & 0xFF));
+  // Sort tempo events by tick and write each as FF 51 03.
+  std::vector<TempoEvent> sorted_events = tempo_events;
+  std::sort(sorted_events.begin(), sorted_events.end(),
+            [](const TempoEvent& lhs, const TempoEvent& rhs) {
+              return lhs.tick < rhs.tick;
+            });
+
+  // If no events provided, write a default 120 BPM event at tick 0.
+  if (sorted_events.empty()) {
+    sorted_events.push_back({0, 120});
+  }
+
+  uint32_t prev_tick = 0;
+  for (const auto& evt : sorted_events) {
+    uint32_t delta = evt.tick - prev_tick;
+    uint32_t usec_per_beat = kMicrosecondsPerMinute / evt.bpm;
+    writeVariableLength(track_buf, delta);
+    track_buf.push_back(0xFF);
+    track_buf.push_back(0x51);
+    track_buf.push_back(0x03);  // Length = 3 bytes
+    track_buf.push_back(static_cast<uint8_t>((usec_per_beat >> 16) & 0xFF));
+    track_buf.push_back(static_cast<uint8_t>((usec_per_beat >> 8) & 0xFF));
+    track_buf.push_back(static_cast<uint8_t>(usec_per_beat & 0xFF));
+    prev_tick = evt.tick;
+  }
 
   // Time signature meta-event: FF 58 04 nn dd cc bb
   // 4/4 time: numerator=4, denominator=2 (2^2=4), 24 MIDI clocks/click, 8 32nds/beat

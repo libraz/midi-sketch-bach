@@ -55,7 +55,7 @@ TEST(MidiWriterTest, BuildWithEmptyTracksProducesValidMidi) {
   MidiWriter writer;
   std::vector<Track> tracks;  // No tracks with content
 
-  writer.build(tracks, 120);
+  writer.build(tracks, {{0, 120}});
 
   auto bytes = writer.toBytes();
   // Even with no content tracks, the metadata track is always present.
@@ -71,7 +71,7 @@ TEST(MidiWriterTest, BuildWithEmptyTracksProducesValidMidi) {
 TEST(MidiWriterTest, HeaderStartsWithMThd) {
   MidiWriter writer;
   std::vector<Track> tracks;
-  writer.build(tracks, 120);
+  writer.build(tracks, {{0, 120}});
 
   auto bytes = writer.toBytes();
   ASSERT_GE(bytes.size(), 4u) << "Output too small to contain MThd header";
@@ -85,7 +85,7 @@ TEST(MidiWriterTest, HeaderStartsWithMThd) {
 TEST(MidiWriterTest, HeaderFormatIsType1) {
   MidiWriter writer;
   std::vector<Track> tracks;
-  writer.build(tracks, 120);
+  writer.build(tracks, {{0, 120}});
 
   auto bytes = writer.toBytes();
   ASSERT_GE(bytes.size(), 14u) << "Output too small to contain full MThd header";
@@ -109,7 +109,7 @@ TEST(MidiWriterTest, HeaderTrackCountMatchesTracks) {
   Track track_two = makeSimpleTrack(1, 20, "Swell", 64, 0, 480);
   std::vector<Track> tracks = {track_one, track_two};
 
-  writer.build(tracks, 120);
+  writer.build(tracks, {{0, 120}});
 
   auto bytes = writer.toBytes();
   ASSERT_GE(bytes.size(), 14u);
@@ -128,7 +128,7 @@ TEST(MidiWriterTest, BuildWithOneTrackContainingNotes) {
   Track track = makeSimpleTrack(0, 19, "Great", kMidiC4, 0, kTicksPerBeat);
   std::vector<Track> tracks = {track};
 
-  writer.build(tracks, 120);
+  writer.build(tracks, {{0, 120}});
 
   auto bytes = writer.toBytes();
   EXPECT_GT(bytes.size(), 14u) << "Output must be larger than just the MThd header";
@@ -168,7 +168,7 @@ TEST(MidiWriterTest, BuildWithMultipleNotesInTrack) {
   track.notes.push_back(note_g4);
 
   std::vector<Track> tracks = {track};
-  writer.build(tracks, 120);
+  writer.build(tracks, {{0, 120}});
 
   auto bytes = writer.toBytes();
   // 3 notes produce 6 events (3 on + 3 off), so output should be substantial.
@@ -185,7 +185,7 @@ TEST(MidiWriterTest, EmptyTracksAreSkipped) {
   Track content_track = makeSimpleTrack(0, 19, "Great", 60, 0, 480);
   std::vector<Track> tracks = {empty_track, content_track};
 
-  writer.build(tracks, 120);
+  writer.build(tracks, {{0, 120}});
 
   auto bytes = writer.toBytes();
   ASSERT_GE(bytes.size(), 14u);
@@ -207,7 +207,7 @@ TEST(MidiWriterTest, ToBytesReturnsDataAfterBuild) {
 
   // After build: non-empty
   std::vector<Track> tracks;
-  writer.build(tracks, 120);
+  writer.build(tracks, {{0, 120}});
   auto bytes = writer.toBytes();
   EXPECT_FALSE(bytes.empty());
 }
@@ -217,12 +217,12 @@ TEST(MidiWriterTest, ConsecutiveBuildsOverwritePreviousData) {
 
   // First build with one track
   Track track_one = makeSimpleTrack(0, 19, "Great", 60, 0, 480);
-  writer.build({track_one}, 120);
+  writer.build({track_one}, {{0, 120}});
   auto first_bytes = writer.toBytes();
 
   // Second build with two tracks -- data should be different
   Track track_two = makeSimpleTrack(1, 20, "Swell", 64, 0, 480);
-  writer.build({track_one, track_two}, 120);
+  writer.build({track_one, track_two}, {{0, 120}});
   auto second_bytes = writer.toBytes();
 
   EXPECT_NE(first_bytes.size(), second_bytes.size())
@@ -236,7 +236,7 @@ TEST(MidiWriterTest, ConsecutiveBuildsOverwritePreviousData) {
 TEST(MidiWriterTest, WriteToFileCreatesFile) {
   MidiWriter writer;
   Track track = makeSimpleTrack(0, 19, "Great", kMidiC4, 0, kTicksPerBeat);
-  writer.build({track}, 120);
+  writer.build({track}, {{0, 120}});
 
   const std::string path = "/tmp/bach_test_output.mid";
 
@@ -263,7 +263,7 @@ TEST(MidiWriterTest, WriteToFileCreatesFile) {
 TEST(MidiWriterTest, WriteToFileContentMatchesToBytes) {
   MidiWriter writer;
   Track track = makeSimpleTrack(0, 19, "Great", kMidiC4, 0, kTicksPerBeat);
-  writer.build({track}, 120);
+  writer.build({track}, {{0, 120}});
 
   const std::string path = "/tmp/bach_test_output_match.mid";
   std::remove(path.c_str());
@@ -292,7 +292,7 @@ TEST(MidiWriterTest, WriteToFileContentMatchesToBytes) {
 
 TEST(MidiWriterTest, WriteToFileFailsForInvalidPath) {
   MidiWriter writer;
-  writer.build({}, 120);
+  writer.build({}, {{0, 120}});
 
   // Writing to a non-existent directory should fail
   bool result = writer.writeToFile("/nonexistent_dir_abc123/output.mid");
@@ -309,8 +309,8 @@ TEST(MidiWriterTest, BuildWithKeyTranspositionProducesDifferentOutput) {
 
   Track track = makeSimpleTrack(0, 19, "Great", kMidiC4, 0, kTicksPerBeat);
 
-  writer_c.build({track}, 120, Key::C);
-  writer_g.build({track}, 120, Key::G);
+  writer_c.build({track}, {{0, 120}}, Key::C);
+  writer_g.build({track}, {{0, 120}}, Key::G);
 
   auto bytes_c = writer_c.toBytes();
   auto bytes_g = writer_g.toBytes();
@@ -330,8 +330,8 @@ TEST(MidiWriterTest, MetadataEmbeddedInOutput) {
   MidiWriter writer_no_meta;
   MidiWriter writer_with_meta;
 
-  writer_no_meta.build({}, 120, Key::C, "");
-  writer_with_meta.build({}, 120, Key::C, "{\"seed\":42}");
+  writer_no_meta.build({}, {{0, 120}}, Key::C, "");
+  writer_with_meta.build({}, {{0, 120}}, Key::C, "{\"seed\":42}");
 
   auto bytes_no_meta = writer_no_meta.toBytes();
   auto bytes_with_meta = writer_with_meta.toBytes();
@@ -348,7 +348,7 @@ TEST(MidiWriterTest, MetadataEmbeddedInOutput) {
 TEST(MidiWriterTest, OutputContainsMTrkChunks) {
   MidiWriter writer;
   Track track = makeSimpleTrack(0, 19, "Great", 60, 0, 480);
-  writer.build({track}, 120);
+  writer.build({track}, {{0, 120}});
 
   auto bytes = writer.toBytes();
 
@@ -372,8 +372,8 @@ TEST(MidiWriterTest, DifferentBpmProducesDifferentOutput) {
   MidiWriter writer_slow;
   MidiWriter writer_fast;
 
-  writer_slow.build({}, 60);
-  writer_fast.build({}, 180);
+  writer_slow.build({}, {{0, 60}});
+  writer_fast.build({}, {{0, 180}});
 
   auto bytes_slow = writer_slow.toBytes();
   auto bytes_fast = writer_fast.toBytes();

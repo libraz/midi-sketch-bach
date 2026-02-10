@@ -43,6 +43,7 @@ set(BACH_TEST_SOURCES
   counterpoint/species_rules_nht_test.cpp
   counterpoint/motion_analyzer_test.cpp
   counterpoint/collision_resolver_test.cpp
+  counterpoint/suspension_chain_test.cpp
   counterpoint/counterpoint_validator_test.cpp
   counterpoint/melodic_context_test.cpp
 
@@ -68,6 +69,14 @@ set(BACH_TEST_SOURCES
   fugue/episode_characteristic_motif_test.cpp
   fugue/episode_modulation_test.cpp
   fugue/stretto_fragment_test.cpp
+  fugue/tonal_plan_enhanced_test.cpp
+  fugue/voice_registers_test.cpp
+  fugue/episode_harmonic_test.cpp
+  fugue/exposition_harmonic_test.cpp
+  fugue/stretto_harmonic_test.cpp
+  fugue/fugue_quality_gate_test.cpp
+  fugue/motif_pool_test.cpp
+  fugue/fortspinnung_test.cpp
 
   # transform/
   transform/motif_transform_test.cpp
@@ -86,6 +95,7 @@ set(BACH_TEST_SOURCES
   analysis/implied_voice_analyzer_test.cpp
   analysis/cross_relation_test.cpp
   analysis/voice_harmony_analyzer_test.cpp
+  analysis/cadence_detector_test.cpp
 
   # harmony/
   harmony/chord_types_test.cpp
@@ -96,6 +106,8 @@ set(BACH_TEST_SOURCES
   harmony/chord_function_test.cpp
   harmony/modulation_plan_test.cpp
   harmony/extended_chord_test.cpp
+  harmony/tempo_map_test.cpp
+  harmony/harmonic_rhythm_test.cpp
 
   # forms/
   forms/prelude_test.cpp

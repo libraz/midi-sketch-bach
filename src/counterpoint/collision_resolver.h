@@ -6,6 +6,7 @@
 
 #include <cstdint>
 #include <string>
+#include <vector>
 
 #include "core/basic_types.h"
 #include "core/note_source.h"
@@ -152,8 +153,19 @@ class CollisionResolver {
   /// @param semitones Maximum distance to search (default: 12).
   void setMaxSearchRange(int semitones);
 
+  /// @brief Set cadence tick positions for voice-leading enhancement.
+  ///
+  /// At cadence ticks, leading tone -> tonic resolution is prioritized.
+  /// When the current tick is within kTicksPerBeat of a cadence tick and the
+  /// previous pitch is the leading tone (pitch % 12 == 11 in C major context),
+  /// resolution upward by semitone receives a penalty bonus (-0.3).
+  ///
+  /// @param ticks Sorted vector of cadence tick positions.
+  void setCadenceTicks(const std::vector<Tick>& ticks);
+
  private:
   int max_search_range_ = 12;
+  std::vector<Tick> cadence_ticks_;
 
   /// @brief Attempt a specific resolution strategy.
   PlacementResult tryStrategy(const CounterpointState& state,

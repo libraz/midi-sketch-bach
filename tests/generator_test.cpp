@@ -575,5 +575,120 @@ TEST(GeneratorTest, TotalDuration_PreludeAndFugueIsReasonable) {
   EXPECT_GE(result.total_duration_ticks, 20u * kTicksPerBar);
 }
 
+// ---------------------------------------------------------------------------
+// Articulation integration -- verify articulation is applied in the pipeline
+// ---------------------------------------------------------------------------
+
+TEST(GeneratorArticulationTest, ArticulationAppliedInPipeline_FugueDurationsReduced) {
+  // Generate a fugue and verify that note durations are shorter than the
+  // "raw" beat-aligned durations that the fugue generator produces.
+  // The organ Assert gate ratio is 0.85, so a quarter-note (480 ticks)
+  // becomes 408 ticks.  We check that at least some notes have been
+  // shortened below their beat-grid-aligned values.
+  GeneratorConfig config = makeTestConfig(42);
+  config.form = FormType::Fugue;
+  config.num_voices = 3;
+  GeneratorResult result = generate(config);
+
+  ASSERT_TRUE(result.success);
+  ASSERT_GE(result.tracks.size(), 1u);
+
+  // Count notes whose duration is NOT a clean multiple of kTicksPerBeat.
+  // Before articulation, durations are typically multiples of 120/240/480.
+  // After articulation (0.85 gate), a 480-tick note becomes 408, which
+  // is not a multiple of 480.
+  size_t articulated_count = 0;
+  size_t total_count = 0;
+  for (const auto& track : result.tracks) {
+    for (const auto& note : track.notes) {
+      ++total_count;
+      // A note whose duration is not evenly divisible by kTicksPerBeat
+      // (480) has almost certainly been articulated.
+      if (note.duration % kTicksPerBeat != 0) {
+        ++articulated_count;
+      }
+    }
+  }
+
+  EXPECT_GT(total_count, 0u) << "Fugue should produce notes";
+  EXPECT_GT(articulated_count, 0u)
+      << "Articulation should modify at least some note durations "
+         "(expected non-beat-aligned durations after gate ratio application)";
+}
+
+TEST(GeneratorArticulationTest, ArticulationAppliedInPipeline_OrganVelocityUnchanged) {
+  // Organ instruments have fixed velocity = 80.  The articulation system
+  // must not modify velocity for organ forms (is_organ = true).
+  GeneratorConfig config = makeTestConfig(42);
+  config.form = FormType::Fugue;
+  config.instrument = InstrumentType::Organ;
+  GeneratorResult result = generate(config);
+
+  ASSERT_TRUE(result.success);
+
+  for (const auto& track : result.tracks) {
+    for (const auto& note : track.notes) {
+      EXPECT_EQ(note.velocity, 80)
+          << "Organ velocity must remain 80 after articulation; "
+             "found " << static_cast<int>(note.velocity)
+          << " at tick " << note.start_tick;
+    }
+  }
+}
+
+TEST(GeneratorArticulationTest, ArticulationAppliedInPipeline_ChaconneDurationsReduced) {
+  // Solo string (non-organ) form should also have articulated durations.
+  GeneratorConfig config = makeTestConfig(42);
+  config.form = FormType::Chaconne;
+  config.instrument = InstrumentType::Violin;
+  GeneratorResult result = generate(config);
+
+  ASSERT_TRUE(result.success) << result.error_message;
+  ASSERT_GE(result.tracks.size(), 1u);
+
+  size_t articulated_count = 0;
+  size_t total_count = 0;
+  for (const auto& track : result.tracks) {
+    for (const auto& note : track.notes) {
+      ++total_count;
+      if (note.duration % kTicksPerBeat != 0) {
+        ++articulated_count;
+      }
+    }
+  }
+
+  EXPECT_GT(total_count, 0u) << "Chaconne should produce notes";
+  EXPECT_GT(articulated_count, 0u)
+      << "Articulation should modify at least some note durations in chaconne";
+}
+
+TEST(GeneratorArticulationTest, ArticulationPreservesNonZeroDurations) {
+  // After articulation, no note should have zero duration (the minimum
+  // articulated duration floor of 60 ticks should prevent this).
+  GeneratorConfig config = makeTestConfig(42);
+  config.form = FormType::Fugue;
+  GeneratorResult result = generate(config);
+
+  ASSERT_TRUE(result.success);
+
+  for (const auto& track : result.tracks) {
+    for (const auto& note : track.notes) {
+      EXPECT_GT(note.duration, 0u)
+          << "Note at tick " << note.start_tick
+          << " has zero duration after articulation";
+    }
+  }
+}
+
+TEST(GeneratorArticulationTest, FailedGenerationNotArticulated) {
+  // A failed generation should return an empty tracks list and no crash.
+  GeneratorConfig config = makeTestConfig(42);
+  config.form = FormType::TrioSonata;  // Stub -- always fails.
+  GeneratorResult result = generate(config);
+
+  EXPECT_FALSE(result.success);
+  EXPECT_TRUE(result.tracks.empty());
+}
+
 }  // namespace
 }  // namespace bach

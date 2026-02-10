@@ -2,6 +2,9 @@
 
 #include "ornament/ornament_engine.h"
 
+#include <algorithm>
+
+#include "analysis/counterpoint_analyzer.h"
 #include "harmony/chord_types.h"
 #include "harmony/harmonic_timeline.h"
 #include "ornament/appoggiatura.h"
@@ -232,6 +235,171 @@ std::vector<NoteEvent> applyOrnaments(const std::vector<NoteEvent>& notes,
   }
 
   return result;
+}
+
+std::vector<NoteEvent> applyOrnaments(const std::vector<NoteEvent>& notes,
+                                      const OrnamentContext& context,
+                                      const std::vector<std::vector<NoteEvent>>& all_voice_notes) {
+  // Apply ornaments using the base overload.
+  auto result = applyOrnaments(notes, context);
+
+  // If no multi-voice context provided, skip verification (backward compatible).
+  if (all_voice_notes.empty()) {
+    return result;
+  }
+
+  // Determine number of voices from all_voice_notes.
+  auto num_voices = static_cast<uint8_t>(all_voice_notes.size());
+  if (num_voices < 2) {
+    return result;  // No cross-voice checking possible with fewer than 2 voices.
+  }
+
+  // Build all_voices with the ornamented voice substituted in for counterpoint checking.
+  // Keep original notes for reversion on violation.
+  verifyOrnamentCounterpoint(result, notes, all_voice_notes, num_voices);
+
+  return result;
+}
+
+void verifyOrnamentCounterpoint(std::vector<NoteEvent>& notes,
+                                const std::vector<NoteEvent>& original_notes,
+                                const std::vector<std::vector<NoteEvent>>& all_voices,
+                                uint8_t num_voices) {
+  if (num_voices < 2 || original_notes.empty() || notes.empty()) {
+    return;
+  }
+
+  // Determine which voice is being ornamented.
+  VoiceId ornamented_voice = notes[0].voice;
+
+  // Find ornament regions: ranges of ticks where notes differ from original_notes.
+  // An ornament region is the tick range of an original note that was expanded.
+  struct OrnamentRegion {
+    Tick start_tick = 0;
+    Tick end_tick = 0;
+    size_t orig_idx = 0;      // Index into original_notes.
+    size_t result_begin = 0;  // Index range in the result notes vector.
+    size_t result_end = 0;
+  };
+
+  std::vector<OrnamentRegion> regions;
+
+  // Walk through original notes and match against result notes.
+  // Original notes are 1-to-1 or 1-to-many in the result.
+  size_t result_pos = 0;
+  for (size_t orig_idx = 0; orig_idx < original_notes.size(); ++orig_idx) {
+    const auto& orig = original_notes[orig_idx];
+    Tick orig_end = orig.start_tick + orig.duration;
+
+    // Find all result notes that fall within this original note's tick range.
+    size_t region_begin = result_pos;
+    while (result_pos < notes.size() && notes[result_pos].start_tick < orig_end) {
+      ++result_pos;
+    }
+    size_t region_end = result_pos;
+
+    // Check if this region differs from the original (ornament was applied).
+    bool is_ornamented = false;
+    if (region_end - region_begin != 1) {
+      is_ornamented = true;  // Expanded to multiple notes.
+    } else if (region_begin < notes.size() && notes[region_begin].pitch != orig.pitch) {
+      is_ornamented = true;  // Pitch changed.
+    }
+
+    if (is_ornamented) {
+      OrnamentRegion region;
+      region.start_tick = orig.start_tick;
+      region.end_tick = orig_end;
+      region.orig_idx = orig_idx;
+      region.result_begin = region_begin;
+      region.result_end = region_end;
+      regions.push_back(region);
+    }
+  }
+
+  if (regions.empty()) {
+    return;  // No ornaments applied, nothing to verify.
+  }
+
+  // For each ornament region, build a local snapshot and check counterpoint.
+  // Context window: ornament tick range +/- 2 beats for surrounding context.
+  constexpr Tick kContextWindow = kTicksPerBeat * 2;
+
+  // Process regions in reverse so index adjustments don't invalidate later regions.
+  for (auto region_iter = regions.rbegin(); region_iter != regions.rend(); ++region_iter) {
+    const auto& region = *region_iter;
+
+    Tick window_start = (region.start_tick > kContextWindow)
+                            ? region.start_tick - kContextWindow
+                            : 0;
+    Tick window_end = region.end_tick + kContextWindow;
+
+    // Build a flat note list for the local window across all voices.
+    std::vector<NoteEvent> local_notes;
+
+    for (uint8_t vid = 0; vid < num_voices; ++vid) {
+      if (vid == ornamented_voice) {
+        // Use the ornamented notes for this voice.
+        for (const auto& note : notes) {
+          if (note.start_tick + note.duration > window_start &&
+              note.start_tick < window_end) {
+            local_notes.push_back(note);
+          }
+        }
+      } else {
+        // Use the original voice notes.
+        for (const auto& note : all_voices[vid]) {
+          if (note.start_tick + note.duration > window_start &&
+              note.start_tick < window_end) {
+            local_notes.push_back(note);
+          }
+        }
+      }
+    }
+
+    // Also build a reference local snapshot using the original (unornamented) notes.
+    std::vector<NoteEvent> reference_notes;
+    for (uint8_t vid = 0; vid < num_voices; ++vid) {
+      if (vid == ornamented_voice) {
+        for (const auto& note : original_notes) {
+          if (note.start_tick + note.duration > window_start &&
+              note.start_tick < window_end) {
+            reference_notes.push_back(note);
+          }
+        }
+      } else {
+        for (const auto& note : all_voices[vid]) {
+          if (note.start_tick + note.duration > window_start &&
+              note.start_tick < window_end) {
+            reference_notes.push_back(note);
+          }
+        }
+      }
+    }
+
+    // Count violations with ornament vs without ornament.
+    uint32_t ornamented_parallels = countParallelPerfect(local_notes, num_voices);
+    uint32_t ornamented_crossings = countVoiceCrossings(local_notes, num_voices);
+    uint32_t reference_parallels = countParallelPerfect(reference_notes, num_voices);
+    uint32_t reference_crossings = countVoiceCrossings(reference_notes, num_voices);
+
+    // If the ornament introduced NEW violations (more than the original had), revert.
+    bool has_new_violations = (ornamented_parallels > reference_parallels) ||
+                              (ornamented_crossings > reference_crossings);
+
+    if (has_new_violations) {
+      // Revert: replace the ornament region with the original note.
+      const auto& orig = original_notes[region.orig_idx];
+      auto erase_begin = notes.begin() +
+                         static_cast<std::ptrdiff_t>(region.result_begin);
+      auto erase_end = notes.begin() +
+                       static_cast<std::ptrdiff_t>(region.result_end);
+      notes.erase(erase_begin, erase_end);
+      notes.insert(notes.begin() +
+                       static_cast<std::ptrdiff_t>(region.result_begin),
+                   orig);
+    }
+  }
 }
 
 }  // namespace bach

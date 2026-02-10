@@ -25,7 +25,8 @@ enum class BachNoteSource : uint8_t {
   GroundBass,       // Ground bass (immutable)
   CollisionAvoid,   // Modified by collision avoidance
   PostProcess,      // Modified by post-processing
-  ChromaticPassing  // Chromatic passing tone between chord tones
+  ChromaticPassing, // Chromatic passing tone between chord tones
+  FalseEntry        // Truncated subject opening that diverges to free counterpoint
 };
 
 /// @brief Convert BachNoteSource to human-readable string.

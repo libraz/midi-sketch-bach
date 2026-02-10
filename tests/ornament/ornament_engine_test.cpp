@@ -4,6 +4,7 @@
 
 #include <gtest/gtest.h>
 
+#include "analysis/counterpoint_analyzer.h"
 #include "core/basic_types.h"
 
 namespace bach {
@@ -500,6 +501,237 @@ TEST(OrnamentTypeSelectionTest, WeakBeatFallsBackToPralltrillerIfNoMordent) {
   config.enable_pralltriller = true;
 
   EXPECT_EQ(selectOrnamentType(note, config), OrnamentType::Pralltriller);
+}
+
+// ---------------------------------------------------------------------------
+// verifyOrnamentCounterpoint - No violation
+// ---------------------------------------------------------------------------
+
+TEST(VerifyOrnamentCounterpointTest, NoViolationPassesThrough) {
+  // Voice 0: soprano at C5 (72), voice 1: alto at E4 (64).
+  // A trill on voice 0 between C5 and D5 should not create parallel 5ths
+  // or voice crossings with the alto at E4.
+  std::vector<NoteEvent> original_notes = {
+      makeNote(0, 72, kTicksPerBeat, 0),  // C5 in voice 0
+  };
+
+  // Simulate a trill: C5 -> D5 -> C5 -> D5 (ornament expansion).
+  std::vector<NoteEvent> ornamented_notes;
+  Tick sub_dur = kTicksPerBeat / 4;
+  for (int idx = 0; idx < 4; ++idx) {
+    uint8_t pitch = (idx % 2 == 0) ? 72 : 74;  // C5, D5 alternation
+    ornamented_notes.push_back(
+        makeNote(static_cast<Tick>(idx) * sub_dur, pitch, sub_dur, 0));
+  }
+
+  // Voice 1: sustained E4 (well below voice 0, no crossing possible).
+  std::vector<NoteEvent> voice1_notes = {
+      makeNote(0, 64, kTicksPerBeat, 1),  // E4
+  };
+
+  std::vector<std::vector<NoteEvent>> all_voices = {original_notes, voice1_notes};
+
+  auto before_size = ornamented_notes.size();
+  verifyOrnamentCounterpoint(ornamented_notes, original_notes, all_voices, 2);
+
+  // No violations, so ornamented notes should remain unchanged.
+  EXPECT_EQ(ornamented_notes.size(), before_size);
+  // Verify the trill pitches are intact.
+  EXPECT_EQ(ornamented_notes[0].pitch, 72);
+  EXPECT_EQ(ornamented_notes[1].pitch, 74);
+  EXPECT_EQ(ornamented_notes[2].pitch, 72);
+  EXPECT_EQ(ornamented_notes[3].pitch, 74);
+}
+
+// ---------------------------------------------------------------------------
+// verifyOrnamentCounterpoint - Parallel fifths reverted
+// ---------------------------------------------------------------------------
+
+TEST(VerifyOrnamentCounterpointTest, ParallelFifthsReverted) {
+  // Set up a scenario where an ornament creates parallel 5ths.
+  // Voice 0 original: G4 (67) on beat 0, then C5 (72) on beat 1.
+  // Voice 1: C4 (60) on beat 0, then F4 (65) on beat 1.
+  // Interval beat 0: G4-C4 = 7 semitones = P5.
+  // If ornament changes voice 0 beat 1 to F5 (77), interval = F5-F4 = 12 = P8.
+  // That's not parallel 5ths. Let's construct a clearer case.
+  //
+  // Voice 0 original: C5 (72) on beat 0, then D5 (74) on beat 1.
+  // Voice 1: F4 (65) on beat 0, then G4 (67) on beat 1.
+  // Beat 0: C5-F4 = 7 = P5. Beat 1: D5-G4 = 7 = P5. Both move up by 2.
+  // This IS parallel 5ths. If the ornament on voice 0 changes the note at
+  // beat 1 to D5 (from some other pitch), the ornament creates the parallel.
+  //
+  // Original voice 0: C5 on beat 0, then A4 (69) on beat 1 (no parallel 5ths).
+  // Beat 0: C5-F4 = 7 (P5). Beat 1: A4-G4 = 2 (not perfect).
+  // Ornament on beat 1 replaces A4 with D5 (74) -> creates P5 parallel.
+
+  std::vector<NoteEvent> original_v0 = {
+      makeNote(0, 72, kTicksPerBeat, 0),           // C5 at beat 0
+      makeNote(kTicksPerBeat, 69, kTicksPerBeat, 0),  // A4 at beat 1
+  };
+
+  // Ornament changes the second note from A4 to D5 (simulating an ornament
+  // that shifts pitch into a parallel 5th).
+  std::vector<NoteEvent> ornamented_v0 = {
+      makeNote(0, 72, kTicksPerBeat, 0),              // C5 unchanged
+      makeNote(kTicksPerBeat, 74, kTicksPerBeat, 0),  // D5 (ornament result)
+  };
+
+  std::vector<NoteEvent> voice1 = {
+      makeNote(0, 65, kTicksPerBeat, 1),           // F4 at beat 0
+      makeNote(kTicksPerBeat, 67, kTicksPerBeat, 1),  // G4 at beat 1
+  };
+
+  std::vector<std::vector<NoteEvent>> all_voices = {original_v0, voice1};
+
+  // Verify: the ornamented version should have parallel 5ths.
+  std::vector<NoteEvent> check_notes;
+  for (const auto& note : ornamented_v0) check_notes.push_back(note);
+  for (const auto& note : voice1) check_notes.push_back(note);
+  ASSERT_GT(countParallelPerfect(check_notes, 2), 0u);
+
+  // Verify: the original version should NOT have parallel 5ths.
+  std::vector<NoteEvent> ref_notes;
+  for (const auto& note : original_v0) ref_notes.push_back(note);
+  for (const auto& note : voice1) ref_notes.push_back(note);
+  ASSERT_EQ(countParallelPerfect(ref_notes, 2), 0u);
+
+  verifyOrnamentCounterpoint(ornamented_v0, original_v0, all_voices, 2);
+
+  // The second note should be reverted to the original A4 (69).
+  ASSERT_EQ(ornamented_v0.size(), 2u);
+  EXPECT_EQ(ornamented_v0[0].pitch, 72);  // First note unchanged.
+  EXPECT_EQ(ornamented_v0[1].pitch, 69);  // Reverted to original A4.
+}
+
+// ---------------------------------------------------------------------------
+// verifyOrnamentCounterpoint - Voice crossing reverted
+// ---------------------------------------------------------------------------
+
+TEST(VerifyOrnamentCounterpointTest, VoiceCrossingReverted) {
+  // Voice 0 (soprano) original: E5 (76) -- well above voice 1.
+  // Voice 1 (alto): C5 (72).
+  // Ornament on voice 0 creates a sub-note at B3 (59), which crosses below
+  // voice 1's C5 (72).
+
+  std::vector<NoteEvent> original_v0 = {
+      makeNote(0, 76, kTicksPerBeat, 0),  // E5
+  };
+
+  // Ornament: two sub-notes, first dips below the alto.
+  std::vector<NoteEvent> ornamented_v0 = {
+      makeNote(0, 59, kTicksPerBeat / 2, 0),                  // B3 (below alto)
+      makeNote(kTicksPerBeat / 2, 76, kTicksPerBeat / 2, 0),  // E5 (original)
+  };
+
+  std::vector<NoteEvent> voice1 = {
+      makeNote(0, 72, kTicksPerBeat, 1),  // C5
+  };
+
+  std::vector<std::vector<NoteEvent>> all_voices = {original_v0, voice1};
+
+  // Verify: ornamented version should have voice crossing.
+  std::vector<NoteEvent> check_notes;
+  for (const auto& note : ornamented_v0) check_notes.push_back(note);
+  for (const auto& note : voice1) check_notes.push_back(note);
+  ASSERT_GT(countVoiceCrossings(check_notes, 2), 0u);
+
+  // Verify: original version should NOT have voice crossing.
+  std::vector<NoteEvent> ref_notes;
+  for (const auto& note : original_v0) ref_notes.push_back(note);
+  for (const auto& note : voice1) ref_notes.push_back(note);
+  ASSERT_EQ(countVoiceCrossings(ref_notes, 2), 0u);
+
+  verifyOrnamentCounterpoint(ornamented_v0, original_v0, all_voices, 2);
+
+  // Should revert to original single note.
+  ASSERT_EQ(ornamented_v0.size(), 1u);
+  EXPECT_EQ(ornamented_v0[0].pitch, 76);  // Reverted to E5.
+  EXPECT_EQ(ornamented_v0[0].duration, kTicksPerBeat);
+}
+
+// ---------------------------------------------------------------------------
+// verifyOrnamentCounterpoint - Empty all_voices skips check
+// ---------------------------------------------------------------------------
+
+TEST(VerifyOrnamentCounterpointTest, EmptyAllVoicesSkipsCheck) {
+  std::vector<NoteEvent> original_notes = {
+      makeNote(0, 72, kTicksPerBeat, 0),
+  };
+
+  // Even if the ornament is "bad", empty all_voices means no verification.
+  std::vector<NoteEvent> ornamented_notes = {
+      makeNote(0, 59, kTicksPerBeat / 2, 0),
+      makeNote(kTicksPerBeat / 2, 72, kTicksPerBeat / 2, 0),
+  };
+
+  std::vector<std::vector<NoteEvent>> empty_voices;
+
+  auto before_size = ornamented_notes.size();
+  verifyOrnamentCounterpoint(ornamented_notes, original_notes, empty_voices, 0);
+
+  // Notes remain unchanged because verification was skipped.
+  EXPECT_EQ(ornamented_notes.size(), before_size);
+}
+
+// ---------------------------------------------------------------------------
+// applyOrnaments - Backward compatible (no all_voice_notes)
+// ---------------------------------------------------------------------------
+
+TEST(OrnamentEngineTest, ApplyOrnamentsBackwardCompatible) {
+  // The existing single-voice API must still work the same way.
+  std::vector<NoteEvent> notes = {
+      makeNote(0, 60, kTicksPerBeat, 0),
+      makeNote(kTicksPerBeat, 62, kTicksPerBeat, 0),
+  };
+
+  auto ctx = makeContext(VoiceRole::Respond, 42, 1.0f);
+
+  // Two-argument overload (original API).
+  auto result_legacy = applyOrnaments(notes, ctx);
+
+  // Three-argument overload with empty all_voice_notes (should behave identically).
+  std::vector<std::vector<NoteEvent>> empty_voices;
+  auto result_new = applyOrnaments(notes, ctx, empty_voices);
+
+  ASSERT_EQ(result_legacy.size(), result_new.size());
+  for (size_t idx = 0; idx < result_legacy.size(); ++idx) {
+    EXPECT_EQ(result_legacy[idx].pitch, result_new[idx].pitch);
+    EXPECT_EQ(result_legacy[idx].start_tick, result_new[idx].start_tick);
+    EXPECT_EQ(result_legacy[idx].duration, result_new[idx].duration);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// applyOrnaments with all_voice_notes - Reverts violating ornaments
+// ---------------------------------------------------------------------------
+
+TEST(OrnamentEngineTest, ApplyOrnamentsWithCounterpointVerification) {
+  // Create a scenario where voice 0 and voice 1 are in a valid position,
+  // and verify that the overload with all_voice_notes doesn't break valid
+  // ornaments while still providing the verification mechanism.
+  std::vector<NoteEvent> notes_v0;
+  for (uint32_t idx = 0; idx < 4; ++idx) {
+    notes_v0.push_back(makeNote(idx * kTicksPerBeat, 72, kTicksPerBeat, 0));
+  }
+
+  std::vector<NoteEvent> notes_v1;
+  for (uint32_t idx = 0; idx < 4; ++idx) {
+    notes_v1.push_back(makeNote(idx * kTicksPerBeat, 48, kTicksPerBeat, 1));
+  }
+
+  auto ctx = makeContext(VoiceRole::Respond, 42, 1.0f);
+  std::vector<std::vector<NoteEvent>> all_voices = {notes_v0, notes_v1};
+
+  auto result = applyOrnaments(notes_v0, ctx, all_voices);
+
+  // Result should not be empty (ornaments were applied or passed through).
+  EXPECT_FALSE(result.empty());
+
+  // All notes should still have voice 0.
+  for (const auto& note : result) {
+    EXPECT_EQ(note.voice, 0);
+  }
 }
 
 }  // namespace

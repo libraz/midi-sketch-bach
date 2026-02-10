@@ -108,6 +108,60 @@ size_t TonalPlan::modulationCount() const {
   return modulations.size();
 }
 
+HarmonicTimeline TonalPlan::toDetailedTimeline(Tick total_duration) const {
+  HarmonicTimeline timeline;
+  if (total_duration == 0) return timeline;
+
+  // Build list of region boundaries: each modulation starts a new key region.
+  struct Region {
+    Key key;
+    Tick start;
+    Tick end;
+  };
+  std::vector<Region> regions;
+
+  if (modulations.empty()) {
+    regions.push_back({home_key, 0, total_duration});
+  } else {
+    for (size_t idx = 0; idx < modulations.size(); ++idx) {
+      Tick region_start = modulations[idx].tick;
+      Tick region_end = (idx + 1 < modulations.size()) ? modulations[idx + 1].tick
+                                                        : total_duration;
+      if (region_end > region_start) {
+        regions.push_back({modulations[idx].target_key, region_start, region_end});
+      }
+    }
+    // If first modulation doesn't start at tick 0, add home key region at front.
+    if (!modulations.empty() && modulations[0].tick > 0) {
+      regions.insert(regions.begin(), {home_key, 0, modulations[0].tick});
+    }
+  }
+
+  // For each key region, create a beat-resolution progression and merge.
+  for (const auto& region : regions) {
+    Tick region_duration = region.end - region.start;
+    if (region_duration == 0) continue;
+
+    KeySignature key_sig;
+    key_sig.tonic = region.key;
+    key_sig.is_minor = is_minor;
+
+    HarmonicTimeline region_timeline = HarmonicTimeline::createProgression(
+        key_sig, region_duration, HarmonicResolution::Beat,
+        ProgressionType::CircleOfFifths);
+
+    // Offset region timeline events to the region start and merge.
+    for (const auto& ev : region_timeline.events()) {
+      HarmonicEvent offset_ev = ev;
+      offset_ev.tick += region.start;
+      offset_ev.end_tick += region.start;
+      timeline.addEvent(offset_ev);
+    }
+  }
+
+  return timeline;
+}
+
 HarmonicTimeline TonalPlan::toHarmonicTimeline(Tick total_duration) const {
   HarmonicTimeline timeline;
   if (total_duration == 0) return timeline;

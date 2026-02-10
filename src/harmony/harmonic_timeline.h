@@ -81,6 +81,11 @@ class HarmonicTimeline {
   /// @return Const reference to the internal event vector.
   const std::vector<HarmonicEvent>& events() const;
 
+  /// @brief Get mutable access to events for post-construction annotation.
+  /// @return Mutable reference to the internal event vector.
+  /// @note Use only for annotation (e.g., rhythm_factor). Do not add/remove events.
+  std::vector<HarmonicEvent>& mutableEvents();
+
   /// @brief Get the total duration covered by the timeline in ticks.
   /// @return The end_tick of the last event, or 0 if empty.
   Tick totalDuration() const;

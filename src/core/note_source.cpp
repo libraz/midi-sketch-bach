@@ -21,6 +21,7 @@ const char* bachNoteSourceToString(BachNoteSource source) {
     case BachNoteSource::CollisionAvoid:   return "collision_avoid";
     case BachNoteSource::PostProcess:      return "post_process";
     case BachNoteSource::ChromaticPassing: return "chromatic_passing";
+    case BachNoteSource::FalseEntry:      return "false_entry";
   }
   return "unknown";
 }
@@ -53,6 +54,7 @@ ProtectionLevel getProtectionLevel(BachNoteSource source) {
     case BachNoteSource::FugueAnswer:
     case BachNoteSource::Countersubject:
     case BachNoteSource::PedalPoint:
+    case BachNoteSource::FalseEntry:
       return ProtectionLevel::Structural;
 
     case BachNoteSource::EpisodeMaterial:

@@ -157,7 +157,7 @@ TEST(MidiReaderTest, RoundTripSingleTrackSingleNote) {
   std::vector<Track> tracks = {track};
 
   MidiWriter writer;
-  writer.build(tracks, 120, Key::C);
+  writer.build(tracks, {{0, 120}}, Key::C);
   std::vector<uint8_t> midi_bytes = writer.toBytes();
 
   // Read it back.
@@ -212,7 +212,7 @@ TEST(MidiReaderTest, RoundTripMultipleNotes) {
   track.notes = {note_c4, note_e4, note_g4};
 
   MidiWriter writer;
-  writer.build({track}, 120, Key::C);
+  writer.build({track}, {{0, 120}}, Key::C);
   std::vector<uint8_t> midi_bytes = writer.toBytes();
 
   MidiReader reader;
@@ -245,7 +245,7 @@ TEST(MidiReaderTest, RoundTripPreservesTempo) {
   constexpr uint16_t kTestBpm = 96;
 
   MidiWriter writer;
-  writer.build({track}, kTestBpm, Key::C);
+  writer.build({track}, {{0, kTestBpm}}, Key::C);
   std::vector<uint8_t> midi_bytes = writer.toBytes();
 
   MidiReader reader;
@@ -272,7 +272,7 @@ TEST(MidiReaderTest, RoundTripWithMetadata) {
   std::string metadata = R"({"form":"fugue","seed":42})";
 
   MidiWriter writer;
-  writer.build({track}, 120, Key::C, metadata);
+  writer.build({track}, {{0, 120}}, Key::C, metadata);
   std::vector<uint8_t> midi_bytes = writer.toBytes();
 
   MidiReader reader;
@@ -311,7 +311,7 @@ TEST(MidiReaderTest, RoundTripMultipleTracks) {
   track_pedal.notes.push_back(bass_note);
 
   MidiWriter writer;
-  writer.build({track_great, track_pedal}, 120, Key::C);
+  writer.build({track_great, track_pedal}, {{0, 120}}, Key::C);
   std::vector<uint8_t> midi_bytes = writer.toBytes();
 
   MidiReader reader;

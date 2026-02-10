@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "core/basic_types.h"
+#include "core/note_source.h"
 #include "core/pitch_utils.h"
 #include "harmony/chord_types.h"
 #include "harmony/harmonic_event.h"
@@ -662,6 +663,360 @@ TEST(DissonancePhase4, MinorKey_LeadingToneNowDiatonic) {
   };
   auto result = detectNonDiatonicNotes(notes, ks);
   EXPECT_EQ(result.size(), 0u) << "G# should be diatonic in A minor (harmonic/melodic)";
+}
+
+// ===========================================================================
+// Phase A-2: Weighted density
+// ===========================================================================
+
+TEST(WeightedDensity, HighOnly) {
+  // 4 high-severity events over 4 beats -> weighted = 4/4 = 1.0.
+  auto tl = makeCMajorTimeline(1);
+  KeySignature ks = {Key::C, false};
+  // 4 non-diatonic notes on strong beats (High severity).
+  std::vector<NoteEvent> notes = {
+      qn(0, 61, 0),                  // C#4 (strong beat -> High)
+      qn(kTicksPerBeat * 2, 66, 0),  // F#4 (strong beat -> High)
+  };
+  auto result = analyzeSoloStringDissonance(notes, tl, ks);
+  // All events should be High (strong beat, non-diatonic + non-chord-tone).
+  EXPECT_GT(result.summary.weighted_density_per_beat, 0.0f);
+  // Weighted >= raw since High=1.0 and these are all High.
+  EXPECT_GE(result.summary.weighted_density_per_beat, result.summary.density_per_beat * 0.5f);
+}
+
+TEST(WeightedDensity, MixedSeverity) {
+  // Mix of high and low severity events.
+  auto tl = makeCMajorTimeline(2);
+  KeySignature ks = {Key::C, false};
+  // Strong beat non-diatonic (High) + weak beat passing tone (Low).
+  std::vector<NoteEvent> notes = {
+      qn(0, 66, 0),                  // F#4 on beat 0 (High)
+      qn(kTicksPerBeat * 0, 60, 1),  // C4 (chord tone, no event)
+      qn(kTicksPerBeat * 1, 62, 1),  // D4 (passing, Low)
+      qn(kTicksPerBeat * 2, 64, 1),  // E4 (chord tone, no event)
+  };
+  auto result = analyzeSoloStringDissonance(notes, tl, ks);
+  // Weighted should be less than raw since Low events contribute 0.
+  EXPECT_LT(result.summary.weighted_density_per_beat, result.summary.density_per_beat);
+}
+
+TEST(WeightedDensity, AllLow) {
+  auto tl = makeCMajorTimeline(2);
+  KeySignature ks = {Key::C, false};
+  // Passing tone on weak beat -> Low severity for both NCT and NonDiatonic.
+  // Use beats 1-3 (all weak) to avoid strong-beat High severity.
+  std::vector<NoteEvent> notes = {
+      qn(kTicksPerBeat * 1, 60, 0),  // C4 (chord tone)
+      qn(kTicksPerBeat * 3, 61, 0),  // C#4 (weak beat, passing tone between C4 and D4)
+      qn(kTicksPerBar + kTicksPerBeat * 1, 62, 0),  // D4 (weak beat, continuation)
+  };
+  auto result = analyzeSoloStringDissonance(notes, tl, ks);
+  // All non-chord/non-diatonic events should be Low severity.
+  for (const auto& ev : result.events) {
+    EXPECT_NE(ev.severity, DissonanceSeverity::High)
+        << "All events should be Low or Medium, got High at tick " << ev.tick;
+  }
+  EXPECT_LT(result.summary.weighted_density_per_beat, result.summary.density_per_beat);
+}
+
+// ===========================================================================
+// Phase B: Escape tone and anticipation detection
+// ===========================================================================
+
+TEST(DissonancePhase2, EscapeTone_StepLeap_DowngradedToLow) {
+  auto tl = makeCMajorTimeline(2);
+  // C4 -> D4 -> G4: D4 is escape tone (step approach, leap departure).
+  std::vector<NoteEvent> notes = {
+      qn(kTicksPerBeat * 0, 60, 0),  // C4 (chord tone)
+      qn(kTicksPerBeat * 1, 62, 0),  // D4 (escape tone, weak beat)
+      qn(kTicksPerBeat * 2, 67, 0),  // G4 (chord tone, leap from D4)
+  };
+  auto result = detectNonChordTones(notes, tl);
+  // D4 should be detected as escape tone with Low severity.
+  bool found_low_d = false;
+  for (const auto& ev : result) {
+    if (ev.pitch == 62 && ev.severity == DissonanceSeverity::Low) {
+      found_low_d = true;
+    }
+  }
+  EXPECT_TRUE(found_low_d) << "Escape tone D4 should be Low severity";
+}
+
+TEST(DissonancePhase2, NonEscapeTone_LeapLeap_StaysMedium) {
+  auto tl = makeCMajorTimeline(2);
+  // G4 -> D4 -> A3: D4 approached by leap, left by leap -- NOT escape tone.
+  // D4 is not a chord tone of C major (I chord).
+  std::vector<NoteEvent> notes = {
+      qn(kTicksPerBeat * 0, 67, 0),  // G4 (chord tone)
+      qn(kTicksPerBeat * 1, 62, 0),  // D4 (leap approach, leap departure)
+      qn(kTicksPerBeat * 2, 57, 0),  // A3 (non-chord-tone)
+  };
+  auto result = detectNonChordTones(notes, tl);
+  // D4 should NOT be downgraded (leap-leap is not an escape tone pattern).
+  bool found_medium_d = false;
+  for (const auto& ev : result) {
+    if (ev.pitch == 62 && ev.severity == DissonanceSeverity::Medium) {
+      found_medium_d = true;
+    }
+  }
+  EXPECT_TRUE(found_medium_d) << "Leap-leap D4 should remain Medium severity";
+}
+
+TEST(DissonancePhase2, Anticipation_ChordToneOfNextChord_DowngradedToLow) {
+  // Build a 2-bar timeline: bar 0 = I (C major), bar 1 = V (G major).
+  auto tl = makeCMajorTimeline(2);
+  // D4 on beat 3 of bar 0: D is NOT a chord tone of I (C, E, G)
+  // but IS a chord tone of V (G, B, D) which comes next.
+  std::vector<NoteEvent> notes = {
+      qn(kTicksPerBeat * 3, 62, 0),  // D4 (anticipation of V chord)
+  };
+  auto result = detectNonChordTones(notes, tl);
+  // D4 should be downgraded to Low as anticipation.
+  bool found_low_d = false;
+  for (const auto& ev : result) {
+    if (ev.pitch == 62 && ev.severity == DissonanceSeverity::Low) {
+      found_low_d = true;
+    }
+  }
+  EXPECT_TRUE(found_low_d) << "Anticipation D4 should be Low severity";
+}
+
+TEST(DissonancePhase2, Appoggiatura_StrongBeatResolvesToChordTone_DowngradedToLow) {
+  auto tl = makeCMajorTimeline(2);
+  // D4 on beat 0 (strong beat): not a chord tone of I (C, E, G).
+  // Resolves by step down to C4 (chord tone) = appoggiatura.
+  std::vector<NoteEvent> notes = {
+      qn(0, 62, 0),               // D4 (appoggiatura, strong beat)
+      qn(kTicksPerBeat, 60, 0),   // C4 (resolution, chord tone)
+  };
+  auto result = detectNonChordTones(notes, tl);
+  // D4 should be downgraded from High to Low (recognized appoggiatura).
+  bool found_low_d = false;
+  for (const auto& ev : result) {
+    if (ev.pitch == 62 && ev.severity == DissonanceSeverity::Low) {
+      found_low_d = true;
+    }
+  }
+  EXPECT_TRUE(found_low_d) << "Appoggiatura D4 should be Low severity";
+}
+
+TEST(DissonancePhase2, NonAppoggiatura_StrongBeatLeapResolution_StaysHigh) {
+  auto tl = makeCMajorTimeline(2);
+  // D4 on beat 0 (strong beat): not a chord tone.
+  // Followed by G4 (leap, not stepwise) = NOT appoggiatura.
+  std::vector<NoteEvent> notes = {
+      qn(0, 62, 0),               // D4 (strong beat)
+      qn(kTicksPerBeat, 67, 0),   // G4 (leap resolution)
+  };
+  auto result = detectNonChordTones(notes, tl);
+  bool found_high_d = false;
+  for (const auto& ev : result) {
+    if (ev.pitch == 62 && ev.severity == DissonanceSeverity::High) {
+      found_high_d = true;
+    }
+  }
+  EXPECT_TRUE(found_high_d) << "Non-appoggiatura D4 should remain High severity";
+}
+
+// ===========================================================================
+// Phase A-1: Bar-resolution timeline verification
+// ===========================================================================
+
+TEST(WeightedDensity, JsonContainsWeightedField) {
+  auto tl = makeCMajorTimeline(1);
+  KeySignature ks = {Key::C, false};
+  std::vector<NoteEvent> notes = {qn(0, 61, 0)};
+  auto result = analyzeSoloStringDissonance(notes, tl, ks);
+  std::string json = result.toJson();
+  EXPECT_NE(json.find("\"weighted_density_per_beat\""), std::string::npos);
+}
+
+TEST(WeightedDensity, TextContainsWeightedField) {
+  auto tl = makeCMajorTimeline(1);
+  KeySignature ks = {Key::C, false};
+  std::vector<NoteEvent> notes = {qn(0, 61, 0)};
+  auto result = analyzeSoloStringDissonance(notes, tl, ks);
+  std::string text = result.toTextSummary("Solo String", 1);
+  EXPECT_NE(text.find("weighted:"), std::string::npos);
+}
+
+// ===========================================================================
+// Helper for sourced notes
+// ===========================================================================
+
+/// @brief Create a quarter-note with a specific BachNoteSource.
+NoteEvent qn_src(Tick tick, uint8_t pitch, VoiceId voice, BachNoteSource src) {
+  NoteEvent ev = {tick, kTicksPerBeat, pitch, 80, voice};
+  ev.source = src;
+  return ev;
+}
+
+/// @brief Build a beat-resolution timeline: each beat gets its own chord.
+/// Bar 0: beat 0 = I, beat 1 = vi, beat 2 = IV, beat 3 = V.
+/// Bar 1: same pattern.
+HarmonicTimeline makeBeatResolutionTimeline(int num_bars) {
+  HarmonicTimeline tl;
+  for (int bar = 0; bar < num_bars; ++bar) {
+    Tick bar_start = static_cast<Tick>(bar) * kTicksPerBar;
+
+    // Beat 0: I (C, E, G)
+    {
+      HarmonicEvent ev;
+      ev.tick = bar_start;
+      ev.end_tick = bar_start + kTicksPerBeat;
+      ev.key = Key::C;
+      ev.is_minor = false;
+      ev.chord.degree = ChordDegree::I;
+      ev.chord.quality = ChordQuality::Major;
+      ev.chord.root_pitch = 60;
+      tl.addEvent(ev);
+    }
+    // Beat 1: vi (A, C, E)
+    {
+      HarmonicEvent ev;
+      ev.tick = bar_start + kTicksPerBeat;
+      ev.end_tick = bar_start + kTicksPerBeat * 2;
+      ev.key = Key::C;
+      ev.is_minor = false;
+      ev.chord.degree = ChordDegree::vi;
+      ev.chord.quality = ChordQuality::Minor;
+      ev.chord.root_pitch = 69;
+      tl.addEvent(ev);
+    }
+    // Beat 2: IV (F, A, C)
+    {
+      HarmonicEvent ev;
+      ev.tick = bar_start + kTicksPerBeat * 2;
+      ev.end_tick = bar_start + kTicksPerBeat * 3;
+      ev.key = Key::C;
+      ev.is_minor = false;
+      ev.chord.degree = ChordDegree::IV;
+      ev.chord.quality = ChordQuality::Major;
+      ev.chord.root_pitch = 65;
+      tl.addEvent(ev);
+    }
+    // Beat 3: V (G, B, D)
+    {
+      HarmonicEvent ev;
+      ev.tick = bar_start + kTicksPerBeat * 3;
+      ev.end_tick = bar_start + kTicksPerBar;
+      ev.key = Key::C;
+      ev.is_minor = false;
+      ev.chord.degree = ChordDegree::V;
+      ev.chord.quality = ChordQuality::Major;
+      ev.chord.root_pitch = 67;
+      tl.addEvent(ev);
+    }
+  }
+  return tl;
+}
+
+// ===========================================================================
+// Phase F: Dual-timeline NCT downgrade
+// ===========================================================================
+
+TEST(DualTimeline, ChordToneOfGeneration_DowngradedToLow) {
+  // Bar-level timeline: I chord all bar (C, E, G).
+  // Beat-level generation_timeline: beat 1 = vi chord (A, C, E).
+  // A4 (MIDI 69) on beat 1: NCT of I (bar-level) but chord tone of vi (gen).
+  // Should be downgraded to Low.
+  auto bar_tl = makeCMajorTimeline(2);
+  auto gen_tl = makeBeatResolutionTimeline(2);
+
+  std::vector<NoteEvent> notes = {
+      qn(kTicksPerBeat, 69, 0),  // A4 on beat 1
+  };
+  auto result = detectNonChordTones(notes, bar_tl, &gen_tl);
+  ASSERT_GE(result.size(), 1u);
+  EXPECT_EQ(result[0].severity, DissonanceSeverity::Low)
+      << "A4 is chord tone of vi in generation timeline -- should be Low";
+}
+
+TEST(DualTimeline, NotChordToneOfEither_StaysHigh) {
+  // F#4 (MIDI 66) on beat 0 (strong): not in I (C,E,G) bar-level,
+  // not in I (C,E,G) generation beat 0 either.
+  auto bar_tl = makeCMajorTimeline(2);
+  auto gen_tl = makeBeatResolutionTimeline(2);
+
+  std::vector<NoteEvent> notes = {
+      qn(0, 66, 0),  // F#4 on beat 0
+  };
+  auto result = detectNonChordTones(notes, bar_tl, &gen_tl);
+  ASSERT_GE(result.size(), 1u);
+  EXPECT_EQ(result[0].severity, DissonanceSeverity::High)
+      << "F#4 is not in either timeline -- should stay High";
+}
+
+TEST(DualTimeline, NullGenTimeline_NoEffect) {
+  // Same as ChordToneOfGeneration but with nullptr -> no downgrade.
+  auto bar_tl = makeCMajorTimeline(2);
+
+  std::vector<NoteEvent> notes = {
+      qn(kTicksPerBeat, 69, 0),  // A4 on beat 1 (weak)
+  };
+  auto with_null = detectNonChordTones(notes, bar_tl, nullptr);
+  auto without = detectNonChordTones(notes, bar_tl);
+  ASSERT_EQ(with_null.size(), without.size());
+  for (size_t i = 0; i < with_null.size(); ++i) {
+    EXPECT_EQ(with_null[i].severity, without[i].severity)
+        << "nullptr generation_timeline should be identical to single-timeline";
+  }
+}
+
+// ===========================================================================
+// Phase G: FalseEntry structural downgrade
+// ===========================================================================
+
+TEST(FalseEntryStructural, SC_Clash_DowngradedToLow) {
+  // FalseEntry source note clashing with another voice -> downgraded to Low.
+  std::vector<NoteEvent> notes = {
+      qn_src(0, 60, 0, BachNoteSource::FreeCounterpoint),  // C4
+      qn_src(0, 61, 1, BachNoteSource::FalseEntry),        // C#4 (clash)
+  };
+  auto result = detectSimultaneousClashes(notes, 2);
+  ASSERT_GE(result.size(), 1u);
+  EXPECT_EQ(result[0].severity, DissonanceSeverity::Low)
+      << "FalseEntry SC clash should be downgraded to Low";
+}
+
+TEST(FalseEntryStructural, NCT_DowngradedToLow) {
+  // FalseEntry note that is NCT of the bar timeline.
+  auto tl = makeCMajorTimeline(2);
+  std::vector<NoteEvent> notes = {
+      qn_src(0, 62, 0, BachNoteSource::FalseEntry),  // D4 (NCT of I chord)
+  };
+  auto result = detectNonChordTones(notes, tl);
+  ASSERT_GE(result.size(), 1u);
+  EXPECT_EQ(result[0].severity, DissonanceSeverity::Low)
+      << "FalseEntry NCT should be downgraded to Low (structural)";
+}
+
+// ===========================================================================
+// Gap: Subject structural downgrade (existing behavior, untested)
+// ===========================================================================
+
+TEST(SubjectStructural, SC_Clash_DowngradedToLow) {
+  // Subject source note clashing with another voice -> downgraded to Low.
+  std::vector<NoteEvent> notes = {
+      qn_src(0, 60, 0, BachNoteSource::FreeCounterpoint),
+      qn_src(0, 61, 1, BachNoteSource::FugueSubject),
+  };
+  auto result = detectSimultaneousClashes(notes, 2);
+  ASSERT_GE(result.size(), 1u);
+  EXPECT_EQ(result[0].severity, DissonanceSeverity::Low)
+      << "FugueSubject SC clash should be downgraded to Low";
+}
+
+TEST(SubjectStructural, NCT_DowngradedToLow) {
+  auto tl = makeCMajorTimeline(2);
+  std::vector<NoteEvent> notes = {
+      qn_src(0, 62, 0, BachNoteSource::FugueSubject),  // D4 (NCT of I chord)
+  };
+  auto result = detectNonChordTones(notes, tl);
+  ASSERT_GE(result.size(), 1u);
+  EXPECT_EQ(result[0].severity, DissonanceSeverity::Low)
+      << "FugueSubject NCT should be downgraded to Low (structural)";
 }
 
 }  // namespace

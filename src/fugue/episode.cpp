@@ -6,9 +6,20 @@
 #include <cstdint>
 #include <random>
 
+#include "core/note_creator.h"
 #include "core/rng_util.h"
 #include "core/scale.h"
+#include "counterpoint/collision_resolver.h"
+#include "counterpoint/counterpoint_state.h"
+#include "counterpoint/i_rule_evaluator.h"
+#include "counterpoint/melodic_context.h"
+#include "fugue/fortspinnung.h"
 #include "fugue/fugue_config.h"
+#include "fugue/motif_pool.h"
+#include "harmony/chord_tone_utils.h"
+#include "harmony/chord_types.h"
+#include "harmony/harmonic_timeline.h"
+#include "harmony/key.h"
 #include "transform/motif_transform.h"
 #include "transform/sequence.h"
 
@@ -75,10 +86,12 @@ int calculateSequenceRepetitions(Tick duration_ticks, Tick motif_dur) {
   return reps;
 }
 
+}  // namespace (anonymous -- reopened below after shared helpers)
+
 /// @brief Clamp a pitch value to valid MIDI range [0, 127].
 /// @param value Pitch value that may be out of range.
 /// @return Clamped uint8_t pitch.
-uint8_t clampMidiPitch(int value) {
+static uint8_t clampMidiPitch(int value) {
   if (value < 0) return 0;
   if (value > 127) return 127;
   return static_cast<uint8_t>(value);
@@ -86,7 +99,7 @@ uint8_t clampMidiPitch(int value) {
 
 /// @brief Normalize a motif so that the first note starts at tick 0.
 /// @param motif Input motif (modified in place).
-void normalizeMotifToZero(std::vector<NoteEvent>& motif) {
+static void normalizeMotifToZero(std::vector<NoteEvent>& motif) {
   if (motif.empty()) return;
   Tick offset = motif[0].start_tick;
   for (auto& note : motif) {
@@ -101,7 +114,7 @@ void normalizeMotifToZero(std::vector<NoteEvent>& motif) {
 /// Baroque compositional technique used in recurring episodes.
 ///
 /// @param notes Episode notes to modify in place.
-void applyInvertibleCounterpoint(std::vector<NoteEvent>& notes) {
+static void applyInvertibleCounterpoint(std::vector<NoteEvent>& notes) {
   for (auto& note : notes) {
     if (note.voice == 0) {
       note.voice = 1;
@@ -110,6 +123,8 @@ void applyInvertibleCounterpoint(std::vector<NoteEvent>& notes) {
     }
   }
 }
+
+namespace {  // NOLINT(google-build-namespaces) reopened for character-specific generators
 
 /// @brief Generate voice 0 and voice 1 for Severe character.
 ///
@@ -340,6 +355,75 @@ void generateRestlessEpisode(Episode& episode, const std::vector<NoteEvent>& mot
   }
 }
 
+/// @brief Select which voice should "rest" (hold long tones) in this episode.
+///
+/// Rotates through voices 2+ based on episode_index, ensuring variety across
+/// successive episodes. Never selects voice 0 or 1 (they carry the primary
+/// motivic material in the sequence/imitation texture).
+///
+/// @param num_voices Total voices (must be >= 3 for a resting voice to exist).
+/// @param episode_index Episode ordinal for rotation.
+/// @return Voice ID of the resting voice, or num_voices if no resting voice.
+static VoiceId selectRestingVoice(uint8_t num_voices, int episode_index) {
+  if (num_voices < 3) return num_voices;  // No resting voice possible
+  // Rotate through voices 2..num_voices-1
+  uint8_t range = num_voices - 2;
+  return static_cast<VoiceId>(2 + (episode_index % range));
+}
+
+/// @brief Generate sustained held tones for a resting voice.
+///
+/// Creates whole-note held tones that alternate between the tonic and
+/// the fifth of the current key. These long tones provide a harmonic
+/// foundation while reducing textural density, a standard Baroque
+/// episode technique for creating breathing space.
+///
+/// @param episode Episode to append notes to.
+/// @param motif Source motif (for deriving a register-appropriate pitch).
+/// @param start_tick Episode start tick.
+/// @param duration_ticks Total episode duration.
+/// @param key Current key context.
+/// @param voice_id Voice ID for the held tones.
+static void generateHeldTones(Episode& episode, const std::vector<NoteEvent>& motif,
+                               Tick start_tick, Tick duration_ticks,
+                               Key key, VoiceId voice_id) {
+  // Use whole notes (kTicksPerBar) as held tone duration.
+  constexpr Tick kHeldDuration = kTicksPerBar;  // Whole note
+
+  // Place held tones one octave below the motif starting pitch for register contrast.
+  int tonic_pitch = static_cast<int>(kMidiC4) + static_cast<int>(key);
+  if (!motif.empty()) {
+    tonic_pitch = static_cast<int>(motif[0].pitch) - 12;
+  }
+
+  // Alternate between root and fifth for harmonic stability.
+  int pitches[] = {tonic_pitch, tonic_pitch + 7};
+
+  Tick tick = start_tick;
+  int idx = 0;
+  while (tick < start_tick + duration_ticks) {
+    Tick dur = std::min(kHeldDuration, start_tick + duration_ticks - tick);
+    if (dur == 0) break;
+
+    int pitch = pitches[idx % 2];
+    // Clamp to valid MIDI range.
+    if (pitch < 0) pitch = 0;
+    if (pitch > 127) pitch = 127;
+
+    NoteEvent note;
+    note.start_tick = tick;
+    note.duration = dur;
+    note.pitch = static_cast<uint8_t>(pitch);
+    note.velocity = 80;  // kOrganVelocity
+    note.voice = voice_id;
+    note.source = BachNoteSource::EpisodeMaterial;
+    episode.notes.push_back(note);
+
+    tick += dur;
+    ++idx;
+  }
+}
+
 }  // namespace
 
 std::vector<NoteEvent> extractMotif(const Subject& subject, size_t max_notes) {
@@ -429,8 +513,20 @@ Episode generateEpisode(const Subject& subject, Tick start_tick, Tick duration_t
       break;
   }
 
+  // --- Texture lightening: one voice uses sustained tones instead of motivic development ---
+  // When num_voices >= 3, designate one voice (besides 0 and 1) to hold long tones.
+  // This creates breathing space in the texture, a standard Baroque episode technique.
+  VoiceId resting_voice = (num_voices >= 3)
+                              ? selectRestingVoice(num_voices, episode_index)
+                              : num_voices;  // Invalid = no resting voice
+
+  // Generate held tones for the resting voice.
+  if (resting_voice < num_voices) {
+    generateHeldTones(episode, motif, start_tick, duration_ticks, start_key, resting_voice);
+  }
+
   // --- Voice 2: Diminished motif (rhythmic contrast, shared across characters) ---
-  if (num_voices >= 3) {
+  if (num_voices >= 3 && resting_voice != 2) {
     auto diminished = diminishMelody(motif, start_tick + motif_dur);
     for (auto& note : diminished) {
       note.voice = 2;
@@ -439,7 +535,7 @@ Episode generateEpisode(const Subject& subject, Tick start_tick, Tick duration_t
   }
 
   // --- Voice 3: Augmented tail motif as slow bass foundation (4+ voices) ---
-  if (num_voices >= 4) {
+  if (num_voices >= 4 && resting_voice != 3) {
     auto tail = extractTailMotif(subject.notes, 3);
     if (!tail.empty()) {
       normalizeMotifToZero(tail);
@@ -453,7 +549,7 @@ Episode generateEpisode(const Subject& subject, Tick start_tick, Tick duration_t
   }
 
   // --- Voice 4: Diatonically inverted tail motif with sequence (5 voices) ---
-  if (num_voices >= 5) {
+  if (num_voices >= 5 && resting_voice != 4) {
     auto tail = extractTailMotif(subject.notes, 3);
     if (!tail.empty()) {
       normalizeMotifToZero(tail);
@@ -572,6 +668,123 @@ std::vector<NoteEvent> extractCharacteristicMotif(const Subject& subject,
 
   return std::vector<NoteEvent>(subject.notes.begin() + best_start,
                                  subject.notes.begin() + best_start + motif_length);
+}
+
+Episode generateEpisode(const Subject& subject, Tick start_tick, Tick duration_ticks,
+                        Key start_key, Key target_key, uint8_t num_voices, uint32_t seed,
+                        int episode_index, float energy_level,
+                        CounterpointState& cp_state, IRuleEvaluator& cp_rules,
+                        CollisionResolver& cp_resolver, const HarmonicTimeline& timeline) {
+  // Step 1: Generate unvalidated episode using existing character-specific logic.
+  Episode raw = generateEpisode(subject, start_tick, duration_ticks,
+                                start_key, target_key, num_voices, seed,
+                                episode_index, energy_level);
+
+  // Step 2: Create a PhraseGoal targeting the tonic of the target key at episode end.
+  // The target pitch is a DESIGN VALUE (Principle 4): derived deterministically from
+  // the cadence tone (tonic of the target key) in octave 4. The goal influences
+  // melodic scoring but does not force any notes.
+  Tick episode_end = start_tick + duration_ticks;
+  PhraseGoal phrase_goal;
+  phrase_goal.target_pitch = tonicPitch(target_key, 4);
+  phrase_goal.target_tick = episode_end;
+  phrase_goal.bonus = 0.3f;
+
+  // Step 3: Post-validate each note through createBachNote().
+  Episode validated;
+  validated.start_tick = raw.start_tick;
+  validated.end_tick = raw.end_tick;
+  validated.start_key = raw.start_key;
+  validated.end_key = raw.end_key;
+  validated.notes.reserve(raw.notes.size());
+
+  // Sort by tick for chronological processing.
+  std::sort(raw.notes.begin(), raw.notes.end(),
+            [](const NoteEvent& a, const NoteEvent& b) {
+              if (a.start_tick != b.start_tick) return a.start_tick < b.start_tick;
+              return a.voice < b.voice;
+            });
+
+  for (const auto& note : raw.notes) {
+    // Query harmonic context at this tick.
+    const auto& harm_ev = timeline.getAt(note.start_tick);
+
+    // Determine desired pitch: snap non-chord tones on strong beats.
+    uint8_t desired_pitch = note.pitch;
+    bool is_strong = (note.start_tick % kTicksPerBar == 0) ||
+                     (note.start_tick % (kTicksPerBar / 2) == 0);
+    if (is_strong && !isChordTone(note.pitch, harm_ev)) {
+      desired_pitch = nearestChordTone(note.pitch, harm_ev);
+    }
+
+    // Route through createBachNote for counterpoint validation.
+    BachNoteOptions opts;
+    opts.voice = note.voice;
+    opts.desired_pitch = desired_pitch;
+    opts.tick = note.start_tick;
+    opts.duration = note.duration;
+    opts.velocity = note.velocity;
+    opts.source = BachNoteSource::EpisodeMaterial;
+
+    BachCreateNoteResult result = createBachNote(&cp_state, &cp_rules, &cp_resolver, opts);
+    if (result.accepted) {
+      validated.notes.push_back(result.note);
+    }
+    // Rejected notes become rests (omitted).
+  }
+
+  return validated;
+}
+
+Episode generateFortspinnungEpisode(const Subject& subject, const MotifPool& pool,
+                                    Tick start_tick, Tick duration_ticks,
+                                    Key start_key, Key target_key,
+                                    uint8_t num_voices, uint32_t seed,
+                                    int episode_index, float energy_level) {
+  // Fall back to standard generation if the pool is empty.
+  if (pool.empty()) {
+    return generateEpisode(subject, start_tick, duration_ticks,
+                           start_key, target_key, num_voices, seed,
+                           episode_index, energy_level);
+  }
+
+  Episode episode;
+  episode.start_tick = start_tick;
+  episode.end_tick = start_tick + duration_ticks;
+  episode.start_key = start_key;
+  episode.end_key = target_key;
+
+  // Generate Fortspinnung material from the motif pool.
+  episode.notes = generateFortspinnung(pool, start_tick, duration_ticks,
+                                       num_voices, seed, subject.character);
+
+  // Apply gradual key modulation: transpose the second half toward the target key.
+  int key_diff = static_cast<int>(target_key) - static_cast<int>(start_key);
+  if (key_diff != 0) {
+    Tick midpoint = start_tick + duration_ticks / 2;
+    ScaleType scale = ScaleType::Major;
+    for (auto& note : episode.notes) {
+      if (note.start_tick >= midpoint) {
+        int new_pitch = static_cast<int>(note.pitch) + key_diff;
+        note.pitch = scale_util::nearestScaleTone(clampMidiPitch(new_pitch), target_key, scale);
+      }
+    }
+  }
+
+  // Apply energy-based rhythm density floor.
+  Tick min_dur = FugueEnergyCurve::minDuration(energy_level);
+  for (auto& note : episode.notes) {
+    if (note.duration < min_dur) {
+      note.duration = min_dur;
+    }
+  }
+
+  // Invertible counterpoint for odd-indexed episodes.
+  if (episode_index % 2 != 0) {
+    applyInvertibleCounterpoint(episode.notes);
+  }
+
+  return episode;
 }
 
 }  // namespace bach

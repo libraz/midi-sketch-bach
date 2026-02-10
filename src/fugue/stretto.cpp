@@ -7,7 +7,14 @@
 #include <cstdlib>
 #include <random>
 
+#include "core/note_creator.h"
 #include "core/rng_util.h"
+#include "counterpoint/collision_resolver.h"
+#include "counterpoint/counterpoint_state.h"
+#include "counterpoint/i_rule_evaluator.h"
+#include "harmony/chord_tone_utils.h"
+#include "harmony/chord_types.h"
+#include "harmony/harmonic_timeline.h"
 #include "transform/motif_transform.h"
 
 namespace bach {
@@ -253,6 +260,78 @@ std::vector<NoteEvent> createStrettoFragment(const Subject& subject,
 
   return std::vector<NoteEvent>(subject.notes.begin(),
                                  subject.notes.begin() + fragment_count);
+}
+
+Stretto generateStretto(const Subject& subject, Key home_key, Tick start_tick,
+                        uint8_t num_voices, uint32_t seed,
+                        SubjectCharacter character,
+                        CounterpointState& cp_state, IRuleEvaluator& cp_rules,
+                        CollisionResolver& cp_resolver,
+                        const HarmonicTimeline& timeline) {
+  // Generate unvalidated stretto.
+  Stretto stretto = generateStretto(subject, home_key, start_tick,
+                                    num_voices, seed, character);
+
+  // Post-validate each entry's notes.
+  for (size_t entry_idx = 0; entry_idx < stretto.entries.size(); ++entry_idx) {
+    auto& entry = stretto.entries[entry_idx];
+    std::vector<NoteEvent> validated;
+    validated.reserve(entry.notes.size());
+
+    // Even entries (original subject) = Immutable (register but don't alter).
+    // Odd entries (transformed) = Flexible (full cascade).
+    bool is_immutable = (entry_idx % 2 == 0);
+
+    // Sort notes by tick for chronological processing.
+    std::sort(entry.notes.begin(), entry.notes.end(),
+              [](const NoteEvent& a, const NoteEvent& b) {
+                return a.start_tick < b.start_tick;
+              });
+
+    for (const auto& note : entry.notes) {
+      if (is_immutable) {
+        // Immutable: try original pitch, accept or reject (rest).
+        BachNoteOptions opts;
+        opts.voice = note.voice;
+        opts.desired_pitch = note.pitch;
+        opts.tick = note.start_tick;
+        opts.duration = note.duration;
+        opts.velocity = note.velocity;
+        opts.source = BachNoteSource::FugueSubject;
+
+        BachCreateNoteResult result = createBachNote(&cp_state, &cp_rules, &cp_resolver, opts);
+        if (result.accepted) {
+          validated.push_back(result.note);
+        }
+      } else {
+        // Flexible: chord-tone snap + full cascade.
+        const auto& harm_ev = timeline.getAt(note.start_tick);
+        uint8_t desired_pitch = note.pitch;
+        bool is_strong = (note.start_tick % kTicksPerBar == 0) ||
+                         (note.start_tick % (kTicksPerBar / 2) == 0);
+        if (is_strong && !isChordTone(note.pitch, harm_ev)) {
+          desired_pitch = nearestChordTone(note.pitch, harm_ev);
+        }
+
+        BachNoteOptions opts;
+        opts.voice = note.voice;
+        opts.desired_pitch = desired_pitch;
+        opts.tick = note.start_tick;
+        opts.duration = note.duration;
+        opts.velocity = note.velocity;
+        opts.source = BachNoteSource::EpisodeMaterial;
+
+        BachCreateNoteResult result = createBachNote(&cp_state, &cp_rules, &cp_resolver, opts);
+        if (result.accepted) {
+          validated.push_back(result.note);
+        }
+      }
+    }
+
+    entry.notes = std::move(validated);
+  }
+
+  return stretto;
 }
 
 }  // namespace bach
