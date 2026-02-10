@@ -8,6 +8,7 @@
 #include "forms/prelude.h"
 #include "fugue/fugue_config.h"
 #include "fugue/fugue_generator.h"
+#include "solo_string/arch/chaconne_engine.h"
 #include "solo_string/flow/harmonic_arpeggio_engine.h"
 
 namespace bach {
@@ -282,10 +283,27 @@ GeneratorResult generate(const GeneratorConfig& config) {
     }
 
     case FormType::Chaconne: {
-      result.success = false;
-      result.seed_used = effective_config.seed;
-      result.error_message = "Chaconne generation not yet implemented";
-      result.form_description = "Chaconne (stub)";
+      ChaconneConfig ch_config;
+      ch_config.key = effective_config.key;
+      ch_config.bpm = effective_config.bpm;
+      ch_config.seed = effective_config.seed;
+      ch_config.instrument = effective_config.instrument;
+
+      ChaconneResult ch_result = generateChaconne(ch_config);
+
+      if (!ch_result.success) {
+        result.success = false;
+        result.seed_used = effective_config.seed;
+        result.error_message = ch_result.error_message;
+        return result;
+      }
+
+      result.tracks = std::move(ch_result.tracks);
+      result.total_duration_ticks = ch_result.total_duration_ticks;
+      result.tempo_events.push_back({0, effective_config.bpm});
+      result.success = true;
+      result.seed_used = ch_result.seed_used;
+      result.form_description = "Chaconne in " + keySignatureToString(effective_config.key);
       return result;
     }
   }

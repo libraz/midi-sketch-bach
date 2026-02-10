@@ -101,8 +101,13 @@ set(BACH_LIB_SOURCES
   solo_string/flow/flow_analyzer.cpp
   solo_string/flow/harmonic_arpeggio_engine.cpp
 
-  # Future sources added here as modules are implemented:
   # solo_string/arch/
+  solo_string/arch/variation_types.cpp
+  solo_string/arch/ground_bass.cpp
+  solo_string/arch/chaconne_config.cpp
+  solo_string/arch/texture_generator.cpp
+  solo_string/arch/chaconne_analyzer.cpp
+  solo_string/arch/chaconne_engine.cpp
 )
 
 add_library(bach_lib STATIC ${BACH_LIB_SOURCES})

@@ -437,13 +437,65 @@ TEST(GeneratorTest, CelloPrelude_Succeeds) {
   EXPECT_NE(result.form_description.find("Cello Prelude"), std::string::npos);
 }
 
-TEST(GeneratorTest, Chaconne_ReturnsStub) {
+TEST(GeneratorTest, Chaconne_Succeeds) {
   GeneratorConfig config = makeTestConfig();
   config.form = FormType::Chaconne;
+  config.instrument = InstrumentType::Violin;
   GeneratorResult result = generate(config);
 
-  EXPECT_FALSE(result.success);
-  EXPECT_FALSE(result.error_message.empty());
+  EXPECT_TRUE(result.success) << result.error_message;
+  EXPECT_TRUE(result.error_message.empty());
+  EXPECT_GT(result.tracks.size(), 0u);
+  EXPECT_GT(result.total_duration_ticks, 0u);
+  // Should have notes in the track.
+  size_t total_notes = 0;
+  for (const auto& track : result.tracks) {
+    total_notes += track.notes.size();
+  }
+  EXPECT_GT(total_notes, 0u);
+  // Form description should reference chaconne.
+  EXPECT_NE(result.form_description.find("Chaconne"), std::string::npos);
+}
+
+TEST(GeneratorTest, Chaconne_Deterministic) {
+  GeneratorConfig config = makeTestConfig(99);
+  config.form = FormType::Chaconne;
+  config.instrument = InstrumentType::Violin;
+
+  GeneratorResult result1 = generate(config);
+  GeneratorResult result2 = generate(config);
+
+  ASSERT_TRUE(result1.success);
+  ASSERT_TRUE(result2.success);
+  ASSERT_EQ(result1.tracks.size(), result2.tracks.size());
+
+  for (size_t track_idx = 0; track_idx < result1.tracks.size(); ++track_idx) {
+    const auto& notes1 = result1.tracks[track_idx].notes;
+    const auto& notes2 = result2.tracks[track_idx].notes;
+    ASSERT_EQ(notes1.size(), notes2.size())
+        << "Track " << track_idx << " note count differs";
+
+    for (size_t note_idx = 0; note_idx < notes1.size(); ++note_idx) {
+      EXPECT_EQ(notes1[note_idx].start_tick, notes2[note_idx].start_tick)
+          << "Track " << track_idx << ", note " << note_idx;
+      EXPECT_EQ(notes1[note_idx].pitch, notes2[note_idx].pitch)
+          << "Track " << track_idx << ", note " << note_idx;
+    }
+  }
+}
+
+TEST(GeneratorTest, Chaconne_DMinorDefault) {
+  GeneratorConfig config = makeTestConfig(42);
+  config.form = FormType::Chaconne;
+  config.key = {Key::D, true};  // D minor (BWV1004)
+  config.instrument = InstrumentType::Violin;
+  GeneratorResult result = generate(config);
+
+  ASSERT_TRUE(result.success) << result.error_message;
+  EXPECT_NE(result.form_description.find("D_minor"), std::string::npos)
+      << "Form description should include key: " << result.form_description;
+  // D minor chaconne with 10 variations x 4 bars = 40 bars minimum.
+  EXPECT_GE(result.total_duration_ticks, 40u * kTicksPerBar);
 }
 
 // ---------------------------------------------------------------------------

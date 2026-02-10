@@ -96,8 +96,14 @@ set(BACH_TEST_SOURCES
   solo_string/flow/harmonic_arpeggio_engine_test.cpp
   solo_string/flow/global_arc_test.cpp
 
-  # Future test sources added here as modules are implemented:
   # solo_string/arch/
+  solo_string/arch/texture_generator_test.cpp
+  solo_string/arch/chaconne_analyzer_test.cpp
+  solo_string/arch/ground_bass_test.cpp
+  solo_string/arch/variation_types_test.cpp
+  solo_string/arch/chaconne_config_test.cpp
+  solo_string/arch/chaconne_engine_test.cpp
+  solo_string/arch/destruction_resistance_test.cpp
 )
 
 add_executable(bach_tests ${BACH_TEST_SOURCES})
