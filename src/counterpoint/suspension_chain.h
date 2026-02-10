@@ -4,6 +4,7 @@
 #include <vector>
 
 #include "core/basic_types.h"
+#include "core/scale.h"
 
 namespace bach {
 
@@ -48,6 +49,26 @@ struct SuspensionChain {
 SuspensionChain generateSuspensionChain(Tick start_tick, uint8_t num_suspensions,
                                         uint8_t base_pitch, VoiceId voice,
                                         SuspensionType type = SuspensionType::Sus4_3);
+
+/// @brief Generate a diatonic suspension chain for a voice pair.
+///
+/// Same as the basic overload but resolves using scale-aware step motion
+/// rather than fixed semitone intervals. This produces musically correct
+/// resolutions in all keys (e.g., whole tone down in C major 4-3, half
+/// tone down in E major 4-3).
+///
+/// @param start_tick Starting tick position.
+/// @param num_suspensions Number of suspensions in the chain (1-4).
+/// @param base_pitch Starting pitch for the suspended voice.
+/// @param voice Voice ID for the suspended notes.
+/// @param type Primary suspension type for the chain.
+/// @param key Musical key context for diatonic resolution.
+/// @param scale Scale type for pitch computation.
+/// @return Generated suspension chain with diatonic resolution pitches.
+SuspensionChain generateSuspensionChain(Tick start_tick, uint8_t num_suspensions,
+                                        uint8_t base_pitch, VoiceId voice,
+                                        SuspensionType type, Key key,
+                                        ScaleType scale);
 
 /// @brief Convert SuspensionType to human-readable string.
 const char* suspensionTypeToString(SuspensionType type);

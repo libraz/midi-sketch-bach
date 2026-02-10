@@ -33,6 +33,54 @@ static bool isNearCadence(Tick tick, const std::vector<Tick>& cadence_ticks) {
   return false;
 }
 
+/// @brief Compute cross-relation penalty for a candidate pitch against other voices.
+///
+/// A cross-relation occurs when two voices use conflicting chromatic alterations
+/// of the same pitch class (e.g., C-natural in one voice, C# in another).
+/// Natural half-steps (E/F, B/C) are excluded.
+///
+/// @param state Current counterpoint state.
+/// @param voice_id Voice being scored.
+/// @param pitch Candidate pitch.
+/// @param tick Current tick.
+/// @return Penalty value (0.0 = no cross-relation, 0.3 = cross-relation detected).
+static float crossRelationPenalty(const CounterpointState& state,
+                                  VoiceId voice_id, uint8_t pitch, Tick tick) {
+  int pitch_class = static_cast<int>(pitch) % 12;
+  const auto& voices = state.getActiveVoices();
+
+  for (VoiceId other : voices) {
+    if (other == voice_id) continue;
+
+    // Check the most recent note in the other voice within 1 beat.
+    const NoteEvent* other_note = state.getNoteAt(other, tick);
+    if (!other_note) {
+      // Also check the previous note if no note at tick.
+      other_note = state.getLastNote(other);
+      if (!other_note) continue;
+      // Must be within 1 beat proximity.
+      Tick dist = (tick >= other_note->start_tick)
+                      ? (tick - other_note->start_tick)
+                      : (other_note->start_tick - tick);
+      if (dist > kTicksPerBeat) continue;
+    }
+
+    int other_pc = static_cast<int>(other_note->pitch) % 12;
+    int pc_diff = std::abs(pitch_class - other_pc);
+    // Chromatic conflict: pitch classes differ by 1 semitone (or 11 wrapping).
+    if (pc_diff == 1 || pc_diff == 11) {
+      // Exclude natural half-steps E/F (4,5) and B/C (11,0).
+      int low_pc = (pitch_class < other_pc) ? pitch_class : other_pc;
+      int high_pc = (pitch_class < other_pc) ? other_pc : pitch_class;
+      if (low_pc == 4 && high_pc == 5) continue;   // E/F natural
+      if (low_pc == 0 && high_pc == 11) continue;   // B/C natural (wrapped)
+      if (low_pc == 0 && high_pc == 1) continue;    // B#/C = enharmonic, skip
+      return 0.3f;
+    }
+  }
+  return 0.0f;
+}
+
 // ---------------------------------------------------------------------------
 // Safety check
 // ---------------------------------------------------------------------------
@@ -142,13 +190,13 @@ bool CollisionResolver::isSafeToPlace(const CounterpointState& state,
 PlacementResult CollisionResolver::tryStrategy(
     const CounterpointState& state, const IRuleEvaluator& rules,
     VoiceId voice_id, uint8_t desired_pitch, Tick tick, Tick duration,
-    const std::string& strategy) const {
+    const std::string& strategy, uint8_t next_pitch) const {
   PlacementResult result;
   result.strategy = strategy;
 
   if (strategy == "original") {
     if (isSafeToPlace(state, rules, voice_id, desired_pitch, tick,
-                      duration)) {
+                      duration, next_pitch)) {
       result.pitch = desired_pitch;
       result.penalty = 0.0f;
       result.accepted = true;
@@ -169,9 +217,10 @@ PlacementResult CollisionResolver::tryStrategy(
 
       auto cand_pitch = static_cast<uint8_t>(candidate);
       if (isSafeToPlace(state, rules, voice_id, cand_pitch, tick,
-                        duration)) {
+                        duration, next_pitch)) {
         float penalty = static_cast<float>(std::abs(offset)) / 12.0f *
                         0.3f;
+        penalty += crossRelationPenalty(state, voice_id, cand_pitch, tick);
         if (penalty < best_penalty) {
           best_penalty = penalty;
           result.pitch = cand_pitch;
@@ -204,8 +253,11 @@ PlacementResult CollisionResolver::tryStrategy(
 
         auto cand_pitch = static_cast<uint8_t>(candidate);
         if (isSafeToPlace(state, rules, voice_id, cand_pitch, tick,
-                          duration)) {
+                          duration, next_pitch)) {
           float penalty = static_cast<float>(delta) / 12.0f * 0.5f;
+
+          // Apply cross-relation penalty.
+          penalty += crossRelationPenalty(state, voice_id, cand_pitch, tick);
 
           // Apply cadence voice-leading bonus.
           if (near_cadence && prev_note) {
@@ -247,7 +299,8 @@ PlacementResult CollisionResolver::tryStrategy(
       if (candidate < 0 || candidate > 127) continue;
 
       auto cand_pitch = static_cast<uint8_t>(candidate);
-      if (!isSafeToPlace(state, rules, voice_id, cand_pitch, tick, duration))
+      if (!isSafeToPlace(state, rules, voice_id, cand_pitch, tick, duration,
+                         next_pitch))
         continue;
 
       // Reject if the octave shift would cross an adjacent voice.
@@ -292,7 +345,7 @@ PlacementResult CollisionResolver::findSafePitch(
 
     PlacementResult result = tryStrategy(state, rules, voice_id,
                                          desired_pitch, tick, duration,
-                                         strategy);
+                                         strategy, next_pitch);
     if (result.accepted) return result;
   }
 
@@ -369,7 +422,7 @@ PlacementResult CollisionResolver::findSafePitch(
 PlacementResult CollisionResolver::trySuspension(
     const CounterpointState& state, const IRuleEvaluator& rules,
     VoiceId voice_id, uint8_t /*desired_pitch*/, Tick tick,
-    Tick duration) const {
+    Tick /*duration*/) const {
   PlacementResult result;
   result.strategy = "suspension";
 
@@ -517,6 +570,7 @@ PlacementResult CollisionResolver::findSafePitchWithLookahead(
 
       float current_penalty =
           static_cast<float>(delta) / 12.0f * 0.3f;
+      current_penalty += crossRelationPenalty(state, voice_id, cand, tick);
 
       // Evaluate next-beat approach quality.
       // Stepwise motion (1-2 semitones) is ideal; small leaps (3-4) are

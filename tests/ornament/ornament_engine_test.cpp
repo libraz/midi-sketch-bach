@@ -6,6 +6,8 @@
 
 #include "analysis/counterpoint_analyzer.h"
 #include "core/basic_types.h"
+#include "harmony/harmonic_timeline.h"
+#include "harmony/key.h"
 
 namespace bach {
 namespace {
@@ -732,6 +734,176 @@ TEST(OrnamentEngineTest, ApplyOrnamentsWithCounterpointVerification) {
   for (const auto& note : result) {
     EXPECT_EQ(note.voice, 0);
   }
+}
+
+// ---------------------------------------------------------------------------
+// Scale-aware ornament neighbors [Task B]
+// ---------------------------------------------------------------------------
+
+TEST(ScaleAwareOrnamentTest, CMajorETrillUsesF) {
+  // In C major, E(64) upper neighbor should be F(65) -- a half step,
+  // not the chromatic G(66).
+  KeySignature key_sig{Key::C, false};
+  auto timeline = HarmonicTimeline::createStandard(key_sig, kTicksPerBar * 2,
+                                                    HarmonicResolution::Beat);
+
+  auto note = makeNote(0, 64, kTicksPerBeat);  // E4 on beat 0
+
+  OrnamentContext ctx;
+  ctx.config.enable_trill = true;
+  ctx.config.enable_mordent = false;
+  ctx.config.enable_turn = false;
+  ctx.config.enable_appoggiatura = false;
+  ctx.config.enable_pralltriller = false;
+  ctx.config.enable_vorschlag = false;
+  ctx.config.enable_nachschlag = false;
+  ctx.config.enable_compound = false;
+  ctx.config.ornament_density = 1.0f;
+  ctx.role = VoiceRole::Respond;
+  ctx.seed = 42;
+  ctx.timeline = &timeline;
+
+  auto result = applyOrnaments({note}, ctx);
+
+  // Should produce trill notes alternating between E4(64) and F4(65).
+  ASSERT_GT(result.size(), 1u);
+  for (const auto& sub : result) {
+    EXPECT_TRUE(sub.pitch == 64 || sub.pitch == 65)
+        << "Expected E4(64) or F4(65), got " << static_cast<int>(sub.pitch);
+  }
+}
+
+TEST(ScaleAwareOrnamentTest, AMinorGSharpTrillUsesA) {
+  // In A harmonic minor, G#(68) upper neighbor should be A(69).
+  KeySignature key_sig{Key::A, true};
+  auto timeline = HarmonicTimeline::createStandard(key_sig, kTicksPerBar * 2,
+                                                    HarmonicResolution::Beat);
+
+  auto note = makeNote(0, 68, kTicksPerBeat);  // G#4 on beat 0
+
+  OrnamentContext ctx;
+  ctx.config.enable_trill = true;
+  ctx.config.enable_mordent = false;
+  ctx.config.enable_turn = false;
+  ctx.config.enable_appoggiatura = false;
+  ctx.config.enable_pralltriller = false;
+  ctx.config.enable_vorschlag = false;
+  ctx.config.enable_nachschlag = false;
+  ctx.config.enable_compound = false;
+  ctx.config.ornament_density = 1.0f;
+  ctx.role = VoiceRole::Respond;
+  ctx.seed = 42;
+  ctx.timeline = &timeline;
+
+  auto result = applyOrnaments({note}, ctx);
+
+  ASSERT_GT(result.size(), 1u);
+  for (const auto& sub : result) {
+    EXPECT_TRUE(sub.pitch == 68 || sub.pitch == 69)
+        << "Expected G#4(68) or A4(69), got " << static_cast<int>(sub.pitch);
+  }
+}
+
+TEST(ScaleAwareOrnamentTest, LegacyWithoutTimelineUsesWholeStep) {
+  // Without timeline, legacy behavior: upper neighbor = pitch + 2.
+  auto note = makeNote(0, 64, kTicksPerBeat);
+
+  OrnamentContext ctx;
+  ctx.config.enable_trill = true;
+  ctx.config.enable_mordent = false;
+  ctx.config.enable_turn = false;
+  ctx.config.enable_appoggiatura = false;
+  ctx.config.enable_pralltriller = false;
+  ctx.config.enable_vorschlag = false;
+  ctx.config.enable_nachschlag = false;
+  ctx.config.enable_compound = false;
+  ctx.config.ornament_density = 1.0f;
+  ctx.role = VoiceRole::Respond;
+  ctx.seed = 42;
+  ctx.timeline = nullptr;  // No timeline
+
+  auto result = applyOrnaments({note}, ctx);
+
+  ASSERT_GT(result.size(), 1u);
+  for (const auto& sub : result) {
+    // Legacy: E4(64) + 2 = F#4(66)
+    EXPECT_TRUE(sub.pitch == 64 || sub.pitch == 66)
+        << "Expected E4(64) or F#4(66), got " << static_cast<int>(sub.pitch);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Cadence trill obligation [Task D]
+// ---------------------------------------------------------------------------
+
+TEST(CadenceTrillTest, TrillForcedBeforeCadence) {
+  // Place a note 1 beat before a cadence tick; it should be trilled.
+  Tick cadence_tick = kTicksPerBar;
+  auto note = makeNote(cadence_tick - kTicksPerBeat, 67, kTicksPerBeat, 0);
+
+  OrnamentContext ctx;
+  ctx.config.enable_trill = true;
+  ctx.config.ornament_density = 0.0f;  // Zero base density -- only cadence forces
+  ctx.role = VoiceRole::Assert;
+  ctx.seed = 42;
+  ctx.cadence_ticks = {cadence_tick};
+
+  auto result = applyOrnaments({note}, ctx);
+
+  // With 95% probability and seed=42, should be ornamented (trill).
+  EXPECT_GT(result.size(), 1u) << "Expected trill at cadence, got pass-through";
+}
+
+TEST(CadenceTrillTest, GroundVoiceNotTrillAtCadence) {
+  Tick cadence_tick = kTicksPerBar;
+  auto note = makeNote(cadence_tick - kTicksPerBeat, 48, kTicksPerBeat, 0);
+
+  OrnamentContext ctx;
+  ctx.config.enable_trill = true;
+  ctx.config.ornament_density = 0.0f;
+  ctx.role = VoiceRole::Ground;  // Ground voice
+  ctx.seed = 42;
+  ctx.cadence_ticks = {cadence_tick};
+
+  auto result = applyOrnaments({note}, ctx);
+
+  // Ground voice never gets ornaments.
+  ASSERT_EQ(result.size(), 1u);
+  EXPECT_EQ(result[0].pitch, 48);
+}
+
+TEST(CadenceTrillTest, PropelVoiceNotForcedAtCadence) {
+  // Only Assert/Respond get cadence trill obligation.
+  Tick cadence_tick = kTicksPerBar;
+  auto note = makeNote(cadence_tick - kTicksPerBeat, 67, kTicksPerBeat, 0);
+
+  OrnamentContext ctx;
+  ctx.config.enable_trill = true;
+  ctx.config.ornament_density = 0.0f;
+  ctx.role = VoiceRole::Propel;
+  ctx.seed = 42;
+  ctx.cadence_ticks = {cadence_tick};
+
+  auto result = applyOrnaments({note}, ctx);
+
+  // Propel doesn't get forced cadence trill (density=0 means no ornaments).
+  ASSERT_EQ(result.size(), 1u);
+}
+
+TEST(CadenceTrillTest, NoCadenceTicksNoForce) {
+  auto note = makeNote(0, 67, kTicksPerBeat, 0);
+
+  OrnamentContext ctx;
+  ctx.config.enable_trill = true;
+  ctx.config.ornament_density = 0.0f;
+  ctx.role = VoiceRole::Assert;
+  ctx.seed = 42;
+  // No cadence_ticks set
+
+  auto result = applyOrnaments({note}, ctx);
+
+  // With zero density and no cadence, nothing should happen.
+  ASSERT_EQ(result.size(), 1u);
 }
 
 }  // namespace

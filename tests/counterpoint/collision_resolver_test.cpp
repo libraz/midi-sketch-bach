@@ -590,5 +590,41 @@ TEST_F(CollisionResolverTest, CadenceTicksFarAwayNoEffect) {
   EXPECT_TRUE(result_far.accepted);
 }
 
+// ---------------------------------------------------------------------------
+// Cross-relation avoidance [Task L]
+// ---------------------------------------------------------------------------
+
+TEST_F(CollisionResolverTest, CrossRelationPenaltyInStepShift) {
+  // Voice 1 recently played C4(60). Voice 0 wants a pitch near C#4(61).
+  // C# creates a cross-relation with C-natural. The resolver should
+  // prefer a non-conflicting pitch over C#.
+  state.addNote(1, {0, kTicksPerBeat, 60, 80, 1});  // Voice 1: C4
+
+  // Voice 0 wants C#4(61) at tick 480 (weak beat, consonance not checked).
+  // But there should be a penalty for the cross-relation.
+  // On a weak beat, the original pitch is accepted by isSafeToPlace,
+  // so step_shift won't even fire. Let's test on strong beat where
+  // the pitch is dissonant and step_shift is invoked.
+  state.addNote(1, {960, kTicksPerBeat, 60, 80, 1});  // Voice 1: C4 at beat 2
+
+  // Voice 0 wants Db4(61) at beat 2 (strong). With C4: interval=1 (m2), dissonant.
+  // step_shift will try candidates. C#/Db candidates should get extra penalty.
+  auto result = resolver.findSafePitch(state, rules, 0, 61, 960, kTicksPerBeat);
+  EXPECT_TRUE(result.accepted);
+
+  // The accepted pitch should NOT be C#(61) due to dissonance + cross-relation.
+  // It should find a consonant pitch that also avoids cross-relation.
+  EXPECT_NE(result.pitch, 61);
+}
+
+TEST_F(CollisionResolverTest, NaturalHalfStepNoCrossRelation) {
+  // E(64) and F(65) are natural half steps -- not a cross-relation.
+  // Voice 1 has E4(64). Voice 0 wants F4(65). On weak beat this should be fine.
+  state.addNote(1, {kTicksPerBeat, kTicksPerBeat, 64, 80, 1});  // Voice 1: E4
+
+  // F4(65) at beat 1 (weak) -- should be safe (E/F is natural, not cross-relation).
+  EXPECT_TRUE(resolver.isSafeToPlace(state, rules, 0, 65, kTicksPerBeat, kTicksPerBeat));
+}
+
 }  // namespace
 }  // namespace bach

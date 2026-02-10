@@ -114,4 +114,64 @@ SuspensionChain generateSuspensionChain(Tick start_tick, uint8_t num_suspensions
   return chain;
 }
 
+// ---------------------------------------------------------------------------
+// Diatonic chain generation (scale-aware resolution)
+// ---------------------------------------------------------------------------
+
+SuspensionChain generateSuspensionChain(Tick start_tick, uint8_t num_suspensions,
+                                        uint8_t base_pitch, VoiceId voice,
+                                        SuspensionType type, Key key,
+                                        ScaleType scale) {
+  SuspensionChain chain;
+  chain.start_tick = start_tick;
+
+  if (num_suspensions == 0) {
+    chain.end_tick = start_tick;
+    return chain;
+  }
+
+  uint8_t current_pitch = clampPitch(static_cast<int>(base_pitch));
+  // Resolution direction: -1 for downward (4-3, 7-6, 9-8), +1 for upward (2-3).
+  int direction = (type == SuspensionType::Sus2_3) ? 1 : -1;
+  // 9-8 resolves by 2 diatonic steps; all others by 1.
+  int step_count = (type == SuspensionType::Sus9_8) ? 2 : 1;
+
+  chain.events.reserve(num_suspensions);
+
+  for (uint8_t idx = 0; idx < num_suspensions; ++idx) {
+    SuspensionEvent event;
+    event.type = type;
+    event.voice = voice;
+
+    Tick offset = static_cast<Tick>(idx) * kTicksPerSuspension;
+    event.preparation_tick = start_tick + offset;
+    event.dissonance_tick = start_tick + offset + kTicksPerBeat;
+    event.resolution_tick = start_tick + offset + 2 * kTicksPerBeat;
+
+    event.suspended_pitch = current_pitch;
+
+    // Compute diatonic resolution by searching for the next scale tone(s).
+    int res_pitch = static_cast<int>(current_pitch);
+    for (int step = 0; step < step_count; ++step) {
+      int search_start = res_pitch + direction;
+      bool found = false;
+      for (int p = search_start; p >= 0 && p <= 127; p += direction) {
+        if (scale_util::isScaleTone(static_cast<uint8_t>(p), key, scale)) {
+          res_pitch = p;
+          found = true;
+          break;
+        }
+      }
+      if (!found) break;
+    }
+    event.resolution_pitch = clampPitch(res_pitch);
+
+    chain.events.push_back(event);
+    current_pitch = event.resolution_pitch;
+  }
+
+  chain.end_tick = chain.events.back().resolution_tick + kTicksPerBeat;
+  return chain;
+}
+
 }  // namespace bach

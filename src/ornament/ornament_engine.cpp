@@ -5,6 +5,7 @@
 #include <algorithm>
 
 #include "analysis/counterpoint_analyzer.h"
+#include "core/scale.h"
 #include "harmony/chord_types.h"
 #include "harmony/harmonic_timeline.h"
 #include "ornament/appoggiatura.h"
@@ -52,14 +53,44 @@ float effectiveDensity(float base_density, VoiceRole role) {
   return base_density;
 }
 
-/// @brief Calculate upper neighbor pitch (whole step up).
+/// @brief Calculate upper neighbor pitch using diatonic scale.
+/// Searches upward from pitch for the next scale tone.
+/// @param pitch Original MIDI pitch.
+/// @param key Musical key context.
+/// @param scale Scale type (Major, HarmonicMinor, etc.).
+/// @return Upper diatonic neighbor pitch, clamped to MIDI range.
+uint8_t upperNeighborPitch(uint8_t pitch, Key key, ScaleType scale) {
+  for (int p = static_cast<int>(pitch) + 1; p <= 127; ++p) {
+    if (scale_util::isScaleTone(static_cast<uint8_t>(p), key, scale)) {
+      return static_cast<uint8_t>(p);
+    }
+  }
+  return pitch;
+}
+
+/// @brief Calculate lower neighbor pitch using diatonic scale.
+/// Searches downward from pitch for the next scale tone.
+/// @param pitch Original MIDI pitch.
+/// @param key Musical key context.
+/// @param scale Scale type (Major, HarmonicMinor, etc.).
+/// @return Lower diatonic neighbor pitch, clamped to MIDI range.
+uint8_t lowerNeighborPitch(uint8_t pitch, Key key, ScaleType scale) {
+  for (int p = static_cast<int>(pitch) - 1; p >= 0; --p) {
+    if (scale_util::isScaleTone(static_cast<uint8_t>(p), key, scale)) {
+      return static_cast<uint8_t>(p);
+    }
+  }
+  return pitch;
+}
+
+/// @brief Calculate upper neighbor pitch (legacy whole step, no key context).
 /// @param pitch Original MIDI pitch.
 /// @return Upper neighbor pitch, clamped to MIDI range.
 uint8_t upperNeighborPitch(uint8_t pitch) {
   return (pitch <= 125) ? static_cast<uint8_t>(pitch + 2) : pitch;
 }
 
-/// @brief Calculate lower neighbor pitch (whole step down).
+/// @brief Calculate lower neighbor pitch (legacy whole step, no key context).
 /// @param pitch Original MIDI pitch.
 /// @return Lower neighbor pitch, clamped to MIDI range.
 uint8_t lowerNeighborPitch(uint8_t pitch) {
@@ -69,10 +100,21 @@ uint8_t lowerNeighborPitch(uint8_t pitch) {
 /// @brief Apply a single ornament to a note based on the selected type.
 /// @param note The note to ornament.
 /// @param type The ornament type to apply.
+/// @param key Musical key context for scale-aware neighbors.
+/// @param scale Scale type for diatonic neighbor calculation.
+/// @param has_key True when key context is available (false = legacy behavior).
 /// @return Vector of sub-notes replacing the original.
-std::vector<NoteEvent> applyOrnamentToNote(const NoteEvent& note, OrnamentType type) {
-  const uint8_t upper = upperNeighborPitch(note.pitch);
-  const uint8_t lower = lowerNeighborPitch(note.pitch);
+std::vector<NoteEvent> applyOrnamentToNote(const NoteEvent& note, OrnamentType type,
+                                           Key key, ScaleType scale, bool has_key) {
+  uint8_t upper;
+  uint8_t lower;
+  if (has_key) {
+    upper = upperNeighborPitch(note.pitch, key, scale);
+    lower = lowerNeighborPitch(note.pitch, key, scale);
+  } else {
+    upper = upperNeighborPitch(note.pitch);
+    lower = lowerNeighborPitch(note.pitch);
+  }
 
   switch (type) {
     case OrnamentType::Trill:
@@ -187,9 +229,10 @@ std::vector<NoteEvent> applyOrnaments(const std::vector<NoteEvent>& notes,
   }
 
   const float density = effectiveDensity(context.config.ornament_density, context.role);
+  const bool has_cadence_ticks = !context.cadence_ticks.empty();
 
-  // Zero density: no ornaments to apply.
-  if (density <= 0.0f) {
+  // Zero density and no cadence ticks: no ornaments to apply.
+  if (density <= 0.0f && !has_cadence_ticks) {
     return notes;
   }
 
@@ -212,19 +255,57 @@ std::vector<NoteEvent> applyOrnaments(const std::vector<NoteEvent>& notes,
       continue;
     }
 
+    // Check cadence trill obligation: force trill at cadence points.
+    bool force_trill = false;
+    if (!context.cadence_ticks.empty() && context.role != VoiceRole::Ground) {
+      for (Tick cad_tick : context.cadence_ticks) {
+        // Note within 1 beat before cadence, with sufficient duration.
+        if (cad_tick > 0 && note.start_tick + note.duration >= cad_tick &&
+            note.start_tick >= cad_tick - kTicksPerBeat &&
+            note.start_tick < cad_tick &&
+            note.duration >= kTicksPerBeat / 2 &&
+            (context.role == VoiceRole::Assert || context.role == VoiceRole::Respond)) {
+          // 95% obligation for cadence trills.
+          DeterministicRng cad_rng(context.seed ^ static_cast<uint32_t>(cad_tick) * 2246822519u);
+          if (cad_rng.next() < 0.95f) {
+            force_trill = true;
+          }
+          break;
+        }
+      }
+    }
+
     // Mix note index into RNG for per-note determinism.
     DeterministicRng note_rng(context.seed ^ static_cast<uint32_t>(idx) * 2654435761u);
     const float roll = note_rng.next();
 
-    if (roll < density) {
+    if (force_trill || roll < density) {
       // Select ornament type: use harmonic context if available.
       OrnamentType type;
-      if (context.timeline != nullptr) {
+      if (force_trill) {
+        // Prefer compound trill+nachschlag for longer notes at cadences.
+        if (note.duration >= kTicksPerBeat && context.config.enable_compound) {
+          type = OrnamentType::CompoundTrillNachschlag;
+        } else {
+          type = OrnamentType::Trill;
+        }
+      } else if (context.timeline != nullptr) {
         type = selectOrnamentType(note, context.config, *context.timeline, note.start_tick);
       } else {
         type = selectOrnamentType(note, context.config);
       }
-      auto ornamented = applyOrnamentToNote(note, type);
+
+      // Extract key context from timeline for scale-aware neighbors.
+      bool has_key = (context.timeline != nullptr);
+      Key key = Key::C;
+      ScaleType scale = ScaleType::Major;
+      if (has_key) {
+        const auto& event = context.timeline->getAt(note.start_tick);
+        key = event.key;
+        scale = event.is_minor ? ScaleType::HarmonicMinor : ScaleType::Major;
+      }
+
+      auto ornamented = applyOrnamentToNote(note, type, key, scale, has_key);
       for (auto& sub_note : ornamented) {
         result.push_back(sub_note);
       }

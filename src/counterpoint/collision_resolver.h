@@ -172,7 +172,8 @@ class CollisionResolver {
                               const IRuleEvaluator& rules,
                               VoiceId voice_id, uint8_t desired_pitch,
                               Tick tick, Tick duration,
-                              const std::string& strategy) const;
+                              const std::string& strategy,
+                              uint8_t next_pitch = 0) const;
 
   /// @brief Check if a pitch would cross an adjacent voice.
   /// @return True if the candidate pitch crosses above a higher voice
