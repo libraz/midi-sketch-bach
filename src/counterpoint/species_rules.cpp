@@ -1,0 +1,130 @@
+/// @file
+/// @brief Implementation of species-specific counterpoint rules (1st through 5th species).
+
+#include "counterpoint/species_rules.h"
+
+#include <cstdlib>
+
+namespace bach {
+
+// ---------------------------------------------------------------------------
+// SpeciesType to string
+// ---------------------------------------------------------------------------
+
+/// @brief Convert a SpeciesType enum value to its string representation.
+/// @param species The species type to convert.
+/// @return A C-string name for the species (e.g. "first_species").
+const char* speciesToString(SpeciesType species) {
+  switch (species) {
+    case SpeciesType::First:  return "first_species";
+    case SpeciesType::Second: return "second_species";
+    case SpeciesType::Third:  return "third_species";
+    case SpeciesType::Fourth: return "fourth_species";
+    case SpeciesType::Fifth:  return "fifth_species";
+  }
+  return "unknown_species";
+}
+
+// ---------------------------------------------------------------------------
+// SpeciesRules
+// ---------------------------------------------------------------------------
+
+SpeciesRules::SpeciesRules(SpeciesType species) : species_(species) {}
+
+SpeciesType SpeciesRules::getSpecies() const { return species_; }
+
+int SpeciesRules::notesPerBeat() const {
+  switch (species_) {
+    case SpeciesType::First:  return 1;
+    case SpeciesType::Second: return 2;
+    case SpeciesType::Third:  return 4;
+    case SpeciesType::Fourth: return 1;  // Syncopated, same ratio as 1st.
+    case SpeciesType::Fifth:  return 0;  // Varies (florid).
+  }
+  return 1;
+}
+
+bool SpeciesRules::isDissonanceAllowed(bool is_strong_beat) const {
+  switch (species_) {
+    case SpeciesType::First:
+      // First species: only consonances, on every beat.
+      return false;
+
+    case SpeciesType::Second:
+      // Second species: consonance required on strong beats.
+      // Dissonance allowed on weak beats (passing tones).
+      return !is_strong_beat;
+
+    case SpeciesType::Third:
+      // Third species: consonance on beat 1.  Dissonance allowed on
+      // beats 2, 3, 4 as passing/neighbor tones.
+      return !is_strong_beat;
+
+    case SpeciesType::Fourth:
+      // Fourth species (syncopation): the tied-over note on the strong
+      // beat may be dissonant (suspension), provided it resolves
+      // downward by step on the weak beat.
+      return is_strong_beat;  // Suspension occurs on the strong beat.
+
+    case SpeciesType::Fifth:
+      // Fifth species (florid): combines all species.  Dissonance is
+      // context-dependent -- allow it on weak beats and as suspensions.
+      return !is_strong_beat;
+  }
+  return false;
+}
+
+bool SpeciesRules::requiresSuspensionResolution() const {
+  return species_ == SpeciesType::Fourth;
+}
+
+// ---------------------------------------------------------------------------
+// Stepwise motion check
+// ---------------------------------------------------------------------------
+
+bool SpeciesRules::isStep(int semitones) {
+  int abs_interval = std::abs(semitones);
+  return abs_interval == 1 || abs_interval == 2;
+}
+
+// ---------------------------------------------------------------------------
+// Passing tone validation
+// ---------------------------------------------------------------------------
+
+bool SpeciesRules::isValidPassingTone(uint8_t prev, uint8_t current,
+                                      uint8_t next) const {
+  // Passing tones are not allowed in first species.
+  if (species_ == SpeciesType::First) return false;
+
+  int interval_in = static_cast<int>(current) - static_cast<int>(prev);
+  int interval_out = static_cast<int>(next) - static_cast<int>(current);
+
+  // Both intervals must be stepwise.
+  if (!isStep(interval_in) || !isStep(interval_out)) return false;
+
+  // Direction must be the same (ascending through or descending through).
+  // Both positive (ascending) or both negative (descending).
+  if ((interval_in > 0) != (interval_out > 0)) return false;
+
+  return true;
+}
+
+// ---------------------------------------------------------------------------
+// Neighbor tone validation
+// ---------------------------------------------------------------------------
+
+bool SpeciesRules::isValidNeighborTone(uint8_t prev, uint8_t current,
+                                       uint8_t next) const {
+  // Neighbor tones appear in 3rd species and above.
+  if (species_ == SpeciesType::First || species_ == SpeciesType::Second) {
+    return false;
+  }
+
+  // A neighbor tone departs by step and returns to the original pitch.
+  if (prev != next) return false;
+
+  int interval = static_cast<int>(current) - static_cast<int>(prev);
+  return isStep(interval);
+}
+
+}  // namespace bach

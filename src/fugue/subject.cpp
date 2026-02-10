@@ -1,0 +1,243 @@
+/// @file
+/// @brief Fugue subject generation with character-driven note and rhythm selection.
+
+#include "fugue/subject.h"
+
+#include <algorithm>
+#include <random>
+
+#include "core/pitch_utils.h"
+#include "core/rng_util.h"
+
+namespace bach {
+
+// ---------------------------------------------------------------------------
+// Subject member functions
+// ---------------------------------------------------------------------------
+
+uint8_t Subject::lowestPitch() const {
+  if (notes.empty()) return 127;
+  uint8_t lowest = 127;
+  for (const auto& note : notes) {
+    if (note.pitch < lowest) lowest = note.pitch;
+  }
+  return lowest;
+}
+
+uint8_t Subject::highestPitch() const {
+  if (notes.empty()) return 0;
+  uint8_t highest = 0;
+  for (const auto& note : notes) {
+    if (note.pitch > highest) highest = note.pitch;
+  }
+  return highest;
+}
+
+int Subject::range() const {
+  if (notes.empty()) return 0;
+  return static_cast<int>(highestPitch()) - static_cast<int>(lowestPitch());
+}
+
+size_t Subject::noteCount() const {
+  return notes.size();
+}
+
+// ---------------------------------------------------------------------------
+// Duration tables per character
+// ---------------------------------------------------------------------------
+
+namespace {
+
+/// @brief Whole note duration in ticks.
+constexpr Tick kWholeNote = kTicksPerBar;          // 1920
+/// @brief Half note duration in ticks.
+constexpr Tick kHalfNote = kTicksPerBeat * 2;      // 960
+/// @brief Quarter note duration in ticks.
+constexpr Tick kQuarterNote = kTicksPerBeat;        // 480
+/// @brief Eighth note duration in ticks.
+constexpr Tick kEighthNote = kTicksPerBeat / 2;     // 240
+/// @brief Dotted quarter note duration in ticks.
+constexpr Tick kDottedQuarter = kQuarterNote + kEighthNote;  // 720
+/// @brief Dotted eighth note duration in ticks.
+constexpr Tick kDottedEighth = kEighthNote + kEighthNote / 2;  // 360
+
+/// @brief Durations for Severe character: even, no dots.
+constexpr Tick kSevereDurations[] = {kHalfNote, kQuarterNote, kEighthNote};
+constexpr int kSevereDurCount = 3;
+
+/// @brief Durations for Playful character: includes dotted values.
+constexpr Tick kPlayfulDurations[] = {
+    kQuarterNote, kEighthNote, kDottedQuarter, kDottedEighth};
+constexpr int kPlayfulDurCount = 4;
+
+/// @brief Durations for Noble character: stately, longer values.
+constexpr Tick kNobleDurations[] = {kWholeNote, kHalfNote, kQuarterNote};
+constexpr int kNobleDurCount = 3;
+
+/// @brief Durations for Restless character: uneven, syncopated.
+constexpr Tick kRestlessDurations[] = {
+    kQuarterNote, kEighthNote, kDottedQuarter, kDottedEighth, kHalfNote};
+constexpr int kRestlessDurCount = 5;
+
+/// @brief Parameters that shape subject generation for a given character type.
+struct CharacterParams {
+  float leap_prob;        // Probability of a leap (vs step)
+  int max_range;          // Maximum pitch range in semitones
+  const Tick* durations;  // Available duration values
+  int dur_count;          // Number of duration values
+};
+
+/// @brief Return generation parameters for the given subject character.
+/// @param character The SubjectCharacter to look up.
+/// @return CharacterParams with leap probability, range, and duration table.
+CharacterParams getCharacterParams(SubjectCharacter character) {
+  switch (character) {
+    case SubjectCharacter::Severe:
+      return {0.15f, 8, kSevereDurations, kSevereDurCount};
+    case SubjectCharacter::Playful:
+      return {0.45f, 12, kPlayfulDurations, kPlayfulDurCount};
+    case SubjectCharacter::Noble:
+      return {0.25f, 10, kNobleDurations, kNobleDurCount};
+    case SubjectCharacter::Restless:
+      return {0.35f, 12, kRestlessDurations, kRestlessDurCount};
+  }
+  return {0.20f, 10, kSevereDurations, kSevereDurCount};
+}
+
+/// @brief Scale degree intervals for stepwise motion (seconds).
+constexpr int kStepIntervals[] = {-2, -1, 1, 2};
+/// @brief Number of entries in kStepIntervals.
+constexpr int kStepCount = 4;
+/// @brief Scale degree intervals for leaps (thirds, fourths, fifths).
+constexpr int kLeapIntervals[] = {-5, -4, -3, 3, 4, 5};
+/// @brief Number of entries in kLeapIntervals.
+constexpr int kLeapCount = 6;
+
+}  // namespace
+
+// ---------------------------------------------------------------------------
+// SubjectGenerator
+// ---------------------------------------------------------------------------
+
+Subject SubjectGenerator::generate(const FugueConfig& config,
+                                   uint32_t seed) const {
+  Subject subject;
+  subject.key = config.key;
+  subject.character = config.character;
+
+  uint8_t bars = config.subject_bars;
+  if (bars < 2) bars = 2;
+  if (bars > 4) bars = 4;
+
+  subject.notes = generateNotes(config.character, config.key, bars, seed);
+  subject.length_ticks = static_cast<Tick>(bars) * kTicksPerBar;
+
+  return subject;
+}
+
+std::vector<NoteEvent> SubjectGenerator::generateNotes(
+    SubjectCharacter character, Key key, uint8_t bars,
+    uint32_t seed) const {
+  std::mt19937 gen(seed);
+  CharacterParams params = getCharacterParams(character);
+  int key_offset = static_cast<int>(key);
+
+  // Total duration to fill.
+  Tick total_ticks = static_cast<Tick>(bars) * kTicksPerBar;
+
+  // Start on tonic (degree 0) or dominant (degree 4).
+  // Base note: C4 = MIDI 60.
+  constexpr int kBaseNote = 60;
+  int start_degree = rng::rollProbability(gen, 0.6f) ? 0 : 4;
+  int current_degree = start_degree;
+
+  std::vector<NoteEvent> result;
+  Tick current_tick = 0;
+
+  // Track the range bounds relative to the starting pitch.
+  int start_pitch = degreeToPitch(current_degree, kBaseNote, key_offset);
+  int min_pitch = start_pitch;
+  int max_pitch = start_pitch;
+
+  while (current_tick < total_ticks) {
+    // Select duration.
+    int dur_idx = rng::rollRange(gen, 0, params.dur_count - 1);
+    Tick duration = params.durations[dur_idx];
+
+    // Ensure we do not exceed total length.
+    if (current_tick + duration > total_ticks) {
+      duration = total_ticks - current_tick;
+      // Snap to nearest valid duration (at least an eighth note).
+      if (duration < kEighthNote) break;
+    }
+
+    // Compute pitch from current degree.
+    int pitch = degreeToPitch(current_degree, kBaseNote, key_offset);
+
+    // Clamp to valid MIDI range.
+    pitch = std::max(36, std::min(96, pitch));
+
+    NoteEvent note;
+    note.start_tick = current_tick;
+    note.duration = duration;
+    note.pitch = static_cast<uint8_t>(pitch);
+    note.velocity = 80;
+    note.voice = 0;
+
+    result.push_back(note);
+    current_tick += duration;
+
+    // Track range.
+    if (pitch < min_pitch) min_pitch = pitch;
+    if (pitch > max_pitch) max_pitch = pitch;
+
+    // Choose next degree: step or leap.
+    bool use_leap = rng::rollProbability(gen, params.leap_prob);
+
+    int interval = 0;
+    if (use_leap) {
+      interval = kLeapIntervals[rng::rollRange(gen, 0, kLeapCount - 1)];
+    } else {
+      interval = kStepIntervals[rng::rollRange(gen, 0, kStepCount - 1)];
+    }
+
+    int next_degree = current_degree + interval;
+    int next_pitch = degreeToPitch(next_degree, kBaseNote, key_offset);
+
+    // Enforce range constraint: if the next note would exceed the maximum
+    // allowed range, reverse the direction.
+    int tentative_min = std::min(min_pitch, next_pitch);
+    int tentative_max = std::max(max_pitch, next_pitch);
+    if (tentative_max - tentative_min > params.max_range) {
+      // Reverse direction.
+      interval = -interval;
+      next_degree = current_degree + interval;
+      next_pitch = degreeToPitch(next_degree, kBaseNote, key_offset);
+
+      // If still out of range, just step back toward the start.
+      tentative_min = std::min(min_pitch, next_pitch);
+      tentative_max = std::max(max_pitch, next_pitch);
+      if (tentative_max - tentative_min > params.max_range) {
+        // Move toward starting degree.
+        if (current_degree > start_degree) {
+          next_degree = current_degree - 1;
+        } else {
+          next_degree = current_degree + 1;
+        }
+      }
+    }
+
+    current_degree = next_degree;
+  }
+
+  // Ensure the last note ends on the tonic.
+  if (!result.empty()) {
+    int tonic_pitch = degreeToPitch(0, kBaseNote, key_offset);
+    tonic_pitch = std::max(36, std::min(96, tonic_pitch));
+    result.back().pitch = static_cast<uint8_t>(tonic_pitch);
+  }
+
+  return result;
+}
+
+}  // namespace bach
