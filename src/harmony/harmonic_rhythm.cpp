@@ -56,4 +56,19 @@ void applyRhythmFactors(std::vector<HarmonicEvent>& events,
   }
 }
 
+float phaseToRhythmFactor(FuguePhase phase, bool near_cadence) {
+  if (near_cadence) {
+    return kPreCadenceAcceleration;
+  }
+  switch (phase) {
+    case FuguePhase::Establish:
+      return kHarmonicRhythmEstablish;
+    case FuguePhase::Develop:
+      return kHarmonicRhythmDevelop;
+    case FuguePhase::Resolve:
+      return kHarmonicRhythmResolve;
+  }
+  return kHarmonicRhythmDevelop;
+}
+
 }  // namespace bach

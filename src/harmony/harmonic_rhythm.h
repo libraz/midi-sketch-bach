@@ -13,18 +13,18 @@ namespace bach {
 /// Design value tables for harmonic rhythm factor by fugue phase.
 /// These are FIXED values (Principle 4: Trust Design Values).
 
-/// Harmonic rhythm factor for Establish phase: steady, normal pace.
-constexpr float kHarmonicRhythmEstablish = 1.0f;
+/// Harmonic rhythm factor for Establish phase: bar-level, leisurely pace.
+constexpr float kHarmonicRhythmEstablish = 2.0f;
 
-/// Harmonic rhythm factor for Develop phase: slightly faster harmonic changes.
-constexpr float kHarmonicRhythmDevelop = 0.85f;
+/// Harmonic rhythm factor for Develop phase: beat-level, standard pace.
+constexpr float kHarmonicRhythmDevelop = 1.0f;
 
-/// Harmonic rhythm factor for Resolve phase: broadening, slowing harmonic rhythm.
-constexpr float kHarmonicRhythmResolve = 1.2f;
+/// Harmonic rhythm factor for Resolve phase: slightly faster, building tension.
+constexpr float kHarmonicRhythmResolve = 0.75f;
 
 /// Pre-cadence acceleration factor.
-/// Harmonic rhythm speeds up within 2 beats before a cadence point.
-constexpr float kPreCadenceAcceleration = 0.7f;
+/// Harmonic rhythm speeds up to half-beat level within 2 beats before a cadence point.
+constexpr float kPreCadenceAcceleration = 0.5f;
 
 /// Number of ticks before a cadence where acceleration begins (2 beats).
 constexpr Tick kPreCadenceWindow = kTicksPerBeat * 2;
@@ -36,12 +36,12 @@ constexpr Tick kPreCadenceWindow = kTicksPerBeat * 2;
 /// without rebuilding the timeline (lazy evaluation).
 ///
 /// Phase boundaries (design values, not configurable):
-///   - First third of total duration: Establish (1.0)
-///   - Middle third: Develop (0.85)
-///   - Last third: Resolve (1.2)
+///   - First third of total duration: Establish (2.0)
+///   - Middle third: Develop (1.0)
+///   - Last third: Resolve (0.75)
 ///
 /// If the tick falls within kPreCadenceWindow ticks before any cadence point,
-/// the pre-cadence acceleration factor (0.7) takes priority.
+/// the pre-cadence acceleration factor (0.5) takes priority.
 ///
 /// @param tick Current tick position.
 /// @param total_duration Total piece duration in ticks.
@@ -62,6 +62,16 @@ float computeRhythmFactor(Tick tick, Tick total_duration,
 void applyRhythmFactors(std::vector<HarmonicEvent>& events,
                         Tick total_duration,
                         const std::vector<Tick>& cadence_ticks);
+
+/// @brief Compute rhythm factor directly from a FuguePhase value.
+///
+/// Maps FuguePhase to a fixed rhythm factor (design values, Principle 4).
+/// Pre-cadence acceleration takes priority when near_cadence is true.
+///
+/// @param phase The current fugue phase.
+/// @param near_cadence True if within pre-cadence window.
+/// @return Rhythm factor: >1.0 = slower, <1.0 = faster, 1.0 = normal.
+float phaseToRhythmFactor(FuguePhase phase, bool near_cadence);
 
 }  // namespace bach
 

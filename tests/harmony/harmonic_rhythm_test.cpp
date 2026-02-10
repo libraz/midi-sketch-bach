@@ -20,7 +20,7 @@ constexpr Tick kTestDuration = kTicksPerBar * 3;
 // ---------------------------------------------------------------------------
 
 TEST(HarmonicRhythmTest, ComputeRhythmFactor_Establish_ReturnsDesignValue) {
-  // Tick in the first third (Establish phase) should return 1.0.
+  // Tick in the first third (Establish phase) should return 2.0.
   std::vector<Tick> no_cadences;
 
   // Beginning of the piece.
@@ -39,7 +39,7 @@ TEST(HarmonicRhythmTest, ComputeRhythmFactor_Establish_ReturnsDesignValue) {
 }
 
 TEST(HarmonicRhythmTest, ComputeRhythmFactor_Develop_ReturnsFasterRhythm) {
-  // Tick in the middle third (Develop phase) should return 0.85.
+  // Tick in the middle third (Develop phase) should return 1.0.
   std::vector<Tick> no_cadences;
 
   // Start of Develop phase.
@@ -53,8 +53,8 @@ TEST(HarmonicRhythmTest, ComputeRhythmFactor_Develop_ReturnsFasterRhythm) {
                   computeRhythmFactor(mid_develop, kTestDuration, no_cadences));
 }
 
-TEST(HarmonicRhythmTest, ComputeRhythmFactor_Resolve_ReturnsSlowerRhythm) {
-  // Tick in the last third (Resolve phase) should return 1.2.
+TEST(HarmonicRhythmTest, ComputeRhythmFactor_Resolve_ReturnsFasterRhythm) {
+  // Tick in the last third (Resolve phase) should return 0.75.
   std::vector<Tick> no_cadences;
 
   // Start of Resolve phase.
@@ -216,10 +216,10 @@ TEST(HarmonicRhythmTest, ApplyRhythmFactors_WithCadences) {
 
 TEST(HarmonicRhythmTest, DesignValues_AreCorrect) {
   // Verify the constant design values match the specification.
-  EXPECT_FLOAT_EQ(1.0f, kHarmonicRhythmEstablish);
-  EXPECT_FLOAT_EQ(0.85f, kHarmonicRhythmDevelop);
-  EXPECT_FLOAT_EQ(1.2f, kHarmonicRhythmResolve);
-  EXPECT_FLOAT_EQ(0.7f, kPreCadenceAcceleration);
+  EXPECT_FLOAT_EQ(2.0f, kHarmonicRhythmEstablish);
+  EXPECT_FLOAT_EQ(1.0f, kHarmonicRhythmDevelop);
+  EXPECT_FLOAT_EQ(0.75f, kHarmonicRhythmResolve);
+  EXPECT_FLOAT_EQ(0.5f, kPreCadenceAcceleration);
   EXPECT_EQ(kTicksPerBeat * 2, kPreCadenceWindow);
 }
 
@@ -227,6 +227,28 @@ TEST(HarmonicRhythmTest, RhythmFactor_DefaultInHarmonicEvent) {
   // Default HarmonicEvent should have rhythm_factor = 1.0.
   HarmonicEvent event;
   EXPECT_FLOAT_EQ(1.0f, event.rhythm_factor);
+}
+
+// ---------------------------------------------------------------------------
+// phaseToRhythmFactor tests
+// ---------------------------------------------------------------------------
+
+TEST(HarmonicRhythmTest, PhaseToRhythmFactor_Establish) {
+  EXPECT_FLOAT_EQ(phaseToRhythmFactor(FuguePhase::Establish, false), 2.0f);
+}
+
+TEST(HarmonicRhythmTest, PhaseToRhythmFactor_Develop) {
+  EXPECT_FLOAT_EQ(phaseToRhythmFactor(FuguePhase::Develop, false), 1.0f);
+}
+
+TEST(HarmonicRhythmTest, PhaseToRhythmFactor_Resolve) {
+  EXPECT_FLOAT_EQ(phaseToRhythmFactor(FuguePhase::Resolve, false), 0.75f);
+}
+
+TEST(HarmonicRhythmTest, PhaseToRhythmFactor_NearCadencePriority) {
+  EXPECT_FLOAT_EQ(phaseToRhythmFactor(FuguePhase::Establish, true), 0.5f);
+  EXPECT_FLOAT_EQ(phaseToRhythmFactor(FuguePhase::Develop, true), 0.5f);
+  EXPECT_FLOAT_EQ(phaseToRhythmFactor(FuguePhase::Resolve, true), 0.5f);
 }
 
 }  // namespace
