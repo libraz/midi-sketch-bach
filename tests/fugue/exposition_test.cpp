@@ -565,7 +565,7 @@ TEST(ExpositionTest, BuildExposition_EntryNumbersAreOneBased) {
 // Voice IDs
 // ---------------------------------------------------------------------------
 
-TEST(ExpositionTest, BuildExposition_VoiceIdsAreSequential) {
+TEST(ExpositionTest, BuildExposition_VoiceIdsAreValidPermutation) {
   Subject subject = makeTestSubject();
   Answer answer = makeTestAnswer(subject);
   Countersubject counter = makeTestCountersubject(subject);
@@ -573,8 +573,16 @@ TEST(ExpositionTest, BuildExposition_VoiceIdsAreSequential) {
 
   Exposition expo = buildExposition(subject, answer, counter, config, 42);
 
+  // With weighted random entry order, voice IDs form a permutation of [0..3],
+  // not necessarily sequential. Verify all IDs are present exactly once.
+  std::set<VoiceId> voice_ids;
   for (uint8_t idx = 0; idx < 4; ++idx) {
-    EXPECT_EQ(expo.entries[idx].voice_id, idx);
+    voice_ids.insert(expo.entries[idx].voice_id);
+  }
+  EXPECT_EQ(voice_ids.size(), 4u);
+  for (uint8_t idx = 0; idx < 4; ++idx) {
+    EXPECT_TRUE(voice_ids.count(idx) > 0)
+        << "Voice ID " << static_cast<int>(idx) << " missing from entry order";
   }
 }
 
@@ -692,10 +700,17 @@ TEST(ExpositionTest, BuildExposition_FreeCounterpointAllDiatonic) {
   for (uint32_t seed = 1; seed <= 10; ++seed) {
     Exposition expo = buildExposition(subject, answer, counter, config, seed);
 
-    // Voice 0 free counterpoint starts at entry 2's tick.
+    // With weighted random entry order, find the voice that enters first
+    // (entry index 0). Its free counterpoint starts after entry 2's tick,
+    // which is 2 entries later than its own subject/CS material.
+    VoiceId first_voice = expo.entries[0].voice_id;
+
+    // Free counterpoint for the first-entering voice begins at entry 2's tick.
+    // Its subject occupies [0, subject.length_ticks) and CS occupies
+    // [subject.length_ticks, 2*subject.length_ticks), so free CP starts at 2x.
     Tick free_cp_start = subject.length_ticks * 2;
-    if (expo.voice_notes.count(0) > 0) {
-      for (const auto& note : expo.voice_notes.at(0)) {
+    if (expo.voice_notes.count(first_voice) > 0) {
+      for (const auto& note : expo.voice_notes.at(first_voice)) {
         if (note.start_tick >= free_cp_start) {
           EXPECT_TRUE(
               scale_util::isScaleTone(note.pitch, Key::C, ScaleType::Major))
@@ -703,6 +718,7 @@ TEST(ExpositionTest, BuildExposition_FreeCounterpointAllDiatonic) {
               << static_cast<int>(note.pitch)
               << " (" << pitchToNoteName(note.pitch) << ")"
               << " at tick " << note.start_tick
+              << " in voice " << static_cast<int>(first_voice)
               << " (seed " << seed << ")";
         }
       }
@@ -790,7 +806,9 @@ TEST(ExpositionTest, BuildExposition_CSAdaptedToAnswerKey) {
 // ---------------------------------------------------------------------------
 
 TEST(ExpositionEntryOrderTest, PlayfulUsesMiddleFirst3Voice) {
-  // Playful character with 3 voices should use MiddleFirst: voice 1 enters first.
+  // Playful character with 3 voices uses weighted random selection.
+  // MiddleFirst [1,0,2] has the highest weight (0.50) for Playful,
+  // so it should appear most often across many seeds.
   Subject subject;
   subject.key = Key::C;
   subject.character = SubjectCharacter::Playful;
@@ -818,16 +836,30 @@ TEST(ExpositionEntryOrderTest, PlayfulUsesMiddleFirst3Voice) {
   config.character = SubjectCharacter::Playful;
   config.key = Key::C;
 
-  auto expo = buildExposition(subject, answer, cs, config, 42);
-
-  // First entry should be voice 1 (MiddleFirst: [1, 0, 2]).
-  ASSERT_GE(expo.entries.size(), 3u);
-  EXPECT_EQ(expo.entries[0].voice_id, 1);
-  EXPECT_EQ(expo.entries[1].voice_id, 0);
-  EXPECT_EQ(expo.entries[2].voice_id, 2);
+  // Run many seeds and count how often MiddleFirst [1,0,2] is selected.
+  int middle_first_count = 0;
+  constexpr int kNumTrials = 100;
+  for (uint32_t seed = 1; seed <= kNumTrials; ++seed) {
+    auto expo = buildExposition(subject, answer, cs, config, seed);
+    ASSERT_GE(expo.entries.size(), 3u);
+    if (expo.entries[0].voice_id == 1 &&
+        expo.entries[1].voice_id == 0 &&
+        expo.entries[2].voice_id == 2) {
+      ++middle_first_count;
+    }
+  }
+  // With weight 0.50, expect MiddleFirst at least 30% of the time (conservative).
+  EXPECT_GE(middle_first_count, 30)
+      << "MiddleFirst should be the most common order for Playful; got "
+      << middle_first_count << "/" << kNumTrials;
 }
 
 TEST(ExpositionEntryOrderTest, NobleUsesBottomFirst3Voice) {
+  // Noble character with 3 voices uses weighted random selection.
+  // TopFirst [0,1,2] has the highest weight (0.40) for Noble,
+  // with BottomFirst [2,1,0] at 0.35. Verify that the order is always
+  // one of the three valid permutations, and that TopFirst or BottomFirst
+  // dominate across many seeds.
   Subject subject;
   subject.key = Key::C;
   subject.character = SubjectCharacter::Noble;
@@ -855,16 +887,33 @@ TEST(ExpositionEntryOrderTest, NobleUsesBottomFirst3Voice) {
   config.character = SubjectCharacter::Noble;
   config.key = Key::C;
 
-  auto expo = buildExposition(subject, answer, cs, config, 42);
-
-  // Noble: BottomFirst [2, 1, 0].
-  ASSERT_GE(expo.entries.size(), 3u);
-  EXPECT_EQ(expo.entries[0].voice_id, 2);
-  EXPECT_EQ(expo.entries[1].voice_id, 1);
-  EXPECT_EQ(expo.entries[2].voice_id, 0);
+  // Run many seeds and count each order.
+  int top_first_count = 0;     // [0,1,2]
+  int bottom_first_count = 0;  // [2,1,0]
+  constexpr int kNumTrials = 100;
+  for (uint32_t seed = 1; seed <= kNumTrials; ++seed) {
+    auto expo = buildExposition(subject, answer, cs, config, seed);
+    ASSERT_GE(expo.entries.size(), 3u);
+    if (expo.entries[0].voice_id == 0) {
+      ++top_first_count;
+    } else if (expo.entries[0].voice_id == 2) {
+      ++bottom_first_count;
+    }
+  }
+  // Noble has TopFirst=0.40 and BottomFirst=0.35, so together they should
+  // dominate. Each should appear at least 20% of the time (conservative).
+  EXPECT_GE(top_first_count, 20)
+      << "TopFirst should appear frequently for Noble; got "
+      << top_first_count << "/" << kNumTrials;
+  EXPECT_GE(bottom_first_count, 20)
+      << "BottomFirst should appear frequently for Noble; got "
+      << bottom_first_count << "/" << kNumTrials;
 }
 
 TEST(ExpositionEntryOrderTest, SevereUsesDefaultOrder) {
+  // Severe character with 3 voices uses weighted random selection.
+  // TopFirst [0,1,2] has the highest weight (0.50) for Severe,
+  // so it should appear most often across many seeds.
   Subject subject;
   subject.key = Key::C;
   subject.character = SubjectCharacter::Severe;
@@ -892,13 +941,22 @@ TEST(ExpositionEntryOrderTest, SevereUsesDefaultOrder) {
   config.character = SubjectCharacter::Severe;
   config.key = Key::C;
 
-  auto expo = buildExposition(subject, answer, cs, config, 42);
-
-  // Severe: TopFirst [0, 1, 2] (default/backward compatible).
-  ASSERT_GE(expo.entries.size(), 3u);
-  EXPECT_EQ(expo.entries[0].voice_id, 0);
-  EXPECT_EQ(expo.entries[1].voice_id, 1);
-  EXPECT_EQ(expo.entries[2].voice_id, 2);
+  // Run many seeds and count how often TopFirst [0,1,2] is selected.
+  int top_first_count = 0;
+  constexpr int kNumTrials = 100;
+  for (uint32_t seed = 1; seed <= kNumTrials; ++seed) {
+    auto expo = buildExposition(subject, answer, cs, config, seed);
+    ASSERT_GE(expo.entries.size(), 3u);
+    if (expo.entries[0].voice_id == 0 &&
+        expo.entries[1].voice_id == 1 &&
+        expo.entries[2].voice_id == 2) {
+      ++top_first_count;
+    }
+  }
+  // With weight 0.50, expect TopFirst at least 30% of the time (conservative).
+  EXPECT_GE(top_first_count, 30)
+      << "TopFirst should be the most common order for Severe; got "
+      << top_first_count << "/" << kNumTrials;
 }
 
 // ---------------------------------------------------------------------------

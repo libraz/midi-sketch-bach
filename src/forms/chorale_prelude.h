@@ -16,7 +16,8 @@ struct ChoralePreludeConfig {
   KeySignature key = {Key::C, false};
   uint16_t bpm = 60;
   uint32_t seed = 42;
-};
+  bool enable_picardy = true;   ///< Apply Picardy third in minor keys.
+};;
 
 /// @brief Result of chorale prelude generation.
 struct ChoralePreludeResult {

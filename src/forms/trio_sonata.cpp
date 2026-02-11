@@ -13,31 +13,19 @@
 #include "harmony/chord_types.h"
 #include "harmony/harmonic_event.h"
 #include "harmony/harmonic_timeline.h"
+#include "organ/organ_techniques.h"
 
 namespace bach {
 
 namespace {
 
-/// @brief Organ velocity (pipe organs have no velocity sensitivity).
-constexpr uint8_t kOrganVelocity = 80;
+using namespace duration;
 
 /// @brief Number of bars for fast outer movements (1st, 3rd).
 constexpr Tick kFastMovementBars = 16;
 
 /// @brief Number of bars for slow middle movement (2nd).
 constexpr Tick kSlowMovementBars = 12;
-
-/// @brief Duration of a 16th note in ticks.
-constexpr Tick kSixteenthNote = kTicksPerBeat / 4;  // 120
-
-/// @brief Duration of an 8th note in ticks.
-constexpr Tick kEighthNote = kTicksPerBeat / 2;  // 240
-
-/// @brief Duration of a quarter note in ticks.
-constexpr Tick kQuarterNote = kTicksPerBeat;  // 480
-
-/// @brief Duration of a half note in ticks.
-constexpr Tick kHalfNote = kTicksPerBeat * 2;  // 960
 
 /// @brief Seed offset for movement 2 (ensures different RNG state).
 constexpr uint32_t kMovement2SeedOffset = 1000;
@@ -466,6 +454,36 @@ TrioSonataResult generateTrioSonata(const TrioSonataConfig& config) {
   // Movement 3: Fast, home key.
   TrioSonataMovement mov3 = generateMovement(
       config.key, kFastMovementBars, config.bpm_fast, config.seed + kMovement3SeedOffset, false);
+
+  // ---------------------------------------------------------------------------
+  // Shared organ techniques: per-movement registration, Picardy
+  // No pedal point (independent 3-voice texture, not appropriate).
+  // ---------------------------------------------------------------------------
+
+  // Movement-specific registration: mezzo / piano / forte.
+  Registration mov_regs[] = {
+      OrganRegistrationPresets::mezzo(),
+      OrganRegistrationPresets::piano(),
+      OrganRegistrationPresets::forte(),
+  };
+  TrioSonataMovement* movs[] = {&mov1, &mov2, &mov3};
+  KeySignature mov_keys[] = {config.key, slow_key, config.key};
+
+  for (int m = 0; m < 3; ++m) {
+    ExtendedRegistrationPlan reg_plan;
+    reg_plan.addPoint(0, mov_regs[m], "movement_" + std::to_string(m + 1));
+    applyExtendedRegistrationPlan(movs[m]->tracks, reg_plan);
+
+    // Picardy third (minor keys only, final bar of each movement).
+    if (config.enable_picardy && mov_keys[m].is_minor &&
+        movs[m]->total_duration_ticks > kTicksPerBar) {
+      for (auto& track : movs[m]->tracks) {
+        applyPicardyToFinalChord(
+            track.notes, mov_keys[m],
+            movs[m]->total_duration_ticks - kTicksPerBar);
+      }
+    }
+  }
 
   result.movements.push_back(std::move(mov1));
   result.movements.push_back(std::move(mov2));

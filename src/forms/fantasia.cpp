@@ -12,97 +12,13 @@
 #include "core/scale.h"
 #include "harmony/chord_types.h"
 #include "harmony/harmonic_event.h"
+#include "organ/organ_techniques.h"
 
 namespace bach {
 
 namespace {
 
-/// @brief Organ velocity (pipe organs have no velocity sensitivity).
-constexpr uint8_t kOrganVelocity = 80;
-
-/// @brief Duration of an 8th note in ticks.
-constexpr Tick kEighthNote = kTicksPerBeat / 2;  // 240
-
-/// @brief Duration of a quarter note in ticks.
-constexpr Tick kQuarterNote = kTicksPerBeat;  // 480
-
-/// @brief Duration of a half note in ticks.
-constexpr Tick kHalfNote = kTicksPerBeat * 2;  // 960
-
-/// @brief Duration of a whole note in ticks.
-constexpr Tick kWholeNote = kTicksPerBeat * 4;  // 1920
-
-// ---------------------------------------------------------------------------
-// Chord tone extraction
-// ---------------------------------------------------------------------------
-
-/// @brief Get chord tones as MIDI pitches for a given chord and base octave.
-///
-/// Returns root, third, and fifth of the chord in the specified octave.
-/// Quality determines the third and fifth intervals.
-///
-/// @param chord The chord to extract tones from.
-/// @param octave Base octave for pitch calculation.
-/// @return Vector of 3 MIDI pitch values (root, third, fifth).
-std::vector<uint8_t> getChordTones(const Chord& chord, int octave) {
-  std::vector<uint8_t> tones;
-  tones.reserve(3);
-
-  int root = (octave + 1) * 12 + (static_cast<int>(chord.root_pitch) % 12);
-
-  // Determine third interval based on quality.
-  int third_offset = 4;  // Major third default.
-  if (chord.quality == ChordQuality::Minor ||
-      chord.quality == ChordQuality::Diminished ||
-      chord.quality == ChordQuality::Minor7) {
-    third_offset = 3;  // Minor third.
-  }
-
-  // Determine fifth interval based on quality.
-  int fifth_offset = 7;  // Perfect fifth default.
-  if (chord.quality == ChordQuality::Diminished) {
-    fifth_offset = 6;  // Diminished fifth.
-  } else if (chord.quality == ChordQuality::Augmented) {
-    fifth_offset = 8;  // Augmented fifth.
-  }
-
-  auto clamp_midi = [](int pitch) -> uint8_t {
-    if (pitch < 0) return 0;
-    if (pitch > 127) return 127;
-    return static_cast<uint8_t>(pitch);
-  };
-
-  tones.push_back(clamp_midi(root));
-  tones.push_back(clamp_midi(root + third_offset));
-  tones.push_back(clamp_midi(root + fifth_offset));
-
-  return tones;
-}
-
-/// @brief Get scale tones within a range for the current key context.
-///
-/// Builds a set of MIDI pitches that belong to the scale of the given key,
-/// spanning from low_pitch to high_pitch.
-///
-/// @param key Musical key (pitch class of tonic).
-/// @param is_minor True for minor mode, false for major.
-/// @param low_pitch Lowest MIDI pitch to include.
-/// @param high_pitch Highest MIDI pitch to include.
-/// @return Vector of scale-member MIDI pitches in ascending order.
-std::vector<uint8_t> getScaleTones(Key key, bool is_minor, uint8_t low_pitch,
-                                   uint8_t high_pitch) {
-  std::vector<uint8_t> tones;
-  ScaleType scale_type = is_minor ? ScaleType::HarmonicMinor : ScaleType::Major;
-
-  for (int pitch = static_cast<int>(low_pitch);
-       pitch <= static_cast<int>(high_pitch); ++pitch) {
-    if (scale_util::isScaleTone(static_cast<uint8_t>(pitch), key, scale_type)) {
-      tones.push_back(static_cast<uint8_t>(pitch));
-    }
-  }
-
-  return tones;
-}
+using namespace duration;
 
 // ---------------------------------------------------------------------------
 // Track creation
@@ -557,6 +473,35 @@ FantasiaResult generateFantasia(const FantasiaConfig& config) {
       tracks[note.voice].notes.push_back(note);
     }
   }
+
+  // ---------------------------------------------------------------------------
+  // Shared organ techniques: pedal point, Picardy, registration
+  // ---------------------------------------------------------------------------
+
+  // Cadential pedal point on tonic (last 2 bars).
+  if (num_voices >= 4 && target_duration > kTicksPerBar * 2) {
+    Tick pedal_start = target_duration - kTicksPerBar * 2;
+    auto pedal_notes = generateCadentialPedal(
+        config.key, pedal_start, target_duration,
+        PedalPointType::Tonic, num_voices - 1);
+    for (auto& n : pedal_notes) {
+      if (n.voice < tracks.size()) {
+        tracks[n.voice].notes.push_back(n);
+      }
+    }
+  }
+
+  // Picardy third (minor keys only).
+  if (config.enable_picardy && config.key.is_minor) {
+    for (auto& track : tracks) {
+      applyPicardyToFinalChord(track.notes, config.key,
+                               target_duration - kTicksPerBar);
+    }
+  }
+
+  // Simple 3-point registration plan.
+  auto reg_plan = createSimpleRegistrationPlan(0, target_duration);
+  applyExtendedRegistrationPlan(tracks, reg_plan);
 
   // Step 5: Sort notes within each track.
   sortFantasiaTrackNotes(tracks);

@@ -3,7 +3,9 @@
 #include "solo_string/arch/chaconne_config.h"
 
 #include <algorithm>
+#include <random>
 
+#include "core/rng_util.h"
 #include "harmony/key.h"
 
 namespace bach {
@@ -33,17 +35,39 @@ TextureType textureByComplexity(int index) {
 /// Divides the block into sub-arcs of ~3-4 variations. Each sub-arc follows
 /// low→high→mid complexity. Successive sub-arcs start at increasingly higher
 /// base complexity.
-void assignBlockTextures(std::vector<ChaconneVariation>& block, int base_complexity) {
+/// @brief Select a VariationType using role-specific weights.
+VariationType selectTypeForRole(std::mt19937& rng, VariationRole role) {
+  using VT = VariationType;
+  switch (role) {
+    case VariationRole::Develop:
+      return rng::selectWeighted(rng, std::vector<VT>{VT::Rhythmic, VT::Lyrical},
+                                 {0.60f, 0.40f});
+    case VariationRole::Destabilize:
+      return rng::selectWeighted(rng, std::vector<VT>{VT::Virtuosic, VT::Rhythmic},
+                                 {0.70f, 0.30f});
+    case VariationRole::Illuminate:
+      return rng::selectWeighted(rng, std::vector<VT>{VT::Lyrical, VT::Chordal},
+                                 {0.55f, 0.45f});
+    case VariationRole::Accumulate:
+      return rng::selectWeighted(rng, std::vector<VT>{VT::Virtuosic, VT::Chordal},
+                                 {0.50f, 0.50f});
+    default:
+      return VT::Theme;
+  }
+}
+
+void assignBlockTextures(std::mt19937& rng, std::vector<ChaconneVariation>& block,
+                         int base_complexity) {
   if (block.empty()) return;
   int n = static_cast<int>(block.size());
 
-  // Sub-arc size: 3-4 variations.
-  constexpr int kSubArcSize = 3;
-  int num_sub_arcs = (n + kSubArcSize - 1) / kSubArcSize;
+  // Sub-arc size: 2-4 variations (randomized).
+  int sub_arc_size = rng::rollRange(rng, 2, 4);
+  int num_sub_arcs = (n + sub_arc_size - 1) / sub_arc_size;
 
   for (int arc = 0; arc < num_sub_arcs; ++arc) {
-    int arc_start = arc * kSubArcSize;
-    int arc_end = std::min(arc_start + kSubArcSize, n);
+    int arc_start = arc * sub_arc_size;
+    int arc_end = std::min(arc_start + sub_arc_size, n);
     int arc_len = arc_end - arc_start;
     int arc_base = base_complexity + arc;  // Gradually raise base
 
@@ -78,13 +102,14 @@ std::vector<KeySignature> getIslandKeys(const KeySignature& key) {
 
 }  // namespace
 
-std::vector<ChaconneVariation> createStandardVariationPlan(const KeySignature& key) {
+std::vector<ChaconneVariation> createStandardVariationPlan(const KeySignature& key,
+                                                            std::mt19937& rng) {
   // Standard chaconne variation plan (~10 variations).
   // Fixed order: Establish -> Develop -> Destabilize -> Illuminate
   //              -> Destabilize -> Accumulate(x3) -> Resolve
   //
-  // This is a design decision (Principle 4: Trust Design Values).
-  // The structural arc is config-fixed and seed-independent.
+  // The structural arc (Role sequence) is config-fixed and seed-independent.
+  // VariationType within each role is RNG-driven.
 
   KeySignature major_key = getParallel(key);
 
@@ -95,47 +120,48 @@ std::vector<ChaconneVariation> createStandardVariationPlan(const KeySignature& k
 
   // --- Minor front section ---
 
-  // Variation 0: Establish (Theme) -- opening statement
+  // Variation 0: Establish (Theme) -- opening statement (fixed)
   plan.push_back({var_num++, VariationRole::Establish, VariationType::Theme,
                   TextureType::SingleLine, key, false});
 
-  // Variation 1: Develop (Rhythmic) -- builds energy
-  plan.push_back({var_num++, VariationRole::Develop, VariationType::Rhythmic,
+  // Variation 1: Develop -- builds energy
+  plan.push_back({var_num++, VariationRole::Develop,
+                  selectTypeForRole(rng, VariationRole::Develop),
                   TextureType::ImpliedPolyphony, key, false});
 
-  // Variation 2: Destabilize (Virtuosic) -- pre-major tension
-  plan.push_back({var_num++, VariationRole::Destabilize, VariationType::Virtuosic,
+  // Variation 2: Destabilize -- pre-major tension
+  plan.push_back({var_num++, VariationRole::Destabilize,
+                  selectTypeForRole(rng, VariationRole::Destabilize),
                   TextureType::ScalePassage, key, false});
 
   // --- Major section (separate personality) ---
 
-  // Variation 3: Illuminate (Lyrical) -- major key, singing character
-  plan.push_back({var_num++, VariationRole::Illuminate, VariationType::Lyrical,
+  // Variation 3: Illuminate -- major key
+  plan.push_back({var_num++, VariationRole::Illuminate,
+                  selectTypeForRole(rng, VariationRole::Illuminate),
                   TextureType::SingleLine, major_key, true});
 
-  // Variation 4: Illuminate (Chordal) -- major key, harmonic warmth
-  plan.push_back({var_num++, VariationRole::Illuminate, VariationType::Chordal,
+  // Variation 4: Illuminate -- major key
+  plan.push_back({var_num++, VariationRole::Illuminate,
+                  selectTypeForRole(rng, VariationRole::Illuminate),
                   TextureType::Arpeggiated, major_key, true});
 
   // --- Minor back section ---
 
-  // Variation 5: Destabilize (Virtuosic) -- return to minor, rebuilding tension
-  plan.push_back({var_num++, VariationRole::Destabilize, VariationType::Virtuosic,
+  // Variation 5: Destabilize -- return to minor, rebuilding tension
+  plan.push_back({var_num++, VariationRole::Destabilize,
+                  selectTypeForRole(rng, VariationRole::Destabilize),
                   TextureType::ScalePassage, key, false});
 
-  // Variation 6: Accumulate (Virtuosic) -- climax buildup 1/3
+  // Variation 6-8: Accumulate -- climax (Principle 4: fixed design values)
   plan.push_back({var_num++, VariationRole::Accumulate, VariationType::Virtuosic,
                   TextureType::ImpliedPolyphony, key, false});
-
-  // Variation 7: Accumulate (Chordal) -- climax buildup 2/3
   plan.push_back({var_num++, VariationRole::Accumulate, VariationType::Chordal,
                   TextureType::FullChords, key, false});
-
-  // Variation 8: Accumulate (Virtuosic) -- climax peak 3/3
   plan.push_back({var_num++, VariationRole::Accumulate, VariationType::Virtuosic,
                   TextureType::FullChords, key, false});
 
-  // Variation 9: Resolve (Theme) -- return to opening, closure
+  // Variation 9: Resolve (Theme) -- return to opening, closure (fixed)
   plan.push_back({var_num++, VariationRole::Resolve, VariationType::Theme,
                   TextureType::SingleLine, key, false});
 
@@ -143,10 +169,11 @@ std::vector<ChaconneVariation> createStandardVariationPlan(const KeySignature& k
 }
 
 std::vector<ChaconneVariation> createScaledVariationPlan(const KeySignature& key,
-                                                          int target_variations) {
+                                                          int target_variations,
+                                                          std::mt19937& rng) {
   // For small counts, use the standard plan.
   if (target_variations <= 10) {
-    return createStandardVariationPlan(key);
+    return createStandardVariationPlan(key, rng);
   }
 
   KeySignature major_key = getParallel(key);
@@ -176,11 +203,11 @@ std::vector<ChaconneVariation> createScaledVariationPlan(const KeySignature& key
   {
     std::vector<ChaconneVariation> block;
     for (int idx = 0; idx < develop_count; ++idx) {
-      VariationType vtype = (idx % 2 == 0) ? VariationType::Rhythmic : VariationType::Lyrical;
-      block.push_back({var_num++, VariationRole::Develop, vtype,
+      block.push_back({var_num++, VariationRole::Develop,
+                       selectTypeForRole(rng, VariationRole::Develop),
                        TextureType::SingleLine, key, false});
     }
-    assignBlockTextures(block, 1);  // Start above SingleLine
+    assignBlockTextures(rng, block, 1);  // Start above SingleLine
     for (auto& v : block) plan.push_back(v);
   }
 
@@ -188,11 +215,11 @@ std::vector<ChaconneVariation> createScaledVariationPlan(const KeySignature& key
   {
     std::vector<ChaconneVariation> block;
     for (int idx = 0; idx < destab_pre_count; ++idx) {
-      VariationType vtype = (idx % 2 == 0) ? VariationType::Virtuosic : VariationType::Rhythmic;
-      block.push_back({var_num++, VariationRole::Destabilize, vtype,
+      block.push_back({var_num++, VariationRole::Destabilize,
+                       selectTypeForRole(rng, VariationRole::Destabilize),
                        TextureType::SingleLine, key, false});
     }
-    assignBlockTextures(block, 2);
+    assignBlockTextures(rng, block, 2);
     for (auto& v : block) plan.push_back(v);
   }
 
@@ -200,39 +227,36 @@ std::vector<ChaconneVariation> createScaledVariationPlan(const KeySignature& key
   {
     std::vector<ChaconneVariation> block;
     for (int idx = 0; idx < illuminate_main_count; ++idx) {
-      VariationType vtype = (idx % 2 == 0) ? VariationType::Lyrical : VariationType::Chordal;
-      block.push_back({var_num++, VariationRole::Illuminate, vtype,
+      block.push_back({var_num++, VariationRole::Illuminate,
+                       selectTypeForRole(rng, VariationRole::Illuminate),
                        TextureType::SingleLine, major_key, true});
     }
-    assignBlockTextures(block, 0);  // Major section: lighter textures
+    assignBlockTextures(rng, block, 0);  // Major section: lighter textures
     for (auto& v : block) plan.push_back(v);
   }
 
   // --- Post-major interleaved: Destabilize with Illuminate islands ---
   {
-    // Insert an Illuminate island of 1-2 variations every ~7 Destabilize variations.
-    constexpr int kIslandInterval = 7;
-    constexpr int kMaxIslandSize = 2;
+    // Insert Illuminate islands within Destabilize blocks at randomized intervals.
+    int island_interval = rng::rollRange(rng, 6, 8);
+    int max_island_size = rng::rollRange(rng, 1, 2);
 
-    // Calculate total Destabilize vs island variations.
-    // We need at least 1 Destabilize at the end (final approach).
     int remaining = post_major_count;
     int island_key_idx = 0;
 
     while (remaining > 0) {
       // Destabilize segment.
-      int destab_seg = std::min(kIslandInterval, remaining);
+      int destab_seg = std::min(island_interval, remaining);
 
       // Check if we have room for an island after this segment.
       int after_this = remaining - destab_seg;
-      bool insert_island = (after_this >= kMaxIslandSize + 1);  // Need room for island + more
+      bool insert_island = (after_this >= max_island_size + 1);  // Need room for island + more
 
       if (!insert_island) {
         // Use all remaining as Destabilize (final approach).
         for (int idx = 0; idx < remaining; ++idx) {
-          VariationType vtype = (idx % 2 == 0) ? VariationType::Virtuosic
-                                               : VariationType::Rhythmic;
-          plan.push_back({var_num++, VariationRole::Destabilize, vtype,
+          plan.push_back({var_num++, VariationRole::Destabilize,
+                          selectTypeForRole(rng, VariationRole::Destabilize),
                           TextureType::ScalePassage, key, false});
         }
         remaining = 0;
@@ -240,26 +264,24 @@ std::vector<ChaconneVariation> createScaledVariationPlan(const KeySignature& key
         // Place Destabilize segment.
         std::vector<ChaconneVariation> destab_block;
         for (int idx = 0; idx < destab_seg; ++idx) {
-          VariationType vtype = (idx % 2 == 0) ? VariationType::Virtuosic
-                                               : VariationType::Rhythmic;
-          destab_block.push_back({var_num++, VariationRole::Destabilize, vtype,
+          destab_block.push_back({var_num++, VariationRole::Destabilize,
+                                  selectTypeForRole(rng, VariationRole::Destabilize),
                                   TextureType::SingleLine, key, false});
         }
-        assignBlockTextures(destab_block, 2);
+        assignBlockTextures(rng, destab_block, 2);
         for (auto& v : destab_block) plan.push_back(v);
         remaining -= destab_seg;
 
         // Place Illuminate island (1-2 variations, is_major_section=false).
-        int island_size = std::min(kMaxIslandSize, remaining - 1);  // Keep at least 1 for later
+        int island_size = std::min(max_island_size, remaining - 1);  // Keep at least 1 for later
         if (island_size < 1) island_size = 1;
 
         KeySignature isl_key = island_keys[island_key_idx % island_keys.size()];
         ++island_key_idx;
 
         for (int idx = 0; idx < island_size; ++idx) {
-          VariationType vtype = (idx % 2 == 0) ? VariationType::Lyrical
-                                               : VariationType::Chordal;
-          plan.push_back({var_num++, VariationRole::Illuminate, vtype,
+          plan.push_back({var_num++, VariationRole::Illuminate,
+                          selectTypeForRole(rng, VariationRole::Illuminate),
                           TextureType::Arpeggiated, isl_key, false});
         }
         remaining -= island_size;

@@ -26,10 +26,16 @@ struct FragmentSelectionWeights {
   float rank_weights[4] = {0.4f, 0.3f, 0.2f, 0.1f};
 };
 
-/// @brief Get character-specific fragment selection weights.
+/// @brief Get character-specific fragment selection weights with per-seed variation.
+///
+/// Applies small RNG-driven variation (+-0.05) to each weight, then re-normalizes
+/// so weights sum to 1.0. This provides subtle variety across seeds.
+///
 /// @param character Subject character.
-/// @return Fixed design weights for fragment selection.
-FragmentSelectionWeights weightsForCharacter(SubjectCharacter character) {
+/// @param rng Mersenne Twister for per-seed variation.
+/// @return Design weights with small per-seed perturbation (normalized).
+FragmentSelectionWeights weightsForCharacter(SubjectCharacter character,
+                                             std::mt19937& rng) {
   FragmentSelectionWeights weights;
   switch (character) {
     case SubjectCharacter::Severe:
@@ -61,6 +67,18 @@ FragmentSelectionWeights weightsForCharacter(SubjectCharacter character) {
       weights.rank_weights[3] = 0.3f;
       break;
   }
+
+  // Apply per-seed variation and re-normalize to sum to 1.0.
+  float total = 0.0f;
+  for (int idx = 0; idx < 4; ++idx) {
+    weights.rank_weights[idx] = std::max(
+        0.01f, weights.rank_weights[idx] + rng::rollFloat(rng, -0.05f, 0.05f));
+    total += weights.rank_weights[idx];
+  }
+  for (int idx = 0; idx < 4; ++idx) {
+    weights.rank_weights[idx] /= total;
+  }
+
   return weights;
 }
 
@@ -171,7 +189,7 @@ std::vector<NoteEvent> generateFortspinnung(const MotifPool& pool,
   }
 
   std::mt19937 rng(seed);
-  FragmentSelectionWeights weights = weightsForCharacter(character);
+  FragmentSelectionWeights weights = weightsForCharacter(character, rng);
   int seq_step = sequenceStepForCharacter(character, rng);
 
   // --- Voice 0: Primary Fortspinnung line ---
@@ -198,8 +216,10 @@ std::vector<NoteEvent> generateFortspinnung(const MotifPool& pool,
         fragment = augmentMelody(fragment, 0);
         break;
       case SubjectCharacter::Playful:
-        // Alternate between normal and diminished.
-        if (current_tick > 0 && rng::rollProbability(rng, 0.5f)) {
+        // Alternate between normal and diminished. Per-seed diminution
+        // probability varies in [0.40, 0.60] for subtle rhythmic variety.
+        if (current_tick > 0 &&
+            rng::rollProbability(rng, rng::rollFloat(rng, 0.40f, 0.60f))) {
           fragment = diminishMelody(fragment, 0);
         }
         break;

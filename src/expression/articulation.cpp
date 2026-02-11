@@ -125,12 +125,16 @@ void applyArticulation(std::vector<NoteEvent>& notes, VoiceRole role,
   ArticulationRule rule = getDefaultArticulation(role);
 
   // Step 1: Apply gate ratio to all note durations.
-  for (auto& note : notes) {
-    Tick new_duration = static_cast<Tick>(static_cast<float>(note.duration) * rule.gate_ratio);
-    if (new_duration < kMinArticulatedDuration) {
-      new_duration = kMinArticulatedDuration;
+  // Organ pipes have no gate control — preserve metric durations exactly.
+  if (!is_organ) {
+    for (auto& note : notes) {
+      Tick new_duration =
+          static_cast<Tick>(static_cast<float>(note.duration) * rule.gate_ratio);
+      if (new_duration < kMinArticulatedDuration) {
+        new_duration = kMinArticulatedDuration;
+      }
+      note.duration = new_duration;
     }
-    note.duration = new_duration;
   }
 
   // Step 2: Apply beat-position velocity accents for non-organ instruments.
@@ -151,7 +155,8 @@ void applyArticulation(std::vector<NoteEvent>& notes, VoiceRole role,
   }
 
   // Step 3: Phrase breathing at cadence points.
-  if (timeline != nullptr) {
+  // Organ sustains through cadences — no breathing reduction needed.
+  if (!is_organ && timeline != nullptr) {
     std::vector<Tick> cadence_ticks = findCadenceTicks(*timeline);
     for (Tick cad_tick : cadence_ticks) {
       int preceding_idx = findPrecedingNoteIndex(notes, cad_tick);

@@ -80,7 +80,7 @@ TEST(ArticulationApplyTest, GateRatioReducesDuration) {
   std::vector<NoteEvent> notes;
   notes.push_back(makeNote(0, 60, kTicksPerBeat));  // 480 ticks at beat 0
 
-  applyArticulation(notes, VoiceRole::Assert, nullptr, true);
+  applyArticulation(notes, VoiceRole::Assert, nullptr, false);
 
   // Assert gate ratio = 0.85 -> 480 * 0.85 = 408
   EXPECT_EQ(notes[0].duration, static_cast<Tick>(480 * 0.85f));
@@ -90,7 +90,7 @@ TEST(ArticulationApplyTest, GroundLegato95) {
   std::vector<NoteEvent> notes;
   notes.push_back(makeNote(0, 48, kTicksPerBar));  // 1920 ticks
 
-  applyArticulation(notes, VoiceRole::Ground, nullptr, true);
+  applyArticulation(notes, VoiceRole::Ground, nullptr, false);
 
   // Ground gate ratio = 0.95 -> 1920 * 0.95 = 1824
   EXPECT_EQ(notes[0].duration, static_cast<Tick>(1920 * 0.95f));
@@ -107,7 +107,7 @@ TEST(ArticulationApplyTest, MinimumDurationPreserved) {
   // Very short note: 50 ticks. After 0.85 gate = 42, which is below minimum 60.
   notes.push_back(makeNote(0, 60, 50));
 
-  applyArticulation(notes, VoiceRole::Assert, nullptr, true);
+  applyArticulation(notes, VoiceRole::Assert, nullptr, false);
 
   // Should be clamped to minimum duration (60 ticks).
   EXPECT_GE(notes[0].duration, static_cast<Tick>(60));
@@ -192,7 +192,7 @@ TEST(ArticulationBreathingTest, PerfectCadenceReducesPrecedingNote) {
   // After breathing: gated_duration * 0.80
   Tick expected_breathed = static_cast<Tick>(static_cast<float>(gated_duration) * 0.80f);
 
-  applyArticulation(notes, VoiceRole::Assert, &timeline, true);
+  applyArticulation(notes, VoiceRole::Assert, &timeline, false);
 
   // The note should be shorter than the gate-only duration due to breathing.
   EXPECT_EQ(notes[0].duration, expected_breathed);
@@ -210,7 +210,7 @@ TEST(ArticulationBreathingTest, NoCadenceNoBreathingReduction) {
   auto rule = getDefaultArticulation(VoiceRole::Assert);
   Tick expected = static_cast<Tick>(static_cast<float>(kTicksPerBar) * rule.gate_ratio);
 
-  applyArticulation(notes, VoiceRole::Assert, &timeline, true);
+  applyArticulation(notes, VoiceRole::Assert, &timeline, false);
 
   // No cadence, so duration should only reflect gate ratio.
   EXPECT_EQ(notes[0].duration, expected);
@@ -229,7 +229,7 @@ TEST(ArticulationBreathingTest, KeyChangeTriggersBreathing) {
   Tick gated = static_cast<Tick>(static_cast<float>(kTicksPerBar) * rule.gate_ratio);
   Tick expected = static_cast<Tick>(static_cast<float>(gated) * 0.80f);
 
-  applyArticulation(notes, VoiceRole::Assert, &timeline, true);
+  applyArticulation(notes, VoiceRole::Assert, &timeline, false);
 
   EXPECT_EQ(notes[0].duration, expected);
 }
@@ -241,7 +241,7 @@ TEST(ArticulationBreathingTest, NullTimelineNoBreathing) {
   auto rule = getDefaultArticulation(VoiceRole::Assert);
   Tick expected = static_cast<Tick>(static_cast<float>(kTicksPerBar) * rule.gate_ratio);
 
-  applyArticulation(notes, VoiceRole::Assert, nullptr, true);
+  applyArticulation(notes, VoiceRole::Assert, nullptr, false);
 
   EXPECT_EQ(notes[0].duration, expected);
 }
@@ -257,12 +257,42 @@ TEST(ArticulationMultiNoteTest, AllNotesDurationsReduced) {
   notes.push_back(makeNote(kTicksPerBeat * 2, 64, kTicksPerBeat));
   notes.push_back(makeNote(kTicksPerBeat * 3, 65, kTicksPerBeat));
 
-  applyArticulation(notes, VoiceRole::Assert, nullptr, true);
+  applyArticulation(notes, VoiceRole::Assert, nullptr, false);
 
   Tick expected = static_cast<Tick>(480.0f * 0.85f);
   for (const auto& note : notes) {
     EXPECT_EQ(note.duration, expected);
   }
+}
+
+// ===========================================================================
+// Organ: gate ratio and breathing are skipped
+// ===========================================================================
+
+TEST(ArticulationOrganTest, OrganPreservesMetricDurations) {
+  std::vector<NoteEvent> notes;
+  notes.push_back(makeNote(0, 60, kTicksPerBeat));    // 480
+  notes.push_back(makeNote(kTicksPerBeat, 62, kTicksPerBeat));
+
+  applyArticulation(notes, VoiceRole::Assert, nullptr, true);
+
+  // Organ: gate ratio is skipped, durations remain metric.
+  EXPECT_EQ(notes[0].duration, kTicksPerBeat);
+  EXPECT_EQ(notes[1].duration, kTicksPerBeat);
+}
+
+TEST(ArticulationOrganTest, OrganSkipsBreathingAtCadence) {
+  HarmonicTimeline timeline;
+  timeline.addEvent(makeHarmEvent(0, kTicksPerBar, ChordDegree::V));
+  timeline.addEvent(makeHarmEvent(kTicksPerBar, kTicksPerBar * 2, ChordDegree::I));
+
+  std::vector<NoteEvent> notes;
+  notes.push_back(makeNote(0, 60, kTicksPerBar));
+
+  applyArticulation(notes, VoiceRole::Assert, &timeline, true);
+
+  // Organ: breathing is skipped, duration stays at original.
+  EXPECT_EQ(notes[0].duration, kTicksPerBar);
 }
 
 }  // namespace

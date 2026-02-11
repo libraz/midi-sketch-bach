@@ -85,6 +85,7 @@ set(BACH_TEST_SOURCES
 
   # organ/
   organ/manual_test.cpp
+  organ/organ_techniques_test.cpp
   organ/registration_test.cpp
 
   # analysis/

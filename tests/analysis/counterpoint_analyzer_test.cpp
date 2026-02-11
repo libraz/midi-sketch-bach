@@ -198,6 +198,34 @@ TEST(CountVoiceCrossingsTest, ThreeVoices) {
   EXPECT_GE(countVoiceCrossings(notes, 3), 2u);
 }
 
+TEST(CountVoiceCrossingsTest, TemporaryCrossingExcluded) {
+  // Voice 0 briefly dips below voice 1 for one beat, then resolves.
+  std::vector<NoteEvent> notes = {
+      qn(0, 72, 0),                  // C5 (voice 0 starts higher)
+      qn(kTicksPerBeat, 60, 0),      // C4 (dips below voice 1)
+      qn(kTicksPerBeat * 2, 72, 0),  // C5 (resolves back up)
+      qn(0, 65, 1),                  // F4
+      qn(kTicksPerBeat, 65, 1),      // F4
+      qn(kTicksPerBeat * 2, 65, 1),  // F4
+  };
+  // At beat 1 crossing resolves at beat 2 -> temporary, excluded.
+  EXPECT_EQ(countVoiceCrossings(notes, 2), 0u);
+}
+
+TEST(CountVoiceCrossingsTest, PersistentCrossingCounted) {
+  // Voice 0 crosses below voice 1 and stays crossed.
+  std::vector<NoteEvent> notes = {
+      qn(0, 72, 0),                  // C5
+      qn(kTicksPerBeat, 60, 0),      // C4 (crosses)
+      qn(kTicksPerBeat * 2, 58, 0),  // Bb3 (stays crossed)
+      qn(0, 65, 1),                  // F4
+      qn(kTicksPerBeat, 65, 1),      // F4
+      qn(kTicksPerBeat * 2, 65, 1),  // F4
+  };
+  // Both crossings persist -> counted.
+  EXPECT_GE(countVoiceCrossings(notes, 2), 1u);
+}
+
 // ---------------------------------------------------------------------------
 // dissonanceResolutionRate
 // ---------------------------------------------------------------------------

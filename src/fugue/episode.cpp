@@ -39,11 +39,11 @@ namespace {
 int sequenceDegreeStepForCharacter(SubjectCharacter character, std::mt19937& rng) {
   switch (character) {
     case SubjectCharacter::Severe:
-      return -1;  // Strict descending by step (standard Baroque Zeugma)
+      return rng::rollProbability(rng, 0.85f) ? -1 : -2;  // Mostly stepwise, occasional skip
     case SubjectCharacter::Playful:
       return rng::rollRange(rng, -2, -1);  // Step or skip
     case SubjectCharacter::Noble:
-      return -1;  // Moderate, stepwise
+      return rng::rollProbability(rng, 0.90f) ? -1 : -2;  // Stately stepwise, rare skip
     case SubjectCharacter::Restless:
       return rng::rollRange(rng, -2, -1);  // Varied
     default:
@@ -55,25 +55,26 @@ int sequenceDegreeStepForCharacter(SubjectCharacter character, std::mt19937& rng
 ///
 /// In Baroque fugue episodes, voices enter in staggered imitation (dialogic
 /// hand-off). The offset is character-specific to match the rhetorical pacing:
-///   - Severe/Noble: 2-beat delay (stately, measured discourse)
-///   - Playful/Restless: 1-beat delay (tighter, more energetic exchange)
+///   - Severe/Noble: ~1.5-2.5 beat delay (stately, measured discourse)
+///   - Playful/Restless: ~0.5-1.5 beat delay (tighter, more energetic exchange)
 ///
 /// @param motif_dur Duration of the motif in ticks (unused, kept for API stability).
 /// @param character Subject character.
+/// @param rng Mersenne Twister instance for offset randomization.
 /// @return Imitation offset in ticks.
-Tick imitationOffsetForCharacter(Tick motif_dur, SubjectCharacter character) {
-  (void)motif_dur;  // Retained for API compatibility; offsets are now fixed per character.
+Tick imitationOffsetForCharacter(Tick motif_dur, SubjectCharacter character, std::mt19937& rng) {
+  (void)motif_dur;  // Retained for API compatibility; offsets are now RNG-driven per character.
   switch (character) {
     case SubjectCharacter::Severe:
-      return kTicksPerBeat * 2;   // 2-beat delay
+      return static_cast<Tick>(rng::rollFloat(rng, 1.5f, 2.5f) * kTicksPerBeat);
     case SubjectCharacter::Playful:
-      return kTicksPerBeat;       // 1-beat delay (tight imitation)
+      return static_cast<Tick>(rng::rollFloat(rng, 0.5f, 1.5f) * kTicksPerBeat);
     case SubjectCharacter::Noble:
-      return kTicksPerBeat * 2;   // 2-beat delay (stately)
+      return static_cast<Tick>(rng::rollFloat(rng, 1.5f, 2.5f) * kTicksPerBeat);
     case SubjectCharacter::Restless:
-      return kTicksPerBeat;       // 1-beat delay (urgent)
+      return static_cast<Tick>(rng::rollFloat(rng, 0.5f, 1.5f) * kTicksPerBeat);
     default:
-      return kTicksPerBeat * 2;
+      return static_cast<Tick>(rng::rollFloat(rng, 1.5f, 2.5f) * kTicksPerBeat);
   }
 }
 
@@ -452,8 +453,11 @@ void generateRestlessEpisode(Episode& episode, const std::vector<NoteEvent>& mot
 /// @return Voice ID of the resting voice, or num_voices if no resting voice.
 static VoiceId selectRestingVoice(uint8_t num_voices, int episode_index) {
   if (num_voices < 3) return num_voices;  // No resting voice possible
-  // Rotate through ALL voices so bass also gets active material.
-  return static_cast<VoiceId>(episode_index % num_voices);
+  // Bass (lowest voice = num_voices-1) never rests — it provides harmonic foundation.
+  // Rotate through voices 0..(num_voices-2) only.
+  uint8_t rotatable = num_voices - 1;
+  if (rotatable < 2) return num_voices;  // Only bass exists beyond 0/1.
+  return static_cast<VoiceId>(episode_index % rotatable);
 }
 
 /// @brief Generate sustained held tones for a resting voice.
@@ -518,6 +522,106 @@ static void generateHeldTones(Episode& episode,
   }
 }
 
+/// @brief Generate bass sequence pattern for episode sections.
+///
+/// Creates 2-4 note stepwise/arpeggiated patterns with strict leap limits,
+/// suitable for bass voice episodic material. Uses I-IV-V-I harmonic
+/// foundation with shorter note values than held tones.
+///
+/// @param subject Source subject for motivic reference.
+/// @param start_tick Start position.
+/// @param duration Duration of the episode section.
+/// @param key Current key context.
+/// @param scale Scale type.
+/// @param voice Target voice ID.
+/// @param num_voices Total number of voices.
+/// @param gen RNG engine.
+/// @return Vector of bass sequence notes.
+static std::vector<NoteEvent> generateBassSequencePattern(
+    const Subject& /* subject */, Tick start_tick, Tick duration,
+    Key key, ScaleType scale, VoiceId voice, uint8_t num_voices,
+    std::mt19937& /* gen */) {
+  std::vector<NoteEvent> result;
+  auto [range_low, range_high] = getFugueVoiceRange(voice, num_voices);
+
+  // Build bass pattern from stepwise motion + arpeggiated figures.
+  int key_pc = static_cast<int>(key);
+  int register_center =
+      (static_cast<int>(range_low) + static_cast<int>(range_high)) / 2;
+  int center_pc = register_center % 12;
+  int pc_diff = key_pc - center_pc;
+  if (pc_diff > 6) pc_diff -= 12;
+  if (pc_diff < -6) pc_diff += 12;
+  int bass_root = register_center + pc_diff;
+
+  // Pattern: 2-bar unit with half-note bass motion followed by quarter-note
+  // passing tones. Alternates between held tonic and moving patterns.
+  constexpr Tick kHalfNote = kTicksPerBeat * 2;
+  constexpr Tick kQuarterNote = kTicksPerBeat;
+  constexpr int kMaxBassLeap = 5;  // P4 max for bass
+
+  // Bass degree offsets for a 4-note sequential pattern (I-down-down-up).
+  static constexpr int kBassPatternA[] = {0, -1, -2, -1};
+  static constexpr int kBassPatternB[] = {0, 2, 1, 0};
+  static constexpr int kPatternLen = 4;
+
+  int abs_tonic = scale_util::pitchToAbsoluteDegree(
+      static_cast<uint8_t>(std::max(0, std::min(127, bass_root))), key, scale);
+
+  Tick tick = start_tick;
+  int pattern_idx = 0;
+  int sequence_offset = 0;  // Descending by 1 degree per 2-bar unit.
+
+  while (tick < start_tick + duration) {
+    const int* pattern =
+        (pattern_idx % 2 == 0) ? kBassPatternA : kBassPatternB;
+
+    for (int i = 0; i < kPatternLen && tick < start_tick + duration; ++i) {
+      Tick dur = (i == 0) ? kHalfNote : kQuarterNote;
+      if (tick + dur > start_tick + duration) {
+        dur = start_tick + duration - tick;
+        if (dur < kQuarterNote / 2) break;
+      }
+
+      int degree = abs_tonic + sequence_offset + pattern[i];
+      int pitch = static_cast<int>(
+          scale_util::absoluteDegreeToPitch(degree, key, scale));
+
+      // Enforce bass leap limit.
+      if (!result.empty()) {
+        int prev = static_cast<int>(result.back().pitch);
+        if (std::abs(pitch - prev) > kMaxBassLeap) {
+          int dir = (pitch > prev) ? 1 : -1;
+          pitch = prev + dir * kMaxBassLeap;
+          pitch = static_cast<int>(scale_util::nearestScaleTone(
+              static_cast<uint8_t>(std::max(0, std::min(127, pitch))),
+              key, scale));
+        }
+      }
+
+      // Keep within voice range.
+      while (pitch < static_cast<int>(range_low)) pitch += 12;
+      while (pitch > static_cast<int>(range_high)) pitch -= 12;
+
+      NoteEvent note;
+      note.start_tick = tick;
+      note.duration = dur;
+      note.pitch = static_cast<uint8_t>(std::max(0, std::min(127, pitch)));
+      note.velocity = 80;
+      note.voice = voice;
+      note.source = BachNoteSource::EpisodeMaterial;
+      result.push_back(note);
+
+      tick += dur;
+    }
+
+    ++pattern_idx;
+    sequence_offset -= 1;  // Descend by 1 degree per pattern unit.
+  }
+
+  return result;
+}
+
 }  // namespace
 
 std::vector<NoteEvent> extractMotif(const Subject& subject, size_t max_notes) {
@@ -578,7 +682,7 @@ Episode generateEpisode(const Subject& subject, Tick start_tick, Tick duration_t
   // Determine transformation parameters based on character.
   int deg_step = sequenceDegreeStepForCharacter(subject.character, rng);
   int seq_reps = calculateSequenceRepetitions(duration_ticks, motif_dur);
-  Tick imitation_offset = imitationOffsetForCharacter(motif_dur, subject.character);
+  Tick imitation_offset = imitationOffsetForCharacter(motif_dur, subject.character, rng);
 
   // Diatonic context: use harmonic minor for minor keys.
   ScaleType scale = subject.is_minor ? ScaleType::HarmonicMinor : ScaleType::Major;
@@ -617,6 +721,26 @@ Episode generateEpisode(const Subject& subject, Tick start_tick, Tick duration_t
   // Generate held tones for the resting voice.
   if (resting_voice < num_voices) {
     generateHeldTones(episode, start_tick, duration_ticks, start_key, resting_voice, num_voices);
+  }
+
+  // Bass voice (lowest): use motivic bass sequence pattern for density,
+  // with held tones filling any remaining gaps.
+  VoiceId bass_voice = num_voices - 1;
+  if (num_voices >= 3 && bass_voice != resting_voice) {
+    auto bass_notes = generateBassSequencePattern(
+        subject, start_tick, duration_ticks, start_key, scale,
+        bass_voice, num_voices, rng);
+    for (auto& n : bass_notes) {
+      episode.notes.push_back(n);
+    }
+    // Fill remaining time with held tones if bass pattern didn't cover it all.
+    Tick last_end = bass_notes.empty()
+                        ? start_tick
+                        : bass_notes.back().start_tick + bass_notes.back().duration;
+    if (last_end < start_tick + duration_ticks) {
+      generateHeldTones(episode, last_end, start_tick + duration_ticks - last_end,
+                        start_key, bass_voice, num_voices);
+    }
   }
 
   // --- Voice 2: Diminished motif (rhythmic contrast, shared across characters) ---
@@ -705,10 +829,27 @@ Episode generateEpisode(const Subject& subject, Tick start_tick, Tick duration_t
     }
   }
 
-  // --- Invertible counterpoint for odd-indexed episodes ---
+  // --- Invertible counterpoint with character-specific probability ---
   // Swap voice 0 and voice 1 material (double counterpoint at the octave).
-  if (episode_index % 2 != 0) {
+  // Only applicable when at least 2 voices are present.
+  // Character-specific invertible counterpoint probability with odd/even bias.
+  float invert_base = 0.30f;
+  switch (subject.character) {
+    case SubjectCharacter::Severe:  invert_base = 0.30f; break;
+    case SubjectCharacter::Playful: invert_base = 0.60f; break;
+    case SubjectCharacter::Noble:   invert_base = 0.20f; break;
+    case SubjectCharacter::Restless: invert_base = 0.70f; break;
+  }
+  // Odd episodes get a +0.15 bias toward inversion.
+  float invert_prob = invert_base + ((episode_index % 2 != 0) ? 0.15f : 0.0f);
+  if (rng::rollProbability(rng, invert_prob) && num_voices >= 2) {
     applyInvertibleCounterpoint(episode.notes);
+  }
+
+  // Snap start_ticks to 8th-note grid for metric integrity.
+  constexpr Tick kTickQuantum = kTicksPerBeat / 2;  // 240
+  for (auto& note : episode.notes) {
+    note.start_tick = (note.start_tick / kTickQuantum) * kTickQuantum;
   }
 
   return episode;
@@ -897,9 +1038,27 @@ Episode generateFortspinnungEpisode(const Subject& subject, const MotifPool& poo
     }
   }
 
-  // Invertible counterpoint for odd-indexed episodes.
-  if (episode_index % 2 != 0) {
+  // Invertible counterpoint with character-specific probability.
+  // Only applicable when at least 2 voices are present.
+  std::mt19937 invert_rng(seed ^ 0x696E7600u);
+  // Character-specific invertible counterpoint probability with odd/even bias.
+  float fort_invert_base = 0.30f;
+  switch (subject.character) {
+    case SubjectCharacter::Severe:  fort_invert_base = 0.30f; break;
+    case SubjectCharacter::Playful: fort_invert_base = 0.60f; break;
+    case SubjectCharacter::Noble:   fort_invert_base = 0.20f; break;
+    case SubjectCharacter::Restless: fort_invert_base = 0.70f; break;
+  }
+  // Odd episodes get a +0.15 bias toward inversion.
+  float fort_invert_prob = fort_invert_base + ((episode_index % 2 != 0) ? 0.15f : 0.0f);
+  if (rng::rollProbability(invert_rng, fort_invert_prob) && num_voices >= 2) {
     applyInvertibleCounterpoint(episode.notes);
+  }
+
+  // Snap start_ticks to 8th-note grid for metric integrity.
+  constexpr Tick kFortTickQuantum = kTicksPerBeat / 2;  // 240
+  for (auto& note : episode.notes) {
+    note.start_tick = (note.start_tick / kFortTickQuantum) * kFortTickQuantum;
   }
 
   return episode;

@@ -219,9 +219,9 @@ ChaconneResult generateChaconne(const ChaconneConfig& config) {
   if (!config.variations.empty()) {
     variations = config.variations;
   } else if (config.target_variations > 0) {
-    variations = createScaledVariationPlan(config.key, config.target_variations);
+    variations = createScaledVariationPlan(config.key, config.target_variations, rng);
   } else {
-    variations = createStandardVariationPlan(config.key);
+    variations = createStandardVariationPlan(config.key, rng);
   }
 
   if (!validateVariationPlan(variations)) {

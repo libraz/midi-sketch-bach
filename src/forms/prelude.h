@@ -25,7 +25,8 @@ struct PreludeConfig {
   uint16_t bpm = 100;
   uint32_t seed = 42;
   Tick fugue_length_ticks = 0;  ///< Used to scale prelude length (60-80% of fugue).
-};
+  bool enable_picardy = true;   ///< Apply Picardy third in minor keys.
+};;
 
 /// @brief Result of prelude generation.
 struct PreludeResult {

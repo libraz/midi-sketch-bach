@@ -3,6 +3,7 @@
 #include "solo_string/arch/chaconne_config.h"
 
 #include <algorithm>
+#include <random>
 #include <set>
 #include <vector>
 
@@ -136,13 +137,15 @@ TEST(MajorSectionConstraintsTest, DefaultRegisterBounds) {
 
 TEST(ChaconneConfigTest, StandardPlanCreatesApproximatelyTenVariations) {
   KeySignature d_minor = {Key::D, true};
-  auto plan = createStandardVariationPlan(d_minor);
+  std::mt19937 rng(42);
+  auto plan = createStandardVariationPlan(d_minor, rng);
   EXPECT_EQ(plan.size(), 10u);
 }
 
 TEST(ChaconneConfigTest, StandardPlanHasCorrectRoleOrder) {
   KeySignature d_minor = {Key::D, true};
-  auto plan = createStandardVariationPlan(d_minor);
+  std::mt19937 rng(42);
+  auto plan = createStandardVariationPlan(d_minor, rng);
 
   std::vector<VariationRole> roles;
   for (const auto& var : plan) {
@@ -153,7 +156,8 @@ TEST(ChaconneConfigTest, StandardPlanHasCorrectRoleOrder) {
 
 TEST(ChaconneConfigTest, StandardPlanHasExactlyThreeAccumulate) {
   KeySignature d_minor = {Key::D, true};
-  auto plan = createStandardVariationPlan(d_minor);
+  std::mt19937 rng(42);
+  auto plan = createStandardVariationPlan(d_minor, rng);
 
   int accumulate_count = 0;
   for (const auto& var : plan) {
@@ -166,7 +170,8 @@ TEST(ChaconneConfigTest, StandardPlanHasExactlyThreeAccumulate) {
 
 TEST(ChaconneConfigTest, StandardPlanResolveIsThemeOnly) {
   KeySignature d_minor = {Key::D, true};
-  auto plan = createStandardVariationPlan(d_minor);
+  std::mt19937 rng(42);
+  auto plan = createStandardVariationPlan(d_minor, rng);
   ASSERT_FALSE(plan.empty());
 
   // Last variation must be Resolve with Theme type.
@@ -177,7 +182,8 @@ TEST(ChaconneConfigTest, StandardPlanResolveIsThemeOnly) {
 
 TEST(ChaconneConfigTest, StandardPlanFirstIsEstablishTheme) {
   KeySignature d_minor = {Key::D, true};
-  auto plan = createStandardVariationPlan(d_minor);
+  std::mt19937 rng(42);
+  auto plan = createStandardVariationPlan(d_minor, rng);
   ASSERT_FALSE(plan.empty());
 
   EXPECT_EQ(plan[0].role, VariationRole::Establish);
@@ -186,7 +192,8 @@ TEST(ChaconneConfigTest, StandardPlanFirstIsEstablishTheme) {
 
 TEST(ChaconneConfigTest, StandardPlanHasMajorSectionVariations) {
   KeySignature d_minor = {Key::D, true};
-  auto plan = createStandardVariationPlan(d_minor);
+  std::mt19937 rng(42);
+  auto plan = createStandardVariationPlan(d_minor, rng);
 
   int major_count = 0;
   for (const auto& var : plan) {
@@ -199,7 +206,8 @@ TEST(ChaconneConfigTest, StandardPlanHasMajorSectionVariations) {
 
 TEST(ChaconneConfigTest, StandardPlanMajorSectionUsesParallelMajor) {
   KeySignature d_minor = {Key::D, true};
-  auto plan = createStandardVariationPlan(d_minor);
+  std::mt19937 rng(42);
+  auto plan = createStandardVariationPlan(d_minor, rng);
 
   KeySignature d_major = getParallel(d_minor);
 
@@ -213,7 +221,8 @@ TEST(ChaconneConfigTest, StandardPlanMajorSectionUsesParallelMajor) {
 
 TEST(ChaconneConfigTest, StandardPlanMajorSectionRolesAreIlluminate) {
   KeySignature d_minor = {Key::D, true};
-  auto plan = createStandardVariationPlan(d_minor);
+  std::mt19937 rng(42);
+  auto plan = createStandardVariationPlan(d_minor, rng);
 
   for (const auto& var : plan) {
     if (var.is_major_section) {
@@ -225,7 +234,8 @@ TEST(ChaconneConfigTest, StandardPlanMajorSectionRolesAreIlluminate) {
 
 TEST(ChaconneConfigTest, StandardPlanVariationNumbersAreSequential) {
   KeySignature d_minor = {Key::D, true};
-  auto plan = createStandardVariationPlan(d_minor);
+  std::mt19937 rng(42);
+  auto plan = createStandardVariationPlan(d_minor, rng);
 
   for (size_t idx = 0; idx < plan.size(); ++idx) {
     EXPECT_EQ(plan[idx].variation_number, static_cast<int>(idx))
@@ -235,7 +245,8 @@ TEST(ChaconneConfigTest, StandardPlanVariationNumbersAreSequential) {
 
 TEST(ChaconneConfigTest, StandardPlanUsesMultipleTextures) {
   KeySignature d_minor = {Key::D, true};
-  auto plan = createStandardVariationPlan(d_minor);
+  std::mt19937 rng(42);
+  auto plan = createStandardVariationPlan(d_minor, rng);
 
   std::set<TextureType> textures;
   for (const auto& var : plan) {
@@ -251,14 +262,16 @@ TEST(ChaconneConfigTest, StandardPlanUsesMultipleTextures) {
 
 TEST(ChaconneConfigTest, StandardPlanWorksWithCMinor) {
   KeySignature c_minor = {Key::C, true};
-  auto plan = createStandardVariationPlan(c_minor);
+  std::mt19937 rng(42);
+  auto plan = createStandardVariationPlan(c_minor, rng);
   EXPECT_EQ(plan.size(), 10u);
   EXPECT_TRUE(validateVariationPlan(plan));
 }
 
 TEST(ChaconneConfigTest, StandardPlanWorksWithGMinor) {
   KeySignature g_minor = {Key::G, true};
-  auto plan = createStandardVariationPlan(g_minor);
+  std::mt19937 rng(42);
+  auto plan = createStandardVariationPlan(g_minor, rng);
   EXPECT_EQ(plan.size(), 10u);
   EXPECT_TRUE(validateVariationPlan(plan));
 }
@@ -269,7 +282,8 @@ TEST(ChaconneConfigTest, StandardPlanWorksWithGMinor) {
 
 TEST(ChaconneConfigTest, ValidateAcceptsStandardPlan) {
   KeySignature d_minor = {Key::D, true};
-  auto plan = createStandardVariationPlan(d_minor);
+  std::mt19937 rng(42);
+  auto plan = createStandardVariationPlan(d_minor, rng);
   EXPECT_TRUE(validateVariationPlan(plan));
 }
 
@@ -280,7 +294,8 @@ TEST(ChaconneConfigTest, ValidateRejectsEmptyPlan) {
 
 TEST(ChaconneConfigTest, ValidateRejectsWrongAccumulateCount) {
   KeySignature d_minor = {Key::D, true};
-  auto plan = createStandardVariationPlan(d_minor);
+  std::mt19937 rng(42);
+  auto plan = createStandardVariationPlan(d_minor, rng);
 
   // Remove one Accumulate
   auto iter = std::find_if(plan.begin(), plan.end(),
@@ -305,7 +320,8 @@ TEST(ChaconneConfigTest, ValidateRejectsInvalidRoleOrder) {
 
 TEST(ChaconneConfigTest, ValidateRejectsInvalidTypeForRole) {
   KeySignature d_minor = {Key::D, true};
-  auto plan = createStandardVariationPlan(d_minor);
+  std::mt19937 rng(42);
+  auto plan = createStandardVariationPlan(d_minor, rng);
 
   // Corrupt: assign Virtuosic to Establish (not allowed).
   plan[0].type = VariationType::Virtuosic;
@@ -314,7 +330,8 @@ TEST(ChaconneConfigTest, ValidateRejectsInvalidTypeForRole) {
 
 TEST(ChaconneConfigTest, ValidateRejectsResolveNotTheme) {
   KeySignature d_minor = {Key::D, true};
-  auto plan = createStandardVariationPlan(d_minor);
+  std::mt19937 rng(42);
+  auto plan = createStandardVariationPlan(d_minor, rng);
 
   // Corrupt: Resolve should be Theme, not Lyrical.
   plan.back().type = VariationType::Lyrical;

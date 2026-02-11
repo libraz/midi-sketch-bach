@@ -16,7 +16,8 @@ struct TrioSonataConfig {
   uint16_t bpm_fast = 120;  ///< BPM for outer movements (1st, 3rd).
   uint16_t bpm_slow = 60;   ///< BPM for middle movement (2nd).
   uint32_t seed = 42;
-};
+  bool enable_picardy = true;  ///< Apply Picardy third in minor keys.
+};;
 
 /// @brief A single movement of the trio sonata.
 struct TrioSonataMovement {

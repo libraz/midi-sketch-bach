@@ -4,7 +4,9 @@
 #define BACH_CORE_RNG_UTIL_H
 
 #include <cstddef>
+#include <numeric>
 #include <random>
+#include <vector>
 
 namespace bach {
 namespace rng {
@@ -69,6 +71,26 @@ template <typename Container>
 inline size_t selectRandomIndex(std::mt19937& rng, const Container& container) {
   std::uniform_int_distribution<size_t> dist(0, container.size() - 1);
   return dist(rng);
+}
+
+/// @brief Select an element from options using weighted probabilities.
+/// @tparam T Element type.
+/// @param rng Mersenne Twister RNG instance.
+/// @param options Non-empty vector of choices.
+/// @param weights Corresponding weights (must be same size as options, all >= 0).
+/// @return The selected element.
+template <typename T>
+inline T selectWeighted(std::mt19937& rng, const std::vector<T>& options,
+                        const std::vector<float>& weights) {
+  float total = std::accumulate(weights.begin(), weights.end(), 0.0f);
+  std::uniform_real_distribution<float> dist(0.0f, total);
+  float roll = dist(rng);
+  float cumulative = 0.0f;
+  for (size_t i = 0; i < options.size(); ++i) {
+    cumulative += weights[i];
+    if (roll < cumulative) return options[i];
+  }
+  return options.back();
 }
 
 }  // namespace rng

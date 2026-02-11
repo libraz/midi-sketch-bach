@@ -10,6 +10,7 @@
 #include "solo_string/arch/ground_bass.h"
 
 #include <cstdint>
+#include <random>
 #include <string>
 #include <vector>
 
@@ -41,7 +42,8 @@ TEST(DestructionResistanceTest, HundredSeedsAllMaintainStructure) {
     // The analyzer needs the variation plan in config. Since we left
     // config.variations empty, the engine used createStandardVariationPlan
     // internally. We must populate it for the analyzer.
-    config.variations = createStandardVariationPlan(config.key);
+    std::mt19937 rng(42);
+    config.variations = createStandardVariationPlan(config.key, rng);
 
     auto analysis = analyzeChaconne(result.tracks, config, bass);
 
@@ -149,7 +151,8 @@ TEST(DestructionResistanceTest, FiftySeedsAcrossFiveKeys) {
 
       // Verify structural invariants.
       GroundBass bass = GroundBass::createForKey(config.key);
-      config.variations = createStandardVariationPlan(config.key);
+      std::mt19937 rng(42);
+      config.variations = createStandardVariationPlan(config.key, rng);
       auto analysis = analyzeChaconne(result.tracks, config, bass);
 
       EXPECT_FLOAT_EQ(analysis.ground_bass_integrity, 1.0f)

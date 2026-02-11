@@ -21,7 +21,8 @@ struct PassacagliaConfig {
   int num_variations = 12;       ///< Number of ground bass variations.
   int ground_bass_bars = 8;      ///< Length of ground bass theme in bars.
   bool append_fugue = true;      ///< Whether to append a fugue section.
-};
+  bool enable_picardy = true;    ///< Apply Picardy third in minor keys.
+};;
 
 /// @brief Result of passacaglia generation.
 struct PassacagliaResult {

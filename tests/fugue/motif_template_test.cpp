@@ -2,34 +2,78 @@
 
 #include "fugue/motif_template.h"
 
+#include <random>
+
 #include <gtest/gtest.h>
 
 #include "core/basic_types.h"
 
 namespace bach {
 
-TEST(GoalToneTest, SevereValues) {
-  GoalTone goal = goalToneForCharacter(SubjectCharacter::Severe);
-  EXPECT_FLOAT_EQ(goal.position_ratio, 0.65f);
-  EXPECT_FLOAT_EQ(goal.pitch_ratio, 0.85f);
+TEST(GoalToneTest, SevereValuesWithinRange) {
+  std::mt19937 rng(42);
+  GoalTone goal = goalToneForCharacter(SubjectCharacter::Severe, rng);
+  // Base: {0.65, 0.85} with +-0.05 position, +-0.03 pitch variation.
+  EXPECT_GE(goal.position_ratio, 0.55f);
+  EXPECT_LE(goal.position_ratio, 0.75f);
+  EXPECT_GE(goal.pitch_ratio, 0.80f);
+  EXPECT_LE(goal.pitch_ratio, 0.90f);
 }
 
-TEST(GoalToneTest, PlayfulValues) {
-  GoalTone goal = goalToneForCharacter(SubjectCharacter::Playful);
-  EXPECT_FLOAT_EQ(goal.position_ratio, 0.50f);
-  EXPECT_FLOAT_EQ(goal.pitch_ratio, 0.90f);
+TEST(GoalToneTest, PlayfulValuesWithinRange) {
+  std::mt19937 rng(42);
+  GoalTone goal = goalToneForCharacter(SubjectCharacter::Playful, rng);
+  // Base: {0.50, 0.90} with +-0.05 position, +-0.03 pitch variation.
+  EXPECT_GE(goal.position_ratio, 0.40f);
+  EXPECT_LE(goal.position_ratio, 0.60f);
+  EXPECT_GE(goal.pitch_ratio, 0.87f);
+  EXPECT_LE(goal.pitch_ratio, 0.93f);
 }
 
-TEST(GoalToneTest, NobleValues) {
-  GoalTone goal = goalToneForCharacter(SubjectCharacter::Noble);
-  EXPECT_FLOAT_EQ(goal.position_ratio, 0.70f);
-  EXPECT_FLOAT_EQ(goal.pitch_ratio, 0.80f);
+TEST(GoalToneTest, NobleValuesWithinRange) {
+  std::mt19937 rng(42);
+  GoalTone goal = goalToneForCharacter(SubjectCharacter::Noble, rng);
+  // Base: {0.70, 0.80} with +-0.05 position, +-0.03 pitch variation.
+  EXPECT_GE(goal.position_ratio, 0.60f);
+  EXPECT_LE(goal.position_ratio, 0.80f);
+  EXPECT_GE(goal.pitch_ratio, 0.77f);
+  EXPECT_LE(goal.pitch_ratio, 0.83f);
 }
 
-TEST(GoalToneTest, RestlessValues) {
-  GoalTone goal = goalToneForCharacter(SubjectCharacter::Restless);
-  EXPECT_FLOAT_EQ(goal.position_ratio, 0.60f);
-  EXPECT_FLOAT_EQ(goal.pitch_ratio, 0.95f);
+TEST(GoalToneTest, RestlessValuesWithinRange) {
+  std::mt19937 rng(42);
+  GoalTone goal = goalToneForCharacter(SubjectCharacter::Restless, rng);
+  // Base: {0.60, 0.95} with +-0.05 position, +-0.03 pitch variation.
+  EXPECT_GE(goal.position_ratio, 0.50f);
+  EXPECT_LE(goal.position_ratio, 0.70f);
+  EXPECT_GE(goal.pitch_ratio, 0.92f);
+  EXPECT_LE(goal.pitch_ratio, 1.00f);
+}
+
+TEST(GoalToneTest, DeterministicWithSameSeed) {
+  // Same seed produces identical results.
+  std::mt19937 rng1(123);
+  GoalTone goal1 = goalToneForCharacter(SubjectCharacter::Severe, rng1);
+  std::mt19937 rng2(123);
+  GoalTone goal2 = goalToneForCharacter(SubjectCharacter::Severe, rng2);
+  EXPECT_FLOAT_EQ(goal1.position_ratio, goal2.position_ratio);
+  EXPECT_FLOAT_EQ(goal1.pitch_ratio, goal2.pitch_ratio);
+}
+
+TEST(GoalToneTest, DifferentSeedsProduceVariation) {
+  // Different seeds should produce at least some variation across many trials.
+  bool found_position_diff = false;
+  bool found_pitch_diff = false;
+  std::mt19937 rng_base(1);
+  GoalTone base = goalToneForCharacter(SubjectCharacter::Playful, rng_base);
+  for (uint32_t seed = 2; seed < 20; ++seed) {
+    std::mt19937 rng_trial(seed);
+    GoalTone trial = goalToneForCharacter(SubjectCharacter::Playful, rng_trial);
+    if (trial.position_ratio != base.position_ratio) found_position_diff = true;
+    if (trial.pitch_ratio != base.pitch_ratio) found_pitch_diff = true;
+  }
+  EXPECT_TRUE(found_position_diff);
+  EXPECT_TRUE(found_pitch_diff);
 }
 
 TEST(MotifTemplateTest, SevereHasTwoTemplates) {

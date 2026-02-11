@@ -14,6 +14,7 @@
 #include "harmony/chord_types.h"
 #include "harmony/harmonic_event.h"
 #include "ornament/ornament_engine.h"
+#include "organ/organ_techniques.h"
 #include "organ/registration.h"
 
 namespace bach {
@@ -24,19 +25,7 @@ namespace {
 // Constants
 // ---------------------------------------------------------------------------
 
-constexpr uint8_t kOrganVelocity = 80;
-
-constexpr Tick kThirtySecondNote = kTicksPerBeat / 8;                  // 60
-constexpr Tick kSixteenthNote = kTicksPerBeat / 4;                     // 120
-constexpr Tick kEighthNote = kTicksPerBeat / 2;                        // 240
-constexpr Tick kQuarterNote = kTicksPerBeat;                           // 480
-constexpr Tick kDottedQuarter = kTicksPerBeat + kTicksPerBeat / 2;     // 720
-constexpr Tick kHalfNote = kTicksPerBeat * 2;                          // 960
-// constexpr Tick kDottedHalf = kTicksPerBeat * 2 + kTicksPerBeat;  // 1440 (reserved)
-constexpr Tick kWholeNote = kTicksPerBeat * 4;                         // 1920
-
-constexpr Tick kGrandPauseDuration = kHalfNote;    // 960 ticks (2 beats)
-// constexpr Tick kFermataGrandPause = kTicksPerBar; // 1920 ticks (reserved)
+using namespace duration;
 
 constexpr uint8_t kGreatChannel = 0;
 constexpr uint8_t kSwellChannel = 1;
@@ -47,90 +36,6 @@ constexpr uint8_t kMaxVoices = 5;
 
 constexpr float kOpeningProportion = 0.25f;
 constexpr float kRecitativeProportion = 0.50f;
-
-// ---------------------------------------------------------------------------
-// Scale / chord helpers
-// ---------------------------------------------------------------------------
-
-/// @brief Get scale tones within a pitch range for the given key context.
-std::vector<uint8_t> getScaleTones(Key key, bool is_minor, uint8_t low_pitch,
-                                   uint8_t high_pitch) {
-  std::vector<uint8_t> tones;
-  ScaleType scale_type = is_minor ? ScaleType::HarmonicMinor : ScaleType::Major;
-
-  for (int pitch = static_cast<int>(low_pitch);
-       pitch <= static_cast<int>(high_pitch); ++pitch) {
-    if (scale_util::isScaleTone(static_cast<uint8_t>(pitch), key, scale_type)) {
-      tones.push_back(static_cast<uint8_t>(pitch));
-    }
-  }
-
-  return tones;
-}
-
-/// @brief Get chord tones as MIDI pitches for a given chord and base octave.
-std::vector<uint8_t> getChordTones(const Chord& chord, int octave) {
-  std::vector<uint8_t> tones;
-  tones.reserve(3);
-
-  int root = (octave + 1) * 12 + (static_cast<int>(chord.root_pitch) % 12);
-
-  int third_offset = 4;  // Major third default.
-  if (chord.quality == ChordQuality::Minor ||
-      chord.quality == ChordQuality::Diminished ||
-      chord.quality == ChordQuality::Minor7) {
-    third_offset = 3;  // Minor third.
-  }
-
-  int fifth_offset = 7;  // Perfect fifth default.
-  if (chord.quality == ChordQuality::Diminished) {
-    fifth_offset = 6;
-  } else if (chord.quality == ChordQuality::Augmented) {
-    fifth_offset = 8;
-  }
-
-  auto clamp_midi = [](int pitch) -> uint8_t {
-    if (pitch < 0) return 0;
-    if (pitch > 127) return 127;
-    return static_cast<uint8_t>(pitch);
-  };
-
-  tones.push_back(clamp_midi(root));
-  tones.push_back(clamp_midi(root + third_offset));
-  tones.push_back(clamp_midi(root + fifth_offset));
-
-  return tones;
-}
-
-/// @brief Collect all chord tones within a pitch range across octaves.
-std::vector<uint8_t> collectChordTonesInRange(const Chord& chord,
-                                              uint8_t low, uint8_t high) {
-  std::vector<uint8_t> tones;
-  int root_pc = static_cast<int>(chord.root_pitch) % 12;
-
-  int third_offset = 4;
-  if (chord.quality == ChordQuality::Minor ||
-      chord.quality == ChordQuality::Diminished ||
-      chord.quality == ChordQuality::Minor7) {
-    third_offset = 3;
-  }
-  int fifth_offset = 7;
-  if (chord.quality == ChordQuality::Diminished) fifth_offset = 6;
-  else if (chord.quality == ChordQuality::Augmented) fifth_offset = 8;
-
-  int intervals[] = {0, third_offset, fifth_offset};
-
-  for (int pitch = static_cast<int>(low); pitch <= static_cast<int>(high); ++pitch) {
-    int pc = pitch % 12;
-    for (int intv : intervals) {
-      if (pc == (root_pc + intv) % 12) {
-        tones.push_back(static_cast<uint8_t>(pitch));
-        break;
-      }
-    }
-  }
-  return tones;
-}
 
 // ---------------------------------------------------------------------------
 // Track creation
@@ -1165,6 +1070,44 @@ ToccataResult generateToccata(const ToccataConfig& config) {
 
   // Sort notes within each track
   sortToccataTrackNotes(tracks);
+
+  // Within-voice overlap cleanup: remove same-tick duplicates and truncate overlaps.
+  for (auto& track : tracks) {
+    auto& notes = track.notes;
+    if (notes.size() < 2) continue;
+
+    // Sort by start_tick, then duration descending (keep longer note on dedup).
+    std::sort(notes.begin(), notes.end(),
+              [](const NoteEvent& a, const NoteEvent& b) {
+                if (a.start_tick != b.start_tick) return a.start_tick < b.start_tick;
+                return a.duration > b.duration;
+              });
+
+    // Remove same-tick duplicates.
+    notes.erase(
+        std::unique(notes.begin(), notes.end(),
+                    [](const NoteEvent& a, const NoteEvent& b) {
+                      return a.start_tick == b.start_tick;
+                    }),
+        notes.end());
+
+    // Truncate overlapping notes.
+    for (size_t i = 0; i + 1 < notes.size(); ++i) {
+      Tick end_tick = notes[i].start_tick + notes[i].duration;
+      if (end_tick > notes[i + 1].start_tick) {
+        notes[i].duration = notes[i + 1].start_tick - notes[i].start_tick;
+        if (notes[i].duration == 0) notes[i].duration = 1;
+      }
+    }
+  }
+
+  // Picardy third (minor keys only).
+  if (config.enable_picardy && config.key.is_minor) {
+    for (auto& track : tracks) {
+      applyPicardyToFinalChord(track.notes, config.key,
+                               total_duration - kTicksPerBar);
+    }
+  }
 
   result.tracks = std::move(tracks);
   result.timeline = std::move(timeline);

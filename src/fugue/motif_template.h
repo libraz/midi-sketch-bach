@@ -8,6 +8,7 @@
 #define BACH_FUGUE_MOTIF_TEMPLATE_H
 
 #include <cstdint>
+#include <random>
 #include <vector>
 
 #include "core/basic_types.h"
@@ -45,9 +46,14 @@ struct GoalTone {
 };
 
 /// @brief Get the GoalTone design values for a given character.
+///
+/// Applies small RNG-driven variation to the base design values so that
+/// different seeds produce subtly different goal tones for the same character.
+///
 /// @param character Subject character type.
-/// @return GoalTone with fixed position and pitch ratios.
-GoalTone goalToneForCharacter(SubjectCharacter character);
+/// @param rng Mersenne Twister for per-seed variation.
+/// @return GoalTone with position and pitch ratios (design values + small perturbation).
+GoalTone goalToneForCharacter(SubjectCharacter character, std::mt19937& rng);
 
 /// @brief Get the pair of MotifTemplates (A and B) for a given character.
 ///

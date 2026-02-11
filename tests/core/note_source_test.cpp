@@ -30,6 +30,9 @@ TEST(BachNoteSourceTest, AllSourcesHaveStringRepresentation) {
       BachNoteSource::GroundBass,
       BachNoteSource::CollisionAvoid,
       BachNoteSource::PostProcess,
+      BachNoteSource::ChromaticPassing,
+      BachNoteSource::FalseEntry,
+      BachNoteSource::Coda,
   };
 
   for (auto src : all_sources) {
@@ -56,6 +59,9 @@ TEST(BachNoteSourceTest, SpecificSourceStringsMatchJsonFormat) {
   EXPECT_STREQ(bachNoteSourceToString(BachNoteSource::GroundBass), "ground_bass");
   EXPECT_STREQ(bachNoteSourceToString(BachNoteSource::CollisionAvoid), "collision_avoid");
   EXPECT_STREQ(bachNoteSourceToString(BachNoteSource::PostProcess), "post_process");
+  EXPECT_STREQ(bachNoteSourceToString(BachNoteSource::ChromaticPassing), "chromatic_passing");
+  EXPECT_STREQ(bachNoteSourceToString(BachNoteSource::FalseEntry), "false_entry");
+  EXPECT_STREQ(bachNoteSourceToString(BachNoteSource::Coda), "coda");
 }
 
 // ---------------------------------------------------------------------------
@@ -191,6 +197,10 @@ TEST(ProtectionLevelTest, StructuralSources) {
             ProtectionLevel::Structural);
   EXPECT_EQ(getProtectionLevel(BachNoteSource::PedalPoint),
             ProtectionLevel::Structural);
+  EXPECT_EQ(getProtectionLevel(BachNoteSource::FalseEntry),
+            ProtectionLevel::Structural);
+  EXPECT_EQ(getProtectionLevel(BachNoteSource::Coda),
+            ProtectionLevel::Structural);
 }
 
 TEST(ProtectionLevelTest, FlexibleSources) {
@@ -208,6 +218,8 @@ TEST(ProtectionLevelTest, FlexibleSources) {
             ProtectionLevel::Flexible);
   EXPECT_EQ(getProtectionLevel(BachNoteSource::PostProcess),
             ProtectionLevel::Flexible);
+  EXPECT_EQ(getProtectionLevel(BachNoteSource::ChromaticPassing),
+            ProtectionLevel::Flexible);
   EXPECT_EQ(getProtectionLevel(BachNoteSource::Unknown),
             ProtectionLevel::Flexible);
 }
@@ -222,6 +234,8 @@ TEST(ProtectionLevelTest, AllSourcesCovered) {
       BachNoteSource::PedalPoint,        BachNoteSource::ArpeggioFlow,
       BachNoteSource::TextureNote,       BachNoteSource::GroundBass,
       BachNoteSource::CollisionAvoid,    BachNoteSource::PostProcess,
+      BachNoteSource::ChromaticPassing,  BachNoteSource::FalseEntry,
+      BachNoteSource::Coda,
   };
   for (auto src : all) {
     auto level = getProtectionLevel(src);

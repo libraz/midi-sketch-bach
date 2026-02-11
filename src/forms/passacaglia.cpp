@@ -13,25 +13,13 @@
 #include "core/scale.h"
 #include "harmony/chord_types.h"
 #include "harmony/harmonic_event.h"
+#include "organ/organ_techniques.h"
 
 namespace bach {
 
 namespace {
 
-/// @brief Organ velocity (pipe organs have no velocity sensitivity).
-constexpr uint8_t kOrganVelocity = 80;
-
-/// @brief Duration of a 16th note in ticks.
-constexpr Tick kSixteenthNote = kTicksPerBeat / 4;  // 120
-
-/// @brief Duration of an 8th note in ticks.
-constexpr Tick kEighthNote = kTicksPerBeat / 2;  // 240
-
-/// @brief Duration of a quarter note in ticks.
-constexpr Tick kQuarterNote = kTicksPerBeat;  // 480
-
-/// @brief Duration of a half note in ticks.
-constexpr Tick kHalfNote = kTicksPerBeat * 2;  // 960
+using namespace duration;
 
 // ---------------------------------------------------------------------------
 // Track creation (organ channel mapping)
@@ -104,72 +92,6 @@ uint8_t getVoiceHighPitch(uint8_t voice_idx) {
     case 3: return organ_range::kPedalHigh;    // 50
     default: return organ_range::kManual1High;
   }
-}
-
-// ---------------------------------------------------------------------------
-// Scale and chord tone utilities
-// ---------------------------------------------------------------------------
-
-/// @brief Get scale tones within a range for the given key context.
-///
-/// @param key Musical key (pitch class of tonic).
-/// @param is_minor True for minor mode (uses harmonic minor), false for major.
-/// @param low_pitch Lowest MIDI pitch to include.
-/// @param high_pitch Highest MIDI pitch to include.
-/// @return Vector of scale-member MIDI pitches in ascending order.
-std::vector<uint8_t> getScaleTones(Key key, bool is_minor, uint8_t low_pitch,
-                                   uint8_t high_pitch) {
-  std::vector<uint8_t> tones;
-  ScaleType scale_type = is_minor ? ScaleType::HarmonicMinor : ScaleType::Major;
-
-  for (int pitch = static_cast<int>(low_pitch);
-       pitch <= static_cast<int>(high_pitch); ++pitch) {
-    if (scale_util::isScaleTone(static_cast<uint8_t>(pitch), key, scale_type)) {
-      tones.push_back(static_cast<uint8_t>(pitch));
-    }
-  }
-
-  return tones;
-}
-
-/// @brief Get chord tones as MIDI pitches for a given chord and base octave.
-///
-/// Returns root, third, and fifth of the chord in the specified octave.
-///
-/// @param chord The chord to extract tones from.
-/// @param octave Base octave for pitch calculation.
-/// @return Vector of 3 MIDI pitch values (root, third, fifth).
-std::vector<uint8_t> getChordTones(const Chord& chord, int octave) {
-  std::vector<uint8_t> tones;
-  tones.reserve(3);
-
-  int root = (octave + 1) * 12 + (static_cast<int>(chord.root_pitch) % 12);
-
-  int third_offset = 4;  // Major third default.
-  if (chord.quality == ChordQuality::Minor ||
-      chord.quality == ChordQuality::Diminished ||
-      chord.quality == ChordQuality::Minor7) {
-    third_offset = 3;  // Minor third.
-  }
-
-  int fifth_offset = 7;  // Perfect fifth default.
-  if (chord.quality == ChordQuality::Diminished) {
-    fifth_offset = 6;  // Diminished fifth.
-  } else if (chord.quality == ChordQuality::Augmented) {
-    fifth_offset = 8;  // Augmented fifth.
-  }
-
-  auto clamp_midi = [](int pitch) -> uint8_t {
-    if (pitch < 0) return 0;
-    if (pitch > 127) return 127;
-    return static_cast<uint8_t>(pitch);
-  };
-
-  tones.push_back(clamp_midi(root));
-  tones.push_back(clamp_midi(root + third_offset));
-  tones.push_back(clamp_midi(root + fifth_offset));
-
-  return tones;
 }
 
 // ---------------------------------------------------------------------------
@@ -769,6 +691,25 @@ PassacagliaResult generatePassacaglia(const PassacagliaConfig& config) {
           cp_result.parallel_perfect_count + cp_result.voice_crossing_count;
     }
   }
+
+  // ---------------------------------------------------------------------------
+  // Shared organ techniques: Picardy, variation registration (no pedal point
+  // since GroundBass already serves as pedal foundation)
+  // ---------------------------------------------------------------------------
+
+  // Picardy third (minor keys only, final variation).
+  if (config.enable_picardy && config.key.is_minor) {
+    for (auto& track : tracks) {
+      applyPicardyToFinalChord(track.notes, config.key,
+                               total_duration - kTicksPerBar);
+    }
+  }
+
+  // Variation registration plan (gradual crescendo).
+  Tick var_dur = static_cast<Tick>(config.ground_bass_bars) * kTicksPerBar;
+  auto reg_plan = createVariationRegistrationPlan(
+      config.num_variations, var_dur);
+  applyExtendedRegistrationPlan(tracks, reg_plan);
 
   result.tracks = std::move(tracks);
   result.timeline = std::move(timeline);

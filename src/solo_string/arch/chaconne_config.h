@@ -3,6 +3,7 @@
 #ifndef BACH_SOLO_STRING_ARCH_CHACONNE_CONFIG_H
 #define BACH_SOLO_STRING_ARCH_CHACONNE_CONFIG_H
 
+#include <random>
 #include <set>
 #include <vector>
 
@@ -111,8 +112,10 @@ struct ChaconneConfig {
 /// is_major_section = true.
 ///
 /// @param key The key signature (major section uses parallel major).
+/// @param rng Mersenne Twister RNG for VariationType selection.
 /// @return Vector of ChaconneVariation with roles and types assigned.
-std::vector<ChaconneVariation> createStandardVariationPlan(const KeySignature& key);
+std::vector<ChaconneVariation> createStandardVariationPlan(const KeySignature& key,
+                                                            std::mt19937& rng);
 
 /// @brief Create a scaled variation plan for a chaconne with a target variation count.
 ///
@@ -130,9 +133,11 @@ std::vector<ChaconneVariation> createStandardVariationPlan(const KeySignature& k
 ///
 /// @param key The key signature (major section uses parallel major).
 /// @param target_variations Number of variations to generate (minimum 10).
+/// @param rng Mersenne Twister RNG for VariationType selection.
 /// @return Vector of ChaconneVariation with roles and types assigned.
 std::vector<ChaconneVariation> createScaledVariationPlan(const KeySignature& key,
-                                                          int target_variations);
+                                                          int target_variations,
+                                                          std::mt19937& rng);
 
 /// @brief Validate a variation plan for structural correctness.
 ///

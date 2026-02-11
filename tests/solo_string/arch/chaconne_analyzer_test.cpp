@@ -2,6 +2,7 @@
 
 #include "solo_string/arch/chaconne_analyzer.h"
 
+#include <random>
 #include <vector>
 
 #include <gtest/gtest.h>
@@ -26,7 +27,8 @@ ChaconneConfig createTestChaconneConfig() {
   config.bpm = 60;
   config.seed = 42;
   config.instrument = InstrumentType::Violin;
-  config.variations = createStandardVariationPlan(config.key);
+  std::mt19937 rng(42);
+  config.variations = createStandardVariationPlan(config.key, rng);
   return config;
 }
 

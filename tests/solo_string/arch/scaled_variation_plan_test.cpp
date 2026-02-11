@@ -3,6 +3,7 @@
 #include "solo_string/arch/chaconne_config.h"
 
 #include <algorithm>
+#include <random>
 #include <vector>
 
 #include <gtest/gtest.h>
@@ -25,10 +26,13 @@ struct ScaleTestParam {
   const char* label;
 };
 
-class ScaledVariationPlanTest : public ::testing::TestWithParam<ScaleTestParam> {};
+class ScaledVariationPlanTest : public ::testing::TestWithParam<ScaleTestParam> {
+ protected:
+  std::mt19937 rng{42};
+};
 
 TEST_P(ScaledVariationPlanTest, ValidatePassesForAllScales) {
-  auto plan = createScaledVariationPlan(kDMinor, GetParam().target_variations);
+  auto plan = createScaledVariationPlan(kDMinor, GetParam().target_variations, rng);
   EXPECT_TRUE(validateVariationPlan(plan))
       << "Plan validation failed for " << GetParam().label
       << " (" << GetParam().target_variations << " variations)";
@@ -36,7 +40,7 @@ TEST_P(ScaledVariationPlanTest, ValidatePassesForAllScales) {
 
 TEST_P(ScaledVariationPlanTest, HasCorrectVariationCount) {
   int target = GetParam().target_variations;
-  auto plan = createScaledVariationPlan(kDMinor, target);
+  auto plan = createScaledVariationPlan(kDMinor, target, rng);
   if (target <= 10) {
     EXPECT_EQ(static_cast<int>(plan.size()), 10);
   } else {
@@ -47,7 +51,7 @@ TEST_P(ScaledVariationPlanTest, HasCorrectVariationCount) {
 }
 
 TEST_P(ScaledVariationPlanTest, HasExactlyThreeAccumulate) {
-  auto plan = createScaledVariationPlan(kDMinor, GetParam().target_variations);
+  auto plan = createScaledVariationPlan(kDMinor, GetParam().target_variations, rng);
   int count = 0;
   for (const auto& v : plan) {
     if (v.role == VariationRole::Accumulate) ++count;
@@ -56,28 +60,28 @@ TEST_P(ScaledVariationPlanTest, HasExactlyThreeAccumulate) {
 }
 
 TEST_P(ScaledVariationPlanTest, FirstIsEstablishTheme) {
-  auto plan = createScaledVariationPlan(kDMinor, GetParam().target_variations);
+  auto plan = createScaledVariationPlan(kDMinor, GetParam().target_variations, rng);
   ASSERT_FALSE(plan.empty());
   EXPECT_EQ(plan.front().role, VariationRole::Establish);
   EXPECT_EQ(plan.front().type, VariationType::Theme);
 }
 
 TEST_P(ScaledVariationPlanTest, LastIsResolveTheme) {
-  auto plan = createScaledVariationPlan(kDMinor, GetParam().target_variations);
+  auto plan = createScaledVariationPlan(kDMinor, GetParam().target_variations, rng);
   ASSERT_FALSE(plan.empty());
   EXPECT_EQ(plan.back().role, VariationRole::Resolve);
   EXPECT_EQ(plan.back().type, VariationType::Theme);
 }
 
 TEST_P(ScaledVariationPlanTest, RoleOrderIsValid) {
-  auto plan = createScaledVariationPlan(kDMinor, GetParam().target_variations);
+  auto plan = createScaledVariationPlan(kDMinor, GetParam().target_variations, rng);
   std::vector<VariationRole> roles;
   for (const auto& v : plan) roles.push_back(v.role);
   EXPECT_TRUE(isRoleOrderValid(roles));
 }
 
 TEST_P(ScaledVariationPlanTest, AllTypesAllowedForRoles) {
-  auto plan = createScaledVariationPlan(kDMinor, GetParam().target_variations);
+  auto plan = createScaledVariationPlan(kDMinor, GetParam().target_variations, rng);
   for (const auto& v : plan) {
     EXPECT_TRUE(isTypeAllowedForRole(v.type, v.role))
         << "Type " << variationTypeToString(v.type)
@@ -87,7 +91,7 @@ TEST_P(ScaledVariationPlanTest, AllTypesAllowedForRoles) {
 }
 
 TEST_P(ScaledVariationPlanTest, AccumulatePositionInRange70to85Percent) {
-  auto plan = createScaledVariationPlan(kDMinor, GetParam().target_variations);
+  auto plan = createScaledVariationPlan(kDMinor, GetParam().target_variations, rng);
   int total = static_cast<int>(plan.size());
   if (total <= 0) return;
 
@@ -111,7 +115,7 @@ TEST_P(ScaledVariationPlanTest, AccumulatePositionInRange70to85Percent) {
 }
 
 TEST_P(ScaledVariationPlanTest, VariationNumbersAreSequential) {
-  auto plan = createScaledVariationPlan(kDMinor, GetParam().target_variations);
+  auto plan = createScaledVariationPlan(kDMinor, GetParam().target_variations, rng);
   for (size_t idx = 0; idx < plan.size(); ++idx) {
     EXPECT_EQ(plan[idx].variation_number, static_cast<int>(idx));
   }
@@ -135,8 +139,10 @@ INSTANTIATE_TEST_SUITE_P(
 // ===========================================================================
 
 TEST(ScaledVariationPlanTest, ShortScaleMatchesStandardPlan) {
-  auto standard = createStandardVariationPlan(kDMinor);
-  auto scaled = createScaledVariationPlan(kDMinor, 10);
+  std::mt19937 rng(42);
+  auto standard = createStandardVariationPlan(kDMinor, rng);
+  std::mt19937 rng2(42);
+  auto scaled = createScaledVariationPlan(kDMinor, 10, rng2);
 
   ASSERT_EQ(standard.size(), scaled.size());
   for (size_t idx = 0; idx < standard.size(); ++idx) {
@@ -150,8 +156,10 @@ TEST(ScaledVariationPlanTest, ShortScaleMatchesStandardPlan) {
 }
 
 TEST(ScaledVariationPlanTest, BelowTenAlsoUsesStandardPlan) {
-  auto standard = createStandardVariationPlan(kDMinor);
-  auto scaled = createScaledVariationPlan(kDMinor, 5);
+  std::mt19937 rng(42);
+  auto standard = createStandardVariationPlan(kDMinor, rng);
+  std::mt19937 rng2(42);
+  auto scaled = createScaledVariationPlan(kDMinor, 5, rng2);
   EXPECT_EQ(standard.size(), scaled.size());
 }
 
@@ -160,7 +168,8 @@ TEST(ScaledVariationPlanTest, BelowTenAlsoUsesStandardPlan) {
 // ===========================================================================
 
 TEST(ScaledVariationPlanTest, FullScaleHasIlluminateIslands) {
-  auto plan = createScaledVariationPlan(kDMinor, 64);
+  std::mt19937 rng(42);
+  auto plan = createScaledVariationPlan(kDMinor, 64, rng);
 
   // Count Illuminate variations that are NOT in the main major section.
   int island_count = 0;
@@ -174,7 +183,8 @@ TEST(ScaledVariationPlanTest, FullScaleHasIlluminateIslands) {
 }
 
 TEST(ScaledVariationPlanTest, MainMajorSectionHasIsMajorTrue) {
-  auto plan = createScaledVariationPlan(kDMinor, 64);
+  std::mt19937 rng(42);
+  auto plan = createScaledVariationPlan(kDMinor, 64, rng);
 
   int major_section_count = 0;
   for (const auto& v : plan) {
@@ -188,7 +198,8 @@ TEST(ScaledVariationPlanTest, MainMajorSectionHasIsMajorTrue) {
 }
 
 TEST(ScaledVariationPlanTest, IslandKeysAreNotMinorHome) {
-  auto plan = createScaledVariationPlan(kDMinor, 64);
+  std::mt19937 rng(42);
+  auto plan = createScaledVariationPlan(kDMinor, 64, rng);
 
   for (const auto& v : plan) {
     if (v.role == VariationRole::Illuminate && !v.is_major_section) {
@@ -206,13 +217,15 @@ TEST(ScaledVariationPlanTest, IslandKeysAreNotMinorHome) {
 
 TEST(ScaledVariationPlanTest, WorksWithCMinor) {
   KeySignature c_minor = {Key::C, true};
-  auto plan = createScaledVariationPlan(c_minor, 40);
+  std::mt19937 rng(42);
+  auto plan = createScaledVariationPlan(c_minor, 40, rng);
   EXPECT_TRUE(validateVariationPlan(plan));
 }
 
 TEST(ScaledVariationPlanTest, WorksWithGMinor) {
   KeySignature g_minor = {Key::G, true};
-  auto plan = createScaledVariationPlan(g_minor, 64);
+  std::mt19937 rng(42);
+  auto plan = createScaledVariationPlan(g_minor, 64, rng);
   EXPECT_TRUE(validateVariationPlan(plan));
 }
 
@@ -230,7 +243,8 @@ TEST(ScaledVariationPlanDestructionTest, AllScalesAllKeysValidate) {
 
   for (const auto& key : keys) {
     for (int target : targets) {
-      auto plan = createScaledVariationPlan(key, target);
+      std::mt19937 rng(42);
+      auto plan = createScaledVariationPlan(key, target, rng);
       EXPECT_TRUE(validateVariationPlan(plan))
           << "Failed for key=" << keyToString(key.tonic)
           << " target=" << target;

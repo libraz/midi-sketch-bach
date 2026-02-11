@@ -3,6 +3,7 @@
 #include "solo_string/arch/chaconne_engine.h"
 
 #include <algorithm>
+#include <random>
 #include <set>
 #include <vector>
 
@@ -417,7 +418,8 @@ TEST(ChaconneEngineTest, InvalidTypesInPlanReturnsError) {
   config.seed = 42;
 
   // Create plan where Establish uses Virtuosic (not allowed).
-  auto plan = createStandardVariationPlan(config.key);
+  std::mt19937 rng(42);
+  auto plan = createStandardVariationPlan(config.key, rng);
   plan[0].type = VariationType::Virtuosic;
   config.variations = plan;
 

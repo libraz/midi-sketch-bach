@@ -79,6 +79,33 @@ class SubjectGenerator {
                                        uint32_t seed) const;
 };
 
+// ---------------------------------------------------------------------------
+// Shared subject/answer pitch helpers
+// ---------------------------------------------------------------------------
+
+/// @brief Maximum allowed leap in semitones for the given character.
+/// @param ch Subject character type.
+/// @return Maximum leap in semitones (7 for Severe/Noble, 9 for Playful/Restless).
+int maxLeapForCharacter(SubjectCharacter ch);
+
+/// @brief Normalize an ending pitch to be reachable from the previous note.
+///
+/// Finds the nearest octave of the target pitch class within max_leap of
+/// prev_pitch. Falls back to stepwise approach if no direct octave works.
+/// Used by both Subject and Answer ending normalization.
+///
+/// @param target_pitch_class Target pitch class (0-11).
+/// @param prev_pitch Previous note's MIDI pitch.
+/// @param max_leap Maximum allowed leap in semitones.
+/// @param key Musical key.
+/// @param scale Scale type.
+/// @param floor Minimum allowed pitch.
+/// @param ceil Maximum allowed pitch.
+/// @return Normalized ending pitch.
+int normalizeEndingPitch(int target_pitch_class, int prev_pitch,
+                         int max_leap, Key key, ScaleType scale,
+                         int floor, int ceil);
+
 }  // namespace bach
 
 #endif  // BACH_FUGUE_SUBJECT_H

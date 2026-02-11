@@ -12,25 +12,13 @@
 #include "harmony/chord_types.h"
 #include "harmony/harmonic_event.h"
 #include "harmony/harmonic_timeline.h"
+#include "organ/organ_techniques.h"
 
 namespace bach {
 
 namespace {
 
-/// @brief Organ velocity (pipe organs have no velocity sensitivity).
-constexpr uint8_t kOrganVelocity = 80;
-
-/// @brief Duration of a 16th note in ticks.
-constexpr Tick kSixteenthNote = kTicksPerBeat / 4;  // 120
-
-/// @brief Duration of an 8th note in ticks.
-constexpr Tick kEighthNote = kTicksPerBeat / 2;  // 240
-
-/// @brief Duration of a quarter note in ticks.
-constexpr Tick kQuarterNote = kTicksPerBeat;  // 480
-
-/// @brief Duration of a half note in ticks.
-constexpr Tick kHalfNote = kTicksPerBeat * 2;  // 960
+using namespace duration;
 
 /// @brief MIDI channel for Great manual (counterpoint voice).
 constexpr uint8_t kGreatChannel = 0;
@@ -429,6 +417,27 @@ ChoralePreludeResult generateChoralePrelude(const ChoralePreludeConfig& config) 
     cantus_tick += cantus_dur;
   }
 
+  // ---------------------------------------------------------------------------
+  // Shared organ techniques: Picardy, registration
+  // ---------------------------------------------------------------------------
+
+  // Picardy third (minor keys only).
+  if (config.enable_picardy && config.key.is_minor && total_duration > kTicksPerBar) {
+    for (auto& track : tracks) {
+      applyPicardyToFinalChord(track.notes, config.key,
+                               total_duration - kTicksPerBar);
+    }
+  }
+
+  // 2-point registration (mezzo -> forte).
+  {
+    ExtendedRegistrationPlan reg_plan;
+    reg_plan.addPoint(0, OrganRegistrationPresets::mezzo(), "opening");
+    Tick mid = total_duration / 2;
+    reg_plan.addPoint(mid, OrganRegistrationPresets::forte(), "closing");
+    applyExtendedRegistrationPlan(tracks, reg_plan);
+  }
+
   // Step 7: Sort notes within each track by start_tick.
   for (auto& track : tracks) {
     std::sort(track.notes.begin(), track.notes.end(),
@@ -442,6 +451,7 @@ ChoralePreludeResult generateChoralePrelude(const ChoralePreludeConfig& config) 
 
   result.tracks = std::move(tracks);
   result.timeline = std::move(timeline);
+  result.total_duration_ticks = total_duration;
   result.success = true;
 
   return result;

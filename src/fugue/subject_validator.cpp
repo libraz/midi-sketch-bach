@@ -18,12 +18,13 @@ namespace bach {
 
 float SubjectScore::composite() const {
   // Weights sum to 1.0.
+  // Step motion ratio gets higher weight (0.25) to enforce melodic quality.
   return interval_variety * 0.15f +
          rhythm_diversity * 0.10f +
          contour_balance * 0.15f +
-         range_score * 0.15f +
-         step_motion_ratio * 0.15f +
-         tonal_stability * 0.20f +
+         range_score * 0.10f +
+         step_motion_ratio * 0.25f +
+         tonal_stability * 0.15f +
          answer_compatibility * 0.10f;
 }
 
@@ -71,6 +72,59 @@ SubjectScore SubjectValidator::evaluate(const Subject& subject) const {
   score.step_motion_ratio = scoreStepMotionRatio(subject);
   score.tonal_stability = scoreTonalStability(subject);
   score.answer_compatibility = scoreAnswerCompatibility(subject);
+
+  // Hard floor: step motion ratio below 0.35 is unacceptable.
+  if (subject.noteCount() >= 2) {
+    int step_count = 0;
+    int total_intervals = 0;
+    for (size_t idx = 1; idx < subject.notes.size(); ++idx) {
+      int abs_interval = absoluteInterval(subject.notes[idx].pitch,
+                                          subject.notes[idx - 1].pitch);
+      total_intervals++;
+      if (abs_interval >= 1 && abs_interval <= 2) step_count++;
+    }
+    if (total_intervals > 0) {
+      float raw_step_ratio =
+          static_cast<float>(step_count) / total_intervals;
+      if (raw_step_ratio < 0.35f) {
+        // Force rejection by zeroing step_motion_ratio.
+        score.step_motion_ratio = 0.0f;
+      }
+    }
+  }
+
+  // Repeated pitch ratio: reject if >30% of notes are same-pitch repetitions.
+  if (subject.noteCount() >= 2) {
+    int repeated = 0;
+    for (size_t idx = 1; idx < subject.notes.size(); ++idx) {
+      if (subject.notes[idx].pitch == subject.notes[idx - 1].pitch) {
+        repeated++;
+      }
+    }
+    float repeated_pitch_ratio =
+        static_cast<float>(repeated) /
+        static_cast<float>(subject.noteCount() - 1);
+    if (repeated_pitch_ratio > 0.30f) {
+      score.interval_variety *= 0.3f;  // Heavy penalty.
+    }
+  }
+
+  // Repeated rhythm ratio: reject if >40% of consecutive durations are identical.
+  if (subject.noteCount() >= 2) {
+    int same_dur = 0;
+    for (size_t idx = 1; idx < subject.notes.size(); ++idx) {
+      if (subject.notes[idx].duration == subject.notes[idx - 1].duration) {
+        same_dur++;
+      }
+    }
+    float repeated_rhythm_ratio =
+        static_cast<float>(same_dur) /
+        static_cast<float>(subject.noteCount() - 1);
+    if (repeated_rhythm_ratio > 0.40f) {
+      score.rhythm_diversity *= 0.5f;  // Moderate penalty.
+    }
+  }
+
   return score;
 }
 

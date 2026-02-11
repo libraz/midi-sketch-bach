@@ -183,6 +183,45 @@ void mergeTracksInPlace(std::vector<Track>& prefix_tracks,
   }
 }
 
+/// @brief Remove within-track overlaps after merging compound forms.
+///
+/// Sorts notes by start_tick, removes same-tick duplicates (keeping the longer
+/// note), and truncates notes that extend past the next note's start.
+/// This is essential after merging tracks from different generation phases
+/// (e.g., toccata + fugue) where boundary overlaps can occur.
+///
+/// @param tracks Tracks to clean up (modified in place).
+void cleanupTrackOverlaps(std::vector<Track>& tracks) {
+  for (auto& track : tracks) {
+    auto& notes = track.notes;
+    if (notes.size() < 2) continue;
+
+    // Sort by start_tick, then duration descending (keep longer note on dedup).
+    std::sort(notes.begin(), notes.end(),
+              [](const NoteEvent& a, const NoteEvent& b) {
+                if (a.start_tick != b.start_tick) return a.start_tick < b.start_tick;
+                return a.duration > b.duration;
+              });
+
+    // Remove same-tick duplicates.
+    notes.erase(
+        std::unique(notes.begin(), notes.end(),
+                    [](const NoteEvent& a, const NoteEvent& b) {
+                      return a.start_tick == b.start_tick;
+                    }),
+        notes.end());
+
+    // Truncate overlapping notes.
+    for (size_t i = 0; i + 1 < notes.size(); ++i) {
+      Tick end_tick = notes[i].start_tick + notes[i].duration;
+      if (end_tick > notes[i + 1].start_tick) {
+        notes[i].duration = notes[i + 1].start_tick - notes[i].start_tick;
+        if (notes[i].duration == 0) notes[i].duration = 1;
+      }
+    }
+  }
+}
+
 /// @brief Map a track index to a VoiceRole for articulation purposes.
 ///
 /// For organ-system multi-voice forms the mapping follows exposition entry order:
@@ -433,6 +472,7 @@ GeneratorResult generate(const GeneratorConfig& config) {
       offsetTrackNotes(fugue_result.tracks, toc_duration);
       result.tracks = std::move(toc_result.tracks);
       mergeTracksInPlace(result.tracks, fugue_result.tracks);
+      cleanupTrackOverlaps(result.tracks);
 
       result.total_duration_ticks = toc_duration + fugue_duration;
 
@@ -513,6 +553,7 @@ GeneratorResult generate(const GeneratorConfig& config) {
       offsetTrackNotes(fugue_result.tracks, fant_duration);
       result.tracks = std::move(fant_result.tracks);
       mergeTracksInPlace(result.tracks, fugue_result.tracks);
+      cleanupTrackOverlaps(result.tracks);
 
       result.total_duration_ticks = fant_duration + fugue_duration;
 
@@ -612,6 +653,7 @@ GeneratorResult generate(const GeneratorConfig& config) {
         mergeTracksInPlace(result.tracks, movement.tracks);
         accumulated_ticks += movement.total_duration_ticks;
       }
+      cleanupTrackOverlaps(result.tracks);
 
       result.total_duration_ticks = accumulated_ticks;
       result.timeline = HarmonicTimeline::createStandard(
@@ -759,6 +801,12 @@ GeneratorResult generate(const GeneratorConfig& config) {
     for (auto& track : result.tracks) {
       applyVelocityCurve(track.notes, effective_config.instrument, cadence_ticks);
     }
+  }
+
+  // Final overlap cleanup: catches any overlaps introduced by articulation,
+  // merging, or other post-processing steps.
+  if (result.success) {
+    cleanupTrackOverlaps(result.tracks);
   }
 
   return result;

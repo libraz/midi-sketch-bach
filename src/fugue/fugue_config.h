@@ -113,7 +113,8 @@ struct FugueConfig {
   int episode_bars = 2;           ///< Duration of each episode in bars.
   ModulationPlan modulation_plan;       ///< Key plan for episode modulations.
   bool has_modulation_plan = false;     ///< Whether modulation_plan was explicitly set.
-};
+  bool enable_picardy = true;           ///< Apply Picardy third in minor keys.
+};;
 
 }  // namespace bach
 

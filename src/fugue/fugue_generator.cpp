@@ -10,6 +10,8 @@
 #include "core/gm_program.h"
 #include "core/note_source.h"
 #include "core/pitch_utils.h"
+#include "core/rng_util.h"
+#include "core/scale.h"
 #include "counterpoint/bach_rule_evaluator.h"
 #include "counterpoint/collision_resolver.h"
 #include "counterpoint/counterpoint_state.h"
@@ -32,6 +34,7 @@
 #include "harmony/harmonic_rhythm.h"
 #include "harmony/modulation_plan.h"
 #include "organ/manual.h"
+#include "organ/organ_techniques.h"
 #include "organ/registration.h"
 
 namespace bach {
@@ -151,7 +154,8 @@ Subject generateValidSubject(const FugueConfig& config, int& attempts_out) {
   float best_composite = -1.0f;
 
   for (int attempt = 0; attempt < config.max_subject_retries; ++attempt) {
-    // Use a large prime multiplier to spread seeds apart, avoiding correlation.
+    // Wrapping on uint32_t overflow is safe: any value is a valid RNG seed.
+    // With max_subject_retries <= ~10, overflow does not occur in practice.
     uint32_t attempt_seed = config.seed + static_cast<uint32_t>(attempt) * 1000003u;
     Subject subject = gen.generate(config, attempt_seed);
     SubjectScore score = validator.evaluate(subject);
@@ -211,8 +215,9 @@ std::vector<NoteEvent> generatePedalPoint(uint8_t pitch, Tick start_tick,
 
 /// @brief Remove notes from the lowest voice that overlap with a pedal region.
 ///
-/// Any existing note in the specified voice whose start_tick falls within
+/// Any existing note in the specified voice whose time interval intersects
 /// [region_start, region_end) is removed, making room for the pedal point.
+/// This catches notes that start before the region but extend into it.
 ///
 /// @param all_notes The collection of all notes (modified in place).
 /// @param voice_id Voice whose notes should be removed.
@@ -224,9 +229,9 @@ void removeLowestVoiceNotes(std::vector<NoteEvent>& all_notes,
   all_notes.erase(
       std::remove_if(all_notes.begin(), all_notes.end(),
                      [voice_id, region_start, region_end](const NoteEvent& evt) {
-                       return evt.voice == voice_id &&
-                              evt.start_tick >= region_start &&
-                              evt.start_tick < region_end;
+                       if (evt.voice != voice_id) return false;
+                       Tick note_end = evt.start_tick + evt.duration;
+                       return evt.start_tick < region_end && note_end > region_start;
                      }),
       all_notes.end());
 }
@@ -285,23 +290,29 @@ std::vector<NoteEvent> createCodaNotes(Tick start_tick, Tick duration,
       note.pitch = clampPitch(head_pitches[idx], organ_range::kPedalLow, organ_range::kManual1High);
       note.velocity = kOrganVelocity;
       note.voice = 0;
-      note.source = BachNoteSource::FreeCounterpoint;
+      note.source = BachNoteSource::Coda;
       notes.push_back(note);
     }
   }
 
   // Other voices: sustained chord tones during stage 1.
+  // Sort offsets descending so V1 (alto) gets highest pitch, V(N-1) (bass) gets lowest.
   int chord_third = is_minor ? 3 : 4;
-  int chord_offsets[] = {0, 7, chord_third, -12, 12};
-  for (uint8_t v = 1; v < num_voices && v < 5; ++v) {
-    NoteEvent note;
-    note.start_tick = start_tick;
-    note.duration = stage1_dur;
-    note.pitch = clampPitch(tonic_pitch + chord_offsets[v],
-                            organ_range::kPedalLow, organ_range::kManual1High);
-    note.velocity = kOrganVelocity;
-    note.voice = v;
-    notes.push_back(note);
+  {
+    int stage1_offsets[] = {7, chord_third, -12, 12};
+    uint8_t count = std::min(static_cast<uint8_t>(num_voices - 1), static_cast<uint8_t>(4));
+    std::sort(stage1_offsets, stage1_offsets + count, std::greater<int>());
+    for (uint8_t i = 0; i < count; ++i) {
+      NoteEvent note;
+      note.start_tick = start_tick;
+      note.duration = stage1_dur;
+      note.pitch = clampPitch(tonic_pitch + stage1_offsets[i],
+                              organ_range::kPedalLow, organ_range::kManual1High);
+      note.velocity = kOrganVelocity;
+      note.voice = 1 + i;
+      note.source = BachNoteSource::Coda;
+      notes.push_back(note);
+    }
   }
 
   // Stage 2 (bar 3): V7-I cadence progression.
@@ -311,52 +322,71 @@ std::vector<NoteEvent> createCodaNotes(Tick start_tick, Tick duration,
     Tick half_bar = stage2_dur / 2;
 
     // V7 chord (first half): dominant 7th chord.
+    // Sort offsets descending so V0=highest pitch (soprano convention).
     int dom_pitch = tonic_pitch + 7;  // Dominant
-    int dom7_offsets[] = {0, 4, 7, 10, -5};  // root, 3rd, 5th, 7th, bass 4th below
-    for (uint8_t v = 0; v < num_voices && v < 5; ++v) {
-      NoteEvent note;
-      note.start_tick = stage2_start;
-      note.duration = half_bar;
-      note.pitch = clampPitch(dom_pitch + dom7_offsets[v],
-                              organ_range::kPedalLow, organ_range::kManual1High);
-      note.velocity = kOrganVelocity;
-      note.voice = v;
-      note.source = BachNoteSource::FreeCounterpoint;
-      notes.push_back(note);
+    {
+      int dom7_offsets[] = {0, 4, 7, 10, -5};
+      uint8_t count = std::min(num_voices, static_cast<uint8_t>(5));
+      std::sort(dom7_offsets, dom7_offsets + count, std::greater<int>());
+      for (uint8_t v = 0; v < count; ++v) {
+        NoteEvent note;
+        note.start_tick = stage2_start;
+        note.duration = half_bar;
+        note.pitch = clampPitch(dom_pitch + dom7_offsets[v],
+                                organ_range::kPedalLow, organ_range::kManual1High);
+        note.velocity = kOrganVelocity;
+        note.voice = v;
+        note.source = BachNoteSource::Coda;
+        notes.push_back(note);
+      }
     }
 
     // I chord (second half): tonic resolution.
-    int res_third = is_minor ? 3 : 4;
-    int tonic_offsets[] = {0, res_third, 7, -12, 12};
-    for (uint8_t v = 0; v < num_voices && v < 5; ++v) {
-      NoteEvent note;
-      note.start_tick = stage2_start + half_bar;
-      note.duration = stage2_dur - half_bar;
-      note.pitch = clampPitch(tonic_pitch + tonic_offsets[v],
-                              organ_range::kPedalLow, organ_range::kManual1High);
-      note.velocity = kOrganVelocity;
-      note.voice = v;
-      note.source = BachNoteSource::FreeCounterpoint;
-      notes.push_back(note);
+    // Sort offsets descending so V0=highest pitch.
+    {
+      int res_third = is_minor ? 3 : 4;
+      int tonic_offsets[] = {0, res_third, 7, -12, 12};
+      uint8_t count = std::min(num_voices, static_cast<uint8_t>(5));
+      std::sort(tonic_offsets, tonic_offsets + count, std::greater<int>());
+      for (uint8_t v = 0; v < count; ++v) {
+        NoteEvent note;
+        note.start_tick = stage2_start + half_bar;
+        note.duration = stage2_dur - half_bar;
+        note.pitch = clampPitch(tonic_pitch + tonic_offsets[v],
+                                organ_range::kPedalLow, organ_range::kManual1High);
+        note.velocity = kOrganVelocity;
+        note.voice = v;
+        note.source = BachNoteSource::Coda;
+        notes.push_back(note);
+      }
     }
   }
 
   // Stage 3 (bar 4): Final sustained tonic chord.
-  Tick stage3_start = start_tick + stage1_dur + bar_dur;
+  Tick stage2_actual = (duration > stage1_dur)
+      ? std::min(bar_dur, duration - stage1_dur)
+      : static_cast<Tick>(0);
+  Tick stage3_start = start_tick + stage1_dur + stage2_actual;
   if (stage3_start < start_tick + duration) {
     Tick stage3_dur = start_tick + duration - stage3_start;
     // Picardy third for minor keys: raise 3rd by 1 semitone.
+    // Sort offsets descending so V0=highest pitch.
     int third_offset = is_minor ? 4 : 4;  // Major 3rd in both (Picardy)
-    int final_offsets[] = {0, 7, third_offset, -12, 12};
-    for (uint8_t v = 0; v < num_voices && v < 5; ++v) {
-      NoteEvent note;
-      note.start_tick = stage3_start;
-      note.duration = stage3_dur;
-      note.pitch = clampPitch(tonic_pitch + final_offsets[v],
-                              organ_range::kPedalLow, organ_range::kManual1High);
-      note.velocity = kOrganVelocity;
-      note.voice = v;
-      notes.push_back(note);
+    {
+      int final_offsets[] = {0, 7, third_offset, -12, 12};
+      uint8_t count = std::min(num_voices, static_cast<uint8_t>(5));
+      std::sort(final_offsets, final_offsets + count, std::greater<int>());
+      for (uint8_t v = 0; v < count; ++v) {
+        NoteEvent note;
+        note.start_tick = stage3_start;
+        note.duration = stage3_dur;
+        note.pitch = clampPitch(tonic_pitch + final_offsets[v],
+                                organ_range::kPedalLow, organ_range::kManual1High);
+        note.velocity = kOrganVelocity;
+        note.voice = v;
+        note.source = BachNoteSource::Coda;
+        notes.push_back(note);
+      }
     }
   }
 
@@ -484,7 +514,7 @@ FugueResult generateFugue(const FugueConfig& config) {
   // RNG for false entry probability checks (seeded from config for determinism).
   std::mt19937 false_entry_rng(config.seed + 9999u);
 
-  // Character-based probability for false entry (design values, Principle 4).
+  // Character-based probability for false entry with per-seed variation.
   float false_entry_prob = 0.0f;
   switch (subject.character) {
     case SubjectCharacter::Restless: false_entry_prob = 0.40f; break;
@@ -492,6 +522,8 @@ FugueResult generateFugue(const FugueConfig& config) {
     case SubjectCharacter::Noble:   false_entry_prob = 0.15f; break;
     case SubjectCharacter::Severe:  false_entry_prob = 0.10f; break;
   }
+  false_entry_prob = std::clamp(
+      false_entry_prob + rng::rollFloat(false_entry_rng, -0.05f, 0.05f), 0.0f, 1.0f);
 
   for (int pair_idx = 0; pair_idx < develop_pairs; ++pair_idx) {
     // Odd-indexed episodes get +1 bar for structural variety (Bach uses
@@ -620,7 +652,8 @@ FugueResult generateFugue(const FugueConfig& config) {
     }
 
     // Generate upper voice counterpoint over the pedal. Use episode material
-    // with high energy (pre-stretto climax) for voices 0..num_voices-2.
+    // with high energy (pre-stretto climax) for voices 0..upper_voices-1.
+    // lowest_voice has the pedal and is excluded from episode generation.
     uint8_t upper_voices = num_voices > 1 ? num_voices - 1 : 1;
     float pedal_energy = FugueEnergyCurve::getLevel(current_tick, estimated_duration);
     Episode pedal_episode = generateFortspinnungEpisode(
@@ -653,7 +686,6 @@ FugueResult generateFugue(const FugueConfig& config) {
   current_tick = stretto_end;
 
   // --- Section 6: Coda (Resolve) with tonic pedal ---
-  Tick coda_start_tick = current_tick;
   Tick coda_duration = kTicksPerBar * kCodaBars;
   structure.addSection(SectionType::Coda, FuguePhase::Resolve,
                        current_tick, current_tick + coda_duration, config.key);
@@ -710,7 +742,7 @@ FugueResult generateFugue(const FugueConfig& config) {
     for (size_t note_idx = 0; note_idx < all_notes.size(); ++note_idx) {
       const auto& note = all_notes[note_idx];
       if (note.voice >= num_voices) {
-        validated_notes.push_back(note);
+        ++rejected;  // Drop: assignNotesToTracks would discard anyway.
         continue;
       }
 
@@ -728,32 +760,71 @@ FugueResult generateFugue(const FugueConfig& config) {
       if (is_chord_tone) ++chord_tones;
 
       // Structural notes (subject, answer, pedal, countersubject, false entry,
-      // coda chord) pass through without alteration -- only register in state
+      // coda) pass through without alteration -- only register in state
       // for context. Coda notes are design values (Principle 4) and should
       // never be altered.
-      bool is_coda = (note.start_tick >= coda_start_tick);
-      bool is_structural = is_coda ||
-                           (source == BachNoteSource::FugueSubject ||
+      bool is_structural = (source == BachNoteSource::FugueSubject ||
                             source == BachNoteSource::FugueAnswer ||
                             source == BachNoteSource::PedalPoint ||
                             source == BachNoteSource::Countersubject ||
-                            source == BachNoteSource::FalseEntry);
+                            source == BachNoteSource::FalseEntry ||
+                            source == BachNoteSource::Coda);
 
       if (is_structural) {
-        post_state.addNote(note.voice, note);
-        validated_notes.push_back(note);
+        // Apply octave correction for structural voice crossings.
+        NoteEvent fixed_note = note;
+        bool has_crossing = false;
+        for (uint8_t other = 0; other < num_voices; ++other) {
+          if (other == note.voice) continue;
+          const NoteEvent* other_note = post_state.getNoteAt(other, note.start_tick);
+          if (!other_note) continue;
+          if ((note.voice < other && note.pitch < other_note->pitch) ||
+              (note.voice > other && note.pitch > other_note->pitch)) {
+            has_crossing = true;
+            break;
+          }
+        }
+        if (has_crossing) {
+          for (int shift : {12, -12, 24, -24}) {
+            int candidate = static_cast<int>(note.pitch) + shift;
+            if (candidate < 0 || candidate > 127) continue;
+            bool resolved = true;
+            for (uint8_t other = 0; other < num_voices; ++other) {
+              if (other == note.voice) continue;
+              const NoteEvent* other_note =
+                  post_state.getNoteAt(other, note.start_tick);
+              if (!other_note) continue;
+              if ((note.voice < other &&
+                   candidate < static_cast<int>(other_note->pitch)) ||
+                  (note.voice > other &&
+                   candidate > static_cast<int>(other_note->pitch))) {
+                resolved = false;
+                break;
+              }
+            }
+            if (resolved) {
+              fixed_note.pitch = static_cast<uint8_t>(candidate);
+              break;
+            }
+          }
+        }
+        post_state.addNote(note.voice, fixed_note);
+        validated_notes.push_back(fixed_note);
 
         // Count dissonances for metrics even on structural notes.
         bool is_strong = (note.start_tick % kTicksPerBeat == 0);
         if (!is_chord_tone && is_strong) ++dissonances;
 
-        // Check voice crossings.
+        // Count remaining voice crossings after correction.
         for (uint8_t other = 0; other < num_voices; ++other) {
           if (other == note.voice) continue;
-          const NoteEvent* other_note = post_state.getNoteAt(other, note.start_tick);
+          const NoteEvent* other_note =
+              post_state.getNoteAt(other, fixed_note.start_tick);
           if (!other_note) continue;
-          if (note.voice < other && note.pitch < other_note->pitch) ++crossings;
-          if (note.voice > other && note.pitch > other_note->pitch) ++crossings;
+          if (note.voice < other && fixed_note.pitch < other_note->pitch)
+            ++crossings;
+          if (note.voice > other && fixed_note.pitch > other_note->pitch)
+            ++crossings;
         }
         continue;
       }
@@ -811,7 +882,44 @@ FugueResult generateFugue(const FugueConfig& config) {
 
     all_notes = std::move(validated_notes);
 
+    // Diatonic enforcement sweep: snap non-diatonic notes to the nearest scale
+    // tone unless they are permitted chromatic alterations (raised 7th, chord
+    // tones of secondary dominants, or notes at modulation boundaries).
+    ScaleType effective_scale =
+        config.is_minor ? ScaleType::HarmonicMinor : ScaleType::Major;
+    for (auto& note : all_notes) {
+      Key note_key = tonal_plan.keyAtTick(note.start_tick);
+      const HarmonicEvent& harm = detailed_timeline.getAt(note.start_tick);
+
+      if (scale_util::isScaleTone(note.pitch, note_key, effective_scale)) {
+        continue;
+      }
+
+      // Allow permitted chromatic alterations.
+      if (isAllowedChromatic(note.pitch, note_key, effective_scale, &harm)) {
+        continue;
+      }
+
+      // Modulation boundary tolerance: within 1 beat of a key change, allow
+      // pitches that are diatonic in either the old or new key.
+      constexpr Tick kBoundaryTolerance = kTicksPerBeat;
+      Key prev_key = tonal_plan.keyAtTick(
+          (note.start_tick > kBoundaryTolerance)
+              ? note.start_tick - kBoundaryTolerance : 0);
+      if (prev_key != note_key) {
+        if (scale_util::isScaleTone(note.pitch, prev_key, effective_scale)) {
+          continue;
+        }
+      }
+
+      // Snap to nearest diatonic tone.
+      note.pitch = scale_util::nearestScaleTone(note.pitch, note_key,
+                                                effective_scale);
+    }
+
     // Compute quality metrics.
+    // NOTE: current_tick == stretto_end here (not updated after coda generation).
+    // Adding kCodaBars is correct -- this is the only place coda duration is counted.
     Tick total_duration_ticks = current_tick + kTicksPerBar * kCodaBars;
     float total_beats = static_cast<float>(total_duration_ticks) /
                         static_cast<float>(kTicksPerBeat);
@@ -828,6 +936,54 @@ FugueResult generateFugue(const FugueConfig& config) {
         ? static_cast<float>(total_notes) / static_cast<float>(pre_count) : 1.0f;
   }
 
+  // =========================================================================
+  // Within-voice overlap cleanup: truncate earlier notes that extend into
+  // the next note's start tick in the same voice.
+  // =========================================================================
+  {
+    // Sort by voice, then start_tick, then duration descending (so that
+    // std::unique keeps the longer note when removing same-tick duplicates).
+    std::sort(all_notes.begin(), all_notes.end(),
+              [](const NoteEvent& a, const NoteEvent& b) {
+                if (a.voice != b.voice) return a.voice < b.voice;
+                if (a.start_tick != b.start_tick) return a.start_tick < b.start_tick;
+                return a.duration > b.duration;  // Longer note first.
+              });
+
+    // Standard musical duration values for snapping truncated notes.
+    static constexpr Tick kStandardDurations[] = {
+        1920, 1440, 960, 720, 480, 360, 240, 120};
+
+    // Remove same-tick duplicates within the same voice: keep the longer note.
+    all_notes.erase(
+        std::unique(all_notes.begin(), all_notes.end(),
+                    [](const NoteEvent& a, const NoteEvent& b) {
+                      return a.voice == b.voice && a.start_tick == b.start_tick;
+                    }),
+        all_notes.end());
+
+    for (size_t i = 0; i + 1 < all_notes.size(); ++i) {
+      if (all_notes[i].voice != all_notes[i + 1].voice) continue;
+      Tick end_tick = all_notes[i].start_tick + all_notes[i].duration;
+      if (end_tick > all_notes[i + 1].start_tick) {
+        Tick trimmed = all_notes[i + 1].start_tick - all_notes[i].start_tick;
+        // Snap trimmed duration to nearest standard musical value (floor),
+        // but never exceed the gap to avoid re-introducing overlaps.
+        Tick snapped = trimmed;  // Default: exact gap (safe).
+        for (Tick std_dur : kStandardDurations) {
+          if (trimmed >= std_dur) {
+            snapped = std_dur;
+            break;
+          }
+        }
+        all_notes[i].duration = std::min(snapped, trimmed);
+        if (all_notes[i].duration == 0) {
+          all_notes[i].duration = 1;  // Avoid zero-duration notes.
+        }
+      }
+    }
+  }
+
   // Store the beat-resolution timeline for dual-timeline analysis.
   // Cannot std::move because detailed_timeline is still referenced below.
   result.generation_timeline = detailed_timeline;
@@ -841,6 +997,7 @@ FugueResult generateFugue(const FugueConfig& config) {
 
   // Build bar-resolution timeline with real progressions for analysis output.
   // This matches Bach's actual harmonic rhythm and prevents inflated SOCC counts.
+  // NOTE: current_tick is still stretto_end. Coda adds kCodaBars once, not double-counted.
   Tick total_ticks = current_tick + kTicksPerBar * kCodaBars;
   {
     HarmonicTimeline bar_timeline;
@@ -897,12 +1054,61 @@ FugueResult generateFugue(const FugueConfig& config) {
     applyRhythmFactors(result.timeline.mutableEvents(), total_ticks, cadence_ticks);
   }
 
+  // --- Coda cadential pedal point (tonic, last 2-4 bars) ---
+  // Only add if the fugue has a pedal voice and enough duration.
+  if (config.num_voices >= 3 && total_ticks > kTicksPerBar * 4) {
+    uint8_t pedal_voice = config.num_voices - 1;
+    Tick pedal_bars = (config.num_voices >= 4) ? 4 : 2;
+    Tick pedal_start = total_ticks - kTicksPerBar * pedal_bars;
+    auto pedal_notes = generateCadentialPedal(
+        home_key_sig, pedal_start, total_ticks,
+        PedalPointType::Tonic, pedal_voice);
+    if (pedal_voice < result.tracks.size()) {
+      for (auto& n : pedal_notes) {
+        result.tracks[pedal_voice].notes.push_back(n);
+      }
+    }
+  }
+
+  // --- Picardy third (minor keys only) ---
+  if (config.enable_picardy && config.is_minor) {
+    for (auto& track : result.tracks) {
+      applyPicardyToFinalChord(track.notes, home_key_sig,
+                               total_ticks - kTicksPerBar);
+    }
+  }
+
+  // Re-sort tracks after adding pedal/Picardy notes.
+  for (auto& track : result.tracks) {
+    std::sort(track.notes.begin(), track.notes.end(),
+              [](const NoteEvent& a, const NoteEvent& b) {
+                return a.start_tick < b.start_tick;
+              });
+  }
+
   // --- Apply extended N-point registration plan ---
   // Insert CC#7/CC#11 events at every section boundary for fine-grained
   // dynamic control following the fugue's structural arc.
   {
     ExtendedRegistrationPlan ext_plan =
         createExtendedRegistrationPlan(structure.sections, total_ticks);
+
+    // Ensure tutti registration at coda if not already present.
+    bool has_coda_tutti = false;
+    Tick coda_threshold = total_ticks > kTicksPerBar * 4
+                              ? total_ticks - kTicksPerBar * 4
+                              : 0;
+    for (const auto& pt : ext_plan.points) {
+      if (pt.tick >= coda_threshold && pt.registration.velocity_hint >= 100) {
+        has_coda_tutti = true;
+        break;
+      }
+    }
+    if (!has_coda_tutti && total_ticks > kTicksPerBar * 2) {
+      ext_plan.addPoint(total_ticks - kTicksPerBar * 2,
+                        OrganRegistrationPresets::tutti(), "coda_tutti");
+    }
+
     applyExtendedRegistrationPlan(result.tracks, ext_plan);
   }
 

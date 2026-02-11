@@ -5,6 +5,7 @@
 #include <cstdlib>
 
 #include "core/pitch_utils.h"
+#include "fugue/subject.h"
 
 namespace bach {
 
@@ -194,11 +195,36 @@ Answer generateAnswer(const Subject& subject, AnswerType type) {
     type = autoDetectAnswerType(subject);
   }
 
+  Answer answer;
   if (type == AnswerType::Tonal) {
-    return generateTonalAnswer(subject, dominant_key);
+    answer = generateTonalAnswer(subject, dominant_key);
+  } else {
+    answer = generateRealAnswer(subject, dominant_key);
   }
 
-  return generateRealAnswer(subject, dominant_key);
+  // Normalize the ending pitch so the answer's last interval doesn't diverge
+  // wildly from the subject's. Uses the shared normalizer from subject.h.
+  if (answer.notes.size() >= 2) {
+    int prev_pitch = static_cast<int>(answer.notes[answer.notes.size() - 2].pitch);
+    int max_leap = maxLeapForCharacter(subject.character);
+
+    // Target: dominant of the answer key (tonic of the subject key).
+    int target_pc = static_cast<int>(subject.key) % 12;
+    ScaleType scale =
+        subject.is_minor ? ScaleType::HarmonicMinor : ScaleType::Major;
+
+    // Pitch bounds from subject.
+    int floor_pitch = static_cast<int>(subject.lowestPitch());
+    int ceil_pitch = static_cast<int>(subject.highestPitch()) + 12;
+    if (ceil_pitch > 127) ceil_pitch = 127;
+
+    int ending = normalizeEndingPitch(target_pc, prev_pitch, max_leap,
+                                      dominant_key, scale,
+                                      floor_pitch, ceil_pitch);
+    answer.notes.back().pitch = static_cast<uint8_t>(ending);
+  }
+
+  return answer;
 }
 
 }  // namespace bach

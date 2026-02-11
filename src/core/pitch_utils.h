@@ -6,10 +6,14 @@
 
 #include <cstdint>
 #include <string>
+#include <vector>
 
 #include "core/basic_types.h"
 
 namespace bach {
+
+// Forward declarations for chord tone utilities.
+struct Chord;
 
 // ---------------------------------------------------------------------------
 // Interval constants (semitones)
@@ -222,6 +226,57 @@ bool isDiatonicInKey(int pitch, Key key, bool is_minor);
 /// @param semitones Interval size (0-12+). Compound intervals are reduced mod 12.
 /// @return String such as "unison", "minor 2nd", "perfect 5th", "tritone".
 const char* intervalToName(int semitones);
+
+// ---------------------------------------------------------------------------
+// Scale / chord tone collection
+// ---------------------------------------------------------------------------
+
+/// @brief Get scale tones within a pitch range for the given key context.
+/// @param key Musical key (pitch class of tonic).
+/// @param is_minor True for minor mode (uses harmonic minor), false for major.
+/// @param low_pitch Lowest MIDI pitch to include.
+/// @param high_pitch Highest MIDI pitch to include.
+/// @return Vector of scale-member MIDI pitches in ascending order.
+std::vector<uint8_t> getScaleTones(Key key, bool is_minor, uint8_t low_pitch,
+                                   uint8_t high_pitch);
+
+/// @brief Get chord tones as MIDI pitches for a given chord and base octave.
+///
+/// Returns root, third, and fifth of the chord in the specified octave.
+/// Quality determines the third and fifth intervals.
+///
+/// @param chord The chord to extract tones from.
+/// @param octave Base octave for pitch calculation.
+/// @return Vector of 3 MIDI pitch values (root, third, fifth).
+std::vector<uint8_t> getChordTones(const struct Chord& chord, int octave);
+
+/// @brief Collect all chord tones within a pitch range across octaves.
+/// @param chord The chord to extract tones from.
+/// @param low Lowest MIDI pitch to include.
+/// @param high Highest MIDI pitch to include.
+/// @return Vector of MIDI pitches that are chord tones within the range.
+std::vector<uint8_t> collectChordTonesInRange(const struct Chord& chord,
+                                              uint8_t low, uint8_t high);
+
+// ---------------------------------------------------------------------------
+// Chromatic alteration validation
+// ---------------------------------------------------------------------------
+
+// Forward declaration to avoid circular dependency.
+struct HarmonicEvent;
+
+/// @brief Check if a pitch is allowed as a chromatic alteration in the given key context.
+///
+/// Allows: (1) raised 7th in harmonic minor, (2) chord tones of the current
+/// harmonic event (secondary dominants etc.), (3) nothing else.
+///
+/// @param pitch MIDI note number.
+/// @param key Current key context.
+/// @param scale Scale type.
+/// @param harm_ev Pointer to the current harmonic event (may be null).
+/// @return True if the pitch is a permitted chromatic alteration.
+bool isAllowedChromatic(uint8_t pitch, Key key, ScaleType scale,
+                        const HarmonicEvent* harm_ev);
 
 }  // namespace bach
 

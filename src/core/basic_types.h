@@ -18,6 +18,22 @@ using Tick = uint32_t;
 constexpr Tick kTicksPerBeat = 480;
 constexpr uint8_t kBeatsPerBar = 4;
 constexpr Tick kTicksPerBar = kTicksPerBeat * kBeatsPerBar;  // 1920
+
+// ---------------------------------------------------------------------------
+// Duration constants (based on kTicksPerBeat)
+// ---------------------------------------------------------------------------
+
+namespace duration {
+
+constexpr Tick kWholeNote = kTicksPerBar;                           // 1920
+constexpr Tick kHalfNote = kTicksPerBeat * 2;                      // 960
+constexpr Tick kDottedQuarter = kTicksPerBeat + kTicksPerBeat / 2; // 720
+constexpr Tick kQuarterNote = kTicksPerBeat;                       // 480
+constexpr Tick kEighthNote = kTicksPerBeat / 2;                    // 240
+constexpr Tick kSixteenthNote = kTicksPerBeat / 4;                 // 120
+constexpr Tick kThirtySecondNote = kTicksPerBeat / 8;              // 60
+
+}  // namespace duration
 constexpr uint8_t kMidiC4 = 60;
 
 // ---------------------------------------------------------------------------

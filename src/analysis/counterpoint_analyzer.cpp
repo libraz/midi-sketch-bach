@@ -157,7 +157,18 @@ uint32_t countVoiceCrossings(const std::vector<NoteEvent>& notes, uint8_t num_vo
       for (uint8_t vb = va + 1; vb < num_voices; ++vb) {
         int hi = soundingPitch(voices[va], beat);
         int lo = soundingPitch(voices[vb], beat);
-        if (hi >= 0 && lo >= 0 && hi < lo) ++count;
+        if (hi >= 0 && lo >= 0 && hi < lo) {
+          // 1-beat lookahead: skip temporary crossings that resolve immediately.
+          Tick next_beat = beat + kTicksPerBeat;
+          if (next_beat < end) {
+            int next_hi = soundingPitch(voices[va], next_beat);
+            int next_lo = soundingPitch(voices[vb], next_beat);
+            if (next_hi >= 0 && next_lo >= 0 && next_hi >= next_lo) {
+              continue;
+            }
+          }
+          ++count;
+        }
       }
     }
   }
@@ -260,16 +271,26 @@ FailReport buildCounterpointReport(const std::vector<NoteEvent>& notes, uint8_t 
     }
   }
 
-  // Voice crossings.
+  // Voice crossings (with 1-beat lookahead to exclude temporary crossings).
   for (Tick beat = 0; beat < end; beat += kTicksPerBeat) {
     for (uint8_t va = 0; va < num_voices; ++va) {
       for (uint8_t vb = va + 1; vb < num_voices; ++vb) {
         int hi = soundingPitch(voices[va], beat), lo = soundingPitch(voices[vb], beat);
-        if (hi >= 0 && lo >= 0 && hi < lo)
+        if (hi >= 0 && lo >= 0 && hi < lo) {
+          // Skip temporary crossings that resolve at the next beat.
+          Tick next_beat = beat + kTicksPerBeat;
+          if (next_beat < end) {
+            int next_hi = soundingPitch(voices[va], next_beat);
+            int next_lo = soundingPitch(voices[vb], next_beat);
+            if (next_hi >= 0 && next_lo >= 0 && next_hi >= next_lo) {
+              continue;
+            }
+          }
           report.addIssue(makeIssue(FailSeverity::Critical, beat, va, vb, "voice_crossing",
               "Voice " + std::to_string(va) + " (pitch " + std::to_string(hi) +
               ") crosses below voice " + std::to_string(vb) +
               " (pitch " + std::to_string(lo) + ")"));
+        }
       }
     }
   }

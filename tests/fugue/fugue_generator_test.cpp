@@ -724,6 +724,37 @@ TEST(FugueGeneratorTest, TonicPedalPitchIsRoot) {
   }
 }
 
+TEST(FugueGeneratorTest, CodaNotesHaveCodaSource) {
+  FugueConfig config = makeTestConfig();
+  config.num_voices = 3;
+  FugueResult result = generateFugue(config);
+  ASSERT_TRUE(result.success);
+
+  auto codas = result.structure.getSectionsByType(SectionType::Coda);
+  ASSERT_EQ(codas.size(), 1u);
+  Tick coda_start = codas[0].start_tick;
+  Tick coda_end = codas[0].end_tick;
+
+  // Collect non-pedal notes in the coda region.
+  int coda_source_count = 0;
+  int non_pedal_coda_count = 0;
+  for (const auto& track : result.tracks) {
+    for (const auto& note : track.notes) {
+      if (note.start_tick >= coda_start && note.start_tick < coda_end &&
+          note.source != BachNoteSource::PedalPoint) {
+        ++non_pedal_coda_count;
+        if (note.source == BachNoteSource::Coda) {
+          ++coda_source_count;
+        }
+      }
+    }
+  }
+
+  EXPECT_GT(non_pedal_coda_count, 0) << "Coda should have non-pedal notes";
+  EXPECT_EQ(coda_source_count, non_pedal_coda_count)
+      << "All non-pedal coda notes should have BachNoteSource::Coda";
+}
+
 TEST(FugueGeneratorTest, PedalPointVelocityIsOrganDefault) {
   FugueConfig config = makeTestConfig();
   config.num_voices = 3;

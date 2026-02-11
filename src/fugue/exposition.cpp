@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <random>
+#include <vector>
 
 #include "core/note_creator.h"
 #include "core/note_source.h"
@@ -103,29 +104,47 @@ static constexpr uint8_t kEntryOrder4_TASB[] = {2, 1, 0, 3};  // ten->alto->sop-
 static constexpr uint8_t kEntryOrder4_BTAS[] = {3, 2, 1, 0};  // bass->ten->alto->sop
 
 /// @brief Select entry voice order based on SubjectCharacter and voice count.
+///
+/// Uses weighted random selection so that each character has a preferred entry
+/// order but can occasionally produce alternatives for variety across seeds.
+///
 /// @param character The subject character.
 /// @param num_voices Number of voices (2-5).
-/// @return Pointer to the voice order array.
-const uint8_t* selectEntryOrder(SubjectCharacter character, uint8_t num_voices) {
+/// @param rng Mersenne Twister RNG for weighted selection.
+/// @return Pointer to the voice order array, or nullptr for default sequential order.
+const uint8_t* selectEntryOrder(SubjectCharacter character, uint8_t num_voices,
+                                std::mt19937& rng) {  // NOLINT(runtime/references): mt19937 must be mutable
   if (num_voices <= 2) {
     return nullptr;  // Only one possible order for 2 voices.
   }
   if (num_voices == 3) {
+    // Weighted random selection per character.
+    static const uint8_t* k3VoiceOrders[] = {
+      kEntryOrder3_TopFirst, kEntryOrder3_MiddleFirst, kEntryOrder3_BottomFirst
+    };
+    std::vector<float> weights;
     switch (character) {
-      case SubjectCharacter::Severe:  return kEntryOrder3_TopFirst;      // Default order
-      case SubjectCharacter::Playful: return kEntryOrder3_MiddleFirst;   // Middle-start = lively
-      case SubjectCharacter::Noble:   return kEntryOrder3_BottomFirst;   // Bass-start = stately
-      case SubjectCharacter::Restless: return kEntryOrder3_MiddleFirst;  // Middle-start = tension
+      case SubjectCharacter::Severe:   weights = {0.50f, 0.30f, 0.20f}; break;
+      case SubjectCharacter::Playful:  weights = {0.30f, 0.50f, 0.20f}; break;
+      case SubjectCharacter::Noble:    weights = {0.40f, 0.25f, 0.35f}; break;
+      case SubjectCharacter::Restless: weights = {0.25f, 0.40f, 0.35f}; break;
     }
+    int idx = rng::selectWeighted(rng, std::vector<int>{0, 1, 2}, weights);
+    return k3VoiceOrders[idx];
   }
-  // 4-5 voices: use 4-voice templates (voice 4 appended at end if needed).
+  // 4-5 voices: weighted selection among templates (+ nullptr for default).
+  static const uint8_t* k4VoiceOrders[] = {
+    nullptr, kEntryOrder4_ATSB, kEntryOrder4_TASB, kEntryOrder4_BTAS
+  };
+  std::vector<float> weights;
   switch (character) {
-    case SubjectCharacter::Severe:  return nullptr;           // Default sequential order
-    case SubjectCharacter::Playful: return kEntryOrder4_ATSB; // Alto-start
-    case SubjectCharacter::Noble:   return kEntryOrder4_BTAS; // Bass-start
-    case SubjectCharacter::Restless: return kEntryOrder4_TASB; // Tenor-start
+    case SubjectCharacter::Severe:   weights = {0.50f, 0.20f, 0.10f, 0.20f}; break;
+    case SubjectCharacter::Playful:  weights = {0.15f, 0.50f, 0.20f, 0.15f}; break;
+    case SubjectCharacter::Noble:    weights = {0.20f, 0.15f, 0.15f, 0.50f}; break;
+    case SubjectCharacter::Restless: weights = {0.15f, 0.20f, 0.50f, 0.15f}; break;
   }
-  return nullptr;
+  int idx = rng::selectWeighted(rng, std::vector<int>{0, 1, 2, 3}, weights);
+  return k4VoiceOrders[idx];
 }
 
 /// @brief Place subject or answer notes for a voice entry, offset by entry tick.
@@ -161,12 +180,42 @@ void placeEntryNotes(const std::vector<NoteEvent>& source_notes,
   int octave_shift = (diff >= 0) ? ((diff + 6) / 12) * 12
                                  : -(((-diff + 5) / 12) * 12);
 
+  // Place all notes with octave shift and clamping.
+  std::vector<NoteEvent> placed;
+  placed.reserve(source_notes.size());
   for (const auto& src_note : source_notes) {
     NoteEvent note = src_note;
     note.start_tick = src_note.start_tick + entry_tick;
     note.voice = voice_id;
     int shifted = static_cast<int>(src_note.pitch) + octave_shift;
     note.pitch = clampPitch(shifted, voice_reg.low, voice_reg.high);
+    placed.push_back(note);
+  }
+
+  // Restore melodic contour: verify that interval directions match the source.
+  // When clamping destroys an interval direction, adjust by small steps.
+  for (size_t i = 1; i < placed.size(); ++i) {
+    int src_interval = static_cast<int>(source_notes[i].pitch) -
+                       static_cast<int>(source_notes[i - 1].pitch);
+    int placed_interval = static_cast<int>(placed[i].pitch) -
+                          static_cast<int>(placed[i - 1].pitch);
+    // Check direction mismatch: original goes up but placed goes down, or vice versa.
+    if (src_interval > 0 && placed_interval <= 0) {
+      // Should go up: try +1 or +2 semitones from previous note.
+      int target = static_cast<int>(placed[i - 1].pitch) + 1;
+      if (target <= static_cast<int>(voice_reg.high)) {
+        placed[i].pitch = static_cast<uint8_t>(target);
+      }
+    } else if (src_interval < 0 && placed_interval >= 0) {
+      // Should go down: try -1 or -2 semitones from previous note.
+      int target = static_cast<int>(placed[i - 1].pitch) - 1;
+      if (target >= static_cast<int>(voice_reg.low)) {
+        placed[i].pitch = static_cast<uint8_t>(target);
+      }
+    }
+  }
+
+  for (auto& note : placed) {
     voice_notes[voice_id].push_back(note);
   }
 }
@@ -342,7 +391,7 @@ Exposition buildExposition(const Subject& subject,
   }
 
   // Select entry order template based on character.
-  const uint8_t* order_template = selectEntryOrder(config.character, num_voices);
+  const uint8_t* order_template = selectEntryOrder(config.character, num_voices, rng);
 
   // Build voice entry plan.
   for (uint8_t idx = 0; idx < num_voices; ++idx) {
@@ -472,24 +521,60 @@ Exposition buildExposition(const Subject& subject,
 
       if (is_structural) {
         // Register structural notes in CP state, then check for voice crossing.
-        // If a crossing is detected, shift by one octave to restore proper order.
+        // If a crossing is detected, try octave shifts to restore proper order.
         NoteEvent fixed_note = note;
+        bool has_crossing = false;
         for (VoiceId other_v : cp_state.getActiveVoices()) {
           if (other_v == voice_id) continue;
           const NoteEvent* other_note = cp_state.getNoteAt(other_v, note.start_tick);
           if (!other_note) continue;
-          // Lower voice_id = higher voice (soprano=0, alto=1, ..., bass=N).
           bool crossed = (voice_id < other_v && note.pitch < other_note->pitch) ||
                          (voice_id > other_v && note.pitch > other_note->pitch);
-          if (crossed) {
-            int shift = (voice_id < other_v) ? 12 : -12;
-            int new_pitch = static_cast<int>(note.pitch) + shift;
-            if (new_pitch >= 0 && new_pitch <= 127) {
-              fixed_note.pitch = static_cast<uint8_t>(new_pitch);
+          if (crossed) { has_crossing = true; break; }
+        }
+        if (has_crossing) {
+          for (int shift : {12, -12, 24, -24}) {
+            int candidate = static_cast<int>(note.pitch) + shift;
+            if (candidate < 0 || candidate > 127) continue;
+            bool resolved = true;
+            for (VoiceId other_v : cp_state.getActiveVoices()) {
+              if (other_v == voice_id) continue;
+              const NoteEvent* other_note = cp_state.getNoteAt(other_v, note.start_tick);
+              if (!other_note) continue;
+              if ((voice_id < other_v &&
+                   candidate < static_cast<int>(other_note->pitch)) ||
+                  (voice_id > other_v &&
+                   candidate > static_cast<int>(other_note->pitch))) {
+                resolved = false;
+                break;
+              }
             }
-            break;
+            if (resolved) {
+              fixed_note.pitch = static_cast<uint8_t>(candidate);
+              break;
+            }
           }
         }
+        // Avoid unisons on strong beats (beat 1 or 3 in 4/4).
+        bool is_strong_beat = (fixed_note.start_tick % (kTicksPerBeat * 2) == 0);
+        if (is_strong_beat) {
+          for (VoiceId other_v : cp_state.getActiveVoices()) {
+            if (other_v == voice_id) continue;
+            const NoteEvent* other_note = cp_state.getNoteAt(other_v, fixed_note.start_tick);
+            if (other_note && other_note->pitch == fixed_note.pitch) {
+              // Shift up by 2 semitones (diatonic step) to avoid unison.
+              ScaleType sc = config.is_minor ? ScaleType::HarmonicMinor : ScaleType::Major;
+              int shifted = static_cast<int>(fixed_note.pitch) + 2;
+              uint8_t snapped = scale_util::nearestScaleTone(
+                  clampPitch(shifted, 0, 127), config.key, sc);
+              if (snapped != other_note->pitch) {
+                fixed_note.pitch = snapped;
+              }
+              break;
+            }
+          }
+        }
+
         cp_state.addNote(voice_id, fixed_note);
         validated.push_back(fixed_note);
         continue;

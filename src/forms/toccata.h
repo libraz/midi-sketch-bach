@@ -19,7 +19,8 @@ struct ToccataConfig {
   uint32_t seed = 42;
   uint8_t num_voices = 3;
   int section_bars = 24;              ///< Length of free section in bars.
-};
+  bool enable_picardy = true;         ///< Apply Picardy third in minor keys.
+};;
 
 /// @brief Result of toccata free section generation.
 struct ToccataResult {

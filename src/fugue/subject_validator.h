@@ -26,8 +26,8 @@ struct SubjectScore {
   /// @brief Compute the weighted composite score.
   /// @return Weighted sum in [0, 1].
   ///
-  /// Weights: interval=0.15, rhythm=0.10, contour=0.15, range=0.15,
-  ///          step=0.15, tonal=0.20, answer=0.10.
+  /// Weights: interval=0.15, rhythm=0.10, contour=0.15, range=0.10,
+  ///          step=0.25, tonal=0.15, answer=0.10.
   float composite() const;
 
   /// @brief Check whether the subject meets the minimum quality threshold.

@@ -72,20 +72,42 @@ struct CSCharacterParams {
 };
 
 /// @brief Return generation parameters based on the subject character.
+///
+/// Applies small RNG-driven variation to each parameter so that different
+/// seeds produce subtly different countersubject behaviour even for the
+/// same SubjectCharacter.
+///
 /// @param character The SubjectCharacter of the accompanying subject.
+/// @param rng Mersenne Twister for per-seed variation.
 /// @return CSCharacterParams with leap probability, range, and split rate.
-CSCharacterParams getCSParams(SubjectCharacter character) {
+CSCharacterParams getCSParams(SubjectCharacter character, std::mt19937& rng) {
+  CSCharacterParams params;
   switch (character) {
     case SubjectCharacter::Severe:
-      return {0.10f, 10, 0.6f};
+      params = {0.10f, 10, 0.6f};
+      break;
     case SubjectCharacter::Playful:
-      return {0.40f, 14, 0.7f};
+      params = {0.40f, 14, 0.7f};
+      break;
     case SubjectCharacter::Noble:
-      return {0.20f, 12, 0.5f};
+      params = {0.20f, 12, 0.5f};
+      break;
     case SubjectCharacter::Restless:
-      return {0.35f, 14, 0.75f};
+      params = {0.35f, 14, 0.75f};
+      break;
+    default:
+      params = {0.15f, 10, 0.6f};
+      break;
   }
-  return {0.15f, 10, 0.6f};
+
+  // Apply small per-seed variation (Principle 3: fewer choices, subtle variety).
+  params.leap_prob = std::clamp(params.leap_prob + rng::rollFloat(rng, -0.05f, 0.05f),
+                                0.0f, 1.0f);
+  params.max_range = std::max(4, params.max_range + rng::rollRange(rng, -1, 1));
+  params.long_split_prob = std::clamp(
+      params.long_split_prob + rng::rollFloat(rng, -0.05f, 0.05f), 0.0f, 1.0f);
+
+  return params;
 }
 
 /// @brief Minimum pitch for countersubject voices (C3).
@@ -548,7 +570,6 @@ Countersubject generateCountersubject(const Subject& subject,
     return empty;
   }
 
-  CSCharacterParams params = getCSParams(subject.character);
   ScaleType scale = subject.is_minor ? ScaleType::HarmonicMinor : ScaleType::Major;
 
   Countersubject best;
@@ -558,6 +579,9 @@ Countersubject generateCountersubject(const Subject& subject,
 
   for (int attempt = 0; attempt < max_retries; ++attempt) {
     std::mt19937 gen(seed + static_cast<uint32_t>(attempt) * 1000003u);
+
+    // Per-attempt RNG variation on character params.
+    CSCharacterParams params = getCSParams(subject.character, gen);
 
     std::vector<NoteEvent> cs_notes =
         generateCSAttempt(subject, params, subject.key, scale, gen);
@@ -610,11 +634,6 @@ Countersubject generateSecondCountersubject(const Subject& subject,
     cs1_above_subject = cs1_avg >= subj_avg;
   }
 
-  // Use modified character params: slightly more leaps and wider range to
-  // differentiate from CS1.
-  CSCharacterParams params = getCSParams(subject.character);
-  params.leap_prob = std::min(params.leap_prob + 0.10f, 0.60f);
-  params.max_range = std::min(params.max_range + 2, 16);
   ScaleType scale = subject.is_minor ? ScaleType::HarmonicMinor : ScaleType::Major;
 
   Countersubject best;
@@ -624,6 +643,12 @@ Countersubject generateSecondCountersubject(const Subject& subject,
 
   for (int attempt = 0; attempt < max_retries; ++attempt) {
     std::mt19937 gen(seed + static_cast<uint32_t>(attempt) * 1000003u);
+
+    // Use modified character params with per-attempt RNG variation:
+    // slightly more leaps and wider range to differentiate from CS1.
+    CSCharacterParams params = getCSParams(subject.character, gen);
+    params.leap_prob = std::min(params.leap_prob + 0.10f, 0.60f);
+    params.max_range = std::min(params.max_range + 2, 16);
 
     // Generate a CS attempt against the subject.
     std::vector<NoteEvent> cs2_notes =

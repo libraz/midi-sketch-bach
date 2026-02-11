@@ -19,7 +19,8 @@ struct FantasiaConfig {
   uint32_t seed = 42;
   uint8_t num_voices = 4;
   int section_bars = 32;              ///< Length of free section in bars.
-};
+  bool enable_picardy = true;         ///< Apply Picardy third in minor keys.
+};;
 
 /// @brief Result of fantasia free section generation.
 struct FantasiaResult {

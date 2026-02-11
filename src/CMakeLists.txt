@@ -80,6 +80,7 @@ set(BACH_LIB_SOURCES
 
   # organ/
   organ/manual.cpp
+  organ/organ_techniques.cpp
   organ/registration.cpp
 
   # analysis/

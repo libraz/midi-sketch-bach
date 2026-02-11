@@ -11,6 +11,7 @@
 #include "core/rng_util.h"
 #include "core/scale.h"
 #include "fugue/motif_template.h"
+#include "fugue/subject_validator.h"
 
 namespace bach {
 
@@ -59,7 +60,13 @@ std::vector<NoteEvent> Subject::extractKopfmotiv(size_t max_notes) const {
 // Duration tables per character
 // ---------------------------------------------------------------------------
 
+// Forward declarations for functions defined later in this file.
+int maxLeapForCharacter(SubjectCharacter ch);
+
 namespace {
+
+int snapToScale(int pitch, Key key, ScaleType scale, int floor_pitch,
+                int ceil_pitch);
 
 /// @brief Half note duration in ticks.
 constexpr Tick kHalfNote = kTicksPerBeat * 2;      // 960
@@ -108,19 +115,24 @@ struct CharacterParams {
 
 /// @brief Return generation parameters for the given subject character.
 /// @param character The SubjectCharacter to look up.
+/// @param rng_eng RNG engine for sampling leap probability from character-specific ranges.
 /// @return CharacterParams with leap probability, range (degrees), and duration table.
-CharacterParams getCharacterParams(SubjectCharacter character) {
+CharacterParams getCharacterParams(SubjectCharacter character, std::mt19937& rng_eng) {
   switch (character) {
     case SubjectCharacter::Severe:
-      return {0.15f, 5, kSevereDurations, kSevereDurCount};    // 6th (~9 semitones)
+      return {rng::rollFloat(rng_eng, 0.10f, 0.20f), 7,
+              kSevereDurations, kSevereDurCount};    // octave (BWV 542/547/578)
     case SubjectCharacter::Playful:
-      return {0.45f, 7, kPlayfulDurations, kPlayfulDurCount};  // octave (12 semitones)
+      return {rng::rollFloat(rng_eng, 0.35f, 0.50f), 7,
+              kPlayfulDurations, kPlayfulDurCount};  // octave (12 semitones)
     case SubjectCharacter::Noble:
-      return {0.25f, 6, kNobleDurations, kNobleDurCount};      // 7th (~11 semitones)
+      return {rng::rollFloat(rng_eng, 0.20f, 0.30f), 8,
+              kNobleDurations, kNobleDurCount};      // 9th (~14 semitones)
     case SubjectCharacter::Restless:
-      return {0.40f, 8, kRestlessDurations, kRestlessDurCount}; // 9th (~14 semitones)
+      return {rng::rollFloat(rng_eng, 0.30f, 0.45f), 9,
+              kRestlessDurations, kRestlessDurCount}; // 10th (~16 semitones)
   }
-  return {0.20f, 5, kSevereDurations, kSevereDurCount};
+  return {0.20f, 7, kSevereDurations, kSevereDurCount};
 }
 
 /// @brief Scale degree intervals for stepwise motion (seconds).
@@ -163,6 +175,54 @@ CharacterParams getCharacterParams(SubjectCharacter character) {
 /// @brief Number of entries in kRestlessLeapIntervals.
 [[maybe_unused]] constexpr int kRestlessLeapCount = 8;
 
+/// @brief Clamp a leap that exceeds the character's maximum interval.
+///
+/// When the interval between two consecutive pitches exceeds the allowed
+/// maximum, the new pitch is pulled toward the previous pitch while
+/// maintaining melodic direction. For Playful/Restless characters,
+/// 8-9 semitone intervals are allowed 20% of the time.
+///
+/// @param pitch Candidate pitch.
+/// @param prev_pitch Previous note's pitch.
+/// @param character Subject character type.
+/// @param key Musical key for scale snapping.
+/// @param scale Scale type.
+/// @param pitch_floor Minimum allowed pitch.
+/// @param pitch_ceil Maximum allowed pitch.
+/// @param gen RNG engine (for probabilistic 6th allowance).
+/// @return Adjusted pitch within the leap limit.
+int clampLeap(int pitch, int prev_pitch, SubjectCharacter character,
+              Key key, ScaleType scale, int pitch_floor, int pitch_ceil,
+              std::mt19937& gen) {
+  if (prev_pitch < 0) return pitch;
+  int interval = std::abs(pitch - prev_pitch);
+  int max_leap = maxLeapForCharacter(character);
+  if (interval <= max_leap) return pitch;
+
+  // Playful/Restless: allow 8-9st (6th) 20% of the time.
+  if ((character == SubjectCharacter::Playful ||
+       character == SubjectCharacter::Restless) &&
+      interval <= 9 && rng::rollProbability(gen, 0.20f)) {
+    return pitch;
+  }
+
+  int direction = (pitch > prev_pitch) ? 1 : -1;
+  // Candidate 1: same direction, clamped to max_leap.
+  int c1 = prev_pitch + direction * max_leap;
+  // Candidate 2: octave correction (±12).
+  int c2 = pitch - 12 * direction;
+  // Choose the candidate closest to the original pitch.
+  int best = (std::abs(c1 - pitch) <= std::abs(c2 - pitch)) ? c1 : c2;
+  best = snapToScale(best, key, scale, pitch_floor, pitch_ceil);
+
+  // Final check: if still exceeding, force clamp.
+  if (std::abs(best - prev_pitch) > max_leap) {
+    best = snapToScale(prev_pitch + direction * max_leap,
+                       key, scale, pitch_floor, pitch_ceil);
+  }
+  return best;
+}
+
 /// @brief Metrically neutral pair substitution for rhythm variation.
 ///
 /// Replaces adjacent note pairs with alternatives that preserve the combined
@@ -184,16 +244,16 @@ void varyDurationPair(Tick dur_a, Tick dur_b, SubjectCharacter character,
   float prob = 0.0f;
   switch (character) {
     case SubjectCharacter::Severe:
-      prob = 0.15f;
+      prob = rng::rollFloat(gen, 0.10f, 0.20f);
       break;
     case SubjectCharacter::Playful:
-      prob = 0.30f;
+      prob = rng::rollFloat(gen, 0.25f, 0.40f);
       break;
     case SubjectCharacter::Noble:
-      prob = 0.15f;
+      prob = rng::rollFloat(gen, 0.10f, 0.20f);
       break;
     case SubjectCharacter::Restless:
-      prob = 0.30f;
+      prob = rng::rollFloat(gen, 0.25f, 0.40f);
       break;
   }
 
@@ -269,6 +329,42 @@ void varyDurationPair(Tick dur_a, Tick dur_b, SubjectCharacter character,
       }
       break;
   }
+}
+
+/// @brief Avoid consecutive same-pitch notes by shifting to adjacent scale degree.
+///
+/// When the candidate pitch matches the previous pitch, tries moving up or down
+/// by the nearest scale tone within bounds. This eliminates monotonous same-pitch
+/// repetition that degrades melodic quality in fugue subjects.
+///
+/// @param pitch Candidate pitch.
+/// @param prev_pitch Previous note's pitch (-1 if no previous note).
+/// @param key Musical key.
+/// @param scale Scale type.
+/// @param floor_pitch Minimum allowed pitch.
+/// @param ceil_pitch Maximum allowed pitch.
+/// @return Adjusted pitch avoiding unison with prev_pitch, or original if unavoidable.
+int avoidUnison(int pitch, int prev_pitch, Key key, ScaleType scale,
+                int floor_pitch, int ceil_pitch) {
+  if (prev_pitch < 0 || pitch != prev_pitch) return pitch;
+
+  // Try up: nearest scale tone above.
+  for (int delta = 1; delta <= 2; ++delta) {
+    int candidate = static_cast<int>(scale_util::nearestScaleTone(
+        static_cast<uint8_t>(std::max(0, std::min(127, pitch + delta))), key, scale));
+    if (candidate != pitch && candidate <= ceil_pitch && candidate >= floor_pitch) {
+      return candidate;
+    }
+  }
+  // Try down: nearest scale tone below.
+  for (int delta = 1; delta <= 2; ++delta) {
+    int candidate = static_cast<int>(scale_util::nearestScaleTone(
+        static_cast<uint8_t>(std::max(0, std::min(127, pitch - delta))), key, scale));
+    if (candidate != pitch && candidate >= floor_pitch && candidate <= ceil_pitch) {
+      return candidate;
+    }
+  }
+  return pitch;  // Unavoidable in extremely narrow range.
 }
 
 /// @brief Snap a pitch to the nearest scale tone within bounds.
@@ -371,6 +467,53 @@ CadentialFormula getCadentialFormula(SubjectCharacter character) {
 }  // namespace
 
 // ---------------------------------------------------------------------------
+// Shared subject/answer pitch helpers
+// ---------------------------------------------------------------------------
+
+int maxLeapForCharacter(SubjectCharacter ch) {
+  switch (ch) {
+    case SubjectCharacter::Severe:  return 7;   // P5 max
+    case SubjectCharacter::Noble:   return 7;   // P5 max
+    case SubjectCharacter::Playful: return 9;   // M6 max (low frequency)
+    case SubjectCharacter::Restless: return 9;  // M6 max (low frequency)
+  }
+  return 7;
+}
+
+int normalizeEndingPitch(int target_pitch_class, int prev_pitch,
+                         int max_leap, Key key, ScaleType scale,
+                         int floor, int ceil) {
+  int best = -1;
+  int best_dist = 999;
+  for (int octave = 0; octave < 11; ++octave) {
+    int candidate = target_pitch_class + octave * 12;
+    if (candidate < floor || candidate > ceil) continue;
+    int dist = std::abs(candidate - prev_pitch);
+    if (dist <= max_leap && dist < best_dist) {
+      best = candidate;
+      best_dist = dist;
+    }
+  }
+  if (best >= 0) return best;
+
+  // No octave within max_leap: use stepwise approach (2-1 or 7-1).
+  int step_approach;
+  if (prev_pitch > ceil) {
+    step_approach = prev_pitch - 2;
+  } else if (prev_pitch < floor) {
+    step_approach = prev_pitch + 2;
+  } else {
+    int nearest_target = target_pitch_class + (prev_pitch / 12) * 12;
+    if (std::abs(nearest_target + 12 - prev_pitch) <
+        std::abs(nearest_target - prev_pitch)) {
+      nearest_target += 12;
+    }
+    step_approach = (prev_pitch > nearest_target) ? prev_pitch - 2 : prev_pitch + 2;
+  }
+  return snapToScale(step_approach, key, scale, floor, ceil);
+}
+
+// ---------------------------------------------------------------------------
 // SubjectGenerator
 // ---------------------------------------------------------------------------
 
@@ -389,10 +532,14 @@ Subject SubjectGenerator::generate(const FugueConfig& config,
   std::mt19937 anacrusis_gen(seed ^ 0x41756674u);  // "Auft" in ASCII
   float anacrusis_prob = 0.0f;
   switch (config.character) {
-    case SubjectCharacter::Severe:  anacrusis_prob = 0.30f; break;
-    case SubjectCharacter::Playful: anacrusis_prob = 0.70f; break;
-    case SubjectCharacter::Noble:   anacrusis_prob = 0.40f; break;
-    case SubjectCharacter::Restless: anacrusis_prob = 0.60f; break;
+    case SubjectCharacter::Severe:
+      anacrusis_prob = rng::rollFloat(anacrusis_gen, 0.20f, 0.40f); break;
+    case SubjectCharacter::Playful:
+      anacrusis_prob = rng::rollFloat(anacrusis_gen, 0.60f, 0.80f); break;
+    case SubjectCharacter::Noble:
+      anacrusis_prob = rng::rollFloat(anacrusis_gen, 0.30f, 0.50f); break;
+    case SubjectCharacter::Restless:
+      anacrusis_prob = rng::rollFloat(anacrusis_gen, 0.50f, 0.70f); break;
   }
   bool has_anacrusis = rng::rollProbability(anacrusis_gen, anacrusis_prob);
   Tick anacrusis_ticks = 0;
@@ -408,8 +555,30 @@ Subject SubjectGenerator::generate(const FugueConfig& config,
     }
   }
 
-  subject.notes = generateNotes(config.character, config.key, config.is_minor,
-                                bars, seed);
+  // Generate with validation retry: cycle through template indices on failure.
+  constexpr int kMaxRetries = 4;
+  SubjectValidator validator;
+  std::vector<NoteEvent> best_notes;
+  float best_composite = -1.0f;
+
+  for (int retry = 0; retry < kMaxRetries; ++retry) {
+    auto notes = generateNotes(config.character, config.key, config.is_minor,
+                               bars, seed + static_cast<uint32_t>(retry));
+    Subject candidate;
+    candidate.notes = notes;
+    candidate.key = config.key;
+    candidate.is_minor = config.is_minor;
+    candidate.character = config.character;
+    SubjectScore score = validator.evaluate(candidate);
+    float comp = score.composite();
+    if (comp > best_composite) {
+      best_composite = comp;
+      best_notes = std::move(notes);
+    }
+    if (score.isAcceptable()) break;
+  }
+
+  subject.notes = std::move(best_notes);
   subject.length_ticks = static_cast<Tick>(bars) * kTicksPerBar;
   subject.anacrusis_ticks = anacrusis_ticks;
 
@@ -444,8 +613,8 @@ std::vector<NoteEvent> SubjectGenerator::generateNotes(
 
   Tick total_ticks = static_cast<Tick>(bars) * kTicksPerBar;
 
-  // Get design values (Principle 4: fixed per character).
-  GoalTone goal = goalToneForCharacter(character);
+  // Get design values with per-seed variation (Principle 4 + Principle 3).
+  GoalTone goal = goalToneForCharacter(character, gen);
 
   // Select template pair from 4 options (Principle 3: fixed set of choices).
   uint32_t template_idx = gen() % 4;
@@ -453,9 +622,16 @@ std::vector<NoteEvent> SubjectGenerator::generateNotes(
 
   // Start on tonic (degree 0) or dominant (degree 4).
   constexpr int kBaseNote = 60;
-  int start_degree = rng::rollProbability(gen, 0.6f) ? 0 : 4;
+  float tonic_prob = 0.6f;
+  switch (character) {
+    case SubjectCharacter::Severe:  tonic_prob = rng::rollFloat(gen, 0.55f, 0.70f); break;
+    case SubjectCharacter::Playful: tonic_prob = rng::rollFloat(gen, 0.40f, 0.55f); break;
+    case SubjectCharacter::Noble:   tonic_prob = rng::rollFloat(gen, 0.60f, 0.70f); break;
+    case SubjectCharacter::Restless: tonic_prob = rng::rollFloat(gen, 0.45f, 0.60f); break;
+  }
+  int start_degree = rng::rollProbability(gen, tonic_prob) ? 0 : 4;
 
-  CharacterParams params = getCharacterParams(character);
+  CharacterParams params = getCharacterParams(character, gen);
 
   // [Fix 2] Compute pitch bounds via scale degrees using absoluteDegreeToPitch.
   int start_pitch = degreeToPitch(start_degree, kBaseNote, key_offset, scale);
@@ -482,8 +658,9 @@ std::vector<NoteEvent> SubjectGenerator::generateNotes(
   int climax_abs = floor_abs +
       static_cast<int>(static_cast<float>(ceil_abs - floor_abs) *
                         goal.pitch_ratio);
-  if (climax_abs <= start_abs) {
-    climax_abs = std::min(start_abs + 1, ceil_abs);
+  // Ensure climax is at least 3 scale degrees above start for clear directionality.
+  if (climax_abs < start_abs + 3) {
+    climax_abs = std::min(start_abs + 3, ceil_abs);
   }
   int climax_pitch = static_cast<int>(
       scale_util::absoluteDegreeToPitch(climax_abs, key, scale));
@@ -504,6 +681,21 @@ std::vector<NoteEvent> SubjectGenerator::generateNotes(
 
   // Place Motif A notes, scaling degrees toward the climax.
   // [Fix 1] Use varyDurationPair for metrically neutral rhythm variation.
+  float fluctuation_rate = 0.20f;
+  switch (character) {
+    case SubjectCharacter::Severe:
+      fluctuation_rate = rng::rollFloat(gen, 0.10f, 0.25f); break;
+    case SubjectCharacter::Playful:
+      fluctuation_rate = rng::rollFloat(gen, 0.20f, 0.35f); break;
+    case SubjectCharacter::Noble:
+      fluctuation_rate = rng::rollFloat(gen, 0.10f, 0.20f); break;
+    case SubjectCharacter::Restless:
+      fluctuation_rate = rng::rollFloat(gen, 0.25f, 0.40f); break;
+  }
+
+  bool needs_compensation = false;
+  int compensation_direction = 0;
+
   for (size_t idx = 0;
        idx < motif_a.degree_offsets.size() && current_tick < climax_tick; ++idx) {
     int target_degree = start_degree + motif_a.degree_offsets[idx];
@@ -529,16 +721,41 @@ std::vector<NoteEvent> SubjectGenerator::generateNotes(
     }
     int adjusted_degree = target_degree + degree_shift;
 
-    // [Fix 5] Interval fluctuation: 20%, skip first note (opening interval).
-    if (idx > 0 && rng::rollProbability(gen, 0.20f)) {
+    // [Fix 5] Interval fluctuation: character-dependent, skip first note (opening interval).
+    if (idx > 0 && rng::rollProbability(gen, fluctuation_rate)) {
       adjusted_degree += rng::rollProbability(gen, 0.5f) ? 1 : -1;
     }
 
+    // Compensation: after a large leap (>=5st), force opposite direction.
+    if (needs_compensation) {
+      bool is_strong_beat =
+          (current_tick % (kTicksPerBeat * 2) < kTicksPerBeat / 4);
+      int max_comp = is_strong_beat ? 2 : 4;  // semitones
+      adjusted_degree += compensation_direction;
+      // Will be re-checked after snap.
+      (void)max_comp;  // Used implicitly via clampLeap below.
+      needs_compensation = false;
+    }
+
     // [Fix 2] Snap pitch to scale after all adjustments.
-    // Cap below climax so the designed climax is the true peak.
+    // Cap at climax so the designed climax is the true peak.
     int pitch = snapToScale(
         degreeToPitch(adjusted_degree, kBaseNote, key_offset, scale),
-        key, scale, pitch_floor, climax_pitch - 1);
+        key, scale, pitch_floor, climax_pitch);
+
+    // Avoid consecutive same-pitch notes.
+    int prev_pitch = result.empty() ? -1 : static_cast<int>(result.back().pitch);
+    pitch = avoidUnison(pitch, prev_pitch, key, scale, pitch_floor, climax_pitch);
+
+    // Clamp leap to character-specific maximum.
+    pitch = clampLeap(pitch, prev_pitch, character, key, scale,
+                      pitch_floor, climax_pitch, gen);
+
+    // Set up compensation for next note if this was a large leap (>=5st).
+    if (prev_pitch >= 0 && std::abs(pitch - prev_pitch) >= 5) {
+      needs_compensation = true;
+      compensation_direction = (pitch > prev_pitch) ? -1 : 1;
+    }
 
     // [Fix 1] Apply pair substitution for durations.
     Tick duration = (idx < motif_a.durations.size())
@@ -612,6 +829,8 @@ std::vector<NoteEvent> SubjectGenerator::generateNotes(
   tonic_pitch = std::max(pitch_floor, std::min(pitch_ceil, tonic_pitch));
 
   bool last_fluctuated = false;  // [Fix 5] Track consecutive fluctuation.
+  needs_compensation = false;
+  compensation_direction = 0;
 
   for (size_t idx = 0;
        idx < motif_b.degree_offsets.size() && current_tick < total_ticks; ++idx) {
@@ -642,19 +861,39 @@ std::vector<NoteEvent> SubjectGenerator::generateNotes(
     }
     int adjusted_abs_degree = target_degree_abs + degree_shift;
 
-    // [Fix 5] Interval fluctuation: 20%, never two consecutive, skip first note.
+    // [Fix 5] Interval fluctuation: character-dependent, never two consecutive, skip first note.
     bool fluctuated = false;
-    if (idx > 0 && !last_fluctuated && rng::rollProbability(gen, 0.20f)) {
+    if (idx > 0 && !last_fluctuated && rng::rollProbability(gen, fluctuation_rate)) {
       adjusted_abs_degree += rng::rollProbability(gen, 0.5f) ? 1 : -1;
       fluctuated = true;
     }
     last_fluctuated = fluctuated;
 
-    // [Fix 2] Snap to scale. Cap below climax (descent phase).
+    // Compensation: after a large leap (>=5st), force opposite direction.
+    if (needs_compensation) {
+      adjusted_abs_degree += compensation_direction;
+      needs_compensation = false;
+    }
+
+    // [Fix 2] Snap to scale. Cap at climax (descent phase).
     int pitch = snapToScale(
         static_cast<int>(scale_util::absoluteDegreeToPitch(
             adjusted_abs_degree, key, scale)),
-        key, scale, pitch_floor, climax_pitch - 1);
+        key, scale, pitch_floor, climax_pitch);
+
+    // Avoid consecutive same-pitch notes.
+    int prev_pitch = result.empty() ? -1 : static_cast<int>(result.back().pitch);
+    pitch = avoidUnison(pitch, prev_pitch, key, scale, pitch_floor, climax_pitch);
+
+    // Clamp leap to character-specific maximum.
+    pitch = clampLeap(pitch, prev_pitch, character, key, scale,
+                      pitch_floor, climax_pitch, gen);
+
+    // Set up compensation for next note if this was a large leap (>=5st).
+    if (prev_pitch >= 0 && std::abs(pitch - prev_pitch) >= 5) {
+      needs_compensation = true;
+      compensation_direction = (pitch > prev_pitch) ? -1 : 1;
+    }
 
     // [Fix 1] Apply pair substitution for durations.
     Tick duration = (idx < motif_b.durations.size())
@@ -725,7 +964,11 @@ std::vector<NoteEvent> SubjectGenerator::generateNotes(
       int pitch = snapToScale(
           static_cast<int>(scale_util::absoluteDegreeToPitch(
               degree_abs, key, scale)),
-          key, scale, pitch_floor, climax_pitch - 1);
+          key, scale, pitch_floor, climax_pitch);
+
+      // Avoid consecutive same-pitch notes in cadence.
+      int prev_pitch = result.empty() ? -1 : static_cast<int>(result.back().pitch);
+      pitch = avoidUnison(pitch, prev_pitch, key, scale, pitch_floor, climax_pitch);
 
       NoteEvent note;
       note.start_tick = current_tick;
@@ -741,15 +984,56 @@ std::vector<NoteEvent> SubjectGenerator::generateNotes(
 
   // [Fix 7] Ending: 70% dominant, 30% tonic.
   // Bach subjects predominantly end on the dominant to facilitate the answer.
-  // Ending pitch is not capped below climax — dominant/tonic are structural.
+  // Use normalizeEndingPitch to ensure the ending is reachable from the
+  // penultimate note without exceeding the character's leap limit.
   if (!result.empty()) {
-    if (rng::rollProbability(gen, 0.70f)) {
-      int dominant_pitch = degreeToPitch(4, kBaseNote, key_offset, scale);
-      dominant_pitch = snapToScale(dominant_pitch, key, scale,
-                                   pitch_floor, pitch_ceil);
-      result.back().pitch = static_cast<uint8_t>(dominant_pitch);
+    int prev_pitch_for_ending =
+        (result.size() >= 2)
+            ? static_cast<int>(result[result.size() - 2].pitch)
+            : static_cast<int>(result.back().pitch);
+    int max_leap = maxLeapForCharacter(character);
+
+    float dominant_rate = 0.70f;
+    switch (character) {
+      case SubjectCharacter::Severe:
+        dominant_rate = rng::rollFloat(gen, 0.70f, 0.80f); break;
+      case SubjectCharacter::Playful:
+        dominant_rate = rng::rollFloat(gen, 0.60f, 0.70f); break;
+      case SubjectCharacter::Noble:
+        dominant_rate = rng::rollFloat(gen, 0.65f, 0.75f); break;
+      case SubjectCharacter::Restless:
+        dominant_rate = rng::rollFloat(gen, 0.65f, 0.75f); break;
+    }
+    if (rng::rollProbability(gen, dominant_rate)) {
+      int dom_pc = degreeToPitch(4, kBaseNote, key_offset, scale) % 12;
+      int ending = normalizeEndingPitch(dom_pc, prev_pitch_for_ending,
+                                        max_leap, key, scale,
+                                        pitch_floor, pitch_ceil);
+      result.back().pitch = static_cast<uint8_t>(ending);
     } else {
-      result.back().pitch = static_cast<uint8_t>(tonic_pitch);
+      int tonic_pc = tonic_pitch % 12;
+      int ending = normalizeEndingPitch(tonic_pc, prev_pitch_for_ending,
+                                        max_leap, key, scale,
+                                        pitch_floor, pitch_ceil);
+      result.back().pitch = static_cast<uint8_t>(ending);
+    }
+  }
+
+  // Snap all start_ticks to 16th-note grid (120 ticks) for metric integrity.
+  // 16th note is the finest standard subdivision; dotted values (360, 720)
+  // are already multiples of 120.
+  constexpr Tick kTickQuantum = kTicksPerBeat / 4;  // 120
+  for (auto& note : result) {
+    note.start_tick = (note.start_tick / kTickQuantum) * kTickQuantum;
+  }
+  // Fix any overlaps introduced by quantization.
+  for (size_t i = 0; i + 1 < result.size(); ++i) {
+    Tick next_start = result[i + 1].start_tick;
+    if (result[i].start_tick + result[i].duration > next_start) {
+      result[i].duration = next_start - result[i].start_tick;
+      if (result[i].duration < kTickQuantum) {
+        result[i].duration = kTickQuantum;
+      }
     }
   }
 

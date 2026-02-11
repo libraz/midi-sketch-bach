@@ -26,7 +26,8 @@ enum class BachNoteSource : uint8_t {
   CollisionAvoid,   // Modified by collision avoidance
   PostProcess,      // Modified by post-processing
   ChromaticPassing, // Chromatic passing tone between chord tones
-  FalseEntry        // Truncated subject opening that diverges to free counterpoint
+  FalseEntry,       // Truncated subject opening that diverges to free counterpoint
+  Coda              // Coda design value (Principle 4: immutable)
 };
 
 /// @brief Convert BachNoteSource to human-readable string.

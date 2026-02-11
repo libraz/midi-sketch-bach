@@ -4,6 +4,10 @@
 
 #include <cstdlib>
 
+#include "core/scale.h"
+#include "harmony/chord_types.h"
+#include "harmony/harmonic_event.h"
+
 namespace bach {
 
 IntervalQuality classifyInterval(int semitones) {
@@ -137,6 +141,110 @@ const char* intervalToName(int semitones) {
     case 11: return "major 7th";
   }
   return "unknown";
+}
+
+// ---------------------------------------------------------------------------
+// Scale / chord tone collection
+// ---------------------------------------------------------------------------
+
+std::vector<uint8_t> getScaleTones(Key key, bool is_minor, uint8_t low_pitch,
+                                   uint8_t high_pitch) {
+  std::vector<uint8_t> tones;
+  ScaleType scale_type = is_minor ? ScaleType::HarmonicMinor : ScaleType::Major;
+
+  for (int pitch = static_cast<int>(low_pitch);
+       pitch <= static_cast<int>(high_pitch); ++pitch) {
+    if (scale_util::isScaleTone(static_cast<uint8_t>(pitch), key, scale_type)) {
+      tones.push_back(static_cast<uint8_t>(pitch));
+    }
+  }
+
+  return tones;
+}
+
+std::vector<uint8_t> getChordTones(const Chord& chord, int octave) {
+  std::vector<uint8_t> tones;
+  tones.reserve(3);
+
+  int root = (octave + 1) * 12 + (static_cast<int>(chord.root_pitch) % 12);
+
+  // Determine third interval based on quality.
+  int third_offset = 4;  // Major third default.
+  if (chord.quality == ChordQuality::Minor ||
+      chord.quality == ChordQuality::Diminished ||
+      chord.quality == ChordQuality::Minor7) {
+    third_offset = 3;  // Minor third.
+  }
+
+  // Determine fifth interval based on quality.
+  int fifth_offset = 7;  // Perfect fifth default.
+  if (chord.quality == ChordQuality::Diminished) {
+    fifth_offset = 6;  // Diminished fifth.
+  } else if (chord.quality == ChordQuality::Augmented) {
+    fifth_offset = 8;  // Augmented fifth.
+  }
+
+  auto clamp_midi = [](int pitch) -> uint8_t {
+    if (pitch < 0) return 0;
+    if (pitch > 127) return 127;
+    return static_cast<uint8_t>(pitch);
+  };
+
+  tones.push_back(clamp_midi(root));
+  tones.push_back(clamp_midi(root + third_offset));
+  tones.push_back(clamp_midi(root + fifth_offset));
+
+  return tones;
+}
+
+std::vector<uint8_t> collectChordTonesInRange(const Chord& chord,
+                                              uint8_t low, uint8_t high) {
+  std::vector<uint8_t> tones;
+  int root_pc = static_cast<int>(chord.root_pitch) % 12;
+
+  int third_offset = 4;
+  if (chord.quality == ChordQuality::Minor ||
+      chord.quality == ChordQuality::Diminished ||
+      chord.quality == ChordQuality::Minor7) {
+    third_offset = 3;
+  }
+  int fifth_offset = 7;
+  if (chord.quality == ChordQuality::Diminished) {
+    fifth_offset = 6;
+  } else if (chord.quality == ChordQuality::Augmented) {
+    fifth_offset = 8;
+  }
+
+  int intervals[] = {0, third_offset, fifth_offset};
+
+  for (int pitch = static_cast<int>(low); pitch <= static_cast<int>(high);
+       ++pitch) {
+    int pc = pitch % 12;
+    for (int intv : intervals) {
+      if (pc == (root_pc + intv) % 12) {
+        tones.push_back(static_cast<uint8_t>(pitch));
+        break;
+      }
+    }
+  }
+  return tones;
+}
+
+bool isAllowedChromatic(uint8_t pitch, Key key, ScaleType scale,
+                        const HarmonicEvent* harm_ev) {
+  int key_offset = static_cast<int>(key);
+  int pc = static_cast<int>(pitch) % 12;
+
+  // 1. Raised 7th in harmonic minor is always allowed.
+  if (scale == ScaleType::HarmonicMinor || scale == ScaleType::NaturalMinor) {
+    int raised_7th = (key_offset + kScaleHarmonicMinor[6]) % 12;
+    if (pc == raised_7th) return true;
+  }
+
+  // 2. Chord tones of the current harmonic event (secondary dominants etc.).
+  if (harm_ev != nullptr && isChordTone(pitch, *harm_ev)) return true;
+
+  return false;
 }
 
 }  // namespace bach
