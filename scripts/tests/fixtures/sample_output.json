@@ -8,14 +8,14 @@
       "channel": 0,
       "program": 19,
       "notes": [
-        {"pitch": 72, "velocity": 80, "start_ticks": 0, "duration_ticks": 480, "voice": "soprano"},
-        {"pitch": 74, "velocity": 80, "start_ticks": 480, "duration_ticks": 480, "voice": "soprano"},
-        {"pitch": 76, "velocity": 80, "start_ticks": 960, "duration_ticks": 480, "voice": "soprano"},
-        {"pitch": 77, "velocity": 80, "start_ticks": 1440, "duration_ticks": 480, "voice": "soprano"},
-        {"pitch": 79, "velocity": 80, "start_ticks": 1920, "duration_ticks": 480, "voice": "soprano"},
-        {"pitch": 81, "velocity": 80, "start_ticks": 2400, "duration_ticks": 480, "voice": "soprano"},
-        {"pitch": 79, "velocity": 80, "start_ticks": 2880, "duration_ticks": 480, "voice": "soprano"},
-        {"pitch": 77, "velocity": 80, "start_ticks": 3360, "duration_ticks": 480, "voice": "soprano"}
+        {"pitch": 72, "velocity": 80, "start_tick": 0, "duration": 480, "voice": "soprano"},
+        {"pitch": 74, "velocity": 80, "start_tick": 480, "duration": 480, "voice": "soprano"},
+        {"pitch": 76, "velocity": 80, "start_tick": 960, "duration": 480, "voice": "soprano"},
+        {"pitch": 77, "velocity": 80, "start_tick": 1440, "duration": 480, "voice": "soprano"},
+        {"pitch": 79, "velocity": 80, "start_tick": 1920, "duration": 480, "voice": "soprano"},
+        {"pitch": 81, "velocity": 80, "start_tick": 2400, "duration": 480, "voice": "soprano"},
+        {"pitch": 79, "velocity": 80, "start_tick": 2880, "duration": 480, "voice": "soprano"},
+        {"pitch": 77, "velocity": 80, "start_tick": 3360, "duration": 480, "voice": "soprano"}
       ]
     },
     {
@@ -23,14 +23,14 @@
       "channel": 1,
       "program": 20,
       "notes": [
-        {"pitch": 60, "velocity": 80, "start_ticks": 960, "duration_ticks": 480, "voice": "alto"},
-        {"pitch": 62, "velocity": 80, "start_ticks": 1440, "duration_ticks": 480, "voice": "alto"},
-        {"pitch": 64, "velocity": 80, "start_ticks": 1920, "duration_ticks": 480, "voice": "alto"},
-        {"pitch": 65, "velocity": 80, "start_ticks": 2400, "duration_ticks": 480, "voice": "alto"},
-        {"pitch": 67, "velocity": 80, "start_ticks": 2880, "duration_ticks": 480, "voice": "alto"},
-        {"pitch": 69, "velocity": 80, "start_ticks": 3360, "duration_ticks": 480, "voice": "alto"},
-        {"pitch": 67, "velocity": 80, "start_ticks": 3840, "duration_ticks": 480, "voice": "alto"},
-        {"pitch": 65, "velocity": 80, "start_ticks": 4320, "duration_ticks": 480, "voice": "alto"}
+        {"pitch": 60, "velocity": 80, "start_tick": 960, "duration": 480, "voice": "alto"},
+        {"pitch": 62, "velocity": 80, "start_tick": 1440, "duration": 480, "voice": "alto"},
+        {"pitch": 64, "velocity": 80, "start_tick": 1920, "duration": 480, "voice": "alto"},
+        {"pitch": 65, "velocity": 80, "start_tick": 2400, "duration": 480, "voice": "alto"},
+        {"pitch": 67, "velocity": 80, "start_tick": 2880, "duration": 480, "voice": "alto"},
+        {"pitch": 69, "velocity": 80, "start_tick": 3360, "duration": 480, "voice": "alto"},
+        {"pitch": 67, "velocity": 80, "start_tick": 3840, "duration": 480, "voice": "alto"},
+        {"pitch": 65, "velocity": 80, "start_tick": 4320, "duration": 480, "voice": "alto"}
       ]
     },
     {
@@ -38,14 +38,14 @@
       "channel": 3,
       "program": 19,
       "notes": [
-        {"pitch": 48, "velocity": 80, "start_ticks": 1920, "duration_ticks": 480, "voice": "bass"},
-        {"pitch": 50, "velocity": 80, "start_ticks": 2400, "duration_ticks": 480, "voice": "bass"},
-        {"pitch": 52, "velocity": 80, "start_ticks": 2880, "duration_ticks": 480, "voice": "bass"},
-        {"pitch": 53, "velocity": 80, "start_ticks": 3360, "duration_ticks": 480, "voice": "bass"},
-        {"pitch": 55, "velocity": 80, "start_ticks": 3840, "duration_ticks": 480, "voice": "bass"},
-        {"pitch": 57, "velocity": 80, "start_ticks": 4320, "duration_ticks": 480, "voice": "bass"},
-        {"pitch": 55, "velocity": 80, "start_ticks": 4800, "duration_ticks": 480, "voice": "bass"},
-        {"pitch": 53, "velocity": 80, "start_ticks": 5280, "duration_ticks": 480, "voice": "bass"}
+        {"pitch": 48, "velocity": 80, "start_tick": 1920, "duration": 480, "voice": "bass"},
+        {"pitch": 50, "velocity": 80, "start_tick": 2400, "duration": 480, "voice": "bass"},
+        {"pitch": 52, "velocity": 80, "start_tick": 2880, "duration": 480, "voice": "bass"},
+        {"pitch": 53, "velocity": 80, "start_tick": 3360, "duration": 480, "voice": "bass"},
+        {"pitch": 55, "velocity": 80, "start_tick": 3840, "duration": 480, "voice": "bass"},
+        {"pitch": 57, "velocity": 80, "start_tick": 4320, "duration": 480, "voice": "bass"},
+        {"pitch": 55, "velocity": 80, "start_tick": 4800, "duration": 480, "voice": "bass"},
+        {"pitch": 53, "velocity": 80, "start_tick": 5280, "duration": 480, "voice": "bass"}
       ]
     }
   ]

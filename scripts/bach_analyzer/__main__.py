@@ -11,6 +11,7 @@ from typing import Optional, Set
 from .batch import parse_seed_range, run_batch
 from .report import format_batch_text, format_json, format_text
 from .runner import load_score, overall_passed, validate
+from .stats import compute_stats, format_stats_json, format_stats_text
 
 
 def _parse_categories(cats_str: Optional[str]) -> Optional[Set[str]]:
@@ -90,6 +91,24 @@ def cmd_batch(args: argparse.Namespace) -> int:
     return 0 if passed == len(results) else 1
 
 
+def cmd_stats(args: argparse.Namespace) -> int:
+    """Show per-track/per-bar statistics."""
+    score = load_score(args.input)
+    data = compute_stats(score)
+
+    if args.json:
+        output = format_stats_json(data)
+    else:
+        output = format_stats_text(data)
+
+    if args.output:
+        Path(args.output).write_text(output)
+    else:
+        print(output)
+
+    return 0
+
+
 def cmd_analyze(args: argparse.Namespace) -> int:
     """Legacy-compatible analyze command (alias for validate)."""
     args.rules = None
@@ -125,6 +144,12 @@ def main() -> int:
     p_batch.add_argument("--json", action="store_true", help="JSON output")
     p_batch.add_argument("-o", "--output", help="Output file path")
 
+    # stats
+    p_stats = subparsers.add_parser("stats", help="Show per-track/per-bar statistics")
+    p_stats.add_argument("input", help="Path to output.json or .mid file")
+    p_stats.add_argument("--json", action="store_true", help="JSON output")
+    p_stats.add_argument("-o", "--output", help="Output file path")
+
     # analyze (legacy compat)
     p_ana = subparsers.add_parser("analyze", help="Analyze (legacy, alias for validate)")
     p_ana.add_argument("input", help="Path to output.json")
@@ -137,6 +162,8 @@ def main() -> int:
         return cmd_validate(args)
     elif args.command == "batch":
         return cmd_batch(args)
+    elif args.command == "stats":
+        return cmd_stats(args)
     elif args.command == "analyze":
         return cmd_analyze(args)
     else:

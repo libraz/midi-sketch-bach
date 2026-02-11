@@ -140,64 +140,7 @@ BachError validateConfig(const bach::GeneratorConfig& config) {
   return BACH_OK;
 }
 
-/// @brief Build events JSON from GeneratorResult.
-std::string buildEventsJson(const bach::GeneratorResult& result, const bach::GeneratorConfig& config) {
-  bach::JsonWriter writer;
-  writer.beginObject();
-
-  writer.key("form");
-  writer.value(std::string(bach::formTypeToString(config.form)));
-  writer.key("key");
-  writer.value(bach::keySignatureToString(config.key));
-  writer.key("bpm");
-  writer.value(static_cast<int>(config.bpm));
-  writer.key("seed");
-  writer.value(result.seed_used);
-  writer.key("total_ticks");
-  writer.value(result.total_duration_ticks);
-  writer.key("total_bars");
-  writer.value(static_cast<int>(result.total_duration_ticks / bach::kTicksPerBar));
-  writer.key("description");
-  writer.value(result.form_description);
-
-  writer.key("tracks");
-  writer.beginArray();
-  for (const auto& track : result.tracks) {
-    writer.beginObject();
-    writer.key("name");
-    writer.value(track.name);
-    writer.key("channel");
-    writer.value(static_cast<int>(track.channel));
-    writer.key("program");
-    writer.value(static_cast<int>(track.program));
-    writer.key("note_count");
-    writer.value(static_cast<int>(track.notes.size()));
-
-    writer.key("notes");
-    writer.beginArray();
-    for (const auto& note : track.notes) {
-      writer.beginObject();
-      writer.key("pitch");
-      writer.value(static_cast<int>(note.pitch));
-      writer.key("velocity");
-      writer.value(static_cast<int>(note.velocity));
-      writer.key("start_tick");
-      writer.value(note.start_tick);
-      writer.key("duration");
-      writer.value(note.duration);
-      writer.key("voice");
-      writer.value(static_cast<int>(note.voice));
-      writer.endObject();
-    }
-    writer.endArray();
-
-    writer.endObject();
-  }
-  writer.endArray();
-
-  writer.endObject();
-  return writer.toString();
-}
+// buildEventsJson is now defined in generator.cpp and declared in generator.h.
 
 // Display names for form types (human-readable)
 const char* kFormDisplayNames[] = {
@@ -269,7 +212,7 @@ BachError bach_generate_from_json(BachHandle handle, const char* json, size_t le
   instance->midi_bytes = writer.toBytes();
 
   // Build events JSON
-  instance->events_json = buildEventsJson(instance->result, instance->config);
+  instance->events_json = bach::buildEventsJson(instance->result, instance->config);
 
   instance->has_result = true;
   return BACH_OK;

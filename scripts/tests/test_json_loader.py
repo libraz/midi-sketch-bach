@@ -89,7 +89,7 @@ class TestJsonLoaderFromDict(unittest.TestCase):
                     "channel": 0,
                     "program": 19,
                     "notes": [
-                        {"pitch": 60, "velocity": 80, "start_ticks": 0, "duration_ticks": 480}
+                        {"pitch": 60, "velocity": 80, "start_tick": 0, "duration": 480}
                     ],
                 }
             ],

@@ -44,8 +44,8 @@ def _parse_note(note_data: dict, voice_name: str, voice_id: int, channel: int) -
     return Note(
         pitch=note_data.get("pitch", 0),
         velocity=note_data.get("velocity", 80),
-        start_tick=note_data.get("start_ticks", 0),
-        duration=note_data.get("duration_ticks", 0),
+        start_tick=note_data.get("start_tick", 0),
+        duration=note_data.get("duration", 0),
         voice=note_data.get("voice", voice_name),
         voice_id=voice_id,
         channel=channel,

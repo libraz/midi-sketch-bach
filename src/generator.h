@@ -57,6 +57,12 @@ struct GeneratorResult {
 ///
 /// @param config Generation configuration.
 /// @return GeneratorResult with MIDI tracks and metadata.
+/// @brief Build events JSON from GeneratorResult.
+/// @param result Generation result with tracks and metadata.
+/// @param config Generator configuration used for generation.
+/// @return JSON string representing all events.
+std::string buildEventsJson(const GeneratorResult& result, const GeneratorConfig& config);
+
 GeneratorResult generate(const GeneratorConfig& config);
 
 /// @brief Auto-detect the default instrument for a given form type.

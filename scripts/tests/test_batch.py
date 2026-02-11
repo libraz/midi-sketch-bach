@@ -40,7 +40,7 @@ class TestValidateSeed(unittest.TestCase):
             "seed": 1, "form": "fugue", "key": "C_major",
             "tracks": [
                 {"name": "soprano", "channel": 0, "program": 19, "notes": [
-                    {"pitch": 72, "velocity": 80, "start_ticks": 0, "duration_ticks": 480}
+                    {"pitch": 72, "velocity": 80, "start_tick": 0, "duration": 480}
                 ]}
             ],
         }

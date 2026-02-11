@@ -204,6 +204,27 @@ int main(int argc, char* argv[]) {
       return 1;
     }
 
+    // Write events JSON if requested.
+    if (opts.json_output) {
+      std::string json_path = opts.output;
+      auto dot_pos = json_path.rfind('.');
+      if (dot_pos != std::string::npos) {
+        json_path = json_path.substr(0, dot_pos) + ".json";
+      } else {
+        json_path += ".json";
+      }
+
+      std::string json_str = bach::buildEventsJson(result, config);
+      std::ofstream json_file(json_path);
+      if (json_file.is_open()) {
+        json_file << json_str;
+        json_file.close();
+        std::printf("JSON:      %s\n", json_path.c_str());
+      } else {
+        std::fprintf(stderr, "Warning: failed to write %s\n", json_path.c_str());
+      }
+    }
+
     // Run analysis if requested.
     if (opts.analyze) {
       const bach::HarmonicTimeline* gen_tl =

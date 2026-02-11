@@ -4,6 +4,8 @@
 
 #include <algorithm>
 
+#include "core/json_helpers.h"
+
 #include "core/rng_util.h"
 
 #include "forms/chorale_prelude.h"
@@ -845,6 +847,64 @@ InstrumentType instrumentTypeFromString(const std::string& str) {
   if (str == "cello") return InstrumentType::Cello;
   if (str == "guitar") return InstrumentType::Guitar;
   return InstrumentType::Organ;
+}
+
+std::string buildEventsJson(const GeneratorResult& result, const GeneratorConfig& config) {
+  JsonWriter writer;
+  writer.beginObject();
+
+  writer.key("form");
+  writer.value(std::string(formTypeToString(config.form)));
+  writer.key("key");
+  writer.value(keySignatureToString(config.key));
+  writer.key("bpm");
+  writer.value(static_cast<int>(config.bpm));
+  writer.key("seed");
+  writer.value(result.seed_used);
+  writer.key("total_ticks");
+  writer.value(result.total_duration_ticks);
+  writer.key("total_bars");
+  writer.value(static_cast<int>(result.total_duration_ticks / kTicksPerBar));
+  writer.key("description");
+  writer.value(result.form_description);
+
+  writer.key("tracks");
+  writer.beginArray();
+  for (const auto& track : result.tracks) {
+    writer.beginObject();
+    writer.key("name");
+    writer.value(track.name);
+    writer.key("channel");
+    writer.value(static_cast<int>(track.channel));
+    writer.key("program");
+    writer.value(static_cast<int>(track.program));
+    writer.key("note_count");
+    writer.value(static_cast<int>(track.notes.size()));
+
+    writer.key("notes");
+    writer.beginArray();
+    for (const auto& note : track.notes) {
+      writer.beginObject();
+      writer.key("pitch");
+      writer.value(static_cast<int>(note.pitch));
+      writer.key("velocity");
+      writer.value(static_cast<int>(note.velocity));
+      writer.key("start_tick");
+      writer.value(note.start_tick);
+      writer.key("duration");
+      writer.value(note.duration);
+      writer.key("voice");
+      writer.value(static_cast<int>(note.voice));
+      writer.endObject();
+    }
+    writer.endArray();
+
+    writer.endObject();
+  }
+  writer.endArray();
+
+  writer.endObject();
+  return writer.toString();
 }
 
 }  // namespace bach
