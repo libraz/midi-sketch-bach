@@ -423,5 +423,264 @@ TEST(TrioSonataTest, MinorKey_GeneratesSuccessfully) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Musical quality tests (Step 8)
+// ---------------------------------------------------------------------------
+
+/// @brief Count unique pitches in a track across a movement.
+size_t countUniquePitches(const TrioSonataMovement& movement, size_t track_idx) {
+  std::set<uint8_t> pitches;
+  if (track_idx < movement.tracks.size()) {
+    for (const auto& note : movement.tracks[track_idx].notes) {
+      pitches.insert(note.pitch);
+    }
+  }
+  return pitches.size();
+}
+
+/// @brief Calculate same-as-previous pitch ratio for a track.
+float sameAsPrevRatio(const TrioSonataMovement& movement, size_t track_idx) {
+  if (track_idx >= movement.tracks.size()) return 0.0f;
+  const auto& notes = movement.tracks[track_idx].notes;
+  if (notes.size() < 2) return 0.0f;
+  size_t same_count = 0;
+  for (size_t i = 1; i < notes.size(); ++i) {
+    if (notes[i].pitch == notes[i - 1].pitch) ++same_count;
+  }
+  return static_cast<float>(same_count) / static_cast<float>(notes.size() - 1);
+}
+
+/// @brief Calculate average note duration for a track.
+double avgDuration(const TrioSonataMovement& movement, size_t track_idx) {
+  if (track_idx >= movement.tracks.size()) return 0.0;
+  const auto& notes = movement.tracks[track_idx].notes;
+  if (notes.empty()) return 0.0;
+  double total = 0.0;
+  for (const auto& note : notes) {
+    total += static_cast<double>(note.duration);
+  }
+  return total / static_cast<double>(notes.size());
+}
+
+/// @brief Count distinct chord degrees in harmonic events.
+size_t countDistinctDegrees(const TrioSonataMovement& movement) {
+  std::set<uint8_t> degrees;
+  // Infer chord degrees from pedal notes (bass roots).
+  if (movement.tracks.size() >= 3) {
+    for (const auto& note : movement.tracks[2].notes) {
+      degrees.insert(note.pitch % 12);
+    }
+  }
+  return degrees.size();
+}
+
+TEST(TrioSonataTest, MelodicDiversity_RightHand) {
+  // RH should have >= 12 unique pitches per movement.
+  for (uint32_t seed : {42u, 99u, 777u}) {
+    TrioSonataConfig config = makeTestConfig(seed);
+    TrioSonataResult result = generateTrioSonata(config);
+    ASSERT_TRUE(result.success);
+    for (size_t mov = 0; mov < result.movements.size(); ++mov) {
+      size_t unique = countUniquePitches(result.movements[mov], 0);
+      EXPECT_GE(unique, 12u)
+          << "Seed " << seed << " movement " << mov
+          << " RH unique pitches: " << unique << " (need >= 12)";
+    }
+  }
+}
+
+TEST(TrioSonataTest, MelodicDiversity_LeftHand) {
+  // LH should have >= 12 unique pitches per movement.
+  for (uint32_t seed : {42u, 99u, 777u}) {
+    TrioSonataConfig config = makeTestConfig(seed);
+    TrioSonataResult result = generateTrioSonata(config);
+    ASSERT_TRUE(result.success);
+    for (size_t mov = 0; mov < result.movements.size(); ++mov) {
+      size_t unique = countUniquePitches(result.movements[mov], 1);
+      EXPECT_GE(unique, 12u)
+          << "Seed " << seed << " movement " << mov
+          << " LH unique pitches: " << unique << " (need >= 12)";
+    }
+  }
+}
+
+TEST(TrioSonataTest, MelodicDiversity_Pedal) {
+  // Pedal should have >= 8 unique pitches per movement.
+  for (uint32_t seed : {42u, 99u, 777u}) {
+    TrioSonataConfig config = makeTestConfig(seed);
+    TrioSonataResult result = generateTrioSonata(config);
+    ASSERT_TRUE(result.success);
+    for (size_t mov = 0; mov < result.movements.size(); ++mov) {
+      size_t unique = countUniquePitches(result.movements[mov], 2);
+      EXPECT_GE(unique, 8u)
+          << "Seed " << seed << " movement " << mov
+          << " Pedal unique pitches: " << unique << " (need >= 8)";
+    }
+  }
+}
+
+TEST(TrioSonataTest, NoVoiceStagnation) {
+  // No voice should have excessive same-as-previous pitch ratio.
+  // Fast movements: < 25%. Slow movement (Adagio): < 45% (longer notes = more repetition).
+  for (uint32_t seed : {42u, 99u, 777u}) {
+    TrioSonataConfig config = makeTestConfig(seed);
+    TrioSonataResult result = generateTrioSonata(config);
+    ASSERT_TRUE(result.success);
+    for (size_t mov = 0; mov < result.movements.size(); ++mov) {
+      float threshold = (mov == 1) ? 0.45f : 0.25f;
+      for (size_t trk = 0; trk < 3; ++trk) {
+        float ratio = sameAsPrevRatio(result.movements[mov], trk);
+        EXPECT_LT(ratio, threshold)
+            << "Seed " << seed << " movement " << mov << " track " << trk
+            << " same-as-prev ratio: " << ratio << " (need < " << threshold << ")";
+      }
+    }
+  }
+}
+
+TEST(TrioSonataTest, MelodicIntervalVariety) {
+  // Interval distribution for fast movements (Allegro/Vivace):
+  //   step 35-85%, skip >= 8%, leap <= 30%.
+  // Adagio is excluded: its post-processed intervals naturally differ.
+  TrioSonataConfig config = makeTestConfig(42);
+  TrioSonataResult result = generateTrioSonata(config);
+  ASSERT_TRUE(result.success);
+
+  // Only check fast movements (0=Allegro, 2=Vivace).
+  for (size_t mov : {size_t(0), size_t(2)}) {
+    for (size_t trk = 0; trk < 2; ++trk) {
+      const auto& notes = result.movements[mov].tracks[trk].notes;
+      if (notes.size() < 10) continue;
+
+      size_t steps = 0, skips = 0, leaps = 0;
+      for (size_t i = 1; i < notes.size(); ++i) {
+        int interval = std::abs(static_cast<int>(notes[i].pitch) -
+                                static_cast<int>(notes[i - 1].pitch));
+        if (interval <= 2) {
+          ++steps;
+        } else if (interval <= 5) {
+          ++skips;
+        } else {
+          ++leaps;
+        }
+      }
+      size_t total = steps + skips + leaps;
+      if (total == 0) continue;
+
+      float step_pct = static_cast<float>(steps) / static_cast<float>(total);
+      float skip_pct = static_cast<float>(skips) / static_cast<float>(total);
+      float leap_pct = static_cast<float>(leaps) / static_cast<float>(total);
+
+      EXPECT_GE(step_pct, 0.35f)
+          << "Movement " << mov << " track " << trk
+          << " step% too low: " << step_pct;
+      EXPECT_LE(step_pct, 0.85f)
+          << "Movement " << mov << " track " << trk
+          << " step% too high: " << step_pct;
+      EXPECT_GE(skip_pct, 0.08f)
+          << "Movement " << mov << " track " << trk
+          << " skip% too low: " << skip_pct;
+      EXPECT_LE(leap_pct, 0.30f)
+          << "Movement " << mov << " track " << trk
+          << " leap% too high: " << leap_pct;
+    }
+  }
+}
+
+TEST(TrioSonataTest, NoExcessiveRhythmRepetition) {
+  // Consecutive same-rhythm ratio should be < 50%.
+  TrioSonataConfig config = makeTestConfig(42);
+  TrioSonataResult result = generateTrioSonata(config);
+  ASSERT_TRUE(result.success);
+
+  for (size_t mov = 0; mov < result.movements.size(); ++mov) {
+    for (size_t trk = 0; trk < 2; ++trk) {
+      const auto& notes = result.movements[mov].tracks[trk].notes;
+      if (notes.size() < 5) continue;
+
+      size_t same_rhythm = 0;
+      for (size_t i = 1; i < notes.size(); ++i) {
+        if (notes[i].duration == notes[i - 1].duration) ++same_rhythm;
+      }
+      float ratio = static_cast<float>(same_rhythm) /
+                     static_cast<float>(notes.size() - 1);
+      EXPECT_LT(ratio, 0.50f)
+          << "Movement " << mov << " track " << trk
+          << " same-rhythm ratio: " << ratio << " (need < 0.50)";
+    }
+  }
+}
+
+TEST(TrioSonataTest, SlowMovementHasLongerNotes) {
+  // Movement 2 (Adagio) should have longer average note duration than movements 1 and 3.
+  TrioSonataConfig config = makeTestConfig(42);
+  TrioSonataResult result = generateTrioSonata(config);
+  ASSERT_TRUE(result.success);
+  ASSERT_EQ(result.movements.size(), 3u);
+
+  // Check RH (track 0).
+  double avg_mov1 = avgDuration(result.movements[0], 0);
+  double avg_mov2 = avgDuration(result.movements[1], 0);
+  double avg_mov3 = avgDuration(result.movements[2], 0);
+
+  EXPECT_GT(avg_mov2, avg_mov1)
+      << "Adagio avg duration (" << avg_mov2
+      << ") should be > Allegro (" << avg_mov1 << ")";
+  EXPECT_GT(avg_mov2, avg_mov3)
+      << "Adagio avg duration (" << avg_mov2
+      << ") should be > Vivace (" << avg_mov3 << ")";
+}
+
+TEST(TrioSonataTest, HarmonicDiversity) {
+  // Each movement should use > 4 distinct pitch classes in the pedal.
+  for (uint32_t seed : {42u, 99u, 777u}) {
+    TrioSonataConfig config = makeTestConfig(seed);
+    TrioSonataResult result = generateTrioSonata(config);
+    ASSERT_TRUE(result.success);
+    for (size_t mov = 0; mov < result.movements.size(); ++mov) {
+      size_t distinct = countDistinctDegrees(result.movements[mov]);
+      EXPECT_GT(distinct, 4u)
+          << "Seed " << seed << " movement " << mov
+          << " distinct bass pitch classes: " << distinct << " (need > 4)";
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Counterpoint report tests (Phase 1)
+// ---------------------------------------------------------------------------
+
+TEST(TrioSonataTest, CounterpointReport_HasBreakdown) {
+  TrioSonataConfig config = makeTestConfig(42);
+  TrioSonataResult result = generateTrioSonata(config);
+
+  ASSERT_TRUE(result.success);
+
+  // Verify struct fields are accessible and total() works.
+  const auto& report = result.counterpoint_report;
+  EXPECT_EQ(report.total(),
+            report.parallel_perfect + report.voice_crossing + report.strong_beat_P4);
+
+  // Per-movement reports should also be accessible.
+  for (size_t mov = 0; mov < result.movements.size(); ++mov) {
+    const auto& mr = result.movements[mov].cp_report;
+    EXPECT_EQ(mr.total(), mr.parallel_perfect + mr.voice_crossing + mr.strong_beat_P4)
+        << "Movement " << mov;
+  }
+}
+
+TEST(TrioSonataTest, CounterpointReport_MultiSeed) {
+  // Total violations across 4 seeds should be < 50 per seed on average.
+  uint32_t total_violations = 0;
+  for (uint32_t seed : {42u, 99u, 777u, 12345u}) {
+    TrioSonataConfig config = makeTestConfig(seed);
+    TrioSonataResult result = generateTrioSonata(config);
+    ASSERT_TRUE(result.success);
+    total_violations += result.counterpoint_report.total();
+  }
+  EXPECT_LT(total_violations, 200u)
+      << "Total violations across 4 seeds: " << total_violations << " (need < 200)";
+}
+
 }  // namespace
 }  // namespace bach

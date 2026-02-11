@@ -3,6 +3,7 @@
 #ifndef BACH_FORMS_TRIO_SONATA_H
 #define BACH_FORMS_TRIO_SONATA_H
 
+#include <cstdint>
 #include <vector>
 
 #include "core/basic_types.h"
@@ -17,7 +18,24 @@ struct TrioSonataConfig {
   uint16_t bpm_slow = 60;   ///< BPM for middle movement (2nd).
   uint32_t seed = 42;
   bool enable_picardy = true;  ///< Apply Picardy third in minor keys.
-};;
+};
+
+/// @brief Counterpoint violation breakdown for trio sonata analysis.
+struct TrioSonataCPReport {
+  uint32_t parallel_perfect = 0;   ///< Parallel 5ths + 8ths.
+  uint32_t voice_crossing = 0;     ///< Voice crossing violations.
+  uint32_t strong_beat_P4 = 0;     ///< Perfect 4ths on strong beats over bass.
+
+  /// @brief Total counterpoint violations.
+  uint32_t total() const { return parallel_perfect + voice_crossing + strong_beat_P4; }
+
+  /// @brief Accumulate another report into this one.
+  void accumulate(const TrioSonataCPReport& other) {
+    parallel_perfect += other.parallel_perfect;
+    voice_crossing += other.voice_crossing;
+    strong_beat_P4 += other.strong_beat_P4;
+  }
+};
 
 /// @brief A single movement of the trio sonata.
 struct TrioSonataMovement {
@@ -25,12 +43,14 @@ struct TrioSonataMovement {
   Tick total_duration_ticks = 0;
   uint16_t bpm = 120;
   KeySignature key = {Key::C, false};
+  TrioSonataCPReport cp_report;    ///< Counterpoint violation breakdown.
 };
 
 /// @brief Result of trio sonata generation.
 struct TrioSonataResult {
   std::vector<TrioSonataMovement> movements;  ///< 3 movements: fast-slow-fast.
   bool success = false;
+  TrioSonataCPReport counterpoint_report;     ///< All movements combined.
 };
 
 /// @brief Generate a BWV 525-530 style trio sonata.
