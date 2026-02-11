@@ -647,7 +647,36 @@ TEST(TrioSonataTest, HarmonicDiversity) {
 }
 
 // ---------------------------------------------------------------------------
-// Counterpoint report tests (Phase 1)
+// Fortspinnung tests
+// ---------------------------------------------------------------------------
+
+TEST(TrioSonataTest, FortspinnungHasSequentialContent) {
+  // The first half of each phrase should have sufficient note density.
+  // At least 8 notes in the first 3/4 of each phrase for upper voices.
+  for (uint32_t seed : {42u, 99u, 777u}) {
+    TrioSonataConfig config = makeTestConfig(seed);
+    TrioSonataResult result = generateTrioSonata(config);
+    ASSERT_TRUE(result.success);
+
+    // Check movement 0 (Allegro) and 2 (Vivace) — fast movements.
+    for (size_t mov : {size_t(0), size_t(2)}) {
+      for (size_t trk = 0; trk < 2; ++trk) {
+        const auto& notes = result.movements[mov].tracks[trk].notes;
+        // Count notes in the first phrase's first 3/4 (0 to 5760 ticks).
+        size_t first_phrase_count = 0;
+        for (const auto& n : notes) {
+          if (n.start_tick < 5760) ++first_phrase_count;
+        }
+        EXPECT_GE(first_phrase_count, 8u)
+            << "Seed " << seed << " mov " << mov << " track " << trk
+            << " first 3/4 phrase notes: " << first_phrase_count;
+      }
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Counterpoint report tests
 // ---------------------------------------------------------------------------
 
 TEST(TrioSonataTest, CounterpointReport_HasBreakdown) {

@@ -511,21 +511,53 @@ void generateUpperVoicePhrase(Tick phrase_start, const std::vector<NoteEvent>& m
   Tick motif_dur = motifDuration(motif);
   Tick seq_start = phrase_start + motif_dur;
   Tick half_phrase = phrase_start + kPhraseTicks / 2;
+  // Extend Fortspinnung boundary to 3/4 of phrase (compress figuration section).
+  Tick fortspinnung_end = phrase_start + kPhraseTicks * 3 / 4;
 
   std::vector<NoteEvent> leader_seq;
-  if (seq_start < half_phrase) {
-    // Generate 1-2 sequence repetitions descending by step.
-    auto seq = generateDiatonicSequence(leader_motif, 1, -1, seq_start, key, scale);
+  if (seq_start < fortspinnung_end) {
+    // Allegro/Vivace: 45% chance of 2 repetitions; Adagio: always 1.
+    bool is_adagio = (params.primary_dur >= kQuarterNote);
+    int reps = 1;
+    if (!is_adagio && rng::rollProbability(rng, 0.45f)) {
+      reps = 2;
+    }
+
+    // Direction: 65% descending, 35% ascending.
+    int direction = rng::rollProbability(rng, 0.65f) ? -1 : 1;
+
+    auto seq = generateDiatonicSequence(leader_motif, reps, direction, seq_start, key, scale);
+
     for (auto& n : seq) {
       n.pitch = clampPitch(static_cast<int>(n.pitch), leader_low, leader_high);
       n.voice = leader_voice;
-      if (n.start_tick < half_phrase) {
-        // Trim notes that extend past half phrase.
-        if (n.start_tick + n.duration > half_phrase) {
-          n.duration = half_phrase - n.start_tick;
+
+      if (n.start_tick < fortspinnung_end) {
+        if (n.start_tick + n.duration > fortspinnung_end) {
+          n.duration = fortspinnung_end - n.start_tick;
         }
         leader_seq.push_back(n);
       }
+    }
+
+    // Parallel P5/P8 heuristic: check consecutive pairs in sequence for same interval.
+    if (leader_seq.size() >= 4) {
+      bool has_parallel = false;
+      for (size_t i = 2; i < leader_seq.size(); ++i) {
+        int ivl_prev = std::abs(static_cast<int>(leader_seq[i - 1].pitch) -
+                                static_cast<int>(leader_seq[i - 2].pitch)) % 12;
+        int ivl_curr = std::abs(static_cast<int>(leader_seq[i].pitch) -
+                                static_cast<int>(leader_seq[i - 1].pitch)) % 12;
+        if ((ivl_prev == interval::kPerfect5th && ivl_curr == interval::kPerfect5th) ||
+            (ivl_prev == interval::kUnison && ivl_curr == interval::kUnison) ||
+            (ivl_prev == interval::kOctave && ivl_curr == interval::kOctave)) {
+          // Truncate from this point.
+          leader_seq.resize(i);
+          has_parallel = true;
+          break;
+        }
+      }
+      (void)has_parallel;
     }
   }
 
@@ -579,7 +611,14 @@ void generateUpperVoicePhrase(Tick phrase_start, const std::vector<NoteEvent>& m
                      }),
       follower_imitation.end());
 
-  // --- Free figuration (bars 3-4) for both voices ---
+  // --- Free figuration for remaining phrase ---
+  // Leader figuration starts after Fortspinnung; follower after imitation half.
+  Tick leader_fig_start = fortspinnung_end;
+  if (!leader_seq.empty()) {
+    Tick seq_end = leader_seq.back().start_tick + leader_seq.back().duration;
+    if (seq_end > leader_fig_start) leader_fig_start = seq_end;
+  }
+
   uint8_t leader_last = leader_motif.empty() ? leader_center : leader_motif.back().pitch;
   if (!leader_seq.empty()) leader_last = leader_seq.back().pitch;
 
@@ -588,7 +627,7 @@ void generateUpperVoicePhrase(Tick phrase_start, const std::vector<NoteEvent>& m
 
   Tick phrase_end = phrase_start + kPhraseTicks;
 
-  auto leader_fig = generateFiguration(half_phrase, phrase_end, timeline, params,
+  auto leader_fig = generateFiguration(leader_fig_start, phrase_end, timeline, params,
                                        leader_low, leader_high, leader_voice,
                                        leader_last, key, is_minor, rng);
 
