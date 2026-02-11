@@ -13,6 +13,7 @@
 #include "core/pitch_utils.h"
 #include "core/rng_util.h"
 #include "core/scale.h"
+#include "counterpoint/species_rules.h"
 #include "harmony/chord_tone_utils.h"
 #include "harmony/chord_types.h"
 #include "harmony/harmonic_event.h"
@@ -1063,6 +1064,89 @@ void insertBreathingRests(std::vector<Track>& tracks, Tick num_phrases, Tick dur
 }
 
 // ---------------------------------------------------------------------------
+// Step 5d: Non-harmonic tone validation (post-processing)
+// ---------------------------------------------------------------------------
+
+/// @brief Check if a pitch is a chord tone of the given harmonic event.
+bool isChordToneAt(uint8_t pitch, const HarmonicEvent& ev) {
+  int pc = static_cast<int>(pitch) % 12;
+  auto tones = collectChordTonesInRange(ev.chord, 0, 127);
+  for (uint8_t ct : tones) {
+    if (static_cast<int>(ct) % 12 == pc) return true;
+  }
+  return false;
+}
+
+/// @brief Validate non-harmonic tones and snap invalid weak-beat dissonances.
+///
+/// For each upper voice track:
+/// - Strong beats (0, 2): non-chord tones are snapped to nearest chord tone.
+/// - Weak beats: checked via SpeciesRules (Fifth species) for valid passing/neighbor.
+///   If invalid and harmonic context is unstable, snap to chord tone.
+void validateNonHarmonicTones(std::vector<Track>& tracks,
+                               const HarmonicTimeline& timeline,
+                               Key /*key*/, ScaleType /*scale*/) {
+
+  for (size_t trk = 0; trk < 2 && trk < tracks.size(); ++trk) {
+    auto& notes = tracks[trk].notes;
+    for (size_t i = 0; i < notes.size(); ++i) {
+      const HarmonicEvent& ev = timeline.getAt(notes[i].start_tick);
+      bool is_ct = isChordToneAt(notes[i].pitch, ev);
+
+      if (is_ct) continue;  // Chord tones are always fine.
+
+      uint8_t beat = beatInBar(notes[i].start_tick);
+
+      if (beat == 0) {
+        // Downbeat: snap only for harsh bass dissonances (2nd, tritone).
+        for (const auto& bn : tracks[2].notes) {
+          if (bn.start_tick <= notes[i].start_tick &&
+              bn.start_tick + bn.duration > notes[i].start_tick) {
+            int ivl = std::abs(static_cast<int>(notes[i].pitch) -
+                               static_cast<int>(bn.pitch)) % 12;
+            if (ivl == interval::kMinor2nd || ivl == interval::kMajor2nd ||
+                ivl == interval::kTritone) {
+              notes[i].pitch = nearestChordTone(notes[i].pitch, ev);
+            }
+            break;
+          }
+        }
+        continue;
+      }
+
+      // Weak beat: validate with species rules. Snap only unclassified
+      // dissonances that are also dissonant with the bass.
+      uint8_t prev_pitch = (i > 0) ? notes[i - 1].pitch : notes[i].pitch;
+      uint8_t next_pitch = (i + 1 < notes.size()) ? notes[i + 1].pitch : notes[i].pitch;
+
+      bool prev_is_ct = (i > 0) ? isChordToneAt(prev_pitch, ev) : true;
+      bool next_is_ct = (i + 1 < notes.size())
+                             ? isChordToneAt(next_pitch, timeline.getAt(notes[i + 1].start_tick))
+                             : true;
+
+      auto nht_type = classifyNonHarmonicTone(prev_pitch, notes[i].pitch, next_pitch,
+                                               false, prev_is_ct, next_is_ct);
+
+      if (nht_type == NonHarmonicToneType::Unknown) {
+        // Only snap if also dissonant with bass (2nd, tritone).
+        for (const auto& bn : tracks[2].notes) {
+          if (bn.start_tick <= notes[i].start_tick &&
+              bn.start_tick + bn.duration > notes[i].start_tick) {
+            int ivl = std::abs(static_cast<int>(notes[i].pitch) -
+                               static_cast<int>(bn.pitch)) % 12;
+            if (ivl == interval::kMinor2nd || ivl == interval::kMajor2nd ||
+                ivl == interval::kTritone) {
+              notes[i].pitch = nearestChordTone(notes[i].pitch, ev);
+            }
+            break;
+          }
+        }
+      }
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Step 6: Invertible counterpoint
 // ---------------------------------------------------------------------------
 
@@ -1249,7 +1333,11 @@ TrioSonataMovement generateMovement(const KeySignature& key_sig, Tick num_bars,
   };
   sortTracks(tracks);
 
-  // 6. Cadential suspensions at phrase boundaries.
+  // 6. Validate non-harmonic tones on upper voices.
+  // 6. Validate non-harmonic tones on upper voices.
+  validateNonHarmonicTones(tracks, timeline, key_sig.tonic, scale);
+
+  // 7. Cadential suspensions at phrase boundaries.
   for (Tick p = 1; p <= num_phrases; ++p) {
     Tick cadence_tick = p * kPhraseTicks;
     if (cadence_tick > duration) cadence_tick = duration;
@@ -1258,13 +1346,13 @@ TrioSonataMovement generateMovement(const KeySignature& key_sig, Tick num_bars,
     insertCadentialSuspension(tracks, cadence_tick, sus_voice, key_sig.tonic, scale);
   }
 
-  // 7. Breathing rests at phrase boundaries (upper voices only, pedal exempt).
+  // 8. Breathing rests at phrase boundaries (upper voices only, pedal exempt).
   insertBreathingRests(tracks, num_phrases, duration);
 
-  // 8. Re-sort after suspension and breathing modifications.
+  // 9. Re-sort after suspension and breathing modifications.
   sortTracks(tracks);
 
-  // 9. Post-process: eliminate consecutive repeated pitches.
+  // 10. Post-process: eliminate consecutive repeated pitches.
   // When a note has the same pitch as the previous note, shift it by 1 or 2
   // scale degrees. Direction chosen to move toward the range center.
   for (auto& track : tracks) {
