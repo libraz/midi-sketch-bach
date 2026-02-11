@@ -19,6 +19,7 @@
 #include "harmony/harmonic_event.h"
 #include "harmony/harmonic_timeline.h"
 #include "organ/organ_techniques.h"
+#include "ornament/ornament_engine.h"
 #include "transform/motif_transform.h"
 #include "transform/sequence.h"
 
@@ -1463,7 +1464,54 @@ TrioSonataMovement generateMovement(const KeySignature& key_sig, Tick num_bars,
     }
   }
 
-  // Counterpoint analysis.
+  // 11. Apply ornaments with counterpoint verification.
+  {
+    // Determine ornament density based on movement character.
+    float density;
+    switch (character) {
+      case TrioMovementCharacter::Adagio: density = 0.08f; break;
+      case TrioMovementCharacter::Vivace: density = 0.06f; break;
+      default: density = 0.08f; break;  // Allegro.
+    }
+
+    OrnamentConfig orn_config;
+    orn_config.ornament_density = density;
+
+    // Collect all voice notes for counterpoint verification.
+    std::vector<std::vector<NoteEvent>> all_voice_notes(kTrioVoiceCount);
+    for (const auto& track : tracks) {
+      for (const auto& n : track.notes) {
+        if (n.voice < kTrioVoiceCount) {
+          all_voice_notes[n.voice].push_back(n);
+        }
+      }
+    }
+
+    // Apply ornaments to upper voices only (pedal is Ground — no ornaments).
+    for (size_t trk = 0; trk < 2 && trk < tracks.size(); ++trk) {
+      OrnamentContext ctx;
+      ctx.config = orn_config;
+      ctx.role = VoiceRole::Respond;  // 3 voices = equal treatment.
+      ctx.seed = seed + static_cast<uint32_t>(trk) * 100;
+      ctx.timeline = &timeline;
+
+      auto ornamented = applyOrnaments(tracks[trk].notes, ctx, all_voice_notes);
+
+      // Pitch clamping: prevent voice crossing from ornament expansion.
+      uint8_t range_low = (trk == 0) ? kRhLow : kLhLow;
+      uint8_t range_high = (trk == 0) ? kRhHigh : kLhHigh;
+      for (auto& n : ornamented) {
+        n.pitch = clampPitch(static_cast<int>(n.pitch), range_low, range_high);
+      }
+
+      tracks[trk].notes = std::move(ornamented);
+    }
+
+    // Re-sort after ornament expansion.
+    sortTracks(tracks);
+  }
+
+  // 12. Counterpoint analysis (after all modifications).
   movement.cp_report = buildTrioCPReport(tracks);
 
   movement.tracks = std::move(tracks);

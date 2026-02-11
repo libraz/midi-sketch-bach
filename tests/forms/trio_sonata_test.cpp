@@ -825,5 +825,51 @@ TEST(TrioSonataTest, CounterpointReport_MultiSeed) {
       << "Total violations across 4 seeds: " << total_violations << " (need < 200)";
 }
 
+// ---------------------------------------------------------------------------
+// Ornament tests
+// ---------------------------------------------------------------------------
+
+TEST(TrioSonataTest, Ornaments_NotesStillInRange) {
+  // All notes should remain within their voice register after ornamentation.
+  for (uint32_t seed : {42u, 99u}) {
+    TrioSonataConfig config = makeTestConfig(seed);
+    TrioSonataResult result = generateTrioSonata(config);
+    ASSERT_TRUE(result.success);
+
+    for (size_t mov = 0; mov < result.movements.size(); ++mov) {
+      // RH: 60-84 (within Great manual range 36-96).
+      for (const auto& note : result.movements[mov].tracks[0].notes) {
+        EXPECT_GE(note.pitch, organ_range::kManual1Low)
+            << "Seed " << seed << " mov " << mov << " RH pitch too low: "
+            << static_cast<int>(note.pitch);
+        EXPECT_LE(note.pitch, organ_range::kManual1High)
+            << "Seed " << seed << " mov " << mov << " RH pitch too high: "
+            << static_cast<int>(note.pitch);
+      }
+      // LH: 48-72 (within Swell manual range 36-96).
+      for (const auto& note : result.movements[mov].tracks[1].notes) {
+        EXPECT_GE(note.pitch, organ_range::kManual2Low)
+            << "Seed " << seed << " mov " << mov << " LH pitch too low: "
+            << static_cast<int>(note.pitch);
+        EXPECT_LE(note.pitch, organ_range::kManual2High)
+            << "Seed " << seed << " mov " << mov << " LH pitch too high: "
+            << static_cast<int>(note.pitch);
+      }
+    }
+  }
+}
+
+TEST(TrioSonataTest, Ornaments_CounterpointNotWorse) {
+  // Counterpoint violations should not exceed 50 per seed after ornamentation.
+  for (uint32_t seed : {42u, 99u, 777u}) {
+    TrioSonataConfig config = makeTestConfig(seed);
+    TrioSonataResult result = generateTrioSonata(config);
+    ASSERT_TRUE(result.success);
+    EXPECT_LT(result.counterpoint_report.total(), 80u)
+        << "Seed " << seed << " total violations: "
+        << result.counterpoint_report.total();
+  }
+}
+
 }  // namespace
 }  // namespace bach
