@@ -1170,6 +1170,62 @@ void swapVoiceRegisters(std::vector<NoteEvent>& upper_notes,
 }
 
 // ---------------------------------------------------------------------------
+// Step 6a: Pedal lead simplification
+// ---------------------------------------------------------------------------
+
+/// @brief Simplify upper voice notes during thematic bass (pedal lead) phrases.
+///
+/// Replaces the first 2 bars of upper voice material with half-note chord tone
+/// outlines, letting the pedal lead be heard clearly.
+void simplifyForPedalLead(std::vector<NoteEvent>& upper_notes, Tick phrase_start,
+                           Tick phrase_end, const HarmonicTimeline& timeline,
+                           uint8_t range_low, uint8_t range_high, uint8_t voice) {
+  Tick simplify_end = phrase_start + 2 * kTicksPerBar;
+  if (simplify_end > phrase_end) simplify_end = phrase_end;
+
+  // Remove upper voice notes in the first 2 bars.
+  upper_notes.erase(
+      std::remove_if(upper_notes.begin(), upper_notes.end(),
+                     [phrase_start, simplify_end, voice](const NoteEvent& n) {
+                       return n.voice == voice &&
+                              n.start_tick >= phrase_start &&
+                              n.start_tick < simplify_end;
+                     }),
+      upper_notes.end());
+
+  // Insert half-note chord tone outlines.
+  uint8_t center = (range_low + range_high) / 2;
+  for (Tick t = phrase_start; t < simplify_end; t += kHalfNote) {
+    const HarmonicEvent& ev = timeline.getAt(t);
+    uint8_t pitch = nearestChordTone(center, ev);
+    pitch = clampPitch(static_cast<int>(pitch), range_low, range_high);
+
+    // Vary pitch: alternate between two nearby chord tones.
+    if (((t - phrase_start) / kHalfNote) % 2 == 1) {
+      auto chord_tones = collectChordTonesInRange(ev.chord, range_low, range_high);
+      for (uint8_t ct : chord_tones) {
+        if (ct != pitch) {
+          pitch = ct;
+          break;
+        }
+      }
+    }
+
+    Tick dur = kHalfNote;
+    if (t + dur > simplify_end) dur = simplify_end - t;
+
+    NoteEvent note;
+    note.start_tick = t;
+    note.duration = dur;
+    note.pitch = pitch;
+    note.velocity = kOrganVelocity;
+    note.voice = voice;
+    note.source = BachNoteSource::FreeCounterpoint;
+    upper_notes.push_back(note);
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Step 6b: Strong-beat P4 over bass counting
 // ---------------------------------------------------------------------------
 
@@ -1305,7 +1361,8 @@ TrioSonataMovement generateMovement(const KeySignature& key_sig, Tick num_bars,
 
     // Generate pedal line.
     std::vector<NoteEvent> pedal_notes;
-    if (rng::rollProbability(rng, params.thematic_bass_prob)) {
+    bool is_thematic_bass = rng::rollProbability(rng, params.thematic_bass_prob);
+    if (is_thematic_bass) {
       pedal_notes = generateThematicBass(phrase_start, phrase_end, motif,
                                          timeline, key_sig.tonic,
                                          key_sig.is_minor, rng);
@@ -1316,6 +1373,15 @@ TrioSonataMovement generateMovement(const KeySignature& key_sig, Tick num_bars,
     }
     for (auto& n : pedal_notes) {
       tracks[2].notes.push_back(n);
+    }
+
+    // Pedal lead: simplify upper voices when thematic bass is active.
+    // Skip first phrase (p == 0) to preserve motif establishment.
+    if (is_thematic_bass && p > 0) {
+      simplifyForPedalLead(tracks[0].notes, phrase_start, phrase_end, timeline,
+                           kRhLow, kRhHigh, 0);
+      simplifyForPedalLead(tracks[1].notes, phrase_start, phrase_end, timeline,
+                           kLhLow, kLhHigh, 1);
     }
   }
 
