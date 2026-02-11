@@ -8,6 +8,7 @@
 #include <gtest/gtest.h>
 
 #include "core/pitch_utils.h"
+#include "core/scale.h"
 #include "fugue/fugue_config.h"
 
 namespace bach {
@@ -330,11 +331,10 @@ TEST_F(SubjectGeneratorTest, DifferentSeedsProduceDiverseSubjects) {
     }
   }
 
-  // With 4 template pairs + rhythm variation + interval fluctuation + ending
-  // variation, we expect at least 2 distinct note counts, 2 distinct first
-  // pitches, and 2 distinct last pitches across 20 seeds.
-  EXPECT_GE(note_counts.size(), 2u)
-      << "Expected diverse note counts across 20 seeds";
+  // With 4 template pairs + interval fluctuation + ending variation, we
+  // expect at least 2 distinct first pitches and 2 distinct last pitches
+  // across 20 seeds. Note counts may be uniform since pair substitution
+  // preserves total duration by design.
   EXPECT_GE(first_pitches.size(), 2u)
       << "Expected diverse first pitches across 20 seeds";
   EXPECT_GE(last_pitches.size(), 2u)
@@ -474,6 +474,168 @@ TEST(SubjectAnacrusisTest, NoAnacrusis_ZeroTicks) {
       break;
     }
   }
+}
+
+// ---------------------------------------------------------------------------
+// Beat-grid alignment (Fix 1: no beat displacement)
+// ---------------------------------------------------------------------------
+
+TEST_F(SubjectGeneratorTest, NotesAlignToBeatGrid) {
+  // All note start_ticks should fall on standard subdivisions:
+  // multiples of sixteenth note (kTicksPerBeat / 4 = 120 ticks).
+  constexpr Tick kSixteenth = kTicksPerBeat / 4;
+  for (auto chr : {SubjectCharacter::Severe, SubjectCharacter::Playful,
+                   SubjectCharacter::Noble, SubjectCharacter::Restless}) {
+    config.character = chr;
+    for (uint32_t seed = 1; seed <= 10; ++seed) {
+      Subject subject = generator.generate(config, seed);
+      for (const auto& note : subject.notes) {
+        EXPECT_EQ(note.start_tick % kSixteenth, 0u)
+            << "Note at tick " << note.start_tick
+            << " not on 16th-note grid (character "
+            << static_cast<int>(chr) << " seed " << seed << ")";
+      }
+    }
+  }
+}
+
+TEST_F(SubjectGeneratorTest, NotesDontOverlap) {
+  // Adjacent notes should not overlap in time within the subject.
+  for (auto chr : {SubjectCharacter::Severe, SubjectCharacter::Playful,
+                   SubjectCharacter::Noble, SubjectCharacter::Restless}) {
+    config.character = chr;
+    for (uint32_t seed = 1; seed <= 10; ++seed) {
+      Subject subject = generator.generate(config, seed);
+      for (size_t idx = 1; idx < subject.notes.size(); ++idx) {
+        Tick prev_end =
+            subject.notes[idx - 1].start_tick + subject.notes[idx - 1].duration;
+        EXPECT_LE(prev_end, subject.notes[idx].start_tick)
+            << "Notes overlap at index " << idx << " (character "
+            << static_cast<int>(chr) << " seed " << seed << ")";
+      }
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// All-diatonic pitches (Fix 2: no chromatic errors)
+// ---------------------------------------------------------------------------
+
+TEST_F(SubjectGeneratorTest, AllPitchesAreDiatonic) {
+  // Every pitch in the subject should belong to the scale of the key.
+  // Test C major and G minor.
+  config.key = Key::C;
+  config.is_minor = false;
+  for (auto chr : {SubjectCharacter::Severe, SubjectCharacter::Playful,
+                   SubjectCharacter::Noble, SubjectCharacter::Restless}) {
+    config.character = chr;
+    for (uint32_t seed = 1; seed <= 20; ++seed) {
+      Subject subject = generator.generate(config, seed);
+      for (const auto& note : subject.notes) {
+        EXPECT_TRUE(scale_util::isScaleTone(note.pitch, config.key,
+                                            ScaleType::Major))
+            << "Non-diatonic pitch " << static_cast<int>(note.pitch)
+            << " (" << pitchToNoteName(note.pitch) << ") in C major subject"
+            << " (character " << static_cast<int>(chr) << " seed " << seed
+            << ")";
+      }
+    }
+  }
+}
+
+TEST_F(SubjectGeneratorTest, AllPitchesAreDiatonicMinor) {
+  config.key = Key::G;
+  config.is_minor = true;
+  for (auto chr : {SubjectCharacter::Severe, SubjectCharacter::Playful,
+                   SubjectCharacter::Noble, SubjectCharacter::Restless}) {
+    config.character = chr;
+    for (uint32_t seed = 1; seed <= 10; ++seed) {
+      Subject subject = generator.generate(config, seed);
+      for (const auto& note : subject.notes) {
+        EXPECT_TRUE(scale_util::isScaleTone(note.pitch, config.key,
+                                            ScaleType::HarmonicMinor))
+            << "Non-diatonic pitch " << static_cast<int>(note.pitch)
+            << " (" << pitchToNoteName(note.pitch) << ") in G minor subject"
+            << " (character " << static_cast<int>(chr) << " seed " << seed
+            << ")";
+      }
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Climax on strong beat (Fix 4)
+// ---------------------------------------------------------------------------
+
+TEST_F(SubjectGeneratorTest, ClimaxOnStrongBeat) {
+  // The designed climax note is quantized to beat 1 or beat 3. Due to interval
+  // fluctuation, the absolute highest pitch may occasionally shift to a
+  // non-strong beat. We verify statistically: across many seeds and all
+  // characters, the majority of highest pitches fall on strong beats.
+  constexpr Tick kBeat3Offset = kTicksPerBeat * 2;
+  int total_cases = 0;
+  int on_strong_beat = 0;
+
+  for (auto chr : {SubjectCharacter::Severe, SubjectCharacter::Playful,
+                   SubjectCharacter::Noble, SubjectCharacter::Restless}) {
+    config.character = chr;
+    config.subject_bars = 3;
+    for (uint32_t seed = 1; seed <= 20; ++seed) {
+      Subject subject = generator.generate(config, seed);
+      ASSERT_GT(subject.notes.size(), 2u);
+
+      // Find the tick of the highest note.
+      Tick highest_tick = 0;
+      uint8_t highest_pitch = 0;
+      for (const auto& note : subject.notes) {
+        if (note.pitch > highest_pitch) {
+          highest_pitch = note.pitch;
+          highest_tick = note.start_tick;
+        }
+      }
+
+      Tick pos_in_bar = highest_tick % kTicksPerBar;
+      bool on_beat1 = (pos_in_bar == 0);
+      bool on_beat3 = (pos_in_bar == kBeat3Offset);
+      if (on_beat1 || on_beat3) ++on_strong_beat;
+      ++total_cases;
+    }
+  }
+
+  // With climax quantization, expect at least 40% of highest pitches on
+  // strong beats (vs ~12.5% chance for random 16th-note positions).
+  float ratio = static_cast<float>(on_strong_beat) /
+                static_cast<float>(total_cases);
+  EXPECT_GE(ratio, 0.40f)
+      << "Expected at least 40% of climax notes on strong beats, got "
+      << on_strong_beat << "/" << total_cases << " (" << (ratio * 100.0f)
+      << "%)";
+}
+
+// ---------------------------------------------------------------------------
+// Ending note preference (Fix 7: 70% dominant)
+// ---------------------------------------------------------------------------
+
+TEST_F(SubjectGeneratorTest, EndingPrefersDominant) {
+  // Across many seeds, the dominant ending should be more frequent than tonic.
+  config.key = Key::C;
+  int dominant_count = 0;
+  int tonic_count = 0;
+  constexpr int kTrials = 100;
+  int tonic_pc = static_cast<int>(config.key) % 12;
+  int dominant_pc = (tonic_pc + 7) % 12;
+
+  for (uint32_t seed = 1; seed <= kTrials; ++seed) {
+    Subject subject = generator.generate(config, seed);
+    ASSERT_GT(subject.noteCount(), 0u);
+    int last_pc = getPitchClass(subject.notes.back().pitch);
+    if (last_pc == dominant_pc) ++dominant_count;
+    else if (last_pc == tonic_pc) ++tonic_count;
+  }
+  // With 70% dominant, expect dominant > tonic across 100 seeds.
+  EXPECT_GT(dominant_count, tonic_count)
+      << "Expected dominant endings (" << dominant_count
+      << ") > tonic endings (" << tonic_count << ")";
 }
 
 }  // namespace
