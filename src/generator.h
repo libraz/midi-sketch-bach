@@ -48,8 +48,10 @@ struct GeneratorResult {
 ///   - Fugue: FugueGenerator only
 ///   - PreludeAndFugue: PreludeGenerator + FugueGenerator concatenated
 ///   - ToccataAndFugue / FantasiaAndFugue / Passacaglia: delegates to FugueGenerator
-///   - TrioSonata: TrioSonataGenerator (stub until implemented)
-///   - ChoralePrelude / CelloPrelude / Chaconne: stub (future phases)
+///   - TrioSonata: TrioSonataGenerator (3-movement fast-slow-fast)
+///   - ChoralePrelude: ChoralePreludeGenerator (cantus firmus + counterpoint)
+///   - CelloPrelude: HarmonicArpeggioEngine (solo string flow)
+///   - Chaconne: ChaconneEngine (solo string arch)
 ///
 /// @param config Generation configuration.
 /// @return GeneratorResult with MIDI tracks and metadata.

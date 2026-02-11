@@ -452,9 +452,8 @@ void generateRestlessEpisode(Episode& episode, const std::vector<NoteEvent>& mot
 /// @return Voice ID of the resting voice, or num_voices if no resting voice.
 static VoiceId selectRestingVoice(uint8_t num_voices, int episode_index) {
   if (num_voices < 3) return num_voices;  // No resting voice possible
-  // Rotate through voices 2..num_voices-1
-  uint8_t range = num_voices - 2;
-  return static_cast<VoiceId>(2 + (episode_index % range));
+  // Rotate through ALL voices so bass also gets active material.
+  return static_cast<VoiceId>(episode_index % num_voices);
 }
 
 /// @brief Generate sustained held tones for a resting voice.
@@ -475,23 +474,23 @@ static VoiceId selectRestingVoice(uint8_t num_voices, int episode_index) {
 static void generateHeldTones(Episode& episode,
                                Tick start_tick, Tick duration_ticks,
                                Key key, VoiceId voice_id, uint8_t num_voices) {
-  // Use whole notes (kTicksPerBar) as held tone duration.
-  constexpr Tick kHeldDuration = kTicksPerBar;  // Whole note
+  constexpr Tick kHeldDuration = kTicksPerBar;
 
-  // Derive tonic pitch from the center of the target voice register.
   auto [range_low, range_high] = getFugueVoiceRange(voice_id, num_voices);
   int register_center = (static_cast<int>(range_low) + static_cast<int>(range_high)) / 2;
 
-  // Snap to the nearest tonic pitch class in the voice register center.
+  // Snap to nearest tonic pitch class in the voice register center.
   int key_pc = static_cast<int>(key);
   int center_pc = register_center % 12;
   int pc_diff = key_pc - center_pc;
   if (pc_diff > 6) pc_diff -= 12;
   if (pc_diff < -6) pc_diff += 12;
-  int tonic_pitch = register_center + pc_diff;
+  int current_pitch = register_center + pc_diff;
 
-  // Alternate between root and fifth for harmonic stability.
-  int pitches[] = {tonic_pitch, tonic_pitch + 7};
+  // Bass progression: I-IV-V-I pattern (root motion by 4th/5th, Bach standard).
+  // Scale degree offsets relative to tonic (in semitones).
+  static constexpr int kBassProgression[] = {0, 5, 7, 0, 4, 5, 7, 0};
+  static constexpr int kProgressionLen = 8;
 
   Tick tick = start_tick;
   int idx = 0;
@@ -499,16 +498,17 @@ static void generateHeldTones(Episode& episode,
     Tick dur = std::min(kHeldDuration, start_tick + duration_ticks - tick);
     if (dur == 0) break;
 
-    int pitch = pitches[idx % 2];
-    // Clamp to voice range.
-    if (pitch < static_cast<int>(range_low)) pitch = static_cast<int>(range_low);
-    if (pitch > static_cast<int>(range_high)) pitch = static_cast<int>(range_high);
+    int degree_offset = kBassProgression[idx % kProgressionLen];
+    int pitch = current_pitch + degree_offset;
+    // Keep within voice range.
+    while (pitch < static_cast<int>(range_low)) pitch += 12;
+    while (pitch > static_cast<int>(range_high)) pitch -= 12;
 
     NoteEvent note;
     note.start_tick = tick;
     note.duration = dur;
     note.pitch = static_cast<uint8_t>(pitch);
-    note.velocity = 80;  // kOrganVelocity
+    note.velocity = 80;
     note.voice = voice_id;
     note.source = BachNoteSource::EpisodeMaterial;
     episode.notes.push_back(note);
@@ -814,15 +814,25 @@ Episode generateEpisode(const Subject& subject, Tick start_tick, Tick duration_t
               return a.voice < b.voice;
             });
 
+  // Diatonic context for pre-snapping.
+  ScaleType scale = subject.is_minor ? ScaleType::HarmonicMinor : ScaleType::Major;
+
   for (const auto& note : raw.notes) {
     // Query harmonic context at this tick.
     const auto& harm_ev = timeline.getAt(note.start_tick);
 
+    // Pre-snap to diatonic scale (prevents chromatic artifacts from collision resolver).
+    Key current_key = (note.start_tick >= start_tick + duration_ticks / 2 &&
+                       target_key != start_key)
+                          ? target_key
+                          : start_key;
+    uint8_t diatonic_pitch = scale_util::nearestScaleTone(note.pitch, current_key, scale);
+
     // Determine desired pitch: snap non-chord tones on strong beats.
-    uint8_t desired_pitch = note.pitch;
+    uint8_t desired_pitch = diatonic_pitch;
     bool is_strong = (note.start_tick % kTicksPerBeat == 0);
-    if (is_strong && !isChordTone(note.pitch, harm_ev)) {
-      desired_pitch = nearestChordTone(note.pitch, harm_ev);
+    if (is_strong && !isChordTone(diatonic_pitch, harm_ev)) {
+      desired_pitch = nearestChordTone(diatonic_pitch, harm_ev);
     }
 
     // Route through createBachNote for counterpoint validation.
@@ -893,6 +903,81 @@ Episode generateFortspinnungEpisode(const Subject& subject, const MotifPool& poo
   }
 
   return episode;
+}
+
+Episode generateFortspinnungEpisode(const Subject& subject, const MotifPool& pool,
+                                    Tick start_tick, Tick duration_ticks,
+                                    Key start_key, Key target_key,
+                                    uint8_t num_voices, uint32_t seed,
+                                    int episode_index, float energy_level,
+                                    CounterpointState& cp_state,
+                                    IRuleEvaluator& cp_rules,
+                                    CollisionResolver& cp_resolver,
+                                    const HarmonicTimeline& timeline) {
+  // Step 1: Generate unvalidated Fortspinnung episode.
+  Episode raw = generateFortspinnungEpisode(subject, pool, start_tick, duration_ticks,
+                                            start_key, target_key, num_voices, seed,
+                                            episode_index, energy_level);
+
+  // Step 2: Create a PhraseGoal targeting the tonic of the target key at episode end.
+  Tick episode_end = start_tick + duration_ticks;
+  PhraseGoal phrase_goal;
+  phrase_goal.target_pitch = tonicPitch(target_key, 4);
+  phrase_goal.target_tick = episode_end;
+  phrase_goal.bonus = 0.3f;
+
+  // Step 3: Post-validate each note through createBachNote().
+  Episode validated;
+  validated.start_tick = raw.start_tick;
+  validated.end_tick = raw.end_tick;
+  validated.start_key = raw.start_key;
+  validated.end_key = raw.end_key;
+  validated.notes.reserve(raw.notes.size());
+
+  // Sort by tick for chronological processing.
+  std::sort(raw.notes.begin(), raw.notes.end(),
+            [](const NoteEvent& a, const NoteEvent& b) {
+              if (a.start_tick != b.start_tick) return a.start_tick < b.start_tick;
+              return a.voice < b.voice;
+            });
+
+  // Diatonic context for pre-snapping.
+  ScaleType scale = subject.is_minor ? ScaleType::HarmonicMinor : ScaleType::Major;
+
+  for (const auto& note : raw.notes) {
+    // Query harmonic context at this tick.
+    const auto& harm_ev = timeline.getAt(note.start_tick);
+
+    // Pre-snap to diatonic scale (Phase 4: prevents chromatic artifacts).
+    Key current_key = (note.start_tick >= start_tick + duration_ticks / 2 &&
+                       target_key != start_key)
+                          ? target_key
+                          : start_key;
+    uint8_t diatonic_pitch = scale_util::nearestScaleTone(note.pitch, current_key, scale);
+
+    // Determine desired pitch: snap non-chord tones on strong beats.
+    uint8_t desired_pitch = diatonic_pitch;
+    bool is_strong = (note.start_tick % kTicksPerBeat == 0);
+    if (is_strong && !isChordTone(diatonic_pitch, harm_ev)) {
+      desired_pitch = nearestChordTone(diatonic_pitch, harm_ev);
+    }
+
+    // Route through createBachNote for counterpoint validation.
+    BachNoteOptions opts;
+    opts.voice = note.voice;
+    opts.desired_pitch = desired_pitch;
+    opts.tick = note.start_tick;
+    opts.duration = note.duration;
+    opts.velocity = note.velocity;
+    opts.source = BachNoteSource::EpisodeMaterial;
+
+    BachCreateNoteResult result = createBachNote(&cp_state, &cp_rules, &cp_resolver, opts);
+    if (result.accepted) {
+      validated.notes.push_back(result.note);
+    }
+  }
+
+  return validated;
 }
 
 }  // namespace bach

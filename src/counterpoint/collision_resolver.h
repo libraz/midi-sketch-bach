@@ -176,7 +176,7 @@ class CollisionResolver {
 
  private:
   int max_search_range_ = 12;
-  int range_tolerance_ = 6;
+  int range_tolerance_ = 3;
   std::vector<Tick> cadence_ticks_;
 
   /// @brief Attempt a specific resolution strategy.

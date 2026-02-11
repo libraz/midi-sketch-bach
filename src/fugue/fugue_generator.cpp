@@ -18,6 +18,8 @@
 #include "fugue/cadence_plan.h"
 #include "fugue/countersubject.h"
 #include "fugue/episode.h"
+#include "fugue/fortspinnung.h"
+#include "fugue/motif_pool.h"
 #include "fugue/exposition.h"
 #include "fugue/middle_entry.h"
 #include "fugue/stretto.h"
@@ -471,6 +473,10 @@ FugueResult generateFugue(const FugueConfig& config) {
   all_notes.insert(all_notes.end(), expo_notes.begin(), expo_notes.end());
   current_tick = expo.total_ticks;
 
+  // --- Build motif pool for Fortspinnung-based episodes ---
+  MotifPool motif_pool;
+  motif_pool.build(subject.notes, counter_subject.notes, subject.character);
+
   // --- Develop phase: Episode+MiddleEntry pairs ---
   int develop_pairs = config.develop_pairs;
   Key prev_key = config.key;
@@ -502,13 +508,12 @@ FugueResult generateFugue(const FugueConfig& config) {
     // Compute energy level for this episode from the energy curve.
     float episode_energy = FugueEnergyCurve::getLevel(current_tick, estimated_duration);
 
-    // Episode: transition from prev_key to target_key.
-    Episode episode = generateEpisode(subject, current_tick, episode_duration,
-                                      prev_key, target_key,
-                                      num_voices, pair_seed_base,
-                                      pair_idx, episode_energy,
-                                      cp_state, cp_rules, cp_resolver,
-                                      detailed_timeline);
+    // Episode: transition from prev_key to target_key (Fortspinnung-based).
+    Episode episode = generateFortspinnungEpisode(
+        subject, motif_pool, current_tick, episode_duration,
+        prev_key, target_key, num_voices, pair_seed_base,
+        pair_idx, episode_energy,
+        cp_state, cp_rules, cp_resolver, detailed_timeline);
     structure.addSection(SectionType::Episode, FuguePhase::Develop,
                          current_tick, current_tick + episode_duration, target_key);
     all_notes.insert(all_notes.end(), episode.notes.begin(), episode.notes.end());
@@ -550,8 +555,8 @@ FugueResult generateFugue(const FugueConfig& config) {
       Tick me_duration = middle_end - current_tick;
       if (me_duration > 0 && num_voices >= 2) {
         float me_energy = FugueEnergyCurve::getLevel(current_tick, estimated_duration);
-        Episode companion = generateEpisode(
-            subject, current_tick, me_duration,
+        Episode companion = generateFortspinnungEpisode(
+            subject, motif_pool, current_tick, me_duration,
             target_key, target_key, num_voices,
             pair_seed_base + 500u, pair_idx, me_energy,
             cp_state, cp_rules, cp_resolver, detailed_timeline);
@@ -575,8 +580,8 @@ FugueResult generateFugue(const FugueConfig& config) {
   {
     Tick return_ep_duration = kTicksPerBar * static_cast<Tick>(config.episode_bars);
     float return_energy = FugueEnergyCurve::getLevel(current_tick, estimated_duration);
-    Episode return_episode = generateEpisode(
-        subject, current_tick, return_ep_duration,
+    Episode return_episode = generateFortspinnungEpisode(
+        subject, motif_pool, current_tick, return_ep_duration,
         prev_key, config.key, num_voices,
         config.seed + static_cast<uint32_t>(develop_pairs) * 2000u + 2000u,
         develop_pairs, return_energy,
@@ -618,8 +623,8 @@ FugueResult generateFugue(const FugueConfig& config) {
     // with high energy (pre-stretto climax) for voices 0..num_voices-2.
     uint8_t upper_voices = num_voices > 1 ? num_voices - 1 : 1;
     float pedal_energy = FugueEnergyCurve::getLevel(current_tick, estimated_duration);
-    Episode pedal_episode = generateEpisode(
-        subject, current_tick, pedal_duration,
+    Episode pedal_episode = generateFortspinnungEpisode(
+        subject, motif_pool, current_tick, pedal_duration,
         config.key, config.key, upper_voices,
         config.seed + static_cast<uint32_t>(develop_pairs + 1) * 2000u + 7000u,
         develop_pairs + 1, pedal_energy,

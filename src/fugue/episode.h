@@ -128,6 +128,26 @@ Episode generateFortspinnungEpisode(const Subject& subject, const MotifPool& poo
                                     uint8_t num_voices, uint32_t seed,
                                     int episode_index, float energy_level);
 
+/// @brief Generate a Fortspinnung-based episode with counterpoint validation.
+///
+/// Generates raw Fortspinnung material, adds resting voice / held tones for
+/// Voice 2+, then validates every note through createBachNote() for
+/// counterpoint safety.
+///
+/// @param cp_state Counterpoint state (modified in place).
+/// @param cp_rules Rule evaluator for counterpoint checks.
+/// @param cp_resolver Collision resolver for pitch adjustments.
+/// @param timeline Harmonic timeline for chord-tone snapping.
+Episode generateFortspinnungEpisode(const Subject& subject, const MotifPool& pool,
+                                    Tick start_tick, Tick duration_ticks,
+                                    Key start_key, Key target_key,
+                                    uint8_t num_voices, uint32_t seed,
+                                    int episode_index, float energy_level,
+                                    CounterpointState& cp_state,
+                                    IRuleEvaluator& cp_rules,
+                                    CollisionResolver& cp_resolver,
+                                    const HarmonicTimeline& timeline);
+
 /// @brief Extract a motif (fragment) from the beginning of the subject.
 ///
 /// Extracts the first N notes from the subject for use as episode material.

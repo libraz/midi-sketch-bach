@@ -10,6 +10,7 @@
 #include "forms/passacaglia.h"
 #include "forms/prelude.h"
 #include "forms/toccata.h"
+#include "forms/trio_sonata.h"
 #include "fugue/fugue_config.h"
 #include "fugue/fugue_generator.h"
 #include "harmony/harmonic_timeline.h"
@@ -582,10 +583,43 @@ GeneratorResult generate(const GeneratorConfig& config) {
     }
 
     case FormType::TrioSonata: {
-      result.success = false;
+      TrioSonataConfig ts_config;
+      ts_config.key = effective_config.key;
+      ts_config.seed = effective_config.seed;
+      // Fast movements use the user BPM; slow movement uses ~55% (Baroque practice).
+      ts_config.bpm_fast = effective_config.bpm;
+      ts_config.bpm_slow = std::max(static_cast<uint16_t>(40),
+          static_cast<uint16_t>(effective_config.bpm * 55 / 100));
+
+      TrioSonataResult ts_result = generateTrioSonata(ts_config);
+      if (!ts_result.success || ts_result.movements.empty()) {
+        result.success = false;
+        result.seed_used = effective_config.seed;
+        result.error_message = "Trio Sonata generation failed";
+        break;
+      }
+
+      // Concatenate 3 movements sequentially: offset and merge tracks.
+      Tick accumulated_ticks = 0;
+      result.tracks = std::move(ts_result.movements[0].tracks);
+      result.tempo_events.push_back({0, ts_result.movements[0].bpm});
+      accumulated_ticks = ts_result.movements[0].total_duration_ticks;
+
+      for (size_t mov = 1; mov < ts_result.movements.size(); ++mov) {
+        auto& movement = ts_result.movements[mov];
+        result.tempo_events.push_back({accumulated_ticks, movement.bpm});
+        offsetTrackNotes(movement.tracks, accumulated_ticks);
+        mergeTracksInPlace(result.tracks, movement.tracks);
+        accumulated_ticks += movement.total_duration_ticks;
+      }
+
+      result.total_duration_ticks = accumulated_ticks;
+      result.timeline = HarmonicTimeline::createStandard(
+          effective_config.key, result.total_duration_ticks, HarmonicResolution::Bar);
+      result.success = true;
       result.seed_used = effective_config.seed;
-      result.error_message = "TrioSonata generation not yet implemented";
-      result.form_description = "Trio Sonata (stub)";
+      result.form_description =
+          "Trio Sonata in " + keySignatureToString(effective_config.key);
       break;
     }
 

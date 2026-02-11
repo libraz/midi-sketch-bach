@@ -18,6 +18,7 @@ describe('BachGenerator - Organ Forms', () => {
   it.each([
     'fugue',
     'prelude_and_fugue',
+    'trio_sonata',
     'chorale_prelude',
     'toccata_and_fugue',
     'passacaglia',

@@ -676,10 +676,12 @@ TEST_F(CollisionResolverTest, TighterRangeRejectsExtremeExcursion) {
   EXPECT_FALSE(resolver.isSafeToPlace(state, rules, 0, 40, 0, 480));
 }
 
-TEST_F(CollisionResolverTest, RangeToleranceWithinSixAllowed) {
-  // Voice 0 range is [48, 84]. 4 semitones below = 44.
-  // With tolerance=6, 4 <= 6 → allowed.
-  EXPECT_TRUE(resolver.isSafeToPlace(state, rules, 0, 44, 0, 480));
+TEST_F(CollisionResolverTest, RangeToleranceWithinThreeAllowed) {
+  // Voice 0 range is [48, 84]. 2 semitones below = 46.
+  // With tolerance=3, 2 <= 3 → allowed.
+  EXPECT_TRUE(resolver.isSafeToPlace(state, rules, 0, 46, 0, 480));
+  // 4 semitones below = 44: 4 > 3 → rejected.
+  EXPECT_FALSE(resolver.isSafeToPlace(state, rules, 0, 44, 0, 480));
 }
 
 // ---------------------------------------------------------------------------
@@ -687,17 +689,17 @@ TEST_F(CollisionResolverTest, RangeToleranceWithinSixAllowed) {
 // ---------------------------------------------------------------------------
 
 TEST_F(CollisionResolverTest, SetRangeToleranceWorks) {
-  // Default tolerance=6 rejects pitch 39 (9 semitones below range low 48).
+  // Default tolerance=3 rejects pitch 39 (9 semitones below range low 48).
   EXPECT_FALSE(resolver.isSafeToPlace(state, rules, 0, 39, 0, 480));
 
   // Widen tolerance to 12 — now 9 <= 12, so it should be allowed.
   resolver.setRangeTolerance(12);
   EXPECT_TRUE(resolver.isSafeToPlace(state, rules, 0, 39, 0, 480));
 
-  // Tighten to 3 — 9 > 3, rejected. Also 4 semitones out (44) rejected.
-  resolver.setRangeTolerance(3);
+  // Tighten to 2 — 9 > 2, rejected. Also 3 semitones out (45) rejected.
+  resolver.setRangeTolerance(2);
   EXPECT_FALSE(resolver.isSafeToPlace(state, rules, 0, 39, 0, 480));
-  EXPECT_FALSE(resolver.isSafeToPlace(state, rules, 0, 44, 0, 480));
+  EXPECT_FALSE(resolver.isSafeToPlace(state, rules, 0, 45, 0, 480));
 }
 
 // ---------------------------------------------------------------------------

@@ -395,16 +395,17 @@ TEST(GeneratorTest, Key_DifferentKeysProduceDifferentPitches) {
 }
 
 // ---------------------------------------------------------------------------
-// Stub forms return failure gracefully
+// Trio Sonata generation
 // ---------------------------------------------------------------------------
 
-TEST(GeneratorTest, TrioSonata_ReturnsStub) {
+TEST(GeneratorTest, TrioSonata_Succeeds) {
   GeneratorConfig config = makeTestConfig();
   config.form = FormType::TrioSonata;
   GeneratorResult result = generate(config);
 
-  EXPECT_FALSE(result.success);
-  EXPECT_FALSE(result.error_message.empty());
+  EXPECT_TRUE(result.success) << result.error_message;
+  EXPECT_GT(result.tracks.size(), 0u);
+  EXPECT_GT(result.total_duration_ticks, 0u);
 }
 
 TEST(GeneratorTest, ChoralePrelude_Succeeds) {
@@ -680,14 +681,21 @@ TEST(GeneratorArticulationTest, ArticulationPreservesNonZeroDurations) {
   }
 }
 
-TEST(GeneratorArticulationTest, FailedGenerationNotArticulated) {
-  // A failed generation should return an empty tracks list and no crash.
+TEST(GeneratorArticulationTest, TrioSonataArticulated) {
+  // Trio Sonata notes should have articulation applied (gate ratio < 1.0).
   GeneratorConfig config = makeTestConfig(42);
-  config.form = FormType::TrioSonata;  // Stub -- always fails.
+  config.form = FormType::TrioSonata;
   GeneratorResult result = generate(config);
 
-  EXPECT_FALSE(result.success);
-  EXPECT_TRUE(result.tracks.empty());
+  EXPECT_TRUE(result.success) << result.error_message;
+  EXPECT_FALSE(result.tracks.empty());
+  for (const auto& track : result.tracks) {
+    for (const auto& note : track.notes) {
+      EXPECT_GT(note.duration, 0u)
+          << "Note at tick " << note.start_tick
+          << " has zero duration after articulation";
+    }
+  }
 }
 
 }  // namespace

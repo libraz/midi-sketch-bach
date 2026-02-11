@@ -32,6 +32,7 @@ describe('Exhaustive Parameter Tests', () => {
     const allForms = [
       'fugue',
       'prelude_and_fugue',
+      'trio_sonata',
       'chorale_prelude',
       'toccata_and_fugue',
       'passacaglia',
@@ -76,6 +77,7 @@ describe('Exhaustive Parameter Tests', () => {
     const forms = [
       'fugue',
       'prelude_and_fugue',
+      'trio_sonata',
       'chorale_prelude',
       'toccata_and_fugue',
       'passacaglia',
@@ -176,6 +178,7 @@ describe('Data Integrity Validation', () => {
     const organForms = [
       'fugue',
       'prelude_and_fugue',
+      'trio_sonata',
       'chorale_prelude',
       'toccata_and_fugue',
       'passacaglia',

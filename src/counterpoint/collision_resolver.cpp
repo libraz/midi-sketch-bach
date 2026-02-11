@@ -11,6 +11,7 @@
 #include "core/pitch_utils.h"
 #include "counterpoint/counterpoint_state.h"
 #include "counterpoint/i_rule_evaluator.h"
+#include "counterpoint/melodic_context.h"
 #include "counterpoint/species_rules.h"
 
 namespace bach {
@@ -194,6 +195,18 @@ bool CollisionResolver::isSafeToPlace(const CounterpointState& state,
     }
   }
 
+  // Melodic leap constraint (Bach's practice):
+  // - Max leap = octave (12 semitones)
+  // - Tritone (6 semitones) forbidden in melodic context
+  const NoteEvent* melodic_prev = state.getLastNote(voice_id);
+  if (melodic_prev) {
+    int leap = std::abs(static_cast<int>(pitch) -
+                        static_cast<int>(melodic_prev->pitch));
+    if (leap > 12) return false;  // > octave forbidden
+    int leap_class = leap % 12;
+    if (leap_class == 6) return false;  // tritone forbidden
+  }
+
   // Check voice crossing.
   if (wouldCrossVoice(state, voice_id, pitch, tick)) {
     return false;
@@ -312,6 +325,29 @@ PlacementResult CollisionResolver::tryStrategy(
 
           // Apply cross-relation penalty.
           penalty += crossRelationPenalty(state, voice_id, cand_pitch, tick);
+
+          // Apply melodic quality penalty via MelodicContext scoring.
+          if (prev_note) {
+            MelodicContext mel_ctx;
+            mel_ctx.prev_pitches[0] = prev_note->pitch;
+            mel_ctx.prev_count = 1;
+            mel_ctx.prev_direction = 0;
+            // Fill second previous pitch if available.
+            const auto& voice_notes = state.getVoiceNotes(voice_id);
+            if (voice_notes.size() >= 2) {
+              auto it = voice_notes.rbegin();
+              ++it;
+              mel_ctx.prev_pitches[1] = it->pitch;
+              mel_ctx.prev_count = 2;
+              int dir = static_cast<int>(prev_note->pitch) -
+                        static_cast<int>(it->pitch);
+              mel_ctx.prev_direction = (dir > 0) ? 1 : (dir < 0) ? -1 : 0;
+            }
+            float melodic_score = MelodicContext::scoreMelodicQuality(
+                mel_ctx, cand_pitch);
+            // Invert: high melodic quality -> low penalty.
+            penalty += (1.0f - melodic_score) * 0.3f;
+          }
 
           // Apply cadence voice-leading bonus.
           if (near_cadence && prev_note) {
