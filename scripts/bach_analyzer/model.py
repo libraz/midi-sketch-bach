@@ -6,6 +6,7 @@ Score/Track/Note dataclasses consumed by all rule checkers.
 
 from __future__ import annotations
 
+from bisect import bisect_right
 from dataclasses import dataclass, field
 from enum import IntEnum
 from typing import Dict, List, Optional
@@ -295,12 +296,17 @@ def sounding_note_at(sorted_notes: List[Note], tick: int) -> Optional[Note]:
     """Return the note sounding at the given tick (considering sustain), or None.
 
     Mirrors C++ soundingPitch() in counterpoint_analyzer.cpp.  Notes must be
-    sorted by start_tick (ascending).
+    sorted by start_tick (ascending).  Uses binary search to skip notes that
+    start after *tick*, then scans backwards over candidates.
     """
-    result: Optional[Note] = None
-    for n in sorted_notes:
+    if not sorted_notes:
+        return None
+    # bisect_right gives the first index where start_tick > tick.
+    # All candidates have index < hi.
+    hi = bisect_right(sorted_notes, tick, key=lambda n: n.start_tick)
+    # Scan backwards: the last note whose duration covers tick wins (C++ semantics).
+    for i in range(hi - 1, -1, -1):
+        n = sorted_notes[i]
         if n.start_tick <= tick < n.end_tick:
-            result = n
-        if n.start_tick > tick:
-            break
-    return result
+            return n
+    return None

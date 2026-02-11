@@ -323,6 +323,7 @@ void placeFreeCounterpoint(VoiceId voice_id,
     note.pitch = pitch;
     note.velocity = 80;
     note.voice = voice_id;
+    note.source = BachNoteSource::FreeCounterpoint;
     voice_notes[voice_id].push_back(note);
 
     current_tick += dur;

@@ -30,6 +30,7 @@ from scripts.bach_analyzer.model import (
     is_dissonant,
     is_perfect_consonance,
     pitch_to_name,
+    sounding_note_at,
 )
 
 
@@ -187,6 +188,40 @@ class TestUtilities(unittest.TestCase):
     def test_pitch_to_name(self):
         self.assertEqual(pitch_to_name(60), "C4")
         self.assertEqual(pitch_to_name(69), "A4")
+
+
+class TestSoundingNoteAt(unittest.TestCase):
+    def _n(self, pitch, tick, dur=480):
+        return Note(pitch=pitch, velocity=80, start_tick=tick, duration=dur, voice="v")
+
+    def test_basic_lookup(self):
+        notes = [self._n(60, 0), self._n(62, 480), self._n(64, 960)]
+        self.assertEqual(sounding_note_at(notes, 0).pitch, 60)
+        self.assertEqual(sounding_note_at(notes, 240).pitch, 60)
+        self.assertEqual(sounding_note_at(notes, 479).pitch, 60)
+        self.assertEqual(sounding_note_at(notes, 480).pitch, 62)
+
+    def test_empty_list(self):
+        self.assertIsNone(sounding_note_at([], 0))
+
+    def test_gap_returns_none(self):
+        notes = [self._n(60, 0, 200), self._n(62, 480)]
+        self.assertIsNone(sounding_note_at(notes, 300))
+
+    def test_zero_duration(self):
+        self.assertIsNone(sounding_note_at([self._n(60, 0, 0)], 0))
+
+    def test_sustained_note(self):
+        notes = [self._n(60, 0, 1920)]
+        self.assertEqual(sounding_note_at(notes, 0).pitch, 60)
+        self.assertEqual(sounding_note_at(notes, 960).pitch, 60)
+        self.assertEqual(sounding_note_at(notes, 1919).pitch, 60)
+        self.assertIsNone(sounding_note_at(notes, 1920))
+
+    def test_overlap_last_wins(self):
+        notes = [self._n(60, 0, 960), self._n(62, 0, 480)]
+        self.assertEqual(sounding_note_at(notes, 0).pitch, 62)
+        self.assertEqual(sounding_note_at(notes, 600).pitch, 60)
 
 
 if __name__ == "__main__":

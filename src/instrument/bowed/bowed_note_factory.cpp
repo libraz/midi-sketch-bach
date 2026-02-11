@@ -27,17 +27,20 @@ NoteEvent BowedNoteFactory::createNote(const BowedNoteOptions& options) const {
                              static_cast<uint8_t>(127));
   }
 
+  note.source = options.source;
   return note;
 }
 
 NoteEvent BowedNoteFactory::createNote(uint8_t pitch, Tick start,
-                                       Tick duration, uint8_t velocity) const {
+                                       Tick duration, uint8_t velocity,
+                                       BachNoteSource source) const {
   BowedNoteOptions options;
   options.pitch = pitch;
   options.tick = start;
   options.duration = duration;
   options.velocity = velocity;
   options.prefer_open_string = true;
+  options.source = source;
   return createNote(options);
 }
 

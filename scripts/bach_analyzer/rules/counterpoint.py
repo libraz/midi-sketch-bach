@@ -6,6 +6,7 @@ Ported from analyzer.py and extended to match C++ counterpoint_analyzer.h semant
 
 from __future__ import annotations
 
+from collections import defaultdict
 from typing import Dict, List, Tuple
 
 from ..model import (
@@ -471,11 +472,17 @@ class VoiceInterleaving:
 
     @staticmethod
     def _bar_averages(notes: List[Note], total_bars: int) -> Dict[int, float]:
-        """Return {bar_number: average_pitch} for bars that contain notes."""
-        from collections import defaultdict
+        """Return {bar_number: average_pitch} for bars that contain notes.
+
+        A note that sustains across multiple bars contributes its pitch to
+        every bar it overlaps.
+        """
         bar_pitches: Dict[int, List[int]] = defaultdict(list)
         for n in notes:
-            bar_pitches[n.bar].append(n.pitch)
+            start_bar = n.start_tick // TICKS_PER_BAR + 1
+            end_bar = (n.end_tick - 1) // TICKS_PER_BAR + 1 if n.duration > 0 else start_bar
+            for b in range(start_bar, end_bar + 1):
+                bar_pitches[b].append(n.pitch)
         return {b: sum(ps) / len(ps) for b, ps in bar_pitches.items()}
 
 

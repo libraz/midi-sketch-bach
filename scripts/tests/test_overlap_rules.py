@@ -57,6 +57,26 @@ class TestVoiceSpacing(unittest.TestCase):
         result = VoiceSpacing().check(_score([soprano, alto]))
         self.assertTrue(result.passed)
 
+    def test_wide_spacing_during_sustain(self):
+        """Sustained note creates spacing violation on later beats."""
+        soprano = _track("soprano", [_n(72, 0, 1920)])  # C5 whole note
+        alto = _track("alto", [_n(64, 0), _n(48, 480, 1440)])  # E4 then C3
+        result = VoiceSpacing().check(_score([soprano, alto]))
+        self.assertFalse(result.passed)
+        # Violations at beats 480, 960, 1440 (24 semitones)
+        self.assertTrue(any(v.tick == 480 for v in result.violations))
+
+    def test_no_violation_one_voice_silent(self):
+        """No spacing violation when one voice has no sounding note."""
+        soprano = _track("soprano", [_n(84, 0, 240)])  # ends before beat 480
+        alto = _track("alto", [_n(48, 480)])
+        result = VoiceSpacing().check(_score([soprano, alto]))
+        self.assertTrue(result.passed)
+
+    def test_single_track(self):
+        result = VoiceSpacing().check(_score([_track("solo", [_n(60, 0)])]))
+        self.assertTrue(result.passed)
+
 
 if __name__ == "__main__":
     unittest.main()

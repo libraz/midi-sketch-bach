@@ -895,6 +895,8 @@ std::string buildEventsJson(const GeneratorResult& result, const GeneratorConfig
       writer.value(note.duration);
       writer.key("voice");
       writer.value(static_cast<int>(note.voice));
+      writer.key("source");
+      writer.value(std::string(bachNoteSourceToString(note.source)));
       writer.endObject();
     }
     writer.endArray();

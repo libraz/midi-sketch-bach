@@ -39,6 +39,16 @@ def _parse_provenance(prov_data: dict) -> Optional[Provenance]:
     )
 
 
+def _parse_flat_source(source_str: Optional[str]) -> Optional[Provenance]:
+    """Parse a flat 'source' field (no nested provenance object)."""
+    if not source_str:
+        return None
+    source = SOURCE_STRING_MAP.get(source_str, NoteSource.UNKNOWN)
+    if source == NoteSource.UNKNOWN and source_str != "unknown":
+        return None
+    return Provenance(source=source)
+
+
 def _parse_note(note_data: dict, voice_name: str, voice_id: int, channel: int) -> Note:
     """Parse a single note dict."""
     return Note(
@@ -46,10 +56,11 @@ def _parse_note(note_data: dict, voice_name: str, voice_id: int, channel: int) -
         velocity=note_data.get("velocity", 80),
         start_tick=note_data.get("start_tick", 0),
         duration=note_data.get("duration", 0),
-        voice=voice_name,
-        voice_id=note_data.get("voice", voice_id) if isinstance(note_data.get("voice"), int) else voice_id,
+        voice=note_data["voice"] if isinstance(note_data.get("voice"), str) else voice_name,
+        voice_id=note_data["voice"] if isinstance(note_data.get("voice"), int) else voice_id,
         channel=channel,
-        provenance=_parse_provenance(note_data.get("provenance")),
+        provenance=_parse_provenance(note_data.get("provenance"))
+        or _parse_flat_source(note_data.get("source")),
     )
 
 

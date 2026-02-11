@@ -28,7 +28,8 @@ class KeyboardNoteFactory {
   /// @param velocity MIDI velocity (0-127).
   /// @return NoteEvent with pitch guaranteed to be within instrument range.
   NoteEvent createNote(uint8_t pitch, Tick start, Tick duration,
-                       uint8_t velocity) const;
+                       uint8_t velocity,
+                       BachNoteSource source = BachNoteSource::Unknown) const;
 
  private:
   const IKeyboardInstrument& instrument_;

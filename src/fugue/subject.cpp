@@ -795,6 +795,7 @@ std::vector<NoteEvent> SubjectGenerator::generateNotes(
     note.pitch = static_cast<uint8_t>(pitch);
     note.velocity = 80;
     note.voice = 0;
+    note.source = BachNoteSource::FugueSubject;
     result.push_back(note);
 
     current_tick += duration;
@@ -835,6 +836,7 @@ std::vector<NoteEvent> SubjectGenerator::generateNotes(
     climax_note.pitch = static_cast<uint8_t>(clamped_climax);
     climax_note.velocity = 80;
     climax_note.voice = 0;
+    climax_note.source = BachNoteSource::FugueSubject;
     result.push_back(climax_note);
 
     // Update climax tracking for Motif B reference.
@@ -939,6 +941,7 @@ std::vector<NoteEvent> SubjectGenerator::generateNotes(
     note.pitch = static_cast<uint8_t>(pitch);
     note.velocity = 80;
     note.voice = 0;
+    note.source = BachNoteSource::FugueSubject;
     result.push_back(note);
 
     current_tick += duration;
@@ -1002,6 +1005,7 @@ std::vector<NoteEvent> SubjectGenerator::generateNotes(
       note.pitch = static_cast<uint8_t>(pitch);
       note.velocity = 80;
       note.voice = 0;
+      note.source = BachNoteSource::FugueSubject;
       result.push_back(note);
 
       current_tick += dur;

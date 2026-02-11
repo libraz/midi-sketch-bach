@@ -12,8 +12,8 @@ FrettedNoteFactory::FrettedNoteFactory(const IFrettedInstrument& instrument)
     : instrument_(instrument) {}
 
 NoteEvent FrettedNoteFactory::createNote(uint8_t pitch, Tick start,
-                                         Tick duration,
-                                         uint8_t velocity) const {
+                                         Tick duration, uint8_t velocity,
+                                         BachNoteSource source) const {
   NoteEvent note;
   note.pitch = std::clamp(pitch, instrument_.getLowestPitch(),
                           instrument_.getHighestPitch());
@@ -21,6 +21,7 @@ NoteEvent FrettedNoteFactory::createNote(uint8_t pitch, Tick start,
   note.duration = duration;
   note.velocity = std::min(velocity, static_cast<uint8_t>(127));
   note.voice = 0;
+  note.source = source;
   return note;
 }
 

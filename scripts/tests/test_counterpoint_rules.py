@@ -8,9 +8,11 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from scripts.bach_analyzer.model import Note, Score, Track
 from scripts.bach_analyzer.rules.base import Category, Severity
+from scripts.bach_analyzer.model import TICKS_PER_BAR
 from scripts.bach_analyzer.rules.counterpoint import (
     AugmentedLeap,
     CrossRelation,
+    VoiceInterleaving,
     HiddenPerfect,
     ParallelPerfect,
     VoiceCrossing,
@@ -139,10 +141,79 @@ class TestAugmentedLeap(unittest.TestCase):
         self.assertTrue(result.passed)
 
 
+class TestVoiceCrossingSustained(unittest.TestCase):
+    def test_crossing_during_sustain(self):
+        """Upper voice sustained low while lower voice starts high."""
+        soprano = _track("soprano", [_n(72, 0, 1920)])  # C5 whole note
+        alto = _track("alto", [_n(60, 0), _n(74, 480)])  # C4 then D5
+        result = VoiceCrossing().check(_score([soprano, alto]))
+        self.assertFalse(result.passed)
+        # Crossing at beat 480 (soprano 72 < alto 74)
+        self.assertTrue(any(v.tick == 480 for v in result.violations))
+
+    def test_no_crossing_with_gap(self):
+        """No note sounding in one voice -> no crossing."""
+        soprano = _track("soprano", [_n(58, 0, 240)])  # ends before beat 480
+        alto = _track("alto", [_n(65, 480)])
+        result = VoiceCrossing().check(_score([soprano, alto]))
+        self.assertTrue(result.passed)
+
+    def test_temporary_crossing_skipped(self):
+        """Crossing that resolves in 1 beat is skipped (lookahead)."""
+        soprano = _track("soprano", [_n(58, 0), _n(72, 480)])
+        alto = _track("alto", [_n(65, 0), _n(60, 480)])
+        result = VoiceCrossing().check(_score([soprano, alto]))
+        self.assertTrue(result.passed)
+
+    def test_single_track(self):
+        result = VoiceCrossing().check(_score([_track("solo", [_n(60, 0)])]))
+        self.assertTrue(result.passed)
+
+
+class TestVoiceInterleaving(unittest.TestCase):
+    def test_inverted_3_bars(self):
+        """3 consecutive bars of register inversion -> violation."""
+        TPB = TICKS_PER_BAR
+        s = _track("soprano", [_n(48, i * TPB, TPB) for i in range(3)])
+        a = _track("alto", [_n(72, i * TPB, TPB) for i in range(3)])
+        result = VoiceInterleaving(min_bars=3).check(_score([s, a]))
+        self.assertFalse(result.passed)
+        self.assertEqual(len(result.violations), 1)
+
+    def test_2_bars_not_flagged(self):
+        """2 bars of inversion (< min_bars=3) -> no violation."""
+        TPB = TICKS_PER_BAR
+        s = _track("soprano", [_n(48, i * TPB, TPB) for i in range(2)])
+        a = _track("alto", [_n(72, i * TPB, TPB) for i in range(2)])
+        result = VoiceInterleaving(min_bars=3).check(_score([s, a]))
+        self.assertTrue(result.passed)
+
+    def test_normal_order_ok(self):
+        """Soprano higher than alto -> no violation."""
+        TPB = TICKS_PER_BAR
+        s = _track("soprano", [_n(72, i * TPB, TPB) for i in range(5)])
+        a = _track("alto", [_n(48, i * TPB, TPB) for i in range(5)])
+        result = VoiceInterleaving().check(_score([s, a]))
+        self.assertTrue(result.passed)
+
+    def test_sustained_note_spans_bars(self):
+        """A sustained note spanning 3 bars should be counted in each bar."""
+        TPB = TICKS_PER_BAR
+        s = _track("soprano", [_n(48, 0, 3 * TPB)])  # 3 bars sustained
+        a = _track("alto", [_n(72, i * TPB, TPB) for i in range(3)])
+        result = VoiceInterleaving(min_bars=3).check(_score([s, a]))
+        self.assertFalse(result.passed)
+        self.assertEqual(len(result.violations), 1)
+
+    def test_single_track(self):
+        result = VoiceInterleaving().check(_score([_track("solo", [_n(60, 0)])]))
+        self.assertTrue(result.passed)
+
+
 class TestRuleProtocol(unittest.TestCase):
     def test_all_rules_have_name_and_category(self):
         rules = [ParallelPerfect(), HiddenPerfect(), VoiceCrossing(),
-                 CrossRelation(), AugmentedLeap()]
+                 CrossRelation(), AugmentedLeap(), VoiceInterleaving()]
         for rule in rules:
             self.assertIsInstance(rule.name, str)
             self.assertIsInstance(rule.category, Category)
