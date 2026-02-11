@@ -939,6 +939,130 @@ std::vector<NoteEvent> generateThematicBass(Tick phrase_start, Tick phrase_end,
 }
 
 // ---------------------------------------------------------------------------
+// Step 5b: Cadential suspension insertion
+// ---------------------------------------------------------------------------
+
+/// @brief Attempt to insert a cadential suspension before a cadence point.
+///
+/// Tries Sus4_3 first, then Sus7_6 as fallback. Each candidate is checked for
+/// melodic legality (resolution within 4 semitones of original) and voice
+/// crossing. Returns true if a suspension was inserted.
+///
+/// @param tracks All 3 tracks (modified in-place).
+/// @param cadence_tick Tick position of the cadence.
+/// @param leader_voice Voice index for the suspension (0=RH, 1=LH).
+/// @param key Current key.
+/// @param scale Scale type.
+/// @return True if suspension was inserted.
+bool insertCadentialSuspension(std::vector<Track>& tracks, Tick cadence_tick,
+                                uint8_t leader_voice, Key key, ScaleType scale) {
+  if (cadence_tick < kTicksPerBar) return false;
+  Tick search_start = cadence_tick - kTicksPerBar;
+
+  auto& notes = tracks[leader_voice].notes;
+  if (notes.empty()) return false;
+
+  // Find the last note in the search window.
+  int target_idx = -1;
+  for (int i = static_cast<int>(notes.size()) - 1; i >= 0; --i) {
+    if (notes[i].start_tick >= search_start && notes[i].start_tick < cadence_tick) {
+      target_idx = i;
+      break;
+    }
+  }
+  if (target_idx < 0) return false;
+
+  uint8_t orig_pitch = notes[target_idx].pitch;
+  uint8_t range_low = (leader_voice == 0) ? kRhLow : kLhLow;
+  uint8_t range_high = (leader_voice == 0) ? kRhHigh : kLhHigh;
+
+  // Find the other upper voice pitch at the same tick for crossing check.
+  uint8_t other_voice = (leader_voice == 0) ? 1 : 0;
+  uint8_t other_pitch = 0;
+  bool has_other = false;
+  for (const auto& n : tracks[other_voice].notes) {
+    if (n.start_tick <= notes[target_idx].start_tick &&
+        n.start_tick + n.duration > notes[target_idx].start_tick) {
+      other_pitch = n.pitch;
+      has_other = true;
+      break;
+    }
+  }
+
+  // Suspension candidates: Sus4_3 (up 1 degree, resolve down), Sus7_6 (up 4 degrees, resolve down).
+  struct SusCand {
+    int sus_degrees;   // Scale degrees above original for suspension.
+    int res_degrees;   // Scale degrees for resolution (negative = down).
+  };
+  static constexpr SusCand kCandidates[] = {{1, -1}, {4, -1}};
+
+  int abs_deg = scale_util::pitchToAbsoluteDegree(orig_pitch, key, scale);
+
+  for (const auto& cand : kCandidates) {
+    uint8_t sus_pitch = scale_util::absoluteDegreeToPitch(abs_deg + cand.sus_degrees, key, scale);
+    uint8_t res_pitch = scale_util::absoluteDegreeToPitch(abs_deg + cand.sus_degrees + cand.res_degrees, key, scale);
+
+    // Melodic legality: resolution within 4 semitones of original.
+    if (std::abs(static_cast<int>(res_pitch) - static_cast<int>(orig_pitch)) > 4) continue;
+
+    // Range check.
+    if (sus_pitch < range_low || sus_pitch > range_high) continue;
+    if (res_pitch < range_low || res_pitch > range_high) continue;
+
+    // Voice crossing check.
+    if (has_other) {
+      if (leader_voice == 0 && sus_pitch < other_pitch) continue;  // RH below LH.
+      if (leader_voice == 1 && sus_pitch > other_pitch) continue;  // LH above RH.
+    }
+
+    // Apply: extend note duration to cadence_tick, set pitch to sus_pitch.
+    notes[target_idx].pitch = sus_pitch;
+    Tick new_dur = cadence_tick - notes[target_idx].start_tick;
+    if (new_dur > 0) notes[target_idx].duration = new_dur;
+
+    // Insert resolution note at cadence_tick.
+    NoteEvent res_note;
+    res_note.start_tick = cadence_tick;
+    res_note.duration = kQuarterNote;
+    res_note.pitch = res_pitch;
+    res_note.velocity = kOrganVelocity;
+    res_note.voice = leader_voice;
+    res_note.source = BachNoteSource::FreeCounterpoint;
+    notes.push_back(res_note);
+    return true;
+  }
+
+  return false;  // No candidate succeeded — safe no-op.
+}
+
+// ---------------------------------------------------------------------------
+// Step 5c: Breathing rest insertion
+// ---------------------------------------------------------------------------
+
+/// @brief Insert breathing rests at phrase boundaries for upper voices.
+///
+/// Truncates upper voice notes (voice 0 and 1) that extend into the last
+/// sixteenth note before each phrase boundary. Pedal (voice 2) is exempt
+/// (organ pedal sustains across phrase boundaries per BWV 525-530 practice).
+void insertBreathingRests(std::vector<Track>& tracks, Tick num_phrases, Tick duration) {
+  for (Tick p = 1; p < num_phrases; ++p) {
+    Tick boundary = p * kPhraseTicks;
+    if (boundary > duration) break;
+    Tick breath_start = boundary - kSixteenthNote;
+
+    // Only upper voices (tracks 0 and 1).
+    for (size_t trk = 0; trk < 2 && trk < tracks.size(); ++trk) {
+      for (auto& note : tracks[trk].notes) {
+        if (note.start_tick < breath_start &&
+            note.start_tick + note.duration > breath_start) {
+          note.duration = breath_start - note.start_tick;
+        }
+      }
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Step 6: Invertible counterpoint
 // ---------------------------------------------------------------------------
 
@@ -1112,17 +1236,35 @@ TrioSonataMovement generateMovement(const KeySignature& key_sig, Tick num_bars,
   }
 
   // 5. Sort notes within each track.
-  for (auto& track : tracks) {
-    std::sort(track.notes.begin(), track.notes.end(),
-              [](const NoteEvent& lhs, const NoteEvent& rhs) {
-                if (lhs.start_tick != rhs.start_tick) {
-                  return lhs.start_tick < rhs.start_tick;
-                }
-                return lhs.pitch < rhs.pitch;
-              });
+  auto sortTracks = [](std::vector<Track>& trks) {
+    for (auto& track : trks) {
+      std::sort(track.notes.begin(), track.notes.end(),
+                [](const NoteEvent& lhs, const NoteEvent& rhs) {
+                  if (lhs.start_tick != rhs.start_tick) {
+                    return lhs.start_tick < rhs.start_tick;
+                  }
+                  return lhs.pitch < rhs.pitch;
+                });
+    }
+  };
+  sortTracks(tracks);
+
+  // 6. Cadential suspensions at phrase boundaries.
+  for (Tick p = 1; p <= num_phrases; ++p) {
+    Tick cadence_tick = p * kPhraseTicks;
+    if (cadence_tick > duration) cadence_tick = duration;
+    // Alternate leader voice for suspension placement.
+    uint8_t sus_voice = ((p - 1) % 2 == 0) ? 0 : 1;
+    insertCadentialSuspension(tracks, cadence_tick, sus_voice, key_sig.tonic, scale);
   }
 
-  // 6. Post-process: eliminate consecutive repeated pitches.
+  // 7. Breathing rests at phrase boundaries (upper voices only, pedal exempt).
+  insertBreathingRests(tracks, num_phrases, duration);
+
+  // 8. Re-sort after suspension and breathing modifications.
+  sortTracks(tracks);
+
+  // 9. Post-process: eliminate consecutive repeated pitches.
   // When a note has the same pitch as the previous note, shift it by 1 or 2
   // scale degrees. Direction chosen to move toward the range center.
   for (auto& track : tracks) {

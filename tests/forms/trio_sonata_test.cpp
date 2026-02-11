@@ -647,6 +647,74 @@ TEST(TrioSonataTest, HarmonicDiversity) {
 }
 
 // ---------------------------------------------------------------------------
+// Cadential suspension and breathing tests
+// ---------------------------------------------------------------------------
+
+TEST(TrioSonataTest, BreathingRests_NotesDontCrossBoundaries) {
+  // Upper voice notes should not cross phrase boundaries (except pedal).
+  for (uint32_t seed : {42u, 99u}) {
+    TrioSonataConfig config = makeTestConfig(seed);
+    TrioSonataResult result = generateTrioSonata(config);
+    ASSERT_TRUE(result.success);
+
+    for (size_t mov = 0; mov < result.movements.size(); ++mov) {
+      Tick total_dur = result.movements[mov].total_duration_ticks;
+      Tick num_phrases = total_dur / (4 * 1920);  // 4 bars per phrase.
+
+      for (size_t trk = 0; trk < 2; ++trk) {  // Only upper voices.
+        for (const auto& note : result.movements[mov].tracks[trk].notes) {
+          Tick note_end = note.start_tick + note.duration;
+          for (Tick p = 1; p < num_phrases; ++p) {
+            Tick boundary = p * 4 * 1920;
+            Tick breath_start = boundary - 120;  // kSixteenthNote = 120.
+            // Note should not extend past breath_start into the boundary.
+            if (note.start_tick < breath_start && note_end > breath_start) {
+              EXPECT_LE(note_end, boundary)
+                  << "Seed " << seed << " mov " << mov << " track " << trk
+                  << " note at " << note.start_tick << " crosses boundary " << boundary;
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+TEST(TrioSonataTest, CadentialSuspension_PresenceCheck) {
+  // At least one movement should have notes near cadence points
+  // (verifies suspension insertion doesn't break note presence).
+  TrioSonataConfig config = makeTestConfig(42);
+  TrioSonataResult result = generateTrioSonata(config);
+  ASSERT_TRUE(result.success);
+
+  // Check that notes exist near the end of each phrase in upper voices.
+  for (size_t mov = 0; mov < result.movements.size(); ++mov) {
+    Tick total_dur = result.movements[mov].total_duration_ticks;
+    Tick num_phrases = total_dur / (4 * 1920);
+
+    for (Tick p = 1; p <= num_phrases; ++p) {
+      Tick cadence = p * 4 * 1920;
+      if (cadence > total_dur) cadence = total_dur;
+      Tick search_start = (cadence > 1920) ? cadence - 1920 : 0;
+
+      bool found = false;
+      for (size_t trk = 0; trk < 2; ++trk) {
+        for (const auto& note : result.movements[mov].tracks[trk].notes) {
+          if (note.start_tick >= search_start && note.start_tick < cadence) {
+            found = true;
+            break;
+          }
+        }
+        if (found) break;
+      }
+      EXPECT_TRUE(found)
+          << "Mov " << mov << " phrase " << p
+          << ": no upper voice notes near cadence at " << cadence;
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Fortspinnung tests
 // ---------------------------------------------------------------------------
 
