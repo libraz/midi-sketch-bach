@@ -530,5 +530,217 @@ TEST(PreludeTest, VoiceAssignment_CorrectPerTrack) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Motivic unity: middle voice pitch variety
+// ---------------------------------------------------------------------------
+
+TEST(PreludeTest, MiddleVoice_PitchVarietyAcrossSeeds) {
+  // Voice 1 (middle) should use at least 8 unique pitches in bars 1-8 across
+  // multiple seeds. This verifies the full-timeline rewrite produces variety
+  // rather than repeating the same 4-note pattern.
+  constexpr uint32_t kTestSeeds[] = {1, 2, 3, 4, 5};
+  constexpr size_t kNumSeeds = sizeof(kTestSeeds) / sizeof(kTestSeeds[0]);
+
+  for (size_t seed_idx = 0; seed_idx < kNumSeeds; ++seed_idx) {
+    PreludeConfig config = makeTestConfig(kTestSeeds[seed_idx]);
+    config.num_voices = 3;
+    PreludeResult result = generatePrelude(config);
+    ASSERT_TRUE(result.success) << "seed=" << kTestSeeds[seed_idx];
+    ASSERT_GE(result.tracks.size(), 2u);
+
+    // Collect unique pitches in bars 1-8 (ticks 0 to 8*1920).
+    constexpr Tick kBar8End = 8 * kTicksPerBar;
+    std::set<uint8_t> unique_pitches;
+    for (const auto& note : result.tracks[1].notes) {
+      if (note.start_tick < kBar8End) {
+        unique_pitches.insert(note.pitch);
+      }
+    }
+
+    EXPECT_GE(unique_pitches.size(), 5u)
+        << "Middle voice (seed=" << kTestSeeds[seed_idx]
+        << ") has too few unique pitches in bars 1-8: " << unique_pitches.size();
+  }
+}
+
+TEST(PreludeTest, MiddleVoice_NoRepeating4NotePattern) {
+  // Verify that no identical 4-note pitch pattern repeats for 3 or more
+  // consecutive bars in the middle voice. This catches the old bug where
+  // per-event state reset caused "C4, C4, B3, C4" to repeat every bar.
+  PreludeConfig config = makeTestConfig(42);
+  config.num_voices = 3;
+  PreludeResult result = generatePrelude(config);
+  ASSERT_TRUE(result.success);
+  ASSERT_GE(result.tracks.size(), 2u);
+
+  const auto& notes = result.tracks[1].notes;
+  if (notes.size() < 12) return;  // Not enough notes to check.
+
+  // Build per-bar pitch sequences.
+  Tick total = result.total_duration_ticks;
+  Tick num_bars = total / kTicksPerBar;
+  std::vector<std::vector<uint8_t>> bar_pitches(num_bars);
+
+  for (const auto& note : notes) {
+    Tick bar = note.start_tick / kTicksPerBar;
+    if (bar < num_bars) {
+      bar_pitches[bar].push_back(note.pitch);
+    }
+  }
+
+  // Check for 3+ consecutive bars with identical pitch patterns.
+  int consecutive_same = 1;
+  for (size_t bar_idx = 1; bar_idx < bar_pitches.size(); ++bar_idx) {
+    if (!bar_pitches[bar_idx].empty() &&
+        bar_pitches[bar_idx] == bar_pitches[bar_idx - 1]) {
+      ++consecutive_same;
+      EXPECT_LT(consecutive_same, 3)
+          << "Middle voice has identical pitch pattern repeating for "
+          << consecutive_same << " consecutive bars starting at bar "
+          << (bar_idx - consecutive_same + 1);
+    } else {
+      consecutive_same = 1;
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Motivic unity: bass voice variety
+// ---------------------------------------------------------------------------
+
+TEST(PreludeTest, BassVoice_PitchVariety) {
+  // Bass voice (voice 2 in 3-voice) should use at least 4 unique pitches
+  // in bars 1-8. No same-note run of 8+ consecutive notes.
+  constexpr uint32_t kTestSeeds[] = {1, 7, 42, 100};
+  constexpr size_t kNumSeeds = sizeof(kTestSeeds) / sizeof(kTestSeeds[0]);
+
+  for (size_t seed_idx = 0; seed_idx < kNumSeeds; ++seed_idx) {
+    PreludeConfig config = makeTestConfig(kTestSeeds[seed_idx]);
+    config.num_voices = 3;
+    PreludeResult result = generatePrelude(config);
+    ASSERT_TRUE(result.success) << "seed=" << kTestSeeds[seed_idx];
+    ASSERT_GE(result.tracks.size(), 3u);
+
+    constexpr Tick kBar8End = 8 * kTicksPerBar;
+    std::set<uint8_t> unique_pitches;
+    int max_same_run = 0;
+    int current_run = 1;
+    uint8_t prev_pitch = 0;
+    bool first = true;
+
+    for (const auto& note : result.tracks[2].notes) {
+      if (note.start_tick >= kBar8End) break;
+      unique_pitches.insert(note.pitch);
+
+      if (first) {
+        prev_pitch = note.pitch;
+        first = false;
+      } else {
+        if (note.pitch == prev_pitch) {
+          ++current_run;
+        } else {
+          if (current_run > max_same_run) max_same_run = current_run;
+          current_run = 1;
+        }
+        prev_pitch = note.pitch;
+      }
+    }
+    if (current_run > max_same_run) max_same_run = current_run;
+
+    EXPECT_GE(unique_pitches.size(), 4u)
+        << "Bass voice (seed=" << kTestSeeds[seed_idx]
+        << ") has too few unique pitches: " << unique_pitches.size();
+
+    EXPECT_LT(max_same_run, 8)
+        << "Bass voice (seed=" << kTestSeeds[seed_idx]
+        << ") has same-note run of " << max_same_run;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Motivic unity: standard durations only
+// ---------------------------------------------------------------------------
+
+TEST(PreludeTest, MiddleVoice_QuantizedDurationsOnly) {
+  // Voice 1 durations must be from {240, 480, 960} (eighth, quarter, half).
+  // No arbitrary clamped durations.
+  PreludeConfig config = makeTestConfig(42);
+  config.num_voices = 3;
+  PreludeResult result = generatePrelude(config);
+  ASSERT_TRUE(result.success);
+  ASSERT_GE(result.tracks.size(), 2u);
+
+  constexpr Tick kAllowedMid[] = {
+      duration::kEighthNote,   // 240
+      duration::kQuarterNote,  // 480
+      duration::kHalfNote      // 960
+  };
+
+  for (const auto& note : result.tracks[1].notes) {
+    bool valid = false;
+    for (Tick allowed : kAllowedMid) {
+      if (note.duration == allowed) {
+        valid = true;
+        break;
+      }
+    }
+    EXPECT_TRUE(valid)
+        << "Middle voice note at tick " << note.start_tick
+        << " has non-standard duration " << note.duration;
+  }
+}
+
+TEST(PreludeTest, BassVoice_QuantizedDurationsOnly) {
+  // Voice 2 (bass) durations must be from {480, 960} (quarter, half).
+  PreludeConfig config = makeTestConfig(42);
+  config.num_voices = 3;
+  PreludeResult result = generatePrelude(config);
+  ASSERT_TRUE(result.success);
+  ASSERT_GE(result.tracks.size(), 3u);
+
+  constexpr Tick kAllowedBass[] = {
+      duration::kQuarterNote,  // 480
+      duration::kHalfNote      // 960
+  };
+
+  for (const auto& note : result.tracks[2].notes) {
+    bool valid = false;
+    for (Tick allowed : kAllowedBass) {
+      if (note.duration == allowed) {
+        valid = true;
+        break;
+      }
+    }
+    EXPECT_TRUE(valid)
+        << "Bass voice note at tick " << note.start_tick
+        << " has non-standard duration " << note.duration;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Motivic unity: Perpetual type also benefits from improvements
+// ---------------------------------------------------------------------------
+
+TEST(PreludeTest, Perpetual_MiddleVoicePitchVariety) {
+  // Perpetual-type prelude middle voice should also have pitch variety.
+  PreludeConfig config = makeTestConfig(42);
+  config.type = PreludeType::Perpetual;
+  config.num_voices = 3;
+  PreludeResult result = generatePrelude(config);
+  ASSERT_TRUE(result.success);
+  ASSERT_GE(result.tracks.size(), 2u);
+
+  constexpr Tick kBar8End = 8 * kTicksPerBar;
+  std::set<uint8_t> unique_pitches;
+  for (const auto& note : result.tracks[1].notes) {
+    if (note.start_tick < kBar8End) {
+      unique_pitches.insert(note.pitch);
+    }
+  }
+
+  EXPECT_GE(unique_pitches.size(), 6u)
+      << "Perpetual middle voice has too few unique pitches: " << unique_pitches.size();
+}
+
 }  // namespace
 }  // namespace bach

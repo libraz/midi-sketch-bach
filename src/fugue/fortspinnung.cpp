@@ -11,6 +11,7 @@
 #include "core/rng_util.h"
 #include "fugue/motif_pool.h"
 #include "transform/motif_transform.h"
+#include "fugue/episode.h"
 #include "transform/sequence.h"
 
 namespace bach {
@@ -229,6 +230,21 @@ std::vector<NoteEvent> generateFortspinnung(const MotifPool& pool,
         break;
     }
 
+    // Apply dotted rhythm variation (30% probability, not for Severe).
+    // Alternates long-short pairs within the fragment for rhythmic interest.
+    if (character != SubjectCharacter::Severe &&
+        rng::rollProbability(rng, 0.30f) && fragment.size() >= 2) {
+      for (size_t fi = 0; fi + 1 < fragment.size(); fi += 2) {
+        Tick combined = fragment[fi].duration + fragment[fi + 1].duration;
+        // Dotted: first note gets 75%, second gets 25%.
+        fragment[fi].duration = (combined * 3) / 4;
+        fragment[fi + 1].duration = combined / 4;
+        // Adjust start tick of the short note.
+        fragment[fi + 1].start_tick =
+            fragment[fi].start_tick + fragment[fi].duration;
+      }
+    }
+
     // Apply sequential transposition based on how many fragments placed so far.
     if (current_tick > 0) {
       int repetition_count = static_cast<int>(current_tick / std::max(motifDuration(fragment),
@@ -306,6 +322,94 @@ std::vector<NoteEvent> generateFortspinnung(const MotifPool& pool,
           }
           result.push_back(note);
         }
+      }
+    }
+  }
+
+  // --- Voice 2: Bass fragments + anchor notes (if 3+ voices) ---
+  // Strategy: Extract tail motif head (2-3 notes) and augment for bass fragments.
+  // Fill gaps between fragments with chord root / 5th anchor notes.
+  // Probabilistic emission (70-85%) prevents over-dense bass that causes parallels.
+  if (num_voices >= 3 && !result.empty()) {
+    std::vector<NoteEvent> voice0_notes;
+    for (const auto& note : result) {
+      if (note.voice == 0) {
+        voice0_notes.push_back(note);
+      }
+    }
+
+    if (!voice0_notes.empty()) {
+      std::mt19937 bass_rng(seed ^ 0xBA550002u);
+      // Emission probability: 70-85% per-seed variation.
+      float emit_prob = rng::rollFloat(bass_rng, 0.70f, 0.85f);
+
+      // Extract tail motif (last 3 notes of voice 0) and augment (2x duration).
+      auto tail = extractTailMotif(voice0_notes, 3);
+      // Only use 2-3 notes from the tail for the bass fragment.
+      if (tail.size() > 3) {
+        tail.resize(3);
+      }
+      auto bass_fragment = augmentMelody(tail, 0, 2);
+
+      // Transpose bass fragment down by an octave for bass register.
+      for (auto& note : bass_fragment) {
+        int bass_pitch = static_cast<int>(note.pitch) - 12;
+        if (bass_pitch < 36) bass_pitch += 12;  // Don't go below C2.
+        if (bass_pitch > 60) bass_pitch -= 12;  // Keep in bass range.
+        note.pitch = static_cast<uint8_t>(std::clamp(bass_pitch, 36, 60));
+      }
+
+      Tick bass_tick = start_tick;
+      Tick frag_dur = motifDuration(bass_fragment);
+      if (frag_dur == 0) frag_dur = kTicksPerBeat * 2;
+
+      // Alternate between bass fragment and anchor notes across the episode.
+      bool use_fragment = true;
+      while (bass_tick < start_tick + duration_ticks) {
+        if (!rng::rollProbability(bass_rng, emit_prob)) {
+          // Skip this segment (rest).
+          bass_tick += use_fragment ? frag_dur : kTicksPerBar;
+          use_fragment = !use_fragment;
+          continue;
+        }
+
+        if (use_fragment && !bass_fragment.empty()) {
+          // Place augmented tail fragment.
+          for (const auto& frag_note : bass_fragment) {
+            NoteEvent evt = frag_note;
+            evt.start_tick = frag_note.start_tick + bass_tick;
+            evt.voice = 2;
+            evt.source = BachNoteSource::EpisodeMaterial;
+            if (evt.start_tick >= start_tick + duration_ticks) break;
+            Tick remaining = start_tick + duration_ticks - evt.start_tick;
+            if (evt.duration > remaining) evt.duration = remaining;
+            result.push_back(evt);
+          }
+          bass_tick += frag_dur;
+        } else {
+          // Anchor note: chord root (tonic) held for one bar.
+          // Use the first note of voice 0 as reference for root pitch.
+          uint8_t anchor_pitch = voice0_notes[0].pitch;
+          int bass_anchor = static_cast<int>(anchor_pitch) - 12;
+          if (bass_anchor < 36) bass_anchor += 12;
+          if (bass_anchor > 60) bass_anchor -= 12;
+          bass_anchor = std::clamp(bass_anchor, 36, 60);
+
+          Tick anchor_dur = std::min(kTicksPerBar,
+                                     start_tick + duration_ticks - bass_tick);
+          if (anchor_dur > 0) {
+            NoteEvent anchor;
+            anchor.start_tick = bass_tick;
+            anchor.duration = anchor_dur;
+            anchor.pitch = static_cast<uint8_t>(bass_anchor);
+            anchor.velocity = 80;
+            anchor.voice = 2;
+            anchor.source = BachNoteSource::EpisodeMaterial;
+            result.push_back(anchor);
+          }
+          bass_tick += kTicksPerBar;
+        }
+        use_fragment = !use_fragment;
       }
     }
   }

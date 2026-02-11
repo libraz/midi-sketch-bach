@@ -38,6 +38,14 @@ bool isPerfectInterval(int semitones);
 /// Use classifyInterval() from pitch_utils.h for full counterpoint classification.
 bool isConsonance(int semitones);
 
+/// @brief Check whether a simple interval is a strict perfect consonance.
+/// @param semitones Interval size in semitones (compound intervals are reduced).
+/// @return True for unison (0), perfect 5th (7), and octave (12 -> 0).
+///
+/// Unlike isPerfectInterval(), this excludes the perfect 4th, which is
+/// dissonant in two-voice counterpoint contexts.
+bool isPerfectConsonance(int semitones);
+
 /// @brief Calculate the inversion of a simple interval.
 /// @param semitones Simple interval (0-12). Compound intervals are reduced first.
 /// @return Inverted interval: e.g. M3 (4) -> m6 (8), P5 (7) -> P4 (5).

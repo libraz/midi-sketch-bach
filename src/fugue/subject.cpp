@@ -193,17 +193,21 @@ CharacterParams getCharacterParams(SubjectCharacter character, std::mt19937& rng
 /// @return Adjusted pitch within the leap limit.
 int clampLeap(int pitch, int prev_pitch, SubjectCharacter character,
               Key key, ScaleType scale, int pitch_floor, int pitch_ceil,
-              std::mt19937& gen) {
+              std::mt19937& gen, int* large_leap_count = nullptr) {
   if (prev_pitch < 0) return pitch;
   int interval = std::abs(pitch - prev_pitch);
   int max_leap = maxLeapForCharacter(character);
   if (interval <= max_leap) return pitch;
 
-  // Playful/Restless: allow 8-9st (6th) 20% of the time.
+  // Playful/Restless: allow 8-9st (6th) but only once per subject.
   if ((character == SubjectCharacter::Playful ||
        character == SubjectCharacter::Restless) &&
-      interval <= 9 && rng::rollProbability(gen, 0.20f)) {
-    return pitch;
+      interval <= 9) {
+    int current_count = large_leap_count ? *large_leap_count : 0;
+    if (current_count < 1 && rng::rollProbability(gen, 0.20f)) {
+      if (large_leap_count) ++(*large_leap_count);
+      return pitch;
+    }
   }
 
   int direction = (pitch > prev_pitch) ? 1 : -1;
@@ -215,9 +219,11 @@ int clampLeap(int pitch, int prev_pitch, SubjectCharacter character,
   int best = (std::abs(c1 - pitch) <= std::abs(c2 - pitch)) ? c1 : c2;
   best = snapToScale(best, key, scale, pitch_floor, pitch_ceil);
 
-  // Final check: if still exceeding, force clamp.
-  if (std::abs(best - prev_pitch) > max_leap) {
-    best = snapToScale(prev_pitch + direction * max_leap,
+  // Final check: if snapToScale pushed the pitch beyond max_leap,
+  // progressively reduce until a scale tone fits within the limit.
+  for (int attempt = max_leap; attempt >= 1; --attempt) {
+    if (std::abs(best - prev_pitch) <= max_leap) break;
+    best = snapToScale(prev_pitch + direction * attempt,
                        key, scale, pitch_floor, pitch_ceil);
   }
   return best;
@@ -695,6 +701,7 @@ std::vector<NoteEvent> SubjectGenerator::generateNotes(
 
   bool needs_compensation = false;
   int compensation_direction = 0;
+  int large_leap_count = 0;  // Track large leaps (>P5) across entire subject.
 
   for (size_t idx = 0;
        idx < motif_a.degree_offsets.size() && current_tick < climax_tick; ++idx) {
@@ -749,7 +756,7 @@ std::vector<NoteEvent> SubjectGenerator::generateNotes(
 
     // Clamp leap to character-specific maximum.
     pitch = clampLeap(pitch, prev_pitch, character, key, scale,
-                      pitch_floor, climax_pitch, gen);
+                      pitch_floor, climax_pitch, gen, &large_leap_count);
 
     // Set up compensation for next note if this was a large leap (>=5st).
     if (prev_pitch >= 0 && std::abs(pitch - prev_pitch) >= 5) {
@@ -813,13 +820,28 @@ std::vector<NoteEvent> SubjectGenerator::generateNotes(
       climax_dur = total_ticks - current_tick;
     }
 
+    // Clamp the climax leap to the character's maximum to prevent large
+    // jumps at the Motif A → climax transition.
+    int clamped_climax = climax_pitch;
+    if (!result.empty()) {
+      int prev = static_cast<int>(result.back().pitch);
+      clamped_climax = clampLeap(climax_pitch, prev, character, key, scale,
+                                 pitch_floor, pitch_ceil, gen, &large_leap_count);
+    }
+
     NoteEvent climax_note;
     climax_note.start_tick = current_tick;
     climax_note.duration = climax_dur;
-    climax_note.pitch = static_cast<uint8_t>(climax_pitch);
+    climax_note.pitch = static_cast<uint8_t>(clamped_climax);
     climax_note.velocity = 80;
     climax_note.voice = 0;
     result.push_back(climax_note);
+
+    // Update climax tracking for Motif B reference.
+    climax_pitch = clamped_climax;
+    climax_abs_degree = scale_util::pitchToAbsoluteDegree(
+        static_cast<uint8_t>(std::max(0, std::min(127, clamped_climax))),
+        key, scale);
 
     current_tick += climax_dur;
   }
@@ -887,7 +909,7 @@ std::vector<NoteEvent> SubjectGenerator::generateNotes(
 
     // Clamp leap to character-specific maximum.
     pitch = clampLeap(pitch, prev_pitch, character, key, scale,
-                      pitch_floor, climax_pitch, gen);
+                      pitch_floor, climax_pitch, gen, &large_leap_count);
 
     // Set up compensation for next note if this was a large leap (>=5st).
     if (prev_pitch >= 0 && std::abs(pitch - prev_pitch) >= 5) {
@@ -970,6 +992,10 @@ std::vector<NoteEvent> SubjectGenerator::generateNotes(
       int prev_pitch = result.empty() ? -1 : static_cast<int>(result.back().pitch);
       pitch = avoidUnison(pitch, prev_pitch, key, scale, pitch_floor, climax_pitch);
 
+      // Clamp cadential leaps to the character's maximum.
+      pitch = clampLeap(pitch, prev_pitch, character, key, scale,
+                        pitch_floor, climax_pitch, gen, &large_leap_count);
+
       NoteEvent note;
       note.start_tick = current_tick;
       note.duration = dur;
@@ -1033,6 +1059,35 @@ std::vector<NoteEvent> SubjectGenerator::generateNotes(
       result[i].duration = next_start - result[i].start_tick;
       if (result[i].duration < kTickQuantum) {
         result[i].duration = kTickQuantum;
+      }
+    }
+  }
+
+  // DEBUG: dump notes before post-processing
+  for (size_t di = 0; di < result.size(); ++di) {
+    int iv = (di > 0) ? static_cast<int>(result[di].pitch) - static_cast<int>(result[di-1].pitch) : 0;
+    fprintf(stderr, "[subj] note[%zu] pitch=%d iv=%+d\n", di, result[di].pitch, iv);
+  }
+
+  // Post-processing leap enforcement: catch any intervals that escaped
+  // the per-note clampLeap calls (e.g., ending normalization, climax
+  // transitions, or snapToScale rounding).
+  int post_max_leap = maxLeapForCharacter(character);
+  for (size_t i = 1; i < result.size(); ++i) {
+    int prev_p = static_cast<int>(result[i - 1].pitch);
+    int cur_p = static_cast<int>(result[i].pitch);
+    int interval = cur_p - prev_p;
+    if (std::abs(interval) > post_max_leap) {
+      int direction = (interval > 0) ? 1 : -1;
+      for (int attempt = post_max_leap; attempt >= 0; --attempt) {
+        int candidate = prev_p + direction * attempt;
+        candidate = std::max(pitch_floor, std::min(pitch_ceil, candidate));
+        int snapped = snapToScale(candidate, key, scale, pitch_floor, pitch_ceil);
+        if (std::abs(snapped - prev_p) <= post_max_leap) {
+          result[i].pitch = static_cast<uint8_t>(
+              std::max(0, std::min(127, snapped)));
+          break;
+        }
       }
     }
   }

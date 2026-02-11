@@ -51,6 +51,11 @@ bool isConsonance(int semitones) {
          quality == IntervalQuality::ImperfectConsonance;
 }
 
+bool isPerfectConsonance(int semitones) {
+  int simple = compoundToSimple(semitones);
+  return simple == 0 || simple == 7;
+}
+
 int invertInterval(int semitones) {
   int simple = compoundToSimple(semitones);
   if (simple == 0) {

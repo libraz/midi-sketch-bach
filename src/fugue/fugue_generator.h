@@ -24,6 +24,7 @@ struct FugueQualityMetrics {
   float chord_tone_ratio = 0.0f;        ///< Fraction of notes that are chord tones.
   int voice_crossings = 0;              ///< Number of voice crossing incidents.
   int parallel_perfects = 0;            ///< Number of parallel 5ths/8ths.
+  int structural_parallel_count = 0;    ///< Parallel perfects involving structural notes.
   float counterpoint_compliance = 0.0f; ///< Fraction of notes passing CP rules.
   int notes_rejected = 0;               ///< Notes removed by post-validation.
   int notes_adjusted = 0;               ///< Notes pitch-adjusted by validation.

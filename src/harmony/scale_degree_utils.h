@@ -10,12 +10,6 @@
 
 namespace bach {
 
-/// @brief Major scale intervals in semitones (7 degrees).
-extern const int kMajorScaleIntervals[7];
-
-/// @brief Natural minor scale intervals in semitones (7 degrees).
-extern const int kMinorScaleIntervals[7];
-
 /// @brief Get the scale intervals array for a key mode.
 /// @param is_minor True for natural minor, false for major.
 /// @return Pointer to a 7-element array of semitone offsets.

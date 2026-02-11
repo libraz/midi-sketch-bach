@@ -6,18 +6,13 @@
 
 #include "core/pitch_utils.h"
 #include "fugue/subject.h"
+#include "harmony/key.h"
 
 namespace bach {
 
 namespace {
 
-/// @brief Get the dominant key for a given tonic key.
-/// @param tonic_key The tonic key.
-/// @return The dominant key (a perfect 5th above).
-Key getDominantKey(Key tonic_key) {
-  int dominant = (static_cast<int>(tonic_key) + interval::kPerfect5th) % 12;
-  return static_cast<Key>(dominant);
-}
+
 
 /// @brief Generate a real answer by transposing all notes up a perfect 5th.
 /// @param subject The source subject.
@@ -189,7 +184,7 @@ AnswerType autoDetectAnswerType(const Subject& subject) {
 }
 
 Answer generateAnswer(const Subject& subject, AnswerType type) {
-  Key dominant_key = getDominantKey(subject.key);
+  Key dominant_key = getDominant(KeySignature{subject.key, false}).tonic;
 
   if (type == AnswerType::Auto) {
     type = autoDetectAnswerType(subject);

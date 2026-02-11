@@ -2,13 +2,12 @@
 
 #include "harmony/scale_degree_utils.h"
 
+#include "core/pitch_utils.h"
+
 namespace bach {
 
-const int kMajorScaleIntervals[7] = {0, 2, 4, 5, 7, 9, 11};
-const int kMinorScaleIntervals[7] = {0, 2, 3, 5, 7, 8, 10};
-
 const int* scaleIntervalsForMode(bool is_minor) {
-  return is_minor ? kMinorScaleIntervals : kMajorScaleIntervals;
+  return is_minor ? kScaleNaturalMinor : kScaleMajor;
 }
 
 int degreeToPitchOffset(int degree, bool is_minor) {

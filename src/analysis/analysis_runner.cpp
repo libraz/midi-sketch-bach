@@ -100,6 +100,7 @@ std::string AnalysisReport::toTextSummary(FormType form, uint8_t num_voices) con
   if (has_counterpoint) {
     oss << "\n=== Counterpoint ===\n";
     oss << "Parallel perfects: " << counterpoint.parallel_perfect_count
+        << " (structural: " << counterpoint.structural_parallel_count << ")"
         << " | Voice crossings: " << counterpoint.voice_crossing_count
         << " | Compliance: ";
     char buf[16];

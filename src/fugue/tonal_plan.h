@@ -69,41 +69,6 @@ struct TonalPlan {
   std::string toJson() const;
 };
 
-/// @brief Get the dominant key (perfect 5th above).
-/// @param key The home key.
-/// @return Key a perfect 5th above.
-Key getDominantKey(Key key);
-
-/// @brief Get the subdominant key (perfect 4th above / 5th below).
-/// @param key The home key.
-/// @return Key a perfect 4th above.
-Key getSubdominantKey(Key key);
-
-/// @brief Get the relative minor/major key.
-/// @param key The home key.
-/// @param is_home_minor True if the home key is minor.
-/// @return The relative key (minor 3rd down for major, minor 3rd up for minor).
-Key getRelativeKey(Key key, bool is_home_minor);
-
-/// @brief Get the parallel major/minor key (same tonic, opposite mode).
-/// @param key The home key.
-/// @param is_home_minor True if the home key is minor.
-/// @return The parallel key (same pitch class, always returns the input key since
-///         parallel keys share the same tonic).
-/// @note For Key enum purposes, parallel major/minor share the same tonic,
-///       so this returns the same Key value. The mode change is implicit.
-Key getParallelKey(Key key, bool is_home_minor);
-
-/// @brief Get all near-related keys for a given home key.
-///
-/// Near-related keys are those within one step on the circle of fifths,
-/// plus the relative major/minor. Returns: dominant, subdominant, relative,
-/// and parallel keys.
-///
-/// @param key Home key.
-/// @param is_minor Whether the home key is minor.
-/// @return Vector of near-related keys (up to 4, duplicates removed).
-std::vector<Key> getNearRelatedKeys(Key key, bool is_minor);
 
 /// @brief Generate a tonal plan for a fugue.
 ///

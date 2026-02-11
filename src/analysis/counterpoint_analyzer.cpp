@@ -8,6 +8,8 @@
 #include <vector>
 
 #include "core/basic_types.h"
+#include "core/interval.h"
+#include "core/note_source.h"
 #include "core/pitch_utils.h"
 
 namespace bach {
@@ -37,6 +39,17 @@ int soundingPitch(const std::vector<NoteEvent>& sorted_voice, Tick tick) {
   return result;
 }
 
+/// @brief Source of the note sounding at tick, or BachNoteSource::Unknown if silent.
+BachNoteSource soundingSource(const std::vector<NoteEvent>& sorted_voice, Tick tick) {
+  BachNoteSource result = BachNoteSource::Unknown;
+  for (const auto& note : sorted_voice) {
+    if (note.start_tick <= tick && tick < note.start_tick + note.duration)
+      result = note.source;
+    if (note.start_tick > tick) break;
+  }
+  return result;
+}
+
 Tick totalEndTick(const std::vector<NoteEvent>& notes) {
   Tick max_end = 0;
   for (const auto& note : notes) {
@@ -46,16 +59,7 @@ Tick totalEndTick(const std::vector<NoteEvent>& notes) {
   return max_end;
 }
 
-bool isPerfectConsonance(int semitones) {
-  int simple = ((semitones % 12) + 12) % 12;
-  return simple == 0 || simple == 7;
-}
 
-bool isDissonant(int semitones) {
-  int simple = ((semitones % 12) + 12) % 12;
-  return simple == 1 || simple == 2 || simple == 5 ||
-         simple == 6 || simple == 10 || simple == 11;
-}
 
 float clamp01(float val) { return val < 0.0f ? 0.0f : (val > 1.0f ? 1.0f : val); }
 
@@ -102,10 +106,10 @@ uint32_t countParallelPerfect(const std::vector<NoteEvent>& notes, uint8_t num_v
           prev_a = cur_a; prev_b = cur_b; continue;
         }
         int pi = std::abs(prev_a - prev_b), ci = std::abs(cur_a - cur_b);
-        if (isPerfectConsonance(pi) && isPerfectConsonance(ci)) {
+        if (interval_util::isPerfectConsonance(pi) && interval_util::isPerfectConsonance(ci)) {
           int ma = cur_a - prev_a, mb = cur_b - prev_b;
           bool same_dir = (ma > 0 && mb > 0) || (ma < 0 && mb < 0);
-          int ps = ((pi % 12) + 12) % 12, cs = ((ci % 12) + 12) % 12;
+          int ps = interval_util::compoundToSimple(pi), cs = interval_util::compoundToSimple(ci);
           if (same_dir && ps == cs) ++count;
         }
         prev_a = cur_a; prev_b = cur_b;
@@ -114,6 +118,50 @@ uint32_t countParallelPerfect(const std::vector<NoteEvent>& notes, uint8_t num_v
   }
   return count;
 }
+
+namespace {
+
+/// @brief Count parallel perfects where both notes at both beats are structural.
+uint32_t countStructuralParallels(const VoiceCache& voices, uint8_t num_voices,
+                                   Tick end) {
+  uint32_t count = 0;
+  for (uint8_t va_idx = 0; va_idx < num_voices; ++va_idx) {
+    for (uint8_t vb_idx = va_idx + 1; vb_idx < num_voices; ++vb_idx) {
+      int prev_a = -1, prev_b = -1;
+      BachNoteSource prev_src_a = BachNoteSource::Unknown;
+      BachNoteSource prev_src_b = BachNoteSource::Unknown;
+      for (Tick beat = 0; beat < end; beat += kTicksPerBeat) {
+        int cur_a = soundingPitch(voices[va_idx], beat);
+        int cur_b = soundingPitch(voices[vb_idx], beat);
+        BachNoteSource src_a = soundingSource(voices[va_idx], beat);
+        BachNoteSource src_b = soundingSource(voices[vb_idx], beat);
+        if (cur_a < 0 || cur_b < 0 || prev_a < 0 || prev_b < 0) {
+          prev_a = cur_a; prev_b = cur_b;
+          prev_src_a = src_a; prev_src_b = src_b;
+          continue;
+        }
+        int pi = std::abs(prev_a - prev_b), ci = std::abs(cur_a - cur_b);
+        if (interval_util::isPerfectConsonance(pi) && interval_util::isPerfectConsonance(ci)) {
+          int ma = cur_a - prev_a, mb = cur_b - prev_b;
+          bool same_dir = (ma > 0 && mb > 0) || (ma < 0 && mb < 0);
+          int ps = interval_util::compoundToSimple(pi), cs = interval_util::compoundToSimple(ci);
+          if (same_dir && ps == cs) {
+            // Both notes at both beats must be structural.
+            if (isStructuralSource(prev_src_a) && isStructuralSource(prev_src_b) &&
+                isStructuralSource(src_a) && isStructuralSource(src_b)) {
+              ++count;
+            }
+          }
+        }
+        prev_a = cur_a; prev_b = cur_b;
+        prev_src_a = src_a; prev_src_b = src_b;
+      }
+    }
+  }
+  return count;
+}
+
+}  // namespace
 
 uint32_t countHiddenPerfect(const std::vector<NoteEvent>& notes, uint8_t num_voices) {
   if (num_voices < 2) return 0;
@@ -132,8 +180,8 @@ uint32_t countHiddenPerfect(const std::vector<NoteEvent>& notes, uint8_t num_voi
           prev_a = cur_a; prev_b = cur_b; continue;
         }
         int ci = std::abs(cur_a - cur_b), pi = std::abs(prev_a - prev_b);
-        int ps = ((pi % 12) + 12) % 12, cs = ((ci % 12) + 12) % 12;
-        if (isPerfectConsonance(ci) && ps != cs) {
+        int ps = interval_util::compoundToSimple(pi), cs = interval_util::compoundToSimple(ci);
+        if (interval_util::isPerfectConsonance(ci) && ps != cs) {
           int ma = cur_a - prev_a, mb = cur_b - prev_b;
           bool same_dir = (ma > 0 && mb > 0) || (ma < 0 && mb < 0);
           if (same_dir && std::abs(ma) > 2) ++count;
@@ -188,11 +236,11 @@ float dissonanceResolutionRate(const std::vector<NoteEvent>& notes, uint8_t num_
       for (uint8_t vb = va + 1; vb < num_voices; ++vb) {
         int pa = soundingPitch(voices[va], beat), pb = soundingPitch(voices[vb], beat);
         if (pa < 0 || pb < 0) continue;
-        if (!isDissonant(std::abs(pa - pb))) continue;
+        if (classifyInterval(std::abs(pa - pb)) != IntervalQuality::Dissonance) continue;
         ++total;
         int na = soundingPitch(voices[va], next), nb = soundingPitch(voices[vb], next);
         if (na < 0 || nb < 0) continue;
-        bool consonant = !isDissonant(std::abs(na - nb));
+        bool consonant = classifyInterval(std::abs(na - nb)) != IntervalQuality::Dissonance;
         bool step_a = std::abs(na - pa) >= 1 && std::abs(na - pa) <= 2;
         bool step_b = std::abs(nb - pb) >= 1 && std::abs(nb - pb) <= 2;
         if (consonant && (step_a || step_b)) ++resolved;
@@ -223,6 +271,13 @@ CounterpointAnalysisResult analyzeCounterpoint(const std::vector<NoteEvent>& not
   result.augmented_leap_count = countAugmentedLeaps(notes, num_voices);
   result.dissonance_resolution_rate = dissonanceResolutionRate(notes, num_voices);
 
+  if (num_voices >= 2 && result.parallel_perfect_count > 0) {
+    auto voices = buildVoiceCache(notes, num_voices);
+    Tick end = totalEndTick(notes);
+    result.structural_parallel_count =
+        countStructuralParallels(voices, num_voices, end);
+  }
+
   uint32_t violations = result.parallel_perfect_count + result.hidden_perfect_count +
                         result.voice_crossing_count + result.augmented_leap_count;
   Tick end = totalEndTick(notes);
@@ -252,16 +307,16 @@ FailReport buildCounterpointReport(const std::vector<NoteEvent>& notes, uint8_t 
         int pi = std::abs(prev_a - prev_b), ci = std::abs(ca - cb);
         int ma = ca - prev_a, mb = cb - prev_b;
         bool sd = (ma > 0 && mb > 0) || (ma < 0 && mb < 0);
-        int ps = ((pi % 12) + 12) % 12, cs = ((ci % 12) + 12) % 12;
+        int ps = interval_util::compoundToSimple(pi), cs = interval_util::compoundToSimple(ci);
 
-        if (isPerfectConsonance(pi) && isPerfectConsonance(ci) && sd && ps == cs) {
+        if (interval_util::isPerfectConsonance(pi) && interval_util::isPerfectConsonance(ci) && sd && ps == cs) {
           const char* name = (cs == 7) ? "parallel_fifths" : "parallel_octaves";
           const char* desc_type = (cs == 7) ? "5ths" : "8ths";
           report.addIssue(makeIssue(FailSeverity::Critical, beat, va, vb, name,
               "Parallel " + std::string(desc_type) + " between voices " +
               std::to_string(va) + " and " + std::to_string(vb)));
         }
-        if (isPerfectConsonance(ci) && ps != cs && sd && std::abs(ma) > 2) {
+        if (interval_util::isPerfectConsonance(ci) && ps != cs && sd && std::abs(ma) > 2) {
           report.addIssue(makeIssue(FailSeverity::Warning, beat, va, vb, "hidden_perfect",
               "Hidden perfect interval between voices " +
               std::to_string(va) + " and " + std::to_string(vb)));

@@ -9,6 +9,7 @@
 #include <set>
 #include <string>
 
+#include "analysis/counterpoint_analyzer.h"
 #include "core/basic_types.h"
 #include "core/gm_program.h"
 #include "core/note_source.h"
@@ -805,6 +806,151 @@ TEST(FugueGeneratorTest, DominantPedalSpansFourBars) {
     total_duration += note.duration;
   }
   EXPECT_EQ(total_duration, kTicksPerBar * 4u);
+}
+
+// ---------------------------------------------------------------------------
+// Bass voice density (Phase A validation)
+// ---------------------------------------------------------------------------
+
+TEST(FugueGeneratorTest, BassDensity_ThreeVoices) {
+  // Test across multiple seeds to ensure bass voice gets sufficient content.
+  uint32_t seeds[] = {1, 7, 13, 42, 99, 256};
+  for (uint32_t seed : seeds) {
+    FugueConfig config = makeTestConfig(seed);
+    config.num_voices = 3;
+    FugueResult result = generateFugue(config);
+    ASSERT_TRUE(result.success) << "Seed " << seed << " failed to generate";
+
+    // Count bass voice (voice 2 for 3-voice, last track) note count.
+    ASSERT_EQ(result.tracks.size(), 3u);
+    const auto& bass_track = result.tracks[2];
+    size_t bass_notes = bass_track.notes.size();
+
+    // Compute total bars from the structure.
+    Tick total_ticks = 0;
+    for (const auto& section : result.structure.sections) {
+      if (section.end_tick > total_ticks) total_ticks = section.end_tick;
+    }
+    float total_bars = static_cast<float>(total_ticks) /
+                       static_cast<float>(kTicksPerBar);
+
+    float notes_per_bar = (total_bars > 0)
+        ? static_cast<float>(bass_notes) / total_bars : 0.0f;
+
+    EXPECT_GT(notes_per_bar, 0.5f)
+        << "Seed " << seed << ": bass notes/bar = " << notes_per_bar
+        << " (need > 0.5)";
+  }
+}
+
+TEST(FugueGeneratorTest, BassMaxConsecutiveSilence_ThreeVoices) {
+  // Verify that the bass voice doesn't have excessively long silent stretches.
+  uint32_t seeds[] = {1, 7, 13, 42, 99, 256};
+  for (uint32_t seed : seeds) {
+    FugueConfig config = makeTestConfig(seed);
+    config.num_voices = 3;
+    FugueResult result = generateFugue(config);
+    ASSERT_TRUE(result.success) << "Seed " << seed << " failed";
+
+    ASSERT_EQ(result.tracks.size(), 3u);
+    const auto& bass_track = result.tracks[2];
+
+    // Find the maximum gap between consecutive bass notes.
+    Tick max_gap = 0;
+    if (!bass_track.notes.empty()) {
+      for (size_t i = 0; i + 1 < bass_track.notes.size(); ++i) {
+        Tick end_of_current = bass_track.notes[i].start_tick +
+                              bass_track.notes[i].duration;
+        Tick start_of_next = bass_track.notes[i + 1].start_tick;
+        if (start_of_next > end_of_current) {
+          Tick gap = start_of_next - end_of_current;
+          if (gap > max_gap) max_gap = gap;
+        }
+      }
+    }
+
+    // Max consecutive silence: 8 bars.
+    Tick max_silence_ticks = kTicksPerBar * 8;
+    EXPECT_LE(max_gap, max_silence_ticks)
+        << "Seed " << seed << ": max bass silence = "
+        << (max_gap / kTicksPerBar) << " bars (limit: 8)";
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Coda voice-leading (Phase D validation)
+// ---------------------------------------------------------------------------
+
+TEST(FugueGeneratorTest, CodaVoiceLeading_NoLargeJumps) {
+  // Verify coda doesn't have excessively large jumps from pre-coda notes.
+  uint32_t seeds[] = {1, 42, 99};
+  for (uint32_t seed : seeds) {
+    FugueConfig config = makeTestConfig(seed);
+    config.num_voices = 3;
+    FugueResult result = generateFugue(config);
+    ASSERT_TRUE(result.success) << "Seed " << seed;
+
+    auto codas = result.structure.getSectionsByType(SectionType::Coda);
+    ASSERT_EQ(codas.size(), 1u);
+    Tick coda_start = codas[0].start_tick;
+
+    // For each voice, check the jump from last pre-coda note to first coda note.
+    for (size_t track_idx = 0; track_idx < result.tracks.size(); ++track_idx) {
+      const auto& notes = result.tracks[track_idx].notes;
+
+      // Find last pre-coda note and first coda note.
+      const NoteEvent* last_pre = nullptr;
+      const NoteEvent* first_coda = nullptr;
+      for (const auto& n : notes) {
+        if (n.start_tick < coda_start) last_pre = &n;
+        if (n.start_tick >= coda_start && !first_coda) first_coda = &n;
+      }
+
+      if (last_pre && first_coda) {
+        int jump = std::abs(static_cast<int>(first_coda->pitch) -
+                            static_cast<int>(last_pre->pitch));
+        // Inner voices: max 7st, soprano: max 12st (octave).
+        int max_jump = (track_idx == 0) ? 12 : 7;
+        // Pedal voice excluded (it has a pedal point).
+        if (first_coda->source != BachNoteSource::PedalPoint) {
+          EXPECT_LE(jump, max_jump)
+              << "Seed " << seed << ", track " << track_idx
+              << ": coda entry jump = " << jump << "st (max " << max_jump << ")";
+        }
+      }
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Non-structural parallel perfects must be zero
+// ---------------------------------------------------------------------------
+
+TEST(FugueGeneratorTest, ZeroNonStructuralParallels_AllSeeds) {
+  uint32_t seeds[] = {1, 7, 13, 42, 99, 256};
+  for (uint32_t seed : seeds) {
+    FugueConfig config = makeTestConfig(seed);
+    config.num_voices = 3;
+    FugueResult result = generateFugue(config);
+    ASSERT_TRUE(result.success) << "Seed " << seed << " failed to generate";
+
+    // Collect all notes from tracks.
+    std::vector<NoteEvent> all_notes;
+    for (const auto& track : result.tracks) {
+      for (const auto& note : track.notes) {
+        all_notes.push_back(note);
+      }
+    }
+
+    auto analysis = analyzeCounterpoint(all_notes, config.num_voices);
+    uint32_t non_structural =
+        analysis.parallel_perfect_count - analysis.structural_parallel_count;
+    EXPECT_EQ(non_structural, 0u)
+        << "Seed " << seed << ": " << non_structural
+        << " non-structural parallel perfects (total: "
+        << analysis.parallel_perfect_count
+        << ", structural: " << analysis.structural_parallel_count << ")";
+  }
 }
 
 }  // namespace

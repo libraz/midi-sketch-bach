@@ -29,7 +29,7 @@ ToccataConfig makeTestConfig(uint32_t seed = 42) {
   config.bpm = 80;
   config.seed = seed;
   config.num_voices = 3;
-  config.section_bars = 24;
+  config.total_bars = 24;
   return config;
 }
 
@@ -143,12 +143,12 @@ TEST(ToccataTest, TracksHaveCorrectNames) {
 }
 
 // ---------------------------------------------------------------------------
-// Total duration matches section_bars
+// Total duration matches total_bars
 // ---------------------------------------------------------------------------
 
 TEST(ToccataTest, TotalDurationMatchesSectionBars) {
   ToccataConfig config = makeTestConfig();
-  config.section_bars = 24;
+  config.total_bars = 24;
   ToccataResult result = generateToccata(config);
 
   ASSERT_TRUE(result.success);
@@ -157,7 +157,7 @@ TEST(ToccataTest, TotalDurationMatchesSectionBars) {
 
 TEST(ToccataTest, TotalDurationMatchesSectionBars_Short) {
   ToccataConfig config = makeTestConfig();
-  config.section_bars = 8;
+  config.total_bars = 8;
   ToccataResult result = generateToccata(config);
 
   ASSERT_TRUE(result.success);
@@ -166,7 +166,7 @@ TEST(ToccataTest, TotalDurationMatchesSectionBars_Short) {
 
 TEST(ToccataTest, TotalDurationMatchesSectionBars_Long) {
   ToccataConfig config = makeTestConfig();
-  config.section_bars = 48;
+  config.total_bars = 48;
   ToccataResult result = generateToccata(config);
 
   ASSERT_TRUE(result.success);
@@ -179,7 +179,7 @@ TEST(ToccataTest, TotalDurationMatchesSectionBars_Long) {
 
 TEST(ToccataTest, OpeningSectionHasFastNotes) {
   ToccataConfig config = makeTestConfig();
-  config.section_bars = 24;
+  config.total_bars = 24;
   ToccataResult result = generateToccata(config);
 
   ASSERT_TRUE(result.success);
@@ -346,7 +346,7 @@ TEST(ToccataTest, MultipleVoicesActive) {
 TEST(ToccataTest, AllVoicesActiveInDrive) {
   ToccataConfig config = makeTestConfig();
   config.num_voices = 3;
-  config.section_bars = 24;
+  config.total_bars = 24;
   ToccataResult result = generateToccata(config);
 
   ASSERT_TRUE(result.success);
@@ -544,7 +544,7 @@ TEST(ToccataTest, DifferentKeys_ProduceDifferentOutput) {
 
 TEST(ToccataTest, EnergyCurve_UShape) {
   ToccataConfig config = makeTestConfig();
-  config.section_bars = 24;
+  config.total_bars = 24;
   ToccataResult result = generateToccata(config);
   ASSERT_TRUE(result.success);
 
@@ -595,7 +595,7 @@ TEST(ToccataTest, EnergyCurve_UShape) {
 TEST(ToccataTest, PedalVoiceHasNotesInOpeningAndDrive) {
   ToccataConfig config = makeTestConfig();
   config.num_voices = 3;
-  config.section_bars = 24;
+  config.total_bars = 24;
   ToccataResult result = generateToccata(config);
   ASSERT_TRUE(result.success);
   ASSERT_GE(result.tracks.size(), 3u);
@@ -618,7 +618,7 @@ TEST(ToccataTest, PedalVoiceHasNotesInOpeningAndDrive) {
 
 TEST(ToccataTest, SmallSectionBars) {
   ToccataConfig config = makeTestConfig();
-  config.section_bars = 4;  // Minimum reasonable size.
+  config.total_bars = 4;  // Minimum reasonable size.
   ToccataResult result = generateToccata(config);
 
   ASSERT_TRUE(result.success);
@@ -628,7 +628,7 @@ TEST(ToccataTest, SmallSectionBars) {
 
 TEST(ToccataTest, LargeSectionBars) {
   ToccataConfig config = makeTestConfig();
-  config.section_bars = 64;
+  config.total_bars = 64;
   ToccataResult result = generateToccata(config);
 
   ASSERT_TRUE(result.success);
@@ -657,7 +657,7 @@ TEST(ToccataTest, MultipleSeeds_AllSucceed) {
 
 TEST(ToccataTest, OpeningHasGrandPause) {
   ToccataConfig config = makeTestConfig();
-  config.section_bars = 24;
+  config.total_bars = 24;
   ToccataResult result = generateToccata(config);
   ASSERT_TRUE(result.success);
   ASSERT_GT(result.tracks[0].notes.size(), 1u);
@@ -685,7 +685,7 @@ TEST(ToccataTest, OpeningHasGrandPause) {
 
 TEST(ToccataTest, OpeningHasOctaveDoubling) {
   ToccataConfig config = makeTestConfig();
-  config.section_bars = 24;
+  config.total_bars = 24;
   ToccataResult result = generateToccata(config);
   ASSERT_TRUE(result.success);
   ASSERT_GE(result.tracks.size(), 2u);
@@ -715,7 +715,7 @@ TEST(ToccataTest, OpeningHasOctaveDoubling) {
 
 TEST(ToccataTest, OpeningHasBlockChord) {
   ToccataConfig config = makeTestConfig();
-  config.section_bars = 24;
+  config.total_bars = 24;
   ToccataResult result = generateToccata(config);
   ASSERT_TRUE(result.success);
   ASSERT_GE(result.tracks.size(), 3u);
@@ -755,7 +755,7 @@ TEST(ToccataTest, OpeningHasBlockChord) {
 
 TEST(ToccataTest, RecitativeHasRhythmicVariety) {
   ToccataConfig config = makeTestConfig();
-  config.section_bars = 24;
+  config.total_bars = 24;
   ToccataResult result = generateToccata(config);
   ASSERT_TRUE(result.success);
 
@@ -779,7 +779,7 @@ TEST(ToccataTest, RecitativeHasRhythmicVariety) {
 
 TEST(ToccataTest, RecitativeHasLeaps) {
   ToccataConfig config = makeTestConfig();
-  config.section_bars = 24;
+  config.total_bars = 24;
   ToccataResult result = generateToccata(config);
   ASSERT_TRUE(result.success);
 
@@ -813,7 +813,7 @@ TEST(ToccataTest, RecitativeHasLeaps) {
 
 TEST(ToccataTest, RecitativeUsesBothManuals) {
   ToccataConfig config = makeTestConfig();
-  config.section_bars = 24;
+  config.total_bars = 24;
   ToccataResult result = generateToccata(config);
   ASSERT_TRUE(result.success);
   ASSERT_GE(result.tracks.size(), 2u);
@@ -830,7 +830,7 @@ TEST(ToccataTest, RecitativeUsesBothManuals) {
 
 TEST(ToccataTest, DriveRhythmicAcceleration) {
   ToccataConfig config = makeTestConfig();
-  config.section_bars = 24;
+  config.total_bars = 24;
   ToccataResult result = generateToccata(config);
   ASSERT_TRUE(result.success);
 
@@ -865,7 +865,7 @@ TEST(ToccataTest, HarmonicPlanIsRich) {
 
 TEST(ToccataTest, PedalSoloPresent) {
   ToccataConfig config = makeTestConfig();
-  config.section_bars = 24;
+  config.total_bars = 24;
   ToccataResult result = generateToccata(config);
   ASSERT_TRUE(result.success);
   ASSERT_GE(result.tracks.size(), 3u);
@@ -891,7 +891,7 @@ TEST(ToccataTest, PedalSoloPresent) {
 TEST(ToccataTest, FinalChordIsPicardy) {
   ToccataConfig config = makeTestConfig();
   config.key = {Key::D, true};  // D minor
-  config.section_bars = 24;
+  config.total_bars = 24;
   ToccataResult result = generateToccata(config);
   ASSERT_TRUE(result.success);
   ASSERT_GT(result.tracks[0].notes.size(), 0u);

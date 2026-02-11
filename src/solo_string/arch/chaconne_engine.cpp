@@ -12,6 +12,8 @@
 #include "solo_string/arch/texture_generator.h"
 #include "solo_string/arch/variation_types.h"
 
+
+
 namespace bach {
 
 namespace {
@@ -43,13 +45,117 @@ InstrumentProfile getInstrumentProfile(InstrumentType instrument) {
   }
 }
 
-/// @brief Generate a random seed using the system random device.
-/// @return A non-zero random seed.
-uint32_t generateRandomSeed() {
-  std::random_device device;
-  uint32_t result = device();
-  if (result == 0) result = 1;
-  return result;
+
+
+/// @brief Select a RhythmProfile based on VariationType and VariationRole.
+///
+/// Maps variation character to appropriate rhythmic subdivisions with
+/// weighted random selection for variety across seeds.
+///
+/// @param rng Mersenne Twister RNG.
+/// @param type The variation's character type.
+/// @param role The variation's structural role.
+/// @return Selected RhythmProfile.
+RhythmProfile selectRhythmProfile(std::mt19937& rng,
+                                   VariationType type,
+                                   VariationRole role) {
+  // Establish: always sparse (QuarterNote or EighthNote).
+  if (role == VariationRole::Establish) {
+    return rng::rollProbability(rng, 0.7f) ? RhythmProfile::QuarterNote
+                                            : RhythmProfile::EighthNote;
+  }
+  // Resolve: always QuarterNote for finality.
+  if (role == VariationRole::Resolve) {
+    return RhythmProfile::QuarterNote;
+  }
+
+  switch (type) {
+    case VariationType::Theme:
+      return RhythmProfile::QuarterNote;
+    case VariationType::Lyrical: {
+      std::vector<RhythmProfile> opts = {
+          RhythmProfile::EighthNote,
+          RhythmProfile::DottedEighth,
+          RhythmProfile::Triplet};
+      std::vector<float> wts = {0.40f, 0.35f, 0.25f};
+      return rng::selectWeighted(rng, opts, wts);
+    }
+    case VariationType::Rhythmic: {
+      std::vector<RhythmProfile> opts = {
+          RhythmProfile::DottedEighth,
+          RhythmProfile::Mixed8th16th,
+          RhythmProfile::Triplet};
+      std::vector<float> wts = {0.35f, 0.40f, 0.25f};
+      return rng::selectWeighted(rng, opts, wts);
+    }
+    case VariationType::Virtuosic: {
+      std::vector<RhythmProfile> opts = {
+          RhythmProfile::Sixteenth,
+          RhythmProfile::Mixed8th16th};
+      std::vector<float> wts = {0.60f, 0.40f};
+      return rng::selectWeighted(rng, opts, wts);
+    }
+    case VariationType::Chordal: {
+      return rng::rollProbability(rng, 0.55f) ? RhythmProfile::QuarterNote
+                                               : RhythmProfile::EighthNote;
+    }
+  }
+  return RhythmProfile::EighthNote;
+}
+
+/// @brief Select a harmonic ProgressionType based on VariationRole.
+///
+/// Different structural roles call for different harmonic complexity.
+/// Weighted random selection ensures variety across seeds.
+///
+/// @param rng Mersenne Twister RNG.
+/// @param role The variation's structural role.
+/// @param is_minor Whether the current key is minor (affects BorrowedChord weight).
+/// @return Selected ProgressionType.
+ProgressionType selectProgression(std::mt19937& rng,
+                                   VariationRole role,
+                                   bool is_minor) {
+  switch (role) {
+    case VariationRole::Establish:
+    case VariationRole::Resolve:
+      return ProgressionType::Basic;  // I-IV-V-I for stability
+    case VariationRole::Develop: {
+      std::vector<ProgressionType> opts = {
+          ProgressionType::CircleOfFifths,
+          ProgressionType::Subdominant,
+          ProgressionType::Basic};
+      std::vector<float> wts = {0.45f, 0.35f, 0.20f};
+      return rng::selectWeighted(rng, opts, wts);
+    }
+    case VariationRole::Destabilize: {
+      // BorrowedChord weight depends on key mode.
+      float borrowed_wt = is_minor ? 0.30f : 0.15f;
+      float chrome_wt = 0.40f;
+      float desc_wt = 1.0f - chrome_wt - borrowed_wt;
+      std::vector<ProgressionType> opts = {
+          ProgressionType::ChromaticCircle,
+          ProgressionType::DescendingFifths,
+          ProgressionType::BorrowedChord};
+      std::vector<float> wts = {chrome_wt, desc_wt, borrowed_wt};
+      return rng::selectWeighted(rng, opts, wts);
+    }
+    case VariationRole::Illuminate: {
+      std::vector<ProgressionType> opts = {
+          ProgressionType::Subdominant,
+          ProgressionType::CircleOfFifths,
+          ProgressionType::Basic};
+      std::vector<float> wts = {0.40f, 0.35f, 0.25f};
+      return rng::selectWeighted(rng, opts, wts);
+    }
+    case VariationRole::Accumulate: {
+      std::vector<ProgressionType> opts = {
+          ProgressionType::DescendingFifths,
+          ProgressionType::ChromaticCircle};
+      std::vector<float> wts = {0.55f, 0.45f};
+      return rng::selectWeighted(rng, opts, wts);
+    }
+  }
+  return ProgressionType::Basic;
 }
 
 /// @brief Place ground bass notes at a given time offset into the output.
@@ -88,7 +194,8 @@ TextureContext buildTextureContext(const ChaconneVariation& variation,
                                   const InstrumentProfile& profile,
                                   const ClimaxDesign& climax_design,
                                   const MajorSectionConstraints& major_constraints,
-                                  uint32_t seed) {
+                                  uint32_t seed,
+                                  RhythmProfile rhythm_profile) {
   TextureContext ctx;
   ctx.texture = variation.primary_texture;
   ctx.key = variation.key;
@@ -100,6 +207,8 @@ TextureContext buildTextureContext(const ChaconneVariation& variation,
   ctx.is_climax = (variation.role == VariationRole::Accumulate);
   ctx.rhythm_density = 1.0f;
   ctx.seed = seed;
+  ctx.rhythm_profile = rhythm_profile;
+  ctx.variation_type = variation.type;
 
   // Apply major section constraints: lighter textures, lower density, narrower register.
   if (variation.is_major_section) {
@@ -190,7 +299,7 @@ ChaconneResult generateChaconne(const ChaconneConfig& config) {
   // -----------------------------------------------------------------------
   uint32_t seed = config.seed;
   if (seed == 0) {
-    seed = generateRandomSeed();
+    seed = rng::generateRandomSeed();
   }
   result.seed_used = seed;
 
@@ -245,6 +354,9 @@ ChaconneResult generateChaconne(const ChaconneConfig& config) {
   // Concatenated timeline across all variations.
   HarmonicTimeline full_timeline;
 
+  // Track recent rhythm profiles for contrast checking.
+  std::vector<RhythmProfile> prev_profiles;
+
   for (size_t var_idx = 0; var_idx < variations.size(); ++var_idx) {
     const auto& variation = variations[var_idx];
     Tick offset_tick = static_cast<Tick>(var_idx) * bass_length;
@@ -252,11 +364,21 @@ ChaconneResult generateChaconne(const ChaconneConfig& config) {
     // Step 4a: Place ground bass (immutable copy).
     placeGroundBass(ground_bass, offset_tick, all_notes);
 
-    // Step 4b: Build harmonic timeline for this variation's key.
-    HarmonicTimeline timeline = HarmonicTimeline::createStandard(
-        variation.key, bass_length, HarmonicResolution::Bar);
+    // Step 4b: Build harmonic timeline with role-appropriate progression.
+    uint32_t var_seed = seed + static_cast<uint32_t>(var_idx) * 997u;
+    std::mt19937 var_rng(var_seed);
 
-    // Collect timeline events with offset for the full piece timeline.
+    ProgressionType prog_type = selectProgression(
+        var_rng, variation.role, variation.key.is_minor);
+
+    // Accumulate uses Beat resolution for maximum harmonic complexity.
+    HarmonicResolution resolution = (variation.role == VariationRole::Accumulate)
+        ? HarmonicResolution::Beat
+        : HarmonicResolution::Bar;
+
+    HarmonicTimeline timeline = HarmonicTimeline::createProgression(
+        variation.key, bass_length, resolution, prog_type);
+
     for (const auto& ev : timeline.events()) {
       HarmonicEvent offset_ev = ev;
       offset_ev.tick += offset_tick;
@@ -264,11 +386,22 @@ ChaconneResult generateChaconne(const ChaconneConfig& config) {
       full_timeline.addEvent(offset_ev);
     }
 
-    // Step 4c: Build texture context with constraints and design values.
-    uint32_t var_seed = seed + static_cast<uint32_t>(var_idx) * 997u;
+    // Step 4c: Select rhythm profile and build texture context.
+    RhythmProfile rhythm = selectRhythmProfile(var_rng, variation.type, variation.role);
+
+    // Contrast check: avoid 2+ consecutive identical profiles.
+    bool conflicts = (!prev_profiles.empty() && rhythm == prev_profiles.back()) ||
+                     (prev_profiles.size() >= 2 &&
+                      rhythm == prev_profiles[prev_profiles.size() - 2]);
+    if (conflicts) {
+      rhythm = selectRhythmProfile(var_rng, variation.type, variation.role);
+      // Second try: accept regardless to avoid infinite loop.
+    }
+    prev_profiles.push_back(rhythm);
+
     TextureContext ctx = buildTextureContext(
         variation, offset_tick, bass_length, profile,
-        config.climax, config.major_constraints, var_seed);
+        config.climax, config.major_constraints, var_seed, rhythm);
 
     // Step 4d: Generate texture notes with retry on failure.
     std::vector<NoteEvent> texture_notes;

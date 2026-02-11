@@ -117,6 +117,9 @@ set(BACH_TEST_SOURCES
   forms/trio_sonata_test.cpp
   forms/chorale_prelude_test.cpp
   forms/toccata_test.cpp
+  forms/toccata_perpetuus_test.cpp
+  forms/toccata_concertato_test.cpp
+  forms/toccata_sectionalis_test.cpp
   forms/passacaglia_test.cpp
   forms/fantasia_test.cpp
 

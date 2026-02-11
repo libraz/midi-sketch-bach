@@ -4,6 +4,7 @@
 #define BACH_SOLO_STRING_ARCH_TEXTURE_GENERATOR_H
 
 #include <cstdint>
+#include <utility>
 #include <vector>
 
 #include "core/basic_types.h"
@@ -12,6 +13,30 @@
 #include "solo_string/arch/variation_types.h"
 
 namespace bach {
+
+/// @brief Rhythmic subdivision profile for texture generation.
+///
+/// Each profile defines a distinct rhythmic character for a beat (480 ticks).
+/// Selected per-variation based on VariationType and VariationRole.
+enum class RhythmProfile : uint8_t {
+  QuarterNote,   ///< 1 note/beat (480 ticks) -- Theme, sparse textures
+  EighthNote,    ///< 2 notes/beat (240 ticks) -- standard SingleLine default
+  DottedEighth,  ///< dotted-8th + 16th (360+120) -- French overture style
+  Triplet,       ///< 3 notes/beat (160 ticks) -- dance-like ternary feel
+  Sixteenth,     ///< 4 notes/beat (120 ticks) -- standard Arpeggiated default
+  Mixed8th16th   ///< 8th + 2x16th (240+120+120) -- Bach's characteristic figuration
+};
+
+/// @brief Get the rhythmic subdivisions for a given profile within one beat.
+///
+/// Returns a vector of {offset, duration} pairs representing the rhythmic
+/// grid within a single beat. The sum of durations equals beat_ticks.
+///
+/// @param profile The rhythm profile to use.
+/// @param beat_ticks Duration of one beat in ticks (default: kTicksPerBeat = 480).
+/// @return Vector of {offset, duration} pairs for one beat.
+std::vector<std::pair<Tick, Tick>> getRhythmSubdivisions(
+    RhythmProfile profile, Tick beat_ticks = kTicksPerBeat);
 
 /// @brief Context for texture generation within a single chaconne variation.
 ///
@@ -29,6 +54,8 @@ struct TextureContext {
   bool is_climax = false;             ///< True only for Accumulate variations
   float rhythm_density = 1.0f;        ///< 1.0 = normal, 0.6 = major section cap
   uint32_t seed = 0;                  ///< RNG seed for this variation
+  RhythmProfile rhythm_profile = RhythmProfile::EighthNote;  ///< Rhythmic subdivision
+  VariationType variation_type = VariationType::Theme;        ///< Character of variation
 };
 
 /// @brief Generate notes for a single variation using the specified texture.

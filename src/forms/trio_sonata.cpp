@@ -10,6 +10,7 @@
 
 #include "analysis/counterpoint_analyzer.h"
 #include "core/gm_program.h"
+#include "core/interval.h"
 #include "core/pitch_utils.h"
 #include "core/rng_util.h"
 #include "core/scale.h"
@@ -1348,12 +1349,7 @@ void enforceDiatonicPitches(std::vector<Track>& tracks, Key key, bool is_minor) 
 // Post-pass: Enforce consonance on strong beats
 // ---------------------------------------------------------------------------
 
-/// @brief Check if an interval (mod 12) is consonant.
-/// Consonant: P1(0), m3(3), M3(4), P5(7), m6(8), M6(9), P8(12→0).
-bool isConsonantInterval(int semitones) {
-  int ivl = std::abs(semitones) % 12;
-  return ivl == 0 || ivl == 3 || ivl == 4 || ivl == 7 || ivl == 8 || ivl == 9;
-}
+
 
 /// @brief Enforce consonance on strong beats (bar downbeat and beat 3).
 ///
@@ -1362,109 +1358,115 @@ bool isConsonantInterval(int semitones) {
 /// 2. Simultaneous clash resolution: fix {m2, tritone, M7} between voice pairs.
 void enforceStrongBeatConsonance(std::vector<Track>& tracks,
                                  const HarmonicTimeline& timeline,
-                                 Key key, bool is_minor) {
+                                 Key /*key*/, bool /*is_minor*/) {
   if (tracks.size() < 2) return;
 
-  // Phase 1: Snap individual notes to chord tones on strong beats.
-  for (size_t trk = 0; trk < 2 && trk < tracks.size(); ++trk) {
-    uint8_t low = (trk == 0) ? kRhLow : kLhLow;
-    uint8_t high = (trk == 0) ? kRhHigh : kLhHigh;
-
-    for (auto& note : tracks[trk].notes) {
-      bool is_strong = (note.start_tick % kTicksPerBar == 0) ||
-                       (note.start_tick % kTicksPerBar == kTicksPerBar / 2);
-      if (!is_strong) continue;
-
-      const HarmonicEvent& ev = timeline.getAt(note.start_tick);
-      if (isChordTone(note.pitch, ev)) continue;
-
-      uint8_t nearest = nearestChordTone(note.pitch, ev);
-      int dist = std::abs(static_cast<int>(nearest) - static_cast<int>(note.pitch));
-      if (dist <= 2) {
-        note.pitch = clampPitch(static_cast<int>(nearest), low, high);
-      } else {
-        // Try octave shift to find a consonant position.
-        for (int shift : {12, -12}) {
-          int candidate = static_cast<int>(note.pitch) + shift;
-          if (candidate >= low && candidate <= high) {
-            uint8_t ct = nearestChordTone(static_cast<uint8_t>(candidate), ev);
-            int ct_dist = std::abs(static_cast<int>(ct) - candidate);
-            if (ct_dist <= 2) {
-              note.pitch = clampPitch(static_cast<int>(ct), low, high);
-              break;
-            }
-          }
-        }
-      }
+  // Collect all strong beat ticks up to max duration.
+  Tick max_dur = 0;
+  for (const auto& track : tracks) {
+    for (const auto& n : track.notes) {
+      Tick end = n.start_tick + n.duration;
+      if (end > max_dur) max_dur = end;
     }
   }
 
-  // Phase 2: Resolve dissonant clashes between voice pairs on strong beats.
-  // Check all pairs: RH-LH, RH-Pedal, LH-Pedal.
-  struct VoicePair { size_t a; size_t b; };
-  VoicePair pairs[] = {{0, 1}, {0, 2}, {1, 2}};
+  for (Tick tick = 0; tick < max_dur; tick += kTicksPerBar / 2) {
+    const HarmonicEvent& ev = timeline.getAt(tick);
 
-  for (const auto& pair : pairs) {
-    if (pair.a >= tracks.size() || pair.b >= tracks.size()) continue;
+    // Collect sounding notes at this tick for each track.
+    struct SoundingNote {
+      NoteEvent* note;
+      size_t track_idx;
+    };
+    std::vector<SoundingNote> sounding;
 
-    for (auto& note_a : tracks[pair.a].notes) {
-      bool is_strong = (note_a.start_tick % kTicksPerBar == 0) ||
-                       (note_a.start_tick % kTicksPerBar == kTicksPerBar / 2);
-      if (!is_strong) continue;
-
-      Tick a_end = note_a.start_tick + note_a.duration;
-
-      for (auto& note_b : tracks[pair.b].notes) {
-        Tick b_end = note_b.start_tick + note_b.duration;
-        // Check temporal overlap at the strong beat.
-        if (note_b.start_tick >= a_end || note_a.start_tick >= b_end) continue;
-        // Both must be sounding at the strong beat tick.
-        if (note_b.start_tick > note_a.start_tick ||
-            note_a.start_tick > note_b.start_tick + note_b.duration) {
-          // Ensure note_b actually sounds at note_a's start tick.
-          if (note_b.start_tick > note_a.start_tick) continue;
-          if (note_b.start_tick + note_b.duration <= note_a.start_tick) continue;
+    for (size_t trk = 0; trk < tracks.size() && trk < 3; ++trk) {
+      for (auto& n : tracks[trk].notes) {
+        if (n.start_tick <= tick && n.start_tick + n.duration > tick) {
+          sounding.push_back({&n, trk});
+          break;  // One note per track at this tick.
         }
+      }
+    }
 
-        int interval = std::abs(static_cast<int>(note_a.pitch) -
-                                static_cast<int>(note_b.pitch)) % 12;
-        // Dissonant intervals: m2(1), tritone(6), M7(11).
-        if (interval != 1 && interval != 6 && interval != 11) continue;
+    if (sounding.size() < 2) continue;
 
-        // Fix note_a (higher voice) first; keep note_b stable.
-        uint8_t low_a = (pair.a == 0) ? kRhLow : (pair.a == 1) ? kLhLow
-                                                                : organ_range::kPedalLow;
-        uint8_t high_a = (pair.a == 0) ? kRhHigh : (pair.a == 1) ? kLhHigh
-                                                                  : organ_range::kPedalHigh;
+    // Check all pairs for dissonance and fix.
+    for (size_t i = 0; i < sounding.size(); ++i) {
+      for (size_t j = i + 1; j < sounding.size(); ++j) {
+        int interval = std::abs(static_cast<int>(sounding[i].note->pitch) -
+                                static_cast<int>(sounding[j].note->pitch)) % 12;
+        if (interval_util::isConsonance(interval)) continue;
 
-        const HarmonicEvent& ev = timeline.getAt(note_a.start_tick);
-        uint8_t nearest_a = nearestChordTone(note_a.pitch, ev);
-        int dist_a = std::abs(static_cast<int>(nearest_a) -
-                              static_cast<int>(note_a.pitch));
-        if (dist_a <= 2) {
-          uint8_t fixed = clampPitch(static_cast<int>(nearest_a), low_a, high_a);
-          int new_ivl = std::abs(static_cast<int>(fixed) -
-                                 static_cast<int>(note_b.pitch)) % 12;
-          if (isConsonantInterval(new_ivl)) {
-            note_a.pitch = fixed;
+        // Fix the upper voice (lower track index = higher register in trio).
+        // Try: snap to nearest chord tone, then octave shift.
+        size_t fix_idx = (sounding[i].track_idx < sounding[j].track_idx) ? i : j;
+        size_t other_idx = (fix_idx == i) ? j : i;
+        NoteEvent* fix_note = sounding[fix_idx].note;
+        NoteEvent* other_note = sounding[other_idx].note;
+        size_t fix_trk = sounding[fix_idx].track_idx;
+
+        uint8_t low = (fix_trk == 0) ? kRhLow
+                     : (fix_trk == 1) ? kLhLow
+                                      : organ_range::kPedalLow;
+        uint8_t high = (fix_trk == 0) ? kRhHigh
+                      : (fix_trk == 1) ? kLhHigh
+                                       : organ_range::kPedalHigh;
+
+        // Strategy 1: Snap to nearest chord tone within ±3 semitones.
+        uint8_t nearest = nearestChordTone(fix_note->pitch, ev);
+        int dist = std::abs(static_cast<int>(nearest) -
+                            static_cast<int>(fix_note->pitch));
+        if (dist <= 3 && nearest >= low && nearest <= high) {
+          int new_ivl = std::abs(static_cast<int>(nearest) -
+                                 static_cast<int>(other_note->pitch)) % 12;
+          if (interval_util::isConsonance(new_ivl)) {
+            fix_note->pitch = nearest;
             continue;
           }
         }
 
-        // Octave shift fallback for note_a.
-        bool fixed = false;
+        // Strategy 2: Try shifting by ±1, ±2 scale steps to find consonance.
+        bool resolved = false;
+        for (int delta : {1, -1, 2, -2, 3, -3}) {
+          int cand = static_cast<int>(fix_note->pitch) + delta;
+          if (cand < low || cand > high) continue;
+          int new_ivl = std::abs(cand - static_cast<int>(other_note->pitch)) % 12;
+          if (interval_util::isConsonance(new_ivl) &&
+              isChordTone(static_cast<uint8_t>(cand), ev)) {
+            fix_note->pitch = static_cast<uint8_t>(cand);
+            resolved = true;
+            break;
+          }
+        }
+        if (resolved) continue;
+
+        // Strategy 3: Any consonant pitch within ±3 (not necessarily chord tone).
+        for (int delta : {1, -1, 2, -2, 3, -3}) {
+          int cand = static_cast<int>(fix_note->pitch) + delta;
+          if (cand < low || cand > high) continue;
+          int new_ivl = std::abs(cand - static_cast<int>(other_note->pitch)) % 12;
+          if (interval_util::isConsonance(new_ivl)) {
+            fix_note->pitch = static_cast<uint8_t>(cand);
+            resolved = true;
+            break;
+          }
+        }
+        if (resolved) continue;
+
+        // Strategy 4: Octave shift.
         for (int shift : {12, -12}) {
-          int cand = static_cast<int>(note_a.pitch) + shift;
-          if (cand >= low_a && cand <= high_a) {
-            int new_ivl = std::abs(cand - static_cast<int>(note_b.pitch)) % 12;
-            if (isConsonantInterval(new_ivl)) {
-              note_a.pitch = static_cast<uint8_t>(cand);
-              fixed = true;
+          int cand = static_cast<int>(fix_note->pitch) + shift;
+          if (cand >= low && cand <= high) {
+            int new_ivl = std::abs(cand -
+                                   static_cast<int>(other_note->pitch)) % 12;
+            if (interval_util::isConsonance(new_ivl)) {
+              fix_note->pitch = static_cast<uint8_t>(cand);
+              resolved = true;
               break;
             }
           }
         }
-        // If note_a can't be fixed, leave unchanged (don't create unnatural leaps).
       }
     }
   }
@@ -1700,15 +1702,6 @@ TrioSonataMovement generateMovement(const KeySignature& key_sig, Tick num_bars,
     }
   }
 
-  // 10b. Enforce minimum voice separation between RH and LH.
-  enforceMinimumVoiceSeparation(tracks);
-
-  // 10c. Enforce diatonic pitches for major movements.
-  enforceDiatonicPitches(tracks, key_sig.tonic, key_sig.is_minor);
-
-  // 10d. Enforce consonance on strong beats.
-  enforceStrongBeatConsonance(tracks, timeline, key_sig.tonic, key_sig.is_minor);
-
   // 11. Apply ornaments with counterpoint verification.
   {
     // Determine ornament density based on movement character.
@@ -1756,7 +1749,53 @@ TrioSonataMovement generateMovement(const KeySignature& key_sig, Tick num_bars,
     sortTracks(tracks);
   }
 
-  // 12. Counterpoint analysis (after all modifications).
+  // 12. Quality post-passes (after ornaments, ensuring final output quality).
+
+  // 12a. Quantize all upper voice durations to allowed set.
+  {
+    bool is_slow = (params.primary_dur >= kQuarterNote);
+    // Fast: {120, 240, 480}; Slow: {240, 480, 960}.
+    const Tick allowed[3] = {
+        is_slow ? kEighthNote : kSixteenthNote,
+        is_slow ? kQuarterNote : kEighthNote,
+        is_slow ? kHalfNote : kQuarterNote};
+    for (size_t trk = 0; trk < 2 && trk < tracks.size(); ++trk) {
+      for (auto& note : tracks[trk].notes) {
+        bool in_set = (note.duration == allowed[0] ||
+                       note.duration == allowed[1] ||
+                       note.duration == allowed[2]);
+        if (!in_set) {
+          // Snap to nearest allowed duration.
+          Tick best = allowed[0];
+          int best_dist = std::abs(static_cast<int>(note.duration) -
+                                   static_cast<int>(best));
+          for (int i = 1; i < 3; ++i) {
+            int dist = std::abs(static_cast<int>(note.duration) -
+                                static_cast<int>(allowed[i]));
+            if (dist < best_dist) {
+              best_dist = dist;
+              best = allowed[i];
+            }
+          }
+          note.duration = best;
+        }
+      }
+    }
+  }
+
+  // 12b. Enforce consonance on strong beats (may introduce chord tones).
+  enforceStrongBeatConsonance(tracks, timeline, key_sig.tonic, key_sig.is_minor);
+
+  // 12c. Enforce diatonic pitches for major movements (after consonance fix).
+  enforceDiatonicPitches(tracks, key_sig.tonic, key_sig.is_minor);
+
+  // 12d. Enforce minimum voice separation (must be last pitch modifier).
+  enforceMinimumVoiceSeparation(tracks);
+
+  // 12e. Re-sort after quality post-passes.
+  sortTracks(tracks);
+
+  // 13. Counterpoint analysis (after all modifications).
   movement.cp_report = buildTrioCPReport(tracks);
 
   movement.tracks = std::move(tracks);

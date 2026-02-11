@@ -33,6 +33,24 @@ const char* subjectCharacterToString(SubjectCharacter character) {
   return "Unknown";
 }
 
+const char* toccataArchetypeToString(ToccataArchetype archetype) {
+  switch (archetype) {
+    case ToccataArchetype::Dramaticus:  return "dramaticus";
+    case ToccataArchetype::Perpetuus:   return "perpetuus";
+    case ToccataArchetype::Concertato:  return "concertato";
+    case ToccataArchetype::Sectionalis: return "sectionalis";
+  }
+  return "unknown";
+}
+
+ToccataArchetype toccataArchetypeFromString(const std::string& str) {
+  if (str == "dramaticus")  return ToccataArchetype::Dramaticus;
+  if (str == "perpetuus")   return ToccataArchetype::Perpetuus;
+  if (str == "concertato")  return ToccataArchetype::Concertato;
+  if (str == "sectionalis") return ToccataArchetype::Sectionalis;
+  return ToccataArchetype::Dramaticus;  // Default
+}
+
 const char* arcPhaseToString(ArcPhase phase) {
   switch (phase) {
     case ArcPhase::Ascent:  return "Ascent";

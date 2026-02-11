@@ -9,6 +9,7 @@
 
 #include "core/note_creator.h"
 #include "core/note_source.h"
+#include "core/pitch_utils.h"
 #include "core/rng_util.h"
 #include "core/scale.h"
 #include "counterpoint/collision_resolver.h"
@@ -177,8 +178,7 @@ void placeEntryNotes(const std::vector<NoteEvent>& source_notes,
                       static_cast<int>(voice_reg.high)) / 2;
   int diff = voice_center - mean_pitch;
   // Round to nearest octave, handling negative values correctly.
-  int octave_shift = (diff >= 0) ? ((diff + 6) / 12) * 12
-                                 : -(((-diff + 5) / 12) * 12);
+  int octave_shift = nearestOctaveShift(diff);
 
   // Place all notes with octave shift and clamping.
   std::vector<NoteEvent> placed;
@@ -212,6 +212,20 @@ void placeEntryNotes(const std::vector<NoteEvent>& source_notes,
       if (target >= static_cast<int>(voice_reg.low)) {
         placed[i].pitch = static_cast<uint8_t>(target);
       }
+    }
+  }
+
+  // Post-placement leap enforcement: clamp any intervals that exceed P5 (7st)
+  // after octave shift + clamp + contour restoration.
+  constexpr int kMaxEntryLeap = 7;
+  for (size_t i = 1; i < placed.size(); ++i) {
+    int interval = static_cast<int>(placed[i].pitch) -
+                   static_cast<int>(placed[i - 1].pitch);
+    if (std::abs(interval) > kMaxEntryLeap) {
+      int direction = (interval > 0) ? 1 : -1;
+      int target = static_cast<int>(placed[i - 1].pitch) +
+                   direction * kMaxEntryLeap;
+      placed[i].pitch = clampPitch(target, voice_reg.low, voice_reg.high);
     }
   }
 
@@ -251,8 +265,7 @@ void placeCountersubjectNotes(const std::vector<NoteEvent>& cs_notes,
                       static_cast<int>(voice_reg.high)) / 2;
   // Round to nearest octave, handling negative values correctly.
   int diff = voice_center - cs_mean;
-  int octave_shift = (diff >= 0) ? ((diff + 6) / 12) * 12
-                                 : -(((-diff + 5) / 12) * 12);
+  int octave_shift = nearestOctaveShift(diff);
 
   for (const auto& cs_note : cs_notes) {
     NoteEvent note = cs_note;

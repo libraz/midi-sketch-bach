@@ -8,6 +8,7 @@
 #include <cmath>
 
 #include "core/basic_types.h"
+#include "core/interval.h"
 #include "core/pitch_utils.h"
 #include "counterpoint/counterpoint_state.h"
 
@@ -60,7 +61,7 @@ static bool isActuallyConsonant(int reduced) {
 }
 
 bool BachRuleEvaluator::isPerfectConsonance(int semitones) {
-  int reduced = ((semitones % 12) + 12) % 12;  // Normalize to [0, 11].
+  int reduced = interval_util::compoundToSimple(semitones);  // Normalize to [0, 11].
   return reduced == interval::kUnison ||
          reduced == interval::kPerfect5th;
   // Note: P8 reduces to 0 (unison) mod 12.
@@ -72,12 +73,12 @@ bool BachRuleEvaluator::isIntervalConsonant(int semitones,
   // Dissonances on weak beats are rejected so that the collision resolver's
   // NHT check (passing tone / neighbor tone) can evaluate with next_pitch context.
   if (free_counterpoint_ && !is_strong_beat) {
-    int reduced = ((semitones % 12) + 12) % 12;
+    int reduced = interval_util::compoundToSimple(semitones);
     return isActuallyConsonant(reduced);
   }
 
   // Normalize to single-octave interval.
-  int reduced = ((semitones % 12) + 12) % 12;
+  int reduced = interval_util::compoundToSimple(semitones);
 
   switch (reduced) {
     // Perfect consonances.
@@ -184,8 +185,8 @@ bool BachRuleEvaluator::hasParallelPerfect(const CounterpointState& state,
   }
 
   // Both intervals must be the same type (both P5, or both P1/P8).
-  int prev_reduced = ((prev_interval % 12) + 12) % 12;
-  int curr_reduced = ((curr_interval % 12) + 12) % 12;
+  int prev_reduced = interval_util::compoundToSimple(prev_interval);
+  int curr_reduced = interval_util::compoundToSimple(curr_interval);
   if (prev_reduced != curr_reduced) return false;
 
   // Motion must be in the same direction (parallel, not contrary).
@@ -218,8 +219,8 @@ bool BachRuleEvaluator::hasHiddenPerfect(const CounterpointState& state,
   // The previous interval must NOT be the same perfect consonance.
   int prev_interval = std::abs(static_cast<int>(prev1->pitch) -
                                static_cast<int>(prev2->pitch));
-  int prev_reduced = ((prev_interval % 12) + 12) % 12;
-  int curr_reduced = ((curr_interval % 12) + 12) % 12;
+  int prev_reduced = interval_util::compoundToSimple(prev_interval);
+  int curr_reduced = interval_util::compoundToSimple(curr_interval);
   if (prev_reduced == curr_reduced) {
     return false;  // That would be parallel, not hidden.
   }

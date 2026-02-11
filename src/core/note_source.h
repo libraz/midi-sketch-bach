@@ -48,6 +48,18 @@ enum class ProtectionLevel : uint8_t {
 /// @return Protection level governing collision resolution behavior.
 ProtectionLevel getProtectionLevel(BachNoteSource source);
 
+/// @brief Check if source is a structural (identity-preserving) note type.
+/// Structural notes are subject, answer, countersubject, pedal, false entry, and coda.
+/// They pass through post-processing without pitch alteration.
+inline bool isStructuralSource(BachNoteSource source) {
+  return source == BachNoteSource::FugueSubject ||
+         source == BachNoteSource::FugueAnswer ||
+         source == BachNoteSource::PedalPoint ||
+         source == BachNoteSource::Countersubject ||
+         source == BachNoteSource::FalseEntry ||
+         source == BachNoteSource::Coda;
+}
+
 /// Transformation steps applied to a note during generation.
 /// Recorded in provenance for debugging the transform pipeline.
 enum class BachTransformStep : uint8_t {

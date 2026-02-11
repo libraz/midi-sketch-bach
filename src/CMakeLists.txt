@@ -112,6 +112,9 @@ set(BACH_LIB_SOURCES
   forms/trio_sonata.cpp
   forms/chorale_prelude.cpp
   forms/toccata.cpp
+  forms/toccata_perpetuus.cpp
+  forms/toccata_concertato.cpp
+  forms/toccata_sectionalis.cpp
   forms/passacaglia.cpp
   forms/fantasia.cpp
 

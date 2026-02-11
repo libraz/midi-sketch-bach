@@ -3,7 +3,8 @@
 #include "generator.h"
 
 #include <algorithm>
-#include <random>
+
+#include "core/rng_util.h"
 
 #include "forms/chorale_prelude.h"
 #include "forms/fantasia.h"
@@ -28,15 +29,7 @@ namespace {
 /// @brief Seed offset applied to the prelude seed so it differs from the fugue seed.
 constexpr uint32_t kPreludeSeedOffset = 7919u;
 
-/// @brief Generate a random seed using the system random device.
-/// @return A non-zero random seed.
-uint32_t generateRandomSeed() {
-  std::random_device device;
-  uint32_t result = device();
-  // Ensure non-zero so we can distinguish "auto" from explicit 0.
-  if (result == 0) result = 1;
-  return result;
-}
+
 
 /// @brief Get fugue develop_pairs and episode_bars for a DurationScale.
 /// @param scale The duration scale.
@@ -417,7 +410,7 @@ GeneratorResult generate(const GeneratorConfig& config) {
   // Auto-select seed if 0.
   GeneratorConfig effective_config = config;
   if (effective_config.seed == 0) {
-    effective_config.seed = generateRandomSeed();
+    effective_config.seed = rng::generateRandomSeed();
   }
   result.seed_used = effective_config.seed;
 
@@ -431,11 +424,23 @@ GeneratorResult generate(const GeneratorConfig& config) {
     case FormType::ToccataAndFugue: {
       // Generate toccata free section, then append a fugue.
       ToccataConfig tconfig;
+      if (effective_config.toccata_archetype_auto) {
+        // Auto-select archetype from seed for structural variety.
+        constexpr ToccataArchetype kArchetypes[] = {
+            ToccataArchetype::Dramaticus,
+            ToccataArchetype::Perpetuus,
+            ToccataArchetype::Concertato,
+            ToccataArchetype::Sectionalis,
+        };
+        tconfig.archetype = kArchetypes[effective_config.seed % 4];
+      } else {
+        tconfig.archetype = effective_config.toccata_archetype;
+      }
       tconfig.key = effective_config.key;
       tconfig.bpm = effective_config.bpm;
       tconfig.seed = effective_config.seed;
       tconfig.num_voices = effective_config.num_voices;
-      tconfig.section_bars = 24;
+      tconfig.total_bars = 24;
 
       ToccataResult toc_result = generateToccata(tconfig);
       if (!toc_result.success) {
@@ -450,7 +455,7 @@ GeneratorResult generate(const GeneratorConfig& config) {
       // Generate the fugue section, subtracting toccata bars from target.
       GeneratorConfig fugue_gen_config = effective_config;
       if (fugue_gen_config.target_bars > 0) {
-        uint32_t toc_bars = tconfig.section_bars;
+        uint32_t toc_bars = tconfig.total_bars;
         fugue_gen_config.target_bars =
             (fugue_gen_config.target_bars > toc_bars)
                 ? fugue_gen_config.target_bars - toc_bars
@@ -478,9 +483,7 @@ GeneratorResult generate(const GeneratorConfig& config) {
 
       // Toccata tempo map + offset fugue tempo map.
       result.tempo_events = generateToccataTempoMap(
-          toc_result.opening_start, toc_result.opening_end,
-          toc_result.recit_start, toc_result.recit_end,
-          toc_result.drive_start, toc_result.drive_end,
+          toc_result.archetype, toc_result.sections,
           effective_config.bpm);
       auto fugue_tempo = generateFugueTempoMap(fugue_result.structure, effective_config.bpm);
       for (auto& evt : fugue_tempo) {
@@ -504,7 +507,8 @@ GeneratorResult generate(const GeneratorConfig& config) {
       result.success = true;
       result.seed_used = effective_config.seed;
       result.form_description =
-          "Toccata and Fugue in " + keySignatureToString(effective_config.key) + ", " +
+          "Toccata and Fugue in " + keySignatureToString(effective_config.key) +
+          " (" + toccataArchetypeToString(tconfig.archetype) + "), " +
           std::to_string(effective_config.num_voices) + " voices";
       break;
     }

@@ -95,106 +95,195 @@ uint8_t getVoiceHighPitch(uint8_t voice_idx) {
 }
 
 // ---------------------------------------------------------------------------
-// Ground bass generation (inner helper)
+// Ground bass generation (Baroque template-based)
 // ---------------------------------------------------------------------------
 
-/// @brief Build the descending bass pitch sequence for the ground bass theme.
+/// @brief 6 Baroque-style ground bass templates (scale degrees, 0=tonic, 7=octave).
 ///
-/// Creates a descending line from tonic to dominant in the specified key,
-/// using harmonic minor for minor keys. The pattern follows BWV 582 style:
-/// stepwise descent from root, ending with a V-I cadential approach.
+/// Each template defines 8 bars of melodic motion. The last 2 bars are
+/// overwritten by enforceCadentialTail() to guarantee V-I closure.
+/// Templates are drawn from common Baroque passacaglia/chaconne patterns.
+static constexpr int kGroundBassTemplates[][8] = {
+    {0, 0, 2, 3, 4, 5, 6, 7},  // 0: Ascending scale (BWV 582-inspired)
+    {7, 6, 5, 4, 3, 2, 1, 0},  // 1: Descending octave scale (lamento)
+    {0, 1, 2, 3, 4, 3, 4, 0},  // 2: Arch with neighbor-tone (Buxtehude)
+    {7, 6, 5, 4, 3, 2, 4, 0},  // 3: Descending with cadential leap (Handel)
+    {0, 2, 4, 2, 0, 2, 4, 7},  // 4: Triadic outline (French Baroque)
+    {0, 1, 2, 3, 4, 2, 1, 0},  // 5: Half-scale ascent with return
+};
+static constexpr int kNumGroundBassTemplates = 6;
+
+/// @brief Enforce cadential closure on the last 2 notes of a ground bass.
+///
+/// bar[n-2] receives a dominant-area degree (4, 6, or 2, weighted toward 4).
+/// bar[n-1] receives the tonic (degree 0).
+///
+/// @param degrees Mutable vector of scale degrees.
+/// @param rng Random number generator for cadential pre-dominant selection.
+void enforceCadentialTail(std::vector<int>& degrees, std::mt19937& rng) {
+  if (degrees.size() < 2) return;
+  size_t n = degrees.size();
+
+  // Dominant-area candidate degrees for penultimate bar.
+  static constexpr int kCandidates[] = {4, 5, 6, 3, 2};
+  static constexpr int kNumCandidates = 5;
+
+  int best = 4;  // Default: dominant.
+  if (n >= 3) {
+    int preceding = degrees[n - 3];
+
+    // Find candidates within 2 steps of preceding (stepwise or 3rd leap max).
+    int close[kNumCandidates];
+    int close_count = 0;
+    for (int i = 0; i < kNumCandidates; ++i) {
+      if (std::abs(kCandidates[i] - preceding) <= 2) {
+        close[close_count++] = kCandidates[i];
+      }
+    }
+    if (close_count > 0) {
+      best = close[rng::rollRange(rng, 0, close_count - 1)];
+    }
+  }
+
+  degrees[n - 2] = best;
+  degrees[n - 1] = 0;  // Tonic.
+}
+
+/// @brief Ensure same-pitch repetition only at bar 0-1 (opening emphasis).
+///
+/// If consecutive degrees match at any position other than index 1,
+/// nudge the later degree up by 1 to break the repetition.
+///
+/// @param degrees Mutable vector of scale degrees.
+void sanitizeConsecutivePitches(std::vector<int>& degrees) {
+  for (size_t idx = 1; idx < degrees.size(); ++idx) {
+    if (degrees[idx] == degrees[idx - 1] && idx != 1) {
+      // Nudge in the direction of the prevailing melodic motion.
+      int nudge = 1;  // Default: ascending.
+      if (idx >= 2 && degrees[idx - 1] < degrees[idx - 2]) {
+        nudge = -1;  // Descending contour: nudge downward.
+      }
+      degrees[idx] = degrees[idx] + nudge;
+      // Normalize to [0, 7] range to avoid relying on degreeToPitch wrapping.
+      if (degrees[idx] < 0) degrees[idx] += 7;
+      if (degrees[idx] > 7) degrees[idx] -= 7;
+    }
+  }
+}
+
+/// @brief Select a ground bass template index with key-dependent weighting.
+///
+/// Minor keys favor lamento/descending patterns; major keys favor
+/// arch/triadic patterns.
+///
+/// @param rng Random number generator.
+/// @param is_minor True for minor key.
+/// @return Template index in [0, kNumGroundBassTemplates).
+int selectGroundBassTemplate(std::mt19937& rng, bool is_minor) {
+  // Weights for each of the 6 templates (sum = 100).
+  static constexpr int kMinorWeights[] = {25, 25, 15, 15, 10, 10};
+  static constexpr int kMajorWeights[] = {15, 15, 20, 20, 15, 15};
+
+  const int* weights = is_minor ? kMinorWeights : kMajorWeights;
+  int roll = rng::rollRange(rng, 1, 100);
+  int cumulative = 0;
+  for (int idx = 0; idx < kNumGroundBassTemplates; ++idx) {
+    cumulative += weights[idx];
+    if (roll <= cumulative) return idx;
+  }
+  return 0;
+}
+
+/// @brief Build ground bass pitches using Baroque-style templates.
+///
+/// Selects a pattern template weighted by key mode, applies cadential
+/// tail enforcement (V-I), sanitizes consecutive-pitch violations,
+/// and converts scale degrees to MIDI pitches in pedal range.
 ///
 /// @param key Key signature (tonic + mode).
-/// @param num_notes Total number of notes needed (2 per bar).
-/// @param rng Random number generator for minor embellishments.
-/// @return Vector of MIDI pitches for the ground bass, clamped to pedal range.
+/// @param num_notes Number of notes (1 per bar).
+/// @param rng Random number generator.
+/// @return Vector of MIDI pitches for the ground bass, within pedal range.
 std::vector<uint8_t> buildGroundBassPitches(const KeySignature& key, int num_notes,
                                             std::mt19937& rng) {
   std::vector<uint8_t> pitches;
+  if (num_notes <= 0) return pitches;
   pitches.reserve(static_cast<size_t>(num_notes));
 
-  ScaleType scale_type = key.is_minor ? ScaleType::HarmonicMinor : ScaleType::Major;
-
-  // Build the descending line in pedal octave (octave 2, MIDI base ~36).
-  // Start on the tonic, descend stepwise through scale degrees.
-  int tonic_pitch = static_cast<int>(tonicPitch(key.tonic, 2));
-
-  // Collect scale tones in the pedal range for the key.
-  std::vector<uint8_t> pedal_scale = getScaleTones(
-      key.tonic, key.is_minor, organ_range::kPedalLow, organ_range::kPedalHigh);
-
-  if (pedal_scale.empty()) {
-    // Fallback: just use the tonic clamped to pedal range.
-    uint8_t clamped = clampPitch(tonic_pitch, organ_range::kPedalLow,
-                                 organ_range::kPedalHigh);
-    for (int idx = 0; idx < num_notes; ++idx) {
-      pitches.push_back(clamped);
-    }
+  // Single note: just the tonic.
+  if (num_notes == 1) {
+    int tonic = static_cast<int>(tonicPitch(key.tonic, 2));
+    pitches.push_back(clampPitch(tonic, organ_range::kPedalLow,
+                                 organ_range::kPedalHigh));
     return pitches;
   }
 
-  // Find the index of the tonic (or nearest) in the pedal scale.
-  uint8_t clamped_tonic = clampPitch(tonic_pitch, organ_range::kPedalLow,
-                                     organ_range::kPedalHigh);
-  size_t tonic_idx = 0;
-  int min_dist = 127;
-  for (size_t idx = 0; idx < pedal_scale.size(); ++idx) {
-    int dist = absoluteInterval(pedal_scale[idx], clamped_tonic);
-    if (dist < min_dist) {
-      min_dist = dist;
-      tonic_idx = idx;
+  // Scale types: NaturalMinor for body, HarmonicMinor for cadential degree 6.
+  ScaleType body_scale = key.is_minor ? ScaleType::NaturalMinor : ScaleType::Major;
+  ScaleType cadence_scale = key.is_minor ? ScaleType::HarmonicMinor : ScaleType::Major;
+
+  // Octave placement: ensure degree 7 (tonic + octave) fits in pedal range.
+  int tonic_pitch = static_cast<int>(tonicPitch(key.tonic, 2));
+  if (tonic_pitch + 12 > static_cast<int>(organ_range::kPedalHigh)) {
+    tonic_pitch = static_cast<int>(tonicPitch(key.tonic, 1));
+  }
+  int key_offset = tonic_pitch % 12;
+  int base_note = tonic_pitch - key_offset;
+
+  // Select template and build degree sequence.
+  int tmpl_idx = selectGroundBassTemplate(rng, key.is_minor);
+  std::vector<int> degrees;
+  degrees.reserve(static_cast<size_t>(num_notes));
+
+  if (num_notes <= 8) {
+    // Take the first num_notes degrees from the template.
+    for (int idx = 0; idx < num_notes; ++idx) {
+      degrees.push_back(kGroundBassTemplates[tmpl_idx][idx]);
+    }
+  } else {
+    // For >8 bars: simple cyclic repetition of the full template.
+    // Baroque passacaglia ground bass is a strict ostinato (exact repetition).
+    for (int idx = 0; idx < num_notes; ++idx) {
+      degrees.push_back(kGroundBassTemplates[tmpl_idx][idx % 8]);
     }
   }
 
-  // BWV 582-style descending ground bass pattern:
-  // Notes proceed stepwise downward from tonic, then cadential V-I.
-  // With 16 notes (8 bars x 2 per bar), the pattern is:
-  //   Notes 0..N-3: descending stepwise from tonic
-  //   Note N-2: dominant (scale degree 5)
-  //   Note N-1: tonic (return home)
-  //
-  // For fewer notes we compress proportionally.
+  // Enforce cadential closure (last 2 bars: V-preparation -> I).
+  enforceCadentialTail(degrees, rng);
 
-  // Find dominant pitch in pedal range.
-  int dom_pitch = tonic_pitch + interval::kPerfect5th;
-  // If dominant is above pedal range, go down an octave.
-  if (dom_pitch > static_cast<int>(organ_range::kPedalHigh)) {
-    dom_pitch -= interval::kOctave;
+  // Sanitize consecutive same-degree outside opening.
+  sanitizeConsecutivePitches(degrees);
+
+  // Convert degrees to MIDI pitches.
+  for (size_t idx = 0; idx < degrees.size(); ++idx) {
+    int degree = degrees[idx];
+    // Use cadence_scale for the penultimate bar's degree 6 (leading tone).
+    ScaleType scale = body_scale;
+    if (idx == degrees.size() - 2 && degree == 6) {
+      scale = cadence_scale;
+    }
+    int midi_pitch = degreeToPitch(degree, base_note, key_offset, scale);
+    pitches.push_back(
+        clampPitch(midi_pitch, organ_range::kPedalLow, organ_range::kPedalHigh));
   }
-  uint8_t dominant = clampPitch(dom_pitch, organ_range::kPedalLow,
-                                organ_range::kPedalHigh);
-  // Snap dominant to nearest scale tone.
-  dominant = scale_util::nearestScaleTone(dominant, key.tonic, scale_type);
 
-  int descent_notes = num_notes - 2;  // Reserve last 2 for V-I cadence.
-  if (descent_notes < 1) descent_notes = 1;
-
-  // Descend from tonic, stepping down through scale degrees.
-  size_t current_idx = tonic_idx;
-  for (int idx = 0; idx < descent_notes; ++idx) {
-    pitches.push_back(pedal_scale[current_idx]);
-    if (current_idx > 0) {
-      --current_idx;
-    } else {
-      // At bottom of pedal range, hold or step up slightly.
-      // Add slight variety: occasionally repeat lowest or step up.
-      if (rng::rollProbability(rng, 0.3f) && current_idx + 1 < pedal_scale.size()) {
-        current_idx = 1;
+  // Smooth leaps in the body. Leave cadential tail (last 2 notes) unsmoothed:
+  // leading-tone resolution (e.g. B->C in C minor, 11 semitones) is idiomatic.
+  size_t smooth_end = pitches.size() > 2 ? pitches.size() - 2 : pitches.size();
+  for (size_t idx = 1; idx < smooth_end; ++idx) {
+    int interval = static_cast<int>(pitches[idx]) - static_cast<int>(pitches[idx - 1]);
+    // Ground bass tolerates wider leaps than upper voices (structural role).
+    // Threshold: major 6th (9 semitones). Perfect 5th and minor 6th are idiomatic.
+    if (std::abs(interval) > 9) {
+      int adjusted = static_cast<int>(pitches[idx]);
+      if (interval > 0) {
+        adjusted -= 12;  // Leap up too large: bring down an octave.
+      } else {
+        adjusted += 12;  // Leap down too large: bring up an octave.
       }
-      // Otherwise stay at bottom.
+      pitches[idx] = clampPitch(adjusted, organ_range::kPedalLow,
+                                organ_range::kPedalHigh);
     }
-  }
-
-  // Cadential ending: V -> I.
-  pitches.push_back(dominant);
-  pitches.push_back(pedal_scale[tonic_idx]);
-
-  // Ensure we have exactly num_notes. Pad or truncate if needed.
-  while (static_cast<int>(pitches.size()) < num_notes) {
-    pitches.push_back(pedal_scale[tonic_idx]);
-  }
-  if (static_cast<int>(pitches.size()) > num_notes) {
-    pitches.resize(static_cast<size_t>(num_notes));
   }
 
   return pitches;
@@ -596,21 +685,21 @@ std::vector<NoteEvent> generatePassacagliaGroundBass(const KeySignature& key,
 
   std::mt19937 rng(seed);
 
-  int num_notes = bars * 2;  // 2 half notes per bar.
+  int num_notes = bars;  // 1 whole note per bar.
   auto pitches = buildGroundBassPitches(key, num_notes, rng);
 
   Tick current_tick = 0;
   for (int idx = 0; idx < num_notes; ++idx) {
     NoteEvent note;
     note.start_tick = current_tick;
-    note.duration = kHalfNote;
+    note.duration = kWholeNote;
     note.pitch = pitches[static_cast<size_t>(idx)];
     note.velocity = kOrganVelocity;
     note.voice = 3;  // Pedal voice.
     note.source = BachNoteSource::GroundBass;
     notes.push_back(note);
 
-    current_tick += kHalfNote;
+    current_tick += kWholeNote;
   }
 
   return notes;

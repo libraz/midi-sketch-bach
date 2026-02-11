@@ -93,6 +93,15 @@ inline T selectWeighted(std::mt19937& rng, const std::vector<T>& options,
   return options.back();
 }
 
+/// @brief Generate a random seed using the system random device.
+/// @return A non-zero random seed (suitable for seeding mt19937).
+inline uint32_t generateRandomSeed() {
+  std::random_device device;
+  uint32_t result = device();
+  if (result == 0) result = 1;
+  return result;
+}
+
 }  // namespace rng
 }  // namespace bach
 

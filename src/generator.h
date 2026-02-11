@@ -20,6 +20,8 @@ struct GeneratorConfig {
   uint16_t bpm = 100;
   uint32_t seed = 0;  ///< 0 = auto (random).
   SubjectCharacter character = SubjectCharacter::Severe;
+  ToccataArchetype toccata_archetype = ToccataArchetype::Dramaticus;
+  bool toccata_archetype_auto = true;  ///< Auto-select archetype from seed.
   InstrumentType instrument = InstrumentType::Organ;
   bool json_output = false;
   bool analyze = false;

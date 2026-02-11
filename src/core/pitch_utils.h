@@ -278,6 +278,16 @@ struct HarmonicEvent;
 bool isAllowedChromatic(uint8_t pitch, Key key, ScaleType scale,
                         const HarmonicEvent* harm_ev);
 
+/// @brief Calculate the octave shift needed to bring a pitch difference close to zero.
+/// @param pitch_diff Signed pitch difference in semitones.
+/// @return Multiple of 12 that, when subtracted from the difference, minimizes |result|.
+///
+/// Example: nearestOctaveShift(14) -> 12, nearestOctaveShift(-14) -> -12.
+inline int nearestOctaveShift(int pitch_diff) {
+  return (pitch_diff >= 0) ? ((pitch_diff + 6) / 12) * 12
+                           : -(((-pitch_diff + 5) / 12) * 12);
+}
+
 }  // namespace bach
 
 #endif  // BACH_CORE_PITCH_UTILS_H

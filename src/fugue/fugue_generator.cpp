@@ -249,6 +249,44 @@ uint8_t tonicBassPitch(Key key) {
   return clampPitch(pitch, organ_range::kPedalLow, organ_range::kPedalHigh);
 }
 
+/// @brief Extract the last pitch played by a specific voice before a given tick.
+/// @param notes All fugue notes (sorted by tick).
+/// @param before_tick Only consider notes starting before this tick.
+/// @param voice Target voice ID.
+/// @return Last pitch (0 if no notes found for this voice).
+static uint8_t extractVoiceLastPitch(
+    const std::vector<NoteEvent>& notes, Tick before_tick, VoiceId voice) {
+  uint8_t last_pitch = 0;
+  for (auto it = notes.rbegin(); it != notes.rend(); ++it) {
+    if (it->voice == voice && it->start_tick < before_tick) {
+      last_pitch = it->pitch;
+      break;
+    }
+  }
+  return last_pitch;
+}
+
+/// @brief Find the nearest chord tone to a given pitch within a max distance.
+/// @param pitch Source pitch.
+/// @param target_pc Target pitch class (0-11).
+/// @param max_dist Maximum semitone distance.
+/// @return Nearest pitch with the target pitch class, or the original pitch if none found.
+static uint8_t nearestPitchWithPC(uint8_t pitch, int target_pc, int max_dist = 7) {
+  int best = pitch;
+  int best_dist = 999;
+  for (int d = -max_dist; d <= max_dist; ++d) {
+    int cand = static_cast<int>(pitch) + d;
+    if (cand < 0 || cand > 127) continue;
+    if (cand % 12 == ((target_pc % 12) + 12) % 12) {
+      if (std::abs(d) < best_dist) {
+        best_dist = std::abs(d);
+        best = cand;
+      }
+    }
+  }
+  return static_cast<uint8_t>(std::clamp(best, 0, 127));
+}
+
 /// @brief Create 3-stage coda notes for a richer fugue ending.
 ///
 /// Stage 1 (bars 1-2): Subject head fragment in voice 0 over tonic pedal.
@@ -266,7 +304,8 @@ uint8_t tonicBassPitch(Key key) {
 /// @return Vector of coda notes.
 std::vector<NoteEvent> createCodaNotes(Tick start_tick, Tick duration,
                                        Key key, uint8_t num_voices,
-                                       bool is_minor = false) {
+                                       bool is_minor = false,
+                                       const uint8_t* last_pitches = nullptr) {
   std::vector<NoteEvent> notes;
 
   int tonic_pitch = static_cast<int>(kMidiC4) + static_cast<int>(key);
@@ -277,11 +316,28 @@ std::vector<NoteEvent> createCodaNotes(Tick start_tick, Tick duration,
   if (stage1_dur > duration) stage1_dur = duration;
 
   // Voice 0: subject head fragment (rising from tonic to 5th and back).
+  // When last_pitches is available, shift the motif to the nearest octave
+  // to minimize the entry jump.
   {
     Tick sub_dur = kTicksPerBeat;
     int third = is_minor ? 3 : 4;
-    int head_pitches[] = {tonic_pitch, tonic_pitch + 2, tonic_pitch + third, tonic_pitch + 7,
-                          tonic_pitch + third, tonic_pitch + 2, tonic_pitch, tonic_pitch};
+    int base_tonic = tonic_pitch;
+    // Octave-shift the motif base to stay close to the previous pitch.
+    if (last_pitches && last_pitches[0] > 0) {
+      int prev = static_cast<int>(last_pitches[0]);
+      int best_dist = std::abs(prev - base_tonic);
+      for (int oct : {-12, 12, -24, 24}) {
+        int cand = tonic_pitch + oct;
+        if (cand < organ_range::kPedalLow || cand > organ_range::kManual1High) continue;
+        int dist = std::abs(prev - cand);
+        if (dist < best_dist) {
+          best_dist = dist;
+          base_tonic = cand;
+        }
+      }
+    }
+    int head_pitches[] = {base_tonic, base_tonic + 2, base_tonic + third, base_tonic + 7,
+                          base_tonic + third, base_tonic + 2, base_tonic, base_tonic};
     int head_count = std::min(8, static_cast<int>(stage1_dur / sub_dur));
     for (int idx = 0; idx < head_count; ++idx) {
       NoteEvent note;
@@ -295,21 +351,52 @@ std::vector<NoteEvent> createCodaNotes(Tick start_tick, Tick duration,
     }
   }
 
-  // Other voices: sustained chord tones during stage 1.
-  // Sort offsets descending so V1 (alto) gets highest pitch, V(N-1) (bass) gets lowest.
+  // Other voices: approach nearest tonic chord tone from their last pitch.
+  // If last_pitches is provided, use voice-leading; otherwise use fixed offsets.
   int chord_third = is_minor ? 3 : 4;
   {
+    // Tonic chord pitch classes: root, 3rd, 5th.
+    int tonic_pc = tonic_pitch % 12;
+    int third_pc = (tonic_pitch + chord_third) % 12;
+    int fifth_pc = (tonic_pitch + 7) % 12;
+    int chord_pcs[] = {tonic_pc, third_pc, fifth_pc};
+
     int stage1_offsets[] = {7, chord_third, -12, 12};
     uint8_t count = std::min(static_cast<uint8_t>(num_voices - 1), static_cast<uint8_t>(4));
     std::sort(stage1_offsets, stage1_offsets + count, std::greater<int>());
+
     for (uint8_t i = 0; i < count; ++i) {
+      uint8_t voice_idx = 1 + i;
+      uint8_t target_pitch;
+
+      if (last_pitches && last_pitches[voice_idx] > 0) {
+        // Voice-leading: find nearest chord tone to previous pitch.
+        uint8_t prev = last_pitches[voice_idx];
+        int best_dist = 999;
+        target_pitch = clampPitch(tonic_pitch + stage1_offsets[i],
+                                  organ_range::kPedalLow, organ_range::kManual1High);
+        for (int pc : chord_pcs) {
+          uint8_t cand = nearestPitchWithPC(prev, pc, 7);
+          int dist = std::abs(static_cast<int>(cand) - static_cast<int>(prev));
+          if (dist < best_dist) {
+            best_dist = dist;
+            target_pitch = cand;
+          }
+        }
+        target_pitch = clampPitch(static_cast<int>(target_pitch),
+                                  organ_range::kPedalLow, organ_range::kManual1High);
+      } else {
+        // Fallback: use fixed offsets.
+        target_pitch = clampPitch(tonic_pitch + stage1_offsets[i],
+                                  organ_range::kPedalLow, organ_range::kManual1High);
+      }
+
       NoteEvent note;
       note.start_tick = start_tick;
       note.duration = stage1_dur;
-      note.pitch = clampPitch(tonic_pitch + stage1_offsets[i],
-                              organ_range::kPedalLow, organ_range::kManual1High);
+      note.pitch = target_pitch;
       note.velocity = kOrganVelocity;
-      note.voice = 1 + i;
+      note.voice = voice_idx;
       note.source = BachNoteSource::Coda;
       notes.push_back(note);
     }
@@ -525,6 +612,7 @@ FugueResult generateFugue(const FugueConfig& config) {
   false_entry_prob = std::clamp(
       false_entry_prob + rng::rollFloat(false_entry_rng, -0.05f, 0.05f), 0.0f, 1.0f);
 
+  uint32_t entries_seen_mask = 0;  // Bitmask: which voices got middle entries.
   for (int pair_idx = 0; pair_idx < develop_pairs; ++pair_idx) {
     // Odd-indexed episodes get +1 bar for structural variety (Bach uses
     // irregular episode lengths to avoid mechanical regularity).
@@ -558,7 +646,20 @@ FugueResult generateFugue(const FugueConfig& config) {
     // False entry: sometimes insert a truncated subject opening instead of a full
     // middle entry (Bach's developmental technique). At least ONE real entry must
     // exist per develop phase, so pair_idx == 0 always gets a real entry.
-    uint8_t entry_voice = static_cast<uint8_t>(pair_idx % num_voices);
+    // Prefer voices that haven't had a middle entry yet (bass rotation fix).
+    uint8_t entry_voice;
+    {
+      uint8_t candidate = static_cast<uint8_t>(pair_idx % num_voices);
+      for (uint8_t v = 0; v < num_voices; ++v) {
+        uint8_t check = (candidate + v) % num_voices;
+        if ((entries_seen_mask & (1u << check)) == 0) {
+          candidate = check;
+          break;
+        }
+      }
+      entry_voice = candidate;
+      entries_seen_mask |= (1u << entry_voice);
+    }
     std::uniform_real_distribution<float> false_dist(0.0f, 1.0f);
     bool use_false_entry = (pair_idx > 0) && (false_dist(false_entry_rng) < false_entry_prob);
 
@@ -689,8 +790,14 @@ FugueResult generateFugue(const FugueConfig& config) {
   Tick coda_duration = kTicksPerBar * kCodaBars;
   structure.addSection(SectionType::Coda, FuguePhase::Resolve,
                        current_tick, current_tick + coda_duration, config.key);
+  // Extract last pitches for each voice for voice-leading into coda.
+  uint8_t coda_last_pitches[5] = {0, 0, 0, 0, 0};
+  for (uint8_t v = 0; v < num_voices && v < 5; ++v) {
+    coda_last_pitches[v] = extractVoiceLastPitch(all_notes, current_tick, v);
+  }
   auto coda_notes = createCodaNotes(current_tick, coda_duration,
-                                    config.key, num_voices, config.is_minor);
+                                    config.key, num_voices, config.is_minor,
+                                    coda_last_pitches);
   all_notes.insert(all_notes.end(), coda_notes.begin(), coda_notes.end());
 
   // Tonic pedal in coda: lowest voice sustains the tonic.
@@ -704,6 +811,37 @@ FugueResult generateFugue(const FugueConfig& config) {
     auto tonic_pedal = generatePedalPoint(tonic_pitch, current_tick,
                                           coda_duration, lowest_voice);
     all_notes.insert(all_notes.end(), tonic_pedal.begin(), tonic_pedal.end());
+  }
+
+  // =========================================================================
+  // Chord-boundary truncation: cut notes that sustain into a new chord
+  // where they are no longer consonant. Protects short passing tones.
+  // =========================================================================
+  {
+    const auto& harm_events = detailed_timeline.events();
+    for (auto& note : all_notes) {
+      // Skip short notes (passing tones / ornaments).
+      if (note.duration <= kTicksPerBeat) continue;
+      // Skip structural notes (subject, answer, pedal, coda).
+      if (note.source == BachNoteSource::FugueSubject ||
+          note.source == BachNoteSource::FugueAnswer ||
+          note.source == BachNoteSource::PedalPoint ||
+          note.source == BachNoteSource::Coda ||
+          note.source == BachNoteSource::Countersubject) continue;
+
+      Tick note_end = note.start_tick + note.duration;
+      for (const auto& ev : harm_events) {
+        // Look for chord boundaries within the note's duration.
+        if (ev.tick <= note.start_tick) continue;
+        if (ev.tick >= note_end) break;
+        // Check if the note is a chord tone in the new chord.
+        if (!isChordTone(note.pitch, ev)) {
+          // Truncate at the chord boundary.
+          note.duration = ev.tick - note.start_tick;
+          break;
+        }
+      }
+    }
   }
 
   // =========================================================================
@@ -763,12 +901,7 @@ FugueResult generateFugue(const FugueConfig& config) {
       // coda) pass through without alteration -- only register in state
       // for context. Coda notes are design values (Principle 4) and should
       // never be altered.
-      bool is_structural = (source == BachNoteSource::FugueSubject ||
-                            source == BachNoteSource::FugueAnswer ||
-                            source == BachNoteSource::PedalPoint ||
-                            source == BachNoteSource::Countersubject ||
-                            source == BachNoteSource::FalseEntry ||
-                            source == BachNoteSource::Coda);
+      bool is_structural = isStructuralSource(source);
 
       if (is_structural) {
         // Apply octave correction for structural voice crossings.
@@ -826,6 +959,16 @@ FugueResult generateFugue(const FugueConfig& config) {
           if (note.voice > other && fixed_note.pitch > other_note->pitch)
             ++crossings;
         }
+
+        // Detect parallel perfects involving structural notes (metrics only).
+        {
+          auto par = checkParallelsAndP4Bass(
+              post_state, post_rules, note.voice, fixed_note.pitch,
+              note.start_tick, num_voices);
+          if (par.has_parallel_perfect) {
+            ++result.quality.structural_parallel_count;
+          }
+        }
         continue;
       }
 
@@ -834,7 +977,36 @@ FugueResult generateFugue(const FugueConfig& config) {
       bool is_strong = (note.start_tick % kTicksPerBeat == 0);
 
       if (is_strong && !is_chord_tone) {
-        desired_pitch = nearestChordTone(note.pitch, harm_ev);
+        // Only snap if the nearest chord tone is within 2 semitones
+        // to prevent melodic destruction from large snaps.
+        uint8_t snap_candidate = nearestChordTone(note.pitch, harm_ev);
+        int snap_dist = std::abs(static_cast<int>(snap_candidate) -
+                                 static_cast<int>(note.pitch));
+        if (snap_dist <= 2) {
+          desired_pitch = snap_candidate;
+        }
+      }
+
+      // Pre-check: if desired_pitch would form parallels with structural notes,
+      // shift by step before handing to createBachNote (C-alt1 strategy).
+      {
+        auto par = checkParallelsAndP4Bass(
+            post_state, post_rules, note.voice, desired_pitch,
+            note.start_tick, num_voices);
+        if (par.has_parallel_perfect || par.has_p4_bass) {
+          // Try +1, -1, +2, -2 semitone shifts.
+          for (int shift : {1, -1, 2, -2}) {
+            int cand = static_cast<int>(desired_pitch) + shift;
+            if (cand < 0 || cand > 127) continue;
+            auto check = checkParallelsAndP4Bass(
+                post_state, post_rules, note.voice,
+                static_cast<uint8_t>(cand), note.start_tick, num_voices);
+            if (!check.has_parallel_perfect && !check.has_p4_bass) {
+              desired_pitch = static_cast<uint8_t>(cand);
+              break;
+            }
+          }
+        }
       }
 
       // Lookahead: find next pitch for the same voice for NHT validation.
@@ -913,8 +1085,206 @@ FugueResult generateFugue(const FugueConfig& config) {
       }
 
       // Snap to nearest diatonic tone.
-      note.pitch = scale_util::nearestScaleTone(note.pitch, note_key,
-                                                effective_scale);
+      uint8_t snapped = scale_util::nearestScaleTone(note.pitch, note_key,
+                                                     effective_scale);
+
+      // Structural notes: snap without parallel check (identity preservation).
+      uint8_t old_pitch = note.pitch;
+      if (isStructuralSource(note.source)) {
+        note.pitch = snapped;
+        if (note.pitch != old_pitch) {
+          post_state.updateNotePitchAt(note.voice, note.start_tick, note.pitch);
+        }
+        continue;
+      }
+
+      // Flexible notes: check if snap creates parallels with registered voices.
+      auto par = checkParallelsAndP4Bass(post_state, post_rules,
+                                         note.voice, snapped,
+                                         note.start_tick, num_voices);
+      if (!par.has_parallel_perfect) {
+        note.pitch = snapped;
+      } else {
+        // Try alternate scale tones within +/-4 semitones.
+        bool fixed = false;
+        for (int delta : {1, -1, 2, -2, 3, -3, 4, -4}) {
+          int cand = static_cast<int>(note.pitch) + delta;
+          if (cand < 0 || cand > 127) continue;
+          uint8_t ucand = static_cast<uint8_t>(cand);
+          if (!scale_util::isScaleTone(ucand, note_key, effective_scale)) continue;
+          auto check = checkParallelsAndP4Bass(post_state, post_rules,
+                                               note.voice, ucand,
+                                               note.start_tick, num_voices);
+          if (!check.has_parallel_perfect) {
+            note.pitch = ucand;
+            fixed = true;
+            break;
+          }
+        }
+        if (!fixed) {
+          note.pitch = snapped;  // Accept snap (structural parallel, can't fix).
+        }
+      }
+      // Keep post_state in sync so subsequent checks use updated pitches.
+      if (note.pitch != old_pitch) {
+        post_state.updateNotePitchAt(note.voice, note.start_tick, note.pitch);
+      }
+    }
+
+    // Parallel repair pass: the diatonic sweep may create new parallels by
+    // snapping a note at tick T, affecting the T->T+1 transition which isn't
+    // checked during the forward-only sweep. Walk beats directly and fix
+    // remaining non-structural parallels by shifting flexible notes.
+    if (num_voices >= 2) {
+      // Build per-voice sorted note lists with indices into all_notes.
+      struct VoiceNote {
+        size_t idx;  // Index in all_notes.
+        Tick start;
+        Tick end;
+        uint8_t pitch;
+        BachNoteSource source;
+      };
+      std::vector<std::vector<VoiceNote>> voice_notes(num_voices);
+      for (size_t i = 0; i < all_notes.size(); ++i) {
+        auto& n = all_notes[i];
+        if (n.voice >= num_voices) continue;
+        voice_notes[n.voice].push_back(
+            {i, n.start_tick, n.start_tick + n.duration, n.pitch, n.source});
+      }
+      for (auto& vn : voice_notes) {
+        std::sort(vn.begin(), vn.end(),
+                  [](const VoiceNote& a, const VoiceNote& b) {
+                    return a.start < b.start;
+                  });
+      }
+
+      // Helper: find sounding pitch at tick for a voice.
+      auto sounding = [&](uint8_t v, Tick t) -> int {
+        for (auto it = voice_notes[v].rbegin(); it != voice_notes[v].rend(); ++it) {
+          if (it->start <= t && t < it->end) return static_cast<int>(it->pitch);
+          if (it->end <= t) break;
+        }
+        return -1;
+      };
+
+      // Helper: check if interval is perfect consonance (P1/P5/P8).
+      auto isPerfect = [](int semitones) {
+        int s = ((semitones % 12) + 12) % 12;
+        return s == 0 || s == 7;
+      };
+
+      // Find max tick.
+      Tick max_tick = 0;
+      for (const auto& n : all_notes) {
+        Tick e = n.start_tick + n.duration;
+        if (e > max_tick) max_tick = e;
+      }
+
+      // Scan each voice pair for parallels and fix flexible notes.
+      for (uint8_t va = 0; va < num_voices; ++va) {
+        for (uint8_t vb = va + 1; vb < num_voices; ++vb) {
+          int prev_a = -1, prev_b = -1;
+          for (Tick beat = 0; beat < max_tick; beat += kTicksPerBeat) {
+            int cur_a = sounding(va, beat);
+            int cur_b = sounding(vb, beat);
+            if (cur_a < 0 || cur_b < 0 || prev_a < 0 || prev_b < 0) {
+              prev_a = cur_a; prev_b = cur_b;
+              continue;
+            }
+            int pi = std::abs(prev_a - prev_b), ci = std::abs(cur_a - cur_b);
+            if (isPerfect(pi) && isPerfect(ci)) {
+              int ma = cur_a - prev_a, mb = cur_b - prev_b;
+              bool same_dir = (ma > 0 && mb > 0) || (ma < 0 && mb < 0);
+              int ps = ((pi % 12) + 12) % 12, cs = ((ci % 12) + 12) % 12;
+              if (same_dir && ps == cs) {
+                // Parallel detected. Try to fix a flexible note at current beat.
+                // Prefer fixing the note that was snapped by the diatonic sweep.
+                for (uint8_t fix_v : {vb, va}) {
+                  // Find the sounding note for fix_v at this beat.
+                  size_t fix_idx = SIZE_MAX;
+                  for (auto& vn : voice_notes[fix_v]) {
+                    if (vn.start <= beat && beat < vn.end) {
+                      fix_idx = vn.idx;
+                      break;
+                    }
+                  }
+                  if (fix_idx == SIZE_MAX) continue;
+                  auto& fix_note = all_notes[fix_idx];
+                  if (isStructuralSource(fix_note.source)) continue;
+
+                  uint8_t other_v = (fix_v == va) ? vb : va;
+                  int other_pitch = sounding(other_v, beat);
+                  if (other_pitch < 0) continue;
+
+                  Key note_key = tonal_plan.keyAtTick(fix_note.start_tick);
+                  bool fixed = false;
+                  for (int delta : {1, -1, 2, -2, 3, -3, 4, -4}) {
+                    int cand = static_cast<int>(fix_note.pitch) + delta;
+                    if (cand < 0 || cand > 127) continue;
+                    uint8_t ucand = static_cast<uint8_t>(cand);
+                    if (!scale_util::isScaleTone(ucand, note_key, effective_scale))
+                      continue;
+                    // Verify the shift doesn't create a new parallel at either
+                    // the prev->current or current->next transitions.
+                    int new_ci = std::abs(cand - other_pitch);
+                    if (isPerfect(pi) && isPerfect(new_ci)) {
+                      int new_m = cand - static_cast<int>(fix_note.pitch) +
+                                  (fix_v == va ? ma : mb);
+                      // Skip: still parallel with prev beat.
+                      int new_ps = ((pi % 12) + 12) % 12;
+                      int new_cs = ((new_ci % 12) + 12) % 12;
+                      if (new_ps == new_cs) continue;
+                    }
+                    // Check also that this doesn't create a parallel at this
+                    // note's OTHER voice pair transitions.
+                    bool creates_other_parallel = false;
+                    for (uint8_t ov = 0; ov < num_voices; ++ov) {
+                      if (ov == fix_v) continue;
+                      int ov_cur = sounding(ov, beat);
+                      Tick prev_beat = (beat >= kTicksPerBeat) ? beat - kTicksPerBeat : 0;
+                      if (beat == 0) continue;
+                      int ov_prev = sounding(ov, prev_beat);
+                      int fix_prev = -1;
+                      for (auto& vn : voice_notes[fix_v]) {
+                        if (vn.start <= prev_beat && prev_beat < vn.end) {
+                          fix_prev = static_cast<int>(vn.pitch);
+                          break;
+                        }
+                      }
+                      if (ov_cur < 0 || ov_prev < 0 || fix_prev < 0) continue;
+                      int p_ivl = std::abs(fix_prev - ov_prev);
+                      int c_ivl = std::abs(cand - ov_cur);
+                      if (isPerfect(p_ivl) && isPerfect(c_ivl)) {
+                        int p_s = ((p_ivl % 12) + 12) % 12;
+                        int c_s = ((c_ivl % 12) + 12) % 12;
+                        if (p_s == c_s) {
+                          int m_fix = cand - fix_prev;
+                          int m_ov = ov_cur - ov_prev;
+                          bool sd = (m_fix > 0 && m_ov > 0) || (m_fix < 0 && m_ov < 0);
+                          if (sd) { creates_other_parallel = true; break; }
+                        }
+                      }
+                    }
+                    if (creates_other_parallel) continue;
+
+                    fix_note.pitch = ucand;
+                    // Update voice_notes cache.
+                    for (auto& vn : voice_notes[fix_v]) {
+                      if (vn.idx == fix_idx) { vn.pitch = ucand; break; }
+                    }
+                    // Update sounding values for continued scanning.
+                    if (fix_v == va) cur_a = cand; else cur_b = cand;
+                    fixed = true;
+                    break;
+                  }
+                  if (fixed) break;
+                }
+              }
+            }
+            prev_a = cur_a; prev_b = cur_b;
+          }
+        }
+      }
     }
 
     // Compute quality metrics.

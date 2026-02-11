@@ -8,6 +8,7 @@
 #include <cstdlib>
 #include <vector>
 
+#include "core/interval.h"
 #include "core/pitch_utils.h"
 #include "counterpoint/counterpoint_state.h"
 #include "counterpoint/i_rule_evaluator.h"
@@ -83,6 +84,70 @@ static float crossRelationPenalty(const CounterpointState& state,
 }
 
 // ---------------------------------------------------------------------------
+// Free-standing parallel / P4-bass checker
+// ---------------------------------------------------------------------------
+
+ParallelCheckResult checkParallelsAndP4Bass(
+    const CounterpointState& state, const IRuleEvaluator& rules,
+    VoiceId voice_id, uint8_t pitch, Tick tick, uint8_t num_voices) {
+  ParallelCheckResult result;
+  const auto& voices = state.getActiveVoices();
+  VoiceId bass_voice = (num_voices > 0) ? (num_voices - 1) : 0;
+
+  for (VoiceId other : voices) {
+    if (other == voice_id) continue;
+
+    const NoteEvent* other_note = state.getNoteAt(other, tick);
+    if (!other_note) continue;
+
+    int ivl = absoluteInterval(pitch, other_note->pitch);
+
+    // P4-bass check.
+    int reduced = interval_util::compoundToSimple(ivl);
+    if (reduced == interval::kPerfect4th) {
+      if (voice_id == bass_voice || other == bass_voice) {
+        result.has_p4_bass = true;
+        result.conflicting_voice = other;
+      }
+    }
+
+    // Parallel perfect consonance check.
+    const NoteEvent* prev_self = state.getLastNote(voice_id);
+    const NoteEvent* prev_other = nullptr;
+    const auto& other_notes = state.getVoiceNotes(other);
+    for (auto iter = other_notes.rbegin(); iter != other_notes.rend(); ++iter) {
+      if (iter->start_tick < tick) {
+        prev_other = &(*iter);
+        break;
+      }
+    }
+
+    if (prev_self && prev_other) {
+      int prev_ivl = absoluteInterval(prev_self->pitch, prev_other->pitch);
+      int prev_reduced = interval_util::compoundToSimple(prev_ivl);
+      int curr_reduced = interval_util::compoundToSimple(ivl);
+
+      bool prev_perfect = (prev_reduced == interval::kUnison ||
+                           prev_reduced == interval::kPerfect5th);
+      bool curr_perfect = (curr_reduced == interval::kUnison ||
+                           curr_reduced == interval::kPerfect5th);
+
+      if (prev_perfect && curr_perfect && prev_reduced == curr_reduced) {
+        MotionType motion = rules.classifyMotion(
+            prev_self->pitch, pitch,
+            prev_other->pitch, other_note->pitch);
+        if (motion == MotionType::Parallel || motion == MotionType::Similar) {
+          result.has_parallel_perfect = true;
+          result.conflicting_voice = other;
+        }
+      }
+    }
+  }
+
+  return result;
+}
+
+// ---------------------------------------------------------------------------
 // Safety check
 // ---------------------------------------------------------------------------
 
@@ -101,8 +166,7 @@ bool CollisionResolver::isSafeToPlace(const CounterpointState& state,
 
     // Check consonance on strong beats (every quarter-note boundary).
     bool is_strong = (tick % kTicksPerBeat == 0);
-    int ivl = std::abs(static_cast<int>(pitch) -
-                       static_cast<int>(other_note->pitch));
+    int ivl = absoluteInterval(pitch, other_note->pitch);
     if (is_strong && !rules.isIntervalConsonant(ivl, is_strong)) {
       // When next_pitch is known, check if this dissonance forms a valid
       // non-harmonic tone pattern (passing tone or neighbor tone).
@@ -130,7 +194,7 @@ bool CollisionResolver::isSafeToPlace(const CounterpointState& state,
     // the rule evaluator treats P4 as consonant (3+ voice context).  Only P4
     // between two upper voices is acceptable.
     if (is_strong && rules.isIntervalConsonant(ivl, is_strong)) {
-      int reduced = ((ivl % 12) + 12) % 12;
+      int reduced = interval_util::compoundToSimple(ivl);
       if (reduced == interval::kPerfect4th) {
         const auto& active = state.getActiveVoices();
         // Bass voice = highest voice_id (last in registration order).
@@ -170,13 +234,12 @@ bool CollisionResolver::isSafeToPlace(const CounterpointState& state,
     }
 
     if (prev_self && prev_other) {
-      int prev_ivl = std::abs(static_cast<int>(prev_self->pitch) -
-                              static_cast<int>(prev_other->pitch));
+      int prev_ivl = absoluteInterval(prev_self->pitch, prev_other->pitch);
       int curr_ivl = ivl;
 
       // Check parallel perfect consonances.
-      int prev_reduced = ((prev_ivl % 12) + 12) % 12;
-      int curr_reduced = ((curr_ivl % 12) + 12) % 12;
+      int prev_reduced = interval_util::compoundToSimple(prev_ivl);
+      int curr_reduced = interval_util::compoundToSimple(curr_ivl);
 
       bool prev_perfect = (prev_reduced == interval::kUnison ||
                            prev_reduced == interval::kPerfect5th);
@@ -200,8 +263,7 @@ bool CollisionResolver::isSafeToPlace(const CounterpointState& state,
   // - Tritone (6 semitones) forbidden in melodic context
   const NoteEvent* melodic_prev = state.getLastNote(voice_id);
   if (melodic_prev) {
-    int leap = std::abs(static_cast<int>(pitch) -
-                        static_cast<int>(melodic_prev->pitch));
+    int leap = absoluteInterval(pitch, melodic_prev->pitch);
     if (leap > 12) return false;  // > octave forbidden
     int leap_class = leap % 12;
     if (leap_class == 6) return false;  // tritone forbidden
@@ -226,8 +288,7 @@ bool CollisionResolver::isSafeToPlace(const CounterpointState& state,
         int voice_dist = std::abs(static_cast<int>(voice_id) -
                                   static_cast<int>(other));
         if (voice_dist != 1) continue;
-        int pitch_dist = std::abs(static_cast<int>(pitch) -
-                                  static_cast<int>(other_note->pitch));
+        int pitch_dist = absoluteInterval(pitch, other_note->pitch);
         if (pitch_dist > 0 && pitch_dist < 3) return false;  // < minor 3rd
       }
     }
@@ -536,8 +597,7 @@ PlacementResult CollisionResolver::trySuspension(
     const NoteEvent* other_note = state.getNoteAt(other, tick);
     if (!other_note) continue;
 
-    int ivl = std::abs(static_cast<int>(held_pitch) -
-                       static_cast<int>(other_note->pitch));
+    int ivl = absoluteInterval(held_pitch, other_note->pitch);
     bool is_strong = (tick % kTicksPerBeat == 0);
     if (!rules.isIntervalConsonant(ivl, is_strong)) {
       // Verify the resolution: step down from held_pitch should be consonant.

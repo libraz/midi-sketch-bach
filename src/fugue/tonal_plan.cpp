@@ -8,66 +8,11 @@
 #include "core/pitch_utils.h"
 #include "harmony/chord_types.h"
 #include "harmony/harmonic_event.h"
+#include "harmony/key.h"
 
 namespace bach {
 
-// ---------------------------------------------------------------------------
-// Key relationship functions
-// ---------------------------------------------------------------------------
 
-Key getDominantKey(Key key) {
-  // Dominant = perfect 5th above = +7 semitones.
-  return static_cast<Key>((static_cast<uint8_t>(key) + 7) % 12);
-}
-
-Key getSubdominantKey(Key key) {
-  // Subdominant = perfect 4th above = +5 semitones.
-  return static_cast<Key>((static_cast<uint8_t>(key) + 5) % 12);
-}
-
-Key getRelativeKey(Key key, bool is_home_minor) {
-  if (is_home_minor) {
-    // Relative major of minor key: 3 semitones UP.
-    return static_cast<Key>((static_cast<uint8_t>(key) + 3) % 12);
-  }
-  // Relative minor of major key: 3 semitones DOWN (= +9 mod 12).
-  return static_cast<Key>((static_cast<uint8_t>(key) + 9) % 12);
-}
-
-Key getParallelKey(Key key, bool /*is_home_minor*/) {
-  // Parallel major/minor share the same tonic pitch class.
-  // The Key enum represents pitch class only, so the value is the same.
-  // The mode difference (major vs minor) is tracked externally.
-  return key;
-}
-
-std::vector<Key> getNearRelatedKeys(Key key, bool is_minor) {
-  std::vector<Key> result;
-  result.reserve(4);
-
-  Key dominant = getDominantKey(key);
-  Key subdominant = getSubdominantKey(key);
-  Key relative = getRelativeKey(key, is_minor);
-
-  result.push_back(dominant);
-  result.push_back(subdominant);
-  result.push_back(relative);
-
-  // Add parallel key only if it differs from the ones already present.
-  // Since parallel key has the same tonic, it equals home key in our enum,
-  // so we skip it if it duplicates home or existing entries. Instead, add
-  // the dominant of the relative key for a richer set.
-  Key dominant_of_relative = getDominantKey(relative);
-  bool already_present = (dominant_of_relative == dominant ||
-                          dominant_of_relative == subdominant ||
-                          dominant_of_relative == relative ||
-                          dominant_of_relative == key);
-  if (!already_present) {
-    result.push_back(dominant_of_relative);
-  }
-
-  return result;
-}
 
 // ---------------------------------------------------------------------------
 // TonalPlan member functions
@@ -274,9 +219,10 @@ TonalPlan generateTonalPlan(const FugueConfig& config, bool is_minor,
   plan.modulations.push_back({config.key, 0, FuguePhase::Establish});
 
   // 2. Develop phase: modulations through near-related keys.
-  Key dominant = getDominantKey(config.key);
-  Key subdominant = getSubdominantKey(config.key);
-  Key relative = getRelativeKey(config.key, is_minor);
+  KeySignature home{config.key, is_minor};
+  Key dominant = getDominant(home).tonic;
+  Key subdominant = getSubdominant(home).tonic;
+  Key relative = getRelative(home).tonic;
 
   // Build the modulation sequence based on mode.
   std::vector<Key> develop_keys;

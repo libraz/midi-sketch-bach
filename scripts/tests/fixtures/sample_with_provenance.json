@@ -1,0 +1,128 @@
+{
+  "seed": 99,
+  "form": "fugue",
+  "key": "C_major",
+  "voices": 3,
+  "tracks": [
+    {
+      "name": "soprano",
+      "channel": 0,
+      "program": 19,
+      "notes": [
+        {
+          "pitch": 72, "velocity": 80, "start_ticks": 0, "duration_ticks": 480,
+          "voice": "soprano",
+          "provenance": {
+            "source": "fugue_subject", "original_pitch": 72,
+            "chord_degree": 1, "lookup_tick": 0, "entry_number": 1,
+            "transform_steps": []
+          }
+        },
+        {
+          "pitch": 74, "velocity": 80, "start_ticks": 480, "duration_ticks": 480,
+          "voice": "soprano",
+          "provenance": {
+            "source": "fugue_subject", "original_pitch": 74,
+            "chord_degree": 2, "lookup_tick": 480, "entry_number": 1,
+            "transform_steps": []
+          }
+        },
+        {
+          "pitch": 76, "velocity": 80, "start_ticks": 960, "duration_ticks": 480,
+          "voice": "soprano",
+          "provenance": {
+            "source": "fugue_subject", "original_pitch": 76,
+            "chord_degree": 3, "lookup_tick": 960, "entry_number": 1,
+            "transform_steps": []
+          }
+        },
+        {
+          "pitch": 77, "velocity": 80, "start_ticks": 1440, "duration_ticks": 480,
+          "voice": "soprano",
+          "provenance": {
+            "source": "fugue_subject", "original_pitch": 77,
+            "chord_degree": 4, "lookup_tick": 1440, "entry_number": 1,
+            "transform_steps": []
+          }
+        },
+        {
+          "pitch": 72, "velocity": 80, "start_ticks": 3840, "duration_ticks": 480,
+          "voice": "soprano",
+          "provenance": {
+            "source": "episode_material", "original_pitch": 72,
+            "chord_degree": 1, "lookup_tick": 3840, "entry_number": 0,
+            "transform_steps": ["sequence"]
+          }
+        }
+      ]
+    },
+    {
+      "name": "alto",
+      "channel": 1,
+      "program": 20,
+      "notes": [
+        {
+          "pitch": 67, "velocity": 80, "start_ticks": 1920, "duration_ticks": 480,
+          "voice": "alto",
+          "provenance": {
+            "source": "fugue_answer", "original_pitch": 72,
+            "chord_degree": 5, "lookup_tick": 1920, "entry_number": 2,
+            "transform_steps": ["tonal_answer"]
+          }
+        },
+        {
+          "pitch": 69, "velocity": 80, "start_ticks": 2400, "duration_ticks": 480,
+          "voice": "alto",
+          "provenance": {
+            "source": "fugue_answer", "original_pitch": 74,
+            "chord_degree": 6, "lookup_tick": 2400, "entry_number": 2,
+            "transform_steps": ["tonal_answer"]
+          }
+        },
+        {
+          "pitch": 71, "velocity": 80, "start_ticks": 2880, "duration_ticks": 480,
+          "voice": "alto",
+          "provenance": {
+            "source": "fugue_answer", "original_pitch": 76,
+            "chord_degree": 7, "lookup_tick": 2880, "entry_number": 2,
+            "transform_steps": ["tonal_answer"]
+          }
+        },
+        {
+          "pitch": 72, "velocity": 80, "start_ticks": 3360, "duration_ticks": 480,
+          "voice": "alto",
+          "provenance": {
+            "source": "fugue_answer", "original_pitch": 77,
+            "chord_degree": 1, "lookup_tick": 3360, "entry_number": 2,
+            "transform_steps": ["tonal_answer"]
+          }
+        }
+      ]
+    },
+    {
+      "name": "bass",
+      "channel": 3,
+      "program": 19,
+      "notes": [
+        {
+          "pitch": 48, "velocity": 80, "start_ticks": 3840, "duration_ticks": 480,
+          "voice": "bass",
+          "provenance": {
+            "source": "fugue_subject", "original_pitch": 60,
+            "chord_degree": 1, "lookup_tick": 3840, "entry_number": 3,
+            "transform_steps": ["octave_adjust"]
+          }
+        },
+        {
+          "pitch": 50, "velocity": 80, "start_ticks": 4320, "duration_ticks": 480,
+          "voice": "bass",
+          "provenance": {
+            "source": "fugue_subject", "original_pitch": 62,
+            "chord_degree": 2, "lookup_tick": 4320, "entry_number": 3,
+            "transform_steps": ["octave_adjust"]
+          }
+        }
+      ]
+    }
+  ]
+}

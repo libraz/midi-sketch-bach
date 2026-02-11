@@ -31,6 +31,8 @@ struct CliOptions {
   bool verbose = false;
   bool instrument_specified = false;
   bach::DurationScale scale = bach::DurationScale::Short;
+  bach::ToccataArchetype toccata_archetype = bach::ToccataArchetype::Dramaticus;
+  bool toccata_style_specified = false;
   uint16_t target_bars = 0;
   bool scale_specified = false;
 };
@@ -49,6 +51,7 @@ void printUsage() {
   std::printf("  --bpm N          BPM (40-200)\n");
   std::printf("  --scale SCALE    Duration scale: short, medium, long, full\n");
   std::printf("  --bars N         Target bar count (overrides --scale)\n");
+  std::printf("  --toccata-style  Toccata archetype: dramaticus, perpetuus, concertato, sectionalis\n");
   std::printf("  --json           JSON output\n");
   std::printf("  --analyze        Generate + analysis\n");
   std::printf("  --strict         No retry\n");
@@ -113,6 +116,9 @@ bool parseArgs(int argc, char* argv[], CliOptions& opts) {
       opts.scale_specified = true;
     } else if (std::strcmp(argv[idx], "--bars") == 0 && idx + 1 < argc) {
       opts.target_bars = static_cast<uint16_t>(std::atoi(argv[++idx]));
+    } else if (std::strcmp(argv[idx], "--toccata-style") == 0 && idx + 1 < argc) {
+      opts.toccata_archetype = bach::toccataArchetypeFromString(argv[++idx]);
+      opts.toccata_style_specified = true;
     }
   }
   return true;
@@ -142,6 +148,8 @@ bach::GeneratorConfig buildGeneratorConfig(const CliOptions& opts) {
 
   config.scale = opts.scale;
   config.target_bars = opts.target_bars;
+  config.toccata_archetype = opts.toccata_archetype;
+  config.toccata_archetype_auto = !opts.toccata_style_specified;
 
   return config;
 }

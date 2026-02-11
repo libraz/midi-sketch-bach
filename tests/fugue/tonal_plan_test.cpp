@@ -8,24 +8,26 @@
 #include <algorithm>
 #include <string>
 
+#include "harmony/key.h"
+
 namespace bach {
 namespace {
 
 // ---------------------------------------------------------------------------
-// getDominantKey
+// Key relationships (via harmony/key.h)
 // ---------------------------------------------------------------------------
 
-TEST(TonalPlanTest, GetDominantKey_CMajor) {
+TEST(TonalPlanTest, GetDominant_CMajor) {
   // C -> G (dominant)
-  EXPECT_EQ(getDominantKey(Key::C), Key::G);
+  EXPECT_EQ(getDominant(KeySignature{Key::C, false}).tonic, Key::G);
 }
 
-TEST(TonalPlanTest, GetDominantKey_FMajor) {
+TEST(TonalPlanTest, GetDominant_FMajor) {
   // F -> C (dominant)
-  EXPECT_EQ(getDominantKey(Key::F), Key::C);
+  EXPECT_EQ(getDominant(KeySignature{Key::F, false}).tonic, Key::C);
 }
 
-TEST(TonalPlanTest, GetDominantKey_AllKeys) {
+TEST(TonalPlanTest, GetDominant_AllKeys) {
   // Circle of fifths: C->G->D->A->E->B->F#->C#->Ab->Eb->Bb->F->C
   const Key expected[] = {
       Key::G,   // C -> G
@@ -44,86 +46,88 @@ TEST(TonalPlanTest, GetDominantKey_AllKeys) {
 
   for (uint8_t idx = 0; idx < 12; ++idx) {
     Key input = static_cast<Key>(idx);
-    EXPECT_EQ(getDominantKey(input), expected[idx])
+    EXPECT_EQ(getDominant(KeySignature{input, false}).tonic, expected[idx])
         << "Failed for key " << keyToString(input);
   }
 }
 
 // ---------------------------------------------------------------------------
-// getSubdominantKey
+// getSubdominant (via harmony/key.h)
 // ---------------------------------------------------------------------------
 
-TEST(TonalPlanTest, GetSubdominantKey_CMajor) {
+TEST(TonalPlanTest, GetSubdominant_CMajor) {
   // C -> F (subdominant)
-  EXPECT_EQ(getSubdominantKey(Key::C), Key::F);
+  EXPECT_EQ(getSubdominant(KeySignature{Key::C, false}).tonic, Key::F);
 }
 
-TEST(TonalPlanTest, GetSubdominantKey_GMajor) {
+TEST(TonalPlanTest, GetSubdominant_GMajor) {
   // G -> C (subdominant)
-  EXPECT_EQ(getSubdominantKey(Key::G), Key::C);
+  EXPECT_EQ(getSubdominant(KeySignature{Key::G, false}).tonic, Key::C);
 }
 
-TEST(TonalPlanTest, GetSubdominantKey_FMajor) {
+TEST(TonalPlanTest, GetSubdominant_FMajor) {
   // F -> Bb (subdominant)
-  EXPECT_EQ(getSubdominantKey(Key::F), Key::Bb);
+  EXPECT_EQ(getSubdominant(KeySignature{Key::F, false}).tonic, Key::Bb);
 }
 
-TEST(TonalPlanTest, GetSubdominantKey_InverseOfDominant) {
+TEST(TonalPlanTest, GetSubdominant_InverseOfDominant) {
   // Subdominant of dominant should return home key for all keys.
   for (uint8_t idx = 0; idx < 12; ++idx) {
     Key key = static_cast<Key>(idx);
-    Key dominant = getDominantKey(key);
-    EXPECT_EQ(getSubdominantKey(dominant), key)
+    Key dominant = getDominant(KeySignature{key, false}).tonic;
+    EXPECT_EQ(getSubdominant(KeySignature{dominant, false}).tonic, key)
         << "Subdominant of dominant should be home for key " << keyToString(key);
   }
 }
 
 // ---------------------------------------------------------------------------
-// getRelativeKey
+// getRelative (via harmony/key.h)
 // ---------------------------------------------------------------------------
 
-TEST(TonalPlanTest, GetRelativeKey_MajorToMinor) {
+TEST(TonalPlanTest, GetRelative_MajorToMinor) {
   // C major -> A minor (3 semitones down)
-  EXPECT_EQ(getRelativeKey(Key::C, false), Key::A);
+  EXPECT_EQ(getRelative(KeySignature{Key::C, false}).tonic, Key::A);
 }
 
-TEST(TonalPlanTest, GetRelativeKey_MinorToMajor) {
+TEST(TonalPlanTest, GetRelative_MinorToMajor) {
   // A minor -> C major (3 semitones up)
-  EXPECT_EQ(getRelativeKey(Key::A, true), Key::C);
+  EXPECT_EQ(getRelative(KeySignature{Key::A, true}).tonic, Key::C);
 }
 
-TEST(TonalPlanTest, GetRelativeKey_GMajor) {
+TEST(TonalPlanTest, GetRelative_GMajor) {
   // G major -> E minor (3 semitones down)
-  EXPECT_EQ(getRelativeKey(Key::G, false), Key::E);
+  EXPECT_EQ(getRelative(KeySignature{Key::G, false}).tonic, Key::E);
 }
 
-TEST(TonalPlanTest, GetRelativeKey_DMinor) {
+TEST(TonalPlanTest, GetRelative_DMinor) {
   // D minor -> F major (3 semitones up)
-  EXPECT_EQ(getRelativeKey(Key::D, true), Key::F);
+  EXPECT_EQ(getRelative(KeySignature{Key::D, true}).tonic, Key::F);
 }
 
-TEST(TonalPlanTest, GetRelativeKey_RoundTrip) {
+TEST(TonalPlanTest, GetRelative_RoundTrip) {
   // Going from major to relative minor and back should return original.
   for (uint8_t idx = 0; idx < 12; ++idx) {
     Key key = static_cast<Key>(idx);
-    Key relative_minor = getRelativeKey(key, false);
-    Key back_to_major = getRelativeKey(relative_minor, true);
+    KeySignature rel = getRelative(KeySignature{key, false});
+    Key back_to_major = getRelative(rel).tonic;
     EXPECT_EQ(back_to_major, key)
         << "Round trip failed for key " << keyToString(key);
   }
 }
 
 // ---------------------------------------------------------------------------
-// getNearRelatedKeys
+// getCloselyRelatedKeys (via harmony/key.h)
 // ---------------------------------------------------------------------------
 
-TEST(TonalPlanTest, GetNearRelatedKeys_CMajor) {
-  auto keys = getNearRelatedKeys(Key::C, false);
-  // Should include G (dominant), F (subdominant), A (relative minor).
-  EXPECT_GE(keys.size(), 3u);
+TEST(TonalPlanTest, GetCloselyRelatedKeys_CMajor) {
+  auto key_sigs = getCloselyRelatedKeys(KeySignature{Key::C, false});
+  EXPECT_GE(key_sigs.size(), 3u);
 
   auto contains = [&](Key target) {
-    return std::find(keys.begin(), keys.end(), target) != keys.end();
+    for (const auto& ks : key_sigs) {
+      if (ks.tonic == target) return true;
+    }
+    return false;
   };
 
   EXPECT_TRUE(contains(Key::G)) << "Should include dominant G";
@@ -131,13 +135,15 @@ TEST(TonalPlanTest, GetNearRelatedKeys_CMajor) {
   EXPECT_TRUE(contains(Key::A)) << "Should include relative minor A";
 }
 
-TEST(TonalPlanTest, GetNearRelatedKeys_DMinor) {
-  auto keys = getNearRelatedKeys(Key::D, true);
-  // Should include A (dominant), G (subdominant), F (relative major).
-  EXPECT_GE(keys.size(), 3u);
+TEST(TonalPlanTest, GetCloselyRelatedKeys_DMinor) {
+  auto key_sigs = getCloselyRelatedKeys(KeySignature{Key::D, true});
+  EXPECT_GE(key_sigs.size(), 3u);
 
   auto contains = [&](Key target) {
-    return std::find(keys.begin(), keys.end(), target) != keys.end();
+    for (const auto& ks : key_sigs) {
+      if (ks.tonic == target) return true;
+    }
+    return false;
   };
 
   EXPECT_TRUE(contains(Key::A)) << "Should include dominant A";
@@ -145,14 +151,16 @@ TEST(TonalPlanTest, GetNearRelatedKeys_DMinor) {
   EXPECT_TRUE(contains(Key::F)) << "Should include relative major F";
 }
 
-TEST(TonalPlanTest, GetNearRelatedKeys_DoesNotContainHome) {
-  // Near-related keys should not include the home key itself.
+TEST(TonalPlanTest, GetCloselyRelatedKeys_IncludesSelf) {
+  // getCloselyRelatedKeys includes the home key as the first entry.
   for (uint8_t idx = 0; idx < 12; ++idx) {
     Key key = static_cast<Key>(idx);
-    auto keys = getNearRelatedKeys(key, false);
-    auto found = std::find(keys.begin(), keys.end(), key);
-    EXPECT_EQ(found, keys.end())
-        << "Near-related keys should not contain home key " << keyToString(key);
+    auto key_sigs = getCloselyRelatedKeys(KeySignature{key, false});
+    ASSERT_FALSE(key_sigs.empty());
+    EXPECT_EQ(key_sigs[0].tonic, key)
+        << "First entry should be home key " << keyToString(key);
+    EXPECT_FALSE(key_sigs[0].is_minor)
+        << "First entry should be major for " << keyToString(key);
   }
 }
 

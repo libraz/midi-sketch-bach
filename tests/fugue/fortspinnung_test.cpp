@@ -345,5 +345,60 @@ TEST(FortspinnungTest, ZeroDurationReturnsEmpty) {
   EXPECT_TRUE(result.empty());
 }
 
+// ===========================================================================
+// Voice2GeneratedForThreeVoices
+// ===========================================================================
+
+TEST(FortspinnungTest, Voice2GeneratedForThreeVoices) {
+  auto pool = buildTestPool();
+  auto result = generateFortspinnung(pool, 0, kTicksPerBar * 4,
+                                     3, 42, SubjectCharacter::Severe);
+
+  EXPECT_FALSE(result.empty());
+
+  // Voice 2 (bass) should be present.
+  int voice2_count = 0;
+  for (const auto& note : result) {
+    if (note.voice == 2) ++voice2_count;
+  }
+  EXPECT_GT(voice2_count, 0)
+      << "3-voice Fortspinnung should generate voice 2 (bass) notes";
+}
+
+// ===========================================================================
+// Voice2PitchInBassRange
+// ===========================================================================
+
+TEST(FortspinnungTest, Voice2PitchInBassRange) {
+  auto pool = buildTestPool();
+  auto result = generateFortspinnung(pool, 0, kTicksPerBar * 8,
+                                     3, 42, SubjectCharacter::Severe);
+
+  for (const auto& note : result) {
+    if (note.voice == 2) {
+      // Bass voice should be in bass range [C2=36, C4=60].
+      EXPECT_GE(note.pitch, 36u)
+          << "Voice 2 bass note below C2: " << static_cast<int>(note.pitch);
+      EXPECT_LE(note.pitch, 60u)
+          << "Voice 2 bass note above C4: " << static_cast<int>(note.pitch);
+    }
+  }
+}
+
+// ===========================================================================
+// Voice2NotGeneratedForTwoVoices
+// ===========================================================================
+
+TEST(FortspinnungTest, Voice2NotGeneratedForTwoVoices) {
+  auto pool = buildTestPool();
+  auto result = generateFortspinnung(pool, 0, kTicksPerBar * 4,
+                                     2, 42, SubjectCharacter::Severe);
+
+  for (const auto& note : result) {
+    EXPECT_NE(note.voice, 2u)
+        << "2-voice Fortspinnung should NOT generate voice 2 notes";
+  }
+}
+
 }  // namespace
 }  // namespace bach

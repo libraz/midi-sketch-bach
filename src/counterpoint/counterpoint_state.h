@@ -64,6 +64,10 @@ class CounterpointState {
   /// @return Pointer to matching note, or nullptr if none found.
   const NoteEvent* getNoteAt(VoiceId voice_id, Tick tick) const;
 
+  /// @brief Update the pitch of a note sounding at a specific tick for a voice.
+  /// @return True if a matching note was found and updated.
+  bool updateNotePitchAt(VoiceId voice_id, Tick tick, uint8_t new_pitch);
+
   /// @brief Get the pitch range for a registered voice.
   /// @return Pointer to VoiceRange, or nullptr if voice is not registered.
   const VoiceRange* getVoiceRange(VoiceId voice_id) const;

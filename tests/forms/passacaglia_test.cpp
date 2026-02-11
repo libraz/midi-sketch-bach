@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <set>
 #include <vector>
 
 #include "core/basic_types.h"
@@ -109,19 +110,19 @@ TEST(PassacagliaTest, GroundBassLength) {
   int bars = 8;
   auto ground_bass = generatePassacagliaGroundBass(key, bars, 42);
 
-  // 2 half notes per bar x 8 bars = 16 notes.
-  EXPECT_EQ(ground_bass.size(), 16u);
+  // 1 whole note per bar x 8 bars = 8 notes.
+  EXPECT_EQ(ground_bass.size(), 8u);
 }
 
-TEST(PassacagliaTest, GroundBassHalfNoteDurations) {
+TEST(PassacagliaTest, GroundBassWholeNoteDurations) {
   KeySignature key = {Key::C, true};
   auto ground_bass = generatePassacagliaGroundBass(key, 8, 42);
 
-  constexpr Tick kExpectedDuration = kTicksPerBeat * 2;  // Half note = 960.
+  constexpr Tick kExpectedDuration = kTicksPerBar;  // Whole note = 1920.
   for (const auto& note : ground_bass) {
     EXPECT_EQ(note.duration, kExpectedDuration)
         << "Ground bass note at tick " << note.start_tick
-        << " should be a half note (" << kExpectedDuration << " ticks)";
+        << " should be a whole note (" << kExpectedDuration << " ticks)";
   }
 }
 
@@ -144,7 +145,7 @@ TEST(PassacagliaTest, GroundBassIsImmutable) {
   const auto& pedal_track = result.tracks.back();
 
   // Collect ground bass notes (source == GroundBass) grouped by variation.
-  int notes_per_variation = config.ground_bass_bars * 2;
+  int notes_per_variation = config.ground_bass_bars;
   Tick variation_duration =
       static_cast<Tick>(config.ground_bass_bars) * kTicksPerBar;
 
@@ -514,9 +515,9 @@ TEST(PassacagliaTest, GroundBassNotesContiguous) {
   KeySignature key = {Key::C, true};
   auto ground_bass = generatePassacagliaGroundBass(key, 8, 42);
 
-  constexpr Tick kHalf = kTicksPerBeat * 2;
+  constexpr Tick kWhole = kTicksPerBar;
   for (size_t idx = 0; idx < ground_bass.size(); ++idx) {
-    EXPECT_EQ(ground_bass[idx].start_tick, static_cast<Tick>(idx) * kHalf)
+    EXPECT_EQ(ground_bass[idx].start_tick, static_cast<Tick>(idx) * kWhole)
         << "Ground bass note " << idx << " is not contiguous";
   }
 }
@@ -537,6 +538,118 @@ TEST(PassacagliaTest, GroundBassDifferentKeys) {
   }
   EXPECT_TRUE(any_different)
       << "Different keys should produce different ground bass pitches";
+}
+
+// ---------------------------------------------------------------------------
+// Baroque-style ground bass properties
+// ---------------------------------------------------------------------------
+
+TEST(PassacagliaTest, GroundBassStartsOnTonic) {
+  for (uint32_t seed = 0; seed < 20; ++seed) {
+    KeySignature key = {Key::C, true};
+    auto ground_bass = generatePassacagliaGroundBass(key, 8, seed);
+    ASSERT_FALSE(ground_bass.empty()) << "Empty for seed " << seed;
+
+    int tonic_class = static_cast<int>(key.tonic);
+    int first_class = ground_bass[0].pitch % 12;
+    EXPECT_EQ(first_class, tonic_class)
+        << "First note should be tonic (seed " << seed << ")";
+  }
+}
+
+TEST(PassacagliaTest, GroundBassEndsOnTonic) {
+  for (uint32_t seed = 0; seed < 20; ++seed) {
+    KeySignature key = {Key::C, true};
+    auto ground_bass = generatePassacagliaGroundBass(key, 8, seed);
+    ASSERT_FALSE(ground_bass.empty()) << "Empty for seed " << seed;
+
+    int tonic_class = static_cast<int>(key.tonic);
+    int last_class = ground_bass.back().pitch % 12;
+    EXPECT_EQ(last_class, tonic_class)
+        << "Last note should be tonic (seed " << seed << ")";
+  }
+}
+
+TEST(PassacagliaTest, GroundBassMaxTwoConsecutiveSamePitch) {
+  for (uint32_t seed = 0; seed < 20; ++seed) {
+    KeySignature key = {Key::C, true};
+    auto ground_bass = generatePassacagliaGroundBass(key, 8, seed);
+
+    for (size_t idx = 2; idx < ground_bass.size(); ++idx) {
+      bool three_same = (ground_bass[idx].pitch == ground_bass[idx - 1].pitch) &&
+                        (ground_bass[idx - 1].pitch == ground_bass[idx - 2].pitch);
+      EXPECT_FALSE(three_same)
+          << "Three consecutive same pitches at index " << idx
+          << " (seed " << seed << ")";
+    }
+  }
+}
+
+TEST(PassacagliaTest, GroundBassNoLeapAboveMajor6th) {
+  for (uint32_t seed = 0; seed < 20; ++seed) {
+    KeySignature key = {Key::C, true};
+    auto ground_bass = generatePassacagliaGroundBass(key, 8, seed);
+
+    for (size_t idx = 1; idx < ground_bass.size(); ++idx) {
+      int interval = std::abs(static_cast<int>(ground_bass[idx].pitch) -
+                              static_cast<int>(ground_bass[idx - 1].pitch));
+      // Body leaps ≤ major 6th (9 semitones). Cadential tail (last 2 notes)
+      // may have wider leaps for leading-tone resolution (up to 11 semitones).
+      bool is_cadential_tail = (idx >= ground_bass.size() - 2);
+      int max_leap = is_cadential_tail ? 12 : 9;
+      EXPECT_LE(interval, max_leap)
+          << "Leap of " << interval << " semitones between index "
+          << (idx - 1) << " and " << idx << " (seed " << seed << ")";
+    }
+  }
+}
+
+TEST(PassacagliaTest, GroundBassStepwiseRatio) {
+  for (uint32_t seed = 0; seed < 10; ++seed) {
+    KeySignature key = {Key::C, true};
+    auto ground_bass = generatePassacagliaGroundBass(key, 8, seed);
+    if (ground_bass.size() < 2) continue;
+
+    int stepwise_count = 0;
+    int total_intervals = static_cast<int>(ground_bass.size()) - 1;
+    for (size_t idx = 1; idx < ground_bass.size(); ++idx) {
+      int interval = std::abs(static_cast<int>(ground_bass[idx].pitch) -
+                              static_cast<int>(ground_bass[idx - 1].pitch));
+      if (interval <= 2) ++stepwise_count;
+    }
+    double ratio = static_cast<double>(stepwise_count) / total_intervals;
+    EXPECT_GE(ratio, 0.5)
+        << "Stepwise ratio " << ratio << " below 50% (seed " << seed << ")";
+  }
+}
+
+TEST(PassacagliaTest, GroundBassVarietyAcrossSeeds) {
+  std::set<std::vector<uint8_t>> unique_patterns;
+  KeySignature key = {Key::C, true};
+  for (uint32_t seed = 0; seed < 50; ++seed) {
+    auto ground_bass = generatePassacagliaGroundBass(key, 8, seed);
+    std::vector<uint8_t> pattern;
+    for (const auto& note : ground_bass) {
+      pattern.push_back(note.pitch);
+    }
+    unique_patterns.insert(pattern);
+  }
+  EXPECT_GE(unique_patterns.size(), 3u)
+      << "At least 3 distinct patterns expected across 50 seeds";
+}
+
+TEST(PassacagliaTest, GroundBassTwoConsecutiveOnlyAtOpening) {
+  for (uint32_t seed = 0; seed < 20; ++seed) {
+    KeySignature key = {Key::C, true};
+    auto ground_bass = generatePassacagliaGroundBass(key, 8, seed);
+
+    for (size_t idx = 2; idx < ground_bass.size(); ++idx) {
+      // Consecutive same pitch after bar 1 should not occur.
+      EXPECT_NE(ground_bass[idx].pitch, ground_bass[idx - 1].pitch)
+          << "Same pitch at index " << (idx - 1) << "-" << idx
+          << " (only allowed at 0-1, seed " << seed << ")";
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -581,6 +694,139 @@ TEST(PassacagliaTest, MultiSeedGenerationSucceeds) {
 
     EXPECT_TRUE(result.success) << "Failed for seed " << seed;
     EXPECT_GT(totalNoteCount(result), 0u) << "No notes for seed " << seed;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Baroque-style ground bass quality (fixes 1-4 verification)
+// ---------------------------------------------------------------------------
+
+TEST(PassacagliaTest, GroundBassEndingTonicInBaseRegister) {
+  // Fix 1 verification: final note must be within 12 semitones of the first
+  // note (no octave displacement from leap smoothing of cadential tail).
+  for (uint32_t seed = 0; seed < 20; ++seed) {
+    KeySignature key = {Key::C, true};
+    auto ground_bass = generatePassacagliaGroundBass(key, 8, seed);
+    ASSERT_GE(ground_bass.size(), 2u) << "seed " << seed;
+
+    int first_pitch = static_cast<int>(ground_bass.front().pitch);
+    int last_pitch = static_cast<int>(ground_bass.back().pitch);
+    EXPECT_LE(std::abs(last_pitch - first_pitch), 12)
+        << "Final tonic displaced by " << std::abs(last_pitch - first_pitch)
+        << " semitones from opening (seed " << seed << ")";
+  }
+}
+
+TEST(PassacagliaTest, GroundBassCadentialTailNotSmoothed) {
+  // Fix 1 verification: when cadential degree 6 produces a leading-tone
+  // resolution (e.g. B->C in C minor = 11 semitones down), the final note
+  // must NOT be brought up an octave by leap smoothing.
+  KeySignature key = {Key::C, true};
+  // Test across many seeds: at least one should use degree 6 cadence.
+  int leading_tone_count = 0;
+  for (uint32_t seed = 0; seed < 100; ++seed) {
+    auto ground_bass = generatePassacagliaGroundBass(key, 8, seed);
+    ASSERT_GE(ground_bass.size(), 2u);
+    size_t n = ground_bass.size();
+
+    uint8_t penultimate = ground_bass[n - 2].pitch;
+    uint8_t final_note = ground_bass[n - 1].pitch;
+
+    // Check if penultimate is B (pitch class 11) = leading tone in C minor.
+    if (penultimate % 12 == 11) {
+      ++leading_tone_count;
+      // Final note should be C in low register (C2=36 or C3=48), not C4=60.
+      EXPECT_LE(final_note, 48u)
+          << "Leading tone B(" << static_cast<int>(penultimate)
+          << ")->C should resolve to low register, got "
+          << static_cast<int>(final_note) << " (seed " << seed << ")";
+    }
+  }
+  // Sanity: at least some seeds should produce leading-tone cadences.
+  EXPECT_GT(leading_tone_count, 0)
+      << "No leading-tone cadences found in 100 seeds";
+}
+
+TEST(PassacagliaTest, GroundBassTonicStartEndMultipleKeys) {
+  // Verify tonic start/end for all 12 keys in both major and minor.
+  Key all_keys[] = {Key::C,  Key::Cs, Key::D,  Key::Eb, Key::E,  Key::F,
+                    Key::Fs, Key::G,  Key::Ab, Key::A,  Key::Bb, Key::B};
+  for (Key k : all_keys) {
+    for (bool is_minor : {true, false}) {
+      KeySignature key = {k, is_minor};
+      auto ground_bass = generatePassacagliaGroundBass(key, 8, 42);
+      ASSERT_FALSE(ground_bass.empty())
+          << "Empty for key " << static_cast<int>(k) << " minor=" << is_minor;
+
+      int tonic_class = static_cast<int>(k);
+      int first_class = ground_bass.front().pitch % 12;
+      int last_class = ground_bass.back().pitch % 12;
+
+      EXPECT_EQ(first_class, tonic_class)
+          << "First note wrong for key " << static_cast<int>(k)
+          << " minor=" << is_minor;
+      EXPECT_EQ(last_class, tonic_class)
+          << "Last note wrong for key " << static_cast<int>(k)
+          << " minor=" << is_minor;
+    }
+  }
+}
+
+TEST(PassacagliaTest, GroundBassCadentialLeadingTone) {
+  // Fix 3 verification: across 100 seeds, leading-tone (degree 6) should
+  // appear in at least 10% of cadential penultimate notes, confirming that
+  // the context-aware selection still produces variety.
+  KeySignature key = {Key::C, true};
+  int leading_tone_count = 0;
+  for (uint32_t seed = 0; seed < 100; ++seed) {
+    auto ground_bass = generatePassacagliaGroundBass(key, 8, seed);
+    ASSERT_GE(ground_bass.size(), 2u);
+    uint8_t penultimate = ground_bass[ground_bass.size() - 2].pitch;
+    // In C minor, leading tone B natural = pitch class 11.
+    if (penultimate % 12 == 11) {
+      ++leading_tone_count;
+    }
+  }
+  EXPECT_GE(leading_tone_count, 10)
+      << "Leading tone appeared only " << leading_tone_count
+      << "/100 times (expected >= 10%)";
+}
+
+TEST(PassacagliaTest, GroundBassExtendedLength) {
+  // Fix 4 verification: 12-bar ground bass stays in pedal range,
+  // has no excessive leaps, and ends on tonic.
+  for (uint32_t seed = 0; seed < 10; ++seed) {
+    KeySignature key = {Key::C, true};
+    auto ground_bass = generatePassacagliaGroundBass(key, 12, seed);
+    ASSERT_EQ(ground_bass.size(), 12u) << "seed " << seed;
+
+    // All pitches in pedal range.
+    for (size_t idx = 0; idx < ground_bass.size(); ++idx) {
+      EXPECT_GE(ground_bass[idx].pitch, organ_range::kPedalLow)
+          << "Below pedal range at index " << idx << " (seed " << seed << ")";
+      EXPECT_LE(ground_bass[idx].pitch, organ_range::kPedalHigh)
+          << "Above pedal range at index " << idx << " (seed " << seed << ")";
+    }
+
+    // Body leaps ≤ major 6th (9 semitones), cadential tail ≤ octave.
+    for (size_t idx = 1; idx < ground_bass.size(); ++idx) {
+      int interval = std::abs(static_cast<int>(ground_bass[idx].pitch) -
+                              static_cast<int>(ground_bass[idx - 1].pitch));
+      bool is_cadential_tail = (idx >= ground_bass.size() - 2);
+      int max_leap = is_cadential_tail ? 12 : 9;
+      EXPECT_LE(interval, max_leap)
+          << "Leap of " << interval << " at index " << idx
+          << " (seed " << seed << ")";
+    }
+
+    // Tonic ending.
+    int tonic_class = static_cast<int>(key.tonic);
+    EXPECT_EQ(ground_bass.back().pitch % 12, tonic_class)
+        << "Not ending on tonic (seed " << seed << ")";
+
+    // Tonic start.
+    EXPECT_EQ(ground_bass.front().pitch % 12, tonic_class)
+        << "Not starting on tonic (seed " << seed << ")";
   }
 }
 

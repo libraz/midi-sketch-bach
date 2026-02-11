@@ -289,13 +289,7 @@ float computeTonalConsistencyScore(const std::vector<NoteEvent>& notes,
   }
   if (total_notes == 0) return 0.0f;
 
-  // Scale tone semitone offsets relative to tonic.
-  // Major: 0, 2, 4, 5, 7, 9, 11
-  // Minor (natural): 0, 2, 3, 5, 7, 8, 10
-  constexpr int kMajorScale[7] = {0, 2, 4, 5, 7, 9, 11};
-  constexpr int kMinorScale[7] = {0, 2, 3, 5, 7, 8, 10};
-
-  const int* scale_offsets = is_minor ? kMinorScale : kMajorScale;
+  const int* scale_offsets = is_minor ? kScaleNaturalMinor : kScaleMajor;
   int tonic_pc = static_cast<int>(tonic_key);
 
   // Build a set of scale-tone pitch classes.

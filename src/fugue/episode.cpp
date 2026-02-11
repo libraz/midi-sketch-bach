@@ -7,6 +7,7 @@
 #include <random>
 
 #include "core/note_creator.h"
+#include "core/pitch_utils.h"
 #include "core/rng_util.h"
 #include "core/scale.h"
 #include "counterpoint/collision_resolver.h"
@@ -117,11 +118,7 @@ static void fitToVoiceRegister(std::vector<NoteEvent>& notes, VoiceId voice_id,
   // Round shift to nearest octave (positive or negative).
   int diff = range_center - avg_pitch;
   int octave_shift = 0;
-  if (diff >= 0) {
-    octave_shift = ((diff + 6) / 12) * 12;
-  } else {
-    octave_shift = -(((- diff) + 6) / 12) * 12;
-  }
+  octave_shift = nearestOctaveShift(diff);
 
   // Apply shift and clamp to voice range.
   for (auto& note : notes) {
@@ -134,14 +131,7 @@ static void fitToVoiceRegister(std::vector<NoteEvent>& notes, VoiceId voice_id,
 
 }  // namespace (anonymous -- reopened below after shared helpers)
 
-/// @brief Clamp a pitch value to valid MIDI range [0, 127].
-/// @param value Pitch value that may be out of range.
-/// @return Clamped uint8_t pitch.
-static uint8_t clampMidiPitch(int value) {
-  if (value < 0) return 0;
-  if (value > 127) return 127;
-  return static_cast<uint8_t>(value);
-}
+
 
 /// @brief Normalize a motif so that the first note starts at tick 0.
 /// @param motif Input motif (modified in place).
@@ -815,7 +805,7 @@ Episode generateEpisode(const Subject& subject, Tick start_tick, Tick duration_t
     for (auto& note : episode.notes) {
       if (note.start_tick >= midpoint) {
         int new_pitch = static_cast<int>(note.pitch) + key_diff;
-        note.pitch = scale_util::nearestScaleTone(clampMidiPitch(new_pitch), target_key, scale);
+        note.pitch = scale_util::nearestScaleTone(clampPitch(new_pitch, 0, 127), target_key, scale);
       }
     }
   }
@@ -1025,7 +1015,7 @@ Episode generateFortspinnungEpisode(const Subject& subject, const MotifPool& poo
     for (auto& note : episode.notes) {
       if (note.start_tick >= midpoint) {
         int new_pitch = static_cast<int>(note.pitch) + key_diff;
-        note.pitch = scale_util::nearestScaleTone(clampMidiPitch(new_pitch), target_key, scale);
+        note.pitch = scale_util::nearestScaleTone(clampPitch(new_pitch, 0, 127), target_key, scale);
       }
     }
   }
@@ -1103,7 +1093,8 @@ Episode generateFortspinnungEpisode(const Subject& subject, const MotifPool& poo
   // Diatonic context for pre-snapping.
   ScaleType scale = subject.is_minor ? ScaleType::HarmonicMinor : ScaleType::Major;
 
-  for (const auto& note : raw.notes) {
+  for (size_t note_idx = 0; note_idx < raw.notes.size(); ++note_idx) {
+    const auto& note = raw.notes[note_idx];
     // Query harmonic context at this tick.
     const auto& harm_ev = timeline.getAt(note.start_tick);
 
@@ -1121,6 +1112,16 @@ Episode generateFortspinnungEpisode(const Subject& subject, const MotifPool& poo
       desired_pitch = nearestChordTone(diatonic_pitch, harm_ev);
     }
 
+    // Lookahead: find next pitch in the same voice for NHT validation.
+    uint8_t lookahead_pitch = 0;
+    for (size_t nxt = note_idx + 1; nxt < raw.notes.size(); ++nxt) {
+      if (raw.notes[nxt].voice == note.voice &&
+          raw.notes[nxt].start_tick > note.start_tick) {
+        lookahead_pitch = raw.notes[nxt].pitch;
+        break;
+      }
+    }
+
     // Route through createBachNote for counterpoint validation.
     BachNoteOptions opts;
     opts.voice = note.voice;
@@ -1129,6 +1130,7 @@ Episode generateFortspinnungEpisode(const Subject& subject, const MotifPool& poo
     opts.duration = note.duration;
     opts.velocity = note.velocity;
     opts.source = BachNoteSource::EpisodeMaterial;
+    opts.next_pitch = lookahead_pitch;
 
     BachCreateNoteResult result = createBachNote(&cp_state, &cp_rules, &cp_resolver, opts);
     if (result.accepted) {

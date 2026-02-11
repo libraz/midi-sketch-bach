@@ -17,6 +17,39 @@
 
 namespace bach {
 
+// ===========================================================================
+// getRhythmSubdivisions -- public
+// ===========================================================================
+
+std::vector<std::pair<Tick, Tick>> getRhythmSubdivisions(
+    RhythmProfile profile, Tick beat_ticks) {
+  switch (profile) {
+    case RhythmProfile::QuarterNote:
+      return {{0, beat_ticks}};
+    case RhythmProfile::EighthNote:
+      return {{0, beat_ticks / 2}, {beat_ticks / 2, beat_ticks / 2}};
+    case RhythmProfile::DottedEighth:
+      // Dotted-8th (360) + 16th (120) = 480
+      return {{0, beat_ticks * 3 / 4}, {beat_ticks * 3 / 4, beat_ticks / 4}};
+    case RhythmProfile::Triplet:
+      // 3 equal subdivisions: 160 + 160 + 160 = 480
+      return {{0, beat_ticks / 3},
+              {beat_ticks / 3, beat_ticks / 3},
+              {beat_ticks * 2 / 3, beat_ticks - beat_ticks / 3 - beat_ticks / 3}};
+    case RhythmProfile::Sixteenth:
+      return {{0, beat_ticks / 4},
+              {beat_ticks / 4, beat_ticks / 4},
+              {beat_ticks / 2, beat_ticks / 4},
+              {beat_ticks * 3 / 4, beat_ticks / 4}};
+    case RhythmProfile::Mixed8th16th:
+      // 8th (240) + 16th (120) + 16th (120) = 480
+      return {{0, beat_ticks / 2},
+              {beat_ticks / 2, beat_ticks / 4},
+              {beat_ticks * 3 / 4, beat_ticks / 4}};
+  }
+  return {{0, beat_ticks}};
+}
+
 namespace {
 
 // ---------------------------------------------------------------------------
@@ -304,12 +337,14 @@ std::vector<NoteEvent> generateSingleLine(const TextureContext& ctx,
 
   std::mt19937 rng(ctx.seed);
 
-  // Reserve space: ~2 notes per beat, 4 beats per bar.
+  auto subdivisions = getRhythmSubdivisions(ctx.rhythm_profile);
   Tick num_bars = ctx.duration_ticks / kTicksPerBar;
-  notes.reserve(static_cast<size_t>(num_bars) * 8);
+  notes.reserve(static_cast<size_t>(num_bars) * subdivisions.size() * kBeatsPerBar);
 
   // Track previous pitch for stepwise preference.
   uint8_t prev_pitch = 0;
+  bool just_leaped = false;
+  int last_leap_direction = 0;  // +1 = up, -1 = down
 
   for (Tick bar_offset = 0; bar_offset < ctx.duration_ticks; bar_offset += kTicksPerBar) {
     Tick bar_tick = ctx.start_tick + bar_offset;
@@ -318,17 +353,15 @@ std::vector<NoteEvent> generateSingleLine(const TextureContext& ctx,
       Tick beat_tick = bar_tick + static_cast<Tick>(beat_idx) * kTicksPerBeat;
       Tick tick_in_bar = static_cast<Tick>(beat_idx) * kTicksPerBeat;
 
-      // Lookup the harmonic event at this tick.
       const HarmonicEvent& harm = timeline.getAt(beat_tick);
       std::vector<uint8_t> chord_pitches = chordToPitches(
           harm.chord, harm.is_minor, ctx.register_low, ctx.register_high);
 
       if (chord_pitches.empty()) continue;
 
-      // Two 8th notes per beat.
-      for (int eighth_idx = 0; eighth_idx < 2; ++eighth_idx) {
-        Tick note_tick = beat_tick + static_cast<Tick>(eighth_idx) * kEighthDuration;
-        Tick note_tick_in_bar = tick_in_bar + static_cast<Tick>(eighth_idx) * kEighthDuration;
+      for (const auto& [sub_offset, sub_duration] : subdivisions) {
+        Tick note_tick = beat_tick + sub_offset;
+        Tick note_tick_in_bar = tick_in_bar + sub_offset;
 
         uint8_t pitch;
         if (prev_pitch == 0) {
@@ -336,24 +369,51 @@ std::vector<NoteEvent> generateSingleLine(const TextureContext& ctx,
           uint8_t mid = static_cast<uint8_t>(
               (static_cast<int>(ctx.register_low) + static_cast<int>(ctx.register_high)) / 2);
           pitch = nearestChordTone(mid, chord_pitches);
+        } else if (just_leaped) {
+          // Compensation after leap: move in the opposite direction.
+          int compensation_dir = (last_leap_direction > 0) ? -1 : 1;
+          int target = static_cast<int>(prev_pitch) + compensation_dir * 2;
+          if (target >= static_cast<int>(ctx.register_low) &&
+              target <= static_cast<int>(ctx.register_high)) {
+            pitch = nearestChordTone(static_cast<uint8_t>(target), chord_pitches);
+          } else {
+            pitch = nearestChordTone(prev_pitch, chord_pitches);
+          }
+          just_leaped = false;
         } else {
-          // Prefer stepwise motion: find the chord tone nearest to prev_pitch.
           pitch = nearestChordTone(prev_pitch, chord_pitches);
 
-          // Small random variation for melodic interest (step up or down by a 2nd).
-          if (chord_pitches.size() > 1 && rng::rollProbability(rng, 0.3f)) {
+          // 15% chance of leap to a non-nearest chord tone for melodic interest.
+          if (chord_pitches.size() > 1 && rng::rollProbability(rng, 0.15f)) {
+            // Pick a chord tone that is NOT the nearest.
+            uint8_t nearest = pitch;
+            std::vector<uint8_t> leap_candidates;
+            for (uint8_t cp : chord_pitches) {
+              if (cp != nearest) {
+                leap_candidates.push_back(cp);
+              }
+            }
+            if (!leap_candidates.empty()) {
+              pitch = rng::selectRandom(rng, leap_candidates);
+              int interval = static_cast<int>(pitch) - static_cast<int>(prev_pitch);
+              if (std::abs(interval) > 4) {
+                just_leaped = true;
+                last_leap_direction = (interval > 0) ? 1 : -1;
+              }
+            }
+          } else if (chord_pitches.size() > 1 && rng::rollProbability(rng, 0.3f)) {
+            // Small random variation (step up or down by a 2nd).
             int direction = rng::rollProbability(rng, 0.5f) ? 1 : -1;
             int target = static_cast<int>(pitch) + direction * 2;
             if (target >= static_cast<int>(ctx.register_low) &&
                 target <= static_cast<int>(ctx.register_high)) {
-              // Snap to nearest chord tone from the shifted position.
               pitch = nearestChordTone(static_cast<uint8_t>(target), chord_pitches);
             }
           }
         }
 
         notes.push_back(makeTextureNote(
-            note_tick, kEighthDuration, pitch, note_tick_in_bar, ctx.is_climax));
+            note_tick, sub_duration, pitch, note_tick_in_bar, ctx.is_climax));
         prev_pitch = pitch;
       }
     }
@@ -375,25 +435,37 @@ std::vector<NoteEvent> generateImpliedPolyphony(const TextureContext& ctx,
 
   std::mt19937 rng(ctx.seed);
 
+  auto subdivisions = getRhythmSubdivisions(ctx.rhythm_profile);
   Tick num_bars = ctx.duration_ticks / kTicksPerBar;
-  notes.reserve(static_cast<size_t>(num_bars) * 8);
+  notes.reserve(static_cast<size_t>(num_bars) * subdivisions.size() * kBeatsPerBar);
 
-  // Divide register into upper and lower halves.
+  // Divide register into upper and lower halves with seed-dependent offset.
   int full_range = static_cast<int>(ctx.register_high) - static_cast<int>(ctx.register_low);
-  int mid_point = static_cast<int>(ctx.register_low) + full_range / 2;
+  int split_offset = rng::rollRange(rng, -3, 3);  // ±3 semitones seed variation
+  int mid_point = static_cast<int>(ctx.register_low) + full_range / 2 + split_offset;
+  mid_point = std::max(static_cast<int>(ctx.register_low) + 4, mid_point);
+  mid_point = std::min(static_cast<int>(ctx.register_high) - 4, mid_point);
 
-  // Slight overlap in the middle to allow smoother transitions.
   constexpr int kOverlap = 2;
   uint8_t lower_low = ctx.register_low;
   uint8_t lower_high = static_cast<uint8_t>(std::min(mid_point + kOverlap, 127));
   uint8_t upper_low = static_cast<uint8_t>(std::max(mid_point - kOverlap, 0));
   uint8_t upper_high = ctx.register_high;
 
-  // Track the last pitch in each voice for melodic continuity.
   uint8_t upper_prev = 0;
   uint8_t lower_prev = 0;
 
-  bool use_upper = true;  // Start with upper voice on beat 1.
+  bool use_upper = true;
+
+  // Voice alternation probability depends on rhythm profile.
+  float alt_prob = 0.8f;
+  if (ctx.rhythm_profile == RhythmProfile::QuarterNote) {
+    alt_prob = 1.0f;  // Always alternate with 1 note/beat.
+  } else if (ctx.rhythm_profile == RhythmProfile::Triplet) {
+    alt_prob = 0.75f;
+  } else if (ctx.rhythm_profile == RhythmProfile::Sixteenth) {
+    alt_prob = 0.85f;
+  }
 
   for (Tick bar_offset = 0; bar_offset < ctx.duration_ticks; bar_offset += kTicksPerBar) {
     Tick bar_tick = ctx.start_tick + bar_offset;
@@ -404,26 +476,23 @@ std::vector<NoteEvent> generateImpliedPolyphony(const TextureContext& ctx,
 
       const HarmonicEvent& harm = timeline.getAt(beat_tick);
 
-      // Build chord tones in each register half.
       std::vector<uint8_t> upper_pitches = chordToPitches(
           harm.chord, harm.is_minor, upper_low, upper_high);
       std::vector<uint8_t> lower_pitches = chordToPitches(
           harm.chord, harm.is_minor, lower_low, lower_high);
 
-      // Two 8th notes per beat, alternating voice.
-      for (int eighth_idx = 0; eighth_idx < 2; ++eighth_idx) {
-        Tick note_tick = beat_tick + static_cast<Tick>(eighth_idx) * kEighthDuration;
-        Tick note_tick_in_bar = tick_in_bar + static_cast<Tick>(eighth_idx) * kEighthDuration;
+      for (const auto& [sub_offset, sub_duration] : subdivisions) {
+        Tick note_tick = beat_tick + sub_offset;
+        Tick note_tick_in_bar = tick_in_bar + sub_offset;
 
         uint8_t pitch;
         if (use_upper) {
           if (upper_pitches.empty()) {
-            // Fallback: use any chord tone in full register.
             std::vector<uint8_t> fallback = chordToPitches(
                 harm.chord, harm.is_minor, ctx.register_low, ctx.register_high);
             pitch = fallback.empty() ? ctx.register_high : fallback.back();
           } else if (upper_prev == 0) {
-            pitch = upper_pitches[upper_pitches.size() / 2];  // Start mid-upper.
+            pitch = upper_pitches[upper_pitches.size() / 2];
           } else {
             pitch = nearestChordTone(upper_prev, upper_pitches);
           }
@@ -434,7 +503,7 @@ std::vector<NoteEvent> generateImpliedPolyphony(const TextureContext& ctx,
                 harm.chord, harm.is_minor, ctx.register_low, ctx.register_high);
             pitch = fallback.empty() ? ctx.register_low : fallback.front();
           } else if (lower_prev == 0) {
-            pitch = lower_pitches[lower_pitches.size() / 2];  // Start mid-lower.
+            pitch = lower_pitches[lower_pitches.size() / 2];
           } else {
             pitch = nearestChordTone(lower_prev, lower_pitches);
           }
@@ -442,14 +511,11 @@ std::vector<NoteEvent> generateImpliedPolyphony(const TextureContext& ctx,
         }
 
         notes.push_back(makeTextureNote(
-            note_tick, kEighthDuration, pitch, note_tick_in_bar, ctx.is_climax));
+            note_tick, sub_duration, pitch, note_tick_in_bar, ctx.is_climax));
 
-        // Alternate voice. Occasional double-notes in same voice (20% chance)
-        // creates the 2.3-2.8 implied voice count target.
-        if (rng::rollProbability(rng, 0.8f)) {
+        if (rng::rollProbability(rng, alt_prob)) {
           use_upper = !use_upper;
         }
-        // Otherwise stay in the same voice (slightly > 2 implied voices).
       }
     }
   }
@@ -553,20 +619,22 @@ std::vector<NoteEvent> generateArpeggiated(const TextureContext& ctx,
     return notes;
   }
 
-  Tick num_bars = ctx.duration_ticks / kTicksPerBar;
-  notes.reserve(static_cast<size_t>(num_bars) * 16);
+  std::mt19937 rng(ctx.seed);
 
-  // Use a simple ArcPhase mapping: first half = Ascent, second half = Descent.
-  // This gives a gentle shape to the arpeggiated variation.
+  auto subdivisions = getRhythmSubdivisions(ctx.rhythm_profile);
+  Tick num_bars = ctx.duration_ticks / kTicksPerBar;
+  notes.reserve(static_cast<size_t>(num_bars) * subdivisions.size() * kBeatsPerBar);
+
   Tick half_duration = ctx.duration_ticks / 2;
+
+  // Seed-based starting pitch offset within chord voicing.
+  int start_offset = rng::rollRange(rng, 0, 2);
 
   for (Tick bar_offset = 0; bar_offset < ctx.duration_ticks; bar_offset += kTicksPerBar) {
     Tick bar_tick = ctx.start_tick + bar_offset;
 
-    // Determine ArcPhase for pattern selection.
     ArcPhase phase = (bar_offset < half_duration) ? ArcPhase::Ascent : ArcPhase::Descent;
 
-    // Simple PatternRole cycling within each half: Drive -> Expand -> Sustain -> Release.
     Tick bars_in_half = half_duration / kTicksPerBar;
     Tick bar_in_half = (bar_offset < half_duration)
         ? bar_offset / kTicksPerBar
@@ -592,20 +660,26 @@ std::vector<NoteEvent> generateArpeggiated(const TextureContext& ctx,
       const HarmonicEvent& harm = timeline.getAt(beat_tick);
       std::vector<int> chord_degrees = getChordDegrees(harm.chord.quality);
 
-      // Generate pattern using Flow system.
       ArpeggioPattern pattern = generatePattern(
           chord_degrees, phase, role, false);
 
       if (pattern.degrees.empty()) continue;
 
-      // Generate 4 sixteenth notes per beat from the pattern.
-      int degree_count = static_cast<int>(pattern.degrees.size());
+      // Per-beat 20% chance to reverse arpeggio direction.
+      std::vector<int> degrees = pattern.degrees;
+      if (rng::rollProbability(rng, 0.2f)) {
+        std::reverse(degrees.begin(), degrees.end());
+      }
 
-      for (int sub_idx = 0; sub_idx < 4; ++sub_idx) {
-        Tick note_tick = beat_tick + static_cast<Tick>(sub_idx) * kSixteenthDuration;
-        Tick note_tick_in_bar = tick_in_bar + static_cast<Tick>(sub_idx) * kSixteenthDuration;
+      int degree_count = static_cast<int>(degrees.size());
 
-        int pattern_degree = pattern.degrees[sub_idx % degree_count];
+      for (size_t sub_idx = 0; sub_idx < subdivisions.size(); ++sub_idx) {
+        const auto& [sub_offset, sub_duration] = subdivisions[sub_idx];
+        Tick note_tick = beat_tick + sub_offset;
+        Tick note_tick_in_bar = tick_in_bar + sub_offset;
+
+        int deg_idx = (static_cast<int>(sub_idx) + start_offset) % degree_count;
+        int pattern_degree = degrees[deg_idx];
         int offset = degreeToPitchOffset(pattern_degree, harm.is_minor);
         int raw_pitch = static_cast<int>(harm.chord.root_pitch) + offset;
 
@@ -614,7 +688,7 @@ std::vector<NoteEvent> generateArpeggiated(const TextureContext& ctx,
             ctx.register_low, ctx.register_high);
 
         notes.push_back(makeTextureNote(
-            note_tick, kSixteenthDuration, pitch, note_tick_in_bar, ctx.is_climax));
+            note_tick, sub_duration, pitch, note_tick_in_bar, ctx.is_climax));
       }
     }
   }
@@ -633,10 +707,12 @@ std::vector<NoteEvent> generateScalePassage(const TextureContext& ctx,
     return notes;
   }
 
-  Tick num_bars = ctx.duration_ticks / kTicksPerBar;
-  notes.reserve(static_cast<size_t>(num_bars) * 16);
+  std::mt19937 rng(ctx.seed);
 
-  // Precompute all scale pitches in register for efficient lookup.
+  auto subdivisions = getRhythmSubdivisions(ctx.rhythm_profile);
+  Tick num_bars = ctx.duration_ticks / kTicksPerBar;
+  notes.reserve(static_cast<size_t>(num_bars) * subdivisions.size() * kBeatsPerBar);
+
   std::vector<uint8_t> scale_pitches = getScalePitches(
       ctx.key.tonic, ctx.key.is_minor, ctx.register_low, ctx.register_high);
 
@@ -644,7 +720,12 @@ std::vector<NoteEvent> generateScalePassage(const TextureContext& ctx,
     return notes;
   }
 
-  bool ascending = true;  // Alternate direction each beat.
+  // Seed-dependent initial direction (Markov chain approach).
+  bool ascending = rng::rollProbability(rng, 0.5f);
+
+  // Seed-dependent starting pitch offset within register.
+  int register_range = static_cast<int>(ctx.register_high) - static_cast<int>(ctx.register_low);
+  int pitch_offset = rng::rollRange(rng, -register_range / 4, register_range / 4);
 
   for (Tick bar_offset = 0; bar_offset < ctx.duration_ticks; bar_offset += kTicksPerBar) {
     Tick bar_tick = ctx.start_tick + bar_offset;
@@ -655,18 +736,18 @@ std::vector<NoteEvent> generateScalePassage(const TextureContext& ctx,
 
       const HarmonicEvent& harm = timeline.getAt(beat_tick);
 
-      // Get the chord tone for this beat as the starting pitch.
       std::vector<uint8_t> chord_pitches = chordToPitches(
           harm.chord, harm.is_minor, ctx.register_low, ctx.register_high);
 
       if (chord_pitches.empty()) continue;
 
-      // Pick a starting chord tone near the middle of the register.
-      uint8_t mid = static_cast<uint8_t>(
-          (static_cast<int>(ctx.register_low) + static_cast<int>(ctx.register_high)) / 2);
+      uint8_t mid = static_cast<uint8_t>(std::max(
+          static_cast<int>(ctx.register_low),
+          std::min(static_cast<int>(ctx.register_high),
+                   (static_cast<int>(ctx.register_low) +
+                    static_cast<int>(ctx.register_high)) / 2 + pitch_offset)));
       uint8_t start_pitch = nearestChordTone(mid, chord_pitches);
 
-      // Find the starting index in the scale_pitches array.
       int start_idx = 0;
       int best_dist = 999;
       for (int idx = 0; idx < static_cast<int>(scale_pitches.size()); ++idx) {
@@ -678,19 +759,18 @@ std::vector<NoteEvent> generateScalePassage(const TextureContext& ctx,
         }
       }
 
-      // Generate 4 sixteenth notes: stepwise run from the start pitch.
-      for (int sub_idx = 0; sub_idx < 4; ++sub_idx) {
-        Tick note_tick = beat_tick + static_cast<Tick>(sub_idx) * kSixteenthDuration;
-        Tick note_tick_in_bar = tick_in_bar + static_cast<Tick>(sub_idx) * kSixteenthDuration;
+      for (size_t sub_idx = 0; sub_idx < subdivisions.size(); ++sub_idx) {
+        const auto& [sub_offset, sub_duration] = subdivisions[sub_idx];
+        Tick note_tick = beat_tick + sub_offset;
+        Tick note_tick_in_bar = tick_in_bar + sub_offset;
 
         int scale_idx;
         if (ascending) {
-          scale_idx = start_idx + sub_idx;
+          scale_idx = start_idx + static_cast<int>(sub_idx);
         } else {
-          scale_idx = start_idx - sub_idx;
+          scale_idx = start_idx - static_cast<int>(sub_idx);
         }
 
-        // Clamp scale index to valid range.
         if (scale_idx < 0) {
           scale_idx = 0;
         }
@@ -700,11 +780,13 @@ std::vector<NoteEvent> generateScalePassage(const TextureContext& ctx,
 
         uint8_t pitch = scale_pitches[scale_idx];
         notes.push_back(makeTextureNote(
-            note_tick, kSixteenthDuration, pitch, note_tick_in_bar, ctx.is_climax));
+            note_tick, sub_duration, pitch, note_tick_in_bar, ctx.is_climax));
       }
 
-      // Alternate direction each beat.
-      ascending = !ascending;
+      // Markov chain direction: 70% continue, 30% reverse.
+      if (rng::rollProbability(rng, 0.3f)) {
+        ascending = !ascending;
+      }
     }
   }
 
@@ -724,8 +806,9 @@ std::vector<NoteEvent> generateBariolage(const TextureContext& ctx,
 
   std::mt19937 rng(ctx.seed);
 
+  auto subdivisions = getRhythmSubdivisions(ctx.rhythm_profile);
   Tick num_bars = ctx.duration_ticks / kTicksPerBar;
-  notes.reserve(static_cast<size_t>(num_bars) * 16);
+  notes.reserve(static_cast<size_t>(num_bars) * subdivisions.size() * kBeatsPerBar);
 
   for (Tick bar_offset = 0; bar_offset < ctx.duration_ticks; bar_offset += kTicksPerBar) {
     Tick bar_tick = ctx.start_tick + bar_offset;
@@ -740,41 +823,45 @@ std::vector<NoteEvent> generateBariolage(const TextureContext& ctx,
 
       if (chord_pitches.empty()) continue;
 
-      // Select a chord tone for the "stopped" note.
-      // Prefer a tone that is near an open string for idiomatic bariolage.
-      uint8_t stopped_pitch = chord_pitches[0];
-      int best_open_dist = 999;
-
-      for (uint8_t cp : chord_pitches) {
-        uint8_t nearest_open = findNearestOpenString(cp, ctx.register_low, ctx.register_high);
-        if (nearest_open > 0) {
-          int dist = std::abs(static_cast<int>(cp) - static_cast<int>(nearest_open));
-          // Prefer stopped notes that are close but not identical to an open string.
-          if (dist > 0 && dist < best_open_dist) {
-            best_open_dist = dist;
-            stopped_pitch = cp;
+      // Select chord tone using RNG for variety across seeds.
+      uint8_t stopped_pitch;
+      if (chord_pitches.size() > 1) {
+        // Build candidates: chord tones near open strings.
+        std::vector<uint8_t> candidates;
+        for (uint8_t cp : chord_pitches) {
+          uint8_t nearest_open = findNearestOpenString(cp, ctx.register_low, ctx.register_high);
+          if (nearest_open > 0) {
+            int dist = std::abs(static_cast<int>(cp) - static_cast<int>(nearest_open));
+            if (dist > 0 && dist <= 7) {
+              candidates.push_back(cp);
+            }
           }
         }
+        if (!candidates.empty()) {
+          stopped_pitch = rng::selectRandom(rng, candidates);
+        } else {
+          stopped_pitch = rng::selectRandom(rng, chord_pitches);
+        }
+      } else {
+        stopped_pitch = chord_pitches[0];
       }
 
-      // Find the open string to alternate with.
       uint8_t open_pitch = findNearestOpenString(
           stopped_pitch, ctx.register_low, ctx.register_high);
 
-      // Fallback: if no open string in range, use the lowest chord tone instead.
       if (open_pitch == 0) {
         open_pitch = chord_pitches.front();
       }
 
-      // Generate 4 sixteenth notes per beat: alternating stopped/open.
-      for (int sub_idx = 0; sub_idx < 4; ++sub_idx) {
-        Tick note_tick = beat_tick + static_cast<Tick>(sub_idx) * kSixteenthDuration;
-        Tick note_tick_in_bar = tick_in_bar + static_cast<Tick>(sub_idx) * kSixteenthDuration;
+      for (size_t sub_idx = 0; sub_idx < subdivisions.size(); ++sub_idx) {
+        const auto& [sub_offset, sub_duration] = subdivisions[sub_idx];
+        Tick note_tick = beat_tick + sub_offset;
+        Tick note_tick_in_bar = tick_in_bar + sub_offset;
 
         uint8_t pitch = (sub_idx % 2 == 0) ? stopped_pitch : open_pitch;
 
         notes.push_back(makeTextureNote(
-            note_tick, kSixteenthDuration, pitch, note_tick_in_bar, ctx.is_climax));
+            note_tick, sub_duration, pitch, note_tick_in_bar, ctx.is_climax));
       }
     }
   }

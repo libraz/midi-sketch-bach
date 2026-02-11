@@ -112,6 +112,35 @@ const NoteEvent* CounterpointState::getNoteAt(VoiceId voice_id,
   return nullptr;
 }
 
+bool CounterpointState::updateNotePitchAt(VoiceId voice_id, Tick tick,
+                                          uint8_t new_pitch) {
+  auto iter = voices_.find(voice_id);
+  if (iter == voices_.end()) {
+    return false;
+  }
+
+  auto& notes = iter->second.notes;
+
+  auto pos = std::upper_bound(
+      notes.begin(), notes.end(), tick,
+      [](Tick target, const NoteEvent& note) {
+        return target < note.start_tick;
+      });
+
+  while (pos != notes.begin()) {
+    --pos;
+    if (pos->start_tick <= tick &&
+        tick < pos->start_tick + pos->duration) {
+      pos->pitch = new_pitch;
+      return true;
+    }
+    if (pos->start_tick + pos->duration <= tick) {
+      break;
+    }
+  }
+  return false;
+}
+
 const CounterpointState::VoiceRange* CounterpointState::getVoiceRange(
     VoiceId voice_id) const {
   auto iter = voices_.find(voice_id);

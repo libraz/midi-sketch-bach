@@ -8,6 +8,7 @@
 #include <random>
 
 #include "core/note_creator.h"
+#include "core/interval.h"
 #include "core/pitch_utils.h"
 #include "core/rng_util.h"
 #include "counterpoint/collision_resolver.h"
@@ -51,13 +52,7 @@ Tick clampAndSnapInterval(Tick interval) {
   return interval;
 }
 
-/// @brief Check if an interval (mod 12) is consonant.
-/// @param semitone_interval Absolute interval in semitones mod 12.
-/// @return True for unison, m3, M3, P5, m6, M6 (0, 3, 4, 7, 8, 9).
-bool isConsonantInterval(int semitone_interval) {
-  return semitone_interval == 0 || semitone_interval == 3 || semitone_interval == 4 ||
-         semitone_interval == 7 || semitone_interval == 8 || semitone_interval == 9;
-}
+
 
 }  // namespace
 
@@ -108,7 +103,7 @@ std::vector<Tick> findValidStrettoIntervals(const std::vector<NoteEvent>& subjec
       if (orig_pitch < 0 || delayed_pitch < 0) continue;
 
       int interval = std::abs(orig_pitch - delayed_pitch) % 12;
-      if (!isConsonantInterval(interval)) {
+      if (!interval_util::isConsonance(interval)) {
         all_consonant = false;
         break;
       }
@@ -229,8 +224,7 @@ Stretto generateStretto(const Subject& subject, Key home_key, Tick start_tick,
         : src_total / static_cast<int>(source_notes.size());
     int vc = (static_cast<int>(lo) + static_cast<int>(hi)) / 2;
     int vdiff = vc - src_mean;
-    int oct_shift = (vdiff >= 0) ? ((vdiff + 6) / 12) * 12
-                                 : -(((-vdiff + 5) / 12) * 12);
+    int oct_shift = nearestOctaveShift(vdiff);
 
     entry.notes.reserve(source_notes.size());
     for (const auto& note : source_notes) {

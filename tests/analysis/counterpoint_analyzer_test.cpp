@@ -9,6 +9,7 @@
 
 #include "analysis/fail_report.h"
 #include "core/basic_types.h"
+#include "core/note_source.h"
 
 namespace bach {
 namespace {
@@ -758,6 +759,69 @@ TEST(TextureDensityVarianceTest, VaryingDensity) {
   notes.push_back(qn(kTicksPerBeat, 74, 0));       // beat 1, voice 0 only
   float var = textureDensityVariance(notes, 2);
   EXPECT_GT(var, 0.0f);
+}
+
+// ---------------------------------------------------------------------------
+// Structural parallel classification
+// ---------------------------------------------------------------------------
+
+/// @brief Create a quarter-note NoteEvent with source.
+NoteEvent qns(Tick tick, uint8_t pitch, VoiceId voice, BachNoteSource source) {
+  NoteEvent n;
+  n.start_tick = tick;
+  n.duration = kTicksPerBeat;
+  n.pitch = pitch;
+  n.velocity = 80;
+  n.voice = voice;
+  n.source = source;
+  return n;
+}
+
+TEST(StructuralParallelTest, BothStructuralCountedAsStructural) {
+  // Parallel 5ths where both voices are structural (subject + answer).
+  std::vector<NoteEvent> notes = {
+      qns(0, 72, 0, BachNoteSource::FugueSubject),
+      qns(kTicksPerBeat, 74, 0, BachNoteSource::FugueSubject),
+      qns(0, 65, 1, BachNoteSource::FugueAnswer),
+      qns(kTicksPerBeat, 67, 1, BachNoteSource::FugueAnswer),
+  };
+  auto result = analyzeCounterpoint(notes, 2);
+  EXPECT_GT(result.parallel_perfect_count, 0u);
+  EXPECT_EQ(result.structural_parallel_count, result.parallel_perfect_count);
+}
+
+TEST(StructuralParallelTest, NonStructuralNotCountedAsStructural) {
+  // Parallel 5ths where both voices are non-structural (free counterpoint).
+  std::vector<NoteEvent> notes = {
+      qns(0, 72, 0, BachNoteSource::FreeCounterpoint),
+      qns(kTicksPerBeat, 74, 0, BachNoteSource::FreeCounterpoint),
+      qns(0, 65, 1, BachNoteSource::EpisodeMaterial),
+      qns(kTicksPerBeat, 67, 1, BachNoteSource::EpisodeMaterial),
+  };
+  auto result = analyzeCounterpoint(notes, 2);
+  EXPECT_GT(result.parallel_perfect_count, 0u);
+  EXPECT_EQ(result.structural_parallel_count, 0u);
+}
+
+TEST(StructuralParallelTest, MixedSourcesNotStructural) {
+  // Parallel 5ths with one structural and one non-structural voice.
+  std::vector<NoteEvent> notes = {
+      qns(0, 72, 0, BachNoteSource::FugueSubject),
+      qns(kTicksPerBeat, 74, 0, BachNoteSource::FugueSubject),
+      qns(0, 65, 1, BachNoteSource::FreeCounterpoint),
+      qns(kTicksPerBeat, 67, 1, BachNoteSource::FreeCounterpoint),
+  };
+  auto result = analyzeCounterpoint(notes, 2);
+  EXPECT_GT(result.parallel_perfect_count, 0u);
+  EXPECT_EQ(result.structural_parallel_count, 0u);
+}
+
+TEST(StructuralParallelTest, ZeroParallelsZeroStructural) {
+  // Good counterpoint: no parallels at all.
+  auto notes = makeGoodCounterpoint();
+  auto result = analyzeCounterpoint(notes, 2);
+  EXPECT_EQ(result.parallel_perfect_count, 0u);
+  EXPECT_EQ(result.structural_parallel_count, 0u);
 }
 
 }  // namespace

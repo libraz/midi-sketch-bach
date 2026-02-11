@@ -20,6 +20,7 @@ struct CounterpointAnalysisResult {
   float dissonance_resolution_rate = 1.0f;  ///< Resolved / total dissonances [0,1].
   float overall_compliance_rate = 1.0f;     ///< 1 - (violations / total_beats) [0,1].
   uint32_t cross_relation_count = 0;        ///< Cross-relations between voices.
+  uint32_t structural_parallel_count = 0;   ///< Parallels involving only structural notes.
 };
 
 /// @brief Analyze counterpoint quality of a set of notes.

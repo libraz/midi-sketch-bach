@@ -908,34 +908,34 @@ void sortToccataTrackNotes(std::vector<Track>& tracks) {
 }  // namespace
 
 // ---------------------------------------------------------------------------
-// Public API
+// Dramaticus archetype (BWV 565 style)
 // ---------------------------------------------------------------------------
 
-ToccataResult generateToccata(const ToccataConfig& config) {
+ToccataResult generateDramaticusToccata(const ToccataConfig& config) {
   ToccataResult result;
   result.success = false;
 
   uint8_t num_voices = clampToccataVoiceCount(config.num_voices);
 
-  if (config.section_bars <= 0) {
-    result.error_message = "section_bars must be positive";
+  if (config.total_bars <= 0) {
+    result.error_message = "total_bars must be positive";
     return result;
   }
 
   std::mt19937 rng(config.seed);
 
   // Section boundaries
-  Tick total_duration = static_cast<Tick>(config.section_bars) * kTicksPerBar;
+  Tick total_duration = static_cast<Tick>(config.total_bars) * kTicksPerBar;
 
   Tick opening_bars = static_cast<Tick>(
-      static_cast<float>(config.section_bars) * kOpeningProportion);
+      static_cast<float>(config.total_bars) * kOpeningProportion);
   if (opening_bars < 1) opening_bars = 1;
 
   Tick recit_bars = static_cast<Tick>(
-      static_cast<float>(config.section_bars) * kRecitativeProportion);
+      static_cast<float>(config.total_bars) * kRecitativeProportion);
   if (recit_bars < 1) recit_bars = 1;
 
-  Tick drive_bars = static_cast<Tick>(config.section_bars) - opening_bars - recit_bars;
+  Tick drive_bars = static_cast<Tick>(config.total_bars) - opening_bars - recit_bars;
   if (drive_bars < 1) {
     if (recit_bars > 1) {
       --recit_bars;
@@ -1112,6 +1112,16 @@ ToccataResult generateToccata(const ToccataConfig& config) {
   result.tracks = std::move(tracks);
   result.timeline = std::move(timeline);
   result.total_duration_ticks = total_duration;
+  result.archetype = ToccataArchetype::Dramaticus;
+
+  // Populate structured sections.
+  result.sections = {
+      {ToccataSectionId::Opening, opening_start, opening_end},
+      {ToccataSectionId::Recitative, recit_start, recit_end},
+      {ToccataSectionId::Drive, drive_start, drive_end},
+  };
+
+  // Legacy fields.
   result.opening_start = opening_start;
   result.opening_end = opening_end;
   result.recit_start = recit_start;
@@ -1120,6 +1130,27 @@ ToccataResult generateToccata(const ToccataConfig& config) {
   result.drive_end = drive_end;
   result.success = true;
 
+  return result;
+}
+
+// ---------------------------------------------------------------------------
+// Public API
+// ---------------------------------------------------------------------------
+
+ToccataResult generateToccata(const ToccataConfig& config) {
+  switch (config.archetype) {
+    case ToccataArchetype::Dramaticus:
+      return generateDramaticusToccata(config);
+    case ToccataArchetype::Perpetuus:
+      return generatePerpetuusToccata(config);
+    case ToccataArchetype::Concertato:
+      return generateConcertatoToccata(config);
+    case ToccataArchetype::Sectionalis:
+      return generateSectionalisToccata(config);
+  }
+  // Unreachable, but satisfy compiler.
+  ToccataResult result;
+  result.error_message = "Unknown toccata archetype";
   return result;
 }
 

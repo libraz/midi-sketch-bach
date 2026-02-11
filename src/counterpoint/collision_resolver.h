@@ -24,6 +24,30 @@ struct PlacementResult {
   bool accepted = false;    ///< True if a safe pitch was found.
 };
 
+/// @brief Result of checking for parallel perfect intervals and P4 over bass.
+struct ParallelCheckResult {
+  bool has_parallel_perfect = false;  ///< Parallel unison, 5th, or octave detected.
+  bool has_p4_bass = false;           ///< Perfect 4th involving bass voice detected.
+  VoiceId conflicting_voice = 0;      ///< Voice ID causing the conflict.
+};
+
+/// @brief Check for parallel perfect intervals and P4 over bass at a given position.
+///
+/// Examines whether placing the given pitch for voice_id at tick would create
+/// parallel perfect consonances (unison/5th/octave) or a dissonant P4 with
+/// the bass voice.
+///
+/// @param state Current counterpoint state.
+/// @param rules Rule evaluator for interval classification.
+/// @param voice_id Voice being checked.
+/// @param pitch Candidate pitch.
+/// @param tick Tick position.
+/// @param num_voices Total number of voices.
+/// @return ParallelCheckResult with detected issues.
+ParallelCheckResult checkParallelsAndP4Bass(
+    const CounterpointState& state, const IRuleEvaluator& rules,
+    VoiceId voice_id, uint8_t pitch, Tick tick, uint8_t num_voices);
+
 /// @brief Resolves counterpoint collisions via a 6-stage strategy cascade.
 ///
 /// When a desired pitch would violate counterpoint rules, the resolver

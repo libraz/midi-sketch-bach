@@ -6,6 +6,8 @@
 #include <algorithm>
 #include <cmath>
 
+#include "forms/toccata.h"
+
 namespace bach {
 
 namespace {
@@ -174,6 +176,99 @@ std::vector<TempoEvent> generateToccataTempoMap(Tick opening_start, Tick opening
   if (drive_end > kTicksPerBar) {
     Tick transition_tick = drive_end - kTicksPerBar;
     events.push_back({transition_tick, adjustBpm(base_bpm, kToccataTransition)});
+  }
+
+  std::sort(events.begin(), events.end(),
+            [](const TempoEvent& a, const TempoEvent& b) {
+              return a.tick < b.tick;
+            });
+
+  return events;
+}
+
+// ---------------------------------------------------------------------------
+// Archetype-specific toccata tempo constants (Design Values)
+// ---------------------------------------------------------------------------
+
+// Perpetuus: minimal variation, metronome-like persistence.
+constexpr float kPerpetuusBase = 0.0f;
+constexpr float kPerpetuusMid = 3.0f;
+constexpr float kPerpetuusLate = 6.0f;
+constexpr float kPerpetuusRit = -5.0f;
+
+// Concertato: large inter-movement contrasts.
+constexpr float kConcertatoAllegro = 10.0f;
+constexpr float kConcertatoAdagio = -30.0f;
+constexpr float kConcertatoVivace = 15.0f;
+constexpr float kConcertatoRit = -8.0f;
+
+// Sectionalis: moderate changes at section boundaries.
+constexpr float kSectionalisFree1 = 5.0f;
+constexpr float kSectionalisQuasiFugal = 0.0f;
+constexpr float kSectionalisFree2 = -8.0f;
+constexpr float kSectionalisCadenza = 8.0f;
+constexpr float kSectionalisCoda = 3.0f;
+constexpr float kSectionalisRit = -12.0f;
+
+std::vector<TempoEvent> generateToccataTempoMap(ToccataArchetype archetype,
+                                                 const std::vector<ToccataSectionBoundary>& sections,
+                                                 uint16_t base_bpm) {
+  if (sections.empty()) return {};
+
+  // Dramaticus: delegate to the legacy 6-arg overload.
+  if (archetype == ToccataArchetype::Dramaticus && sections.size() >= 3) {
+    return generateToccataTempoMap(
+        sections[0].start, sections[0].end,
+        sections[1].start, sections[1].end,
+        sections[2].start, sections[2].end,
+        base_bpm);
+  }
+
+  std::vector<TempoEvent> events;
+
+  auto addSectionTempo = [&](const ToccataSectionBoundary& sec, float percent) {
+    events.push_back({sec.start, adjustBpm(base_bpm, percent)});
+  };
+
+  auto addRit = [&](Tick end_tick, float rit_percent) {
+    if (end_tick > kTicksPerBar) {
+      events.push_back({end_tick - kTicksPerBar, adjustBpm(base_bpm, rit_percent)});
+    }
+  };
+
+  switch (archetype) {
+    case ToccataArchetype::Dramaticus:
+      // Already handled above, but satisfy compiler.
+      break;
+
+    case ToccataArchetype::Perpetuus:
+      if (sections.size() >= 3) {
+        addSectionTempo(sections[0], kPerpetuusBase);
+        addSectionTempo(sections[1], kPerpetuusMid);
+        addSectionTempo(sections[2], kPerpetuusLate);
+        addRit(sections.back().end, kPerpetuusRit);
+      }
+      break;
+
+    case ToccataArchetype::Concertato:
+      if (sections.size() >= 3) {
+        addSectionTempo(sections[0], kConcertatoAllegro);
+        addSectionTempo(sections[1], kConcertatoAdagio);
+        addSectionTempo(sections[2], kConcertatoVivace);
+        addRit(sections.back().end, kConcertatoRit);
+      }
+      break;
+
+    case ToccataArchetype::Sectionalis:
+      if (sections.size() >= 5) {
+        addSectionTempo(sections[0], kSectionalisFree1);
+        addSectionTempo(sections[1], kSectionalisQuasiFugal);
+        addSectionTempo(sections[2], kSectionalisFree2);
+        addSectionTempo(sections[3], kSectionalisCadenza);
+        addSectionTempo(sections[4], kSectionalisCoda);
+        addRit(sections.back().end, kSectionalisRit);
+      }
+      break;
   }
 
   std::sort(events.begin(), events.end(),

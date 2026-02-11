@@ -104,6 +104,39 @@ enum class SubjectCharacter : uint8_t {
 const char* subjectCharacterToString(SubjectCharacter character);
 
 // ---------------------------------------------------------------------------
+// Enums: Toccata archetypes
+// ---------------------------------------------------------------------------
+
+/// Toccata structural archetype. Each archetype defines a distinct section
+/// layout, energy curve, and harmonic design. Dispatched via generateToccata().
+enum class ToccataArchetype : uint8_t {
+  Dramaticus,   ///< BWV 565. U-energy. Gesture->Recitative->Drive.
+  Perpetuus,    ///< BWV 538. Ascending energy. Continuous 16th-note moto perpetuo.
+  Concertato,   ///< BWV 564. Arch energy. Allegro->Adagio->Vivace.
+  Sectionalis   ///< BWV 566. Wave energy. Free->QuasiFugal->Free->Cadenza->Coda.
+};
+
+/// @brief Convert ToccataArchetype to human-readable string.
+const char* toccataArchetypeToString(ToccataArchetype archetype);
+
+/// @brief Parse ToccataArchetype from string.
+/// @param str String such as "dramaticus", "perpetuus", "concertato", "sectionalis".
+/// @return Parsed archetype. Defaults to ToccataArchetype::Dramaticus on unrecognized input.
+ToccataArchetype toccataArchetypeFromString(const std::string& str);
+
+/// Section identifiers for toccata structural boundaries.
+enum class ToccataSectionId : uint8_t {
+  // Dramaticus
+  Opening, Recitative, Drive,
+  // Perpetuus
+  Ascent, Plateau, Climax,
+  // Concertato
+  Allegro, Adagio, Vivace,
+  // Sectionalis
+  Free1, QuasiFugal, Free2, Cadenza, Coda
+};
+
+// ---------------------------------------------------------------------------
 // Enums: Solo String Flow system
 // ---------------------------------------------------------------------------
 

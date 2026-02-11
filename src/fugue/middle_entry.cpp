@@ -37,8 +37,7 @@ MiddleEntry generateMiddleEntry(const Subject& subject, Key target_key, Tick sta
   int mean_pitch = total_pitch / static_cast<int>(entry.notes.size());
   int voice_center = (static_cast<int>(lo) + static_cast<int>(hi)) / 2;
   int diff = voice_center - mean_pitch;
-  int octave_shift = (diff >= 0) ? ((diff + 6) / 12) * 12
-                                 : -(((-diff + 5) / 12) * 12);
+  int octave_shift = nearestOctaveShift(diff);
 
   // Offset tick positions so the entry starts at start_tick.
   Tick original_start = subject.notes[0].start_tick;
@@ -124,8 +123,7 @@ MiddleEntry generateFalseEntry(const Subject& subject, Key target_key,
   int mean_pitch = total_pitch / static_cast<int>(transposed.size());
   int voice_center = (static_cast<int>(lo) + static_cast<int>(hi)) / 2;
   int reg_diff = voice_center - mean_pitch;
-  int octave_shift = (reg_diff >= 0) ? ((reg_diff + 6) / 12) * 12
-                                     : -(((-reg_diff + 5) / 12) * 12);
+  int octave_shift = nearestOctaveShift(reg_diff);
 
   // Apply octave shift to transposed notes.
   for (auto& note : transposed) {

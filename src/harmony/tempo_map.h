@@ -15,6 +15,8 @@
 
 namespace bach {
 
+struct ToccataSectionBoundary;
+
 /// @brief Apply a percentage change to a base BPM, clamped to [40, 200].
 /// @param base_bpm Base tempo in beats per minute.
 /// @param percent_change Percentage adjustment (e.g. +3.0 for 3% faster, -10.0 for 10% slower).
@@ -59,6 +61,22 @@ std::vector<TempoEvent> generateFugueTempoMap(const FugueStructure& structure,
 std::vector<TempoEvent> generateToccataTempoMap(Tick opening_start, Tick opening_end,
                                                  Tick recit_start, Tick recit_end,
                                                  Tick drive_start, Tick drive_end,
+                                                 uint16_t base_bpm);
+
+/// @brief Generate an archetype-aware tempo map for a toccata.
+///
+/// Dispatches to archetype-specific tempo curves:
+///   - Dramaticus: delegates to the 6-arg overload above.
+///   - Perpetuus:  minimal variation (metronome-like persistence).
+///   - Concertato: large inter-movement contrasts.
+///   - Sectionalis: moderate changes at section boundaries.
+///
+/// @param archetype Toccata structural archetype.
+/// @param sections Section boundary list (from ToccataResult).
+/// @param base_bpm Base tempo in beats per minute.
+/// @return Sorted vector of TempoEvent for the toccata.
+std::vector<TempoEvent> generateToccataTempoMap(ToccataArchetype archetype,
+                                                 const std::vector<ToccataSectionBoundary>& sections,
                                                  uint16_t base_bpm);
 
 /// @brief Generate a tempo map for a fantasia free section (BWV 537/542 style).

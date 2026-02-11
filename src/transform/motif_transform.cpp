@@ -5,20 +5,14 @@
 #include <algorithm>
 #include <cstdint>
 
+#include "core/pitch_utils.h"
 #include "core/scale.h"
 
 namespace bach {
 
 namespace {
 
-/// @brief Clamp an integer pitch value to the valid MIDI range [0, 127].
-/// @param value Pitch value that may be out of range.
-/// @return Clamped uint8_t pitch.
-uint8_t clampMidiPitch(int value) {
-  if (value < 0) return 0;
-  if (value > 127) return 127;
-  return static_cast<uint8_t>(value);
-}
+
 
 }  // namespace
 
@@ -28,7 +22,7 @@ std::vector<NoteEvent> invertMelody(const std::vector<NoteEvent>& notes, uint8_t
   for (const auto& note : notes) {
     NoteEvent inverted = note;
     int new_pitch = 2 * static_cast<int>(pivot) - static_cast<int>(note.pitch);
-    inverted.pitch = clampMidiPitch(new_pitch);
+    inverted.pitch = clampPitch(new_pitch, 0, 127);
     result.push_back(inverted);
   }
   return result;
@@ -137,7 +131,7 @@ std::vector<NoteEvent> transposeMelody(const std::vector<NoteEvent>& notes, int 
   for (const auto& note : notes) {
     NoteEvent transposed = note;
     int new_pitch = static_cast<int>(note.pitch) + semitones;
-    transposed.pitch = clampMidiPitch(new_pitch);
+    transposed.pitch = clampPitch(new_pitch, 0, 127);
     result.push_back(transposed);
   }
   return result;

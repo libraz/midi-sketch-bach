@@ -14,30 +14,41 @@ namespace bach {
 
 /// @brief Configuration for toccata free section (BWV 565 style).
 struct ToccataConfig {
+  ToccataArchetype archetype = ToccataArchetype::Dramaticus;
   KeySignature key = {Key::D, true};  ///< D minor default (BWV 565).
   uint16_t bpm = 80;
   uint32_t seed = 42;
   uint8_t num_voices = 3;
-  int section_bars = 24;              ///< Length of free section in bars.
+  int total_bars = 24;                ///< Total toccata length in bars.
   bool enable_picardy = true;         ///< Apply Picardy third in minor keys.
-};;
+};;;
 
 /// @brief Result of toccata free section generation.
+/// @brief Section boundary within a toccata.
+struct ToccataSectionBoundary {
+  ToccataSectionId id;
+  Tick start = 0;
+  Tick end = 0;
+};
+
 struct ToccataResult {
   std::vector<Track> tracks;
   HarmonicTimeline timeline;
   Tick total_duration_ticks = 0;
   bool success = false;
   std::string error_message;
+  ToccataArchetype archetype = ToccataArchetype::Dramaticus;
+  std::vector<ToccataSectionBoundary> sections;
 
-  // Section boundaries for tempo map generation.
+  // Legacy section boundary fields (always populated for backward compat).
+  // Non-Dramaticus: opening=sections[0], recit=sections[1], drive=sections.back().
   Tick opening_start = 0;
   Tick opening_end = 0;
   Tick recit_start = 0;
   Tick recit_end = 0;
   Tick drive_start = 0;
   Tick drive_end = 0;
-};
+};;
 
 /// @brief Generate a toccata free section (BWV 565 opening style).
 ///
@@ -55,6 +66,12 @@ struct ToccataResult {
 /// @param config Toccata configuration.
 /// @return ToccataResult with generated tracks.
 ToccataResult generateToccata(const ToccataConfig& config);
+
+// Archetype-specific generators (called via dispatcher above).
+ToccataResult generateDramaticusToccata(const ToccataConfig& config);
+ToccataResult generatePerpetuusToccata(const ToccataConfig& config);
+ToccataResult generateConcertatoToccata(const ToccataConfig& config);
+ToccataResult generateSectionalisToccata(const ToccataConfig& config);
 
 }  // namespace bach
 

@@ -462,5 +462,72 @@ TEST(ChaconneEngineTest, TimelineSpansFullDuration) {
   EXPECT_GT(last_end, 0u);
 }
 
+// ===========================================================================
+// Seed diversity fingerprint -- regression test for seed independence
+// ===========================================================================
+
+/// @brief Extract a pitch class histogram (top 3 most frequent) for a track.
+std::vector<int> topPitchClasses(const std::vector<NoteEvent>& notes, int top_n = 3) {
+  int pc_count[12] = {};
+  for (const auto& n : notes) {
+    pc_count[n.pitch % 12]++;
+  }
+  // Build pairs and sort by count descending.
+  std::vector<std::pair<int, int>> pairs;
+  for (int i = 0; i < 12; ++i) {
+    pairs.push_back({pc_count[i], i});
+  }
+  std::sort(pairs.begin(), pairs.end(), std::greater<>());
+  std::vector<int> result;
+  for (int i = 0; i < top_n && i < static_cast<int>(pairs.size()); ++i) {
+    result.push_back(pairs[i].second);
+  }
+  return result;
+}
+
+TEST(ChaconneSeedDiversityTest, DifferentSeedsProduceDiverseOutput) {
+  constexpr int kNumSeeds = 10;
+  constexpr int kMinUnique = 6;
+
+  // Collect fingerprints: pitch class top-3 as a string.
+  std::set<std::string> fingerprints;
+
+  for (int seed_idx = 1; seed_idx <= kNumSeeds; ++seed_idx) {
+    auto config = createTestConfig(static_cast<uint32_t>(seed_idx));
+    auto result = generateChaconne(config);
+    ASSERT_TRUE(result.success) << "Seed " << seed_idx << ": " << result.error_message;
+    ASSERT_EQ(result.tracks.size(), 1u);
+
+    auto top = topPitchClasses(result.tracks[0].notes);
+    std::string fp;
+    for (int pc : top) {
+      fp += std::to_string(pc) + ",";
+    }
+    fingerprints.insert(fp);
+  }
+
+  EXPECT_GE(fingerprints.size(), static_cast<size_t>(kMinUnique))
+      << "Expected at least " << kMinUnique << " unique fingerprints across "
+      << kNumSeeds << " seeds, got " << fingerprints.size();
+}
+
+TEST(ChaconneSeedDiversityTest, SeedsProduceDifferentNoteCounts) {
+  // Different seeds should produce at least some variation in total note count
+  // (due to rhythm profile variation).
+  std::set<size_t> note_counts;
+
+  for (int seed_idx = 1; seed_idx <= 10; ++seed_idx) {
+    auto config = createTestConfig(static_cast<uint32_t>(seed_idx));
+    auto result = generateChaconne(config);
+    ASSERT_TRUE(result.success) << "Seed " << seed_idx << ": " << result.error_message;
+    ASSERT_EQ(result.tracks.size(), 1u);
+    note_counts.insert(result.tracks[0].notes.size());
+  }
+
+  // With rhythm profile variation, we expect multiple distinct note counts.
+  EXPECT_GE(note_counts.size(), 3u)
+      << "Expected at least 3 distinct note counts across 10 seeds";
+}
+
 }  // namespace
 }  // namespace bach

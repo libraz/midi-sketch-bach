@@ -112,6 +112,8 @@ TEST(TextureContextTest, DefaultValues) {
   EXPECT_FALSE(ctx.is_climax);
   EXPECT_FLOAT_EQ(ctx.rhythm_density, 1.0f);
   EXPECT_EQ(ctx.seed, 0u);
+  EXPECT_EQ(ctx.rhythm_profile, RhythmProfile::EighthNote);
+  EXPECT_EQ(ctx.variation_type, VariationType::Theme);
 }
 
 // ---------------------------------------------------------------------------
@@ -402,6 +404,7 @@ TEST_F(TextureGeneratorTest, FullChordsHasClimaxVelocity) {
 
 TEST_F(TextureGeneratorTest, ArpeggiatedProduces16thNotes) {
   auto ctx = makeDefaultContext(TextureType::Arpeggiated);
+  ctx.rhythm_profile = RhythmProfile::Sixteenth;
   auto notes = generateArpeggiated(ctx, timeline_);
 
   EXPECT_FALSE(notes.empty());
@@ -416,6 +419,7 @@ TEST_F(TextureGeneratorTest, ArpeggiatedProduces16thNotes) {
 
 TEST_F(TextureGeneratorTest, ArpeggiatedNoteCountApprox4PerBeat) {
   auto ctx = makeDefaultContext(TextureType::Arpeggiated);
+  ctx.rhythm_profile = RhythmProfile::Sixteenth;
   auto notes = generateArpeggiated(ctx, timeline_);
 
   // 4 bars * 4 beats * 4 notes = 64 expected.
@@ -429,6 +433,7 @@ TEST_F(TextureGeneratorTest, ArpeggiatedNoteCountApprox4PerBeat) {
 
 TEST_F(TextureGeneratorTest, ScalePassageProduces16thNotes) {
   auto ctx = makeDefaultContext(TextureType::ScalePassage);
+  ctx.rhythm_profile = RhythmProfile::Sixteenth;
   auto notes = generateScalePassage(ctx, timeline_);
 
   EXPECT_FALSE(notes.empty());
@@ -497,6 +502,7 @@ TEST_F(TextureGeneratorTest, ScalePassageHasStepwiseMotion) {
 
 TEST_F(TextureGeneratorTest, BariolageProduces16thNotes) {
   auto ctx = makeDefaultContext(TextureType::Bariolage);
+  ctx.rhythm_profile = RhythmProfile::Sixteenth;
   auto notes = generateBariolage(ctx, timeline_);
 
   EXPECT_FALSE(notes.empty());
@@ -510,6 +516,7 @@ TEST_F(TextureGeneratorTest, BariolageProduces16thNotes) {
 
 TEST_F(TextureGeneratorTest, BariolageAlternatesPitches) {
   auto ctx = makeDefaultContext(TextureType::Bariolage);
+  ctx.rhythm_profile = RhythmProfile::Sixteenth;
   auto notes = generateBariolage(ctx, timeline_);
 
   ASSERT_GE(notes.size(), 8u);
@@ -655,6 +662,97 @@ TEST_F(TextureGeneratorTest, NarrowRegisterStillProducesNotes) {
     EXPECT_GE(note.pitch, 62);
     EXPECT_LE(note.pitch, 69);
   }
+}
+
+// ---------------------------------------------------------------------------
+// RhythmProfile subdivisions
+// ---------------------------------------------------------------------------
+
+TEST(RhythmProfileTest, QuarterNoteHasOneSubdivision) {
+  auto subs = getRhythmSubdivisions(RhythmProfile::QuarterNote);
+  ASSERT_EQ(subs.size(), 1u);
+  EXPECT_EQ(subs[0].first, 0u);
+  EXPECT_EQ(subs[0].second, kTicksPerBeat);
+}
+
+TEST(RhythmProfileTest, EighthNoteHasTwoSubdivisions) {
+  auto subs = getRhythmSubdivisions(RhythmProfile::EighthNote);
+  ASSERT_EQ(subs.size(), 2u);
+  Tick total = 0;
+  for (const auto& [offset, dur] : subs) {
+    total += dur;
+  }
+  EXPECT_EQ(total, kTicksPerBeat);
+}
+
+TEST(RhythmProfileTest, SixteenthHasFourSubdivisions) {
+  auto subs = getRhythmSubdivisions(RhythmProfile::Sixteenth);
+  ASSERT_EQ(subs.size(), 4u);
+  Tick total = 0;
+  for (const auto& [offset, dur] : subs) {
+    total += dur;
+  }
+  EXPECT_EQ(total, kTicksPerBeat);
+}
+
+TEST(RhythmProfileTest, TripletHasThreeSubdivisions) {
+  auto subs = getRhythmSubdivisions(RhythmProfile::Triplet);
+  ASSERT_EQ(subs.size(), 3u);
+  Tick total = 0;
+  for (const auto& [offset, dur] : subs) {
+    total += dur;
+  }
+  EXPECT_EQ(total, kTicksPerBeat);
+}
+
+TEST(RhythmProfileTest, DottedEighthSumsToBeat) {
+  auto subs = getRhythmSubdivisions(RhythmProfile::DottedEighth);
+  ASSERT_EQ(subs.size(), 2u);
+  EXPECT_EQ(subs[0].second, 360u);  // Dotted eighth
+  EXPECT_EQ(subs[1].second, 120u);  // Sixteenth
+  EXPECT_EQ(subs[0].second + subs[1].second, kTicksPerBeat);
+}
+
+TEST(RhythmProfileTest, Mixed8th16thSumsToBeat) {
+  auto subs = getRhythmSubdivisions(RhythmProfile::Mixed8th16th);
+  ASSERT_EQ(subs.size(), 3u);
+  EXPECT_EQ(subs[0].second, 240u);  // Eighth
+  EXPECT_EQ(subs[1].second, 120u);  // Sixteenth
+  EXPECT_EQ(subs[2].second, 120u);  // Sixteenth
+  Tick total = 0;
+  for (const auto& [offset, dur] : subs) {
+    total += dur;
+  }
+  EXPECT_EQ(total, kTicksPerBeat);
+}
+
+// ---------------------------------------------------------------------------
+// RhythmProfile affects output note count
+// ---------------------------------------------------------------------------
+
+TEST_F(TextureGeneratorTest, RhythmProfileAffectsNoteCount) {
+  auto ctx_q = makeDefaultContext(TextureType::SingleLine);
+  ctx_q.rhythm_profile = RhythmProfile::QuarterNote;
+  auto notes_q = generateSingleLine(ctx_q, timeline_);
+
+  auto ctx_s = makeDefaultContext(TextureType::SingleLine);
+  ctx_s.rhythm_profile = RhythmProfile::Sixteenth;
+  auto notes_s = generateSingleLine(ctx_s, timeline_);
+
+  // QuarterNote: 1 note/beat -> ~16 notes in 4 bars.
+  // Sixteenth: 4 notes/beat -> ~64 notes in 4 bars.
+  EXPECT_GT(notes_s.size(), notes_q.size() * 2)
+      << "Sixteenth should produce significantly more notes than QuarterNote";
+}
+
+TEST_F(TextureGeneratorTest, TripletProduces3NotesPerBeat) {
+  auto ctx = makeDefaultContext(TextureType::SingleLine);
+  ctx.rhythm_profile = RhythmProfile::Triplet;
+  auto notes = generateSingleLine(ctx, timeline_);
+
+  // 4 bars * 4 beats * 3 notes = 48 expected.
+  EXPECT_GE(notes.size(), 40u);
+  EXPECT_LE(notes.size(), 56u);
 }
 
 }  // namespace
