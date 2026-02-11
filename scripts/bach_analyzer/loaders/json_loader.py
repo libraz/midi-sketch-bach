@@ -46,8 +46,8 @@ def _parse_note(note_data: dict, voice_name: str, voice_id: int, channel: int) -
         velocity=note_data.get("velocity", 80),
         start_tick=note_data.get("start_tick", 0),
         duration=note_data.get("duration", 0),
-        voice=note_data.get("voice", voice_name),
-        voice_id=voice_id,
+        voice=voice_name,
+        voice_id=note_data.get("voice", voice_id) if isinstance(note_data.get("voice"), int) else voice_id,
         channel=channel,
         provenance=_parse_provenance(note_data.get("provenance")),
     )

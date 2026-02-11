@@ -20,6 +20,7 @@ from ..model import (
     Score,
     interval_class,
     pitch_to_name,
+    sounding_note_at,
 )
 from .base import Category, RuleResult, Severity, Violation
 
@@ -186,7 +187,12 @@ class HiddenPerfect:
 
 
 class VoiceCrossing:
-    """Detect voice crossing: upper voice pitch below lower voice pitch."""
+    """Detect voice crossing: upper voice pitch below lower voice pitch.
+
+    Scans every beat position and checks the sounding pitch of each voice
+    (including sustained notes), matching C++ countVoiceCrossings().
+    A 1-beat lookahead suppresses temporary crossings that resolve immediately.
+    """
 
     @property
     def name(self) -> str:
@@ -198,33 +204,46 @@ class VoiceCrossing:
 
     def check(self, score: Score) -> RuleResult:
         violations: List[Violation] = []
-        voices = _voices_sorted(score)
-        names = sorted(voices.keys())
-        # Sorted alphabetically: alto < bass < soprano -> expect soprano > alto > bass
-        # Use voice_id order instead (0 = highest)
-        track_order = [(t.name, t.notes) for t in score.tracks]
+        track_order = [(t.name, t.sorted_notes) for t in score.tracks]
+        if len(track_order) < 2:
+            return RuleResult(
+                rule_name=self.name, category=self.category,
+                passed=True, violations=[],
+            )
+        end_tick = score.total_duration
         for i in range(len(track_order) - 1):
             name_upper, notes_upper = track_order[i]
             name_lower, notes_lower = track_order[i + 1]
-            beats_u = _beat_map(notes_upper)
-            beats_l = _beat_map(notes_lower)
-            for tick in sorted(set(beats_u) & set(beats_l)):
-                nu, nl = beats_u[tick], beats_l[tick]
-                if nu.pitch < nl.pitch:
+            beat = 0
+            while beat < end_tick:
+                nu = sounding_note_at(notes_upper, beat)
+                nl = sounding_note_at(notes_lower, beat)
+                if nu is not None and nl is not None and nu.pitch < nl.pitch:
+                    # 1-beat lookahead: skip temporary crossings
+                    next_beat = beat + TICKS_PER_BEAT
+                    if next_beat < end_tick:
+                        nnu = sounding_note_at(notes_upper, next_beat)
+                        nnl = sounding_note_at(notes_lower, next_beat)
+                        if nnu is not None and nnl is not None and nnu.pitch >= nnl.pitch:
+                            beat += TICKS_PER_BEAT
+                            continue
+                    bar = beat // TICKS_PER_BAR + 1
+                    beat_in_bar = (beat % TICKS_PER_BAR) // TICKS_PER_BEAT + 1
                     violations.append(
                         Violation(
                             rule_name=self.name,
                             category=self.category,
                             severity=Severity.ERROR,
-                            bar=nu.bar,
-                            beat=nu.beat,
-                            tick=tick,
+                            bar=bar,
+                            beat=beat_in_bar,
+                            tick=beat,
                             voice_a=name_upper,
                             voice_b=name_lower,
                             description=f"{name_upper} {pitch_to_name(nu.pitch)} < {name_lower} {pitch_to_name(nl.pitch)}",
                             source=nu.provenance.source if nu.provenance else None,
                         )
                     )
+                beat += TICKS_PER_BEAT
         return RuleResult(
             rule_name=self.name,
             category=self.category,
@@ -356,6 +375,110 @@ class AugmentedLeap:
         )
 
 
+# ---------------------------------------------------------------------------
+# VoiceInterleaving
+# ---------------------------------------------------------------------------
+
+
+class VoiceInterleaving:
+    """Detect sustained register inversion between adjacent voices.
+
+    Computes per-bar average pitch for each voice and flags runs of N or more
+    consecutive bars where the expected upper voice has a lower average pitch
+    than its lower neighbour.
+    """
+
+    def __init__(self, min_bars: int = 3):
+        self.min_bars = min_bars
+
+    @property
+    def name(self) -> str:
+        return "voice_interleaving"
+
+    @property
+    def category(self) -> Category:
+        return Category.COUNTERPOINT
+
+    def check(self, score: Score) -> RuleResult:
+        violations: List[Violation] = []
+        track_order = [(t.name, t.sorted_notes) for t in score.tracks]
+        if len(track_order) < 2:
+            return RuleResult(
+                rule_name=self.name, category=self.category,
+                passed=True, violations=[],
+            )
+        total_bars = score.total_bars
+        for i in range(len(track_order) - 1):
+            name_upper, notes_upper = track_order[i]
+            name_lower, notes_lower = track_order[i + 1]
+            avg_upper = self._bar_averages(notes_upper, total_bars)
+            avg_lower = self._bar_averages(notes_lower, total_bars)
+            run_start: int | None = None
+            for bar in range(1, total_bars + 1):
+                au = avg_upper.get(bar)
+                al = avg_lower.get(bar)
+                inverted = au is not None and al is not None and au < al
+                if inverted:
+                    if run_start is None:
+                        run_start = bar
+                else:
+                    if run_start is not None:
+                        run_len = bar - run_start
+                        if run_len >= self.min_bars:
+                            violations.append(
+                                Violation(
+                                    rule_name=self.name,
+                                    category=self.category,
+                                    severity=Severity.WARNING,
+                                    bar=run_start,
+                                    beat=1,
+                                    tick=(run_start - 1) * TICKS_PER_BAR,
+                                    voice_a=name_upper,
+                                    voice_b=name_lower,
+                                    description=(
+                                        f"register inverted for bars {run_start}-{bar - 1} "
+                                        f"({run_len} bars)"
+                                    ),
+                                )
+                            )
+                        run_start = None
+            # Flush trailing run
+            if run_start is not None:
+                run_len = total_bars - run_start + 1
+                if run_len >= self.min_bars:
+                    violations.append(
+                        Violation(
+                            rule_name=self.name,
+                            category=self.category,
+                            severity=Severity.WARNING,
+                            bar=run_start,
+                            beat=1,
+                            tick=(run_start - 1) * TICKS_PER_BAR,
+                            voice_a=name_upper,
+                            voice_b=name_lower,
+                            description=(
+                                f"register inverted for bars {run_start}-{total_bars} "
+                                f"({run_len} bars)"
+                            ),
+                        )
+                    )
+        return RuleResult(
+            rule_name=self.name,
+            category=self.category,
+            passed=len(violations) == 0,
+            violations=violations,
+        )
+
+    @staticmethod
+    def _bar_averages(notes: List[Note], total_bars: int) -> Dict[int, float]:
+        """Return {bar_number: average_pitch} for bars that contain notes."""
+        from collections import defaultdict
+        bar_pitches: Dict[int, List[int]] = defaultdict(list)
+        for n in notes:
+            bar_pitches[n.bar].append(n.pitch)
+        return {b: sum(ps) / len(ps) for b, ps in bar_pitches.items()}
+
+
 # Convenience: all counterpoint rules.
 ALL_COUNTERPOINT_RULES = [
     ParallelPerfect,
@@ -363,4 +486,5 @@ ALL_COUNTERPOINT_RULES = [
     VoiceCrossing,
     CrossRelation,
     AugmentedLeap,
+    VoiceInterleaving,
 ]

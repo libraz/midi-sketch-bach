@@ -70,7 +70,7 @@ Subject makeTestSubject(SubjectCharacter character = SubjectCharacter::Severe) {
 TEST(FortspinnungTest, EmptyPoolReturnsEmpty) {
   MotifPool empty_pool;
   auto result = generateFortspinnung(empty_pool, 0, kTicksPerBar * 4,
-                                     3, 42, SubjectCharacter::Severe);
+                                     3, 42, SubjectCharacter::Severe, Key::C);
   EXPECT_TRUE(result.empty());
 }
 
@@ -81,7 +81,7 @@ TEST(FortspinnungTest, EmptyPoolReturnsEmpty) {
 TEST(FortspinnungTest, GeneratesNotesForSingleVoice) {
   auto pool = buildTestPool();
   auto result = generateFortspinnung(pool, 0, kTicksPerBar * 4,
-                                     1, 42, SubjectCharacter::Severe);
+                                     1, 42, SubjectCharacter::Severe, Key::C);
 
   EXPECT_FALSE(result.empty());
 
@@ -98,7 +98,7 @@ TEST(FortspinnungTest, GeneratesNotesForSingleVoice) {
 TEST(FortspinnungTest, GeneratesNotesForTwoVoices) {
   auto pool = buildTestPool();
   auto result = generateFortspinnung(pool, 0, kTicksPerBar * 4,
-                                     2, 42, SubjectCharacter::Severe);
+                                     2, 42, SubjectCharacter::Severe, Key::C);
 
   EXPECT_FALSE(result.empty());
 
@@ -121,7 +121,7 @@ TEST(FortspinnungTest, NotesWithinDuration) {
   Tick duration = kTicksPerBar * 3;
 
   auto result = generateFortspinnung(pool, start, duration,
-                                     2, 42, SubjectCharacter::Severe);
+                                     2, 42, SubjectCharacter::Severe, Key::C);
 
   EXPECT_FALSE(result.empty());
 
@@ -140,7 +140,7 @@ TEST(FortspinnungTest, NotesWithinDuration) {
 TEST(FortspinnungTest, FragmentConnectionSmallGaps) {
   auto pool = buildTestPool();
   auto result = generateFortspinnung(pool, 0, kTicksPerBar * 4,
-                                     1, 42, SubjectCharacter::Severe);
+                                     1, 42, SubjectCharacter::Severe, Key::C);
 
   // Filter voice 0 only and sort by tick.
   std::vector<NoteEvent> voice0;
@@ -181,9 +181,9 @@ TEST(FortspinnungTest, DeterministicWithSameSeed) {
   uint32_t seed = 12345;
 
   auto result1 = generateFortspinnung(pool, 0, kTicksPerBar * 4,
-                                      2, seed, SubjectCharacter::Playful);
+                                      2, seed, SubjectCharacter::Playful, Key::C);
   auto result2 = generateFortspinnung(pool, 0, kTicksPerBar * 4,
-                                      2, seed, SubjectCharacter::Playful);
+                                      2, seed, SubjectCharacter::Playful, Key::C);
 
   ASSERT_EQ(result1.size(), result2.size());
   for (size_t idx = 0; idx < result1.size(); ++idx) {
@@ -312,7 +312,7 @@ TEST(FortspinnungTest, AllCharactersProduceNotes) {
   for (auto character : characters) {
     auto pool = buildTestPool(character);
     auto result = generateFortspinnung(pool, 0, kTicksPerBar * 4,
-                                       2, 42, character);
+                                       2, 42, character, Key::C);
     EXPECT_FALSE(result.empty())
         << "Character " << static_cast<int>(character) << " produced no notes";
   }
@@ -325,7 +325,7 @@ TEST(FortspinnungTest, AllCharactersProduceNotes) {
 TEST(FortspinnungTest, NoteSourceIsEpisodeMaterial) {
   auto pool = buildTestPool();
   auto result = generateFortspinnung(pool, 0, kTicksPerBar * 4,
-                                     2, 42, SubjectCharacter::Severe);
+                                     2, 42, SubjectCharacter::Severe, Key::C);
 
   EXPECT_FALSE(result.empty());
   for (const auto& note : result) {
@@ -341,7 +341,7 @@ TEST(FortspinnungTest, NoteSourceIsEpisodeMaterial) {
 TEST(FortspinnungTest, ZeroDurationReturnsEmpty) {
   auto pool = buildTestPool();
   auto result = generateFortspinnung(pool, 0, 0,
-                                     2, 42, SubjectCharacter::Severe);
+                                     2, 42, SubjectCharacter::Severe, Key::C);
   EXPECT_TRUE(result.empty());
 }
 
@@ -352,7 +352,7 @@ TEST(FortspinnungTest, ZeroDurationReturnsEmpty) {
 TEST(FortspinnungTest, Voice2GeneratedForThreeVoices) {
   auto pool = buildTestPool();
   auto result = generateFortspinnung(pool, 0, kTicksPerBar * 4,
-                                     3, 42, SubjectCharacter::Severe);
+                                     3, 42, SubjectCharacter::Severe, Key::C);
 
   EXPECT_FALSE(result.empty());
 
@@ -372,7 +372,7 @@ TEST(FortspinnungTest, Voice2GeneratedForThreeVoices) {
 TEST(FortspinnungTest, Voice2PitchInBassRange) {
   auto pool = buildTestPool();
   auto result = generateFortspinnung(pool, 0, kTicksPerBar * 8,
-                                     3, 42, SubjectCharacter::Severe);
+                                     3, 42, SubjectCharacter::Severe, Key::C);
 
   for (const auto& note : result) {
     if (note.voice == 2) {
@@ -392,12 +392,154 @@ TEST(FortspinnungTest, Voice2PitchInBassRange) {
 TEST(FortspinnungTest, Voice2NotGeneratedForTwoVoices) {
   auto pool = buildTestPool();
   auto result = generateFortspinnung(pool, 0, kTicksPerBar * 4,
-                                     2, 42, SubjectCharacter::Severe);
+                                     2, 42, SubjectCharacter::Severe, Key::C);
 
   for (const auto& note : result) {
     EXPECT_NE(note.voice, 2u)
         << "2-voice Fortspinnung should NOT generate voice 2 notes";
   }
+}
+
+// ===========================================================================
+// Voice3GeneratedForFourVoices
+// ===========================================================================
+
+TEST(FortspinnungTest, Voice3GeneratedForFourVoices) {
+  auto pool = buildTestPool();
+  auto result = generateFortspinnung(pool, 0, kTicksPerBar * 8,
+                                     4, 42, SubjectCharacter::Severe, Key::C);
+
+  EXPECT_FALSE(result.empty());
+
+  int voice3_count = 0;
+  for (const auto& note : result) {
+    if (note.voice == 3) {
+      ++voice3_count;
+      // Pedal range: C1 (24) to D3 (50).
+      EXPECT_GE(note.pitch, 24u)
+          << "Voice 3 pedal note below C1: " << static_cast<int>(note.pitch);
+      EXPECT_LE(note.pitch, 50u)
+          << "Voice 3 pedal note above D3: " << static_cast<int>(note.pitch);
+    }
+  }
+  EXPECT_GT(voice3_count, 0)
+      << "4-voice Fortspinnung should generate voice 3 (pedal) notes";
+}
+
+// ===========================================================================
+// Voice2InTenorRangeForFourVoices
+// ===========================================================================
+
+TEST(FortspinnungTest, Voice2InTenorRangeForFourVoices) {
+  auto pool = buildTestPool();
+  auto result = generateFortspinnung(pool, 0, kTicksPerBar * 8,
+                                     4, 42, SubjectCharacter::Severe, Key::C);
+
+  int voice2_count = 0;
+  for (const auto& note : result) {
+    if (note.voice == 2) {
+      ++voice2_count;
+      // Tenor range for 4 voices: C3 (48) to C5 (72).
+      EXPECT_GE(note.pitch, 48u)
+          << "Voice 2 tenor note below C3: " << static_cast<int>(note.pitch);
+      EXPECT_LE(note.pitch, 72u)
+          << "Voice 2 tenor note above C5: " << static_cast<int>(note.pitch);
+    }
+  }
+  EXPECT_GT(voice2_count, 0)
+      << "4-voice Fortspinnung should generate voice 2 (tenor) notes";
+}
+
+// ===========================================================================
+// Voice3NotGeneratedForThreeVoices
+// ===========================================================================
+
+TEST(FortspinnungTest, Voice3NotGeneratedForThreeVoices) {
+  auto pool = buildTestPool();
+  auto result = generateFortspinnung(pool, 0, kTicksPerBar * 8,
+                                     3, 42, SubjectCharacter::Severe, Key::C);
+
+  for (const auto& note : result) {
+    EXPECT_NE(note.voice, 3u)
+        << "3-voice Fortspinnung should NOT generate voice 3 notes";
+  }
+}
+
+// ===========================================================================
+// Voice3MaxSilenceRespected
+// ===========================================================================
+
+TEST(FortspinnungTest, Voice3MaxSilenceRespected) {
+  auto pool = buildTestPool();
+  Tick duration = kTicksPerBar * 16;
+
+  // Test across 10 seeds to cover RNG variation.
+  for (uint32_t seed = 1; seed <= 10; ++seed) {
+    auto result = generateFortspinnung(pool, 0, duration,
+                                       4, seed, SubjectCharacter::Severe, Key::C);
+
+    // Collect voice 3 notes sorted by tick.
+    std::vector<NoteEvent> v3_notes;
+    for (const auto& note : result) {
+      if (note.voice == 3) v3_notes.push_back(note);
+    }
+    std::sort(v3_notes.begin(), v3_notes.end(),
+              [](const NoteEvent& a, const NoteEvent& b) {
+                return a.start_tick < b.start_tick;
+              });
+
+    ASSERT_FALSE(v3_notes.empty())
+        << "Seed " << seed << ": voice 3 has no notes";
+
+    // Check max silence gap between consecutive voice 3 notes.
+    // Also check from start to first note and from last note to end.
+    constexpr int kMaxSilentBars = 4;
+    Tick max_allowed_gap = kTicksPerBar * (kMaxSilentBars + 1);
+
+    Tick first_gap = v3_notes[0].start_tick;
+    EXPECT_LE(first_gap, max_allowed_gap)
+        << "Seed " << seed << ": gap before first voice 3 note too large: "
+        << first_gap / kTicksPerBar << " bars";
+
+    for (size_t idx = 1; idx < v3_notes.size(); ++idx) {
+      Tick gap = v3_notes[idx].start_tick -
+                 (v3_notes[idx - 1].start_tick + v3_notes[idx - 1].duration);
+      EXPECT_LE(gap, max_allowed_gap)
+          << "Seed " << seed << ": gap between voice 3 notes too large at tick "
+          << v3_notes[idx].start_tick << ": " << gap / kTicksPerBar << " bars";
+    }
+  }
+}
+
+// ===========================================================================
+// Voice3AnchorUsesKeyPitch
+// ===========================================================================
+
+TEST(FortspinnungTest, Voice3AnchorUsesKeyPitch) {
+  auto pool = buildTestPool();
+  // Test with G key (key offset = 7).
+  Key test_key = Key::G;
+  auto result = generateFortspinnung(pool, 0, kTicksPerBar * 8,
+                                     4, 42, SubjectCharacter::Severe, test_key);
+
+  // Expected anchor pitches: tonic = 36 + 7 = 43 (G2), dominant = 43 + 7 = 50 (D3).
+  int tonic_bass = 36 + static_cast<int>(test_key);  // 43
+  int dominant_bass = tonic_bass + 7;                 // 50
+
+  // Collect voice 3 notes that are whole-bar duration (anchor notes).
+  bool found_tonic_or_dominant = false;
+  for (const auto& note : result) {
+    if (note.voice == 3 && note.duration >= kTicksPerBar - 1) {
+      int pitch = static_cast<int>(note.pitch);
+      // Anchor should be tonic or dominant pitch.
+      if (pitch == tonic_bass || pitch == dominant_bass) {
+        found_tonic_or_dominant = true;
+      }
+    }
+  }
+  EXPECT_TRUE(found_tonic_or_dominant)
+      << "Voice 3 anchor notes should include tonic (" << tonic_bass
+      << ") or dominant (" << dominant_bass << ") of key G";
 }
 
 }  // namespace

@@ -156,6 +156,17 @@ void closeGapIfNeeded(std::vector<NoteEvent>& fragment, uint8_t prev_last_pitch)
   fragment = transposeMelody(fragment, transpose_amount);
 }
 
+/// @brief Map pitch to target register with octave folding.
+/// @param pitch Input pitch (may be outside range).
+/// @param lo Lower bound of target register.
+/// @param hi Upper bound of target register.
+/// @return Clamped pitch within [lo, hi].
+uint8_t mapToRegister(int pitch, int lo, int hi) {
+  if (pitch < lo) pitch += 12;
+  if (pitch > hi) pitch -= 12;
+  return static_cast<uint8_t>(std::clamp(pitch, lo, hi));
+}
+
 /// @brief Place a fragment at a given tick offset, assigning voice ID.
 /// @param fragment Source fragment notes (tick-normalized to 0).
 /// @param offset_tick Tick position for the first note.
@@ -182,7 +193,8 @@ std::vector<NoteEvent> generateFortspinnung(const MotifPool& pool,
                                             Tick duration_ticks,
                                             uint8_t num_voices,
                                             uint32_t seed,
-                                            SubjectCharacter character) {
+                                            SubjectCharacter character,
+                                            Key key) {
   std::vector<NoteEvent> result;
 
   if (pool.empty() || duration_ticks == 0) {
@@ -351,12 +363,14 @@ std::vector<NoteEvent> generateFortspinnung(const MotifPool& pool,
       }
       auto bass_fragment = augmentMelody(tail, 0, 2);
 
-      // Transpose bass fragment down by an octave for bass register.
+      // Transpose fragment to appropriate register based on voice count.
+      // 4 voices: voice 2 = tenor (C3-C5, MIDI 48-72).
+      // 3 voices: voice 2 = bass (C2-C4, MIDI 36-60).
+      int v2_offset = (num_voices >= 4) ? 0 : -12;
+      int v2_lo = (num_voices >= 4) ? 48 : 36;
+      int v2_hi = (num_voices >= 4) ? 72 : 60;
       for (auto& note : bass_fragment) {
-        int bass_pitch = static_cast<int>(note.pitch) - 12;
-        if (bass_pitch < 36) bass_pitch += 12;  // Don't go below C2.
-        if (bass_pitch > 60) bass_pitch -= 12;  // Keep in bass range.
-        note.pitch = static_cast<uint8_t>(std::clamp(bass_pitch, 36, 60));
+        note.pitch = mapToRegister(static_cast<int>(note.pitch) + v2_offset, v2_lo, v2_hi);
       }
 
       Tick bass_tick = start_tick;
@@ -387,13 +401,16 @@ std::vector<NoteEvent> generateFortspinnung(const MotifPool& pool,
           }
           bass_tick += frag_dur;
         } else {
-          // Anchor note: chord root (tonic) held for one bar.
-          // Use the first note of voice 0 as reference for root pitch.
-          uint8_t anchor_pitch = voice0_notes[0].pitch;
-          int bass_anchor = static_cast<int>(anchor_pitch) - 12;
-          if (bass_anchor < 36) bass_anchor += 12;
-          if (bass_anchor > 60) bass_anchor -= 12;
-          bass_anchor = std::clamp(bass_anchor, 36, 60);
+          // Anchor note: tonic held for one bar, derived from key.
+          int v2_anchor_pitch;
+          if (num_voices >= 4) {
+            // Tenor: tonic in C4 octave.
+            v2_anchor_pitch = 48 + static_cast<int>(key);
+          } else {
+            // Bass: tonic in C2 octave.
+            v2_anchor_pitch = 36 + static_cast<int>(key);
+          }
+          int bass_anchor = mapToRegister(v2_anchor_pitch, v2_lo, v2_hi);
 
           Tick anchor_dur = std::min(kTicksPerBar,
                                      start_tick + duration_ticks - bass_tick);
@@ -408,6 +425,95 @@ std::vector<NoteEvent> generateFortspinnung(const MotifPool& pool,
             result.push_back(anchor);
           }
           bass_tick += kTicksPerBar;
+        }
+        use_fragment = !use_fragment;
+      }
+    }
+  }
+
+  // --- Voice 3: Pedal foundation (if 4+ voices) ---
+  // Alternates between augmented tail fragments and tonic/dominant anchor notes.
+  // Hard constraint: no more than 4 consecutive bars of silence.
+  if (num_voices >= 4 && !result.empty()) {
+    std::vector<NoteEvent> voice0_notes;
+    for (const auto& note : result) {
+      if (note.voice == 0) voice0_notes.push_back(note);
+    }
+    if (!voice0_notes.empty()) {
+      std::mt19937 pedal_rng(seed ^ 0xBA550003u);
+      float emit_prob = rng::rollFloat(pedal_rng, 0.50f, 0.65f);
+
+      // Pedal anchor pitches from key (tonicBassPitch pattern).
+      constexpr int kPedalLo = 24;          // C1
+      constexpr int kPedalHiNormal = 45;    // A2 (normal upper limit)
+      constexpr int kPedalHiAnchor = 50;    // D3 (anchor exception)
+      int tonic_bass = 36 + static_cast<int>(key);  // C2 octave
+      tonic_bass = std::clamp(tonic_bass, kPedalLo, kPedalHiAnchor);
+      int dominant_bass = tonic_bass + 7;   // Perfect 5th
+      if (dominant_bass > kPedalHiAnchor) dominant_bass -= 12;
+      dominant_bass = std::clamp(dominant_bass, kPedalLo, kPedalHiAnchor);
+
+      // Augmented tail fragment from voice 0.
+      auto tail = extractTailMotif(voice0_notes, 3);
+      if (tail.size() > 3) tail.resize(3);
+      auto pedal_fragment = augmentMelody(tail, 0, 2);
+      for (auto& note : pedal_fragment) {
+        note.pitch = mapToRegister(static_cast<int>(note.pitch) - 24,
+                                   kPedalLo, kPedalHiNormal);
+      }
+      Tick frag_dur = motifDuration(pedal_fragment);
+      if (frag_dur == 0) frag_dur = kTicksPerBeat * 2;
+
+      // Generate with max-silence hard constraint.
+      constexpr int kMaxSilentBars = 4;
+      Tick pedal_tick = start_tick;
+      int consecutive_silent_bars = 0;
+      bool use_fragment = true;
+
+      while (pedal_tick < start_tick + duration_ticks) {
+        Tick segment_dur = use_fragment ? frag_dur : kTicksPerBar;
+        bool force_emit = (consecutive_silent_bars >= kMaxSilentBars);
+        bool emit = force_emit || rng::rollProbability(pedal_rng, emit_prob);
+
+        if (!emit) {
+          int bars_skipped = std::max(1, static_cast<int>(segment_dur / kTicksPerBar));
+          consecutive_silent_bars += bars_skipped;
+          pedal_tick += segment_dur;
+          use_fragment = !use_fragment;
+          continue;
+        }
+
+        consecutive_silent_bars = 0;
+
+        if (use_fragment && !pedal_fragment.empty()) {
+          // Augmented tail fragment (0-based start_ticks + pedal_tick).
+          for (const auto& frag_note : pedal_fragment) {
+            NoteEvent evt = frag_note;
+            evt.start_tick = frag_note.start_tick + pedal_tick;
+            evt.voice = 3;
+            evt.source = BachNoteSource::EpisodeMaterial;
+            if (evt.start_tick >= start_tick + duration_ticks) break;
+            Tick remaining = start_tick + duration_ticks - evt.start_tick;
+            if (evt.duration > remaining) evt.duration = remaining;
+            result.push_back(evt);
+          }
+          pedal_tick += frag_dur;
+        } else {
+          // Anchor note: tonic or dominant from key (alternating).
+          int anchor_pitch = use_fragment ? tonic_bass : dominant_bass;
+          Tick anchor_dur = std::min(kTicksPerBar,
+                                     start_tick + duration_ticks - pedal_tick);
+          if (anchor_dur > 0) {
+            NoteEvent anchor;
+            anchor.start_tick = pedal_tick;
+            anchor.duration = anchor_dur;
+            anchor.pitch = static_cast<uint8_t>(anchor_pitch);
+            anchor.velocity = 80;
+            anchor.voice = 3;
+            anchor.source = BachNoteSource::EpisodeMaterial;
+            result.push_back(anchor);
+          }
+          pedal_tick += kTicksPerBar;
         }
         use_fragment = !use_fragment;
       }

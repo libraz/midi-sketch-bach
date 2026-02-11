@@ -289,3 +289,18 @@ def is_dissonant(semitones: int) -> bool:
 def pitch_to_name(pitch: int) -> str:
     """Convert MIDI pitch to note name with octave (e.g., 'C4')."""
     return f"{NOTE_NAMES[pitch % 12]}{pitch // 12 - 1}"
+
+
+def sounding_note_at(sorted_notes: List[Note], tick: int) -> Optional[Note]:
+    """Return the note sounding at the given tick (considering sustain), or None.
+
+    Mirrors C++ soundingPitch() in counterpoint_analyzer.cpp.  Notes must be
+    sorted by start_tick (ascending).
+    """
+    result: Optional[Note] = None
+    for n in sorted_notes:
+        if n.start_tick <= tick < n.end_tick:
+            result = n
+        if n.start_tick > tick:
+            break
+    return result

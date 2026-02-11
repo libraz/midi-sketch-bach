@@ -1005,7 +1005,8 @@ Episode generateFortspinnungEpisode(const Subject& subject, const MotifPool& poo
 
   // Generate Fortspinnung material from the motif pool.
   episode.notes = generateFortspinnung(pool, start_tick, duration_ticks,
-                                       num_voices, seed, subject.character);
+                                       num_voices, seed, subject.character,
+                                       start_key);
 
   // Apply gradual key modulation: transpose the second half toward the target key.
   int key_diff = static_cast<int>(target_key) - static_cast<int>(start_key);

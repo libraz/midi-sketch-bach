@@ -649,15 +649,25 @@ FugueResult generateFugue(const FugueConfig& config) {
     // Prefer voices that haven't had a middle entry yet (bass rotation fix).
     uint8_t entry_voice;
     {
-      uint8_t candidate = static_cast<uint8_t>(pair_idx % num_voices);
-      for (uint8_t v = 0; v < num_voices; ++v) {
-        uint8_t check = (candidate + v) % num_voices;
-        if ((entries_seen_mask & (1u << check)) == 0) {
-          candidate = check;
-          break;
+      uint8_t bass_voice = num_voices - 1;
+      bool bass_has_entry = (entries_seen_mask & (1u << bass_voice)) != 0;
+
+      // Force bass entry in the latter portion of the develop phase.
+      // This ensures the pedal voice participates in middle entries.
+      int threshold = std::max(1, develop_pairs * 2 / 3);
+      if (!bass_has_entry && pair_idx >= threshold && num_voices >= 4) {
+        entry_voice = bass_voice;
+      } else {
+        uint8_t candidate = static_cast<uint8_t>(pair_idx % num_voices);
+        for (uint8_t v = 0; v < num_voices; ++v) {
+          uint8_t check = (candidate + v) % num_voices;
+          if ((entries_seen_mask & (1u << check)) == 0) {
+            candidate = check;
+            break;
+          }
         }
+        entry_voice = candidate;
       }
-      entry_voice = candidate;
       entries_seen_mask |= (1u << entry_voice);
     }
     std::uniform_real_distribution<float> false_dist(0.0f, 1.0f);

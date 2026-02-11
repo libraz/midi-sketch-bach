@@ -14,6 +14,7 @@
 #include "core/basic_types.h"
 #include "fugue/motif_pool.h"
 #include "fugue/subject.h"
+#include "harmony/key.h"
 
 namespace bach {
 
@@ -36,13 +37,15 @@ namespace bach {
 /// @param num_voices Number of active voices.
 /// @param seed RNG seed for fragment selection.
 /// @param character Subject character (influences fragment choice probability).
+/// @param key Musical key for pedal anchor pitch calculation.
 /// @return Vector of NoteEvents for the Fortspinnung passage.
 std::vector<NoteEvent> generateFortspinnung(const MotifPool& pool,
                                             Tick start_tick,
                                             Tick duration_ticks,
                                             uint8_t num_voices,
                                             uint32_t seed,
-                                            SubjectCharacter character);
+                                            SubjectCharacter character,
+                                            Key key);
 
 }  // namespace bach
 

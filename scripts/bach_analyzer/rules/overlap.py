@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Dict, List
 
-from ..model import TICKS_PER_BEAT, Note, Score, pitch_to_name
+from ..model import TICKS_PER_BAR, TICKS_PER_BEAT, Note, Score, pitch_to_name, sounding_note_at
 from .base import Category, RuleResult, Severity, Violation
 
 
@@ -63,8 +63,11 @@ class WithinVoiceOverlap:
 
 
 class VoiceSpacing:
-    """Detect excessive spacing (>12 semitones) between adjacent voices on
-    the same beat."""
+    """Detect excessive spacing (>12 semitones) between adjacent voices.
+
+    Scans every beat position and checks sounding pitches (including sustained
+    notes), matching the sustained-note-aware approach used by C++ analysis.
+    """
 
     def __init__(self, max_semitones: int = 12):
         self.max_semitones = max_semitones
@@ -79,29 +82,39 @@ class VoiceSpacing:
 
     def check(self, score: Score) -> RuleResult:
         violations: List[Violation] = []
-        track_order = [(t.name, t.notes) for t in score.tracks]
+        track_order = [(t.name, t.sorted_notes) for t in score.tracks]
+        if len(track_order) < 2:
+            return RuleResult(
+                rule_name=self.name, category=self.category,
+                passed=True, violations=[],
+            )
+        end_tick = score.total_duration
         for i in range(len(track_order) - 1):
             name_upper, notes_upper = track_order[i]
             name_lower, notes_lower = track_order[i + 1]
-            beats_u: Dict[int, Note] = {n.start_tick: n for n in notes_upper}
-            beats_l: Dict[int, Note] = {n.start_tick: n for n in notes_lower}
-            for tick in sorted(set(beats_u) & set(beats_l)):
-                nu, nl = beats_u[tick], beats_l[tick]
-                gap = abs(nu.pitch - nl.pitch)
-                if gap > self.max_semitones:
-                    violations.append(
-                        Violation(
-                            rule_name=self.name,
-                            category=self.category,
-                            severity=Severity.WARNING,
-                            bar=nu.bar,
-                            beat=nu.beat,
-                            tick=tick,
-                            voice_a=name_upper,
-                            voice_b=name_lower,
-                            description=f"{gap} semitones apart: {pitch_to_name(nu.pitch)} / {pitch_to_name(nl.pitch)}",
+            beat = 0
+            while beat < end_tick:
+                nu = sounding_note_at(notes_upper, beat)
+                nl = sounding_note_at(notes_lower, beat)
+                if nu is not None and nl is not None:
+                    gap = abs(nu.pitch - nl.pitch)
+                    if gap > self.max_semitones:
+                        bar = beat // TICKS_PER_BAR + 1
+                        beat_in_bar = (beat % TICKS_PER_BAR) // TICKS_PER_BEAT + 1
+                        violations.append(
+                            Violation(
+                                rule_name=self.name,
+                                category=self.category,
+                                severity=Severity.WARNING,
+                                bar=bar,
+                                beat=beat_in_bar,
+                                tick=beat,
+                                voice_a=name_upper,
+                                voice_b=name_lower,
+                                description=f"{gap} semitones apart: {pitch_to_name(nu.pitch)} / {pitch_to_name(nl.pitch)}",
+                            )
                         )
-                    )
+                beat += TICKS_PER_BEAT
         return RuleResult(
             rule_name=self.name,
             category=self.category,

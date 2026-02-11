@@ -26,7 +26,7 @@ class TestRunner(unittest.TestCase):
 
     def test_get_filtered_rules(self):
         rules = get_rules(categories={"counterpoint"})
-        self.assertEqual(len(rules), 5)
+        self.assertEqual(len(rules), 6)
         for r in rules:
             self.assertEqual(r.category.value, "counterpoint")
 
