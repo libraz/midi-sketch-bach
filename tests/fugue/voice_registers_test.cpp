@@ -17,8 +17,8 @@ TEST(VoiceRegistersTest, ThreeVoiceRanges) {
   EXPECT_EQ(hi1, 79u);
 
   auto [lo2, hi2] = getFugueVoiceRange(2, 3);
-  EXPECT_EQ(lo2, 36u);
-  EXPECT_EQ(hi2, 60u);
+  EXPECT_EQ(lo2, 48u);
+  EXPECT_EQ(hi2, 72u);
 }
 
 TEST(VoiceRegistersTest, TwoVoiceRanges) {

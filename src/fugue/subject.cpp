@@ -7,6 +7,7 @@
 #include <cmath>
 #include <random>
 
+#include "core/interval.h"
 #include "core/pitch_utils.h"
 #include "core/rng_util.h"
 #include "core/scale.h"
@@ -130,6 +131,7 @@ struct SkeletonSlot {
   SlotPhase phase;
   int degree_hint;    ///< Motif degree offset (MotifA/B) or absolute degree (Cadence).
   size_t phase_index; ///< Index within this phase (0, 1, 2, ...).
+  NoteFunction function = NoteFunction::StructuralTone;  ///< Structural role hint.
 };
 
 /// Pre-computed anchor data for subject generation (fixed per seed).
@@ -186,8 +188,11 @@ std::vector<SkeletonSlot> buildRhythmSkeleton(
       if (duration < kTicksPerBeat / 4) break;
     }
 
+    NoteFunction func = (idx < motif_a.functions.size())
+                             ? motif_a.functions[idx]
+                             : NoteFunction::StructuralTone;
     slots.push_back({current_tick, duration, SlotPhase::kMotifA,
-                      motif_a.degree_offsets[idx], motif_a_count});
+                      motif_a.degree_offsets[idx], motif_a_count, func});
     current_tick += duration;
     ++motif_a_count;
   }
@@ -204,7 +209,8 @@ std::vector<SkeletonSlot> buildRhythmSkeleton(
     if (current_tick + climax_dur > a.total_ticks) {
       climax_dur = a.total_ticks - current_tick;
     }
-    slots.push_back({current_tick, climax_dur, SlotPhase::kClimax, 0, 0});
+    slots.push_back({current_tick, climax_dur, SlotPhase::kClimax, 0, 0,
+                      NoteFunction::ClimaxTone});
     current_tick += climax_dur;
   }
 
@@ -229,8 +235,11 @@ std::vector<SkeletonSlot> buildRhythmSkeleton(
       if (duration < kTicksPerBeat / 4) break;
     }
 
+    NoteFunction func_b = (idx < motif_b.functions.size())
+                               ? motif_b.functions[idx]
+                               : NoteFunction::StructuralTone;
     slots.push_back({current_tick, duration, SlotPhase::kMotifB,
-                      motif_b.degree_offsets[idx], motif_b_count});
+                      motif_b.degree_offsets[idx], motif_b_count, func_b});
     current_tick += duration;
     ++motif_b_count;
   }
@@ -270,13 +279,76 @@ std::vector<SkeletonSlot> buildRhythmSkeleton(
 
       int degree_abs = tonic_abs_degree + cadence.degrees[ci];
       slots.push_back({current_tick, dur, SlotPhase::kCadence,
-                        degree_abs, cadence_count});
+                        degree_abs, cadence_count, NoteFunction::CadentialTone});
       current_tick += dur;
       ++cadence_count;
     }
   }
 
   return slots;
+}
+
+/// @brief Evaluate how well a candidate pitch fits its NoteFunction.
+///
+/// Returns a bonus in [0, 1] for use in composite scoring. Each NoteFunction
+/// type rewards pitch choices that match its structural role.
+///
+/// @param candidate_pitch The candidate MIDI pitch.
+/// @param prev_pitch Previous note pitch (-1 if none).
+/// @param function The NoteFunction for this slot.
+/// @param key Musical key.
+/// @param scale Scale type.
+/// @param num_slots Total skeleton slots (for normalization).
+/// @return Bonus score in [0, 1].
+float evaluateNoteFunctionFit(int candidate_pitch, int prev_pitch,
+                               NoteFunction function, Key key,
+                               ScaleType /* scale */, size_t num_slots) {
+  if (num_slots == 0) return 0.0f;
+  float per_note = 1.0f / static_cast<float>(num_slots);
+
+  switch (function) {
+    case NoteFunction::StructuralTone: {
+      // Structural tones should be chord tones (scale degrees 1, 3, 5).
+      int pc = getPitchClass(static_cast<uint8_t>(candidate_pitch));
+      int root = static_cast<int>(key);
+      int rel = ((pc - root) % 12 + 12) % 12;
+      // Major/minor chord tones: root(0), third(3 or 4), fifth(7).
+      if (rel == 0 || rel == 3 || rel == 4 || rel == 7) return per_note;
+      return 0.0f;
+    }
+    case NoteFunction::PassingTone: {
+      // Passing tones should be stepwise from previous note.
+      if (prev_pitch < 0) return 0.0f;
+      int dist = std::abs(candidate_pitch - prev_pitch);
+      if (dist >= 1 && dist <= 2) return per_note;
+      return 0.0f;
+    }
+    case NoteFunction::NeighborTone: {
+      // Neighbor tones should be within 2 semitones of previous.
+      if (prev_pitch < 0) return 0.0f;
+      int dist = std::abs(candidate_pitch - prev_pitch);
+      if (dist <= 2) return per_note;
+      return 0.0f;
+    }
+    case NoteFunction::Resolution: {
+      // Resolution: descending or ascending semitone from previous.
+      if (prev_pitch < 0) return 0.0f;
+      int interval = candidate_pitch - prev_pitch;
+      if (interval == -1 || interval == -2 || interval == 1) return per_note;
+      return 0.0f;
+    }
+    case NoteFunction::SequenceHead: {
+      // SequenceHead: no tritone from previous note.
+      if (prev_pitch < 0) return per_note;
+      int dist = std::abs(candidate_pitch - prev_pitch);
+      int simple = interval_util::compoundToSimple(dist);
+      if (simple != 6) return per_note;  // Not a tritone.
+      return 0.0f;
+    }
+    // LeapTone, ClimaxTone, CadentialTone: handled by existing phase logic.
+    default:
+      return 0.0f;
+  }
 }
 
 /// Generate a pitch path for the given skeleton using a candidate-specific seed.
@@ -460,6 +532,19 @@ std::vector<NoteEvent> generatePitchPath(
       }
     }
 
+    // SequenceHead tritonus avoidance: only hard correction in NoteFunction.
+    if (slot.function == NoteFunction::SequenceHead && !result.empty()) {
+      int prev = static_cast<int>(result.back().pitch);
+      int dist = std::abs(pitch - prev);
+      int simple = interval_util::compoundToSimple(dist);
+      if (simple == 6) {
+        // Shift ±1 semitone to escape tritone, then snap to scale.
+        int shifted = (pitch > prev) ? pitch + 1 : pitch - 1;
+        pitch = snapToScale(shifted, a.key, a.scale,
+                            a.pitch_floor, a.pitch_ceil);
+      }
+    }
+
     NoteEvent note;
     note.start_tick = slot.start_tick;
     note.duration = slot.duration;
@@ -589,9 +674,10 @@ Subject SubjectGenerator::generate(const FugueConfig& config,
     }
   }
 
-  // Generate with validation retry.
+  // Generate with validation retry (archetype-weighted selection).
   constexpr int kMaxRetries = 4;
   SubjectValidator validator;
+  ArchetypeScorer archetype_scorer;
   std::vector<NoteEvent> best_notes;
   float best_composite = -1.0f;
 
@@ -603,13 +689,17 @@ Subject SubjectGenerator::generate(const FugueConfig& config,
     candidate.key = config.key;
     candidate.is_minor = config.is_minor;
     candidate.character = config.character;
-    SubjectScore score = validator.evaluate(candidate);
-    float comp = score.composite();
+
+    float base_comp = validator.evaluate(candidate).composite();
+    float arch_comp = archetype_scorer.evaluate(candidate, policy).composite();
+    float w = policy.base_quality_weight;
+    float comp = base_comp * w + arch_comp * (1.0f - w);
+
     if (comp > best_composite) {
       best_composite = comp;
       best_notes = std::move(notes);
     }
-    if (score.isAcceptable()) break;
+    if (comp >= 0.7f) break;
   }
 
   subject.notes = std::move(best_notes);
@@ -743,8 +833,10 @@ std::vector<NoteEvent> SubjectGenerator::generateNotes(
   std::vector<NoteEvent> best_notes;
   float best_composite = -1.0f;
 
-  for (int i = 0; i < kDefaultPathCandidates; ++i) {
-    uint32_t path_seed = seed ^ (static_cast<uint32_t>(i) * 0x7A3B9C1Du);
+  int num_candidates = (policy.path_candidates > 0)
+      ? policy.path_candidates : kDefaultPathCandidates;
+  for (int idx = 0; idx < num_candidates; ++idx) {
+    uint32_t path_seed = seed ^ (static_cast<uint32_t>(idx) * 0x7A3B9C1Du);
     auto candidate = generatePitchPath(anchors, skeleton, policy, path_seed);
 
     Subject s;
@@ -756,10 +848,23 @@ std::vector<NoteEvent> SubjectGenerator::generateNotes(
     // Hard gate: reject candidates that violate archetype requirements.
     if (!archetype_scorer.checkHardGate(s, policy)) continue;
 
-    // Combined score: base quality (70%) + archetype fitness (30%).
+    // NoteFunction fitness bonus: evaluate how well the pitch path matches
+    // the structural function assignments in the skeleton.
+    float note_func_bonus = 0.0f;
+    size_t eval_count = std::min(candidate.size(), skeleton.size());
+    for (size_t ni = 0; ni < eval_count; ++ni) {
+      int prev_p = (ni > 0) ? static_cast<int>(candidate[ni - 1].pitch) : -1;
+      note_func_bonus += evaluateNoteFunctionFit(
+          static_cast<int>(candidate[ni].pitch), prev_p,
+          skeleton[ni].function, key, scale, skeleton.size());
+    }
+    note_func_bonus = std::clamp(note_func_bonus, 0.0f, 1.0f);
+
+    // Combined score: base (65%) + archetype (25%) + NoteFunction (10%).
     float base_comp = validator.evaluate(s).composite();
     float arch_comp = archetype_scorer.evaluate(s, policy).composite();
-    float comp = base_comp * 0.7f + arch_comp * 0.3f;
+    float comp = base_comp * 0.65f + arch_comp * 0.25f
+               + note_func_bonus * 0.10f;
 
     if (comp > best_composite) {
       best_composite = comp;

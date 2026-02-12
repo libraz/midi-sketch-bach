@@ -7,6 +7,7 @@
 #include <random>
 
 #include "core/note_creator.h"
+#include "core/interval.h"
 #include "core/pitch_utils.h"
 #include "core/rng_util.h"
 #include "core/scale.h"
@@ -974,7 +975,8 @@ Episode generateEpisode(const Subject& subject, Tick start_tick, Tick duration_t
                         Key start_key, Key target_key, uint8_t num_voices, uint32_t seed,
                         int episode_index, float energy_level,
                         CounterpointState& cp_state, IRuleEvaluator& cp_rules,
-                        CollisionResolver& cp_resolver, const HarmonicTimeline& timeline) {
+                        CollisionResolver& cp_resolver, const HarmonicTimeline& timeline,
+                        uint8_t pedal_pitch) {
   // Step 1: Generate unvalidated episode using existing character-specific logic.
   Episode raw = generateEpisode(subject, start_tick, duration_ticks,
                                 start_key, target_key, num_voices, seed,
@@ -1104,6 +1106,43 @@ Episode generateEpisode(const Subject& subject, Tick start_tick, Tick duration_t
           mel_score += 0.15f;
         }
 
+        // Pedal consonance: light bias against strong-beat pedal dissonance.
+        // CollisionResolver handles hard rejection; this only steers ranking.
+        if (pedal_pitch > 0 && ml >= MetricLevel::Beat) {
+          int pedal_ivl = interval_util::compoundToSimple(
+              absoluteInterval(cand.pitch, pedal_pitch));
+          if (!interval_util::isConsonance(pedal_ivl)) {
+            mel_score += (ml == MetricLevel::Bar) ? -0.4f : -0.2f;
+          }
+        }
+
+        // Vertical consonance: light bias toward consonant vertical intervals.
+        // Final safety is CollisionResolver's responsibility.
+        if (ml >= MetricLevel::Beat) {
+          bool has_dissonance = false;
+          bool has_any_other = false;
+          for (VoiceId other_v : cp_state.getActiveVoices()) {
+            if (other_v == note.voice) continue;
+            const NoteEvent* other = cp_state.getNoteAt(other_v, note.start_tick);
+            if (!other || other->start_tick + other->duration <= note.start_tick)
+              continue;
+            has_any_other = true;
+            int ivl = interval_util::compoundToSimple(
+                absoluteInterval(cand.pitch, other->pitch));
+            if (!interval_util::isConsonance(ivl)) {
+              has_dissonance = true;
+              break;
+            }
+          }
+          if (has_any_other) {
+            if (has_dissonance) {
+              mel_score += (ml == MetricLevel::Bar) ? -0.3f : -0.15f;
+            } else {
+              mel_score += 0.15f;
+            }
+          }
+        }
+
         cand.score = mel_score;
       }
 
@@ -1231,7 +1270,8 @@ Episode generateFortspinnungEpisode(const Subject& subject, const MotifPool& poo
                                     CounterpointState& cp_state,
                                     IRuleEvaluator& cp_rules,
                                     CollisionResolver& cp_resolver,
-                                    const HarmonicTimeline& timeline) {
+                                    const HarmonicTimeline& timeline,
+                                    uint8_t pedal_pitch) {
   // Step 1: Generate unvalidated Fortspinnung episode.
   Episode raw = generateFortspinnungEpisode(subject, pool, start_tick, duration_ticks,
                                             start_key, target_key, num_voices, seed,
@@ -1355,6 +1395,43 @@ Episode generateFortspinnungEpisode(const Subject& subject, const MotifPool& poo
         // Chord tone affinity on structural beats.
         if (cand.is_chord_tone && ml >= MetricLevel::Beat) {
           mel_score += 0.15f;
+        }
+
+        // Pedal consonance: light bias against strong-beat pedal dissonance.
+        // CollisionResolver handles hard rejection; this only steers ranking.
+        if (pedal_pitch > 0 && ml >= MetricLevel::Beat) {
+          int pedal_ivl = interval_util::compoundToSimple(
+              absoluteInterval(cand.pitch, pedal_pitch));
+          if (!interval_util::isConsonance(pedal_ivl)) {
+            mel_score += (ml == MetricLevel::Bar) ? -0.4f : -0.2f;
+          }
+        }
+
+        // Vertical consonance: light bias toward consonant vertical intervals.
+        // Final safety is CollisionResolver's responsibility.
+        if (ml >= MetricLevel::Beat) {
+          bool has_dissonance = false;
+          bool has_any_other = false;
+          for (VoiceId other_v : cp_state.getActiveVoices()) {
+            if (other_v == note.voice) continue;
+            const NoteEvent* other = cp_state.getNoteAt(other_v, note.start_tick);
+            if (!other || other->start_tick + other->duration <= note.start_tick)
+              continue;
+            has_any_other = true;
+            int ivl = interval_util::compoundToSimple(
+                absoluteInterval(cand.pitch, other->pitch));
+            if (!interval_util::isConsonance(ivl)) {
+              has_dissonance = true;
+              break;
+            }
+          }
+          if (has_any_other) {
+            if (has_dissonance) {
+              mel_score += (ml == MetricLevel::Bar) ? -0.3f : -0.15f;
+            } else {
+              mel_score += 0.15f;
+            }
+          }
         }
 
         cand.score = mel_score;

@@ -50,6 +50,7 @@ class ArchetypeScorer {
   /// - require_fragmentable: Kopfmotiv must be rhythmically distinct
   /// - require_contour_symmetry: ascending/descending contour must be balanced
   /// - require_functional_resolution: chromatic steps must resolve
+  /// - require_axis_stability: inversion must stay within playable range
   ///
   /// @param subject The subject to check.
   /// @param policy Archetype policy with required conditions.
@@ -68,7 +69,11 @@ class ArchetypeScorer {
   float scoreStrettoPotential(const Subject& subject) const;
 
   /// @brief Score the head motif's distinctiveness and reusability.
-  float scoreKopfmotivStrength(const Subject& subject) const;
+  /// @param subject The subject to evaluate.
+  /// @param policy Archetype policy with fragment/sequence weights.
+  /// @return Score in [0, 1].
+  float scoreKopfmotivStrength(const Subject& subject,
+                               const ArchetypePolicy& policy) const;
 };
 
 }  // namespace bach

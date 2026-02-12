@@ -6,14 +6,161 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <map>
 #include <set>
 
+#include "core/interval.h"
 #include "core/pitch_utils.h"
+#include "core/scale.h"
 #include "fugue/stretto.h"
 #include "fugue/subject_params.h"
 #include "transform/motif_transform.h"
 
 namespace bach {
+namespace {
+
+/// @brief Evaluate fragment reusability of a Kopfmotiv.
+/// @return Score in [0, 1].
+float evaluateFragmentReusability(const std::vector<NoteEvent>& kopf,
+                                  Key /*key*/, ScaleType /*scale*/) {
+  if (kopf.size() < 2) return 0.0f;
+  float score = 0.0f;
+
+  // (a) Range within one octave: narrower = more reusable.
+  uint8_t lowest = 127, highest = 0;
+  for (const auto& note : kopf) {
+    if (note.pitch < lowest) lowest = note.pitch;
+    if (note.pitch > highest) highest = note.pitch;
+  }
+  int range = static_cast<int>(highest) - static_cast<int>(lowest);
+  if (range <= 12) {
+    score += 0.3f * (1.0f - static_cast<float>(range) / 12.0f);
+  }
+
+  // (b) Start/end pitch proximity: same or adjacent degree = more circular.
+  int start_end_dist = std::abs(static_cast<int>(kopf.front().pitch) -
+                                static_cast<int>(kopf.back().pitch));
+  if (start_end_dist <= 2) {
+    score += 0.3f;
+  } else if (start_end_dist <= 4) {
+    score += 0.15f;
+  }
+
+  // (c) Rhythmic repetition: repeated duration patterns = more memorable.
+  std::map<Tick, int> dur_counts;
+  for (const auto& note : kopf) {
+    dur_counts[note.duration]++;
+  }
+  int max_repeat = 0;
+  for (const auto& [dur, cnt] : dur_counts) {
+    if (cnt > max_repeat) max_repeat = cnt;
+  }
+  float repeat_ratio =
+      static_cast<float>(max_repeat) / static_cast<float>(kopf.size());
+  score += 0.4f * repeat_ratio;
+
+  return std::clamp(score, 0.0f, 1.0f);
+}
+
+/// @brief Evaluate sequence (Sequenz) potential of a Kopfmotiv.
+/// @return Score in [0, 1].
+float evaluateSequencePotential(const std::vector<NoteEvent>& kopf,
+                                Key key, ScaleType scale) {
+  if (kopf.size() < 2) return 0.0f;
+
+  // Extract interval pattern from kopf.
+  std::vector<int> intervals;
+  for (size_t idx = 1; idx < kopf.size(); ++idx) {
+    intervals.push_back(static_cast<int>(kopf[idx].pitch) -
+                        static_cast<int>(kopf[idx - 1].pitch));
+  }
+
+  // Transpose the interval pattern up and down by 2 scale degrees
+  // and count tritones (augmented 4th = 6 semitones) in the result.
+  int tritone_count = 0;
+  for (int shift : {2, -2}) {
+    // Shift each note by 'shift' scale degrees from the first note.
+    uint8_t base_pitch = kopf[0].pitch;
+    int base_abs = scale_util::pitchToAbsoluteDegree(base_pitch, key, scale);
+    int shifted_abs = base_abs + shift;
+    int shifted_pitch = static_cast<int>(
+        scale_util::absoluteDegreeToPitch(shifted_abs, key, scale));
+
+    // Reconstruct the transposed sequence using original intervals mapped
+    // through the scale.
+    int prev = shifted_pitch;
+    for (size_t idx = 0; idx < intervals.size(); ++idx) {
+      int orig_from = static_cast<int>(kopf[idx].pitch);
+      int orig_to = static_cast<int>(kopf[idx + 1].pitch);
+      int orig_from_abs = scale_util::pitchToAbsoluteDegree(
+          static_cast<uint8_t>(std::clamp(orig_from, 0, 127)), key, scale);
+      int orig_to_abs = scale_util::pitchToAbsoluteDegree(
+          static_cast<uint8_t>(std::clamp(orig_to, 0, 127)), key, scale);
+      int degree_interval = orig_to_abs - orig_from_abs;
+
+      int next_abs = scale_util::pitchToAbsoluteDegree(
+          static_cast<uint8_t>(std::clamp(prev, 0, 127)), key, scale) +
+          degree_interval;
+      int next = static_cast<int>(
+          scale_util::absoluteDegreeToPitch(next_abs, key, scale));
+
+      int semitone_interval = std::abs(next - prev);
+      int simple = interval_util::compoundToSimple(semitone_interval);
+      if (simple == 6) ++tritone_count;  // Tritone
+
+      prev = next;
+    }
+  }
+
+  // Score: 0 tritones = 1.0, 1 = 0.6, 2+ = 0.2.
+  if (tritone_count == 0) return 1.0f;
+  if (tritone_count == 1) return 0.6f;
+  return 0.2f;
+}
+
+/// @brief Evaluate contour symmetry of a subject.
+/// @return Score in [0, 1]. 1.0 = perfectly symmetric contour.
+float evaluateContourSymmetry(const Subject& subject) {
+  if (subject.notes.size() < 3) return 0.5f;
+
+  // Extract ascending and descending interval magnitudes.
+  std::vector<int> ascending_intervals;
+  std::vector<int> descending_intervals;
+  for (size_t idx = 1; idx < subject.notes.size(); ++idx) {
+    int interval = static_cast<int>(subject.notes[idx].pitch) -
+                   static_cast<int>(subject.notes[idx - 1].pitch);
+    if (interval > 0) ascending_intervals.push_back(interval);
+    else if (interval < 0) descending_intervals.push_back(-interval);
+  }
+
+  if (ascending_intervals.empty() || descending_intervals.empty()) return 0.0f;
+
+  // Compare distributions: sum of absolute intervals.
+  int asc_sum = 0, desc_sum = 0;
+  for (int val : ascending_intervals) asc_sum += val;
+  for (int val : descending_intervals) desc_sum += val;
+
+  // Size balance.
+  size_t min_size =
+      std::min(ascending_intervals.size(), descending_intervals.size());
+  size_t max_size =
+      std::max(ascending_intervals.size(), descending_intervals.size());
+  float size_balance =
+      static_cast<float>(min_size) / static_cast<float>(max_size);
+
+  // Magnitude balance.
+  int max_sum = std::max(asc_sum, desc_sum);
+  float magnitude_balance =
+      (max_sum > 0)
+          ? static_cast<float>(std::min(asc_sum, desc_sum)) /
+                static_cast<float>(max_sum)
+          : 0.0f;
+
+  return std::clamp(size_balance * 0.5f + magnitude_balance * 0.5f, 0.0f,
+                    1.0f);
+}
+
+}  // namespace
 
 // ---------------------------------------------------------------------------
 // ArchetypeScore
@@ -36,7 +183,7 @@ ArchetypeScore ArchetypeScorer::evaluate(const Subject& subject,
   score.archetype_fitness = scoreArchetypeFitness(subject, policy);
   score.inversion_quality = scoreInversionQuality(subject);
   score.stretto_potential = scoreStrettoPotential(subject);
-  score.kopfmotiv_strength = scoreKopfmotivStrength(subject);
+  score.kopfmotiv_strength = scoreKopfmotivStrength(subject, policy);
   return score;
 }
 
@@ -52,7 +199,7 @@ bool ArchetypeScorer::checkHardGate(const Subject& subject,
 
   // Hard gate: require_fragmentable — Kopfmotiv must be distinctive.
   if (policy.require_fragmentable) {
-    float kopf = scoreKopfmotivStrength(subject);
+    float kopf = scoreKopfmotivStrength(subject, policy);
     if (kopf < 0.40f) return false;
   }
 
@@ -92,6 +239,30 @@ bool ArchetypeScorer::checkHardGate(const Subject& subject,
       }
     }
     if (unresolved_chromatic > policy.max_consecutive_chromatic) return false;
+  }
+
+  // Hard gate: require_axis_stability — inversion must stay within range.
+  if (policy.require_axis_stability) {
+    uint8_t pivot = subject.notes[0].pitch;
+    ScaleType scale =
+        subject.is_minor ? ScaleType::HarmonicMinor : ScaleType::Major;
+
+    // 1) Max deviation: M6 (9 semitones) from pivot causes extreme register
+    //    displacement when inverted.
+    int max_dev = 0;
+    for (const auto& note : subject.notes) {
+      int dev = std::abs(static_cast<int>(note.pitch) - static_cast<int>(pivot));
+      if (dev > max_dev) max_dev = dev;
+    }
+    if (max_dev > 9) return false;
+
+    // 2) Inversion simulation: inverted melody must fit within C2-C7.
+    auto inverted = invertMelodyDiatonic(subject.notes, pivot, subject.key, scale);
+    if (!inverted.empty()) {
+      for (const auto& inv_note : inverted) {
+        if (inv_note.pitch < 36 || inv_note.pitch > 96) return false;
+      }
+    }
   }
 
   return true;
@@ -154,6 +325,13 @@ float ArchetypeScorer::scoreArchetypeFitness(
       // Scale bonus by how strongly the policy favors dominant (0.5-1.0 → 0.15-0.30).
       score += 0.15f + (policy.dominant_ending_prob - 0.5f) * 0.30f;
     }
+  }
+
+  // Symmetry scoring: blend existing score with contour symmetry.
+  if (policy.symmetry_score_weight > 0.0f) {
+    float symmetry = evaluateContourSymmetry(subject);
+    score = score * (1.0f - policy.symmetry_score_weight) +
+            symmetry * policy.symmetry_score_weight;
   }
 
   return std::max(0.0f, std::min(1.0f, score));
@@ -226,48 +404,73 @@ float ArchetypeScorer::scoreStrettoPotential(const Subject& subject) const {
   return 1.0f;
 }
 
-float ArchetypeScorer::scoreKopfmotivStrength(const Subject& subject) const {
+float ArchetypeScorer::scoreKopfmotivStrength(
+    const Subject& subject, const ArchetypePolicy& policy) const {
   if (subject.notes.size() < 3) return 0.0f;
 
   auto kopf = subject.extractKopfmotiv(4);
   if (kopf.size() < 2) return 0.0f;
 
-  float score = 0.0f;
+  // Base score (existing logic): interval variety, rhythmic variety, opening gesture.
+  float base_score = 0.0f;
 
-  // Criterion 1: interval variety in Kopfmotiv (unique intervals / count).
+  // Criterion 1: interval variety in Kopfmotiv.
   std::set<int> unique_intervals;
-  for (size_t i = 1; i < kopf.size(); ++i) {
-    int interval = static_cast<int>(kopf[i].pitch) -
-                   static_cast<int>(kopf[i - 1].pitch);
+  for (size_t idx = 1; idx < kopf.size(); ++idx) {
+    int interval = static_cast<int>(kopf[idx].pitch) -
+                   static_cast<int>(kopf[idx - 1].pitch);
     unique_intervals.insert(interval);
   }
   float interval_ratio = static_cast<float>(unique_intervals.size()) /
                          static_cast<float>(kopf.size() - 1);
-  score += interval_ratio * 0.4f;
+  base_score += interval_ratio * 0.4f;
 
-  // Criterion 2: rhythmic variety (unique durations / count).
+  // Criterion 2: rhythmic variety.
   std::set<Tick> unique_durations;
-  for (const auto& n : kopf) {
-    unique_durations.insert(n.duration);
+  for (const auto& note : kopf) {
+    unique_durations.insert(note.duration);
   }
   float rhythm_ratio = static_cast<float>(unique_durations.size()) /
                        static_cast<float>(kopf.size());
-  score += rhythm_ratio * 0.3f;
+  base_score += rhythm_ratio * 0.3f;
 
-  // Criterion 3: presence of a clear opening gesture (leap or step pattern).
+  // Criterion 3: opening gesture.
   if (kopf.size() >= 2) {
     int first_interval = std::abs(static_cast<int>(kopf[1].pitch) -
                                   static_cast<int>(kopf[0].pitch));
-    // A clear gesture is either a notable leap (3+ semitones) or a
-    // characteristic step pattern.
     if (first_interval >= 3) {
-      score += 0.3f;  // Clear opening leap.
+      base_score += 0.3f;
     } else if (first_interval >= 1) {
-      score += 0.15f;  // Stepwise opening.
+      base_score += 0.15f;
     }
   }
+  base_score = std::clamp(base_score, 0.0f, 1.0f);
 
-  return std::max(0.0f, std::min(1.0f, score));
+  // Policy-weighted sub-scores.
+  float w_frag = policy.fragment_reusability_weight;
+  float w_seq = policy.sequence_potential_weight;
+  float w_base = 1.0f - w_frag - w_seq;
+
+  // Guard against w_frag + w_seq > 1.0.
+  if (w_base < 0.0f) {
+    w_base = 0.0f;
+    w_frag = 0.5f;
+    w_seq = 0.5f;
+  }
+
+  // If no policy weights, return base score directly (backward compatible).
+  if (w_frag <= 0.0f && w_seq <= 0.0f) {
+    return base_score;
+  }
+
+  ScaleType scale =
+      subject.is_minor ? ScaleType::HarmonicMinor : ScaleType::Major;
+  float reusability = evaluateFragmentReusability(kopf, subject.key, scale);
+  float seq_potential = evaluateSequencePotential(kopf, subject.key, scale);
+
+  return std::clamp(
+      w_base * base_score + w_frag * reusability + w_seq * seq_potential,
+      0.0f, 1.0f);
 }
 
 }  // namespace bach

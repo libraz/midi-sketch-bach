@@ -957,5 +957,130 @@ TEST(FugueGeneratorTest, ZeroNonStructuralParallels_AllSeeds) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Fix 1: Coda V/I/Final chord notes use upper voices only (lowest = pedal)
+// ---------------------------------------------------------------------------
+
+TEST(FugueGeneratorTest, CodaChordNotes_UpperVoicesOnly_3Voice) {
+  FugueConfig config = makeTestConfig();
+  config.num_voices = 3;
+  FugueResult result = generateFugue(config);
+  ASSERT_TRUE(result.success);
+
+  auto codas = result.structure.getSectionsByType(SectionType::Coda);
+  ASSERT_EQ(codas.size(), 1u);
+  Tick coda_start = codas[0].start_tick;
+  Tick coda_end = codas[0].end_tick;
+
+  // Stage 1 uses all voices (motif in V0 + held chords V1+). Skip it.
+  // Stage 2 starts after 2 bars, Stage 3 after 3 bars.
+  Tick stage2_start = coda_start + kTicksPerBar * 2;
+  VoiceId lowest_voice = config.num_voices - 1;
+
+  // Collect Coda-sourced notes in stages 2+3 for the lowest voice.
+  int lowest_voice_chord_notes = 0;
+  for (const auto& track : result.tracks) {
+    for (const auto& note : track.notes) {
+      if (note.source == BachNoteSource::Coda &&
+          note.voice == lowest_voice &&
+          note.start_tick >= stage2_start &&
+          note.start_tick < coda_end) {
+        ++lowest_voice_chord_notes;
+      }
+    }
+  }
+
+  // The lowest voice should have zero chord notes in stages 2+3
+  // because it carries the tonic pedal.
+  EXPECT_EQ(lowest_voice_chord_notes, 0)
+      << "Coda stages 2-3 should not place chord notes in the lowest voice "
+      << "(voice " << static_cast<int>(lowest_voice)
+      << ") -- it carries the tonic pedal";
+}
+
+TEST(FugueGeneratorTest, CodaChordNotes_UpperVoicesOnly_4Voice) {
+  FugueConfig config = makeTestConfig();
+  config.num_voices = 4;
+  FugueResult result = generateFugue(config);
+  ASSERT_TRUE(result.success);
+
+  auto codas = result.structure.getSectionsByType(SectionType::Coda);
+  ASSERT_EQ(codas.size(), 1u);
+  Tick coda_start = codas[0].start_tick;
+  Tick coda_end = codas[0].end_tick;
+
+  Tick stage2_start = coda_start + kTicksPerBar * 2;
+  VoiceId lowest_voice = config.num_voices - 1;
+
+  int lowest_voice_chord_notes = 0;
+  for (const auto& track : result.tracks) {
+    for (const auto& note : track.notes) {
+      if (note.source == BachNoteSource::Coda &&
+          note.voice == lowest_voice &&
+          note.start_tick >= stage2_start &&
+          note.start_tick < coda_end) {
+        ++lowest_voice_chord_notes;
+      }
+    }
+  }
+
+  EXPECT_EQ(lowest_voice_chord_notes, 0)
+      << "4-voice coda stages 2-3 should not place chord notes in voice "
+      << static_cast<int>(lowest_voice);
+}
+
+TEST(FugueGeneratorTest, CodaV7Chord_HasConsonantAnchor) {
+  // Verify that coda V7 chord includes at least one note consonant with
+  // the tonic pedal (the root G = P5). The V7 chord intentionally includes
+  // the leading tone B (M7 vs pedal) for cadential tension, so we check
+  // that the consonance anchor (G) is present rather than requiring all
+  // notes to be consonant.
+  for (uint32_t seed : {42u, 100u, 200u, 314u}) {
+    FugueConfig config = makeTestConfig(seed);
+    config.num_voices = 3;
+    config.key = Key::C;
+    FugueResult result = generateFugue(config);
+    ASSERT_TRUE(result.success) << "Seed " << seed;
+
+    auto codas = result.structure.getSectionsByType(SectionType::Coda);
+    ASSERT_EQ(codas.size(), 1u);
+    Tick stage2_start = codas[0].start_tick + kTicksPerBar * 2;
+    Tick stage2_half = stage2_start + kTicksPerBar / 2;
+
+    // Find coda pedal pitch.
+    uint8_t pedal_pitch = 0;
+    for (const auto& track : result.tracks) {
+      for (const auto& note : track.notes) {
+        if (note.source == BachNoteSource::PedalPoint &&
+            note.start_tick <= stage2_start &&
+            note.start_tick + note.duration > stage2_start) {
+          pedal_pitch = note.pitch;
+          break;
+        }
+      }
+      if (pedal_pitch > 0) break;
+    }
+    if (pedal_pitch == 0) continue;
+
+    // Check that at least one V7 chord note is consonant with pedal.
+    bool has_consonant_anchor = false;
+    for (const auto& track : result.tracks) {
+      for (const auto& note : track.notes) {
+        if (note.source == BachNoteSource::Coda &&
+            note.start_tick >= stage2_start &&
+            note.start_tick < stage2_half) {
+          int ivl = absoluteInterval(note.pitch, pedal_pitch) % 12;
+          bool consonant = (ivl == 0 || ivl == 3 || ivl == 4 ||
+                            ivl == 7 || ivl == 8 || ivl == 9);
+          if (consonant) has_consonant_anchor = true;
+        }
+      }
+    }
+    EXPECT_TRUE(has_consonant_anchor)
+        << "Seed " << seed << ": Coda V7 chord has no consonant anchor "
+        << "with tonic pedal " << static_cast<int>(pedal_pitch);
+  }
+}
+
 }  // namespace
 }  // namespace bach

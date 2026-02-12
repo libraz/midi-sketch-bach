@@ -27,9 +27,13 @@ struct Answer {
 ///
 /// @param subject The fugue subject (dux).
 /// @param type Answer type. If Auto, the type is auto-detected.
+/// @param archetype_preference Archetype policy's preferred answer type.
+///        When @p type is Auto and this is not Auto, the archetype
+///        preference overrides auto-detection.
 /// @return The derived Answer.
 Answer generateAnswer(const Subject& subject,
-                      AnswerType type = AnswerType::Auto);
+                      AnswerType type = AnswerType::Auto,
+                      AnswerType archetype_preference = AnswerType::Auto);
 
 /// @brief Automatically detect whether a real or tonal answer is needed.
 ///

@@ -1122,5 +1122,155 @@ TEST(ExpositionTest, FreeCPGapFilling) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Fix 4: CS-answer strong-beat consonance snap
+// ---------------------------------------------------------------------------
+
+TEST(ExpositionTest, CSAgainstAnswer_StrongBeatConsonance) {
+  // Create a CS with pitches that would be dissonant against the answer
+  // on strong beats. The snap should correct them.
+  Subject subject = makeTestSubject();
+  Answer answer = makeTestAnswer(subject);
+
+  Countersubject counter;
+  counter.key = Key::C;
+  counter.length_ticks = subject.length_ticks;
+
+  // Deliberately create dissonant intervals on strong beats vs G-major answer.
+  // Beat 0: F#4 (66) vs G4 (67) = m2 -> dissonant, should snap.
+  // Beat 1: E4 (64) -> offbeat, no snap.
+  // Beat 2: Bb4 (70) vs A4 (69) = m2 -> dissonant, should snap.
+  // Beat 3: G4 (67) -> offbeat, no snap.
+  const uint8_t cs_pitches[] = {66, 64, 70, 67, 66, 64, 70, 67};
+  for (int idx = 0; idx < 8; ++idx) {
+    NoteEvent note;
+    note.start_tick = static_cast<Tick>(idx) * kTicksPerBeat;
+    note.duration = kTicksPerBeat;
+    note.pitch = cs_pitches[idx];
+    note.velocity = 80;
+    note.voice = 0;
+    counter.notes.push_back(note);
+  }
+
+  FugueConfig config = makeTestConfig(3);
+  Exposition expo = buildExposition(subject, answer, counter, config, 42);
+
+  // Voice 0 plays CS when voice 1 enters (answer at tick = subject.length_ticks).
+  Tick cs_start = subject.length_ticks;
+  if (expo.voice_notes.count(0) > 0 && expo.voice_notes.count(1) > 0) {
+    const auto& cs_notes = expo.voice_notes.at(0);
+    const auto& entry_notes = expo.voice_notes.at(expo.entries[1].voice_id);
+
+    for (const auto& cs : cs_notes) {
+      if (cs.start_tick < cs_start ||
+          cs.start_tick >= cs_start + counter.length_ticks)
+        continue;
+
+      uint8_t beat = beatInBar(cs.start_tick);
+      if (beat != 0 && beat != 2) continue;  // Strong beats only.
+
+      // Find concurrent entry note.
+      for (const auto& entry : entry_notes) {
+        if (entry.start_tick > cs.start_tick) break;
+        if (entry.start_tick + entry.duration <= cs.start_tick) continue;
+
+        int ivl = absoluteInterval(cs.pitch, entry.pitch) % 12;
+        bool consonant = (ivl == 0 || ivl == 3 || ivl == 4 ||
+                          ivl == 7 || ivl == 8 || ivl == 9);
+        EXPECT_TRUE(consonant)
+            << "Strong-beat CS pitch " << static_cast<int>(cs.pitch)
+            << " at tick " << cs.start_tick
+            << " is dissonant (interval " << ivl << ") with entry pitch "
+            << static_cast<int>(entry.pitch);
+        break;
+      }
+    }
+  }
+}
+
+TEST(ExpositionTest, CSSnap_PreservesDiatonicity) {
+  // Verify that snapped CS notes remain diatonic in the answer key.
+  Subject subject = makeTestSubject();
+  Answer answer = makeTestAnswer(subject);
+
+  Countersubject counter;
+  counter.key = Key::C;
+  counter.length_ticks = subject.length_ticks;
+  const uint8_t cs_pitches[] = {72, 71, 69, 67, 66, 64, 62, 60};
+  for (int idx = 0; idx < 8; ++idx) {
+    NoteEvent note;
+    note.start_tick = static_cast<Tick>(idx) * kTicksPerBeat;
+    note.duration = kTicksPerBeat;
+    note.pitch = cs_pitches[idx];
+    note.velocity = 80;
+    note.voice = 0;
+    counter.notes.push_back(note);
+  }
+
+  FugueConfig config = makeTestConfig(3);
+  Exposition expo = buildExposition(subject, answer, counter, config, 42);
+
+  Tick cs_start = subject.length_ticks;
+  if (expo.voice_notes.count(0) > 0) {
+    for (const auto& note : expo.voice_notes.at(0)) {
+      if (note.start_tick >= cs_start &&
+          note.start_tick < cs_start + counter.length_ticks) {
+        // All CS notes accompanying the answer should remain diatonic.
+        EXPECT_TRUE(
+            scale_util::isScaleTone(note.pitch, Key::G, ScaleType::Major))
+            << "Snapped CS pitch " << static_cast<int>(note.pitch)
+            << " (" << pitchToNoteName(note.pitch) << ")"
+            << " at tick " << note.start_tick
+            << " is not diatonic in G major";
+      }
+    }
+  }
+}
+
+TEST(ExpositionTest, CSSnap_NoSnapNeededWhenConsonant) {
+  // Verify that consonant CS notes are not modified by the snap.
+  Subject subject = makeTestSubject();
+  Answer answer = makeTestAnswer(subject);
+
+  // CS with notes that are already consonant (P1, M6, P5, P1) with answer.
+  Countersubject counter;
+  counter.key = Key::C;
+  counter.length_ticks = subject.length_ticks;
+  const uint8_t cs_pitches[] = {67, 64, 60, 67, 67, 64, 60, 67};
+  for (int idx = 0; idx < 8; ++idx) {
+    NoteEvent note;
+    note.start_tick = static_cast<Tick>(idx) * kTicksPerBeat;
+    note.duration = kTicksPerBeat;
+    note.pitch = cs_pitches[idx];
+    note.velocity = 80;
+    note.voice = 0;
+    counter.notes.push_back(note);
+  }
+
+  FugueConfig config = makeTestConfig(3);
+  Exposition expo = buildExposition(subject, answer, counter, config, 42);
+
+  Tick cs_start = subject.length_ticks;
+  if (expo.voice_notes.count(0) > 0) {
+    int cs_idx = 0;
+    for (const auto& note : expo.voice_notes.at(0)) {
+      if (note.start_tick >= cs_start &&
+          note.start_tick < cs_start + counter.length_ticks) {
+        if (cs_idx < 8) {
+          // Pitch class should be preserved (octave shift is OK).
+          uint8_t expected_pc = cs_pitches[cs_idx] % 12;
+          uint8_t actual_pc = note.pitch % 12;
+          EXPECT_EQ(actual_pc, expected_pc)
+              << "CS note " << cs_idx << ": pitch class changed from "
+              << static_cast<int>(expected_pc) << " to "
+              << static_cast<int>(actual_pc)
+              << " (should not snap consonant notes)";
+        }
+        ++cs_idx;
+      }
+    }
+  }
+}
+
 }  // namespace
 }  // namespace bach

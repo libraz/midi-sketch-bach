@@ -48,6 +48,7 @@ set(BACH_LIB_SOURCES
   counterpoint/collision_resolver.cpp
   counterpoint/parallel_repair.cpp
   counterpoint/repeated_note_repair.cpp
+  counterpoint/cross_relation.cpp
   counterpoint/suspension_chain.cpp
   counterpoint/voice_manager.cpp
   counterpoint/motion_analyzer.cpp

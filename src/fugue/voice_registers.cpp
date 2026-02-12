@@ -17,7 +17,7 @@ std::pair<uint8_t, uint8_t> getFugueVoiceRange(VoiceId voice_id, uint8_t num_voi
     constexpr uint8_t kRanges3[][2] = {
         {60, 96},  // Voice 0 (soprano): C4-C6
         {55, 79},  // Voice 1 (alto): G3-G5
-        {36, 60},  // Voice 2 (bass): C2-C4
+        {48, 72},  // Voice 2 (tenor): C3-C5
     };
     auto idx = voice_id < 3 ? voice_id : 2;
     return {kRanges3[idx][0], kRanges3[idx][1]};

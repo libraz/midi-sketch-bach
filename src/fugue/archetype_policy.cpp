@@ -30,7 +30,9 @@ const ArchetypePolicy kCompactPolicy = {
     false,              // require_axis_stability
     0.0f,               // symmetry_score_weight
     2,                  // max_consecutive_chromatic
-    false               // require_functional_resolution
+    false,              // require_functional_resolution
+    6,                  // path_candidates
+    0.60f               // base_quality_weight
 };
 
 const ArchetypePolicy kCantabilePolicy = {
@@ -56,7 +58,9 @@ const ArchetypePolicy kCantabilePolicy = {
     false,              // require_axis_stability
     0.0f,               // symmetry_score_weight
     2,                  // max_consecutive_chromatic
-    false               // require_functional_resolution
+    false,              // require_functional_resolution
+    8,                  // path_candidates
+    0.75f               // base_quality_weight
 };
 
 const ArchetypePolicy kInvertiblePolicy = {
@@ -82,7 +86,9 @@ const ArchetypePolicy kInvertiblePolicy = {
     true,               // require_axis_stability
     0.4f,               // symmetry_score_weight
     2,                  // max_consecutive_chromatic
-    false               // require_functional_resolution
+    false,              // require_functional_resolution
+    12,                 // path_candidates
+    0.50f               // base_quality_weight
 };
 
 const ArchetypePolicy kChromaticPolicy = {
@@ -108,7 +114,9 @@ const ArchetypePolicy kChromaticPolicy = {
     false,              // require_axis_stability
     0.0f,               // symmetry_score_weight
     4,                  // max_consecutive_chromatic
-    true                // require_functional_resolution
+    true,               // require_functional_resolution
+    10,                 // path_candidates
+    0.60f               // base_quality_weight
 };
 // NOLINTEND(readability-magic-numbers)
 

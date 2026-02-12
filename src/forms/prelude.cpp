@@ -17,7 +17,9 @@
 #include "harmony/chord_tone_utils.h"
 #include "harmony/chord_types.h"
 #include "harmony/harmonic_event.h"
+#include "counterpoint/cross_relation.h"
 #include "counterpoint/repeated_note_repair.h"
+#include "fugue/fugue_config.h"
 #include "organ/organ_techniques.h"
 
 namespace bach {
@@ -25,6 +27,17 @@ namespace bach {
 namespace {
 
 using namespace duration;
+
+/// Prelude energy curve: 8th note center with quarter/dotted-quarter mix.
+/// Energy 0.55-0.65 -> minDuration = eighth note floor, suppresses 16th notes.
+static float preludeEnergy(Tick tick, Tick total_duration) {
+  if (total_duration == 0) return 0.55f;
+  float pos = static_cast<float>(tick) / static_cast<float>(total_duration);
+  pos = std::clamp(pos, 0.0f, 1.0f);
+  if (pos < 0.20f) return 0.55f;
+  if (pos < 0.80f) return 0.55f + ((pos - 0.20f) / 0.60f) * 0.10f;
+  return 0.60f;
+}
 
 /// @brief Default prelude length in bars when fugue length is unknown.
 constexpr Tick kDefaultPreludeBars = 12;
@@ -152,13 +165,13 @@ bool isStrongBeat(Tick tick) {
 ///
 /// @param event Current harmonic event.
 /// @param voice_idx Voice/track index.
-/// @param note_duration Duration per note in ticks.
+/// @param energy Energy level [0,1] for duration selection.
 /// @param pattern_index Selects ascending (even) or descending (odd).
 /// @param rng Random number generator for starting pitch selection.
 /// @return Vector of NoteEvent entries.
 std::vector<NoteEvent> generateScalePassage(const HarmonicEvent& event,
                                             uint8_t voice_idx,
-                                            Tick note_duration,
+                                            float energy,
                                             int pattern_index,
                                             std::mt19937& rng,
                                             int hint_center = -1) {
@@ -228,7 +241,8 @@ std::vector<NoteEvent> generateScalePassage(const HarmonicEvent& event,
 
   while (current_tick < event.tick + event_duration) {
     Tick remaining = (event.tick + event_duration) - current_tick;
-    Tick dur = (remaining < note_duration) ? remaining : note_duration;
+    Tick dur = FugueEnergyCurve::selectDuration(energy, current_tick, rng, 0);
+    if (dur > remaining) dur = remaining;
     if (dur == 0) break;
 
     NoteEvent note;
@@ -269,12 +283,12 @@ std::vector<NoteEvent> generateScalePassage(const HarmonicEvent& event,
 ///
 /// @param event Current harmonic event.
 /// @param voice_idx Voice/track index.
-/// @param note_duration Duration per note in ticks.
+/// @param energy Energy level [0,1] for duration selection.
 /// @param rng Random number generator.
 /// @return Vector of NoteEvent entries.
 std::vector<NoteEvent> generateArpeggioPassage(const HarmonicEvent& event,
                                                uint8_t voice_idx,
-                                               Tick note_duration,
+                                               float energy,
                                                std::mt19937& rng,
                                                int hint_center = -1) {
   std::vector<NoteEvent> notes;
@@ -380,7 +394,8 @@ std::vector<NoteEvent> generateArpeggioPassage(const HarmonicEvent& event,
   while (current_tick < event.tick + event_duration) {
     bool was_resolution = false;
     Tick remaining = (event.tick + event_duration) - current_tick;
-    Tick dur = (remaining < note_duration) ? remaining : note_duration;
+    Tick dur = FugueEnergyCurve::selectDuration(energy, current_tick, rng, 0);
+    if (dur > remaining) dur = remaining;
     if (dur == 0) break;
 
     uint8_t candidate;
@@ -868,12 +883,13 @@ std::vector<NoteEvent> generateFreeFormNotes(const HarmonicTimeline& timeline,
     int pattern_index = static_cast<int>(event_idx);
 
     if (num_voices >= 1) {
+      float energy = preludeEnergy(event.tick, total);
       std::vector<NoteEvent> voice0_notes;
       if (rng::rollProbability(rng, 0.5f)) {
         voice0_notes =
-            generateScalePassage(event, 0, kEighthNote, pattern_index, rng, voice0_hint);
+            generateScalePassage(event, 0, energy, pattern_index, rng, voice0_hint);
       } else {
-        voice0_notes = generateArpeggioPassage(event, 0, kEighthNote, rng, voice0_hint);
+        voice0_notes = generateArpeggioPassage(event, 0, energy, rng, voice0_hint);
       }
       if (!voice0_notes.empty()) {
         voice0_hint = static_cast<int>(voice0_notes.back().pitch);
@@ -935,7 +951,7 @@ std::vector<NoteEvent> generatePerpetualNotes(const HarmonicTimeline& timeline,
 
     if (num_voices >= 1) {
       auto voice0_notes =
-          generateArpeggioPassage(event, 0, kSixteenthNote, rng, voice0_hint);
+          generateArpeggioPassage(event, 0, 0.90f, rng, voice0_hint);
       if (!voice0_notes.empty()) {
         voice0_hint = static_cast<int>(voice0_notes.back().pitch);
       }
@@ -1122,6 +1138,24 @@ PreludeResult generatePrelude(const PreludeConfig& config) {
 
         auto result = createBachNote(&cp_state, &cp_rules, &cp_resolver, opts);
         if (result.accepted) {
+          // Soft cross-relation check: try alternatives if detected.
+          if (hasCrossRelation(coordinated, num_voices, note.voice,
+                               result.note.pitch, note.start_tick)) {
+            for (int delta : {1, -1, 2, -2}) {
+              auto alt_opts = opts;
+              alt_opts.desired_pitch = clampPitch(
+                  static_cast<int>(note.pitch) + delta,
+                  getVoiceLowPitch(note.voice), getVoiceHighPitch(note.voice));
+              auto alt = createBachNote(&cp_state, &cp_rules, &cp_resolver, alt_opts);
+              if (alt.accepted &&
+                  !hasCrossRelation(coordinated, num_voices, note.voice,
+                                    alt.note.pitch, note.start_tick)) {
+                result = alt;
+                break;
+              }
+            }
+            // If no alternative found, keep original result (soft constraint).
+          }
           coordinated.push_back(result.note);
           ++accepted_count;
         }

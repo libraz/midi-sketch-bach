@@ -16,6 +16,8 @@ TEST(ArchetypePolicyTest, CompactPolicy) {
   EXPECT_GT(pol.sequence_potential_weight, 0.0f);
   EXPECT_FALSE(pol.require_invertible);
   EXPECT_FALSE(pol.require_functional_resolution);
+  EXPECT_EQ(pol.path_candidates, 6);
+  EXPECT_FLOAT_EQ(pol.base_quality_weight, 0.60f);
 }
 
 TEST(ArchetypePolicyTest, CantabilePolicy) {
@@ -25,6 +27,8 @@ TEST(ArchetypePolicyTest, CantabilePolicy) {
   EXPECT_LE(pol.max_sixteenth_density, 0.15f);
   EXPECT_GE(pol.min_step_ratio, 0.6f);
   EXPECT_FALSE(pol.require_fragmentable);
+  EXPECT_EQ(pol.path_candidates, 8);
+  EXPECT_FLOAT_EQ(pol.base_quality_weight, 0.75f);
 }
 
 TEST(ArchetypePolicyTest, InvertiblePolicy) {
@@ -34,6 +38,8 @@ TEST(ArchetypePolicyTest, InvertiblePolicy) {
   EXPECT_TRUE(pol.require_axis_stability);
   EXPECT_GT(pol.symmetry_score_weight, 0.0f);
   EXPECT_EQ(pol.preferred_answer, AnswerType::Real);
+  EXPECT_EQ(pol.path_candidates, 12);
+  EXPECT_FLOAT_EQ(pol.base_quality_weight, 0.50f);
 }
 
 TEST(ArchetypePolicyTest, ChromaticPolicy) {
@@ -41,6 +47,8 @@ TEST(ArchetypePolicyTest, ChromaticPolicy) {
   EXPECT_EQ(pol.max_consecutive_chromatic, 4);
   EXPECT_TRUE(pol.require_functional_resolution);
   EXPECT_EQ(pol.preferred_answer, AnswerType::Real);
+  EXPECT_EQ(pol.path_candidates, 10);
+  EXPECT_FLOAT_EQ(pol.base_quality_weight, 0.60f);
 }
 
 TEST(ArchetypePolicyTest, AllArchetypesHaveValidRanges) {
@@ -61,6 +69,9 @@ TEST(ArchetypePolicyTest, AllArchetypesHaveValidRanges) {
     EXPECT_GE(pol.min_step_ratio, 0.0f);
     EXPECT_LE(pol.min_step_ratio, 1.0f);
     EXPECT_GE(pol.max_consecutive_chromatic, 1);
+    EXPECT_GT(pol.path_candidates, 0);
+    EXPECT_GT(pol.base_quality_weight, 0.0f);
+    EXPECT_LE(pol.base_quality_weight, 1.0f);
   }
 }
 

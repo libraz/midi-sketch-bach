@@ -96,12 +96,14 @@ Episode generateEpisode(const Subject& subject, Tick start_tick, Tick duration_t
 /// @param cp_rules Rule evaluator for counterpoint checking.
 /// @param cp_resolver Collision resolver for pitch adjustment.
 /// @param timeline Harmonic timeline for chord-tone context.
+/// @param pedal_pitch MIDI pitch of the active pedal point (0 = none).
 /// @return Generated Episode with validated notes.
 Episode generateEpisode(const Subject& subject, Tick start_tick, Tick duration_ticks,
                         Key start_key, Key target_key, uint8_t num_voices, uint32_t seed,
                         int episode_index, float energy_level,
                         CounterpointState& cp_state, IRuleEvaluator& cp_rules,
-                        CollisionResolver& cp_resolver, const HarmonicTimeline& timeline);
+                        CollisionResolver& cp_resolver, const HarmonicTimeline& timeline,
+                        uint8_t pedal_pitch = 0);
 
 /// @brief Generate a Fortspinnung-style episode using motif pool fragments.
 ///
@@ -138,6 +140,7 @@ Episode generateFortspinnungEpisode(const Subject& subject, const MotifPool& poo
 /// @param cp_rules Rule evaluator for counterpoint checks.
 /// @param cp_resolver Collision resolver for pitch adjustments.
 /// @param timeline Harmonic timeline for chord-tone snapping.
+/// @param pedal_pitch MIDI pitch of the active pedal point (0 = none).
 Episode generateFortspinnungEpisode(const Subject& subject, const MotifPool& pool,
                                     Tick start_tick, Tick duration_ticks,
                                     Key start_key, Key target_key,
@@ -146,7 +149,8 @@ Episode generateFortspinnungEpisode(const Subject& subject, const MotifPool& poo
                                     CounterpointState& cp_state,
                                     IRuleEvaluator& cp_rules,
                                     CollisionResolver& cp_resolver,
-                                    const HarmonicTimeline& timeline);
+                                    const HarmonicTimeline& timeline,
+                                    uint8_t pedal_pitch = 0);
 
 /// @brief Extract a motif (fragment) from the beginning of the subject.
 ///

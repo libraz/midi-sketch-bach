@@ -187,5 +187,43 @@ TEST(AnswerTest, HighPitchClampedToValidRange) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Archetype preferred_answer connection (Step 1)
+// ---------------------------------------------------------------------------
+
+TEST(AnswerTest, PreferredAnswerOverridesAutoDetection) {
+  // Subject with tonic-dominant leap at start: C4(60) -> G4(67) = P5.
+  // Auto-detection would classify this as Tonal, but archetype_preference=Real
+  // should override and produce a Real answer.
+  Subject subject = makeSubjectQuarters({60, 67, 64, 62, 60});
+  AnswerType auto_detected = autoDetectAnswerType(subject);
+  ASSERT_EQ(auto_detected, AnswerType::Tonal)
+      << "Precondition: subject should auto-detect as Tonal";
+
+  Answer answer = generateAnswer(subject, AnswerType::Auto, AnswerType::Real);
+  EXPECT_EQ(answer.type, AnswerType::Real)
+      << "Archetype preference Real should override auto-detected Tonal";
+}
+
+TEST(AnswerTest, PreferredAnswerAutoFallsThrough) {
+  // Same tonic-dominant leap subject. When archetype_preference=Auto,
+  // auto-detection should work normally and produce a Tonal answer.
+  Subject subject = makeSubjectQuarters({60, 67, 64, 62, 60});
+  Answer answer = generateAnswer(subject, AnswerType::Auto, AnswerType::Auto);
+  EXPECT_EQ(answer.type, AnswerType::Tonal)
+      << "With archetype_preference=Auto, auto-detection should select Tonal "
+         "for tonic-dominant leap";
+}
+
+TEST(AnswerTest, ExplicitTypeOverridesPreference) {
+  // When the caller explicitly sets type=Tonal, the archetype_preference
+  // should be ignored even if it says Real.
+  Subject subject = makeSubjectQuarters({60, 67, 64, 62, 60});
+  Answer answer = generateAnswer(subject, AnswerType::Tonal, AnswerType::Real);
+  EXPECT_EQ(answer.type, AnswerType::Tonal)
+      << "Explicit type=Tonal should take precedence over "
+         "archetype_preference=Real";
+}
+
 }  // namespace
 }  // namespace bach

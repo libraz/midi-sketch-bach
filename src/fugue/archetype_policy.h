@@ -47,6 +47,10 @@ struct ArchetypePolicy {
   // --- Chromatic: functional harmony ---
   int max_consecutive_chromatic;      ///< Maximum consecutive chromatic steps.
   bool require_functional_resolution; ///< Require functional harmonic resolution.
+
+  // --- Outer loop and path control ---
+  int path_candidates;        ///< N-candidate pitch path exploration count.
+  float base_quality_weight;  ///< Outer loop base quality weight ratio (rest = archetype).
 };
 
 /// @brief Get the archetype policy for a given fugue archetype.

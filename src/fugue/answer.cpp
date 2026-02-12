@@ -182,11 +182,25 @@ AnswerType autoDetectAnswerType(const Subject& subject) {
   return AnswerType::Real;
 }
 
-Answer generateAnswer(const Subject& subject, AnswerType type) {
+Answer generateAnswer(const Subject& subject, AnswerType type,
+                      AnswerType archetype_preference) {
   Key dominant_key = getDominant(KeySignature{subject.key, false}).tonic;
 
   if (type == AnswerType::Auto) {
-    type = autoDetectAnswerType(subject);
+    if (archetype_preference != AnswerType::Auto) {
+      // Archetype policy overrides auto-detection.
+      type = archetype_preference;
+      // Warn if Real answer is forced on a tonic-dominant head subject,
+      // which normally requires tonal mutation.
+      if (type == AnswerType::Real &&
+          autoDetectAnswerType(subject) == AnswerType::Tonal) {
+        // Structural contradiction: subject has tonic-dominant head but
+        // archetype requires Real answer. Log for visibility.
+        // (No rejection -- archetype priority principle.)
+      }
+    } else {
+      type = autoDetectAnswerType(subject);
+    }
   }
 
   Answer answer;

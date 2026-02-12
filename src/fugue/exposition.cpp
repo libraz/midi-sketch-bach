@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "core/note_creator.h"
+#include "core/interval.h"
 #include "core/note_source.h"
 #include "core/pitch_utils.h"
 #include "core/rng_util.h"
@@ -278,6 +279,51 @@ void placeCountersubjectNotes(const std::vector<NoteEvent>& cs_notes,
   }
 }
 
+/// @brief Snap CS strong-beat dissonances against concurrent entry notes.
+///
+/// Limited to +/-2 semitones to preserve melodic contour. Only processes
+/// strong beats (beat 0 or 2 in 4/4). Finds the nearest consonant and
+/// diatonic pitch within the snap range.
+///
+/// @param cs_notes CS notes to modify (voice_notes for the CS voice).
+/// @param entry_notes Entry (answer) notes to check against.
+/// @param key Key for diatonic constraint.
+/// @param scale Scale type for diatonic constraint.
+void snapCSStrongBeatsToEntry(std::vector<NoteEvent>& cs_notes,
+                              const std::vector<NoteEvent>& entry_notes,
+                              Key key, ScaleType scale) {
+  for (auto& cs : cs_notes) {
+    uint8_t beat = beatInBar(cs.start_tick);
+    if (beat != 0 && beat != 2) continue;  // Strong beats only.
+    for (const auto& entry : entry_notes) {
+      if (entry.start_tick > cs.start_tick) break;
+      if (entry.start_tick + entry.duration <= cs.start_tick) continue;
+      int ivl = interval_util::compoundToSimple(
+          absoluteInterval(cs.pitch, entry.pitch));
+      if (interval_util::isConsonance(ivl)) break;  // Already consonant.
+      // Search +/-2 semitones for the nearest consonant, diatonic pitch.
+      uint8_t best = cs.pitch;
+      int best_dist = 999;
+      for (int delta = -2; delta <= 2; ++delta) {
+        if (delta == 0) continue;
+        int cand = static_cast<int>(cs.pitch) + delta;
+        if (cand < 0 || cand > 127) continue;
+        uint8_t cand_u8 = static_cast<uint8_t>(cand);
+        if (!scale_util::isScaleTone(cand_u8, key, scale)) continue;
+        int c_ivl = interval_util::compoundToSimple(
+            absoluteInterval(cand_u8, entry.pitch));
+        if (interval_util::isConsonance(c_ivl) &&
+            std::abs(delta) < best_dist) {
+          best_dist = std::abs(delta);
+          best = cand_u8;
+        }
+      }
+      if (best != cs.pitch) cs.pitch = best;
+      break;
+    }
+  }
+}
+
 /// @brief Generate diatonic scalar passage work as free counterpoint filler.
 ///
 /// When a voice is two or more entries behind the current entry, it plays
@@ -487,6 +533,17 @@ Exposition buildExposition(const Subject& subject,
 
       placeCountersubjectNotes(cs_to_place, prev_voice,
                                entry.entry_tick, prev_reg, expo.voice_notes);
+
+      // Snap CS strong-beat dissonances against answer notes.
+      // CS was generated against the subject, so it may clash with the
+      // transposed answer. Only snap when accompanying an answer entry.
+      if (!entry.is_subject) {
+        ScaleType snap_scale = config.is_minor ? ScaleType::HarmonicMinor
+                                               : ScaleType::Major;
+        snapCSStrongBeatsToEntry(expo.voice_notes[prev_voice],
+                                 expo.voice_notes[entry.voice_id],
+                                 answer.key, snap_scale);
+      }
     }
 
     // Voices that are two or more entries behind play free counterpoint.

@@ -17,9 +17,11 @@
 #include "counterpoint/collision_resolver.h"
 #include "counterpoint/counterpoint_state.h"
 #include "counterpoint/parallel_repair.h"
+#include "counterpoint/cross_relation.h"
 #include "counterpoint/repeated_note_repair.h"
 #include "core/note_creator.h"
 #include "fugue/answer.h"
+#include "fugue/archetype_policy.h"
 #include "fugue/cadence_plan.h"
 #include "fugue/countersubject.h"
 #include "fugue/episode.h"
@@ -327,26 +329,31 @@ std::vector<NoteEvent> createCodaNotes(Tick start_tick, Tick duration,
     int base_tonic = tonic_pitch;
     // Octave-shift the motif base to stay close to the previous pitch.
     if (last_pitches && last_pitches[0] > 0) {
+      auto [v0_lo, v0_hi] = getFugueVoiceRange(0, num_voices);
       int prev = static_cast<int>(last_pitches[0]);
       int best_dist = std::abs(prev - base_tonic);
       for (int oct : {-12, 12, -24, 24}) {
         int cand = tonic_pitch + oct;
-        if (cand < organ_range::kPedalLow || cand > organ_range::kManual1High) continue;
+        if (cand < v0_lo || cand + 7 > v0_hi) continue;  // Entire motif must fit
         int dist = std::abs(prev - cand);
         if (dist < best_dist) {
           best_dist = dist;
           base_tonic = cand;
         }
       }
+      // Hard gate: max leap of 12 semitones (octave)
+      int leap = std::abs(prev - base_tonic);
+      if (leap > 12) base_tonic = tonic_pitch;
     }
     int head_pitches[] = {base_tonic, base_tonic + 2, base_tonic + third, base_tonic + 7,
                           base_tonic + third, base_tonic + 2, base_tonic, base_tonic};
     int head_count = std::min(8, static_cast<int>(stage1_dur / sub_dur));
+    auto [head_lo, head_hi] = getFugueVoiceRange(0, num_voices);
     for (int idx = 0; idx < head_count; ++idx) {
       NoteEvent note;
       note.start_tick = start_tick + static_cast<Tick>(idx) * sub_dur;
       note.duration = sub_dur;
-      note.pitch = clampPitch(head_pitches[idx], organ_range::kPedalLow, organ_range::kManual1High);
+      note.pitch = clampPitch(head_pitches[idx], head_lo, head_hi);
       note.velocity = kOrganVelocity;
       note.voice = 0;
       note.source = BachNoteSource::Coda;
@@ -370,14 +377,14 @@ std::vector<NoteEvent> createCodaNotes(Tick start_tick, Tick duration,
 
     for (uint8_t i = 0; i < count; ++i) {
       uint8_t voice_idx = 1 + i;
+      auto [vlo, vhi] = getFugueVoiceRange(voice_idx, num_voices);
       uint8_t target_pitch;
 
       if (last_pitches && last_pitches[voice_idx] > 0) {
         // Voice-leading: find nearest chord tone to previous pitch.
         uint8_t prev = last_pitches[voice_idx];
         int best_dist = 999;
-        target_pitch = clampPitch(tonic_pitch + stage1_offsets[i],
-                                  organ_range::kPedalLow, organ_range::kManual1High);
+        target_pitch = clampPitch(tonic_pitch + stage1_offsets[i], vlo, vhi);
         for (int pc : chord_pcs) {
           uint8_t cand = nearestPitchWithPC(prev, pc, 7);
           int dist = std::abs(static_cast<int>(cand) - static_cast<int>(prev));
@@ -386,12 +393,10 @@ std::vector<NoteEvent> createCodaNotes(Tick start_tick, Tick duration,
             target_pitch = cand;
           }
         }
-        target_pitch = clampPitch(static_cast<int>(target_pitch),
-                                  organ_range::kPedalLow, organ_range::kManual1High);
+        target_pitch = clampPitch(static_cast<int>(target_pitch), vlo, vhi);
       } else {
         // Fallback: use fixed offsets.
-        target_pitch = clampPitch(tonic_pitch + stage1_offsets[i],
-                                  organ_range::kPedalLow, organ_range::kManual1High);
+        target_pitch = clampPitch(tonic_pitch + stage1_offsets[i], vlo, vhi);
       }
 
       NoteEvent note;
@@ -412,18 +417,21 @@ std::vector<NoteEvent> createCodaNotes(Tick start_tick, Tick duration,
     Tick half_bar = stage2_dur / 2;
 
     // V7 chord (first half): dominant 7th chord.
-    // Sort offsets descending so V0=highest pitch (soprano convention).
+    // Upper voices only (lowest voice = tonic pedal in coda context).
+    // Include root (offset 0 = G = P5 above tonic) as consonance anchor.
+    // Include 3rd (offset 4 = B = leading tone) for cadential function.
     int dom_pitch = tonic_pitch + 7;  // Dominant
     {
-      int dom7_offsets[] = {0, 4, 7, 10, -5};
-      uint8_t count = std::min(num_voices, static_cast<uint8_t>(5));
+      uint8_t upper_count = (num_voices > 1) ? num_voices - 1 : num_voices;
+      int dom7_offsets[] = {4, 0, 10, 7, -5};  // B, G, F, D, C-below
+      uint8_t count = std::min(upper_count, static_cast<uint8_t>(5));
       std::sort(dom7_offsets, dom7_offsets + count, std::greater<int>());
       for (uint8_t v = 0; v < count; ++v) {
+        auto [vlo, vhi] = getFugueVoiceRange(v, num_voices);
         NoteEvent note;
         note.start_tick = stage2_start;
         note.duration = half_bar;
-        note.pitch = clampPitch(dom_pitch + dom7_offsets[v],
-                                organ_range::kPedalLow, organ_range::kManual1High);
+        note.pitch = clampPitch(dom_pitch + dom7_offsets[v], vlo, vhi);
         note.velocity = kOrganVelocity;
         note.voice = v;
         note.source = BachNoteSource::Coda;
@@ -432,18 +440,20 @@ std::vector<NoteEvent> createCodaNotes(Tick start_tick, Tick duration,
     }
 
     // I chord (second half): tonic resolution.
-    // Sort offsets descending so V0=highest pitch.
+    // Upper voices only, voiced for proper V→I resolution.
+    // Leading tone B→C resolution; root G stays or descends.
     {
+      uint8_t upper_count = (num_voices > 1) ? num_voices - 1 : num_voices;
       int res_third = is_minor ? 3 : 4;
-      int tonic_offsets[] = {0, res_third, 7, -12, 12};
-      uint8_t count = std::min(num_voices, static_cast<uint8_t>(5));
+      int tonic_offsets[] = {12, 7, res_third, 0, -12};  // C5, G4, E4, C4, C3
+      uint8_t count = std::min(upper_count, static_cast<uint8_t>(5));
       std::sort(tonic_offsets, tonic_offsets + count, std::greater<int>());
       for (uint8_t v = 0; v < count; ++v) {
+        auto [vlo, vhi] = getFugueVoiceRange(v, num_voices);
         NoteEvent note;
         note.start_tick = stage2_start + half_bar;
         note.duration = stage2_dur - half_bar;
-        note.pitch = clampPitch(tonic_pitch + tonic_offsets[v],
-                                organ_range::kPedalLow, organ_range::kManual1High);
+        note.pitch = clampPitch(tonic_pitch + tonic_offsets[v], vlo, vhi);
         note.velocity = kOrganVelocity;
         note.voice = v;
         note.source = BachNoteSource::Coda;
@@ -460,18 +470,19 @@ std::vector<NoteEvent> createCodaNotes(Tick start_tick, Tick duration,
   if (stage3_start < start_tick + duration) {
     Tick stage3_dur = start_tick + duration - stage3_start;
     // Picardy third for minor keys: raise 3rd by 1 semitone.
-    // Sort offsets descending so V0=highest pitch.
+    // Upper voices only (consistent with Stage 2).
     int third_offset = is_minor ? 4 : 4;  // Major 3rd in both (Picardy)
     {
+      uint8_t upper_count = (num_voices > 1) ? num_voices - 1 : num_voices;
       int final_offsets[] = {0, 7, third_offset, -12, 12};
-      uint8_t count = std::min(num_voices, static_cast<uint8_t>(5));
+      uint8_t count = std::min(upper_count, static_cast<uint8_t>(5));
       std::sort(final_offsets, final_offsets + count, std::greater<int>());
       for (uint8_t v = 0; v < count; ++v) {
+        auto [vlo, vhi] = getFugueVoiceRange(v, num_voices);
         NoteEvent note;
         note.start_tick = stage3_start;
         note.duration = stage3_dur;
-        note.pitch = clampPitch(tonic_pitch + final_offsets[v],
-                                organ_range::kPedalLow, organ_range::kManual1High);
+        note.pitch = clampPitch(tonic_pitch + final_offsets[v], vlo, vhi);
         note.velocity = kOrganVelocity;
         note.voice = v;
         note.source = BachNoteSource::Coda;
@@ -481,53 +492,6 @@ std::vector<NoteEvent> createCodaNotes(Tick start_tick, Tick duration,
   }
 
   return notes;
-}
-
-/// @brief Check if placing a candidate pitch creates a cross-relation with
-/// notes in other voices within the note list.
-///
-/// Cross-relation occurs when two voices have conflicting chromatic alterations
-/// of the same pitch class at the same time (e.g. C-natural in voice 0, C# in
-/// voice 1). Natural half-steps E/F (pitch classes 4,5) and B/C (0,11) are
-/// excluded since they are diatonic neighbors, not chromatic conflicts.
-///
-/// @param notes The full note list.
-/// @param voice_idx Per-voice sorted indices (from diatonic sweep setup).
-/// @param num_voices Number of active voices.
-/// @param voice Target voice.
-/// @param pitch Candidate pitch.
-/// @param tick Note start tick.
-/// @return true if cross-relation detected.
-bool hasCrossRelation(const std::vector<NoteEvent>& notes,
-                      const std::vector<std::vector<size_t>>& voice_idx,
-                      uint8_t num_voices, uint8_t voice, uint8_t pitch,
-                      Tick tick) {
-  int pitch_class = getPitchClass(pitch);
-  for (uint8_t other_voice = 0; other_voice < num_voices; ++other_voice) {
-    if (other_voice == voice) continue;
-    // Find the note in other_voice sounding at tick (reverse search for efficiency).
-    for (auto iter = voice_idx[other_voice].rbegin();
-         iter != voice_idx[other_voice].rend(); ++iter) {
-      const auto& other_note = notes[*iter];
-      if (other_note.start_tick <= tick &&
-          other_note.start_tick + other_note.duration > tick) {
-        int other_pc = getPitchClass(other_note.pitch);
-        int diff = std::abs(pitch_class - other_pc);
-        if (diff == 1 || diff == 11) {
-          // Exclude natural half-steps E/F and B/C.
-          int low_pc = std::min(pitch_class, other_pc);
-          int high_pc = std::max(pitch_class, other_pc);
-          if (low_pc == 4 && high_pc == 5) break;   // E/F
-          if (low_pc == 0 && high_pc == 11) break;   // B/C (wrapped)
-          if (low_pc == 0 && high_pc == 1) break;    // B#/C enharmonic
-          return true;
-        }
-        break;  // Found the sounding note, no need to search further.
-      }
-      if (other_note.start_tick + other_note.duration <= tick) break;  // Past notes.
-    }
-  }
-  return false;
 }
 
 /// @brief Get a phase-aware ceiling factor for voice ranges.
@@ -568,7 +532,8 @@ FugueResult generateFugue(const FugueConfig& config) {
   // =========================================================================
   // Step 2: Generate answer (Real/Tonal auto-detection)
   // =========================================================================
-  Answer answer = generateAnswer(subject, config.answer_type);
+  const ArchetypePolicy& policy = getArchetypePolicy(config.archetype);
+  Answer answer = generateAnswer(subject, config.answer_type, policy.preferred_answer);
 
   // =========================================================================
   // Step 3: Generate countersubject(s)
@@ -840,7 +805,8 @@ FugueResult generateFugue(const FugueConfig& config) {
         config.key, config.key, upper_voices,
         config.seed + static_cast<uint32_t>(develop_pairs + 1) * 2000u + 7000u,
         develop_pairs + 1, pedal_energy,
-        cp_state, cp_rules, cp_resolver, detailed_timeline);
+        cp_state, cp_rules, cp_resolver, detailed_timeline,
+        dominant_pitch);
     all_notes.insert(all_notes.end(), pedal_episode.notes.begin(),
                      pedal_episode.notes.end());
 
@@ -878,16 +844,20 @@ FugueResult generateFugue(const FugueConfig& config) {
                                     coda_last_pitches);
   all_notes.insert(all_notes.end(), coda_notes.begin(), coda_notes.end());
 
-  // Tonic pedal in coda: lowest voice sustains the tonic.
+  // Tonic pedal in coda: lowest voice sustains the tonic in Stage 3 only.
+  // Stages 1-2 bass from createCodaNotes is preserved for V7→I cadence.
   {
     uint8_t tonic_pitch = tonicBassPitch(config.key);
 
-    // Remove the lowest voice's coda chord note -- replaced by pedal point.
-    removeLowestVoiceNotes(all_notes, lowest_voice,
-                           current_tick, current_tick + coda_duration);
+    // Pedal starts at Stage 3 (last bar of the 4-bar coda).
+    Tick pedal_start = current_tick + kTicksPerBar * 3;
+    Tick pedal_dur = current_tick + coda_duration - pedal_start;
 
-    auto tonic_pedal = generatePedalPoint(tonic_pitch, current_tick,
-                                          coda_duration, lowest_voice);
+    removeLowestVoiceNotes(all_notes, lowest_voice,
+                           pedal_start, current_tick + coda_duration);
+
+    auto tonic_pedal = generatePedalPoint(tonic_pitch, pedal_start,
+                                          pedal_dur, lowest_voice);
     all_notes.insert(all_notes.end(), tonic_pedal.begin(), tonic_pedal.end());
   }
 
@@ -1275,7 +1245,7 @@ FugueResult generateFugue(const FugueConfig& config) {
       auto par = checkParallelsAndP4Bass(post_state, post_rules,
                                          note.voice, snapped,
                                          note.start_tick, num_voices);
-      bool has_cross = hasCrossRelation(all_notes, dia_voice_idx, num_voices,
+      bool has_cross = hasCrossRelation(all_notes, num_voices,
                                         note.voice, snapped, note.start_tick);
       if (!par.has_parallel_perfect && !has_cross) {
         note.pitch = snapped;
@@ -1291,7 +1261,7 @@ FugueResult generateFugue(const FugueConfig& config) {
           auto check = checkParallelsAndP4Bass(post_state, post_rules,
                                                note.voice, ucand,
                                                note.start_tick, num_voices);
-          bool cand_cross = hasCrossRelation(all_notes, dia_voice_idx, num_voices,
+          bool cand_cross = hasCrossRelation(all_notes, num_voices,
                                              note.voice, ucand, note.start_tick);
           if (!check.has_parallel_perfect && !cand_cross) {
             note.pitch = ucand;

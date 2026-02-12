@@ -448,10 +448,10 @@ TEST(StrettoTest, EvenEntries_AlwaysOriginal_RegardlessOfCharacter) {
     EXPECT_EQ(stretto.entries[0].notes[2].pitch, 79);  // 67+12
 
     // Entry 2 (voice 2, even): shifted to voice 2 register.
-    // 3 voices: voice 2 range [36,60] center 48. Mean 63, shift -12.
-    EXPECT_EQ(stretto.entries[2].notes[0].pitch, 48);  // 60-12
-    EXPECT_EQ(stretto.entries[2].notes[1].pitch, 52);  // 64-12
-    EXPECT_EQ(stretto.entries[2].notes[2].pitch, 55);  // 67-12
+    // 3 voices: voice 2 range [48,72] center 60. Mean 63, shift 0.
+    EXPECT_EQ(stretto.entries[2].notes[0].pitch, 60);  // 60+0
+    EXPECT_EQ(stretto.entries[2].notes[1].pitch, 64);  // 64+0
+    EXPECT_EQ(stretto.entries[2].notes[2].pitch, 67);  // 67+0
   }
 }
 

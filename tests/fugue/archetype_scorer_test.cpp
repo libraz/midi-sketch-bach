@@ -113,19 +113,44 @@ TEST(ArchetypeScorerTest, KopfmotivStrengthWithLeap) {
       {60, 67, 65, 64, 62, 60},
       {kTicksPerBeat, kTicksPerBeat / 2, kTicksPerBeat / 2, kTicksPerBeat,
        kTicksPerBeat, kTicksPerBeat});
+  const auto& policy = getArchetypePolicy(FugueArchetype::Compact);
   ArchetypeScorer scorer;
-  float kopf = scorer.scoreKopfmotivStrength(subject);
+  float kopf = scorer.scoreKopfmotivStrength(subject, policy);
   EXPECT_GE(kopf, 0.4f) << "Opening leap should contribute to Kopfmotiv strength";
 }
 
 TEST(ArchetypeScorerTest, KopfmotivStrengthWithRepetition) {
   // Subject with repeated pitches should score lower.
+  // Use Cantabile policy (zero fragment/sequence weights) to test base scoring.
   auto subject = makeTestSubject(
       {60, 60, 60, 60},
       {kTicksPerBeat, kTicksPerBeat, kTicksPerBeat, kTicksPerBeat});
+  const auto& policy = getArchetypePolicy(FugueArchetype::Cantabile);
   ArchetypeScorer scorer;
-  float kopf = scorer.scoreKopfmotivStrength(subject);
+  float kopf = scorer.scoreKopfmotivStrength(subject, policy);
   EXPECT_LE(kopf, 0.3f) << "Repeated pitches = weak Kopfmotiv";
+}
+
+TEST(ArchetypeScorerTest, KopfmotivStrengthPolicyWeightsAffectScore) {
+  // Compact policy has fragment_reusability_weight=0.3, sequence_potential_weight=0.2.
+  // A narrow-range subject with repeated durations should get a higher score under
+  // Compact (reusable fragment) than under Cantabile (base scoring only).
+  auto subject = makeTestSubject(
+      {60, 62, 64, 62},
+      {kTicksPerBeat, kTicksPerBeat, kTicksPerBeat, kTicksPerBeat});
+  ArchetypeScorer scorer;
+  const auto& compact_policy = getArchetypePolicy(FugueArchetype::Compact);
+  const auto& cantabile_policy = getArchetypePolicy(FugueArchetype::Cantabile);
+  float compact_score = scorer.scoreKopfmotivStrength(subject, compact_policy);
+  float cantabile_score = scorer.scoreKopfmotivStrength(subject, cantabile_policy);
+  // Both should be in valid range.
+  EXPECT_GE(compact_score, 0.0f);
+  EXPECT_LE(compact_score, 1.0f);
+  EXPECT_GE(cantabile_score, 0.0f);
+  EXPECT_LE(cantabile_score, 1.0f);
+  // Policy weights should cause different scores.
+  EXPECT_NE(compact_score, cantabile_score)
+      << "Different policy weights should produce different Kopfmotiv scores";
 }
 
 // ---------------------------------------------------------------------------
@@ -178,6 +203,74 @@ TEST(ArchetypeScorerTest, EvaluateReturnsAllDimensions) {
   EXPECT_LE(score.kopfmotiv_strength, 1.0f);
   EXPECT_GE(score.composite(), 0.0f);
   EXPECT_LE(score.composite(), 1.0f);
+}
+
+// ---------------------------------------------------------------------------
+// Step 2: Symmetry scoring connection to fitness
+// ---------------------------------------------------------------------------
+
+TEST(ArchetypeScorerTest, SymmetryWeightAffectsFitness) {
+  // A subject with balanced ascending/descending motion should produce
+  // different fitness scores under Invertible (symmetry_score_weight=0.4) vs
+  // Compact (symmetry_score_weight=0.0), since the symmetry blending code
+  // path in scoreArchetypeFitness is only active when the weight is nonzero.
+  auto subject = makeTestSubject(
+      {60, 62, 64, 67, 65, 64, 62, 60},
+      {kTicksPerBeat, kTicksPerBeat, kTicksPerBeat, kTicksPerBeat,
+       kTicksPerBeat, kTicksPerBeat, kTicksPerBeat, kTicksPerBeat});
+  const auto& invertible_policy = getArchetypePolicy(FugueArchetype::Invertible);
+  const auto& compact_policy = getArchetypePolicy(FugueArchetype::Compact);
+
+  // Verify the policy difference that drives the test.
+  ASSERT_GT(invertible_policy.symmetry_score_weight, 0.0f)
+      << "Invertible must have nonzero symmetry_score_weight";
+  ASSERT_FLOAT_EQ(compact_policy.symmetry_score_weight, 0.0f)
+      << "Compact must have zero symmetry_score_weight";
+
+  ArchetypeScorer scorer;
+  float invertible_fitness =
+      scorer.scoreArchetypeFitness(subject, invertible_policy);
+  float compact_fitness =
+      scorer.scoreArchetypeFitness(subject, compact_policy);
+
+  // The symmetry weight blends contour symmetry into fitness; with different
+  // weights the scores must differ for any subject whose symmetry != raw fitness.
+  EXPECT_NE(invertible_fitness, compact_fitness)
+      << "Symmetry weight should cause different fitness for the same subject";
+
+  // Both must remain in valid [0, 1] range.
+  EXPECT_GE(invertible_fitness, 0.0f);
+  EXPECT_LE(invertible_fitness, 1.0f);
+  EXPECT_GE(compact_fitness, 0.0f);
+  EXPECT_LE(compact_fitness, 1.0f);
+}
+
+TEST(ArchetypeScorerTest, SymmetricSubjectScoresHigherWithSymmetryWeight) {
+  // Symmetric subject: C-D-E-G-E-D-C (balanced ascending/descending).
+  auto symmetric = makeTestSubject(
+      {60, 62, 64, 67, 64, 62, 60},
+      {kTicksPerBeat, kTicksPerBeat, kTicksPerBeat, kTicksPerBeat,
+       kTicksPerBeat, kTicksPerBeat, kTicksPerBeat});
+
+  // Asymmetric subject: C-D-E-F-G-A-B (all ascending, zero descending motion).
+  auto asymmetric = makeTestSubject(
+      {60, 62, 64, 65, 67, 69, 71},
+      {kTicksPerBeat, kTicksPerBeat, kTicksPerBeat, kTicksPerBeat,
+       kTicksPerBeat, kTicksPerBeat, kTicksPerBeat});
+
+  const auto& policy = getArchetypePolicy(FugueArchetype::Invertible);
+  ASSERT_GT(policy.symmetry_score_weight, 0.0f);
+
+  ArchetypeScorer scorer;
+  float symmetric_fitness = scorer.scoreArchetypeFitness(symmetric, policy);
+  float asymmetric_fitness = scorer.scoreArchetypeFitness(asymmetric, policy);
+
+  // Under Invertible policy, the symmetric subject should receive a higher
+  // fitness score because its contour symmetry is blended in.
+  EXPECT_GT(symmetric_fitness, asymmetric_fitness)
+      << "Symmetric subject should score higher than asymmetric under "
+         "Invertible policy (symmetry_score_weight="
+      << policy.symmetry_score_weight << ")";
 }
 
 }  // namespace
