@@ -26,12 +26,6 @@ namespace bach {
 
 namespace {
 
-/// @brief Per-voice pitch register boundaries.
-struct VoiceRegister {
-  uint8_t low;
-  uint8_t high;
-};
-
 /// @brief Get the pitch register for a voice based on Bach organ fugue practice.
 ///
 /// Delegates to the shared getFugueVoiceRange() for consistent ranges.
@@ -168,21 +162,11 @@ void placeEntryNotes(const std::vector<NoteEvent>& source_notes,
                      std::map<VoiceId, std::vector<NoteEvent>>& voice_notes) {
   if (source_notes.empty()) return;
 
-  // Compute mean pitch of source notes.
-  int total_pitch = 0;
-  for (const auto& n : source_notes) {
-    total_pitch += static_cast<int>(n.pitch);
-  }
-  int mean_pitch = total_pitch / static_cast<int>(source_notes.size());
+  // Compute octave shift using fitToRegister for optimal register placement.
+  int octave_shift = fitToRegister(source_notes,
+                                    voice_reg.low, voice_reg.high);
 
-  // Compute voice register center and octave shift needed.
-  int voice_center = (static_cast<int>(voice_reg.low) +
-                      static_cast<int>(voice_reg.high)) / 2;
-  int diff = voice_center - mean_pitch;
-  // Round to nearest octave, handling negative values correctly.
-  int octave_shift = nearestOctaveShift(diff);
-
-  // Place all notes with octave shift and clamping.
+  // Place all notes with octave shift.
   std::vector<NoteEvent> placed;
   placed.reserve(source_notes.size());
   for (const auto& src_note : source_notes) {
@@ -190,44 +174,34 @@ void placeEntryNotes(const std::vector<NoteEvent>& source_notes,
     note.start_tick = src_note.start_tick + entry_tick;
     note.voice = voice_id;
     int shifted = static_cast<int>(src_note.pitch) + octave_shift;
-    note.pitch = clampPitch(shifted, voice_reg.low, voice_reg.high);
+    if (shifted < static_cast<int>(voice_reg.low) || shifted > static_cast<int>(voice_reg.high)) {
+      note.pitch = clampPitch(shifted, voice_reg.low, voice_reg.high);
+    } else {
+      note.pitch = static_cast<uint8_t>(shifted);
+    }
     placed.push_back(note);
   }
 
   // Restore melodic contour: verify that interval directions match the source.
   // When clamping destroys an interval direction, adjust by small steps.
-  for (size_t i = 1; i < placed.size(); ++i) {
-    int src_interval = static_cast<int>(source_notes[i].pitch) -
-                       static_cast<int>(source_notes[i - 1].pitch);
-    int placed_interval = static_cast<int>(placed[i].pitch) -
-                          static_cast<int>(placed[i - 1].pitch);
+  for (size_t idx = 1; idx < placed.size(); ++idx) {
+    int src_interval = static_cast<int>(source_notes[idx].pitch) -
+                       static_cast<int>(source_notes[idx - 1].pitch);
+    int placed_interval = static_cast<int>(placed[idx].pitch) -
+                          static_cast<int>(placed[idx - 1].pitch);
     // Check direction mismatch: original goes up but placed goes down, or vice versa.
     if (src_interval > 0 && placed_interval <= 0) {
-      // Should go up: try +1 or +2 semitones from previous note.
-      int target = static_cast<int>(placed[i - 1].pitch) + 1;
+      // Should go up: try +1 semitone from previous note.
+      int target = static_cast<int>(placed[idx - 1].pitch) + 1;
       if (target <= static_cast<int>(voice_reg.high)) {
-        placed[i].pitch = static_cast<uint8_t>(target);
+        placed[idx].pitch = static_cast<uint8_t>(target);
       }
     } else if (src_interval < 0 && placed_interval >= 0) {
-      // Should go down: try -1 or -2 semitones from previous note.
-      int target = static_cast<int>(placed[i - 1].pitch) - 1;
+      // Should go down: try -1 semitone from previous note.
+      int target = static_cast<int>(placed[idx - 1].pitch) - 1;
       if (target >= static_cast<int>(voice_reg.low)) {
-        placed[i].pitch = static_cast<uint8_t>(target);
+        placed[idx].pitch = static_cast<uint8_t>(target);
       }
-    }
-  }
-
-  // Post-placement leap enforcement: clamp any intervals that exceed P5 (7st)
-  // after octave shift + clamp + contour restoration.
-  constexpr int kMaxEntryLeap = 7;
-  for (size_t i = 1; i < placed.size(); ++i) {
-    int interval = static_cast<int>(placed[i].pitch) -
-                   static_cast<int>(placed[i - 1].pitch);
-    if (std::abs(interval) > kMaxEntryLeap) {
-      int direction = (interval > 0) ? 1 : -1;
-      int target = static_cast<int>(placed[i - 1].pitch) +
-                   direction * kMaxEntryLeap;
-      placed[i].pitch = clampPitch(target, voice_reg.low, voice_reg.high);
     }
   }
 
@@ -255,26 +229,20 @@ void placeCountersubjectNotes(const std::vector<NoteEvent>& cs_notes,
                               std::map<VoiceId, std::vector<NoteEvent>>& voice_notes) {
   if (cs_notes.empty()) return;
 
-  // Compute mean pitch of the countersubject.
-  int cs_total = 0;
-  for (const auto& n : cs_notes) {
-    cs_total += static_cast<int>(n.pitch);
-  }
-  int cs_mean = cs_total / static_cast<int>(cs_notes.size());
-
-  // Compute voice register center and octave shift needed.
-  int voice_center = (static_cast<int>(voice_reg.low) +
-                      static_cast<int>(voice_reg.high)) / 2;
-  // Round to nearest octave, handling negative values correctly.
-  int diff = voice_center - cs_mean;
-  int octave_shift = nearestOctaveShift(diff);
+  // Compute octave shift using fitToRegister for optimal register placement.
+  int octave_shift = fitToRegister(cs_notes,
+                                    voice_reg.low, voice_reg.high);
 
   for (const auto& cs_note : cs_notes) {
     NoteEvent note = cs_note;
     note.start_tick = cs_note.start_tick + start_tick;
     note.voice = voice_id;
     int shifted = static_cast<int>(cs_note.pitch) + octave_shift;
-    note.pitch = clampPitch(shifted, voice_reg.low, voice_reg.high);
+    if (shifted < static_cast<int>(voice_reg.low) || shifted > static_cast<int>(voice_reg.high)) {
+      note.pitch = clampPitch(shifted, voice_reg.low, voice_reg.high);
+    } else {
+      note.pitch = static_cast<uint8_t>(shifted);
+    }
     voice_notes[voice_id].push_back(note);
   }
 }

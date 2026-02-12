@@ -233,8 +233,9 @@ void placeCantus(const ChoraleMelody& melody, Track& track) {
     Tick dur = static_cast<Tick>(melody.notes[idx].duration_beats) * kTicksPerBeat;
     uint8_t pitch = melody.notes[idx].pitch;
 
-    // Cantus sits in the soprano register on Swell: ensure within range.
-    pitch = clampPitch(static_cast<int>(pitch), 60, 79);  // C4-G5 (cantus)
+    // Cantus sits in the soprano register on Swell: transpose up one octave
+    // so figuration (alto/tenor) sits clearly below it.
+    pitch = clampPitch(static_cast<int>(pitch) + 12, 72, 91);  // C5-G6 (soprano)
 
     NoteEvent note;
     note.start_tick = current_tick;
@@ -270,9 +271,9 @@ std::vector<NoteEvent> generateFiguration(Tick cantus_tick, Tick cantus_dur,
                                           uint32_t& rng_state) {
   std::vector<NoteEvent> notes;
 
-  // Counterpoint range: below cantus, in the tenor/alto region (C3-B4).
+  // Counterpoint range: below cantus (C5+), in the tenor/alto region (C3-B4).
   constexpr uint8_t kFigLow = 48;
-  constexpr uint8_t kFigHigh = 67;  // G4 (narrower, avoid cantus overlap)
+  constexpr uint8_t kFigHigh = 71;  // B4 (clear gap below cantus at C5)
 
   ScaleType scale_type = key_sig.is_minor ? ScaleType::HarmonicMinor : ScaleType::Major;
 
@@ -500,8 +501,8 @@ ChoralePreludeResult generateChoralePrelude(const ChoralePreludeConfig& config) 
     }
 
     std::vector<std::pair<uint8_t, uint8_t>> voice_ranges = {
-        {48, 67},  // Voice 0: Great figuration (C3-G4)
-        {60, 79},  // Voice 1: Swell cantus (C4-G5)
+        {48, 71},  // Voice 0: Great figuration (C3-B4)
+        {72, 91},  // Voice 1: Swell cantus (C5-G6)
         {organ_range::kPedalLow, organ_range::kPedalHigh}};    // Voice 2: Pedal
 
     // ---- createBachNote coordination pass ----

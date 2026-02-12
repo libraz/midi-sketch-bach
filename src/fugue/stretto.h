@@ -97,7 +97,8 @@ std::vector<Tick> findValidStrettoIntervals(const std::vector<NoteEvent>& subjec
 /// @return Generated Stretto.
 Stretto generateStretto(const Subject& subject, Key home_key, Tick start_tick,
                         uint8_t num_voices, uint32_t seed,
-                        SubjectCharacter character = SubjectCharacter::Severe);
+                        SubjectCharacter character = SubjectCharacter::Severe,
+                        const uint8_t* voice_last_pitches = nullptr);
 
 /// @brief Generate a stretto section with counterpoint validation.
 ///
@@ -122,7 +123,8 @@ Stretto generateStretto(const Subject& subject, Key home_key, Tick start_tick,
                         SubjectCharacter character,
                         CounterpointState& cp_state, IRuleEvaluator& cp_rules,
                         CollisionResolver& cp_resolver,
-                        const HarmonicTimeline& timeline);
+                        const HarmonicTimeline& timeline,
+                        const uint8_t* voice_last_pitches = nullptr);
 
 /// @brief Create a stretto fragment from the subject head.
 ///

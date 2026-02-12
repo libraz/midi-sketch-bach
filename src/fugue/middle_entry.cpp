@@ -11,7 +11,8 @@
 namespace bach {
 
 MiddleEntry generateMiddleEntry(const Subject& subject, Key target_key, Tick start_tick,
-                                VoiceId voice_id, uint8_t num_voices) {
+                                VoiceId voice_id, uint8_t num_voices,
+                                uint8_t last_pitch) {
   MiddleEntry entry;
   entry.key = target_key;
   entry.start_tick = start_tick;
@@ -28,16 +29,10 @@ MiddleEntry generateMiddleEntry(const Subject& subject, Key target_key, Tick sta
   // Use transposeMelody from the transform module.
   entry.notes = transposeMelody(subject.notes, semitones);
 
-  // Compute octave shift to fit the target voice's register.
+  // Compute octave shift using fitToRegister for optimal register placement.
   auto [lo, hi] = getFugueVoiceRange(voice_id, num_voices);
-  int total_pitch = 0;
-  for (const auto& n : entry.notes) {
-    total_pitch += static_cast<int>(n.pitch);
-  }
-  int mean_pitch = total_pitch / static_cast<int>(entry.notes.size());
-  int voice_center = (static_cast<int>(lo) + static_cast<int>(hi)) / 2;
-  int diff = voice_center - mean_pitch;
-  int octave_shift = nearestOctaveShift(diff);
+  int octave_shift = fitToRegister(entry.notes, lo, hi,
+                                    last_pitch);  // reference_pitch = last_pitch
 
   // Offset tick positions so the entry starts at start_tick.
   Tick original_start = subject.notes[0].start_tick;
@@ -45,7 +40,11 @@ MiddleEntry generateMiddleEntry(const Subject& subject, Key target_key, Tick sta
     note.start_tick = note.start_tick - original_start + start_tick;
     note.voice = voice_id;
     int shifted = static_cast<int>(note.pitch) + octave_shift;
-    note.pitch = clampPitch(shifted, lo, hi);
+    if (shifted < static_cast<int>(lo) || shifted > static_cast<int>(hi)) {
+      note.pitch = clampPitch(shifted, lo, hi);
+    } else {
+      note.pitch = static_cast<uint8_t>(shifted);
+    }
   }
 
   return entry;
@@ -55,9 +54,11 @@ MiddleEntry generateMiddleEntry(const Subject& subject, Key target_key, Tick sta
                                 VoiceId voice_id, uint8_t num_voices,
                                 CounterpointState& cp_state, IRuleEvaluator& cp_rules,
                                 CollisionResolver& cp_resolver,
-                                const HarmonicTimeline& /*timeline*/) {
-  // Generate raw middle entry notes (with register adjustment).
-  MiddleEntry entry = generateMiddleEntry(subject, target_key, start_tick, voice_id, num_voices);
+                                const HarmonicTimeline& /*timeline*/,
+                                uint8_t last_pitch) {
+  // Generate raw middle entry notes (with register adjustment + leap guard).
+  MiddleEntry entry = generateMiddleEntry(subject, target_key, start_tick, voice_id, num_voices,
+                                          last_pitch);
 
   // Validate each note through createBachNote with Immutable protection.
   std::vector<NoteEvent> validated;
@@ -114,21 +115,18 @@ MiddleEntry generateFalseEntry(const Subject& subject, Key target_key,
   // Transpose entire subject, then take only the quoted portion.
   std::vector<NoteEvent> transposed = transposeMelody(subject.notes, semitones);
 
-  // Compute octave shift to fit the target voice's register.
+  // Compute octave shift using fitToRegister for optimal register placement.
   auto [lo, hi] = getFugueVoiceRange(voice_id, num_voices);
-  int total_pitch = 0;
-  for (const auto& n : transposed) {
-    total_pitch += static_cast<int>(n.pitch);
-  }
-  int mean_pitch = total_pitch / static_cast<int>(transposed.size());
-  int voice_center = (static_cast<int>(lo) + static_cast<int>(hi)) / 2;
-  int reg_diff = voice_center - mean_pitch;
-  int octave_shift = nearestOctaveShift(reg_diff);
+  int octave_shift = fitToRegister(transposed, lo, hi);
 
   // Apply octave shift to transposed notes.
   for (auto& note : transposed) {
     int shifted = static_cast<int>(note.pitch) + octave_shift;
-    note.pitch = clampPitch(shifted, lo, hi);
+    if (shifted < static_cast<int>(lo) || shifted > static_cast<int>(hi)) {
+      note.pitch = clampPitch(shifted, lo, hi);
+    } else {
+      note.pitch = static_cast<uint8_t>(shifted);
+    }
   }
 
   // Offset tick positions so the entry starts at start_tick.

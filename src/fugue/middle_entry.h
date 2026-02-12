@@ -44,7 +44,8 @@ struct MiddleEntry {
 /// @param num_voices Total number of voices (for register lookup).
 /// @return Generated MiddleEntry.
 MiddleEntry generateMiddleEntry(const Subject& subject, Key target_key, Tick start_tick,
-                                VoiceId voice_id, uint8_t num_voices = 3);
+                                VoiceId voice_id, uint8_t num_voices = 3,
+                                uint8_t last_pitch = 0);
 
 /// @brief Generate a middle entry with counterpoint validation.
 ///
@@ -66,7 +67,8 @@ MiddleEntry generateMiddleEntry(const Subject& subject, Key target_key, Tick sta
                                 VoiceId voice_id, uint8_t num_voices,
                                 CounterpointState& cp_state, IRuleEvaluator& cp_rules,
                                 CollisionResolver& cp_resolver,
-                                const HarmonicTimeline& timeline);
+                                const HarmonicTimeline& timeline,
+                                uint8_t last_pitch = 0);
 
 /// @brief Generate a false entry -- subject opening that diverges to free counterpoint.
 ///

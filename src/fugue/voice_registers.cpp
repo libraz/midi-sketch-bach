@@ -1,6 +1,13 @@
-// Shared voice range constants for fugue voices.
+// Shared voice range constants and register-fitting logic for fugue voices.
 
 #include "fugue/voice_registers.h"
+
+#include <algorithm>
+#include <climits>
+#include <cstdlib>
+#include <vector>
+
+#include "core/interval.h"
 
 namespace bach {
 
@@ -31,6 +38,204 @@ std::pair<uint8_t, uint8_t> getFugueVoiceRange(VoiceId voice_id, uint8_t num_voi
   };
   auto idx = voice_id < 4 ? voice_id : 3;
   return {kRanges4[idx][0], kRanges4[idx][1]};
+}
+
+namespace {
+
+// Characteristic ranges -- the "audible identity" band, narrower than full range.
+struct CharRange {
+  uint8_t low;
+  uint8_t high;
+};
+
+CharRange getCharacteristicRange(uint8_t range_lo, uint8_t /* range_hi */) {
+  // Map voice range to characteristic sub-band by voice type.
+  //   Soprano: [60,84], Alto: [55,74], Tenor: [48,67], Bass/Pedal: [36,60]
+  if (range_lo >= 60) return {60, 84};   // Soprano
+  if (range_lo >= 55) return {55, 74};   // Alto
+  if (range_lo >= 48) return {48, 67};   // Tenor
+  return {36, 60};                       // Bass / Pedal
+}
+
+int signOf(int val) {
+  if (val > 0) return 1;
+  if (val < 0) return -1;
+  return 0;
+}
+
+}  // namespace
+
+int fitToRegister(const uint8_t* pitches, size_t num_pitches,
+                  uint8_t range_lo, uint8_t range_hi,
+                  uint8_t reference_pitch,
+                  uint8_t prev_reference_pitch,
+                  uint8_t adjacent_last_pitch,
+                  uint8_t adjacent_prev_pitch,
+                  uint8_t adjacent_lo, uint8_t adjacent_hi,
+                  bool is_subject_voice,
+                  uint8_t last_subject_pitch,
+                  bool is_exposition) {
+  // Reserved for future melodic contour analysis between prev_reference and reference.
+  (void)prev_reference_pitch;
+
+  if (num_pitches == 0) return 0;
+
+  // Find min and max pitch in the input.
+  uint8_t min_pitch = pitches[0];
+  uint8_t max_pitch = pitches[0];
+  for (size_t idx = 1; idx < num_pitches; ++idx) {
+    if (pitches[idx] < min_pitch) min_pitch = pitches[idx];
+    if (pitches[idx] > max_pitch) max_pitch = pitches[idx];
+  }
+
+  uint8_t first_pitch = pitches[0];
+  uint8_t second_pitch = (num_pitches >= 2) ? pitches[1] : first_pitch;
+
+  CharRange char_range = getCharacteristicRange(range_lo, range_hi);
+
+  int best_shift = 0;
+  int best_score = INT32_MAX;
+
+  static constexpr int kShifts[] = {-48, -36, -24, -12, 0, 12, 24, 36, 48};
+  for (int shift : kShifts) {
+    int shifted_first = static_cast<int>(first_pitch) + shift;
+    int shifted_second = static_cast<int>(second_pitch) + shift;
+    int shifted_min = static_cast<int>(min_pitch) + shift;
+    int shifted_max = static_cast<int>(max_pitch) + shift;
+
+    // (a) overflow_penalty: out-of-range overflow.
+    int overflow = 0;
+    if (shifted_min < static_cast<int>(range_lo)) {
+      overflow += static_cast<int>(range_lo) - shifted_min;
+    }
+    if (shifted_max > static_cast<int>(range_hi)) {
+      overflow += shifted_max - static_cast<int>(range_hi);
+    }
+
+    // (b) instant_cross: first pitch crosses adjacent voice's last pitch.
+    int instant_cross = 0;
+    if (adjacent_last_pitch > 0) {
+      if (adjacent_lo > range_lo) {
+        // Adjacent is upper voice -- shifted_first should be below adj_last.
+        if (shifted_first > static_cast<int>(adjacent_last_pitch)) {
+          instant_cross = shifted_first - static_cast<int>(adjacent_last_pitch);
+        }
+      } else {
+        // Adjacent is lower voice -- shifted_first should be above adj_last.
+        if (static_cast<int>(adjacent_last_pitch) > shifted_first) {
+          instant_cross = static_cast<int>(adjacent_last_pitch) - shifted_first;
+        }
+      }
+    }
+    int cross_weight = is_subject_voice ? 15 : 50;
+
+    // (c) parallel_risk: both voices move in same direction to perfect consonance.
+    int parallel_risk = 0;
+    if (adjacent_last_pitch > 0 && adjacent_prev_pitch > 0 && num_pitches >= 2) {
+      int adj_motion = static_cast<int>(adjacent_last_pitch) -
+                       static_cast<int>(adjacent_prev_pitch);
+      int entry_motion = shifted_second - shifted_first;
+      if (signOf(adj_motion) == signOf(entry_motion) && signOf(adj_motion) != 0) {
+        int simple = interval_util::compoundToSimple(
+            std::abs(shifted_second - static_cast<int>(adjacent_last_pitch)));
+        if (simple == 0 || simple == 7) {
+          parallel_risk = 1;
+        }
+      }
+    }
+
+    // (d) melodic_distance: distance from reference pitch.
+    int melodic_dist = 0;
+    if (reference_pitch > 0) {
+      melodic_dist = std::abs(shifted_first - static_cast<int>(reference_pitch));
+    }
+
+    // (e) order_violation: sustained voice order inversion.
+    int order_violation = 0;
+    if (adjacent_last_pitch > 0 && num_pitches >= 2) {
+      bool adj_is_lower = (adjacent_lo < range_lo) ||
+                          (adjacent_lo == range_lo && adjacent_hi < range_hi);
+      if (adj_is_lower) {
+        // Adjacent is lower voice; this voice should be higher.
+        if (shifted_first < static_cast<int>(adjacent_last_pitch) &&
+            shifted_second < static_cast<int>(adjacent_last_pitch)) {
+          order_violation = 1;
+        }
+      } else {
+        // Adjacent is upper voice; this voice should be lower.
+        if (shifted_first > static_cast<int>(adjacent_last_pitch) &&
+            shifted_second > static_cast<int>(adjacent_last_pitch)) {
+          order_violation = 1;
+        }
+      }
+    }
+
+    // (f) register_drift: exposition-only drift from last subject entry.
+    int register_drift = 0;
+    if (is_exposition && last_subject_pitch > 0) {
+      int drift = std::abs(shifted_first - static_cast<int>(last_subject_pitch));
+      if (drift > 12) {
+        register_drift = drift - 12;
+      }
+    }
+
+    // (g) clarity_penalty: distance from characteristic range.
+    int clarity = 0;
+    if (shifted_first < static_cast<int>(char_range.low)) {
+      clarity = static_cast<int>(char_range.low) - shifted_first;
+    }
+    if (shifted_first > static_cast<int>(char_range.high)) {
+      clarity = shifted_first - static_cast<int>(char_range.high);
+    }
+
+    // (h) center_distance: distance from voice center.
+    int center = (static_cast<int>(range_lo) + static_cast<int>(range_hi)) / 2;
+    int shifted_center = (shifted_min + shifted_max) / 2;
+    int center_dist = std::abs(center - shifted_center);
+
+    int score = 100 * overflow
+              + cross_weight * instant_cross
+              + 20 * parallel_risk
+              + 10 * melodic_dist
+              +  5 * order_violation
+              +  3 * register_drift
+              +  2 * clarity
+              +  1 * center_dist;
+
+    // Prefer smaller absolute shift on tie.
+    if (score < best_score ||
+        (score == best_score && std::abs(shift) < std::abs(best_shift))) {
+      best_score = score;
+      best_shift = shift;
+    }
+  }
+
+  return best_shift;
+}
+
+int fitToRegister(const std::vector<NoteEvent>& notes,
+                  uint8_t range_lo, uint8_t range_hi,
+                  uint8_t reference_pitch,
+                  uint8_t prev_reference_pitch,
+                  uint8_t adjacent_last_pitch,
+                  uint8_t adjacent_prev_pitch,
+                  uint8_t adjacent_lo, uint8_t adjacent_hi,
+                  bool is_subject_voice,
+                  uint8_t last_subject_pitch,
+                  bool is_exposition) {
+  if (notes.empty()) return 0;
+  std::vector<uint8_t> pitch_buf;
+  pitch_buf.reserve(notes.size());
+  for (const auto& note : notes) {
+    pitch_buf.push_back(note.pitch);
+  }
+  return fitToRegister(pitch_buf.data(), pitch_buf.size(),
+                       range_lo, range_hi,
+                       reference_pitch, prev_reference_pitch,
+                       adjacent_last_pitch, adjacent_prev_pitch,
+                       adjacent_lo, adjacent_hi,
+                       is_subject_voice, last_subject_pitch,
+                       is_exposition);
 }
 
 }  // namespace bach

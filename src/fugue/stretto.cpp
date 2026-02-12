@@ -115,7 +115,8 @@ std::vector<Tick> findValidStrettoIntervals(const std::vector<NoteEvent>& subjec
 
 Stretto generateStretto(const Subject& subject, Key home_key, Tick start_tick,
                         uint8_t num_voices, uint32_t seed,
-                        SubjectCharacter character) {
+                        SubjectCharacter character,
+                        const uint8_t* voice_last_pitches) {
   Stretto stretto;
   stretto.start_tick = start_tick;
   stretto.key = home_key;
@@ -214,17 +215,18 @@ Stretto generateStretto(const Subject& subject, Key home_key, Tick start_tick,
     }
     const auto& source_notes = *source_ptr;
 
-    // Compute octave shift to fit the voice's register.
+    // Compute octave shift using fitToRegister for optimal register placement.
     auto [lo, hi] = getFugueVoiceRange(idx, num_voices);
-    int src_total = 0;
-    for (const auto& n : source_notes) {
-      src_total += static_cast<int>(n.pitch);
-    }
-    int src_mean = source_notes.empty() ? 60
-        : src_total / static_cast<int>(source_notes.size());
-    int vc = (static_cast<int>(lo) + static_cast<int>(hi)) / 2;
-    int vdiff = vc - src_mean;
-    int oct_shift = nearestOctaveShift(vdiff);
+    uint8_t voice_last = voice_last_pitches ? voice_last_pitches[idx] : 0;
+    bool is_subject = (idx % 2 == 0);  // Even=original subject, odd=transform
+    int oct_shift = fitToRegister(source_notes, lo, hi,
+                                   voice_last,  // reference_pitch
+                                   0,           // prev_reference_pitch
+                                   0, 0,        // adjacent pitches (not tracked here)
+                                   0, 0,        // adjacent range (not tracked here)
+                                   is_subject,  // is_subject_voice
+                                   0,           // last_subject_pitch
+                                   false);      // is_exposition (stretto is NOT expo)
 
     entry.notes.reserve(source_notes.size());
     for (const auto& note : source_notes) {
@@ -232,7 +234,11 @@ Stretto generateStretto(const Subject& subject, Key home_key, Tick start_tick,
       placed.start_tick = note.start_tick + entry.entry_tick;
       placed.voice = entry.voice_id;
       int shifted_p = static_cast<int>(note.pitch) + oct_shift;
-      placed.pitch = clampPitch(shifted_p, lo, hi);
+      if (shifted_p < static_cast<int>(lo) || shifted_p > static_cast<int>(hi)) {
+        placed.pitch = clampPitch(shifted_p, lo, hi);
+      } else {
+        placed.pitch = static_cast<uint8_t>(shifted_p);
+      }
       entry.notes.push_back(placed);
     }
 
@@ -278,10 +284,12 @@ Stretto generateStretto(const Subject& subject, Key home_key, Tick start_tick,
                         SubjectCharacter character,
                         CounterpointState& cp_state, IRuleEvaluator& cp_rules,
                         CollisionResolver& cp_resolver,
-                        const HarmonicTimeline& timeline) {
-  // Generate unvalidated stretto.
+                        const HarmonicTimeline& timeline,
+                        const uint8_t* voice_last_pitches) {
+  // Generate unvalidated stretto (with leap guard).
   Stretto stretto = generateStretto(subject, home_key, start_tick,
-                                    num_voices, seed, character);
+                                    num_voices, seed, character,
+                                    voice_last_pitches);
 
   // Post-validate each entry's notes.
   for (size_t entry_idx = 0; entry_idx < stretto.entries.size(); ++entry_idx) {

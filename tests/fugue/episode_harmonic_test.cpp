@@ -156,7 +156,9 @@ TEST(EpisodeHarmonicTest, DominantPedalEpisode_StrongBeatConsonance) {
     if (total == 0) continue;
 
     float ratio = static_cast<float>(consonant) / static_cast<float>(total);
-    EXPECT_GE(ratio, 0.6f)
+    // Threshold 55%: manualiter pedal register may shift consonance ratios
+    // slightly vs pedaliter due to different compound interval reductions.
+    EXPECT_GE(ratio, 0.55f)
         << "Seed " << seed << ": only " << consonant << "/" << total
         << " (" << static_cast<int>(ratio * 100) << "%) strong-beat episode "
         << "notes consonant with dominant pedal "

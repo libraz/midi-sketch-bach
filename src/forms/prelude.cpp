@@ -99,7 +99,7 @@ uint8_t getVoiceLowPitch(uint8_t voice_idx) {
   switch (voice_idx) {
     case 0: return 60;                         // C4 (Great)
     case 1: return 52;                         // E3 (Swell)
-    case 2: return 43;                         // G2 (Positiv)
+    case 2: return organ_range::kManual3Low;   // C3 (Positiv standard)
     case 3: return organ_range::kPedalLow;     // 24 (Pedal unchanged)
     default: return 52;
   }

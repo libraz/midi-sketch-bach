@@ -3,6 +3,7 @@
 #include "fugue/episode.h"
 
 #include <algorithm>
+#include <array>
 #include <cstdint>
 #include <random>
 
@@ -101,41 +102,55 @@ int calculateSequenceRepetitions(Tick duration_ticks, Tick motif_dur) {
   return reps;
 }
 
+/// @brief Calculate median pitch of the first 3 notes in a motif.
+///
+/// Episode reference uses the opening pitch (median of first 3) rather than
+/// the final pitch, because sequences cause register drift when tracking
+/// the arrival pitch of each unit.
+///
+/// @param notes The motif to analyze.
+/// @return Median of first 3 pitches, or 0 if empty.
+static uint8_t medianOfFirst3(const std::vector<NoteEvent>& notes) {
+  if (notes.empty()) return 0;
+  size_t count = std::min(notes.size(), size_t{3});
+  std::array<uint8_t, 3> heads = {};
+  for (size_t idx = 0; idx < count; ++idx) {
+    heads[idx] = notes[idx].pitch;
+  }
+  std::sort(heads.begin(), heads.begin() + count);
+  return heads[count / 2];
+}
+
 /// @brief Shift notes to fit within the appropriate voice register.
 ///
-/// Calculates the average pitch of the notes, compares it to the center
-/// of the target voice's range (from getFugueVoiceRange()), and shifts
-/// all notes by the nearest whole octave. Final pitches are clamped to
-/// the voice range.
+/// Uses fitToRegister for optimal octave shift calculation with
+/// reference pitch support. Final pitches are clamped to the voice range.
 ///
 /// @param notes Notes to adjust (modified in place).
 /// @param voice_id Target voice.
 /// @param num_voices Total voices in the fugue.
+/// @param reference_pitch Optional reference pitch for continuity.
 static void fitToVoiceRegister(std::vector<NoteEvent>& notes, VoiceId voice_id,
-                               uint8_t num_voices) {
+                               uint8_t num_voices,
+                               uint8_t reference_pitch = 0) {
   if (notes.empty()) return;
 
-  auto [range_low, range_high] = getFugueVoiceRange(voice_id, num_voices);
-  int range_center = (static_cast<int>(range_low) + static_cast<int>(range_high)) / 2;
-
-  // Calculate average pitch of notes.
-  int sum = 0;
-  for (const auto& note : notes) {
-    sum += static_cast<int>(note.pitch);
+  auto [lo, hi] = getFugueVoiceRange(voice_id, num_voices);
+  uint8_t adj_lo = 0, adj_hi = 0;
+  if (voice_id > 0) {
+    std::tie(adj_lo, adj_hi) = getFugueVoiceRange(voice_id - 1, num_voices);
   }
-  int avg_pitch = sum / static_cast<int>(notes.size());
-
-  // Round shift to nearest octave (positive or negative).
-  int diff = range_center - avg_pitch;
-  int octave_shift = 0;
-  octave_shift = nearestOctaveShift(diff);
-
-  // Apply shift and clamp to voice range.
+  int shift = fitToRegister(notes, lo, hi,
+                             reference_pitch, 0, 0, 0,
+                             adj_lo, adj_hi,
+                             false, 0, false);
   for (auto& note : notes) {
-    int new_pitch = static_cast<int>(note.pitch) + octave_shift;
-    if (new_pitch < static_cast<int>(range_low)) new_pitch = static_cast<int>(range_low);
-    if (new_pitch > static_cast<int>(range_high)) new_pitch = static_cast<int>(range_high);
-    note.pitch = static_cast<uint8_t>(new_pitch);
+    int shifted = static_cast<int>(note.pitch) + shift;
+    if (shifted < static_cast<int>(lo) || shifted > static_cast<int>(hi)) {
+      note.pitch = clampPitch(shifted, lo, hi);
+    } else {
+      note.pitch = static_cast<uint8_t>(shifted);
+    }
   }
 }
 
@@ -210,7 +225,7 @@ void generateSevereEpisode(Episode& episode, const std::vector<NoteEvent>& motif
     note.voice = 0;
     v0_notes.push_back(note);
   }
-  fitToVoiceRegister(v0_notes, 0, num_voices);
+  fitToVoiceRegister(v0_notes, 0, num_voices, medianOfFirst3(motif));
   for (auto& note : v0_notes) {
     episode.notes.push_back(note);
   }
@@ -239,7 +254,7 @@ void generateSevereEpisode(Episode& episode, const std::vector<NoteEvent>& motif
       note.voice = 1;
       v1_notes.push_back(note);
     }
-    fitToVoiceRegister(v1_notes, 1, num_voices);
+    fitToVoiceRegister(v1_notes, 1, num_voices, medianOfFirst3(inverted));
     for (auto& note : v1_notes) {
       episode.notes.push_back(note);
     }
@@ -283,7 +298,7 @@ void generatePlayfulEpisode(Episode& episode, const std::vector<NoteEvent>& moti
     note.voice = 0;
     v0_notes.push_back(note);
   }
-  fitToVoiceRegister(v0_notes, 0, num_voices);
+  fitToVoiceRegister(v0_notes, 0, num_voices, medianOfFirst3(retrograde));
   for (auto& note : v0_notes) {
     episode.notes.push_back(note);
   }
@@ -312,7 +327,7 @@ void generatePlayfulEpisode(Episode& episode, const std::vector<NoteEvent>& moti
       note.voice = 1;
       v1_notes.push_back(note);
     }
-    fitToVoiceRegister(v1_notes, 1, num_voices);
+    fitToVoiceRegister(v1_notes, 1, num_voices, medianOfFirst3(inverted));
     for (auto& note : v1_notes) {
       episode.notes.push_back(note);
     }
@@ -356,7 +371,7 @@ void generateNobleEpisode(Episode& episode, const std::vector<NoteEvent>& motif,
     note.voice = 0;
     v0_notes.push_back(note);
   }
-  fitToVoiceRegister(v0_notes, 0, num_voices);
+  fitToVoiceRegister(v0_notes, 0, num_voices, medianOfFirst3(motif));
   for (auto& note : v0_notes) {
     episode.notes.push_back(note);
   }
@@ -374,7 +389,7 @@ void generateNobleEpisode(Episode& episode, const std::vector<NoteEvent>& motif,
       note.voice = 1;
       v1_notes.push_back(note);
     }
-    fitToVoiceRegister(v1_notes, 1, num_voices);
+    fitToVoiceRegister(v1_notes, 1, num_voices, medianOfFirst3(retrograded));
     for (auto& note : v1_notes) {
       episode.notes.push_back(note);
     }
@@ -430,7 +445,7 @@ void generateRestlessEpisode(Episode& episode, const std::vector<NoteEvent>& mot
     note.voice = 0;
     v0_notes.push_back(note);
   }
-  fitToVoiceRegister(v0_notes, 0, num_voices);
+  fitToVoiceRegister(v0_notes, 0, num_voices, medianOfFirst3(frag0));
   for (auto& note : v0_notes) {
     episode.notes.push_back(note);
   }
@@ -460,7 +475,7 @@ void generateRestlessEpisode(Episode& episode, const std::vector<NoteEvent>& mot
       note.voice = 1;
       v1_notes.push_back(note);
     }
-    fitToVoiceRegister(v1_notes, 1, num_voices);
+    fitToVoiceRegister(v1_notes, 1, num_voices, medianOfFirst3(diminished));
     for (auto& note : v1_notes) {
       episode.notes.push_back(note);
     }
@@ -793,7 +808,7 @@ Episode generateEpisode(const Subject& subject, Tick start_tick, Tick duration_t
       note.voice = 2;
       v2_notes.push_back(note);
     }
-    fitToVoiceRegister(v2_notes, 2, num_voices);
+    fitToVoiceRegister(v2_notes, 2, num_voices, medianOfFirst3(diminished));
     for (auto& note : v2_notes) {
       episode.notes.push_back(note);
     }
@@ -811,7 +826,7 @@ Episode generateEpisode(const Subject& subject, Tick start_tick, Tick duration_t
         note.voice = 3;
         v3_notes.push_back(note);
       }
-      fitToVoiceRegister(v3_notes, 3, num_voices);
+      fitToVoiceRegister(v3_notes, 3, num_voices, medianOfFirst3(augmented));
       for (auto& note : v3_notes) {
         episode.notes.push_back(note);
       }
@@ -845,7 +860,7 @@ Episode generateEpisode(const Subject& subject, Tick start_tick, Tick duration_t
         note.voice = 4;
         v4_notes.push_back(note);
       }
-      fitToVoiceRegister(v4_notes, 4, num_voices);
+      fitToVoiceRegister(v4_notes, 4, num_voices, medianOfFirst3(inverted));
       for (auto& note : v4_notes) {
         episode.notes.push_back(note);
       }

@@ -681,19 +681,21 @@ TEST(FugueGeneratorTest, DominantPedalPitchIsFifthAboveTonic) {
   FugueResult result = generateFugue(config);
   ASSERT_TRUE(result.success);
 
-  // For C major, tonic bass = C2 (MIDI 36), dominant = G2 (MIDI 43).
-  // The dominant pedal notes should all have pitch 43.
+  // Dominant pedal should be G (pitch class 7) in the lowest voice register.
+  // For 3-voice manualiter, the pedal is in the tenor range (48-72).
+  // For 4-voice pedaliter, the pedal is in the pedal range (24-50).
   auto strettos = result.structure.getSectionsByType(SectionType::Stretto);
   ASSERT_EQ(strettos.size(), 1u);
   Tick stretto_start = strettos[0].start_tick;
 
+  VoiceId lowest = config.num_voices - 1;
   for (const auto& track : result.tracks) {
     for (const auto& note : track.notes) {
       if (note.source == BachNoteSource::PedalPoint &&
+          note.voice == lowest &&
           note.start_tick < stretto_start) {
-        // C2 (36) + perfect 5th (7) = G2 (43).
-        EXPECT_EQ(note.pitch, 43u)
-            << "Dominant pedal in C major should be G2 (MIDI 43), got "
+        EXPECT_EQ(getPitchClass(note.pitch), 7u)
+            << "Dominant pedal in C major should be G, got pitch "
             << static_cast<int>(note.pitch);
       }
     }
@@ -712,13 +714,15 @@ TEST(FugueGeneratorTest, TonicPedalPitchIsRoot) {
   Tick coda_start = codas[0].start_tick;
   Tick coda_end = codas[0].end_tick;
 
+  VoiceId lowest = config.num_voices - 1;
   for (const auto& track : result.tracks) {
     for (const auto& note : track.notes) {
       if (note.source == BachNoteSource::PedalPoint &&
+          note.voice == lowest &&
           note.start_tick >= coda_start && note.start_tick < coda_end) {
-        // C2 = MIDI 36.
-        EXPECT_EQ(note.pitch, 36u)
-            << "Tonic pedal in C major should be C2 (MIDI 36), got "
+        // Tonic pedal should be C (pitch class 0).
+        EXPECT_EQ(getPitchClass(note.pitch), 0u)
+            << "Tonic pedal in C major should be C, got pitch "
             << static_cast<int>(note.pitch);
       }
     }
@@ -909,8 +913,10 @@ TEST(FugueGeneratorTest, CodaVoiceLeading_NoLargeJumps) {
       if (last_pre && first_coda) {
         int jump = std::abs(static_cast<int>(first_coda->pitch) -
                             static_cast<int>(last_pre->pitch));
-        // Inner voices: max 7st, soprano: max 12st (octave).
-        int max_jump = (track_idx == 0) ? 12 : 7;
+        // Soprano and bass: max 12st (octave); inner voices: max 7st.
+        bool is_outer = (track_idx == 0 ||
+                         track_idx == result.tracks.size() - 1);
+        int max_jump = is_outer ? 12 : 7;
         // Pedal voice excluded (it has a pedal point).
         if (first_coda->source != BachNoteSource::PedalPoint) {
           EXPECT_LE(jump, max_jump)
@@ -958,10 +964,10 @@ TEST(FugueGeneratorTest, ZeroNonStructuralParallels_AllSeeds) {
 }
 
 // ---------------------------------------------------------------------------
-// Fix 1: Coda V/I/Final chord notes use upper voices only (lowest = pedal)
+// Coda V7-I cadence: all voices participate in Stage 2, pedal in Stage 3 only
 // ---------------------------------------------------------------------------
 
-TEST(FugueGeneratorTest, CodaChordNotes_UpperVoicesOnly_3Voice) {
+TEST(FugueGeneratorTest, CodaChordNotes_AllVoicesInStage2_3Voice) {
   FugueConfig config = makeTestConfig();
   config.num_voices = 3;
   FugueResult result = generateFugue(config);
@@ -970,35 +976,30 @@ TEST(FugueGeneratorTest, CodaChordNotes_UpperVoicesOnly_3Voice) {
   auto codas = result.structure.getSectionsByType(SectionType::Coda);
   ASSERT_EQ(codas.size(), 1u);
   Tick coda_start = codas[0].start_tick;
-  Tick coda_end = codas[0].end_tick;
 
-  // Stage 1 uses all voices (motif in V0 + held chords V1+). Skip it.
   // Stage 2 starts after 2 bars, Stage 3 after 3 bars.
   Tick stage2_start = coda_start + kTicksPerBar * 2;
+  Tick stage3_start = coda_start + kTicksPerBar * 3;
   VoiceId lowest_voice = config.num_voices - 1;
 
-  // Collect Coda-sourced notes in stages 2+3 for the lowest voice.
-  int lowest_voice_chord_notes = 0;
+  // Lowest voice should have chord notes in Stage 2 (V7 and I).
+  int lowest_stage2_notes = 0;
   for (const auto& track : result.tracks) {
     for (const auto& note : track.notes) {
       if (note.source == BachNoteSource::Coda &&
           note.voice == lowest_voice &&
           note.start_tick >= stage2_start &&
-          note.start_tick < coda_end) {
-        ++lowest_voice_chord_notes;
+          note.start_tick < stage3_start) {
+        ++lowest_stage2_notes;
       }
     }
   }
 
-  // The lowest voice should have zero chord notes in stages 2+3
-  // because it carries the tonic pedal.
-  EXPECT_EQ(lowest_voice_chord_notes, 0)
-      << "Coda stages 2-3 should not place chord notes in the lowest voice "
-      << "(voice " << static_cast<int>(lowest_voice)
-      << ") -- it carries the tonic pedal";
+  EXPECT_GE(lowest_stage2_notes, 2)
+      << "Lowest voice should participate in V7-I cadence (Stage 2)";
 }
 
-TEST(FugueGeneratorTest, CodaChordNotes_UpperVoicesOnly_4Voice) {
+TEST(FugueGeneratorTest, CodaChordNotes_AllVoicesInStage2_4Voice) {
   FugueConfig config = makeTestConfig();
   config.num_voices = 4;
   FugueResult result = generateFugue(config);
@@ -1007,26 +1008,25 @@ TEST(FugueGeneratorTest, CodaChordNotes_UpperVoicesOnly_4Voice) {
   auto codas = result.structure.getSectionsByType(SectionType::Coda);
   ASSERT_EQ(codas.size(), 1u);
   Tick coda_start = codas[0].start_tick;
-  Tick coda_end = codas[0].end_tick;
 
   Tick stage2_start = coda_start + kTicksPerBar * 2;
+  Tick stage3_start = coda_start + kTicksPerBar * 3;
   VoiceId lowest_voice = config.num_voices - 1;
 
-  int lowest_voice_chord_notes = 0;
+  int lowest_stage2_notes = 0;
   for (const auto& track : result.tracks) {
     for (const auto& note : track.notes) {
       if (note.source == BachNoteSource::Coda &&
           note.voice == lowest_voice &&
           note.start_tick >= stage2_start &&
-          note.start_tick < coda_end) {
-        ++lowest_voice_chord_notes;
+          note.start_tick < stage3_start) {
+        ++lowest_stage2_notes;
       }
     }
   }
 
-  EXPECT_EQ(lowest_voice_chord_notes, 0)
-      << "4-voice coda stages 2-3 should not place chord notes in voice "
-      << static_cast<int>(lowest_voice);
+  EXPECT_GE(lowest_stage2_notes, 2)
+      << "4-voice: lowest voice should participate in V7-I cadence (Stage 2)";
 }
 
 TEST(FugueGeneratorTest, CodaV7Chord_HasConsonantAnchor) {

@@ -248,10 +248,18 @@ void removeLowestVoiceNotes(std::vector<NoteEvent>& all_notes,
 ///
 /// @param key Musical key.
 /// @return MIDI pitch number for the tonic in octave 2.
-uint8_t tonicBassPitch(Key key) {
-  // Octave 2 starts at MIDI 36 (C2). Add the key's pitch class offset.
-  int pitch = 36 + static_cast<int>(key);
-  return clampPitch(pitch, organ_range::kPedalLow, organ_range::kPedalHigh);
+/// @brief Get tonic bass pitch adjusted for the actual lowest voice range.
+///
+/// For 4+ voices (pedaliter), returns the standard pedal-register tonic (octave 2).
+/// For 2-3 voices (manualiter), octave-shifts to fit the lowest voice range
+/// per Baroque manualiter practice (BWV 552/2, 541/2).
+static uint8_t tonicBassPitchForVoices(Key key, uint8_t num_voices) {
+  auto [lo, hi] = getFugueVoiceRange(num_voices - 1, num_voices);
+  int base = 36 + static_cast<int>(key);  // Octave 2 default
+  int center = (static_cast<int>(lo) + static_cast<int>(hi)) / 2;
+  int shift = nearestOctaveShift(center - base);
+  int adjusted = base + shift;
+  return clampPitch(adjusted, lo, hi);
 }
 
 /// @brief Extract the last pitch played by a specific voice before a given tick.
@@ -417,15 +425,21 @@ std::vector<NoteEvent> createCodaNotes(Tick start_tick, Tick duration,
     Tick half_bar = stage2_dur / 2;
 
     // V7 chord (first half): dominant 7th chord.
-    // Upper voices only (lowest voice = tonic pedal in coda context).
-    // Include root (offset 0 = G = P5 above tonic) as consonance anchor.
-    // Include 3rd (offset 4 = B = leading tone) for cadential function.
+    // All voices participate in V7-I cadence (lowest voice pedal is Stage 3 only).
     int dom_pitch = tonic_pitch + 7;  // Dominant
     {
-      uint8_t upper_count = (num_voices > 1) ? num_voices - 1 : num_voices;
-      int dom7_offsets[] = {4, 0, 10, 7, -5};  // B, G, F, D, C-below
-      uint8_t count = std::min(upper_count, static_cast<uint8_t>(5));
-      std::sort(dom7_offsets, dom7_offsets + count, std::greater<int>());
+      // Voice-specific V7 voicings (dom_pitch-relative offsets).
+      // 3v: {+4(B), -2(F), -12(G bass)}
+      // 4v: {+4(B), +7(D), -2(F), -12(G bass)}
+      // 5v: {+4(B), +7(D), -2(F), -12(G bass), -17(C below)}
+      int dom7_3[] = {4, -2, -12};
+      int dom7_4[] = {4, 7, -2, -12};
+      int dom7_5[] = {4, 7, -2, -12, -17};
+      int* dom7_offsets;
+      if (num_voices <= 3) dom7_offsets = dom7_3;
+      else if (num_voices == 4) dom7_offsets = dom7_4;
+      else dom7_offsets = dom7_5;
+      uint8_t count = std::min(num_voices, static_cast<uint8_t>(5));
       for (uint8_t v = 0; v < count; ++v) {
         auto [vlo, vhi] = getFugueVoiceRange(v, num_voices);
         NoteEvent note;
@@ -440,14 +454,22 @@ std::vector<NoteEvent> createCodaNotes(Tick start_tick, Tick duration,
     }
 
     // I chord (second half): tonic resolution.
-    // Upper voices only, voiced for proper V→I resolution.
-    // Leading tone B→C resolution; root G stays or descends.
+    // All voices participate in V7-I cadence (lowest voice pedal is Stage 3 only).
     {
-      uint8_t upper_count = (num_voices > 1) ? num_voices - 1 : num_voices;
+      // Voice-specific I resolutions (tonic_pitch-relative offsets).
+      // B→C(↑m2), F→E(↓m2), G→C(↑P4) — functional voice leading.
+      // 3v: {+12(C5), +4(E), 0(C)}
+      // 4v: {+12(C5), +7(G), +4(E), 0(C)}
+      // 5v: {+12(C5), +7(G), +4(E), 0(C), -12(C below)}
       int res_third = is_minor ? 3 : 4;
-      int tonic_offsets[] = {12, 7, res_third, 0, -12};  // C5, G4, E4, C4, C3
-      uint8_t count = std::min(upper_count, static_cast<uint8_t>(5));
-      std::sort(tonic_offsets, tonic_offsets + count, std::greater<int>());
+      int tonic_3[] = {12, res_third, 0};
+      int tonic_4[] = {12, 7, res_third, 0};
+      int tonic_5[] = {12, 7, res_third, 0, -12};
+      int* tonic_offsets;
+      if (num_voices <= 3) tonic_offsets = tonic_3;
+      else if (num_voices == 4) tonic_offsets = tonic_4;
+      else tonic_offsets = tonic_5;
+      uint8_t count = std::min(num_voices, static_cast<uint8_t>(5));
       for (uint8_t v = 0; v < count; ++v) {
         auto [vlo, vhi] = getFugueVoiceRange(v, num_voices);
         NoteEvent note;
@@ -706,12 +728,13 @@ FugueResult generateFugue(const FugueConfig& config) {
     std::uniform_real_distribution<float> false_dist(0.0f, 1.0f);
     bool use_false_entry = (pair_idx > 0) && (false_dist(false_entry_rng) < false_entry_prob);
 
+    uint8_t entry_last = extractVoiceLastPitch(all_notes, current_tick, entry_voice);
     MiddleEntry middle_entry = use_false_entry
         ? generateFalseEntry(subject, target_key, current_tick, entry_voice, num_voices)
         : generateMiddleEntry(subject, target_key,
                               current_tick, entry_voice, num_voices,
                               cp_state, cp_rules, cp_resolver,
-                              detailed_timeline);
+                              detailed_timeline, entry_last);
     Tick middle_end = middle_entry.end_tick;
     if (middle_end <= current_tick) {
       middle_end = current_tick + subject.length_ticks;
@@ -776,11 +799,10 @@ FugueResult generateFugue(const FugueConfig& config) {
   VoiceId lowest_voice = num_voices - 1;
   {
     Tick pedal_duration = kTicksPerBar * kDominantPedalBars;
-    uint8_t dominant_pitch =
-        static_cast<uint8_t>(tonicBassPitch(config.key) + interval::kPerfect5th);
-    // Clamp to pedal range.
-    dominant_pitch = clampPitch(static_cast<int>(dominant_pitch),
-                                organ_range::kPedalLow, organ_range::kPedalHigh);
+    auto [ped_lo, ped_hi] = getFugueVoiceRange(lowest_voice, num_voices);
+    uint8_t tonic_for_pedal = tonicBassPitchForVoices(config.key, num_voices);
+    uint8_t dominant_pitch = clampPitch(
+        static_cast<int>(tonic_for_pedal) + interval::kPerfect5th, ped_lo, ped_hi);
 
     // Remove existing lowest-voice notes in the pedal region.
     removeLowestVoiceNotes(all_notes, lowest_voice,
@@ -814,11 +836,15 @@ FugueResult generateFugue(const FugueConfig& config) {
   }
 
   // --- Stretto (Resolve) ---
+  uint8_t stretto_last[5] = {0, 0, 0, 0, 0};
+  for (uint8_t v = 0; v < num_voices && v < 5; ++v) {
+    stretto_last[v] = extractVoiceLastPitch(all_notes, current_tick, v);
+  }
   Stretto stretto = generateStretto(subject, config.key, current_tick,
                                     num_voices, config.seed + 4000,
                                     config.character,
                                     cp_state, cp_rules, cp_resolver,
-                                    detailed_timeline);
+                                    detailed_timeline, stretto_last);
   Tick stretto_end = stretto.end_tick;
   // Ensure stretto has non-zero duration.
   if (stretto_end <= current_tick) {
@@ -847,7 +873,7 @@ FugueResult generateFugue(const FugueConfig& config) {
   // Tonic pedal in coda: lowest voice sustains the tonic in Stage 3 only.
   // Stages 1-2 bass from createCodaNotes is preserved for V7→I cadence.
   {
-    uint8_t tonic_pitch = tonicBassPitch(config.key);
+    uint8_t tonic_pitch = tonicBassPitchForVoices(config.key, num_voices);
 
     // Pedal starts at Stage 3 (last bar of the 4-bar coda).
     Tick pedal_start = current_tick + kTicksPerBar * 3;
@@ -970,7 +996,9 @@ FugueResult generateFugue(const FugueConfig& config) {
         if (has_crossing) {
           for (int shift : {12, -12, 24, -24}) {
             int candidate = static_cast<int>(note.pitch) + shift;
-            if (candidate < 0 || candidate > 127) continue;
+            auto [fix_lo, fix_hi] = getFugueVoiceRange(note.voice, num_voices);
+            if (candidate < static_cast<int>(fix_lo) ||
+                candidate > static_cast<int>(fix_hi)) continue;
             bool resolved = true;
             for (uint8_t other = 0; other < num_voices; ++other) {
               if (other == note.voice) continue;
@@ -1201,7 +1229,16 @@ FugueResult generateFugue(const FugueConfig& config) {
     // tone unless they are permitted chromatic alterations (raised 7th, chord
     // tones of secondary dominants, or notes at modulation boundaries).
     // -----------------------------------------------------------------------
+    // Track last pitch per voice for melodic leap validation in sweep.
+    uint8_t dia_last_pitch[5] = {0, 0, 0, 0, 0};
+
     for (auto& note : all_notes) {
+      // Update tracker unconditionally (including notes that will be skipped).
+      // This ensures dia_last_pitch always reflects the most recent note,
+      // even for notes that are already diatonic and skip further processing.
+      uint8_t prev_pitch_for_voice = dia_last_pitch[note.voice];
+      dia_last_pitch[note.voice] = note.pitch;
+
       Key note_key = tonal_plan.keyAtTick(note.start_tick);
       const HarmonicEvent& harm = detailed_timeline.getAt(note.start_tick);
 
@@ -1230,24 +1267,53 @@ FugueResult generateFugue(const FugueConfig& config) {
       uint8_t snapped = scale_util::nearestScaleTone(note.pitch, note_key,
                                                      effective_scale);
 
-      // Structural notes: snap without parallel check (identity preservation).
+      // Structural notes: snap with melodic leap validation.
       uint8_t old_pitch = note.pitch;
       if (isStructuralSource(note.source)) {
-        note.pitch = snapped;
-        note.modified_by |= static_cast<uint8_t>(NoteModifiedBy::ChordToneSnap);
+        // Check melodic leap before accepting snap.
+        bool snap_ok = true;
+        if (prev_pitch_for_voice > 0 &&
+            absoluteInterval(snapped, prev_pitch_for_voice) > 12) {
+          snap_ok = false;
+        }
+        if (snap_ok) {
+          note.pitch = snapped;
+          note.modified_by |= static_cast<uint8_t>(NoteModifiedBy::ChordToneSnap);
+        } else {
+          // Graduated fallback: try nearby scale tones within leap limit.
+          for (int delta : {1, -1, 2, -2}) {
+            int cand = static_cast<int>(note.pitch) + delta;
+            if (cand < 0 || cand > 127) continue;
+            uint8_t ucand = static_cast<uint8_t>(cand);
+            if (!scale_util::isScaleTone(ucand, note_key, effective_scale))
+              continue;
+            if (absoluteInterval(ucand, prev_pitch_for_voice) <= 12) {
+              note.pitch = ucand;
+              note.modified_by |=
+                  static_cast<uint8_t>(NoteModifiedBy::ChordToneSnap);
+              break;
+            }
+          }
+          // If no alternative found, keep original pitch
+          // (melodic continuity > diatonic purity).
+        }
         if (note.pitch != old_pitch) {
           post_state.updateNotePitchAt(note.voice, note.start_tick, note.pitch);
         }
+        dia_last_pitch[note.voice] = note.pitch;
         continue;
       }
 
-      // Flexible notes: check if snap creates parallels or cross-relations.
+      // Flexible notes: check if snap creates parallels, cross-relations,
+      // or excessive melodic leaps.
       auto par = checkParallelsAndP4Bass(post_state, post_rules,
                                          note.voice, snapped,
                                          note.start_tick, num_voices);
       bool has_cross = hasCrossRelation(all_notes, num_voices,
                                         note.voice, snapped, note.start_tick);
-      if (!par.has_parallel_perfect && !has_cross) {
+      bool leap_ok = (prev_pitch_for_voice == 0 ||
+                      absoluteInterval(snapped, prev_pitch_for_voice) <= 12);
+      if (!par.has_parallel_perfect && !has_cross && leap_ok) {
         note.pitch = snapped;
         note.modified_by |= static_cast<uint8_t>(NoteModifiedBy::ChordToneSnap);
       } else {
@@ -1263,7 +1329,10 @@ FugueResult generateFugue(const FugueConfig& config) {
                                                note.start_tick, num_voices);
           bool cand_cross = hasCrossRelation(all_notes, num_voices,
                                              note.voice, ucand, note.start_tick);
-          if (!check.has_parallel_perfect && !cand_cross) {
+          bool cand_leap_ok =
+              (prev_pitch_for_voice == 0 ||
+               absoluteInterval(ucand, prev_pitch_for_voice) <= 12);
+          if (!check.has_parallel_perfect && !cand_cross && cand_leap_ok) {
             note.pitch = ucand;
             note.modified_by |= static_cast<uint8_t>(NoteModifiedBy::ChordToneSnap);
             fixed = true;
@@ -1279,6 +1348,7 @@ FugueResult generateFugue(const FugueConfig& config) {
       if (note.pitch != old_pitch) {
         post_state.updateNotePitchAt(note.voice, note.start_tick, note.pitch);
       }
+      dia_last_pitch[note.voice] = note.pitch;
     }
 
     // -----------------------------------------------------------------------
@@ -1934,21 +2004,8 @@ FugueResult generateFugue(const FugueConfig& config) {
     applyRhythmFactors(result.timeline.mutableEvents(), total_ticks, cadence_ticks);
   }
 
-  // --- Coda cadential pedal point (tonic, last 2-4 bars) ---
-  // Only add if the fugue has a pedal voice and enough duration.
-  if (config.num_voices >= 3 && total_ticks > kTicksPerBar * 4) {
-    uint8_t pedal_voice = config.num_voices - 1;
-    Tick pedal_bars = (config.num_voices >= 4) ? 4 : 2;
-    Tick pedal_start = total_ticks - kTicksPerBar * pedal_bars;
-    auto pedal_notes = generateCadentialPedal(
-        home_key_sig, pedal_start, total_ticks,
-        PedalPointType::Tonic, pedal_voice);
-    if (pedal_voice < result.tracks.size()) {
-      for (auto& n : pedal_notes) {
-        result.tracks[pedal_voice].notes.push_back(n);
-      }
-    }
-  }
+  // Coda cadential pedal removed: Stage 3 tonic pedal in createCodaNotes
+  // already provides this functionality (Phase 10).
 
   // --- Picardy third (minor keys only) ---
   if (config.enable_picardy && config.is_minor) {

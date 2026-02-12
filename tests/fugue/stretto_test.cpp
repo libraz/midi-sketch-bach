@@ -264,11 +264,11 @@ TEST(StrettoTest, GenerateStretto_OddEntriesInverted) {
   ASSERT_GE(stretto.entryCount(), 2u);
   ASSERT_GE(stretto.entries[1].notes.size(), 3u);
 
-  // First entry (idx 0, voice 0): original pitches shifted to voice 0 register.
-  // 2 voices: voice 0 range [55,84] center 69. Mean ~63, shift +12.
-  EXPECT_EQ(stretto.entries[0].notes[0].pitch, 72);  // 60+12
-  EXPECT_EQ(stretto.entries[0].notes[1].pitch, 76);  // 64+12
-  EXPECT_EQ(stretto.entries[0].notes[2].pitch, 79);  // 67+12
+  // First entry (idx 0, voice 0): original pitches placed via fitToRegister.
+  // 2 voices: voice 0 range [55,84]. Pitches {60,64,67} already fit, shift 0.
+  EXPECT_EQ(stretto.entries[0].notes[0].pitch, 60);  // 60+0
+  EXPECT_EQ(stretto.entries[0].notes[1].pitch, 64);  // 64+0
+  EXPECT_EQ(stretto.entries[0].notes[2].pitch, 67);  // 67+0
 
   // Second entry (idx 1, voice 1): inverted around pivot=60 → 60, 56, 53.
   // Voice 1 range [36,67] center 51. Mean 56, shift 0.
