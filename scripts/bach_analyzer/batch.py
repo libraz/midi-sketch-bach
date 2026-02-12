@@ -152,3 +152,73 @@ def parse_seed_range(seed_str: str) -> List[int]:
         else:
             seeds.append(int(part))
     return seeds
+
+
+# ---------------------------------------------------------------------------
+# Batch statistics
+# ---------------------------------------------------------------------------
+
+
+def compute_batch_statistics(batch_results: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Compute aggregate statistics across batch results.
+
+    Args:
+        batch_results: List of per-seed result dicts from run_batch/validate_seed.
+
+    Returns:
+        Dict with per-rule stats, pass rate, worst seeds, and systemic violations.
+    """
+    import statistics
+
+    total = len(batch_results)
+    if total == 0:
+        return {"per_rule": {}, "pass_rate": 0.0, "worst_seeds": [], "systemic_violations": []}
+
+    passed = sum(1 for r in batch_results if r.get("overall_passed"))
+    pass_rate = passed / total
+
+    # Collect per-rule violation counts across all seeds.
+    rule_counts: Dict[str, List[int]] = {}
+    for result in batch_results:
+        counts = result.get("violation_counts", {})
+        for rule_name, count in counts.items():
+            if rule_name not in rule_counts:
+                rule_counts[rule_name] = []
+            rule_counts[rule_name].append(count)
+
+    # Compute per-rule statistics.
+    per_rule: Dict[str, Dict[str, Any]] = {}
+    for rule_name, counts in rule_counts.items():
+        # Pad with zeros for seeds where the rule had 0 violations (not in counts).
+        all_counts = counts + [0] * (total - len(counts))
+        nonzero = [c for c in all_counts if c > 0]
+        sorted_counts = sorted(all_counts)
+        p95_idx = int(len(sorted_counts) * 0.95)
+        per_rule[rule_name] = {
+            "mean": statistics.mean(all_counts),
+            "median": statistics.median(all_counts),
+            "p95": sorted_counts[min(p95_idx, len(sorted_counts) - 1)],
+            "max": max(all_counts) if all_counts else 0,
+            "seeds_with_violations": len(nonzero),
+            "systemic": len(nonzero) / total > 0.8,  # >80% of seeds = systemic
+        }
+
+    # Systemic violations: rules failing in >80% of seeds.
+    systemic = [name for name, stats in per_rule.items() if stats["systemic"]]
+
+    # Worst seeds: highest total violation count.
+    seed_totals = [
+        (r.get("seed", 0), r.get("total_violations", 0))
+        for r in batch_results
+    ]
+    seed_totals.sort(key=lambda x: x[1], reverse=True)
+    worst_seeds = [{"seed": s, "total_violations": v} for s, v in seed_totals[:5]]
+
+    return {
+        "per_rule": per_rule,
+        "pass_rate": pass_rate,
+        "total_seeds": total,
+        "passed_seeds": passed,
+        "worst_seeds": worst_seeds,
+        "systemic_violations": systemic,
+    }

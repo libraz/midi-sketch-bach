@@ -130,5 +130,30 @@ class TestAccentedDissonanceExemption(unittest.TestCase):
                         f"Accented passing tone should be exempt: {result.violations}")
 
 
+class TestDiminishedSeventhContext(unittest.TestCase):
+    """Diminished 7th chord context should downgrade dissonance severity to INFO."""
+
+    def test_dim7_chord_info(self):
+        """B-D-F-Ab (dim7) on beat 1: dissonances within should be INFO."""
+        # B3=59, D4=62, F4=65, Ab4=68 -> pitch classes 11,2,5,8 (all 3 apart)
+        soprano = _track("soprano", [_n(68, 0, voice="soprano")])  # Ab4
+        alto = _track("alto", [_n(65, 0, voice="alto")])          # F4
+        tenor = _track("tenor", [_n(62, 0, voice="tenor")])       # D4
+        bass = _track("bass", [_n(59, 0, voice="bass")])          # B3
+        result = StrongBeatDissonance().check(_score([soprano, alto, tenor, bass]))
+        # All dissonances in a dim7 context should be INFO, not WARNING.
+        for v in result.violations:
+            self.assertEqual(v.severity, Severity.INFO,
+                             f"Expected INFO for dim7 context, got {v.severity}: {v.description}")
+
+    def test_non_dim7_stays_warning(self):
+        """Non-dim7 dissonance should remain WARNING."""
+        soprano = _track("soprano", [_n(61, 0, voice="soprano")])  # C#4
+        alto = _track("alto", [_n(60, 0, voice="alto")])          # C4 -> m2 dissonant
+        result = StrongBeatDissonance().check(_score([soprano, alto]))
+        diss_violations = [v for v in result.violations if v.severity != Severity.INFO]
+        self.assertTrue(len(diss_violations) > 0)
+
+
 if __name__ == "__main__":
     unittest.main()

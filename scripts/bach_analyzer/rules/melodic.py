@@ -8,6 +8,9 @@ from typing import List
 from ..model import Note, NoteSource, Score, TICKS_PER_BAR, pitch_to_name
 from .base import Category, RuleResult, Severity, Violation
 
+if False:  # TYPE_CHECKING
+    from ..form_profile import FormProfile
+
 
 # ---------------------------------------------------------------------------
 # ConsecutiveRepeatedNotes
@@ -135,6 +138,9 @@ class ExcessiveLeap:
     def category(self) -> Category:
         return Category.MELODIC
 
+    def configure(self, profile: FormProfile) -> None:
+        self.max_semitones = profile.max_leap_semitones
+
     def check(self, score: Score) -> RuleResult:
         violations: List[Violation] = []
         for voice_name, notes in score.voices_dict.items():
@@ -182,6 +188,11 @@ class LeapResolution:
     """
 
     _ARPEGGIO_SOURCES = {NoteSource.EPISODE_MATERIAL, NoteSource.ARPEGGIO_FLOW}
+    # Structural thematic sources: subject/answer/countersubject entries are
+    # compositionally fixed melodic material where leaps are idiomatic and
+    # resolution is determined by the counterpoint context, not melodic rules.
+    _STRUCTURAL_SOURCES = {NoteSource.FUGUE_SUBJECT, NoteSource.FUGUE_ANSWER,
+                           NoteSource.COUNTERSUBJECT}
 
     def __init__(self, leap_threshold: int = 5):
         self.leap_threshold = leap_threshold
@@ -207,6 +218,9 @@ class LeapResolution:
                 src1 = n1.provenance.source if n1.provenance else None
                 src2 = n2.provenance.source if n2.provenance else None
                 if (src1 and src1 in self._ARPEGGIO_SOURCES) or (src2 and src2 in self._ARPEGGIO_SOURCES):
+                    continue
+                # Exempt structural thematic entries (subject, answer, countersubject).
+                if (src1 and src1 in self._STRUCTURAL_SOURCES) or (src2 and src2 in self._STRUCTURAL_SOURCES):
                     continue
                 # Resolution should step (1-2 semitones) in opposite direction.
                 resolution = n3.pitch - n2.pitch
@@ -272,6 +286,9 @@ class StepwiseMotionRatio:
     def category(self) -> Category:
         return Category.MELODIC
 
+    def configure(self, profile: FormProfile) -> None:
+        self.min_ratio = profile.min_stepwise_ratio
+
     def check(self, score: Score) -> RuleResult:
         violations: List[Violation] = []
         info_parts = []
@@ -307,9 +324,204 @@ class StepwiseMotionRatio:
         )
 
 
+# ---------------------------------------------------------------------------
+# BassLineQuality
+# ---------------------------------------------------------------------------
+
+
+class BassLineQuality:
+    """Check stepwise motion ratio of non-pedal bass voice.
+
+    Fugue bass voices should show ~55%+ stepwise motion outside of
+    subject entries and pedal points. Subject entries are relaxed
+    because their contour depends on the subject's melodic shape.
+    """
+
+    def __init__(self, min_ratio: float = 0.4):
+        self.min_ratio = min_ratio
+
+    @property
+    def name(self) -> str:
+        return "bass_line_quality"
+
+    @property
+    def category(self) -> Category:
+        return Category.MELODIC
+
+    def applies_to(self, profile: FormProfile) -> bool:
+        return (profile.counterpoint_enabled
+                and profile.expected_voices is not None
+                and profile.expected_voices[0] >= 2)
+
+    def configure(self, profile: FormProfile) -> None:
+        pass
+
+    def check(self, score: Score) -> RuleResult:
+        violations: List[Violation] = []
+
+        if not score.tracks:
+            return RuleResult(
+                rule_name=self.name, category=self.category,
+                passed=True, info="no tracks",
+            )
+
+        # Bass is the last track.
+        bass_track = score.tracks[-1]
+        bass_notes = bass_track.sorted_notes
+
+        # Exclude pedal_point and ground_bass notes.
+        pedal_sources = {NoteSource.PEDAL_POINT, NoteSource.GROUND_BASS}
+        # Also exclude subject/answer entries (their contour is predetermined).
+        subject_sources = {NoteSource.FUGUE_SUBJECT, NoteSource.FUGUE_ANSWER}
+        filtered = [
+            n for n in bass_notes
+            if not (n.provenance and n.provenance.source in (pedal_sources | subject_sources))
+        ]
+
+        if len(filtered) < 4:
+            return RuleResult(
+                rule_name=self.name, category=self.category,
+                passed=True, info="insufficient non-pedal bass notes",
+            )
+
+        steps = sum(
+            1 for k in range(len(filtered) - 1)
+            if abs(filtered[k + 1].pitch - filtered[k].pitch) <= 2
+        )
+        total = len(filtered) - 1
+        ratio = steps / total if total > 0 else 1.0
+
+        if ratio < self.min_ratio:
+            violations.append(Violation(
+                rule_name=self.name,
+                category=self.category,
+                severity=Severity.INFO,
+                voice_a=bass_track.name,
+                description=f"bass stepwise ratio {ratio:.2f} < {self.min_ratio}",
+            ))
+
+        return RuleResult(
+            rule_name=self.name,
+            category=self.category,
+            passed=len(violations) == 0,
+            violations=violations,
+            info=f"bass stepwise ratio: {ratio:.2f}",
+        )
+
+
+# ---------------------------------------------------------------------------
+# MelodicTritoneOutline
+# ---------------------------------------------------------------------------
+
+
+class MelodicTritoneOutline:
+    """Detect tritone outlines in melodic contour.
+
+    A tritone outline occurs when a melody changes direction at notes
+    that form a tritone (6 semitones). E.g., C-D-E-F# (ascending then
+    reversing) outlines a C-F# tritone. This is a fundamental rule in
+    Baroque counterpoint.
+
+    Sources like ARPEGGIO_FLOW and EPISODE_MATERIAL are exempt because
+    tritone outlines naturally arise in arpeggio and sequential patterns.
+    """
+
+    _TRITONE = 6
+    _EXEMPT_SOURCES = {NoteSource.ARPEGGIO_FLOW, NoteSource.EPISODE_MATERIAL}
+
+    @property
+    def name(self) -> str:
+        return "melodic_tritone_outline"
+
+    @property
+    def category(self) -> Category:
+        return Category.MELODIC
+
+    def applies_to(self, profile: FormProfile) -> bool:
+        return True  # Universal melodic rule.
+
+    def configure(self, profile: FormProfile) -> None:
+        pass
+
+    def check(self, score: Score) -> RuleResult:
+        violations: List[Violation] = []
+        for voice_name, notes in score.voices_dict.items():
+            sorted_notes = sorted(notes, key=lambda n: n.start_tick)
+            if len(sorted_notes) < 3:
+                continue
+            # Track direction change points (peaks and troughs).
+            last_trough_pitch: int | None = None
+            last_peak_pitch: int | None = None
+            # Initialize: first note is a trough if first motion goes up,
+            # or a peak if first motion goes down.
+            first_dir = sorted_notes[1].pitch - sorted_notes[0].pitch
+            if first_dir > 0:
+                last_trough_pitch = sorted_notes[0].pitch
+            elif first_dir < 0:
+                last_peak_pitch = sorted_notes[0].pitch
+            for k in range(1, len(sorted_notes) - 1):
+                prev_p = sorted_notes[k - 1].pitch
+                cur_p = sorted_notes[k].pitch
+                next_p = sorted_notes[k + 1].pitch
+                prev_dir = cur_p - prev_p
+                next_dir = next_p - cur_p
+                # Exempt notes with arpeggio/episode provenance.
+                cur_note = sorted_notes[k]
+                if cur_note.provenance and cur_note.provenance.source in self._EXEMPT_SOURCES:
+                    continue
+                if prev_dir > 0 and next_dir < 0:
+                    # Peak: check interval from last trough.
+                    if last_trough_pitch is not None:
+                        outline = abs(cur_p - last_trough_pitch)
+                        if outline % 12 == self._TRITONE:
+                            violations.append(Violation(
+                                rule_name=self.name,
+                                category=self.category,
+                                severity=Severity.WARNING,
+                                bar=cur_note.bar,
+                                beat=cur_note.beat,
+                                tick=cur_note.start_tick,
+                                voice_a=voice_name,
+                                description=(
+                                    f"tritone outline {pitch_to_name(last_trough_pitch)}"
+                                    f"-{pitch_to_name(cur_p)} ({outline} st)"
+                                ),
+                                source=cur_note.provenance.source if cur_note.provenance else None,
+                            ))
+                    last_peak_pitch = cur_p
+                elif prev_dir < 0 and next_dir > 0:
+                    # Trough: check interval from last peak.
+                    if last_peak_pitch is not None:
+                        outline = abs(cur_p - last_peak_pitch)
+                        if outline % 12 == self._TRITONE:
+                            violations.append(Violation(
+                                rule_name=self.name,
+                                category=self.category,
+                                severity=Severity.WARNING,
+                                bar=cur_note.bar,
+                                beat=cur_note.beat,
+                                tick=cur_note.start_tick,
+                                voice_a=voice_name,
+                                description=(
+                                    f"tritone outline {pitch_to_name(last_peak_pitch)}"
+                                    f"-{pitch_to_name(cur_p)} ({outline} st)"
+                                ),
+                                source=cur_note.provenance.source if cur_note.provenance else None,
+                            ))
+                    last_trough_pitch = cur_p
+        return RuleResult(
+            rule_name=self.name,
+            category=self.category,
+            passed=len(violations) == 0,
+            violations=violations,
+        )
+
+
 ALL_MELODIC_RULES = [
     ConsecutiveRepeatedNotes,
     ExcessiveLeap,
     LeapResolution,
     StepwiseMotionRatio,
+    BassLineQuality,
+    MelodicTritoneOutline,
 ]

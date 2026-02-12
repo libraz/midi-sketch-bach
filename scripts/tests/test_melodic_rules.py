@@ -12,6 +12,7 @@ from scripts.bach_analyzer.rules.melodic import (
     ConsecutiveRepeatedNotes,
     ExcessiveLeap,
     LeapResolution,
+    MelodicTritoneOutline,
     StepwiseMotionRatio,
 )
 
@@ -185,6 +186,41 @@ class TestLeapResolutionN1Source(unittest.TestCase):
         self.assertFalse(result.passed)
 
 
+class TestLeapResolutionStructuralExempt(unittest.TestCase):
+    def test_subject_exempt(self):
+        """Leap in fugue_subject should be exempt from resolution check."""
+        prov = Provenance(source=NoteSource.FUGUE_SUBJECT)
+        notes = [
+            Note(pitch=60, velocity=80, start_tick=0, duration=480, voice="s", provenance=prov),
+            Note(pitch=67, velocity=80, start_tick=480, duration=480, voice="s", provenance=prov),
+            Note(pitch=69, velocity=80, start_tick=960, duration=480, voice="s", provenance=prov),
+        ]
+        result = LeapResolution().check(_score([_track("s", notes)]))
+        self.assertTrue(result.passed)
+
+    def test_answer_exempt(self):
+        """Leap in fugue_answer should be exempt from resolution check."""
+        prov = Provenance(source=NoteSource.FUGUE_ANSWER)
+        notes = [
+            Note(pitch=60, velocity=80, start_tick=0, duration=480, voice="s", provenance=prov),
+            Note(pitch=67, velocity=80, start_tick=480, duration=480, voice="s", provenance=prov),
+            Note(pitch=69, velocity=80, start_tick=960, duration=480, voice="s", provenance=prov),
+        ]
+        result = LeapResolution().check(_score([_track("s", notes)]))
+        self.assertTrue(result.passed)
+
+    def test_countersubject_exempt(self):
+        """Leap in countersubject should be exempt from resolution check."""
+        prov = Provenance(source=NoteSource.COUNTERSUBJECT)
+        notes = [
+            Note(pitch=60, velocity=80, start_tick=0, duration=480, voice="s", provenance=prov),
+            Note(pitch=67, velocity=80, start_tick=480, duration=480, voice="s", provenance=prov),
+            Note(pitch=69, velocity=80, start_tick=960, duration=480, voice="s", provenance=prov),
+        ]
+        result = LeapResolution().check(_score([_track("s", notes)]))
+        self.assertTrue(result.passed)
+
+
 class TestExcessiveLeapThreshold(unittest.TestCase):
     def test_14_semitones_flagged(self):
         """14 semitones (> new default 13) should be flagged."""
@@ -196,6 +232,44 @@ class TestExcessiveLeapThreshold(unittest.TestCase):
         """Exactly 13 semitones (= threshold) should pass."""
         notes = [_n(60, 0), _n(73, 480)]
         result = ExcessiveLeap().check(_score([_track("s", notes)]))
+        self.assertTrue(result.passed)
+
+
+class TestMelodicTritoneOutline(unittest.TestCase):
+    """Test tritone outline detection in melodic contour."""
+
+    def test_tritone_outline_detected(self):
+        """D-C-F#-E: trough at C, peak at F#, outline C-F# = 6 semitones (tritone)."""
+        # D4(62) -> C4(60) -> F#4(66) -> E4(64)
+        # Direction: down(-2), up(+6), down(-2)
+        # C4 is trough (down->up), F#4 is peak (up->down)
+        # Outline from C4 to F#4 = 6 semitones = tritone
+        notes = [_n(62, 0), _n(60, 480), _n(66, 960), _n(64, 1440)]
+        result = MelodicTritoneOutline().check(_score([_track("s", notes)]))
+        self.assertFalse(result.passed)
+        self.assertEqual(len(result.violations), 1)
+        self.assertIn("tritone outline", result.violations[0].description)
+
+    def test_no_tritone_outline(self):
+        """D-C-G-F: trough at C, peak at G. Outline = P5 (7 st), not tritone."""
+        # D4(62) -> C4(60) -> G4(67) -> F4(65)
+        # Trough at C4, peak at G4. Outline = 7 (P5, not tritone).
+        notes = [_n(62, 0), _n(60, 480), _n(67, 960), _n(65, 1440)]
+        result = MelodicTritoneOutline().check(_score([_track("s", notes)]))
+        self.assertTrue(result.passed)
+
+    def test_arpeggio_flow_exempt(self):
+        """Arpeggio flow notes should be exempt from tritone outline check."""
+        prov = Provenance(source=NoteSource.ARPEGGIO_FLOW)
+        notes = [
+            Note(pitch=59, velocity=80, start_tick=0, duration=480, voice="s"),
+            Note(pitch=60, velocity=80, start_tick=480, duration=480, voice="s",
+                 provenance=prov),
+            Note(pitch=66, velocity=80, start_tick=960, duration=480, voice="s",
+                 provenance=prov),
+            Note(pitch=64, velocity=80, start_tick=1440, duration=480, voice="s"),
+        ]
+        result = MelodicTritoneOutline().check(_score([_track("s", notes)]))
         self.assertTrue(result.passed)
 
 

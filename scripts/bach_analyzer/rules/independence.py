@@ -11,6 +11,9 @@ from typing import Dict, List
 from ..model import Note, NoteSource, Score, TICKS_PER_BEAT
 from .base import Category, RuleResult, Severity, Violation
 
+if False:  # TYPE_CHECKING
+    from ..form_profile import FormProfile
+
 
 # ---------------------------------------------------------------------------
 # VoiceIndependence
@@ -31,6 +34,12 @@ class VoiceIndependence:
     @property
     def category(self) -> Category:
         return Category.INDEPENDENCE
+
+    def applies_to(self, profile: FormProfile) -> bool:
+        return profile.independence_enabled
+
+    def configure(self, profile: FormProfile) -> None:
+        pass
 
     def check(self, score: Score) -> RuleResult:
         voices = score.voices_dict
@@ -160,6 +169,12 @@ class RhythmDiversity:
     def category(self) -> Category:
         return Category.INDEPENDENCE
 
+    def applies_to(self, profile: FormProfile) -> bool:
+        return profile.independence_enabled
+
+    def configure(self, profile: FormProfile) -> None:
+        pass
+
     _PEDAL_MIN_DIVERSITY = 0.0  # Pedal voices may have completely uniform rhythm.
 
     def check(self, score: Score) -> RuleResult:
@@ -194,4 +209,178 @@ class RhythmDiversity:
         )
 
 
-ALL_INDEPENDENCE_RULES = [VoiceIndependence, RhythmDiversity]
+# ---------------------------------------------------------------------------
+# ContraryMotionRatio
+# ---------------------------------------------------------------------------
+
+
+class ContraryMotionRatio:
+    """Check the ratio of contrary motion between voice pairs.
+
+    Bach's counterpoint typically shows 40-60% contrary motion.
+    Flag if below 25%.
+    """
+
+    def __init__(self, min_ratio: float = 0.25):
+        self.min_ratio = min_ratio
+
+    @property
+    def name(self) -> str:
+        return "contrary_motion_ratio"
+
+    @property
+    def category(self) -> Category:
+        return Category.INDEPENDENCE
+
+    def applies_to(self, profile: FormProfile) -> bool:
+        return profile.independence_enabled
+
+    def configure(self, profile: FormProfile) -> None:
+        pass
+
+    def check(self, score: Score) -> RuleResult:
+        violations: List[Violation] = []
+        voices = score.voices_dict
+        names = sorted(voices.keys())
+        if len(names) < 2:
+            return RuleResult(
+                rule_name=self.name, category=self.category,
+                passed=True, info="single voice, contrary motion N/A",
+            )
+
+        info_parts = []
+        for i in range(len(names)):
+            for j in range(i + 1, len(names)):
+                va = sorted(voices[names[i]], key=lambda n: n.start_tick)
+                vb = sorted(voices[names[j]], key=lambda n: n.start_tick)
+                ratio = self._compute_ratio(va, vb)
+                info_parts.append(f"{names[i]}<>{names[j]}: {ratio:.2f}")
+                if ratio < self.min_ratio:
+                    violations.append(Violation(
+                        rule_name=self.name,
+                        category=self.category,
+                        severity=Severity.WARNING,
+                        voice_a=names[i],
+                        voice_b=names[j],
+                        description=f"contrary motion ratio {ratio:.2f} < {self.min_ratio}",
+                    ))
+
+        return RuleResult(
+            rule_name=self.name,
+            category=self.category,
+            passed=len(violations) == 0,
+            violations=violations,
+            info="; ".join(info_parts),
+        )
+
+    @staticmethod
+    def _compute_ratio(va: List[Note], vb: List[Note]) -> float:
+        """Compute contrary motion ratio using time-aligned beats."""
+        if len(va) < 2 or len(vb) < 2:
+            return 0.0
+        bp_a = {n.start_tick // TICKS_PER_BEAT: n.pitch for n in va}
+        bp_b = {n.start_tick // TICKS_PER_BEAT: n.pitch for n in vb}
+        common_beats = sorted(set(bp_a) & set(bp_b))
+        if len(common_beats) < 2:
+            return 0.0
+        contrary = 0
+        comparisons = 0
+        for k in range(len(common_beats) - 1):
+            b1, b2 = common_beats[k], common_beats[k + 1]
+            dir_a = bp_a[b2] - bp_a[b1]
+            dir_b = bp_b[b2] - bp_b[b1]
+            if dir_a != 0 and dir_b != 0:
+                comparisons += 1
+                if (dir_a > 0) != (dir_b > 0):
+                    contrary += 1
+        return contrary / comparisons if comparisons > 0 else 0.0
+
+
+# ---------------------------------------------------------------------------
+# OnsetAsynchrony
+# ---------------------------------------------------------------------------
+
+
+class OnsetAsynchrony:
+    """Measure onset synchrony between voices.
+
+    Bach's counterpoint shows rhythmic independence via staggered note onsets.
+    If >80% of beats have all voices attacking simultaneously, the texture
+    is too homophonic.
+    """
+
+    def __init__(self, max_sync_ratio: float = 0.8):
+        self.max_sync_ratio = max_sync_ratio
+
+    @property
+    def name(self) -> str:
+        return "onset_asynchrony"
+
+    @property
+    def category(self) -> Category:
+        return Category.INDEPENDENCE
+
+    def applies_to(self, profile: "FormProfile") -> bool:
+        return (profile.independence_enabled
+                and profile.form_name != "chorale_prelude")
+
+    def configure(self, profile: "FormProfile") -> None:
+        pass
+
+    def check(self, score: Score) -> RuleResult:
+        voices = score.voices_dict
+        names = sorted(voices.keys())
+        if len(names) < 2:
+            return RuleResult(
+                rule_name=self.name, category=self.category,
+                passed=True, info="single voice, onset asynchrony N/A",
+            )
+
+        # Collect all onset ticks per voice.
+        onset_sets = {name: {n.start_tick for n in notes} for name, notes in voices.items()}
+        num_voices = len(names)
+
+        # Count beats where all voices have an onset.
+        total_beats = score.total_duration // TICKS_PER_BEAT
+        if total_beats == 0:
+            return RuleResult(
+                rule_name=self.name, category=self.category,
+                passed=True, info="empty score",
+            )
+
+        fully_sync = 0
+        active_beats = 0
+        beat = 0
+        while beat < score.total_duration:
+            # Count how many voices have an onset at this beat.
+            attacking = sum(1 for name in names if beat in onset_sets[name])
+            if attacking > 0:
+                active_beats += 1
+                if attacking == num_voices:
+                    fully_sync += 1
+            beat += TICKS_PER_BEAT
+
+        sync_ratio = fully_sync / active_beats if active_beats > 0 else 0.0
+
+        violations = []
+        if sync_ratio > self.max_sync_ratio:
+            violations.append(Violation(
+                rule_name=self.name,
+                category=self.category,
+                severity=Severity.WARNING,
+                description=(
+                    f"onset synchrony {sync_ratio:.2f} > {self.max_sync_ratio} "
+                    f"({fully_sync}/{active_beats} beats fully synchronous)"
+                ),
+            ))
+
+        return RuleResult(
+            rule_name=self.name,
+            category=self.category,
+            passed=len(violations) == 0,
+            violations=violations,
+            info=f"sync_ratio={sync_ratio:.2f}",
+        )
+
+
+ALL_INDEPENDENCE_RULES = [VoiceIndependence, RhythmDiversity, ContraryMotionRatio, OnsetAsynchrony]

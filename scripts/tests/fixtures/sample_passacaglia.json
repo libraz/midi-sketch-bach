@@ -1,0 +1,76 @@
+{
+  "seed": 300,
+  "form": "passacaglia",
+  "key": "C_minor",
+  "tracks": [
+    {
+      "name": "soprano",
+      "channel": 0,
+      "program": 19,
+      "notes": [
+        {"pitch": 72, "velocity": 80, "start_tick": 0, "duration": 480, "voice": "soprano"},
+        {"pitch": 74, "velocity": 80, "start_tick": 480, "duration": 480, "voice": "soprano"},
+        {"pitch": 75, "velocity": 80, "start_tick": 960, "duration": 480, "voice": "soprano"},
+        {"pitch": 77, "velocity": 80, "start_tick": 1440, "duration": 480, "voice": "soprano"},
+        {"pitch": 79, "velocity": 80, "start_tick": 1920, "duration": 480, "voice": "soprano"},
+        {"pitch": 77, "velocity": 80, "start_tick": 2400, "duration": 480, "voice": "soprano"},
+        {"pitch": 75, "velocity": 80, "start_tick": 2880, "duration": 480, "voice": "soprano"},
+        {"pitch": 72, "velocity": 80, "start_tick": 3360, "duration": 480, "voice": "soprano"},
+        {"pitch": 72, "velocity": 80, "start_tick": 3840, "duration": 480, "voice": "soprano"},
+        {"pitch": 74, "velocity": 80, "start_tick": 4320, "duration": 480, "voice": "soprano"},
+        {"pitch": 75, "velocity": 80, "start_tick": 4800, "duration": 480, "voice": "soprano"},
+        {"pitch": 77, "velocity": 80, "start_tick": 5280, "duration": 480, "voice": "soprano"},
+        {"pitch": 79, "velocity": 80, "start_tick": 5760, "duration": 480, "voice": "soprano"},
+        {"pitch": 77, "velocity": 80, "start_tick": 6240, "duration": 480, "voice": "soprano"},
+        {"pitch": 75, "velocity": 80, "start_tick": 6720, "duration": 480, "voice": "soprano"},
+        {"pitch": 72, "velocity": 80, "start_tick": 7200, "duration": 960, "voice": "soprano"}
+      ]
+    },
+    {
+      "name": "alto",
+      "channel": 0,
+      "program": 19,
+      "notes": [
+        {"pitch": 60, "velocity": 80, "start_tick": 0, "duration": 480, "voice": "alto"},
+        {"pitch": 62, "velocity": 80, "start_tick": 480, "duration": 480, "voice": "alto"},
+        {"pitch": 63, "velocity": 80, "start_tick": 960, "duration": 480, "voice": "alto"},
+        {"pitch": 65, "velocity": 80, "start_tick": 1440, "duration": 480, "voice": "alto"},
+        {"pitch": 67, "velocity": 80, "start_tick": 1920, "duration": 480, "voice": "alto"},
+        {"pitch": 65, "velocity": 80, "start_tick": 2400, "duration": 480, "voice": "alto"},
+        {"pitch": 63, "velocity": 80, "start_tick": 2880, "duration": 480, "voice": "alto"},
+        {"pitch": 60, "velocity": 80, "start_tick": 3360, "duration": 480, "voice": "alto"},
+        {"pitch": 60, "velocity": 80, "start_tick": 3840, "duration": 480, "voice": "alto"},
+        {"pitch": 62, "velocity": 80, "start_tick": 4320, "duration": 480, "voice": "alto"},
+        {"pitch": 63, "velocity": 80, "start_tick": 4800, "duration": 480, "voice": "alto"},
+        {"pitch": 65, "velocity": 80, "start_tick": 5280, "duration": 480, "voice": "alto"},
+        {"pitch": 67, "velocity": 80, "start_tick": 5760, "duration": 480, "voice": "alto"},
+        {"pitch": 65, "velocity": 80, "start_tick": 6240, "duration": 480, "voice": "alto"},
+        {"pitch": 63, "velocity": 80, "start_tick": 6720, "duration": 480, "voice": "alto"},
+        {"pitch": 60, "velocity": 80, "start_tick": 7200, "duration": 960, "voice": "alto"}
+      ]
+    },
+    {
+      "name": "pedal",
+      "channel": 3,
+      "program": 19,
+      "notes": [
+        {"pitch": 36, "velocity": 80, "start_tick": 0, "duration": 480, "voice": "pedal",
+         "provenance": {"source": "ground_bass"}},
+        {"pitch": 35, "velocity": 80, "start_tick": 480, "duration": 480, "voice": "pedal",
+         "provenance": {"source": "ground_bass"}},
+        {"pitch": 34, "velocity": 80, "start_tick": 960, "duration": 480, "voice": "pedal",
+         "provenance": {"source": "ground_bass"}},
+        {"pitch": 33, "velocity": 80, "start_tick": 1440, "duration": 480, "voice": "pedal",
+         "provenance": {"source": "ground_bass"}},
+        {"pitch": 32, "velocity": 80, "start_tick": 1920, "duration": 480, "voice": "pedal",
+         "provenance": {"source": "ground_bass"}},
+        {"pitch": 31, "velocity": 80, "start_tick": 2400, "duration": 480, "voice": "pedal",
+         "provenance": {"source": "ground_bass"}},
+        {"pitch": 29, "velocity": 80, "start_tick": 2880, "duration": 480, "voice": "pedal",
+         "provenance": {"source": "ground_bass"}},
+        {"pitch": 36, "velocity": 80, "start_tick": 3360, "duration": 480, "voice": "pedal",
+         "provenance": {"source": "ground_bass"}}
+      ]
+    }
+  ]
+}

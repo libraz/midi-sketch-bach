@@ -26,6 +26,9 @@ from ..model import (
 )
 from .base import Category, RuleResult, Severity, Violation
 
+if False:  # TYPE_CHECKING
+    from ..form_profile import FormProfile
+
 
 def _voices_sorted(score: Score) -> Dict[str, List[Note]]:
     """Return voice dict with notes sorted by start_tick."""
@@ -53,15 +56,32 @@ class ParallelPerfect:
     def category(self) -> Category:
         return Category.COUNTERPOINT
 
+    def applies_to(self, profile: FormProfile) -> bool:
+        return profile.counterpoint_enabled
+
+    def configure(self, profile: FormProfile) -> None:
+        pass
+
     def check(self, score: Score) -> RuleResult:
         violations: List[Violation] = []
         voices = _voices_sorted(score)
         names = sorted(voices.keys())
         end_tick = score.total_duration
+        # Determine outer pair from track order (first and last tracks).
+        track_names = [t.name for t in score.tracks]
+        outer_pair = (
+            frozenset({track_names[0], track_names[-1]})
+            if len(track_names) >= 2
+            else frozenset()
+        )
         for i in range(len(names)):
             for j in range(i + 1, len(names)):
+                is_outer = frozenset({names[i], names[j]}) == outer_pair
                 violations.extend(
-                    self._check_pair(names[i], voices[names[i]], names[j], voices[names[j]], end_tick)
+                    self._check_pair(
+                        names[i], voices[names[i]], names[j], voices[names[j]],
+                        end_tick, is_outer,
+                    )
                 )
         return RuleResult(
             rule_name=self.name,
@@ -71,9 +91,15 @@ class ParallelPerfect:
         )
 
     def _check_pair(
-        self, name_a: str, va: List[Note], name_b: str, vb: List[Note], end_tick: int
+        self, name_a: str, va: List[Note], name_b: str, vb: List[Note],
+        end_tick: int, is_outer: bool = True,
     ) -> List[Violation]:
-        """Scan beat-by-beat using sounding_note_at to catch sustained-note parallels."""
+        """Scan beat-by-beat using sounding_note_at to catch sustained-note parallels.
+
+        Outer voice pairs (soprano-bass) receive CRITICAL severity;
+        inner voice pairs receive ERROR.
+        """
+        severity = Severity.CRITICAL if is_outer else Severity.ERROR
         violations = []
         prev_na = prev_nb = None
         beat = 0
@@ -95,7 +121,7 @@ class ParallelPerfect:
                                 Violation(
                                     rule_name=self.name,
                                     category=self.category,
-                                    severity=Severity.CRITICAL,
+                                    severity=severity,
                                     bar=bar,
                                     beat=beat_in_bar,
                                     tick=beat,
@@ -121,6 +147,9 @@ class HiddenPerfect:
     """Detect hidden (direct) 5ths/8ths: similar motion arriving at P5/P8
     where both voices leap."""
 
+    def __init__(self):
+        self._severity = Severity.WARNING
+
     @property
     def name(self) -> str:
         return "hidden_perfect"
@@ -128,6 +157,12 @@ class HiddenPerfect:
     @property
     def category(self) -> Category:
         return Category.COUNTERPOINT
+
+    def applies_to(self, profile: FormProfile) -> bool:
+        return profile.counterpoint_enabled
+
+    def configure(self, profile: FormProfile) -> None:
+        self._severity = profile.hidden_perfect_severity
 
     def check(self, score: Score) -> RuleResult:
         violations: List[Violation] = []
@@ -176,7 +211,7 @@ class HiddenPerfect:
                                         Violation(
                                             rule_name=self.name,
                                             category=self.category,
-                                            severity=Severity.WARNING,
+                                            severity=self._severity,
                                             bar=bar,
                                             beat=beat_in_bar,
                                             tick=beat,
@@ -213,6 +248,9 @@ class VoiceCrossing:
     _INVERTIBLE_SOURCES = {NoteSource.FUGUE_SUBJECT, NoteSource.FUGUE_ANSWER,
                            NoteSource.COUNTERSUBJECT}
 
+    def __init__(self):
+        self._base_severity = Severity.ERROR
+
     @property
     def name(self) -> str:
         return "voice_crossing"
@@ -220,6 +258,12 @@ class VoiceCrossing:
     @property
     def category(self) -> Category:
         return Category.COUNTERPOINT
+
+    def applies_to(self, profile: FormProfile) -> bool:
+        return profile.counterpoint_enabled
+
+    def configure(self, profile: FormProfile) -> None:
+        self._base_severity = profile.voice_crossing_base_severity
 
     def check(self, score: Score) -> RuleResult:
         violations: List[Violation] = []
@@ -310,6 +354,12 @@ class CrossRelation:
     def category(self) -> Category:
         return Category.COUNTERPOINT
 
+    def applies_to(self, profile: FormProfile) -> bool:
+        return profile.counterpoint_enabled
+
+    def configure(self, profile: FormProfile) -> None:
+        pass
+
     def check(self, score: Score) -> RuleResult:
         violations: List[Violation] = []
         voices = _voices_sorted(score)
@@ -359,12 +409,18 @@ class CrossRelation:
                     pc_a, pc_b = na.pitch_class, nb.pitch_class
                     # Cross-relation if one is natural and other is its sharp/flat.
                     if (pc_a in natural_classes) != (pc_b in natural_classes):
-                        later = na if na.start_tick >= nb.start_tick else nb
+                        if na.start_tick <= nb.start_tick:
+                            earlier, later = na, nb
+                        else:
+                            earlier, later = nb, na
+                        # Phrase boundary: long gap between notes -> INFO.
+                        gap = later.start_tick - earlier.end_tick
+                        sev = Severity.INFO if gap >= TICKS_PER_BAR else Severity.WARNING
                         violations.append(
                             Violation(
                                 rule_name=self.name,
                                 category=self.category,
-                                severity=Severity.WARNING,
+                                severity=sev,
                                 bar=later.bar,
                                 beat=later.beat,
                                 tick=later.start_tick,
@@ -398,6 +454,12 @@ class AugmentedLeap:
     @property
     def category(self) -> Category:
         return Category.COUNTERPOINT
+
+    def applies_to(self, profile: FormProfile) -> bool:
+        return profile.counterpoint_enabled
+
+    def configure(self, profile: FormProfile) -> None:
+        pass
 
     def check(self, score: Score) -> RuleResult:
         violations: List[Violation] = []
@@ -454,6 +516,12 @@ class VoiceInterleaving:
     @property
     def category(self) -> Category:
         return Category.COUNTERPOINT
+
+    def applies_to(self, profile: FormProfile) -> bool:
+        return profile.counterpoint_enabled
+
+    def configure(self, profile: FormProfile) -> None:
+        pass
 
     def check(self, score: Score) -> RuleResult:
         violations: List[Violation] = []

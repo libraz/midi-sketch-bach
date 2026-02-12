@@ -25,6 +25,9 @@ class Category(Enum):
     DISSONANCE = "dissonance"
     STRUCTURE = "structure"
     INDEPENDENCE = "independence"
+    CADENCE = "cadence"
+    ARPEGGIO = "arpeggio"
+    ORNAMENT = "ornament"
 
 
 @dataclass

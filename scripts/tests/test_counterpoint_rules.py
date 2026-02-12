@@ -282,6 +282,63 @@ class TestVoiceInterleaving(unittest.TestCase):
         self.assertTrue(result.passed)
 
 
+class TestParallelPerfectOuterInner(unittest.TestCase):
+    """Test outer/inner voice severity differentiation."""
+
+    def test_outer_pair_critical(self):
+        """Parallel P5 between soprano and bass (outer) -> CRITICAL."""
+        soprano = _track("soprano", [_n(67, 0), _n(69, 480)])  # G4, A4
+        alto = _track("alto", [_n(64, 0), _n(66, 480)])  # E4, F#4
+        bass = _track("bass", [_n(60, 0), _n(62, 480)])  # C4, D4 (P5 with soprano)
+        result = ParallelPerfect().check(_score([soprano, alto, bass]))
+        outer_violations = [v for v in result.violations
+                           if v.voice_a == "bass" and v.voice_b == "soprano"
+                           or v.voice_a == "soprano" and v.voice_b == "bass"]
+        for v in outer_violations:
+            self.assertEqual(v.severity, Severity.CRITICAL)
+
+    def test_inner_pair_error(self):
+        """Parallel P5 between inner voices -> ERROR (not CRITICAL)."""
+        soprano = _track("soprano", [_n(84, 0), _n(86, 480)])  # C6, D6
+        alto = _track("alto", [_n(67, 0), _n(69, 480)])  # G4, A4
+        tenor = _track("tenor", [_n(60, 0), _n(62, 480)])  # C4, D4 (P5 with alto)
+        bass = _track("bass", [_n(48, 0), _n(50, 480)])  # C3, D3
+        result = ParallelPerfect().check(_score([soprano, alto, tenor, bass]))
+        inner_violations = [v for v in result.violations
+                           if {v.voice_a, v.voice_b} == {"alto", "tenor"}]
+        for v in inner_violations:
+            self.assertEqual(v.severity, Severity.ERROR)
+
+    def test_two_voice_always_outer(self):
+        """With only 2 voices, the pair is always outer -> CRITICAL."""
+        soprano = _track("soprano", [_n(67, 0), _n(69, 480)])
+        bass = _track("bass", [_n(60, 0), _n(62, 480)])
+        result = ParallelPerfect().check(_score([soprano, bass]))
+        for v in result.violations:
+            self.assertEqual(v.severity, Severity.CRITICAL)
+
+
+class TestCrossRelationPhraseBoundary(unittest.TestCase):
+    """Test phrase boundary exception for cross-relations."""
+
+    def test_phrase_boundary_info(self):
+        """Cross-relation across phrase boundary (>= 1 bar gap) -> INFO."""
+        # F#4 ends at tick 480, F4 starts at tick 2400 (gap = 1920 >= TICKS_PER_BAR)
+        soprano = _track("soprano", [_n(66, 0, 480)])  # F#4, ends at 480
+        alto = _track("alto", [_n(65, 2400)])  # F4, starts at 2400
+        result = CrossRelation(proximity_ticks=3000).check(_score([soprano, alto]))
+        self.assertFalse(result.passed)
+        self.assertEqual(result.violations[0].severity, Severity.INFO)
+
+    def test_close_proximity_warning(self):
+        """Cross-relation within same phrase (small gap) -> WARNING."""
+        soprano = _track("soprano", [_n(66, 0)])  # F#4
+        alto = _track("alto", [_n(65, 240)])  # F4
+        result = CrossRelation().check(_score([soprano, alto]))
+        self.assertFalse(result.passed)
+        self.assertEqual(result.violations[0].severity, Severity.WARNING)
+
+
 class TestRuleProtocol(unittest.TestCase):
     def test_all_rules_have_name_and_category(self):
         rules = [ParallelPerfect(), HiddenPerfect(), VoiceCrossing(),

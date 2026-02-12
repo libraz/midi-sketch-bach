@@ -7,7 +7,11 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from scripts.bach_analyzer.model import Note, NoteSource, Provenance, Score, Track
-from scripts.bach_analyzer.rules.independence import RhythmDiversity, VoiceIndependence
+from scripts.bach_analyzer.rules.independence import (
+    OnsetAsynchrony,
+    RhythmDiversity,
+    VoiceIndependence,
+)
 
 
 def _score(tracks):
@@ -79,6 +83,41 @@ class TestRhythmDiversityPedal(unittest.TestCase):
         notes = [_n(60 + i, i * 480, 480) for i in range(10)]
         result = RhythmDiversity(min_diversity=0.5).check(_score([_track("soprano", notes)]))
         self.assertFalse(result.passed)
+
+
+class TestOnsetAsynchrony(unittest.TestCase):
+    """Test onset synchrony detection."""
+
+    def test_fully_synchronous_warning(self):
+        """All voices attacking on every beat -> WARNING."""
+        soprano = _track("soprano", [
+            _n(72, 0, voice="soprano"), _n(74, 480, voice="soprano"),
+            _n(76, 960, voice="soprano"), _n(77, 1440, voice="soprano"),
+        ])
+        alto = _track("alto", [
+            _n(60, 0, voice="alto"), _n(62, 480, voice="alto"),
+            _n(64, 960, voice="alto"), _n(65, 1440, voice="alto"),
+        ])
+        result = OnsetAsynchrony(max_sync_ratio=0.8).check(_score([soprano, alto]))
+        self.assertFalse(result.passed)
+        self.assertEqual(len(result.violations), 1)
+
+    def test_staggered_onsets_pass(self):
+        """Voices with staggered onsets should pass."""
+        soprano = _track("soprano", [
+            _n(72, 0, voice="soprano"), _n(74, 960, voice="soprano"),
+        ])
+        alto = _track("alto", [
+            _n(60, 480, voice="alto"), _n(62, 1440, voice="alto"),
+        ])
+        result = OnsetAsynchrony(max_sync_ratio=0.8).check(_score([soprano, alto]))
+        self.assertTrue(result.passed)
+
+    def test_single_voice_passes(self):
+        """Single voice -> N/A, passes."""
+        soprano = _track("soprano", [_n(72, 0)])
+        result = OnsetAsynchrony().check(_score([soprano]))
+        self.assertTrue(result.passed)
 
 
 if __name__ == "__main__":

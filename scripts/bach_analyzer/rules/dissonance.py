@@ -17,6 +17,9 @@ from ..model import (
 )
 from .base import Category, RuleResult, Severity, Violation
 
+if False:  # TYPE_CHECKING
+    from ..form_profile import FormProfile
+
 
 def _notes_at_tick(all_notes: List[Note], tick: int, tolerance: int = 0) -> List[Note]:
     """Find notes sounding at a given tick (start_tick <= tick < end_tick)."""
@@ -56,6 +59,12 @@ class StrongBeatDissonance:
     @property
     def category(self) -> Category:
         return Category.DISSONANCE
+
+    def applies_to(self, profile: FormProfile) -> bool:
+        return profile.counterpoint_enabled
+
+    def configure(self, profile: FormProfile) -> None:
+        pass
 
     def _is_suspension(self, note: Note, partner: Note,
                        all_notes: List[Note], tick: int,
@@ -125,6 +134,23 @@ class StrongBeatDissonance:
                     return True
         return False
 
+    @staticmethod
+    def _is_diminished_seventh_context(sounding: List[Note]) -> bool:
+        """Check if sounding notes form a diminished 7th chord context.
+
+        A diminished 7th chord consists of notes spaced 3 semitones apart
+        (e.g., B-D-F-Ab = pitch classes 11,2,5,8). If the sounding notes
+        are a subset of such a chord, dissonances are structurally expected.
+        """
+        if len(sounding) < 3:
+            return False
+        pitch_classes = sorted(set(n.pitch % 12 for n in sounding))
+        for base in pitch_classes:
+            dim7 = {base, (base + 3) % 12, (base + 6) % 12, (base + 9) % 12}
+            if set(pitch_classes).issubset(dim7):
+                return True
+        return False
+
     def check(self, score: Score) -> RuleResult:
         violations: List[Violation] = []
         all_notes = score.all_notes
@@ -141,6 +167,8 @@ class StrongBeatDissonance:
             if len(sounding) < 2:
                 tick += TICKS_PER_BEAT
                 continue
+            # Check diminished 7th context once per beat.
+            dim7_context = self._is_diminished_seventh_context(sounding)
             # Check all pairs.
             for i in range(len(sounding)):
                 for j in range(i + 1, len(sounding)):
@@ -155,11 +183,13 @@ class StrongBeatDissonance:
                             continue
                         if self._is_suspension(nb, na, all_notes, tick, num_voices):
                             continue
+                        # Diminished 7th context: downgrade to INFO.
+                        sev = Severity.INFO if dim7_context else Severity.WARNING
                         violations.append(
                             Violation(
                                 rule_name=self.name,
                                 category=self.category,
-                                severity=Severity.WARNING,
+                                severity=sev,
                                 bar=tick // TICKS_PER_BAR + 1,
                                 beat=beat_in_bar,
                                 tick=tick,
@@ -197,6 +227,12 @@ class UnresolvedDissonance:
     @property
     def category(self) -> Category:
         return Category.DISSONANCE
+
+    def applies_to(self, profile: FormProfile) -> bool:
+        return profile.counterpoint_enabled
+
+    def configure(self, profile: FormProfile) -> None:
+        pass
 
     # Compound intervals (> octave) are perceptually less dissonant.
     _COMPOUND_THRESHOLD = 12

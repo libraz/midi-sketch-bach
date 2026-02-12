@@ -7,6 +7,9 @@ from typing import Dict, List
 from ..model import TICKS_PER_BAR, TICKS_PER_BEAT, Note, Score, pitch_to_name, sounding_note_at
 from .base import Category, RuleResult, Severity, Violation
 
+if False:  # TYPE_CHECKING
+    from ..form_profile import FormProfile
+
 
 # ---------------------------------------------------------------------------
 # WithinVoiceOverlap
@@ -76,18 +79,42 @@ class VoiceSpacing:
 
     _PEDAL_NAMES = {"pedal", "ped", "ped."}
     _PEDAL_CHANNEL = 3
+    _ORGAN_FORMS = {
+        "fugue", "prelude_and_fugue", "trio_sonata", "chorale_prelude",
+        "toccata_and_fugue", "passacaglia", "fantasia_and_fugue",
+    }
 
     def __init__(self, max_semitones: int = 12, pedal_max_semitones: int = 24):
         self.max_semitones = max_semitones
         self.pedal_max_semitones = pedal_max_semitones
 
-    def _is_pedal(self, name: str, track_list: list) -> bool:
-        """Check if a voice is a pedal voice by name or channel."""
+    def applies_to(self, profile: FormProfile) -> bool:
+        return (profile.counterpoint_enabled
+                and profile.expected_voices is not None
+                and profile.expected_voices[0] >= 2)
+
+    def configure(self, profile: FormProfile) -> None:
+        if profile.voice_spacing_max != 12:
+            self.max_semitones = profile.voice_spacing_max
+
+    def _is_pedal(self, name: str, track_list: list, score: Score) -> bool:
+        """Check if a voice is a pedal voice by name, channel, or position.
+
+        In organ forms with 3+ voices, the lowest voice (last track) functions
+        as a pedal voice even when not explicitly named "Pedal" or on channel 3.
+        BWV 578/543 etc. use the lowest voice for pedal keyboard patterns where
+        a tenor-pedal gap exceeding 12 semitones is idiomatic.
+        """
         if name.lower() in self._PEDAL_NAMES:
             return True
         for t in track_list:
             if t.name == name and t.channel == self._PEDAL_CHANNEL:
                 return True
+        # In organ forms with 3+ voices, treat the lowest voice as pedal.
+        if (score.form in self._ORGAN_FORMS
+                and len(track_list) >= 3
+                and track_list[-1].name == name):
+            return True
         return False
 
     @property
@@ -111,8 +138,8 @@ class VoiceSpacing:
             name_upper, notes_upper = track_order[i]
             name_lower, notes_lower = track_order[i + 1]
             # Use relaxed threshold if either voice is a pedal voice.
-            involves_pedal = (self._is_pedal(name_upper, score.tracks)
-                              or self._is_pedal(name_lower, score.tracks))
+            involves_pedal = (self._is_pedal(name_upper, score.tracks, score)
+                              or self._is_pedal(name_lower, score.tracks, score))
             threshold = self.pedal_max_semitones if involves_pedal else self.max_semitones
             beat = 0
             while beat < end_tick:
@@ -145,4 +172,81 @@ class VoiceSpacing:
         )
 
 
-ALL_OVERLAP_RULES = [WithinVoiceOverlap, VoiceSpacing]
+# ---------------------------------------------------------------------------
+# InstrumentRange
+# ---------------------------------------------------------------------------
+
+
+class InstrumentRange:
+    """Check that all notes fall within the instrument's physical range.
+
+    Range is defined by the form profile's instrument_range field.
+    Organ forms use channel-based ranges (Ch0-2: 36-96, Ch3: 24-50).
+    """
+
+    # Organ channel ranges (fallback when no profile instrument_range).
+    _ORGAN_RANGES = {
+        0: (36, 96),  # Manual I (Great)
+        1: (36, 96),  # Manual II (Swell)
+        2: (48, 96),  # Manual III (Positiv)
+        3: (24, 50),  # Pedal
+    }
+
+    def __init__(self):
+        self._profile_range: tuple | None = None
+        self._is_organ = False
+
+    @property
+    def name(self) -> str:
+        return "instrument_range"
+
+    @property
+    def category(self) -> Category:
+        return Category.OVERLAP
+
+    def applies_to(self, profile: FormProfile) -> bool:
+        return (profile.instrument_range is not None
+                or profile.style_family == "organ")
+
+    def configure(self, profile: FormProfile) -> None:
+        self._profile_range = profile.instrument_range
+        self._is_organ = profile.style_family == "organ"
+
+    def check(self, score: Score) -> RuleResult:
+        violations: list[Violation] = []
+
+        for track in score.tracks:
+            if self._is_organ:
+                lo, hi = self._ORGAN_RANGES.get(track.channel, (36, 96))
+            elif self._profile_range:
+                lo, hi = self._profile_range
+            else:
+                continue
+
+            for note in track.sorted_notes:
+                if note.pitch < lo or note.pitch > hi:
+                    violations.append(Violation(
+                        rule_name=self.name,
+                        category=self.category,
+                        severity=Severity.WARNING,
+                        bar=note.bar,
+                        beat=note.beat,
+                        tick=note.start_tick,
+                        voice_a=track.name,
+                        description=(
+                            f"{pitch_to_name(note.pitch)} (MIDI {note.pitch}) "
+                            f"outside range {pitch_to_name(lo)}-{pitch_to_name(hi)} "
+                            f"({lo}-{hi})"
+                        ),
+                        source=note.provenance.source if note.provenance else None,
+                    ))
+
+        return RuleResult(
+            rule_name=self.name,
+            category=self.category,
+            passed=len(violations) == 0,
+            violations=violations,
+        )
+
+
+ALL_OVERLAP_RULES = [WithinVoiceOverlap, VoiceSpacing, InstrumentRange]
