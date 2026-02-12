@@ -21,7 +21,7 @@ if False:  # TYPE_CHECKING
     from ..form_profile import FormProfile
 
 
-def _notes_at_tick(all_notes: List[Note], tick: int, tolerance: int = 0) -> List[Note]:
+def _notes_at_tick(all_notes: List[Note], tick: int) -> List[Note]:
     """Find notes sounding at a given tick (start_tick <= tick < end_tick)."""
     return [n for n in all_notes if n.start_tick <= tick < n.end_tick]
 

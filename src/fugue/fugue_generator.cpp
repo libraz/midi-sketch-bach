@@ -627,6 +627,7 @@ FugueResult generateFugue(const FugueConfig& config) {
   BachRuleEvaluator cp_rules(num_voices);
   cp_rules.setFreeCounterpoint(true);  // Allow weak-beat dissonance
   CollisionResolver cp_resolver;
+  cp_resolver.setHarmonicTimeline(&detailed_timeline);
 
   for (uint8_t v = 0; v < num_voices; ++v) {
     auto [lo, hi] = getFugueVoiceRange(v, num_voices);
@@ -937,6 +938,7 @@ FugueResult generateFugue(const FugueConfig& config) {
     BachRuleEvaluator post_rules(num_voices);
     post_rules.setFreeCounterpoint(true);
     CollisionResolver post_resolver;
+    post_resolver.setHarmonicTimeline(&detailed_timeline);
 
     for (uint8_t v = 0; v < num_voices; ++v) {
       auto [lo, hi] = getFugueVoiceRange(v, num_voices);

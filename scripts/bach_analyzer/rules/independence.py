@@ -8,7 +8,7 @@ from __future__ import annotations
 from collections import Counter
 from typing import Dict, List
 
-from ..model import Note, NoteSource, Score, TICKS_PER_BEAT
+from ..model import Note, NoteSource, Score, TICKS_PER_BEAT, is_pedal_voice
 from .base import Category, RuleResult, Severity, Violation
 
 if False:  # TYPE_CHECKING
@@ -142,17 +142,6 @@ class VoiceIndependence:
 # ---------------------------------------------------------------------------
 
 
-def _is_pedal_voice(voice_name: str, notes: List[Note]) -> bool:
-    """Detect pedal voice by name or provenance (>80% pedal/ground_bass sources)."""
-    name_lower = voice_name.lower()
-    if name_lower in ("pedal", "ped"):
-        return True
-    if not notes:
-        return False
-    pedal_sources = {NoteSource.PEDAL_POINT, NoteSource.GROUND_BASS}
-    pedal_count = sum(1 for n in notes
-                      if n.provenance and n.provenance.source in pedal_sources)
-    return pedal_count / len(notes) > 0.8
 
 
 class RhythmDiversity:
@@ -189,7 +178,7 @@ class RhythmDiversity:
             # Score: 1.0 if max_ratio <= 0.3, 0.0 if max_ratio = 1.0
             diversity = 1.0 - max(0.0, (max_ratio - 0.3) / 0.7)
             info_parts.append(f"{voice_name}: {diversity:.2f}")
-            threshold = self._PEDAL_MIN_DIVERSITY if _is_pedal_voice(voice_name, notes) else self.min_diversity
+            threshold = self._PEDAL_MIN_DIVERSITY if is_pedal_voice(voice_name, notes) else self.min_diversity
             if diversity < threshold:
                 violations.append(
                     Violation(

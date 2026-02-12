@@ -114,7 +114,8 @@ class ParallelPerfect:
                         dir_a = na.pitch - prev_na.pitch
                         dir_b = nb.pitch - prev_nb.pitch
                         if dir_a != 0 and dir_b != 0 and (dir_a > 0) == (dir_b > 0):
-                            iv_name = "P5" if iv1 == PERFECT_5TH else ("P8" if iv1 in (UNISON, OCTAVE) else f"P{iv1}")
+                            raw_diff = abs(na.pitch - nb.pitch)
+                            iv_name = "P5" if iv1 == PERFECT_5TH else ("P1" if raw_diff == 0 else "P8")
                             bar = beat // TICKS_PER_BAR + 1
                             beat_in_bar = (beat % TICKS_PER_BAR) // TICKS_PER_BEAT + 1
                             violations.append(

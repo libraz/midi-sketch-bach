@@ -10,6 +10,7 @@
 
 #include "core/basic_types.h"
 #include "core/note_source.h"
+#include "harmony/harmonic_timeline.h"
 
 namespace bach {
 
@@ -198,10 +199,22 @@ class CollisionResolver {
   /// @param ticks Sorted vector of cadence tick positions.
   void setCadenceTicks(const std::vector<Tick>& ticks);
 
+  /// @brief Set the harmonic timeline for chord-tone-aware resolution.
+  ///
+  /// When set, the chord_tone strategy uses actual chord tones from the
+  /// timeline instead of generic consonant intervals, and the step_shift
+  /// strategy applies chord-tone bonuses on strong beats.
+  ///
+  /// The timeline must outlive the resolver.
+  ///
+  /// @param timeline Pointer to harmonic timeline (nullptr for legacy behavior).
+  void setHarmonicTimeline(const HarmonicTimeline* timeline);
+
  private:
   int max_search_range_ = 12;
   int range_tolerance_ = 3;
   std::vector<Tick> cadence_ticks_;
+  const HarmonicTimeline* harmonic_timeline_ = nullptr;
 
   /// @brief Attempt a specific resolution strategy.
   PlacementResult tryStrategy(const CounterpointState& state,

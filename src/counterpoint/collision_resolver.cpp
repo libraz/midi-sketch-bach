@@ -15,6 +15,8 @@
 #include "counterpoint/i_rule_evaluator.h"
 #include "counterpoint/melodic_context.h"
 #include "counterpoint/species_rules.h"
+#include "harmony/chord_tone_utils.h"
+#include "harmony/chord_types.h"
 
 namespace bach {
 
@@ -34,6 +36,12 @@ static bool isNearCadence(Tick tick, const std::vector<Tick>& cadence_ticks) {
     }
   }
   return false;
+}
+
+/// @brief Check if a tick falls on a strong beat (beats 0 or 2 in 4/4).
+static bool isStrongBeat(Tick tick) {
+  uint8_t beat = beatInBar(tick);
+  return beat == 0 || beat == 2;
 }
 
 /// @brief Compute cross-relation penalty for a candidate pitch against other voices.
@@ -349,51 +357,125 @@ PlacementResult CollisionResolver::tryStrategy(
   }
 
   if (strategy == "chord_tone") {
-    // Try consonant intervals with the lowest sounding voice.
-    // Check pitches at consonant intervals from desired.
-    // Build consonant offsets from canonical consonant intervals.
-    std::vector<int> consonant_offsets;
-    for (int ivl : interval_util::kConsonantIntervals) {
-      consonant_offsets.push_back(ivl);
-      if (ivl != 0) consonant_offsets.push_back(-ivl);
-    }
     float best_penalty = 2.0f;
 
-    for (int offset : consonant_offsets) {
-      int candidate = static_cast<int>(desired_pitch) + offset;
-      if (candidate < 0 || candidate > 127) continue;
+    // Helper lambda: evaluate a candidate pitch and update best result.
+    auto evaluateCandidate = [&](uint8_t cand_pitch, float base_penalty) {
+      if (!isSafeToPlace(state, rules, voice_id, cand_pitch, tick,
+                         duration, next_pitch))
+        return;
 
-      auto cand_pitch = static_cast<uint8_t>(candidate);
-      if (isSafeToPlace(state, rules, voice_id, cand_pitch, tick,
-                        duration, next_pitch)) {
-        float penalty = static_cast<float>(std::abs(offset)) / 12.0f *
-                        0.3f;
-        penalty += crossRelationPenalty(state, voice_id, cand_pitch, tick);
+      float penalty = base_penalty;
+      penalty += crossRelationPenalty(state, voice_id, cand_pitch, tick);
 
-        // Voice spacing penalty: penalize wide gaps between adjacent manual voices.
-        for (VoiceId adj_v = 0; adj_v < state.voiceCount(); ++adj_v) {
-          if (adj_v == voice_id) continue;
-          int vdist = std::abs(static_cast<int>(voice_id) - static_cast<int>(adj_v));
-          if (vdist != 1) continue;  // Adjacent voices only.
-          // Skip pedal voice (lowest) for spacing checks.
-          if (adj_v == state.voiceCount() - 1 && state.voiceCount() >= 3) continue;
-          if (voice_id == state.voiceCount() - 1 && state.voiceCount() >= 3) continue;
-          const NoteEvent* adj_note = state.getLastNote(adj_v);
-          if (!adj_note) continue;
-          int spacing = absoluteInterval(cand_pitch, adj_note->pitch);
-          if (spacing > 12) {
-            penalty += static_cast<float>(spacing - 12) / 7.0f * 0.3f;
-          }
+      // Voice spacing penalty: penalize wide gaps between adjacent manual voices.
+      for (VoiceId adj_v = 0; adj_v < state.voiceCount(); ++adj_v) {
+        if (adj_v == voice_id) continue;
+        int vdist = std::abs(static_cast<int>(voice_id) - static_cast<int>(adj_v));
+        if (vdist != 1) continue;
+        if (adj_v == state.voiceCount() - 1 && state.voiceCount() >= 3) continue;
+        if (voice_id == state.voiceCount() - 1 && state.voiceCount() >= 3) continue;
+        const NoteEvent* adj_note = state.getNoteAt(adj_v, tick);
+        if (!adj_note) adj_note = state.getLastNote(adj_v);
+        if (!adj_note) continue;
+        int spacing = absoluteInterval(cand_pitch, adj_note->pitch);
+        if (spacing > 12) {
+          penalty += static_cast<float>(spacing - 12) / 7.0f * 0.3f;
         }
+      }
 
-        if (penalty < best_penalty) {
-          best_penalty = penalty;
-          result.pitch = cand_pitch;
-          result.penalty = penalty;
-          result.accepted = true;
+      if (penalty < best_penalty) {
+        best_penalty = penalty;
+        result.pitch = cand_pitch;
+        result.penalty = penalty;
+        result.accepted = true;
+      }
+    };
+
+    if (harmonic_timeline_) {
+      // Chord-tone-aware strategy: use actual chord tones from the timeline.
+      const HarmonicEvent& event = harmonic_timeline_->getAt(tick);
+
+      // 1. Try nearestChordTone(desired_pitch) -- minimal displacement.
+      uint8_t nearest = nearestChordTone(desired_pitch, event);
+      float dist_penalty = static_cast<float>(
+          std::abs(static_cast<int>(nearest) - static_cast<int>(desired_pitch))) /
+          12.0f * 0.3f;
+      evaluateCandidate(nearest, dist_penalty);
+
+      // 2. Try all chord tones across octaves (closest to desired_pitch first).
+      int root_pc = getPitchClass(event.chord.root_pitch);
+      // Build chord pitch classes (root, 3rd, 5th, optional 7th).
+      std::vector<int> chord_pcs;
+      chord_pcs.push_back(root_pc);
+      // Use isChordTone to determine the full set, but build it from root.
+      for (int i = 1; i < 12; ++i) {
+        int pc = (root_pc + i) % 12;
+        // Build a test pitch in octave 5 to check.
+        uint8_t test_pitch = static_cast<uint8_t>(60 + pc);
+        if (isChordTone(test_pitch, event)) {
+          chord_pcs.push_back(pc);
+        }
+      }
+
+      // Generate candidates sorted by distance to desired_pitch.
+      struct ChordCandidate {
+        uint8_t pitch;
+        int distance;
+      };
+      std::vector<ChordCandidate> candidates;
+      int base_octave = (static_cast<int>(desired_pitch) / 12) * 12;
+      for (int pc : chord_pcs) {
+        for (int oct_offset = -24; oct_offset <= 24; oct_offset += 12) {
+          int cand = base_octave + pc + oct_offset;
+          if (cand < 0 || cand > 127) continue;
+          int dist = std::abs(cand - static_cast<int>(desired_pitch));
+          candidates.push_back({static_cast<uint8_t>(cand), dist});
+        }
+      }
+      std::sort(candidates.begin(), candidates.end(),
+                [](const ChordCandidate& a, const ChordCandidate& b) {
+                  return a.distance < b.distance;
+                });
+
+      for (const auto& c : candidates) {
+        float penalty = static_cast<float>(c.distance) / 12.0f * 0.3f;
+        evaluateCandidate(c.pitch, penalty);
+      }
+
+      // 3. Try diatonic tones (non-chord but scale tones).
+      if (!result.accepted) {
+        for (int delta = 1; delta <= 7; ++delta) {
+          for (int sign = -1; sign <= 1; sign += 2) {
+            int cand = static_cast<int>(desired_pitch) + delta * sign;
+            if (cand < 0 || cand > 127) continue;
+            if (isDiatonicInKey(cand, event.key, event.is_minor) &&
+                !isChordTone(static_cast<uint8_t>(cand), event)) {
+              float penalty = static_cast<float>(delta) / 12.0f * 0.3f + 0.1f;
+              evaluateCandidate(static_cast<uint8_t>(cand), penalty);
+            }
+          }
+          if (result.accepted) break;
         }
       }
     }
+
+    // 4. Fallback: consonant intervals (legacy behavior, or if timeline not set).
+    if (!result.accepted) {
+      std::vector<int> consonant_offsets;
+      for (int ivl : interval_util::kConsonantIntervals) {
+        consonant_offsets.push_back(ivl);
+        if (ivl != 0) consonant_offsets.push_back(-ivl);
+      }
+      for (int offset : consonant_offsets) {
+        int candidate = static_cast<int>(desired_pitch) + offset;
+        if (candidate < 0 || candidate > 127) continue;
+        auto cand_pitch = static_cast<uint8_t>(candidate);
+        float penalty = static_cast<float>(std::abs(offset)) / 12.0f * 0.3f;
+        evaluateCandidate(cand_pitch, penalty);
+      }
+    }
+
     return result;
   }
 
@@ -410,6 +492,13 @@ PlacementResult CollisionResolver::tryStrategy(
       prev_pitch_class = getPitchClass(prev_note->pitch);
     }
 
+    // Harmonic context for chord-tone and diatonic awareness.
+    bool strong_beat = isStrongBeat(tick);
+    const HarmonicEvent* h_event = nullptr;
+    if (harmonic_timeline_) {
+      h_event = &harmonic_timeline_->getAt(tick);
+    }
+
     for (int delta = 1; delta <= max_search_range_; ++delta) {
       // Try both directions: up and down.
       for (int sign = -1; sign <= 1; sign += 2) {
@@ -423,6 +512,18 @@ PlacementResult CollisionResolver::tryStrategy(
 
           // Apply cross-relation penalty.
           penalty += crossRelationPenalty(state, voice_id, cand_pitch, tick);
+
+          // Chord-tone and diatonic penalties when harmonic context is available.
+          if (h_event) {
+            if (strong_beat && isChordTone(cand_pitch, *h_event)) {
+              // Strong beat chord tone bonus.
+              penalty -= 0.3f;
+            }
+            if (!isDiatonicInKey(cand_pitch, h_event->key, h_event->is_minor)) {
+              // Non-diatonic penalty: stronger on strong beats.
+              penalty += strong_beat ? 0.3f : 0.1f;
+            }
+          }
 
           // Apply melodic quality penalty via MelodicContext scoring.
           if (prev_note) {
@@ -439,7 +540,6 @@ PlacementResult CollisionResolver::tryStrategy(
               if (cand_interval >= 1 && cand_interval <= 2 &&
                   cand_dir != mel_ctx.prev_direction) {
                 penalty -= 0.25f;
-                if (penalty < 0.0f) penalty = 0.0f;
               }
             }
 
@@ -453,7 +553,8 @@ PlacementResult CollisionResolver::tryStrategy(
                 continue;
               if (voice_id == state.voiceCount() - 1 && state.voiceCount() >= 3)
                 continue;
-              const NoteEvent* adj_note = state.getLastNote(adj_v);
+              const NoteEvent* adj_note = state.getNoteAt(adj_v, tick);
+              if (!adj_note) adj_note = state.getLastNote(adj_v);
               if (!adj_note) continue;
               int spacing = absoluteInterval(cand_pitch, adj_note->pitch);
               if (spacing > 12) {
@@ -461,6 +562,9 @@ PlacementResult CollisionResolver::tryStrategy(
               }
             }
           }
+
+          // Clamp penalty floor.
+          if (penalty < 0.0f) penalty = 0.0f;
 
           // Apply cadence voice-leading bonus.
           if (near_cadence && prev_note) {
@@ -888,6 +992,10 @@ void CollisionResolver::setRangeTolerance(int semitones) {
 
 void CollisionResolver::setCadenceTicks(const std::vector<Tick>& ticks) {
   cadence_ticks_ = ticks;
+}
+
+void CollisionResolver::setHarmonicTimeline(const HarmonicTimeline* timeline) {
+  harmonic_timeline_ = timeline;
 }
 
 }  // namespace bach

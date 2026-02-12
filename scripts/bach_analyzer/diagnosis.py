@@ -26,6 +26,7 @@ SOURCE_FILE_MAP: Dict[NoteSource, str] = {
     NoteSource.CHROMATIC_PASSING: "src/counterpoint/",
     NoteSource.FALSE_ENTRY: "src/fugue/",
     NoteSource.CODA: "src/fugue/",
+    NoteSource.SEQUENCE_NOTE: "src/fugue/",
 }
 
 

@@ -339,3 +339,16 @@ def sounding_note_at(sorted_notes: List[Note], tick: int) -> Optional[Note]:
         if n.start_tick <= tick < n.end_tick:
             return n
     return None
+
+
+def is_pedal_voice(voice_name: str, notes: List[Note]) -> bool:
+    """Detect pedal voice by name or provenance (>80% pedal/ground_bass sources)."""
+    name_lower = voice_name.lower()
+    if name_lower in ("pedal", "ped"):
+        return True
+    if not notes:
+        return False
+    pedal_sources = {NoteSource.PEDAL_POINT, NoteSource.GROUND_BASS}
+    pedal_count = sum(1 for n in notes
+                      if n.provenance and n.provenance.source in pedal_sources)
+    return pedal_count / len(notes) > 0.8

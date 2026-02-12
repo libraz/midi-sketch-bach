@@ -509,6 +509,7 @@ ChoralePreludeResult generateChoralePrelude(const ChoralePreludeConfig& config) 
       BachRuleEvaluator cp_rules(kChoraleVoices);
       cp_rules.setFreeCounterpoint(true);
       CollisionResolver cp_resolver;
+      cp_resolver.setHarmonicTimeline(&timeline);
       CounterpointState cp_state;
       cp_state.setKey(config.key.tonic);
       for (uint8_t v = 0; v < kChoraleVoices; ++v) {

@@ -1053,7 +1053,7 @@ ToccataResult generateDramaticusToccata(const ToccataConfig& config) {
     }
 
     all_notes = toccata_internal::coordinateVoices(
-        std::move(all_notes), num_voices, config.key.tonic);
+        std::move(all_notes), num_voices, config.key.tonic, &timeline);
 
     PostValidateStats stats;
     all_notes = postValidateNotes(

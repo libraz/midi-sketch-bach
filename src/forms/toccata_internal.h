@@ -237,10 +237,12 @@ inline void populateLegacyFields(ToccataResult& result) {
 /// @param tonic Key tonic for counterpoint state.
 /// @return Coordinated notes with dissonances resolved.
 inline std::vector<NoteEvent> coordinateVoices(
-    std::vector<NoteEvent> all_notes, uint8_t num_voices, Key tonic) {
+    std::vector<NoteEvent> all_notes, uint8_t num_voices, Key tonic,
+    const HarmonicTimeline* timeline = nullptr) {
   BachRuleEvaluator cp_rules(num_voices);
   cp_rules.setFreeCounterpoint(true);
   CollisionResolver cp_resolver;
+  cp_resolver.setHarmonicTimeline(timeline);
   CounterpointState cp_state;
   cp_state.setKey(tonic);
   for (uint8_t v = 0; v < num_voices; ++v) {

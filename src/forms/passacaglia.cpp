@@ -867,6 +867,7 @@ PassacagliaResult generatePassacaglia(const PassacagliaConfig& config) {
   BachRuleEvaluator cp_rules(num_voices);
   cp_rules.setFreeCounterpoint(true);  // Allow weak-beat non-harmonic tones.
   CollisionResolver cp_resolver;
+  cp_resolver.setHarmonicTimeline(&timeline);
 
   for (int var_idx = 0; var_idx < config.num_variations; ++var_idx) {
     Tick var_start = static_cast<Tick>(var_idx) * variation_duration;

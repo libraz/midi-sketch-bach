@@ -465,7 +465,7 @@ ToccataResult generateConcertatoToccata(const ToccataConfig& config) {
       }
     }
     all_notes = coordinateVoices(
-        std::move(all_notes), num_voices, config.key.tonic);
+        std::move(all_notes), num_voices, config.key.tonic, &timeline);
 
     all_notes = postValidateNotes(
         std::move(all_notes), num_voices, config.key, voice_ranges);

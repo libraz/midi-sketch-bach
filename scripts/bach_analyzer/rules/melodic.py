@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from typing import List
 
-from ..model import Note, NoteSource, Score, TICKS_PER_BAR, pitch_to_name
+from ..model import Note, NoteSource, Score, TICKS_PER_BAR, is_pedal_voice, pitch_to_name
 from .base import Category, RuleResult, Severity, Violation
 
 if False:  # TYPE_CHECKING
@@ -256,17 +256,6 @@ class LeapResolution:
 # ---------------------------------------------------------------------------
 
 
-def _is_pedal_voice(voice_name: str, notes: list) -> bool:
-    """Detect pedal voice by name or provenance (>80% pedal/ground_bass sources)."""
-    name_lower = voice_name.lower()
-    if name_lower in ("pedal", "ped"):
-        return True
-    if not notes:
-        return False
-    pedal_sources = {NoteSource.PEDAL_POINT, NoteSource.GROUND_BASS}
-    pedal_count = sum(1 for n in notes
-                      if n.provenance and n.provenance.source in pedal_sources)
-    return pedal_count / len(notes) > 0.8
 
 
 class StepwiseMotionRatio:
@@ -304,7 +293,7 @@ class StepwiseMotionRatio:
             total = len(sorted_notes) - 1
             ratio = steps / total if total > 0 else 1.0
             info_parts.append(f"{voice_name}: {ratio:.2f}")
-            threshold = self._PEDAL_MIN_RATIO if _is_pedal_voice(voice_name, sorted_notes) else self.min_ratio
+            threshold = self._PEDAL_MIN_RATIO if is_pedal_voice(voice_name, sorted_notes) else self.min_ratio
             if ratio < threshold:
                 violations.append(
                     Violation(
@@ -312,7 +301,7 @@ class StepwiseMotionRatio:
                         category=self.category,
                         severity=Severity.INFO,
                         voice_a=voice_name,
-                        description=f"stepwise ratio {ratio:.2f} < {self.min_ratio}",
+                        description=f"stepwise ratio {ratio:.2f} < {threshold}",
                     )
                 )
         return RuleResult(
