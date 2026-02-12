@@ -85,10 +85,10 @@ float scoreWindow(const std::vector<NoteEvent>& notes, size_t start, size_t leng
   score += 0.2f * proximity;
 
   // Tonal stability: contains root pitch class (first note's pitch class).
-  uint8_t root_pc = notes[0].pitch % 12;
+  int root_pc = getPitchClass(notes[0].pitch);
   bool has_root = false;
   for (size_t idx = start; idx < start + length; ++idx) {
-    if (notes[idx].pitch % 12 == root_pc) {
+    if (getPitchClass(notes[idx].pitch) == root_pc) {
       has_root = true;
       break;
     }

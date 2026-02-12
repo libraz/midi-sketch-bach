@@ -4,6 +4,7 @@
 
 #include <cstdlib>
 
+#include "core/basic_types.h"
 #include "core/pitch_utils.h"
 #include "harmony/chord_types.h"
 
@@ -68,6 +69,26 @@ uint8_t nearestChordTone(uint8_t pitch, const HarmonicEvent& event) {
   }
 
   return static_cast<uint8_t>(best_pitch);
+}
+
+uint8_t nearestChordTone(uint8_t target,
+                         const std::vector<uint8_t>& chord_pitches) {
+  if (chord_pitches.empty()) {
+    return target;
+  }
+
+  uint8_t best = chord_pitches[0];
+  int best_dist = absoluteInterval(target, best);
+
+  for (size_t idx = 1; idx < chord_pitches.size(); ++idx) {
+    int dist = absoluteInterval(target, chord_pitches[idx]);
+    if (dist < best_dist) {
+      best_dist = dist;
+      best = chord_pitches[idx];
+    }
+  }
+
+  return best;
 }
 
 }  // namespace bach

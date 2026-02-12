@@ -126,7 +126,7 @@ Answer generateTonalAnswer(const Subject& subject, Key dominant_key) {
   answer.type = AnswerType::Tonal;
   answer.key = dominant_key;
 
-  int tonic_class = static_cast<int>(subject.key) % 12;
+  int tonic_class = getPitchClass(static_cast<uint8_t>(subject.key));
   int dominant_class = (tonic_class + interval::kPerfect5th) % 12;
 
   size_t mutation_end = findMutationPoint(subject, tonic_class, dominant_class);
@@ -150,7 +150,7 @@ Answer generateTonalAnswer(const Subject& subject, Key dominant_key) {
 AnswerType autoDetectAnswerType(const Subject& subject) {
   if (subject.noteCount() < 2) return AnswerType::Real;
 
-  int tonic_class = static_cast<int>(subject.key) % 12;
+  int tonic_class = getPitchClass(static_cast<uint8_t>(subject.key));
   int dominant_class = (tonic_class + interval::kPerfect5th) % 12;
 
   // Check the first few notes for a tonic-dominant leap.
@@ -203,7 +203,7 @@ Answer generateAnswer(const Subject& subject, AnswerType type) {
     int max_leap = maxLeapForCharacter(subject.character);
 
     // Target: dominant of the answer key (tonic of the subject key).
-    int target_pc = static_cast<int>(subject.key) % 12;
+    int target_pc = getPitchClass(static_cast<uint8_t>(subject.key));
     ScaleType scale =
         subject.is_minor ? ScaleType::HarmonicMinor : ScaleType::Major;
 

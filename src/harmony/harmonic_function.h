@@ -30,6 +30,7 @@ HarmonicFunction classifyFunction(ChordDegree degree, bool is_minor);
 /// @return Null-terminated string representation.
 const char* harmonicFunctionToString(HarmonicFunction func);
 
+/// @note Integration point: use in HarmonicTimeline to enrich chord progressions with secondary dominants.
 /// @brief Create a secondary dominant chord (V/x).
 ///
 /// Generates the dominant chord that would resolve to the target degree.

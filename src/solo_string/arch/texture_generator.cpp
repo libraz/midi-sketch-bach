@@ -10,6 +10,7 @@
 #include "core/pitch_utils.h"
 #include "core/rng_util.h"
 #include "core/scale.h"
+#include "harmony/chord_tone_utils.h"
 #include "harmony/chord_types.h"
 #include "harmony/harmonic_event.h"
 #include "harmony/scale_degree_utils.h"
@@ -58,9 +59,6 @@ namespace {
 
 /// @brief Duration of an 8th note in ticks.
 constexpr Tick kEighthDuration = kTicksPerBeat / 2;  // 240
-
-/// @brief Duration of a 16th note in ticks.
-constexpr Tick kSixteenthDuration = kTicksPerBeat / 4;  // 120
 
 /// @brief Duration of a chord grace note in ticks (used in FullChords).
 constexpr Tick kGraceNoteDuration = 60;
@@ -114,7 +112,7 @@ std::vector<uint8_t> chordToPitches(const Chord& chord, bool is_minor,
     int raw_pitch = static_cast<int>(chord.root_pitch) + offset;
 
     // Octave-adjust to fit register.
-    int pitch_class = ((raw_pitch % 12) + 12) % 12;
+    int pitch_class = getPitchClassSigned(raw_pitch);
     int best_pitch = -1;
     int best_distance = 999;
 
@@ -207,28 +205,6 @@ std::vector<uint8_t> getScalePitches(Key key, bool is_minor,
   return pitches;
 }
 
-/// @brief Select the chord tone nearest to a target pitch from a set of chord tones.
-/// @param target Target MIDI pitch.
-/// @param chord_pitches Available chord tones.
-/// @return Nearest chord tone, or target if chord_pitches is empty.
-uint8_t nearestChordTone(uint8_t target, const std::vector<uint8_t>& chord_pitches) {
-  if (chord_pitches.empty()) {
-    return target;
-  }
-
-  uint8_t best = chord_pitches[0];
-  int best_dist = absoluteInterval(target, best);
-
-  for (size_t idx = 1; idx < chord_pitches.size(); ++idx) {
-    int dist = absoluteInterval(target, chord_pitches[idx]);
-    if (dist < best_dist) {
-      best_dist = dist;
-      best = chord_pitches[idx];
-    }
-  }
-
-  return best;
-}
 
 /// @brief Compute velocity with beat-position-aware accents.
 /// @param tick_in_bar Position within the bar (0 to kTicksPerBar-1).

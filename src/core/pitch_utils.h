@@ -146,6 +146,17 @@ inline int getPitchClass(uint8_t pitch) {
   return static_cast<int>(pitch) % 12;
 }
 
+/// @brief Extract pitch class (0-11) from a signed integer pitch value.
+///
+/// Handles negative values correctly (e.g., -1 → 11).
+/// Use for intermediate computation results that may be negative.
+///
+/// @param pitch Signed pitch value (may be negative).
+/// @return Pitch class in [0, 11].
+inline int getPitchClassSigned(int pitch) {
+  return ((pitch % 12) + 12) % 12;
+}
+
 /// @brief Get octave number from MIDI note number.
 /// @param pitch MIDI note number.
 /// @return Octave number (C4 = octave 4, MIDI 60).
@@ -157,7 +168,7 @@ inline int getOctave(uint8_t pitch) {
 /// @param pitch MIDI note number.
 /// @return True if the pitch class is in {C, D, E, F, G, A, B}.
 inline bool isDiatonic(int pitch) {
-  int pitch_class = ((pitch % 12) + 12) % 12;  // Handle negative pitches
+  int pitch_class = getPitchClassSigned(pitch);
   return kDiatonicPitchClass[pitch_class];
 }
 

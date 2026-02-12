@@ -252,6 +252,38 @@ TEST(NoteEventTest, SizeIs16Bytes) {
   EXPECT_EQ(sizeof(NoteEvent), 16u);
 }
 
+// ---------------------------------------------------------------------------
+// MetricLevel: metric hierarchy classification
+// ---------------------------------------------------------------------------
+
+TEST(MetricLevelTest, BarStartIsBar) {
+  EXPECT_EQ(metricLevel(0), MetricLevel::Bar);
+  EXPECT_EQ(metricLevel(kTicksPerBar), MetricLevel::Bar);
+  EXPECT_EQ(metricLevel(kTicksPerBar * 3), MetricLevel::Bar);
+}
+
+TEST(MetricLevelTest, BeatStartIsBeat) {
+  EXPECT_EQ(metricLevel(kTicksPerBeat), MetricLevel::Beat);
+  EXPECT_EQ(metricLevel(kTicksPerBeat * 2), MetricLevel::Beat);
+  EXPECT_EQ(metricLevel(kTicksPerBeat * 3), MetricLevel::Beat);
+  // Beat 4 of bar 1 (tick 1920 + 3*480 = 3360).
+  EXPECT_EQ(metricLevel(kTicksPerBar + kTicksPerBeat * 3), MetricLevel::Beat);
+}
+
+TEST(MetricLevelTest, OffbeatIsOffbeat) {
+  EXPECT_EQ(metricLevel(1), MetricLevel::Offbeat);
+  EXPECT_EQ(metricLevel(240), MetricLevel::Offbeat);   // Eighth note.
+  EXPECT_EQ(metricLevel(120), MetricLevel::Offbeat);   // Sixteenth note.
+  EXPECT_EQ(metricLevel(kTicksPerBeat + 240), MetricLevel::Offbeat);
+}
+
+TEST(MetricLevelTest, OrderingBarGreaterThanBeatGreaterThanOffbeat) {
+  EXPECT_GT(static_cast<uint8_t>(MetricLevel::Bar),
+            static_cast<uint8_t>(MetricLevel::Beat));
+  EXPECT_GT(static_cast<uint8_t>(MetricLevel::Beat),
+            static_cast<uint8_t>(MetricLevel::Offbeat));
+}
+
 TEST(NoteEventTest, ModifiedByAccumulatesFlags) {
   NoteEvent note;
   note.modified_by |= static_cast<uint8_t>(NoteModifiedBy::ParallelRepair);

@@ -100,7 +100,7 @@ MelodicContext buildMelodicContextFromState(const CounterpointState& state, Voic
     ctx.leap_needs_resolution = (absoluteInterval(iter->pitch, iter2->pitch) >= 5);
   }
   // Leading tone detection: pitch class == (key + 11) % 12
-  uint8_t prev_pc = ctx.prev_pitches[0] % 12;
+  uint8_t prev_pc = getPitchClass(ctx.prev_pitches[0]);
   ctx.is_leading_tone = (prev_pc == (static_cast<uint8_t>(state.getKey()) + 11) % 12);
   return ctx;
 }

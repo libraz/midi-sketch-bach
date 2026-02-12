@@ -162,7 +162,8 @@ bool CollisionResolver::isSafeToPlace(const CounterpointState& state,
                                       const IRuleEvaluator& rules,
                                       VoiceId voice_id, uint8_t pitch,
                                       Tick tick, Tick /*duration*/,
-                                      uint8_t next_pitch) const {
+                                      uint8_t next_pitch,
+                                      int adjacent_spacing_limit) const {
   const auto& voices = state.getActiveVoices();
 
   for (VoiceId other : voices) {
@@ -301,7 +302,9 @@ bool CollisionResolver::isSafeToPlace(const CounterpointState& state,
 
   // Maximum spacing for adjacent manual voices (all evaluators).
   // Does not apply to pedal (last voice) since pedal-manual gap is naturally
-  // wide in organ writing. Threshold: octave + P5 = 19 semitones.
+  // wide in organ writing. Default threshold: octave + M2 = 14 semitones for
+  // adjacent voices. Immutable/Structural notes use 19 (octave + P5) to avoid
+  // dropping structural material.
   {
     VoiceId bass_voice = voices.empty() ? 0 : voices.back();
     for (VoiceId other : voices) {
@@ -314,7 +317,7 @@ bool CollisionResolver::isSafeToPlace(const CounterpointState& state,
       const NoteEvent* adj_note = state.getNoteAt(other, tick);
       if (!adj_note) continue;
       int pitch_dist = absoluteInterval(pitch, adj_note->pitch);
-      if (pitch_dist > 19) return false;
+      if (pitch_dist > adjacent_spacing_limit) return false;
     }
   }
 
@@ -726,6 +729,10 @@ PlacementResult CollisionResolver::findSafePitch(
       break;
   }
 
+  // Immutable/Structural notes use relaxed adjacent spacing (19 semitones)
+  // to prevent dropping structural material like fugue subjects.
+  int spacing_limit = (level != ProtectionLevel::Flexible) ? 19 : 14;
+
   for (int idx = 0; idx < list.count; ++idx) {
     // The suspension strategy uses a dedicated method.
     if (std::string(list.strategies[idx]) == "suspension") {
@@ -735,10 +742,47 @@ PlacementResult CollisionResolver::findSafePitch(
       continue;
     }
 
+    // For "original" strategy with Immutable/Structural sources, call
+    // isSafeToPlace directly with relaxed spacing to avoid note drops.
+    if (std::string(list.strategies[idx]) == "original" &&
+        level != ProtectionLevel::Flexible) {
+      if (isSafeToPlace(state, rules, voice_id, desired_pitch, tick,
+                         duration, next_pitch, spacing_limit)) {
+        PlacementResult result;
+        result.pitch = desired_pitch;
+        result.penalty = 0.0f;
+        result.strategy = "original";
+        result.accepted = true;
+        return result;
+      }
+      continue;
+    }
+
     PlacementResult result = tryStrategy(state, rules, voice_id,
                                          desired_pitch, tick, duration,
                                          list.strategies[idx], next_pitch);
-    if (result.accepted) return result;
+    if (result.accepted) {
+      // Repetition gate: reject "original" if it would create a run of 3+
+      // same-pitch notes for FreeCounterpoint. Forces cascade fallthrough to
+      // chord_tone / step_shift for a melodic alternative.
+      if (std::string(list.strategies[idx]) == "original" &&
+          source == BachNoteSource::FreeCounterpoint) {
+        const auto& voice_notes = state.getVoiceNotes(voice_id);
+        constexpr Tick kRunGapThreshold = 2 * kTicksPerBar;
+        int run_length = 0;
+        Tick ref_tick = tick;
+        for (auto it = voice_notes.rbegin(); it != voice_notes.rend(); ++it) {
+          if (it->pitch != result.pitch) break;
+          Tick note_end = it->start_tick + it->duration;
+          if (ref_tick > note_end && (ref_tick - note_end) > kRunGapThreshold)
+            break;
+          ++run_length;
+          ref_tick = it->start_tick;
+        }
+        if (run_length >= 2) continue;  // Would be 3+ same pitch; reject.
+      }
+      return result;
+    }
   }
 
   PlacementResult rest;

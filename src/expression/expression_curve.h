@@ -21,6 +21,7 @@ struct ExpressionEvent {
   uint8_t value = 100;  ///< CC#11 value (0-127)
 };
 
+/// @note Integration point: wire into MidiWriter to output CC#11 expression data.
 /// @brief Generate a CC#11 expression curve from phrase boundaries.
 ///
 /// Creates a smooth expression curve that shapes dynamics within each phrase:

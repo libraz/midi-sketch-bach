@@ -139,7 +139,7 @@ float computeGroundBassIntegrity(const std::vector<NoteEvent>& all_notes,
     }
 
     // Verify the extracted bass against the original.
-    if (!ground_bass.verifyIntegrity(extracted_bass)) {
+    if (ground_bass.verifyIntegrityReport(extracted_bass).hasCritical()) {
       return 0.0f;
     }
   }

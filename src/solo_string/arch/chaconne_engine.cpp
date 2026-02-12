@@ -334,9 +334,10 @@ ChaconneResult generateChaconne(const ChaconneConfig& config) {
     variations = createStandardVariationPlan(config.key, rng);
   }
 
-  if (!validateVariationPlan(variations)) {
+  auto plan_report = validateVariationPlanReport(variations);
+  if (plan_report.hasCritical()) {
     result.success = false;
-    result.error_message = "Invalid variation plan: role order or type constraints violated";
+    result.error_message = "Invalid variation plan: " + plan_report.toJson();
     return result;
   }
 
@@ -463,11 +464,11 @@ ChaconneResult generateChaconne(const ChaconneConfig& config) {
     std::vector<NoteEvent> var_bass(extracted_bass.begin() + static_cast<long>(slice_start),
                                     extracted_bass.begin() + static_cast<long>(slice_end));
 
-    if (!ground_bass.verifyIntegrity(var_bass)) {
+    auto integrity_report = ground_bass.verifyIntegrityReport(var_bass);
+    if (integrity_report.hasCritical()) {
       result.success = false;
-      result.error_message =
-          "Ground bass integrity check failed: bass was modified in variation " +
-          std::to_string(var_idx) + " (STRUCTURAL_FAIL)";
+      result.error_message = "Ground bass integrity check failed in variation " +
+          std::to_string(var_idx) + ": " + integrity_report.toJson();
       return result;
     }
   }

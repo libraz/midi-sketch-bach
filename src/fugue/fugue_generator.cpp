@@ -17,6 +17,7 @@
 #include "counterpoint/collision_resolver.h"
 #include "counterpoint/counterpoint_state.h"
 #include "counterpoint/parallel_repair.h"
+#include "counterpoint/repeated_note_repair.h"
 #include "core/note_creator.h"
 #include "fugue/answer.h"
 #include "fugue/cadence_plan.h"
@@ -279,7 +280,7 @@ static uint8_t nearestPitchWithPC(uint8_t pitch, int target_pc, int max_dist = 7
   for (int d = -max_dist; d <= max_dist; ++d) {
     int cand = static_cast<int>(pitch) + d;
     if (cand < 0 || cand > 127) continue;
-    if (cand % 12 == ((target_pc % 12) + 12) % 12) {
+    if (getPitchClass(static_cast<uint8_t>(cand)) == getPitchClassSigned(target_pc)) {
       if (std::abs(d) < best_dist) {
         best_dist = std::abs(d);
         best = cand;
@@ -358,7 +359,7 @@ std::vector<NoteEvent> createCodaNotes(Tick start_tick, Tick duration,
   int chord_third = is_minor ? 3 : 4;
   {
     // Tonic chord pitch classes: root, 3rd, 5th.
-    int tonic_pc = tonic_pitch % 12;
+    int tonic_pc = getPitchClass(static_cast<uint8_t>(tonic_pitch));
     int third_pc = (tonic_pitch + chord_third) % 12;
     int fifth_pc = (tonic_pitch + 7) % 12;
     int chord_pcs[] = {tonic_pc, third_pc, fifth_pc};
@@ -501,7 +502,7 @@ bool hasCrossRelation(const std::vector<NoteEvent>& notes,
                       const std::vector<std::vector<size_t>>& voice_idx,
                       uint8_t num_voices, uint8_t voice, uint8_t pitch,
                       Tick tick) {
-  int pitch_class = static_cast<int>(pitch) % 12;
+  int pitch_class = getPitchClass(pitch);
   for (uint8_t other_voice = 0; other_voice < num_voices; ++other_voice) {
     if (other_voice == voice) continue;
     // Find the note in other_voice sounding at tick (reverse search for efficiency).
@@ -510,7 +511,7 @@ bool hasCrossRelation(const std::vector<NoteEvent>& notes,
       const auto& other_note = notes[*iter];
       if (other_note.start_tick <= tick &&
           other_note.start_tick + other_note.duration > tick) {
-        int other_pc = static_cast<int>(other_note.pitch) % 12;
+        int other_pc = getPitchClass(other_note.pitch);
         int diff = std::abs(pitch_class - other_pc);
         if (diff == 1 || diff == 11) {
           // Exclude natural half-steps E/F and B/C.
@@ -1780,7 +1781,6 @@ FugueResult generateFugue(const FugueConfig& config) {
           Key lr_key = tonal_plan.keyAtTick(all_notes[i3].start_tick);
           auto [lr_lo, lr_hi] = getFugueVoiceRange(v, num_voices);
 
-          bool fixed = false;
           for (int delta : {1, 2}) {
             int cand = static_cast<int>(all_notes[i2].pitch) + step_dir * delta;
             if (cand < lr_lo || cand > lr_hi) continue;
@@ -1789,111 +1789,22 @@ FugueResult generateFugue(const FugueConfig& config) {
             if (candidateCreatesParallel(cand, i3, v, idxs, k)) continue;
             all_notes[i3].pitch = ucand;
             all_notes[i3].modified_by |= static_cast<uint8_t>(NoteModifiedBy::LeapResolution);
-            fixed = true;
             break;
           }
         }
       }
     }
 
-    // -----------------------------------------------------------------------
-    // Consecutive repeated note repair: replace 4th+ same-pitch notes in a
-    // voice with step-adjacent scale tones. Preserves structural sources
-    // (subject, answer, countersubject, pedal, ground bass).
-    // -----------------------------------------------------------------------
+    // Consecutive repeated note repair using shared utility.
     {
-      std::vector<std::vector<size_t>> rn_voices(num_voices);
-      for (size_t i = 0; i < all_notes.size(); ++i) {
-        if (all_notes[i].voice < num_voices) {
-          rn_voices[all_notes[i].voice].push_back(i);
-        }
-      }
-      for (auto& vi : rn_voices) {
-        std::sort(vi.begin(), vi.end(), [&](size_t a, size_t b) {
-          return all_notes[a].start_tick < all_notes[b].start_tick;
-        });
-      }
-
-      constexpr Tick kRunGapThreshold = 2 * kTicksPerBar;
-      constexpr int kMaxConsecutive = 3;
-
-      for (uint8_t v = 0; v < num_voices; ++v) {
-        const auto& idxs = rn_voices[v];
-        if (idxs.size() < 2) continue;
-
-        int run_len = 1;
-        size_t run_start = 0;
-        for (size_t k = 1; k <= idxs.size(); ++k) {
-          bool same_run = false;
-          if (k < idxs.size()) {
-            Tick gap = all_notes[idxs[k]].start_tick -
-                       all_notes[idxs[k - 1]].start_tick;
-            same_run = (all_notes[idxs[k]].pitch ==
-                        all_notes[idxs[run_start]].pitch) &&
-                       (gap <= kRunGapThreshold);
-          }
-          if (same_run) {
-            ++run_len;
-          } else {
-            // Process run if too long.
-            if (run_len > kMaxConsecutive) {
-              uint8_t base_pitch = all_notes[idxs[run_start]].pitch;
-              int prev_dir = 0;
-              // Determine direction from notes before the run.
-              if (run_start > 0) {
-                int diff = static_cast<int>(base_pitch) -
-                           static_cast<int>(all_notes[idxs[run_start - 1]].pitch);
-                prev_dir = (diff > 0) ? 1 : (diff < 0) ? -1 : 0;
-              }
-              int alt = 0;
-              for (size_t j = run_start + kMaxConsecutive;
-                   j < run_start + static_cast<size_t>(run_len); ++j) {
-                size_t ni = idxs[j];
-                // Skip structural sources.
-                if (isStructuralSource(all_notes[ni].source) ||
-                    all_notes[ni].source == BachNoteSource::PedalPoint) {
-                  continue;
-                }
-                Key rk = tonal_plan.keyAtTick(all_notes[ni].start_tick);
-                // Alternate step direction, preferring counter to previous
-                // motion direction.
-                int step_dir = ((alt % 2 == 0) ? -1 : 1);
-                if (prev_dir != 0) {
-                  step_dir = ((alt % 2 == 0) ? -prev_dir : prev_dir);
-                }
-                ++alt;
-                bool placed = false;
-                for (int delta = 1; delta <= 3 && !placed; ++delta) {
-                  int cand = static_cast<int>(base_pitch) + step_dir * delta;
-                  if (cand < 0 || cand > 127) continue;
-                  uint8_t ucand = static_cast<uint8_t>(cand);
-                  if (!scale_util::isScaleTone(ucand, rk, effective_scale))
-                    continue;
-                  all_notes[ni].pitch = ucand;
-                  all_notes[ni].modified_by |= static_cast<uint8_t>(NoteModifiedBy::RepeatedNoteRep);
-                  placed = true;
-                }
-                // Try opposite direction if preferred failed.
-                if (!placed) {
-                  for (int delta = 1; delta <= 3; ++delta) {
-                    int cand = static_cast<int>(base_pitch) - step_dir * delta;
-                    if (cand < 0 || cand > 127) continue;
-                    uint8_t ucand = static_cast<uint8_t>(cand);
-                    if (!scale_util::isScaleTone(ucand, rk, effective_scale))
-                      continue;
-                    all_notes[ni].pitch = ucand;
-                    all_notes[ni].modified_by |= static_cast<uint8_t>(NoteModifiedBy::RepeatedNoteRep);
-                    break;
-                  }
-                }
-              }
-            }
-            // Reset run.
-            run_start = k;
-            run_len = 1;
-          }
-        }
-      }
+      RepeatedNoteRepairParams rn_params;
+      rn_params.num_voices = num_voices;
+      rn_params.key_at_tick = [&](Tick t) { return tonal_plan.keyAtTick(t); };
+      rn_params.scale_at_tick = [&](Tick) { return effective_scale; };
+      rn_params.voice_range = [&](uint8_t v) -> std::pair<uint8_t, uint8_t> {
+        return getFugueVoiceRange(v, num_voices);
+      };
+      repairRepeatedNotes(all_notes, rn_params);
     }
 
     // -----------------------------------------------------------------------

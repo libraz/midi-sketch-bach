@@ -7,6 +7,7 @@
 #include <set>
 #include <vector>
 
+#include "analysis/fail_report.h"
 #include "core/basic_types.h"
 #include "harmony/key.h"
 #include "solo_string/arch/ground_bass.h"
@@ -150,6 +151,21 @@ std::vector<ChaconneVariation> createScaledVariationPlan(const KeySignature& key
 /// @param plan The variation plan to validate.
 /// @return true if the plan satisfies all structural constraints.
 bool validateVariationPlan(const std::vector<ChaconneVariation>& plan);
+
+/// @brief Validate a variation plan and return a structured FailReport.
+///
+/// Performs the same checks as validateVariationPlan but returns a FailReport
+/// with individual FailIssue entries for each detected problem:
+///
+/// - Empty plan (ConfigFail, Critical, rule="empty_plan")
+/// - Invalid type for role (ConfigFail, Critical, rule="invalid_type_for_role")
+/// - Accumulate count != 3 (ConfigFail, Critical, rule="accumulate_count")
+/// - Final variation not Resolve/Theme (ConfigFail, Critical, rule="final_not_resolve")
+/// - Invalid role order (ConfigFail, Critical, rule="invalid_role_order")
+///
+/// @param plan The variation plan to validate.
+/// @return FailReport containing all detected issues.
+FailReport validateVariationPlanReport(const std::vector<ChaconneVariation>& plan);
 
 }  // namespace bach
 

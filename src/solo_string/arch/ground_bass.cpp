@@ -3,7 +3,9 @@
 #include "solo_string/arch/ground_bass.h"
 
 #include <algorithm>
+#include <string>
 
+#include "analysis/fail_report.h"
 #include "core/pitch_utils.h"
 
 namespace bach {
@@ -57,22 +59,74 @@ size_t GroundBass::noteCount() const {
 }
 
 bool GroundBass::verifyIntegrity(const std::vector<NoteEvent>& generated_bass) const {
+  return !verifyIntegrityReport(generated_bass).hasCritical();
+}
+
+FailReport GroundBass::verifyIntegrityReport(
+    const std::vector<NoteEvent>& generated_bass) const {
+  FailReport report;
+
+  // Check 1: Note count mismatch.
   if (generated_bass.size() != bass_notes_.size()) {
-    return false;
+    FailIssue issue;
+    issue.kind = FailKind::StructuralFail;
+    issue.severity = FailSeverity::Critical;
+    issue.rule = "note_count_mismatch";
+    issue.description = "Expected " + std::to_string(bass_notes_.size()) +
+                        " notes, found " + std::to_string(generated_bass.size());
+    report.addIssue(issue);
+    return report;
   }
 
+  // Check 2-4: Per-note property mismatches.
   for (size_t idx = 0; idx < bass_notes_.size(); ++idx) {
     const auto& original = bass_notes_[idx];
     const auto& generated = generated_bass[idx];
 
-    // Compare the three immutable properties: pitch, start_tick, duration.
-    if (original.pitch != generated.pitch ||
-        original.start_tick != generated.start_tick ||
-        original.duration != generated.duration) {
-      return false;
+    if (original.pitch != generated.pitch) {
+      FailIssue issue;
+      issue.kind = FailKind::StructuralFail;
+      issue.severity = FailSeverity::Critical;
+      issue.tick = original.start_tick;
+      issue.bar = static_cast<uint8_t>(tickToBar(original.start_tick));
+      issue.beat = beatInBar(original.start_tick);
+      issue.rule = "pitch_mismatch";
+      issue.description = "Note " + std::to_string(idx) + ": expected pitch " +
+                          std::to_string(original.pitch) + ", found " +
+                          std::to_string(generated.pitch);
+      report.addIssue(issue);
+    }
+
+    if (original.start_tick != generated.start_tick) {
+      FailIssue issue;
+      issue.kind = FailKind::StructuralFail;
+      issue.severity = FailSeverity::Critical;
+      issue.tick = original.start_tick;
+      issue.bar = static_cast<uint8_t>(tickToBar(original.start_tick));
+      issue.beat = beatInBar(original.start_tick);
+      issue.rule = "timing_mismatch";
+      issue.description = "Note " + std::to_string(idx) + ": expected start_tick " +
+                          std::to_string(original.start_tick) + ", found " +
+                          std::to_string(generated.start_tick);
+      report.addIssue(issue);
+    }
+
+    if (original.duration != generated.duration) {
+      FailIssue issue;
+      issue.kind = FailKind::StructuralFail;
+      issue.severity = FailSeverity::Critical;
+      issue.tick = original.start_tick;
+      issue.bar = static_cast<uint8_t>(tickToBar(original.start_tick));
+      issue.beat = beatInBar(original.start_tick);
+      issue.rule = "duration_mismatch";
+      issue.description = "Note " + std::to_string(idx) + ": expected duration " +
+                          std::to_string(original.duration) + ", found " +
+                          std::to_string(generated.duration);
+      report.addIssue(issue);
     }
   }
-  return true;
+
+  return report;
 }
 
 bool GroundBass::isEmpty() const {

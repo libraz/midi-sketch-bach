@@ -4,6 +4,8 @@
 
 #include <gtest/gtest.h>
 
+#include "analysis/fail_report.h"
+
 namespace bach {
 namespace {
 
@@ -214,6 +216,66 @@ TEST(CreateDefaultArcConfigTest, SectionIdsAreSequential) {
   for (size_t idx = 0; idx < config.phase_assignment.size(); ++idx) {
     EXPECT_EQ(config.phase_assignment[idx].first, static_cast<SectionId>(idx));
   }
+}
+
+
+// ---------------------------------------------------------------------------
+// validateGlobalArcConfigReport
+// ---------------------------------------------------------------------------
+
+TEST(ValidateGlobalArcConfigTest, ReportEmptyConfig) {
+  GlobalArcConfig config;
+  auto report = validateGlobalArcConfigReport(config);
+  EXPECT_TRUE(report.hasCritical());
+  ASSERT_EQ(report.issues.size(), 1u);
+  EXPECT_EQ(report.issues[0].rule, "empty_phases");
+  EXPECT_EQ(report.issues[0].kind, FailKind::ConfigFail);
+}
+
+TEST(ValidateGlobalArcConfigTest, ReportValidConfigHasNoIssues) {
+  GlobalArcConfig config;
+  config.phase_assignment = {{0, ArcPhase::Ascent}, {1, ArcPhase::Peak}, {2, ArcPhase::Descent}};
+  auto report = validateGlobalArcConfigReport(config);
+  EXPECT_FALSE(report.hasCritical());
+  EXPECT_TRUE(report.issues.empty());
+}
+
+TEST(ValidateGlobalArcConfigTest, ReportFirstNotAscent) {
+  GlobalArcConfig config;
+  config.phase_assignment = {{0, ArcPhase::Peak}, {1, ArcPhase::Descent}};
+  auto report = validateGlobalArcConfigReport(config);
+  EXPECT_TRUE(report.hasCritical());
+  bool found = false;
+  for (const auto& issue : report.issues) {
+    if (issue.rule == "first_not_ascent") { found = true; break; }
+  }
+  EXPECT_TRUE(found);
+}
+
+TEST(ValidateGlobalArcConfigTest, ReportPhaseRegression) {
+  GlobalArcConfig config;
+  config.phase_assignment = {{0, ArcPhase::Ascent}, {1, ArcPhase::Descent}, {2, ArcPhase::Peak}};
+  auto report = validateGlobalArcConfigReport(config);
+  EXPECT_TRUE(report.hasCritical());
+  bool found = false;
+  for (const auto& issue : report.issues) {
+    if (issue.rule == "phase_regression") { found = true; break; }
+  }
+  EXPECT_TRUE(found);
+}
+
+TEST(ValidateGlobalArcConfigTest, ReportWrongPeakCount) {
+  GlobalArcConfig config;
+  config.phase_assignment = {
+    {0, ArcPhase::Ascent}, {1, ArcPhase::Peak}, {2, ArcPhase::Peak}, {3, ArcPhase::Descent}
+  };
+  auto report = validateGlobalArcConfigReport(config);
+  EXPECT_TRUE(report.hasCritical());
+  bool found = false;
+  for (const auto& issue : report.issues) {
+    if (issue.rule == "peak_count") { found = true; break; }
+  }
+  EXPECT_TRUE(found);
 }
 
 }  // namespace

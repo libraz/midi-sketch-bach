@@ -16,27 +16,11 @@ enum class Hand : uint8_t {
   Right
 };
 
-/// @brief Keyboard technique classification for cost estimation.
-enum class KeyboardTechnique : uint8_t {
-  Normal,       // Standard fingering
-  Stretch,      // Finger stretch required
-  CrossOver,    // Thumb-under or finger-over
-  Jump,         // Large positional jump
-  Repeated      // Same note repeated quickly
-};
-
 /// @brief Pedal (sustain/sostenuto) state for piano.
 enum class PedalState : uint8_t {
   Off,
   SustainOn,
   SostenutoOn
-};
-
-/// @brief Current position of a key (for modeling legato / staccato).
-enum class KeyPosition : uint8_t {
-  Released,
-  Depressed,
-  Sustained  // Key released but sustain pedal held
 };
 
 /// @brief Physical span constraints for a keyboard player's hand.

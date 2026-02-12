@@ -2,6 +2,8 @@
 
 #include "harmony/harmonic_timeline.h"
 
+#include "core/pitch_utils.h"
+
 namespace bach {
 
 // ---------------------------------------------------------------------------
@@ -184,7 +186,7 @@ static int fifthInterval(ChordQuality quality) {
 /// @param bass_octave Octave for the bass note (typically 2 or 3).
 /// @return MIDI pitch for the bass.
 static uint8_t computeBassPitch(const Chord& chord, int bass_octave) {
-  int root_pc = static_cast<int>(chord.root_pitch) % 12;
+  int root_pc = getPitchClass(chord.root_pitch);
   int bass_pc = root_pc;
 
   if (chord.inversion == 1) {

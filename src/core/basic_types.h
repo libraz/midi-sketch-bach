@@ -57,6 +57,22 @@ inline constexpr uint8_t beatInBar(Tick tick) {
 /// @brief Convert bar number to tick (start of bar).
 inline constexpr Tick barToTick(Tick bar) { return bar * kTicksPerBar; }
 
+/// @brief Metric hierarchy level for a given tick position.
+/// Used to enforce Baroque counterpoint rules: strong beats require chord tones,
+/// beat positions allow NHTs only with resolution, offbeats are unrestricted.
+enum class MetricLevel : uint8_t {
+  Bar = 2,     ///< Bar start: chord tone required (NHT forbidden).
+  Beat = 1,    ///< Beat start: chord tone preferred, NHT needs resolution (next_pitch).
+  Offbeat = 0  ///< Off-beat: passing/neighbor tones permitted.
+};
+
+/// @brief Determine the metric level of a tick position.
+inline constexpr MetricLevel metricLevel(Tick tick) {
+  if (tick % kTicksPerBar == 0) return MetricLevel::Bar;
+  if (tick % kTicksPerBeat == 0) return MetricLevel::Beat;
+  return MetricLevel::Offbeat;
+}
+
 // ---------------------------------------------------------------------------
 // Voice
 // ---------------------------------------------------------------------------

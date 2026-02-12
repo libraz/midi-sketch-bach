@@ -86,7 +86,7 @@ void applyPicardyToFinalChord(std::vector<NoteEvent>& notes,
 
   for (auto& note : notes) {
     if (note.start_tick >= final_bar_tick) {
-      int pc = static_cast<int>(note.pitch) % 12;
+      int pc = getPitchClass(note.pitch);
       if (pc == minor_third_pc) {
         // Raise minor third to major third.
         note.pitch = static_cast<uint8_t>(

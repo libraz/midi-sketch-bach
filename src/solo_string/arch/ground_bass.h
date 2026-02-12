@@ -5,6 +5,7 @@
 
 #include <vector>
 
+#include "analysis/fail_report.h"
 #include "core/basic_types.h"
 #include "harmony/key.h"
 
@@ -61,10 +62,21 @@ class GroundBass {
   ///
   /// Compares pitch, start_tick, and duration of each note in sequence.
   /// Returns false immediately if any note differs (instant STRUCTURAL_FAIL).
+  /// Wrapper around verifyIntegrityReport().
   ///
   /// @param generated_bass The bass notes extracted from generated output.
   /// @return true if every note matches exactly, false if any modification detected.
   bool verifyIntegrity(const std::vector<NoteEvent>& generated_bass) const;
+
+  /// @brief Verify integrity with structured error reporting.
+  ///
+  /// Checks all four failure conditions (note count, pitch, timing, duration)
+  /// and returns a FailReport with detailed FailIssue entries for each violation.
+  /// All issues are classified as StructuralFail / Critical.
+  ///
+  /// @param generated_bass The bass notes extracted from generated output.
+  /// @return FailReport containing any detected integrity violations.
+  FailReport verifyIntegrityReport(const std::vector<NoteEvent>& generated_bass) const;
 
   /// @brief Check if the ground bass has any notes.
   /// @return true if at least one note is present.

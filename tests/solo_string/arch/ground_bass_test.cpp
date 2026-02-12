@@ -6,6 +6,8 @@
 
 #include <gtest/gtest.h>
 
+#include "analysis/fail_report.h"
+
 #include "core/basic_types.h"
 #include "harmony/key.h"
 
@@ -354,6 +356,69 @@ TEST(GroundBassTest, CustomNotesAreStoredCorrectly) {
   EXPECT_EQ(bass.noteCount(), 2u);
   EXPECT_EQ(bass.getLengthTicks(), 3840u);
   EXPECT_FALSE(bass.isEmpty());
+}
+
+
+// ===========================================================================
+// verifyIntegrityReport
+// ===========================================================================
+
+TEST(GroundBassTest, IntegrityReportExactCopyHasNoIssues) {
+  auto bass = GroundBass::createStandardDMinor();
+  auto copy = bass.getNotes();
+  auto report = bass.verifyIntegrityReport(copy);
+  EXPECT_FALSE(report.hasCritical());
+  EXPECT_TRUE(report.issues.empty());
+}
+
+TEST(GroundBassTest, IntegrityReportNoteCountMismatch) {
+  auto bass = GroundBass::createStandardDMinor();
+  auto modified = bass.getNotes();
+  modified.pop_back();
+  auto report = bass.verifyIntegrityReport(modified);
+  EXPECT_TRUE(report.hasCritical());
+  ASSERT_GE(report.issues.size(), 1u);
+  EXPECT_EQ(report.issues[0].rule, "note_count_mismatch");
+  EXPECT_EQ(report.issues[0].kind, FailKind::StructuralFail);
+}
+
+TEST(GroundBassTest, IntegrityReportPitchMismatch) {
+  auto bass = GroundBass::createStandardDMinor();
+  auto modified = bass.getNotes();
+  modified[0].pitch += 1;
+  auto report = bass.verifyIntegrityReport(modified);
+  EXPECT_TRUE(report.hasCritical());
+  bool found = false;
+  for (const auto& issue : report.issues) {
+    if (issue.rule == "pitch_mismatch") { found = true; break; }
+  }
+  EXPECT_TRUE(found);
+}
+
+TEST(GroundBassTest, IntegrityReportTimingMismatch) {
+  auto bass = GroundBass::createStandardDMinor();
+  auto modified = bass.getNotes();
+  modified[0].start_tick += 1;
+  auto report = bass.verifyIntegrityReport(modified);
+  EXPECT_TRUE(report.hasCritical());
+  bool found = false;
+  for (const auto& issue : report.issues) {
+    if (issue.rule == "timing_mismatch") { found = true; break; }
+  }
+  EXPECT_TRUE(found);
+}
+
+TEST(GroundBassTest, IntegrityReportDurationMismatch) {
+  auto bass = GroundBass::createStandardDMinor();
+  auto modified = bass.getNotes();
+  modified[0].duration += 1;
+  auto report = bass.verifyIntegrityReport(modified);
+  EXPECT_TRUE(report.hasCritical());
+  bool found = false;
+  for (const auto& issue : report.issues) {
+    if (issue.rule == "duration_mismatch") { found = true; break; }
+  }
+  EXPECT_TRUE(found);
 }
 
 }  // namespace

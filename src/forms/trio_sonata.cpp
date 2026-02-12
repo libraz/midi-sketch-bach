@@ -1122,10 +1122,10 @@ void insertBreathingRests(std::vector<Track>& tracks, Tick num_phrases, Tick dur
 
 /// @brief Check if a pitch is a chord tone of the given harmonic event.
 bool isChordToneAt(uint8_t pitch, const HarmonicEvent& ev) {
-  int pc = static_cast<int>(pitch) % 12;
+  int pc = getPitchClass(pitch);
   auto tones = collectChordTonesInRange(ev.chord, 0, 127);
   for (uint8_t ct : tones) {
-    if (static_cast<int>(ct) % 12 == pc) return true;
+    if (getPitchClass(ct) == pc) return true;
   }
   return false;
 }

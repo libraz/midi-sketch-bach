@@ -24,7 +24,9 @@ struct HarmonicEvent {
   float weight = 1.0f;    // Harmonic weight (1.0 = strong beat, 0.5 = weak)
   float rhythm_factor = 1.0f;  // Harmonic rhythm multiplier (1.0 = normal, <1.0 = faster, >1.0 = slower)
   bool is_immutable = false;  // If true, cannot be altered by generation
+  /// Reserved for future modulation support.
   Key modulation_target = Key::C;  // Target key for modulation (same as key if none)
+  /// Reserved for future modulation support.
   bool has_modulation = false;     // Whether this event represents a modulation point
 };
 

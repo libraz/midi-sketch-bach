@@ -3,18 +3,28 @@
 #include "solo_string/flow/arpeggio_flow_config.h"
 
 #include <cmath>
+#include <string>
+
+#include "analysis/fail_report.h"
 
 namespace bach {
 
-bool validateGlobalArcConfig(const GlobalArcConfig& config) {
+FailReport validateGlobalArcConfigReport(const GlobalArcConfig& config) {
+  FailReport report;
+
   if (config.phase_assignment.empty()) {
-    return false;
+    report.addIssue({FailKind::ConfigFail, FailSeverity::Critical,
+                     /*tick=*/0, /*bar=*/0, /*beat=*/0,
+                     /*voice_a=*/0, /*voice_b=*/0,
+                     "empty_phases", "phase_assignment is empty"});
+    return report;
   }
 
   // Track the current phase progression and count Peak sections.
   int peak_count = 0;
   ArcPhase prev_phase = ArcPhase::Ascent;
   bool first = true;
+  int section_index = 0;
 
   for (const auto& [section_id, phase] : config.phase_assignment) {
     if (phase == ArcPhase::Peak) {
@@ -24,24 +34,53 @@ bool validateGlobalArcConfig(const GlobalArcConfig& config) {
     if (first) {
       // First section must be Ascent (cannot start at Peak or Descent).
       if (phase != ArcPhase::Ascent) {
-        return false;
+        report.addIssue({FailKind::ConfigFail, FailSeverity::Critical,
+                         /*tick=*/0, /*bar=*/0, /*beat=*/0,
+                         /*voice_a=*/0, /*voice_b=*/0,
+                         "first_not_ascent",
+                         std::string("First section must be Ascent, found ") +
+                             arcPhaseToString(phase)});
       }
       prev_phase = phase;
       first = false;
+      ++section_index;
       continue;
     }
 
     // Monotonic order check: phase can stay the same or advance, never go back.
     // Ascent(0) -> Peak(1) -> Descent(2)
     if (static_cast<uint8_t>(phase) < static_cast<uint8_t>(prev_phase)) {
-      return false;
+      report.addIssue({FailKind::ConfigFail, FailSeverity::Critical,
+                       /*tick=*/0,
+                       /*bar=*/static_cast<uint8_t>(section_index),
+                       /*beat=*/0,
+                       /*voice_a=*/0, /*voice_b=*/0,
+                       "phase_regression",
+                       "Section " + std::to_string(section_index) +
+                           ": phase regression from " +
+                           arcPhaseToString(prev_phase) + " to " +
+                           arcPhaseToString(phase)});
     }
 
     prev_phase = phase;
+    ++section_index;
   }
 
   // Exactly one Peak section required.
-  return peak_count == 1;
+  if (peak_count != 1) {
+    report.addIssue({FailKind::ConfigFail, FailSeverity::Critical,
+                     /*tick=*/0, /*bar=*/0, /*beat=*/0,
+                     /*voice_a=*/0, /*voice_b=*/0,
+                     "peak_count",
+                     "Expected exactly 1 Peak, found " +
+                         std::to_string(peak_count)});
+  }
+
+  return report;
+}
+
+bool validateGlobalArcConfig(const GlobalArcConfig& config) {
+  return !validateGlobalArcConfigReport(config).hasCritical();
 }
 
 GlobalArcConfig createDefaultArcConfig(int num_sections) {

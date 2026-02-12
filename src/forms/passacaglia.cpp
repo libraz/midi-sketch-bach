@@ -17,6 +17,7 @@
 #include "counterpoint/counterpoint_state.h"
 #include "harmony/chord_types.h"
 #include "harmony/harmonic_event.h"
+#include "counterpoint/repeated_note_repair.h"
 #include "organ/organ_techniques.h"
 
 namespace bach {
@@ -234,7 +235,7 @@ std::vector<uint8_t> buildGroundBassPitches(const KeySignature& key, int num_not
   if (tonic_pitch + 12 > static_cast<int>(organ_range::kPedalHigh)) {
     tonic_pitch = static_cast<int>(tonicPitch(key.tonic, 1));
   }
-  int key_offset = tonic_pitch % 12;
+  int key_offset = getPitchClass(static_cast<uint8_t>(tonic_pitch));
   int base_note = tonic_pitch - key_offset;
 
   // Select template and build degree sequence.
@@ -322,23 +323,84 @@ std::vector<NoteEvent> generateEstablishVariation(Tick start_tick, int bars,
   Tick end_tick = start_tick + static_cast<Tick>(bars) * kTicksPerBar;
   Tick current_tick = start_tick;
 
-  // Choose a comfortable octave for this voice.
-  int base_octave = (voice_idx <= 1) ? rng::rollRange(rng, 4, 5) : 3;
+  // Initial scale tones for stepwise motion.
+  const HarmonicEvent& first_event = timeline.getAt(start_tick);
+  auto scale_tones = getScaleTones(first_event.key, first_event.is_minor,
+                                   low_pitch, high_pitch);
+  if (scale_tones.empty()) return notes;
+
+  size_t tone_idx = scale_tones.size() / 2;
+  bool ascending = rng::rollProbability(rng, 0.5f);
+  uint8_t prev_pitch = 0;
+  uint8_t prevprev_pitch = 0;
 
   while (current_tick < end_tick) {
     const HarmonicEvent& event = timeline.getAt(current_tick);
-    auto chord_tones = getChordTones(event.chord, base_octave);
+    auto new_tones = getScaleTones(event.key, event.is_minor,
+                                   low_pitch, high_pitch);
+    if (new_tones.empty()) { current_tick += kQuarterNote; continue; }
 
-    // Filter to valid range.
-    std::vector<uint8_t> valid_tones;
-    for (auto tone : chord_tones) {
-      if (tone >= low_pitch && tone <= high_pitch) {
-        valid_tones.push_back(tone);
+    // Re-map position if scale changed.
+    if (new_tones != scale_tones) {
+      scale_tones = std::move(new_tones);
+      if (!notes.empty()) {
+        tone_idx = findClosestToneIndex(scale_tones, notes.back().pitch);
       }
     }
-    if (valid_tones.empty()) {
-      valid_tones.push_back(clampPitch(static_cast<int>(event.bass_pitch) + 12,
-                                       low_pitch, high_pitch));
+
+    // Strong-beat chord tone snapping.
+    Tick relative_tick = current_tick - start_tick;
+    if (relative_tick % kTicksPerBar == 0) {
+      // Bar head: force chord tone — find closest chord tone in scale_tones.
+      size_t best_idx = tone_idx;
+      int best_dist = 999;
+      for (size_t idx = 0; idx < scale_tones.size(); ++idx) {
+        if (isChordTone(scale_tones[idx], event)) {
+          int dist = static_cast<int>(idx) - static_cast<int>(tone_idx);
+          if (std::abs(dist) < best_dist) {
+            best_dist = std::abs(dist);
+            best_idx = idx;
+          }
+        }
+      }
+      tone_idx = best_idx;
+    } else if (relative_tick % kTicksPerBeat == 0) {
+      // Beat head: prefer chord tone — try +/-1 if current is not.
+      if (!isChordTone(scale_tones[tone_idx], event)) {
+        if (tone_idx + 1 < scale_tones.size() &&
+            isChordTone(scale_tones[tone_idx + 1], event)) {
+          tone_idx += 1;
+        } else if (tone_idx > 0 &&
+                   isChordTone(scale_tones[tone_idx - 1], event)) {
+          tone_idx -= 1;
+        }
+      }
+    }
+
+    uint8_t candidate = scale_tones[tone_idx];
+
+    // 3-consecutive repetition guard.
+    if (candidate == prev_pitch && prev_pitch == prevprev_pitch) {
+      // Force extra step in current direction.
+      if (ascending && tone_idx + 1 < scale_tones.size()) {
+        ++tone_idx;
+      } else if (!ascending && tone_idx > 0) {
+        --tone_idx;
+      } else if (tone_idx + 1 < scale_tones.size()) {
+        ++tone_idx;
+      } else if (tone_idx > 0) {
+        --tone_idx;
+      }
+      candidate = scale_tones[tone_idx];
+    } else if (candidate == prev_pitch) {
+      // 2nd consecutive: try 1 extra step if possible.
+      if (ascending && tone_idx + 1 < scale_tones.size()) {
+        ++tone_idx;
+        candidate = scale_tones[tone_idx];
+      } else if (!ascending && tone_idx > 0) {
+        --tone_idx;
+        candidate = scale_tones[tone_idx];
+      }
     }
 
     Tick dur = kQuarterNote;
@@ -349,13 +411,39 @@ std::vector<NoteEvent> generateEstablishVariation(Tick start_tick, int bars,
     NoteEvent note;
     note.start_tick = current_tick;
     note.duration = dur;
-    note.pitch = rng::selectRandom(rng, valid_tones);
+    note.pitch = candidate;
     note.velocity = kOrganVelocity;
     note.voice = voice_idx;
     note.source = BachNoteSource::FreeCounterpoint;
     notes.push_back(note);
 
+    prevprev_pitch = prev_pitch;
+    prev_pitch = candidate;
     current_tick += dur;
+
+    // Stepwise motion.
+    if (ascending) {
+      if (tone_idx + 1 < scale_tones.size()) {
+        ++tone_idx;
+      } else {
+        ascending = false;
+        if (tone_idx > 0) --tone_idx;
+      }
+    } else {
+      if (tone_idx > 0) {
+        --tone_idx;
+      } else {
+        ascending = true;
+        if (tone_idx + 1 < scale_tones.size()) ++tone_idx;
+      }
+    }
+
+    // Direction reversal: 15% probability, not at boundaries.
+    if (tone_idx > 0 && tone_idx + 1 < scale_tones.size()) {
+      if (rng::rollProbability(rng, 0.15f)) {
+        ascending = !ascending;
+      }
+    }
   }
 
   return notes;
@@ -475,44 +563,36 @@ std::vector<NoteEvent> generateDevelopLateVariation(Tick start_tick, int bars,
   Tick end_tick = start_tick + static_cast<Tick>(bars) * kTicksPerBar;
   Tick current_tick = start_tick;
 
+  // Build initial arpeggio pitches and initialize traversal state ONCE.
+  const HarmonicEvent& first_event = timeline.getAt(start_tick);
+  std::vector<uint8_t> arp_pitches =
+      collectChordTonesInRange(first_event.chord, low_pitch, high_pitch);
+  if (arp_pitches.empty()) return notes;
+  std::sort(arp_pitches.begin(), arp_pitches.end());
+
+  size_t arp_idx = static_cast<size_t>(
+      rng::rollRange(rng, 0, static_cast<int>(arp_pitches.size()) - 1));
+  bool going_up = rng::rollProbability(rng, 0.6f);
+
   while (current_tick < end_tick) {
     const HarmonicEvent& event = timeline.getAt(current_tick);
 
-    // Build arpeggio pitches from chord tones across octaves.
-    int root_pc = static_cast<int>(event.chord.root_pitch) % 12;
-    int third_offset = 4;
-    if (event.chord.quality == ChordQuality::Minor ||
-        event.chord.quality == ChordQuality::Diminished ||
-        event.chord.quality == ChordQuality::Minor7) {
-      third_offset = 3;
-    }
-    int fifth_offset = 7;
-    if (event.chord.quality == ChordQuality::Diminished) {
-      fifth_offset = 6;
-    }
-
-    std::vector<uint8_t> arp_pitches;
-    for (int octave = 1; octave <= 8; ++octave) {
-      int base = octave * 12 + root_pc;
-      int candidates[] = {base, base + third_offset, base + fifth_offset};
-      for (int pitch : candidates) {
-        if (pitch >= static_cast<int>(low_pitch) &&
-            pitch <= static_cast<int>(high_pitch) && pitch <= 127) {
-          arp_pitches.push_back(static_cast<uint8_t>(pitch));
-        }
-      }
-    }
-
-    if (arp_pitches.empty()) {
+    // Rebuild arpeggio pitches on harmony change.
+    auto new_arp = collectChordTonesInRange(event.chord, low_pitch, high_pitch);
+    if (new_arp.empty()) {
       current_tick += kEighthNote;
       continue;
     }
+    std::sort(new_arp.begin(), new_arp.end());
 
-    std::sort(arp_pitches.begin(), arp_pitches.end());
-
-    size_t arp_idx = static_cast<size_t>(
-        rng::rollRange(rng, 0, static_cast<int>(arp_pitches.size()) - 1));
-    bool going_up = rng::rollProbability(rng, 0.6f);
+    if (new_arp != arp_pitches) {
+      arp_pitches = std::move(new_arp);
+      if (!notes.empty()) {
+        arp_idx = findClosestToneIndex(arp_pitches, notes.back().pitch);
+      } else {
+        arp_idx = arp_pitches.size() / 2;
+      }
+    }
 
     // Fill one beat at a time to allow chord changes.
     Tick beat_end = current_tick + kTicksPerBeat;
@@ -935,6 +1015,21 @@ PassacagliaResult generatePassacaglia(const PassacagliaConfig& config) {
     PostValidateStats stats;
     auto validated = postValidateNotes(
         std::move(all_notes), num_voices, config.key, voice_ranges, &stats);
+
+    // Repeated note repair: replace 4th+ same-pitch notes with step-adjacent
+    // scale tones. Passacaglia uses fixed key (no modulation within a piece).
+    {
+      RepeatedNoteRepairParams repair_params;
+      repair_params.num_voices = num_voices;
+      repair_params.key_at_tick = [&](Tick) { return config.key.tonic; };
+      repair_params.scale_at_tick = [&](Tick) {
+        return config.key.is_minor ? ScaleType::HarmonicMinor : ScaleType::Major;
+      };
+      repair_params.voice_range = [&](uint8_t v) -> std::pair<uint8_t, uint8_t> {
+        return {getVoiceLowPitch(v), getVoiceHighPitch(v)};
+      };
+      repairRepeatedNotes(validated, repair_params);
+    }
 
     // Redistribute validated notes back to tracks.
     for (auto& track : tracks) {

@@ -201,7 +201,7 @@ std::vector<uint8_t> getChordTones(const Chord& chord, int octave) {
 std::vector<uint8_t> collectChordTonesInRange(const Chord& chord,
                                               uint8_t low, uint8_t high) {
   std::vector<uint8_t> tones;
-  int root_pc = static_cast<int>(chord.root_pitch) % 12;
+  int root_pc = getPitchClass(chord.root_pitch);
 
   int third_offset = 4;
   if (chord.quality == ChordQuality::Minor ||

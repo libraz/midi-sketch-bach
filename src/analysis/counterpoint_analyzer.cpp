@@ -580,7 +580,7 @@ uint32_t countCrossRelations(const std::vector<NoteEvent>& notes, uint8_t num_vo
       auto vb_notes = voiceNotes(notes, vb);
 
       for (const auto& na : va_notes) {
-        int na_pc = static_cast<int>(na.pitch) % 12;
+        int na_pc = getPitchClass(na.pitch);
 
         for (const auto& nb : vb_notes) {
           // Check temporal proximity.
@@ -589,7 +589,7 @@ uint32_t countCrossRelations(const std::vector<NoteEvent>& notes, uint8_t num_vo
                                : nb.start_tick - na.start_tick;
           if (tick_dist > proximity_threshold) continue;
 
-          int nb_pc = static_cast<int>(nb.pitch) % 12;
+          int nb_pc = getPitchClass(nb.pitch);
 
           // Cross-relation: same letter name but different accidental.
           // Detect by checking if the two pitch classes differ by exactly 1

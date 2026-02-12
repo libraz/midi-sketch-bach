@@ -10,6 +10,7 @@
 #include <gtest/gtest.h>
 
 #include "core/basic_types.h"
+#include "analysis/fail_report.h"
 #include "harmony/key.h"
 #include "solo_string/arch/variation_types.h"
 
@@ -379,6 +380,75 @@ TEST(ChaconneVariationTest, DefaultValues) {
   EXPECT_EQ(var.key.tonic, Key::D);
   EXPECT_TRUE(var.key.is_minor);
   EXPECT_FALSE(var.is_major_section);
+}
+
+
+// ===========================================================================
+// validateVariationPlanReport
+// ===========================================================================
+
+TEST(ChaconneConfigTest, ReportEmptyPlan) {
+  auto report = validateVariationPlanReport({});
+  EXPECT_TRUE(report.hasCritical());
+  ASSERT_EQ(report.issues.size(), 1u);
+  EXPECT_EQ(report.issues[0].rule, "empty_plan");
+  EXPECT_EQ(report.issues[0].kind, FailKind::ConfigFail);
+  EXPECT_EQ(report.issues[0].severity, FailSeverity::Critical);
+}
+
+TEST(ChaconneConfigTest, ReportValidPlanHasNoIssues) {
+  KeySignature d_minor = {Key::D, true};
+  std::mt19937 rng(42);
+  auto plan = createStandardVariationPlan(d_minor, rng);
+  auto report = validateVariationPlanReport(plan);
+  EXPECT_FALSE(report.hasCritical());
+  EXPECT_TRUE(report.issues.empty());
+}
+
+TEST(ChaconneConfigTest, ReportInvalidTypeForRole) {
+  KeySignature d_minor = {Key::D, true};
+  std::mt19937 rng(42);
+  auto plan = createStandardVariationPlan(d_minor, rng);
+  plan[0].type = VariationType::Virtuosic;  // Not allowed for Establish
+  auto report = validateVariationPlanReport(plan);
+  EXPECT_TRUE(report.hasCritical());
+  // Should have an issue with rule "invalid_type_for_role"
+  bool found = false;
+  for (const auto& issue : report.issues) {
+    if (issue.rule == "invalid_type_for_role") { found = true; break; }
+  }
+  EXPECT_TRUE(found);
+}
+
+TEST(ChaconneConfigTest, ReportWrongAccumulateCount) {
+  KeySignature d_minor = {Key::D, true};
+  std::mt19937 rng(42);
+  auto plan = createStandardVariationPlan(d_minor, rng);
+  // Remove an Accumulate variation
+  auto iter = std::find_if(plan.begin(), plan.end(),
+      [](const ChaconneVariation& v) { return v.role == VariationRole::Accumulate; });
+  if (iter != plan.end()) plan.erase(iter);
+  auto report = validateVariationPlanReport(plan);
+  EXPECT_TRUE(report.hasCritical());
+  bool found = false;
+  for (const auto& issue : report.issues) {
+    if (issue.rule == "accumulate_count") { found = true; break; }
+  }
+  EXPECT_TRUE(found);
+}
+
+TEST(ChaconneConfigTest, ReportFinalNotResolve) {
+  KeySignature d_minor = {Key::D, true};
+  std::mt19937 rng(42);
+  auto plan = createStandardVariationPlan(d_minor, rng);
+  plan.back().type = VariationType::Lyrical;  // Should be Theme
+  auto report = validateVariationPlanReport(plan);
+  EXPECT_TRUE(report.hasCritical());
+  bool found = false;
+  for (const auto& issue : report.issues) {
+    if (issue.rule == "final_not_resolve") { found = true; break; }
+  }
+  EXPECT_TRUE(found);
 }
 
 }  // namespace

@@ -481,13 +481,13 @@ std::vector<NoteEvent> generatePitchPath(
     float dominant_rate = policy.dominant_ending_prob;
     if (rng::rollProbability(gen, dominant_rate)) {
       int dom_pc =
-          degreeToPitch(4, kBaseNote, a.key_offset, a.scale) % 12;
+          getPitchClass(static_cast<uint8_t>(degreeToPitch(4, kBaseNote, a.key_offset, a.scale)));
       int ending = normalizeEndingPitch(dom_pc, prev_pitch_for_ending,
                                         max_leap, a.key, a.scale,
                                         a.pitch_floor, a.pitch_ceil);
       result.back().pitch = static_cast<uint8_t>(ending);
     } else {
-      int tonic_pc = a.tonic_pitch % 12;
+      int tonic_pc = getPitchClass(static_cast<uint8_t>(a.tonic_pitch));
       int ending = normalizeEndingPitch(tonic_pc, prev_pitch_for_ending,
                                         max_leap, a.key, a.scale,
                                         a.pitch_floor, a.pitch_ceil);

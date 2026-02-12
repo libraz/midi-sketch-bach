@@ -37,6 +37,15 @@ namespace {
 /// @param character Subject character influencing episode style.
 /// @param rng Mersenne Twister instance for Playful/Restless randomization.
 /// @return Degree step (typically -1 for stepwise descending sequence).
+/// @brief Pitch candidate for episode validated loop.
+/// Candidates are scored by harmonic + melodic quality and tried sequentially
+/// through createBachNote. Maximum 3 candidates per note (Reduce Generation).
+struct PitchCandidate {
+  uint8_t pitch = 0;
+  float score = 0.0f;        ///< Composite melodic + harmony score (higher = better).
+  bool is_chord_tone = false;
+};
+
 int sequenceDegreeStepForCharacter(SubjectCharacter character, std::mt19937& rng) {
   switch (character) {
     case SubjectCharacter::Severe:
@@ -500,7 +509,7 @@ static void generateHeldTones(Episode& episode,
 
   // Snap to nearest tonic pitch class in the voice register center.
   int key_pc = static_cast<int>(key);
-  int center_pc = register_center % 12;
+  int center_pc = getPitchClass(static_cast<uint8_t>(register_center));
   int pc_diff = key_pc - center_pc;
   if (pc_diff > 6) pc_diff -= 12;
   if (pc_diff < -6) pc_diff += 12;
@@ -563,7 +572,7 @@ static std::vector<NoteEvent> generateBassSequencePattern(
   int key_pc = static_cast<int>(key);
   int register_center =
       (static_cast<int>(range_low) + static_cast<int>(range_high)) / 2;
-  int center_pc = register_center % 12;
+  int center_pc = getPitchClass(static_cast<uint8_t>(register_center));
   int pc_diff = key_pc - center_pc;
   if (pc_diff > 6) pc_diff -= 12;
   if (pc_diff < -6) pc_diff += 12;
@@ -941,10 +950,10 @@ std::vector<NoteEvent> extractCharacteristicMotif(const Subject& subject,
     score += 0.2f * proximity;
 
     // Tonal stability: contains root (pitch class 0 in subject context).
-    uint8_t root_pc = subject.notes[0].pitch % 12;
+    int root_pc = getPitchClass(subject.notes[0].pitch);
     bool has_root = false;
     for (size_t idx = start; idx < start + motif_length; ++idx) {
-      if (subject.notes[idx].pitch % 12 == root_pc) {
+      if (getPitchClass(subject.notes[idx].pitch) == root_pc) {
         has_root = true;
         break;
       }
@@ -981,7 +990,7 @@ Episode generateEpisode(const Subject& subject, Tick start_tick, Tick duration_t
   phrase_goal.target_tick = episode_end;
   phrase_goal.bonus = 0.3f;
 
-  // Step 3: Post-validate each note through createBachNote().
+  // Step 3: Prepare validated episode.
   Episode validated;
   validated.start_tick = raw.start_tick;
   validated.end_tick = raw.end_tick;
@@ -989,48 +998,152 @@ Episode generateEpisode(const Subject& subject, Tick start_tick, Tick duration_t
   validated.end_key = raw.end_key;
   validated.notes.reserve(raw.notes.size());
 
-  // Sort by tick for chronological processing.
+  // Sort by tick then voice for tick-group processing.
   std::sort(raw.notes.begin(), raw.notes.end(),
             [](const NoteEvent& a, const NoteEvent& b) {
               if (a.start_tick != b.start_tick) return a.start_tick < b.start_tick;
               return a.voice < b.voice;
             });
 
-  // Diatonic context for pre-snapping.
   ScaleType scale = subject.is_minor ? ScaleType::HarmonicMinor : ScaleType::Major;
+  Tick final_bar_start = (episode_end > kTicksPerBar) ? episode_end - kTicksPerBar : 0;
 
-  for (const auto& note : raw.notes) {
-    // Query harmonic context at this tick.
-    const auto& harm_ev = timeline.getAt(note.start_tick);
-
-    // Pre-snap to diatonic scale (prevents chromatic artifacts from collision resolver).
-    Key current_key = (note.start_tick >= start_tick + duration_ticks / 2 &&
-                       target_key != start_key)
-                          ? target_key
-                          : start_key;
-    uint8_t diatonic_pitch = scale_util::nearestScaleTone(note.pitch, current_key, scale);
-
-    // Determine desired pitch: snap non-chord tones on strong beats.
-    uint8_t desired_pitch = diatonic_pitch;
-    bool is_strong = (note.start_tick % kTicksPerBeat == 0);
-    if (is_strong && !isChordTone(diatonic_pitch, harm_ev)) {
-      desired_pitch = nearestChordTone(diatonic_pitch, harm_ev);
+  // Step 4: Process notes in tick groups.
+  // Same start_tick events form a group; within each group, voices are processed
+  // in order (0→1→2→...→bass) so that earlier voices are in cp_state when later
+  // voices are evaluated.
+  size_t group_start = 0;
+  while (group_start < raw.notes.size()) {
+    Tick group_tick = raw.notes[group_start].start_tick;
+    size_t group_end = group_start + 1;
+    while (group_end < raw.notes.size() &&
+           raw.notes[group_end].start_tick == group_tick) {
+      ++group_end;
     }
 
-    // Route through createBachNote for counterpoint validation.
-    BachNoteOptions opts;
-    opts.voice = note.voice;
-    opts.desired_pitch = desired_pitch;
-    opts.tick = note.start_tick;
-    opts.duration = note.duration;
-    opts.velocity = note.velocity;
-    opts.source = BachNoteSource::EpisodeMaterial;
+    for (size_t idx = group_start; idx < group_end; ++idx) {
+      const auto& note = raw.notes[idx];
+      MetricLevel ml = metricLevel(note.start_tick);
+      const auto& harm_ev = timeline.getAt(note.start_tick);
 
-    BachCreateNoteResult result = createBachNote(&cp_state, &cp_rules, &cp_resolver, opts);
-    if (result.accepted) {
-      validated.notes.push_back(result.note);
+      // Current key for diatonic snapping (midpoint switch).
+      Key current_key = (note.start_tick >= start_tick + duration_ticks / 2 &&
+                         target_key != start_key)
+                            ? target_key
+                            : start_key;
+
+      // --- Lookahead: find next pitch in the same voice for NHT validation. ---
+      uint8_t lookahead_pitch = 0;
+      for (size_t nxt = idx + 1; nxt < raw.notes.size(); ++nxt) {
+        if (raw.notes[nxt].voice == note.voice &&
+            raw.notes[nxt].start_tick > note.start_tick) {
+          lookahead_pitch = raw.notes[nxt].pitch;
+          break;
+        }
+      }
+
+      // --- Candidate generation (harmony-first, max 3). ---
+      // Search center uses raw pitch to preserve the intended melodic contour.
+      // Scoring uses mel_ctx (from cp_state) to evaluate voice leading quality.
+      std::vector<PitchCandidate> candidates;
+      candidates.reserve(4);
+
+      // (1) Nearest chord tone to raw pitch (contour-preserving).
+      uint8_t ct_near = nearestChordTone(note.pitch, harm_ev);
+      candidates.push_back({ct_near, 0.0f, true});
+
+      // (2) Chord tone on the opposite side of raw pitch.
+      uint8_t probe = (ct_near >= note.pitch)
+                          ? static_cast<uint8_t>(note.pitch >= 4 ? note.pitch - 4 : 0)
+                          : static_cast<uint8_t>(note.pitch <= 123 ? note.pitch + 4 : 127);
+      uint8_t ct_other = nearestChordTone(probe, harm_ev);
+      if (ct_other != ct_near) {
+        candidates.push_back({ct_other, 0.0f, true});
+      }
+
+      // (3) Raw pitch diatonic snap (if not already a candidate).
+      uint8_t raw_diatonic = scale_util::nearestScaleTone(note.pitch, current_key, scale);
+      bool raw_is_ct = isChordTone(raw_diatonic, harm_ev);
+      bool already_present = false;
+      for (const auto& c : candidates) {
+        if (c.pitch == raw_diatonic) {
+          already_present = true;
+          break;
+        }
+      }
+      if (!already_present) {
+        // MetricLevel enforcement:
+        //   Bar: chord tones only (NHT forbidden).
+        //   Beat: NHT only with resolution (lookahead_pitch available).
+        //   Offbeat: unrestricted.
+        if (ml == MetricLevel::Bar && !raw_is_ct) {
+          // Skip non-chord tone on bar start.
+        } else if (ml == MetricLevel::Beat && !raw_is_ct && lookahead_pitch == 0) {
+          // Skip unresolvable NHT on beat.
+        } else {
+          candidates.push_back({raw_diatonic, 0.0f, raw_is_ct});
+        }
+      }
+
+      // --- Scoring: melodic quality + PhraseGoal. ---
+      MelodicContext mel_ctx = buildMelodicContextFromState(cp_state, note.voice);
+      for (auto& cand : candidates) {
+        float mel_score = MelodicContext::scoreMelodicQuality(
+            mel_ctx, cand.pitch, &phrase_goal, note.start_tick);
+
+        // Additional PhraseGoal bonus on Bar/Beat; doubled in final bar.
+        if (ml >= MetricLevel::Beat) {
+          float goal_bonus =
+              computeGoalApproachBonus(cand.pitch, note.start_tick, phrase_goal);
+          if (note.start_tick >= final_bar_start) goal_bonus *= 2.0f;
+          mel_score += goal_bonus;
+        }
+
+        // Chord tone affinity on structural beats.
+        if (cand.is_chord_tone && ml >= MetricLevel::Beat) {
+          mel_score += 0.15f;
+        }
+
+        cand.score = mel_score;
+      }
+
+      // Sort candidates by score descending.
+      std::sort(candidates.begin(), candidates.end(),
+                [](const PitchCandidate& a, const PitchCandidate& b) {
+                  return a.score > b.score;
+                });
+
+      // --- Sequential trial: best → 2nd → 3rd → omit. ---
+      bool placed = false;
+      for (const auto& cand : candidates) {
+        BachNoteOptions opts;
+        opts.voice = note.voice;
+        opts.desired_pitch = cand.pitch;
+        opts.tick = note.start_tick;
+        opts.duration = note.duration;
+        opts.velocity = note.velocity;
+        opts.source = BachNoteSource::EpisodeMaterial;
+        opts.next_pitch = lookahead_pitch;
+        opts.phrase_goal = &phrase_goal;
+        opts.prev_pitches[0] = mel_ctx.prev_pitches[0];
+        opts.prev_pitches[1] = mel_ctx.prev_pitches[1];
+        opts.prev_pitches[2] = mel_ctx.prev_pitches[2];
+        opts.prev_count = mel_ctx.prev_count;
+        opts.prev_direction = mel_ctx.prev_direction;
+
+        BachCreateNoteResult result =
+            createBachNote(&cp_state, &cp_rules, &cp_resolver, opts);
+        if (result.accepted) {
+          validated.notes.push_back(result.note);
+          placed = true;
+          break;
+        }
+      }
+      // All candidates failed → rest (omitted).
+      (void)placed;
     }
-    // Rejected notes become rests (omitted).
+
+    group_start = group_end;
   }
 
   return validated;
@@ -1131,7 +1244,7 @@ Episode generateFortspinnungEpisode(const Subject& subject, const MotifPool& poo
   phrase_goal.target_tick = episode_end;
   phrase_goal.bonus = 0.3f;
 
-  // Step 3: Post-validate each note through createBachNote().
+  // Step 3: Prepare validated episode.
   Episode validated;
   validated.start_tick = raw.start_tick;
   validated.end_tick = raw.end_tick;
@@ -1139,59 +1252,151 @@ Episode generateFortspinnungEpisode(const Subject& subject, const MotifPool& poo
   validated.end_key = raw.end_key;
   validated.notes.reserve(raw.notes.size());
 
-  // Sort by tick for chronological processing.
+  // Sort by tick then voice for tick-group processing.
   std::sort(raw.notes.begin(), raw.notes.end(),
             [](const NoteEvent& a, const NoteEvent& b) {
               if (a.start_tick != b.start_tick) return a.start_tick < b.start_tick;
               return a.voice < b.voice;
             });
 
-  // Diatonic context for pre-snapping.
   ScaleType scale = subject.is_minor ? ScaleType::HarmonicMinor : ScaleType::Major;
+  Tick final_bar_start = (episode_end > kTicksPerBar) ? episode_end - kTicksPerBar : 0;
 
-  for (size_t note_idx = 0; note_idx < raw.notes.size(); ++note_idx) {
-    const auto& note = raw.notes[note_idx];
-    // Query harmonic context at this tick.
-    const auto& harm_ev = timeline.getAt(note.start_tick);
-
-    // Pre-snap to diatonic scale (Phase 4: prevents chromatic artifacts).
-    Key current_key = (note.start_tick >= start_tick + duration_ticks / 2 &&
-                       target_key != start_key)
-                          ? target_key
-                          : start_key;
-    uint8_t diatonic_pitch = scale_util::nearestScaleTone(note.pitch, current_key, scale);
-
-    // Determine desired pitch: snap non-chord tones on strong beats.
-    uint8_t desired_pitch = diatonic_pitch;
-    bool is_strong = (note.start_tick % kTicksPerBeat == 0);
-    if (is_strong && !isChordTone(diatonic_pitch, harm_ev)) {
-      desired_pitch = nearestChordTone(diatonic_pitch, harm_ev);
+  // Step 4: Process notes in tick groups.
+  // Same start_tick events form a group; within each group, voices are processed
+  // in order so earlier voices are in cp_state when later voices are evaluated.
+  size_t group_start = 0;
+  while (group_start < raw.notes.size()) {
+    Tick group_tick = raw.notes[group_start].start_tick;
+    size_t group_end = group_start + 1;
+    while (group_end < raw.notes.size() &&
+           raw.notes[group_end].start_tick == group_tick) {
+      ++group_end;
     }
 
-    // Lookahead: find next pitch in the same voice for NHT validation.
-    uint8_t lookahead_pitch = 0;
-    for (size_t nxt = note_idx + 1; nxt < raw.notes.size(); ++nxt) {
-      if (raw.notes[nxt].voice == note.voice &&
-          raw.notes[nxt].start_tick > note.start_tick) {
-        lookahead_pitch = raw.notes[nxt].pitch;
-        break;
+    for (size_t idx = group_start; idx < group_end; ++idx) {
+      const auto& note = raw.notes[idx];
+      MetricLevel ml = metricLevel(note.start_tick);
+      const auto& harm_ev = timeline.getAt(note.start_tick);
+
+      // Current key for diatonic snapping (midpoint switch).
+      Key current_key = (note.start_tick >= start_tick + duration_ticks / 2 &&
+                         target_key != start_key)
+                            ? target_key
+                            : start_key;
+
+      // Lookahead: find next pitch in the same voice for NHT validation.
+      uint8_t lookahead_pitch = 0;
+      for (size_t nxt = idx + 1; nxt < raw.notes.size(); ++nxt) {
+        if (raw.notes[nxt].voice == note.voice &&
+            raw.notes[nxt].start_tick > note.start_tick) {
+          lookahead_pitch = raw.notes[nxt].pitch;
+          break;
+        }
       }
+
+      // --- Candidate generation (harmony-first, max 3). ---
+      // Search center uses raw pitch to preserve the intended melodic contour.
+      // Scoring uses mel_ctx (from cp_state) to evaluate voice leading quality.
+      std::vector<PitchCandidate> candidates;
+      candidates.reserve(4);
+
+      // (1) Nearest chord tone to raw pitch (contour-preserving).
+      uint8_t ct_near = nearestChordTone(note.pitch, harm_ev);
+      candidates.push_back({ct_near, 0.0f, true});
+
+      // (2) Chord tone on the opposite side of raw pitch.
+      uint8_t probe = (ct_near >= note.pitch)
+                          ? static_cast<uint8_t>(note.pitch >= 4 ? note.pitch - 4 : 0)
+                          : static_cast<uint8_t>(note.pitch <= 123 ? note.pitch + 4 : 127);
+      uint8_t ct_other = nearestChordTone(probe, harm_ev);
+      if (ct_other != ct_near) {
+        candidates.push_back({ct_other, 0.0f, true});
+      }
+
+      // (3) Raw pitch diatonic snap (if not already a candidate).
+      uint8_t raw_diatonic = scale_util::nearestScaleTone(note.pitch, current_key, scale);
+      bool raw_is_ct = isChordTone(raw_diatonic, harm_ev);
+      bool already_present = false;
+      for (const auto& c : candidates) {
+        if (c.pitch == raw_diatonic) {
+          already_present = true;
+          break;
+        }
+      }
+      if (!already_present) {
+        // MetricLevel enforcement:
+        //   Bar: chord tones only.
+        //   Beat: NHT only with resolution (lookahead available).
+        //   Offbeat: unrestricted.
+        if (ml == MetricLevel::Bar && !raw_is_ct) {
+          // Skip non-chord tone on bar start.
+        } else if (ml == MetricLevel::Beat && !raw_is_ct && lookahead_pitch == 0) {
+          // Skip unresolvable NHT on beat.
+        } else {
+          candidates.push_back({raw_diatonic, 0.0f, raw_is_ct});
+        }
+      }
+
+      // --- Scoring: melodic quality + PhraseGoal. ---
+      MelodicContext mel_ctx = buildMelodicContextFromState(cp_state, note.voice);
+      for (auto& cand : candidates) {
+        float mel_score = MelodicContext::scoreMelodicQuality(
+            mel_ctx, cand.pitch, &phrase_goal, note.start_tick);
+
+        // Additional PhraseGoal bonus on Bar/Beat; doubled in final bar.
+        if (ml >= MetricLevel::Beat) {
+          float goal_bonus =
+              computeGoalApproachBonus(cand.pitch, note.start_tick, phrase_goal);
+          if (note.start_tick >= final_bar_start) goal_bonus *= 2.0f;
+          mel_score += goal_bonus;
+        }
+
+        // Chord tone affinity on structural beats.
+        if (cand.is_chord_tone && ml >= MetricLevel::Beat) {
+          mel_score += 0.15f;
+        }
+
+        cand.score = mel_score;
+      }
+
+      // Sort candidates by score descending.
+      std::sort(candidates.begin(), candidates.end(),
+                [](const PitchCandidate& a, const PitchCandidate& b) {
+                  return a.score > b.score;
+                });
+
+      // --- Sequential trial: best → 2nd → 3rd → omit. ---
+      bool placed = false;
+      for (const auto& cand : candidates) {
+        BachNoteOptions opts;
+        opts.voice = note.voice;
+        opts.desired_pitch = cand.pitch;
+        opts.tick = note.start_tick;
+        opts.duration = note.duration;
+        opts.velocity = note.velocity;
+        opts.source = BachNoteSource::EpisodeMaterial;
+        opts.next_pitch = lookahead_pitch;
+        opts.phrase_goal = &phrase_goal;
+        opts.prev_pitches[0] = mel_ctx.prev_pitches[0];
+        opts.prev_pitches[1] = mel_ctx.prev_pitches[1];
+        opts.prev_pitches[2] = mel_ctx.prev_pitches[2];
+        opts.prev_count = mel_ctx.prev_count;
+        opts.prev_direction = mel_ctx.prev_direction;
+
+        BachCreateNoteResult result =
+            createBachNote(&cp_state, &cp_rules, &cp_resolver, opts);
+        if (result.accepted) {
+          validated.notes.push_back(result.note);
+          placed = true;
+          break;
+        }
+      }
+      // All candidates failed → rest (omitted).
+      (void)placed;
     }
 
-    // Route through createBachNote for counterpoint validation.
-    BachNoteOptions opts;
-    opts.voice = note.voice;
-    opts.desired_pitch = desired_pitch;
-    opts.tick = note.start_tick;
-    opts.duration = note.duration;
-    opts.velocity = note.velocity;
-    opts.source = BachNoteSource::EpisodeMaterial;
-    opts.next_pitch = lookahead_pitch;
-
-    BachCreateNoteResult result = createBachNote(&cp_state, &cp_rules, &cp_resolver, opts);
-    if (result.accepted) {
-      validated.notes.push_back(result.note);
-    }
+    group_start = group_end;
   }
 
   return validated;

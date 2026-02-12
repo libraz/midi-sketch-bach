@@ -665,7 +665,7 @@ std::vector<NoteEvent> generateBarNotes(
     std::mt19937& rng,
     uint8_t& prev_pitch,
     uint8_t prev_chord_root,
-    ArcPhase phase) {
+    [[maybe_unused]] ArcPhase phase) {
   std::vector<NoteEvent> notes;
 
   if (pattern.degrees.empty()) {
@@ -889,10 +889,10 @@ ArpeggioFlowResult generateArpeggioFlow(const ArpeggioFlowConfig& config) {
     arc_config = createDefaultArcConfig(config.num_sections);
   }
 
-  if (!validateGlobalArcConfig(arc_config)) {
+  auto arc_report = validateGlobalArcConfigReport(arc_config);
+  if (arc_report.hasCritical()) {
     result.success = false;
-    result.error_message = "Invalid GlobalArcConfig: must have monotonic Ascent->Peak->Descent "
-                           "with exactly 1 Peak section";
+    result.error_message = "Invalid GlobalArcConfig: " + arc_report.toJson();
     return result;
   }
 

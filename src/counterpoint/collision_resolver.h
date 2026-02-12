@@ -83,7 +83,8 @@ class CollisionResolver {
                      const IRuleEvaluator& rules,
                      VoiceId voice_id, uint8_t pitch,
                      Tick tick, Tick duration,
-                     uint8_t next_pitch = 0) const;
+                     uint8_t next_pitch = 0,
+                     int adjacent_spacing_limit = 14) const;
 
   /// @brief Find a safe pitch using the 6-stage strategy cascade.
   ///

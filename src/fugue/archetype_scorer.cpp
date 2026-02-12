@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <set>
 
+#include "core/pitch_utils.h"
 #include "fugue/stretto.h"
 #include "fugue/subject_params.h"
 #include "transform/motif_transform.h"
@@ -148,7 +149,7 @@ float ArchetypeScorer::scoreArchetypeFitness(
   if (policy.dominant_ending_prob >= 0.5f && subject.notes.size() >= 2) {
     int key_root = static_cast<int>(subject.key);
     int dominant_pc = (key_root + 7) % 12;
-    int last_pc = static_cast<int>(subject.notes.back().pitch) % 12;
+    int last_pc = getPitchClass(subject.notes.back().pitch);
     if (last_pc == dominant_pc) {
       // Scale bonus by how strongly the policy favors dominant (0.5-1.0 → 0.15-0.30).
       score += 0.15f + (policy.dominant_ending_prob - 0.5f) * 0.30f;
@@ -189,8 +190,8 @@ float ArchetypeScorer::scoreInversionQuality(const Subject& subject) const {
                         static_cast<int>(inverted[i].pitch);
     int prev_interval = static_cast<int>(subject.notes[i - 1].pitch) -
                         static_cast<int>(inverted[i - 1].pitch);
-    int orig_mod = ((orig_interval % 12) + 12) % 12;
-    int prev_mod = ((prev_interval % 12) + 12) % 12;
+    int orig_mod = getPitchClassSigned(orig_interval);
+    int prev_mod = getPitchClassSigned(prev_interval);
     // Check for parallel unisons, 5ths, or octaves.
     bool is_perfect = (orig_mod == 0 || orig_mod == 7);
     bool was_perfect = (prev_mod == 0 || prev_mod == 7);

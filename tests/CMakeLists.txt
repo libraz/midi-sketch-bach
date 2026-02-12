@@ -47,6 +47,7 @@ set(BACH_TEST_SOURCES
   counterpoint/suspension_chain_test.cpp
   counterpoint/counterpoint_validator_test.cpp
   counterpoint/melodic_context_test.cpp
+  counterpoint/repeated_note_repair_test.cpp
 
   # counterpoint/ (cantus firmus)
   counterpoint/cantus_firmus_test.cpp
@@ -111,6 +112,7 @@ set(BACH_TEST_SOURCES
   harmony/harmonic_function_test.cpp
   harmony/harmonic_timeline_test.cpp
   harmony/chord_function_test.cpp
+  harmony/chord_tone_utils_test.cpp
   harmony/modulation_plan_test.cpp
   harmony/extended_chord_test.cpp
   harmony/tempo_map_test.cpp
@@ -170,7 +172,6 @@ add_executable(bach_tests ${BACH_TEST_SOURCES})
 target_link_libraries(bach_tests
   PRIVATE
     bach_lib
-    GTest::gtest
     GTest::gtest_main
 )
 

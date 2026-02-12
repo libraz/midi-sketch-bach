@@ -123,10 +123,10 @@ int repairParallelPerfect(std::vector<NoteEvent>& notes,
 
             // Determine shift lists based on protection level.
             auto shiftsFor = [](ProtectionLevel pl) -> std::initializer_list<int> {
-              if (pl == ProtectionLevel::Flexible)
-                return {1, -1, 2, -2, 3, -3, 4, -4, 12, -12};
-              if (pl == ProtectionLevel::Structural)
-                return {12, -12};
+              static const auto flexible = {1, -1, 2, -2, 3, -3, 4, -4, 12, -12};
+              static const auto structural = {12, -12};
+              if (pl == ProtectionLevel::Flexible) return flexible;
+              if (pl == ProtectionLevel::Structural) return structural;
               return {};  // Immutable
             };
 

@@ -17,6 +17,7 @@
 #include "harmony/chord_tone_utils.h"
 #include "harmony/chord_types.h"
 #include "harmony/harmonic_event.h"
+#include "counterpoint/repeated_note_repair.h"
 #include "organ/organ_techniques.h"
 
 namespace bach {
@@ -120,10 +121,10 @@ std::pair<int, int> getVoiceCenterRange(uint8_t voice_idx, uint8_t num_voices) {
     if (voice_idx == 0) return {67, 82};  // G4-Bb5
     return {52, 68};                       // E3-Ab4
   }
-  // 3+ voices: clear register separation matching new ranges.
+  // 3+ voices: clear register separation with 7-semitone gap between voices 0 and 1.
   switch (voice_idx) {
-    case 0: return {67, 82};   // G4-Bb5 (Great: 60-88)
-    case 1: return {57, 70};   // A3-Bb4 (Swell: 52-76)
+    case 0: return {74, 84};   // D5-C6 (Great: 60-88)
+    case 1: return {55, 67};   // G3-G4 (Swell: 52-76)
     default: return {48, 58};  // C3-Bb3 (Positiv: 43-64)
   }
 }
@@ -199,8 +200,22 @@ std::vector<NoteEvent> generateScalePassage(const HarmonicEvent& event,
   Tick current_tick = event.tick;
   bool ascending = (pattern_index % 2 == 0);
 
+  // Start from the scale tone nearest to hint_center for continuity.
+  // Only fall back to random region when no hint is available.
   size_t start_idx;
-  if (ascending) {
+  if (hint_center >= 0) {
+    // Find the scale tone closest to the hint pitch.
+    int best_dist = 999;
+    size_t best_idx = 0;
+    for (size_t idx = 0; idx < scale_tones.size(); ++idx) {
+      int dist = std::abs(static_cast<int>(scale_tones[idx]) - hint_center);
+      if (dist < best_dist) {
+        best_dist = dist;
+        best_idx = idx;
+      }
+    }
+    start_idx = best_idx;
+  } else if (ascending) {
     start_idx = rng::rollRange(rng, 0, static_cast<int>(scale_tones.size()) / 3);
   } else {
     int high_start = static_cast<int>(scale_tones.size()) - 1;
@@ -267,7 +282,7 @@ std::vector<NoteEvent> generateArpeggioPassage(const HarmonicEvent& event,
   uint8_t high_pitch = getVoiceHighPitch(voice_idx);
 
   // Build arpeggio pitches spanning the voice range.
-  int root_pc = static_cast<int>(event.chord.root_pitch) % 12;
+  int root_pc = getPitchClass(event.chord.root_pitch);
   int third_offset = 4;
   if (event.chord.quality == ChordQuality::Minor ||
       event.chord.quality == ChordQuality::Diminished ||
@@ -300,7 +315,7 @@ std::vector<NoteEvent> generateArpeggioPassage(const HarmonicEvent& event,
 
   // Local register window: restrict arpeggio to ±9 semitones around a center.
   constexpr int kRegisterWindow = 9;
-  constexpr int kMaxLeap = 8;
+  constexpr int kMaxLeap = 5;  // Perfect 4th max; was 8 (minor 6th).
 
   int center;
   if (hint_center >= 0) {
@@ -334,29 +349,106 @@ std::vector<NoteEvent> generateArpeggioPassage(const HarmonicEvent& event,
   Tick event_duration = event.end_tick - event.tick;
   Tick current_tick = event.tick;
 
-  size_t arp_idx = arp_pitches.size() / 2;
+  // Start from the arpeggio pitch closest to hint for continuity.
+  size_t arp_idx;
+  if (hint_center >= 0) {
+    int best_dist = 999;
+    size_t best_idx = 0;
+    for (size_t idx = 0; idx < arp_pitches.size(); ++idx) {
+      int dist = std::abs(static_cast<int>(arp_pitches[idx]) - hint_center);
+      if (dist < best_dist) {
+        best_dist = dist;
+        best_idx = idx;
+      }
+    }
+    arp_idx = best_idx;
+  } else {
+    arp_idx = arp_pitches.size() / 2;
+  }
   bool going_up = rng::rollProbability(rng, 0.6f);
 
   uint8_t prev_pitch = arp_pitches[arp_idx];
 
+  // Leap resolution state: when a leap > 4 semitones occurs, force stepwise
+  // resolution in the opposite direction on the next note.
+  bool leap_pending = false;
+  int leap_direction = 0;  // +1 if the leap went up, -1 if down.
+
+  // Determine scale type for leap resolution lookups.
+  ScaleType arp_scale = event.is_minor ? ScaleType::HarmonicMinor : ScaleType::Major;
+
   while (current_tick < event.tick + event_duration) {
+    bool was_resolution = false;
     Tick remaining = (event.tick + event_duration) - current_tick;
     Tick dur = (remaining < note_duration) ? remaining : note_duration;
     if (dur == 0) break;
 
-    uint8_t candidate = arp_pitches[arp_idx];
-    if (absoluteInterval(candidate, prev_pitch) > kMaxLeap) {
+    uint8_t candidate;
+
+    if (leap_pending) {
+      // Resolve the leap: step in the opposite direction to the nearest scale tone.
+      int resolve_dir = -leap_direction;
+      int abs_deg = scale_util::pitchToAbsoluteDegree(prev_pitch, event.key, arp_scale);
+      uint8_t resolve_pitch =
+          scale_util::absoluteDegreeToPitch(abs_deg + resolve_dir, event.key, arp_scale);
+      resolve_pitch = clampPitch(static_cast<int>(resolve_pitch),
+                                 static_cast<int>(arp_pitches.front()),
+                                 static_cast<int>(arp_pitches.back()));
+      candidate = resolve_pitch;
+      leap_pending = false;
+      was_resolution = true;
+
+      // Update arp_idx to the nearest arpeggio pitch for subsequent navigation.
       int best_dist = 999;
-      size_t best_idx = arp_idx;
-      for (size_t i = 0; i < arp_pitches.size(); ++i) {
-        int dist = absoluteInterval(arp_pitches[i], prev_pitch);
-        if (dist <= kMaxLeap && dist < best_dist && arp_pitches[i] != prev_pitch) {
+      for (size_t idx = 0; idx < arp_pitches.size(); ++idx) {
+        int dist = std::abs(static_cast<int>(arp_pitches[idx])
+                            - static_cast<int>(candidate));
+        if (dist < best_dist) {
           best_dist = dist;
-          best_idx = i;
+          arp_idx = idx;
         }
       }
-      arp_idx = best_idx;
+    } else {
       candidate = arp_pitches[arp_idx];
+      if (absoluteInterval(candidate, prev_pitch) > kMaxLeap) {
+        // Try to find a chord tone within kMaxLeap of prev_pitch.
+        bool found = false;
+        int best_dist = 999;
+        size_t best_idx = arp_idx;
+        for (size_t idx = 0; idx < arp_pitches.size(); ++idx) {
+          int dist = absoluteInterval(arp_pitches[idx], prev_pitch);
+          if (dist <= kMaxLeap && dist < best_dist && arp_pitches[idx] != prev_pitch) {
+            best_dist = dist;
+            best_idx = idx;
+            found = true;
+          }
+        }
+        if (found) {
+          arp_idx = best_idx;
+          candidate = arp_pitches[arp_idx];
+        } else {
+          // All chord tones exceed kMaxLeap. Find nearest scale tone by degree.
+          int abs_deg = scale_util::pitchToAbsoluteDegree(prev_pitch, event.key, arp_scale);
+          int search_dir = going_up ? 1 : -1;
+          bool scale_found = false;
+          for (int delta = 1; delta <= 3 && !scale_found; ++delta) {
+            for (int dir : {search_dir, -search_dir}) {
+              uint8_t st = scale_util::absoluteDegreeToPitch(
+                  abs_deg + dir * delta, event.key, arp_scale);
+              if (st >= arp_pitches.front() && st <= arp_pitches.back() &&
+                  st != prev_pitch &&
+                  absoluteInterval(st, prev_pitch) <= kMaxLeap) {
+                candidate = st;
+                scale_found = true;
+                break;
+              }
+            }
+          }
+          if (!scale_found) {
+            candidate = prev_pitch;  // Last resort.
+          }
+        }
+      }
     }
 
     NoteEvent note;
@@ -368,9 +460,19 @@ std::vector<NoteEvent> generateArpeggioPassage(const HarmonicEvent& event,
     note.source = BachNoteSource::FreeCounterpoint;
     notes.push_back(note);
 
+    // Check if this note created a leap that needs resolution.
+    if (absoluteInterval(candidate, prev_pitch) > 4) {
+      leap_pending = true;
+      leap_direction = (candidate > prev_pitch) ? 1 : -1;
+    }
+
     prev_pitch = candidate;
     current_tick += dur;
 
+    // Skip arp_idx advance after leap resolution to let the resolution breathe.
+    if (was_resolution) continue;
+
+    // Advance arp_idx for next iteration.
     if (going_up) {
       if (arp_idx + 1 < arp_pitches.size()) {
         ++arp_idx;
@@ -567,7 +669,7 @@ std::vector<NoteEvent> generateMiddleVoice(const HarmonicTimeline& timeline,
 /// @return Octave-adjusted MIDI pitch.
 uint8_t fitBassRegister(int target_pitch, uint8_t prev_pitch,
                         uint8_t low, uint8_t high) {
-  int target_pc = ((target_pitch % 12) + 12) % 12;
+  int target_pc = getPitchClassSigned(target_pitch);
   int best = -1;
   int best_dist = 999;
   // Try all octave placements of this pitch class within the range.
@@ -1010,6 +1112,14 @@ PreludeResult generatePrelude(const PreludeConfig& config) {
         opts.velocity = note.velocity;
         opts.source = note.source;
 
+        // Lookahead: find next note in same voice for NHT classification hint.
+        for (size_t k = j + 1; k < all_notes.size() && k < j + 20; ++k) {
+          if (all_notes[k].voice == note.voice) {
+            opts.next_pitch = all_notes[k].pitch;
+            break;
+          }
+        }
+
         auto result = createBachNote(&cp_state, &cp_rules, &cp_resolver, opts);
         if (result.accepted) {
           coordinated.push_back(result.note);
@@ -1035,6 +1145,21 @@ PreludeResult generatePrelude(const PreludeConfig& config) {
   PostValidateStats pv_stats;
   all_notes = postValidateNotes(
       std::move(all_notes), num_voices, config.key, voice_ranges, &pv_stats);
+
+  // Repeated note repair: safety net for remaining consecutive repeated pitches.
+  {
+    RepeatedNoteRepairParams repair_params;
+    repair_params.num_voices = num_voices;
+    repair_params.key_at_tick = [&](Tick) { return config.key.tonic; };
+    repair_params.scale_at_tick = [&](Tick t) {
+      const auto& ev = timeline.getAt(t);
+      return ev.is_minor ? ScaleType::HarmonicMinor : ScaleType::Major;
+    };
+    repair_params.voice_range = [&](uint8_t v) -> std::pair<uint8_t, uint8_t> {
+      return {getVoiceLowPitch(v), getVoiceHighPitch(v)};
+    };
+    repairRepeatedNotes(all_notes, repair_params);
+  }
 
   // Step 4: Create tracks and assign notes by voice_id.
   std::vector<Track> tracks = createPreludeTracks(num_voices);

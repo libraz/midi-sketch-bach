@@ -7,6 +7,7 @@
 #include <utility>
 #include <vector>
 
+#include "analysis/fail_report.h"
 #include "core/basic_types.h"
 #include "harmony/key.h"
 
@@ -64,6 +65,19 @@ struct ArpeggioFlowConfig {
 /// @param config The GlobalArcConfig to validate.
 /// @return true if the config satisfies all constraints, false otherwise.
 bool validateGlobalArcConfig(const GlobalArcConfig& config);
+
+/// @brief Validate a GlobalArcConfig and return a structured FailReport.
+///
+/// Performs the same checks as validateGlobalArcConfig but returns a FailReport
+/// with detailed FailIssue entries for each detected problem:
+/// - Empty phase_assignment (ConfigFail, Critical)
+/// - First section not Ascent (ConfigFail, Critical)
+/// - Phase regression (ConfigFail, Critical)
+/// - Peak count != 1 (ConfigFail, Critical)
+///
+/// @param config The GlobalArcConfig to validate.
+/// @return FailReport containing all detected issues (empty if valid).
+FailReport validateGlobalArcConfigReport(const GlobalArcConfig& config);
 
 /// @brief Create a default GlobalArcConfig for a given number of sections.
 ///

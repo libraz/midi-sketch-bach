@@ -59,14 +59,6 @@ TEST(CharacteristicMotifTest, MotifContainsLeap_HigherScore) {
   Subject subject = makeTestSubject();
   auto motif = extractCharacteristicMotif(subject);
 
-  // Verify the motif contains at least one leap (>= 3 semitones).
-  bool has_leap = false;
-  for (size_t idx = 1; idx < motif.size(); ++idx) {
-    int ivl = std::abs(static_cast<int>(motif[idx].pitch) -
-                       static_cast<int>(motif[idx - 1].pitch));
-    if (ivl >= 3) has_leap = true;
-  }
-  // Either the motif has a leap or it's from the opening (also valid).
   // Just verify it returns valid notes.
   EXPECT_GE(motif.size(), 1u);
 }

@@ -4,7 +4,9 @@
 
 #include <algorithm>
 #include <random>
+#include <string>
 
+#include "analysis/fail_report.h"
 #include "core/rng_util.h"
 #include "harmony/key.h"
 
@@ -304,12 +306,19 @@ std::vector<ChaconneVariation> createScaledVariationPlan(const KeySignature& key
   return plan;
 }
 
-bool validateVariationPlan(const std::vector<ChaconneVariation>& plan) {
+FailReport validateVariationPlanReport(const std::vector<ChaconneVariation>& plan) {
+  FailReport report;
+
+  // Check 1: Empty plan.
   if (plan.empty()) {
-    return false;
+    report.addIssue({FailKind::ConfigFail, FailSeverity::Critical,
+                     /*tick=*/0, /*bar=*/0, /*beat=*/0,
+                     /*voice_a=*/0, /*voice_b=*/0,
+                     "empty_plan", "Variation plan is empty"});
+    return report;
   }
 
-  // Extract roles for order validation.
+  // Extract roles for order validation and check type constraints.
   std::vector<VariationRole> roles;
   roles.reserve(plan.size());
 
@@ -322,29 +331,51 @@ bool validateVariationPlan(const std::vector<ChaconneVariation>& plan) {
       ++accumulate_count;
     }
 
-    // Check that each variation's type is allowed for its role.
+    // Check 2: Each variation's type must be allowed for its role.
     if (!isTypeAllowedForRole(var.type, var.role)) {
-      return false;
+      report.addIssue({FailKind::ConfigFail, FailSeverity::Critical,
+                       /*tick=*/0, /*bar=*/0, /*beat=*/0,
+                       /*voice_a=*/0, /*voice_b=*/0,
+                       "invalid_type_for_role",
+                       "Variation " + std::to_string(var.variation_number) + ": type " +
+                           variationTypeToString(var.type) + " not allowed for role " +
+                           variationRoleToString(var.role)});
     }
   }
 
-  // Accumulate must appear exactly 3 times.
+  // Check 3: Accumulate must appear exactly 3 times.
   if (accumulate_count != 3) {
-    return false;
+    report.addIssue({FailKind::ConfigFail, FailSeverity::Critical,
+                     /*tick=*/0, /*bar=*/0, /*beat=*/0,
+                     /*voice_a=*/0, /*voice_b=*/0,
+                     "accumulate_count",
+                     "Expected 3 Accumulate, found " + std::to_string(accumulate_count)});
   }
 
-  // Final variation must be Resolve with Theme type.
+  // Check 4: Final variation must be Resolve with Theme type.
   const auto& last = plan.back();
   if (last.role != VariationRole::Resolve || last.type != VariationType::Theme) {
-    return false;
+    report.addIssue({FailKind::ConfigFail, FailSeverity::Critical,
+                     /*tick=*/0, /*bar=*/0, /*beat=*/0,
+                     /*voice_a=*/0, /*voice_b=*/0,
+                     "final_not_resolve",
+                     "Last variation must be Resolve with Theme type"});
   }
 
-  // Check role order validity.
+  // Check 5: Role order validity.
   if (!isRoleOrderValid(roles)) {
-    return false;
+    report.addIssue({FailKind::ConfigFail, FailSeverity::Critical,
+                     /*tick=*/0, /*bar=*/0, /*beat=*/0,
+                     /*voice_a=*/0, /*voice_b=*/0,
+                     "invalid_role_order",
+                     "Variation role sequence violates ordering constraints"});
   }
 
-  return true;
+  return report;
+}
+
+bool validateVariationPlan(const std::vector<ChaconneVariation>& plan) {
+  return !validateVariationPlanReport(plan).hasCritical();
 }
 
 }  // namespace bach

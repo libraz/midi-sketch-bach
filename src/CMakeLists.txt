@@ -47,6 +47,7 @@ set(BACH_LIB_SOURCES
   counterpoint/species_rules.cpp
   counterpoint/collision_resolver.cpp
   counterpoint/parallel_repair.cpp
+  counterpoint/repeated_note_repair.cpp
   counterpoint/suspension_chain.cpp
   counterpoint/voice_manager.cpp
   counterpoint/motion_analyzer.cpp
@@ -105,7 +106,6 @@ set(BACH_LIB_SOURCES
   harmony/harmonic_timeline.cpp
   harmony/harmonic_function.cpp
   harmony/modulation_plan.cpp
-  harmony/voice_leading_planner.cpp
   harmony/chord_tone_utils.cpp
   harmony/tempo_map.cpp
   harmony/harmonic_rhythm.cpp

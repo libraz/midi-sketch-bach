@@ -294,7 +294,7 @@ float SubjectValidator::scoreTonalStability(const Subject& subject) const {
   if (subject.notes.empty()) return 0.0f;
 
   int key_offset = static_cast<int>(subject.key);
-  int tonic_class = key_offset % 12;
+  int tonic_class = getPitchClass(static_cast<uint8_t>(key_offset));
   int dominant_class = (key_offset + interval::kPerfect5th) % 12;
 
   float score = 0.0f;

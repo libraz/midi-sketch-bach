@@ -22,53 +22,6 @@ size_t totalNoteCount(const FugueResult& result) {
   return count;
 }
 
-/// @brief Count voice crossings in a fugue result.
-int countVoiceCrossings(const FugueResult& result) {
-  // Collect all notes sorted by tick.
-  std::vector<NoteEvent> all_notes;
-  for (const auto& track : result.tracks) {
-    all_notes.insert(all_notes.end(), track.notes.begin(), track.notes.end());
-  }
-  std::sort(all_notes.begin(), all_notes.end(),
-            [](const NoteEvent& a, const NoteEvent& b) {
-              return a.start_tick < b.start_tick;
-            });
-
-  int crossings = 0;
-  for (size_t i = 0; i < all_notes.size(); ++i) {
-    for (size_t j = i + 1; j < all_notes.size(); ++j) {
-      if (all_notes[j].start_tick > all_notes[i].start_tick + all_notes[i].duration) break;
-      if (all_notes[j].start_tick != all_notes[i].start_tick) continue;
-      // Same tick: higher voice should have higher pitch.
-      if (all_notes[i].voice < all_notes[j].voice &&
-          all_notes[i].pitch < all_notes[j].pitch) {
-        ++crossings;
-      }
-      if (all_notes[i].voice > all_notes[j].voice &&
-          all_notes[i].pitch > all_notes[j].pitch) {
-        ++crossings;
-      }
-    }
-  }
-  return crossings;
-}
-
-/// @brief Compute chord tone ratio against the timeline.
-float computeChordToneRatio(const FugueResult& result) {
-  int chord_tones = 0;
-  int total = 0;
-  for (const auto& track : result.tracks) {
-    for (const auto& note : track.notes) {
-      const auto& ev = result.timeline.getAt(note.start_tick);
-      if (isChordTone(note.pitch, ev)) {
-        ++chord_tones;
-      }
-      ++total;
-    }
-  }
-  if (total == 0) return 1.0f;
-  return static_cast<float>(chord_tones) / static_cast<float>(total);
-}
 
 TEST(FugueQualityGateTest, GenerationSucceeds10Seeds) {
   for (uint32_t seed = 1000; seed < 1010; ++seed) {

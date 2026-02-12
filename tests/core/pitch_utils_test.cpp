@@ -403,5 +403,35 @@ TEST(IsDiatonicInKeyTest, MajorKeyUnchanged) {
   EXPECT_TRUE(isDiatonicInKey(60, Key::C, false));
 }
 
+// ---------------------------------------------------------------------------
+// getPitchClassSigned -- signed pitch class extraction
+// ---------------------------------------------------------------------------
+
+TEST(PitchUtilsTest, GetPitchClassSignedPositive) {
+  EXPECT_EQ(getPitchClassSigned(60), 0);   // C4
+  EXPECT_EQ(getPitchClassSigned(61), 1);   // C#4
+  EXPECT_EQ(getPitchClassSigned(71), 11);  // B4
+  EXPECT_EQ(getPitchClassSigned(72), 0);   // C5
+}
+
+TEST(PitchUtilsTest, GetPitchClassSignedZero) {
+  EXPECT_EQ(getPitchClassSigned(0), 0);
+}
+
+TEST(PitchUtilsTest, GetPitchClassSignedNegative) {
+  EXPECT_EQ(getPitchClassSigned(-1), 11);   // B below C0
+  EXPECT_EQ(getPitchClassSigned(-12), 0);   // C one octave below
+  EXPECT_EQ(getPitchClassSigned(-13), 11);  // B two octaves below
+  EXPECT_EQ(getPitchClassSigned(-7), 5);    // F below C0
+}
+
+TEST(PitchUtilsTest, GetPitchClassSignedConsistentWithUnsigned) {
+  // For non-negative values, both functions should agree.
+  for (int p = 0; p <= 127; ++p) {
+    EXPECT_EQ(getPitchClassSigned(p), getPitchClass(static_cast<uint8_t>(p)))
+        << "Mismatch at pitch " << p;
+  }
+}
+
 }  // namespace
 }  // namespace bach
