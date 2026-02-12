@@ -6,7 +6,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-from scripts.bach_analyzer.model import Note, Score, Track
+from scripts.bach_analyzer.model import Note, NoteSource, Provenance, Score, Track
 from scripts.bach_analyzer.rules.base import Severity
 from scripts.bach_analyzer.rules.melodic import (
     ConsecutiveRepeatedNotes,
@@ -46,13 +46,32 @@ class TestConsecutiveRepeatedNotes(unittest.TestCase):
         self.assertTrue(result.passed)
 
 
+class TestConsecutiveRepeatedNotesGap(unittest.TestCase):
+    def test_gap_breaks_run(self):
+        """Same pitch notes separated by >2 bars gap should not form a run."""
+        # 3 notes at C4, then a 3-bar gap, then 3 more C4 notes
+        notes = (
+            [_n(60, i * 480) for i in range(3)]
+            + [_n(60, 3 * 1920 + i * 480) for i in range(3)]
+        )
+        result = ConsecutiveRepeatedNotes(max_repeats=3).check(_score([_track("s", notes)]))
+        # Each group is 3 (at limit), not 6
+        self.assertTrue(result.passed)
+
+    def test_no_gap_forms_run(self):
+        """Same pitch notes without large gap should still be detected."""
+        notes = [_n(60, i * 480) for i in range(5)]  # 5x C4 contiguous
+        result = ConsecutiveRepeatedNotes(max_repeats=3).check(_score([_track("s", notes)]))
+        self.assertFalse(result.passed)
+
+
 class TestExcessiveLeap(unittest.TestCase):
     def test_large_leap(self):
-        notes = [_n(60, 0), _n(75, 480)]  # 15 semitones
+        notes = [_n(60, 0), _n(78, 480)]  # 18 semitones (> default 16)
         result = ExcessiveLeap().check(_score([_track("s", notes)]))
         self.assertFalse(result.passed)
         self.assertEqual(result.violations[0].severity, Severity.ERROR)
-        self.assertIn("15", result.violations[0].description)
+        self.assertIn("18", result.violations[0].description)
 
     def test_octave_ok(self):
         notes = [_n(60, 0), _n(72, 480)]  # exactly 12
@@ -86,6 +105,97 @@ class TestStepwiseMotionRatio(unittest.TestCase):
     def test_mostly_steps(self):
         notes = [_n(60, 0), _n(62, 480), _n(64, 960), _n(65, 1440)]
         result = StepwiseMotionRatio(min_ratio=0.4).check(_score([_track("s", notes)]))
+        self.assertTrue(result.passed)
+
+
+class TestConsecutiveRepeatedNotesPedalExempt(unittest.TestCase):
+    def test_pedal_point_exempt(self):
+        """Repeated notes with pedal_point source should be exempt."""
+        prov = Provenance(source=NoteSource.PEDAL_POINT)
+        notes = [
+            Note(pitch=36, velocity=80, start_tick=i * 480, duration=480,
+                 voice="pedal", provenance=prov)
+            for i in range(6)
+        ]
+        result = ConsecutiveRepeatedNotes(max_repeats=3).check(
+            _score([_track("pedal", notes)])
+        )
+        self.assertTrue(result.passed)
+
+    def test_ground_bass_exempt(self):
+        """Repeated notes with ground_bass source should be exempt."""
+        prov = Provenance(source=NoteSource.GROUND_BASS)
+        notes = [
+            Note(pitch=48, velocity=80, start_tick=i * 480, duration=480,
+                 voice="bass", provenance=prov)
+            for i in range(5)
+        ]
+        result = ConsecutiveRepeatedNotes(max_repeats=3).check(
+            _score([_track("bass", notes)])
+        )
+        self.assertTrue(result.passed)
+
+
+class TestLeapResolutionArpeggioExempt(unittest.TestCase):
+    def test_episode_material_exempt(self):
+        """Leaps in episode_material are exempt from resolution check."""
+        prov = Provenance(source=NoteSource.EPISODE_MATERIAL)
+        notes = [
+            Note(pitch=60, velocity=80, start_tick=0, duration=480, voice="s", provenance=prov),
+            Note(pitch=67, velocity=80, start_tick=480, duration=480, voice="s", provenance=prov),
+            Note(pitch=72, velocity=80, start_tick=960, duration=480, voice="s", provenance=prov),
+        ]
+        result = LeapResolution().check(_score([_track("s", notes)]))
+        self.assertTrue(result.passed)
+
+    def test_arpeggio_flow_exempt(self):
+        """Leaps in arpeggio_flow are exempt from resolution check."""
+        prov = Provenance(source=NoteSource.ARPEGGIO_FLOW)
+        notes = [
+            Note(pitch=60, velocity=80, start_tick=0, duration=480, voice="s", provenance=prov),
+            Note(pitch=67, velocity=80, start_tick=480, duration=480, voice="s", provenance=prov),
+            Note(pitch=69, velocity=80, start_tick=960, duration=480, voice="s", provenance=prov),
+        ]
+        result = LeapResolution().check(_score([_track("s", notes)]))
+        self.assertTrue(result.passed)
+
+
+class TestLeapResolutionN1Source(unittest.TestCase):
+    def test_n1_episode_material_exempt(self):
+        """Leap where n1 is episode_material should be exempt even if n2 is not."""
+        prov_ep = Provenance(source=NoteSource.EPISODE_MATERIAL)
+        prov_fc = Provenance(source=NoteSource.FREE_COUNTERPOINT)
+        notes = [
+            Note(pitch=60, velocity=80, start_tick=0, duration=480, voice="s", provenance=prov_ep),
+            Note(pitch=67, velocity=80, start_tick=480, duration=480, voice="s", provenance=prov_fc),
+            Note(pitch=69, velocity=80, start_tick=960, duration=480, voice="s", provenance=prov_fc),
+        ]
+        result = LeapResolution().check(_score([_track("s", notes)]))
+        self.assertTrue(result.passed)
+
+    def test_both_non_arpeggio_flagged(self):
+        """Leap where neither n1 nor n2 is arpeggio should still be flagged."""
+        prov_fc = Provenance(source=NoteSource.FREE_COUNTERPOINT)
+        notes = [
+            Note(pitch=60, velocity=80, start_tick=0, duration=480, voice="s", provenance=prov_fc),
+            Note(pitch=67, velocity=80, start_tick=480, duration=480, voice="s", provenance=prov_fc),
+            Note(pitch=69, velocity=80, start_tick=960, duration=480, voice="s", provenance=prov_fc),
+        ]
+        result = LeapResolution().check(_score([_track("s", notes)]))
+        self.assertFalse(result.passed)
+
+
+class TestExcessiveLeapThreshold(unittest.TestCase):
+    def test_14_semitones_flagged(self):
+        """14 semitones (> new default 13) should be flagged."""
+        notes = [_n(60, 0), _n(74, 480)]
+        result = ExcessiveLeap().check(_score([_track("s", notes)]))
+        self.assertFalse(result.passed)
+
+    def test_13_semitones_ok(self):
+        """Exactly 13 semitones (= threshold) should pass."""
+        notes = [_n(60, 0), _n(73, 480)]
+        result = ExcessiveLeap().check(_score([_track("s", notes)]))
         self.assertTrue(result.passed)
 
 

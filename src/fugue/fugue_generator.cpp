@@ -8,6 +8,7 @@
 #include <random>
 
 #include "core/gm_program.h"
+#include "core/interval.h"
 #include "core/note_source.h"
 #include "core/pitch_utils.h"
 #include "core/rng_util.h"
@@ -15,6 +16,7 @@
 #include "counterpoint/bach_rule_evaluator.h"
 #include "counterpoint/collision_resolver.h"
 #include "counterpoint/counterpoint_state.h"
+#include "counterpoint/parallel_repair.h"
 #include "core/note_creator.h"
 #include "fugue/answer.h"
 #include "fugue/cadence_plan.h"
@@ -1141,160 +1143,17 @@ FugueResult generateFugue(const FugueConfig& config) {
       }
     }
 
-    // Parallel repair pass: the diatonic sweep may create new parallels by
-    // snapping a note at tick T, affecting the T->T+1 transition which isn't
-    // checked during the forward-only sweep. Walk beats directly and fix
-    // remaining non-structural parallels by shifting flexible notes.
+    // Parallel repair pass: shared utility for detecting and fixing
+    // parallel perfect consonances via dual-scan and pitch shifting.
     if (num_voices >= 2) {
-      // Build per-voice sorted note lists with indices into all_notes.
-      struct VoiceNote {
-        size_t idx;  // Index in all_notes.
-        Tick start;
-        Tick end;
-        uint8_t pitch;
-        BachNoteSource source;
+      ParallelRepairParams repair_params;
+      repair_params.num_voices = num_voices;
+      repair_params.scale = effective_scale;
+      repair_params.key_at_tick = [&](Tick t) { return tonal_plan.keyAtTick(t); };
+      repair_params.voice_range = [&](uint8_t v) {
+        return getFugueVoiceRange(v, num_voices);
       };
-      std::vector<std::vector<VoiceNote>> voice_notes(num_voices);
-      for (size_t i = 0; i < all_notes.size(); ++i) {
-        auto& n = all_notes[i];
-        if (n.voice >= num_voices) continue;
-        voice_notes[n.voice].push_back(
-            {i, n.start_tick, n.start_tick + n.duration, n.pitch, n.source});
-      }
-      for (auto& vn : voice_notes) {
-        std::sort(vn.begin(), vn.end(),
-                  [](const VoiceNote& a, const VoiceNote& b) {
-                    return a.start < b.start;
-                  });
-      }
-
-      // Helper: find sounding pitch at tick for a voice.
-      auto sounding = [&](uint8_t v, Tick t) -> int {
-        for (auto it = voice_notes[v].rbegin(); it != voice_notes[v].rend(); ++it) {
-          if (it->start <= t && t < it->end) return static_cast<int>(it->pitch);
-          if (it->end <= t) break;
-        }
-        return -1;
-      };
-
-      // Helper: check if interval is perfect consonance (P1/P5/P8).
-      auto isPerfect = [](int semitones) {
-        int s = ((semitones % 12) + 12) % 12;
-        return s == 0 || s == 7;
-      };
-
-      // Find max tick.
-      Tick max_tick = 0;
-      for (const auto& n : all_notes) {
-        Tick e = n.start_tick + n.duration;
-        if (e > max_tick) max_tick = e;
-      }
-
-      // Scan each voice pair for parallels and fix flexible notes.
-      for (uint8_t va = 0; va < num_voices; ++va) {
-        for (uint8_t vb = va + 1; vb < num_voices; ++vb) {
-          int prev_a = -1, prev_b = -1;
-          for (Tick beat = 0; beat < max_tick; beat += kTicksPerBeat) {
-            int cur_a = sounding(va, beat);
-            int cur_b = sounding(vb, beat);
-            if (cur_a < 0 || cur_b < 0 || prev_a < 0 || prev_b < 0) {
-              prev_a = cur_a; prev_b = cur_b;
-              continue;
-            }
-            int pi = std::abs(prev_a - prev_b), ci = std::abs(cur_a - cur_b);
-            if (isPerfect(pi) && isPerfect(ci)) {
-              int ma = cur_a - prev_a, mb = cur_b - prev_b;
-              bool same_dir = (ma > 0 && mb > 0) || (ma < 0 && mb < 0);
-              int ps = ((pi % 12) + 12) % 12, cs = ((ci % 12) + 12) % 12;
-              if (same_dir && ps == cs) {
-                // Parallel detected. Try to fix a flexible note at current beat.
-                // Prefer fixing the note that was snapped by the diatonic sweep.
-                for (uint8_t fix_v : {vb, va}) {
-                  // Find the sounding note for fix_v at this beat.
-                  size_t fix_idx = SIZE_MAX;
-                  for (auto& vn : voice_notes[fix_v]) {
-                    if (vn.start <= beat && beat < vn.end) {
-                      fix_idx = vn.idx;
-                      break;
-                    }
-                  }
-                  if (fix_idx == SIZE_MAX) continue;
-                  auto& fix_note = all_notes[fix_idx];
-                  if (isStructuralSource(fix_note.source)) continue;
-
-                  uint8_t other_v = (fix_v == va) ? vb : va;
-                  int other_pitch = sounding(other_v, beat);
-                  if (other_pitch < 0) continue;
-
-                  Key note_key = tonal_plan.keyAtTick(fix_note.start_tick);
-                  bool fixed = false;
-                  for (int delta : {1, -1, 2, -2, 3, -3, 4, -4}) {
-                    int cand = static_cast<int>(fix_note.pitch) + delta;
-                    if (cand < 0 || cand > 127) continue;
-                    uint8_t ucand = static_cast<uint8_t>(cand);
-                    if (!scale_util::isScaleTone(ucand, note_key, effective_scale))
-                      continue;
-                    // Verify the shift doesn't create a new parallel at either
-                    // the prev->current or current->next transitions.
-                    int new_ci = std::abs(cand - other_pitch);
-                    if (isPerfect(pi) && isPerfect(new_ci)) {
-                      int new_m = cand - static_cast<int>(fix_note.pitch) +
-                                  (fix_v == va ? ma : mb);
-                      // Skip: still parallel with prev beat.
-                      int new_ps = ((pi % 12) + 12) % 12;
-                      int new_cs = ((new_ci % 12) + 12) % 12;
-                      if (new_ps == new_cs) continue;
-                    }
-                    // Check also that this doesn't create a parallel at this
-                    // note's OTHER voice pair transitions.
-                    bool creates_other_parallel = false;
-                    for (uint8_t ov = 0; ov < num_voices; ++ov) {
-                      if (ov == fix_v) continue;
-                      int ov_cur = sounding(ov, beat);
-                      Tick prev_beat = (beat >= kTicksPerBeat) ? beat - kTicksPerBeat : 0;
-                      if (beat == 0) continue;
-                      int ov_prev = sounding(ov, prev_beat);
-                      int fix_prev = -1;
-                      for (auto& vn : voice_notes[fix_v]) {
-                        if (vn.start <= prev_beat && prev_beat < vn.end) {
-                          fix_prev = static_cast<int>(vn.pitch);
-                          break;
-                        }
-                      }
-                      if (ov_cur < 0 || ov_prev < 0 || fix_prev < 0) continue;
-                      int p_ivl = std::abs(fix_prev - ov_prev);
-                      int c_ivl = std::abs(cand - ov_cur);
-                      if (isPerfect(p_ivl) && isPerfect(c_ivl)) {
-                        int p_s = ((p_ivl % 12) + 12) % 12;
-                        int c_s = ((c_ivl % 12) + 12) % 12;
-                        if (p_s == c_s) {
-                          int m_fix = cand - fix_prev;
-                          int m_ov = ov_cur - ov_prev;
-                          bool sd = (m_fix > 0 && m_ov > 0) || (m_fix < 0 && m_ov < 0);
-                          if (sd) { creates_other_parallel = true; break; }
-                        }
-                      }
-                    }
-                    if (creates_other_parallel) continue;
-
-                    fix_note.pitch = ucand;
-                    // Update voice_notes cache.
-                    for (auto& vn : voice_notes[fix_v]) {
-                      if (vn.idx == fix_idx) { vn.pitch = ucand; break; }
-                    }
-                    // Update sounding values for continued scanning.
-                    if (fix_v == va) cur_a = cand; else cur_b = cand;
-                    fixed = true;
-                    break;
-                  }
-                  if (fixed) break;
-                }
-              }
-            }
-            prev_a = cur_a; prev_b = cur_b;
-          }
-        }
-      }
+      repairParallelPerfect(all_notes, repair_params);
     }
 
     // Compute quality metrics.

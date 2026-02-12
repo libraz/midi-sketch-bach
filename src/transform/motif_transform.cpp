@@ -161,11 +161,74 @@ std::vector<NoteEvent> transposeMelodyDiatonic(const std::vector<NoteEvent>& not
 
   std::vector<NoteEvent> result;
   result.reserve(notes.size());
-  for (const auto& note : notes) {
-    NoteEvent transposed = note;
-    int note_degree = scale_util::pitchToAbsoluteDegree(note.pitch, key, scale);
+
+  uint8_t prev_pitch = 0;
+  for (size_t idx = 0; idx < notes.size(); ++idx) {
+    NoteEvent transposed = notes[idx];
+    int note_degree = scale_util::pitchToAbsoluteDegree(notes[idx].pitch, key, scale);
     int new_degree = note_degree + degree_steps;
-    transposed.pitch = scale_util::absoluteDegreeToPitch(new_degree, key, scale);
+    uint8_t raw_pitch = scale_util::absoluteDegreeToPitch(new_degree, key, scale);
+
+    // Snap off-scale pitches respecting melodic direction.
+    if (!scale_util::isScaleTone(raw_pitch, key, scale)) {
+      int int_pitch = static_cast<int>(raw_pitch);
+      uint8_t lower = 0;
+      uint8_t upper = 0;
+      bool found_lower = false;
+      bool found_upper = false;
+      for (int off = 1; off <= 6; ++off) {
+        if (!found_lower && int_pitch - off >= 0) {
+          auto cand = static_cast<uint8_t>(int_pitch - off);
+          if (scale_util::isScaleTone(cand, key, scale)) {
+            lower = cand;
+            found_lower = true;
+          }
+        }
+        if (!found_upper && int_pitch + off <= 127) {
+          auto cand = static_cast<uint8_t>(int_pitch + off);
+          if (scale_util::isScaleTone(cand, key, scale)) {
+            upper = cand;
+            found_upper = true;
+          }
+        }
+        if (found_lower && found_upper) break;
+      }
+
+      // Choose candidate that preserves melodic direction.
+      if (found_lower && found_upper) {
+        if (prev_pitch > 0) {
+          int dir = (degree_steps > 0) ? 1 : (degree_steps < 0) ? -1 : 0;
+          if (idx > 0) {
+            // Use transposed pitches for direction (not original pitches).
+            int local_dir = static_cast<int>(raw_pitch) -
+                            static_cast<int>(prev_pitch);
+            if (local_dir != 0) dir = (local_dir > 0) ? 1 : -1;
+          }
+          if (dir > 0) {
+            raw_pitch = upper;
+          } else if (dir < 0) {
+            raw_pitch = lower;
+          } else {
+            // No direction: pick closer, prefer lower on tie.
+            int d_lo = int_pitch - static_cast<int>(lower);
+            int d_hi = static_cast<int>(upper) - int_pitch;
+            raw_pitch = (d_lo <= d_hi) ? lower : upper;
+          }
+        } else {
+          // First note: prefer closer, lower on tie.
+          int d_lo = int_pitch - static_cast<int>(lower);
+          int d_hi = static_cast<int>(upper) - int_pitch;
+          raw_pitch = (d_lo <= d_hi) ? lower : upper;
+        }
+      } else if (found_lower) {
+        raw_pitch = lower;
+      } else if (found_upper) {
+        raw_pitch = upper;
+      }
+    }
+
+    transposed.pitch = raw_pitch;
+    prev_pitch = raw_pitch;
     result.push_back(transposed);
   }
   return result;

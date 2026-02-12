@@ -8,10 +8,12 @@
 #include <vector>
 
 #include "core/gm_program.h"
+#include "core/note_creator.h"
 #include "core/pitch_utils.h"
 #include "core/rng_util.h"
 #include "core/scale.h"
 #include "harmony/chord_types.h"
+#include "harmony/key.h"
 #include "harmony/harmonic_event.h"
 #include "ornament/ornament_engine.h"
 #include "organ/organ_techniques.h"
@@ -358,8 +360,7 @@ std::vector<NoteEvent> generateOpeningGesture(const HarmonicTimeline& timeline,
   Tick opening_bars = total_opening / kTicksPerBar;
 
   // Dominant in octave 5 for dramatic opening (BWV 565: A5)
-  uint8_t tpc = static_cast<uint8_t>(key_sig.tonic);
-  uint8_t dominant_pc = (tpc + 7) % 12;
+  uint8_t dominant_pc = static_cast<uint8_t>(getDominant(key_sig).tonic);
   uint8_t start_pitch1 = clampPitch(72 + dominant_pc, low0, high0);
 
   // One scale step below dominant for second wave
@@ -767,7 +768,7 @@ std::vector<NoteEvent> generatePedalSolo(const KeySignature& key_sig,
   Tick mid = start_tick + (end_tick - start_tick) / 2;
 
   // Bar 1: descending scale from dominant area
-  uint8_t dominant_pc = (static_cast<uint8_t>(key_sig.tonic) + 7) % 12;
+  uint8_t dominant_pc = static_cast<uint8_t>(getDominant(key_sig).tonic);
   size_t start_idx = scale.size() - 1;
   for (size_t i = 0; i < scale.size(); ++i) {
     if (scale[i] % 12 == dominant_pc && scale[i] >= 36) {
@@ -830,7 +831,8 @@ std::vector<NoteEvent> generateRhythmicPedal(const KeySignature& key_sig,
 
   uint8_t tpc = static_cast<uint8_t>(key_sig.tonic);
   uint8_t tonic = clampPitch(36 + tpc, low, high);
-  uint8_t dominant = clampPitch(36 + (tpc + 7) % 12, low, high);
+  uint8_t dominant = clampPitch(36 + static_cast<int>(getDominant(key_sig).tonic),
+                                low, high);
 
   Tick tick = start_tick;
   while (tick < end_tick) {
@@ -1029,6 +1031,26 @@ ToccataResult generateDramaticusToccata(const ToccataConfig& config) {
       auto rp = generateRhythmicPedal(config.key, rp_start, rp_end, rp_phase3);
       all_notes.insert(all_notes.end(), rp.begin(), rp.end());
     }
+  }
+
+  // Post-validate through counterpoint engine.
+  if (num_voices >= 2) {
+    std::vector<std::pair<uint8_t, uint8_t>> voice_ranges;
+    for (uint8_t v = 0; v < num_voices; ++v) {
+      voice_ranges.emplace_back(getToccataLowPitch(v), getToccataHighPitch(v));
+    }
+
+    // Tag untagged notes: voice 2 = Pedal (Structural), others = FreeCounterpoint.
+    for (auto& n : all_notes) {
+      if (n.source == BachNoteSource::Unknown) {
+        n.source = isPedalVoice(n.voice, num_voices) ? BachNoteSource::PedalPoint
+                                  : BachNoteSource::FreeCounterpoint;
+      }
+    }
+
+    PostValidateStats stats;
+    all_notes = postValidateNotes(
+        std::move(all_notes), num_voices, config.key, voice_ranges, &stats);
   }
 
   // Create tracks and assign notes by voice

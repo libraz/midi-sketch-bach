@@ -5,6 +5,8 @@
 
 #include <cstdlib>
 
+#include "core/pitch_utils.h"
+
 namespace bach {
 
 // ---------------------------------------------------------------------------
@@ -141,10 +143,8 @@ NonHarmonicToneType classifyNonHarmonicTone(uint8_t prev_pitch, uint8_t current_
   bool has_next = next_pitch > 0;
 
   if (has_prev && has_next) {
-    int step_from_prev =
-        std::abs(static_cast<int>(current_pitch) - static_cast<int>(prev_pitch));
-    int step_to_next =
-        std::abs(static_cast<int>(next_pitch) - static_cast<int>(current_pitch));
+    int step_from_prev = absoluteInterval(current_pitch, prev_pitch);
+    int step_to_next = absoluteInterval(next_pitch, current_pitch);
 
     // Passing tone: stepwise from prev, stepwise to next, same direction,
     // both neighbors are chord tones.
@@ -172,10 +172,8 @@ NonHarmonicToneType classifyNonHarmonicTone(uint8_t prev_pitch, uint8_t current_
   }
 
   if (has_prev && has_next) {
-    int step_from_prev =
-        std::abs(static_cast<int>(current_pitch) - static_cast<int>(prev_pitch));
-    int step_to_next =
-        std::abs(static_cast<int>(next_pitch) - static_cast<int>(current_pitch));
+    int step_from_prev = absoluteInterval(current_pitch, prev_pitch);
+    int step_to_next = absoluteInterval(next_pitch, current_pitch);
     int dir_in = static_cast<int>(current_pitch) - static_cast<int>(prev_pitch);
     int dir_out = static_cast<int>(next_pitch) - static_cast<int>(current_pitch);
 

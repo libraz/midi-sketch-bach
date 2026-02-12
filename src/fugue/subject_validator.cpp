@@ -7,6 +7,7 @@
 #include <map>
 #include <set>
 
+#include "core/interval.h"
 #include "core/json_helpers.h"
 #include "core/pitch_utils.h"
 
@@ -139,7 +140,7 @@ float SubjectValidator::scoreIntervalVariety(const Subject& subject) const {
     int abs_interval = absoluteInterval(subject.notes[idx].pitch,
                                         subject.notes[idx - 1].pitch);
     // Reduce to within-octave.
-    int reduced = abs_interval % 12;
+    int reduced = interval_util::compoundToSimple(abs_interval);
     unique_intervals.insert(reduced);
     total_intervals++;
 

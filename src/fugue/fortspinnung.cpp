@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "core/basic_types.h"
+#include "core/pitch_utils.h"
 #include "core/rng_util.h"
 #include "fugue/motif_pool.h"
 #include "transform/motif_transform.h"
@@ -164,7 +165,7 @@ void closeGapIfNeeded(std::vector<NoteEvent>& fragment, uint8_t prev_last_pitch)
 uint8_t mapToRegister(int pitch, int lo, int hi) {
   if (pitch < lo) pitch += 12;
   if (pitch > hi) pitch -= 12;
-  return static_cast<uint8_t>(std::clamp(pitch, lo, hi));
+  return clampPitch(pitch, static_cast<uint8_t>(lo), static_cast<uint8_t>(hi));
 }
 
 /// @brief Place a fragment at a given tick offset, assigning voice ID.
@@ -448,10 +449,12 @@ std::vector<NoteEvent> generateFortspinnung(const MotifPool& pool,
       constexpr int kPedalHiNormal = 45;    // A2 (normal upper limit)
       constexpr int kPedalHiAnchor = 50;    // D3 (anchor exception)
       int tonic_bass = 36 + static_cast<int>(key);  // C2 octave
-      tonic_bass = std::clamp(tonic_bass, kPedalLo, kPedalHiAnchor);
+      tonic_bass = clampPitch(tonic_bass, static_cast<uint8_t>(kPedalLo),
+                              static_cast<uint8_t>(kPedalHiAnchor));
       int dominant_bass = tonic_bass + 7;   // Perfect 5th
       if (dominant_bass > kPedalHiAnchor) dominant_bass -= 12;
-      dominant_bass = std::clamp(dominant_bass, kPedalLo, kPedalHiAnchor);
+      dominant_bass = clampPitch(dominant_bass, static_cast<uint8_t>(kPedalLo),
+                                 static_cast<uint8_t>(kPedalHiAnchor));
 
       // Augmented tail fragment from voice 0.
       auto tail = extractTailMotif(voice0_notes, 3);

@@ -102,7 +102,7 @@ std::vector<Tick> findValidStrettoIntervals(const std::vector<NoteEvent>& subjec
 
       if (orig_pitch < 0 || delayed_pitch < 0) continue;
 
-      int interval = std::abs(orig_pitch - delayed_pitch) % 12;
+      int interval = interval_util::compoundToSimple(orig_pitch - delayed_pitch);
       if (!interval_util::isConsonance(interval)) {
         all_consonant = false;
         break;

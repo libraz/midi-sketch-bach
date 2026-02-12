@@ -77,7 +77,7 @@ static float crossRelationPenalty(const CounterpointState& state,
       if (low_pc == 4 && high_pc == 5) continue;   // E/F natural
       if (low_pc == 0 && high_pc == 11) continue;   // B/C natural (wrapped)
       if (low_pc == 0 && high_pc == 1) continue;    // B#/C = enharmonic, skip
-      return 0.3f;
+      return 0.5f;
     }
   }
   return 0.0f;
@@ -291,6 +291,25 @@ bool CollisionResolver::isSafeToPlace(const CounterpointState& state,
         int pitch_dist = absoluteInterval(pitch, other_note->pitch);
         if (pitch_dist > 0 && pitch_dist < 3) return false;  // < minor 3rd
       }
+    }
+  }
+
+  // Maximum spacing for adjacent manual voices (all evaluators).
+  // Does not apply to pedal (last voice) since pedal-manual gap is naturally
+  // wide in organ writing. Threshold: octave + P5 = 19 semitones.
+  {
+    VoiceId bass_voice = voices.empty() ? 0 : voices.back();
+    for (VoiceId other : voices) {
+      if (other == voice_id) continue;
+      int voice_dist = std::abs(static_cast<int>(voice_id) -
+                                static_cast<int>(other));
+      if (voice_dist != 1) continue;
+      // Skip pedal-manual pairs.
+      if (voice_id == bass_voice || other == bass_voice) continue;
+      const NoteEvent* adj_note = state.getNoteAt(other, tick);
+      if (!adj_note) continue;
+      int pitch_dist = absoluteInterval(pitch, adj_note->pitch);
+      if (pitch_dist > 19) return false;
     }
   }
 

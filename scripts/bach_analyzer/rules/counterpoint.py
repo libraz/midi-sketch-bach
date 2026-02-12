@@ -10,6 +10,7 @@ from collections import defaultdict
 from typing import Dict, List, Tuple
 
 from ..model import (
+    NoteSource,
     OCTAVE,
     PERFECT_5TH,
     PERFECT_CONSONANCES,
@@ -56,10 +57,11 @@ class ParallelPerfect:
         violations: List[Violation] = []
         voices = _voices_sorted(score)
         names = sorted(voices.keys())
+        end_tick = score.total_duration
         for i in range(len(names)):
             for j in range(i + 1, len(names)):
                 violations.extend(
-                    self._check_pair(names[i], voices[names[i]], names[j], voices[names[j]])
+                    self._check_pair(names[i], voices[names[i]], names[j], voices[names[j]], end_tick)
                 )
         return RuleResult(
             rule_name=self.name,
@@ -69,37 +71,44 @@ class ParallelPerfect:
         )
 
     def _check_pair(
-        self, name_a: str, va: List[Note], name_b: str, vb: List[Note]
+        self, name_a: str, va: List[Note], name_b: str, vb: List[Note], end_tick: int
     ) -> List[Violation]:
+        """Scan beat-by-beat using sounding_note_at to catch sustained-note parallels."""
         violations = []
-        beats_a = _beat_map(va)
-        beats_b = _beat_map(vb)
-        common = sorted(set(beats_a) & set(beats_b))
-        for k in range(len(common) - 1):
-            t1, t2 = common[k], common[k + 1]
-            na1, nb1 = beats_a[t1], beats_b[t1]
-            na2, nb2 = beats_a[t2], beats_b[t2]
-            iv1 = interval_class(na1.pitch - nb1.pitch)
-            iv2 = interval_class(na2.pitch - nb2.pitch)
-            if iv1 in PERFECT_CONSONANCES and iv1 == iv2:
-                dir_a = na2.pitch - na1.pitch
-                dir_b = nb2.pitch - nb1.pitch
-                if dir_a != 0 and dir_b != 0 and (dir_a > 0) == (dir_b > 0):
-                    iv_name = "P5" if iv1 == PERFECT_5TH else ("P8" if iv1 in (UNISON, OCTAVE) else f"P{iv1}")
-                    violations.append(
-                        Violation(
-                            rule_name=self.name,
-                            category=self.category,
-                            severity=Severity.CRITICAL,
-                            bar=na2.bar,
-                            beat=na2.beat,
-                            tick=t2,
-                            voice_a=name_a,
-                            voice_b=name_b,
-                            description=f"{iv_name}->{iv_name} {pitch_to_name(na1.pitch)}/{pitch_to_name(nb1.pitch)} -> {pitch_to_name(na2.pitch)}/{pitch_to_name(nb2.pitch)}",
-                            source=na2.provenance.source if na2.provenance else None,
-                        )
-                    )
+        prev_na = prev_nb = None
+        beat = 0
+        while beat < end_tick:
+            na = sounding_note_at(va, beat)
+            nb = sounding_note_at(vb, beat)
+            if na is not None and nb is not None:
+                if prev_na is not None and prev_nb is not None:
+                    iv1 = interval_class(prev_na.pitch - prev_nb.pitch)
+                    iv2 = interval_class(na.pitch - nb.pitch)
+                    if iv1 in PERFECT_CONSONANCES and iv1 == iv2:
+                        dir_a = na.pitch - prev_na.pitch
+                        dir_b = nb.pitch - prev_nb.pitch
+                        if dir_a != 0 and dir_b != 0 and (dir_a > 0) == (dir_b > 0):
+                            iv_name = "P5" if iv1 == PERFECT_5TH else ("P8" if iv1 in (UNISON, OCTAVE) else f"P{iv1}")
+                            bar = beat // TICKS_PER_BAR + 1
+                            beat_in_bar = (beat % TICKS_PER_BAR) // TICKS_PER_BEAT + 1
+                            violations.append(
+                                Violation(
+                                    rule_name=self.name,
+                                    category=self.category,
+                                    severity=Severity.CRITICAL,
+                                    bar=bar,
+                                    beat=beat_in_bar,
+                                    tick=beat,
+                                    voice_a=name_a,
+                                    voice_b=name_b,
+                                    description=f"{iv_name}->{iv_name} {pitch_to_name(prev_na.pitch)}/{pitch_to_name(prev_nb.pitch)} -> {pitch_to_name(na.pitch)}/{pitch_to_name(nb.pitch)}",
+                                    source=na.provenance.source if na.provenance else None,
+                                )
+                            )
+                prev_na, prev_nb = na, nb
+            else:
+                prev_na = prev_nb = None
+            beat += TICKS_PER_BEAT
         return violations
 
 
@@ -124,10 +133,11 @@ class HiddenPerfect:
         violations: List[Violation] = []
         voices = _voices_sorted(score)
         names = sorted(voices.keys())
+        end_tick = score.total_duration
         for i in range(len(names)):
             for j in range(i + 1, len(names)):
                 violations.extend(
-                    self._check_pair(names[i], voices[names[i]], names[j], voices[names[j]])
+                    self._check_pair(names[i], voices[names[i]], names[j], voices[names[j]], end_tick)
                 )
         return RuleResult(
             rule_name=self.name,
@@ -137,48 +147,49 @@ class HiddenPerfect:
         )
 
     def _check_pair(
-        self, name_a: str, va: List[Note], name_b: str, vb: List[Note]
+        self, name_a: str, va: List[Note], name_b: str, vb: List[Note], end_tick: int
     ) -> List[Violation]:
+        """Scan beat-by-beat using sounding_note_at to catch sustained-note hidden parallels."""
         violations = []
-        beats_a = _beat_map(va)
-        beats_b = _beat_map(vb)
-        common = sorted(set(beats_a) & set(beats_b))
-        for k in range(len(common) - 1):
-            t1, t2 = common[k], common[k + 1]
-            na1, nb1 = beats_a[t1], beats_b[t1]
-            na2, nb2 = beats_a[t2], beats_b[t2]
-            iv2 = interval_class(na2.pitch - nb2.pitch)
-            if iv2 not in PERFECT_CONSONANCES:
-                continue
-            dir_a = na2.pitch - na1.pitch
-            dir_b = nb2.pitch - nb1.pitch
-            # Same direction (similar motion)
-            if dir_a == 0 or dir_b == 0:
-                continue
-            if (dir_a > 0) != (dir_b > 0):
-                continue
-            # Both voices leap (>2 semitones)
-            if abs(dir_a) <= 2 or abs(dir_b) <= 2:
-                continue
-            # Not already a parallel perfect (those are caught separately)
-            iv1 = interval_class(na1.pitch - nb1.pitch)
-            if iv1 == iv2:
-                continue
-            iv_name = "P5" if iv2 == PERFECT_5TH else "P8"
-            violations.append(
-                Violation(
-                    rule_name=self.name,
-                    category=self.category,
-                    severity=Severity.WARNING,
-                    bar=na2.bar,
-                    beat=na2.beat,
-                    tick=t2,
-                    voice_a=name_a,
-                    voice_b=name_b,
-                    description=f"hidden {iv_name}: both leap to {pitch_to_name(na2.pitch)}/{pitch_to_name(nb2.pitch)}",
-                    source=na2.provenance.source if na2.provenance else None,
-                )
-            )
+        prev_na = prev_nb = None
+        beat = 0
+        while beat < end_tick:
+            na = sounding_note_at(va, beat)
+            nb = sounding_note_at(vb, beat)
+            if na is not None and nb is not None:
+                if prev_na is not None and prev_nb is not None:
+                    iv2 = interval_class(na.pitch - nb.pitch)
+                    if iv2 in PERFECT_CONSONANCES:
+                        dir_a = na.pitch - prev_na.pitch
+                        dir_b = nb.pitch - prev_nb.pitch
+                        # Same direction (similar motion), both non-zero
+                        if dir_a != 0 and dir_b != 0 and (dir_a > 0) == (dir_b > 0):
+                            # Both voices leap (>2 semitones)
+                            if abs(dir_a) > 2 and abs(dir_b) > 2:
+                                # Not already a parallel perfect (caught separately)
+                                iv1 = interval_class(prev_na.pitch - prev_nb.pitch)
+                                if iv1 != iv2:
+                                    iv_name = "P5" if iv2 == PERFECT_5TH else "P8"
+                                    bar = beat // TICKS_PER_BAR + 1
+                                    beat_in_bar = (beat % TICKS_PER_BAR) // TICKS_PER_BEAT + 1
+                                    violations.append(
+                                        Violation(
+                                            rule_name=self.name,
+                                            category=self.category,
+                                            severity=Severity.WARNING,
+                                            bar=bar,
+                                            beat=beat_in_bar,
+                                            tick=beat,
+                                            voice_a=name_a,
+                                            voice_b=name_b,
+                                            description=f"hidden {iv_name}: both leap to {pitch_to_name(na.pitch)}/{pitch_to_name(nb.pitch)}",
+                                            source=na.provenance.source if na.provenance else None,
+                                        )
+                                    )
+                prev_na, prev_nb = na, nb
+            else:
+                prev_na = prev_nb = None
+            beat += TICKS_PER_BEAT
         return violations
 
 
@@ -192,8 +203,15 @@ class VoiceCrossing:
 
     Scans every beat position and checks the sounding pitch of each voice
     (including sustained notes), matching C++ countVoiceCrossings().
-    A 1-beat lookahead suppresses temporary crossings that resolve immediately.
+    A 2-beat lookahead suppresses temporary crossings that resolve quickly.
     """
+
+    _LOOKAHEAD_BEATS = 2
+    # Crossings <= this many semitones are treated as minor (WARNING).
+    _MINOR_CROSSING_LIMIT = 2
+    # Sources involved in invertible counterpoint (subject/answer + countersubject).
+    _INVERTIBLE_SOURCES = {NoteSource.FUGUE_SUBJECT, NoteSource.FUGUE_ANSWER,
+                           NoteSource.COUNTERSUBJECT}
 
     @property
     def name(self) -> str:
@@ -220,21 +238,40 @@ class VoiceCrossing:
                 nu = sounding_note_at(notes_upper, beat)
                 nl = sounding_note_at(notes_lower, beat)
                 if nu is not None and nl is not None and nu.pitch < nl.pitch:
-                    # 1-beat lookahead: skip temporary crossings
-                    next_beat = beat + TICKS_PER_BEAT
-                    if next_beat < end_tick:
-                        nnu = sounding_note_at(notes_upper, next_beat)
-                        nnl = sounding_note_at(notes_lower, next_beat)
+                    # Multi-beat lookahead: skip temporary crossings.
+                    resolved = False
+                    for ahead in range(1, self._LOOKAHEAD_BEATS + 1):
+                        fb = beat + TICKS_PER_BEAT * ahead
+                        if fb >= end_tick:
+                            break
+                        nnu = sounding_note_at(notes_upper, fb)
+                        nnl = sounding_note_at(notes_lower, fb)
                         if nnu is not None and nnl is not None and nnu.pitch >= nnl.pitch:
-                            beat += TICKS_PER_BEAT
-                            continue
+                            resolved = True
+                            break
+                    if resolved:
+                        beat += TICKS_PER_BEAT
+                        continue
+                    crossing_amount = nl.pitch - nu.pitch
+                    # Invertible counterpoint: subject/answer crossing with countersubject
+                    # is structurally intentional -> INFO.
+                    src_u = nu.provenance.source if nu.provenance else None
+                    src_l = nl.provenance.source if nl.provenance else None
+                    if (src_u in self._INVERTIBLE_SOURCES and src_l in self._INVERTIBLE_SOURCES
+                            and src_u != src_l):
+                        sev = Severity.INFO
+                    # Small crossings (<=2 semitones) are WARNING, not ERROR.
+                    elif crossing_amount <= self._MINOR_CROSSING_LIMIT:
+                        sev = Severity.WARNING
+                    else:
+                        sev = Severity.ERROR
                     bar = beat // TICKS_PER_BAR + 1
                     beat_in_bar = (beat % TICKS_PER_BAR) // TICKS_PER_BEAT + 1
                     violations.append(
                         Violation(
                             rule_name=self.name,
                             category=self.category,
-                            severity=Severity.ERROR,
+                            severity=sev,
                             bar=bar,
                             beat=beat_in_bar,
                             tick=beat,
@@ -289,29 +326,38 @@ class CrossRelation:
             violations=violations,
         )
 
+    # Sources where chromatic pitch conflicts are expected.
+    _CHROMATIC_SOURCES = {NoteSource.CHROMATIC_PASSING, NoteSource.ORNAMENT}
+
     def _check_pair(
         self, name_a: str, va: List[Note], name_b: str, vb: List[Note]
     ) -> List[Violation]:
         violations = []
+        natural_classes = {0, 2, 4, 5, 7, 9, 11}
+        # Use sorted order + early termination to avoid O(n*m) worst case.
+        j_start = 0
         for na in va:
-            for nb in vb:
-                if abs(na.start_tick - nb.start_tick) > self.proximity_ticks:
+            # Exempt chromatic passing tones and ornaments.
+            if na.provenance and na.provenance.source in self._CHROMATIC_SOURCES:
+                continue
+            # Advance j_start past notes too early.
+            while j_start < len(vb) and vb[j_start].start_tick < na.start_tick - self.proximity_ticks:
+                j_start += 1
+            for j in range(j_start, len(vb)):
+                nb = vb[j]
+                if nb.start_tick > na.start_tick + self.proximity_ticks:
+                    break
+                # Exempt chromatic passing tones and ornaments.
+                if nb.provenance and nb.provenance.source in self._CHROMATIC_SOURCES:
                     continue
                 if na.pitch_class == nb.pitch_class:
                     continue
-                # Same letter name, different accidental: e.g., F# vs F natural
-                # Simplification: pitch classes differ by exactly 1 semitone and
-                # share the same "base" (approximated by checking if one is the
-                # sharp version of the other).
+                # Same letter name, different accidental: e.g., F# vs F natural.
+                # Pitch classes differ by exactly 1 semitone.
                 diff = abs(na.pitch - nb.pitch) % 12
                 if diff == 1 or diff == 11:
-                    # Check they share a letter-name base (heuristic: same pitch class
-                    # differs by 1 semitone and they are in different voices)
-                    # More precise: the "natural" pitch classes C,D,E,F,G,A,B
-                    # C=0,D=2,E=4,F=5,G=7,A=9,B=11; accidentals are 1,3,6,8,10
-                    natural_classes = {0, 2, 4, 5, 7, 9, 11}
                     pc_a, pc_b = na.pitch_class, nb.pitch_class
-                    # Cross-relation if one is natural and other is its sharp/flat
+                    # Cross-relation if one is natural and other is its sharp/flat.
                     if (pc_a in natural_classes) != (pc_b in natural_classes):
                         later = na if na.start_tick >= nb.start_tick else nb
                         violations.append(
@@ -337,7 +383,13 @@ class CrossRelation:
 
 
 class AugmentedLeap:
-    """Detect augmented (tritone = 6 semitones) leaps within individual voices."""
+    """Detect augmented (tritone = 6 semitones) leaps within individual voices.
+
+    Short notes (<= quarter note) in running passages are exempt because tritone
+    intervals arise naturally in free counterpoint figurations.
+    """
+
+    _SHORT_NOTE_LIMIT = TICKS_PER_BEAT // 2  # 240 ticks (eighth note)
 
     @property
     def name(self) -> str:
@@ -355,6 +407,9 @@ class AugmentedLeap:
                 n1, n2 = sorted_notes[k], sorted_notes[k + 1]
                 leap = abs(n2.pitch - n1.pitch)
                 if leap == TRITONE:
+                    # Exempt short notes in rapid passages.
+                    if n1.duration <= self._SHORT_NOTE_LIMIT and n2.duration <= self._SHORT_NOTE_LIMIT:
+                        continue
                     violations.append(
                         Violation(
                             rule_name=self.name,

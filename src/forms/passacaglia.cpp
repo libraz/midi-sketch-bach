@@ -8,6 +8,7 @@
 
 #include "analysis/counterpoint_analyzer.h"
 #include "core/gm_program.h"
+#include "core/note_creator.h"
 #include "core/pitch_utils.h"
 #include "core/rng_util.h"
 #include "core/scale.h"
@@ -72,12 +73,14 @@ std::vector<Track> createPassacagliaTracks(uint8_t num_voices) {
 /// @param voice_idx Voice index (0-based).
 /// @return Low MIDI pitch bound for the manual.
 uint8_t getVoiceLowPitch(uint8_t voice_idx) {
+  // Hierarchical voice ranges to prevent voice crossing.
+  // BWV 582 standard: soprano-alto ~12-15st separation, alto-tenor ~12st.
   switch (voice_idx) {
-    case 0: return organ_range::kManual1Low;   // 36
-    case 1: return organ_range::kManual2Low;   // 36
-    case 2: return organ_range::kManual3Low;   // 48
-    case 3: return organ_range::kPedalLow;     // 24
-    default: return organ_range::kManual1Low;
+    case 0: return 53;                        // F3 — soprano (BWV 582 descends to F3)
+    case 1: return 48;                        // C3 — alto
+    case 2: return 40;                        // E2 — tenor
+    case 3: return organ_range::kPedalLow;    // 24 (C1) — bass (unchanged)
+    default: return 53;
   }
 }
 
@@ -85,12 +88,13 @@ uint8_t getVoiceLowPitch(uint8_t voice_idx) {
 /// @param voice_idx Voice index (0-based).
 /// @return High MIDI pitch bound for the manual.
 uint8_t getVoiceHighPitch(uint8_t voice_idx) {
+  // Hierarchical voice ranges — matches getVoiceLowPitch().
   switch (voice_idx) {
-    case 0: return organ_range::kManual1High;  // 96
-    case 1: return organ_range::kManual2High;  // 96
-    case 2: return organ_range::kManual3High;  // 96
-    case 3: return organ_range::kPedalHigh;    // 50
-    default: return organ_range::kManual1High;
+    case 0: return 96;                        // C6 — soprano
+    case 1: return 79;                        // G5 — alto
+    case 2: return 67;                        // G4 — tenor
+    case 3: return organ_range::kPedalHigh;   // 50 (D3) — bass (unchanged)
+    default: return 96;
   }
 }
 
@@ -764,10 +768,39 @@ PassacagliaResult generatePassacaglia(const PassacagliaConfig& config) {
     }
   }
 
-  // Step 5: Sort notes within each track.
+  // Step 5: Post-validate through counterpoint engine.
+  if (num_voices >= 2) {
+    // Collect all notes from all tracks.
+    std::vector<NoteEvent> all_notes;
+    for (const auto& track : tracks) {
+      all_notes.insert(all_notes.end(), track.notes.begin(), track.notes.end());
+    }
+
+    // Build voice ranges from the hierarchical range functions.
+    std::vector<std::pair<uint8_t, uint8_t>> voice_ranges;
+    for (uint8_t v = 0; v < num_voices; ++v) {
+      voice_ranges.emplace_back(getVoiceLowPitch(v), getVoiceHighPitch(v));
+    }
+
+    PostValidateStats stats;
+    auto validated = postValidateNotes(
+        std::move(all_notes), num_voices, config.key, voice_ranges, &stats);
+
+    // Redistribute validated notes back to tracks.
+    for (auto& track : tracks) {
+      track.notes.clear();
+    }
+    for (auto& note : validated) {
+      if (note.voice < num_voices) {
+        tracks[note.voice].notes.push_back(std::move(note));
+      }
+    }
+  }
+
+  // Step 6: Sort notes within each track.
   sortTrackNotes(tracks);
 
-  // Step 6: Run pairwise counterpoint check and log violations as warnings.
+  // Step 7: Run pairwise counterpoint check and log violations as warnings.
   if (num_voices >= 2) {
     std::vector<NoteEvent> all_notes;
     for (const auto& track : tracks) {

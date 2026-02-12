@@ -8,27 +8,25 @@ ModulationPlan ModulationPlan::createForMajor(Key home) {
   ModulationPlan plan;
   plan.targets.reserve(4);
 
-  int home_val = static_cast<int>(home);
-
-  // Target 0: dominant (home + 7 semitones), major, Develop phase, Half cadence entry
+  // Target 0: dominant, major, Develop phase, Half cadence entry
   ModulationTarget dominant;
-  dominant.target_key = static_cast<Key>((home_val + 7) % 12);
+  dominant.target_key = getDominant(KeySignature{home, false}).tonic;
   dominant.target_is_minor = false;
   dominant.phase = FuguePhase::Develop;
   dominant.entry_cadence = CadenceType::Half;
   plan.targets.push_back(dominant);
 
-  // Target 1: relative minor (home + 9 semitones), minor, Develop phase, Perfect cadence
+  // Target 1: relative minor, minor, Develop phase, Perfect cadence
   ModulationTarget relative_minor;
-  relative_minor.target_key = static_cast<Key>((home_val + 9) % 12);
+  relative_minor.target_key = getRelative(KeySignature{home, false}).tonic;
   relative_minor.target_is_minor = true;
   relative_minor.phase = FuguePhase::Develop;
   relative_minor.entry_cadence = CadenceType::Perfect;
   plan.targets.push_back(relative_minor);
 
-  // Target 2: subdominant (home + 5 semitones), major, Develop phase, Perfect cadence
+  // Target 2: subdominant, major, Develop phase, Perfect cadence
   ModulationTarget subdominant;
-  subdominant.target_key = static_cast<Key>((home_val + 5) % 12);
+  subdominant.target_key = getSubdominant(KeySignature{home, false}).tonic;
   subdominant.target_is_minor = false;
   subdominant.phase = FuguePhase::Develop;
   subdominant.entry_cadence = CadenceType::Perfect;
@@ -49,28 +47,26 @@ ModulationPlan ModulationPlan::createForMinor(Key home) {
   ModulationPlan plan;
   plan.targets.reserve(4);
 
-  int home_val = static_cast<int>(home);
-
-  // Target 0: relative major (home + 3 semitones), major, Develop phase, Half cadence
+  // Target 0: relative major, major, Develop phase, Half cadence
   ModulationTarget relative_major;
-  relative_major.target_key = static_cast<Key>((home_val + 3) % 12);
+  relative_major.target_key = getRelative(KeySignature{home, true}).tonic;
   relative_major.target_is_minor = false;
   relative_major.phase = FuguePhase::Develop;
   relative_major.entry_cadence = CadenceType::Half;
   plan.targets.push_back(relative_major);
 
-  // Target 1: dominant (home + 7 semitones), MAJOR, Develop phase, Perfect cadence.
+  // Target 1: dominant, MAJOR, Develop phase, Perfect cadence.
   // In Baroque practice, V in minor keys is major (harmonic minor raised 7th).
   ModulationTarget dominant_minor;
-  dominant_minor.target_key = static_cast<Key>((home_val + 7) % 12);
+  dominant_minor.target_key = getDominant(KeySignature{home, true}).tonic;
   dominant_minor.target_is_minor = false;
   dominant_minor.phase = FuguePhase::Develop;
   dominant_minor.entry_cadence = CadenceType::Perfect;
   plan.targets.push_back(dominant_minor);
 
-  // Target 2: subdominant (home + 5 semitones), minor, Develop phase, Perfect cadence
+  // Target 2: subdominant, minor, Develop phase, Perfect cadence
   ModulationTarget subdominant;
-  subdominant.target_key = static_cast<Key>((home_val + 5) % 12);
+  subdominant.target_key = getSubdominant(KeySignature{home, true}).tonic;
   subdominant.target_is_minor = true;
   subdominant.phase = FuguePhase::Develop;
   subdominant.entry_cadence = CadenceType::Perfect;

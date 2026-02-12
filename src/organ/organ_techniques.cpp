@@ -7,6 +7,7 @@
 #include "core/gm_program.h"
 #include "core/pitch_utils.h"
 #include "harmony/chord_types.h"
+#include "harmony/key.h"
 
 namespace bach {
 
@@ -24,7 +25,7 @@ std::vector<NoteEvent> generateCadentialPedal(
   int tonic_pc = static_cast<int>(key_sig.tonic);
   int target_pc = tonic_pc;
   if (type == PedalPointType::Dominant) {
-    target_pc = (tonic_pc + 7) % 12;  // Perfect 5th above tonic.
+    target_pc = static_cast<int>(getDominant(key_sig).tonic);
   }
 
   // Find the pitch in organ pedal range (C1-D3, MIDI 24-50), preferring

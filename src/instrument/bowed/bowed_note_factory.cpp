@@ -4,6 +4,7 @@
 
 #include <algorithm>
 
+#include "core/pitch_utils.h"
 #include "instrument/bowed/bowed_string_instrument.h"
 
 namespace bach {
@@ -13,7 +14,7 @@ BowedNoteFactory::BowedNoteFactory(const IBowedStringInstrument& instrument)
 
 NoteEvent BowedNoteFactory::createNote(const BowedNoteOptions& options) const {
   NoteEvent note;
-  note.pitch = std::clamp(options.pitch, instrument_.getLowestPitch(),
+  note.pitch = clampPitch(options.pitch, instrument_.getLowestPitch(),
                           instrument_.getHighestPitch());
   note.start_tick = options.tick;
   note.duration = options.duration;

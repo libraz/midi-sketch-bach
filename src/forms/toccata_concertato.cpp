@@ -6,6 +6,8 @@
 
 #include <cmath>
 
+#include "core/note_creator.h"
+#include "core/pitch_utils.h"
 #include "ornament/ornament_engine.h"
 
 namespace bach {
@@ -156,9 +158,9 @@ std::vector<NoteEvent> generateCantabileMelody(
       auto chord_tones = collectChordTonesInRange(ev.chord, search_low, search_high);
       if (!chord_tones.empty()) {
         uint8_t best = chord_tones[0];
-        int best_dist = std::abs(static_cast<int>(current) - static_cast<int>(best));
+        int best_dist = absoluteInterval(current, best);
         for (auto ct : chord_tones) {
-          int d = std::abs(static_cast<int>(current) - static_cast<int>(ct));
+          int d = absoluteInterval(current, ct);
           if (d < best_dist) {
             best = ct;
             best_dist = d;
@@ -228,9 +230,9 @@ std::vector<NoteEvent> generateMotoPerpetuo_Concertato(
       auto chord_tones = collectChordTonesInRange(ev.chord, search_low, search_high);
       if (!chord_tones.empty()) {
         uint8_t best = chord_tones[0];
-        int best_dist = std::abs(static_cast<int>(current) - static_cast<int>(best));
+        int best_dist = absoluteInterval(current, best);
         for (auto ct : chord_tones) {
-          int d = std::abs(static_cast<int>(current) - static_cast<int>(ct));
+          int d = absoluteInterval(current, ct);
           if (d < best_dist) { best = ct; best_dist = d; }
         }
         for (size_t i = 0; i < scale.size(); ++i) {
@@ -448,6 +450,22 @@ ToccataResult generateConcertatoToccata(const ToccataConfig& config) {
     ctx.timeline = &timeline;
     ctx.cadence_ticks = {sections.back().end - kTicksPerBar};
     all_notes = applyOrnaments(all_notes, ctx);
+  }
+
+  // Post-validate: counterpoint repair (parallel perfects, range clamping).
+  {
+    std::vector<std::pair<uint8_t, uint8_t>> voice_ranges;
+    for (uint8_t v = 0; v < num_voices; ++v) {
+      voice_ranges.emplace_back(getToccataLowPitch(v), getToccataHighPitch(v));
+    }
+    for (auto& n : all_notes) {
+      if (n.source == BachNoteSource::Unknown) {
+        n.source = isPedalVoice(n.voice, num_voices) ? BachNoteSource::PedalPoint
+                                  : BachNoteSource::FreeCounterpoint;
+      }
+    }
+    all_notes = postValidateNotes(
+        std::move(all_notes), num_voices, config.key, voice_ranges);
   }
 
   // Build tracks.

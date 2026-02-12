@@ -60,6 +60,12 @@ inline bool isStructuralSource(BachNoteSource source) {
          source == BachNoteSource::Coda;
 }
 
+/// @brief Check if a voice index is the pedal voice for a given voice count.
+/// Organ pedal is the last voice when num_voices >= 3.
+inline bool isPedalVoice(uint8_t voice, uint8_t num_voices) {
+  return num_voices >= 3 && voice == num_voices - 1;
+}
+
 /// Transformation steps applied to a note during generation.
 /// Recorded in provenance for debugging the transform pipeline.
 enum class BachTransformStep : uint8_t {

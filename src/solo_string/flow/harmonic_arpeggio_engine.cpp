@@ -756,9 +756,7 @@ ArpeggioFlowResult generateArpeggioFlow(const ArpeggioFlowConfig& config) {
   // Resolve seed.
   uint32_t effective_seed = config.seed;
   if (effective_seed == 0) {
-    std::random_device device;
-    effective_seed = device();
-    if (effective_seed == 0) effective_seed = 1;
+    effective_seed = rng::generateRandomSeed();
   }
   result.seed_used = effective_seed;
   std::mt19937 rng(effective_seed);

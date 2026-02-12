@@ -82,5 +82,53 @@ class TestUnresolvedDissonance(unittest.TestCase):
         self.assertFalse(result.passed)
 
 
+class TestSuspensionExemption(unittest.TestCase):
+    """StrongBeatDissonance should exempt prepared suspensions."""
+
+    def test_prepared_suspension_exempt(self):
+        """4-3 suspension: C5 prepared on beat 4, held on beat 1 against E4, resolves to B4."""
+        soprano = _track("soprano", [
+            _n(72, 1440, 960, voice="soprano"),  # C5 prepared on beat 4, sustains to beat 1
+            _n(71, 2400, 480, voice="soprano"),   # B4 resolution (step down)
+        ])
+        alto = _track("alto", [
+            _n(64, 0, 1920, voice="alto"),        # E4 on bar 1
+            _n(64, 1920, 480, voice="alto"),       # E4 on bar 2 beat 1 (m2 with C5)
+        ])
+        result = StrongBeatDissonance().check(_score([soprano, alto]))
+        self.assertTrue(result.passed, f"Suspension should be exempt: {result.violations}")
+
+    def test_unprepared_dissonance_not_exempt(self):
+        """Unprepared dissonance on beat 1 should still be flagged."""
+        soprano = _track("soprano", [
+            _n(60, 0, 480, voice="soprano"),       # C4 on beat 1
+        ])
+        alto = _track("alto", [
+            _n(61, 0, 480, voice="alto"),           # C#4 on beat 1 (m2, unprepared)
+        ])
+        result = StrongBeatDissonance().check(_score([soprano, alto]))
+        self.assertFalse(result.passed)
+
+
+class TestAccentedDissonanceExemption(unittest.TestCase):
+    """Accented dissonances (appoggiatura, accented passing/neighbor) should be exempt."""
+
+    def test_accented_passing_tone_exempt(self):
+        """Accented passing tone: step approach, step resolution in same direction.
+        E4 -> F4 (dissonant with E4 in alto on beat 1) -> G4."""
+        soprano = _track("soprano", [
+            _n(64, 1440, 480, voice="soprano"),  # E4 on beat 4 (approach)
+            _n(65, 1920, 480, voice="soprano"),  # F4 on beat 1 (dissonant)
+            _n(67, 2400, 480, voice="soprano"),  # G4 resolution by step
+        ])
+        alto = _track("alto", [
+            _n(64, 0, 1920, voice="alto"),       # E4 bar 1
+            _n(64, 1920, 960, voice="alto"),      # E4 bar 2 (m2 with F4)
+        ])
+        result = StrongBeatDissonance().check(_score([soprano, alto]))
+        self.assertTrue(result.passed,
+                        f"Accented passing tone should be exempt: {result.violations}")
+
+
 if __name__ == "__main__":
     unittest.main()

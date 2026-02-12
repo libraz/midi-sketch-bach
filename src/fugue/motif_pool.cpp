@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "core/basic_types.h"
+#include "core/pitch_utils.h"
 
 namespace bach {
 
@@ -69,8 +70,7 @@ float scoreWindow(const std::vector<NoteEvent>& notes, size_t start, size_t leng
   // Intervallic interest: contains a leap (>= 3 semitones).
   bool has_leap = false;
   for (size_t idx = start + 1; idx < start + length; ++idx) {
-    int interval = std::abs(static_cast<int>(notes[idx].pitch) -
-                            static_cast<int>(notes[idx - 1].pitch));
+    int interval = absoluteInterval(notes[idx].pitch, notes[idx - 1].pitch);
     if (interval >= 3) {
       has_leap = true;
       break;

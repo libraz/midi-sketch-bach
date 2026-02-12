@@ -391,27 +391,28 @@ TEST(PassacagliaTest, AllNotesInRange) {
   PassacagliaResult result = generatePassacaglia(config);
   ASSERT_TRUE(result.success);
 
-  // Track 0: Manual I (Great) -- C2-C6 (36-96).
+  // Track 0: Manual I (Great) — soprano: F3-C6 (53-96).
+  // Passacaglia uses hierarchical voice ranges for voice separation.
   for (const auto& note : result.tracks[0].notes) {
-    EXPECT_GE(note.pitch, organ_range::kManual1Low)
+    EXPECT_GE(note.pitch, static_cast<uint8_t>(53))
         << "Manual I pitch below range: " << static_cast<int>(note.pitch);
     EXPECT_LE(note.pitch, organ_range::kManual1High)
         << "Manual I pitch above range: " << static_cast<int>(note.pitch);
   }
 
-  // Track 1: Manual II (Swell) -- C2-C6 (36-96).
+  // Track 1: Manual II (Swell) — alto: C3-G5 (48-79).
   for (const auto& note : result.tracks[1].notes) {
-    EXPECT_GE(note.pitch, organ_range::kManual2Low)
+    EXPECT_GE(note.pitch, static_cast<uint8_t>(48))
         << "Manual II pitch below range: " << static_cast<int>(note.pitch);
-    EXPECT_LE(note.pitch, organ_range::kManual2High)
+    EXPECT_LE(note.pitch, static_cast<uint8_t>(79))
         << "Manual II pitch above range: " << static_cast<int>(note.pitch);
   }
 
-  // Track 2: Manual III (Positiv) -- C3-C6 (48-96).
+  // Track 2: Manual III (Positiv) — tenor: E2-G4 (40-67).
   for (const auto& note : result.tracks[2].notes) {
-    EXPECT_GE(note.pitch, organ_range::kManual3Low)
+    EXPECT_GE(note.pitch, static_cast<uint8_t>(40))
         << "Manual III pitch below range: " << static_cast<int>(note.pitch);
-    EXPECT_LE(note.pitch, organ_range::kManual3High)
+    EXPECT_LE(note.pitch, static_cast<uint8_t>(67))
         << "Manual III pitch above range: " << static_cast<int>(note.pitch);
   }
 

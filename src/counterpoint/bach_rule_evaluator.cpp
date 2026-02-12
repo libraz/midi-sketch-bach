@@ -46,26 +46,9 @@ uint8_t BachRuleEvaluator::numVoices() const {
 ///
 /// @param reduced Interval modulo 12, in range [0, 11].
 /// @return True if the interval is a consonance (P1/P5/m3/M3/m6/M6).
-static bool isActuallyConsonant(int reduced) {
-  switch (reduced) {
-    case interval::kUnison:
-    case interval::kPerfect5th:
-    case interval::kMinor3rd:
-    case interval::kMajor3rd:
-    case interval::kMinor6th:
-    case interval::kMajor6th:
-      return true;
-    default:
-      return false;
-  }
-}
 
-bool BachRuleEvaluator::isPerfectConsonance(int semitones) {
-  int reduced = interval_util::compoundToSimple(semitones);  // Normalize to [0, 11].
-  return reduced == interval::kUnison ||
-         reduced == interval::kPerfect5th;
-  // Note: P8 reduces to 0 (unison) mod 12.
-}
+
+
 
 bool BachRuleEvaluator::isIntervalConsonant(int semitones,
                                             bool is_strong_beat) const {
@@ -74,7 +57,7 @@ bool BachRuleEvaluator::isIntervalConsonant(int semitones,
   // NHT check (passing tone / neighbor tone) can evaluate with next_pitch context.
   if (free_counterpoint_ && !is_strong_beat) {
     int reduced = interval_util::compoundToSimple(semitones);
-    return isActuallyConsonant(reduced);
+    return interval_util::isConsonance(reduced);
   }
 
   // Normalize to single-octave interval.
@@ -179,8 +162,8 @@ bool BachRuleEvaluator::hasParallelPerfect(const CounterpointState& state,
                                static_cast<int>(curr2->pitch));
 
   // Both intervals must be perfect consonances (P1/P5/P8).
-  if (!isPerfectConsonance(prev_interval) ||
-      !isPerfectConsonance(curr_interval)) {
+  if (!interval_util::isPerfectConsonance(prev_interval) ||
+      !interval_util::isPerfectConsonance(curr_interval)) {
     return false;
   }
 
@@ -214,7 +197,7 @@ bool BachRuleEvaluator::hasHiddenPerfect(const CounterpointState& state,
                                static_cast<int>(curr2->pitch));
 
   // The arriving interval must be a perfect consonance.
-  if (!isPerfectConsonance(curr_interval)) return false;
+  if (!interval_util::isPerfectConsonance(curr_interval)) return false;
 
   // The previous interval must NOT be the same perfect consonance.
   int prev_interval = std::abs(static_cast<int>(prev1->pitch) -

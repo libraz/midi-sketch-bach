@@ -46,6 +46,7 @@ set(BACH_LIB_SOURCES
   counterpoint/bach_rule_evaluator.cpp
   counterpoint/species_rules.cpp
   counterpoint/collision_resolver.cpp
+  counterpoint/parallel_repair.cpp
   counterpoint/suspension_chain.cpp
   counterpoint/voice_manager.cpp
   counterpoint/motion_analyzer.cpp

@@ -6,7 +6,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-from scripts.bach_analyzer.model import Note, Score, Track
+from scripts.bach_analyzer.model import Note, NoteSource, Provenance, Score, Track
 from scripts.bach_analyzer.rules.base import Category, Severity
 from scripts.bach_analyzer.model import TICKS_PER_BAR
 from scripts.bach_analyzer.rules.counterpoint import (
@@ -73,6 +73,26 @@ class TestParallelPerfect(unittest.TestCase):
         self.assertTrue(result.passed)
 
 
+class TestParallelPerfectSustained(unittest.TestCase):
+    def test_async_attack_parallel_fifths(self):
+        """Voice A attacks at 0,960; Voice B attacks at 480,960.
+        At beat 480, A is sustained at pitch 67, B attacks 60 -> P5.
+        At beat 960, A attacks 69, B attacks 62 -> P5.
+        This is parallel P5 (480->960) and should be detected."""
+        soprano = _track("soprano", [_n(67, 0, 960), _n(69, 960)])  # G4 sustained, A4
+        alto = _track("alto", [_n(60, 480), _n(62, 960)])  # C4, D4 (both P5)
+        result = ParallelPerfect().check(_score([soprano, alto]))
+        self.assertFalse(result.passed)
+        self.assertTrue(any("P5" in v.description for v in result.violations))
+
+    def test_oblique_motion_no_violation(self):
+        """One voice sustains (same pitch) while other moves -> oblique, not parallel."""
+        soprano = _track("soprano", [_n(67, 0, 1920)])  # G4 sustained 2 bars
+        alto = _track("alto", [_n(60, 0), _n(62, 480)])  # C4->D4 (P5 -> P5 but oblique)
+        result = ParallelPerfect().check(_score([soprano, alto]))
+        self.assertTrue(result.passed)
+
+
 class TestHiddenPerfect(unittest.TestCase):
     def test_hidden_fifth(self):
         """Both voices leap in same direction arriving at P5 (not from P5)."""
@@ -108,6 +128,40 @@ class TestVoiceCrossing(unittest.TestCase):
         self.assertTrue(result.passed)
 
 
+class TestVoiceCrossingInvertible(unittest.TestCase):
+    def test_subject_countersubject_crossing_info(self):
+        """Subject crossing with countersubject -> INFO (invertible counterpoint)."""
+        prov_s = Provenance(source=NoteSource.FUGUE_SUBJECT)
+        prov_cs = Provenance(source=NoteSource.COUNTERSUBJECT)
+        soprano = _track("soprano", [
+            Note(pitch=58, velocity=80, start_tick=0, duration=480,
+                 voice="soprano", provenance=prov_s),
+        ])
+        alto = _track("alto", [
+            Note(pitch=65, velocity=80, start_tick=0, duration=480,
+                 voice="alto", provenance=prov_cs),
+        ])
+        result = VoiceCrossing().check(_score([soprano, alto]))
+        self.assertFalse(result.passed)
+        self.assertEqual(result.violations[0].severity, Severity.INFO)
+
+    def test_free_counterpoint_crossing_not_info(self):
+        """Free counterpoint crossing should remain ERROR/WARNING."""
+        prov_fc = Provenance(source=NoteSource.FREE_COUNTERPOINT)
+        soprano = _track("soprano", [
+            Note(pitch=55, velocity=80, start_tick=0, duration=480,
+                 voice="soprano", provenance=prov_fc),
+        ])
+        alto = _track("alto", [
+            Note(pitch=65, velocity=80, start_tick=0, duration=480,
+                 voice="alto", provenance=prov_fc),
+        ])
+        result = VoiceCrossing().check(_score([soprano, alto]))
+        self.assertFalse(result.passed)
+        # Same source -> not invertible -> ERROR
+        self.assertNotEqual(result.violations[0].severity, Severity.INFO)
+
+
 class TestCrossRelation(unittest.TestCase):
     def test_cross_relation(self):
         """F# in soprano, F natural in alto within 1 beat."""
@@ -127,8 +181,8 @@ class TestCrossRelation(unittest.TestCase):
 
 class TestAugmentedLeap(unittest.TestCase):
     def test_tritone_leap(self):
-        """Tritone leap within a voice."""
-        soprano = _track("soprano", [_n(60, 0), _n(66, 480)])  # C4->F#4 = 6 semitones
+        """Tritone leap within a voice (long notes)."""
+        soprano = _track("soprano", [_n(60, 0, 960), _n(66, 960, 960)])  # C4->F#4 = 6 st
         result = AugmentedLeap().check(_score([soprano]))
         self.assertFalse(result.passed)
         self.assertEqual(len(result.violations), 1)
@@ -139,6 +193,24 @@ class TestAugmentedLeap(unittest.TestCase):
         soprano = _track("soprano", [_n(60, 0), _n(67, 480)])  # C4->G4 = 7 semitones
         result = AugmentedLeap().check(_score([soprano]))
         self.assertTrue(result.passed)
+
+    def test_both_short_exempt(self):
+        """Both notes short (<= eighth) -> exempt from tritone detection."""
+        soprano = _track("soprano", [_n(60, 0, 240), _n(66, 240, 240)])  # eighth->eighth
+        result = AugmentedLeap().check(_score([soprano]))
+        self.assertTrue(result.passed)
+
+    def test_quarter_notes_not_exempt(self):
+        """Quarter note pairs (480 ticks) should be caught (> eighth note threshold)."""
+        soprano = _track("soprano", [_n(60, 0, 480), _n(66, 480, 480)])
+        result = AugmentedLeap().check(_score([soprano]))
+        self.assertFalse(result.passed)
+
+    def test_long_to_short_not_exempt(self):
+        """Long note -> short note tritone should still be flagged."""
+        soprano = _track("soprano", [_n(60, 0, 960), _n(66, 960, 240)])  # long->short
+        result = AugmentedLeap().check(_score([soprano]))
+        self.assertFalse(result.passed)
 
 
 class TestVoiceCrossingSustained(unittest.TestCase):

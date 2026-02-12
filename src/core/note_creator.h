@@ -3,8 +3,12 @@
 #ifndef BACH_CORE_NOTE_CREATOR_H
 #define BACH_CORE_NOTE_CREATOR_H
 
+#include <utility>
+#include <vector>
+
 #include "core/basic_types.h"
 #include "core/note_source.h"
+#include "harmony/key.h"
 
 namespace bach {
 
@@ -55,6 +59,37 @@ BachCreateNoteResult createBachNote(
     IRuleEvaluator* rules,
     CollisionResolver* resolver,
     const BachNoteOptions& opts);
+
+/// Statistics from postValidateNotes().
+struct PostValidateStats {
+  uint32_t total_input = 0;
+  uint32_t accepted_original = 0;
+  uint32_t repaired = 0;
+  uint32_t dropped = 0;
+  float drop_rate() const {
+    return total_input > 0 ? static_cast<float>(dropped) / total_input : 0.0f;
+  }
+};
+
+/// @brief Post-validate raw notes through the counterpoint engine.
+///
+/// Processes notes in priority order (Immutable -> Structural -> Flexible).
+/// Each note is routed through createBachNote() which applies the 6-stage
+/// repair cascade (original -> chord_tone -> suspension -> step_shift ->
+/// octave_shift -> rest). Only truly irreconcilable notes are dropped.
+///
+/// @param raw_notes Input notes (consumed by move).
+/// @param num_voices Number of active voices.
+/// @param key_sig Key signature for counterpoint state and scale-tone validation.
+/// @param voice_ranges Per-voice (low, high) ranges.
+/// @param[out] stats Optional repair statistics.
+/// @return Validated notes with counterpoint rules enforced.
+std::vector<NoteEvent> postValidateNotes(
+    std::vector<NoteEvent> raw_notes,
+    uint8_t num_voices,
+    KeySignature key_sig,
+    const std::vector<std::pair<uint8_t, uint8_t>>& voice_ranges,
+    PostValidateStats* stats = nullptr);
 
 }  // namespace bach
 

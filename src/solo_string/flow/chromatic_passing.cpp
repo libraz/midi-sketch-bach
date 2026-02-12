@@ -6,6 +6,7 @@
 #include <cstdlib>
 #include <random>
 
+#include "core/pitch_utils.h"
 #include "core/rng_util.h"
 #include "harmony/chord_types.h"
 #include "harmony/harmonic_event.h"
@@ -15,7 +16,7 @@ namespace bach {
 bool canInsertChromaticPassing(const NoteEvent& note1, const NoteEvent& note2,
                                const HarmonicTimeline& timeline) {
   // Pitch interval must be at least 2 semitones (whole tone or more).
-  int pitch_diff = std::abs(static_cast<int>(note1.pitch) - static_cast<int>(note2.pitch));
+  int pitch_diff = absoluteInterval(note1.pitch, note2.pitch);
   if (pitch_diff < 2) return false;
 
   // Both notes must be chord tones of their respective harmonic contexts.

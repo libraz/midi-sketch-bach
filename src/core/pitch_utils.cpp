@@ -4,6 +4,7 @@
 
 #include <cstdlib>
 
+#include "core/interval.h"
 #include "core/scale.h"
 #include "harmony/chord_types.h"
 #include "harmony/harmonic_event.h"
@@ -12,7 +13,7 @@ namespace bach {
 
 IntervalQuality classifyInterval(int semitones) {
   // Normalize to 0-11 range (reduce compound intervals)
-  int normalized = std::abs(semitones) % 12;
+  int normalized = interval_util::compoundToSimple(semitones);
 
   switch (normalized) {
     // Perfect consonances: unison, perfect 5th, octave (0 after mod 12)
@@ -42,14 +43,14 @@ IntervalQuality classifyInterval(int semitones) {
 }
 
 bool isParallelFifths(int interval1, int interval2) {
-  int norm1 = std::abs(interval1) % 12;
-  int norm2 = std::abs(interval2) % 12;
+  int norm1 = interval_util::compoundToSimple(interval1);
+  int norm2 = interval_util::compoundToSimple(interval2);
   return (norm1 == interval::kPerfect5th) && (norm2 == interval::kPerfect5th);
 }
 
 bool isParallelOctaves(int interval1, int interval2) {
-  int norm1 = std::abs(interval1) % 12;
-  int norm2 = std::abs(interval2) % 12;
+  int norm1 = interval_util::compoundToSimple(interval1);
+  int norm2 = interval_util::compoundToSimple(interval2);
   return (norm1 == interval::kUnison) && (norm2 == interval::kUnison);
 }
 
@@ -125,7 +126,7 @@ bool isDiatonicInKey(int pitch, Key key, bool is_minor) {
 }
 
 const char* intervalToName(int semitones) {
-  int normalized = std::abs(semitones) % 12;
+  int normalized = interval_util::compoundToSimple(semitones);
   switch (normalized) {
     case 0:  return "unison";
     case 1:  return "minor 2nd";

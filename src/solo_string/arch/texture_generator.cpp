@@ -217,10 +217,10 @@ uint8_t nearestChordTone(uint8_t target, const std::vector<uint8_t>& chord_pitch
   }
 
   uint8_t best = chord_pitches[0];
-  int best_dist = std::abs(static_cast<int>(target) - static_cast<int>(best));
+  int best_dist = absoluteInterval(target, best);
 
   for (size_t idx = 1; idx < chord_pitches.size(); ++idx) {
-    int dist = std::abs(static_cast<int>(target) - static_cast<int>(chord_pitches[idx]));
+    int dist = absoluteInterval(target, chord_pitches[idx]);
     if (dist < best_dist) {
       best_dist = dist;
       best = chord_pitches[idx];
@@ -288,7 +288,7 @@ uint8_t findNearestOpenString(uint8_t target, uint8_t reg_low, uint8_t reg_high)
   for (int idx = 0; idx < kViolinOpenStringCount; ++idx) {
     uint8_t open_pitch = kViolinOpenStrings[idx];
     if (open_pitch >= reg_low && open_pitch <= reg_high) {
-      int dist = std::abs(static_cast<int>(target) - static_cast<int>(open_pitch));
+      int dist = absoluteInterval(target, open_pitch);
       if (dist < best_dist) {
         best_dist = dist;
         best = open_pitch;
@@ -299,6 +299,73 @@ uint8_t findNearestOpenString(uint8_t target, uint8_t reg_low, uint8_t reg_high)
   return best;
 }
 
+/// @brief Clamp excessive leaps (>12 semitones) by octave-adjusting the target note.
+///
+/// When a note creates a leap >12 semitones from the previous note, adjust it
+/// to the nearest octave placement that keeps the interval within 12 semitones.
+void clampExcessiveLeaps(std::vector<NoteEvent>& notes,
+                         uint8_t reg_low, uint8_t reg_high) {
+  if (notes.size() < 2) return;
+
+  for (size_t i = 1; i < notes.size(); ++i) {
+    int leap = absoluteInterval(notes[i].pitch, notes[i - 1].pitch);
+    if (leap <= 12) continue;
+
+    // Find the octave-transposition of notes[i] closest to notes[i-1].
+    int pc = static_cast<int>(notes[i].pitch) % 12;
+    int prev = static_cast<int>(notes[i - 1].pitch);
+    int best = static_cast<int>(notes[i].pitch);
+    int best_dist = leap;
+
+    for (int oct = 0; oct <= 10; ++oct) {
+      int cand = oct * 12 + pc;
+      if (cand < static_cast<int>(reg_low) || cand > static_cast<int>(reg_high)) continue;
+      int dist = std::abs(cand - prev);
+      if (dist < best_dist) {
+        best_dist = dist;
+        best = cand;
+      }
+    }
+    notes[i].pitch = static_cast<uint8_t>(best);
+  }
+}
+
+/// @brief Enforce leap resolution on a note sequence.
+///
+/// For leaps >= 7 semitones (P5), attempts to resolve the following note by
+/// contrary stepwise motion. Modifies notes in place.
+void enforceLeapResolution(std::vector<NoteEvent>& notes, Key key, bool is_minor) {
+  if (notes.size() < 3) return;
+
+  ScaleType scale = is_minor ? ScaleType::NaturalMinor : ScaleType::Major;
+
+  for (size_t i = 1; i + 1 < notes.size(); ++i) {
+    int leap = static_cast<int>(notes[i].pitch) - static_cast<int>(notes[i - 1].pitch);
+    int abs_leap = std::abs(leap);
+
+    if (abs_leap < 7) continue;  // Only resolve P5+ leaps.
+
+    // Check if next note already resolves by contrary step.
+    int next_motion = static_cast<int>(notes[i + 1].pitch) - static_cast<int>(notes[i].pitch);
+    bool is_contrary = (leap > 0 && next_motion < 0) || (leap < 0 && next_motion > 0);
+    bool is_step = std::abs(next_motion) <= 2;
+
+    if (is_contrary && is_step) continue;  // Already resolved.
+
+    // Try to resolve: move the next note to a contrary-step scale tone.
+    int resolve_dir = (leap > 0) ? -1 : 1;
+    for (int offset = 1; offset <= 2; ++offset) {
+      int cand = static_cast<int>(notes[i].pitch) + resolve_dir * offset;
+      if (cand < 0 || cand > 127) continue;
+      auto cand_u8 = static_cast<uint8_t>(cand);
+      if (scale_util::isScaleTone(cand_u8, key, scale)) {
+        notes[i + 1].pitch = cand_u8;
+        break;
+      }
+    }
+  }
+}
+
 }  // namespace
 
 // ===========================================================================
@@ -307,21 +374,35 @@ uint8_t findNearestOpenString(uint8_t target, uint8_t reg_low, uint8_t reg_high)
 
 std::vector<NoteEvent> generateTexture(const TextureContext& ctx,
                                        const HarmonicTimeline& timeline) {
+  std::vector<NoteEvent> notes;
   switch (ctx.texture) {
     case TextureType::SingleLine:
-      return generateSingleLine(ctx, timeline);
+      notes = generateSingleLine(ctx, timeline);
+      break;
     case TextureType::ImpliedPolyphony:
-      return generateImpliedPolyphony(ctx, timeline);
+      notes = generateImpliedPolyphony(ctx, timeline);
+      break;
     case TextureType::FullChords:
-      return generateFullChords(ctx, timeline);
+      notes = generateFullChords(ctx, timeline);
+      break;
     case TextureType::Arpeggiated:
-      return generateArpeggiated(ctx, timeline);
+      notes = generateArpeggiated(ctx, timeline);
+      break;
     case TextureType::ScalePassage:
-      return generateScalePassage(ctx, timeline);
+      notes = generateScalePassage(ctx, timeline);
+      break;
     case TextureType::Bariolage:
-      return generateBariolage(ctx, timeline);
+      notes = generateBariolage(ctx, timeline);
+      break;
   }
-  return {};
+
+  // Clamp excessive leaps (>12 semitones) then apply leap resolution.
+  if (ctx.texture != TextureType::FullChords) {
+    clampExcessiveLeaps(notes, ctx.register_low, ctx.register_high);
+    enforceLeapResolution(notes, ctx.key.tonic, ctx.key.is_minor);
+  }
+
+  return notes;
 }
 
 // ===========================================================================
@@ -371,12 +452,24 @@ std::vector<NoteEvent> generateSingleLine(const TextureContext& ctx,
           pitch = nearestChordTone(mid, chord_pitches);
         } else if (just_leaped) {
           // Compensation after leap: move in the opposite direction.
+          // Compensation amount scales with leap size (min 1, max 4 semitones).
           int compensation_dir = (last_leap_direction > 0) ? -1 : 1;
-          int target = static_cast<int>(prev_pitch) + compensation_dir * 2;
-          if (target >= static_cast<int>(ctx.register_low) &&
-              target <= static_cast<int>(ctx.register_high)) {
-            pitch = nearestChordTone(static_cast<uint8_t>(target), chord_pitches);
-          } else {
+          int leap_size = absoluteInterval(prev_pitch,
+                                          notes.empty() ? prev_pitch
+                                              : notes.back().pitch);
+          int comp_amount = std::min(std::max(leap_size / 2, 1), 4);
+          // Prefer 1-2 semitone compensation first.
+          bool found = false;
+          for (int try_amt = std::min(comp_amount, 2); try_amt <= comp_amount; ++try_amt) {
+            int target = static_cast<int>(prev_pitch) + compensation_dir * try_amt;
+            if (target >= static_cast<int>(ctx.register_low) &&
+                target <= static_cast<int>(ctx.register_high)) {
+              pitch = nearestChordTone(static_cast<uint8_t>(target), chord_pitches);
+              found = true;
+              break;
+            }
+          }
+          if (!found) {
             pitch = nearestChordTone(prev_pitch, chord_pitches);
           }
           just_leaped = false;
@@ -441,7 +534,7 @@ std::vector<NoteEvent> generateImpliedPolyphony(const TextureContext& ctx,
 
   // Divide register into upper and lower halves with seed-dependent offset.
   int full_range = static_cast<int>(ctx.register_high) - static_cast<int>(ctx.register_low);
-  int split_offset = rng::rollRange(rng, -3, 3);  // ±3 semitones seed variation
+  int split_offset = rng::rollRange(rng, -1, 1);  // ±1 semitone (reduced from ±3)
   int mid_point = static_cast<int>(ctx.register_low) + full_range / 2 + split_offset;
   mid_point = std::max(static_cast<int>(ctx.register_low) + 4, mid_point);
   mid_point = std::min(static_cast<int>(ctx.register_high) - 4, mid_point);
@@ -495,6 +588,15 @@ std::vector<NoteEvent> generateImpliedPolyphony(const TextureContext& ctx,
             pitch = upper_pitches[upper_pitches.size() / 2];
           } else {
             pitch = nearestChordTone(upper_prev, upper_pitches);
+            // Limit leap within implied voice to octave (12 semitones).
+            int leap = absoluteInterval(pitch, upper_prev);
+            if (leap > 12) {
+              // Find chord tone within 7 semitones of previous pitch.
+              uint8_t close_target = clampPitch(
+                  static_cast<int>(upper_prev) + ((pitch > upper_prev) ? 7 : -7),
+                  upper_low, upper_high);
+              pitch = nearestChordTone(close_target, upper_pitches);
+            }
           }
           upper_prev = pitch;
         } else {
@@ -506,6 +608,14 @@ std::vector<NoteEvent> generateImpliedPolyphony(const TextureContext& ctx,
             pitch = lower_pitches[lower_pitches.size() / 2];
           } else {
             pitch = nearestChordTone(lower_prev, lower_pitches);
+            // Limit leap within implied voice to octave (12 semitones).
+            int leap = absoluteInterval(pitch, lower_prev);
+            if (leap > 12) {
+              uint8_t close_target = clampPitch(
+                  static_cast<int>(lower_prev) + ((pitch > lower_prev) ? 7 : -7),
+                  lower_low, lower_high);
+              pitch = nearestChordTone(close_target, lower_pitches);
+            }
           }
           lower_prev = pitch;
         }
@@ -831,7 +941,7 @@ std::vector<NoteEvent> generateBariolage(const TextureContext& ctx,
         for (uint8_t cp : chord_pitches) {
           uint8_t nearest_open = findNearestOpenString(cp, ctx.register_low, ctx.register_high);
           if (nearest_open > 0) {
-            int dist = std::abs(static_cast<int>(cp) - static_cast<int>(nearest_open));
+            int dist = absoluteInterval(cp, nearest_open);
             if (dist > 0 && dist <= 7) {
               candidates.push_back(cp);
             }

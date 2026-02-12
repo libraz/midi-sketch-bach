@@ -4,6 +4,7 @@
 
 #include <algorithm>
 
+#include "core/pitch_utils.h"
 #include "instrument/fretted/fretted_instrument.h"
 
 namespace bach {
@@ -15,7 +16,7 @@ NoteEvent FrettedNoteFactory::createNote(uint8_t pitch, Tick start,
                                          Tick duration, uint8_t velocity,
                                          BachNoteSource source) const {
   NoteEvent note;
-  note.pitch = std::clamp(pitch, instrument_.getLowestPitch(),
+  note.pitch = clampPitch(pitch, instrument_.getLowestPitch(),
                           instrument_.getHighestPitch());
   note.start_tick = start;
   note.duration = duration;

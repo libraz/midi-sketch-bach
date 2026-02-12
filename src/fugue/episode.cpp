@@ -876,8 +876,7 @@ std::vector<NoteEvent> extractCharacteristicMotif(const Subject& subject,
     // Intervallic interest: contains a leap (>= 3 semitones).
     bool has_leap = false;
     for (size_t idx = start + 1; idx < start + motif_length; ++idx) {
-      int ivl = std::abs(static_cast<int>(subject.notes[idx].pitch) -
-                          static_cast<int>(subject.notes[idx - 1].pitch));
+      int ivl = absoluteInterval(subject.notes[idx].pitch, subject.notes[idx - 1].pitch);
       if (ivl >= 3) {
         has_leap = true;
         break;

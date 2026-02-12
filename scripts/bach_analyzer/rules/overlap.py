@@ -63,14 +63,32 @@ class WithinVoiceOverlap:
 
 
 class VoiceSpacing:
-    """Detect excessive spacing (>12 semitones) between adjacent voices.
+    """Detect excessive spacing between adjacent voices.
+
+    Default threshold is 12 semitones (one octave) between manual voices.
+    When one voice is a pedal voice (organ pedal), the threshold is relaxed
+    to 24 semitones (two octaves) because large pedal-manual gaps are
+    idiomatic in Bach's organ music.
 
     Scans every beat position and checks sounding pitches (including sustained
     notes), matching the sustained-note-aware approach used by C++ analysis.
     """
 
-    def __init__(self, max_semitones: int = 12):
+    _PEDAL_NAMES = {"pedal", "ped", "ped."}
+    _PEDAL_CHANNEL = 3
+
+    def __init__(self, max_semitones: int = 12, pedal_max_semitones: int = 24):
         self.max_semitones = max_semitones
+        self.pedal_max_semitones = pedal_max_semitones
+
+    def _is_pedal(self, name: str, track_list: list) -> bool:
+        """Check if a voice is a pedal voice by name or channel."""
+        if name.lower() in self._PEDAL_NAMES:
+            return True
+        for t in track_list:
+            if t.name == name and t.channel == self._PEDAL_CHANNEL:
+                return True
+        return False
 
     @property
     def name(self) -> str:
@@ -92,13 +110,17 @@ class VoiceSpacing:
         for i in range(len(track_order) - 1):
             name_upper, notes_upper = track_order[i]
             name_lower, notes_lower = track_order[i + 1]
+            # Use relaxed threshold if either voice is a pedal voice.
+            involves_pedal = (self._is_pedal(name_upper, score.tracks)
+                              or self._is_pedal(name_lower, score.tracks))
+            threshold = self.pedal_max_semitones if involves_pedal else self.max_semitones
             beat = 0
             while beat < end_tick:
                 nu = sounding_note_at(notes_upper, beat)
                 nl = sounding_note_at(notes_lower, beat)
                 if nu is not None and nl is not None:
                     gap = abs(nu.pitch - nl.pitch)
-                    if gap > self.max_semitones:
+                    if gap > threshold:
                         bar = beat // TICKS_PER_BAR + 1
                         beat_in_bar = (beat % TICKS_PER_BAR) // TICKS_PER_BEAT + 1
                         violations.append(

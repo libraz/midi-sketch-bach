@@ -11,6 +11,7 @@
 #include "analysis/counterpoint_analyzer.h"
 #include "core/gm_program.h"
 #include "core/interval.h"
+#include "core/note_creator.h"
 #include "core/pitch_utils.h"
 #include "core/rng_util.h"
 #include "core/scale.h"
@@ -451,7 +452,7 @@ std::vector<NoteEvent> generateFiguration(Tick start_tick, Tick end_tick,
           uint8_t alt = pitch;
           for (uint8_t ct : chord_tones) {
             if (ct != prev0) {
-              int d = std::abs(static_cast<int>(ct) - static_cast<int>(prev0));
+              int d = absoluteInterval(ct, prev0);
               if (d < best_dist) { best_dist = d; alt = ct; }
             }
           }
@@ -579,10 +580,12 @@ void generateUpperVoicePhrase(Tick phrase_start, const std::vector<NoteEvent>& m
     if (leader_seq.size() >= 4) {
       bool has_parallel = false;
       for (size_t i = 2; i < leader_seq.size(); ++i) {
-        int ivl_prev = std::abs(static_cast<int>(leader_seq[i - 1].pitch) -
-                                static_cast<int>(leader_seq[i - 2].pitch)) % 12;
-        int ivl_curr = std::abs(static_cast<int>(leader_seq[i].pitch) -
-                                static_cast<int>(leader_seq[i - 1].pitch)) % 12;
+        int ivl_prev = interval_util::compoundToSimple(
+            static_cast<int>(leader_seq[i - 1].pitch) -
+            static_cast<int>(leader_seq[i - 2].pitch));
+        int ivl_curr = interval_util::compoundToSimple(
+            static_cast<int>(leader_seq[i].pitch) -
+            static_cast<int>(leader_seq[i - 1].pitch));
         if ((ivl_prev == interval::kPerfect5th && ivl_curr == interval::kPerfect5th) ||
             (ivl_prev == interval::kUnison && ivl_curr == interval::kUnison) ||
             (ivl_prev == interval::kOctave && ivl_curr == interval::kOctave)) {
@@ -1038,7 +1041,7 @@ bool insertCadentialSuspension(std::vector<Track>& tracks, Tick cadence_tick,
     uint8_t res_pitch = scale_util::absoluteDegreeToPitch(abs_deg + cand.sus_degrees + cand.res_degrees, key, scale);
 
     // Melodic legality: resolution within 4 semitones of original.
-    if (std::abs(static_cast<int>(res_pitch) - static_cast<int>(orig_pitch)) > 4) continue;
+    if (absoluteInterval(res_pitch, orig_pitch) > 4) continue;
 
     // Range check.
     if (sus_pitch < range_low || sus_pitch > range_high) continue;
@@ -1136,8 +1139,8 @@ void validateNonHarmonicTones(std::vector<Track>& tracks,
         for (const auto& bn : tracks[2].notes) {
           if (bn.start_tick <= notes[i].start_tick &&
               bn.start_tick + bn.duration > notes[i].start_tick) {
-            int ivl = std::abs(static_cast<int>(notes[i].pitch) -
-                               static_cast<int>(bn.pitch)) % 12;
+            int ivl = interval_util::compoundToSimple(
+                static_cast<int>(notes[i].pitch) - static_cast<int>(bn.pitch));
             if (ivl == interval::kMinor2nd || ivl == interval::kMajor2nd ||
                 ivl == interval::kTritone) {
               notes[i].pitch = nearestChordTone(notes[i].pitch, ev);
@@ -1166,8 +1169,8 @@ void validateNonHarmonicTones(std::vector<Track>& tracks,
         for (const auto& bn : tracks[2].notes) {
           if (bn.start_tick <= notes[i].start_tick &&
               bn.start_tick + bn.duration > notes[i].start_tick) {
-            int ivl = std::abs(static_cast<int>(notes[i].pitch) -
-                               static_cast<int>(bn.pitch)) % 12;
+            int ivl = interval_util::compoundToSimple(
+                static_cast<int>(notes[i].pitch) - static_cast<int>(bn.pitch));
             if (ivl == interval::kMinor2nd || ivl == interval::kMajor2nd ||
                 ivl == interval::kTritone) {
               notes[i].pitch = nearestChordTone(notes[i].pitch, ev);
@@ -1394,8 +1397,9 @@ void enforceStrongBeatConsonance(std::vector<Track>& tracks,
     // Check all pairs for dissonance and fix.
     for (size_t i = 0; i < sounding.size(); ++i) {
       for (size_t j = i + 1; j < sounding.size(); ++j) {
-        int interval = std::abs(static_cast<int>(sounding[i].note->pitch) -
-                                static_cast<int>(sounding[j].note->pitch)) % 12;
+        int interval = interval_util::compoundToSimple(
+            static_cast<int>(sounding[i].note->pitch) -
+            static_cast<int>(sounding[j].note->pitch));
         if (interval_util::isConsonance(interval)) continue;
 
         // Fix the upper voice (lower track index = higher register in trio).
@@ -1415,11 +1419,10 @@ void enforceStrongBeatConsonance(std::vector<Track>& tracks,
 
         // Strategy 1: Snap to nearest chord tone within ±3 semitones.
         uint8_t nearest = nearestChordTone(fix_note->pitch, ev);
-        int dist = std::abs(static_cast<int>(nearest) -
-                            static_cast<int>(fix_note->pitch));
+        int dist = absoluteInterval(nearest, fix_note->pitch);
         if (dist <= 3 && nearest >= low && nearest <= high) {
-          int new_ivl = std::abs(static_cast<int>(nearest) -
-                                 static_cast<int>(other_note->pitch)) % 12;
+          int new_ivl = interval_util::compoundToSimple(
+              static_cast<int>(nearest) - static_cast<int>(other_note->pitch));
           if (interval_util::isConsonance(new_ivl)) {
             fix_note->pitch = nearest;
             continue;
@@ -1431,7 +1434,8 @@ void enforceStrongBeatConsonance(std::vector<Track>& tracks,
         for (int delta : {1, -1, 2, -2, 3, -3}) {
           int cand = static_cast<int>(fix_note->pitch) + delta;
           if (cand < low || cand > high) continue;
-          int new_ivl = std::abs(cand - static_cast<int>(other_note->pitch)) % 12;
+          int new_ivl = interval_util::compoundToSimple(
+              cand - static_cast<int>(other_note->pitch));
           if (interval_util::isConsonance(new_ivl) &&
               isChordTone(static_cast<uint8_t>(cand), ev)) {
             fix_note->pitch = static_cast<uint8_t>(cand);
@@ -1445,7 +1449,8 @@ void enforceStrongBeatConsonance(std::vector<Track>& tracks,
         for (int delta : {1, -1, 2, -2, 3, -3}) {
           int cand = static_cast<int>(fix_note->pitch) + delta;
           if (cand < low || cand > high) continue;
-          int new_ivl = std::abs(cand - static_cast<int>(other_note->pitch)) % 12;
+          int new_ivl = interval_util::compoundToSimple(
+              cand - static_cast<int>(other_note->pitch));
           if (interval_util::isConsonance(new_ivl)) {
             fix_note->pitch = static_cast<uint8_t>(cand);
             resolved = true;
@@ -1458,8 +1463,8 @@ void enforceStrongBeatConsonance(std::vector<Track>& tracks,
         for (int shift : {12, -12}) {
           int cand = static_cast<int>(fix_note->pitch) + shift;
           if (cand >= low && cand <= high) {
-            int new_ivl = std::abs(cand -
-                                   static_cast<int>(other_note->pitch)) % 12;
+            int new_ivl = interval_util::compoundToSimple(
+                cand - static_cast<int>(other_note->pitch));
             if (interval_util::isConsonance(new_ivl)) {
               fix_note->pitch = static_cast<uint8_t>(cand);
               resolved = true;
@@ -1477,7 +1482,7 @@ uint32_t countStrongBeatP4OverBass(const std::vector<NoteEvent>& all_notes) {
   std::vector<const NoteEvent*> bass_notes;
   std::vector<const NoteEvent*> upper_notes;
   for (const auto& n : all_notes) {
-    if (n.voice == 2) {
+    if (isPedalVoice(n.voice, kTrioVoiceCount)) {
       bass_notes.push_back(&n);
     } else {
       upper_notes.push_back(&n);
@@ -1494,8 +1499,8 @@ uint32_t countStrongBeatP4OverBass(const std::vector<NoteEvent>& all_notes) {
     for (const auto* bass : bass_notes) {
       if (bass->start_tick <= upper->start_tick &&
           bass->start_tick + bass->duration > upper->start_tick) {
-        int ivl = std::abs(static_cast<int>(upper->pitch) -
-                           static_cast<int>(bass->pitch)) % 12;
+        int ivl = interval_util::compoundToSimple(
+            static_cast<int>(upper->pitch) - static_cast<int>(bass->pitch));
         if (ivl == interval::kPerfect4th) {
           ++count;
         }
@@ -1638,7 +1643,42 @@ TrioSonataMovement generateMovement(const KeySignature& key_sig, Tick num_bars,
   };
   sortTracks(tracks);
 
-  // 6. Validate non-harmonic tones on upper voices.
+  // 5b. Post-validate through counterpoint engine.
+  {
+    std::vector<NoteEvent> all_notes;
+    for (const auto& track : tracks) {
+      all_notes.insert(all_notes.end(), track.notes.begin(), track.notes.end());
+    }
+
+    std::vector<std::pair<uint8_t, uint8_t>> voice_ranges = {
+        {kRhLow, kRhHigh},
+        {kLhLow, kLhHigh},
+        {organ_range::kPedalLow, organ_range::kPedalHigh}};
+
+    // Pedal notes are Structural (PedalPoint), upper voices are Flexible.
+    for (auto& n : all_notes) {
+      if (isPedalVoice(n.voice, kTrioVoiceCount) && n.source == BachNoteSource::Unknown) {
+        n.source = BachNoteSource::PedalPoint;
+      } else if (n.source == BachNoteSource::Unknown) {
+        n.source = BachNoteSource::FreeCounterpoint;
+      }
+    }
+
+    PostValidateStats stats;
+    auto validated = postValidateNotes(
+        std::move(all_notes), kTrioVoiceCount, key_sig, voice_ranges, &stats);
+
+    for (auto& track : tracks) {
+      track.notes.clear();
+    }
+    for (auto& note : validated) {
+      if (note.voice < kTrioVoiceCount) {
+        tracks[note.voice].notes.push_back(std::move(note));
+      }
+    }
+    sortTracks(tracks);
+  }
+
   // 6. Validate non-harmonic tones on upper voices.
   validateNonHarmonicTones(tracks, timeline, key_sig.tonic, scale);
 
@@ -1700,6 +1740,38 @@ TrioSonataMovement generateMovement(const KeySignature& key_sig, Tick num_bars,
         }
       }
     }
+  }
+
+  // 10b. Second parallel repair: steps 6-10 may have re-introduced parallel
+  // perfect consonances. Run postValidateNotes before ornaments and quality
+  // passes so that diatonic enforcement and voice separation still apply.
+  {
+    std::vector<NoteEvent> all_notes;
+    for (const auto& track : tracks) {
+      all_notes.insert(all_notes.end(), track.notes.begin(), track.notes.end());
+    }
+    for (auto& n : all_notes) {
+      if (isPedalVoice(n.voice, kTrioVoiceCount) && n.source == BachNoteSource::Unknown) {
+        n.source = BachNoteSource::PedalPoint;
+      } else if (n.source == BachNoteSource::Unknown) {
+        n.source = BachNoteSource::FreeCounterpoint;
+      }
+    }
+    std::vector<std::pair<uint8_t, uint8_t>> vr = {
+        {kRhLow, kRhHigh},
+        {kLhLow, kLhHigh},
+        {organ_range::kPedalLow, organ_range::kPedalHigh}};
+    auto validated = postValidateNotes(
+        std::move(all_notes), kTrioVoiceCount, key_sig, vr);
+    for (auto& track : tracks) {
+      track.notes.clear();
+    }
+    for (auto& note : validated) {
+      if (note.voice < kTrioVoiceCount) {
+        tracks[note.voice].notes.push_back(std::move(note));
+      }
+    }
+    sortTracks(tracks);
   }
 
   // 11. Apply ornaments with counterpoint verification.

@@ -51,9 +51,6 @@ class FuxRuleEvaluator : public IRuleEvaluator {
       Tick from_tick, Tick to_tick) const override;
 
  private:
-  /// @brief Check if an interval (mod 12) is a perfect consonance.
-  static bool isPerfectConsonance(int semitones);
-
   /// @brief Get the previous note before the given tick for a voice.
   static const NoteEvent* getPreviousNote(const CounterpointState& state,
                                           VoiceId voice_id, Tick tick);

@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <random>
 
+#include "core/pitch_utils.h"
 #include "core/rng_util.h"
 #include "harmony/harmonic_timeline.h"
 #include "harmony/key.h"
@@ -483,6 +484,33 @@ ChaconneResult generateChaconne(const ChaconneConfig& config) {
               }
               return lhs.pitch < rhs.pitch;
             });
+
+  // Clamp excessive leaps (>12 semitones) at variation boundaries.
+  // Skip immutable notes (GroundBass) to preserve structural integrity.
+  // Also skip when prev note is GroundBass (ground bass→texture transition
+  // may naturally have a large interval).
+  for (size_t idx = 1; idx < all_notes.size(); ++idx) {
+    if (all_notes[idx].source == BachNoteSource::GroundBass) continue;
+    if (all_notes[idx - 1].source == BachNoteSource::GroundBass) continue;
+    int leap = absoluteInterval(all_notes[idx].pitch, all_notes[idx - 1].pitch);
+    if (leap > 12) {
+      int pc = static_cast<int>(all_notes[idx].pitch) % 12;
+      int prev = static_cast<int>(all_notes[idx - 1].pitch);
+      int best = static_cast<int>(all_notes[idx].pitch);
+      int best_dist = leap;
+      for (int oct = 0; oct <= 10; ++oct) {
+        int cand = oct * 12 + pc;
+        if (cand < static_cast<int>(profile.register_low) ||
+            cand > static_cast<int>(profile.register_high)) continue;
+        int dist = std::abs(cand - prev);
+        if (dist < best_dist) {
+          best_dist = dist;
+          best = cand;
+        }
+      }
+      all_notes[idx].pitch = static_cast<uint8_t>(best);
+    }
+  }
 
   Track track;
   track.channel = 0;

@@ -8,7 +8,7 @@ from __future__ import annotations
 from collections import Counter
 from typing import Dict, List
 
-from ..model import Note, Score
+from ..model import Note, NoteSource, Score, TICKS_PER_BEAT
 from .base import Category, RuleResult, Severity, Violation
 
 
@@ -87,21 +87,35 @@ class VoiceIndependence:
 
     @staticmethod
     def _contour(va: List[Note], vb: List[Note]) -> float:
+        """Compare melodic contour between two voices using time-aligned beats.
+
+        Instead of comparing notes by sequential index (which is meaningless
+        when voices have different note counts), we sample the melodic direction
+        at each beat position where both voices have notes, producing a
+        time-aligned contour comparison.
+        """
         if len(va) < 2 or len(vb) < 2:
             return 0.0
-        dirs_a = [
-            1 if va[k + 1].pitch > va[k].pitch else (-1 if va[k + 1].pitch < va[k].pitch else 0)
-            for k in range(len(va) - 1)
-        ]
-        dirs_b = [
-            1 if vb[k + 1].pitch > vb[k].pitch else (-1 if vb[k + 1].pitch < vb[k].pitch else 0)
-            for k in range(len(vb) - 1)
-        ]
-        min_len = min(len(dirs_a), len(dirs_b))
-        if min_len == 0:
+        # Build per-beat pitch maps for each voice.
+        def beat_pitches(notes: List[Note]) -> Dict[int, int]:
+            return {n.start_tick // TICKS_PER_BEAT: n.pitch for n in notes}
+        bp_a = beat_pitches(va)
+        bp_b = beat_pitches(vb)
+        # Find beats where both voices have attacks.
+        common_beats = sorted(set(bp_a) & set(bp_b))
+        if len(common_beats) < 2:
             return 0.0
-        opposite = sum(1 for k in range(min_len) if dirs_a[k] * dirs_b[k] < 0)
-        return opposite / min_len
+        opposite = 0
+        comparisons = 0
+        for k in range(len(common_beats) - 1):
+            b1, b2 = common_beats[k], common_beats[k + 1]
+            dir_a = bp_a[b2] - bp_a[b1]
+            dir_b = bp_b[b2] - bp_b[b1]
+            if dir_a != 0 and dir_b != 0:
+                comparisons += 1
+                if (dir_a > 0) != (dir_b > 0):
+                    opposite += 1
+        return opposite / comparisons if comparisons > 0 else 0.0
 
     @staticmethod
     def _register(va: List[Note], vb: List[Note]) -> float:
@@ -119,6 +133,19 @@ class VoiceIndependence:
 # ---------------------------------------------------------------------------
 
 
+def _is_pedal_voice(voice_name: str, notes: List[Note]) -> bool:
+    """Detect pedal voice by name or provenance (>80% pedal/ground_bass sources)."""
+    name_lower = voice_name.lower()
+    if name_lower in ("pedal", "ped"):
+        return True
+    if not notes:
+        return False
+    pedal_sources = {NoteSource.PEDAL_POINT, NoteSource.GROUND_BASS}
+    pedal_count = sum(1 for n in notes
+                      if n.provenance and n.provenance.source in pedal_sources)
+    return pedal_count / len(notes) > 0.8
+
+
 class RhythmDiversity:
     """Check duration variety per voice. Flag if a single duration dominates."""
 
@@ -133,6 +160,8 @@ class RhythmDiversity:
     def category(self) -> Category:
         return Category.INDEPENDENCE
 
+    _PEDAL_MIN_DIVERSITY = 0.0  # Pedal voices may have completely uniform rhythm.
+
     def check(self, score: Score) -> RuleResult:
         violations: List[Violation] = []
         info_parts = []
@@ -145,7 +174,8 @@ class RhythmDiversity:
             # Score: 1.0 if max_ratio <= 0.3, 0.0 if max_ratio = 1.0
             diversity = 1.0 - max(0.0, (max_ratio - 0.3) / 0.7)
             info_parts.append(f"{voice_name}: {diversity:.2f}")
-            if diversity < self.min_diversity:
+            threshold = self._PEDAL_MIN_DIVERSITY if _is_pedal_voice(voice_name, notes) else self.min_diversity
+            if diversity < threshold:
                 violations.append(
                     Violation(
                         rule_name=self.name,

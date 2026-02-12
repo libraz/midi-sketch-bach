@@ -6,6 +6,9 @@
 
 #include <cmath>
 
+#include "core/note_creator.h"
+#include "core/pitch_utils.h"
+#include "harmony/key.h"
 #include "ornament/ornament_engine.h"
 
 namespace bach {
@@ -218,7 +221,7 @@ std::vector<NoteEvent> generatePedalCadenza(
 
   // Dominant pitch for trill target.
   uint8_t tpc = static_cast<uint8_t>(key_sig.tonic);
-  uint8_t dominant_pc = (tpc + 7) % 12;
+  uint8_t dominant_pc = static_cast<uint8_t>(getDominant(key_sig).tonic);
 
   Tick tick = start_tick;
   Tick cadenza_mid = start_tick + (end_tick - start_tick) / 2;
@@ -241,7 +244,7 @@ std::vector<NoteEvent> generatePedalCadenza(
   {
     // V7 arpeggio: root, 3rd, 5th, 7th.
     std::vector<uint8_t> v7_pcs = {
-        static_cast<uint8_t>((tpc + 7) % 12),   // 5th (root of V)
+        static_cast<uint8_t>(getDominant(key_sig).tonic),  // root of V
         static_cast<uint8_t>((tpc + 11) % 12),  // maj 3rd of V
         static_cast<uint8_t>((tpc + 2) % 12),   // 5th of V
         static_cast<uint8_t>((tpc + 5) % 12),   // min 7th of V
@@ -322,9 +325,9 @@ std::vector<NoteEvent> generateFreeSection(
         auto chord_tones = collectChordTonesInRange(ev.chord, search_low, search_high);
         if (!chord_tones.empty()) {
           uint8_t best = chord_tones[0];
-          int best_dist = std::abs(static_cast<int>(current) - static_cast<int>(best));
+          int best_dist = absoluteInterval(current, best);
           for (auto ct : chord_tones) {
-            int d = std::abs(static_cast<int>(current) - static_cast<int>(ct));
+            int d = absoluteInterval(current, ct);
             if (d < best_dist) { best = ct; best_dist = d; }
           }
           for (size_t i = 0; i < scale.size(); ++i) {
@@ -455,6 +458,22 @@ ToccataResult generateSectionalisToccata(const ToccataConfig& config) {
     ctx.timeline = &timeline;
     ctx.cadence_ticks = {sections.back().end - kTicksPerBar};
     all_notes = applyOrnaments(all_notes, ctx);
+  }
+
+  // Post-validate: counterpoint repair (parallel perfects, range clamping).
+  {
+    std::vector<std::pair<uint8_t, uint8_t>> voice_ranges;
+    for (uint8_t v = 0; v < num_voices; ++v) {
+      voice_ranges.emplace_back(getToccataLowPitch(v), getToccataHighPitch(v));
+    }
+    for (auto& n : all_notes) {
+      if (n.source == BachNoteSource::Unknown) {
+        n.source = isPedalVoice(n.voice, num_voices) ? BachNoteSource::PedalPoint
+                                  : BachNoteSource::FreeCounterpoint;
+      }
+    }
+    all_notes = postValidateNotes(
+        std::move(all_notes), num_voices, config.key, voice_ranges);
   }
 
   // Build tracks.

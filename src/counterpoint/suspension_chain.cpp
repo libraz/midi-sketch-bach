@@ -6,6 +6,8 @@
 
 #include <algorithm>
 
+#include "core/pitch_utils.h"
+
 namespace bach {
 
 namespace {
@@ -21,12 +23,6 @@ constexpr uint8_t kBeatsPerSuspension = 3;
 
 /// Ticks per suspension event.
 constexpr Tick kTicksPerSuspension = kBeatsPerSuspension * kTicksPerBeat;
-
-/// @brief Clamp a pitch value to the valid MIDI range [kMinPitch, kMaxPitch].
-uint8_t clampPitch(int pitch) {
-  return static_cast<uint8_t>(std::clamp(pitch, static_cast<int>(kMinPitch),
-                                         static_cast<int>(kMaxPitch)));
-}
 
 }  // namespace
 
@@ -79,7 +75,7 @@ SuspensionChain generateSuspensionChain(Tick start_tick, uint8_t num_suspensions
   }
 
   // Clamp the starting pitch to valid range.
-  uint8_t current_pitch = clampPitch(static_cast<int>(base_pitch));
+  uint8_t current_pitch = clampPitch(static_cast<int>(base_pitch), kMinPitch, kMaxPitch);
   int interval = resolutionInterval(type);
 
   chain.events.reserve(num_suspensions);
@@ -99,7 +95,8 @@ SuspensionChain generateSuspensionChain(Tick start_tick, uint8_t num_suspensions
     event.resolution_tick = start_tick + offset + 2 * kTicksPerBeat;
 
     event.suspended_pitch = current_pitch;
-    event.resolution_pitch = clampPitch(static_cast<int>(current_pitch) + interval);
+    event.resolution_pitch = clampPitch(static_cast<int>(current_pitch) + interval,
+                                         kMinPitch, kMaxPitch);
 
     chain.events.push_back(event);
 
@@ -130,7 +127,7 @@ SuspensionChain generateSuspensionChain(Tick start_tick, uint8_t num_suspensions
     return chain;
   }
 
-  uint8_t current_pitch = clampPitch(static_cast<int>(base_pitch));
+  uint8_t current_pitch = clampPitch(static_cast<int>(base_pitch), kMinPitch, kMaxPitch);
   // Resolution direction: -1 for downward (4-3, 7-6, 9-8), +1 for upward (2-3).
   int direction = (type == SuspensionType::Sus2_3) ? 1 : -1;
   // 9-8 resolves by 2 diatonic steps; all others by 1.
@@ -164,7 +161,7 @@ SuspensionChain generateSuspensionChain(Tick start_tick, uint8_t num_suspensions
       }
       if (!found) break;
     }
-    event.resolution_pitch = clampPitch(res_pitch);
+    event.resolution_pitch = clampPitch(res_pitch, kMinPitch, kMaxPitch);
 
     chain.events.push_back(event);
     current_pitch = event.resolution_pitch;

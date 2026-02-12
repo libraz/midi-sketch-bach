@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "core/gm_program.h"
+#include "core/note_creator.h"
 #include "core/pitch_utils.h"
 #include "core/scale.h"
 #include "harmony/chord_types.h"
@@ -415,6 +416,42 @@ ChoralePreludeResult generateChoralePrelude(const ChoralePreludeConfig& config) 
     }
 
     cantus_tick += cantus_dur;
+  }
+
+  // Step 6b: Post-validate through counterpoint engine.
+  {
+    constexpr uint8_t kChoraleVoices = 3;
+    std::vector<NoteEvent> all_notes;
+    for (const auto& track : tracks) {
+      all_notes.insert(all_notes.end(), track.notes.begin(), track.notes.end());
+    }
+
+    // Tag sources: cantus = CantusFixed (already tagged), figuration = FreeCounterpoint,
+    // pedal = PedalPoint.
+    for (auto& n : all_notes) {
+      if (n.source == BachNoteSource::Unknown) {
+        n.source = isPedalVoice(n.voice, kChoraleVoices) ? BachNoteSource::PedalPoint
+                                  : BachNoteSource::FreeCounterpoint;
+      }
+    }
+
+    std::vector<std::pair<uint8_t, uint8_t>> voice_ranges = {
+        {48, 71},  // Voice 0: Great figuration (C3-B4)
+        {organ_range::kManual2Low, organ_range::kManual2High},  // Voice 1: Swell (cantus)
+        {organ_range::kPedalLow, organ_range::kPedalHigh}};    // Voice 2: Pedal
+
+    PostValidateStats stats;
+    auto validated = postValidateNotes(
+        std::move(all_notes), kChoraleVoices, config.key, voice_ranges, &stats);
+
+    for (auto& track : tracks) {
+      track.notes.clear();
+    }
+    for (auto& note : validated) {
+      if (note.voice < kChoraleVoices) {
+        tracks[note.voice].notes.push_back(std::move(note));
+      }
+    }
   }
 
   // ---------------------------------------------------------------------------

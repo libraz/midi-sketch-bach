@@ -16,12 +16,7 @@ namespace bach {
 // Interval classification
 // ---------------------------------------------------------------------------
 
-bool FuxRuleEvaluator::isPerfectConsonance(int semitones) {
-  int reduced = interval_util::compoundToSimple(semitones);  // Normalize to [0, 11].
-  return reduced == interval::kUnison ||
-         reduced == interval::kPerfect5th;
-  // Note: P8 reduces to 0 (unison) mod 12.
-}
+
 
 bool FuxRuleEvaluator::isIntervalConsonant(int semitones,
                                            bool is_strong_beat) const {
@@ -132,8 +127,8 @@ bool FuxRuleEvaluator::hasParallelPerfect(const CounterpointState& state,
                                static_cast<int>(curr2->pitch));
 
   // Both intervals must be perfect consonances (P1/P5/P8).
-  if (!isPerfectConsonance(prev_interval) ||
-      !isPerfectConsonance(curr_interval)) {
+  if (!interval_util::isPerfectConsonance(prev_interval) ||
+      !interval_util::isPerfectConsonance(curr_interval)) {
     return false;
   }
 
@@ -167,7 +162,7 @@ bool FuxRuleEvaluator::hasHiddenPerfect(const CounterpointState& state,
                                static_cast<int>(curr2->pitch));
 
   // The arriving interval must be a perfect consonance.
-  if (!isPerfectConsonance(curr_interval)) return false;
+  if (!interval_util::isPerfectConsonance(curr_interval)) return false;
 
   // The previous interval must NOT be the same perfect consonance.
   int prev_interval = std::abs(static_cast<int>(prev1->pitch) -

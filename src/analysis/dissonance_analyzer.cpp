@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "core/basic_types.h"
+#include "core/interval.h"
 #include "core/note_source.h"
 #include "core/pitch_utils.h"
 #include "harmony/chord_types.h"
@@ -323,7 +324,7 @@ std::vector<DissonanceEvent> detectSimultaneousClashes(
         // Perfect 4th between upper voices (neither is bass) is consonant
         // in 3+ voice counterpoint -- it is the inversion of a perfect 5th.
         if (quality == IntervalQuality::Dissonance &&
-            (ivl % 12) == interval::kPerfect4th &&
+            interval_util::compoundToSimple(ivl) == interval::kPerfect4th &&
             va != bass_voice && vb != bass_voice) {
           continue;
         }

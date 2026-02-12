@@ -375,8 +375,7 @@ float bassLineStepwiseRatio(const std::vector<NoteEvent>& notes, uint8_t num_voi
   uint32_t total = 0;
   uint32_t stepwise = 0;
   for (size_t idx = 1; idx < bass_notes.size(); ++idx) {
-    int interval = std::abs(static_cast<int>(bass_notes[idx].pitch) -
-                            static_cast<int>(bass_notes[idx - 1].pitch));
+    int interval = absoluteInterval(bass_notes[idx].pitch, bass_notes[idx - 1].pitch);
     ++total;
     if (interval >= 1 && interval <= 2) ++stepwise;
   }
@@ -396,8 +395,7 @@ float voiceLeadingSmoothness(const std::vector<NoteEvent>& notes, uint8_t num_vo
     float voice_sum = 0.0f;
     uint32_t intervals = 0;
     for (size_t idx = 1; idx < sorted.size(); ++idx) {
-      int leap = std::abs(static_cast<int>(sorted[idx].pitch) -
-                          static_cast<int>(sorted[idx - 1].pitch));
+      int leap = absoluteInterval(sorted[idx].pitch, sorted[idx - 1].pitch);
       voice_sum += static_cast<float>(leap);
       ++intervals;
     }

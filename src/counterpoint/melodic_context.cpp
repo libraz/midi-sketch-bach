@@ -5,6 +5,9 @@
 #include <cmath>
 #include <cstdlib>
 
+#include "core/interval.h"
+#include "core/pitch_utils.h"
+
 namespace bach {
 
 float computeGoalApproachBonus(uint8_t current_pitch, Tick current_tick,
@@ -13,8 +16,7 @@ float computeGoalApproachBonus(uint8_t current_pitch, Tick current_tick,
   if (goal.target_pitch == 0 || goal.target_tick == 0) return 0.0f;
 
   // Pitch proximity: inverse linear within an octave. Beyond 12 semitones, no bonus.
-  int pitch_distance =
-      std::abs(static_cast<int>(current_pitch) - static_cast<int>(goal.target_pitch));
+  int pitch_distance = absoluteInterval(current_pitch, goal.target_pitch);
   constexpr int kMaxPitchDistance = 12;  // One octave.
   float pitch_factor = 0.0f;
   if (pitch_distance < kMaxPitchDistance) {
@@ -47,7 +49,7 @@ float MelodicContext::scoreMelodicQuality(const MelodicContext& ctx, uint8_t can
 
   float score = 0.5f;  // Base score (neutral).
   uint8_t prev = ctx.prev_pitches[0];
-  int interval = std::abs(static_cast<int>(candidate) - static_cast<int>(prev));
+  int interval = absoluteInterval(candidate, prev);
   int directed = static_cast<int>(candidate) - static_cast<int>(prev);
   int direction = (directed > 0) ? 1 : (directed < 0 ? -1 : 0);
 
@@ -55,8 +57,7 @@ float MelodicContext::scoreMelodicQuality(const MelodicContext& ctx, uint8_t can
   // A leap (>= 4 semitones) followed by stepwise motion (1-2 semitones)
   // in the opposite direction is a hallmark of good Bach voice leading.
   if (ctx.prev_count >= 2 && ctx.prev_direction != 0) {
-    int prev_interval =
-        std::abs(static_cast<int>(prev) - static_cast<int>(ctx.prev_pitches[1]));
+    int prev_interval = absoluteInterval(prev, ctx.prev_pitches[1]);
     if (prev_interval >= 4 && interval >= 1 && interval <= 2 && direction != 0 &&
         direction != ctx.prev_direction) {
       score += 0.3f;
@@ -69,7 +70,7 @@ float MelodicContext::scoreMelodicQuality(const MelodicContext& ctx, uint8_t can
   }
 
   // Rule 3: Imperfect consonance interval (+0.1)
-  int reduced = interval % 12;
+  int reduced = interval_util::compoundToSimple(interval);
   if (reduced == 3 || reduced == 4 || reduced == 8 || reduced == 9) {
     score += 0.1f;
   }

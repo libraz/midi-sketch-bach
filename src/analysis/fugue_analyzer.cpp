@@ -10,6 +10,7 @@
 #include "analysis/cadence_detector.h"
 #include "analysis/counterpoint_analyzer.h"
 #include "core/basic_types.h"
+#include "core/interval.h"
 #include "core/pitch_utils.h"
 #include "harmony/harmonic_timeline.h"
 
@@ -176,7 +177,7 @@ FugueAnalysisResult analyzeFugue(const std::vector<NoteEvent>& notes,
       if (matchesIntervalPattern(ans_ivl, subj_ivl, 1)) {
         int trans = static_cast<int>(answer_voice[0].pitch) -
                     static_cast<int>(subject_notes[0].pitch);
-        int abs_trans = ((trans % 12) + 12) % 12;
+        int abs_trans = interval_util::compoundToSimple(trans);
         if (abs_trans == 7 || abs_trans == 5) result.answer_accuracy_score = 1.0f;
         else if (abs_trans == 0) result.answer_accuracy_score = 0.5f;
         else result.answer_accuracy_score = 0.3f;

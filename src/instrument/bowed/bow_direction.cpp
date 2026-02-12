@@ -6,6 +6,8 @@
 #include <cmath>
 #include <cstdlib>
 
+#include "core/pitch_utils.h"
+
 namespace bach {
 
 namespace {
@@ -35,7 +37,7 @@ int estimateStringIndex(uint8_t pitch, const std::vector<uint8_t>& open_strings)
 /// @param pitch_b Second MIDI pitch.
 /// @return True if the interval is a half or whole step.
 bool isStepwiseMotion(uint8_t pitch_a, uint8_t pitch_b) {
-  int interval = std::abs(static_cast<int>(pitch_a) - static_cast<int>(pitch_b));
+  int interval = absoluteInterval(pitch_a, pitch_b);
   return interval >= 1 && interval <= 2;
 }
 

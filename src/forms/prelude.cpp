@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "core/gm_program.h"
+#include "core/note_creator.h"
 #include "core/pitch_utils.h"
 #include "core/rng_util.h"
 #include "core/scale.h"
@@ -341,12 +342,11 @@ std::vector<NoteEvent> generateArpeggioPassage(const HarmonicEvent& event,
     if (dur == 0) break;
 
     uint8_t candidate = arp_pitches[arp_idx];
-    if (std::abs(static_cast<int>(candidate) - static_cast<int>(prev_pitch)) > kMaxLeap) {
+    if (absoluteInterval(candidate, prev_pitch) > kMaxLeap) {
       int best_dist = 999;
       size_t best_idx = arp_idx;
       for (size_t i = 0; i < arp_pitches.size(); ++i) {
-        int dist = std::abs(static_cast<int>(arp_pitches[i]) -
-                            static_cast<int>(prev_pitch));
+        int dist = absoluteInterval(arp_pitches[i], prev_pitch);
         if (dist <= kMaxLeap && dist < best_dist && arp_pitches[i] != prev_pitch) {
           best_dist = dist;
           best_idx = i;
@@ -932,6 +932,26 @@ PreludeResult generatePrelude(const PreludeConfig& config) {
   } else {
     all_notes = generateFreeFormNotes(timeline, num_voices, rng);
   }
+
+  // Tag untagged notes with source for counterpoint protection levels.
+  for (auto& n : all_notes) {
+    if (n.source == BachNoteSource::Unknown) {
+      n.source = (num_voices >= 4 && isPedalVoice(n.voice, num_voices))
+                     ? BachNoteSource::PedalPoint
+                     : BachNoteSource::FreeCounterpoint;
+    }
+  }
+
+  // Build per-voice pitch ranges for counterpoint validation.
+  std::vector<std::pair<uint8_t, uint8_t>> voice_ranges;
+  for (uint8_t v = 0; v < num_voices; ++v) {
+    voice_ranges.push_back({getVoiceLowPitch(v), getVoiceHighPitch(v)});
+  }
+
+  // Post-validate through counterpoint engine (parallel 5ths/8ths repair).
+  PostValidateStats pv_stats;
+  all_notes = postValidateNotes(
+      std::move(all_notes), num_voices, config.key, voice_ranges, &pv_stats);
 
   // Step 4: Create tracks and assign notes by voice_id.
   std::vector<Track> tracks = createPreludeTracks(num_voices);
