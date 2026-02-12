@@ -77,7 +77,7 @@ static float crossRelationPenalty(const CounterpointState& state,
       if (low_pc == 4 && high_pc == 5) continue;   // E/F natural
       if (low_pc == 0 && high_pc == 11) continue;   // B/C natural (wrapped)
       if (low_pc == 0 && high_pc == 1) continue;    // B#/C = enharmonic, skip
-      return 0.5f;
+      return 1.0f;
     }
   }
   return 0.0f;

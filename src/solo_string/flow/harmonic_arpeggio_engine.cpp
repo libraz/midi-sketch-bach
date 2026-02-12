@@ -158,6 +158,95 @@ uint8_t fitToRegister(uint8_t pitch, const RegisterRange& range) {
   return range.high;
 }
 
+/// @brief Place a pitch in register with melodic smoothness to the previous note.
+///
+/// BWV 1007-style arpeggio writing keeps adjacent notes within a 5th (7st)
+/// in normal flow. Larger leaps are permitted only at chord root changes
+/// (harmonic turning points) or at the start of a bar.
+///
+/// Priority order for placement:
+///   1. <=7st (perfect 5th) from prev_pitch, within range — best
+///   2. <=12st (octave) from prev_pitch, within range
+///   3. <=19st (octave + P5) — only at harmonic turning points
+///   4. Nearest in-range placement (fallback)
+///
+/// @param pitch Raw MIDI pitch (pitch class to preserve).
+/// @param range Target register range.
+/// @param prev_pitch Previous note's MIDI pitch (0 = no previous, use fitToRegister).
+/// @param is_harmonic_turn True at chord root changes or bar start (relaxes leap limit).
+/// @return MIDI pitch adjusted for smooth voice leading within register range.
+uint8_t fitToRegisterSmooth(uint8_t pitch, const RegisterRange& range,
+                            uint8_t prev_pitch, bool is_harmonic_turn) {
+  // No previous context: fall back to original placement.
+  if (prev_pitch == 0) {
+    return fitToRegister(pitch, range);
+  }
+
+  int pitch_class = static_cast<int>(pitch) % 12;
+  int prev = static_cast<int>(prev_pitch);
+
+  // Collect all in-range octave candidates for this pitch class.
+  struct Candidate {
+    int pitch;
+    int distance;  // from prev_pitch
+  };
+  Candidate candidates[11];
+  int num_candidates = 0;
+
+  for (int octave = 0; octave <= 10; ++octave) {
+    int cand = (octave + 1) * 12 + pitch_class;
+    if (cand < static_cast<int>(range.low) ||
+        cand > static_cast<int>(range.high)) {
+      continue;
+    }
+    int dist = std::abs(cand - prev);
+    candidates[num_candidates++] = {cand, dist};
+  }
+
+  if (num_candidates == 0) {
+    // No octave fits: clamp to boundary.
+    if (pitch < range.low) return range.low;
+    return range.high;
+  }
+
+  // Sort candidates by distance to prev_pitch.
+  std::sort(candidates, candidates + num_candidates,
+            [](const Candidate& a, const Candidate& b) {
+              return a.distance < b.distance;
+            });
+
+  // Priority 1: within P5 (7 semitones).
+  for (int i = 0; i < num_candidates; ++i) {
+    if (candidates[i].distance <= 7) {
+      return static_cast<uint8_t>(candidates[i].pitch);
+    }
+  }
+
+  // Priority 2: within octave (12 semitones).
+  for (int i = 0; i < num_candidates; ++i) {
+    if (candidates[i].distance <= 12) {
+      return static_cast<uint8_t>(candidates[i].pitch);
+    }
+  }
+
+  // Priority 3: within octave (12st) even for non-turn — accept nearest.
+  // This catches cases where no candidate is within P5 but one is within octave.
+  // (Already covered by priority 2, but kept for clarity.)
+
+  // Priority 4 (harmonic turns only): allow up to 13st (octave + m2) to stay
+  // within the validator's max_leap_semitones threshold (default 13).
+  if (is_harmonic_turn) {
+    for (int i = 0; i < num_candidates; ++i) {
+      if (candidates[i].distance <= 13) {
+        return static_cast<uint8_t>(candidates[i].pitch);
+      }
+    }
+  }
+
+  // Fallback: nearest candidate regardless of distance.
+  return static_cast<uint8_t>(candidates[0].pitch);
+}
+
 // ---------------------------------------------------------------------------
 // Helper: compute register range for a given section based on ArcPhase
 // ---------------------------------------------------------------------------
@@ -180,15 +269,21 @@ RegisterRange computeRegisterRange(ArcPhase phase, float progress,
   int full_range = static_cast<int>(inst_high) - static_cast<int>(inst_low);
   int mid_point = static_cast<int>(inst_low) + full_range / 2;
 
+  // Peak retains the full instrument range. Ascent/Descent are capped slightly
+  // below the instrument ceiling so that Peak is guaranteed the widest register
+  // (design values principle: Peak = climax with maximum range).
+  constexpr int kPeakRegisterMargin = 3;  // semitones reserved for Peak
+
   switch (phase) {
     case ArcPhase::Ascent: {
       // Start from lower-mid range, expand upward as progress increases.
-      // Low stays near instrument low; high expands from mid to instrument high.
+      // Low stays near instrument low; high expands from mid toward the cap.
       range.low = inst_low;
+      int cap = static_cast<int>(inst_high) - kPeakRegisterMargin;
       int expanding_high = mid_point + static_cast<int>(
-          static_cast<float>(inst_high - mid_point) * progress);
+          static_cast<float>(cap - mid_point) * progress);
       range.high = static_cast<uint8_t>(
-          std::min(expanding_high, static_cast<int>(inst_high)));
+          std::min(expanding_high, cap));
       break;
     }
     case ArcPhase::Peak: {
@@ -198,12 +293,13 @@ RegisterRange computeRegisterRange(ArcPhase phase, float progress,
       break;
     }
     case ArcPhase::Descent: {
-      // Gradually contract from full range toward the low register.
-      // High shrinks from instrument high toward mid-point.
-      // Low stays at instrument low.
+      // Gradually contract from near-full range toward the low register.
+      // High starts at the cap (just below instrument ceiling) and shrinks
+      // toward mid-point.
       range.low = inst_low;
-      int contracting_high = inst_high - static_cast<int>(
-          static_cast<float>(inst_high - mid_point) * progress);
+      int cap = static_cast<int>(inst_high) - kPeakRegisterMargin;
+      int contracting_high = cap - static_cast<int>(
+          static_cast<float>(cap - mid_point) * progress);
       range.high = static_cast<uint8_t>(
           std::max(contracting_high, mid_point));
       break;
@@ -568,12 +664,19 @@ std::vector<NoteEvent> generateBarNotes(
     bool is_cadence_bar,
     float cadence_prog,
     float rhythm_simplification,
-    std::mt19937& rng) {
+    std::mt19937& rng,
+    uint8_t& prev_pitch,
+    uint8_t prev_chord_root,
+    ArcPhase phase) {
   std::vector<NoteEvent> notes;
 
   if (pattern.degrees.empty()) {
     return notes;
   }
+
+  // Detect harmonic turning point: chord root changed from previous bar.
+  bool chord_root_changed = (prev_chord_root != 0 &&
+                             prev_chord_root != harm_event.chord.root_pitch);
 
   // In cadence region, occasionally merge consecutive 16ths into 8ths.
   bool simplify_rhythm = is_cadence_bar &&
@@ -595,11 +698,21 @@ std::vector<NoteEvent> generateBarNotes(
       uint8_t raw_pitch = patternDegreeToMidiPitch(
           harm_event.chord.root_pitch, pattern_degree, harm_event.is_minor);
 
-      // Fit to register range.
-      uint8_t pitch = fitToRegister(raw_pitch, reg_range);
+      // Harmonic turn: first note of bar at chord change, or beat 1.
+      bool is_turn = (note_idx == 0 && chord_root_changed) ||
+                     (beat_idx == 0 && sub_idx == 0);
+
+      // Fit to register range with smooth voice leading for all phases.
+      // Peak has the widest available register (guaranteed by
+      // computeRegisterRange's kPeakRegisterMargin), so smooth placement
+      // naturally achieves the widest actual range at Peak.
+      uint8_t pitch = fitToRegisterSmooth(
+          raw_pitch, reg_range, prev_pitch, is_turn);
 
       // Open string preference: if this pitch class matches an open string,
       // and the bias roll succeeds, use the open string pitch directly.
+      // Guard: only accept the open string if it doesn't create an excessive
+      // leap from prev_pitch (BWV 1007 idiom: adjacent notes within ~P5).
       float effective_bias = open_string_bias;
       if (is_cadence_bar) {
         // Increase open string usage in cadence (per CadenceConfig).
@@ -612,7 +725,14 @@ std::vector<NoteEvent> generateBarNotes(
         uint8_t open_pitch = findOpenStringPitch(
             pitch_class, instrument.open_strings, reg_range);
         if (open_pitch > 0) {
-          pitch = open_pitch;
+          // Accept only if it doesn't exceed the smooth leap limit.
+          int open_leap = (prev_pitch > 0)
+              ? std::abs(static_cast<int>(open_pitch) - static_cast<int>(prev_pitch))
+              : 0;
+          int smooth_limit = is_turn ? 12 : 7;
+          if (prev_pitch == 0 || open_leap <= smooth_limit) {
+            pitch = open_pitch;
+          }
         }
       }
 
@@ -652,6 +772,7 @@ std::vector<NoteEvent> generateBarNotes(
       note.source = BachNoteSource::ArpeggioFlow;
 
       notes.push_back(note);
+      prev_pitch = pitch;
       ++note_idx;
     }
   }
@@ -830,8 +951,15 @@ ArpeggioFlowResult generateArpeggioFlow(const ArpeggioFlowConfig& config) {
   // Default open string bias for non-cadence bars.
   constexpr float kDefaultOpenStringBias = 0.3f;
 
+  // Track previous pitch across bars for smooth voice leading (Phase 1A).
+  uint8_t prev_pitch = 0;
+  uint8_t prev_chord_root = 0;
+
   for (int section_idx = 0; section_idx < config.num_sections; ++section_idx) {
     ArcPhase phase = getPhaseForSection(section_idx);
+
+    // No prev_pitch reset at section boundaries: smooth voice leading
+    // carries across sections for melodic continuity.
 
     // Calculate phase progress (0.0 to 1.0 within the phase).
     float phase_progress = 0.0f;
@@ -919,9 +1047,11 @@ ArpeggioFlowResult generateArpeggioFlow(const ArpeggioFlowConfig& config) {
       auto bar_notes = generateBarNotes(
           bar_tick, harm_event, pattern, effective_range,
           instrument, open_bias, is_cadence, cad_prog,
-          config.cadence.rhythm_simplification, rng);
+          config.cadence.rhythm_simplification, rng,
+          prev_pitch, prev_chord_root, phase);
 
       all_notes.insert(all_notes.end(), bar_notes.begin(), bar_notes.end());
+      prev_chord_root = harm_event.chord.root_pitch;
     }
   }
 

@@ -211,6 +211,119 @@ int repairParallelPerfect(std::vector<NoteEvent>& notes,
                 break;
               }
             }
+
+            // Adjacent flexible note repair: when notes at the current tick
+            // cannot be fixed, try shifting a flexible note at the previous
+            // tick (pt) to break the parallel motion pattern.
+            if (!fixed) {
+              int adj_ia = soundIdx(va, pt);
+              int adj_ib = soundIdx(vb, pt);
+              // Skip if the same note spans both pt and t (pitch change would
+              // alter both intervals simultaneously).
+              if (adj_ia >= 0 && adj_ib >= 0 &&
+                  adj_ia != ia && adj_ib != ib) {
+                ProtectionLevel adj_pa = getProtectionLevel(notes[adj_ia].source);
+                ProtectionLevel adj_pb = getProtectionLevel(notes[adj_ib].source);
+                nc = 0;
+                if (adj_pa != ProtectionLevel::Immutable &&
+                    adj_pb != ProtectionLevel::Immutable) {
+                  if (adj_pa >= adj_pb) {
+                    addC(adj_ia, va, shiftsFor(adj_pa));
+                    addC(adj_ib, vb, shiftsFor(adj_pb));
+                  } else {
+                    addC(adj_ib, vb, shiftsFor(adj_pb));
+                    addC(adj_ia, va, shiftsFor(adj_pa));
+                  }
+                } else if (adj_pa != ProtectionLevel::Immutable) {
+                  addC(adj_ia, va, shiftsFor(adj_pa));
+                } else if (adj_pb != ProtectionLevel::Immutable) {
+                  addC(adj_ib, vb, shiftsFor(adj_pb));
+                }
+
+                for (int c2 = 0; c2 < nc && !fixed; ++c2) {
+                  auto& fc2 = cands[c2];
+                  Key nk2 = params.key_at_tick(notes[fc2.ni].start_tick);
+
+                  for (int si = 0; si < fc2.ns; ++si) {
+                    int delta = fc2.shifts[si];
+                    int cp2 = static_cast<int>(notes[fc2.ni].pitch) + delta;
+                    if (cp2 < 0 || cp2 > 127) continue;
+                    uint8_t ucp2 = static_cast<uint8_t>(cp2);
+
+                    if (std::abs(delta) <= 4 &&
+                        !scale_util::isScaleTone(ucp2, nk2, params.scale))
+                      continue;
+
+                    auto [lo2, hi2] = params.voice_range(fc2.v);
+                    if (ucp2 < lo2 || ucp2 > hi2) continue;
+
+                    // Melodic leap from note before pt.
+                    {
+                      int prev_p = -1;
+                      for (auto it = vns[fc2.v].rbegin();
+                           it != vns[fc2.v].rend(); ++it) {
+                        if (static_cast<int>(it->idx) == fc2.ni) continue;
+                        if (it->start < notes[fc2.ni].start_tick) {
+                          prev_p = static_cast<int>(notes[it->idx].pitch);
+                          break;
+                        }
+                      }
+                      if (prev_p >= 0 && std::abs(cp2 - prev_p) > 12) continue;
+                    }
+
+                    // Melodic leap from pt to t (the unchanged note at t).
+                    int pitch_at_t = (fc2.v == va) ? ca : cb;
+                    if (std::abs(cp2 - pitch_at_t) > 12) continue;
+
+                    // Verify this actually breaks the original parallel.
+                    int new_prev_a = (fc2.v == va) ? cp2 : pp;
+                    int new_prev_b = (fc2.v == vb) ? cp2 : pb2;
+                    int new_pi = std::abs(new_prev_a - new_prev_b);
+                    bool still_par = false;
+                    if (interval_util::isPerfectConsonance(new_pi) &&
+                        interval_util::isPerfectConsonance(ci)) {
+                      int new_ps = interval_util::compoundToSimple(new_pi);
+                      if (new_ps == cs) {
+                        int nm_a = ca - new_prev_a, nm_b = cb - new_prev_b;
+                        if (nm_a != 0 && nm_b != 0 && (nm_a > 0) == (nm_b > 0))
+                          still_par = true;
+                      }
+                    }
+                    if (still_par) continue;
+
+                    // Check no new parallel with other voices at (pt, t).
+                    bool new_par = false;
+                    for (uint8_t ov = 0;
+                         ov < params.num_voices && !new_par; ++ov) {
+                      if (ov == fc2.v) continue;
+                      int ov_t = soundPitch(ov, t);
+                      int ov_pt = soundPitch(ov, pt);
+                      if (ov_t < 0 || ov_pt < 0) continue;
+                      int p_i2 = std::abs(cp2 - ov_pt);
+                      int c_i2 = std::abs(pitch_at_t - ov_t);
+                      if (interval_util::isPerfectConsonance(p_i2) &&
+                          interval_util::isPerfectConsonance(c_i2)) {
+                        int p2s = interval_util::compoundToSimple(p_i2);
+                        int c2s = interval_util::compoundToSimple(c_i2);
+                        if (p2s == c2s) {
+                          int mf = pitch_at_t - cp2, mo = ov_t - ov_pt;
+                          if (mf != 0 && mo != 0 && (mf > 0) == (mo > 0))
+                            new_par = true;
+                        }
+                      }
+                    }
+                    if (new_par) continue;
+
+                    notes[fc2.ni].pitch = ucp2;
+                    fixed = true;
+                    any_fixed = true;
+                    ++total_fixed;
+                    break;
+                  }
+                }
+              }
+            }
+
             pp = ca; pb2 = cb; pt = t;
           }
         }  // scan_mode

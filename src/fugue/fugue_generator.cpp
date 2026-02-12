@@ -1066,11 +1066,40 @@ FugueResult generateFugue(const FugueConfig& config) {
 
     all_notes = std::move(validated_notes);
 
+    ScaleType effective_scale =
+        config.is_minor ? ScaleType::HarmonicMinor : ScaleType::Major;
+
+    // -----------------------------------------------------------------------
+    // Parallel repair pass (primary): fix parallel perfect consonances while
+    // notes still have maximum pitch flexibility (before diatonic snapping).
+    // -----------------------------------------------------------------------
+    if (num_voices >= 2) {
+      ParallelRepairParams repair_params;
+      repair_params.num_voices = num_voices;
+      repair_params.scale = effective_scale;
+      repair_params.key_at_tick = [&](Tick t) { return tonal_plan.keyAtTick(t); };
+      repair_params.voice_range = [&](uint8_t v) {
+        return getFugueVoiceRange(v, num_voices);
+      };
+      repairParallelPerfect(all_notes, repair_params);
+
+      // Rebuild post_state so diatonic enforcement sees updated pitches.
+      post_state.clear();
+      for (uint8_t v = 0; v < num_voices; ++v) {
+        auto [lo, hi] = getFugueVoiceRange(v, num_voices);
+        post_state.registerVoice(v, lo, hi);
+      }
+      post_state.setKey(config.key);
+      for (const auto& note : all_notes) {
+        post_state.addNote(note.voice, note);
+      }
+    }
+
+    // -----------------------------------------------------------------------
     // Diatonic enforcement sweep: snap non-diatonic notes to the nearest scale
     // tone unless they are permitted chromatic alterations (raised 7th, chord
     // tones of secondary dominants, or notes at modulation boundaries).
-    ScaleType effective_scale =
-        config.is_minor ? ScaleType::HarmonicMinor : ScaleType::Major;
+    // -----------------------------------------------------------------------
     for (auto& note : all_notes) {
       Key note_key = tonal_plan.keyAtTick(note.start_tick);
       const HarmonicEvent& harm = detailed_timeline.getAt(note.start_tick);
@@ -1143,17 +1172,453 @@ FugueResult generateFugue(const FugueConfig& config) {
       }
     }
 
-    // Parallel repair pass: shared utility for detecting and fixing
-    // parallel perfect consonances via dual-scan and pitch shifting.
+    // -----------------------------------------------------------------------
+    // Regression parallel repair: catch any parallels introduced by diatonic
+    // snapping. Limited to 1 iteration since most should already be fixed.
+    // -----------------------------------------------------------------------
     if (num_voices >= 2) {
-      ParallelRepairParams repair_params;
-      repair_params.num_voices = num_voices;
-      repair_params.scale = effective_scale;
-      repair_params.key_at_tick = [&](Tick t) { return tonal_plan.keyAtTick(t); };
-      repair_params.voice_range = [&](uint8_t v) {
+      ParallelRepairParams regression_params;
+      regression_params.num_voices = num_voices;
+      regression_params.scale = effective_scale;
+      regression_params.key_at_tick = [&](Tick t) {
+        return tonal_plan.keyAtTick(t);
+      };
+      regression_params.voice_range = [&](uint8_t v) {
         return getFugueVoiceRange(v, num_voices);
       };
-      repairParallelPerfect(all_notes, repair_params);
+      regression_params.max_iterations = 1;
+      repairParallelPerfect(all_notes, regression_params);
+    }
+
+    // -----------------------------------------------------------------------
+    // Dissonance resolution sweep: fix unresolved dissonances by adjusting
+    // flexible notes at the next beat to resolve by step to consonance.
+    // Targets structural notes (countersubject, subject) that create
+    // dissonances bypassing the collision resolver.
+    // -----------------------------------------------------------------------
+    {
+      struct VN { size_t idx; Tick start; Tick end_t; };
+      std::vector<std::vector<VN>> dvns(num_voices);
+      for (size_t i = 0; i < all_notes.size(); ++i) {
+        auto& n = all_notes[i];
+        if (n.voice < num_voices) {
+          dvns[n.voice].push_back({i, n.start_tick, n.start_tick + n.duration});
+        }
+      }
+      for (auto& v : dvns) {
+        std::sort(v.begin(), v.end(),
+                  [](const VN& a, const VN& b) { return a.start < b.start; });
+      }
+
+      auto dSounding = [&](uint8_t v, Tick t) -> int {
+        for (auto it = dvns[v].rbegin(); it != dvns[v].rend(); ++it) {
+          if (it->start <= t && t < it->end_t)
+            return static_cast<int>(it->idx);
+          if (it->end_t <= t) return -1;
+        }
+        return -1;
+      };
+
+      Tick d_max_tick = 0;
+      for (const auto& n : all_notes) {
+        Tick e = n.start_tick + n.duration;
+        if (e > d_max_tick) d_max_tick = e;
+      }
+
+      constexpr Tick kHalfBeat = kTicksPerBeat / 2;
+
+      for (Tick beat = 0; beat < d_max_tick; beat += kTicksPerBeat) {
+        for (uint8_t va = 0; va < num_voices; ++va) {
+          for (uint8_t vb = va + 1; vb < num_voices; ++vb) {
+            int dia = dSounding(va, beat);
+            int dib = dSounding(vb, beat);
+            if (dia < 0 || dib < 0) continue;
+
+            int dist = std::abs(static_cast<int>(all_notes[dia].pitch) -
+                                static_cast<int>(all_notes[dib].pitch));
+            if (dist > 12) continue;
+            int ic = interval_util::compoundToSimple(dist);
+            if (interval_util::isConsonance(ic)) continue;
+            // Skip short passing/neighbor tones.
+            if (all_notes[dia].duration <= kHalfBeat ||
+                all_notes[dib].duration <= kHalfBeat) continue;
+
+            // Check if resolved within next 3 beats.
+            bool resolved = false;
+            for (int look = 1; look <= 3 && !resolved; ++look) {
+              Tick fut = beat + static_cast<Tick>(look) * kTicksPerBeat;
+              int fa = dSounding(va, fut);
+              int fb = dSounding(vb, fut);
+              if (fa < 0 || fb < 0) { resolved = true; break; }
+              int fdist = std::abs(static_cast<int>(all_notes[fa].pitch) -
+                                   static_cast<int>(all_notes[fb].pitch));
+              if (fdist > 12 ||
+                  interval_util::isConsonance(
+                      interval_util::compoundToSimple(fdist))) {
+                int sa = std::abs(static_cast<int>(all_notes[fa].pitch) -
+                                  static_cast<int>(all_notes[dia].pitch));
+                int sb = std::abs(static_cast<int>(all_notes[fb].pitch) -
+                                  static_cast<int>(all_notes[dib].pitch));
+                if ((sa >= 1 && sa <= 2) || (sb >= 1 && sb <= 2))
+                  resolved = true;
+              }
+            }
+            if (resolved) continue;
+
+            // Unresolved. Adjust next flexible note to resolve by step.
+            bool fixed = false;
+            for (int look = 1; look <= 3 && !fixed; ++look) {
+              Tick res_tick = beat + static_cast<Tick>(look) * kTicksPerBeat;
+              for (int att = 0; att < 2 && !fixed; ++att) {
+                uint8_t fv = (att == 0) ? va : vb;
+                uint8_t ov = (att == 0) ? vb : va;
+                int fni = dSounding(fv, res_tick);
+                int oni = dSounding(ov, res_tick);
+                if (fni < 0 || oni < 0) continue;
+                if (isStructuralSource(all_notes[fni].source)) continue;
+                int orig = (fv == va) ? static_cast<int>(all_notes[dia].pitch)
+                                      : static_cast<int>(all_notes[dib].pitch);
+                int op = static_cast<int>(all_notes[oni].pitch);
+                Key fk = tonal_plan.keyAtTick(all_notes[fni].start_tick);
+                for (int delta : {-1, -2, 1, 2}) {
+                  int cand = orig + delta;
+                  if (cand < 0 || cand > 127) continue;
+                  uint8_t ucand = static_cast<uint8_t>(cand);
+                  if (!scale_util::isScaleTone(ucand, fk, effective_scale))
+                    continue;
+                  int nd = std::abs(cand - op);
+                  if (nd > 12 ||
+                      interval_util::isConsonance(
+                          interval_util::compoundToSimple(nd))) {
+                    all_notes[fni].pitch = ucand;
+                    fixed = true;
+                    break;
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+
+    // -----------------------------------------------------------------------
+    // Voice crossing repair sweep: fix crossings introduced by diatonic
+    // enforcement or dissonance resolution. Matches the Python validator's
+    // adjacent-track check with 2-beat lookahead.
+    // -----------------------------------------------------------------------
+    {
+      struct VCN { size_t idx; Tick start; Tick end_t; };
+      std::vector<std::vector<VCN>> vcns(num_voices);
+      for (size_t i = 0; i < all_notes.size(); ++i) {
+        auto& n = all_notes[i];
+        if (n.voice < num_voices) {
+          vcns[n.voice].push_back({i, n.start_tick, n.start_tick + n.duration});
+        }
+      }
+      for (auto& v : vcns) {
+        std::sort(v.begin(), v.end(),
+                  [](const VCN& a, const VCN& b) { return a.start < b.start; });
+      }
+
+      auto vcSounding = [&](uint8_t v, Tick t) -> int {
+        for (auto it = vcns[v].rbegin(); it != vcns[v].rend(); ++it) {
+          if (it->start <= t && t < it->end_t)
+            return static_cast<int>(it->idx);
+          if (it->end_t <= t) return -1;
+        }
+        return -1;
+      };
+
+      Tick vc_max_tick = 0;
+      for (const auto& n : all_notes) {
+        Tick e = n.start_tick + n.duration;
+        if (e > vc_max_tick) vc_max_tick = e;
+      }
+
+      constexpr int kVCLookahead = 2;  // Match validator _LOOKAHEAD_BEATS.
+
+      for (Tick beat = 0; beat < vc_max_tick; beat += kTicksPerBeat) {
+        for (uint8_t va = 0; va + 1 < num_voices; ++va) {
+          uint8_t vb = va + 1;
+          int ia = vcSounding(va, beat);
+          int ib = vcSounding(vb, beat);
+          if (ia < 0 || ib < 0) continue;
+          if (all_notes[ia].pitch >= all_notes[ib].pitch) continue;
+
+          // Check if crossing resolves within lookahead.
+          bool resolves = false;
+          for (int ahead = 1; ahead <= kVCLookahead; ++ahead) {
+            Tick fb = beat + static_cast<Tick>(ahead) * kTicksPerBeat;
+            int fa = vcSounding(va, fb);
+            int fbi = vcSounding(vb, fb);
+            if (fa >= 0 && fbi >= 0 &&
+                all_notes[fa].pitch >= all_notes[fbi].pitch) {
+              resolves = true;
+              break;
+            }
+          }
+          if (resolves) continue;
+
+          // Persistent crossing. Try octave shift on the flexible note.
+          // Also check that the shift doesn't create a parallel perfect.
+          auto tryOctaveFix = [&](int fix_idx, int other_idx,
+                                  uint8_t fix_voice, bool is_upper) -> bool {
+            if (isStructuralSource(all_notes[fix_idx].source)) return false;
+            auto [lo, hi] = getFugueVoiceRange(fix_voice, num_voices);
+            int old_pitch = static_cast<int>(all_notes[fix_idx].pitch);
+            // Find previous beat's pitches for parallel detection.
+            Tick prev_beat = (beat >= kTicksPerBeat) ? beat - kTicksPerBeat : 0;
+            for (int shift : {12, -12, 24, -24}) {
+              int cand = old_pitch + shift;
+              if (cand < lo || cand > hi) continue;
+              bool ok = is_upper
+                  ? (cand >= static_cast<int>(all_notes[other_idx].pitch))
+                  : (static_cast<int>(all_notes[other_idx].pitch) >= cand);
+              if (!ok) continue;
+              // Check parallel with all other voices.
+              bool creates_parallel = false;
+              for (uint8_t ov = 0; ov < num_voices && !creates_parallel; ++ov) {
+                if (ov == fix_voice) continue;
+                int ov_cur = vcSounding(ov, beat);
+                int ov_prev = vcSounding(ov, prev_beat);
+                if (ov_cur < 0 || ov_prev < 0) continue;
+                int fix_prev_idx = vcSounding(fix_voice, prev_beat);
+                if (fix_prev_idx < 0) continue;
+                int prev_iv = interval_util::compoundToSimple(
+                    std::abs(static_cast<int>(all_notes[fix_prev_idx].pitch) -
+                             static_cast<int>(all_notes[ov_prev].pitch)));
+                int new_iv = interval_util::compoundToSimple(
+                    std::abs(cand -
+                             static_cast<int>(all_notes[ov_cur].pitch)));
+                if (prev_iv == new_iv &&
+                    interval_util::isPerfectConsonance(new_iv) && new_iv != 0) {
+                  int m1 = cand - static_cast<int>(all_notes[fix_prev_idx].pitch);
+                  int m2 = static_cast<int>(all_notes[ov_cur].pitch) -
+                           static_cast<int>(all_notes[ov_prev].pitch);
+                  if ((m1 > 0 && m2 > 0) || (m1 < 0 && m2 < 0))
+                    creates_parallel = true;
+                }
+              }
+              if (creates_parallel) continue;
+              all_notes[fix_idx].pitch = static_cast<uint8_t>(cand);
+              return true;
+            }
+            return false;
+          };
+
+          // Prefer fixing the lower voice (shift down) first.
+          if (!tryOctaveFix(ib, ia, vb, false)) {
+            tryOctaveFix(ia, ib, va, true);
+          }
+        }
+      }
+    }
+
+    // -----------------------------------------------------------------------
+    // Leap resolution repair sweep: after a leap (>=5 semitones), the next
+    // note should step (1-2 st) in the opposite direction. Fix flexible
+    // resolution notes; structural notes are left untouched.
+    // Episode material is exempt (arpeggiated figures).
+    // -----------------------------------------------------------------------
+    {
+      // Build per-voice sorted note indices.
+      std::vector<std::vector<size_t>> lr_voices(num_voices);
+      for (size_t i = 0; i < all_notes.size(); ++i) {
+        if (all_notes[i].voice < num_voices) {
+          lr_voices[all_notes[i].voice].push_back(i);
+        }
+      }
+      for (auto& vi : lr_voices) {
+        std::sort(vi.begin(), vi.end(),
+                  [&](size_t a, size_t b) {
+                    return all_notes[a].start_tick < all_notes[b].start_tick;
+                  });
+      }
+
+      constexpr int kLeapThreshold = 5;
+
+      // Beat-grid parallel checker: checks every beat boundary from the note's
+      // onset until the next note in the same voice starts. This matches
+      // countParallelPerfect's behavior of carrying prev_pitch forward.
+      auto candidateCreatesParallel = [&](int cand, size_t note_i3,
+                                          uint8_t voice_v,
+                                          const std::vector<size_t>& voice_idxs,
+                                          size_t triplet_k) -> bool {
+        Tick n_start = all_notes[note_i3].start_tick;
+        uint8_t n_voice = voice_v;
+
+        // Extend scan to the start of the NEXT note in this voice (or end).
+        Tick scan_end = n_start + all_notes[note_i3].duration;
+        if (triplet_k + 3 < voice_idxs.size()) {
+          scan_end = all_notes[voice_idxs[triplet_k + 3]].start_tick;
+        }
+        // Also include at least one beat beyond the note's end to catch
+        // carry-forward parallels.
+        Tick note_end = n_start + all_notes[note_i3].duration;
+        if (scan_end < note_end + kTicksPerBeat) {
+          scan_end = note_end + kTicksPerBeat;
+        }
+
+        Tick onset_beat = (n_start / kTicksPerBeat) * kTicksPerBeat;
+
+        for (Tick beat = onset_beat; beat < scan_end; beat += kTicksPerBeat) {
+          Tick prev_beat = (beat >= kTicksPerBeat) ? beat - kTicksPerBeat : 0;
+          if (prev_beat == beat) continue;
+
+          // Find pitch of this voice at prev_beat (carry-forward semantics).
+          int self_prev = -1;
+          for (auto it = lr_voices[n_voice].rbegin();
+               it != lr_voices[n_voice].rend(); ++it) {
+            const auto& on = all_notes[*it];
+            if (on.start_tick <= prev_beat &&
+                on.start_tick + on.duration > prev_beat) {
+              self_prev = (*it == note_i3) ? cand
+                          : static_cast<int>(on.pitch);
+              break;
+            }
+          }
+          // If no note is sounding, use carry-forward from last onset <= prev_beat.
+          if (self_prev < 0) {
+            for (auto it = lr_voices[n_voice].rbegin();
+                 it != lr_voices[n_voice].rend(); ++it) {
+              if (all_notes[*it].start_tick <= prev_beat) {
+                self_prev = (*it == note_i3) ? cand
+                            : static_cast<int>(all_notes[*it].pitch);
+                break;
+              }
+            }
+          }
+          if (self_prev < 0) continue;
+
+          // Pitch at current beat: if note is sounding, use cand; otherwise
+          // carry forward the last known pitch.
+          int self_cur = -1;
+          if (n_start <= beat && note_end > beat) {
+            self_cur = cand;
+          } else {
+            for (auto it = lr_voices[n_voice].rbegin();
+                 it != lr_voices[n_voice].rend(); ++it) {
+              const auto& on = all_notes[*it];
+              if (on.start_tick <= beat && on.start_tick + on.duration > beat) {
+                self_cur = (*it == note_i3) ? cand
+                           : static_cast<int>(on.pitch);
+                break;
+              }
+            }
+            if (self_cur < 0) {
+              // Carry forward: use last onset's pitch.
+              for (auto it = lr_voices[n_voice].rbegin();
+                   it != lr_voices[n_voice].rend(); ++it) {
+                if (all_notes[*it].start_tick <= beat) {
+                  self_cur = (*it == note_i3) ? cand
+                             : static_cast<int>(all_notes[*it].pitch);
+                  break;
+                }
+              }
+            }
+          }
+          if (self_cur < 0) continue;
+
+          for (uint8_t ov = 0; ov < num_voices; ++ov) {
+            if (ov == n_voice) continue;
+            int ov_prev = -1, ov_cur = -1;
+            for (const auto& oi : lr_voices[ov]) {
+              const auto& on = all_notes[oi];
+              if (ov_prev < 0 && on.start_tick <= prev_beat &&
+                  on.start_tick + on.duration > prev_beat)
+                ov_prev = static_cast<int>(on.pitch);
+              if (ov_cur < 0 && on.start_tick <= beat &&
+                  on.start_tick + on.duration > beat)
+                ov_cur = static_cast<int>(on.pitch);
+              if (ov_prev >= 0 && ov_cur >= 0) break;
+            }
+            if (ov_prev < 0 || ov_cur < 0) continue;
+            if (self_prev == self_cur && ov_prev == ov_cur) continue;
+
+            int pi = std::abs(self_prev - ov_prev);
+            int ci = std::abs(self_cur - ov_cur);
+            if (!interval_util::isPerfectConsonance(pi) ||
+                !interval_util::isPerfectConsonance(ci))
+              continue;
+            int ps = interval_util::compoundToSimple(pi);
+            int cs = interval_util::compoundToSimple(ci);
+            if (ps != cs) continue;
+            int m1 = self_cur - self_prev, m2 = ov_cur - ov_prev;
+            if ((m1 > 0 && m2 > 0) || (m1 < 0 && m2 < 0))
+              return true;
+          }
+        }
+        return false;
+      };
+
+      for (uint8_t v = 0; v < num_voices; ++v) {
+        const auto& idxs = lr_voices[v];
+        if (idxs.size() < 3) continue;
+        for (size_t k = 0; k + 2 < idxs.size(); ++k) {
+          size_t i1 = idxs[k], i2 = idxs[k + 1], i3 = idxs[k + 2];
+          int leap = static_cast<int>(all_notes[i2].pitch) -
+                     static_cast<int>(all_notes[i1].pitch);
+          if (std::abs(leap) < kLeapThreshold) continue;
+
+          // Exempt episode material (arpeggiated figures).
+          if (all_notes[i1].source == BachNoteSource::EpisodeMaterial ||
+              all_notes[i2].source == BachNoteSource::EpisodeMaterial) {
+            continue;
+          }
+
+          // Check if already resolved.
+          int resolution = static_cast<int>(all_notes[i3].pitch) -
+                           static_cast<int>(all_notes[i2].pitch);
+          bool resolved = (std::abs(resolution) >= 1 && std::abs(resolution) <= 2 &&
+                           ((leap > 0) != (resolution > 0)));
+          if (resolved) continue;
+
+          // Only fix flexible notes.
+          if (isStructuralSource(all_notes[i3].source)) continue;
+
+          // Skip if i3 is already far from i2 (would create a large leap
+          // from the candidate resolution pitch to i3's current register).
+          int i3_dist = std::abs(static_cast<int>(all_notes[i3].pitch) -
+                                 static_cast<int>(all_notes[i2].pitch));
+          if (i3_dist > 4) continue;  // Only fix when i3 is within a M3 of i2.
+
+          // Target: step 1-2 semitones opposite to leap direction.
+          int step_dir = (leap > 0) ? -1 : 1;
+          Key lr_key = tonal_plan.keyAtTick(all_notes[i3].start_tick);
+          auto [lr_lo, lr_hi] = getFugueVoiceRange(v, num_voices);
+
+          bool fixed = false;
+          for (int delta : {1, 2}) {
+            int cand = static_cast<int>(all_notes[i2].pitch) + step_dir * delta;
+            if (cand < lr_lo || cand > lr_hi) continue;
+            uint8_t ucand = static_cast<uint8_t>(cand);
+            if (!scale_util::isScaleTone(ucand, lr_key, effective_scale)) continue;
+            if (candidateCreatesParallel(cand, i3, v, idxs, k)) continue;
+            all_notes[i3].pitch = ucand;
+            fixed = true;
+            break;
+          }
+        }
+      }
+    }
+
+    // -----------------------------------------------------------------------
+    // Final regression parallel repair: catch parallels introduced by voice
+    // crossing repair, leap resolution, or dissonance resolution.
+    // -----------------------------------------------------------------------
+    if (num_voices >= 2) {
+      ParallelRepairParams final_repair_params;
+      final_repair_params.num_voices = num_voices;
+      final_repair_params.scale = effective_scale;
+      final_repair_params.key_at_tick = [&](Tick t) {
+        return tonal_plan.keyAtTick(t);
+      };
+      final_repair_params.voice_range = [&](uint8_t v) {
+        return getFugueVoiceRange(v, num_voices);
+      };
+      final_repair_params.max_iterations = 2;
+      repairParallelPerfect(all_notes, final_repair_params);
     }
 
     // Compute quality metrics.
