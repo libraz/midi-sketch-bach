@@ -1137,10 +1137,10 @@ TEST(EpisodeImitationTest, SevereUsesDirectImitation) {
   EXPECT_TRUE(has_voice1);
 }
 
-TEST(EpisodeImitationTest, SevereVoice1RepeatsMotifIntervals) {
-  // In Severe, voice 1 should use direct (uninverted) imitation. After
-  // register placement the absolute pitches may differ by whole octaves,
-  // but the interval pattern (successive pitch differences) must match.
+TEST(EpisodeImitationTest, SevereVoice1UsesInvertedContour) {
+  // In Severe, voice 1 should use diatonic inversion for contour independence.
+  // After register placement the absolute pitches may differ by whole octaves,
+  // but the interval direction should generally oppose voice 0.
   Subject subject = makeDiatonicTestSubject(Key::C, SubjectCharacter::Severe);
   Episode epi = generateEpisode(subject, 0, kTicksPerBar * 4, Key::C, Key::C,
                                 2, 42, 0, 0.5f);
@@ -1154,18 +1154,22 @@ TEST(EpisodeImitationTest, SevereVoice1RepeatsMotifIntervals) {
 
   ASSERT_FALSE(voice0_pitches.empty());
   ASSERT_FALSE(voice1_pitches.empty());
-  // Compare interval patterns (direct imitation preserves intervals).
+  // Verify contour independence: at least one interval direction differs.
   size_t check_count = std::min({voice0_pitches.size(), voice1_pitches.size(), size_t{4}});
   ASSERT_GE(check_count, 2u) << "Need at least 2 notes to compare intervals";
+  int contour_diffs = 0;
   for (size_t idx = 1; idx < check_count; ++idx) {
-    int v0_interval = static_cast<int>(voice0_pitches[idx]) -
-                      static_cast<int>(voice0_pitches[idx - 1]);
-    int v1_interval = static_cast<int>(voice1_pitches[idx]) -
-                      static_cast<int>(voice1_pitches[idx - 1]);
-    EXPECT_EQ(v0_interval, v1_interval)
-        << "Severe voice 1 interval " << idx
-        << " should match voice 0 (direct imitation)";
+    int v0_dir = static_cast<int>(voice0_pitches[idx]) -
+                 static_cast<int>(voice0_pitches[idx - 1]);
+    int v1_dir = static_cast<int>(voice1_pitches[idx]) -
+                 static_cast<int>(voice1_pitches[idx - 1]);
+    if ((v0_dir > 0 && v1_dir < 0) || (v0_dir < 0 && v1_dir > 0)) {
+      ++contour_diffs;
+    }
   }
+  EXPECT_GT(contour_diffs, 0)
+      << "Severe voice 1 should have at least one contrary-motion interval "
+      << "(diatonic inversion)";
 }
 
 TEST(EpisodeImitationTest, PlayfulUsesInvertedImitation) {

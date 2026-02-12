@@ -482,6 +482,53 @@ std::vector<NoteEvent> createCodaNotes(Tick start_tick, Tick duration,
   return notes;
 }
 
+/// @brief Check if placing a candidate pitch creates a cross-relation with
+/// notes in other voices within the note list.
+///
+/// Cross-relation occurs when two voices have conflicting chromatic alterations
+/// of the same pitch class at the same time (e.g. C-natural in voice 0, C# in
+/// voice 1). Natural half-steps E/F (pitch classes 4,5) and B/C (0,11) are
+/// excluded since they are diatonic neighbors, not chromatic conflicts.
+///
+/// @param notes The full note list.
+/// @param voice_idx Per-voice sorted indices (from diatonic sweep setup).
+/// @param num_voices Number of active voices.
+/// @param voice Target voice.
+/// @param pitch Candidate pitch.
+/// @param tick Note start tick.
+/// @return true if cross-relation detected.
+bool hasCrossRelation(const std::vector<NoteEvent>& notes,
+                      const std::vector<std::vector<size_t>>& voice_idx,
+                      uint8_t num_voices, uint8_t voice, uint8_t pitch,
+                      Tick tick) {
+  int pitch_class = static_cast<int>(pitch) % 12;
+  for (uint8_t other_voice = 0; other_voice < num_voices; ++other_voice) {
+    if (other_voice == voice) continue;
+    // Find the note in other_voice sounding at tick (reverse search for efficiency).
+    for (auto iter = voice_idx[other_voice].rbegin();
+         iter != voice_idx[other_voice].rend(); ++iter) {
+      const auto& other_note = notes[*iter];
+      if (other_note.start_tick <= tick &&
+          other_note.start_tick + other_note.duration > tick) {
+        int other_pc = static_cast<int>(other_note.pitch) % 12;
+        int diff = std::abs(pitch_class - other_pc);
+        if (diff == 1 || diff == 11) {
+          // Exclude natural half-steps E/F and B/C.
+          int low_pc = std::min(pitch_class, other_pc);
+          int high_pc = std::max(pitch_class, other_pc);
+          if (low_pc == 4 && high_pc == 5) break;   // E/F
+          if (low_pc == 0 && high_pc == 11) break;   // B/C (wrapped)
+          if (low_pc == 0 && high_pc == 1) break;    // B#/C enharmonic
+          return true;
+        }
+        break;  // Found the sounding note, no need to search further.
+      }
+      if (other_note.start_tick + other_note.duration <= tick) break;  // Past notes.
+    }
+  }
+  return false;
+}
+
 }  // namespace
 
 FugueResult generateFugue(const FugueConfig& config) {
@@ -1095,6 +1142,20 @@ FugueResult generateFugue(const FugueConfig& config) {
       }
     }
 
+    // Build per-voice sorted index for cross-relation detection.
+    std::vector<std::vector<size_t>> dia_voice_idx(num_voices);
+    for (size_t idx = 0; idx < all_notes.size(); ++idx) {
+      if (all_notes[idx].voice < num_voices) {
+        dia_voice_idx[all_notes[idx].voice].push_back(idx);
+      }
+    }
+    for (auto& voice_indices : dia_voice_idx) {
+      std::sort(voice_indices.begin(), voice_indices.end(),
+                [&](size_t lhs, size_t rhs) {
+                  return all_notes[lhs].start_tick < all_notes[rhs].start_tick;
+                });
+    }
+
     // -----------------------------------------------------------------------
     // Diatonic enforcement sweep: snap non-diatonic notes to the nearest scale
     // tone unless they are permitted chromatic alterations (raised 7th, chord
@@ -1139,11 +1200,13 @@ FugueResult generateFugue(const FugueConfig& config) {
         continue;
       }
 
-      // Flexible notes: check if snap creates parallels with registered voices.
+      // Flexible notes: check if snap creates parallels or cross-relations.
       auto par = checkParallelsAndP4Bass(post_state, post_rules,
                                          note.voice, snapped,
                                          note.start_tick, num_voices);
-      if (!par.has_parallel_perfect) {
+      bool has_cross = hasCrossRelation(all_notes, dia_voice_idx, num_voices,
+                                        note.voice, snapped, note.start_tick);
+      if (!par.has_parallel_perfect && !has_cross) {
         note.pitch = snapped;
       } else {
         // Try alternate scale tones within +/-4 semitones.
@@ -1156,7 +1219,9 @@ FugueResult generateFugue(const FugueConfig& config) {
           auto check = checkParallelsAndP4Bass(post_state, post_rules,
                                                note.voice, ucand,
                                                note.start_tick, num_voices);
-          if (!check.has_parallel_perfect) {
+          bool cand_cross = hasCrossRelation(all_notes, dia_voice_idx, num_voices,
+                                             note.voice, ucand, note.start_tick);
+          if (!check.has_parallel_perfect && !cand_cross) {
             note.pitch = ucand;
             fixed = true;
             break;
@@ -1242,6 +1307,58 @@ FugueResult generateFugue(const FugueConfig& config) {
             // Skip short passing/neighbor tones.
             if (all_notes[dia].duration <= kHalfBeat ||
                 all_notes[dib].duration <= kHalfBeat) continue;
+
+            // Suspension preservation: on strong beats, detect the pattern
+            // preparation (consonant hold) -> dissonance -> stepwise resolution.
+            // Properly formed suspensions are a key expressive device and should
+            // not be "fixed" by the dissonance sweep.
+            bool is_suspension = false;
+            {
+              Tick bar_offset = beat % kTicksPerBar;
+              bool is_strong_beat = (bar_offset == 0 ||
+                                     bar_offset == 2 * kTicksPerBeat);
+              if (is_strong_beat && beat >= kTicksPerBeat) {
+                for (int att = 0; att < 2 && !is_suspension; ++att) {
+                  uint8_t fv = (att == 0) ? va : vb;  // Suspended voice.
+                  uint8_t ov = (att == 0) ? vb : va;  // Other voice.
+                  int fni = (fv == va) ? dia : dib;
+                  // Preparation: same pitch held from previous beat, consonant
+                  // with the other voice at that point.
+                  Tick prev = beat - kTicksPerBeat;
+                  int fprev = dSounding(fv, prev);
+                  int oprev = dSounding(ov, prev);
+                  if (fprev < 0 || oprev < 0) continue;
+                  if (all_notes[fprev].pitch != all_notes[fni].pitch) continue;
+                  int prev_dist = std::abs(
+                      static_cast<int>(all_notes[fprev].pitch) -
+                      static_cast<int>(all_notes[oprev].pitch));
+                  if (prev_dist > 12) continue;
+                  int prev_ic = interval_util::compoundToSimple(prev_dist);
+                  if (!interval_util::isConsonance(prev_ic)) continue;
+                  // Resolution: next beat steps down diatonically to consonance.
+                  Tick next_t = beat + kTicksPerBeat;
+                  int fnext = dSounding(fv, next_t);
+                  int onext = dSounding(ov, next_t);
+                  if (fnext < 0 || onext < 0) continue;
+                  int fstep = static_cast<int>(all_notes[fni].pitch) -
+                              static_cast<int>(all_notes[fnext].pitch);
+                  Key sk = tonal_plan.keyAtTick(all_notes[fnext].start_tick);
+                  if (fstep >= 1 && fstep <= 3 &&
+                      scale_util::isScaleTone(all_notes[fnext].pitch, sk,
+                                              effective_scale)) {
+                    int res_dist = std::abs(
+                        static_cast<int>(all_notes[fnext].pitch) -
+                        static_cast<int>(all_notes[onext].pitch));
+                    if (res_dist > 12 ||
+                        interval_util::isConsonance(
+                            interval_util::compoundToSimple(res_dist))) {
+                      is_suspension = true;
+                    }
+                  }
+                }
+              }
+            }
+            if (is_suspension) continue;  // Preserve valid suspension.
 
             // Check if resolved within next 3 beats.
             bool resolved = false;
@@ -1598,6 +1715,104 @@ FugueResult generateFugue(const FugueConfig& config) {
             all_notes[i3].pitch = ucand;
             fixed = true;
             break;
+          }
+        }
+      }
+    }
+
+    // -----------------------------------------------------------------------
+    // Consecutive repeated note repair: replace 4th+ same-pitch notes in a
+    // voice with step-adjacent scale tones. Preserves structural sources
+    // (subject, answer, countersubject, pedal, ground bass).
+    // -----------------------------------------------------------------------
+    {
+      std::vector<std::vector<size_t>> rn_voices(num_voices);
+      for (size_t i = 0; i < all_notes.size(); ++i) {
+        if (all_notes[i].voice < num_voices) {
+          rn_voices[all_notes[i].voice].push_back(i);
+        }
+      }
+      for (auto& vi : rn_voices) {
+        std::sort(vi.begin(), vi.end(), [&](size_t a, size_t b) {
+          return all_notes[a].start_tick < all_notes[b].start_tick;
+        });
+      }
+
+      constexpr Tick kRunGapThreshold = 2 * kTicksPerBar;
+      constexpr int kMaxConsecutive = 3;
+
+      for (uint8_t v = 0; v < num_voices; ++v) {
+        const auto& idxs = rn_voices[v];
+        if (idxs.size() < 2) continue;
+
+        int run_len = 1;
+        size_t run_start = 0;
+        for (size_t k = 1; k <= idxs.size(); ++k) {
+          bool same_run = false;
+          if (k < idxs.size()) {
+            Tick gap = all_notes[idxs[k]].start_tick -
+                       all_notes[idxs[k - 1]].start_tick;
+            same_run = (all_notes[idxs[k]].pitch ==
+                        all_notes[idxs[run_start]].pitch) &&
+                       (gap <= kRunGapThreshold);
+          }
+          if (same_run) {
+            ++run_len;
+          } else {
+            // Process run if too long.
+            if (run_len > kMaxConsecutive) {
+              uint8_t base_pitch = all_notes[idxs[run_start]].pitch;
+              int prev_dir = 0;
+              // Determine direction from notes before the run.
+              if (run_start > 0) {
+                int diff = static_cast<int>(base_pitch) -
+                           static_cast<int>(all_notes[idxs[run_start - 1]].pitch);
+                prev_dir = (diff > 0) ? 1 : (diff < 0) ? -1 : 0;
+              }
+              int alt = 0;
+              for (size_t j = run_start + kMaxConsecutive;
+                   j < run_start + static_cast<size_t>(run_len); ++j) {
+                size_t ni = idxs[j];
+                // Skip structural sources.
+                if (isStructuralSource(all_notes[ni].source) ||
+                    all_notes[ni].source == BachNoteSource::PedalPoint) {
+                  continue;
+                }
+                Key rk = tonal_plan.keyAtTick(all_notes[ni].start_tick);
+                // Alternate step direction, preferring counter to previous
+                // motion direction.
+                int step_dir = ((alt % 2 == 0) ? -1 : 1);
+                if (prev_dir != 0) {
+                  step_dir = ((alt % 2 == 0) ? -prev_dir : prev_dir);
+                }
+                ++alt;
+                bool placed = false;
+                for (int delta = 1; delta <= 3 && !placed; ++delta) {
+                  int cand = static_cast<int>(base_pitch) + step_dir * delta;
+                  if (cand < 0 || cand > 127) continue;
+                  uint8_t ucand = static_cast<uint8_t>(cand);
+                  if (!scale_util::isScaleTone(ucand, rk, effective_scale))
+                    continue;
+                  all_notes[ni].pitch = ucand;
+                  placed = true;
+                }
+                // Try opposite direction if preferred failed.
+                if (!placed) {
+                  for (int delta = 1; delta <= 3; ++delta) {
+                    int cand = static_cast<int>(base_pitch) - step_dir * delta;
+                    if (cand < 0 || cand > 127) continue;
+                    uint8_t ucand = static_cast<uint8_t>(cand);
+                    if (!scale_util::isScaleTone(ucand, rk, effective_scale))
+                      continue;
+                    all_notes[ni].pitch = ucand;
+                    break;
+                  }
+                }
+              }
+            }
+            // Reset run.
+            run_start = k;
+            run_len = 1;
           }
         }
       }

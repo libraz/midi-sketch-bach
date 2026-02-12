@@ -202,20 +202,22 @@ void generateSevereEpisode(Episode& episode, const std::vector<NoteEvent>& motif
     episode.notes.push_back(note);
   }
 
-  // Voice 1: Kopfmotiv direct imitation (same position, no inversion) with
-  // diatonic sequence. Severe character uses strict dialogic hand-off where
-  // voice 1 restates the motif at a 2-beat delay without transformation.
+  // Voice 1: Diatonic inversion of Kopfmotiv for contour independence with
+  // diatonic sequence. Severe character uses strict contrary motion where
+  // voice 1 inverts the motif at a 2-beat delay for melodic contrast.
   if (num_voices >= 2) {
     std::vector<NoteEvent> v1_notes;
     Tick voice1_start = start_tick + imitation_offset;
-    for (const auto& note : motif) {
-      NoteEvent placed = note;
-      placed.start_tick += voice1_start;
-      placed.voice = 1;
-      v1_notes.push_back(placed);
+    // Diatonic inversion for contour independence (strict contrary motion).
+    uint8_t pivot = motif.empty() ? 60 : motif[0].pitch;
+    auto inverted = invertMelodyDiatonic(motif, pivot, key, scale);
+    for (auto& note : inverted) {
+      note.start_tick += voice1_start;
+      note.voice = 1;
+      v1_notes.push_back(note);
     }
     int inv_reps = std::max(1, seq_reps - 1);
-    auto seq = generateDiatonicSequence(motif, inv_reps, deg_step,
+    auto seq = generateDiatonicSequence(inverted, inv_reps, deg_step,
                                         voice1_start + motif_dur, key, scale);
     for (auto& note : seq) {
       note.voice = 1;
@@ -334,11 +336,13 @@ void generateNobleEpisode(Episode& episode, const std::vector<NoteEvent>& motif,
     episode.notes.push_back(note);
   }
 
-  // Voice 1: Augmented motif in the bass (doubled duration for stately motion).
+  // Voice 1: Retrograde + augmented motif in the bass (reversed stately motion).
   if (num_voices >= 2) {
     std::vector<NoteEvent> v1_notes;
     Tick voice1_start = start_tick + imitation_offset;
-    auto augmented = augmentMelody(motif, voice1_start);
+    // Retrograde + augmentation for contour independence (reversed stately motion).
+    auto retrograded = retrogradeMelody(motif, 0);
+    auto augmented = augmentMelody(retrograded, voice1_start);
     // Transpose down an octave for bass register placement.
     augmented = transposeMelody(augmented, -12);
     for (auto& note : augmented) {
