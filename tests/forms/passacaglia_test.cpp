@@ -10,10 +10,12 @@
 #include <cstdint>
 #include <map>
 #include <set>
+#include <string>
 #include <vector>
 
 #include "core/basic_types.h"
 #include "core/gm_program.h"
+#include "core/note_source.h"
 #include "core/pitch_utils.h"
 #include "harmony/key.h"
 
@@ -949,6 +951,104 @@ TEST(PassacagliaTest, MinVoicesEnforced) {
   ASSERT_TRUE(result.success);
   EXPECT_GE(result.tracks.size(), 3u)
       << "Direct API should clamp to at least 3 voices";
+}
+
+// ---------------------------------------------------------------------------
+// Repeated note regression tests
+// ---------------------------------------------------------------------------
+
+TEST(PassacagliaTest, NoTripleRepeat) {
+  // Absolute guarantee: no 3+ consecutive same-pitch notes in upper voices.
+  for (uint32_t seed = 0; seed < 20; ++seed) {
+    PassacagliaConfig config = makeTestConfig(seed);
+    PassacagliaResult result = generatePassacaglia(config);
+    ASSERT_TRUE(result.success) << "Generation failed for seed " << seed;
+
+    Tick variation_duration =
+        static_cast<Tick>(config.ground_bass_bars) * kTicksPerBar;
+
+    // Check all upper voice tracks (exclude pedal = last track).
+    for (size_t track_idx = 0; track_idx + 1 < result.tracks.size();
+         ++track_idx) {
+      const auto& track_notes = result.tracks[track_idx].notes;
+      for (size_t idx = 2; idx < track_notes.size(); ++idx) {
+        bool triple =
+            (track_notes[idx].pitch == track_notes[idx - 1].pitch) &&
+            (track_notes[idx - 1].pitch == track_notes[idx - 2].pitch);
+        if (triple) {
+          // Compute variation index and bar for diagnostics.
+          Tick tick = track_notes[idx].start_tick;
+          int var_idx = static_cast<int>(tick / variation_duration);
+          int bar = static_cast<int>(
+              (tick % variation_duration) / kTicksPerBar);
+          FAIL() << "Triple repeat at seed " << seed
+                 << " track " << track_idx
+                 << " variation " << var_idx
+                 << " bar " << bar
+                 << " tick " << tick
+                 << " pitch " << static_cast<int>(track_notes[idx].pitch)
+                 << " (note indices " << (idx - 2) << "-" << idx << ")";
+        }
+      }
+    }
+  }
+}
+
+TEST(PassacagliaTest, GroundBassNotModifiedByRepair) {
+  // Ground bass notes must never be touched by repeated note repair.
+  for (uint32_t seed = 0; seed < 20; ++seed) {
+    PassacagliaConfig config = makeTestConfig(seed);
+    PassacagliaResult result = generatePassacaglia(config);
+    ASSERT_TRUE(result.success) << "Generation failed for seed " << seed;
+
+    for (const auto& track : result.tracks) {
+      for (const auto& note : track.notes) {
+        if (note.source != BachNoteSource::GroundBass) continue;
+        bool has_repair_flag =
+            (note.modified_by &
+             static_cast<uint8_t>(NoteModifiedBy::RepeatedNoteRep)) != 0;
+        EXPECT_FALSE(has_repair_flag)
+            << "Ground bass note at tick " << note.start_tick
+            << " was modified by repeated note repair (seed " << seed << ")";
+      }
+    }
+  }
+}
+
+TEST(PassacagliaTest, DeterminismMultiSeed) {
+  // Verify determinism across seeds 0-19 (repairs must not introduce
+  // non-determinism).
+  for (uint32_t seed = 0; seed < 20; ++seed) {
+    PassacagliaConfig config = makeTestConfig(seed);
+    PassacagliaResult result1 = generatePassacaglia(config);
+    PassacagliaResult result2 = generatePassacaglia(config);
+
+    ASSERT_TRUE(result1.success) << "First run failed for seed " << seed;
+    ASSERT_TRUE(result2.success) << "Second run failed for seed " << seed;
+    ASSERT_EQ(result1.tracks.size(), result2.tracks.size())
+        << "Track count differs for seed " << seed;
+
+    for (size_t track_idx = 0; track_idx < result1.tracks.size();
+         ++track_idx) {
+      const auto& notes1 = result1.tracks[track_idx].notes;
+      const auto& notes2 = result2.tracks[track_idx].notes;
+      ASSERT_EQ(notes1.size(), notes2.size())
+          << "Note count differs in track " << track_idx
+          << " for seed " << seed;
+
+      for (size_t note_idx = 0; note_idx < notes1.size(); ++note_idx) {
+        EXPECT_EQ(notes1[note_idx].pitch, notes2[note_idx].pitch)
+            << "Pitch mismatch at track " << track_idx
+            << " note " << note_idx << " seed " << seed;
+        EXPECT_EQ(notes1[note_idx].start_tick, notes2[note_idx].start_tick)
+            << "Tick mismatch at track " << track_idx
+            << " note " << note_idx << " seed " << seed;
+        EXPECT_EQ(notes1[note_idx].duration, notes2[note_idx].duration)
+            << "Duration mismatch at track " << track_idx
+            << " note " << note_idx << " seed " << seed;
+      }
+    }
+  }
 }
 
 }  // namespace

@@ -331,8 +331,8 @@ std::vector<NoteEvent> generateEstablishVariation(Tick start_tick, int bars,
 
   size_t tone_idx = scale_tones.size() / 2;
   bool ascending = rng::rollProbability(rng, 0.5f);
+  bool has_prev = false;
   uint8_t prev_pitch = 0;
-  uint8_t prevprev_pitch = 0;
 
   while (current_tick < end_tick) {
     const HarmonicEvent& event = timeline.getAt(current_tick);
@@ -351,56 +351,82 @@ std::vector<NoteEvent> generateEstablishVariation(Tick start_tick, int bars,
     // Strong-beat chord tone snapping.
     Tick relative_tick = current_tick - start_tick;
     if (relative_tick % kTicksPerBar == 0) {
-      // Bar head: force chord tone — find closest chord tone in scale_tones.
+      // Bar head: find closest chord tone by pitch distance, excluding
+      // prev_pitch to avoid repeated notes.
       size_t best_idx = tone_idx;
-      int best_dist = 999;
+      int best_pitch_dist = 999;
+      bool found_non_repeat = false;
       for (size_t idx = 0; idx < scale_tones.size(); ++idx) {
-        if (isChordTone(scale_tones[idx], event)) {
-          int dist = static_cast<int>(idx) - static_cast<int>(tone_idx);
-          if (std::abs(dist) < best_dist) {
-            best_dist = std::abs(dist);
+        if (!isChordTone(scale_tones[idx], event)) continue;
+        if (has_prev && scale_tones[idx] == prev_pitch) continue;
+        int pitch_dist = std::abs(static_cast<int>(scale_tones[idx]) -
+                                  static_cast<int>(scale_tones[tone_idx]));
+        if (pitch_dist < best_pitch_dist) {
+          best_pitch_dist = pitch_dist;
+          best_idx = idx;
+          found_non_repeat = true;
+        }
+      }
+      if (!found_non_repeat) {
+        // Fallback: allow same pitch (all chord tones == prev_pitch).
+        for (size_t idx = 0; idx < scale_tones.size(); ++idx) {
+          if (!isChordTone(scale_tones[idx], event)) continue;
+          int pitch_dist = std::abs(static_cast<int>(scale_tones[idx]) -
+                                    static_cast<int>(scale_tones[tone_idx]));
+          if (pitch_dist < best_pitch_dist) {
+            best_pitch_dist = pitch_dist;
             best_idx = idx;
           }
         }
       }
       tone_idx = best_idx;
     } else if (relative_tick % kTicksPerBeat == 0) {
-      // Beat head: prefer chord tone — try +/-1 if current is not.
+      // Beat head: prefer chord tone — try ±1, ±2 with prev_pitch filter.
       if (!isChordTone(scale_tones[tone_idx], event)) {
-        if (tone_idx + 1 < scale_tones.size() &&
-            isChordTone(scale_tones[tone_idx + 1], event)) {
-          tone_idx += 1;
-        } else if (tone_idx > 0 &&
-                   isChordTone(scale_tones[tone_idx - 1], event)) {
-          tone_idx -= 1;
+        size_t best_idx = tone_idx;
+        bool found = false;
+        for (int offset : {1, -1, 2, -2}) {
+          int idx = static_cast<int>(tone_idx) + offset;
+          if (idx < 0 || idx >= static_cast<int>(scale_tones.size())) continue;
+          if (!isChordTone(scale_tones[idx], event)) continue;
+          if (has_prev && scale_tones[idx] == prev_pitch) continue;
+          best_idx = static_cast<size_t>(idx);
+          found = true;
+          break;
         }
+        if (!found) {
+          // Retry without prev_pitch filter.
+          for (int offset : {1, -1, 2, -2}) {
+            int idx = static_cast<int>(tone_idx) + offset;
+            if (idx < 0 || idx >= static_cast<int>(scale_tones.size())) continue;
+            if (!isChordTone(scale_tones[idx], event)) continue;
+            best_idx = static_cast<size_t>(idx);
+            break;
+          }
+        }
+        tone_idx = best_idx;
       }
     }
 
     uint8_t candidate = scale_tones[tone_idx];
 
-    // 3-consecutive repetition guard.
-    if (candidate == prev_pitch && prev_pitch == prevprev_pitch) {
-      // Force extra step in current direction.
+    // 2-consecutive repetition guard.
+    if (has_prev && candidate == prev_pitch) {
+      // Step ±1 in ascending direction, fallback to reverse.
       if (ascending && tone_idx + 1 < scale_tones.size()) {
         ++tone_idx;
+        candidate = scale_tones[tone_idx];
       } else if (!ascending && tone_idx > 0) {
         --tone_idx;
+        candidate = scale_tones[tone_idx];
       } else if (tone_idx + 1 < scale_tones.size()) {
         ++tone_idx;
+        candidate = scale_tones[tone_idx];
       } else if (tone_idx > 0) {
         --tone_idx;
-      }
-      candidate = scale_tones[tone_idx];
-    } else if (candidate == prev_pitch) {
-      // 2nd consecutive: try 1 extra step if possible.
-      if (ascending && tone_idx + 1 < scale_tones.size()) {
-        ++tone_idx;
-        candidate = scale_tones[tone_idx];
-      } else if (!ascending && tone_idx > 0) {
-        --tone_idx;
         candidate = scale_tones[tone_idx];
       }
+      // If still same pitch: fallback allow — post-processing catches 3+.
     }
 
     Tick dur = kQuarterNote;
@@ -417,7 +443,7 @@ std::vector<NoteEvent> generateEstablishVariation(Tick start_tick, int bars,
     note.source = BachNoteSource::FreeCounterpoint;
     notes.push_back(note);
 
-    prevprev_pitch = prev_pitch;
+    has_prev = true;
     prev_pitch = candidate;
     current_tick += dur;
 
@@ -480,6 +506,8 @@ std::vector<NoteEvent> generateDevelopEarlyVariation(Tick start_tick, int bars,
   // Start roughly in the middle of the scale range.
   size_t tone_idx = scale_tones.size() / 2;
   bool ascending = rng::rollProbability(rng, 0.5f);
+  bool has_prev = false;
+  uint8_t prev_pitch = 0;
 
   while (current_tick < end_tick) {
     // Re-acquire scale tones per beat from timeline (harmony may change).
@@ -490,13 +518,34 @@ std::vector<NoteEvent> generateDevelopEarlyVariation(Tick start_tick, int bars,
 
     // Re-map position if scale changed.
     if (new_tones != scale_tones) {
-      uint8_t prev_pitch = scale_tones.empty() ? 0 : scale_tones[tone_idx];
+      uint8_t old_pitch = scale_tones.empty() ? 0 : scale_tones[tone_idx];
       scale_tones = std::move(new_tones);
       if (!notes.empty()) {
         tone_idx = findClosestToneIndex(scale_tones, notes.back().pitch);
       } else {
-        tone_idx = findClosestToneIndex(scale_tones, prev_pitch);
+        tone_idx = findClosestToneIndex(scale_tones, old_pitch);
       }
+    }
+
+    uint8_t candidate = scale_tones[tone_idx];
+
+    // 2-consecutive repetition guard with direction-based search.
+    if (has_prev && candidate == prev_pitch) {
+      const int offsets_asc[] = {1, -1, 2, -2, 3, -3};
+      const int offsets_desc[] = {-1, 1, -2, 2, -3, 3};
+      const int* offsets = ascending ? offsets_asc : offsets_desc;
+      for (int i = 0; i < 6; ++i) {
+        int idx = static_cast<int>(tone_idx) + offsets[i];
+        if (idx < 0 || idx >= static_cast<int>(scale_tones.size())) continue;
+        uint8_t c = scale_tones[idx];
+        if (c == prev_pitch) continue;
+        if (std::abs(static_cast<int>(c) - static_cast<int>(prev_pitch)) > 7)
+          continue;
+        tone_idx = static_cast<size_t>(idx);
+        candidate = c;
+        break;
+      }
+      // Fallback: allow same pitch — post-processing catches 3+.
     }
 
     Tick dur = kEighthNote;
@@ -507,12 +556,14 @@ std::vector<NoteEvent> generateDevelopEarlyVariation(Tick start_tick, int bars,
     NoteEvent note;
     note.start_tick = current_tick;
     note.duration = dur;
-    note.pitch = scale_tones[tone_idx];
+    note.pitch = candidate;
     note.velocity = kOrganVelocity;
     note.voice = voice_idx;
     note.source = BachNoteSource::FreeCounterpoint;
     notes.push_back(note);
 
+    has_prev = true;
+    prev_pitch = candidate;
     current_tick += dur;
 
     // Stepwise motion with occasional direction change.
@@ -573,6 +624,8 @@ std::vector<NoteEvent> generateDevelopLateVariation(Tick start_tick, int bars,
   size_t arp_idx = static_cast<size_t>(
       rng::rollRange(rng, 0, static_cast<int>(arp_pitches.size()) - 1));
   bool going_up = rng::rollProbability(rng, 0.6f);
+  bool has_prev = false;
+  uint8_t prev_pitch = 0;
 
   while (current_tick < end_tick) {
     const HarmonicEvent& event = timeline.getAt(current_tick);
@@ -604,15 +657,56 @@ std::vector<NoteEvent> generateDevelopLateVariation(Tick start_tick, int bars,
       if (dur > remaining) dur = remaining;
       if (dur == 0) break;
 
+      uint8_t candidate = arp_pitches[arp_idx];
+
+      // 2-consecutive repetition guard for arpeggio.
+      if (has_prev && candidate == prev_pitch) {
+        if (arp_pitches.size() == 1) {
+          // Fallback: allow same pitch — post-processing catches 3+.
+        } else if (arp_pitches.size() == 2) {
+          // Pick the other index directly.
+          size_t other = (arp_idx == 0) ? 1 : 0;
+          candidate = arp_pitches[other];
+          arp_idx = other;
+          // Safety: if still same pitch after switch, fallback.
+        } else {
+          // Step in going_up direction; if at boundary, reverse once.
+          bool resolved = false;
+          if (going_up && arp_idx + 1 < arp_pitches.size()) {
+            ++arp_idx;
+            candidate = arp_pitches[arp_idx];
+            resolved = (candidate != prev_pitch);
+          } else if (!going_up && arp_idx > 0) {
+            --arp_idx;
+            candidate = arp_pitches[arp_idx];
+            resolved = (candidate != prev_pitch);
+          }
+          if (!resolved) {
+            // Reverse direction once and try.
+            going_up = !going_up;
+            if (going_up && arp_idx + 1 < arp_pitches.size()) {
+              ++arp_idx;
+              candidate = arp_pitches[arp_idx];
+            } else if (!going_up && arp_idx > 0) {
+              --arp_idx;
+              candidate = arp_pitches[arp_idx];
+            }
+            // If still same pitch: fallback allow.
+          }
+        }
+      }
+
       NoteEvent note;
       note.start_tick = current_tick;
       note.duration = dur;
-      note.pitch = arp_pitches[arp_idx];
+      note.pitch = candidate;
       note.velocity = kOrganVelocity;
       note.voice = voice_idx;
       note.source = BachNoteSource::FreeCounterpoint;
       notes.push_back(note);
 
+      has_prev = true;
+      prev_pitch = candidate;
       current_tick += dur;
 
       // Zigzag through arpeggio pitches.
@@ -669,6 +763,8 @@ std::vector<NoteEvent> generateAccumulateVariation(Tick start_tick, int bars,
   // Start in the upper portion of the range for intensity.
   size_t tone_idx = scale_tones.size() * 2 / 3;
   bool ascending = rng::rollProbability(rng, 0.5f);
+  bool has_prev = false;
+  uint8_t prev_pitch = 0;
 
   while (current_tick < end_tick) {
     // Re-acquire scale tones per beat from timeline (harmony may change).
@@ -679,13 +775,34 @@ std::vector<NoteEvent> generateAccumulateVariation(Tick start_tick, int bars,
 
     // Re-map position if scale changed.
     if (new_tones != scale_tones) {
-      uint8_t prev_pitch = scale_tones.empty() ? 0 : scale_tones[tone_idx];
+      uint8_t old_pitch = scale_tones.empty() ? 0 : scale_tones[tone_idx];
       scale_tones = std::move(new_tones);
       if (!notes.empty()) {
         tone_idx = findClosestToneIndex(scale_tones, notes.back().pitch);
       } else {
-        tone_idx = findClosestToneIndex(scale_tones, prev_pitch);
+        tone_idx = findClosestToneIndex(scale_tones, old_pitch);
       }
+    }
+
+    uint8_t candidate = scale_tones[tone_idx];
+
+    // 2-consecutive repetition guard with direction-based search.
+    if (has_prev && candidate == prev_pitch) {
+      const int offsets_asc[] = {1, -1, 2, -2, 3, -3};
+      const int offsets_desc[] = {-1, 1, -2, 2, -3, 3};
+      const int* offsets = ascending ? offsets_asc : offsets_desc;
+      for (int i = 0; i < 6; ++i) {
+        int idx = static_cast<int>(tone_idx) + offsets[i];
+        if (idx < 0 || idx >= static_cast<int>(scale_tones.size())) continue;
+        uint8_t c = scale_tones[idx];
+        if (c == prev_pitch) continue;
+        if (std::abs(static_cast<int>(c) - static_cast<int>(prev_pitch)) > 7)
+          continue;
+        tone_idx = static_cast<size_t>(idx);
+        candidate = c;
+        break;
+      }
+      // Fallback: allow same pitch — post-processing catches 3+.
     }
 
     Tick dur = kSixteenthNote;
@@ -696,12 +813,14 @@ std::vector<NoteEvent> generateAccumulateVariation(Tick start_tick, int bars,
     NoteEvent note;
     note.start_tick = current_tick;
     note.duration = dur;
-    note.pitch = scale_tones[tone_idx];
+    note.pitch = candidate;
     note.velocity = kOrganVelocity;
     note.voice = voice_idx;
     note.source = BachNoteSource::FreeCounterpoint;
     notes.push_back(note);
 
+    has_prev = true;
+    prev_pitch = candidate;
     current_tick += dur;
 
     // Rapid stepwise motion with occasional leaps.
@@ -1020,6 +1139,7 @@ PassacagliaResult generatePassacaglia(const PassacagliaConfig& config) {
     // scale tones. Passacaglia uses fixed key (no modulation within a piece).
     {
       RepeatedNoteRepairParams repair_params;
+      repair_params.max_consecutive = 2;
       repair_params.num_voices = num_voices;
       repair_params.key_at_tick = [&](Tick) { return config.key.tonic; };
       repair_params.scale_at_tick = [&](Tick) {
@@ -1028,7 +1148,12 @@ PassacagliaResult generatePassacaglia(const PassacagliaConfig& config) {
       repair_params.voice_range = [&](uint8_t v) -> std::pair<uint8_t, uint8_t> {
         return {getVoiceLowPitch(v), getVoiceHighPitch(v)};
       };
-      repairRepeatedNotes(validated, repair_params);
+      // Repair in a loop until convergence: repairing a note can create a new
+      // same-pitch boundary with the next note, requiring another pass.
+      for (int pass = 0; pass < 5; ++pass) {
+        int modified = repairRepeatedNotes(validated, repair_params);
+        if (modified == 0) break;
+      }
     }
 
     // Redistribute validated notes back to tracks.
@@ -1077,6 +1202,48 @@ PassacagliaResult generatePassacaglia(const PassacagliaConfig& config) {
   auto reg_plan = createVariationRegistrationPlan(
       config.num_variations, var_dur);
   applyExtendedRegistrationPlan(tracks, reg_plan);
+
+  // Final repeated-note repair pass: Picardy and other post-processing steps
+  // may introduce new same-pitch runs after the main repair.
+  if (num_voices >= 2) {
+    std::vector<NoteEvent> final_notes;
+    for (const auto& track : tracks) {
+      final_notes.insert(final_notes.end(), track.notes.begin(),
+                         track.notes.end());
+    }
+
+    RepeatedNoteRepairParams final_repair;
+    final_repair.max_consecutive = 2;
+    final_repair.num_voices = num_voices;
+    final_repair.key_at_tick = [&](Tick) { return config.key.tonic; };
+    final_repair.scale_at_tick = [&](Tick tick) {
+      // Picardy region uses major scale for valid candidates.
+      if (config.enable_picardy && config.key.is_minor &&
+          tick >= total_duration - kTicksPerBar) {
+        return ScaleType::Major;
+      }
+      return config.key.is_minor ? ScaleType::HarmonicMinor : ScaleType::Major;
+    };
+    final_repair.voice_range = [&](uint8_t v) -> std::pair<uint8_t, uint8_t> {
+      return {getVoiceLowPitch(v), getVoiceHighPitch(v)};
+    };
+
+    for (int pass = 0; pass < 3; ++pass) {
+      int modified = repairRepeatedNotes(final_notes, final_repair);
+      if (modified == 0) break;
+    }
+
+    // Redistribute repaired notes back to tracks.
+    for (auto& track : tracks) {
+      track.notes.clear();
+    }
+    for (auto& note : final_notes) {
+      if (note.voice < num_voices) {
+        tracks[note.voice].notes.push_back(std::move(note));
+      }
+    }
+    sortTrackNotes(tracks);
+  }
 
   result.tracks = std::move(tracks);
   result.timeline = std::move(timeline);
