@@ -13,6 +13,7 @@
 #include "core/pitch_utils.h"
 #include "core/rng_util.h"
 #include "core/scale.h"
+#include "fugue/fugue_config.h"
 
 namespace bach {
 
@@ -177,8 +178,8 @@ uint8_t findConsonantPitch(uint8_t subject_pitch, int direction,
 /// @param split_prob Probability of splitting long notes (character-based).
 /// @param gen Random number generator.
 /// @return Complementary duration in ticks.
-Tick complementaryDuration(Tick subject_duration, float split_prob,
-                           std::mt19937& gen) {
+[[maybe_unused]] Tick complementaryDuration(Tick subject_duration, float split_prob,
+                                            std::mt19937& gen) {
   if (subject_duration >= kHalfNote) {
     // Long subject note -> shorter CS notes for rhythmic contrast.
     if (rng::rollProbability(gen, split_prob)) {
@@ -198,6 +199,28 @@ Tick complementaryDuration(Tick subject_duration, float split_prob,
     return kEighthNote;
   }
   return kHalfNote;
+}
+
+/// Select countersubject duration with style-aware constraints.
+/// 16th notes restricted to Playful/Restless characters only.
+Tick selectCSDuration(Tick subject_duration, float split_prob,
+                      Tick tick, std::mt19937& gen) {
+  // Map split_prob [0.5, 0.75] -> energy [0.4, 0.7].
+  // Severe (0.6) -> 0.52, Noble (0.5) -> 0.40
+  // Playful (0.7) -> 0.64, Restless (0.75) -> 0.70
+  float energy = 0.4f + (split_prob - 0.5f) * 1.2f;
+  if (energy < 0.3f) energy = 0.3f;
+  if (energy > 0.75f) energy = 0.75f;
+
+  Tick dur = FugueEnergyCurve::selectDuration(energy, tick, gen, subject_duration);
+
+  // 16th note restriction: forbidden when energy < 0.6 (Severe, Noble).
+  // Baroque practice: CS sixteenths only in Playful/Restless contexts.
+  if (dur < kTicksPerBeat / 2 && energy < 0.6f) {
+    dur = kTicksPerBeat / 2;  // Floor at eighth note.
+  }
+
+  return dur;
 }
 
 /// @brief Determine the motion direction for the countersubject.
@@ -458,8 +481,8 @@ std::vector<NoteEvent> generateCSAttempt(const Subject& subject,
     }
 
     // Generate complementary duration.
-    Tick duration = complementaryDuration(subj_note.duration,
-                                          params.long_split_prob, gen);
+    Tick duration = selectCSDuration(subj_note.duration,
+                                     params.long_split_prob, current_tick, gen);
     if (current_tick + duration > total_ticks) {
       duration = total_ticks - current_tick;
       if (duration < kEighthNote) break;

@@ -2,6 +2,8 @@
 
 #include "core/note_source.h"
 
+#include <string>
+
 namespace bach {
 
 const char* bachNoteSourceToString(BachNoteSource source) {
@@ -73,6 +75,25 @@ ProtectionLevel getProtectionLevel(BachNoteSource source) {
       return ProtectionLevel::Flexible;
   }
   return ProtectionLevel::Flexible;
+}
+
+std::string noteModifiedByToString(uint8_t flags) {
+  if (flags == 0) return "none";
+  std::string result;
+  auto append = [&](uint8_t bit, const char* name) {
+    if (flags & bit) {
+      if (!result.empty()) result += ',';
+      result += name;
+    }
+  };
+  append(static_cast<uint8_t>(NoteModifiedBy::ParallelRepair),  "parallel_repair");
+  append(static_cast<uint8_t>(NoteModifiedBy::ChordToneSnap),   "chord_tone_snap");
+  append(static_cast<uint8_t>(NoteModifiedBy::LeapResolution),   "leap_resolution");
+  append(static_cast<uint8_t>(NoteModifiedBy::OverlapTrim),      "overlap_trim");
+  append(static_cast<uint8_t>(NoteModifiedBy::OctaveAdjust),     "octave_adjust");
+  append(static_cast<uint8_t>(NoteModifiedBy::Articulation),     "articulation");
+  append(static_cast<uint8_t>(NoteModifiedBy::RepeatedNoteRep),  "repeated_note_rep");
+  return result;
 }
 
 }  // namespace bach

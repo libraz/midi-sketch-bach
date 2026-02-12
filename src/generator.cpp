@@ -211,6 +211,7 @@ void cleanupTrackOverlaps(std::vector<Track>& tracks) {
       Tick end_tick = notes[i].start_tick + notes[i].duration;
       if (end_tick > notes[i + 1].start_tick) {
         notes[i].duration = notes[i + 1].start_tick - notes[i].start_tick;
+        notes[i].modified_by |= static_cast<uint8_t>(NoteModifiedBy::OverlapTrim);
         if (notes[i].duration == 0) notes[i].duration = 1;
       }
     }
@@ -897,6 +898,10 @@ std::string buildEventsJson(const GeneratorResult& result, const GeneratorConfig
       writer.value(static_cast<int>(note.voice));
       writer.key("source");
       writer.value(std::string(bachNoteSourceToString(note.source)));
+      if (note.modified_by != 0) {
+        writer.key("modified_by");
+        writer.value(noteModifiedByToString(note.modified_by));
+      }
       writer.endObject();
     }
     writer.endArray();

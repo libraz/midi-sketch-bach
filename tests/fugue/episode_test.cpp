@@ -10,6 +10,7 @@
 #include <string>
 
 #include "core/scale.h"
+#include "fugue/fugue_config.h"
 
 namespace bach {
 namespace {
@@ -1244,6 +1245,48 @@ TEST(EpisodeImitationTest, NobleKeepsAugmentedBass) {
   double voice1_avg = static_cast<double>(voice1_sum) / voice1_count;
   EXPECT_LT(voice1_avg, voice0_avg)
       << "Noble voice 1 (augmented bass) should be lower than voice 0";
+}
+
+// ---------------------------------------------------------------------------
+// Bass duration variety (selectDuration integration)
+// ---------------------------------------------------------------------------
+
+TEST(EpisodeTest, BassDurationVariety) {
+  Subject subject = makeTestSubject();
+  // Try multiple seeds to find bass duration variety.
+  bool found_variety = false;
+  for (uint32_t seed = 1; seed <= 20; ++seed) {
+    Episode episode = generateEpisode(subject, 0, kTicksPerBar * 4,
+                                      Key::C, Key::C, 3, seed, 0, 0.6f);
+    // Find bass voice (voice 2 in 3-voice fugue).
+    std::set<Tick> distinct;
+    for (const auto& note : episode.notes) {
+      if (note.voice == 2) {
+        distinct.insert(note.duration);
+      }
+    }
+    if (distinct.size() >= 3) {
+      found_variety = true;
+      break;
+    }
+  }
+  EXPECT_TRUE(found_variety)
+      << "At least one seed in 1-20 should produce 3+ distinct bass durations";
+}
+
+TEST(EpisodeTest, BassNoSixteenthNotes) {
+  Subject subject = makeTestSubject();
+  constexpr Tick kSixteenth = kTicksPerBeat / 4;
+  for (uint32_t seed = 1; seed <= 10; ++seed) {
+    Episode episode = generateEpisode(subject, 0, kTicksPerBar * 4,
+                                      Key::C, Key::C, 3, seed, 0, 0.5f);
+    for (const auto& note : episode.notes) {
+      if (note.voice == 2) {
+        EXPECT_GT(note.duration, kSixteenth)
+            << "Bass voice should not contain sixteenth notes (seed=" << seed << ")";
+      }
+    }
+  }
 }
 
 }  // namespace

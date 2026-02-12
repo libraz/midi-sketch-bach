@@ -509,6 +509,7 @@ ChaconneResult generateChaconne(const ChaconneConfig& config) {
         }
       }
       all_notes[idx].pitch = static_cast<uint8_t>(best);
+      all_notes[idx].modified_by |= static_cast<uint8_t>(NoteModifiedBy::OctaveAdjust);
     }
   }
 

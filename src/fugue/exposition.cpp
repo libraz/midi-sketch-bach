@@ -15,6 +15,7 @@
 #include "counterpoint/collision_resolver.h"
 #include "counterpoint/counterpoint_state.h"
 #include "counterpoint/i_rule_evaluator.h"
+#include "fugue/fugue_config.h"
 #include "fugue/voice_registers.h"
 #include "harmony/chord_tone_utils.h"
 #include "harmony/chord_types.h"
@@ -298,6 +299,7 @@ void placeFreeCounterpoint(VoiceId voice_id,
                            bool is_minor,
                            VoiceRegister voice_reg,
                            std::mt19937& rng,  // NOLINT(runtime/references): mt19937 must be mutable
+                           float energy,
                            std::map<VoiceId, std::vector<NoteEvent>>& voice_notes) {
   if (duration_ticks == 0) return;
 
@@ -310,10 +312,39 @@ void placeFreeCounterpoint(VoiceId voice_id,
   int direction = rng::rollProbability(rng, 0.5f) ? 1 : -1;
   Tick current_tick = start_tick;
   Tick remaining = duration_ticks;
-  constexpr Tick kStepDur = kTicksPerBeat;  // Quarter note steps.
+  auto findOtherDuration = [&voice_notes, voice_id](Tick tick) -> Tick {
+    for (const auto& [vid, notes] : voice_notes) {
+      if (vid == voice_id || notes.empty()) continue;
+      for (auto iter = notes.rbegin(); iter != notes.rend(); ++iter) {
+        if (iter->start_tick <= tick && iter->start_tick + iter->duration > tick)
+          return iter->duration;
+      }
+    }
+    return 0;
+  };
 
   while (remaining > 0) {
-    Tick dur = std::min(remaining, kStepDur);
+    Tick other_dur = findOtherDuration(current_tick);
+    Tick raw_dur = FugueEnergyCurve::selectDuration(energy, current_tick, rng, other_dur);
+
+    // Guard 1: Split duration at bar boundaries.
+    // Non-suspension notes crossing bar lines feel unnatural in counterpoint.
+    Tick ticks_to_bar = kTicksPerBar - (current_tick % kTicksPerBar);
+    if (raw_dur > ticks_to_bar && ticks_to_bar >= kTicksPerBeat / 2) {
+      raw_dur = ticks_to_bar;
+    }
+
+    // Guard 2: If remaining is less than minDuration, consume it in one note.
+    Tick min_dur = FugueEnergyCurve::minDuration(energy);
+    if (remaining < min_dur) {
+      raw_dur = remaining;
+    }
+
+    Tick dur = std::min(remaining, raw_dur);
+    // Floor: don't go below sixteenth note if we have room.
+    if (dur < kTicksPerBeat / 4 && remaining >= kTicksPerBeat / 4) {
+      dur = kTicksPerBeat / 4;
+    }
     uint8_t pitch = scale_util::absoluteDegreeToPitch(current_deg, key, scale);
     pitch = clampPitch(static_cast<int>(pitch), voice_reg.low, voice_reg.high);
 
@@ -465,7 +496,7 @@ Exposition buildExposition(const Subject& subject,
         VoiceRegister earlier_reg = getVoiceRegister(earlier_voice, num_voices);
         placeFreeCounterpoint(earlier_voice, entry.entry_tick,
                               entry_interval, config.key, config.is_minor,
-                              earlier_reg, rng, expo.voice_notes);
+                              earlier_reg, rng, 0.5f, expo.voice_notes);
       }
     }
   }

@@ -134,6 +134,7 @@ void applyArticulation(std::vector<NoteEvent>& notes, VoiceRole role,
         new_duration = kMinArticulatedDuration;
       }
       note.duration = new_duration;
+      note.modified_by |= static_cast<uint8_t>(NoteModifiedBy::Articulation);
     }
   }
 
@@ -168,6 +169,7 @@ void applyArticulation(std::vector<NoteEvent>& notes, VoiceRole role,
           new_duration = kMinArticulatedDuration;
         }
         note.duration = new_duration;
+        note.modified_by |= static_cast<uint8_t>(NoteModifiedBy::Articulation);
       }
     }
   }

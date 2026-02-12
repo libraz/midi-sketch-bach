@@ -327,6 +327,7 @@ void clampExcessiveLeaps(std::vector<NoteEvent>& notes,
       }
     }
     notes[i].pitch = static_cast<uint8_t>(best);
+    notes[i].modified_by |= static_cast<uint8_t>(NoteModifiedBy::OctaveAdjust);
   }
 }
 
@@ -360,6 +361,7 @@ void enforceLeapResolution(std::vector<NoteEvent>& notes, Key key, bool is_minor
       auto cand_u8 = static_cast<uint8_t>(cand);
       if (scale_util::isScaleTone(cand_u8, key, scale)) {
         notes[i + 1].pitch = cand_u8;
+        notes[i + 1].modified_by |= static_cast<uint8_t>(NoteModifiedBy::LeapResolution);
         break;
       }
     }

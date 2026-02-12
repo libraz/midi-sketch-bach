@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from bisect import bisect_right
 from dataclasses import dataclass, field
-from enum import IntEnum
+from enum import IntEnum, IntFlag
 from typing import Dict, List, Optional
 
 # ---------------------------------------------------------------------------
@@ -123,6 +123,32 @@ TRANSFORM_STRING_MAP: Dict[str, TransformStep] = {
     "key_transpose": TransformStep.KEY_TRANSPOSE,
 }
 
+
+class NoteModifiedBy(IntFlag):
+    """Bit-flag enum tracking post-processing modifications applied to a note.
+
+    Mirrors NoteModifiedBy in C++ (src/core/note_source.h).
+    """
+    NONE = 0
+    PARALLEL_REPAIR = 1 << 0
+    CHORD_TONE_SNAP = 1 << 1
+    LEAP_RESOLUTION = 1 << 2
+    OVERLAP_TRIM = 1 << 3
+    OCTAVE_ADJUST = 1 << 4
+    ARTICULATION = 1 << 5
+    REPEATED_NOTE_REP = 1 << 6
+
+
+MODIFIED_BY_STRING_MAP: Dict[str, NoteModifiedBy] = {
+    "parallel_repair": NoteModifiedBy.PARALLEL_REPAIR,
+    "chord_tone_snap": NoteModifiedBy.CHORD_TONE_SNAP,
+    "leap_resolution": NoteModifiedBy.LEAP_RESOLUTION,
+    "overlap_trim": NoteModifiedBy.OVERLAP_TRIM,
+    "octave_adjust": NoteModifiedBy.OCTAVE_ADJUST,
+    "articulation": NoteModifiedBy.ARTICULATION,
+    "repeated_note_rep": NoteModifiedBy.REPEATED_NOTE_REP,
+}
+
 # ---------------------------------------------------------------------------
 # Provenance
 # ---------------------------------------------------------------------------
@@ -163,6 +189,7 @@ class Note:
     voice_id: int = 0
     channel: int = 0
     provenance: Optional[Provenance] = None
+    modified_by: int = 0
 
     @property
     def end_tick(self) -> int:

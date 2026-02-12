@@ -203,6 +203,7 @@ int repairParallelPerfect(std::vector<NoteEvent>& notes,
                 if (new_par) continue;
 
                 notes[fc.ni].pitch = ucp;
+                notes[fc.ni].modified_by |= static_cast<uint8_t>(NoteModifiedBy::ParallelRepair);
                 ca = soundPitch(va, t);
                 cb = soundPitch(vb, t);
                 fixed = true;
@@ -315,6 +316,7 @@ int repairParallelPerfect(std::vector<NoteEvent>& notes,
                     if (new_par) continue;
 
                     notes[fc2.ni].pitch = ucp2;
+                    notes[fc2.ni].modified_by |= static_cast<uint8_t>(NoteModifiedBy::ParallelRepair);
                     fixed = true;
                     any_fixed = true;
                     ++total_fixed;

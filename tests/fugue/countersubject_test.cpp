@@ -639,5 +639,40 @@ TEST(CountersubjectInvertibilityTest, GeneratedCSHasReasonableInvertedConsonance
   EXPECT_GE(cs.notes.size(), 2u);
 }
 
+// ---------------------------------------------------------------------------
+// Countersubject duration variety (selectDuration integration)
+// ---------------------------------------------------------------------------
+
+TEST(CountersubjectTest, CSDurationVariety) {
+  Subject subject = makeTestSubject();
+  // Try multiple seeds to find CS duration variety.
+  bool found_variety = false;
+  for (uint32_t seed = 1; seed <= 20; ++seed) {
+    Countersubject cs = generateCountersubject(subject, seed);
+    std::set<Tick> distinct;
+    for (const auto& note : cs.notes) {
+      distinct.insert(note.duration);
+    }
+    if (distinct.size() >= 3) {
+      found_variety = true;
+      break;
+    }
+  }
+  EXPECT_TRUE(found_variety)
+      << "At least one seed in 1-20 should produce 3+ distinct CS durations";
+}
+
+TEST(CountersubjectTest, SevereNoSixteenthNotes) {
+  Subject subject = makeTestSubject(SubjectCharacter::Severe);
+  constexpr Tick kSixteenth = kTicksPerBeat / 4;
+  for (uint32_t seed = 1; seed <= 20; ++seed) {
+    Countersubject cs = generateCountersubject(subject, seed);
+    for (const auto& note : cs.notes) {
+      EXPECT_GE(note.duration, kSixteenth * 2)
+          << "Severe CS should not contain sixteenth notes (seed=" << seed << ")";
+    }
+  }
+}
+
 }  // namespace
 }  // namespace bach

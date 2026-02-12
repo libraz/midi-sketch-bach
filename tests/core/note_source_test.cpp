@@ -1,4 +1,4 @@
-// Tests for BachNoteSource, BachTransformStep, and NoteProvenance.
+// Tests for BachNoteSource, BachTransformStep, NoteProvenance, and NoteModifiedBy.
 
 #include "core/note_source.h"
 
@@ -244,6 +244,72 @@ TEST(ProtectionLevelTest, AllSourcesCovered) {
                 level == ProtectionLevel::Flexible)
         << "Source " << bachNoteSourceToString(src) << " has invalid level";
   }
+}
+
+// ---------------------------------------------------------------------------
+// NoteModifiedBy string conversion tests
+// ---------------------------------------------------------------------------
+
+TEST(NoteModifiedByTest, NoneReturnsNone) {
+  EXPECT_EQ(noteModifiedByToString(0), "none");
+}
+
+TEST(NoteModifiedByTest, SingleFlags) {
+  EXPECT_EQ(noteModifiedByToString(static_cast<uint8_t>(NoteModifiedBy::ParallelRepair)),
+            "parallel_repair");
+  EXPECT_EQ(noteModifiedByToString(static_cast<uint8_t>(NoteModifiedBy::ChordToneSnap)),
+            "chord_tone_snap");
+  EXPECT_EQ(noteModifiedByToString(static_cast<uint8_t>(NoteModifiedBy::LeapResolution)),
+            "leap_resolution");
+  EXPECT_EQ(noteModifiedByToString(static_cast<uint8_t>(NoteModifiedBy::OverlapTrim)),
+            "overlap_trim");
+  EXPECT_EQ(noteModifiedByToString(static_cast<uint8_t>(NoteModifiedBy::OctaveAdjust)),
+            "octave_adjust");
+  EXPECT_EQ(noteModifiedByToString(static_cast<uint8_t>(NoteModifiedBy::Articulation)),
+            "articulation");
+  EXPECT_EQ(noteModifiedByToString(static_cast<uint8_t>(NoteModifiedBy::RepeatedNoteRep)),
+            "repeated_note_rep");
+}
+
+TEST(NoteModifiedByTest, CombinedFlags) {
+  uint8_t flags = static_cast<uint8_t>(NoteModifiedBy::ParallelRepair) |
+                  static_cast<uint8_t>(NoteModifiedBy::OctaveAdjust);
+  EXPECT_EQ(noteModifiedByToString(flags), "parallel_repair,octave_adjust");
+}
+
+TEST(NoteModifiedByTest, AllFlags) {
+  uint8_t flags = 0x7F;  // All 7 flags set
+  EXPECT_EQ(noteModifiedByToString(flags),
+            "parallel_repair,chord_tone_snap,leap_resolution,"
+            "overlap_trim,octave_adjust,articulation,repeated_note_rep");
+}
+
+TEST(NoteModifiedByTest, BitwiseOrOperator) {
+  NoteModifiedBy combined = NoteModifiedBy::ParallelRepair | NoteModifiedBy::ChordToneSnap;
+  EXPECT_EQ(static_cast<uint8_t>(combined), 0x03);
+}
+
+TEST(NoteModifiedByTest, BitwiseOrAssignOperator) {
+  NoteModifiedBy flags = NoteModifiedBy::None;
+  flags |= NoteModifiedBy::OverlapTrim;
+  flags |= NoteModifiedBy::Articulation;
+  EXPECT_EQ(static_cast<uint8_t>(flags), 0x28);
+}
+
+TEST(NoteModifiedByTest, UnknownHighBitIgnored) {
+  // Bit 7 (0x80) is not defined; verify it produces no named flag.
+  uint8_t flags = 0x80;
+  EXPECT_EQ(noteModifiedByToString(flags), "");
+}
+
+TEST(NoteModifiedByTest, EnumValuesArePowersOfTwo) {
+  EXPECT_EQ(static_cast<uint8_t>(NoteModifiedBy::ParallelRepair),  1);
+  EXPECT_EQ(static_cast<uint8_t>(NoteModifiedBy::ChordToneSnap),   2);
+  EXPECT_EQ(static_cast<uint8_t>(NoteModifiedBy::LeapResolution),  4);
+  EXPECT_EQ(static_cast<uint8_t>(NoteModifiedBy::OverlapTrim),     8);
+  EXPECT_EQ(static_cast<uint8_t>(NoteModifiedBy::OctaveAdjust),   16);
+  EXPECT_EQ(static_cast<uint8_t>(NoteModifiedBy::Articulation),   32);
+  EXPECT_EQ(static_cast<uint8_t>(NoteModifiedBy::RepeatedNoteRep), 64);
 }
 
 }  // namespace

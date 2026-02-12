@@ -1,4 +1,4 @@
-// Tests for core/basic_types.h -- enum conversions, timing utilities.
+// Tests for core/basic_types.h -- enum conversions, timing utilities, struct layout.
 
 #include "core/basic_types.h"
 
@@ -236,6 +236,27 @@ TEST(BasicTypesTest, MidiEventDefaults) {
   EXPECT_EQ(event.status, 0u);
   EXPECT_EQ(event.data1, 0u);
   EXPECT_EQ(event.data2, 0u);
+}
+
+// ---------------------------------------------------------------------------
+// NoteEvent: modified_by field and struct layout
+// ---------------------------------------------------------------------------
+
+TEST(NoteEventTest, NewNoteHasNoModifications) {
+  NoteEvent note;
+  EXPECT_EQ(note.modified_by, 0);
+}
+
+TEST(NoteEventTest, SizeIs16Bytes) {
+  // NoteEvent is a hot struct in tight loops; guard against accidental bloat.
+  EXPECT_EQ(sizeof(NoteEvent), 16u);
+}
+
+TEST(NoteEventTest, ModifiedByAccumulatesFlags) {
+  NoteEvent note;
+  note.modified_by |= static_cast<uint8_t>(NoteModifiedBy::ParallelRepair);
+  note.modified_by |= static_cast<uint8_t>(NoteModifiedBy::OverlapTrim);
+  EXPECT_EQ(note.modified_by, 0x09);  // 1 | 8
 }
 
 }  // namespace

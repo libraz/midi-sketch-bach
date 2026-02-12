@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Union
 
 from ..model import (
+    MODIFIED_BY_STRING_MAP,
     Note,
     NoteSource,
     Provenance,
@@ -51,6 +52,14 @@ def _parse_flat_source(source_str: Optional[str]) -> Optional[Provenance]:
 
 def _parse_note(note_data: dict, voice_name: str, voice_id: int, channel: int) -> Note:
     """Parse a single note dict."""
+    # Parse modified_by from comma-separated string to bit flags.
+    modified_by = 0
+    if "modified_by" in note_data:
+        for flag_str in note_data["modified_by"].split(","):
+            flag_str = flag_str.strip()
+            if flag_str in MODIFIED_BY_STRING_MAP:
+                modified_by |= MODIFIED_BY_STRING_MAP[flag_str]
+
     return Note(
         pitch=note_data.get("pitch", 0),
         velocity=note_data.get("velocity", 80),
@@ -61,6 +70,7 @@ def _parse_note(note_data: dict, voice_name: str, voice_id: int, channel: int) -
         channel=channel,
         provenance=_parse_provenance(note_data.get("provenance"))
         or _parse_flat_source(note_data.get("source")),
+        modified_by=modified_by,
     )
 
 

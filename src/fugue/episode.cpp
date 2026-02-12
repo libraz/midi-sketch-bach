@@ -555,7 +555,7 @@ static void generateHeldTones(Episode& episode,
 static std::vector<NoteEvent> generateBassSequencePattern(
     const Subject& /* subject */, Tick start_tick, Tick duration,
     Key key, ScaleType scale, VoiceId voice, uint8_t num_voices,
-    std::mt19937& /* gen */) {
+    std::mt19937& gen, float energy) {
   std::vector<NoteEvent> result;
   auto [range_low, range_high] = getFugueVoiceRange(voice, num_voices);
 
@@ -592,7 +592,24 @@ static std::vector<NoteEvent> generateBassSequencePattern(
         (pattern_idx % 2 == 0) ? kBassPatternA : kBassPatternB;
 
     for (int i = 0; i < kPatternLen && tick < start_tick + duration; ++i) {
-      Tick dur = (i == 0) ? kHalfNote : kQuarterNote;
+      Tick raw_dur;
+      if (i == 0) {
+        // Pattern head: harmonic rhythm anchor. Lower energy for longer notes.
+        raw_dur = FugueEnergyCurve::selectDuration(
+            std::max(0.0f, energy - 0.15f), tick, gen, kQuarterNote);
+        if (raw_dur < kQuarterNote) raw_dur = kQuarterNote;  // Floor: quarter.
+      } else {
+        raw_dur = FugueEnergyCurve::selectDuration(energy, tick, gen, kHalfNote);
+        // Bass sixteenths are a style violation; floor at eighth note.
+        if (raw_dur < kTicksPerBeat / 2) raw_dur = kTicksPerBeat / 2;
+      }
+
+      // Low energy: reinforce half-note bias for stable harmonic rhythm.
+      if (energy < 0.5f && i != 0 && raw_dur < kHalfNote) {
+        raw_dur = kHalfNote;
+      }
+
+      Tick dur = raw_dur;
       if (tick + dur > start_tick + duration) {
         dur = start_tick + duration - tick;
         if (dur < kQuarterNote / 2) break;
@@ -744,7 +761,7 @@ Episode generateEpisode(const Subject& subject, Tick start_tick, Tick duration_t
   if (num_voices >= 3 && bass_voice != resting_voice) {
     auto bass_notes = generateBassSequencePattern(
         subject, start_tick, duration_ticks, start_key, scale,
-        bass_voice, num_voices, rng);
+        bass_voice, num_voices, rng, energy_level);
     for (auto& n : bass_notes) {
       episode.notes.push_back(n);
     }

@@ -323,8 +323,10 @@ std::vector<NoteEvent> generateMotif(const HarmonicEvent& event,
   // Snap last note to chord tone for harmonic stability.
   if (!motif.empty()) {
     motif.back().pitch = nearestChordTone(motif.back().pitch, event);
+    motif.back().modified_by |= static_cast<uint8_t>(NoteModifiedBy::ChordToneSnap);
     motif.back().pitch =
         clampPitch(static_cast<int>(motif.back().pitch), 48, 84);
+    motif.back().modified_by |= static_cast<uint8_t>(NoteModifiedBy::OctaveAdjust);
   }
 
   return motif;
@@ -349,6 +351,7 @@ std::vector<NoteEvent> placeInRegister(const std::vector<NoteEvent>& motif,
   auto placed = transposeMelody(motif, shift);
   for (auto& n : placed) {
     n.pitch = clampPitch(static_cast<int>(n.pitch), range_low, range_high);
+    n.modified_by |= static_cast<uint8_t>(NoteModifiedBy::OctaveAdjust);
   }
   return placed;
 }
@@ -566,11 +569,13 @@ void generateUpperVoicePhrase(Tick phrase_start, const std::vector<NoteEvent>& m
 
     for (auto& n : seq) {
       n.pitch = clampPitch(static_cast<int>(n.pitch), leader_low, leader_high);
+      n.modified_by |= static_cast<uint8_t>(NoteModifiedBy::OctaveAdjust);
       n.voice = leader_voice;
 
       if (n.start_tick < fortspinnung_end) {
         if (n.start_tick + n.duration > fortspinnung_end) {
           n.duration = fortspinnung_end - n.start_tick;
+          n.modified_by |= static_cast<uint8_t>(NoteModifiedBy::OverlapTrim);
         }
         leader_seq.push_back(n);
       }
@@ -640,6 +645,7 @@ void generateUpperVoicePhrase(Tick phrase_start, const std::vector<NoteEvent>& m
   for (auto& n : follower_imitation) {
     if (n.start_tick + n.duration > half_phrase) {
       n.duration = (n.start_tick < half_phrase) ? (half_phrase - n.start_tick) : 0;
+      n.modified_by |= static_cast<uint8_t>(NoteModifiedBy::OverlapTrim);
     }
   }
   follower_imitation.erase(
@@ -932,6 +938,7 @@ std::vector<NoteEvent> generateThematicBass(Tick phrase_start, Tick phrase_end,
   for (auto& n : bass_motif) {
     n.pitch = clampPitch(static_cast<int>(n.pitch),
                          organ_range::kPedalLow, organ_range::kPedalHigh);
+    n.modified_by |= static_cast<uint8_t>(NoteModifiedBy::OctaveAdjust);
     n.voice = 2;
     n.source = BachNoteSource::PedalPoint;
   }
@@ -948,6 +955,7 @@ std::vector<NoteEvent> generateThematicBass(Tick phrase_start, Tick phrase_end,
   for (auto& n : bass_motif) {
     if (n.start_tick + n.duration > phrase_end) {
       n.duration = phrase_end - n.start_tick;
+      n.modified_by |= static_cast<uint8_t>(NoteModifiedBy::OverlapTrim);
     }
   }
 
@@ -1055,8 +1063,12 @@ bool insertCadentialSuspension(std::vector<Track>& tracks, Tick cadence_tick,
 
     // Apply: extend note duration to cadence_tick, set pitch to sus_pitch.
     notes[target_idx].pitch = sus_pitch;
+    notes[target_idx].modified_by |= static_cast<uint8_t>(NoteModifiedBy::ChordToneSnap);
     Tick new_dur = cadence_tick - notes[target_idx].start_tick;
-    if (new_dur > 0) notes[target_idx].duration = new_dur;
+    if (new_dur > 0) {
+      notes[target_idx].duration = new_dur;
+      notes[target_idx].modified_by |= static_cast<uint8_t>(NoteModifiedBy::OverlapTrim);
+    }
 
     // Insert resolution note at cadence_tick.
     NoteEvent res_note;
@@ -1094,6 +1106,7 @@ void insertBreathingRests(std::vector<Track>& tracks, Tick num_phrases, Tick dur
         if (note.start_tick < breath_start &&
             note.start_tick + note.duration > breath_start) {
           note.duration = breath_start - note.start_tick;
+          note.modified_by |= static_cast<uint8_t>(NoteModifiedBy::Articulation);
         }
       }
     }
@@ -1144,6 +1157,7 @@ void validateNonHarmonicTones(std::vector<Track>& tracks,
             if (ivl == interval::kMinor2nd || ivl == interval::kMajor2nd ||
                 ivl == interval::kTritone) {
               notes[i].pitch = nearestChordTone(notes[i].pitch, ev);
+              notes[i].modified_by |= static_cast<uint8_t>(NoteModifiedBy::ChordToneSnap);
             }
             break;
           }
@@ -1174,6 +1188,7 @@ void validateNonHarmonicTones(std::vector<Track>& tracks,
             if (ivl == interval::kMinor2nd || ivl == interval::kMajor2nd ||
                 ivl == interval::kTritone) {
               notes[i].pitch = nearestChordTone(notes[i].pitch, ev);
+              notes[i].modified_by |= static_cast<uint8_t>(NoteModifiedBy::ChordToneSnap);
             }
             break;
           }
@@ -1198,11 +1213,13 @@ void swapVoiceRegisters(std::vector<NoteEvent>& upper_notes,
     int offset = static_cast<int>(n.pitch) - static_cast<int>(upper_center);
     int new_pitch = static_cast<int>(lower_center) + offset;
     n.pitch = clampPitch(new_pitch, lower_low, lower_high);
+    n.modified_by |= static_cast<uint8_t>(NoteModifiedBy::OctaveAdjust);
   }
   for (auto& n : lower_notes) {
     int offset = static_cast<int>(n.pitch) - static_cast<int>(lower_center);
     int new_pitch = static_cast<int>(upper_center) + offset;
     n.pitch = clampPitch(new_pitch, upper_low, upper_high);
+    n.modified_by |= static_cast<uint8_t>(NoteModifiedBy::OctaveAdjust);
   }
 }
 
@@ -1301,12 +1318,14 @@ void enforceMinimumVoiceSeparation(std::vector<Track>& tracks,
         int rh_candidate = static_cast<int>(rh.pitch) + 12;
         if (rh_candidate <= static_cast<int>(kRhHigh)) {
           rh.pitch = static_cast<uint8_t>(rh_candidate);
+          rh.modified_by |= static_cast<uint8_t>(NoteModifiedBy::OctaveAdjust);
           any_changed = true;
         } else {
           // RH at ceiling — shift LH down.
           int lh_candidate = static_cast<int>(lh.pitch) - 12;
           if (lh_candidate >= static_cast<int>(kLhLow)) {
             lh.pitch = static_cast<uint8_t>(lh_candidate);
+            lh.modified_by |= static_cast<uint8_t>(NoteModifiedBy::OctaveAdjust);
             any_changed = true;
           }
         }
@@ -1343,6 +1362,7 @@ void enforceDiatonicPitches(std::vector<Track>& tracks, Key key, bool is_minor) 
           low = organ_range::kPedalLow; high = organ_range::kPedalHigh;
         }
         note.pitch = clampPitch(static_cast<int>(snapped), low, high);
+        note.modified_by |= static_cast<uint8_t>(NoteModifiedBy::ChordToneSnap);
       }
     }
   }
@@ -1727,6 +1747,7 @@ TrioSonataMovement generateMovement(const KeySignature& key_sig, Tick num_bars,
           cand = clampPitch(static_cast<int>(cand), low, high);
           if (cand != notes[i - 1].pitch) {
             notes[i].pitch = cand;
+            notes[i].modified_by |= static_cast<uint8_t>(NoteModifiedBy::RepeatedNoteRep);
             fixed = true;
             break;
           }
@@ -1737,6 +1758,7 @@ TrioSonataMovement generateMovement(const KeySignature& key_sig, Tick num_bars,
               static_cast<int>(scale_util::absoluteDegreeToPitch(
                   abs_deg + 3 * dir, key_sig.tonic, scale)),
               low, high);
+          notes[i].modified_by |= static_cast<uint8_t>(NoteModifiedBy::RepeatedNoteRep);
         }
       }
     }
@@ -1812,6 +1834,7 @@ TrioSonataMovement generateMovement(const KeySignature& key_sig, Tick num_bars,
       uint8_t range_high = (trk == 0) ? kRhHigh : kLhHigh;
       for (auto& n : ornamented) {
         n.pitch = clampPitch(static_cast<int>(n.pitch), range_low, range_high);
+        n.modified_by |= static_cast<uint8_t>(NoteModifiedBy::OctaveAdjust);
       }
 
       tracks[trk].notes = std::move(ornamented);
@@ -1850,6 +1873,7 @@ TrioSonataMovement generateMovement(const KeySignature& key_sig, Tick num_bars,
             }
           }
           note.duration = best;
+          note.modified_by |= static_cast<uint8_t>(NoteModifiedBy::Articulation);
         }
       }
     }

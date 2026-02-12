@@ -912,6 +912,7 @@ FugueResult generateFugue(const FugueConfig& config) {
         if (!isChordTone(note.pitch, ev)) {
           // Truncate at the chord boundary.
           note.duration = ev.tick - note.start_tick;
+          note.modified_by |= static_cast<uint8_t>(NoteModifiedBy::OverlapTrim);
           break;
         }
       }
@@ -1011,6 +1012,7 @@ FugueResult generateFugue(const FugueConfig& config) {
             }
             if (resolved) {
               fixed_note.pitch = static_cast<uint8_t>(candidate);
+              fixed_note.modified_by |= static_cast<uint8_t>(NoteModifiedBy::OctaveAdjust);
               break;
             }
           }
@@ -1030,6 +1032,7 @@ FugueResult generateFugue(const FugueConfig& config) {
                                 static_cast<int>(static_cast<float>(range) * ceiling);
             if (fixed_note.pitch > static_cast<uint8_t>(ceiling_pitch)) {
               fixed_note.pitch = static_cast<uint8_t>(ceiling_pitch);
+              fixed_note.modified_by |= static_cast<uint8_t>(NoteModifiedBy::OctaveAdjust);
             }
           }
           // Revert if ceiling introduced a parallel perfect.
@@ -1039,6 +1042,7 @@ FugueResult generateFugue(const FugueConfig& config) {
                 note.start_tick, num_voices);
             if (par.has_parallel_perfect) {
               fixed_note.pitch = pre_ceiling_pitch;
+              fixed_note.modified_by |= static_cast<uint8_t>(NoteModifiedBy::OctaveAdjust);
             }
           }
         }
@@ -1255,6 +1259,7 @@ FugueResult generateFugue(const FugueConfig& config) {
       uint8_t old_pitch = note.pitch;
       if (isStructuralSource(note.source)) {
         note.pitch = snapped;
+        note.modified_by |= static_cast<uint8_t>(NoteModifiedBy::ChordToneSnap);
         if (note.pitch != old_pitch) {
           post_state.updateNotePitchAt(note.voice, note.start_tick, note.pitch);
         }
@@ -1269,6 +1274,7 @@ FugueResult generateFugue(const FugueConfig& config) {
                                         note.voice, snapped, note.start_tick);
       if (!par.has_parallel_perfect && !has_cross) {
         note.pitch = snapped;
+        note.modified_by |= static_cast<uint8_t>(NoteModifiedBy::ChordToneSnap);
       } else {
         // Try alternate scale tones within +/-4 semitones.
         bool fixed = false;
@@ -1284,12 +1290,14 @@ FugueResult generateFugue(const FugueConfig& config) {
                                              note.voice, ucand, note.start_tick);
           if (!check.has_parallel_perfect && !cand_cross) {
             note.pitch = ucand;
+            note.modified_by |= static_cast<uint8_t>(NoteModifiedBy::ChordToneSnap);
             fixed = true;
             break;
           }
         }
         if (!fixed) {
           note.pitch = snapped;  // Accept snap (structural parallel, can't fix).
+          note.modified_by |= static_cast<uint8_t>(NoteModifiedBy::ChordToneSnap);
         }
       }
       // Keep post_state in sync so subsequent checks use updated pitches.
@@ -1469,6 +1477,7 @@ FugueResult generateFugue(const FugueConfig& config) {
                       interval_util::isConsonance(
                           interval_util::compoundToSimple(nd))) {
                     all_notes[fni].pitch = ucand;
+                    all_notes[fni].modified_by |= static_cast<uint8_t>(NoteModifiedBy::ChordToneSnap);
                     fixed = true;
                     break;
                   }
@@ -1580,6 +1589,7 @@ FugueResult generateFugue(const FugueConfig& config) {
               }
               if (creates_parallel) continue;
               all_notes[fix_idx].pitch = static_cast<uint8_t>(cand);
+              all_notes[fix_idx].modified_by |= static_cast<uint8_t>(NoteModifiedBy::OctaveAdjust);
               return true;
             }
             return false;
@@ -1774,6 +1784,7 @@ FugueResult generateFugue(const FugueConfig& config) {
             if (!scale_util::isScaleTone(ucand, lr_key, effective_scale)) continue;
             if (candidateCreatesParallel(cand, i3, v, idxs, k)) continue;
             all_notes[i3].pitch = ucand;
+            all_notes[i3].modified_by |= static_cast<uint8_t>(NoteModifiedBy::LeapResolution);
             fixed = true;
             break;
           }
@@ -1855,6 +1866,7 @@ FugueResult generateFugue(const FugueConfig& config) {
                   if (!scale_util::isScaleTone(ucand, rk, effective_scale))
                     continue;
                   all_notes[ni].pitch = ucand;
+                  all_notes[ni].modified_by |= static_cast<uint8_t>(NoteModifiedBy::RepeatedNoteRep);
                   placed = true;
                 }
                 // Try opposite direction if preferred failed.
@@ -1866,6 +1878,7 @@ FugueResult generateFugue(const FugueConfig& config) {
                     if (!scale_util::isScaleTone(ucand, rk, effective_scale))
                       continue;
                     all_notes[ni].pitch = ucand;
+                    all_notes[ni].modified_by |= static_cast<uint8_t>(NoteModifiedBy::RepeatedNoteRep);
                     break;
                   }
                 }
@@ -1957,8 +1970,10 @@ FugueResult generateFugue(const FugueConfig& config) {
           }
         }
         all_notes[i].duration = std::min(snapped, trimmed);
+        all_notes[i].modified_by |= static_cast<uint8_t>(NoteModifiedBy::OverlapTrim);
         if (all_notes[i].duration == 0) {
           all_notes[i].duration = 1;  // Avoid zero-duration notes.
+          all_notes[i].modified_by |= static_cast<uint8_t>(NoteModifiedBy::OverlapTrim);
         }
       }
     }

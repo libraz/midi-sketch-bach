@@ -51,7 +51,7 @@ class BowedNoteFactory {
   /// @return NoteEvent with pitch guaranteed to be within instrument range.
   NoteEvent createNote(uint8_t pitch, Tick start, Tick duration,
                        uint8_t velocity,
-                       BachNoteSource source = BachNoteSource::Unknown) const;
+                       BachNoteSource source) const;
 
  private:
   const IBowedStringInstrument& instrument_;

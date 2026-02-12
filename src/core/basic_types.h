@@ -273,6 +273,7 @@ struct NoteEvent {
   BachNoteSource source = BachNoteSource::Unknown;  ///< Provenance source for debugging.
   uint8_t bow_direction = 0;  ///< BowDirection cast (0=Natural, 1=Down, 2=Up).
   uint8_t is_harmonic = 0;    ///< 0=normal, 1=natural harmonic.
+  uint8_t modified_by = 0;    ///< NoteModifiedBy bit flags.
 };
 
 /// Track: a collection of note events on a single MIDI channel.

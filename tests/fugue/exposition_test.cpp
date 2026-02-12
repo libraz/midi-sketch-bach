@@ -742,18 +742,20 @@ TEST(ExpositionTest, BuildExposition_FreeCounterpointQuarterNoteSteps) {
   Tick free_cp_start = subject.length_ticks * 2;
   if (expo.voice_notes.count(0) > 0) {
     int free_cp_count = 0;
+    std::set<Tick> distinct_durations;
     for (const auto& note : expo.voice_notes.at(0)) {
       if (note.start_tick >= free_cp_start) {
         free_cp_count++;
-        // Quarter note steps = kTicksPerBeat duration.
-        EXPECT_LE(note.duration, kTicksPerBeat)
-            << "Free counterpoint note should be quarter notes or shorter";
+        distinct_durations.insert(note.duration);
+        // Duration should be a valid baroque value (sixteenth to whole note).
+        EXPECT_GE(note.duration, kTicksPerBeat / 4)
+            << "Free CP duration too short";
+        EXPECT_LE(note.duration, kTicksPerBar)
+            << "Free CP duration too long";
       }
     }
-    // With 2-bar subject, free counterpoint for 1 entry interval = 2 bars
-    // = 8 quarter notes.
-    EXPECT_GE(free_cp_count, 4)
-        << "Expected multiple quarter-note steps in free counterpoint";
+    EXPECT_GE(free_cp_count, 2)
+        << "Expected multiple notes in free counterpoint";
   }
 }
 
@@ -1061,6 +1063,62 @@ TEST(ExpositionCSPlacementTest, NegativeDiffOctaveShift) {
       }
     }
     EXPECT_TRUE(found_cs) << "Countersubject notes should be placed for voice 0";
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Free counterpoint duration variety (selectDuration integration)
+// ---------------------------------------------------------------------------
+
+TEST(ExpositionTest, FreeCPDurationVariety) {
+  Subject subject = makeTestSubject();
+  Answer answer = makeTestAnswer(subject);
+  Countersubject counter = makeTestCountersubject(subject);
+  FugueConfig config = makeTestConfig(3);
+
+  // Try multiple seeds to find one with duration variety.
+  bool found_variety = false;
+  for (uint32_t seed = 1; seed <= 20; ++seed) {
+    Exposition expo = buildExposition(subject, answer, counter, config, seed);
+    Tick free_cp_start = subject.length_ticks * 2;
+    if (expo.voice_notes.count(0) == 0) continue;
+
+    std::set<Tick> distinct;
+    for (const auto& note : expo.voice_notes.at(0)) {
+      if (note.start_tick >= free_cp_start) {
+        distinct.insert(note.duration);
+      }
+    }
+    if (distinct.size() >= 3) {
+      found_variety = true;
+      break;
+    }
+  }
+  EXPECT_TRUE(found_variety)
+      << "At least one seed in 1-20 should produce 3+ distinct free CP durations";
+}
+
+TEST(ExpositionTest, FreeCPGapFilling) {
+  Subject subject = makeTestSubject();
+  Answer answer = makeTestAnswer(subject);
+  Countersubject counter = makeTestCountersubject(subject);
+  FugueConfig config = makeTestConfig(3);
+
+  Exposition expo = buildExposition(subject, answer, counter, config, 42);
+  Tick free_cp_start = subject.length_ticks * 2;
+  Tick entry_interval = subject.length_ticks;
+
+  if (expo.voice_notes.count(0) > 0) {
+    Tick total_dur = 0;
+    for (const auto& note : expo.voice_notes.at(0)) {
+      if (note.start_tick >= free_cp_start &&
+          note.start_tick < free_cp_start + entry_interval) {
+        total_dur += note.duration;
+      }
+    }
+    // Free CP should fill the entire entry interval (no gaps).
+    EXPECT_EQ(total_dur, entry_interval)
+        << "Free counterpoint total duration should equal entry interval";
   }
 }
 

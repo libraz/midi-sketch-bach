@@ -5,6 +5,7 @@
 
 #include <cstdint>
 #include <cstddef>
+#include <string>
 
 namespace bach {
 
@@ -84,6 +85,32 @@ enum class BachTransformStep : uint8_t {
   OctaveAdjust,   // Octave transposition
   KeyTranspose    // Key transposition at output
 };
+
+/// @brief Bit flags recording which post-processing steps modified a note.
+/// Multiple flags can be combined via bitwise OR.
+enum class NoteModifiedBy : uint8_t {
+  None             = 0,
+  ParallelRepair   = 1 << 0,  // Parallel 5th/8ve repair
+  ChordToneSnap    = 1 << 1,  // Chord tone / diatonic snap
+  LeapResolution   = 1 << 2,  // Leap resolution (contrary step)
+  OverlapTrim      = 1 << 3,  // Duration trim
+  OctaveAdjust     = 1 << 4,  // Octave shift / register clamp / crossing fix
+  Articulation     = 1 << 5,  // Articulation / breath
+  RepeatedNoteRep  = 1 << 6,  // Repeated note repair
+};
+
+inline NoteModifiedBy operator|(NoteModifiedBy a, NoteModifiedBy b) {
+  return static_cast<NoteModifiedBy>(static_cast<uint8_t>(a) | static_cast<uint8_t>(b));
+}
+inline NoteModifiedBy& operator|=(NoteModifiedBy& a, NoteModifiedBy b) {
+  a = a | b;
+  return a;
+}
+
+/// @brief Convert NoteModifiedBy bit flags to comma-separated string.
+/// @param flags Raw uint8_t flags value.
+/// @return Comma-separated string (e.g. "parallel_repair,octave_adjust"), or "none".
+std::string noteModifiedByToString(uint8_t flags);
 
 /// @brief Convert BachTransformStep to human-readable string.
 /// @param step The transform step enum value.
