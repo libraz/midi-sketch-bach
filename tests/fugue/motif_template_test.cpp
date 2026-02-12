@@ -232,4 +232,40 @@ TEST(MotifTemplateTest, DefaultIndexIsZero) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// NoteFunction tags
+// ---------------------------------------------------------------------------
+
+TEST(MotifTemplateTest, FunctionsMatchDegreeOffsets) {
+  SubjectCharacter characters[] = {
+      SubjectCharacter::Severe, SubjectCharacter::Playful,
+      SubjectCharacter::Noble, SubjectCharacter::Restless};
+  for (auto character : characters) {
+    for (uint32_t idx = 0; idx < 4; ++idx) {
+      auto [mot_a, mot_b] = motifTemplatesForCharacter(character, idx);
+      EXPECT_EQ(mot_a.functions.size(), mot_a.degree_offsets.size())
+          << "character=" << static_cast<int>(character) << " idx=" << idx
+          << " motif_a";
+      EXPECT_EQ(mot_b.functions.size(), mot_b.degree_offsets.size())
+          << "character=" << static_cast<int>(character) << " idx=" << idx
+          << " motif_b";
+    }
+  }
+}
+
+TEST(MotifTemplateTest, AllFunctionsNonEmpty) {
+  SubjectCharacter characters[] = {
+      SubjectCharacter::Severe, SubjectCharacter::Playful,
+      SubjectCharacter::Noble, SubjectCharacter::Restless};
+  for (auto character : characters) {
+    for (uint32_t idx = 0; idx < 4; ++idx) {
+      auto [mot_a, mot_b] = motifTemplatesForCharacter(character, idx);
+      EXPECT_FALSE(mot_a.functions.empty())
+          << "character=" << static_cast<int>(character) << " idx=" << idx;
+      EXPECT_FALSE(mot_b.functions.empty())
+          << "character=" << static_cast<int>(character) << " idx=" << idx;
+    }
+  }
+}
+
 }  // namespace bach

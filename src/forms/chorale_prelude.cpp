@@ -10,6 +10,9 @@
 #include "core/note_creator.h"
 #include "core/pitch_utils.h"
 #include "core/scale.h"
+#include "counterpoint/bach_rule_evaluator.h"
+#include "counterpoint/collision_resolver.h"
+#include "counterpoint/counterpoint_state.h"
 #include "harmony/chord_types.h"
 #include "harmony/harmonic_event.h"
 #include "harmony/harmonic_timeline.h"
@@ -154,6 +157,69 @@ Tick calculateChoraleDuration(const ChoraleMelody& melody) {
   return total;
 }
 
+/// @brief Create a HarmonicTimeline driven by cantus firmus pitches.
+///
+/// Each cantus note maps to a harmonic event using scale degree analysis.
+/// @param melody The chorale melody.
+/// @param key Key signature.
+/// @return A HarmonicTimeline with cantus-driven harmony.
+HarmonicTimeline createChoraleTimeline(const ChoraleMelody& melody,
+                                       const KeySignature& key) {
+  HarmonicTimeline timeline;
+  ScaleType scale_type = key.is_minor ? ScaleType::HarmonicMinor
+                                      : ScaleType::Major;
+  int bass_octave = 2;
+
+  std::vector<HarmonicEvent> events;
+  events.reserve(melody.note_count);
+
+  Tick current_tick = 0;
+  for (size_t idx = 0; idx < melody.note_count; ++idx) {
+    Tick dur = static_cast<Tick>(melody.notes[idx].duration_beats) * kTicksPerBeat;
+    uint8_t pitch = clampPitch(static_cast<int>(melody.notes[idx].pitch), 60, 79);
+
+    int degree = 0;
+    scale_util::pitchToScaleDegree(pitch, key.tonic, scale_type, degree);
+    ChordDegree chord_degree = scaleDegreeToChordDegree(degree, key.is_minor);
+
+    Chord chord;
+    chord.degree = chord_degree;
+    chord.quality = key.is_minor ? minorKeyQuality(chord_degree)
+                                 : majorKeyQuality(chord_degree);
+    if (key.is_minor && chord_degree == ChordDegree::V) {
+      chord.quality = ChordQuality::Major;
+    }
+
+    uint8_t semitone_offset = key.is_minor
+                                  ? degreeMinorSemitones(chord_degree)
+                                  : degreeSemitones(chord_degree);
+    int root_midi = (bass_octave + 1) * 12 +
+                    static_cast<int>(key.tonic) + semitone_offset;
+    chord.root_pitch = static_cast<uint8_t>(
+        root_midi > 127 ? 127 : (root_midi < 0 ? 0 : root_midi));
+
+    // Bass pitch from chord root (not raw cantus pitch — may be inverted).
+    uint8_t bass_pitch = chord.root_pitch;
+
+    HarmonicEvent event;
+    event.tick = current_tick;
+    event.end_tick = current_tick + dur;
+    event.key = key.tonic;
+    event.is_minor = key.is_minor;
+    event.chord = chord;
+    event.bass_pitch = bass_pitch;
+    event.weight = 1.0f;
+
+    events.push_back(event);
+    current_tick += dur;
+  }
+
+  for (const auto& ev : events) {
+    timeline.addEvent(ev);
+  }
+  return timeline;
+}
+
 /// @brief Place the cantus firmus notes onto the Swell track.
 ///
 /// The cantus is placed with long note values as specified in the melody.
@@ -168,8 +234,7 @@ void placeCantus(const ChoraleMelody& melody, Track& track) {
     uint8_t pitch = melody.notes[idx].pitch;
 
     // Cantus sits in the soprano register on Swell: ensure within range.
-    pitch = clampPitch(static_cast<int>(pitch), organ_range::kManual2Low,
-                       organ_range::kManual2High);
+    pitch = clampPitch(static_cast<int>(pitch), 60, 79);  // C4-G5 (cantus)
 
     NoteEvent note;
     note.start_tick = current_tick;
@@ -207,7 +272,7 @@ std::vector<NoteEvent> generateFiguration(Tick cantus_tick, Tick cantus_dur,
 
   // Counterpoint range: below cantus, in the tenor/alto region (C3-B4).
   constexpr uint8_t kFigLow = 48;
-  constexpr uint8_t kFigHigh = 71;
+  constexpr uint8_t kFigHigh = 67;  // G4 (narrower, avoid cantus overlap)
 
   ScaleType scale_type = key_sig.is_minor ? ScaleType::HarmonicMinor : ScaleType::Major;
 
@@ -383,9 +448,8 @@ ChoralePreludeResult generateChoralePrelude(const ChoralePreludeConfig& config) 
   }
   result.total_duration_ticks = total_duration;
 
-  // Step 3: Create harmonic timeline at beat resolution.
-  HarmonicTimeline timeline =
-      HarmonicTimeline::createStandard(config.key, total_duration, HarmonicResolution::Beat);
+  // Step 3: Create cantus-driven harmonic timeline.
+  HarmonicTimeline timeline = createChoraleTimeline(melody, config.key);
 
   // Step 4: Create tracks.
   std::vector<Track> tracks = createChoralePreludeTracks();
@@ -436,9 +500,88 @@ ChoralePreludeResult generateChoralePrelude(const ChoralePreludeConfig& config) 
     }
 
     std::vector<std::pair<uint8_t, uint8_t>> voice_ranges = {
-        {48, 71},  // Voice 0: Great figuration (C3-B4)
-        {organ_range::kManual2Low, organ_range::kManual2High},  // Voice 1: Swell (cantus)
+        {48, 67},  // Voice 0: Great figuration (C3-G4)
+        {60, 79},  // Voice 1: Swell cantus (C4-G5)
         {organ_range::kPedalLow, organ_range::kPedalHigh}};    // Voice 2: Pedal
+
+    // ---- createBachNote coordination pass ----
+    {
+      BachRuleEvaluator cp_rules(kChoraleVoices);
+      cp_rules.setFreeCounterpoint(true);
+      CollisionResolver cp_resolver;
+      CounterpointState cp_state;
+      cp_state.setKey(config.key.tonic);
+      for (uint8_t v = 0; v < kChoraleVoices; ++v) {
+        cp_state.registerVoice(v, voice_ranges[v].first, voice_ranges[v].second);
+      }
+
+      std::sort(all_notes.begin(), all_notes.end(),
+                [](const NoteEvent& a, const NoteEvent& b) {
+                  return a.start_tick < b.start_tick;
+                });
+
+      std::vector<NoteEvent> coordinated;
+      coordinated.reserve(all_notes.size());
+      int accepted_count = 0;
+      int total_count = 0;
+
+      size_t idx = 0;
+      while (idx < all_notes.size()) {
+        Tick current_tick = all_notes[idx].start_tick;
+        size_t group_end = idx;
+        while (group_end < all_notes.size() &&
+               all_notes[group_end].start_tick == current_tick) {
+          ++group_end;
+        }
+
+        // Priority: cantus (immutable) → pedal → figuration.
+        std::sort(all_notes.begin() + static_cast<ptrdiff_t>(idx),
+                  all_notes.begin() + static_cast<ptrdiff_t>(group_end),
+                  [](const NoteEvent& a, const NoteEvent& b) {
+                    // Cantus (voice 1) first, then pedal (voice 2), then figuration (voice 0).
+                    auto priority = [](const NoteEvent& n) -> int {
+                      if (n.source == BachNoteSource::CantusFixed) return 0;
+                      if (n.source == BachNoteSource::PedalPoint) return 1;
+                      return 2;
+                    };
+                    return priority(a) < priority(b);
+                  });
+
+        for (size_t j = idx; j < group_end; ++j) {
+          const auto& note = all_notes[j];
+          ++total_count;
+
+          // Cantus and pedal are immutable — register directly.
+          if (note.source == BachNoteSource::CantusFixed ||
+              note.source == BachNoteSource::PedalPoint) {
+            cp_state.addNote(note.voice, note);
+            coordinated.push_back(note);
+            ++accepted_count;
+            continue;
+          }
+
+          BachNoteOptions opts;
+          opts.voice = note.voice;
+          opts.desired_pitch = note.pitch;
+          opts.tick = note.start_tick;
+          opts.duration = note.duration;
+          opts.velocity = note.velocity;
+          opts.source = note.source;
+
+          auto result = createBachNote(&cp_state, &cp_rules, &cp_resolver, opts);
+          if (result.accepted) {
+            coordinated.push_back(result.note);
+            ++accepted_count;
+          }
+        }
+        idx = group_end;
+      }
+
+      fprintf(stderr, "[ChoralePrelude] createBachNote: accepted %d/%d (%.0f%%)\n",
+              accepted_count, total_count,
+              total_count > 0 ? 100.0 * accepted_count / total_count : 0.0);
+      all_notes = std::move(coordinated);
+    }
 
     PostValidateStats stats;
     auto validated = postValidateNotes(

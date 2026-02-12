@@ -12,6 +12,9 @@
 #include "core/pitch_utils.h"
 #include "core/rng_util.h"
 #include "core/scale.h"
+#include "counterpoint/bach_rule_evaluator.h"
+#include "counterpoint/collision_resolver.h"
+#include "counterpoint/counterpoint_state.h"
 #include "harmony/chord_types.h"
 #include "harmony/harmonic_event.h"
 #include "organ/organ_techniques.h"
@@ -73,14 +76,14 @@ std::vector<Track> createPassacagliaTracks(uint8_t num_voices) {
 /// @param voice_idx Voice index (0-based).
 /// @return Low MIDI pitch bound for the manual.
 uint8_t getVoiceLowPitch(uint8_t voice_idx) {
-  // Hierarchical voice ranges to prevent voice crossing.
-  // BWV 582 standard: soprano-alto ~12-15st separation, alto-tenor ~12st.
+  // Tightened voice ranges for minimal overlap (max ~16st soprano-alto,
+  // ~7st alto-tenor) while ensuring climax headroom in soprano.
   switch (voice_idx) {
-    case 0: return 53;                        // F3 — soprano (BWV 582 descends to F3)
-    case 1: return 48;                        // C3 — alto
-    case 2: return 40;                        // E2 — tenor
+    case 0: return 60;                        // C4 — soprano
+    case 1: return 55;                        // G3 — alto
+    case 2: return 48;                        // C3 — tenor
     case 3: return organ_range::kPedalLow;    // 24 (C1) — bass (unchanged)
-    default: return 53;
+    default: return 60;
   }
 }
 
@@ -88,13 +91,13 @@ uint8_t getVoiceLowPitch(uint8_t voice_idx) {
 /// @param voice_idx Voice index (0-based).
 /// @return High MIDI pitch bound for the manual.
 uint8_t getVoiceHighPitch(uint8_t voice_idx) {
-  // Hierarchical voice ranges — matches getVoiceLowPitch().
+  // Tightened voice ranges — matches getVoiceLowPitch().
   switch (voice_idx) {
-    case 0: return 96;                        // C6 — soprano
-    case 1: return 79;                        // G5 — alto
-    case 2: return 67;                        // G4 — tenor
+    case 0: return 88;                        // E6 — soprano
+    case 1: return 76;                        // E5 — alto
+    case 2: return 69;                        // A4 — tenor
     case 3: return organ_range::kPedalHigh;   // 50 (D3) — bass (unchanged)
-    default: return 96;
+    default: return 88;
   }
 }
 
@@ -377,19 +380,37 @@ std::vector<NoteEvent> generateDevelopEarlyVariation(Tick start_tick, int bars,
   uint8_t low_pitch = getVoiceLowPitch(voice_idx);
   uint8_t high_pitch = getVoiceHighPitch(voice_idx);
 
+  Tick end_tick = start_tick + static_cast<Tick>(bars) * kTicksPerBar;
+  Tick current_tick = start_tick;
+
+  // Initial scale tones for starting position.
   const HarmonicEvent& first_event = timeline.getAt(start_tick);
   auto scale_tones = getScaleTones(first_event.key, first_event.is_minor,
                                    low_pitch, high_pitch);
   if (scale_tones.empty()) return notes;
-
-  Tick end_tick = start_tick + static_cast<Tick>(bars) * kTicksPerBar;
-  Tick current_tick = start_tick;
 
   // Start roughly in the middle of the scale range.
   size_t tone_idx = scale_tones.size() / 2;
   bool ascending = rng::rollProbability(rng, 0.5f);
 
   while (current_tick < end_tick) {
+    // Re-acquire scale tones per beat from timeline (harmony may change).
+    const HarmonicEvent& event = timeline.getAt(current_tick);
+    auto new_tones = getScaleTones(event.key, event.is_minor,
+                                   low_pitch, high_pitch);
+    if (new_tones.empty()) { current_tick += kEighthNote; continue; }
+
+    // Re-map position if scale changed.
+    if (new_tones != scale_tones) {
+      uint8_t prev_pitch = scale_tones.empty() ? 0 : scale_tones[tone_idx];
+      scale_tones = std::move(new_tones);
+      if (!notes.empty()) {
+        tone_idx = findClosestToneIndex(scale_tones, notes.back().pitch);
+      } else {
+        tone_idx = findClosestToneIndex(scale_tones, prev_pitch);
+      }
+    }
+
     Tick dur = kEighthNote;
     Tick remaining = end_tick - current_tick;
     if (dur > remaining) dur = remaining;
@@ -556,19 +577,37 @@ std::vector<NoteEvent> generateAccumulateVariation(Tick start_tick, int bars,
   uint8_t low_pitch = getVoiceLowPitch(voice_idx);
   uint8_t high_pitch = getVoiceHighPitch(voice_idx);
 
+  Tick end_tick = start_tick + static_cast<Tick>(bars) * kTicksPerBar;
+  Tick current_tick = start_tick;
+
+  // Initial scale tones for starting position.
   const HarmonicEvent& first_event = timeline.getAt(start_tick);
   auto scale_tones = getScaleTones(first_event.key, first_event.is_minor,
                                    low_pitch, high_pitch);
   if (scale_tones.empty()) return notes;
-
-  Tick end_tick = start_tick + static_cast<Tick>(bars) * kTicksPerBar;
-  Tick current_tick = start_tick;
 
   // Start in the upper portion of the range for intensity.
   size_t tone_idx = scale_tones.size() * 2 / 3;
   bool ascending = rng::rollProbability(rng, 0.5f);
 
   while (current_tick < end_tick) {
+    // Re-acquire scale tones per beat from timeline (harmony may change).
+    const HarmonicEvent& event = timeline.getAt(current_tick);
+    auto new_tones = getScaleTones(event.key, event.is_minor,
+                                   low_pitch, high_pitch);
+    if (new_tones.empty()) { current_tick += kSixteenthNote; continue; }
+
+    // Re-map position if scale changed.
+    if (new_tones != scale_tones) {
+      uint8_t prev_pitch = scale_tones.empty() ? 0 : scale_tones[tone_idx];
+      scale_tones = std::move(new_tones);
+      if (!notes.empty()) {
+        tone_idx = findClosestToneIndex(scale_tones, notes.back().pitch);
+      } else {
+        tone_idx = findClosestToneIndex(scale_tones, prev_pitch);
+      }
+    }
+
     Tick dur = kSixteenthNote;
     Tick remaining = end_tick - current_tick;
     if (dur > remaining) dur = remaining;
@@ -675,6 +714,81 @@ uint8_t clampVoiceCount(uint8_t num_voices) {
   return num_voices;
 }
 
+/// Create a HarmonicTimeline derived from the ground bass pitches.
+/// Each bass note maps to one bar of harmony, repeated for all variations.
+/// @param ground_bass The immutable ground bass note sequence.
+/// @param key Key signature.
+/// @param num_variations Number of variations.
+/// @return A HarmonicTimeline with bar-level resolution driven by the bass.
+HarmonicTimeline createPassacagliaTimeline(
+    const std::vector<NoteEvent>& ground_bass,
+    const KeySignature& key,
+    int num_variations) {
+  HarmonicTimeline timeline;
+  ScaleType scale_type = key.is_minor ? ScaleType::HarmonicMinor
+                                      : ScaleType::Major;
+  int bass_octave = 2;  // Bass pitch octave for chord construction.
+
+  // Build one variation's worth of harmonic events from ground bass.
+  std::vector<HarmonicEvent> var_template;
+  var_template.reserve(ground_bass.size());
+
+  for (const auto& bass_note : ground_bass) {
+    int degree = 0;  // Default to tonic for non-diatonic pitches.
+    scale_util::pitchToScaleDegree(bass_note.pitch, key.tonic, scale_type,
+                                   degree);
+    ChordDegree chord_degree = scaleDegreeToChordDegree(degree, key.is_minor);
+
+    // Build chord from degree.
+    Chord chord;
+    chord.degree = chord_degree;
+    chord.quality = key.is_minor ? minorKeyQuality(chord_degree)
+                                 : majorKeyQuality(chord_degree);
+
+    // Force V to Major quality in minor keys (harmonic minor convention).
+    if (key.is_minor && chord_degree == ChordDegree::V) {
+      chord.quality = ChordQuality::Major;
+    }
+
+    uint8_t semitone_offset = key.is_minor
+                                  ? degreeMinorSemitones(chord_degree)
+                                  : degreeSemitones(chord_degree);
+    int root_midi = (bass_octave + 1) * 12 +
+                    static_cast<int>(key.tonic) + semitone_offset;
+    chord.root_pitch = static_cast<uint8_t>(
+        root_midi > 127 ? 127 : (root_midi < 0 ? 0 : root_midi));
+
+    HarmonicEvent event;
+    event.tick = bass_note.start_tick;
+    event.end_tick = bass_note.start_tick + bass_note.duration;
+    event.key = key.tonic;
+    event.is_minor = key.is_minor;
+    event.chord = chord;
+    event.bass_pitch = bass_note.pitch;
+    event.weight = 1.0f;
+
+    var_template.push_back(event);
+  }
+
+  // Replicate the template for each variation with time offset.
+  Tick variation_duration = ground_bass.empty()
+                                ? 0
+                                : ground_bass.back().start_tick +
+                                      ground_bass.back().duration;
+
+  for (int var_idx = 0; var_idx < num_variations; ++var_idx) {
+    Tick offset = static_cast<Tick>(var_idx) * variation_duration;
+    for (const auto& tmpl : var_template) {
+      HarmonicEvent event = tmpl;
+      event.tick = tmpl.tick + offset;
+      event.end_tick = tmpl.end_tick + offset;
+      timeline.addEvent(event);
+    }
+  }
+
+  return timeline;
+}
+
 }  // namespace
 
 // ---------------------------------------------------------------------------
@@ -699,6 +813,7 @@ std::vector<NoteEvent> generatePassacagliaGroundBass(const KeySignature& key,
     note.duration = kWholeNote;
     note.pitch = pitches[static_cast<size_t>(idx)];
     note.velocity = kOrganVelocity;
+    // TODO: ground bass voice index should be injected, not hardcoded.
     note.voice = 3;  // Pedal voice.
     note.source = BachNoteSource::GroundBass;
     notes.push_back(note);
@@ -736,36 +851,70 @@ PassacagliaResult generatePassacaglia(const PassacagliaConfig& config) {
   Tick total_duration =
       static_cast<Tick>(config.num_variations) * variation_duration;
 
-  // Step 2: Create harmonic timeline spanning all variations.
-  HarmonicTimeline timeline = HarmonicTimeline::createStandard(
-      config.key, total_duration, HarmonicResolution::Beat);
+  // Step 2: Create bass-driven harmonic timeline (1 chord per bar, derived
+  // from ground bass pitches via scale degree → chord degree mapping).
+  HarmonicTimeline timeline = createPassacagliaTimeline(
+      ground_bass, config.key, config.num_variations);
 
   // Step 3: Create tracks.
   std::vector<Track> tracks = createPassacagliaTracks(num_voices);
 
-  // Step 4: For each variation, place ground bass and generate upper voices.
+  // Step 4: For each variation, place ground bass and generate upper voices
+  // through createBachNote() for vertical coordination.
+  uint8_t pedal_track_idx = static_cast<uint8_t>(num_voices - 1);
+
+  // Shared counterpoint infrastructure (one evaluator/resolver for all variations).
+  BachRuleEvaluator cp_rules(num_voices);
+  cp_rules.setFreeCounterpoint(true);  // Allow weak-beat non-harmonic tones.
+  CollisionResolver cp_resolver;
+
   for (int var_idx = 0; var_idx < config.num_variations; ++var_idx) {
     Tick var_start = static_cast<Tick>(var_idx) * variation_duration;
 
-    // Place ground bass (immutable, identical in every variation).
-    // The pedal track is the last track (index num_voices - 1) which maps to
-    // channel 3 for 4-voice setup, but we always use the track that has
-    // channel 3 (Pedal). For standard 4-voice, that is track index 3.
-    uint8_t pedal_track_idx = static_cast<uint8_t>(num_voices - 1);
+    // Fresh CounterpointState per variation (resets voice interactions).
+    CounterpointState cp_state;
+    cp_state.setKey(config.key.tonic);
+    for (uint8_t v = 0; v < num_voices; ++v) {
+      cp_state.registerVoice(v, getVoiceLowPitch(v), getVoiceHighPitch(v));
+    }
+
+    // Place ground bass as immutable (register in cp_state for coordination).
     for (const auto& bass_note : ground_bass) {
       NoteEvent shifted_note = bass_note;
       shifted_note.start_tick = var_start + bass_note.start_tick;
+      shifted_note.voice = pedal_track_idx;
+      cp_state.addNote(pedal_track_idx, shifted_note);
       tracks[pedal_track_idx].notes.push_back(shifted_note);
     }
 
-    // Generate upper voices (all tracks except pedal).
+    // Generate upper voices through createBachNote for vertical coordination.
     for (uint8_t voice_idx = 0; voice_idx < num_voices - 1; ++voice_idx) {
-      auto var_notes = generateVariationNotes(
+      auto raw_notes = generateVariationNotes(
           var_idx, var_start, config.ground_bass_bars, voice_idx, timeline, rng);
-      for (auto& note : var_notes) {
-        tracks[voice_idx].notes.push_back(note);
+
+      uint8_t prev_pitch = 0;
+      for (const auto& note : raw_notes) {
+        BachNoteOptions opts;
+        opts.voice = voice_idx;
+        opts.desired_pitch = note.pitch;
+        opts.tick = note.start_tick;
+        opts.duration = note.duration;
+        opts.velocity = note.velocity;
+        opts.source = note.source;
+        if (prev_pitch > 0) {
+          opts.prev_pitches[0] = prev_pitch;
+          opts.prev_count = 1;
+        }
+
+        auto result_note = createBachNote(&cp_state, &cp_rules, &cp_resolver,
+                                          opts);
+        if (result_note.accepted) {
+          tracks[voice_idx].notes.push_back(result_note.note);
+          prev_pitch = result_note.final_pitch;
+        }
       }
     }
+    // cp_state is destroyed at scope end (variation boundary reset).
   }
 
   // Step 5: Post-validate through counterpoint engine.

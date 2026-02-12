@@ -322,28 +322,28 @@ TEST(FantasiaTest, AllNotesInRange) {
   ASSERT_TRUE(result.success);
   ASSERT_EQ(result.tracks.size(), 4u);
 
-  // Voice 0 (Manual I): 36-96.
+  // Voice 0 (Melody): 67-88.
   for (const auto& note : result.tracks[0].notes) {
-    EXPECT_GE(note.pitch, organ_range::kManual1Low)
-        << "Manual I pitch below range: " << static_cast<int>(note.pitch);
-    EXPECT_LE(note.pitch, organ_range::kManual1High)
-        << "Manual I pitch above range: " << static_cast<int>(note.pitch);
+    EXPECT_GE(note.pitch, 67)
+        << "Melody pitch below range: " << static_cast<int>(note.pitch);
+    EXPECT_LE(note.pitch, 88)
+        << "Melody pitch above range: " << static_cast<int>(note.pitch);
   }
 
-  // Voice 1 (Manual II): 36-96.
+  // Voice 1 (Chords): 52-76.
   for (const auto& note : result.tracks[1].notes) {
-    EXPECT_GE(note.pitch, organ_range::kManual2Low)
-        << "Manual II pitch below range: " << static_cast<int>(note.pitch);
-    EXPECT_LE(note.pitch, organ_range::kManual2High)
-        << "Manual II pitch above range: " << static_cast<int>(note.pitch);
+    EXPECT_GE(note.pitch, 52)
+        << "Chords pitch below range: " << static_cast<int>(note.pitch);
+    EXPECT_LE(note.pitch, 76)
+        << "Chords pitch above range: " << static_cast<int>(note.pitch);
   }
 
-  // Voice 2 (Manual III): 48-96.
+  // Voice 2 (Counter): 43-64.
   for (const auto& note : result.tracks[2].notes) {
-    EXPECT_GE(note.pitch, organ_range::kManual3Low)
-        << "Manual III pitch below range: " << static_cast<int>(note.pitch);
-    EXPECT_LE(note.pitch, organ_range::kManual3High)
-        << "Manual III pitch above range: " << static_cast<int>(note.pitch);
+    EXPECT_GE(note.pitch, 43)
+        << "Counter pitch below range: " << static_cast<int>(note.pitch);
+    EXPECT_LE(note.pitch, 64)
+        << "Counter pitch above range: " << static_cast<int>(note.pitch);
   }
 
   // Voice 3 (Pedal): 24-50.

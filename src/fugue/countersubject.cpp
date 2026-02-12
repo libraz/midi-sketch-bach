@@ -13,6 +13,7 @@
 #include "core/pitch_utils.h"
 #include "core/rng_util.h"
 #include "core/scale.h"
+#include "fugue/archetype_policy.h"
 #include "fugue/fugue_config.h"
 
 namespace bach {
@@ -101,6 +102,33 @@ CSCharacterParams getCSParams(SubjectCharacter character, std::mt19937& rng) {
       params.long_split_prob + rng::rollFloat(rng, -0.05f, 0.05f), 0.0f, 1.0f);
 
   return params;
+}
+
+/// @brief Apply archetype-specific constraints to countersubject params.
+void applyArchetypeToCSParams(CSCharacterParams& params,
+                               const ArchetypePolicy& policy) {
+  // Cantabile: smoother melodic flow — reduce leaps, constrain range.
+  if (policy.min_step_ratio > 0.5f) {
+    params.leap_prob = std::min(params.leap_prob, 1.0f - policy.min_step_ratio);
+  }
+  if (policy.max_sixteenth_density < 0.3f) {
+    params.long_split_prob = std::min(params.long_split_prob, 0.5f);
+  }
+
+  // Compact: more fragmentable motifs — encourage shorter note values.
+  if (policy.require_fragmentable) {
+    params.long_split_prob = std::max(params.long_split_prob, 0.65f);
+  }
+
+  // Invertible: keep range moderate for double counterpoint at the octave.
+  if (policy.require_invertible) {
+    params.max_range = std::min(params.max_range, 12);
+  }
+
+  // Chromatic: stepwise CS for harmonic grounding against chromatic subject.
+  if (policy.require_functional_resolution) {
+    params.leap_prob = std::min(params.leap_prob, 0.15f);
+  }
 }
 
 /// @brief Minimum pitch for countersubject voices (C3).
@@ -431,6 +459,25 @@ float validateConsonanceRate(const std::vector<NoteEvent>& cs_notes,
          static_cast<float>(strong_beat_checks);
 }
 
+/// @brief Detect if the subject is in a chromatic run at the given index.
+/// A chromatic run = 3+ consecutive notes where each interval is 1 semitone
+/// AND at least one pitch is non-diatonic (NaturalMinor/Major).
+bool inChromaticRun(const Subject& subject, size_t idx,
+                    Key key, ScaleType base_scale) {
+  if (idx + 2 >= subject.notes.size()) return false;
+  for (size_t i = idx; i < idx + 2; ++i) {
+    int iv = std::abs(directedInterval(
+        subject.notes[i].pitch, subject.notes[i + 1].pitch));
+    if (iv != 1) return false;
+  }
+  // At least one non-diatonic pitch in the run.
+  for (size_t i = idx; i <= idx + 2; ++i) {
+    if (!scale_util::isScaleTone(subject.notes[i].pitch, key, base_scale))
+      return true;
+  }
+  return false;  // All diatonic (e.g. E-F-E) → not a chromatic run.
+}
+
 /// @brief Generate a single attempt at a countersubject.
 ///
 /// Walks through the subject notes, generating countersubject notes with
@@ -443,11 +490,14 @@ float validateConsonanceRate(const std::vector<NoteEvent>& cs_notes,
 /// @param key Musical key for diatonic enforcement.
 /// @param scale Scale type for diatonic enforcement.
 /// @param gen Seeded random number generator.
+/// @param enforce_chromatic_contrary If true, force contrary stepwise motion
+///        during chromatic runs in the subject.
 /// @return Vector of generated countersubject notes.
 std::vector<NoteEvent> generateCSAttempt(const Subject& subject,
                                          const CSCharacterParams& params,
                                          Key key, ScaleType scale,
-                                         std::mt19937& gen) {
+                                         std::mt19937& gen,
+                                         bool enforce_chromatic_contrary = false) {
   if (subject.notes.empty()) return {};
 
   std::vector<NoteEvent> result;
@@ -489,16 +539,29 @@ std::vector<NoteEvent> generateCSAttempt(const Subject& subject,
     }
 
     // Determine motion direction (contrary to subject).
-    int cs_direction = contraryDirection(subj_direction, gen);
+    // During chromatic runs: deterministic contrary + stepwise forced.
+    ScaleType base_scale = subject.is_minor ? ScaleType::NaturalMinor
+                                            : ScaleType::Major;
+    bool in_chromatic = false;
+    if (enforce_chromatic_contrary) {
+      in_chromatic = inChromaticRun(subject, subj_idx, key, base_scale);
+    }
 
-    // Move the countersubject pitch.
+    int cs_direction;
     uint8_t next_pitch;
-    if (rng::rollProbability(gen, params.leap_prob)) {
-      next_pitch = leapMotion(current_pitch, cs_direction,
-                              kCSPitchLow, kCSPitchHigh, key, scale, gen);
-    } else {
+    if (in_chromatic && subj_direction != 0) {
+      cs_direction = (subj_direction > 0) ? -1 : 1;
       next_pitch = stepMotion(current_pitch, cs_direction,
                               kCSPitchLow, kCSPitchHigh, key, scale);
+    } else {
+      cs_direction = contraryDirection(subj_direction, gen);
+      if (rng::rollProbability(gen, params.leap_prob)) {
+        next_pitch = leapMotion(current_pitch, cs_direction,
+                                kCSPitchLow, kCSPitchHigh, key, scale, gen);
+      } else {
+        next_pitch = stepMotion(current_pitch, cs_direction,
+                                kCSPitchLow, kCSPitchHigh, key, scale);
+      }
     }
 
     // Check for parallel 5ths/octaves against previous note pair.
@@ -570,6 +633,95 @@ std::vector<NoteEvent> generateCSAttempt(const Subject& subject,
   return result;
 }
 
+/// @brief Find the subject pitch sounding at a given tick.
+uint8_t findSubjectPitchAt(const Subject& subject, Tick tick) {
+  for (const auto& note : subject.notes) {
+    Tick end = note.start_tick + note.duration;
+    if (note.start_tick <= tick && end > tick) return note.pitch;
+  }
+  return subject.notes.empty() ? 60 : subject.notes.back().pitch;
+}
+
+/// @brief Insert chromatic passing tones on weak beats between whole-tone
+///        diatonic steps in the countersubject.
+void insertCSChromaticPassingTones(std::vector<NoteEvent>& cs_notes,
+                                   Key key, ScaleType scale,
+                                   int max_insertions) {
+  if (cs_notes.size() < 2 || max_insertions <= 0) return;
+
+  int insertions = 0;
+  // Reverse iterate so insertions don't invalidate earlier indices.
+  for (int idx = static_cast<int>(cs_notes.size()) - 2; idx >= 0; --idx) {
+    if (insertions >= max_insertions) break;
+
+    auto& curr = cs_notes[static_cast<size_t>(idx)];
+    const auto& next = cs_notes[static_cast<size_t>(idx) + 1];
+
+    // Condition 1: both notes diatonic.
+    if (!scale_util::isScaleTone(curr.pitch, key, scale)) continue;
+    if (!scale_util::isScaleTone(next.pitch, key, scale)) continue;
+
+    // Condition 2: interval = exactly whole tone (2 semitones).
+    int interval = directedInterval(curr.pitch, next.pitch);
+    if (std::abs(interval) != 2) continue;
+
+    // Condition 3: intermediate pitch is non-diatonic.
+    uint8_t mid_pitch = static_cast<uint8_t>(
+        static_cast<int>(curr.pitch) + (interval > 0 ? 1 : -1));
+    if (scale_util::isScaleTone(mid_pitch, key, scale)) continue;
+
+    // Condition 4: duration >= eighth note.
+    if (curr.duration < kEighthNote) continue;
+
+    // Condition 5: contiguous (no gap or overlap).
+    if (curr.start_tick + curr.duration != next.start_tick) continue;
+
+    // Condition 6: passing tone position must land on a weak beat.
+    Tick half = curr.duration / 2;
+    uint8_t passing_beat = beatInBar(curr.start_tick + half);
+    if (passing_beat != 1 && passing_beat != 3) continue;
+
+    NoteEvent passing;
+    passing.start_tick = curr.start_tick + half;
+    passing.duration = half;
+    passing.pitch = mid_pitch;
+    passing.velocity = curr.velocity;
+    passing.voice = curr.voice;
+    passing.source = BachNoteSource::ChromaticPassing;
+
+    curr.duration = half;
+
+    cs_notes.insert(cs_notes.begin() + idx + 1, passing);
+    insertions++;
+  }
+}
+
+/// @brief Snap strong-beat notes back to consonance with the subject.
+///        Skips ChromaticPassing notes (which are on weak beats).
+void snapStrongBeatConsonance(std::vector<NoteEvent>& cs_notes,
+                              const Subject& subject,
+                              Key key, ScaleType scale,
+                              std::mt19937& gen) {
+  for (size_t i = 0; i < cs_notes.size(); ++i) {
+    auto& note = cs_notes[i];
+    if (note.source == BachNoteSource::ChromaticPassing) continue;
+    // Skip if the next note is a passing tone (preserve stepwise approach).
+    if (i + 1 < cs_notes.size() &&
+        cs_notes[i + 1].source == BachNoteSource::ChromaticPassing) continue;
+    uint8_t beat = beatInBar(note.start_tick);
+    if (beat != 0 && beat != 2) continue;
+    uint8_t subj_pitch = findSubjectPitchAt(subject, note.start_tick);
+    if (isConsonant(note.pitch, subj_pitch)) continue;
+    int dir = (static_cast<int>(note.pitch) >= static_cast<int>(subj_pitch))
+                  ? 1 : -1;
+    uint8_t fixed = findConsonantPitch(
+        subj_pitch, dir, kCSPitchLow, kCSPitchHigh, key, scale, gen);
+    if (absoluteInterval(fixed, note.pitch) <= interval::kPerfect5th) {
+      note.pitch = fixed;
+    }
+  }
+}
+
 }  // namespace
 
 // ---------------------------------------------------------------------------
@@ -578,7 +730,8 @@ std::vector<NoteEvent> generateCSAttempt(const Subject& subject,
 
 Countersubject generateCountersubject(const Subject& subject,
                                        uint32_t seed,
-                                       int max_retries) {
+                                       int max_retries,
+                                       FugueArchetype archetype) {
   if (subject.notes.empty()) {
     Countersubject empty;
     empty.key = subject.key;
@@ -598,15 +751,28 @@ Countersubject generateCountersubject(const Subject& subject,
 
     // Per-attempt RNG variation on character params.
     CSCharacterParams params = getCSParams(subject.character, gen);
+    const ArchetypePolicy& policy = getArchetypePolicy(archetype);
+    applyArchetypeToCSParams(params, policy);
 
+    bool enforce_chromatic_contrary = policy.require_functional_resolution;
     std::vector<NoteEvent> cs_notes =
-        generateCSAttempt(subject, params, subject.key, scale, gen);
+        generateCSAttempt(subject, params, subject.key, scale, gen,
+                          enforce_chromatic_contrary);
+
+    if (policy.require_functional_resolution) {
+      int max_chromatic = policy.max_consecutive_chromatic / 2;
+      insertCSChromaticPassingTones(cs_notes, subject.key, scale,
+                                    max_chromatic);
+      snapStrongBeatConsonance(cs_notes, subject, subject.key, scale, gen);
+    }
+
     float score = validateConsonanceRate(cs_notes, subject);
 
     // Check invertibility at the octave: inverted consonance must be >= 60%.
     float inverted_score = validateInvertedConsonanceRate(cs_notes, subject);
-    // Combine: weight original 70% and inverted 30% for a composite score.
-    float composite = score * 0.7f + inverted_score * 0.3f;
+    // Invertible archetype: weight inverted quality more heavily.
+    float inv_weight = policy.require_invertible ? 0.45f : 0.30f;
+    float composite = score * (1.0f - inv_weight) + inverted_score * inv_weight;
 
     if (composite > best_score) {
       best_score = composite;
@@ -623,7 +789,8 @@ Countersubject generateCountersubject(const Subject& subject,
 Countersubject generateSecondCountersubject(const Subject& subject,
                                              const Countersubject& first_cs,
                                              uint32_t seed,
-                                             int max_retries) {
+                                             int max_retries,
+                                             FugueArchetype archetype) {
   if (subject.notes.empty()) {
     Countersubject empty;
     empty.key = subject.key;
@@ -665,10 +832,21 @@ Countersubject generateSecondCountersubject(const Subject& subject,
     CSCharacterParams params = getCSParams(subject.character, gen);
     params.leap_prob = std::min(params.leap_prob + 0.10f, 0.60f);
     params.max_range = std::min(params.max_range + 2, 16);
+    const ArchetypePolicy& policy2 = getArchetypePolicy(archetype);
+    applyArchetypeToCSParams(params, policy2);
 
     // Generate a CS attempt against the subject.
+    bool enforce_chromatic_contrary2 = policy2.require_functional_resolution;
     std::vector<NoteEvent> cs2_notes =
-        generateCSAttempt(subject, params, subject.key, scale, gen);
+        generateCSAttempt(subject, params, subject.key, scale, gen,
+                          enforce_chromatic_contrary2);
+
+    if (policy2.require_functional_resolution) {
+      int max_chromatic2 = policy2.max_consecutive_chromatic / 2;
+      insertCSChromaticPassingTones(cs2_notes, subject.key, scale,
+                                    max_chromatic2);
+      snapStrongBeatConsonance(cs2_notes, subject, subject.key, scale, gen);
+    }
 
     // Shift register: if CS1 is above, push CS2 down by an octave offset;
     // otherwise push CS2 up. Snap to scale to preserve diatonic membership.

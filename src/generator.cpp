@@ -599,7 +599,8 @@ GeneratorResult generate(const GeneratorConfig& config) {
       pconfig.key = effective_config.key;
       pconfig.bpm = effective_config.bpm;
       pconfig.seed = effective_config.seed;
-      pconfig.num_voices = effective_config.num_voices;
+      // Passacaglia requires at least 4 voices (3 manuals + pedal).
+      pconfig.num_voices = std::max(effective_config.num_voices, static_cast<uint8_t>(4));
 
       PassacagliaResult pass_result = generatePassacaglia(pconfig);
       if (!pass_result.success) {

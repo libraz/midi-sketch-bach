@@ -52,9 +52,9 @@ struct Countersubject {
 /// @param seed Random seed for deterministic generation.
 /// @param max_retries Maximum generation attempts (default 5).
 /// @return Generated Countersubject.
-Countersubject generateCountersubject(const Subject& subject,
-                                       uint32_t seed,
-                                       int max_retries = 5);
+Countersubject generateCountersubject(
+    const Subject& subject, uint32_t seed, int max_retries = 5,
+    FugueArchetype archetype = FugueArchetype::Compact);
 
 /// @brief Generate a second countersubject for 4+ voice fugues.
 ///
@@ -71,10 +71,10 @@ Countersubject generateCountersubject(const Subject& subject,
 /// @param seed Random seed for deterministic generation.
 /// @param max_retries Maximum generation attempts (default 5).
 /// @return Generated second Countersubject.
-Countersubject generateSecondCountersubject(const Subject& subject,
-                                             const Countersubject& first_cs,
-                                             uint32_t seed,
-                                             int max_retries = 5);
+Countersubject generateSecondCountersubject(
+    const Subject& subject, const Countersubject& first_cs,
+    uint32_t seed, int max_retries = 5,
+    FugueArchetype archetype = FugueArchetype::Compact);
 
 }  // namespace bach
 

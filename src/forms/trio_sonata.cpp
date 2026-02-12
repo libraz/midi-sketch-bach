@@ -15,6 +15,9 @@
 #include "core/pitch_utils.h"
 #include "core/rng_util.h"
 #include "core/scale.h"
+#include "counterpoint/bach_rule_evaluator.h"
+#include "counterpoint/collision_resolver.h"
+#include "counterpoint/counterpoint_state.h"
 #include "counterpoint/species_rules.h"
 #include "harmony/chord_tone_utils.h"
 #include "harmony/chord_types.h"
@@ -50,9 +53,9 @@ constexpr Tick kPhraseBars = 4;
 constexpr Tick kPhraseTicks = kPhraseBars * kTicksPerBar;  // 7680
 
 /// @brief Right hand register bounds.
-constexpr uint8_t kRhLow = 60;
+constexpr uint8_t kRhLow = 64;
 constexpr uint8_t kRhHigh = 84;
-constexpr uint8_t kRhCenter = 72;
+constexpr uint8_t kRhCenter = 74;
 
 /// @brief Left hand register bounds.
 constexpr uint8_t kLhLow = 48;
@@ -1682,6 +1685,80 @@ TrioSonataMovement generateMovement(const KeySignature& key_sig, Tick num_bars,
       } else if (n.source == BachNoteSource::Unknown) {
         n.source = BachNoteSource::FreeCounterpoint;
       }
+    }
+
+    // ---- createBachNote coordination pass ----
+    {
+      BachRuleEvaluator cp_rules(kTrioVoiceCount);
+      cp_rules.setFreeCounterpoint(true);
+      CollisionResolver cp_resolver;
+      CounterpointState cp_state;
+      cp_state.setKey(key_sig.tonic);
+      for (uint8_t v = 0; v < kTrioVoiceCount; ++v) {
+        cp_state.registerVoice(v, voice_ranges[v].first, voice_ranges[v].second);
+      }
+
+      std::sort(all_notes.begin(), all_notes.end(),
+                [](const NoteEvent& a, const NoteEvent& b) {
+                  return a.start_tick < b.start_tick;
+                });
+
+      std::vector<NoteEvent> coordinated;
+      coordinated.reserve(all_notes.size());
+      int accepted_count = 0;
+      int total_count = 0;
+
+      size_t idx = 0;
+      while (idx < all_notes.size()) {
+        Tick current_tick = all_notes[idx].start_tick;
+        size_t group_end = idx;
+        while (group_end < all_notes.size() &&
+               all_notes[group_end].start_tick == current_tick) {
+          ++group_end;
+        }
+
+        // Priority: pedal (immutable) → LH → RH.
+        std::sort(all_notes.begin() + static_cast<ptrdiff_t>(idx),
+                  all_notes.begin() + static_cast<ptrdiff_t>(group_end),
+                  [](const NoteEvent& a, const NoteEvent& b) {
+                    bool a_pedal = (a.source == BachNoteSource::PedalPoint);
+                    bool b_pedal = (b.source == BachNoteSource::PedalPoint);
+                    if (a_pedal != b_pedal) return a_pedal;
+                    return a.voice > b.voice;  // LH (1) before RH (0)
+                  });
+
+        for (size_t j = idx; j < group_end; ++j) {
+          const auto& note = all_notes[j];
+          ++total_count;
+
+          if (note.source == BachNoteSource::PedalPoint) {
+            cp_state.addNote(note.voice, note);
+            coordinated.push_back(note);
+            ++accepted_count;
+            continue;
+          }
+
+          BachNoteOptions opts;
+          opts.voice = note.voice;
+          opts.desired_pitch = note.pitch;
+          opts.tick = note.start_tick;
+          opts.duration = note.duration;
+          opts.velocity = note.velocity;
+          opts.source = note.source;
+
+          auto result = createBachNote(&cp_state, &cp_rules, &cp_resolver, opts);
+          if (result.accepted) {
+            coordinated.push_back(result.note);
+            ++accepted_count;
+          }
+        }
+        idx = group_end;
+      }
+
+      fprintf(stderr, "[TrioSonata] createBachNote: accepted %d/%d (%.0f%%)\n",
+              accepted_count, total_count,
+              total_count > 0 ? 100.0 * accepted_count / total_count : 0.0);
+      all_notes = std::move(coordinated);
     }
 
     PostValidateStats stats;

@@ -185,6 +185,7 @@ struct FugueEnergyCurve {
 struct FugueConfig {
   SubjectSource subject_source = SubjectSource::Generate;
   SubjectCharacter character = SubjectCharacter::Severe;
+  FugueArchetype archetype = FugueArchetype::Compact;
   AnswerType answer_type = AnswerType::Auto;
   uint8_t num_voices = 3;
   Key key = Key::C;

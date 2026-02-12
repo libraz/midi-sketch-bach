@@ -24,6 +24,18 @@ enum class MotifType : uint8_t {
   Sustain     ///< Sustained note (single long-value note).
 };
 
+/// @brief Structural function of a note within a motif template.
+enum class NoteFunction : uint8_t {
+  StructuralTone,  ///< Harmonic skeleton tone.
+  PassingTone,     ///< Stepwise connection between structural tones.
+  NeighborTone,    ///< Ornamental tone returning to origin.
+  LeapTone,        ///< Leap arrival or departure.
+  Resolution,      ///< Resolution of a dissonance or leap.
+  ClimaxTone,      ///< Climax/peak tone.
+  CadentialTone,   ///< Cadence-related tone.
+  SequenceHead     ///< Sequence pattern start.
+};
+
 /// @brief A fixed motivic pattern template.
 ///
 /// Each template defines a sequence of degree offsets from the starting degree
@@ -31,8 +43,9 @@ enum class MotifType : uint8_t {
 /// and are never generated randomly.
 struct MotifTemplate {
   MotifType type;
-  std::vector<int> degree_offsets;  ///< Relative scale degrees from start (0-based).
-  std::vector<Tick> durations;      ///< Duration for each note.
+  std::vector<int> degree_offsets;       ///< Relative scale degrees from start (0-based).
+  std::vector<Tick> durations;           ///< Duration for each note.
+  std::vector<NoteFunction> functions;   ///< Structural function per note.
 };
 
 /// @brief Goal tone position and pitch for subject climax.
@@ -54,6 +67,19 @@ struct GoalTone {
 /// @param rng Mersenne Twister for per-seed variation.
 /// @return GoalTone with position and pitch ratios (design values + small perturbation).
 GoalTone goalToneForCharacter(SubjectCharacter character, std::mt19937& rng);
+
+/// @brief Get GoalTone clamped to archetype bounds.
+///
+/// Delegates to the base goalToneForCharacter then clamps position_ratio
+/// and pitch_ratio to the archetype policy's climax bounds.
+///
+/// @param character Subject character type.
+/// @param rng Mersenne Twister for per-seed variation.
+/// @param policy Archetype policy providing climax bounds.
+/// @return GoalTone with ratios clamped to archetype bounds.
+struct ArchetypePolicy;
+GoalTone goalToneForCharacter(SubjectCharacter character, std::mt19937& rng,
+                               const ArchetypePolicy& policy);
 
 /// @brief Get the pair of MotifTemplates (A and B) for a given character.
 ///

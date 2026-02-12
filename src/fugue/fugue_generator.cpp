@@ -573,14 +573,16 @@ FugueResult generateFugue(const FugueConfig& config) {
   // Step 3: Generate countersubject(s)
   // =========================================================================
   Countersubject counter_subject =
-      generateCountersubject(subject, config.seed + 1000);
+      generateCountersubject(subject, config.seed + 1000, 5,
+                              config.archetype);
 
   // For 4+ voices, generate a second countersubject that contrasts with both
   // the subject and the first countersubject.
   Countersubject counter_subject_2;
   if (num_voices >= 4) {
     counter_subject_2 = generateSecondCountersubject(
-        subject, counter_subject, config.seed + 5000);
+        subject, counter_subject, config.seed + 5000, 5,
+        config.archetype);
   }
 
   // =========================================================================

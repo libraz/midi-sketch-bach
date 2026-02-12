@@ -94,6 +94,12 @@ struct HarmonicEvent;
 /// @return true if the pitch is a chord tone.
 bool isChordTone(uint8_t pitch, const HarmonicEvent& event);
 
+/// @brief Map scale degree (0-6) to ChordDegree for bass-driven harmony.
+/// @param degree Scale degree (0=tonic through 6=leading tone).
+/// @param is_minor Whether the key is minor.
+/// @return The ChordDegree corresponding to the scale degree.
+ChordDegree scaleDegreeToChordDegree(int degree, bool is_minor);
+
 }  // namespace bach
 
 #endif  // BACH_HARMONY_CHORD_TYPES_H

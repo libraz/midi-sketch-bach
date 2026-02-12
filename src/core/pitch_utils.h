@@ -288,6 +288,12 @@ inline int nearestOctaveShift(int pitch_diff) {
                            : -(((-pitch_diff + 5) / 12) * 12);
 }
 
+/// @brief Find the index of the closest pitch in a tone vector.
+/// @param tones Vector of MIDI pitches.
+/// @param target Target MIDI pitch to find closest match for.
+/// @return Index of the closest tone (0 if tones is empty).
+size_t findClosestToneIndex(const std::vector<uint8_t>& tones, uint8_t target);
+
 }  // namespace bach
 
 #endif  // BACH_CORE_PITCH_UTILS_H

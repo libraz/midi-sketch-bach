@@ -12,6 +12,10 @@
 #include "core/pitch_utils.h"
 #include "core/rng_util.h"
 #include "core/scale.h"
+#include "counterpoint/bach_rule_evaluator.h"
+#include "counterpoint/collision_resolver.h"
+#include "counterpoint/counterpoint_state.h"
+#include "forms/toccata_internal.h"
 #include "harmony/chord_types.h"
 #include "harmony/key.h"
 #include "harmony/harmonic_event.h"
@@ -78,21 +82,21 @@ std::vector<Track> createToccataTracks(uint8_t num_voices) {
 
 uint8_t getToccataLowPitch(uint8_t voice_idx) {
   switch (voice_idx) {
-    case 0: return organ_range::kManual1Low;
-    case 1: return organ_range::kManual2Low;
-    case 2: return organ_range::kPedalLow;
-    case 3: return organ_range::kManual3Low;
-    default: return organ_range::kManual1Low;
+    case 0: return 60;                          // C4 (Great)
+    case 1: return 52;                          // E3 (Swell)
+    case 2: return organ_range::kPedalLow;      // 24 (Pedal unchanged)
+    case 3: return 43;                          // G2 (Positiv)
+    default: return 52;
   }
 }
 
 uint8_t getToccataHighPitch(uint8_t voice_idx) {
   switch (voice_idx) {
-    case 0: return organ_range::kManual1High;
-    case 1: return organ_range::kManual2High;
-    case 2: return organ_range::kPedalHigh;
-    case 3: return organ_range::kManual3High;
-    default: return organ_range::kManual1High;
+    case 0: return 88;                          // E6 (Great)
+    case 1: return 76;                          // E5 (Swell)
+    case 2: return organ_range::kPedalHigh;     // 50 (Pedal unchanged)
+    case 3: return 67;                          // G4 (Positiv)
+    default: return 76;
   }
 }
 
@@ -1047,6 +1051,9 @@ ToccataResult generateDramaticusToccata(const ToccataConfig& config) {
                                   : BachNoteSource::FreeCounterpoint;
       }
     }
+
+    all_notes = toccata_internal::coordinateVoices(
+        std::move(all_notes), num_voices, config.key.tonic);
 
     PostValidateStats stats;
     all_notes = postValidateNotes(

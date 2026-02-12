@@ -53,8 +53,12 @@ set(BACH_TEST_SOURCES
 
   # fugue/
   fugue/fugue_config_test.cpp
+  fugue/archetype_policy_test.cpp
+  fugue/archetype_scorer_test.cpp
   fugue/fugue_structure_test.cpp
   fugue/subject_test.cpp
+  fugue/subject_archetype_test.cpp
+  fugue/subject_params_test.cpp
   fugue/subject_validator_test.cpp
   fugue/answer_test.cpp
   fugue/countersubject_test.cpp

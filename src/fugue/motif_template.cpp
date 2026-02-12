@@ -5,6 +5,7 @@
 #include <algorithm>
 
 #include "core/rng_util.h"
+#include "fugue/archetype_policy.h"
 
 namespace bach {
 
@@ -49,11 +50,16 @@ std::pair<MotifTemplate, MotifTemplate> motifTemplatesForCharacter(
           mot_a.type = MotifType::Scale;
           mot_a.degree_offsets = {0, 1, 2, 3};
           mot_a.durations = {kTicksPerBeat, kTicksPerBeat, kTicksPerBeat, kTicksPerBeat};
+          mot_a.functions = {NoteFunction::StructuralTone, NoteFunction::PassingTone,
+                             NoteFunction::PassingTone, NoteFunction::StructuralTone};
           MotifTemplate mot_b;
           mot_b.type = MotifType::Leap;
           mot_b.degree_offsets = {0, -3, -2, -1, 0};
           mot_b.durations = {kTicksPerBeat, kTicksPerBeat / 2, kTicksPerBeat / 2,
                              kTicksPerBeat / 2, kTicksPerBeat};
+          mot_b.functions = {NoteFunction::StructuralTone, NoteFunction::LeapTone,
+                             NoteFunction::Resolution, NoteFunction::PassingTone,
+                             NoteFunction::StructuralTone};
           return {mot_a, mot_b};
         }
         case 1: {
@@ -62,11 +68,16 @@ std::pair<MotifTemplate, MotifTemplate> motifTemplatesForCharacter(
           mot_a.type = MotifType::Scale;
           mot_a.degree_offsets = {0, -1, -2, -1};
           mot_a.durations = {kTicksPerBeat, kTicksPerBeat, kTicksPerBeat, kTicksPerBeat};
+          mot_a.functions = {NoteFunction::StructuralTone, NoteFunction::PassingTone,
+                             NoteFunction::PassingTone, NoteFunction::PassingTone};
           MotifTemplate mot_b;
           mot_b.type = MotifType::Leap;
           mot_b.degree_offsets = {0, 3, 2, 1, 0};
           mot_b.durations = {kTicksPerBeat, kTicksPerBeat / 2, kTicksPerBeat / 2,
                              kTicksPerBeat / 2, kTicksPerBeat};
+          mot_b.functions = {NoteFunction::StructuralTone, NoteFunction::LeapTone,
+                             NoteFunction::Resolution, NoteFunction::PassingTone,
+                             NoteFunction::StructuralTone};
           return {mot_a, mot_b};
         }
         case 2: {
@@ -76,11 +87,16 @@ std::pair<MotifTemplate, MotifTemplate> motifTemplatesForCharacter(
           mot_a.degree_offsets = {0, 1, 2, 1, 0};
           mot_a.durations = {kTicksPerBeat / 2, kTicksPerBeat / 2, kTicksPerBeat,
                              kTicksPerBeat / 2, kTicksPerBeat / 2};
+          mot_a.functions = {NoteFunction::StructuralTone, NoteFunction::PassingTone,
+                             NoteFunction::ClimaxTone, NoteFunction::PassingTone,
+                             NoteFunction::StructuralTone};
           MotifTemplate mot_b;
           mot_b.type = MotifType::Sustain;
           mot_b.degree_offsets = {0, 0, -1, 0};
           mot_b.durations = {kTicksPerBeat * 2, kTicksPerBeat, kTicksPerBeat / 2,
                              kTicksPerBeat * 2};
+          mot_b.functions = {NoteFunction::StructuralTone, NoteFunction::StructuralTone,
+                             NoteFunction::NeighborTone, NoteFunction::StructuralTone};
           return {mot_a, mot_b};
         }
         case 3:
@@ -91,11 +107,16 @@ std::pair<MotifTemplate, MotifTemplate> motifTemplatesForCharacter(
           mot_a.degree_offsets = {0, 4, 3, 2, 3};
           mot_a.durations = {kTicksPerBeat / 2, kTicksPerBeat, kTicksPerBeat / 2,
                              kTicksPerBeat / 2, kTicksPerBeat};
+          mot_a.functions = {NoteFunction::StructuralTone, NoteFunction::LeapTone,
+                             NoteFunction::Resolution, NoteFunction::PassingTone,
+                             NoteFunction::StructuralTone};
           MotifTemplate mot_b;
           mot_b.type = MotifType::Scale;
           mot_b.degree_offsets = {0, -1, -2, -3};
           mot_b.durations = {kTicksPerBeat, kTicksPerBeat / 2, kTicksPerBeat / 2,
                              kTicksPerBeat * 2};
+          mot_b.functions = {NoteFunction::StructuralTone, NoteFunction::PassingTone,
+                             NoteFunction::PassingTone, NoteFunction::CadentialTone};
           return {mot_a, mot_b};
         }
       }
@@ -109,11 +130,15 @@ std::pair<MotifTemplate, MotifTemplate> motifTemplatesForCharacter(
           mot_a.degree_offsets = {0, 3, 2, 4};
           mot_a.durations = {kTicksPerBeat / 2, kTicksPerBeat,
                              kTicksPerBeat / 2, kTicksPerBeat};
+          mot_a.functions = {NoteFunction::StructuralTone, NoteFunction::LeapTone,
+                             NoteFunction::Resolution, NoteFunction::StructuralTone};
           MotifTemplate mot_b;
           mot_b.type = MotifType::Rhythmic;
           mot_b.degree_offsets = {0, 0, -1, -2};
           mot_b.durations = {kTicksPerBeat / 2, kTicksPerBeat / 2,
                              kTicksPerBeat / 2, kTicksPerBeat};
+          mot_b.functions = {NoteFunction::StructuralTone, NoteFunction::NeighborTone,
+                             NoteFunction::PassingTone, NoteFunction::CadentialTone};
           return {mot_a, mot_b};
         }
         case 1: {
@@ -123,11 +148,16 @@ std::pair<MotifTemplate, MotifTemplate> motifTemplatesForCharacter(
           mot_a.degree_offsets = {0, 1, 0, 2};
           mot_a.durations = {kTicksPerBeat * 3 / 4, kTicksPerBeat / 4,
                              kTicksPerBeat * 3 / 4, kTicksPerBeat / 4};
+          mot_a.functions = {NoteFunction::StructuralTone, NoteFunction::NeighborTone,
+                             NoteFunction::StructuralTone, NoteFunction::LeapTone};
           MotifTemplate mot_b;
           mot_b.type = MotifType::Scale;
           mot_b.degree_offsets = {0, -1, -2, -3, -2};
           mot_b.durations = {kTicksPerBeat / 2, kTicksPerBeat / 2,
                              kTicksPerBeat / 2, kTicksPerBeat / 2, kTicksPerBeat};
+          mot_b.functions = {NoteFunction::StructuralTone, NoteFunction::PassingTone,
+                             NoteFunction::PassingTone, NoteFunction::PassingTone,
+                             NoteFunction::CadentialTone};
           return {mot_a, mot_b};
         }
         case 2: {
@@ -137,11 +167,16 @@ std::pair<MotifTemplate, MotifTemplate> motifTemplatesForCharacter(
           mot_a.degree_offsets = {0, 2, 1, 3};
           mot_a.durations = {kTicksPerBeat / 2, kTicksPerBeat / 2,
                              kTicksPerBeat / 2, kTicksPerBeat};
+          mot_a.functions = {NoteFunction::StructuralTone, NoteFunction::LeapTone,
+                             NoteFunction::PassingTone, NoteFunction::StructuralTone};
           MotifTemplate mot_b;
           mot_b.type = MotifType::Rhythmic;
           mot_b.degree_offsets = {0, -1, 0, -2, -1};
           mot_b.durations = {kTicksPerBeat / 4, kTicksPerBeat * 3 / 4,
                              kTicksPerBeat / 4, kTicksPerBeat * 3 / 4, kTicksPerBeat / 2};
+          mot_b.functions = {NoteFunction::StructuralTone, NoteFunction::PassingTone,
+                             NoteFunction::NeighborTone, NoteFunction::PassingTone,
+                             NoteFunction::CadentialTone};
           return {mot_a, mot_b};
         }
         case 3:
@@ -152,11 +187,16 @@ std::pair<MotifTemplate, MotifTemplate> motifTemplatesForCharacter(
           mot_a.degree_offsets = {0, 2, 4, 2};
           mot_a.durations = {kTicksPerBeat / 2, kTicksPerBeat / 2,
                              kTicksPerBeat, kTicksPerBeat / 2};
+          mot_a.functions = {NoteFunction::StructuralTone, NoteFunction::LeapTone,
+                             NoteFunction::LeapTone, NoteFunction::Resolution};
           MotifTemplate mot_b;
           mot_b.type = MotifType::Scale;
           mot_b.degree_offsets = {0, 1, 0, -1, 0};
           mot_b.durations = {kTicksPerBeat / 2, kTicksPerBeat / 4,
                              kTicksPerBeat / 2, kTicksPerBeat / 4, kTicksPerBeat};
+          mot_b.functions = {NoteFunction::StructuralTone, NoteFunction::NeighborTone,
+                             NoteFunction::StructuralTone, NoteFunction::NeighborTone,
+                             NoteFunction::CadentialTone};
           return {mot_a, mot_b};
         }
       }
@@ -169,11 +209,16 @@ std::pair<MotifTemplate, MotifTemplate> motifTemplatesForCharacter(
           mot_a.type = MotifType::Sustain;
           mot_a.degree_offsets = {0, 1, 2};
           mot_a.durations = {kTicksPerBeat * 2, kTicksPerBeat, kTicksPerBeat};
+          mot_a.functions = {NoteFunction::StructuralTone, NoteFunction::PassingTone,
+                             NoteFunction::StructuralTone};
           MotifTemplate mot_b;
           mot_b.type = MotifType::Scale;
           mot_b.degree_offsets = {0, -1, -2, -3, -4};
           mot_b.durations = {kTicksPerBeat, kTicksPerBeat,
                              kTicksPerBeat, kTicksPerBeat / 2, kTicksPerBeat * 2};
+          mot_b.functions = {NoteFunction::StructuralTone, NoteFunction::PassingTone,
+                             NoteFunction::PassingTone, NoteFunction::PassingTone,
+                             NoteFunction::CadentialTone};
           return {mot_a, mot_b};
         }
         case 1: {
@@ -182,11 +227,16 @@ std::pair<MotifTemplate, MotifTemplate> motifTemplatesForCharacter(
           mot_a.type = MotifType::Sustain;
           mot_a.degree_offsets = {0, 0, 1};
           mot_a.durations = {kTicksPerBeat * 3, kTicksPerBeat, kTicksPerBeat * 2};
+          mot_a.functions = {NoteFunction::StructuralTone, NoteFunction::StructuralTone,
+                             NoteFunction::PassingTone};
           MotifTemplate mot_b;
           mot_b.type = MotifType::Scale;
           mot_b.degree_offsets = {0, 1, 0, -1, -2};
           mot_b.durations = {kTicksPerBeat, kTicksPerBeat / 2,
                              kTicksPerBeat, kTicksPerBeat / 2, kTicksPerBeat * 2};
+          mot_b.functions = {NoteFunction::StructuralTone, NoteFunction::NeighborTone,
+                             NoteFunction::StructuralTone, NoteFunction::PassingTone,
+                             NoteFunction::CadentialTone};
           return {mot_a, mot_b};
         }
         case 2: {
@@ -195,11 +245,15 @@ std::pair<MotifTemplate, MotifTemplate> motifTemplatesForCharacter(
           mot_a.type = MotifType::Leap;
           mot_a.degree_offsets = {0, 3, 2};
           mot_a.durations = {kTicksPerBeat * 2, kTicksPerBeat, kTicksPerBeat * 2};
+          mot_a.functions = {NoteFunction::StructuralTone, NoteFunction::LeapTone,
+                             NoteFunction::Resolution};
           MotifTemplate mot_b;
           mot_b.type = MotifType::Scale;
           mot_b.degree_offsets = {0, -1, -2, -1};
           mot_b.durations = {kTicksPerBeat * 2, kTicksPerBeat,
                              kTicksPerBeat, kTicksPerBeat * 2};
+          mot_b.functions = {NoteFunction::StructuralTone, NoteFunction::PassingTone,
+                             NoteFunction::PassingTone, NoteFunction::CadentialTone};
           return {mot_a, mot_b};
         }
         case 3:
@@ -209,11 +263,16 @@ std::pair<MotifTemplate, MotifTemplate> motifTemplatesForCharacter(
           mot_a.type = MotifType::Sustain;
           mot_a.degree_offsets = {0, 0, 0, 1};
           mot_a.durations = {kTicksPerBeat * 2, kTicksPerBeat, kTicksPerBeat, kTicksPerBeat};
+          mot_a.functions = {NoteFunction::StructuralTone, NoteFunction::StructuralTone,
+                             NoteFunction::StructuralTone, NoteFunction::PassingTone};
           MotifTemplate mot_b;
           mot_b.type = MotifType::Leap;
           mot_b.degree_offsets = {0, -2, -1, -3, -2};
           mot_b.durations = {kTicksPerBeat, kTicksPerBeat / 2,
                              kTicksPerBeat, kTicksPerBeat / 2, kTicksPerBeat * 2};
+          mot_b.functions = {NoteFunction::StructuralTone, NoteFunction::LeapTone,
+                             NoteFunction::Resolution, NoteFunction::LeapTone,
+                             NoteFunction::CadentialTone};
           return {mot_a, mot_b};
         }
       }
@@ -227,11 +286,17 @@ std::pair<MotifTemplate, MotifTemplate> motifTemplatesForCharacter(
           mot_a.degree_offsets = {0, 1, 0, 1, 2};
           mot_a.durations = {kTicksPerBeat / 2, kTicksPerBeat / 2,
                              kTicksPerBeat / 2, kTicksPerBeat / 2, kTicksPerBeat / 2};
+          mot_a.functions = {NoteFunction::StructuralTone, NoteFunction::PassingTone,
+                             NoteFunction::NeighborTone, NoteFunction::PassingTone,
+                             NoteFunction::StructuralTone};
           MotifTemplate mot_b;
           mot_b.type = MotifType::Leap;
           mot_b.degree_offsets = {0, -4, -3, -2, -1};
           mot_b.durations = {kTicksPerBeat / 2, kTicksPerBeat / 2,
                              kTicksPerBeat / 4, kTicksPerBeat / 4, kTicksPerBeat};
+          mot_b.functions = {NoteFunction::StructuralTone, NoteFunction::LeapTone,
+                             NoteFunction::Resolution, NoteFunction::PassingTone,
+                             NoteFunction::CadentialTone};
           return {mot_a, mot_b};
         }
         case 1: {
@@ -241,11 +306,16 @@ std::pair<MotifTemplate, MotifTemplate> motifTemplatesForCharacter(
           mot_a.degree_offsets = {0, 3, 4, 3};
           mot_a.durations = {kTicksPerBeat / 2, kTicksPerBeat / 2,
                              kTicksPerBeat / 2, kTicksPerBeat / 2};
+          mot_a.functions = {NoteFunction::StructuralTone, NoteFunction::LeapTone,
+                             NoteFunction::LeapTone, NoteFunction::Resolution};
           MotifTemplate mot_b;
           mot_b.type = MotifType::Chromatic;
           mot_b.degree_offsets = {0, -1, 0, -1, -2};
           mot_b.durations = {kTicksPerBeat / 2, kTicksPerBeat / 4,
                              kTicksPerBeat / 2, kTicksPerBeat / 4, kTicksPerBeat};
+          mot_b.functions = {NoteFunction::StructuralTone, NoteFunction::PassingTone,
+                             NoteFunction::NeighborTone, NoteFunction::PassingTone,
+                             NoteFunction::CadentialTone};
           return {mot_a, mot_b};
         }
         case 2: {
@@ -256,11 +326,16 @@ std::pair<MotifTemplate, MotifTemplate> motifTemplatesForCharacter(
           mot_a.durations = {kTicksPerBeat / 4, kTicksPerBeat / 4,
                              kTicksPerBeat / 4, kTicksPerBeat / 4,
                              kTicksPerBeat / 4, kTicksPerBeat / 4};
+          mot_a.functions = {NoteFunction::SequenceHead, NoteFunction::PassingTone,
+                             NoteFunction::PassingTone, NoteFunction::ClimaxTone,
+                             NoteFunction::PassingTone, NoteFunction::PassingTone};
           MotifTemplate mot_b;
           mot_b.type = MotifType::Chromatic;
           mot_b.degree_offsets = {0, -1, -3, -2};
           mot_b.durations = {kTicksPerBeat / 2, kTicksPerBeat,
                              kTicksPerBeat / 2, kTicksPerBeat};
+          mot_b.functions = {NoteFunction::StructuralTone, NoteFunction::PassingTone,
+                             NoteFunction::LeapTone, NoteFunction::Resolution};
           return {mot_a, mot_b};
         }
         case 3:
@@ -271,11 +346,17 @@ std::pair<MotifTemplate, MotifTemplate> motifTemplatesForCharacter(
           mot_a.degree_offsets = {0, 1, 0, 2, 1};
           mot_a.durations = {kTicksPerBeat / 4, kTicksPerBeat / 4,
                              kTicksPerBeat / 2, kTicksPerBeat / 4, kTicksPerBeat / 4};
+          mot_a.functions = {NoteFunction::SequenceHead, NoteFunction::PassingTone,
+                             NoteFunction::NeighborTone, NoteFunction::LeapTone,
+                             NoteFunction::Resolution};
           MotifTemplate mot_b;
           mot_b.type = MotifType::Scale;
           mot_b.degree_offsets = {0, -1, -2, -3, -4};
           mot_b.durations = {kTicksPerBeat / 4, kTicksPerBeat / 4,
                              kTicksPerBeat / 4, kTicksPerBeat / 4, kTicksPerBeat};
+          mot_b.functions = {NoteFunction::SequenceHead, NoteFunction::PassingTone,
+                             NoteFunction::PassingTone, NoteFunction::PassingTone,
+                             NoteFunction::CadentialTone};
           return {mot_a, mot_b};
         }
       }
@@ -283,6 +364,18 @@ std::pair<MotifTemplate, MotifTemplate> motifTemplatesForCharacter(
   }
   // Fallback: Severe pair 0.
   return motifTemplatesForCharacter(SubjectCharacter::Severe, 0);
+}
+
+GoalTone goalToneForCharacter(SubjectCharacter character, std::mt19937& rng,
+                               const ArchetypePolicy& policy) {
+  GoalTone goal = goalToneForCharacter(character, rng);
+  goal.position_ratio = std::clamp(goal.position_ratio,
+                                    policy.min_climax_position,
+                                    policy.max_climax_position);
+  goal.pitch_ratio = std::clamp(goal.pitch_ratio,
+                                 policy.min_climax_pitch,
+                                 policy.max_climax_pitch);
+  return goal;
 }
 
 }  // namespace bach

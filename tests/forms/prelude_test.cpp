@@ -247,29 +247,29 @@ TEST(PreludeTest, NotesWithinOrganRange) {
   PreludeResult result = generatePrelude(config);
   ASSERT_TRUE(result.success);
 
-  // Voice 0 (Manual I): 36-96
+  // Voice 0 (Great): 60-88
   for (const auto& note : result.tracks[0].notes) {
-    EXPECT_GE(note.pitch, organ_range::kManual1Low)
-        << "Manual I pitch below range: " << static_cast<int>(note.pitch);
-    EXPECT_LE(note.pitch, organ_range::kManual1High)
-        << "Manual I pitch above range: " << static_cast<int>(note.pitch);
+    EXPECT_GE(note.pitch, 60)
+        << "Great pitch below range: " << static_cast<int>(note.pitch);
+    EXPECT_LE(note.pitch, 88)
+        << "Great pitch above range: " << static_cast<int>(note.pitch);
   }
 
-  // Voice 1 (Manual II): 36-96
+  // Voice 1 (Swell): 52-76
   for (const auto& note : result.tracks[1].notes) {
-    EXPECT_GE(note.pitch, organ_range::kManual2Low)
-        << "Manual II pitch below range: " << static_cast<int>(note.pitch);
-    EXPECT_LE(note.pitch, organ_range::kManual2High)
-        << "Manual II pitch above range: " << static_cast<int>(note.pitch);
+    EXPECT_GE(note.pitch, 52)
+        << "Swell pitch below range: " << static_cast<int>(note.pitch);
+    EXPECT_LE(note.pitch, 76)
+        << "Swell pitch above range: " << static_cast<int>(note.pitch);
   }
 
-  // Voice 2 (Manual III): 48-96
+  // Voice 2 (Positiv): 43-64
   if (result.tracks.size() > 2) {
     for (const auto& note : result.tracks[2].notes) {
-      EXPECT_GE(note.pitch, organ_range::kManual3Low)
-          << "Manual III pitch below range: " << static_cast<int>(note.pitch);
-      EXPECT_LE(note.pitch, organ_range::kManual3High)
-          << "Manual III pitch above range: " << static_cast<int>(note.pitch);
+      EXPECT_GE(note.pitch, 43)
+          << "Positiv pitch below range: " << static_cast<int>(note.pitch);
+      EXPECT_LE(note.pitch, 64)
+          << "Positiv pitch above range: " << static_cast<int>(note.pitch);
     }
   }
 

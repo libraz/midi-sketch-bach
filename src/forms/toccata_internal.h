@@ -10,9 +10,13 @@
 
 #include "core/basic_types.h"
 #include "core/gm_program.h"
+#include "core/note_creator.h"
 #include "core/pitch_utils.h"
 #include "core/rng_util.h"
 #include "core/scale.h"
+#include "counterpoint/bach_rule_evaluator.h"
+#include "counterpoint/collision_resolver.h"
+#include "counterpoint/counterpoint_state.h"
 #include "harmony/chord_types.h"
 #include "harmony/harmonic_event.h"
 #include "harmony/harmonic_timeline.h"
@@ -76,21 +80,21 @@ inline std::vector<Track> createToccataTracks(uint8_t num_voices) {
 
 inline uint8_t getToccataLowPitch(uint8_t voice_idx) {
   switch (voice_idx) {
-    case 0: return organ_range::kManual1Low;
-    case 1: return organ_range::kManual2Low;
-    case 2: return organ_range::kPedalLow;
-    case 3: return organ_range::kManual3Low;
-    default: return organ_range::kManual1Low;
+    case 0: return 60;                          // C4 (Great)
+    case 1: return 52;                          // E3 (Swell)
+    case 2: return organ_range::kPedalLow;      // 24 (Pedal unchanged)
+    case 3: return 43;                          // G2 (Positiv)
+    default: return 52;
   }
 }
 
 inline uint8_t getToccataHighPitch(uint8_t voice_idx) {
   switch (voice_idx) {
-    case 0: return organ_range::kManual1High;
-    case 1: return organ_range::kManual2High;
-    case 2: return organ_range::kPedalHigh;
-    case 3: return organ_range::kManual3High;
-    default: return organ_range::kManual1High;
+    case 0: return 88;                          // E6 (Great)
+    case 1: return 76;                          // E5 (Swell)
+    case 2: return organ_range::kPedalHigh;     // 50 (Pedal unchanged)
+    case 3: return 67;                          // G4 (Positiv)
+    default: return 76;
   }
 }
 
@@ -222,6 +226,88 @@ inline void populateLegacyFields(ToccataResult& result) {
   }
   result.drive_start = result.sections.back().start;
   result.drive_end = result.sections.back().end;
+}
+
+/// @brief Coordinate all voices through createBachNote for vertical dissonance control.
+///
+/// Sorts notes by tick, groups simultaneous notes, processes pedal first (immutable),
+/// then upper voices through createBachNote with free counterpoint rules.
+/// @param all_notes All generated notes (will be consumed).
+/// @param num_voices Number of active voices.
+/// @param tonic Key tonic for counterpoint state.
+/// @return Coordinated notes with dissonances resolved.
+inline std::vector<NoteEvent> coordinateVoices(
+    std::vector<NoteEvent> all_notes, uint8_t num_voices, Key tonic) {
+  BachRuleEvaluator cp_rules(num_voices);
+  cp_rules.setFreeCounterpoint(true);
+  CollisionResolver cp_resolver;
+  CounterpointState cp_state;
+  cp_state.setKey(tonic);
+  for (uint8_t v = 0; v < num_voices; ++v) {
+    cp_state.registerVoice(v, getToccataLowPitch(v), getToccataHighPitch(v));
+  }
+
+  std::sort(all_notes.begin(), all_notes.end(),
+            [](const NoteEvent& a, const NoteEvent& b) {
+              return a.start_tick < b.start_tick;
+            });
+
+  std::vector<NoteEvent> coordinated;
+  coordinated.reserve(all_notes.size());
+  int accepted_count = 0;
+  int total_count = 0;
+
+  size_t i = 0;
+  while (i < all_notes.size()) {
+    Tick current_tick = all_notes[i].start_tick;
+    size_t group_end = i;
+    while (group_end < all_notes.size() &&
+           all_notes[group_end].start_tick == current_tick) {
+      ++group_end;
+    }
+
+    // Sort group: pedal first (voice 2), then lower voices first.
+    std::sort(all_notes.begin() + static_cast<ptrdiff_t>(i),
+              all_notes.begin() + static_cast<ptrdiff_t>(group_end),
+              [](const NoteEvent& a, const NoteEvent& b) {
+                bool a_pedal = (a.source == BachNoteSource::PedalPoint);
+                bool b_pedal = (b.source == BachNoteSource::PedalPoint);
+                if (a_pedal != b_pedal) return a_pedal;
+                return a.voice > b.voice;
+              });
+
+    for (size_t j = i; j < group_end; ++j) {
+      const auto& note = all_notes[j];
+      ++total_count;
+
+      if (note.source == BachNoteSource::PedalPoint) {
+        cp_state.addNote(note.voice, note);
+        coordinated.push_back(note);
+        ++accepted_count;
+        continue;
+      }
+
+      BachNoteOptions opts;
+      opts.voice = note.voice;
+      opts.desired_pitch = note.pitch;
+      opts.tick = note.start_tick;
+      opts.duration = note.duration;
+      opts.velocity = note.velocity;
+      opts.source = note.source;
+
+      auto result = createBachNote(&cp_state, &cp_rules, &cp_resolver, opts);
+      if (result.accepted) {
+        coordinated.push_back(result.note);
+        ++accepted_count;
+      }
+    }
+    i = group_end;
+  }
+
+  fprintf(stderr, "[Toccata] createBachNote: accepted %d/%d (%.0f%%)\n",
+          accepted_count, total_count,
+          total_count > 0 ? 100.0 * accepted_count / total_count : 0.0);
+  return coordinated;
 }
 
 }  // namespace toccata_internal

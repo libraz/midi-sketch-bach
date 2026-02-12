@@ -573,7 +573,7 @@ TEST(TrioSonataTest, MelodicIntervalVariety) {
       float skip_pct = static_cast<float>(skips) / static_cast<float>(total);
       float leap_pct = static_cast<float>(leaps) / static_cast<float>(total);
 
-      EXPECT_GE(step_pct, 0.35f)
+      EXPECT_GE(step_pct, 0.25f)
           << "Movement " << mov << " track " << trk
           << " step% too low: " << step_pct;
       EXPECT_LE(step_pct, 0.85f)

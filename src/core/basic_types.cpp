@@ -51,6 +51,16 @@ ToccataArchetype toccataArchetypeFromString(const std::string& str) {
   return ToccataArchetype::Dramaticus;  // Default
 }
 
+const char* fugueArchetypeToString(FugueArchetype archetype) {
+  switch (archetype) {
+    case FugueArchetype::Compact:    return "Compact";
+    case FugueArchetype::Cantabile:  return "Cantabile";
+    case FugueArchetype::Invertible: return "Invertible";
+    case FugueArchetype::Chromatic:  return "Chromatic";
+  }
+  return "Compact";
+}
+
 const char* arcPhaseToString(ArcPhase phase) {
   switch (phase) {
     case ArcPhase::Ascent:  return "Ascent";

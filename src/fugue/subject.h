@@ -68,13 +68,11 @@ class SubjectGenerator {
 
  private:
   /// @brief Generate the note sequence for a subject.
-  /// @param character Subject character type.
-  /// @param key Musical key.
-  /// @param bars Number of bars (2-4).
+  /// @param config Fugue configuration (character, key, archetype, etc.).
+  /// @param bars Number of bars (1-4, already clamped by archetype).
   /// @param seed Random seed.
   /// @return Vector of NoteEvent forming the subject.
-  std::vector<NoteEvent> generateNotes(SubjectCharacter character,
-                                       Key key, bool is_minor,
+  std::vector<NoteEvent> generateNotes(const FugueConfig& config,
                                        uint8_t bars,
                                        uint32_t seed) const;
 };

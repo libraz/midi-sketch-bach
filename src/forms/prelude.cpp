@@ -11,6 +11,9 @@
 #include "core/pitch_utils.h"
 #include "core/rng_util.h"
 #include "core/scale.h"
+#include "counterpoint/bach_rule_evaluator.h"
+#include "counterpoint/collision_resolver.h"
+#include "counterpoint/counterpoint_state.h"
 #include "harmony/chord_tone_utils.h"
 #include "harmony/chord_types.h"
 #include "harmony/harmonic_event.h"
@@ -80,11 +83,11 @@ std::vector<Track> createPreludeTracks(uint8_t num_voices) {
 /// @return Low MIDI pitch bound for the manual.
 uint8_t getVoiceLowPitch(uint8_t voice_idx) {
   switch (voice_idx) {
-    case 0: return organ_range::kManual1Low;   // 36
-    case 1: return organ_range::kManual2Low;   // 36
-    case 2: return organ_range::kManual3Low;   // 48
-    case 3: return organ_range::kPedalLow;     // 24
-    default: return organ_range::kManual1Low;
+    case 0: return 60;                         // C4 (Great)
+    case 1: return 52;                         // E3 (Swell)
+    case 2: return 43;                         // G2 (Positiv)
+    case 3: return organ_range::kPedalLow;     // 24 (Pedal unchanged)
+    default: return 52;
   }
 }
 
@@ -93,11 +96,11 @@ uint8_t getVoiceLowPitch(uint8_t voice_idx) {
 /// @return High MIDI pitch bound for the manual.
 uint8_t getVoiceHighPitch(uint8_t voice_idx) {
   switch (voice_idx) {
-    case 0: return organ_range::kManual1High;  // 96
-    case 1: return organ_range::kManual2High;  // 96
-    case 2: return organ_range::kManual3High;  // 96
-    case 3: return organ_range::kPedalHigh;    // 50
-    default: return organ_range::kManual1High;
+    case 0: return 88;                         // E6 (Great)
+    case 1: return 76;                         // E5 (Swell)
+    case 2: return 64;                         // E4 (Positiv)
+    case 3: return organ_range::kPedalHigh;    // 50 (Pedal unchanged)
+    default: return 76;
   }
 }
 
@@ -114,14 +117,14 @@ uint8_t getVoiceHighPitch(uint8_t voice_idx) {
 std::pair<int, int> getVoiceCenterRange(uint8_t voice_idx, uint8_t num_voices) {
   if (num_voices <= 2) {
     // 2-voice: voice 0 higher, voice 1 lower.
-    if (voice_idx == 0) return {64, 79};  // E4-G5
-    return {48, 62};                       // C3-D4
+    if (voice_idx == 0) return {67, 82};  // G4-Bb5
+    return {52, 68};                       // E3-Ab4
   }
-  // 3+ voices: clear register separation.
+  // 3+ voices: clear register separation matching new ranges.
   switch (voice_idx) {
-    case 0: return {67, 79};   // G4-G5 (soprano passage)
-    case 1: return {55, 65};   // G3-F4 (alto middle)
-    default: return {48, 60};  // C3-C4 (tenor/bass, if used for passage)
+    case 0: return {67, 82};   // G4-Bb5 (Great: 60-88)
+    case 1: return {57, 70};   // A3-Bb4 (Swell: 52-76)
+    default: return {48, 58};  // C3-Bb3 (Positiv: 43-64)
   }
 }
 
@@ -940,6 +943,85 @@ PreludeResult generatePrelude(const PreludeConfig& config) {
                      ? BachNoteSource::PedalPoint
                      : BachNoteSource::FreeCounterpoint;
     }
+  }
+
+  // ---- createBachNote coordination pass (vertical dissonance control) ----
+  {
+    BachRuleEvaluator cp_rules(num_voices);
+    cp_rules.setFreeCounterpoint(true);  // Allow weak-beat NHTs.
+    CollisionResolver cp_resolver;
+    CounterpointState cp_state;
+    cp_state.setKey(config.key.tonic);
+    for (uint8_t v = 0; v < num_voices; ++v) {
+      cp_state.registerVoice(v, getVoiceLowPitch(v), getVoiceHighPitch(v));
+    }
+
+    // Sort by tick for chronological processing.
+    std::sort(all_notes.begin(), all_notes.end(),
+              [](const NoteEvent& a, const NoteEvent& b) {
+                return a.start_tick < b.start_tick;
+              });
+
+    // Group by tick and process in voice priority order:
+    // pedal (immutable) → lower voices → upper voices.
+    std::vector<NoteEvent> coordinated;
+    coordinated.reserve(all_notes.size());
+    int accepted_count = 0;
+    int total_count = 0;
+
+    size_t i = 0;
+    while (i < all_notes.size()) {
+      Tick current_tick = all_notes[i].start_tick;
+      size_t group_end = i;
+      while (group_end < all_notes.size() &&
+             all_notes[group_end].start_tick == current_tick) {
+        ++group_end;
+      }
+
+      // Sort group by voice priority: pedal first (highest voice idx), then
+      // ascending voice idx for upper voices.
+      std::sort(all_notes.begin() + static_cast<ptrdiff_t>(i),
+                all_notes.begin() + static_cast<ptrdiff_t>(group_end),
+                [num_voices](const NoteEvent& a, const NoteEvent& b) {
+                  bool a_pedal = isPedalVoice(a.voice, num_voices);
+                  bool b_pedal = isPedalVoice(b.voice, num_voices);
+                  if (a_pedal != b_pedal) return a_pedal;  // pedal first
+                  return a.voice > b.voice;  // then lower voices first
+                });
+
+      for (size_t j = i; j < group_end; ++j) {
+        const auto& note = all_notes[j];
+        ++total_count;
+
+        // Pedal notes are immutable — register directly.
+        if (isPedalVoice(note.voice, num_voices)) {
+          cp_state.addNote(note.voice, note);
+          coordinated.push_back(note);
+          ++accepted_count;
+          continue;
+        }
+
+        BachNoteOptions opts;
+        opts.voice = note.voice;
+        opts.desired_pitch = note.pitch;
+        opts.tick = note.start_tick;
+        opts.duration = note.duration;
+        opts.velocity = note.velocity;
+        opts.source = note.source;
+
+        auto result = createBachNote(&cp_state, &cp_rules, &cp_resolver, opts);
+        if (result.accepted) {
+          coordinated.push_back(result.note);
+          ++accepted_count;
+        }
+      }
+      i = group_end;
+    }
+
+    fprintf(stderr, "[Prelude] createBachNote: accepted %d/%d (%.0f%%)\n",
+            accepted_count, total_count,
+            total_count > 0 ? 100.0 * accepted_count / total_count : 0.0);
+    all_notes = std::move(coordinated);
   }
 
   // Build per-voice pitch ranges for counterpoint validation.

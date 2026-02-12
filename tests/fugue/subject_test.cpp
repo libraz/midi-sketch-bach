@@ -76,26 +76,34 @@ TEST_F(SubjectGeneratorTest, SubjectLength) {
 
 TEST_F(SubjectGeneratorTest, SubjectLengthThreeBars) {
   config.subject_bars = 3;
+  // Cantabile archetype allows 2-4 bars; Compact caps at 2.
+  config.archetype = FugueArchetype::Cantabile;
   Subject subject = generator.generate(config, 42);
   EXPECT_EQ(subject.length_ticks, 3u * kTicksPerBar);
 }
 
 TEST_F(SubjectGeneratorTest, SubjectLengthFourBars) {
   config.subject_bars = 4;
+  // Cantabile archetype allows 2-4 bars.
+  config.archetype = FugueArchetype::Cantabile;
   Subject subject = generator.generate(config, 42);
   EXPECT_EQ(subject.length_ticks, 4u * kTicksPerBar);
 }
 
-TEST_F(SubjectGeneratorTest, SubjectBarsClampedToMinTwo) {
-  config.subject_bars = 1;  // Below minimum.
+TEST_F(SubjectGeneratorTest, SubjectBarsClampedToArchetypeMin) {
+  // Compact archetype min=1, so requesting 0 should clamp to 1.
+  config.subject_bars = 0;
+  config.archetype = FugueArchetype::Compact;
+  Subject subject = generator.generate(config, 42);
+  EXPECT_EQ(subject.length_ticks, 1u * kTicksPerBar);
+}
+
+TEST_F(SubjectGeneratorTest, SubjectBarsClampedToArchetypeMax) {
+  // Compact archetype max=2, so requesting 10 should clamp to 2.
+  config.subject_bars = 10;
+  config.archetype = FugueArchetype::Compact;
   Subject subject = generator.generate(config, 42);
   EXPECT_EQ(subject.length_ticks, 2u * kTicksPerBar);
-}
-
-TEST_F(SubjectGeneratorTest, SubjectBarsClampedToMaxFour) {
-  config.subject_bars = 10;  // Above maximum.
-  Subject subject = generator.generate(config, 42);
-  EXPECT_EQ(subject.length_ticks, 4u * kTicksPerBar);
 }
 
 TEST_F(SubjectGeneratorTest, NotesDoNotExceedTotalLength) {

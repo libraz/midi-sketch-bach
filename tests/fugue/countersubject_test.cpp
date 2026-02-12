@@ -9,8 +9,10 @@
 #include <cmath>
 #include <set>
 
+#include "core/note_source.h"
 #include "core/pitch_utils.h"
 #include "core/scale.h"
+#include "fugue/fugue_config.h"
 
 namespace bach {
 namespace {
@@ -670,6 +672,226 @@ TEST(CountersubjectTest, SevereNoSixteenthNotes) {
     for (const auto& note : cs.notes) {
       EXPECT_GE(note.duration, kSixteenth * 2)
           << "Severe CS should not contain sixteenth notes (seed=" << seed << ")";
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Chromatic archetype countersubject tests
+// ---------------------------------------------------------------------------
+
+/// @brief Create a chromatic subject in C minor with a clear chromatic run.
+/// C4-Db4-D4-Eb4-E4-F4-Gb4-G4 as quarter notes (2 bars).
+/// The first 7 intervals are all semitones; many pitches are non-diatonic
+/// in C natural minor, so inChromaticRun should detect this.
+Subject makeChromaticSubject() {
+  Subject sub;
+  sub.key = Key::C;
+  sub.is_minor = true;
+  sub.character = SubjectCharacter::Restless;
+  sub.length_ticks = kTicksPerBar * 2;
+
+  // Ascending chromatic scale from C4.
+  const uint8_t pitches[] = {60, 61, 62, 63, 64, 65, 66, 67};
+  for (int idx = 0; idx < 8; ++idx) {
+    NoteEvent note;
+    note.start_tick = static_cast<Tick>(idx) * kTicksPerBeat;
+    note.duration = kTicksPerBeat;
+    note.pitch = pitches[idx];
+    note.velocity = 80;
+    note.voice = 0;
+    note.source = BachNoteSource::FugueSubject;
+    sub.notes.push_back(note);
+  }
+  return sub;
+}
+
+TEST(ChromaticArchetypeTest, StrongerContraryMotion) {
+  Subject subject = makeChromaticSubject();
+
+  int total_contrary = 0;
+  int total_chromatic_steps = 0;
+
+  for (uint32_t seed = 1; seed <= 25; ++seed) {
+    Countersubject cs = generateCountersubject(
+        subject, seed, 10, FugueArchetype::Chromatic);
+    ASSERT_GT(cs.noteCount(), 1u);
+
+    for (size_t idx = 0; idx + 1 < cs.noteCount(); ++idx) {
+      // Only check at positions where subject has chromatic step.
+      Tick cs_tick = cs.notes[idx].start_tick;
+      int subj_motion = 0;
+      for (size_t sdx = 0; sdx + 1 < subject.notes.size(); ++sdx) {
+        if (subject.notes[sdx].start_tick <= cs_tick &&
+            subject.notes[sdx + 1].start_tick > cs_tick) {
+          subj_motion = directedInterval(subject.notes[sdx].pitch,
+                                         subject.notes[sdx + 1].pitch);
+          break;
+        }
+      }
+      // Only count if subject step is chromatic (1 semitone).
+      if (std::abs(subj_motion) != 1) continue;
+
+      int cs_motion = directedInterval(cs.notes[idx].pitch,
+                                       cs.notes[idx + 1].pitch);
+      if (cs_motion == 0) continue;
+
+      total_chromatic_steps++;
+      if ((cs_motion > 0 && subj_motion < 0) ||
+          (cs_motion < 0 && subj_motion > 0)) {
+        total_contrary++;
+      }
+    }
+  }
+
+  ASSERT_GT(total_chromatic_steps, 0);
+  float rate = static_cast<float>(total_contrary) /
+               static_cast<float>(total_chromatic_steps);
+  EXPECT_GE(rate, 0.60f)
+      << "Contrary motion rate at chromatic steps: " << rate;
+}
+
+TEST(ChromaticArchetypeTest, HasChromaticPassingTones) {
+  Subject subject = makeChromaticSubject();
+
+  bool found_passing = false;
+  for (uint32_t seed = 1; seed <= 30; ++seed) {
+    Countersubject cs = generateCountersubject(
+        subject, seed, 10, FugueArchetype::Chromatic);
+    for (const auto& note : cs.notes) {
+      if (note.source == BachNoteSource::ChromaticPassing) {
+        found_passing = true;
+        break;
+      }
+    }
+    if (found_passing) break;
+  }
+  EXPECT_TRUE(found_passing)
+      << "At least one seed should produce ChromaticPassing notes";
+}
+
+TEST(ChromaticArchetypeTest, PassingTonesOnWeakBeats) {
+  Subject subject = makeChromaticSubject();
+
+  for (uint32_t seed = 1; seed <= 25; ++seed) {
+    Countersubject cs = generateCountersubject(
+        subject, seed, 10, FugueArchetype::Chromatic);
+    for (const auto& note : cs.notes) {
+      if (note.source != BachNoteSource::ChromaticPassing) continue;
+      uint8_t beat = beatInBar(note.start_tick);
+      EXPECT_TRUE(beat == 1 || beat == 3)
+          << "ChromaticPassing at beat " << static_cast<int>(beat)
+          << " (tick " << note.start_tick << ", seed " << seed << ")";
+    }
+  }
+}
+
+TEST(ChromaticArchetypeTest, PassingTonesResolveByStep) {
+  Subject subject = makeChromaticSubject();
+
+  for (uint32_t seed = 1; seed <= 25; ++seed) {
+    Countersubject cs = generateCountersubject(
+        subject, seed, 10, FugueArchetype::Chromatic);
+    for (size_t idx = 0; idx < cs.noteCount(); ++idx) {
+      if (cs.notes[idx].source != BachNoteSource::ChromaticPassing) continue;
+      // Check neighbor before.
+      if (idx > 0) {
+        int iv = absoluteInterval(cs.notes[idx].pitch,
+                                  cs.notes[idx - 1].pitch);
+        EXPECT_LE(iv, 2)
+            << "Passing tone not stepwise from predecessor (seed " << seed
+            << ", idx " << idx << ")";
+      }
+      // Check neighbor after (relaxed: snap may adjust successor pitch).
+      if (idx + 1 < cs.noteCount()) {
+        int iv = absoluteInterval(cs.notes[idx].pitch,
+                                  cs.notes[idx + 1].pitch);
+        EXPECT_LE(iv, 4)
+            << "Passing tone too far from successor (seed " << seed
+            << ", idx " << idx << ", interval " << iv << ")";
+      }
+    }
+  }
+}
+
+TEST(ChromaticArchetypeTest, PassingLimitedCount) {
+  Subject subject = makeChromaticSubject();
+  constexpr int kMaxExpected = 2;  // max_consecutive_chromatic / 2 = 4 / 2
+
+  for (uint32_t seed = 1; seed <= 25; ++seed) {
+    Countersubject cs = generateCountersubject(
+        subject, seed, 10, FugueArchetype::Chromatic);
+    int passing_count = 0;
+    for (const auto& note : cs.notes) {
+      if (note.source == BachNoteSource::ChromaticPassing) passing_count++;
+    }
+    EXPECT_LE(passing_count, kMaxExpected)
+        << "Too many ChromaticPassing notes (seed " << seed
+        << "): " << passing_count;
+  }
+}
+
+TEST(ChromaticArchetypeTest, NonChromaticUnaffected) {
+  Subject subject = makeTestSubject();  // Diatonic C major subject.
+
+  const FugueArchetype non_chromatic[] = {
+      FugueArchetype::Compact,
+      FugueArchetype::Cantabile,
+      FugueArchetype::Invertible,
+  };
+
+  for (auto archetype : non_chromatic) {
+    for (uint32_t seed = 1; seed <= 10; ++seed) {
+      Countersubject cs = generateCountersubject(subject, seed, 10, archetype);
+      for (const auto& note : cs.notes) {
+        EXPECT_NE(note.source, BachNoteSource::ChromaticPassing)
+            << "Non-chromatic archetype should not have ChromaticPassing "
+            << "(seed " << seed << ")";
+        EXPECT_TRUE(
+            scale_util::isScaleTone(note.pitch, Key::C, ScaleType::Major))
+            << "Non-chromatic archetype has non-diatonic pitch "
+            << static_cast<int>(note.pitch) << " (seed " << seed << ")";
+      }
+    }
+  }
+}
+
+TEST(ChromaticArchetypeTest, ConsonanceStillAcceptable) {
+  Subject subject = makeChromaticSubject();
+
+  for (uint32_t seed = 1; seed <= 25; ++seed) {
+    Countersubject cs = generateCountersubject(
+        subject, seed, 10, FugueArchetype::Chromatic);
+    ASSERT_GT(cs.noteCount(), 0u);
+
+    int strong_checks = 0;
+    int consonant = 0;
+    for (const auto& cs_note : cs.notes) {
+      uint8_t beat = beatInBar(cs_note.start_tick);
+      if (beat != 0 && beat != 2) continue;
+      if (cs_note.source == BachNoteSource::ChromaticPassing) continue;
+
+      for (const auto& subj_note : subject.notes) {
+        Tick subj_end = subj_note.start_tick + subj_note.duration;
+        if (subj_note.start_tick <= cs_note.start_tick &&
+            subj_end > cs_note.start_tick) {
+          strong_checks++;
+          int abs_int = absoluteInterval(cs_note.pitch, subj_note.pitch);
+          IntervalQuality quality = classifyInterval(abs_int);
+          if (quality == IntervalQuality::PerfectConsonance ||
+              quality == IntervalQuality::ImperfectConsonance) {
+            consonant++;
+          }
+          break;
+        }
+      }
+    }
+
+    if (strong_checks > 0) {
+      float rate = static_cast<float>(consonant) /
+                   static_cast<float>(strong_checks);
+      EXPECT_GE(rate, 0.60f)
+          << "Strong-beat consonance too low (seed " << seed << "): " << rate;
     }
   }
 }

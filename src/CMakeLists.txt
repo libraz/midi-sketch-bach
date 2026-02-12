@@ -58,8 +58,11 @@ set(BACH_LIB_SOURCES
 
   # fugue/
   fugue/fugue_config.cpp
+  fugue/archetype_policy.cpp
+  fugue/archetype_scorer.cpp
   fugue/fugue_structure.cpp
   fugue/subject.cpp
+  fugue/subject_params.cpp
   fugue/subject_validator.cpp
   fugue/answer.cpp
   fugue/countersubject.cpp

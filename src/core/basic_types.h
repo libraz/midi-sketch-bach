@@ -124,6 +124,24 @@ const char* toccataArchetypeToString(ToccataArchetype archetype);
 /// @return Parsed archetype. Defaults to ToccataArchetype::Dramaticus on unrecognized input.
 ToccataArchetype toccataArchetypeFromString(const std::string& str);
 
+// ---------------------------------------------------------------------------
+// Enums: Fugue archetypes
+// ---------------------------------------------------------------------------
+
+/// @brief Archetype classification for fugue subjects.
+///
+/// Each archetype represents a structural strategy that shapes subject
+/// generation, scoring, and development potential.
+enum class FugueArchetype : uint8_t {
+  Compact,     ///< BWV 578, 847. Short Kopfmotiv, fragmentable for sequences.
+  Cantabile,   ///< BWV 542, 538. Through-composed melodic line, smooth motion.
+  Invertible,  ///< BWV 548, 550. Mirror inversion and stretto design.
+  Chromatic    ///< BWV 537, 686. Chromatic progression as structural element.
+};
+
+/// @brief Convert FugueArchetype to string.
+const char* fugueArchetypeToString(FugueArchetype archetype);
+
 /// Section identifiers for toccata structural boundaries.
 enum class ToccataSectionId : uint8_t {
   // Dramaticus

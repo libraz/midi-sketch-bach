@@ -375,6 +375,9 @@ ToccataResult generatePerpetuusToccata(const ToccataConfig& config) {
                                   : BachNoteSource::FreeCounterpoint;
       }
     }
+    all_notes = coordinateVoices(
+        std::move(all_notes), num_voices, config.key.tonic);
+
     all_notes = postValidateNotes(
         std::move(all_notes), num_voices, config.key, voice_ranges);
   }

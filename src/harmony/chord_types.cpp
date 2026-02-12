@@ -236,4 +236,28 @@ bool isChordTone(uint8_t pitch, const HarmonicEvent& event) {
   return false;
 }
 
+ChordDegree scaleDegreeToChordDegree(int degree, bool is_minor) {
+  static constexpr ChordDegree kMinorMap[] = {
+      ChordDegree::I,       // 0: i
+      ChordDegree::ii,      // 1: ii°
+      ChordDegree::bIII,    // 2: bIII (= natural minor III)
+      ChordDegree::IV,      // 3: iv
+      ChordDegree::V,       // 4: V (Major forced by harmonic minor)
+      ChordDegree::bVI,     // 5: bVI (= natural minor VI)
+      ChordDegree::viiDim,  // 6: vii°
+  };
+  static constexpr ChordDegree kMajorMap[] = {
+      ChordDegree::I,       // 0: I
+      ChordDegree::ii,      // 1: ii
+      ChordDegree::iii,     // 2: iii
+      ChordDegree::IV,      // 3: IV
+      ChordDegree::V,       // 4: V
+      ChordDegree::vi,      // 5: vi
+      ChordDegree::viiDim,  // 6: vii°
+  };
+
+  if (degree < 0 || degree > 6) return ChordDegree::I;
+  return is_minor ? kMinorMap[degree] : kMajorMap[degree];
+}
+
 }  // namespace bach

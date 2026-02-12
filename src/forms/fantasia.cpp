@@ -7,9 +7,13 @@
 #include <vector>
 
 #include "core/gm_program.h"
+#include "core/note_creator.h"
 #include "core/pitch_utils.h"
 #include "core/rng_util.h"
 #include "core/scale.h"
+#include "counterpoint/bach_rule_evaluator.h"
+#include "counterpoint/collision_resolver.h"
+#include "counterpoint/counterpoint_state.h"
 #include "harmony/chord_types.h"
 #include "harmony/harmonic_event.h"
 #include "organ/organ_techniques.h"
@@ -82,8 +86,8 @@ std::vector<NoteEvent> generateOrnamentalMelody(const HarmonicEvent& event,
   std::vector<NoteEvent> notes;
 
   // Ornamental melody sits in the upper register of Manual I.
-  constexpr uint8_t kMelodyLow = 60;   // C4
-  constexpr uint8_t kMelodyHigh = 84;  // C6
+  constexpr uint8_t kMelodyLow = 67;   // G4
+  constexpr uint8_t kMelodyHigh = 88;  // E6
 
   auto scale_tones = getScaleTones(event.key, event.is_minor, kMelodyLow, kMelodyHigh);
   if (scale_tones.empty()) {
@@ -194,8 +198,8 @@ std::vector<NoteEvent> generateSustainedChords(const HarmonicTimeline& timeline,
   std::vector<NoteEvent> notes;
 
   // Sustained chords sit in the middle register of Manual II.
-  constexpr uint8_t kChordLow = 48;   // C3
-  constexpr uint8_t kChordHigh = 72;  // C5
+  constexpr uint8_t kChordLow = 52;   // E3
+  constexpr uint8_t kChordHigh = 76;  // E5
 
   Tick current_tick = 0;
   bool use_whole = rng::rollProbability(rng, 0.5f);
@@ -256,8 +260,8 @@ std::vector<NoteEvent> generateCountermelody(const HarmonicEvent& event,
   std::vector<NoteEvent> notes;
 
   // Countermelody sits in the Positiv range, focusing on the middle register.
-  constexpr uint8_t kCounterLow = 55;   // G3
-  constexpr uint8_t kCounterHigh = 79;  // G5
+  constexpr uint8_t kCounterLow = 43;   // G2
+  constexpr uint8_t kCounterHigh = 64;  // E4
 
   auto scale_tones =
       getScaleTones(event.key, event.is_minor, kCounterLow, kCounterHigh);
@@ -423,9 +427,16 @@ FantasiaResult generateFantasia(const FantasiaConfig& config) {
     return result;
   }
 
-  // Step 2: Create harmonic timeline with beat-level resolution.
-  HarmonicTimeline timeline =
-      HarmonicTimeline::createStandard(config.key, target_duration, HarmonicResolution::Beat);
+  // Step 2: Create harmonic timeline with Baroque-favored progression.
+  const ProgressionType kProgTypes[] = {
+      ProgressionType::DescendingFifths,
+      ProgressionType::ChromaticCircle,
+      ProgressionType::BorrowedChord,
+  };
+  auto prog = kProgTypes[config.seed % 3];
+  HarmonicTimeline timeline = HarmonicTimeline::createProgression(
+      config.key, target_duration, HarmonicResolution::Beat, prog);
+  timeline.applyCadence(CadenceType::Perfect, config.key);
 
   // Step 3: Generate notes for each voice.
   //
@@ -464,6 +475,114 @@ FantasiaResult generateFantasia(const FantasiaConfig& config) {
   if (num_voices >= 4) {
     auto bass_notes = generateSlowBass(timeline, target_duration);
     all_notes.insert(all_notes.end(), bass_notes.begin(), bass_notes.end());
+  }
+
+  // ---- createBachNote coordination pass (vertical dissonance control) ----
+  {
+    auto fantasia_low = [](uint8_t v) -> uint8_t {
+      switch (v) {
+        case 0: return 67;  // melody
+        case 1: return 52;  // chords
+        case 2: return 43;  // counter
+        case 3: return organ_range::kPedalLow;
+        default: return 52;
+      }
+    };
+    auto fantasia_high = [](uint8_t v) -> uint8_t {
+      switch (v) {
+        case 0: return 88;
+        case 1: return 76;
+        case 2: return 64;
+        case 3: return organ_range::kPedalHigh;
+        default: return 76;
+      }
+    };
+
+    BachRuleEvaluator cp_rules(num_voices);
+    cp_rules.setFreeCounterpoint(true);
+    CollisionResolver cp_resolver;
+    CounterpointState cp_state;
+    cp_state.setKey(config.key.tonic);
+    for (uint8_t v = 0; v < num_voices; ++v) {
+      cp_state.registerVoice(v, fantasia_low(v), fantasia_high(v));
+    }
+
+    std::sort(all_notes.begin(), all_notes.end(),
+              [](const NoteEvent& a, const NoteEvent& b) {
+                return a.start_tick < b.start_tick;
+              });
+
+    std::vector<NoteEvent> coordinated;
+    coordinated.reserve(all_notes.size());
+    int accepted_count = 0;
+    int total_count = 0;
+
+    size_t idx = 0;
+    while (idx < all_notes.size()) {
+      Tick current_tick = all_notes[idx].start_tick;
+      size_t group_end = idx;
+      while (group_end < all_notes.size() &&
+             all_notes[group_end].start_tick == current_tick) {
+        ++group_end;
+      }
+
+      // Sort group: pedal first, then lower voices first.
+      std::sort(all_notes.begin() + static_cast<ptrdiff_t>(idx),
+                all_notes.begin() + static_cast<ptrdiff_t>(group_end),
+                [num_voices](const NoteEvent& a, const NoteEvent& b) {
+                  bool a_pedal = (a.voice == num_voices - 1 && num_voices >= 4);
+                  bool b_pedal = (b.voice == num_voices - 1 && num_voices >= 4);
+                  if (a_pedal != b_pedal) return a_pedal;
+                  return a.voice > b.voice;
+                });
+
+      for (size_t j = idx; j < group_end; ++j) {
+        const auto& note = all_notes[j];
+        ++total_count;
+
+        if (note.source == BachNoteSource::PedalPoint) {
+          cp_state.addNote(note.voice, note);
+          coordinated.push_back(note);
+          ++accepted_count;
+          continue;
+        }
+
+        BachNoteOptions opts;
+        opts.voice = note.voice;
+        opts.desired_pitch = note.pitch;
+        opts.tick = note.start_tick;
+        opts.duration = note.duration;
+        opts.velocity = note.velocity;
+        opts.source = note.source;
+
+        auto result = createBachNote(&cp_state, &cp_rules, &cp_resolver, opts);
+        if (result.accepted) {
+          coordinated.push_back(result.note);
+          ++accepted_count;
+        }
+      }
+      idx = group_end;
+    }
+
+    fprintf(stderr, "[Fantasia] createBachNote: accepted %d/%d (%.0f%%)\n",
+            accepted_count, total_count,
+            total_count > 0 ? 100.0 * accepted_count / total_count : 0.0);
+    all_notes = std::move(coordinated);
+  }
+
+  // ---- postValidateNotes safety net (parallel 5ths/8ths repair) ----
+  {
+    std::vector<std::pair<uint8_t, uint8_t>> voice_ranges;
+    for (uint8_t v = 0; v < num_voices; ++v) {
+      uint8_t lo = (v == 0) ? 67 : (v == 1) ? 52 : (v == 2) ? 43
+                                              : organ_range::kPedalLow;
+      uint8_t hi = (v == 0) ? 88 : (v == 1) ? 76 : (v == 2) ? 64
+                                              : organ_range::kPedalHigh;
+      voice_ranges.push_back({lo, hi});
+    }
+    PostValidateStats pv_stats;
+    all_notes = postValidateNotes(
+        std::move(all_notes), num_voices, config.key, voice_ranges, &pv_stats);
   }
 
   // Step 4: Create tracks and assign notes by voice_id.

@@ -307,10 +307,12 @@ float SubjectValidator::scoreTonalStability(const Subject& subject) const {
     score += 0.25f;
   }
 
-  // End on tonic = bonus.
+  // End on tonic or dominant = bonus.
   int end_class = getPitchClass(subject.notes.back().pitch);
   if (end_class == tonic_class) {
     score += 0.3f;
+  } else if (end_class == dominant_class) {
+    score += 0.25f;
   }
 
   // Count scale-tone usage.

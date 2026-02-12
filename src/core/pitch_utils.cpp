@@ -248,4 +248,18 @@ bool isAllowedChromatic(uint8_t pitch, Key key, ScaleType scale,
   return false;
 }
 
+size_t findClosestToneIndex(const std::vector<uint8_t>& tones, uint8_t target) {
+  if (tones.empty()) return 0;
+  size_t best = 0;
+  int best_dist = std::abs(static_cast<int>(tones[0]) - static_cast<int>(target));
+  for (size_t i = 1; i < tones.size(); ++i) {
+    int dist = std::abs(static_cast<int>(tones[i]) - static_cast<int>(target));
+    if (dist < best_dist) {
+      best = i;
+      best_dist = dist;
+    }
+  }
+  return best;
+}
+
 }  // namespace bach
