@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "core/interval.h"
+#include "core/note_creator.h"
 #include "core/pitch_utils.h"
 #include "counterpoint/counterpoint_state.h"
 #include "counterpoint/i_rule_evaluator.h"
@@ -48,7 +49,7 @@ static bool isNearCadence(Tick tick, const std::vector<Tick>& cadence_ticks) {
 /// @return Penalty value (0.0 = no cross-relation, 0.3 = cross-relation detected).
 static float crossRelationPenalty(const CounterpointState& state,
                                   VoiceId voice_id, uint8_t pitch, Tick tick) {
-  int pitch_class = static_cast<int>(pitch) % 12;
+  int pitch_class = getPitchClass(pitch);
   const auto& voices = state.getActiveVoices();
 
   for (VoiceId other : voices) {
@@ -67,7 +68,7 @@ static float crossRelationPenalty(const CounterpointState& state,
       if (dist > kTicksPerBeat) continue;
     }
 
-    int other_pc = static_cast<int>(other_note->pitch) % 12;
+    int other_pc = getPitchClass(other_note->pitch);
     int pc_diff = std::abs(pitch_class - other_pc);
     // Chromatic conflict: pitch classes differ by 1 semitone (or 11 wrapping).
     if (pc_diff == 1 || pc_diff == 11) {
@@ -127,10 +128,8 @@ ParallelCheckResult checkParallelsAndP4Bass(
       int prev_reduced = interval_util::compoundToSimple(prev_ivl);
       int curr_reduced = interval_util::compoundToSimple(ivl);
 
-      bool prev_perfect = (prev_reduced == interval::kUnison ||
-                           prev_reduced == interval::kPerfect5th);
-      bool curr_perfect = (curr_reduced == interval::kUnison ||
-                           curr_reduced == interval::kPerfect5th);
+      bool prev_perfect = interval_util::isPerfectConsonance(prev_reduced);
+      bool curr_perfect = interval_util::isPerfectConsonance(curr_reduced);
 
       if (prev_perfect && curr_perfect && prev_reduced == curr_reduced) {
         MotionType motion = rules.classifyMotion(
@@ -241,10 +240,8 @@ bool CollisionResolver::isSafeToPlace(const CounterpointState& state,
       int prev_reduced = interval_util::compoundToSimple(prev_ivl);
       int curr_reduced = interval_util::compoundToSimple(curr_ivl);
 
-      bool prev_perfect = (prev_reduced == interval::kUnison ||
-                           prev_reduced == interval::kPerfect5th);
-      bool curr_perfect = (curr_reduced == interval::kUnison ||
-                           curr_reduced == interval::kPerfect5th);
+      bool prev_perfect = interval_util::isPerfectConsonance(prev_reduced);
+      bool curr_perfect = interval_util::isPerfectConsonance(curr_reduced);
 
       if (prev_perfect && curr_perfect && prev_reduced == curr_reduced) {
         MotionType motion = rules.classifyMotion(
@@ -354,11 +351,15 @@ PlacementResult CollisionResolver::tryStrategy(
   if (strategy == "chord_tone") {
     // Try consonant intervals with the lowest sounding voice.
     // Check pitches at consonant intervals from desired.
-    static constexpr int kConsonantOffsets[] = {0, 3, 4, 7, 8, 9, -3,
-                                                -4, -7, -8, -9, 12, -12};
+    // Build consonant offsets from canonical consonant intervals.
+    std::vector<int> consonant_offsets;
+    for (int ivl : interval_util::kConsonantIntervals) {
+      consonant_offsets.push_back(ivl);
+      if (ivl != 0) consonant_offsets.push_back(-ivl);
+    }
     float best_penalty = 2.0f;
 
-    for (int offset : kConsonantOffsets) {
+    for (int offset : consonant_offsets) {
       int candidate = static_cast<int>(desired_pitch) + offset;
       if (candidate < 0 || candidate > 127) continue;
 
@@ -368,6 +369,23 @@ PlacementResult CollisionResolver::tryStrategy(
         float penalty = static_cast<float>(std::abs(offset)) / 12.0f *
                         0.3f;
         penalty += crossRelationPenalty(state, voice_id, cand_pitch, tick);
+
+        // Voice spacing penalty: penalize wide gaps between adjacent manual voices.
+        for (VoiceId adj_v = 0; adj_v < state.voiceCount(); ++adj_v) {
+          if (adj_v == voice_id) continue;
+          int vdist = std::abs(static_cast<int>(voice_id) - static_cast<int>(adj_v));
+          if (vdist != 1) continue;  // Adjacent voices only.
+          // Skip pedal voice (lowest) for spacing checks.
+          if (adj_v == state.voiceCount() - 1 && state.voiceCount() >= 3) continue;
+          if (voice_id == state.voiceCount() - 1 && state.voiceCount() >= 3) continue;
+          const NoteEvent* adj_note = state.getLastNote(adj_v);
+          if (!adj_note) continue;
+          int spacing = absoluteInterval(cand_pitch, adj_note->pitch);
+          if (spacing > 12) {
+            penalty += static_cast<float>(spacing - 12) / 7.0f * 0.3f;
+          }
+        }
+
         if (penalty < best_penalty) {
           best_penalty = penalty;
           result.pitch = cand_pitch;
@@ -389,7 +407,7 @@ PlacementResult CollisionResolver::tryStrategy(
     const NoteEvent* prev_note = state.getLastNote(voice_id);
     int prev_pitch_class = -1;
     if (prev_note) {
-      prev_pitch_class = static_cast<int>(prev_note->pitch) % 12;
+      prev_pitch_class = getPitchClass(prev_note->pitch);
     }
 
     for (int delta = 1; delta <= max_search_range_; ++delta) {
@@ -408,25 +426,40 @@ PlacementResult CollisionResolver::tryStrategy(
 
           // Apply melodic quality penalty via MelodicContext scoring.
           if (prev_note) {
-            MelodicContext mel_ctx;
-            mel_ctx.prev_pitches[0] = prev_note->pitch;
-            mel_ctx.prev_count = 1;
-            mel_ctx.prev_direction = 0;
-            // Fill second previous pitch if available.
-            const auto& voice_notes = state.getVoiceNotes(voice_id);
-            if (voice_notes.size() >= 2) {
-              auto it = voice_notes.rbegin();
-              ++it;
-              mel_ctx.prev_pitches[1] = it->pitch;
-              mel_ctx.prev_count = 2;
-              int dir = static_cast<int>(prev_note->pitch) -
-                        static_cast<int>(it->pitch);
-              mel_ctx.prev_direction = (dir > 0) ? 1 : (dir < 0) ? -1 : 0;
-            }
+            MelodicContext mel_ctx = buildMelodicContextFromState(state, voice_id);
             float melodic_score = MelodicContext::scoreMelodicQuality(
                 mel_ctx, cand_pitch);
             // Invert: high melodic quality -> low penalty.
             penalty += (1.0f - melodic_score) * 0.3f;
+
+            // Leap resolution priority: favor candidates that resolve a pending leap.
+            if (mel_ctx.leap_needs_resolution) {
+              int cand_interval = absoluteInterval(cand_pitch, prev_note->pitch);
+              int cand_dir = (cand_pitch > prev_note->pitch) ? 1 : -1;
+              if (cand_interval >= 1 && cand_interval <= 2 &&
+                  cand_dir != mel_ctx.prev_direction) {
+                penalty -= 0.25f;
+                if (penalty < 0.0f) penalty = 0.0f;
+              }
+            }
+
+            // Voice spacing penalty: penalize wide gaps between adjacent manual voices.
+            for (VoiceId adj_v = 0; adj_v < state.voiceCount(); ++adj_v) {
+              if (adj_v == voice_id) continue;
+              int vdist =
+                  std::abs(static_cast<int>(voice_id) - static_cast<int>(adj_v));
+              if (vdist != 1) continue;
+              if (adj_v == state.voiceCount() - 1 && state.voiceCount() >= 3)
+                continue;
+              if (voice_id == state.voiceCount() - 1 && state.voiceCount() >= 3)
+                continue;
+              const NoteEvent* adj_note = state.getLastNote(adj_v);
+              if (!adj_note) continue;
+              int spacing = absoluteInterval(cand_pitch, adj_note->pitch);
+              if (spacing > 12) {
+                penalty += static_cast<float>(spacing - 12) / 7.0f * 0.3f;
+              }
+            }
           }
 
           // Apply cadence voice-leading bonus.
@@ -463,8 +496,36 @@ PlacementResult CollisionResolver::tryStrategy(
   }
 
   if (strategy == "octave_shift") {
-    // Try one octave up, then one octave down.
-    for (int shift : {12, -12}) {
+    // Try octave shifts, preferring the direction that minimizes adjacent voice spacing.
+    auto computeMinAdjacentSpacing = [&](uint8_t pitch) -> int {
+      int min_spacing = 127;
+      for (VoiceId adj_v = 0; adj_v < state.voiceCount(); ++adj_v) {
+        if (adj_v == voice_id) continue;
+        int vdist =
+            std::abs(static_cast<int>(voice_id) - static_cast<int>(adj_v));
+        if (vdist != 1) continue;
+        const NoteEvent* adj_note = state.getLastNote(adj_v);
+        if (!adj_note) continue;
+        int spc = absoluteInterval(pitch, adj_note->pitch);
+        if (spc < min_spacing) min_spacing = spc;
+      }
+      return min_spacing;
+    };
+
+    int up_pitch = static_cast<int>(desired_pitch) + 12;
+    int dn_pitch = static_cast<int>(desired_pitch) - 12;
+    int up_spacing =
+        (up_pitch <= 127)
+            ? computeMinAdjacentSpacing(static_cast<uint8_t>(up_pitch))
+            : 127;
+    int dn_spacing =
+        (dn_pitch >= 0)
+            ? computeMinAdjacentSpacing(static_cast<uint8_t>(dn_pitch))
+            : 127;
+    int first = (up_spacing <= dn_spacing) ? 12 : -12;
+    int second = (first == 12) ? -12 : 12;
+
+    for (int shift : {first, second}) {
       int candidate = static_cast<int>(desired_pitch) + shift;
       if (candidate < 0 || candidate > 127) continue;
 
@@ -474,8 +535,7 @@ PlacementResult CollisionResolver::tryStrategy(
         continue;
 
       // Reject if the octave shift would cross an adjacent voice.
-      if (wouldCrossVoice(state, voice_id, cand_pitch, tick))
-        continue;
+      if (wouldCrossVoice(state, voice_id, cand_pitch, tick)) continue;
 
       result.pitch = cand_pitch;
       result.penalty = 0.7f;
@@ -603,6 +663,33 @@ PlacementResult CollisionResolver::trySuspension(
   Tick prev_tick = tick - kTicksPerBeat;
   const NoteEvent* prev_note = state.getNoteAt(voice_id, prev_tick);
   if (!prev_note) return result;
+
+  // Guard: reject suspension if it would create 3+ consecutive same pitches.
+  // PedalPoint is exempt -- pedal points sustain the same pitch by design.
+  {
+    const auto& vn = state.getVoiceNotes(voice_id);
+    if (vn.size() >= 2) {
+      auto iter = vn.rbegin();
+      uint8_t last = iter->pitch;
+      ++iter;
+      uint8_t second_last = iter->pitch;
+      if (second_last == last && last == prev_note->pitch) {
+        // Already 2 consecutive same pitches matching the suspension pitch;
+        // holding would create a 3rd. Reject unless this is a pedal voice.
+        // Check if any of the recent notes are PedalPoint source.
+        bool is_pedal = false;
+        for (auto pit = vn.rbegin(); pit != vn.rend(); ++pit) {
+          if (pit->source == BachNoteSource::PedalPoint) {
+            is_pedal = true;
+            break;
+          }
+          // Only check last few notes.
+          if (std::distance(vn.rbegin(), pit) >= 3) break;
+        }
+        if (!is_pedal) return result;
+      }
+    }
+  }
 
   uint8_t held_pitch = prev_note->pitch;
 

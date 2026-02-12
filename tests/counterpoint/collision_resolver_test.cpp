@@ -399,10 +399,12 @@ TEST_F(CollisionResolverTest, DissonantLeapNotAllowedWithNextPitch) {
 // ---------------------------------------------------------------------------
 
 TEST_F(CollisionResolverTest, SuspensionStrategyHeldPitch) {
-  // Set up: voice 0 played D4(62) on the previous beat, voice 1 has C4(60)
+  // Set up: voice 0 played E4(64) then D4(62), voice 1 has C4(60)
   // on the current beat. D4 held against C4 = M2 (dissonant), and
   // resolving down to C4(60) would produce unison (consonant).
-  state.addNote(0, {0, 480, 62, 80, 0});    // Voice 0: D4 at tick 0.
+  // First note is E4 (not D4) to avoid triggering the same-pitch repetition
+  // guard that rejects suspensions creating 3+ consecutive same pitches.
+  state.addNote(0, {0, 480, 64, 80, 0});    // Voice 0: E4 at tick 0.
   state.addNote(1, {480, 480, 60, 80, 1});   // Voice 1: C4 at tick 480.
 
   // Try suspension at tick 480 (beat 1, weak beat).

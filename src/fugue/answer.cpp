@@ -28,8 +28,7 @@ Answer generateRealAnswer(const Subject& subject, Key dominant_key) {
     int new_pitch = static_cast<int>(note.pitch) + interval::kPerfect5th;
 
     // Clamp to valid MIDI range.
-    if (new_pitch > 127) new_pitch = 127;
-    if (new_pitch < 0) new_pitch = 0;
+    new_pitch = clampPitch(new_pitch, 0, 127);
 
     transposed.pitch = static_cast<uint8_t>(new_pitch);
     transposed.source = BachNoteSource::FugueAnswer;
@@ -210,8 +209,7 @@ Answer generateAnswer(const Subject& subject, AnswerType type) {
 
     // Pitch bounds from subject.
     int floor_pitch = static_cast<int>(subject.lowestPitch());
-    int ceil_pitch = static_cast<int>(subject.highestPitch()) + 12;
-    if (ceil_pitch > 127) ceil_pitch = 127;
+    int ceil_pitch = clampPitch(static_cast<int>(subject.highestPitch()) + 12, 0, 127);
 
     int ending = normalizeEndingPitch(target_pc, prev_pitch, max_leap,
                                       dominant_key, scale,

@@ -67,6 +67,7 @@ class NoteSource(IntEnum):
     CHROMATIC_PASSING = 14
     FALSE_ENTRY = 15
     CODA = 16
+    SEQUENCE_NOTE = 17
 
 
 # String name used in output.json -> NoteSource mapping.
@@ -88,6 +89,7 @@ SOURCE_STRING_MAP: Dict[str, NoteSource] = {
     "chromatic_passing": NoteSource.CHROMATIC_PASSING,
     "false_entry": NoteSource.FALSE_ENTRY,
     "coda": NoteSource.CODA,
+    "sequence_note": NoteSource.SEQUENCE_NOTE,
 }
 
 

@@ -6,8 +6,10 @@
 
 #include <algorithm>
 #include <cstdlib>
+#include <iterator>
 #include <random>
 
+#include "core/interval.h"
 #include "core/pitch_utils.h"
 #include "core/rng_util.h"
 #include "core/scale.h"
@@ -53,16 +55,6 @@ namespace {
 constexpr Tick kHalfNote = kTicksPerBeat * 2;
 constexpr Tick kQuarterNote = kTicksPerBeat;
 constexpr Tick kEighthNote = kTicksPerBeat / 2;
-
-/// @brief Imperfect consonance intervals (semitones) -- preferred for
-/// countersubject because they avoid parallel 5ths/8ths while sounding good.
-constexpr int kImperfectConsonances[] = {3, 4, 8, 9};
-constexpr int kImperfectConsonanceCount = 4;
-
-/// @brief All consonance intervals (semitones) -- including perfect, used
-/// as fallback when imperfect consonance placement fails range constraints.
-constexpr int kAllConsonances[] = {3, 4, 7, 8, 9, 12};
-constexpr int kAllConsonanceCount = 6;
 
 /// @brief Parameters that shape countersubject generation per character.
 struct CSCharacterParams {
@@ -135,19 +127,21 @@ uint8_t findConsonantPitch(uint8_t subject_pitch, int direction,
                            Key key, ScaleType scale,
                            std::mt19937& gen) {
   // Shuffle through imperfect consonances in the preferred direction.
-  int offsets[kImperfectConsonanceCount];
-  for (int idx = 0; idx < kImperfectConsonanceCount; ++idx) {
-    offsets[idx] = kImperfectConsonances[idx] * direction;
+  constexpr auto kImperfectCount =
+      static_cast<int>(std::size(interval_util::kImperfectConsonantIntervals));
+  int offsets[kImperfectCount];
+  for (int idx = 0; idx < kImperfectCount; ++idx) {
+    offsets[idx] = interval_util::kImperfectConsonantIntervals[idx] * direction;
   }
 
   // Try each offset; pick the first one that stays in range and is diatonic.
   // Shuffle order for variety.
-  for (int idx = kImperfectConsonanceCount - 1; idx > 0; --idx) {
+  for (int idx = kImperfectCount - 1; idx > 0; --idx) {
     int jdx = rng::rollRange(gen, 0, idx);
     std::swap(offsets[idx], offsets[jdx]);
   }
 
-  for (int idx = 0; idx < kImperfectConsonanceCount; ++idx) {
+  for (int idx = 0; idx < kImperfectCount; ++idx) {
     int candidate = static_cast<int>(subject_pitch) + offsets[idx];
     uint8_t snapped = scale_util::nearestScaleTone(
         clampPitch(candidate, 0, 127), key, scale);
@@ -157,9 +151,9 @@ uint8_t findConsonantPitch(uint8_t subject_pitch, int direction,
   }
 
   // Fallback: try all consonances with diatonic snap.
-  for (int idx = 0; idx < kAllConsonanceCount; ++idx) {
+  for (int consonant_interval : interval_util::kConsonantIntervals) {
     int candidate = static_cast<int>(subject_pitch) +
-                    kAllConsonances[idx] * direction;
+                    consonant_interval * direction;
     uint8_t snapped = scale_util::nearestScaleTone(
         clampPitch(candidate, 0, 127), key, scale);
     if (snapped >= low_range && snapped <= high_range) {
@@ -362,8 +356,7 @@ float validateInvertedConsonanceRate(const std::vector<NoteEvent>& cs_notes,
     strong_beat_checks++;
 
     // Invert at the octave: transpose CS up by 12 semitones.
-    int inverted_pitch = static_cast<int>(cs_note.pitch) + 12;
-    if (inverted_pitch > 127) inverted_pitch = cs_note.pitch;
+    int inverted_pitch = clampPitch(static_cast<int>(cs_note.pitch) + 12, 0, 127);
 
     // Find the subject note sounding at this tick.
     for (const auto& subj_note : subject.notes) {

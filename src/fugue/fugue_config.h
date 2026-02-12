@@ -5,6 +5,7 @@
 #define BACH_FUGUE_FUGUE_CONFIG_H
 
 #include <cstdint>
+#include <random>
 
 #include "core/basic_types.h"
 #include "harmony/modulation_plan.h"
@@ -94,6 +95,89 @@ struct FugueEnergyCurve {
     if (energy < 0.4f) return kTicksPerBeat;      // quarter note
     if (energy < 0.7f) return kTicksPerBeat / 2;  // eighth note
     return kTicksPerBeat / 4;                      // sixteenth note
+  }
+
+  /// @brief Select a duration using weighted probabilities based on energy and context.
+  ///
+  /// Weights musical duration choices by beat position, energy level, and
+  /// rhythmic complementarity with an adjacent voice. Returns one of the
+  /// standard Baroque durations:
+  ///   - Whole note (1920), half note (960), dotted quarter (720),
+  ///     quarter note (480), eighth note (240), sixteenth note (120).
+  ///
+  /// @param energy Energy level from getLevel().
+  /// @param tick Current tick position.
+  /// @param rng Random number generator.
+  /// @param other_voice_duration Duration of the most recent note in an adjacent voice
+  ///        (0 = unknown). Used for rhythmic complementarity.
+  /// @return Selected duration in ticks.
+  static Tick selectDuration(float energy, Tick tick, std::mt19937& rng,
+                             Tick other_voice_duration = 0) {
+    // Standard Baroque durations with base weights.
+    struct DurWeight {
+      Tick duration;
+      float weight;
+    };
+    DurWeight candidates[] = {
+        {kTicksPerBar,          0.5f},   // Whole note
+        {kTicksPerBeat * 2,     1.5f},   // Half note
+        {kTicksPerBeat * 3 / 2, 1.2f},   // Dotted quarter
+        {kTicksPerBeat,         3.0f},   // Quarter note
+        {kTicksPerBeat / 2,     2.0f},   // Eighth note
+        {kTicksPerBeat / 4,     0.8f},   // Sixteenth note
+    };
+    constexpr int kNumCandidates = 6;
+
+    // Energy floor: suppress durations shorter than the minimum.
+    Tick min_dur = minDuration(energy);
+    for (int idx = 0; idx < kNumCandidates; ++idx) {
+      if (candidates[idx].duration < min_dur) {
+        candidates[idx].weight = 0.0f;
+      }
+    }
+
+    // Beat position bonuses.
+    bool is_bar_start = (tick % kTicksPerBar == 0);
+    bool is_beat_start = (tick % kTicksPerBeat == 0);
+    for (int idx = 0; idx < kNumCandidates; ++idx) {
+      if (is_bar_start && candidates[idx].duration >= kTicksPerBeat * 2) {
+        candidates[idx].weight *= 2.0f;  // Long notes on bar starts.
+      } else if (is_beat_start && candidates[idx].duration >= kTicksPerBeat) {
+        candidates[idx].weight *= 1.5f;  // Quarter+ on beat starts.
+      }
+    }
+
+    // Rhythmic complementarity: when adjacent voice has short notes, prefer long,
+    // and vice versa.
+    if (other_voice_duration > 0) {
+      bool other_is_short = (other_voice_duration <= kTicksPerBeat / 2);
+      bool other_is_long = (other_voice_duration >= kTicksPerBeat * 2);
+      for (int idx = 0; idx < kNumCandidates; ++idx) {
+        if (other_is_short && candidates[idx].duration >= kTicksPerBeat) {
+          candidates[idx].weight *= 2.0f;
+        } else if (other_is_long && candidates[idx].duration <= kTicksPerBeat / 2) {
+          candidates[idx].weight *= 2.0f;
+        }
+      }
+    }
+
+    // Compute total weight and select.
+    float total = 0.0f;
+    for (int idx = 0; idx < kNumCandidates; ++idx) {
+      total += candidates[idx].weight;
+    }
+    if (total <= 0.0f) return kTicksPerBeat;  // Fallback: quarter note.
+
+    std::uniform_real_distribution<float> dist(0.0f, total);
+    float roll = dist(rng);
+    float cumulative = 0.0f;
+    for (int idx = 0; idx < kNumCandidates; ++idx) {
+      cumulative += candidates[idx].weight;
+      if (roll <= cumulative) {
+        return candidates[idx].duration;
+      }
+    }
+    return kTicksPerBeat;  // Fallback.
   }
 };
 

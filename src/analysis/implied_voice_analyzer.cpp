@@ -6,6 +6,8 @@
 #include <cmath>
 #include <numeric>
 
+#include "core/interval.h"
+
 namespace bach {
 
 namespace {
@@ -41,10 +43,10 @@ uint32_t countImpliedParallels(const std::vector<NoteEvent>& upper,
     int interval = std::abs(static_cast<int>(upper[ui].pitch) -
                             static_cast<int>(lower[li].pitch)) % 12;
 
-    bool is_perfect = (interval == 0 || interval == 7);
+    bool is_perfect = interval_util::isPerfectConsonance(interval);
 
     if (prev_interval >= 0 && is_perfect) {
-      bool prev_perfect = (prev_interval == 0 || prev_interval == 7);
+      bool prev_perfect = interval_util::isPerfectConsonance(prev_interval);
       if (prev_perfect && interval == prev_interval) {
         ++count;
       }

@@ -529,6 +529,21 @@ bool hasCrossRelation(const std::vector<NoteEvent>& notes,
   return false;
 }
 
+/// @brief Get a phase-aware ceiling factor for voice ranges.
+///
+/// Controls the effective upper range of voices based on fugue position,
+/// encouraging the climax to occur in the Develop phase (55-75%) rather
+/// than at the very end.
+///
+/// @param position Normalized position in the fugue (0.0 = start, 1.0 = end).
+/// @return Ceiling factor in [0.0, 1.0] to multiply against the voice range.
+static float getPhaseAwareCeiling(float position) {
+  if (position < 0.25f) return 0.85f;   // Establish: restrained.
+  if (position < 0.55f) return 0.92f;   // Early Develop: opening up.
+  if (position < 0.75f) return 1.00f;   // Climax Zone: full range.
+  return 0.95f;                          // Late Resolve: pulling back.
+}
+
 }  // namespace
 
 FugueResult generateFugue(const FugueConfig& config) {
@@ -1000,6 +1015,34 @@ FugueResult generateFugue(const FugueConfig& config) {
             }
           }
         }
+        // Apply phase-aware ceiling to structural notes too.
+        // If the ceiling would create a parallel perfect, revert to the
+        // original pitch — the structural note was already valid before.
+        if (estimated_duration > 0) {
+          uint8_t pre_ceiling_pitch = fixed_note.pitch;
+          float pos = static_cast<float>(note.start_tick) /
+                      static_cast<float>(estimated_duration);
+          float ceiling = getPhaseAwareCeiling(pos);
+          if (note.voice < num_voices) {
+            auto [lo, hi] = getFugueVoiceRange(note.voice, num_voices);
+            int range = static_cast<int>(hi) - static_cast<int>(lo);
+            int ceiling_pitch = static_cast<int>(lo) +
+                                static_cast<int>(static_cast<float>(range) * ceiling);
+            if (fixed_note.pitch > static_cast<uint8_t>(ceiling_pitch)) {
+              fixed_note.pitch = static_cast<uint8_t>(ceiling_pitch);
+            }
+          }
+          // Revert if ceiling introduced a parallel perfect.
+          if (fixed_note.pitch != pre_ceiling_pitch) {
+            auto par = checkParallelsAndP4Bass(
+                post_state, post_rules, note.voice, fixed_note.pitch,
+                note.start_tick, num_voices);
+            if (par.has_parallel_perfect) {
+              fixed_note.pitch = pre_ceiling_pitch;
+            }
+          }
+        }
+
         post_state.addNote(note.voice, fixed_note);
         validated_notes.push_back(fixed_note);
 
@@ -1043,6 +1086,24 @@ FugueResult generateFugue(const FugueConfig& config) {
                                  static_cast<int>(note.pitch));
         if (snap_dist <= 2) {
           desired_pitch = snap_candidate;
+        }
+      }
+
+      // Phase-aware range ceiling: constrain upper pitch to discourage
+      // climax at the very end of the piece. Applied BEFORE parallel pre-check
+      // so that the pre-check operates on the ceiling-constrained pitch.
+      if (estimated_duration > 0) {
+        float pos = static_cast<float>(note.start_tick) /
+                    static_cast<float>(estimated_duration);
+        float ceiling = getPhaseAwareCeiling(pos);
+        if (note.voice < num_voices) {
+          auto [lo, hi] = getFugueVoiceRange(note.voice, num_voices);
+          int range = static_cast<int>(hi) - static_cast<int>(lo);
+          int ceiling_pitch = static_cast<int>(lo) +
+                              static_cast<int>(static_cast<float>(range) * ceiling);
+          if (desired_pitch > static_cast<uint8_t>(ceiling_pitch)) {
+            desired_pitch = static_cast<uint8_t>(ceiling_pitch);
+          }
         }
       }
 

@@ -51,6 +51,13 @@ bool isPerfectConsonance(int semitones);
 /// @return Inverted interval: e.g. M3 (4) -> m6 (8), P5 (7) -> P4 (5).
 int invertInterval(int semitones);
 
+/// @brief All consonant intervals (semitones): P1, m3, M3, P5, m6, M6, P8.
+/// Note: Perfect 4th is excluded (dissonant in two-voice counterpoint).
+constexpr int kConsonantIntervals[] = {0, 3, 4, 7, 8, 9, 12};
+
+/// @brief Imperfect consonance intervals (semitones): m3, M3, m6, M6.
+constexpr int kImperfectConsonantIntervals[] = {3, 4, 8, 9};
+
 }  // namespace interval_util
 }  // namespace bach
 

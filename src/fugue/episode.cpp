@@ -194,6 +194,9 @@ void generateSevereEpisode(Episode& episode, const std::vector<NoteEvent>& motif
   auto seq_notes =
       generateDiatonicSequence(motif, seq_reps, deg_step, start_tick + motif_dur, key, scale);
   for (auto& note : seq_notes) {
+    note.source = BachNoteSource::SequenceNote;
+  }
+  for (auto& note : seq_notes) {
     note.voice = 0;
     v0_notes.push_back(note);
   }
@@ -219,6 +222,9 @@ void generateSevereEpisode(Episode& episode, const std::vector<NoteEvent>& motif
     int inv_reps = std::max(1, seq_reps - 1);
     auto seq = generateDiatonicSequence(inverted, inv_reps, deg_step,
                                         voice1_start + motif_dur, key, scale);
+    for (auto& note : seq) {
+      note.source = BachNoteSource::SequenceNote;
+    }
     for (auto& note : seq) {
       note.voice = 1;
       v1_notes.push_back(note);
@@ -261,6 +267,9 @@ void generatePlayfulEpisode(Episode& episode, const std::vector<NoteEvent>& moti
   auto seq_notes = generateDiatonicSequence(retrograde, seq_reps, deg_step,
                                             start_tick + motif_dur, key, scale);
   for (auto& note : seq_notes) {
+    note.source = BachNoteSource::SequenceNote;
+  }
+  for (auto& note : seq_notes) {
     note.voice = 0;
     v0_notes.push_back(note);
   }
@@ -286,6 +295,9 @@ void generatePlayfulEpisode(Episode& episode, const std::vector<NoteEvent>& moti
     int inv_reps = std::max(1, seq_reps - 1);
     auto inv_seq = generateDiatonicSequence(inverted, inv_reps, deg_step,
                                             voice1_start + motif_dur, key, scale);
+    for (auto& note : inv_seq) {
+      note.source = BachNoteSource::SequenceNote;
+    }
     for (auto& note : inv_seq) {
       note.voice = 1;
       v1_notes.push_back(note);
@@ -327,6 +339,9 @@ void generateNobleEpisode(Episode& episode, const std::vector<NoteEvent>& motif,
   }
   auto seq_notes =
       generateDiatonicSequence(motif, seq_reps, deg_step, start_tick + motif_dur, key, scale);
+  for (auto& note : seq_notes) {
+    note.source = BachNoteSource::SequenceNote;
+  }
   for (auto& note : seq_notes) {
     note.voice = 0;
     v0_notes.push_back(note);
@@ -399,6 +414,9 @@ void generateRestlessEpisode(Episode& episode, const std::vector<NoteEvent>& mot
   auto seq_notes =
       generateDiatonicSequence(frag0, frag_reps, deg_step, start_tick + frag0_dur, key, scale);
   for (auto& note : seq_notes) {
+    note.source = BachNoteSource::SequenceNote;
+  }
+  for (auto& note : seq_notes) {
     note.voice = 0;
     v0_notes.push_back(note);
   }
@@ -425,6 +443,9 @@ void generateRestlessEpisode(Episode& episode, const std::vector<NoteEvent>& mot
         seq_reps + 1);
     auto dim_seq = generateDiatonicSequence(diminished, dim_reps, deg_step,
                                             voice1_start + dim_dur, key, scale);
+    for (auto& note : dim_seq) {
+      note.source = BachNoteSource::SequenceNote;
+    }
     for (auto& note : dim_seq) {
       note.voice = 1;
       v1_notes.push_back(note);
@@ -791,6 +812,9 @@ Episode generateEpisode(const Subject& subject, Tick start_tick, Tick duration_t
       auto inv_seq = generateDiatonicSequence(inverted, inv_reps, deg_step,
                                               voice4_start + inv_dur, start_key, scale);
       for (auto& note : inv_seq) {
+        note.source = BachNoteSource::SequenceNote;
+      }
+      for (auto& note : inv_seq) {
         note.voice = 4;
         v4_notes.push_back(note);
       }
@@ -816,10 +840,17 @@ Episode generateEpisode(const Subject& subject, Tick start_tick, Tick duration_t
 
   // --- Apply energy-based rhythm density floor ---
   // Clamp note durations to the minimum allowed by the current energy level.
+  // Also cap excessively long notes to preserve rhythmic diversity.
   Tick min_dur = FugueEnergyCurve::minDuration(energy_level);
   for (auto& note : episode.notes) {
     if (note.duration < min_dur) {
       note.duration = min_dur;
+    }
+    // Cap notes that are much longer than the rhythmic context.
+    // Exempt resting voice held tones — they are intentionally whole notes.
+    if (note.duration > min_dur * 4 &&
+        (resting_voice >= num_voices || note.voice != resting_voice)) {
+      note.duration = std::max(min_dur * 2, note.duration / 2);
     }
   }
 
@@ -1025,10 +1056,14 @@ Episode generateFortspinnungEpisode(const Subject& subject, const MotifPool& poo
   }
 
   // Apply energy-based rhythm density floor.
+  // Also cap excessively long notes to preserve rhythmic diversity.
   Tick min_dur = FugueEnergyCurve::minDuration(energy_level);
   for (auto& note : episode.notes) {
     if (note.duration < min_dur) {
       note.duration = min_dur;
+    }
+    if (note.duration > min_dur * 4) {
+      note.duration = std::max(min_dur * 2, note.duration / 2);
     }
   }
 

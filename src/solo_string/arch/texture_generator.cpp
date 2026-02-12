@@ -156,7 +156,7 @@ uint8_t fitPitchToRegister(uint8_t pitch, uint8_t reg_low, uint8_t reg_high) {
     return pitch;
   }
 
-  int pitch_class = static_cast<int>(pitch) % 12;
+  int pitch_class = getPitchClass(pitch);
   int best_pitch = -1;
   int best_distance = 999;
 
@@ -312,7 +312,7 @@ void clampExcessiveLeaps(std::vector<NoteEvent>& notes,
     if (leap <= 12) continue;
 
     // Find the octave-transposition of notes[i] closest to notes[i-1].
-    int pc = static_cast<int>(notes[i].pitch) % 12;
+    int pc = getPitchClass(notes[i].pitch);
     int prev = static_cast<int>(notes[i - 1].pitch);
     int best = static_cast<int>(notes[i].pitch);
     int best_dist = leap;

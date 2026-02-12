@@ -270,5 +270,121 @@ TEST(MelodicContextTest, PhraseGoalNoContextWithGoal) {
   EXPECT_FLOAT_EQ(score, 0.8f);
 }
 
+// ---------------------------------------------------------------------------
+// Rule 8: Unresolved leap penalty / resolution bonus
+// ---------------------------------------------------------------------------
+
+TEST(MelodicContextTest, Rule8_CorrectResolution_Bonus) {
+  // Leap up (C4->G4 = 7 semitones), then step down (resolution).
+  MelodicContext ctx;
+  ctx.prev_pitches[0] = 67;  // G4 (most recent)
+  ctx.prev_pitches[1] = 60;  // C4 (before that)
+  ctx.prev_count = 2;
+  ctx.prev_direction = 1;    // Was ascending
+  ctx.leap_needs_resolution = true;
+
+  // F4 (step down = correct resolution)
+  float resolved = MelodicContext::scoreMelodicQuality(ctx, 65);
+  // D5 (leap up = wrong, consecutive leaps)
+  float unresolved = MelodicContext::scoreMelodicQuality(ctx, 74);
+
+  EXPECT_GT(resolved, unresolved);
+  // Resolution should get strong bonus: base 0.5 + step_after_leap 0.3 + stepwise 0.2
+  // + resolution 0.4 = 1.4 -> clamped to 1.0
+  EXPECT_FLOAT_EQ(resolved, 1.0f);
+}
+
+TEST(MelodicContextTest, Rule8_ConsecutiveLeaps_Penalty) {
+  // Leap up (C4->G4), then another leap up (should be penalized).
+  MelodicContext ctx;
+  ctx.prev_pitches[0] = 67;  // G4
+  ctx.prev_pitches[1] = 60;  // C4
+  ctx.prev_count = 2;
+  ctx.prev_direction = 1;
+  ctx.leap_needs_resolution = true;
+
+  // C5 (another leap up = consecutive leaps)
+  float score = MelodicContext::scoreMelodicQuality(ctx, 72);
+  // Should be penalized: base 0.5 - 0.4 (consecutive leap) = 0.1
+  EXPECT_LT(score, 0.5f);
+}
+
+TEST(MelodicContextTest, Rule8_NoLeapNoEffect) {
+  // No leap pending, Rule 8 should not affect score.
+  MelodicContext ctx;
+  ctx.prev_pitches[0] = 62;  // D4
+  ctx.prev_pitches[1] = 60;  // C4
+  ctx.prev_count = 2;
+  ctx.prev_direction = 1;
+  ctx.leap_needs_resolution = false;  // No leap to resolve
+
+  float score_step = MelodicContext::scoreMelodicQuality(ctx, 64);  // E4 (step up)
+  // Should get normal stepwise bonus but no Rule 8 bonus.
+  EXPECT_GT(score_step, 0.5f);
+  EXPECT_LT(score_step, 1.0f);
+}
+
+TEST(MelodicContextTest, Rule8_SameDirectionStep_MildPenalty) {
+  // Leap down (G3->C3), then step down (same direction = mild penalty).
+  MelodicContext ctx;
+  ctx.prev_pitches[0] = 48;  // C3
+  ctx.prev_pitches[1] = 55;  // G3
+  ctx.prev_count = 2;
+  ctx.prev_direction = -1;   // Was descending
+  ctx.leap_needs_resolution = true;
+
+  // Step down (same direction as leap)
+  float same_dir = MelodicContext::scoreMelodicQuality(ctx, 46);  // Bb2
+  // Step up (opposite direction = correct resolution)
+  float opposite_dir = MelodicContext::scoreMelodicQuality(ctx, 50);  // D3
+
+  EXPECT_GT(opposite_dir, same_dir);
+}
+
+TEST(MelodicContextTest, LeapNeedsResolution_DefaultFalse) {
+  MelodicContext ctx;
+  EXPECT_FALSE(ctx.leap_needs_resolution);
+}
+
+// ---------------------------------------------------------------------------
+// Rule 4: Graduated same-pitch repetition penalty
+// ---------------------------------------------------------------------------
+
+TEST(MelodicContextTest, Rule4_FirstRepetition_MildPenalty) {
+  // First repetition (2 consecutive same pitches) gets only -0.1.
+  MelodicContext ctx;
+  ctx.prev_pitches[0] = 60;
+  ctx.prev_count = 1;
+
+  float repeat_score = MelodicContext::scoreMelodicQuality(ctx, 60);
+  // Base 0.5 - 0.1 (any repetition) = 0.4
+  EXPECT_NEAR(repeat_score, 0.4f, 0.01f);
+}
+
+TEST(MelodicContextTest, Rule4_ThreeConsecutive_StrongerPenalty) {
+  // 3rd consecutive same pitch: -0.1 (base) + -0.2 (3 consecutive) = -0.3 total.
+  MelodicContext ctx;
+  ctx.prev_pitches[0] = 60;
+  ctx.prev_pitches[1] = 60;
+  ctx.prev_count = 2;
+
+  float repeat_score = MelodicContext::scoreMelodicQuality(ctx, 60);
+  // Base 0.5 - 0.3 = 0.2
+  EXPECT_NEAR(repeat_score, 0.2f, 0.01f);
+}
+
+TEST(MelodicContextTest, Rule4_FourConsecutive_HeavyPenalty) {
+  // 4th consecutive same pitch: -0.1 + -0.2 + -0.2 = -0.5 total.
+  MelodicContext ctx;
+  ctx.prev_pitches[0] = 60;
+  ctx.prev_pitches[1] = 60;
+  ctx.prev_pitches[2] = 60;
+  ctx.prev_count = 3;
+
+  float repeat_score = MelodicContext::scoreMelodicQuality(ctx, 60);
+  // Base 0.5 - 0.5 = 0.0
+  EXPECT_NEAR(repeat_score, 0.0f, 0.01f);
+}
+
 }  // namespace
 }  // namespace bach

@@ -1,8 +1,12 @@
-// Tests for createBachNote (Phase 0 stub implementation).
+// Tests for createBachNote (Phase 0 stub implementation) and
+// buildMelodicContextFromState.
 
 #include "core/note_creator.h"
 
 #include <gtest/gtest.h>
+
+#include "counterpoint/counterpoint_state.h"
+#include "counterpoint/melodic_context.h"
 
 namespace bach {
 namespace {
@@ -164,6 +168,118 @@ TEST(CreateBachNoteTest, ExtremeTickAndDurationValues) {
   EXPECT_EQ(result.note.start_tick, 1920u * 100);
   EXPECT_EQ(result.note.duration, 1920u * 4);
   EXPECT_EQ(result.note.pitch, 36);
+}
+
+// ---------------------------------------------------------------------------
+// buildMelodicContextFromState
+// ---------------------------------------------------------------------------
+
+TEST(BuildMelodicContextTest, EmptyState_ReturnsDefault) {
+  CounterpointState state;
+  state.registerVoice(0, 48, 84);
+  auto ctx = buildMelodicContextFromState(state, 0);
+  EXPECT_EQ(ctx.prev_count, 0);
+  EXPECT_FALSE(ctx.leap_needs_resolution);
+  EXPECT_FALSE(ctx.is_leading_tone);
+}
+
+TEST(BuildMelodicContextTest, OneNote_SetsPrevCount1) {
+  CounterpointState state;
+  state.registerVoice(0, 48, 84);
+  state.setKey(Key::C);
+  NoteEvent note;
+  note.voice = 0;
+  note.pitch = 60;
+  note.start_tick = 0;
+  note.duration = 480;
+  state.addNote(0, note);
+
+  auto ctx = buildMelodicContextFromState(state, 0);
+  EXPECT_EQ(ctx.prev_count, 1);
+  EXPECT_EQ(ctx.prev_pitches[0], 60);
+  EXPECT_FALSE(ctx.leap_needs_resolution);
+}
+
+TEST(BuildMelodicContextTest, TwoNotes_SetsPrevCount2) {
+  CounterpointState state;
+  state.registerVoice(0, 48, 84);
+  state.setKey(Key::C);
+
+  NoteEvent note1;
+  note1.voice = 0;
+  note1.pitch = 60;
+  note1.start_tick = 0;
+  note1.duration = 480;
+  state.addNote(0, note1);
+
+  NoteEvent note2;
+  note2.voice = 0;
+  note2.pitch = 67;
+  note2.start_tick = 480;
+  note2.duration = 480;
+  state.addNote(0, note2);
+
+  auto ctx = buildMelodicContextFromState(state, 0);
+  EXPECT_EQ(ctx.prev_count, 2);
+  EXPECT_EQ(ctx.prev_pitches[0], 67);  // Most recent
+  EXPECT_EQ(ctx.prev_pitches[1], 60);  // Previous
+  EXPECT_EQ(ctx.prev_direction, 1);    // Ascending (60->67)
+  EXPECT_TRUE(ctx.leap_needs_resolution);  // 7 semitones >= 5
+}
+
+TEST(BuildMelodicContextTest, StepMotion_NoLeapResolution) {
+  CounterpointState state;
+  state.registerVoice(0, 48, 84);
+  state.setKey(Key::C);
+
+  NoteEvent note1;
+  note1.voice = 0;
+  note1.pitch = 60;
+  note1.start_tick = 0;
+  note1.duration = 480;
+  state.addNote(0, note1);
+
+  NoteEvent note2;
+  note2.voice = 0;
+  note2.pitch = 62;
+  note2.start_tick = 480;
+  note2.duration = 480;
+  state.addNote(0, note2);
+
+  auto ctx = buildMelodicContextFromState(state, 0);
+  EXPECT_FALSE(ctx.leap_needs_resolution);  // 2 semitones < 5
+}
+
+TEST(BuildMelodicContextTest, LeadingTone_Detected) {
+  CounterpointState state;
+  state.registerVoice(0, 48, 84);
+  state.setKey(Key::C);  // Leading tone = B (pitch class 11)
+
+  NoteEvent note;
+  note.voice = 0;
+  note.pitch = 71;  // B4
+  note.start_tick = 0;
+  note.duration = 480;
+  state.addNote(0, note);
+
+  auto ctx = buildMelodicContextFromState(state, 0);
+  EXPECT_TRUE(ctx.is_leading_tone);
+}
+
+TEST(BuildMelodicContextTest, NonLeadingTone_NotDetected) {
+  CounterpointState state;
+  state.registerVoice(0, 48, 84);
+  state.setKey(Key::C);
+
+  NoteEvent note;
+  note.voice = 0;
+  note.pitch = 60;  // C4
+  note.start_tick = 0;
+  note.duration = 480;
+  state.addNote(0, note);
+
+  auto ctx = buildMelodicContextFromState(state, 0);
+  EXPECT_FALSE(ctx.is_leading_tone);
 }
 
 }  // namespace

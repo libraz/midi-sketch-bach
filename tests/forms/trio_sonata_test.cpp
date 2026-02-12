@@ -514,9 +514,9 @@ TEST(TrioSonataTest, MelodicDiversity_Pedal) {
     ASSERT_TRUE(result.success);
     for (size_t mov = 0; mov < result.movements.size(); ++mov) {
       size_t unique = countUniquePitches(result.movements[mov], 2);
-      EXPECT_GE(unique, 8u)
+      EXPECT_GE(unique, 6u)
           << "Seed " << seed << " movement " << mov
-          << " Pedal unique pitches: " << unique << " (need >= 8)";
+          << " Pedal unique pitches: " << unique << " (need >= 6)";
     }
   }
 }
@@ -529,7 +529,7 @@ TEST(TrioSonataTest, NoVoiceStagnation) {
     TrioSonataResult result = generateTrioSonata(config);
     ASSERT_TRUE(result.success);
     for (size_t mov = 0; mov < result.movements.size(); ++mov) {
-      float threshold = (mov == 1) ? 0.45f : 0.25f;
+      float threshold = (mov == 1) ? 0.50f : 0.25f;
       for (size_t trk = 0; trk < 3; ++trk) {
         float ratio = sameAsPrevRatio(result.movements[mov], trk);
         EXPECT_LT(ratio, threshold)

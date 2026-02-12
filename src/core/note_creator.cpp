@@ -13,6 +13,7 @@
 #include "core/pitch_utils.h"
 #include "core/scale.h"
 #include "counterpoint/bach_rule_evaluator.h"
+#include "counterpoint/melodic_context.h"
 #include "counterpoint/collision_resolver.h"
 #include "counterpoint/counterpoint_state.h"
 #include "counterpoint/i_rule_evaluator.h"
@@ -80,6 +81,28 @@ BachCreateNoteResult createBachNote(
   result.note.source = opts.source;
 
   return result;
+}
+
+MelodicContext buildMelodicContextFromState(const CounterpointState& state, VoiceId voice_id) {
+  MelodicContext ctx;
+  const auto& voice_notes = state.getVoiceNotes(voice_id);
+  if (voice_notes.empty()) return ctx;
+  auto iter = voice_notes.rbegin();
+  ctx.prev_pitches[0] = iter->pitch;
+  ctx.prev_count = 1;
+  if (voice_notes.size() >= 2) {
+    auto iter2 = iter;
+    ++iter2;
+    ctx.prev_pitches[1] = iter2->pitch;
+    ctx.prev_count = 2;
+    int dir = static_cast<int>(iter->pitch) - static_cast<int>(iter2->pitch);
+    ctx.prev_direction = (dir > 0) ? 1 : (dir < 0) ? -1 : 0;
+    ctx.leap_needs_resolution = (absoluteInterval(iter->pitch, iter2->pitch) >= 5);
+  }
+  // Leading tone detection: pitch class == (key + 11) % 12
+  uint8_t prev_pc = ctx.prev_pitches[0] % 12;
+  ctx.is_leading_tone = (prev_pc == (static_cast<uint8_t>(state.getKey()) + 11) % 12);
+  return ctx;
 }
 
 namespace {
@@ -159,13 +182,23 @@ std::vector<NoteEvent> postValidateNotes(
     opts.velocity = note.velocity;
     opts.source = note.source;
 
-    // Build melodic context from the last note in the same voice.
+    // Build melodic context from the last 2 notes in the same voice.
     const NoteEvent* prev = state.getLastNote(note.voice);
     if (prev) {
       opts.prev_pitches[0] = prev->pitch;
       opts.prev_count = 1;
-      opts.prev_direction = (note.pitch > prev->pitch) ? 1 :
-                            (note.pitch < prev->pitch) ? -1 : 0;
+      const auto& voice_notes = state.getVoiceNotes(note.voice);
+      if (voice_notes.size() >= 2) {
+        auto iter = voice_notes.rbegin();
+        ++iter;
+        opts.prev_pitches[1] = iter->pitch;
+        opts.prev_count = 2;
+        int dir = static_cast<int>(prev->pitch) - static_cast<int>(iter->pitch);
+        opts.prev_direction = (dir > 0) ? 1 : (dir < 0) ? -1 : 0;
+      } else {
+        opts.prev_direction = (note.pitch > prev->pitch) ? 1 :
+                              (note.pitch < prev->pitch) ? -1 : 0;
+      }
     }
 
     state.setCurrentTick(note.start_tick);

@@ -4,6 +4,8 @@
 
 #include <algorithm>
 
+#include "core/pitch_utils.h"
+
 namespace bach {
 
 GroundBass::GroundBass(std::vector<NoteEvent> bass_notes)
@@ -144,15 +146,7 @@ GroundBass GroundBass::createForKey(const KeySignature& key_sig) {
 
   for (const auto& note : standard.getNotes()) {
     NoteEvent transposed = note;
-    int new_pitch = static_cast<int>(note.pitch) + transpose;
-
-    // Clamp to valid MIDI range [0, 127].
-    if (new_pitch < 0) {
-      new_pitch = 0;
-    }
-    if (new_pitch > 127) {
-      new_pitch = 127;
-    }
+    int new_pitch = clampPitch(static_cast<int>(note.pitch) + transpose, 0, 127);
 
     transposed.pitch = static_cast<uint8_t>(new_pitch);
     transposed_notes.push_back(transposed);

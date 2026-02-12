@@ -36,6 +36,7 @@ struct MelodicContext {
   uint8_t prev_count = 0;                ///< Number of valid previous pitches (0-3).
   int8_t prev_direction = 0;             ///< -1=descending, 0=unknown, 1=ascending.
   bool is_leading_tone = false;          ///< True if prev pitch is the leading tone.
+  bool leap_needs_resolution = false;    ///< True if prev interval was a leap (>= 5 semitones).
 
   /// @brief Evaluate melodic quality of a candidate pitch.
   ///
@@ -43,9 +44,12 @@ struct MelodicContext {
   ///   +0.3  Step after leap in opposite direction (Bach's melodic law)
   ///   +0.2  Stepwise motion (1-2 semitones)
   ///   +0.1  Imperfect consonance interval (3rd or 6th)
-  ///   -0.2  Same-pitch repetition (3+ consecutive)
+  ///   -0.1  Same-pitch repetition (any, mild)
+  ///   -0.2  3 consecutive same pitch (additional, total -0.3)
+  ///   -0.2  4 consecutive same pitch (additional, total -0.5)
   ///   -0.3  Augmented interval leap (tritone)
   ///   -0.5  Leading tone not resolving to tonic (semitone above)
+  ///   +0.4/-0.4  Unresolved leap penalty / resolution bonus (Rule 8)
   ///
   /// Returns 0.5 (neutral) when context has no valid previous pitches.
   ///

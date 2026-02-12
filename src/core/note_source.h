@@ -27,7 +27,8 @@ enum class BachNoteSource : uint8_t {
   PostProcess,      // Modified by post-processing
   ChromaticPassing, // Chromatic passing tone between chord tones
   FalseEntry,       // Truncated subject opening that diverges to free counterpoint
-  Coda              // Coda design value (Principle 4: immutable)
+  Coda,             // Coda design value (Principle 4: immutable)
+  SequenceNote      // Diatonic sequence note (structural protection)
 };
 
 /// @brief Convert BachNoteSource to human-readable string.
@@ -49,15 +50,16 @@ enum class ProtectionLevel : uint8_t {
 ProtectionLevel getProtectionLevel(BachNoteSource source);
 
 /// @brief Check if source is a structural (identity-preserving) note type.
-/// Structural notes are subject, answer, countersubject, pedal, false entry, and coda.
-/// They pass through post-processing without pitch alteration.
+/// Structural notes are subject, answer, countersubject, pedal, false entry, coda,
+/// and sequence notes. They pass through post-processing without pitch alteration.
 inline bool isStructuralSource(BachNoteSource source) {
   return source == BachNoteSource::FugueSubject ||
          source == BachNoteSource::FugueAnswer ||
          source == BachNoteSource::PedalPoint ||
          source == BachNoteSource::Countersubject ||
          source == BachNoteSource::FalseEntry ||
-         source == BachNoteSource::Coda;
+         source == BachNoteSource::Coda ||
+         source == BachNoteSource::SequenceNote;
 }
 
 /// @brief Check if a voice index is the pedal voice for a given voice count.

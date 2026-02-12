@@ -8,6 +8,7 @@
 
 #include "core/basic_types.h"
 #include "core/note_source.h"
+#include "counterpoint/melodic_context.h"
 #include "harmony/key.h"
 
 namespace bach {
@@ -90,6 +91,13 @@ std::vector<NoteEvent> postValidateNotes(
     KeySignature key_sig,
     const std::vector<std::pair<uint8_t, uint8_t>>& voice_ranges,
     PostValidateStats* stats = nullptr);
+
+/// @brief Build a MelodicContext from the counterpoint state for a given voice.
+/// @param state The counterpoint state to query.
+/// @param voice_id The voice to build context for.
+/// @return MelodicContext populated with up to 2 previous pitches, direction,
+///         leap_needs_resolution flag, and leading tone detection.
+MelodicContext buildMelodicContextFromState(const CounterpointState& state, VoiceId voice_id);
 
 }  // namespace bach
 

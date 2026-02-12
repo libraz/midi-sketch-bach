@@ -71,13 +71,20 @@ float MelodicContext::scoreMelodicQuality(const MelodicContext& ctx, uint8_t can
 
   // Rule 3: Imperfect consonance interval (+0.1)
   int reduced = interval_util::compoundToSimple(interval);
-  if (reduced == 3 || reduced == 4 || reduced == 8 || reduced == 9) {
+  if (interval_util::isConsonance(reduced) && !interval_util::isPerfectConsonance(reduced)) {
     score += 0.1f;
   }
 
-  // Rule 4: Same-pitch repetition penalty (-0.2)
-  if (interval == 0 && ctx.prev_count >= 2 && ctx.prev_pitches[0] == ctx.prev_pitches[1]) {
-    score -= 0.2f;
+  // Rule 4: Same-pitch repetition penalty (graduated).
+  // Any repetition gets a mild penalty; consecutive repetitions are progressively penalized.
+  if (interval == 0) {
+    score -= 0.1f;  // Any repetition: mild penalty.
+    if (ctx.prev_count >= 2 && ctx.prev_pitches[0] == ctx.prev_pitches[1]) {
+      score -= 0.2f;  // 3 consecutive same pitch: total -0.3.
+    }
+    if (ctx.prev_count >= 3 && ctx.prev_pitches[1] == ctx.prev_pitches[2]) {
+      score -= 0.2f;  // 4 consecutive same pitch: total -0.5.
+    }
   }
 
   // Rule 5: Augmented interval (tritone) penalty (-0.3)
@@ -96,6 +103,21 @@ float MelodicContext::scoreMelodicQuality(const MelodicContext& ctx, uint8_t can
   // Rule 7: Phrase goal approach bonus (additive, up to goal.bonus).
   if (goal != nullptr) {
     score += computeGoalApproachBonus(candidate, current_tick, *goal);
+  }
+
+  // Rule 8: Unresolved leap penalty / resolution bonus.
+  // Baroque practice: leaps of a 4th or wider demand stepwise resolution
+  // in the opposite direction.
+  if (ctx.leap_needs_resolution) {
+    bool is_step = (interval >= 1 && interval <= 2);
+    bool is_opposite = (direction != 0 && direction != ctx.prev_direction);
+    if (is_step && is_opposite) {
+      score += 0.4f;   // Correct resolution: strong bonus.
+    } else if (interval > 2) {
+      score -= 0.4f;   // Consecutive leaps: strong suppression.
+    } else {
+      score -= 0.15f;  // Same-direction step: mild penalty.
+    }
   }
 
   // Clamp to [0.0, 1.0].

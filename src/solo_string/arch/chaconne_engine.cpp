@@ -494,7 +494,7 @@ ChaconneResult generateChaconne(const ChaconneConfig& config) {
     if (all_notes[idx - 1].source == BachNoteSource::GroundBass) continue;
     int leap = absoluteInterval(all_notes[idx].pitch, all_notes[idx - 1].pitch);
     if (leap > 12) {
-      int pc = static_cast<int>(all_notes[idx].pitch) % 12;
+      int pc = getPitchClass(all_notes[idx].pitch);
       int prev = static_cast<int>(all_notes[idx - 1].pitch);
       int best = static_cast<int>(all_notes[idx].pitch);
       int best_dist = leap;

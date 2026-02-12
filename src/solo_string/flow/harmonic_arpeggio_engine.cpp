@@ -7,6 +7,7 @@
 #include <random>
 
 #include "core/note_source.h"
+#include "core/pitch_utils.h"
 #include "core/rng_util.h"
 #include "harmony/chord_types.h"
 #include "harmony/harmonic_event.h"
@@ -129,7 +130,7 @@ uint8_t fitToRegister(uint8_t pitch, const RegisterRange& range) {
     return pitch;
   }
 
-  int pitch_class = static_cast<int>(pitch) % 12;
+  int pitch_class = getPitchClass(pitch);
 
   // Find the best octave placement within range.
   int best_pitch = -1;
@@ -182,7 +183,7 @@ uint8_t fitToRegisterSmooth(uint8_t pitch, const RegisterRange& range,
     return fitToRegister(pitch, range);
   }
 
-  int pitch_class = static_cast<int>(pitch) % 12;
+  int pitch_class = getPitchClass(pitch);
   int prev = static_cast<int>(prev_pitch);
 
   // Collect all in-range octave candidates for this pitch class.
@@ -417,7 +418,7 @@ bool shouldPreferOpenString(uint8_t pitch,
                             const std::vector<uint8_t>& open_string_pitches,
                             float bias, std::mt19937& rng) {
   // Check if pitch matches any open string (in any octave).
-  int pitch_class = static_cast<int>(pitch) % 12;
+  int pitch_class = getPitchClass(pitch);
   bool has_open_match = false;
 
   for (uint8_t open_pitch : open_string_pitches) {
@@ -605,15 +606,12 @@ HarmonicTimeline buildFlowTimeline(const ArpeggioFlowConfig& config,
                                     ? degreeMinorSemitones(degree)
                                     : degreeSemitones(degree);
       int root_midi = 4 * 12 + static_cast<int>(config.key.tonic) + semitone_offset;
-      chord.root_pitch = static_cast<uint8_t>(
-          std::min(std::max(root_midi, 0), 127));
+      chord.root_pitch = clampPitch(root_midi, 0, 127);
       chord.inversion = 0;
 
       // Bass pitch in octave 2.
-      int bass_pc = static_cast<int>(chord.root_pitch) % 12;
-      int bass_midi = 3 * 12 + bass_pc;  // Octave 2 = (2+1)*12
-      if (bass_midi > 127) bass_midi = 127;
-      if (bass_midi < 0) bass_midi = 0;
+      int bass_pc = getPitchClass(chord.root_pitch);
+      int bass_midi = clampPitch(3 * 12 + bass_pc, 0, 127);  // Octave 2 = (2+1)*12
 
       HarmonicEvent event;
       event.tick = current_tick;
@@ -721,7 +719,7 @@ std::vector<NoteEvent> generateBarNotes(
 
       if (shouldPreferOpenString(pitch, instrument.open_strings,
                                  effective_bias, rng)) {
-        int pitch_class = static_cast<int>(pitch) % 12;
+        int pitch_class = getPitchClass(pitch);
         uint8_t open_pitch = findOpenStringPitch(
             pitch_class, instrument.open_strings, reg_range);
         if (open_pitch > 0) {

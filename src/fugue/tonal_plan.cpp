@@ -125,8 +125,7 @@ HarmonicTimeline TonalPlan::toHarmonicTimeline(Tick total_duration) const {
     chord.degree = ChordDegree::I;
     chord.quality = is_minor ? ChordQuality::Minor : ChordQuality::Major;
     int root_midi = 4 * 12 + static_cast<int>(active_key);  // Octave 3 (C3 base)
-    chord.root_pitch = static_cast<uint8_t>(
-        std::min(std::max(root_midi, 0), 127));
+    chord.root_pitch = clampPitch(root_midi, 0, 127);
     chord.inversion = 0;
 
     HarmonicEvent ev;
