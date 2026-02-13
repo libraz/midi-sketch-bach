@@ -209,10 +209,33 @@ int resolveLeaps(std::vector<NoteEvent>& notes,
         }
       }
 
-      // === Candidate search ===
+      // === Candidate search with next-note lookahead ===
       int resolve_dir = (leap > 0) ? -1 : 1;
       int best_pitch = -1;
       bool best_is_ct = false;
+
+      // Next-note lookahead: if pos+3 exists, check that the candidate
+      // doesn't create a new unresolved leap toward the following note.
+      bool has_next = (pos + 3 < len);
+      int next_pitch = has_next ? static_cast<int>(notes[idxs[pos + 3]].pitch) : -1;
+      // Skip lookahead if next note has zero duration (marked for delete).
+      if (has_next && notes[idxs[pos + 3]].duration == 0) {
+        has_next = false;
+      }
+      // Skip lookahead for tie-like notes (same pitch, adjacent tick).
+      if (has_next && next_pitch == static_cast<int>(notes[i2].pitch)) {
+        Tick i2_end = notes[i2].start_tick + notes[i2].duration;
+        if (notes[idxs[pos + 3]].start_tick <= i2_end) {
+          has_next = false;
+        }
+      }
+
+      // Anchor tone exception: downbeat chord tone at i2 skips lookahead.
+      bool anchor_exception = false;
+      if (notes[i2].start_tick % kTicksPerBeat == 0 && params.is_chord_tone &&
+          params.is_chord_tone(notes[i2].start_tick, notes[i2].pitch)) {
+        anchor_exception = true;
+      }
 
       for (int offset = 1; offset <= 2; ++offset) {
         int cand = static_cast<int>(notes[i1].pitch) + resolve_dir * offset;
@@ -235,12 +258,34 @@ int resolveLeaps(std::vector<NoteEvent>& notes,
                               ? params.is_chord_tone(notes[i2].start_tick, cand_u8)
                               : false;
 
+        // Next-note lookahead rejection: if the candidate creates a new
+        // leap (>= threshold) to the next note, and the followup is not
+        // contrary step, reject it -- unless it's an anchor tone exception.
+        if (has_next && !anchor_exception) {
+          int cand_to_next = next_pitch - cand;
+          if (std::abs(cand_to_next) >= params.leap_threshold) {
+            // Check if next_pitch -> note[pos+4] provides contrary step.
+            bool followup_resolves = false;
+            if (pos + 4 < len) {
+              int followup = static_cast<int>(notes[idxs[pos + 4]].pitch);
+              int followup_motion = followup - next_pitch;
+              bool contrary_dir = (cand_to_next > 0 && followup_motion < 0) ||
+                                  (cand_to_next < 0 && followup_motion > 0);
+              bool step_motion = std::abs(followup_motion) <= 2;
+              followup_resolves = contrary_dir && step_motion;
+            }
+            if (!followup_resolves) continue;  // Reject: would cascade.
+          }
+        }
+
         if (best_pitch < 0 || (cand_is_ct && !best_is_ct)) {
           best_pitch = cand;
           best_is_ct = cand_is_ct;
         }
       }
 
+      // Fallback: if both candidates were rejected (e.g., lookahead rejected
+      // them all), keep the original pitch to avoid cascading violations.
       if (best_pitch >= 0 && static_cast<uint8_t>(best_pitch) != notes[i2].pitch) {
         notes[i2].pitch = static_cast<uint8_t>(best_pitch);
         notes[i2].modified_by |= static_cast<uint8_t>(NoteModifiedBy::LeapResolution);

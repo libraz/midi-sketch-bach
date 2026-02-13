@@ -262,17 +262,32 @@ bool CollisionResolver::isSafeToPlace(const CounterpointState& state,
         }
       }
 
-      // Hidden perfect: approaching a perfect consonance via similar motion
-      // where both voices leap wider than P5 (> 7 semitones). Bach commonly
-      // uses P4/P5 leaps in similar motion to perfect intervals, so only
-      // flag when BOTH voices make large leaps (m6 or wider).
+      // Hidden perfect: approaching a perfect consonance via similar motion.
+      // Outer voice pair on strong beat: flag if either voice leaps (>2st).
+      // Inner voice pairs or weak beat: keep original threshold (>7st both).
       if (curr_perfect) {
         int dir_a = static_cast<int>(pitch) - static_cast<int>(prev_self->pitch);
         int dir_b = static_cast<int>(other_note->pitch) -
                     static_cast<int>(prev_other->pitch);
-        if (dir_a != 0 && dir_b != 0 && (dir_a > 0) == (dir_b > 0) &&
-            std::abs(dir_a) > 7 && std::abs(dir_b) > 7) {
-          return false;
+        if (dir_a != 0 && dir_b != 0 && (dir_a > 0) == (dir_b > 0)) {
+          bool a_outer =
+              voices.empty() || voice_id == voices.front() || voice_id == voices.back();
+          bool b_outer =
+              voices.empty() || other == voices.front() || other == voices.back();
+          bool landing_on_strong = isStrongBeat(tick);
+
+          if (a_outer && b_outer && landing_on_strong) {
+            // Outer voice pair on strong beat: flag if either voice leaps (>2st).
+            int leading_leap = std::max(std::abs(dir_a), std::abs(dir_b));
+            if (leading_leap > 2) {
+              return false;
+            }
+          } else {
+            // Inner voices or weak beat: keep original threshold (>7st both).
+            if (std::abs(dir_a) > 7 && std::abs(dir_b) > 7) {
+              return false;
+            }
+          }
         }
       }
     }

@@ -532,16 +532,56 @@ std::vector<NoteEvent> generatePitchPath(
       }
     }
 
-    // SequenceHead tritonus avoidance: only hard correction in NoteFunction.
-    if (slot.function == NoteFunction::SequenceHead && !result.empty()) {
+    // Tritone avoidance: reject augmented 4th/diminished 5th intervals.
+    // Safety valves:
+    // (1) StructuralTone exempt (subject contour preservation)
+    // (2) Strong-beat diatonic chord tone exempt
+    // (3) Only consecutive tritones trigger correction (single tritone allowed)
+    // (4) Short notes (both <= 240 ticks) exempt
+    if (!result.empty()) {
       int prev = static_cast<int>(result.back().pitch);
       int dist = std::abs(pitch - prev);
       int simple = interval_util::compoundToSimple(dist);
       if (simple == 6) {
-        // Shift ±1 semitone to escape tritone, then snap to scale.
-        int shifted = (pitch > prev) ? pitch + 1 : pitch - 1;
-        pitch = snapToScale(shifted, a.key, a.scale,
-                            a.pitch_floor, a.pitch_ceil);
+        bool exempt = false;
+
+        // (1) StructuralTone exception.
+        if (slot.function == NoteFunction::StructuralTone) exempt = true;
+
+        // (2) Strong-beat diatonic chord tone exception.
+        if (!exempt && slot.start_tick % kTicksPerBeat == 0) {
+          int pc = getPitchClass(static_cast<uint8_t>(pitch));
+          int root = static_cast<int>(a.key);
+          int rel = ((pc - root) % 12 + 12) % 12;
+          // Tonic triad + 7th: root(0), m3(3)/M3(4), P5(7), m7(10)/M7(11).
+          if (rel == 0 || rel == 3 || rel == 4 || rel == 7 ||
+              rel == 10 || rel == 11) {
+            exempt = true;
+          }
+        }
+
+        // (4) Short note exemption: both notes <= 240 ticks.
+        if (!exempt) {
+          Tick prev_dur = result.back().duration;
+          if (prev_dur <= 240 && slot.duration <= 240) exempt = true;
+        }
+
+        // (3) Consecutive tritone check: only fix if previous interval was
+        // also a tritone. For SequenceHead, always fix (original behavior).
+        if (!exempt) {
+          bool prev_was_tritone = false;
+          if (result.size() >= 2) {
+            int pp = static_cast<int>(result[result.size() - 2].pitch);
+            int pd = std::abs(prev - pp);
+            int ps = interval_util::compoundToSimple(pd);
+            prev_was_tritone = (ps == 6);
+          }
+          if (prev_was_tritone || slot.function == NoteFunction::SequenceHead) {
+            int shifted = (pitch > prev) ? pitch + 1 : pitch - 1;
+            pitch = snapToScale(shifted, a.key, a.scale,
+                                a.pitch_floor, a.pitch_ceil);
+          }
+        }
       }
     }
 
@@ -618,6 +658,34 @@ std::vector<NoteEvent> generatePitchPath(
         }
       }
     }
+  }
+
+  // Post-processing tritone enforcement: fix consecutive tritones that
+  // escaped per-note avoidance (max 2 iterations to prevent melody collapse).
+  for (int tritone_pass = 0; tritone_pass < 2; ++tritone_pass) {
+    bool any_fixed = false;
+    for (size_t idx = 2; idx < result.size(); ++idx) {
+      int p0 = static_cast<int>(result[idx - 2].pitch);
+      int p1 = static_cast<int>(result[idx - 1].pitch);
+      int p2 = static_cast<int>(result[idx].pitch);
+      int s01 = interval_util::compoundToSimple(std::abs(p1 - p0));
+      int s12 = interval_util::compoundToSimple(std::abs(p2 - p1));
+      if (s01 == 6 && s12 == 6) {
+        // Both <= 240 ticks: exempt.
+        if (result[idx - 1].duration <= 240 && result[idx].duration <= 240) continue;
+        // Fix the middle note: shift ±1 and snap.
+        int shifted = (p1 > p0) ? p1 + 1 : p1 - 1;
+        int snapped = snapToScale(shifted, a.key, a.scale,
+                                  a.pitch_floor, a.pitch_ceil);
+        if (std::abs(snapped - p0) <= post_max_leap &&
+            std::abs(snapped - p2) <= post_max_leap) {
+          result[idx - 1].pitch = static_cast<uint8_t>(
+              std::max(0, std::min(127, snapped)));
+          any_fixed = true;
+        }
+      }
+    }
+    if (!any_fixed) break;
   }
 
   return result;

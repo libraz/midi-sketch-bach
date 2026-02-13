@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "core/gm_program.h"
+#include "core/melodic_state.h"
 #include "core/note_creator.h"
 #include "core/pitch_utils.h"
 #include "core/rng_util.h"
@@ -16,6 +17,7 @@
 #include "counterpoint/collision_resolver.h"
 #include "counterpoint/counterpoint_state.h"
 #include "counterpoint/leap_resolution.h"
+#include "counterpoint/parallel_repair.h"
 #include "forms/toccata_internal.h"
 #include "harmony/chord_types.h"
 #include "harmony/key.h"
@@ -312,7 +314,10 @@ void generateArpeggioFlourish(const HarmonicTimeline& timeline,
 
   Tick tick = start_tick;
   bool ascending = true;
+  int same_dir_count = 0;
   size_t idx = chord_tones.size() / 2;
+  MelodicState mel_state;
+  uint8_t prev_flourish_pitch = chord_tones[idx];
 
   while (tick < end_tick) {
     // Refresh chord tones at bar boundaries
@@ -329,10 +334,24 @@ void generateArpeggioFlourish(const HarmonicTimeline& timeline,
     if (dur == 0) break;
 
     notes.push_back(makeNote(tick, dur, chord_tones[idx], 0));
+    updateMelodicState(mel_state, prev_flourish_pitch, chord_tones[idx]);
+    prev_flourish_pitch = chord_tones[idx];
     tick += dur;
 
-    // Zigzag with occasional direction reversal
-    if (rng::rollProbability(rng, 0.10f)) ascending = !ascending;
+    // Direction: boundary-aware coin flip with anti-sawtooth prevention.
+    {
+      bool prev_ascending = ascending;
+      if (idx + 1 >= chord_tones.size()) {
+        ascending = false;
+      } else if (idx == 0) {
+        ascending = true;
+      } else {
+        // After 2 consecutive same-direction, 60% reverse (anti-sawtooth).
+        float flip_prob = (same_dir_count >= 2) ? 0.60f : 0.50f;
+        ascending = !rng::rollProbability(rng, flip_prob);
+      }
+      same_dir_count = (ascending == prev_ascending) ? same_dir_count + 1 : 0;
+    }
 
     if (ascending) {
       if (idx + 1 < chord_tones.size()) ++idx;
@@ -438,10 +457,9 @@ Tick selectRecitDuration(std::mt19937& rng) {
 int selectRecitScaleStep(std::mt19937& rng, bool ascending) {
   float roll = rng::rollFloat(rng, 0.0f, 1.0f);
   int magnitude;
-  if (roll < 0.50f) magnitude = 1;                                  // Step (2nd)
-  else if (roll < 0.75f) magnitude = rng::rollRange(rng, 2, 3);    // Skip (3rd/4th)
-  else if (roll < 0.90f) magnitude = rng::rollRange(rng, 4, 5);    // Leap (5th/6th)
-  else magnitude = 7;                                                // Octave
+  if (roll < 0.50f) magnitude = 1;                                // Step (2nd)
+  else if (roll < 0.80f) magnitude = rng::rollRange(rng, 2, 3);  // Skip (3rd/4th)
+  else magnitude = 4;                                              // Max leap (5th)
   return ascending ? magnitude : -magnitude;
 }
 
@@ -472,6 +490,8 @@ std::vector<NoteEvent> generateRecitative(const HarmonicTimeline& timeline,
   size_t mel_idx0 = scale0.size() / 2;
   size_t mel_idx1 = scale1.size() / 2;
   bool ascending = true;
+  MelodicState recit_mel_state;
+  uint8_t prev_recit_pitch = scale0[mel_idx0];
 
   for (Tick bar = 0; bar < recit_bars; ++bar) {
     Tick bar_start = start_tick + bar * kTicksPerBar;
@@ -490,6 +510,7 @@ std::vector<NoteEvent> generateRecitative(const HarmonicTimeline& timeline,
 
     // --- Melody line (scale-indexed movement) ---
     Tick tick = bar_start;
+    bool prev_was_forced = false;
     while (tick < bar_end) {
       Tick dur = selectRecitDuration(rng);
       if (tick + dur > bar_end) dur = bar_end - tick;
@@ -499,12 +520,25 @@ std::vector<NoteEvent> generateRecitative(const HarmonicTimeline& timeline,
       int new_idx = static_cast<int>(mel_idx) + step;
       new_idx = std::max(0, std::min(new_idx,
                                      static_cast<int>(mel_scale.size()) - 1));
+      uint8_t old_recit_pitch = prev_recit_pitch;
       mel_idx = static_cast<size_t>(new_idx);
 
       notes.push_back(makeNote(tick, dur, mel_scale[mel_idx], melody_voice));
+      updateMelodicState(recit_mel_state, old_recit_pitch, mel_scale[mel_idx]);
+      prev_recit_pitch = mel_scale[mel_idx];
       tick += dur;
 
-      if (rng::rollProbability(rng, 0.15f)) ascending = !ascending;
+      // Post-leap contrary enforcement (>= 5st = P4+).
+      // Force contrary once, but not twice consecutively (anti-zigzag).
+      int semitone_interval = std::abs(static_cast<int>(mel_scale[mel_idx]) -
+                                       static_cast<int>(old_recit_pitch));
+      if (semitone_interval >= 5 && !prev_was_forced) {
+        ascending = !ascending;
+        prev_was_forced = true;
+      } else {
+        ascending = (chooseMelodicDirection(recit_mel_state, rng) > 0);
+        prev_was_forced = false;
+      }
     }
 
     // --- Chord layer (sustained diatonic tones) ---
@@ -1077,6 +1111,17 @@ ToccataResult generateDramaticusToccata(const ToccataConfig& config) {
         return isChordTone(p, timeline.getAt(t));
       };
       resolveLeaps(all_notes, lr_params);
+
+      // Second parallel-perfect repair pass after leap resolution.
+      {
+        ParallelRepairParams pp_params;
+        pp_params.num_voices = num_voices;
+        pp_params.scale = config.key.is_minor ? ScaleType::HarmonicMinor : ScaleType::Major;
+        pp_params.key_at_tick = lr_params.key_at_tick;
+        pp_params.voice_range = lr_params.voice_range;
+        pp_params.max_iterations = 1;
+        repairParallelPerfect(all_notes, pp_params);
+      }
     }
   }
 

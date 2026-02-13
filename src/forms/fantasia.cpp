@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "core/gm_program.h"
+#include "core/melodic_state.h"
 #include "core/note_creator.h"
 #include "core/pitch_utils.h"
 #include "core/rng_util.h"
@@ -15,6 +16,7 @@
 #include "counterpoint/collision_resolver.h"
 #include "counterpoint/counterpoint_state.h"
 #include "counterpoint/leap_resolution.h"
+#include "counterpoint/parallel_repair.h"
 #include "harmony/chord_types.h"
 #include "harmony/harmonic_event.h"
 #include "organ/organ_techniques.h"
@@ -121,6 +123,8 @@ std::vector<NoteEvent> generateOrnamentalMelody(const HarmonicEvent& event,
   }
 
   bool ascending = rng::rollProbability(rng, 0.5f);
+  MelodicState orn_mel_state;
+  uint8_t prev_orn_pitch = scale_tones[tone_idx];
 
   while (current_tick < event.tick + event_duration) {
     // Ornamental melody uses quarter and eighth notes.
@@ -138,6 +142,8 @@ std::vector<NoteEvent> generateOrnamentalMelody(const HarmonicEvent& event,
     note.source = BachNoteSource::FreeCounterpoint;
     notes.push_back(note);
 
+    updateMelodicState(orn_mel_state, prev_orn_pitch, note.pitch);
+    prev_orn_pitch = note.pitch;
     current_tick += dur;
 
     // Stepwise motion with occasional leaps for ornamental character.
@@ -170,10 +176,8 @@ std::vector<NoteEvent> generateOrnamentalMelody(const HarmonicEvent& event,
       }
     }
 
-    // Occasionally reverse direction for musical interest.
-    if (rng::rollProbability(rng, 0.15f)) {
-      ascending = !ascending;
-    }
+    // Direction via MelodicState persistence model.
+    ascending = (chooseMelodicDirection(orn_mel_state, rng) > 0);
   }
 
   return notes;
@@ -276,6 +280,8 @@ std::vector<NoteEvent> generateCountermelody(const HarmonicEvent& event,
   // Start from the lower third of the range for contrast with melody.
   size_t tone_idx = scale_tones.size() / 3;
   bool ascending = rng::rollProbability(rng, 0.5f);
+  MelodicState ctr_mel_state;
+  uint8_t prev_ctr_pitch = scale_tones[tone_idx];
 
   while (current_tick < event.tick + event_duration) {
     // Countermelody uses eighth notes for light texture.
@@ -293,6 +299,8 @@ std::vector<NoteEvent> generateCountermelody(const HarmonicEvent& event,
     note.source = BachNoteSource::FreeCounterpoint;
     notes.push_back(note);
 
+    updateMelodicState(ctr_mel_state, prev_ctr_pitch, note.pitch);
+    prev_ctr_pitch = note.pitch;
     current_tick += dur;
 
     // Gentle stepwise motion with occasional direction changes.
@@ -325,10 +333,8 @@ std::vector<NoteEvent> generateCountermelody(const HarmonicEvent& event,
       }
     }
 
-    // Occasional direction reversal.
-    if (rng::rollProbability(rng, 0.2f)) {
-      ascending = !ascending;
-    }
+    // Direction via MelodicState persistence model.
+    ascending = (chooseMelodicDirection(ctr_mel_state, rng) > 0);
   }
 
   return notes;
@@ -603,6 +609,17 @@ FantasiaResult generateFantasia(const FantasiaConfig& config) {
         return isChordTone(p, timeline.getAt(t));
       };
       resolveLeaps(all_notes, lr_params);
+
+      // Second parallel-perfect repair pass after leap resolution.
+      {
+        ParallelRepairParams pp_params;
+        pp_params.num_voices = num_voices;
+        pp_params.scale = config.key.is_minor ? ScaleType::HarmonicMinor : ScaleType::Major;
+        pp_params.key_at_tick = lr_params.key_at_tick;
+        pp_params.voice_range = lr_params.voice_range;
+        pp_params.max_iterations = 1;
+        repairParallelPerfect(all_notes, pp_params);
+      }
     }
   }
 

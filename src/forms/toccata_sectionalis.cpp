@@ -6,10 +6,12 @@
 
 #include <cmath>
 
+#include "core/melodic_state.h"
 #include "core/note_creator.h"
 #include "core/pitch_utils.h"
 #include "harmony/key.h"
 #include "counterpoint/leap_resolution.h"
+#include "counterpoint/parallel_repair.h"
 #include "ornament/ornament_engine.h"
 
 namespace bach {
@@ -177,6 +179,8 @@ std::vector<NoteEvent> generateQuasiFugalSection(
 
     size_t idx = base_idx;
     bool ascending = rng::rollProbability(rng, 0.5f);
+    MelodicState qf_mel_state;
+    uint8_t prev_qf_pitch = scale[idx];
     Tick tick = free_start;
     while (tick < end_tick) {
       Tick dur = rng::rollProbability(rng, 0.5f) ? kEighthNote : kQuarterNote;
@@ -191,10 +195,14 @@ std::vector<NoteEvent> generateQuasiFugalSection(
         if (idx >= static_cast<size_t>(step)) idx -= step;
         else { ascending = true; if (idx + step < scale.size()) idx += step; }
       }
-      if (rng::rollProbability(rng, 0.12f)) ascending = !ascending;
 
       notes.push_back(makeNote(tick, dur, scale[idx], v));
+      updateMelodicState(qf_mel_state, prev_qf_pitch, scale[idx]);
+      prev_qf_pitch = scale[idx];
       tick += dur;
+
+      // Direction via MelodicState persistence model.
+      ascending = (chooseMelodicDirection(qf_mel_state, rng) > 0);
     }
   }
 
@@ -305,6 +313,8 @@ std::vector<NoteEvent> generateFreeSection(
 
     size_t idx = scale.size() / 2;
     bool ascending = (v == 0);
+    MelodicState free_mel_state;
+    uint8_t prev_free_pitch = scale[idx];
 
     Tick tick = start_tick;
     while (tick < end_tick) {
@@ -351,10 +361,13 @@ std::vector<NoteEvent> generateFreeSection(
       if (scale[idx] > center + kMaxRangeFromCenter) ascending = false;
       else if (scale[idx] < center - kMaxRangeFromCenter) ascending = true;
 
-      if (rng::rollProbability(rng, 0.10f)) ascending = !ascending;
-
       notes.push_back(makeNote(tick, dur, scale[idx], v));
+      updateMelodicState(free_mel_state, prev_free_pitch, scale[idx]);
+      prev_free_pitch = scale[idx];
       tick += dur;
+
+      // Direction via MelodicState persistence model.
+      ascending = (chooseMelodicDirection(free_mel_state, rng) > 0);
     }
   }
 
@@ -496,6 +509,17 @@ ToccataResult generateSectionalisToccata(const ToccataConfig& config) {
         return isChordTone(p, timeline.getAt(t));
       };
       resolveLeaps(all_notes, lr_params);
+
+      // Second parallel-perfect repair pass after leap resolution.
+      {
+        ParallelRepairParams pp_params;
+        pp_params.num_voices = num_voices;
+        pp_params.scale = config.key.is_minor ? ScaleType::HarmonicMinor : ScaleType::Major;
+        pp_params.key_at_tick = lr_params.key_at_tick;
+        pp_params.voice_range = lr_params.voice_range;
+        pp_params.max_iterations = 1;
+        repairParallelPerfect(all_notes, pp_params);
+      }
     }
   }
 

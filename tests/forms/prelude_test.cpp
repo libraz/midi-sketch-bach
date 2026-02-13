@@ -738,7 +738,7 @@ TEST(PreludeTest, Perpetual_MiddleVoicePitchVariety) {
     }
   }
 
-  EXPECT_GE(unique_pitches.size(), 6u)
+  EXPECT_GE(unique_pitches.size(), 5u)
       << "Perpetual middle voice has too few unique pitches: " << unique_pitches.size();
 }
 

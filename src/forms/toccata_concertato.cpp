@@ -6,9 +6,11 @@
 
 #include <cmath>
 
+#include "core/melodic_state.h"
 #include "core/note_creator.h"
 #include "core/pitch_utils.h"
 #include "counterpoint/leap_resolution.h"
+#include "counterpoint/parallel_repair.h"
 #include "ornament/ornament_engine.h"
 
 namespace bach {
@@ -211,6 +213,8 @@ std::vector<NoteEvent> generateMotoPerpetuo_Concertato(
   size_t idx = scale.size() / 2;
   bool ascending = true;
   constexpr int kMaxRangeFromCenter = 14;
+  MelodicState mel_state;
+  uint8_t prev_moto_pitch = scale[idx];
 
   Tick tick = start_tick;
   while (tick < end_tick) {
@@ -256,10 +260,13 @@ std::vector<NoteEvent> generateMotoPerpetuo_Concertato(
     if (scale[idx] > center + kMaxRangeFromCenter) ascending = false;
     else if (scale[idx] < center - kMaxRangeFromCenter) ascending = true;
 
-    if (rng::rollProbability(rng, 0.08f)) ascending = !ascending;
-
     notes.push_back(makeNote(tick, dur, scale[idx], voice));
+    updateMelodicState(mel_state, prev_moto_pitch, scale[idx]);
+    prev_moto_pitch = scale[idx];
     tick += dur;
+
+    // Direction via MelodicState persistence model.
+    ascending = (chooseMelodicDirection(mel_state, rng) > 0);
   }
 
   return notes;
@@ -488,6 +495,17 @@ ToccataResult generateConcertatoToccata(const ToccataConfig& config) {
         return isChordTone(p, timeline.getAt(t));
       };
       resolveLeaps(all_notes, lr_params);
+
+      // Second parallel-perfect repair pass after leap resolution.
+      {
+        ParallelRepairParams pp_params;
+        pp_params.num_voices = num_voices;
+        pp_params.scale = config.key.is_minor ? ScaleType::HarmonicMinor : ScaleType::Major;
+        pp_params.key_at_tick = lr_params.key_at_tick;
+        pp_params.voice_range = lr_params.voice_range;
+        pp_params.max_iterations = 1;
+        repairParallelPerfect(all_notes, pp_params);
+      }
     }
   }
 

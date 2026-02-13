@@ -4,9 +4,9 @@
 
 A MIDI generator dedicated to the instrumental works of Johann Sebastian Bach.
 
-Bach's instrumental music — organ fugues, solo string suites, chamber sonatas — is built on an extraordinary architecture of counterpoint, harmonic logic, and formal structure. This project focuses exclusively on these instrumental works, and attempts to reproduce their structural principles — strict voice-leading, the harmonic flow of the cello suites, the monumental arch of the Chaconne — as playable MIDI, as closely as possible.
+Bach's instrumental music — organ fugues, solo string suites, chamber sonatas — is built on an extraordinary architecture of counterpoint, harmonic logic, and formal structure. This project focuses exclusively on these instrumental works, and attempts to reproduce their structural principles — strict voice-leading, the harmonic flow of the cello suites, the polyphonic texture of organ fugues — as playable MIDI, as closely as possible.
 
-The ultimate goal is to generate a complete, structure-faithful Chaconne (BWV 1004-5).
+There are still many known issues across counterpoint rules, voice-leading, and musical structure. Contributions and feedback are welcome.
 
 Built on the development insights from [midi-sketch](https://github.com/libraz/midi-sketch), a pop/contemporary music generator. Available as a **CLI tool**, **JavaScript/WASM library**, and **interactive web demo**.
 
@@ -31,7 +31,13 @@ Built on the development insights from [midi-sketch](https://github.com/libraz/m
 | Cello Prelude | BWV 1007 (Suite No.1) | Cello |
 | Chaconne | BWV 1004 (Partita No.2) | Violin |
 
-Every fugue enforces proper exposition, real/tonal answer, countersubject, episodes, and stretto. Parallel fifths and octaves are forbidden. Voice crossing is resolved. The Chaconne follows the three-part arch with ground bass integrity throughout.
+**Keyboard Works** — variation form:
+
+| Form | After the manner of | Voices |
+|------|---------------------|--------|
+| Goldberg Variations | BWV 988 | 2-3 |
+
+Every fugue enforces proper exposition, real/tonal answer, countersubject, episodes, and stretto. Parallel fifths and octaves are forbidden. Voice crossing is resolved.
 
 ## Quick Start
 
@@ -52,7 +58,7 @@ import { init, BachGenerator } from '@libraz/midi-sketch-bach';
 
 await init();
 const bach = new BachGenerator();
-bach.generate({ form: 'chaconne', key: 0, isMinor: true, seed: 42 });
+bach.generate({ form: 'fugue', key: 0, isMinor: true, seed: 42 });
 
 const midi = bach.getMidi();     // Uint8Array
 const events = bach.getEvents(); // parsed JSON with note data

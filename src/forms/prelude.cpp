@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "core/gm_program.h"
+#include "core/melodic_state.h"
 #include "core/note_creator.h"
 #include "core/pitch_utils.h"
 #include "core/rng_util.h"
@@ -21,6 +22,7 @@
 #include "harmony/harmonic_event.h"
 #include "counterpoint/cross_relation.h"
 #include "counterpoint/leap_resolution.h"
+#include "counterpoint/parallel_repair.h"
 #include "counterpoint/repeated_note_repair.h"
 #include "fugue/fugue_config.h"
 #include "organ/organ_techniques.h"
@@ -558,10 +560,9 @@ std::vector<NoteEvent> generateMiddleVoice(const HarmonicTimeline& timeline,
                           static_cast<uint8_t>(reg_lo),
                           static_cast<uint8_t>(reg_hi));
 
-  // Directional persistence: maintain direction for 3-4 notes before reversal.
+  // Directional persistence via MelodicState model.
   int direction = 1;  // +1 ascending, -1 descending
-  int notes_in_direction = 0;
-  int direction_limit = rng::rollRange(rng, 3, 4);
+  MelodicState mel_state;
 
   // Cadence region: last 2 beats of the piece.
   Tick cadence_start = (end_tick > kHalfNote) ? end_tick - kHalfNote : start_tick;
@@ -610,31 +611,80 @@ std::vector<NoteEvent> generateMiddleVoice(const HarmonicTimeline& timeline,
                          static_cast<uint8_t>(reg_lo),
                          static_cast<uint8_t>(reg_hi));
     } else {
-      // Weak beat: diatonic step in the current direction (~80%) or
-      // neighbor tone (~20%).
-      bool use_neighbor = rng::rollProbability(rng, 0.20f);
-
-      // Compute the next scale degree in the current direction.
+      // Weak beat: multi-candidate scoring with direction as prior.
       int abs_deg =
           scale_util::pitchToAbsoluteDegree(prev_pitch, event.key, scale_type);
-      int target_deg = abs_deg + direction;
-      uint8_t step_pitch =
-          scale_util::absoluteDegreeToPitch(target_deg, event.key, scale_type);
-      step_pitch = clampPitch(static_cast<int>(step_pitch),
-                              static_cast<uint8_t>(reg_lo),
-                              static_cast<uint8_t>(reg_hi));
 
-      if (use_neighbor) {
-        // Neighbor tone: step away in the opposite direction.
-        int neighbor_deg = abs_deg - direction;
-        uint8_t neighbor_pitch =
-            scale_util::absoluteDegreeToPitch(neighbor_deg, event.key, scale_type);
-        neighbor_pitch = clampPitch(static_cast<int>(neighbor_pitch),
-                                    static_cast<uint8_t>(reg_lo),
-                                    static_cast<uint8_t>(reg_hi));
-        pitch = neighbor_pitch;
+      // Generate candidates: steps in both directions + neighbor.
+      struct Candidate {
+        uint8_t p;
+        float score;
+      };
+      Candidate candidates[4];
+      int n_cand = 0;
+
+      for (int delta : {direction, -direction, direction * 2, -direction * 2}) {
+        int deg = abs_deg + delta;
+        uint8_t cp = scale_util::absoluteDegreeToPitch(deg, event.key, scale_type);
+        cp = clampPitch(static_cast<int>(cp),
+                        static_cast<uint8_t>(reg_lo),
+                        static_cast<uint8_t>(reg_hi));
+        if (n_cand < 4) {
+          float s = 0.0f;
+          // (1) Direction prior: bonus for matching current direction.
+          int motion = static_cast<int>(cp) - static_cast<int>(prev_pitch);
+          if ((direction > 0 && motion > 0) || (direction < 0 && motion < 0)) {
+            s += 0.30f;
+          }
+          // Chord tone bonus.
+          if (isChordTone(cp, event)) s += 0.25f;
+          // Stepwise bonus (prefer small intervals).
+          int semitones = std::abs(motion);
+          if (semitones <= 2) s += 0.20f;
+          else if (semitones <= 4) s += 0.10f;
+          // (2) Register boundary penalty.
+          if (static_cast<int>(cp) <= reg_lo + 2 ||
+              static_cast<int>(cp) >= reg_hi - 2) {
+            s -= 0.15f;
+          }
+          // (4) Same-pitch penalty (repeated_pitch_rate protection).
+          if (cp == prev_pitch) s -= 0.05f;
+          candidates[n_cand++] = {cp, s};
+        }
+      }
+
+      if (n_cand > 0) {
+        // Sort candidates by score descending.
+        for (int a = 0; a < n_cand - 1; ++a) {
+          for (int b = a + 1; b < n_cand; ++b) {
+            if (candidates[b].score > candidates[a].score) {
+              std::swap(candidates[a], candidates[b]);
+            }
+          }
+        }
+
+        // (3) Inertia: if score difference < 0.08, prefer current direction.
+        if (n_cand >= 2 &&
+            candidates[0].score - candidates[1].score < 0.08f) {
+          // Find the candidate matching current direction.
+          for (int ci = 0; ci < n_cand; ++ci) {
+            int m = static_cast<int>(candidates[ci].p) -
+                    static_cast<int>(prev_pitch);
+            if ((direction > 0 && m > 0) || (direction < 0 && m < 0)) {
+              pitch = candidates[ci].p;
+              goto scored_done;
+            }
+          }
+        }
+        pitch = candidates[0].p;
+      scored_done:;
       } else {
-        pitch = step_pitch;
+        // Fallback: step in current direction.
+        pitch = scale_util::absoluteDegreeToPitch(abs_deg + direction,
+                                                  event.key, scale_type);
+        pitch = clampPitch(static_cast<int>(pitch),
+                           static_cast<uint8_t>(reg_lo),
+                           static_cast<uint8_t>(reg_hi));
       }
     }
 
@@ -647,21 +697,15 @@ std::vector<NoteEvent> generateMiddleVoice(const HarmonicTimeline& timeline,
     note.source = BachNoteSource::FreeCounterpoint;
     notes.push_back(note);
 
-    // Update direction tracking.
-    ++notes_in_direction;
-    if (notes_in_direction >= direction_limit) {
-      direction = -direction;
-      notes_in_direction = 0;
-      direction_limit = rng::rollRange(rng, 3, 4);
-    }
+    // Update melodic state and choose next direction.
+    updateMelodicState(mel_state, prev_pitch, pitch);
+    direction = chooseMelodicDirection(mel_state, rng);
 
-    // If we hit the register boundary, reverse direction to stay in range.
+    // If we hit the register boundary, override direction to stay in range.
     if (static_cast<int>(pitch) <= reg_lo + 2 && direction < 0) {
       direction = 1;
-      notes_in_direction = 0;
     } else if (static_cast<int>(pitch) >= reg_hi - 2 && direction > 0) {
       direction = -1;
-      notes_in_direction = 0;
     }
 
     prev_pitch = pitch;
@@ -1222,6 +1266,17 @@ PreludeResult generatePrelude(const PreludeConfig& config) {
       return isChordTone(p, timeline.getAt(t));
     };
     resolveLeaps(all_notes, lr_params);
+
+    // Second parallel-perfect repair pass after leap resolution.
+    {
+      ParallelRepairParams pp_params;
+      pp_params.num_voices = num_voices;
+      pp_params.scale = config.key.is_minor ? ScaleType::HarmonicMinor : ScaleType::Major;
+      pp_params.key_at_tick = lr_params.key_at_tick;
+      pp_params.voice_range = lr_params.voice_range;
+      pp_params.max_iterations = 1;
+      repairParallelPerfect(all_notes, pp_params);
+    }
   }
 
   // Repeated note repair: safety net for remaining consecutive repeated pitches.

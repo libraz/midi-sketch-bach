@@ -11,6 +11,7 @@
 #include "analysis/counterpoint_analyzer.h"
 #include "core/gm_program.h"
 #include "core/interval.h"
+#include "core/melodic_state.h"
 #include "core/note_creator.h"
 #include "core/pitch_utils.h"
 #include "core/rng_util.h"
@@ -19,6 +20,7 @@
 #include "counterpoint/collision_resolver.h"
 #include "counterpoint/counterpoint_state.h"
 #include "counterpoint/leap_resolution.h"
+#include "counterpoint/parallel_repair.h"
 #include "counterpoint/species_rules.h"
 #include "harmony/chord_tone_utils.h"
 #include "harmony/chord_types.h"
@@ -360,6 +362,73 @@ std::vector<NoteEvent> placeInRegister(const std::vector<NoteEvent>& motif,
   return placed;
 }
 
+/// @brief Clamp excessive leaps (>12 semitones) in a note sequence.
+///
+/// Adjusts notes that create intervals larger than the threshold by shifting
+/// them closer by octave. Cadence-window notes and notes resolving a
+/// previous large leap are exempt.
+///
+/// @param notes Notes to clamp (modified in-place).
+/// @param threshold Maximum allowed interval in semitones (default 12).
+/// @param center Register center pitch for voice role preservation.
+/// @param phrase_end End tick of the current phrase (for cadence window).
+void clampExcessiveLeaps(std::vector<NoteEvent>& notes, int threshold,
+                         uint8_t center, Tick phrase_end) {
+  if (notes.size() < 2) return;
+
+  // Cadence window: last 2 beats of phrase are exempt.
+  Tick cadence_start = (phrase_end > kTicksPerBeat * 2)
+                           ? (phrase_end - kTicksPerBeat * 2) : 0;
+
+  bool prev_was_large = false;
+
+  for (size_t idx = 1; idx < notes.size(); ++idx) {
+    int prev_p = static_cast<int>(notes[idx - 1].pitch);
+    int cur_p = static_cast<int>(notes[idx].pitch);
+    int interval = std::abs(cur_p - prev_p);
+
+    // Cadence window exemption.
+    if (notes[idx].start_tick >= cadence_start) {
+      prev_was_large = (interval > threshold);
+      continue;
+    }
+
+    // Skip if previous leap is being resolved (preserve resolution direction).
+    if (prev_was_large) {
+      prev_was_large = (interval > threshold);
+      continue;
+    }
+
+    if (interval > threshold) {
+      // Shift current note by octave toward previous note.
+      int shift = nearestOctaveShift(prev_p - cur_p);
+      int new_pitch = cur_p + shift;
+
+      // Guard: don't cross register center (voice role preservation).
+      bool cur_above_center = (cur_p >= static_cast<int>(center));
+      bool new_above_center = (new_pitch >= static_cast<int>(center));
+      if (cur_above_center != new_above_center) {
+        // Crossing register center -- abort this correction.
+        prev_was_large = true;
+        continue;
+      }
+
+      // Clamp to valid MIDI range.
+      new_pitch = std::max(0, std::min(127, new_pitch));
+
+      // Only apply if the new interval is actually smaller.
+      if (std::abs(new_pitch - prev_p) < interval) {
+        notes[idx].pitch = static_cast<uint8_t>(new_pitch);
+        notes[idx].modified_by |= static_cast<uint8_t>(NoteModifiedBy::OctaveAdjust);
+      }
+
+      prev_was_large = true;
+    } else {
+      prev_was_large = false;
+    }
+  }
+}
+
 /// @brief Shift note start ticks by an offset.
 void shiftTicks(std::vector<NoteEvent>& notes, Tick offset) {
   for (auto& n : notes) {
@@ -424,6 +493,8 @@ std::vector<NoteEvent> generateFiguration(Tick start_tick, Tick end_tick,
 
   uint8_t prev0 = last_pitch;
   uint8_t prev1 = last_pitch;
+  MelodicState mel_state;
+  Tick total_duration = end_tick - start_tick;
 
   while (current < end_tick) {
     Tick remaining = end_tick - current;
@@ -434,19 +505,16 @@ std::vector<NoteEvent> generateFiguration(Tick start_tick, Tick end_tick,
     // Only bar downbeats are "strong" (chord tone anchor).
     bool is_downbeat = (positionInBar(current) == 0);
 
-    // Determine melodic direction preferring contrary motion.
-    int slope = static_cast<int>(prev0) - static_cast<int>(prev1);
-    bool ascending;
-    if (slope > 0) {
-      ascending = rng::rollProbability(rng, 0.3f);
-    } else if (slope < 0) {
-      ascending = rng::rollProbability(rng, 0.7f);
-    } else {
-      ascending = rng::rollProbability(rng, 0.5f);
+    // Update phrase progress.
+    if (total_duration > 0) {
+      mel_state.phrase_progress =
+          static_cast<float>(current - start_tick) / static_cast<float>(total_duration);
     }
 
+    int direction = chooseMelodicDirection(mel_state, rng);
+    bool ascending = (direction > 0);
+
     int abs_deg = scale_util::pitchToAbsoluteDegree(prev0, key, scale);
-    int direction = ascending ? 1 : -1;
 
     uint8_t pitch;
     if (is_downbeat) {
@@ -455,31 +523,16 @@ std::vector<NoteEvent> generateFiguration(Tick start_tick, Tick end_tick,
       if (pitch == prev0) {
         auto chord_tones = collectChordTonesInRange(ev.chord, range_low, range_high);
         if (chord_tones.size() > 1) {
-          int best_dist = 127;
-          uint8_t alt = pitch;
-          for (uint8_t ct : chord_tones) {
-            if (ct != prev0) {
-              int d = absoluteInterval(ct, prev0);
-              if (d < best_dist) { best_dist = d; alt = ct; }
-            }
-          }
-          pitch = alt;
+          // Score candidates for best voice-leading.
+          pitch = selectBestPitch(mel_state, prev0, chord_tones, current, true, rng);
         } else {
           // Shift by one scale step to avoid repetition.
           pitch = scale_util::absoluteDegreeToPitch(abs_deg + direction, key, scale);
         }
       }
     } else {
-      // Mixed motion: 60% step, 32% skip (3rd), 8% leap (4th).
-      float motion_roll = rng::rollFloat(rng, 0.0f, 1.0f);
-      int step;
-      if (motion_roll < 0.60f) {
-        step = 1 * direction;
-      } else if (motion_roll < 0.92f) {
-        step = 2 * direction;
-      } else {
-        step = 3 * direction;  // Perfect 4th max.
-      }
+      int interval_size = chooseMelodicInterval(mel_state, rng);
+      int step = interval_size * direction;
       pitch = scale_util::absoluteDegreeToPitch(abs_deg + step, key, scale);
     }
 
@@ -505,6 +558,7 @@ std::vector<NoteEvent> generateFiguration(Tick start_tick, Tick end_tick,
     notes.push_back(note);
 
     current += dur;
+    updateMelodicState(mel_state, prev0, pitch);
     prev1 = prev0;
     prev0 = pitch;
   }
@@ -547,6 +601,7 @@ void generateUpperVoicePhrase(Tick phrase_start, const std::vector<NoteEvent>& m
 
   // --- Leader: motif + Fortspinnung (bars 1-2) ---
   auto leader_motif = placeInRegister(motif, leader_center, leader_low, leader_high);
+  clampExcessiveLeaps(leader_motif, 12, leader_center, phrase_start + kPhraseTicks);
   setVoice(leader_motif, leader_voice);
   shiftTicks(leader_motif, phrase_start);
 
@@ -642,6 +697,7 @@ void generateUpperVoicePhrase(Tick phrase_start, const std::vector<NoteEvent>& m
 
   follower_imitation =
       placeInRegister(follower_imitation, follower_center, follower_low, follower_high);
+  clampExcessiveLeaps(follower_imitation, 12, follower_center, phrase_start + kPhraseTicks);
   setVoice(follower_imitation, follower_voice);
   shiftTicks(follower_imitation, phrase_start + imitation_offset);
 
@@ -1781,6 +1837,17 @@ TrioSonataMovement generateMovement(const KeySignature& key_sig, Tick num_bars,
         return isChordTone(p, timeline.getAt(t));
       };
       resolveLeaps(validated, lr_params);
+
+      // Second parallel-perfect repair pass after leap resolution.
+      {
+        ParallelRepairParams pp_params;
+        pp_params.num_voices = kTrioVoiceCount;
+        pp_params.scale = scale;
+        pp_params.key_at_tick = lr_params.key_at_tick;
+        pp_params.voice_range = lr_params.voice_range;
+        pp_params.max_iterations = 1;
+        repairParallelPerfect(validated, pp_params);
+      }
     }
 
     for (auto& track : tracks) {
@@ -1895,6 +1962,17 @@ TrioSonataMovement generateMovement(const KeySignature& key_sig, Tick num_bars,
         return isChordTone(p, timeline.getAt(t));
       };
       resolveLeaps(validated, lr_params);
+
+      // Second parallel-perfect repair pass after leap resolution.
+      {
+        ParallelRepairParams pp_params;
+        pp_params.num_voices = kTrioVoiceCount;
+        pp_params.scale = scale;
+        pp_params.key_at_tick = lr_params.key_at_tick;
+        pp_params.voice_range = lr_params.voice_range;
+        pp_params.max_iterations = 1;
+        repairParallelPerfect(validated, pp_params);
+      }
     }
 
     for (auto& track : tracks) {

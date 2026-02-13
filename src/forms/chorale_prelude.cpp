@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "core/gm_program.h"
+#include "core/melodic_state.h"
 #include "core/note_creator.h"
 #include "core/pitch_utils.h"
 #include "core/rng_util.h"
@@ -16,6 +17,7 @@
 #include "counterpoint/collision_resolver.h"
 #include "counterpoint/counterpoint_state.h"
 #include "counterpoint/leap_resolution.h"
+#include "counterpoint/parallel_repair.h"
 #include "harmony/chord_types.h"
 #include "harmony/harmonic_event.h"
 #include "harmony/harmonic_timeline.h"
@@ -326,8 +328,7 @@ std::vector<NoteEvent> generateFiguration(Tick cantus_tick, Tick cantus_dur,
   }
 
   bool ascending = rng::rollProbability(rng, 0.5f);
-  int direction_count = 0;
-  int direction_target = 3 + rng::rollRange(rng, 0, 1);
+  MelodicState mel_state;
   Tick prev_harm_start = timeline.getAt(cantus_tick).tick;
   int neighbor_return = -1;  // Saved tone_idx for neighbor return, -1 = none.
 
@@ -399,6 +400,9 @@ std::vector<NoteEvent> generateFiguration(Tick cantus_tick, Tick cantus_dur,
       }
     }
 
+    uint8_t prev_fig_pitch = notes.empty() ? scale_tones[tone_idx]
+                                            : notes.back().pitch;
+
     NoteEvent note;
     note.start_tick = current_tick;
     note.duration = dur;
@@ -407,6 +411,8 @@ std::vector<NoteEvent> generateFiguration(Tick cantus_tick, Tick cantus_dur,
     note.voice = kFigurationVoice;
     note.source = BachNoteSource::FreeCounterpoint;
     notes.push_back(note);
+
+    updateMelodicState(mel_state, prev_fig_pitch, note.pitch);
 
     current_tick += dur;
 
@@ -448,7 +454,6 @@ std::vector<NoteEvent> generateFiguration(Tick cantus_tick, Tick cantus_dur,
     // Normal stepping with directional persistence.
     if (!did_step) {
       int step = rng::rollProbability(rng, 0.25f) ? 2 : 1;
-      ++direction_count;
 
       bool hit_boundary = false;
       if (ascending) {
@@ -463,8 +468,6 @@ std::vector<NoteEvent> generateFiguration(Tick cantus_tick, Tick cantus_dur,
           } else {
             tone_idx = 0;
           }
-          direction_count = 0;
-          direction_target = 3 + rng::rollRange(rng, 0, 1);
         }
       } else {
         if (tone_idx >= static_cast<size_t>(step)) {
@@ -477,21 +480,13 @@ std::vector<NoteEvent> generateFiguration(Tick cantus_tick, Tick cantus_dur,
           } else if (!scale_tones.empty()) {
             tone_idx = scale_tones.size() - 1;
           }
-          direction_count = 0;
-          direction_target = 3 + rng::rollRange(rng, 0, 1);
         }
       }
 
-      // 3c: Random direction reversal — only when persistence target met
-      // and not at a harmonic boundary (boundary reversals handled above).
-      if (!hit_boundary) {
-        bool can_reverse = direction_count >= direction_target &&
-                           !at_harmony_boundary;
-        if (can_reverse && rng::rollProbability(rng, 0.2f)) {
-          ascending = !ascending;
-          direction_count = 0;
-          direction_target = 3 + rng::rollRange(rng, 0, 1);
-        }
+      // Direction reversal via MelodicState persistence model.
+      if (!hit_boundary && !at_harmony_boundary) {
+        int dir = chooseMelodicDirection(mel_state, rng);
+        ascending = (dir > 0);
       }
     }
   }
@@ -937,6 +932,17 @@ ChoralePreludeResult generateChoralePrelude(const ChoralePreludeConfig& config) 
         return isChordTone(p, timeline.getAt(t));
       };
       resolveLeaps(validated, lr_params);
+
+      // Second parallel-perfect repair pass after leap resolution.
+      {
+        ParallelRepairParams pp_params;
+        pp_params.num_voices = kChoraleVoices;
+        pp_params.scale = config.key.is_minor ? ScaleType::HarmonicMinor : ScaleType::Major;
+        pp_params.key_at_tick = lr_params.key_at_tick;
+        pp_params.voice_range = lr_params.voice_range;
+        pp_params.max_iterations = 1;
+        repairParallelPerfect(validated, pp_params);
+      }
     }
 
     for (auto& track : tracks) {

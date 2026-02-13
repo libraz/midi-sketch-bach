@@ -272,6 +272,92 @@ std::vector<NoteEvent> generateFortspinnung(const MotifPool& pool,
       closeGapIfNeeded(fragment, prev_fragment.back().pitch);
     }
 
+    // --- Tritone repair: eliminate augmented 4th (6 semitones) melodic leaps ---
+    {
+      bool has_tritone = false;
+      for (size_t idx = 1; idx < fragment.size(); ++idx) {
+        int mel = std::abs(static_cast<int>(fragment[idx].pitch) -
+                           static_cast<int>(fragment[idx - 1].pitch));
+        if (mel == 6) {
+          has_tritone = true;
+          break;
+        }
+      }
+
+      // Stage 1: Re-select from pool (3 attempts).
+      if (has_tritone) {
+        for (int attempt = 0; attempt < 3 && has_tritone; ++attempt) {
+          size_t alt_rank = selectFragmentRank(rng, weights, pool.size());
+          const PooledMotif* alt_motif = pool.getByRank(alt_rank);
+          if (alt_motif == nullptr || alt_motif->notes.empty()) continue;
+          std::vector<NoteEvent> alt_frag = alt_motif->notes;
+          if (!prev_fragment.empty()) {
+            closeGapIfNeeded(alt_frag, prev_fragment.back().pitch);
+          }
+          bool alt_tritone = false;
+          for (size_t idx = 1; idx < alt_frag.size(); ++idx) {
+            int mel = std::abs(static_cast<int>(alt_frag[idx].pitch) -
+                               static_cast<int>(alt_frag[idx - 1].pitch));
+            if (mel == 6) {
+              alt_tritone = true;
+              break;
+            }
+          }
+          if (!alt_tritone) {
+            fragment = std::move(alt_frag);
+            has_tritone = false;
+          }
+        }
+      }
+
+      // Stages 2-4: Fix individual tritone intervals.
+      if (has_tritone) {
+        for (size_t idx = 1; idx < fragment.size(); ++idx) {
+          int mel = static_cast<int>(fragment[idx].pitch) -
+                    static_cast<int>(fragment[idx - 1].pitch);
+          if (std::abs(mel) != 6) continue;
+
+          // Stage 2: Octave transposition to eliminate tritone.
+          uint8_t oct_up =
+              (fragment[idx].pitch <= 115) ? fragment[idx].pitch + 12 : fragment[idx].pitch;
+          uint8_t oct_dn =
+              (fragment[idx].pitch >= 12) ? fragment[idx].pitch - 12 : fragment[idx].pitch;
+          int mel_up =
+              std::abs(static_cast<int>(oct_up) - static_cast<int>(fragment[idx - 1].pitch));
+          int mel_dn =
+              std::abs(static_cast<int>(oct_dn) - static_cast<int>(fragment[idx - 1].pitch));
+          if (mel_up != 6 && oct_up <= 127) {
+            fragment[idx].pitch = oct_up;
+            continue;
+          }
+          if (mel_dn != 6 && oct_dn > 0) {
+            fragment[idx].pitch = oct_dn;
+            continue;
+          }
+
+          // Stage 3: Neighbor substitution (+-1 semitone).
+          int shift_dir = (mel > 0) ? -1 : 1;
+          uint8_t shifted = static_cast<uint8_t>(
+              std::clamp(static_cast<int>(fragment[idx].pitch) + shift_dir, 0, 127));
+          if (std::abs(static_cast<int>(shifted) -
+                       static_cast<int>(fragment[idx - 1].pitch)) != 6) {
+            fragment[idx].pitch = shifted;
+            continue;
+          }
+
+          // Stage 4: Duration extension + deletion (protect strong beats).
+          bool is_strong =
+              (fragment[idx].start_tick % kTicksPerBar) % (2 * kTicksPerBeat) == 0;
+          if (!is_strong) {
+            fragment[idx - 1].duration += fragment[idx].duration;
+            fragment.erase(fragment.begin() + static_cast<ptrdiff_t>(idx));
+            --idx;  // Re-check new pair.
+          }
+          break;
+        }
+      }
+    }
+
     // Check if fragment fits within remaining duration.
     Tick frag_dur = motifDuration(fragment);
     if (frag_dur == 0) frag_dur = kTicksPerBeat;

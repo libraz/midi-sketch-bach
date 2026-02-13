@@ -8,6 +8,7 @@
 
 #include "analysis/counterpoint_analyzer.h"
 #include "core/gm_program.h"
+#include "core/melodic_state.h"
 #include "core/note_creator.h"
 #include "core/pitch_utils.h"
 #include "core/rng_util.h"
@@ -18,6 +19,7 @@
 #include "harmony/chord_types.h"
 #include "harmony/harmonic_event.h"
 #include "counterpoint/leap_resolution.h"
+#include "counterpoint/parallel_repair.h"
 #include "counterpoint/repeated_note_repair.h"
 #include "organ/organ_techniques.h"
 
@@ -299,6 +301,102 @@ std::vector<uint8_t> buildGroundBassPitches(const KeySignature& key, int num_not
 }
 
 // ---------------------------------------------------------------------------
+// Resolution target for non-harmonic tones
+// ---------------------------------------------------------------------------
+
+/// @brief Compute resolution target pitch for a non-harmonic tone.
+///
+/// Returns 0 if the current pitch is already a chord tone (no resolution needed).
+/// Otherwise returns a diatonic pitch toward which the next note should resolve,
+/// based on the non-harmonic tone classification:
+///   - Suspension (strong beat, stepwise approach): resolve down by step.
+///   - Passing tone (stepwise approach): continue in same direction.
+///   - Cambiata (skip approach, 3-5 semitones): resolve by contrary step.
+///   - Default: neighbor resolution (step down).
+///
+/// @param current_pitch Current non-harmonic MIDI pitch.
+/// @param prev_pitch Previous MIDI pitch (for approach direction).
+/// @param event Current harmonic event (chord context).
+/// @param key Key (tonic pitch class).
+/// @param is_minor True if minor mode.
+/// @param tick Current tick position for metric-level classification.
+/// @return Resolution target pitch, or 0 if no resolution needed.
+uint8_t findResolutionTarget(uint8_t current_pitch, uint8_t prev_pitch,
+                             const HarmonicEvent& event, Key key,
+                             bool is_minor, Tick tick) {
+  if (isChordTone(current_pitch, event)) return 0;
+
+  int interval = static_cast<int>(current_pitch) - static_cast<int>(prev_pitch);
+  int abs_interval = std::abs(interval);
+  int direction = (interval > 0) ? 1 : -1;
+  bool on_strong = (metricLevel(tick) == MetricLevel::Bar);
+
+  ScaleType scale = is_minor ? ScaleType::HarmonicMinor : ScaleType::Major;
+  int degree = scale_util::pitchToAbsoluteDegree(current_pitch, key, scale);
+
+  if (on_strong && abs_interval <= 2) {
+    // Suspension-like: resolve down by step.
+    return scale_util::absoluteDegreeToPitch(degree - 1, key, scale);
+  }
+  if (abs_interval <= 2) {
+    // Passing tone: continue in same direction.
+    return scale_util::absoluteDegreeToPitch(degree + direction, key, scale);
+  }
+  if (abs_interval >= 3 && abs_interval <= 5) {
+    // Cambiata: resolve by contrary step.
+    return scale_util::absoluteDegreeToPitch(degree - direction, key, scale);
+  }
+  // Default: step down (neighbor resolution).
+  return scale_util::absoluteDegreeToPitch(degree - 1, key, scale);
+}
+
+// ---------------------------------------------------------------------------
+// Scored pitch selection helper
+// ---------------------------------------------------------------------------
+
+/// @brief Select next scale tone index using multi-candidate scoring.
+/// Generates candidates at offsets ±1..±3 from current index, scores each
+/// using the voice dynamics model, and returns the selected index.
+size_t selectNextToneIdx(const std::vector<uint8_t>& scale_tones,
+                         size_t current_idx, const MelodicState& mel_state,
+                         uint8_t prev_pitch, Tick tick,
+                         const HarmonicEvent& event, std::mt19937& rng) {
+  std::vector<uint8_t> candidates;
+  std::vector<size_t> indices;
+  for (int offset : {1, -1, 2, -2, 3, -3}) {
+    int idx = static_cast<int>(current_idx) + offset;
+    if (idx < 0 || idx >= static_cast<int>(scale_tones.size())) continue;
+    uint8_t c = scale_tones[idx];
+    if (c == prev_pitch) continue;
+    candidates.push_back(c);
+    indices.push_back(static_cast<size_t>(idx));
+  }
+  if (candidates.empty()) return current_idx;
+
+  // Score each candidate with proper chord tone awareness.
+  std::vector<float> weights;
+  weights.reserve(candidates.size());
+  float max_s = -100.0f;
+  for (uint8_t c : candidates) {
+    bool ct = isChordTone(c, event);
+    float s = scoreCandidatePitch(mel_state, prev_pitch, c, tick, ct);
+    weights.push_back(s);
+    if (s > max_s) max_s = s;
+  }
+
+  // Shift to positive range for weighted selection.
+  float shift = (max_s < 0.0f) ? (-max_s + 0.1f) : 0.1f;
+  for (float& w : weights) w = std::max(0.01f, w + shift);
+
+  uint8_t selected = rng::selectWeighted(rng, candidates, weights);
+  // Find matching index.
+  for (size_t i = 0; i < candidates.size(); ++i) {
+    if (candidates[i] == selected) return indices[i];
+  }
+  return current_idx;
+}
+
+// ---------------------------------------------------------------------------
 // Variation stage generators
 // ---------------------------------------------------------------------------
 
@@ -322,7 +420,12 @@ std::vector<NoteEvent> generateEstablishVariation(Tick start_tick, int bars,
   uint8_t high_pitch = getVoiceHighPitch(voice_idx);
 
   Tick end_tick = start_tick + static_cast<Tick>(bars) * kTicksPerBar;
+  Tick total_duration = end_tick - start_tick;
   Tick current_tick = start_tick;
+
+  // Voice dynamics model for direction persistence and interval distribution.
+  MelodicState mel_state;
+  uint8_t pending_resolution = 0;  // Non-zero: bias next note toward this pitch.
 
   // Initial scale tones for stepwise motion.
   const HarmonicEvent& first_event = timeline.getAt(start_tick);
@@ -336,6 +439,9 @@ std::vector<NoteEvent> generateEstablishVariation(Tick start_tick, int bars,
   uint8_t prev_pitch = 0;
 
   while (current_tick < end_tick) {
+    mel_state.phrase_progress =
+        static_cast<float>(current_tick - start_tick) / static_cast<float>(total_duration);
+
     const HarmonicEvent& event = timeline.getAt(current_tick);
     auto new_tones = getScaleTones(event.key, event.is_minor,
                                    low_pitch, high_pitch);
@@ -362,6 +468,12 @@ std::vector<NoteEvent> generateEstablishVariation(Tick start_tick, int bars,
         if (has_prev && scale_tones[idx] == prev_pitch) continue;
         int pitch_dist = std::abs(static_cast<int>(scale_tones[idx]) -
                                   static_cast<int>(scale_tones[tone_idx]));
+        // Resolution bonus: favor candidates near pending resolution target.
+        if (pending_resolution > 0 &&
+            std::abs(static_cast<int>(scale_tones[idx]) -
+                     static_cast<int>(pending_resolution)) <= 2) {
+          pitch_dist -= 5;  // Strong bias toward resolution target.
+        }
         if (pitch_dist < best_pitch_dist) {
           best_pitch_dist = pitch_dist;
           best_idx = idx;
@@ -444,11 +556,28 @@ std::vector<NoteEvent> generateEstablishVariation(Tick start_tick, int bars,
     note.source = BachNoteSource::FreeCounterpoint;
     notes.push_back(note);
 
+    // Update melodic state tracking before overwriting prev_pitch.
+    uint8_t prev_pitch_before = prev_pitch;
     has_prev = true;
     prev_pitch = candidate;
+    if (has_prev && prev_pitch_before > 0) {
+      updateMelodicState(mel_state, prev_pitch_before, candidate);
+    }
+
+    // Compute resolution target for non-chord-tone notes (outer voice bias).
+    if (has_prev && !isChordTone(candidate, event)) {
+      uint8_t res = findResolutionTarget(candidate, prev_pitch_before, event,
+                                         event.key, event.is_minor,
+                                         current_tick);
+      if (res > 0) pending_resolution = res;
+    } else {
+      pending_resolution = 0;  // Chord tone placed: resolution satisfied.
+    }
+
     current_tick += dur;
 
-    // Stepwise motion.
+    // Stepwise advancement with direction persistence.
+    ascending = (chooseMelodicDirection(mel_state, rng) > 0);
     if (ascending) {
       if (tone_idx + 1 < scale_tones.size()) {
         ++tone_idx;
@@ -462,13 +591,6 @@ std::vector<NoteEvent> generateEstablishVariation(Tick start_tick, int bars,
       } else {
         ascending = true;
         if (tone_idx + 1 < scale_tones.size()) ++tone_idx;
-      }
-    }
-
-    // Direction reversal: 15% probability, not at boundaries.
-    if (tone_idx > 0 && tone_idx + 1 < scale_tones.size()) {
-      if (rng::rollProbability(rng, 0.15f)) {
-        ascending = !ascending;
       }
     }
   }
@@ -496,7 +618,12 @@ std::vector<NoteEvent> generateDevelopEarlyVariation(Tick start_tick, int bars,
   uint8_t high_pitch = getVoiceHighPitch(voice_idx);
 
   Tick end_tick = start_tick + static_cast<Tick>(bars) * kTicksPerBar;
+  Tick total_duration = end_tick - start_tick;
   Tick current_tick = start_tick;
+
+  // Voice dynamics model for direction persistence and interval distribution.
+  MelodicState mel_state;
+  uint8_t pending_resolution = 0;
 
   // Initial scale tones for starting position.
   const HarmonicEvent& first_event = timeline.getAt(start_tick);
@@ -511,6 +638,9 @@ std::vector<NoteEvent> generateDevelopEarlyVariation(Tick start_tick, int bars,
   uint8_t prev_pitch = 0;
 
   while (current_tick < end_tick) {
+    mel_state.phrase_progress =
+        static_cast<float>(current_tick - start_tick) / static_cast<float>(total_duration);
+
     // Re-acquire scale tones per beat from timeline (harmony may change).
     const HarmonicEvent& event = timeline.getAt(current_tick);
     auto new_tones = getScaleTones(event.key, event.is_minor,
@@ -530,20 +660,42 @@ std::vector<NoteEvent> generateDevelopEarlyVariation(Tick start_tick, int bars,
 
     uint8_t candidate = scale_tones[tone_idx];
 
+    // Resolution bias: if pending resolution target, prefer candidates near it.
+    if (pending_resolution > 0 && has_prev) {
+      size_t best_res_idx = tone_idx;
+      int best_res_dist = 999;
+      for (size_t idx = 0; idx < scale_tones.size(); ++idx) {
+        int dist = std::abs(static_cast<int>(scale_tones[idx]) -
+                            static_cast<int>(pending_resolution));
+        // Only consider candidates within a 3rd of the resolution target.
+        if (dist > 4) continue;
+        if (scale_tones[idx] == prev_pitch) continue;
+        if (dist < best_res_dist) {
+          best_res_dist = dist;
+          best_res_idx = idx;
+        }
+      }
+      if (best_res_dist <= 4) {
+        tone_idx = best_res_idx;
+        candidate = scale_tones[tone_idx];
+        pending_resolution = 0;
+      }
+    }
+
     // 2-consecutive repetition guard with direction-based search.
     if (has_prev && candidate == prev_pitch) {
       const int offsets_asc[] = {1, -1, 2, -2, 3, -3};
       const int offsets_desc[] = {-1, 1, -2, 2, -3, 3};
       const int* offsets = ascending ? offsets_asc : offsets_desc;
-      for (int i = 0; i < 6; ++i) {
-        int idx = static_cast<int>(tone_idx) + offsets[i];
-        if (idx < 0 || idx >= static_cast<int>(scale_tones.size())) continue;
-        uint8_t c = scale_tones[idx];
-        if (c == prev_pitch) continue;
-        if (std::abs(static_cast<int>(c) - static_cast<int>(prev_pitch)) > 7)
+      for (int idx = 0; idx < 6; ++idx) {
+        int off = static_cast<int>(tone_idx) + offsets[idx];
+        if (off < 0 || off >= static_cast<int>(scale_tones.size())) continue;
+        uint8_t cnd = scale_tones[off];
+        if (cnd == prev_pitch) continue;
+        if (std::abs(static_cast<int>(cnd) - static_cast<int>(prev_pitch)) > 7)
           continue;
-        tone_idx = static_cast<size_t>(idx);
-        candidate = c;
+        tone_idx = static_cast<size_t>(off);
+        candidate = cnd;
         break;
       }
       // Fallback: allow same pitch — post-processing catches 3+.
@@ -563,11 +715,28 @@ std::vector<NoteEvent> generateDevelopEarlyVariation(Tick start_tick, int bars,
     note.source = BachNoteSource::FreeCounterpoint;
     notes.push_back(note);
 
+    // Update melodic state tracking before overwriting prev_pitch.
+    uint8_t prev_pitch_before = prev_pitch;
     has_prev = true;
     prev_pitch = candidate;
+    if (prev_pitch_before > 0) {
+      updateMelodicState(mel_state, prev_pitch_before, candidate);
+    }
+
+    // Compute resolution target for non-chord-tone notes.
+    if (prev_pitch_before > 0 && !isChordTone(candidate, event)) {
+      uint8_t res = findResolutionTarget(candidate, prev_pitch_before, event,
+                                         event.key, event.is_minor,
+                                         current_tick);
+      if (res > 0) pending_resolution = res;
+    } else {
+      pending_resolution = 0;
+    }
+
     current_tick += dur;
 
-    // Stepwise motion with occasional direction change.
+    // Stepwise advancement with direction persistence.
+    ascending = (chooseMelodicDirection(mel_state, rng) > 0);
     if (ascending) {
       if (tone_idx + 1 < scale_tones.size()) {
         ++tone_idx;
@@ -580,13 +749,8 @@ std::vector<NoteEvent> generateDevelopEarlyVariation(Tick start_tick, int bars,
         --tone_idx;
       } else {
         ascending = true;
-        ++tone_idx;
+        if (tone_idx + 1 < scale_tones.size()) ++tone_idx;
       }
-    }
-
-    // Occasional direction reversal for musical interest.
-    if (rng::rollProbability(rng, 0.15f)) {
-      ascending = !ascending;
     }
   }
 
@@ -613,7 +777,12 @@ std::vector<NoteEvent> generateDevelopLateVariation(Tick start_tick, int bars,
   uint8_t high_pitch = getVoiceHighPitch(voice_idx);
 
   Tick end_tick = start_tick + static_cast<Tick>(bars) * kTicksPerBar;
+  Tick total_duration = end_tick - start_tick;
   Tick current_tick = start_tick;
+
+  // Voice dynamics model for direction persistence.
+  MelodicState mel_state;
+  uint8_t pending_resolution = 0;
 
   // Build initial arpeggio pitches and initialize traversal state ONCE.
   const HarmonicEvent& first_event = timeline.getAt(start_tick);
@@ -629,6 +798,9 @@ std::vector<NoteEvent> generateDevelopLateVariation(Tick start_tick, int bars,
   uint8_t prev_pitch = 0;
 
   while (current_tick < end_tick) {
+    mel_state.phrase_progress =
+        static_cast<float>(current_tick - start_tick) / static_cast<float>(total_duration);
+
     const HarmonicEvent& event = timeline.getAt(current_tick);
 
     // Rebuild arpeggio pitches on harmony change.
@@ -653,12 +825,35 @@ std::vector<NoteEvent> generateDevelopLateVariation(Tick start_tick, int bars,
     if (beat_end > end_tick) beat_end = end_tick;
 
     while (current_tick < beat_end) {
+      mel_state.phrase_progress =
+          static_cast<float>(current_tick - start_tick) / static_cast<float>(total_duration);
+
       Tick dur = kEighthNote;
       Tick remaining = beat_end - current_tick;
       if (dur > remaining) dur = remaining;
       if (dur == 0) break;
 
       uint8_t candidate = arp_pitches[arp_idx];
+
+      // Resolution bias: if pending, prefer arpeggio tone nearest target.
+      if (pending_resolution > 0 && has_prev && arp_pitches.size() > 1) {
+        size_t best_res_idx = arp_idx;
+        int best_res_dist = 999;
+        for (size_t idx = 0; idx < arp_pitches.size(); ++idx) {
+          if (arp_pitches[idx] == prev_pitch) continue;
+          int dist = std::abs(static_cast<int>(arp_pitches[idx]) -
+                              static_cast<int>(pending_resolution));
+          if (dist < best_res_dist) {
+            best_res_dist = dist;
+            best_res_idx = idx;
+          }
+        }
+        if (best_res_dist <= 4) {
+          arp_idx = best_res_idx;
+          candidate = arp_pitches[arp_idx];
+          pending_resolution = 0;
+        }
+      }
 
       // 2-consecutive repetition guard for arpeggio.
       if (has_prev && candidate == prev_pitch) {
@@ -706,11 +901,28 @@ std::vector<NoteEvent> generateDevelopLateVariation(Tick start_tick, int bars,
       note.source = BachNoteSource::FreeCounterpoint;
       notes.push_back(note);
 
+      // Update melodic state tracking before overwriting prev_pitch.
+      uint8_t prev_pitch_before = prev_pitch;
       has_prev = true;
       prev_pitch = candidate;
+      if (prev_pitch_before > 0) {
+        updateMelodicState(mel_state, prev_pitch_before, candidate);
+      }
+
+      // Compute resolution target for non-chord-tone notes.
+      if (prev_pitch_before > 0 && !isChordTone(candidate, event)) {
+        uint8_t res = findResolutionTarget(candidate, prev_pitch_before, event,
+                                           event.key, event.is_minor,
+                                           current_tick);
+        if (res > 0) pending_resolution = res;
+      } else {
+        pending_resolution = 0;
+      }
+
       current_tick += dur;
 
-      // Zigzag through arpeggio pitches.
+      // Zigzag through arpeggio pitches, using MelodicState for direction.
+      going_up = (chooseMelodicDirection(mel_state, rng) > 0);
       if (going_up) {
         if (arp_idx + 1 < arp_pitches.size()) {
           ++arp_idx;
@@ -723,7 +935,7 @@ std::vector<NoteEvent> generateDevelopLateVariation(Tick start_tick, int bars,
           --arp_idx;
         } else {
           going_up = true;
-          ++arp_idx;
+          if (arp_idx + 1 < arp_pitches.size()) ++arp_idx;
         }
       }
     }
@@ -753,7 +965,12 @@ std::vector<NoteEvent> generateAccumulateVariation(Tick start_tick, int bars,
   uint8_t high_pitch = getVoiceHighPitch(voice_idx);
 
   Tick end_tick = start_tick + static_cast<Tick>(bars) * kTicksPerBar;
+  Tick total_duration = end_tick - start_tick;
   Tick current_tick = start_tick;
+
+  // Voice dynamics model for direction persistence and interval distribution.
+  MelodicState mel_state;
+  uint8_t pending_resolution = 0;
 
   // Initial scale tones for starting position.
   const HarmonicEvent& first_event = timeline.getAt(start_tick);
@@ -768,6 +985,9 @@ std::vector<NoteEvent> generateAccumulateVariation(Tick start_tick, int bars,
   uint8_t prev_pitch = 0;
 
   while (current_tick < end_tick) {
+    mel_state.phrase_progress =
+        static_cast<float>(current_tick - start_tick) / static_cast<float>(total_duration);
+
     // Re-acquire scale tones per beat from timeline (harmony may change).
     const HarmonicEvent& event = timeline.getAt(current_tick);
     auto new_tones = getScaleTones(event.key, event.is_minor,
@@ -787,20 +1007,41 @@ std::vector<NoteEvent> generateAccumulateVariation(Tick start_tick, int bars,
 
     uint8_t candidate = scale_tones[tone_idx];
 
+    // Resolution bias: if pending resolution target, prefer candidates near it.
+    if (pending_resolution > 0 && has_prev) {
+      size_t best_res_idx = tone_idx;
+      int best_res_dist = 999;
+      for (size_t idx = 0; idx < scale_tones.size(); ++idx) {
+        int dist = std::abs(static_cast<int>(scale_tones[idx]) -
+                            static_cast<int>(pending_resolution));
+        if (dist > 4) continue;
+        if (scale_tones[idx] == prev_pitch) continue;
+        if (dist < best_res_dist) {
+          best_res_dist = dist;
+          best_res_idx = idx;
+        }
+      }
+      if (best_res_dist <= 4) {
+        tone_idx = best_res_idx;
+        candidate = scale_tones[tone_idx];
+        pending_resolution = 0;
+      }
+    }
+
     // 2-consecutive repetition guard with direction-based search.
     if (has_prev && candidate == prev_pitch) {
       const int offsets_asc[] = {1, -1, 2, -2, 3, -3};
       const int offsets_desc[] = {-1, 1, -2, 2, -3, 3};
       const int* offsets = ascending ? offsets_asc : offsets_desc;
-      for (int i = 0; i < 6; ++i) {
-        int idx = static_cast<int>(tone_idx) + offsets[i];
-        if (idx < 0 || idx >= static_cast<int>(scale_tones.size())) continue;
-        uint8_t c = scale_tones[idx];
-        if (c == prev_pitch) continue;
-        if (std::abs(static_cast<int>(c) - static_cast<int>(prev_pitch)) > 7)
+      for (int idx = 0; idx < 6; ++idx) {
+        int off = static_cast<int>(tone_idx) + offsets[idx];
+        if (off < 0 || off >= static_cast<int>(scale_tones.size())) continue;
+        uint8_t cnd = scale_tones[off];
+        if (cnd == prev_pitch) continue;
+        if (std::abs(static_cast<int>(cnd) - static_cast<int>(prev_pitch)) > 7)
           continue;
-        tone_idx = static_cast<size_t>(idx);
-        candidate = c;
+        tone_idx = static_cast<size_t>(off);
+        candidate = cnd;
         break;
       }
       // Fallback: allow same pitch — post-processing catches 3+.
@@ -820,40 +1061,44 @@ std::vector<NoteEvent> generateAccumulateVariation(Tick start_tick, int bars,
     note.source = BachNoteSource::FreeCounterpoint;
     notes.push_back(note);
 
+    // Update melodic state tracking before overwriting prev_pitch.
+    uint8_t prev_pitch_before = prev_pitch;
     has_prev = true;
     prev_pitch = candidate;
+    if (prev_pitch_before > 0) {
+      updateMelodicState(mel_state, prev_pitch_before, candidate);
+    }
+
+    // Compute resolution target for non-chord-tone notes.
+    if (prev_pitch_before > 0 && !isChordTone(candidate, event)) {
+      uint8_t res = findResolutionTarget(candidate, prev_pitch_before, event,
+                                         event.key, event.is_minor,
+                                         current_tick);
+      if (res > 0) pending_resolution = res;
+    } else {
+      pending_resolution = 0;
+    }
+
     current_tick += dur;
 
-    // Rapid stepwise motion with occasional leaps.
-    int step = rng::rollProbability(rng, 0.2f) ? 2 : 1;
-
+    // Stepwise advancement with direction persistence.
+    // Accumulate stage: allow occasional skip (20%) for intensity.
+    ascending = (chooseMelodicDirection(mel_state, rng) > 0);
+    int step = rng::rollProbability(rng, 0.20f) ? 2 : 1;
     if (ascending) {
       if (tone_idx + static_cast<size_t>(step) < scale_tones.size()) {
         tone_idx += static_cast<size_t>(step);
       } else {
         ascending = false;
-        if (tone_idx >= static_cast<size_t>(step)) {
-          tone_idx -= static_cast<size_t>(step);
-        } else {
-          tone_idx = 0;
-        }
+        if (tone_idx > 0) --tone_idx;
       }
     } else {
       if (tone_idx >= static_cast<size_t>(step)) {
         tone_idx -= static_cast<size_t>(step);
       } else {
         ascending = true;
-        if (tone_idx + static_cast<size_t>(step) < scale_tones.size()) {
-          tone_idx += static_cast<size_t>(step);
-        } else if (!scale_tones.empty()) {
-          tone_idx = scale_tones.size() - 1;
-        }
+        if (tone_idx + 1 < scale_tones.size()) ++tone_idx;
       }
-    }
-
-    // Frequent direction changes for figuration character.
-    if (rng::rollProbability(rng, 0.2f)) {
-      ascending = !ascending;
     }
   }
 
@@ -1151,6 +1396,18 @@ PassacagliaResult generatePassacaglia(const PassacagliaConfig& config) {
         return isChordTone(p, timeline.getAt(t));
       };
       resolveLeaps(validated, lr_params);
+
+      // Second parallel-perfect repair pass: fix parallels introduced by leap resolution.
+      // Outer voices only, max 1 iteration, minimal movement (|delta| <= 2).
+      {
+        ParallelRepairParams pp_params;
+        pp_params.num_voices = num_voices;
+        pp_params.scale = config.key.is_minor ? ScaleType::HarmonicMinor : ScaleType::Major;
+        pp_params.key_at_tick = lr_params.key_at_tick;
+        pp_params.voice_range = lr_params.voice_range;
+        pp_params.max_iterations = 1;
+        repairParallelPerfect(validated, pp_params);
+      }
     }
 
     // Repeated note repair: replace 4th+ same-pitch notes with step-adjacent
