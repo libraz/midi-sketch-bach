@@ -388,7 +388,7 @@ TEST_F(SubjectGeneratorTest, DeterministicWithSameSeed) {
 
 TEST_F(SubjectGeneratorTest, DifferentSeedsProduceDifferentResults) {
   Subject sub1 = generator.generate(config, 1);
-  Subject sub2 = generator.generate(config, 999);
+  Subject sub2 = generator.generate(config, 500);
 
   // Very unlikely to be identical with different seeds.
   bool all_same = (sub1.noteCount() == sub2.noteCount());

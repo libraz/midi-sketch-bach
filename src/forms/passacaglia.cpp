@@ -8,6 +8,7 @@
 
 #include "analysis/counterpoint_analyzer.h"
 #include "core/gm_program.h"
+#include "core/interval.h"
 #include "core/melodic_state.h"
 #include "core/note_creator.h"
 #include "core/pitch_utils.h"
@@ -1395,6 +1396,27 @@ PassacagliaResult generatePassacaglia(const PassacagliaConfig& config) {
       lr_params.is_chord_tone = [&](Tick t, uint8_t p) {
         return isChordTone(p, timeline.getAt(t));
       };
+      lr_params.vertical_safe = [&timeline, &validated](Tick tick, uint8_t voice,
+                                                         uint8_t cand_pitch) -> bool {
+        // Only check on accented beats (0, 2 in 4/4). Weak beats always safe.
+        uint8_t beat = beatInBar(tick);
+        if (beat != 0 && beat != 2) return true;
+
+        // Chord tone is always safe on any beat.
+        const HarmonicEvent& event = timeline.getAt(tick);
+        if (isChordTone(cand_pitch, event)) return true;
+
+        // On accent: reject only harsh dissonances (m2/M7) against sounding voices.
+        for (const auto& note : validated) {
+          if (note.voice == voice) continue;
+          if (note.start_tick + note.duration <= tick) continue;
+          if (note.start_tick > tick) break;
+          int reduced = interval_util::compoundToSimple(
+              absoluteInterval(cand_pitch, note.pitch));
+          if (reduced == 1 || reduced == 11) return false;
+        }
+        return true;
+      };
       resolveLeaps(validated, lr_params);
 
       // Second parallel-perfect repair pass: fix parallels introduced by leap resolution.
@@ -1405,7 +1427,7 @@ PassacagliaResult generatePassacaglia(const PassacagliaConfig& config) {
         pp_params.scale = config.key.is_minor ? ScaleType::HarmonicMinor : ScaleType::Major;
         pp_params.key_at_tick = lr_params.key_at_tick;
         pp_params.voice_range = lr_params.voice_range;
-        pp_params.max_iterations = 1;
+        pp_params.max_iterations = 8;  // Strengthened for parallel repair
         repairParallelPerfect(validated, pp_params);
       }
     }

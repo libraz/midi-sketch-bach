@@ -92,6 +92,20 @@ static float crossRelationPenalty(const CounterpointState& state,
   return 0.0f;
 }
 
+/// @brief Compute ascending tritone leap penalty for a candidate pitch.
+/// Only penalizes ascending tritone (prev->cand = +6 semitones). Descending
+/// tritone is common in Bach bass lines and countersubjects. Compound
+/// intervals (abs > 12) are exempt.
+static float tritonePenalty(const CounterpointState& state,
+                            VoiceId voice_id, uint8_t pitch) {
+  const NoteEvent* prev = state.getLastNote(voice_id);
+  if (!prev) return 0.0f;
+  int leap = static_cast<int>(pitch) - static_cast<int>(prev->pitch);
+  if (std::abs(leap) > 12) return 0.0f;  // compound exempt
+  if (leap == 6) return 1.0f;            // ascending tritone only
+  return 0.0f;
+}
+
 // ---------------------------------------------------------------------------
 // Free-standing parallel / P4-bass checker
 // ---------------------------------------------------------------------------
@@ -422,6 +436,8 @@ PlacementResult CollisionResolver::tryStrategy(
         }
       }
 
+      penalty += tritonePenalty(state, voice_id, cand_pitch);
+
       if (penalty < best_penalty) {
         best_penalty = penalty;
         result.pitch = cand_pitch;
@@ -550,6 +566,9 @@ PlacementResult CollisionResolver::tryStrategy(
 
           // Apply cross-relation penalty.
           penalty += crossRelationPenalty(state, voice_id, cand_pitch, tick);
+
+          // Apply ascending tritone penalty.
+          penalty += tritonePenalty(state, voice_id, cand_pitch);
 
           // Chord-tone and diatonic penalties when harmonic context is available.
           if (h_event) {

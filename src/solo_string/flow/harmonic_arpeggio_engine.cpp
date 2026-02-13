@@ -98,6 +98,14 @@ constexpr ProgressionEntry kProgression_C[4] = {
     {ChordDegree::V, 1.0f}
 };
 
+/// Splitmix32 hash for decorrelating per-section sub-seeds.
+inline uint32_t splitmix32(uint32_t seed, uint32_t index) {
+  uint32_t z = seed + index * 0x9E3779B9u;
+  z = (z ^ (z >> 16)) * 0x85EBCA6Bu;
+  z = (z ^ (z >> 13)) * 0xC2B2AE35u;
+  return z ^ (z >> 16);
+}
+
 /// @brief Compute the MIDI pitch for a chord degree in a given key and octave.
 ///
 /// @param chord_root_pitch MIDI pitch of the chord root.
@@ -314,30 +322,44 @@ RegisterRange computeRegisterRange(ArcPhase phase, float progress,
 // Helper: select progression for a section
 // ---------------------------------------------------------------------------
 
-/// @brief Select a harmonic progression template for a section.
+/// @brief Select a harmonic progression template for a section using Markov transitions.
+///
+/// Peak sections always use the climactic progression (design value).
+/// The last section returns to the basic progression. Otherwise, a Markov chain
+/// with 3-consecutive prohibition ensures seed-dependent variety.
 ///
 /// @param section_idx 0-based section index.
 /// @param phase ArcPhase of this section.
 /// @param total_sections Total number of sections in the piece.
+/// @param prev_progression Pointer to the previous section's progression (nullptr for first).
+/// @param same_count Number of consecutive sections using the same progression.
+/// @param rng Random number generator for Markov transitions.
 /// @return Pointer to a 4-element ProgressionEntry array.
-const ProgressionEntry* selectProgressionForSection(int section_idx,
-                                                    ArcPhase phase,
-                                                    int total_sections) {
-  // Peak section always uses the climactic progression.
+const ProgressionEntry* selectProgressionForSection(
+    int section_idx, ArcPhase phase, int total_sections,
+    const ProgressionEntry* prev_progression, int same_count,
+    std::mt19937& rng) {
+  // Peak section always uses the climactic progression (design value).
   if (phase == ArcPhase::Peak) {
     return kProgression_C;
   }
 
-  // Last section (Descent end) returns to the basic progression.
+  // Last section returns to the basic progression.
   if (section_idx == total_sections - 1) {
     return kProgression_A;
   }
 
-  // Alternate between A and B for variety.
-  if (section_idx % 2 == 0) {
-    return kProgression_A;
+  // Force transition after 3 consecutive same progressions.
+  if (same_count >= 3 && prev_progression != nullptr) {
+    return (prev_progression == kProgression_A) ? kProgression_B : kProgression_A;
   }
-  return kProgression_B;
+
+  // Markov transition probabilities.
+  float stay_prob = (prev_progression == kProgression_A) ? 0.25f : 0.45f;
+  if (prev_progression != nullptr && rng::rollProbability(rng, stay_prob)) {
+    return prev_progression;
+  }
+  return (prev_progression == kProgression_A) ? kProgression_B : kProgression_A;
 }
 
 // ---------------------------------------------------------------------------
@@ -555,15 +577,20 @@ InstrumentProps getInstrumentProps(InstrumentType instrument) {
 ///
 /// Creates a harmonic event for each bar, cycling through diatonic progressions
 /// that vary by section and ArcPhase. Peak sections receive elevated harmonic weight.
+/// Progression selection uses Markov transitions seeded from base_seed for
+/// seed-dependent variety.
 ///
 /// @param config The flow configuration.
 /// @param arc_config Validated GlobalArcConfig with phase assignments.
+/// @param base_seed Seed for decorrelating progression selection.
 /// @return HarmonicTimeline at bar resolution.
 HarmonicTimeline buildFlowTimeline(const ArpeggioFlowConfig& config,
-                                   const GlobalArcConfig& arc_config) {
+                                   const GlobalArcConfig& arc_config,
+                                   uint32_t base_seed) {
   HarmonicTimeline timeline;
 
   int total_sections = config.num_sections;
+  std::mt19937 timeline_rng(splitmix32(base_seed, 0xF10Au));
 
   // Map section_id -> ArcPhase for quick lookup.
   auto getPhaseForSection = [&](int section_idx) -> ArcPhase {
@@ -576,11 +603,22 @@ HarmonicTimeline buildFlowTimeline(const ArpeggioFlowConfig& config,
   };
 
   Tick current_tick = 0;
+  const ProgressionEntry* prev_progression = nullptr;
+  int same_count = 0;
 
   for (int section_idx = 0; section_idx < total_sections; ++section_idx) {
     ArcPhase phase = getPhaseForSection(section_idx);
     const ProgressionEntry* progression =
-        selectProgressionForSection(section_idx, phase, total_sections);
+        selectProgressionForSection(section_idx, phase, total_sections,
+                                    prev_progression, same_count, timeline_rng);
+
+    // Track consecutive same-progression count.
+    if (progression == prev_progression) {
+      ++same_count;
+    } else {
+      same_count = 1;
+    }
+    prev_progression = progression;
 
     for (int bar_in_section = 0; bar_in_section < config.bars_per_section;
          ++bar_in_section) {
@@ -665,7 +703,8 @@ std::vector<NoteEvent> generateBarNotes(
     std::mt19937& rng,
     uint8_t& prev_pitch,
     uint8_t prev_chord_root,
-    [[maybe_unused]] ArcPhase phase) {
+    [[maybe_unused]] ArcPhase phase,
+    float neighbor_prob) {
   std::vector<NoteEvent> notes;
 
   if (pattern.degrees.empty()) {
@@ -706,6 +745,22 @@ std::vector<NoteEvent> generateBarNotes(
       // naturally achieves the widest actual range at Peak.
       uint8_t pitch = fitToRegisterSmooth(
           raw_pitch, reg_range, prev_pitch, is_turn);
+
+      // Neighbor tone on weak beats for large leaps (Step 4).
+      // Skip in cadence approach to preserve resolution clarity.
+      bool in_cadence_approach = is_cadence_bar && cadence_prog >= 0.8f;
+      if ((sub_idx == 1 || sub_idx == 3) && prev_pitch > 0 &&
+          !in_cadence_approach) {
+        int leap = std::abs(static_cast<int>(pitch) -
+                            static_cast<int>(prev_pitch));
+        if (leap >= 3 && rng::rollProbability(rng, neighbor_prob)) {
+          int step = (pitch > prev_pitch) ? 1 : -1;
+          pitch = static_cast<uint8_t>(clampPitch(
+              static_cast<int>(prev_pitch) +
+                  step * rng::rollRange(rng, 1, 2),
+              reg_range.low, reg_range.high));
+        }
+      }
 
       // Open string preference: if this pitch class matches an open string,
       // and the bias roll succeeds, use the open string pitch directly.
@@ -750,22 +805,26 @@ std::vector<NoteEvent> generateBarNotes(
         ++sub_idx;  // Skip the next subdivision
       }
 
-      // Calculate velocity based on harmonic weight and beat position.
-      uint8_t velocity = kBaseVelocity;
+      // Calculate velocity: jitter -> weight boost -> accent (accent last to
+      // prevent jitter from weakening strong-beat structure).
+      uint32_t vel_hash = splitmix32(
+          static_cast<uint32_t>(bar_tick), static_cast<uint32_t>(note_idx));
+      int vel_jitter = static_cast<int>(vel_hash % 7) - 3;  // [-3, +3]
+      int velocity = static_cast<int>(kBaseVelocity) + vel_jitter;
+
       if (harm_event.weight >= 1.5f) {
-        velocity = static_cast<uint8_t>(
-            std::min(static_cast<int>(kBaseVelocity) + kWeightedVelocityBoost, 127));
+        velocity += kWeightedVelocityBoost;
       }
       // Slight accent on beat 1 and beat 3 (strong beats in 4/4).
       if (original_sub_idx == 0 && (beat_idx == 0 || beat_idx == 2)) {
-        velocity = static_cast<uint8_t>(std::min(static_cast<int>(velocity) + 6, 127));
+        velocity += 6;
       }
 
       NoteEvent note;
       note.start_tick = note_tick;
       note.duration = duration;
       note.pitch = pitch;
-      note.velocity = velocity;
+      note.velocity = static_cast<uint8_t>(std::clamp(velocity, 60, 127));
       note.voice = 0;  // Solo instrument, single voice
       note.source = BachNoteSource::ArpeggioFlow;
 
@@ -913,7 +972,7 @@ ArpeggioFlowResult generateArpeggioFlow(const ArpeggioFlowConfig& config) {
   // Step 3: Build harmonic timeline
   // ---------------------------------------------------------------------------
 
-  HarmonicTimeline timeline = buildFlowTimeline(config, arc_config);
+  HarmonicTimeline timeline = buildFlowTimeline(config, arc_config, effective_seed);
 
   int total_bars = config.num_sections * config.bars_per_section;
   Tick total_duration = static_cast<Tick>(total_bars) * kTicksPerBar;
@@ -986,6 +1045,24 @@ ArpeggioFlowResult generateArpeggioFlow(const ArpeggioFlowConfig& config) {
     // Assign PatternRoles for each bar in this section.
     std::vector<PatternRole> bar_roles = assignPatternRoles(config.bars_per_section);
 
+    // Per-section sub-seed for local randomization.
+    std::mt19937 section_rng(splitmix32(effective_seed,
+                                        static_cast<uint32_t>(section_idx)));
+
+    // Section-level seventh chord decision (Step 5).
+    float seventh_prob = (phase == ArcPhase::Peak) ? 0.30f
+                       : (phase == ArcPhase::Ascent) ? 0.20f
+                       : 0.12f;
+    bool section_has_seventh = rng::rollProbability(section_rng, seventh_prob);
+
+    // Neighbor tone probability varies by phase (Step 4).
+    float neighbor_prob = (phase == ArcPhase::Peak) ? 0.20f
+                        : (phase == ArcPhase::Ascent) ? 0.12f
+                        : 0.08f;
+
+    // Track previous pattern type for persistence; reset at section start.
+    ArpeggioPatternType prev_pattern = ArpeggioPatternType::Rising;
+
     for (int bar_in_section = 0; bar_in_section < config.bars_per_section;
          ++bar_in_section) {
       int global_bar_idx = section_idx * config.bars_per_section + bar_in_section;
@@ -1004,6 +1081,13 @@ ArpeggioFlowResult generateArpeggioFlow(const ArpeggioFlowConfig& config) {
       // Get chord degrees for the current chord.
       std::vector<int> chord_degrees = getChordDegrees(harm_event.chord.quality);
 
+      // Add seventh if section decided to use it (skip tonic bass for
+      // stability preservation).
+      if (section_has_seventh && chord_degrees.size() == 3 &&
+          harm_event.chord.degree != ChordDegree::I) {
+        chord_degrees.push_back(6);  // 7th scale degree above root
+      }
+
       // Get PatternRole for this bar.
       PatternRole role = PatternRole::Drive;  // Default
       if (bar_in_section < static_cast<int>(bar_roles.size())) {
@@ -1014,9 +1098,13 @@ ArpeggioFlowResult generateArpeggioFlow(const ArpeggioFlowConfig& config) {
       bool use_open_strings = (phase == ArcPhase::Descent) ||
                               rng::rollProbability(rng, kDefaultOpenStringBias);
 
+      bool is_section_start = (bar_in_section == 0);
+
       // Generate the arpeggio pattern for this bar.
       ArpeggioPattern pattern = generatePattern(
-          chord_degrees, phase, role, use_open_strings);
+          chord_degrees, phase, role, use_open_strings,
+          rng, prev_pattern, is_section_start);
+      prev_pattern = pattern.type;
 
       // Cadence processing.
       bool is_cadence = isInCadenceRegion(
@@ -1046,7 +1134,7 @@ ArpeggioFlowResult generateArpeggioFlow(const ArpeggioFlowConfig& config) {
           bar_tick, harm_event, pattern, effective_range,
           instrument, open_bias, is_cadence, cad_prog,
           config.cadence.rhythm_simplification, rng,
-          prev_pitch, prev_chord_root, phase);
+          prev_pitch, prev_chord_root, phase, neighbor_prob);
 
       all_notes.insert(all_notes.end(), bar_notes.begin(), bar_notes.end());
       prev_chord_root = harm_event.chord.root_pitch;

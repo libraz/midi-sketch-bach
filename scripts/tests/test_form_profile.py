@@ -23,7 +23,7 @@ class TestFormProfileRegistry(unittest.TestCase):
         expected = [
             "fugue", "prelude_and_fugue", "toccata_and_fugue",
             "fantasia_and_fugue", "trio_sonata", "chorale_prelude",
-            "passacaglia", "cello_prelude", "chaconne",
+            "goldberg_variations", "passacaglia", "cello_prelude", "chaconne",
         ]
         names = all_form_names()
         for form in expected:
@@ -73,6 +73,28 @@ class TestFormProfileRegistry(unittest.TestCase):
         self.assertEqual(profile.hidden_perfect_severity, Severity.INFO)
         self.assertEqual(profile.expected_voices, (3, 3))
         self.assertFalse(profile.exposition_required)
+
+    def test_goldberg_variations_profile(self):
+        profile = get_form_profile("goldberg_variations")
+        self.assertIn("goldberg_variations", all_form_names())
+        self.assertEqual(profile.form_name, "goldberg_variations")
+        self.assertEqual(profile.style_family, "keyboard")
+        self.assertTrue(profile.counterpoint_enabled)
+        self.assertTrue(profile.independence_enabled)
+        self.assertFalse(profile.exposition_required)
+        self.assertEqual(profile.max_leap_semitones, 48)
+        self.assertTrue(profile.keyboard_parallel_policy)
+        self.assertEqual(profile.instrument_range, (29, 89))
+        self.assertEqual(profile.expected_voices, (1, 5))
+
+    def test_keyboard_parallel_policy_default_false(self):
+        """Non-keyboard forms should have keyboard_parallel_policy=False."""
+        for form_name in ["fugue", "passacaglia", "trio_sonata", "chorale_prelude"]:
+            profile = get_form_profile(form_name)
+            self.assertFalse(
+                profile.keyboard_parallel_policy,
+                f"{form_name} should have keyboard_parallel_policy=False",
+            )
 
     def test_toccata_relaxed_sources(self):
         profile = get_form_profile("toccata_and_fugue")

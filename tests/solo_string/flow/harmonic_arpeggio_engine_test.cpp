@@ -268,8 +268,7 @@ TEST(HarmonicArpeggioEngineTest, DifferentSeedsProduceDifferentOutput) {
   ASSERT_FALSE(result_a.tracks[0].notes.empty());
   ASSERT_FALSE(result_b.tracks[0].notes.empty());
 
-  // With different seeds, at least some notes should differ.
-  // Compare pitch sequences.
+  // With different seeds, a meaningful fraction of notes should differ.
   const auto& notes_a = result_a.tracks[0].notes;
   const auto& notes_b = result_b.tracks[0].notes;
 
@@ -281,8 +280,45 @@ TEST(HarmonicArpeggioEngineTest, DifferentSeedsProduceDifferentOutput) {
     }
   }
 
-  EXPECT_GT(diff_count, 0)
-      << "Two different seeds produced identical pitch sequences";
+  // Seed-dependent randomization should produce >20% pitch differences.
+  int total = static_cast<int>(compare_count);
+  EXPECT_GT(diff_count, total * 20 / 100)
+      << "diff_count=" << diff_count << " / " << total
+      << " (" << (100 * diff_count / std::max(total, 1)) << "%)";
+}
+
+TEST(HarmonicArpeggioEngineTest, MultiSeedDiversityOver20Percent) {
+  // Verify seed diversity across 5 different seeds.
+  constexpr uint32_t kSeeds[] = {100, 200, 300, 400, 500};
+  constexpr int kNumSeeds = 5;
+
+  std::vector<std::vector<uint8_t>> pitch_sequences;
+  for (int i = 0; i < kNumSeeds; ++i) {
+    auto config = makeEngineConfig(6, 4, InstrumentType::Cello, kSeeds[i]);
+    auto result = generateArpeggioFlow(config);
+    ASSERT_TRUE(result.success);
+    std::vector<uint8_t> pitches;
+    for (const auto& n : result.tracks[0].notes) {
+      pitches.push_back(n.pitch);
+    }
+    pitch_sequences.push_back(std::move(pitches));
+  }
+
+  // Every pair of seeds should have >20% different notes.
+  for (int i = 0; i < kNumSeeds; ++i) {
+    for (int j = i + 1; j < kNumSeeds; ++j) {
+      int diff = 0;
+      size_t len = std::min(pitch_sequences[i].size(),
+                            pitch_sequences[j].size());
+      for (size_t k = 0; k < len; ++k) {
+        if (pitch_sequences[i][k] != pitch_sequences[j][k]) ++diff;
+      }
+      int total = static_cast<int>(len);
+      EXPECT_GT(diff, total * 20 / 100)
+          << "Seeds " << kSeeds[i] << " vs " << kSeeds[j]
+          << ": diff=" << diff << "/" << total;
+    }
+  }
 }
 
 TEST(HarmonicArpeggioEngineTest, SeedUsedFieldMatchesInput) {

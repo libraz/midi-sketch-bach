@@ -3,6 +3,9 @@
 #include "solo_string/flow/arpeggio_pattern.h"
 
 #include <algorithm>
+#include <random>
+
+#include "core/rng_util.h"
 
 namespace bach {
 
@@ -177,45 +180,103 @@ std::vector<int> arrangeScaleFragment(std::vector<int> degrees) {
   return result;
 }
 
-/// @brief Select a pattern type based on ArcPhase and PatternRole.
+/// @brief Select a pattern type using weighted probabilities with persistence.
 ///
-/// Deterministic mapping (no randomness):
-/// - Drive + Ascent/Peak -> Rising
-/// - Expand + any -> Oscillating
-/// - Sustain + any -> PedalPoint
-/// - Release + Descent -> Falling
-/// - Otherwise -> first allowed pattern for the phase.
+/// Non-section-start bars have a 70% chance to reuse the previous pattern type
+/// (if it is allowed for the current phase), providing musical continuity.
+/// Otherwise, selection uses role/phase-specific weights via rng::selectWeighted.
 ///
 /// @param phase Current ArcPhase.
 /// @param role Current PatternRole.
+/// @param rng Mersenne Twister RNG instance.
+/// @param prev_pattern The pattern type used in the previous bar/beat.
+/// @param is_section_start True if this is the first bar/beat of a new section.
 /// @return Selected ArpeggioPatternType.
-ArpeggioPatternType selectPatternType(ArcPhase phase, PatternRole role) {
-  // Deterministic role-based selection.
-  switch (role) {
-    case PatternRole::Drive:
-      if (phase == ArcPhase::Ascent || phase == ArcPhase::Peak) {
-        return ArpeggioPatternType::Rising;
-      }
-      // Descent + Drive: Falling makes more sense than Rising.
-      return ArpeggioPatternType::Falling;
+ArpeggioPatternType selectPatternType(ArcPhase phase, PatternRole role,
+                                      std::mt19937& rng,
+                                      ArpeggioPatternType prev_pattern,
+                                      bool is_section_start) {
+  auto allowed = getAllowedPatternsForPhase(phase);
 
-    case PatternRole::Expand:
-      return ArpeggioPatternType::Oscillating;
-
-    case PatternRole::Sustain:
-      return ArpeggioPatternType::PedalPoint;
-
-    case PatternRole::Release:
-      if (phase == ArcPhase::Descent || phase == ArcPhase::Peak) {
-        return ArpeggioPatternType::Falling;
-      }
-      // Ascent + Release: use ScaleFragment for gentle stepwise motion.
-      return ArpeggioPatternType::ScaleFragment;
+  // Non-section-start: 70% persistence of previous pattern (if allowed).
+  if (!is_section_start &&
+      std::find(allowed.begin(), allowed.end(), prev_pattern) != allowed.end() &&
+      rng::rollProbability(rng, 0.70f)) {
+    return prev_pattern;
   }
 
-  // Fallback: first allowed pattern for the phase.
-  auto allowed = getAllowedPatternsForPhase(phase);
-  return allowed.empty() ? ArpeggioPatternType::Rising : allowed[0];
+  // Build weighted selection based on role and phase.
+  std::vector<ArpeggioPatternType> candidates;
+  std::vector<float> weights;
+
+  auto addIfAllowed = [&](ArpeggioPatternType type, float weight) {
+    if (std::find(allowed.begin(), allowed.end(), type) != allowed.end()) {
+      candidates.push_back(type);
+      weights.push_back(weight);
+    }
+  };
+
+  switch (role) {
+    case PatternRole::Drive:
+      if (phase == ArcPhase::Descent) {
+        addIfAllowed(ArpeggioPatternType::Falling, 0.60f);
+        addIfAllowed(ArpeggioPatternType::Oscillating, 0.25f);
+        addIfAllowed(ArpeggioPatternType::PedalPoint, 0.15f);
+      } else if (phase == ArcPhase::Peak) {
+        addIfAllowed(ArpeggioPatternType::Rising, 0.55f);
+        addIfAllowed(ArpeggioPatternType::Oscillating, 0.30f);
+        addIfAllowed(ArpeggioPatternType::ScaleFragment, 0.15f);
+      } else {  // Ascent
+        addIfAllowed(ArpeggioPatternType::Rising, 0.60f);
+        addIfAllowed(ArpeggioPatternType::Oscillating, 0.25f);
+        addIfAllowed(ArpeggioPatternType::ScaleFragment, 0.15f);
+      }
+      break;
+
+    case PatternRole::Expand:
+      addIfAllowed(ArpeggioPatternType::Oscillating, 0.55f);
+      // Add remaining allowed patterns with decreasing weights.
+      for (auto type : allowed) {
+        if (type != ArpeggioPatternType::Oscillating) {
+          addIfAllowed(type, candidates.size() == 1 ? 0.30f : 0.15f);
+        }
+      }
+      break;
+
+    case PatternRole::Sustain:
+      addIfAllowed(ArpeggioPatternType::PedalPoint, 0.55f);
+      addIfAllowed(ArpeggioPatternType::Oscillating, 0.30f);
+      // Fill remaining allowed patterns.
+      for (auto type : allowed) {
+        if (type != ArpeggioPatternType::PedalPoint &&
+            type != ArpeggioPatternType::Oscillating) {
+          addIfAllowed(type, 0.15f);
+        }
+      }
+      break;
+
+    case PatternRole::Release:
+      if (phase == ArcPhase::Ascent) {
+        addIfAllowed(ArpeggioPatternType::ScaleFragment, 0.55f);
+        addIfAllowed(ArpeggioPatternType::Oscillating, 0.30f);
+        addIfAllowed(ArpeggioPatternType::Rising, 0.15f);
+      } else if (phase == ArcPhase::Peak) {
+        addIfAllowed(ArpeggioPatternType::Falling, 0.55f);
+        addIfAllowed(ArpeggioPatternType::Oscillating, 0.25f);
+        addIfAllowed(ArpeggioPatternType::ScaleFragment, 0.20f);
+      } else {  // Descent
+        addIfAllowed(ArpeggioPatternType::Falling, 0.55f);
+        addIfAllowed(ArpeggioPatternType::PedalPoint, 0.30f);
+        addIfAllowed(ArpeggioPatternType::Oscillating, 0.15f);
+      }
+      break;
+  }
+
+  if (candidates.empty()) {
+    return allowed.empty() ? ArpeggioPatternType::Rising : allowed[0];
+  }
+
+  return rng::selectWeighted(rng, candidates, weights);
 }
 
 /// @brief Arrange degrees according to pattern type.
@@ -243,28 +304,18 @@ std::vector<int> arrangeDegrees(const std::vector<int>& degrees,
 
 ArpeggioPattern generatePattern(const std::vector<int>& chord_degrees,
                                 ArcPhase phase, PatternRole role,
-                                bool use_open_strings) {
+                                bool use_open_strings,
+                                std::mt19937& rng,
+                                ArpeggioPatternType prev_pattern,
+                                bool is_section_start) {
   ArpeggioPattern pattern;
   pattern.role = role;
   pattern.use_open_string = use_open_strings;
   pattern.notes_per_beat = 4;  // Standard 16th-note arpeggio
 
-  // Select type based on phase and role.
-  pattern.type = selectPatternType(phase, role);
-
-  // Validate against allowed patterns for the phase. If the selected type
-  // is not allowed, fall back to the first allowed type.
-  auto allowed = getAllowedPatternsForPhase(phase);
-  bool type_allowed = false;
-  for (auto allowed_type : allowed) {
-    if (allowed_type == pattern.type) {
-      type_allowed = true;
-      break;
-    }
-  }
-  if (!type_allowed && !allowed.empty()) {
-    pattern.type = allowed[0];
-  }
+  // Select type with weighted randomization and persistence.
+  pattern.type = selectPatternType(phase, role, rng, prev_pattern,
+                                   is_section_start);
 
   // Arrange chord degrees according to the selected pattern type.
   if (chord_degrees.empty()) {

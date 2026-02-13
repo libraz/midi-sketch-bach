@@ -695,6 +695,9 @@ std::vector<NoteEvent> generateArpeggiated(const TextureContext& ctx,
   // Seed-based starting pitch offset within chord voicing.
   int start_offset = rng::rollRange(rng, 0, 2);
 
+  // Track previous pattern type for persistence; reset at half-section boundaries.
+  ArpeggioPatternType prev_pattern = ArpeggioPatternType::Rising;
+
   for (Tick bar_offset = 0; bar_offset < ctx.duration_ticks; bar_offset += kTicksPerBar) {
     Tick bar_tick = ctx.start_tick + bar_offset;
 
@@ -725,8 +728,12 @@ std::vector<NoteEvent> generateArpeggiated(const TextureContext& ctx,
       const HarmonicEvent& harm = timeline.getAt(beat_tick);
       std::vector<int> chord_degrees = getChordDegrees(harm.chord.quality);
 
+      bool is_section_start = (bar_in_half == 0 && beat_idx == 0);
+
       ArpeggioPattern pattern = generatePattern(
-          chord_degrees, phase, role, false);
+          chord_degrees, phase, role, false,
+          rng, prev_pattern, is_section_start);
+      prev_pattern = pattern.type;
 
       if (pattern.degrees.empty()) continue;
 

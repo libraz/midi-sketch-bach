@@ -6,6 +6,7 @@ from typing import Dict, List, Tuple
 
 from ..model import (
     CONSONANCES,
+    NoteSource,
     PERFECT_4TH,
     TICKS_PER_BEAT,
     TICKS_PER_BAR,
@@ -325,9 +326,22 @@ class UnresolvedDissonance:
                             resolved = True
                             break
                     if not resolved:
-                        # Strong beats (1, 3) are ERROR; weak beats are WARNING.
+                        # Ground bass on weak (non-accent) beats: structural
+                        # dissonance inherent to passacaglia form.
+                        is_ground_bass_pair = (
+                            (na.provenance and na.provenance.source == NoteSource.GROUND_BASS)
+                            or (nb.provenance and nb.provenance.source == NoteSource.GROUND_BASS)
+                        )
+                        # Use accent-based check (beats 1, 3 = strong in 4/4).
                         beat_in_bar = (tick % TICKS_PER_BAR) // TICKS_PER_BEAT + 1
-                        sev = Severity.ERROR if beat_in_bar in (1, 3) else Severity.WARNING
+                        is_accent = beat_in_bar in (1, 3)
+
+                        if is_accent:
+                            sev = Severity.ERROR
+                        elif is_ground_bass_pair:
+                            sev = Severity.INFO
+                        else:
+                            sev = Severity.WARNING
                         violations.append(
                             Violation(
                                 rule_name=self.name,

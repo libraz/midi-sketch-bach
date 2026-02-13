@@ -4,6 +4,7 @@
 #define BACH_SOLO_STRING_FLOW_ARPEGGIO_PATTERN_H
 
 #include <cstdint>
+#include <random>
 #include <vector>
 
 #include "core/basic_types.h"
@@ -81,21 +82,25 @@ std::vector<ArpeggioPatternType> getAllowedPatternsForPhase(ArcPhase phase);
 /// @brief Generate a pattern for a given chord, ArcPhase, and PatternRole.
 ///
 /// Creates an ArpeggioPattern with degrees arranged according to the pattern type
-/// selected for the given phase and role. The pattern type is deterministic:
-/// - Drive + Ascent/Peak -> Rising
-/// - Expand + any -> Oscillating
-/// - Sustain + any -> PedalPoint
-/// - Release + Descent -> Falling
-/// - Otherwise -> first allowed pattern for the phase
+/// selected via weighted random probabilities. Each role biases toward its primary
+/// pattern type but allows variation. Pattern persistence (70% chance to repeat
+/// the previous pattern) provides musical continuity within sections, while
+/// section-start boundaries reset persistence to allow fresh pattern selection.
 ///
 /// @param chord_degrees Scale degrees available from the chord (e.g. {0, 4, 7}).
 /// @param phase Current ArcPhase.
 /// @param role Current PatternRole.
 /// @param use_open_strings Whether to prefer open string usage.
+/// @param rng Mersenne Twister RNG instance for weighted selection.
+/// @param prev_pattern The pattern type used in the previous bar/beat.
+/// @param is_section_start True if this is the first bar/beat of a new section.
 /// @return A configured ArpeggioPattern with degrees arranged per the type.
 ArpeggioPattern generatePattern(const std::vector<int>& chord_degrees,
                                 ArcPhase phase, PatternRole role,
-                                bool use_open_strings);
+                                bool use_open_strings,
+                                std::mt19937& rng,
+                                ArpeggioPatternType prev_pattern,
+                                bool is_section_start);
 
 }  // namespace bach
 

@@ -1845,7 +1845,7 @@ TrioSonataMovement generateMovement(const KeySignature& key_sig, Tick num_bars,
         pp_params.scale = scale;
         pp_params.key_at_tick = lr_params.key_at_tick;
         pp_params.voice_range = lr_params.voice_range;
-        pp_params.max_iterations = 1;
+        pp_params.max_iterations = 3;
         repairParallelPerfect(validated, pp_params);
       }
     }
@@ -1970,8 +1970,102 @@ TrioSonataMovement generateMovement(const KeySignature& key_sig, Tick num_bars,
         pp_params.scale = scale;
         pp_params.key_at_tick = lr_params.key_at_tick;
         pp_params.voice_range = lr_params.voice_range;
-        pp_params.max_iterations = 1;
+        pp_params.max_iterations = 3;
         repairParallelPerfect(validated, pp_params);
+      }
+    }
+
+    // Resolve excessive melodic leaps (> 13 semitones) using octave shift priority.
+    // Bach's trio sonatas maintain independent registers per voice; octave
+    // displacement is musically correct for resolving large leaps.  We generate
+    // three candidates, score them with a 3-point contour check (prev, curr,
+    // next), and pick the best one that avoids voice crossing.
+    for (uint8_t voice = 0; voice < kTrioVoiceCount - 1; ++voice) {  // pedal excluded
+      std::vector<size_t> voice_indices;
+      for (size_t idx = 0; idx < validated.size(); ++idx) {
+        if (validated[idx].voice == voice) voice_indices.push_back(idx);
+      }
+      for (size_t cur = 1; cur < voice_indices.size(); ++cur) {
+        auto& curr = validated[voice_indices[cur]];
+        const auto& prev_note = validated[voice_indices[cur - 1]];
+        int leap = static_cast<int>(curr.pitch) - static_cast<int>(prev_note.pitch);
+        if (std::abs(leap) <= 13) continue;
+
+        const uint8_t range_low = vr[voice].first;
+        const uint8_t range_high = vr[voice].second;
+
+        // Generate three octave-shift candidates.
+        int shift1 = nearestOctaveShift(leap);
+        int cand1 = static_cast<int>(curr.pitch) - shift1;
+        int shift2 = (shift1 > 0) ? shift1 - 12 : shift1 + 12;  // opposite shift
+        int cand2 = static_cast<int>(curr.pitch) - shift2;
+        int dir = (leap > 0) ? 1 : -1;
+        int cand3 = static_cast<int>(prev_note.pitch) + dir * 12;  // fallback
+
+        // Clamp all candidates to voice range.
+        uint8_t candidates[3] = {
+            clampPitch(cand1, range_low, range_high),
+            clampPitch(cand2, range_low, range_high),
+            clampPitch(cand3, range_low, range_high),
+        };
+
+        // Look up the next note pitch for continuity scoring (if available).
+        bool has_next = (cur + 1 < voice_indices.size());
+        int next_pitch = has_next
+            ? static_cast<int>(validated[voice_indices[cur + 1]].pitch)
+            : static_cast<int>(curr.pitch);
+
+        // Score each candidate.
+        constexpr double kRejectScore = 1000.0;
+        constexpr double kCrossingPenalty = 900.0;
+        constexpr double kNextWeight = 0.75;
+        double best_score = kRejectScore;
+        uint8_t best_pitch = curr.pitch;
+
+        for (int cdx = 0; cdx < 3; ++cdx) {
+          int cand_pitch = static_cast<int>(candidates[cdx]);
+          int new_leap = cand_pitch - static_cast<int>(prev_note.pitch);
+
+          // Reject if leap from prev still exceeds threshold.
+          if (std::abs(new_leap) > 13) continue;
+
+          double score = static_cast<double>(std::abs(new_leap));
+
+          // Voice crossing penalty: check against other voices at same tick.
+          bool crossing = false;
+          for (size_t odx = 0; odx < validated.size(); ++odx) {
+            const auto& other = validated[odx];
+            if (other.voice == voice) continue;
+            if (other.voice >= kTrioVoiceCount) continue;
+            // Check temporal overlap (same tick window).
+            if (other.start_tick + other.duration <= curr.start_tick) continue;
+            if (other.start_tick >= curr.start_tick + curr.duration) continue;
+            int other_pitch = static_cast<int>(other.pitch);
+            // Voice 0 (upper) must not go below other voices.
+            if (voice == 0 && cand_pitch < other_pitch) { crossing = true; break; }
+            // Voice 1 (middle) must not go above voice 0.
+            if (voice == 1 && other.voice == 0 && cand_pitch > other_pitch) {
+              crossing = true;
+              break;
+            }
+          }
+          if (crossing) {
+            score = kCrossingPenalty;
+          } else {
+            // Next note continuity bonus.
+            score += std::abs(cand_pitch - next_pitch) * kNextWeight;
+          }
+
+          if (score < best_score) {
+            best_score = score;
+            best_pitch = candidates[cdx];
+          }
+        }
+
+        // Apply only if a valid candidate was found (score < crossing penalty).
+        if (best_score < kCrossingPenalty) {
+          curr.pitch = best_pitch;
+        }
       }
     }
 

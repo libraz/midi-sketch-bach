@@ -920,6 +920,78 @@ Episode generateEpisode(const Subject& subject, Tick start_tick, Tick duration_t
     note.start_tick = (note.start_tick / kTickQuantum) * kTickQuantum;
   }
 
+  // Per-voice tritone sweep: fix tritone leaps within each voice.
+  // Process each voice independently, sorting by tick order.
+  // Determine the modulation midpoint for correct key context.
+  Tick mod_midpoint = start_tick + duration_ticks / 2;
+  for (VoiceId vid = 0; vid < num_voices; ++vid) {
+    // Collect indices for this voice.
+    std::vector<size_t> voice_indices;
+    for (size_t idx = 0; idx < episode.notes.size(); ++idx) {
+      if (episode.notes[idx].voice == vid) {
+        voice_indices.push_back(idx);
+      }
+    }
+    // Sort indices by start_tick to ensure tick-order within voice.
+    std::sort(voice_indices.begin(), voice_indices.end(),
+              [&episode](size_t lhs, size_t rhs) {
+                return episode.notes[lhs].start_tick < episode.notes[rhs].start_tick;
+              });
+
+    auto [voice_lo, voice_hi] = getFugueVoiceRange(vid, num_voices);
+
+    // Check consecutive note pairs for tritone intervals.
+    for (size_t pos = 1; pos < voice_indices.size(); ++pos) {
+      size_t prev_idx = voice_indices[pos - 1];
+      size_t cur_idx = voice_indices[pos];
+      auto& prev_note = episode.notes[prev_idx];
+      auto& cur_note = episode.notes[cur_idx];
+
+      int prev_p = static_cast<int>(prev_note.pitch);
+      int cur_p = static_cast<int>(cur_note.pitch);
+      int simple = interval_util::compoundToSimple(std::abs(cur_p - prev_p));
+      if (simple != 6) continue;
+
+      // Short note exemption: both notes <= 240 ticks.
+      if (prev_note.duration <= 240 && cur_note.duration <= 240) continue;
+
+      // Determine the diatonic key for this note (respects modulation midpoint).
+      Key note_key = (key_diff != 0 && cur_note.start_tick >= mod_midpoint)
+                         ? target_key
+                         : start_key;
+
+      // Try deltas {1, -1, 2, -2}, snap to scale, pick best non-tritone.
+      int best_cand = cur_p;
+      int best_cost = 9999;
+      for (int delta : {1, -1, 2, -2}) {
+        int shifted = cur_p + delta;
+        uint8_t snapped = scale_util::nearestScaleTone(
+            clampPitch(shifted, voice_lo, voice_hi), note_key, scale);
+        int cand = static_cast<int>(snapped);
+        int new_simple = interval_util::compoundToSimple(
+            std::abs(cand - prev_p));
+        if (new_simple == 6) continue;  // Still a tritone.
+        // Check forward: avoid creating tritone with next note in voice.
+        if (pos + 1 < voice_indices.size()) {
+          int next_p = static_cast<int>(
+              episode.notes[voice_indices[pos + 1]].pitch);
+          int fwd_simple = interval_util::compoundToSimple(
+              std::abs(cand - next_p));
+          if (fwd_simple == 6) continue;
+        }
+        int cost = std::abs(cand - prev_p) + ((cand == prev_p) ? 30 : 0);
+        if (cost < best_cost) {
+          best_cost = cost;
+          best_cand = cand;
+        }
+      }
+      if (best_cand != cur_p) {
+        cur_note.pitch = static_cast<uint8_t>(
+            std::max(0, std::min(127, best_cand)));
+      }
+    }
+  }
+
   return episode;
 }
 

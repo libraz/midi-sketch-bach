@@ -3,11 +3,26 @@
 #include "solo_string/flow/arpeggio_pattern.h"
 
 #include <algorithm>
+#include <random>
 
 #include <gtest/gtest.h>
 
 namespace bach {
 namespace {
+
+/// @brief Helper: call generatePattern with default RNG and no persistence.
+///
+/// Uses a fixed seed for deterministic tests. is_section_start=true bypasses
+/// the 70% persistence branch so each call does a fresh weighted selection.
+ArpeggioPattern generatePatternForTest(const std::vector<int>& chord_degrees,
+                                       ArcPhase phase, PatternRole role,
+                                       bool use_open_strings,
+                                       uint32_t seed = 42) {
+  std::mt19937 rng(seed);
+  return generatePattern(chord_degrees, phase, role, use_open_strings,
+                         rng, ArpeggioPatternType::Rising,
+                         /*is_section_start=*/true);
+}
 
 // ---------------------------------------------------------------------------
 // ArpeggioPattern defaults
@@ -180,56 +195,53 @@ TEST(GetAllowedPatternsForPhaseTest, DescentNoRisingNoScaleFragment) {
 // generatePattern -- basic behavior
 // ---------------------------------------------------------------------------
 
-TEST(GeneratePatternTest, RisingDriveAscent) {
-  auto pattern = generatePattern({0, 4, 7}, ArcPhase::Ascent, PatternRole::Drive, false);
-  EXPECT_EQ(pattern.type, ArpeggioPatternType::Rising);
+TEST(GeneratePatternTest, DriveAscentProducesAllowedType) {
+  auto pattern = generatePatternForTest(
+      {0, 4, 7}, ArcPhase::Ascent, PatternRole::Drive, false);
+  auto allowed = getAllowedPatternsForPhase(ArcPhase::Ascent);
+  EXPECT_NE(std::find(allowed.begin(), allowed.end(), pattern.type), allowed.end());
   EXPECT_EQ(pattern.role, PatternRole::Drive);
   EXPECT_FALSE(pattern.use_open_string);
   EXPECT_EQ(pattern.notes_per_beat, 4);
-
-  // Degrees should be sorted ascending.
   ASSERT_FALSE(pattern.degrees.empty());
-  for (size_t idx = 1; idx < pattern.degrees.size(); ++idx) {
-    EXPECT_LE(pattern.degrees[idx - 1], pattern.degrees[idx]);
-  }
 }
 
-TEST(GeneratePatternTest, FallingReleaseDescent) {
-  auto pattern = generatePattern({0, 4, 7}, ArcPhase::Descent, PatternRole::Release, false);
-  EXPECT_EQ(pattern.type, ArpeggioPatternType::Falling);
+TEST(GeneratePatternTest, ReleaseDescentProducesAllowedType) {
+  auto pattern = generatePatternForTest(
+      {0, 4, 7}, ArcPhase::Descent, PatternRole::Release, false);
+  auto allowed = getAllowedPatternsForPhase(ArcPhase::Descent);
+  EXPECT_NE(std::find(allowed.begin(), allowed.end(), pattern.type), allowed.end());
   EXPECT_EQ(pattern.role, PatternRole::Release);
-
-  // Degrees should be sorted descending.
   ASSERT_FALSE(pattern.degrees.empty());
-  for (size_t idx = 1; idx < pattern.degrees.size(); ++idx) {
-    EXPECT_GE(pattern.degrees[idx - 1], pattern.degrees[idx]);
-  }
 }
 
-TEST(GeneratePatternTest, OscillatingExpandAny) {
-  auto pattern = generatePattern({0, 4, 7}, ArcPhase::Peak, PatternRole::Expand, false);
-  EXPECT_EQ(pattern.type, ArpeggioPatternType::Oscillating);
+TEST(GeneratePatternTest, ExpandPeakProducesAllowedType) {
+  auto pattern = generatePatternForTest(
+      {0, 4, 7}, ArcPhase::Peak, PatternRole::Expand, false);
+  auto allowed = getAllowedPatternsForPhase(ArcPhase::Peak);
+  EXPECT_NE(std::find(allowed.begin(), allowed.end(), pattern.type), allowed.end());
   EXPECT_EQ(pattern.role, PatternRole::Expand);
   EXPECT_FALSE(pattern.degrees.empty());
 }
 
-TEST(GeneratePatternTest, PedalPointSustainAny) {
-  auto pattern = generatePattern({0, 4, 7}, ArcPhase::Peak, PatternRole::Sustain, false);
-  EXPECT_EQ(pattern.type, ArpeggioPatternType::PedalPoint);
+TEST(GeneratePatternTest, SustainPeakProducesAllowedType) {
+  auto pattern = generatePatternForTest(
+      {0, 4, 7}, ArcPhase::Peak, PatternRole::Sustain, false);
+  auto allowed = getAllowedPatternsForPhase(ArcPhase::Peak);
+  EXPECT_NE(std::find(allowed.begin(), allowed.end(), pattern.type), allowed.end());
   EXPECT_EQ(pattern.role, PatternRole::Sustain);
-
-  // PedalPoint: lowest degree interleaved. First element should be the lowest.
-  ASSERT_GE(pattern.degrees.size(), 2u);
-  EXPECT_EQ(pattern.degrees[0], 0);  // Pedal (lowest)
+  ASSERT_FALSE(pattern.degrees.empty());
 }
 
 TEST(GeneratePatternTest, OpenStringFlagPropagated) {
-  auto pattern = generatePattern({0, 4, 7}, ArcPhase::Ascent, PatternRole::Drive, true);
+  auto pattern = generatePatternForTest(
+      {0, 4, 7}, ArcPhase::Ascent, PatternRole::Drive, true);
   EXPECT_TRUE(pattern.use_open_string);
 }
 
 TEST(GeneratePatternTest, EmptyChordDegreesUsesDefault) {
-  auto pattern = generatePattern({}, ArcPhase::Ascent, PatternRole::Drive, false);
+  auto pattern = generatePatternForTest(
+      {}, ArcPhase::Ascent, PatternRole::Drive, false);
   // Should use default triad {0, 2, 4}.
   EXPECT_FALSE(pattern.degrees.empty());
 }
@@ -238,38 +250,49 @@ TEST(GeneratePatternTest, EmptyChordDegreesUsesDefault) {
 // generatePattern -- phase constraint enforcement
 // ---------------------------------------------------------------------------
 
-TEST(GeneratePatternTest, DescentDriveSelectsFalling) {
-  // In Descent phase, Drive should not use Rising (forbidden). Falling is used instead.
-  auto pattern = generatePattern({0, 4, 7}, ArcPhase::Descent, PatternRole::Drive, false);
-  EXPECT_EQ(pattern.type, ArpeggioPatternType::Falling);
+TEST(GeneratePatternTest, DescentDriveSelectsAllowedType) {
+  // In Descent phase, Drive should not use Rising (forbidden).
+  auto pattern = generatePatternForTest(
+      {0, 4, 7}, ArcPhase::Descent, PatternRole::Drive, false);
+  EXPECT_NE(pattern.type, ArpeggioPatternType::Rising);
+  auto allowed = getAllowedPatternsForPhase(ArcPhase::Descent);
+  EXPECT_NE(std::find(allowed.begin(), allowed.end(), pattern.type), allowed.end());
 }
 
-TEST(GeneratePatternTest, AscentReleaseSelectsScaleFragment) {
-  // In Ascent phase, Release role selects ScaleFragment.
-  auto pattern = generatePattern({0, 4, 7}, ArcPhase::Ascent, PatternRole::Release, false);
-  EXPECT_EQ(pattern.type, ArpeggioPatternType::ScaleFragment);
+TEST(GeneratePatternTest, AscentReleaseSelectsAllowedType) {
+  // In Ascent phase, Release role should select an allowed type (no Falling).
+  auto pattern = generatePatternForTest(
+      {0, 4, 7}, ArcPhase::Ascent, PatternRole::Release, false);
+  EXPECT_NE(pattern.type, ArpeggioPatternType::Falling);
+  auto allowed = getAllowedPatternsForPhase(ArcPhase::Ascent);
+  EXPECT_NE(std::find(allowed.begin(), allowed.end(), pattern.type), allowed.end());
 }
 
-TEST(GeneratePatternTest, DescentSustainSelectsPedalPoint) {
-  // PedalPoint is allowed in Descent.
-  auto pattern = generatePattern({0, 4, 7}, ArcPhase::Descent, PatternRole::Sustain, false);
-  EXPECT_EQ(pattern.type, ArpeggioPatternType::PedalPoint);
+TEST(GeneratePatternTest, DescentSustainSelectsAllowedType) {
+  auto pattern = generatePatternForTest(
+      {0, 4, 7}, ArcPhase::Descent, PatternRole::Sustain, false);
+  auto allowed = getAllowedPatternsForPhase(ArcPhase::Descent);
+  EXPECT_NE(std::find(allowed.begin(), allowed.end(), pattern.type), allowed.end());
 }
 
 TEST(GeneratePatternTest, ResultTypeAlwaysAllowedForPhase) {
-  // Exhaustively check that the generated pattern type is in the allowed set.
+  // Exhaustively check that the generated pattern type is in the allowed set
+  // across multiple seeds.
   ArcPhase phases[] = {ArcPhase::Ascent, ArcPhase::Peak, ArcPhase::Descent};
   PatternRole roles[] = {PatternRole::Drive, PatternRole::Expand,
                          PatternRole::Sustain, PatternRole::Release};
 
-  for (auto phase : phases) {
-    auto allowed = getAllowedPatternsForPhase(phase);
-    for (auto role : roles) {
-      auto pattern = generatePattern({0, 4, 7}, phase, role, false);
-      bool found = std::find(allowed.begin(), allowed.end(), pattern.type) != allowed.end();
-      EXPECT_TRUE(found) << "Pattern type " << arpeggioPatternTypeToString(pattern.type)
-                         << " not allowed for phase " << arcPhaseToString(phase)
-                         << " (role=" << patternRoleToString(role) << ")";
+  for (uint32_t seed = 1; seed <= 10; ++seed) {
+    for (auto phase : phases) {
+      auto allowed = getAllowedPatternsForPhase(phase);
+      for (auto role : roles) {
+        auto pattern = generatePatternForTest({0, 4, 7}, phase, role, false, seed);
+        bool found = std::find(allowed.begin(), allowed.end(), pattern.type) != allowed.end();
+        EXPECT_TRUE(found) << "Pattern type " << arpeggioPatternTypeToString(pattern.type)
+                           << " not allowed for phase " << arcPhaseToString(phase)
+                           << " (role=" << patternRoleToString(role)
+                           << ", seed=" << seed << ")";
+      }
     }
   }
 }
@@ -279,49 +302,76 @@ TEST(GeneratePatternTest, ResultTypeAlwaysAllowedForPhase) {
 // ---------------------------------------------------------------------------
 
 TEST(GeneratePatternTest, RisingDegreesAreSorted) {
-  auto pattern = generatePattern({7, 0, 4, 2}, ArcPhase::Ascent, PatternRole::Drive, false);
-  EXPECT_EQ(pattern.type, ArpeggioPatternType::Rising);
-  ASSERT_FALSE(pattern.degrees.empty());
-  for (size_t idx = 1; idx < pattern.degrees.size(); ++idx) {
-    EXPECT_LE(pattern.degrees[idx - 1], pattern.degrees[idx])
-        << "Rising pattern degrees not sorted at index " << idx;
+  // Try multiple seeds until we get a Rising pattern to test arrangement.
+  for (uint32_t seed = 1; seed <= 100; ++seed) {
+    auto pattern = generatePatternForTest(
+        {7, 0, 4, 2}, ArcPhase::Ascent, PatternRole::Drive, false, seed);
+    if (pattern.type == ArpeggioPatternType::Rising) {
+      ASSERT_FALSE(pattern.degrees.empty());
+      for (size_t idx = 1; idx < pattern.degrees.size(); ++idx) {
+        EXPECT_LE(pattern.degrees[idx - 1], pattern.degrees[idx])
+            << "Rising pattern degrees not sorted at index " << idx;
+      }
+      return;
+    }
   }
+  FAIL() << "Could not produce a Rising pattern after 100 seeds";
 }
 
 TEST(GeneratePatternTest, FallingDegreesAreSortedDescending) {
-  auto pattern = generatePattern({0, 4, 7}, ArcPhase::Descent, PatternRole::Drive, false);
-  EXPECT_EQ(pattern.type, ArpeggioPatternType::Falling);
-  ASSERT_FALSE(pattern.degrees.empty());
-  for (size_t idx = 1; idx < pattern.degrees.size(); ++idx) {
-    EXPECT_GE(pattern.degrees[idx - 1], pattern.degrees[idx])
-        << "Falling pattern degrees not descending at index " << idx;
+  // Try multiple seeds until we get a Falling pattern to test arrangement.
+  for (uint32_t seed = 1; seed <= 100; ++seed) {
+    auto pattern = generatePatternForTest(
+        {0, 4, 7}, ArcPhase::Descent, PatternRole::Drive, false, seed);
+    if (pattern.type == ArpeggioPatternType::Falling) {
+      ASSERT_FALSE(pattern.degrees.empty());
+      for (size_t idx = 1; idx < pattern.degrees.size(); ++idx) {
+        EXPECT_GE(pattern.degrees[idx - 1], pattern.degrees[idx])
+            << "Falling pattern degrees not descending at index " << idx;
+      }
+      return;
+    }
   }
+  FAIL() << "Could not produce a Falling pattern after 100 seeds";
 }
 
 TEST(GeneratePatternTest, PedalPointHasLowestRepeated) {
-  auto pattern = generatePattern({0, 4, 7}, ArcPhase::Peak, PatternRole::Sustain, false);
-  EXPECT_EQ(pattern.type, ArpeggioPatternType::PedalPoint);
-
-  // In pedal point, the lowest degree (0) should appear at even indices.
-  ASSERT_GE(pattern.degrees.size(), 4u);
-  EXPECT_EQ(pattern.degrees[0], 0);
-  EXPECT_EQ(pattern.degrees[2], 0);
+  // Try multiple seeds until we get a PedalPoint pattern.
+  for (uint32_t seed = 1; seed <= 100; ++seed) {
+    auto pattern = generatePatternForTest(
+        {0, 4, 7}, ArcPhase::Peak, PatternRole::Sustain, false, seed);
+    if (pattern.type == ArpeggioPatternType::PedalPoint) {
+      // In pedal point, the lowest degree (0) should appear at even indices.
+      ASSERT_GE(pattern.degrees.size(), 4u);
+      EXPECT_EQ(pattern.degrees[0], 0);
+      EXPECT_EQ(pattern.degrees[2], 0);
+      return;
+    }
+  }
+  FAIL() << "Could not produce a PedalPoint pattern after 100 seeds";
 }
 
 TEST(GeneratePatternTest, ScaleFragmentHasConsecutiveDegrees) {
-  auto pattern = generatePattern({0, 4, 7}, ArcPhase::Ascent, PatternRole::Release, false);
-  EXPECT_EQ(pattern.type, ArpeggioPatternType::ScaleFragment);
-
-  // ScaleFragment fills stepwise between min and max of input.
-  ASSERT_FALSE(pattern.degrees.empty());
-  for (size_t idx = 1; idx < pattern.degrees.size(); ++idx) {
-    EXPECT_EQ(pattern.degrees[idx] - pattern.degrees[idx - 1], 1)
-        << "ScaleFragment degrees not consecutive at index " << idx;
+  // Try multiple seeds until we get a ScaleFragment pattern.
+  for (uint32_t seed = 1; seed <= 100; ++seed) {
+    auto pattern = generatePatternForTest(
+        {0, 4, 7}, ArcPhase::Ascent, PatternRole::Release, false, seed);
+    if (pattern.type == ArpeggioPatternType::ScaleFragment) {
+      // ScaleFragment fills stepwise between min and max of input.
+      ASSERT_FALSE(pattern.degrees.empty());
+      for (size_t idx = 1; idx < pattern.degrees.size(); ++idx) {
+        EXPECT_EQ(pattern.degrees[idx] - pattern.degrees[idx - 1], 1)
+            << "ScaleFragment degrees not consecutive at index " << idx;
+      }
+      return;
+    }
   }
+  FAIL() << "Could not produce a ScaleFragment pattern after 100 seeds";
 }
 
 TEST(GeneratePatternTest, SingleDegreeHandled) {
-  auto pattern = generatePattern({5}, ArcPhase::Ascent, PatternRole::Drive, false);
+  auto pattern = generatePatternForTest(
+      {5}, ArcPhase::Ascent, PatternRole::Drive, false);
   ASSERT_FALSE(pattern.degrees.empty());
   EXPECT_EQ(pattern.degrees[0], 5);
 }

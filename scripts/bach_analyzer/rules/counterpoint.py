@@ -48,6 +48,9 @@ def _beat_map(notes: List[Note]) -> Dict[int, Note]:
 class ParallelPerfect:
     """Detect parallel P5/P8 between all voice pairs."""
 
+    def __init__(self):
+        self._keyboard_policy = False
+
     @property
     def name(self) -> str:
         return "parallel_perfect"
@@ -60,7 +63,7 @@ class ParallelPerfect:
         return profile.counterpoint_enabled
 
     def configure(self, profile: FormProfile) -> None:
-        pass
+        self._keyboard_policy = getattr(profile, 'keyboard_parallel_policy', False)
 
     def check(self, score: Score) -> RuleResult:
         violations: List[Violation] = []
@@ -96,12 +99,17 @@ class ParallelPerfect:
     ) -> List[Violation]:
         """Scan beat-by-beat using sounding_note_at to catch sustained-note parallels.
 
-        Outer voice pairs (soprano-bass) receive CRITICAL severity;
+        Default policy: outer voice pairs (soprano-bass) receive CRITICAL severity;
         inner voice pairs receive ERROR.
+
+        Keyboard policy (keyboard_parallel_policy=True): inner voices get WARNING;
+        outer voices get ERROR only when consecutive parallels (>=2) in same direction,
+        otherwise WARNING.
         """
-        severity = Severity.CRITICAL if is_outer else Severity.ERROR
         violations = []
         prev_na = prev_nb = None
+        consecutive_parallel_count = 0
+        prev_was_parallel = False
         beat = 0
         while beat < end_tick:
             na = sounding_note_at(va, beat)
@@ -113,7 +121,23 @@ class ParallelPerfect:
                     if iv1 in PERFECT_CONSONANCES and iv1 == iv2:
                         dir_a = na.pitch - prev_na.pitch
                         dir_b = nb.pitch - prev_nb.pitch
-                        if dir_a != 0 and dir_b != 0 and (dir_a > 0) == (dir_b > 0):
+                        same_direction = dir_a != 0 and dir_b != 0 and (dir_a > 0) == (dir_b > 0)
+                        if same_direction:
+                            # Determine severity based on policy.
+                            if self._keyboard_policy:
+                                if prev_was_parallel:
+                                    consecutive_parallel_count += 1
+                                else:
+                                    consecutive_parallel_count = 1
+                                prev_was_parallel = True
+                                # Outer + same direction + consecutive >= 2 -> ERROR
+                                if is_outer and consecutive_parallel_count >= 2:
+                                    severity = Severity.ERROR
+                                else:
+                                    severity = Severity.WARNING
+                            else:
+                                severity = Severity.CRITICAL if is_outer else Severity.ERROR
+
                             raw_diff = abs(na.pitch - nb.pitch)
                             iv_name = "P5" if iv1 == PERFECT_5TH else ("P1" if raw_diff == 0 else "P8")
                             bar = beat // TICKS_PER_BAR + 1
@@ -132,9 +156,17 @@ class ParallelPerfect:
                                     source=na.provenance.source if na.provenance else None,
                                 )
                             )
+                        else:
+                            prev_was_parallel = False
+                            consecutive_parallel_count = 0
+                    else:
+                        prev_was_parallel = False
+                        consecutive_parallel_count = 0
                 prev_na, prev_nb = na, nb
             else:
                 prev_na = prev_nb = None
+                prev_was_parallel = False
+                consecutive_parallel_count = 0
             beat += TICKS_PER_BEAT
         return violations
 

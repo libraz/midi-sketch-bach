@@ -18,7 +18,7 @@ class FormProfile:
     """Validation profile for a specific musical form."""
 
     form_name: str
-    style_family: str  # "organ" | "solo_string_flow" | "solo_string_arch"
+    style_family: str  # "organ" | "keyboard" | "solo_string_flow" | "solo_string_arch"
 
     # Rule application flags
     counterpoint_enabled: bool = True
@@ -38,6 +38,10 @@ class FormProfile:
     expected_voices: Optional[Tuple[int, int]] = None  # (min, max) range
     ground_bass_expected: bool = False
     ground_bass_period: Optional[int] = None  # bar-count repetition period
+
+    # Keyboard-style parallel policy: relax parallel perfect severity for inner voices
+    # and only flag consecutive outer-voice parallels in same direction as ERROR.
+    keyboard_parallel_policy: bool = False
 
     # Sources where violations should be severity-downgraded (e.g., toccata sections).
     relaxed_sources: frozenset = frozenset()
@@ -103,6 +107,21 @@ _PROFILES: Dict[str, FormProfile] = {
         exposition_required=False,
         cadence_validation=True,
         expected_voices=(2, 4),
+    ),
+    "goldberg_variations": FormProfile(
+        form_name="goldberg_variations",
+        style_family="keyboard",
+        counterpoint_enabled=True,
+        independence_enabled=True,
+        exposition_required=False,
+        cadence_validation=True,
+        hidden_perfect_severity=Severity.INFO,
+        voice_crossing_base_severity=Severity.WARNING,
+        max_leap_semitones=48,
+        voice_spacing_max=24,
+        keyboard_parallel_policy=True,
+        instrument_range=(29, 89),
+        expected_voices=(1, 5),
     ),
     "passacaglia": FormProfile(
         form_name="passacaglia",
