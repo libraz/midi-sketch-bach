@@ -197,6 +197,11 @@ class LeapResolution:
     def __init__(self, leap_threshold: int = 5):
         self.leap_threshold = leap_threshold
 
+    def configure(self, profile) -> None:
+        """Apply form-specific leap resolution threshold."""
+        if hasattr(profile, 'leap_resolution_threshold'):
+            self.leap_threshold = profile.leap_resolution_threshold
+
     @property
     def name(self) -> str:
         return "leap_resolution"

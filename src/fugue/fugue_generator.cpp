@@ -4,7 +4,9 @@
 #include "fugue/fugue_generator.h"
 
 #include <algorithm>
+#include <climits>
 #include <cstdint>
+#include <functional>
 #include <random>
 
 #include "core/gm_program.h"
@@ -417,99 +419,592 @@ std::vector<NoteEvent> createCodaNotes(Tick start_tick, Tick duration,
       note.source = BachNoteSource::Coda;
       notes.push_back(note);
     }
+
+    // Fix Stage 1 voice crossing: ensure higher voice indices have lower pitches.
+    // Stage 1 held chords are sustained tones, so pitch reordering is safe.
+    // IMPORTANT: preserve voice-leading proximity to last_pitches to avoid
+    // large jumps at coda entry (inner voices max 7st, outer voices max 12st).
+    {
+      // Collect held chord notes (voice >= 1, start_tick == start_tick).
+      std::vector<size_t> held_indices;
+      for (size_t idx = 0; idx < notes.size(); ++idx) {
+        if (notes[idx].voice >= 1 && notes[idx].start_tick == start_tick &&
+            notes[idx].duration == stage1_dur) {
+          held_indices.push_back(idx);
+        }
+      }
+      // Also include voice 0's pitch at stage1 end for crossing check.
+      uint8_t voice0_pitch = 0;
+      for (const auto& n : notes) {
+        if (n.voice == 0) voice0_pitch = n.pitch;  // Last voice 0 note pitch.
+      }
+
+      // Sort held pitches descending (voice 1 highest, voice N-1 lowest).
+      std::vector<uint8_t> held_pitches;
+      for (auto idx : held_indices) held_pitches.push_back(notes[idx].pitch);
+      std::sort(held_pitches.begin(), held_pitches.end(), std::greater<uint8_t>());
+
+      // Ensure voice 1 is below voice 0's highest pitch.
+      if (!held_pitches.empty() && voice0_pitch > 0 && held_pitches[0] > voice0_pitch) {
+        // Find a pitch class match below voice0_pitch.
+        for (int shift = -12; shift >= -36; shift -= 12) {
+          int cand = static_cast<int>(held_pitches[0]) + shift;
+          auto [vlo, vhi] = getFugueVoiceRange(1, num_voices);
+          if (cand >= vlo && cand <= vhi && cand <= voice0_pitch) {
+            held_pitches[0] = static_cast<uint8_t>(cand);
+            break;
+          }
+        }
+      }
+
+      // Re-sort after potential adjustment.
+      std::sort(held_pitches.begin(), held_pitches.end(), std::greater<uint8_t>());
+
+      // Reassign pitches to voices in order, but verify voice-leading proximity.
+      for (size_t idx = 0; idx < held_indices.size() && idx < held_pitches.size(); ++idx) {
+        uint8_t voice_idx = notes[held_indices[idx]].voice;
+        uint8_t new_pitch = held_pitches[idx];
+
+        // Check leap from pre-coda pitch if available.
+        if (last_pitches && last_pitches[voice_idx] > 0) {
+          bool is_outer = (voice_idx == 0 ||
+                           voice_idx == num_voices - 1);
+          int max_leap = is_outer ? 12 : 7;
+          int leap = std::abs(static_cast<int>(new_pitch) -
+                              static_cast<int>(last_pitches[voice_idx]));
+          if (leap > max_leap) {
+            // Try octave shifts of the assigned pitch to stay within leap limit.
+            auto [vlo, vhi] = getFugueVoiceRange(voice_idx, num_voices);
+            int target_pc = getPitchClass(new_pitch);
+            int best_leap = leap;
+            uint8_t best_pitch = new_pitch;
+            for (int shift = -36; shift <= 36; shift += 12) {
+              if (shift == 0) continue;
+              int cand = static_cast<int>(new_pitch) + shift;
+              if (cand < vlo || cand > vhi) continue;
+              if (getPitchClass(static_cast<uint8_t>(cand)) != target_pc) continue;
+              int cand_leap = std::abs(cand - static_cast<int>(last_pitches[voice_idx]));
+              if (cand_leap < best_leap) {
+                best_leap = cand_leap;
+                best_pitch = static_cast<uint8_t>(cand);
+              }
+            }
+            new_pitch = best_pitch;
+          }
+        }
+        notes[held_indices[idx]].pitch = new_pitch;
+      }
+    }
   }
 
-  // Stage 2 (bar 3): V7-I cadence progression.
+  // =========================================================================
+  // Stage 2 (bar 3): V7-I cadence — 3-chord chain optimization.
+  // Stage 3 (bar 4): Final sustained tonic chord.
+  //
+  // Strategy: "outer voices first, inner voices by search"
+  //   1. Fix outer voices (soprano/bass) with cadential voice-leading constraints
+  //   2. Search inner voice candidates to minimize total cost
+  //   3. Reject any solution with voice crossing or parallel 5/8
+  // =========================================================================
   if (duration > stage1_dur) {
     Tick stage2_start = start_tick + stage1_dur;
     Tick stage2_dur = std::min(bar_dur, duration - stage1_dur);
     Tick half_bar = stage2_dur / 2;
 
-    // V7 chord (first half): dominant 7th chord.
-    // All voices participate in V7-I cadence (lowest voice pedal is Stage 3 only).
-    int dom_pitch = tonic_pitch + 7;  // Dominant
+    // Collect Stage 1 end pitches for voice-leading reference.
+    // Voice 0: last note of head motif; others: held chord tone.
+    uint8_t stage1_end[5] = {0, 0, 0, 0, 0};
+    for (const auto& n : notes) {
+      if (n.voice < 5) {
+        // For voice 0, we want the last note; for others, the held note.
+        if (n.voice == 0) {
+          Tick note_end = n.start_tick + n.duration;
+          if (note_end <= stage2_start + 1) {
+            stage1_end[0] = n.pitch;
+          }
+        } else {
+          stage1_end[n.voice] = n.pitch;
+        }
+      }
+    }
+
+    // Dominant and tonic pitch classes for V7 and I chords.
+    int dom_root = (tonic_pitch + 7) % 12;       // G
+    int dom_third = (tonic_pitch + 11) % 12;      // B (leading tone)
+    int dom_fifth = (tonic_pitch + 14) % 12;      // D
+    int dom_seventh = (tonic_pitch + 17) % 12;    // F (7th)
+    int tonic_root = tonic_pitch % 12;            // C
+    int picardy_third = (tonic_pitch + 4) % 12;   // E (always major for Picardy)
+    int res_third_pc = is_minor ? picardy_third : ((tonic_pitch + 4) % 12);
+    int tonic_fifth = (tonic_pitch + 7) % 12;     // G
+
+    int v7_pcs[] = {dom_root, dom_third, dom_fifth, dom_seventh};
+    int i_pcs[] = {tonic_root, res_third_pc, tonic_fifth};
+
+    uint8_t voice_count = std::min(num_voices, static_cast<uint8_t>(5));
+    uint8_t sop = 0;
+    uint8_t bass = voice_count - 1;
+
+    // Helper: generate pitch candidates for a voice given target PCs.
+    auto generateCandidates = [](uint8_t prev_pitch, const int* pcs, int num_pcs,
+                                  uint8_t range_lo, uint8_t range_hi) {
+      std::vector<uint8_t> cands;
+      for (int pc_idx = 0; pc_idx < num_pcs; ++pc_idx) {
+        int pc = pcs[pc_idx];
+        // Search ±2 octaves from prev_pitch.
+        for (int oct = -24; oct <= 24; oct += 12) {
+          int base = (prev_pitch > 0) ? static_cast<int>(prev_pitch) + oct
+                                      : static_cast<int>(range_lo) + oct;
+          // Find nearest pitch with target PC.
+          int target = base - (base % 12) + pc;
+          if (target < base - 6) target += 12;
+          if (target > base + 6) target -= 12;
+          if (target >= static_cast<int>(range_lo) &&
+              target <= static_cast<int>(range_hi)) {
+            cands.push_back(static_cast<uint8_t>(target));
+          }
+        }
+      }
+      // Deduplicate.
+      std::sort(cands.begin(), cands.end());
+      cands.erase(std::unique(cands.begin(), cands.end()), cands.end());
+      return cands;
+    };
+
+    // Limit candidates by distance from reference pitch, keeping top N.
+    auto limitCandidates = [](std::vector<uint8_t>& cands, uint8_t ref, size_t max_n) {
+      if (cands.size() <= max_n) return;
+      std::sort(cands.begin(), cands.end(), [ref](uint8_t a, uint8_t b) {
+        return std::abs(static_cast<int>(a) - static_cast<int>(ref)) <
+               std::abs(static_cast<int>(b) - static_cast<int>(ref));
+      });
+      cands.resize(max_n);
+    };
+
+    // === Outer voices first ===
+    auto [sop_lo, sop_hi] = getFugueVoiceRange(sop, num_voices);
+    auto [bass_lo, bass_hi] = getFugueVoiceRange(bass, num_voices);
+
+    // V7 candidates for soprano and bass (limited to top 3 by proximity).
+    auto sop_v7_cands = generateCandidates(stage1_end[sop], v7_pcs, 4, sop_lo, sop_hi);
+    limitCandidates(sop_v7_cands, stage1_end[sop], 3);
+    auto bass_v7_cands = generateCandidates(stage1_end[bass], v7_pcs, 4, bass_lo, bass_hi);
+    limitCandidates(bass_v7_cands, stage1_end[bass], 3);
+    // Prefer bass on dominant root.
     {
-      // Voice-specific V7 voicings (dom_pitch-relative offsets).
-      // 3v: {+4(B), -2(F), -12(G bass)}
-      // 4v: {+4(B), +7(D), -2(F), -12(G bass)}
-      // 5v: {+4(B), +7(D), -2(F), -12(G bass), -17(C below)}
-      int dom7_3[] = {4, -2, -12};
-      int dom7_4[] = {4, 7, -2, -12};
-      int dom7_5[] = {4, 7, -2, -12, -17};
-      int* dom7_offsets;
-      if (num_voices <= 3) dom7_offsets = dom7_3;
-      else if (num_voices == 4) dom7_offsets = dom7_4;
-      else dom7_offsets = dom7_5;
-      uint8_t count = std::min(num_voices, static_cast<uint8_t>(5));
-      for (uint8_t v = 0; v < count; ++v) {
-        auto [vlo, vhi] = getFugueVoiceRange(v, num_voices);
+      std::vector<uint8_t> root_first;
+      std::vector<uint8_t> others;
+      for (auto p : bass_v7_cands) {
+        if (getPitchClass(p) == dom_root)
+          root_first.push_back(p);
+        else
+          others.push_back(p);
+      }
+      root_first.insert(root_first.end(), others.begin(), others.end());
+      bass_v7_cands = root_first;
+    }
+
+    // Score a 3-chord sequence for all voices.
+    // v7_pitches[v], i_pitches[v], final_pitches[v] for each voice v.
+    struct CodaSolution {
+      uint8_t v7[5] = {};
+      uint8_t i_chord[5] = {};
+      uint8_t final_chord[5] = {};
+      int cost = INT32_MAX;
+    };
+
+    auto scoreSolution = [&](const CodaSolution& sol) -> int {
+      int cost = 0;
+
+      for (uint8_t v = 0; v < voice_count; ++v) {
+        // Voice-leading distance: stage1→V7, V7→I, I→final.
+        int d1 = std::abs(static_cast<int>(sol.v7[v]) - static_cast<int>(stage1_end[v]));
+        int d2 = std::abs(static_cast<int>(sol.i_chord[v]) - static_cast<int>(sol.v7[v]));
+        int d3 = std::abs(static_cast<int>(sol.final_chord[v]) - static_cast<int>(sol.i_chord[v]));
+        cost += 10 * (d1 + d2 + d3);
+
+        // Excessive leap penalty (>12st).
+        if (d1 > 12) cost += 200 * (d1 - 12);
+        if (d2 > 12) cost += 200 * (d2 - 12);
+        if (d3 > 12) cost += 200 * (d3 - 12);
+      }
+
+      // Leading-tone resolution: any voice with V7 leading tone should resolve up by semitone.
+      for (uint8_t v = 0; v < voice_count; ++v) {
+        if (getPitchClass(sol.v7[v]) == dom_third) {
+          int resolution = static_cast<int>(sol.i_chord[v]) - static_cast<int>(sol.v7[v]);
+          if (resolution != 1) cost += 50;  // Leading tone must resolve up by semitone.
+        }
+      }
+
+      // Seventh resolution: any voice with V7 seventh should resolve down by step.
+      for (uint8_t v = 0; v < voice_count; ++v) {
+        if (getPitchClass(sol.v7[v]) == dom_seventh) {
+          int resolution = static_cast<int>(sol.i_chord[v]) - static_cast<int>(sol.v7[v]);
+          if (resolution != -1 && resolution != -2) cost += 50;
+        }
+      }
+
+      // Contrary outer voice motion bonus (V7→I: soprano up, bass down or vice versa).
+      {
+        int sop_motion = static_cast<int>(sol.i_chord[sop]) - static_cast<int>(sol.v7[sop]);
+        int bass_motion = static_cast<int>(sol.i_chord[bass]) - static_cast<int>(sol.v7[bass]);
+        if ((sop_motion > 0 && bass_motion < 0) || (sop_motion < 0 && bass_motion > 0)) {
+          cost -= 10;
+        }
+      }
+
+      // Voice crossing check — instant rejection.
+      for (int chord_idx = 0; chord_idx < 3; ++chord_idx) {
+        const uint8_t* pitches = (chord_idx == 0) ? sol.v7
+                               : (chord_idx == 1) ? sol.i_chord
+                               : sol.final_chord;
+        for (uint8_t v = 0; v + 1 < voice_count; ++v) {
+          if (pitches[v] < pitches[v + 1]) {
+            return INT32_MAX;  // Voice crossing: reject.
+          }
+        }
+      }
+
+      // Parallel perfect 5ths/octaves check between consecutive chords.
+      auto checkParallels = [&](const uint8_t* chord_a, const uint8_t* chord_b) -> int {
+        int pen = 0;
+        for (uint8_t va = 0; va < voice_count; ++va) {
+          for (uint8_t vb = va + 1; vb < voice_count; ++vb) {
+            int interval_a = std::abs(static_cast<int>(chord_a[va]) -
+                                       static_cast<int>(chord_a[vb]));
+            int interval_b = std::abs(static_cast<int>(chord_b[va]) -
+                                       static_cast<int>(chord_b[vb]));
+            int simple_a = interval_util::compoundToSimple(interval_a);
+            int simple_b = interval_util::compoundToSimple(interval_b);
+            // Parallel perfect unisons, 5ths, or octaves.
+            if ((simple_a == 0 || simple_a == 7) &&
+                (simple_b == 0 || simple_b == 7) &&
+                simple_a == simple_b) {
+              // Check both voices move in same direction.
+              int motion_a = static_cast<int>(chord_b[va]) - static_cast<int>(chord_a[va]);
+              int motion_b = static_cast<int>(chord_b[vb]) - static_cast<int>(chord_a[vb]);
+              if (motion_a != 0 && motion_b != 0 &&
+                  ((motion_a > 0) == (motion_b > 0))) {
+                return INT32_MAX;  // Parallel 5/8: reject.
+              }
+            }
+          }
+        }
+        return pen;
+      };
+
+      int par1 = checkParallels(sol.v7, sol.i_chord);
+      if (par1 == INT32_MAX) return INT32_MAX;
+      cost += par1;
+      int par2 = checkParallels(sol.i_chord, sol.final_chord);
+      if (par2 == INT32_MAX) return INT32_MAX;
+      cost += par2;
+
+      // Hidden 5/8 on outer voices (penalty, not rejection).
+      auto checkHidden58 = [&](const uint8_t* chord_a, const uint8_t* chord_b) -> int {
+        int sop_m = static_cast<int>(chord_b[sop]) - static_cast<int>(chord_a[sop]);
+        int bass_m = static_cast<int>(chord_b[bass]) - static_cast<int>(chord_a[bass]);
+        if (sop_m != 0 && bass_m != 0 && ((sop_m > 0) == (bass_m > 0))) {
+          int interval = std::abs(static_cast<int>(chord_b[sop]) -
+                                   static_cast<int>(chord_b[bass]));
+          int simple = interval_util::compoundToSimple(interval);
+          if (simple == 0 || simple == 7) {
+            return 100;  // Hidden 5/8 penalty.
+          }
+        }
+        return 0;
+      };
+
+      cost += checkHidden58(sol.v7, sol.i_chord);
+      cost += checkHidden58(sol.i_chord, sol.final_chord);
+
+      // 4-3 suspension bonus: voice holds from V7 to I chord.
+      for (uint8_t v = 0; v < voice_count; ++v) {
+        if (sol.v7[v] == sol.i_chord[v]) {
+          // Check if held note forms a 4th resolving to 3rd with any lower voice.
+          for (uint8_t vb = v + 1; vb < voice_count; ++vb) {
+            int interval_v7 = std::abs(static_cast<int>(sol.v7[v]) -
+                                        static_cast<int>(sol.v7[vb]));
+            int simple = interval_util::compoundToSimple(interval_v7);
+            if (simple == 5) {  // Perfect 4th
+              cost -= 20;  // 4-3 suspension bonus.
+            }
+          }
+        }
+      }
+
+      return cost;
+    };
+
+    CodaSolution best;
+
+    // I chord PCs for the final chord (Picardy third for minor).
+    int final_pcs[] = {tonic_root, picardy_third, tonic_fifth};
+
+    // Search: iterate outer voice candidates, then fill inner voices.
+    for (auto sop_v7 : sop_v7_cands) {
+      // I chord: soprano resolves leading tone → tonic (if leading tone),
+      // otherwise nearest I chord tone.
+      std::vector<uint8_t> sop_i_cands;
+      if (getPitchClass(sop_v7) == dom_third) {
+        // Leading tone must resolve up by semitone.
+        uint8_t resolved = sop_v7 + 1;
+        if (resolved >= sop_lo && resolved <= sop_hi) {
+          sop_i_cands.push_back(resolved);
+        }
+      }
+      if (sop_i_cands.empty()) {
+        sop_i_cands = generateCandidates(sop_v7, i_pcs, 3, sop_lo, sop_hi);
+      }
+      limitCandidates(sop_i_cands, sop_v7, 2);
+
+      for (auto bass_v7 : bass_v7_cands) {
+        // Bass: V7 root → tonic root (standard bass resolution).
+        std::vector<uint8_t> bass_i_cands;
+        if (getPitchClass(bass_v7) == dom_root) {
+          // Dominant root → tonic root (down P5 or up P4).
+          for (int d : {-7, 5, -19, 17}) {
+            int cand = static_cast<int>(bass_v7) + d;
+            if (cand >= bass_lo && cand <= bass_hi &&
+                getPitchClass(static_cast<uint8_t>(cand)) == tonic_root) {
+              bass_i_cands.push_back(static_cast<uint8_t>(cand));
+            }
+          }
+        }
+        if (bass_i_cands.empty()) {
+          bass_i_cands = generateCandidates(bass_v7, i_pcs, 3, bass_lo, bass_hi);
+        }
+        limitCandidates(bass_i_cands, bass_v7, 2);
+
+        for (auto sop_i : sop_i_cands) {
+          for (auto bass_i : bass_i_cands) {
+            // Quick crossing check on outer voices.
+            if (sop_v7 < bass_v7 || sop_i < bass_i) continue;
+
+            // Final chord candidates for outer voices (limited to top 2).
+            auto sop_final_cands = generateCandidates(sop_i, final_pcs, 3, sop_lo, sop_hi);
+            limitCandidates(sop_final_cands, sop_i, 2);
+            auto bass_final_cands = generateCandidates(bass_i, final_pcs, 3, bass_lo, bass_hi);
+            limitCandidates(bass_final_cands, bass_i, 2);
+
+            for (auto sop_final : sop_final_cands) {
+              for (auto bass_final : bass_final_cands) {
+                if (sop_final < bass_final) continue;
+
+                // === Inner voices: enumerate all combinations ===
+                if (voice_count <= 2) {
+                  CodaSolution sol;
+                  sol.v7[sop] = sop_v7;
+                  sol.v7[bass] = bass_v7;
+                  sol.i_chord[sop] = sop_i;
+                  sol.i_chord[bass] = bass_i;
+                  sol.final_chord[sop] = sop_final;
+                  sol.final_chord[bass] = bass_final;
+                  sol.cost = scoreSolution(sol);
+                  if (sol.cost < best.cost) best = sol;
+                  continue;
+                }
+
+                // Generate inner voice candidates.
+                struct InnerCands {
+                  std::vector<uint8_t> v7;
+                  std::vector<uint8_t> i_chord;
+                  std::vector<uint8_t> final_chord;
+                };
+                std::vector<InnerCands> inner(voice_count - 2);
+
+                for (uint8_t iv = 0; iv < voice_count - 2; ++iv) {
+                  uint8_t voice_idx = 1 + iv;
+                  auto [vlo, vhi] = getFugueVoiceRange(voice_idx, num_voices);
+                  inner[iv].v7 = generateCandidates(stage1_end[voice_idx], v7_pcs, 4, vlo, vhi);
+                  inner[iv].i_chord = generateCandidates(0, i_pcs, 3, vlo, vhi);
+                  inner[iv].final_chord = generateCandidates(0, final_pcs, 3, vlo, vhi);
+
+                  // Limit candidates to keep search space manageable.
+                  // Sort by distance from previous pitch and keep top 5.
+                  auto limitByDist = [](std::vector<uint8_t>& cands, uint8_t ref, int max_n) {
+                    if (ref == 0 || static_cast<int>(cands.size()) <= max_n) return;
+                    std::sort(cands.begin(), cands.end(), [ref](uint8_t a, uint8_t b) {
+                      return std::abs(static_cast<int>(a) - static_cast<int>(ref)) <
+                             std::abs(static_cast<int>(b) - static_cast<int>(ref));
+                    });
+                    cands.resize(static_cast<size_t>(max_n));
+                  };
+                  limitByDist(inner[iv].v7, stage1_end[voice_idx], 2);
+                  uint8_t v7_ref = inner[iv].v7.empty() ? stage1_end[voice_idx]
+                                                         : inner[iv].v7[0];
+                  limitByDist(inner[iv].i_chord, v7_ref, 2);
+                  uint8_t i_ref = inner[iv].i_chord.empty() ? v7_ref
+                                                             : inner[iv].i_chord[0];
+                  limitByDist(inner[iv].final_chord, i_ref, 2);
+                }
+
+                // Enumerate inner voice combinations.
+                // For 3 voices: 1 inner voice; 4 voices: 2 inner; 5 voices: 3 inner.
+                uint8_t n_inner = voice_count - 2;
+
+                // Recursive lambda to enumerate inner voice assignments.
+                std::function<void(uint8_t, CodaSolution&)> enumerate;
+                enumerate = [&](uint8_t depth, CodaSolution& partial) {
+                  if (depth == n_inner) {
+                    partial.cost = scoreSolution(partial);
+                    if (partial.cost < best.cost) best = partial;
+                    return;
+                  }
+                  uint8_t voice_idx = 1 + depth;
+                  for (auto pv7 : inner[depth].v7) {
+                    // Early pruning: skip if voice-leading distance alone
+                    // already exceeds best known cost.
+                    int d1 = std::abs(static_cast<int>(pv7) -
+                                       static_cast<int>(stage1_end[voice_idx]));
+                    if (10 * d1 >= best.cost) continue;
+                    for (auto pi : inner[depth].i_chord) {
+                      for (auto pf : inner[depth].final_chord) {
+                        partial.v7[voice_idx] = pv7;
+                        partial.i_chord[voice_idx] = pi;
+                        partial.final_chord[voice_idx] = pf;
+                        enumerate(depth + 1, partial);
+                      }
+                    }
+                  }
+                };
+
+                CodaSolution partial;
+                partial.v7[sop] = sop_v7;
+                partial.v7[bass] = bass_v7;
+                partial.i_chord[sop] = sop_i;
+                partial.i_chord[bass] = bass_i;
+                partial.final_chord[sop] = sop_final;
+                partial.final_chord[bass] = bass_final;
+                enumerate(0, partial);
+              }
+            }
+          }
+        }
+      }
+    }
+
+    // Emit V7 chord notes (first half of Stage 2).
+    if (best.cost < INT32_MAX) {
+      for (uint8_t v = 0; v < voice_count; ++v) {
         NoteEvent note;
         note.start_tick = stage2_start;
         note.duration = half_bar;
-        note.pitch = clampPitch(dom_pitch + dom7_offsets[v], vlo, vhi);
+        note.pitch = best.v7[v];
         note.velocity = kOrganVelocity;
         note.voice = v;
         note.source = BachNoteSource::Coda;
         notes.push_back(note);
       }
-    }
 
-    // I chord (second half): tonic resolution.
-    // All voices participate in V7-I cadence (lowest voice pedal is Stage 3 only).
-    {
-      // Voice-specific I resolutions (tonic_pitch-relative offsets).
-      // B→C(↑m2), F→E(↓m2), G→C(↑P4) — functional voice leading.
-      // 3v: {+12(C5), +4(E), 0(C)}
-      // 4v: {+12(C5), +7(G), +4(E), 0(C)}
-      // 5v: {+12(C5), +7(G), +4(E), 0(C), -12(C below)}
-      int res_third = is_minor ? 3 : 4;
-      int tonic_3[] = {12, res_third, 0};
-      int tonic_4[] = {12, 7, res_third, 0};
-      int tonic_5[] = {12, 7, res_third, 0, -12};
-      int* tonic_offsets;
-      if (num_voices <= 3) tonic_offsets = tonic_3;
-      else if (num_voices == 4) tonic_offsets = tonic_4;
-      else tonic_offsets = tonic_5;
-      uint8_t count = std::min(num_voices, static_cast<uint8_t>(5));
-      for (uint8_t v = 0; v < count; ++v) {
-        auto [vlo, vhi] = getFugueVoiceRange(v, num_voices);
+      // Emit I chord notes (second half of Stage 2).
+      for (uint8_t v = 0; v < voice_count; ++v) {
         NoteEvent note;
         note.start_tick = stage2_start + half_bar;
         note.duration = stage2_dur - half_bar;
-        note.pitch = clampPitch(tonic_pitch + tonic_offsets[v], vlo, vhi);
+        note.pitch = best.i_chord[v];
         note.velocity = kOrganVelocity;
         note.voice = v;
         note.source = BachNoteSource::Coda;
         notes.push_back(note);
+      }
+
+      // Emit Stage 3 final tonic chord.
+      Tick stage2_actual = stage2_dur;
+      Tick stage3_start = start_tick + stage1_dur + stage2_actual;
+      if (stage3_start < start_tick + duration) {
+        Tick stage3_dur = start_tick + duration - stage3_start;
+        for (uint8_t v = 0; v < voice_count; ++v) {
+          NoteEvent note;
+          note.start_tick = stage3_start;
+          note.duration = stage3_dur;
+          note.pitch = best.final_chord[v];
+          note.velocity = kOrganVelocity;
+          note.voice = v;
+          note.source = BachNoteSource::Coda;
+          notes.push_back(note);
+        }
+      }
+    } else {
+      // Fallback: emit simple V7-I if optimization found no valid solution.
+      int dom_pitch = tonic_pitch + 7;
+      int dom7_offsets[] = {4, 7, -2, -12, -17};
+      int res_third = is_minor ? 3 : 4;
+      int tonic_offsets[] = {12, 7, res_third, 0, -12};
+      int final_offsets[] = {12, 7, 4, 0, -12};
+
+      uint8_t count = std::min(num_voices, static_cast<uint8_t>(5));
+      for (uint8_t v = 0; v < count; ++v) {
+        auto [vlo, vhi] = getFugueVoiceRange(v, num_voices);
+        NoteEvent v7_note;
+        v7_note.start_tick = stage2_start;
+        v7_note.duration = half_bar;
+        v7_note.pitch = clampPitch(dom_pitch + dom7_offsets[v], vlo, vhi);
+        v7_note.velocity = kOrganVelocity;
+        v7_note.voice = v;
+        v7_note.source = BachNoteSource::Coda;
+        notes.push_back(v7_note);
+
+        NoteEvent i_note;
+        i_note.start_tick = stage2_start + half_bar;
+        i_note.duration = stage2_dur - half_bar;
+        i_note.pitch = clampPitch(tonic_pitch + tonic_offsets[v], vlo, vhi);
+        i_note.velocity = kOrganVelocity;
+        i_note.voice = v;
+        i_note.source = BachNoteSource::Coda;
+        notes.push_back(i_note);
+      }
+
+      // Stage 3 fallback.
+      Tick stage3_start = start_tick + stage1_dur + stage2_dur;
+      if (stage3_start < start_tick + duration) {
+        Tick stage3_dur = start_tick + duration - stage3_start;
+        for (uint8_t v = 0; v < count; ++v) {
+          auto [vlo, vhi] = getFugueVoiceRange(v, num_voices);
+          NoteEvent note;
+          note.start_tick = stage3_start;
+          note.duration = stage3_dur;
+          note.pitch = clampPitch(tonic_pitch + final_offsets[v], vlo, vhi);
+          note.velocity = kOrganVelocity;
+          note.voice = v;
+          note.source = BachNoteSource::Coda;
+          notes.push_back(note);
+        }
       }
     }
   }
 
-  // Stage 3 (bar 4): Final sustained tonic chord.
-  Tick stage2_actual = (duration > stage1_dur)
-      ? std::min(bar_dur, duration - stage1_dur)
-      : static_cast<Tick>(0);
-  Tick stage3_start = start_tick + stage1_dur + stage2_actual;
-  if (stage3_start < start_tick + duration) {
-    Tick stage3_dur = start_tick + duration - stage3_start;
-    // Picardy third for minor keys: raise 3rd by 1 semitone.
-    // Upper voices only (consistent with Stage 2).
-    int third_offset = is_minor ? 4 : 4;  // Major 3rd in both (Picardy)
-    {
-      uint8_t upper_count = (num_voices > 1) ? num_voices - 1 : num_voices;
-      int final_offsets[] = {0, 7, third_offset, -12, 12};
-      uint8_t count = std::min(upper_count, static_cast<uint8_t>(5));
-      std::sort(final_offsets, final_offsets + count, std::greater<int>());
-      for (uint8_t v = 0; v < count; ++v) {
-        auto [vlo, vhi] = getFugueVoiceRange(v, num_voices);
-        NoteEvent note;
-        note.start_tick = stage3_start;
-        note.duration = stage3_dur;
-        note.pitch = clampPitch(tonic_pitch + final_offsets[v], vlo, vhi);
-        note.velocity = kOrganVelocity;
-        note.voice = v;
-        note.source = BachNoteSource::Coda;
-        notes.push_back(note);
+  // Verification pass: log any remaining violations (diagnostic only).
+  {
+    // Check voice crossing across all Stage 2/3 chords.
+    auto checkCrossing = [&](const char* label, Tick tick) {
+      uint8_t pitches_at_tick[5] = {0, 0, 0, 0, 0};
+      for (const auto& n : notes) {
+        if (n.start_tick <= tick && tick < n.start_tick + n.duration && n.voice < 5) {
+          pitches_at_tick[n.voice] = n.pitch;
+        }
+      }
+      uint8_t count = std::min(num_voices, static_cast<uint8_t>(5));
+      for (uint8_t v = 0; v + 1 < count; ++v) {
+        if (pitches_at_tick[v] > 0 && pitches_at_tick[v + 1] > 0 &&
+            pitches_at_tick[v] < pitches_at_tick[v + 1]) {
+          std::fprintf(stderr, "[createCodaNotes] WARNING: %s voice crossing v%u(%u) < v%u(%u)\n",
+                       label, v, pitches_at_tick[v], v + 1, pitches_at_tick[v + 1]);
+        }
+      }
+    };
+
+    Tick stage2_start = start_tick + stage1_dur;
+    Tick stage2_dur = std::min(bar_dur, duration - stage1_dur);
+    Tick half_bar = stage2_dur / 2;
+
+    if (duration > stage1_dur) {
+      checkCrossing("V7", stage2_start);
+      checkCrossing("I", stage2_start + half_bar);
+      Tick stage3_start = start_tick + stage1_dur + stage2_dur;
+      if (stage3_start < start_tick + duration) {
+        checkCrossing("final", stage3_start);
       }
     }
   }
@@ -1877,7 +2372,7 @@ FugueResult generateFugue(const FugueConfig& config) {
       final_repair_params.voice_range = [&](uint8_t v) {
         return getFugueVoiceRange(v, num_voices);
       };
-      final_repair_params.max_iterations = 2;
+      final_repair_params.max_iterations = 5;
       repairParallelPerfect(all_notes, final_repair_params);
     }
 

@@ -80,14 +80,21 @@ class StrongBeatDissonance:
         3. Resolution: the suspended voice resolves by step (1-2 semitones),
            typically downward.
         """
-        prev_tick = tick - TICKS_PER_BEAT
         next_tick = tick + TICKS_PER_BEAT
-        if prev_tick < 0:
-            return False
-        # Check preparation: note.pitch was sounding at prev_tick.
-        prev_sounding = _notes_at_tick(all_notes, prev_tick)
-        prepared = any(n.pitch == note.pitch and n.voice == note.voice
-                       for n in prev_sounding)
+        # Check preparation: note.pitch was sounding at the previous beat.
+        # Extended to 2-beat lookback to recognize chain suspensions where the
+        # previous beat's dissonance resolution serves as preparation for the
+        # next suspension (standard Baroque practice).
+        prepared = False
+        for lookback in (1, 2):
+            prev_tick = tick - TICKS_PER_BEAT * lookback
+            if prev_tick < 0:
+                continue
+            prev_sounding = _notes_at_tick(all_notes, prev_tick)
+            if any(n.pitch == note.pitch and n.voice == note.voice
+                   for n in prev_sounding):
+                prepared = True
+                break
         if not prepared:
             # Also accept appoggiatura: approached by step and resolves by step.
             return self._is_accented_dissonance(note, partner, all_notes, tick, num_voices)
@@ -337,7 +344,42 @@ class UnresolvedDissonance:
                         is_accent = beat_in_bar in (1, 3)
 
                         if is_accent:
-                            sev = Severity.ERROR
+                            # Downgrade to WARNING when a diatonic 7th chord
+                            # context is present and resolution motion (step
+                            # movement or chord change) occurs within 3 beats.
+                            is_seventh = (
+                                StrongBeatDissonance._is_dominant_seventh_context(sounding)
+                                or StrongBeatDissonance._is_diminished_seventh_context(sounding)
+                                or StrongBeatDissonance._is_diatonic_seventh_context(sounding)
+                            )
+                            if is_seventh:
+                                has_resolution = False
+                                for look in range(1, 4):
+                                    fut_idx = b_idx + look
+                                    if fut_idx >= len(beats):
+                                        break
+                                    fut_sounding = _notes_at_tick(all_notes, beats[fut_idx])
+                                    # Either voice resolves by step.
+                                    for resolver in (na, nb):
+                                        fut_voice = [n for n in fut_sounding
+                                                     if n.voice == resolver.voice]
+                                        for fnt in fut_voice:
+                                            if 1 <= abs(fnt.pitch - resolver.pitch) <= 2:
+                                                has_resolution = True
+                                                break
+                                        if has_resolution:
+                                            break
+                                    # Chord change also counts as resolution.
+                                    if not has_resolution and fut_sounding:
+                                        fut_pcs = {n.pitch % 12 for n in fut_sounding}
+                                        curr_pcs = {n.pitch % 12 for n in sounding}
+                                        if fut_pcs != curr_pcs:
+                                            has_resolution = True
+                                    if has_resolution:
+                                        break
+                                sev = Severity.WARNING if has_resolution else Severity.ERROR
+                            else:
+                                sev = Severity.ERROR
                         elif is_ground_bass_pair:
                             sev = Severity.INFO
                         else:

@@ -46,6 +46,11 @@ class FormProfile:
     # Sources where violations should be severity-downgraded (e.g., toccata sections).
     relaxed_sources: frozenset = frozenset()
 
+    # Leap resolution: minimum leap interval (semitones) that triggers the
+    # "leap must resolve by step" rule.  Default 5 (perfect 4th).
+    # Higher values relax the rule for arpeggio-heavy forms.
+    leap_resolution_threshold: int = 5
+
 
 # ---------------------------------------------------------------------------
 # Profile registry
@@ -69,6 +74,7 @@ _PROFILES: Dict[str, FormProfile] = {
         exposition_required=True,
         cadence_validation=True,
         expected_voices=(2, 5),
+        leap_resolution_threshold=7,
     ),
     "toccata_and_fugue": FormProfile(
         form_name="toccata_and_fugue",

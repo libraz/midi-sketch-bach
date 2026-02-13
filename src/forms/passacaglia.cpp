@@ -1530,6 +1530,29 @@ PassacagliaResult generatePassacaglia(const PassacagliaConfig& config) {
       if (modified == 0) break;
     }
 
+    // Second parallel repair: catch violations introduced by post-processing
+    // (repeated-note repair, Picardy third, registration changes).
+    // Ground bass is ProtectionLevel::Immutable — never modified.
+    {
+      ParallelRepairParams pp2;
+      pp2.num_voices = num_voices;
+      pp2.scale = config.key.is_minor ? ScaleType::HarmonicMinor : ScaleType::Major;
+      pp2.key_at_tick = [&](Tick) { return config.key.tonic; };
+      pp2.voice_range = [&](uint8_t v) -> std::pair<uint8_t, uint8_t> {
+        return {getVoiceLowPitch(v), getVoiceHighPitch(v)};
+      };
+      pp2.max_iterations = 5;
+      repairParallelPerfect(final_notes, pp2);
+    }
+
+    // Post-parallel repeated-note repair: the second parallel repair may have
+    // moved pitches to avoid parallel 5ths/8ves, reintroducing same-pitch runs.
+    // Reuse final_repair params (same key, scale, voice ranges).
+    for (int pass = 0; pass < 3; ++pass) {
+      int modified = repairRepeatedNotes(final_notes, final_repair);
+      if (modified == 0) break;
+    }
+
     // Redistribute repaired notes back to tracks.
     for (auto& track : tracks) {
       track.notes.clear();

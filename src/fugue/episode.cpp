@@ -133,7 +133,8 @@ static uint8_t medianOfFirst3(const std::vector<NoteEvent>& notes) {
 /// @param reference_pitch Optional reference pitch for continuity.
 static void fitToVoiceRegister(std::vector<NoteEvent>& notes, VoiceId voice_id,
                                uint8_t num_voices,
-                               uint8_t reference_pitch = 0) {
+                               uint8_t reference_pitch = 0,
+                               uint8_t prev_pitch = 0) {
   if (notes.empty()) return;
 
   auto [lo, hi] = getFugueVoiceRange(voice_id, num_voices);
@@ -141,8 +142,12 @@ static void fitToVoiceRegister(std::vector<NoteEvent>& notes, VoiceId voice_id,
   if (voice_id > 0) {
     std::tie(adj_lo, adj_hi) = getFugueVoiceRange(voice_id - 1, num_voices);
   }
+  // When prev_pitch is available, use it as the primary reference for
+  // melodic_dist in fitToRegister. This penalizes octave shifts that create
+  // large intervals (including tritones) from the previous section.
+  uint8_t effective_ref = (prev_pitch > 0) ? prev_pitch : reference_pitch;
   int shift = fitToRegister(notes, lo, hi,
-                             reference_pitch, 0, 0, 0,
+                             effective_ref, 0, 0, 0,
                              adj_lo, adj_hi,
                              false, 0, false);
   for (auto& note : notes) {
@@ -208,7 +213,8 @@ namespace {  // NOLINT(google-build-namespaces) reopened for character-specific 
 void generateSevereEpisode(Episode& episode, const std::vector<NoteEvent>& motif,
                            Tick start_tick, Tick motif_dur, int deg_step,
                            int seq_reps, Tick imitation_offset, uint8_t num_voices,
-                           Key key, ScaleType scale) {
+                           Key key, ScaleType scale,
+                           const uint8_t* prev_pitches = nullptr) {
   // Voice 0: Original motif + diatonic sequence.
   std::vector<NoteEvent> v0_notes;
   for (const auto& note : motif) {
@@ -226,7 +232,8 @@ void generateSevereEpisode(Episode& episode, const std::vector<NoteEvent>& motif
     note.voice = 0;
     v0_notes.push_back(note);
   }
-  fitToVoiceRegister(v0_notes, 0, num_voices, medianOfFirst3(motif));
+  fitToVoiceRegister(v0_notes, 0, num_voices, medianOfFirst3(motif),
+                     prev_pitches ? prev_pitches[0] : 0);
   for (auto& note : v0_notes) {
     episode.notes.push_back(note);
   }
@@ -255,7 +262,8 @@ void generateSevereEpisode(Episode& episode, const std::vector<NoteEvent>& motif
       note.voice = 1;
       v1_notes.push_back(note);
     }
-    fitToVoiceRegister(v1_notes, 1, num_voices, medianOfFirst3(inverted));
+    fitToVoiceRegister(v1_notes, 1, num_voices, medianOfFirst3(inverted),
+                       prev_pitches ? prev_pitches[1] : 0);
     for (auto& note : v1_notes) {
       episode.notes.push_back(note);
     }
@@ -282,7 +290,8 @@ void generateSevereEpisode(Episode& episode, const std::vector<NoteEvent>& motif
 void generatePlayfulEpisode(Episode& episode, const std::vector<NoteEvent>& motif,
                             Tick start_tick, Tick motif_dur, int deg_step,
                             int seq_reps, Tick imitation_offset, uint8_t num_voices,
-                            Key key, ScaleType scale) {
+                            Key key, ScaleType scale,
+                            const uint8_t* prev_pitches = nullptr) {
   // Voice 0: Retrograde of motif + diatonic sequence of retrograde.
   std::vector<NoteEvent> v0_notes;
   auto retrograde = retrogradeMelody(motif, start_tick);
@@ -299,7 +308,8 @@ void generatePlayfulEpisode(Episode& episode, const std::vector<NoteEvent>& moti
     note.voice = 0;
     v0_notes.push_back(note);
   }
-  fitToVoiceRegister(v0_notes, 0, num_voices, medianOfFirst3(retrograde));
+  fitToVoiceRegister(v0_notes, 0, num_voices, medianOfFirst3(retrograde),
+                     prev_pitches ? prev_pitches[0] : 0);
   for (auto& note : v0_notes) {
     episode.notes.push_back(note);
   }
@@ -328,7 +338,8 @@ void generatePlayfulEpisode(Episode& episode, const std::vector<NoteEvent>& moti
       note.voice = 1;
       v1_notes.push_back(note);
     }
-    fitToVoiceRegister(v1_notes, 1, num_voices, medianOfFirst3(inverted));
+    fitToVoiceRegister(v1_notes, 1, num_voices, medianOfFirst3(inverted),
+                       prev_pitches ? prev_pitches[1] : 0);
     for (auto& note : v1_notes) {
       episode.notes.push_back(note);
     }
@@ -354,7 +365,8 @@ void generatePlayfulEpisode(Episode& episode, const std::vector<NoteEvent>& moti
 void generateNobleEpisode(Episode& episode, const std::vector<NoteEvent>& motif,
                           Tick start_tick, Tick motif_dur, int deg_step,
                           int seq_reps, Tick imitation_offset, uint8_t num_voices,
-                          Key key, ScaleType scale) {
+                          Key key, ScaleType scale,
+                          const uint8_t* prev_pitches = nullptr) {
   // Voice 0: Original motif + diatonic sequence (upper melodic line).
   std::vector<NoteEvent> v0_notes;
   for (const auto& note : motif) {
@@ -372,7 +384,8 @@ void generateNobleEpisode(Episode& episode, const std::vector<NoteEvent>& motif,
     note.voice = 0;
     v0_notes.push_back(note);
   }
-  fitToVoiceRegister(v0_notes, 0, num_voices, medianOfFirst3(motif));
+  fitToVoiceRegister(v0_notes, 0, num_voices, medianOfFirst3(motif),
+                     prev_pitches ? prev_pitches[0] : 0);
   for (auto& note : v0_notes) {
     episode.notes.push_back(note);
   }
@@ -390,7 +403,8 @@ void generateNobleEpisode(Episode& episode, const std::vector<NoteEvent>& motif,
       note.voice = 1;
       v1_notes.push_back(note);
     }
-    fitToVoiceRegister(v1_notes, 1, num_voices, medianOfFirst3(retrograded));
+    fitToVoiceRegister(v1_notes, 1, num_voices, medianOfFirst3(retrograded),
+                       prev_pitches ? prev_pitches[1] : 0);
     for (auto& note : v1_notes) {
       episode.notes.push_back(note);
     }
@@ -416,7 +430,8 @@ void generateNobleEpisode(Episode& episode, const std::vector<NoteEvent>& motif,
 void generateRestlessEpisode(Episode& episode, const std::vector<NoteEvent>& motif,
                              Tick start_tick, Tick motif_dur, int deg_step,
                              int seq_reps, Tick imitation_offset, uint8_t num_voices,
-                             Key key, ScaleType scale) {
+                             Key key, ScaleType scale,
+                             const uint8_t* prev_pitches = nullptr) {
   // Fragment the motif into 2 pieces for tight imitation.
   auto fragments = fragmentMotif(motif, 2);
 
@@ -446,7 +461,8 @@ void generateRestlessEpisode(Episode& episode, const std::vector<NoteEvent>& mot
     note.voice = 0;
     v0_notes.push_back(note);
   }
-  fitToVoiceRegister(v0_notes, 0, num_voices, medianOfFirst3(frag0));
+  fitToVoiceRegister(v0_notes, 0, num_voices, medianOfFirst3(frag0),
+                     prev_pitches ? prev_pitches[0] : 0);
   for (auto& note : v0_notes) {
     episode.notes.push_back(note);
   }
@@ -476,7 +492,8 @@ void generateRestlessEpisode(Episode& episode, const std::vector<NoteEvent>& mot
       note.voice = 1;
       v1_notes.push_back(note);
     }
-    fitToVoiceRegister(v1_notes, 1, num_voices, medianOfFirst3(diminished));
+    fitToVoiceRegister(v1_notes, 1, num_voices, medianOfFirst3(diminished),
+                       prev_pitches ? prev_pitches[1] : 0);
     for (auto& note : v1_notes) {
       episode.notes.push_back(note);
     }
@@ -714,7 +731,8 @@ std::vector<std::vector<NoteEvent>> fragmentMotif(const std::vector<NoteEvent>& 
 
 Episode generateEpisode(const Subject& subject, Tick start_tick, Tick duration_ticks,
                         Key start_key, Key target_key, uint8_t num_voices, uint32_t seed,
-                        int episode_index, float energy_level) {
+                        int episode_index, float energy_level,
+                        const uint8_t* prev_pitches) {
   std::mt19937 rng(seed);
 
   Episode episode;
@@ -752,20 +770,20 @@ Episode generateEpisode(const Subject& subject, Tick start_tick, Tick duration_t
   switch (subject.character) {
     case SubjectCharacter::Playful:
       generatePlayfulEpisode(episode, motif, start_tick, motif_dur, deg_step, seq_reps,
-                             imitation_offset, num_voices, start_key, scale);
+                             imitation_offset, num_voices, start_key, scale, prev_pitches);
       break;
     case SubjectCharacter::Noble:
       generateNobleEpisode(episode, motif, start_tick, motif_dur, deg_step, seq_reps,
-                           imitation_offset, num_voices, start_key, scale);
+                           imitation_offset, num_voices, start_key, scale, prev_pitches);
       break;
     case SubjectCharacter::Restless:
       generateRestlessEpisode(episode, motif, start_tick, motif_dur, deg_step, seq_reps,
-                              imitation_offset, num_voices, start_key, scale);
+                              imitation_offset, num_voices, start_key, scale, prev_pitches);
       break;
     case SubjectCharacter::Severe:
     default:
       generateSevereEpisode(episode, motif, start_tick, motif_dur, deg_step, seq_reps,
-                            imitation_offset, num_voices, start_key, scale);
+                            imitation_offset, num_voices, start_key, scale, prev_pitches);
       break;
   }
 
@@ -809,7 +827,8 @@ Episode generateEpisode(const Subject& subject, Tick start_tick, Tick duration_t
       note.voice = 2;
       v2_notes.push_back(note);
     }
-    fitToVoiceRegister(v2_notes, 2, num_voices, medianOfFirst3(diminished));
+    fitToVoiceRegister(v2_notes, 2, num_voices, medianOfFirst3(diminished),
+                       prev_pitches ? prev_pitches[2] : 0);
     for (auto& note : v2_notes) {
       episode.notes.push_back(note);
     }
@@ -827,7 +846,8 @@ Episode generateEpisode(const Subject& subject, Tick start_tick, Tick duration_t
         note.voice = 3;
         v3_notes.push_back(note);
       }
-      fitToVoiceRegister(v3_notes, 3, num_voices, medianOfFirst3(augmented));
+      fitToVoiceRegister(v3_notes, 3, num_voices, medianOfFirst3(augmented),
+                         prev_pitches ? prev_pitches[3] : 0);
       for (auto& note : v3_notes) {
         episode.notes.push_back(note);
       }
@@ -861,7 +881,8 @@ Episode generateEpisode(const Subject& subject, Tick start_tick, Tick duration_t
         note.voice = 4;
         v4_notes.push_back(note);
       }
-      fitToVoiceRegister(v4_notes, 4, num_voices, medianOfFirst3(inverted));
+      fitToVoiceRegister(v4_notes, 4, num_voices, medianOfFirst3(inverted),
+                         prev_pitches ? prev_pitches[4] : 0);
       for (auto& note : v4_notes) {
         episode.notes.push_back(note);
       }
@@ -1066,9 +1087,15 @@ Episode generateEpisode(const Subject& subject, Tick start_tick, Tick duration_t
                         CollisionResolver& cp_resolver, const HarmonicTimeline& timeline,
                         uint8_t pedal_pitch) {
   // Step 1: Generate unvalidated episode using existing character-specific logic.
+  // Extract per-voice previous pitches from cp_state for tritone avoidance.
+  uint8_t episode_prev_pitches[5] = {0, 0, 0, 0, 0};
+  for (uint8_t v = 0; v < num_voices && v < 5; ++v) {
+    const NoteEvent* prev = cp_state.getLastNote(v);
+    if (prev) episode_prev_pitches[v] = prev->pitch;
+  }
   Episode raw = generateEpisode(subject, start_tick, duration_ticks,
                                 start_key, target_key, num_voices, seed,
-                                episode_index, energy_level);
+                                episode_index, energy_level, episode_prev_pitches);
 
   // Step 2: Create a PhraseGoal targeting the tonic of the target key at episode end.
   // The target pitch is a DESIGN VALUE (Principle 4): derived deterministically from

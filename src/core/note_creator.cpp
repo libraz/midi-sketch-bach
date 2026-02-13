@@ -185,6 +185,7 @@ std::vector<NoteEvent> postValidateNotes(
   PostValidateStats local_stats;
   std::vector<NoteEvent> result;
   result.reserve(raw_notes.size());
+  std::vector<NoteEvent> dropped_flexible;  // Track for Phase 4 Structural rescue.
 
   size_t note_idx = 0;
   for (const auto& note : raw_notes) {
@@ -245,8 +246,102 @@ std::vector<NoteEvent> postValidateNotes(
       }
     } else {
       local_stats.dropped++;
+      // Track dropped Flexible notes for Structural micro-shift rescue.
+      if (prot == ProtectionLevel::Flexible) {
+        dropped_flexible.push_back(note);
+      }
     }
     ++note_idx;
+  }
+
+  // --- Phase 4: Structural micro-shift rescue for dropped Flexible notes ---
+  // When a Flexible note was dropped due to dissonance with a Structural note
+  // (specifically Countersubject), try ±1/±2 step shifts on the Structural
+  // note (direction-preserving) to resolve the conflict.
+  // Limited to 20 rescues max and only targets Countersubject sources to
+  // avoid O(n^2) blowup in large pieces (passacaglia, etc.).
+  {
+    constexpr int kMaxRescues = 20;
+    int rescue_count = 0;
+    // Build tick→structural note index for O(1) lookup.
+    std::map<Tick, std::vector<size_t>> structural_at_tick;
+    for (size_t i = 0; i < result.size(); ++i) {
+      if (getProtectionLevel(result[i].source) == ProtectionLevel::Structural &&
+          result[i].source == BachNoteSource::Countersubject) {
+        structural_at_tick[result[i].start_tick].push_back(i);
+      }
+    }
+
+    for (const auto& dropped : dropped_flexible) {
+      if (rescue_count >= kMaxRescues) break;
+      auto it = structural_at_tick.find(dropped.start_tick);
+      if (it == structural_at_tick.end()) continue;
+
+      for (size_t si : it->second) {
+        auto& structural = result[si];
+        if (structural.voice == dropped.voice) continue;
+
+        int interval = std::abs(static_cast<int>(structural.pitch) -
+                                 static_cast<int>(dropped.pitch));
+        int simple = interval_util::compoundToSimple(interval);
+        if (interval_util::isConsonance(simple)) continue;
+
+        // Determine direction from previous note.
+        int prev_dir = 0;
+        uint8_t prev_pitch = 0;
+        for (auto rit = result.rbegin(); rit != result.rend(); ++rit) {
+          if (rit->voice == structural.voice &&
+              rit->start_tick < structural.start_tick) {
+            prev_pitch = rit->pitch;
+            if (structural.pitch > rit->pitch) prev_dir = 1;
+            else if (structural.pitch < rit->pitch) prev_dir = -1;
+            break;
+          }
+        }
+
+        bool rescued = false;
+        for (int delta : {-1, 1, -2, 2}) {
+          int cand = static_cast<int>(structural.pitch) + delta;
+          if (cand < 0 || cand > 127) continue;
+
+          if (prev_dir != 0 && prev_pitch > 0) {
+            int new_dir = (cand > static_cast<int>(prev_pitch)) ? 1 :
+                          (cand < static_cast<int>(prev_pitch)) ? -1 : 0;
+            if (new_dir != 0 && new_dir != prev_dir) continue;
+          }
+
+          if (structural.voice < voice_ranges.size()) {
+            auto [lo, hi] = voice_ranges[structural.voice];
+            if (cand < static_cast<int>(lo) || cand > static_cast<int>(hi)) continue;
+          }
+
+          int new_interval = std::abs(cand - static_cast<int>(dropped.pitch));
+          int new_simple = interval_util::compoundToSimple(new_interval);
+          if (!interval_util::isConsonance(new_simple)) continue;
+
+          // Check consonance with all notes at the same tick.
+          bool all_ok = true;
+          for (size_t oi : it->second) {
+            if (oi == si) continue;
+            int d = std::abs(cand - static_cast<int>(result[oi].pitch));
+            if (!interval_util::isConsonance(interval_util::compoundToSimple(d))) {
+              all_ok = false;
+              break;
+            }
+          }
+          if (!all_ok) continue;
+
+          structural.pitch = static_cast<uint8_t>(cand);
+          result.push_back(dropped);
+          local_stats.dropped--;
+          local_stats.repaired++;
+          rescue_count++;
+          rescued = true;
+          break;
+        }
+        if (rescued) break;
+      }
+    }
   }
 
   // Clamp repaired notes to strict voice ranges (collision resolver allows

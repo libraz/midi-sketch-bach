@@ -74,7 +74,8 @@ struct Episode {
 /// @return Generated Episode.
 Episode generateEpisode(const Subject& subject, Tick start_tick, Tick duration_ticks,
                         Key start_key, Key target_key, uint8_t num_voices, uint32_t seed,
-                        int episode_index = 0, float energy_level = 0.5f);
+                        int episode_index = 0, float energy_level = 0.5f,
+                        const uint8_t* prev_pitches = nullptr);
 
 /// @brief Generate an episode with harmonic validation.
 ///

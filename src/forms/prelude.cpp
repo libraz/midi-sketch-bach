@@ -477,7 +477,7 @@ std::vector<NoteEvent> generateArpeggioPassage(const HarmonicEvent& event,
     note.pitch = candidate;
     note.velocity = kOrganVelocity;
     note.voice = voice_idx;
-    note.source = BachNoteSource::FreeCounterpoint;
+    note.source = BachNoteSource::ArpeggioFlow;
     notes.push_back(note);
 
     // Check if this note created a leap that needs resolution.
@@ -1274,7 +1274,7 @@ PreludeResult generatePrelude(const PreludeConfig& config) {
       pp_params.scale = config.key.is_minor ? ScaleType::HarmonicMinor : ScaleType::Major;
       pp_params.key_at_tick = lr_params.key_at_tick;
       pp_params.voice_range = lr_params.voice_range;
-      pp_params.max_iterations = 1;
+      pp_params.max_iterations = 5;
       repairParallelPerfect(all_notes, pp_params);
     }
   }

@@ -413,7 +413,7 @@ ToccataResult generatePerpetuusToccata(const ToccataConfig& config) {
         pp_params.scale = config.key.is_minor ? ScaleType::HarmonicMinor : ScaleType::Major;
         pp_params.key_at_tick = lr_params.key_at_tick;
         pp_params.voice_range = lr_params.voice_range;
-        pp_params.max_iterations = 1;
+        pp_params.max_iterations = 3;
         repairParallelPerfect(all_notes, pp_params);
       }
     }

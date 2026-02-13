@@ -40,12 +40,16 @@ int repairParallelPerfect(std::vector<NoteEvent>& notes,
     }
 
     // Sounding note index at tick for a voice (-1 if silent).
+    // Uses binary search: O(log N) per lookup instead of O(N) linear scan.
     auto soundIdx = [&](uint8_t v, Tick t) -> int {
-      for (auto it = vns[v].rbegin(); it != vns[v].rend(); ++it) {
-        if (it->start <= t && t < it->end)
-          return static_cast<int>(it->idx);
-        if (it->end <= t) return -1;
-      }
+      auto& vnv = vns[v];
+      if (vnv.empty()) return -1;
+      // upper_bound finds first note with start > t.
+      auto it = std::upper_bound(vnv.begin(), vnv.end(), t,
+          [](Tick tick, const VN& vn) { return tick < vn.start; });
+      if (it == vnv.begin()) return -1;
+      --it;  // Now it->start <= t.
+      if (t < it->end) return static_cast<int>(it->idx);
       return -1;
     };
     auto soundPitch = [&](uint8_t v, Tick t) -> int {
@@ -53,24 +57,48 @@ int repairParallelPerfect(std::vector<NoteEvent>& notes,
       return (i >= 0) ? static_cast<int>(notes[i].pitch) : -1;
     };
 
-    // Max tick for scan range.
+    // Find pitch of the note immediately before target_start in a voice,
+    // excluding one specific index. Uses binary search: O(log N).
+    auto findPrevPitch = [&](uint8_t v, Tick target_start, int exclude_idx) -> int {
+      auto& vnv = vns[v];
+      // lower_bound finds first note with start >= target_start.
+      auto it = std::lower_bound(vnv.begin(), vnv.end(), target_start,
+          [](const VN& vn, Tick tick) { return vn.start < tick; });
+      while (it != vnv.begin()) {
+        --it;
+        if (static_cast<int>(it->idx) != exclude_idx) {
+          return static_cast<int>(notes[it->idx].pitch);
+        }
+      }
+      return -1;
+    };
+
+    // Max tick (invariant across iterations — only pitches change, not timing).
     Tick max_tick = 0;
     for (auto& n : notes) {
       Tick e = n.start_tick + n.duration;
       if (e > max_tick) max_tick = e;
     }
 
+    // Pre-build beat grid ticks (shared across all voice pairs).
+    std::vector<Tick> beat_grid_ticks;
+    beat_grid_ticks.reserve(max_tick / kTicksPerBeat + 1);
+    for (Tick t = 0; t < max_tick; t += kTicksPerBeat) {
+      beat_grid_ticks.push_back(t);
+    }
+
     bool any_fixed = false;
 
     for (uint8_t va = 0; va < params.num_voices; ++va) {
       for (uint8_t vb = va + 1; vb < params.num_voices; ++vb) {
-        // Two scan modes: beat grid (C++ analyzer) and common onsets (Python).
+        // Two scan modes: beat grid (C++ analyzer) and common onsets
+        // (Python analyzer).  Each mode maintains its own previous-state
+        // tracking so that beat-level parallels (across staggered onsets)
+        // are detected correctly.
         for (int scan_mode = 0; scan_mode < 2; ++scan_mode) {
           std::vector<Tick> scan_ticks;
           if (scan_mode == 0) {
-            for (Tick t = 0; t < max_tick; t += kTicksPerBeat) {
-              scan_ticks.push_back(t);
-            }
+            scan_ticks = beat_grid_ticks;
           } else {
             std::set<Tick> oa, ob;
             for (auto& vn : vns[va]) oa.insert(vn.start);
@@ -168,14 +196,7 @@ int repairParallelPerfect(std::vector<NoteEvent>& notes,
 
                 // Melodic leap: no more than octave from previous note in voice.
                 {
-                  int prev_p = -1;
-                  for (auto it = vns[fc.v].rbegin(); it != vns[fc.v].rend(); ++it) {
-                    if (static_cast<int>(it->idx) == fc.ni) continue;
-                    if (it->start < notes[fc.ni].start_tick) {
-                      prev_p = static_cast<int>(notes[it->idx].pitch);
-                      break;
-                    }
-                  }
+                  int prev_p = findPrevPitch(fc.v, notes[fc.ni].start_tick, fc.ni);
                   if (prev_p >= 0 && std::abs(cp - prev_p) > 12) continue;
                 }
 
@@ -260,15 +281,7 @@ int repairParallelPerfect(std::vector<NoteEvent>& notes,
 
                     // Melodic leap from note before pt.
                     {
-                      int prev_p = -1;
-                      for (auto it = vns[fc2.v].rbegin();
-                           it != vns[fc2.v].rend(); ++it) {
-                        if (static_cast<int>(it->idx) == fc2.ni) continue;
-                        if (it->start < notes[fc2.ni].start_tick) {
-                          prev_p = static_cast<int>(notes[it->idx].pitch);
-                          break;
-                        }
-                      }
+                      int prev_p = findPrevPitch(fc2.v, notes[fc2.ni].start_tick, fc2.ni);
                       if (prev_p >= 0 && std::abs(cp2 - prev_p) > 12) continue;
                     }
 

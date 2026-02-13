@@ -3,8 +3,13 @@
 #include "forms/goldberg/goldberg_generator.h"
 
 #include <algorithm>
+#include <cmath>
 
+#include "core/interval.h"
+#include "core/pitch_utils.h"
 #include "core/rng_util.h"
+#include "core/scale.h"
+#include "counterpoint/parallel_repair.h"
 #include "forms/goldberg/goldberg_aria.h"
 #include "forms/goldberg/goldberg_binary.h"
 #include "forms/goldberg/canon/canon_generator.h"
@@ -29,6 +34,20 @@ constexpr uint32_t kSeedMix = 0x9E3779B9u;
 
 /// @brief GM program number for Harpsichord.
 constexpr uint8_t kHarpsichordProgram = 6;
+
+/// @brief Number of voices in the Goldberg texture.
+constexpr uint8_t kGoldbergVoices = 5;
+
+/// @brief Harpsichord voice ranges (MIDI note numbers).
+/// voice 0 (soprano): C4-F6, voice 1 (alto): C3-F5,
+/// voice 2 (tenor): C2-F4, voice 3 (bass): F1-F3, default: F1-F6.
+constexpr uint8_t kHarpsichordLow[] = {60, 48, 36, 29, 29};
+constexpr uint8_t kHarpsichordHigh[] = {89, 77, 65, 53, 53};
+constexpr uint8_t kHarpsichordGlobalLow = 29;
+constexpr uint8_t kHarpsichordGlobalHigh = 89;
+
+/// @brief Short passing note threshold for tritone sweep exemption (ticks).
+constexpr Tick kPassingNoteThreshold = 240;
 
 /// @brief Number of bars in each binary repeat section.
 constexpr int kSectionBars = 16;
@@ -221,6 +240,119 @@ GoldbergResult GoldbergGenerator::generate(const GoldbergConfig& config) const {
   };
   sortByTick(track_upper.notes);
   sortByTick(track_lower.notes);
+
+  // Step 6b: Counterpoint repair pipeline.
+  // Merge both tracks into a single note vector for cross-voice analysis.
+  {
+    std::vector<NoteEvent> all_notes;
+    all_notes.reserve(track_upper.notes.size() + track_lower.notes.size());
+    all_notes.insert(all_notes.end(), track_upper.notes.begin(), track_upper.notes.end());
+    all_notes.insert(all_notes.end(), track_lower.notes.begin(), track_lower.notes.end());
+
+    // (a) Parallel perfect consonance repair.
+    {
+      ParallelRepairParams pp_params;
+      pp_params.num_voices = kGoldbergVoices;
+      pp_params.scale = config.key.is_minor ? ScaleType::HarmonicMinor : ScaleType::Major;
+      pp_params.key_at_tick = [&](Tick) { return config.key.tonic; };
+      pp_params.voice_range = [](uint8_t voice) -> std::pair<uint8_t, uint8_t> {
+        if (voice < kGoldbergVoices) {
+          return {kHarpsichordLow[voice], kHarpsichordHigh[voice]};
+        }
+        return {kHarpsichordGlobalLow, kHarpsichordGlobalHigh};
+      };
+      pp_params.max_iterations = 8;
+      repairParallelPerfect(all_notes, pp_params);
+    }
+
+    // (b) Per-voice tritone sweep: fix tritone leaps between consecutive notes.
+    ScaleType tritone_scale =
+        config.key.is_minor ? ScaleType::HarmonicMinor : ScaleType::Major;
+    for (uint8_t vid = 0; vid < kGoldbergVoices; ++vid) {
+      // Collect indices belonging to this voice.
+      std::vector<size_t> voice_indices;
+      for (size_t idx = 0; idx < all_notes.size(); ++idx) {
+        if (all_notes[idx].voice == vid) {
+          voice_indices.push_back(idx);
+        }
+      }
+      // Sort by tick for consecutive-pair analysis.
+      std::sort(voice_indices.begin(), voice_indices.end(),
+                [&all_notes](size_t lhs, size_t rhs) {
+                  return all_notes[lhs].start_tick < all_notes[rhs].start_tick;
+                });
+
+      uint8_t voice_lo = (vid < kGoldbergVoices) ? kHarpsichordLow[vid] : kHarpsichordGlobalLow;
+      uint8_t voice_hi =
+          (vid < kGoldbergVoices) ? kHarpsichordHigh[vid] : kHarpsichordGlobalHigh;
+
+      for (size_t pos = 1; pos < voice_indices.size(); ++pos) {
+        size_t prev_idx = voice_indices[pos - 1];
+        size_t cur_idx = voice_indices[pos];
+        auto& prev_note = all_notes[prev_idx];
+        auto& cur_note = all_notes[cur_idx];
+
+        // Skip protected notes (Immutable or Structural sources).
+        if (getProtectionLevel(prev_note.source) != ProtectionLevel::Flexible) continue;
+        if (getProtectionLevel(cur_note.source) != ProtectionLevel::Flexible) continue;
+
+        // Skip short passing notes (both durations <= 240 ticks).
+        if (prev_note.duration <= kPassingNoteThreshold &&
+            cur_note.duration <= kPassingNoteThreshold) {
+          continue;
+        }
+
+        int prev_p = static_cast<int>(prev_note.pitch);
+        int cur_p = static_cast<int>(cur_note.pitch);
+        int simple = interval_util::compoundToSimple(std::abs(cur_p - prev_p));
+        if (simple != interval::kTritone) continue;
+
+        // Try adjustments {+1, -1, +2, -2}, pick best non-tritone candidate.
+        int best_cand = cur_p;
+        int best_cost = 9999;
+        for (int delta : {1, -1, 2, -2}) {
+          int shifted = cur_p + delta;
+          uint8_t snapped =
+              scale_util::nearestScaleTone(clampPitch(shifted, voice_lo, voice_hi),
+                                           config.key.tonic, tritone_scale);
+          int cand = static_cast<int>(snapped);
+          int new_simple = interval_util::compoundToSimple(std::abs(cand - prev_p));
+          if (new_simple == interval::kTritone) continue;  // Still a tritone.
+
+          // Check forward: avoid creating tritone with next note in voice.
+          if (pos + 1 < voice_indices.size()) {
+            int next_p = static_cast<int>(all_notes[voice_indices[pos + 1]].pitch);
+            int fwd_simple = interval_util::compoundToSimple(std::abs(cand - next_p));
+            if (fwd_simple == interval::kTritone) continue;
+          }
+
+          // Minimize interval distance; penalize unison with previous note.
+          int cost = std::abs(cand - prev_p) + ((cand == prev_p) ? 30 : 0);
+          if (cost < best_cost) {
+            best_cost = cost;
+            best_cand = cand;
+          }
+        }
+
+        if (best_cand != cur_p) {
+          cur_note.pitch = clampPitch(best_cand, voice_lo, voice_hi);
+        }
+      }
+    }
+
+    // (c) Redistribute repaired notes back into upper/lower tracks.
+    track_upper.notes.clear();
+    track_lower.notes.clear();
+    for (auto& note : all_notes) {
+      if (note.voice <= 1) {
+        track_upper.notes.push_back(note);
+      } else {
+        track_lower.notes.push_back(note);
+      }
+    }
+    sortByTick(track_upper.notes);
+    sortByTick(track_lower.notes);
+  }
 
   // Step 7: Assemble result.
   result.tracks.push_back(std::move(track_upper));

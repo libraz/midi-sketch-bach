@@ -193,10 +193,27 @@ int fitToRegister(const uint8_t* pitches, size_t num_pitches,
     int shifted_center = (shifted_min + shifted_max) / 2;
     int center_dist = std::abs(center - shifted_center);
 
+    // (i) entry_leap_penalty: penalize >octave leap from reference_pitch.
+    int entry_leap_penalty = 0;
+    if (reference_pitch > 0) {
+      int ref_dist = std::abs(shifted_first - static_cast<int>(reference_pitch));
+      if (ref_dist > 12) entry_leap_penalty = ref_dist - 12;
+    }
+
+    // (j) max_internal_leap: penalize >octave leaps between adjacent notes.
+    // Shift is uniform so internal intervals are shift-invariant.
+    int max_internal_leap = 0;
+    for (size_t i = 1; i < num_pitches; ++i) {
+      int d = std::abs(static_cast<int>(pitches[i]) - static_cast<int>(pitches[i - 1]));
+      if (d > 12) max_internal_leap = std::max(max_internal_leap, d - 12);
+    }
+
     int score = 100 * overflow
               + cross_weight * instant_cross
               + 20 * parallel_risk
               + 10 * melodic_dist
+              + 40 * entry_leap_penalty
+              + 15 * max_internal_leap
               +  5 * order_violation
               +  3 * register_drift
               +  2 * clarity

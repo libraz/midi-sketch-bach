@@ -1408,8 +1408,32 @@ void enforceDiatonicPitches(std::vector<Track>& tracks, Key key, bool is_minor) 
   if (is_minor) return;  // Minor keys allow chromatic alterations (leading tone).
 
   ScaleType scale = ScaleType::Major;
-  for (auto& track : tracks) {
-    for (auto& note : track.notes) {
+
+  // Step 11a: Helper — check if a candidate pitch would create parallel
+  // perfect (P1/P5/P8) with any note sounding at the same time in other tracks.
+  auto creates_parallel = [&](size_t src_trk, const NoteEvent& src_note,
+                              uint8_t candidate) -> bool {
+    for (size_t other_trk = 0; other_trk < tracks.size(); ++other_trk) {
+      if (other_trk == src_trk) continue;
+      for (const auto& other : tracks[other_trk].notes) {
+        if (other.start_tick > src_note.start_tick + src_note.duration) break;
+        if (other.start_tick + other.duration <= src_note.start_tick) continue;
+        int old_simple = interval_util::compoundToSimple(
+            std::abs(static_cast<int>(src_note.pitch) -
+                     static_cast<int>(other.pitch)));
+        int new_simple = interval_util::compoundToSimple(
+            std::abs(static_cast<int>(candidate) -
+                     static_cast<int>(other.pitch)));
+        if ((new_simple == 0 || new_simple == 7) && old_simple != new_simple) {
+          return true;
+        }
+      }
+    }
+    return false;
+  };
+
+  for (size_t trk = 0; trk < tracks.size(); ++trk) {
+    for (auto& note : tracks[trk].notes) {
       if (!scale_util::isScaleTone(note.pitch, key, scale)) {
         uint8_t snapped = scale_util::nearestScaleTone(note.pitch, key, scale);
         // Clamp to voice range.
@@ -1421,8 +1445,36 @@ void enforceDiatonicPitches(std::vector<Track>& tracks, Key key, bool is_minor) 
         } else {
           low = organ_range::kPedalLow; high = organ_range::kPedalHigh;
         }
-        note.pitch = clampPitch(static_cast<int>(snapped), low, high);
-        note.modified_by |= static_cast<uint8_t>(NoteModifiedBy::ChordToneSnap);
+        uint8_t new_pitch = clampPitch(static_cast<int>(snapped), low, high);
+
+        // If the nearest diatonic pitch is parallel-safe, apply it directly.
+        if (!creates_parallel(trk, note, new_pitch)) {
+          note.pitch = new_pitch;
+          note.modified_by |= static_cast<uint8_t>(NoteModifiedBy::ChordToneSnap);
+          continue;
+        }
+
+        // Try alternative diatonic pitches within ±4 semitones to avoid
+        // parallel perfects while still enforcing diatonic constraint.
+        bool found = false;
+        for (int delta : {1, -1, 2, -2, 3, -3, 4, -4}) {
+          int cand = static_cast<int>(snapped) + delta;
+          if (cand < low || cand > high) continue;
+          auto cand_u8 = static_cast<uint8_t>(cand);
+          if (!scale_util::isScaleTone(cand_u8, key, scale)) continue;
+          if (!creates_parallel(trk, note, cand_u8)) {
+            note.pitch = cand_u8;
+            note.modified_by |= static_cast<uint8_t>(NoteModifiedBy::ChordToneSnap);
+            found = true;
+            break;
+          }
+        }
+        if (!found) {
+          // All nearby diatonic alternatives create parallels. Apply nearest
+          // diatonic pitch anyway to satisfy the diatonic constraint.
+          note.pitch = new_pitch;
+          note.modified_by |= static_cast<uint8_t>(NoteModifiedBy::ChordToneSnap);
+        }
       }
     }
   }
@@ -1474,18 +1526,38 @@ void enforceStrongBeatConsonance(std::vector<Track>& tracks,
 
     if (sounding.size() < 2) continue;
 
+    // Step 11a: Guard — check if a candidate pitch would create parallel
+    // perfect (P1/P5/P8) with any other sounding note at this tick.
+    auto would_create_parallel_perfect =
+        [&sounding](size_t fix_idx, uint8_t new_pitch) -> bool {
+      uint8_t old_pitch = sounding[fix_idx].note->pitch;
+      for (size_t idx = 0; idx < sounding.size(); ++idx) {
+        if (idx == fix_idx) continue;
+        uint8_t other_pitch = sounding[idx].note->pitch;
+        int old_simple = interval_util::compoundToSimple(
+            std::abs(static_cast<int>(old_pitch) - static_cast<int>(other_pitch)));
+        int new_simple = interval_util::compoundToSimple(
+            std::abs(static_cast<int>(new_pitch) - static_cast<int>(other_pitch)));
+        if ((new_simple == 0 || new_simple == 7) && old_simple != new_simple) {
+          return true;
+        }
+      }
+      return false;
+    };
+
     // Check all pairs for dissonance and fix.
-    for (size_t i = 0; i < sounding.size(); ++i) {
-      for (size_t j = i + 1; j < sounding.size(); ++j) {
+    for (size_t idx_i = 0; idx_i < sounding.size(); ++idx_i) {
+      for (size_t idx_j = idx_i + 1; idx_j < sounding.size(); ++idx_j) {
         int interval = interval_util::compoundToSimple(
-            static_cast<int>(sounding[i].note->pitch) -
-            static_cast<int>(sounding[j].note->pitch));
+            static_cast<int>(sounding[idx_i].note->pitch) -
+            static_cast<int>(sounding[idx_j].note->pitch));
         if (interval_util::isConsonance(interval)) continue;
 
         // Fix the upper voice (lower track index = higher register in trio).
         // Try: snap to nearest chord tone, then octave shift.
-        size_t fix_idx = (sounding[i].track_idx < sounding[j].track_idx) ? i : j;
-        size_t other_idx = (fix_idx == i) ? j : i;
+        size_t fix_idx =
+            (sounding[idx_i].track_idx < sounding[idx_j].track_idx) ? idx_i : idx_j;
+        size_t other_idx = (fix_idx == idx_i) ? idx_j : idx_i;
         NoteEvent* fix_note = sounding[fix_idx].note;
         NoteEvent* other_note = sounding[other_idx].note;
         size_t fix_trk = sounding[fix_idx].track_idx;
@@ -1503,7 +1575,8 @@ void enforceStrongBeatConsonance(std::vector<Track>& tracks,
         if (dist <= 3 && nearest >= low && nearest <= high) {
           int new_ivl = interval_util::compoundToSimple(
               static_cast<int>(nearest) - static_cast<int>(other_note->pitch));
-          if (interval_util::isConsonance(new_ivl)) {
+          if (interval_util::isConsonance(new_ivl) &&
+              !would_create_parallel_perfect(fix_idx, nearest)) {
             fix_note->pitch = nearest;
             continue;
           }
@@ -1517,7 +1590,8 @@ void enforceStrongBeatConsonance(std::vector<Track>& tracks,
           int new_ivl = interval_util::compoundToSimple(
               cand - static_cast<int>(other_note->pitch));
           if (interval_util::isConsonance(new_ivl) &&
-              isChordTone(static_cast<uint8_t>(cand), ev)) {
+              isChordTone(static_cast<uint8_t>(cand), ev) &&
+              !would_create_parallel_perfect(fix_idx, static_cast<uint8_t>(cand))) {
             fix_note->pitch = static_cast<uint8_t>(cand);
             resolved = true;
             break;
@@ -1531,7 +1605,8 @@ void enforceStrongBeatConsonance(std::vector<Track>& tracks,
           if (cand < low || cand > high) continue;
           int new_ivl = interval_util::compoundToSimple(
               cand - static_cast<int>(other_note->pitch));
-          if (interval_util::isConsonance(new_ivl)) {
+          if (interval_util::isConsonance(new_ivl) &&
+              !would_create_parallel_perfect(fix_idx, static_cast<uint8_t>(cand))) {
             fix_note->pitch = static_cast<uint8_t>(cand);
             resolved = true;
             break;
@@ -1545,7 +1620,8 @@ void enforceStrongBeatConsonance(std::vector<Track>& tracks,
           if (cand >= low && cand <= high) {
             int new_ivl = interval_util::compoundToSimple(
                 cand - static_cast<int>(other_note->pitch));
-            if (interval_util::isConsonance(new_ivl)) {
+            if (interval_util::isConsonance(new_ivl) &&
+                !would_create_parallel_perfect(fix_idx, static_cast<uint8_t>(cand))) {
               fix_note->pitch = static_cast<uint8_t>(cand);
               resolved = true;
               break;
@@ -1845,7 +1921,7 @@ TrioSonataMovement generateMovement(const KeySignature& key_sig, Tick num_bars,
         pp_params.scale = scale;
         pp_params.key_at_tick = lr_params.key_at_tick;
         pp_params.voice_range = lr_params.voice_range;
-        pp_params.max_iterations = 3;
+        pp_params.max_iterations = 5;
         repairParallelPerfect(validated, pp_params);
       }
     }
@@ -1970,7 +2046,7 @@ TrioSonataMovement generateMovement(const KeySignature& key_sig, Tick num_bars,
         pp_params.scale = scale;
         pp_params.key_at_tick = lr_params.key_at_tick;
         pp_params.voice_range = lr_params.voice_range;
-        pp_params.max_iterations = 3;
+        pp_params.max_iterations = 5;
         repairParallelPerfect(validated, pp_params);
       }
     }
@@ -2173,6 +2249,49 @@ TrioSonataMovement generateMovement(const KeySignature& key_sig, Tick num_bars,
   enforceMinimumVoiceSeparation(tracks);
 
   // 12e. Re-sort after quality post-passes.
+  sortTracks(tracks);
+
+  // 12f. Final parallel repair (outer voice pairs only).
+  // Steps 12b-12d may re-introduce parallel perfect consonances. This final
+  // repair pass catches any remaining P5/P8 parallels after all post-passes.
+  {
+    std::vector<NoteEvent> final_notes;
+    for (const auto& track : tracks) {
+      final_notes.insert(final_notes.end(), track.notes.begin(), track.notes.end());
+    }
+    std::sort(final_notes.begin(), final_notes.end(),
+              [](const NoteEvent& lhs, const NoteEvent& rhs) {
+                if (lhs.start_tick != rhs.start_tick) return lhs.start_tick < rhs.start_tick;
+                if (lhs.voice != rhs.voice) return lhs.voice < rhs.voice;
+                return lhs.pitch < rhs.pitch;
+              });
+    std::vector<std::pair<uint8_t, uint8_t>> vr_final = {
+        {kRhLow, kRhHigh},
+        {kLhLow, kLhHigh},
+        {organ_range::kPedalLow, organ_range::kPedalHigh}};
+    ParallelRepairParams pp_final;
+    pp_final.num_voices = kTrioVoiceCount;
+    pp_final.scale = scale;
+    pp_final.key_at_tick = [&](Tick) { return key_sig.tonic; };
+    pp_final.voice_range = [&vr_final](uint8_t voice) {
+      if (voice < vr_final.size()) return vr_final[voice];
+      return std::make_pair(static_cast<uint8_t>(0), static_cast<uint8_t>(127));
+    };
+    pp_final.max_iterations = 3;
+    repairParallelPerfect(final_notes, pp_final);
+    // Redistribute repaired notes back to tracks.
+    for (auto& track : tracks) track.notes.clear();
+    for (auto& note : final_notes) {
+      if (note.voice < kTrioVoiceCount) {
+        tracks[note.voice].notes.push_back(std::move(note));
+      }
+    }
+    sortTracks(tracks);
+  }
+
+  // 12g. Re-enforce voice separation after parallel repair (12f may shift
+  // pitches in ways that violate the minimum 12-semitone RH/LH gap).
+  enforceMinimumVoiceSeparation(tracks);
   sortTracks(tracks);
 
   // 13. Counterpoint analysis (after all modifications).
