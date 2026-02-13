@@ -8,6 +8,7 @@
 
 #include "core/note_creator.h"
 #include "core/pitch_utils.h"
+#include "counterpoint/leap_resolution.h"
 #include "ornament/ornament_engine.h"
 
 namespace bach {
@@ -469,6 +470,25 @@ ToccataResult generateConcertatoToccata(const ToccataConfig& config) {
 
     all_notes = postValidateNotes(
         std::move(all_notes), num_voices, config.key, voice_ranges);
+
+    // Leap resolution: fix unresolved melodic leaps.
+    {
+      LeapResolutionParams lr_params;
+      lr_params.num_voices = num_voices;
+      lr_params.key_at_tick = [&](Tick) { return config.key.tonic; };
+      lr_params.scale_at_tick = [&](Tick t) {
+        const auto& ev = timeline.getAt(t);
+        return ev.is_minor ? ScaleType::HarmonicMinor : ScaleType::Major;
+      };
+      lr_params.voice_range = [&](uint8_t v) -> std::pair<uint8_t, uint8_t> {
+        if (v < voice_ranges.size()) return voice_ranges[v];
+        return {0, 127};
+      };
+      lr_params.is_chord_tone = [&](Tick t, uint8_t p) {
+        return isChordTone(p, timeline.getAt(t));
+      };
+      resolveLeaps(all_notes, lr_params);
+    }
   }
 
   // Build tracks.

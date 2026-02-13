@@ -135,6 +135,24 @@ class StrongBeatDissonance:
         return False
 
     @staticmethod
+    def _is_dominant_seventh_context(sounding: List[Note]) -> bool:
+        """Check if sounding notes form a dominant 7th chord context.
+
+        A dominant 7th chord consists of root, M3, P5, m7 (pitch class
+        intervals 0, 4, 7, 10).  If the sounding notes are a subset of
+        such a chord, the m7 and tritone (3rd-7th) dissonances are
+        structurally expected and should not be flagged.
+        """
+        if len(sounding) < 3:
+            return False
+        pitch_classes = sorted(set(n.pitch % 12 for n in sounding))
+        for base in pitch_classes:
+            v7 = {base, (base + 4) % 12, (base + 7) % 12, (base + 10) % 12}
+            if set(pitch_classes).issubset(v7):
+                return True
+        return False
+
+    @staticmethod
     def _is_diminished_seventh_context(sounding: List[Note]) -> bool:
         """Check if sounding notes form a diminished 7th chord context.
 
@@ -149,6 +167,32 @@ class StrongBeatDissonance:
             dim7 = {base, (base + 3) % 12, (base + 6) % 12, (base + 9) % 12}
             if set(pitch_classes).issubset(dim7):
                 return True
+        return False
+
+    @staticmethod
+    def _is_diatonic_seventh_context(sounding: List[Note]) -> bool:
+        """Check if sounding notes form a diatonic seventh chord context.
+
+        Recognizes minor 7th (ii7, iii7, vi7) and half-diminished 7th (viiø7)
+        chords. Major 7th is excluded as Bach treats it as decorative rather
+        than a stable harmonic sonority.
+
+        Only activates with 3+ simultaneous notes to ensure sufficient harmonic
+        density for reliable chord recognition.
+        """
+        if len(sounding) < 3:
+            return False
+        pitch_classes = sorted(set(n.pitch % 12 for n in sounding))
+        # Minor 7th: (0, 3, 7, 10), Half-diminished 7th: (0, 3, 6, 10)
+        templates = [
+            (0, 3, 7, 10),
+            (0, 3, 6, 10),
+        ]
+        for base in pitch_classes:
+            for template in templates:
+                chord = {(base + iv) % 12 for iv in template}
+                if set(pitch_classes).issubset(chord):
+                    return True
         return False
 
     def check(self, score: Score) -> RuleResult:
@@ -167,8 +211,10 @@ class StrongBeatDissonance:
             if len(sounding) < 2:
                 tick += TICKS_PER_BEAT
                 continue
-            # Check diminished 7th context once per beat.
+            # Check chord context once per beat.
             dim7_context = self._is_diminished_seventh_context(sounding)
+            v7_context = self._is_dominant_seventh_context(sounding)
+            seventh_context = self._is_diatonic_seventh_context(sounding)
             # Check all pairs.
             for i in range(len(sounding)):
                 for j in range(i + 1, len(sounding)):
@@ -183,8 +229,8 @@ class StrongBeatDissonance:
                             continue
                         if self._is_suspension(nb, na, all_notes, tick, num_voices):
                             continue
-                        # Diminished 7th context: downgrade to INFO.
-                        sev = Severity.INFO if dim7_context else Severity.WARNING
+                        # Diminished 7th / dominant 7th context: downgrade to INFO.
+                        sev = Severity.INFO if (dim7_context or v7_context or seventh_context) else Severity.WARNING
                         violations.append(
                             Violation(
                                 rule_name=self.name,

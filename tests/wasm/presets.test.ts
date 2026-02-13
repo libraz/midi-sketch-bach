@@ -15,9 +15,9 @@ beforeAll(async () => {
 
 describe('Presets', () => {
   describe('getForms', () => {
-    it('should return 9 forms', () => {
+    it('should return 10 forms', () => {
       const forms = getForms();
-      expect(forms.length).toBe(9);
+      expect(forms.length).toBe(10);
     });
 
     it('should return correct form names', () => {
@@ -27,6 +27,8 @@ describe('Presets', () => {
       expect(forms[1].name).toBe('prelude_and_fugue');
       expect(forms[1].display).toBe('Prelude and Fugue');
       expect(forms[8].name).toBe('chaconne');
+      expect(forms[9].name).toBe('goldberg_variations');
+      expect(forms[9].display).toBe('Goldberg Variations');
     });
   });
 
@@ -107,6 +109,10 @@ describe('Presets', () => {
 
     it('should return violin for chaconne', () => {
       expect(getDefaultInstrumentForForm(8)).toBe(3); // chaconne -> violin
+    });
+
+    it('should return harpsichord for goldberg variations', () => {
+      expect(getDefaultInstrumentForForm(9)).toBe(1); // goldberg_variations -> harpsichord
     });
   });
 });

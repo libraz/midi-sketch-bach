@@ -33,6 +33,13 @@ TEST(BachNoteSourceTest, AllSourcesHaveStringRepresentation) {
       BachNoteSource::ChromaticPassing,
       BachNoteSource::FalseEntry,
       BachNoteSource::Coda,
+      BachNoteSource::SequenceNote,
+      BachNoteSource::CanonDux,
+      BachNoteSource::CanonComes,
+      BachNoteSource::CanonFreeBass,
+      BachNoteSource::GoldbergAria,
+      BachNoteSource::GoldbergBass,
+      BachNoteSource::QuodlibetMelody,
   };
 
   for (auto src : all_sources) {
@@ -62,6 +69,13 @@ TEST(BachNoteSourceTest, SpecificSourceStringsMatchJsonFormat) {
   EXPECT_STREQ(bachNoteSourceToString(BachNoteSource::ChromaticPassing), "chromatic_passing");
   EXPECT_STREQ(bachNoteSourceToString(BachNoteSource::FalseEntry), "false_entry");
   EXPECT_STREQ(bachNoteSourceToString(BachNoteSource::Coda), "coda");
+  EXPECT_STREQ(bachNoteSourceToString(BachNoteSource::SequenceNote), "sequence_note");
+  EXPECT_STREQ(bachNoteSourceToString(BachNoteSource::CanonDux), "canon_dux");
+  EXPECT_STREQ(bachNoteSourceToString(BachNoteSource::CanonComes), "canon_comes");
+  EXPECT_STREQ(bachNoteSourceToString(BachNoteSource::CanonFreeBass), "canon_free_bass");
+  EXPECT_STREQ(bachNoteSourceToString(BachNoteSource::GoldbergAria), "goldberg_aria");
+  EXPECT_STREQ(bachNoteSourceToString(BachNoteSource::GoldbergBass), "goldberg_bass");
+  EXPECT_STREQ(bachNoteSourceToString(BachNoteSource::QuodlibetMelody), "quodlibet_melody");
 }
 
 // ---------------------------------------------------------------------------
@@ -188,6 +202,10 @@ TEST(ProtectionLevelTest, ImmutableSources) {
             ProtectionLevel::Immutable);
   EXPECT_EQ(getProtectionLevel(BachNoteSource::GroundBass),
             ProtectionLevel::Immutable);
+  EXPECT_EQ(getProtectionLevel(BachNoteSource::GoldbergBass),
+            ProtectionLevel::Immutable);
+  EXPECT_EQ(getProtectionLevel(BachNoteSource::QuodlibetMelody),
+            ProtectionLevel::Immutable);
 }
 
 TEST(ProtectionLevelTest, StructuralSources) {
@@ -200,6 +218,14 @@ TEST(ProtectionLevelTest, StructuralSources) {
   EXPECT_EQ(getProtectionLevel(BachNoteSource::FalseEntry),
             ProtectionLevel::Structural);
   EXPECT_EQ(getProtectionLevel(BachNoteSource::Coda),
+            ProtectionLevel::Structural);
+  EXPECT_EQ(getProtectionLevel(BachNoteSource::SequenceNote),
+            ProtectionLevel::Structural);
+  EXPECT_EQ(getProtectionLevel(BachNoteSource::CanonDux),
+            ProtectionLevel::Structural);
+  EXPECT_EQ(getProtectionLevel(BachNoteSource::CanonComes),
+            ProtectionLevel::Structural);
+  EXPECT_EQ(getProtectionLevel(BachNoteSource::GoldbergAria),
             ProtectionLevel::Structural);
 }
 
@@ -222,6 +248,8 @@ TEST(ProtectionLevelTest, FlexibleSources) {
             ProtectionLevel::Flexible);
   EXPECT_EQ(getProtectionLevel(BachNoteSource::Unknown),
             ProtectionLevel::Flexible);
+  EXPECT_EQ(getProtectionLevel(BachNoteSource::CanonFreeBass),
+            ProtectionLevel::Flexible);
 }
 
 TEST(ProtectionLevelTest, AllSourcesCovered) {
@@ -235,7 +263,10 @@ TEST(ProtectionLevelTest, AllSourcesCovered) {
       BachNoteSource::TextureNote,       BachNoteSource::GroundBass,
       BachNoteSource::CollisionAvoid,    BachNoteSource::PostProcess,
       BachNoteSource::ChromaticPassing,  BachNoteSource::FalseEntry,
-      BachNoteSource::Coda,
+      BachNoteSource::Coda,              BachNoteSource::SequenceNote,
+      BachNoteSource::CanonDux,          BachNoteSource::CanonComes,
+      BachNoteSource::CanonFreeBass,     BachNoteSource::GoldbergAria,
+      BachNoteSource::GoldbergBass,      BachNoteSource::QuodlibetMelody,
   };
   for (auto src : all) {
     auto level = getProtectionLevel(src);
@@ -244,6 +275,34 @@ TEST(ProtectionLevelTest, AllSourcesCovered) {
                 level == ProtectionLevel::Flexible)
         << "Source " << bachNoteSourceToString(src) << " has invalid level";
   }
+}
+
+// ---------------------------------------------------------------------------
+// isStructuralSource tests
+// ---------------------------------------------------------------------------
+
+TEST(IsStructuralSourceTest, CanonDuxIsStructural) {
+  EXPECT_TRUE(isStructuralSource(BachNoteSource::CanonDux));
+}
+
+TEST(IsStructuralSourceTest, CanonComesIsStructural) {
+  EXPECT_TRUE(isStructuralSource(BachNoteSource::CanonComes));
+}
+
+TEST(IsStructuralSourceTest, GoldbergAriaIsStructural) {
+  EXPECT_TRUE(isStructuralSource(BachNoteSource::GoldbergAria));
+}
+
+TEST(IsStructuralSourceTest, CanonFreeBassIsNotStructural) {
+  EXPECT_FALSE(isStructuralSource(BachNoteSource::CanonFreeBass));
+}
+
+TEST(IsStructuralSourceTest, GoldbergBassIsNotStructural) {
+  EXPECT_FALSE(isStructuralSource(BachNoteSource::GoldbergBass));
+}
+
+TEST(IsStructuralSourceTest, QuodlibetMelodyIsNotStructural) {
+  EXPECT_FALSE(isStructuralSource(BachNoteSource::QuodlibetMelody));
 }
 
 // ---------------------------------------------------------------------------

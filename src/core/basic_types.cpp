@@ -101,7 +101,8 @@ const char* formTypeToString(FormType form) {
     case FormType::Passacaglia:       return "passacaglia";
     case FormType::FantasiaAndFugue:  return "fantasia_and_fugue";
     case FormType::CelloPrelude:      return "cello_prelude";
-    case FormType::Chaconne:          return "chaconne";
+    case FormType::Chaconne:             return "chaconne";
+    case FormType::GoldbergVariations:   return "goldberg_variations";
   }
   return "unknown";
 }
@@ -116,6 +117,7 @@ FormType formTypeFromString(const std::string& str) {
   if (str == "fantasia_and_fugue")  return FormType::FantasiaAndFugue;
   if (str == "cello_prelude")       return FormType::CelloPrelude;
   if (str == "chaconne")            return FormType::Chaconne;
+  if (str == "goldberg_variations") return FormType::GoldbergVariations;
   return FormType::Fugue;  // Default
 }
 
@@ -165,6 +167,15 @@ DurationScale durationScaleFromString(const std::string& str) {
   if (str == "long")   return DurationScale::Long;
   if (str == "full")   return DurationScale::Full;
   return DurationScale::Short;  // Default
+}
+
+MetricalStrength getMetricalStrength(int beat_in_bar, MeterProfile profile) {
+  if (beat_in_bar == 0) return MetricalStrength::Strong;
+  if (profile == MeterProfile::SarabandeTriple && beat_in_bar == 1) {
+    return MetricalStrength::Strong;
+  }
+  if (beat_in_bar == 1) return MetricalStrength::Medium;
+  return MetricalStrength::Weak;
 }
 
 }  // namespace bach

@@ -39,6 +39,7 @@ describe('Exhaustive Parameter Tests', () => {
       'fantasia_and_fugue',
       'cello_prelude',
       'chaconne',
+      'goldberg_variations',
     ];
     const seeds = [1, 42, 12345, 99999];
 
@@ -84,6 +85,7 @@ describe('Exhaustive Parameter Tests', () => {
       'fantasia_and_fugue',
       'cello_prelude',
       'chaconne',
+      'goldberg_variations',
     ];
     // Character-form compatibility rules:
     //   Playful/Restless × chorale_prelude = forbidden
@@ -193,6 +195,13 @@ describe('Data Integrity Validation', () => {
       bach.destroy();
     }
     bach = undefined;
+  });
+
+  it('should produce valid data for goldberg variations', () => {
+    bach = new BachGenerator();
+    bach.generate({ form: 'goldberg_variations', seed: 42 });
+    const events = bach.getEvents();
+    validateEventData(events, 'form=goldberg_variations');
   });
 
   it('should produce valid data for solo string forms', () => {

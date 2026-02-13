@@ -6,6 +6,7 @@
 #include "core/note_creator.h"
 
 #include <algorithm>
+#include <array>
 #include <cstdio>
 #include <map>
 
@@ -155,10 +156,37 @@ std::vector<NoteEvent> postValidateNotes(
         return a.voice < b.voice;
       });
 
+  // Build per-voice next-pitch index (after sort). O(n).
+  // For each note, stores the pitch of the next note at a strictly later tick
+  // in the same voice, enabling NHT validation in the repair cascade.
+  std::vector<std::optional<uint8_t>> next_pitch_map(raw_notes.size());
+  {
+    std::array<std::vector<size_t>, 5> voice_indices;
+    for (size_t idx = 0; idx < raw_notes.size(); ++idx) {
+      uint8_t v = raw_notes[idx].voice;
+      if (v < 5) voice_indices[v].push_back(idx);
+    }
+    for (uint8_t v = 0; v < 5; ++v) {
+      const auto& vi = voice_indices[v];
+      if (vi.size() < 2) continue;
+      std::optional<uint8_t> last_candidate;
+      Tick last_tick = 0;
+      for (size_t k = vi.size(); k-- > 0;) {
+        Tick this_tick = raw_notes[vi[k]].start_tick;
+        if (last_tick > this_tick) {
+          next_pitch_map[vi[k]] = last_candidate;
+        }
+        last_candidate = raw_notes[vi[k]].pitch;
+        last_tick = this_tick;
+      }
+    }
+  }
+
   PostValidateStats local_stats;
   std::vector<NoteEvent> result;
   result.reserve(raw_notes.size());
 
+  size_t note_idx = 0;
   for (const auto& note : raw_notes) {
     local_stats.total_input++;
 
@@ -170,6 +198,7 @@ std::vector<NoteEvent> postValidateNotes(
       state.addNote(note.voice, note);
       result.push_back(note);
       local_stats.accepted_original++;
+      ++note_idx;
       continue;
     }
 
@@ -181,6 +210,9 @@ std::vector<NoteEvent> postValidateNotes(
     opts.duration = note.duration;
     opts.velocity = note.velocity;
     opts.source = note.source;
+
+    // Set next_pitch from pre-computed per-voice index for NHT validation.
+    opts.next_pitch = next_pitch_map[note_idx];
 
     // Build melodic context from the last 2 notes in the same voice.
     const NoteEvent* prev = state.getLastNote(note.voice);
@@ -214,6 +246,7 @@ std::vector<NoteEvent> postValidateNotes(
     } else {
       local_stats.dropped++;
     }
+    ++note_idx;
   }
 
   // Clamp repaired notes to strict voice ranges (collision resolver allows

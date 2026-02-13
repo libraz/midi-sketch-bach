@@ -30,6 +30,17 @@ class MidiWriter {
              const std::vector<TempoEvent>& tempo_events,
              Key key = Key::C, const std::string& metadata = "");
 
+  /// @brief Build complete MIDI data from tracks with time signature support.
+  /// @param tracks Vector of Track objects containing notes and events.
+  /// @param tempo_events Tempo map.
+  /// @param time_sig_events Time signature changes. Empty = default 4/4.
+  /// @param key Output key for transposition.
+  /// @param metadata Optional JSON metadata string.
+  void build(const std::vector<Track>& tracks,
+             const std::vector<TempoEvent>& tempo_events,
+             const std::vector<TimeSignatureEvent>& time_sig_events,
+             Key key = Key::C, const std::string& metadata = "");
+
   /// @brief Get the binary MIDI data after build().
   /// @return Byte vector containing complete SMF Type 1 data.
   std::vector<uint8_t> toBytes() const;
@@ -50,6 +61,7 @@ class MidiWriter {
 
   /// Write the metadata track (tempo map, time signature, BACH metadata text).
   void writeMetadataTrack(const std::vector<TempoEvent>& tempo_events,
+                          const std::vector<TimeSignatureEvent>& time_sig_events,
                           const std::string& metadata);
 };
 

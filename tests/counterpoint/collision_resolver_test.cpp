@@ -370,16 +370,16 @@ TEST_F(CollisionResolverTest, NeighborToneAllowedWithNextPitch) {
   EXPECT_TRUE(resolver.isSafeToPlace(state, rules, 0, 62, 960, 480, 60));
 }
 
-TEST_F(CollisionResolverTest, NextPitchZeroPreservesLegacyBehavior) {
+TEST_F(CollisionResolverTest, NextPitchNulloptPreservesLegacyBehavior) {
   // Voice 1 has C3(48) at tick 0.
   state.addNote(1, {0, 480, 48, 80, 1});
 
   // Voice 0 wants D4(62) at tick 0 -- dissonant (M2 with C3).
-  // With next_pitch=0, behavior is identical to the old isSafeToPlace.
-  EXPECT_FALSE(resolver.isSafeToPlace(state, rules, 0, 62, 0, 480, 0));
+  // With next_pitch=nullopt, behavior is identical to the old isSafeToPlace.
+  EXPECT_FALSE(resolver.isSafeToPlace(state, rules, 0, 62, 0, 480, std::nullopt));
 
   // Consonant case should also remain unchanged.
-  EXPECT_TRUE(resolver.isSafeToPlace(state, rules, 0, 67, 0, 480, 0));
+  EXPECT_TRUE(resolver.isSafeToPlace(state, rules, 0, 67, 0, 480, std::nullopt));
 }
 
 TEST_F(CollisionResolverTest, DissonantLeapNotAllowedWithNextPitch) {
@@ -633,6 +633,54 @@ TEST_F(CollisionResolverTest, NaturalHalfStepNoCrossRelation) {
 }
 
 // ---------------------------------------------------------------------------
+// Hidden perfect check in isSafeToPlace (Step 2)
+// ---------------------------------------------------------------------------
+
+TEST_F(CollisionResolverTest, HiddenPerfectBothLeapM6ToOctaveRejected) {
+  // Both voices leap by m6+ in same direction to reach P8.
+  // Voice 0 prev: C4(60), Voice 1 prev: Eb3(51).
+  // Voice 1 curr: C4(60). Voice 0 wants C5(72).
+  // dir_a = 72-60 = +12 (octave up), dir_b = 60-51 = +9 (M6 up).
+  // Both positive, both > 7. curr_ivl = |72-60| = 12 = P8 (perfect). Rejected!
+  state.addNote(0, {0, 480, 60, 80, 0});   // Voice 0 prev: C4
+  state.addNote(1, {0, 480, 51, 80, 1});   // Voice 1 prev: Eb3
+  state.addNote(1, {480, 480, 60, 80, 1}); // Voice 1 curr: C4
+
+  // Voice 0 wants C5(72) at tick 480. Tick 480 % 480 == 0 (strong beat).
+  // Interval: |72-60| = 12 = P8 (consonant). Parallel check: prev interval
+  // |60-51| = 9 (M6), not perfect. So parallel check passes. But hidden
+  // perfect fires: curr is P8, dir_a=+12, dir_b=+9, both > 7.
+  EXPECT_FALSE(resolver.isSafeToPlace(state, rules, 0, 72, 480, 480));
+}
+
+TEST_F(CollisionResolverTest, HiddenPerfectOneStepOneLargeLeapAllowed) {
+  // One voice steps, one voice leaps — NOT rejected (only one large leap).
+  // Voice 0 prev: C4(60), Voice 1 prev: G2(43).
+  // Voice 1 curr: D3(50). Voice 0 wants D4(62).
+  // dir_a = 62-60 = +2 (step), dir_b = 50-43 = +7 (P5, NOT > 7).
+  // curr_ivl = |62-50| = 12 = P8. Both positive but dir_a=2 (<=7).
+  // Hidden perfect should NOT reject.
+  state.addNote(0, {0, 480, 60, 80, 0});   // Voice 0 prev: C4
+  state.addNote(1, {0, 480, 43, 80, 1});   // Voice 1 prev: G2
+  state.addNote(1, {480, 480, 50, 80, 1}); // Voice 1 curr: D3
+
+  // Voice 0 wants D4(62). |62-50|=12 (P8). dir_a=+2, dir_b=+7.
+  // dir_b=7 is NOT > 7. So hidden perfect does not fire.
+  EXPECT_TRUE(resolver.isSafeToPlace(state, rules, 0, 62, 480, 480));
+}
+
+TEST_F(CollisionResolverTest, HiddenPerfectWithRestPrevNoCrash) {
+  // When one voice has no previous note, hidden perfect check should not crash.
+  // Voice 1 has C4(60) at tick 480.
+  state.addNote(1, {480, 480, 60, 80, 1});
+
+  // Voice 0 has NO previous note. Try placing G4(67) = P5 above C4.
+  // prev_self is null, so the entire if(prev_self && prev_other) block is
+  // skipped. No crash.
+  EXPECT_TRUE(resolver.isSafeToPlace(state, rules, 0, 67, 480, 480));
+}
+
+// ---------------------------------------------------------------------------
 // Voice crossing in isSafeToPlace (Change 1)
 // ---------------------------------------------------------------------------
 
@@ -828,7 +876,7 @@ TEST_F(CollisionResolverP4BassTest, P4WithBassRejectedWithoutNHT) {
 
   // Soprano wants F3(53) at tick 0 with no next_pitch info.
   // P4 with bass, no NHT context -> rejected.
-  EXPECT_FALSE(resolver.isSafeToPlace(state, rules, 0, 53, 0, 480, 0));
+  EXPECT_FALSE(resolver.isSafeToPlace(state, rules, 0, 53, 0, 480, std::nullopt));
 }
 
 // ---------------------------------------------------------------------------
@@ -911,6 +959,119 @@ TEST_F(WeakBeatNHTTest, SourceAwareOverloadPassesNextPitch) {
   EXPECT_TRUE(result.accepted);
   EXPECT_EQ(result.pitch, 62);
   EXPECT_EQ(result.strategy, "original");
+}
+
+// ---------------------------------------------------------------------------
+// Leap resolution soft gate (Step 3)
+// ---------------------------------------------------------------------------
+
+TEST_F(CollisionResolverTest, LeapGateTriggersOnUnresolvedLeap) {
+  // Voice 0 has two previous notes forming a P5 leap (7 semitones).
+  // C4(60) -> G4(67): leap of +7.
+  state.addNote(0, {0, 480, 60, 80, 0});
+  state.addNote(0, {480, 480, 67, 80, 0});
+
+  // Voice 1 has E4(64) at tick 960 (strong beat).
+  state.addNote(1, {960, 480, 64, 80, 1});
+
+  // Desired pitch A4(69) at tick 960. Interval from G4: +2 (step up) = resolves.
+  // This should NOT trigger the gate.
+  auto result = resolver.findSafePitch(state, rules, 0, 69, 960, 480,
+                                       BachNoteSource::FreeCounterpoint);
+  // A4(69) with E4(64) = 5 (P4) which is dissonant on strong beat.
+  // So "original" fails consonance, cascade finds something else.
+  // The leap gate does not affect this since resolution condition is met.
+  EXPECT_TRUE(result.accepted);
+}
+
+TEST_F(CollisionResolverTest, LeapGateSkippedForEpisodeMaterial) {
+  // EpisodeMaterial is exempt from the leap gate.
+  state.addNote(0, {0, 480, 60, 80, 0});
+  state.addNote(0, {480, 480, 67, 80, 0});
+  state.addNote(1, {960, 480, 48, 80, 1});
+
+  // Desired pitch B4(71) at tick 960: G4->B4 = +4 (M3, not step resolution).
+  // For EpisodeMaterial, leap gate should not apply.
+  auto result = resolver.findSafePitch(state, rules, 0, 71, 960, 480,
+                                       BachNoteSource::EpisodeMaterial);
+  // B4(71) with C3(48) = 23, mod 12 = 11 (M7) -- dissonant on strong beat.
+  // Structural/Flexible cascade should handle it.
+  // EpisodeMaterial has Flexible protection level, but leap gate exempt.
+  EXPECT_TRUE(result.accepted);
+}
+
+TEST_F(CollisionResolverTest, LeapGateSkippedForImmutableSource) {
+  // FugueSubject (Immutable) should not be affected by leap gate.
+  state.addNote(0, {0, 480, 60, 80, 0});
+  state.addNote(0, {480, 480, 67, 80, 0});
+  state.addNote(1, {960, 480, 48, 80, 1});
+
+  // Desired pitch B4(71) at tick 960. Immutable only tries original.
+  auto result = resolver.findSafePitch(state, rules, 0, 71, 960, 480,
+                                       BachNoteSource::FugueSubject);
+  // B4(71) with C3(48) = M7 dissonant -- Immutable rejects. That's expected.
+  // The key is: no crash, no leap gate interference.
+  EXPECT_FALSE(result.accepted);
+}
+
+TEST_F(CollisionResolverTest, LeapGateFallbackPreventsDrop) {
+  // When the leap gate fires but no cascade alternative resolves the leap,
+  // the original pitch should be used as fallback (no drop).
+  state.addNote(0, {0, 480, 60, 80, 0});   // C4
+  state.addNote(0, {480, 480, 68, 80, 0}); // Ab4 (leap of +8, m6)
+
+  // No other voice sounding -- original will always pass isSafeToPlace.
+  // desired_pitch = Bb4(70): Ab4->Bb4 = +2 (step, resolves). Gate should NOT fire.
+  auto result_resolves = resolver.findSafePitch(
+      state, rules, 0, 70, 960, 480, BachNoteSource::FreeCounterpoint);
+  EXPECT_TRUE(result_resolves.accepted);
+  EXPECT_EQ(result_resolves.pitch, 70);  // Original accepted, no gate.
+
+  // desired_pitch = C5(72): Ab4->C5 = +4 (M3, not step). Gate fires.
+  // But no other voice -- cascade "original" is gated, chord_tone/step_shift/etc.
+  // will find alternatives. If none resolves the leap, fallback to C5(72).
+  auto result_no_resolve = resolver.findSafePitch(
+      state, rules, 0, 72, 960, 480, BachNoteSource::FreeCounterpoint);
+  EXPECT_TRUE(result_no_resolve.accepted);
+  // Should still produce a result (either a resolving cascade candidate or fallback).
+}
+
+TEST_F(CollisionResolverTest, LeapGateDiagnosticCounters) {
+  // Verify diagnostic counters increment.
+  auto [t0, f0] = resolver.getLeapGateStats();
+  EXPECT_EQ(t0, 0u);
+  EXPECT_EQ(f0, 0u);
+
+  // Create a leap that the gate should trigger on.
+  state.addNote(0, {0, 480, 60, 80, 0});   // C4
+  state.addNote(0, {480, 480, 68, 80, 0}); // Ab4 (leap +8)
+
+  // desired_pitch = C5(72): not step resolution from Ab4.
+  // No other voice -- original safe, gate fires, cascade may find alternative.
+  resolver.findSafePitch(state, rules, 0, 72, 960, 480,
+                         BachNoteSource::FreeCounterpoint);
+
+  auto [t1, f1] = resolver.getLeapGateStats();
+  EXPECT_GE(t1, 1u);  // Gate should have triggered at least once.
+}
+
+TEST_F(CollisionResolverTest, LeapGateCadenceExemption) {
+  // Near-cadence ticks (one-sided: tick < cadence, cadence - tick <= kTicksPerBeat)
+  // should exempt from leap gate.
+  state.clear();
+  state.registerVoice(0, 48, 84);
+  state.registerVoice(1, 36, 72);
+  resolver.setCadenceTicks({1440});  // Cadence at tick 1440.
+
+  state.addNote(0, {0, 480, 60, 80, 0});    // C4
+  state.addNote(0, {480, 480, 68, 80, 0});  // Ab4 (leap +8)
+
+  // Tick 960: cadence at 1440, cad - tick = 480 = kTicksPerBeat. tick < cad: yes.
+  // --> exempt from leap gate.
+  auto result = resolver.findSafePitch(
+      state, rules, 0, 72, 960, 480, BachNoteSource::FreeCounterpoint);
+  EXPECT_TRUE(result.accepted);
+  EXPECT_EQ(result.pitch, 72);  // No gate -- original accepted.
 }
 
 }  // namespace

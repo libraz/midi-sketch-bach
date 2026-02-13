@@ -53,14 +53,14 @@ def load_midi(source: Union[str, Path]) -> Score:
             if msg.type == "program_change":
                 channel_programs[msg.channel] = msg.program
             elif msg.type == "note_on" and msg.velocity > 0:
-                pending.setdefault(msg.channel, {})[msg.pitch] = abs_tick
+                pending.setdefault(msg.channel, {})[msg.note] = abs_tick
             elif msg.type == "note_off" or (msg.type == "note_on" and msg.velocity == 0):
                 ch_pending = pending.get(msg.channel, {})
-                start = ch_pending.pop(msg.pitch, None)
+                start = ch_pending.pop(msg.note, None)
                 if start is not None:
                     voice_name = _channel_to_voice_name(msg.channel)
                     note = Note(
-                        pitch=msg.pitch,
+                        pitch=msg.note,
                         velocity=msg.velocity if msg.type != "note_off" else 80,
                         start_tick=start,
                         duration=abs_tick - start,

@@ -18,6 +18,7 @@
 #include "counterpoint/bach_rule_evaluator.h"
 #include "counterpoint/collision_resolver.h"
 #include "counterpoint/counterpoint_state.h"
+#include "counterpoint/leap_resolution.h"
 #include "counterpoint/species_rules.h"
 #include "harmony/chord_tone_utils.h"
 #include "harmony/chord_types.h"
@@ -1766,6 +1767,22 @@ TrioSonataMovement generateMovement(const KeySignature& key_sig, Tick num_bars,
     auto validated = postValidateNotes(
         std::move(all_notes), kTrioVoiceCount, key_sig, voice_ranges, &stats);
 
+    // Leap resolution: fix unresolved melodic leaps.
+    {
+      LeapResolutionParams lr_params;
+      lr_params.num_voices = kTrioVoiceCount;
+      lr_params.key_at_tick = [&](Tick) { return key_sig.tonic; };
+      lr_params.scale_at_tick = [&](Tick) { return scale; };
+      lr_params.voice_range = [&](uint8_t v) -> std::pair<uint8_t, uint8_t> {
+        if (v < voice_ranges.size()) return voice_ranges[v];
+        return {0, 127};
+      };
+      lr_params.is_chord_tone = [&](Tick t, uint8_t p) {
+        return isChordTone(p, timeline.getAt(t));
+      };
+      resolveLeaps(validated, lr_params);
+    }
+
     for (auto& track : tracks) {
       track.notes.clear();
     }
@@ -1863,6 +1880,23 @@ TrioSonataMovement generateMovement(const KeySignature& key_sig, Tick num_bars,
         {organ_range::kPedalLow, organ_range::kPedalHigh}};
     auto validated = postValidateNotes(
         std::move(all_notes), kTrioVoiceCount, key_sig, vr);
+
+    // Leap resolution: fix unresolved melodic leaps (second pass).
+    {
+      LeapResolutionParams lr_params;
+      lr_params.num_voices = kTrioVoiceCount;
+      lr_params.key_at_tick = [&](Tick) { return key_sig.tonic; };
+      lr_params.scale_at_tick = [&](Tick) { return scale; };
+      lr_params.voice_range = [&](uint8_t v) -> std::pair<uint8_t, uint8_t> {
+        if (v < vr.size()) return vr[v];
+        return {0, 127};
+      };
+      lr_params.is_chord_tone = [&](Tick t, uint8_t p) {
+        return isChordTone(p, timeline.getAt(t));
+      };
+      resolveLeaps(validated, lr_params);
+    }
+
     for (auto& track : tracks) {
       track.notes.clear();
     }

@@ -47,6 +47,7 @@ set(BACH_LIB_SOURCES
   counterpoint/species_rules.cpp
   counterpoint/collision_resolver.cpp
   counterpoint/parallel_repair.cpp
+  counterpoint/leap_resolution.cpp
   counterpoint/repeated_note_repair.cpp
   counterpoint/cross_relation.cpp
   counterpoint/suspension_chain.cpp
@@ -110,6 +111,7 @@ set(BACH_LIB_SOURCES
   harmony/chord_tone_utils.cpp
   harmony/tempo_map.cpp
   harmony/harmonic_rhythm.cpp
+  harmony/harmonic_time_warp.cpp
   harmony/scale_degree_utils.cpp
 
   # forms/
@@ -122,6 +124,26 @@ set(BACH_LIB_SOURCES
   forms/toccata_sectionalis.cpp
   forms/passacaglia.cpp
   forms/fantasia.cpp
+  forms/goldberg/goldberg_plan.cpp
+  forms/goldberg/goldberg_structural_grid.cpp
+  forms/goldberg/goldberg_binary.cpp
+  forms/goldberg/goldberg_figuren.cpp
+  forms/goldberg/goldberg_config.cpp
+  forms/goldberg/goldberg_generator.cpp
+  forms/goldberg/goldberg_soggetto.cpp
+  forms/goldberg/goldberg_aria.cpp
+  forms/goldberg/canon/dux_buffer.cpp
+  forms/goldberg/canon/canon_validator.cpp
+  forms/goldberg/canon/canon_generator.cpp
+  forms/goldberg/variations/goldberg_ornamental.cpp
+  forms/goldberg/variations/goldberg_dance.cpp
+  forms/goldberg/variations/goldberg_crossing.cpp
+  forms/goldberg/variations/goldberg_fughetta.cpp
+  forms/goldberg/variations/goldberg_invention.cpp
+  forms/goldberg/variations/goldberg_virtuoso.cpp
+  forms/goldberg/variations/goldberg_overture.cpp
+  forms/goldberg/variations/goldberg_black_pearl.cpp
+  forms/goldberg/variations/goldberg_quodlibet.cpp
 
   # core/ (phrase)
   core/phrase_structure.cpp

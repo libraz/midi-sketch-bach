@@ -18,6 +18,7 @@
 #include "counterpoint/counterpoint_state.h"
 #include "counterpoint/parallel_repair.h"
 #include "counterpoint/cross_relation.h"
+#include "counterpoint/leap_resolution.h"
 #include "counterpoint/repeated_note_repair.h"
 #include "core/note_creator.h"
 #include "fugue/answer.h"
@@ -1137,7 +1138,7 @@ FugueResult generateFugue(const FugueConfig& config) {
       }
 
       // Lookahead: find next pitch for the same voice for NHT validation.
-      uint8_t lookahead_pitch = 0;
+      std::optional<uint8_t> lookahead_pitch;
       for (size_t nxt = note_idx + 1; nxt < all_notes.size(); ++nxt) {
         if (all_notes[nxt].voice == note.voice) {
           lookahead_pitch = all_notes[nxt].pitch;
@@ -1183,6 +1184,21 @@ FugueResult generateFugue(const FugueConfig& config) {
 
     ScaleType effective_scale =
         config.is_minor ? ScaleType::HarmonicMinor : ScaleType::Major;
+
+    // Leap resolution: fix unresolved melodic leaps (contrary step rule).
+    {
+      LeapResolutionParams lr_params;
+      lr_params.num_voices = num_voices;
+      lr_params.key_at_tick = [&](Tick t) { return tonal_plan.keyAtTick(t); };
+      lr_params.scale_at_tick = [&](Tick) { return effective_scale; };
+      lr_params.voice_range = [num_voices](uint8_t v) {
+        return getFugueVoiceRange(v, num_voices);
+      };
+      lr_params.is_chord_tone = [&](Tick t, uint8_t p) {
+        return isChordTone(p, detailed_timeline.getAt(t));
+      };
+      resolveLeaps(all_notes, lr_params);
+    }
 
     // -----------------------------------------------------------------------
     // Parallel repair pass (primary): fix parallel perfect consonances while

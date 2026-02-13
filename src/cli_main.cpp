@@ -61,7 +61,7 @@ void printUsage() {
   std::printf("\nForms:\n");
   std::printf("  fugue, prelude_and_fugue, trio_sonata, chorale_prelude\n");
   std::printf("  toccata_and_fugue, passacaglia, fantasia_and_fugue\n");
-  std::printf("  cello_prelude, chaconne\n");
+  std::printf("  cello_prelude, chaconne, goldberg_variations\n");
 }
 
 /// @brief Parse command-line arguments into CliOptions.

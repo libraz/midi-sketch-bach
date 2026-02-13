@@ -21,6 +21,7 @@
 #include "harmony/tempo_map.h"
 #include "expression/articulation.h"
 #include "midi/velocity_curve.h"
+#include "forms/goldberg/goldberg_config.h"
 #include "solo_string/arch/chaconne_engine.h"
 #include "solo_string/flow/harmonic_arpeggio_engine.h"
 
@@ -786,6 +787,37 @@ GeneratorResult generate(const GeneratorConfig& config) {
       result.form_description = "Chaconne in " + keySignatureToString(effective_config.key);
       break;
     }
+
+    case FormType::GoldbergVariations: {
+      GoldbergConfig gconfig;
+      gconfig.key = effective_config.key;
+      gconfig.bpm = effective_config.bpm;
+      gconfig.seed = effective_config.seed;
+      gconfig.instrument = effective_config.instrument;
+      gconfig.scale = effective_config.scale;
+
+      GoldbergResult gold_result = generateGoldbergVariations(gconfig);
+
+      if (!gold_result.success) {
+        result.success = false;
+        result.seed_used = effective_config.seed;
+        result.error_message = gold_result.error_message;
+        break;
+      }
+
+      result.tracks = std::move(gold_result.tracks);
+      result.total_duration_ticks = gold_result.total_duration_ticks;
+      result.tempo_events = std::move(gold_result.tempo_events);
+      result.timeline = gold_result.timeline.size() > 0
+          ? std::move(gold_result.timeline)
+          : HarmonicTimeline::createStandard(
+                effective_config.key, result.total_duration_ticks, HarmonicResolution::Bar);
+      result.success = true;
+      result.seed_used = gold_result.seed_used;
+      result.form_description =
+          "Goldberg Variations in " + keySignatureToString(effective_config.key);
+      break;
+    }
   }
 
   // Apply articulation as the final processing step before returning.
@@ -836,6 +868,9 @@ InstrumentType defaultInstrumentForForm(FormType form) {
 
     case FormType::Chaconne:
       return InstrumentType::Violin;
+
+    case FormType::GoldbergVariations:
+      return InstrumentType::Harpsichord;
   }
 
   return InstrumentType::Organ;

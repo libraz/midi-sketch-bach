@@ -29,7 +29,20 @@ enum class BachNoteSource : uint8_t {
   ChromaticPassing, // Chromatic passing tone between chord tones
   FalseEntry,       // Truncated subject opening that diverges to free counterpoint
   Coda,             // Coda design value (Principle 4: immutable)
-  SequenceNote      // Diatonic sequence note (structural protection)
+  SequenceNote,     // Diatonic sequence note (structural protection)
+  CanonDux,        ///< Canon leader voice.
+  CanonComes,      ///< Canon follower, derived from dux.
+  CanonFreeBass,   ///< Free bass in canon variation.
+  GoldbergAria,    ///< Aria theme.
+  GoldbergBass,    ///< Realized bass line.
+  GoldbergFigura,  ///< Elaboratio figura pattern (Figurenlehre).
+  GoldbergSoggetto, ///< Inventio soggetto (short subject for canon/fughetta/invention).
+  GoldbergDance,   ///< Dance variation pattern (Passepied, Gigue, Sarabande).
+  GoldbergFughetta, ///< Fughetta/alla breve fugal variation entry.
+  GoldbergInvention, ///< Invention/Sinfonia variation free counterpoint.
+  QuodlibetMelody,  ///< Folk melody in Quodlibet.
+  GoldbergOverture,  ///< French Overture variation (Var 16 Grave + Fugato).
+  GoldbergSuspension ///< BlackPearl (Var 25) suspension-driven notes.
 };
 
 /// @brief Convert BachNoteSource to human-readable string.
@@ -60,7 +73,10 @@ inline bool isStructuralSource(BachNoteSource source) {
          source == BachNoteSource::Countersubject ||
          source == BachNoteSource::FalseEntry ||
          source == BachNoteSource::Coda ||
-         source == BachNoteSource::SequenceNote;
+         source == BachNoteSource::SequenceNote ||
+         source == BachNoteSource::CanonDux ||
+         source == BachNoteSource::CanonComes ||
+         source == BachNoteSource::GoldbergAria;
 }
 
 /// @brief Check if a voice index is the pedal voice for a given voice count.

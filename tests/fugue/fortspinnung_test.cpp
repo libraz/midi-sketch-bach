@@ -376,11 +376,11 @@ TEST(FortspinnungTest, Voice2PitchInBassRange) {
 
   for (const auto& note : result) {
     if (note.voice == 2) {
-      // Bass voice should be in bass range [C2=36, C4=60].
-      EXPECT_GE(note.pitch, 36u)
-          << "Voice 2 bass note below C2: " << static_cast<int>(note.pitch);
-      EXPECT_LE(note.pitch, 60u)
-          << "Voice 2 bass note above C4: " << static_cast<int>(note.pitch);
+      // Voice 2 range matches getFugueVoiceRange(2, 3) = [C3=48, C5=72].
+      EXPECT_GE(note.pitch, 48u)
+          << "Voice 2 note below C3: " << static_cast<int>(note.pitch);
+      EXPECT_LE(note.pitch, 72u)
+          << "Voice 2 note above C5: " << static_cast<int>(note.pitch);
     }
   }
 }
@@ -540,6 +540,45 @@ TEST(FortspinnungTest, Voice3AnchorUsesKeyPitch) {
   EXPECT_TRUE(found_tonic_or_dominant)
       << "Voice 3 anchor notes should include tonic (" << tonic_bass
       << ") or dominant (" << dominant_bass << ") of key G";
+}
+
+// ===========================================================================
+// Voice2StructuralBeatCoverage
+// ===========================================================================
+
+TEST(FortspinnungTest, Voice2StructuralBeatCoverage) {
+  auto pool = buildTestPool();
+  // Generate 3-voice Fortspinnung over 16 bars across multiple seeds.
+  Tick duration = kTicksPerBar * 16;
+
+  int seeds_passing = 0;
+  for (uint32_t seed = 1; seed <= 10; ++seed) {
+    auto result = generateFortspinnung(pool, 0, duration,
+                                       3, seed, SubjectCharacter::Severe, Key::C);
+
+    // Count bar starts covered by voice 2 notes.
+    int total_bars = 16;
+    int covered_bars = 0;
+    for (int bar = 0; bar < total_bars; ++bar) {
+      Tick bar_start = static_cast<Tick>(bar) * kTicksPerBar;
+      for (const auto& note : result) {
+        if (note.voice == 2 &&
+            note.start_tick <= bar_start &&
+            note.start_tick + note.duration > bar_start) {
+          ++covered_bars;
+          break;
+        }
+      }
+    }
+
+    float coverage = static_cast<float>(covered_bars) / total_bars;
+    if (coverage >= 0.5f) {
+      ++seeds_passing;
+    }
+  }
+  // At least 7/10 seeds should have >= 50% bar coverage.
+  EXPECT_GE(seeds_passing, 7)
+      << "Voice 2 structural beat coverage too low across seeds";
 }
 
 }  // namespace

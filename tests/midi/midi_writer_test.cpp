@@ -384,5 +384,116 @@ TEST(MidiWriterTest, DifferentBpmProducesDifferentOutput) {
   EXPECT_NE(bytes_slow, bytes_fast) << "Different BPM values should produce different output";
 }
 
+// ---------------------------------------------------------------------------
+// Time signature support (Goldberg Variations infrastructure)
+// ---------------------------------------------------------------------------
+
+TEST(MidiWriterTest, BackwardCompatibleBuildStillWorks) {
+  // The old build() signature should still produce valid MIDI.
+  MidiWriter writer;
+  Track track;
+  track.channel = 0;
+  track.program = 0;
+  track.name = "Test";
+  NoteEvent note;
+  note.start_tick = 0;
+  note.duration = 480;
+  note.pitch = 60;
+  note.velocity = 80;
+  track.notes.push_back(note);
+
+  std::vector<TempoEvent> tempos = {{0, 120}};
+  writer.build({track}, tempos, Key::C);
+  auto bytes = writer.toBytes();
+  EXPECT_GT(bytes.size(), 0u);
+}
+
+TEST(MidiWriterTest, TimeSignature3_4InMetadata) {
+  MidiWriter writer;
+  Track track;
+  track.channel = 0;
+  track.program = 0;
+  NoteEvent note;
+  note.start_tick = 0;
+  note.duration = 480;
+  note.pitch = 60;
+  note.velocity = 80;
+  track.notes.push_back(note);
+
+  std::vector<TempoEvent> tempos = {{0, 120}};
+  std::vector<TimeSignatureEvent> time_sigs = {{0, {3, 4}}};
+  writer.build({track}, tempos, time_sigs, Key::C);
+  auto bytes = writer.toBytes();
+
+  // Search for FF 58 04 03 02 (3/4 time: numerator=3, denom=log2(4)=2)
+  bool found = false;
+  for (size_t idx = 0; idx + 4 < bytes.size(); ++idx) {
+    if (bytes[idx] == 0xFF && bytes[idx + 1] == 0x58 && bytes[idx + 2] == 0x04 &&
+        bytes[idx + 3] == 0x03 && bytes[idx + 4] == 0x02) {
+      found = true;
+      break;
+    }
+  }
+  EXPECT_TRUE(found) << "Expected 3/4 time signature meta-event in MIDI output";
+}
+
+TEST(MidiWriterTest, EmptyTimeSigFallsBackTo4_4) {
+  MidiWriter writer;
+  Track track;
+  track.channel = 0;
+  track.program = 0;
+  NoteEvent note;
+  note.start_tick = 0;
+  note.duration = 480;
+  note.pitch = 60;
+  note.velocity = 80;
+  track.notes.push_back(note);
+
+  std::vector<TempoEvent> tempos = {{0, 120}};
+  std::vector<TimeSignatureEvent> empty_ts;
+  writer.build({track}, tempos, empty_ts, Key::C);
+  auto bytes = writer.toBytes();
+
+  // Should have default 4/4: FF 58 04 04 02
+  bool found = false;
+  for (size_t idx = 0; idx + 4 < bytes.size(); ++idx) {
+    if (bytes[idx] == 0xFF && bytes[idx + 1] == 0x58 && bytes[idx + 2] == 0x04 &&
+        bytes[idx + 3] == 0x04 && bytes[idx + 4] == 0x02) {
+      found = true;
+      break;
+    }
+  }
+  EXPECT_TRUE(found) << "Expected default 4/4 time signature in MIDI output";
+}
+
+TEST(MidiWriterTest, TimeSignature6_8DenominatorEncoding) {
+  MidiWriter writer;
+  Track track;
+  track.channel = 0;
+  track.program = 0;
+  NoteEvent note;
+  note.start_tick = 0;
+  note.duration = 480;
+  note.pitch = 60;
+  note.velocity = 80;
+  track.notes.push_back(note);
+
+  std::vector<TempoEvent> tempos = {{0, 120}};
+  std::vector<TimeSignatureEvent> time_sigs = {{0, {6, 8}}};
+  writer.build({track}, tempos, time_sigs, Key::C);
+  auto bytes = writer.toBytes();
+
+  // 6/8: FF 58 04 06 03 (numerator=6, denom=log2(8)=3)
+  bool found = false;
+  for (size_t idx = 0; idx + 4 < bytes.size(); ++idx) {
+    if (bytes[idx] == 0xFF && bytes[idx + 1] == 0x58 && bytes[idx + 2] == 0x04 &&
+        bytes[idx + 3] == 0x06 && bytes[idx + 4] == 0x03) {
+      found = true;
+      break;
+    }
+  }
+  EXPECT_TRUE(found) << "Expected 6/8 time signature (denom=3) in MIDI output";
+}
+
 }  // namespace
 }  // namespace bach

@@ -3,6 +3,8 @@
 #include "forms/prelude.h"
 
 #include <algorithm>
+#include <array>
+#include <map>
 #include <random>
 #include <vector>
 
@@ -18,6 +20,7 @@
 #include "harmony/chord_types.h"
 #include "harmony/harmonic_event.h"
 #include "counterpoint/cross_relation.h"
+#include "counterpoint/leap_resolution.h"
 #include "counterpoint/repeated_note_repair.h"
 #include "fugue/fugue_config.h"
 #include "organ/organ_techniques.h"
@@ -1081,6 +1084,31 @@ PreludeResult generatePrelude(const PreludeConfig& config) {
                 return a.start_tick < b.start_tick;
               });
 
+    // Build per-voice next-pitch map with strictly-later-tick guarantee. O(n).
+    // Keyed by (voice, tick) so it is independent of group-sort reordering.
+    std::map<std::pair<VoiceId, Tick>, std::optional<uint8_t>> next_pitch_map;
+    {
+      std::array<std::vector<size_t>, 5> voice_indices;
+      for (size_t idx = 0; idx < all_notes.size(); ++idx) {
+        uint8_t v = all_notes[idx].voice;
+        if (v < 5) voice_indices[v].push_back(idx);
+      }
+      for (uint8_t v = 0; v < 5; ++v) {
+        const auto& vi = voice_indices[v];
+        if (vi.size() < 2) continue;
+        std::optional<uint8_t> last_candidate;
+        Tick last_tick = 0;
+        for (size_t k = vi.size(); k-- > 0;) {
+          Tick this_tick = all_notes[vi[k]].start_tick;
+          if (last_tick > this_tick) {
+            next_pitch_map[{v, this_tick}] = last_candidate;
+          }
+          last_candidate = all_notes[vi[k]].pitch;
+          last_tick = this_tick;
+        }
+      }
+    }
+
     // Group by tick and process in voice priority order:
     // pedal (immutable) → lower voices → upper voices.
     std::vector<NoteEvent> coordinated;
@@ -1128,12 +1156,10 @@ PreludeResult generatePrelude(const PreludeConfig& config) {
         opts.velocity = note.velocity;
         opts.source = note.source;
 
-        // Lookahead: find next note in same voice for NHT classification hint.
-        for (size_t k = j + 1; k < all_notes.size() && k < j + 20; ++k) {
-          if (all_notes[k].voice == note.voice) {
-            opts.next_pitch = all_notes[k].pitch;
-            break;
-          }
+        // Lookahead: per-voice next pitch for NHT classification.
+        auto np_it = next_pitch_map.find({note.voice, note.start_tick});
+        if (np_it != next_pitch_map.end()) {
+          opts.next_pitch = np_it->second;
         }
 
         auto result = createBachNote(&cp_state, &cp_rules, &cp_resolver, opts);
@@ -1179,6 +1205,24 @@ PreludeResult generatePrelude(const PreludeConfig& config) {
   PostValidateStats pv_stats;
   all_notes = postValidateNotes(
       std::move(all_notes), num_voices, config.key, voice_ranges, &pv_stats);
+
+  // Leap resolution: fix unresolved melodic leaps (contrary step rule).
+  {
+    LeapResolutionParams lr_params;
+    lr_params.num_voices = num_voices;
+    lr_params.key_at_tick = [&](Tick) { return config.key.tonic; };
+    lr_params.scale_at_tick = [&](Tick t) {
+      const auto& ev = timeline.getAt(t);
+      return ev.is_minor ? ScaleType::HarmonicMinor : ScaleType::Major;
+    };
+    lr_params.voice_range = [&](uint8_t v) -> std::pair<uint8_t, uint8_t> {
+      return {getVoiceLowPitch(v), getVoiceHighPitch(v)};
+    };
+    lr_params.is_chord_tone = [&](Tick t, uint8_t p) {
+      return isChordTone(p, timeline.getAt(t));
+    };
+    resolveLeaps(all_notes, lr_params);
+  }
 
   // Repeated note repair: safety net for remaining consecutive repeated pitches.
   {

@@ -201,7 +201,7 @@ TEST(ClassifyNonHarmonicToneTest, NoPrevPitch) {
 }
 
 TEST(ClassifyNonHarmonicToneTest, NoNextPitch) {
-  auto type = classifyNonHarmonicTone(60, 62, 0, false, true, false);
+  auto type = classifyNonHarmonicTone(60, 62, std::nullopt, false, true, false);
   EXPECT_EQ(type, NonHarmonicToneType::Unknown);
 }
 

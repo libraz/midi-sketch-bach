@@ -13,6 +13,7 @@
 #include "core/rng_util.h"
 #include "core/scale.h"
 #include "counterpoint/collision_resolver.h"
+#include "counterpoint/leap_resolution.h"
 #include "counterpoint/counterpoint_state.h"
 #include "counterpoint/i_rule_evaluator.h"
 #include "counterpoint/melodic_context.h"
@@ -1050,7 +1051,7 @@ Episode generateEpisode(const Subject& subject, Tick start_tick, Tick duration_t
                             : start_key;
 
       // --- Lookahead: find next pitch in the same voice for NHT validation. ---
-      uint8_t lookahead_pitch = 0;
+      std::optional<uint8_t> lookahead_pitch;
       for (size_t nxt = idx + 1; nxt < raw.notes.size(); ++nxt) {
         if (raw.notes[nxt].voice == note.voice &&
             raw.notes[nxt].start_tick > note.start_tick) {
@@ -1095,7 +1096,7 @@ Episode generateEpisode(const Subject& subject, Tick start_tick, Tick duration_t
         //   Offbeat: unrestricted.
         if (ml == MetricLevel::Bar && !raw_is_ct) {
           // Skip non-chord tone on bar start.
-        } else if (ml == MetricLevel::Beat && !raw_is_ct && lookahead_pitch == 0) {
+        } else if (ml == MetricLevel::Beat && !raw_is_ct && !lookahead_pitch.has_value()) {
           // Skip unresolvable NHT on beat.
         } else {
           candidates.push_back({raw_diatonic, 0.0f, raw_is_ct});
@@ -1198,6 +1199,19 @@ Episode generateEpisode(const Subject& subject, Tick start_tick, Tick duration_t
     }
 
     group_start = group_end;
+  }
+
+  // Leap resolution: fix unresolved P5+ leaps in episode.
+  {
+    LeapResolutionParams lr_params;
+    lr_params.num_voices = num_voices;
+    lr_params.leap_threshold = 7;  // Episode: P5+ only.
+    lr_params.key_at_tick = [&](Tick t) { return timeline.getKeyAt(t); };
+    lr_params.scale_at_tick = [&](Tick) { return scale; };
+    lr_params.is_chord_tone = [&](Tick t, uint8_t p) {
+      return isChordTone(p, timeline.getAt(t));
+    };
+    resolveLeaps(validated.notes, lr_params);
   }
 
   return validated;
@@ -1317,6 +1331,177 @@ Episode generateFortspinnungEpisode(const Subject& subject, const MotifPool& poo
   ScaleType scale = subject.is_minor ? ScaleType::HarmonicMinor : ScaleType::Major;
   Tick final_bar_start = (episode_end > kTicksPerBar) ? episode_end - kTicksPerBar : 0;
 
+  // --- Harmonic projection bass (basso fondamentale) ---
+  // For 3-voice fugues without pedal, replace melodic bass with harmonic projection.
+  VoiceId bass_voice_id = num_voices - 1;
+  bool is_harmonic_bass = (num_voices >= 3 && pedal_pitch == 0);
+  if (is_harmonic_bass) {
+    // Remove raw melodic bass.
+    raw.notes.erase(
+        std::remove_if(raw.notes.begin(), raw.notes.end(),
+                       [bass_voice_id](const NoteEvent& n) {
+                         return n.voice == bass_voice_id;
+                       }),
+        raw.notes.end());
+
+    auto [bass_lo_u, bass_hi_u] = getFugueVoiceRange(bass_voice_id, num_voices);
+    int bass_lo = static_cast<int>(bass_lo_u);
+    int bass_hi = static_cast<int>(bass_hi_u);
+    auto [adj_lo_u, adj_hi_u] = getFugueVoiceRange(bass_voice_id - 1, num_voices);
+    int adj_lo = static_cast<int>(adj_lo_u);
+    Tick ep_end = start_tick + duration_ticks;
+
+    // Build structural ticks from timeline (harmonic root changes + bar fallback).
+    const auto& events = timeline.events();
+    std::vector<Tick> structural_ticks;
+    int prev_root_pc = -1;
+
+    for (const auto& ev : events) {
+      if (ev.end_tick <= start_tick) {
+        prev_root_pc = getPitchClass(ev.chord.root_pitch);
+        continue;
+      }
+      if (ev.tick >= ep_end) break;
+
+      Tick t = std::max(ev.tick, start_tick);
+      int curr_root_pc = getPitchClass(ev.chord.root_pitch);
+
+      if (curr_root_pc != prev_root_pc) {
+        structural_ticks.push_back(t);
+      } else if (t % kTicksPerBar == 0) {
+        structural_ticks.push_back(t);
+      }
+      prev_root_pc = curr_root_pc;
+    }
+    if (structural_ticks.empty() || structural_ticks[0] != start_tick) {
+      structural_ticks.insert(structural_ticks.begin(), start_tick);
+    }
+
+    // Place bass notes at structural ticks.
+    uint8_t prev_bass_pitch = 0;
+
+    for (size_t si = 0; si < structural_ticks.size(); ++si) {
+      Tick tick = structural_ticks[si];
+      const auto& harm_ev = timeline.getAt(tick);
+
+      Tick dur = (si + 1 < structural_ticks.size())
+                     ? structural_ticks[si + 1] - tick
+                     : ep_end - tick;
+      if (dur == 0) continue;
+
+      // Candidate pitches: root -> 5th -> inversion bass.
+      uint8_t targets[3];
+      int num_targets;
+
+      bool is_dominant = (harm_ev.chord.degree == ChordDegree::V ||
+                          harm_ev.chord.degree == ChordDegree::V_of_V);
+      bool is_tonic = (harm_ev.chord.degree == ChordDegree::I);
+
+      if (is_dominant || is_tonic) {
+        targets[0] = harm_ev.chord.root_pitch;
+        num_targets = 1;
+      } else {
+        targets[0] = harm_ev.chord.root_pitch;
+        targets[1] = static_cast<uint8_t>(
+            std::min(127, static_cast<int>(harm_ev.chord.root_pitch) + 7));
+        targets[2] = (harm_ev.bass_pitch > 0) ? harm_ev.bass_pitch
+                                               : harm_ev.chord.root_pitch;
+        num_targets = 3;
+      }
+
+      // Octave-fit with hard crossing constraint.
+      uint8_t placed_pitch = 0;
+      bool found = false;
+      for (int ci = 0; ci < num_targets && !found; ++ci) {
+        int p = static_cast<int>(targets[ci]);
+        int best = -1;
+        int best_cost = 999;
+        for (int shift = -48; shift <= 48; shift += 12) {
+          int cand = p + shift;
+          if (cand < bass_lo || cand > bass_hi) continue;
+          if (cand >= adj_lo) continue;  // Hard crossing reject.
+          int cost = (cand > (bass_lo + bass_hi) / 2) ? 2 : 0;
+          if (cost < best_cost) {
+            best_cost = cost;
+            best = cand;
+          }
+        }
+        if (best >= 0) {
+          placed_pitch = static_cast<uint8_t>(best);
+          found = true;
+        }
+      }
+
+      // Relax crossing constraint if no candidate fits.
+      if (!found) {
+        for (int ci = 0; ci < num_targets && !found; ++ci) {
+          int p = static_cast<int>(targets[ci]);
+          for (int shift = -48; shift <= 48; shift += 12) {
+            int cand = p + shift;
+            if (cand < bass_lo || cand > bass_hi) continue;
+            placed_pitch = static_cast<uint8_t>(cand);
+            found = true;
+            break;
+          }
+        }
+      }
+      if (!found) continue;
+
+      // Lightweight counterpoint pre-check.
+      bool cp_ok = true;
+      if (prev_bass_pitch > 0) {
+        int melodic_interval = std::abs(
+            static_cast<int>(placed_pitch) - static_cast<int>(prev_bass_pitch));
+
+        // Tritone prohibition in bass melodic motion.
+        if (melodic_interval == 6) cp_ok = false;
+
+        // Leading tone resolution.
+        int tonic_pc = static_cast<int>(harm_ev.key);
+        int prev_pc = getPitchClass(prev_bass_pitch);
+        int leading_pc = (tonic_pc + 11) % 12;
+        if (prev_pc == leading_pc && getPitchClass(placed_pitch) != tonic_pc) {
+          cp_ok = false;
+        }
+      }
+
+      if (!cp_ok) {
+        // Try nearby scale tones as fallback.
+        Key ck = harm_ev.key;
+        for (int delta : {2, -2, 1, -1}) {
+          int alt = static_cast<int>(placed_pitch) + delta;
+          if (alt < bass_lo || alt > bass_hi) continue;
+          if (alt >= adj_lo) continue;
+          uint8_t ualt = static_cast<uint8_t>(alt);
+          if (!scale_util::isScaleTone(ualt, ck, scale)) continue;
+          int mi = std::abs(alt - static_cast<int>(prev_bass_pitch));
+          if (mi == 6) continue;
+          placed_pitch = ualt;
+          cp_ok = true;
+          break;
+        }
+        if (!cp_ok) continue;
+      }
+
+      NoteEvent bass_note;
+      bass_note.start_tick = tick;
+      bass_note.duration = dur;
+      bass_note.pitch = placed_pitch;
+      bass_note.velocity = 80;
+      bass_note.voice = bass_voice_id;
+      bass_note.source = BachNoteSource::EpisodeMaterial;
+      raw.notes.push_back(bass_note);
+      prev_bass_pitch = placed_pitch;
+    }
+
+    // Re-sort after bass insertion.
+    std::sort(raw.notes.begin(), raw.notes.end(),
+              [](const NoteEvent& a, const NoteEvent& b) {
+                if (a.start_tick != b.start_tick) return a.start_tick < b.start_tick;
+                return a.voice < b.voice;
+              });
+  }
+
   // Step 4: Process notes in tick groups.
   // Same start_tick events form a group; within each group, voices are processed
   // in order so earlier voices are in cp_state when later voices are evaluated.
@@ -1341,7 +1526,7 @@ Episode generateFortspinnungEpisode(const Subject& subject, const MotifPool& poo
                             : start_key;
 
       // Lookahead: find next pitch in the same voice for NHT validation.
-      uint8_t lookahead_pitch = 0;
+      std::optional<uint8_t> lookahead_pitch;
       for (size_t nxt = idx + 1; nxt < raw.notes.size(); ++nxt) {
         if (raw.notes[nxt].voice == note.voice &&
             raw.notes[nxt].start_tick > note.start_tick) {
@@ -1386,7 +1571,7 @@ Episode generateFortspinnungEpisode(const Subject& subject, const MotifPool& poo
         //   Offbeat: unrestricted.
         if (ml == MetricLevel::Bar && !raw_is_ct) {
           // Skip non-chord tone on bar start.
-        } else if (ml == MetricLevel::Beat && !raw_is_ct && lookahead_pitch == 0) {
+        } else if (ml == MetricLevel::Beat && !raw_is_ct && !lookahead_pitch.has_value()) {
           // Skip unresolvable NHT on beat.
         } else {
           candidates.push_back({raw_diatonic, 0.0f, raw_is_ct});
@@ -1489,6 +1674,19 @@ Episode generateFortspinnungEpisode(const Subject& subject, const MotifPool& poo
     }
 
     group_start = group_end;
+  }
+
+  // Leap resolution: fix unresolved P5+ leaps in episode.
+  {
+    LeapResolutionParams lr_params;
+    lr_params.num_voices = num_voices;
+    lr_params.leap_threshold = 7;  // Episode: P5+ only.
+    lr_params.key_at_tick = [&](Tick t) { return timeline.getKeyAt(t); };
+    lr_params.scale_at_tick = [&](Tick) { return scale; };
+    lr_params.is_chord_tone = [&](Tick t, uint8_t p) {
+      return isChordTone(p, timeline.getAt(t));
+    };
+    resolveLeaps(validated.notes, lr_params);
   }
 
   return validated;

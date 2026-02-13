@@ -134,38 +134,39 @@ bool SpeciesRules::isValidNeighborTone(uint8_t prev, uint8_t current,
 // ---------------------------------------------------------------------------
 
 NonHarmonicToneType classifyNonHarmonicTone(uint8_t prev_pitch, uint8_t current_pitch,
-                                             uint8_t next_pitch, bool is_chord_tone,
+                                             std::optional<uint8_t> next_pitch,
+                                             bool is_chord_tone,
                                              bool prev_is_chord_tone,
                                              bool next_is_chord_tone) {
   if (is_chord_tone) return NonHarmonicToneType::ChordTone;
 
   bool has_prev = prev_pitch > 0;
-  bool has_next = next_pitch > 0;
+  bool has_next = next_pitch.has_value();
 
   if (has_prev && has_next) {
     int step_from_prev = absoluteInterval(current_pitch, prev_pitch);
-    int step_to_next = absoluteInterval(next_pitch, current_pitch);
+    int step_to_next = absoluteInterval(*next_pitch, current_pitch);
 
     // Passing tone: stepwise from prev, stepwise to next, same direction,
     // both neighbors are chord tones.
     if (step_from_prev <= 2 && step_to_next <= 2 && prev_is_chord_tone &&
         next_is_chord_tone) {
       int dir1 = static_cast<int>(current_pitch) - static_cast<int>(prev_pitch);
-      int dir2 = static_cast<int>(next_pitch) - static_cast<int>(current_pitch);
+      int dir2 = static_cast<int>(*next_pitch) - static_cast<int>(current_pitch);
       if ((dir1 > 0 && dir2 > 0) || (dir1 < 0 && dir2 < 0)) {
         return NonHarmonicToneType::PassingTone;
       }
     }
 
     // Neighbor tone: step away then return to same pitch.
-    if (step_from_prev <= 2 && prev_pitch == next_pitch && prev_is_chord_tone) {
+    if (step_from_prev <= 2 && prev_pitch == *next_pitch && prev_is_chord_tone) {
       return NonHarmonicToneType::NeighborTone;
     }
   }
 
   // Suspension: held from previous beat (same pitch as prev), resolves down by step.
   if (has_prev && prev_pitch == current_pitch && has_next) {
-    int resolution = static_cast<int>(current_pitch) - static_cast<int>(next_pitch);
+    int resolution = static_cast<int>(current_pitch) - static_cast<int>(*next_pitch);
     if (resolution >= 1 && resolution <= 2 && next_is_chord_tone) {
       return NonHarmonicToneType::Suspension;
     }
@@ -173,9 +174,9 @@ NonHarmonicToneType classifyNonHarmonicTone(uint8_t prev_pitch, uint8_t current_
 
   if (has_prev && has_next) {
     int step_from_prev = absoluteInterval(current_pitch, prev_pitch);
-    int step_to_next = absoluteInterval(next_pitch, current_pitch);
+    int step_to_next = absoluteInterval(*next_pitch, current_pitch);
     int dir_in = static_cast<int>(current_pitch) - static_cast<int>(prev_pitch);
-    int dir_out = static_cast<int>(next_pitch) - static_cast<int>(current_pitch);
+    int dir_out = static_cast<int>(*next_pitch) - static_cast<int>(current_pitch);
 
     // Escape tone: stepwise entry, leap exit in opposite direction.
     if (step_from_prev <= 2 && step_to_next >= 3 && prev_is_chord_tone) {
@@ -186,13 +187,13 @@ NonHarmonicToneType classifyNonHarmonicTone(uint8_t prev_pitch, uint8_t current_
 
     // Anticipation: next chord tone sounded early, entered by step.
     if (step_from_prev <= 2 && next_is_chord_tone &&
-        current_pitch == next_pitch) {
+        current_pitch == *next_pitch) {
       return NonHarmonicToneType::Anticipation;
     }
 
     // Changing tone (double neighbor): step in one direction, leap to other side.
     if (step_from_prev <= 2 && step_to_next <= 2 && prev_is_chord_tone &&
-        next_is_chord_tone && prev_pitch != next_pitch) {
+        next_is_chord_tone && prev_pitch != *next_pitch) {
       if ((dir_in > 0 && dir_out < 0) || (dir_in < 0 && dir_out > 0)) {
         return NonHarmonicToneType::ChangingTone;
       }

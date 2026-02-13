@@ -47,6 +47,7 @@ set(BACH_TEST_SOURCES
   counterpoint/suspension_chain_test.cpp
   counterpoint/counterpoint_validator_test.cpp
   counterpoint/melodic_context_test.cpp
+  counterpoint/leap_resolution_test.cpp
   counterpoint/repeated_note_repair_test.cpp
 
   # counterpoint/ (cantus firmus)
@@ -117,6 +118,7 @@ set(BACH_TEST_SOURCES
   harmony/extended_chord_test.cpp
   harmony/tempo_map_test.cpp
   harmony/harmonic_rhythm_test.cpp
+  harmony/harmonic_time_warp_test.cpp
 
   # forms/
   forms/prelude_test.cpp
@@ -128,6 +130,26 @@ set(BACH_TEST_SOURCES
   forms/toccata_sectionalis_test.cpp
   forms/passacaglia_test.cpp
   forms/fantasia_test.cpp
+  forms/goldberg/goldberg_plan_test.cpp
+  forms/goldberg/goldberg_structural_grid_test.cpp
+  forms/goldberg/goldberg_binary_test.cpp
+  forms/goldberg/goldberg_figuren_test.cpp
+  forms/goldberg/goldberg_config_test.cpp
+  forms/goldberg/goldberg_soggetto_test.cpp
+  forms/goldberg/goldberg_aria_test.cpp
+  forms/goldberg/dux_buffer_test.cpp
+  forms/goldberg/canon_validator_test.cpp
+  forms/goldberg/canon_generator_test.cpp
+  forms/goldberg/goldberg_ornamental_test.cpp
+  forms/goldberg/goldberg_dance_test.cpp
+  forms/goldberg/goldberg_crossing_test.cpp
+  forms/goldberg/goldberg_fughetta_test.cpp
+  forms/goldberg/goldberg_invention_test.cpp
+  forms/goldberg/goldberg_virtuoso_test.cpp
+  forms/goldberg/goldberg_overture_test.cpp
+  forms/goldberg/goldberg_black_pearl_test.cpp
+  forms/goldberg/goldberg_quodlibet_test.cpp
+  forms/goldberg/goldberg_generator_test.cpp
 
   # generator (unified entry point)
   generator_test.cpp

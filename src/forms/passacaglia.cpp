@@ -17,6 +17,7 @@
 #include "counterpoint/counterpoint_state.h"
 #include "harmony/chord_types.h"
 #include "harmony/harmonic_event.h"
+#include "counterpoint/leap_resolution.h"
 #include "counterpoint/repeated_note_repair.h"
 #include "organ/organ_techniques.h"
 
@@ -1134,6 +1135,23 @@ PassacagliaResult generatePassacaglia(const PassacagliaConfig& config) {
     PostValidateStats stats;
     auto validated = postValidateNotes(
         std::move(all_notes), num_voices, config.key, voice_ranges, &stats);
+
+    // Leap resolution: fix unresolved melodic leaps (contrary step rule).
+    {
+      LeapResolutionParams lr_params;
+      lr_params.num_voices = num_voices;
+      lr_params.key_at_tick = [&](Tick) { return config.key.tonic; };
+      lr_params.scale_at_tick = [&](Tick) {
+        return config.key.is_minor ? ScaleType::HarmonicMinor : ScaleType::Major;
+      };
+      lr_params.voice_range = [&](uint8_t v) -> std::pair<uint8_t, uint8_t> {
+        return {getVoiceLowPitch(v), getVoiceHighPitch(v)};
+      };
+      lr_params.is_chord_tone = [&](Tick t, uint8_t p) {
+        return isChordTone(p, timeline.getAt(t));
+      };
+      resolveLeaps(validated, lr_params);
+    }
 
     // Repeated note repair: replace 4th+ same-pitch notes with step-adjacent
     // scale tones. Passacaglia uses fixed key (no modulation within a piece).

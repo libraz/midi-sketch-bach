@@ -41,6 +41,13 @@ MidiWriter::MidiWriter() = default;
 void MidiWriter::build(const std::vector<Track>& tracks,
                         const std::vector<TempoEvent>& tempo_events,
                         Key key, const std::string& metadata) {
+  build(tracks, tempo_events, {}, key, metadata);
+}
+
+void MidiWriter::build(const std::vector<Track>& tracks,
+                        const std::vector<TempoEvent>& tempo_events,
+                        const std::vector<TimeSignatureEvent>& time_sig_events,
+                        Key key, const std::string& metadata) {
   data_.clear();
 
   // Count non-empty tracks, plus one for the metadata track.
@@ -53,7 +60,7 @@ void MidiWriter::build(const std::vector<Track>& tracks,
   uint16_t total_tracks = num_content_tracks + 1;  // +1 for metadata track
 
   writeHeader(total_tracks, kTicksPerBeat);
-  writeMetadataTrack(tempo_events, metadata);
+  writeMetadataTrack(tempo_events, time_sig_events, metadata);
 
   for (const auto& track : tracks) {
     if (!track.notes.empty() || !track.events.empty()) {
@@ -184,6 +191,7 @@ void MidiWriter::writeTrack(const Track& track, Key key) {
 }
 
 void MidiWriter::writeMetadataTrack(const std::vector<TempoEvent>& tempo_events,
+                                     const std::vector<TimeSignatureEvent>& time_sig_events,
                                      const std::string& metadata) {
   std::vector<uint8_t> track_buf;
 
@@ -224,16 +232,47 @@ void MidiWriter::writeMetadataTrack(const std::vector<TempoEvent>& tempo_events,
     prev_tick = evt.tick;
   }
 
-  // Time signature meta-event: FF 58 04 nn dd cc bb
-  // 4/4 time: numerator=4, denominator=2 (2^2=4), 24 MIDI clocks/click, 8 32nds/beat
-  writeVariableLength(track_buf, 0);
-  track_buf.push_back(0xFF);
-  track_buf.push_back(0x58);
-  track_buf.push_back(0x04);  // Length = 4 bytes
-  track_buf.push_back(0x04);  // Numerator: 4
-  track_buf.push_back(0x02);  // Denominator: 2^2 = 4
-  track_buf.push_back(0x18);  // 24 MIDI clocks per metronome click
-  track_buf.push_back(0x08);  // 8 thirty-second notes per 24 MIDI clocks
+  // Time signature meta-events: FF 58 04 nn dd cc bb
+  if (time_sig_events.empty()) {
+    // Default 4/4 time signature (backward compatible).
+    writeVariableLength(track_buf, 0);
+    track_buf.push_back(0xFF);
+    track_buf.push_back(0x58);
+    track_buf.push_back(0x04);
+    track_buf.push_back(0x04);  // Numerator: 4
+    track_buf.push_back(0x02);  // Denominator: 2^2 = 4
+    track_buf.push_back(0x18);  // 24 MIDI clocks per metronome click
+    track_buf.push_back(0x08);  // 8 thirty-second notes per 24 MIDI clocks
+  } else {
+    // Sort and write time signature events.
+    std::vector<TimeSignatureEvent> sorted_ts = time_sig_events;
+    std::sort(sorted_ts.begin(), sorted_ts.end(),
+              [](const TimeSignatureEvent& lhs, const TimeSignatureEvent& rhs) {
+                return lhs.tick < rhs.tick;
+              });
+
+    uint32_t ts_prev_tick = prev_tick;  // Continue from after tempo events
+    for (const auto& ts_evt : sorted_ts) {
+      uint32_t delta = ts_evt.tick - ts_prev_tick;
+      writeVariableLength(track_buf, delta);
+      track_buf.push_back(0xFF);
+      track_buf.push_back(0x58);
+      track_buf.push_back(0x04);
+      track_buf.push_back(ts_evt.time_sig.numerator);
+      // Denominator is encoded as log2: 4->2, 8->3, 2->1, 16->4
+      uint8_t denom_log2 = 0;
+      uint8_t denom = ts_evt.time_sig.denominator;
+      while (denom > 1) {
+        denom >>= 1;
+        ++denom_log2;
+      }
+      track_buf.push_back(denom_log2);
+      track_buf.push_back(0x18);  // 24 MIDI clocks per metronome click
+      track_buf.push_back(0x08);  // 8 thirty-second notes per 24 MIDI clocks
+      ts_prev_tick = ts_evt.tick;
+    }
+    prev_tick = ts_prev_tick;
+  }
 
   // Embed metadata as a text event if non-empty.
   if (!metadata.empty()) {

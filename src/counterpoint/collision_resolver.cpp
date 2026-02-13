@@ -162,7 +162,7 @@ bool CollisionResolver::isSafeToPlace(const CounterpointState& state,
                                       const IRuleEvaluator& rules,
                                       VoiceId voice_id, uint8_t pitch,
                                       Tick tick, Tick /*duration*/,
-                                      uint8_t next_pitch,
+                                      std::optional<uint8_t> next_pitch,
                                       int adjacent_spacing_limit) const {
   const auto& voices = state.getActiveVoices();
 
@@ -180,14 +180,14 @@ bool CollisionResolver::isSafeToPlace(const CounterpointState& state,
       // non-harmonic tone pattern (passing tone or neighbor tone).
       // Use Fifth species rules which allow the broadest non-harmonic tones.
       bool allowed_as_nht = false;
-      if (next_pitch > 0) {
+      if (next_pitch.has_value()) {
         const NoteEvent* prev_self = state.getLastNote(voice_id);
         if (prev_self) {
           SpeciesRules species_rules(SpeciesType::Fifth);
           bool is_passing = species_rules.isValidPassingTone(
-              prev_self->pitch, pitch, next_pitch);
+              prev_self->pitch, pitch, *next_pitch);
           bool is_neighbor = species_rules.isValidNeighborTone(
-              prev_self->pitch, pitch, next_pitch);
+              prev_self->pitch, pitch, *next_pitch);
           if (is_passing || is_neighbor) {
             allowed_as_nht = true;
           }
@@ -210,14 +210,14 @@ bool CollisionResolver::isSafeToPlace(const CounterpointState& state,
         if (voice_id == bass_voice || other == bass_voice) {
           // Reject unless justified as a non-harmonic tone (passing/neighbor).
           bool p4_bass_allowed = false;
-          if (next_pitch > 0) {
+          if (next_pitch.has_value()) {
             const NoteEvent* prev_self = state.getLastNote(voice_id);
             if (prev_self) {
               SpeciesRules species_rules(SpeciesType::Fifth);
               bool is_passing = species_rules.isValidPassingTone(
-                  prev_self->pitch, pitch, next_pitch);
+                  prev_self->pitch, pitch, *next_pitch);
               bool is_neighbor = species_rules.isValidNeighborTone(
-                  prev_self->pitch, pitch, next_pitch);
+                  prev_self->pitch, pitch, *next_pitch);
               if (is_passing || is_neighbor) p4_bass_allowed = true;
             }
           }
@@ -258,6 +258,20 @@ bool CollisionResolver::isSafeToPlace(const CounterpointState& state,
             prev_other->pitch, other_note->pitch);
         if (motion == MotionType::Parallel ||
             motion == MotionType::Similar) {
+          return false;
+        }
+      }
+
+      // Hidden perfect: approaching a perfect consonance via similar motion
+      // where both voices leap wider than P5 (> 7 semitones). Bach commonly
+      // uses P4/P5 leaps in similar motion to perfect intervals, so only
+      // flag when BOTH voices make large leaps (m6 or wider).
+      if (curr_perfect) {
+        int dir_a = static_cast<int>(pitch) - static_cast<int>(prev_self->pitch);
+        int dir_b = static_cast<int>(other_note->pitch) -
+                    static_cast<int>(prev_other->pitch);
+        if (dir_a != 0 && dir_b != 0 && (dir_a > 0) == (dir_b > 0) &&
+            std::abs(dir_a) > 7 && std::abs(dir_b) > 7) {
           return false;
         }
       }
@@ -345,13 +359,19 @@ bool CollisionResolver::isSafeToPlace(const CounterpointState& state,
 PlacementResult CollisionResolver::tryStrategy(
     const CounterpointState& state, const IRuleEvaluator& rules,
     VoiceId voice_id, uint8_t desired_pitch, Tick tick, Tick duration,
-    const std::string& strategy, uint8_t next_pitch) const {
+    const std::string& strategy, std::optional<uint8_t> next_pitch) const {
   PlacementResult result;
   result.strategy = strategy;
 
   if (strategy == "original") {
     if (isSafeToPlace(state, rules, voice_id, desired_pitch, tick,
                       duration, next_pitch)) {
+      // Soft cross-relation gate: if the original pitch creates a chromatic
+      // conflict with another voice, skip it so that chord_tone / step_shift
+      // can find a non-conflicting alternative.
+      if (crossRelationPenalty(state, voice_id, desired_pitch, tick) > 0.0f) {
+        return result;  // result.accepted remains false → cascade continues
+      }
       result.pitch = desired_pitch;
       result.penalty = 0.0f;
       result.accepted = true;
@@ -666,7 +686,7 @@ PlacementResult CollisionResolver::tryStrategy(
 PlacementResult CollisionResolver::findSafePitch(
     const CounterpointState& state, const IRuleEvaluator& rules,
     VoiceId voice_id, uint8_t desired_pitch, Tick tick,
-    Tick duration, uint8_t next_pitch) const {
+    Tick duration, std::optional<uint8_t> next_pitch) const {
   // 6-stage strategy cascade (suspension inserted between chord_tone and step_shift).
   static const char* kStrategies[] = {
       "original", "chord_tone", "suspension", "step_shift", "octave_shift", "rest"};
@@ -702,7 +722,7 @@ PlacementResult CollisionResolver::findSafePitch(
 PlacementResult CollisionResolver::findSafePitch(
     const CounterpointState& state, const IRuleEvaluator& rules,
     VoiceId voice_id, uint8_t desired_pitch, Tick tick, Tick duration,
-    BachNoteSource source, uint8_t next_pitch) const {
+    BachNoteSource source, std::optional<uint8_t> next_pitch) const {
   ProtectionLevel level = getProtectionLevel(source);
 
   // Select allowed strategies based on protection level.
@@ -733,6 +753,44 @@ PlacementResult CollisionResolver::findSafePitch(
   // to prevent dropping structural material like fugue subjects.
   int spacing_limit = (level != ProtectionLevel::Flexible) ? 19 : 14;
 
+  // Leap resolution soft gate: when the previous interval was a leap (>=5
+  // semitones) and the original candidate does not resolve it by step, defer
+  // to the cascade (chord_tone/step_shift) to find a resolving alternative.
+  // Falls back to original if no cascade candidate resolves the leap.
+  bool apply_leap_gate = false;
+  if (level == ProtectionLevel::Flexible &&
+      source != BachNoteSource::EpisodeMaterial &&
+      source != BachNoteSource::ArpeggioFlow) {
+    // One-sided cadence exemption: only exempt ticks in [cadence - kTicksPerBeat, cadence).
+    bool near_cadence_before = false;
+    for (Tick cad : cadence_ticks_) {
+      if (tick < cad && cad - tick <= kTicksPerBeat) {
+        near_cadence_before = true;
+        break;
+      }
+    }
+    if (!near_cadence_before) {
+      const auto& voice_notes = state.getVoiceNotes(voice_id);
+      if (voice_notes.size() >= 2) {
+        auto iter = voice_notes.rbegin();
+        uint8_t last_pitch = iter->pitch;
+        ++iter;
+        int prev_leap = static_cast<int>(last_pitch) -
+                        static_cast<int>(iter->pitch);
+        if (std::abs(prev_leap) >= 5) {
+          int res = static_cast<int>(desired_pitch) -
+                    static_cast<int>(last_pitch);
+          // Step (1-2 semitones) in any direction counts as resolution.
+          bool resolves = (std::abs(res) >= 1 && std::abs(res) <= 2);
+          apply_leap_gate = !resolves;
+        }
+      }
+    }
+  }
+
+  PlacementResult soft_fallback;
+  bool has_soft_fallback = false;
+
   for (int idx = 0; idx < list.count; ++idx) {
     // The suspension strategy uses a dedicated method.
     if (std::string(list.strategies[idx]) == "suspension") {
@@ -762,6 +820,16 @@ PlacementResult CollisionResolver::findSafePitch(
                                          desired_pitch, tick, duration,
                                          list.strategies[idx], next_pitch);
     if (result.accepted) {
+      // Leap resolution gate: when the previous note was a leap and the
+      // original pitch does not resolve it, save as fallback and let the
+      // cascade try to find a resolving alternative.
+      if (apply_leap_gate && std::string(list.strategies[idx]) == "original") {
+        soft_fallback = result;
+        has_soft_fallback = true;
+        leap_gate_triggered_++;
+        continue;  // Try cascade strategies for leap resolution.
+      }
+
       // Repetition gate: reject "original" if it would create a run of 3+
       // same-pitch notes for FreeCounterpoint. Forces cascade fallthrough to
       // chord_tone / step_shift for a melodic alternative.
@@ -783,6 +851,13 @@ PlacementResult CollisionResolver::findSafePitch(
       }
       return result;
     }
+  }
+
+  // Cascade failed to find a resolving alternative. Use the original pitch
+  // as fallback to prevent note drops.
+  if (has_soft_fallback) {
+    leap_gate_fallback_used_++;
+    return soft_fallback;
   }
 
   PlacementResult rest;

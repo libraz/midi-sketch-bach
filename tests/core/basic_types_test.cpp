@@ -136,6 +136,7 @@ TEST(BasicTypesTest, FormTypeToString) {
   EXPECT_STREQ(formTypeToString(FormType::FantasiaAndFugue), "fantasia_and_fugue");
   EXPECT_STREQ(formTypeToString(FormType::CelloPrelude), "cello_prelude");
   EXPECT_STREQ(formTypeToString(FormType::Chaconne), "chaconne");
+  EXPECT_STREQ(formTypeToString(FormType::GoldbergVariations), "goldberg_variations");
 }
 
 TEST(BasicTypesTest, FormTypeFromStringValidInputs) {
@@ -148,6 +149,7 @@ TEST(BasicTypesTest, FormTypeFromStringValidInputs) {
   EXPECT_EQ(formTypeFromString("fantasia_and_fugue"), FormType::FantasiaAndFugue);
   EXPECT_EQ(formTypeFromString("cello_prelude"), FormType::CelloPrelude);
   EXPECT_EQ(formTypeFromString("chaconne"), FormType::Chaconne);
+  EXPECT_EQ(formTypeFromString("goldberg_variations"), FormType::GoldbergVariations);
 }
 
 TEST(BasicTypesTest, FormTypeFromStringUnknownDefaultsToFugue) {
@@ -162,7 +164,7 @@ TEST(BasicTypesTest, FormTypeRoundTrip) {
       FormType::TrioSonata,    FormType::ChoralePrelude,
       FormType::ToccataAndFugue, FormType::Passacaglia,
       FormType::FantasiaAndFugue, FormType::CelloPrelude,
-      FormType::Chaconne};
+      FormType::Chaconne, FormType::GoldbergVariations};
 
   for (auto form : forms) {
     std::string name = formTypeToString(form);
@@ -289,6 +291,93 @@ TEST(NoteEventTest, ModifiedByAccumulatesFlags) {
   note.modified_by |= static_cast<uint8_t>(NoteModifiedBy::ParallelRepair);
   note.modified_by |= static_cast<uint8_t>(NoteModifiedBy::OverlapTrim);
   EXPECT_EQ(note.modified_by, 0x09);  // 1 | 8
+}
+
+// ---------------------------------------------------------------------------
+// TimeSignature
+// ---------------------------------------------------------------------------
+
+TEST(TimeSignatureTest, TicksPerBar_4_4) {
+  TimeSignature ts{4, 4};
+  EXPECT_EQ(ts.ticksPerBar(), 1920u);
+}
+
+TEST(TimeSignatureTest, TicksPerBar_3_4) {
+  TimeSignature ts{3, 4};
+  EXPECT_EQ(ts.ticksPerBar(), 1440u);
+}
+
+TEST(TimeSignatureTest, TicksPerBar_6_8) {
+  TimeSignature ts{6, 8};
+  EXPECT_EQ(ts.ticksPerBar(), 1440u);
+}
+
+TEST(TimeSignatureTest, TicksPerBar_2_2) {
+  TimeSignature ts{2, 2};
+  EXPECT_EQ(ts.ticksPerBar(), 1920u);
+}
+
+TEST(TimeSignatureTest, TicksPerBar_3_8) {
+  TimeSignature ts{3, 8};
+  EXPECT_EQ(ts.ticksPerBar(), 720u);
+}
+
+TEST(TimeSignatureTest, IsCompound) {
+  EXPECT_FALSE((TimeSignature{3, 4}.isCompound()));
+  EXPECT_TRUE((TimeSignature{6, 8}.isCompound()));
+  EXPECT_TRUE((TimeSignature{9, 8}.isCompound()));
+  EXPECT_TRUE((TimeSignature{12, 8}.isCompound()));
+  EXPECT_FALSE((TimeSignature{4, 4}.isCompound()));
+  EXPECT_FALSE((TimeSignature{2, 2}.isCompound()));
+}
+
+TEST(TimeSignatureTest, PulsesPerBar) {
+  EXPECT_EQ((TimeSignature{3, 4}.pulsesPerBar()), 3);
+  EXPECT_EQ((TimeSignature{6, 8}.pulsesPerBar()), 2);
+  EXPECT_EQ((TimeSignature{9, 8}.pulsesPerBar()), 3);
+  EXPECT_EQ((TimeSignature{4, 4}.pulsesPerBar()), 4);
+}
+
+TEST(TimeSignatureTest, BeatsPerBar) {
+  EXPECT_EQ((TimeSignature{3, 4}.beatsPerBar()), 3);
+  EXPECT_EQ((TimeSignature{6, 8}.beatsPerBar()), 6);
+  EXPECT_EQ((TimeSignature{4, 4}.beatsPerBar()), 4);
+}
+
+TEST(TimeSignatureTest, DefaultIs4_4) {
+  TimeSignature ts;
+  EXPECT_EQ(ts.numerator, 4);
+  EXPECT_EQ(ts.denominator, 4);
+  EXPECT_EQ(ts.ticksPerBar(), kTicksPerBar);
+}
+
+TEST(TimeSignatureEventTest, DefaultValues) {
+  TimeSignatureEvent evt;
+  EXPECT_EQ(evt.tick, 0u);
+  EXPECT_EQ(evt.time_sig.numerator, 4);
+  EXPECT_EQ(evt.time_sig.denominator, 4);
+}
+
+// ---------------------------------------------------------------------------
+// MetricalStrength / MeterProfile
+// ---------------------------------------------------------------------------
+
+TEST(MetricalStrengthTest, StandardTriple_S_M_W) {
+  EXPECT_EQ(getMetricalStrength(0, MeterProfile::StandardTriple),
+            MetricalStrength::Strong);
+  EXPECT_EQ(getMetricalStrength(1, MeterProfile::StandardTriple),
+            MetricalStrength::Medium);
+  EXPECT_EQ(getMetricalStrength(2, MeterProfile::StandardTriple),
+            MetricalStrength::Weak);
+}
+
+TEST(MetricalStrengthTest, SarabandeTriple_S_S_W) {
+  EXPECT_EQ(getMetricalStrength(0, MeterProfile::SarabandeTriple),
+            MetricalStrength::Strong);
+  EXPECT_EQ(getMetricalStrength(1, MeterProfile::SarabandeTriple),
+            MetricalStrength::Strong);
+  EXPECT_EQ(getMetricalStrength(2, MeterProfile::SarabandeTriple),
+            MetricalStrength::Weak);
 }
 
 }  // namespace

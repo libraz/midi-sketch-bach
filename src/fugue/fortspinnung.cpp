@@ -13,6 +13,7 @@
 #include "fugue/motif_pool.h"
 #include "transform/motif_transform.h"
 #include "fugue/episode.h"
+#include "fugue/voice_registers.h"
 #include "transform/sequence.h"
 
 namespace bach {
@@ -364,12 +365,11 @@ std::vector<NoteEvent> generateFortspinnung(const MotifPool& pool,
       }
       auto bass_fragment = augmentMelody(tail, 0, 2);
 
-      // Transpose fragment to appropriate register based on voice count.
-      // 4 voices: voice 2 = tenor (C3-C5, MIDI 48-72).
-      // 3 voices: voice 2 = bass (C2-C4, MIDI 36-60).
-      int v2_offset = (num_voices >= 4) ? 0 : -12;
-      int v2_lo = (num_voices >= 4) ? 48 : 36;
-      int v2_hi = (num_voices >= 4) ? 72 : 60;
+      // Transpose fragment to appropriate register from getFugueVoiceRange.
+      auto [v2_lo_u, v2_hi_u] = getFugueVoiceRange(2, num_voices);
+      int v2_lo = static_cast<int>(v2_lo_u);
+      int v2_hi = static_cast<int>(v2_hi_u);
+      int v2_offset = 0;
       for (auto& note : bass_fragment) {
         note.pitch = mapToRegister(static_cast<int>(note.pitch) + v2_offset, v2_lo, v2_hi);
       }
@@ -403,14 +403,7 @@ std::vector<NoteEvent> generateFortspinnung(const MotifPool& pool,
           bass_tick += frag_dur;
         } else {
           // Anchor note: tonic held for one bar, derived from key.
-          int v2_anchor_pitch;
-          if (num_voices >= 4) {
-            // Tenor: tonic in C4 octave.
-            v2_anchor_pitch = 48 + static_cast<int>(key);
-          } else {
-            // Bass: tonic in C2 octave.
-            v2_anchor_pitch = 36 + static_cast<int>(key);
-          }
+          int v2_anchor_pitch = 48 + static_cast<int>(key);
           int bass_anchor = mapToRegister(v2_anchor_pitch, v2_lo, v2_hi);
 
           Tick anchor_dur = std::min(kTicksPerBar,

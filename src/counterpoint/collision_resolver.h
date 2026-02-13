@@ -5,7 +5,9 @@
 #define BACH_COUNTERPOINT_COLLISION_RESOLVER_H
 
 #include <cstdint>
+#include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "core/basic_types.h"
@@ -83,7 +85,7 @@ class CollisionResolver {
                      const IRuleEvaluator& rules,
                      VoiceId voice_id, uint8_t pitch,
                      Tick tick, Tick duration,
-                     uint8_t next_pitch = 0,
+                     std::optional<uint8_t> next_pitch = std::nullopt,
                      int adjacent_spacing_limit = 14) const;
 
   /// @brief Find a safe pitch using the 6-stage strategy cascade.
@@ -109,7 +111,7 @@ class CollisionResolver {
                                 const IRuleEvaluator& rules,
                                 VoiceId voice_id, uint8_t desired_pitch,
                                 Tick tick, Tick duration,
-                                uint8_t next_pitch = 0) const;
+                                std::optional<uint8_t> next_pitch = std::nullopt) const;
 
   /// @brief Find a safe pitch respecting the source's protection level.
   ///
@@ -126,7 +128,7 @@ class CollisionResolver {
                                 VoiceId voice_id, uint8_t desired_pitch,
                                 Tick tick, Tick duration,
                                 BachNoteSource source,
-                                uint8_t next_pitch = 0) const;
+                                std::optional<uint8_t> next_pitch = std::nullopt) const;
 
   /// @brief Find a safe pitch with pedal-range awareness.
   ///
@@ -211,11 +213,19 @@ class CollisionResolver {
   /// @param timeline Pointer to harmonic timeline (nullptr for legacy behavior).
   void setHarmonicTimeline(const HarmonicTimeline* timeline);
 
+  /// @brief Get leap gate diagnostic counters.
+  /// @return Pair of (triggered, fallback_used) counts.
+  std::pair<uint32_t, uint32_t> getLeapGateStats() const {
+    return {leap_gate_triggered_, leap_gate_fallback_used_};
+  }
+
  private:
   int max_search_range_ = 12;
   int range_tolerance_ = 3;
   std::vector<Tick> cadence_ticks_;
   const HarmonicTimeline* harmonic_timeline_ = nullptr;
+  mutable uint32_t leap_gate_triggered_ = 0;
+  mutable uint32_t leap_gate_fallback_used_ = 0;
 
   /// @brief Attempt a specific resolution strategy.
   PlacementResult tryStrategy(const CounterpointState& state,
@@ -223,7 +233,7 @@ class CollisionResolver {
                               VoiceId voice_id, uint8_t desired_pitch,
                               Tick tick, Tick duration,
                               const std::string& strategy,
-                              uint8_t next_pitch = 0) const;
+                              std::optional<uint8_t> next_pitch = std::nullopt) const;
 
   /// @brief Check if a pitch would cross an adjacent voice.
   /// @return True if the candidate pitch crosses above a higher voice

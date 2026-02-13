@@ -19,11 +19,11 @@ class TestMidiLoader(unittest.TestCase):
             MagicMock(type="program_change", channel=0, program=19, time=0),
             MagicMock(type="program_change", channel=3, program=19, time=0),
             # Soprano: C5 at tick 0, dur 480
-            MagicMock(type="note_on", channel=0, pitch=72, velocity=80, time=0),
-            MagicMock(type="note_off", channel=0, pitch=72, velocity=0, time=480),
+            MagicMock(type="note_on", channel=0, note=72, velocity=80, time=0),
+            MagicMock(type="note_off", channel=0, note=72, velocity=0, time=480),
             # Pedal: C3 at tick 0, dur 960
-            MagicMock(type="note_on", channel=3, pitch=48, velocity=80, time=0),
-            MagicMock(type="note_off", channel=3, pitch=48, velocity=0, time=480),
+            MagicMock(type="note_on", channel=3, note=48, velocity=80, time=0),
+            MagicMock(type="note_off", channel=3, note=48, velocity=0, time=480),
         ]
         # Only one track in the mock
         mock_track = MagicMock()

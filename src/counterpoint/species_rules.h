@@ -4,6 +4,7 @@
 #define BACH_COUNTERPOINT_SPECIES_RULES_H
 
 #include <cstdint>
+#include <optional>
 
 namespace bach {
 
@@ -106,7 +107,8 @@ class SpeciesRules {
 /// @param next_is_chord_tone True if next_pitch belongs to the current chord.
 /// @return The classified non-harmonic tone type.
 NonHarmonicToneType classifyNonHarmonicTone(uint8_t prev_pitch, uint8_t current_pitch,
-                                             uint8_t next_pitch, bool is_chord_tone,
+                                             std::optional<uint8_t> next_pitch,
+                                             bool is_chord_tone,
                                              bool prev_is_chord_tone,
                                              bool next_is_chord_tone);
 

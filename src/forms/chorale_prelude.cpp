@@ -15,6 +15,7 @@
 #include "counterpoint/bach_rule_evaluator.h"
 #include "counterpoint/collision_resolver.h"
 #include "counterpoint/counterpoint_state.h"
+#include "counterpoint/leap_resolution.h"
 #include "harmony/chord_types.h"
 #include "harmony/harmonic_event.h"
 #include "harmony/harmonic_timeline.h"
@@ -918,6 +919,25 @@ ChoralePreludeResult generateChoralePrelude(const ChoralePreludeConfig& config) 
     PostValidateStats stats;
     auto validated = postValidateNotes(
         std::move(all_notes), kChoraleVoices, config.key, voice_ranges, &stats);
+
+    // Leap resolution: fix unresolved melodic leaps.
+    {
+      LeapResolutionParams lr_params;
+      lr_params.num_voices = kChoraleVoices;
+      lr_params.key_at_tick = [&](Tick) { return config.key.tonic; };
+      lr_params.scale_at_tick = [&](Tick t) {
+        const auto& ev = timeline.getAt(t);
+        return ev.is_minor ? ScaleType::HarmonicMinor : ScaleType::Major;
+      };
+      lr_params.voice_range = [&](uint8_t v) -> std::pair<uint8_t, uint8_t> {
+        if (v < voice_ranges.size()) return voice_ranges[v];
+        return {0, 127};
+      };
+      lr_params.is_chord_tone = [&](Tick t, uint8_t p) {
+        return isChordTone(p, timeline.getAt(t));
+      };
+      resolveLeaps(validated, lr_params);
+    }
 
     for (auto& track : tracks) {
       track.notes.clear();

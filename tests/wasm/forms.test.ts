@@ -56,6 +56,54 @@ describe('BachGenerator - Solo String Forms', () => {
   });
 });
 
+describe('BachGenerator - Goldberg Variations', () => {
+  let bach: BachGenerator | undefined;
+
+  afterEach(() => {
+    bach?.destroy();
+  });
+
+  it('should generate goldberg_variations', () => {
+    bach = new BachGenerator();
+    bach.generate({ form: 'goldberg_variations', seed: 42 });
+    const midi = bach.getMidi();
+    expect(midi.length).toBeGreaterThan(0);
+    expect([...midi.slice(0, 4)]).toEqual(MIDI_HEADER);
+  });
+
+  it('should generate goldberg_variations with different scales', () => {
+    for (const scale of ['short', 'medium', 'long']) {
+      bach = new BachGenerator();
+      bach.generate({ form: 'goldberg_variations', scale, seed: 42 });
+      const midi = bach.getMidi();
+      expect(midi.length).toBeGreaterThan(0);
+      bach.destroy();
+    }
+    bach = undefined;
+  });
+
+  it('should generate goldberg_variations with G major key', () => {
+    bach = new BachGenerator();
+    bach.generate({ form: 'goldberg_variations', key: 7, seed: 42 });
+    const events = bach.getEvents();
+    expect(events.key).toContain('G');
+  });
+
+  it('should produce deterministic output', () => {
+    bach = new BachGenerator();
+    bach.generate({ form: 'goldberg_variations', seed: 42 });
+    const midi1 = bach.getMidi();
+    bach.destroy();
+
+    bach = new BachGenerator();
+    bach.generate({ form: 'goldberg_variations', seed: 42 });
+    const midi2 = bach.getMidi();
+
+    expect(midi1.length).toBe(midi2.length);
+    expect([...midi1]).toEqual([...midi2]);
+  });
+});
+
 describe('BachGenerator - Key and Character', () => {
   let bach: BachGenerator | undefined;
 

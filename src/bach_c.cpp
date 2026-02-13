@@ -34,7 +34,7 @@ bach::GeneratorConfig configFromJson(const std::map<std::string, bach::JsonValue
     config.form = bach::formTypeFromString(it->second.string_val);
   } else if (it != kv.end() && it->second.type == bach::JsonValue::Number) {
     auto form_id = static_cast<uint8_t>(it->second.number_val);
-    if (form_id <= static_cast<uint8_t>(bach::FormType::Chaconne)) {
+    if (form_id <= static_cast<uint8_t>(bach::FormType::GoldbergVariations)) {
       config.form = static_cast<bach::FormType>(form_id);
     }
   }
@@ -120,7 +120,7 @@ bach::GeneratorConfig configFromJson(const std::map<std::string, bach::JsonValue
 
 /// @brief Validate a GeneratorConfig and return an error code.
 BachError validateConfig(const bach::GeneratorConfig& config) {
-  if (static_cast<uint8_t>(config.form) > static_cast<uint8_t>(bach::FormType::Chaconne)) {
+  if (static_cast<uint8_t>(config.form) > static_cast<uint8_t>(bach::FormType::GoldbergVariations)) {
     return BACH_ERROR_INVALID_FORM;
   }
   if (static_cast<uint8_t>(config.key.tonic) > 11) {
@@ -153,9 +153,10 @@ const char* kFormDisplayNames[] = {
     "Fantasia and Fugue",
     "Cello Prelude",
     "Chaconne",
+    "Goldberg Variations",
 };
 
-constexpr uint8_t kFormCount = 9;
+constexpr uint8_t kFormCount = 10;
 constexpr uint8_t kInstrumentCount = 6;
 constexpr uint8_t kCharacterCount = 4;
 constexpr uint8_t kKeyCount = 12;

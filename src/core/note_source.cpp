@@ -25,7 +25,20 @@ const char* bachNoteSourceToString(BachNoteSource source) {
     case BachNoteSource::ChromaticPassing: return "chromatic_passing";
     case BachNoteSource::FalseEntry:      return "false_entry";
     case BachNoteSource::Coda:            return "coda";
-    case BachNoteSource::SequenceNote:   return "sequence_note";
+    case BachNoteSource::SequenceNote:    return "sequence_note";
+    case BachNoteSource::CanonDux:        return "canon_dux";
+    case BachNoteSource::CanonComes:      return "canon_comes";
+    case BachNoteSource::CanonFreeBass:   return "canon_free_bass";
+    case BachNoteSource::GoldbergAria:    return "goldberg_aria";
+    case BachNoteSource::GoldbergBass:    return "goldberg_bass";
+    case BachNoteSource::GoldbergFigura:  return "goldberg_figura";
+    case BachNoteSource::GoldbergSoggetto: return "goldberg_soggetto";
+    case BachNoteSource::GoldbergDance:   return "goldberg_dance";
+    case BachNoteSource::GoldbergFughetta: return "goldberg_fughetta";
+    case BachNoteSource::GoldbergInvention: return "goldberg_invention";
+    case BachNoteSource::QuodlibetMelody: return "quodlibet_melody";
+    case BachNoteSource::GoldbergOverture: return "goldberg_overture";
+    case BachNoteSource::GoldbergSuspension: return "goldberg_suspension";
   }
   return "unknown";
 }
@@ -53,6 +66,8 @@ ProtectionLevel getProtectionLevel(BachNoteSource source) {
     case BachNoteSource::FugueSubject:
     case BachNoteSource::CantusFixed:
     case BachNoteSource::GroundBass:
+    case BachNoteSource::GoldbergBass:
+    case BachNoteSource::QuodlibetMelody:
       return ProtectionLevel::Immutable;
 
     case BachNoteSource::FugueAnswer:
@@ -61,6 +76,11 @@ ProtectionLevel getProtectionLevel(BachNoteSource source) {
     case BachNoteSource::FalseEntry:
     case BachNoteSource::Coda:
     case BachNoteSource::SequenceNote:
+    case BachNoteSource::CanonDux:
+    case BachNoteSource::CanonComes:
+    case BachNoteSource::GoldbergAria:
+    case BachNoteSource::GoldbergSoggetto:
+    case BachNoteSource::GoldbergFughetta:
       return ProtectionLevel::Structural;
 
     case BachNoteSource::EpisodeMaterial:
@@ -72,6 +92,12 @@ ProtectionLevel getProtectionLevel(BachNoteSource source) {
     case BachNoteSource::PostProcess:
     case BachNoteSource::ChromaticPassing:
     case BachNoteSource::Unknown:
+    case BachNoteSource::CanonFreeBass:
+    case BachNoteSource::GoldbergFigura:
+    case BachNoteSource::GoldbergDance:
+    case BachNoteSource::GoldbergInvention:
+    case BachNoteSource::GoldbergOverture:
+    case BachNoteSource::GoldbergSuspension:
       return ProtectionLevel::Flexible;
   }
   return ProtectionLevel::Flexible;

@@ -34,6 +34,64 @@ constexpr Tick kSixteenthNote = kTicksPerBeat / 4;                 // 120
 constexpr Tick kThirtySecondNote = kTicksPerBeat / 8;              // 60
 
 }  // namespace duration
+
+// ---------------------------------------------------------------------------
+// Time Signature (Goldberg Variations support)
+// ---------------------------------------------------------------------------
+
+/// @brief Time signature representation for variable meter support.
+/// Existing code uses kTicksPerBar=1920 (4/4). TimeSignature::ticksPerBar()
+/// provides form-specific calculation. Existing constants are unaffected.
+struct TimeSignature {
+  uint8_t numerator = 4;
+  uint8_t denominator = 4;
+
+  /// @brief Calculate ticks per bar for this time signature.
+  constexpr Tick ticksPerBar() const {
+    return static_cast<Tick>(numerator) * (kTicksPerBeat * 4 / denominator);
+  }
+
+  /// @brief Get notated beats per bar (numerator).
+  constexpr uint8_t beatsPerBar() const { return numerator; }
+
+  /// @brief Check if this is a compound time signature (6/8, 9/8, 12/8).
+  constexpr bool isCompound() const {
+    return numerator % 3 == 0 && numerator > 3;
+  }
+
+  /// @brief Get musical pulse count (6/8->2, 9/8->3, 3/4->3).
+  constexpr uint8_t pulsesPerBar() const {
+    return isCompound() ? numerator / 3 : numerator;
+  }
+};
+
+/// @brief Time signature change event at a specific tick position.
+struct TimeSignatureEvent {
+  Tick tick = 0;
+  TimeSignature time_sig = {4, 4};
+};
+
+/// @brief Metrical strength level for beat hierarchy.
+/// Used by canon and variation generators for note placement scoring.
+enum class MetricalStrength : uint8_t {
+  Strong,  ///< Beat 1: unprepared dissonance penalized.
+  Medium,  ///< Beat 2: Sarabande expressive strong beat.
+  Weak     ///< Beat 3: relatively free.
+};
+
+/// @brief Meter profile for beat emphasis patterns.
+/// Sarabande's beat 2 emphasis requires distinct handling.
+enum class MeterProfile : uint8_t {
+  StandardTriple,   ///< Normal 3/4: Strong-Medium-Weak (most variations).
+  SarabandeTriple   ///< Sarabande 3/4: Strong-Strong-Weak (Aria, Var 13 etc).
+};
+
+/// @brief Determine metrical strength for a beat position.
+/// @param beat_in_bar Zero-based beat index within the bar.
+/// @param profile Meter profile (Standard or Sarabande).
+/// @return MetricalStrength for the given beat position.
+MetricalStrength getMetricalStrength(int beat_in_bar, MeterProfile profile);
+
 constexpr uint8_t kMidiC4 = 60;
 
 // ---------------------------------------------------------------------------
@@ -227,7 +285,8 @@ enum class FormType : uint8_t {
   Passacaglia,
   FantasiaAndFugue,
   CelloPrelude,
-  Chaconne
+  Chaconne,
+  GoldbergVariations
 };
 
 /// @brief Convert FormType to human-readable string.

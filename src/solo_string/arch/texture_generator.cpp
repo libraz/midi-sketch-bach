@@ -10,6 +10,7 @@
 #include "core/pitch_utils.h"
 #include "core/rng_util.h"
 #include "core/scale.h"
+#include "counterpoint/leap_resolution.h"
 #include "harmony/chord_tone_utils.h"
 #include "harmony/chord_types.h"
 #include "harmony/harmonic_event.h"
@@ -307,42 +308,6 @@ void clampExcessiveLeaps(std::vector<NoteEvent>& notes,
   }
 }
 
-/// @brief Enforce leap resolution on a note sequence.
-///
-/// For leaps >= 7 semitones (P5), attempts to resolve the following note by
-/// contrary stepwise motion. Modifies notes in place.
-void enforceLeapResolution(std::vector<NoteEvent>& notes, Key key, bool is_minor) {
-  if (notes.size() < 3) return;
-
-  ScaleType scale = is_minor ? ScaleType::NaturalMinor : ScaleType::Major;
-
-  for (size_t i = 1; i + 1 < notes.size(); ++i) {
-    int leap = static_cast<int>(notes[i].pitch) - static_cast<int>(notes[i - 1].pitch);
-    int abs_leap = std::abs(leap);
-
-    if (abs_leap < 7) continue;  // Only resolve P5+ leaps.
-
-    // Check if next note already resolves by contrary step.
-    int next_motion = static_cast<int>(notes[i + 1].pitch) - static_cast<int>(notes[i].pitch);
-    bool is_contrary = (leap > 0 && next_motion < 0) || (leap < 0 && next_motion > 0);
-    bool is_step = std::abs(next_motion) <= 2;
-
-    if (is_contrary && is_step) continue;  // Already resolved.
-
-    // Try to resolve: move the next note to a contrary-step scale tone.
-    int resolve_dir = (leap > 0) ? -1 : 1;
-    for (int offset = 1; offset <= 2; ++offset) {
-      int cand = static_cast<int>(notes[i].pitch) + resolve_dir * offset;
-      if (cand < 0 || cand > 127) continue;
-      auto cand_u8 = static_cast<uint8_t>(cand);
-      if (scale_util::isScaleTone(cand_u8, key, scale)) {
-        notes[i + 1].pitch = cand_u8;
-        notes[i + 1].modified_by |= static_cast<uint8_t>(NoteModifiedBy::LeapResolution);
-        break;
-      }
-    }
-  }
-}
 
 }  // namespace
 
@@ -377,7 +342,19 @@ std::vector<NoteEvent> generateTexture(const TextureContext& ctx,
   // Clamp excessive leaps (>12 semitones) then apply leap resolution.
   if (ctx.texture != TextureType::FullChords) {
     clampExcessiveLeaps(notes, ctx.register_low, ctx.register_high);
-    enforceLeapResolution(notes, ctx.key.tonic, ctx.key.is_minor);
+    {
+      LeapResolutionParams lr_params;
+      lr_params.num_voices = 1;  // Solo string.
+      lr_params.leap_threshold = 7;  // P5+ only (existing behavior).
+      lr_params.key_at_tick = [&](Tick) { return ctx.key.tonic; };
+      lr_params.scale_at_tick = [&](Tick) {
+        return ctx.key.is_minor ? ScaleType::NaturalMinor : ScaleType::Major;
+      };
+      lr_params.voice_range = [&](uint8_t) -> std::pair<uint8_t, uint8_t> {
+        return {ctx.register_low, ctx.register_high};
+      };
+      resolveLeaps(notes, lr_params);
+    }
   }
 
   return notes;
