@@ -497,8 +497,19 @@ std::vector<NoteEvent> generateRecitative(const HarmonicTimeline& timeline,
     Tick bar_start = start_tick + bar * kTicksPerBar;
     Tick bar_end = bar_start + kTicksPerBar;
 
-    // Grand pause: skip this bar (silence on all voices)
-    if (bar == gp_bar1 || bar == gp_bar2) continue;
+    // Grand pause: silence first half, then light chord tone (3rd or 5th).
+    if (bar == gp_bar1 || bar == gp_bar2) {
+      Tick half_start = bar_start + kTicksPerBar / 2;
+      const HarmonicEvent& event = timeline.getAt(half_start);
+      auto chord_tones = getChordTones(event.chord, 4);
+      if (chord_tones.size() >= 2) {
+        // Prefer 5th (index 2) or 3rd (index 1) over root for lighter touch.
+        size_t ct_idx = (chord_tones.size() >= 3) ? 2 : 1;
+        uint8_t ct = clampPitch(static_cast<int>(chord_tones[ct_idx]), low0, high0);
+        notes.push_back(makeNote(half_start, bar_end - half_start, ct, 0));
+      }
+      continue;
+    }
 
     // Determine voice assignment (swap every 2 bars for manual contrast)
     uint8_t melody_voice = ((bar / 2) % 2 == 0) ? 0 : 1;
@@ -872,11 +883,13 @@ std::vector<NoteEvent> generateRhythmicPedal(const KeySignature& key_sig,
   uint8_t tonic = clampPitch(36 + tpc, low, high);
   uint8_t dominant = clampPitch(36 + static_cast<int>(getDominant(key_sig).tonic),
                                 low, high);
+  uint8_t subdominant = clampPitch(
+      36 + static_cast<int>(getSubdominant(key_sig).tonic), low, high);
 
   Tick tick = start_tick;
   while (tick < end_tick) {
     if (tick >= phase3_start) {
-      // Phase 3: 8th note tonic-dominant alternation
+      // Phase 3: 8th note tonic-dominant alternation.
       Tick dur = std::min(kEighthNote, end_tick - tick);
       if (dur == 0) break;
       bool use_tonic = ((tick / kEighthNote) % 2 == 0);
@@ -884,16 +897,27 @@ std::vector<NoteEvent> generateRhythmicPedal(const KeySignature& key_sig,
                                2, BachNoteSource::PedalPoint));
       tick += dur;
     } else {
-      // Phase 2: quarter-quarter-half pattern (T-D-T)
+      // Cadence: hold dominant in final 2 beats before phase 3.
+      Tick cadence_start = phase3_start - 2 * kTicksPerBeat;
+      if (tick >= cadence_start) {
+        Tick bound = std::min(end_tick, phase3_start);
+        Tick dur = std::min(kQuarterNote, bound - tick);
+        if (dur == 0) break;
+        notes.push_back(makeNote(tick, dur, dominant, 2, BachNoteSource::PedalPoint));
+        tick += dur;
+        continue;
+      }
+      // Phase 2: T-D-SD-T quarter note pattern.
       struct Step { uint8_t pitch; Tick dur; };
       Step pattern[] = {
         {tonic, kQuarterNote},
         {dominant, kQuarterNote},
-        {tonic, kHalfNote}
+        {subdominant, kQuarterNote},
+        {tonic, kQuarterNote}
       };
       for (auto& s : pattern) {
-        if (tick >= end_tick || tick >= phase3_start) break;
-        Tick bound = std::min(end_tick, phase3_start);
+        if (tick >= end_tick || tick >= cadence_start) break;
+        Tick bound = std::min({end_tick, phase3_start, cadence_start});
         Tick dur = std::min(s.dur, bound - tick);
         if (dur == 0) break;
         notes.push_back(makeNote(tick, dur, s.pitch, 2, BachNoteSource::PedalPoint));
@@ -905,20 +929,29 @@ std::vector<NoteEvent> generateRhythmicPedal(const KeySignature& key_sig,
   return notes;
 }
 
-/// @brief Generate sustained tonic pedal during opening waves.
+/// @brief Generate I-V alternation pedal with cadence dominant hold during opening waves.
 std::vector<NoteEvent> generateOpeningPedal(const KeySignature& key_sig,
                                             Tick start_tick, Tick end_tick) {
   std::vector<NoteEvent> notes;
   uint8_t tpc = static_cast<uint8_t>(key_sig.tonic);
   uint8_t tonic = clampPitch(36 + tpc,
                              organ_range::kPedalLow, organ_range::kPedalHigh);
+  uint8_t dominant = clampPitch(
+      36 + static_cast<int>(getDominant(key_sig).tonic),
+      organ_range::kPedalLow, organ_range::kPedalHigh);
 
   Tick tick = start_tick;
+  bool use_tonic = true;
   while (tick < end_tick) {
     Tick dur = std::min(kWholeNote, end_tick - tick);
     if (dur == 0) break;
-    notes.push_back(makeNote(tick, dur, tonic, 2, BachNoteSource::PedalPoint));
+    // Cadence: hold dominant in the final 2 beats.
+    bool near_cadence = (tick + dur >= end_tick - 2 * kTicksPerBeat);
+    uint8_t pitch = near_cadence ? dominant
+                                : (use_tonic ? tonic : dominant);
+    notes.push_back(makeNote(tick, dur, pitch, 2, BachNoteSource::PedalPoint));
     tick += dur;
+    use_tonic = !use_tonic;
   }
 
   return notes;

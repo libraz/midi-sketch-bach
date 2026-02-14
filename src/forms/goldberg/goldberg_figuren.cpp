@@ -47,7 +47,9 @@ const int* scaleIntervalsForKey(const KeySignature& key) {
 /// @param register_offset Octave offset from pivot.
 /// @return Vector of 3 chord-tone MIDI pitches.
 std::vector<uint8_t> buildChordTones(uint8_t pivot_pitch, const KeySignature& key,
-                                      int register_offset) {
+                                      int register_offset,
+                                      uint8_t range_low = kHarpsichordLow,
+                                      uint8_t range_high = kHarpsichordHigh) {
   int root_pc = static_cast<int>(key.tonic);
   const int* scale = scaleIntervalsForKey(key);
   int pivot_pc = getPitchClass(pivot_pitch);
@@ -82,7 +84,7 @@ std::vector<uint8_t> buildChordTones(uint8_t pivot_pitch, const KeySignature& ke
     if (target < base - 6) target += 12;
     if (target > base + 18) target -= 12;
     target += octave_add * 12;
-    tones.push_back(clampPitch(target, kHarpsichordLow, kHarpsichordHigh));
+    tones.push_back(clampPitch(target, range_low, range_high));
   }
 
   return tones;
@@ -93,7 +95,9 @@ std::vector<uint8_t> buildChordTones(uint8_t pivot_pitch, const KeySignature& ke
 /// @param direction +1 for upper neighbor, -1 for lower neighbor.
 /// @param key Key signature.
 /// @return Neighbor MIDI pitch on the diatonic scale.
-uint8_t getScaleNeighbor(uint8_t pitch, int direction, const KeySignature& key) {
+uint8_t getScaleNeighbor(uint8_t pitch, int direction, const KeySignature& key,
+                         uint8_t range_low = kHarpsichordLow,
+                         uint8_t range_high = kHarpsichordHigh) {
   int root_pc = static_cast<int>(key.tonic);
   const int* scale = scaleIntervalsForKey(key);
   int pitch_val = static_cast<int>(pitch);
@@ -103,7 +107,7 @@ uint8_t getScaleNeighbor(uint8_t pitch, int direction, const KeySignature& key) 
     for (int deg = 0; deg < 7; ++deg) {
       int candidate = (pitch_val / 12) * 12 + root_pc + scale[deg] + oct * 12;
       if (direction > 0 && candidate > pitch_val) {
-        return clampPitch(candidate, kHarpsichordLow, kHarpsichordHigh);
+        return clampPitch(candidate, range_low, range_high);
       }
       if (direction < 0 && candidate < pitch_val) {
         // Keep scanning to find the closest one below.
@@ -118,15 +122,15 @@ uint8_t getScaleNeighbor(uint8_t pitch, int direction, const KeySignature& key) 
       for (int deg = 6; deg >= 0; --deg) {
         int candidate = (pitch_val / 12) * 12 + root_pc + scale[deg] + oct * 12;
         if (candidate < pitch_val) {
-          return clampPitch(candidate, kHarpsichordLow, kHarpsichordHigh);
+          return clampPitch(candidate, range_low, range_high);
         }
       }
     }
-    return clampPitch(best, kHarpsichordLow, kHarpsichordHigh);
+    return clampPitch(best, range_low, range_high);
   }
 
   // Fallback: step up.
-  return clampPitch(pitch_val + 2, kHarpsichordLow, kHarpsichordHigh);
+  return clampPitch(pitch_val + 2, range_low, range_high);
 }
 
 /// @brief Get a scale pitch at a given number of scale steps from the reference.
@@ -134,12 +138,14 @@ uint8_t getScaleNeighbor(uint8_t pitch, int direction, const KeySignature& key) 
 /// @param steps Number of scale steps (positive = up, negative = down).
 /// @param key Key signature.
 /// @return MIDI pitch after the given scale steps.
-uint8_t scaleStep(uint8_t pitch, int steps, const KeySignature& key) {
+uint8_t scaleStep(uint8_t pitch, int steps, const KeySignature& key,
+                  uint8_t range_low = kHarpsichordLow,
+                  uint8_t range_high = kHarpsichordHigh) {
   uint8_t result = pitch;
   int dir = steps > 0 ? 1 : -1;
   int remaining = steps > 0 ? steps : -steps;
   for (int idx = 0; idx < remaining; ++idx) {
-    result = getScaleNeighbor(result, dir, key);
+    result = getScaleNeighbor(result, dir, key, range_low, range_high);
   }
   return result;
 }
@@ -151,7 +157,9 @@ uint8_t scaleStep(uint8_t pitch, int steps, const KeySignature& key) {
 /// @param key Key signature.
 /// @return Vector of scale pitches from 'from' toward 'to_pitch'.
 std::vector<uint8_t> fillScaleRun(uint8_t from, uint8_t to_pitch, int count,
-                                   const KeySignature& key) {
+                                   const KeySignature& key,
+                                   uint8_t range_low = kHarpsichordLow,
+                                   uint8_t range_high = kHarpsichordHigh) {
   std::vector<uint8_t> result;
   result.reserve(static_cast<size_t>(count));
 
@@ -159,7 +167,7 @@ std::vector<uint8_t> fillScaleRun(uint8_t from, uint8_t to_pitch, int count,
   uint8_t current = from;
   for (int idx = 0; idx < count; ++idx) {
     result.push_back(current);
-    current = getScaleNeighbor(current, direction, key);
+    current = getScaleNeighbor(current, direction, key, range_low, range_high);
   }
   return result;
 }
@@ -194,12 +202,17 @@ std::vector<NoteEvent> FigurenGenerator::generate(
     const KeySignature& key,
     const TimeSignature& time_sig,
     uint8_t voice_index,
-    uint32_t seed) const {
+    uint32_t seed,
+    const IKeyboardInstrument* instrument) const {
   std::vector<NoteEvent> all_notes;
   all_notes.reserve(static_cast<size_t>(kGridBars) * profile.notes_per_beat *
                     time_sig.beatsPerBar());
 
   std::mt19937 rng(seed);
+
+  // Compute range from instrument or use harpsichord defaults.
+  const uint8_t range_low = instrument ? instrument->getLowestPitch() : kHarpsichordLow;
+  const uint8_t range_high = instrument ? instrument->getHighestPitch() : kHarpsichordHigh;
 
   // Determine starting pitch based on voice index and key.
   int reg_offset = (voice_index < kNumRegisterOffsets)
@@ -207,7 +220,7 @@ std::vector<NoteEvent> FigurenGenerator::generate(
                        : 0;
   uint8_t register_center = clampPitch(
       static_cast<int>(tonicPitch(key.tonic, 4)) + reg_offset,
-      kHarpsichordLow, kHarpsichordHigh);
+      range_low, range_high);
   uint8_t prev_pitch = register_center;
 
   Tick ticks_per_bar = time_sig.ticksPerBar();
@@ -218,7 +231,7 @@ std::vector<NoteEvent> FigurenGenerator::generate(
 
     auto bar_notes = generateBarFigura(
         profile, bar_info, key, time_sig, prev_pitch, register_center,
-        shaping, rng);
+        shaping, range_low, range_high, rng);
 
     // Offset notes to correct bar position.
     Tick bar_start = static_cast<Tick>(bar_idx) * ticks_per_bar;
@@ -278,6 +291,8 @@ std::vector<NoteEvent> FigurenGenerator::generateBarFigura(
     uint8_t prev_pitch,
     uint8_t register_center,
     const PhraseShapingParams& shaping,
+    uint8_t range_low,
+    uint8_t range_high,
     std::mt19937& rng) const {
   // Get harmonic pivot from the structural grid.
   uint8_t pivot = bar_info.bass_motion.primary_pitch;
@@ -308,7 +323,8 @@ std::vector<NoteEvent> FigurenGenerator::generateBarFigura(
 
   // Generate the pitch pattern.
   auto pitches = generateFiguraPattern(
-      active_type, pivot, effective_npb, effective_dir, key, voice_reg, rng);
+      active_type, pivot, effective_npb, effective_dir, key, voice_reg,
+      range_low, range_high, rng);
 
   if (pitches.empty()) return {};
 
@@ -326,7 +342,7 @@ std::vector<NoteEvent> FigurenGenerator::generateBarFigura(
         for (auto& pitch : pitches) {
           if (pitch > 0) {  // Only adjust sounding pitches, not rest markers.
             pitch = clampPitch(static_cast<int>(pitch) - shift,
-                               kHarpsichordLow, kHarpsichordHigh);
+                               range_low, range_high);
           }
         }
       }
@@ -343,7 +359,7 @@ std::vector<NoteEvent> FigurenGenerator::generateBarFigura(
   chord_ratio = std::max(0.0f, std::min(1.0f, chord_ratio));
 
   // Build chord tones for validation.
-  auto chord_tones = buildChordTones(pivot, key, 0);
+  auto chord_tones = buildChordTones(pivot, key, 0, range_low, range_high);
 
   std::vector<NoteEvent> notes;
   notes.reserve(pitches.size());
@@ -366,7 +382,7 @@ std::vector<NoteEvent> FigurenGenerator::generateBarFigura(
     }
 
     // Clamp to harpsichord range.
-    pitch = clampPitch(static_cast<int>(pitch), kHarpsichordLow, kHarpsichordHigh);
+    pitch = clampPitch(static_cast<int>(pitch), range_low, range_high);
 
     // Use createBachNote for proper provenance tracking.
     BachNoteOptions opts{};
@@ -397,6 +413,8 @@ std::vector<uint8_t> FigurenGenerator::generateFiguraPattern(
     DirectionBias direction,
     const KeySignature& key,
     int register_offset,
+    uint8_t range_low,
+    uint8_t range_high,
     std::mt19937& rng) const {
   // Total notes for one bar (3 beats typical for 3/4).
   // The caller determines beats from time_sig, but we generate based on notes_per_beat.
@@ -408,7 +426,8 @@ std::vector<uint8_t> FigurenGenerator::generateFiguraPattern(
   std::vector<uint8_t> pattern;
   pattern.reserve(static_cast<size_t>(total_notes));
 
-  auto chord_tones = buildChordTones(pivot_pitch, key, register_offset);
+  auto chord_tones = buildChordTones(pivot_pitch, key, register_offset,
+                                      range_low, range_high);
 
   switch (type) {
     case FiguraType::Circulatio: {
@@ -434,7 +453,7 @@ std::vector<uint8_t> FigurenGenerator::generateFiguraPattern(
         target = getScaleNeighbor(pivot_pitch, -1, key);
         // Fill downward.
         target = clampPitch(static_cast<int>(pivot_pitch) - 12,
-                            kHarpsichordLow, kHarpsichordHigh);
+                            range_low, range_high);
       }
       pattern = fillScaleRun(
           chord_tones.empty() ? pivot_pitch : chord_tones[0],
@@ -449,7 +468,7 @@ std::vector<uint8_t> FigurenGenerator::generateFiguraPattern(
         for (int idx = 0; idx < total_notes; ++idx) {
           pattern.push_back(idx % 2 == 0 ? pivot_pitch
                                          : clampPitch(static_cast<int>(pivot_pitch) + 12,
-                                                      kHarpsichordLow, kHarpsichordHigh));
+                                                      range_low, range_high));
         }
       } else {
         // Alternate between lowest and highest chord tones.
@@ -476,7 +495,7 @@ std::vector<uint8_t> FigurenGenerator::generateFiguraPattern(
       // Add octave of root.
       if (!tones.empty()) {
         uint8_t octave_root = clampPitch(static_cast<int>(tones[0]) + 12,
-                                          kHarpsichordLow, kHarpsichordHigh);
+                                          range_low, range_high);
         tones.push_back(octave_root);
       }
       if (direction == DirectionBias::Descending) {
@@ -555,7 +574,7 @@ std::vector<uint8_t> FigurenGenerator::generateFiguraPattern(
       } else {
         uint8_t low_tone = chord_tones[0];
         uint8_t high_tone = clampPitch(static_cast<int>(chord_tones.back()) + 12,
-                                        kHarpsichordLow, kHarpsichordHigh);
+                                        range_low, range_high);
         for (int idx = 0; idx < total_notes; ++idx) {
           pattern.push_back(idx % 2 == 0 ? low_tone : high_tone);
         }
@@ -587,8 +606,8 @@ std::vector<uint8_t> FigurenGenerator::generateFiguraPattern(
         pattern.push_back(current);
         // Symmetric: reverse direction when reaching register bounds.
         if (direction == DirectionBias::Symmetric || direction == DirectionBias::Alternating) {
-          if (current >= kHarpsichordHigh - 5) dir = -1;
-          else if (current <= kHarpsichordLow + 5) dir = 1;
+          if (current >= range_high - 5) dir = -1;
+          else if (current <= range_low + 5) dir = 1;
           else if (idx % 6 == 5) dir = -dir;  // Alternate every 6 notes.
         }
         if (leap_dist(rng) == 0) {

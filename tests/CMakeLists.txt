@@ -33,6 +33,7 @@ set(BACH_TEST_SOURCES
   instrument/bowed_note_factory_test.cpp
   instrument/bowed/bow_direction_test.cpp
   instrument/bowed/harmonics_test.cpp
+  instrument/impossibility_guard_test.cpp
 
   # counterpoint/
   counterpoint/counterpoint_state_test.cpp

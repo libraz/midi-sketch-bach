@@ -137,6 +137,26 @@ struct GoldbergVariationDescriptor {
   GoldbergTempoCharacter tempo_character = GoldbergTempoCharacter::Dance;  ///< Warp curvature.
 };
 
+/// Manual assignment policy for Goldberg voicing checks.
+enum class ManualPolicy : uint8_t {
+  Standard,       ///< voice 0,1=Upper, 2,3,4=Lower (most variations).
+  HandCrossing,   ///< Hand crossing: skip one-hand playability checks.
+  SingleManual,   ///< All voices on single manual: full isVoicingPlayable().
+};
+
+/// Get the manual policy for a given variation type.
+inline ManualPolicy getManualPolicy(GoldbergVariationType type) {
+  switch (type) {
+    case GoldbergVariationType::HandCrossing:
+      return ManualPolicy::HandCrossing;
+    case GoldbergVariationType::Toccata:
+    case GoldbergVariationType::BravuraChordal:
+      return ManualPolicy::SingleManual;
+    default:
+      return ManualPolicy::Standard;
+  }
+}
+
 }  // namespace bach
 
 #endif  // BACH_FORMS_GOLDBERG_GOLDBERG_TYPES_H

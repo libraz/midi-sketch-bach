@@ -287,14 +287,14 @@ std::vector<NoteEvent> generateFiguration(Tick cantus_tick, Tick cantus_dur,
   if (hint_center == 0) {
     center = raw_center;
   } else {
-    // Blend toward raw_center for continuity between cantus notes.
+    // Blend toward raw_center (70%) for phrase-following register movement.
     center = static_cast<uint8_t>(
-        (static_cast<int>(hint_center) + static_cast<int>(raw_center)) / 2);
+        (static_cast<int>(hint_center) * 3 + static_cast<int>(raw_center) * 7) / 10);
     center = clampPitch(static_cast<int>(center), kFigLow, kFigHigh);
   }
 
-  uint8_t eff_low = clampPitch(static_cast<int>(center) - 9, kFigLow, kFigHigh);
-  uint8_t eff_high = clampPitch(static_cast<int>(center) + 9, kFigLow, kFigHigh);
+  uint8_t eff_low = clampPitch(static_cast<int>(center) - 12, kFigLow, kFigHigh);
+  uint8_t eff_high = clampPitch(static_cast<int>(center) + 12, kFigLow, kFigHigh);
 
   ScaleType scale_type = key_sig.is_minor ? ScaleType::HarmonicMinor
                                           : ScaleType::Major;
@@ -328,6 +328,7 @@ std::vector<NoteEvent> generateFiguration(Tick cantus_tick, Tick cantus_dur,
   }
 
   bool ascending = rng::rollProbability(rng, 0.5f);
+  bool leap_recovery = false;
   MelodicState mel_state;
   Tick prev_harm_start = timeline.getAt(cantus_tick).tick;
   int neighbor_return = -1;  // Saved tone_idx for neighbor return, -1 = none.
@@ -377,6 +378,23 @@ std::vector<NoteEvent> generateFiguration(Tick cantus_tick, Tick cantus_dur,
             found = true;
           }
         }
+        // Cantus protection: on strong beats, prefer chord tones away from cantus.
+        if (found) {
+          int cantus_dist = std::abs(static_cast<int>(scale_tones[tone_idx]) -
+                                     static_cast<int>(cantus_pitch));
+          if (cantus_dist <= 5) {
+            size_t alt_idx = ascending
+                ? (tone_idx >= 2 ? tone_idx - 2 : 0)
+                : std::min(tone_idx + 2, scale_tones.size() - 1);
+            if (alt_idx < scale_tones.size() &&
+                isChordTone(scale_tones[alt_idx], event) &&
+                std::abs(static_cast<int>(scale_tones[alt_idx]) -
+                         static_cast<int>(cantus_pitch)) > 5) {
+              tone_idx = alt_idx;
+            }
+          }
+        }
+
         // Avoid repeat: if snap recreates previous pitch, revert to
         // allow passing tone rather than stagnation.
         if (found && !notes.empty() &&
@@ -386,13 +404,16 @@ std::vector<NoteEvent> generateFiguration(Tick cantus_tick, Tick cantus_dur,
       }
     }
 
-    // Avoid consecutive pitch repeats — nudge in current direction.
-    // Baroque figuration uses held notes for repeats, not re-attacks.
+    // Avoid consecutive pitch repeats — skip by 2nd for variety.
     if (!notes.empty() && scale_tones[tone_idx] == notes.back().pitch) {
-      if (ascending && tone_idx + 1 < scale_tones.size()) {
-        tone_idx += 1;
-      } else if (!ascending && tone_idx >= 1) {
-        tone_idx -= 1;
+      if (ascending && tone_idx + 2 < scale_tones.size()) {
+        tone_idx += 2;
+      } else if (!ascending && tone_idx >= 2) {
+        tone_idx -= 2;
+      } else if (tone_idx + 2 < scale_tones.size()) {
+        tone_idx += 2;
+      } else if (tone_idx >= 2) {
+        tone_idx -= 2;
       } else if (tone_idx + 1 < scale_tones.size()) {
         tone_idx += 1;
       } else if (tone_idx >= 1) {
@@ -453,7 +474,22 @@ std::vector<NoteEvent> generateFiguration(Tick cantus_tick, Tick cantus_dur,
 
     // Normal stepping with directional persistence.
     if (!did_step) {
-      int step = rng::rollProbability(rng, 0.25f) ? 2 : 1;
+      int step;
+      if (leap_recovery) {
+        // After a leap (3rd), force stepwise contrary motion.
+        step = 1;
+        ascending = !ascending;
+        leap_recovery = false;
+      } else {
+        int step_roll = rng::rollRange(rng, 0, 9);
+        if (step_roll < 2) {
+          step = 3;  // 20%: 3rd leap
+        } else if (step_roll < 5) {
+          step = 2;  // 30%: 2nd skip
+        } else {
+          step = 1;  // 50%: stepwise
+        }
+      }
 
       bool hit_boundary = false;
       if (ascending) {
@@ -481,6 +517,11 @@ std::vector<NoteEvent> generateFiguration(Tick cantus_tick, Tick cantus_dur,
             tone_idx = scale_tones.size() - 1;
           }
         }
+      }
+
+      // Trigger leap recovery for next iteration after a 3rd leap.
+      if (step >= 3 && !hit_boundary) {
+        leap_recovery = true;
       }
 
       // Direction reversal via MelodicState persistence model.

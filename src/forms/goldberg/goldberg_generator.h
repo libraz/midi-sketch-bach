@@ -12,6 +12,7 @@
 #include "forms/goldberg/goldberg_structural_grid.h"
 #include "forms/goldberg/goldberg_types.h"
 #include "harmony/key.h"
+#include "instrument/keyboard/keyboard_instrument.h"
 
 namespace bach {
 

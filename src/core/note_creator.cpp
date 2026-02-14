@@ -70,16 +70,38 @@ BachCreateNoteResult createBachNote(
   }
 
   // Fallback: no counterpoint engine (Phase 0 behavior).
+  uint8_t final_pitch = opts.desired_pitch;
+
+  // Apply instrument range check if available.
+  if (opts.instrument && !opts.instrument->isPitchInRange(final_pitch)) {
+    uint8_t lo = opts.instrument->getLowestPitch();
+    uint8_t hi = opts.instrument->getHighestPitch();
+    // Try octave shift first, then clamp.
+    int up = static_cast<int>(final_pitch) + 12;
+    int down = static_cast<int>(final_pitch) - 12;
+    if (up >= lo && up <= hi && up <= 127) {
+      final_pitch = static_cast<uint8_t>(up);
+    } else if (down >= static_cast<int>(lo) && down <= static_cast<int>(hi) && down >= 0) {
+      final_pitch = static_cast<uint8_t>(down);
+    } else {
+      final_pitch = clampPitch(static_cast<int>(final_pitch), lo, hi);
+    }
+  }
+
   result.accepted = true;
-  result.was_adjusted = false;
-  result.final_pitch = opts.desired_pitch;
+  result.was_adjusted = (final_pitch != opts.desired_pitch);
+  result.final_pitch = final_pitch;
 
   result.note.start_tick = opts.tick;
   result.note.duration = opts.duration;
-  result.note.pitch = opts.desired_pitch;
+  result.note.pitch = final_pitch;
   result.note.velocity = opts.velocity;
   result.note.voice = opts.voice;
   result.note.source = opts.source;
+
+  if (result.was_adjusted) {
+    result.provenance.addStep(BachTransformStep::RangeClamp);
+  }
 
   return result;
 }

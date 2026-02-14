@@ -44,8 +44,9 @@ uint8_t computeVelocity(Tick tick, const std::vector<Tick>& cadence_ticks,
 void applyVelocityCurve(std::vector<NoteEvent>& notes,
                         InstrumentType instrument,
                         const std::vector<Tick>& cadence_ticks) {
-  // Organ always uses fixed velocity -- do not modify.
-  if (instrument == InstrumentType::Organ) {
+  // Organ and harpsichord use fixed velocity -- do not modify.
+  if (instrument == InstrumentType::Organ ||
+      instrument == InstrumentType::Harpsichord) {
     return;
   }
 

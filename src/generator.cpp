@@ -20,6 +20,7 @@
 #include "harmony/modulation_plan.h"
 #include "harmony/tempo_map.h"
 #include "expression/articulation.h"
+#include "instrument/common/impossibility_guard.h"
 #include "midi/velocity_curve.h"
 #include "forms/goldberg/goldberg_config.h"
 #include "solo_string/arch/chaconne_engine.h"
@@ -824,6 +825,12 @@ GeneratorResult generate(const GeneratorConfig& config) {
   // This adjusts note durations (gate ratio) and adds phrase breathing at cadences.
   // Skipped automatically for failed results (applyArticulationToResult checks success).
   applyArticulationToResult(result, effective_config.instrument);
+
+  // Enforce physical impossibility constraints for the target instrument.
+  if (result.success) {
+    auto guard = createGuard(effective_config.instrument);
+    enforceImpossibilityGuard(result.tracks, guard);
+  }
 
   // Apply velocity curves for non-organ instruments.
   if (result.success && effective_config.instrument != InstrumentType::Organ) {

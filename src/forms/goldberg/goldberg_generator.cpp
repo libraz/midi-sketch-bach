@@ -6,10 +6,13 @@
 #include <cmath>
 
 #include "core/interval.h"
+#include "core/note_source.h"
 #include "core/pitch_utils.h"
 #include "core/rng_util.h"
 #include "core/scale.h"
 #include "counterpoint/parallel_repair.h"
+#include "instrument/common/impossibility_guard.h"
+#include "instrument/keyboard/harpsichord_model.h"
 #include "forms/goldberg/goldberg_aria.h"
 #include "forms/goldberg/goldberg_binary.h"
 #include "forms/goldberg/canon/canon_generator.h"
@@ -229,6 +232,42 @@ GoldbergResult GoldbergGenerator::generate(const GoldbergConfig& config) const {
     }
 
     cumulative_offset += variation_duration;
+  }
+
+  // Step 5b: Harpsichord physical model post-processing.
+  // Apply range enforcement and velocity normalization using HarpsichordModel.
+  {
+    HarpsichordModel harpsichord;
+    auto guard = createGuard(InstrumentType::Harpsichord);
+
+    // Range enforcement per note (Immutable voices skipped).
+    uint8_t prev_upper = 0;
+    uint8_t prev_lower = 0;
+    for (auto& note : track_upper.notes) {
+      auto level = getProtectionLevel(note.source);
+      if (level != ProtectionLevel::Immutable &&
+          !guard.isPitchPlayable(note.pitch)) {
+        note.pitch = guard.fixPitchRange(note.pitch, level, prev_upper);
+      }
+      prev_upper = note.pitch;
+    }
+    for (auto& note : track_lower.notes) {
+      auto level = getProtectionLevel(note.source);
+      if (level != ProtectionLevel::Immutable &&
+          !guard.isPitchPlayable(note.pitch)) {
+        note.pitch = guard.fixPitchRange(note.pitch, level, prev_lower);
+      }
+      prev_lower = note.pitch;
+    }
+
+    // Normalize velocity for harpsichord (not velocity sensitive).
+    uint8_t harpsi_vel = harpsichord.defaultVelocity();
+    for (auto& note : track_upper.notes) {
+      note.velocity = harpsi_vel;
+    }
+    for (auto& note : track_lower.notes) {
+      note.velocity = harpsi_vel;
+    }
   }
 
   // Step 6: Sort notes within each track by start_tick for MIDI compliance.

@@ -31,6 +31,9 @@ set(BACH_LIB_SOURCES
   instrument/fretted/guitar_model.cpp
   instrument/fretted/fretted_note_factory.cpp
 
+  # instrument/common/
+  instrument/common/impossibility_guard.cpp
+
   # instrument/bowed/
   instrument/bowed/bowed_string_instrument_base.cpp
   instrument/bowed/cello_model.cpp

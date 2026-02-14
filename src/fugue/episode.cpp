@@ -502,20 +502,23 @@ void generateRestlessEpisode(Episode& episode, const std::vector<NoteEvent>& mot
 
 /// @brief Select which voice should "rest" (hold long tones) in this episode.
 ///
-/// Rotates through voices 2+ based on episode_index, ensuring variety across
-/// successive episodes. Never selects voice 0 or 1 (they carry the primary
-/// motivic material in the sequence/imitation texture).
+/// With fewer than 4 voices, all voices are essential (subject, answer, bass)
+/// so no voice rests. With 4+ voices, inner voices (indices 2..num_voices-2)
+/// rotate based on episode_index. Voices 0 and 1 carry the primary motivic
+/// material and are never selected. The bass (num_voices-1) provides harmonic
+/// foundation and is never selected.
 ///
-/// @param num_voices Total voices (must be >= 3 for a resting voice to exist).
+/// @param num_voices Total voices (must be >= 4 for a resting voice to exist).
 /// @param episode_index Episode ordinal for rotation.
-/// @return Voice ID of the resting voice, or num_voices if no resting voice.
+/// @return Voice ID of the resting voice, or num_voices (sentinel) if no rest.
 static VoiceId selectRestingVoice(uint8_t num_voices, int episode_index) {
-  if (num_voices < 3) return num_voices;  // No resting voice possible
-  // Bass (lowest voice = num_voices-1) never rests — it provides harmonic foundation.
-  // Rotate through voices 0..(num_voices-2) only.
-  uint8_t rotatable = num_voices - 1;
-  if (rotatable < 2) return num_voices;  // Only bass exists beyond 0/1.
-  return static_cast<VoiceId>(episode_index % rotatable);
+  // 3 or fewer voices: all voices required (subject + answer + bass). No rest.
+  if (num_voices < 4) return num_voices;  // sentinel = no rest
+  // 4+ voices: rotate through inner voices (2..num_voices-2).
+  // Voice 0/1 = primary motivic, bass (num_voices-1) = harmonic foundation.
+  uint8_t inner_count = num_voices - 3;
+  if (inner_count == 0) return num_voices;
+  return static_cast<VoiceId>(2 + (episode_index % inner_count));
 }
 
 /// @brief Generate sustained held tones for a resting voice.

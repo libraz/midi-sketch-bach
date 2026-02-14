@@ -11,6 +11,7 @@
 #include "forms/goldberg/goldberg_structural_grid.h"
 #include "forms/goldberg/goldberg_types.h"
 #include "harmony/key.h"
+#include "instrument/keyboard/keyboard_instrument.h"
 
 namespace bach {
 
@@ -45,6 +46,7 @@ class FigurenGenerator {
   /// @param time_sig Time signature for tick calculation.
   /// @param voice_index Voice index (0 = upper, higher = lower register).
   /// @param seed Random seed for deterministic generation.
+  /// @param instrument Optional keyboard instrument for range constraints.
   /// @return Vector of NoteEvents spanning 32 bars.
   std::vector<NoteEvent> generate(
       const FiguraProfile& profile,
@@ -52,7 +54,8 @@ class FigurenGenerator {
       const KeySignature& key,
       const TimeSignature& time_sig,
       uint8_t voice_index,
-      uint32_t seed) const;
+      uint32_t seed,
+      const IKeyboardInstrument* instrument = nullptr) const;
 
  private:
   /// @brief Generate one bar of Figura pattern.
@@ -73,6 +76,8 @@ class FigurenGenerator {
       uint8_t prev_pitch,
       uint8_t register_center,
       const PhraseShapingParams& shaping,
+      uint8_t range_low,
+      uint8_t range_high,
       std::mt19937& rng) const;
 
   /// @brief Generate pitch pattern for a specific FiguraType from a harmonic pivot.
@@ -90,6 +95,8 @@ class FigurenGenerator {
       DirectionBias direction,
       const KeySignature& key,
       int register_offset,
+      uint8_t range_low,
+      uint8_t range_high,
       std::mt19937& rng) const;
 
   /// @brief Apply phrase shaping adjustments to generated notes.

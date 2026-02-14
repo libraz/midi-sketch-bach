@@ -11,6 +11,7 @@
 #include "core/note_source.h"
 #include "counterpoint/melodic_context.h"
 #include "harmony/key.h"
+#include "instrument/keyboard/keyboard_instrument.h"
 
 namespace bach {
 
@@ -34,6 +35,7 @@ struct BachNoteOptions {
   int8_t prev_direction = 0;            // Previous motion direction (-1/0/1)
   std::optional<uint8_t> next_pitch;    // Next pitch for NHT validation (nullopt = unknown)
   const PhraseGoal* phrase_goal = nullptr;  // Optional phrase goal for melodic scoring
+  const IKeyboardInstrument* instrument = nullptr;  // Optional instrument for range check
 };
 
 /// Result of note creation via createBachNote().
