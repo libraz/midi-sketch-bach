@@ -223,6 +223,28 @@ int repairParallelPerfect(std::vector<NoteEvent>& notes,
                 }
                 if (new_par) continue;
 
+                // On strong beats (1 and 3 in 4/4), reject candidates that
+                // create dissonance with any active voice.
+                {
+                  Tick beat = (t % kTicksPerBar) / kTicksPerBeat;
+                  if (beat == 0 || beat == 2) {
+                    bool dissonant = false;
+                    for (uint8_t ov = 0; ov < params.num_voices && !dissonant; ++ov) {
+                      if (ov == fc.v) continue;
+                      int ovc = soundPitch(ov, t);
+                      if (ovc < 0) continue;
+                      int iv = interval_util::compoundToSimple(std::abs(cp - ovc));
+                      if (!interval_util::isConsonance(iv)) {
+                        // P4 is acceptable in 3+ voice contexts.
+                        if (!(params.num_voices >= 3 && iv == 5)) {
+                          dissonant = true;
+                        }
+                      }
+                    }
+                    if (dissonant) continue;
+                  }
+                }
+
                 notes[fc.ni].pitch = ucp;
                 notes[fc.ni].modified_by |= static_cast<uint8_t>(NoteModifiedBy::ParallelRepair);
                 ca = soundPitch(va, t);
@@ -327,6 +349,27 @@ int repairParallelPerfect(std::vector<NoteEvent>& notes,
                       }
                     }
                     if (new_par) continue;
+
+                    // Strong-beat consonance check for adjacent repair.
+                    {
+                      Tick beat = (pt % kTicksPerBar) / kTicksPerBeat;
+                      if (beat == 0 || beat == 2) {
+                        bool dissonant = false;
+                        for (uint8_t ov = 0; ov < params.num_voices && !dissonant; ++ov) {
+                          if (ov == fc2.v) continue;
+                          int ovc = soundPitch(ov, pt);
+                          if (ovc < 0) continue;
+                          int iv = interval_util::compoundToSimple(
+                              std::abs(cp2 - ovc));
+                          if (!interval_util::isConsonance(iv)) {
+                            if (!(params.num_voices >= 3 && iv == 5)) {
+                              dissonant = true;
+                            }
+                          }
+                        }
+                        if (dissonant) continue;
+                      }
+                    }
 
                     notes[fc2.ni].pitch = ucp2;
                     notes[fc2.ni].modified_by |= static_cast<uint8_t>(NoteModifiedBy::ParallelRepair);

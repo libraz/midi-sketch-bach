@@ -903,8 +903,9 @@ TEST_F(WeakBeatNHTTest, WeakBeatPassingToneAcceptedWithNextPitch) {
   Tick weak_tick = kTicksPerBeat / 2;  // 240: 8th-note subdivision
   state.addNote(1, {weak_tick, 480, 48, 80, 1});
 
-  // Voice 0 previously played C4(60).
-  state.addNote(0, {0, 480, 60, 80, 0});
+  // Voice 0 previously played C4(60), sustained until tick 960 to keep
+  // melodic context continuous (avoids triggering voice reentry detection).
+  state.addNote(0, {0, 960, 60, 80, 0});
 
   // Voice 0 wants D4(62) at tick 240 (weak). D4 with C3 = 14 semitones, mod 12 = 2 (M2),
   // dissonant. With BachRuleEvaluator + free counterpoint, the old code returned

@@ -495,6 +495,157 @@ std::vector<NoteEvent> createCodaNotes(Tick start_tick, Tick duration,
         notes[held_indices[idx]].pitch = new_pitch;
       }
     }
+
+    // Consonance check: ensure held chord tones (voices 1+) are consonant
+    // with voice 0's first note on the strong beat.  If dissonant, try
+    // octave shifts of the offending voice within its register, preserving
+    // the chord degree.  Only apply to the first beat (start_tick).
+    if (!notes.empty()) {
+      // Find voice 0's first note pitch.
+      uint8_t voice0_first_pitch = 0;
+      for (const auto& note : notes) {
+        if (note.voice == 0 && note.start_tick == start_tick) {
+          voice0_first_pitch = note.pitch;
+          break;
+        }
+      }
+
+      if (voice0_first_pitch > 0) {
+        for (size_t idx = 0; idx < notes.size(); ++idx) {
+          if (notes[idx].voice == 0) continue;
+          if (notes[idx].start_tick != start_tick) continue;
+
+          int diff = std::abs(static_cast<int>(notes[idx].pitch) -
+                              static_cast<int>(voice0_first_pitch));
+          int simple = interval_util::compoundToSimple(diff);
+          if (interval_util::isConsonance(simple) && diff >= 3) continue;
+
+          // Dissonant or too close: try octave shifts.
+          auto [vlo, vhi] = getFugueVoiceRange(notes[idx].voice, num_voices);
+          int orig_pc = getPitchClass(notes[idx].pitch);
+          uint8_t best_pitch = notes[idx].pitch;
+          int best_cost = INT32_MAX;
+
+          for (int shift = -36; shift <= 36; shift += 12) {
+            if (shift == 0) continue;
+            int cand = static_cast<int>(notes[idx].pitch) + shift;
+            if (cand < vlo || cand > vhi) continue;
+            if (getPitchClass(static_cast<uint8_t>(cand)) != orig_pc) continue;
+
+            // Check consonance with voice 0.
+            int cand_diff = std::abs(cand - static_cast<int>(voice0_first_pitch));
+            int cand_simple = interval_util::compoundToSimple(cand_diff);
+            if (!interval_util::isConsonance(cand_simple) || cand_diff < 3) continue;
+
+            // Check no voice crossing with adjacent voices.
+            bool crosses = false;
+            for (size_t jdx = 0; jdx < notes.size(); ++jdx) {
+              if (jdx == idx || notes[jdx].start_tick != start_tick) continue;
+              if (notes[jdx].voice == notes[idx].voice) continue;
+              if (notes[jdx].voice < notes[idx].voice && cand > notes[jdx].pitch) {
+                crosses = true;
+                break;
+              }
+              if (notes[jdx].voice > notes[idx].voice && cand < notes[jdx].pitch) {
+                crosses = true;
+                break;
+              }
+            }
+            if (crosses) continue;
+
+            // Cost: voice-leading distance from original + imperfect consonance bonus.
+            int cost = std::abs(shift);
+            if (cand_simple == 3 || cand_simple == 4 ||
+                cand_simple == 8 || cand_simple == 9) {
+              cost -= 6;  // Prefer imperfect consonances.
+            }
+            if (cost < best_cost) {
+              best_cost = cost;
+              best_pitch = static_cast<uint8_t>(cand);
+            }
+          }
+
+          // If octave shift didn't help, try ±3rd and ±6th within chord.
+          if (best_cost == INT32_MAX) {
+            int tonic_pc_local = getPitchClass(static_cast<uint8_t>(tonic_pitch));
+            int third_pc_local = (tonic_pitch + chord_third) % 12;
+            int fifth_pc_local = (tonic_pitch + 7) % 12;
+            int chord_pcs_local[] = {tonic_pc_local, third_pc_local, fifth_pc_local};
+
+            for (int ct_pc : chord_pcs_local) {
+              if (ct_pc == orig_pc) continue;  // Same degree, already tried octave shifts.
+              // Find nearest pitch with this chord PC.
+              for (int oct = -24; oct <= 24; oct += 12) {
+                int base = static_cast<int>(notes[idx].pitch) + oct;
+                int target = base - (base % 12) + ct_pc;
+                if (target < base - 6) target += 12;
+                if (target > base + 6) target -= 12;
+                if (target < vlo || target > vhi) continue;
+
+                // Check consonance with voice 0.
+                int cand_diff = std::abs(target - static_cast<int>(voice0_first_pitch));
+                int cand_simple = interval_util::compoundToSimple(cand_diff);
+                if (!interval_util::isConsonance(cand_simple) || cand_diff < 3) continue;
+
+                // Check no crossing.
+                bool crosses = false;
+                for (size_t jdx = 0; jdx < notes.size(); ++jdx) {
+                  if (jdx == idx || notes[jdx].start_tick != start_tick) continue;
+                  if (notes[jdx].voice == notes[idx].voice) continue;
+                  if (notes[jdx].voice < notes[idx].voice && target > notes[jdx].pitch) {
+                    crosses = true;
+                    break;
+                  }
+                  if (notes[jdx].voice > notes[idx].voice && target < notes[jdx].pitch) {
+                    crosses = true;
+                    break;
+                  }
+                }
+                if (crosses) continue;
+
+                // Voice-leading cost from original position.
+                int cost = std::abs(target - static_cast<int>(notes[idx].pitch));
+                if (cand_simple == 3 || cand_simple == 4 ||
+                    cand_simple == 8 || cand_simple == 9) {
+                  cost -= 3;
+                }
+                if (cost < best_cost) {
+                  best_cost = cost;
+                  best_pitch = static_cast<uint8_t>(target);
+                }
+              }
+            }
+          }
+
+          if (best_pitch != notes[idx].pitch) {
+            notes[idx].pitch = best_pitch;
+          }
+        }
+      }
+    }
+
+    // Inter-voice consonance among held chord tones: ensure all pairs
+    // have at least a minor 3rd spacing and form consonant intervals.
+    // This is a soft fix -- only adjusts obviously dissonant pairs via
+    // octave shift of the more flexible voice.
+    for (size_t idx = 0; idx < notes.size(); ++idx) {
+      if (notes[idx].voice == 0 || notes[idx].start_tick != start_tick) continue;
+      for (size_t jdx = idx + 1; jdx < notes.size(); ++jdx) {
+        if (notes[jdx].voice == 0 || notes[jdx].start_tick != start_tick) continue;
+        int diff = std::abs(static_cast<int>(notes[idx].pitch) -
+                            static_cast<int>(notes[jdx].pitch));
+        if (diff >= 3) continue;  // Sufficient spacing.
+        // Too close (unison or minor 2nd): shift the lower-priority voice.
+        size_t fix_idx = (notes[idx].voice > notes[jdx].voice) ? idx : jdx;
+        int fix_shift =
+            (notes[fix_idx].pitch < notes[fix_idx == idx ? jdx : idx].pitch) ? -12 : 12;
+        int shifted = static_cast<int>(notes[fix_idx].pitch) + fix_shift;
+        auto [flo, fhi] = getFugueVoiceRange(notes[fix_idx].voice, num_voices);
+        if (shifted >= flo && shifted <= fhi) {
+          notes[fix_idx].pitch = static_cast<uint8_t>(shifted);
+        }
+      }
+    }
   }
 
   // =========================================================================

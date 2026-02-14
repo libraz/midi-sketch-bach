@@ -287,23 +287,28 @@ std::vector<NoteEvent> generateFiguration(Tick cantus_tick, Tick cantus_dur,
   if (hint_center == 0) {
     center = raw_center;
   } else {
-    // Blend toward raw_center (70%) for phrase-following register movement.
+    // Blend toward hint_center (60%) for Fortspinnung register continuity.
     center = static_cast<uint8_t>(
-        (static_cast<int>(hint_center) * 3 + static_cast<int>(raw_center) * 7) / 10);
+        (static_cast<int>(hint_center) * 6 + static_cast<int>(raw_center) * 4) / 10);
     center = clampPitch(static_cast<int>(center), kFigLow, kFigHigh);
   }
 
   uint8_t eff_low = clampPitch(static_cast<int>(center) - 12, kFigLow, kFigHigh);
   uint8_t eff_high = clampPitch(static_cast<int>(center) + 12, kFigLow, kFigHigh);
 
-  ScaleType scale_type = key_sig.is_minor ? ScaleType::HarmonicMinor
-                                          : ScaleType::Major;
+  // Figuration runs use natural minor to avoid augmented 2nd exposure;
+  // harmonic minor reserved for cadence/leading-tone contexts.
+  ScaleType run_scale_type = key_sig.is_minor ? ScaleType::NaturalMinor
+                                              : ScaleType::Major;
+  ScaleType cadence_scale_type = key_sig.is_minor ? ScaleType::HarmonicMinor
+                                                  : ScaleType::Major;
+  (void)cadence_scale_type;  // Reserved for future cadence-context use.
 
-  // Collect scale tones in the effective range.
+  // Collect scale tones in the effective range (using run scale type).
   std::vector<uint8_t> scale_tones;
   for (int p = static_cast<int>(eff_low); p <= static_cast<int>(eff_high); ++p) {
     if (scale_util::isScaleTone(static_cast<uint8_t>(p), key_sig.tonic,
-                                scale_type)) {
+                                run_scale_type)) {
       scale_tones.push_back(static_cast<uint8_t>(p));
     }
   }
@@ -315,12 +320,14 @@ std::vector<NoteEvent> generateFiguration(Tick cantus_tick, Tick cantus_dur,
   Tick current_tick = cantus_tick;
   Tick end_tick = cantus_tick + cantus_dur;
 
-  // Start near center pitch.
+  // Start near previous call's ending pitch for Fortspinnung continuity.
+  // First call (hint_center == 0) uses the blended center.
+  uint8_t start_ref = (hint_center != 0) ? hint_center : center;
   size_t tone_idx = 0;
   int min_dist = 999;
   for (size_t i = 0; i < scale_tones.size(); ++i) {
     int d = std::abs(static_cast<int>(scale_tones[i]) -
-                     static_cast<int>(center));
+                     static_cast<int>(start_ref));
     if (d < min_dist) {
       min_dist = d;
       tone_idx = i;
@@ -328,8 +335,8 @@ std::vector<NoteEvent> generateFiguration(Tick cantus_tick, Tick cantus_dur,
   }
 
   bool ascending = rng::rollProbability(rng, 0.5f);
-  bool leap_recovery = false;
-  MelodicState mel_state;
+  int run_remaining = 0;  // Steps remaining in current directional run (Fortspinnung).
+  bool prev_step_was_skip = false;  // Consecutive skip guard (max 1 per run).
   Tick prev_harm_start = timeline.getAt(cantus_tick).tick;
   int neighbor_return = -1;  // Saved tone_idx for neighbor return, -1 = none.
 
@@ -347,6 +354,8 @@ std::vector<NoteEvent> generateFiguration(Tick cantus_tick, Tick cantus_dur,
     Tick remaining = end_tick - current_tick;
     if (dur > remaining) dur = remaining;
     if (dur == 0) break;
+
+    size_t prev_tone_idx = tone_idx;  // Save for run disruption check.
 
     // On strong beats, prefer chord tones from the harmonic timeline.
     // Direction-aware: prefer chord tones in current travel direction
@@ -421,8 +430,17 @@ std::vector<NoteEvent> generateFiguration(Tick cantus_tick, Tick cantus_dur,
       }
     }
 
-    uint8_t prev_fig_pitch = notes.empty() ? scale_tones[tone_idx]
-                                            : notes.back().pitch;
+    // Run disruption check: end run if chord-tone snap moved significantly
+    // against direction or made a large jump (even in run direction).
+    if (run_remaining > 0) {
+      int snap_delta = static_cast<int>(tone_idx) - static_cast<int>(prev_tone_idx);
+      bool snap_against = (ascending && snap_delta < -1) ||
+                          (!ascending && snap_delta > 1);
+      bool large_jump = std::abs(snap_delta) >= 3;
+      if (snap_against || large_jump) {
+        run_remaining = 0;
+      }
+    }
 
     NoteEvent note;
     note.start_tick = current_tick;
@@ -433,7 +451,7 @@ std::vector<NoteEvent> generateFiguration(Tick cantus_tick, Tick cantus_dur,
     note.source = BachNoteSource::FreeCounterpoint;
     notes.push_back(note);
 
-    updateMelodicState(mel_state, prev_fig_pitch, note.pitch);
+
 
     current_tick += dur;
 
@@ -455,8 +473,11 @@ std::vector<NoteEvent> generateFiguration(Tick cantus_tick, Tick cantus_dur,
       did_step = true;
     }
 
-    // 3c: 20% neighbor tone — step away by 1, return next iteration.
-    if (!did_step && rng::rollProbability(rng, 0.2f)) {
+    // 3c: Neighbor tone — step away by 1, return next iteration.
+    // Reduced during active runs to preserve directional coherence.
+    bool active_run = run_remaining > 0 && !at_harmony_boundary;
+    float neighbor_prob = active_run ? 0.10f : 0.20f;
+    if (!did_step && rng::rollProbability(rng, neighbor_prob)) {
       int saved = static_cast<int>(tone_idx);
       bool stepped = false;
       if (ascending && tone_idx + 1 < scale_tones.size()) {
@@ -472,63 +493,63 @@ std::vector<NoteEvent> generateFiguration(Tick cantus_tick, Tick cantus_dur,
       }
     }
 
-    // Normal stepping with directional persistence.
+    // Guided run model (Fortspinnung): coherent directional runs of 4-8 notes.
     if (!did_step) {
-      int step;
-      if (leap_recovery) {
-        // After a leap (3rd), force stepwise contrary motion.
-        step = 1;
-        ascending = !ascending;
-        leap_recovery = false;
-      } else {
-        int step_roll = rng::rollRange(rng, 0, 9);
-        if (step_roll < 2) {
-          step = 3;  // 20%: 3rd leap
-        } else if (step_roll < 5) {
-          step = 2;  // 30%: 2nd skip
-        } else {
-          step = 1;  // 50%: stepwise
+      // Plan new run if current run is exhausted or at harmonic boundary.
+      if (run_remaining <= 0 || at_harmony_boundary) {
+        // Register balance: bias direction toward under-represented register.
+        if (scale_tones.size() > 1) {
+          float rel_pos = static_cast<float>(tone_idx) /
+                          static_cast<float>(scale_tones.size() - 1);
+          if (rel_pos > 0.7f) {
+            ascending = false;  // Near top: descend.
+          } else if (rel_pos < 0.3f) {
+            ascending = true;   // Near bottom: ascend.
+          } else {
+            // Mid-register: alternate at harmonic boundaries.
+            ascending = at_harmony_boundary ? !ascending : ascending;
+          }
         }
+        // Run length 4-8 notes (BWV 599-650 typical phrase segment).
+        // Short runs (4) near scale boundaries to avoid rapid bouncing.
+        int max_run = (scale_tones.size() <= 6) ? 3 : 4;
+        run_remaining = 4 + rng::rollRange(rng, 0, max_run);
+        // Safety cap: never exceed available scale tones + 1 boundary step.
+        run_remaining = std::min(run_remaining,
+                                 static_cast<int>(scale_tones.size()) + 1);
+        prev_step_was_skip = false;
       }
 
-      bool hit_boundary = false;
+      // Execute run: stepwise with occasional skip (max 1 consecutive).
+      int step;
+      if (prev_step_was_skip) {
+        step = 1;  // After skip, force stepwise (no consecutive 3rds).
+      } else {
+        step = rng::rollProbability(rng, 0.75f) ? 1 : 2;
+      }
+      prev_step_was_skip = (step >= 2);
+
       if (ascending) {
         if (tone_idx + step < scale_tones.size()) {
           tone_idx += step;
         } else {
-          // Range boundary: always reverse and step back to avoid repeats.
-          hit_boundary = true;
+          // Register boundary: reverse and end run.
           ascending = false;
-          if (tone_idx >= static_cast<size_t>(step)) {
-            tone_idx -= step;
-          } else {
-            tone_idx = 0;
-          }
+          run_remaining = 0;
+          if (tone_idx >= 1) tone_idx -= 1;
         }
       } else {
         if (tone_idx >= static_cast<size_t>(step)) {
           tone_idx -= step;
         } else {
-          hit_boundary = true;
+          // Register boundary: reverse and end run.
           ascending = true;
-          if (tone_idx + step < scale_tones.size()) {
-            tone_idx += step;
-          } else if (!scale_tones.empty()) {
-            tone_idx = scale_tones.size() - 1;
-          }
+          run_remaining = 0;
+          if (tone_idx + 1 < scale_tones.size()) tone_idx += 1;
         }
       }
 
-      // Trigger leap recovery for next iteration after a 3rd leap.
-      if (step >= 3 && !hit_boundary) {
-        leap_recovery = true;
-      }
-
-      // Direction reversal via MelodicState persistence model.
-      if (!hit_boundary && !at_harmony_boundary) {
-        int dir = chooseMelodicDirection(mel_state, rng);
-        ascending = (dir > 0);
-      }
+      run_remaining--;
     }
   }
 
@@ -811,23 +832,15 @@ ChoralePreludeResult generateChoralePrelude(const ChoralePreludeConfig& config) 
             }
           }
 
-          // (D) createBachNote for remaining validation.
-          BachNoteOptions opts;
-          opts.voice = note.voice;
-          opts.desired_pitch = note.pitch;
-          opts.tick = note.start_tick;
-          opts.duration = note.duration;
-          opts.velocity = note.velocity;
-          opts.source = note.source;
-
-          auto cp_result = createBachNote(&cp_state, &cp_rules, &cp_resolver, opts);
-          if (cp_result.accepted) {
-            coordinated.push_back(cp_result.note);
-            ++accepted_count;
-            ++fig_accepted;
-          } else {
-            ++fig_other;
-          }
+          // (D) Accept figuration directly — checks A-C are sufficient.
+          // createBachNote's CollisionResolver would aggressively adjust
+          // pitches (e.g., desired=86 → actual=74), destroying the
+          // Fortspinnung register traversal pattern. The later parallel
+          // repair pass handles any remaining voice-leading issues.
+          cp_state.addNote(note.voice, note);
+          coordinated.push_back(note);
+          ++accepted_count;
+          ++fig_accepted;
         }
         note_idx = group_end;
       }
@@ -840,6 +853,64 @@ ChoralePreludeResult generateChoralePrelude(const ChoralePreludeConfig& config) 
               accepted_count, total_count,
               total_count > 0 ? 100.0 * accepted_count / total_count : 0.0);
       all_notes = std::move(coordinated);
+
+      // Post-rejection repeat mitigation (weak-beat only, chord-tone-aware).
+      // Shifts repeated figuration notes by nearest scale step to prevent
+      // consecutive same-pitch merges. Strong beats are exempt to avoid
+      // reintroducing dissonance on metrically accented positions.
+      {
+        // Build scale-tone lookup for index-based shifting.
+        ScaleType shift_scale = config.key.is_minor ? ScaleType::NaturalMinor
+                                                    : ScaleType::Major;
+        std::vector<uint8_t> shift_tones;
+        for (int p = voice_ranges[kFigurationVoice].first;
+             p <= voice_ranges[kFigurationVoice].second; ++p) {
+          if (scale_util::isScaleTone(static_cast<uint8_t>(p), config.key.tonic,
+                                      shift_scale)) {
+            shift_tones.push_back(static_cast<uint8_t>(p));
+          }
+        }
+
+        uint8_t last_fig_pitch = 0;
+        bool has_last_fig = false;
+        for (auto& note : all_notes) {
+          if (note.voice != kFigurationVoice) continue;
+          if (has_last_fig && note.pitch == last_fig_pitch) {
+            // Strong beats: only shift to a chord tone (harmonic safety).
+            // Weak beats: shift to any scale tone.
+            bool on_strong_beat = (note.start_tick % kTicksPerBeat == 0);
+
+            // Find exact position in shift_tones.
+            auto it = std::find(shift_tones.begin(), shift_tones.end(),
+                                note.pitch);
+            if (it != shift_tones.end()) {
+              size_t st_idx = static_cast<size_t>(
+                  std::distance(shift_tones.begin(), it));
+
+              // Try adjacent scale-tone indices: +/-1, +/-2.
+              for (int d : {1, -1, 2, -2}) {
+                int cand_idx = static_cast<int>(st_idx) + d;
+                if (cand_idx < 0 ||
+                    cand_idx >= static_cast<int>(shift_tones.size())) continue;
+                uint8_t cand = shift_tones[static_cast<size_t>(cand_idx)];
+                if (cand == last_fig_pitch) continue;
+
+                if (on_strong_beat) {
+                  // Strong beat: require chord tone.
+                  const HarmonicEvent& harm = timeline.getAt(note.start_tick);
+                  if (!isChordTone(cand, harm)) continue;
+                }
+
+                note.pitch = cand;
+                break;
+              }
+              // If no safe shift found, leave unchanged (merge will handle it).
+            }
+          }
+          last_fig_pitch = note.pitch;
+          has_last_fig = true;
+        }
+      }
 
       // Merge consecutive repeated pitches in figuration into single
       // held notes (Baroque notation convention: re-attacks → sustained).

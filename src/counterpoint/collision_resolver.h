@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <optional>
 #include <string>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -219,6 +220,12 @@ class CollisionResolver {
     return {leap_gate_triggered_, leap_gate_fallback_used_};
   }
 
+  /// @brief Get voice reentry diagnostic counters.
+  /// @return Tuple of (detected, cascade_forced, rescued) counts.
+  std::tuple<uint32_t, uint32_t, uint32_t> getReentryStats() const {
+    return {reentry_detected_count_, reentry_cascade_count_, reentry_rescue_count_};
+  }
+
  private:
   int max_search_range_ = 12;
   int range_tolerance_ = 3;
@@ -226,6 +233,9 @@ class CollisionResolver {
   const HarmonicTimeline* harmonic_timeline_ = nullptr;
   mutable uint32_t leap_gate_triggered_ = 0;
   mutable uint32_t leap_gate_fallback_used_ = 0;
+  mutable uint32_t reentry_detected_count_ = 0;
+  mutable uint32_t reentry_cascade_count_ = 0;
+  mutable uint32_t reentry_rescue_count_ = 0;
 
   /// @brief Attempt a specific resolution strategy.
   PlacementResult tryStrategy(const CounterpointState& state,

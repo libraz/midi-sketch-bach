@@ -50,6 +50,7 @@ set(BACH_TEST_SOURCES
   counterpoint/melodic_context_test.cpp
   counterpoint/leap_resolution_test.cpp
   counterpoint/repeated_note_repair_test.cpp
+  counterpoint/collision_resolver_entry_test.cpp
 
   # counterpoint/ (cantus firmus)
   counterpoint/cantus_firmus_test.cpp
@@ -80,6 +81,7 @@ set(BACH_TEST_SOURCES
   fugue/tonal_plan_enhanced_test.cpp
   fugue/voice_registers_test.cpp
   fugue/episode_harmonic_test.cpp
+  fugue/episode_consonance_test.cpp
   fugue/exposition_harmonic_test.cpp
   fugue/stretto_harmonic_test.cpp
   fugue/fugue_quality_gate_test.cpp

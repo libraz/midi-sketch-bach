@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <vector>
 
+#include "core/interval.h"
 #include "core/scale.h"
 
 namespace bach {
@@ -77,6 +78,24 @@ int repairRepeatedNotes(std::vector<NoteEvent>& notes,
     });
   }
 
+  // Sounding-pitch lookup for consonance checks.
+  auto soundingPitchAt = [&](uint8_t v, Tick t) -> int {
+    if (v >= params.num_voices) return -1;
+    const auto& vi = voice_indices[v];
+    if (vi.empty()) return -1;
+    // Binary search: find last index with start_tick <= t.
+    auto it = std::upper_bound(vi.begin(), vi.end(), t,
+        [&](Tick tick, size_t idx) { return tick < notes[idx].start_tick; });
+    if (it == vi.begin()) return -1;
+    --it;
+    size_t idx = *it;
+    if (notes[idx].start_tick <= t &&
+        t < notes[idx].start_tick + notes[idx].duration) {
+      return static_cast<int>(notes[idx].pitch);
+    }
+    return -1;
+  };
+
   for (uint8_t voice = 0; voice < params.num_voices; ++voice) {
     const auto& idxs = voice_indices[voice];
     if (idxs.size() < 2) continue;
@@ -128,22 +147,56 @@ int repairRepeatedNotes(std::vector<NoteEvent>& notes,
           }
           ++alt;
 
-          // Try preferred direction: +1, +2, +3 semitones along step_dir.
-          bool placed = false;
-          uint8_t new_pitch = 0;
-          for (int delta = 1; delta <= 3 && !placed; ++delta) {
-            placed = tryCandidate(base_pitch, step_dir * delta, cur_key,
-                                  cur_scale, voice, notes[note_idx].start_tick,
-                                  params, new_pitch);
+          // Collect all valid candidates and score them.
+          struct Candidate { uint8_t pitch; int score; };
+          std::vector<Candidate> candidates;
+
+          for (int dir : {step_dir, -step_dir}) {
+            for (int delta = 1; delta <= 3; ++delta) {
+              uint8_t cand = 0;
+              if (tryCandidate(base_pitch, dir * delta, cur_key, cur_scale,
+                               voice, notes[note_idx].start_tick, params,
+                               cand)) {
+                int score = (4 - delta);  // proximity: 3, 2, 1
+                if (dir == step_dir) score += 3;  // preferred direction
+                candidates.push_back({cand, score});
+              }
+            }
           }
 
-          // Fallback: try opposite direction if preferred failed.
-          if (!placed) {
-            for (int delta = 1; delta <= 3 && !placed; ++delta) {
-              placed = tryCandidate(base_pitch, -step_dir * delta, cur_key,
-                                    cur_scale, voice, notes[note_idx].start_tick,
-                                    params, new_pitch);
+          // Score consonance with all sounding voices.
+          Tick beat =
+              (notes[note_idx].start_tick % kTicksPerBar) / kTicksPerBeat;
+          bool is_strong = (beat == 0 || beat == 2);
+          for (auto& cnd : candidates) {
+            bool consonant = true;
+            for (uint8_t ov = 0; ov < params.num_voices; ++ov) {
+              if (ov == voice) continue;
+              int other = soundingPitchAt(ov, notes[note_idx].start_tick);
+              if (other < 0) continue;
+              int ivl = interval_util::compoundToSimple(
+                  std::abs(static_cast<int>(cnd.pitch) - other));
+              bool is_cons = interval_util::isConsonance(ivl) ||
+                             (params.num_voices >= 3 && ivl == 5);
+              if (!is_cons) {
+                consonant = false;
+                break;
+              }
             }
+            cnd.score += consonant ? 10 : (is_strong ? -5 : 0);
+          }
+
+          // Pick the best candidate (always pick if any exist --
+          // even a weak candidate beats the original repeated pitch).
+          bool placed = false;
+          uint8_t new_pitch = 0;
+          if (!candidates.empty()) {
+            std::sort(candidates.begin(), candidates.end(),
+                      [](const Candidate& lhs, const Candidate& rhs) {
+                        return lhs.score > rhs.score;
+                      });
+            new_pitch = candidates[0].pitch;
+            placed = true;
           }
 
           if (placed) {

@@ -9,7 +9,8 @@ from pathlib import Path
 from typing import Optional, Set
 
 from .batch import parse_seed_range, run_batch
-from .report import format_batch_text, format_json, format_text
+from .diagnosis import compute_dissonance_diagnostics
+from .report import format_batch_text, format_diagnostics_text, format_json, format_text
 from .runner import load_score, overall_passed, validate
 from .stats import compute_stats, format_stats_json, format_stats_text
 
@@ -59,6 +60,8 @@ def cmd_batch(args: argparse.Namespace) -> int:
         if not args.json:
             print(f"\r  [{idx + 1}/{total}] seed={seed}...", end="", flush=True)
 
+    diagnostics = getattr(args, "diagnostics", False)
+
     results = run_batch(
         seeds=seeds,
         form=args.form,
@@ -67,13 +70,26 @@ def cmd_batch(args: argparse.Namespace) -> int:
         cli_path=args.cli_path,
         categories=categories,
         on_progress=progress,
+        diagnostics=diagnostics,
     )
 
     if not args.json:
         print()  # Clear progress line
 
+    # Compute diagnostics if requested.
+    diag = None
+    if diagnostics:
+        diag = [
+            compute_dissonance_diagnostics(results, "strong_beat_dissonance"),
+            compute_dissonance_diagnostics(results, "unresolved_dissonance"),
+        ]
+
     if args.json:
-        output = json.dumps(results, indent=2)
+        if diag:
+            output_data = {"results": results, "diagnostics": diag}
+            output = json.dumps(output_data, indent=2)
+        else:
+            output = json.dumps(results, indent=2)
     else:
         output = format_batch_text(
             results,
@@ -81,6 +97,8 @@ def cmd_batch(args: argparse.Namespace) -> int:
             seed_range=args.seeds,
             voices=args.voices,
         )
+        if diag:
+            output += "\n" + format_diagnostics_text(diag)
 
     if args.output:
         Path(args.output).write_text(output)
@@ -142,6 +160,8 @@ def main() -> int:
     p_batch.add_argument("--rules", help="Comma-separated rule categories")
     p_batch.add_argument("--cli-path", default="./build/bin/bach_cli", help="Path to bach_cli")
     p_batch.add_argument("--json", action="store_true", help="JSON output")
+    p_batch.add_argument("--diagnostics", action="store_true",
+                         help="Include source/interval breakdown for dissonance violations")
     p_batch.add_argument("-o", "--output", help="Output file path")
 
     # stats

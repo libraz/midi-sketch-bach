@@ -169,6 +169,34 @@ ParallelCheckResult checkParallelsAndP4Bass(
 }
 
 // ---------------------------------------------------------------------------
+// Voice reentry detection
+// ---------------------------------------------------------------------------
+
+/// @brief Detect voice reentry: a voice returning after a rest gap.
+///
+/// A voice reentry occurs when:
+/// - The voice has prior notes (not first entry)
+/// - There is a gap of at least one full bar between the last note's end
+///   and the current tick
+/// - The current tick is on a beat boundary
+///
+/// @param state Counterpoint state.
+/// @param voice_id Voice to check.
+/// @param tick Current tick.
+/// @return True if this is a voice reentry moment.
+static bool isVoiceReentry(const CounterpointState& state,
+                           VoiceId voice_id, Tick tick) {
+  const NoteEvent* last = state.getLastNote(voice_id);
+  if (!last) return true;  // First entry ever.
+  // Check that current tick is on a beat boundary.
+  if (tick % kTicksPerBeat != 0) return false;
+  // Eighth-note rests and shorter are normal articulation.
+  // Quarter-rest or longer signals a voice gap where melodic context is lost.
+  Tick last_end = last->start_tick + last->duration;
+  return (last_end + kTicksPerBeat <= tick);
+}
+
+// ---------------------------------------------------------------------------
 // Safety check
 // ---------------------------------------------------------------------------
 
@@ -190,11 +218,24 @@ bool CollisionResolver::isSafeToPlace(const CounterpointState& state,
     bool is_strong = (tick % kTicksPerBeat == 0);
     int ivl = absoluteInterval(pitch, other_note->pitch);
     if (is_strong && !rules.isIntervalConsonant(ivl, is_strong)) {
+      // Voice reentry: disable NHT exemption because there is no
+      // continuous melodic context. Force cascade (chord_tone/step_shift)
+      // to find a consonant alternative.
+      if (isVoiceReentry(state, voice_id, tick)) {
+        reentry_detected_count_++;
+        return false;  // Force cascade.
+      }
+
+      // Normal NHT exemption: passing tone or neighbor tone.
       // When next_pitch is known, check if this dissonance forms a valid
       // non-harmonic tone pattern (passing tone or neighbor tone).
       // Use Fifth species rules which allow the broadest non-harmonic tones.
       bool allowed_as_nht = false;
-      if (next_pitch.has_value()) {
+      // Downbeat (beat 1): NHT exemption disabled — only suspensions
+      // are acceptable dissonances on the strongest metric position.
+      Tick beat_in_bar = (tick % kTicksPerBar) / kTicksPerBeat;
+      bool is_downbeat = (beat_in_bar == 0);
+      if (!is_downbeat && next_pitch.has_value()) {
         const NoteEvent* prev_self = state.getLastNote(voice_id);
         if (prev_self) {
           SpeciesRules species_rules(SpeciesType::Fifth);
@@ -224,15 +265,21 @@ bool CollisionResolver::isSafeToPlace(const CounterpointState& state,
         if (voice_id == bass_voice || other == bass_voice) {
           // Reject unless justified as a non-harmonic tone (passing/neighbor).
           bool p4_bass_allowed = false;
-          if (next_pitch.has_value()) {
-            const NoteEvent* prev_self = state.getLastNote(voice_id);
-            if (prev_self) {
-              SpeciesRules species_rules(SpeciesType::Fifth);
-              bool is_passing = species_rules.isValidPassingTone(
-                  prev_self->pitch, pitch, *next_pitch);
-              bool is_neighbor = species_rules.isValidNeighborTone(
-                  prev_self->pitch, pitch, *next_pitch);
-              if (is_passing || is_neighbor) p4_bass_allowed = true;
+          // Voice reentry: no NHT exemption for P4-bass.
+          // Reuse downbeat logic: no NHT exemption on beat 1.
+          Tick p4_beat_in_bar = (tick % kTicksPerBar) / kTicksPerBeat;
+          bool p4_is_downbeat = (p4_beat_in_bar == 0);
+          if (!p4_is_downbeat && !isVoiceReentry(state, voice_id, tick)) {
+            if (next_pitch.has_value()) {
+              const NoteEvent* prev_self = state.getLastNote(voice_id);
+              if (prev_self) {
+                SpeciesRules species_rules(SpeciesType::Fifth);
+                bool is_passing = species_rules.isValidPassingTone(
+                    prev_self->pitch, pitch, *next_pitch);
+                bool is_neighbor = species_rules.isValidNeighborTone(
+                    prev_self->pitch, pitch, *next_pitch);
+                if (is_passing || is_neighbor) p4_bass_allowed = true;
+              }
             }
           }
           if (!p4_bass_allowed) return false;

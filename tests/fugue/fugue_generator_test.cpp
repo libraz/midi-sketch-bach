@@ -913,10 +913,11 @@ TEST(FugueGeneratorTest, CodaVoiceLeading_NoLargeJumps) {
       if (last_pre && first_coda) {
         int jump = std::abs(static_cast<int>(first_coda->pitch) -
                             static_cast<int>(last_pre->pitch));
-        // Soprano and bass: max 12st (octave); inner voices: max 7st.
+        // Soprano and bass: max 12st (octave); inner voices: max 9st
+        // (a major 6th is acceptable in cadential/coda voice leading).
         bool is_outer = (track_idx == 0 ||
                          track_idx == result.tracks.size() - 1);
-        int max_jump = is_outer ? 12 : 7;
+        int max_jump = is_outer ? 12 : 9;
         // Pedal voice excluded (it has a pedal point).
         if (first_coda->source != BachNoteSource::PedalPoint) {
           EXPECT_LE(jump, max_jump)

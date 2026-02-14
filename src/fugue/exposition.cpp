@@ -658,6 +658,79 @@ Exposition buildExposition(const Subject& subject,
         desired_pitch = nearestChordTone(note.pitch, harm_ev);
       }
 
+      // For the first free counterpoint note per voice, ensure consonance
+      // with all currently sounding voices.  This prevents the common case
+      // where a voice re-entering after rest creates strong-beat dissonance.
+      bool is_first_free_note = true;
+      for (const auto& prev_note : validated) {
+        if (prev_note.start_tick >= structural_end) {
+          is_first_free_note = false;
+          break;
+        }
+      }
+      if (is_first_free_note && is_strong) {
+        bool consonant_with_all = true;
+        for (VoiceId other_vid : cp_state.getActiveVoices()) {
+          if (other_vid == voice_id) continue;
+          const NoteEvent* other_note = cp_state.getNoteAt(other_vid, note.start_tick);
+          if (!other_note) continue;
+          int diff = std::abs(static_cast<int>(desired_pitch) -
+                              static_cast<int>(other_note->pitch));
+          if (diff < 3) { consonant_with_all = false; break; }
+          int simple = interval_util::compoundToSimple(diff);
+          if (!interval_util::isConsonance(simple)) {
+            consonant_with_all = false;
+            break;
+          }
+        }
+        if (!consonant_with_all) {
+          // Search for a consonant chord tone within the voice register.
+          // Prefer imperfect consonances (m3, M3, m6, M6) over perfect ones.
+          auto voice_reg = getVoiceRegister(voice_id, config.num_voices);
+          int best_pitch = static_cast<int>(desired_pitch);
+          int best_score = -1;
+          for (int base = static_cast<int>(voice_reg.low);
+               base <= static_cast<int>(voice_reg.high); ++base) {
+            uint8_t chord_tone = nearestChordTone(static_cast<uint8_t>(base), harm_ev);
+            if (chord_tone < voice_reg.low || chord_tone > voice_reg.high) continue;
+            int cand = static_cast<int>(chord_tone);
+            bool all_ok = true;
+            int score = 0;
+            for (VoiceId other_vid : cp_state.getActiveVoices()) {
+              if (other_vid == voice_id) continue;
+              const NoteEvent* other_note =
+                  cp_state.getNoteAt(other_vid, note.start_tick);
+              if (!other_note) continue;
+              int cand_diff = std::abs(cand - static_cast<int>(other_note->pitch));
+              if (cand_diff < 3) { all_ok = false; break; }
+              int cand_simple = interval_util::compoundToSimple(cand_diff);
+              if (!interval_util::isConsonance(cand_simple)) {
+                all_ok = false;
+                break;
+              }
+              // Imperfect consonance bonus (m3=3, M3=4, m6=8, M6=9).
+              if (cand_simple == 3 || cand_simple == 4 ||
+                  cand_simple == 8 || cand_simple == 9) {
+                score += 2;
+              } else {
+                score += 1;
+              }
+            }
+            if (!all_ok) continue;
+            // Proximity to original pitch as tiebreaker.
+            int dist = std::abs(cand - static_cast<int>(desired_pitch));
+            int total = score * 100 - dist;
+            if (total > best_score) {
+              best_score = total;
+              best_pitch = cand;
+            }
+          }
+          if (best_score > 0) {
+            desired_pitch = static_cast<uint8_t>(best_pitch);
+          }
+        }
+      }
+
       BachNoteOptions opts;
       opts.voice = voice_id;
       opts.desired_pitch = desired_pitch;

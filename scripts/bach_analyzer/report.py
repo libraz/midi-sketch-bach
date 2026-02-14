@@ -201,3 +201,56 @@ def format_batch_text(
         lines.append("")
 
     return "\n".join(lines)
+
+
+def _format_ranked_section(
+    title: str,
+    data: Dict,
+    lines: List[str],
+    max_items: int = 10,
+) -> None:
+    """Append a ranked breakdown section to lines."""
+    lines.append(f"  {title}:")
+    items = list(data.items())[:max_items]
+    for key, info in items:
+        lines.append(f"    {key:<32} {info['count']:>6}  ({info['pct']:>5.1f}%)")
+    lines.append("")
+
+
+def format_diagnostics_text(diagnostics_list: List[Dict]) -> str:
+    """Format dissonance diagnostics as human-readable text.
+
+    Args:
+        diagnostics_list: List of dicts from compute_dissonance_diagnostics().
+    """
+    lines: List[str] = ["=== Dissonance Diagnostics ===", ""]
+
+    for diag in diagnostics_list:
+        rule = diag["rule"]
+        lines.append(f"--- {rule} ---")
+        lines.append(f"  Total violations: {diag['total_violations']}")
+        lines.append(f"  Seeds analyzed: {diag['seeds_analyzed']}")
+        lines.append(f"  Avg per seed: {diag['avg_per_seed']}")
+        lines.append(f"  Unknown source rate: {diag['unknown_source_rate']:.2%}")
+        lines.append("")
+
+        _format_ranked_section("Source (note A)", diag["source_breakdown"], lines)
+        _format_ranked_section("Source pair (A+B)", diag["source_pair_breakdown"], lines, 15)
+
+        # Interval: show all (max 12)
+        lines.append("  Interval distribution:")
+        for iv_key, info in diag["interval_distribution"].items():
+            lines.append(f"    {info['name']:<8} (iv={iv_key:>2})  {info['count']:>6}  ({info['pct']:>5.1f}%)")
+        lines.append("")
+
+        # Beat: show all
+        lines.append("  Beat distribution:")
+        for beat_key, info in diag["beat_distribution"].items():
+            lines.append(f"    beat {beat_key:<4}              {info['count']:>6}  ({info['pct']:>5.1f}%)")
+        lines.append("")
+
+        _format_ranked_section("Voice pair", diag["voice_pair_breakdown"], lines)
+        _format_ranked_section("Modified-by (bits)", diag["modified_by_bits"], lines)
+        _format_ranked_section("Modified-by (primary)", diag["modified_by_primary"], lines)
+
+    return "\n".join(lines)

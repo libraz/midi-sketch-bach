@@ -47,6 +47,8 @@ struct PitchCandidate {
   uint8_t pitch = 0;
   float score = 0.0f;        ///< Composite melodic + harmony score (higher = better).
   bool is_chord_tone = false;
+  bool has_vertical_dissonance = false;  ///< True if dissonant with any sounding voice.
+  bool is_suspension_like = false;       ///< True if pitch == previous note in voice (held).
 };
 
 int sequenceDegreeStepForCharacter(SubjectCharacter character, std::mt19937& rng) {
@@ -1201,7 +1203,83 @@ Episode generateEpisode(const Subject& subject, Tick start_tick, Tick duration_t
         } else if (ml == MetricLevel::Beat && !raw_is_ct && !lookahead_pitch.has_value()) {
           // Skip unresolvable NHT on beat.
         } else {
-          candidates.push_back({raw_diatonic, 0.0f, raw_is_ct});
+          candidates.push_back({raw_diatonic, 0.0f, raw_is_ct, false, false});
+        }
+      }
+
+      // (2b) Guaranteed vertical-consonant candidate: if both chord-tone
+      // candidates are vertically dissonant with other voices, add a
+      // chord tone that is consonant (imperfect preferred).
+      {
+        bool all_ct_dissonant = true;
+        for (const auto& cnd : candidates) {
+          if (!cnd.is_chord_tone) continue;
+          // Quick check: is this candidate consonant with all sounding voices?
+          bool cnd_ok = true;
+          for (VoiceId ov_id : cp_state.getActiveVoices()) {
+            if (ov_id == note.voice) continue;
+            const NoteEvent* other = cp_state.getNoteAt(ov_id, note.start_tick);
+            if (!other || other->start_tick + other->duration <= note.start_tick)
+              continue;
+            int ivl = interval_util::compoundToSimple(
+                absoluteInterval(cnd.pitch, other->pitch));
+            if (!interval_util::isConsonance(ivl)) {
+              cnd_ok = false;
+              break;
+            }
+          }
+          if (cnd_ok) {
+            all_ct_dissonant = false;
+            break;
+          }
+        }
+
+        if (all_ct_dissonant && ml >= MetricLevel::Beat) {
+          // Search for a chord tone that is consonant with all voices.
+          // Prefer imperfect consonances to avoid hollow sound.
+          uint8_t best_vc = 0;
+          int best_vc_score = -1;
+          for (int search = -12; search <= 12; ++search) {
+            int cand_p = static_cast<int>(note.pitch) + search;
+            if (cand_p < 0 || cand_p > 127) continue;
+            if (!isChordTone(static_cast<uint8_t>(cand_p), harm_ev)) continue;
+            bool vc_ok = true;
+            int vc_score = 0;
+            for (VoiceId ov_id : cp_state.getActiveVoices()) {
+              if (ov_id == note.voice) continue;
+              const NoteEvent* other = cp_state.getNoteAt(ov_id, note.start_tick);
+              if (!other || other->start_tick + other->duration <= note.start_tick)
+                continue;
+              int ivl = interval_util::compoundToSimple(
+                  absoluteInterval(static_cast<uint8_t>(cand_p), other->pitch));
+              if (!interval_util::isConsonance(ivl)) {
+                vc_ok = false;
+                break;
+              }
+              // Prefer imperfect consonances.
+              if (ivl == 3 || ivl == 4 || ivl == 8 || ivl == 9) {
+                vc_score += 2;
+              } else {
+                vc_score += 1;
+              }
+            }
+            if (vc_ok && vc_score > best_vc_score) {
+              best_vc_score = vc_score;
+              best_vc = static_cast<uint8_t>(cand_p);
+            }
+          }
+          if (best_vc_score > 0) {
+            bool dup = false;
+            for (const auto& cnd : candidates) {
+              if (cnd.pitch == best_vc) {
+                dup = true;
+                break;
+              }
+            }
+            if (!dup) {
+              candidates.push_back({best_vc, 0.0f, true, false, false});
+            }
+          }
         }
       }
 
@@ -1254,9 +1332,31 @@ Episode generateEpisode(const Subject& subject, Tick start_tick, Tick duration_t
           }
           if (has_any_other) {
             if (has_dissonance) {
+              cand.has_vertical_dissonance = true;
               mel_score += (ml == MetricLevel::Bar) ? -0.3f : -0.15f;
             } else {
               mel_score += 0.15f;
+            }
+          }
+        }
+
+        // A held pitch (same as previous note in this voice) is suspension-like
+        // and may be exempted from the strong-beat dissonance filter.
+        const NoteEvent* prev_in_voice = cp_state.getLastNote(note.voice);
+        if (prev_in_voice && cand.pitch == prev_in_voice->pitch) {
+          cand.is_suspension_like = true;
+        }
+
+        // Voice reentry penalty: if this voice is returning after a rest gap,
+        // penalize dissonant candidates more strongly.
+        {
+          const NoteEvent* last_in_voice = cp_state.getLastNote(note.voice);
+          if (last_in_voice) {
+            Tick last_end = last_in_voice->start_tick + last_in_voice->duration;
+            bool is_reentry = (last_end + kTicksPerBeat <= note.start_tick) &&
+                              (note.start_tick % kTicksPerBeat == 0);
+            if (is_reentry && cand.has_vertical_dissonance) {
+              mel_score -= 0.5f;
             }
           }
         }
@@ -1266,9 +1366,28 @@ Episode generateEpisode(const Subject& subject, Tick start_tick, Tick duration_t
 
       // Sort candidates by score descending.
       std::sort(candidates.begin(), candidates.end(),
-                [](const PitchCandidate& a, const PitchCandidate& b) {
-                  return a.score > b.score;
+                [](const PitchCandidate& lhs, const PitchCandidate& rhs) {
+                  return lhs.score > rhs.score;
                 });
+
+      // Strong-beat dissonance filter: on beats 1 and 3, remove dissonant
+      // candidates that are not suspension-like.
+      {
+        Tick beat_in_bar = (note.start_tick % kTicksPerBar) / kTicksPerBeat;
+        bool is_strong_beat = (beat_in_bar == 0 || beat_in_bar == 2);
+        if (is_strong_beat) {
+          auto disqualify_it = std::remove_if(
+              candidates.begin(), candidates.end(),
+              [](const PitchCandidate& cnd) {
+                return cnd.has_vertical_dissonance && !cnd.is_suspension_like;
+              });
+          // Safety valve: never remove ALL candidates.
+          if (disqualify_it == candidates.begin()) {
+            disqualify_it = candidates.begin() + 1;
+          }
+          candidates.erase(disqualify_it, candidates.end());
+        }
+      }
 
       // --- Sequential trial: best → 2nd → 3rd → omit. ---
       bool placed = false;
@@ -1729,6 +1848,7 @@ Episode generateFortspinnungEpisode(const Subject& subject, const MotifPool& poo
           }
           if (has_any_other) {
             if (has_dissonance) {
+              cand.has_vertical_dissonance = true;
               mel_score += (ml == MetricLevel::Bar) ? -0.3f : -0.15f;
             } else {
               mel_score += 0.15f;
@@ -1737,6 +1857,12 @@ Episode generateFortspinnungEpisode(const Subject& subject, const MotifPool& poo
         }
 
         cand.score = mel_score;
+
+        // Suspension-like detection: held pitch from previous note in voice.
+        const NoteEvent* prev_in_voice = cp_state.getLastNote(note.voice);
+        if (prev_in_voice && cand.pitch == prev_in_voice->pitch) {
+          cand.is_suspension_like = true;
+        }
       }
 
       // Sort candidates by score descending.
@@ -1744,6 +1870,23 @@ Episode generateFortspinnungEpisode(const Subject& subject, const MotifPool& poo
                 [](const PitchCandidate& a, const PitchCandidate& b) {
                   return a.score > b.score;
                 });
+
+      // Strong-beat dissonance filter: on beats 1 and 3, remove dissonant
+      // candidates that are not suspension-like.
+      Tick beat_in_bar = (note.start_tick % kTicksPerBar) / kTicksPerBeat;
+      bool is_strong_beat = (beat_in_bar == 0 || beat_in_bar == 2);
+      if (is_strong_beat) {
+        auto disqualify_it = std::remove_if(
+            candidates.begin(), candidates.end(),
+            [](const PitchCandidate& cnd) {
+              return cnd.has_vertical_dissonance && !cnd.is_suspension_like;
+            });
+        // Safety valve: never remove ALL candidates.
+        if (disqualify_it == candidates.begin()) {
+          disqualify_it = candidates.begin() + 1;
+        }
+        candidates.erase(disqualify_it, candidates.end());
+      }
 
       // --- Sequential trial: best → 2nd → 3rd → omit. ---
       bool placed = false;

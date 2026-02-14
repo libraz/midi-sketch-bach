@@ -43,6 +43,11 @@ class Violation:
     voice_b: str = ""
     description: str = ""
     source: Optional[NoteSource] = None
+    # Diagnostic fields (Phase 5-A)
+    source_b: Optional[NoteSource] = None
+    interval_semitones: Optional[int] = None  # simple interval [0-11]
+    modified_by_a: int = 0  # NoteModifiedBy bitfield
+    modified_by_b: int = 0  # NoteModifiedBy bitfield
 
     @property
     def location(self) -> str:

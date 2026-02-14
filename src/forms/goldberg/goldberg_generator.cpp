@@ -3,9 +3,13 @@
 #include "forms/goldberg/goldberg_generator.h"
 
 #include <algorithm>
+#include <cassert>
+#include <cstdio>
 #include <cmath>
+#include <map>
 
 #include "core/interval.h"
+#include "core/note_creator.h"
 #include "core/note_source.h"
 #include "core/pitch_utils.h"
 #include "core/rng_util.h"
@@ -186,7 +190,114 @@ GoldbergResult GoldbergGenerator::generate(const GoldbergConfig& config) const {
       var_notes = generateVariation(desc, grid_major, grid_minor, config.key, var_seed);
     }
 
+    // Verify all variation notes have provenance set.
+    // Every sub-generator must tag its notes with a non-Unknown BachNoteSource
+    // so that validation and debugging can trace each note to its origin.
+    for (const auto& note : var_notes) {
+      assert(note.source != BachNoteSource::Unknown &&
+             "Goldberg variation note missing provenance source");
+    }
+
     if (var_notes.empty()) continue;
+
+    // ManualPolicy voicing enforcement: ensure notes at each tick
+    // are physically playable per manual (one-hand span check).
+    {
+      auto manual_policy = getManualPolicy(desc.type);
+      if (manual_policy != ManualPolicy::HandCrossing) {
+        HarpsichordModel harpsichord;
+
+        // Group note indices by start_tick.
+        std::map<Tick, std::vector<size_t>> tick_groups;
+        for (size_t i = 0; i < var_notes.size(); ++i) {
+          tick_groups[var_notes[i].start_tick].push_back(i);
+        }
+
+        // Check playability for a group of simultaneous notes.
+        auto isGroupPlayable = [&](const std::vector<size_t>& group,
+                                   ManualPolicy pol, Hand hand) -> bool {
+          std::vector<uint8_t> pitches;
+          for (size_t idx : group) pitches.push_back(var_notes[idx].pitch);
+          if (pitches.size() < 2) return true;
+          if (pol == ManualPolicy::SingleManual) {
+            return harpsichord.isVoicingPlayable(pitches);
+          }
+          return harpsichord.isPlayableByOneHand(pitches, hand);
+        };
+
+        // Fix a group of simultaneous notes to be playable.
+        auto fixGroup = [&](std::vector<size_t>& group, ManualPolicy pol,
+                            Hand hand) {
+          if (isGroupPlayable(group, pol, hand)) return;
+
+          // Phase 1: Octave-shift flexible notes toward group pitch center.
+          int sum = 0;
+          for (size_t idx : group) sum += var_notes[idx].pitch;
+          int center = sum / static_cast<int>(group.size());
+
+          for (size_t idx : group) {
+            if (getProtectionLevel(var_notes[idx].source) !=
+                ProtectionLevel::Flexible) {
+              continue;
+            }
+            int cur = var_notes[idx].pitch;
+            int shifted = (cur > center + 6)   ? cur - 12
+                          : (cur < center - 6) ? cur + 12
+                                               : cur;
+            if (shifted >= kHarpsichordGlobalLow &&
+                shifted <= kHarpsichordGlobalHigh && shifted != cur) {
+              var_notes[idx].pitch = static_cast<uint8_t>(shifted);
+              var_notes[idx].modified_by |=
+                  static_cast<uint8_t>(NoteModifiedBy::OctaveAdjust);
+            }
+          }
+
+          if (isGroupPlayable(group, pol, hand)) return;
+
+          // Phase 2: Drop outermost flexible notes until playable.
+          std::sort(group.begin(), group.end(), [&](size_t a, size_t b) {
+            return var_notes[a].pitch < var_notes[b].pitch;
+          });
+          for (int attempt = 0; attempt < 3 && group.size() >= 2; ++attempt) {
+            if (isGroupPlayable(group, pol, hand)) break;
+            bool dropped = false;
+            for (auto it = group.rbegin(); it != group.rend(); ++it) {
+              if (getProtectionLevel(var_notes[*it].source) ==
+                  ProtectionLevel::Flexible) {
+                var_notes[*it].duration = 0;
+                group.erase(std::next(it).base());
+                dropped = true;
+                break;
+              }
+            }
+            if (!dropped) break;
+          }
+        };
+
+        for (auto& [tick, indices] : tick_groups) {
+          if (manual_policy == ManualPolicy::Standard) {
+            std::vector<size_t> upper_indices, lower_indices;
+            for (size_t idx : indices) {
+              if (var_notes[idx].voice <= 1) {
+                upper_indices.push_back(idx);
+              } else {
+                lower_indices.push_back(idx);
+              }
+            }
+            fixGroup(upper_indices, ManualPolicy::Standard, Hand::Right);
+            fixGroup(lower_indices, ManualPolicy::Standard, Hand::Left);
+          } else {  // SingleManual
+            fixGroup(indices, ManualPolicy::SingleManual, Hand::Right);
+          }
+        }
+
+        // Remove muted notes (duration == 0).
+        var_notes.erase(
+            std::remove_if(var_notes.begin(), var_notes.end(),
+                           [](const NoteEvent& n) { return n.duration == 0; }),
+            var_notes.end());
+      }
+    }
 
     // Apply binary repeats if Full scale.
     Tick bar_ticks = desc.time_sig.ticksPerBar();
@@ -281,28 +392,32 @@ GoldbergResult GoldbergGenerator::generate(const GoldbergConfig& config) const {
   sortByTick(track_lower.notes);
 
   // Step 6b: Counterpoint repair pipeline.
+  // Pre-dedup: collapse same-tick notes within each track to 1 note/tick.
+  // This matches cleanupTrackOverlaps in generator.cpp, ensuring postValidateNotes
+  // only processes notes that survive the final dedup (5 voices → 2 tracks).
+  auto dedupTrack = [](std::vector<NoteEvent>& notes) {
+    if (notes.size() < 2) return;
+    std::stable_sort(notes.begin(), notes.end(),
+        [](const NoteEvent& a, const NoteEvent& b) {
+          if (a.start_tick != b.start_tick) return a.start_tick < b.start_tick;
+          return a.duration > b.duration;
+        });
+    notes.erase(
+        std::unique(notes.begin(), notes.end(),
+            [](const NoteEvent& a, const NoteEvent& b) {
+              return a.start_tick == b.start_tick;
+            }),
+        notes.end());
+  };
+  dedupTrack(track_upper.notes);
+  dedupTrack(track_lower.notes);
+
   // Merge both tracks into a single note vector for cross-voice analysis.
   {
     std::vector<NoteEvent> all_notes;
     all_notes.reserve(track_upper.notes.size() + track_lower.notes.size());
     all_notes.insert(all_notes.end(), track_upper.notes.begin(), track_upper.notes.end());
     all_notes.insert(all_notes.end(), track_lower.notes.begin(), track_lower.notes.end());
-
-    // (a) Parallel perfect consonance repair.
-    {
-      ParallelRepairParams pp_params;
-      pp_params.num_voices = kGoldbergVoices;
-      pp_params.scale = config.key.is_minor ? ScaleType::HarmonicMinor : ScaleType::Major;
-      pp_params.key_at_tick = [&](Tick) { return config.key.tonic; };
-      pp_params.voice_range = [](uint8_t voice) -> std::pair<uint8_t, uint8_t> {
-        if (voice < kGoldbergVoices) {
-          return {kHarpsichordLow[voice], kHarpsichordHigh[voice]};
-        }
-        return {kHarpsichordGlobalLow, kHarpsichordGlobalHigh};
-      };
-      pp_params.max_iterations = 8;
-      repairParallelPerfect(all_notes, pp_params);
-    }
 
     // (b) Per-voice tritone sweep: fix tritone leaps between consecutive notes.
     ScaleType tritone_scale =
@@ -377,6 +492,42 @@ GoldbergResult GoldbergGenerator::generate(const GoldbergConfig& config) const {
           cur_note.pitch = clampPitch(best_cand, voice_lo, voice_hi);
         }
       }
+    }
+
+    // (0) Post-validate: route all notes through collision resolver cascade
+    //     for strong-beat consonance, parallel/hidden perfect, voice crossing.
+    {
+      std::vector<std::pair<uint8_t, uint8_t>> voice_ranges;
+      for (uint8_t v = 0; v < kGoldbergVoices; ++v) {
+        voice_ranges.push_back({kHarpsichordLow[v], kHarpsichordHigh[v]});
+      }
+      PostValidateStats pv_stats;
+      all_notes = postValidateNotes(
+          std::move(all_notes), kGoldbergVoices, config.key, voice_ranges,
+          &pv_stats);
+      if (pv_stats.drop_rate() > 0.10f) {
+        std::fprintf(stderr,
+            "[GoldbergGenerator] WARNING: postValidate drop_rate=%.1f%% "
+            "(%u/%u dropped)\n",
+            pv_stats.drop_rate() * 100.0f,
+            pv_stats.dropped, pv_stats.total_input);
+      }
+    }
+
+    // (a) Parallel perfect consonance repair.
+    {
+      ParallelRepairParams pp_params;
+      pp_params.num_voices = kGoldbergVoices;
+      pp_params.scale = config.key.is_minor ? ScaleType::HarmonicMinor : ScaleType::Major;
+      pp_params.key_at_tick = [&](Tick) { return config.key.tonic; };
+      pp_params.voice_range = [](uint8_t voice) -> std::pair<uint8_t, uint8_t> {
+        if (voice < kGoldbergVoices) {
+          return {kHarpsichordLow[voice], kHarpsichordHigh[voice]};
+        }
+        return {kHarpsichordGlobalLow, kHarpsichordGlobalHigh};
+      };
+      pp_params.max_iterations = 8;
+      repairParallelPerfect(all_notes, pp_params);
     }
 
     // (c) Redistribute repaired notes back into upper/lower tracks.

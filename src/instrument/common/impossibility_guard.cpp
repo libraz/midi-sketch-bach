@@ -86,9 +86,16 @@ makeFixPitchRange(uint8_t range_low, uint8_t range_high) {
       }
     }
 
-    // Structural: if shift not possible, don't touch.
+    // Structural: retry octave shift ignoring contour (out-of-range is worse
+    // than a direction reversal).
     if (level == ProtectionLevel::Structural) {
-      return pitch;
+      if (down >= range_low && down <= range_high && down >= 0) {
+        return static_cast<uint8_t>(down);
+      }
+      if (up >= range_low && up <= range_high && up <= 127) {
+        return static_cast<uint8_t>(up);
+      }
+      return pitch;  // Neither direction fits; leave as-is.
     }
 
     // Flexible: clamp as last resort.

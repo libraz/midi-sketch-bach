@@ -206,7 +206,7 @@ class StrongBeatDissonance:
     def check(self, score: Score) -> RuleResult:
         violations: List[Violation] = []
         all_notes = score.all_notes
-        num_voices = score.num_voices
+        num_voices = score.num_internal_voices
         total = score.total_duration
 
         tick = 0
@@ -251,6 +251,10 @@ class StrongBeatDissonance:
                                 voice_b=nb.voice,
                                 description=f"dissonant interval {iv} st on beat {beat_in_bar}: {pitch_to_name(na.pitch)}/{pitch_to_name(nb.pitch)}",
                                 source=na.provenance.source if na.provenance else None,
+                                source_b=nb.provenance.source if nb.provenance else None,
+                                interval_semitones=iv,
+                                modified_by_a=na.modified_by,
+                                modified_by_b=nb.modified_by,
                             )
                         )
             tick += TICKS_PER_BEAT
@@ -296,7 +300,7 @@ class UnresolvedDissonance:
     def check(self, score: Score) -> RuleResult:
         violations: List[Violation] = []
         all_notes = score.all_notes
-        num_voices = score.num_voices
+        num_voices = score.num_internal_voices
         beats = _beat_ticks(score)
 
         for b_idx in range(len(beats) - 1):
@@ -396,6 +400,10 @@ class UnresolvedDissonance:
                                 voice_b=nb.voice,
                                 description=f"unresolved dissonance {iv} st: {pitch_to_name(na.pitch)}/{pitch_to_name(nb.pitch)}",
                                 source=na.provenance.source if na.provenance else None,
+                                source_b=nb.provenance.source if nb.provenance else None,
+                                interval_semitones=iv,
+                                modified_by_a=na.modified_by,
+                                modified_by_b=nb.modified_by,
                             )
                         )
         return RuleResult(

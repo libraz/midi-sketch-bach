@@ -58,6 +58,8 @@ def validate_seed(
     cli_path: str = "./build/bin/bach_cli",
     output_dir: Optional[str] = None,
     categories: Optional[set] = None,
+    diagnostics: bool = False,
+    diagnostic_rules: Optional[set] = None,
 ) -> Dict[str, Any]:
     """Generate and validate a single seed.
 
@@ -88,6 +90,27 @@ def validate_seed(
             all_violations.extend(r.violations)
         result["total_violations"] = len(all_violations)
         result["violation_counts"] = counts
+        if diagnostics:
+            target_rules = diagnostic_rules or {"strong_beat_dissonance", "unresolved_dissonance"}
+            details = []
+            for r in results:
+                if r.rule_name not in target_rules:
+                    continue
+                for v in r.violations:
+                    details.append({
+                        "rule": v.rule_name,
+                        "severity": v.severity.value,
+                        "bar": v.bar,
+                        "beat": v.beat,
+                        "source_a": v.source.name.lower() if v.source else "unknown",
+                        "source_b": v.source_b.name.lower() if v.source_b else "unknown",
+                        "interval": v.interval_semitones,
+                        "modified_by_a": v.modified_by_a,
+                        "modified_by_b": v.modified_by_b,
+                        "voice_a": v.voice_a,
+                        "voice_b": v.voice_b,
+                    })
+            result["violation_details"] = details
     except Exception as exc:
         result["error"] = str(exc)
     return result
@@ -101,6 +124,8 @@ def run_batch(
     cli_path: str = "./build/bin/bach_cli",
     categories: Optional[set] = None,
     on_progress: Optional[callable] = None,
+    diagnostics: bool = False,
+    diagnostic_rules: Optional[set] = None,
 ) -> List[Dict[str, Any]]:
     """Run batch validation across multiple seeds.
 
@@ -133,6 +158,8 @@ def run_batch(
                     cli_path=cli_path,
                     output_dir=tmpdir,
                     categories=categories,
+                    diagnostics=diagnostics,
+                    diagnostic_rules=diagnostic_rules,
                 )
                 if key:
                     r["key"] = key

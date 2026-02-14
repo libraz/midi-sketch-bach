@@ -68,6 +68,19 @@ class NoteSource(IntEnum):
     FALSE_ENTRY = 15
     CODA = 16
     SEQUENCE_NOTE = 17
+    CANON_DUX = 18
+    CANON_COMES = 19
+    CANON_FREE_BASS = 20
+    GOLDBERG_ARIA = 21
+    GOLDBERG_BASS = 22
+    GOLDBERG_FIGURA = 23
+    GOLDBERG_SOGGETTO = 24
+    GOLDBERG_DANCE = 25
+    GOLDBERG_FUGHETTA = 26
+    GOLDBERG_INVENTION = 27
+    QUODLIBET_MELODY = 28
+    GOLDBERG_OVERTURE = 29
+    GOLDBERG_SUSPENSION = 30
 
 
 # String name used in output.json -> NoteSource mapping.
@@ -90,6 +103,19 @@ SOURCE_STRING_MAP: Dict[str, NoteSource] = {
     "false_entry": NoteSource.FALSE_ENTRY,
     "coda": NoteSource.CODA,
     "sequence_note": NoteSource.SEQUENCE_NOTE,
+    "canon_dux": NoteSource.CANON_DUX,
+    "canon_comes": NoteSource.CANON_COMES,
+    "canon_free_bass": NoteSource.CANON_FREE_BASS,
+    "goldberg_aria": NoteSource.GOLDBERG_ARIA,
+    "goldberg_bass": NoteSource.GOLDBERG_BASS,
+    "goldberg_figura": NoteSource.GOLDBERG_FIGURA,
+    "goldberg_soggetto": NoteSource.GOLDBERG_SOGGETTO,
+    "goldberg_dance": NoteSource.GOLDBERG_DANCE,
+    "goldberg_fughetta": NoteSource.GOLDBERG_FUGHETTA,
+    "goldberg_invention": NoteSource.GOLDBERG_INVENTION,
+    "quodlibet_melody": NoteSource.QUODLIBET_MELODY,
+    "goldberg_overture": NoteSource.GOLDBERG_OVERTURE,
+    "goldberg_suspension": NoteSource.GOLDBERG_SUSPENSION,
 }
 
 
@@ -265,6 +291,15 @@ class Score:
     @property
     def num_voices(self) -> int:
         return len(self.tracks)
+
+    @property
+    def num_internal_voices(self) -> int:
+        """Actual voice count from voice_id (may differ from track count)."""
+        voice_ids = set()
+        for track in self.tracks:
+            for note in track.notes:
+                voice_ids.add(note.voice_id)
+        return max(len(voice_ids), len(self.tracks))
 
     @property
     def total_notes(self) -> int:
