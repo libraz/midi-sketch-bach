@@ -8,6 +8,7 @@
 
 #include "core/gm_program.h"
 #include "core/melodic_state.h"
+#include "forms/form_utils.h"
 #include "core/note_creator.h"
 #include "core/pitch_utils.h"
 #include "core/rng_util.h"
@@ -17,6 +18,7 @@
 #include "counterpoint/counterpoint_state.h"
 #include "counterpoint/leap_resolution.h"
 #include "counterpoint/parallel_repair.h"
+#include "counterpoint/vertical_safe.h"
 #include "harmony/chord_types.h"
 #include "harmony/harmonic_event.h"
 #include "organ/organ_techniques.h"
@@ -26,49 +28,6 @@ namespace bach {
 namespace {
 
 using namespace duration;
-
-// ---------------------------------------------------------------------------
-// Track creation
-// ---------------------------------------------------------------------------
-
-/// @brief Create MIDI tracks for a fantasia.
-///
-/// Channel/program mapping per the organ system spec:
-///   Voice 0 -> Ch 0, Church Organ (Manual I / Great)
-///   Voice 1 -> Ch 1, Reed Organ   (Manual II / Swell)
-///   Voice 2 -> Ch 2, Church Organ (Manual III / Positiv)
-///   Voice 3 -> Ch 3, Church Organ (Pedal)
-///
-/// @param num_voices Number of voices (2-5).
-/// @return Vector of Track objects with channel/program/name configured.
-std::vector<Track> createFantasiaTracks(uint8_t num_voices) {
-  std::vector<Track> tracks;
-  tracks.reserve(num_voices);
-
-  struct TrackSpec {
-    uint8_t channel;
-    uint8_t program;
-    const char* name;
-  };
-
-  static constexpr TrackSpec kSpecs[] = {
-      {0, GmProgram::kChurchOrgan, "Manual I (Great)"},
-      {1, GmProgram::kReedOrgan, "Manual II (Swell)"},
-      {2, GmProgram::kChurchOrgan, "Manual III (Positiv)"},
-      {3, GmProgram::kChurchOrgan, "Pedal"},
-      {4, GmProgram::kChurchOrgan, "Manual IV"},
-  };
-
-  for (uint8_t idx = 0; idx < num_voices && idx < 5; ++idx) {
-    Track track;
-    track.channel = kSpecs[idx].channel;
-    track.program = kSpecs[idx].program;
-    track.name = kSpecs[idx].name;
-    tracks.push_back(track);
-  }
-
-  return tracks;
-}
 
 // ---------------------------------------------------------------------------
 // Voice generators
@@ -387,24 +346,6 @@ std::vector<NoteEvent> generateSlowBass(const HarmonicTimeline& timeline,
   return notes;
 }
 
-// ---------------------------------------------------------------------------
-// Note sorting
-// ---------------------------------------------------------------------------
-
-/// @brief Sort notes in each track by start_tick for MIDI output.
-/// @param tracks Tracks whose notes will be sorted in place.
-void sortFantasiaTrackNotes(std::vector<Track>& tracks) {
-  for (auto& track : tracks) {
-    std::sort(track.notes.begin(), track.notes.end(),
-              [](const NoteEvent& lhs, const NoteEvent& rhs) {
-                if (lhs.start_tick != rhs.start_tick) {
-                  return lhs.start_tick < rhs.start_tick;
-                }
-                return lhs.pitch < rhs.pitch;
-              });
-  }
-}
-
 /// @brief Clamp voice count to valid range [2, 5].
 /// @param num_voices Raw voice count from configuration.
 /// @return Clamped voice count.
@@ -601,13 +542,15 @@ FantasiaResult generateFantasia(const FantasiaConfig& config) {
         const auto& ev = timeline.getAt(t);
         return ev.is_minor ? ScaleType::HarmonicMinor : ScaleType::Major;
       };
-      lr_params.voice_range = [&](uint8_t v) -> std::pair<uint8_t, uint8_t> {
+      lr_params.voice_range_static = [&](uint8_t v) -> std::pair<uint8_t, uint8_t> {
         if (v < voice_ranges.size()) return voice_ranges[v];
         return {0, 127};
       };
       lr_params.is_chord_tone = [&](Tick t, uint8_t p) {
         return isChordTone(p, timeline.getAt(t));
       };
+      lr_params.vertical_safe =
+          makeVerticalSafeCallback(timeline, all_notes, num_voices);
       resolveLeaps(all_notes, lr_params);
 
       // Second parallel-perfect repair pass after leap resolution.
@@ -616,7 +559,7 @@ FantasiaResult generateFantasia(const FantasiaConfig& config) {
         pp_params.num_voices = num_voices;
         pp_params.scale = config.key.is_minor ? ScaleType::HarmonicMinor : ScaleType::Major;
         pp_params.key_at_tick = lr_params.key_at_tick;
-        pp_params.voice_range = lr_params.voice_range;
+        pp_params.voice_range_static = lr_params.voice_range_static;
         pp_params.max_iterations = 5;
         repairParallelPerfect(all_notes, pp_params);
       }
@@ -624,7 +567,7 @@ FantasiaResult generateFantasia(const FantasiaConfig& config) {
   }
 
   // Step 4: Create tracks and assign notes by voice_id.
-  std::vector<Track> tracks = createFantasiaTracks(num_voices);
+  std::vector<Track> tracks = form_utils::createOrganTracks(num_voices);
   for (const auto& note : all_notes) {
     if (note.voice < tracks.size()) {
       tracks[note.voice].notes.push_back(note);
@@ -661,7 +604,7 @@ FantasiaResult generateFantasia(const FantasiaConfig& config) {
   applyExtendedRegistrationPlan(tracks, reg_plan);
 
   // Step 5: Sort notes within each track.
-  sortFantasiaTrackNotes(tracks);
+  form_utils::sortTrackNotes(tracks);
 
   result.tracks = std::move(tracks);
   result.timeline = std::move(timeline);

@@ -24,6 +24,8 @@
 #include "counterpoint/leap_resolution.h"
 #include "counterpoint/parallel_repair.h"
 #include "counterpoint/repeated_note_repair.h"
+#include "counterpoint/vertical_safe.h"
+#include "forms/form_utils.h"
 #include "fugue/fugue_config.h"
 #include "organ/organ_techniques.h"
 
@@ -49,49 +51,6 @@ constexpr Tick kDefaultPreludeBars = 12;
 
 /// @brief Prelude-to-fugue length ratio (midpoint of 60-80% range).
 constexpr float kPreludeFugueRatio = 0.70f;
-
-// ---------------------------------------------------------------------------
-// Track creation (mirrors fugue_generator organ track setup)
-// ---------------------------------------------------------------------------
-
-/// @brief Create MIDI tracks for an organ prelude.
-///
-/// Channel/program mapping per the organ system spec:
-///   Voice 0 -> Ch 0, Church Organ (Manual I / Great)
-///   Voice 1 -> Ch 1, Reed Organ   (Manual II / Swell)
-///   Voice 2 -> Ch 2, Church Organ (Manual III / Positiv)
-///   Voice 3 -> Ch 3, Church Organ (Pedal)
-///
-/// @param num_voices Number of voices (2-5).
-/// @return Vector of Track objects with channel/program/name configured.
-std::vector<Track> createPreludeTracks(uint8_t num_voices) {
-  std::vector<Track> tracks;
-  tracks.reserve(num_voices);
-
-  struct TrackSpec {
-    uint8_t channel;
-    uint8_t program;
-    const char* name;
-  };
-
-  static constexpr TrackSpec kSpecs[] = {
-      {0, GmProgram::kChurchOrgan, "Manual I (Great)"},
-      {1, GmProgram::kReedOrgan, "Manual II (Swell)"},
-      {2, GmProgram::kChurchOrgan, "Manual III (Positiv)"},
-      {3, GmProgram::kChurchOrgan, "Pedal"},
-      {4, GmProgram::kChurchOrgan, "Manual IV"},
-  };
-
-  for (uint8_t idx = 0; idx < num_voices && idx < 5; ++idx) {
-    Track track;
-    track.channel = kSpecs[idx].channel;
-    track.program = kSpecs[idx].program;
-    track.name = kSpecs[idx].name;
-    tracks.push_back(track);
-  }
-
-  return tracks;
-}
 
 // ---------------------------------------------------------------------------
 // Pitch range helpers
@@ -256,7 +215,7 @@ std::vector<NoteEvent> generateScalePassage(const HarmonicEvent& event,
     note.pitch = scale_tones[tone_idx];
     note.velocity = kOrganVelocity;
     note.voice = voice_idx;
-    note.source = BachNoteSource::FreeCounterpoint;
+    note.source = BachNoteSource::EpisodeMaterial;
     notes.push_back(note);
 
     current_tick += dur;
@@ -1028,20 +987,6 @@ std::vector<NoteEvent> generatePerpetualNotes(const HarmonicTimeline& timeline,
   return all_notes;
 }
 
-/// @brief Sort notes in each track by start_tick for MIDI output.
-/// @param tracks Tracks whose notes will be sorted in place.
-void sortPreludeTrackNotes(std::vector<Track>& tracks) {
-  for (auto& track : tracks) {
-    std::sort(track.notes.begin(), track.notes.end(),
-              [](const NoteEvent& lhs, const NoteEvent& rhs) {
-                if (lhs.start_tick != rhs.start_tick) {
-                  return lhs.start_tick < rhs.start_tick;
-                }
-                return lhs.pitch < rhs.pitch;
-              });
-  }
-}
-
 /// @brief Clamp voice count to valid range [2, 5].
 /// @param num_voices Raw voice count from configuration.
 /// @return Clamped voice count.
@@ -1049,6 +994,32 @@ uint8_t clampPreludeVoiceCount(uint8_t num_voices) {
   if (num_voices < 2) return 2;
   if (num_voices > 5) return 5;
   return num_voices;
+}
+
+/// Check vertical consonance of candidate pitch against already-placed notes.
+static bool isVerticallyConsonant(uint8_t pitch, uint8_t voice, Tick tick,
+                                  const std::vector<NoteEvent>& placed,
+                                  uint8_t num_voices) {
+  uint8_t lowest = pitch;
+  for (const auto& note : placed) {
+    if (note.voice == voice) continue;
+    if (note.start_tick + note.duration <= tick || note.start_tick > tick) continue;
+    if (note.pitch < lowest) lowest = note.pitch;
+  }
+  for (const auto& note : placed) {
+    if (note.voice == voice) continue;
+    if (note.start_tick + note.duration <= tick || note.start_tick > tick) continue;
+    int reduced = interval_util::compoundToSimple(
+        absoluteInterval(pitch, note.pitch));
+    if (!interval_util::isConsonance(reduced)) {
+      if (num_voices >= 3 && reduced == interval::kPerfect4th) {
+        uint8_t lower = std::min(pitch, note.pitch);
+        if (lower > lowest) continue;  // P4 between upper voices: OK.
+      }
+      return false;
+    }
+  }
+  return true;
 }
 
 }  // namespace
@@ -1192,6 +1163,73 @@ PreludeResult generatePrelude(const PreludeConfig& config) {
           continue;
         }
 
+        // Pre-composed patterns: lightweight safety + accept.
+        if (note.source == BachNoteSource::ArpeggioFlow ||
+            note.source == BachNoteSource::EpisodeMaterial) {
+          if (note.pitch < getVoiceLowPitch(note.voice) ||
+              note.pitch > getVoiceHighPitch(note.voice)) {
+            continue;
+          }
+
+          if (isStrongBeat(note.start_tick)) {
+            // (A) Chord-tone check.
+            const HarmonicEvent& harm = timeline.getAt(note.start_tick);
+            if (!isChordTone(note.pitch, harm)) {
+              // Snap repair: try ±1 first, then ±2 same-direction only.
+              bool snapped = false;
+              int run_dir = 0;
+              for (auto iter = coordinated.rbegin(); iter != coordinated.rend();
+                   ++iter) {
+                if (iter->voice == note.voice) {
+                  run_dir = (note.pitch > iter->pitch)    ? 1
+                            : (note.pitch < iter->pitch) ? -1
+                                                          : 0;
+                  break;
+                }
+              }
+              std::array<int, 4> deltas;
+              int delta_count = 2;
+              deltas[0] = 1;
+              deltas[1] = -1;
+              if (run_dir != 0) {
+                deltas[delta_count++] = 2 * run_dir;
+              } else {
+                deltas[delta_count++] = 2;
+                deltas[delta_count++] = -2;
+              }
+              for (int di = 0; di < delta_count; ++di) {
+                uint8_t cand = clampPitch(static_cast<int>(note.pitch) + deltas[di],
+                                          getVoiceLowPitch(note.voice),
+                                          getVoiceHighPitch(note.voice));
+                if (isChordTone(cand, harm) &&
+                    isVerticallyConsonant(cand, note.voice, note.start_tick,
+                                          coordinated, num_voices)) {
+                  NoteEvent fixed = note;
+                  fixed.pitch = cand;
+                  cp_state.addNote(fixed.voice, fixed);
+                  coordinated.push_back(fixed);
+                  ++accepted_count;
+                  snapped = true;
+                  break;
+                }
+              }
+              if (!snapped) continue;
+              continue;
+            }
+
+            // (B) Vertical consonance check (original pitch).
+            if (!isVerticallyConsonant(note.pitch, note.voice, note.start_tick,
+                                       coordinated, num_voices)) {
+              continue;
+            }
+          }
+
+          cp_state.addNote(note.voice, note);
+          coordinated.push_back(note);
+          ++accepted_count;
+          continue;
+        }
+
         BachNoteOptions opts;
         opts.voice = note.voice;
         opts.desired_pitch = note.pitch;
@@ -1259,12 +1297,14 @@ PreludeResult generatePrelude(const PreludeConfig& config) {
       const auto& ev = timeline.getAt(t);
       return ev.is_minor ? ScaleType::HarmonicMinor : ScaleType::Major;
     };
-    lr_params.voice_range = [&](uint8_t v) -> std::pair<uint8_t, uint8_t> {
+    lr_params.voice_range_static = [&](uint8_t v) -> std::pair<uint8_t, uint8_t> {
       return {getVoiceLowPitch(v), getVoiceHighPitch(v)};
     };
     lr_params.is_chord_tone = [&](Tick t, uint8_t p) {
       return isChordTone(p, timeline.getAt(t));
     };
+    lr_params.vertical_safe =
+        makeVerticalSafeCallback(timeline, all_notes, num_voices);
     resolveLeaps(all_notes, lr_params);
 
     // Second parallel-perfect repair pass after leap resolution.
@@ -1273,7 +1313,7 @@ PreludeResult generatePrelude(const PreludeConfig& config) {
       pp_params.num_voices = num_voices;
       pp_params.scale = config.key.is_minor ? ScaleType::HarmonicMinor : ScaleType::Major;
       pp_params.key_at_tick = lr_params.key_at_tick;
-      pp_params.voice_range = lr_params.voice_range;
+      pp_params.voice_range_static = lr_params.voice_range_static;
       pp_params.max_iterations = 5;
       repairParallelPerfect(all_notes, pp_params);
     }
@@ -1291,11 +1331,13 @@ PreludeResult generatePrelude(const PreludeConfig& config) {
     repair_params.voice_range = [&](uint8_t v) -> std::pair<uint8_t, uint8_t> {
       return {getVoiceLowPitch(v), getVoiceHighPitch(v)};
     };
+    repair_params.vertical_safe =
+        makeVerticalSafeCallback(timeline, all_notes, num_voices);
     repairRepeatedNotes(all_notes, repair_params);
   }
 
   // Step 4: Create tracks and assign notes by voice_id.
-  std::vector<Track> tracks = createPreludeTracks(num_voices);
+  std::vector<Track> tracks = form_utils::createOrganTracks(num_voices);
   for (const auto& note : all_notes) {
     if (note.voice < tracks.size()) {
       tracks[note.voice].notes.push_back(note);
@@ -1332,7 +1374,7 @@ PreludeResult generatePrelude(const PreludeConfig& config) {
   applyExtendedRegistrationPlan(tracks, reg_plan);
 
   // Step 5: Sort notes within each track.
-  sortPreludeTrackNotes(tracks);
+  form_utils::sortTrackNotes(tracks);
 
   result.tracks = std::move(tracks);
   result.timeline = std::move(timeline);

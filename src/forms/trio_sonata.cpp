@@ -18,9 +18,11 @@
 #include "core/scale.h"
 #include "counterpoint/bach_rule_evaluator.h"
 #include "counterpoint/collision_resolver.h"
+#include "forms/form_utils.h"
 #include "counterpoint/counterpoint_state.h"
 #include "counterpoint/leap_resolution.h"
 #include "counterpoint/parallel_repair.h"
+#include "counterpoint/vertical_safe.h"
 #include "counterpoint/species_rules.h"
 #include "harmony/chord_tone_utils.h"
 #include "harmony/chord_types.h"
@@ -603,6 +605,9 @@ void generateUpperVoicePhrase(Tick phrase_start, const std::vector<NoteEvent>& m
   auto leader_motif = placeInRegister(motif, leader_center, leader_low, leader_high);
   clampExcessiveLeaps(leader_motif, 12, leader_center, phrase_start + kPhraseTicks);
   setVoice(leader_motif, leader_voice);
+  for (auto& n : leader_motif) {
+    n.source = BachNoteSource::EpisodeMaterial;
+  }
   shiftTicks(leader_motif, phrase_start);
 
   // Diatonic sequence (Fortspinnung) continuing after motif.
@@ -630,6 +635,7 @@ void generateUpperVoicePhrase(Tick phrase_start, const std::vector<NoteEvent>& m
       n.pitch = clampPitch(static_cast<int>(n.pitch), leader_low, leader_high);
       n.modified_by |= static_cast<uint8_t>(NoteModifiedBy::OctaveAdjust);
       n.voice = leader_voice;
+      n.source = BachNoteSource::SequenceNote;
 
       if (n.start_tick < fortspinnung_end) {
         if (n.start_tick + n.duration > fortspinnung_end) {
@@ -699,6 +705,9 @@ void generateUpperVoicePhrase(Tick phrase_start, const std::vector<NoteEvent>& m
       placeInRegister(follower_imitation, follower_center, follower_low, follower_high);
   clampExcessiveLeaps(follower_imitation, 12, follower_center, phrase_start + kPhraseTicks);
   setVoice(follower_imitation, follower_voice);
+  for (auto& n : follower_imitation) {
+    n.source = BachNoteSource::EpisodeMaterial;
+  }
   shiftTicks(follower_imitation, phrase_start + imitation_offset);
 
   // Trim follower notes that exceed half phrase.
@@ -1126,7 +1135,14 @@ bool insertCadentialSuspension(std::vector<Track>& tracks, Tick cadence_tick,
     notes[target_idx].modified_by |= static_cast<uint8_t>(NoteModifiedBy::ChordToneSnap);
     Tick new_dur = cadence_tick - notes[target_idx].start_tick;
     if (new_dur > 0) {
-      notes[target_idx].duration = new_dur;
+      // Quantize to largest standard duration that fits.
+      static constexpr Tick kStdDurs[] = {kWholeNote, kHalfNote, kQuarterNote,
+                                          kEighthNote, kSixteenthNote};
+      Tick quantized = kSixteenthNote;
+      for (Tick dur : kStdDurs) {
+        if (dur <= new_dur) { quantized = dur; break; }
+      }
+      notes[target_idx].duration = quantized;
       notes[target_idx].modified_by |= static_cast<uint8_t>(NoteModifiedBy::OverlapTrim);
     }
 
@@ -1149,22 +1165,48 @@ bool insertCadentialSuspension(std::vector<Track>& tracks, Tick cadence_tick,
 // Step 5c: Breathing rest insertion
 // ---------------------------------------------------------------------------
 
-/// @brief Insert breathing rests at phrase boundaries for upper voices.
+/// @brief Insert breathing rests at cadence boundaries for upper voices.
 ///
-/// Truncates upper voice notes (voice 0 and 1) that extend into the last
-/// sixteenth note before each phrase boundary. Pedal (voice 2) is exempt
+/// Detects cadence positions from the harmonic timeline (key changes and V-I
+/// progressions) and truncates upper voice notes (voice 0 and 1) that extend
+/// into the last sixteenth note before each cadence. Pedal (voice 2) is exempt
 /// (organ pedal sustains across phrase boundaries per BWV 525-530 practice).
-void insertBreathingRests(std::vector<Track>& tracks, Tick num_phrases, Tick duration) {
-  for (Tick p = 1; p < num_phrases; ++p) {
-    Tick boundary = p * kPhraseTicks;
-    if (boundary > duration) break;
-    Tick breath_start = boundary - kSixteenthNote;
+void insertBreathingRests(std::vector<Track>& tracks,
+                          const HarmonicTimeline& timeline, Tick duration) {
+  // Collect breathing boundaries: phrase boundaries + harmonic cadences.
+  std::vector<Tick> cadence_ticks;
 
-    // Only upper voices (tracks 0 and 1).
+  // Phrase boundaries (every kPhraseTicks).
+  for (Tick boundary = kPhraseTicks; boundary < duration;
+       boundary += kPhraseTicks) {
+    cadence_ticks.push_back(boundary);
+  }
+
+  // Harmonic cadences (key changes, V-I progressions).
+  const auto& events = timeline.events();
+  for (size_t idx = 1; idx < events.size(); ++idx) {
+    if (events[idx].key != events[idx - 1].key ||
+        events[idx].is_minor != events[idx - 1].is_minor ||
+        (events[idx - 1].chord.degree == ChordDegree::V &&
+         events[idx].chord.degree == ChordDegree::I)) {
+      if (events[idx].tick > 0 && events[idx].tick < duration) {
+        cadence_ticks.push_back(events[idx].tick);
+      }
+    }
+  }
+
+  // Deduplicate and sort.
+  std::sort(cadence_ticks.begin(), cadence_ticks.end());
+  cadence_ticks.erase(std::unique(cadence_ticks.begin(), cadence_ticks.end()),
+                      cadence_ticks.end());
+
+  for (Tick cad_tick : cadence_ticks) {
+    Tick breath_start = cad_tick - kSixteenthNote;
     for (size_t trk = 0; trk < 2 && trk < tracks.size(); ++trk) {
       for (auto& note : tracks[trk].notes) {
         if (note.start_tick < breath_start &&
-            note.start_tick + note.duration > breath_start) {
+            note.start_tick + note.duration > breath_start &&
+            note.duration > kEighthNote) {  // Protect short notes.
           note.duration = breath_start - note.start_tick;
           note.modified_by |= static_cast<uint8_t>(NoteModifiedBy::Articulation);
         }
@@ -1683,6 +1725,32 @@ TrioSonataCPReport buildTrioCPReport(const std::vector<Track>& tracks) {
   return report;
 }
 
+/// Check vertical consonance of candidate pitch against already-placed notes.
+static bool isVerticallyConsonant(uint8_t pitch, uint8_t voice, Tick tick,
+                                  const std::vector<NoteEvent>& placed,
+                                  uint8_t num_voices) {
+  uint8_t lowest = pitch;
+  for (const auto& n : placed) {
+    if (n.voice == voice) continue;
+    if (n.start_tick + n.duration <= tick || n.start_tick > tick) continue;
+    if (n.pitch < lowest) lowest = n.pitch;
+  }
+  for (const auto& n : placed) {
+    if (n.voice == voice) continue;
+    if (n.start_tick + n.duration <= tick || n.start_tick > tick) continue;
+    int reduced = interval_util::compoundToSimple(
+        absoluteInterval(pitch, n.pitch));
+    if (!interval_util::isConsonance(reduced)) {
+      if (num_voices >= 3 && reduced == interval::kPerfect4th) {
+        uint8_t lower = std::min(pitch, n.pitch);
+        if (lower > lowest) continue;  // P4 between upper voices: OK.
+      }
+      return false;
+    }
+  }
+  return true;
+}
+
 // ---------------------------------------------------------------------------
 // Step 7: Movement generation
 // ---------------------------------------------------------------------------
@@ -1786,18 +1854,7 @@ TrioSonataMovement generateMovement(const KeySignature& key_sig, Tick num_bars,
   }
 
   // 5. Sort notes within each track.
-  auto sortTracks = [](std::vector<Track>& trks) {
-    for (auto& track : trks) {
-      std::sort(track.notes.begin(), track.notes.end(),
-                [](const NoteEvent& lhs, const NoteEvent& rhs) {
-                  if (lhs.start_tick != rhs.start_tick) {
-                    return lhs.start_tick < rhs.start_tick;
-                  }
-                  return lhs.pitch < rhs.pitch;
-                });
-    }
-  };
-  sortTracks(tracks);
+  form_utils::sortTrackNotes(tracks);
 
   // 5b. Post-validate through counterpoint engine.
   {
@@ -1872,6 +1929,57 @@ TrioSonataMovement generateMovement(const KeySignature& key_sig, Tick num_bars,
             continue;
           }
 
+          // Structural patterns: accept with lightweight safety checks.
+          if (note.source == BachNoteSource::EpisodeMaterial ||
+              note.source == BachNoteSource::SequenceNote) {
+            uint8_t low = voice_ranges[note.voice].first;
+            uint8_t high = voice_ranges[note.voice].second;
+            if (note.pitch < low || note.pitch > high) continue;
+
+            // Downbeat consonance check (beat 0 only).
+            bool on_downbeat = (beatInBar(note.start_tick) == 0);
+            if (on_downbeat) {
+              const HarmonicEvent& harm = timeline.getAt(note.start_tick);
+              if (!isChordTone(note.pitch, harm)) continue;
+              if (!isVerticallyConsonant(note.pitch, note.voice, note.start_tick,
+                                         coordinated, kTrioVoiceCount)) {
+                continue;
+              }
+            }
+
+            NoteEvent accepted_note = note;
+
+            // Trim notes crossing phrase boundaries first.
+            Tick phrase_idx = accepted_note.start_tick / kPhraseTicks;
+            Tick next_boundary = (phrase_idx + 1) * kPhraseTicks;
+            Tick breath_start = next_boundary - kSixteenthNote;
+            if (accepted_note.start_tick + accepted_note.duration > breath_start) {
+              accepted_note.duration = breath_start - accepted_note.start_tick;
+            }
+            if (accepted_note.duration <= 0) continue;
+
+            // Quantize non-standard durations to largest fitting standard value.
+            static constexpr Tick kStdDurs[] = {kWholeNote, kHalfNote, kQuarterNote,
+                                                kEighthNote, kSixteenthNote};
+            bool is_standard = false;
+            for (Tick dur : kStdDurs) {
+              if (accepted_note.duration == dur) { is_standard = true; break; }
+            }
+            if (!is_standard) {
+              // Pick the largest standard duration that fits.
+              Tick best = kSixteenthNote;
+              for (Tick dur : kStdDurs) {
+                if (dur <= accepted_note.duration) { best = dur; break; }
+              }
+              accepted_note.duration = best;
+            }
+
+            cp_state.addNote(accepted_note.voice, accepted_note);
+            coordinated.push_back(accepted_note);
+            ++accepted_count;
+            continue;
+          }
+
           BachNoteOptions opts;
           opts.voice = note.voice;
           opts.desired_pitch = note.pitch;
@@ -1905,13 +2013,15 @@ TrioSonataMovement generateMovement(const KeySignature& key_sig, Tick num_bars,
       lr_params.num_voices = kTrioVoiceCount;
       lr_params.key_at_tick = [&](Tick) { return key_sig.tonic; };
       lr_params.scale_at_tick = [&](Tick) { return scale; };
-      lr_params.voice_range = [&](uint8_t v) -> std::pair<uint8_t, uint8_t> {
+      lr_params.voice_range_static = [&](uint8_t v) -> std::pair<uint8_t, uint8_t> {
         if (v < voice_ranges.size()) return voice_ranges[v];
         return {0, 127};
       };
       lr_params.is_chord_tone = [&](Tick t, uint8_t p) {
         return isChordTone(p, timeline.getAt(t));
       };
+      lr_params.vertical_safe =
+          makeVerticalSafeCallback(timeline, validated, kTrioVoiceCount);
       resolveLeaps(validated, lr_params);
 
       // Second parallel-perfect repair pass after leap resolution.
@@ -1920,7 +2030,7 @@ TrioSonataMovement generateMovement(const KeySignature& key_sig, Tick num_bars,
         pp_params.num_voices = kTrioVoiceCount;
         pp_params.scale = scale;
         pp_params.key_at_tick = lr_params.key_at_tick;
-        pp_params.voice_range = lr_params.voice_range;
+        pp_params.voice_range_static = lr_params.voice_range_static;
         pp_params.max_iterations = 5;
         repairParallelPerfect(validated, pp_params);
       }
@@ -1934,7 +2044,7 @@ TrioSonataMovement generateMovement(const KeySignature& key_sig, Tick num_bars,
         tracks[note.voice].notes.push_back(std::move(note));
       }
     }
-    sortTracks(tracks);
+    form_utils::sortTrackNotes(tracks);
   }
 
   // 6. Validate non-harmonic tones on upper voices.
@@ -1950,10 +2060,10 @@ TrioSonataMovement generateMovement(const KeySignature& key_sig, Tick num_bars,
   }
 
   // 8. Breathing rests at phrase boundaries (upper voices only, pedal exempt).
-  insertBreathingRests(tracks, num_phrases, duration);
+  insertBreathingRests(tracks, timeline, duration);
 
   // 9. Re-sort after suspension and breathing modifications.
-  sortTracks(tracks);
+  form_utils::sortTrackNotes(tracks);
 
   // 10. Post-process: eliminate consecutive repeated pitches.
   // When a note has the same pitch as the previous note, shift it by 1 or 2
@@ -2030,13 +2140,15 @@ TrioSonataMovement generateMovement(const KeySignature& key_sig, Tick num_bars,
       lr_params.num_voices = kTrioVoiceCount;
       lr_params.key_at_tick = [&](Tick) { return key_sig.tonic; };
       lr_params.scale_at_tick = [&](Tick) { return scale; };
-      lr_params.voice_range = [&](uint8_t v) -> std::pair<uint8_t, uint8_t> {
+      lr_params.voice_range_static = [&](uint8_t v) -> std::pair<uint8_t, uint8_t> {
         if (v < vr.size()) return vr[v];
         return {0, 127};
       };
       lr_params.is_chord_tone = [&](Tick t, uint8_t p) {
         return isChordTone(p, timeline.getAt(t));
       };
+      lr_params.vertical_safe =
+          makeVerticalSafeCallback(timeline, validated, kTrioVoiceCount);
       resolveLeaps(validated, lr_params);
 
       // Second parallel-perfect repair pass after leap resolution.
@@ -2045,7 +2157,7 @@ TrioSonataMovement generateMovement(const KeySignature& key_sig, Tick num_bars,
         pp_params.num_voices = kTrioVoiceCount;
         pp_params.scale = scale;
         pp_params.key_at_tick = lr_params.key_at_tick;
-        pp_params.voice_range = lr_params.voice_range;
+        pp_params.voice_range_static = lr_params.voice_range_static;
         pp_params.max_iterations = 5;
         repairParallelPerfect(validated, pp_params);
       }
@@ -2153,7 +2265,7 @@ TrioSonataMovement generateMovement(const KeySignature& key_sig, Tick num_bars,
         tracks[note.voice].notes.push_back(std::move(note));
       }
     }
-    sortTracks(tracks);
+    form_utils::sortTrackNotes(tracks);
   }
 
   // 11. Apply ornaments with counterpoint verification.
@@ -2201,7 +2313,7 @@ TrioSonataMovement generateMovement(const KeySignature& key_sig, Tick num_bars,
     }
 
     // Re-sort after ornament expansion.
-    sortTracks(tracks);
+    form_utils::sortTrackNotes(tracks);
   }
 
   // 12. Quality post-passes (after ornaments, ensuring final output quality).
@@ -2215,22 +2327,23 @@ TrioSonataMovement generateMovement(const KeySignature& key_sig, Tick num_bars,
         is_slow ? kQuarterNote : kEighthNote,
         is_slow ? kHalfNote : kQuarterNote};
     for (size_t trk = 0; trk < 2 && trk < tracks.size(); ++trk) {
-      for (auto& note : tracks[trk].notes) {
+      auto& notes = tracks[trk].notes;
+      for (size_t ni = 0; ni < notes.size(); ++ni) {
+        auto& note = notes[ni];
         bool in_set = (note.duration == allowed[0] ||
                        note.duration == allowed[1] ||
                        note.duration == allowed[2]);
         if (!in_set) {
-          // Snap to nearest allowed duration.
-          Tick best = allowed[0];
-          int best_dist = std::abs(static_cast<int>(note.duration) -
-                                   static_cast<int>(best));
-          for (int i = 1; i < 3; ++i) {
-            int dist = std::abs(static_cast<int>(note.duration) -
-                                static_cast<int>(allowed[i]));
-            if (dist < best_dist) {
-              best_dist = dist;
-              best = allowed[i];
-            }
+          // Determine max duration from next-note boundary to prevent overlap.
+          Tick max_dur = allowed[2];
+          if (ni + 1 < notes.size()) {
+            Tick gap = notes[ni + 1].start_tick - note.start_tick;
+            if (gap < max_dur) max_dur = gap;
+          }
+          // Pick the largest standard duration that fits within max_dur.
+          Tick best = allowed[0];  // Smallest as fallback.
+          for (int aidx = 2; aidx >= 0; --aidx) {
+            if (allowed[aidx] <= max_dur) { best = allowed[aidx]; break; }
           }
           note.duration = best;
           note.modified_by |= static_cast<uint8_t>(NoteModifiedBy::Articulation);
@@ -2249,7 +2362,7 @@ TrioSonataMovement generateMovement(const KeySignature& key_sig, Tick num_bars,
   enforceMinimumVoiceSeparation(tracks);
 
   // 12e. Re-sort after quality post-passes.
-  sortTracks(tracks);
+  form_utils::sortTrackNotes(tracks);
 
   // 12f. Final parallel repair (outer voice pairs only).
   // Steps 12b-12d may re-introduce parallel perfect consonances. This final
@@ -2273,7 +2386,7 @@ TrioSonataMovement generateMovement(const KeySignature& key_sig, Tick num_bars,
     pp_final.num_voices = kTrioVoiceCount;
     pp_final.scale = scale;
     pp_final.key_at_tick = [&](Tick) { return key_sig.tonic; };
-    pp_final.voice_range = [&vr_final](uint8_t voice) {
+    pp_final.voice_range_static = [&vr_final](uint8_t voice) {
       if (voice < vr_final.size()) return vr_final[voice];
       return std::make_pair(static_cast<uint8_t>(0), static_cast<uint8_t>(127));
     };
@@ -2286,13 +2399,44 @@ TrioSonataMovement generateMovement(const KeySignature& key_sig, Tick num_bars,
         tracks[note.voice].notes.push_back(std::move(note));
       }
     }
-    sortTracks(tracks);
+    form_utils::sortTrackNotes(tracks);
   }
 
   // 12g. Re-enforce voice separation after parallel repair (12f may shift
   // pitches in ways that violate the minimum 12-semitone RH/LH gap).
   enforceMinimumVoiceSeparation(tracks);
-  sortTracks(tracks);
+  form_utils::sortTrackNotes(tracks);
+
+  // 12h. Final phrase boundary enforcement: trim upper voice notes that cross
+  // phrase boundaries (post-processing steps may have re-introduced crossings).
+  // Then re-quantize trimmed durations to the allowed set.
+  {
+    bool is_slow = (params.primary_dur >= kQuarterNote);
+    const Tick final_allowed[3] = {
+        is_slow ? kEighthNote : kSixteenthNote,
+        is_slow ? kQuarterNote : kEighthNote,
+        is_slow ? kHalfNote : kQuarterNote};
+
+    for (size_t trk = 0; trk < 2 && trk < tracks.size(); ++trk) {
+      for (auto& note : tracks[trk].notes) {
+        Tick phrase_idx = note.start_tick / kPhraseTicks;
+        Tick next_boundary = (phrase_idx + 1) * kPhraseTicks;
+        if (next_boundary > duration) continue;
+        Tick breath = next_boundary - kSixteenthNote;
+        if (note.start_tick < breath &&
+            note.start_tick + note.duration > breath) {
+          Tick trimmed = breath - note.start_tick;
+          // Quantize to largest standard duration that fits.
+          Tick best = final_allowed[0];
+          for (int aidx = 2; aidx >= 0; --aidx) {
+            if (final_allowed[aidx] <= trimmed) { best = final_allowed[aidx]; break; }
+          }
+          note.duration = best;
+          note.modified_by |= static_cast<uint8_t>(NoteModifiedBy::Articulation);
+        }
+      }
+    }
+  }
 
   // 13. Counterpoint analysis (after all modifications).
   movement.cp_report = buildTrioCPReport(tracks);

@@ -3,6 +3,7 @@
 #ifndef BACH_CORE_NOTE_CREATOR_H
 #define BACH_CORE_NOTE_CREATOR_H
 
+#include <functional>
 #include <optional>
 #include <utility>
 #include <vector>
@@ -94,6 +95,24 @@ std::vector<NoteEvent> postValidateNotes(
     uint8_t num_voices,
     KeySignature key_sig,
     const std::vector<std::pair<uint8_t, uint8_t>>& voice_ranges,
+    PostValidateStats* stats = nullptr);
+
+/// @brief Tick-aware overload: voice_range_fn(voice, tick) returns (low, high).
+///
+/// Uses note.start_tick for phase boundary lookup, enabling dynamic voice ranges
+/// that change over time (e.g., per-section range adjustments).
+///
+/// @param raw_notes Input notes (consumed by move).
+/// @param num_voices Number of active voices.
+/// @param key_sig Key signature for counterpoint state and scale-tone validation.
+/// @param voice_range_fn Function returning (low, high) for a given voice and tick.
+/// @param[out] stats Optional repair statistics.
+/// @return Validated notes with counterpoint rules enforced.
+std::vector<NoteEvent> postValidateNotes(
+    std::vector<NoteEvent> raw_notes,
+    uint8_t num_voices,
+    KeySignature key_sig,
+    std::function<std::pair<uint8_t, uint8_t>(uint8_t voice, Tick tick)> voice_range_fn,
     PostValidateStats* stats = nullptr);
 
 /// @brief Build a MelodicContext from the counterpoint state for a given voice.

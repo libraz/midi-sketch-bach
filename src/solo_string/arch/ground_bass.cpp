@@ -175,7 +175,8 @@ GroundBass GroundBass::createStandardDMinor() {
   return GroundBass(std::move(notes));
 }
 
-GroundBass GroundBass::createForKey(const KeySignature& key_sig) {
+GroundBass GroundBass::createForKey(const KeySignature& key_sig,
+                                   uint8_t register_low) {
   // Start from the standard D minor pattern and transpose.
   GroundBass standard = createStandardDMinor();
 
@@ -189,11 +190,6 @@ GroundBass GroundBass::createForKey(const KeySignature& key_sig) {
   // Transposition interval in semitones.
   int transpose = static_cast<int>(target_tonic) - static_cast<int>(kDMinorTonic);
 
-  if (transpose == 0) {
-    // Already in D; return the standard pattern directly.
-    return standard;
-  }
-
   // Transpose all notes by the interval.
   std::vector<NoteEvent> transposed_notes;
   transposed_notes.reserve(standard.noteCount());
@@ -201,9 +197,23 @@ GroundBass GroundBass::createForKey(const KeySignature& key_sig) {
   for (const auto& note : standard.getNotes()) {
     NoteEvent transposed = note;
     int new_pitch = clampPitch(static_cast<int>(note.pitch) + transpose, 0, 127);
-
     transposed.pitch = static_cast<uint8_t>(new_pitch);
     transposed_notes.push_back(transposed);
+  }
+
+  // Octave-shift the entire bass up so the lowest note >= register_low.
+  if (register_low > 0) {
+    uint8_t lowest = 127;
+    for (const auto& note : transposed_notes) {
+      if (note.pitch < lowest) lowest = note.pitch;
+    }
+    if (lowest < register_low) {
+      int shift = ((static_cast<int>(register_low) - static_cast<int>(lowest) + 11) / 12) * 12;
+      for (auto& note : transposed_notes) {
+        int new_pitch = static_cast<int>(note.pitch) + shift;
+        note.pitch = static_cast<uint8_t>(std::min(new_pitch, 127));
+      }
+    }
   }
 
   return GroundBass(std::move(transposed_notes));

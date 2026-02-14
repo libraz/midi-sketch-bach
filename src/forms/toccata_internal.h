@@ -5,6 +5,7 @@
 #define BACH_FORMS_TOCCATA_INTERNAL_H
 
 #include <algorithm>
+#include <map>
 #include <random>
 #include <vector>
 
@@ -17,6 +18,7 @@
 #include "counterpoint/bach_rule_evaluator.h"
 #include "counterpoint/collision_resolver.h"
 #include "counterpoint/counterpoint_state.h"
+#include "forms/form_utils.h"
 #include "harmony/chord_types.h"
 #include "harmony/harmonic_event.h"
 #include "harmony/harmonic_timeline.h"
@@ -125,15 +127,7 @@ inline uint8_t clampToccataVoiceCount(uint8_t num_voices) {
 }
 
 inline void sortToccataTrackNotes(std::vector<Track>& tracks) {
-  for (auto& track : tracks) {
-    std::sort(track.notes.begin(), track.notes.end(),
-              [](const NoteEvent& lhs, const NoteEvent& rhs) {
-                if (lhs.start_tick != rhs.start_tick) {
-                  return lhs.start_tick < rhs.start_tick;
-                }
-                return lhs.pitch < rhs.pitch;
-              });
-  }
+  form_utils::sortTrackNotes(tracks);
 }
 
 /// @brief Clean up within-voice overlaps: deduplicate same-tick notes and truncate.
@@ -197,6 +191,102 @@ inline std::vector<Tick> allocateBars(int total_bars,
   // Distribute remainder to largest section.
   Tick remainder = static_cast<Tick>(total_bars) - assigned;
   bars[max_idx] += remainder;
+
+  return bars;
+}
+
+/// @brief Discrete bars allocation with preset tables and weighted minimum guarantee.
+/// @param total_bars Total number of bars to allocate.
+/// @param discrete_tables Map of total_bars to preset bar allocations.
+/// @param fallback_proportions Proportions for bars not in discrete_tables.
+/// @param min_bars_per_section Minimum bars per section (weighted guarantee).
+/// @return Bar allocations per section.
+inline std::vector<Tick> allocateBarsDiscrete(
+    int total_bars,
+    const std::map<int, std::vector<Tick>>& discrete_tables,
+    const std::vector<float>& fallback_proportions,
+    const std::vector<Tick>& min_bars_per_section) {
+  // 1. Check if total_bars matches a discrete table entry.
+  auto table_iter = discrete_tables.find(total_bars);
+  if (table_iter != discrete_tables.end()) {
+    return table_iter->second;
+  }
+
+  // 2. Fallback: use proportions with minimum guarantee.
+  size_t num = fallback_proportions.size();
+  std::vector<Tick> bars(num, 0);
+
+  // Check if minimum guarantee exceeds total.
+  Tick min_total = 0;
+  for (size_t idx = 0; idx < num && idx < min_bars_per_section.size(); ++idx) {
+    min_total += min_bars_per_section[idx];
+  }
+
+  if (total_bars <= 0 || min_total >= static_cast<Tick>(total_bars)) {
+    // Scale down minimums proportionally.
+    float scale = static_cast<float>(total_bars) / static_cast<float>(min_total);
+    Tick assigned = 0;
+    for (size_t idx = 0; idx < num; ++idx) {
+      Tick min_b = (idx < min_bars_per_section.size()) ? min_bars_per_section[idx] : 1;
+      bars[idx] = std::max(static_cast<Tick>(1),
+                           static_cast<Tick>(static_cast<float>(min_b) * scale));
+      assigned += bars[idx];
+    }
+    // Adjust to match total_bars exactly.
+    if (assigned <= static_cast<Tick>(total_bars)) {
+      bars.back() += static_cast<Tick>(total_bars) - assigned;
+    } else {
+      // Over-allocated (each section clamped to 1 exceeds total): trim from end.
+      Tick excess = assigned - static_cast<Tick>(total_bars);
+      for (size_t idx = num; idx > 0 && excess > 0; --idx) {
+        Tick reduce = std::min(bars[idx - 1], excess);
+        bars[idx - 1] -= reduce;
+        excess -= reduce;
+      }
+    }
+    return bars;
+  }
+
+  // 3. Allocate by proportions, then enforce minimums.
+  for (size_t idx = 0; idx < num; ++idx) {
+    bars[idx] = static_cast<Tick>(static_cast<float>(total_bars) * fallback_proportions[idx]);
+    Tick min_b = (idx < min_bars_per_section.size()) ? min_bars_per_section[idx] : 1;
+    if (bars[idx] < min_b) bars[idx] = min_b;
+  }
+
+  // Adjust to match total_bars exactly.
+  Tick assigned = 0;
+  for (auto bar : bars) assigned += bar;
+  Tick diff = static_cast<Tick>(total_bars) - assigned;
+
+  if (diff > 0) {
+    // Distribute excess to largest-proportion section.
+    size_t max_idx = 0;
+    float max_prop = 0.0f;
+    for (size_t idx = 0; idx < num; ++idx) {
+      if (fallback_proportions[idx] > max_prop) {
+        max_prop = fallback_proportions[idx];
+        max_idx = idx;
+      }
+    }
+    bars[max_idx] += diff;
+  } else if (diff < 0) {
+    // Reduce from largest sections (but not below minimum).
+    for (Tick cur = 0; cur < static_cast<Tick>(-diff);) {
+      size_t max_idx = 0;
+      Tick max_val = 0;
+      for (size_t idx = 0; idx < num; ++idx) {
+        Tick min_b = (idx < min_bars_per_section.size()) ? min_bars_per_section[idx] : 1;
+        if (bars[idx] > min_b && bars[idx] > max_val) {
+          max_val = bars[idx];
+          max_idx = idx;
+        }
+      }
+      if (max_val == 0) break;  // Can't reduce further.
+      bars[max_idx]--;
+      ++cur;
+    }
+  }
 
   return bars;
 }

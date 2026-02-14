@@ -6,6 +6,8 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <map>
+#include <set>
 #include <string>
 
 #include "core/basic_types.h"
@@ -695,6 +697,74 @@ TEST(GeneratorArticulationTest, TrioSonataArticulated) {
           << "Note at tick " << note.start_tick
           << " has zero duration after articulation";
     }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Chaconne polyphony preservation tests
+// ---------------------------------------------------------------------------
+
+TEST(ChaconneE2E, PostProcessingDestructionRate) {
+  GeneratorConfig config = makeTestConfig(42);
+  config.form = FormType::Chaconne;
+  config.instrument = InstrumentType::Violin;
+  auto result = generate(config);
+  ASSERT_TRUE(result.success) << result.error_message;
+  ASSERT_FALSE(result.tracks.empty());
+
+  const auto& notes = result.tracks[0].notes;
+  int bass_count = 0, texture_count = 0;
+  for (const auto& n : notes) {
+    if (n.source == BachNoteSource::GroundBass) ++bass_count;
+    if (n.source == BachNoteSource::TextureNote) ++texture_count;
+  }
+
+  EXPECT_GT(texture_count, 0)
+      << "No texture notes survived post-processing";
+  EXPECT_GT(bass_count, 0) << "No bass notes found";
+
+  // Voice separation: both voice IDs are present.
+  std::set<VoiceId> voice_ids;
+  for (const auto& n : notes) {
+    voice_ids.insert(n.voice);
+  }
+  EXPECT_GE(voice_ids.size(), 2u)
+      << "Expected at least 2 distinct voice IDs (bass=0, texture=1)";
+
+  // Temporal polyphony: bass notes whose sounding range overlaps a texture note.
+  // This verifies that cross-voice overlap is preserved (not trimmed away).
+  int temporal_overlaps = 0;
+  for (const auto& bn : notes) {
+    if (bn.source != BachNoteSource::GroundBass) continue;
+    Tick b_end = bn.start_tick + bn.duration;
+    for (const auto& tn : notes) {
+      if (tn.source != BachNoteSource::TextureNote) continue;
+      if (tn.start_tick >= bn.start_tick && tn.start_tick < b_end) {
+        ++temporal_overlaps;
+        break;
+      }
+    }
+  }
+  EXPECT_GT(temporal_overlaps, 0)
+      << "No temporal overlap between bass and texture; "
+         "voice-aware cleanup may not be preserving cross-voice polyphony";
+}
+
+TEST(ChaconneE2E, MultiSeedTexturePresence) {
+  for (uint32_t seed : {1u, 42u, 100u, 999u}) {
+    GeneratorConfig config;
+    config.form = FormType::Chaconne;
+    config.seed = seed;
+    config.instrument = InstrumentType::Violin;
+    auto result = generate(config);
+    ASSERT_TRUE(result.success) << "seed=" << seed;
+
+    int texture_count = 0;
+    for (const auto& n : result.tracks[0].notes) {
+      if (n.source == BachNoteSource::TextureNote) ++texture_count;
+    }
+    EXPECT_GT(texture_count, 0)
+        << "No texture notes survived for seed=" << seed;
   }
 }
 

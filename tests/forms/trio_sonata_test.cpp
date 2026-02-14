@@ -940,7 +940,9 @@ TEST(TrioSonataTest, MajorMovementDiatonic) {
 // ---------------------------------------------------------------------------
 
 TEST(TrioSonataTest, FastMovementDurationsInSet) {
-  // Fast movement (Allegro/Vivace) durations should be in {120, 240, 480}.
+  // Fast movement (Allegro/Vivace) durations should be in {120, 240, 480}
+  // or boundary-clamped (>= 120, no overlap with next note).
+  constexpr Tick kMinAllowed = 120;
   std::set<Tick> allowed = {120, 240, 480};
 
   for (uint32_t seed : {1u, 2u, 3u, 4u, 5u}) {
@@ -950,10 +952,20 @@ TEST(TrioSonataTest, FastMovementDurationsInSet) {
 
     for (size_t mov : {size_t(0), size_t(2)}) {
       for (size_t trk = 0; trk < 2; ++trk) {
-        for (const auto& note : result.movements[mov].tracks[trk].notes) {
-          EXPECT_TRUE(allowed.count(note.duration) > 0)
+        const auto& notes = result.movements[mov].tracks[trk].notes;
+        for (size_t idx = 0; idx < notes.size(); ++idx) {
+          const auto& note = notes[idx];
+          // Duration must be at least the minimum allowed value.
+          EXPECT_GE(note.duration, kMinAllowed)
               << "Seed " << seed << " mov " << mov << " track " << trk
-              << " duration " << note.duration << " not in {120,240,480}";
+              << " duration " << note.duration << " below minimum " << kMinAllowed;
+          // If not in the standard set, must be boundary-clamped (no overlap).
+          if (allowed.count(note.duration) == 0 && idx + 1 < notes.size()) {
+            Tick gap = notes[idx + 1].start_tick - note.start_tick;
+            EXPECT_LE(note.duration, gap)
+                << "Seed " << seed << " mov " << mov << " track " << trk
+                << " duration " << note.duration << " exceeds gap " << gap;
+          }
         }
       }
     }

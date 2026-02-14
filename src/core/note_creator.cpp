@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <array>
 #include <cstdio>
+#include <functional>
 #include <map>
 
 #include "core/interval.h"
@@ -76,16 +77,9 @@ BachCreateNoteResult createBachNote(
   if (opts.instrument && !opts.instrument->isPitchInRange(final_pitch)) {
     uint8_t lo = opts.instrument->getLowestPitch();
     uint8_t hi = opts.instrument->getHighestPitch();
-    // Try octave shift first, then clamp.
-    int up = static_cast<int>(final_pitch) + 12;
-    int down = static_cast<int>(final_pitch) - 12;
-    if (up >= lo && up <= hi && up <= 127) {
-      final_pitch = static_cast<uint8_t>(up);
-    } else if (down >= static_cast<int>(lo) && down <= static_cast<int>(hi) && down >= 0) {
-      final_pitch = static_cast<uint8_t>(down);
-    } else {
-      final_pitch = clampPitch(static_cast<int>(final_pitch), lo, hi);
-    }
+    int center = (static_cast<int>(lo) + static_cast<int>(hi)) / 2;
+    int shift = nearestOctaveShift(center - static_cast<int>(final_pitch));
+    final_pitch = clampPitch(static_cast<int>(final_pitch) + shift, lo, hi);
   }
 
   result.accepted = true;
@@ -148,6 +142,20 @@ std::vector<NoteEvent> postValidateNotes(
     KeySignature key_sig,
     const std::vector<std::pair<uint8_t, uint8_t>>& voice_ranges,
     PostValidateStats* stats) {
+  auto range_fn = [&voice_ranges](uint8_t voice,
+                                   Tick /*tick*/) -> std::pair<uint8_t, uint8_t> {
+    if (voice < voice_ranges.size()) return voice_ranges[voice];
+    return {0, 127};
+  };
+  return postValidateNotes(std::move(raw_notes), num_voices, key_sig, range_fn, stats);
+}
+
+std::vector<NoteEvent> postValidateNotes(
+    std::vector<NoteEvent> raw_notes,
+    uint8_t num_voices,
+    KeySignature key_sig,
+    std::function<std::pair<uint8_t, uint8_t>(uint8_t voice, Tick tick)> voice_range_fn,
+    PostValidateStats* stats) {
   if (raw_notes.empty()) return {};
 
   // Determine scale type for diatonic validation of step shifts.
@@ -155,10 +163,12 @@ std::vector<NoteEvent> postValidateNotes(
                                                : ScaleType::Major;
 
   // Initialize counterpoint engine.
+  // Use voice ranges at tick 0 for initial registration.
   CounterpointState state;
   state.setKey(key_sig.tonic);
-  for (uint8_t v = 0; v < num_voices && v < voice_ranges.size(); ++v) {
-    state.registerVoice(v, voice_ranges[v].first, voice_ranges[v].second);
+  for (uint8_t v = 0; v < num_voices; ++v) {
+    auto [low, high] = voice_range_fn(v, 0);
+    state.registerVoice(v, low, high);
   }
 
   BachRuleEvaluator rules(num_voices);
@@ -278,28 +288,28 @@ std::vector<NoteEvent> postValidateNotes(
 
   // --- Phase 4: Structural micro-shift rescue for dropped Flexible notes ---
   // When a Flexible note was dropped due to dissonance with a Structural note
-  // (specifically Countersubject), try ±1/±2 step shifts on the Structural
+  // (specifically Countersubject), try +/-1/+/-2 step shifts on the Structural
   // note (direction-preserving) to resolve the conflict.
   // Limited to 20 rescues max and only targets Countersubject sources to
   // avoid O(n^2) blowup in large pieces (passacaglia, etc.).
   {
     constexpr int kMaxRescues = 20;
     int rescue_count = 0;
-    // Build tick→structural note index for O(1) lookup.
+    // Build tick->structural note index for O(1) lookup.
     std::map<Tick, std::vector<size_t>> structural_at_tick;
-    for (size_t i = 0; i < result.size(); ++i) {
-      if (getProtectionLevel(result[i].source) == ProtectionLevel::Structural &&
-          result[i].source == BachNoteSource::Countersubject) {
-        structural_at_tick[result[i].start_tick].push_back(i);
+    for (size_t idx = 0; idx < result.size(); ++idx) {
+      if (getProtectionLevel(result[idx].source) == ProtectionLevel::Structural &&
+          result[idx].source == BachNoteSource::Countersubject) {
+        structural_at_tick[result[idx].start_tick].push_back(idx);
       }
     }
 
     for (const auto& dropped : dropped_flexible) {
       if (rescue_count >= kMaxRescues) break;
-      auto it = structural_at_tick.find(dropped.start_tick);
-      if (it == structural_at_tick.end()) continue;
+      auto iter = structural_at_tick.find(dropped.start_tick);
+      if (iter == structural_at_tick.end()) continue;
 
-      for (size_t si : it->second) {
+      for (size_t si : iter->second) {
         auto& structural = result[si];
         if (structural.voice == dropped.voice) continue;
 
@@ -332,10 +342,8 @@ std::vector<NoteEvent> postValidateNotes(
             if (new_dir != 0 && new_dir != prev_dir) continue;
           }
 
-          if (structural.voice < voice_ranges.size()) {
-            auto [lo, hi] = voice_ranges[structural.voice];
-            if (cand < static_cast<int>(lo) || cand > static_cast<int>(hi)) continue;
-          }
+          auto [lo, hi] = voice_range_fn(structural.voice, structural.start_tick);
+          if (cand < static_cast<int>(lo) || cand > static_cast<int>(hi)) continue;
 
           int new_interval = std::abs(cand - static_cast<int>(dropped.pitch));
           int new_simple = interval_util::compoundToSimple(new_interval);
@@ -343,10 +351,10 @@ std::vector<NoteEvent> postValidateNotes(
 
           // Check consonance with all notes at the same tick.
           bool all_ok = true;
-          for (size_t oi : it->second) {
+          for (size_t oi : iter->second) {
             if (oi == si) continue;
-            int d = std::abs(cand - static_cast<int>(result[oi].pitch));
-            if (!interval_util::isConsonance(interval_util::compoundToSimple(d))) {
+            int dist = std::abs(cand - static_cast<int>(result[oi].pitch));
+            if (!interval_util::isConsonance(interval_util::compoundToSimple(dist))) {
               all_ok = false;
               break;
             }
@@ -369,11 +377,9 @@ std::vector<NoteEvent> postValidateNotes(
   // Clamp repaired notes to strict voice ranges (collision resolver allows
   // a soft tolerance, but final output must respect range boundaries).
   for (auto& note : result) {
-    if (note.voice < voice_ranges.size()) {
-      auto [lo, hi] = voice_ranges[note.voice];
-      if (note.pitch < lo) note.pitch = lo;
-      if (note.pitch > hi) note.pitch = hi;
-    }
+    auto [lo, hi] = voice_range_fn(note.voice, note.start_tick);
+    if (note.pitch < lo) note.pitch = lo;
+    if (note.pitch > hi) note.pitch = hi;
   }
 
   // Final pass: fix parallel perfect consonances via shared repair utility.
@@ -382,9 +388,8 @@ std::vector<NoteEvent> postValidateNotes(
     repair_params.num_voices = num_voices;
     repair_params.scale = effective_scale;
     repair_params.key_at_tick = [&](Tick) { return key_sig.tonic; };
-    repair_params.voice_range = [&](uint8_t v) -> std::pair<uint8_t, uint8_t> {
-      if (v < voice_ranges.size()) return voice_ranges[v];
-      return {0, 127};
+    repair_params.voice_range = [&](uint8_t v, Tick t) -> std::pair<uint8_t, uint8_t> {
+      return voice_range_fn(v, t);
     };
     repairParallelPerfect(result, repair_params);
   }

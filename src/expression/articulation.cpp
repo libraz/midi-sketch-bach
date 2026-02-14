@@ -128,8 +128,12 @@ void applyArticulation(std::vector<NoteEvent>& notes, VoiceRole role,
   // Organ pipes have no gate control — preserve metric durations exactly.
   if (!is_organ) {
     for (auto& note : notes) {
+      float effective_gate = rule.gate_ratio;
+      if (note.source == BachNoteSource::GroundBass) {
+        effective_gate = 0.95f;  // Basso ostinato sustains through texture.
+      }
       Tick new_duration =
-          static_cast<Tick>(static_cast<float>(note.duration) * rule.gate_ratio);
+          static_cast<Tick>(static_cast<float>(note.duration) * effective_gate);
       if (new_duration < kMinArticulatedDuration) {
         new_duration = kMinArticulatedDuration;
       }

@@ -78,6 +78,46 @@ constexpr uint8_t kViolinOpenStrings[] = {55, 62, 69, 76};
 constexpr int kViolinOpenStringCount = 4;
 
 // ---------------------------------------------------------------------------
+// Helper: place a pitch class in a register, nearest to a reference pitch
+// ---------------------------------------------------------------------------
+
+/// @brief Place a pitch class within [reg_low, reg_high] closest to ref_pitch.
+///
+/// Uses nearestOctaveShift to find the best octave placement for a pitch class,
+/// then checks +/-12 alternatives to pick the one nearest to ref_pitch.
+///
+/// @param pitch_class Pitch class in [0, 11].
+/// @param reg_low Lowest allowed MIDI pitch.
+/// @param reg_high Highest allowed MIDI pitch.
+/// @param ref_pitch Reference pitch to minimize distance to.
+/// @return MIDI pitch within [reg_low, reg_high], or clamped if no exact fit.
+int fitPitchClassToRegister(int pitch_class, uint8_t reg_low,
+                            uint8_t reg_high, int ref_pitch) {
+  int center = (static_cast<int>(reg_low) + static_cast<int>(reg_high)) / 2;
+  int shift = nearestOctaveShift(center - pitch_class);
+  int candidate = pitch_class + shift;
+
+  // If the nearest-octave candidate is out of range, clamp.
+  if (candidate < static_cast<int>(reg_low) || candidate > static_cast<int>(reg_high)) {
+    return static_cast<int>(clampPitch(candidate, reg_low, reg_high));
+  }
+
+  // Among in-range octave placements, pick nearest to ref_pitch.
+  int best = candidate;
+  int best_dist = std::abs(candidate - ref_pitch);
+  for (int alt : {candidate - 12, candidate + 12}) {
+    if (alt >= static_cast<int>(reg_low) && alt <= static_cast<int>(reg_high)) {
+      int dist = std::abs(alt - ref_pitch);
+      if (dist < best_dist) {
+        best_dist = dist;
+        best = alt;
+      }
+    }
+  }
+  return best;
+}
+
+// ---------------------------------------------------------------------------
 // Helper: convert chord to MIDI pitches within a register range
 // ---------------------------------------------------------------------------
 
@@ -114,25 +154,10 @@ std::vector<uint8_t> chordToPitches(const Chord& chord, bool is_minor,
 
     // Octave-adjust to fit register.
     int pitch_class = getPitchClassSigned(raw_pitch);
-    int best_pitch = -1;
-    int best_distance = 999;
-
-    for (int oct = 0; oct <= 10; ++oct) {
-      int candidate = (oct + 1) * 12 + pitch_class;
-      if (candidate >= static_cast<int>(reg_low) &&
-          candidate <= static_cast<int>(reg_high)) {
-        int distance = std::abs(candidate - raw_pitch);
-        if (distance < best_distance) {
-          best_distance = distance;
-          best_pitch = candidate;
-        }
-      }
-    }
-
-    if (best_pitch >= 0) {
-      pitches.push_back(static_cast<uint8_t>(best_pitch));
+    int fitted = fitPitchClassToRegister(pitch_class, reg_low, reg_high, raw_pitch);
+    if (fitted >= static_cast<int>(reg_low) && fitted <= static_cast<int>(reg_high)) {
+      pitches.push_back(static_cast<uint8_t>(fitted));
     } else {
-      // Clamp to boundary if no octave fits.
       pitches.push_back(raw_pitch < static_cast<int>(reg_low) ? reg_low : reg_high);
     }
   }
@@ -156,28 +181,9 @@ uint8_t fitPitchToRegister(uint8_t pitch, uint8_t reg_low, uint8_t reg_high) {
   }
 
   int pitch_class = getPitchClass(pitch);
-  int best_pitch = -1;
-  int best_distance = 999;
-
-  for (int oct = 0; oct <= 10; ++oct) {
-    int candidate = (oct + 1) * 12 + pitch_class;
-    if (candidate >= static_cast<int>(reg_low) &&
-        candidate <= static_cast<int>(reg_high)) {
-      int distance = std::abs(candidate - static_cast<int>(pitch));
-      if (distance < best_distance) {
-        best_distance = distance;
-        best_pitch = candidate;
-      }
-    }
-  }
-
-  if (best_pitch >= 0) {
-    return static_cast<uint8_t>(best_pitch);
-  }
-
-  // No octave placement works -- clamp.
-  if (pitch < reg_low) return reg_low;
-  return reg_high;
+  int fitted = fitPitchClassToRegister(pitch_class, reg_low, reg_high,
+                                       static_cast<int>(pitch));
+  return static_cast<uint8_t>(fitted);
 }
 
 /// @brief Get all scale pitches within a register range for a given key.
@@ -244,7 +250,7 @@ NoteEvent makeTextureNote(Tick tick, Tick duration, uint8_t pitch,
   note.duration = duration;
   note.pitch = pitch;
   note.velocity = computeVelocity(tick_in_bar, kBaseVelocity, is_climax);
-  note.voice = 0;  // Solo instrument
+  note.voice = 1;  // Texture voice (distinct from ground bass voice=0)
   note.source = BachNoteSource::TextureNote;
   return note;
 }
@@ -291,19 +297,8 @@ void clampExcessiveLeaps(std::vector<NoteEvent>& notes,
     // Find the octave-transposition of notes[i] closest to notes[i-1].
     int pc = getPitchClass(notes[i].pitch);
     int prev = static_cast<int>(notes[i - 1].pitch);
-    int best = static_cast<int>(notes[i].pitch);
-    int best_dist = leap;
-
-    for (int oct = 0; oct <= 10; ++oct) {
-      int cand = oct * 12 + pc;
-      if (cand < static_cast<int>(reg_low) || cand > static_cast<int>(reg_high)) continue;
-      int dist = std::abs(cand - prev);
-      if (dist < best_dist) {
-        best_dist = dist;
-        best = cand;
-      }
-    }
-    notes[i].pitch = static_cast<uint8_t>(best);
+    int fitted = fitPitchClassToRegister(pc, reg_low, reg_high, prev);
+    notes[i].pitch = static_cast<uint8_t>(fitted);
     notes[i].modified_by |= static_cast<uint8_t>(NoteModifiedBy::OctaveAdjust);
   }
 }
@@ -350,7 +345,7 @@ std::vector<NoteEvent> generateTexture(const TextureContext& ctx,
       lr_params.scale_at_tick = [&](Tick) {
         return ctx.key.is_minor ? ScaleType::NaturalMinor : ScaleType::Major;
       };
-      lr_params.voice_range = [&](uint8_t) -> std::pair<uint8_t, uint8_t> {
+      lr_params.voice_range_static = [&](uint8_t) -> std::pair<uint8_t, uint8_t> {
         return {ctx.register_low, ctx.register_high};
       };
       resolveLeaps(notes, lr_params);

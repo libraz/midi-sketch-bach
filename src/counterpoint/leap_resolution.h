@@ -31,9 +31,13 @@ struct LeapResolutionParams {
   /// for scale-tone membership checks.
   std::function<ScaleType(Tick)> scale_at_tick;
 
-  /// Optional: voice pitch range (low, high). Return (0, 127) if unused.
-  /// Candidates outside this range are rejected.
-  std::function<std::pair<uint8_t, uint8_t>(uint8_t)> voice_range;
+  /// Static voice pitch range (low, high). Used when voice_range is not set.
+  /// Existing callers set this field only (gradual migration).
+  std::function<std::pair<uint8_t, uint8_t>(uint8_t)> voice_range_static;
+
+  /// Tick-aware voice pitch range (low, high). When set, takes priority over
+  /// voice_range_static. Enables phase-ceiling enforcement in repair.
+  std::function<std::pair<uint8_t, uint8_t>(uint8_t, Tick)> voice_range;
 
   /// Optional: vertical safety check. Returns true if the candidate pitch
   /// is acceptable at the given tick in the given voice (no tritone,

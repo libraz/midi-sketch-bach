@@ -11,6 +11,7 @@
 #include "core/pitch_utils.h"
 #include "counterpoint/leap_resolution.h"
 #include "counterpoint/parallel_repair.h"
+#include "counterpoint/vertical_safe.h"
 #include "ornament/ornament_engine.h"
 
 namespace bach {
@@ -487,13 +488,15 @@ ToccataResult generateConcertatoToccata(const ToccataConfig& config) {
         const auto& ev = timeline.getAt(t);
         return ev.is_minor ? ScaleType::HarmonicMinor : ScaleType::Major;
       };
-      lr_params.voice_range = [&](uint8_t v) -> std::pair<uint8_t, uint8_t> {
+      lr_params.voice_range_static = [&](uint8_t v) -> std::pair<uint8_t, uint8_t> {
         if (v < voice_ranges.size()) return voice_ranges[v];
         return {0, 127};
       };
       lr_params.is_chord_tone = [&](Tick t, uint8_t p) {
         return isChordTone(p, timeline.getAt(t));
       };
+      lr_params.vertical_safe =
+          makeVerticalSafeCallback(timeline, all_notes, num_voices);
       resolveLeaps(all_notes, lr_params);
 
       // Second parallel-perfect repair pass after leap resolution.
@@ -502,7 +505,7 @@ ToccataResult generateConcertatoToccata(const ToccataConfig& config) {
         pp_params.num_voices = num_voices;
         pp_params.scale = config.key.is_minor ? ScaleType::HarmonicMinor : ScaleType::Major;
         pp_params.key_at_tick = lr_params.key_at_tick;
-        pp_params.voice_range = lr_params.voice_range;
+        pp_params.voice_range_static = lr_params.voice_range_static;
         pp_params.max_iterations = 3;
         repairParallelPerfect(all_notes, pp_params);
       }

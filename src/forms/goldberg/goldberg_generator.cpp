@@ -527,7 +527,7 @@ GoldbergResult GoldbergGenerator::generate(const GoldbergConfig& config) const {
       lr_params.scale_at_tick = [&](Tick) {
         return config.key.is_minor ? ScaleType::HarmonicMinor : ScaleType::Major;
       };
-      lr_params.voice_range = [](uint8_t v) -> std::pair<uint8_t, uint8_t> {
+      lr_params.voice_range_static = [](uint8_t v) -> std::pair<uint8_t, uint8_t> {
         if (v < kGoldbergVoices) {
           return {kHarpsichordLow[v], kHarpsichordHigh[v]};
         }
@@ -650,7 +650,7 @@ GoldbergResult GoldbergGenerator::generate(const GoldbergConfig& config) const {
       pp_params.num_voices = kGoldbergVoices;
       pp_params.scale = config.key.is_minor ? ScaleType::HarmonicMinor : ScaleType::Major;
       pp_params.key_at_tick = [&](Tick) { return config.key.tonic; };
-      pp_params.voice_range = [](uint8_t voice) -> std::pair<uint8_t, uint8_t> {
+      pp_params.voice_range_static = [](uint8_t voice) -> std::pair<uint8_t, uint8_t> {
         if (voice < kGoldbergVoices) {
           return {kHarpsichordLow[voice], kHarpsichordHigh[voice]};
         }

@@ -184,29 +184,30 @@ TEST(ToccataTest, OpeningSectionHasFastNotes) {
 
   ASSERT_TRUE(result.success);
   ASSERT_GT(result.tracks[0].notes.size(), 0u);
+  ASSERT_GE(result.phases.size(), 1u);
 
-  // Opening is first 25% = 6 bars.
-  Tick opening_end = 6 * kTicksPerBar;
+  // Phase A (Gesture) has fast passages (16th notes).
+  Tick gesture_end = result.phases[0].end;
   constexpr Tick kSixteenthDuration = kTicksPerBeat / 4;  // 120 ticks.
 
   int fast_note_count = 0;
-  int opening_note_count = 0;
+  int gesture_note_count = 0;
 
   for (const auto& note : result.tracks[0].notes) {
-    if (note.start_tick < opening_end) {
-      ++opening_note_count;
+    if (note.start_tick < gesture_end) {
+      ++gesture_note_count;
       if (note.duration <= kSixteenthDuration) {
         ++fast_note_count;
       }
     }
   }
 
-  EXPECT_GT(opening_note_count, 0) << "Opening section should have notes on voice 0";
-  // The majority of opening notes should be 16th notes.
+  EXPECT_GT(gesture_note_count, 0) << "Gesture phase should have notes on voice 0";
+  // The majority of gesture notes should be 16th notes.
   float fast_ratio = static_cast<float>(fast_note_count) /
-                     static_cast<float>(opening_note_count);
+                     static_cast<float>(gesture_note_count);
   EXPECT_GE(fast_ratio, 0.55f)
-      << "Expected >= 55% 16th notes in opening, got " << (fast_ratio * 100.0f) << "%";
+      << "Expected >= 55% 16th notes in Gesture, got " << (fast_ratio * 100.0f) << "%";
 }
 
 // ---------------------------------------------------------------------------
@@ -350,11 +351,11 @@ TEST(ToccataTest, AllVoicesActiveInDrive) {
   ToccataResult result = generateToccata(config);
 
   ASSERT_TRUE(result.success);
+  ASSERT_GE(result.sections.size(), 3u);
 
-  // Drive section is last 25% (bars 18-24 in a 24-bar piece).
-  // Opening = 6 bars, Recitative = 12 bars, Drive = 6 bars.
-  Tick drive_start = 18u * kTicksPerBar;
-  Tick drive_end = 24u * kTicksPerBar;
+  // Drive section (legacy: phases F+G+H).
+  Tick drive_start = result.sections[2].start;
+  Tick drive_end = result.sections[2].end;
 
   // Voice 0 and 1 should both have notes in the drive section.
   size_t voice0_drive = countNotesInRange(result.tracks[0], drive_start, drive_end);
@@ -542,20 +543,15 @@ TEST(ToccataTest, DifferentKeys_ProduceDifferentOutput) {
 // Energy curve: U-shape (high -> low -> high)
 // ---------------------------------------------------------------------------
 
-TEST(ToccataTest, EnergyCurve_UShape) {
+TEST(ToccataTest, EnergyCurve_TwoPeak) {
   ToccataConfig config = makeTestConfig();
   config.total_bars = 24;
   ToccataResult result = generateToccata(config);
   ASSERT_TRUE(result.success);
+  ASSERT_EQ(result.phases.size(), 8u);
 
-  // U-shape energy: opening and drive have shorter average note durations (high
-  // energy) than the recitative (low energy, sustained chords + free melody).
-  // Metric: average note duration across both manual tracks (0 and 1).
-  Tick opening_end = 6u * kTicksPerBar;
-  Tick recit_start = opening_end;
-  Tick recit_end = recit_start + 12u * kTicksPerBar;
-  Tick drive_start = recit_end;
-
+  // Two-peak energy curve: valleys (B, E) should have longer avg note duration
+  // than peaks (A, G/H). Use phases directly for precise measurement.
   auto avgDuration = [&](Tick start, Tick end) -> float {
     Tick total_dur = 0;
     size_t count = 0;
@@ -571,20 +567,24 @@ TEST(ToccataTest, EnergyCurve_UShape) {
                        : 0.0f;
   };
 
-  float opening_avg = avgDuration(0, opening_end);
-  float recit_avg = avgDuration(recit_start, recit_end);
-  float drive_avg = avgDuration(drive_start, result.total_duration_ticks);
+  float gesture_avg = avgDuration(result.phases[0].start, result.phases[0].end);
+  float echo_avg = avgDuration(result.phases[1].start, result.phases[1].end);
+  float drive_avg = avgDuration(result.phases[5].start, result.phases[7].end);
 
-  // Opening has fast passages (32nd/16th notes) -> shorter average duration.
-  EXPECT_LT(opening_avg, recit_avg)
-      << "Opening should have shorter avg note duration than recitative "
-      << "(opening=" << opening_avg << ", recit=" << recit_avg << ")";
+  // Phase A (Gesture, 0.90 energy) has fast passages -> shorter avg duration
+  // than Phase B (EchoCollapse, 0.30 energy).
+  if (gesture_avg > 0.0f && echo_avg > 0.0f) {
+    EXPECT_LT(gesture_avg, echo_avg)
+        << "Gesture should have shorter avg note duration than EchoCollapse "
+        << "(gesture=" << gesture_avg << ", echo=" << echo_avg << ")";
+  }
 
-  // Drive has accelerating passages -> shorter average duration.
-  if (drive_avg > 0.0f) {
-    EXPECT_LT(drive_avg, recit_avg)
-        << "Drive should have shorter avg note duration than recitative "
-        << "(drive=" << drive_avg << ", recit=" << recit_avg << ")";
+  // Drive phases (F+G+H, energy 0.85-1.00) have fast passages -> shorter avg
+  // than echo valley.
+  if (drive_avg > 0.0f && echo_avg > 0.0f) {
+    EXPECT_LT(drive_avg, echo_avg)
+        << "Drive phases should have shorter avg note duration than EchoCollapse "
+        << "(drive=" << drive_avg << ", echo=" << echo_avg << ")";
   }
 }
 
@@ -599,13 +599,15 @@ TEST(ToccataTest, PedalVoiceHasNotesInOpeningAndDrive) {
   ToccataResult result = generateToccata(config);
   ASSERT_TRUE(result.success);
   ASSERT_GE(result.tracks.size(), 3u);
+  ASSERT_GE(result.sections.size(), 3u);
 
-  Tick opening_end = 6u * kTicksPerBar;
-  Tick drive_start = 18u * kTicksPerBar;
-  Tick drive_end = 24u * kTicksPerBar;
+  Tick opening_start = result.sections[0].start;
+  Tick opening_end = result.sections[0].end;
+  Tick drive_start = result.sections[2].start;
+  Tick drive_end = result.sections[2].end;
 
   // Pedal (voice 2) should have notes in both opening and drive sections.
-  size_t pedal_opening = countNotesInRange(result.tracks[2], 0, opening_end);
+  size_t pedal_opening = countNotesInRange(result.tracks[2], opening_start, opening_end);
   size_t pedal_drive = countNotesInRange(result.tracks[2], drive_start, drive_end);
 
   EXPECT_GT(pedal_opening, 0u) << "Pedal should have notes during opening";
@@ -661,14 +663,15 @@ TEST(ToccataTest, OpeningHasGrandPause) {
   ToccataResult result = generateToccata(config);
   ASSERT_TRUE(result.success);
   ASSERT_GT(result.tracks[0].notes.size(), 1u);
+  ASSERT_GE(result.phases.size(), 1u);
 
-  // Check for a 960+ tick gap in voice 0 within the first 4 bars.
-  Tick four_bars = 4u * kTicksPerBar;
+  // Check for a 960+ tick gap in voice 0 within Phase A (Gesture).
+  Tick gesture_end = result.phases[0].end;
   bool found_gap = false;
 
   const auto& notes = result.tracks[0].notes;
   for (size_t i = 1; i < notes.size(); ++i) {
-    if (notes[i].start_tick >= four_bars) break;
+    if (notes[i].start_tick >= gesture_end) break;
     Tick prev_end = notes[i - 1].start_tick + notes[i - 1].duration;
     if (notes[i].start_tick > prev_end) {
       Tick gap = notes[i].start_tick - prev_end;
@@ -680,7 +683,7 @@ TEST(ToccataTest, OpeningHasGrandPause) {
   }
 
   EXPECT_TRUE(found_gap)
-      << "Opening should have a grand pause (960+ tick gap) in the first 4 bars";
+      << "Gesture phase should have a grand pause (960+ tick gap)";
 }
 
 TEST(ToccataTest, OpeningHasOctaveDoubling) {
@@ -689,9 +692,11 @@ TEST(ToccataTest, OpeningHasOctaveDoubling) {
   ToccataResult result = generateToccata(config);
   ASSERT_TRUE(result.success);
   ASSERT_GE(result.tracks.size(), 2u);
+  ASSERT_GE(result.sections.size(), 1u);
 
-  // Check for notes at the same tick with 12-semitone difference across tracks.
-  Tick opening_end = 6u * kTicksPerBar;
+  // Check for notes at the same tick with 12-semitone difference across tracks
+  // within the legacy Opening section (Gesture + EchoCollapse).
+  Tick opening_end = result.sections[0].end;
   bool found_octave = false;
 
   for (const auto& n0 : result.tracks[0].notes) {
@@ -719,38 +724,45 @@ TEST(ToccataTest, OpeningHasBlockChord) {
   ToccataResult result = generateToccata(config);
   ASSERT_TRUE(result.success);
   ASSERT_GE(result.tracks.size(), 3u);
+  ASSERT_GE(result.sections.size(), 1u);
 
-  Tick opening_end = 6u * kTicksPerBar;
-  constexpr Tick kWholeNoteDur = kTicksPerBeat * 4;
+  // Opening (legacy section = Gesture + EchoCollapse).
+  Tick opening_end = result.sections[0].end;
 
-  // Find a whole-note-or-longer note in voice 0 during opening.
+  // Find a multi-voice simultaneous note onset (block chord) in the opening.
+  // With the 8-phase system, block chord may be shorter than whole note.
+  constexpr Tick kMinBlockDuration = kTicksPerBeat;  // At least a quarter note.
   bool found_block = false;
+
   for (const auto& n0 : result.tracks[0].notes) {
     if (n0.start_tick >= opening_end) break;
-    if (n0.duration >= kWholeNoteDur) {
-      // Check if voices 1 and 2 also have notes at the same tick.
-      bool v1_present = false, v2_present = false;
-      for (const auto& n1 : result.tracks[1].notes) {
-        if (n1.start_tick == n0.start_tick && n1.duration >= kWholeNoteDur) {
-          v1_present = true;
-          break;
-        }
-      }
-      for (const auto& n2 : result.tracks[2].notes) {
-        if (n2.start_tick == n0.start_tick && n2.duration >= kWholeNoteDur / 2) {
-          v2_present = true;
-          break;
-        }
-      }
-      if (v1_present && v2_present) {
-        found_block = true;
+    if (n0.duration < kMinBlockDuration) continue;
+    // Check if voice 1 also has a note at the same tick.
+    bool v1_present = false;
+    for (const auto& n1 : result.tracks[1].notes) {
+      if (n1.start_tick > n0.start_tick) break;
+      if (n1.start_tick == n0.start_tick && n1.duration >= kMinBlockDuration) {
+        v1_present = true;
         break;
       }
+    }
+    // Check voice 2 (pedal).
+    bool v2_present = false;
+    for (const auto& n2 : result.tracks[2].notes) {
+      if (n2.start_tick > n0.start_tick) break;
+      if (n2.start_tick == n0.start_tick) {
+        v2_present = true;
+        break;
+      }
+    }
+    if (v1_present && v2_present) {
+      found_block = true;
+      break;
     }
   }
 
   EXPECT_TRUE(found_block)
-      << "Opening should have a block chord (whole note) across 3+ voices";
+      << "Opening should have a block chord across 3+ voices";
 }
 
 TEST(ToccataTest, RecitativeHasRhythmicVariety) {
@@ -758,9 +770,10 @@ TEST(ToccataTest, RecitativeHasRhythmicVariety) {
   config.total_bars = 24;
   ToccataResult result = generateToccata(config);
   ASSERT_TRUE(result.success);
+  ASSERT_GE(result.sections.size(), 2u);
 
-  Tick recit_start = 6u * kTicksPerBar;
-  Tick recit_end = 18u * kTicksPerBar;
+  Tick recit_start = result.sections[1].start;
+  Tick recit_end = result.sections[1].end;
 
   // Collect unique durations across both manual tracks in recitative.
   std::set<Tick> durations;
@@ -782,9 +795,10 @@ TEST(ToccataTest, RecitativeHasLeaps) {
   config.total_bars = 24;
   ToccataResult result = generateToccata(config);
   ASSERT_TRUE(result.success);
+  ASSERT_GE(result.sections.size(), 2u);
 
-  Tick recit_start = 6u * kTicksPerBar;
-  Tick recit_end = 18u * kTicksPerBar;
+  Tick recit_start = result.sections[1].start;
+  Tick recit_end = result.sections[1].end;
 
   // Count consecutive note pairs with 5+ semitone leaps in manual tracks.
   int leap_count = 0;
@@ -817,9 +831,10 @@ TEST(ToccataTest, RecitativeUsesBothManuals) {
   ToccataResult result = generateToccata(config);
   ASSERT_TRUE(result.success);
   ASSERT_GE(result.tracks.size(), 2u);
+  ASSERT_GE(result.sections.size(), 2u);
 
-  Tick recit_start = 6u * kTicksPerBar;
-  Tick recit_end = 18u * kTicksPerBar;
+  Tick recit_start = result.sections[1].start;
+  Tick recit_end = result.sections[1].end;
 
   size_t v0_count = countNotesInRange(result.tracks[0], recit_start, recit_end);
   size_t v1_count = countNotesInRange(result.tracks[1], recit_start, recit_end);
@@ -833,9 +848,10 @@ TEST(ToccataTest, DriveRhythmicAcceleration) {
   config.total_bars = 24;
   ToccataResult result = generateToccata(config);
   ASSERT_TRUE(result.success);
+  ASSERT_GE(result.sections.size(), 3u);
 
-  Tick drive_start = 18u * kTicksPerBar;
-  Tick drive_end = 24u * kTicksPerBar;
+  Tick drive_start = result.sections[2].start;
+  Tick drive_end = result.sections[2].end;
   Tick drive_mid = drive_start + (drive_end - drive_start) / 2;
 
   // Count notes in first half vs second half of drive (voice 0).
@@ -863,29 +879,124 @@ TEST(ToccataTest, HarmonicPlanIsRich) {
       << qualities.size();
 }
 
-TEST(ToccataTest, PedalSoloPresent) {
+TEST(ToccataTest, PedalPhaseActivity) {
   ToccataConfig config = makeTestConfig();
   config.total_bars = 24;
   ToccataResult result = generateToccata(config);
   ASSERT_TRUE(result.success);
   ASSERT_GE(result.tracks.size(), 3u);
+  ASSERT_EQ(result.phases.size(), 8u);
 
-  // Check for 8th-note-or-shorter pedal activity near opening/recit boundary.
-  Tick opening_end = 6u * kTicksPerBar;
-  Tick search_start = opening_end - 2u * kTicksPerBar;
-  Tick search_end = opening_end;
-
-  int short_pedal_count = 0;
-  for (const auto& note : result.tracks[2].notes) {
-    if (note.start_tick >= search_start && note.start_tick < search_end) {
-      if (note.duration <= kTicksPerBeat / 2) {  // 8th note or shorter
-        ++short_pedal_count;
-      }
+  // Pedal (voice 2) should have notes in the majority of phases (8-phase
+  // pedal generation covers all phases with different rhythmic densities).
+  int phases_with_pedal = 0;
+  for (const auto& phase : result.phases) {
+    if (countNotesInRange(result.tracks[2], phase.start, phase.end) > 0) {
+      ++phases_with_pedal;
     }
   }
 
-  EXPECT_GT(short_pedal_count, 0)
-      << "Pedal solo should have 8th-note-or-shorter activity near opening end";
+  EXPECT_GE(phases_with_pedal, 6)
+      << "Pedal should be active in at least 6 of 8 phases, found "
+      << phases_with_pedal;
+}
+
+// ---------------------------------------------------------------------------
+// 8-phase Dramaticus structure tests
+// ---------------------------------------------------------------------------
+
+TEST(ToccataTest, DramaticusHasEightPhases) {
+  ToccataConfig config = makeTestConfig();
+  config.total_bars = 24;
+  ToccataResult result = generateToccata(config);
+  ASSERT_TRUE(result.success);
+
+  ASSERT_EQ(result.phases.size(), 8u);
+  EXPECT_EQ(result.phases[0].id, ToccataSectionId::Gesture);
+  EXPECT_EQ(result.phases[1].id, ToccataSectionId::EchoCollapse);
+  EXPECT_EQ(result.phases[2].id, ToccataSectionId::RecitExpansion);
+  EXPECT_EQ(result.phases[3].id, ToccataSectionId::SequenceClimb1);
+  EXPECT_EQ(result.phases[4].id, ToccataSectionId::HarmonicBreak);
+  EXPECT_EQ(result.phases[5].id, ToccataSectionId::SequenceClimb2);
+  EXPECT_EQ(result.phases[6].id, ToccataSectionId::DomObsession);
+  EXPECT_EQ(result.phases[7].id, ToccataSectionId::FinalExplosion);
+}
+
+TEST(ToccataTest, DramaticusPhasesContiguous) {
+  ToccataConfig config = makeTestConfig();
+  config.total_bars = 24;
+  ToccataResult result = generateToccata(config);
+  ASSERT_TRUE(result.success);
+  ASSERT_EQ(result.phases.size(), 8u);
+
+  // First phase starts at 0.
+  EXPECT_EQ(result.phases[0].start, 0u);
+
+  // Each phase is contiguous with the next.
+  for (size_t i = 1; i < result.phases.size(); ++i) {
+    EXPECT_EQ(result.phases[i].start, result.phases[i - 1].end)
+        << "Phase " << i << " not contiguous with phase " << (i - 1);
+  }
+
+  // Last phase ends at total_duration.
+  EXPECT_EQ(result.phases[7].end, result.total_duration_ticks);
+}
+
+TEST(ToccataTest, DramaticusLegacySectionsFromPhases) {
+  ToccataConfig config = makeTestConfig();
+  config.total_bars = 24;
+  ToccataResult result = generateToccata(config);
+  ASSERT_TRUE(result.success);
+  ASSERT_EQ(result.sections.size(), 3u);
+  ASSERT_EQ(result.phases.size(), 8u);
+
+  // Legacy Opening = phases[0..1].
+  EXPECT_EQ(result.sections[0].id, ToccataSectionId::Opening);
+  EXPECT_EQ(result.sections[0].start, result.phases[0].start);
+  EXPECT_EQ(result.sections[0].end, result.phases[1].end);
+
+  // Legacy Recitative = phases[2..4].
+  EXPECT_EQ(result.sections[1].id, ToccataSectionId::Recitative);
+  EXPECT_EQ(result.sections[1].start, result.phases[2].start);
+  EXPECT_EQ(result.sections[1].end, result.phases[4].end);
+
+  // Legacy Drive = phases[5..7].
+  EXPECT_EQ(result.sections[2].id, ToccataSectionId::Drive);
+  EXPECT_EQ(result.sections[2].start, result.phases[5].start);
+  EXPECT_EQ(result.sections[2].end, result.phases[7].end);
+}
+
+TEST(ToccataTest, DramaticusDiscreteBarAllocation_24) {
+  ToccataConfig config = makeTestConfig();
+  config.total_bars = 24;
+  ToccataResult result = generateToccata(config);
+  ASSERT_TRUE(result.success);
+  ASSERT_EQ(result.phases.size(), 8u);
+
+  // 24 bars -> known table: {2, 2, 4, 3, 2, 4, 4, 3}.
+  std::vector<Tick> expected_bars = {2, 2, 4, 3, 2, 4, 4, 3};
+  for (size_t i = 0; i < 8; ++i) {
+    Tick actual_bars = (result.phases[i].end - result.phases[i].start) / kTicksPerBar;
+    EXPECT_EQ(actual_bars, expected_bars[i])
+        << "Phase " << i << " bar count mismatch";
+  }
+}
+
+TEST(ToccataTest, DramaticusAllPhasesHaveNotes) {
+  ToccataConfig config = makeTestConfig();
+  config.total_bars = 24;
+  ToccataResult result = generateToccata(config);
+  ASSERT_TRUE(result.success);
+  ASSERT_EQ(result.phases.size(), 8u);
+
+  for (size_t pi = 0; pi < result.phases.size(); ++pi) {
+    size_t total = 0;
+    for (const auto& track : result.tracks) {
+      total += countNotesInRange(track, result.phases[pi].start,
+                                 result.phases[pi].end);
+    }
+    EXPECT_GT(total, 0u) << "Phase " << pi << " should have notes";
+  }
 }
 
 TEST(ToccataTest, FinalChordIsPicardy) {

@@ -39,6 +39,7 @@ struct ToccataResult {
   std::string error_message;
   ToccataArchetype archetype = ToccataArchetype::Dramaticus;
   std::vector<ToccataSectionBoundary> sections;
+  std::vector<ToccataSectionBoundary> phases;  // 8-phase (Dramaticus), empty for others.
 
   // Legacy section boundary fields (always populated for backward compat).
   // Non-Dramaticus: opening=sections[0], recit=sections[1], drive=sections.back().

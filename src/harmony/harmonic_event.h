@@ -28,6 +28,11 @@ struct HarmonicEvent {
   Key modulation_target = Key::C;  // Target key for modulation (same as key if none)
   /// Reserved for future modulation support.
   bool has_modulation = false;     // Whether this event represents a modulation point
+
+  /// Probability of selecting chord tones during note generation (0.0-1.0).
+  /// Higher values reduce dissonance in chromatic contexts (e.g., bII, bVI).
+  float chord_tone_bias = 0.6f;
+  // reserved: std::optional<std::array<bool, 12>> allowed_pitch_classes;
 };
 
 }  // namespace bach

@@ -6,7 +6,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-from scripts.bach_analyzer.model import Note, Score, Track
+from scripts.bach_analyzer.model import Note, NoteSource, Provenance, Score, Track
 from scripts.bach_analyzer.rules.base import Severity
 from scripts.bach_analyzer.rules.dissonance import StrongBeatDissonance, UnresolvedDissonance
 
@@ -257,6 +257,49 @@ class TestDiatonicSeventhContext(unittest.TestCase):
         warn_violations = [v for v in result.violations if v.severity == Severity.WARNING]
         self.assertTrue(len(warn_violations) > 0,
                         "2-voice dissonance should remain WARNING (no seventh context)")
+
+
+
+class TestGoldbergSuspensionDowngrade(unittest.TestCase):
+    """GOLDBERG_SUSPENSION source should downgrade strong-beat dissonance to INFO."""
+
+    def test_goldberg_suspension_info(self):
+        """Dissonance where one note is GOLDBERG_SUSPENSION should be INFO."""
+        prov = Provenance(source=NoteSource.GOLDBERG_SUSPENSION)
+        soprano = _track("soprano", [
+            Note(pitch=61, velocity=80, start_tick=0, duration=480,
+                 voice="soprano", provenance=prov),
+        ])
+        alto = _track("alto", [_n(60, 0, voice="alto")])  # m2 dissonance on beat 1
+        result = StrongBeatDissonance().check(_score([soprano, alto]))
+        self.assertFalse(result.passed)
+        self.assertEqual(result.violations[0].severity, Severity.INFO)
+
+    def test_non_suspension_source_remains_warning(self):
+        """Dissonance without GOLDBERG_SUSPENSION should remain WARNING."""
+        prov = Provenance(source=NoteSource.FREE_COUNTERPOINT)
+        soprano = _track("soprano", [
+            Note(pitch=61, velocity=80, start_tick=0, duration=480,
+                 voice="soprano", provenance=prov),
+        ])
+        alto = _track("alto", [_n(60, 0, voice="alto")])
+        result = StrongBeatDissonance().check(_score([soprano, alto]))
+        self.assertFalse(result.passed)
+        self.assertEqual(result.violations[0].severity, Severity.WARNING)
+
+    def test_goldberg_suspension_not_skipped(self):
+        """GOLDBERG_SUSPENSION should be downgraded, not skipped (violation still recorded)."""
+        prov = Provenance(source=NoteSource.GOLDBERG_SUSPENSION)
+        soprano = _track("soprano", [
+            Note(pitch=61, velocity=80, start_tick=0, duration=480,
+                 voice="soprano", provenance=prov),
+        ])
+        alto = _track("alto", [_n(60, 0, voice="alto")])
+        result = StrongBeatDissonance().check(_score([soprano, alto]))
+        # Must have violations (not skipped)
+        self.assertTrue(len(result.violations) > 0)
+        # But severity is INFO
+        self.assertEqual(result.violations[0].severity, Severity.INFO)
 
 
 if __name__ == "__main__":

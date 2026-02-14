@@ -25,8 +25,8 @@ constexpr uint8_t kBassVelocity = 70;
 constexpr uint8_t kBassLow = 36;   // C2
 constexpr uint8_t kBassHigh = 60;  // C4
 
-/// Ornament density for the Aria (highest among all variations).
-constexpr float kAriaOrnamentDensity = 0.35f;
+/// Ornament density for the Aria (restrained — cadential trills + sparse mordents).
+constexpr float kAriaOrnamentDensity = 0.06f;
 
 }  // namespace
 
@@ -194,16 +194,18 @@ void AriaGenerator::applyOrnaments(
     const KeySignature& /*key*/,
     const TimeSignature& /*time_sig*/,
     std::mt19937& rng) const {
-  // Build an OrnamentContext with high density for the Aria.
+  // Build an OrnamentContext — piano style: only cadential trills + sparse mordents.
+  // Harpsichord-specific ornaments (Schleifer, Pralltriller, Vorschlag, Nachschlag,
+  // compound ornaments) are disabled; piano dynamics replace their function.
   OrnamentConfig config;
   config.enable_trill = true;
   config.enable_mordent = true;
-  config.enable_turn = true;
-  config.enable_appoggiatura = true;
-  config.enable_pralltriller = true;
-  config.enable_vorschlag = true;
-  config.enable_nachschlag = true;
-  config.enable_compound = true;
+  config.enable_turn = false;
+  config.enable_appoggiatura = false;
+  config.enable_pralltriller = false;
+  config.enable_vorschlag = false;
+  config.enable_nachschlag = false;
+  config.enable_compound = false;
   config.ornament_density = kAriaOrnamentDensity;
 
   OrnamentContext context;

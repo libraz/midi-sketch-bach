@@ -192,5 +192,39 @@ class TestFormProfileIntegration(unittest.TestCase):
         self.assertTrue(has_non_skipped)
 
 
+class TestFormProfileThresholdIsolation(unittest.TestCase):
+    """Verify form-specific thresholds don't leak across forms."""
+
+    def test_goldberg_leap_resolution_threshold(self):
+        """Goldberg should have leap_resolution_threshold=6."""
+        profile = get_form_profile("goldberg_variations")
+        self.assertEqual(profile.leap_resolution_threshold, 6)
+
+    def test_fugue_leap_resolution_threshold_default(self):
+        """Fugue should have default leap_resolution_threshold=5."""
+        profile = get_form_profile("fugue")
+        self.assertEqual(profile.leap_resolution_threshold, 5)
+
+    def test_prelude_and_fugue_threshold_7(self):
+        """Prelude_and_fugue already has threshold=7, should be unchanged."""
+        profile = get_form_profile("prelude_and_fugue")
+        self.assertEqual(profile.leap_resolution_threshold, 7)
+
+    def test_chorale_prelude_threshold_default(self):
+        """Chorale prelude should have default threshold=5."""
+        profile = get_form_profile("chorale_prelude")
+        self.assertEqual(profile.leap_resolution_threshold, 5)
+
+    def test_passacaglia_threshold_default(self):
+        """Passacaglia should have default threshold=5."""
+        profile = get_form_profile("passacaglia")
+        self.assertEqual(profile.leap_resolution_threshold, 5)
+
+    def test_default_profile_threshold(self):
+        """Default/unknown profile should have threshold=5."""
+        profile = get_form_profile(None)
+        self.assertEqual(profile.leap_resolution_threshold, 5)
+
+
 if __name__ == "__main__":
     unittest.main()

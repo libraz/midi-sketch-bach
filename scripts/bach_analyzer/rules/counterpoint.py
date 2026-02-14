@@ -400,7 +400,7 @@ class CrossRelation:
         for i in range(len(names)):
             for j in range(i + 1, len(names)):
                 violations.extend(
-                    self._check_pair(names[i], voices[names[i]], names[j], voices[names[j]])
+                    self._check_pair(names[i], voices[names[i]], names[j], voices[names[j]], score.key)
                 )
         return RuleResult(
             rule_name=self.name,
@@ -412,8 +412,43 @@ class CrossRelation:
     # Sources where chromatic pitch conflicts are expected.
     _CHROMATIC_SOURCES = {NoteSource.CHROMATIC_PASSING, NoteSource.ORNAMENT}
 
+    # Structural sources: fixed bass / canon voices -> full exemption.
+    _STRUCTURAL_SOURCES = {
+        NoteSource.GOLDBERG_BASS,       # Ground bass
+        NoteSource.CANON_DUX,           # Canon leading voice
+        NoteSource.CANON_COMES,         # Canon following voice
+    }
+
+    # Downgrade sources: thematic material -> INFO (not full skip).
+    _DOWNGRADE_SOURCES = {
+        NoteSource.GOLDBERG_SOGGETTO,   # Soggetto material
+        NoteSource.GOLDBERG_FUGHETTA,   # Fughetta subject
+    }
+
+    _MINOR_KEY_ROOTS = {
+        "C_minor": 0, "C#_minor": 1, "Db_minor": 1,
+        "D_minor": 2, "D#_minor": 3, "Eb_minor": 3,
+        "E_minor": 4, "F_minor": 5, "F#_minor": 6, "Gb_minor": 6,
+        "G_minor": 7, "G#_minor": 8, "Ab_minor": 8,
+        "A_minor": 9, "A#_minor": 10, "Bb_minor": 10,
+        "B_minor": 11,
+    }
+
+    @staticmethod
+    def _is_raised_seventh_pair(pc_a: int, pc_b: int, key: str | None) -> bool:
+        """Check if two pitch classes form a natural-7th vs raised-7th pair in a minor key."""
+        if not key or "minor" not in key:
+            return False
+        root = CrossRelation._MINOR_KEY_ROOTS.get(key)
+        if root is None:
+            return False
+        natural_7th = (root + 10) % 12
+        raised_7th = (root + 11) % 12
+        return {pc_a, pc_b} == {natural_7th, raised_7th}
+
     def _check_pair(
-        self, name_a: str, va: List[Note], name_b: str, vb: List[Note]
+        self, name_a: str, va: List[Note], name_b: str, vb: List[Note],
+        key: str | None = None,
     ) -> List[Violation]:
         violations = []
         natural_classes = {0, 2, 4, 5, 7, 9, 11}
@@ -433,6 +468,11 @@ class CrossRelation:
                 # Exempt chromatic passing tones and ornaments.
                 if nb.provenance and nb.provenance.source in self._CHROMATIC_SOURCES:
                     continue
+                # Structural source exemption: fixed bass and canon voices.
+                src_a = na.provenance.source if na.provenance else None
+                src_b = nb.provenance.source if nb.provenance else None
+                if (src_a and src_a in self._STRUCTURAL_SOURCES) or (src_b and src_b in self._STRUCTURAL_SOURCES):
+                    continue
                 if na.pitch_class == nb.pitch_class:
                     continue
                 # Same letter name, different accidental: e.g., F# vs F natural.
@@ -448,7 +488,14 @@ class CrossRelation:
                             earlier, later = nb, na
                         # Phrase boundary: long gap between notes -> INFO.
                         gap = later.start_tick - earlier.end_tick
-                        sev = Severity.INFO if gap >= TICKS_PER_BAR else Severity.WARNING
+                        if gap >= TICKS_PER_BAR:
+                            sev = Severity.INFO
+                        elif self._is_raised_seventh_pair(pc_a, pc_b, key):
+                            sev = Severity.INFO
+                        elif (src_a and src_a in self._DOWNGRADE_SOURCES) or (src_b and src_b in self._DOWNGRADE_SOURCES):
+                            sev = Severity.INFO
+                        else:
+                            sev = Severity.WARNING
                         violations.append(
                             Violation(
                                 rule_name=self.name,

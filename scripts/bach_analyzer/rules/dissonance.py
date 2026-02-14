@@ -237,8 +237,16 @@ class StrongBeatDissonance:
                             continue
                         if self._is_suspension(nb, na, all_notes, tick, num_voices):
                             continue
-                        # Diminished 7th / dominant 7th context: downgrade to INFO.
-                        sev = Severity.INFO if (dim7_context or v7_context or seventh_context) else Severity.WARNING
+                        # GOLDBERG_SUSPENSION: intentional suspension -> INFO.
+                        src_a = na.provenance.source if na.provenance else None
+                        src_b = nb.provenance.source if nb.provenance else None
+                        is_intentional_suspension = (
+                            src_a == NoteSource.GOLDBERG_SUSPENSION or
+                            src_b == NoteSource.GOLDBERG_SUSPENSION
+                        )
+                        # Diminished 7th / dominant 7th / diatonic 7th / intentional suspension: INFO.
+                        sev = Severity.INFO if (dim7_context or v7_context or seventh_context
+                                                or is_intentional_suspension) else Severity.WARNING
                         violations.append(
                             Violation(
                                 rule_name=self.name,

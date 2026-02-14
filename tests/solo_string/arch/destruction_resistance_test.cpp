@@ -18,6 +18,7 @@
 
 #include "core/basic_types.h"
 #include "harmony/key.h"
+#include "instrument/bowed/violin_model.h"
 
 namespace bach {
 namespace {
@@ -38,7 +39,9 @@ TEST(DestructionResistanceTest, HundredSeedsAllMaintainStructure) {
         << "Seed " << seed << " failed generation: " << result.error_message;
 
     // Verify structural integrity via analyzer.
-    GroundBass bass = GroundBass::createForKey(config.key);
+    // Use the same register_low as the engine (violin lowest pitch).
+    ViolinModel violin;
+    GroundBass bass = GroundBass::createForKey(config.key, violin.getLowestPitch());
     // The analyzer needs the variation plan in config. Since we left
     // config.variations empty, the engine used createStandardVariationPlan
     // internally. We must populate it for the analyzer.
@@ -87,11 +90,11 @@ TEST(DestructionResistanceTest, HundredSeedsAllProduceNonEmptyTracks) {
 // ===========================================================================
 
 TEST(DestructionResistanceTest, HundredSeedsViolinNotesInRange) {
-  // Ground bass uses pitches as low as G2 (43), so we use that as the
-  // practical lower bound. Violin texture notes should be >= 55 (G3),
-  // but bass notes are allowed below that.
-  constexpr uint8_t kLowestBassNote = 43;   // G2 from ground bass
-  constexpr uint8_t kHighestViolinNote = 96; // C7
+  // With instrument-aware bass, all notes (including ground bass) should
+  // now be within the violin's playable range.
+  ViolinModel violin;
+  const uint8_t kLowestNote = violin.getLowestPitch();
+  const uint8_t kHighestNote = violin.getHighestPitch();
 
   for (uint32_t seed = 1; seed <= 100; ++seed) {
     ChaconneConfig config;
@@ -105,10 +108,10 @@ TEST(DestructionResistanceTest, HundredSeedsViolinNotesInRange) {
     ASSERT_EQ(result.tracks.size(), 1u);
 
     for (const auto& note : result.tracks[0].notes) {
-      EXPECT_GE(note.pitch, kLowestBassNote)
+      EXPECT_GE(note.pitch, kLowestNote)
           << "Seed " << seed << ": note pitch " << static_cast<int>(note.pitch)
           << " below range at tick " << note.start_tick;
-      EXPECT_LE(note.pitch, kHighestViolinNote)
+      EXPECT_LE(note.pitch, kHighestNote)
           << "Seed " << seed << ": note pitch " << static_cast<int>(note.pitch)
           << " above range at tick " << note.start_tick;
     }
@@ -150,7 +153,9 @@ TEST(DestructionResistanceTest, FiftySeedsAcrossFiveKeys) {
           << key_case.name << " seed " << seed << ": no notes generated";
 
       // Verify structural invariants.
-      GroundBass bass = GroundBass::createForKey(config.key);
+      // Use the same register_low as the engine (violin lowest pitch).
+      ViolinModel violin;
+      GroundBass bass = GroundBass::createForKey(config.key, violin.getLowestPitch());
       std::mt19937 rng(42);
       config.variations = createStandardVariationPlan(config.key, rng);
       auto analysis = analyzeChaconne(result.tracks, config, bass);

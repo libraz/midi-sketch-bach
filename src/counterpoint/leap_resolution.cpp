@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdlib>
+#include <tuple>
 #include <vector>
 
 #include "core/basic_types.h"
@@ -244,8 +245,13 @@ int resolveLeaps(std::vector<NoteEvent>& notes,
 
         if (!scale_util::isScaleTone(cand_u8, key, scale)) continue;
 
-        if (params.voice_range) {
-          auto [low, high] = params.voice_range(vid);
+        {
+          uint8_t low = 0, high = 127;
+          if (params.voice_range) {
+            std::tie(low, high) = params.voice_range(vid, notes[i2].start_tick);
+          } else if (params.voice_range_static) {
+            std::tie(low, high) = params.voice_range_static(vid);
+          }
           if (cand_u8 < low || cand_u8 > high) continue;
         }
 

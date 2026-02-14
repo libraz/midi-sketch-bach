@@ -24,7 +24,7 @@ class ConsecutiveRepeatedNotes:
     structural repetition is inherent to these musical functions.
     """
 
-    _EXEMPT_SOURCES = {NoteSource.PEDAL_POINT, NoteSource.GROUND_BASS}
+    _EXEMPT_SOURCES = {NoteSource.PEDAL_POINT, NoteSource.GROUND_BASS, NoteSource.GOLDBERG_BASS}
     _MAX_GAP_TICKS = 2 * TICKS_PER_BAR  # 2 bars
 
     def __init__(self, max_repeats: int = 3):
@@ -187,12 +187,26 @@ class LeapResolution:
     consecutive leaps are idiomatic in sequential and figurative passages.
     """
 
-    _ARPEGGIO_SOURCES = {NoteSource.EPISODE_MATERIAL, NoteSource.ARPEGGIO_FLOW}
+    _ARPEGGIO_SOURCES = {
+        NoteSource.EPISODE_MATERIAL,
+        NoteSource.ARPEGGIO_FLOW,
+        NoteSource.GOLDBERG_FIGURA,     # Arpeggiated variation figures
+        NoteSource.GOLDBERG_OVERTURE,   # Orchestral texture
+        NoteSource.ORNAMENT,            # Ornamental figures
+    }
     # Structural thematic sources: subject/answer/countersubject entries are
     # compositionally fixed melodic material where leaps are idiomatic and
     # resolution is determined by the counterpoint context, not melodic rules.
-    _STRUCTURAL_SOURCES = {NoteSource.FUGUE_SUBJECT, NoteSource.FUGUE_ANSWER,
-                           NoteSource.COUNTERSUBJECT}
+    _STRUCTURAL_SOURCES = {
+        NoteSource.FUGUE_SUBJECT,
+        NoteSource.FUGUE_ANSWER,
+        NoteSource.COUNTERSUBJECT,
+        NoteSource.GOLDBERG_FUGHETTA,   # Fughetta subject (= FUGUE_SUBJECT)
+        NoteSource.CANON_DUX,           # Canon leading voice (fixed material)
+        NoteSource.CANON_COMES,         # Canon following voice (fixed material)
+        NoteSource.QUODLIBET_MELODY,    # Quoted melody (fixed material)
+        NoteSource.GOLDBERG_BASS,       # Ground bass (= GROUND_BASS)
+    }
 
     def __init__(self, leap_threshold: int = 5):
         self.leap_threshold = leap_threshold
@@ -226,6 +240,11 @@ class LeapResolution:
                     continue
                 # Exempt structural thematic entries (subject, answer, countersubject).
                 if (src1 and src1 in self._STRUCTURAL_SOURCES) or (src2 and src2 in self._STRUCTURAL_SOURCES):
+                    continue
+                # Arpeggio continuation: n2->n3 continues in same direction as
+                # n1->n2 with interval >= 3st -> arpeggio pattern (e.g. C->E->G).
+                continuation = n3.pitch - n2.pitch
+                if continuation != 0 and (leap > 0) == (continuation > 0) and abs(continuation) >= 3:
                     continue
                 # Resolution should step (1-2 semitones) in opposite direction.
                 resolution = n3.pitch - n2.pitch

@@ -3,6 +3,7 @@
 #include "generator.h"
 
 #include <algorithm>
+#include <array>
 
 #include "core/json_helpers.h"
 
@@ -183,43 +184,6 @@ void mergeTracksInPlace(std::vector<Track>& prefix_tracks,
 /// @brief Remove within-track overlaps after merging compound forms.
 ///
 /// Sorts notes by start_tick, removes same-tick duplicates (keeping the longer
-/// note), and truncates notes that extend past the next note's start.
-/// This is essential after merging tracks from different generation phases
-/// (e.g., toccata + fugue) where boundary overlaps can occur.
-///
-/// @param tracks Tracks to clean up (modified in place).
-void cleanupTrackOverlaps(std::vector<Track>& tracks) {
-  for (auto& track : tracks) {
-    auto& notes = track.notes;
-    if (notes.size() < 2) continue;
-
-    // Sort by start_tick, then duration descending (keep longer note on dedup).
-    std::sort(notes.begin(), notes.end(),
-              [](const NoteEvent& a, const NoteEvent& b) {
-                if (a.start_tick != b.start_tick) return a.start_tick < b.start_tick;
-                return a.duration > b.duration;
-              });
-
-    // Remove same-tick duplicates.
-    notes.erase(
-        std::unique(notes.begin(), notes.end(),
-                    [](const NoteEvent& a, const NoteEvent& b) {
-                      return a.start_tick == b.start_tick;
-                    }),
-        notes.end());
-
-    // Truncate overlapping notes.
-    for (size_t i = 0; i + 1 < notes.size(); ++i) {
-      Tick end_tick = notes[i].start_tick + notes[i].duration;
-      if (end_tick > notes[i + 1].start_tick) {
-        notes[i].duration = notes[i + 1].start_tick - notes[i].start_tick;
-        notes[i].modified_by |= static_cast<uint8_t>(NoteModifiedBy::OverlapTrim);
-        if (notes[i].duration == 0) notes[i].duration = 1;
-      }
-    }
-  }
-}
-
 /// @brief Map a track index to a VoiceRole for articulation purposes.
 ///
 /// For organ-system multi-voice forms the mapping follows exposition entry order:
@@ -408,6 +372,68 @@ GeneratorResult generatePreludeAndFugueForm(const GeneratorConfig& config) {
 }
 
 }  // namespace
+
+/// @brief Remove duplicate notes and truncate overlapping notes within each track.
+///
+/// Sorts notes by (start_tick, voice, duration DESC), deduplicates same-tick +
+/// same-voice + same-pitch notes (keeping the longest), and truncates notes
+/// that extend past the next same-voice note's start.
+///
+/// Voice-aware: notes in different voices at the same tick are preserved
+/// (e.g., ground bass voice=0 + texture voice=1 in chaconne).
+///
+/// @param tracks Tracks to clean up (modified in place).
+void cleanupTrackOverlaps(std::vector<Track>& tracks) {
+  for (auto& track : tracks) {
+    auto& notes = track.notes;
+    if (notes.size() < 2) continue;
+
+    // Sort by start_tick, then voice, then duration descending.
+    std::sort(notes.begin(), notes.end(),
+              [](const NoteEvent& a, const NoteEvent& b) {
+                if (a.start_tick != b.start_tick) return a.start_tick < b.start_tick;
+                if (a.voice != b.voice) return a.voice < b.voice;
+                return a.duration > b.duration;
+              });
+
+    // Remove same-tick + same-voice + same-pitch duplicates (keep longer).
+    notes.erase(
+        std::unique(notes.begin(), notes.end(),
+                    [](const NoteEvent& a, const NoteEvent& b) {
+                      return a.start_tick == b.start_tick &&
+                             a.voice == b.voice &&
+                             a.pitch == b.pitch;
+                    }),
+        notes.end());
+
+    // Truncate overlapping notes within the same voice.
+    // Per-voice tracking with fixed array (VoiceId is uint8_t, solo string uses 0-1).
+    constexpr size_t kMaxCleanupVoices = 8;
+    std::array<size_t, kMaxCleanupVoices> prev_index{};
+    std::array<bool, kMaxCleanupVoices> has_prev{};
+    has_prev.fill(false);
+
+    for (size_t i = 0; i < notes.size(); ++i) {
+      VoiceId v = notes[i].voice;
+      if (v >= kMaxCleanupVoices) continue;
+      if (has_prev[v]) {
+        size_t prev_i = prev_index[v];
+        // Skip same-tick chord tones (simultaneous notes in the same voice).
+        if (notes[prev_i].start_tick != notes[i].start_tick) {
+          Tick end_tick = notes[prev_i].start_tick + notes[prev_i].duration;
+          if (end_tick > notes[i].start_tick) {
+            notes[prev_i].duration = notes[i].start_tick - notes[prev_i].start_tick;
+            notes[prev_i].modified_by |=
+                static_cast<uint8_t>(NoteModifiedBy::OverlapTrim);
+            if (notes[prev_i].duration == 0) notes[prev_i].duration = 1;
+          }
+        }
+      }
+      prev_index[v] = i;
+      has_prev[v] = true;
+    }
+  }
+}
 
 GeneratorResult generate(const GeneratorConfig& config) {
   GeneratorResult result;

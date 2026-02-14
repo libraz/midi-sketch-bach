@@ -1838,7 +1838,7 @@ FugueResult generateFugue(const FugueConfig& config) {
       lr_params.num_voices = num_voices;
       lr_params.key_at_tick = [&](Tick t) { return tonal_plan.keyAtTick(t); };
       lr_params.scale_at_tick = [&](Tick) { return effective_scale; };
-      lr_params.voice_range = [num_voices](uint8_t v) {
+      lr_params.voice_range_static = [num_voices](uint8_t v) {
         return getFugueVoiceRange(v, num_voices);
       };
       lr_params.is_chord_tone = [&](Tick t, uint8_t p) {
@@ -1856,7 +1856,7 @@ FugueResult generateFugue(const FugueConfig& config) {
       repair_params.num_voices = num_voices;
       repair_params.scale = effective_scale;
       repair_params.key_at_tick = [&](Tick t) { return tonal_plan.keyAtTick(t); };
-      repair_params.voice_range = [&](uint8_t v) {
+      repair_params.voice_range_static = [&](uint8_t v) {
         return getFugueVoiceRange(v, num_voices);
       };
       repairParallelPerfect(all_notes, repair_params);
@@ -2025,7 +2025,7 @@ FugueResult generateFugue(const FugueConfig& config) {
       regression_params.key_at_tick = [&](Tick t) {
         return tonal_plan.keyAtTick(t);
       };
-      regression_params.voice_range = [&](uint8_t v) {
+      regression_params.voice_range_static = [&](uint8_t v) {
         return getFugueVoiceRange(v, num_voices);
       };
       regression_params.max_iterations = 1;
@@ -2568,7 +2568,7 @@ FugueResult generateFugue(const FugueConfig& config) {
       final_repair_params.key_at_tick = [&](Tick t) {
         return tonal_plan.keyAtTick(t);
       };
-      final_repair_params.voice_range = [&](uint8_t v) {
+      final_repair_params.voice_range_static = [&](uint8_t v) {
         return getFugueVoiceRange(v, num_voices);
       };
       final_repair_params.max_iterations = 5;

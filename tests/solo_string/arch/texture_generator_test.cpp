@@ -223,14 +223,15 @@ TEST_P(AllTexturesInRegisterTest, NotesWithinTimeBounds) {
   }
 }
 
-TEST_P(AllTexturesInRegisterTest, VoiceIsZero) {
+TEST_P(AllTexturesInRegisterTest, VoiceIsTextureVoice) {
   TextureType texture = GetParam();
   bool is_climax = (texture == TextureType::FullChords);
   auto ctx = makeDefaultContext(texture, is_climax);
   auto notes = generateTexture(ctx, timeline_);
 
   for (const auto& note : notes) {
-    EXPECT_EQ(note.voice, 0) << "Solo string should use voice 0";
+    EXPECT_EQ(note.voice, 1)
+        << "Texture notes should use voice 1 (distinct from ground bass voice 0)";
   }
 }
 

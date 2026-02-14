@@ -295,5 +295,31 @@ TEST(ArticulationOrganTest, OrganSkipsBreathingAtCadence) {
   EXPECT_EQ(notes[0].duration, kTicksPerBar);
 }
 
+// ---------------------------------------------------------------------------
+// Source-based gate ratio tests
+// ---------------------------------------------------------------------------
+
+TEST(ArticulationTest, GroundBassGetsLegatoGate) {
+  NoteEvent note = makeNote(0, 60, 480, 80);
+  note.source = BachNoteSource::GroundBass;
+  std::vector<NoteEvent> notes = {note};
+
+  applyArticulation(notes, VoiceRole::Assert, nullptr, false);
+
+  // GroundBass gets 0.95 gate: 480 * 0.95 = 456.
+  EXPECT_EQ(notes[0].duration, 456u);
+}
+
+TEST(ArticulationTest, TextureNoteGetsDefaultGate) {
+  NoteEvent note = makeNote(0, 60, 480, 80);
+  note.source = BachNoteSource::TextureNote;
+  std::vector<NoteEvent> notes = {note};
+
+  applyArticulation(notes, VoiceRole::Assert, nullptr, false);
+
+  // TextureNote gets default Assert gate 0.85: 480 * 0.85 = 408.
+  EXPECT_EQ(notes[0].duration, 408u);
+}
+
 }  // namespace
 }  // namespace bach

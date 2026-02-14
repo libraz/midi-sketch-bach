@@ -349,5 +349,142 @@ class TestRuleProtocol(unittest.TestCase):
             self.assertEqual(rule.category, Category.COUNTERPOINT)
 
 
+
+class TestCrossRelationRaisedSeventh(unittest.TestCase):
+    """Raised-7th cross-relations in minor keys should be INFO, not WARNING."""
+
+    def test_g_minor_raised_seventh_info(self):
+        """F# vs F-natural in G minor should be INFO (raised-7th pair)."""
+        soprano = _track("soprano", [_n(66, 0, voice="soprano")])  # F#4
+        alto = _track("alto", [_n(65, 240, voice="alto")])  # F4
+        score = Score(tracks=[soprano, alto], key="G_minor")
+        result = CrossRelation().check(score)
+        self.assertFalse(result.passed)
+        self.assertEqual(result.violations[0].severity, Severity.INFO)
+
+    def test_c_minor_raised_seventh_info(self):
+        """B-natural vs Bb in C minor should be INFO."""
+        soprano = _track("soprano", [_n(71, 0, voice="soprano")])  # B4
+        alto = _track("alto", [_n(70, 240, voice="alto")])  # Bb4
+        score = Score(tracks=[soprano, alto], key="C_minor")
+        result = CrossRelation().check(score)
+        self.assertFalse(result.passed)
+        self.assertEqual(result.violations[0].severity, Severity.INFO)
+
+    def test_major_key_not_downgraded(self):
+        """F# vs F-natural in G major should remain WARNING (not minor key)."""
+        soprano = _track("soprano", [_n(66, 0, voice="soprano")])  # F#4
+        alto = _track("alto", [_n(65, 240, voice="alto")])  # F4
+        score = Score(tracks=[soprano, alto], key="G_major")
+        result = CrossRelation().check(score)
+        self.assertFalse(result.passed)
+        self.assertEqual(result.violations[0].severity, Severity.WARNING)
+
+    def test_non_seventh_pair_not_downgraded(self):
+        """C# vs C-natural in G minor is NOT a raised-7th pair -> WARNING."""
+        soprano = _track("soprano", [_n(61, 0, voice="soprano")])  # C#4
+        alto = _track("alto", [_n(60, 240, voice="alto")])  # C4
+        score = Score(tracks=[soprano, alto], key="G_minor")
+        result = CrossRelation().check(score)
+        self.assertFalse(result.passed)
+        self.assertEqual(result.violations[0].severity, Severity.WARNING)
+
+    def test_no_key_not_downgraded(self):
+        """Without key info, raised-7th detection is skipped -> WARNING."""
+        soprano = _track("soprano", [_n(66, 0, voice="soprano")])  # F#4
+        alto = _track("alto", [_n(65, 240, voice="alto")])  # F4
+        score = Score(tracks=[soprano, alto])  # no key
+        result = CrossRelation().check(score)
+        self.assertFalse(result.passed)
+        self.assertEqual(result.violations[0].severity, Severity.WARNING)
+
+
+class TestCrossRelationStructuralExempt(unittest.TestCase):
+    """Structural sources should be fully exempt from cross-relation detection."""
+
+    def test_goldberg_bass_exempt(self):
+        """GOLDBERG_BASS notes should be fully exempt."""
+        prov = Provenance(source=NoteSource.GOLDBERG_BASS)
+        soprano = _track("soprano", [_n(66, 0, voice="soprano")])  # F#4
+        alto = _track("alto", [
+            Note(pitch=65, velocity=80, start_tick=240, duration=480, voice="alto", provenance=prov)
+        ])
+        result = CrossRelation().check(_score([soprano, alto]))
+        self.assertTrue(result.passed)
+
+    def test_canon_dux_exempt(self):
+        """CANON_DUX notes should be fully exempt."""
+        prov = Provenance(source=NoteSource.CANON_DUX)
+        soprano = _track("soprano", [
+            Note(pitch=66, velocity=80, start_tick=0, duration=480, voice="soprano", provenance=prov)
+        ])
+        alto = _track("alto", [_n(65, 240, voice="alto")])  # F4
+        result = CrossRelation().check(_score([soprano, alto]))
+        self.assertTrue(result.passed)
+
+    def test_canon_comes_exempt(self):
+        """CANON_COMES notes should be fully exempt."""
+        prov = Provenance(source=NoteSource.CANON_COMES)
+        soprano = _track("soprano", [_n(66, 0, voice="soprano")])
+        alto = _track("alto", [
+            Note(pitch=65, velocity=80, start_tick=240, duration=480, voice="alto", provenance=prov)
+        ])
+        result = CrossRelation().check(_score([soprano, alto]))
+        self.assertTrue(result.passed)
+
+
+class TestCrossRelationDowngradeSource(unittest.TestCase):
+    """Downgrade sources should get INFO severity, not exemption."""
+
+    def test_goldberg_soggetto_info(self):
+        """GOLDBERG_SOGGETTO cross-relation should be INFO."""
+        prov = Provenance(source=NoteSource.GOLDBERG_SOGGETTO)
+        soprano = _track("soprano", [
+            Note(pitch=66, velocity=80, start_tick=0, duration=480, voice="soprano", provenance=prov)
+        ])
+        alto = _track("alto", [_n(65, 240, voice="alto")])
+        result = CrossRelation().check(_score([soprano, alto]))
+        self.assertFalse(result.passed)
+        self.assertEqual(result.violations[0].severity, Severity.INFO)
+
+    def test_goldberg_fughetta_info(self):
+        """GOLDBERG_FUGHETTA cross-relation should be INFO."""
+        prov = Provenance(source=NoteSource.GOLDBERG_FUGHETTA)
+        soprano = _track("soprano", [
+            Note(pitch=66, velocity=80, start_tick=0, duration=480, voice="soprano", provenance=prov)
+        ])
+        alto = _track("alto", [_n(65, 240, voice="alto")])
+        result = CrossRelation().check(_score([soprano, alto]))
+        self.assertFalse(result.passed)
+        self.assertEqual(result.violations[0].severity, Severity.INFO)
+
+
+class TestIsRaisedSeventhPair(unittest.TestCase):
+    """Unit test for CrossRelation._is_raised_seventh_pair."""
+
+    def test_g_minor_f_fsharp(self):
+        # G minor: natural 7th = F (pc 5), raised 7th = F# (pc 6)
+        self.assertTrue(CrossRelation._is_raised_seventh_pair(5, 6, "G_minor"))
+        self.assertTrue(CrossRelation._is_raised_seventh_pair(6, 5, "G_minor"))
+
+    def test_c_minor_bb_b(self):
+        # C minor: natural 7th = Bb (pc 10), raised 7th = B (pc 11)
+        self.assertTrue(CrossRelation._is_raised_seventh_pair(10, 11, "C_minor"))
+
+    def test_a_minor_g_gsharp(self):
+        # A minor: natural 7th = G (pc 7), raised 7th = G# (pc 8)
+        self.assertTrue(CrossRelation._is_raised_seventh_pair(7, 8, "A_minor"))
+
+    def test_major_key_false(self):
+        self.assertFalse(CrossRelation._is_raised_seventh_pair(5, 6, "G_major"))
+
+    def test_none_key_false(self):
+        self.assertFalse(CrossRelation._is_raised_seventh_pair(5, 6, None))
+
+    def test_wrong_pair_false(self):
+        # C# vs C in G minor is NOT raised-7th pair
+        self.assertFalse(CrossRelation._is_raised_seventh_pair(0, 1, "G_minor"))
+
+
 if __name__ == "__main__":
     unittest.main()

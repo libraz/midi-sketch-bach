@@ -9,6 +9,9 @@
 #include "core/rng_util.h"
 #include "harmony/harmonic_timeline.h"
 #include "harmony/key.h"
+#include "instrument/bowed/cello_model.h"
+#include "instrument/bowed/violin_model.h"
+#include "instrument/fretted/guitar_model.h"
 #include "solo_string/arch/ground_bass.h"
 #include "solo_string/arch/texture_generator.h"
 #include "solo_string/arch/variation_types.h"
@@ -35,14 +38,22 @@ struct InstrumentProfile {
 /// @return InstrumentProfile with GM program and range.
 InstrumentProfile getInstrumentProfile(InstrumentType instrument) {
   switch (instrument) {
-    case InstrumentType::Violin:
-      return {40, 55, 96};   // Violin: G3-C7, GM program 40
-    case InstrumentType::Cello:
-      return {42, 36, 81};   // Cello: C2-A5, GM program 42
-    case InstrumentType::Guitar:
-      return {24, 40, 83};   // Nylon Guitar: E2-B5, GM program 24
-    default:
-      return {40, 55, 96};   // Default to violin
+    case InstrumentType::Violin: {
+      ViolinModel model;
+      return {40, model.getLowestPitch(), model.getHighestPitch()};
+    }
+    case InstrumentType::Cello: {
+      CelloModel model;
+      return {42, model.getLowestPitch(), model.getHighestPitch()};
+    }
+    case InstrumentType::Guitar: {
+      GuitarModel model;
+      return {24, model.getLowestPitch(), model.getHighestPitch()};
+    }
+    default: {
+      ViolinModel model;
+      return {40, model.getLowestPitch(), model.getHighestPitch()};
+    }
   }
 }
 
@@ -306,10 +317,13 @@ ChaconneResult generateChaconne(const ChaconneConfig& config) {
 
   std::mt19937 rng(seed);
 
-  // Create the immutable ground bass.
+  // Get instrument profile first -- needed for bass register constraints.
+  InstrumentProfile profile = getInstrumentProfile(config.instrument);
+
+  // Create the immutable ground bass with instrument-aware register.
   GroundBass ground_bass;
   if (config.ground_bass_notes.empty()) {
-    ground_bass = GroundBass::createForKey(config.key);
+    ground_bass = GroundBass::createForKey(config.key, profile.register_low);
   } else {
     ground_bass = GroundBass(config.ground_bass_notes);
   }
@@ -344,7 +358,6 @@ ChaconneResult generateChaconne(const ChaconneConfig& config) {
   // -----------------------------------------------------------------------
   // Step 3-4: Generate each variation (harmonic timeline + texture).
   // -----------------------------------------------------------------------
-  InstrumentProfile profile = getInstrumentProfile(config.instrument);
 
   // Single track for the solo instrument.
   std::vector<NoteEvent> all_notes;

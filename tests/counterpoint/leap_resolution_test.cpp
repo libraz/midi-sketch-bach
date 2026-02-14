@@ -438,7 +438,7 @@ TEST(LeapResolution, NoCandidateSkips) {
   // All candidates rejected -> no modification.
   std::vector<NoteEvent> notes = {offBeat(0, 60), offBeat(1, 67), offBeat(2, 69)};
   auto params = makeDefaultParams(1);
-  params.voice_range = [](uint8_t) -> std::pair<uint8_t, uint8_t> {
+  params.voice_range_static = [](uint8_t) -> std::pair<uint8_t, uint8_t> {
     return {68, 127};  // Very high range, excludes candidates 65-66.
   };
   int modified = resolveLeaps(notes, params);
@@ -464,7 +464,7 @@ TEST(LeapResolution, VoiceRangeRespected) {
   // Candidate is outside voice range -> rejected.
   std::vector<NoteEvent> notes = {offBeat(0, 60), offBeat(1, 67), offBeat(2, 69)};
   auto params = makeDefaultParams(1);
-  params.voice_range = [](uint8_t) -> std::pair<uint8_t, uint8_t> {
+  params.voice_range_static = [](uint8_t) -> std::pair<uint8_t, uint8_t> {
     return {67, 80};  // Low bound is 67, candidates at 65-66 are out of range.
   };
   EXPECT_EQ(resolveLeaps(notes, params), 0);

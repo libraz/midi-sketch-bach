@@ -218,14 +218,17 @@ const char* fugueArchetypeToString(FugueArchetype archetype);
 
 /// Section identifiers for toccata structural boundaries.
 enum class ToccataSectionId : uint8_t {
-  // Dramaticus
+  // Dramaticus (legacy 3-section)
   Opening, Recitative, Drive,
   // Perpetuus
   Ascent, Plateau, Climax,
   // Concertato
   Allegro, Adagio, Vivace,
   // Sectionalis
-  Free1, QuasiFugal, Free2, Cadenza, Coda
+  Free1, QuasiFugal, Free2, Cadenza, Coda,
+  // Dramaticus 8-phase (new)
+  Gesture, EchoCollapse, RecitExpansion, SequenceClimb1,
+  HarmonicBreak, SequenceClimb2, DomObsession, FinalExplosion
 };
 
 // ---------------------------------------------------------------------------

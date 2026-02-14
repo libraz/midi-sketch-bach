@@ -15,9 +15,11 @@
 #include "core/scale.h"
 #include "counterpoint/bach_rule_evaluator.h"
 #include "counterpoint/collision_resolver.h"
+#include "forms/form_utils.h"
 #include "counterpoint/counterpoint_state.h"
 #include "counterpoint/leap_resolution.h"
 #include "counterpoint/parallel_repair.h"
+#include "counterpoint/vertical_safe.h"
 #include "harmony/chord_types.h"
 #include "harmony/harmonic_event.h"
 #include "harmony/harmonic_timeline.h"
@@ -246,6 +248,63 @@ void placeCantus(const ChoraleMelody& melody, Track& track) {
 
     current_tick += dur;
   }
+}
+
+/// Insert passing tones into long cantus notes (weak-beat, stepwise only).
+void addCantusPassingTones(Track& track,
+                           const std::pair<uint8_t, uint8_t>& voice_range,
+                           Key key, bool is_minor) {
+  ScaleType scale = is_minor ? ScaleType::HarmonicMinor : ScaleType::Major;
+  std::vector<NoteEvent> enriched;
+  auto& notes = track.notes;
+
+  for (size_t idx = 0; idx < notes.size(); ++idx) {
+    auto note = notes[idx];
+    // Only enrich notes > 2 beats that have a next note.
+    if (note.duration <= kHalfNote || idx + 1 >= notes.size()) {
+      enriched.push_back(note);
+      continue;
+    }
+
+    uint8_t next_pitch = notes[idx + 1].pitch;
+    int cur_deg = scale_util::pitchToAbsoluteDegree(note.pitch, key, scale);
+    int next_deg = scale_util::pitchToAbsoluteDegree(next_pitch, key, scale);
+    int deg_dist = std::abs(next_deg - cur_deg);
+
+    // Only insert passing tone if next note is 2 degrees away (stepwise).
+    if (deg_dist != 2) {
+      enriched.push_back(note);
+      continue;
+    }
+
+    Tick half = note.duration / 2;
+    // Weak-beat constraint: passing tone must land on beat 1 or 3.
+    Tick pt_start = note.start_tick + half;
+    uint8_t pt_beat = beatInBar(pt_start);
+    if (pt_beat != 1 && pt_beat != 3) {
+      enriched.push_back(note);
+      continue;
+    }
+
+    int dir = (next_deg > cur_deg) ? 1 : -1;
+    uint8_t passing = scale_util::absoluteDegreeToPitch(cur_deg + dir, key, scale);
+    passing = clampPitch(static_cast<int>(passing),
+                         voice_range.first, voice_range.second);
+
+    // Split: first half original, second half passing tone.
+    note.duration = half;
+    enriched.push_back(note);
+
+    NoteEvent pt_note;
+    pt_note.start_tick = pt_start;
+    pt_note.duration = half;
+    pt_note.pitch = passing;
+    pt_note.velocity = note.velocity;
+    pt_note.voice = note.voice;
+    pt_note.source = BachNoteSource::CantusFixed;
+    enriched.push_back(pt_note);
+  }
+  track.notes = std::move(enriched);
 }
 
 // ---------------------------------------------------------------------------
@@ -636,7 +695,16 @@ std::vector<NoteEvent> generatePedalBass(Tick cantus_tick, Tick cantus_dur,
       consecutive_octave = 0;
     }
 
-    Tick dur = rng::rollProbability(rng, 0.5f) ? kQuarterNote : kHalfNote;
+    // Beat-position pattern: half on downbeat, quarter elsewhere.
+    uint8_t beat = beatInBar(current_tick);
+    Tick dur;
+    if (beat == 0) {
+      dur = kHalfNote;  // Downbeat: anchor with half note.
+    } else if (beat == 2 && rng::rollProbability(rng, 0.3f)) {
+      dur = kQuarterNote + kEighthNote;  // Beat 3: occasional dotted quarter.
+    } else {
+      dur = kQuarterNote;  // Other beats: quarter note.
+    }
     Tick remaining = end_tick - current_tick;
     if (dur > remaining) dur = remaining;
     if (dur == 0) break;
@@ -685,6 +753,8 @@ ChoralePreludeResult generateChoralePrelude(const ChoralePreludeConfig& config) 
 
   // Step 5: Place cantus firmus on Swell (track 1).
   placeCantus(melody, tracks[1]);
+  addCantusPassingTones(tracks[1], {60, 71},
+                        config.key.tonic, config.key.is_minor);
 
   // Step 6: Generate counterpoint and pedal for each cantus note.
   std::mt19937 rng(config.seed);
@@ -1036,13 +1106,15 @@ ChoralePreludeResult generateChoralePrelude(const ChoralePreludeConfig& config) 
         const auto& ev = timeline.getAt(t);
         return ev.is_minor ? ScaleType::HarmonicMinor : ScaleType::Major;
       };
-      lr_params.voice_range = [&](uint8_t v) -> std::pair<uint8_t, uint8_t> {
+      lr_params.voice_range_static = [&](uint8_t v) -> std::pair<uint8_t, uint8_t> {
         if (v < voice_ranges.size()) return voice_ranges[v];
         return {0, 127};
       };
       lr_params.is_chord_tone = [&](Tick t, uint8_t p) {
         return isChordTone(p, timeline.getAt(t));
       };
+      lr_params.vertical_safe =
+          makeVerticalSafeCallback(timeline, validated, kChoraleVoices);
       resolveLeaps(validated, lr_params);
 
       // Second parallel-perfect repair pass after leap resolution.
@@ -1051,7 +1123,7 @@ ChoralePreludeResult generateChoralePrelude(const ChoralePreludeConfig& config) 
         pp_params.num_voices = kChoraleVoices;
         pp_params.scale = config.key.is_minor ? ScaleType::HarmonicMinor : ScaleType::Major;
         pp_params.key_at_tick = lr_params.key_at_tick;
-        pp_params.voice_range = lr_params.voice_range;
+        pp_params.voice_range_static = lr_params.voice_range_static;
         pp_params.max_iterations = 5;
         repairParallelPerfect(validated, pp_params);
       }
@@ -1089,15 +1161,7 @@ ChoralePreludeResult generateChoralePrelude(const ChoralePreludeConfig& config) 
   }
 
   // Step 7: Sort notes within each track by start_tick.
-  for (auto& track : tracks) {
-    std::sort(track.notes.begin(), track.notes.end(),
-              [](const NoteEvent& lhs, const NoteEvent& rhs) {
-                if (lhs.start_tick != rhs.start_tick) {
-                  return lhs.start_tick < rhs.start_tick;
-                }
-                return lhs.pitch < rhs.pitch;
-              });
-  }
+  form_utils::sortTrackNotes(tracks);
 
   result.tracks = std::move(tracks);
   result.timeline = std::move(timeline);

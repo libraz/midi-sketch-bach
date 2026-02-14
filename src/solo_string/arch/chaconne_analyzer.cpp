@@ -105,8 +105,8 @@ float computeGroundBassIntegrity(const std::vector<NoteEvent>& all_notes,
     auto [var_start, var_end] = variationTickRange(var_idx, bass_length);
     auto var_notes = notesInRange(all_notes, var_start, var_end);
 
-    // For each expected bass note, find the lowest-pitch note at that position
-    // within this variation.
+    // For each expected bass note, find the GroundBass-sourced note at that
+    // position within this variation.
     std::vector<NoteEvent> extracted_bass;
     extracted_bass.reserve(bass_notes.size());
 
@@ -114,18 +114,32 @@ float computeGroundBassIntegrity(const std::vector<NoteEvent>& all_notes,
       // The expected position is the original note's offset + variation start.
       Tick expected_tick = var_start + original_note.start_tick;
 
-      // Find the lowest-pitch note at or near the expected tick.
-      // Allow a small tolerance window of 1 tick for floating-point drift.
+      // Find the GroundBass-sourced note at the expected tick.
+      // Prefer source-based matching (accurate), fall back to lowest-pitch
+      // matching for backward compatibility with notes that lack source info.
       NoteEvent best_match{};
       bool found = false;
 
       for (const auto& note : var_notes) {
-        if (note.start_tick == expected_tick) {
+        if (note.start_tick == expected_tick &&
+            note.source == BachNoteSource::GroundBass) {
           if (!found || note.pitch < best_match.pitch) {
             best_match = note;
-            // Store with offset relative to variation start for integrity check.
             best_match.start_tick = note.start_tick - var_start;
             found = true;
+          }
+        }
+      }
+
+      // Fallback: if no GroundBass-sourced note found, try lowest-pitch match.
+      if (!found) {
+        for (const auto& note : var_notes) {
+          if (note.start_tick == expected_tick) {
+            if (!found || note.pitch < best_match.pitch) {
+              best_match = note;
+              best_match.start_tick = note.start_tick - var_start;
+              found = true;
+            }
           }
         }
       }

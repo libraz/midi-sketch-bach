@@ -80,10 +80,15 @@ int maxLeapForCharacter(SubjectCharacter ch) {
 int normalizeEndingPitch(int target_pitch_class, int prev_pitch,
                          int max_leap, Key key, ScaleType scale,
                          int floor, int ceil) {
+  // Find nearest octave placement of target_pitch_class to prev_pitch.
+  int shift = nearestOctaveShift(prev_pitch - target_pitch_class);
+  int best_candidate = target_pitch_class + shift;
+
+  // Check the nearest and its neighbors, respecting range and max_leap.
   int best = -1;
   int best_dist = 999;
-  for (int octave = 0; octave < 11; ++octave) {
-    int candidate = target_pitch_class + octave * 12;
+  for (int offset : {0, -12, 12}) {
+    int candidate = best_candidate + offset;
     if (candidate < floor || candidate > ceil) continue;
     int dist = std::abs(candidate - prev_pitch);
     if (dist <= max_leap && dist < best_dist) {

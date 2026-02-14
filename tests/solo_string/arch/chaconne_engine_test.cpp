@@ -11,6 +11,9 @@
 
 #include "core/basic_types.h"
 #include "harmony/key.h"
+#include "instrument/bowed/cello_model.h"
+#include "instrument/bowed/violin_model.h"
+#include "instrument/fretted/guitar_model.h"
 #include "solo_string/arch/chaconne_config.h"
 #include "solo_string/arch/ground_bass.h"
 #include "solo_string/arch/variation_types.h"
@@ -129,11 +132,12 @@ TEST(ChaconneEngineTest, ViolinNotesWithinRange) {
   ASSERT_TRUE(result.success) << result.error_message;
   ASSERT_EQ(result.tracks.size(), 1u);
 
+  ViolinModel violin;
   for (const auto& note : result.tracks[0].notes) {
-    EXPECT_GE(note.pitch, 43u)  // Allow some bass notes from ground bass
+    EXPECT_GE(note.pitch, violin.getLowestPitch())
         << "Note pitch " << static_cast<int>(note.pitch) << " below violin range"
         << " at tick " << note.start_tick;
-    EXPECT_LE(note.pitch, 96u)
+    EXPECT_LE(note.pitch, violin.getHighestPitch())
         << "Note pitch " << static_cast<int>(note.pitch) << " above violin range"
         << " at tick " << note.start_tick;
   }
@@ -298,7 +302,9 @@ TEST(ChaconneEngineTest, GroundBassNotesArePresentInOutput) {
   ASSERT_TRUE(result.success) << result.error_message;
   ASSERT_EQ(result.tracks.size(), 1u);
 
-  auto ground_bass = GroundBass::createForKey(config.key);
+  // Use the same register_low as the engine uses for violin.
+  ViolinModel violin;
+  auto ground_bass = GroundBass::createForKey(config.key, violin.getLowestPitch());
   Tick bass_length = ground_bass.getLengthTicks();
   const auto& bass_notes = ground_bass.getNotes();
   const auto& output_notes = result.tracks[0].notes;
@@ -527,6 +533,83 @@ TEST(ChaconneSeedDiversityTest, SeedsProduceDifferentNoteCounts) {
   // With rhythm profile variation, we expect multiple distinct note counts.
   EXPECT_GE(note_counts.size(), 3u)
       << "Expected at least 3 distinct note counts across 10 seeds";
+}
+
+// ===========================================================================
+// Bass notes in instrument range (E2E)
+// ===========================================================================
+
+TEST(ChaconneE2ETest, ViolinBassNotesInRange) {
+  auto config = createTestConfig();
+  config.instrument = InstrumentType::Violin;
+  auto result = generateChaconne(config);
+  ASSERT_TRUE(result.success) << result.error_message;
+  ASSERT_EQ(result.tracks.size(), 1u);
+
+  ViolinModel violin;
+  for (const auto& note : result.tracks[0].notes) {
+    if (note.source == BachNoteSource::GroundBass) {
+      EXPECT_GE(note.pitch, violin.getLowestPitch())
+          << "Bass pitch " << static_cast<int>(note.pitch) << " below violin range";
+      EXPECT_LE(note.pitch, violin.getHighestPitch())
+          << "Bass pitch " << static_cast<int>(note.pitch) << " above violin range";
+    }
+  }
+}
+
+TEST(ChaconneE2ETest, CelloBassNotesInRange) {
+  auto config = createTestConfig();
+  config.instrument = InstrumentType::Cello;
+  auto result = generateChaconne(config);
+  ASSERT_TRUE(result.success) << result.error_message;
+  ASSERT_EQ(result.tracks.size(), 1u);
+
+  CelloModel cello;
+  for (const auto& note : result.tracks[0].notes) {
+    if (note.source == BachNoteSource::GroundBass) {
+      EXPECT_GE(note.pitch, cello.getLowestPitch())
+          << "Bass pitch " << static_cast<int>(note.pitch) << " below cello range";
+      EXPECT_LE(note.pitch, cello.getHighestPitch())
+          << "Bass pitch " << static_cast<int>(note.pitch) << " above cello range";
+    }
+  }
+}
+
+TEST(ChaconneE2ETest, GuitarBassNotesInRange) {
+  auto config = createTestConfig();
+  config.instrument = InstrumentType::Guitar;
+  auto result = generateChaconne(config);
+  ASSERT_TRUE(result.success) << result.error_message;
+  ASSERT_EQ(result.tracks.size(), 1u);
+
+  GuitarModel guitar;
+  for (const auto& note : result.tracks[0].notes) {
+    if (note.source == BachNoteSource::GroundBass) {
+      EXPECT_GE(note.pitch, guitar.getLowestPitch())
+          << "Bass pitch " << static_cast<int>(note.pitch) << " below guitar range";
+      EXPECT_LE(note.pitch, guitar.getHighestPitch())
+          << "Bass pitch " << static_cast<int>(note.pitch) << " above guitar range";
+    }
+  }
+}
+
+TEST(ChaconneE2ETest, MultiSeedViolinBassInRange) {
+  ViolinModel violin;
+  for (uint32_t seed = 1; seed <= 10; ++seed) {
+    auto config = createTestConfig(seed);
+    config.instrument = InstrumentType::Violin;
+    auto result = generateChaconne(config);
+    ASSERT_TRUE(result.success) << "Seed " << seed << ": " << result.error_message;
+    ASSERT_EQ(result.tracks.size(), 1u);
+
+    for (const auto& note : result.tracks[0].notes) {
+      if (note.source == BachNoteSource::GroundBass) {
+        EXPECT_GE(note.pitch, violin.getLowestPitch())
+            << "Seed " << seed << ": bass pitch "
+            << static_cast<int>(note.pitch) << " below violin range";
+      }
+    }
+  }
 }
 
 }  // namespace

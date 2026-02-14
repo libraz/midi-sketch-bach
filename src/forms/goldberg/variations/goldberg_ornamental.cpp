@@ -24,11 +24,11 @@ constexpr uint8_t kBassVelocity = 70;
 constexpr uint8_t kBassLow = 36;   // C2
 constexpr uint8_t kBassHigh = 60;  // C4
 
-/// Ornament density for ornamental variations (moderate, below Aria).
-constexpr float kOrnamentalDensity = 0.25f;
+/// Ornament density for ornamental variations (restrained piano style).
+constexpr float kOrnamentalDensity = 0.08f;
 
-/// Ornament density for trill etude variations (high trill focus).
-constexpr float kTrillEtudeDensity = 0.40f;
+/// Ornament density for trill etude variations (trill-focused, restrained).
+constexpr float kTrillEtudeDensity = 0.20f;
 
 }  // namespace
 
@@ -266,21 +266,24 @@ void OrnamentalGenerator::applyOrnaments(
     std::vector<NoteEvent>& notes,
     bool is_trill_etude,
     uint32_t seed) const {
+  // Piano style: disable harpsichord-specific ornaments.
   OrnamentConfig config;
-  config.enable_trill = true;
-  config.enable_mordent = true;
-  config.enable_turn = true;
-  config.enable_appoggiatura = true;
-  config.enable_pralltriller = true;
-  config.enable_vorschlag = true;
-  config.enable_nachschlag = true;
-  config.enable_compound = true;
+  config.enable_turn = false;
+  config.enable_appoggiatura = false;
+  config.enable_pralltriller = false;
+  config.enable_vorschlag = false;
+  config.enable_nachschlag = false;
+  config.enable_compound = false;
 
   if (is_trill_etude) {
-    // Trill etudes: high density, trill-dominant ornamentation.
+    // Trill etudes: trill-only, restrained density.
+    config.enable_trill = true;
+    config.enable_mordent = false;
     config.ornament_density = kTrillEtudeDensity;
   } else {
-    // Ornamental variations: moderate density.
+    // Ornamental variations: sparse trills + mordents.
+    config.enable_trill = true;
+    config.enable_mordent = true;
     config.ornament_density = kOrnamentalDensity;
   }
 

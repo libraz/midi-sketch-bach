@@ -21,8 +21,13 @@ struct ParallelRepairParams {
   /// Key at a given tick (for diatonic validation of step shifts).
   std::function<Key(Tick)> key_at_tick;
 
-  /// Voice range (low, high) for a given voice.
-  std::function<std::pair<uint8_t, uint8_t>(uint8_t)> voice_range;
+  /// Static voice range (low, high). Used when voice_range is not set.
+  /// Existing callers set this field only (gradual migration).
+  std::function<std::pair<uint8_t, uint8_t>(uint8_t)> voice_range_static;
+
+  /// Tick-aware voice range (low, high). When set, takes priority over
+  /// voice_range_static. Enables phase-ceiling enforcement in repair.
+  std::function<std::pair<uint8_t, uint8_t>(uint8_t, Tick)> voice_range;
 
   /// Maximum repair iterations (default 3).
   int max_iterations = 3;

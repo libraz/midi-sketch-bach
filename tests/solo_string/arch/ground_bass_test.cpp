@@ -421,5 +421,69 @@ TEST(GroundBassTest, IntegrityReportDurationMismatch) {
   EXPECT_TRUE(found);
 }
 
+// ===========================================================================
+// createForKey with register_low (instrument-aware octave shift)
+// ===========================================================================
+
+TEST(GroundBassTest, CreateForKeyRespectsRegisterLow) {
+  // D minor on violin (BWV1004-style): register_low = 55 (G3).
+  auto bass = GroundBass::createForKey({Key::D, true}, 55);
+  for (const auto& note : bass.getNotes()) {
+    EXPECT_GE(note.pitch, 55u) << "Bass note below violin range";
+  }
+  // D minor standard bass lowest is G2(43). Shift = ceil((55-43)/12)*12 = 12.
+  // G2(43)+12 = G3(55). Lowest should be exactly G3(55).
+  uint8_t lowest = 127;
+  for (const auto& note : bass.getNotes()) {
+    if (note.pitch < lowest) lowest = note.pitch;
+  }
+  EXPECT_EQ(lowest, 55u);
+}
+
+TEST(GroundBassTest, CreateForKeyNoShiftWhenInRange) {
+  // D minor on cello (register_low = 36): all notes already >= 36.
+  auto bass_default = GroundBass::createForKey({Key::D, true});
+  auto bass_cello = GroundBass::createForKey({Key::D, true}, 36);
+  // Both should produce identical pitches (all notes already >= 36).
+  ASSERT_EQ(bass_default.noteCount(), bass_cello.noteCount());
+  for (size_t i = 0; i < bass_default.noteCount(); ++i) {
+    EXPECT_EQ(bass_default.getNotes()[i].pitch, bass_cello.getNotes()[i].pitch);
+  }
+}
+
+TEST(GroundBassTest, CreateForKeyDefaultBackwardCompatible) {
+  // register_low=0 (default) should produce same result as before.
+  auto bass_old = GroundBass::createForKey({Key::D, true});
+  auto bass_new = GroundBass::createForKey({Key::D, true}, 0);
+  ASSERT_EQ(bass_old.noteCount(), bass_new.noteCount());
+  for (size_t i = 0; i < bass_old.noteCount(); ++i) {
+    EXPECT_EQ(bass_old.getNotes()[i].pitch, bass_new.getNotes()[i].pitch);
+  }
+}
+
+TEST(GroundBassTest, CreateForKeyPreservesIntervalsAfterShift) {
+  // Interval structure should be preserved even after octave shift.
+  auto bass_no_shift = GroundBass::createForKey({Key::D, true});
+  auto bass_shifted = GroundBass::createForKey({Key::D, true}, 55);
+  ASSERT_EQ(bass_no_shift.noteCount(), bass_shifted.noteCount());
+  for (size_t i = 1; i < bass_no_shift.noteCount(); ++i) {
+    int interval_orig = static_cast<int>(bass_no_shift.getNotes()[i].pitch) -
+                        static_cast<int>(bass_no_shift.getNotes()[i - 1].pitch);
+    int interval_shifted = static_cast<int>(bass_shifted.getNotes()[i].pitch) -
+                           static_cast<int>(bass_shifted.getNotes()[i - 1].pitch);
+    EXPECT_EQ(interval_orig, interval_shifted)
+        << "Interval mismatch at note " << i;
+  }
+}
+
+TEST(GroundBassTest, CreateForKeyCMajorOnViolinShiftsUp) {
+  // C major bass lowest = F2(41). Violin register_low=55.
+  // Shift = ceil((55-41)/12)*12 = ceil(14/12)*12 = 24.
+  auto bass = GroundBass::createForKey({Key::C, false}, 55);
+  for (const auto& note : bass.getNotes()) {
+    EXPECT_GE(note.pitch, 55u) << "Bass note below violin range";
+  }
+}
+
 }  // namespace
 }  // namespace bach

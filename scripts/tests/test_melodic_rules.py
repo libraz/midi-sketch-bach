@@ -273,5 +273,165 @@ class TestMelodicTritoneOutline(unittest.TestCase):
         self.assertTrue(result.passed)
 
 
+class TestLeapResolutionGoldbergExempt(unittest.TestCase):
+    """Goldberg-specific source exemptions for LeapResolution."""
+
+    def _notes_with_source(self, source):
+        prov = Provenance(source=source)
+        return [
+            Note(pitch=60, velocity=80, start_tick=0, duration=480, voice="s", provenance=prov),
+            Note(pitch=67, velocity=80, start_tick=480, duration=480, voice="s", provenance=prov),
+            Note(pitch=69, velocity=80, start_tick=960, duration=480, voice="s", provenance=prov),
+        ]
+
+    def test_goldberg_figura_exempt(self):
+        """GOLDBERG_FIGURA (arpeggiated variation) should be exempt."""
+        notes = self._notes_with_source(NoteSource.GOLDBERG_FIGURA)
+        result = LeapResolution().check(_score([_track("s", notes)]))
+        self.assertTrue(result.passed)
+
+    def test_goldberg_overture_exempt(self):
+        """GOLDBERG_OVERTURE (orchestral texture) should be exempt."""
+        notes = self._notes_with_source(NoteSource.GOLDBERG_OVERTURE)
+        result = LeapResolution().check(_score([_track("s", notes)]))
+        self.assertTrue(result.passed)
+
+    def test_ornament_exempt(self):
+        """ORNAMENT should be exempt."""
+        notes = self._notes_with_source(NoteSource.ORNAMENT)
+        result = LeapResolution().check(_score([_track("s", notes)]))
+        self.assertTrue(result.passed)
+
+    def test_goldberg_fughetta_exempt(self):
+        """GOLDBERG_FUGHETTA (structural source) should be exempt."""
+        notes = self._notes_with_source(NoteSource.GOLDBERG_FUGHETTA)
+        result = LeapResolution().check(_score([_track("s", notes)]))
+        self.assertTrue(result.passed)
+
+    def test_canon_dux_exempt(self):
+        """CANON_DUX (fixed material) should be exempt."""
+        notes = self._notes_with_source(NoteSource.CANON_DUX)
+        result = LeapResolution().check(_score([_track("s", notes)]))
+        self.assertTrue(result.passed)
+
+    def test_canon_comes_exempt(self):
+        """CANON_COMES (fixed material) should be exempt."""
+        notes = self._notes_with_source(NoteSource.CANON_COMES)
+        result = LeapResolution().check(_score([_track("s", notes)]))
+        self.assertTrue(result.passed)
+
+    def test_quodlibet_melody_exempt(self):
+        """QUODLIBET_MELODY (quoted melody) should be exempt."""
+        notes = self._notes_with_source(NoteSource.QUODLIBET_MELODY)
+        result = LeapResolution().check(_score([_track("s", notes)]))
+        self.assertTrue(result.passed)
+
+    def test_goldberg_bass_exempt(self):
+        """GOLDBERG_BASS (ground bass) should be exempt."""
+        notes = self._notes_with_source(NoteSource.GOLDBERG_BASS)
+        result = LeapResolution().check(_score([_track("s", notes)]))
+        self.assertTrue(result.passed)
+
+    def test_goldberg_aria_not_exempt(self):
+        """GOLDBERG_ARIA should NOT be exempt (melodic rules apply)."""
+        notes = self._notes_with_source(NoteSource.GOLDBERG_ARIA)
+        result = LeapResolution().check(_score([_track("s", notes)]))
+        self.assertFalse(result.passed)
+
+    def test_goldberg_dance_not_exempt(self):
+        """GOLDBERG_DANCE should NOT be blanket-exempt (selective via arpeggio continuation)."""
+        prov = Provenance(source=NoteSource.GOLDBERG_DANCE)
+        # up 7, up 1 (not arpeggio continuation since 1 < 3)
+        notes = [
+            Note(pitch=60, velocity=80, start_tick=0, duration=480, voice="s", provenance=prov),
+            Note(pitch=67, velocity=80, start_tick=480, duration=480, voice="s", provenance=prov),
+            Note(pitch=68, velocity=80, start_tick=960, duration=480, voice="s", provenance=prov),
+        ]
+        result = LeapResolution().check(_score([_track("s", notes)]))
+        self.assertFalse(result.passed)
+
+
+class TestLeapResolutionArpeggioContinuation(unittest.TestCase):
+    """Arpeggio continuation pattern: same direction, >= 3 semitones."""
+
+    def test_ascending_arpeggio_exempt(self):
+        """C->G->B (up 7, up 4) is arpeggio continuation -> exempt."""
+        notes = [_n(60, 0), _n(67, 480), _n(71, 960)]  # up 7, up 4
+        result = LeapResolution().check(_score([_track("s", notes)]))
+        self.assertTrue(result.passed)
+
+    def test_descending_arpeggio_exempt(self):
+        """G->C->Ab (down 7, down 4) is arpeggio continuation -> exempt."""
+        notes = [_n(67, 0), _n(60, 480), _n(56, 960)]  # down 7, down 4
+        result = LeapResolution().check(_score([_track("s", notes)]))
+        self.assertTrue(result.passed)
+
+    def test_small_continuation_not_exempt(self):
+        """C->G->A (up 7, up 2) is NOT arpeggio continuation (2 < 3)."""
+        notes = [_n(60, 0), _n(67, 480), _n(69, 960)]  # up 7, up 2
+        result = LeapResolution().check(_score([_track("s", notes)]))
+        self.assertFalse(result.passed)
+
+    def test_opposite_direction_not_exempt(self):
+        """C->G->E (up 7, down 3) is NOT arpeggio continuation (opposite direction)."""
+        notes = [_n(60, 0), _n(67, 480), _n(64, 960)]  # up 7, down 3
+        result = LeapResolution().check(_score([_track("s", notes)]))
+        # down 3 is opposite to up 7, AND it's > 2, so not resolved by step either
+        self.assertFalse(result.passed)
+
+    def test_goldberg_dance_arpeggio_continuation_exempt(self):
+        """GOLDBERG_DANCE with arpeggio continuation should be exempt."""
+        prov = Provenance(source=NoteSource.GOLDBERG_DANCE)
+        # up 7, up 3 -> arpeggio continuation
+        notes = [
+            Note(pitch=60, velocity=80, start_tick=0, duration=480, voice="s", provenance=prov),
+            Note(pitch=67, velocity=80, start_tick=480, duration=480, voice="s", provenance=prov),
+            Note(pitch=70, velocity=80, start_tick=960, duration=480, voice="s", provenance=prov),
+        ]
+        result = LeapResolution().check(_score([_track("s", notes)]))
+        self.assertTrue(result.passed)
+
+
+class TestConsecutiveRepeatedNotesGoldbergBass(unittest.TestCase):
+    def test_goldberg_bass_exempt(self):
+        """Repeated notes with GOLDBERG_BASS source should be exempt."""
+        prov = Provenance(source=NoteSource.GOLDBERG_BASS)
+        notes = [
+            Note(pitch=48, velocity=80, start_tick=i * 480, duration=480,
+                 voice="bass", provenance=prov)
+            for i in range(6)
+        ]
+        result = ConsecutiveRepeatedNotes(max_repeats=3).check(
+            _score([_track("bass", notes)])
+        )
+        self.assertTrue(result.passed)
+
+
+class TestLeapResolutionThreshold(unittest.TestCase):
+    def test_threshold_6_exempts_p4(self):
+        """Leap of 5 semitones (P4) should pass when threshold=6."""
+        # up 5, up 2 (same dir, no step resolution) -- default threshold 5 would flag
+        notes = [_n(60, 0), _n(65, 480), _n(67, 960)]
+        rule = LeapResolution(leap_threshold=6)
+        result = rule.check(_score([_track("s", notes)]))
+        self.assertTrue(result.passed)
+
+    def test_threshold_6_catches_tritone(self):
+        """Leap of 6 semitones (tritone) should still be caught when threshold=6."""
+        # up 6, up 2 (same dir)
+        notes = [_n(60, 0), _n(66, 480), _n(68, 960)]
+        rule = LeapResolution(leap_threshold=6)
+        result = rule.check(_score([_track("s", notes)]))
+        self.assertFalse(result.passed)
+
+    def test_configure_from_profile(self):
+        """LeapResolution should pick up threshold from form profile."""
+        from scripts.bach_analyzer.form_profile import get_form_profile
+        profile = get_form_profile("goldberg_variations")
+        rule = LeapResolution()
+        rule.configure(profile)
+        self.assertEqual(rule.leap_threshold, 6)
+
+
 if __name__ == "__main__":
     unittest.main()

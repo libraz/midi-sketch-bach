@@ -156,6 +156,7 @@ set(BACH_TEST_SOURCES
 
   # generator (unified entry point)
   generator_test.cpp
+  generator_overlap_test.cpp
 
   # ornament/
   ornament/ornament_types_test.cpp

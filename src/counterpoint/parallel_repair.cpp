@@ -191,7 +191,9 @@ int repairParallelPerfect(std::vector<NoteEvent>& notes,
                   continue;
 
                 // Voice range check.
-                auto [lo, hi] = params.voice_range(fc.v);
+                auto [lo, hi] = params.voice_range
+                    ? params.voice_range(fc.v, notes[fc.ni].start_tick)
+                    : params.voice_range_static(fc.v);
                 if (ucp < lo || ucp > hi) continue;
 
                 // Melodic leap: no more than octave from previous note in voice.
@@ -298,7 +300,9 @@ int repairParallelPerfect(std::vector<NoteEvent>& notes,
                         !scale_util::isScaleTone(ucp2, nk2, params.scale))
                       continue;
 
-                    auto [lo2, hi2] = params.voice_range(fc2.v);
+                    auto [lo2, hi2] = params.voice_range
+                        ? params.voice_range(fc2.v, notes[fc2.ni].start_tick)
+                        : params.voice_range_static(fc2.v);
                     if (ucp2 < lo2 || ucp2 > hi2) continue;
 
                     // Melodic leap from note before pt.

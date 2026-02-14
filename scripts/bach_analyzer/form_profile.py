@@ -128,6 +128,7 @@ _PROFILES: Dict[str, FormProfile] = {
         keyboard_parallel_policy=True,
         instrument_range=(29, 89),
         expected_voices=(1, 5),
+        leap_resolution_threshold=6,
     ),
     "passacaglia": FormProfile(
         form_name="passacaglia",

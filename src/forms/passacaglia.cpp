@@ -19,6 +19,7 @@
 #include "counterpoint/counterpoint_state.h"
 #include "harmony/chord_types.h"
 #include "harmony/harmonic_event.h"
+#include "forms/form_utils.h"
 #include "counterpoint/leap_resolution.h"
 #include "counterpoint/parallel_repair.h"
 #include "counterpoint/repeated_note_repair.h"
@@ -29,49 +30,6 @@ namespace bach {
 namespace {
 
 using namespace duration;
-
-// ---------------------------------------------------------------------------
-// Track creation (organ channel mapping)
-// ---------------------------------------------------------------------------
-
-/// @brief Create MIDI tracks for an organ passacaglia.
-///
-/// Channel/program mapping per the organ system spec:
-///   Voice 0 -> Ch 0, Church Organ (Manual I / Great)
-///   Voice 1 -> Ch 1, Reed Organ   (Manual II / Swell)
-///   Voice 2 -> Ch 2, Church Organ (Manual III / Positiv)
-///   Voice 3 -> Ch 3, Church Organ (Pedal)
-///
-/// @param num_voices Number of voices (3-5).
-/// @return Vector of Track objects with channel/program/name configured.
-std::vector<Track> createPassacagliaTracks(uint8_t num_voices) {
-  std::vector<Track> tracks;
-  tracks.reserve(num_voices);
-
-  struct TrackSpec {
-    uint8_t channel;
-    uint8_t program;
-    const char* name;
-  };
-
-  static constexpr TrackSpec kSpecs[] = {
-      {0, GmProgram::kChurchOrgan, "Manual I (Great)"},
-      {1, GmProgram::kReedOrgan, "Manual II (Swell)"},
-      {2, GmProgram::kChurchOrgan, "Manual III (Positiv)"},
-      {3, GmProgram::kChurchOrgan, "Pedal"},
-      {4, GmProgram::kChurchOrgan, "Manual IV"},
-  };
-
-  for (uint8_t idx = 0; idx < num_voices && idx < 5; ++idx) {
-    Track track;
-    track.channel = kSpecs[idx].channel;
-    track.program = kSpecs[idx].program;
-    track.name = kSpecs[idx].name;
-    tracks.push_back(track);
-  }
-
-  return tracks;
-}
 
 // ---------------------------------------------------------------------------
 // Pitch range helpers
@@ -1137,19 +1095,6 @@ std::vector<NoteEvent> generateVariationNotes(int variation_idx, Tick start_tick
   }
 }
 
-/// @brief Sort notes in each track by start_tick, breaking ties by pitch.
-/// @param tracks Tracks whose notes will be sorted in place.
-void sortTrackNotes(std::vector<Track>& tracks) {
-  for (auto& track : tracks) {
-    std::sort(track.notes.begin(), track.notes.end(),
-              [](const NoteEvent& lhs, const NoteEvent& rhs) {
-                if (lhs.start_tick != rhs.start_tick) {
-                  return lhs.start_tick < rhs.start_tick;
-                }
-                return lhs.pitch < rhs.pitch;
-              });
-  }
-}
 
 /// @brief Clamp voice count to valid range [3, 5].
 /// @param num_voices Raw voice count from configuration.
@@ -1303,7 +1248,7 @@ PassacagliaResult generatePassacaglia(const PassacagliaConfig& config) {
       ground_bass, config.key, config.num_variations);
 
   // Step 3: Create tracks.
-  std::vector<Track> tracks = createPassacagliaTracks(num_voices);
+  std::vector<Track> tracks = form_utils::createOrganTracks(num_voices);
 
   // Step 4: For each variation, place ground bass and generate upper voices
   // through createBachNote() for vertical coordination.
@@ -1390,7 +1335,7 @@ PassacagliaResult generatePassacaglia(const PassacagliaConfig& config) {
       lr_params.scale_at_tick = [&](Tick) {
         return config.key.is_minor ? ScaleType::HarmonicMinor : ScaleType::Major;
       };
-      lr_params.voice_range = [&](uint8_t v) -> std::pair<uint8_t, uint8_t> {
+      lr_params.voice_range_static = [&](uint8_t v) -> std::pair<uint8_t, uint8_t> {
         return {getVoiceLowPitch(v), getVoiceHighPitch(v)};
       };
       lr_params.is_chord_tone = [&](Tick t, uint8_t p) {
@@ -1426,7 +1371,7 @@ PassacagliaResult generatePassacaglia(const PassacagliaConfig& config) {
         pp_params.num_voices = num_voices;
         pp_params.scale = config.key.is_minor ? ScaleType::HarmonicMinor : ScaleType::Major;
         pp_params.key_at_tick = lr_params.key_at_tick;
-        pp_params.voice_range = lr_params.voice_range;
+        pp_params.voice_range_static = lr_params.voice_range_static;
         pp_params.max_iterations = 8;  // Strengthened for parallel repair
         repairParallelPerfect(validated, pp_params);
       }
@@ -1465,7 +1410,7 @@ PassacagliaResult generatePassacaglia(const PassacagliaConfig& config) {
   }
 
   // Step 6: Sort notes within each track.
-  sortTrackNotes(tracks);
+  form_utils::sortTrackNotes(tracks);
 
   // Step 7: Run pairwise counterpoint check and log violations as warnings.
   if (num_voices >= 2) {
@@ -1538,7 +1483,7 @@ PassacagliaResult generatePassacaglia(const PassacagliaConfig& config) {
       pp2.num_voices = num_voices;
       pp2.scale = config.key.is_minor ? ScaleType::HarmonicMinor : ScaleType::Major;
       pp2.key_at_tick = [&](Tick) { return config.key.tonic; };
-      pp2.voice_range = [&](uint8_t v) -> std::pair<uint8_t, uint8_t> {
+      pp2.voice_range_static = [&](uint8_t v) -> std::pair<uint8_t, uint8_t> {
         return {getVoiceLowPitch(v), getVoiceHighPitch(v)};
       };
       pp2.max_iterations = 5;
@@ -1562,7 +1507,7 @@ PassacagliaResult generatePassacaglia(const PassacagliaConfig& config) {
         tracks[note.voice].notes.push_back(std::move(note));
       }
     }
-    sortTrackNotes(tracks);
+    form_utils::sortTrackNotes(tracks);
   }
 
   result.tracks = std::move(tracks);
