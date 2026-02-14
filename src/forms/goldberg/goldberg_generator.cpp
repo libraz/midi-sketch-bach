@@ -14,7 +14,10 @@
 #include "core/pitch_utils.h"
 #include "core/rng_util.h"
 #include "core/scale.h"
+#include "counterpoint/cross_relation.h"
+#include "counterpoint/leap_resolution.h"
 #include "counterpoint/parallel_repair.h"
+#include "counterpoint/repeated_note_repair.h"
 #include "instrument/common/impossibility_guard.h"
 #include "instrument/keyboard/harpsichord_model.h"
 #include "forms/goldberg/goldberg_aria.h"
@@ -514,7 +517,134 @@ GoldbergResult GoldbergGenerator::generate(const GoldbergConfig& config) const {
       }
     }
 
-    // (a) Parallel perfect consonance repair.
+    // (1) Leap resolution: resolve unresolved leaps (>=5 semitones).
+    //     Uses is_chord_tone callback to protect arpeggio/broken-chord leaps
+    //     (chord-tone landings are exempt via P5 protection).
+    {
+      LeapResolutionParams lr_params;
+      lr_params.num_voices = kGoldbergVoices;
+      lr_params.key_at_tick = [&](Tick) { return config.key.tonic; };
+      lr_params.scale_at_tick = [&](Tick) {
+        return config.key.is_minor ? ScaleType::HarmonicMinor : ScaleType::Major;
+      };
+      lr_params.voice_range = [](uint8_t v) -> std::pair<uint8_t, uint8_t> {
+        if (v < kGoldbergVoices) {
+          return {kHarpsichordLow[v], kHarpsichordHigh[v]};
+        }
+        return {kHarpsichordGlobalLow, kHarpsichordGlobalHigh};
+      };
+      // Chord-tone awareness: protects arpeggio/broken-chord landings (P5).
+      // Without timeline, use consonant-interval heuristic against bass.
+      lr_params.is_chord_tone = [&](Tick t, uint8_t pitch) -> bool {
+        // Find bass note at this tick.
+        for (const auto& n : all_notes) {
+          if (n.start_tick <= t && n.start_tick + n.duration > t &&
+              (n.voice == kGoldbergVoices - 1 ||
+               getProtectionLevel(n.source) == ProtectionLevel::Immutable)) {
+            int ivl = interval_util::compoundToSimple(
+                absoluteInterval(pitch, n.pitch));
+            return interval_util::isConsonance(ivl);
+          }
+        }
+        return false;
+      };
+      // Vertical safety: reject candidates creating harsh dissonance (m2/M7)
+      // on strong beats against sounding voices.
+      lr_params.vertical_safe = [&](Tick tick, uint8_t voice,
+                                     uint8_t cand_pitch) -> bool {
+        uint8_t beat = static_cast<uint8_t>(
+            (tick % kTicksPerBar) / kTicksPerBeat);
+        if (beat != 0 && beat != 2) return true;  // Weak beats always safe.
+        for (const auto& n : all_notes) {
+          if (n.voice == voice) continue;
+          if (n.start_tick + n.duration <= tick) continue;
+          if (n.start_tick > tick) break;
+          int reduced = interval_util::compoundToSimple(
+              absoluteInterval(cand_pitch, n.pitch));
+          if (reduced == 1 || reduced == 11) return false;  // m2/M7 reject.
+        }
+        return true;
+      };
+      resolveLeaps(all_notes, lr_params);
+    }
+
+    // (2) Repeated note repair: break runs of >3 identical pitches.
+    //     Short ornamental notes (16th or shorter) are exempt via
+    //     run_gap_threshold: rapid ornamental repeats don't form "runs".
+    {
+      RepeatedNoteRepairParams rn_params;
+      rn_params.num_voices = kGoldbergVoices;
+      rn_params.max_consecutive = 3;
+      rn_params.run_gap_threshold = kTicksPerBeat;
+      rn_params.key_at_tick = [&](Tick) { return config.key.tonic; };
+      rn_params.scale_at_tick = [&](Tick) {
+        return config.key.is_minor ? ScaleType::HarmonicMinor : ScaleType::Major;
+      };
+      rn_params.voice_range = [](uint8_t v) -> std::pair<uint8_t, uint8_t> {
+        if (v < kGoldbergVoices) {
+          return {kHarpsichordLow[v], kHarpsichordHigh[v]};
+        }
+        return {kHarpsichordGlobalLow, kHarpsichordGlobalHigh};
+      };
+      repairRepeatedNotes(all_notes, rn_params);
+    }
+
+    // (3) Cross-relation repair: fix chromatic contradictions at same tick.
+    //     Respects leading-tone function and vertical consonance.
+    {
+      // Stable sort by (tick, voice) for reproducibility.
+      std::stable_sort(all_notes.begin(), all_notes.end(),
+          [](const NoteEvent& a, const NoteEvent& b) {
+            if (a.start_tick != b.start_tick) return a.start_tick < b.start_tick;
+            return a.voice < b.voice;
+          });
+      ScaleType cr_scale =
+          config.key.is_minor ? ScaleType::HarmonicMinor : ScaleType::Major;
+      for (size_t i = 0; i < all_notes.size(); ++i) {
+        auto& note = all_notes[i];
+        if (getProtectionLevel(note.source) != ProtectionLevel::Flexible) continue;
+        if (!hasCrossRelation(all_notes, kGoldbergVoices, note.voice,
+                              note.pitch, note.start_tick)) {
+          continue;
+        }
+        // Skip if this note is a leading tone (scale degree 7 in minor).
+        if (config.key.is_minor) {
+          int pc = (static_cast<int>(note.pitch) - static_cast<int>(config.key.tonic) + 12) % 12;
+          if (pc == 11) continue;  // raised 7th = leading tone, preserve.
+        }
+        uint8_t lo = (note.voice < kGoldbergVoices)
+            ? kHarpsichordLow[note.voice] : kHarpsichordGlobalLow;
+        uint8_t hi = (note.voice < kGoldbergVoices)
+            ? kHarpsichordHigh[note.voice] : kHarpsichordGlobalHigh;
+        for (int delta : {1, -1, 2, -2}) {
+          uint8_t cand = scale_util::nearestScaleTone(
+              clampPitch(static_cast<int>(note.pitch) + delta, lo, hi),
+              config.key.tonic, cr_scale);
+          if (hasCrossRelation(all_notes, kGoldbergVoices, note.voice,
+                               cand, note.start_tick)) {
+            continue;
+          }
+          // Vertical consonance check: reject if candidate creates
+          // harsh dissonance (m2/M7) with any sounding note at same tick.
+          bool vertically_safe = true;
+          for (const auto& other : all_notes) {
+            if (other.start_tick != note.start_tick) continue;
+            if (other.voice == note.voice) continue;
+            int ivl = interval_util::compoundToSimple(
+                absoluteInterval(cand, other.pitch));
+            if (ivl == 1 || ivl == 11) {
+              vertically_safe = false;
+              break;
+            }
+          }
+          if (!vertically_safe) continue;
+          note.pitch = cand;
+          break;
+        }
+      }
+    }
+
+    // (4) Parallel perfect consonance repair.
     {
       ParallelRepairParams pp_params;
       pp_params.num_voices = kGoldbergVoices;

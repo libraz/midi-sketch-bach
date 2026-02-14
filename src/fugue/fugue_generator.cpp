@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <climits>
+#include <array>
 #include <cstdint>
 #include <functional>
 #include <random>
@@ -2510,8 +2511,55 @@ FugueResult generateFugue(const FugueConfig& config) {
     }
 
     // -----------------------------------------------------------------------
+    // Enforce per-voice organ range before final parallel repair.
+    // Uses getFugueVoiceRange (aligns with analyzer per-channel checks).
+    // Placed before final parallel repair so any parallels introduced by
+    // range clamping are caught and repaired.
+    {
+      std::array<uint8_t, 5> prev_pitch = {};  // Per-voice tracking.
+      // Sort by (voice, tick) for sequential per-voice processing.
+      std::stable_sort(all_notes.begin(), all_notes.end(),
+          [](const NoteEvent& a, const NoteEvent& b) {
+            if (a.voice != b.voice) return a.voice < b.voice;
+            return a.start_tick < b.start_tick;
+          });
+      for (auto& note : all_notes) {
+        if (note.voice >= num_voices) continue;
+        auto [lo, hi] = getFugueVoiceRange(note.voice, num_voices);
+        auto level = getProtectionLevel(note.source);
+        if (level != ProtectionLevel::Immutable &&
+            (note.pitch < lo || note.pitch > hi)) {
+          // Try octave shift first (preserves melodic contour).
+          uint8_t fixed = clampPitch(static_cast<int>(note.pitch), lo, hi);
+          for (int shift : {12, -12, 24, -24}) {
+            int cand = static_cast<int>(note.pitch) + shift;
+            if (cand >= lo && cand <= hi) {
+              if (prev_pitch[note.voice] == 0 ||
+                  std::abs(cand - static_cast<int>(prev_pitch[note.voice])) <
+                  std::abs(static_cast<int>(fixed) -
+                           static_cast<int>(prev_pitch[note.voice]))) {
+                fixed = static_cast<uint8_t>(cand);
+              }
+              break;  // First valid shift is closest octave.
+            }
+          }
+          note.pitch = fixed;
+        }
+        if (note.voice < prev_pitch.size()) {
+          prev_pitch[note.voice] = note.pitch;
+        }
+      }
+      // Re-sort by tick for subsequent pipeline steps.
+      std::sort(all_notes.begin(), all_notes.end(),
+          [](const NoteEvent& a, const NoteEvent& b) {
+            return a.start_tick < b.start_tick;
+          });
+    }
+
+    // -----------------------------------------------------------------------
     // Final regression parallel repair: catch parallels introduced by voice
-    // crossing repair, leap resolution, or dissonance resolution.
+    // crossing repair, leap resolution, dissonance resolution, or range
+    // enforcement.
     // -----------------------------------------------------------------------
     if (num_voices >= 2) {
       ParallelRepairParams final_repair_params;
