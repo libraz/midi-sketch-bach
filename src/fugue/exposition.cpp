@@ -338,12 +338,12 @@ void placeFreeCounterpoint(VoiceId voice_id,
     return 0;
   };
 
-  bool is_bass = isPedalVoice(voice_id, num_voices);
+  VoiceProfile voice_profile = getVoiceProfile(voice_id, num_voices);
 
   while (remaining > 0) {
     Tick other_dur = findOtherDuration(current_tick);
     Tick raw_dur = FugueEnergyCurve::selectDuration(energy, current_tick, rng,
-                                                     other_dur, is_bass);
+                                                     other_dur, voice_profile);
 
     // Guard 1: Split duration at bar boundaries.
     // Non-suspension notes crossing bar lines feel unnatural in counterpoint.

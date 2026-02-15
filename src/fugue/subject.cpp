@@ -16,6 +16,7 @@
 #include "fugue/motif_template.h"
 #include "fugue/subject_params.h"
 #include "fugue/subject_validator.h"
+#include "fugue/toccata_affinity.h"
 
 namespace bach {
 
@@ -1411,7 +1412,20 @@ Subject SubjectGenerator::generate(const FugueConfig& config,
     float base_comp = validator.evaluate(candidate).composite();
     float arch_comp = archetype_scorer.evaluate(candidate, policy).composite();
     float w = policy.base_quality_weight;
-    float comp = base_comp * w + arch_comp * (1.0f - w);
+    float comp;
+    if (config.toccata_core_intervals.empty()) {
+      comp = base_comp * w + arch_comp * (1.0f - w);
+    } else {
+      constexpr float kToccataAlpha = 0.12f;
+      std::vector<int> subj_ivls;
+      for (size_t i = 1; i < result.notes.size(); ++i) {
+        subj_ivls.push_back(static_cast<int>(result.notes[i].pitch) -
+                            static_cast<int>(result.notes[i - 1].pitch));
+      }
+      float toc = computeToccataAffinity(subj_ivls, config.toccata_core_intervals);
+      comp = (base_comp * w + arch_comp * (1.0f - w)) * (1.0f - kToccataAlpha)
+             + toc * kToccataAlpha;
+    }
 
     if (comp > best_composite) {
       best_composite = comp;
@@ -1626,7 +1640,19 @@ SubjectGenerator::GenerateResult SubjectGenerator::generateNotes(
 
     float base_comp = validator.evaluate(sub).composite();
     float arch_comp = archetype_scorer.evaluate(sub, policy).composite();
-    float comp = base_comp * 0.65f + arch_comp * 0.25f + note_func_bonus * 0.10f;
+    float comp;
+    if (config.toccata_core_intervals.empty()) {
+      comp = base_comp * 0.65f + arch_comp * 0.25f + note_func_bonus * 0.10f;
+    } else {
+      std::vector<int> subj_ivls;
+      for (size_t ni2 = 1; ni2 < candidate.size(); ++ni2) {
+        subj_ivls.push_back(static_cast<int>(candidate[ni2].pitch) -
+                            static_cast<int>(candidate[ni2 - 1].pitch));
+      }
+      float toc = computeToccataAffinity(subj_ivls, config.toccata_core_intervals);
+      comp = base_comp * 0.60f + arch_comp * 0.25f + note_func_bonus * 0.10f
+             + toc * 0.05f;
+    }
 
     // Lower tier wins; within same tier, higher composite wins.
     if (tier < best.tier || (tier == best.tier && comp > best.composite)) {
@@ -1668,7 +1694,19 @@ SubjectGenerator::GenerateResult SubjectGenerator::generateNotes(
 
       float base_comp = validator.evaluate(sub).composite();
       float arch_comp = archetype_scorer.evaluate(sub, policy).composite();
-      float comp = base_comp * 0.65f + arch_comp * 0.25f + note_func_bonus * 0.10f;
+      float comp;
+      if (config.toccata_core_intervals.empty()) {
+        comp = base_comp * 0.65f + arch_comp * 0.25f + note_func_bonus * 0.10f;
+      } else {
+        std::vector<int> subj_ivls;
+        for (size_t ni2 = 1; ni2 < candidate.size(); ++ni2) {
+          subj_ivls.push_back(static_cast<int>(candidate[ni2].pitch) -
+                              static_cast<int>(candidate[ni2 - 1].pitch));
+        }
+        float toc = computeToccataAffinity(subj_ivls, config.toccata_core_intervals);
+        comp = base_comp * 0.60f + arch_comp * 0.25f + note_func_bonus * 0.10f
+               + toc * 0.05f;
+      }
 
       if (comp > best.composite || best.notes.empty()) {
         best.notes = std::move(candidate);

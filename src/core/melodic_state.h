@@ -1,6 +1,6 @@
 // Voice dynamics model for Bach-style melodic generation.
 // Provides direction persistence, WTC-based interval distribution,
-// and beat-position-dependent harmonic scoring.
+// voice-profile-driven scoring, and beat-position-dependent harmonic scoring.
 
 #ifndef BACH_CORE_MELODIC_STATE_H
 #define BACH_CORE_MELODIC_STATE_H
@@ -24,7 +24,100 @@ struct MelodicState {
   int last_large_leap = 0;       // Previous large leap in semitones (5+).
   float phrase_progress = 0.0f;  // Progress within phrase (0..1).
   bool prev_was_reversal = false;
+  int consecutive_leap_count = 0;  // Consecutive leaps (3+ semitones).
 };
+
+/// @brief Voice-specific melodic parameter profile.
+/// Calibrated from BWV578 per-voice analysis and category summaries.
+struct VoiceProfile {
+  float step_prob;          ///< P(step) -- 1-2 semitones.
+  float skip_prob;          ///< P(skip) -- 3-4 semitones.
+  // leap_prob = 1.0 - step_prob - skip_prob
+
+  float large_leap_prob;    ///< P(6th+) -- conditional within leaps.
+  bool require_stepwise_after_large_leap;  ///< Force step after 6th+.
+  uint8_t max_consecutive_leaps;           ///< Max consecutive leaps (3rd+).
+
+  float dur_weights[6];     ///< {whole, half, dotted-qtr, qtr, 8th, 16th}.
+  Tick min_duration;         ///< Minimum note duration.
+
+  float stepwise_bonus;     ///< Score bonus for stepwise motion.
+  float p4p5_bonus;         ///< Score bonus for P4/P5 leaps (bass).
+  float continuation_bonus; ///< Score bonus for direction continuation.
+};
+
+namespace voice_profiles {
+
+constexpr VoiceProfile kSoprano = {
+    0.67f, 0.22f, 0.03f, true, 1,
+    {0.5f, 1.5f, 1.2f, 3.0f, 2.0f, 0.8f}, 120,  // min=16th
+    0.20f, 0.0f, 0.30f};
+
+constexpr VoiceProfile kAlto = {
+    0.59f, 0.25f, 0.03f, true, 1,
+    {0.5f, 1.5f, 1.2f, 3.0f, 2.0f, 0.6f}, 120,
+    0.20f, 0.0f, 0.30f};
+
+constexpr VoiceProfile kTenor = {
+    0.65f, 0.22f, 0.04f, true, 1,
+    {0.5f, 1.5f, 1.2f, 3.0f, 2.0f, 0.8f}, 120,
+    0.20f, 0.0f, 0.30f};
+
+constexpr VoiceProfile kBassLine = {
+    0.44f, 0.24f, 0.10f, true, 2,
+    {1.0f, 3.0f, 2.0f, 3.0f, 1.0f, 0.1f}, 240,  // min=8th
+    0.10f, 0.15f, 0.30f};
+
+constexpr VoiceProfile kPedalPoint = {
+    0.30f, 0.20f, 0.08f, true, 2,
+    {2.0f, 4.0f, 2.0f, 2.0f, 0.5f, 0.0f}, 480,  // min=quarter
+    0.05f, 0.20f, 0.25f};
+
+constexpr VoiceProfile kCantusFirmus = {
+    0.70f, 0.25f, 0.01f, true, 1,
+    {0.5f, 2.0f, 1.5f, 3.0f, 1.0f, 0.0f}, 480,  // min=quarter
+    0.25f, 0.0f, 0.30f};
+
+}  // namespace voice_profiles
+
+/// @brief Get voice profile from voice ID and voice count.
+/// Maps: voice 0 = soprano, 1 = alto, ..., last = bass.
+inline VoiceProfile getVoiceProfile(uint8_t voice_id, uint8_t num_voices) {
+  if (num_voices <= 1) return voice_profiles::kSoprano;
+  if (voice_id == num_voices - 1) return voice_profiles::kBassLine;
+  if (voice_id == 0) return voice_profiles::kSoprano;
+  if (voice_id == num_voices - 2) return voice_profiles::kTenor;
+  return voice_profiles::kAlto;
+}
+
+/// @brief Get voice profile for a specific texture function.
+/// Subject/Countersubject apply strictness modifiers on top of
+/// the base voice profile.
+inline VoiceProfile getVoiceProfile(TextureFunction function,
+                                     uint8_t voice_id,
+                                     uint8_t num_voices) {
+  VoiceProfile profile = getVoiceProfile(voice_id, num_voices);
+  switch (function) {
+    case TextureFunction::Subject:
+      profile.large_leap_prob *= 0.5f;
+      profile.continuation_bonus += 0.10f;
+      profile.max_consecutive_leaps = 1;
+      break;
+    case TextureFunction::Countersubject:
+      profile.large_leap_prob *= 0.7f;
+      profile.max_consecutive_leaps = 1;
+      break;
+    case TextureFunction::PedalPoint:
+      return voice_profiles::kPedalPoint;
+    case TextureFunction::CantusFirmus:
+      return voice_profiles::kCantusFirmus;
+    case TextureFunction::BassLine:
+      return voice_profiles::kBassLine;
+    default:
+      break;
+  }
+  return profile;
+}
 
 /// @brief Choose melodic direction using persistence model with noise.
 /// Avoids mechanical zigzag while allowing long runs to reverse naturally.
@@ -59,57 +152,60 @@ inline int chooseMelodicDirection(const MelodicState& state,
                                                   : state.last_direction;
 }
 
-/// @brief Choose interval step count in diatonic degrees (WTC distribution).
-/// @param is_bass If true, use bass-voice distribution (more leaps, fewer steps)
-///        based on BWV578 pedal analysis: step 44%, skip+leap 52%.
+/// @brief Choose interval step count using VoiceProfile distribution.
+/// @param profile Voice-specific melodic parameter profile.
 /// @return 1 (step), 2 (skip/3rd), 3 (leap/4th+).
 inline int chooseMelodicInterval(const MelodicState& state,
                                  std::mt19937& rng,
-                                 bool is_bass = false) {
-  if (is_bass) {
-    // Bass/pedal voice: BWV578 pedal shows step 44%, leap 52%.
-    // Split as: step 45%, skip(3rd) 35%, leap(4th+) 20%.
-    if (state.last_large_leap != 0) {
-      float roll = rng::rollFloat(rng, 0.0f, 1.0f);
-      if (roll < 0.50f) return 1;
-      if (roll < 0.80f) return 2;
-      return 3;
-    }
-    if (state.last_skip_size != 0) {
-      float roll = rng::rollFloat(rng, 0.0f, 1.0f);
-      if (roll < 0.50f) return 1;
-      if (roll < 0.80f) return 2;
-      return 3;
-    }
-    float roll = rng::rollFloat(rng, 0.0f, 1.0f);
-    if (roll < 0.45f) return 1;
-    if (roll < 0.80f) return 2;
-    return 3;
+                                 const VoiceProfile& profile) {
+  // Consecutive leap limit.
+  if (state.consecutive_leap_count >= profile.max_consecutive_leaps) {
+    return 1;  // Force step.
   }
 
-  // Upper voices: standard WTC distribution.
-  // Consecutive large leap prohibition.
+  // After large leap: increase step probability.
   if (state.last_large_leap != 0) {
-    // After large leap: 62% step, 28% skip, 10% small leap.
+    float step_boost = profile.require_stepwise_after_large_leap ? 0.15f : 0.0f;
+    float step = std::min(1.0f, profile.step_prob + step_boost);
+    float skip = profile.skip_prob * 0.8f;
+    float total = step + skip;
     float roll = rng::rollFloat(rng, 0.0f, 1.0f);
-    if (roll < 0.62f) return 1;
-    if (roll < 0.90f) return 2;
+    if (roll < step / total) return 1;
+    if (roll < (step + skip) / total) return 2;
     return 3;
   }
 
-  // After skip: 62% step, 28% skip, 10% leap.
+  // After skip: slightly prefer step.
   if (state.last_skip_size != 0) {
+    float step = profile.step_prob + 0.05f;
+    float skip = profile.skip_prob - 0.03f;
+    float total = step + skip;
     float roll = rng::rollFloat(rng, 0.0f, 1.0f);
-    if (roll < 0.62f) return 1;
-    if (roll < 0.90f) return 2;
+    if (roll < step / total) return 1;
+    if (roll < (step + skip) / total) return 2;
     return 3;
   }
 
-  // Normal distribution: 60% step, 32% skip, 8% leap.
+  // Normal distribution from profile.
   float roll = rng::rollFloat(rng, 0.0f, 1.0f);
-  if (roll < 0.60f) return 1;
-  if (roll < 0.92f) return 2;
+  if (roll < profile.step_prob) return 1;
+  if (roll < profile.step_prob + profile.skip_prob) return 2;
   return 3;
+}
+
+/// @brief Backward-compatible wrapper using is_bass flag.
+inline int chooseMelodicInterval(const MelodicState& state,
+                                 std::mt19937& rng,
+                                 bool is_bass) {
+  const VoiceProfile& profile = is_bass ? voice_profiles::kBassLine
+                                        : voice_profiles::kSoprano;
+  return chooseMelodicInterval(state, rng, profile);
+}
+
+/// @brief Default overload (non-bass, uses soprano profile).
+inline int chooseMelodicInterval(const MelodicState& state,
+                                 std::mt19937& rng) {
+  return chooseMelodicInterval(state, rng, voice_profiles::kSoprano);
 }
 
 /// @brief Goal tension factor: relax penalties toward phrase end.
@@ -146,40 +242,44 @@ inline void updateMelodicState(MelodicState& state, uint8_t prev_pitch,
   state.last_skip_size =
       (abs_interval >= 3 && abs_interval <= 4) ? abs_interval : 0;
   state.last_large_leap = (abs_interval >= 5) ? abs_interval : 0;
+
+  // Track consecutive leaps (3+ semitones).
+  if (abs_interval >= 3) {
+    state.consecutive_leap_count++;
+  } else {
+    state.consecutive_leap_count = 0;
+  }
 }
 
-/// @brief Score a candidate pitch for weighted selection.
+/// @brief Score a candidate pitch for weighted selection using VoiceProfile.
 /// Higher score = more desirable. Used when choosing among chord tones
 /// or scale tones on strong beats.
-/// @param is_bass If true, apply bass-voice scoring: reduce stepwise
-///        preference, add P4/P5 leap bonus (harmonic skeleton projection).
+/// @param profile Voice-specific melodic parameter profile.
 inline float scoreCandidatePitch(const MelodicState& state,
                                  uint8_t prev_pitch, uint8_t candidate,
                                  Tick tick, bool is_chord_tone,
-                                 bool is_bass = false) {
-  int interval =
-      static_cast<int>(candidate) - static_cast<int>(prev_pitch);
+                                 const VoiceProfile& profile) {
+  int interval = static_cast<int>(candidate) - static_cast<int>(prev_pitch);
   int abs_interval = std::abs(interval);
   int direction = (interval > 0) ? 1 : ((interval < 0) ? -1 : 0);
 
   float score = 0.0f;
 
-  // Motion score: continuation bonus.
+  // Motion score: continuation bonus from profile.
   if (direction == state.last_direction && direction != 0) {
-    score += 0.30f;
+    score += profile.continuation_bonus;
   }
 
-  // Step score: prefer stepwise motion (reduced for bass voices).
+  // Step score from profile.
   if (abs_interval <= 2) {
-    score += is_bass ? 0.10f : 0.20f;
+    score += profile.stepwise_bonus;
   } else if (abs_interval <= 4) {
-    score += 0.10f;
+    score += profile.stepwise_bonus * 0.5f;
   }
 
-  // Bass P4/P5 bonus: harmonic skeleton projection.
-  // P4 = 5 semitones, P5 = 7 semitones.
-  if (is_bass && (abs_interval == 5 || abs_interval == 7)) {
-    score += 0.15f;
+  // P4/P5 bonus from profile.
+  if (abs_interval == 5 || abs_interval == 7) {
+    score += profile.p4p5_bonus;
   }
 
   // Harmonic penalty for non-chord tone (beat-position dependent).
@@ -205,37 +305,66 @@ inline float scoreCandidatePitch(const MelodicState& state,
   float tension = goalTensionFactor(state.phrase_progress);
   score += leap_penalty * tension;
 
-  // After large leap: contrary motion bonus.
-  if (state.last_large_leap != 0 && direction != 0 &&
-      direction != state.last_direction) {
-    score += 0.20f;
+  // After large leap: direction-dependent resolution bonus.
+  if (state.last_large_leap != 0 && direction != 0) {
+    if (direction != state.last_direction) {
+      // Contrary motion after leap.
+      score += 0.20f;
+      // Direction-dependent resolution: prefer stepwise contrary.
+      if (abs_interval <= 2) {
+        score += 0.25f;  // Strong bonus for stepwise resolution.
+      }
+    }
+  }
+
+  // Consecutive leap suppression.
+  if (abs_interval >= 3 &&
+      state.consecutive_leap_count >= profile.max_consecutive_leaps) {
+    score -= 0.40f;
   }
 
   return score;
 }
 
-/// @brief Select the best pitch from candidates using scoring.
-/// Falls back to the first candidate if all scores are very low.
+/// @brief Backward-compatible wrapper using is_bass flag.
+inline float scoreCandidatePitch(const MelodicState& state,
+                                 uint8_t prev_pitch, uint8_t candidate,
+                                 Tick tick, bool is_chord_tone,
+                                 bool is_bass) {
+  const VoiceProfile& profile = is_bass ? voice_profiles::kBassLine
+                                        : voice_profiles::kSoprano;
+  return scoreCandidatePitch(state, prev_pitch, candidate, tick,
+                             is_chord_tone, profile);
+}
+
+/// @brief Default overload (non-bass).
+inline float scoreCandidatePitch(const MelodicState& state,
+                                 uint8_t prev_pitch, uint8_t candidate,
+                                 Tick tick, bool is_chord_tone) {
+  return scoreCandidatePitch(state, prev_pitch, candidate, tick,
+                             is_chord_tone, voice_profiles::kSoprano);
+}
+
+/// @brief Select the best pitch from candidates using VoiceProfile scoring.
+/// @param profile Voice-specific melodic parameter profile.
 inline uint8_t selectBestPitch(const MelodicState& state, uint8_t prev_pitch,
                                const std::vector<uint8_t>& candidates,
                                Tick tick, bool all_chord_tones,
                                std::mt19937& rng,
-                               bool is_bass = false) {
+                               const VoiceProfile& profile) {
   if (candidates.empty()) return prev_pitch;
   if (candidates.size() == 1) return candidates[0];
 
-  // Score each candidate.
   std::vector<float> scores;
   scores.reserve(candidates.size());
   float max_score = -100.0f;
   for (uint8_t c : candidates) {
     float s = scoreCandidatePitch(state, prev_pitch, c, tick, all_chord_tones,
-                                  is_bass);
+                                  profile);
     scores.push_back(s);
     if (s > max_score) max_score = s;
   }
 
-  // Shift scores to positive range and use as weights.
   float shift = (max_score < 0.0f) ? (-max_score + 0.1f) : 0.1f;
   std::vector<float> weights;
   weights.reserve(candidates.size());
@@ -244,6 +373,27 @@ inline uint8_t selectBestPitch(const MelodicState& state, uint8_t prev_pitch,
   }
 
   return rng::selectWeighted(rng, candidates, weights);
+}
+
+/// @brief Backward-compatible wrapper using is_bass flag.
+inline uint8_t selectBestPitch(const MelodicState& state, uint8_t prev_pitch,
+                               const std::vector<uint8_t>& candidates,
+                               Tick tick, bool all_chord_tones,
+                               std::mt19937& rng,
+                               bool is_bass) {
+  const VoiceProfile& profile = is_bass ? voice_profiles::kBassLine
+                                        : voice_profiles::kSoprano;
+  return selectBestPitch(state, prev_pitch, candidates, tick,
+                         all_chord_tones, rng, profile);
+}
+
+/// @brief Default overload (non-bass).
+inline uint8_t selectBestPitch(const MelodicState& state, uint8_t prev_pitch,
+                               const std::vector<uint8_t>& candidates,
+                               Tick tick, bool all_chord_tones,
+                               std::mt19937& rng) {
+  return selectBestPitch(state, prev_pitch, candidates, tick,
+                         all_chord_tones, rng, voice_profiles::kSoprano);
 }
 
 }  // namespace bach

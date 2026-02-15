@@ -10,8 +10,11 @@ from typing import Optional, Set
 
 from .batch import parse_seed_range, run_batch
 from .diagnosis import compute_dissonance_diagnostics
-from .report import format_batch_text, format_diagnostics_text, format_json, format_text
+from .report import (format_batch_text, format_diagnostics_text, format_json,
+                     format_score_json, format_score_text, format_text)
 from .runner import load_score, overall_passed, validate
+from .form_profile import get_form_profile
+from .score import compute_score
 from .stats import compute_stats, format_stats_json, format_stats_text
 
 
@@ -136,6 +139,39 @@ def cmd_analyze(args: argparse.Namespace) -> int:
     return cmd_validate(args)
 
 
+def cmd_score(args: argparse.Namespace) -> int:
+    """Compute Bach reference score."""
+    score = load_score(args.input)
+    form = args.form or score.form
+    profile = get_form_profile(form)
+
+    if not profile.reference_category:
+        print(f"Error: No reference category for form '{form}'", file=sys.stderr)
+        return 1
+
+    # Run validation for penalty integration
+    results = validate(score)
+
+    bach_score = compute_score(
+        score,
+        category=profile.reference_category,
+        counterpoint_enabled=profile.counterpoint_enabled,
+        results=results,
+    )
+
+    if args.json:
+        output = format_score_json(bach_score)
+    else:
+        output = format_score_text(bach_score)
+
+    if args.output:
+        Path(args.output).write_text(output)
+    else:
+        print(output)
+
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         prog="bach_analyzer",
@@ -176,6 +212,13 @@ def main() -> int:
     p_ana.add_argument("--json", action="store_true", help="JSON output")
     p_ana.add_argument("-o", "--output", help="Output file path")
 
+    # score
+    p_score = subparsers.add_parser("score", help="Compute Bach reference score")
+    p_score.add_argument("input", help="Path to output.json or .mid file")
+    p_score.add_argument("--form", help="Override form type")
+    p_score.add_argument("--json", action="store_true", help="JSON output")
+    p_score.add_argument("-o", "--output", help="Output file path")
+
     args = parser.parse_args()
 
     if args.command == "validate":
@@ -186,6 +229,8 @@ def main() -> int:
         return cmd_stats(args)
     elif args.command == "analyze":
         return cmd_analyze(args)
+    elif args.command == "score":
+        return cmd_score(args)
     else:
         parser.print_help()
         return 0

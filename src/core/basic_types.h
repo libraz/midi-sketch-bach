@@ -371,6 +371,19 @@ enum class GestureRole : uint8_t {
   Accumulation   ///< Chord buildup within the gesture.
 };
 
+/// @brief Texture function for voice-specific parameter selection.
+/// Used to select VoiceProfile parameters based on the musical role
+/// of the voice at a given point in the piece.
+enum class TextureFunction : uint8_t {
+  Subject,           ///< Subject presentation (stricter leap control, identity).
+  Countersubject,    ///< Countersubject (slightly relaxed from Subject).
+  FreeCounterpoint,  ///< Free counterpoint (filling voice).
+  PedalPoint,        ///< Pedal point (long held notes).
+  CantusFirmus,      ///< Cantus firmus (chorale melody).
+  BassLine,          ///< Normal bass motion.
+  Default            ///< Inferred from voice ID.
+};
+
 // ---------------------------------------------------------------------------
 // Data structures
 // ---------------------------------------------------------------------------

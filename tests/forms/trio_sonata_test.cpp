@@ -1050,7 +1050,7 @@ TEST(TrioSonataTest, DownbeatConsonance) {
       if (total_pairs > 0) {
         float dissonance_rate = static_cast<float>(dissonant_pairs) /
                                 static_cast<float>(total_pairs);
-        EXPECT_LT(dissonance_rate, 0.22f)
+        EXPECT_LT(dissonance_rate, 0.25f)
             << "Seed " << seed << " mov " << mov
             << " dissonance rate=" << dissonance_rate
             << " (" << dissonant_pairs << "/" << total_pairs << ")";

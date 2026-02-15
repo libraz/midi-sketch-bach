@@ -494,6 +494,7 @@ GeneratorResult generate(const GeneratorConfig& config) {
                 : 12;  // minimum fugue baseline
       }
       FugueConfig fconfig = toFugueConfig(fugue_gen_config);
+      fconfig.toccata_core_intervals = toc_result.core_intervals;
       FugueResult fugue_result = generateFugue(fconfig);
       if (!fugue_result.success) {
         result.success = false;
@@ -982,6 +983,21 @@ std::string buildEventsJson(const GeneratorResult& result, const GeneratorConfig
       if (note.modified_by != 0) {
         writer.key("modified_by");
         writer.value(noteModifiedByToString(note.modified_by));
+      }
+      if (note.gesture_id != 0) {
+        writer.key("gesture_id");
+        writer.value(static_cast<int>(note.gesture_id));
+        writer.key("gesture_role");
+        const char* role_str = "none";
+        switch (note.gesture_role) {
+          case GestureRole::Leader: role_str = "leader"; break;
+          case GestureRole::OctaveEcho: role_str = "octave_echo"; break;
+          case GestureRole::LowerEcho: role_str = "lower_echo"; break;
+          case GestureRole::PedalHit: role_str = "pedal_hit"; break;
+          case GestureRole::Accumulation: role_str = "accumulation"; break;
+          default: break;
+        }
+        writer.value(std::string(role_str));
       }
       writer.endObject();
     }

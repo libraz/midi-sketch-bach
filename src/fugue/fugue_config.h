@@ -4,10 +4,12 @@
 #ifndef BACH_FUGUE_FUGUE_CONFIG_H
 #define BACH_FUGUE_FUGUE_CONFIG_H
 
+#include <algorithm>
 #include <cstdint>
 #include <random>
 
 #include "core/basic_types.h"
+#include "core/melodic_state.h"
 #include "harmony/modulation_plan.h"
 
 namespace bach {
@@ -95,6 +97,125 @@ struct FugueEnergyCurve {
     if (energy < 0.4f) return kTicksPerBeat;      // quarter note
     if (energy < 0.7f) return kTicksPerBeat / 2;  // eighth note
     return kTicksPerBeat / 4;                      // sixteenth note
+  }
+
+  /// @brief Select duration using VoiceProfile weights and context.
+  /// @param energy Energy level from getLevel().
+  /// @param tick Current tick position.
+  /// @param rng Random number generator.
+  /// @param other_voice_duration Duration of adjacent voice (0=unknown).
+  /// @param profile Voice-specific parameter profile.
+  /// @param allow_burst_32nd If true, allow 32nd notes (Phase 3 burst mode).
+  /// @param density_ratio Ratio of actual/target notes-per-bar (1.0 = on target).
+  ///        Used for density steering with a dead zone of 0.9-1.1.
+  /// @param in_cadence If true, raise effective min duration to suppress short notes.
+  static Tick selectDuration(float energy, Tick tick, std::mt19937& rng,
+                             Tick other_voice_duration,
+                             const VoiceProfile& profile,
+                             bool allow_burst_32nd = false,
+                             float density_ratio = 1.0f,
+                             bool in_cadence = false) {
+    struct DurWeight {
+      Tick duration;
+      float weight;
+    };
+    DurWeight candidates[] = {
+        {kTicksPerBar,          profile.dur_weights[0]},  // Whole note
+        {kTicksPerBeat * 2,     profile.dur_weights[1]},  // Half note
+        {kTicksPerBeat * 3 / 2, profile.dur_weights[2]},  // Dotted quarter
+        {kTicksPerBeat,         profile.dur_weights[3]},  // Quarter note
+        {kTicksPerBeat / 2,     profile.dur_weights[4]},  // Eighth note
+        {kTicksPerBeat / 4,     profile.dur_weights[5]},  // Sixteenth note
+        {kTicksPerBeat / 8,                               // Thirty-second note
+         (allow_burst_32nd && profile.min_duration <= kTicksPerBeat / 4)
+             ? 0.5f : 0.0f},
+    };
+    constexpr int kNumCandidates = 7;
+
+    // Energy floor: suppress durations shorter than profile minimum.
+    Tick min_dur = std::max(minDuration(energy), profile.min_duration);
+    for (int idx = 0; idx < kNumCandidates; ++idx) {
+      if (candidates[idx].duration < min_dur) {
+        candidates[idx].weight = 0.0f;
+      }
+    }
+
+    // Beat position bonuses.
+    bool is_bar_start = (tick % kTicksPerBar == 0);
+    bool is_beat_start = (tick % kTicksPerBeat == 0);
+    for (int idx = 0; idx < kNumCandidates; ++idx) {
+      if (is_bar_start && candidates[idx].duration >= kTicksPerBeat * 2) {
+        candidates[idx].weight *= 2.0f;
+      } else if (is_beat_start && candidates[idx].duration >= kTicksPerBeat) {
+        candidates[idx].weight *= 1.5f;
+      }
+    }
+
+    // Density steering: bias toward longer notes if too dense, shorter if too sparse.
+    // Dead zone: no adjustment when ratio is 0.9-1.1.
+    if (density_ratio > 1.1f) {
+      // Too dense: boost longer durations.
+      float boost = std::min(2.0f, density_ratio - 1.0f);
+      for (int idx = 0; idx < kNumCandidates; ++idx) {
+        if (candidates[idx].duration >= kTicksPerBeat) {
+          candidates[idx].weight *= (1.0f + boost);
+        }
+      }
+    } else if (density_ratio < 0.9f) {
+      // Too sparse: boost shorter durations.
+      float boost = std::min(2.0f, 1.0f - density_ratio);
+      for (int idx = 0; idx < kNumCandidates; ++idx) {
+        if (candidates[idx].duration <= kTicksPerBeat / 2) {
+          candidates[idx].weight *= (1.0f + boost);
+        }
+      }
+    }
+
+    // Cadence window: freeze density correction, raise min duration.
+    if (in_cadence) {
+      Tick cadence_min = std::max(min_dur, static_cast<Tick>(kTicksPerBeat / 2));
+      if (min_dur <= kTicksPerBeat / 4) {
+        cadence_min = kTicksPerBeat / 2;  // 16th -> 8th
+      } else if (min_dur <= kTicksPerBeat / 2) {
+        cadence_min = kTicksPerBeat;      // 8th -> quarter
+      }
+      for (int idx = 0; idx < kNumCandidates; ++idx) {
+        if (candidates[idx].duration < cadence_min) {
+          candidates[idx].weight = 0.0f;
+        }
+      }
+    }
+
+    // Rhythmic complementarity.
+    if (other_voice_duration > 0) {
+      bool other_is_short = (other_voice_duration <= kTicksPerBeat / 2);
+      bool other_is_long = (other_voice_duration >= kTicksPerBeat * 2);
+      for (int idx = 0; idx < kNumCandidates; ++idx) {
+        if (other_is_short && candidates[idx].duration >= kTicksPerBeat) {
+          candidates[idx].weight *= 2.0f;
+        } else if (other_is_long && candidates[idx].duration <= kTicksPerBeat / 2) {
+          candidates[idx].weight *= 2.0f;
+        }
+      }
+    }
+
+    // Compute total weight and select.
+    float total = 0.0f;
+    for (int idx = 0; idx < kNumCandidates; ++idx) {
+      total += candidates[idx].weight;
+    }
+    if (total <= 0.0f) return kTicksPerBeat;
+
+    std::uniform_real_distribution<float> dist(0.0f, total);
+    float roll = dist(rng);
+    float cumulative = 0.0f;
+    for (int idx = 0; idx < kNumCandidates; ++idx) {
+      cumulative += candidates[idx].weight;
+      if (roll <= cumulative) {
+        return candidates[idx].duration;
+      }
+    }
+    return kTicksPerBeat;
   }
 
   /// @brief Select a duration using weighted probabilities based on energy and context.
@@ -215,6 +336,7 @@ struct FugueConfig {
   bool has_modulation_plan = false;     ///< Whether modulation_plan was explicitly set.
   bool enable_picardy = true;           ///< Apply Picardy third in minor keys.
   TextureDensityTarget density_target;  ///< Texture density guidance.
+  std::vector<int> toccata_core_intervals;  ///< Toccata gesture core intervals (empty = no toccata context).
 };
 
 }  // namespace bach

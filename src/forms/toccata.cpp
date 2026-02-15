@@ -22,6 +22,7 @@
 #include "counterpoint/parallel_repair.h"
 #include "counterpoint/vertical_safe.h"
 #include "forms/form_utils.h"
+#include "forms/gesture_template.h"
 #include "forms/toccata_internal.h"
 #include "harmony/chord_types.h"
 #include "harmony/key.h"
@@ -1666,6 +1667,11 @@ ToccataResult generateDramaticusToccata(const ToccataConfig& config) {
     *phase_refs[i].notes = applyOrnaments(*phase_refs[i].notes, ctx);
   }
 
+  // --- 5b. Tag gesture notes (after ornaments so metadata survives) ---
+  constexpr uint16_t kOpeningGestureId = 1;
+  tagGestureNotes(a_notes, kOpeningGestureId);
+  result.core_intervals = extractGestureCoreIntervals(a_notes, kOpeningGestureId);
+
   // --- 6. Merge all phase notes ---
   std::vector<NoteEvent> all_notes;
   auto append = [&](const std::vector<NoteEvent>& src) {
@@ -1737,6 +1743,7 @@ ToccataResult generateDramaticusToccata(const ToccataConfig& config) {
         pp_params.key_at_tick = lr_params.key_at_tick;
         pp_params.voice_range_static = lr_params.voice_range_static;
         pp_params.max_iterations = 2;
+        pp_params.gesture_core_intervals = result.core_intervals;
         repairParallelPerfect(all_notes, pp_params);
       }
     }

@@ -508,6 +508,8 @@ FantasiaResult generateFantasia(const FantasiaConfig& config) {
       }
     };
     coord_config.form_name = "Fantasia";
+    auto form_profile = getFormProfile(FormType::FantasiaAndFugue);
+    coord_config.dissonance_policy = form_profile.dissonance_policy;
     all_notes = coordinateVoices(std::move(all_notes), coord_config);
   }
 

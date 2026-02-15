@@ -156,6 +156,62 @@ inline void cleanupToccataOverlaps(std::vector<Track>& tracks) {
   }
 }
 
+/// @brief Compute sustained energy in a tick window (including pedal hold-overs).
+/// Uses Σ(duration * log(velocity + 1)) for notes overlapping the window.
+inline float computeSustainedEnergy(const std::vector<NoteEvent>& notes,
+                                     Tick window_start, Tick window_end) {
+  float energy = 0.0f;
+  for (const auto& n : notes) {
+    Tick note_end = n.start_tick + n.duration;
+    if (n.start_tick < window_end && note_end > window_start) {
+      // Overlap portion.
+      Tick overlap_start = std::max(n.start_tick, window_start);
+      Tick overlap_end = std::min(note_end, window_end);
+      float dur = static_cast<float>(overlap_end - overlap_start);
+      float vel_weight = std::log(static_cast<float>(n.velocity) + 1.0f);
+      energy += dur * vel_weight;
+    }
+  }
+  return energy;
+}
+
+/// @brief Validate a grand pause placement in Stylus Phantasticus context.
+/// @param gap_start Tick where silence begins.
+/// @param gap_duration Duration of the silence in ticks.
+/// @param style_mode Current section style mode.
+/// @param notes All generated notes for energy calculation.
+/// @return true if the pause is stylistically valid.
+inline bool isValidGrandPause(Tick gap_start, Tick gap_duration,
+                               ToccataStyleMode style_mode,
+                               const std::vector<NoteEvent>& notes) {
+  // Only valid in Phantasticus or Recitativo style.
+  if (style_mode != ToccataStyleMode::Phantasticus &&
+      style_mode != ToccataStyleMode::Recitativo) {
+    return false;
+  }
+
+  // Pre-gap sustained energy must exceed threshold (includes pedal sustain).
+  constexpr float kMinPreGapEnergy = 5000.0f;
+  Tick lookback = kTicksPerBar;  // 1 bar lookback window.
+  Tick window_start = (gap_start > lookback) ? gap_start - lookback : 0;
+  float pre_energy = computeSustainedEnergy(notes, window_start, gap_start);
+  if (pre_energy < kMinPreGapEnergy) return false;
+
+  // Post-gap: accent event required (high velocity or strong beat onset).
+  Tick post_start = gap_start + gap_duration;
+  bool has_accent = false;
+  for (const auto& n : notes) {
+    if (n.start_tick >= post_start &&
+        n.start_tick < post_start + kTicksPerBeat) {
+      if (n.velocity >= 80 || positionInBar(n.start_tick) == 0) {
+        has_accent = true;
+        break;
+      }
+    }
+  }
+  return has_accent;
+}
+
 /// @brief Assign notes to tracks by voice index.
 inline void assignNotesToTracks(const std::vector<NoteEvent>& all_notes,
                                 std::vector<Track>& tracks) {
@@ -333,6 +389,8 @@ inline std::vector<NoteEvent> coordinateVoices(
   config.voice_range = [](uint8_t v) -> std::pair<uint8_t, uint8_t> {
     return {getToccataLowPitch(v), getToccataHighPitch(v)};
   };
+  config.immutable_sources = {BachNoteSource::PedalPoint,
+                              BachNoteSource::ToccataGesture};
   config.form_name = "Toccata";
   return bach::coordinateVoices(std::move(all_notes), config);
 }

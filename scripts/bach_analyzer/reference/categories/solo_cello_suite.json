@@ -1,0 +1,26 @@
+{
+  "category": "solo_cello_suite",
+  "work_count": 36,
+  "scalars": {
+    "stepwise_ratio": {"mean": 0.548, "std": 0.115},
+    "leap_ratio": {"mean": 0.382, "std": 0.10},
+    "avg_interval": {"mean": 2.88, "std": 0.5},
+    "consonance_ratio": {"mean": 0.722, "std": 0.125},
+    "perfect_consonance_ratio": {"mean": 0.30, "std": 0.10},
+    "avg_active_voices": {"mean": 1.10, "std": 0.3},
+    "notes_per_bar": {"mean": 14.52, "std": 5.0}
+  },
+  "distributions": {
+    "interval": {
+      "P1": 0.074, "m2": 0.240, "M2": 0.316, "m3": 0.109,
+      "M3": 0.066, "P4": 0.060, "TT": 0.020, "P5": 0.046,
+      "m6": 0.021, "M6": 0.027, "m7": 0.017, "M7": 0.004
+    },
+    "rhythm": {
+      "16th": 0.919, "8th": 0.075, "half": 0.006
+    },
+    "texture": {
+      "0": 0.021, "1": 0.857, "2": 0.121
+    }
+  }
+}

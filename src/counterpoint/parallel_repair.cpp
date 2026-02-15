@@ -361,6 +361,72 @@ int repairParallelPerfect(std::vector<NoteEvent>& notes,
             int ia = soundIdx(va, t), ib = soundIdx(vb, t);
             if (ia < 0 || ib < 0) { pp = ca; pb2 = cb; pt = t; continue; }
 
+            // --- Gesture octave exemption (Stylus Phantasticus) ---
+            // 7 conditions (all AND) to exempt intentional parallel unison/octave.
+            if (cs == 0) {  // C1: unison/octave only (not 5ths)
+              const auto& na = notes[ia];
+              const auto& nb = notes[ib];
+              if (na.gesture_id != 0 &&
+                  na.gesture_id == nb.gesture_id &&  // C2: same gesture
+                  ma == mb) {  // C5: same directed motion
+                Tick onset_diff = (na.start_tick > nb.start_tick)
+                    ? na.start_tick - nb.start_tick
+                    : nb.start_tick - na.start_tick;
+                bool is_leader_echo =  // C4: Leader↔OctaveEcho (PedalHit excluded)
+                    (na.gesture_role == GestureRole::Leader &&
+                     nb.gesture_role == GestureRole::OctaveEcho) ||
+                    (na.gesture_role == GestureRole::OctaveEcho &&
+                     nb.gesture_role == GestureRole::Leader);
+                if (onset_diff <= 60 && is_leader_echo) {  // C3: ≤ 1/32nd
+                  // C6: previous beat also synced under same gesture.
+                  int prev_ia2 = soundIdx(va, pt);
+                  int prev_ib2 = soundIdx(vb, pt);
+                  bool prev_synced = prev_ia2 >= 0 && prev_ib2 >= 0 &&
+                      notes[prev_ia2].gesture_id == na.gesture_id &&
+                      notes[prev_ib2].gesture_id == na.gesture_id;
+                  if (prev_synced) {
+                    // C7: Leader interval sequence is prefix of core_intervals.
+                    bool prefix_ok = params.gesture_core_intervals.empty();
+                    if (!prefix_ok) {
+                      // Collect Leader pitches within this gesture, sorted by time.
+                      uint16_t gid = na.gesture_id;
+                      struct LP { Tick tick; uint8_t pitch; };
+                      std::vector<LP> lps;
+                      for (const auto& n : notes) {
+                        if (n.gesture_id == gid &&
+                            n.gesture_role == GestureRole::Leader) {
+                          lps.push_back({n.start_tick, n.pitch});
+                        }
+                      }
+                      std::sort(lps.begin(), lps.end(),
+                                [](const LP& a, const LP& b) {
+                                  return a.tick < b.tick;
+                                });
+                      // Compute directed intervals and check prefix.
+                      if (lps.size() >= 2) {
+                        prefix_ok = true;
+                        for (size_t k = 1;
+                             k < lps.size() &&
+                             k - 1 < params.gesture_core_intervals.size();
+                             ++k) {
+                          int ivl = static_cast<int>(lps[k].pitch) -
+                                    static_cast<int>(lps[k - 1].pitch);
+                          if (ivl != params.gesture_core_intervals[k - 1]) {
+                            prefix_ok = false;
+                            break;
+                          }
+                        }
+                      }
+                    }
+                    if (prefix_ok) {
+                      pp = ca; pb2 = cb; pt = t;
+                      continue;  // Exempt: intentional gesture doubling.
+                    }
+                  }
+                }
+              }
+            }
+
             ProtectionLevel pa = getProtectionLevel(notes[ia].source);
             ProtectionLevel pb_l = getProtectionLevel(notes[ib].source);
 

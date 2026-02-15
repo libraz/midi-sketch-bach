@@ -1573,6 +1573,8 @@ ChoralePreludeResult generateChoralePrelude(const ChoralePreludeConfig& config) 
         return 3;
       };
       coord_config.form_name = "ChoralePrelude";
+      auto form_profile = getFormProfile(FormType::ChoralePrelude);
+      coord_config.dissonance_policy = form_profile.dissonance_policy;
       all_notes = coordinateVoices(std::move(all_notes), coord_config);
 
       // Post-rejection repeat mitigation (weak-beat only, chord-tone-aware).

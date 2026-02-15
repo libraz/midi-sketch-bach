@@ -254,3 +254,83 @@ def format_diagnostics_text(diagnostics_list: List[Dict]) -> str:
         _format_ranked_section("Modified-by (primary)", diag["modified_by_primary"], lines)
 
     return "\n".join(lines)
+
+
+def format_score_text(bach_score) -> str:
+    """Format Bach reference score as human-readable text."""
+    lines = []
+    lines.append(f"=== Bach Reference Score: {bach_score.form} ({bach_score.category}) ===")
+    lines.append(f"Total: {bach_score.total:.1f} / 100 [{bach_score.grade}]")
+    lines.append("")
+
+    dim_labels = {
+        "structure": "I.   Structure   ",
+        "melody": "II.  Melody      ",
+        "harmony": "III. Harmony     ",
+        "counterpoint": "IV.  Counterpoint",
+        "rhythm": "V.   Rhythm      ",
+        "texture": "VI.  Texture     ",
+    }
+
+    for dim_name in ["structure", "melody", "harmony", "counterpoint", "rhythm", "texture"]:
+        ds = bach_score.dimensions.get(dim_name)
+        if not ds:
+            continue
+        label = dim_labels.get(dim_name, dim_name)
+        if not ds.applicable:
+            lines.append(f"{label}   --  (n/a)")
+            continue
+        bar_len = int(ds.score / 10)
+        bar = "\u2588" * bar_len + "\u258f" * (1 if ds.score % 10 >= 5 else 0)
+        penalty_note = f"   (-{ds.penalty:.0f} violation penalty)" if ds.penalty > 0 else ""
+        lines.append(f"{label}  {ds.score:5.1f}  {bar}{penalty_note}")
+
+    lines.append("")
+    lines.append("Detail:")
+
+    for dim_name in ["structure", "melody", "harmony", "counterpoint", "rhythm", "texture"]:
+        ds = bach_score.dimensions.get(dim_name)
+        if not ds or not ds.applicable:
+            continue
+        for ss in ds.sub_scores:
+            dim_label = dim_name.capitalize()
+            if ss.method == "jsd":
+                lines.append(f"  {dim_label} / {ss.name}:  {ss.detail}  -> {ss.score:.0f}")
+            elif ss.method == "zscore":
+                lines.append(f"  {dim_label} / {ss.name}:  {ss.detail}  -> {ss.score:.0f}")
+            else:
+                lines.append(f"  {dim_label} / {ss.name}:  {ss.detail}  -> {ss.score:.0f}")
+
+    lines.append("")
+    return "\n".join(lines)
+
+
+def format_score_json(bach_score) -> str:
+    """Format Bach reference score as JSON."""
+    data: Dict[str, Any] = {
+        "form": bach_score.form,
+        "category": bach_score.category,
+        "total": bach_score.total,
+        "grade": bach_score.grade,
+        "dimensions": {},
+    }
+
+    for dim_name, ds in bach_score.dimensions.items():
+        dim_data: Dict[str, Any] = {
+            "score": round(ds.score, 1),
+            "applicable": ds.applicable,
+            "penalty": round(ds.penalty, 1),
+            "sub_scores": [],
+        }
+        for ss in ds.sub_scores:
+            dim_data["sub_scores"].append({
+                "name": ss.name,
+                "value": round(ss.value, 4),
+                "reference": round(ss.reference, 4),
+                "score": round(ss.score, 1),
+                "method": ss.method,
+                "detail": ss.detail,
+            })
+        data["dimensions"][dim_name] = dim_data
+
+    return json.dumps(data, indent=2)

@@ -293,6 +293,9 @@ std::vector<NoteEvent> postValidateNotes(
 
     if (res.accepted) {
       result.push_back(res.note);
+      // Preserve gesture metadata through createBachNote pipeline.
+      result.back().gesture_id = note.gesture_id;
+      result.back().gesture_role = note.gesture_role;
       if (res.was_adjusted) {
         local_stats.repaired++;
       } else {

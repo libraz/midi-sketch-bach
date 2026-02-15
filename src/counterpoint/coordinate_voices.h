@@ -6,11 +6,11 @@
 
 #include <cstdint>
 #include <functional>
-#include <string>
 #include <utility>
 #include <vector>
 
 #include "core/basic_types.h"
+#include "core/form_profile.h"
 #include "core/note_source.h"
 #include "counterpoint/vertical_context.h"
 #include "harmony/harmonic_timeline.h"
@@ -49,6 +49,12 @@ struct CoordinationConfig {
 
   /// Form name for diagnostic logging.
   const char* form_name = "Unknown";
+
+  /// Dissonance handling policy (suspension validation, passing-tone rules).
+  DissonancePolicy dissonance_policy;
+
+  /// Total duration of the piece in ticks (for cadence window calculation).
+  Tick total_duration = 0;
 };
 
 /// Run the unified coordination pass on all_notes.

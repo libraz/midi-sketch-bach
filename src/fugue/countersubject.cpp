@@ -240,7 +240,10 @@ Tick selectCSDuration(Tick subject_duration, float split_prob,
   if (energy < 0.3f) energy = 0.3f;
   if (energy > 0.75f) energy = 0.75f;
 
-  Tick dur = FugueEnergyCurve::selectDuration(energy, tick, gen, subject_duration);
+  // Use Countersubject voice profile (default: voice 1 in 4-voice texture).
+  VoiceProfile cs_profile = getVoiceProfile(TextureFunction::Countersubject, 1, 4);
+  Tick dur = FugueEnergyCurve::selectDuration(energy, tick, gen, subject_duration,
+                                               cs_profile);
 
   // 16th note restriction: forbidden when energy < 0.6 (Severe, Noble).
   // Baroque practice: CS sixteenths only in Playful/Restless contexts.

@@ -29,6 +29,7 @@ struct ToccataSectionBoundary {
   ToccataSectionId id;
   Tick start = 0;
   Tick end = 0;
+  ToccataStyleMode style_mode = ToccataStyleMode::Phantasticus;
 };
 
 struct ToccataResult {
@@ -40,6 +41,7 @@ struct ToccataResult {
   ToccataArchetype archetype = ToccataArchetype::Dramaticus;
   std::vector<ToccataSectionBoundary> sections;
   std::vector<ToccataSectionBoundary> phases;  // 8-phase (Dramaticus), empty for others.
+  std::vector<int> core_intervals;  ///< Opening gesture Leader descent intervals (for Kerngestalt).
 
   // Legacy section boundary fields (always populated for backward compat).
   // Non-Dramaticus: opening=sections[0], recit=sections[1], drive=sections.back().

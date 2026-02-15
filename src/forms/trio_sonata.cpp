@@ -62,6 +62,13 @@ constexpr uint8_t kPedalChannel = 3;
 constexpr Tick kPhraseBars = 4;
 constexpr Tick kPhraseTicks = kPhraseBars * kTicksPerBar;  // 7680
 
+/// Custom trio sonata upper voice profile: higher stepwise ratio than default.
+/// Based on trio_sonata category avg: step 57.7%, interval 2.83.
+constexpr VoiceProfile kTrioUpper = {
+    0.58f, 0.24f, 0.02f, true, 1,
+    {0.3f, 1.0f, 1.2f, 3.0f, 2.5f, 1.0f}, 120,  // min=16th
+    0.22f, 0.0f, 0.30f};
+
 /// @brief Right hand register bounds.
 constexpr uint8_t kRhLow = 64;
 constexpr uint8_t kRhHigh = 84;
@@ -524,6 +531,9 @@ std::vector<NoteEvent> generateFiguration(Tick start_tick, Tick end_tick,
 
     int abs_deg = scale_util::pitchToAbsoluteDegree(prev0, key, scale);
 
+    const VoiceProfile& voice_prof =
+        is_bass ? voice_profiles::kBassLine : kTrioUpper;
+
     uint8_t pitch;
     if (is_downbeat) {
       // Snap to chord tone, but avoid exact repetition.
@@ -533,14 +543,14 @@ std::vector<NoteEvent> generateFiguration(Tick start_tick, Tick end_tick,
         if (chord_tones.size() > 1) {
           // Score candidates for best voice-leading.
           pitch = selectBestPitch(mel_state, prev0, chord_tones, current, true,
-                                  rng, is_bass);
+                                  rng, voice_prof);
         } else {
           // Shift by one scale step to avoid repetition.
           pitch = scale_util::absoluteDegreeToPitch(abs_deg + direction, key, scale);
         }
       }
     } else {
-      int interval_size = chooseMelodicInterval(mel_state, rng, is_bass);
+      int interval_size = chooseMelodicInterval(mel_state, rng, voice_prof);
       int step = interval_size * direction;
       pitch = scale_util::absoluteDegreeToPitch(abs_deg + step, key, scale);
     }
@@ -1965,6 +1975,8 @@ TrioSonataMovement generateMovement(const KeySignature& key_sig, Tick num_bars,
       coord_config.lightweight_sources = {BachNoteSource::EpisodeMaterial,
                                           BachNoteSource::SequenceNote};
       coord_config.form_name = "TrioSonata";
+      auto form_profile = getFormProfile(FormType::TrioSonata);
+      coord_config.dissonance_policy = form_profile.dissonance_policy;
       all_notes = coordinateVoices(std::move(all_notes), coord_config);
     }
 

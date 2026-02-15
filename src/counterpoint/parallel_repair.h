@@ -36,6 +36,12 @@ struct ParallelRepairParams {
   /// BWV578 reference: ~4% parallel ratio. Budget allows a small number
   /// of parallels through repair for natural texture.
   int parallel_budget = 0;
+
+  /// Core intervals of the toccata opening gesture Leader voice.
+  /// When non-empty, enables gesture octave exemption condition 7:
+  /// the Leader's interval sequence must be a prefix of these intervals.
+  /// Empty = prefix check is vacuously true (exemption uses conditions 1-6 only).
+  std::vector<int> gesture_core_intervals;
 };
 
 /// @brief Repair parallel perfect consonances in a note list.

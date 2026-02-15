@@ -51,6 +51,10 @@ class FormProfile:
     # Higher values relax the rule for arpeggio-heavy forms.
     leap_resolution_threshold: int = 5
 
+    # Bach reference scoring: category name and optional exemplar work ID.
+    reference_category: Optional[str] = None
+    reference_exemplar: Optional[str] = None
+
 
 # ---------------------------------------------------------------------------
 # Profile registry
@@ -65,6 +69,8 @@ _PROFILES: Dict[str, FormProfile] = {
         exposition_required=True,
         cadence_validation=True,
         expected_voices=(2, 5),
+        reference_category="organ_fugue",
+        reference_exemplar="BWV578_fugue",
     ),
     "prelude_and_fugue": FormProfile(
         form_name="prelude_and_fugue",
@@ -75,6 +81,7 @@ _PROFILES: Dict[str, FormProfile] = {
         cadence_validation=True,
         expected_voices=(2, 5),
         leap_resolution_threshold=7,
+        reference_category="wtc1",
     ),
     "toccata_and_fugue": FormProfile(
         form_name="toccata_and_fugue",
@@ -85,6 +92,7 @@ _PROFILES: Dict[str, FormProfile] = {
         cadence_validation=True,
         expected_voices=(2, 5),
         relaxed_sources=frozenset({"free_counterpoint", "post_process"}),
+        reference_category="organ_fugue",
     ),
     "fantasia_and_fugue": FormProfile(
         form_name="fantasia_and_fugue",
@@ -94,6 +102,7 @@ _PROFILES: Dict[str, FormProfile] = {
         exposition_required=True,
         cadence_validation=True,
         expected_voices=(2, 5),
+        reference_category="organ_fugue",
     ),
     "trio_sonata": FormProfile(
         form_name="trio_sonata",
@@ -104,6 +113,7 @@ _PROFILES: Dict[str, FormProfile] = {
         cadence_validation=True,
         hidden_perfect_severity=Severity.INFO,
         expected_voices=(3, 3),
+        reference_category="orgelbuchlein",
     ),
     "chorale_prelude": FormProfile(
         form_name="chorale_prelude",
@@ -113,6 +123,7 @@ _PROFILES: Dict[str, FormProfile] = {
         exposition_required=False,
         cadence_validation=True,
         expected_voices=(2, 4),
+        reference_category="orgelbuchlein",
     ),
     "goldberg_variations": FormProfile(
         form_name="goldberg_variations",
@@ -129,6 +140,7 @@ _PROFILES: Dict[str, FormProfile] = {
         instrument_range=(29, 89),
         expected_voices=(1, 5),
         leap_resolution_threshold=6,
+        reference_category="goldberg",
     ),
     "passacaglia": FormProfile(
         form_name="passacaglia",
@@ -141,6 +153,7 @@ _PROFILES: Dict[str, FormProfile] = {
         expected_voices=(2, 5),
         ground_bass_expected=True,
         ground_bass_period=8,
+        reference_category="organ_fugue",
     ),
     "cello_prelude": FormProfile(
         form_name="cello_prelude",
@@ -151,6 +164,7 @@ _PROFILES: Dict[str, FormProfile] = {
         cadence_validation=False,
         instrument_range=(36, 81),
         expected_voices=(1, 1),
+        reference_category="solo_cello_suite",
     ),
     "chaconne": FormProfile(
         form_name="chaconne",
@@ -163,6 +177,7 @@ _PROFILES: Dict[str, FormProfile] = {
         expected_voices=(1, 1),
         ground_bass_expected=True,
         ground_bass_period=4,
+        reference_category="solo_violin",
     ),
 }
 

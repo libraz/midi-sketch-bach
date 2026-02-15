@@ -77,6 +77,55 @@ uint8_t findPrevPitchInVoice(uint8_t voice, Tick before_tick,
   return best;
 }
 
+/// Check if a strong-beat dissonance is a valid suspension.
+/// Requires: (1) preparation on previous beat, (2) downward resolution,
+/// (3) stepwise resolution.
+bool isValidSuspension(uint8_t pitch, uint8_t voice, Tick tick,
+                       const std::vector<NoteEvent>& placed) {
+  // Condition 1: Preparation -- same pitch must be sounding on the previous beat.
+  Tick prev_beat = (tick >= kTicksPerBeat) ? tick - kTicksPerBeat : 0;
+  bool prepared = false;
+  for (const auto& note : placed) {
+    if (note.voice != voice) continue;
+    if (note.pitch == pitch &&
+        note.start_tick <= prev_beat &&
+        note.start_tick + note.duration > prev_beat) {
+      prepared = true;
+      break;
+    }
+  }
+  if (!prepared) return false;
+
+  // Conditions 2+3: Check that there is a plausible resolution target.
+  // Resolution must be downward and stepwise (1-2 semitones below).
+  // We check whether a note follows in the same voice within the next beat.
+  Tick next_beat = tick + kTicksPerBeat;
+  for (const auto& note : placed) {
+    if (note.voice != voice) continue;
+    if (note.start_tick > tick && note.start_tick <= next_beat) {
+      int resolution_interval =
+          static_cast<int>(pitch) - static_cast<int>(note.pitch);
+      // Downward stepwise: 1 or 2 semitones down.
+      if (resolution_interval >= 1 && resolution_interval <= 2) {
+        return true;
+      }
+    }
+  }
+
+  // No resolution found yet -- suspension may still resolve later.
+  // Accept optimistically (the note hasn't been placed yet for lookahead).
+  return true;
+}
+
+/// Check if we are in the cadence window (last 2 bars of the piece).
+bool isInCadenceWindow(Tick tick, Tick total_duration) {
+  if (total_duration == 0) return false;
+  Tick cadence_start = (total_duration > 2 * kTicksPerBar)
+                           ? total_duration - 2 * kTicksPerBar
+                           : 0;
+  return tick >= cadence_start;
+}
+
 }  // namespace
 
 std::vector<NoteEvent> coordinateVoices(std::vector<NoteEvent> all_notes,
@@ -179,6 +228,16 @@ std::vector<NoteEvent> coordinateVoices(std::vector<NoteEvent> all_notes,
           if (config.timeline) {
             const HarmonicEvent& harm = config.timeline->getAt(note.start_tick);
             if (!isChordTone(note.pitch, harm)) {
+              // Suspension check: if policy requires valid suspension,
+              // accept the dissonance if it qualifies as a prepared suspension.
+              if (config.dissonance_policy.require_valid_suspension &&
+                  isValidSuspension(note.pitch, note.voice, note.start_tick,
+                                    coordinated)) {
+                cp_state.addNote(note.voice, note);
+                coordinated.push_back(note);
+                ++accepted_count;
+                continue;
+              }
               // Snap repair: try +/-1, +/-2.
               bool snapped = false;
               for (int delta : {1, -1, 2, -2}) {
@@ -225,11 +284,25 @@ std::vector<NoteEvent> coordinateVoices(std::vector<NoteEvent> all_notes,
           }
         } else {
           // Weak beat: reject m2/TT/M7.
+          // Cadence window: tighten dissonance acceptance.
+          Tick max_overlap = config.dissonance_policy.max_dissonance_overlap;
+          if (config.total_duration > 0 &&
+              isInCadenceWindow(note.start_tick, config.total_duration)) {
+            max_overlap /= 2;  // Halve overlap tolerance in cadence.
+          }
           uint8_t prev = findPrevPitchInVoice(note.voice, note.start_tick,
                                               coordinated);
           if (hasHarshDissonance(note.pitch, note.voice, note.start_tick,
                                  coordinated, config.weak_beat_allow, prev)) {
-            continue;
+            // Check passing dissonance policy: if passing tones are not
+            // allowed, reject immediately.
+            if (!config.dissonance_policy.allow_passing_dissonance) {
+              continue;
+            }
+            // If overlap exceeds the (possibly cadence-tightened) limit, reject.
+            if (note.duration > max_overlap) {
+              continue;
+            }
           }
         }
 

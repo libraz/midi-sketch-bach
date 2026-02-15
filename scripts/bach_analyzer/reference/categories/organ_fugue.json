@@ -1,0 +1,35 @@
+{
+  "category": "organ_fugue",
+  "work_count": 8,
+  "scalars": {
+    "stepwise_ratio": {"mean": 0.445, "std": 0.132},
+    "leap_ratio": {"mean": 0.474, "std": 0.12},
+    "avg_interval": {"mean": 3.34, "std": 0.5},
+    "consonance_ratio": {"mean": 0.746, "std": 0.050},
+    "perfect_consonance_ratio": {"mean": 0.34, "std": 0.05},
+    "avg_active_voices": {"mean": 2.66, "std": 0.4},
+    "notes_per_bar": {"mean": 23.48, "std": 5.0}
+  },
+  "distributions": {
+    "interval": {
+      "P1": 0.086, "m2": 0.167, "M2": 0.274, "m3": 0.114,
+      "M3": 0.068, "P4": 0.107, "TT": 0.018, "P5": 0.074,
+      "m6": 0.034, "M6": 0.039, "m7": 0.016, "M7": 0.005
+    },
+    "rhythm": {
+      "32nd": 0.102, "16th": 0.614, "8th": 0.207,
+      "quarter": 0.058, "half": 0.014, "whole": 0.003, "longer": 0.002
+    },
+    "vertical": {
+      "P1": 0.211, "m2": 0.033, "M2": 0.067, "m3": 0.122,
+      "M3": 0.122, "P4": 0.133, "TT": 0.078, "P5": 0.133,
+      "m6": 0.022, "M6": 0.044, "m7": 0.011, "M7": 0.022
+    },
+    "motion": {
+      "oblique": 0.394, "contrary": 0.310, "similar": 0.254, "parallel": 0.042
+    },
+    "texture": {
+      "0": 0.009, "1": 0.086, "2": 0.241, "3": 0.559, "4": 0.105
+    }
+  }
+}

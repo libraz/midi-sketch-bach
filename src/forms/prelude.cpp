@@ -263,6 +263,8 @@ PreludeResult generatePrelude(const PreludeConfig& config) {
     coord_config.use_next_pitch_map = true;
     coord_config.check_cross_relations = true;
     coord_config.form_name = "Prelude";
+    auto form_profile = getFormProfile(FormType::PreludeAndFugue);
+    coord_config.dissonance_policy = form_profile.dissonance_policy;
     all_notes = coordinateVoices(std::move(all_notes), coord_config);
   }
 

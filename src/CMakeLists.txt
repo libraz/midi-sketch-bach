@@ -85,6 +85,7 @@ set(BACH_LIB_SOURCES
   fugue/motif_pool.cpp
   fugue/fortspinnung.cpp
   fugue/motif_template.cpp
+  fugue/toccata_affinity.cpp
   fugue/fugue_generator.cpp
 
   # transform/
@@ -127,6 +128,7 @@ set(BACH_LIB_SOURCES
   forms/trio_sonata.cpp
   forms/chorale_prelude.cpp
   forms/toccata.cpp
+  forms/gesture_template.cpp
   forms/toccata_perpetuus.cpp
   forms/toccata_concertato.cpp
   forms/toccata_sectionalis.cpp

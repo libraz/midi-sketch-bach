@@ -1837,6 +1837,10 @@ FugueResult generateFugue(const FugueConfig& config) {
     coord_config.use_next_pitch_map = true;
     coord_config.check_cross_relations = false;  // parallel repair handles this
 
+    auto form_profile = getFormProfile(FormType::Fugue);
+    coord_config.dissonance_policy = form_profile.dissonance_policy;
+    coord_config.total_duration = current_tick + coda_duration;
+
     // Tier 1: Cantus firmus — immutable, never modified.
     // Coda notes are design values (Principle 4) and must never be altered.
     coord_config.immutable_sources = {
