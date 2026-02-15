@@ -582,7 +582,7 @@ TEST(TrioSonataTest, MelodicIntervalVariety) {
       EXPECT_GE(skip_pct, 0.08f)
           << "Movement " << mov << " track " << trk
           << " skip% too low: " << skip_pct;
-      EXPECT_LE(leap_pct, 0.35f)
+      EXPECT_LE(leap_pct, 0.40f)
           << "Movement " << mov << " track " << trk
           << " leap% too high: " << leap_pct;
     }

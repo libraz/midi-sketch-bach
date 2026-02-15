@@ -15,6 +15,7 @@
 #include "counterpoint/counterpoint_state.h"
 #include "counterpoint/cross_relation.h"
 #include "counterpoint/vertical_safe.h"
+#include "harmony/chord_tone_utils.h"
 #include "harmony/chord_types.h"
 
 namespace bach {
@@ -197,6 +198,22 @@ std::vector<NoteEvent> coordinateVoices(std::vector<NoteEvent> all_notes,
                   break;
                 }
               }
+              // Fallback: nearestChordTone for tritone escape in dom7.
+              if (!snapped) {
+                auto [low, high] = config.voice_range(note.voice);
+                uint8_t nct = nearestChordTone(note.pitch, harm);
+                if (nct != note.pitch && nct >= low && nct <= high &&
+                    checkVerticalConsonance(nct, note.voice, note.start_tick,
+                                            coordinated, *config.timeline,
+                                            config.num_voices)) {
+                  NoteEvent fixed = note;
+                  fixed.pitch = nct;
+                  cp_state.addNote(fixed.voice, fixed);
+                  coordinated.push_back(fixed);
+                  ++accepted_count;
+                  snapped = true;
+                }
+              }
               if (!snapped) continue;
               continue;  // NOLINT(readability-redundant-continue) explicit skip after snap
             }
@@ -241,6 +258,34 @@ std::vector<NoteEvent> coordinateVoices(std::vector<NoteEvent> all_notes,
 
       auto result = createBachNote(&cp_state, &cp_rules, &cp_resolver, opts);
       if (result.accepted) {
+        // Vertical harsh gate (defense-in-depth, same as Tier 2 check).
+        uint8_t prev_harsh = findPrevPitchInVoice(note.voice, note.start_tick,
+                                                   coordinated);
+        if (hasHarshDissonance(result.note.pitch, note.voice, note.start_tick,
+                               coordinated, config.weak_beat_allow,
+                               prev_harsh)) {
+          bool found_alt = false;
+          for (int delta : {1, -1, 2, -2}) {
+            if (!config.voice_range) break;
+            auto [low, high] = config.voice_range(note.voice);
+            auto alt_opts = opts;
+            alt_opts.desired_pitch =
+                clampPitch(static_cast<int>(note.pitch) + delta, low, high);
+            auto alt =
+                createBachNote(&cp_state, &cp_rules, &cp_resolver, alt_opts);
+            if (alt.accepted &&
+                !hasHarshDissonance(alt.note.pitch, note.voice,
+                                    note.start_tick, coordinated,
+                                    config.weak_beat_allow, prev_harsh)) {
+              coordinated.push_back(alt.note);
+              ++accepted_count;
+              found_alt = true;
+              break;
+            }
+          }
+          if (found_alt) continue;
+          // No alternative: keep original (soft constraint).
+        }
         // Optional cross-relation check.
         if (config.check_cross_relations) {
           if (hasCrossRelation(coordinated, config.num_voices, note.voice,

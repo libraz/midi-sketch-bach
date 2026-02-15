@@ -75,10 +75,10 @@ TEST(VerticalContextTest, StrongBeatChordToneAlwaysSafe) {
   std::vector<NoteEvent> placed = {makeNote(0, kTicksPerBeat, 49, 1)};  // Db3
   VerticalContext vctx{&placed, &tl, 2};
 
-  // Beat 0: C4(60) is a chord tone of C major I chord — always safe
-  // even though Db3(49) to C4(60) = M7 = dissonant.
-  // checkVerticalConsonance accepts chord tones unconditionally.
-  EXPECT_TRUE(vctx.isSafe(0, 0, 60));
+  // Beat 0: C4(60) is a chord tone of C major I chord.
+  // Db3(49) to C4(60) = M7 = dissonant.
+  // Vertical sovereignty: chord-tone status does NOT exempt from consonance check.
+  EXPECT_FALSE(vctx.isSafe(0, 0, 60));
 }
 
 TEST(VerticalContextTest, WeakBeatM2Rejected) {

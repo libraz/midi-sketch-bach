@@ -110,16 +110,44 @@ TEST(VerticalSafeCallback, Beat3HarshDissonanceRejected) {
   EXPECT_TRUE(safe(3 * kTicksPerBeat, 1, 62));   // M2(2) allowed.
 }
 
-TEST(VerticalSafeCallback, ChordToneAlwaysSafe) {
-  // Voice 0: Bb3(58) at tick 0 (strong beat, not in C major chord).
+TEST(VerticalSafeCallback, ChordToneM2Rejected) {
+  // Voice 0: Bb3(58) at tick 0 (strong beat).
   // Candidate: pitch C4(60) -- chord tone of I chord.
-  // Even though Bb-C = m2 (dissonant), C is a chord tone -> safe.
+  // Bb-C = m2 (dissonant). Vertical sovereignty: chord-tone status does NOT
+  // exempt from interval consonance check. -> rejected.
   auto tl = makeCMajorTimeline(kTicksPerBar);
   std::vector<NoteEvent> notes = {
       makeNote(0, kTicksPerBeat, 58, 0),  // Bb3, voice 0
   };
   auto safe = makeVerticalSafeCallback(tl, notes, 2);
-  EXPECT_TRUE(safe(0, 1, 60));  // C4: chord tone -> safe despite m2 with Bb.
+  EXPECT_FALSE(safe(0, 1, 60));  // C4: m2 with Bb -> rejected despite chord tone.
+}
+
+TEST(VerticalSafeCallback, ChordToneTTRejected) {
+  // Voice 0: C4(60) at tick 0 (strong beat).
+  // Candidate: F#4(66) -- NOT a chord tone, but test that TT is rejected
+  // even in harmonic context where V7 might justify it.
+  // |66-60| = 6 (TT). isConsonance(6) = false -> rejected.
+  auto tl = makeCMajorTimeline(kTicksPerBar);
+  std::vector<NoteEvent> notes = {
+      makeNote(0, kTicksPerBeat, 60, 0),  // C4, voice 0
+  };
+  auto safe = makeVerticalSafeCallback(tl, notes, 2);
+  EXPECT_FALSE(safe(0, 1, 66));  // F#4: TT with C4 -> rejected.
+}
+
+TEST(VerticalSafeCallback, ChordToneConsonanceStillAccepted) {
+  // Regression guard: chord tones that form consonant intervals still pass.
+  // Voice 0: C4(60) at tick 0 (strong beat).
+  // Candidate: G4(67) -- chord tone of C-I. |67-60| = 7 (P5). Consonant.
+  // Candidate: E4(64) -- chord tone of C-I. |64-60| = 4 (M3). Consonant.
+  auto tl = makeCMajorTimeline(kTicksPerBar);
+  std::vector<NoteEvent> notes = {
+      makeNote(0, kTicksPerBeat, 60, 0),  // C4, voice 0
+  };
+  auto safe = makeVerticalSafeCallback(tl, notes, 2);
+  EXPECT_TRUE(safe(0, 1, 67));   // G4: P5 with C4 -> accepted.
+  EXPECT_TRUE(safe(0, 1, 64));   // E4: M3 with C4 -> accepted.
 }
 
 TEST(VerticalSafeCallback, P4UpperVoicesAccepted) {
@@ -419,12 +447,13 @@ TEST(VerticalSafeParallel, WeakBeatBypassesParallelCheck) {
   EXPECT_TRUE(safe(kTicksPerBeat, 1, 69));  // Would be parallel P5, but weak beat.
 }
 
-TEST(VerticalSafeParallel, ChordToneBypassesParallelCheck) {
-  // Chord tone candidates bypass all checks (including parallel).
+TEST(VerticalSafeParallel, ChordToneDoesNotBypassConsonance) {
+  // Chord tone no longer bypasses consonance/parallel checks.
   // Voice 0: C4(60) at tick 480, D4(62) at tick 960.
   // Voice 1: G4(67) at tick 480.
   // Candidate for voice 1 at tick 960: E4(64).
-  // E is a chord tone of C major I -> returns true before parallel check.
+  // E is a chord tone of C major I, BUT |64-62|=2 (M2), dissonant.
+  // Vertical sovereignty: chord tone does NOT override interval check.
   auto tl = makeCMajorTimeline(kTicksPerBar * 2);
   std::vector<NoteEvent> notes = {
       makeNote(kTicksPerBeat, kTicksPerBeat, 60, 0),
@@ -432,7 +461,7 @@ TEST(VerticalSafeParallel, ChordToneBypassesParallelCheck) {
       makeNote(kTicksPerBeat, kTicksPerBeat, 67, 1),
   };
   auto safe = makeVerticalSafeWithParallelCheck(tl, notes, 2);
-  EXPECT_TRUE(safe(2 * kTicksPerBeat, 1, 64));  // E4: chord tone -> bypasses all.
+  EXPECT_FALSE(safe(2 * kTicksPerBeat, 1, 64));  // E4: M2 with D4 -> rejected.
 }
 
 TEST(VerticalSafeParallel, CompoundIntervalParallelDetected) {

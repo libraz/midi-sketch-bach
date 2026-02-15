@@ -218,39 +218,10 @@ bool CollisionResolver::isSafeToPlace(const CounterpointState& state,
     bool is_strong = (tick % kTicksPerBeat == 0);
     int ivl = absoluteInterval(pitch, other_note->pitch);
     if (is_strong && !rules.isIntervalConsonant(ivl, is_strong)) {
-      // Voice reentry: disable NHT exemption because there is no
-      // continuous melodic context. Force cascade (chord_tone/step_shift)
-      // to find a consonant alternative.
-      if (isVoiceReentry(state, voice_id, tick)) {
-        reentry_detected_count_++;
-        return false;  // Force cascade.
-      }
-
-      // Normal NHT exemption: passing tone or neighbor tone.
-      // When next_pitch is known, check if this dissonance forms a valid
-      // non-harmonic tone pattern (passing tone or neighbor tone).
-      // Use Fifth species rules which allow the broadest non-harmonic tones.
-      bool allowed_as_nht = false;
-      // Downbeat (beat 1): NHT exemption disabled — only suspensions
-      // are acceptable dissonances on the strongest metric position.
-      Tick beat_in_bar = (tick % kTicksPerBar) / kTicksPerBeat;
-      bool is_downbeat = (beat_in_bar == 0);
-      if (!is_downbeat && next_pitch.has_value()) {
-        const NoteEvent* prev_self = state.getLastNote(voice_id);
-        if (prev_self) {
-          SpeciesRules species_rules(SpeciesType::Fifth);
-          bool is_passing = species_rules.isValidPassingTone(
-              prev_self->pitch, pitch, *next_pitch);
-          bool is_neighbor = species_rules.isValidNeighborTone(
-              prev_self->pitch, pitch, *next_pitch);
-          if (is_passing || is_neighbor) {
-            allowed_as_nht = true;
-          }
-        }
-      }
-      if (!allowed_as_nht) {
-        return false;
-      }
+      // Vertical law: dissonant interval is always rejected.
+      // NHT (passing/neighbor) is a melodic property and cannot
+      // override vertical safety. See: vertical sovereignty principle.
+      return false;
     }
 
     // P4 involving the bass voice is dissonant in Baroque practice, even when

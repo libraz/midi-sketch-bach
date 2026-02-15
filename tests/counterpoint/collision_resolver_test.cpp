@@ -354,8 +354,8 @@ TEST_F(CollisionResolverTest, PassingToneAllowedWithNextPitch) {
   EXPECT_FALSE(resolver.isSafeToPlace(state, rules, 0, 62, 960, 480));
 
   // With next_pitch E4(64), the pattern C4->D4->E4 is an ascending passing tone.
-  // D4 should be allowed.
-  EXPECT_TRUE(resolver.isSafeToPlace(state, rules, 0, 62, 960, 480, 64));
+  // Vertical sovereignty: dissonant interval rejected regardless of NHT status.
+  EXPECT_FALSE(resolver.isSafeToPlace(state, rules, 0, 62, 960, 480, 64));
 }
 
 TEST_F(CollisionResolverTest, NeighborToneAllowedWithNextPitch) {
@@ -367,7 +367,8 @@ TEST_F(CollisionResolverTest, NeighborToneAllowedWithNextPitch) {
 
   // Voice 0 wants D4(62) at tick 960 (dissonant M2 with C3).
   // next_pitch = C4(60) -> pattern C4->D4->C4 = upper neighbor tone.
-  EXPECT_TRUE(resolver.isSafeToPlace(state, rules, 0, 62, 960, 480, 60));
+  // Vertical sovereignty: dissonant interval rejected regardless of NHT status.
+  EXPECT_FALSE(resolver.isSafeToPlace(state, rules, 0, 62, 960, 480, 60));
 }
 
 TEST_F(CollisionResolverTest, NextPitchNulloptPreservesLegacyBehavior) {
@@ -923,8 +924,9 @@ TEST_F(WeakBeatNHTTest, WeakBeatPassingToneAcceptedWithNextPitch) {
   // Without NHT -> rejected.
   EXPECT_FALSE(resolver.isSafeToPlace(state, bach_rules, 0, 62, 960, 480));
 
-  // With next_pitch E4(64): C4->D4->E4 = ascending passing tone -> accepted.
-  EXPECT_TRUE(resolver.isSafeToPlace(state, bach_rules, 0, 62, 960, 480, 64));
+  // With next_pitch E4(64): C4->D4->E4 = ascending passing tone.
+  // Vertical sovereignty: dissonant interval rejected regardless of NHT status.
+  EXPECT_FALSE(resolver.isSafeToPlace(state, bach_rules, 0, 62, 960, 480, 64));
 }
 
 TEST_F(WeakBeatNHTTest, WeakBeatConsonanceUnchanged) {
@@ -955,11 +957,10 @@ TEST_F(WeakBeatNHTTest, SourceAwareOverloadPassesNextPitch) {
   auto result = resolver.findSafePitch(
       state, bach_rules, 0, 62, 960, 480,
       BachNoteSource::FreeCounterpoint, 64);
-  // The cascade tries "original" first with next_pitch=64. Since C4->D4->E4
-  // is a valid passing tone, isSafeToPlace should accept.
+  // Vertical sovereignty: dissonant D4(62) rejected. Cascade finds alternative.
   EXPECT_TRUE(result.accepted);
-  EXPECT_EQ(result.pitch, 62);
-  EXPECT_EQ(result.strategy, "original");
+  // Cascade may shift pitch via chord_tone/step_shift strategy.
+  EXPECT_NE(result.strategy, "original");
 }
 
 // ---------------------------------------------------------------------------

@@ -10,6 +10,7 @@
 #include <string>
 
 #include "analysis/counterpoint_analyzer.h"
+#include "analysis/dissonance_analyzer.h"
 #include "core/basic_types.h"
 #include "core/gm_program.h"
 #include "core/note_source.h"
@@ -1379,6 +1380,130 @@ TEST(FugueGeneratorTest, CodaProximity_NoCrossing) {
           }
         }
       }
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// coordinateVoices integration: strong-beat dissonance must be zero
+// ---------------------------------------------------------------------------
+
+TEST(FugueGeneratorTest, FugueStrongBeatDissonanceZero) {
+  // Verify that coordinateVoices eliminates strong-beat dissonances across
+  // multiple seeds and voice counts.
+  uint32_t seeds[] = {1, 7, 42, 100, 123, 200};
+  for (uint32_t seed : seeds) {
+    for (uint8_t nv : {3, 4}) {
+      FugueConfig config = makeTestConfig(seed);
+      config.num_voices = nv;
+      FugueResult result = generateFugue(config);
+      ASSERT_TRUE(result.success)
+          << "Seed " << seed << ", voices=" << static_cast<int>(nv);
+
+      std::vector<NoteEvent> all_notes;
+      for (const auto& track : result.tracks) {
+        for (const auto& note : track.notes) {
+          all_notes.push_back(note);
+        }
+      }
+
+      auto clashes = detectSimultaneousClashes(all_notes, nv);
+      int strong_beat_high = 0;
+      for (const auto& ev : clashes) {
+        if (ev.severity == DissonanceSeverity::High) {
+          ++strong_beat_high;
+        }
+      }
+      EXPECT_EQ(strong_beat_high, 0)
+          << "Seed " << seed << ", voices=" << static_cast<int>(nv)
+          << ": " << strong_beat_high << " strong-beat dissonances";
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Post-validation tier order: Tier 1 notes registered before Tier 2/3
+// ---------------------------------------------------------------------------
+
+TEST(FugueGeneratorTest, FuguePostValidationTierOrder) {
+  FugueConfig config = makeTestConfig(42);
+  config.num_voices = 3;
+  FugueResult result = generateFugue(config);
+  ASSERT_TRUE(result.success);
+
+  // Collect all notes and sort the same way post-validation does.
+  std::vector<NoteEvent> all_notes;
+  for (const auto& track : result.tracks) {
+    for (const auto& note : track.notes) {
+      all_notes.push_back(note);
+    }
+  }
+
+  std::sort(all_notes.begin(), all_notes.end(),
+            [](const NoteEvent& a, const NoteEvent& b) {
+              if (a.start_tick != b.start_tick) return a.start_tick < b.start_tick;
+              int pa = sourcePriority(a.source);
+              int pb = sourcePriority(b.source);
+              if (pa != pb) return pa < pb;
+              return a.voice < b.voice;
+            });
+
+  // At each tick, Tier 1 notes must appear before Tier 2/3.
+  Tick prev_tick = 0;
+  int max_priority_seen = -1;
+  for (const auto& note : all_notes) {
+    if (note.start_tick != prev_tick) {
+      max_priority_seen = -1;
+      prev_tick = note.start_tick;
+    }
+    int pri = sourcePriority(note.source);
+    // Priority should be non-decreasing within same tick.
+    EXPECT_GE(pri, max_priority_seen)
+        << "Tick " << note.start_tick << ": priority " << pri
+        << " after " << max_priority_seen;
+    max_priority_seen = std::max(max_priority_seen, pri);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// sourcePriority consistency with isStructuralSource
+// ---------------------------------------------------------------------------
+
+TEST(FugueGeneratorTest, SourcePriorityConsistency) {
+  // Tier 1 (priority 0) sources must all be structural.
+  // All structural sources must have priority <= 1.
+  // Tier 3 (priority 2) sources must NOT be structural.
+  BachNoteSource all_sources[] = {
+      BachNoteSource::FugueSubject, BachNoteSource::FugueAnswer,
+      BachNoteSource::SubjectCore,  BachNoteSource::PedalPoint,
+      BachNoteSource::CanonDux,     BachNoteSource::CanonComes,
+      BachNoteSource::GoldbergAria,
+      BachNoteSource::Countersubject, BachNoteSource::EpisodeMaterial,
+      BachNoteSource::FalseEntry,   BachNoteSource::SequenceNote,
+      BachNoteSource::Coda,
+      BachNoteSource::FreeCounterpoint, BachNoteSource::Ornament,
+      BachNoteSource::Unknown,
+  };
+  for (auto src : all_sources) {
+    int pri = sourcePriority(src);
+    bool structural = isStructuralSource(src);
+    if (pri == 0) {
+      // Tier 1 (immutable): must be structural.
+      EXPECT_TRUE(structural)
+          << "Source " << static_cast<int>(src)
+          << " has priority 0 but is not structural";
+    }
+    if (structural) {
+      // All structural sources must be Tier 1 or Tier 2.
+      EXPECT_LE(pri, 1)
+          << "Source " << static_cast<int>(src)
+          << " is structural but has priority " << pri;
+    }
+    if (pri == 2) {
+      // Tier 3: must NOT be structural.
+      EXPECT_FALSE(structural)
+          << "Source " << static_cast<int>(src)
+          << " has priority 2 but is structural";
     }
   }
 }

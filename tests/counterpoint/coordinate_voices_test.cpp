@@ -12,6 +12,8 @@
 #include "harmony/chord_types.h"
 #include "harmony/harmonic_event.h"
 #include "harmony/harmonic_timeline.h"
+#include "core/interval.h"
+#include "core/pitch_utils.h"
 
 namespace bach {
 namespace {
@@ -186,6 +188,65 @@ TEST(CoordinateVoicesTest, AcceptanceRateReasonable) {
   auto result = coordinateVoices(std::move(notes), config);
   // All notes are chord tones in the correct range -- most should be accepted.
   EXPECT_GE(result.size(), 2u);
+}
+
+
+// ---- Tier 3: harsh dissonance post-check ----
+
+TEST(CoordinateVoicesTest, FullTierHarshPostCheck) {
+  auto tl = makeCMajorTimeline(kTicksPerBar * 4);
+  auto config = makeBasicConfig(tl);
+  config.immutable_sources = {BachNoteSource::PedalPoint};
+
+  // Pedal C3(48) lasts whole bar -- immutable.
+  // Beat 1 (weak): Db3(49) as FreeCounterpoint in voice 0 = m2 over pedal.
+  // Tier 3 harsh gate should reject or replace.
+  std::vector<NoteEvent> notes = {
+      makeNote(0, kTicksPerBar, 48, 1, BachNoteSource::PedalPoint),
+      makeNote(kTicksPerBeat, kTicksPerBeat, 49, 0,
+               BachNoteSource::FreeCounterpoint),
+  };
+
+  auto result = coordinateVoices(std::move(notes), config);
+  // Pedal always accepted. The m2 note should be either replaced or dropped.
+  for (const auto& n : result) {
+    if (n.source == BachNoteSource::PedalPoint) continue;
+    // If accepted, it must not form m2/TT/M7 with pedal.
+    int simple = interval_util::compoundToSimple(
+        absoluteInterval(n.pitch, 48));
+    EXPECT_NE(1, simple) << "m2 leaked at tick " << n.start_tick;
+    EXPECT_NE(6, simple) << "TT leaked at tick " << n.start_tick;
+    EXPECT_NE(11, simple) << "M7 leaked at tick " << n.start_tick;
+  }
+}
+
+// ---- NHT cannot override vertical ----
+
+TEST(CoordinateVoicesTest, NHTCannotOverrideVertical) {
+  auto tl = makeCMajorTimeline(kTicksPerBar * 4);
+  auto config = makeBasicConfig(tl);
+  config.immutable_sources = {BachNoteSource::PedalPoint};
+  config.use_next_pitch_map = true;
+
+  // Pedal C3(48) sustains. Voice 0 plays B3(47)->Db4(49)->C4(60).
+  // Db4(49) at beat 1 forms m2 with pedal. Even as a passing tone
+  // between B3 and C4, vertical law rejects m2.
+  std::vector<NoteEvent> notes = {
+      makeNote(0, kTicksPerBar, 48, 1, BachNoteSource::PedalPoint),
+      makeNote(0, kTicksPerBeat, 47, 0, BachNoteSource::FreeCounterpoint),
+      makeNote(kTicksPerBeat, kTicksPerBeat, 49, 0,
+               BachNoteSource::FreeCounterpoint),
+      makeNote(2 * kTicksPerBeat, kTicksPerBeat, 60, 0,
+               BachNoteSource::FreeCounterpoint),
+  };
+
+  auto result = coordinateVoices(std::move(notes), config);
+  for (const auto& n : result) {
+    if (n.source == BachNoteSource::PedalPoint) continue;
+    int simple = interval_util::compoundToSimple(
+        absoluteInterval(n.pitch, 48));
+    EXPECT_NE(1, simple) << "m2 NHT leaked at tick " << n.start_tick;
+  }
 }
 
 }  // namespace

@@ -156,12 +156,10 @@ TEST_F(CollisionResolverEntryTest, NormalNHTExemptionPreserved) {
       state_, rules_, 1, 54, kBeat, kBeat,
       std::optional<uint8_t>(55));  // next = G3(55)
 
-  // Wait: melodic leap constraint checks tritone in melodic context.
-  // prev=E3(52), current=F#3(54): leap = |54-52| = 2 (M2), stepwise, OK.
-  // The vertical interval F#3(54) vs C4(60) = 6 = tritone, dissonant on strong beat.
-  // But with NHT (passing tone E3->F#3->G3), should be allowed.
-  EXPECT_TRUE(safe)
-      << "NHT exemption should allow dissonant passing tone for continuous voice";
+  // Vertical sovereignty: dissonant interval (tritone) is always rejected
+  // regardless of NHT status or continuous voice context.
+  EXPECT_FALSE(safe)
+      << "Vertical sovereignty: dissonant interval always rejected";
 }
 
 TEST_F(CollisionResolverEntryTest, ReentryDisablesNHTExemption) {
@@ -222,12 +220,14 @@ TEST_F(CollisionResolverEntryTest, ReentryStatsTracked) {
   EXPECT_EQ(cas0, 0u);
   EXPECT_EQ(res0, 0u);
 
-  // Trigger reentry with dissonant pitch.
-  // F#3(54) against C4(60) = tritone = dissonant.
+  // Trigger dissonant pitch. Reentry detection is subsumed by vertical
+  // sovereignty: all dissonant intervals are rejected unconditionally,
+  // so the reentry code path is no longer reached.
   resolver_.findSafePitch(state_, rules_, 1, 54, kBar * 2, kBeat);
 
   auto [det1, cas1, res1] = resolver_.getReentryStats();
-  EXPECT_GT(det1, 0u) << "Reentry detection should be counted";
+  // Reentry detection counter no longer increments (vertical sovereignty).
+  EXPECT_EQ(det1, 0u);
 }
 
 // ---------------------------------------------------------------------------
@@ -285,8 +285,10 @@ TEST_F(CollisionResolverEntryTest, ShortGapIsNotReentry) {
       state_, rules_, 1, 54, kBeat, kBeat,
       std::optional<uint8_t>(55));
 
-  EXPECT_TRUE(safe)
-      << "Gap < kBeat should NOT trigger reentry; NHT exemption should apply";
+  // Vertical sovereignty: dissonant interval always rejected regardless of
+  // gap size or NHT status.
+  EXPECT_FALSE(safe)
+      << "Vertical sovereignty: dissonant interval always rejected";
 }
 
 TEST_F(CollisionResolverEntryTest, ExactBeatGapIsReentry) {
@@ -344,8 +346,10 @@ TEST_F(CollisionResolverEntryTest, ContinuousVoiceIsNotReentry) {
       state_, rules_, 1, 54, kBeat, kBeat,
       std::optional<uint8_t>(55));
 
-  EXPECT_TRUE(safe)
-      << "Gap = 0 (continuous) should NOT trigger reentry; NHT applies";
+  // Vertical sovereignty: dissonant interval always rejected regardless of
+  // continuous voice context.
+  EXPECT_FALSE(safe)
+      << "Vertical sovereignty: dissonant interval always rejected";
 }
 
 TEST_F(CollisionResolverEntryTest, OffbeatPositionIsNotReentry) {

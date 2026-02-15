@@ -24,7 +24,7 @@ namespace {
 /// beat, or is a chord tone).
 inline bool checkVerticalConsonance(uint8_t cand_pitch, uint8_t voice, Tick tick,
                                     const std::vector<NoteEvent>& notes,
-                                    const HarmonicTimeline& timeline,
+                                    const HarmonicTimeline& /*timeline*/,
                                     uint8_t num_voices) {
   // Accented beats (0, 2): full consonance check below.
   // Weak beats (1, 3): reject only harsh dissonances (m2, TT, M7).
@@ -39,9 +39,6 @@ inline bool checkVerticalConsonance(uint8_t cand_pitch, uint8_t voice, Tick tick
     }
     return true;
   }
-
-  // Chord tone is always safe (consonant with harmonic context).
-  if (isChordTone(cand_pitch, timeline.getAt(tick))) return true;
 
   // Find lowest sounding pitch at tick for bass-relative P4 judgment.
   // Include the candidate itself (it may become the new bass).
@@ -155,8 +152,6 @@ makeVerticalSafeWithParallelCheck(const HarmonicTimeline& timeline,
       return checkVerticalConsonance(cand_pitch, voice, tick, notes, timeline,
                                      num_voices);
     }
-    if (isChordTone(cand_pitch, timeline.getAt(tick))) return true;
-
     // --- Consonance check ---
     if (!checkVerticalConsonance(cand_pitch, voice, tick, notes, timeline, num_voices))
       return false;

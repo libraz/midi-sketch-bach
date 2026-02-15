@@ -84,6 +84,32 @@ inline bool isStructuralSource(BachNoteSource source) {
          source == BachNoteSource::GoldbergAria;
 }
 
+/// @brief Return the coordination priority tier for a note source.
+/// Tier 0 = immutable (subject, answer, pedal, canon, aria, coda).
+/// Tier 1 = semi-fixed (countersubject, episode, false entry, sequence).
+/// Tier 2 = fully flexible (free counterpoint, ornament, etc.).
+/// Lower value = higher priority in coordinateVoices and post-validation sort.
+inline int sourcePriority(BachNoteSource source) {
+  switch (source) {
+    case BachNoteSource::FugueSubject:
+    case BachNoteSource::FugueAnswer:
+    case BachNoteSource::SubjectCore:
+    case BachNoteSource::PedalPoint:
+    case BachNoteSource::CanonDux:
+    case BachNoteSource::CanonComes:
+    case BachNoteSource::GoldbergAria:
+    case BachNoteSource::Coda:
+      return 0;  // Tier 1: immutable (design values, never modified)
+    case BachNoteSource::Countersubject:
+    case BachNoteSource::EpisodeMaterial:
+    case BachNoteSource::FalseEntry:
+    case BachNoteSource::SequenceNote:
+      return 1;  // Tier 2: semi-fixed
+    default:
+      return 2;  // Tier 3: fully flexible
+  }
+}
+
 /// @brief Check if a voice index is the pedal voice for a given voice count.
 /// Organ pedal is the last voice when num_voices >= 3.
 inline bool isPedalVoice(uint8_t voice, uint8_t num_voices) {

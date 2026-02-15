@@ -21,6 +21,7 @@
 #include "core/scale.h"
 #include "counterpoint/bach_rule_evaluator.h"
 #include "counterpoint/collision_resolver.h"
+#include "counterpoint/coordinate_voices.h"
 #include "counterpoint/counterpoint_state.h"
 #include "counterpoint/parallel_repair.h"
 #include "counterpoint/cross_relation.h"
@@ -1718,6 +1719,42 @@ FugueResult generateFugue(const FugueConfig& config) {
   }
 
   // =========================================================================
+  // Unified voice coordination: simultaneous strong-beat consonance check
+  // across all voices. Replaces fugue's sequential per-voice validation that
+  // missed cross-voice dissonances at the same tick.
+  // =========================================================================
+  {
+    CoordinationConfig coord_config;
+    coord_config.num_voices = num_voices;
+    coord_config.tonic = config.key;
+    coord_config.timeline = &detailed_timeline;
+    coord_config.voice_range = [num_voices](uint8_t v) {
+      return getFugueVoiceRange(v, num_voices);
+    };
+    coord_config.form_name = "Fugue";
+    coord_config.use_next_pitch_map = true;
+    coord_config.check_cross_relations = false;  // parallel repair handles this
+
+    // Tier 1: Cantus firmus — immutable, never modified.
+    // Coda notes are design values (Principle 4) and must never be altered.
+    coord_config.immutable_sources = {
+        BachNoteSource::FugueSubject, BachNoteSource::FugueAnswer,
+        BachNoteSource::SubjectCore,  BachNoteSource::PedalPoint,
+        BachNoteSource::CanonDux,     BachNoteSource::CanonComes,
+        BachNoteSource::GoldbergAria, BachNoteSource::Coda,
+    };
+
+    // Tier 2: Semi-fixed — strong-beat snap repair, drop if unresolvable.
+    coord_config.lightweight_sources = {
+        BachNoteSource::Countersubject, BachNoteSource::EpisodeMaterial,
+        BachNoteSource::FalseEntry,     BachNoteSource::SequenceNote,
+    };
+    // Tier 3 (FreeCounterpoint etc.): full createBachNote cascade.
+
+    all_notes = coordinateVoices(std::move(all_notes), coord_config);
+  }
+
+  // =========================================================================
   // Post-validation sweep: final safety net for remaining notes
   // =========================================================================
   {
@@ -1725,6 +1762,9 @@ FugueResult generateFugue(const FugueConfig& config) {
     std::sort(all_notes.begin(), all_notes.end(),
               [](const NoteEvent& a, const NoteEvent& b) {
                 if (a.start_tick != b.start_tick) return a.start_tick < b.start_tick;
+                int pa = sourcePriority(a.source);
+                int pb = sourcePriority(b.source);
+                if (pa != pb) return pa < pb;  // Tier 1 → Tier 2 → Tier 3
                 return a.voice < b.voice;
               });
 
@@ -1776,7 +1816,11 @@ FugueResult generateFugue(const FugueConfig& config) {
       // coda) pass through without alteration -- only register in state
       // for context. Coda notes are design values (Principle 4) and should
       // never be altered.
-      bool is_structural = isStructuralSource(source);
+      // Treat Tier 1 (immutable) and Tier 2 (lightweight) as structural in
+      // post-validation: coordinateVoices already validated these notes, so
+      // re-processing them via createBachNote would undo vertical consonance
+      // guarantees.  Only Tier 3 (FreeCounterpoint etc.) needs full cascade.
+      bool is_structural = sourcePriority(source) <= 1;
 
       if (is_structural) {
         NoteEvent fixed_note = note;
@@ -2092,13 +2136,21 @@ FugueResult generateFugue(const FugueConfig& config) {
       uint8_t snapped = scale_util::nearestScaleTone(note.pitch, note_key,
                                                      effective_scale);
 
-      // Structural notes: snap with melodic leap validation.
+      // Structural notes: snap with melodic leap + consonance validation.
       uint8_t old_pitch = note.pitch;
       if (isStructuralSource(note.source)) {
         // Check melodic leap before accepting snap.
         bool snap_ok = true;
         if (prev_pitch_for_voice > 0 &&
             absoluteInterval(snapped, prev_pitch_for_voice) > 12) {
+          snap_ok = false;
+        }
+        // Reject snap if it introduces strong-beat dissonance.
+        uint8_t beat_dia = beatInBar(note.start_tick);
+        if (snap_ok && (beat_dia == 0 || beat_dia == 2) &&
+            !checkVerticalConsonance(snapped, note.voice, note.start_tick,
+                                     all_notes, detailed_timeline,
+                                     num_voices)) {
           snap_ok = false;
         }
         if (snap_ok) {
@@ -2113,6 +2165,13 @@ FugueResult generateFugue(const FugueConfig& config) {
             if (!scale_util::isScaleTone(ucand, note_key, effective_scale))
               continue;
             if (absoluteInterval(ucand, prev_pitch_for_voice) <= 12) {
+              // Also reject if it introduces strong-beat dissonance.
+              if ((beat_dia == 0 || beat_dia == 2) &&
+                  !checkVerticalConsonance(ucand, note.voice, note.start_tick,
+                                           all_notes, detailed_timeline,
+                                           num_voices)) {
+                continue;
+              }
               note.pitch = ucand;
               note.modified_by |=
                   static_cast<uint8_t>(NoteModifiedBy::ChordToneSnap);
@@ -2130,7 +2189,7 @@ FugueResult generateFugue(const FugueConfig& config) {
       }
 
       // Flexible notes: check if snap creates parallels, cross-relations,
-      // or excessive melodic leaps.
+      // excessive melodic leaps, or strong-beat dissonance.
       auto par = checkParallelsAndP4Bass(post_state, post_rules,
                                          note.voice, snapped,
                                          note.start_tick, num_voices);
@@ -2138,7 +2197,14 @@ FugueResult generateFugue(const FugueConfig& config) {
                                         note.voice, snapped, note.start_tick);
       bool leap_ok = (prev_pitch_for_voice == 0 ||
                       absoluteInterval(snapped, prev_pitch_for_voice) <= 12);
-      if (!par.has_parallel_perfect && !has_cross && leap_ok) {
+      uint8_t beat_flex = beatInBar(note.start_tick);
+      bool consonant = true;
+      if ((beat_flex == 0 || beat_flex == 2) &&
+          !checkVerticalConsonance(snapped, note.voice, note.start_tick,
+                                   all_notes, detailed_timeline, num_voices)) {
+        consonant = false;
+      }
+      if (!par.has_parallel_perfect && !has_cross && leap_ok && consonant) {
         note.pitch = snapped;
         note.modified_by |= static_cast<uint8_t>(NoteModifiedBy::ChordToneSnap);
       } else {
@@ -2157,7 +2223,15 @@ FugueResult generateFugue(const FugueConfig& config) {
           bool cand_leap_ok =
               (prev_pitch_for_voice == 0 ||
                absoluteInterval(ucand, prev_pitch_for_voice) <= 12);
-          if (!check.has_parallel_perfect && !cand_cross && cand_leap_ok) {
+          bool cand_consonant = true;
+          if ((beat_flex == 0 || beat_flex == 2) &&
+              !checkVerticalConsonance(ucand, note.voice, note.start_tick,
+                                       all_notes, detailed_timeline,
+                                       num_voices)) {
+            cand_consonant = false;
+          }
+          if (!check.has_parallel_perfect && !cand_cross && cand_leap_ok &&
+              cand_consonant) {
             note.pitch = ucand;
             note.modified_by |= static_cast<uint8_t>(NoteModifiedBy::ChordToneSnap);
             fixed = true;
@@ -2165,7 +2239,11 @@ FugueResult generateFugue(const FugueConfig& config) {
           }
         }
         if (!fixed) {
-          note.pitch = snapped;  // Accept snap (structural parallel, can't fix).
+          // Keep original pitch if snap introduces strong-beat dissonance;
+          // only accept snap as last resort for non-diatonic retention.
+          if (consonant || (beat_flex != 0 && beat_flex != 2)) {
+            note.pitch = snapped;
+          }
           note.modified_by |= static_cast<uint8_t>(NoteModifiedBy::ChordToneSnap);
         }
       }
@@ -2735,6 +2813,109 @@ FugueResult generateFugue(const FugueConfig& config) {
       };
       final_repair_params.max_iterations = 3;
       repairParallelPerfect(all_notes, final_repair_params);
+    }
+
+    // -----------------------------------------------------------------------
+    // Final strong-beat consonance sweep: fix any remaining dissonances
+    // introduced by leap resolution, parallel repair, diatonic snapping, or
+    // range enforcement on notes that sustain across strong beats.
+    // Runs at the very end of the pipeline so no subsequent step can undo it.
+    // -----------------------------------------------------------------------
+    {
+      struct SVN { size_t idx; Tick start; Tick end_t; };
+      std::vector<std::vector<SVN>> svns(num_voices);
+      for (size_t i = 0; i < all_notes.size(); ++i) {
+        auto& n = all_notes[i];
+        if (n.voice < num_voices) {
+          svns[n.voice].push_back({i, n.start_tick, n.start_tick + n.duration});
+        }
+      }
+      for (auto& v : svns) {
+        std::sort(v.begin(), v.end(),
+                  [](const SVN& a, const SVN& b) { return a.start < b.start; });
+      }
+
+      auto soundingIdx = [&](uint8_t vid, Tick tick) -> int {
+        auto& vnv = svns[vid];
+        auto iter = std::upper_bound(vnv.begin(), vnv.end(), tick,
+            [](Tick tck, const SVN& vn) { return tck < vn.start; });
+        if (iter == vnv.begin()) return -1;
+        --iter;
+        if (tick >= iter->start && tick < iter->end_t)
+          return static_cast<int>(iter->idx);
+        return -1;
+      };
+
+      Tick sb_max = 0;
+      for (const auto& n : all_notes) {
+        Tick end = n.start_tick + n.duration;
+        if (end > sb_max) sb_max = end;
+      }
+
+      for (Tick tick = 0; tick < sb_max; tick += kTicksPerBeat) {
+        uint8_t beat = beatInBar(tick);
+        if (beat != 0 && beat != 2) continue;
+
+        // Re-scan all pairs at this tick until no dissonance remains.
+        bool tick_changed = true;
+        while (tick_changed) {
+          tick_changed = false;
+          for (uint8_t va = 0; va < num_voices && !tick_changed; ++va) {
+            for (uint8_t vb = va + 1; vb < num_voices && !tick_changed; ++vb) {
+              int ia = soundingIdx(va, tick);
+              int ib = soundingIdx(vb, tick);
+              if (ia < 0 || ib < 0) continue;
+
+              int dist = std::abs(static_cast<int>(all_notes[ia].pitch) -
+                                  static_cast<int>(all_notes[ib].pitch));
+              int simple = interval_util::compoundToSimple(dist);
+              if (interval_util::isConsonance(simple)) continue;
+              if (num_voices >= 3 && simple == interval::kPerfect4th) {
+                uint8_t lowest = 127;
+                for (uint8_t v = 0; v < num_voices; ++v) {
+                  int idx = soundingIdx(v, tick);
+                  if (idx >= 0 && all_notes[idx].pitch < lowest)
+                    lowest = all_notes[idx].pitch;
+                }
+                uint8_t lower = std::min(all_notes[ia].pitch,
+                                         all_notes[ib].pitch);
+                if (lower > lowest) continue;
+              }
+
+              // Try both notes, starting with more flexible.
+              int pri_a = sourcePriority(all_notes[ia].source);
+              int pri_b = sourcePriority(all_notes[ib].source);
+              int candidates[2] = {(pri_a >= pri_b) ? ia : ib,
+                                   (pri_a >= pri_b) ? ib : ia};
+
+              for (int ci = 0; ci < 2 && !tick_changed; ++ci) {
+                int fix_idx = candidates[ci];
+                uint8_t fix_voice = all_notes[fix_idx].voice;
+                auto [flo, fhi] = getFugueVoiceRange(fix_voice, num_voices);
+                Key fix_key = tonal_plan.keyAtTick(
+                    all_notes[fix_idx].start_tick);
+
+                for (int delta : {1, -1, 2, -2, 3, -3}) {
+                  int cand = static_cast<int>(all_notes[fix_idx].pitch) + delta;
+                  if (cand < flo || cand > fhi) continue;
+                  uint8_t ucand = static_cast<uint8_t>(cand);
+                  if (!scale_util::isScaleTone(ucand, fix_key, effective_scale))
+                    continue;
+                  if (checkVerticalConsonance(ucand, fix_voice, tick,
+                                              all_notes, detailed_timeline,
+                                              num_voices)) {
+                    all_notes[fix_idx].pitch = ucand;
+                    all_notes[fix_idx].modified_by |=
+                        static_cast<uint8_t>(NoteModifiedBy::ChordToneSnap);
+                    tick_changed = true;
+                    break;
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
     }
 
     // Compute quality metrics.
