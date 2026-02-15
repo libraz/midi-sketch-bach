@@ -4,6 +4,7 @@
 
 #include <gtest/gtest.h>
 
+#include "core/pitch_utils.h"
 #include "organ/pedal_constraints.h"
 
 namespace bach {
@@ -251,8 +252,8 @@ TEST(OrganModelTest, UsesVirtuosoHandPhysics) {
 // ---------------------------------------------------------------------------
 
 TEST(PedalConstraintsTest, ConstantsMatchOrganConfig) {
-  EXPECT_EQ(kPedalLow, 24);   // C1
-  EXPECT_EQ(kPedalHigh, 50);  // D3
+  EXPECT_EQ(organ_range::kPedalLow, 24);   // C1
+  EXPECT_EQ(organ_range::kPedalHigh, 50);  // D3
   EXPECT_EQ(kPedalIdealLow, 24);
   EXPECT_EQ(kPedalIdealHigh, 50);
   EXPECT_FLOAT_EQ(kPedalPenaltyPerSemitone, 5.0f);

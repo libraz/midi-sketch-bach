@@ -262,8 +262,7 @@ std::vector<RuleViolation> FuxRuleEvaluator::validate(
           const NoteEvent* ca = state.getNoteAt(va, tick);
           const NoteEvent* cb = state.getNoteAt(vb, tick);
           int ivl_mod = (ca && cb)
-              ? (std::abs(static_cast<int>(ca->pitch) -
-                          static_cast<int>(cb->pitch)) % 12)
+              ? interval_util::compoundToSimple(absoluteInterval(ca->pitch, cb->pitch))
               : 0;
           viol.rule = (ivl_mod == 7) ? "parallel_fifths" : "parallel_octaves";
           viol.severity = 1;
@@ -279,8 +278,7 @@ std::vector<RuleViolation> FuxRuleEvaluator::validate(
           const NoteEvent* ca = state.getNoteAt(va, tick);
           const NoteEvent* cb = state.getNoteAt(vb, tick);
           int ivl_mod = (ca && cb)
-              ? (std::abs(static_cast<int>(ca->pitch) -
-                          static_cast<int>(cb->pitch)) % 12)
+              ? interval_util::compoundToSimple(absoluteInterval(ca->pitch, cb->pitch))
               : 0;
           viol.rule = (ivl_mod == 7) ? "hidden_fifths" : "hidden_octaves";
           viol.severity = 0;  // Warning, not error.

@@ -7,6 +7,7 @@
 #include <numeric>
 
 #include "core/interval.h"
+#include "core/pitch_utils.h"
 
 namespace bach {
 
@@ -40,8 +41,8 @@ uint32_t countImpliedParallels(const std::vector<NoteEvent>& upper,
     }
     if (ui >= upper.size() || li >= lower.size()) break;
 
-    int interval = std::abs(static_cast<int>(upper[ui].pitch) -
-                            static_cast<int>(lower[li].pitch)) % 12;
+    int interval = interval_util::compoundToSimple(
+        absoluteInterval(upper[ui].pitch, lower[li].pitch));
 
     bool is_perfect = interval_util::isPerfectConsonance(interval);
 

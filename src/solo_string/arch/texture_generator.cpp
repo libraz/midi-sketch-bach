@@ -796,7 +796,7 @@ std::vector<NoteEvent> generateArpeggiated(const TextureContext& ctx,
         int raw_pitch = static_cast<int>(harm.chord.root_pitch) + offset;
 
         uint8_t pitch = fitPitchToRegister(
-            static_cast<uint8_t>(std::max(0, std::min(127, raw_pitch))),
+            clampPitch(raw_pitch, 0, 127),
             ctx.register_low, ctx.register_high);
 
         notes.push_back(makeTextureNote(

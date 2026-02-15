@@ -437,7 +437,7 @@ bool shouldPreferOpenString(uint8_t pitch,
   bool has_open_match = false;
 
   for (uint8_t open_pitch : open_string_pitches) {
-    if (static_cast<int>(open_pitch) % 12 == pitch_class) {
+    if (getPitchClass(open_pitch) == pitch_class) {
       has_open_match = true;
       break;
     }
@@ -460,7 +460,7 @@ uint8_t findOpenStringPitch(int pitch_class,
                             const std::vector<uint8_t>& open_string_pitches,
                             const RegisterRange& range) {
   for (uint8_t open_pitch : open_string_pitches) {
-    if (static_cast<int>(open_pitch) % 12 == pitch_class &&
+    if (getPitchClass(open_pitch) == pitch_class &&
         open_pitch >= range.low && open_pitch <= range.high) {
       return open_pitch;
     }

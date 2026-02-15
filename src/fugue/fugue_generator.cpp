@@ -305,7 +305,7 @@ static uint8_t nearestPitchWithPC(uint8_t pitch, int target_pc, int max_dist = 7
       }
     }
   }
-  return static_cast<uint8_t>(std::clamp(best, 0, 127));
+  return clampPitch(best, 0, 127);
 }
 
 /// @brief Create 3-stage coda notes for a richer fugue ending.

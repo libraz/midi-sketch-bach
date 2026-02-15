@@ -93,13 +93,13 @@ float evaluateSequencePotential(const std::vector<NoteEvent>& kopf,
       int orig_from = static_cast<int>(kopf[idx].pitch);
       int orig_to = static_cast<int>(kopf[idx + 1].pitch);
       int orig_from_abs = scale_util::pitchToAbsoluteDegree(
-          static_cast<uint8_t>(std::clamp(orig_from, 0, 127)), key, scale);
+          clampPitch(orig_from, 0, 127), key, scale);
       int orig_to_abs = scale_util::pitchToAbsoluteDegree(
-          static_cast<uint8_t>(std::clamp(orig_to, 0, 127)), key, scale);
+          clampPitch(orig_to, 0, 127), key, scale);
       int degree_interval = orig_to_abs - orig_from_abs;
 
       int next_abs = scale_util::pitchToAbsoluteDegree(
-          static_cast<uint8_t>(std::clamp(prev, 0, 127)), key, scale) +
+          clampPitch(prev, 0, 127), key, scale) +
           degree_interval;
       int next = static_cast<int>(
           scale_util::absoluteDegreeToPitch(next_abs, key, scale));
@@ -260,7 +260,8 @@ bool ArchetypeScorer::checkHardGate(const Subject& subject,
     auto inverted = invertMelodyDiatonic(subject.notes, pivot, subject.key, scale);
     if (!inverted.empty()) {
       for (const auto& inv_note : inverted) {
-        if (inv_note.pitch < 36 || inv_note.pitch > 96) return false;
+        if (inv_note.pitch < organ_range::kManual1Low ||
+            inv_note.pitch > organ_range::kManual1High) return false;
       }
     }
   }

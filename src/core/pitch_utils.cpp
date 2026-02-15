@@ -167,7 +167,7 @@ std::vector<uint8_t> getChordTones(const Chord& chord, int octave) {
   std::vector<uint8_t> tones;
   tones.reserve(3);
 
-  int root = (octave + 1) * 12 + (static_cast<int>(chord.root_pitch) % 12);
+  int root = (octave + 1) * 12 + getPitchClass(chord.root_pitch);
 
   // Determine third interval based on quality.
   int third_offset = 4;  // Major third default.
@@ -234,7 +234,7 @@ std::vector<uint8_t> collectChordTonesInRange(const Chord& chord,
 bool isAllowedChromatic(uint8_t pitch, Key key, ScaleType scale,
                         const HarmonicEvent* harm_ev) {
   int key_offset = static_cast<int>(key);
-  int pc = static_cast<int>(pitch) % 12;
+  int pc = getPitchClass(pitch);
 
   // 1. Raised 7th in harmonic minor is always allowed.
   if (scale == ScaleType::HarmonicMinor || scale == ScaleType::NaturalMinor) {

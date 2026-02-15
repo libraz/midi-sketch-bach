@@ -659,8 +659,8 @@ std::vector<uint8_t> CanonGenerator::buildCandidates(
   }
 
   auto tones = getScaleTones(key.tonic, is_minor,
-                              static_cast<uint8_t>(std::max(0, low)),
-                              static_cast<uint8_t>(std::min(127, high)));
+                              clampPitch(low, 0, 127),
+                              clampPitch(high, 0, 127));
 
   return tones;
 }

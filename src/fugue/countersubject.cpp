@@ -344,10 +344,8 @@ uint8_t leapMotion(uint8_t current_pitch, int direction,
 /// @param pitch_b Second MIDI pitch.
 /// @return True if the interval is perfect or imperfect consonance.
 bool isConsonant(uint8_t pitch_a, uint8_t pitch_b) {
-  int abs_interval = absoluteInterval(pitch_a, pitch_b);
-  IntervalQuality quality = classifyInterval(abs_interval);
-  return quality == IntervalQuality::PerfectConsonance ||
-         quality == IntervalQuality::ImperfectConsonance;
+  return interval_util::isConsonance(
+      interval_util::compoundToSimple(absoluteInterval(pitch_a, pitch_b)));
 }
 
 /// @brief Check if moving from prev_interval to curr_interval creates

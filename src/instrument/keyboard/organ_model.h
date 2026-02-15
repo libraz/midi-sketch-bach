@@ -5,6 +5,7 @@
 
 #include <cstdint>
 
+#include "core/pitch_utils.h"
 #include "instrument/keyboard/piano_model.h"
 
 namespace bach {
@@ -33,20 +34,20 @@ const char* organManualToString(OrganManual manual);
 ///   Pedal:        C1-D3 (MIDI 24-50)
 struct OrganConfig {
   // Manual I (Great) range in MIDI note numbers
-  uint8_t great_low = 36;    // C2
-  uint8_t great_high = 96;   // C6
+  uint8_t great_low = organ_range::kManual1Low;      // C2
+  uint8_t great_high = organ_range::kManual1High;     // C6
 
   // Manual II (Swell) range
-  uint8_t swell_low = 36;    // C2
-  uint8_t swell_high = 96;   // C6
+  uint8_t swell_low = organ_range::kManual2Low;       // C2
+  uint8_t swell_high = organ_range::kManual2High;     // C6
 
   // Manual III (Positiv) range -- smaller than Great/Swell
-  uint8_t positiv_low = 48;  // C3
-  uint8_t positiv_high = 96; // C6
+  uint8_t positiv_low = organ_range::kManual3Low;     // C3
+  uint8_t positiv_high = organ_range::kManual3High;   // C6
 
   // Pedal range
-  uint8_t pedal_low = 24;    // C1
-  uint8_t pedal_high = 50;   // D3
+  uint8_t pedal_low = organ_range::kPedalLow;         // C1
+  uint8_t pedal_high = organ_range::kPedalHigh;       // D3
 
   /// @brief Create a standard Bach-era organ configuration.
   /// @return Default OrganConfig with standard ranges.

@@ -129,6 +129,21 @@ std::vector<NoteEvent> postValidateNotes(
 ///         leap_needs_resolution flag, and leading tone detection.
 MelodicContext buildMelodicContextFromState(const CounterpointState& state, VoiceId voice_id);
 
+/// @brief Check if a pitch is vertically consonant with all sounding notes at the given tick.
+///
+/// Allows P4 between upper voices in 3+ voice textures (standard counterpoint rule:
+/// a perfect fourth is consonant when it is not against the bass).
+///
+/// @param pitch Candidate MIDI pitch to check.
+/// @param voice Voice index of the candidate pitch (excluded from comparison).
+/// @param tick Tick at which to check simultaneity.
+/// @param placed Already-placed notes to check against.
+/// @param num_voices Total number of voices in the texture.
+/// @return true if the pitch forms only consonant intervals with all sounding notes.
+bool isVerticallyConsonant(uint8_t pitch, uint8_t voice, Tick tick,
+                           const std::vector<NoteEvent>& placed,
+                           uint8_t num_voices);
+
 }  // namespace bach
 
 #endif  // BACH_CORE_NOTE_CREATOR_H

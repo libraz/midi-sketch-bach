@@ -163,8 +163,8 @@ std::vector<std::vector<NoteEvent>> SoggettoGenerator::generateCandidates(
     register_anchor += 12;
   }
 
-  int pitch_floor = std::max(36, register_anchor - 7);
-  int pitch_ceil = std::min(96, register_anchor + 14);
+  int pitch_floor = std::max(static_cast<int>(organ_range::kManual1Low), register_anchor - 7);
+  int pitch_ceil = std::min(static_cast<int>(organ_range::kManual1High), register_anchor + 14);
 
   // Determine start degree and pitch.
   int start_degree = 0;  // Start on tonic.
@@ -257,8 +257,7 @@ std::vector<std::vector<NoteEvent>> SoggettoGenerator::generateCandidates(
       NoteEvent note;
       note.start_tick = current_tick;
       note.duration = dur;
-      note.pitch = static_cast<uint8_t>(
-          std::max(0, std::min(127, pitch)));
+      note.pitch = clampPitch(pitch, 0, 127);
       note.velocity = 80;
       note.voice = 0;
       note.source = BachNoteSource::GoldbergSoggetto;
@@ -287,8 +286,7 @@ std::vector<std::vector<NoteEvent>> SoggettoGenerator::generateCandidates(
       NoteEvent note;
       note.start_tick = current_tick;
       note.duration = climax_dur;
-      note.pitch = static_cast<uint8_t>(
-          std::max(0, std::min(127, final_climax)));
+      note.pitch = clampPitch(final_climax, 0, 127);
       note.velocity = 80;
       note.voice = 0;
       note.source = BachNoteSource::GoldbergSoggetto;
@@ -311,7 +309,7 @@ std::vector<std::vector<NoteEvent>> SoggettoGenerator::generateCandidates(
       }
 
       int climax_abs_degree = scale_util::pitchToAbsoluteDegree(
-          static_cast<uint8_t>(std::max(0, std::min(127, current_pitch))),
+          clampPitch(current_pitch, 0, 127),
           key.tonic, scale);
       int target_abs = climax_abs_degree + motif_b.degree_offsets[mot_idx];
       int pitch = snapToScale(
@@ -330,8 +328,7 @@ std::vector<std::vector<NoteEvent>> SoggettoGenerator::generateCandidates(
       NoteEvent note;
       note.start_tick = current_tick;
       note.duration = dur;
-      note.pitch = static_cast<uint8_t>(
-          std::max(0, std::min(127, pitch)));
+      note.pitch = clampPitch(pitch, 0, 127);
       note.velocity = 80;
       note.voice = 0;
       note.source = BachNoteSource::GoldbergSoggetto;
@@ -350,8 +347,7 @@ std::vector<std::vector<NoteEvent>> SoggettoGenerator::generateCandidates(
       int ending = normalizeEndingPitch(
           cadence_target_pc.value(), prev_pitch_for_end, max_leap,
           key.tonic, scale, pitch_floor, pitch_ceil);
-      notes.back().pitch = static_cast<uint8_t>(
-          std::max(0, std::min(127, ending)));
+      notes.back().pitch = clampPitch(ending, 0, 127);
     }
 
     // Quantize to 16th-note grid.
@@ -383,8 +379,7 @@ std::vector<std::vector<NoteEvent>> SoggettoGenerator::generateCandidates(
           int snapped = snapToScale(cand, key.tonic, scale,
                                      pitch_floor, pitch_ceil);
           if (std::abs(snapped - prev_p) <= max_leap) {
-            notes[nidx].pitch = static_cast<uint8_t>(
-                std::max(0, std::min(127, snapped)));
+            notes[nidx].pitch = clampPitch(snapped, 0, 127);
             break;
           }
         }

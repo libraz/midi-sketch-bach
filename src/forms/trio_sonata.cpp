@@ -419,7 +419,7 @@ void clampExcessiveLeaps(std::vector<NoteEvent>& notes, int threshold,
       }
 
       // Clamp to valid MIDI range.
-      new_pitch = std::max(0, std::min(127, new_pitch));
+      new_pitch = static_cast<int>(clampPitch(new_pitch, 0, 127));
 
       // Only apply if the new interval is actually smaller.
       if (std::abs(new_pitch - prev_p) < interval) {
@@ -1222,15 +1222,6 @@ void insertBreathingRests(std::vector<Track>& tracks,
 // Step 5d: Non-harmonic tone validation (post-processing)
 // ---------------------------------------------------------------------------
 
-/// @brief Check if a pitch is a chord tone of the given harmonic event.
-bool isChordToneAt(uint8_t pitch, const HarmonicEvent& ev) {
-  int pc = getPitchClass(pitch);
-  auto tones = collectChordTonesInRange(ev.chord, 0, 127);
-  for (uint8_t ct : tones) {
-    if (getPitchClass(ct) == pc) return true;
-  }
-  return false;
-}
 
 /// @brief Validate non-harmonic tones and snap invalid weak-beat dissonances.
 ///
@@ -1246,7 +1237,7 @@ void validateNonHarmonicTones(std::vector<Track>& tracks,
     auto& notes = tracks[trk].notes;
     for (size_t i = 0; i < notes.size(); ++i) {
       const HarmonicEvent& ev = timeline.getAt(notes[i].start_tick);
-      bool is_ct = isChordToneAt(notes[i].pitch, ev);
+      bool is_ct = isChordTone(notes[i].pitch, ev);
 
       if (is_ct) continue;  // Chord tones are always fine.
 
@@ -1275,9 +1266,9 @@ void validateNonHarmonicTones(std::vector<Track>& tracks,
       uint8_t prev_pitch = (i > 0) ? notes[i - 1].pitch : notes[i].pitch;
       uint8_t next_pitch = (i + 1 < notes.size()) ? notes[i + 1].pitch : notes[i].pitch;
 
-      bool prev_is_ct = (i > 0) ? isChordToneAt(prev_pitch, ev) : true;
+      bool prev_is_ct = (i > 0) ? isChordTone(prev_pitch, ev) : true;
       bool next_is_ct = (i + 1 < notes.size())
-                             ? isChordToneAt(next_pitch, timeline.getAt(notes[i + 1].start_tick))
+                             ? isChordTone(next_pitch, timeline.getAt(notes[i + 1].start_tick))
                              : true;
 
       auto nht_type = classifyNonHarmonicTone(prev_pitch, notes[i].pitch, next_pitch,
@@ -1726,32 +1717,6 @@ TrioSonataCPReport buildTrioCPReport(const std::vector<Track>& tracks) {
   report.voice_crossing = cp.voice_crossing_count;
   report.strong_beat_P4 = countStrongBeatP4OverBass(all_notes);
   return report;
-}
-
-/// Check vertical consonance of candidate pitch against already-placed notes.
-static bool isVerticallyConsonant(uint8_t pitch, uint8_t voice, Tick tick,
-                                  const std::vector<NoteEvent>& placed,
-                                  uint8_t num_voices) {
-  uint8_t lowest = pitch;
-  for (const auto& n : placed) {
-    if (n.voice == voice) continue;
-    if (n.start_tick + n.duration <= tick || n.start_tick > tick) continue;
-    if (n.pitch < lowest) lowest = n.pitch;
-  }
-  for (const auto& n : placed) {
-    if (n.voice == voice) continue;
-    if (n.start_tick + n.duration <= tick || n.start_tick > tick) continue;
-    int reduced = interval_util::compoundToSimple(
-        absoluteInterval(pitch, n.pitch));
-    if (!interval_util::isConsonance(reduced)) {
-      if (num_voices >= 3 && reduced == interval::kPerfect4th) {
-        uint8_t lower = std::min(pitch, n.pitch);
-        if (lower > lowest) continue;  // P4 between upper voices: OK.
-      }
-      return false;
-    }
-  }
-  return true;
 }
 
 // ---------------------------------------------------------------------------

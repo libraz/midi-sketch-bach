@@ -597,7 +597,7 @@ GoldbergResult GoldbergGenerator::generate(const GoldbergConfig& config) const {
         }
         // Skip if this note is a leading tone (scale degree 7 in minor).
         if (config.key.is_minor) {
-          int pc = (static_cast<int>(note.pitch) - static_cast<int>(config.key.tonic) + 12) % 12;
+          int pc = getPitchClassSigned(static_cast<int>(note.pitch) - static_cast<int>(config.key.tonic));
           if (pc == 11) continue;  // raised 7th = leading tone, preserve.
         }
         uint8_t lo = (note.voice < kGoldbergVoices)

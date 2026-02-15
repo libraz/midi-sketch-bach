@@ -300,7 +300,8 @@ void VirtuosoGenerator::applyClimaxIntensification(
     if (note.source != BachNoteSource::GoldbergBass && tension > 0.6f) {
       int expand = static_cast<int>(tension * static_cast<float>(kClimaxRegisterExpand));
       int expanded_pitch = static_cast<int>(note.pitch) + expand;
-      note.pitch = clampPitch(expanded_pitch, 36, 96);
+      note.pitch = clampPitch(expanded_pitch, organ_range::kManual1Low,
+                             organ_range::kManual1High);
     }
   }
 }

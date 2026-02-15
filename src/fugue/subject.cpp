@@ -252,7 +252,7 @@ std::vector<SkeletonSlot> buildRhythmSkeleton(
   // --- Cadence slots ---
   if (current_tick < a.total_ticks) {
     int tonic_abs_degree = scale_util::pitchToAbsoluteDegree(
-        static_cast<uint8_t>(std::max(0, std::min(127, a.tonic_pitch))),
+        clampPitch(a.tonic_pitch, 0, 127),
         a.key, a.scale);
 
     Tick cadence_total = 0;
@@ -316,7 +316,7 @@ float evaluateNoteFunctionFit(int candidate_pitch, int prev_pitch,
       // Structural tones should be chord tones (scale degrees 1, 3, 5).
       int pc = getPitchClass(static_cast<uint8_t>(candidate_pitch));
       int root = static_cast<int>(key);
-      int rel = ((pc - root) % 12 + 12) % 12;
+      int rel = getPitchClassSigned(pc - root);
       // Major/minor chord tones: root(0), third(3 or 4), fifth(7).
       if (rel == 0 || rel == 3 || rel == 4 || rel == 7) return per_note;
       return 0.0f;
@@ -448,7 +448,7 @@ std::vector<NoteEvent> generateLegacyPitchPath(
         pitch = clamped_climax;
         actual_climax_pitch = clamped_climax;
         actual_climax_abs_degree = scale_util::pitchToAbsoluteDegree(
-            static_cast<uint8_t>(std::max(0, std::min(127, clamped_climax))),
+            clampPitch(clamped_climax, 0, 127),
             a.key, a.scale);
 
         // Reset state for descent phase.
@@ -658,8 +658,7 @@ std::vector<NoteEvent> generateLegacyPitchPath(
         int snapped =
             snapToScale(candidate, a.key, a.scale, a.pitch_floor, a.pitch_ceil);
         if (std::abs(snapped - prev_p) <= post_max_leap) {
-          result[i].pitch = static_cast<uint8_t>(
-              std::max(0, std::min(127, snapped)));
+          result[i].pitch = clampPitch(snapped, 0, 127);
           break;
         }
       }
@@ -706,8 +705,7 @@ std::vector<NoteEvent> generateLegacyPitchPath(
         }
       }
       if (best_cand != cur_p) {
-        result[idx].pitch = static_cast<uint8_t>(
-            std::max(0, std::min(127, best_cand)));
+        result[idx].pitch = clampPitch(best_cand, 0, 127);
         any_fixed = true;
       }
     }
@@ -919,7 +917,7 @@ std::vector<NoteEvent> generateKerngestaltPath(
           pitch = clamped_climax;
           actual_climax_pitch = clamped_climax;
           actual_climax_abs_degree = scale_util::pitchToAbsoluteDegree(
-              static_cast<uint8_t>(std::max(0, std::min(127, clamped_climax))),
+              clampPitch(clamped_climax, 0, 127),
               anchors.key, anchors.scale);
 
           needs_compensation = false;
@@ -1114,7 +1112,7 @@ std::vector<NoteEvent> generateKerngestaltPath(
     NoteEvent note;
     note.start_tick = slot.start_tick;
     note.duration = slot.duration;
-    note.pitch = static_cast<uint8_t>(std::max(0, std::min(127, pitch)));
+    note.pitch = clampPitch(pitch, 0, 127);
     note.velocity = 80;
     note.voice = 0;
     note.source = source;
@@ -1192,8 +1190,7 @@ std::vector<NoteEvent> generateKerngestaltPath(
             snapToScale(candidate, anchors.key, anchors.scale,
                         anchors.pitch_floor, anchors.pitch_ceil);
         if (std::abs(snapped - prev_p) <= post_max_leap) {
-          result[idx].pitch = static_cast<uint8_t>(
-              std::max(0, std::min(127, snapped)));
+          result[idx].pitch = clampPitch(snapped, 0, 127);
           break;
         }
       }
@@ -1246,8 +1243,7 @@ std::vector<NoteEvent> generateKerngestaltPath(
         }
       }
       if (best_cand != cur_p) {
-        result[idx].pitch = static_cast<uint8_t>(
-            std::max(0, std::min(127, best_cand)));
+        result[idx].pitch = clampPitch(best_cand, 0, 127);
         any_fixed = true;
       }
     }
@@ -1417,8 +1413,8 @@ SubjectGenerator::GenerateResult SubjectGenerator::generateNotes(
       scale_util::absoluteDegreeToPitch(floor_abs, key, scale));
   int pitch_ceil = static_cast<int>(
       scale_util::absoluteDegreeToPitch(ceil_abs, key, scale));
-  pitch_floor = std::max(36, pitch_floor);
-  pitch_ceil = std::min(96, pitch_ceil);
+  pitch_floor = std::max(static_cast<int>(organ_range::kManual1Low), pitch_floor);
+  pitch_ceil = std::min(static_cast<int>(organ_range::kManual1High), pitch_ceil);
 
   int climax_abs = floor_abs +
       static_cast<int>(static_cast<float>(ceil_abs - floor_abs) *
@@ -1453,7 +1449,7 @@ SubjectGenerator::GenerateResult SubjectGenerator::generateNotes(
   tonic_pitch = std::max(pitch_floor, std::min(pitch_ceil, tonic_pitch));
 
   int climax_abs_degree = scale_util::pitchToAbsoluteDegree(
-      static_cast<uint8_t>(std::max(0, std::min(127, climax_pitch))),
+      clampPitch(climax_pitch, 0, 127),
       key, scale);
 
   CadentialFormula cadence = getCadentialFormula(character);

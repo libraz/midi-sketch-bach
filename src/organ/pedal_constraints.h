@@ -5,11 +5,9 @@
 
 #include <cstdint>
 
-namespace bach {
+#include "core/pitch_utils.h"
 
-/// Pedal keyboard absolute range (lowest and highest playable notes).
-constexpr uint8_t kPedalLow = 24;   // C1
-constexpr uint8_t kPedalHigh = 50;  // D3
+namespace bach {
 
 /// Ideal pedal range (no penalty zone). Pitches within this range
 /// receive zero penalty; pitches outside receive a linearly increasing cost.

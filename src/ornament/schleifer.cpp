@@ -21,7 +21,7 @@ uint8_t getDiatonicNeighbor(uint8_t pitch, bool upper, Key key, bool is_minor) {
   const int* scale = is_minor ? kScaleHarmonicMinor : kScaleMajor;
 
   int pc = getPitchClass(pitch);
-  int relative_pc = ((pc - tonic_pc) + 12) % 12;
+  int relative_pc = getPitchClassSigned(pc - tonic_pc);
 
   // Find the current scale degree.
   int current_degree = -1;

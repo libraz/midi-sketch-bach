@@ -16,6 +16,53 @@
 
 namespace bach {
 
+namespace {
+
+/// Returns false if the candidate pitch creates a dissonance with any sounding
+/// note at the given tick (accented-beat-only check with P4 upper-voice rule).
+/// Returns true if the candidate passes the consonance check (or is on a weak
+/// beat, or is a chord tone).
+inline bool checkVerticalConsonance(uint8_t cand_pitch, uint8_t voice, Tick tick,
+                                    const std::vector<NoteEvent>& notes,
+                                    const HarmonicTimeline& timeline,
+                                    uint8_t num_voices) {
+  // Only check on accented beats (0, 2 in 4/4). Weak beats always safe.
+  uint8_t beat = beatInBar(tick);
+  if (beat != 0 && beat != 2) return true;
+
+  // Chord tone is always safe (consonant with harmonic context).
+  if (isChordTone(cand_pitch, timeline.getAt(tick))) return true;
+
+  // Find lowest sounding pitch at tick for bass-relative P4 judgment.
+  // Include the candidate itself (it may become the new bass).
+  uint8_t lowest = cand_pitch;
+  for (const auto& n : notes) {
+    if (n.voice == voice) continue;
+    if (n.start_tick + n.duration <= tick || n.start_tick > tick) continue;
+    if (n.pitch < lowest) lowest = n.pitch;
+  }
+
+  // Check consonance with each sounding voice.
+  for (const auto& n : notes) {
+    if (n.voice == voice) continue;
+    if (n.start_tick + n.duration <= tick || n.start_tick > tick) continue;
+    int reduced = interval_util::compoundToSimple(
+        absoluteInterval(cand_pitch, n.pitch));
+    if (!interval_util::isConsonance(reduced)) {
+      // P4 acceptable between upper voices only (bass-relative rule).
+      // In 3+ voice texture, allow P4 when neither pitch is the bass.
+      if (num_voices >= 3 && reduced == interval::kPerfect4th) {
+        uint8_t lower = std::min(cand_pitch, n.pitch);
+        if (lower > lowest) continue;  // Neither is bass: OK.
+      }
+      return false;
+    }
+  }
+  return true;
+}
+
+}  // namespace
+
 /// Creates a vertical_safe callback for resolveLeaps / repairRepeatedNotes.
 /// Rejects candidates that create dissonance on accented beats (0, 2 in 4/4)
 /// against sounding voices. Chord tones are always safe.
@@ -31,39 +78,7 @@ makeVerticalSafeCallback(const HarmonicTimeline& timeline,
                          uint8_t num_voices) {
   return [&timeline, &notes, num_voices](
              Tick tick, uint8_t voice, uint8_t cand_pitch) -> bool {
-    // Only check on accented beats (0, 2 in 4/4). Weak beats always safe.
-    uint8_t beat = beatInBar(tick);
-    if (beat != 0 && beat != 2) return true;
-
-    // Chord tone is always safe (consonant with harmonic context).
-    if (isChordTone(cand_pitch, timeline.getAt(tick))) return true;
-
-    // Find lowest sounding pitch at tick for bass-relative P4 judgment.
-    // Include the candidate itself (it may become the new bass).
-    uint8_t lowest = cand_pitch;
-    for (const auto& n : notes) {
-      if (n.voice == voice) continue;
-      if (n.start_tick + n.duration <= tick || n.start_tick > tick) continue;
-      if (n.pitch < lowest) lowest = n.pitch;
-    }
-
-    // Check consonance with each sounding voice.
-    for (const auto& n : notes) {
-      if (n.voice == voice) continue;
-      if (n.start_tick + n.duration <= tick || n.start_tick > tick) continue;
-      int reduced = interval_util::compoundToSimple(
-          absoluteInterval(cand_pitch, n.pitch));
-      if (!interval_util::isConsonance(reduced)) {
-        // P4 acceptable between upper voices only (bass-relative rule).
-        // In 3+ voice texture, allow P4 when neither pitch is the bass.
-        if (num_voices >= 3 && reduced == interval::kPerfect4th) {
-          uint8_t lower = std::min(cand_pitch, n.pitch);
-          if (lower > lowest) continue;  // Neither is bass: OK.
-        }
-        return false;
-      }
-    }
-    return true;
+    return checkVerticalConsonance(cand_pitch, voice, tick, notes, timeline, num_voices);
   };
 }
 
@@ -121,40 +136,14 @@ makeVerticalSafeWithParallelCheck(const HarmonicTimeline& timeline,
 
   return [&timeline, &notes, num_voices, pitchAt](Tick tick, uint8_t voice,
                                                    uint8_t cand_pitch) -> bool {
-    // --- Consonance checks (same as makeVerticalSafeCallback) ---
-
-    // Only check on accented beats (0, 2 in 4/4). Weak beats always safe.
+    // Weak beats and chord tones bypass all checks (including parallel).
     uint8_t beat = beatInBar(tick);
     if (beat != 0 && beat != 2) return true;
-
-    // Chord tone is always safe (consonant with harmonic context).
     if (isChordTone(cand_pitch, timeline.getAt(tick))) return true;
 
-    // Find lowest sounding pitch at tick for bass-relative P4 judgment.
-    // Include the candidate itself (it may become the new bass).
-    uint8_t lowest = cand_pitch;
-    for (const auto& note : notes) {
-      if (note.voice == voice) continue;
-      if (note.start_tick + note.duration <= tick || note.start_tick > tick) continue;
-      if (note.pitch < lowest) lowest = note.pitch;
-    }
-
-    // Check consonance with each sounding voice.
-    for (const auto& note : notes) {
-      if (note.voice == voice) continue;
-      if (note.start_tick + note.duration <= tick || note.start_tick > tick) continue;
-      int reduced = interval_util::compoundToSimple(
-          absoluteInterval(cand_pitch, note.pitch));
-      if (!interval_util::isConsonance(reduced)) {
-        // P4 acceptable between upper voices only (bass-relative rule).
-        // In 3+ voice texture, allow P4 when neither pitch is the bass.
-        if (num_voices >= 3 && reduced == interval::kPerfect4th) {
-          uint8_t lower = std::min(cand_pitch, note.pitch);
-          if (lower > lowest) continue;  // Neither is bass: OK.
-        }
-        return false;
-      }
-    }
+    // --- Consonance check ---
+    if (!checkVerticalConsonance(cand_pitch, voice, tick, notes, timeline, num_voices))
+      return false;
 
     // --- Parallel P5/P8 check: candidate voice vs each other voice ---
 

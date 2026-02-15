@@ -67,7 +67,7 @@ Tick totalEndTick(const std::vector<NoteEvent>& notes) {
 
 int dominantPitchClass(const std::vector<NoteEvent>& notes) {
   uint32_t counts[12] = {};
-  for (const auto& note : notes) counts[static_cast<int>(note.pitch) % 12]++;
+  for (const auto& note : notes) counts[getPitchClass(note.pitch)]++;
   int best = 0;
   for (int idx = 1; idx < 12; ++idx) {
     if (counts[idx] > counts[best]) best = idx;
@@ -285,7 +285,7 @@ float computeTonalConsistencyScore(const std::vector<NoteEvent>& notes,
   uint32_t counts[12] = {};
   uint32_t total_notes = 0;
   for (const auto& note : notes) {
-    counts[static_cast<int>(note.pitch) % 12]++;
+    counts[getPitchClass(note.pitch)]++;
     ++total_notes;
   }
   if (total_notes == 0) return 0.0f;
@@ -346,7 +346,7 @@ float invertibleCounterpointScore(const std::vector<NoteEvent>& subject_notes,
   for (const auto& note : subject_notes) {
     NoteEvent inv = note;
     int new_pitch = static_cast<int>(note.pitch) - 12;
-    inv.pitch = static_cast<uint8_t>(std::max(0, std::min(127, new_pitch)));
+    inv.pitch = clampPitch(new_pitch, 0, 127);
     inv.voice = 1;
     inverted_notes.push_back(inv);
   }

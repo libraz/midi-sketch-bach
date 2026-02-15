@@ -13,10 +13,10 @@ namespace bach {
 namespace {
 
 /// Minimum allowed MIDI pitch for suspension chains.
-constexpr uint8_t kMinPitch = 24;
+constexpr uint8_t kMinPitch = organ_range::kPedalLow;
 
 /// Maximum allowed MIDI pitch for suspension chains.
-constexpr uint8_t kMaxPitch = 96;
+constexpr uint8_t kMaxPitch = organ_range::kManual1High;
 
 /// Number of beats per suspension event (preparation + dissonance + resolution).
 constexpr uint8_t kBeatsPerSuspension = 3;

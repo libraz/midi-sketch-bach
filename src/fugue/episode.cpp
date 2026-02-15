@@ -630,7 +630,7 @@ static std::vector<NoteEvent> generateBassSequencePattern(
   static constexpr int kPatternLen = 4;
 
   int abs_tonic = scale_util::pitchToAbsoluteDegree(
-      static_cast<uint8_t>(std::max(0, std::min(127, bass_root))), key, scale);
+      clampPitch(bass_root, 0, 127), key, scale);
 
   Tick tick = start_tick;
   int pattern_idx = 0;
@@ -675,7 +675,7 @@ static std::vector<NoteEvent> generateBassSequencePattern(
           int dir = (pitch > prev) ? 1 : -1;
           pitch = prev + dir * kMaxBassLeap;
           pitch = static_cast<int>(scale_util::nearestScaleTone(
-              static_cast<uint8_t>(std::max(0, std::min(127, pitch))),
+              clampPitch(pitch, 0, 127),
               key, scale));
         }
       }
@@ -687,7 +687,7 @@ static std::vector<NoteEvent> generateBassSequencePattern(
       NoteEvent note;
       note.start_tick = tick;
       note.duration = dur;
-      note.pitch = static_cast<uint8_t>(std::max(0, std::min(127, pitch)));
+      note.pitch = clampPitch(pitch, 0, 127);
       note.velocity = 80;
       note.voice = voice;
       note.source = BachNoteSource::EpisodeMaterial;
@@ -1013,8 +1013,7 @@ Episode generateEpisode(const Subject& subject, Tick start_tick, Tick duration_t
         }
       }
       if (best_cand != cur_p) {
-        cur_note.pitch = static_cast<uint8_t>(
-            std::max(0, std::min(127, best_cand)));
+        cur_note.pitch = clampPitch(best_cand, 0, 127);
       }
     }
   }

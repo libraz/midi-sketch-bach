@@ -337,8 +337,8 @@ std::vector<NoteEvent> generateFortspinnung(const MotifPool& pool,
 
           // Stage 3: Neighbor substitution (+-1 semitone).
           int shift_dir = (mel > 0) ? -1 : 1;
-          uint8_t shifted = static_cast<uint8_t>(
-              std::clamp(static_cast<int>(fragment[idx].pitch) + shift_dir, 0, 127));
+          uint8_t shifted = clampPitch(
+              static_cast<int>(fragment[idx].pitch) + shift_dir, 0, 127);
           if (std::abs(static_cast<int>(shifted) -
                        static_cast<int>(fragment[idx - 1].pitch)) != 6) {
             fragment[idx].pitch = shifted;

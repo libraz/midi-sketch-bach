@@ -8,6 +8,7 @@
 #include <cmath>
 #include <random>
 
+#include "core/pitch_utils.h"
 #include "core/rng_util.h"
 #include "core/scale.h"
 #include "fugue/archetype_policy.h"
@@ -174,7 +175,7 @@ int avoidUnison(int pitch, int prev_pitch, Key key, ScaleType scale,
   // Try up: nearest scale tone above.
   for (int delta = 1; delta <= 2; ++delta) {
     int candidate = static_cast<int>(scale_util::nearestScaleTone(
-        static_cast<uint8_t>(std::max(0, std::min(127, pitch + delta))), key, scale));
+        clampPitch(pitch + delta, 0, 127), key, scale));
     if (candidate != pitch && candidate <= ceil_pitch && candidate >= floor_pitch) {
       return candidate;
     }
@@ -182,7 +183,7 @@ int avoidUnison(int pitch, int prev_pitch, Key key, ScaleType scale,
   // Try down: nearest scale tone below.
   for (int delta = 1; delta <= 2; ++delta) {
     int candidate = static_cast<int>(scale_util::nearestScaleTone(
-        static_cast<uint8_t>(std::max(0, std::min(127, pitch - delta))), key, scale));
+        clampPitch(pitch - delta, 0, 127), key, scale));
     if (candidate != pitch && candidate >= floor_pitch && candidate <= ceil_pitch) {
       return candidate;
     }
@@ -194,12 +195,12 @@ int snapToScale(int pitch, Key key, ScaleType scale, int floor_pitch,
                 int ceil_pitch) {
   pitch = std::max(floor_pitch, std::min(ceil_pitch, pitch));
   int snapped = static_cast<int>(scale_util::nearestScaleTone(
-      static_cast<uint8_t>(std::max(0, std::min(127, pitch))), key, scale));
+      clampPitch(pitch, 0, 127), key, scale));
   // Ensure snapped result respects ceiling (nearestScaleTone may snap up).
   if (snapped > ceil_pitch) {
     // Find the scale tone below the ceiling.
     int abs_deg = scale_util::pitchToAbsoluteDegree(
-        static_cast<uint8_t>(std::max(0, std::min(127, ceil_pitch))),
+        clampPitch(ceil_pitch, 0, 127),
         key, scale);
     int candidate = static_cast<int>(
         scale_util::absoluteDegreeToPitch(abs_deg, key, scale));

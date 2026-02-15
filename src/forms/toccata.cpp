@@ -660,7 +660,7 @@ std::vector<NoteEvent> generateSequenceClimb(const HarmonicTimeline& timeline,
 
   // Find starting pitch: chord root in lower third of range (room to climb).
   const HarmonicEvent& initial_event = timeline.getAt(start_tick);
-  uint8_t chord_root_pc = initial_event.chord.root_pitch % 12;
+  uint8_t chord_root_pc = static_cast<uint8_t>(getPitchClass(initial_event.chord.root_pitch));
 
   uint8_t target_start = low0 + (high0 - low0) / 3;
   size_t best_idx = 0;
@@ -668,7 +668,7 @@ std::vector<NoteEvent> generateSequenceClimb(const HarmonicTimeline& timeline,
   for (size_t idx = 0; idx < scale_tones.size(); ++idx) {
     int dist = std::abs(static_cast<int>(scale_tones[idx]) -
                         static_cast<int>(target_start));
-    bool is_root = (scale_tones[idx] % 12 == chord_root_pc);
+    bool is_root = (getPitchClass(scale_tones[idx]) == chord_root_pc);
     int effective_dist = is_root ? dist : dist + 4;
     if (effective_dist < best_dist) {
       best_dist = effective_dist;

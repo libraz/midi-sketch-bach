@@ -999,32 +999,6 @@ uint8_t clampPreludeVoiceCount(uint8_t num_voices) {
   return num_voices;
 }
 
-/// Check vertical consonance of candidate pitch against already-placed notes.
-static bool isVerticallyConsonant(uint8_t pitch, uint8_t voice, Tick tick,
-                                  const std::vector<NoteEvent>& placed,
-                                  uint8_t num_voices) {
-  uint8_t lowest = pitch;
-  for (const auto& note : placed) {
-    if (note.voice == voice) continue;
-    if (note.start_tick + note.duration <= tick || note.start_tick > tick) continue;
-    if (note.pitch < lowest) lowest = note.pitch;
-  }
-  for (const auto& note : placed) {
-    if (note.voice == voice) continue;
-    if (note.start_tick + note.duration <= tick || note.start_tick > tick) continue;
-    int reduced = interval_util::compoundToSimple(
-        absoluteInterval(pitch, note.pitch));
-    if (!interval_util::isConsonance(reduced)) {
-      if (num_voices >= 3 && reduced == interval::kPerfect4th) {
-        uint8_t lower = std::min(pitch, note.pitch);
-        if (lower > lowest) continue;  // P4 between upper voices: OK.
-      }
-      return false;
-    }
-  }
-  return true;
-}
-
 }  // namespace
 
 // ---------------------------------------------------------------------------

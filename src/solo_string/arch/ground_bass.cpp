@@ -217,7 +217,7 @@ GroundBass GroundBass::createForKey(const KeySignature& key_sig,
       int shift = ((static_cast<int>(register_low) - static_cast<int>(lowest) + 11) / 12) * 12;
       for (auto& note : transposed_notes) {
         int new_pitch = static_cast<int>(note.pitch) + shift;
-        note.pitch = static_cast<uint8_t>(std::min(new_pitch, 127));
+        note.pitch = clampPitch(new_pitch, 0, 127);
       }
     }
   }

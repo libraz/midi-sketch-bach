@@ -219,7 +219,7 @@ uint8_t choraleBassPitch(const Chord& chord, int bass_octave) {
     bass_pc = (root_pc + choraleFifthInterval(chord.quality)) % 12;
   }
   int bass_midi = (bass_octave + 1) * 12 + bass_pc;
-  return static_cast<uint8_t>(std::max(0, std::min(127, bass_midi)));
+  return clampPitch(bass_midi, 0, 127);
 }
 
 /// @brief Create a HarmonicTimeline driven by cantus firmus pitches.
@@ -1719,7 +1719,7 @@ ChoralePreludeResult generateChoralePrelude(const ChoralePreludeConfig& config) 
       uint8_t fig_min = 127, fig_max = 0;
       for (const auto& n : all_notes) {
         if (n.voice == kFigurationVoice) {
-          hist[n.pitch % 12]++;
+          hist[getPitchClass(n.pitch)]++;
           ++fig_note_count;
           if (n.pitch < fig_min) fig_min = n.pitch;
           if (n.pitch > fig_max) fig_max = n.pitch;

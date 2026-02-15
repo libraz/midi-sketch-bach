@@ -36,7 +36,7 @@ std::vector<NoteEvent> generateCadentialPedal(
   uint8_t pedal_pitch = 0;
   int best_dist = 128;
   for (int p = organ_range::kPedalLow; p <= organ_range::kPedalHigh; ++p) {
-    if (p % 12 == target_pc) {
+    if (getPitchClass(static_cast<uint8_t>(p)) == target_pc) {
       int dist = std::abs(p - range_mid);
       if (dist < best_dist) {
         best_dist = dist;
@@ -128,7 +128,7 @@ std::vector<NoteEvent> generateBlockChord(
     for (int pc : pcs) {
       // Find the instance of this pitch class closest to mid.
       for (int p = low; p <= high; ++p) {
-        if (p % 12 == pc) {
+        if (getPitchClass(static_cast<uint8_t>(p)) == pc) {
           int dist = std::abs(p - mid);
           if (dist < best_dist) {
             best_dist = dist;

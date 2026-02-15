@@ -320,7 +320,7 @@ float SubjectValidator::scoreTonalStability(const Subject& subject) const {
       subject.is_minor ? ScaleType::HarmonicMinor : ScaleType::Major);
   int scale_tone_count = 0;
   for (const auto& note : subject.notes) {
-    int pc = (getPitchClass(note.pitch) - key_offset + 12) % 12;
+    int pc = getPitchClassSigned(getPitchClass(note.pitch) - key_offset);
     for (int deg = 0; deg < 7; ++deg) {
       if (scale[deg] == pc) {
         scale_tone_count++;
@@ -346,7 +346,7 @@ float SubjectValidator::scoreAnswerCompatibility(const Subject& subject) const {
   // Count chromatic notes (not in the scale).
   int chromatic_count = 0;
   for (const auto& note : subject.notes) {
-    int pc = (getPitchClass(note.pitch) - key_offset + 12) % 12;
+    int pc = getPitchClassSigned(getPitchClass(note.pitch) - key_offset);
     bool in_scale = false;
     for (int deg = 0; deg < 7; ++deg) {
       if (scale[deg] == pc) {
