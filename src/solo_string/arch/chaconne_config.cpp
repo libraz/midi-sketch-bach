@@ -141,6 +141,24 @@ std::vector<KeySignature> getIslandKeys(const KeySignature& key) {
 
 }  // namespace
 
+TextureArcTarget getTextureArcTarget(VariationRole role) {
+  switch (role) {
+    case VariationRole::Establish:
+      return {0.70f, 0.20f, 0.10f};
+    case VariationRole::Develop:
+      return {0.65f, 0.20f, 0.15f};
+    case VariationRole::Destabilize:
+      return {0.55f, 0.25f, 0.20f};
+    case VariationRole::Illuminate:
+      return {0.55f, 0.25f, 0.20f};
+    case VariationRole::Accumulate:
+      return {0.45f, 0.25f, 0.30f};
+    case VariationRole::Resolve:
+      return {0.70f, 0.20f, 0.10f};  // Return to simpler texture
+  }
+  return {0.60f, 0.20f, 0.20f};
+}
+
 std::vector<ChaconneVariation> createStandardVariationPlan(const KeySignature& key,
                                                             std::mt19937& rng) {
   // Standard chaconne variation plan (~10 variations).

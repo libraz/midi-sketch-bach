@@ -445,6 +445,17 @@ float ArchetypeScorer::scoreKopfmotivStrength(
       base_score += 0.15f;
     }
   }
+  // P4/P5 opening leap bonus (soft, +0.04 to +0.06).
+  if (kopf.size() >= 2) {
+    int opening_interval = std::abs(static_cast<int>(kopf[1].pitch) -
+                                     static_cast<int>(kopf[0].pitch));
+    int simple = interval_util::compoundToSimple(opening_interval);
+    if (simple == 7) {        // P5
+      base_score += 0.06f;
+    } else if (simple == 5) { // P4
+      base_score += 0.04f;
+    }
+  }
   base_score = std::clamp(base_score, 0.0f, 1.0f);
 
   // Policy-weighted sub-scores.

@@ -493,7 +493,8 @@ std::vector<NoteEvent> generateFiguration(Tick start_tick, Tick end_tick,
                                           uint8_t range_low, uint8_t range_high,
                                           uint8_t voice, uint8_t last_pitch,
                                           Key key, bool is_minor,
-                                          std::mt19937& rng) {
+                                          std::mt19937& rng,
+                                          bool is_bass = false) {
   std::vector<NoteEvent> notes;
   ScaleType scale = is_minor ? ScaleType::HarmonicMinor : ScaleType::Major;
   Tick current = start_tick;
@@ -531,14 +532,15 @@ std::vector<NoteEvent> generateFiguration(Tick start_tick, Tick end_tick,
         auto chord_tones = collectChordTonesInRange(ev.chord, range_low, range_high);
         if (chord_tones.size() > 1) {
           // Score candidates for best voice-leading.
-          pitch = selectBestPitch(mel_state, prev0, chord_tones, current, true, rng);
+          pitch = selectBestPitch(mel_state, prev0, chord_tones, current, true,
+                                  rng, is_bass);
         } else {
           // Shift by one scale step to avoid repetition.
           pitch = scale_util::absoluteDegreeToPitch(abs_deg + direction, key, scale);
         }
       }
     } else {
-      int interval_size = chooseMelodicInterval(mel_state, rng);
+      int interval_size = chooseMelodicInterval(mel_state, rng, is_bass);
       int step = interval_size * direction;
       pitch = scale_util::absoluteDegreeToPitch(abs_deg + step, key, scale);
     }

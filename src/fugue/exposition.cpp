@@ -314,7 +314,8 @@ void placeFreeCounterpoint(VoiceId voice_id,
                            VoiceRegister voice_reg,
                            std::mt19937& rng,  // NOLINT(runtime/references): mt19937 must be mutable
                            float energy,
-                           std::map<VoiceId, std::vector<NoteEvent>>& voice_notes) {
+                           std::map<VoiceId, std::vector<NoteEvent>>& voice_notes,
+                           uint8_t num_voices = 0) {
   if (duration_ticks == 0) return;
 
   ScaleType scale = is_minor ? ScaleType::HarmonicMinor : ScaleType::Major;
@@ -337,9 +338,12 @@ void placeFreeCounterpoint(VoiceId voice_id,
     return 0;
   };
 
+  bool is_bass = isPedalVoice(voice_id, num_voices);
+
   while (remaining > 0) {
     Tick other_dur = findOtherDuration(current_tick);
-    Tick raw_dur = FugueEnergyCurve::selectDuration(energy, current_tick, rng, other_dur);
+    Tick raw_dur = FugueEnergyCurve::selectDuration(energy, current_tick, rng,
+                                                     other_dur, is_bass);
 
     // Guard 1: Split duration at bar boundaries.
     // Non-suspension notes crossing bar lines feel unnatural in counterpoint.
@@ -521,7 +525,8 @@ Exposition buildExposition(const Subject& subject,
         VoiceRegister earlier_reg = getVoiceRegister(earlier_voice, num_voices);
         placeFreeCounterpoint(earlier_voice, entry.entry_tick,
                               entry_interval, config.key, config.is_minor,
-                              earlier_reg, rng, 0.5f, expo.voice_notes);
+                              earlier_reg, rng, 0.5f, expo.voice_notes,
+                              num_voices);
       }
     }
   }

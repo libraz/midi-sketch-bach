@@ -166,6 +166,7 @@ std::vector<SkeletonSlot> buildRhythmSkeleton(
     const MotifTemplate& motif_a,
     const MotifTemplate& motif_b,
     const CadentialFormula& cadence,
+    const AccelProfile& accel_profile,
     std::mt19937& rhythm_gen) {
   std::vector<SkeletonSlot> slots;
   Tick current_tick = 0;
@@ -179,12 +180,34 @@ std::vector<SkeletonSlot> buildRhythmSkeleton(
                         ? motif_a.durations[idx]
                         : kTicksPerBeat;
 
+    // Apply acceleration profile before pair substitution.
+    // Progress: 0.0 at start, 1.0 at end of motif phase.
+    float accel_progress = (a.total_ticks > 0)
+        ? static_cast<float>(current_tick) / static_cast<float>(a.total_ticks)
+        : 0.0f;
+    if (accel_profile.curve_type == AccelCurveType::EaseIn) {
+      // Ease-in: slow start (factor ~1.0), accelerate at end (factor ~0.5).
+      float factor = 1.0f - 0.5f * accel_progress * accel_progress;
+      duration = std::max(accel_profile.min_dur,
+                          static_cast<Tick>(static_cast<float>(duration) * factor));
+    } else if (accel_profile.curve_type == AccelCurveType::Linear) {
+      float factor = 1.0f - 0.4f * accel_progress;
+      duration = std::max(accel_profile.min_dur,
+                          static_cast<Tick>(static_cast<float>(duration) * factor));
+    }
+
     // Pair substitution on even-indexed pairs only.
     if (idx % 2 == 0 && idx + 1 < motif_a.durations.size() &&
         idx + 1 < motif_a.degree_offsets.size()) {
       Tick next_dur = motif_a.durations[idx + 1];
       Tick new_a = duration, new_b = next_dur;
       varyDurationPair(duration, next_dur, a.character, rhythm_gen, new_a, new_b);
+      // Clamp varied duration to prevent undoing acceleration (+-1 duration class).
+      if (accel_profile.curve_type != AccelCurveType::None) {
+        Tick accel_floor = std::max(accel_profile.min_dur, duration / 2);
+        Tick accel_ceil = duration * 2;
+        new_a = std::clamp(new_a, accel_floor, accel_ceil);
+      }
       duration = new_a;
     }
 
@@ -228,10 +251,30 @@ std::vector<SkeletonSlot> buildRhythmSkeleton(
                         ? motif_b.durations[idx]
                         : kTicksPerBeat;
 
+    // Apply acceleration profile to Motif B as well.
+    float accel_progress_b = (a.total_ticks > 0)
+        ? static_cast<float>(current_tick) / static_cast<float>(a.total_ticks)
+        : 0.0f;
+    if (accel_profile.curve_type == AccelCurveType::EaseIn) {
+      float factor = 1.0f - 0.5f * accel_progress_b * accel_progress_b;
+      duration = std::max(accel_profile.min_dur,
+                          static_cast<Tick>(static_cast<float>(duration) * factor));
+    } else if (accel_profile.curve_type == AccelCurveType::Linear) {
+      float factor = 1.0f - 0.4f * accel_progress_b;
+      duration = std::max(accel_profile.min_dur,
+                          static_cast<Tick>(static_cast<float>(duration) * factor));
+    }
+
     if (idx % 2 == 0 && idx + 1 < motif_b.durations.size()) {
       Tick next_dur = motif_b.durations[idx + 1];
       Tick new_a = duration, new_b = next_dur;
       varyDurationPair(duration, next_dur, a.character, rhythm_gen, new_a, new_b);
+      // Clamp varied duration to prevent undoing acceleration.
+      if (accel_profile.curve_type != AccelCurveType::None) {
+        Tick accel_floor = std::max(accel_profile.min_dur, duration / 2);
+        Tick accel_ceil = duration * 2;
+        new_a = std::clamp(new_a, accel_floor, accel_ceil);
+      }
       duration = new_a;
     }
 
@@ -422,6 +465,22 @@ std::vector<NoteEvent> generateLegacyPitchPath(
         pitch = snapToScale(
             degreeToPitch(adjusted_degree, kBaseNote, a.key_offset, a.scale),
             a.key, a.scale, a.pitch_floor, a.climax_pitch);
+
+        // Post-leap stepwise preference for Kopfmotiv (70%).
+        if (slot.phase_index > 0 && slot.phase_index <= 2 && !result.empty()) {
+          int prev_p = static_cast<int>(result.back().pitch);
+          int head_interval = (result.size() >= 2)
+              ? std::abs(static_cast<int>(result[1].pitch) -
+                         static_cast<int>(result[0].pitch))
+              : 0;
+          if (head_interval >= 5 && rng::rollProbability(gen, 0.70f)) {
+            int step_dir = (result.back().pitch > result[0].pitch) ? -1 : 1;
+            int step_pitch = snapToScale(
+                prev_p + step_dir * 2, a.key, a.scale,
+                a.pitch_floor, a.pitch_ceil);
+            pitch = step_pitch;
+          }
+        }
 
         int prev_pitch =
             result.empty() ? -1 : static_cast<int>(result.back().pitch);
@@ -781,13 +840,26 @@ std::vector<NoteEvent> generateKerngestaltPath(
   }
 
   // Compute cell pitches from intervals, snapping to scale for diatonic integrity.
+  // For ChromaticCell: preserve semitone intervals on weak beats.
   std::vector<int> cell_pitches(cell_note_count);
   cell_pitches[0] = snapToScale(anchors.start_pitch, anchors.key, anchors.scale,
                                 anchors.pitch_floor, anchors.pitch_ceil);
   for (size_t idx = 0; idx < cell.intervals.size(); ++idx) {
     int raw = cell_pitches[idx] + cell.intervals[idx];
-    cell_pitches[idx + 1] = snapToScale(raw, anchors.key, anchors.scale,
-                                        anchors.pitch_floor, anchors.pitch_ceil);
+    bool is_chromatic_cell = (cell.type == KerngestaltType::ChromaticCell);
+    bool is_semitone = (std::abs(cell.intervals[idx]) == 1);
+    Tick cell_slot_tick = (cell_start_slot + idx + 1 < skeleton.size())
+        ? skeleton[cell_start_slot + idx + 1].start_tick : 0;
+    bool on_weak_beat = (cell_slot_tick % kTicksPerBeat != 0);
+
+    if (is_chromatic_cell && is_semitone && on_weak_beat) {
+      // Skip scale snapping to preserve chromatic interval.
+      cell_pitches[idx + 1] = std::max(anchors.pitch_floor,
+                                        std::min(anchors.pitch_ceil, raw));
+    } else {
+      cell_pitches[idx + 1] = snapToScale(raw, anchors.key, anchors.scale,
+                                          anchors.pitch_floor, anchors.pitch_ceil);
+    }
   }
 
   // Octave shift if any cell pitch is out of range.
@@ -889,6 +961,22 @@ std::vector<NoteEvent> generateKerngestaltPath(
           pitch = snapToScale(
               degreeToPitch(adjusted_degree, kBaseNote, anchors.key_offset, anchors.scale),
               anchors.key, anchors.scale, anchors.pitch_floor, anchors.climax_pitch);
+
+          // Post-leap stepwise preference for Kopfmotiv (70%).
+          if (slot.phase_index > 0 && slot.phase_index <= 2 && !result.empty()) {
+            int prev_p = static_cast<int>(result.back().pitch);
+            int head_interval = (result.size() >= 2)
+                ? std::abs(static_cast<int>(result[1].pitch) -
+                           static_cast<int>(result[0].pitch))
+                : 0;
+            if (head_interval >= 5 && rng::rollProbability(gen, 0.70f)) {
+              int step_dir = (result.back().pitch > result[0].pitch) ? -1 : 1;
+              int step_pitch = snapToScale(
+                  prev_p + step_dir * 2, anchors.key, anchors.scale,
+                  anchors.pitch_floor, anchors.pitch_ceil);
+              pitch = step_pitch;
+            }
+          }
 
           int prev_pitch =
               result.empty() ? -1 : static_cast<int>(result.back().pitch);
@@ -1379,7 +1467,7 @@ SubjectGenerator::GenerateResult SubjectGenerator::generateNotes(
   // --- Phase 1: Compute anchors (once per seed) ---
 
   GoalTone goal = goalToneForCharacter(character, anchor_rng, policy);
-  uint32_t template_idx = anchor_rng() % 4;
+  uint32_t template_idx = anchor_rng() % 5;
   auto [motif_a, motif_b] = motifTemplatesForCharacter(character, template_idx);
 
   constexpr int kBaseNote = 60;
@@ -1465,8 +1553,9 @@ SubjectGenerator::GenerateResult SubjectGenerator::generateNotes(
   // --- Phase 2: Build rhythm skeleton (once per seed) ---
 
   std::mt19937 rhythm_gen(seed ^ 0x52687974u);  // "Rhyt"
+  AccelProfile accel_profile = getAccelProfile(character, config.archetype, rhythm_gen);
   auto skeleton =
-      buildRhythmSkeleton(anchors, motif_a, motif_b, cadence, rhythm_gen);
+      buildRhythmSkeleton(anchors, motif_a, motif_b, cadence, accel_profile, rhythm_gen);
 
   // --- Phase 2.5: Select Kerngestalt type and cell ---
 

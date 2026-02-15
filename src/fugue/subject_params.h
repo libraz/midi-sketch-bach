@@ -9,6 +9,7 @@
 #include <random>
 
 #include "core/basic_types.h"
+#include "fugue/motif_template.h"
 
 namespace bach {
 
@@ -234,6 +235,18 @@ struct ArchetypePolicy;  // Forward declaration.
 /// @param policy Archetype policy providing range bounds.
 void applyArchetypeConstraints(CharacterParams& params,
                                 const ArchetypePolicy& policy);
+
+/// @brief Get acceleration profile for a character x archetype combination.
+///
+/// Controls how note durations decrease from subject head to tail.
+/// 20-30% chance of None (equal rhythm), remaining split 70/30 EaseIn/Linear.
+///
+/// @param character Subject character type.
+/// @param archetype Fugue archetype.
+/// @param rng RNG for stochastic selection.
+/// @return AccelProfile with curve_type and min_dur.
+AccelProfile getAccelProfile(SubjectCharacter character, FugueArchetype archetype,
+                             std::mt19937& rng);
 
 /// Default number of pitch path candidates for N-candidate selection.
 constexpr int kDefaultPathCandidates = 8;

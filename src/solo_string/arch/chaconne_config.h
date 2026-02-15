@@ -70,6 +70,30 @@ struct MajorSectionConstraints {
   uint8_t register_high = 84;       ///< C6
 };
 
+/// @brief Texture distribution target for a variation group within the chaconne arc.
+///
+/// Provides soft targets for the proportion of SingleLine, DoubleStop (2-voice),
+/// and Chord (3+ voice) textures within a group of variations. These targets
+/// guide the texture selection to follow the BWV1004 reference distribution:
+/// 1-voice 61%, 2-voice 20%, 3-voice 19%, avg active voices 1.57.
+struct TextureArcTarget {
+  float single_line_ratio = 0.60f;  ///< Target SingleLine proportion.
+  float double_stop_ratio = 0.20f;  ///< Target 2-voice proportion.
+  float chord_ratio = 0.20f;        ///< Target 3+ voice proportion.
+};
+
+/// @brief Get texture arc target for a variation role and its position within the arc.
+///
+/// The arc follows BWV1004 structure:
+///   - Early (Establish/Develop): heavier SingleLine (70/20/10)
+///   - Middle (Destabilize/Illuminate): balanced (55/25/20)
+///   - Late (Accumulate/Resolve): Accumulate uses chords (45/25/30),
+///     Resolve returns to simpler texture (70/20/10)
+///
+/// @param role Variation role.
+/// @return TextureArcTarget with soft ratio targets.
+TextureArcTarget getTextureArcTarget(VariationRole role);
+
 /// @brief Full configuration for chaconne generation.
 ///
 /// This is the top-level config struct for generating BWV1004-style chaconnes.

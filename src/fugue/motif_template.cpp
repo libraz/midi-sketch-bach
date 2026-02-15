@@ -6,6 +6,7 @@
 
 #include "core/rng_util.h"
 #include "fugue/archetype_policy.h"
+#include "fugue/subject_params.h"
 
 namespace bach {
 
@@ -40,7 +41,7 @@ GoalTone goalToneForCharacter(SubjectCharacter character, std::mt19937& rng) {
 
 std::pair<MotifTemplate, MotifTemplate> motifTemplatesForCharacter(
     SubjectCharacter character, uint32_t template_idx) {
-  uint32_t idx = template_idx % 4;
+  uint32_t idx = template_idx % 5;
   switch (character) {
     case SubjectCharacter::Severe: {
       switch (idx) {
@@ -99,14 +100,33 @@ std::pair<MotifTemplate, MotifTemplate> motifTemplatesForCharacter(
                              NoteFunction::NeighborTone, NoteFunction::StructuralTone};
           return {mot_a, mot_b};
         }
-        case 3:
-        default: {
+        case 3: {
           // Pair 3: 5th leap + stepwise fill.
           MotifTemplate mot_a;
           mot_a.type = MotifType::Leap;
           mot_a.degree_offsets = {0, 4, 3, 2, 3};
           mot_a.durations = {kTicksPerBeat / 2, kTicksPerBeat, kTicksPerBeat / 2,
                              kTicksPerBeat / 2, kTicksPerBeat};
+          mot_a.functions = {NoteFunction::StructuralTone, NoteFunction::LeapTone,
+                             NoteFunction::Resolution, NoteFunction::PassingTone,
+                             NoteFunction::StructuralTone};
+          MotifTemplate mot_b;
+          mot_b.type = MotifType::Scale;
+          mot_b.degree_offsets = {0, -1, -2, -3};
+          mot_b.durations = {kTicksPerBeat, kTicksPerBeat / 2, kTicksPerBeat / 2,
+                             kTicksPerBeat * 2};
+          mot_b.functions = {NoteFunction::StructuralTone, NoteFunction::PassingTone,
+                             NoteFunction::PassingTone, NoteFunction::CadentialTone};
+          return {mot_a, mot_b};
+        }
+        case 4:
+        default: {
+          // Pair 4 (NEW): P5 leap head + stepwise descent. BWV578-style.
+          MotifTemplate mot_a;
+          mot_a.type = MotifType::Leap;
+          mot_a.degree_offsets = {0, 4, 3, 2, 1};
+          mot_a.durations = {kDottedQuarter, kEighthNote, kEighthNote,
+                             kEighthNote, kQuarterNote};
           mot_a.functions = {NoteFunction::StructuralTone, NoteFunction::LeapTone,
                              NoteFunction::Resolution, NoteFunction::PassingTone,
                              NoteFunction::StructuralTone};
@@ -179,8 +199,7 @@ std::pair<MotifTemplate, MotifTemplate> motifTemplatesForCharacter(
                              NoteFunction::CadentialTone};
           return {mot_a, mot_b};
         }
-        case 3:
-        default: {
+        case 3: {
           // Pair 3: Arpeggio + Neighbor tone.
           MotifTemplate mot_a;
           mot_a.type = MotifType::Leap;
@@ -197,6 +216,26 @@ std::pair<MotifTemplate, MotifTemplate> motifTemplatesForCharacter(
           mot_b.functions = {NoteFunction::StructuralTone, NoteFunction::NeighborTone,
                              NoteFunction::StructuralTone, NoteFunction::NeighborTone,
                              NoteFunction::CadentialTone};
+          return {mot_a, mot_b};
+        }
+        case 4:
+        default: {
+          // Pair 4 (NEW): P5 leap head + ornamental turn. Lively rhythm.
+          MotifTemplate mot_a;
+          mot_a.type = MotifType::Leap;
+          mot_a.degree_offsets = {0, 4, 3, 4, 3};
+          mot_a.durations = {kEighthNote, kEighthNote, kEighthNote,
+                             kEighthNote, kEighthNote};
+          mot_a.functions = {NoteFunction::StructuralTone, NoteFunction::LeapTone,
+                             NoteFunction::NeighborTone, NoteFunction::NeighborTone,
+                             NoteFunction::Resolution};
+          MotifTemplate mot_b;
+          mot_b.type = MotifType::Scale;
+          mot_b.degree_offsets = {0, -1, -2, -1};
+          mot_b.durations = {kTicksPerBeat / 2, kTicksPerBeat / 2,
+                             kTicksPerBeat / 2, kTicksPerBeat};
+          mot_b.functions = {NoteFunction::StructuralTone, NoteFunction::PassingTone,
+                             NoteFunction::PassingTone, NoteFunction::CadentialTone};
           return {mot_a, mot_b};
         }
       }
@@ -256,8 +295,7 @@ std::pair<MotifTemplate, MotifTemplate> motifTemplatesForCharacter(
                              NoteFunction::PassingTone, NoteFunction::CadentialTone};
           return {mot_a, mot_b};
         }
-        case 3:
-        default: {
+        case 3: {
           // Pair 3: Pedal sustain + Rising 3rds.
           MotifTemplate mot_a;
           mot_a.type = MotifType::Sustain;
@@ -273,6 +311,24 @@ std::pair<MotifTemplate, MotifTemplate> motifTemplatesForCharacter(
           mot_b.functions = {NoteFunction::StructuralTone, NoteFunction::LeapTone,
                              NoteFunction::Resolution, NoteFunction::LeapTone,
                              NoteFunction::CadentialTone};
+          return {mot_a, mot_b};
+        }
+        case 4:
+        default: {
+          // Pair 4 (NEW): P5 leap head + sustained descent. Stately.
+          MotifTemplate mot_a;
+          mot_a.type = MotifType::Leap;
+          mot_a.degree_offsets = {0, 4, 3, 2};
+          mot_a.durations = {kHalfNote, kQuarterNote, kQuarterNote, kHalfNote};
+          mot_a.functions = {NoteFunction::StructuralTone, NoteFunction::LeapTone,
+                             NoteFunction::Resolution, NoteFunction::StructuralTone};
+          MotifTemplate mot_b;
+          mot_b.type = MotifType::Scale;
+          mot_b.degree_offsets = {0, -1, -2, -3};
+          mot_b.durations = {kTicksPerBeat * 2, kTicksPerBeat,
+                             kTicksPerBeat, kTicksPerBeat * 2};
+          mot_b.functions = {NoteFunction::StructuralTone, NoteFunction::PassingTone,
+                             NoteFunction::PassingTone, NoteFunction::CadentialTone};
           return {mot_a, mot_b};
         }
       }
@@ -338,8 +394,7 @@ std::pair<MotifTemplate, MotifTemplate> motifTemplatesForCharacter(
                              NoteFunction::LeapTone, NoteFunction::Resolution};
           return {mot_a, mot_b};
         }
-        case 3:
-        default: {
+        case 3: {
           // Pair 3: Fragment + Rapid descending scale.
           MotifTemplate mot_a;
           mot_a.type = MotifType::Rhythmic;
@@ -356,6 +411,27 @@ std::pair<MotifTemplate, MotifTemplate> motifTemplatesForCharacter(
                              kTicksPerBeat / 4, kTicksPerBeat / 4, kTicksPerBeat};
           mot_b.functions = {NoteFunction::SequenceHead, NoteFunction::PassingTone,
                              NoteFunction::PassingTone, NoteFunction::PassingTone,
+                             NoteFunction::CadentialTone};
+          return {mot_a, mot_b};
+        }
+        case 4:
+        default: {
+          // Pair 4 (NEW): P5 leap head + chromatic descent. Short values.
+          MotifTemplate mot_a;
+          mot_a.type = MotifType::Leap;
+          mot_a.degree_offsets = {0, 4, 3, 2, 1};
+          mot_a.durations = {kEighthNote, kSixteenthNote, kSixteenthNote,
+                             kSixteenthNote, kEighthNote};
+          mot_a.functions = {NoteFunction::StructuralTone, NoteFunction::LeapTone,
+                             NoteFunction::Resolution, NoteFunction::PassingTone,
+                             NoteFunction::StructuralTone};
+          MotifTemplate mot_b;
+          mot_b.type = MotifType::Chromatic;
+          mot_b.degree_offsets = {0, -1, 0, -1, -2};
+          mot_b.durations = {kTicksPerBeat / 4, kTicksPerBeat / 4,
+                             kTicksPerBeat / 4, kTicksPerBeat / 4, kTicksPerBeat};
+          mot_b.functions = {NoteFunction::StructuralTone, NoteFunction::PassingTone,
+                             NoteFunction::NeighborTone, NoteFunction::PassingTone,
                              NoteFunction::CadentialTone};
           return {mot_a, mot_b};
         }

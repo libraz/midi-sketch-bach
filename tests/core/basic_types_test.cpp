@@ -249,9 +249,11 @@ TEST(NoteEventTest, NewNoteHasNoModifications) {
   EXPECT_EQ(note.modified_by, 0);
 }
 
-TEST(NoteEventTest, SizeIs16Bytes) {
+TEST(NoteEventTest, SizeIs20Bytes) {
   // NoteEvent is a hot struct in tight loops; guard against accidental bloat.
-  EXPECT_EQ(sizeof(NoteEvent), 16u);
+  // 20 bytes: 8 (ticks) + 7 (pitch/vel/voice/source/bow/harmonic/modified_by)
+  //           + 2 (gesture_id) + 1 (gesture_role) + 2 padding = 20.
+  EXPECT_EQ(sizeof(NoteEvent), 20u);
 }
 
 // ---------------------------------------------------------------------------

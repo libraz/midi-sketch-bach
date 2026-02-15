@@ -83,6 +83,26 @@ GoalTone goalToneForCharacter(SubjectCharacter character, std::mt19937& rng,
                                const ArchetypePolicy& policy);
 
 // ---------------------------------------------------------------------------
+// Acceleration profile for rhythm progression
+// ---------------------------------------------------------------------------
+
+/// @brief Acceleration curve type for subject rhythm progression.
+enum class AccelCurveType : uint8_t {
+  None,     ///< Equal rhythm (no acceleration). 20-30% of subjects.
+  EaseIn,   ///< Hold early values, accelerate toward end. Most common.
+  Linear    ///< Steady acceleration throughout.
+};
+
+/// @brief Acceleration profile for rhythm progression within a subject.
+///
+/// Controls how note durations decrease from subject head to tail.
+/// min_dur prevents acceleration beyond instrument capabilities.
+struct AccelProfile {
+  AccelCurveType curve_type = AccelCurveType::None;
+  Tick min_dur = duration::kSixteenthNote;  ///< Floor duration (instrument-dependent).
+};
+
+// ---------------------------------------------------------------------------
 // Kerngestalt cell system
 // ---------------------------------------------------------------------------
 
@@ -129,15 +149,15 @@ KerngestaltType selectKerngestaltType(SubjectCharacter character,
 
 /// @brief Get the pair of MotifTemplates (A and B) for a given character.
 ///
-/// Each character has 4 template pairs (16 total). Use template_idx to select
-/// among the variants; values are taken modulo 4. This expands subject diversity
-/// while keeping fixed design values (Principle 3: reduce generation).
+/// Each character has 5 template pairs (20 total). Use template_idx to select
+/// among the variants; values are taken modulo 5. Pair 4 features a P5 leap
+/// head (Kopfmotiv) for BWV578-style opening gestures.
 ///
 /// Motif A is used for the ascending portion (toward the goal tone).
 /// Motif B is used for the descending portion (away from the goal tone).
 ///
 /// @param character Subject character type.
-/// @param template_idx Index to select among 4 template pairs (taken mod 4).
+/// @param template_idx Index to select among 5 template pairs (taken mod 5).
 /// @return Pair of templates: first = Motif A (ascending), second = Motif B (descending).
 std::pair<MotifTemplate, MotifTemplate> motifTemplatesForCharacter(
     SubjectCharacter character, uint32_t template_idx = 0);

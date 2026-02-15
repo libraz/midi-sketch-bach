@@ -672,10 +672,12 @@ static std::vector<NoteEvent> generateBassSequencePattern(
       if (i == 0) {
         // Pattern head: harmonic rhythm anchor. Lower energy for longer notes.
         raw_dur = FugueEnergyCurve::selectDuration(
-            std::max(0.0f, energy - 0.15f), tick, gen, kQuarterNote);
+            std::max(0.0f, energy - 0.15f), tick, gen, kQuarterNote,
+            /*is_bass=*/true);
         if (raw_dur < kQuarterNote) raw_dur = kQuarterNote;  // Floor: quarter.
       } else {
-        raw_dur = FugueEnergyCurve::selectDuration(energy, tick, gen, kHalfNote);
+        raw_dur = FugueEnergyCurve::selectDuration(energy, tick, gen, kHalfNote,
+                                                    /*is_bass=*/true);
         // Bass sixteenths are a style violation; floor at eighth note.
         if (raw_dur < kTicksPerBeat / 2) raw_dur = kTicksPerBeat / 2;
       }

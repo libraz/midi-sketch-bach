@@ -281,6 +281,39 @@ int repairParallelPerfect(std::vector<NoteEvent>& notes,
       beat_grid_ticks.push_back(tick);
     }
 
+    // Budget check: count remaining parallels across all voice pairs.
+    // If within budget, stop repairing early to allow natural texture.
+    if (params.parallel_budget > 0) {
+      int parallel_count = 0;
+      for (uint8_t va = 0; va < params.num_voices; ++va) {
+        for (uint8_t vb = va + 1; vb < params.num_voices; ++vb) {
+          int pp_chk = -1, pb2_chk = -1;
+          for (Tick tick : beat_grid_ticks) {
+            int ca_chk = soundPitch(va, tick);
+            int cb_chk = soundPitch(vb, tick);
+            if (ca_chk < 0 || cb_chk < 0 || pp_chk < 0 || pb2_chk < 0) {
+              pp_chk = ca_chk; pb2_chk = cb_chk; continue;
+            }
+            if (ca_chk == pp_chk && cb_chk == pb2_chk) continue;
+            int pi_chk = std::abs(pp_chk - pb2_chk);
+            int ci_chk = std::abs(ca_chk - cb_chk);
+            if (interval_util::isPerfectConsonance(pi_chk) &&
+                interval_util::isPerfectConsonance(ci_chk) &&
+                interval_util::compoundToSimple(pi_chk) ==
+                    interval_util::compoundToSimple(ci_chk)) {
+              int ma_chk = ca_chk - pp_chk, mb_chk = cb_chk - pb2_chk;
+              if (ma_chk != 0 && mb_chk != 0 &&
+                  (ma_chk > 0) == (mb_chk > 0)) {
+                ++parallel_count;
+              }
+            }
+            pp_chk = ca_chk; pb2_chk = cb_chk;
+          }
+        }
+      }
+      if (parallel_count <= params.parallel_budget) break;
+    }
+
     bool any_fixed = false;
 
     for (uint8_t va = 0; va < params.num_voices; ++va) {

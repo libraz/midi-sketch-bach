@@ -60,9 +60,34 @@ inline int chooseMelodicDirection(const MelodicState& state,
 }
 
 /// @brief Choose interval step count in diatonic degrees (WTC distribution).
+/// @param is_bass If true, use bass-voice distribution (more leaps, fewer steps)
+///        based on BWV578 pedal analysis: step 44%, skip+leap 52%.
 /// @return 1 (step), 2 (skip/3rd), 3 (leap/4th+).
 inline int chooseMelodicInterval(const MelodicState& state,
-                                 std::mt19937& rng) {
+                                 std::mt19937& rng,
+                                 bool is_bass = false) {
+  if (is_bass) {
+    // Bass/pedal voice: BWV578 pedal shows step 44%, leap 52%.
+    // Split as: step 45%, skip(3rd) 35%, leap(4th+) 20%.
+    if (state.last_large_leap != 0) {
+      float roll = rng::rollFloat(rng, 0.0f, 1.0f);
+      if (roll < 0.50f) return 1;
+      if (roll < 0.80f) return 2;
+      return 3;
+    }
+    if (state.last_skip_size != 0) {
+      float roll = rng::rollFloat(rng, 0.0f, 1.0f);
+      if (roll < 0.50f) return 1;
+      if (roll < 0.80f) return 2;
+      return 3;
+    }
+    float roll = rng::rollFloat(rng, 0.0f, 1.0f);
+    if (roll < 0.45f) return 1;
+    if (roll < 0.80f) return 2;
+    return 3;
+  }
+
+  // Upper voices: standard WTC distribution.
   // Consecutive large leap prohibition.
   if (state.last_large_leap != 0) {
     // After large leap: 62% step, 28% skip, 10% small leap.
@@ -126,9 +151,12 @@ inline void updateMelodicState(MelodicState& state, uint8_t prev_pitch,
 /// @brief Score a candidate pitch for weighted selection.
 /// Higher score = more desirable. Used when choosing among chord tones
 /// or scale tones on strong beats.
+/// @param is_bass If true, apply bass-voice scoring: reduce stepwise
+///        preference, add P4/P5 leap bonus (harmonic skeleton projection).
 inline float scoreCandidatePitch(const MelodicState& state,
                                  uint8_t prev_pitch, uint8_t candidate,
-                                 Tick tick, bool is_chord_tone) {
+                                 Tick tick, bool is_chord_tone,
+                                 bool is_bass = false) {
   int interval =
       static_cast<int>(candidate) - static_cast<int>(prev_pitch);
   int abs_interval = std::abs(interval);
@@ -141,11 +169,17 @@ inline float scoreCandidatePitch(const MelodicState& state,
     score += 0.30f;
   }
 
-  // Step score: prefer stepwise motion.
+  // Step score: prefer stepwise motion (reduced for bass voices).
   if (abs_interval <= 2) {
-    score += 0.20f;
+    score += is_bass ? 0.10f : 0.20f;
   } else if (abs_interval <= 4) {
     score += 0.10f;
+  }
+
+  // Bass P4/P5 bonus: harmonic skeleton projection.
+  // P4 = 5 semitones, P5 = 7 semitones.
+  if (is_bass && (abs_interval == 5 || abs_interval == 7)) {
+    score += 0.15f;
   }
 
   // Harmonic penalty for non-chord tone (beat-position dependent).
@@ -185,7 +219,8 @@ inline float scoreCandidatePitch(const MelodicState& state,
 inline uint8_t selectBestPitch(const MelodicState& state, uint8_t prev_pitch,
                                const std::vector<uint8_t>& candidates,
                                Tick tick, bool all_chord_tones,
-                               std::mt19937& rng) {
+                               std::mt19937& rng,
+                               bool is_bass = false) {
   if (candidates.empty()) return prev_pitch;
   if (candidates.size() == 1) return candidates[0];
 
@@ -194,7 +229,8 @@ inline uint8_t selectBestPitch(const MelodicState& state, uint8_t prev_pitch,
   scores.reserve(candidates.size());
   float max_score = -100.0f;
   for (uint8_t c : candidates) {
-    float s = scoreCandidatePitch(state, prev_pitch, c, tick, all_chord_tones);
+    float s = scoreCandidatePitch(state, prev_pitch, c, tick, all_chord_tones,
+                                  is_bass);
     scores.push_back(s);
     if (s > max_score) max_score = s;
   }

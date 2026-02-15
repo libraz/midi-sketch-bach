@@ -83,7 +83,7 @@ bool isArpeggioPattern(const std::vector<int>& intervals) {
 ///   - Arpeggio: consecutive same-direction 3rd-class intervals >= 2, with
 ///     at least 2 distinct triad pitch classes.
 ///   - IntervalDriven: signature interval abs >= 3 and has a leap.
-///   - ChromaticCell: 2+ semitone motions (abs==1) in first 4 intervals.
+///   - ChromaticCell: 2+ semitone motions (abs==1) in first 6 intervals.
 ///   - Linear: default (scale-based with internal repetition).
 KerngestaltType classifyKerngestalt(const std::vector<int>& intervals,
                                     int signature_interval) {
@@ -103,8 +103,8 @@ KerngestaltType classifyKerngestalt(const std::vector<int>& intervals,
       has_leap = true;
     }
 
-    // Count chromatic motion (abs==1) in the first 4 intervals.
-    if (idx < 4 && abs_val == 1) {
+    // Count chromatic motion (abs==1) in the first 6 intervals.
+    if (idx < 6 && abs_val == 1) {
       ++chromatic_in_head_count;
     }
   }
@@ -113,7 +113,7 @@ KerngestaltType classifyKerngestalt(const std::vector<int>& intervals,
     return KerngestaltType::IntervalDriven;
   }
 
-  // ChromaticCell requires 2+ semitone motions in head (first 4 intervals).
+  // ChromaticCell requires 2+ semitone motions in head (first 6 intervals).
   if (chromatic_in_head_count >= 2) {
     return KerngestaltType::ChromaticCell;
   }
@@ -609,14 +609,25 @@ bool isValidKerngestalt(const EssentialIdentity& identity) {
       return chord_tone_count >= 2;
     }
 
-    case KerngestaltType::Linear:
-      // At least one pair of consecutive equal durations in core_rhythm.
+    case KerngestaltType::Linear: {
+      // Check 1: consecutive equal durations (existing).
       for (size_t idx = 0; idx + 1 < identity.core_rhythm.size(); ++idx) {
         if (identity.core_rhythm[idx] == identity.core_rhythm[idx + 1]) {
           return true;
         }
       }
+      // Check 2 (new): 60%+ stepwise intervals.
+      if (!identity.core_intervals.empty()) {
+        int step_count = 0;
+        for (int interval : identity.core_intervals) {
+          if (std::abs(interval) <= 2) ++step_count;
+        }
+        float step_ratio = static_cast<float>(step_count) /
+                           static_cast<float>(identity.core_intervals.size());
+        if (step_ratio >= 0.60f) return true;
+      }
       return false;
+    }
   }
 
   return false;  // NOLINT(clang-diagnostic-covered-switch-default): defensive

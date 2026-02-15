@@ -7,6 +7,7 @@
 #include <array>
 #include <cassert>
 #include <climits>
+#include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <functional>
@@ -1330,6 +1331,61 @@ static float getPhaseAwareCeiling(float position) {
   return 0.95f;                          // Late Resolve: pulling back.
 }
 
+/// @brief Select how many voices should be active for an episode.
+///
+/// Based on BWV578 analysis: 3-voice texture dominates. Episodes in the
+/// develop phase should typically use num_voices-1 active voices.
+///
+/// @param num_voices Total voice count.
+/// @param phase_pos Current fugue phase position (0.0-1.0).
+/// @param density_target Texture density target.
+/// @param rng Random number generator.
+/// @return Number of active voices for this episode.
+uint8_t selectEpisodeVoiceCount(uint8_t num_voices, float phase_pos,
+                                const TextureDensityTarget& density_target,
+                                std::mt19937& rng) {
+  if (num_voices <= 2) return num_voices;  // Can't reduce below 2.
+
+  // In develop phase (0.25-0.70): mostly N-1 voices.
+  float target = density_target.develop_density;
+  if (phase_pos >= 0.70f) {
+    target = density_target.stretto_density;
+  }
+
+  uint8_t target_voices = static_cast<uint8_t>(
+      std::round(static_cast<float>(num_voices) * target));
+  if (target_voices < 2) target_voices = 2;
+  if (target_voices > num_voices) target_voices = num_voices;
+
+  // Probabilistic: 70% use target, 30% use full (for variety).
+  std::uniform_real_distribution<float> dist(0.0f, 1.0f);
+  if (dist(rng) < 0.30f) {
+    return num_voices;
+  }
+  return target_voices;
+}
+
+/// @brief Select which voice to rest during an episode.
+///
+/// Rotates resting voice to ensure all voices get periodic rest.
+/// Avoids resting the entry voice (if in a middle entry section).
+///
+/// @param num_voices Total voice count.
+/// @param episode_idx Episode index (for rotation).
+/// @param entry_voice Voice with the current subject entry (-1 if none).
+/// @return Voice ID to rest, or num_voices if no rest.
+uint8_t selectRestingVoice(uint8_t num_voices, int episode_idx,
+                           int entry_voice = -1) {
+  if (num_voices <= 2) return num_voices;  // No rest possible.
+
+  // Rotate through voices, skipping the entry voice.
+  uint8_t candidate = static_cast<uint8_t>(episode_idx % num_voices);
+  if (static_cast<int>(candidate) == entry_voice) {
+    candidate = (candidate + 1) % num_voices;
+  }
+  return candidate;
+}
+
 }  // namespace
 
 FugueResult generateFugue(const FugueConfig& config) {
@@ -1454,6 +1510,7 @@ FugueResult generateFugue(const FugueConfig& config) {
 
   // RNG for false entry probability checks (seeded from config for determinism).
   std::mt19937 false_entry_rng(config.seed + 9999u);
+  std::mt19937 density_rng(config.seed + 8888u);
 
   // Character-based probability for false entry with per-seed variation.
   float false_entry_prob = 0.0f;
@@ -1488,6 +1545,21 @@ FugueResult generateFugue(const FugueConfig& config) {
         prev_key, target_key, num_voices, pair_seed_base,
         pair_idx, episode_energy,
         cp_state, cp_rules, cp_resolver, detailed_timeline);
+    // Texture density: rest one voice during some episodes (BWV578: 56% is 3-voice).
+    float ep_phase_pos =
+        static_cast<float>(current_tick) / static_cast<float>(estimated_duration);
+    uint8_t ep_active = selectEpisodeVoiceCount(
+        num_voices, ep_phase_pos, config.density_target, density_rng);
+    if (ep_active < num_voices) {
+      uint8_t rest_voice = selectRestingVoice(num_voices, pair_idx, -1);
+      episode.notes.erase(
+          std::remove_if(episode.notes.begin(), episode.notes.end(),
+                         [rest_voice](const NoteEvent& evt) {
+                           return evt.voice == rest_voice;
+                         }),
+          episode.notes.end());
+    }
+
     structure.addSection(SectionType::Episode, FuguePhase::Develop,
                          current_tick, current_tick + episode_duration, target_key);
     all_notes.insert(all_notes.end(), episode.notes.begin(), episode.notes.end());
@@ -1565,6 +1637,19 @@ FugueResult generateFugue(const FugueConfig& config) {
                              return evt.voice == entry_voice;
                            }),
             companion.notes.end());
+        // Additional voice rest in companion for texture variety.
+        if (ep_active < num_voices && num_voices >= 4) {
+          uint8_t companion_rest =
+              selectRestingVoice(num_voices, pair_idx + 100, entry_voice);
+          if (companion_rest != entry_voice) {
+            companion.notes.erase(
+                std::remove_if(companion.notes.begin(), companion.notes.end(),
+                               [companion_rest](const NoteEvent& evt) {
+                                 return evt.voice == companion_rest;
+                               }),
+                companion.notes.end());
+          }
+        }
         all_notes.insert(all_notes.end(), companion.notes.begin(),
                          companion.notes.end());
       }
@@ -1584,6 +1669,23 @@ FugueResult generateFugue(const FugueConfig& config) {
         config.seed + static_cast<uint32_t>(develop_pairs) * 2000u + 2000u,
         develop_pairs, return_energy,
         cp_state, cp_rules, cp_resolver, detailed_timeline);
+    // Voice rest in return episode for continuity.
+    {
+      float ret_phase_pos =
+          static_cast<float>(current_tick) / static_cast<float>(estimated_duration);
+      uint8_t ret_active = selectEpisodeVoiceCount(
+          num_voices, ret_phase_pos, config.density_target, density_rng);
+      if (ret_active < num_voices) {
+        uint8_t ret_rest = selectRestingVoice(num_voices, develop_pairs, -1);
+        return_episode.notes.erase(
+            std::remove_if(return_episode.notes.begin(), return_episode.notes.end(),
+                           [ret_rest](const NoteEvent& evt) {
+                             return evt.voice == ret_rest;
+                           }),
+            return_episode.notes.end());
+      }
+    }
+
     structure.addSection(SectionType::Episode, FuguePhase::Develop,
                          current_tick, current_tick + return_ep_duration, config.key);
     all_notes.insert(all_notes.end(), return_episode.notes.begin(),
@@ -1750,6 +1852,24 @@ FugueResult generateFugue(const FugueConfig& config) {
         BachNoteSource::FalseEntry,     BachNoteSource::SequenceNote,
     };
     // Tier 3 (FreeCounterpoint etc.): full createBachNote cascade.
+
+    // Minor key weak-beat dissonance tolerance: allow tritone (TT) when
+    // approached by step (passing/neighbor tone). Minor-key fugues show
+    // higher dissonance (37-38% vs 22-24% in major) per Bach reference data.
+    if (config.is_minor) {
+      coord_config.weak_beat_allow =
+          [](Tick /*tick*/, uint8_t /*voice*/, uint8_t candidate_pitch,
+             uint8_t /*other_pitch*/, int simple_interval,
+             uint8_t melodic_prev) -> bool {
+        // Allow tritone (dim5/aug4) on weak beats when approached stepwise.
+        if (simple_interval == 6 && melodic_prev != 0) {
+          int approach = std::abs(static_cast<int>(candidate_pitch) -
+                                  static_cast<int>(melodic_prev));
+          return approach <= 2;  // Stepwise approach (semitone or whole tone).
+        }
+        return false;
+      };
+    }
 
     all_notes = coordinateVoices(std::move(all_notes), coord_config);
   }
@@ -2065,6 +2185,11 @@ FugueResult generateFugue(const FugueConfig& config) {
       repair_params.voice_range_static = [&](uint8_t v) {
         return getFugueVoiceRange(v, num_voices);
       };
+      // Allow a small parallel budget (~0.5% of notes, capped 1-8) so that
+      // the output matches Bach reference data (BWV578: ~4% parallel ratio).
+      repair_params.parallel_budget = std::max(1, std::min(8,
+          static_cast<int>(std::ceil(
+              static_cast<float>(all_notes.size()) * 0.005f))));
       repairParallelPerfect(all_notes, repair_params);
 
       // Rebuild post_state so diatonic enforcement sees updated pitches.
@@ -2269,6 +2394,9 @@ FugueResult generateFugue(const FugueConfig& config) {
         return getFugueVoiceRange(v, num_voices);
       };
       regression_params.max_iterations = 1;
+      regression_params.parallel_budget = std::max(1, std::min(8,
+          static_cast<int>(std::ceil(
+              static_cast<float>(all_notes.size()) * 0.005f))));
       repairParallelPerfect(all_notes, regression_params);
     }
 
@@ -2812,6 +2940,9 @@ FugueResult generateFugue(const FugueConfig& config) {
         return getFugueVoiceRange(v, num_voices);
       };
       final_repair_params.max_iterations = 3;
+      final_repair_params.parallel_budget = std::max(1, std::min(8,
+          static_cast<int>(std::ceil(
+              static_cast<float>(all_notes.size()) * 0.005f))));
       repairParallelPerfect(all_notes, final_repair_params);
     }
 

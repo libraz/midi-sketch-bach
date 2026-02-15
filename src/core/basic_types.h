@@ -231,6 +231,15 @@ enum class ToccataSectionId : uint8_t {
   HarmonicBreak, SequenceClimb2, DomObsession, FinalExplosion
 };
 
+/// @brief Toccata style mode for Dramaticus 8-phase sections.
+/// Groups related ToccataSectionId phases into stylistic categories.
+enum class ToccataStyleMode : uint8_t {
+  Phantasticus,   ///< Gesture, EchoCollapse — rhetorical gestures and echo effects.
+  Recitativo,     ///< RecitExpansion — free declamatory style.
+  Sequence,       ///< SequenceClimb1/2 — sequential motivic development.
+  Transitional    ///< HarmonicBreak, DomObsession, FinalExplosion — harmonic transitions.
+};
+
 // ---------------------------------------------------------------------------
 // Enums: Solo String Flow system
 // ---------------------------------------------------------------------------
@@ -348,6 +357,21 @@ const char* durationScaleToString(DurationScale scale);
 DurationScale durationScaleFromString(const std::string& str);
 
 // ---------------------------------------------------------------------------
+// Enums: Gesture system
+// ---------------------------------------------------------------------------
+
+/// @brief Role of a note within a multi-note gesture group.
+/// Notes sharing the same gesture_id form a single musical gesture.
+enum class GestureRole : uint8_t {
+  None = 0,      ///< Not part of any gesture.
+  Leader,        ///< Primary melodic voice of the gesture.
+  OctaveEcho,    ///< Octave doubling of the leader.
+  LowerEcho,     ///< Lower register echo of the leader.
+  PedalHit,      ///< Pedal strike accompanying the gesture.
+  Accumulation   ///< Chord buildup within the gesture.
+};
+
+// ---------------------------------------------------------------------------
 // Data structures
 // ---------------------------------------------------------------------------
 
@@ -370,6 +394,8 @@ struct NoteEvent {
   uint8_t bow_direction = 0;  ///< BowDirection cast (0=Natural, 1=Down, 2=Up).
   uint8_t is_harmonic = 0;    ///< 0=normal, 1=natural harmonic.
   uint8_t modified_by = 0;    ///< NoteModifiedBy bit flags.
+  uint16_t gesture_id = 0;    ///< Gesture group id (0 = not part of gesture).
+  GestureRole gesture_role = GestureRole::None;  ///< Role within the gesture group.
 };
 
 /// Track: a collection of note events on a single MIDI channel.

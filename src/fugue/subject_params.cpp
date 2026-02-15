@@ -265,4 +265,41 @@ void applyArchetypeConstraints(CharacterParams& params,
   }
 }
 
+AccelProfile getAccelProfile(SubjectCharacter character,
+                             FugueArchetype /* archetype */,
+                             std::mt19937& rng) {
+  AccelProfile profile;
+
+  // Character-specific None probability (equal rhythm).
+  float none_prob = 0.25f;  // Default 25%.
+  switch (character) {
+    case SubjectCharacter::Severe:
+      none_prob = 0.30f;   // Severe: slightly higher None probability.
+      break;
+    case SubjectCharacter::Playful:
+      none_prob = 0.25f;
+      break;
+    case SubjectCharacter::Noble:
+      none_prob = 0.25f;
+      break;
+    case SubjectCharacter::Restless:
+      none_prob = 0.15f;   // Restless: lower None probability.
+      break;
+  }
+
+  if (rng::rollProbability(rng, none_prob)) {
+    profile.curve_type = AccelCurveType::None;
+  } else {
+    // Remaining: 70% EaseIn, 30% Linear.
+    profile.curve_type = rng::rollProbability(rng, 0.70f)
+                             ? AccelCurveType::EaseIn
+                             : AccelCurveType::Linear;
+  }
+
+  // min_dur: organ = kSixteenthNote (120 ticks) for all combinations.
+  profile.min_dur = kSixteenthNote;
+
+  return profile;
+}
+
 }  // namespace bach

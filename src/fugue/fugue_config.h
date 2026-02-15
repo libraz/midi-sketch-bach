@@ -110,21 +110,24 @@ struct FugueEnergyCurve {
   /// @param rng Random number generator.
   /// @param other_voice_duration Duration of the most recent note in an adjacent voice
   ///        (0 = unknown). Used for rhythmic complementarity.
+  /// @param is_bass If true, apply bass-voice duration bias (longer notes,
+  ///        near-zero sixteenths). Based on BWV578 pedal avg 0.51 beats.
   /// @return Selected duration in ticks.
   static Tick selectDuration(float energy, Tick tick, std::mt19937& rng,
-                             Tick other_voice_duration = 0) {
+                             Tick other_voice_duration = 0,
+                             bool is_bass = false) {
     // Standard Baroque durations with base weights.
     struct DurWeight {
       Tick duration;
       float weight;
     };
     DurWeight candidates[] = {
-        {kTicksPerBar,          0.5f},   // Whole note
-        {kTicksPerBeat * 2,     1.5f},   // Half note
-        {kTicksPerBeat * 3 / 2, 1.2f},   // Dotted quarter
-        {kTicksPerBeat,         3.0f},   // Quarter note
-        {kTicksPerBeat / 2,     2.0f},   // Eighth note
-        {kTicksPerBeat / 4,     0.8f},   // Sixteenth note
+        {kTicksPerBar,          is_bass ? 1.0f : 0.5f},   // Whole note
+        {kTicksPerBeat * 2,     is_bass ? 3.0f : 1.5f},   // Half note
+        {kTicksPerBeat * 3 / 2, is_bass ? 2.0f : 1.2f},   // Dotted quarter
+        {kTicksPerBeat,         3.0f},                      // Quarter note
+        {kTicksPerBeat / 2,     is_bass ? 1.0f : 2.0f},   // Eighth note
+        {kTicksPerBeat / 4,     is_bass ? 0.1f : 0.8f},   // Sixteenth note
     };
     constexpr int kNumCandidates = 6;
 
@@ -181,6 +184,18 @@ struct FugueEnergyCurve {
   }
 };
 
+/// @brief Target voice density per fugue phase (soft guidance).
+///
+/// Based on BWV578 analysis: 3-voice texture dominates (56%), 4-voice
+/// is rare (10%). Episodes should NOT always use full voice count.
+struct TextureDensityTarget {
+  /// Target active voice count for each phase (as fraction of num_voices).
+  /// 1.0 = all voices active, 0.75 = 3/4 of voices active.
+  float develop_density = 0.75f;   ///< Develop: mostly N-1 voices.
+  float stretto_density = 0.90f;   ///< Stretto: near-tutti.
+  float max_tutti_ratio = 0.15f;   ///< Max fraction of tutti time.
+};
+
 /// Configuration for fugue generation.
 struct FugueConfig {
   SubjectSource subject_source = SubjectSource::Generate;
@@ -199,7 +214,8 @@ struct FugueConfig {
   ModulationPlan modulation_plan;       ///< Key plan for episode modulations.
   bool has_modulation_plan = false;     ///< Whether modulation_plan was explicitly set.
   bool enable_picardy = true;           ///< Apply Picardy third in minor keys.
-};;
+  TextureDensityTarget density_target;  ///< Texture density guidance.
+};
 
 }  // namespace bach
 

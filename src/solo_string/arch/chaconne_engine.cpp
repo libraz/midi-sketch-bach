@@ -116,10 +116,89 @@ RhythmProfile selectRhythmProfile(std::mt19937& rng,
   return RhythmProfile::EighthNote;
 }
 
+/// @brief Classify a TextureType into voice-count category for arc tracking.
+///
+/// Categories match BWV1004_5 reference texture density analysis:
+///   - 1-voice: SingleLine, Arpeggiated, ScalePassage (single melodic line)
+///   - 2-voice: ImpliedPolyphony, Bariolage (implied or actual double stops)
+///   - 3-voice: FullChords (3-4 note chords, climax only)
+///
+/// @param texture The texture type to classify.
+/// @return 1, 2, or 3 indicating the voice-count category.
+int textureVoiceCategory(TextureType texture) {
+  switch (texture) {
+    case TextureType::SingleLine:
+    case TextureType::Arpeggiated:
+    case TextureType::ScalePassage:
+      return 1;
+    case TextureType::ImpliedPolyphony:
+    case TextureType::Bariolage:
+      return 2;
+    case TextureType::FullChords:
+      return 3;
+  }
+  return 1;
+}
+
+/// @brief Apply texture arc bias to override the role-selected texture.
+///
+/// Uses the TextureArcTarget for the variation's role to probabilistically
+/// override the selected texture towards the arc's target distribution.
+/// This is a soft bias: it only overrides with a probability proportional
+/// to the difference between the current category and the arc target.
+///
+/// Anchor roles (Establish, Resolve) and Accumulate are not overridden,
+/// as their textures are fixed by design.
+///
+/// @param rng Mersenne Twister RNG.
+/// @param current_texture The texture selected by role-based logic.
+/// @param role The variation's structural role.
+/// @return Potentially overridden TextureType.
+TextureType applyTextureArcBias(std::mt19937& rng, TextureType current_texture,
+                                VariationRole role) {
+  // Anchor roles and Accumulate have fixed textures -- do not override.
+  if (role == VariationRole::Establish || role == VariationRole::Resolve ||
+      role == VariationRole::Accumulate) {
+    return current_texture;
+  }
+
+  TextureArcTarget arc = getTextureArcTarget(role);
+  int category = textureVoiceCategory(current_texture);
+
+  // If the arc strongly favors SingleLine and we picked a multi-voice texture,
+  // probabilistically override to SingleLine.
+  if (category > 1 && arc.single_line_ratio > 0.55f) {
+    float override_prob = (arc.single_line_ratio - 0.50f);  // 0.0 to 0.20
+    if (rng::rollProbability(rng, override_prob)) {
+      // Pick a 1-voice texture randomly from the palette.
+      return rng::selectWeighted(
+          rng,
+          std::vector<TextureType>{TextureType::SingleLine, TextureType::Arpeggiated,
+                                   TextureType::ScalePassage},
+          {0.50f, 0.30f, 0.20f});
+    }
+  }
+
+  // If the arc wants more multi-voice and we picked SingleLine,
+  // probabilistically override to a 2-voice texture.
+  if (category == 1 && arc.double_stop_ratio + arc.chord_ratio > 0.35f) {
+    float override_prob = (arc.double_stop_ratio + arc.chord_ratio - 0.30f) * 0.5f;
+    if (rng::rollProbability(rng, override_prob)) {
+      return rng::selectWeighted(
+          rng,
+          std::vector<TextureType>{TextureType::ImpliedPolyphony, TextureType::Bariolage},
+          {0.60f, 0.40f});
+    }
+  }
+
+  return current_texture;
+}
+
 /// @brief Build a TextureContext for a variation from its config and the engine state.
 ///
-/// Applies major section constraints when appropriate and sets climax design
-/// values directly for Accumulate variations (Principle 4: Trust Design Values).
+/// Applies texture arc bias for non-anchor roles, major section constraints
+/// when appropriate, and sets climax design values directly for Accumulate
+/// variations (Principle 4: Trust Design Values).
 /// Accumulate variations are differentiated by accumulate_index (0=build-up,
 /// 1=peak, 2+=wind-down).
 ///
@@ -154,6 +233,12 @@ TextureContext buildTextureContext(const ChaconneVariation& variation,
   ctx.seed = seed;
   ctx.rhythm_profile = rhythm_profile;
   ctx.variation_type = variation.type;
+
+  // Apply texture arc bias for non-anchor roles (soft override toward BWV1004 distribution).
+  {
+    std::mt19937 arc_rng(seed + 0xA2C0u);  // Separate RNG stream for arc bias.
+    ctx.texture = applyTextureArcBias(arc_rng, ctx.texture, variation.role);
+  }
 
   // Apply seed-dependent register variation for non-anchor, non-climax variations.
   // Establish, Resolve, and Accumulate retain design-fixed register.

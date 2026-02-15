@@ -59,6 +59,11 @@ namespace {
 // ---------------------------------------------------------------------------
 
 /// @brief Duration of an 8th note in ticks.
+/// NOTE: The chaconne is historically in 3/4 time, but this implementation
+/// uses the global kTicksPerBar=1920 and kBeatsPerBar=4 (4/4) constants
+/// throughout. The beat grid (kTicksPerBeat=480) is correct regardless of
+/// time signature, but bar-level calculations assume 4 beats per bar.
+/// Changing to 3/4 would require a larger refactor beyond S3 scope.
 constexpr Tick kEighthDuration = kTicksPerBeat / 2;  // 240
 
 /// @brief Duration of a chord grace note in ticks (used in FullChords).
@@ -218,10 +223,13 @@ std::vector<uint8_t> getScalePitches(Key key, bool is_minor,
 /// @param base_velocity Base velocity value.
 /// @param is_climax True for additional climax accent.
 /// @return Adjusted velocity value clamped to [1, 127].
+/// @note Assumes 4/4 time (kBeatsPerBar=4). For a historically-accurate
+/// chaconne in 3/4, beat 2 accent would need adjustment.
 uint8_t computeVelocity(Tick tick_in_bar, uint8_t base_velocity, bool is_climax) {
   int vel = static_cast<int>(base_velocity);
 
   // Strong beat accent (beat 0 and beat 2 in 4/4).
+  // NOTE: In 3/4 chaconne, beat 0 is the only strong beat.
   uint8_t beat = static_cast<uint8_t>(tick_in_bar / kTicksPerBeat);
   if (tick_in_bar % kTicksPerBeat == 0 && (beat == 0 || beat == 2)) {
     vel += kStrongBeatBoost;

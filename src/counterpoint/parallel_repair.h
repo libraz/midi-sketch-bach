@@ -31,6 +31,11 @@ struct ParallelRepairParams {
 
   /// Maximum repair iterations (default 3).
   int max_iterations = 3;
+
+  /// Maximum parallel perfects to tolerate after repair (0 = fix all).
+  /// BWV578 reference: ~4% parallel ratio. Budget allows a small number
+  /// of parallels through repair for natural texture.
+  int parallel_budget = 0;
 };
 
 /// @brief Repair parallel perfect consonances in a note list.

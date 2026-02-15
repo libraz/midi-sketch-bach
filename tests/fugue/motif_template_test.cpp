@@ -159,16 +159,16 @@ TEST(MotifTemplateTest, FourTemplatesPerCharacter) {
   }
 }
 
-TEST(MotifTemplateTest, TemplateIdxWrapsModulo4) {
-  // template_idx values 0 and 4 should return the same template.
+TEST(MotifTemplateTest, TemplateIdxWrapsModulo5) {
+  // template_idx values 0 and 5 should return the same template (mod 5).
   for (auto chr : {SubjectCharacter::Severe, SubjectCharacter::Playful,
                    SubjectCharacter::Noble, SubjectCharacter::Restless}) {
     auto [mot_a0, mot_b0] = motifTemplatesForCharacter(chr, 0);
-    auto [mot_a4, mot_b4] = motifTemplatesForCharacter(chr, 4);
-    EXPECT_EQ(mot_a0.degree_offsets, mot_a4.degree_offsets);
-    EXPECT_EQ(mot_b0.degree_offsets, mot_b4.degree_offsets);
-    EXPECT_EQ(mot_a0.durations, mot_a4.durations);
-    EXPECT_EQ(mot_b0.durations, mot_b4.durations);
+    auto [mot_a5, mot_b5] = motifTemplatesForCharacter(chr, 5);
+    EXPECT_EQ(mot_a0.degree_offsets, mot_a5.degree_offsets);
+    EXPECT_EQ(mot_b0.degree_offsets, mot_b5.degree_offsets);
+    EXPECT_EQ(mot_a0.durations, mot_a5.durations);
+    EXPECT_EQ(mot_b0.durations, mot_b5.durations);
   }
 }
 
