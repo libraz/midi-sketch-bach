@@ -1303,7 +1303,7 @@ PreludeResult generatePrelude(const PreludeConfig& config) {
       return isChordTone(p, timeline.getAt(t));
     };
     lr_params.vertical_safe =
-        makeVerticalSafeCallback(timeline, all_notes, num_voices);
+        makeVerticalSafeWithParallelCheck(timeline, all_notes, num_voices);
     resolveLeaps(all_notes, lr_params);
 
     // Second parallel-perfect repair pass after leap resolution.
@@ -1313,7 +1313,7 @@ PreludeResult generatePrelude(const PreludeConfig& config) {
       pp_params.scale = config.key.is_minor ? ScaleType::HarmonicMinor : ScaleType::Major;
       pp_params.key_at_tick = lr_params.key_at_tick;
       pp_params.voice_range_static = lr_params.voice_range_static;
-      pp_params.max_iterations = 5;
+      pp_params.max_iterations = 2;
       repairParallelPerfect(all_notes, pp_params);
     }
   }
@@ -1331,7 +1331,7 @@ PreludeResult generatePrelude(const PreludeConfig& config) {
       return {getVoiceLowPitch(v), getVoiceHighPitch(v)};
     };
     repair_params.vertical_safe =
-        makeVerticalSafeCallback(timeline, all_notes, num_voices);
+        makeVerticalSafeWithParallelCheck(timeline, all_notes, num_voices);
     repairRepeatedNotes(all_notes, repair_params);
   }
 

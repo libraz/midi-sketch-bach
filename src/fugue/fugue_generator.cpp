@@ -10,6 +10,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <functional>
+#include <optional>
 #include <random>
 
 #include "core/gm_program.h"
@@ -25,6 +26,7 @@
 #include "counterpoint/cross_relation.h"
 #include "counterpoint/leap_resolution.h"
 #include "counterpoint/repeated_note_repair.h"
+#include "counterpoint/vertical_safe.h"
 #include "core/note_creator.h"
 #include "fugue/answer.h"
 #include "fugue/archetype_policy.h"
@@ -641,6 +643,7 @@ std::vector<NoteEvent> createCodaNotes(Tick start_tick, Tick duration,
         }
       }
     }
+
   }
 
   // =========================================================================
@@ -1975,6 +1978,9 @@ FugueResult generateFugue(const FugueConfig& config) {
       lr_params.is_chord_tone = [&](Tick t, uint8_t p) {
         return isChordTone(p, detailed_timeline.getAt(t));
       };
+      lr_params.vertical_safe =
+          makeVerticalSafeWithParallelCheck(detailed_timeline, all_notes,
+                                            num_voices);
       resolveLeaps(all_notes, lr_params);
     }
 
@@ -2702,7 +2708,7 @@ FugueResult generateFugue(const FugueConfig& config) {
       final_repair_params.voice_range_static = [&](uint8_t v) {
         return getFugueVoiceRange(v, num_voices);
       };
-      final_repair_params.max_iterations = 5;
+      final_repair_params.max_iterations = 3;
       repairParallelPerfect(all_notes, final_repair_params);
     }
 
@@ -2780,10 +2786,12 @@ FugueResult generateFugue(const FugueConfig& config) {
   result.generation_timeline = detailed_timeline;
 
   // =========================================================================
-  // Coda proximity enforcement: after all post-processing, ensure coda held
-  // chord notes are within leap limits of the (now post-processed) pre-coda
-  // pitches.  createCodaNotes targets raw pre-coda pitches, but post-processing
-  // can shift pre-coda notes significantly, creating large entry jumps.
+  // Coda proximity enforcement (top-down greedy): after all post-processing,
+  // ensure coda held chord notes satisfy three constraints in priority order:
+  //   (a) ceiling (strict descending order) — structural guarantee
+  //   (b) jump limit — outer 12st, inner 9st (relaxable)
+  //   (c) proximity — closest chord tone to last pre-coda pitch
+  // Voice 0 is processed first to anchor the ceiling.
   // =========================================================================
   {
     auto codas = structure.getSectionsByType(SectionType::Coda);
@@ -2803,45 +2811,155 @@ FugueResult generateFugue(const FugueConfig& config) {
       int coda_chord_pcs[] = {tonic_midi % 12, (tonic_midi + ct) % 12,
                               (tonic_midi + 7) % 12};
 
-      for (uint8_t v = 0; v < num_voices; ++v) {
-        uint8_t last_pre_pitch = 0;
-        size_t first_coda_idx = SIZE_MAX;
-        for (size_t i = 0; i < all_notes.size(); ++i) {
-          if (all_notes[i].voice != v) continue;
-          if (all_notes[i].start_tick < coda_start) {
-            last_pre_pitch = all_notes[i].pitch;
-          } else if (first_coda_idx == SIZE_MAX &&
-                     all_notes[i].source == BachNoteSource::Coda) {
-            first_coda_idx = i;
-          }
+      // Collect last_pre_pitch and first_coda_idx per voice (single pass).
+      uint8_t last_pre_pitch[5] = {0, 0, 0, 0, 0};
+      size_t first_coda_idx[5] = {SIZE_MAX, SIZE_MAX, SIZE_MAX, SIZE_MAX,
+                                   SIZE_MAX};
+      for (size_t i = 0; i < all_notes.size(); ++i) {
+        uint8_t v = all_notes[i].voice;
+        if (v >= num_voices) continue;
+        if (all_notes[i].start_tick < coda_start) {
+          last_pre_pitch[v] = all_notes[i].pitch;
+        } else if (first_coda_idx[v] == SIZE_MAX &&
+                   all_notes[i].source == BachNoteSource::Coda) {
+          first_coda_idx[v] = i;
         }
-        if (first_coda_idx == SIZE_MAX || last_pre_pitch == 0) continue;
+      }
 
-        int jump = std::abs(static_cast<int>(all_notes[first_coda_idx].pitch) -
-                            static_cast<int>(last_pre_pitch));
-        bool is_outer = (v == 0 || v == num_voices - 1);
-        int max_leap = is_outer ? 12 : 9;
-        if (jump <= max_leap) continue;
-
-        // Find nearest tonic chord tone to last_pre_pitch within voice range.
-        auto [vlo, vhi] = getFugueVoiceRange(v, num_voices);
-        int best_dist = jump;
-        uint8_t best_pitch = all_notes[first_coda_idx].pitch;
+      // Find nearest chord tone to target within constraints.
+      // Returns std::nullopt if no candidate exists.
+      auto findChordTone = [&](uint8_t target, uint8_t vlo, uint8_t vhi,
+                               int pitch_ceiling,
+                               int max_leap) -> std::optional<uint8_t> {
+        int best_dist = max_leap + 1;
+        std::optional<uint8_t> best;
+        int effective_hi = std::min(static_cast<int>(vhi), pitch_ceiling);
         for (int pc : coda_chord_pcs) {
           int base = pc;
-          while (base < vlo) base += 12;
-          for (int p = base; p <= vhi; p += 12) {
-            int dist = std::abs(p - static_cast<int>(last_pre_pitch));
-            if (dist < best_dist) {
+          while (base < static_cast<int>(vlo)) base += 12;
+          for (int p = base; p <= effective_hi; p += 12) {
+            int dist = std::abs(p - static_cast<int>(target));
+            if (dist <= max_leap && dist < best_dist) {
               best_dist = dist;
-              best_pitch = static_cast<uint8_t>(p);
+              best = static_cast<uint8_t>(p);
             }
           }
         }
-        all_notes[first_coda_idx].pitch = best_pitch;
+        return best;
+      };
+
+      // Top-down greedy: voice 0 first, then 1..N-1 with descending ceiling.
+      int ceiling = 127;
+      for (uint8_t v = 0; v < num_voices; ++v) {
+        if (first_coda_idx[v] == SIZE_MAX || last_pre_pitch[v] == 0) continue;
+
+        auto [vlo, vhi] = getFugueVoiceRange(v, num_voices);
+        int effective_ceiling = (v == 0) ? static_cast<int>(vhi) : ceiling;
+        uint8_t cur_pitch = all_notes[first_coda_idx[v]].pitch;
+        int cur_jump = std::abs(static_cast<int>(cur_pitch) -
+                                static_cast<int>(last_pre_pitch[v]));
+        bool is_outer = (v == 0 || v == num_voices - 1);
+        int max_leap = is_outer ? 12 : 9;
+
+        // If current pitch satisfies ceiling AND jump, skip (no fix needed).
+        if (static_cast<int>(cur_pitch) <= effective_ceiling &&
+            cur_jump <= max_leap) {
+          ceiling = static_cast<int>(cur_pitch) - 1;
+          continue;
+        }
+
+        // Tier 1: ceiling + jump limit + nearest chord tone.
+        auto best = findChordTone(last_pre_pitch[v], vlo, vhi,
+                                  effective_ceiling, max_leap);
+
+        // Tier 2: ceiling + relaxed jump (inner 9→12, outer 12→15).
+        if (!best) {
+          int relaxed_leap = max_leap + 3;
+          best = findChordTone(last_pre_pitch[v], vlo, vhi,
+                               effective_ceiling, relaxed_leap);
+        }
+
+        // Tier 3: ceiling + no jump limit (nearest chord tone).
+        if (!best) {
+          best = findChordTone(last_pre_pitch[v], vlo, vhi,
+                               effective_ceiling, 127);
+        }
+
+        // Tier 4: no candidate found — keep current pitch, update ceiling.
+        if (!best) {
+          ceiling = static_cast<int>(cur_pitch) - 1;
+          continue;
+        }
+
+        all_notes[first_coda_idx[v]].pitch = best.value();
+        ceiling = static_cast<int>(best.value()) - 1;
+      }
+
+      // Post-fixup: if a lower voice still exceeds its max_leap due to a
+      // tight ceiling from the voice above, try raising the voice above to
+      // create more room.  This handles cases where the greedy pass locks
+      // in a satisfactory-but-suboptimal pitch for an inner voice, leaving
+      // the bass with no chord tone within its jump limit.
+      for (uint8_t v = 1; v < num_voices; ++v) {
+        if (first_coda_idx[v] == SIZE_MAX || last_pre_pitch[v] == 0) continue;
+        uint8_t cur_v = all_notes[first_coda_idx[v]].pitch;
+        int jump_v = std::abs(static_cast<int>(cur_v) -
+                              static_cast<int>(last_pre_pitch[v]));
+        bool is_outer_v = (v == 0 || v == num_voices - 1);
+        int max_leap_v = is_outer_v ? 12 : 9;
+        if (jump_v <= max_leap_v) continue;
+
+        // Try raising voice v-1 to create a higher ceiling for voice v.
+        uint8_t uv = v - 1;
+        if (first_coda_idx[uv] == SIZE_MAX) continue;
+
+        auto [vlo, vhi] = getFugueVoiceRange(v, num_voices);
+        auto [ulo, uhi] = getFugueVoiceRange(uv, num_voices);
+        int upper_ceil =
+            (uv == 0)
+                ? static_cast<int>(uhi)
+                : (first_coda_idx[uv - 1] != SIZE_MAX
+                       ? static_cast<int>(
+                             all_notes[first_coda_idx[uv - 1]].pitch) -
+                             1
+                       : 127);
+        bool is_outer_u = (uv == 0 || uv == num_voices - 1);
+        int max_leap_u = is_outer_u ? 12 : 9;
+
+        int best_u = -1;
+        int best_v_pitch = -1;
+        int best_total = 999;
+        int eff_hi_u = std::min(static_cast<int>(uhi), upper_ceil);
+        for (int pc : coda_chord_pcs) {
+          int base = pc;
+          while (base < static_cast<int>(ulo)) base += 12;
+          for (int pu = base; pu <= eff_hi_u; pu += 12) {
+            int jump_u = std::abs(pu - static_cast<int>(last_pre_pitch[uv]));
+            if (jump_u > max_leap_u + 6) continue;  // Allow relaxed for upper.
+            int new_ceil_v = pu - 1;
+            auto cand = findChordTone(last_pre_pitch[v], vlo, vhi,
+                                      new_ceil_v, max_leap_v);
+            if (!cand) continue;
+            int jv = std::abs(static_cast<int>(*cand) -
+                              static_cast<int>(last_pre_pitch[v]));
+            int total = jump_u + jv;
+            if (total < best_total) {
+              best_total = total;
+              best_u = pu;
+              best_v_pitch = static_cast<int>(*cand);
+            }
+          }
+        }
+        if (best_u >= 0 && best_v_pitch >= 0) {
+          all_notes[first_coda_idx[uv]].pitch = static_cast<uint8_t>(best_u);
+          all_notes[first_coda_idx[v]].pitch =
+              static_cast<uint8_t>(best_v_pitch);
+        }
       }
     }
   }
+
+
 
   // =========================================================================
   // Create tracks and assign notes

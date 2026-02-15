@@ -1725,7 +1725,7 @@ ToccataResult generateDramaticusToccata(const ToccataConfig& config) {
         return isChordTone(p, timeline.getAt(t));
       };
       lr_params.vertical_safe =
-          makeVerticalSafeCallback(timeline, all_notes, num_voices);
+          makeVerticalSafeWithParallelCheck(timeline, all_notes, num_voices);
       resolveLeaps(all_notes, lr_params);
 
       // Second parallel-perfect repair pass.
@@ -1736,7 +1736,7 @@ ToccataResult generateDramaticusToccata(const ToccataConfig& config) {
                                               : ScaleType::Major;
         pp_params.key_at_tick = lr_params.key_at_tick;
         pp_params.voice_range_static = lr_params.voice_range_static;
-        pp_params.max_iterations = 5;
+        pp_params.max_iterations = 2;
         repairParallelPerfect(all_notes, pp_params);
       }
     }

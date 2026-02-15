@@ -2019,7 +2019,7 @@ TrioSonataMovement generateMovement(const KeySignature& key_sig, Tick num_bars,
         return isChordTone(p, timeline.getAt(t));
       };
       lr_params.vertical_safe =
-          makeVerticalSafeCallback(timeline, validated, kTrioVoiceCount);
+          makeVerticalSafeWithParallelCheck(timeline, validated, kTrioVoiceCount);
       resolveLeaps(validated, lr_params);
 
       // Second parallel-perfect repair pass after leap resolution.
@@ -2029,7 +2029,7 @@ TrioSonataMovement generateMovement(const KeySignature& key_sig, Tick num_bars,
         pp_params.scale = scale;
         pp_params.key_at_tick = lr_params.key_at_tick;
         pp_params.voice_range_static = lr_params.voice_range_static;
-        pp_params.max_iterations = 5;
+        pp_params.max_iterations = 2;
         repairParallelPerfect(validated, pp_params);
       }
     }
@@ -2141,7 +2141,7 @@ TrioSonataMovement generateMovement(const KeySignature& key_sig, Tick num_bars,
         return isChordTone(p, timeline.getAt(t));
       };
       lr_params.vertical_safe =
-          makeVerticalSafeCallback(timeline, validated, kTrioVoiceCount);
+          makeVerticalSafeWithParallelCheck(timeline, validated, kTrioVoiceCount);
       resolveLeaps(validated, lr_params);
 
       // Second parallel-perfect repair pass after leap resolution.
@@ -2151,7 +2151,7 @@ TrioSonataMovement generateMovement(const KeySignature& key_sig, Tick num_bars,
         pp_params.scale = scale;
         pp_params.key_at_tick = lr_params.key_at_tick;
         pp_params.voice_range_static = lr_params.voice_range_static;
-        pp_params.max_iterations = 5;
+        pp_params.max_iterations = 2;
         repairParallelPerfect(validated, pp_params);
       }
     }
@@ -2383,7 +2383,7 @@ TrioSonataMovement generateMovement(const KeySignature& key_sig, Tick num_bars,
       if (voice < vr_final.size()) return vr_final[voice];
       return std::make_pair(static_cast<uint8_t>(0), static_cast<uint8_t>(127));
     };
-    pp_final.max_iterations = 3;
+    pp_final.max_iterations = 1;
     repairParallelPerfect(final_notes, pp_final);
     // Redistribute repaired notes back to tracks.
     for (auto& track : tracks) track.notes.clear();

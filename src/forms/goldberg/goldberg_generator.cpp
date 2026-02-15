@@ -548,8 +548,8 @@ GoldbergResult GoldbergGenerator::generate(const GoldbergConfig& config) const {
         }
         return false;
       };
-      // Vertical safety: reject candidates creating harsh dissonance (m2/M7)
-      // on strong beats against sounding voices.
+      // Vertical safety: reject harsh dissonance (m2/M7) on strong beats
+      // and prevent parallel perfect consonances (P5/P8).
       lr_params.vertical_safe = [&](Tick tick, uint8_t voice,
                                      uint8_t cand_pitch) -> bool {
         uint8_t beat = static_cast<uint8_t>(
@@ -563,6 +563,50 @@ GoldbergResult GoldbergGenerator::generate(const GoldbergConfig& config) const {
               absoluteInterval(cand_pitch, n.pitch));
           if (reduced == 1 || reduced == 11) return false;  // m2/M7 reject.
         }
+
+        // Parallel P5/P8 check against each other voice.
+        Tick prev_tick = (tick >= kTicksPerBeat) ? tick - kTicksPerBeat : 0;
+        if (prev_tick == tick) return true;
+
+        auto pitchAt = [&](uint8_t v, Tick t) -> int {
+          for (const auto& n : all_notes) {
+            if (n.voice != v) continue;
+            if (n.start_tick <= t && n.start_tick + n.duration > t) {
+              return static_cast<int>(n.pitch);
+            }
+          }
+          return -1;
+        };
+
+        for (uint8_t ov = 0; ov < kGoldbergVoices; ++ov) {
+          if (ov == voice) continue;
+          int other_curr = pitchAt(ov, tick);
+          if (other_curr < 0) continue;
+          int other_prev = pitchAt(ov, prev_tick);
+          if (other_prev < 0) continue;
+          int cand_prev = pitchAt(voice, prev_tick);
+          if (cand_prev < 0) continue;
+
+          int curr_interval =
+              std::abs(static_cast<int>(cand_pitch) - other_curr);
+          int prev_interval = std::abs(cand_prev - other_prev);
+
+          if (!interval_util::isPerfectConsonance(curr_interval) ||
+              !interval_util::isPerfectConsonance(prev_interval))
+            continue;
+
+          int curr_simple = interval_util::compoundToSimple(curr_interval);
+          int prev_simple = interval_util::compoundToSimple(prev_interval);
+          if (curr_simple != prev_simple) continue;
+
+          int motion_cand = static_cast<int>(cand_pitch) - cand_prev;
+          int motion_other = other_curr - other_prev;
+          if (motion_cand != 0 && motion_other != 0 &&
+              (motion_cand > 0) == (motion_other > 0)) {
+            return false;  // Parallel perfect consonance detected.
+          }
+        }
+
         return true;
       };
       resolveLeaps(all_notes, lr_params);
@@ -656,7 +700,7 @@ GoldbergResult GoldbergGenerator::generate(const GoldbergConfig& config) const {
         }
         return {kHarpsichordGlobalLow, kHarpsichordGlobalHigh};
       };
-      pp_params.max_iterations = 8;
+      pp_params.max_iterations = 3;
       repairParallelPerfect(all_notes, pp_params);
     }
 

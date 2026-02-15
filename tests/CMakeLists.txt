@@ -50,7 +50,9 @@ set(BACH_TEST_SOURCES
   counterpoint/melodic_context_test.cpp
   counterpoint/leap_resolution_test.cpp
   counterpoint/repeated_note_repair_test.cpp
+  counterpoint/parallel_repair_test.cpp
   counterpoint/collision_resolver_entry_test.cpp
+  counterpoint/vertical_safe_test.cpp
 
   # counterpoint/ (cantus firmus)
   counterpoint/cantus_firmus_test.cpp

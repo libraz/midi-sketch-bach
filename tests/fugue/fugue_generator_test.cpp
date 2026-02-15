@@ -1260,5 +1260,128 @@ TEST(FugueGeneratorTest, CodaV7_FallbackPitchClassPreserved) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Coda voice crossing regression tests
+// ---------------------------------------------------------------------------
+
+TEST(FugueGeneratorTest, CodaStage1_HeldChordStrictOrder) {
+  // Verify that Stage 1 held chord voices (voice >= 1) maintain strict
+  // descending pitch order at every tick in [coda_start, coda_start + 2*bar).
+  // Voice 0 motif overlap is NOT checked (allowed by design).
+  uint32_t seeds[] = {2, 3, 6, 7, 13};
+  for (uint32_t seed : seeds) {
+    for (uint8_t nv : {2, 3, 4, 5}) {
+      FugueConfig config = makeTestConfig(seed);
+      config.num_voices = nv;
+      FugueResult result = generateFugue(config);
+      ASSERT_TRUE(result.success)
+          << "Seed " << seed << ", voices=" << static_cast<int>(nv);
+
+      auto codas = result.structure.getSectionsByType(SectionType::Coda);
+      if (codas.empty()) continue;
+      Tick coda_start = codas[0].start_tick;
+      Tick stage1_end = coda_start + kTicksPerBar * 2;
+
+      // Collect all ticks in Stage 1 for held chord voices.
+      std::set<Tick> check_ticks;
+      for (const auto& track : result.tracks) {
+        for (const auto& note : track.notes) {
+          if (note.voice >= 1 && note.source == BachNoteSource::Coda &&
+              note.start_tick >= coda_start && note.start_tick < stage1_end) {
+            check_ticks.insert(note.start_tick);
+          }
+        }
+      }
+
+      for (Tick tick : check_ticks) {
+        // Gather held chord pitches (voice >= 1) active at this tick.
+        uint8_t pitches[5] = {0, 0, 0, 0, 0};
+        for (const auto& track : result.tracks) {
+          for (const auto& note : track.notes) {
+            if (note.voice >= 1 && note.voice < 5 &&
+                note.source == BachNoteSource::Coda &&
+                note.start_tick <= tick &&
+                tick < note.start_tick + note.duration) {
+              pitches[note.voice] = note.pitch;
+            }
+          }
+        }
+        uint8_t vc = std::min(nv, static_cast<uint8_t>(5));
+        for (uint8_t v = 1; v + 1 < vc; ++v) {
+          if (pitches[v] > 0 && pitches[v + 1] > 0) {
+            EXPECT_GT(pitches[v], pitches[v + 1])
+                << "HeldChordStrictOrder: seed " << seed
+                << ", voices=" << static_cast<int>(nv)
+                << ", tick " << tick
+                << ": v" << static_cast<int>(v) << "("
+                << static_cast<int>(pitches[v]) << ") <= v"
+                << static_cast<int>(v + 1) << "("
+                << static_cast<int>(pitches[v + 1]) << ")";
+          }
+        }
+      }
+    }
+  }
+}
+
+TEST(FugueGeneratorTest, CodaProximity_NoCrossing) {
+  // Verify that held chord voices (voice >= 1) maintain strict descending
+  // order across the entire coda section.  Voice 0 (motif) overlap with held
+  // chords is allowed by design.
+  uint32_t seeds[] = {1, 42, 43, 44};
+  for (uint32_t seed : seeds) {
+    for (uint8_t nv : {3, 4, 5}) {
+      FugueConfig config = makeTestConfig(seed);
+      config.num_voices = nv;
+      FugueResult result = generateFugue(config);
+      ASSERT_TRUE(result.success)
+          << "Seed " << seed << ", voices=" << static_cast<int>(nv);
+
+      auto codas = result.structure.getSectionsByType(SectionType::Coda);
+      if (codas.empty()) continue;
+      Tick coda_start = codas[0].start_tick;
+      Tick coda_end = codas[0].end_tick;
+
+      // Collect all ticks where Coda-source notes are active.
+      std::set<Tick> check_ticks;
+      for (const auto& track : result.tracks) {
+        for (const auto& note : track.notes) {
+          if (note.source == BachNoteSource::Coda &&
+              note.start_tick >= coda_start && note.start_tick < coda_end) {
+            check_ticks.insert(note.start_tick);
+          }
+        }
+      }
+
+      for (Tick tick : check_ticks) {
+        uint8_t pitches[5] = {0, 0, 0, 0, 0};
+        for (const auto& track : result.tracks) {
+          for (const auto& note : track.notes) {
+            if (note.voice < 5 && note.source == BachNoteSource::Coda &&
+                note.start_tick <= tick &&
+                tick < note.start_tick + note.duration) {
+              pitches[note.voice] = note.pitch;
+            }
+          }
+        }
+        uint8_t vc = std::min(nv, static_cast<uint8_t>(5));
+        // Start from voice 1: voice0 motif overlap is allowed.
+        for (uint8_t v = 1; v + 1 < vc; ++v) {
+          if (pitches[v] > 0 && pitches[v + 1] > 0) {
+            EXPECT_GT(pitches[v], pitches[v + 1])
+                << "CodaProximityNoCrossing: seed " << seed
+                << ", voices=" << static_cast<int>(nv)
+                << ", tick " << tick
+                << ": v" << static_cast<int>(v) << "("
+                << static_cast<int>(pitches[v]) << ") <= v"
+                << static_cast<int>(v + 1) << "("
+                << static_cast<int>(pitches[v + 1]) << ")";
+          }
+        }
+      }
+    }
+  }
+}
+
 }  // namespace
 }  // namespace bach

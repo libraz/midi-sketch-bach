@@ -5,6 +5,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <functional>
+#include <optional>
 #include <set>
 #include <vector>
 
@@ -13,6 +15,195 @@
 #include "core/scale.h"
 
 namespace bach {
+
+namespace {
+
+/// Context for a single shift-candidate validation pass.
+/// Encapsulates the modal differences between direct-fix (shift at current tick)
+/// and adjacent-fix (shift at previous tick) so that tryShiftCandidate can
+/// implement both paths with a single validation pipeline.
+struct ShiftContext {
+  int note_idx;            ///< Index of note being shifted.
+  uint8_t voice;           ///< Voice of note being shifted.
+  Tick check_tick;         ///< Tick for consonance/crossing checks (direct: t, adjacent: pt).
+  Tick prev_tick;          ///< Previous beat tick (pt).
+  Tick curr_tick;          ///< Current beat tick (t).
+  int pitch_at_next_tick;  ///< For adjacent: unchanged pitch at t. -1 for direct mode.
+  // Original parallel context (for adjacent: verify break).
+  int orig_prev_pitch_a;  ///< Previous pitch in voice A (pp).
+  int orig_prev_pitch_b;  ///< Previous pitch in voice B (pb2).
+  int orig_curr_simple;   ///< Simple interval at current tick (cs).
+  uint8_t voice_a;        ///< Voice A of the detected parallel.
+  uint8_t voice_b;        ///< Voice B of the detected parallel.
+  int curr_pitch_a;       ///< Current pitch in voice A (ca).
+  int curr_pitch_b;       ///< Current pitch in voice B (cb).
+  bool check_crossing;    ///< true for direct fix, false for adjacent.
+};
+
+/// @brief Try each shift candidate in order. Return the first valid delta, or nullopt.
+///
+/// Validates each candidate pitch shift against MIDI range, diatonic scale,
+/// voice range, melodic leap, new-parallel, strong-beat consonance, and
+/// (optionally) voice-crossing constraints.  In adjacent mode (pitch_at_next_tick >= 0),
+/// also checks leap to next tick and verifies the shift actually breaks the
+/// original detected parallel.
+///
+/// @param notes Current note list (read-only for validation).
+/// @param params Repair parameters (key, scale, voice range, num_voices).
+/// @param ctx Shift context describing the note, ticks, and original parallel.
+/// @param shifts Array of candidate deltas to try.
+/// @param num_shifts Number of elements in shifts.
+/// @param sound_pitch Sounding pitch lookup: (voice, tick) -> pitch or -1.
+/// @param find_prev_pitch Previous-note pitch lookup: (voice, start_tick, exclude_idx) -> pitch.
+/// @return First valid delta, or std::nullopt if no candidate passes.
+std::optional<int> tryShiftCandidate(
+    const std::vector<NoteEvent>& notes,
+    const ParallelRepairParams& params,
+    const ShiftContext& ctx,
+    const int* shifts, int num_shifts,
+    const std::function<int(uint8_t, Tick)>& sound_pitch,
+    const std::function<int(uint8_t, Tick, int)>& find_prev_pitch) {
+  const int base_pitch = static_cast<int>(notes[ctx.note_idx].pitch);
+  const Key note_key = params.key_at_tick(notes[ctx.note_idx].start_tick);
+  const bool is_adjacent = (ctx.pitch_at_next_tick >= 0);
+
+  for (int idx = 0; idx < num_shifts; ++idx) {
+    int delta = shifts[idx];
+    int candidate = base_pitch + delta;
+
+    // 1. MIDI range check.
+    if (candidate < 0 || candidate > 127) continue;
+    uint8_t candidate_u8 = static_cast<uint8_t>(candidate);
+
+    // 2. Diatonic scale check for step shifts (not octave shifts).
+    if (std::abs(delta) <= 4 &&
+        !scale_util::isScaleTone(candidate_u8, note_key, params.scale))
+      continue;
+
+    // 3. Voice range check.
+    auto [range_lo, range_hi] = params.voice_range
+        ? params.voice_range(ctx.voice, notes[ctx.note_idx].start_tick)
+        : params.voice_range_static(ctx.voice);
+    if (candidate_u8 < range_lo || candidate_u8 > range_hi) continue;
+
+    // 4. Melodic leap: no more than octave from previous note in voice.
+    {
+      int prev_p = find_prev_pitch(ctx.voice, notes[ctx.note_idx].start_tick,
+                                   ctx.note_idx);
+      if (prev_p >= 0 && std::abs(candidate - prev_p) > 12) continue;
+    }
+
+    // 5. Adjacent-mode specific checks.
+    if (is_adjacent) {
+      // 5a. Melodic leap from pt to t must not exceed an octave.
+      if (std::abs(candidate - ctx.pitch_at_next_tick) > 12) continue;
+
+      // 5b. Verify this shift actually breaks the original parallel.
+      int new_prev_a = (ctx.voice == ctx.voice_a)
+          ? candidate : ctx.orig_prev_pitch_a;
+      int new_prev_b = (ctx.voice == ctx.voice_b)
+          ? candidate : ctx.orig_prev_pitch_b;
+      int new_pi = std::abs(new_prev_a - new_prev_b);
+      int orig_ci = std::abs(ctx.curr_pitch_a - ctx.curr_pitch_b);
+      bool still_par = false;
+      if (interval_util::isPerfectConsonance(new_pi) &&
+          interval_util::isPerfectConsonance(orig_ci)) {
+        int new_ps = interval_util::compoundToSimple(new_pi);
+        if (new_ps == ctx.orig_curr_simple) {
+          int nm_a = ctx.curr_pitch_a - new_prev_a;
+          int nm_b = ctx.curr_pitch_b - new_prev_b;
+          if (nm_a != 0 && nm_b != 0 && (nm_a > 0) == (nm_b > 0))
+            still_par = true;
+        }
+      }
+      if (still_par) continue;
+    }
+
+    // 6. Check no new parallel with any other voice.
+    //
+    // In direct mode the candidate replaces the note at curr_tick, so:
+    //   shifted voice: prev = soundPitch(voice, prev_tick), curr = candidate.
+    // In adjacent mode the candidate replaces the note at prev_tick, so:
+    //   shifted voice: prev = candidate, curr = pitch_at_next_tick.
+    int shifted_prev = is_adjacent ? candidate
+                                   : sound_pitch(ctx.voice, ctx.prev_tick);
+    int shifted_curr = is_adjacent ? ctx.pitch_at_next_tick : candidate;
+    {
+      bool new_par = false;
+      for (uint8_t ov_idx = 0; ov_idx < params.num_voices && !new_par;
+           ++ov_idx) {
+        if (ov_idx == ctx.voice) continue;
+        int ov_curr = sound_pitch(ov_idx, ctx.curr_tick);
+        int ov_prev = sound_pitch(ov_idx, ctx.prev_tick);
+        if (ov_curr < 0 || ov_prev < 0) continue;
+        // In direct mode, shifted_prev may be -1 if voice is silent at pt.
+        if (shifted_prev < 0) continue;
+        int prev_interval = std::abs(shifted_prev - ov_prev);
+        int curr_interval = std::abs(shifted_curr - ov_curr);
+        if (interval_util::isPerfectConsonance(prev_interval) &&
+            interval_util::isPerfectConsonance(curr_interval)) {
+          int prev_simple = interval_util::compoundToSimple(prev_interval);
+          int curr_simple = interval_util::compoundToSimple(curr_interval);
+          if (prev_simple == curr_simple) {
+            int motion_shifted = shifted_curr - shifted_prev;
+            int motion_other = ov_curr - ov_prev;
+            if (motion_shifted != 0 && motion_other != 0 &&
+                (motion_shifted > 0) == (motion_other > 0))
+              new_par = true;
+          }
+        }
+      }
+      if (new_par) continue;
+    }
+
+    // 7. Strong-beat consonance check: on beats 1 and 3 (4/4), reject
+    //    candidates that create dissonance with any active voice.
+    //    Uses check_tick (direct: t, adjacent: pt).  The candidate pitch
+    //    is always the pitch sounding at check_tick after the shift.
+    {
+      Tick beat = (ctx.check_tick % kTicksPerBar) / kTicksPerBeat;
+      if (beat == 0 || beat == 2) {
+        bool dissonant = false;
+        for (uint8_t ov_idx = 0;
+             ov_idx < params.num_voices && !dissonant; ++ov_idx) {
+          if (ov_idx == ctx.voice) continue;
+          int ov_pitch = sound_pitch(ov_idx, ctx.check_tick);
+          if (ov_pitch < 0) continue;
+          int ivl = interval_util::compoundToSimple(
+              std::abs(candidate - ov_pitch));
+          if (!interval_util::isConsonance(ivl)) {
+            // P4 is acceptable in 3+ voice contexts.
+            if (!(params.num_voices >= 3 && ivl == 5)) {
+              dissonant = true;
+            }
+          }
+        }
+        if (dissonant) continue;
+      }
+    }
+
+    // 8. Voice crossing check (direct fix only): reject if shift creates
+    //    crossing with any adjacent voice.
+    if (ctx.check_crossing) {
+      bool crosses = false;
+      for (uint8_t ov_idx = 0;
+           ov_idx < params.num_voices && !crosses; ++ov_idx) {
+        if (ov_idx == ctx.voice) continue;
+        int ov_pitch = sound_pitch(ov_idx, ctx.check_tick);
+        if (ov_pitch < 0) continue;
+        if (ctx.voice < ov_idx && candidate < ov_pitch) crosses = true;
+        if (ctx.voice > ov_idx && candidate > ov_pitch) crosses = true;
+      }
+      if (crosses) continue;
+    }
+
+    return delta;
+  }
+
+  return std::nullopt;
+}
+
+}  // namespace
 
 int repairParallelPerfect(std::vector<NoteEvent>& notes,
                           const ParallelRepairParams& params) {
@@ -28,63 +219,66 @@ int repairParallelPerfect(std::vector<NoteEvent>& notes,
       Tick end;
     };
     std::vector<std::vector<VN>> vns(params.num_voices);
-    for (size_t i = 0; i < notes.size(); ++i) {
-      auto& n = notes[i];
-      if (n.voice < params.num_voices) {
-        vns[n.voice].push_back({i, n.start_tick, n.start_tick + n.duration});
+    for (size_t idx = 0; idx < notes.size(); ++idx) {
+      auto& note = notes[idx];
+      if (note.voice < params.num_voices) {
+        vns[note.voice].push_back({idx, note.start_tick,
+                                   note.start_tick + note.duration});
       }
     }
-    for (auto& v : vns) {
-      std::sort(v.begin(), v.end(),
-                [](const VN& a, const VN& b) { return a.start < b.start; });
+    for (auto& vec : vns) {
+      std::sort(vec.begin(), vec.end(),
+                [](const VN& lhs, const VN& rhs) { return lhs.start < rhs.start; });
     }
 
     // Sounding note index at tick for a voice (-1 if silent).
     // Uses binary search: O(log N) per lookup instead of O(N) linear scan.
-    auto soundIdx = [&](uint8_t v, Tick t) -> int {
-      auto& vnv = vns[v];
+    auto soundIdx = [&](uint8_t vid, Tick tick) -> int {
+      auto& vnv = vns[vid];
       if (vnv.empty()) return -1;
-      // upper_bound finds first note with start > t.
-      auto it = std::upper_bound(vnv.begin(), vnv.end(), t,
-          [](Tick tick, const VN& vn) { return tick < vn.start; });
-      if (it == vnv.begin()) return -1;
-      --it;  // Now it->start <= t.
-      if (t < it->end) return static_cast<int>(it->idx);
+      // upper_bound finds first note with start > tick.
+      auto iter = std::upper_bound(vnv.begin(), vnv.end(), tick,
+          [](Tick tck, const VN& vn) { return tck < vn.start; });
+      if (iter == vnv.begin()) return -1;
+      --iter;  // Now iter->start <= tick.
+      if (tick < iter->end) return static_cast<int>(iter->idx);
       return -1;
     };
-    auto soundPitch = [&](uint8_t v, Tick t) -> int {
-      int i = soundIdx(v, t);
-      return (i >= 0) ? static_cast<int>(notes[i].pitch) : -1;
+    std::function<int(uint8_t, Tick)> soundPitch =
+        [&](uint8_t vid, Tick tick) -> int {
+      int idx = soundIdx(vid, tick);
+      return (idx >= 0) ? static_cast<int>(notes[idx].pitch) : -1;
     };
 
     // Find pitch of the note immediately before target_start in a voice,
     // excluding one specific index. Uses binary search: O(log N).
-    auto findPrevPitch = [&](uint8_t v, Tick target_start, int exclude_idx) -> int {
-      auto& vnv = vns[v];
+    std::function<int(uint8_t, Tick, int)> findPrevPitch =
+        [&](uint8_t vid, Tick target_start, int exclude_idx) -> int {
+      auto& vnv = vns[vid];
       // lower_bound finds first note with start >= target_start.
-      auto it = std::lower_bound(vnv.begin(), vnv.end(), target_start,
-          [](const VN& vn, Tick tick) { return vn.start < tick; });
-      while (it != vnv.begin()) {
-        --it;
-        if (static_cast<int>(it->idx) != exclude_idx) {
-          return static_cast<int>(notes[it->idx].pitch);
+      auto iter = std::lower_bound(vnv.begin(), vnv.end(), target_start,
+          [](const VN& vn, Tick tck) { return vn.start < tck; });
+      while (iter != vnv.begin()) {
+        --iter;
+        if (static_cast<int>(iter->idx) != exclude_idx) {
+          return static_cast<int>(notes[iter->idx].pitch);
         }
       }
       return -1;
     };
 
-    // Max tick (invariant across iterations — only pitches change, not timing).
+    // Max tick (invariant across iterations -- only pitches change, not timing).
     Tick max_tick = 0;
-    for (auto& n : notes) {
-      Tick e = n.start_tick + n.duration;
-      if (e > max_tick) max_tick = e;
+    for (auto& note : notes) {
+      Tick end = note.start_tick + note.duration;
+      if (end > max_tick) max_tick = end;
     }
 
     // Pre-build beat grid ticks (shared across all voice pairs).
     std::vector<Tick> beat_grid_ticks;
     beat_grid_ticks.reserve(max_tick / kTicksPerBeat + 1);
-    for (Tick t = 0; t < max_tick; t += kTicksPerBeat) {
-      beat_grid_ticks.push_back(t);
+    for (Tick tick = 0; tick < max_tick; tick += kTicksPerBeat) {
+      beat_grid_ticks.push_back(tick);
     }
 
     bool any_fixed = false;
@@ -103,8 +297,8 @@ int repairParallelPerfect(std::vector<NoteEvent>& notes,
             std::set<Tick> oa, ob;
             for (auto& vn : vns[va]) oa.insert(vn.start);
             for (auto& vn : vns[vb]) ob.insert(vn.start);
-            for (Tick t : oa) {
-              if (ob.count(t)) scan_ticks.push_back(t);
+            for (Tick tick : oa) {
+              if (ob.count(tick)) scan_ticks.push_back(tick);
             }
           }
 
@@ -144,18 +338,18 @@ int repairParallelPerfect(std::vector<NoteEvent>& notes,
             struct FC { int ni; uint8_t v; int shifts[12]; int ns; };
             FC cands[2]; int nc = 0;
 
-            auto addC = [&](int ni, uint8_t v, std::initializer_list<int> sh) {
-              FC& c = cands[nc++]; c.ni = ni; c.v = v; c.ns = 0;
-              for (int s : sh) { if (c.ns < 12) c.shifts[c.ns++] = s; }
+            auto addC = [&](int ni, uint8_t vid, std::initializer_list<int> sh) {
+              FC& cand = cands[nc++]; cand.ni = ni; cand.v = vid; cand.ns = 0;
+              for (int s : sh) { if (cand.ns < 12) cand.shifts[cand.ns++] = s; }
             };
 
             // Determine shift lists based on protection level.
-            auto shiftsFor = [](ProtectionLevel pl) -> std::initializer_list<int> {
+            auto shiftsFor = [](ProtectionLevel plv) -> std::initializer_list<int> {
               static const auto flexible = {1, -1, 2, -2, 3, -3, 4, -4, 12, -12};
               static const auto structural = {12, -12};
-              if (pl == ProtectionLevel::Flexible) return flexible;
-              if (pl == ProtectionLevel::Structural ||
-                  pl == ProtectionLevel::SemiImmutable) return structural;
+              if (plv == ProtectionLevel::Flexible) return flexible;
+              if (plv == ProtectionLevel::Structural ||
+                  plv == ProtectionLevel::SemiImmutable) return structural;
               return {};  // Immutable
             };
 
@@ -176,94 +370,20 @@ int repairParallelPerfect(std::vector<NoteEvent>& notes,
             }
 
             bool fixed = false;
+
+            // Direct fix: try shifting a note at the current tick (t).
             for (int c2 = 0; c2 < nc && !fixed; ++c2) {
               auto& fc = cands[c2];
-              Key nk = params.key_at_tick(notes[fc.ni].start_tick);
-
-              for (int si = 0; si < fc.ns; ++si) {
-                int delta = fc.shifts[si];
-                int cp = static_cast<int>(notes[fc.ni].pitch) + delta;
-                if (cp < 0 || cp > 127) continue;
-                uint8_t ucp = static_cast<uint8_t>(cp);
-
-                // Diatonic check for step shifts (not octave shifts).
-                if (std::abs(delta) <= 4 &&
-                    !scale_util::isScaleTone(ucp, nk, params.scale))
-                  continue;
-
-                // Voice range check.
-                auto [lo, hi] = params.voice_range
-                    ? params.voice_range(fc.v, notes[fc.ni].start_tick)
-                    : params.voice_range_static(fc.v);
-                if (ucp < lo || ucp > hi) continue;
-
-                // Melodic leap: no more than octave from previous note in voice.
-                {
-                  int prev_p = findPrevPitch(fc.v, notes[fc.ni].start_tick, fc.ni);
-                  if (prev_p >= 0 && std::abs(cp - prev_p) > 12) continue;
-                }
-
-                // Check no new parallel with any other voice.
-                bool new_par = false;
-                for (uint8_t ov = 0; ov < params.num_voices && !new_par; ++ov) {
-                  if (ov == fc.v) continue;
-                  int ovc = soundPitch(ov, t);
-                  int ovpv = soundPitch(ov, pt);
-                  int fpv = soundPitch(fc.v, pt);
-                  if (ovc < 0 || ovpv < 0 || fpv < 0) continue;
-                  int p_i2 = std::abs(fpv - ovpv);
-                  int c_i2 = std::abs(cp - ovc);
-                  if (interval_util::isPerfectConsonance(p_i2) &&
-                      interval_util::isPerfectConsonance(c_i2)) {
-                    int p2s = interval_util::compoundToSimple(p_i2);
-                    int c2s = interval_util::compoundToSimple(c_i2);
-                    if (p2s == c2s) {
-                      int mf = cp - fpv, mo = ovc - ovpv;
-                      if (mf != 0 && mo != 0 && (mf > 0) == (mo > 0))
-                        new_par = true;
-                    }
-                  }
-                }
-                if (new_par) continue;
-
-                // On strong beats (1 and 3 in 4/4), reject candidates that
-                // create dissonance with any active voice.
-                {
-                  Tick beat = (t % kTicksPerBar) / kTicksPerBeat;
-                  if (beat == 0 || beat == 2) {
-                    bool dissonant = false;
-                    for (uint8_t ov = 0; ov < params.num_voices && !dissonant; ++ov) {
-                      if (ov == fc.v) continue;
-                      int ovc = soundPitch(ov, t);
-                      if (ovc < 0) continue;
-                      int iv = interval_util::compoundToSimple(std::abs(cp - ovc));
-                      if (!interval_util::isConsonance(iv)) {
-                        // P4 is acceptable in 3+ voice contexts.
-                        if (!(params.num_voices >= 3 && iv == 5)) {
-                          dissonant = true;
-                        }
-                      }
-                    }
-                    if (dissonant) continue;
-                  }
-                }
-
-                // Voice crossing check: reject if shift creates crossing
-                // with any adjacent voice.
-                {
-                  bool crosses = false;
-                  for (uint8_t ov = 0; ov < params.num_voices && !crosses; ++ov) {
-                    if (ov == fc.v) continue;
-                    int ovc = soundPitch(ov, t);
-                    if (ovc < 0) continue;
-                    if (fc.v < ov && cp < ovc) crosses = true;
-                    if (fc.v > ov && cp > ovc) crosses = true;
-                  }
-                  if (crosses) continue;
-                }
-
-                notes[fc.ni].pitch = ucp;
-                notes[fc.ni].modified_by |= static_cast<uint8_t>(NoteModifiedBy::ParallelRepair);
+              auto result = tryShiftCandidate(
+                  notes, params,
+                  ShiftContext{fc.ni, fc.v, t, pt, t, -1,
+                               pp, pb2, cs, va, vb, ca, cb, true},
+                  fc.shifts, fc.ns, soundPitch, findPrevPitch);
+              if (result) {
+                notes[fc.ni].pitch = static_cast<uint8_t>(
+                    static_cast<int>(notes[fc.ni].pitch) + *result);
+                notes[fc.ni].modified_by |=
+                    static_cast<uint8_t>(NoteModifiedBy::ParallelRepair);
                 ca = soundPitch(va, t);
                 cb = soundPitch(vb, t);
                 fixed = true;
@@ -303,95 +423,17 @@ int repairParallelPerfect(std::vector<NoteEvent>& notes,
 
                 for (int c2 = 0; c2 < nc && !fixed; ++c2) {
                   auto& fc2 = cands[c2];
-                  Key nk2 = params.key_at_tick(notes[fc2.ni].start_tick);
-
-                  for (int si = 0; si < fc2.ns; ++si) {
-                    int delta = fc2.shifts[si];
-                    int cp2 = static_cast<int>(notes[fc2.ni].pitch) + delta;
-                    if (cp2 < 0 || cp2 > 127) continue;
-                    uint8_t ucp2 = static_cast<uint8_t>(cp2);
-
-                    if (std::abs(delta) <= 4 &&
-                        !scale_util::isScaleTone(ucp2, nk2, params.scale))
-                      continue;
-
-                    auto [lo2, hi2] = params.voice_range
-                        ? params.voice_range(fc2.v, notes[fc2.ni].start_tick)
-                        : params.voice_range_static(fc2.v);
-                    if (ucp2 < lo2 || ucp2 > hi2) continue;
-
-                    // Melodic leap from note before pt.
-                    {
-                      int prev_p = findPrevPitch(fc2.v, notes[fc2.ni].start_tick, fc2.ni);
-                      if (prev_p >= 0 && std::abs(cp2 - prev_p) > 12) continue;
-                    }
-
-                    // Melodic leap from pt to t (the unchanged note at t).
-                    int pitch_at_t = (fc2.v == va) ? ca : cb;
-                    if (std::abs(cp2 - pitch_at_t) > 12) continue;
-
-                    // Verify this actually breaks the original parallel.
-                    int new_prev_a = (fc2.v == va) ? cp2 : pp;
-                    int new_prev_b = (fc2.v == vb) ? cp2 : pb2;
-                    int new_pi = std::abs(new_prev_a - new_prev_b);
-                    bool still_par = false;
-                    if (interval_util::isPerfectConsonance(new_pi) &&
-                        interval_util::isPerfectConsonance(ci)) {
-                      int new_ps = interval_util::compoundToSimple(new_pi);
-                      if (new_ps == cs) {
-                        int nm_a = ca - new_prev_a, nm_b = cb - new_prev_b;
-                        if (nm_a != 0 && nm_b != 0 && (nm_a > 0) == (nm_b > 0))
-                          still_par = true;
-                      }
-                    }
-                    if (still_par) continue;
-
-                    // Check no new parallel with other voices at (pt, t).
-                    bool new_par = false;
-                    for (uint8_t ov = 0;
-                         ov < params.num_voices && !new_par; ++ov) {
-                      if (ov == fc2.v) continue;
-                      int ov_t = soundPitch(ov, t);
-                      int ov_pt = soundPitch(ov, pt);
-                      if (ov_t < 0 || ov_pt < 0) continue;
-                      int p_i2 = std::abs(cp2 - ov_pt);
-                      int c_i2 = std::abs(pitch_at_t - ov_t);
-                      if (interval_util::isPerfectConsonance(p_i2) &&
-                          interval_util::isPerfectConsonance(c_i2)) {
-                        int p2s = interval_util::compoundToSimple(p_i2);
-                        int c2s = interval_util::compoundToSimple(c_i2);
-                        if (p2s == c2s) {
-                          int mf = pitch_at_t - cp2, mo = ov_t - ov_pt;
-                          if (mf != 0 && mo != 0 && (mf > 0) == (mo > 0))
-                            new_par = true;
-                        }
-                      }
-                    }
-                    if (new_par) continue;
-
-                    // Strong-beat consonance check for adjacent repair.
-                    {
-                      Tick beat = (pt % kTicksPerBar) / kTicksPerBeat;
-                      if (beat == 0 || beat == 2) {
-                        bool dissonant = false;
-                        for (uint8_t ov = 0; ov < params.num_voices && !dissonant; ++ov) {
-                          if (ov == fc2.v) continue;
-                          int ovc = soundPitch(ov, pt);
-                          if (ovc < 0) continue;
-                          int iv = interval_util::compoundToSimple(
-                              std::abs(cp2 - ovc));
-                          if (!interval_util::isConsonance(iv)) {
-                            if (!(params.num_voices >= 3 && iv == 5)) {
-                              dissonant = true;
-                            }
-                          }
-                        }
-                        if (dissonant) continue;
-                      }
-                    }
-
-                    notes[fc2.ni].pitch = ucp2;
-                    notes[fc2.ni].modified_by |= static_cast<uint8_t>(NoteModifiedBy::ParallelRepair);
+                  int pitch_at_t = (fc2.v == va) ? ca : cb;
+                  auto result = tryShiftCandidate(
+                      notes, params,
+                      ShiftContext{fc2.ni, fc2.v, pt, pt, t, pitch_at_t,
+                                   pp, pb2, cs, va, vb, ca, cb, false},
+                      fc2.shifts, fc2.ns, soundPitch, findPrevPitch);
+                  if (result) {
+                    notes[fc2.ni].pitch = static_cast<uint8_t>(
+                        static_cast<int>(notes[fc2.ni].pitch) + *result);
+                    notes[fc2.ni].modified_by |=
+                        static_cast<uint8_t>(NoteModifiedBy::ParallelRepair);
                     fixed = true;
                     any_fixed = true;
                     ++total_fixed;
