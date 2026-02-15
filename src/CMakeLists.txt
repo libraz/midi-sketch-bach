@@ -13,6 +13,7 @@ set(BACH_LIB_SOURCES
   core/note_source.cpp
   core/note_creator.cpp
   core/rhythm_pattern.cpp
+  core/figure_match.cpp
 
   # midi/
   midi/midi_writer.cpp

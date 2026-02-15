@@ -86,6 +86,34 @@ FigurationTemplate createFigurationTemplate(FigurationType type,
       tmpl.steps.push_back({bass, 0, kSixteenth * 3, kSixteenth}); // bass chord tone
       break;
     }
+
+    case FigurationType::SlotPattern: {
+      // Default: use 3-voice rising as fallback.
+      return createFigurationTemplateFromSlot(kFig3vRising, num_voices);
+    }
+  }
+
+  return tmpl;
+}
+
+FigurationTemplate createFigurationTemplateFromSlot(
+    const FigurationSlotPattern& pattern, uint8_t num_voices) {
+  FigurationTemplate tmpl;
+  tmpl.type = FigurationType::SlotPattern;
+
+  auto clamp_voice = [](uint8_t idx, uint8_t nv) -> uint8_t {
+    return (idx < nv) ? idx : static_cast<uint8_t>(nv - 1);
+  };
+
+  constexpr Tick kStepDur = kTicksPerBeat / 4;  // 120 ticks = sixteenth note
+  for (uint8_t idx = 0; idx < pattern.slot_count; ++idx) {
+    FigurationStep step;
+    // Map slot index to voice index, clamped to available voices.
+    step.voice_index = clamp_voice(pattern.slots[idx], num_voices);
+    step.scale_offset = 0;  // Always chord tones.
+    step.relative_tick = static_cast<Tick>(idx) * kStepDur;
+    step.duration = kStepDur;
+    tmpl.steps.push_back(step);
   }
 
   return tmpl;

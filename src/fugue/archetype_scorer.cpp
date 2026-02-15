@@ -8,11 +8,15 @@
 #include <cstdint>
 #include <map>
 #include <set>
+#include <vector>
 
+#include "core/bach_vocabulary.h"
+#include "core/figure_match.h"
 #include "core/interval.h"
 #include "core/pitch_utils.h"
 #include "core/scale.h"
 #include "fugue/stretto.h"
+#include "fugue/subject_identity.h"
 #include "fugue/subject_params.h"
 #include "transform/motif_transform.h"
 
@@ -457,6 +461,38 @@ float ArchetypeScorer::scoreKopfmotivStrength(
     }
   }
   base_score = std::clamp(base_score, 0.0f, 1.0f);
+
+  // Vocabulary prior: bonus for Kopfmotiv resembling common Bach figures.
+  // Capped at +0.10 (soft prior per design constraint E).
+  // Kerngestalt priority: bonus attenuated when subject has strong
+  // Kerngestalt identity to prevent vocabulary from overriding it.
+  {
+    ScaleType vocab_scale = subject.is_minor ? ScaleType::HarmonicMinor : ScaleType::Major;
+
+    std::vector<uint8_t> kopf_pitches;
+    kopf_pitches.reserve(kopf.size());
+    for (const auto& note : kopf) kopf_pitches.push_back(note.pitch);
+
+    int best_idx = figure_match::findBestFigure(
+        kopf_pitches.data(), static_cast<int>(kopf_pitches.size()),
+        kCommonFigures, kCommonFigureCount,
+        subject.key, vocab_scale, 0.6f);
+
+    if (best_idx >= 0) {
+      float match_quality = figure_match::matchFigure(
+          kopf_pitches.data(), static_cast<int>(kopf_pitches.size()),
+          *kCommonFigures[best_idx], subject.key, vocab_scale);
+      float bonus = 0.05f + 0.05f * std::clamp((match_quality - 0.6f) / 0.4f, 0.0f, 1.0f);
+      // Kerngestalt attenuation: reduce bonus when subject has valid Kerngestalt
+      // identity to preserve identity-first scoring.
+      if (subject.identity.essential.isValid() &&
+          subject.identity.essential.kerngestalt_type != KerngestaltType::Linear) {
+        // Non-Linear Kerngestalt types have distinctive identity; attenuate.
+        bonus *= 0.5f;
+      }
+      base_score = std::clamp(base_score + bonus, 0.0f, 1.0f);
+    }
+  }
 
   // Policy-weighted sub-scores.
   float w_frag = policy.fragment_reusability_weight;

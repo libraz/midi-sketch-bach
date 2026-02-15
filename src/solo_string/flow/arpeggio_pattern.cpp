@@ -6,6 +6,7 @@
 #include <random>
 
 #include "core/rng_util.h"
+#include "solo_string/solo_vocabulary.h"
 
 namespace bach {
 
@@ -300,6 +301,44 @@ std::vector<int> arrangeDegrees(const std::vector<int>& degrees,
   return degrees;
 }
 
+/// @brief Arrange degrees using a vocabulary slot pattern.
+/// Maps chord degrees to slots by sorting and indexing.
+static std::vector<int> arrangeDegreesFromSlots(
+    const std::vector<int>& degrees,
+    const FigurationSlotPattern& pattern) {
+  auto sorted = degrees;
+  std::sort(sorted.begin(), sorted.end());
+  std::vector<int> result;
+  result.reserve(pattern.slot_count);
+  for (uint8_t idx = 0; idx < pattern.slot_count; ++idx) {
+    uint8_t slot = pattern.slots[idx];
+    int deg_idx = std::min(static_cast<int>(slot),
+                           static_cast<int>(sorted.size()) - 1);
+    if (deg_idx < 0) deg_idx = 0;
+    result.push_back(sorted[deg_idx]);
+  }
+  return result;
+}
+
+/// @brief Select a vocabulary slot pattern matching the voice count.
+/// Returns nullptr if no pattern matches or probability check fails.
+static const FigurationSlotPattern* selectSlotPattern(
+    size_t voice_count, ArcPhase /* phase */, std::mt19937& rng) {
+  // 40% probability gate.
+  if (!rng::rollProbability(rng, 0.40f)) return nullptr;
+
+  // Filter by voice_count.
+  std::vector<const FigurationSlotPattern*> candidates;
+  for (int idx = 0; idx < kSoloFigurationCount; ++idx) {
+    if (kSoloFigurations[idx]->voice_count == static_cast<uint8_t>(voice_count) ||
+        kSoloFigurations[idx]->slot_count <= static_cast<uint8_t>(voice_count)) {
+      candidates.push_back(kSoloFigurations[idx]);
+    }
+  }
+  if (candidates.empty()) return nullptr;
+  return candidates[rng::rollRange(rng, 0, static_cast<int>(candidates.size()) - 1)];
+}
+
 }  // namespace
 
 ArpeggioPattern generatePattern(const std::vector<int>& chord_degrees,
@@ -317,12 +356,17 @@ ArpeggioPattern generatePattern(const std::vector<int>& chord_degrees,
   pattern.type = selectPatternType(phase, role, rng, prev_pattern,
                                    is_section_start);
 
-  // Arrange chord degrees according to the selected pattern type.
-  if (chord_degrees.empty()) {
-    // Default triad: root, 3rd, 5th.
-    pattern.degrees = arrangeDegrees({0, 2, 4}, pattern.type);
+  // Determine effective degrees (default triad if empty).
+  std::vector<int> effective_degrees =
+      chord_degrees.empty() ? std::vector<int>{0, 2, 4} : chord_degrees;
+
+  // 40% chance: use vocabulary slot pattern from Bach reference.
+  const FigurationSlotPattern* slot =
+      selectSlotPattern(effective_degrees.size(), phase, rng);
+  if (slot) {
+    pattern.degrees = arrangeDegreesFromSlots(effective_degrees, *slot);
   } else {
-    pattern.degrees = arrangeDegrees(chord_degrees, pattern.type);
+    pattern.degrees = arrangeDegrees(effective_degrees, pattern.type);
   }
 
   return pattern;

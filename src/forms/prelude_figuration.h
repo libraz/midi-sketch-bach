@@ -10,6 +10,7 @@
 #include "core/basic_types.h"
 #include "harmony/chord_voicer.h"
 #include "harmony/harmonic_event.h"
+#include "solo_string/solo_vocabulary.h"
 
 namespace bach {
 
@@ -18,6 +19,7 @@ enum class FigurationType : uint8_t {
   BrokenChord,   ///< BWV 846 style: chord tones sounded in sequence.
   Alberti,       ///< Alberti bass: low-high-mid-high pattern.
   ScaleConnect,  ///< Chord tones connected by scale passing tones.
+  SlotPattern,   ///< Bach reference slot pattern from FigurationSlotPattern.
 };
 
 /// @brief A single step within a figuration pattern.
@@ -40,6 +42,13 @@ struct FigurationTemplate {
 /// @return A template with steps spanning one beat (kTicksPerBeat ticks).
 FigurationTemplate createFigurationTemplate(FigurationType type,
                                             uint8_t num_voices);
+
+/// @brief Create a figuration template from a vocabulary slot pattern.
+/// @param pattern The slot pattern defining the chord tone ordering.
+/// @param num_voices Number of voices in the voicing (2-5).
+/// @return A template with steps spanning one beat (kTicksPerBeat ticks).
+FigurationTemplate createFigurationTemplateFromSlot(
+    const FigurationSlotPattern& pattern, uint8_t num_voices);
 
 /// @brief Apply a figuration template to a chord voicing, producing NoteEvents.
 ///

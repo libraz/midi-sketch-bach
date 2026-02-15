@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <vector>
 
+#include "core/bach_vocabulary.h"
 #include "core/basic_types.h"
 
 namespace bach {
@@ -47,6 +48,26 @@ void tagGestureNotes(std::vector<NoteEvent>& notes, uint16_t gesture_id);
 /// @return Directed intervals of the descent portion (negative values = descending).
 std::vector<int> extractGestureCoreIntervals(
     const std::vector<NoteEvent>& notes, uint16_t gesture_id);
+
+/// @brief Figure hints mapped to a ToccataArchetype.
+/// Each archetype has 1-3 characteristic melodic figures and an activation probability.
+struct ArchetypeFigureHint {
+  const MelodicFigure* figures[3];  ///< Up to 3 characteristic figures.
+  int count;                         ///< Number of valid figures (1-3).
+  float activation_prob;             ///< Probability of applying vocabulary (0.0-1.0).
+};
+
+/// @brief Get vocabulary figure hints for a ToccataArchetype.
+///
+/// Maps each archetype to characteristic Bach melodic figures:
+/// - Dramaticus: descending figures (kDescRun4, kChromaticDesc, kTurnDown)
+/// - Perpetuus: oscillating figures (kUpperNbr, kLowerNbr, kAscRun4)
+/// - Concertato: leap-step figures (kLeapUpStepDown, kEscapeDown, kCambiataDown)
+/// - Sectionalis: turn figures (kTurnUp, kStepDownLeapUp, kLeapRecovery)
+///
+/// @param arch The toccata archetype.
+/// @return ArchetypeFigureHint with figures and activation probability.
+ArchetypeFigureHint getArchetypeFigures(ToccataArchetype arch);
 
 }  // namespace bach
 

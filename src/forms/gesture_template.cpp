@@ -4,6 +4,9 @@
 
 #include <algorithm>
 
+#include "core/bach_vocabulary.h"
+#include "core/basic_types.h"
+
 namespace bach {
 
 void tagGestureNotes(std::vector<NoteEvent>& notes, uint16_t gesture_id) {
@@ -80,6 +83,21 @@ std::vector<int> extractGestureCoreIntervals(
   }
 
   return descent;
+}
+
+ArchetypeFigureHint getArchetypeFigures(ToccataArchetype arch) {
+  switch (arch) {
+    case ToccataArchetype::Dramaticus:
+      return {{&kDescRun4, &kChromaticDesc, &kTurnDown}, 3, 0.40f};
+    case ToccataArchetype::Perpetuus:
+      return {{&kUpperNbr, &kLowerNbr, &kAscRun4}, 3, 0.30f};
+    case ToccataArchetype::Concertato:
+      return {{&kLeapUpStepDown, &kEscapeDown, &kCambiataDown}, 3, 0.35f};
+    case ToccataArchetype::Sectionalis:
+      return {{&kTurnUp, &kStepDownLeapUp, &kLeapRecovery}, 3, 0.25f};
+    default:
+      return {{&kDescRun4, nullptr, nullptr}, 1, 0.20f};
+  }
 }
 
 }  // namespace bach

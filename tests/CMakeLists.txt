@@ -17,6 +17,7 @@ set(BACH_TEST_SOURCES
   core/rng_util_test.cpp
   core/phrase_structure_test.cpp
   core/rhythm_pattern_test.cpp
+  core/figure_match_test.cpp
 
   # midi/
   midi/midi_writer_test.cpp
@@ -93,6 +94,8 @@ set(BACH_TEST_SOURCES
   fugue/fortspinnung_test.cpp
   fugue/motif_template_test.cpp
   fugue/subject_identity_test.cpp
+  fugue/episode_vocabulary_test.cpp
+  fugue/archetype_scorer_vocabulary_test.cpp
 
   # transform/
   transform/motif_transform_test.cpp
@@ -138,6 +141,7 @@ set(BACH_TEST_SOURCES
   forms/toccata_perpetuus_test.cpp
   forms/toccata_concertato_test.cpp
   forms/toccata_sectionalis_test.cpp
+  forms/gesture_vocabulary_test.cpp
   forms/passacaglia_test.cpp
   forms/fantasia_test.cpp
   forms/goldberg/goldberg_plan_test.cpp
@@ -183,6 +187,7 @@ set(BACH_TEST_SOURCES
   solo_string/flow/flow_analyzer_test.cpp
   solo_string/flow/harmonic_arpeggio_engine_test.cpp
   solo_string/flow/global_arc_test.cpp
+  solo_string/flow/arpeggio_vocabulary_test.cpp
 
   # solo_string/arch/
   solo_string/arch/texture_generator_test.cpp

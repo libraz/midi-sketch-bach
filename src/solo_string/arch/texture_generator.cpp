@@ -6,6 +6,7 @@
 #include <cmath>
 #include <random>
 
+#include "core/bach_vocabulary.h"
 #include "core/note_source.h"
 #include "core/pitch_utils.h"
 #include "core/rng_util.h"
@@ -992,6 +993,21 @@ std::vector<NoteEvent> generateBariolage(const TextureContext& ctx,
               note_tick, sub_duration, stopped_pitch, note_tick_in_bar, ctx.is_climax));
           notes.push_back(makeTextureNote(
               note_tick, sub_duration, open_pitch, note_tick_in_bar, ctx.is_climax));
+        } else if (stopped_pitch == open_pitch) {
+          // Vocabulary fallback: when no open string contrast available,
+          // use chromatic neighbor alternation (inspired by kBariolage figure).
+          // Strong beat guarantee: always resolve to stopped_pitch on strong beats.
+          bool is_strong_beat = (note_tick_in_bar % kTicksPerBeat == 0);
+          int offset = 0;
+          if (!is_strong_beat) {
+            // Weak beat: chromatic neighbor alternation.
+            offset = (sub_idx % 4 < 2) ? 1 : -1;
+          }
+          uint8_t alt_pitch = clampPitch(
+              static_cast<int>(stopped_pitch) + offset,
+              ctx.register_low, ctx.register_high);
+          notes.push_back(makeTextureNote(
+              note_tick, sub_duration, alt_pitch, note_tick_in_bar, ctx.is_climax));
         } else {
           uint8_t pitch = (sub_idx % 2 == 0) ? stopped_pitch : open_pitch;
           notes.push_back(makeTextureNote(

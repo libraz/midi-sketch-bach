@@ -64,9 +64,9 @@ constexpr VoiceProfile kTenor = {
     0.20f, 0.0f, 0.30f};
 
 constexpr VoiceProfile kBassLine = {
-    0.44f, 0.24f, 0.10f, true, 2,
+    0.44f, 0.24f, 0.12f, true, 2,
     {1.0f, 3.0f, 2.0f, 3.0f, 1.0f, 0.1f}, 240,  // min=8th
-    0.10f, 0.15f, 0.30f};
+    0.10f, 0.18f, 0.30f};
 
 constexpr VoiceProfile kPedalPoint = {
     0.30f, 0.20f, 0.08f, true, 2,

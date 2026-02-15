@@ -18,7 +18,7 @@ import math
 import sys
 from collections import Counter
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, NamedTuple, Optional
 
 # Add project root to sys.path for bach_analyzer imports.
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -55,6 +55,181 @@ INTERVAL_NAMES = [
     "TT", "P5", "m6", "M6", "m7", "M7",
 ]
 NOTE_NAMES_12 = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
+
+
+# ---------------------------------------------------------------------------
+# Scale degree utilities (for degree-mode n-gram extraction)
+# ---------------------------------------------------------------------------
+
+MAJOR_SCALE_SEMITONES = [0, 2, 4, 5, 7, 9, 11]
+MINOR_SCALE_SEMITONES = [0, 2, 3, 5, 7, 8, 10]
+
+# Map tonic name -> MIDI pitch class (0-11).
+TONIC_TO_PC: dict[str, int] = {
+    "C": 0, "C#": 1, "Db": 1, "D": 2, "D#": 3, "Eb": 3,
+    "E": 4, "F": 5, "F#": 6, "Gb": 6, "G": 7, "G#": 8,
+    "Ab": 8, "A": 9, "A#": 10, "Bb": 10, "B": 11,
+}
+
+
+def _build_pc_to_degree_map(scale: list[int]) -> list[tuple[int, int]]:
+    """For pitch classes 0-11 (relative to tonic), return (degree, accidental).
+
+    Prefers lower degree when distance ties; preserves chromatic alterations.
+    """
+    result: list[tuple[int, int]] = []
+    for pc in range(12):
+        best_d = 0
+        best_acc = 99
+        for d, s in enumerate(scale):
+            acc = pc - s
+            if abs(acc) < abs(best_acc) or (
+                abs(acc) == abs(best_acc) and acc > 0
+            ):
+                best_d = d
+                best_acc = acc
+        result.append((best_d, best_acc))
+    return result
+
+
+# Precomputed maps: pc_in_scale -> (degree, accidental).
+_PC_DEGREE_MAJOR = _build_pc_to_degree_map(MAJOR_SCALE_SEMITONES)
+_PC_DEGREE_MINOR = _build_pc_to_degree_map(MINOR_SCALE_SEMITONES)
+
+
+class ScaleDegree(NamedTuple):
+    """Diatonic scale degree with chromatic accidental.
+
+    Non-scale tones are NOT snapped — they are stored with accidental != 0.
+    octave is scale-relative (pitch-tonic divided by 12).
+    """
+    degree: int       # 0-6 within one octave of the scale
+    accidental: int   # -1=flat, 0=natural, +1=sharp (vs diatonic scale)
+    octave: int       # scale-relative octave ((pitch - tonic) // 12)
+
+
+def pitch_to_scale_degree(
+    pitch: int, tonic: int, is_minor: bool,
+) -> ScaleDegree:
+    """Convert MIDI pitch to ScaleDegree.
+
+    Args:
+        pitch: MIDI pitch (0-127).
+        tonic: Tonic pitch class (0-11, C=0, G=7, etc.).
+        is_minor: True for natural minor scale.
+    """
+    pc_map = _PC_DEGREE_MINOR if is_minor else _PC_DEGREE_MAJOR
+    rel = pitch - tonic
+    # Python's divmod handles negatives correctly for our needs:
+    # (-1) // 12 == -1, (-1) % 12 == 11.
+    octave = rel // 12
+    pc = rel % 12  # always 0-11
+    degree, accidental = pc_map[pc]
+    return ScaleDegree(degree=degree, accidental=accidental, octave=octave)
+
+
+def degree_interval(a: ScaleDegree, b: ScaleDegree) -> tuple[int, int]:
+    """Signed diatonic interval between two ScaleDegrees.
+
+    Returns:
+        (degree_diff, chroma_diff) where degree_diff is signed absolute
+        diatonic distance (C4->D5 = +8) and chroma_diff is accidental
+        difference (augmented = +1, diminished = -1).
+    """
+    return (
+        (b.octave * 7 + b.degree) - (a.octave * 7 + a.degree),
+        b.accidental - a.accidental,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Key signature metadata
+# ---------------------------------------------------------------------------
+
+_KEY_SIGS: dict[str, dict] = {}
+
+
+def _load_key_signatures() -> dict[str, dict]:
+    """Load key_signatures.json lazily."""
+    global _KEY_SIGS
+    if _KEY_SIGS:
+        return _KEY_SIGS
+    ks_path = DATA_DIR / "key_signatures.json"
+    if ks_path.is_file():
+        with open(ks_path) as f:
+            _KEY_SIGS = json.load(f)
+    return _KEY_SIGS
+
+
+def _get_key_info(work_id: str) -> tuple[Optional[int], Optional[bool], float]:
+    """Get (tonic_pc, is_minor, confidence) for a work.
+
+    Returns (None, None, 0.0) if key is unavailable.
+    """
+    ks = _load_key_signatures()
+    info = ks.get(work_id)
+    if not info:
+        return None, None, 0.0
+    tonic_pc = TONIC_TO_PC.get(info.get("tonic", ""))
+    if tonic_pc is None:
+        return None, None, 0.0
+    is_minor = info.get("mode") == "minor"
+    conf = 1.0 if info.get("confidence") == "verified" else 0.8
+    return tonic_pc, is_minor, conf
+
+
+# ---------------------------------------------------------------------------
+# Beat / rhythm classification helpers
+# ---------------------------------------------------------------------------
+
+
+def _classify_beat_position(tick: int) -> str:
+    """Classify tick as 'strong' (beat 1), 'mid' (beat 3), or 'weak'."""
+    beat = (tick % TICKS_PER_BAR) // TICKS_PER_BEAT
+    if beat == 0:
+        return "strong"
+    if beat == 2:
+        return "mid"
+    return "weak"
+
+
+def _beat_strength(tick: int) -> float:
+    """Metric strength at tick (4/4 assumed, 16th resolution)."""
+    pos = tick % TICKS_PER_BAR
+    if pos == 0:
+        return 1.0
+    if pos == 2 * TICKS_PER_BEAT:
+        return 0.75
+    if pos % TICKS_PER_BEAT == 0:
+        return 0.5
+    if pos % (TICKS_PER_BEAT // 2) == 0:
+        return 0.25
+    return 0.125
+
+
+def _quantize_duration(dur_beats: float, grid: str) -> int:
+    """Quantize duration to grid units.
+
+    Args:
+        dur_beats: Duration in beats.
+        grid: 'sixteenth' (default), 'eighth', or 'quarter'.
+    Returns:
+        Duration in grid units (minimum 1).
+    """
+    divisor = {"sixteenth": 0.25, "eighth": 0.5, "quarter": 1.0}.get(grid, 0.25)
+    return max(1, round(dur_beats / divisor))
+
+
+def _accent_char(tick: int) -> str:
+    """Return accent character for a tick position (s/m/w)."""
+    pos = _classify_beat_position(tick)
+    return {"strong": "s", "mid": "m", "weak": "w"}[pos]
+
+
+def _is_chord_tone_simple(pitch: int, bass_pitch: int) -> bool:
+    """Simplified chord-tone check: root, m3, M3, P5, m6, M6 from bass."""
+    iv = abs(pitch - bass_pitch) % 12
+    return iv in (0, 3, 4, 7, 8, 9)
 
 
 # ---------------------------------------------------------------------------
@@ -1167,6 +1342,690 @@ def get_category_summary(category: str) -> str:
             INTERVAL_NAMES[k]: v for k, v in sorted(all_intervals.items())
         } if all_intervals else {},
     }, indent=2)
+
+
+# ===== F. Pattern vocabulary extraction (4) ==================================
+
+
+def _load_works_for_category(category: str) -> list[tuple[str, dict]]:
+    """Return list of (work_id, full_json) for all works in category."""
+    idx = _get_index()
+    works = idx.filter(category=category)
+    result: list[tuple[str, dict]] = []
+    for w in works:
+        data = idx.load_full(w["id"])
+        if data:
+            result.append((w["id"], data))
+    return result
+
+
+def _iter_track_notes(
+    data: dict, track_filter: Optional[str],
+) -> list[tuple[str, list[Note]]]:
+    """Yield (role, sorted_notes) pairs from raw reference data."""
+    tpb = data.get("ticks_per_beat", TICKS_PER_BEAT)
+    pairs: list[tuple[str, list[Note]]] = []
+    for t in data.get("tracks", []):
+        role = t.get("role", "unknown")
+        if track_filter and role != track_filter:
+            continue
+        notes = []
+        for n in t.get("notes", []):
+            notes.append(Note(
+                pitch=n["pitch"],
+                velocity=n.get("velocity", 80),
+                start_tick=int(n["onset"] * tpb),
+                duration=max(1, int(n["duration"] * tpb)),
+                voice=role,
+            ))
+        notes.sort(key=lambda x: x.start_tick)
+        if notes:
+            pairs.append((role, notes))
+    return pairs
+
+
+def _compute_intervals(
+    notes: list[Note],
+    interval_mode: str,
+    tonic: Optional[int],
+    is_minor: Optional[bool],
+) -> list[Any]:
+    """Compute consecutive intervals as tuples.
+
+    Returns list of interval representations (length = len(notes) - 1).
+    For 'semitone': int (signed semitone diff).
+    For 'degree': (degree_diff, chroma_diff).
+    For 'diatonic': int (degree_diff only, no accidental).
+    Falls back to semitone if key info unavailable for degree modes.
+    """
+    if len(notes) < 2:
+        return []
+    use_degree = interval_mode in ("degree", "diatonic") and tonic is not None
+    intervals: list[Any] = []
+    for i in range(len(notes) - 1):
+        diff = notes[i + 1].pitch - notes[i].pitch
+        if interval_mode == "semitone" or not use_degree:
+            intervals.append(diff)
+        else:
+            sd_a = pitch_to_scale_degree(notes[i].pitch, tonic, is_minor or False)
+            sd_b = pitch_to_scale_degree(
+                notes[i + 1].pitch, tonic, is_minor or False,
+            )
+            dd, cd = degree_interval(sd_a, sd_b)
+            if interval_mode == "degree":
+                intervals.append((dd, cd))
+            else:  # diatonic
+                intervals.append(dd)
+    return intervals
+
+
+def _strongest_beat_hit(notes: list[Note]) -> int:
+    """Return index of the note on the strongest beat within the group."""
+    best_idx = 0
+    best_s = -1.0
+    for i, n in enumerate(notes):
+        s = _beat_strength(n.start_tick)
+        if s > best_s:
+            best_s = s
+            best_idx = i
+    return best_idx
+
+
+def _label_melodic_ngram(intervals: tuple, mode: str) -> str:
+    """Generate a human-readable label for a melodic n-gram."""
+    if mode == "semitone":
+        dirs = [("+" if v > 0 else "" if v < 0 else "=") + str(v) for v in intervals]
+        return "st:" + ",".join(dirs)
+    if mode == "diatonic":
+        dirs = [("+" if v > 0 else "" if v < 0 else "=") + str(v) for v in intervals]
+        return "dia:" + ",".join(dirs)
+    # degree mode: list of (dd, cd)
+    parts = []
+    for dd, cd in intervals:
+        s = ("+" if dd > 0 else "" if dd < 0 else "=") + str(dd)
+        if cd != 0:
+            s += ("+" if cd > 0 else "") + str(cd) + "c"
+        parts.append(s)
+    return "deg:" + ",".join(parts)
+
+
+@server.tool()
+def extract_melodic_ngrams(
+    category: str,
+    n: int = 3,
+    track: Optional[str] = None,
+    interval_mode: str = "degree",
+    min_occurrences: int = 5,
+    top_k: int = 30,
+) -> str:
+    """Extract melodic interval n-grams from all works in a category.
+
+    Scans all tracks (or a filtered track) in every work of the given category,
+    extracts consecutive interval n-grams, and returns the most frequent ones
+    with beat-position statistics and examples.
+
+    Args:
+        category: Reference category (e.g. organ_fugue, wtc1, solo_cello_suite)
+        n: N-gram size (number of intervals = n, notes = n+1). Default 3.
+        track: Optional track role filter (e.g. 'upper', 'pedal', 'v1')
+        interval_mode: 'semitone', 'degree', or 'diatonic'. Default 'degree'.
+        min_occurrences: Minimum count to include in results. Default 5.
+        top_k: Maximum number of n-grams to return. Default 30.
+    """
+    if interval_mode not in ("semitone", "degree", "diatonic"):
+        return json.dumps({"error": f"Invalid interval_mode: {interval_mode}"})
+
+    works = _load_works_for_category(category)
+    if not works:
+        return json.dumps({"error": f"No works found for category '{category}'."})
+
+    # Accumulators per n-gram key.
+    counts: Counter = Counter()
+    work_sets: dict[tuple, set[str]] = {}
+    beat_pos: dict[tuple, Counter] = {}
+    strongest_hits: dict[tuple, Counter] = {}
+    examples: dict[tuple, dict] = {}
+    total_ngrams = 0
+
+    for work_id, data in works:
+        tonic, is_minor, conf = _get_key_info(work_id)
+        # Skip degree modes for low-confidence keys.
+        use_tonic = tonic if conf >= 0.7 else None
+        if interval_mode in ("degree", "diatonic") and use_tonic is None:
+            # Fallback to semitone silently.
+            eff_mode = "semitone"
+        else:
+            eff_mode = interval_mode
+
+        for role, notes in _iter_track_notes(data, track):
+            ivs = _compute_intervals(notes, eff_mode, use_tonic, is_minor)
+            if len(ivs) < n:
+                continue
+            for i in range(len(ivs) - n + 1):
+                window_ivs = tuple(ivs[i:i + n])
+                window_notes = notes[i:i + n + 1]
+                key = window_ivs
+
+                counts[key] += 1
+                total_ngrams += 1
+                work_sets.setdefault(key, set()).add(work_id)
+
+                bp = _classify_beat_position(window_notes[0].start_tick)
+                beat_pos.setdefault(key, Counter())[bp] += 1
+
+                sbh = _strongest_beat_hit(window_notes)
+                strongest_hits.setdefault(key, Counter())[sbh] += 1
+
+                if key not in examples:
+                    examples[key] = {
+                        "work_id": work_id,
+                        "track": role,
+                        "bar": window_notes[0].bar,
+                        "beat_index": window_notes[0].beat - 1,
+                        "starting_pitch": window_notes[0].pitch,
+                    }
+
+    # Build results.
+    ngrams_out = []
+    for key, count in counts.most_common():
+        if count < min_occurrences:
+            break
+        bp = beat_pos.get(key, Counter())
+        bp_total = sum(bp.values()) or 1
+        sh = strongest_hits.get(key, Counter())
+        sh_total = sum(sh.values()) or 1
+
+        entry: dict[str, Any] = {
+            "intervals": [
+                list(iv) if isinstance(iv, tuple) else iv for iv in key
+            ],
+            "label": _label_melodic_ngram(key, interval_mode),
+            "count": count,
+            "works_containing": len(work_sets.get(key, set())),
+            "frequency_per_1000": round(count / max(total_ngrams, 1) * 1000, 1),
+            "beat_position_distribution": {
+                "strong": round(bp.get("strong", 0) / bp_total, 2),
+                "mid": round(bp.get("mid", 0) / bp_total, 2),
+                "weak": round(bp.get("weak", 0) / bp_total, 2),
+            },
+            "strongest_beat_hit_position": [
+                round(sh.get(p, 0) / sh_total, 2) for p in range(n + 1)
+            ],
+            "example": examples.get(key),
+        }
+        ngrams_out.append(entry)
+        if len(ngrams_out) >= top_k:
+            break
+
+    return json.dumps({
+        "category": category,
+        "n": n,
+        "interval_mode": interval_mode,
+        "total_works_scanned": len(works),
+        "total_ngrams_extracted": total_ngrams,
+        "ngrams": ngrams_out,
+    }, indent=2)
+
+
+@server.tool()
+def extract_rhythm_ngrams(
+    category: str,
+    n: int = 4,
+    track: Optional[str] = None,
+    quantize: str = "sixteenth",
+    min_occurrences: int = 5,
+    top_k: int = 30,
+) -> str:
+    """Extract rhythm n-grams (duration sequences) from all works in a category.
+
+    Durations are quantized to the specified grid. Returns the most frequent
+    duration patterns with beat-position and accent statistics.
+
+    Args:
+        category: Reference category (e.g. organ_fugue, wtc1)
+        n: N-gram size (number of notes). Default 4.
+        track: Optional track role filter
+        quantize: Grid for quantization: 'sixteenth', 'eighth', 'quarter'. Default 'sixteenth'.
+        min_occurrences: Minimum count to include. Default 5.
+        top_k: Maximum results. Default 30.
+    """
+    works = _load_works_for_category(category)
+    if not works:
+        return json.dumps({"error": f"No works found for category '{category}'."})
+
+    grid_beat = {"sixteenth": 0.25, "eighth": 0.5, "quarter": 1.0}.get(
+        quantize, 0.25,
+    )
+
+    counts: Counter = Counter()
+    work_sets: dict[tuple, set[str]] = {}
+    beat_pos: dict[tuple, Counter] = {}
+    strongest_hits: dict[tuple, Counter] = {}
+    total_ngrams = 0
+
+    for work_id, data in works:
+        tpb = data.get("ticks_per_beat", TICKS_PER_BEAT)
+        for role, notes in _iter_track_notes(data, track):
+            if len(notes) < n:
+                continue
+            for i in range(len(notes) - n + 1):
+                window = notes[i:i + n]
+                durs = tuple(
+                    max(1, round(nt.duration / tpb / grid_beat))
+                    for nt in window
+                )
+                key = durs
+                counts[key] += 1
+                total_ngrams += 1
+                work_sets.setdefault(key, set()).add(work_id)
+
+                bp = _classify_beat_position(window[0].start_tick)
+                beat_pos.setdefault(key, Counter())[bp] += 1
+
+                sbh = _strongest_beat_hit(window)
+                strongest_hits.setdefault(key, Counter())[sbh] += 1
+
+    ngrams_out = []
+    for key, count in counts.most_common():
+        if count < min_occurrences:
+            break
+        bp = beat_pos.get(key, Counter())
+        bp_total = sum(bp.values()) or 1
+        sh = strongest_hits.get(key, Counter())
+        sh_total = sum(sh.values()) or 1
+
+        dur_beats = [v * grid_beat for v in key]
+        # Compute onset_in_beat for this pattern (cumulative from first note).
+        onset_positions: list[float] = [0.0]
+        for d in dur_beats[:-1]:
+            onset_positions.append(round(onset_positions[-1] + d, 4))
+
+        # Label.
+        if all(d == key[0] for d in key):
+            label = f"{n}x{_dur_name(key[0], grid_beat)} (running)"
+        else:
+            label = "-".join(_dur_name(d, grid_beat) for d in key)
+
+        entry: dict[str, Any] = {
+            "durations_grid": list(key),
+            "durations_beats": [round(d, 4) for d in dur_beats],
+            "onset_in_beat": onset_positions,
+            "label": label,
+            "count": count,
+            "works_containing": len(work_sets.get(key, set())),
+            "frequency_per_1000": round(count / max(total_ngrams, 1) * 1000, 1),
+            "beat_position_distribution": {
+                "strong": round(bp.get("strong", 0) / bp_total, 2),
+                "mid": round(bp.get("mid", 0) / bp_total, 2),
+                "weak": round(bp.get("weak", 0) / bp_total, 2),
+            },
+            "strongest_beat_hit_position": [
+                round(sh.get(p, 0) / sh_total, 2) for p in range(n)
+            ],
+        }
+        ngrams_out.append(entry)
+        if len(ngrams_out) >= top_k:
+            break
+
+    return json.dumps({
+        "category": category,
+        "n": n,
+        "quantize": quantize,
+        "total_works_scanned": len(works),
+        "total_ngrams_extracted": total_ngrams,
+        "ngrams": ngrams_out,
+    }, indent=2)
+
+
+def _dur_name(grid_units: int, grid_beat: float) -> str:
+    """Human-readable duration name from grid units."""
+    beats = grid_units * grid_beat
+    if beats <= 0.125:
+        return "32nd"
+    if beats <= 0.25:
+        return "16th"
+    if beats <= 0.5:
+        return "8th"
+    if beats <= 1.0:
+        return "qtr"
+    if beats <= 2.0:
+        return "half"
+    return "whole+"
+
+
+@server.tool()
+def extract_combined_figures(
+    category: str,
+    n: int = 4,
+    track: Optional[str] = None,
+    interval_mode: str = "degree",
+    min_occurrences: int = 3,
+    top_k: int = 25,
+) -> str:
+    """Extract combined melodic+rhythm figures from all works in a category.
+
+    Each figure is a combination of interval sequence, duration ratios, and
+    onset ratios. This is the core pattern extraction tool.
+
+    Args:
+        category: Reference category
+        n: Figure size (number of notes). Default 4.
+        track: Optional track role filter
+        interval_mode: 'semitone', 'degree', or 'diatonic'. Default 'degree'.
+        min_occurrences: Minimum count. Default 3.
+        top_k: Maximum results. Default 25.
+    """
+    if interval_mode not in ("semitone", "degree", "diatonic"):
+        return json.dumps({"error": f"Invalid interval_mode: {interval_mode}"})
+
+    works = _load_works_for_category(category)
+    if not works:
+        return json.dumps({"error": f"No works found for category '{category}'."})
+
+    counts: Counter = Counter()
+    work_sets: dict[tuple, set[str]] = {}
+    beat_pos: dict[tuple, Counter] = {}
+    strongest_hits: dict[tuple, Counter] = {}
+    chord_tone_sums: dict[tuple, list[float]] = {}
+    examples: dict[tuple, dict] = {}
+    total_figures = 0
+
+    for work_id, data in works:
+        tonic, is_minor, conf = _get_key_info(work_id)
+        use_tonic = tonic if conf >= 0.7 else None
+        if interval_mode in ("degree", "diatonic") and use_tonic is None:
+            eff_mode = "semitone"
+        else:
+            eff_mode = interval_mode
+        tpb = data.get("ticks_per_beat", TICKS_PER_BEAT)
+
+        for role, notes in _iter_track_notes(data, track):
+            if len(notes) < n:
+                continue
+            ivs = _compute_intervals(notes, eff_mode, use_tonic, is_minor)
+            for i in range(len(notes) - n + 1):
+                window = notes[i:i + n]
+                window_ivs = tuple(ivs[i:i + n - 1]) if (i + n - 1) <= len(ivs) else None
+                if window_ivs is None or len(window_ivs) != n - 1:
+                    continue
+
+                # Duration ratios: relative to first note's duration.
+                first_dur = window[0].duration / tpb
+                if first_dur <= 0:
+                    continue
+                dur_ratios = tuple(
+                    round(nt.duration / tpb / first_dur * 4) / 4  # quantize to 0.25
+                    for nt in window
+                )
+                # Onset ratios: relative to first note, in first_dur units.
+                t0 = window[0].start_tick
+                onset_ratios = tuple(
+                    round((nt.start_tick - t0) / tpb / first_dur * 4) / 4
+                    for nt in window
+                )
+
+                key = (window_ivs, dur_ratios, onset_ratios)
+                counts[key] += 1
+                total_figures += 1
+                work_sets.setdefault(key, set()).add(work_id)
+
+                bp = _classify_beat_position(window[0].start_tick)
+                beat_pos.setdefault(key, Counter())[bp] += 1
+
+                sbh = _strongest_beat_hit(window)
+                strongest_hits.setdefault(key, Counter())[sbh] += 1
+
+                # Chord tone ratio: simplified check vs bass.
+                bass_pitch = min(nt.pitch for nt in window)
+                ct_count = sum(
+                    1 for nt in window if _is_chord_tone_simple(nt.pitch, bass_pitch)
+                )
+                chord_tone_sums.setdefault(key, []).append(ct_count / n)
+
+                if key not in examples:
+                    examples[key] = {
+                        "work_id": work_id,
+                        "track": role,
+                        "bar": window[0].bar,
+                        "beat_index": window[0].beat - 1,
+                        "pitches": [nt.pitch for nt in window],
+                    }
+
+    figures_out = []
+    for key, count in counts.most_common():
+        if count < min_occurrences:
+            break
+        window_ivs, dur_ratios, onset_ratios = key
+        bp = beat_pos.get(key, Counter())
+        bp_total = sum(bp.values()) or 1
+        sh = strongest_hits.get(key, Counter())
+        sh_total = sum(sh.values()) or 1
+        ct_vals = chord_tone_sums.get(key, [])
+
+        # Determine contour.
+        signed_dirs = []
+        for iv in window_ivs:
+            if isinstance(iv, tuple):
+                signed_dirs.append(iv[0])  # degree_diff
+            else:
+                signed_dirs.append(iv)
+        if all(d > 0 for d in signed_dirs):
+            contour = "ascending"
+        elif all(d < 0 for d in signed_dirs):
+            contour = "descending"
+        elif all(d == 0 for d in signed_dirs):
+            contour = "repeated"
+        else:
+            contour = "mixed"
+
+        is_stepwise = all(
+            abs(d) <= 2 if isinstance(d, int) else abs(d[0]) <= 1
+            for d in window_ivs
+        )
+
+        entry: dict[str, Any] = {
+            "intervals": [
+                list(iv) if isinstance(iv, tuple) else iv for iv in window_ivs
+            ],
+            "duration_ratios": list(dur_ratios),
+            "onset_ratios": list(onset_ratios),
+            "label": _label_melodic_ngram(window_ivs, interval_mode) + " " + contour,
+            "contour": contour,
+            "is_stepwise": is_stepwise,
+            "chord_tone_ratio": round(sum(ct_vals) / len(ct_vals), 2) if ct_vals else 0,
+            "count": count,
+            "works_containing": len(work_sets.get(key, set())),
+            "frequency_per_1000": round(count / max(total_figures, 1) * 1000, 1),
+            "beat_position_distribution": {
+                "strong": round(bp.get("strong", 0) / bp_total, 2),
+                "mid": round(bp.get("mid", 0) / bp_total, 2),
+                "weak": round(bp.get("weak", 0) / bp_total, 2),
+            },
+            "strongest_beat_hit_position": [
+                round(sh.get(p, 0) / sh_total, 2) for p in range(n)
+            ],
+            "example": examples.get(key),
+        }
+        figures_out.append(entry)
+        if len(figures_out) >= top_k:
+            break
+
+    return json.dumps({
+        "category": category,
+        "n": n,
+        "interval_mode": interval_mode,
+        "total_works_scanned": len(works),
+        "total_figures_extracted": total_figures,
+        "figures": figures_out,
+    }, indent=2)
+
+
+@server.tool()
+def detect_figuration_slots(
+    category: str,
+    beats_per_pattern: int = 1,
+    min_pattern_notes: int = 3,
+    chord_tones_only: bool = True,
+    top_k: int = 20,
+) -> str:
+    """Detect figuration slot patterns (arpeggio orderings) in a category.
+
+    Analyzes how chord tones are voiced in each beat group, mapping notes to
+    vertical slots (0=bass, N-1=soprano) and recording the temporal access order.
+
+    Args:
+        category: Reference category
+        beats_per_pattern: Number of beats per pattern window. Default 1.
+        min_pattern_notes: Minimum notes in a pattern to include. Default 3.
+        chord_tones_only: If True, only chord tones are slotted. Default True.
+        top_k: Maximum results. Default 20.
+    """
+    works = _load_works_for_category(category)
+    if not works:
+        return json.dumps({"error": f"No works found for category '{category}'."})
+
+    pattern_ticks = beats_per_pattern * TICKS_PER_BEAT
+    counts: Counter = Counter()
+    work_sets: dict[tuple, set[str]] = {}
+    non_ct_sums: dict[tuple, list[float]] = {}
+    bass_degrees: dict[tuple, Counter] = {}
+    examples: dict[tuple, dict] = {}
+    total_patterns = 0
+
+    for work_id, data in works:
+        tonic, is_minor, conf = _get_key_info(work_id)
+        tpb = data.get("ticks_per_beat", TICKS_PER_BEAT)
+
+        # Merge all tracks for figuration analysis.
+        all_notes: list[Note] = []
+        for t in data.get("tracks", []):
+            for nt in t.get("notes", []):
+                all_notes.append(Note(
+                    pitch=nt["pitch"],
+                    velocity=nt.get("velocity", 80),
+                    start_tick=int(nt["onset"] * tpb),
+                    duration=max(1, int(nt["duration"] * tpb)),
+                    voice=t.get("role", "unknown"),
+                ))
+        all_notes.sort(key=lambda x: x.start_tick)
+        if not all_notes:
+            continue
+
+        # Process beat windows.
+        max_tick = all_notes[-1].start_tick
+        tick = 0
+        while tick <= max_tick:
+            window_end = tick + pattern_ticks
+            window_notes = [
+                nt for nt in all_notes
+                if tick <= nt.start_tick < window_end
+            ]
+            if len(window_notes) < min_pattern_notes:
+                tick += pattern_ticks
+                continue
+
+            # Sort by pitch to assign slots.
+            unique_pitches = sorted(set(nt.pitch for nt in window_notes))
+            pitch_to_slot = {p: i for i, p in enumerate(unique_pitches)}
+            num_voices = len(unique_pitches)
+            bass_pitch = unique_pitches[0]
+
+            # Filter to chord tones if requested.
+            if chord_tones_only:
+                ct_notes = [
+                    nt for nt in window_notes
+                    if _is_chord_tone_simple(nt.pitch, bass_pitch)
+                ]
+                non_ct_count = len(window_notes) - len(ct_notes)
+                non_ct_ratio = non_ct_count / len(window_notes)
+                if len(ct_notes) < min_pattern_notes:
+                    tick += pattern_ticks
+                    continue
+                # Re-assign slots for chord-tone-only set.
+                ct_pitches = sorted(set(nt.pitch for nt in ct_notes))
+                pitch_to_slot = {p: i for i, p in enumerate(ct_pitches)}
+                num_voices = len(ct_pitches)
+                bass_pitch = ct_pitches[0]
+                use_notes = ct_notes
+            else:
+                use_notes = window_notes
+                non_ct_ratio = 0.0
+
+            # Build slot sequence (temporal order).
+            use_notes.sort(key=lambda x: x.start_tick)
+            slot_seq = tuple(pitch_to_slot[nt.pitch] for nt in use_notes)
+            key = (num_voices, slot_seq)
+
+            counts[key] += 1
+            total_patterns += 1
+            work_sets.setdefault(key, set()).add(work_id)
+            non_ct_sums.setdefault(key, []).append(non_ct_ratio)
+
+            # Track bass degree.
+            if tonic is not None and conf >= 0.7:
+                sd = pitch_to_scale_degree(bass_pitch, tonic, is_minor or False)
+                bass_degrees.setdefault(key, Counter())[sd.degree] += 1
+
+            if key not in examples:
+                examples[key] = {
+                    "work_id": work_id,
+                    "bar": use_notes[0].bar,
+                    "pitches": [nt.pitch for nt in use_notes],
+                    "bass_pitch": bass_pitch,
+                }
+
+            tick += pattern_ticks
+
+    patterns_out = []
+    for key, count in counts.most_common():
+        num_voices, slot_seq = key
+        nct_vals = non_ct_sums.get(key, [])
+        bd = bass_degrees.get(key, Counter())
+        bd_most = bd.most_common(1)[0][0] if bd else 0
+
+        entry: dict[str, Any] = {
+            "num_voices": num_voices,
+            "slot_sequence": list(slot_seq),
+            "bass_degree": bd_most,
+            "non_chord_tone_ratio": (
+                round(sum(nct_vals) / len(nct_vals), 2) if nct_vals else 0
+            ),
+            "count": count,
+            "works_containing": len(work_sets.get(key, set())),
+            "label": _figuration_label(num_voices, slot_seq),
+            "example": examples.get(key),
+        }
+        patterns_out.append(entry)
+        if len(patterns_out) >= top_k:
+            break
+
+    return json.dumps({
+        "category": category,
+        "beats_per_pattern": beats_per_pattern,
+        "chord_tones_only": chord_tones_only,
+        "total_works_scanned": len(works),
+        "total_patterns_extracted": total_patterns,
+        "figuration_patterns": patterns_out,
+    }, indent=2)
+
+
+def _figuration_label(num_voices: int, slots: tuple[int, ...]) -> str:
+    """Generate label for a figuration slot pattern."""
+    if len(slots) < 2:
+        return f"{num_voices}v-single"
+    # Check direction.
+    diffs = [slots[i + 1] - slots[i] for i in range(len(slots) - 1)]
+    if all(d > 0 for d in diffs):
+        direction = "rising"
+    elif all(d < 0 for d in diffs):
+        direction = "falling"
+    elif all(d >= 0 for d in diffs[:len(diffs) // 2]) and all(
+        d <= 0 for d in diffs[len(diffs) // 2:]
+    ):
+        direction = "arch"
+    else:
+        direction = "mixed"
+    return f"{num_voices}v-{direction}-{len(slots)}notes"
 
 
 # ---------------------------------------------------------------------------

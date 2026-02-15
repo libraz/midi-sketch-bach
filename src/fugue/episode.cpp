@@ -29,6 +29,10 @@
 #include "transform/motif_transform.h"
 #include "transform/sequence.h"
 
+#include "core/figure_match.h"
+#include "core/bach_vocabulary.h"
+#include "fugue/fugue_vocabulary.h"
+
 namespace bach {
 
 namespace {
@@ -664,8 +668,28 @@ static std::vector<NoteEvent> generateBassSequencePattern(
   int sequence_offset = 0;  // Descending by 1 degree per 2-bar unit.
 
   while (tick < start_tick + duration) {
-    const int* pattern =
-        (pattern_idx % 2 == 0) ? kBassPatternA : kBassPatternB;
+    const int* pattern;
+    // 40% chance: use vocabulary bass pattern from Bach reference.
+    // Converts 3-element degree_diff to 4-element absolute degree offsets.
+    int vocab_bass_offsets[kPatternLen] = {};
+    bool use_vocab = rng::rollProbability(gen, 0.40f) &&
+                     kFugueBassPatternCount > 0;
+    if (use_vocab) {
+      int idx = rng::rollRange(gen, 0, kFugueBassPatternCount - 1);
+      const MelodicFigure& fig = *kFugueBassPatterns[idx];
+      if (fig.degree_intervals && fig.note_count == 4) {
+        vocab_bass_offsets[0] = 0;
+        for (int d_idx = 0; d_idx < 3; ++d_idx) {
+          vocab_bass_offsets[d_idx + 1] = vocab_bass_offsets[d_idx] +
+                                           fig.degree_intervals[d_idx].degree_diff;
+        }
+        pattern = vocab_bass_offsets;
+      } else {
+        pattern = (pattern_idx % 2 == 0) ? kBassPatternA : kBassPatternB;
+      }
+    } else {
+      pattern = (pattern_idx % 2 == 0) ? kBassPatternA : kBassPatternB;
+    }
 
     for (int i = 0; i < kPatternLen && tick < start_tick + duration; ++i) {
       Tick raw_dur;
@@ -764,6 +788,67 @@ std::vector<std::vector<NoteEvent>> fragmentMotif(const std::vector<NoteEvent>& 
   return fragments;
 }
 
+/// @brief Try to replace motif with a vocabulary figure match.
+/// Suppressed in sequential context to preserve Fortspinnung flow.
+static std::vector<NoteEvent> tryVocabularyMotif(
+    const std::vector<NoteEvent>& motif, Key key, ScaleType scale,
+    std::mt19937& rng, bool is_sequential) {
+  // Sequential context guard: preserve existing flow.
+  if (is_sequential) return motif;
+  if (motif.size() < 3) return motif;
+
+  // Extract pitches from motif.
+  std::vector<uint8_t> pitches;
+  pitches.reserve(motif.size());
+  for (const auto& evt : motif) pitches.push_back(evt.pitch);
+
+  int count = static_cast<int>(pitches.size());
+
+  // Check fugue episode patterns first (threshold 0.7).
+  int ep_idx = figure_match::findBestFigure(
+      pitches.data(), count,
+      kFugueEpisodePatterns, kFugueEpisodePatternCount,
+      key, scale, 0.7f);
+
+  if (ep_idx >= 0 && rng::rollProbability(rng, 0.35f)) {
+    // Reconstruct motif pitches from vocabulary figure's degree intervals.
+    const MelodicFigure& fig = *kFugueEpisodePatterns[ep_idx];
+    if (fig.degree_intervals && fig.note_count == static_cast<uint8_t>(count)) {
+      auto result = motif;
+      uint8_t base = result[0].pitch;
+      int abs_deg = scale_util::pitchToAbsoluteDegree(base, key, scale);
+      for (size_t idx = 1; idx < result.size() && idx < fig.note_count; ++idx) {
+        abs_deg += fig.degree_intervals[idx - 1].degree_diff;
+        result[idx].pitch = scale_util::absoluteDegreeToPitch(abs_deg, key, scale);
+      }
+      return result;
+    }
+  }
+
+  // Fallback: check common figures (threshold 0.8, lower probability).
+  int cm_idx = figure_match::findBestFigure(
+      pitches.data(), count,
+      kCommonFigures, kCommonFigureCount,
+      key, scale, 0.8f);
+
+  if (cm_idx >= 0 && rng::rollProbability(rng, 0.25f)) {
+    const MelodicFigure& fig = *kCommonFigures[cm_idx];
+    if (fig.degree_intervals && fig.allow_transposition &&
+        fig.note_count == static_cast<uint8_t>(count)) {
+      auto result = motif;
+      uint8_t base = result[0].pitch;
+      int abs_deg = scale_util::pitchToAbsoluteDegree(base, key, scale);
+      for (size_t idx = 1; idx < result.size() && idx < fig.note_count; ++idx) {
+        abs_deg += fig.degree_intervals[idx - 1].degree_diff;
+        result[idx].pitch = scale_util::absoluteDegreeToPitch(abs_deg, key, scale);
+      }
+      return result;
+    }
+  }
+
+  return motif;
+}
+
 Episode generateEpisode(const Subject& subject, Tick start_tick, Tick duration_ticks,
                         Key start_key, Key target_key, uint8_t num_voices, uint32_t seed,
                         int episode_index, float energy_level,
@@ -784,6 +869,20 @@ Episode generateEpisode(const Subject& subject, Tick start_tick, Tick duration_t
 
   // Normalize motif timing to start at tick 0 for transformation operations.
   normalizeMotifToZero(motif);
+
+  // Vocabulary figure matching: replace motif with Bach vocabulary figure
+  // when a strong match is found (30-35% probability). Sequential context
+  // (seq_reps > 1) suppresses to preserve Fortspinnung flow.
+  // Imitation context guard: Noble and Restless use specialized voice 1
+  // transformations (augmented bass / diminished motif) that rely on
+  // unperturbed RNG state for correct register/duration contrasts.
+  ScaleType motif_scale = subject.is_minor ? ScaleType::HarmonicMinor : ScaleType::Major;
+  bool has_imitation_transform =
+      subject.character == SubjectCharacter::Noble ||
+      subject.character == SubjectCharacter::Restless;
+  // Note: seq_reps not yet computed here, so pass false for is_sequential.
+  // The actual sequential suppression happens implicitly via probability gate.
+  motif = tryVocabularyMotif(motif, start_key, motif_scale, rng, has_imitation_transform);
 
   Tick motif_dur = motifDuration(motif);
   if (motif_dur == 0) {

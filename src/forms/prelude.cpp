@@ -23,6 +23,7 @@
 #include "harmony/harmonic_event.h"
 #include "forms/prelude_figuration.h"
 #include "forms/form_utils.h"
+#include "solo_string/solo_vocabulary.h"
 #include "organ/organ_techniques.h"
 
 namespace bach {
@@ -76,11 +77,64 @@ uint8_t clampPreludeVoiceCount(uint8_t num_voices) {
   return num_voices;
 }
 
+/// @brief Enforce prelude voice-duration constraints on a slot-pattern template.
+///
+/// Slot patterns produce sixteenth-note (120-tick) durations for all voices,
+/// but prelude middle voice requires >= eighth (240) and bass >= quarter (480).
+/// This collapses duplicate voice steps, moves onset to beat start for voices
+/// that need long durations, and extends durations accordingly.
+///
+/// @param tmpl Template to adjust (modified in place).
+/// @param num_voices Number of voices in the prelude.
+void enforcePreludeSlotDurations(FigurationTemplate& tmpl, uint8_t num_voices) {
+  if (tmpl.steps.empty()) return;
+
+  // Minimum duration per voice index in prelude context.
+  // Voice 0 (soprano): sixteenth is fine (test allows any).
+  // Voice 1 (middle): minimum eighth note (240).
+  // Voice 2+ (bass/lower): minimum quarter note (480).
+  auto minDurationForVoice = [](uint8_t voice) -> Tick {
+    if (voice == 0) return duration::kSixteenthNote;  // 120
+    if (voice == 1) return duration::kEighthNote;      // 240
+    return duration::kQuarterNote;                     // 480
+  };
+
+  // Keep only the first step for each voice, extend its duration.
+  std::vector<FigurationStep> deduped;
+  deduped.reserve(tmpl.steps.size());
+  // Track which voices we've already seen.
+  uint8_t seen_mask = 0;  // Bit mask, supports up to 8 voices.
+
+  for (const auto& step : tmpl.steps) {
+    uint8_t vid = step.voice_index;
+    if (vid >= 8) continue;  // Safety.
+    uint8_t bit = static_cast<uint8_t>(1u << vid);
+    if (seen_mask & bit) continue;  // Skip duplicate voice steps.
+    seen_mask |= bit;
+
+    FigurationStep adjusted = step;
+    Tick min_dur = minDurationForVoice(vid);
+
+    if (adjusted.duration < min_dur) {
+      // If the remaining beat time from current offset is insufficient,
+      // move onset to beat start so the voice can sustain properly.
+      Tick remaining = kTicksPerBeat - adjusted.relative_tick;
+      if (remaining < min_dur) {
+        adjusted.relative_tick = 0;
+      }
+      adjusted.duration = min_dur;
+    }
+    deduped.push_back(adjusted);
+  }
+
+  tmpl.steps = std::move(deduped);
+}
+
 // Harmony-first prelude generation: voice chords, then figurate.
 std::vector<NoteEvent> generateHarmonicPreludeNotes(
     const HarmonicTimeline& timeline, uint8_t num_voices,
     FigurationType fig_type, std::mt19937& rng) {
-  (void)rng;  // Reserved for future section-level figuration selection.
+  // Section-level vocabulary slot pattern selection (position-dependent).
   std::vector<NoteEvent> all_notes;
   const auto& events = timeline.events();
   if (events.empty()) return all_notes;
@@ -146,13 +200,46 @@ std::vector<NoteEvent> generateHarmonicPreludeNotes(
   }
 
   // Step 2: Apply figuration to each event.
-  FigurationTemplate tmpl = createFigurationTemplate(fig_type, num_voices);
+  FigurationTemplate base_tmpl = createFigurationTemplate(fig_type, num_voices);
   int beats_per_bar = kTicksPerBar / kTicksPerBeat;
+  Tick total_duration = events.empty() ? 0 :
+      (events.back().end_tick - events.front().tick);
 
   for (size_t i = 0; i < events.size(); ++i) {
     const auto& ev = events[i];
     const auto& voicing = voicings[i];
     Tick event_duration = ev.end_tick - ev.tick;
+
+    // Position-dependent vocabulary slot pattern selection.
+    // Section start: 60%, middle: 30%, pre-cadence: 50%.
+    Tick event_start = ev.tick - events.front().tick;
+    float progress = total_duration > 0
+        ? static_cast<float>(event_start) / static_cast<float>(total_duration)
+        : 0.5f;
+    float slot_prob;
+    if (progress < 0.1f) {
+      slot_prob = 0.60f;  // Section opening.
+    } else if (progress > 0.85f) {
+      slot_prob = 0.50f;  // Pre-cadential.
+    } else {
+      slot_prob = 0.30f;  // Middle.
+    }
+
+    FigurationTemplate tmpl = base_tmpl;
+    if (rng::rollProbability(rng, slot_prob)) {
+      // Select a random vocabulary slot pattern matching voice count.
+      std::vector<const FigurationSlotPattern*> slot_candidates;
+      for (int si = 0; si < kSoloFigurationCount; ++si) {
+        if (kSoloFigurations[si]->slot_count <= num_voices) {
+          slot_candidates.push_back(kSoloFigurations[si]);
+        }
+      }
+      if (!slot_candidates.empty()) {
+        int pick = rng::rollRange(rng, 0, static_cast<int>(slot_candidates.size()) - 1);
+        tmpl = createFigurationTemplateFromSlot(*slot_candidates[pick], num_voices);
+        enforcePreludeSlotDurations(tmpl, num_voices);
+      }
+    }
 
     // Apply figuration for each beat within this event.
     int num_beats = static_cast<int>(event_duration / kTicksPerBeat);

@@ -8,6 +8,8 @@
 #include <random>
 #include <vector>
 
+#include "core/bach_vocabulary.h"
+#include "core/figure_match.h"
 #include "core/gm_program.h"
 #include "core/melodic_state.h"
 #include "core/note_creator.h"
@@ -604,6 +606,74 @@ ClimbingMotif extractClimbingMotif(const std::vector<NoteEvent>& opening_notes,
     motif.intervals = {0, -2, -4, -5};
     motif.durations = {kEighthNote, kEighthNote, kEighthNote, kEighthNote};
     motif.num_notes = 4;
+  }
+
+  return motif;
+}
+
+/// @brief Check if a figure's contour is descending (net negative direction).
+static bool isFigureDescending(const MelodicFigure& fig) {
+  if (!fig.degree_intervals || fig.note_count < 2) return false;
+  int sum = 0;
+  for (uint8_t idx = 0; idx < fig.note_count - 1; ++idx) {
+    sum += fig.degree_intervals[idx].degree_diff;
+  }
+  return sum < 0;
+}
+
+/// @brief Check if a figure's contour is ascending (net positive direction).
+static bool isFigureAscending(const MelodicFigure& fig) {
+  if (!fig.degree_intervals || fig.note_count < 2) return false;
+  int sum = 0;
+  for (uint8_t idx = 0; idx < fig.note_count - 1; ++idx) {
+    sum += fig.degree_intervals[idx].degree_diff;
+  }
+  return sum > 0;
+}
+
+/// @brief Try to apply vocabulary figure to a climbing motif segment.
+/// Register-linked: descending figures only during descending phases,
+/// ascending figures only during ascending phases.
+static ClimbingMotif tryVocabularyGesture(
+    const ClimbingMotif& motif, ToccataArchetype archetype,
+    int current_base_pitch, int next_base_pitch,
+    Key key, ScaleType scale, std::mt19937& rng_engine) {
+  auto hint = getArchetypeFigures(archetype);
+  if (!rng::rollProbability(rng_engine, hint.activation_prob)) return motif;
+
+  bool register_descending = (next_base_pitch < current_base_pitch);
+
+  // Try each figure in the hint.
+  for (int fig_idx = 0; fig_idx < hint.count; ++fig_idx) {
+    if (!hint.figures[fig_idx]) continue;
+    const MelodicFigure& fig = *hint.figures[fig_idx];
+
+    // Register-linked direction check.
+    if (isFigureDescending(fig) && !register_descending) continue;
+    if (isFigureAscending(fig) && register_descending) continue;
+
+    // Only apply if note counts are compatible.
+    if (fig.note_count != motif.num_notes) continue;
+    if (!fig.degree_intervals) continue;
+
+    // Reconstruct intervals from figure's degree diffs.
+    ClimbingMotif result;
+    result.num_notes = motif.num_notes;
+    result.durations = motif.durations;
+    result.intervals.resize(motif.num_notes);
+    result.intervals[0] = 0;  // Base pitch.
+
+    int abs_deg = scale_util::pitchToAbsoluteDegree(
+        clampPitch(current_base_pitch, 0, 127), key, scale);
+    uint8_t base_p = scale_util::absoluteDegreeToPitch(abs_deg, key, scale);
+
+    for (uint8_t note_idx = 1; note_idx < fig.note_count; ++note_idx) {
+      abs_deg += fig.degree_intervals[note_idx - 1].degree_diff;
+      uint8_t pitch = scale_util::absoluteDegreeToPitch(abs_deg, key, scale);
+      result.intervals[note_idx] = static_cast<int8_t>(
+          static_cast<int>(pitch) - static_cast<int>(base_p));
+    }
+    return result;
   }
 
   return motif;
