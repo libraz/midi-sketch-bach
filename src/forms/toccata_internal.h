@@ -11,13 +11,10 @@
 
 #include "core/basic_types.h"
 #include "core/gm_program.h"
-#include "core/note_creator.h"
 #include "core/pitch_utils.h"
 #include "core/rng_util.h"
 #include "core/scale.h"
-#include "counterpoint/bach_rule_evaluator.h"
-#include "counterpoint/collision_resolver.h"
-#include "counterpoint/counterpoint_state.h"
+#include "counterpoint/coordinate_voices.h"
 #include "forms/form_utils.h"
 #include "harmony/chord_types.h"
 #include "harmony/harmonic_event.h"
@@ -318,88 +315,26 @@ inline void populateLegacyFields(ToccataResult& result) {
   result.drive_end = result.sections.back().end;
 }
 
-/// @brief Coordinate all voices through createBachNote for vertical dissonance control.
+/// @brief Coordinate all voices through the unified coordination pass.
 ///
-/// Sorts notes by tick, groups simultaneous notes, processes pedal first (immutable),
-/// then upper voices through createBachNote with free counterpoint rules.
+/// Thin wrapper around bach::coordinateVoices with toccata-specific voice ranges.
 /// @param all_notes All generated notes (will be consumed).
 /// @param num_voices Number of active voices.
 /// @param tonic Key tonic for counterpoint state.
+/// @param timeline Optional harmonic timeline for chord-tone awareness.
 /// @return Coordinated notes with dissonances resolved.
 inline std::vector<NoteEvent> coordinateVoices(
     std::vector<NoteEvent> all_notes, uint8_t num_voices, Key tonic,
     const HarmonicTimeline* timeline = nullptr) {
-  BachRuleEvaluator cp_rules(num_voices);
-  cp_rules.setFreeCounterpoint(true);
-  CollisionResolver cp_resolver;
-  cp_resolver.setHarmonicTimeline(timeline);
-  CounterpointState cp_state;
-  cp_state.setKey(tonic);
-  for (uint8_t v = 0; v < num_voices; ++v) {
-    cp_state.registerVoice(v, getToccataLowPitch(v), getToccataHighPitch(v));
-  }
-
-  std::sort(all_notes.begin(), all_notes.end(),
-            [](const NoteEvent& a, const NoteEvent& b) {
-              return a.start_tick < b.start_tick;
-            });
-
-  std::vector<NoteEvent> coordinated;
-  coordinated.reserve(all_notes.size());
-  int accepted_count = 0;
-  int total_count = 0;
-
-  size_t i = 0;
-  while (i < all_notes.size()) {
-    Tick current_tick = all_notes[i].start_tick;
-    size_t group_end = i;
-    while (group_end < all_notes.size() &&
-           all_notes[group_end].start_tick == current_tick) {
-      ++group_end;
-    }
-
-    // Sort group: pedal first (voice 2), then lower voices first.
-    std::sort(all_notes.begin() + static_cast<ptrdiff_t>(i),
-              all_notes.begin() + static_cast<ptrdiff_t>(group_end),
-              [](const NoteEvent& a, const NoteEvent& b) {
-                bool a_pedal = (a.source == BachNoteSource::PedalPoint);
-                bool b_pedal = (b.source == BachNoteSource::PedalPoint);
-                if (a_pedal != b_pedal) return a_pedal;
-                return a.voice > b.voice;
-              });
-
-    for (size_t j = i; j < group_end; ++j) {
-      const auto& note = all_notes[j];
-      ++total_count;
-
-      if (note.source == BachNoteSource::PedalPoint) {
-        cp_state.addNote(note.voice, note);
-        coordinated.push_back(note);
-        ++accepted_count;
-        continue;
-      }
-
-      BachNoteOptions opts;
-      opts.voice = note.voice;
-      opts.desired_pitch = note.pitch;
-      opts.tick = note.start_tick;
-      opts.duration = note.duration;
-      opts.velocity = note.velocity;
-      opts.source = note.source;
-
-      auto result = createBachNote(&cp_state, &cp_rules, &cp_resolver, opts);
-      if (result.accepted) {
-        coordinated.push_back(result.note);
-        ++accepted_count;
-      }
-    }
-    i = group_end;
-  }
-
-  fprintf(stderr, "[Toccata] createBachNote: accepted %d/%d (%.0f%%)\n",
-          accepted_count, total_count,
-          total_count > 0 ? 100.0 * accepted_count / total_count : 0.0);
-  return coordinated;
+  CoordinationConfig config;
+  config.num_voices = num_voices;
+  config.tonic = tonic;
+  config.timeline = timeline;
+  config.voice_range = [](uint8_t v) -> std::pair<uint8_t, uint8_t> {
+    return {getToccataLowPitch(v), getToccataHighPitch(v)};
+  };
+  config.form_name = "Toccata";
+  return bach::coordinateVoices(std::move(all_notes), config);
 }
 
 }  // namespace toccata_internal

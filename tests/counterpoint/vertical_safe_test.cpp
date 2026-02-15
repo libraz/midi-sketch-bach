@@ -86,25 +86,28 @@ TEST(VerticalSafeCallback, DissonanceRejected) {
   EXPECT_FALSE(safe(0, 1, 61));  // Db4: m2 with C4 -> rejected.
 }
 
-TEST(VerticalSafeCallback, WeakBeatAlwaysSafe) {
-  // Same dissonant setup, but at tick 480 (beat 1 = weak).
-  // Weak beats bypass all checks.
+TEST(VerticalSafeCallback, WeakBeatHarshDissonanceRejected) {
+  // Weak beat (beat 1) now rejects m2/TT/M7.
   auto tl = makeCMajorTimeline(kTicksPerBar);
   std::vector<NoteEvent> notes = {
       makeNote(kTicksPerBeat, kTicksPerBeat, 60, 0),  // C4 at beat 1
   };
   auto safe = makeVerticalSafeCallback(tl, notes, 2);
-  EXPECT_TRUE(safe(kTicksPerBeat, 1, 61));  // Db4 on weak beat -> safe.
+  EXPECT_FALSE(safe(kTicksPerBeat, 1, 61));  // Db4 = m2(1) -> rejected.
+  EXPECT_FALSE(safe(kTicksPerBeat, 1, 66));  // F#4 = TT(6) -> rejected.
+  EXPECT_FALSE(safe(kTicksPerBeat, 1, 71));  // B4 = M7(11) -> rejected.
+  EXPECT_TRUE(safe(kTicksPerBeat, 1, 64));   // E4 = M3(4) -> allowed.
 }
 
-TEST(VerticalSafeCallback, Beat3WeakSafe) {
-  // Beat 3 (tick 1440) is also weak.
+TEST(VerticalSafeCallback, Beat3HarshDissonanceRejected) {
+  // Beat 3 (tick 1440) is weak -- rejects m2/TT/M7.
   auto tl = makeCMajorTimeline(kTicksPerBar * 2);
   std::vector<NoteEvent> notes = {
       makeNote(3 * kTicksPerBeat, kTicksPerBeat, 60, 0),  // C4 at beat 3
   };
   auto safe = makeVerticalSafeCallback(tl, notes, 2);
-  EXPECT_TRUE(safe(3 * kTicksPerBeat, 1, 61));  // Dissonant but weak beat.
+  EXPECT_FALSE(safe(3 * kTicksPerBeat, 1, 61));  // m2 rejected.
+  EXPECT_TRUE(safe(3 * kTicksPerBeat, 1, 62));   // M2(2) allowed.
 }
 
 TEST(VerticalSafeCallback, ChordToneAlwaysSafe) {

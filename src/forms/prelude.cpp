@@ -3,10 +3,8 @@
 #include "forms/prelude.h"
 
 #include <algorithm>
-#include <array>
 #include <cassert>
 #include <cstdio>
-#include <map>
 #include <random>
 #include <vector>
 
@@ -17,17 +15,15 @@
 #include "core/pitch_utils.h"
 #include "core/rng_util.h"
 #include "core/scale.h"
-#include "counterpoint/bach_rule_evaluator.h"
-#include "counterpoint/collision_resolver.h"
-#include "counterpoint/counterpoint_state.h"
-#include "harmony/chord_tone_utils.h"
-#include "harmony/chord_types.h"
-#include "harmony/harmonic_event.h"
-#include "counterpoint/cross_relation.h"
+#include "counterpoint/coordinate_voices.h"
 #include "counterpoint/leap_resolution.h"
 #include "counterpoint/parallel_repair.h"
 #include "counterpoint/repeated_note_repair.h"
+#include "counterpoint/vertical_context.h"
 #include "counterpoint/vertical_safe.h"
+#include "harmony/chord_tone_utils.h"
+#include "harmony/chord_types.h"
+#include "harmony/harmonic_event.h"
 #include "forms/form_utils.h"
 #include "fugue/fugue_config.h"
 #include "organ/organ_techniques.h"
@@ -141,7 +137,8 @@ std::vector<NoteEvent> generateScalePassage(const HarmonicEvent& event,
                                             float energy,
                                             int pattern_index,
                                             std::mt19937& rng,
-                                            int hint_center = -1) {
+                                            int hint_center = -1,
+                                            const VerticalContext* vctx = nullptr) {
   std::vector<NoteEvent> notes;
   uint8_t low_pitch = getVoiceLowPitch(voice_idx);
   uint8_t high_pitch = getVoiceHighPitch(voice_idx);
@@ -212,10 +209,25 @@ std::vector<NoteEvent> generateScalePassage(const HarmonicEvent& event,
     if (dur > remaining) dur = remaining;
     if (dur == 0) break;
 
+    uint8_t pitch = scale_tones[tone_idx];
+
+    // Category B: nudge pitch if vertically unsafe against placed voices.
+    if (vctx && !vctx->isSafe(current_tick, voice_idx, pitch)) {
+      ScaleType sc = event.is_minor ? ScaleType::HarmonicMinor : ScaleType::Major;
+      for (int dlt : {1, -1, 2, -2}) {
+        uint8_t alt = clampPitch(static_cast<int>(pitch) + dlt, low_pitch, high_pitch);
+        if (scale_util::isScaleTone(alt, event.key, sc) &&
+            vctx->isSafe(current_tick, voice_idx, alt)) {
+          pitch = alt;
+          break;
+        }
+      }
+    }
+
     NoteEvent note;
     note.start_tick = current_tick;
     note.duration = dur;
-    note.pitch = scale_tones[tone_idx];
+    note.pitch = pitch;
     note.velocity = kOrganVelocity;
     note.voice = voice_idx;
     note.source = BachNoteSource::EpisodeMaterial;
@@ -257,7 +269,8 @@ std::vector<NoteEvent> generateArpeggioPassage(const HarmonicEvent& event,
                                                uint8_t voice_idx,
                                                float energy,
                                                std::mt19937& rng,
-                                               int hint_center = -1) {
+                                               int hint_center = -1,
+                                               const VerticalContext* vctx = nullptr) {
   std::vector<NoteEvent> notes;
   uint8_t low_pitch = getVoiceLowPitch(voice_idx);
   uint8_t high_pitch = getVoiceHighPitch(voice_idx);
@@ -433,6 +446,21 @@ std::vector<NoteEvent> generateArpeggioPassage(const HarmonicEvent& event,
       }
     }
 
+    // Category B: nudge candidate if vertically unsafe against placed voices.
+    if (vctx && !vctx->isSafe(current_tick, voice_idx, candidate)) {
+      ScaleType sc_arp = event.is_minor ? ScaleType::HarmonicMinor : ScaleType::Major;
+      for (int dlt : {1, -1, 2, -2}) {
+        uint8_t alt = clampPitch(static_cast<int>(candidate) + dlt,
+                                 static_cast<int>(arp_pitches.front()),
+                                 static_cast<int>(arp_pitches.back()));
+        if (scale_util::isScaleTone(alt, event.key, sc_arp) &&
+            vctx->isSafe(current_tick, voice_idx, alt)) {
+          candidate = alt;
+          break;
+        }
+      }
+    }
+
     NoteEvent note;
     note.start_tick = current_tick;
     note.duration = dur;
@@ -495,7 +523,8 @@ std::vector<NoteEvent> generateArpeggioPassage(const HarmonicEvent& event,
 std::vector<NoteEvent> generateMiddleVoice(const HarmonicTimeline& timeline,
                                            Tick start_tick, Tick end_tick,
                                            uint8_t voice_idx, uint8_t num_voices,
-                                           std::mt19937& rng) {
+                                           std::mt19937& rng,
+                                           const VerticalContext* vctx = nullptr) {
   std::vector<NoteEvent> notes;
   if (start_tick >= end_tick) return notes;
 
@@ -611,6 +640,8 @@ std::vector<NoteEvent> generateMiddleVoice(const HarmonicTimeline& timeline,
           }
           // (4) Same-pitch penalty (repeated_pitch_rate protection).
           if (cp == prev_pitch) s -= 0.05f;
+          // (5) Vertical context scoring: reward vertically consonant candidates.
+          if (vctx) s += 0.25f * vctx->score(current_tick, voice_idx, cp);
           candidates[n_cand++] = {cp, s};
         }
       }
@@ -730,7 +761,8 @@ std::vector<NoteEvent> generateBassVoice(const HarmonicTimeline& timeline,
                                          Tick start_tick, Tick end_tick,
                                          uint8_t voice_idx,
                                          uint8_t num_voices,
-                                         std::mt19937& rng) {
+                                         std::mt19937& rng,
+                                         const VerticalContext* vctx = nullptr) {
   (void)num_voices;  // Kept for API symmetry with generateMiddleVoice.
   std::vector<NoteEvent> notes;
   if (start_tick >= end_tick) return notes;
@@ -825,6 +857,18 @@ std::vector<NoteEvent> generateBassVoice(const HarmonicTimeline& timeline,
       pitch = clampPitch(static_cast<int>(pitch), low_pitch, bass_high);
     }
 
+    // Category B: nudge pitch if vertically unsafe against placed voices.
+    if (vctx && !vctx->isSafe(current_tick, voice_idx, pitch)) {
+      for (int dlt : {1, -1, 2, -2}) {
+        uint8_t alt = clampPitch(static_cast<int>(pitch) + dlt, low_pitch, bass_high);
+        if (scale_util::isScaleTone(alt, event.key, scale_type) &&
+            vctx->isSafe(current_tick, voice_idx, alt)) {
+          pitch = alt;
+          break;
+        }
+      }
+    }
+
     // Prevent same pitch more than 2 consecutive times.
     if (pitch == prev_pitch) {
       ++same_pitch_count;
@@ -866,11 +910,9 @@ std::vector<NoteEvent> generateBassVoice(const HarmonicTimeline& timeline,
 
 /// @brief Generate all notes for a FreeForm prelude.
 ///
-/// Voice 0 (top): Passage work -- alternating between scale and arpeggio
-/// patterns using 8th notes (per-event, unchanged).
-/// Voice 1 (middle): Full-timeline Baroque middle voice with mixed durations.
-/// Voice 2 (bottom/pedal): Full-timeline stepwise bass voice.
-/// Additional middle voices use full-timeline generation.
+/// Generation order: bass first (harmonic foundation), then middle voices,
+/// then voice 0 (gestural scale/arpeggio passages). VerticalContext grows
+/// as voices are added so subsequent generators see previously placed notes.
 ///
 /// @param timeline Harmonic timeline providing chord context.
 /// @param num_voices Number of organ voices.
@@ -883,10 +925,31 @@ std::vector<NoteEvent> generateFreeFormNotes(const HarmonicTimeline& timeline,
   const auto& events = timeline.events();
   Tick total = timeline.totalDuration();
 
-  // Track voice0 hint for inter-event continuity.
-  int voice0_hint = -1;
+  // Bass voice first (harmonic foundation).
+  if (num_voices >= 3) {
+    uint8_t bass_voice = static_cast<uint8_t>(num_voices - 1);
+    auto bass = generateBassVoice(timeline, 0, total, bass_voice, num_voices, rng);
+    all_notes.insert(all_notes.end(), bass.begin(), bass.end());
+  }
 
-  // Voice 0: per-event passage work with 8th notes (scale and arpeggio patterns).
+  // VerticalContext grows as voices are added; subsequent generators see
+  // previously placed notes for vertical safety checks.
+  VerticalContext vctx{&all_notes, &timeline, num_voices};
+
+  // Voice 1: full-timeline Baroque middle voice.
+  if (num_voices >= 2) {
+    auto voice1 = generateMiddleVoice(timeline, 0, total, 1, num_voices, rng, &vctx);
+    all_notes.insert(all_notes.end(), voice1.begin(), voice1.end());
+  }
+
+  // Additional middle voices (4+ voices): full-timeline middle voice.
+  for (uint8_t vid = 2; vid < num_voices - 1 && vid < 4; ++vid) {
+    auto extra = generateMiddleVoice(timeline, 0, total, vid, num_voices, rng, &vctx);
+    all_notes.insert(all_notes.end(), extra.begin(), extra.end());
+  }
+
+  // Voice 0 (scale/arpeggio passages) last -- gestural, per-event.
+  int voice0_hint = -1;
   for (size_t event_idx = 0; event_idx < events.size(); ++event_idx) {
     const auto& event = events[event_idx];
     int pattern_index = static_cast<int>(event_idx);
@@ -895,35 +958,17 @@ std::vector<NoteEvent> generateFreeFormNotes(const HarmonicTimeline& timeline,
       float energy = preludeEnergy(event.tick, total);
       std::vector<NoteEvent> voice0_notes;
       if (rng::rollProbability(rng, 0.5f)) {
-        voice0_notes =
-            generateScalePassage(event, 0, energy, pattern_index, rng, voice0_hint);
+        voice0_notes = generateScalePassage(event, 0, energy, pattern_index, rng,
+                                            voice0_hint, &vctx);
       } else {
-        voice0_notes = generateArpeggioPassage(event, 0, energy, rng, voice0_hint);
+        voice0_notes = generateArpeggioPassage(event, 0, energy, rng,
+                                               voice0_hint, &vctx);
       }
       if (!voice0_notes.empty()) {
         voice0_hint = static_cast<int>(voice0_notes.back().pitch);
       }
       all_notes.insert(all_notes.end(), voice0_notes.begin(), voice0_notes.end());
     }
-  }
-
-  // Voice 1: full-timeline Baroque middle voice.
-  if (num_voices >= 2) {
-    auto voice1 = generateMiddleVoice(timeline, 0, total, 1, num_voices, rng);
-    all_notes.insert(all_notes.end(), voice1.begin(), voice1.end());
-  }
-
-  // Bass voice (last voice): full-timeline stepwise bass.
-  if (num_voices >= 3) {
-    uint8_t bass_voice = static_cast<uint8_t>(num_voices - 1);
-    auto bass = generateBassVoice(timeline, 0, total, bass_voice, num_voices, rng);
-    all_notes.insert(all_notes.end(), bass.begin(), bass.end());
-  }
-
-  // Additional middle voices (4+ voices): full-timeline middle voice.
-  for (uint8_t vid = 2; vid < num_voices - 1 && vid < 4; ++vid) {
-    auto extra = generateMiddleVoice(timeline, 0, total, vid, num_voices, rng);
-    all_notes.insert(all_notes.end(), extra.begin(), extra.end());
   }
 
   return all_notes;
@@ -935,10 +980,9 @@ std::vector<NoteEvent> generateFreeFormNotes(const HarmonicTimeline& timeline,
 
 /// @brief Generate all notes for a Perpetual motion prelude.
 ///
-/// Voice 0 (top): Continuous 16th notes arpeggiating through chord tones
-/// and passing tones (per-event, unchanged).
-/// Voice 1 (middle): Full-timeline Baroque middle voice.
-/// Voice 2 (bottom/pedal): Full-timeline stepwise bass voice.
+/// Generation order: bass first (harmonic foundation), then middle voices,
+/// then voice 0 (continuous arpeggio). VerticalContext grows as voices are
+/// added so subsequent generators see previously placed notes.
 ///
 /// @param timeline Harmonic timeline providing chord context.
 /// @param num_voices Number of organ voices.
@@ -951,40 +995,42 @@ std::vector<NoteEvent> generatePerpetualNotes(const HarmonicTimeline& timeline,
   const auto& events = timeline.events();
   Tick total = timeline.totalDuration();
 
-  // Track voice0 hint for inter-event continuity.
-  int voice0_hint = -1;
-
-  // Voice 0: per-event continuous 16th notes (arpeggio pattern).
-  for (size_t event_idx = 0; event_idx < events.size(); ++event_idx) {
-    const auto& event = events[event_idx];
-
-    if (num_voices >= 1) {
-      auto voice0_notes =
-          generateArpeggioPassage(event, 0, 0.90f, rng, voice0_hint);
-      if (!voice0_notes.empty()) {
-        voice0_hint = static_cast<int>(voice0_notes.back().pitch);
-      }
-      all_notes.insert(all_notes.end(), voice0_notes.begin(), voice0_notes.end());
-    }
-  }
-
-  // Voice 1: full-timeline Baroque middle voice.
-  if (num_voices >= 2) {
-    auto voice1 = generateMiddleVoice(timeline, 0, total, 1, num_voices, rng);
-    all_notes.insert(all_notes.end(), voice1.begin(), voice1.end());
-  }
-
-  // Bass voice (last voice): full-timeline stepwise bass.
+  // Bass voice first (harmonic foundation).
   if (num_voices >= 3) {
     uint8_t bass_voice = static_cast<uint8_t>(num_voices - 1);
     auto bass = generateBassVoice(timeline, 0, total, bass_voice, num_voices, rng);
     all_notes.insert(all_notes.end(), bass.begin(), bass.end());
   }
 
+  // VerticalContext grows as voices are added; subsequent generators see
+  // previously placed notes for vertical safety checks.
+  VerticalContext vctx{&all_notes, &timeline, num_voices};
+
+  // Voice 1: full-timeline Baroque middle voice.
+  if (num_voices >= 2) {
+    auto voice1 = generateMiddleVoice(timeline, 0, total, 1, num_voices, rng, &vctx);
+    all_notes.insert(all_notes.end(), voice1.begin(), voice1.end());
+  }
+
   // Additional middle voices (4+ voices): full-timeline middle voice.
   for (uint8_t vid = 2; vid < num_voices - 1 && vid < 4; ++vid) {
-    auto extra = generateMiddleVoice(timeline, 0, total, vid, num_voices, rng);
+    auto extra = generateMiddleVoice(timeline, 0, total, vid, num_voices, rng, &vctx);
     all_notes.insert(all_notes.end(), extra.begin(), extra.end());
+  }
+
+  // Voice 0 (continuous arpeggio) last -- gestural, per-event.
+  int voice0_hint = -1;
+  for (size_t event_idx = 0; event_idx < events.size(); ++event_idx) {
+    const auto& event = events[event_idx];
+
+    if (num_voices >= 1) {
+      auto voice0_notes =
+          generateArpeggioPassage(event, 0, 0.90f, rng, voice0_hint, &vctx);
+      if (!voice0_notes.empty()) {
+        voice0_hint = static_cast<int>(voice0_notes.back().pitch);
+      }
+      all_notes.insert(all_notes.end(), voice0_notes.begin(), voice0_notes.end());
+    }
   }
 
   return all_notes;
@@ -1053,201 +1099,22 @@ PreludeResult generatePrelude(const PreludeConfig& config) {
   assert(countUnknownSource(all_notes) == 0 &&
          "All notes should have source set by generators");
 
-  // ---- createBachNote coordination pass (vertical dissonance control) ----
+  // ---- Unified coordination pass (vertical dissonance control) ----
   {
-    BachRuleEvaluator cp_rules(num_voices);
-    cp_rules.setFreeCounterpoint(true);  // Allow weak-beat NHTs.
-    CollisionResolver cp_resolver;
-    cp_resolver.setHarmonicTimeline(&timeline);
-    CounterpointState cp_state;
-    cp_state.setKey(config.key.tonic);
-    for (uint8_t v = 0; v < num_voices; ++v) {
-      cp_state.registerVoice(v, getVoiceLowPitch(v), getVoiceHighPitch(v));
-    }
-
-    // Sort by tick for chronological processing.
-    std::sort(all_notes.begin(), all_notes.end(),
-              [](const NoteEvent& a, const NoteEvent& b) {
-                return a.start_tick < b.start_tick;
-              });
-
-    // Build per-voice next-pitch map with strictly-later-tick guarantee. O(n).
-    // Keyed by (voice, tick) so it is independent of group-sort reordering.
-    std::map<std::pair<VoiceId, Tick>, std::optional<uint8_t>> next_pitch_map;
-    {
-      std::array<std::vector<size_t>, 5> voice_indices;
-      for (size_t idx = 0; idx < all_notes.size(); ++idx) {
-        uint8_t v = all_notes[idx].voice;
-        if (v < 5) voice_indices[v].push_back(idx);
-      }
-      for (uint8_t v = 0; v < 5; ++v) {
-        const auto& vi = voice_indices[v];
-        if (vi.size() < 2) continue;
-        std::optional<uint8_t> last_candidate;
-        Tick last_tick = 0;
-        for (size_t k = vi.size(); k-- > 0;) {
-          Tick this_tick = all_notes[vi[k]].start_tick;
-          if (last_tick > this_tick) {
-            next_pitch_map[{v, this_tick}] = last_candidate;
-          }
-          last_candidate = all_notes[vi[k]].pitch;
-          last_tick = this_tick;
-        }
-      }
-    }
-
-    // Group by tick and process in voice priority order:
-    // pedal (immutable) → lower voices → upper voices.
-    std::vector<NoteEvent> coordinated;
-    coordinated.reserve(all_notes.size());
-    int accepted_count = 0;
-    int total_count = 0;
-
-    size_t i = 0;
-    while (i < all_notes.size()) {
-      Tick current_tick = all_notes[i].start_tick;
-      size_t group_end = i;
-      while (group_end < all_notes.size() &&
-             all_notes[group_end].start_tick == current_tick) {
-        ++group_end;
-      }
-
-      // Sort group by voice priority: pedal first (highest voice idx), then
-      // ascending voice idx for upper voices.
-      std::sort(all_notes.begin() + static_cast<ptrdiff_t>(i),
-                all_notes.begin() + static_cast<ptrdiff_t>(group_end),
-                [num_voices](const NoteEvent& a, const NoteEvent& b) {
-                  bool a_pedal = isPedalVoice(a.voice, num_voices);
-                  bool b_pedal = isPedalVoice(b.voice, num_voices);
-                  if (a_pedal != b_pedal) return a_pedal;  // pedal first
-                  return a.voice > b.voice;  // then lower voices first
-                });
-
-      for (size_t j = i; j < group_end; ++j) {
-        const auto& note = all_notes[j];
-        ++total_count;
-
-        // Pedal notes are immutable — register directly.
-        if (isPedalVoice(note.voice, num_voices) &&
-            note.source == BachNoteSource::PedalPoint) {
-          cp_state.addNote(note.voice, note);
-          coordinated.push_back(note);
-          ++accepted_count;
-          continue;
-        }
-
-        // Pre-composed patterns: lightweight safety + accept.
-        if (note.source == BachNoteSource::ArpeggioFlow ||
-            note.source == BachNoteSource::EpisodeMaterial) {
-          if (note.pitch < getVoiceLowPitch(note.voice) ||
-              note.pitch > getVoiceHighPitch(note.voice)) {
-            continue;
-          }
-
-          if (isStrongBeat(note.start_tick)) {
-            // (A) Chord-tone check.
-            const HarmonicEvent& harm = timeline.getAt(note.start_tick);
-            if (!isChordTone(note.pitch, harm)) {
-              // Snap repair: try ±1 first, then ±2 same-direction only.
-              bool snapped = false;
-              int run_dir = 0;
-              for (auto iter = coordinated.rbegin(); iter != coordinated.rend();
-                   ++iter) {
-                if (iter->voice == note.voice) {
-                  run_dir = (note.pitch > iter->pitch)    ? 1
-                            : (note.pitch < iter->pitch) ? -1
-                                                          : 0;
-                  break;
-                }
-              }
-              std::array<int, 4> deltas;
-              int delta_count = 2;
-              deltas[0] = 1;
-              deltas[1] = -1;
-              if (run_dir != 0) {
-                deltas[delta_count++] = 2 * run_dir;
-              } else {
-                deltas[delta_count++] = 2;
-                deltas[delta_count++] = -2;
-              }
-              for (int di = 0; di < delta_count; ++di) {
-                uint8_t cand = clampPitch(static_cast<int>(note.pitch) + deltas[di],
-                                          getVoiceLowPitch(note.voice),
-                                          getVoiceHighPitch(note.voice));
-                if (isChordTone(cand, harm) &&
-                    isVerticallyConsonant(cand, note.voice, note.start_tick,
-                                          coordinated, num_voices)) {
-                  NoteEvent fixed = note;
-                  fixed.pitch = cand;
-                  cp_state.addNote(fixed.voice, fixed);
-                  coordinated.push_back(fixed);
-                  ++accepted_count;
-                  snapped = true;
-                  break;
-                }
-              }
-              if (!snapped) continue;
-              continue;
-            }
-
-            // (B) Vertical consonance check (original pitch).
-            if (!isVerticallyConsonant(note.pitch, note.voice, note.start_tick,
-                                       coordinated, num_voices)) {
-              continue;
-            }
-          }
-
-          cp_state.addNote(note.voice, note);
-          coordinated.push_back(note);
-          ++accepted_count;
-          continue;
-        }
-
-        BachNoteOptions opts;
-        opts.voice = note.voice;
-        opts.desired_pitch = note.pitch;
-        opts.tick = note.start_tick;
-        opts.duration = note.duration;
-        opts.velocity = note.velocity;
-        opts.source = note.source;
-
-        // Lookahead: per-voice next pitch for NHT classification.
-        auto np_it = next_pitch_map.find({note.voice, note.start_tick});
-        if (np_it != next_pitch_map.end()) {
-          opts.next_pitch = np_it->second;
-        }
-
-        auto result = createBachNote(&cp_state, &cp_rules, &cp_resolver, opts);
-        if (result.accepted) {
-          // Soft cross-relation check: try alternatives if detected.
-          if (hasCrossRelation(coordinated, num_voices, note.voice,
-                               result.note.pitch, note.start_tick)) {
-            for (int delta : {1, -1, 2, -2}) {
-              auto alt_opts = opts;
-              alt_opts.desired_pitch = clampPitch(
-                  static_cast<int>(note.pitch) + delta,
-                  getVoiceLowPitch(note.voice), getVoiceHighPitch(note.voice));
-              auto alt = createBachNote(&cp_state, &cp_rules, &cp_resolver, alt_opts);
-              if (alt.accepted &&
-                  !hasCrossRelation(coordinated, num_voices, note.voice,
-                                    alt.note.pitch, note.start_tick)) {
-                result = alt;
-                break;
-              }
-            }
-            // If no alternative found, keep original result (soft constraint).
-          }
-          coordinated.push_back(result.note);
-          ++accepted_count;
-        }
-      }
-      i = group_end;
-    }
-
-    fprintf(stderr, "[Prelude] createBachNote: accepted %d/%d (%.0f%%)\n",
-            accepted_count, total_count,
-            total_count > 0 ? 100.0 * accepted_count / total_count : 0.0);
-    all_notes = std::move(coordinated);
+    CoordinationConfig coord_config;
+    coord_config.num_voices = num_voices;
+    coord_config.tonic = config.key.tonic;
+    coord_config.timeline = &timeline;
+    coord_config.voice_range = [](uint8_t v) -> std::pair<uint8_t, uint8_t> {
+      return {getVoiceLowPitch(v), getVoiceHighPitch(v)};
+    };
+    coord_config.immutable_sources = {BachNoteSource::PedalPoint};
+    coord_config.lightweight_sources = {BachNoteSource::ArpeggioFlow,
+                                        BachNoteSource::EpisodeMaterial};
+    coord_config.use_next_pitch_map = true;
+    coord_config.check_cross_relations = true;
+    coord_config.form_name = "Prelude";
+    all_notes = coordinateVoices(std::move(all_notes), coord_config);
   }
 
   // Build per-voice pitch ranges for counterpoint validation.

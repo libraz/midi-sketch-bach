@@ -129,7 +129,8 @@ void applyArticulation(std::vector<NoteEvent>& notes, VoiceRole role,
   if (!is_organ) {
     for (auto& note : notes) {
       float effective_gate = rule.gate_ratio;
-      if (note.source == BachNoteSource::GroundBass) {
+      if (note.source == BachNoteSource::GroundBass ||
+          note.source == BachNoteSource::ChaconneBass) {
         effective_gate = 0.95f;  // Basso ostinato sustains through texture.
       }
       Tick new_duration =

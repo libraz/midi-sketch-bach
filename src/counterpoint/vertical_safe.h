@@ -26,9 +26,19 @@ inline bool checkVerticalConsonance(uint8_t cand_pitch, uint8_t voice, Tick tick
                                     const std::vector<NoteEvent>& notes,
                                     const HarmonicTimeline& timeline,
                                     uint8_t num_voices) {
-  // Only check on accented beats (0, 2 in 4/4). Weak beats always safe.
+  // Accented beats (0, 2): full consonance check below.
+  // Weak beats (1, 3): reject only harsh dissonances (m2, TT, M7).
   uint8_t beat = beatInBar(tick);
-  if (beat != 0 && beat != 2) return true;
+  if (beat != 0 && beat != 2) {
+    for (const auto& n : notes) {
+      if (n.voice == voice) continue;
+      if (n.start_tick + n.duration <= tick || n.start_tick > tick) continue;
+      int simple = interval_util::compoundToSimple(
+          absoluteInterval(cand_pitch, n.pitch));
+      if (simple == 1 || simple == 6 || simple == 11) return false;
+    }
+    return true;
+  }
 
   // Chord tone is always safe (consonant with harmonic context).
   if (isChordTone(cand_pitch, timeline.getAt(tick))) return true;
@@ -136,9 +146,15 @@ makeVerticalSafeWithParallelCheck(const HarmonicTimeline& timeline,
 
   return [&timeline, &notes, num_voices, pitchAt](Tick tick, uint8_t voice,
                                                    uint8_t cand_pitch) -> bool {
-    // Weak beats and chord tones bypass all checks (including parallel).
+    // Weak beats: reject harsh dissonances (m2/TT/M7) but skip parallel check.
+    // Strong beats and chord tones: full consonance + parallel check.
     uint8_t beat = beatInBar(tick);
-    if (beat != 0 && beat != 2) return true;
+    if (beat != 0 && beat != 2) {
+      // Delegate to checkVerticalConsonance which now handles weak-beat
+      // harsh dissonance rejection.
+      return checkVerticalConsonance(cand_pitch, voice, tick, notes, timeline,
+                                     num_voices);
+    }
     if (isChordTone(cand_pitch, timeline.getAt(tick))) return true;
 
     // --- Consonance check ---

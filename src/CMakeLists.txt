@@ -61,6 +61,8 @@ set(BACH_LIB_SOURCES
   # counterpoint/ (cantus firmus)
   counterpoint/cantus_firmus.cpp
   counterpoint/melodic_context.cpp
+  counterpoint/vertical_context.cpp
+  counterpoint/coordinate_voices.cpp
 
   # fugue/
   fugue/fugue_config.cpp
@@ -178,9 +180,12 @@ set(BACH_LIB_SOURCES
   # solo_string/arch/
   solo_string/arch/variation_types.cpp
   solo_string/arch/ground_bass.cpp
+  solo_string/arch/chaconne_scheme.cpp
   solo_string/arch/chaconne_config.cpp
   solo_string/arch/texture_generator.cpp
   solo_string/arch/chaconne_analyzer.cpp
+  solo_string/arch/chaconne_scheme.cpp
+  solo_string/arch/bass_realizer.cpp
   solo_string/arch/chaconne_engine.cpp
 
   # expression/

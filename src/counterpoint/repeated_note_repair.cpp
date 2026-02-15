@@ -18,7 +18,8 @@ namespace {
 /// Protected sources include structural notes (subject, answer, countersubject,
 /// pedal, false entry, coda, sequence) and ground bass.
 bool isProtectedSource(BachNoteSource source) {
-  return isStructuralSource(source) || source == BachNoteSource::GroundBass;
+  return isStructuralSource(source) || source == BachNoteSource::GroundBass ||
+         source == BachNoteSource::ChaconneBass;
 }
 
 /// @brief Attempt to place a replacement pitch at a given semitone offset.

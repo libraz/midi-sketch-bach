@@ -715,7 +715,7 @@ TEST(ChaconneE2E, PostProcessingDestructionRate) {
   const auto& notes = result.tracks[0].notes;
   int bass_count = 0, texture_count = 0;
   for (const auto& n : notes) {
-    if (n.source == BachNoteSource::GroundBass) ++bass_count;
+    if (n.source == BachNoteSource::ChaconneBass) ++bass_count;
     if (n.source == BachNoteSource::TextureNote) ++texture_count;
   }
 
@@ -735,7 +735,7 @@ TEST(ChaconneE2E, PostProcessingDestructionRate) {
   // This verifies that cross-voice overlap is preserved (not trimmed away).
   int temporal_overlaps = 0;
   for (const auto& bn : notes) {
-    if (bn.source != BachNoteSource::GroundBass) continue;
+    if (bn.source != BachNoteSource::ChaconneBass) continue;
     Tick b_end = bn.start_tick + bn.duration;
     for (const auto& tn : notes) {
       if (tn.source != BachNoteSource::TextureNote) continue;

@@ -1168,6 +1168,31 @@ std::vector<NoteEvent> createCodaNotes(Tick start_tick, Tick duration,
             clampPitch(tonic_pitch + final_offsets_fb[v], vlo, vhi));
       }
 
+      // Harsh dissonance guard: check each V7 pitch against the tonic bass
+      // (pedal from Stage 1). If m2(1)/TT(6)/M7(11) is formed, try octave
+      // shifts to find a safe register that avoids the clash.
+      int tonic_bass = static_cast<int>(
+          clampPitch(tonic_pitch, bass_lo, bass_hi));
+      for (uint8_t v = 0; v < count; ++v) {
+        int simple = interval_util::compoundToSimple(
+            absoluteInterval(static_cast<uint8_t>(v7_pitches[v]),
+                             static_cast<uint8_t>(tonic_bass)));
+        if (simple == 1 || simple == 6 || simple == 11) {
+          auto [range_lo, range_hi] = getFugueVoiceRange(v, num_voices);
+          for (int shift : {12, -12, 24, -24}) {
+            int alt = v7_pitches[v] + shift;
+            if (alt < range_lo || alt > range_hi) continue;
+            int alt_simple = interval_util::compoundToSimple(
+                absoluteInterval(static_cast<uint8_t>(alt),
+                                 static_cast<uint8_t>(tonic_bass)));
+            if (alt_simple != 1 && alt_simple != 6 && alt_simple != 11) {
+              v7_pitches[v] = alt;
+              break;
+            }
+          }
+        }
+      }
+
       // Layer 2: Top-down greedy projection — ensure strict descending order.
       // Priority: (1) strict v0 > v1 > v2 > ..., (2) preserve pitch class.
       auto projectStrictOrder = [&](int* pitches) {

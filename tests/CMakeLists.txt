@@ -53,6 +53,8 @@ set(BACH_TEST_SOURCES
   counterpoint/parallel_repair_test.cpp
   counterpoint/collision_resolver_entry_test.cpp
   counterpoint/vertical_safe_test.cpp
+  counterpoint/vertical_context_test.cpp
+  counterpoint/coordinate_voices_test.cpp
 
   # counterpoint/ (cantus firmus)
   counterpoint/cantus_firmus_test.cpp
@@ -188,6 +190,8 @@ set(BACH_TEST_SOURCES
   solo_string/arch/chaconne_config_test.cpp
   solo_string/arch/scaled_variation_plan_test.cpp
   solo_string/arch/chaconne_engine_test.cpp
+  solo_string/arch/chaconne_scheme_test.cpp
+  solo_string/arch/bass_realizer_test.cpp
   solo_string/arch/destruction_resistance_test.cpp
 
   # expression/

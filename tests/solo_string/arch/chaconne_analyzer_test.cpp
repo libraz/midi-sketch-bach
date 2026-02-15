@@ -9,7 +9,7 @@
 
 #include "core/basic_types.h"
 #include "solo_string/arch/chaconne_config.h"
-#include "solo_string/arch/ground_bass.h"
+#include "solo_string/arch/chaconne_scheme.h"
 #include "solo_string/arch/variation_types.h"
 
 namespace bach {
@@ -32,37 +32,71 @@ ChaconneConfig createTestChaconneConfig() {
   return config;
 }
 
-/// @brief Create a track containing ground bass notes for every variation.
+/// @brief Create bass notes (ChaconneBass-sourced) at each scheme entry position.
 ///
-/// For each variation, places the ground bass notes at the correct tick offset.
-/// Also adds upper voice notes with varied pitches to simulate a real piece.
+/// For each variation, places a ChaconneBass note at each SchemeEntry's beat
+/// position. Uses D3 (50) as the bass pitch.
 ///
 /// @param config Chaconne config with variation plan.
-/// @param ground_bass The ground bass pattern to embed.
+/// @param scheme The harmonic scheme defining bass positions.
+/// @param[out] track Track to append bass notes to.
+void addSchemeBassTicks(const ChaconneConfig& config,
+                        const ChaconneScheme& scheme,
+                        Track& track) {
+  Tick cycle_length = scheme.getLengthTicks();
+  if (cycle_length == 0) return;
+
+  int num_variations = static_cast<int>(config.variations.size());
+  const auto& entries = scheme.entries();
+
+  for (int var_idx = 0; var_idx < num_variations; ++var_idx) {
+    Tick var_start = static_cast<Tick>(var_idx) * cycle_length;
+
+    for (const auto& entry : entries) {
+      NoteEvent note;
+      note.start_tick =
+          var_start + static_cast<Tick>(entry.position_beats) * kTicksPerBeat;
+      note.duration =
+          static_cast<Tick>(entry.duration_beats) * kTicksPerBeat;
+      note.pitch = 50;  // D3 -- typical bass range for violin chaconne
+      note.velocity = 80;
+      note.voice = 0;
+      note.source = BachNoteSource::ChaconneBass;
+      track.notes.push_back(note);
+    }
+  }
+}
+
+/// @brief Create a track containing ChaconneBass notes for every variation.
+///
+/// For each variation, places ChaconneBass-sourced notes at each SchemeEntry's
+/// beat position. Also adds upper voice notes with varied pitches to simulate
+/// a real piece.
+///
+/// @param config Chaconne config with variation plan.
+/// @param scheme The harmonic scheme defining bass positions.
 /// @return Track with bass + upper voice notes.
 Track createIdealChaconneTrack(const ChaconneConfig& config,
-                               const GroundBass& ground_bass) {
+                               const ChaconneScheme& scheme) {
   Track track;
   track.channel = 0;
   track.program = 40;  // Violin
   track.name = "Violin";
 
-  Tick bass_length = ground_bass.getLengthTicks();
-  if (bass_length == 0) return track;
+  Tick cycle_length = scheme.getLengthTicks();
+  if (cycle_length == 0) return track;
 
   int num_variations = static_cast<int>(config.variations.size());
-  const auto& bass_notes = ground_bass.getNotes();
+
+  // Place ChaconneBass notes at scheme entry positions.
+  addSchemeBassTicks(config, scheme, track);
+
+  // Collect bass note ticks for skip logic.
+  const auto& entries = scheme.entries();
 
   for (int var_idx = 0; var_idx < num_variations; ++var_idx) {
-    Tick var_start = static_cast<Tick>(var_idx) * bass_length;
+    Tick var_start = static_cast<Tick>(var_idx) * cycle_length;
     const auto& variation = config.variations[static_cast<size_t>(var_idx)];
-
-    // Place ground bass notes at the correct offset.
-    for (const auto& bass_note : bass_notes) {
-      NoteEvent note = bass_note;
-      note.start_tick = var_start + bass_note.start_tick;
-      track.notes.push_back(note);
-    }
 
     // Add upper voice notes with register variation based on the variation.
     // Use different pitch ranges per variation role to create distinct sections.
@@ -92,11 +126,13 @@ Track createIdealChaconneTrack(const ChaconneConfig& config,
 
     // Generate upper voice notes: 8th notes across the variation.
     Tick eighth_note = kTicksPerBeat / 2;  // 240 ticks
-    for (Tick tick = var_start; tick < var_start + bass_length; tick += eighth_note) {
+    for (Tick tick = var_start; tick < var_start + cycle_length; tick += eighth_note) {
       // Skip ticks where a bass note starts (to avoid duplicate ticks).
       bool is_bass_tick = false;
-      for (const auto& bass_note : bass_notes) {
-        if (tick == var_start + bass_note.start_tick) {
+      for (const auto& entry : entries) {
+        Tick bass_tick =
+            var_start + static_cast<Tick>(entry.position_beats) * kTicksPerBeat;
+        if (tick == bass_tick) {
           is_bass_tick = true;
           break;
         }
@@ -137,28 +173,35 @@ Track createIdealChaconneTrack(const ChaconneConfig& config,
 /// implied polyphony. Each beat has notes in 2-3 distinct octave bands.
 ///
 /// @param config Chaconne config.
-/// @param ground_bass Ground bass for variation length.
+/// @param scheme Harmonic scheme for variation length.
 /// @return Track with implied polyphony patterns.
 Track createImpliedPolyphonyTrack(const ChaconneConfig& config,
-                                  const GroundBass& ground_bass) {
+                                  const ChaconneScheme& scheme) {
   Track track;
   track.channel = 0;
   track.program = 40;  // Violin
   track.name = "Violin";
 
-  Tick bass_length = ground_bass.getLengthTicks();
-  if (bass_length == 0) return track;
+  Tick cycle_length = scheme.getLengthTicks();
+  if (cycle_length == 0) return track;
 
   int num_variations = static_cast<int>(config.variations.size());
-  const auto& bass_notes = ground_bass.getNotes();
+  const auto& entries = scheme.entries();
 
   for (int var_idx = 0; var_idx < num_variations; ++var_idx) {
-    Tick var_start = static_cast<Tick>(var_idx) * bass_length;
+    Tick var_start = static_cast<Tick>(var_idx) * cycle_length;
 
-    // Place ground bass notes.
-    for (const auto& bass_note : bass_notes) {
-      NoteEvent note = bass_note;
-      note.start_tick = var_start + bass_note.start_tick;
+    // Place ChaconneBass notes at scheme positions.
+    for (const auto& entry : entries) {
+      NoteEvent note;
+      note.start_tick =
+          var_start + static_cast<Tick>(entry.position_beats) * kTicksPerBeat;
+      note.duration =
+          static_cast<Tick>(entry.duration_beats) * kTicksPerBeat;
+      note.pitch = 50;  // D3
+      note.velocity = 80;
+      note.voice = 0;
+      note.source = BachNoteSource::ChaconneBass;
       track.notes.push_back(note);
     }
 
@@ -167,11 +210,13 @@ Track createImpliedPolyphonyTrack(const ChaconneConfig& config,
         TextureType::ImpliedPolyphony) {
       // Place notes in 3 register bands: bass (48-59), mid (60-71), high (72-83).
       Tick sixteenth = kTicksPerBeat / 4;  // 120 ticks
-      for (Tick tick = var_start; tick < var_start + bass_length; tick += sixteenth) {
+      for (Tick tick = var_start; tick < var_start + cycle_length; tick += sixteenth) {
         // Skip bass note ticks.
         bool is_bass_tick = false;
-        for (const auto& bn : bass_notes) {
-          if (tick == var_start + bn.start_tick) {
+        for (const auto& entry : entries) {
+          Tick bass_tick =
+              var_start + static_cast<Tick>(entry.position_beats) * kTicksPerBeat;
+          if (tick == bass_tick) {
             is_bass_tick = true;
             break;
           }
@@ -193,10 +238,12 @@ Track createImpliedPolyphonyTrack(const ChaconneConfig& config,
     } else {
       // Non-implied-polyphony: single line.
       Tick eighth = kTicksPerBeat / 2;
-      for (Tick tick = var_start; tick < var_start + bass_length; tick += eighth) {
+      for (Tick tick = var_start; tick < var_start + cycle_length; tick += eighth) {
         bool is_bass_tick = false;
-        for (const auto& bn : bass_notes) {
-          if (tick == var_start + bn.start_tick) {
+        for (const auto& entry : entries) {
+          Tick bass_tick =
+              var_start + static_cast<Tick>(entry.position_beats) * kTicksPerBeat;
+          if (tick == bass_tick) {
             is_bass_tick = true;
             break;
           }
@@ -222,25 +269,23 @@ Track createImpliedPolyphonyTrack(const ChaconneConfig& config,
   return track;
 }
 
-/// @brief Create a track with corrupted bass (one note modified).
+/// @brief Create a track with missing bass at variation 0 (no ChaconneBass notes).
 /// @param config Chaconne config.
-/// @param ground_bass Original ground bass.
-/// @return Track with incorrect bass in variation 0.
-Track createCorruptedBassTrack(const ChaconneConfig& config,
-                               const GroundBass& ground_bass) {
-  Track track = createIdealChaconneTrack(config, ground_bass);
+/// @param scheme Harmonic scheme.
+/// @return Track with missing bass coverage in variation 0.
+Track createMissingBassTrack(const ChaconneConfig& config,
+                              const ChaconneScheme& scheme) {
+  Track track = createIdealChaconneTrack(config, scheme);
 
-  // Find and corrupt the first bass note (change its pitch).
-  if (!track.notes.empty()) {
-    // The first note should be a bass note at tick 0.
-    for (auto& note : track.notes) {
-      if (note.start_tick == 0 &&
-          note.pitch == ground_bass.getNotes()[0].pitch) {
-        note.pitch += 1;  // Corrupt the pitch.
-        break;
-      }
-    }
-  }
+  // Remove all ChaconneBass notes from variation 0.
+  Tick cycle_length = scheme.getLengthTicks();
+  track.notes.erase(
+      std::remove_if(track.notes.begin(), track.notes.end(),
+                     [cycle_length](const NoteEvent& note) {
+                       return note.start_tick < cycle_length &&
+                              note.source == BachNoteSource::ChaconneBass;
+                     }),
+      track.notes.end());
 
   return track;
 }
@@ -249,41 +294,41 @@ Track createCorruptedBassTrack(const ChaconneConfig& config,
 // Instant-FAIL metric tests
 // ===========================================================================
 
-TEST(ChaconneAnalyzerTest, GroundBassIntegrityPassesWithCorrectBass) {
+TEST(ChaconneAnalyzerTest, HarmonicSchemeIntegrityPassesWithCorrectBass) {
   auto config = createTestChaconneConfig();
-  auto ground_bass = GroundBass::createStandardDMinor();
-  auto track = createIdealChaconneTrack(config, ground_bass);
+  auto scheme = ChaconneScheme::createStandardDMinor();
+  auto track = createIdealChaconneTrack(config, scheme);
 
-  auto result = analyzeChaconne({track}, config, ground_bass);
-  EXPECT_FLOAT_EQ(result.ground_bass_integrity, 1.0f);
+  auto result = analyzeChaconne({track}, config, scheme);
+  EXPECT_FLOAT_EQ(result.harmonic_scheme_integrity, 1.0f);
 }
 
-TEST(ChaconneAnalyzerTest, GroundBassIntegrityFailsWithCorruptedBass) {
+TEST(ChaconneAnalyzerTest, HarmonicSchemeIntegrityFailsWithMissingBass) {
   auto config = createTestChaconneConfig();
-  auto ground_bass = GroundBass::createStandardDMinor();
-  auto track = createCorruptedBassTrack(config, ground_bass);
+  auto scheme = ChaconneScheme::createStandardDMinor();
+  auto track = createMissingBassTrack(config, scheme);
 
-  auto result = analyzeChaconne({track}, config, ground_bass);
-  EXPECT_FLOAT_EQ(result.ground_bass_integrity, 0.0f);
+  auto result = analyzeChaconne({track}, config, scheme);
+  EXPECT_FLOAT_EQ(result.harmonic_scheme_integrity, 0.0f);
   EXPECT_FALSE(result.isPass());
 }
 
-TEST(ChaconneAnalyzerTest, GroundBassIntegrityFailsWithEmptyBass) {
+TEST(ChaconneAnalyzerTest, HarmonicSchemeIntegrityFailsWithEmptyScheme) {
   auto config = createTestChaconneConfig();
-  GroundBass empty_bass;
+  ChaconneScheme empty_scheme;
   Track track;
   track.channel = 0;
 
-  auto result = analyzeChaconne({track}, config, empty_bass);
-  EXPECT_FLOAT_EQ(result.ground_bass_integrity, 0.0f);
+  auto result = analyzeChaconne({track}, config, empty_scheme);
+  EXPECT_FLOAT_EQ(result.harmonic_scheme_integrity, 0.0f);
 }
 
 TEST(ChaconneAnalyzerTest, RoleOrderScorePassesWithStandardPlan) {
   auto config = createTestChaconneConfig();
-  auto ground_bass = GroundBass::createStandardDMinor();
-  auto track = createIdealChaconneTrack(config, ground_bass);
+  auto scheme = ChaconneScheme::createStandardDMinor();
+  auto track = createIdealChaconneTrack(config, scheme);
 
-  auto result = analyzeChaconne({track}, config, ground_bass);
+  auto result = analyzeChaconne({track}, config, scheme);
   EXPECT_FLOAT_EQ(result.role_order_score, 1.0f);
 }
 
@@ -292,10 +337,10 @@ TEST(ChaconneAnalyzerTest, RoleOrderScoreFailsWithReversedRoles) {
   // Reverse the variation plan to break role order.
   std::reverse(config.variations.begin(), config.variations.end());
 
-  auto ground_bass = GroundBass::createStandardDMinor();
-  auto track = createIdealChaconneTrack(config, ground_bass);
+  auto scheme = ChaconneScheme::createStandardDMinor();
+  auto track = createIdealChaconneTrack(config, scheme);
 
-  auto result = analyzeChaconne({track}, config, ground_bass);
+  auto result = analyzeChaconne({track}, config, scheme);
   EXPECT_FLOAT_EQ(result.role_order_score, 0.0f);
   EXPECT_FALSE(result.isPass());
 }
@@ -304,17 +349,17 @@ TEST(ChaconneAnalyzerTest, RoleOrderScoreFailsWithEmptyPlan) {
   ChaconneConfig config;
   config.variations.clear();
 
-  auto ground_bass = GroundBass::createStandardDMinor();
-  auto result = analyzeChaconne({}, config, ground_bass);
+  auto scheme = ChaconneScheme::createStandardDMinor();
+  auto result = analyzeChaconne({}, config, scheme);
   EXPECT_FLOAT_EQ(result.role_order_score, 0.0f);
 }
 
 TEST(ChaconneAnalyzerTest, ClimaxPresencePassesWithThreeAccumulate) {
   auto config = createTestChaconneConfig();
-  auto ground_bass = GroundBass::createStandardDMinor();
-  auto track = createIdealChaconneTrack(config, ground_bass);
+  auto scheme = ChaconneScheme::createStandardDMinor();
+  auto track = createIdealChaconneTrack(config, scheme);
 
-  auto result = analyzeChaconne({track}, config, ground_bass);
+  auto result = analyzeChaconne({track}, config, scheme);
   EXPECT_FLOAT_EQ(result.climax_presence_score, 1.0f);
   EXPECT_EQ(result.accumulate_count, 3);
 }
@@ -331,8 +376,8 @@ TEST(ChaconneAnalyzerTest, ClimaxPresenceFailsWithTwoAccumulate) {
     config.variations.erase(iter);
   }
 
-  auto ground_bass = GroundBass::createStandardDMinor();
-  auto result = analyzeChaconne({}, config, ground_bass);
+  auto scheme = ChaconneScheme::createStandardDMinor();
+  auto result = analyzeChaconne({}, config, scheme);
   EXPECT_FLOAT_EQ(result.climax_presence_score, 0.0f);
 }
 
@@ -350,8 +395,8 @@ TEST(ChaconneAnalyzerTest, ClimaxPresenceFailsWithFourAccumulate) {
   extra_acc.primary_texture = TextureType::FullChords;
   config.variations.insert(resolve_iter, extra_acc);
 
-  auto ground_bass = GroundBass::createStandardDMinor();
-  auto result = analyzeChaconne({}, config, ground_bass);
+  auto scheme = ChaconneScheme::createStandardDMinor();
+  auto result = analyzeChaconne({}, config, scheme);
   EXPECT_FLOAT_EQ(result.climax_presence_score, 0.0f);
   EXPECT_EQ(result.accumulate_count, 4);
 }
@@ -366,19 +411,19 @@ TEST(ChaconneAnalyzerTest, ImpliedPolyphonyScorePassesWithNoImpliedPolyphony) {
     }
   }
 
-  auto ground_bass = GroundBass::createStandardDMinor();
-  auto track = createIdealChaconneTrack(config, ground_bass);
+  auto scheme = ChaconneScheme::createStandardDMinor();
+  auto track = createIdealChaconneTrack(config, scheme);
 
-  auto result = analyzeChaconne({track}, config, ground_bass);
+  auto result = analyzeChaconne({track}, config, scheme);
   EXPECT_FLOAT_EQ(result.implied_polyphony_score, 1.0f);
 }
 
 TEST(ChaconneAnalyzerTest, ImpliedPolyphonyTrackPopulatesDiagnostic) {
   auto config = createTestChaconneConfig();
-  auto ground_bass = GroundBass::createStandardDMinor();
-  auto track = createImpliedPolyphonyTrack(config, ground_bass);
+  auto scheme = ChaconneScheme::createStandardDMinor();
+  auto track = createImpliedPolyphonyTrack(config, scheme);
 
-  auto result = analyzeChaconne({track}, config, ground_bass);
+  auto result = analyzeChaconne({track}, config, scheme);
   // The implied polyphony track has notes in multiple register bands,
   // so the diagnostic average should be populated.
   EXPECT_GT(result.implied_voice_count_avg, 0.0f);
@@ -390,10 +435,10 @@ TEST(ChaconneAnalyzerTest, ImpliedPolyphonyTrackPopulatesDiagnostic) {
 
 TEST(ChaconneAnalyzerTest, VariationDiversityWithStandardPlan) {
   auto config = createTestChaconneConfig();
-  auto ground_bass = GroundBass::createStandardDMinor();
-  auto track = createIdealChaconneTrack(config, ground_bass);
+  auto scheme = ChaconneScheme::createStandardDMinor();
+  auto track = createIdealChaconneTrack(config, scheme);
 
-  auto result = analyzeChaconne({track}, config, ground_bass);
+  auto result = analyzeChaconne({track}, config, scheme);
   // Standard plan uses 5 distinct textures: SingleLine, ImpliedPolyphony,
   // ScalePassage, Arpeggiated, FullChords.
   EXPECT_GE(result.variation_diversity, 0.7f);
@@ -406,20 +451,20 @@ TEST(ChaconneAnalyzerTest, VariationDiversityFailsWithSingleTexture) {
     var.primary_texture = TextureType::SingleLine;
   }
 
-  auto ground_bass = GroundBass::createStandardDMinor();
-  auto track = createIdealChaconneTrack(config, ground_bass);
+  auto scheme = ChaconneScheme::createStandardDMinor();
+  auto track = createIdealChaconneTrack(config, scheme);
 
-  auto result = analyzeChaconne({track}, config, ground_bass);
+  auto result = analyzeChaconne({track}, config, scheme);
   EXPECT_FLOAT_EQ(result.variation_diversity, 0.0f);
   EXPECT_LT(result.variation_diversity, 0.7f);
 }
 
 TEST(ChaconneAnalyzerTest, TextureTransitionScoreWithStandardPlan) {
   auto config = createTestChaconneConfig();
-  auto ground_bass = GroundBass::createStandardDMinor();
-  auto track = createIdealChaconneTrack(config, ground_bass);
+  auto scheme = ChaconneScheme::createStandardDMinor();
+  auto track = createIdealChaconneTrack(config, scheme);
 
-  auto result = analyzeChaconne({track}, config, ground_bass);
+  auto result = analyzeChaconne({track}, config, scheme);
   // Standard plan has varied textures with smooth transitions.
   EXPECT_GE(result.texture_transition_score, 0.5f);
 }
@@ -431,20 +476,20 @@ TEST(ChaconneAnalyzerTest, TextureTransitionScoreFailsWithIdenticalAdjacent) {
     var.primary_texture = TextureType::SingleLine;
   }
 
-  auto ground_bass = GroundBass::createStandardDMinor();
-  auto track = createIdealChaconneTrack(config, ground_bass);
+  auto scheme = ChaconneScheme::createStandardDMinor();
+  auto track = createIdealChaconneTrack(config, scheme);
 
-  auto result = analyzeChaconne({track}, config, ground_bass);
+  auto result = analyzeChaconne({track}, config, scheme);
   // All identical: every transition scores 0.
   EXPECT_FLOAT_EQ(result.texture_transition_score, 0.0f);
 }
 
 TEST(ChaconneAnalyzerTest, SectionBalanceWithStandardPlan) {
   auto config = createTestChaconneConfig();
-  auto ground_bass = GroundBass::createStandardDMinor();
-  auto track = createIdealChaconneTrack(config, ground_bass);
+  auto scheme = ChaconneScheme::createStandardDMinor();
+  auto track = createIdealChaconneTrack(config, scheme);
 
-  auto result = analyzeChaconne({track}, config, ground_bass);
+  auto result = analyzeChaconne({track}, config, scheme);
   // Standard plan: 3 front + 2 major + 5 back = 10 variations.
   // Proportions: 30% / 20% / 50% -- exactly ideal.
   EXPECT_GE(result.section_balance, 0.7f);
@@ -452,26 +497,26 @@ TEST(ChaconneAnalyzerTest, SectionBalanceWithStandardPlan) {
 
 TEST(ChaconneAnalyzerTest, VoiceSwitchFrequencyWithVariedPitches) {
   auto config = createTestChaconneConfig();
-  auto ground_bass = GroundBass::createStandardDMinor();
-  auto track = createIdealChaconneTrack(config, ground_bass);
+  auto scheme = ChaconneScheme::createStandardDMinor();
+  auto track = createIdealChaconneTrack(config, scheme);
 
-  auto result = analyzeChaconne({track}, config, ground_bass);
+  auto result = analyzeChaconne({track}, config, scheme);
   // Ideal track alternates register positions, creating switches.
   EXPECT_GT(result.voice_switch_frequency, 0.0f);
 }
 
 TEST(ChaconneAnalyzerTest, VoiceSwitchFrequencyFailsWithMonotonePitch) {
   auto config = createTestChaconneConfig();
-  auto ground_bass = GroundBass::createStandardDMinor();
+  auto scheme = ChaconneScheme::createStandardDMinor();
 
   // Create a track with all notes at the same pitch.
   Track track;
   track.channel = 0;
   track.name = "Monotone";
 
-  Tick bass_length = ground_bass.getLengthTicks();
+  Tick cycle_length = scheme.getLengthTicks();
   int num_variations = static_cast<int>(config.variations.size());
-  Tick total_ticks = static_cast<Tick>(num_variations) * bass_length;
+  Tick total_ticks = static_cast<Tick>(num_variations) * cycle_length;
 
   for (Tick tick = 0; tick < total_ticks; tick += kTicksPerBeat) {
     NoteEvent note;
@@ -483,7 +528,7 @@ TEST(ChaconneAnalyzerTest, VoiceSwitchFrequencyFailsWithMonotonePitch) {
     track.notes.push_back(note);
   }
 
-  auto result = analyzeChaconne({track}, config, ground_bass);
+  auto result = analyzeChaconne({track}, config, scheme);
   // No pitch variation => no switches.
   EXPECT_FLOAT_EQ(result.voice_switch_frequency, 0.0f);
 }
@@ -507,7 +552,7 @@ TEST(ChaconneAnalysisResultTest, GetFailuresListsAllDefaults) {
 TEST(ChaconneAnalysisResultTest, PassingResultHasNoFailures) {
   ChaconneAnalysisResult result;
   // Set all instant-FAIL metrics to passing values.
-  result.ground_bass_integrity = 1.0f;
+  result.harmonic_scheme_integrity = 1.0f;
   result.role_order_score = 1.0f;
   result.climax_presence_score = 1.0f;
   result.implied_polyphony_score = 1.0f;
@@ -524,7 +569,7 @@ TEST(ChaconneAnalysisResultTest, PassingResultHasNoFailures) {
 
 TEST(ChaconneAnalysisResultTest, SingleInstantFailCausesOverallFail) {
   ChaconneAnalysisResult result;
-  result.ground_bass_integrity = 0.0f;  // FAIL
+  result.harmonic_scheme_integrity = 0.0f;  // FAIL
   result.role_order_score = 1.0f;
   result.climax_presence_score = 1.0f;
   result.implied_polyphony_score = 1.0f;
@@ -537,12 +582,12 @@ TEST(ChaconneAnalysisResultTest, SingleInstantFailCausesOverallFail) {
   EXPECT_FALSE(result.isPass());
   auto failures = result.getFailures();
   ASSERT_EQ(failures.size(), 1u);
-  EXPECT_NE(failures[0].find("ground_bass_integrity"), std::string::npos);
+  EXPECT_NE(failures[0].find("harmonic_scheme_integrity"), std::string::npos);
 }
 
 TEST(ChaconneAnalysisResultTest, SingleThresholdFailCausesOverallFail) {
   ChaconneAnalysisResult result;
-  result.ground_bass_integrity = 1.0f;
+  result.harmonic_scheme_integrity = 1.0f;
   result.role_order_score = 1.0f;
   result.climax_presence_score = 1.0f;
   result.implied_polyphony_score = 1.0f;
@@ -564,7 +609,7 @@ TEST(ChaconneAnalysisResultTest, SummaryContainsPassOrFail) {
   EXPECT_NE(sum.find("FAIL"), std::string::npos);
 
   // Set all passing.
-  result.ground_bass_integrity = 1.0f;
+  result.harmonic_scheme_integrity = 1.0f;
   result.role_order_score = 1.0f;
   result.climax_presence_score = 1.0f;
   result.implied_polyphony_score = 1.0f;
@@ -594,19 +639,19 @@ TEST(ChaconneAnalysisResultTest, SummaryContainsDiagnostics) {
 
 TEST(ChaconneAnalyzerTest, EmptyTracksReturnZeroScores) {
   auto config = createTestChaconneConfig();
-  auto ground_bass = GroundBass::createStandardDMinor();
+  auto scheme = ChaconneScheme::createStandardDMinor();
 
-  auto result = analyzeChaconne({}, config, ground_bass);
-  EXPECT_FLOAT_EQ(result.ground_bass_integrity, 0.0f);
+  auto result = analyzeChaconne({}, config, scheme);
+  EXPECT_FLOAT_EQ(result.harmonic_scheme_integrity, 0.0f);
   EXPECT_FLOAT_EQ(result.voice_switch_frequency, 0.0f);
 }
 
 TEST(ChaconneAnalyzerTest, EmptyConfigReturnsZeroScores) {
   ChaconneConfig empty_config;
-  auto ground_bass = GroundBass::createStandardDMinor();
+  auto scheme = ChaconneScheme::createStandardDMinor();
   Track track;
 
-  auto result = analyzeChaconne({track}, empty_config, ground_bass);
+  auto result = analyzeChaconne({track}, empty_config, scheme);
   EXPECT_FLOAT_EQ(result.role_order_score, 0.0f);
   EXPECT_FLOAT_EQ(result.climax_presence_score, 0.0f);
   EXPECT_FLOAT_EQ(result.variation_diversity, 0.0f);
@@ -614,10 +659,10 @@ TEST(ChaconneAnalyzerTest, EmptyConfigReturnsZeroScores) {
 
 TEST(ChaconneAnalyzerTest, MultipleTracksAreMerged) {
   auto config = createTestChaconneConfig();
-  auto ground_bass = GroundBass::createStandardDMinor();
+  auto scheme = ChaconneScheme::createStandardDMinor();
 
   // Split the ideal track into two tracks.
-  auto full_track = createIdealChaconneTrack(config, ground_bass);
+  auto full_track = createIdealChaconneTrack(config, scheme);
 
   Track track_a;
   track_a.channel = 0;
@@ -632,7 +677,7 @@ TEST(ChaconneAnalyzerTest, MultipleTracksAreMerged) {
     }
   }
 
-  auto result = analyzeChaconne({track_a, track_b}, config, ground_bass);
+  auto result = analyzeChaconne({track_a, track_b}, config, scheme);
   // The merged tracks should still contain all notes.
   // Role order and climax presence are config-derived, so they should pass.
   EXPECT_FLOAT_EQ(result.role_order_score, 1.0f);
@@ -641,10 +686,10 @@ TEST(ChaconneAnalyzerTest, MultipleTracksAreMerged) {
 
 TEST(ChaconneAnalyzerTest, AccumulateCountDiagnosticIsCorrect) {
   auto config = createTestChaconneConfig();
-  auto ground_bass = GroundBass::createStandardDMinor();
-  auto track = createIdealChaconneTrack(config, ground_bass);
+  auto scheme = ChaconneScheme::createStandardDMinor();
+  auto track = createIdealChaconneTrack(config, scheme);
 
-  auto result = analyzeChaconne({track}, config, ground_bass);
+  auto result = analyzeChaconne({track}, config, scheme);
   EXPECT_EQ(result.accumulate_count, 3);
 }
 
@@ -656,8 +701,8 @@ TEST(ChaconneAnalyzerTest, TextureTransitionWithSingleVariation) {
       {0, VariationRole::Resolve, VariationType::Theme,
        TextureType::SingleLine, {Key::D, true}, false});
 
-  auto ground_bass = GroundBass::createStandardDMinor();
-  auto result = analyzeChaconne({}, config, ground_bass);
+  auto scheme = ChaconneScheme::createStandardDMinor();
+  auto result = analyzeChaconne({}, config, scheme);
   // Single variation has no transitions; should return 1.0 (no transitions to fail).
   EXPECT_FLOAT_EQ(result.texture_transition_score, 1.0f);
 }

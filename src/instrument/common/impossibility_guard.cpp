@@ -28,6 +28,7 @@ constexpr Tick kTinyOffsetMax = 3;
 /// Check if pitch is a bass-line source that should be preserved.
 bool isBassoSource(BachNoteSource source) {
   return source == BachNoteSource::GroundBass ||
+         source == BachNoteSource::ChaconneBass ||
          source == BachNoteSource::GoldbergBass ||
          source == BachNoteSource::PedalPoint;
 }

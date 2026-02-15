@@ -19,10 +19,12 @@
 #include "core/scale.h"
 #include "counterpoint/bach_rule_evaluator.h"
 #include "counterpoint/collision_resolver.h"
+#include "counterpoint/coordinate_voices.h"
 #include "forms/form_utils.h"
 #include "counterpoint/counterpoint_state.h"
 #include "counterpoint/leap_resolution.h"
 #include "counterpoint/parallel_repair.h"
+#include "counterpoint/vertical_context.h"
 #include "counterpoint/vertical_safe.h"
 #include "harmony/chord_types.h"
 #include "harmony/harmonic_event.h"
@@ -49,6 +51,9 @@ constexpr uint8_t kFigurationVoice = 0;  // Great: ornamental soprano
 constexpr uint8_t kCantusVoice = 1;      // Swell: cantus firmus (tenor/alto)
 constexpr uint8_t kInnerVoice = 2;  // Great: inner voice
 constexpr uint8_t kPedalVoice = 3;       // Pedal: bass
+
+/// @brief Total number of voices in a chorale prelude.
+constexpr uint8_t kChoraleVoices = 4;
 
 /// @brief Number of built-in chorale melodies.
 constexpr int kChoraleCount = 3;
@@ -489,7 +494,8 @@ std::vector<NoteEvent> generateFiguration(Tick cantus_tick, Tick cantus_dur,
                                           uint8_t cantus_pitch,
                                           uint8_t& hint_center,
                                           std::mt19937& rng,
-                                          const FigurationMotif* motif = nullptr) {
+                                          const FigurationMotif* motif = nullptr,
+                                          const VerticalContext* vctx = nullptr) {
   std::vector<NoteEvent> notes;
 
   constexpr uint8_t kFigLow = 72;
@@ -686,16 +692,29 @@ std::vector<NoteEvent> generateFiguration(Tick cantus_tick, Tick cantus_dur,
       }
     }
 
+    uint8_t fig_pitch = scale_tones[tone_idx];
+
+    // Category A: vctx safety filter — try stepwise alternatives if unsafe.
+    if (vctx && !vctx->isSafe(current_tick, kFigurationVoice, fig_pitch)) {
+      for (int delta : {1, -1, 2, -2}) {
+        uint8_t alt = clampPitch(static_cast<int>(fig_pitch) + delta,
+                                 eff_low, eff_high);
+        if (scale_util::isScaleTone(alt, key_sig.tonic, run_scale_type) &&
+            vctx->isSafe(current_tick, kFigurationVoice, alt)) {
+          fig_pitch = alt;
+          break;
+        }
+      }
+    }
+
     NoteEvent note;
     note.start_tick = current_tick;
     note.duration = dur;
-    note.pitch = scale_tones[tone_idx];
+    note.pitch = fig_pitch;
     note.velocity = kOrganVelocity;
     note.voice = kFigurationVoice;
     note.source = BachNoteSource::FreeCounterpoint;
     notes.push_back(note);
-
-
 
     current_tick += dur;
 
@@ -1122,7 +1141,8 @@ std::vector<NoteEvent> generateInnerVoice(
     Tick cantus_tick, Tick cantus_dur, uint8_t cantus_pitch,
     const HarmonicTimeline& timeline, const KeySignature& key_sig,
     const std::vector<NoteEvent>& pedal_notes,
-    uint8_t& prev_inner_pitch, std::mt19937& rng) {
+    uint8_t& prev_inner_pitch, std::mt19937& rng,
+    const VerticalContext* vctx = nullptr) {
   std::vector<NoteEvent> notes;
 
   constexpr uint8_t kInnerLow = 48;   // C3
@@ -1245,6 +1265,18 @@ std::vector<NoteEvent> generateInnerVoice(
           if (!isWeakBeatAllowed(chosen_pitch, prev_inner_pitch, next_cts,
                                  cantus_pitch)) {
             chosen_pitch = nearest_chord_tone(current_tick);
+          }
+        }
+
+        // Category A: vctx safety filter — try chord-tone alternatives if unsafe.
+        if (vctx && !vctx->isSafe(current_tick, kInnerVoice, chosen_pitch)) {
+          const HarmonicEvent& evt = timeline.getAt(current_tick);
+          for (uint8_t tone : scale_tones) {
+            if (isChordTone(tone, evt) &&
+                vctx->isSafe(current_tick, kInnerVoice, tone)) {
+              chosen_pitch = tone;
+              break;
+            }
           }
         }
 
@@ -1382,11 +1414,26 @@ ChoralePreludeResult generateChoralePrelude(const ChoralePreludeConfig& config) 
   // Step 6: Generate pedal, inner voice, and figuration for each cantus note.
   // Order: pedal first (references cantus only), inner voice (references cantus
   // + pedal), figuration last (references cantus + pedal + inner).
+  //
+  // VerticalContext wiring: placed_notes grows as voices are generated.
+  // Each subsequent voice sees all previously placed notes for vertical safety.
   std::mt19937 rng(config.seed);
   Tick cantus_tick = 0;
   uint8_t fig_center = 0;      // Figuration center hint (0 = first call).
   uint8_t inner_center = 0;    // Inner voice previous pitch (0 = first call).
   FigurationMotif fig_motif;   // Motif extracted from first figuration segment.
+
+  // Seed placed_notes with cantus (immutable, placed first).
+  std::vector<NoteEvent> placed_notes;
+  placed_notes.reserve(tracks[kCantusVoice].notes.size() * 4);
+  for (const auto& note : tracks[kCantusVoice].notes) {
+    placed_notes.push_back(note);
+  }
+
+  VerticalContext vctx;
+  vctx.placed_notes = &placed_notes;
+  vctx.timeline = &timeline;
+  vctx.num_voices = kChoraleVoices;
 
   for (size_t idx = 0; idx < melody.note_count; ++idx) {
     Tick cantus_dur =
@@ -1400,27 +1447,31 @@ ChoralePreludeResult generateChoralePrelude(const ChoralePreludeConfig& config) 
                                          nullptr, rng);
     for (auto& note : pedal_notes) {
       tracks[3].notes.push_back(note);
+      placed_notes.push_back(note);
     }
 
-    // 2. Inner voice (references cantus + pedal) — track 2.
+    // 2. Inner voice (references cantus + pedal via vctx) — track 2.
     auto inner_notes = generateInnerVoice(cantus_tick, cantus_dur, cantus_pitch,
                                            timeline, config.key, tracks[3].notes,
-                                           inner_center, rng);
+                                           inner_center, rng, &vctx);
     for (auto& note : inner_notes) {
       tracks[2].notes.push_back(note);
+      placed_notes.push_back(note);
     }
 
-    // 3. Figuration last (references cantus + pedal + inner) — track 0.
+    // 3. Figuration last (references cantus + pedal + inner via vctx) — track 0.
     auto fig_notes = generateFiguration(cantus_tick, cantus_dur, timeline,
                                         config.key, cantus_pitch,
                                         fig_center, rng,
-                                        fig_motif.valid ? &fig_motif : nullptr);
+                                        fig_motif.valid ? &fig_motif : nullptr,
+                                        &vctx);
     // Extract motif from first segment.
     if (idx == 0 && !fig_motif.valid && fig_notes.size() >= 3) {
       fig_motif = extractMotif(fig_notes);
     }
     for (auto& note : fig_notes) {
       tracks[0].notes.push_back(note);
+      placed_notes.push_back(note);
     }
 
     cantus_tick += cantus_dur;
@@ -1428,7 +1479,6 @@ ChoralePreludeResult generateChoralePrelude(const ChoralePreludeConfig& config) 
 
   // Step 6b: Post-validate through counterpoint engine.
   {
-    constexpr uint8_t kChoraleVoices = 4;
     std::vector<NoteEvent> all_notes;
     for (const auto& track : tracks) {
       all_notes.insert(all_notes.end(), track.notes.begin(), track.notes.end());
@@ -1445,24 +1495,9 @@ ChoralePreludeResult generateChoralePrelude(const ChoralePreludeConfig& config) 
         {48, 67},  // Voice 2: Inner voice (C3-G4)
         {organ_range::kPedalLow, organ_range::kPedalHigh}};  // Voice 3: Pedal
 
-    // ---- createBachNote coordination pass ----
+    // ---- Pre-filter + unified coordination pass ----
     {
-      BachRuleEvaluator cp_rules(kChoraleVoices);
-      cp_rules.setFreeCounterpoint(true);
-      CollisionResolver cp_resolver;
-      cp_resolver.setHarmonicTimeline(&timeline);
-      CounterpointState cp_state;
-      cp_state.setKey(config.key.tonic);
-      for (uint8_t v = 0; v < kChoraleVoices; ++v) {
-        cp_state.registerVoice(v, voice_ranges[v].first, voice_ranges[v].second);
-      }
-
-      std::sort(all_notes.begin(), all_notes.end(),
-                [](const NoteEvent& a, const NoteEvent& b) {
-                  return a.start_tick < b.start_tick;
-                });
-
-      // Pre-compute cantus pitch lookup for crossing detection.
+      // Cantus pitch lookup for crossing detection.
       auto cantus_pitch_at = [&tracks](Tick tick) -> int {
         for (const auto& n : tracks[kCantusVoice].notes) {
           if (tick >= n.start_tick && tick < n.start_tick + n.duration) {
@@ -1472,108 +1507,73 @@ ChoralePreludeResult generateChoralePrelude(const ChoralePreludeConfig& config) 
         return -1;
       };
 
-      std::vector<NoteEvent> coordinated;
-      coordinated.reserve(all_notes.size());
-      int accepted_count = 0;
-      int total_count = 0;
-      int fig_accepted = 0;
-      int fig_crossing = 0;
-      int fig_range = 0;
-      int fig_harmony = 0;
-      int fig_other = 0;
+      // Pre-filter: reject inner voice out of range, figuration crossing/range/harmony.
+      int fig_crossing = 0, fig_range = 0, fig_harmony = 0;
+      all_notes.erase(
+          std::remove_if(
+              all_notes.begin(), all_notes.end(),
+              [&](const NoteEvent& note) {
+                if (note.source == BachNoteSource::CantusFixed ||
+                    note.source == BachNoteSource::PedalPoint) {
+                  return false;
+                }
 
-      size_t note_idx = 0;
-      while (note_idx < all_notes.size()) {
-        Tick current_tick = all_notes[note_idx].start_tick;
-        size_t group_end = note_idx;
-        while (group_end < all_notes.size() &&
-               all_notes[group_end].start_tick == current_tick) {
-          ++group_end;
-        }
+                // Inner voice: range check only.
+                if (note.voice == kInnerVoice) {
+                  return note.pitch < voice_ranges[kInnerVoice].first ||
+                         note.pitch > voice_ranges[kInnerVoice].second;
+                }
 
-        // Priority: cantus (immutable) -> pedal -> inner -> figuration.
-        std::sort(all_notes.begin() + static_cast<ptrdiff_t>(note_idx),
-                  all_notes.begin() + static_cast<ptrdiff_t>(group_end),
-                  [](const NoteEvent& a, const NoteEvent& b) {
-                    auto priority = [](const NoteEvent& n) -> int {
-                      if (n.source == BachNoteSource::CantusFixed) return 0;
-                      if (n.source == BachNoteSource::PedalPoint) return 1;
-                      if (n.voice == kInnerVoice) return 2;  // Inner voice
-                      return 3;  // Figuration
-                    };
-                    return priority(a) < priority(b);
-                  });
-
-        for (size_t j = note_idx; j < group_end; ++j) {
-          const auto& note = all_notes[j];
-          ++total_count;
-
-          // Cantus and pedal are immutable — register directly.
-          if (note.source == BachNoteSource::CantusFixed ||
-              note.source == BachNoteSource::PedalPoint) {
-            cp_state.addNote(note.voice, note);
-            coordinated.push_back(note);
-            ++accepted_count;
-            continue;
-          }
-
-          // Inner voice: accept directly (FSM already enforces consonance).
-          // Range check only — inner voice sits BELOW cantus by design.
-          if (note.voice == kInnerVoice) {
-            if (note.pitch >= voice_ranges[kInnerVoice].first &&
-                note.pitch <= voice_ranges[kInnerVoice].second) {
-              cp_state.addNote(note.voice, note);
-              coordinated.push_back(note);
-              ++accepted_count;
-            }
-            continue;
-          }
-
-          // Figuration rejection classification (short-circuit).
-          // (A) Crossing: figuration pitch at or below cantus.
-          int cantus_p = cantus_pitch_at(note.start_tick);
-          if (cantus_p >= 0 && static_cast<int>(note.pitch) <= cantus_p) {
-            ++fig_crossing;
-            continue;
-          }
-
-          // (B) Range: outside registered voice range.
-          if (note.pitch < voice_ranges[kFigurationVoice].first ||
-              note.pitch > voice_ranges[kFigurationVoice].second) {
-            ++fig_range;
-            continue;
-          }
-
-          // (C) Harmony: non-chord-tone on strong beat.
-          if (note.start_tick % kTicksPerBeat == 0) {
-            const HarmonicEvent& harm = timeline.getAt(note.start_tick);
-            if (!isChordTone(note.pitch, harm)) {
-              ++fig_harmony;
-              continue;
-            }
-          }
-
-          // (D) Accept figuration directly — checks A-C are sufficient.
-          // createBachNote's CollisionResolver would aggressively adjust
-          // pitches (e.g., desired=86 -> actual=74), destroying the
-          // Fortspinnung register traversal pattern. The later parallel
-          // repair pass handles any remaining voice-leading issues.
-          cp_state.addNote(note.voice, note);
-          coordinated.push_back(note);
-          ++accepted_count;
-          ++fig_accepted;
-        }
-        note_idx = group_end;
-      }
+                // Figuration: crossing + range + harmony.
+                int cantus_p = cantus_pitch_at(note.start_tick);
+                if (cantus_p >= 0 &&
+                    static_cast<int>(note.pitch) <= cantus_p) {
+                  ++fig_crossing;
+                  return true;
+                }
+                if (note.pitch < voice_ranges[kFigurationVoice].first ||
+                    note.pitch > voice_ranges[kFigurationVoice].second) {
+                  ++fig_range;
+                  return true;
+                }
+                if (note.start_tick % kTicksPerBeat == 0) {
+                  const HarmonicEvent& harm =
+                      timeline.getAt(note.start_tick);
+                  if (!isChordTone(note.pitch, harm)) {
+                    ++fig_harmony;
+                    return true;
+                  }
+                }
+                return false;
+              }),
+          all_notes.end());
 
       fprintf(stderr,
-              "[ChoralePrelude] figuration: accepted=%d, rejected:"
-              " crossing=%d range=%d harmony=%d other=%d\n",
-              fig_accepted, fig_crossing, fig_range, fig_harmony, fig_other);
-      fprintf(stderr, "[ChoralePrelude] createBachNote: accepted %d/%d (%.0f%%)\n",
-              accepted_count, total_count,
-              total_count > 0 ? 100.0 * accepted_count / total_count : 0.0);
-      all_notes = std::move(coordinated);
+              "[ChoralePrelude] figuration pre-filter:"
+              " crossing=%d range=%d harmony=%d\n",
+              fig_crossing, fig_range, fig_harmony);
+
+      // Unified coordination pass — all remaining notes are pre-validated.
+      CoordinationConfig coord_config;
+      coord_config.num_voices = kChoraleVoices;
+      coord_config.tonic = config.key.tonic;
+      coord_config.timeline = &timeline;
+      coord_config.voice_range =
+          [&voice_ranges](uint8_t v) -> std::pair<uint8_t, uint8_t> {
+        if (v < voice_ranges.size()) return voice_ranges[v];
+        return {36, 96};
+      };
+      coord_config.immutable_sources = {BachNoteSource::CantusFixed,
+                                        BachNoteSource::PedalPoint,
+                                        BachNoteSource::FreeCounterpoint};
+      coord_config.priority = [](const NoteEvent& n) -> int {
+        if (n.source == BachNoteSource::CantusFixed) return 0;
+        if (n.source == BachNoteSource::PedalPoint) return 1;
+        if (n.voice == kInnerVoice) return 2;
+        return 3;
+      };
+      coord_config.form_name = "ChoralePrelude";
+      all_notes = coordinateVoices(std::move(all_notes), coord_config);
 
       // Post-rejection repeat mitigation (weak-beat only, chord-tone-aware).
       // Shifts repeated figuration notes by nearest scale step to prevent

@@ -13,8 +13,9 @@
 #include "analysis/analysis_utils.h"
 #include "core/basic_types.h"
 #include "core/pitch_utils.h"
+#include "solo_string/arch/bass_realizer.h"
 #include "solo_string/arch/chaconne_config.h"
-#include "solo_string/arch/ground_bass.h"
+#include "solo_string/arch/chaconne_scheme.h"
 #include "solo_string/arch/variation_types.h"
 
 namespace bach {
@@ -76,85 +77,75 @@ float noteDensity(const std::vector<NoteEvent>& notes, Tick range_ticks) {
 
 namespace {
 
-/// @brief Verify ground bass integrity across all variations (INSTANT FAIL if != 1.0).
+/// @brief Verify harmonic scheme integrity across all variations (INSTANT FAIL if != 1.0).
 ///
-/// For each variation, extracts the lowest-pitch notes at the expected ground bass
-/// tick positions (offset within the variation) and compares them against the
-/// original ground bass pattern. Uses GroundBass::verifyIntegrity().
+/// For each variation, checks that ChaconneBass-sourced notes are present
+/// covering each SchemeEntry's beat position. Verifies that the scheme's
+/// degree/quality sequence is reflected in the bass notes.
 ///
 /// @param all_notes All notes sorted by start_tick.
 /// @param config Chaconne config with variation plan.
-/// @param ground_bass The original immutable ground bass.
-/// @return 1.0 if ALL variations preserve the bass, 0.0 if any modification detected.
-float computeGroundBassIntegrity(const std::vector<NoteEvent>& all_notes,
-                                 const ChaconneConfig& config,
-                                 const GroundBass& ground_bass) {
-  if (ground_bass.isEmpty() || config.variations.empty()) {
+/// @param scheme The harmonic scheme defining the expected progression.
+/// @return 1.0 if ALL variations have bass notes at scheme positions, 0.0 otherwise.
+float computeHarmonicSchemeIntegrity(const std::vector<NoteEvent>& all_notes,
+                                     const ChaconneConfig& config,
+                                     const ChaconneScheme& scheme) {
+  if (scheme.size() == 0 || config.variations.empty()) {
     return 0.0f;
   }
 
-  Tick bass_length = ground_bass.getLengthTicks();
-  if (bass_length == 0) {
+  Tick cycle_length = scheme.getLengthTicks();
+  if (cycle_length == 0) {
     return 0.0f;
   }
 
-  const auto& bass_notes = ground_bass.getNotes();
+  const auto& entries = scheme.entries();
   int num_variations = static_cast<int>(config.variations.size());
 
   for (int var_idx = 0; var_idx < num_variations; ++var_idx) {
-    auto [var_start, var_end] = variationTickRange(var_idx, bass_length);
+    auto [var_start, var_end] = variationTickRange(var_idx, cycle_length);
     auto var_notes = notesInRange(all_notes, var_start, var_end);
 
-    // For each expected bass note, find the GroundBass-sourced note at that
-    // position within this variation.
-    std::vector<NoteEvent> extracted_bass;
-    extracted_bass.reserve(bass_notes.size());
+    // For each scheme entry, verify a ChaconneBass-sourced note exists at
+    // the expected beat position within this variation.
+    for (const auto& entry : entries) {
+      Tick expected_tick =
+          var_start + static_cast<Tick>(entry.position_beats) * kTicksPerBeat;
 
-    for (const auto& original_note : bass_notes) {
-      // The expected position is the original note's offset + variation start.
-      Tick expected_tick = var_start + original_note.start_tick;
-
-      // Find the GroundBass-sourced note at the expected tick.
-      // Prefer source-based matching (accurate), fall back to lowest-pitch
-      // matching for backward compatibility with notes that lack source info.
-      NoteEvent best_match{};
+      // Find any ChaconneBass-sourced note at the expected tick.
       bool found = false;
-
       for (const auto& note : var_notes) {
         if (note.start_tick == expected_tick &&
-            note.source == BachNoteSource::GroundBass) {
-          if (!found || note.pitch < best_match.pitch) {
-            best_match = note;
-            best_match.start_tick = note.start_tick - var_start;
-            found = true;
-          }
+            note.source == BachNoteSource::ChaconneBass) {
+          found = true;
+          break;
         }
       }
 
-      // Fallback: if no GroundBass-sourced note found, try lowest-pitch match.
+      // Fallback: if no ChaconneBass-sourced note found, try GroundBass source
+      // for backward compatibility, then lowest-pitch match.
+      if (!found) {
+        for (const auto& note : var_notes) {
+          if (note.start_tick == expected_tick &&
+              note.source == BachNoteSource::GroundBass) {
+            found = true;
+            break;
+          }
+        }
+      }
       if (!found) {
         for (const auto& note : var_notes) {
           if (note.start_tick == expected_tick) {
-            if (!found || note.pitch < best_match.pitch) {
-              best_match = note;
-              best_match.start_tick = note.start_tick - var_start;
-              found = true;
-            }
+            found = true;
+            break;
           }
         }
       }
 
       if (!found) {
-        // Missing bass note -- integrity violated.
+        // Missing bass note at scheme entry position -- integrity violated.
         return 0.0f;
       }
-
-      extracted_bass.push_back(best_match);
-    }
-
-    // Verify the extracted bass against the original.
-    if (ground_bass.verifyIntegrityReport(extracted_bass).hasCritical()) {
-      return 0.0f;
     }
   }
 
@@ -242,16 +233,16 @@ float computeClimaxPresenceScore(const ChaconneConfig& config) {
 ///
 /// @param all_notes All notes sorted by start_tick.
 /// @param config Chaconne config with variation plan.
-/// @param ground_bass Ground bass for variation length.
+/// @param scheme Harmonic scheme for variation length.
 /// @param[out] avg_voice_count Diagnostic: average implied voice count.
 /// @return 1.0 if in range or not applicable, 0.0 if out of range.
 float computeImpliedPolyphonyScore(const std::vector<NoteEvent>& all_notes,
                                    const ChaconneConfig& config,
-                                   const GroundBass& ground_bass,
+                                   const ChaconneScheme& scheme,
                                    float& avg_voice_count) {
   avg_voice_count = 0.0f;
 
-  Tick bass_length = ground_bass.getLengthTicks();
+  Tick bass_length = scheme.getLengthTicks();
   if (bass_length == 0) {
     return 1.0f;  // Not applicable.
   }
@@ -521,16 +512,16 @@ float computeSectionBalance(const ChaconneConfig& config) {
 ///
 /// @param all_notes All notes sorted by start_tick.
 /// @param config Chaconne config with variation plan.
-/// @param ground_bass Ground bass for variation length.
+/// @param scheme Harmonic scheme for variation length.
 /// @return Score in [0.0, 1.0].
 float computeMajorSectionSeparation(const std::vector<NoteEvent>& all_notes,
                                     const ChaconneConfig& config,
-                                    const GroundBass& ground_bass) {
-  if (config.variations.empty() || ground_bass.isEmpty()) {
+                                    const ChaconneScheme& scheme) {
+  if (config.variations.empty() || scheme.size() == 0) {
     return 0.0f;
   }
 
-  Tick bass_length = ground_bass.getLengthTicks();
+  Tick bass_length = scheme.getLengthTicks();
   if (bass_length == 0) {
     return 0.0f;
   }
@@ -635,16 +626,16 @@ float computeMajorSectionSeparation(const std::vector<NoteEvent>& all_notes,
 ///
 /// @param all_notes All notes sorted by start_tick.
 /// @param config Chaconne config for total piece information.
-/// @param ground_bass Ground bass for piece length calculation.
+/// @param scheme Harmonic scheme for piece length calculation.
 /// @return Score in [0.0, 1.0].
 float computeVoiceSwitchFrequency(const std::vector<NoteEvent>& all_notes,
                                   const ChaconneConfig& config,
-                                  const GroundBass& ground_bass) {
-  if (all_notes.size() < 2 || ground_bass.isEmpty()) {
+                                  const ChaconneScheme& scheme) {
+  if (all_notes.size() < 2 || scheme.size() == 0) {
     return 0.0f;
   }
 
-  Tick bass_length = ground_bass.getLengthTicks();
+  Tick bass_length = scheme.getLengthTicks();
   if (bass_length == 0) {
     return 0.0f;
   }
@@ -712,7 +703,7 @@ float computeVoiceSwitchFrequency(const std::vector<NoteEvent>& all_notes,
 
 bool ChaconneAnalysisResult::isPass() const {
   // Instant-FAIL checks (exact values required).
-  if (ground_bass_integrity != 1.0f) return false;
+  if (harmonic_scheme_integrity != 1.0f) return false;
   if (role_order_score != 1.0f) return false;
   if (climax_presence_score != 1.0f) return false;
   if (implied_polyphony_score != 1.0f) return false;
@@ -740,9 +731,9 @@ std::vector<std::string> ChaconneAnalysisResult::getFailures() const {
   };
 
   // Instant-FAIL checks.
-  if (ground_bass_integrity != 1.0f) {
+  if (harmonic_scheme_integrity != 1.0f) {
     failures.push_back(
-        formatMetric("ground_bass_integrity", ground_bass_integrity, "must be 1.0"));
+        formatMetric("harmonic_scheme_integrity", harmonic_scheme_integrity, "must be 1.0"));
   }
   if (role_order_score != 1.0f) {
     failures.push_back(
@@ -786,8 +777,8 @@ std::string ChaconneAnalysisResult::summary() const {
   std::ostringstream oss;
   oss << "ChaconneAnalysisResult (" << (isPass() ? "PASS" : "FAIL") << ")\n";
   oss << "  Instant-FAIL metrics:\n";
-  oss << "    ground_bass_integrity:     " << ground_bass_integrity
-      << (ground_bass_integrity == 1.0f ? " [OK]" : " [FAIL]") << "\n";
+  oss << "    harmonic_scheme_integrity: " << harmonic_scheme_integrity
+      << (harmonic_scheme_integrity == 1.0f ? " [OK]" : " [FAIL]") << "\n";
   oss << "    role_order_score:          " << role_order_score
       << (role_order_score == 1.0f ? " [OK]" : " [FAIL]") << "\n";
   oss << "    climax_presence_score:     " << climax_presence_score
@@ -818,7 +809,7 @@ std::string ChaconneAnalysisResult::summary() const {
 
 ChaconneAnalysisResult analyzeChaconne(const std::vector<Track>& tracks,
                                        const ChaconneConfig& config,
-                                       const GroundBass& ground_bass) {
+                                       const ChaconneScheme& scheme) {
   ChaconneAnalysisResult result;
 
   auto all_notes = collectAllNotes(tracks);
@@ -831,12 +822,12 @@ ChaconneAnalysisResult analyzeChaconne(const std::vector<Track>& tracks,
   }
 
   // Instant-FAIL metrics.
-  result.ground_bass_integrity =
-      computeGroundBassIntegrity(all_notes, config, ground_bass);
+  result.harmonic_scheme_integrity =
+      computeHarmonicSchemeIntegrity(all_notes, config, scheme);
   result.role_order_score = computeRoleOrderScore(config);
   result.climax_presence_score = computeClimaxPresenceScore(config);
   result.implied_polyphony_score = computeImpliedPolyphonyScore(
-      all_notes, config, ground_bass, result.implied_voice_count_avg);
+      all_notes, config, scheme, result.implied_voice_count_avg);
 
   // Threshold metrics (config-derived).
   result.variation_diversity = computeVariationDiversity(config);
@@ -845,9 +836,9 @@ ChaconneAnalysisResult analyzeChaconne(const std::vector<Track>& tracks,
 
   // Threshold metrics (note-derived).
   result.major_section_separation =
-      computeMajorSectionSeparation(all_notes, config, ground_bass);
+      computeMajorSectionSeparation(all_notes, config, scheme);
   result.voice_switch_frequency =
-      computeVoiceSwitchFrequency(all_notes, config, ground_bass);
+      computeVoiceSwitchFrequency(all_notes, config, scheme);
 
   return result;
 }

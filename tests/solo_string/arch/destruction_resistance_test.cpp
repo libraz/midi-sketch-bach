@@ -7,7 +7,7 @@
 #include "solo_string/arch/chaconne_analyzer.h"
 #include "solo_string/arch/chaconne_config.h"
 #include "solo_string/arch/chaconne_engine.h"
-#include "solo_string/arch/ground_bass.h"
+#include "solo_string/arch/chaconne_scheme.h"
 
 #include <cstdint>
 #include <random>
@@ -39,19 +39,17 @@ TEST(DestructionResistanceTest, HundredSeedsAllMaintainStructure) {
         << "Seed " << seed << " failed generation: " << result.error_message;
 
     // Verify structural integrity via analyzer.
-    // Use the same register_low as the engine (violin lowest pitch).
-    ViolinModel violin;
-    GroundBass bass = GroundBass::createForKey(config.key, violin.getLowestPitch());
+    auto scheme = ChaconneScheme::createForKey(config.key);
     // The analyzer needs the variation plan in config. Since we left
     // config.variations empty, the engine used createStandardVariationPlan
     // internally. We must populate it for the analyzer.
     std::mt19937 rng(42);
     config.variations = createStandardVariationPlan(config.key, rng);
 
-    auto analysis = analyzeChaconne(result.tracks, config, bass);
+    auto analysis = analyzeChaconne(result.tracks, config, scheme);
 
-    EXPECT_FLOAT_EQ(analysis.ground_bass_integrity, 1.0f)
-        << "Seed " << seed << ": ground bass integrity violated";
+    EXPECT_FLOAT_EQ(analysis.harmonic_scheme_integrity, 1.0f)
+        << "Seed " << seed << ": harmonic scheme integrity violated";
     EXPECT_FLOAT_EQ(analysis.role_order_score, 1.0f)
         << "Seed " << seed << ": role order violated";
     EXPECT_FLOAT_EQ(analysis.climax_presence_score, 1.0f)
@@ -153,15 +151,13 @@ TEST(DestructionResistanceTest, FiftySeedsAcrossFiveKeys) {
           << key_case.name << " seed " << seed << ": no notes generated";
 
       // Verify structural invariants.
-      // Use the same register_low as the engine (violin lowest pitch).
-      ViolinModel violin;
-      GroundBass bass = GroundBass::createForKey(config.key, violin.getLowestPitch());
+      auto scheme = ChaconneScheme::createForKey(config.key);
       std::mt19937 rng(42);
       config.variations = createStandardVariationPlan(config.key, rng);
-      auto analysis = analyzeChaconne(result.tracks, config, bass);
+      auto analysis = analyzeChaconne(result.tracks, config, scheme);
 
-      EXPECT_FLOAT_EQ(analysis.ground_bass_integrity, 1.0f)
-          << key_case.name << " seed " << seed << ": ground bass integrity failed";
+      EXPECT_FLOAT_EQ(analysis.harmonic_scheme_integrity, 1.0f)
+          << key_case.name << " seed " << seed << ": harmonic scheme integrity failed";
       EXPECT_FLOAT_EQ(analysis.role_order_score, 1.0f)
           << key_case.name << " seed " << seed << ": role order failed";
       EXPECT_FLOAT_EQ(analysis.climax_presence_score, 1.0f)

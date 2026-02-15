@@ -21,10 +21,12 @@
 #include "core/scale.h"
 #include "counterpoint/bach_rule_evaluator.h"
 #include "counterpoint/collision_resolver.h"
+#include "counterpoint/coordinate_voices.h"
 #include "forms/form_utils.h"
 #include "counterpoint/counterpoint_state.h"
 #include "counterpoint/leap_resolution.h"
 #include "counterpoint/parallel_repair.h"
+#include "counterpoint/vertical_context.h"
 #include "counterpoint/vertical_safe.h"
 #include "counterpoint/species_rules.h"
 #include "harmony/chord_tone_utils.h"
@@ -784,10 +786,28 @@ std::vector<NoteEvent> generateWalkingBass(Tick phrase_start, Tick phrase_end,
                                            const HarmonicTimeline& timeline,
                                            const CharacterParams& params,
                                            Key key, bool is_minor,
-                                           std::mt19937& rng) {
+                                           std::mt19937& rng,
+                                           const VerticalContext* vctx = nullptr) {
   std::vector<NoteEvent> notes;
   ScaleType scale = is_minor ? ScaleType::HarmonicMinor : ScaleType::Major;
   Tick pedal_dur = static_cast<Tick>(params.pedal_dur);
+  constexpr uint8_t lo = organ_range::kPedalLow;
+  constexpr uint8_t hi = organ_range::kPedalHigh;
+  constexpr uint8_t voice = 2;
+
+  // Category B vctx: stepwise alternative when vertical clash detected.
+  auto fixVertical = [&](Tick tick, uint8_t& pitch) {
+    if (vctx && !vctx->isSafe(tick, voice, pitch)) {
+      for (int d : {1, -1, 2, -2}) {
+        uint8_t alt = clampPitch(static_cast<int>(pitch) + d, lo, hi);
+        if (scale_util::isScaleTone(alt, key, scale) &&
+            vctx->isSafe(tick, voice, alt)) {
+          pitch = alt;
+          break;
+        }
+      }
+    }
+  };
 
   for (Tick bar_start = phrase_start; bar_start < phrase_end;
        bar_start += kTicksPerBar) {
@@ -825,6 +845,7 @@ std::vector<NoteEvent> generateWalkingBass(Tick phrase_start, Tick phrase_end,
         bq1.velocity = kOrganVelocity;
         bq1.voice = 2;
         bq1.source = BachNoteSource::PedalPoint;
+        fixVertical(bq1.start_tick, bq1.pitch);
         notes.push_back(bq1);
 
         // Beat 2: scale step between root and target.
@@ -839,6 +860,7 @@ std::vector<NoteEvent> generateWalkingBass(Tick phrase_start, Tick phrase_end,
         bq2.velocity = kOrganVelocity;
         bq2.voice = 2;
         bq2.source = BachNoteSource::PedalPoint;
+        fixVertical(bq2.start_tick, bq2.pitch);
         notes.push_back(bq2);
 
         NoteEvent bq3;
@@ -848,6 +870,7 @@ std::vector<NoteEvent> generateWalkingBass(Tick phrase_start, Tick phrase_end,
         bq3.velocity = kOrganVelocity;
         bq3.voice = 2;
         bq3.source = BachNoteSource::PedalPoint;
+        fixVertical(bq3.start_tick, bq3.pitch);
         notes.push_back(bq3);
 
         // Beat 4: approach.
@@ -870,6 +893,7 @@ std::vector<NoteEvent> generateWalkingBass(Tick phrase_start, Tick phrase_end,
         bq4.velocity = kOrganVelocity;
         bq4.voice = 2;
         bq4.source = BachNoteSource::PedalPoint;
+        fixVertical(bq4.start_tick, bq4.pitch);
         notes.push_back(bq4);
       } else {
         // Standard 2 half notes.
@@ -880,6 +904,7 @@ std::vector<NoteEvent> generateWalkingBass(Tick phrase_start, Tick phrase_end,
         n1.velocity = kOrganVelocity;
         n1.voice = 2;
         n1.source = BachNoteSource::PedalPoint;
+        fixVertical(n1.start_tick, n1.pitch);
         notes.push_back(n1);
 
         // Second half: 5th or approach.
@@ -905,6 +930,7 @@ std::vector<NoteEvent> generateWalkingBass(Tick phrase_start, Tick phrase_end,
         n2.velocity = kOrganVelocity;
         n2.voice = 2;
         n2.source = BachNoteSource::PedalPoint;
+        fixVertical(n2.start_tick, n2.pitch);
         notes.push_back(n2);
       }
     } else {
@@ -917,6 +943,7 @@ std::vector<NoteEvent> generateWalkingBass(Tick phrase_start, Tick phrase_end,
       b1.velocity = kOrganVelocity;
       b1.voice = 2;
       b1.source = BachNoteSource::PedalPoint;
+      fixVertical(b1.start_tick, b1.pitch);
       notes.push_back(b1);
 
       // Beat 3 target.
@@ -951,6 +978,7 @@ std::vector<NoteEvent> generateWalkingBass(Tick phrase_start, Tick phrase_end,
       b2.velocity = kOrganVelocity;
       b2.voice = 2;
       b2.source = BachNoteSource::PedalPoint;
+      fixVertical(b2.start_tick, b2.pitch);
       notes.push_back(b2);
 
       NoteEvent b3;
@@ -960,6 +988,7 @@ std::vector<NoteEvent> generateWalkingBass(Tick phrase_start, Tick phrase_end,
       b3.velocity = kOrganVelocity;
       b3.voice = 2;
       b3.source = BachNoteSource::PedalPoint;
+      fixVertical(b3.start_tick, b3.pitch);
       notes.push_back(b3);
 
       // Beat 4: approach tone toward next bar's root.
@@ -990,6 +1019,7 @@ std::vector<NoteEvent> generateWalkingBass(Tick phrase_start, Tick phrase_end,
       b4.velocity = kOrganVelocity;
       b4.voice = 2;
       b4.source = BachNoteSource::PedalPoint;
+      fixVertical(b4.start_tick, b4.pitch);
       notes.push_back(b4);
     }
   }
@@ -1001,7 +1031,8 @@ std::vector<NoteEvent> generateThematicBass(Tick phrase_start, Tick phrase_end,
                                             const std::vector<NoteEvent>& motif,
                                             const HarmonicTimeline& timeline,
                                             Key /*key*/, bool /*is_minor*/,
-                                            std::mt19937& /*rng*/) {
+                                            std::mt19937& /*rng*/,
+                                            const VerticalContext* vctx = nullptr) {
   // Augment motif by factor 2 and transpose to pedal register.
   auto bass_motif = augmentMelody(motif, 0, 2);
   bass_motif = transposeMelody(bass_motif, -24);  // 2 octaves down.
@@ -1031,6 +1062,23 @@ std::vector<NoteEvent> generateThematicBass(Tick phrase_start, Tick phrase_end,
     }
   }
 
+  // Category C vctx: octave shift when vertical clash detected.
+  if (vctx) {
+    constexpr uint8_t lo = organ_range::kPedalLow;
+    constexpr uint8_t hi = organ_range::kPedalHigh;
+    for (auto& n : bass_motif) {
+      if (!vctx->isSafe(n.start_tick, n.voice, n.pitch)) {
+        for (int s : {12, -12}) {
+          uint8_t alt = clampPitch(static_cast<int>(n.pitch) + s, lo, hi);
+          if (vctx->isSafe(n.start_tick, n.voice, alt)) {
+            n.pitch = alt;
+            break;
+          }
+        }
+      }
+    }
+  }
+
   // If thematic bass is too short, fill remaining with walking bass pattern.
   Tick thematic_end = phrase_start;
   if (!bass_motif.empty()) {
@@ -1050,6 +1098,16 @@ std::vector<NoteEvent> generateThematicBass(Tick phrase_start, Tick phrase_end,
     fill.velocity = kOrganVelocity;
     fill.voice = 2;
     fill.source = BachNoteSource::PedalPoint;
+    if (vctx && !vctx->isSafe(fill.start_tick, fill.voice, fill.pitch)) {
+      for (int s : {12, -12}) {
+        uint8_t alt = clampPitch(static_cast<int>(fill.pitch) + s,
+                                 organ_range::kPedalLow, organ_range::kPedalHigh);
+        if (vctx->isSafe(fill.start_tick, fill.voice, alt)) {
+          fill.pitch = alt;
+          break;
+        }
+      }
+    }
     bass_motif.push_back(fill);
   }
 
@@ -1754,6 +1812,10 @@ TrioSonataMovement generateMovement(const KeySignature& key_sig, Tick num_bars,
 
   ScaleType scale = key_sig.is_minor ? ScaleType::HarmonicMinor : ScaleType::Major;
 
+  // Accumulate placed notes for VerticalContext across phrases.
+  std::vector<NoteEvent> placed_notes;
+  VerticalContext vctx{&placed_notes, &timeline, kTrioVoiceCount};
+
   for (Tick p = 0; p < num_phrases; ++p) {
     Tick phrase_start = p * kPhraseTicks;
     Tick phrase_end = phrase_start + kPhraseTicks;
@@ -1770,7 +1832,24 @@ TrioSonataMovement generateMovement(const KeySignature& key_sig, Tick num_bars,
       phrase_motif = transposeMelodyDiatonic(motif, shift, key_sig.tonic, scale);
     }
 
-    // Generate upper voices.
+    // Step 1: Generate pedal FIRST (harmonic foundation).
+    std::vector<NoteEvent> pedal_notes;
+    bool is_thematic_bass = rng::rollProbability(rng, params.thematic_bass_prob);
+    if (is_thematic_bass) {
+      pedal_notes = generateThematicBass(phrase_start, phrase_end, motif,
+                                         timeline, key_sig.tonic,
+                                         key_sig.is_minor, rng, &vctx);
+    } else {
+      pedal_notes = generateWalkingBass(phrase_start, phrase_end, timeline,
+                                        params, key_sig.tonic,
+                                        key_sig.is_minor, rng, &vctx);
+    }
+    for (auto& n : pedal_notes) {
+      tracks[2].notes.push_back(n);
+      placed_notes.push_back(n);
+    }
+
+    // Step 2: Generate upper voices (with vctx available).
     std::vector<NoteEvent> leader_notes, follower_notes;
     generateUpperVoicePhrase(phrase_start, phrase_motif, timeline, params,
                              leader_voice, key_sig.tonic, key_sig.is_minor,
@@ -1787,28 +1866,14 @@ TrioSonataMovement generateMovement(const KeySignature& key_sig, Tick num_bars,
                          leader_voice == 0 ? kLhHigh : kRhHigh);
     }
 
-    // Route to tracks.
+    // Route upper voices to tracks and placed_notes.
     for (auto& n : leader_notes) {
       tracks[n.voice].notes.push_back(n);
+      placed_notes.push_back(n);
     }
     for (auto& n : follower_notes) {
       tracks[n.voice].notes.push_back(n);
-    }
-
-    // Generate pedal line.
-    std::vector<NoteEvent> pedal_notes;
-    bool is_thematic_bass = rng::rollProbability(rng, params.thematic_bass_prob);
-    if (is_thematic_bass) {
-      pedal_notes = generateThematicBass(phrase_start, phrase_end, motif,
-                                         timeline, key_sig.tonic,
-                                         key_sig.is_minor, rng);
-    } else {
-      pedal_notes = generateWalkingBass(phrase_start, phrase_end, timeline,
-                                        params, key_sig.tonic,
-                                        key_sig.is_minor, rng);
-    }
-    for (auto& n : pedal_notes) {
-      tracks[2].notes.push_back(n);
+      placed_notes.push_back(n);
     }
 
     // Pedal lead: simplify upper voices when thematic bass is active.
@@ -1840,130 +1905,65 @@ TrioSonataMovement generateMovement(const KeySignature& key_sig, Tick num_bars,
     assert(countUnknownSource(all_notes) == 0 &&
            "All notes should have source set by generators");
 
-    // ---- createBachNote coordination pass ----
+    // ---- Pre-process lightweight notes: trim and quantize durations ----
+    for (auto& note : all_notes) {
+      if (note.source != BachNoteSource::EpisodeMaterial &&
+          note.source != BachNoteSource::SequenceNote) {
+        continue;
+      }
+      // Trim at phrase boundary.
+      Tick phrase_idx = note.start_tick / kPhraseTicks;
+      Tick next_boundary = (phrase_idx + 1) * kPhraseTicks;
+      Tick breath_start = next_boundary - kSixteenthNote;
+      if (note.start_tick + note.duration > breath_start) {
+        note.duration = breath_start - note.start_tick;
+      }
+      // Quantize non-standard durations.
+      if (note.duration > 0) {
+        static constexpr Tick kStdDurs[] = {kWholeNote, kHalfNote,
+                                            kQuarterNote, kEighthNote,
+                                            kSixteenthNote};
+        bool is_standard = false;
+        for (Tick dur : kStdDurs) {
+          if (note.duration == dur) {
+            is_standard = true;
+            break;
+          }
+        }
+        if (!is_standard) {
+          Tick best = kSixteenthNote;
+          for (Tick dur : kStdDurs) {
+            if (dur <= note.duration) {
+              best = dur;
+              break;
+            }
+          }
+          note.duration = best;
+        }
+      }
+    }
+    // Remove notes with non-positive duration after trimming.
+    all_notes.erase(
+        std::remove_if(all_notes.begin(), all_notes.end(),
+                       [](const NoteEvent& n) { return n.duration <= 0; }),
+        all_notes.end());
+
+    // ---- Unified coordination pass ----
     {
-      BachRuleEvaluator cp_rules(kTrioVoiceCount);
-      cp_rules.setFreeCounterpoint(true);
-      CollisionResolver cp_resolver;
-      cp_resolver.setHarmonicTimeline(&timeline);
-      CounterpointState cp_state;
-      cp_state.setKey(key_sig.tonic);
-      for (uint8_t v = 0; v < kTrioVoiceCount; ++v) {
-        cp_state.registerVoice(v, voice_ranges[v].first, voice_ranges[v].second);
-      }
-
-      std::sort(all_notes.begin(), all_notes.end(),
-                [](const NoteEvent& a, const NoteEvent& b) {
-                  return a.start_tick < b.start_tick;
-                });
-
-      std::vector<NoteEvent> coordinated;
-      coordinated.reserve(all_notes.size());
-      int accepted_count = 0;
-      int total_count = 0;
-
-      size_t idx = 0;
-      while (idx < all_notes.size()) {
-        Tick current_tick = all_notes[idx].start_tick;
-        size_t group_end = idx;
-        while (group_end < all_notes.size() &&
-               all_notes[group_end].start_tick == current_tick) {
-          ++group_end;
-        }
-
-        // Priority: pedal (immutable) → LH → RH.
-        std::sort(all_notes.begin() + static_cast<ptrdiff_t>(idx),
-                  all_notes.begin() + static_cast<ptrdiff_t>(group_end),
-                  [](const NoteEvent& a, const NoteEvent& b) {
-                    bool a_pedal = (a.source == BachNoteSource::PedalPoint);
-                    bool b_pedal = (b.source == BachNoteSource::PedalPoint);
-                    if (a_pedal != b_pedal) return a_pedal;
-                    return a.voice > b.voice;  // LH (1) before RH (0)
-                  });
-
-        for (size_t j = idx; j < group_end; ++j) {
-          const auto& note = all_notes[j];
-          ++total_count;
-
-          if (note.source == BachNoteSource::PedalPoint) {
-            cp_state.addNote(note.voice, note);
-            coordinated.push_back(note);
-            ++accepted_count;
-            continue;
-          }
-
-          // Structural patterns: accept with lightweight safety checks.
-          if (note.source == BachNoteSource::EpisodeMaterial ||
-              note.source == BachNoteSource::SequenceNote) {
-            uint8_t low = voice_ranges[note.voice].first;
-            uint8_t high = voice_ranges[note.voice].second;
-            if (note.pitch < low || note.pitch > high) continue;
-
-            // Downbeat consonance check (beat 0 only).
-            bool on_downbeat = (beatInBar(note.start_tick) == 0);
-            if (on_downbeat) {
-              const HarmonicEvent& harm = timeline.getAt(note.start_tick);
-              if (!isChordTone(note.pitch, harm)) continue;
-              if (!isVerticallyConsonant(note.pitch, note.voice, note.start_tick,
-                                         coordinated, kTrioVoiceCount)) {
-                continue;
-              }
-            }
-
-            NoteEvent accepted_note = note;
-
-            // Trim notes crossing phrase boundaries first.
-            Tick phrase_idx = accepted_note.start_tick / kPhraseTicks;
-            Tick next_boundary = (phrase_idx + 1) * kPhraseTicks;
-            Tick breath_start = next_boundary - kSixteenthNote;
-            if (accepted_note.start_tick + accepted_note.duration > breath_start) {
-              accepted_note.duration = breath_start - accepted_note.start_tick;
-            }
-            if (accepted_note.duration <= 0) continue;
-
-            // Quantize non-standard durations to largest fitting standard value.
-            static constexpr Tick kStdDurs[] = {kWholeNote, kHalfNote, kQuarterNote,
-                                                kEighthNote, kSixteenthNote};
-            bool is_standard = false;
-            for (Tick dur : kStdDurs) {
-              if (accepted_note.duration == dur) { is_standard = true; break; }
-            }
-            if (!is_standard) {
-              // Pick the largest standard duration that fits.
-              Tick best = kSixteenthNote;
-              for (Tick dur : kStdDurs) {
-                if (dur <= accepted_note.duration) { best = dur; break; }
-              }
-              accepted_note.duration = best;
-            }
-
-            cp_state.addNote(accepted_note.voice, accepted_note);
-            coordinated.push_back(accepted_note);
-            ++accepted_count;
-            continue;
-          }
-
-          BachNoteOptions opts;
-          opts.voice = note.voice;
-          opts.desired_pitch = note.pitch;
-          opts.tick = note.start_tick;
-          opts.duration = note.duration;
-          opts.velocity = note.velocity;
-          opts.source = note.source;
-
-          auto result = createBachNote(&cp_state, &cp_rules, &cp_resolver, opts);
-          if (result.accepted) {
-            coordinated.push_back(result.note);
-            ++accepted_count;
-          }
-        }
-        idx = group_end;
-      }
-
-      fprintf(stderr, "[TrioSonata] createBachNote: accepted %d/%d (%.0f%%)\n",
-              accepted_count, total_count,
-              total_count > 0 ? 100.0 * accepted_count / total_count : 0.0);
-      all_notes = std::move(coordinated);
+      CoordinationConfig coord_config;
+      coord_config.num_voices = kTrioVoiceCount;
+      coord_config.tonic = key_sig.tonic;
+      coord_config.timeline = &timeline;
+      coord_config.voice_range =
+          [&voice_ranges](uint8_t v) -> std::pair<uint8_t, uint8_t> {
+        if (v < voice_ranges.size()) return voice_ranges[v];
+        return {36, 96};
+      };
+      coord_config.immutable_sources = {BachNoteSource::PedalPoint};
+      coord_config.lightweight_sources = {BachNoteSource::EpisodeMaterial,
+                                          BachNoteSource::SequenceNote};
+      coord_config.form_name = "TrioSonata";
+      all_notes = coordinateVoices(std::move(all_notes), coord_config);
     }
 
     PostValidateStats stats;

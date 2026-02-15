@@ -194,6 +194,33 @@ static void applyInvertibleCounterpoint(std::vector<NoteEvent>& notes) {
   }
 }
 
+/// @brief Count harsh dissonance pairs (m2/TT/M7) among simultaneously sounding notes.
+///
+/// Counts inter-voice note pairs whose simple interval is a minor 2nd (1 semitone),
+/// tritone (6 semitones), or major 7th (11 semitones) and that overlap in time.
+/// Used as a quality metric for invertible counterpoint guard: if voice swapping
+/// increases harsh dissonances, the swap should be reverted.
+///
+/// @param notes Episode notes to analyze.
+/// @return Number of harsh dissonance pairs found.
+static int countHarshDissonances(const std::vector<NoteEvent>& notes) {
+  int count = 0;
+  for (size_t idx = 0; idx < notes.size(); ++idx) {
+    for (size_t jdx = idx + 1; jdx < notes.size(); ++jdx) {
+      if (notes[idx].voice == notes[jdx].voice) continue;
+      // Check if overlapping in time.
+      Tick end_i = notes[idx].start_tick + notes[idx].duration;
+      Tick end_j = notes[jdx].start_tick + notes[jdx].duration;
+      if (notes[idx].start_tick >= end_j || notes[jdx].start_tick >= end_i) continue;
+      // Check interval for harsh dissonance: m2(1), TT(6), M7(11).
+      int simple = interval_util::compoundToSimple(
+          absoluteInterval(notes[idx].pitch, notes[jdx].pitch));
+      if (simple == 1 || simple == 6 || simple == 11) ++count;
+    }
+  }
+  return count;
+}
+
 namespace {  // NOLINT(google-build-namespaces) reopened for character-specific generators
 
 /// @brief Generate voice 0 and voice 1 for Severe character.
@@ -938,7 +965,13 @@ Episode generateEpisode(const Subject& subject, Tick start_tick, Tick duration_t
   // Odd episodes get a +0.15 bias toward inversion.
   float invert_prob = invert_base + ((episode_index % 2 != 0) ? 0.15f : 0.0f);
   if (rng::rollProbability(rng, invert_prob) && num_voices >= 2) {
+    auto notes_before = episode.notes;
+    int harsh_before = countHarshDissonances(notes_before);
     applyInvertibleCounterpoint(episode.notes);
+    int harsh_after = countHarshDissonances(episode.notes);
+    if (harsh_after > harsh_before) {
+      episode.notes = std::move(notes_before);  // Revert: swap increased dissonance.
+    }
   }
 
   // Snap start_ticks to 8th-note grid for metric integrity.
@@ -1506,7 +1539,13 @@ Episode generateFortspinnungEpisode(const Subject& subject, const MotifPool& poo
   // Odd episodes get a +0.15 bias toward inversion.
   float fort_invert_prob = fort_invert_base + ((episode_index % 2 != 0) ? 0.15f : 0.0f);
   if (rng::rollProbability(invert_rng, fort_invert_prob) && num_voices >= 2) {
+    auto notes_before = episode.notes;
+    int harsh_before = countHarshDissonances(notes_before);
     applyInvertibleCounterpoint(episode.notes);
+    int harsh_after = countHarshDissonances(episode.notes);
+    if (harsh_after > harsh_before) {
+      episode.notes = std::move(notes_before);  // Revert: swap increased dissonance.
+    }
   }
 
   // Snap start_ticks to 8th-note grid for metric integrity.

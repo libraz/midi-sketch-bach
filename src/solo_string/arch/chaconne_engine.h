@@ -14,9 +14,10 @@ namespace bach {
 
 /// @brief Result from chaconne generation.
 ///
-/// Contains a single MIDI track (solo instrument) with ground bass and
-/// texture notes interleaved. The ground bass notes carry
-/// BachNoteSource::GroundBass provenance and are verified post-generation.
+/// Contains a single MIDI track (solo instrument) with bass and
+/// texture notes interleaved. The bass notes carry
+/// BachNoteSource::ChaconneBass provenance and are generated per
+/// variation based on the harmonic scheme.
 struct ChaconneResult {
   std::vector<Track> tracks;       ///< Usually 1 track (solo instrument).
   Tick total_duration_ticks = 0;   ///< Total piece duration in ticks.
@@ -26,22 +27,22 @@ struct ChaconneResult {
   HarmonicTimeline timeline;       ///< Concatenated harmonic context across variations.
 };
 
-/// @brief Generate a BWV1004-style chaconne with ground bass variations.
+/// @brief Generate a BWV1004-style chaconne with scheme-based bass variations.
 ///
 /// Pipeline:
-///   1. Initialize ground bass (immutable for the lifetime of the piece)
+///   1. Initialize harmonic scheme (immutable for the lifetime of the piece)
 ///   2. Create or validate variation plan (fixed structural order)
 ///   3. For each variation:
-///      a. Place ground bass (copy, never modify original)
-///      b. Build harmonic timeline segment for the variation's key
+///      a. Realize bass line from scheme (role-dependent via BassRealizer)
+///      b. Build harmonic timeline segment from scheme for the variation's key
 ///      c. Generate texture notes based on VariationRole + TextureType
 ///      d. Apply major section constraints where applicable
 ///      e. Output climax design values directly for Accumulate variations
-///   4. Verify ground bass integrity against all placed bass notes
+///   4. Verify harmonic scheme integrity against the concatenated timeline
 ///   5. Assemble final track sorted by start_tick
 ///
 /// Recovery: on texture generation failure, retries with a different seed
-/// up to config.max_variation_retries times. The ground bass is NEVER
+/// up to config.max_variation_retries times. The harmonic scheme is NEVER
 /// modified during recovery.
 ///
 /// @param config Full configuration for chaconne generation.

@@ -8,14 +8,14 @@
 
 #include "core/basic_types.h"
 #include "solo_string/arch/chaconne_config.h"
-#include "solo_string/arch/ground_bass.h"
+#include "solo_string/arch/chaconne_scheme.h"
 
 namespace bach {
 
 /// @brief Result of chaconne analysis with all quality metrics.
 ///
 /// Contains 9 metrics across 2 categories:
-/// - Instant-FAIL metrics that must have exact values (ground_bass_integrity,
+/// - Instant-FAIL metrics that must have exact values (harmonic_scheme_integrity,
 ///   role_order_score, climax_presence_score, implied_polyphony_score)
 /// - Threshold metrics with minimum requirements (variation_diversity,
 ///   texture_transition_score, section_balance, major_section_separation,
@@ -25,9 +25,10 @@ namespace bach {
 struct ChaconneAnalysisResult {
   // ---- Instant-FAIL metrics (must be exact) ----
 
-  /// Ground bass integrity: all variations preserve the original bass exactly.
+  /// Harmonic scheme integrity: all variations contain ChaconneBass-sourced notes
+  /// covering each SchemeEntry's beat position.
   /// Must be exactly 1.0 (FAIL if != 1.0).
-  float ground_bass_integrity = 0.0f;
+  float harmonic_scheme_integrity = 0.0f;
 
   /// Variation role order validity (Establish -> Develop -> ... -> Resolve).
   /// Must be exactly 1.0 (FAIL if != 1.0).
@@ -81,14 +82,14 @@ struct ChaconneAnalysisResult {
   std::string summary() const;
 
   /// @brief Get list of failed metric names with their values.
-  /// @return Vector of strings like "ground_bass_integrity: 0.00 (must be 1.0)".
+  /// @return Vector of strings like "harmonic_scheme_integrity: 0.00 (must be 1.0)".
   std::vector<std::string> getFailures() const;
 };
 
 /// @brief Analyze a generated chaconne for quality metrics.
 ///
 /// Evaluates 9 metrics across 2 categories:
-/// - Instant-FAIL: ground bass integrity, role order, climax presence, implied polyphony
+/// - Instant-FAIL: harmonic scheme integrity, role order, climax presence, implied polyphony
 /// - Threshold: variation diversity, texture transitions, section balance,
 ///   major section separation, voice switch frequency
 ///
@@ -96,11 +97,11 @@ struct ChaconneAnalysisResult {
 ///
 /// @param tracks Generated MIDI tracks to analyze (typically 1 track for solo string).
 /// @param config The ChaconneConfig used for generation.
-/// @param ground_bass The original ground bass for integrity verification.
+/// @param scheme The harmonic scheme for integrity verification.
 /// @return ChaconneAnalysisResult with all metric scores populated.
 ChaconneAnalysisResult analyzeChaconne(const std::vector<Track>& tracks,
                                        const ChaconneConfig& config,
-                                       const GroundBass& ground_bass);
+                                       const ChaconneScheme& scheme);
 
 }  // namespace bach
 

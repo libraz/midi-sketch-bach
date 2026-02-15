@@ -10,6 +10,7 @@
 #include "analysis/fail_report.h"
 #include "core/basic_types.h"
 #include "harmony/key.h"
+#include "solo_string/arch/chaconne_scheme.h"
 #include "solo_string/arch/ground_bass.h"
 #include "solo_string/arch/variation_types.h"
 
@@ -80,8 +81,11 @@ struct ChaconneConfig {
   uint32_t seed = 0;                  ///< 0 = auto (time-based)
   InstrumentType instrument = InstrumentType::Violin;
 
-  /// Ground bass notes. If empty, createForKey(key) is used by the engine.
+  /// @deprecated Use custom_scheme instead. Ignored when custom_scheme is non-empty.
   std::vector<NoteEvent> ground_bass_notes;
+
+  /// Custom harmonic scheme. If empty, createForKey(key) is used.
+  std::vector<SchemeEntry> custom_scheme;
 
   /// Variation plan. If empty, createStandardVariationPlan(key) is used.
   std::vector<ChaconneVariation> variations;
