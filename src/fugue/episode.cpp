@@ -17,6 +17,7 @@
 #include "counterpoint/counterpoint_state.h"
 #include "counterpoint/i_rule_evaluator.h"
 #include "counterpoint/melodic_context.h"
+#include "counterpoint/vertical_safe.h"
 #include "fugue/fortspinnung.h"
 #include "fugue/fugue_config.h"
 #include "fugue/motif_pool.h"
@@ -1432,6 +1433,12 @@ Episode generateEpisode(const Subject& subject, Tick start_tick, Tick duration_t
     lr_params.is_chord_tone = [&](Tick t, uint8_t p) {
       return isChordTone(p, timeline.getAt(t));
     };
+    lr_params.voice_range_static = [num_voices](uint8_t v) {
+      return getFugueVoiceRange(v, num_voices);
+    };
+    lr_params.vertical_safe =
+        makeVerticalSafeWithParallelCheck(timeline, validated.notes,
+                                          num_voices);
     resolveLeaps(validated.notes, lr_params);
   }
 
@@ -1931,6 +1938,12 @@ Episode generateFortspinnungEpisode(const Subject& subject, const MotifPool& poo
     lr_params.is_chord_tone = [&](Tick t, uint8_t p) {
       return isChordTone(p, timeline.getAt(t));
     };
+    lr_params.voice_range_static = [num_voices](uint8_t v) {
+      return getFugueVoiceRange(v, num_voices);
+    };
+    lr_params.vertical_safe =
+        makeVerticalSafeWithParallelCheck(timeline, validated.notes,
+                                          num_voices);
     resolveLeaps(validated.notes, lr_params);
   }
 
