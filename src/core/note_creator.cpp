@@ -128,6 +128,7 @@ namespace {
 int protectionPriority(ProtectionLevel level) {
   switch (level) {
     case ProtectionLevel::Immutable: return 0;
+    case ProtectionLevel::SemiImmutable: return 0;
     case ProtectionLevel::Structural: return 1;
     case ProtectionLevel::Flexible: return 2;
   }
@@ -141,13 +142,15 @@ std::vector<NoteEvent> postValidateNotes(
     uint8_t num_voices,
     KeySignature key_sig,
     const std::vector<std::pair<uint8_t, uint8_t>>& voice_ranges,
-    PostValidateStats* stats) {
+    PostValidateStats* stats,
+    const ProtectionOverrides& protection_overrides) {
   auto range_fn = [&voice_ranges](uint8_t voice,
                                    Tick /*tick*/) -> std::pair<uint8_t, uint8_t> {
     if (voice < voice_ranges.size()) return voice_ranges[voice];
     return {0, 127};
   };
-  return postValidateNotes(std::move(raw_notes), num_voices, key_sig, range_fn, stats);
+  return postValidateNotes(std::move(raw_notes), num_voices, key_sig, range_fn, stats,
+                           protection_overrides);
 }
 
 std::vector<NoteEvent> postValidateNotes(
@@ -155,7 +158,8 @@ std::vector<NoteEvent> postValidateNotes(
     uint8_t num_voices,
     KeySignature key_sig,
     std::function<std::pair<uint8_t, uint8_t>(uint8_t voice, Tick tick)> voice_range_fn,
-    PostValidateStats* stats) {
+    PostValidateStats* stats,
+    const ProtectionOverrides& protection_overrides) {
   if (raw_notes.empty()) return {};
 
   // Determine scale type for diatonic validation of step shifts.
@@ -177,13 +181,27 @@ std::vector<NoteEvent> postValidateNotes(
   CollisionResolver resolver;
   resolver.setRangeTolerance(0);  // Strict range enforcement for post-validation.
 
+  // Build per-voice protection override lookup (num_voices-based, dynamic).
+  std::vector<int> voice_prot_override(num_voices, -1);
+  for (const auto& [v, level] : protection_overrides) {
+    if (v < num_voices) {
+      voice_prot_override[v] = static_cast<int>(level);
+    }
+  }
+
   // Sort by (tick ASC, protection_priority ASC, voice ASC).
   // Immutable notes processed first within each tick.
   std::stable_sort(raw_notes.begin(), raw_notes.end(),
-      [](const NoteEvent& a, const NoteEvent& b) {
+      [&voice_prot_override, num_voices](const NoteEvent& a, const NoteEvent& b) {
         if (a.start_tick != b.start_tick) return a.start_tick < b.start_tick;
-        int pa = protectionPriority(getProtectionLevel(a.source));
-        int pb = protectionPriority(getProtectionLevel(b.source));
+        auto effectiveProt = [&](const NoteEvent& n) -> ProtectionLevel {
+          if (n.voice < num_voices && voice_prot_override[n.voice] >= 0) {
+            return static_cast<ProtectionLevel>(voice_prot_override[n.voice]);
+          }
+          return getProtectionLevel(n.source);
+        };
+        int pa = protectionPriority(effectiveProt(a));
+        int pb = protectionPriority(effectiveProt(b));
         if (pa != pb) return pa < pb;
         return a.voice < b.voice;
       });
@@ -223,10 +241,14 @@ std::vector<NoteEvent> postValidateNotes(
   for (const auto& note : raw_notes) {
     local_stats.total_input++;
 
-    ProtectionLevel prot = getProtectionLevel(note.source);
+    ProtectionLevel prot = (note.voice < num_voices &&
+                            voice_prot_override[note.voice] >= 0)
+        ? static_cast<ProtectionLevel>(voice_prot_override[note.voice])
+        : getProtectionLevel(note.source);
 
-    if (prot == ProtectionLevel::Immutable) {
-      // Immutable notes are registered directly without modification.
+    if (prot == ProtectionLevel::Immutable ||
+        prot == ProtectionLevel::SemiImmutable) {
+      // Immutable/SemiImmutable notes are registered directly without modification.
       state.setCurrentTick(note.start_tick);
       state.addNote(note.voice, note);
       result.push_back(note);

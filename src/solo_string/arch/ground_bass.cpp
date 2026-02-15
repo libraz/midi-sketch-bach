@@ -21,7 +21,10 @@ NoteEvent GroundBass::getBassAt(Tick tick) const {
   // Normalize tick to position within the ground bass cycle.
   Tick length = getLengthTicks();
   if (length == 0) {
-    return NoteEvent{tick, 0, 0, 0, 0};  // Rest: empty bass
+    NoteEvent rest{};
+    rest.start_tick = tick;
+    rest.velocity = 0;
+    return rest;  // Rest sentinel: pitch=0, duration=0
   }
 
   Tick position = tick % length;
@@ -36,7 +39,10 @@ NoteEvent GroundBass::getBassAt(Tick tick) const {
   }
 
   // No note covers this position -- return a rest.
-  return NoteEvent{tick, 0, 0, 0, 0};
+  NoteEvent rest{};
+  rest.start_tick = tick;
+  rest.velocity = 0;
+  return rest;  // Rest sentinel: pitch=0, duration=0
 }
 
 Tick GroundBass::getLengthTicks() const {

@@ -4,10 +4,12 @@
 #include "forms/toccata.h"
 #include "forms/toccata_internal.h"
 
+#include <cassert>
 #include <cmath>
 
 #include "core/melodic_state.h"
 #include "core/note_creator.h"
+#include "core/note_source.h"
 #include "core/pitch_utils.h"
 #include "counterpoint/leap_resolution.h"
 #include "counterpoint/parallel_repair.h"
@@ -377,12 +379,8 @@ ToccataResult generatePerpetuusToccata(const ToccataConfig& config) {
       voice_ranges.emplace_back(getToccataLowPitch(v), getToccataHighPitch(v));
     }
     // Tag untagged notes.
-    for (auto& n : all_notes) {
-      if (n.source == BachNoteSource::Unknown) {
-        n.source = isPedalVoice(n.voice, num_voices) ? BachNoteSource::PedalPoint
-                                  : BachNoteSource::FreeCounterpoint;
-      }
-    }
+    assert(countUnknownSource(all_notes) == 0 &&
+           "All notes should have source set by generators");
     all_notes = coordinateVoices(
         std::move(all_notes), num_voices, config.key.tonic, &timeline);
 

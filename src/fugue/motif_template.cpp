@@ -378,4 +378,154 @@ GoalTone goalToneForCharacter(SubjectCharacter character, std::mt19937& rng,
   return goal;
 }
 
+// ---------------------------------------------------------------------------
+// Kerngestalt core cells (16 cells: 4 types x 4 variants)
+// ---------------------------------------------------------------------------
+
+const KerngestaltCell& getCoreCell(KerngestaltType type, int index) {
+  using RT = RhythmToken;
+  using K = RT::Kind;
+
+  // 16 core cells indexed by type * 4 + (index % 4).
+  // Notation: S=Short, M=Medium, L=Long, DL=Dotted-long, DS=Dotted-short.
+  static const KerngestaltCell kCells[16] = {
+      // --- IntervalDriven (A0-A3) ---
+      // A0: 5th leap, quarter-eighth
+      {KerngestaltType::IntervalDriven,
+       {+7},
+       {{K::M, 1}, {K::S, 1}},
+       true},
+      // A1: 4th up + step down
+      {KerngestaltType::IntervalDriven,
+       {+5, -2},
+       {{K::M, 1}, {K::S, 1}, {K::M, 1}},
+       true},
+      // A2: 4th down + step up, dotted
+      {KerngestaltType::IntervalDriven,
+       {-5, +2},
+       {{K::DL, 1}, {K::DS, 1}, {K::M, 1}},
+       true},
+      // A3: major 3rd + minor 3rd
+      {KerngestaltType::IntervalDriven,
+       {+4, +3},
+       {{K::S, 1}, {K::S, 1}, {K::L, 2}},
+       true},
+
+      // --- ChromaticCell (B0-B3) ---
+      // B0: ascending chromatic + step back
+      {KerngestaltType::ChromaticCell,
+       {+1, +1, -1},
+       {{K::S, 1}, {K::S, 1}, {K::S, 1}, {K::M, 1}},
+       false},
+      // B1: descending chromatic + step up
+      {KerngestaltType::ChromaticCell,
+       {-1, -1, +1},
+       {{K::S, 1}, {K::S, 1}, {K::S, 1}, {K::M, 1}},
+       false},
+      // B2: chromatic neighbor + whole step
+      {KerngestaltType::ChromaticCell,
+       {+1, -1, +2},
+       {{K::S, 1}, {K::S, 1}, {K::DL, 1}, {K::DS, 1}},
+       true},
+      // B3: extended descending chromatic
+      {KerngestaltType::ChromaticCell,
+       {-1, +1, -1, -1},
+       {{K::S, 1}, {K::S, 1}, {K::S, 1}, {K::S, 1}, {K::M, 1}},
+       false},
+
+      // --- Arpeggio (C0-C3) ---
+      // C0: major triad (root position)
+      {KerngestaltType::Arpeggio,
+       {+4, +3},
+       {{K::DL, 1}, {K::DS, 1}, {K::M, 1}},
+       true},
+      // C1: minor triad (root position)
+      {KerngestaltType::Arpeggio,
+       {+3, +4},
+       {{K::DL, 1}, {K::DS, 1}, {K::M, 1}},
+       true},
+      // C2: diminished triad + step
+      {KerngestaltType::Arpeggio,
+       {+3, +3, +1},
+       {{K::S, 1}, {K::S, 1}, {K::S, 1}, {K::L, 2}},
+       true},
+      // C3: broken chord (up-down-up)
+      {KerngestaltType::Arpeggio,
+       {+4, -3, +4},
+       {{K::M, 1}, {K::S, 1}, {K::S, 1}, {K::M, 1}},
+       true},
+
+      // --- Linear (D0-D3) ---
+      // D0: whole-tone ascending
+      {KerngestaltType::Linear,
+       {+2, +2, +2},
+       {{K::M, 1}, {K::M, 1}, {K::M, 1}, {K::M, 1}},
+       true},
+      // D1: mixed step ascending
+      {KerngestaltType::Linear,
+       {+2, +1, +2},
+       {{K::M, 1}, {K::M, 1}, {K::M, 1}, {K::M, 1}},
+       true},
+      // D2: stepwise ascending (4 intervals)
+      {KerngestaltType::Linear,
+       {+1, +2, +1, +2},
+       {{K::S, 1}, {K::S, 1}, {K::S, 1}, {K::S, 1}, {K::M, 1}},
+       true},
+      // D3: descending steps, dotted pairs
+      {KerngestaltType::Linear,
+       {-2, -2, -1},
+       {{K::DL, 1}, {K::DS, 1}, {K::DL, 1}, {K::DS, 1}},
+       true},
+  };
+
+  int type_idx = static_cast<int>(type);
+  return kCells[type_idx * 4 + (index % 4)];
+}
+
+// ---------------------------------------------------------------------------
+// Kerngestalt type selection (character x archetype -> primary/secondary)
+// ---------------------------------------------------------------------------
+
+KerngestaltType selectKerngestaltType(SubjectCharacter character,
+                                      FugueArchetype archetype,
+                                      std::mt19937& rng) {
+  using KT = KerngestaltType;
+
+  struct TypePair {
+    KT primary;
+    KT secondary;
+  };
+
+  // Mapping table: [character][archetype] = {primary (80%), secondary (20%)}.
+  //                  Compact            Cantabile          Invertible         Chromatic
+  static const TypePair kMapping[4][4] = {
+      // Severe
+      {{KT::Linear, KT::IntervalDriven},
+       {KT::IntervalDriven, KT::Linear},
+       {KT::Linear, KT::IntervalDriven},
+       {KT::ChromaticCell, KT::Linear}},
+      // Playful
+      {{KT::IntervalDriven, KT::Arpeggio},
+       {KT::Arpeggio, KT::IntervalDriven},
+       {KT::IntervalDriven, KT::Arpeggio},
+       {KT::ChromaticCell, KT::IntervalDriven}},
+      // Noble
+      {{KT::Linear, KT::IntervalDriven},
+       {KT::IntervalDriven, KT::Linear},
+       {KT::Linear, KT::IntervalDriven},
+       {KT::ChromaticCell, KT::Linear}},
+      // Restless
+      {{KT::ChromaticCell, KT::IntervalDriven},
+       {KT::IntervalDriven, KT::ChromaticCell},
+       {KT::ChromaticCell, KT::IntervalDriven},
+       {KT::ChromaticCell, KT::Linear}},
+  };
+
+  int char_idx = static_cast<int>(character);
+  int arch_idx = static_cast<int>(archetype);
+  const auto& pair = kMapping[char_idx][arch_idx];
+
+  return rng::rollProbability(rng, 0.80f) ? pair.primary : pair.secondary;
+}
+
 }  // namespace bach

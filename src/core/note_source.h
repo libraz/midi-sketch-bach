@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <cstddef>
 #include <string>
+#include <vector>
 
 namespace bach {
 
@@ -14,6 +15,7 @@ namespace bach {
 enum class BachNoteSource : uint8_t {
   Unknown = 0,
   FugueSubject,     // Subject entry
+  SubjectCore,      // Subject core Kerngestalt notes (immutable identity)
   FugueAnswer,      // Answer (Real/Tonal)
   Countersubject,   // Countersubject
   EpisodeMaterial,  // Episode motif
@@ -53,9 +55,10 @@ const char* bachNoteSourceToString(BachNoteSource source);
 /// @brief Protection level for collision resolution.
 /// Determines how aggressively the resolver may modify a note's pitch.
 enum class ProtectionLevel : uint8_t {
-  Immutable,   ///< No pitch change allowed (subject, cantus, ground bass).
-  Structural,  ///< Octave shift only (answer, countersubject, pedal point).
-  Flexible     ///< Full 5-stage cascade (free counterpoint, episodes, ornaments).
+  Immutable,      ///< No pitch change allowed (subject core, cantus, ground bass).
+  SemiImmutable,  ///< Octave shift only, pitch class preserved (subject entries).
+  Structural,     ///< Octave shift only (answer, countersubject, pedal point).
+  Flexible        ///< Full 5-stage cascade (free counterpoint, episodes, ornaments).
 };
 
 /// @brief Get the protection level for a given note source.
@@ -67,7 +70,8 @@ ProtectionLevel getProtectionLevel(BachNoteSource source);
 /// Structural notes are subject, answer, countersubject, pedal, false entry, coda,
 /// and sequence notes. They pass through post-processing without pitch alteration.
 inline bool isStructuralSource(BachNoteSource source) {
-  return source == BachNoteSource::FugueSubject ||
+  return source == BachNoteSource::SubjectCore ||
+         source == BachNoteSource::FugueSubject ||
          source == BachNoteSource::FugueAnswer ||
          source == BachNoteSource::PedalPoint ||
          source == BachNoteSource::Countersubject ||
@@ -160,6 +164,13 @@ struct NoteProvenance {
   /// @return true if source is not Unknown.
   bool hasProvenance() const { return source != BachNoteSource::Unknown; }
 };
+
+struct NoteEvent;  // Forward declaration (defined in basic_types.h).
+
+/// @brief Count notes with Unknown source in a note collection.
+/// @param notes The notes to inspect.
+/// @return Number of notes whose source is BachNoteSource::Unknown.
+int countUnknownSource(const std::vector<NoteEvent>& notes);
 
 }  // namespace bach
 

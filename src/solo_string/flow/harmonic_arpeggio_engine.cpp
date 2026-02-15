@@ -98,13 +98,6 @@ constexpr ProgressionEntry kProgression_C[4] = {
     {ChordDegree::V, 1.0f}
 };
 
-/// Splitmix32 hash for decorrelating per-section sub-seeds.
-inline uint32_t splitmix32(uint32_t seed, uint32_t index) {
-  uint32_t z = seed + index * 0x9E3779B9u;
-  z = (z ^ (z >> 16)) * 0x85EBCA6Bu;
-  z = (z ^ (z >> 13)) * 0xC2B2AE35u;
-  return z ^ (z >> 16);
-}
 
 /// @brief Compute the MIDI pitch for a chord degree in a given key and octave.
 ///
@@ -590,7 +583,7 @@ HarmonicTimeline buildFlowTimeline(const ArpeggioFlowConfig& config,
   HarmonicTimeline timeline;
 
   int total_sections = config.num_sections;
-  std::mt19937 timeline_rng(splitmix32(base_seed, 0xF10Au));
+  std::mt19937 timeline_rng(rng::splitmix32(base_seed, 0xF10Au));
 
   // Map section_id -> ArcPhase for quick lookup.
   auto getPhaseForSection = [&](int section_idx) -> ArcPhase {
@@ -807,7 +800,7 @@ std::vector<NoteEvent> generateBarNotes(
 
       // Calculate velocity: jitter -> weight boost -> accent (accent last to
       // prevent jitter from weakening strong-beat structure).
-      uint32_t vel_hash = splitmix32(
+      uint32_t vel_hash = rng::splitmix32(
           static_cast<uint32_t>(bar_tick), static_cast<uint32_t>(note_idx));
       int vel_jitter = static_cast<int>(vel_hash % 7) - 3;  // [-3, +3]
       int velocity = static_cast<int>(kBaseVelocity) + vel_jitter;
@@ -1046,8 +1039,8 @@ ArpeggioFlowResult generateArpeggioFlow(const ArpeggioFlowConfig& config) {
     std::vector<PatternRole> bar_roles = assignPatternRoles(config.bars_per_section);
 
     // Per-section sub-seed for local randomization.
-    std::mt19937 section_rng(splitmix32(effective_seed,
-                                        static_cast<uint32_t>(section_idx)));
+    std::mt19937 section_rng(rng::splitmix32(effective_seed,
+                                            static_cast<uint32_t>(section_idx)));
 
     // Section-level seventh chord decision (Step 5).
     float seventh_prob = (phase == ArcPhase::Peak) ? 0.30f

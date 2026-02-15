@@ -69,6 +69,7 @@ set(BACH_LIB_SOURCES
   fugue/fugue_structure.cpp
   fugue/subject.cpp
   fugue/subject_params.cpp
+  fugue/subject_identity.cpp
   fugue/subject_validator.cpp
   fugue/answer.cpp
   fugue/countersubject.cpp

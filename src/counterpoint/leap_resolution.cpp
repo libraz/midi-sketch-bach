@@ -116,6 +116,21 @@ int resolveLeaps(std::vector<NoteEvent>& notes,
 
       // === Protection conditions ===
 
+      // P0: Subject identity protection -- leaps belonging to the fugue subject
+      // (SubjectCore or FugueSubject) are intentional and must not be "resolved"
+      // by modifying the following note. Skip if the leap originates from or
+      // lands on a subject note.
+      {
+        auto prot0 = getProtectionLevel(notes[i0].source);
+        auto prot1 = getProtectionLevel(notes[i1].source);
+        if (prot0 == ProtectionLevel::Immutable ||
+            prot0 == ProtectionLevel::SemiImmutable ||
+            prot1 == ProtectionLevel::Immutable ||
+            prot1 == ProtectionLevel::SemiImmutable) {
+          continue;
+        }
+      }
+
       // P1: Source protection (Immutable/Structural -> skip).
       if (getProtectionLevel(notes[i2].source) != ProtectionLevel::Flexible) continue;
 

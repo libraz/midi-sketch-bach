@@ -4,9 +4,11 @@
 #include "fugue/fugue_generator.h"
 
 #include <algorithm>
-#include <climits>
 #include <array>
+#include <cassert>
+#include <climits>
 #include <cstdint>
+#include <cstdio>
 #include <functional>
 #include <random>
 
@@ -434,66 +436,58 @@ std::vector<NoteEvent> createCodaNotes(Tick start_tick, Tick duration,
           held_indices.push_back(idx);
         }
       }
-      // Also include voice 0's pitch at stage1 end for crossing check.
-      uint8_t voice0_pitch = 0;
+      // Use voice 0's maximum pitch during Stage 1 as upper bound.
+      // The motif rises to base_tonic+7 and falls back, so held chords should
+      // be below the peak (not the last note) to avoid forced large jumps.
+      uint8_t voice0_max_pitch = 0;
       for (const auto& n : notes) {
-        if (n.voice == 0) voice0_pitch = n.pitch;  // Last voice 0 note pitch.
-      }
-
-      // Sort held pitches descending (voice 1 highest, voice N-1 lowest).
-      std::vector<uint8_t> held_pitches;
-      for (auto idx : held_indices) held_pitches.push_back(notes[idx].pitch);
-      std::sort(held_pitches.begin(), held_pitches.end(), std::greater<uint8_t>());
-
-      // Ensure voice 1 is below voice 0's highest pitch.
-      if (!held_pitches.empty() && voice0_pitch > 0 && held_pitches[0] > voice0_pitch) {
-        // Find a pitch class match below voice0_pitch.
-        for (int shift = -12; shift >= -36; shift -= 12) {
-          int cand = static_cast<int>(held_pitches[0]) + shift;
-          auto [vlo, vhi] = getFugueVoiceRange(1, num_voices);
-          if (cand >= vlo && cand <= vhi && cand <= voice0_pitch) {
-            held_pitches[0] = static_cast<uint8_t>(cand);
-            break;
-          }
+        if (n.voice == 0 && n.pitch > voice0_max_pitch) {
+          voice0_max_pitch = n.pitch;
         }
       }
 
-      // Re-sort after potential adjustment.
-      std::sort(held_pitches.begin(), held_pitches.end(), std::greater<uint8_t>());
+      // Fix voice crossing while preserving voice-leading proximity.
+      // Greedy top-down: for each voice (1, 2, ...), find the closest chord
+      // tone to last_pitches that is also ≤ upper_bound (pitch of voice above).
+      // This avoids the sort-then-reassign approach that can break proximity
+      // by assigning a wrong pitch class to a voice.
+      uint8_t upper_bound = (voice0_max_pitch > 0) ? voice0_max_pitch : 127;
+      for (size_t i = 0; i < held_indices.size(); ++i) {
+        size_t note_idx = held_indices[i];
+        uint8_t voice_idx = notes[note_idx].voice;
+        auto [vlo, vhi] = getFugueVoiceRange(voice_idx, num_voices);
+        uint8_t current_pitch = notes[note_idx].pitch;
 
-      // Reassign pitches to voices in order, but verify voice-leading proximity.
-      for (size_t idx = 0; idx < held_indices.size() && idx < held_pitches.size(); ++idx) {
-        uint8_t voice_idx = notes[held_indices[idx]].voice;
-        uint8_t new_pitch = held_pitches[idx];
+        // If already within bounds, keep it.
+        if (current_pitch <= upper_bound && current_pitch >= vlo) {
+          upper_bound = current_pitch;
+          continue;
+        }
 
-        // Check leap from pre-coda pitch if available.
-        if (last_pitches && last_pitches[voice_idx] > 0) {
-          bool is_outer = (voice_idx == 0 ||
-                           voice_idx == num_voices - 1);
-          int max_leap = is_outer ? 12 : 7;
-          int leap = std::abs(static_cast<int>(new_pitch) -
-                              static_cast<int>(last_pitches[voice_idx]));
-          if (leap > max_leap) {
-            // Try octave shifts of the assigned pitch to stay within leap limit.
-            auto [vlo, vhi] = getFugueVoiceRange(voice_idx, num_voices);
-            int target_pc = getPitchClass(new_pitch);
-            int best_leap = leap;
-            uint8_t best_pitch = new_pitch;
-            for (int shift = -36; shift <= 36; shift += 12) {
-              if (shift == 0) continue;
-              int cand = static_cast<int>(new_pitch) + shift;
-              if (cand < vlo || cand > vhi) continue;
-              if (getPitchClass(static_cast<uint8_t>(cand)) != target_pc) continue;
-              int cand_leap = std::abs(cand - static_cast<int>(last_pitches[voice_idx]));
-              if (cand_leap < best_leap) {
-                best_leap = cand_leap;
-                best_pitch = static_cast<uint8_t>(cand);
-              }
+        // Re-find the best chord tone: within voice range, ≤ upper_bound,
+        // and closest to last_pitches[voice_idx] (or current pitch as fallback).
+        uint8_t ref_pitch = (last_pitches && last_pitches[voice_idx] > 0)
+                                ? last_pitches[voice_idx]
+                                : current_pitch;
+        int best_dist = 999;
+        uint8_t best_pitch = clampPitch(static_cast<int>(current_pitch), vlo,
+                                        std::min(static_cast<int>(upper_bound),
+                                                 static_cast<int>(vhi)));
+        for (int pc : chord_pcs) {
+          // Scan octaves within the voice range.
+          int base = pc;
+          while (base < vlo) base += 12;
+          for (int p = base; p <= vhi && p <= static_cast<int>(upper_bound); p += 12) {
+            if (p < vlo) continue;
+            int dist = std::abs(p - static_cast<int>(ref_pitch));
+            if (dist < best_dist) {
+              best_dist = dist;
+              best_pitch = static_cast<uint8_t>(p);
             }
-            new_pitch = best_pitch;
           }
         }
-        notes[held_indices[idx]].pitch = new_pitch;
+        notes[note_idx].pitch = best_pitch;
+        upper_bound = best_pitch;
       }
     }
 
@@ -806,14 +800,14 @@ std::vector<NoteEvent> createCodaNotes(Tick start_tick, Tick duration,
         }
       }
 
-      // Voice crossing check — instant rejection.
+      // Voice crossing/unison check — instant rejection.
       for (int chord_idx = 0; chord_idx < 3; ++chord_idx) {
         const uint8_t* pitches = (chord_idx == 0) ? sol.v7
                                : (chord_idx == 1) ? sol.i_chord
                                : sol.final_chord;
         for (uint8_t v = 0; v + 1 < voice_count; ++v) {
-          if (pitches[v] < pitches[v + 1]) {
-            return INT32_MAX;  // Voice crossing: reject.
+          if (pitches[v] <= pitches[v + 1]) {
+            return INT32_MAX;  // Voice crossing or unison: reject.
           }
         }
       }
@@ -1038,7 +1032,51 @@ std::vector<NoteEvent> createCodaNotes(Tick start_tick, Tick duration,
     }
 
     // Emit V7 chord notes (first half of Stage 2).
+    // Layer 2 safety net: enforce strict descending pitch order on the
+    // winning solution (search or fallback).  This is normally a no-op when
+    // scoreSolution already rejects crossings, but guards against edge cases
+    // where candidate generation produces borderline solutions.
+    auto projectStrictOrderU8 = [&](uint8_t* pitches) {
+      int upper = INT_MAX;
+      for (uint8_t v = 0; v < voice_count; ++v) {
+        int p = static_cast<int>(pitches[v]);
+        auto [vlo, vhi] = getFugueVoiceRange(v, num_voices);
+
+        if (p < upper) {
+          upper = p;
+          continue;
+        }
+
+        // p >= upper: voice crossing/unison.
+        int pc = getPitchClass(static_cast<uint8_t>(p));
+        bool found = false;
+        for (int cand = p - 12; cand >= static_cast<int>(vlo); cand -= 12) {
+          if (cand < upper &&
+              getPitchClass(static_cast<uint8_t>(cand)) == pc) {
+            pitches[v] = static_cast<uint8_t>(cand);
+            upper = cand;
+            found = true;
+            break;
+          }
+        }
+        if (found) continue;
+
+        int ceiling = std::min(upper - 1, static_cast<int>(vhi));
+        if (ceiling >= static_cast<int>(vlo)) {
+          pitches[v] = static_cast<uint8_t>(ceiling);
+          upper = ceiling;
+        } else {
+          pitches[v] = vlo;
+          upper = static_cast<int>(vlo);
+        }
+      }
+    };
+
     if (best.cost < INT32_MAX) {
+      projectStrictOrderU8(best.v7);
+      projectStrictOrderU8(best.i_chord);
+      projectStrictOrderU8(best.final_chord);
+
       for (uint8_t v = 0; v < voice_count; ++v) {
         NoteEvent note;
         note.start_tick = stage2_start;
@@ -1081,18 +1119,103 @@ std::vector<NoteEvent> createCodaNotes(Tick start_tick, Tick duration,
     } else {
       // Fallback: emit simple V7-I if optimization found no valid solution.
       int dom_pitch = tonic_pitch + 7;
-      int dom7_offsets[] = {4, 7, -2, -12, -17};
       int res_third = is_minor ? 3 : 4;
-      int tonic_offsets[] = {12, 7, res_third, 0, -12};
-      int final_offsets[] = {12, 7, 4, 0, -12};
 
+      // Layer 1: Voice-count-specific offsets.
+      // 3-voice (and 2-voice): LT/7th/root for V7 — omit 5th to avoid crossing.
+      int dom7_offsets[5];
+      int tonic_offsets_fb[5];
+      int final_offsets_fb[5];
       uint8_t count = std::min(num_voices, static_cast<uint8_t>(5));
+
+      if (num_voices <= 3) {
+        // V7: LT(soprano), 7th(inner), root(bass) — 5th omitted.
+        dom7_offsets[0] = 4;    // B4 (leading tone)
+        dom7_offsets[1] = -2;   // F4 (7th)
+        dom7_offsets[2] = -12;  // G3 (root)
+        // I: tonic(sop), 3rd(inner), root(bass).
+        tonic_offsets_fb[0] = 12;         // C5
+        tonic_offsets_fb[1] = res_third;  // E4/Eb4
+        tonic_offsets_fb[2] = 0;          // C4
+        // Final: tonic(sop), 3rd(inner, Picardy), root(bass).
+        final_offsets_fb[0] = 12;  // C5
+        final_offsets_fb[1] = 4;   // E4 (always major for Picardy)
+        final_offsets_fb[2] = 0;   // C4
+      } else {
+        // 4-5 voice: original offsets.
+        int dom7_src[] = {4, 7, -2, -12, -17};
+        int tonic_src[] = {12, 7, res_third, 0, -12};
+        int final_src[] = {12, 7, 4, 0, -12};
+        for (uint8_t v = 0; v < count; ++v) {
+          dom7_offsets[v] = dom7_src[v];
+          tonic_offsets_fb[v] = tonic_src[v];
+          final_offsets_fb[v] = final_src[v];
+        }
+      }
+
+      // Compute fallback pitches into arrays.
+      int v7_pitches[5] = {};
+      int i_pitches[5] = {};
+      int final_pitches[5] = {};
       for (uint8_t v = 0; v < count; ++v) {
         auto [vlo, vhi] = getFugueVoiceRange(v, num_voices);
+        v7_pitches[v] = static_cast<int>(clampPitch(dom_pitch + dom7_offsets[v], vlo, vhi));
+        i_pitches[v] = static_cast<int>(clampPitch(tonic_pitch + tonic_offsets_fb[v], vlo, vhi));
+        final_pitches[v] = static_cast<int>(
+            clampPitch(tonic_pitch + final_offsets_fb[v], vlo, vhi));
+      }
+
+      // Layer 2: Top-down greedy projection — ensure strict descending order.
+      // Priority: (1) strict v0 > v1 > v2 > ..., (2) preserve pitch class.
+      auto projectStrictOrder = [&](int* pitches) {
+        int upper = INT_MAX;
+        for (uint8_t v = 0; v < count; ++v) {
+          int p = pitches[v];
+          auto [vlo, vhi] = getFugueVoiceRange(v, num_voices);
+
+          if (p < upper) {
+            upper = p;
+            continue;
+          }
+
+          // p >= upper: voice crossing. Rescue search.
+          // (A) Same PC, octave below (within range, below upper).
+          int pc = getPitchClass(static_cast<uint8_t>(p));
+          bool found = false;
+          for (int cand = p - 12; cand >= static_cast<int>(vlo); cand -= 12) {
+            if (cand < upper &&
+                getPitchClass(static_cast<uint8_t>(cand)) == pc) {
+              pitches[v] = cand;
+              upper = cand;
+              found = true;
+              break;
+            }
+          }
+          if (found) continue;
+
+          // (B) clampPitch: PC may change, but strict order is priority.
+          int ceiling = std::min(upper - 1, static_cast<int>(vhi));
+          if (ceiling >= static_cast<int>(vlo)) {
+            pitches[v] = ceiling;
+            upper = ceiling;
+          } else {
+            // (C) Extreme fallback: set to voice range low.
+            pitches[v] = static_cast<int>(vlo);
+            upper = static_cast<int>(vlo);
+          }
+        }
+      };
+
+      projectStrictOrder(v7_pitches);
+      projectStrictOrder(i_pitches);
+      projectStrictOrder(final_pitches);
+
+      // Emit V7 and I chord notes.
+      for (uint8_t v = 0; v < count; ++v) {
         NoteEvent v7_note;
         v7_note.start_tick = stage2_start;
         v7_note.duration = half_bar;
-        v7_note.pitch = clampPitch(dom_pitch + dom7_offsets[v], vlo, vhi);
+        v7_note.pitch = static_cast<uint8_t>(v7_pitches[v]);
         v7_note.velocity = kOrganVelocity;
         v7_note.voice = v;
         v7_note.source = BachNoteSource::Coda;
@@ -1101,7 +1224,7 @@ std::vector<NoteEvent> createCodaNotes(Tick start_tick, Tick duration,
         NoteEvent i_note;
         i_note.start_tick = stage2_start + half_bar;
         i_note.duration = stage2_dur - half_bar;
-        i_note.pitch = clampPitch(tonic_pitch + tonic_offsets[v], vlo, vhi);
+        i_note.pitch = static_cast<uint8_t>(i_pitches[v]);
         i_note.velocity = kOrganVelocity;
         i_note.voice = v;
         i_note.source = BachNoteSource::Coda;
@@ -1113,11 +1236,10 @@ std::vector<NoteEvent> createCodaNotes(Tick start_tick, Tick duration,
       if (stage3_start < start_tick + duration) {
         Tick stage3_dur = start_tick + duration - stage3_start;
         for (uint8_t v = 0; v < count; ++v) {
-          auto [vlo, vhi] = getFugueVoiceRange(v, num_voices);
           NoteEvent note;
           note.start_tick = stage3_start;
           note.duration = stage3_dur;
-          note.pitch = clampPitch(tonic_pitch + final_offsets[v], vlo, vhi);
+          note.pitch = static_cast<uint8_t>(final_pitches[v]);
           note.velocity = kOrganVelocity;
           note.voice = v;
           note.source = BachNoteSource::Coda;
@@ -1611,7 +1733,8 @@ FugueResult generateFugue(const FugueConfig& config) {
       // Determine source-based protection.
       BachNoteSource source = note.source;
       if (source == BachNoteSource::Unknown) {
-        source = BachNoteSource::FreeCounterpoint;
+        assert(false && "Note should have source set by generator");
+        source = BachNoteSource::FreeCounterpoint;  // Fallback for release builds.
       }
 
       // Check chord tone status against beat-resolution timeline for generation quality.
@@ -1628,50 +1751,58 @@ FugueResult generateFugue(const FugueConfig& config) {
       bool is_structural = isStructuralSource(source);
 
       if (is_structural) {
-        // Apply octave correction for structural voice crossings.
         NoteEvent fixed_note = note;
+
+        // Coda notes are design values (Principle 4): createCodaNotes already
+        // handles voice crossing and voice-leading internally.  Skip octave
+        // correction and phase-aware ceiling to preserve coda entry proximity.
+        bool skip_post_adjust = (source == BachNoteSource::Coda);
+
+        // Apply octave correction for structural voice crossings.
         bool has_crossing = false;
-        for (uint8_t other = 0; other < num_voices; ++other) {
-          if (other == note.voice) continue;
-          const NoteEvent* other_note = post_state.getNoteAt(other, note.start_tick);
-          if (!other_note) continue;
-          if ((note.voice < other && note.pitch < other_note->pitch) ||
-              (note.voice > other && note.pitch > other_note->pitch)) {
-            has_crossing = true;
-            break;
+        if (!skip_post_adjust) {
+          for (uint8_t other = 0; other < num_voices; ++other) {
+            if (other == note.voice) continue;
+            const NoteEvent* other_note = post_state.getNoteAt(other, note.start_tick);
+            if (!other_note) continue;
+            if ((note.voice < other && note.pitch < other_note->pitch) ||
+                (note.voice > other && note.pitch > other_note->pitch)) {
+              has_crossing = true;
+              break;
+            }
           }
-        }
-        if (has_crossing) {
-          for (int shift : {12, -12, 24, -24}) {
-            int candidate = static_cast<int>(note.pitch) + shift;
-            auto [fix_lo, fix_hi] = getFugueVoiceRange(note.voice, num_voices);
-            if (candidate < static_cast<int>(fix_lo) ||
-                candidate > static_cast<int>(fix_hi)) continue;
-            bool resolved = true;
-            for (uint8_t other = 0; other < num_voices; ++other) {
-              if (other == note.voice) continue;
-              const NoteEvent* other_note =
-                  post_state.getNoteAt(other, note.start_tick);
-              if (!other_note) continue;
-              if ((note.voice < other &&
-                   candidate < static_cast<int>(other_note->pitch)) ||
-                  (note.voice > other &&
-                   candidate > static_cast<int>(other_note->pitch))) {
-                resolved = false;
+          if (has_crossing) {
+            for (int shift : {12, -12, 24, -24}) {
+              int candidate = static_cast<int>(note.pitch) + shift;
+              auto [fix_lo, fix_hi] = getFugueVoiceRange(note.voice, num_voices);
+              if (candidate < static_cast<int>(fix_lo) ||
+                  candidate > static_cast<int>(fix_hi)) continue;
+              bool resolved = true;
+              for (uint8_t other = 0; other < num_voices; ++other) {
+                if (other == note.voice) continue;
+                const NoteEvent* other_note =
+                    post_state.getNoteAt(other, note.start_tick);
+                if (!other_note) continue;
+                if ((note.voice < other &&
+                     candidate < static_cast<int>(other_note->pitch)) ||
+                    (note.voice > other &&
+                     candidate > static_cast<int>(other_note->pitch))) {
+                  resolved = false;
+                  break;
+                }
+              }
+              if (resolved) {
+                fixed_note.pitch = static_cast<uint8_t>(candidate);
+                fixed_note.modified_by |= static_cast<uint8_t>(NoteModifiedBy::OctaveAdjust);
                 break;
               }
-            }
-            if (resolved) {
-              fixed_note.pitch = static_cast<uint8_t>(candidate);
-              fixed_note.modified_by |= static_cast<uint8_t>(NoteModifiedBy::OctaveAdjust);
-              break;
             }
           }
         }
         // Apply phase-aware ceiling to structural notes too.
         // If the ceiling would create a parallel perfect, revert to the
         // original pitch — the structural note was already valid before.
-        if (estimated_duration > 0) {
+        if (!skip_post_adjust && estimated_duration > 0) {
           uint8_t pre_ceiling_pitch = fixed_note.pitch;
           float pos = static_cast<float>(note.start_tick) /
                       static_cast<float>(estimated_duration);
@@ -2647,6 +2778,70 @@ FugueResult generateFugue(const FugueConfig& config) {
   // Store the beat-resolution timeline for dual-timeline analysis.
   // Cannot std::move because detailed_timeline is still referenced below.
   result.generation_timeline = detailed_timeline;
+
+  // =========================================================================
+  // Coda proximity enforcement: after all post-processing, ensure coda held
+  // chord notes are within leap limits of the (now post-processed) pre-coda
+  // pitches.  createCodaNotes targets raw pre-coda pitches, but post-processing
+  // can shift pre-coda notes significantly, creating large entry jumps.
+  // =========================================================================
+  {
+    auto codas = structure.getSectionsByType(SectionType::Coda);
+    if (codas.size() == 1) {
+      Tick coda_start = codas[0].start_tick;
+
+      // Sort by (voice, tick) for per-voice sequential scan.
+      std::stable_sort(all_notes.begin(), all_notes.end(),
+          [](const NoteEvent& a, const NoteEvent& b) {
+            if (a.voice != b.voice) return a.voice < b.voice;
+            return a.start_tick < b.start_tick;
+          });
+
+      // Tonic chord pitch classes for re-assignment candidates.
+      int tonic_midi = static_cast<int>(kMidiC4) + static_cast<int>(config.key);
+      int ct = config.is_minor ? 3 : 4;
+      int coda_chord_pcs[] = {tonic_midi % 12, (tonic_midi + ct) % 12,
+                              (tonic_midi + 7) % 12};
+
+      for (uint8_t v = 0; v < num_voices; ++v) {
+        uint8_t last_pre_pitch = 0;
+        size_t first_coda_idx = SIZE_MAX;
+        for (size_t i = 0; i < all_notes.size(); ++i) {
+          if (all_notes[i].voice != v) continue;
+          if (all_notes[i].start_tick < coda_start) {
+            last_pre_pitch = all_notes[i].pitch;
+          } else if (first_coda_idx == SIZE_MAX &&
+                     all_notes[i].source == BachNoteSource::Coda) {
+            first_coda_idx = i;
+          }
+        }
+        if (first_coda_idx == SIZE_MAX || last_pre_pitch == 0) continue;
+
+        int jump = std::abs(static_cast<int>(all_notes[first_coda_idx].pitch) -
+                            static_cast<int>(last_pre_pitch));
+        bool is_outer = (v == 0 || v == num_voices - 1);
+        int max_leap = is_outer ? 12 : 9;
+        if (jump <= max_leap) continue;
+
+        // Find nearest tonic chord tone to last_pre_pitch within voice range.
+        auto [vlo, vhi] = getFugueVoiceRange(v, num_voices);
+        int best_dist = jump;
+        uint8_t best_pitch = all_notes[first_coda_idx].pitch;
+        for (int pc : coda_chord_pcs) {
+          int base = pc;
+          while (base < vlo) base += 12;
+          for (int p = base; p <= vhi; p += 12) {
+            int dist = std::abs(p - static_cast<int>(last_pre_pitch));
+            if (dist < best_dist) {
+              best_dist = dist;
+              best_pitch = static_cast<uint8_t>(p);
+            }
+          }
+        }
+        all_notes[first_coda_idx].pitch = best_pitch;
+      }
+    }
+  }
 
   // =========================================================================
   // Create tracks and assign notes

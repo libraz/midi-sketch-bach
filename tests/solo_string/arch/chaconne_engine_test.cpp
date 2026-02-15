@@ -493,7 +493,7 @@ std::vector<int> topPitchClasses(const std::vector<NoteEvent>& notes, int top_n 
 
 TEST(ChaconneSeedDiversityTest, DifferentSeedsProduceDiverseOutput) {
   constexpr int kNumSeeds = 10;
-  constexpr int kMinUnique = 6;
+  constexpr int kMinUnique = 8;
 
   // Collect fingerprints: pitch class top-3 as a string.
   std::set<std::string> fingerprints;
@@ -533,6 +533,101 @@ TEST(ChaconneSeedDiversityTest, SeedsProduceDifferentNoteCounts) {
   // With rhythm profile variation, we expect multiple distinct note counts.
   EXPECT_GE(note_counts.size(), 3u)
       << "Expected at least 3 distinct note counts across 10 seeds";
+}
+
+TEST(ChaconneSeedDiversityTest, NoteContentDiffersAcrossSeeds) {
+  auto config_a = createTestConfig(42);
+  auto config_b = createTestConfig(99);
+
+  auto result_a = generateChaconne(config_a);
+  auto result_b = generateChaconne(config_b);
+
+  ASSERT_TRUE(result_a.success) << result_a.error_message;
+  ASSERT_TRUE(result_b.success) << result_b.error_message;
+  ASSERT_EQ(result_a.tracks.size(), 1u);
+  ASSERT_EQ(result_b.tracks.size(), 1u);
+
+  // Extract texture note pitches only (skip ground bass which is identical).
+  std::vector<uint8_t> pitches_a, pitches_b;
+  for (const auto& n : result_a.tracks[0].notes) {
+    if (n.source == BachNoteSource::TextureNote) {
+      pitches_a.push_back(n.pitch);
+    }
+  }
+  for (const auto& n : result_b.tracks[0].notes) {
+    if (n.source == BachNoteSource::TextureNote) {
+      pitches_b.push_back(n.pitch);
+    }
+  }
+
+  ASSERT_FALSE(pitches_a.empty()) << "No texture notes in seed 42";
+  ASSERT_FALSE(pitches_b.empty()) << "No texture notes in seed 99";
+
+  // Compare pitches at matching positions. Different seeds may produce
+  // different note counts due to texture variation (e.g. double stops),
+  // so compare up to the minimum length.
+  size_t compare_len = std::min(pitches_a.size(), pitches_b.size());
+  int diff_count = 0;
+  for (size_t i = 0; i < compare_len; ++i) {
+    if (pitches_a[i] != pitches_b[i]) {
+      ++diff_count;
+    }
+  }
+
+  // Also count the length difference as diffs.
+  int size_diff = static_cast<int>(
+      std::max(pitches_a.size(), pitches_b.size()) - compare_len);
+  diff_count += size_diff;
+
+  int total = static_cast<int>(std::max(pitches_a.size(), pitches_b.size()));
+  float diff_ratio = static_cast<float>(diff_count) / static_cast<float>(total);
+
+  EXPECT_GE(diff_ratio, 0.30f)
+      << "Expected >= 30% pitch differences between seeds, got "
+      << (diff_ratio * 100.0f) << "% (" << diff_count << "/" << total << ")";
+}
+
+TEST(ChaconneSeedDiversityTest, TextureTypesVaryAcrossSeeds) {
+  constexpr int kNumSeeds = 10;
+  constexpr int kMinCombinations = 5;
+
+  std::set<std::string> fingerprints;
+
+  for (int seed_idx = 1; seed_idx <= kNumSeeds; ++seed_idx) {
+    auto config = createTestConfig(static_cast<uint32_t>(seed_idx));
+    auto result = generateChaconne(config);
+    ASSERT_TRUE(result.success) << "Seed " << seed_idx << ": " << result.error_message;
+    ASSERT_EQ(result.tracks.size(), 1u);
+
+    // Count texture notes per variation by binning start_tick.
+    auto ground_bass = GroundBass::createForKey(config.key);
+    Tick bass_length = ground_bass.getLengthTicks();
+    ASSERT_GT(bass_length, 0u);
+
+    // 10 variations -> 10 bins.
+    constexpr int kNumVariations = 10;
+    int notes_per_var[kNumVariations] = {};
+
+    for (const auto& note : result.tracks[0].notes) {
+      if (note.source != BachNoteSource::TextureNote) continue;
+      int var_idx = static_cast<int>(note.start_tick / bass_length);
+      if (var_idx >= 0 && var_idx < kNumVariations) {
+        ++notes_per_var[var_idx];
+      }
+    }
+
+    // Build fingerprint: quantize to buckets of 16 to tolerate small variations.
+    std::string fp;
+    for (int var_idx = 0; var_idx < kNumVariations; ++var_idx) {
+      fp += std::to_string(notes_per_var[var_idx] / 16) + ",";
+    }
+    fingerprints.insert(fp);
+  }
+
+  EXPECT_GE(fingerprints.size(), static_cast<size_t>(kMinCombinations))
+      << "Expected at least " << kMinCombinations
+      << " distinct texture combinations across " << kNumSeeds
+      << " seeds, got " << fingerprints.size();
 }
 
 // ===========================================================================

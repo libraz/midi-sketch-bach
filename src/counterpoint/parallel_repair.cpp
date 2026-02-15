@@ -154,7 +154,8 @@ int repairParallelPerfect(std::vector<NoteEvent>& notes,
               static const auto flexible = {1, -1, 2, -2, 3, -3, 4, -4, 12, -12};
               static const auto structural = {12, -12};
               if (pl == ProtectionLevel::Flexible) return flexible;
-              if (pl == ProtectionLevel::Structural) return structural;
+              if (pl == ProtectionLevel::Structural ||
+                  pl == ProtectionLevel::SemiImmutable) return structural;
               return {};  // Immutable
             };
 
@@ -245,6 +246,20 @@ int repairParallelPerfect(std::vector<NoteEvent>& notes,
                     }
                     if (dissonant) continue;
                   }
+                }
+
+                // Voice crossing check: reject if shift creates crossing
+                // with any adjacent voice.
+                {
+                  bool crosses = false;
+                  for (uint8_t ov = 0; ov < params.num_voices && !crosses; ++ov) {
+                    if (ov == fc.v) continue;
+                    int ovc = soundPitch(ov, t);
+                    if (ovc < 0) continue;
+                    if (fc.v < ov && cp < ovc) crosses = true;
+                    if (fc.v > ov && cp > ovc) crosses = true;
+                  }
+                  if (crosses) continue;
                 }
 
                 notes[fc.ni].pitch = ucp;

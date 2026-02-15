@@ -4,6 +4,8 @@
 
 #include <algorithm>
 #include <array>
+#include <cassert>
+#include <cstdio>
 #include <map>
 #include <random>
 #include <vector>
@@ -11,6 +13,7 @@
 #include "core/gm_program.h"
 #include "core/melodic_state.h"
 #include "core/note_creator.h"
+#include "core/note_source.h"
 #include "core/pitch_utils.h"
 #include "core/rng_util.h"
 #include "core/scale.h"
@@ -1073,13 +1076,8 @@ PreludeResult generatePrelude(const PreludeConfig& config) {
   }
 
   // Tag untagged notes with source for counterpoint protection levels.
-  for (auto& n : all_notes) {
-    if (n.source == BachNoteSource::Unknown) {
-      n.source = (num_voices >= 4 && isPedalVoice(n.voice, num_voices))
-                     ? BachNoteSource::PedalPoint
-                     : BachNoteSource::FreeCounterpoint;
-    }
-  }
+  assert(countUnknownSource(all_notes) == 0 &&
+         "All notes should have source set by generators");
 
   // ---- createBachNote coordination pass (vertical dissonance control) ----
   {
@@ -1156,7 +1154,8 @@ PreludeResult generatePrelude(const PreludeConfig& config) {
         ++total_count;
 
         // Pedal notes are immutable — register directly.
-        if (isPedalVoice(note.voice, num_voices)) {
+        if (isPedalVoice(note.voice, num_voices) &&
+            note.source == BachNoteSource::PedalPoint) {
           cp_state.addNote(note.voice, note);
           coordinated.push_back(note);
           ++accepted_count;

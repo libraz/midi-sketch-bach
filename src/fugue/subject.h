@@ -9,6 +9,7 @@
 
 #include "core/basic_types.h"
 #include "fugue/fugue_config.h"
+#include "fugue/subject_identity.h"
 
 namespace bach {
 
@@ -23,6 +24,8 @@ struct Subject {
   Tick length_ticks = 0;  ///< Total length including anacrusis.
   SubjectCharacter character = SubjectCharacter::Severe;
   Tick anacrusis_ticks = 0;  ///< Duration of the anacrusis (0 = no anacrusis).
+  SubjectIdentity identity;  ///< Kerngestalt identity (Layers 1+2, immutable after generate).
+  CellWindow cell_window;  ///< Kerngestalt cell window (shortcut, also in identity.essential).
 
   /// @brief Get the lowest MIDI pitch in the subject.
   /// @return Lowest pitch, or 127 if subject is empty.
@@ -67,14 +70,20 @@ class SubjectGenerator {
   Subject generate(const FugueConfig& config, uint32_t seed) const;
 
  private:
+  /// @brief Result of note generation including cell window metadata.
+  struct GenerateResult {
+    std::vector<NoteEvent> notes;
+    CellWindow cell_window;
+  };
+
   /// @brief Generate the note sequence for a subject.
   /// @param config Fugue configuration (character, key, archetype, etc.).
   /// @param bars Number of bars (1-4, already clamped by archetype).
   /// @param seed Random seed.
-  /// @return Vector of NoteEvent forming the subject.
-  std::vector<NoteEvent> generateNotes(const FugueConfig& config,
-                                       uint8_t bars,
-                                       uint32_t seed) const;
+  /// @return GenerateResult with notes and cell window.
+  GenerateResult generateNotes(const FugueConfig& config,
+                               uint8_t bars,
+                               uint32_t seed) const;
 };
 
 // ---------------------------------------------------------------------------

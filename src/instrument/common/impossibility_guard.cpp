@@ -86,9 +86,10 @@ makeFixPitchRange(uint8_t range_low, uint8_t range_high) {
       }
     }
 
-    // Structural: retry octave shift ignoring contour (out-of-range is worse
-    // than a direction reversal).
-    if (level == ProtectionLevel::Structural) {
+    // Structural / SemiImmutable: retry octave shift ignoring contour
+    // (out-of-range is worse than a direction reversal).
+    if (level == ProtectionLevel::Structural ||
+        level == ProtectionLevel::SemiImmutable) {
       if (down >= range_low && down <= range_high && down >= 0) {
         return static_cast<uint8_t>(down);
       }
@@ -145,7 +146,8 @@ ImpossibilityGuard createBowedGuard() {
       for (size_t i = group.notes.size(); i-- > 0;) {
         auto* note = group.notes[i];
         auto level = getProtectionLevel(note->source);
-        if (level == ProtectionLevel::Immutable) continue;
+        if (level == ProtectionLevel::Immutable ||
+            level == ProtectionLevel::SemiImmutable) continue;
         // Structural on beat-head: skip offset.
         if (level == ProtectionLevel::Structural &&
             note->start_tick % kTactus == 0) {
@@ -277,7 +279,8 @@ ImpossibilityGuard createKeyboardGuard() {
               });
     for (size_t i = 0; i < group.notes.size() && i < suggested.size(); ++i) {
       auto level = getProtectionLevel(group.notes[i]->source);
-      if (level == ProtectionLevel::Immutable) continue;
+      if (level == ProtectionLevel::Immutable ||
+          level == ProtectionLevel::SemiImmutable) continue;
       group.notes[i]->pitch = suggested[i];
     }
   };
@@ -409,7 +412,8 @@ ImpossibilityGuard createHarpsichordGuard() {
               });
     for (size_t i = 0; i < group.notes.size() && i < suggested.size(); ++i) {
       auto level = getProtectionLevel(group.notes[i]->source);
-      if (level == ProtectionLevel::Immutable) continue;
+      if (level == ProtectionLevel::Immutable ||
+          level == ProtectionLevel::SemiImmutable) continue;
       group.notes[i]->pitch = suggested[i];
     }
   };

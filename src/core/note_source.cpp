@@ -4,12 +4,15 @@
 
 #include <string>
 
+#include "core/basic_types.h"
+
 namespace bach {
 
 const char* bachNoteSourceToString(BachNoteSource source) {
   switch (source) {
     case BachNoteSource::Unknown:          return "unknown";
     case BachNoteSource::FugueSubject:     return "fugue_subject";
+    case BachNoteSource::SubjectCore:     return "subject_core";
     case BachNoteSource::FugueAnswer:      return "fugue_answer";
     case BachNoteSource::Countersubject:   return "countersubject";
     case BachNoteSource::EpisodeMaterial:  return "episode_material";
@@ -63,12 +66,15 @@ const char* bachTransformStepToString(BachTransformStep step) {
 
 ProtectionLevel getProtectionLevel(BachNoteSource source) {
   switch (source) {
-    case BachNoteSource::FugueSubject:
+    case BachNoteSource::SubjectCore:
     case BachNoteSource::CantusFixed:
     case BachNoteSource::GroundBass:
     case BachNoteSource::GoldbergBass:
     case BachNoteSource::QuodlibetMelody:
       return ProtectionLevel::Immutable;
+
+    case BachNoteSource::FugueSubject:
+      return ProtectionLevel::SemiImmutable;
 
     case BachNoteSource::FugueAnswer:
     case BachNoteSource::Countersubject:
@@ -120,6 +126,16 @@ std::string noteModifiedByToString(uint8_t flags) {
   append(static_cast<uint8_t>(NoteModifiedBy::Articulation),     "articulation");
   append(static_cast<uint8_t>(NoteModifiedBy::RepeatedNoteRep),  "repeated_note_rep");
   return result;
+}
+
+int countUnknownSource(const std::vector<NoteEvent>& notes) {
+  int count = 0;
+  for (const auto& n : notes) {
+    if (n.source == BachNoteSource::Unknown) {
+      ++count;
+    }
+  }
+  return count;
 }
 
 }  // namespace bach

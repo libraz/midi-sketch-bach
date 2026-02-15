@@ -58,6 +58,43 @@ VariationType selectTypeForRole(std::mt19937& rng, VariationRole role) {
   }
 }
 
+/// @brief Select a TextureType based on VariationRole using weighted probabilities.
+///
+/// Anchor roles (Establish, Resolve) always use SingleLine.
+/// Other roles select from role-appropriate texture palettes with RNG.
+/// Accumulate is handled separately in buildTextureContext.
+///
+/// @param rng Mersenne Twister RNG.
+/// @param role The variation's structural role.
+/// @return Selected TextureType.
+TextureType selectTextureForRole(std::mt19937& rng, VariationRole role) {
+  using TT = TextureType;
+  switch (role) {
+    case VariationRole::Establish:
+    case VariationRole::Resolve:
+      return TT::SingleLine;
+    case VariationRole::Develop:
+      return rng::selectWeighted(
+          rng, std::vector<TT>{TT::ImpliedPolyphony, TT::Arpeggiated, TT::Bariolage},
+          {0.40f, 0.30f, 0.30f});
+    case VariationRole::Destabilize:
+      return rng::selectWeighted(
+          rng,
+          std::vector<TT>{TT::ScalePassage, TT::ImpliedPolyphony, TT::Bariolage,
+                          TT::Arpeggiated},
+          {0.35f, 0.30f, 0.20f, 0.15f});
+    case VariationRole::Illuminate:
+      return rng::selectWeighted(
+          rng,
+          std::vector<TT>{TT::SingleLine, TT::Arpeggiated, TT::Bariolage, TT::ScalePassage},
+          {0.30f, 0.30f, 0.25f, 0.15f});
+    case VariationRole::Accumulate:
+      // Accumulate texture is handled in buildTextureContext (Step 4).
+      return TT::ImpliedPolyphony;
+  }
+  return TT::SingleLine;
+}
+
 void assignBlockTextures(std::mt19937& rng, std::vector<ChaconneVariation>& block,
                          int base_complexity) {
   if (block.empty()) return;
@@ -129,39 +166,39 @@ std::vector<ChaconneVariation> createStandardVariationPlan(const KeySignature& k
   // Variation 1: Develop -- builds energy
   plan.push_back({var_num++, VariationRole::Develop,
                   selectTypeForRole(rng, VariationRole::Develop),
-                  TextureType::ImpliedPolyphony, key, false});
+                  selectTextureForRole(rng, VariationRole::Develop), key, false});
 
   // Variation 2: Destabilize -- pre-major tension
   plan.push_back({var_num++, VariationRole::Destabilize,
                   selectTypeForRole(rng, VariationRole::Destabilize),
-                  TextureType::ScalePassage, key, false});
+                  selectTextureForRole(rng, VariationRole::Destabilize), key, false});
 
   // --- Major section (separate personality) ---
 
   // Variation 3: Illuminate -- major key
   plan.push_back({var_num++, VariationRole::Illuminate,
                   selectTypeForRole(rng, VariationRole::Illuminate),
-                  TextureType::SingleLine, major_key, true});
+                  selectTextureForRole(rng, VariationRole::Illuminate), major_key, true});
 
   // Variation 4: Illuminate -- major key
   plan.push_back({var_num++, VariationRole::Illuminate,
                   selectTypeForRole(rng, VariationRole::Illuminate),
-                  TextureType::Arpeggiated, major_key, true});
+                  selectTextureForRole(rng, VariationRole::Illuminate), major_key, true});
 
   // --- Minor back section ---
 
   // Variation 5: Destabilize -- return to minor, rebuilding tension
   plan.push_back({var_num++, VariationRole::Destabilize,
                   selectTypeForRole(rng, VariationRole::Destabilize),
-                  TextureType::ScalePassage, key, false});
+                  selectTextureForRole(rng, VariationRole::Destabilize), key, false});
 
   // Variation 6-8: Accumulate -- climax (Principle 4: fixed design values)
   plan.push_back({var_num++, VariationRole::Accumulate, VariationType::Virtuosic,
-                  TextureType::ImpliedPolyphony, key, false});
+                  selectTextureForRole(rng, VariationRole::Accumulate), key, false});
   plan.push_back({var_num++, VariationRole::Accumulate, VariationType::Chordal,
-                  TextureType::FullChords, key, false});
+                  selectTextureForRole(rng, VariationRole::Accumulate), key, false});
   plan.push_back({var_num++, VariationRole::Accumulate, VariationType::Virtuosic,
-                  TextureType::FullChords, key, false});
+                  selectTextureForRole(rng, VariationRole::Accumulate), key, false});
 
   // Variation 9: Resolve (Theme) -- return to opening, closure (fixed)
   plan.push_back({var_num++, VariationRole::Resolve, VariationType::Theme,
@@ -293,11 +330,11 @@ std::vector<ChaconneVariation> createScaledVariationPlan(const KeySignature& key
 
   // --- Accumulate (3) ---
   plan.push_back({var_num++, VariationRole::Accumulate, VariationType::Virtuosic,
-                  TextureType::ImpliedPolyphony, key, false});
+                  selectTextureForRole(rng, VariationRole::Accumulate), key, false});
   plan.push_back({var_num++, VariationRole::Accumulate, VariationType::Chordal,
-                  TextureType::FullChords, key, false});
+                  selectTextureForRole(rng, VariationRole::Accumulate), key, false});
   plan.push_back({var_num++, VariationRole::Accumulate, VariationType::Virtuosic,
-                  TextureType::FullChords, key, false});
+                  selectTextureForRole(rng, VariationRole::Accumulate), key, false});
 
   // --- Resolve (1) ---
   plan.push_back({var_num++, VariationRole::Resolve, VariationType::Theme,

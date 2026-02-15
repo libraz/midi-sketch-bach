@@ -822,6 +822,9 @@ PlacementResult CollisionResolver::findSafePitch(
     case ProtectionLevel::Immutable:
       list = {kImmutable, 2};
       break;
+    case ProtectionLevel::SemiImmutable:
+      list = {kStructural, 3};
+      break;
     case ProtectionLevel::Structural:
       list = {kStructural, 3};
       break;

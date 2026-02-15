@@ -170,6 +170,7 @@ CanonResult CanonGenerator::generate(const CanonSpec& spec,
     opts.source = BachNoteSource::CanonDux;
 
     auto note_result = createBachNote(nullptr, nullptr, nullptr, opts);
+    if (!note_result.accepted) continue;
     NoteEvent dux_note = note_result.note;
     dux_note.pitch = dux_pitch;  // Phase 0: no adjustment.
     dux_note.source = BachNoteSource::CanonDux;
@@ -280,6 +281,7 @@ CanonResult CanonGenerator::generate(const CanonSpec& spec,
     dux_opts.source = BachNoteSource::CanonDux;
 
     auto dux_result = createBachNote(nullptr, nullptr, nullptr, dux_opts);
+    if (!dux_result.accepted) continue;
     NoteEvent dux_note = dux_result.note;
     dux_note.pitch = dux_pitch;
     dux_note.source = BachNoteSource::CanonDux;

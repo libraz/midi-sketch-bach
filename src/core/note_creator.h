@@ -77,6 +77,9 @@ struct PostValidateStats {
   }
 };
 
+/// Per-voice protection level overrides.
+using ProtectionOverrides = std::vector<std::pair<uint8_t, ProtectionLevel>>;
+
 /// @brief Post-validate raw notes through the counterpoint engine.
 ///
 /// Processes notes in priority order (Immutable -> Structural -> Flexible).
@@ -89,13 +92,15 @@ struct PostValidateStats {
 /// @param key_sig Key signature for counterpoint state and scale-tone validation.
 /// @param voice_ranges Per-voice (low, high) ranges.
 /// @param[out] stats Optional repair statistics.
+/// @param protection_overrides Per-voice protection level overrides.
 /// @return Validated notes with counterpoint rules enforced.
 std::vector<NoteEvent> postValidateNotes(
     std::vector<NoteEvent> raw_notes,
     uint8_t num_voices,
     KeySignature key_sig,
     const std::vector<std::pair<uint8_t, uint8_t>>& voice_ranges,
-    PostValidateStats* stats = nullptr);
+    PostValidateStats* stats = nullptr,
+    const ProtectionOverrides& protection_overrides = {});
 
 /// @brief Tick-aware overload: voice_range_fn(voice, tick) returns (low, high).
 ///
@@ -107,13 +112,15 @@ std::vector<NoteEvent> postValidateNotes(
 /// @param key_sig Key signature for counterpoint state and scale-tone validation.
 /// @param voice_range_fn Function returning (low, high) for a given voice and tick.
 /// @param[out] stats Optional repair statistics.
+/// @param protection_overrides Per-voice protection level overrides.
 /// @return Validated notes with counterpoint rules enforced.
 std::vector<NoteEvent> postValidateNotes(
     std::vector<NoteEvent> raw_notes,
     uint8_t num_voices,
     KeySignature key_sig,
     std::function<std::pair<uint8_t, uint8_t>(uint8_t voice, Tick tick)> voice_range_fn,
-    PostValidateStats* stats = nullptr);
+    PostValidateStats* stats = nullptr,
+    const ProtectionOverrides& protection_overrides = {});
 
 /// @brief Build a MelodicContext from the counterpoint state for a given voice.
 /// @param state The counterpoint state to query.

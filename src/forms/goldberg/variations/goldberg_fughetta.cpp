@@ -208,6 +208,7 @@ std::vector<NoteEvent> generateFreeCounterpoint(
       opts.source = BachNoteSource::GoldbergFughetta;
 
       auto note_result = createBachNote(nullptr, nullptr, nullptr, opts);
+      if (!note_result.accepted) continue;
       NoteEvent note = note_result.note;
       note.pitch = new_pitch;
       note.source = BachNoteSource::GoldbergFughetta;

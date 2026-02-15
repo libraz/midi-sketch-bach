@@ -6,6 +6,8 @@
 
 #include <gtest/gtest.h>
 
+#include "core/basic_types.h"
+
 namespace bach {
 namespace {
 
@@ -196,7 +198,7 @@ TEST(NoteProvenanceTest, StepOrderPreserved) {
 // ---------------------------------------------------------------------------
 
 TEST(ProtectionLevelTest, ImmutableSources) {
-  EXPECT_EQ(getProtectionLevel(BachNoteSource::FugueSubject),
+  EXPECT_EQ(getProtectionLevel(BachNoteSource::SubjectCore),
             ProtectionLevel::Immutable);
   EXPECT_EQ(getProtectionLevel(BachNoteSource::CantusFixed),
             ProtectionLevel::Immutable);
@@ -206,6 +208,11 @@ TEST(ProtectionLevelTest, ImmutableSources) {
             ProtectionLevel::Immutable);
   EXPECT_EQ(getProtectionLevel(BachNoteSource::QuodlibetMelody),
             ProtectionLevel::Immutable);
+}
+
+TEST(ProtectionLevelTest, SemiImmutableSources) {
+  EXPECT_EQ(getProtectionLevel(BachNoteSource::FugueSubject),
+            ProtectionLevel::SemiImmutable);
 }
 
 TEST(ProtectionLevelTest, StructuralSources) {
@@ -256,7 +263,8 @@ TEST(ProtectionLevelTest, AllSourcesCovered) {
   // Ensure every source maps to a valid protection level.
   const BachNoteSource all[] = {
       BachNoteSource::Unknown,          BachNoteSource::FugueSubject,
-      BachNoteSource::FugueAnswer,      BachNoteSource::Countersubject,
+      BachNoteSource::SubjectCore,       BachNoteSource::FugueAnswer,
+      BachNoteSource::Countersubject,
       BachNoteSource::EpisodeMaterial,   BachNoteSource::FreeCounterpoint,
       BachNoteSource::CantusFixed,       BachNoteSource::Ornament,
       BachNoteSource::PedalPoint,        BachNoteSource::ArpeggioFlow,
@@ -271,6 +279,7 @@ TEST(ProtectionLevelTest, AllSourcesCovered) {
   for (auto src : all) {
     auto level = getProtectionLevel(src);
     EXPECT_TRUE(level == ProtectionLevel::Immutable ||
+                level == ProtectionLevel::SemiImmutable ||
                 level == ProtectionLevel::Structural ||
                 level == ProtectionLevel::Flexible)
         << "Source " << bachNoteSourceToString(src) << " has invalid level";
@@ -369,6 +378,68 @@ TEST(NoteModifiedByTest, EnumValuesArePowersOfTwo) {
   EXPECT_EQ(static_cast<uint8_t>(NoteModifiedBy::OctaveAdjust),   16);
   EXPECT_EQ(static_cast<uint8_t>(NoteModifiedBy::Articulation),   32);
   EXPECT_EQ(static_cast<uint8_t>(NoteModifiedBy::RepeatedNoteRep), 64);
+}
+
+// ---------------------------------------------------------------------------
+// countUnknownSource tests
+// ---------------------------------------------------------------------------
+
+TEST(CountUnknownSourceTest, EmptyVectorReturnsZero) {
+  std::vector<NoteEvent> notes;
+  EXPECT_EQ(countUnknownSource(notes), 0);
+}
+
+TEST(CountUnknownSourceTest, AllKnownSourcesReturnsZero) {
+  std::vector<NoteEvent> notes(3);
+  notes[0].source = BachNoteSource::FugueSubject;
+  notes[1].source = BachNoteSource::FreeCounterpoint;
+  notes[2].source = BachNoteSource::PedalPoint;
+  EXPECT_EQ(countUnknownSource(notes), 0);
+}
+
+TEST(CountUnknownSourceTest, AllUnknownReturnsCount) {
+  std::vector<NoteEvent> notes(5);
+  // Default source is Unknown.
+  EXPECT_EQ(countUnknownSource(notes), 5);
+}
+
+TEST(CountUnknownSourceTest, MixedSourcesCountsOnlyUnknown) {
+  std::vector<NoteEvent> notes(4);
+  notes[0].source = BachNoteSource::Unknown;
+  notes[1].source = BachNoteSource::FugueSubject;
+  notes[2].source = BachNoteSource::Unknown;
+  notes[3].source = BachNoteSource::PedalPoint;
+  EXPECT_EQ(countUnknownSource(notes), 2);
+}
+
+// ---------------------------------------------------------------------------
+// BachNoteSource completeness: all non-Unknown values must not map to "unknown"
+// ---------------------------------------------------------------------------
+
+TEST(BachNoteSourceTest, NonUnknownSourcesNeverReturnUnknownString) {
+  const BachNoteSource non_unknown[] = {
+      BachNoteSource::FugueSubject,     BachNoteSource::SubjectCore,
+      BachNoteSource::FugueAnswer,      BachNoteSource::Countersubject,
+      BachNoteSource::EpisodeMaterial,   BachNoteSource::FreeCounterpoint,
+      BachNoteSource::CantusFixed,       BachNoteSource::Ornament,
+      BachNoteSource::PedalPoint,        BachNoteSource::ArpeggioFlow,
+      BachNoteSource::TextureNote,       BachNoteSource::GroundBass,
+      BachNoteSource::CollisionAvoid,    BachNoteSource::PostProcess,
+      BachNoteSource::ChromaticPassing,  BachNoteSource::FalseEntry,
+      BachNoteSource::Coda,              BachNoteSource::SequenceNote,
+      BachNoteSource::CanonDux,          BachNoteSource::CanonComes,
+      BachNoteSource::CanonFreeBass,     BachNoteSource::GoldbergAria,
+      BachNoteSource::GoldbergBass,      BachNoteSource::GoldbergFigura,
+      BachNoteSource::GoldbergSoggetto,  BachNoteSource::GoldbergDance,
+      BachNoteSource::GoldbergFughetta,  BachNoteSource::GoldbergInvention,
+      BachNoteSource::QuodlibetMelody,   BachNoteSource::GoldbergOverture,
+      BachNoteSource::GoldbergSuspension,
+  };
+  for (auto src : non_unknown) {
+    const char* str = bachNoteSourceToString(src);
+    EXPECT_STRNE(str, "unknown")
+        << "Source " << static_cast<int>(src) << " incorrectly maps to \"unknown\"";
+  }
 }
 
 }  // namespace

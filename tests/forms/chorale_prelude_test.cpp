@@ -7,9 +7,11 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <cmath>
 
 #include "core/basic_types.h"
 #include "core/gm_program.h"
+#include "core/interval.h"
 #include "core/pitch_utils.h"
 #include "fugue/fugue_config.h"
 #include "harmony/key.h"
@@ -55,12 +57,12 @@ TEST(ChoralePreludeTest, GeneratesSuccessfully) {
   EXPECT_GT(result.total_duration_ticks, 0u);
 }
 
-TEST(ChoralePreludeTest, ProducesThreeTracks) {
+TEST(ChoralePreludeTest, ProducesFourTracks) {
   ChoralePreludeConfig config = makeTestConfig();
   ChoralePreludeResult result = generateChoralePrelude(config);
 
   ASSERT_TRUE(result.success);
-  ASSERT_EQ(result.tracks.size(), 3u);
+  ASSERT_EQ(result.tracks.size(), 4u);
 }
 
 TEST(ChoralePreludeTest, AllTracksHaveNotes) {
@@ -93,14 +95,16 @@ TEST(ChoralePreludeTest, TrackChannelMapping) {
   ChoralePreludeResult result = generateChoralePrelude(config);
 
   ASSERT_TRUE(result.success);
-  ASSERT_EQ(result.tracks.size(), 3u);
+  ASSERT_EQ(result.tracks.size(), 4u);
 
   // Track 0: Counterpoint on Great (ch 0).
   EXPECT_EQ(result.tracks[0].channel, 0u);
   // Track 1: Cantus on Swell (ch 1).
   EXPECT_EQ(result.tracks[1].channel, 1u);
-  // Track 2: Pedal (ch 3).
-  EXPECT_EQ(result.tracks[2].channel, 3u);
+  // Track 2: Inner voice on Great (ch 0, shares with Track 0).
+  EXPECT_EQ(result.tracks[2].channel, 0u);
+  // Track 3: Pedal (ch 3).
+  EXPECT_EQ(result.tracks[3].channel, 3u);
 }
 
 TEST(ChoralePreludeTest, TrackProgramMapping) {
@@ -108,11 +112,12 @@ TEST(ChoralePreludeTest, TrackProgramMapping) {
   ChoralePreludeResult result = generateChoralePrelude(config);
 
   ASSERT_TRUE(result.success);
-  ASSERT_EQ(result.tracks.size(), 3u);
+  ASSERT_EQ(result.tracks.size(), 4u);
 
   EXPECT_EQ(result.tracks[0].program, GmProgram::kChurchOrgan);
   EXPECT_EQ(result.tracks[1].program, GmProgram::kReedOrgan);
   EXPECT_EQ(result.tracks[2].program, GmProgram::kChurchOrgan);
+  EXPECT_EQ(result.tracks[3].program, GmProgram::kChurchOrgan);
 }
 
 TEST(ChoralePreludeTest, TrackNames) {
@@ -120,11 +125,12 @@ TEST(ChoralePreludeTest, TrackNames) {
   ChoralePreludeResult result = generateChoralePrelude(config);
 
   ASSERT_TRUE(result.success);
-  ASSERT_EQ(result.tracks.size(), 3u);
+  ASSERT_EQ(result.tracks.size(), 4u);
 
   EXPECT_EQ(result.tracks[0].name, "Counterpoint (Great)");
   EXPECT_EQ(result.tracks[1].name, "Cantus Firmus (Swell)");
-  EXPECT_EQ(result.tracks[2].name, "Pedal");
+  EXPECT_EQ(result.tracks[2].name, "Inner Voice (Great)");
+  EXPECT_EQ(result.tracks[3].name, "Pedal");
 }
 
 // ---------------------------------------------------------------------------
@@ -138,14 +144,15 @@ TEST(ChoralePreludeTest, CantusHasLongNotes) {
   ASSERT_TRUE(result.success);
   ASSERT_GE(result.tracks.size(), 2u);
 
-  // All cantus notes should be at least a whole note (4 beats = 1920 ticks).
+  // Cantus notes should be at least a half note (2 beats = 960 ticks).
+  // Some passing tones may subdivide the original whole notes.
   const auto& cantus_notes = result.tracks[1].notes;
   ASSERT_GT(cantus_notes.size(), 0u);
 
   for (const auto& note : cantus_notes) {
-    EXPECT_GE(note.duration, kTicksPerBeat * 4)
+    EXPECT_GE(note.duration, kTicksPerBeat * 2)
         << "Cantus note at tick " << note.start_tick
-        << " has duration " << note.duration << " (less than a whole note)";
+        << " has duration " << note.duration << " (less than a half note)";
   }
 }
 
@@ -176,6 +183,174 @@ TEST(ChoralePreludeTest, CounterpointHasShorterNotes) {
   // because it uses shorter note values.
   EXPECT_GT(result.tracks[0].notes.size(), result.tracks[1].notes.size())
       << "Counterpoint should have more notes than cantus (shorter values)";
+}
+
+// ---------------------------------------------------------------------------
+// Inner voice tests
+// ---------------------------------------------------------------------------
+
+TEST(ChoralePreludeTest, InnerVoiceHasNotes) {
+  ChoralePreludeConfig config = makeTestConfig();
+  ChoralePreludeResult result = generateChoralePrelude(config);
+  ASSERT_TRUE(result.success);
+  ASSERT_GE(result.tracks.size(), 4u);
+
+  EXPECT_GT(result.tracks[2].notes.size(), 0u)
+      << "Inner voice track should have notes";
+}
+
+TEST(ChoralePreludeTest, InnerVoicePitchRange) {
+  ChoralePreludeConfig config = makeTestConfig();
+  ChoralePreludeResult result = generateChoralePrelude(config);
+  ASSERT_TRUE(result.success);
+  ASSERT_GE(result.tracks.size(), 4u);
+
+  for (const auto& note : result.tracks[2].notes) {
+    EXPECT_GE(note.pitch, 48u)
+        << "Inner voice pitch below C3: " << static_cast<int>(note.pitch);
+    EXPECT_LE(note.pitch, 67u)
+        << "Inner voice pitch above G4: " << static_cast<int>(note.pitch);
+  }
+}
+
+TEST(ChoralePreludeTest, InnerVoiceBelowCantus) {
+  ChoralePreludeConfig config = makeTestConfig();
+  ChoralePreludeResult result = generateChoralePrelude(config);
+  ASSERT_TRUE(result.success);
+
+  // Build cantus pitch lookup.
+  auto cantus_at = [&](Tick tick) -> int {
+    for (const auto& n : result.tracks[1].notes) {
+      if (tick >= n.start_tick && tick < n.start_tick + n.duration) {
+        return static_cast<int>(n.pitch);
+      }
+    }
+    return -1;
+  };
+
+  int crossings = 0;
+  for (const auto& note : result.tracks[2].notes) {
+    int cantus_p = cantus_at(note.start_tick);
+    if (cantus_p >= 0 && static_cast<int>(note.pitch) >= cantus_p) {
+      ++crossings;
+    }
+  }
+  // Allow some crossings (from post-validation adjustments), but < 5%.
+  float crossing_rate = result.tracks[2].notes.empty()
+      ? 0.0f
+      : 100.0f * static_cast<float>(crossings) /
+            static_cast<float>(result.tracks[2].notes.size());
+  EXPECT_LT(crossing_rate, 5.0f)
+      << "Inner voice crosses cantus too often: " << crossing_rate << "%";
+}
+
+// ---------------------------------------------------------------------------
+// Pedal coverage
+// ---------------------------------------------------------------------------
+
+TEST(ChoralePreludeTest, PedalCoverageAbove90Percent) {
+  // Test across multiple seeds to ensure consistency.
+  for (uint32_t seed : {42u, 99u, 12345u}) {
+    ChoralePreludeConfig config = makeTestConfig(seed);
+    ChoralePreludeResult result = generateChoralePrelude(config);
+    ASSERT_TRUE(result.success);
+
+    Tick pedal_covered = 0;
+    for (const auto& note : result.tracks[3].notes) {
+      pedal_covered += note.duration;
+    }
+    float coverage = result.total_duration_ticks > 0
+        ? 100.0f * static_cast<float>(pedal_covered) /
+              static_cast<float>(result.total_duration_ticks)
+        : 0.0f;
+    EXPECT_GE(coverage, 90.0f)
+        << "Pedal coverage " << coverage << "% for seed " << seed;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Voice ordering (SATB median check)
+// ---------------------------------------------------------------------------
+
+TEST(ChoralePreludeTest, VoiceOrderingSATB) {
+  ChoralePreludeConfig config = makeTestConfig();
+  ChoralePreludeResult result = generateChoralePrelude(config);
+  ASSERT_TRUE(result.success);
+
+  // Compute medians for each voice track.
+  auto median = [](std::vector<uint8_t>& pitches) -> float {
+    if (pitches.empty()) return 0.0f;
+    std::sort(pitches.begin(), pitches.end());
+    size_t mid = pitches.size() / 2;
+    return pitches.size() % 2 == 0
+        ? (pitches[mid - 1] + pitches[mid]) / 2.0f
+        : static_cast<float>(pitches[mid]);
+  };
+
+  std::vector<uint8_t> fig_pitches, cantus_pitches, inner_pitches, pedal_pitches;
+  for (const auto& n : result.tracks[0].notes) fig_pitches.push_back(n.pitch);
+  for (const auto& n : result.tracks[1].notes) cantus_pitches.push_back(n.pitch);
+  for (const auto& n : result.tracks[2].notes) inner_pitches.push_back(n.pitch);
+  for (const auto& n : result.tracks[3].notes) pedal_pitches.push_back(n.pitch);
+
+  float med_fig = median(fig_pitches);
+  float med_cantus = median(cantus_pitches);
+  float med_inner = median(inner_pitches);
+  float med_pedal = median(pedal_pitches);
+
+  EXPECT_GT(med_fig, med_cantus) << "Figuration should be above cantus";
+  EXPECT_GT(med_cantus, med_inner) << "Cantus should be above inner voice";
+  EXPECT_GT(med_inner, med_pedal) << "Inner voice should be above pedal";
+}
+
+// ---------------------------------------------------------------------------
+// Strong-beat dissonance rate
+// ---------------------------------------------------------------------------
+
+TEST(ChoralePreludeTest, StrongBeatDissonanceReasonable) {
+  ChoralePreludeConfig config = makeTestConfig();
+  ChoralePreludeResult result = generateChoralePrelude(config);
+  ASSERT_TRUE(result.success);
+
+  // Cantus pitch lookup.
+  auto cantus_at = [&](Tick tick) -> int {
+    for (const auto& n : result.tracks[1].notes) {
+      if (tick >= n.start_tick && tick < n.start_tick + n.duration) {
+        return static_cast<int>(n.pitch);
+      }
+    }
+    return -1;
+  };
+
+  int total = 0, dissonant = 0;
+  // Exclude last 2 bars (cadence window).
+  Tick cadence_start = result.total_duration_ticks > kTicksPerBar * 2
+      ? result.total_duration_ticks - kTicksPerBar * 2
+      : 0;
+
+  for (size_t track_idx : {0u, 2u, 3u}) {
+    for (const auto& note : result.tracks[track_idx].notes) {
+      uint8_t beat = beatInBar(note.start_tick);
+      if (beat != 0 && beat != 2) continue;
+      if (note.start_tick >= cadence_start) continue;
+
+      ++total;
+      int cp = cantus_at(note.start_tick);
+      if (cp >= 0) {
+        int ivl = interval_util::compoundToSimple(
+            std::abs(static_cast<int>(note.pitch) - cp));
+        if (!interval_util::isConsonance(ivl)) {
+          ++dissonant;
+        }
+      }
+    }
+  }
+
+  float rate = total > 0 ? 100.0f * static_cast<float>(dissonant) /
+                               static_cast<float>(total)
+                         : 0.0f;
+  EXPECT_LT(rate, 30.0f)
+      << "Strong-beat dissonance rate " << rate << "% exceeds 30% threshold";
 }
 
 // ---------------------------------------------------------------------------
@@ -218,7 +393,7 @@ TEST(ChoralePreludeTest, PedalPitchWithinRange) {
   ChoralePreludeResult result = generateChoralePrelude(config);
   ASSERT_TRUE(result.success);
 
-  for (const auto& note : result.tracks[2].notes) {
+  for (const auto& note : result.tracks[3].notes) {
     EXPECT_GE(note.pitch, organ_range::kPedalLow)
         << "Pedal pitch below range: " << static_cast<int>(note.pitch);
     EXPECT_LE(note.pitch, organ_range::kPedalHigh)
@@ -235,7 +410,7 @@ TEST(ChoralePreludeTest, VoiceAssignmentCorrect) {
   ChoralePreludeResult result = generateChoralePrelude(config);
   ASSERT_TRUE(result.success);
 
-  // Track 0: voice 0 (counterpoint).
+  // Track 0: voice 0 (counterpoint/figuration).
   for (const auto& note : result.tracks[0].notes) {
     EXPECT_EQ(note.voice, 0u) << "Counterpoint note has wrong voice id";
   }
@@ -243,9 +418,13 @@ TEST(ChoralePreludeTest, VoiceAssignmentCorrect) {
   for (const auto& note : result.tracks[1].notes) {
     EXPECT_EQ(note.voice, 1u) << "Cantus note has wrong voice id";
   }
-  // Track 2: voice 2 (pedal).
+  // Track 2: voice 2 (inner voice).
   for (const auto& note : result.tracks[2].notes) {
-    EXPECT_EQ(note.voice, 2u) << "Pedal note has wrong voice id";
+    EXPECT_EQ(note.voice, 2u) << "Inner voice note has wrong voice id";
+  }
+  // Track 3: voice 3 (pedal).
+  for (const auto& note : result.tracks[3].notes) {
+    EXPECT_EQ(note.voice, 3u) << "Pedal note has wrong voice id";
   }
 }
 

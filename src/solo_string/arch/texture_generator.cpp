@@ -396,9 +396,14 @@ std::vector<NoteEvent> generateSingleLine(const TextureContext& ctx,
 
         uint8_t pitch;
         if (prev_pitch == 0) {
-          // First note: pick a chord tone in the middle of the register.
-          uint8_t mid = static_cast<uint8_t>(
-              (static_cast<int>(ctx.register_low) + static_cast<int>(ctx.register_high)) / 2);
+          // First note: pick a chord tone near the middle of the register with offset.
+          int center = (static_cast<int>(ctx.register_low) +
+                        static_cast<int>(ctx.register_high)) / 2;
+          int range = static_cast<int>(ctx.register_high) -
+                      static_cast<int>(ctx.register_low);
+          int offset = rng::rollRange(rng, -range / 4, range / 4);
+          uint8_t mid = static_cast<uint8_t>(clampPitch(
+              center + offset, ctx.register_low, ctx.register_high));
           pitch = nearestChordTone(mid, chord_pitches);
         } else if (just_leaped) {
           // Compensation after leap: move in the opposite direction.
@@ -424,33 +429,54 @@ std::vector<NoteEvent> generateSingleLine(const TextureContext& ctx,
           }
           just_leaped = false;
         } else {
-          pitch = nearestChordTone(prev_pitch, chord_pitches);
+          // Weak beat non-chord tones: passing/neighbor tones on subdivisions.
+          bool is_weak = (sub_offset > 0);
+          if (is_weak && prev_pitch > 0 && rng::rollProbability(rng, 0.35f)) {
+            // Passing tone: half-step toward next chord tone.
+            uint8_t next_ct = nearestChordTone(prev_pitch, chord_pitches);
+            int direction = (next_ct > prev_pitch) ? 1 : (next_ct < prev_pitch) ? -1 : 1;
+            if (rng::rollProbability(rng, 0.5f)) {
+              // Neighbor tone: chord tone +-1-2 semitones.
+              int nct_offset = rng::rollRange(rng, 1, 2) * direction;
+              int target = static_cast<int>(prev_pitch) + nct_offset;
+              pitch = static_cast<uint8_t>(clampPitch(
+                  target, ctx.register_low, ctx.register_high));
+            } else {
+              // Passing tone: step between prev and next chord tone.
+              int step = direction * rng::rollRange(rng, 1, 2);
+              int target = static_cast<int>(prev_pitch) + step;
+              pitch = static_cast<uint8_t>(clampPitch(
+                  target, ctx.register_low, ctx.register_high));
+            }
+          } else {
+            pitch = nearestChordTone(prev_pitch, chord_pitches);
 
-          // 15% chance of leap to a non-nearest chord tone for melodic interest.
-          if (chord_pitches.size() > 1 && rng::rollProbability(rng, 0.15f)) {
-            // Pick a chord tone that is NOT the nearest.
-            uint8_t nearest = pitch;
-            std::vector<uint8_t> leap_candidates;
-            for (uint8_t cp : chord_pitches) {
-              if (cp != nearest) {
-                leap_candidates.push_back(cp);
+            // 30% chance of leap to a non-nearest chord tone for melodic interest.
+            if (chord_pitches.size() > 1 && rng::rollProbability(rng, 0.30f)) {
+              // Pick a chord tone that is NOT the nearest.
+              uint8_t nearest = pitch;
+              std::vector<uint8_t> leap_candidates;
+              for (uint8_t cp : chord_pitches) {
+                if (cp != nearest) {
+                  leap_candidates.push_back(cp);
+                }
               }
-            }
-            if (!leap_candidates.empty()) {
-              pitch = rng::selectRandom(rng, leap_candidates);
-              int interval = static_cast<int>(pitch) - static_cast<int>(prev_pitch);
-              if (std::abs(interval) > 4) {
-                just_leaped = true;
-                last_leap_direction = (interval > 0) ? 1 : -1;
+              if (!leap_candidates.empty()) {
+                pitch = rng::selectRandom(rng, leap_candidates);
+                int interval = static_cast<int>(pitch) - static_cast<int>(prev_pitch);
+                if (std::abs(interval) > 4) {
+                  just_leaped = true;
+                  last_leap_direction = (interval > 0) ? 1 : -1;
+                }
               }
-            }
-          } else if (chord_pitches.size() > 1 && rng::rollProbability(rng, 0.3f)) {
-            // Small random variation (step up or down by a 2nd).
-            int direction = rng::rollProbability(rng, 0.5f) ? 1 : -1;
-            int target = static_cast<int>(pitch) + direction * 2;
-            if (target >= static_cast<int>(ctx.register_low) &&
-                target <= static_cast<int>(ctx.register_high)) {
-              pitch = nearestChordTone(static_cast<uint8_t>(target), chord_pitches);
+            } else if (chord_pitches.size() > 1 && rng::rollProbability(rng, 0.45f)) {
+              // Small random variation (step up or down by a 2nd).
+              int direction = rng::rollProbability(rng, 0.5f) ? 1 : -1;
+              int target = static_cast<int>(pitch) + direction * 2;
+              if (target >= static_cast<int>(ctx.register_low) &&
+                  target <= static_cast<int>(ctx.register_high)) {
+                pitch = nearestChordTone(static_cast<uint8_t>(target), chord_pitches);
+              }
             }
           }
         }
@@ -484,7 +510,7 @@ std::vector<NoteEvent> generateImpliedPolyphony(const TextureContext& ctx,
 
   // Divide register into upper and lower halves with seed-dependent offset.
   int full_range = static_cast<int>(ctx.register_high) - static_cast<int>(ctx.register_low);
-  int split_offset = rng::rollRange(rng, -1, 1);  // ±1 semitone (reduced from ±3)
+  int split_offset = rng::rollRange(rng, -4, 4);  // +-4 semitones for seed diversity
   int mid_point = static_cast<int>(ctx.register_low) + full_range / 2 + split_offset;
   mid_point = std::max(static_cast<int>(ctx.register_low) + 4, mid_point);
   mid_point = std::min(static_cast<int>(ctx.register_high) - 4, mid_point);
@@ -509,6 +535,10 @@ std::vector<NoteEvent> generateImpliedPolyphony(const TextureContext& ctx,
   } else if (ctx.rhythm_profile == RhythmProfile::Sixteenth) {
     alt_prob = 0.85f;
   }
+
+  // Seed-dependent variation of alternation probability.
+  float alt_variation = rng::rollFloat(rng, -0.10f, 0.10f);
+  alt_prob = std::max(0.5f, std::min(1.0f, alt_prob + alt_variation));
 
   for (Tick bar_offset = 0; bar_offset < ctx.duration_ticks; bar_offset += kTicksPerBar) {
     Tick bar_tick = ctx.start_tick + bar_offset;
@@ -538,10 +568,17 @@ std::vector<NoteEvent> generateImpliedPolyphony(const TextureContext& ctx,
             pitch = upper_pitches[upper_pitches.size() / 2];
           } else {
             pitch = nearestChordTone(upper_prev, upper_pitches);
+            // 20% chance of leap to a non-nearest chord tone.
+            if (upper_pitches.size() > 1 && rng::rollProbability(rng, 0.20f)) {
+              std::vector<uint8_t> others;
+              for (uint8_t cp : upper_pitches) {
+                if (cp != pitch) others.push_back(cp);
+              }
+              if (!others.empty()) pitch = rng::selectRandom(rng, others);
+            }
             // Limit leap within implied voice to octave (12 semitones).
             int leap = absoluteInterval(pitch, upper_prev);
             if (leap > 12) {
-              // Find chord tone within 7 semitones of previous pitch.
               uint8_t close_target = clampPitch(
                   static_cast<int>(upper_prev) + ((pitch > upper_prev) ? 7 : -7),
                   upper_low, upper_high);
@@ -558,6 +595,14 @@ std::vector<NoteEvent> generateImpliedPolyphony(const TextureContext& ctx,
             pitch = lower_pitches[lower_pitches.size() / 2];
           } else {
             pitch = nearestChordTone(lower_prev, lower_pitches);
+            // 20% chance of leap to a non-nearest chord tone.
+            if (lower_pitches.size() > 1 && rng::rollProbability(rng, 0.20f)) {
+              std::vector<uint8_t> others;
+              for (uint8_t cp : lower_pitches) {
+                if (cp != pitch) others.push_back(cp);
+              }
+              if (!others.empty()) pitch = rng::selectRandom(rng, others);
+            }
             // Limit leap within implied voice to octave (12 semitones).
             int leap = absoluteInterval(pitch, lower_prev);
             if (leap > 12) {
@@ -794,6 +839,9 @@ std::vector<NoteEvent> generateScalePassage(const TextureContext& ctx,
   int register_range = static_cast<int>(ctx.register_high) - static_cast<int>(ctx.register_low);
   int pitch_offset = rng::rollRange(rng, -register_range / 4, register_range / 4);
 
+  // Seed-dependent direction reversal probability.
+  float reversal_prob = rng::rollFloat(rng, 0.15f, 0.50f);
+
   for (Tick bar_offset = 0; bar_offset < ctx.duration_ticks; bar_offset += kTicksPerBar) {
     Tick bar_tick = ctx.start_tick + bar_offset;
 
@@ -831,11 +879,16 @@ std::vector<NoteEvent> generateScalePassage(const TextureContext& ctx,
         Tick note_tick = beat_tick + sub_offset;
         Tick note_tick_in_bar = tick_in_bar + sub_offset;
 
+        // Occasional step skipping for melodic variety (10% chance to skip 1 step).
+        int step = static_cast<int>(sub_idx);
+        if (sub_idx > 0 && rng::rollProbability(rng, 0.10f)) {
+          step += 1;  // Skip one scale step.
+        }
         int scale_idx;
         if (ascending) {
-          scale_idx = start_idx + static_cast<int>(sub_idx);
+          scale_idx = start_idx + step;
         } else {
-          scale_idx = start_idx - static_cast<int>(sub_idx);
+          scale_idx = start_idx - step;
         }
 
         if (scale_idx < 0) {
@@ -850,8 +903,8 @@ std::vector<NoteEvent> generateScalePassage(const TextureContext& ctx,
             note_tick, sub_duration, pitch, note_tick_in_bar, ctx.is_climax));
       }
 
-      // Markov chain direction: 70% continue, 30% reverse.
-      if (rng::rollProbability(rng, 0.3f)) {
+      // Markov chain direction reversal (seed-dependent probability).
+      if (rng::rollProbability(rng, reversal_prob)) {
         ascending = !ascending;
       }
     }
@@ -925,10 +978,17 @@ std::vector<NoteEvent> generateBariolage(const TextureContext& ctx,
         Tick note_tick = beat_tick + sub_offset;
         Tick note_tick_in_bar = tick_in_bar + sub_offset;
 
-        uint8_t pitch = (sub_idx % 2 == 0) ? stopped_pitch : open_pitch;
-
-        notes.push_back(makeTextureNote(
-            note_tick, sub_duration, pitch, note_tick_in_bar, ctx.is_climax));
+        // 25% chance of double stop (both pitches simultaneously).
+        if (stopped_pitch != open_pitch && rng::rollProbability(rng, 0.25f)) {
+          notes.push_back(makeTextureNote(
+              note_tick, sub_duration, stopped_pitch, note_tick_in_bar, ctx.is_climax));
+          notes.push_back(makeTextureNote(
+              note_tick, sub_duration, open_pitch, note_tick_in_bar, ctx.is_climax));
+        } else {
+          uint8_t pitch = (sub_idx % 2 == 0) ? stopped_pitch : open_pitch;
+          notes.push_back(makeTextureNote(
+              note_tick, sub_duration, pitch, note_tick_in_bar, ctx.is_climax));
+        }
       }
     }
   }

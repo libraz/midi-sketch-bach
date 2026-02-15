@@ -93,6 +93,22 @@ inline T selectWeighted(std::mt19937& rng, const std::vector<T>& options,
   return options.back();
 }
 
+/// @brief Splitmix32 hash for decorrelating per-index sub-seeds.
+///
+/// Produces a well-distributed 32-bit hash from a seed+index pair.
+/// Use this instead of `seed + idx * constant` for better decorrelation
+/// between close seed values.
+///
+/// @param seed Base seed value.
+/// @param index Sub-seed index.
+/// @return Decorrelated 32-bit hash.
+inline uint32_t splitmix32(uint32_t seed, uint32_t index) {
+  uint32_t z = seed + index * 0x9E3779B9u;
+  z = (z ^ (z >> 16)) * 0x85EBCA6Bu;
+  z = (z ^ (z >> 13)) * 0xC2B2AE35u;
+  return z ^ (z >> 16);
+}
+
 /// @brief Generate a random seed using the system random device.
 /// @return A non-zero random seed (suitable for seeding mt19937).
 inline uint32_t generateRandomSeed() {

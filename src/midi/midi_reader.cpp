@@ -254,6 +254,7 @@ bool MidiReader::parseTrack(const uint8_t* data, size_t size, size_t& offset) {
           note.pitch = pitch;
           note.velocity = pending_notes[pitch].velocity;
           note.voice = 0;
+          note.source = BachNoteSource::Unknown;  // MIDI import: analysis only, not generation.
           parsed_track.notes.push_back(note);
           has_pending[pitch] = false;
         }

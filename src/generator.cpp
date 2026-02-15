@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cstdio>
 
 #include "core/json_helpers.h"
 
@@ -880,6 +881,17 @@ GeneratorResult generate(const GeneratorConfig& config) {
   // merging, or other post-processing steps.
   if (result.success) {
     cleanupTrackOverlaps(result.tracks);
+  }
+
+  // Pipeline exit: warn if any notes still have Unknown source.
+  if (result.success) {
+    for (const auto& track : result.tracks) {
+      int unknown_count = countUnknownSource(track.notes);
+      if (unknown_count > 0) {
+        std::fprintf(stderr, "[%s] WARNING: %d notes with Unknown source\n",
+                     formTypeToString(effective_config.form), unknown_count);
+      }
+    }
   }
 
   return result;

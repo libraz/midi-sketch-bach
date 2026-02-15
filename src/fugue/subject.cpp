@@ -358,10 +358,9 @@ float evaluateNoteFunctionFit(int candidate_pitch, int prev_pitch,
 
 /// Generate a pitch path for the given skeleton using a candidate-specific seed.
 ///
-/// Anchors and rhythm skeleton are fixed; only pitch decisions vary per candidate.
-/// This implements the same pitch logic as the original generateNotes but operates
-/// on pre-computed skeleton slots.
-std::vector<NoteEvent> generatePitchPath(
+/// Legacy pitch path: anchors and rhythm skeleton are fixed; only pitch decisions
+/// vary per candidate. Used as fallback when Kerngestalt path generation fails.
+std::vector<NoteEvent> generateLegacyPitchPath(
     const SubjectAnchors& a,
     const std::vector<SkeletonSlot>& skeleton,
     const ArchetypePolicy& policy,
@@ -718,6 +717,546 @@ std::vector<NoteEvent> generatePitchPath(
   return result;
 }
 
+/// @brief Convert a RhythmToken to tick duration.
+/// @param token The rhythm token to convert.
+/// @return Duration in ticks.
+Tick rhythmTokenToTicks(const RhythmToken& token) {
+  switch (token.kind) {
+    case RhythmToken::S:
+      return (token.base_class == 0) ? duration::kSixteenthNote : duration::kEighthNote;
+    case RhythmToken::M:
+      return kTicksPerBeat;
+    case RhythmToken::L:
+      return kTicksPerBeat * 2;
+    case RhythmToken::DL:
+      return (token.base_class == 0) ? kDottedEighth : duration::kDottedQuarter;
+    case RhythmToken::DS:
+      return (token.base_class == 0) ? duration::kSixteenthNote : duration::kEighthNote;
+  }
+  return kTicksPerBeat;  // NOLINT(clang-diagnostic-covered-switch-default): defensive
+}
+
+/// @brief Generate a pitch path using Kerngestalt cell placement.
+///
+/// Places a core cell at the subject head, then fills remaining slots
+/// using type-aware pitch selection. Returns the note sequence with
+/// cell_window marking the core cell boundaries.
+///
+/// @param anchors Pre-computed anchors.
+/// @param skeleton Rhythm skeleton slots.
+/// @param policy Archetype policy.
+/// @param cell The Kerngestalt cell to place.
+/// @param path_seed Per-candidate RNG seed.
+/// @param[out] out_cell_window Cell window boundaries (set on success).
+/// @return Generated note sequence, or empty if cell cannot be placed.
+std::vector<NoteEvent> generateKerngestaltPath(
+    const SubjectAnchors& anchors,
+    const std::vector<SkeletonSlot>& skeleton,
+    const ArchetypePolicy& policy,
+    const KerngestaltCell& cell,
+    uint32_t path_seed,
+    CellWindow& out_cell_window) {
+  constexpr int kBaseNote = 60;
+  std::mt19937 gen(path_seed);
+
+  std::vector<NoteEvent> result;
+  result.reserve(skeleton.size());
+
+  // --- Stage 1: Core Cell Placement ---
+  size_t cell_note_count = cell.intervals.size() + 1;
+  size_t cell_start_slot = 0;
+
+  // Check if pickup needed for strong-beat preference.
+  bool needs_pickup = false;
+  if (cell.prefer_strong_beat && !skeleton.empty()) {
+    Tick pos_in_bar = skeleton[0].start_tick % kTicksPerBar;
+    bool on_strong = (pos_in_bar == 0 || pos_in_bar == kTicksPerBeat * 2);
+    if (!on_strong && skeleton.size() > cell_note_count) {
+      needs_pickup = true;
+      cell_start_slot = 1;
+    }
+  }
+
+  // Verify cell fits in skeleton.
+  if (cell_start_slot + cell_note_count > skeleton.size()) {
+    return {};
+  }
+
+  // Compute cell pitches from intervals, snapping to scale for diatonic integrity.
+  std::vector<int> cell_pitches(cell_note_count);
+  cell_pitches[0] = snapToScale(anchors.start_pitch, anchors.key, anchors.scale,
+                                anchors.pitch_floor, anchors.pitch_ceil);
+  for (size_t idx = 0; idx < cell.intervals.size(); ++idx) {
+    int raw = cell_pitches[idx] + cell.intervals[idx];
+    cell_pitches[idx + 1] = snapToScale(raw, anchors.key, anchors.scale,
+                                        anchors.pitch_floor, anchors.pitch_ceil);
+  }
+
+  // Octave shift if any cell pitch is out of range.
+  int cell_min = *std::min_element(cell_pitches.begin(), cell_pitches.end());
+  int cell_max = *std::max_element(cell_pitches.begin(), cell_pitches.end());
+  int octave_shift = 0;
+  if (cell_min < anchors.pitch_floor) {
+    octave_shift = ((anchors.pitch_floor - cell_min + 11) / 12) * 12;
+  } else if (cell_max > anchors.pitch_ceil) {
+    octave_shift = -((cell_max - anchors.pitch_ceil + 11) / 12) * 12;
+  }
+  if (octave_shift != 0) {
+    for (auto& pch : cell_pitches) pch += octave_shift;
+  }
+
+  // Verify all cell pitches are in range after shift.
+  for (int pch : cell_pitches) {
+    if (pch < anchors.pitch_floor || pch > anchors.pitch_ceil) return {};
+  }
+
+  // Record cell window.
+  out_cell_window.start_idx = cell_start_slot;
+  out_cell_window.end_idx = cell_start_slot + cell_note_count - 1;
+  out_cell_window.valid = true;
+
+  // --- Main loop: pitch generation with cell placement ---
+  bool needs_compensation = false;
+  int compensation_direction = 0;
+  int large_leap_count = 0;
+  bool last_fluctuated = false;
+  int actual_climax_pitch = anchors.climax_pitch;
+  int actual_climax_abs_degree = anchors.climax_abs_degree;
+
+  // Cell reappearance tracking for MotifB (inverted cell).
+  bool cell_reappeared = false;
+  std::vector<int> reappearance_pitches;
+  size_t reappearance_start = 0;
+  size_t reappearance_end = 0;
+
+  for (size_t si = 0; si < skeleton.size(); ++si) {
+    const auto& slot = skeleton[si];
+    int pitch = 0;
+    BachNoteSource source = BachNoteSource::FugueSubject;
+
+    // --- Pickup note ---
+    if (needs_pickup && si == 0) {
+      pitch = anchors.start_pitch;
+      // Keep default source (FugueSubject).
+    }
+    // --- Cell window notes ---
+    else if (si >= cell_start_slot && si <= out_cell_window.end_idx) {
+      size_t cell_idx = si - cell_start_slot;
+      pitch = cell_pitches[cell_idx];
+      source = BachNoteSource::SubjectCore;
+    }
+    // --- Cell reappearance notes (pre-computed) ---
+    else if (cell_reappeared && si >= reappearance_start && si <= reappearance_end) {
+      size_t reapp_idx = si - reappearance_start;
+      if (reapp_idx < reappearance_pitches.size()) {
+        pitch = reappearance_pitches[reapp_idx];
+        // Mark as FugueSubject (not SubjectCore -- reappearance is not immutable).
+      }
+    }
+    // --- Remaining slots: phase-based logic ---
+    else {
+      switch (slot.phase) {
+        case SlotPhase::kMotifA: {
+          int target_degree = anchors.start_degree + slot.degree_hint;
+          int target_pitch =
+              degreeToPitch(target_degree, kBaseNote, anchors.key_offset, anchors.scale);
+
+          float progress =
+              (anchors.climax_tick > 0)
+                  ? static_cast<float>(slot.start_tick) /
+                        static_cast<float>(anchors.climax_tick)
+                  : 0.0f;
+          int interp_pitch =
+              anchors.start_pitch +
+              static_cast<int>(
+                  static_cast<float>(anchors.climax_pitch - anchors.start_pitch) *
+                  progress);
+
+          int degree_shift = 0;
+          if (target_pitch < interp_pitch) {
+            degree_shift = (interp_pitch - target_pitch + 1) / 2;
+          }
+          int adjusted_degree = target_degree + degree_shift;
+
+          if (slot.phase_index > 0 &&
+              rng::rollProbability(gen, anchors.fluctuation_rate)) {
+            adjusted_degree += rng::rollProbability(gen, 0.5f) ? 1 : -1;
+          }
+
+          if (needs_compensation) {
+            adjusted_degree += compensation_direction;
+            needs_compensation = false;
+          }
+
+          pitch = snapToScale(
+              degreeToPitch(adjusted_degree, kBaseNote, anchors.key_offset, anchors.scale),
+              anchors.key, anchors.scale, anchors.pitch_floor, anchors.climax_pitch);
+
+          int prev_pitch =
+              result.empty() ? -1 : static_cast<int>(result.back().pitch);
+          pitch = avoidUnison(pitch, prev_pitch, anchors.key, anchors.scale,
+                              anchors.pitch_floor, anchors.climax_pitch);
+          pitch = clampLeap(pitch, prev_pitch, anchors.character, anchors.key,
+                            anchors.scale, anchors.pitch_floor, anchors.climax_pitch,
+                            gen, &large_leap_count);
+
+          if (prev_pitch >= 0 && std::abs(pitch - prev_pitch) >= 5) {
+            needs_compensation = true;
+            compensation_direction = (pitch > prev_pitch) ? -1 : 1;
+          }
+          break;
+        }
+
+        case SlotPhase::kClimax: {
+          int clamped_climax = anchors.climax_pitch;
+          if (!result.empty()) {
+            int prev = static_cast<int>(result.back().pitch);
+            clamped_climax =
+                clampLeap(anchors.climax_pitch, prev, anchors.character, anchors.key,
+                          anchors.scale, anchors.pitch_floor, anchors.pitch_ceil,
+                          gen, &large_leap_count);
+          }
+          pitch = clamped_climax;
+          actual_climax_pitch = clamped_climax;
+          actual_climax_abs_degree = scale_util::pitchToAbsoluteDegree(
+              static_cast<uint8_t>(std::max(0, std::min(127, clamped_climax))),
+              anchors.key, anchors.scale);
+
+          needs_compensation = false;
+          compensation_direction = 0;
+          last_fluctuated = false;
+          break;
+        }
+
+        case SlotPhase::kMotifB: {
+          // Attempt cell reappearance (inverted) once.
+          if (!cell_reappeared) {
+            size_t remaining_motifb = 0;
+            for (size_t fi = si; fi < skeleton.size(); ++fi) {
+              if (skeleton[fi].phase == SlotPhase::kMotifB) ++remaining_motifb;
+            }
+            if (remaining_motifb >= cell_note_count) {
+              int prev_p = result.empty() ? anchors.start_pitch
+                                          : static_cast<int>(result.back().pitch);
+              int max_leap = maxLeapForCharacter(anchors.character);
+
+              // Try inverted intervals first, then original if inverted fails.
+              for (int attempt = 0; attempt < 2; ++attempt) {
+                std::vector<int> trial_pitches(cell_note_count);
+                trial_pitches[0] = prev_p;
+                bool valid = true;
+                for (size_t ri = 0; ri < cell.intervals.size(); ++ri) {
+                  int interval = (attempt == 0) ? -cell.intervals[ri]
+                                                : cell.intervals[ri];
+                  int raw = trial_pitches[ri] + interval;
+                  trial_pitches[ri + 1] = snapToScale(
+                      raw, anchors.key, anchors.scale,
+                      anchors.pitch_floor, anchors.pitch_ceil);
+                  if (trial_pitches[ri + 1] < anchors.pitch_floor ||
+                      trial_pitches[ri + 1] > anchors.pitch_ceil) {
+                    valid = false;
+                    break;
+                  }
+                  if (std::abs(trial_pitches[ri + 1] - trial_pitches[ri]) > max_leap) {
+                    valid = false;
+                    break;
+                  }
+                }
+                if (valid) {
+                  reappearance_pitches = std::move(trial_pitches);
+                  reappearance_start = si;
+                  reappearance_end = si + cell_note_count - 1;
+                  cell_reappeared = true;
+                  pitch = reappearance_pitches[0];
+                  break;
+                }
+              }
+            }
+          }
+
+          // If not a reappearance note, use standard MotifB logic.
+          if (!(cell_reappeared && si >= reappearance_start && si <= reappearance_end
+                && si != reappearance_start)) {
+            if (cell_reappeared && si == reappearance_start) {
+              // pitch already set above; skip standard logic.
+            } else {
+              int offset = slot.degree_hint;
+              float remaining_ratio =
+                  (anchors.total_ticks > anchors.climax_tick)
+                      ? static_cast<float>(slot.start_tick - anchors.climax_tick) /
+                            static_cast<float>(anchors.total_ticks - anchors.climax_tick)
+                      : 1.0f;
+              int interp_pitch =
+                  actual_climax_pitch +
+                  static_cast<int>(
+                      static_cast<float>(anchors.tonic_pitch - actual_climax_pitch) *
+                      remaining_ratio);
+
+              int target_degree_abs = actual_climax_abs_degree + offset;
+              int target_pitch = static_cast<int>(
+                  scale_util::absoluteDegreeToPitch(target_degree_abs, anchors.key,
+                                                   anchors.scale));
+
+              int degree_shift = 0;
+              if (target_pitch > interp_pitch + 2) {
+                degree_shift = -1;
+              } else if (target_pitch < interp_pitch - 2) {
+                degree_shift = 1;
+              }
+              int adjusted_abs_degree = target_degree_abs + degree_shift;
+
+              bool fluctuated = false;
+              if (slot.phase_index > 0 && !last_fluctuated &&
+                  rng::rollProbability(gen, anchors.fluctuation_rate)) {
+                adjusted_abs_degree += rng::rollProbability(gen, 0.5f) ? 1 : -1;
+                fluctuated = true;
+              }
+              last_fluctuated = fluctuated;
+
+              if (needs_compensation) {
+                adjusted_abs_degree += compensation_direction;
+                needs_compensation = false;
+              }
+
+              pitch = snapToScale(
+                  static_cast<int>(scale_util::absoluteDegreeToPitch(
+                      adjusted_abs_degree, anchors.key, anchors.scale)),
+                  anchors.key, anchors.scale, anchors.pitch_floor, actual_climax_pitch);
+
+              int prev_pitch =
+                  result.empty() ? -1 : static_cast<int>(result.back().pitch);
+              pitch = avoidUnison(pitch, prev_pitch, anchors.key, anchors.scale,
+                                  anchors.pitch_floor, actual_climax_pitch);
+              pitch = clampLeap(pitch, prev_pitch, anchors.character, anchors.key,
+                                anchors.scale, anchors.pitch_floor, actual_climax_pitch,
+                                gen, &large_leap_count);
+
+              if (prev_pitch >= 0 && std::abs(pitch - prev_pitch) >= 5) {
+                needs_compensation = true;
+                compensation_direction = (pitch > prev_pitch) ? -1 : 1;
+              }
+            }
+          }
+          break;
+        }
+
+        case SlotPhase::kCadence: {
+          pitch = snapToScale(
+              static_cast<int>(scale_util::absoluteDegreeToPitch(
+                  slot.degree_hint, anchors.key, anchors.scale)),
+              anchors.key, anchors.scale, anchors.pitch_floor, actual_climax_pitch);
+
+          int prev_pitch =
+              result.empty() ? -1 : static_cast<int>(result.back().pitch);
+          pitch = avoidUnison(pitch, prev_pitch, anchors.key, anchors.scale,
+                              anchors.pitch_floor, actual_climax_pitch);
+          pitch = clampLeap(pitch, prev_pitch, anchors.character, anchors.key,
+                            anchors.scale, anchors.pitch_floor, actual_climax_pitch,
+                            gen, &large_leap_count);
+          break;
+        }
+      }
+    }
+
+    // Tritone avoidance: skip for cell window notes (reject if cell has tritone).
+    if (!result.empty()) {
+      bool in_cell = (si >= out_cell_window.start_idx && si <= out_cell_window.end_idx);
+      int prev = static_cast<int>(result.back().pitch);
+      int dist = std::abs(pitch - prev);
+      int simple = interval_util::compoundToSimple(dist);
+      if (simple == 6) {
+        // Cell window notes with tritone: reject entire candidate.
+        if (in_cell) return {};
+
+        bool exempt = false;
+        Tick prev_dur = result.back().duration;
+        if (prev_dur <= 240 && slot.duration <= 240) exempt = true;
+
+        if (!exempt) {
+          int direction = (pitch > prev) ? 1 : -1;
+          struct TritoneCandidate {
+            int cand_pitch;
+            int score;
+          };
+          TritoneCandidate candidates[3];
+          candidates[0].cand_pitch = snapToScale(
+              pitch + (-direction), anchors.key, anchors.scale,
+              anchors.pitch_floor, anchors.pitch_ceil);
+          candidates[1].cand_pitch = snapToScale(
+              pitch + direction, anchors.key, anchors.scale,
+              anchors.pitch_floor, anchors.pitch_ceil);
+          candidates[2].cand_pitch = snapToScale(
+              pitch + direction * 2, anchors.key, anchors.scale,
+              anchors.pitch_floor, anchors.pitch_ceil);
+
+          int best_idx = -1;
+          int best_score = 9999;
+          for (int cidx = 0; cidx < 3; ++cidx) {
+            int cand = candidates[cidx].cand_pitch;
+            int cand_simple =
+                interval_util::compoundToSimple(std::abs(cand - prev));
+            if (cand_simple == 6) continue;
+            int leap_size = std::abs(cand - prev);
+            int unison_penalty = (cand == prev) ? 30 : 0;
+            int score = leap_size + unison_penalty;
+            if (score < best_score) {
+              best_score = score;
+              best_idx = cidx;
+            }
+          }
+          if (best_idx >= 0) {
+            pitch = candidates[best_idx].cand_pitch;
+          }
+        }
+      }
+    }
+
+    NoteEvent note;
+    note.start_tick = slot.start_tick;
+    note.duration = slot.duration;
+    note.pitch = static_cast<uint8_t>(std::max(0, std::min(127, pitch)));
+    note.velocity = 80;
+    note.voice = 0;
+    note.source = source;
+    result.push_back(note);
+  }
+
+  // Ending normalization (same as legacy, but skip if last note is in cell window).
+  if (!result.empty()) {
+    bool last_in_cell = (result.size() - 1 >= out_cell_window.start_idx &&
+                         result.size() - 1 <= out_cell_window.end_idx);
+    if (!last_in_cell) {
+      int prev_pitch_for_ending =
+          (result.size() >= 2)
+              ? static_cast<int>(result[result.size() - 2].pitch)
+              : static_cast<int>(result.back().pitch);
+      int max_leap = maxLeapForCharacter(anchors.character);
+
+      float dominant_rate = policy.dominant_ending_prob;
+      if (rng::rollProbability(gen, dominant_rate)) {
+        int dom_pc = getPitchClass(static_cast<uint8_t>(
+            degreeToPitch(4, kBaseNote, anchors.key_offset, anchors.scale)));
+        int ending = normalizeEndingPitch(dom_pc, prev_pitch_for_ending,
+                                          max_leap, anchors.key, anchors.scale,
+                                          anchors.pitch_floor, anchors.pitch_ceil);
+        result.back().pitch = static_cast<uint8_t>(ending);
+      } else {
+        int tonic_pc =
+            getPitchClass(static_cast<uint8_t>(anchors.tonic_pitch));
+        int ending = normalizeEndingPitch(tonic_pc, prev_pitch_for_ending,
+                                          max_leap, anchors.key, anchors.scale,
+                                          anchors.pitch_floor, anchors.pitch_ceil);
+        result.back().pitch = static_cast<uint8_t>(ending);
+      }
+    }
+  }
+
+  // Snap all start_ticks to 16th-note grid for metric integrity.
+  constexpr Tick kTickQuantum = kTicksPerBeat / 4;  // 120
+  for (auto& note : result) {
+    note.start_tick = (note.start_tick / kTickQuantum) * kTickQuantum;
+  }
+  // Fix any overlaps introduced by quantization.
+  for (size_t idx = 0; idx + 1 < result.size(); ++idx) {
+    Tick next_start = result[idx + 1].start_tick;
+    if (result[idx].start_tick + result[idx].duration > next_start) {
+      result[idx].duration = next_start - result[idx].start_tick;
+      if (result[idx].duration < kTickQuantum) {
+        result[idx].duration = kTickQuantum;
+      }
+    }
+  }
+
+  // Post-processing leap enforcement: skip cell window notes.
+  int post_max_leap = maxLeapForCharacter(anchors.character);
+  for (size_t idx = 1; idx < result.size(); ++idx) {
+    // Skip cell window notes; reject if they violate.
+    if (idx >= out_cell_window.start_idx && idx <= out_cell_window.end_idx) {
+      int prev_p = static_cast<int>(result[idx - 1].pitch);
+      int cur_p = static_cast<int>(result[idx].pitch);
+      if (std::abs(cur_p - prev_p) > post_max_leap) return {};
+      continue;
+    }
+    // Also skip if prev note is the last cell note (don't modify the transition away
+    // from cell unless it's outside the cell window itself).
+    int prev_p = static_cast<int>(result[idx - 1].pitch);
+    int cur_p = static_cast<int>(result[idx].pitch);
+    int interval = cur_p - prev_p;
+    if (std::abs(interval) > post_max_leap) {
+      int direction = (interval > 0) ? 1 : -1;
+      for (int attempt = post_max_leap; attempt >= 0; --attempt) {
+        int candidate = prev_p + direction * attempt;
+        candidate =
+            std::max(anchors.pitch_floor, std::min(anchors.pitch_ceil, candidate));
+        int snapped =
+            snapToScale(candidate, anchors.key, anchors.scale,
+                        anchors.pitch_floor, anchors.pitch_ceil);
+        if (std::abs(snapped - prev_p) <= post_max_leap) {
+          result[idx].pitch = static_cast<uint8_t>(
+              std::max(0, std::min(127, snapped)));
+          break;
+        }
+      }
+    }
+  }
+
+  // Post-processing: fix tritone intervals, skip cell window notes.
+  for (int tritone_pass = 0; tritone_pass < 2; ++tritone_pass) {
+    bool any_fixed = false;
+    for (size_t idx = 1; idx < result.size(); ++idx) {
+      // Skip cell window notes; reject if they have a tritone violation.
+      if (idx >= out_cell_window.start_idx && idx <= out_cell_window.end_idx) {
+        int prev_p = static_cast<int>(result[idx - 1].pitch);
+        int cur_p = static_cast<int>(result[idx].pitch);
+        int s = interval_util::compoundToSimple(std::abs(cur_p - prev_p));
+        if (s == 6 && !(result[idx - 1].duration <= 240 && result[idx].duration <= 240)) {
+          return {};
+        }
+        continue;
+      }
+
+      int prev_p = static_cast<int>(result[idx - 1].pitch);
+      int cur_p = static_cast<int>(result[idx].pitch);
+      int s = interval_util::compoundToSimple(std::abs(cur_p - prev_p));
+      if (s != 6) continue;
+
+      if (result[idx - 1].duration <= 240 && result[idx].duration <= 240) continue;
+
+      int best_cand = cur_p;
+      int best_cost = 9999;
+      for (int delta : {1, -1, 2, -2}) {
+        int shifted = cur_p + delta;
+        int snapped = snapToScale(shifted, anchors.key, anchors.scale,
+                                  anchors.pitch_floor, anchors.pitch_ceil);
+        int new_simple =
+            interval_util::compoundToSimple(std::abs(snapped - prev_p));
+        if (new_simple == 6) continue;
+        if (std::abs(snapped - prev_p) > post_max_leap) continue;
+        if (idx + 1 < result.size()) {
+          int next_p = static_cast<int>(result[idx + 1].pitch);
+          int fwd_simple =
+              interval_util::compoundToSimple(std::abs(snapped - next_p));
+          if (fwd_simple == 6) continue;
+        }
+        int cost =
+            std::abs(snapped - prev_p) + ((snapped == prev_p) ? 30 : 0);
+        if (cost < best_cost) {
+          best_cost = cost;
+          best_cand = snapped;
+        }
+      }
+      if (best_cand != cur_p) {
+        result[idx].pitch = static_cast<uint8_t>(
+            std::max(0, std::min(127, best_cand)));
+        any_fixed = true;
+      }
+    }
+    if (!any_fixed) break;
+  }
+
+  return result;
+}
+
 }  // anonymous namespace
 
 // ---------------------------------------------------------------------------
@@ -773,14 +1312,14 @@ Subject SubjectGenerator::generate(const FugueConfig& config,
   constexpr int kMaxRetries = 4;
   SubjectValidator validator;
   ArchetypeScorer archetype_scorer;
-  std::vector<NoteEvent> best_notes;
+  GenerateResult best_result;
   float best_composite = -1.0f;
 
   for (int retry = 0; retry < kMaxRetries; ++retry) {
-    auto notes = generateNotes(config, bars,
-                               seed + static_cast<uint32_t>(retry));
+    auto result = generateNotes(config, bars,
+                                seed + static_cast<uint32_t>(retry));
     Subject candidate;
-    candidate.notes = notes;
+    candidate.notes = result.notes;
     candidate.key = config.key;
     candidate.is_minor = config.is_minor;
     candidate.character = config.character;
@@ -792,12 +1331,13 @@ Subject SubjectGenerator::generate(const FugueConfig& config,
 
     if (comp > best_composite) {
       best_composite = comp;
-      best_notes = std::move(notes);
+      best_result = std::move(result);
     }
     if (comp >= 0.7f) break;
   }
 
-  subject.notes = std::move(best_notes);
+  subject.notes = std::move(best_result.notes);
+  subject.cell_window = best_result.cell_window;
   subject.length_ticks = static_cast<Tick>(bars) * kTicksPerBar;
   subject.anacrusis_ticks = anacrusis_ticks;
 
@@ -809,20 +1349,31 @@ Subject SubjectGenerator::generate(const FugueConfig& config,
       subject.notes[0].start_tick = anacrusis_ticks;
       subject.notes[0].duration = first_dur - anacrusis_ticks;
       subject.notes.insert(subject.notes.begin(), anacrusis_note);
+      // Shift cell_window indices if anacrusis note was inserted before it.
+      if (subject.cell_window.valid) {
+        subject.cell_window.start_idx += 1;
+        subject.cell_window.end_idx += 1;
+      }
     }
     subject.length_ticks += anacrusis_ticks;
   }
 
+  // Build SubjectIdentity (Layers 1+2) from the final note sequence.
+  subject.identity = buildSubjectIdentity(subject.notes, config.key, config.is_minor);
+  // Preserve cell_window from generator in the identity.
+  subject.identity.essential.cell_window = subject.cell_window;
+
   return subject;
 }
 
-std::vector<NoteEvent> SubjectGenerator::generateNotes(
+SubjectGenerator::GenerateResult SubjectGenerator::generateNotes(
     const FugueConfig& config, uint8_t bars, uint32_t seed) const {
   SubjectCharacter character = config.character;
   Key key = config.key;
   bool is_minor = config.is_minor;
 
-  std::mt19937 gen(seed);
+  // Dedicated anchor RNG (separate stream from rhythm and path RNGs).
+  std::mt19937 anchor_rng(seed ^ 0x416E6368u);  // "Anch"
   int key_offset = static_cast<int>(key);
   ScaleType scale = is_minor ? ScaleType::HarmonicMinor : ScaleType::Major;
   Tick total_ticks = static_cast<Tick>(bars) * kTicksPerBar;
@@ -831,25 +1382,25 @@ std::vector<NoteEvent> SubjectGenerator::generateNotes(
 
   // --- Phase 1: Compute anchors (once per seed) ---
 
-  GoalTone goal = goalToneForCharacter(character, gen, policy);
-  uint32_t template_idx = gen() % 4;
+  GoalTone goal = goalToneForCharacter(character, anchor_rng, policy);
+  uint32_t template_idx = anchor_rng() % 4;
   auto [motif_a, motif_b] = motifTemplatesForCharacter(character, template_idx);
 
   constexpr int kBaseNote = 60;
   float tonic_prob = 0.6f;
   switch (character) {
     case SubjectCharacter::Severe:
-      tonic_prob = rng::rollFloat(gen, 0.55f, 0.70f); break;
+      tonic_prob = rng::rollFloat(anchor_rng, 0.55f, 0.70f); break;
     case SubjectCharacter::Playful:
-      tonic_prob = rng::rollFloat(gen, 0.40f, 0.55f); break;
+      tonic_prob = rng::rollFloat(anchor_rng, 0.40f, 0.55f); break;
     case SubjectCharacter::Noble:
-      tonic_prob = rng::rollFloat(gen, 0.60f, 0.70f); break;
+      tonic_prob = rng::rollFloat(anchor_rng, 0.60f, 0.70f); break;
     case SubjectCharacter::Restless:
-      tonic_prob = rng::rollFloat(gen, 0.45f, 0.60f); break;
+      tonic_prob = rng::rollFloat(anchor_rng, 0.45f, 0.60f); break;
   }
-  int start_degree = rng::rollProbability(gen, tonic_prob) ? 0 : 4;
+  int start_degree = rng::rollProbability(anchor_rng, tonic_prob) ? 0 : 4;
 
-  CharacterParams params = getCharacterParams(character, gen);
+  CharacterParams params = getCharacterParams(character, anchor_rng);
   applyArchetypeConstraints(params, policy);
 
   int start_pitch = degreeToPitch(start_degree, kBaseNote, key_offset, scale);
@@ -889,13 +1440,13 @@ std::vector<NoteEvent> SubjectGenerator::generateNotes(
   float fluctuation_rate = 0.20f;
   switch (character) {
     case SubjectCharacter::Severe:
-      fluctuation_rate = rng::rollFloat(gen, 0.10f, 0.25f); break;
+      fluctuation_rate = rng::rollFloat(anchor_rng, 0.10f, 0.25f); break;
     case SubjectCharacter::Playful:
-      fluctuation_rate = rng::rollFloat(gen, 0.20f, 0.35f); break;
+      fluctuation_rate = rng::rollFloat(anchor_rng, 0.20f, 0.35f); break;
     case SubjectCharacter::Noble:
-      fluctuation_rate = rng::rollFloat(gen, 0.10f, 0.20f); break;
+      fluctuation_rate = rng::rollFloat(anchor_rng, 0.10f, 0.20f); break;
     case SubjectCharacter::Restless:
-      fluctuation_rate = rng::rollFloat(gen, 0.25f, 0.40f); break;
+      fluctuation_rate = rng::rollFloat(anchor_rng, 0.25f, 0.40f); break;
   }
 
   int tonic_pitch = degreeToPitch(0, kBaseNote, key_offset, scale);
@@ -921,30 +1472,63 @@ std::vector<NoteEvent> SubjectGenerator::generateNotes(
   auto skeleton =
       buildRhythmSkeleton(anchors, motif_a, motif_b, cadence, rhythm_gen);
 
-  // --- Phase 3: N-candidate pitch path selection with archetype scoring ---
+  // --- Phase 2.5: Select Kerngestalt type and cell ---
+
+  uint32_t arch_mix = static_cast<uint32_t>(config.archetype) * 0x41726368u;
+  std::mt19937 type_rng(seed ^ 0x54797065u ^ arch_mix);  // "Type" + archetype
+  KerngestaltType kern_type =
+      selectKerngestaltType(character, config.archetype, type_rng);
+  int cell_idx = static_cast<int>(type_rng() % 4);
+  const KerngestaltCell& cell = getCoreCell(kern_type, cell_idx);
+
+  // --- Phase 3: N-candidate Kerngestalt path selection with tiered fallback ---
 
   SubjectValidator validator;
   ArchetypeScorer archetype_scorer;
-  std::vector<NoteEvent> best_notes;
-  float best_composite = -1.0f;
+
+  struct CandidateResult {
+    std::vector<NoteEvent> notes;
+    float composite = -1.0f;
+    int tier = 2;  // 0=best, 1=good, 2=fallback
+    CellWindow cell_window;
+  };
+  CandidateResult best;
 
   int num_candidates = (policy.path_candidates > 0)
       ? policy.path_candidates : kDefaultPathCandidates;
+
+  // Tier 0/1: Kerngestalt path candidates.
   for (int idx = 0; idx < num_candidates; ++idx) {
-    uint32_t path_seed = seed ^ (static_cast<uint32_t>(idx) * 0x7A3B9C1Du);
-    auto candidate = generatePitchPath(anchors, skeleton, policy, path_seed);
+    uint32_t path_seed = seed ^ (static_cast<uint32_t>(idx) * 0x7A3B9C1Du) ^ arch_mix;
 
-    Subject s;
-    s.notes = candidate;
-    s.key = key;
-    s.is_minor = is_minor;
-    s.character = character;
+    CellWindow cw;
+    auto candidate = generateKerngestaltPath(
+        anchors, skeleton, policy, cell, path_seed, cw);
 
-    // Hard gate: reject candidates that violate archetype requirements.
-    if (!archetype_scorer.checkHardGate(s, policy)) continue;
+    if (candidate.empty()) continue;
 
-    // NoteFunction fitness bonus: evaluate how well the pitch path matches
-    // the structural function assignments in the skeleton.
+    Subject sub;
+    sub.notes = candidate;
+    sub.key = key;
+    sub.is_minor = is_minor;
+    sub.character = character;
+
+    if (!archetype_scorer.checkHardGate(sub, policy)) continue;
+
+    // Build identity to check Kerngestalt validity.
+    auto ident = buildEssentialIdentity(candidate, key, is_minor);
+    ident.cell_window = cw;
+
+    // Determine tier based on Kerngestalt validity and type match.
+    int tier = 2;
+    bool valid_kern = isValidKerngestalt(ident);
+    if (valid_kern && ident.kerngestalt_type == kern_type) {
+      tier = 0;
+    } else if (valid_kern) {
+      tier = 1;
+    }
+
+    // NoteFunction fitness bonus.
     float note_func_bonus = 0.0f;
     size_t eval_count = std::min(candidate.size(), skeleton.size());
     for (size_t ni = 0; ni < eval_count; ++ni) {
@@ -955,21 +1539,62 @@ std::vector<NoteEvent> SubjectGenerator::generateNotes(
     }
     note_func_bonus = std::clamp(note_func_bonus, 0.0f, 1.0f);
 
-    // Combined score: base (65%) + archetype (25%) + NoteFunction (10%).
-    float base_comp = validator.evaluate(s).composite();
-    float arch_comp = archetype_scorer.evaluate(s, policy).composite();
-    float comp = base_comp * 0.65f + arch_comp * 0.25f
-               + note_func_bonus * 0.10f;
+    float base_comp = validator.evaluate(sub).composite();
+    float arch_comp = archetype_scorer.evaluate(sub, policy).composite();
+    float comp = base_comp * 0.65f + arch_comp * 0.25f + note_func_bonus * 0.10f;
 
-    if (comp > best_composite) {
-      best_composite = comp;
-      best_notes = std::move(candidate);
+    // Lower tier wins; within same tier, higher composite wins.
+    if (tier < best.tier || (tier == best.tier && comp > best.composite)) {
+      best.notes = std::move(candidate);
+      best.composite = comp;
+      best.tier = tier;
+      best.cell_window = cw;
     }
-    // Early stop for high-quality candidates.
-    if (comp >= 0.85f) break;
+
+    if (tier == 0 && comp >= 0.85f) break;
   }
 
-  return best_notes;
+  // Tier 2 fallback: if no Kerngestalt candidates succeeded, try legacy path.
+  if (best.tier == 2 || best.notes.empty()) {
+    for (int idx = 0; idx < num_candidates; ++idx) {
+      uint32_t path_seed = seed ^ (static_cast<uint32_t>(idx) * 0x7A3B9C1Du) ^ arch_mix;
+      auto candidate =
+          generateLegacyPitchPath(anchors, skeleton, policy, path_seed);
+
+      if (candidate.empty()) continue;
+
+      Subject sub;
+      sub.notes = candidate;
+      sub.key = key;
+      sub.is_minor = is_minor;
+      sub.character = character;
+
+      if (!archetype_scorer.checkHardGate(sub, policy)) continue;
+
+      float note_func_bonus = 0.0f;
+      size_t eval_count = std::min(candidate.size(), skeleton.size());
+      for (size_t ni = 0; ni < eval_count; ++ni) {
+        int prev_p = (ni > 0) ? static_cast<int>(candidate[ni - 1].pitch) : -1;
+        note_func_bonus += evaluateNoteFunctionFit(
+            static_cast<int>(candidate[ni].pitch), prev_p,
+            skeleton[ni].function, key, scale, skeleton.size());
+      }
+      note_func_bonus = std::clamp(note_func_bonus, 0.0f, 1.0f);
+
+      float base_comp = validator.evaluate(sub).composite();
+      float arch_comp = archetype_scorer.evaluate(sub, policy).composite();
+      float comp = base_comp * 0.65f + arch_comp * 0.25f + note_func_bonus * 0.10f;
+
+      if (comp > best.composite || best.notes.empty()) {
+        best.notes = std::move(candidate);
+        best.composite = comp;
+        best.cell_window = {};  // No cell window for legacy path.
+      }
+      if (comp >= 0.85f) break;
+    }
+  }
+
+  return {std::move(best.notes), best.cell_window};
 }
 
 }  // namespace bach

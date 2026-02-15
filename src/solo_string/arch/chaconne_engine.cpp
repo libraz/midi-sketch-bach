@@ -192,6 +192,8 @@ void placeGroundBass(const GroundBass& ground_bass, Tick offset_tick,
 ///
 /// Applies major section constraints when appropriate and sets climax design
 /// values directly for Accumulate variations (Principle 4: Trust Design Values).
+/// Accumulate variations are differentiated by accumulate_index (0=build-up,
+/// 1=peak, 2+=wind-down).
 ///
 /// @param variation The variation configuration.
 /// @param offset_tick Absolute start tick for this variation.
@@ -200,6 +202,8 @@ void placeGroundBass(const GroundBass& ground_bass, Tick offset_tick,
 /// @param climax_design Climax design values from the config.
 /// @param major_constraints Major section constraints from the config.
 /// @param seed RNG seed for this variation.
+/// @param rhythm_profile Selected rhythm profile for this variation.
+/// @param accumulate_index Position within Accumulate block (0-based), or -1 if not Accumulate.
 /// @return Configured TextureContext.
 TextureContext buildTextureContext(const ChaconneVariation& variation,
                                   Tick offset_tick, Tick bass_length,
@@ -207,7 +211,8 @@ TextureContext buildTextureContext(const ChaconneVariation& variation,
                                   const ClimaxDesign& climax_design,
                                   const MajorSectionConstraints& major_constraints,
                                   uint32_t seed,
-                                  RhythmProfile rhythm_profile) {
+                                  RhythmProfile rhythm_profile,
+                                  int accumulate_index) {
   TextureContext ctx;
   ctx.texture = variation.primary_texture;
   ctx.key = variation.key;
@@ -222,6 +227,27 @@ TextureContext buildTextureContext(const ChaconneVariation& variation,
   ctx.rhythm_profile = rhythm_profile;
   ctx.variation_type = variation.type;
 
+  // Apply seed-dependent register variation for non-anchor, non-climax variations.
+  // Establish, Resolve, and Accumulate retain design-fixed register.
+  if (variation.role != VariationRole::Establish &&
+      variation.role != VariationRole::Resolve &&
+      variation.role != VariationRole::Accumulate) {
+    std::mt19937 reg_rng(seed);
+    int reg_offset = rng::rollRange(reg_rng, -3, 3);
+    ctx.register_low = static_cast<uint8_t>(clampPitch(
+        static_cast<int>(profile.register_low) + reg_offset,
+        profile.register_low, profile.register_high));
+    ctx.register_high = static_cast<uint8_t>(clampPitch(
+        static_cast<int>(profile.register_high) - std::abs(reg_offset),
+        profile.register_low, profile.register_high));
+    // Ensure minimum range of 12 semitones.
+    if (ctx.register_high - ctx.register_low < 12) {
+      ctx.register_high = static_cast<uint8_t>(std::min(
+          static_cast<int>(ctx.register_low) + 12,
+          static_cast<int>(profile.register_high)));
+    }
+  }
+
   // Apply major section constraints: lighter textures, lower density, narrower register.
   if (variation.is_major_section) {
     ctx.register_low = major_constraints.register_low;
@@ -229,16 +255,42 @@ TextureContext buildTextureContext(const ChaconneVariation& variation,
     ctx.rhythm_density = major_constraints.rhythm_density_cap;
   }
 
-  // Apply climax design values directly for Accumulate variations.
-  // Principle 4: Trust Design Values -- output directly, do not search.
+  // Apply Accumulate differentiation based on position within the climax block.
+  // Principle 4: Trust Design Values, but allow staged build-up across 3 variations.
   if (variation.role == VariationRole::Accumulate) {
-    ctx.register_low = climax_design.fixed_register_low;
-    ctx.register_high = climax_design.fixed_register_high;
     ctx.is_climax = true;
-    // Override texture to FullChords if climax design allows it and the
-    // variation's configured texture is compatible.
-    if (climax_design.allow_full_chords) {
-      ctx.texture = climax_design.fixed_texture;
+    switch (accumulate_index) {
+      case 0:
+        // Build-up: ImpliedPolyphony with slightly narrowed register.
+        ctx.texture = TextureType::ImpliedPolyphony;
+        ctx.register_low = climax_design.fixed_register_low;
+        ctx.register_high = static_cast<uint8_t>(std::max(
+            static_cast<int>(climax_design.fixed_register_high) - 5,
+            static_cast<int>(climax_design.fixed_register_low) + 12));
+        break;
+      case 1:
+        // Climax peak: FullChords with full register.
+        ctx.register_low = climax_design.fixed_register_low;
+        ctx.register_high = climax_design.fixed_register_high;
+        if (climax_design.allow_full_chords) {
+          ctx.texture = climax_design.fixed_texture;
+        }
+        break;
+      default: {
+        // Wind-down: seed-dependent texture, register narrowed from below.
+        ctx.register_low = static_cast<uint8_t>(std::min(
+            static_cast<int>(climax_design.fixed_register_low) + 3,
+            static_cast<int>(climax_design.fixed_register_high) - 12));
+        ctx.register_high = climax_design.fixed_register_high;
+        // 50/50 between FullChords and ImpliedPolyphony based on seed.
+        std::mt19937 accum_rng(seed);
+        if (climax_design.allow_full_chords && rng::rollProbability(accum_rng, 0.5f)) {
+          ctx.texture = climax_design.fixed_texture;
+        } else {
+          ctx.texture = TextureType::ImpliedPolyphony;
+        }
+        break;
+      }
     }
   }
 
@@ -372,15 +424,21 @@ ChaconneResult generateChaconne(const ChaconneConfig& config) {
   // Track recent rhythm profiles for contrast checking.
   std::vector<RhythmProfile> prev_profiles;
 
+  int accumulate_count_so_far = 0;
+
   for (size_t var_idx = 0; var_idx < variations.size(); ++var_idx) {
     const auto& variation = variations[var_idx];
+    int accumulate_index = -1;
+    if (variation.role == VariationRole::Accumulate) {
+      accumulate_index = accumulate_count_so_far++;
+    }
     Tick offset_tick = static_cast<Tick>(var_idx) * bass_length;
 
     // Step 4a: Place ground bass (immutable copy).
     placeGroundBass(ground_bass, offset_tick, all_notes);
 
     // Step 4b: Build harmonic timeline with role-appropriate progression.
-    uint32_t var_seed = seed + static_cast<uint32_t>(var_idx) * 997u;
+    uint32_t var_seed = rng::splitmix32(seed, static_cast<uint32_t>(var_idx));
     std::mt19937 var_rng(var_seed);
 
     ProgressionType prog_type = selectProgression(
@@ -416,7 +474,8 @@ ChaconneResult generateChaconne(const ChaconneConfig& config) {
 
     TextureContext ctx = buildTextureContext(
         variation, offset_tick, bass_length, profile,
-        config.climax, config.major_constraints, var_seed, rhythm);
+        config.climax, config.major_constraints, var_seed, rhythm,
+        accumulate_index);
 
     // Step 4d: Generate texture notes with retry on failure.
     std::vector<NoteEvent> texture_notes;
@@ -425,7 +484,7 @@ ChaconneResult generateChaconne(const ChaconneConfig& config) {
     for (int retry = 0; retry <= config.max_variation_retries; ++retry) {
       if (retry > 0) {
         // Retry with a different seed. NEVER modify the ground bass.
-        ctx.seed = var_seed + static_cast<uint32_t>(retry) * 1013u;
+        ctx.seed = rng::splitmix32(var_seed, static_cast<uint32_t>(retry) + 100u);
       }
 
       texture_notes = generateTexture(ctx, timeline);

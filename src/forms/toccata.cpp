@@ -3,6 +3,7 @@
 #include "forms/toccata.h"
 
 #include <algorithm>
+#include <cassert>
 #include <cmath>
 #include <random>
 #include <vector>
@@ -10,6 +11,7 @@
 #include "core/gm_program.h"
 #include "core/melodic_state.h"
 #include "core/note_creator.h"
+#include "core/note_source.h"
 #include "core/pitch_utils.h"
 #include "core/rng_util.h"
 #include "core/scale.h"
@@ -1689,13 +1691,8 @@ ToccataResult generateDramaticusToccata(const ToccataConfig& config) {
   }
 
   // --- 8. Tag untagged notes ---
-  for (auto& n : all_notes) {
-    if (n.source == BachNoteSource::Unknown) {
-      n.source = isPedalVoice(n.voice, num_voices)
-                     ? BachNoteSource::PedalPoint
-                     : BachNoteSource::FreeCounterpoint;
-    }
-  }
+  assert(countUnknownSource(all_notes) == 0 &&
+         "All notes should have source set by generators");
 
   // --- 9. Repair pipeline ---
   if (num_voices >= 2) {

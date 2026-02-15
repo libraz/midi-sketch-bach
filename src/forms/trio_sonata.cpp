@@ -4,7 +4,9 @@
 #include "forms/trio_sonata.h"
 
 #include <algorithm>
+#include <cassert>
 #include <cmath>
+#include <cstdio>
 #include <random>
 #include <vector>
 
@@ -13,6 +15,7 @@
 #include "core/interval.h"
 #include "core/melodic_state.h"
 #include "core/note_creator.h"
+#include "core/note_source.h"
 #include "core/pitch_utils.h"
 #include "core/rng_util.h"
 #include "core/scale.h"
@@ -1869,13 +1872,8 @@ TrioSonataMovement generateMovement(const KeySignature& key_sig, Tick num_bars,
         {organ_range::kPedalLow, organ_range::kPedalHigh}};
 
     // Pedal notes are Structural (PedalPoint), upper voices are Flexible.
-    for (auto& n : all_notes) {
-      if (isPedalVoice(n.voice, kTrioVoiceCount) && n.source == BachNoteSource::Unknown) {
-        n.source = BachNoteSource::PedalPoint;
-      } else if (n.source == BachNoteSource::Unknown) {
-        n.source = BachNoteSource::FreeCounterpoint;
-      }
-    }
+    assert(countUnknownSource(all_notes) == 0 &&
+           "All notes should have source set by generators");
 
     // ---- createBachNote coordination pass ----
     {
@@ -2120,13 +2118,8 @@ TrioSonataMovement generateMovement(const KeySignature& key_sig, Tick num_bars,
     for (const auto& track : tracks) {
       all_notes.insert(all_notes.end(), track.notes.begin(), track.notes.end());
     }
-    for (auto& n : all_notes) {
-      if (isPedalVoice(n.voice, kTrioVoiceCount) && n.source == BachNoteSource::Unknown) {
-        n.source = BachNoteSource::PedalPoint;
-      } else if (n.source == BachNoteSource::Unknown) {
-        n.source = BachNoteSource::FreeCounterpoint;
-      }
-    }
+    assert(countUnknownSource(all_notes) == 0 &&
+           "All notes should have source set by generators");
     std::vector<std::pair<uint8_t, uint8_t>> vr = {
         {kRhLow, kRhHigh},
         {kLhLow, kLhHigh},

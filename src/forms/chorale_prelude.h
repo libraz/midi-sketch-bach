@@ -21,7 +21,7 @@ struct ChoralePreludeConfig {
 
 /// @brief Result of chorale prelude generation.
 struct ChoralePreludeResult {
-  std::vector<Track> tracks;  ///< 3 tracks: cantus (Swell), counterpoint (Great), pedal.
+  std::vector<Track> tracks;  ///< 4 tracks: figuration (Great), cantus (Swell), inner (Great), pedal.
   Tick total_duration_ticks = 0;
   bool success = false;
   HarmonicTimeline timeline;  ///< Harmonic context used during generation.
@@ -29,9 +29,10 @@ struct ChoralePreludeResult {
 
 /// @brief Generate a BWV 599-650 style chorale prelude.
 ///
-/// Produces a 3-voice organ chorale prelude with:
-///   - Cantus firmus on Manual II (Swell, ch 1) in long note values (whole/breve).
+/// Produces a 4-voice organ chorale prelude with:
 ///   - Ornamental counterpoint on Manual I (Great, ch 0) in 8th/16th figurations.
+///   - Cantus firmus on Manual II (Swell, ch 1) in long note values (whole/breve).
+///   - Inner voice on Manual I (Great, ch 0) providing harmonic support.
 ///   - Pedal bass (Pedal, ch 3) in quarter/half notes on root and fifth.
 ///
 /// The cantus firmus is treated as immutable (BachNoteSource::CantusFixed).
@@ -39,7 +40,7 @@ struct ChoralePreludeResult {
 /// Organ velocity is fixed at 80.
 ///
 /// @param config Chorale prelude configuration.
-/// @return ChoralePreludeResult with 3 tracks populated.
+/// @return ChoralePreludeResult with 4 tracks populated.
 ChoralePreludeResult generateChoralePrelude(const ChoralePreludeConfig& config);
 
 }  // namespace bach

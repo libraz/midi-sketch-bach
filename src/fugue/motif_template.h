@@ -12,6 +12,7 @@
 #include <vector>
 
 #include "core/basic_types.h"
+#include "fugue/subject_identity.h"
 
 namespace bach {
 
@@ -80,6 +81,51 @@ GoalTone goalToneForCharacter(SubjectCharacter character, std::mt19937& rng);
 struct ArchetypePolicy;
 GoalTone goalToneForCharacter(SubjectCharacter character, std::mt19937& rng,
                                const ArchetypePolicy& policy);
+
+// ---------------------------------------------------------------------------
+// Kerngestalt cell system
+// ---------------------------------------------------------------------------
+
+/// @brief Rhythm token for Kerngestalt cell -- preserves "long-short" relationships.
+struct RhythmToken {
+  enum Kind : uint8_t {
+    S,   ///< Short (8th note class).
+    M,   ///< Medium (quarter note class).
+    L,   ///< Long (half note class).
+    DL,  ///< Dotted-long (first of a dotted pair).
+    DS,  ///< Dotted-short (second of a dotted pair).
+  };
+  Kind kind;
+  uint8_t base_class = 1;  ///< 0=8th, 1=quarter, 2=half.
+};
+
+/// @brief Kerngestalt cell: interval x rhythm pair defining the nuclear shape.
+struct KerngestaltCell {
+  KerngestaltType type;
+  std::vector<int> intervals;       ///< Directed intervals (semitones). len = N.
+  std::vector<RhythmToken> rhythm;  ///< Rhythm tokens. len = N+1 (per note).
+  bool prefer_strong_beat;          ///< Prefer cell head on beat 0/2.
+};
+
+/// @brief Get a core Kerngestalt cell by type and index.
+/// @param type Kerngestalt type (IntervalDriven, ChromaticCell, Arpeggio, Linear).
+/// @param index Cell index within type (0-3).
+/// @return KerngestaltCell definition.
+const KerngestaltCell& getCoreCell(KerngestaltType type, int index);
+
+/// @brief Select a KerngestaltType based on character and archetype.
+///
+/// Uses a weighted mapping table (primary 80% / secondary 20%):
+///   - Each (character, archetype) pair maps to a primary and secondary type.
+///   - RNG decides which one is selected.
+///
+/// @param character Subject character type.
+/// @param archetype Fugue archetype.
+/// @param rng Random number generator.
+/// @return Selected KerngestaltType.
+KerngestaltType selectKerngestaltType(SubjectCharacter character,
+                                      FugueArchetype archetype,
+                                      std::mt19937& rng);
 
 /// @brief Get the pair of MotifTemplates (A and B) for a given character.
 ///

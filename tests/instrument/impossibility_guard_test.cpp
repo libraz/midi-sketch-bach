@@ -223,7 +223,7 @@ TEST(ImpossibilityGuardTest, EnforcePreservesImmutable) {
   Track track;
   track.channel = 0;
   // Immutable note below range: should NOT be modified.
-  track.notes.push_back(makeNote(40, 0, 480, BachNoteSource::FugueSubject));
+  track.notes.push_back(makeNote(40, 0, 480, BachNoteSource::SubjectCore));
 
   std::vector<Track> tracks = {track};
   enforceImpossibilityGuard(tracks, guard);
