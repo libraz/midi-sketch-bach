@@ -115,6 +115,7 @@ set(BACH_LIB_SOURCES
   harmony/harmonic_function.cpp
   harmony/modulation_plan.cpp
   harmony/chord_tone_utils.cpp
+  harmony/chord_voicer.cpp
   harmony/tempo_map.cpp
   harmony/harmonic_rhythm.cpp
   harmony/harmonic_time_warp.cpp
@@ -122,6 +123,7 @@ set(BACH_LIB_SOURCES
 
   # forms/
   forms/prelude.cpp
+  forms/prelude_figuration.cpp
   forms/trio_sonata.cpp
   forms/chorale_prelude.cpp
   forms/toccata.cpp

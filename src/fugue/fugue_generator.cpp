@@ -1071,7 +1071,7 @@ std::vector<NoteEvent> createCodaNotes(Tick start_tick, Tick duration,
           upper = ceiling;
         } else {
           pitches[v] = vlo;
-          upper = static_cast<int>(vlo);
+          upper = static_cast<int>(vlo) - 1;
         }
       }
     };
@@ -1230,7 +1230,7 @@ std::vector<NoteEvent> createCodaNotes(Tick start_tick, Tick duration,
           } else {
             // (C) Extreme fallback: set to voice range low.
             pitches[v] = static_cast<int>(vlo);
-            upper = static_cast<int>(vlo);
+            upper = static_cast<int>(vlo) - 1;
           }
         }
       };
@@ -1291,7 +1291,7 @@ std::vector<NoteEvent> createCodaNotes(Tick start_tick, Tick duration,
       uint8_t count = std::min(num_voices, static_cast<uint8_t>(5));
       for (uint8_t v = 0; v + 1 < count; ++v) {
         if (pitches_at_tick[v] > 0 && pitches_at_tick[v + 1] > 0 &&
-            pitches_at_tick[v] < pitches_at_tick[v + 1]) {
+            pitches_at_tick[v] <= pitches_at_tick[v + 1]) {
           std::fprintf(stderr, "[createCodaNotes] WARNING: %s voice crossing v%u(%u) < v%u(%u)\n",
                        label, v, pitches_at_tick[v], v + 1, pitches_at_tick[v + 1]);
         }
@@ -2890,6 +2890,8 @@ FugueResult generateFugue(const FugueConfig& config) {
 
               for (int ci = 0; ci < 2 && !tick_changed; ++ci) {
                 int fix_idx = candidates[ci];
+                // Coda notes are design values (Principle 4) — never alter.
+                if (all_notes[fix_idx].source == BachNoteSource::Coda) continue;
                 uint8_t fix_voice = all_notes[fix_idx].voice;
                 auto [flo, fhi] = getFugueVoiceRange(fix_voice, num_voices);
                 Key fix_key = tonal_plan.keyAtTick(

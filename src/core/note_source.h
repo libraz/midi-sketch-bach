@@ -45,7 +45,8 @@ enum class BachNoteSource : uint8_t {
   QuodlibetMelody,  ///< Folk melody in Quodlibet.
   GoldbergOverture,  ///< French Overture variation (Var 16 Grave + Fugato).
   GoldbergSuspension, ///< BlackPearl (Var 25) suspension-driven notes.
-  ChaconneBass       ///< Realized chaconne bass line (structural, role-dependent).
+  ChaconneBass,       ///< Realized chaconne bass line (structural, role-dependent).
+  PreludeFiguration   ///< Harmony-first prelude figuration note (structurally consonant).
 };
 
 /// @brief Convert BachNoteSource to human-readable string.

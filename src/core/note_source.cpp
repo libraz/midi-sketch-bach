@@ -43,6 +43,7 @@ const char* bachNoteSourceToString(BachNoteSource source) {
     case BachNoteSource::GoldbergOverture: return "goldberg_overture";
     case BachNoteSource::GoldbergSuspension: return "goldberg_suspension";
     case BachNoteSource::ChaconneBass: return "chaconne_bass";
+    case BachNoteSource::PreludeFiguration: return "prelude_figuration";
   }
   return "unknown";
 }
@@ -109,6 +110,9 @@ ProtectionLevel getProtectionLevel(BachNoteSource source) {
 
     case BachNoteSource::ChaconneBass:
       return ProtectionLevel::Structural;
+
+    case BachNoteSource::PreludeFiguration:
+      return ProtectionLevel::Flexible;
   }
   return ProtectionLevel::Flexible;
 }

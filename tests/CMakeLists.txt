@@ -122,6 +122,7 @@ set(BACH_TEST_SOURCES
   harmony/harmonic_timeline_test.cpp
   harmony/chord_function_test.cpp
   harmony/chord_tone_utils_test.cpp
+  harmony/chord_voicer_test.cpp
   harmony/modulation_plan_test.cpp
   harmony/extended_chord_test.cpp
   harmony/tempo_map_test.cpp
@@ -130,6 +131,7 @@ set(BACH_TEST_SOURCES
 
   # forms/
   forms/prelude_test.cpp
+  forms/prelude_figuration_test.cpp
   forms/trio_sonata_test.cpp
   forms/chorale_prelude_test.cpp
   forms/toccata_test.cpp
