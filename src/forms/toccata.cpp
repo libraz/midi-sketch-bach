@@ -1688,8 +1688,15 @@ ToccataResult generateDramaticusToccata(const ToccataConfig& config) {
   auto c_notes = generateRecitativeExpansion(
       timeline, config.key, phases[2].start, phases[2].end, rng);
 
-  // D: SequenceClimb1 (motif extracted from A)
+  // D: SequenceClimb1 (motif extracted from A, then vocabulary-enriched)
   ClimbingMotif motif = extractClimbingMotif(a_notes, 0);
+  ScaleType climb_scale = config.key.is_minor ? ScaleType::HarmonicMinor : ScaleType::Major;
+  // Apply vocabulary gesture: ascending direction (climb from low register toward ceiling).
+  motif = tryVocabularyGesture(
+      motif, config.archetype,
+      static_cast<int>(getToccataLowPitch(0)),
+      static_cast<int>(kDramaticusRangeCeiling[3]),
+      config.key.tonic, climb_scale, rng);
   auto d_notes = generateSequenceClimb(
       timeline, config.key, motif,
       phases[3].start, phases[3].end,

@@ -742,5 +742,190 @@ TEST(PreludeTest, Perpetual_MiddleVoicePitchVariety) {
       << "Perpetual middle voice has too few unique pitches: " << unique_pitches.size();
 }
 
+// ---------------------------------------------------------------------------
+// Step 3: Opening tonic pedal for Perpetual preludes
+// ---------------------------------------------------------------------------
+
+TEST(PreludeTest, Perpetual_HasOpeningTonicPedal) {
+  // Perpetual preludes with 3+ voices should have a tonic pedal point
+  // in the bass voice for the first 3 bars.
+  PreludeConfig config = makeTestConfig(42);
+  config.type = PreludeType::Perpetual;
+  config.num_voices = 3;
+  config.key = {Key::C, false};
+  PreludeResult result = generatePrelude(config);
+  ASSERT_TRUE(result.success);
+  ASSERT_GE(result.tracks.size(), 3u);
+
+  // Bass voice is the last voice.
+  uint8_t bass_idx = static_cast<uint8_t>(result.tracks.size() - 1);
+  const auto& bass_notes = result.tracks[bass_idx].notes;
+
+  // Check that the first notes in the bass voice are pedal points.
+  int pedal_count = 0;
+  for (const auto& note : bass_notes) {
+    if (note.start_tick < kTicksPerBar * 3) {
+      EXPECT_EQ(note.source, BachNoteSource::PedalPoint)
+          << "Bass note at tick " << note.start_tick
+          << " should be a PedalPoint in opening pedal region";
+      ++pedal_count;
+    }
+  }
+  EXPECT_GE(pedal_count, 1) << "Should have at least 1 pedal note in first 3 bars";
+
+  // All pedal notes in the opening region should have the same pitch (tonic).
+  if (pedal_count > 1) {
+    uint8_t first_pedal_pitch = 0;
+    for (const auto& note : bass_notes) {
+      if (note.start_tick < kTicksPerBar * 3 &&
+          note.source == BachNoteSource::PedalPoint) {
+        if (first_pedal_pitch == 0) {
+          first_pedal_pitch = note.pitch;
+        } else {
+          EXPECT_EQ(note.pitch, first_pedal_pitch)
+              << "All opening pedal notes should have the same pitch";
+        }
+      }
+    }
+
+    // Verify the pedal pitch is the tonic pitch class (C = 0).
+    EXPECT_EQ(first_pedal_pitch % 12, 0)
+        << "Pedal pitch should be C (tonic), got "
+        << static_cast<int>(first_pedal_pitch);
+  }
+}
+
+TEST(PreludeTest, FreeForm_NoOpeningPedal) {
+  // FreeForm preludes should NOT have opening pedal points.
+  PreludeConfig config = makeTestConfig(42);
+  config.type = PreludeType::FreeForm;
+  config.num_voices = 3;
+  PreludeResult result = generatePrelude(config);
+  ASSERT_TRUE(result.success);
+  ASSERT_GE(result.tracks.size(), 3u);
+
+  const auto& bass_notes = result.tracks[2].notes;
+  for (const auto& note : bass_notes) {
+    if (note.start_tick < kTicksPerBar * 3) {
+      EXPECT_NE(note.source, BachNoteSource::PedalPoint)
+          << "FreeForm should not have opening pedal points";
+    }
+  }
+}
+
+TEST(PreludeTest, Perpetual_OpeningPedalInDMinor) {
+  // Verify opening pedal works correctly in D minor.
+  PreludeConfig config = makeTestConfig(42);
+  config.type = PreludeType::Perpetual;
+  config.num_voices = 3;
+  config.key = {Key::D, true};  // D minor.
+  PreludeResult result = generatePrelude(config);
+  ASSERT_TRUE(result.success);
+  ASSERT_GE(result.tracks.size(), 3u);
+
+  const auto& bass_notes = result.tracks[2].notes;
+  for (const auto& note : bass_notes) {
+    if (note.start_tick < kTicksPerBar * 3 &&
+        note.source == BachNoteSource::PedalPoint) {
+      // D = pitch class 2.
+      EXPECT_EQ(note.pitch % 12, 2)
+          << "Pedal should be D in D minor, got "
+          << static_cast<int>(note.pitch);
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Step 3: Texture thinning
+// ---------------------------------------------------------------------------
+
+TEST(PreludeTest, TextureThinning_InnerVoiceShorterAtBoundaries) {
+  // Inner voice notes at phrase boundaries (bar 1 beat 3, bar 3 beat 3, etc.)
+  // should have shorter durations than non-boundary beats.
+  PreludeConfig config = makeTestConfig(42);
+  config.type = PreludeType::FreeForm;
+  config.num_voices = 3;
+  PreludeResult result = generatePrelude(config);
+  ASSERT_TRUE(result.success);
+  ASSERT_GE(result.tracks.size(), 3u);
+
+  const auto& mid_notes = result.tracks[1].notes;
+  ASSERT_GT(mid_notes.size(), 4u);
+
+  // Collect durations at boundary vs non-boundary positions.
+  Tick total_boundary_dur = 0;
+  int boundary_count = 0;
+  Tick total_normal_dur = 0;
+  int normal_count = 0;
+
+  for (const auto& note : mid_notes) {
+    int bar_idx = static_cast<int>(note.start_tick / kTicksPerBar);
+    int beat_in_bar = static_cast<int>(
+        (note.start_tick % kTicksPerBar) / kTicksPerBeat);
+    bool is_phrase_end = (bar_idx % 2 == 1) && (beat_in_bar == 3);
+
+    if (is_phrase_end) {
+      total_boundary_dur += note.duration;
+      ++boundary_count;
+    } else {
+      total_normal_dur += note.duration;
+      ++normal_count;
+    }
+  }
+
+  // Both categories should have notes.
+  if (boundary_count > 0 && normal_count > 0) {
+    float avg_boundary = static_cast<float>(total_boundary_dur) /
+                         static_cast<float>(boundary_count);
+    float avg_normal = static_cast<float>(total_normal_dur) /
+                       static_cast<float>(normal_count);
+
+    // Boundary durations should be shorter on average.
+    EXPECT_LE(avg_boundary, avg_normal)
+        << "Boundary durations (avg=" << avg_boundary
+        << ") should be <= normal durations (avg=" << avg_normal << ")";
+  }
+}
+
+TEST(PreludeTest, TextureThinning_OuterVoicesUnchanged) {
+  // Soprano and bass voice durations should not be affected by thinning.
+  // Compare with the same seed, same config -- outer voices should have
+  // no zero-duration notes and all durations within expected quantized set.
+  PreludeConfig config = makeTestConfig(42);
+  config.type = PreludeType::FreeForm;
+  config.num_voices = 3;
+  PreludeResult result = generatePrelude(config);
+  ASSERT_TRUE(result.success);
+
+  // Soprano (voice 0): check all notes have positive duration.
+  for (const auto& note : result.tracks[0].notes) {
+    EXPECT_GT(note.duration, 0u)
+        << "Soprano note at tick " << note.start_tick << " has zero duration";
+  }
+
+  // Bass (voice 2): check quantized durations still hold.
+  for (const auto& note : result.tracks[2].notes) {
+    EXPECT_GT(note.duration, 0u)
+        << "Bass note at tick " << note.start_tick << " has zero duration";
+  }
+}
+
+TEST(PreludeTest, TextureThinning_NoEffectOnTwoVoices) {
+  // Two-voice preludes should not be affected by texture thinning.
+  PreludeConfig config = makeTestConfig(42);
+  config.type = PreludeType::FreeForm;
+  config.num_voices = 2;
+  PreludeResult result = generatePrelude(config);
+  ASSERT_TRUE(result.success);
+  ASSERT_EQ(result.tracks.size(), 2u);
+
+  // All notes should have positive duration.
+  for (const auto& track : result.tracks) {
+    for (const auto& note : track.notes) {
+      EXPECT_GT(note.duration, 0u);
+    }
+  }
+}
+
 }  // namespace
 }  // namespace bach

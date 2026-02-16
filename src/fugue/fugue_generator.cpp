@@ -3124,6 +3124,44 @@ FugueResult generateFugue(const FugueConfig& config) {
     }
   }
 
+  // =========================================================================
+  // Fugue-safe postValidateNotes: pitch safety net with rhetorical protection.
+  // Runs after duration finalization (overlap cleanup) to avoid breaking
+  // suspensions and passing tones. Subject, answer, and countersubject
+  // pitches are protected by their ProtectionLevel (Immutable/SemiImmutable/
+  // Structural) in the existing createBachNote cascade.
+  // =========================================================================
+  {
+    auto range_fn = [num_voices](uint8_t v_id,
+                                 Tick /*tick*/) -> std::pair<uint8_t, uint8_t> {
+      return getFugueVoiceRange(v_id, num_voices);
+    };
+    PostValidatePolicy pv_policy;
+    pv_policy.fix_parallel_perfect = true;
+    pv_policy.fix_voice_crossing = true;
+    pv_policy.fix_strong_beat_dissonance = true;
+    pv_policy.fix_weak_beat_nct = false;
+    pv_policy.fix_hidden_perfect = false;
+
+    auto codas = structure.getSectionsByType(SectionType::Coda);
+    Tick pv_cadence_tick = codas.empty() ? 0 : codas[0].start_tick;
+    pv_policy.cadence_protection_ticks = codas.empty() ? 0 : kTicksPerBeat * 2;
+
+    PostValidateStats pv_stats;
+    all_notes = postValidateNotes(
+        std::move(all_notes), num_voices,
+        KeySignature{config.key, config.is_minor},
+        range_fn, &pv_stats, {}, pv_policy, pv_cadence_tick);
+
+    // Log if intervention is excessive.
+    if (pv_stats.drop_rate() > 0.05f) {
+      std::fprintf(stderr,
+          "[Fugue postValidate] WARNING: drop_rate=%.1f%% (%u/%u)\n",
+          pv_stats.drop_rate() * 100.0f,
+          pv_stats.dropped, pv_stats.total_input);
+    }
+  }
+
   // Store the beat-resolution timeline for dual-timeline analysis.
   // Cannot std::move because detailed_timeline is still referenced below.
   result.generation_timeline = detailed_timeline;

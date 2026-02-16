@@ -282,5 +282,288 @@ TEST(BuildMelodicContextTest, NonLeadingTone_NotDetected) {
   EXPECT_FALSE(ctx.is_leading_tone);
 }
 
+// ---------------------------------------------------------------------------
+// PostValidatePolicy + PostValidateStats: policy-aware overloads
+// ---------------------------------------------------------------------------
+
+/// Helper: create a NoteEvent with specified fields.
+NoteEvent makeNote(uint8_t voice, uint8_t pitch, Tick start, Tick dur,
+                   BachNoteSource source = BachNoteSource::FreeCounterpoint) {
+  NoteEvent note;
+  note.voice = voice;
+  note.pitch = pitch;
+  note.start_tick = start;
+  note.duration = dur;
+  note.velocity = 80;
+  note.source = source;
+  return note;
+}
+
+TEST(PostValidatePolicyTest, DefaultPolicyValues) {
+  PostValidatePolicy policy;
+  EXPECT_TRUE(policy.fix_parallel_perfect);
+  EXPECT_TRUE(policy.fix_voice_crossing);
+  EXPECT_TRUE(policy.fix_strong_beat_dissonance);
+  EXPECT_FALSE(policy.fix_weak_beat_nct);
+  EXPECT_FALSE(policy.fix_hidden_perfect);
+  EXPECT_EQ(policy.cadence_protection_ticks, 0u);
+}
+
+TEST(PostValidatePolicyTest, EmptyInputReturnsEmpty) {
+  std::vector<NoteEvent> empty;
+  PostValidatePolicy policy;
+  PostValidateStats stats;
+  auto result = postValidateNotes(std::move(empty), 4,
+                                   KeySignature{Key::C, false},
+                                   std::vector<std::pair<uint8_t, uint8_t>>{{48, 84}, {48, 84}, {36, 72}, {24, 60}},
+                                   &stats, {}, policy);
+  EXPECT_TRUE(result.empty());
+  EXPECT_EQ(stats.total_input, 0u);
+  EXPECT_EQ(stats.dropped, 0u);
+}
+
+TEST(PostValidatePolicyTest, NeverDropsNotes) {
+  // The policy-aware overload is a targeted safety net that never drops notes.
+  std::vector<NoteEvent> notes;
+  notes.push_back(makeNote(0, 72, 0, 480, BachNoteSource::FreeCounterpoint));
+  notes.push_back(makeNote(1, 60, 0, 480, BachNoteSource::EpisodeMaterial));
+  notes.push_back(makeNote(2, 48, 0, 480, BachNoteSource::FreeCounterpoint));
+  notes.push_back(makeNote(0, 74, 480, 480, BachNoteSource::FreeCounterpoint));
+  notes.push_back(makeNote(1, 62, 480, 480, BachNoteSource::EpisodeMaterial));
+  notes.push_back(makeNote(2, 50, 480, 480, BachNoteSource::FreeCounterpoint));
+
+  PostValidatePolicy policy;
+  PostValidateStats stats;
+  auto result = postValidateNotes(std::move(notes), 3,
+                                   KeySignature{Key::C, false},
+                                   std::vector<std::pair<uint8_t, uint8_t>>{{60, 84}, {48, 72}, {36, 60}},
+                                   &stats, {}, policy);
+  EXPECT_EQ(result.size(), 6u);
+  EXPECT_EQ(stats.dropped, 0u);
+  EXPECT_EQ(stats.total_input, 6u);
+}
+
+TEST(PostValidatePolicyTest, SubjectPitchesProtected) {
+  // Subject notes must never have their pitches modified.
+  std::vector<NoteEvent> notes;
+  notes.push_back(makeNote(0, 72, 0, 480, BachNoteSource::FugueSubject));
+  notes.push_back(makeNote(0, 74, 480, 480, BachNoteSource::FugueSubject));
+  notes.push_back(makeNote(1, 60, 0, 480, BachNoteSource::FreeCounterpoint));
+
+  PostValidatePolicy policy;
+  PostValidateStats stats;
+  auto result = postValidateNotes(std::move(notes), 2,
+                                   KeySignature{Key::C, false},
+                                   std::vector<std::pair<uint8_t, uint8_t>>{{60, 84}, {48, 72}},
+                                   &stats, {}, policy);
+  // Subject pitches must be preserved.
+  bool found_subject_0 = false;
+  bool found_subject_1 = false;
+  for (const auto& note : result) {
+    if (note.source == BachNoteSource::FugueSubject && note.start_tick == 0) {
+      EXPECT_EQ(note.pitch, 72u);
+      found_subject_0 = true;
+    }
+    if (note.source == BachNoteSource::FugueSubject && note.start_tick == 480) {
+      EXPECT_EQ(note.pitch, 74u);
+      found_subject_1 = true;
+    }
+  }
+  EXPECT_TRUE(found_subject_0);
+  EXPECT_TRUE(found_subject_1);
+}
+
+TEST(PostValidatePolicyTest, SubjectCoreProtected) {
+  std::vector<NoteEvent> notes;
+  notes.push_back(makeNote(0, 65, 0, 480, BachNoteSource::SubjectCore));
+
+  PostValidatePolicy policy;
+  PostValidateStats stats;
+  auto result = postValidateNotes(std::move(notes), 2,
+                                   KeySignature{Key::C, false},
+                                   std::vector<std::pair<uint8_t, uint8_t>>{{60, 84}, {48, 72}},
+                                   &stats, {}, policy);
+  ASSERT_EQ(result.size(), 1u);
+  EXPECT_EQ(result[0].pitch, 65u);
+}
+
+TEST(PostValidatePolicyTest, AnswerPitchProtected) {
+  std::vector<NoteEvent> notes;
+  notes.push_back(makeNote(1, 67, 960, 480, BachNoteSource::FugueAnswer));
+
+  PostValidatePolicy policy;
+  PostValidateStats stats;
+  auto result = postValidateNotes(std::move(notes), 2,
+                                   KeySignature{Key::C, false},
+                                   std::vector<std::pair<uint8_t, uint8_t>>{{60, 84}, {48, 72}},
+                                   &stats, {}, policy);
+  ASSERT_EQ(result.size(), 1u);
+  EXPECT_EQ(result[0].pitch, 67u);
+}
+
+TEST(PostValidatePolicyTest, CountersubjectProtected) {
+  std::vector<NoteEvent> notes;
+  notes.push_back(makeNote(1, 64, 0, 480, BachNoteSource::Countersubject));
+
+  PostValidatePolicy policy;
+  PostValidateStats stats;
+  auto result = postValidateNotes(std::move(notes), 2,
+                                   KeySignature{Key::C, false},
+                                   std::vector<std::pair<uint8_t, uint8_t>>{{60, 84}, {48, 72}},
+                                   &stats, {}, policy);
+  ASSERT_EQ(result.size(), 1u);
+  EXPECT_EQ(result[0].pitch, 64u);
+}
+
+TEST(PostValidatePolicyTest, RangeClampingApplied) {
+  // A note outside range should be clamped.
+  std::vector<NoteEvent> notes;
+  // Pitch 90 is above the range [60, 84] for voice 0.
+  notes.push_back(makeNote(0, 90, 0, 480, BachNoteSource::FreeCounterpoint));
+  // Pitch 30 is below the range [48, 72] for voice 1.
+  notes.push_back(makeNote(1, 30, 0, 480, BachNoteSource::EpisodeMaterial));
+
+  PostValidatePolicy policy;
+  PostValidateStats stats;
+  auto result = postValidateNotes(std::move(notes), 2,
+                                   KeySignature{Key::C, false},
+                                   std::vector<std::pair<uint8_t, uint8_t>>{{60, 84}, {48, 72}},
+                                   &stats, {}, policy);
+  ASSERT_EQ(result.size(), 2u);
+  EXPECT_EQ(result[0].pitch, 84u);  // Clamped to upper bound.
+  EXPECT_EQ(result[1].pitch, 48u);  // Clamped to lower bound.
+  EXPECT_GE(stats.repaired, 2u);
+}
+
+TEST(PostValidatePolicyTest, ImmutableNotesNotRangeClamped) {
+  // Immutable notes (SubjectCore, CantusFixed, GroundBass) should not be clamped.
+  std::vector<NoteEvent> notes;
+  notes.push_back(makeNote(0, 90, 0, 480, BachNoteSource::SubjectCore));
+
+  PostValidatePolicy policy;
+  PostValidateStats stats;
+  auto result = postValidateNotes(std::move(notes), 2,
+                                   KeySignature{Key::C, false},
+                                   std::vector<std::pair<uint8_t, uint8_t>>{{60, 84}, {48, 72}},
+                                   &stats, {}, policy);
+  ASSERT_EQ(result.size(), 1u);
+  EXPECT_EQ(result[0].pitch, 90u);  // Not clamped: immutable.
+}
+
+TEST(PostValidatePolicyTest, ParallelRepairDisabled) {
+  // When policy disables parallel repair, no parallel perfect fixes are applied.
+  PostValidatePolicy policy;
+  policy.fix_parallel_perfect = false;
+
+  std::vector<NoteEvent> notes;
+  notes.push_back(makeNote(0, 72, 0, 480, BachNoteSource::FreeCounterpoint));
+  notes.push_back(makeNote(1, 60, 0, 480, BachNoteSource::FreeCounterpoint));
+  notes.push_back(makeNote(0, 79, 480, 480, BachNoteSource::FreeCounterpoint));
+  notes.push_back(makeNote(1, 67, 480, 480, BachNoteSource::FreeCounterpoint));
+
+  PostValidateStats stats;
+  auto result = postValidateNotes(std::move(notes), 2,
+                                   KeySignature{Key::C, false},
+                                   std::vector<std::pair<uint8_t, uint8_t>>{{60, 84}, {48, 72}},
+                                   &stats, {}, policy);
+  // With repair disabled, parallel 5ths may remain. No notes dropped.
+  EXPECT_EQ(result.size(), 4u);
+  EXPECT_EQ(stats.dropped, 0u);
+}
+
+TEST(PostValidatePolicyTest, StatsTrackShiftMagnitude) {
+  // Out-of-range notes get clamped, producing measurable shifts.
+  std::vector<NoteEvent> notes;
+  notes.push_back(makeNote(0, 90, 0, 480, BachNoteSource::FreeCounterpoint));  // +6 shift
+  notes.push_back(makeNote(1, 60, 0, 480, BachNoteSource::FreeCounterpoint));  // No shift
+
+  PostValidatePolicy policy;
+  PostValidateStats stats;
+  auto result = postValidateNotes(std::move(notes), 2,
+                                   KeySignature{Key::C, false},
+                                   std::vector<std::pair<uint8_t, uint8_t>>{{60, 84}, {48, 72}},
+                                   &stats, {}, policy);
+  EXPECT_GE(stats.max_shift_semitones, 6);
+  EXPECT_GT(stats.avg_shift_semitones, 0.0f);
+}
+
+TEST(PostValidatePolicyTest, FunctionBasedRangeOverload) {
+  std::vector<NoteEvent> notes;
+  notes.push_back(makeNote(0, 72, 0, 480, BachNoteSource::FreeCounterpoint));
+  notes.push_back(makeNote(1, 60, 0, 480, BachNoteSource::FreeCounterpoint));
+
+  PostValidatePolicy policy;
+  PostValidateStats stats;
+  auto range_fn = [](uint8_t voice,
+                     Tick /*tick*/) -> std::pair<uint8_t, uint8_t> {
+    if (voice == 0) return {60, 84};
+    return {48, 72};
+  };
+  auto result = postValidateNotes(std::move(notes), 2,
+                                   KeySignature{Key::C, false},
+                                   range_fn, &stats, {}, policy);
+  EXPECT_EQ(result.size(), 2u);
+  EXPECT_EQ(stats.dropped, 0u);
+}
+
+TEST(PostValidatePolicyTest, VectorAndFunctionOverloadsProduceSameResult) {
+  // Both policy-aware overloads should produce identical results.
+  auto make_test_notes = []() {
+    std::vector<NoteEvent> notes;
+    notes.push_back(makeNote(0, 72, 0, 480, BachNoteSource::FreeCounterpoint));
+    notes.push_back(makeNote(1, 60, 0, 480, BachNoteSource::FreeCounterpoint));
+    notes.push_back(makeNote(0, 74, 480, 480, BachNoteSource::FugueSubject));
+    notes.push_back(makeNote(1, 62, 480, 480, BachNoteSource::Countersubject));
+    return notes;
+  };
+
+  std::vector<std::pair<uint8_t, uint8_t>> ranges = {{60, 84}, {48, 72}};
+  PostValidatePolicy policy;
+  PostValidateStats stats_vec, stats_fn;
+
+  auto result_vec = postValidateNotes(make_test_notes(), 2,
+                                       KeySignature{Key::C, false},
+                                       ranges, &stats_vec, {}, policy);
+  auto range_fn = [&ranges](uint8_t voice,
+                             Tick /*tick*/) -> std::pair<uint8_t, uint8_t> {
+    if (voice < ranges.size()) return ranges[voice];
+    return {0, 127};
+  };
+  auto result_fn = postValidateNotes(make_test_notes(), 2,
+                                      KeySignature{Key::C, false},
+                                      range_fn, &stats_fn, {}, policy);
+
+  ASSERT_EQ(result_vec.size(), result_fn.size());
+  for (size_t idx = 0; idx < result_vec.size(); ++idx) {
+    EXPECT_EQ(result_vec[idx].pitch, result_fn[idx].pitch) << "idx=" << idx;
+    EXPECT_EQ(result_vec[idx].voice, result_fn[idx].voice) << "idx=" << idx;
+    EXPECT_EQ(result_vec[idx].start_tick, result_fn[idx].start_tick) << "idx=" << idx;
+  }
+  EXPECT_EQ(stats_vec.total_input, stats_fn.total_input);
+  EXPECT_EQ(stats_vec.dropped, stats_fn.dropped);
+}
+
+TEST(PostValidateStatsTest, ExpandedFieldsDefaultToZero) {
+  PostValidateStats stats;
+  EXPECT_EQ(stats.parallel_fixes, 0u);
+  EXPECT_EQ(stats.crossing_fixes, 0u);
+  EXPECT_EQ(stats.dissonance_fixes, 0u);
+  EXPECT_FLOAT_EQ(stats.avg_shift_semitones, 0.0f);
+  EXPECT_EQ(stats.max_shift_semitones, 0);
+  EXPECT_EQ(stats.subject_touches, 0u);
+  EXPECT_EQ(stats.countersubject_touches, 0u);
+  EXPECT_EQ(stats.stretto_section_touches, 0u);
+}
+
+TEST(PostValidateStatsTest, DropRateCalculation) {
+  PostValidateStats stats;
+  stats.total_input = 100;
+  stats.dropped = 5;
+  EXPECT_NEAR(stats.drop_rate(), 0.05f, 0.001f);
+
+  stats.total_input = 0;
+  EXPECT_FLOAT_EQ(stats.drop_rate(), 0.0f);
+}
+
 }  // namespace
 }  // namespace bach

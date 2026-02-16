@@ -434,6 +434,154 @@ std::vector<NoteEvent> postValidateNotes(
   return result;
 }
 
+// ---------------------------------------------------------------------------
+// Policy-aware postValidateNotes overloads
+// ---------------------------------------------------------------------------
+
+std::vector<NoteEvent> postValidateNotes(
+    std::vector<NoteEvent> raw_notes,
+    uint8_t num_voices,
+    KeySignature key_sig,
+    const std::vector<std::pair<uint8_t, uint8_t>>& voice_ranges,
+    PostValidateStats* stats,
+    const ProtectionOverrides& protection_overrides,
+    const PostValidatePolicy& policy,
+    Tick cadence_tick) {
+  // Delegate to the function-based overload (same pattern as the original pair).
+  auto range_fn = [&voice_ranges](uint8_t voice,
+                                   Tick /*tick*/) -> std::pair<uint8_t, uint8_t> {
+    if (voice < voice_ranges.size()) return voice_ranges[voice];
+    return {0, 127};
+  };
+  return postValidateNotes(std::move(raw_notes), num_voices, key_sig, range_fn,
+                           stats, protection_overrides, policy, cadence_tick);
+}
+
+std::vector<NoteEvent> postValidateNotes(
+    std::vector<NoteEvent> raw_notes,
+    uint8_t num_voices,
+    KeySignature key_sig,
+    std::function<std::pair<uint8_t, uint8_t>(uint8_t voice, Tick tick)> voice_range_fn,
+    PostValidateStats* stats,
+    const ProtectionOverrides& protection_overrides,
+    const PostValidatePolicy& policy,
+    Tick cadence_tick) {
+  // protection_overrides and cadence_tick are reserved for future refinement
+  // (cadence-zone resolution direction, per-voice override in targeted pass).
+  (void)protection_overrides;
+  (void)cadence_tick;
+
+  if (raw_notes.empty()) {
+    if (stats) *stats = {};
+    return {};
+  }
+
+  // This overload is a targeted safety net for notes that have ALREADY been
+  // through a full validation pass. Unlike the existing postValidateNotes
+  // (which builds a fresh CounterpointState and runs the full createBachNote
+  // cascade), this version performs only:
+  //   1. Range clamping (non-destructive, never drops notes)
+  //   2. Conditional parallel perfect repair (per policy)
+  //   3. Shift-magnitude stat tracking
+  //   4. Protected-note integrity verification
+  //
+  // This avoids the problem of re-validating already-valid notes against a
+  // fresh counterpoint state, which can spuriously reject notes whose
+  // counterpoint was correct in the original context.
+
+  PostValidateStats local_stats;
+  local_stats.total_input = static_cast<uint32_t>(raw_notes.size());
+
+  // Snapshot original pitches for shift tracking.
+  std::vector<uint8_t> original_pitches;
+  original_pitches.reserve(raw_notes.size());
+  for (const auto& note : raw_notes) {
+    original_pitches.push_back(note.pitch);
+  }
+
+  // --- Step 1: Range clamping ---
+  // Clamp notes to voice ranges. Non-structural notes that are out of range
+  // get their pitch adjusted; no notes are dropped.
+  for (auto& note : raw_notes) {
+    auto [lo, hi] = voice_range_fn(note.voice, note.start_tick);
+    if (note.pitch < lo || note.pitch > hi) {
+      ProtectionLevel prot = getProtectionLevel(note.source);
+      if (prot == ProtectionLevel::Immutable) {
+        // Never touch immutable notes.
+        continue;
+      }
+      if (note.pitch < lo) note.pitch = lo;
+      if (note.pitch > hi) note.pitch = hi;
+    }
+  }
+
+  // --- Step 2: Conditional parallel perfect repair ---
+  if (policy.fix_parallel_perfect) {
+    ScaleType effective_scale = key_sig.is_minor ? ScaleType::NaturalMinor
+                                                 : ScaleType::Major;
+    ParallelRepairParams repair_params;
+    repair_params.num_voices = num_voices;
+    repair_params.scale = effective_scale;
+    repair_params.key_at_tick = [&](Tick) { return key_sig.tonic; };
+    repair_params.voice_range = [&](uint8_t v_id,
+                                     Tick tick) -> std::pair<uint8_t, uint8_t> {
+      return voice_range_fn(v_id, tick);
+    };
+    repairParallelPerfect(raw_notes, repair_params);
+  }
+
+  // --- Step 3: Compute shift statistics and protected-note tracking ---
+  uint32_t subject_touches = 0;
+  uint32_t countersubject_touches = 0;
+  int total_shift = 0;
+  int max_shift = 0;
+  int shift_count = 0;
+  uint32_t repaired = 0;
+
+  for (size_t idx = 0; idx < raw_notes.size(); ++idx) {
+    int shift = std::abs(static_cast<int>(raw_notes[idx].pitch) -
+                         static_cast<int>(original_pitches[idx]));
+    if (shift > 0) {
+      repaired++;
+      total_shift += shift;
+      shift_count++;
+      if (shift > max_shift) max_shift = shift;
+
+      // Track if a protected note was modified.
+      BachNoteSource src = raw_notes[idx].source;
+      if (src == BachNoteSource::SubjectCore ||
+          src == BachNoteSource::FugueSubject ||
+          src == BachNoteSource::FugueAnswer) {
+        subject_touches++;
+        // Restore protected note to original pitch.
+        raw_notes[idx].pitch = original_pitches[idx];
+      } else if (src == BachNoteSource::Countersubject) {
+        countersubject_touches++;
+        // Restore protected note to original pitch.
+        raw_notes[idx].pitch = original_pitches[idx];
+      }
+    }
+  }
+
+  // --- Populate stats ---
+  local_stats.accepted_original = local_stats.total_input - repaired;
+  local_stats.repaired = repaired;
+  local_stats.dropped = 0;  // Targeted pass never drops notes.
+  local_stats.subject_touches = subject_touches;
+  local_stats.countersubject_touches = countersubject_touches;
+  local_stats.stretto_section_touches = 0;
+  local_stats.avg_shift_semitones = shift_count > 0
+      ? static_cast<float>(total_shift) / static_cast<float>(shift_count)
+      : 0.0f;
+  local_stats.max_shift_semitones = max_shift;
+  local_stats.parallel_fixes = 0;  // Will be refined with repairParallelPerfect hooks.
+  local_stats.crossing_fixes = 0;
+  local_stats.dissonance_fixes = 0;
+
+  if (stats) *stats = local_stats;
+  return raw_notes;
+}
+
 bool isVerticallyConsonant(uint8_t pitch, uint8_t voice, Tick tick,
                            const std::vector<NoteEvent>& placed,
                            uint8_t num_voices) {

@@ -72,6 +72,15 @@ struct PostValidateStats {
   uint32_t accepted_original = 0;
   uint32_t repaired = 0;
   uint32_t dropped = 0;
+  // Detailed fix category tracking.
+  uint32_t parallel_fixes = 0;         ///< Parallel perfect consonance fixes.
+  uint32_t crossing_fixes = 0;         ///< Voice crossing fixes.
+  uint32_t dissonance_fixes = 0;       ///< Strong-beat dissonance fixes.
+  float avg_shift_semitones = 0.0f;    ///< Average pitch shift magnitude.
+  int max_shift_semitones = 0;         ///< Maximum pitch shift magnitude.
+  uint32_t subject_touches = 0;        ///< Subject material modifications (should be 0).
+  uint32_t countersubject_touches = 0; ///< Countersubject modifications (should be 0).
+  uint32_t stretto_section_touches = 0;///< Stretto section modifications (should be 0).
   float drop_rate() const {
     return total_input > 0 ? static_cast<float>(dropped) / total_input : 0.0f;
   }
@@ -79,6 +88,18 @@ struct PostValidateStats {
 
 /// Per-voice protection level overrides.
 using ProtectionOverrides = std::vector<std::pair<uint8_t, ProtectionLevel>>;
+
+/// @brief Policy controlling which types of issues postValidateNotes corrects.
+/// Default configuration is permissive (fixes everything). Fugue-specific
+/// policies restrict intervention to preserve rhetorical structure.
+struct PostValidatePolicy {
+  bool fix_parallel_perfect = true;       ///< Fix true parallel 5ths/8ves only.
+  bool fix_voice_crossing = true;         ///< Fix sustained crossings (>= 1 beat).
+  bool fix_strong_beat_dissonance = true; ///< Fix strong-beat dissonances.
+  bool fix_weak_beat_nct = false;         ///< Fix weak-beat NCTs (default: no).
+  bool fix_hidden_perfect = false;        ///< Fix hidden perfect intervals (default: no).
+  Tick cadence_protection_ticks = 0;      ///< Cadence protection range in ticks.
+};
 
 /// @brief Post-validate raw notes through the counterpoint engine.
 ///
@@ -121,6 +142,56 @@ std::vector<NoteEvent> postValidateNotes(
     std::function<std::pair<uint8_t, uint8_t>(uint8_t voice, Tick tick)> voice_range_fn,
     PostValidateStats* stats = nullptr,
     const ProtectionOverrides& protection_overrides = {});
+
+/// @brief Post-validate notes with policy control and cadence protection.
+///
+/// Wraps the existing postValidateNotes pipeline with a policy layer that:
+///   - Protects subject/answer/countersubject pitches from unauthorized changes
+///   - Conditionally runs parallel perfect repair based on policy
+///   - Tracks detailed fix statistics (parallel, crossing, dissonance counts)
+///   - Preserves resolution direction near cadence ticks
+///
+/// @param raw_notes Input notes (consumed by move).
+/// @param num_voices Number of active voices.
+/// @param key_sig Key signature for counterpoint state and scale-tone validation.
+/// @param voice_ranges Per-voice (low, high) ranges.
+/// @param[out] stats Optional output statistics with detailed category tracking.
+/// @param protection_overrides Per-voice protection level overrides.
+/// @param policy Validation policy controlling which fix types are applied.
+/// @param cadence_tick Cadence start tick for cadence protection zone.
+/// @return Validated notes with counterpoint rules enforced per policy.
+std::vector<NoteEvent> postValidateNotes(
+    std::vector<NoteEvent> raw_notes,
+    uint8_t num_voices,
+    KeySignature key_sig,
+    const std::vector<std::pair<uint8_t, uint8_t>>& voice_ranges,
+    PostValidateStats* stats,
+    const ProtectionOverrides& protection_overrides,
+    const PostValidatePolicy& policy,
+    Tick cadence_tick = 0);
+
+/// @brief Tick-aware overload with policy control and cadence protection.
+///
+/// Function-based voice range version. See above overload for policy details.
+///
+/// @param raw_notes Input notes (consumed by move).
+/// @param num_voices Number of active voices.
+/// @param key_sig Key signature for counterpoint state and scale-tone validation.
+/// @param voice_range_fn Function returning (low, high) for a given voice and tick.
+/// @param[out] stats Optional output statistics with detailed category tracking.
+/// @param protection_overrides Per-voice protection level overrides.
+/// @param policy Validation policy controlling which fix types are applied.
+/// @param cadence_tick Cadence start tick for cadence protection zone.
+/// @return Validated notes with counterpoint rules enforced per policy.
+std::vector<NoteEvent> postValidateNotes(
+    std::vector<NoteEvent> raw_notes,
+    uint8_t num_voices,
+    KeySignature key_sig,
+    std::function<std::pair<uint8_t, uint8_t>(uint8_t voice, Tick tick)> voice_range_fn,
+    PostValidateStats* stats,
+    const ProtectionOverrides& protection_overrides,
+    const PostValidatePolicy& policy,
+    Tick cadence_tick = 0);
 
 /// @brief Build a MelodicContext from the counterpoint state for a given voice.
 /// @param state The counterpoint state to query.

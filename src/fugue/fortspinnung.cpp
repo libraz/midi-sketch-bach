@@ -208,6 +208,20 @@ std::vector<NoteEvent> generateFortspinnung(const MotifPool& pool,
   int seq_step = sequenceStepForCharacter(character, rng);
 
   // --- Voice 0: Primary Fortspinnung line ---
+  // NOTE: Vocabulary figure matching (tryVocabularyMotif) is intentionally NOT
+  // applied in the Fortspinnung path. Fortspinnung draws fragments directly from
+  // the MotifPool (subject-derived motifs ranked by characteristic_score), which
+  // already ensures motivic coherence with the fugue subject. Applying vocabulary
+  // substitution here would:
+  //   1. Break the pool-based fragment ranking (fragments would no longer match
+  //      their PooledMotif::characteristic_score).
+  //   2. Disrupt the closeGapIfNeeded() voice-leading logic, which assumes
+  //      fragments retain their original pitch contour.
+  //   3. Conflict with the sequential transposition chain, where each fragment
+  //      is transposed by seq_step relative to its predecessor.
+  // Vocabulary integration is handled in generateEpisode() (the fallback path),
+  // where motifs are extracted fresh from the subject head and are not part of
+  // a sequential chain.
   // Select fragments sequentially and connect them via transposition.
   Tick current_tick = 0;
   std::vector<NoteEvent> prev_fragment;

@@ -4,9 +4,13 @@
 
 #include <algorithm>
 #include <cassert>
+#include <cstdio>
 #include <random>
+#include <tuple>
+#include <unordered_map>
 #include <vector>
 
+#include "core/bach_vocabulary.h"
 #include "core/note_creator.h"
 #include "core/note_source.h"
 #include "core/pitch_utils.h"
@@ -130,10 +134,114 @@ void enforcePreludeSlotDurations(FigurationTemplate& tmpl, uint8_t num_voices) {
   tmpl.steps = std::move(deduped);
 }
 
+// ---------------------------------------------------------------------------
+// Texture thinning for boundary-driven density reduction
+// ---------------------------------------------------------------------------
+
+/// @brief Texture thinning strategy at phrase/harmonic boundaries.
+enum class TextureThinning : uint8_t {
+  None,             ///< No thinning applied.
+  ShortenDuration,  ///< Shorten inner voice durations (most conservative).
+  DropDoubling,     ///< Remove octave doublings at phrase boundaries.
+};
+
+/// @brief Determine texture thinning at a given bar and beat position.
+/// @param bar_idx Zero-based bar index of the note.
+/// @param beat_in_bar Zero-based beat index within the bar.
+/// @param total_bars Total number of bars in the prelude (reserved for future cadence logic).
+/// @param beats_per_bar Number of beats per bar.
+/// @param num_voices Number of voices in the prelude.
+/// @param timeline Harmonic timeline for event boundary detection.
+/// @param beat_tick Absolute tick of the beat position.
+/// @return TextureThinning strategy to apply at this position.
+TextureThinning thinningAt(int bar_idx, int beat_in_bar,
+                           int /*total_bars*/,
+                           int beats_per_bar, uint8_t num_voices,
+                           const HarmonicTimeline& timeline, Tick beat_tick) {
+  if (num_voices < 3) return TextureThinning::None;
+
+  bool is_phrase_end = (bar_idx % 2 == 1) && (beat_in_bar == beats_per_bar - 1);
+
+  // Check if next beat starts a new harmonic event.
+  bool is_event_boundary = false;
+  Tick next_beat_tick = beat_tick + kTicksPerBeat;
+  const auto& events = timeline.events();
+  for (const auto& evt : events) {
+    if (evt.tick > beat_tick && evt.tick <= next_beat_tick) {
+      is_event_boundary = true;
+      break;
+    }
+  }
+
+  if (is_phrase_end) return TextureThinning::ShortenDuration;
+  if (is_event_boundary) return TextureThinning::ShortenDuration;
+  return TextureThinning::None;
+}
+
+// ---------------------------------------------------------------------------
+// JSD diagnostic: interval distribution statistics
+// ---------------------------------------------------------------------------
+
+/// @brief Compute interval distribution from notes (simplified JSD proxy).
+/// @param notes Vector of NoteEvents to analyze.
+/// @param num_voices Number of voices in the prelude.
+/// @return Tuple of {stepwise_ratio, leap_ratio, avg_interval}.
+std::tuple<float, float, float> computeIntervalStats(
+    const std::vector<NoteEvent>& notes, uint8_t /*num_voices*/) {
+  // Sort by (voice, tick) for sequential interval computation.
+  std::vector<const NoteEvent*> sorted;
+  sorted.reserve(notes.size());
+  for (const auto& note : notes) sorted.push_back(&note);
+  std::sort(sorted.begin(), sorted.end(),
+            [](const NoteEvent* lhs, const NoteEvent* rhs) {
+              if (lhs->voice != rhs->voice) return lhs->voice < rhs->voice;
+              return lhs->start_tick < rhs->start_tick;
+            });
+
+  int step_count = 0;
+  int leap_count = 0;
+  float interval_sum = 0.0f;
+  int total_intervals = 0;
+  uint8_t prev_voice = 255;
+  uint8_t prev_pitch = 0;
+
+  for (const auto* nptr : sorted) {
+    if (nptr->voice == prev_voice && prev_pitch > 0) {
+      int interval = std::abs(static_cast<int>(nptr->pitch) -
+                              static_cast<int>(prev_pitch));
+      if (interval > 0) {
+        interval_sum += static_cast<float>(interval);
+        total_intervals++;
+        if (interval <= 2) {
+          step_count++;
+        } else {
+          leap_count++;
+        }
+      }
+    }
+    prev_voice = nptr->voice;
+    prev_pitch = nptr->pitch;
+  }
+
+  float stepwise = total_intervals > 0
+                       ? static_cast<float>(step_count) / total_intervals
+                       : 0.0f;
+  float leap = total_intervals > 0
+                   ? static_cast<float>(leap_count) / total_intervals
+                   : 0.0f;
+  float avg = total_intervals > 0 ? interval_sum / total_intervals : 0.0f;
+  return {stepwise, leap, avg};
+}
+
+// ---------------------------------------------------------------------------
+// Harmony-first prelude generation
+// ---------------------------------------------------------------------------
+
 // Harmony-first prelude generation: voice chords, then figurate.
 std::vector<NoteEvent> generateHarmonicPreludeNotes(
     const HarmonicTimeline& timeline, uint8_t num_voices,
-    FigurationType fig_type, std::mt19937& rng) {
+    FigurationType fig_type, std::mt19937& rng,
+    PreludeType prelude_type) {
   // Section-level vocabulary slot pattern selection (position-dependent).
   std::vector<NoteEvent> all_notes;
   const auto& events = timeline.events();
@@ -205,6 +313,22 @@ std::vector<NoteEvent> generateHarmonicPreludeNotes(
   Tick total_duration = events.empty() ? 0 :
       (events.back().end_tick - events.front().tick);
 
+  // Rhythm variation probability depends on prelude type.
+  float rhythm_variation_prob =
+      (prelude_type == PreludeType::Perpetual) ? 0.05f : 0.15f;
+
+  // Available new figuration types for phrase-level variety.
+  constexpr FigurationType kNewFigTypes[] = {
+      FigurationType::Falling3v, FigurationType::Arch3v,
+      FigurationType::Mixed3v, FigurationType::Falling4v,
+  };
+  constexpr int kNewFigTypeCount = 4;
+
+  // 2-bar phrase-level figuration type selection state.
+  FigurationType current_phrase_type = fig_type;
+  int phrase_idx = -1;
+  int total_bars = static_cast<int>(total_duration / kTicksPerBar);
+
   for (size_t i = 0; i < events.size(); ++i) {
     const auto& ev = events[i];
     const auto& voicing = voicings[i];
@@ -246,6 +370,26 @@ std::vector<NoteEvent> generateHarmonicPreludeNotes(
     for (int b = 0; b < num_beats; ++b) {
       Tick beat_tick = ev.tick + static_cast<Tick>(b) * kTicksPerBeat;
 
+      // 2-bar phrase-level figuration type selection.
+      int bar_idx = static_cast<int>(beat_tick / kTicksPerBar);
+      int new_phrase_idx = bar_idx / 2;
+      if (new_phrase_idx != phrase_idx) {
+        phrase_idx = new_phrase_idx;
+        // 40% chance to use a new figuration type for variety.
+        if (rng::rollProbability(rng, 0.40f)) {
+          int pick = rng::rollRange(rng, 0, kNewFigTypeCount - 1);
+          current_phrase_type = kNewFigTypes[pick];
+        } else {
+          current_phrase_type = fig_type;  // Revert to base type.
+        }
+      }
+
+      // Near-cadence (last 2 bars): reduce rhythm variation for convergence.
+      float effective_rhythm_var = rhythm_variation_prob;
+      if (bar_idx >= total_bars - 2) {
+        effective_rhythm_var = 0.05f;
+      }
+
       // Variation: on second half of bar, shift mid voice for variety.
       ChordVoicing beat_voicing = voicing;
       if (b >= beats_per_bar / 2 && num_beats >= beats_per_bar) {
@@ -273,7 +417,25 @@ std::vector<NoteEvent> generateHarmonicPreludeNotes(
         }
       }
 
-      auto fig_notes = applyFiguration(beat_voicing, tmpl, beat_tick, ev, voice_range);
+      // Select figuration template: use phrase-level new type or slot pattern.
+      // When the phrase selected a new figuration type, use the rng overload.
+      // Otherwise, use the existing slot-pattern-aware template from the event.
+      FigurationTemplate beat_tmpl;
+      if (current_phrase_type != fig_type) {
+        beat_tmpl = createFigurationTemplate(current_phrase_type, num_voices,
+                                             rng, effective_rhythm_var);
+        // Enforce minimum voice durations (middle >= eighth, bass >= quarter).
+        enforcePreludeSlotDurations(beat_tmpl, num_voices);
+      } else {
+        beat_tmpl = tmpl;
+      }
+      // Compute section progress for NCT direction bias.
+      float section_progress = total_duration > 0
+          ? static_cast<float>(beat_tick - events.front().tick) /
+            static_cast<float>(total_duration)
+          : 0.5f;
+      auto fig_notes = applyFiguration(beat_voicing, beat_tmpl, beat_tick,
+                                       ev, voice_range, section_progress);
       all_notes.insert(all_notes.end(), fig_notes.begin(), fig_notes.end());
     }
   }
@@ -328,11 +490,116 @@ PreludeResult generatePrelude(const PreludeConfig& config) {
                                 ? FigurationType::ScaleConnect
                                 : FigurationType::BrokenChord;
   std::vector<NoteEvent> all_notes =
-      generateHarmonicPreludeNotes(timeline, num_voices, fig_type, rng);
+      generateHarmonicPreludeNotes(timeline, num_voices, fig_type, rng,
+                                   config.type);
 
   // Tag untagged notes with source for counterpoint protection levels.
   assert(countUnknownSource(all_notes) == 0 &&
          "All notes should have source set by generators");
+
+  // Opening tonic pedal for Perpetual preludes (BWV543 style).
+  // Bass voice sustains tonic for first 3 bars while upper voices figurate,
+  // creating oblique motion and harmonic stability.
+  if (config.type == PreludeType::Perpetual && num_voices >= 3) {
+    uint8_t bass_voice = static_cast<uint8_t>(num_voices - 1);
+    Tick pedal_end = std::min(kTicksPerBar * 3, target_duration);
+
+    // Remove existing bass voice notes in pedal region.
+    all_notes.erase(
+        std::remove_if(all_notes.begin(), all_notes.end(),
+                       [bass_voice, pedal_end](const NoteEvent& note) {
+                         return note.voice == bass_voice &&
+                                note.start_tick < pedal_end;
+                       }),
+        all_notes.end());
+
+    // Find closest tonic pitch to center of bass range.
+    auto [bass_lo, bass_hi] =
+        std::make_pair(getVoiceLowPitch(bass_voice), getVoiceHighPitch(bass_voice));
+    int tonic_pc = static_cast<int>(config.key.tonic);
+    int center = (static_cast<int>(bass_lo) + static_cast<int>(bass_hi)) / 2;
+    uint8_t tonic_pitch = bass_lo;
+    for (int pitch = static_cast<int>(bass_lo); pitch <= static_cast<int>(bass_hi);
+         ++pitch) {
+      if (((pitch % 12) + 12) % 12 == tonic_pc) {
+        if (std::abs(pitch - center) <
+            std::abs(static_cast<int>(tonic_pitch) - center)) {
+          tonic_pitch = static_cast<uint8_t>(pitch);
+        }
+      }
+    }
+
+    // Generate tonic pedal notes (one per bar for clean overlap).
+    for (Tick bar_start = 0; bar_start < pedal_end; bar_start += kTicksPerBar) {
+      NoteEvent pedal;
+      pedal.start_tick = bar_start;
+      pedal.duration = kTicksPerBar;
+      pedal.pitch = tonic_pitch;
+      pedal.velocity = kOrganVelocity;
+      pedal.voice = bass_voice;
+      pedal.source = BachNoteSource::PedalPoint;
+      all_notes.push_back(pedal);
+    }
+  }
+
+  // Bass voice harmonic constraint ceiling (kOrganPedalConstraint).
+  // Ensure bass voice notes are predominantly chord tones. Only intervene
+  // if the ratio drops below the ceiling threshold (0.85 from BWV578 pedal).
+  if (num_voices >= 3) {
+    uint8_t bass_voice = static_cast<uint8_t>(num_voices - 1);
+    int bass_total = 0;
+    int bass_chord_tones = 0;
+    for (const auto& note : all_notes) {
+      if (note.voice != bass_voice) continue;
+      if (note.source == BachNoteSource::PedalPoint) continue;
+      bass_total++;
+      if (isChordTone(note.pitch, timeline.getAt(note.start_tick))) {
+        bass_chord_tones++;
+      }
+    }
+    float ct_ratio = bass_total > 0
+        ? static_cast<float>(bass_chord_tones) / bass_total
+        : 1.0f;
+
+    // Only intervene if below ceiling.
+    if (ct_ratio < kOrganPedalConstraint.chord_tone_ratio) {
+      for (auto& note : all_notes) {
+        if (note.voice != bass_voice) continue;
+        if (note.source == BachNoteSource::PedalPoint) continue;
+        if (isChordTone(note.pitch, timeline.getAt(note.start_tick))) continue;
+
+        // Strong-beat notes get priority snapping.
+        bool is_strong = (note.start_tick % kTicksPerBeat == 0);
+        if (!is_strong) continue;  // Only fix strong-beat non-chord tones.
+
+        const auto& harm_ev = timeline.getAt(note.start_tick);
+        uint8_t bass_lo = getVoiceLowPitch(bass_voice);
+        uint8_t bass_hi = getVoiceHighPitch(bass_voice);
+
+        // Find nearest chord tone within bass range.
+        auto chord_pcs = getChordPitchClasses(harm_ev.chord.quality,
+                                              getPitchClass(harm_ev.chord.root_pitch));
+        int best_dist = 999;
+        uint8_t best_pitch = note.pitch;
+        for (int cand = static_cast<int>(bass_lo);
+             cand <= static_cast<int>(bass_hi); ++cand) {
+          int cand_pc = ((cand % 12) + 12) % 12;
+          for (int pitch_class : chord_pcs) {
+            if (cand_pc == pitch_class) {
+              int dist = std::abs(cand - static_cast<int>(note.pitch));
+              if (dist < best_dist) {
+                best_dist = dist;
+                best_pitch = static_cast<uint8_t>(cand);
+              }
+            }
+          }
+        }
+        if (best_dist <= 3) {  // Only snap if within minor 3rd.
+          note.pitch = best_pitch;
+        }
+      }
+    }
+  }
 
   // ---- Unified coordination pass (vertical dissonance control) ----
   {
@@ -412,6 +679,103 @@ PreludeResult generatePrelude(const PreludeConfig& config) {
     repair_params.vertical_safe =
         makeVerticalSafeWithParallelCheck(timeline, all_notes, num_voices);
     repairRepeatedNotes(all_notes, repair_params);
+  }
+
+  // Boundary-driven texture thinning: reduce inner voice density at phrase
+  // and harmonic event boundaries for avg_active 2.0-2.5.
+  if (num_voices >= 3) {
+    int total_bars = static_cast<int>(target_duration / kTicksPerBar);
+    int beats_per_bar = static_cast<int>(kTicksPerBar / kTicksPerBeat);
+
+    for (auto& note : all_notes) {
+      // Only thin inner voices (not soprano or bass).
+      if (note.voice == 0 || note.voice == num_voices - 1) continue;
+      if (note.source == BachNoteSource::PedalPoint) continue;
+
+      int bar_idx = static_cast<int>(note.start_tick / kTicksPerBar);
+      int beat_in_bar = static_cast<int>(
+          (note.start_tick % kTicksPerBar) / kTicksPerBeat);
+
+      TextureThinning thin = thinningAt(bar_idx, beat_in_bar, total_bars,
+                                        beats_per_bar, num_voices, timeline,
+                                        note.start_tick);
+
+      if (thin == TextureThinning::ShortenDuration) {
+        // Shorten to half duration, minimum eighth note (preserving
+        // quantized duration constraints for inner voices).
+        Tick shortened = std::max(note.duration / 2, duration::kEighthNote);
+        // Near cadence (last 2 bars): further shorten.
+        if (bar_idx >= total_bars - 2) {
+          shortened = std::max(shortened / 2, duration::kEighthNote);
+        }
+        note.duration = shortened;
+      }
+    }
+  }
+
+  // Drop octave doublings in inner voices at phrase boundaries.
+  if (num_voices >= 3) {
+    // Build per-tick pitch set for outer voices (soprano + bass).
+    std::unordered_map<Tick, std::vector<uint8_t>> outer_pitches;
+    for (const auto& note : all_notes) {
+      if (note.voice == 0 || note.voice == num_voices - 1) {
+        outer_pitches[note.start_tick].push_back(note.pitch);
+      }
+    }
+
+    constexpr int kBeatsPerBarLocal = kTicksPerBar / kTicksPerBeat;
+
+    all_notes.erase(
+        std::remove_if(
+            all_notes.begin(), all_notes.end(),
+            [&](const NoteEvent& note) {
+              // Only remove inner voice doublings.
+              if (note.voice == 0 || note.voice == num_voices - 1) return false;
+              if (note.source == BachNoteSource::PedalPoint) return false;
+
+              int bar_idx = static_cast<int>(note.start_tick / kTicksPerBar);
+              int beat_in_bar = static_cast<int>(
+                  (note.start_tick % kTicksPerBar) / kTicksPerBeat);
+
+              // Only at phrase boundaries (end of 2-bar phrase).
+              bool is_phrase_boundary =
+                  (bar_idx % 2 == 1) && (beat_in_bar >= kBeatsPerBarLocal - 1);
+              if (!is_phrase_boundary) return false;
+
+              auto iter = outer_pitches.find(note.start_tick);
+              if (iter == outer_pitches.end()) return false;
+
+              int note_pc = note.pitch % 12;
+              for (uint8_t outer_p : iter->second) {
+                if (outer_p % 12 == note_pc && outer_p != note.pitch) {
+                  return true;  // Octave doubling -- remove.
+                }
+              }
+              return false;
+            }),
+        all_notes.end());
+  }
+
+  // Diagnostic: interval distribution vs Bach reference profile.
+  {
+    auto [stepwise, leap, avg_interval] =
+        computeIntervalStats(all_notes, num_voices);
+    const auto& ref = kOrganUpperProfile;
+    float step_diff = std::abs(stepwise - ref.stepwise_ratio);
+    float avg_diff = std::abs(avg_interval - ref.avg_interval);
+
+    // PreludeType-dependent thresholds.
+    float step_thresh = (config.type == PreludeType::Perpetual) ? 0.12f : 0.20f;
+    float avg_thresh = (config.type == PreludeType::Perpetual) ? 1.0f : 1.5f;
+
+    if (step_diff > step_thresh || avg_diff > avg_thresh) {
+      std::fprintf(stderr,
+                   "[Prelude] interval profile: stepwise=%.2f (ref %.2f, diff %.2f), "
+                   "leap=%.2f (ref %.2f), avg=%.1f (ref %.1f)\n",
+                   stepwise, ref.stepwise_ratio, step_diff,
+                   leap, ref.leap_ratio,
+                   avg_interval, ref.avg_interval);
+    }
   }
 
   // Step 4: Create tracks and assign notes by voice_id.

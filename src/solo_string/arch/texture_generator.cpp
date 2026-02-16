@@ -6,7 +6,6 @@
 #include <cmath>
 #include <random>
 
-#include "core/bach_vocabulary.h"
 #include "core/note_source.h"
 #include "core/pitch_utils.h"
 #include "core/rng_util.h"
@@ -17,6 +16,7 @@
 #include "harmony/harmonic_event.h"
 #include "harmony/scale_degree_utils.h"
 #include "solo_string/flow/arpeggio_pattern.h"
+#include "solo_string/solo_vocabulary.h"
 
 namespace bach {
 
@@ -995,13 +995,21 @@ std::vector<NoteEvent> generateBariolage(const TextureContext& ctx,
               note_tick, sub_duration, open_pitch, note_tick_in_bar, ctx.is_climax));
         } else if (stopped_pitch == open_pitch) {
           // Vocabulary fallback: when no open string contrast available,
-          // use chromatic neighbor alternation (inspired by kBariolage figure).
+          // use kBariolage figure's chromatic neighbor alternation pattern.
+          // kBariolage encodes a 4-note figure with degree_intervals:
+          //   {+1,-1}, {-1,+1}, {+1,-1} -- alternating neighbor directions.
           // Strong beat guarantee: always resolve to stopped_pitch on strong beats.
           bool is_strong_beat = (note_tick_in_bar % kTicksPerBeat == 0);
           int offset = 0;
-          if (!is_strong_beat) {
-            // Weak beat: chromatic neighbor alternation.
-            offset = (sub_idx % 4 < 2) ? 1 : -1;
+          if (!is_strong_beat && kBariolage.degree_intervals != nullptr) {
+            // Cycle through kBariolage degree intervals for alternation direction.
+            // note_count-1 intervals for note_count notes; sub_idx 0 is the
+            // anchor note, so intervals start at sub_idx 1.
+            int interval_count = static_cast<int>(kBariolage.note_count) - 1;
+            if (interval_count > 0 && sub_idx > 0) {
+              int ivl_idx = (static_cast<int>(sub_idx) - 1) % interval_count;
+              offset = kBariolage.degree_intervals[ivl_idx].degree_diff;
+            }
           }
           uint8_t alt_pitch = clampPitch(
               static_cast<int>(stopped_pitch) + offset,

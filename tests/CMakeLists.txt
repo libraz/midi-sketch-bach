@@ -142,6 +142,7 @@ set(BACH_TEST_SOURCES
   forms/toccata_concertato_test.cpp
   forms/toccata_sectionalis_test.cpp
   forms/gesture_vocabulary_test.cpp
+  forms/prelude_figuration_vocabulary_test.cpp
   forms/passacaglia_test.cpp
   forms/fantasia_test.cpp
   forms/goldberg/goldberg_plan_test.cpp
@@ -199,6 +200,7 @@ set(BACH_TEST_SOURCES
   solo_string/arch/chaconne_engine_test.cpp
   solo_string/arch/chaconne_scheme_test.cpp
   solo_string/arch/bass_realizer_test.cpp
+  solo_string/arch/texture_vocabulary_test.cpp
   solo_string/arch/destruction_resistance_test.cpp
 
   # expression/
