@@ -313,6 +313,67 @@ void clampExcessiveLeaps(std::vector<NoteEvent>& notes,
 }
 
 
+// ---------------------------------------------------------------------------
+// Helper: find the nearest diatonic step from a pitch toward a direction
+// ---------------------------------------------------------------------------
+
+/// @brief Find a pitch that is one diatonic scale step from `from_pitch`.
+///
+/// Steps up or down by one scale degree, preferring the direction of
+/// `target_pitch`. If the step in the preferred direction is out of range,
+/// tries the opposite direction. Ensures the result is a scale tone within
+/// the register bounds.
+///
+/// @param from_pitch Starting MIDI pitch.
+/// @param target_pitch Target direction pitch (step toward this).
+/// @param key Scale key context.
+/// @param scale Scale type (Major, NaturalMinor, etc.).
+/// @param range_low Lower register bound.
+/// @param range_high Upper register bound.
+/// @return A pitch one diatonic step from from_pitch, or from_pitch if stuck.
+uint8_t nearestDiatonicStep(uint8_t from_pitch, uint8_t target_pitch,
+                            Key key, ScaleType scale,
+                            uint8_t range_low, uint8_t range_high) {
+  int abs_deg = scale_util::pitchToAbsoluteDegree(from_pitch, key, scale);
+
+  // Determine preferred direction: toward target_pitch.
+  int direction = (target_pitch >= from_pitch) ? 1 : -1;
+  if (target_pitch == from_pitch) {
+    direction = 1;  // Default to ascending when equal.
+  }
+
+  // Try the preferred direction first.
+  int step_deg = abs_deg + direction;
+  uint8_t step_pitch = scale_util::absoluteDegreeToPitch(step_deg, key, scale);
+  if (step_pitch >= range_low && step_pitch <= range_high) {
+    return step_pitch;
+  }
+
+  // Try the opposite direction.
+  step_deg = abs_deg - direction;
+  step_pitch = scale_util::absoluteDegreeToPitch(step_deg, key, scale);
+  if (step_pitch >= range_low && step_pitch <= range_high) {
+    return step_pitch;
+  }
+
+  // Stuck at register boundary -- stay put.
+  return from_pitch;
+}
+
+/// @brief Check if the given beat position is on a strong beat.
+///
+/// Strong beats in 4/4: beat 0 and beat 2 (tick offsets 0 and 960).
+/// Strong beats are where chord tones should anchor.
+///
+/// @param tick_in_bar Tick offset within the bar.
+/// @return True if on beat 0 or beat 2.
+bool isStrongBeatPosition(Tick tick_in_bar) {
+  Tick beat_offset = tick_in_bar % kTicksPerBeat;
+  if (beat_offset != 0) return false;
+  uint8_t beat = static_cast<uint8_t>(tick_in_bar / kTicksPerBeat);
+  return (beat == 0 || beat == 2);
+}
+
 }  // namespace
 
 // ===========================================================================
@@ -365,7 +426,7 @@ std::vector<NoteEvent> generateTexture(const TextureContext& ctx,
 }
 
 // ===========================================================================
-// SingleLine -- simple melody following chord tones
+// SingleLine -- melody with diatonic stepwise motion between chord tones
 // ===========================================================================
 
 std::vector<NoteEvent> generateSingleLine(const TextureContext& ctx,
@@ -381,10 +442,13 @@ std::vector<NoteEvent> generateSingleLine(const TextureContext& ctx,
   Tick num_bars = ctx.duration_ticks / kTicksPerBar;
   notes.reserve(static_cast<size_t>(num_bars) * subdivisions.size() * kBeatsPerBar);
 
+  ScaleType scale_type = ctx.key.is_minor ? ScaleType::NaturalMinor : ScaleType::Major;
+
   // Track previous pitch for stepwise preference.
   uint8_t prev_pitch = 0;
   bool just_leaped = false;
   int last_leap_direction = 0;  // +1 = up, -1 = down
+  int melodic_direction = 1;    // Current melodic direction for step continuation.
 
   for (Tick bar_offset = 0; bar_offset < ctx.duration_ticks; bar_offset += kTicksPerBar) {
     Tick bar_tick = ctx.start_tick + bar_offset;
@@ -405,7 +469,7 @@ std::vector<NoteEvent> generateSingleLine(const TextureContext& ctx,
 
         uint8_t pitch;
         if (prev_pitch == 0) {
-          // First note: pick a chord tone near the middle of the register with offset.
+          // First note: pick a chord tone near the middle of the register.
           int center = (static_cast<int>(ctx.register_low) +
                         static_cast<int>(ctx.register_high)) / 2;
           int range = static_cast<int>(ctx.register_high) -
@@ -414,60 +478,33 @@ std::vector<NoteEvent> generateSingleLine(const TextureContext& ctx,
           uint8_t mid = static_cast<uint8_t>(clampPitch(
               center + offset, ctx.register_low, ctx.register_high));
           pitch = nearestChordTone(mid, chord_pitches);
+          melodic_direction = rng::rollProbability(rng, 0.5f) ? 1 : -1;
         } else if (just_leaped) {
-          // Compensation after leap: move in the opposite direction.
-          // Compensation amount scales with leap size (min 1, max 4 semitones).
-          int compensation_dir = (last_leap_direction > 0) ? -1 : 1;
-          int leap_size = absoluteInterval(prev_pitch,
-                                          notes.empty() ? prev_pitch
-                                              : notes.back().pitch);
-          int comp_amount = std::min(std::max(leap_size / 2, 1), 4);
-          // Prefer 1-2 semitone compensation first.
-          bool found = false;
-          for (int try_amt = std::min(comp_amount, 2); try_amt <= comp_amount; ++try_amt) {
-            int target = static_cast<int>(prev_pitch) + compensation_dir * try_amt;
-            if (target >= static_cast<int>(ctx.register_low) &&
-                target <= static_cast<int>(ctx.register_high)) {
-              pitch = nearestChordTone(static_cast<uint8_t>(target), chord_pitches);
-              found = true;
-              break;
-            }
-          }
-          if (!found) {
-            pitch = nearestChordTone(prev_pitch, chord_pitches);
-          }
+          // After a leap, resolve by stepping in the opposite direction.
+          int comp_dir = (last_leap_direction > 0) ? -1 : 1;
+          uint8_t comp_target = clampPitch(
+              static_cast<int>(prev_pitch) + comp_dir * 7,
+              ctx.register_low, ctx.register_high);
+          pitch = nearestDiatonicStep(prev_pitch, comp_target,
+                                      ctx.key.tonic, scale_type,
+                                      ctx.register_low, ctx.register_high);
+          melodic_direction = comp_dir;
           just_leaped = false;
         } else {
-          // Weak beat non-chord tones: passing/neighbor tones on subdivisions.
-          bool is_weak = (sub_offset > 0);
-          if (is_weak && prev_pitch > 0 && rng::rollProbability(rng, 0.35f)) {
-            // Passing tone: half-step toward next chord tone.
-            uint8_t next_ct = nearestChordTone(prev_pitch, chord_pitches);
-            int direction = (next_ct > prev_pitch) ? 1 : (next_ct < prev_pitch) ? -1 : 1;
-            if (rng::rollProbability(rng, 0.5f)) {
-              // Neighbor tone: chord tone +-1-2 semitones.
-              int nct_offset = rng::rollRange(rng, 1, 2) * direction;
-              int target = static_cast<int>(prev_pitch) + nct_offset;
-              pitch = static_cast<uint8_t>(clampPitch(
-                  target, ctx.register_low, ctx.register_high));
-            } else {
-              // Passing tone: step between prev and next chord tone.
-              int step = direction * rng::rollRange(rng, 1, 2);
-              int target = static_cast<int>(prev_pitch) + step;
-              pitch = static_cast<uint8_t>(clampPitch(
-                  target, ctx.register_low, ctx.register_high));
-            }
-          } else {
+          bool is_strong = isStrongBeatPosition(note_tick_in_bar);
+          bool is_downbeat = (sub_offset == 0);
+
+          if (is_strong && is_downbeat) {
+            // Strong beat downbeat: anchor on chord tone.
             pitch = nearestChordTone(prev_pitch, chord_pitches);
 
-            // 30% chance of leap to a non-nearest chord tone for melodic interest.
-            if (chord_pitches.size() > 1 && rng::rollProbability(rng, 0.30f)) {
-              // Pick a chord tone that is NOT the nearest.
+            // Occasional leap to non-nearest chord tone for melodic interest (15%).
+            if (chord_pitches.size() > 1 && rng::rollProbability(rng, 0.15f)) {
               uint8_t nearest = pitch;
               std::vector<uint8_t> leap_candidates;
-              for (uint8_t cp : chord_pitches) {
-                if (cp != nearest) {
-                  leap_candidates.push_back(cp);
+              for (uint8_t cpt : chord_pitches) {
+                if (cpt != nearest) {
+                  leap_candidates.push_back(cpt);
                 }
               }
               if (!leap_candidates.empty()) {
@@ -478,14 +515,68 @@ std::vector<NoteEvent> generateSingleLine(const TextureContext& ctx,
                   last_leap_direction = (interval > 0) ? 1 : -1;
                 }
               }
-            } else if (chord_pitches.size() > 1 && rng::rollProbability(rng, 0.45f)) {
-              // Small random variation (step up or down by a 2nd).
-              int direction = rng::rollProbability(rng, 0.5f) ? 1 : -1;
-              int target = static_cast<int>(pitch) + direction * 2;
-              if (target >= static_cast<int>(ctx.register_low) &&
-                  target <= static_cast<int>(ctx.register_high)) {
-                pitch = nearestChordTone(static_cast<uint8_t>(target), chord_pitches);
+            }
+          } else {
+            // Weak beat or subdivision: prefer diatonic step from previous note.
+            // Find the nearest chord tone as a target to step toward.
+            uint8_t target_ct = nearestChordTone(prev_pitch, chord_pitches);
+
+            // Determine step direction: toward the target chord tone.
+            int step_dir;
+            if (target_ct > prev_pitch) {
+              step_dir = 1;
+            } else if (target_ct < prev_pitch) {
+              step_dir = -1;
+            } else {
+              // Already on chord tone -- continue in current melodic direction.
+              step_dir = melodic_direction;
+            }
+
+            // Calculate diatonic step.
+            uint8_t step_target = clampPitch(
+                static_cast<int>(prev_pitch) + step_dir * 3,
+                ctx.register_low, ctx.register_high);
+            uint8_t step_pitch = nearestDiatonicStep(
+                prev_pitch, step_target,
+                ctx.key.tonic, scale_type,
+                ctx.register_low, ctx.register_high);
+
+            // Check if the step is also a chord tone (ideal).
+            bool step_is_chord_tone = false;
+            for (uint8_t cpt : chord_pitches) {
+              if (cpt == step_pitch) {
+                step_is_chord_tone = true;
+                break;
               }
+            }
+
+            if (step_is_chord_tone || is_downbeat) {
+              // Step is a chord tone, or we're on a beat -- use the step.
+              pitch = step_pitch;
+            } else {
+              // Step is a passing/neighbor tone. Use it about half the time
+              // to achieve ~55% stepwise ratio (cello suite reference).
+              // The other half snaps to the nearest chord tone, which may
+              // create a small leap and provides harmonic grounding.
+              if (rng::rollProbability(rng, 0.50f)) {
+                pitch = step_pitch;
+              } else {
+                pitch = nearestChordTone(prev_pitch, chord_pitches);
+              }
+            }
+
+            // Update melodic direction based on actual motion.
+            int actual_dir = static_cast<int>(pitch) - static_cast<int>(prev_pitch);
+            if (actual_dir > 0) {
+              melodic_direction = 1;
+            } else if (actual_dir < 0) {
+              melodic_direction = -1;
+            }
+            // On unison, keep previous direction.
+
+            // Occasional direction reversal for variety (20%).
+            if (rng::rollProbability(rng, 0.20f)) {
+              melodic_direction = -melodic_direction;
             }
           }
         }
@@ -501,7 +592,7 @@ std::vector<NoteEvent> generateSingleLine(const TextureContext& ctx,
 }
 
 // ===========================================================================
-// ImpliedPolyphony -- alternating upper/lower voices
+// ImpliedPolyphony -- alternating upper/lower voices with stepwise connection
 // ===========================================================================
 
 std::vector<NoteEvent> generateImpliedPolyphony(const TextureContext& ctx,
@@ -516,6 +607,8 @@ std::vector<NoteEvent> generateImpliedPolyphony(const TextureContext& ctx,
   auto subdivisions = getRhythmSubdivisions(ctx.rhythm_profile);
   Tick num_bars = ctx.duration_ticks / kTicksPerBar;
   notes.reserve(static_cast<size_t>(num_bars) * subdivisions.size() * kBeatsPerBar);
+
+  ScaleType scale_type = ctx.key.is_minor ? ScaleType::NaturalMinor : ScaleType::Major;
 
   // Divide register into upper and lower halves with seed-dependent offset.
   int full_range = static_cast<int>(ctx.register_high) - static_cast<int>(ctx.register_low);
@@ -532,8 +625,11 @@ std::vector<NoteEvent> generateImpliedPolyphony(const TextureContext& ctx,
 
   uint8_t upper_prev = 0;
   uint8_t lower_prev = 0;
+  bool upper_just_switched = false;  // True when we just jumped to upper voice.
+  bool lower_just_switched = false;  // True when we just jumped to lower voice.
 
   bool use_upper = true;
+  bool was_upper = true;  // Track the voice from the previous note.
 
   // Voice alternation probability depends on rhythm profile.
   float alt_prob = 0.8f;
@@ -567,6 +663,9 @@ std::vector<NoteEvent> generateImpliedPolyphony(const TextureContext& ctx,
         Tick note_tick = beat_tick + sub_offset;
         Tick note_tick_in_bar = tick_in_bar + sub_offset;
 
+        // Detect voice switch: we just moved to a different voice register.
+        bool voice_switched = (use_upper != was_upper);
+
         uint8_t pitch;
         if (use_upper) {
           if (upper_pitches.empty()) {
@@ -574,18 +673,43 @@ std::vector<NoteEvent> generateImpliedPolyphony(const TextureContext& ctx,
                 harm.chord, harm.is_minor, ctx.register_low, ctx.register_high);
             pitch = fallback.empty() ? ctx.register_high : fallback.back();
           } else if (upper_prev == 0) {
+            // First note in upper voice: pick a chord tone.
             pitch = upper_pitches[upper_pitches.size() / 2];
-          } else {
+            upper_just_switched = false;
+          } else if (voice_switched) {
+            // Just switched to upper voice. The leap to this register IS the
+            // polyphonic jump. Use a chord tone near the previous upper pitch.
             pitch = nearestChordTone(upper_prev, upper_pitches);
-            // 20% chance of leap to a non-nearest chord tone.
-            if (upper_pitches.size() > 1 && rng::rollProbability(rng, 0.20f)) {
-              std::vector<uint8_t> others;
-              for (uint8_t cp : upper_pitches) {
-                if (cp != pitch) others.push_back(cp);
+            upper_just_switched = true;
+          } else if (upper_just_switched) {
+            // First continuation note after switching to upper voice.
+            // Connect by diatonic step to the previous note in this voice.
+            uint8_t target_ct = nearestChordTone(upper_prev, upper_pitches);
+            pitch = nearestDiatonicStep(upper_prev, target_ct,
+                                        ctx.key.tonic, scale_type,
+                                        upper_low, upper_high);
+            upper_just_switched = false;
+          } else {
+            // Continuing in upper voice. Prefer stepwise motion.
+            bool is_strong = isStrongBeatPosition(note_tick_in_bar);
+            if (is_strong && sub_offset == 0) {
+              // Strong beat: chord tone.
+              pitch = nearestChordTone(upper_prev, upper_pitches);
+            } else {
+              // Weak beat/subdivision: diatonic step.
+              uint8_t target_ct = nearestChordTone(upper_prev, upper_pitches);
+              pitch = nearestDiatonicStep(upper_prev, target_ct,
+                                          ctx.key.tonic, scale_type,
+                                          upper_low, upper_high);
+
+              // 15% chance of chord-tone leap for variety.
+              if (upper_pitches.size() > 1 && rng::rollProbability(rng, 0.15f)) {
+                pitch = nearestChordTone(upper_prev, upper_pitches);
               }
-              if (!others.empty()) pitch = rng::selectRandom(rng, others);
             }
-            // Limit leap within implied voice to octave (12 semitones).
+          }
+          // Limit leap within implied voice to octave (12 semitones).
+          if (upper_prev > 0) {
             int leap = absoluteInterval(pitch, upper_prev);
             if (leap > 12) {
               uint8_t close_target = clampPitch(
@@ -601,18 +725,39 @@ std::vector<NoteEvent> generateImpliedPolyphony(const TextureContext& ctx,
                 harm.chord, harm.is_minor, ctx.register_low, ctx.register_high);
             pitch = fallback.empty() ? ctx.register_low : fallback.front();
           } else if (lower_prev == 0) {
+            // First note in lower voice: pick a chord tone.
             pitch = lower_pitches[lower_pitches.size() / 2];
-          } else {
+            lower_just_switched = false;
+          } else if (voice_switched) {
+            // Just switched to lower voice. Use chord tone near previous lower pitch.
             pitch = nearestChordTone(lower_prev, lower_pitches);
-            // 20% chance of leap to a non-nearest chord tone.
-            if (lower_pitches.size() > 1 && rng::rollProbability(rng, 0.20f)) {
-              std::vector<uint8_t> others;
-              for (uint8_t cp : lower_pitches) {
-                if (cp != pitch) others.push_back(cp);
+            lower_just_switched = true;
+          } else if (lower_just_switched) {
+            // First continuation after switching to lower voice: connect by step.
+            uint8_t target_ct = nearestChordTone(lower_prev, lower_pitches);
+            pitch = nearestDiatonicStep(lower_prev, target_ct,
+                                        ctx.key.tonic, scale_type,
+                                        lower_low, lower_high);
+            lower_just_switched = false;
+          } else {
+            // Continuing in lower voice. Prefer stepwise motion.
+            bool is_strong = isStrongBeatPosition(note_tick_in_bar);
+            if (is_strong && sub_offset == 0) {
+              pitch = nearestChordTone(lower_prev, lower_pitches);
+            } else {
+              uint8_t target_ct = nearestChordTone(lower_prev, lower_pitches);
+              pitch = nearestDiatonicStep(lower_prev, target_ct,
+                                          ctx.key.tonic, scale_type,
+                                          lower_low, lower_high);
+
+              // 15% chance of chord-tone leap for variety.
+              if (lower_pitches.size() > 1 && rng::rollProbability(rng, 0.15f)) {
+                pitch = nearestChordTone(lower_prev, lower_pitches);
               }
-              if (!others.empty()) pitch = rng::selectRandom(rng, others);
             }
-            // Limit leap within implied voice to octave (12 semitones).
+          }
+          // Limit leap within implied voice to octave (12 semitones).
+          if (lower_prev > 0) {
             int leap = absoluteInterval(pitch, lower_prev);
             if (leap > 12) {
               uint8_t close_target = clampPitch(
@@ -627,6 +772,7 @@ std::vector<NoteEvent> generateImpliedPolyphony(const TextureContext& ctx,
         notes.push_back(makeTextureNote(
             note_tick, sub_duration, pitch, note_tick_in_bar, ctx.is_climax));
 
+        was_upper = use_upper;
         if (rng::rollProbability(rng, alt_prob)) {
           use_upper = !use_upper;
         }

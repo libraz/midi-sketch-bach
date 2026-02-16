@@ -53,6 +53,7 @@ struct PitchCandidate {
   float score = 0.0f;        ///< Composite melodic + harmony score (higher = better).
   bool is_chord_tone = false;
   bool has_vertical_dissonance = false;  ///< True if dissonant with any sounding voice.
+  bool has_harsh_dissonance = false;     ///< True if m2/TT/M7 with any sounding voice.
   bool is_suspension_like = false;       ///< True if pitch == previous note in voice (held).
 };
 
@@ -223,6 +224,171 @@ static int countHarshDissonances(const std::vector<NoteEvent>& notes) {
     }
   }
   return count;
+}
+
+/// @brief Repair dissonant vertical intervals on strong beats in episode notes.
+///
+/// For each strong beat (beats 1 and 3 in 4/4), collects all notes sounding at
+/// that tick across voices and checks inter-voice intervals. When a dissonance
+/// is found, the note with the more flexible protection level is shifted by the
+/// smallest diatonic adjustment that produces consonance with ALL other sounding
+/// voices at that tick. Only notes with ProtectionLevel::Flexible (e.g.
+/// EpisodeMaterial) are eligible for repair; structural/immutable notes are
+/// never touched.
+///
+/// @param notes Episode notes to repair (modified in place).
+/// @param num_voices Number of voices in the fugue (used for voice range lookup).
+/// @param start_key Key for the first half of the episode.
+/// @param target_key Key for the second half (after modulation midpoint).
+/// @param scale Scale type for scale-tone snapping.
+/// @param mod_midpoint Tick at which key switches from start_key to target_key.
+/// @return Number of pitch repairs applied.
+static int repairEpisodeConsonance(std::vector<NoteEvent>& notes,
+                                   uint8_t num_voices,
+                                   Key start_key, Key target_key,
+                                   ScaleType scale, Tick mod_midpoint) {
+  if (notes.size() < 2 || num_voices < 2) return 0;
+
+  // Collect unique strong-beat ticks across all notes.
+  std::vector<Tick> strong_ticks;
+  strong_ticks.reserve(notes.size());
+  for (const auto& note : notes) {
+    if (note.start_tick % kTicksPerBeat != 0) continue;
+    Tick beat_in_bar = (note.start_tick % kTicksPerBar) / kTicksPerBeat;
+    if (beat_in_bar != 0 && beat_in_bar != 2) continue;
+    // Deduplicate: only add if not already present.
+    if (strong_ticks.empty() || strong_ticks.back() != note.start_tick) {
+      strong_ticks.push_back(note.start_tick);
+    }
+  }
+  // Sort and deduplicate in case notes were not in tick order.
+  std::sort(strong_ticks.begin(), strong_ticks.end());
+  strong_ticks.erase(std::unique(strong_ticks.begin(), strong_ticks.end()),
+                     strong_ticks.end());
+
+  int repair_count = 0;
+
+  for (Tick tick : strong_ticks) {
+    // Select the correct key for this tick based on modulation midpoint.
+    Key active_key = (start_key != target_key && tick >= mod_midpoint)
+                         ? target_key
+                         : start_key;
+
+    // Gather indices of all notes sounding at this tick (started at or before,
+    // ending after this tick).
+    std::vector<size_t> sounding;
+    sounding.reserve(num_voices);
+    for (size_t idx = 0; idx < notes.size(); ++idx) {
+      if (notes[idx].start_tick > tick) continue;
+      Tick end_tick = notes[idx].start_tick + notes[idx].duration;
+      if (end_tick <= tick) continue;
+      sounding.push_back(idx);
+    }
+    if (sounding.size() < 2) continue;
+
+    // Check all pairs; identify which notes need repair.
+    for (size_t aidx = 0; aidx < sounding.size(); ++aidx) {
+      for (size_t bidx = aidx + 1; bidx < sounding.size(); ++bidx) {
+        auto& note_a = notes[sounding[aidx]];
+        auto& note_b = notes[sounding[bidx]];
+        if (note_a.voice == note_b.voice) continue;
+
+        int ivl = interval_util::compoundToSimple(
+            absoluteInterval(note_a.pitch, note_b.pitch));
+        // Only repair harsh dissonances (m2, tritone, M7). Milder dissonances
+        // (P4, M2, m7) are left intact to preserve the natural dissonance ratio
+        // that Bach's fugues exhibit (~25-29% dissonance).
+        if (ivl != 1 && ivl != 6 && ivl != 11) continue;
+
+        // Determine which note to repair (prefer Flexible over Structural).
+        ProtectionLevel prot_a = getProtectionLevel(note_a.source);
+        ProtectionLevel prot_b = getProtectionLevel(note_b.source);
+
+        // Only repair Flexible notes.
+        size_t repair_idx;
+        if (prot_a == ProtectionLevel::Flexible &&
+            prot_b != ProtectionLevel::Flexible) {
+          repair_idx = sounding[aidx];
+        } else if (prot_b == ProtectionLevel::Flexible &&
+                   prot_a != ProtectionLevel::Flexible) {
+          repair_idx = sounding[bidx];
+        } else if (prot_a == ProtectionLevel::Flexible &&
+                   prot_b == ProtectionLevel::Flexible) {
+          // Both flexible: repair the one starting exactly at this tick
+          // (onset note), or the higher-numbered voice if both are onsets.
+          if (note_a.start_tick == tick && note_b.start_tick != tick) {
+            repair_idx = sounding[aidx];
+          } else if (note_b.start_tick == tick && note_a.start_tick != tick) {
+            repair_idx = sounding[bidx];
+          } else {
+            repair_idx = (note_a.voice > note_b.voice)
+                             ? sounding[aidx]
+                             : sounding[bidx];
+          }
+        } else {
+          // Neither is flexible -- skip.
+          continue;
+        }
+
+        auto& target = notes[repair_idx];
+        auto [range_lo, range_hi] = getFugueVoiceRange(target.voice, num_voices);
+
+        // Try small diatonic adjustments: +-1, +-2, +-3 semitones, snapped to
+        // the nearest scale tone. Pick the smallest shift that is consonant
+        // with ALL other sounding voices at this tick.
+        int best_pitch = -1;
+        int best_cost = 9999;  // Lower is better.
+        int orig_pitch = static_cast<int>(target.pitch);
+
+        for (int delta : {1, -1, 2, -2, 3, -3, 4, -4}) {
+          int shifted = orig_pitch + delta;
+          if (shifted < static_cast<int>(range_lo) ||
+              shifted > static_cast<int>(range_hi)) {
+            continue;
+          }
+          uint8_t snapped = scale_util::nearestScaleTone(
+              clampPitch(shifted, range_lo, range_hi), active_key, scale);
+          if (snapped == target.pitch) continue;  // No change.
+
+          // Verify consonance with ALL other sounding voices at this tick.
+          bool all_consonant = true;
+          for (size_t cidx = 0; cidx < sounding.size(); ++cidx) {
+            if (sounding[cidx] == repair_idx) continue;
+            int check_ivl = interval_util::compoundToSimple(
+                absoluteInterval(snapped, notes[sounding[cidx]].pitch));
+            if (!interval_util::isConsonance(check_ivl)) {
+              all_consonant = false;
+              break;
+            }
+          }
+          if (!all_consonant) continue;
+
+          int cost = std::abs(delta);
+          // Prefer imperfect consonances (3rds, 6ths) over perfect ones
+          // (unison, 5th, octave) to avoid hollow sound.
+          int new_ivl = interval_util::compoundToSimple(
+              absoluteInterval(snapped, (repair_idx == sounding[aidx])
+                                            ? note_b.pitch
+                                            : note_a.pitch));
+          if (new_ivl == 0 || new_ivl == 7) {
+            cost += 2;  // Mild penalty for perfect consonances.
+          }
+
+          if (cost < best_cost) {
+            best_cost = cost;
+            best_pitch = static_cast<int>(snapped);
+          }
+        }
+
+        if (best_pitch >= 0 && best_pitch != orig_pitch) {
+          target.pitch = static_cast<uint8_t>(best_pitch);
+          ++repair_count;
+        }
+      }
+    }
+  }
+
+  return repair_count;
 }
 
 namespace {  // NOLINT(google-build-namespaces) reopened for character-specific generators
@@ -1052,6 +1218,16 @@ Episode generateEpisode(const Subject& subject, Tick start_tick, Tick duration_t
     }
   }
 
+  // --- Strong-beat vertical consonance repair ---
+  // Fix dissonant intervals on beats 1 and 3 by shifting Flexible-protection
+  // notes to the nearest consonant pitch. Runs before invertible counterpoint
+  // to provide cleaner input for the voice-swap quality check.
+  {
+    Tick repair_midpoint = start_tick + duration_ticks / 2;
+    repairEpisodeConsonance(episode.notes, num_voices, start_key, target_key,
+                            scale, repair_midpoint);
+  }
+
   // --- Invertible counterpoint with character-specific probability ---
   // Swap voice 0 and voice 1 material (double counterpoint at the octave).
   // Only applicable when at least 2 voices are present.
@@ -1368,9 +1544,10 @@ Episode generateEpisode(const Subject& subject, Tick start_tick, Tick duration_t
           }
         }
 
-        if (all_ct_dissonant && ml >= MetricLevel::Beat) {
-          // Search for a chord tone that is consonant with all voices.
-          // Prefer imperfect consonances to avoid hollow sound.
+        if (all_ct_dissonant && ml == MetricLevel::Bar) {
+          // Bar start only: search for a chord tone that is consonant with all
+          // voices. On beats 2-4, natural dissonance is acceptable per Bach
+          // reference (~25-34% dissonance in organ fugues).
           uint8_t best_vc = 0;
           int best_vc_score = -1;
           for (int search = -12; search <= 12; ++search) {
@@ -1450,6 +1627,7 @@ Episode generateEpisode(const Subject& subject, Tick start_tick, Tick duration_t
         // Final safety is CollisionResolver's responsibility.
         if (ml >= MetricLevel::Beat) {
           bool has_dissonance = false;
+          bool has_harsh = false;
           bool has_any_other = false;
           for (VoiceId other_v : cp_state.getActiveVoices()) {
             if (other_v == note.voice) continue;
@@ -1461,12 +1639,16 @@ Episode generateEpisode(const Subject& subject, Tick start_tick, Tick duration_t
                 absoluteInterval(cand.pitch, other->pitch));
             if (!interval_util::isConsonance(ivl)) {
               has_dissonance = true;
-              break;
+              // m2(1), tritone(6), M7(11) are harsh; P4(5), M2(2), m7(10) are mild.
+              if (ivl == 1 || ivl == 6 || ivl == 11) {
+                has_harsh = true;
+              }
             }
           }
           if (has_any_other) {
             if (has_dissonance) {
               cand.has_vertical_dissonance = true;
+              cand.has_harsh_dissonance = has_harsh;
               mel_score += (ml == MetricLevel::Bar) ? -0.3f : -0.15f;
             } else {
               mel_score += 0.15f;
@@ -1504,16 +1686,21 @@ Episode generateEpisode(const Subject& subject, Tick start_tick, Tick duration_t
                   return lhs.score > rhs.score;
                 });
 
-      // Strong-beat dissonance filter: on beats 1 and 3, remove dissonant
-      // candidates that are not suspension-like.
+      // Strong-beat dissonance filter: tiered by metric position.
+      //   Bar start (beat 1): remove harsh dissonances (m2/TT/M7) only.
+      //     Mild dissonances (P4, M2, m7) are allowed -- they occur naturally
+      //     in Bach fugues at ~25-34% dissonance (reference: organ_fugue mean=0.746).
+      //   Beat 3: no hard filter -- rely on scoring penalties. Beat 3 is only
+      //     semi-strong in Baroque practice and routinely carries dissonance.
+      //   Suspension-like candidates are always exempt.
       {
         Tick beat_in_bar = (note.start_tick % kTicksPerBar) / kTicksPerBeat;
-        bool is_strong_beat = (beat_in_bar == 0 || beat_in_bar == 2);
-        if (is_strong_beat) {
+        if (beat_in_bar == 0) {
+          // Bar start: remove only harsh dissonances.
           auto disqualify_it = std::remove_if(
               candidates.begin(), candidates.end(),
               [](const PitchCandidate& cnd) {
-                return cnd.has_vertical_dissonance && !cnd.is_suspension_like;
+                return cnd.has_harsh_dissonance && !cnd.is_suspension_like;
               });
           // Safety valve: never remove ALL candidates.
           if (disqualify_it == candidates.begin()) {
@@ -1521,6 +1708,7 @@ Episode generateEpisode(const Subject& subject, Tick start_tick, Tick duration_t
           }
           candidates.erase(disqualify_it, candidates.end());
         }
+        // Beat 3 (beat_in_bar == 2): no hard filter, scoring handles it.
       }
 
       // --- Sequential trial: best → 2nd → 3rd → omit. ---
@@ -1624,6 +1812,18 @@ Episode generateFortspinnungEpisode(const Subject& subject, const MotifPool& poo
     if (note.duration > min_dur * 4) {
       note.duration = std::max(min_dur * 2, note.duration / 2);
     }
+  }
+
+  // --- Strong-beat vertical consonance repair ---
+  // Fix dissonant intervals on beats 1 and 3 by shifting Flexible-protection
+  // notes to the nearest consonant pitch. Runs before invertible counterpoint
+  // to provide cleaner input for the voice-swap quality check.
+  {
+    ScaleType fort_scale = subject.is_minor ? ScaleType::HarmonicMinor
+                                           : ScaleType::Major;
+    Tick fort_midpoint = start_tick + duration_ticks / 2;
+    repairEpisodeConsonance(episode.notes, num_voices, start_key, target_key,
+                            fort_scale, fort_midpoint);
   }
 
   // Invertible counterpoint with character-specific probability.
@@ -1978,6 +2178,7 @@ Episode generateFortspinnungEpisode(const Subject& subject, const MotifPool& poo
         // Final safety is CollisionResolver's responsibility.
         if (ml >= MetricLevel::Beat) {
           bool has_dissonance = false;
+          bool has_harsh = false;
           bool has_any_other = false;
           for (VoiceId other_v : cp_state.getActiveVoices()) {
             if (other_v == note.voice) continue;
@@ -1989,12 +2190,16 @@ Episode generateFortspinnungEpisode(const Subject& subject, const MotifPool& poo
                 absoluteInterval(cand.pitch, other->pitch));
             if (!interval_util::isConsonance(ivl)) {
               has_dissonance = true;
-              break;
+              // m2(1), tritone(6), M7(11) are harsh; P4(5), M2(2), m7(10) are mild.
+              if (ivl == 1 || ivl == 6 || ivl == 11) {
+                has_harsh = true;
+              }
             }
           }
           if (has_any_other) {
             if (has_dissonance) {
               cand.has_vertical_dissonance = true;
+              cand.has_harsh_dissonance = has_harsh;
               mel_score += (ml == MetricLevel::Bar) ? -0.3f : -0.15f;
             } else {
               mel_score += 0.15f;
@@ -2017,21 +2222,27 @@ Episode generateFortspinnungEpisode(const Subject& subject, const MotifPool& poo
                   return a.score > b.score;
                 });
 
-      // Strong-beat dissonance filter: on beats 1 and 3, remove dissonant
-      // candidates that are not suspension-like.
-      Tick beat_in_bar = (note.start_tick % kTicksPerBar) / kTicksPerBeat;
-      bool is_strong_beat = (beat_in_bar == 0 || beat_in_bar == 2);
-      if (is_strong_beat) {
-        auto disqualify_it = std::remove_if(
-            candidates.begin(), candidates.end(),
-            [](const PitchCandidate& cnd) {
-              return cnd.has_vertical_dissonance && !cnd.is_suspension_like;
-            });
-        // Safety valve: never remove ALL candidates.
-        if (disqualify_it == candidates.begin()) {
-          disqualify_it = candidates.begin() + 1;
+      // Strong-beat dissonance filter: tiered by metric position.
+      //   Bar start (beat 1): remove harsh dissonances (m2/TT/M7) only.
+      //     Mild dissonances (P4, M2, m7) are allowed -- they occur naturally
+      //     in Bach fugues at ~25-34% dissonance (reference: organ_fugue mean=0.746).
+      //   Beat 3: no hard filter -- rely on scoring penalties.
+      //   Suspension-like candidates are always exempt.
+      {
+        Tick beat_in_bar = (note.start_tick % kTicksPerBar) / kTicksPerBeat;
+        if (beat_in_bar == 0) {
+          auto disqualify_it = std::remove_if(
+              candidates.begin(), candidates.end(),
+              [](const PitchCandidate& cnd) {
+                return cnd.has_harsh_dissonance && !cnd.is_suspension_like;
+              });
+          // Safety valve: never remove ALL candidates.
+          if (disqualify_it == candidates.begin()) {
+            disqualify_it = candidates.begin() + 1;
+          }
+          candidates.erase(disqualify_it, candidates.end());
         }
-        candidates.erase(disqualify_it, candidates.end());
+        // Beat 3 (beat_in_bar == 2): no hard filter, scoring handles it.
       }
 
       // --- Sequential trial: best → 2nd → 3rd → omit. ---

@@ -6,6 +6,7 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <set>
 
 #include "core/basic_types.h"
 #include "core/gm_program.h"
@@ -285,29 +286,49 @@ TEST(FantasiaTest, PedalHasWholeNotes) {
       << (ratio * 100.0f) << "%";
 }
 
-TEST(FantasiaTest, Voice2HasEighthNotes) {
+TEST(FantasiaTest, Voice2HasMixedRhythm) {
   FantasiaConfig config = makeTestConfig();
   FantasiaResult result = generateFantasia(config);
 
   ASSERT_TRUE(result.success);
   ASSERT_GE(result.tracks.size(), 3u);
 
-  // Voice 2 (countermelody) uses eighth notes.
+  // Voice 2 (countermelody) uses section-texture-aware rhythm:
+  // - Passage sections: eighth notes (active counterpoint).
+  // - Chordal sections: quarter notes (calmer texture).
+  // - Cadential sections: half notes (convergence).
+  // With 4-bar alternation, expect a mix of durations.
   const auto& counter_notes = result.tracks[2].notes;
   ASSERT_GT(counter_notes.size(), 0u);
 
   constexpr Tick kEighthDuration = kTicksPerBeat / 2;  // 240.
-  int eighth_count = 0;
+  constexpr Tick kQuarterDuration = kTicksPerBeat;       // 480.
+  int short_count = 0;   // Eighth or shorter.
+  int medium_count = 0;  // Quarter.
+  int long_count = 0;    // Half or longer.
   for (const auto& note : counter_notes) {
     if (note.duration <= kEighthDuration) {
-      ++eighth_count;
+      ++short_count;
+    } else if (note.duration <= kQuarterDuration) {
+      ++medium_count;
+    } else {
+      ++long_count;
     }
   }
-  float ratio = static_cast<float>(eighth_count) /
-                static_cast<float>(counter_notes.size());
-  EXPECT_GE(ratio, 0.80f)
-      << "Expected >= 80% of countermelody notes to be eighth notes, got "
-      << (ratio * 100.0f) << "%";
+
+  // Passage sections provide eighth notes; chordal/cadential provide quarter/half.
+  // At least 30% should be short (passage sections).
+  float short_ratio = static_cast<float>(short_count) /
+                      static_cast<float>(counter_notes.size());
+  EXPECT_GE(short_ratio, 0.30f)
+      << "Expected >= 30% of countermelody notes to be eighth notes "
+      << "(passage sections), got " << (short_ratio * 100.0f) << "%";
+
+  // At least some longer notes should exist (chordal/cadential sections).
+  int longer_count = medium_count + long_count;
+  EXPECT_GT(longer_count, 0)
+      << "Expected some quarter/half notes in countermelody "
+      << "(chordal/cadential sections)";
 }
 
 // ---------------------------------------------------------------------------
@@ -535,6 +556,119 @@ TEST(FantasiaTest, DifferentKeysProduceDifferentOutput) {
   }
   EXPECT_TRUE(any_pitch_difference)
       << "G minor and C major should have different pitches";
+}
+
+// ---------------------------------------------------------------------------
+// Structural rhythm diversity: section texture alternation
+// ---------------------------------------------------------------------------
+
+TEST(FantasiaTest, MelodyHasSectionTextureRhythmDiversity) {
+  // The melody voice (Voice 0) should have both short notes (passage sections)
+  // and longer notes (chordal/cadential sections), not uniform rhythm.
+  FantasiaConfig config = makeTestConfig();
+  FantasiaResult result = generateFantasia(config);
+  ASSERT_TRUE(result.success);
+  ASSERT_GE(result.tracks.size(), 1u);
+
+  constexpr Tick kEighthDuration = kTicksPerBeat / 2;  // 240
+  constexpr Tick kQuarterDuration = kTicksPerBeat;      // 480
+  int short_count = 0;   // Sixteenth or eighth.
+  int medium_count = 0;  // Quarter.
+  int long_count = 0;    // Half or longer.
+
+  for (const auto& note : result.tracks[0].notes) {
+    if (note.duration <= kEighthDuration) {
+      ++short_count;
+    } else if (note.duration <= kQuarterDuration) {
+      ++medium_count;
+    } else {
+      ++long_count;
+    }
+  }
+
+  // Passage sections should produce short notes.
+  EXPECT_GT(short_count, 0)
+      << "Melody should have short notes from passage sections";
+
+  // Chordal/cadential sections should produce longer notes.
+  int longer_count = medium_count + long_count;
+  EXPECT_GT(longer_count, 0)
+      << "Melody should have quarter/half/whole notes from "
+      << "chordal/cadential sections";
+
+  // At least 3 distinct duration values for true diversity.
+  std::set<Tick> unique_durations;
+  for (const auto& note : result.tracks[0].notes) {
+    unique_durations.insert(note.duration);
+  }
+  EXPECT_GE(unique_durations.size(), 3u)
+      << "Melody should use at least 3 distinct duration values, "
+      << "found " << unique_durations.size();
+}
+
+TEST(FantasiaTest, ChordVoiceHasSectionTextureVariation) {
+  // The sustained chord voice (Voice 1) should have both shorter durations
+  // in passage sections and longer durations in chordal sections.
+  FantasiaConfig config = makeTestConfig();
+  FantasiaResult result = generateFantasia(config);
+  ASSERT_TRUE(result.success);
+  ASSERT_GE(result.tracks.size(), 2u);
+
+  constexpr Tick kHalfDuration = kTicksPerBeat * 2;   // 960
+  int shorter_count = 0;  // Quarter or half (passage sections).
+  int longer_count = 0;   // Whole (chordal/cadential sections).
+
+  for (const auto& note : result.tracks[1].notes) {
+    if (note.duration < kHalfDuration) {
+      ++shorter_count;
+    } else {
+      ++longer_count;
+    }
+  }
+
+  // Both duration categories should be present.
+  EXPECT_GT(shorter_count, 0)
+      << "Chord voice should have shorter notes in passage sections";
+  EXPECT_GT(longer_count, 0)
+      << "Chord voice should have longer notes in chordal sections";
+}
+
+TEST(FantasiaTest, CadentialSectionHasLongerNotes) {
+  // Notes in the final 2 bars should have significantly longer average
+  // duration than notes in the middle of the piece.
+  FantasiaConfig config = makeTestConfig();
+  FantasiaResult result = generateFantasia(config);
+  ASSERT_TRUE(result.success);
+  ASSERT_GE(result.tracks.size(), 1u);
+
+  Tick cadence_start = result.total_duration_ticks - 2 * kTicksPerBar;
+  Tick mid_start = result.total_duration_ticks / 4;
+  Tick mid_end = result.total_duration_ticks * 3 / 4;
+
+  Tick total_cadence_dur = 0;
+  int cadence_count = 0;
+  Tick total_mid_dur = 0;
+  int mid_count = 0;
+
+  for (const auto& note : result.tracks[0].notes) {
+    if (note.start_tick >= cadence_start) {
+      total_cadence_dur += note.duration;
+      ++cadence_count;
+    } else if (note.start_tick >= mid_start && note.start_tick < mid_end) {
+      total_mid_dur += note.duration;
+      ++mid_count;
+    }
+  }
+
+  if (cadence_count > 0 && mid_count > 0) {
+    float avg_cadence = static_cast<float>(total_cadence_dur) /
+                        static_cast<float>(cadence_count);
+    float avg_mid = static_cast<float>(total_mid_dur) /
+                    static_cast<float>(mid_count);
+    EXPECT_GT(avg_cadence, avg_mid)
+        << "Cadential section (avg=" << avg_cadence
+        << ") should have longer notes than middle (avg=" << avg_mid << ")";
+  }
 }
 
 }  // namespace

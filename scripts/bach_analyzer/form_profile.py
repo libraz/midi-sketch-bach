@@ -113,7 +113,7 @@ _PROFILES: Dict[str, FormProfile] = {
         cadence_validation=True,
         hidden_perfect_severity=Severity.INFO,
         expected_voices=(3, 3),
-        reference_category="orgelbuchlein",
+        reference_category="trio_sonata",
     ),
     "chorale_prelude": FormProfile(
         form_name="chorale_prelude",

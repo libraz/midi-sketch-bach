@@ -228,7 +228,8 @@ TEST(PassacagliaTest, VariationComplexityIncreases) {
   // Stage 0 (Establish, vars 0-2): quarter notes
   // Stage 1 (Develop early, vars 3-5): eighth notes
   // Stage 2 (Develop late, vars 6-8): eighth note arpeggios
-  // Stage 3 (Accumulate, vars 9-11): sixteenth notes
+  // Stage 3 (Accumulate, var 9): sixteenth notes
+  // Stage 4 (Resolve, vars 10-11): half/quarter notes (simplification)
 
   auto avgDurationInRange = [&](Tick range_start, Tick range_end) -> double {
     Tick total_dur = 0;
@@ -247,15 +248,22 @@ TEST(PassacagliaTest, VariationComplexityIncreases) {
   // Develop early: variations 3-5.
   double develop_early_avg =
       avgDurationInRange(3 * variation_duration, 6 * variation_duration);
-  // Accumulate/Resolve: variations 9-11.
+  // Accumulate: variation 9 only (before Resolve simplification).
   double accumulate_avg =
-      avgDurationInRange(9 * variation_duration, 12 * variation_duration);
+      avgDurationInRange(9 * variation_duration, 10 * variation_duration);
+  // Resolve: variations 10-11 (simplification for conclusion).
+  double resolve_avg =
+      avgDurationInRange(10 * variation_duration, 12 * variation_duration);
 
   // Earlier stages should have longer average note durations (less complex).
   EXPECT_GT(establish_avg, develop_early_avg)
       << "Establish stage should have longer notes than Develop";
   EXPECT_GT(develop_early_avg, accumulate_avg)
       << "Develop stage should have longer notes than Accumulate";
+
+  // Resolve should simplify back to broader rhythms (longer than accumulate).
+  EXPECT_GT(resolve_avg, accumulate_avg)
+      << "Resolve stage should return to longer notes than Accumulate";
 }
 
 // ---------------------------------------------------------------------------

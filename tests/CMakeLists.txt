@@ -56,6 +56,7 @@ set(BACH_TEST_SOURCES
   counterpoint/vertical_safe_test.cpp
   counterpoint/vertical_context_test.cpp
   counterpoint/coordinate_voices_test.cpp
+  counterpoint/suspension_resolution_test.cpp
 
   # counterpoint/ (cantus firmus)
   counterpoint/cantus_firmus_test.cpp
@@ -80,6 +81,7 @@ set(BACH_TEST_SOURCES
   fugue/fugue_duration_scale_test.cpp
   fugue/fugue_energy_curve_test.cpp
   fugue/cadence_plan_test.cpp
+  fugue/cadence_insertion_test.cpp
   fugue/episode_characteristic_motif_test.cpp
   fugue/episode_modulation_test.cpp
   fugue/stretto_fragment_test.cpp
@@ -96,6 +98,8 @@ set(BACH_TEST_SOURCES
   fugue/subject_identity_test.cpp
   fugue/episode_vocabulary_test.cpp
   fugue/archetype_scorer_vocabulary_test.cpp
+  fugue/fugue_texture_density_test.cpp
+  fugue/episode_melodic_contour_test.cpp
 
   # transform/
   transform/motif_transform_test.cpp
@@ -135,6 +139,7 @@ set(BACH_TEST_SOURCES
   # forms/
   forms/prelude_test.cpp
   forms/prelude_figuration_test.cpp
+  forms/prelude_stepwise_range_test.cpp
   forms/trio_sonata_test.cpp
   forms/chorale_prelude_test.cpp
   forms/toccata_test.cpp
@@ -144,6 +149,7 @@ set(BACH_TEST_SOURCES
   forms/gesture_vocabulary_test.cpp
   forms/prelude_figuration_vocabulary_test.cpp
   forms/passacaglia_test.cpp
+  forms/passacaglia_ground_bass_periodicity_test.cpp
   forms/fantasia_test.cpp
   forms/goldberg/goldberg_plan_test.cpp
   forms/goldberg/goldberg_structural_grid_test.cpp
@@ -198,6 +204,7 @@ set(BACH_TEST_SOURCES
   solo_string/arch/chaconne_config_test.cpp
   solo_string/arch/scaled_variation_plan_test.cpp
   solo_string/arch/chaconne_engine_test.cpp
+  solo_string/arch/chaconne_overlap_test.cpp
   solo_string/arch/chaconne_scheme_test.cpp
   solo_string/arch/bass_realizer_test.cpp
   solo_string/arch/texture_vocabulary_test.cpp

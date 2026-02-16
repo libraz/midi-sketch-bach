@@ -2,26 +2,111 @@
   "category": "solo_violin",
   "work_count": 17,
   "scalars": {
-    "stepwise_ratio": {"mean": 0.523, "std": 0.10},
-    "leap_ratio": {"mean": 0.394, "std": 0.11},
-    "avg_interval": {"mean": 2.95, "std": 0.5},
-    "consonance_ratio": {"mean": 0.740, "std": 0.12},
-    "perfect_consonance_ratio": {"mean": 0.30, "std": 0.08},
-    "avg_active_voices": {"mean": 1.57, "std": 0.4},
-    "notes_per_bar": {"mean": 20.23, "std": 5.0}
+    "stepwise_ratio": {
+      "mean": 0.523,
+      "std": 0.1
+    },
+    "leap_ratio": {
+      "mean": 0.394,
+      "std": 0.11
+    },
+    "avg_interval": {
+      "mean": 2.95,
+      "std": 0.5
+    },
+    "consonance_ratio": {
+      "mean": 0.74,
+      "std": 0.12
+    },
+    "perfect_consonance_ratio": {
+      "mean": 0.3,
+      "std": 0.08
+    },
+    "avg_active_voices": {
+      "mean": 1.57,
+      "std": 0.4
+    },
+    "notes_per_bar": {
+      "mean": 20.23,
+      "std": 5.0
+    },
+    "cadences_per_8_bars": {
+      "mean": 0.06,
+      "std": 0.3
+    },
+    "parallel_perfects_per_100_beats": {
+      "mean": 0.42,
+      "std": 0.55
+    }
   },
   "distributions": {
     "interval": {
-      "P1": 0.076, "m2": 0.214, "M2": 0.277, "m3": 0.112,
-      "M3": 0.076, "P4": 0.072, "TT": 0.025, "P5": 0.049,
-      "m6": 0.030, "M6": 0.037, "m7": 0.027, "M7": 0.005
+      "P1": 0.076,
+      "m2": 0.214,
+      "M2": 0.277,
+      "m3": 0.112,
+      "M3": 0.076,
+      "P4": 0.072,
+      "TT": 0.025,
+      "P5": 0.049,
+      "m6": 0.03,
+      "M6": 0.037,
+      "m7": 0.027,
+      "M7": 0.005
     },
     "rhythm": {
-      "32nd": 0.415, "16th": 0.327, "8th": 0.171,
-      "quarter": 0.073, "half": 0.013
+      "32nd": 0.415,
+      "16th": 0.327,
+      "8th": 0.171,
+      "quarter": 0.073,
+      "half": 0.013
     },
     "texture": {
-      "0": 0.005, "1": 0.610, "2": 0.198, "3": 0.187
+      "0": 0.005,
+      "1": 0.61,
+      "2": 0.198,
+      "3": 0.187
+    },
+    "function": {
+      "T": 0.35,
+      "S": 0.264,
+      "D": 0.261,
+      "M": 0.125
+    },
+    "harmony_degrees": {
+      "V": 0.154,
+      "i": 0.129,
+      "III": 0.084,
+      "VI": 0.083,
+      "iv": 0.076,
+      "I": 0.066,
+      "vii\u00b0": 0.065,
+      "ii\u00b0": 0.053,
+      "IV": 0.051,
+      "ii": 0.047,
+      "vi": 0.036,
+      "iii": 0.028,
+      "I+": 0.014,
+      "v": 0.014,
+      "VII": 0.014,
+      "II": 0.013,
+      "V+": 0.011,
+      "i\u00b0": 0.01,
+      "iv\u00b0": 0.01,
+      "IV+": 0.009,
+      "iii\u00b0": 0.008,
+      "vi\u00b0": 0.006,
+      "II+": 0.005,
+      "VI+": 0.005,
+      "III+": 0.005,
+      "v\u00b0": 0.002,
+      "vii": 0.001
+    },
+    "nct_types": {
+      "passing": 0.211,
+      "neighbor": 0.263,
+      "suspension": 0.0,
+      "other": 0.526
     }
   }
 }

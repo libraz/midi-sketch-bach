@@ -9,6 +9,7 @@
 #include "core/gm_program.h"
 #include "core/melodic_state.h"
 #include "forms/form_utils.h"
+#include "fugue/cadence_insertion.h"
 #include "core/note_creator.h"
 #include "core/pitch_utils.h"
 #include "core/rng_util.h"
@@ -29,6 +30,61 @@ namespace {
 using namespace duration;
 
 // ---------------------------------------------------------------------------
+// Section texture type for stylus phantasticus alternation
+// ---------------------------------------------------------------------------
+
+/// @brief Section texture type for fantasia structural rhythm.
+///
+/// Fantasia (stylus phantasticus) alternates between rapid passage work
+/// and sustained chordal sections. This enum drives duration selection
+/// across all voices at each harmonic event.
+enum class FantasiaSectionTexture : uint8_t {
+  Passage,   ///< Rapid figuration: 16th/8th notes in melody, 8th in counter.
+  Chordal,   ///< Sustained: quarter/half in melody, whole in chords, quarter in counter.
+  Cadential  ///< Cadence approach: half/whole notes, all voices converge.
+};
+
+/// @brief Determine section texture for a given event position.
+///
+/// The texture alternates in 4-bar groups (2 passage, 2 chordal), with the
+/// final 2 bars always cadential. At sequence/harmonic boundaries (detected
+/// by chord root change), the texture may shift early.
+///
+/// @param event_progress Progress of this event within the piece (0.0-1.0).
+/// @param bar_idx Zero-based bar index of the event start.
+/// @param prev_root_pc Previous event root pitch class (-1 if first).
+/// @param curr_root_pc Current event root pitch class.
+/// @param total_bars Total number of bars in the piece.
+/// @return FantasiaSectionTexture for this event.
+FantasiaSectionTexture determineFantasiaSectionTexture(
+    float event_progress, int bar_idx, int prev_root_pc, int curr_root_pc,
+    int total_bars) {
+  // Final 2 bars: cadential convergence.
+  if (bar_idx >= total_bars - 2) {
+    return FantasiaSectionTexture::Cadential;
+  }
+
+  // Harmonic boundary detection: root motion signals section shift.
+  bool at_harmonic_boundary = (prev_root_pc >= 0 && curr_root_pc != prev_root_pc);
+
+  // 4-bar alternation cycle: bars 0-1 passage, bars 2-3 chordal.
+  int cycle_pos = bar_idx % 4;
+
+  // At harmonic boundaries in the middle of a cycle, shift texture early
+  // to create structural motivic organization rather than mechanical alternation.
+  if (at_harmonic_boundary && event_progress > 0.15f && event_progress < 0.85f) {
+    // Shift: passage sections get an extra push at harmonic boundaries.
+    if (cycle_pos == 1 || cycle_pos == 3) {
+      return (cycle_pos < 2) ? FantasiaSectionTexture::Chordal
+                             : FantasiaSectionTexture::Passage;
+    }
+  }
+
+  return (cycle_pos < 2) ? FantasiaSectionTexture::Passage
+                         : FantasiaSectionTexture::Chordal;
+}
+
+// ---------------------------------------------------------------------------
 // Voice generators
 // ---------------------------------------------------------------------------
 
@@ -44,7 +100,9 @@ using namespace duration;
 /// @return Vector of NoteEvents for the ornamental melody voice.
 std::vector<NoteEvent> generateOrnamentalMelody(const HarmonicEvent& event,
                                                 std::mt19937& rng,
-                                                const VerticalContext* vctx = nullptr) {
+                                                const VerticalContext* vctx = nullptr,
+                                                FantasiaSectionTexture texture =
+                                                    FantasiaSectionTexture::Passage) {
   std::vector<NoteEvent> notes;
 
   // Ornamental melody sits in the upper register of Manual I.
@@ -86,8 +144,22 @@ std::vector<NoteEvent> generateOrnamentalMelody(const HarmonicEvent& event,
   uint8_t prev_orn_pitch = scale_tones[tone_idx];
 
   while (current_tick < event.tick + event_duration) {
-    // Ornamental melody uses quarter and eighth notes.
-    Tick dur = rng::rollProbability(rng, 0.4f) ? kEighthNote : kQuarterNote;
+    // Section-texture-aware duration selection for melodic voice.
+    Tick dur;
+    switch (texture) {
+      case FantasiaSectionTexture::Passage:
+        // Rapid passage work: primarily 16th and 8th notes.
+        dur = rng::rollProbability(rng, 0.35f) ? kSixteenthNote : kEighthNote;
+        break;
+      case FantasiaSectionTexture::Chordal:
+        // Sustained chordal: quarter and half notes.
+        dur = rng::rollProbability(rng, 0.6f) ? kQuarterNote : kHalfNote;
+        break;
+      case FantasiaSectionTexture::Cadential:
+        // Cadence: half and whole notes for convergence.
+        dur = rng::rollProbability(rng, 0.5f) ? kHalfNote : kWholeNote;
+        break;
+    }
     Tick remaining = (event.tick + event_duration) - current_tick;
     if (dur > remaining) dur = remaining;
     if (dur == 0) break;
@@ -175,12 +247,18 @@ std::vector<NoteEvent> generateOrnamentalMelody(const HarmonicEvent& event,
 std::vector<NoteEvent> generateSustainedChords(const HarmonicTimeline& timeline,
                                                Tick target_duration,
                                                std::mt19937& rng,
-                                               const VerticalContext* vctx = nullptr) {
+                                               const VerticalContext* vctx = nullptr,
+                                               int total_bars = 0) {
   std::vector<NoteEvent> notes;
 
   // Sustained chords sit in the middle register of Manual II.
   constexpr uint8_t kChordLow = 52;   // E3
   constexpr uint8_t kChordHigh = 76;  // E5
+
+  if (total_bars <= 0) {
+    total_bars = static_cast<int>(target_duration / kTicksPerBar);
+  }
+  int prev_root_pc = -1;
 
   Tick current_tick = 0;
   bool use_whole = rng::rollProbability(rng, 0.5f);
@@ -206,7 +284,32 @@ std::vector<NoteEvent> generateSustainedChords(const HarmonicTimeline& timeline,
           clampPitch(static_cast<int>(event.bass_pitch), kChordLow, kChordHigh));
     }
 
-    Tick dur = use_whole ? kWholeNote : kHalfNote;
+    // Section-texture-aware duration for sustained chords.
+    int bar_idx = static_cast<int>(current_tick / kTicksPerBar);
+    float progress = target_duration > 0
+        ? static_cast<float>(current_tick) / static_cast<float>(target_duration)
+        : 0.5f;
+    int curr_root_pc = getPitchClass(event.chord.root_pitch);
+    FantasiaSectionTexture chd_texture = determineFantasiaSectionTexture(
+        progress, bar_idx, prev_root_pc, curr_root_pc, total_bars);
+    prev_root_pc = curr_root_pc;
+
+    Tick dur;
+    switch (chd_texture) {
+      case FantasiaSectionTexture::Passage:
+        // During passage sections, chords shorten to quarter/half
+        // to create rhythmic contrast with the rapid melody.
+        dur = rng::rollProbability(rng, 0.4f) ? kQuarterNote : kHalfNote;
+        break;
+      case FantasiaSectionTexture::Cadential:
+        // Cadence: sustain with whole notes.
+        dur = kWholeNote;
+        break;
+      default:
+        // Chordal sections: original half/whole alternation.
+        dur = use_whole ? kWholeNote : kHalfNote;
+        break;
+    }
     Tick remaining = target_duration - current_tick;
     if (dur > remaining) dur = remaining;
     if (dur == 0) break;
@@ -254,7 +357,9 @@ std::vector<NoteEvent> generateSustainedChords(const HarmonicTimeline& timeline,
 /// @return Vector of NoteEvents for the countermelody voice.
 std::vector<NoteEvent> generateCountermelody(const HarmonicEvent& event,
                                              std::mt19937& rng,
-                                             const VerticalContext* vctx = nullptr) {
+                                             const VerticalContext* vctx = nullptr,
+                                             FantasiaSectionTexture texture =
+                                                 FantasiaSectionTexture::Passage) {
   std::vector<NoteEvent> notes;
 
   // Countermelody sits in the Positiv range, focusing on the middle register.
@@ -277,8 +382,22 @@ std::vector<NoteEvent> generateCountermelody(const HarmonicEvent& event,
   uint8_t prev_ctr_pitch = scale_tones[tone_idx];
 
   while (current_tick < event.tick + event_duration) {
-    // Countermelody uses eighth notes for light texture.
-    Tick dur = kEighthNote;
+    // Section-texture-aware countermelody duration.
+    Tick dur;
+    switch (texture) {
+      case FantasiaSectionTexture::Passage:
+        // Passage: eighth notes for active counterpoint.
+        dur = kEighthNote;
+        break;
+      case FantasiaSectionTexture::Chordal:
+        // Chordal: quarter notes for calmer texture.
+        dur = kQuarterNote;
+        break;
+      case FantasiaSectionTexture::Cadential:
+        // Cadential: half notes for convergence.
+        dur = kHalfNote;
+        break;
+    }
     Tick remaining = (event.tick + event_duration) - current_tick;
     if (dur > remaining) dur = remaining;
     if (dur == 0) break;
@@ -469,27 +588,60 @@ FantasiaResult generateFantasia(const FantasiaConfig& config) {
   // VerticalContext grows as voices are added.
   VerticalContext vctx{&all_notes, &timeline, num_voices};
 
-  // Voice 1 (sustained chords) -- harmonic support.
+  // Voice 1 (sustained chords) -- harmonic support with section texture.
+  int total_bars = config.section_bars;
   if (num_voices >= 2) {
-    auto chord_notes = generateSustainedChords(timeline, target_duration, rng, &vctx);
+    auto chord_notes = generateSustainedChords(timeline, target_duration, rng,
+                                               &vctx, total_bars);
     all_notes.insert(all_notes.end(), chord_notes.begin(), chord_notes.end());
   }
 
   // Voice 0 (melody) and Voice 2 (countermelody) -- per-event gestural voices.
+  // Section texture computed per event for structural motivic organization.
+  int prev_melody_root_pc = -1;
   for (size_t event_idx = 0; event_idx < events.size(); ++event_idx) {
     const auto& event = events[event_idx];
 
-    // Voice 0: Ornamental melody (quarter/eighth notes on Great).
+    // Compute section texture for this event.
+    int bar_idx = static_cast<int>(event.tick / kTicksPerBar);
+    float event_progress = target_duration > 0
+        ? static_cast<float>(event.tick) / static_cast<float>(target_duration)
+        : 0.5f;
+    int curr_root_pc = getPitchClass(event.chord.root_pitch);
+    FantasiaSectionTexture texture = determineFantasiaSectionTexture(
+        event_progress, bar_idx, prev_melody_root_pc, curr_root_pc, total_bars);
+    prev_melody_root_pc = curr_root_pc;
+
+    // Voice 0: Ornamental melody with section-texture-aware rhythm.
     if (num_voices >= 1) {
-      auto melody_notes = generateOrnamentalMelody(event, rng, &vctx);
+      auto melody_notes = generateOrnamentalMelody(event, rng, &vctx, texture);
       all_notes.insert(all_notes.end(), melody_notes.begin(), melody_notes.end());
     }
 
-    // Voice 2: Light countermelody (eighth notes on Positiv).
+    // Voice 2: Countermelody with section-texture-aware rhythm.
     if (num_voices >= 3) {
-      auto counter_notes = generateCountermelody(event, rng, &vctx);
+      auto counter_notes = generateCountermelody(event, rng, &vctx, texture);
       all_notes.insert(all_notes.end(), counter_notes.begin(), counter_notes.end());
     }
+  }
+
+  // ---- Cadence insertion: fill harmonic tension gaps ----
+  // Fantasia (stylus phantasticus) allows longer stretches without clear
+  // cadences, so the detection threshold is relaxed to 24 bars (vs 16 for fugue).
+  {
+    CadenceDetectionConfig cadence_config;
+    cadence_config.max_bars_without_cadence = 24;
+    cadence_config.scan_window_bars = 8;
+    cadence_config.deceptive_cadence_probability = 0.20f;
+
+    FugueStructure empty_structure;  // No subject entries to exclude.
+    VoiceId bass_voice = (num_voices >= 4) ? static_cast<VoiceId>(num_voices - 1)
+                                           : static_cast<VoiceId>(num_voices - 1);
+    int cadences_inserted = ensureCadentialCoverage(
+        all_notes, empty_structure, config.key.tonic, config.key.is_minor,
+        bass_voice, num_voices, target_duration,
+        config.seed + 66666u, cadence_config);
+    (void)cadences_inserted;
   }
 
   // ---- Unified coordination pass (vertical dissonance control) ----

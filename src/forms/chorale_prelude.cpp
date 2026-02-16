@@ -590,16 +590,36 @@ std::vector<NoteEvent> generateFiguration(Tick cantus_tick, Tick cantus_dur,
   Tick prev_harm_start = timeline.getAt(cantus_tick).tick;
   int neighbor_return = -1;  // Saved tone_idx for neighbor return, -1 = none.
 
+  // Cadence convergence window: last 2 beats of this cantus segment broaden rhythm.
+  Tick cadence_window = 2 * kTicksPerBeat;
+
   while (current_tick < end_tick) {
-    // 3a: Duration from {kSixteenthNote, kEighthNote, kDottedEighth}.
+    // 3a: Beat-position-aware duration selection for structural rhythm.
+    // Downbeats anchor with quarter notes, middle beats use eighth-note
+    // ornamental figuration, and pre-cadence regions broaden to quarter/half.
+    uint8_t beat = beatInBar(current_tick);
+    bool near_cadence = (end_tick - current_tick) <= cadence_window;
     Tick dur;
-    int rval = rng::rollRange(rng, 0, 9);
-    if (rval < 3) {
-      dur = kSixteenthNote;
-    } else if (rval < 8) {
-      dur = kEighthNote;
+
+    if (near_cadence) {
+      // Cadence convergence: broaden to quarter/half notes.
+      dur = rng::rollProbability(rng, 0.6f) ? kQuarterNote : kHalfNote;
+    } else if (beat == 0) {
+      // Downbeat: quarter note anchor (stable metric position).
+      dur = kQuarterNote;
+    } else if (beat == 3) {
+      // Beat 4: prepare next bar with quarter note.
+      dur = rng::rollProbability(rng, 0.7f) ? kQuarterNote : kEighthNote;
     } else {
-      dur = kDottedEighth;
+      // Beats 2-3: ornamental eighth notes with occasional 16th for activity.
+      int rval = rng::rollRange(rng, 0, 9);
+      if (rval < 2) {
+        dur = kSixteenthNote;
+      } else if (rval < 7) {
+        dur = kEighthNote;
+      } else {
+        dur = kEighthNote + kSixteenthNote;  // Dotted eighth.
+      }
     }
     Tick remaining = end_tick - current_tick;
     if (dur > remaining) dur = remaining;
@@ -1164,8 +1184,11 @@ std::vector<NoteEvent> generateInnerVoice(
   }
   if (scale_tones.empty()) return notes;
 
-  // Density control: long cantus notes (>= whole) -> eighth notes; shorter -> quarter.
-  Tick note_dur = (cantus_dur >= kWholeNote) ? kEighthNote : kQuarterNote;
+  // Density control: base duration adapts to cantus length.
+  // Long cantus notes (>= whole) -> eighth notes; shorter -> quarter.
+  // Beat-position and cadence convergence applied dynamically in the loop.
+  Tick base_note_dur = (cantus_dur >= kWholeNote) ? kEighthNote : kQuarterNote;
+  Tick cadence_window_inner = 2 * kTicksPerBeat;
 
   // Helper: find pedal pitch at a given tick.
   auto pedal_pitch_at = [&pedal_notes](Tick tick) -> uint8_t {
@@ -1229,12 +1252,23 @@ std::vector<NoteEvent> generateInnerVoice(
   Tick end_tick = cantus_tick + cantus_dur;
 
   while (current_tick < end_tick) {
-    Tick dur = note_dur;
+    // Beat-position-aware inner voice duration:
+    // Downbeats use longer notes (quarter), middle beats use base duration,
+    // cadence regions broaden to quarter/half for convergence with CF.
+    uint8_t beat = beatInBar(current_tick);
+    bool near_cadence_inner = (end_tick - current_tick) <= cadence_window_inner;
+    Tick dur;
+    if (near_cadence_inner) {
+      dur = kQuarterNote;  // Cadence: converge to quarter notes.
+    } else if (beat == 0) {
+      dur = kQuarterNote;  // Downbeat: anchor with quarter note.
+    } else {
+      dur = base_note_dur;  // Use base density for middle beats.
+    }
     Tick remaining = end_tick - current_tick;
     if (dur > remaining) dur = remaining;
     if (dur == 0) break;
 
-    uint8_t beat = beatInBar(current_tick);
     bool is_strong = (beat == 0 || beat == 2);
     uint8_t pedal_p = pedal_pitch_at(current_tick);
     uint8_t chosen_pitch = 0;
@@ -1379,6 +1413,118 @@ std::vector<NoteEvent> generateInnerVoice(
   return notes;
 }
 
+// ---------------------------------------------------------------------------
+// CF-aware rest policy — thin inner voice texture while preserving CF
+// ---------------------------------------------------------------------------
+
+/// @brief Count the number of distinct voices sounding at a given tick.
+///
+/// Scans all notes to find those whose time range [start_tick, start_tick + duration)
+/// contains the query tick.
+///
+/// @param all_notes All notes across all voices.
+/// @param tick The tick position to query.
+/// @return Number of distinct voices with notes sounding at this tick.
+int countActiveVoicesAt(const std::vector<NoteEvent>& all_notes, Tick tick) {
+  bool active[kChoraleVoices] = {};
+  int count = 0;
+  for (const auto& note : all_notes) {
+    if (note.voice >= kChoraleVoices) continue;
+    if (active[note.voice]) continue;
+    if (tick >= note.start_tick && tick < note.start_tick + note.duration) {
+      active[note.voice] = true;
+      ++count;
+    }
+  }
+  return count;
+}
+
+/// @brief Apply CF-aware rest policy to thin inner voice texture.
+///
+/// The cantus firmus voice (kCantusVoice) is never modified. Inner voices
+/// (voices that are neither the CF nor the bass) have their attack frequency
+/// reduced at non-cadence points where texture density exceeds 3 simultaneous
+/// voices. This is achieved by extending the previous inner voice note's
+/// duration to absorb the current note, effectively creating a tied note
+/// instead of a re-attack.
+///
+/// Only notes with source == FreeCounterpoint (Flexible protection) are
+/// candidates for absorption. Cadence points (final 2 bars) always preserve
+/// all voices for convergence.
+///
+/// @param tracks The 4 chorale prelude tracks (modified in place).
+/// @param total_duration Total piece duration in ticks.
+/// @return Number of inner voice attacks absorbed.
+int applyCFAwareRestPolicy(std::vector<Track>& tracks, Tick total_duration) {
+  int absorbed = 0;
+
+  // Cadence region: final 2 bars — all voices should converge.
+  Tick cadence_start = (total_duration > kTicksPerBar * 2)
+      ? total_duration - kTicksPerBar * 2
+      : total_duration;
+
+  // Build a flat note list for density queries.
+  std::vector<NoteEvent> all_notes;
+  for (const auto& track : tracks) {
+    all_notes.insert(all_notes.end(), track.notes.begin(), track.notes.end());
+  }
+
+  // Process the inner voice track (track index kInnerVoice = 2).
+  auto& inner_notes = tracks[kInnerVoice].notes;
+  if (inner_notes.size() < 2) return 0;
+
+  // Sort inner notes by start_tick for sequential processing.
+  std::sort(inner_notes.begin(), inner_notes.end(),
+            [](const NoteEvent& lhs, const NoteEvent& rhs) {
+              return lhs.start_tick < rhs.start_tick;
+            });
+
+  // Mark notes for removal by setting duration to 0.
+  for (size_t idx = 1; idx < inner_notes.size(); ++idx) {
+    auto& current = inner_notes[idx];
+
+    // Never absorb in cadence region.
+    if (current.start_tick >= cadence_start) continue;
+
+    // Only absorb Flexible-protection notes.
+    if (current.source != BachNoteSource::FreeCounterpoint) continue;
+
+    // Check density at this note's start tick.
+    int density = countActiveVoicesAt(all_notes, current.start_tick);
+    if (density <= 3) continue;
+
+    // Absorb: extend previous note's duration to cover this one.
+    auto& previous = inner_notes[idx - 1];
+    Tick extended_end = current.start_tick + current.duration;
+    Tick prev_end = previous.start_tick + previous.duration;
+    if (extended_end > prev_end) {
+      previous.duration = extended_end - previous.start_tick;
+    }
+
+    // Mark current note for removal.
+    current.duration = 0;
+    ++absorbed;
+
+    // Skip every other note at most — preserve some inner voice motion.
+    // This ensures we do not absorb consecutive notes, keeping texture alive.
+    ++idx;
+  }
+
+  // Remove absorbed notes (duration == 0).
+  inner_notes.erase(
+      std::remove_if(inner_notes.begin(), inner_notes.end(),
+                     [](const NoteEvent& note) { return note.duration == 0; }),
+      inner_notes.end());
+
+  if (absorbed > 0) {
+    fprintf(stderr,
+            "[ChoralePrelude] CF-aware rest policy: absorbed %d inner voice"
+            " attacks to thin texture\n", absorbed);
+  }
+
+  return absorbed;
+}
+
 }  // namespace
 
 // ---------------------------------------------------------------------------
@@ -1476,6 +1622,11 @@ ChoralePreludeResult generateChoralePrelude(const ChoralePreludeConfig& config) 
 
     cantus_tick += cantus_dur;
   }
+
+  // Step 6a: CF-aware rest policy — thin inner voice texture while preserving CF.
+  // The cantus firmus voice is never modified. Inner voice attacks are absorbed
+  // (extended duration) at non-cadence points where texture density > 3 voices.
+  applyCFAwareRestPolicy(tracks, total_duration);
 
   // Step 6b: Post-validate through counterpoint engine.
   {
@@ -1891,6 +2042,88 @@ ChoralePreludeResult generateChoralePrelude(const ChoralePreludeConfig& config) 
 
   // Step 7: Sort notes within each track by start_tick.
   form_utils::sortTrackNotes(tracks);
+
+  // Final parallel repair pass: catch parallels introduced by post-processing
+  // (Picardy third, registration changes).
+  {
+    std::vector<NoteEvent> final_notes;
+    for (const auto& track : tracks) {
+      final_notes.insert(final_notes.end(), track.notes.begin(), track.notes.end());
+    }
+
+    // Count melodic direction changes before repair for sanity check.
+    auto countDirectionChanges = [](const std::vector<NoteEvent>& notes,
+                                    uint8_t nv) -> int {
+      std::vector<std::vector<uint8_t>> voice_pitches(nv);
+      std::vector<std::vector<Tick>> voice_ticks(nv);
+      for (const auto& note : notes) {
+        if (note.voice < nv) {
+          voice_pitches[note.voice].push_back(note.pitch);
+          voice_ticks[note.voice].push_back(note.start_tick);
+        }
+      }
+      int changes = 0;
+      for (uint8_t vid = 0; vid < nv; ++vid) {
+        auto& pitches = voice_pitches[vid];
+        auto& ticks = voice_ticks[vid];
+        if (pitches.size() < 3) continue;
+        std::vector<size_t> order(pitches.size());
+        for (size_t idx = 0; idx < order.size(); ++idx) order[idx] = idx;
+        std::sort(order.begin(), order.end(),
+                  [&ticks](size_t lhs, size_t rhs) {
+                    return ticks[lhs] < ticks[rhs];
+                  });
+        int prev_dir = 0;
+        for (size_t idx = 1; idx < order.size(); ++idx) {
+          int diff = static_cast<int>(pitches[order[idx]]) -
+                     static_cast<int>(pitches[order[idx - 1]]);
+          int dir = (diff > 0) ? 1 : ((diff < 0) ? -1 : 0);
+          if (dir != 0 && prev_dir != 0 && dir != prev_dir) ++changes;
+          if (dir != 0) prev_dir = dir;
+        }
+      }
+      return changes;
+    };
+
+    int dir_changes_before = countDirectionChanges(final_notes, kChoraleVoices);
+
+    ParallelRepairParams pp_final;
+    pp_final.num_voices = kChoraleVoices;
+    pp_final.scale = config.key.is_minor ? ScaleType::HarmonicMinor : ScaleType::Major;
+    pp_final.key_at_tick = [&](Tick) { return config.key.tonic; };
+    // Voice ranges: v0=figuration(C5-E6), v1=cantus(C4-B4),
+    // v2=inner(C3-G4), v3=pedal(C1-D3).
+    static constexpr std::pair<uint8_t, uint8_t> kChoraleRanges[4] = {
+        {72, 88}, {60, 71}, {48, 67},
+        {organ_range::kPedalLow, organ_range::kPedalHigh}};
+    pp_final.voice_range_static =
+        [](uint8_t vid) -> std::pair<uint8_t, uint8_t> {
+      if (vid < kChoraleVoices) return kChoraleRanges[vid];
+      return {0, 127};
+    };
+    pp_final.max_iterations = 2;
+    repairParallelPerfect(final_notes, pp_final);
+
+    int dir_changes_after = countDirectionChanges(final_notes, kChoraleVoices);
+    if (dir_changes_before > 0 &&
+        dir_changes_after > dir_changes_before * 120 / 100) {
+      fprintf(stderr,
+              "[ChoralePrelude] WARNING: final parallel repair increased "
+              "direction changes %d -> %d (+%.0f%%)\n",
+              dir_changes_before, dir_changes_after,
+              100.0f * (dir_changes_after - dir_changes_before) /
+                  dir_changes_before);
+    }
+
+    // Redistribute repaired notes back to tracks.
+    for (auto& track : tracks) track.notes.clear();
+    for (auto& note : final_notes) {
+      if (note.voice < kChoraleVoices) {
+        tracks[note.voice].notes.push_back(std::move(note));
+      }
+    }
+    form_utils::sortTrackNotes(tracks);
+  }
 
   result.tracks = std::move(tracks);
   result.timeline = std::move(timeline);

@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <set>
 
 #include "core/basic_types.h"
 #include "core/gm_program.h"
@@ -622,6 +623,94 @@ TEST(CharacterFormCompatTest, AllCharactersAllowedForPassacaglia) {
   EXPECT_TRUE(isCharacterFormCompatible(SubjectCharacter::Playful, FormType::Passacaglia));
   EXPECT_TRUE(isCharacterFormCompatible(SubjectCharacter::Noble, FormType::Passacaglia));
   EXPECT_TRUE(isCharacterFormCompatible(SubjectCharacter::Restless, FormType::Passacaglia));
+}
+
+// ---------------------------------------------------------------------------
+// Structural rhythm diversity: beat-position-aware figuration
+// ---------------------------------------------------------------------------
+
+TEST(ChoralePreludeTest, FigurationDownbeatsHaveLongerNotes) {
+  // Downbeat (beat 0) figuration notes should predominantly use quarter notes
+  // as structural anchors, rather than the shorter eighth/sixteenth notes
+  // used on middle beats.
+  ChoralePreludeConfig config = makeTestConfig();
+  ChoralePreludeResult result = generateChoralePrelude(config);
+  ASSERT_TRUE(result.success);
+  ASSERT_GE(result.tracks.size(), 1u);
+
+  Tick total_downbeat_dur = 0;
+  int downbeat_count = 0;
+  Tick total_midbeat_dur = 0;
+  int midbeat_count = 0;
+
+  for (const auto& note : result.tracks[0].notes) {
+    uint8_t beat = beatInBar(note.start_tick);
+    if (beat == 0) {
+      total_downbeat_dur += note.duration;
+      ++downbeat_count;
+    } else if (beat == 1 || beat == 2) {
+      total_midbeat_dur += note.duration;
+      ++midbeat_count;
+    }
+  }
+
+  if (downbeat_count > 0 && midbeat_count > 0) {
+    float avg_downbeat = static_cast<float>(total_downbeat_dur) /
+                         static_cast<float>(downbeat_count);
+    float avg_midbeat = static_cast<float>(total_midbeat_dur) /
+                        static_cast<float>(midbeat_count);
+    EXPECT_GT(avg_downbeat, avg_midbeat)
+        << "Downbeat figuration (avg=" << avg_downbeat
+        << ") should have longer durations than midbeat (avg=" << avg_midbeat
+        << ") for structural rhythm anchoring";
+  }
+}
+
+TEST(ChoralePreludeTest, FigurationHasDurationDiversity) {
+  // The figuration voice should use at least 3 distinct duration values
+  // across the piece (e.g. sixteenth, eighth, quarter, half).
+  ChoralePreludeConfig config = makeTestConfig();
+  ChoralePreludeResult result = generateChoralePrelude(config);
+  ASSERT_TRUE(result.success);
+  ASSERT_GE(result.tracks.size(), 1u);
+
+  std::set<Tick> unique_durations;
+  for (const auto& note : result.tracks[0].notes) {
+    unique_durations.insert(note.duration);
+  }
+
+  EXPECT_GE(unique_durations.size(), 3u)
+      << "Figuration should use at least 3 distinct duration values, "
+      << "found " << unique_durations.size();
+}
+
+TEST(ChoralePreludeTest, InnerVoiceDownbeatsHaveQuarterNotes) {
+  // Inner voice downbeats should use quarter notes for structural clarity,
+  // while middle beats may use eighth notes for activity.
+  ChoralePreludeConfig config = makeTestConfig();
+  ChoralePreludeResult result = generateChoralePrelude(config);
+  ASSERT_TRUE(result.success);
+  ASSERT_GE(result.tracks.size(), 3u);
+
+  int downbeat_quarter_count = 0;
+  int downbeat_total = 0;
+
+  for (const auto& note : result.tracks[2].notes) {
+    if (beatInBar(note.start_tick) == 0) {
+      ++downbeat_total;
+      if (note.duration >= duration::kQuarterNote) {
+        ++downbeat_quarter_count;
+      }
+    }
+  }
+
+  if (downbeat_total > 0) {
+    float ratio = static_cast<float>(downbeat_quarter_count) /
+                  static_cast<float>(downbeat_total);
+    EXPECT_GE(ratio, 0.70f)
+        << "Inner voice downbeats should use quarter notes >= 70% of the time, "
+        << "got " << (ratio * 100.0f) << "%";
+  }
 }
 
 }  // namespace

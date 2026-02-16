@@ -41,11 +41,15 @@ struct PassacagliaResult {
 /// as subject.
 ///
 /// The ground bass is immutable once generated (BachNoteSource::GroundBass).
-/// Upper voices increase in complexity across four stages:
-///   - Variations 0-2:  Quarter note chord tones (Establish)
-///   - Variations 3-5:  Eighth note scale passages (Develop early)
-///   - Variations 6-8:  Eighth note arpeggios (Develop late)
-///   - Variations 9-11: Sixteenth note figurations (Accumulate/Resolve)
+/// Upper voices follow a 5-stage complexity arc:
+///   - Variations 0-2:      Quarter note chord tones (Establish)
+///   - Variations 3-5:      Eighth note scale passages (Develop early)
+///   - Variations 6-8:      Eighth note arpeggios (Develop late)
+///   - Middle (9 to N-2):   Sixteenth note figurations (Accumulate)
+///   - Final 1-2 vars:      Half/quarter notes (Resolve)
+///
+/// A strong-beat vertical consonance pass ensures that upper-voice notes
+/// on bar heads and beat heads form consonant intervals with the ground bass.
 ///
 /// @param config Passacaglia configuration.
 /// @return PassacagliaResult with generated tracks.

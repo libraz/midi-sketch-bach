@@ -82,6 +82,7 @@ set(BACH_LIB_SOURCES
   fugue/middle_entry.cpp
   fugue/stretto.cpp
   fugue/cadence_plan.cpp
+  fugue/cadence_insertion.cpp
   fugue/voice_registers.cpp
   fugue/motif_pool.cpp
   fugue/fortspinnung.cpp

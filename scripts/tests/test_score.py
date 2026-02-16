@@ -28,6 +28,8 @@ from scripts.bach_analyzer.score import (
     jsd_to_points,
     zscore_to_points,
     _compute_penalties,
+    _detect_cantus_firmus,
+    _detect_ground_bass_regularity,
     _normalize,
 )
 
@@ -204,7 +206,8 @@ class TestReferenceData(unittest.TestCase):
         self.assertIn("organ_fugue", cats)
         self.assertIn("wtc1", cats)
         self.assertIn("solo_cello_suite", cats)
-        self.assertEqual(len(cats), 6)
+        self.assertIn("trio_sonata", cats)
+        self.assertEqual(len(cats), 7)
 
     def test_load_category(self):
         ref = load_category("organ_fugue")
@@ -520,6 +523,316 @@ class TestFixtureIntegration(unittest.TestCase):
 
         tp = extract_texture_profile(self.score)
         self.assertGreater(tp["avg_active_voices"], 0)
+
+
+# ---------------------------------------------------------------------------
+# Ground bass regularity tests
+# ---------------------------------------------------------------------------
+
+class TestDetectGroundBassRegularity(unittest.TestCase):
+    """Tests for _detect_ground_bass_regularity."""
+
+    def _make_passacaglia_score(self, period_bars=4, num_periods=4):
+        """Create a score with a repeating bass pattern.
+
+        Bass plays C on beat 1 of each period-start bar, with a fixed
+        pitch-class pattern within each period.
+        """
+        pattern_pcs = [0, 7, 5, 0]  # C, G, F, C as pitch classes
+        # Extend/truncate to match period length
+        bar_pattern = (pattern_pcs * ((period_bars // len(pattern_pcs)) + 1))[:period_bars]
+
+        bass_notes = []
+        for period_idx in range(num_periods):
+            for bar_idx in range(period_bars):
+                global_bar = period_idx * period_bars + bar_idx
+                tick = global_bar * TICKS_PER_BAR
+                # Bass note on beat 1 with pitch based on pattern
+                pitch = 36 + bar_pattern[bar_idx]  # C2 range
+                bass_notes.append(
+                    _n(pitch, tick, TICKS_PER_BAR, "bass", NoteSource.GROUND_BASS)
+                )
+
+        # Add an upper voice so we have multi-voice texture
+        upper_notes = []
+        total_bars = period_bars * num_periods
+        for bar_idx in range(total_bars):
+            tick = bar_idx * TICKS_PER_BAR
+            pitch = 72 + (bar_idx % 7)  # Some melody in C5 range
+            upper_notes.append(
+                _n(pitch, tick, TICKS_PER_BEAT, "soprano", NoteSource.FREE_COUNTERPOINT)
+            )
+
+        return Score(
+            tracks=[_track("soprano", upper_notes), _track("bass", bass_notes)],
+            form="passacaglia",
+        )
+
+    def test_regular_ground_bass(self):
+        """A perfectly regular ground bass should score high."""
+        score = self._make_passacaglia_score(period_bars=4, num_periods=6)
+        result = _detect_ground_bass_regularity(score)
+        self.assertGreater(result, 40.0)
+
+    def test_no_bass_pattern(self):
+        """Random pitches with no periodicity should score low."""
+        import random
+        rng = random.Random(42)
+        bass_notes = []
+        for bar_idx in range(24):
+            tick = bar_idx * TICKS_PER_BAR
+            pitch = 36 + rng.randint(0, 11)
+            bass_notes.append(_n(pitch, tick, TICKS_PER_BAR, "bass"))
+        upper_notes = [_n(72, bar_idx * TICKS_PER_BAR, TICKS_PER_BEAT, "soprano")
+                       for bar_idx in range(24)]
+        score = Score(
+            tracks=[_track("soprano", upper_notes), _track("bass", bass_notes)],
+            form="passacaglia",
+        )
+        result = _detect_ground_bass_regularity(score)
+        # Random data should have lower regularity than structured pattern
+        regular_score = self._make_passacaglia_score(period_bars=4, num_periods=6)
+        regular_result = _detect_ground_bass_regularity(regular_score)
+        self.assertLess(result, regular_result)
+
+    def test_too_short(self):
+        """Very short scores should return 0."""
+        bass_notes = [_n(36, 0, TICKS_PER_BAR, "bass")]
+        score = Score(tracks=[_track("bass", bass_notes)], form="passacaglia")
+        result = _detect_ground_bass_regularity(score)
+        self.assertEqual(result, 0.0)
+
+    def test_transposed_repetition(self):
+        """Bass pattern transposed by a fixed interval should still be detected."""
+        # Period of 4 bars: C-E-G-C, then transposed up by P5: G-B-D-G
+        bass_notes = []
+        base_pattern = [0, 4, 7, 0]  # C, E, G, C
+        for period_idx in range(4):
+            transpose = (period_idx * 7) % 12  # Transpose by P5 each time
+            for bar_idx in range(4):
+                global_bar = period_idx * 4 + bar_idx
+                tick = global_bar * TICKS_PER_BAR
+                pitch = 36 + (base_pattern[bar_idx] + transpose) % 12
+                bass_notes.append(_n(pitch, tick, TICKS_PER_BAR, "bass"))
+        upper_notes = [_n(72, b * TICKS_PER_BAR, TICKS_PER_BEAT, "soprano")
+                       for b in range(16)]
+        score = Score(
+            tracks=[_track("soprano", upper_notes), _track("bass", bass_notes)],
+            form="passacaglia",
+        )
+        result = _detect_ground_bass_regularity(score)
+        self.assertGreater(result, 30.0)
+
+
+# ---------------------------------------------------------------------------
+# Cantus firmus detection tests
+# ---------------------------------------------------------------------------
+
+class TestDetectCantusFirmus(unittest.TestCase):
+    """Tests for _detect_cantus_firmus."""
+
+    def test_clear_cantus_firmus(self):
+        """Voice with much longer notes on strong beats should score high."""
+        # CF voice: whole notes on beat 1
+        cf_notes = []
+        for bar_idx in range(8):
+            tick = bar_idx * TICKS_PER_BAR
+            pitch = 60 + (bar_idx % 5)
+            cf_notes.append(_n(pitch, tick, TICKS_PER_BAR, "soprano",
+                              NoteSource.CANTUS_FIXED))
+
+        # Counter voice: eighth notes
+        counter_notes = []
+        for bar_idx in range(8):
+            for beat in range(8):  # 8 eighth notes per bar
+                tick = bar_idx * TICKS_PER_BAR + beat * (TICKS_PER_BEAT // 2)
+                pitch = 48 + (beat % 7)
+                counter_notes.append(_n(pitch, tick, TICKS_PER_BEAT // 2, "alto",
+                                        NoteSource.FREE_COUNTERPOINT))
+
+        score = Score(
+            tracks=[_track("soprano", cf_notes), _track("alto", counter_notes)],
+            form="chorale_prelude",
+        )
+        result = _detect_cantus_firmus(score)
+        self.assertGreater(result, 60.0)
+
+    def test_no_cantus_firmus(self):
+        """Equal-duration voices should score low."""
+        voice1_notes = [_n(60, i * TICKS_PER_BEAT, TICKS_PER_BEAT, "soprano")
+                        for i in range(16)]
+        voice2_notes = [_n(48, i * TICKS_PER_BEAT, TICKS_PER_BEAT, "alto")
+                        for i in range(16)]
+        score = Score(
+            tracks=[_track("soprano", voice1_notes), _track("alto", voice2_notes)],
+            form="chorale_prelude",
+        )
+        result = _detect_cantus_firmus(score)
+        # Equal durations -> ratio ~1.0 -> 0 points from duration
+        self.assertLess(result, 50.0)
+
+    def test_single_voice(self):
+        """Single voice should return 0 (no CF possible)."""
+        notes = [_n(60, i * TICKS_PER_BEAT, TICKS_PER_BEAT, "soprano") for i in range(8)]
+        score = Score(tracks=[_track("soprano", notes)], form="chorale_prelude")
+        result = _detect_cantus_firmus(score)
+        self.assertEqual(result, 0.0)
+
+    def test_cf_on_weak_beats(self):
+        """CF with long notes but on weak beats should score lower."""
+        # CF on beat 2 (weak beat)
+        cf_notes = []
+        for bar_idx in range(8):
+            tick = bar_idx * TICKS_PER_BAR + TICKS_PER_BEAT  # Beat 2
+            cf_notes.append(_n(60 + bar_idx % 5, tick, TICKS_PER_BAR - TICKS_PER_BEAT,
+                              "soprano"))
+
+        counter_notes = []
+        for bar_idx in range(8):
+            for beat in range(4):
+                tick = bar_idx * TICKS_PER_BAR + beat * TICKS_PER_BEAT
+                counter_notes.append(_n(48 + beat, tick, TICKS_PER_BEAT // 2, "alto"))
+
+        score = Score(
+            tracks=[_track("soprano", cf_notes), _track("alto", counter_notes)],
+            form="chorale_prelude",
+        )
+
+        # Compare with CF on strong beats
+        cf_strong = []
+        for bar_idx in range(8):
+            tick = bar_idx * TICKS_PER_BAR  # Beat 1
+            cf_strong.append(_n(60 + bar_idx % 5, tick, TICKS_PER_BAR, "soprano"))
+        score_strong = Score(
+            tracks=[_track("soprano", cf_strong), _track("alto", counter_notes)],
+            form="chorale_prelude",
+        )
+
+        result_weak = _detect_cantus_firmus(score)
+        result_strong = _detect_cantus_firmus(score_strong)
+        self.assertLess(result_weak, result_strong)
+
+
+# ---------------------------------------------------------------------------
+# Form-aware structure scoring tests
+# ---------------------------------------------------------------------------
+
+class TestFormAwareStructureScoring(unittest.TestCase):
+    """Test that _score_structure uses form-specific metrics."""
+
+    def test_passacaglia_includes_ground_bass(self):
+        """Passacaglia form should include ground_bass_regularity sub-score."""
+        # Build a passacaglia-like score
+        bass_notes = []
+        pattern = [0, 7, 5, 0]
+        for period_idx in range(4):
+            for bar_idx in range(4):
+                global_bar = period_idx * 4 + bar_idx
+                tick = global_bar * TICKS_PER_BAR
+                pitch = 36 + pattern[bar_idx]
+                bass_notes.append(
+                    _n(pitch, tick, TICKS_PER_BAR, "bass", NoteSource.GROUND_BASS)
+                )
+        upper_notes = [_n(72 + (b % 5), b * TICKS_PER_BAR, TICKS_PER_BEAT, "soprano")
+                       for b in range(16)]
+        score = Score(
+            tracks=[_track("soprano", upper_notes), _track("bass", bass_notes)],
+            form="passacaglia",
+        )
+        bach_score = compute_score(
+            score, "organ_fugue", form_name="passacaglia"
+        )
+        structure = bach_score.dimensions["structure"]
+        self.assertTrue(structure.applicable)
+        sub_names = [s.name for s in structure.sub_scores]
+        self.assertIn("ground_bass_regularity", sub_names)
+
+    def test_chorale_prelude_includes_cantus(self):
+        """Chorale prelude form should include cantus_firmus sub-score."""
+        cf_notes = [_n(60 + (b % 5), b * TICKS_PER_BAR, TICKS_PER_BAR, "soprano",
+                       NoteSource.CANTUS_FIXED) for b in range(8)]
+        counter_notes = []
+        for b in range(8):
+            for beat in range(8):
+                tick = b * TICKS_PER_BAR + beat * (TICKS_PER_BEAT // 2)
+                counter_notes.append(_n(48 + beat % 7, tick, TICKS_PER_BEAT // 2, "alto"))
+        score = Score(
+            tracks=[_track("soprano", cf_notes), _track("alto", counter_notes)],
+            form="chorale_prelude",
+        )
+        bach_score = compute_score(
+            score, "orgelbuchlein", form_name="chorale_prelude"
+        )
+        structure = bach_score.dimensions["structure"]
+        self.assertTrue(structure.applicable)
+        sub_names = [s.name for s in structure.sub_scores]
+        self.assertIn("cantus_firmus", sub_names)
+
+    def test_fugue_still_uses_voice_entries(self):
+        """Fugue should still use voice_entry_intervals (backward compat)."""
+        score = _make_fugue_score()
+        bach_score = compute_score(score, "organ_fugue", form_name="fugue")
+        structure = bach_score.dimensions["structure"]
+        self.assertTrue(structure.applicable)
+        sub_names = [s.name for s in structure.sub_scores]
+        self.assertIn("voice_entry_intervals", sub_names)
+        # Should NOT have ground bass or cantus firmus for fugue
+        self.assertNotIn("ground_bass_regularity", sub_names)
+        self.assertNotIn("cantus_firmus", sub_names)
+
+    def test_chaconne_includes_ground_bass(self):
+        """Chaconne form should include ground_bass_regularity sub-score."""
+        bass_notes = []
+        pattern = [0, 5, 7, 0]
+        for period_idx in range(6):
+            for bar_idx in range(4):
+                global_bar = period_idx * 4 + bar_idx
+                tick = global_bar * TICKS_PER_BAR
+                pitch = 55 + pattern[bar_idx]
+                bass_notes.append(
+                    _n(pitch, tick, TICKS_PER_BAR, "violin", NoteSource.GROUND_BASS)
+                )
+        score = Score(
+            tracks=[_track("violin", bass_notes)],
+            form="chaconne",
+        )
+        bach_score = compute_score(
+            score, "solo_violin", counterpoint_enabled=False, form_name="chaconne"
+        )
+        structure = bach_score.dimensions["structure"]
+        self.assertTrue(structure.applicable)
+        sub_names = [s.name for s in structure.sub_scores]
+        self.assertIn("ground_bass_regularity", sub_names)
+
+    def test_no_form_name_still_works(self):
+        """When form_name is empty, should fall back to existing behavior."""
+        score = _make_fugue_score()
+        bach_score = compute_score(score, "organ_fugue")
+        structure = bach_score.dimensions["structure"]
+        # Should still work (voice entries from provenance)
+        self.assertTrue(structure.applicable)
+
+    def test_unknown_form_texture_only(self):
+        """Unknown form with no fugue provenance should use texture only."""
+        notes = [_n(60 + (i % 7), i * TICKS_PER_BEAT, TICKS_PER_BEAT, "soprano")
+                 for i in range(32)]
+        notes2 = [_n(48 + (i % 5), i * TICKS_PER_BEAT, TICKS_PER_BEAT, "bass")
+                  for i in range(32)]
+        score = Score(
+            tracks=[_track("soprano", notes), _track("bass", notes2)],
+            form="trio_sonata",
+        )
+        bach_score = compute_score(
+            score, "orgelbuchlein", form_name="trio_sonata"
+        )
+        structure = bach_score.dimensions["structure"]
+        sub_names = [s.name for s in structure.sub_scores]
+        # No voice entries (no fugue provenance), no ground bass, no CF
+        self.assertNotIn("voice_entry_intervals", sub_names)
+        self.assertNotIn("ground_bass_regularity", sub_names)
+        self.assertNotIn("cantus_firmus", sub_names)
+        # Should have texture density match
+        self.assertIn("texture_density_match", sub_names)
 
 
 if __name__ == "__main__":

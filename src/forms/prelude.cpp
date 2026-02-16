@@ -384,10 +384,29 @@ std::vector<NoteEvent> generateHarmonicPreludeNotes(
         }
       }
 
-      // Near-cadence (last 2 bars): reduce rhythm variation for convergence.
+      // Section-progress-dependent rhythm density shaping:
+      //   Opening (0-15%):  simpler rhythm, low variation prob.
+      //   Development (15-80%): more active, higher variation prob.
+      //   Pre-cadence (80-90%): rhythmic augmentation begins.
+      //   Cadence (last 2 bars): minimal variation for convergence.
       float effective_rhythm_var = rhythm_variation_prob;
+      float beat_progress = total_duration > 0
+          ? static_cast<float>(beat_tick - events.front().tick) /
+            static_cast<float>(total_duration)
+          : 0.5f;
+
       if (bar_idx >= total_bars - 2) {
+        // Cadence: minimal variation for convergence.
         effective_rhythm_var = 0.05f;
+      } else if (beat_progress < 0.15f) {
+        // Opening: simpler, more predictable rhythm.
+        effective_rhythm_var *= 0.3f;
+      } else if (beat_progress > 0.80f) {
+        // Pre-cadence: augmentation, reduce active variation.
+        effective_rhythm_var *= 0.5f;
+      } else if (beat_progress > 0.30f && beat_progress < 0.70f) {
+        // Development peak: increase rhythm variation for activity.
+        effective_rhythm_var = std::min(effective_rhythm_var * 1.5f, 0.25f);
       }
 
       // Variation: on second half of bar, shift mid voice for variety.
@@ -436,6 +455,24 @@ std::vector<NoteEvent> generateHarmonicPreludeNotes(
           : 0.5f;
       auto fig_notes = applyFiguration(beat_voicing, beat_tmpl, beat_tick,
                                        ev, voice_range, section_progress);
+
+      // Inject passing and neighbor tones into weak sub-beats.
+      // NCT density shaped by section progress:
+      //   Opening: fewer NCTs for harmonic clarity.
+      //   Development: higher NCT density for scalar motion.
+      //   Pre-cadence: reduced NCTs for harmonic convergence.
+      float base_nct_prob = (prelude_type == PreludeType::Perpetual) ? 0.50f : 0.35f;
+      float nct_prob = base_nct_prob;
+      if (beat_progress < 0.15f) {
+        nct_prob *= 0.5f;  // Opening: half the NCT density.
+      } else if (beat_progress > 0.30f && beat_progress < 0.70f) {
+        nct_prob = std::min(base_nct_prob * 1.3f, 0.60f);  // Development peak.
+      } else if (beat_progress > 0.85f) {
+        nct_prob *= 0.4f;  // Pre-cadence: reduced for convergence.
+      }
+      injectNonChordTones(fig_notes, beat_tmpl, beat_tick, ev, voice_range,
+                          rng, nct_prob, section_progress);
+
       all_notes.insert(all_notes.end(), fig_notes.begin(), fig_notes.end());
     }
   }
@@ -817,6 +854,83 @@ PreludeResult generatePrelude(const PreludeConfig& config) {
 
   // Step 5: Sort notes within each track.
   form_utils::sortTrackNotes(tracks);
+
+  // Final parallel repair pass: catch parallels introduced by post-processing
+  // (cadential pedal, Picardy third, registration changes).
+  if (num_voices >= 2) {
+    std::vector<NoteEvent> final_notes;
+    for (const auto& track : tracks) {
+      final_notes.insert(final_notes.end(), track.notes.begin(), track.notes.end());
+    }
+
+    // Count melodic direction changes before repair for sanity check.
+    auto countDirectionChanges = [](const std::vector<NoteEvent>& notes,
+                                    uint8_t nv) -> int {
+      // Build per-voice sorted pitch sequences.
+      std::vector<std::vector<uint8_t>> voice_pitches(nv);
+      std::vector<std::vector<Tick>> voice_ticks(nv);
+      for (const auto& note : notes) {
+        if (note.voice < nv) {
+          voice_pitches[note.voice].push_back(note.pitch);
+          voice_ticks[note.voice].push_back(note.start_tick);
+        }
+      }
+      int changes = 0;
+      for (uint8_t vid = 0; vid < nv; ++vid) {
+        auto& pitches = voice_pitches[vid];
+        auto& ticks = voice_ticks[vid];
+        if (pitches.size() < 3) continue;
+        // Sort by tick.
+        std::vector<size_t> order(pitches.size());
+        for (size_t idx = 0; idx < order.size(); ++idx) order[idx] = idx;
+        std::sort(order.begin(), order.end(),
+                  [&ticks](size_t lhs, size_t rhs) {
+                    return ticks[lhs] < ticks[rhs];
+                  });
+        int prev_dir = 0;
+        for (size_t idx = 1; idx < order.size(); ++idx) {
+          int diff = static_cast<int>(pitches[order[idx]]) -
+                     static_cast<int>(pitches[order[idx - 1]]);
+          int dir = (diff > 0) ? 1 : ((diff < 0) ? -1 : 0);
+          if (dir != 0 && prev_dir != 0 && dir != prev_dir) ++changes;
+          if (dir != 0) prev_dir = dir;
+        }
+      }
+      return changes;
+    };
+
+    int dir_changes_before = countDirectionChanges(final_notes, num_voices);
+
+    ParallelRepairParams pp_final;
+    pp_final.num_voices = num_voices;
+    pp_final.scale = config.key.is_minor ? ScaleType::HarmonicMinor : ScaleType::Major;
+    pp_final.key_at_tick = [&](Tick) { return config.key.tonic; };
+    pp_final.voice_range_static = [&](uint8_t vid) -> std::pair<uint8_t, uint8_t> {
+      return {getVoiceLowPitch(vid), getVoiceHighPitch(vid)};
+    };
+    pp_final.max_iterations = 2;
+    repairParallelPerfect(final_notes, pp_final);
+
+    int dir_changes_after = countDirectionChanges(final_notes, num_voices);
+    if (dir_changes_before > 0 &&
+        dir_changes_after > dir_changes_before * 120 / 100) {
+      fprintf(stderr,
+              "[Prelude] WARNING: final parallel repair increased direction "
+              "changes %d -> %d (+%.0f%%)\n",
+              dir_changes_before, dir_changes_after,
+              100.0f * (dir_changes_after - dir_changes_before) /
+                  dir_changes_before);
+    }
+
+    // Redistribute repaired notes back to tracks.
+    for (auto& track : tracks) track.notes.clear();
+    for (auto& note : final_notes) {
+      if (note.voice < num_voices) {
+        tracks[note.voice].notes.push_back(std::move(note));
+      }
+    }
+    form_utils::sortTrackNotes(tracks);
+  }
 
   result.tracks = std::move(tracks);
   result.timeline = std::move(timeline);

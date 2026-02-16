@@ -14,7 +14,6 @@
 #include <optional>
 #include <random>
 
-#include "core/gm_program.h"
 #include "core/interval.h"
 #include "core/note_source.h"
 #include "core/pitch_utils.h"
@@ -32,10 +31,10 @@
 #include "core/note_creator.h"
 #include "fugue/answer.h"
 #include "fugue/archetype_policy.h"
+#include "fugue/cadence_insertion.h"
 #include "fugue/cadence_plan.h"
 #include "fugue/countersubject.h"
 #include "fugue/episode.h"
-#include "fugue/fortspinnung.h"
 #include "fugue/motif_pool.h"
 #include "fugue/exposition.h"
 #include "fugue/middle_entry.h"
@@ -1693,6 +1692,23 @@ FugueResult generateFugue(const FugueConfig& config) {
     current_tick += return_ep_duration;
   }
 
+  // --- Cadence insertion: detect and fill harmonic tension gaps ---
+  // Scan for long stretches without leading-tone -> tonic resolution.
+  // Only insert minimal cadential formulas (V->I or V->vi) where no
+  // existing cadential activity or subject entry provides articulation.
+  {
+    CadenceDetectionConfig cadence_config;
+    cadence_config.max_bars_without_cadence = 16;
+    cadence_config.scan_window_bars = 8;
+    cadence_config.deceptive_cadence_probability = 0.20f;
+
+    int cadences_inserted = ensureCadentialCoverage(
+        all_notes, structure, config.key, config.is_minor,
+        num_voices - 1, num_voices, current_tick,
+        config.seed + 66666u, cadence_config);
+    (void)cadences_inserted;  // Informational; no action needed on count.
+  }
+
   // --- Dominant pedal: 4 bars before stretto (Develop -> Resolve transition) ---
   // In Bach's fugues, the dominant pedal is a climactic point where the bass
   // sustains the dominant while upper voices remain highly active with
@@ -3072,6 +3088,165 @@ FugueResult generateFugue(const FugueConfig& config) {
     result.quality.notes_adjusted = adjusted;
     result.quality.counterpoint_compliance = (pre_count > 0)
         ? static_cast<float>(total_notes) / static_cast<float>(pre_count) : 1.0f;
+  }
+
+  // =========================================================================
+  // Episode density reduction via tie extension: merge consecutive short
+  // flexible notes in non-thematic voices into longer held notes, reducing
+  // attack frequency without removing voices.
+  //
+  // BWV578 reference: 56% of beats are 3-voice texture in a 4-voice fugue,
+  // meaning one voice is often resting or sustaining. This pass creates
+  // that effect by extending durations in episode filler voices.
+  //
+  // Protection: Subject, Answer, SubjectCore, Countersubject, PedalPoint,
+  // SequenceNote, FalseEntry, and Coda notes are never modified.
+  // =========================================================================
+  {
+    // Identify episode sections from the fugue structure.
+    auto episode_sections = structure.getSectionsByType(SectionType::Episode);
+
+    if (!episode_sections.empty() && num_voices >= 3) {
+      // Sort notes by (voice, start_tick) for sequential per-voice processing.
+      std::stable_sort(all_notes.begin(), all_notes.end(),
+          [](const NoteEvent& lhs, const NoteEvent& rhs) {
+            if (lhs.voice != rhs.voice) return lhs.voice < rhs.voice;
+            return lhs.start_tick < rhs.start_tick;
+          });
+
+      // Maximum note duration after merging: 1 bar (avoid unrealistically long notes).
+      constexpr Tick kMaxMergeDuration = kTicksPerBar;
+      // Minimum duration to be eligible for merging: 1 eighth note or shorter.
+      constexpr Tick kMergeEligibleMax = kTicksPerBeat;
+
+      // Process each episode section independently.
+      for (const auto& episode : episode_sections) {
+        // Determine which voices carry thematic material in this episode.
+        // A voice is "thematic" if it has any Subject/Answer/CS/SubjectCore
+        // notes in this section's time range.
+        bool voice_has_theme[5] = {false, false, false, false, false};
+        for (const auto& note : all_notes) {
+          if (note.start_tick < episode.start_tick ||
+              note.start_tick >= episode.end_tick) continue;
+          if (note.voice >= num_voices) continue;
+          if (note.source == BachNoteSource::FugueSubject ||
+              note.source == BachNoteSource::FugueAnswer ||
+              note.source == BachNoteSource::SubjectCore ||
+              note.source == BachNoteSource::Countersubject) {
+            voice_has_theme[note.voice] = true;
+          }
+        }
+
+        // Compute density reduction factor based on position in the fugue.
+        // Early episodes: lighter reduction (30%). Late episodes: stronger (45%).
+        // This creates a density arc matching the BWV578 profile.
+        float episode_pos = (estimated_duration > 0)
+            ? static_cast<float>(episode.start_tick) /
+              static_cast<float>(estimated_duration)
+            : 0.5f;
+        // Merge probability: 0.30 at start, 0.45 at 80% through, back to 0.25 at end.
+        float merge_probability;
+        if (episode_pos < 0.25f) {
+          merge_probability = 0.30f;  // Exposition-adjacent: moderate.
+        } else if (episode_pos < 0.70f) {
+          merge_probability = 0.35f;  // Middle development: moderate.
+        } else if (episode_pos < 0.85f) {
+          merge_probability = 0.45f;  // Late development: heavier reduction.
+        } else {
+          merge_probability = 0.25f;  // Near stretto: let density build.
+        }
+
+        // For each non-thematic voice, merge consecutive flexible notes.
+        for (uint8_t vid = 0; vid < num_voices; ++vid) {
+          if (voice_has_theme[vid]) continue;
+
+          // Collect indices of flexible notes in this voice within this episode.
+          std::vector<size_t> eligible_indices;
+          for (size_t idx = 0; idx < all_notes.size(); ++idx) {
+            const auto& note = all_notes[idx];
+            if (note.voice != vid) continue;
+            if (note.start_tick < episode.start_tick ||
+                note.start_tick >= episode.end_tick) continue;
+
+            // Only merge flexible-level notes.
+            ProtectionLevel level = getProtectionLevel(note.source);
+            if (level != ProtectionLevel::Flexible) continue;
+
+            // Only merge short notes (eighth note or shorter).
+            if (note.duration > kMergeEligibleMax) continue;
+
+            eligible_indices.push_back(idx);
+          }
+
+          if (eligible_indices.size() < 2) continue;
+
+          // Seeded RNG for deterministic merging per episode+voice.
+          uint32_t merge_seed = config.seed + static_cast<uint32_t>(vid) * 1000u +
+              static_cast<uint32_t>(episode.start_tick / kTicksPerBar) * 100u + 55555u;
+          std::mt19937 merge_rng(merge_seed);
+          std::uniform_real_distribution<float> merge_dist(0.0f, 1.0f);
+
+          // Walk through eligible notes, merging consecutive ones.
+          std::vector<bool> merged(all_notes.size(), false);
+
+          for (size_t eidx = 0; eidx + 1 < eligible_indices.size(); ++eidx) {
+            size_t cur_idx = eligible_indices[eidx];
+            if (merged[cur_idx]) continue;
+
+            // Probabilistic: skip this merge opportunity sometimes.
+            if (merge_dist(merge_rng) > merge_probability) continue;
+
+            // Extend this note to cover subsequent consecutive notes.
+            Tick extended_end = all_notes[cur_idx].start_tick +
+                                all_notes[cur_idx].duration;
+
+            size_t merge_count = 0;
+            for (size_t nxt = eidx + 1; nxt < eligible_indices.size(); ++nxt) {
+              size_t nxt_idx = eligible_indices[nxt];
+              if (merged[nxt_idx]) continue;
+
+              Tick nxt_start = all_notes[nxt_idx].start_tick;
+              Tick nxt_end = nxt_start + all_notes[nxt_idx].duration;
+
+              // Must be within 1 beat of the current end (allow small gaps).
+              if (nxt_start > extended_end + kTicksPerBeat) break;
+
+              // Would the merged duration exceed the maximum?
+              Tick potential_duration = nxt_end - all_notes[cur_idx].start_tick;
+              if (potential_duration > kMaxMergeDuration) break;
+
+              // Mark for removal and extend.
+              merged[nxt_idx] = true;
+              extended_end = nxt_end;
+              ++merge_count;
+
+              // Limit merges per group to 3 (avoids extremely sparse texture).
+              if (merge_count >= 3) break;
+            }
+
+            if (merge_count > 0) {
+              all_notes[cur_idx].duration =
+                  extended_end - all_notes[cur_idx].start_tick;
+            }
+          }
+
+          // Remove merged notes (they are absorbed into the extended note).
+          // Iterate backward to preserve indices.
+          for (size_t idx = all_notes.size(); idx > 0; --idx) {
+            if (merged[idx - 1]) {
+              all_notes.erase(all_notes.begin() +
+                              static_cast<std::ptrdiff_t>(idx - 1));
+            }
+          }
+        }
+      }
+
+      // Re-sort by start_tick for subsequent pipeline steps.
+      std::sort(all_notes.begin(), all_notes.end(),
+          [](const NoteEvent& lhs, const NoteEvent& rhs) {
+            return lhs.start_tick < rhs.start_tick;
+          });
+    }
   }
 
   // =========================================================================

@@ -48,24 +48,36 @@ struct VoiceProfile {
 
 namespace voice_profiles {
 
+/// Soprano: favor shorter durations (8th/16th) for ornamental activity.
+/// BWV578 v1 avg duration 0.24 beats supports rapid figuration.
+/// Weights: {whole, half, dotted-qtr, qtr, 8th, 16th}
 constexpr VoiceProfile kSoprano = {
     0.67f, 0.22f, 0.03f, true, 1,
-    {0.5f, 1.5f, 1.2f, 3.0f, 2.0f, 0.8f}, 120,  // min=16th
+    {0.3f, 1.0f, 0.8f, 2.0f, 3.0f, 2.5f}, 120,  // min=16th
     0.20f, 0.0f, 0.30f};
 
+/// Alto: mixed duration distribution for rhythmic variety.
+/// BWV578 v2 avg duration 0.47 beats -- moderate activity.
+/// Weights: {whole, half, dotted-qtr, qtr, 8th, 16th}
 constexpr VoiceProfile kAlto = {
     0.59f, 0.25f, 0.03f, true, 1,
-    {0.5f, 1.5f, 1.2f, 3.0f, 2.0f, 0.6f}, 120,
+    {0.8f, 1.5f, 1.2f, 3.0f, 2.5f, 1.5f}, 120,
     0.20f, 0.0f, 0.30f};
 
+/// Tenor: favor medium durations (quarter/half) for sustained support.
+/// BWV578 v3 avg duration 0.30 beats -- between upper and lower.
+/// Weights: {whole, half, dotted-qtr, qtr, 8th, 16th}
 constexpr VoiceProfile kTenor = {
     0.65f, 0.22f, 0.04f, true, 1,
-    {0.5f, 1.5f, 1.2f, 3.0f, 2.0f, 0.8f}, 120,
+    {0.8f, 2.5f, 1.5f, 3.5f, 1.5f, 0.8f}, 120,
     0.20f, 0.0f, 0.30f};
 
+/// Bass: favor longer durations (half/quarter) for harmonic foundation.
+/// BWV578 v4 avg duration 0.51 beats -- slow-moving bass line.
+/// Weights: {whole, half, dotted-qtr, qtr, 8th, 16th}
 constexpr VoiceProfile kBassLine = {
     0.44f, 0.24f, 0.12f, true, 2,
-    {1.0f, 3.0f, 2.0f, 3.0f, 1.0f, 0.1f}, 240,  // min=8th
+    {1.5f, 3.0f, 2.0f, 3.0f, 1.5f, 0.5f}, 240,  // min=8th
     0.10f, 0.18f, 0.30f};
 
 constexpr VoiceProfile kPedalPoint = {

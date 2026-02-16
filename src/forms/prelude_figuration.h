@@ -114,6 +114,40 @@ std::vector<NoteEvent> applyFiguration(const ChordVoicing& voicing,
                                        VoiceRangeFn voice_range,
                                        float section_progress);
 
+/// @brief Inject passing and neighbor tones into figuration output.
+///
+/// Post-processes a beat's worth of figuration notes, replacing selected
+/// weak-beat chord tones with diatonic non-chord tones:
+///
+///   - **Passing tones**: When consecutive notes in the same voice leap a 3rd
+///     or larger, the weak-beat note is replaced with a diatonic step between
+///     the two chord tones (filling the gap stepwise).
+///   - **Neighbor tones**: On weak sub-beats, a chord tone may be replaced
+///     by a diatonic step above or below, creating a departure-return motion.
+///
+/// Beat 1 (the note at beat_start_tick) is always preserved as a chord tone.
+/// Only notes whose template step has NCTFunction::ChordTone are candidates
+/// for replacement (existing passing/neighbor tones are left unchanged).
+///
+/// @param notes Notes from applyFiguration for a single beat (modified in place).
+/// @param tmpl The figuration template used to generate these notes.
+/// @param beat_start_tick Absolute tick of the beat start.
+/// @param event Harmonic event (for key/scale context).
+/// @param voice_range Voice range function for pitch clamping.
+/// @param rng Random number generator for probabilistic NCT selection.
+/// @param nct_probability Probability of replacing a weak-beat chord tone
+///        with an NCT (0.0 = never, 1.0 = always). Recommended: 0.35-0.50.
+/// @param section_progress Progress within piece (0.0=start, 1.0=end).
+///        Biases neighbor direction: opening/closing prefer lower, middle balanced.
+void injectNonChordTones(std::vector<NoteEvent>& notes,
+                         const FigurationTemplate& tmpl,
+                         Tick beat_start_tick,
+                         const HarmonicEvent& event,
+                         VoiceRangeFn voice_range,
+                         std::mt19937& rng,
+                         float nct_probability = 0.40f,
+                         float section_progress = 0.5f);
+
 }  // namespace bach
 
 #endif  // BACH_FORMS_PRELUDE_FIGURATION_H

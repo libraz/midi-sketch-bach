@@ -311,6 +311,85 @@ std::vector<NoteEvent> postValidateNotes(
     ++note_idx;
   }
 
+  // --- Phase 3b: Voice-role-specific leap threshold enforcement ---
+  // Scan consecutive same-voice notes and re-octave notes that exceed
+  // voice-specific leap thresholds. This prevents unnaturally large leaps
+  // while respecting that bass/pedal voices idiomatically use wider intervals.
+  {
+    // Voice-specific maximum leap thresholds (semitones).
+    // Voices 0-2 (soprano/alto/tenor): 16 semitones (compound 3rd / 10th).
+    // Voice 3+ (bass/pedal): 19 semitones (compound 5th / 12th) -- octave jumps
+    // are idiomatic in bass lines (Bach organ pedal frequently uses them).
+    constexpr int kUpperVoiceMaxLeap = 16;
+    constexpr int kBassVoiceMaxLeap = 19;
+
+    // Build per-voice index for sequential scanning.
+    std::array<std::vector<size_t>, 5> voice_result_indices;
+    for (size_t idx = 0; idx < result.size(); ++idx) {
+      uint8_t vid = result[idx].voice;
+      if (vid < 5) voice_result_indices[vid].push_back(idx);
+    }
+
+    for (uint8_t vid = 0; vid < std::min(num_voices, static_cast<uint8_t>(5)); ++vid) {
+      const auto& indices = voice_result_indices[vid];
+      int max_leap = (vid >= 3) ? kBassVoiceMaxLeap : kUpperVoiceMaxLeap;
+
+      for (size_t pos = 1; pos < indices.size(); ++pos) {
+        auto& curr = result[indices[pos]];
+        const auto& prev = result[indices[pos - 1]];
+
+        // Skip Immutable/SemiImmutable notes -- never modify identity notes.
+        ProtectionLevel curr_prot = (curr.voice < num_voices &&
+                                     voice_prot_override[curr.voice] >= 0)
+            ? static_cast<ProtectionLevel>(voice_prot_override[curr.voice])
+            : getProtectionLevel(curr.source);
+        if (curr_prot == ProtectionLevel::Immutable ||
+            curr_prot == ProtectionLevel::SemiImmutable) {
+          continue;
+        }
+
+        int leap = std::abs(static_cast<int>(curr.pitch) -
+                            static_cast<int>(prev.pitch));
+        if (leap <= max_leap) continue;
+
+        // Attempt re-octave: find the octave of curr.pitch closest to
+        // prev.pitch that keeps the interval within the threshold and
+        // stays within the voice range.
+        auto [range_lo, range_hi] = voice_range_fn(vid, curr.start_tick);
+        int pitch_class = static_cast<int>(curr.pitch) % 12;
+        int prev_p = static_cast<int>(prev.pitch);
+
+        int best_candidate = -1;
+        int best_distance = 999;
+
+        // Search all octave placements of the same pitch class within range.
+        for (int octave = 0; octave <= 10; ++octave) {
+          int candidate = pitch_class + octave * 12;
+          if (candidate < static_cast<int>(range_lo) ||
+              candidate > static_cast<int>(range_hi)) {
+            continue;
+          }
+          int dist = std::abs(candidate - prev_p);
+          if (dist <= max_leap && dist < best_distance) {
+            best_candidate = candidate;
+            best_distance = dist;
+          }
+        }
+
+        if (best_candidate >= 0 &&
+            static_cast<uint8_t>(best_candidate) != curr.pitch) {
+          curr.pitch = static_cast<uint8_t>(best_candidate);
+          curr.modified_by |= static_cast<uint8_t>(NoteModifiedBy::OctaveAdjust);
+          local_stats.repaired++;
+          // Corresponding decrement: this was already counted as
+          // accepted_original or repaired in the main loop, but the
+          // re-octave is an additional adjustment -- only count the
+          // increment to track total modifications.
+        }
+      }
+    }
+  }
+
   // --- Phase 4: Structural micro-shift rescue for dropped Flexible notes ---
   // When a Flexible note was dropped due to dissonance with a Structural note
   // (specifically Countersubject), try +/-1/+/-2 step shifts on the Structural

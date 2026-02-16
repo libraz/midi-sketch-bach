@@ -308,6 +308,20 @@ int resolveLeaps(std::vector<NoteEvent>& notes,
       // Fallback: if both candidates were rejected (e.g., lookahead rejected
       // them all), keep the original pitch to avoid cascading violations.
       if (best_pitch >= 0 && static_cast<uint8_t>(best_pitch) != notes[i2].pitch) {
+        // Probabilistic resolution: use tick-based deterministic PRNG to decide
+        // whether to apply the resolution. This makes leap resolution a
+        // high-probability bias rather than a mandatory transformation.
+        if (params.resolution_probability < 1.0f) {
+          // Deterministic hash from tick value for reproducibility across runs.
+          // Uses a simple LCG-style hash to produce a value in [0, 1).
+          uint32_t tick_hash = notes[i2].start_tick * 2654435761u;  // NOLINT(readability-magic-numbers): Knuth's multiplicative hash constant
+          tick_hash ^= (static_cast<uint32_t>(vid) << 16);
+          tick_hash = (tick_hash >> 8) & 0xFFFF;
+          float roll = static_cast<float>(tick_hash) / 65536.0f;
+          if (roll >= params.resolution_probability) {
+            continue;  // Skip resolution for this leap.
+          }
+        }
         notes[i2].pitch = static_cast<uint8_t>(best_pitch);
         notes[i2].modified_by |= static_cast<uint8_t>(NoteModifiedBy::LeapResolution);
         ++modified;

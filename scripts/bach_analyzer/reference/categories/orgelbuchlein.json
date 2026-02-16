@@ -2,34 +2,131 @@
   "category": "orgelbuchlein",
   "work_count": 46,
   "scalars": {
-    "stepwise_ratio": {"mean": 0.545, "std": 0.134},
-    "leap_ratio": {"mean": 0.388, "std": 0.12},
-    "avg_interval": {"mean": 3.01, "std": 0.5},
-    "consonance_ratio": {"mean": 0.844, "std": 0.111},
-    "perfect_consonance_ratio": {"mean": 0.38, "std": 0.08},
-    "avg_active_voices": {"mean": 2.62, "std": 0.3},
-    "notes_per_bar": {"mean": 25.26, "std": 6.0}
+    "stepwise_ratio": {
+      "mean": 0.545,
+      "std": 0.134
+    },
+    "leap_ratio": {
+      "mean": 0.388,
+      "std": 0.12
+    },
+    "avg_interval": {
+      "mean": 3.01,
+      "std": 0.5
+    },
+    "consonance_ratio": {
+      "mean": 0.844,
+      "std": 0.111
+    },
+    "perfect_consonance_ratio": {
+      "mean": 0.38,
+      "std": 0.08
+    },
+    "avg_active_voices": {
+      "mean": 2.62,
+      "std": 0.3
+    },
+    "notes_per_bar": {
+      "mean": 25.26,
+      "std": 6.0
+    },
+    "cadences_per_8_bars": {
+      "mean": 0.1,
+      "std": 0.3
+    },
+    "parallel_perfects_per_100_beats": {
+      "mean": 2.15,
+      "std": 1.95
+    }
   },
   "distributions": {
     "interval": {
-      "P1": 0.070, "m2": 0.219, "M2": 0.335, "m3": 0.087,
-      "M3": 0.058, "P4": 0.085, "TT": 0.019, "P5": 0.051,
-      "m6": 0.027, "M6": 0.028, "m7": 0.015, "M7": 0.004
+      "P1": 0.07,
+      "m2": 0.219,
+      "M2": 0.335,
+      "m3": 0.087,
+      "M3": 0.058,
+      "P4": 0.085,
+      "TT": 0.019,
+      "P5": 0.051,
+      "m6": 0.027,
+      "M6": 0.028,
+      "m7": 0.015,
+      "M7": 0.004
     },
     "rhythm": {
-      "16th": 0.473, "8th": 0.310, "quarter": 0.136,
-      "half": 0.070, "whole": 0.008, "longer": 0.004
+      "16th": 0.473,
+      "8th": 0.31,
+      "quarter": 0.136,
+      "half": 0.07,
+      "whole": 0.008,
+      "longer": 0.004
     },
     "vertical": {
-      "P1": 0.200, "m2": 0.025, "m3": 0.150, "M3": 0.125,
-      "P4": 0.050, "TT": 0.050, "P5": 0.175, "m6": 0.125,
-      "M6": 0.050, "M7": 0.050
+      "P1": 0.2,
+      "m2": 0.025,
+      "m3": 0.15,
+      "M3": 0.125,
+      "P4": 0.05,
+      "TT": 0.05,
+      "P5": 0.175,
+      "m6": 0.125,
+      "M6": 0.05,
+      "M7": 0.05
     },
     "motion": {
-      "oblique": 0.344, "contrary": 0.406, "similar": 0.250, "parallel": 0.000
+      "oblique": 0.344,
+      "contrary": 0.406,
+      "similar": 0.25,
+      "parallel": 0.0
     },
     "texture": {
-      "0": 0.022, "1": 0.044, "2": 0.222, "3": 0.711
+      "0": 0.022,
+      "1": 0.044,
+      "2": 0.222,
+      "3": 0.711
+    },
+    "function": {
+      "T": 0.409,
+      "S": 0.268,
+      "D": 0.249,
+      "M": 0.075
+    },
+    "harmony_degrees": {
+      "I": 0.155,
+      "V": 0.111,
+      "IV": 0.094,
+      "VI": 0.089,
+      "II": 0.054,
+      "i": 0.048,
+      "v": 0.041,
+      "V+": 0.04,
+      "vi": 0.039,
+      "ii": 0.038,
+      "I+": 0.038,
+      "III": 0.034,
+      "iv": 0.033,
+      "iii": 0.026,
+      "VII": 0.025,
+      "IV+": 0.018,
+      "VI+": 0.014,
+      "i\u00b0": 0.014,
+      "II+": 0.012,
+      "vii\u00b0": 0.012,
+      "vi\u00b0": 0.012,
+      "ii\u00b0": 0.01,
+      "iii\u00b0": 0.009,
+      "iv\u00b0": 0.009,
+      "vii": 0.007,
+      "VII+": 0.007,
+      "v\u00b0": 0.006,
+      "III+": 0.006
+    },
+    "nct_types": {
+      "passing": 0.362,
+      "neighbor": 0.221,
+      "suspension": 0.0,
+      "other": 0.417
     }
   }
 }

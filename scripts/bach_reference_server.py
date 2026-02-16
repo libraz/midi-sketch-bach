@@ -1189,6 +1189,30 @@ def _get_distribution(score: Score, profile_type: str) -> dict[str, float]:
     return {}
 
 
+def _get_chord_distribution(
+    work_id: str, profile_type: str,
+) -> dict[str, float]:
+    """Build a distribution from chord estimation for comparison.
+
+    Args:
+        work_id: Work identifier.
+        profile_type: "harmony_degrees" or "function".
+    """
+    chords, stats = _estimate_chords_for_work(work_id, 1.0)
+    if not chords:
+        return {}
+    tonic, is_minor, conf = _get_key_info(work_id)
+    counts: Counter = Counter()
+    for c in chords:
+        if c.confidence <= 0.0:
+            continue
+        if profile_type == "function":
+            counts[_DEGREE_TO_FUNCTION.get(c.degree, "T")] += 1
+        else:  # harmony_degrees
+            counts[_degree_to_roman(c.degree, c.quality, is_minor or False)] += 1
+    return dict(counts)
+
+
 @server.tool()
 def compare_profiles(
     work_id_a: str,
@@ -1201,17 +1225,23 @@ def compare_profiles(
         work_id_a: First work identifier
         work_id_b: Second work identifier
         profile_type: Profile to compare: "interval", "rhythm",
-                      "pitch_class", or "vertical"
+                      "pitch_class", "vertical", "harmony_degrees", or "function"
     """
-    score_a, _, err_a = _load_score(work_id_a)
-    if err_a:
-        return json.dumps({"error": err_a})
-    score_b, _, err_b = _load_score(work_id_b)
-    if err_b:
-        return json.dumps({"error": err_b})
-
-    pa = _get_distribution(score_a, profile_type)
-    pb = _get_distribution(score_b, profile_type)
+    # Chord-based profile types use work_id directly.
+    if profile_type in ("harmony_degrees", "function"):
+        pa = _get_chord_distribution(work_id_a, profile_type)
+        pb = _get_chord_distribution(work_id_b, profile_type)
+        if not pa or not pb:
+            return json.dumps({"error": "Chord estimation unavailable for one or both works."})
+    else:
+        score_a, _, err_a = _load_score(work_id_a)
+        if err_a:
+            return json.dumps({"error": err_a})
+        score_b, _, err_b = _load_score(work_id_b)
+        if err_b:
+            return json.dumps({"error": err_b})
+        pa = _get_distribution(score_a, profile_type)
+        pb = _get_distribution(score_b, profile_type)
     jsd = _js_divergence(pa, pb)
 
     if jsd < 0.01:
@@ -2026,6 +2056,1875 @@ def _figuration_label(num_voices: int, slots: tuple[int, ...]) -> str:
     else:
         direction = "mixed"
     return f"{num_voices}v-{direction}-{len(slots)}notes"
+
+
+# ===== G. Harmonic analysis (2) =============================================
+
+# Chord templates: pitch class sets relative to root.
+CHORD_TEMPLATES: dict[str, frozenset[int]] = {
+    "M": frozenset({0, 4, 7}),
+    "m": frozenset({0, 3, 7}),
+    "dim": frozenset({0, 3, 6}),
+    "aug": frozenset({0, 4, 8}),
+    "dom7": frozenset({0, 4, 7, 10}),
+    "m7": frozenset({0, 3, 7, 10}),
+    "dim7": frozenset({0, 3, 6, 9}),
+    "hdim7": frozenset({0, 3, 6, 10}),
+}
+
+# Markov transition prior for Bach progressions (scale-degree bigrams).
+# Pairs are (from_degree, to_degree) -> weight multiplier.
+_TRANSITION_PRIOR: dict[tuple[int, int], float] = {
+    (4, 0): 1.5, (3, 4): 1.3, (1, 4): 1.3, (0, 3): 1.2,
+    (0, 4): 1.2, (4, 5): 1.2, (5, 3): 1.1, (6, 0): 1.2,
+}
+
+# Scale degree -> harmonic function.
+_DEGREE_TO_FUNCTION: dict[int, str] = {
+    0: "T", 1: "S", 2: "M", 3: "S", 4: "D", 5: "T", 6: "D",
+}
+
+# Roman numeral labels per mode.
+_MAJOR_NUMERALS = ["I", "ii", "iii", "IV", "V", "vi", "vii\u00b0"]
+_MINOR_NUMERALS = ["i", "ii\u00b0", "III", "iv", "V", "VI", "vii\u00b0"]
+
+
+class ChordEstimate(NamedTuple):
+    """Estimated chord at a sample point."""
+    root_pc: int        # 0-11 pitch class of root
+    quality: str        # key in CHORD_TEMPLATES, or "" for unclassified
+    degree: int         # 0-6 scale degree
+    inversion: str      # "root", "1st", "2nd", "3rd"
+    confidence: float   # 0.0-1.0
+    bass_pc: Optional[int]  # bass pitch class, or None
+
+
+# Module-level chord cache for memoization.
+_CHORD_CACHE: dict[str, tuple[list[ChordEstimate], dict]] = {}
+
+
+def _extract_chord_support_pcs(
+    tracks_notes: list[tuple[str, list[Note]]],
+    tick: int,
+    tpb: int,
+) -> tuple[dict[int, float], Optional[int]]:
+    """Extract weighted pitch-class support at a given tick.
+
+    For each track, finds the sounding note at tick and computes a weight
+    based on duration, metric position, and voice role.
+
+    Returns:
+        (pc_weights, bass_pc) where pc_weights maps pitch class to
+        accumulated weight, and bass_pc is the pitch class of the lowest
+        voice's sounding note (or None).
+    """
+    pc_weights: dict[int, float] = {}
+    bass_pc: Optional[int] = None
+    num_tracks = len(tracks_notes)
+    tick_strength = _beat_strength(tick)
+
+    for track_idx, (role, sorted_notes) in enumerate(tracks_notes):
+        note = sounding_note_at(sorted_notes, tick)
+        if note is None:
+            continue
+
+        dur_beats = note.duration / tpb
+        is_bass = (track_idx == num_tracks - 1)
+
+        # Short note handling (< 0.25 beats).
+        if dur_beats < 0.25:
+            note_start_strength = _beat_strength(note.start_tick)
+            weight = 0.2 if note_start_strength >= 0.5 else 0.1
+        else:
+            # Duration weight: capped at 2 beats.
+            duration_weight = min(dur_beats, 2.0) / 2.0
+
+            # Metric weight at note onset.
+            metric_weight = _beat_strength(note.start_tick)
+
+            # Tie handling: note started before tick on a strong beat.
+            if note.start_tick < tick and tick_strength >= 0.5:
+                metric_weight = max(metric_weight, 0.8)
+
+            # Tick-level bonus for strong metric positions.
+            if tick_strength >= 0.75:
+                metric_weight += 0.1
+
+            # Voice weight: bass gets 1.2x.
+            voice_weight = 1.2 if is_bass else 1.0
+
+            weight = duration_weight * metric_weight * voice_weight
+
+        pitch_class = note.pitch % 12
+        pc_weights[pitch_class] = pc_weights.get(pitch_class, 0.0) + weight
+
+        # Track bass PC (last track = bass).
+        if is_bass:
+            bass_pc = pitch_class
+
+    return pc_weights, bass_pc
+
+
+def _estimate_chord(
+    weighted_pcs: dict[int, float],
+    bass_pc: Optional[int],
+    tonic: int,
+    is_minor: bool,
+    prev_chord: Optional[ChordEstimate] = None,
+) -> ChordEstimate:
+    """Estimate the most likely chord from weighted pitch classes.
+
+    Uses template matching with inversion scoring and Markov priors.
+
+    Args:
+        weighted_pcs: Pitch class -> weight mapping.
+        bass_pc: Bass pitch class (or None).
+        tonic: Tonic pitch class (0-11).
+        is_minor: True for minor key.
+        prev_chord: Previous chord estimate for Markov prior.
+
+    Returns:
+        Best ChordEstimate.
+    """
+    if not weighted_pcs:
+        return ChordEstimate(
+            root_pc=0, quality="", degree=0,
+            inversion="root", confidence=0.0, bass_pc=bass_pc,
+        )
+
+    total_weight = sum(weighted_pcs.values())
+    if total_weight < 1e-9:
+        return ChordEstimate(
+            root_pc=0, quality="", degree=0,
+            inversion="root", confidence=0.0, bass_pc=bass_pc,
+        )
+
+    pc_set = set(weighted_pcs.keys())
+    num_pcs = len(pc_set)
+
+    # Single PC: low confidence.
+    if num_pcs <= 1:
+        single_pc = next(iter(pc_set)) if pc_set else 0
+        scale = MINOR_SCALE_SEMITONES if is_minor else MAJOR_SCALE_SEMITONES
+        rel = (single_pc - tonic) % 12
+        degree = 0
+        min_dist = 12
+        for deg_idx, sem in enumerate(scale):
+            dist = min(abs(rel - sem), 12 - abs(rel - sem))
+            if dist < min_dist:
+                min_dist = dist
+                degree = deg_idx
+        return ChordEstimate(
+            root_pc=single_pc, quality="",
+            degree=degree, inversion="root",
+            confidence=0.15, bass_pc=bass_pc,
+        )
+
+    scale = MINOR_SCALE_SEMITONES if is_minor else MAJOR_SCALE_SEMITONES
+    best_score = -1.0
+    best_estimate = ChordEstimate(
+        root_pc=0, quality="", degree=0,
+        inversion="root", confidence=0.0, bass_pc=bass_pc,
+    )
+    second_best_score = -1.0
+
+    for root in range(12):
+        for quality, template in CHORD_TEMPLATES.items():
+            # Transpose template to this root.
+            transposed = frozenset((root + pc) % 12 for pc in template)
+
+            # Matched weight: sum of weights for PCs in template.
+            matched_weight = sum(
+                weighted_pcs.get(pc, 0.0) for pc in transposed
+            )
+
+            # Count how many template PCs are present.
+            matched_pcs = len(transposed & pc_set)
+            template_size = len(template)
+            coverage = matched_pcs / template_size
+
+            # Skip 7th chords with poor coverage.
+            if template_size >= 4 and coverage < 0.75:
+                continue
+
+            base_score = matched_weight / total_weight
+
+            # Coverage bonus: prefer templates that explain more of their PCs.
+            base_score *= coverage
+
+            # Parsimony: penalize extra PCs not explained by the template.
+            extra_pcs = len(pc_set - transposed)
+            if extra_pcs > 0:
+                base_score *= 1.0 / (1.0 + 0.15 * extra_pcs)
+
+            # Inversion scoring based on bass.
+            inversion = "root"
+            if bass_pc is not None:
+                bass_offset = (bass_pc - root) % 12
+                if bass_offset == 0:
+                    # Root position — no adjustment.
+                    pass
+                elif bass_offset in (3, 4):
+                    # 3rd in bass.
+                    base_score += 0.05
+                    inversion = "1st"
+                elif bass_offset in (6, 7, 8):
+                    # 5th in bass.
+                    base_score += 0.03
+                    inversion = "2nd"
+                elif bass_offset in (9, 10):
+                    # 7th in bass.
+                    base_score += 0.02
+                    inversion = "3rd"
+                elif bass_pc not in transposed:
+                    # Bass not in template.
+                    base_score -= 0.1
+
+            # Map root to scale degree (find closest in scale).
+            rel_pc = (root - tonic) % 12
+            degree = 0
+            min_dist = 12
+            for deg_idx, sem in enumerate(scale):
+                dist = min(abs(rel_pc - sem), 12 - abs(rel_pc - sem))
+                if dist < min_dist:
+                    min_dist = dist
+                    degree = deg_idx
+
+            # Markov prior.
+            if prev_chord is not None and prev_chord.confidence > 0.0:
+                pair = (prev_chord.degree, degree)
+                prior = _TRANSITION_PRIOR.get(pair, 1.0)
+                base_score *= 1.0 + 0.2 * (prior - 1.0)
+
+            if base_score > best_score:
+                second_best_score = best_score
+                best_score = base_score
+                best_estimate = ChordEstimate(
+                    root_pc=root,
+                    quality=quality,
+                    degree=degree,
+                    inversion=inversion,
+                    confidence=0.0,  # computed below
+                    bass_pc=bass_pc,
+                )
+            elif base_score > second_best_score:
+                second_best_score = base_score
+
+    # Compute confidence.
+    if best_score <= 0:
+        return best_estimate
+
+    # Uniqueness: ratio of best to second-best.
+    uniqueness = (
+        best_score / second_best_score
+        if second_best_score > 0 else 2.0
+    )
+
+    # Coverage of the best template.
+    best_template = CHORD_TEMPLATES.get(best_estimate.quality, frozenset())
+    best_transposed = frozenset(
+        (best_estimate.root_pc + pc) % 12 for pc in best_template
+    )
+    best_coverage = (
+        len(best_transposed & pc_set) / len(best_template)
+        if best_template else 0.0
+    )
+
+    confidence = best_coverage * min(uniqueness, 2.0) / 2.0
+
+    # Clamp low coverage.
+    if best_coverage < 0.4:
+        confidence = min(confidence, 0.3)
+
+    # Penalize low uniqueness.
+    if uniqueness < 1.1:
+        confidence *= 0.8
+
+    # Limit confidence for sparse data.
+    if num_pcs <= 2:
+        confidence = min(confidence, 0.6)
+
+    return ChordEstimate(
+        root_pc=best_estimate.root_pc,
+        quality=best_estimate.quality,
+        degree=best_estimate.degree,
+        inversion=best_estimate.inversion,
+        confidence=confidence,
+        bass_pc=best_estimate.bass_pc,
+    )
+
+
+def _estimate_chords_for_work(
+    work_id: str,
+    sample_interval_beats: float = 1.0,
+) -> tuple[list[ChordEstimate], dict[str, Any]]:
+    """Estimate chords for all sample points in a work.
+
+    Uses module-level _CHORD_CACHE for memoization.
+
+    Returns:
+        (chord_estimates, stats) where stats contains mean_confidence,
+        unclassified_ratio, and low_confidence_ratio.
+    """
+    cache_key = f"{work_id}:{sample_interval_beats}"
+    if cache_key in _CHORD_CACHE:
+        return _CHORD_CACHE[cache_key]
+
+    score, raw_data, err = _load_score(work_id)
+    if err or score is None or raw_data is None:
+        empty: list[ChordEstimate] = []
+        stats: dict[str, Any] = {
+            "mean_confidence": 0.0,
+            "unclassified_ratio": 1.0,
+            "low_confidence_ratio": 1.0,
+        }
+        return empty, stats
+
+    tonic_pc, is_minor, key_conf = _get_key_info(work_id)
+    if tonic_pc is None or is_minor is None:
+        # Fall back to C major if key unknown.
+        tonic_pc = 0
+        is_minor = False
+
+    tpb = raw_data.get("ticks_per_beat", TICKS_PER_BEAT)
+    tracks_notes = _iter_track_notes(raw_data, None)
+    if not tracks_notes:
+        empty_list: list[ChordEstimate] = []
+        empty_stats: dict[str, Any] = {
+            "mean_confidence": 0.0,
+            "unclassified_ratio": 1.0,
+            "low_confidence_ratio": 1.0,
+        }
+        return empty_list, empty_stats
+
+    # Determine total duration.
+    max_tick = 0
+    for _, sorted_notes in tracks_notes:
+        if sorted_notes:
+            last = sorted_notes[-1]
+            max_tick = max(max_tick, last.start_tick + last.duration)
+
+    sample_ticks = int(sample_interval_beats * tpb)
+    if sample_ticks <= 0:
+        sample_ticks = tpb
+
+    chords: list[ChordEstimate] = []
+    prev_chord: Optional[ChordEstimate] = None
+    tick = 0
+
+    while tick < max_tick:
+        weighted_pcs, bass_pc = _extract_chord_support_pcs(
+            tracks_notes, tick, tpb,
+        )
+        chord = _estimate_chord(
+            weighted_pcs, bass_pc, tonic_pc, is_minor, prev_chord,
+        )
+        chords.append(chord)
+        if chord.confidence > 0.0:
+            prev_chord = chord
+        tick += sample_ticks
+
+    # Compute stats.
+    total = len(chords)
+    if total == 0:
+        stats_out: dict[str, Any] = {
+            "mean_confidence": 0.0,
+            "unclassified_ratio": 1.0,
+            "low_confidence_ratio": 1.0,
+        }
+    else:
+        confidences = [c.confidence for c in chords]
+        unclassified = sum(1 for c in chords if c.quality == "")
+        low_conf = sum(1 for c in chords if 0.0 < c.confidence < 0.4)
+        stats_out = {
+            "mean_confidence": round(sum(confidences) / total, 3),
+            "unclassified_ratio": round(unclassified / total, 3),
+            "low_confidence_ratio": round(low_conf / total, 3),
+        }
+
+    _CHORD_CACHE[cache_key] = (chords, stats_out)
+    return chords, stats_out
+
+
+def _degree_to_roman(degree: int, quality: str, is_minor: bool) -> str:
+    """Convert scale degree + quality to Roman numeral label."""
+    numerals = _MINOR_NUMERALS if is_minor else _MAJOR_NUMERALS
+    if 0 <= degree < len(numerals):
+        base = numerals[degree]
+    else:
+        base = str(degree)
+
+    # Override case/suffix based on actual quality.
+    root_numeral = ["I", "II", "III", "IV", "V", "VI", "VII"][degree] if 0 <= degree < 7 else str(degree)
+    if quality in ("m", "m7"):
+        return root_numeral.lower()
+    elif quality in ("dim", "dim7", "hdim7"):
+        return root_numeral.lower() + "\u00b0"
+    elif quality == "aug":
+        return root_numeral + "+"
+    elif quality in ("M", "dom7"):
+        return root_numeral
+    return base
+
+
+@server.tool()
+def get_harmonic_profile(
+    work_id: str,
+    sample_interval_beats: float = 1.0,
+) -> str:
+    """Analyze harmonic content of a Bach work via chord estimation.
+
+    Estimates chords at regular intervals using template matching with
+    weighted pitch classes, inversion scoring, and Markov priors for
+    Bach-typical progressions.
+
+    Args:
+        work_id: Work identifier (e.g. BWV578, BWV846_1)
+        sample_interval_beats: Interval between chord samples in beats
+            (default 1.0 = quarter note resolution)
+    """
+    tonic_pc, is_minor, key_conf = _get_key_info(work_id)
+    if tonic_pc is None:
+        # Try to load anyway with C major fallback.
+        tonic_pc = 0
+        is_minor = False
+
+    chords, est_quality = _estimate_chords_for_work(
+        work_id, sample_interval_beats,
+    )
+    if not chords:
+        return json.dumps({"error": f"No chords estimated for '{work_id}'."})
+
+    # Key label.
+    key_name = NOTE_NAMES_12[tonic_pc]
+    key_label = f"{key_name} {'minor' if is_minor else 'major'}"
+
+    # Filter to confident chords for distributions.
+    confident = [c for c in chords if c.confidence > 0.0]
+    total_confident = len(confident)
+
+    # Degree distribution.
+    degree_counts: Counter[str] = Counter()
+    for chord in confident:
+        roman = _degree_to_roman(chord.degree, chord.quality, is_minor)
+        degree_counts[roman] += 1
+
+    degree_dist: dict[str, float] = {}
+    if total_confident > 0:
+        for roman, count in degree_counts.most_common():
+            degree_dist[roman] = round(count / total_confident, 3)
+
+    # Quality distribution.
+    quality_counts: Counter[str] = Counter()
+    for chord in confident:
+        if chord.quality:
+            quality_counts[chord.quality] += 1
+
+    total_quality = sum(quality_counts.values())
+    quality_dist: dict[str, float] = {}
+    if total_quality > 0:
+        for qual, count in quality_counts.most_common():
+            quality_dist[qual] = round(count / total_quality, 3)
+
+    # Function distribution.
+    func_counts: Counter[str] = Counter()
+    for chord in confident:
+        func = _DEGREE_TO_FUNCTION.get(chord.degree, "?")
+        func_counts[func] += 1
+
+    func_dist: dict[str, float] = {}
+    if total_confident > 0:
+        for func, count in func_counts.most_common():
+            func_dist[func] = round(count / total_confident, 3)
+
+    # Inversion distribution.
+    inv_counts: Counter[str] = Counter()
+    for chord in confident:
+        inv_counts[chord.inversion] += 1
+
+    inv_dist: dict[str, float] = {}
+    if total_confident > 0:
+        for inv, count in inv_counts.most_common():
+            inv_dist[inv] = round(count / total_confident, 3)
+
+    # Harmonic rhythm: count chord changes.
+    changes = 0
+    prev_deg = -1
+    prev_qual = ""
+    for chord in chords:
+        if chord.confidence > 0.0:
+            if (chord.degree != prev_deg or chord.quality != prev_qual):
+                if prev_deg >= 0:
+                    changes += 1
+                prev_deg = chord.degree
+                prev_qual = chord.quality
+
+    total_samples = len(chords)
+    total_beats = total_samples * sample_interval_beats
+    total_bars = total_beats / 4.0  # 4/4 time
+
+    avg_beats_per_change = (
+        round(total_beats / changes, 2) if changes > 0 else 0.0
+    )
+    changes_per_bar = (
+        round(changes / total_bars, 2) if total_bars > 0 else 0.0
+    )
+
+    # Degree bigrams (top 10).
+    bigram_counts: Counter[tuple[str, str]] = Counter()
+    prev_roman: Optional[str] = None
+    for chord in chords:
+        if chord.confidence > 0.0:
+            roman = _degree_to_roman(chord.degree, chord.quality, is_minor)
+            if prev_roman is not None and roman != prev_roman:
+                bigram_counts[(prev_roman, roman)] += 1
+            prev_roman = roman
+
+    total_bigrams = sum(bigram_counts.values())
+    bigrams_top10 = []
+    for (from_r, to_r), count in bigram_counts.most_common(10):
+        bigrams_top10.append({
+            "from": from_r,
+            "to": to_r,
+            "count": count,
+            "ratio": round(count / total_bigrams, 3) if total_bigrams > 0 else 0.0,
+        })
+
+    result: dict[str, Any] = {
+        "work_id": work_id,
+        "key": key_label,
+        "total_samples": total_samples,
+        "estimation_quality": est_quality,
+        "degree_distribution": degree_dist,
+        "quality_distribution": quality_dist,
+        "function_distribution": func_dist,
+        "inversion_distribution": inv_dist,
+        "harmonic_rhythm": {
+            "avg_beats_per_chord_change": avg_beats_per_change,
+            "changes_per_bar": changes_per_bar,
+        },
+        "degree_bigrams_top10": bigrams_top10,
+    }
+    return json.dumps(result, indent=2)
+
+
+@server.tool()
+def get_cadence_profile(work_id: str) -> str:
+    """Detect and classify cadences in a Bach work.
+
+    Analyzes chord progressions at half-beat resolution to identify
+    cadence patterns (PAC, IAC, HC, DC, PHR, EVAD) with confidence
+    scoring based on multiple musical signals.
+
+    Args:
+        work_id: Work identifier (e.g. BWV578, BWV846_1)
+    """
+    tonic_pc, is_minor, key_conf = _get_key_info(work_id)
+    if tonic_pc is None:
+        tonic_pc = 0
+        is_minor = False
+
+    # Use 0.5-beat resolution for finer cadence detection.
+    chords, _ = _estimate_chords_for_work(work_id, 0.5)
+    if not chords:
+        return json.dumps({"error": f"No chords estimated for '{work_id}'."})
+
+    score, raw_data, err = _load_score(work_id)
+    if err or score is None or raw_data is None:
+        return json.dumps({"error": err})
+
+    tpb = raw_data.get("ticks_per_beat", TICKS_PER_BEAT)
+    tracks_notes = _iter_track_notes(raw_data, None)
+    sample_ticks = tpb // 2  # 0.5 beats
+
+    cadences: list[dict[str, Any]] = []
+    cadence_counts: Counter[str] = Counter()
+
+    # Helper: check if upper voice has leading tone resolution (7 -> 1).
+    def _has_leading_tone_resolution(idx: int) -> bool:
+        """Check for leading tone to tonic resolution at sample idx."""
+        if idx < 1 or not tracks_notes:
+            return False
+        tick_before = (idx - 1) * sample_ticks
+        tick_at = idx * sample_ticks
+        leading_tone = (tonic_pc - 1) % 12  # semitone below tonic
+
+        # Check upper voices (all except last = bass).
+        for track_idx, (role, sorted_notes) in enumerate(tracks_notes):
+            if track_idx == len(tracks_notes) - 1:
+                continue  # skip bass
+            note_before = sounding_note_at(sorted_notes, tick_before)
+            note_at = sounding_note_at(sorted_notes, tick_at)
+            if (note_before is not None and note_at is not None
+                    and note_before.pitch % 12 == leading_tone
+                    and note_at.pitch % 12 == tonic_pc):
+                return True
+        return False
+
+    # Helper: check bass motion (5th down / 4th up).
+    def _has_bass_fifth_motion(idx: int) -> bool:
+        """Check for bass V-I motion (descending 5th or ascending 4th)."""
+        if idx < 1 or not tracks_notes:
+            return False
+        tick_before = (idx - 1) * sample_ticks
+        tick_at = idx * sample_ticks
+        # Bass is last track.
+        _, bass_notes = tracks_notes[-1]
+        note_before = sounding_note_at(bass_notes, tick_before)
+        note_at = sounding_note_at(bass_notes, tick_at)
+        if note_before is not None and note_at is not None:
+            interval = (note_at.pitch - note_before.pitch) % 12
+            # 5th down = 7 semitones up, 4th up = 5 semitones up.
+            if interval == 5 or interval == 7:
+                return True
+        return False
+
+    # Helper: check for long note / fermata at resolution.
+    def _has_long_resolution(idx: int) -> bool:
+        """Check if the resolution chord has a notably long note."""
+        if not tracks_notes:
+            return False
+        tick_at = idx * sample_ticks
+        for _, sorted_notes in tracks_notes:
+            note = sounding_note_at(sorted_notes, tick_at)
+            if note is not None:
+                dur_beats = note.duration / tpb
+                if dur_beats >= 2.0:
+                    return True
+        return False
+
+    # Helper: check for texture decrease (fewer voices at idx than idx-1).
+    def _has_texture_decrease(idx: int) -> bool:
+        """Check if fewer voices are sounding at idx vs idx-1."""
+        if idx < 1 or not tracks_notes:
+            return False
+        tick_before = (idx - 1) * sample_ticks
+        tick_at = idx * sample_ticks
+        voices_before = sum(
+            1 for _, sn in tracks_notes
+            if sounding_note_at(sn, tick_before) is not None
+        )
+        voices_at = sum(
+            1 for _, sn in tracks_notes
+            if sounding_note_at(sn, tick_at) is not None
+        )
+        return voices_at < voices_before
+
+    # Helper: check bass descending by semitone (for Phrygian).
+    def _has_bass_semitone_descent(idx: int) -> bool:
+        """Check if bass descends by semitone at idx."""
+        if idx < 1 or not tracks_notes:
+            return False
+        tick_before = (idx - 1) * sample_ticks
+        tick_at = idx * sample_ticks
+        _, bass_notes = tracks_notes[-1]
+        note_before = sounding_note_at(bass_notes, tick_before)
+        note_at = sounding_note_at(bass_notes, tick_at)
+        if note_before is not None and note_at is not None:
+            return note_before.pitch - note_at.pitch == 1
+        return False
+
+    # Scan chord pairs for cadence patterns.
+    for idx in range(1, len(chords)):
+        prev = chords[idx - 1]
+        curr = chords[idx]
+
+        # Skip low-confidence pairs.
+        if prev.confidence < 0.3 or curr.confidence < 0.3:
+            continue
+
+        cadence_type: Optional[str] = None
+        base_confidence = min(prev.confidence, curr.confidence)
+
+        # PAC / IAC: V -> I
+        if prev.degree == 4 and curr.degree == 0:
+            if curr.inversion == "root" and curr.confidence >= 0.5:
+                cadence_type = "PAC"
+            else:
+                cadence_type = "IAC"
+
+        # HC: -> V where V sustains for >= 2 beats (4 samples at 0.5 beat).
+        elif curr.degree == 4:
+            # Check if V sustains.
+            sustain_count = 0
+            for look in range(idx, min(idx + 4, len(chords))):
+                if chords[look].degree == 4 and chords[look].confidence > 0.2:
+                    sustain_count += 1
+                else:
+                    break
+            if sustain_count >= 4 or _has_texture_decrease(idx):
+                cadence_type = "HC"
+
+        # DC: V -> vi (or V -> VI in minor).
+        elif prev.degree == 4 and curr.degree == 5:
+            cadence_type = "DC"
+
+        # PHR: iv6 -> V in minor (bass semitone descent).
+        elif (is_minor and prev.degree == 3 and curr.degree == 4
+              and prev.inversion == "1st"
+              and _has_bass_semitone_descent(idx)):
+            cadence_type = "PHR"
+
+        # EVAD: V -> (not I, not vi).
+        elif prev.degree == 4 and curr.degree not in (0, 5):
+            cadence_type = "EVAD"
+
+        if cadence_type is None:
+            continue
+
+        # Compute confidence with enhancement signals.
+        confidence = base_confidence
+        tick_at = idx * sample_ticks
+
+        # Strong beat arrival.
+        beat_str = _beat_strength(tick_at)
+        if beat_str >= 0.75:
+            confidence += 0.2
+
+        # Bass 5th down / 4th up.
+        if _has_bass_fifth_motion(idx):
+            confidence += 0.3
+
+        # Leading tone resolution.
+        if _has_leading_tone_resolution(idx):
+            confidence += 0.3
+
+        # Long note / fermata at resolution.
+        if _has_long_resolution(idx):
+            confidence += 0.1
+
+        confidence = min(confidence, 1.0)
+
+        # Location.
+        bar = tick_at // TICKS_PER_BAR + 1
+        beat = (tick_at % TICKS_PER_BAR) // tpb + 1
+
+        # Avoid duplicate cadences within 2 beats (4 samples).
+        if cadences:
+            last_cad = cadences[-1]
+            last_tick = (last_cad["bar"] - 1) * TICKS_PER_BAR + (last_cad["beat"] - 1) * tpb
+            if tick_at - last_tick < 2 * tpb and last_cad["type"] == cadence_type:
+                # Keep the one with higher confidence.
+                if confidence > last_cad["confidence"]:
+                    cadence_counts[last_cad["type"]] -= 1
+                    cadences[-1] = {
+                        "bar": bar,
+                        "beat": beat,
+                        "type": cadence_type,
+                        "confidence": round(confidence, 2),
+                        "key_context": _degree_to_roman(
+                            curr.degree, curr.quality, is_minor,
+                        ),
+                    }
+                    cadence_counts[cadence_type] += 1
+                continue
+
+        cadence_counts[cadence_type] += 1
+        cadences.append({
+            "bar": bar,
+            "beat": beat,
+            "type": cadence_type,
+            "confidence": round(confidence, 2),
+            "key_context": _degree_to_roman(
+                curr.degree, curr.quality, is_minor,
+            ),
+        })
+
+    # Compute summary stats.
+    total_bars = score.total_bars if score.total_bars > 0 else 1
+    cadences_per_8_bars = (
+        round(len(cadences) / total_bars * 8, 1)
+        if total_bars > 0 else 0.0
+    )
+    avg_confidence = (
+        round(sum(c["confidence"] for c in cadences) / len(cadences), 2)
+        if cadences else 0.0
+    )
+
+    # Final cadence.
+    final_cadence: Optional[dict[str, Any]] = None
+    if cadences:
+        final_cadence = {
+            "type": cadences[-1]["type"],
+            "bar": cadences[-1]["bar"],
+        }
+
+    result: dict[str, Any] = {
+        "work_id": work_id,
+        "cadence_types": dict(cadence_counts.most_common()),
+        "cadences_per_8_bars": cadences_per_8_bars,
+        "cadence_list": cadences,
+        "final_cadence": final_cadence,
+        "avg_confidence": avg_confidence,
+    }
+    return json.dumps(result, indent=2)
+
+
+# ===== H. Non-chord tone analysis (1) ========================================
+
+
+def _detect_suspension(
+    note: Note,
+    prev_note: Optional[Note],
+    next_note: Optional[Note],
+    chord_est: ChordEstimate,
+    next_chord_est: Optional[ChordEstimate],
+) -> bool:
+    """Detect whether a note is a suspension.
+
+    A suspension requires:
+    - Same pitch as previous note (tied / preparation)
+    - Previous note was a chord tone in its own chord context
+    - Resolves down by step (1-2 semitones) to the next note
+    - Falls on a strong beat (beat strength >= 0.5)
+
+    Args:
+        note: The candidate suspension note.
+        prev_note: The note immediately before.
+        next_note: The note immediately after (resolution).
+        chord_est: Chord estimate at the suspension note's position.
+        next_chord_est: Chord estimate at the resolution note's position.
+
+    Returns:
+        True if the note qualifies as a suspension.
+    """
+    if prev_note is None or next_note is None:
+        return False
+
+    # Preparation: same pitch as previous note.
+    if note.pitch != prev_note.pitch:
+        return False
+
+    # Strong beat requirement.
+    if _beat_strength(note.start_tick) < 0.5:
+        return False
+
+    # Resolution: descend by step (1-2 semitones).
+    resolution_interval = note.pitch - next_note.pitch
+    if resolution_interval < 1 or resolution_interval > 2:
+        return False
+
+    # Previous note should have been a chord tone (in its own chord context).
+    # We approximate: the preparation pitch is consonant with the chord at
+    # the previous position.  Since we don't always have the prev chord in
+    # this helper, we relax this to: the prev note existed (already checked).
+
+    return True
+
+
+def _classify_suspension_pattern(
+    note: Note,
+    next_note: Optional[Note],
+    chord_est: ChordEstimate,
+) -> Optional[str]:
+    """Classify a suspension into 4-3, 7-6, or 9-8 pattern.
+
+    Measures the interval from the suspension note down to the chord root,
+    then checks the resolution interval.
+
+    Returns:
+        Pattern string ("4-3", "7-6", "9-8") or None if unclassifiable.
+    """
+    if next_note is None or chord_est.quality == "":
+        return None
+
+    root_pc = chord_est.root_pc
+    susp_pc = note.pitch % 12
+    interval_from_root = (susp_pc - root_pc) % 12
+    resolution_semitones = note.pitch - next_note.pitch
+
+    if resolution_semitones < 1 or resolution_semitones > 2:
+        return None
+
+    # 4-3: suspension is P4 (5 semitones) above root, resolves to M3/m3.
+    if interval_from_root == 5:
+        return "4-3"
+    # 7-6: suspension is m7/M7 (10 or 11 semitones) above root, resolves to 6th.
+    if interval_from_root in (10, 11):
+        return "7-6"
+    # 9-8: suspension is m9/M9 (1 or 2 semitones) above root, resolves to octave.
+    if interval_from_root in (1, 2):
+        return "9-8"
+
+    return None
+
+
+@server.tool()
+def get_nct_profile(
+    work_id: str,
+    track: Optional[str] = None,
+    sample_interval_beats: float = 1.0,
+) -> str:
+    """Analyze non-chord tone usage in a Bach work.
+
+    For each note, determines if it is a chord tone (CT) or non-chord tone
+    (NCT) based on estimated chords. NCTs are further classified as passing,
+    neighbor, suspension, or other.
+
+    Args:
+        work_id: Work identifier (e.g. BWV578, BWV846_1)
+        track: Optional track role to analyze (all tracks if omitted)
+        sample_interval_beats: Chord estimation interval in beats (default 1.0)
+    """
+    tonic_pc, is_minor, key_conf = _get_key_info(work_id)
+    if tonic_pc is None:
+        tonic_pc = 0
+        is_minor = False
+
+    chords, est_quality = _estimate_chords_for_work(work_id, sample_interval_beats)
+    if not chords:
+        return json.dumps({"error": f"No chords estimated for '{work_id}'."})
+
+    score, raw_data, err = _load_score(work_id)
+    if err or score is None or raw_data is None:
+        return json.dumps({"error": err})
+
+    tpb = raw_data.get("ticks_per_beat", TICKS_PER_BEAT)
+    sample_ticks = int(sample_interval_beats * tpb)
+
+    # Collect all notes from selected tracks.
+    all_notes: list[Note] = []
+    for trk in score.tracks:
+        if track and trk.name != track:
+            continue
+        all_notes.extend(trk.sorted_notes)
+    all_notes.sort(key=lambda note_obj: (note_obj.start_tick, note_obj.pitch))
+
+    if not all_notes:
+        return json.dumps({"error": f"No notes found for '{work_id}'."})
+
+    # Helper: get chord estimate at a given tick.
+    def _chord_at_tick(tick: int) -> Optional[ChordEstimate]:
+        if sample_ticks <= 0:
+            return None
+        idx = tick // sample_ticks
+        if 0 <= idx < len(chords):
+            return chords[idx]
+        return None
+
+    # Helper: get template PCs for a chord.
+    def _chord_pcs(chord: ChordEstimate) -> frozenset[int]:
+        template = CHORD_TEMPLATES.get(chord.quality, frozenset())
+        return frozenset((chord.root_pc + pc) % 12 for pc in template)
+
+    # Classify each note.
+    ct_count = 0
+    nct_count = 0
+    uncertain_count = 0
+    nct_types: Counter[str] = Counter()
+    suspension_patterns: Counter[str] = Counter()
+    strong_beat_total = 0
+    strong_beat_nct = 0
+    weak_beat_total = 0
+    weak_beat_nct = 0
+
+    for note_idx, note_obj in enumerate(all_notes):
+        chord = _chord_at_tick(note_obj.start_tick)
+        if chord is None or chord.quality == "":
+            uncertain_count += 1
+            continue
+
+        if chord.confidence < 0.4:
+            uncertain_count += 1
+            continue
+
+        note_pc = note_obj.pitch % 12
+        chord_pc_set = _chord_pcs(chord)
+        is_ct = note_pc in chord_pc_set
+
+        # Beat position tracking.
+        beat_str = _beat_strength(note_obj.start_tick)
+        is_strong_beat = beat_str >= 0.5
+
+        if is_strong_beat:
+            strong_beat_total += 1
+        else:
+            weak_beat_total += 1
+
+        if is_ct:
+            ct_count += 1
+            continue
+
+        nct_count += 1
+        if is_strong_beat:
+            strong_beat_nct += 1
+        else:
+            weak_beat_nct += 1
+
+        # Get neighboring notes for NCT classification.
+        prev_note = all_notes[note_idx - 1] if note_idx > 0 else None
+        next_note = all_notes[note_idx + 1] if note_idx + 1 < len(all_notes) else None
+
+        next_chord = _chord_at_tick(next_note.start_tick) if next_note else None
+
+        # Check suspension first (strong beat pattern).
+        if _detect_suspension(note_obj, prev_note, next_note, chord, next_chord):
+            nct_types["suspension"] += 1
+            pattern = _classify_suspension_pattern(note_obj, next_note, chord)
+            if pattern:
+                suspension_patterns[pattern] += 1
+            continue
+
+        # Passing and neighbor tone classification.
+        if prev_note is not None and next_note is not None:
+            iv_in = note_obj.pitch - prev_note.pitch
+            iv_out = next_note.pitch - note_obj.pitch
+
+            is_step_in = 1 <= abs(iv_in) <= 2
+            is_step_out = 1 <= abs(iv_out) <= 2
+
+            # Check if neighbors are chord tones.
+            prev_chord = _chord_at_tick(prev_note.start_tick)
+            prev_is_ct = (
+                prev_chord is not None
+                and prev_chord.quality != ""
+                and prev_note.pitch % 12 in _chord_pcs(prev_chord)
+            )
+            next_is_ct = (
+                next_chord is not None
+                and next_chord.quality != ""
+                and next_note.pitch % 12 in _chord_pcs(next_chord)
+            )
+
+            if is_step_in and is_step_out and prev_is_ct and next_is_ct:
+                # Same direction = passing, opposite direction = neighbor.
+                if (iv_in > 0 and iv_out > 0) or (iv_in < 0 and iv_out < 0):
+                    nct_types["passing"] += 1
+                    continue
+                else:
+                    nct_types["neighbor"] += 1
+                    continue
+
+        nct_types["other"] += 1
+
+    # Compute ratios.
+    classified_total = ct_count + nct_count
+    total_all = classified_total + uncertain_count
+
+    ct_ratio = round(ct_count / classified_total, 3) if classified_total > 0 else 0.0
+    nct_ratio = round(nct_count / classified_total, 3) if classified_total > 0 else 0.0
+
+    nct_type_dist: dict[str, float] = {}
+    if nct_count > 0:
+        for ntype in ("passing", "neighbor", "suspension", "other"):
+            nct_type_dist[ntype] = round(nct_types.get(ntype, 0) / nct_count, 3)
+
+    # NCT per beat.
+    total_beats = score.total_duration / tpb if tpb > 0 else 1.0
+    nct_per_beat = round(nct_count / total_beats, 2) if total_beats > 0 else 0.0
+
+    strong_beat_nct_ratio = (
+        round(strong_beat_nct / strong_beat_total, 3) if strong_beat_total > 0 else 0.0
+    )
+    weak_beat_nct_ratio = (
+        round(weak_beat_nct / weak_beat_total, 3) if weak_beat_total > 0 else 0.0
+    )
+
+    uncertain_ratio = round(uncertain_count / total_all, 3) if total_all > 0 else 0.0
+
+    result: dict[str, Any] = {
+        "work_id": work_id,
+        "ct_ratio": ct_ratio,
+        "nct_ratio": nct_ratio,
+        "nct_types": nct_type_dist,
+        "nct_per_beat": nct_per_beat,
+        "strong_beat_nct_ratio": strong_beat_nct_ratio,
+        "weak_beat_nct_ratio": weak_beat_nct_ratio,
+        "suspension_patterns": dict(suspension_patterns.most_common()),
+        "uncertain_ratio": uncertain_ratio,
+        "estimation_quality": {"mean_chord_confidence": est_quality.get("mean_confidence", 0.0)},
+    }
+    return json.dumps(result, indent=2)
+
+
+# ===== I. Voice leading analysis (1) =========================================
+
+
+@server.tool()
+def get_voice_leading_profile(
+    work_id: str,
+    track_a: Optional[str] = None,
+    track_b: Optional[str] = None,
+) -> str:
+    """Analyze voice leading quality between voice pairs.
+
+    Detects parallel perfects (P5->P5, P8->P8 in same direction), hidden
+    perfects (same direction motion arriving at P5/P8), voice crossings,
+    and suspension chains.
+
+    Args:
+        work_id: Work identifier (e.g. BWV578, BWV846_1)
+        track_a: First track (analyzes specific pair if both given)
+        track_b: Second track (analyzes specific pair if both given)
+    """
+    score, raw_data, err = _load_score(work_id)
+    if err or score is None or raw_data is None:
+        return json.dumps({"error": err})
+
+    tpb = raw_data.get("ticks_per_beat", TICKS_PER_BEAT)
+
+    # Determine which track pairs to analyze.
+    if track_a and track_b:
+        ta_obj, tb_obj, terr = _resolve_tracks(score, track_a, track_b)
+        if terr:
+            return json.dumps({"error": terr})
+        pairs = [(ta_obj, tb_obj)]
+    else:
+        if len(score.tracks) < 2:
+            return json.dumps({"error": "Need at least 2 tracks for voice leading analysis."})
+        pairs = []
+        for idx_a in range(len(score.tracks)):
+            for idx_b in range(idx_a + 1, len(score.tracks)):
+                pairs.append((score.tracks[idx_a], score.tracks[idx_b]))
+
+    total_dur = score.total_duration
+    total_beats = total_dur / tpb if tpb > 0 else 1.0
+
+    # Accumulators across all pairs.
+    sum_parallel_perfects = 0
+    sum_hidden_perfects = 0
+    sum_voice_crossings = 0
+    pair_results: dict[str, dict[str, Any]] = {}
+
+    # Suspension chain tracking.
+    all_suspension_chains: list[int] = []
+
+    for ta_obj, tb_obj in pairs:
+        pair_key = f"{ta_obj.name}-{tb_obj.name}"
+        notes_a = ta_obj.sorted_notes
+        notes_b = tb_obj.sorted_notes
+
+        parallel_perfects = 0
+        hidden_perfects = 0
+        voice_crossings = 0
+        pair_beat_count = 0
+
+        # Suspension chain tracking for this pair.
+        current_chain_length = 0
+        pair_chains: list[int] = []
+
+        prev_note_a: Optional[Note] = None
+        prev_note_b: Optional[Note] = None
+        prev_ic: Optional[int] = None
+
+        tick = 0
+        while tick < total_dur:
+            na = sounding_note_at(notes_a, tick)
+            nb = sounding_note_at(notes_b, tick)
+
+            if na is not None and nb is not None:
+                pair_beat_count += 1
+                curr_ic = interval_class(na.pitch - nb.pitch)
+
+                # Voice crossing: upper track (a) goes below lower track (b).
+                # Track a is the higher voice; if its pitch < track b's pitch,
+                # it's a crossing.
+                if na.pitch < nb.pitch:
+                    voice_crossings += 1
+
+                if prev_note_a is not None and prev_note_b is not None and prev_ic is not None:
+                    da = na.pitch - prev_note_a.pitch
+                    db = nb.pitch - prev_note_b.pitch
+
+                    same_direction = (
+                        (da > 0 and db > 0) or (da < 0 and db < 0)
+                    )
+
+                    # Parallel perfects: same interval class, same direction,
+                    # both are P5 (7) or P8 (0, but not P1 with both stationary).
+                    is_curr_perfect = curr_ic in (0, 7)
+                    is_prev_perfect = prev_ic in (0, 7)
+
+                    if same_direction and is_curr_perfect and is_prev_perfect:
+                        if curr_ic == prev_ic:
+                            parallel_perfects += 1
+
+                    # Hidden perfects: same direction arriving at P5/P8 but
+                    # not previously at the same perfect interval.
+                    if (same_direction and is_curr_perfect
+                            and not (is_prev_perfect and curr_ic == prev_ic)):
+                        hidden_perfects += 1
+
+                    # Suspension detection for chains.
+                    # A suspension occurs when one voice holds while the other
+                    # moves, creating a dissonance on a strong beat.
+                    is_suspension = False
+                    if _beat_strength(tick) >= 0.5:
+                        # One voice holds, other moves.
+                        if (da == 0 and db != 0) or (da != 0 and db == 0):
+                            if is_dissonant(na.pitch - nb.pitch):
+                                is_suspension = True
+
+                    if is_suspension:
+                        current_chain_length += 1
+                    else:
+                        if current_chain_length >= 2:
+                            pair_chains.append(current_chain_length)
+                        current_chain_length = 0
+
+                prev_ic = curr_ic
+            else:
+                if current_chain_length >= 2:
+                    pair_chains.append(current_chain_length)
+                current_chain_length = 0
+                prev_ic = None
+
+            prev_note_a = na
+            prev_note_b = nb
+            tick += tpb  # sample every beat
+
+        # Flush last chain.
+        if current_chain_length >= 2:
+            pair_chains.append(current_chain_length)
+
+        # Per-100-beats rates.
+        if pair_beat_count > 0:
+            scale = 100.0 / pair_beat_count
+        else:
+            scale = 0.0
+
+        pair_results[pair_key] = {
+            "parallel_perfects": parallel_perfects,
+            "parallel_perfects_per_100_beats": round(parallel_perfects * scale, 2),
+            "hidden_perfects": hidden_perfects,
+            "hidden_perfects_per_100_beats": round(hidden_perfects * scale, 2),
+            "voice_crossings": voice_crossings,
+            "voice_crossings_per_100_beats": round(voice_crossings * scale, 2),
+            "suspension_chains": len(pair_chains),
+            "suspension_chain_avg_length": (
+                round(sum(pair_chains) / len(pair_chains), 1) if pair_chains else 0.0
+            ),
+        }
+
+        sum_parallel_perfects += parallel_perfects
+        sum_hidden_perfects += hidden_perfects
+        sum_voice_crossings += voice_crossings
+        all_suspension_chains.extend(pair_chains)
+
+    # Summary across all pairs.
+    if total_beats > 0:
+        summary_scale = 100.0 / total_beats
+    else:
+        summary_scale = 0.0
+
+    summary: dict[str, Any] = {
+        "parallel_perfects_per_100_beats": round(sum_parallel_perfects * summary_scale, 2),
+        "hidden_perfects_per_100_beats": round(sum_hidden_perfects * summary_scale, 2),
+        "voice_crossings_per_100_beats": round(sum_voice_crossings * summary_scale, 2),
+        "suspension_chain_count": len(all_suspension_chains),
+        "suspension_chain_avg_length": (
+            round(sum(all_suspension_chains) / len(all_suspension_chains), 1)
+            if all_suspension_chains else 0.0
+        ),
+    }
+
+    result: dict[str, Any] = {
+        "work_id": work_id,
+        "summary": summary,
+        "voice_pairs": pair_results,
+    }
+    return json.dumps(result, indent=2)
+
+
+# ===== J. Bass line analysis (1) =============================================
+
+
+def _categorize_duration(dur_ticks: int) -> str:
+    """Categorize note duration in ticks to a rhythm name."""
+    beats = dur_ticks / TICKS_PER_BEAT
+    if beats <= 0.1875:
+        return "32nd"
+    if beats <= 0.375:
+        return "16th"
+    if beats <= 0.75:
+        return "8th"
+    if beats <= 1.5:
+        return "quarter"
+    if beats <= 3.0:
+        return "half"
+    if beats <= 6.0:
+        return "whole"
+    return "longer"
+
+
+def _detect_bass_track(score: Score) -> Optional[Track]:
+    """Auto-detect the bass track from a score.
+
+    Priority: track named 'pedal' > 'lower' > 'bass' > lowest avg pitch.
+    """
+    if not score.tracks:
+        return None
+
+    # Check by name priority.
+    for name in ("pedal", "lower", "bass"):
+        for trk in score.tracks:
+            if trk.name == name:
+                return trk
+
+    # Fall back to lowest average pitch.
+    best_track: Optional[Track] = None
+    best_avg = 999.0
+    for trk in score.tracks:
+        if not trk.sorted_notes:
+            continue
+        avg_pitch = sum(n.pitch for n in trk.sorted_notes) / len(trk.sorted_notes)
+        if avg_pitch < best_avg:
+            best_avg = avg_pitch
+            best_track = trk
+    return best_track
+
+
+@server.tool()
+def get_bass_profile(
+    work_id: str,
+    bass_track: Optional[str] = None,
+) -> str:
+    """Analyze bass line characteristics of a Bach work.
+
+    Auto-detects the bass track (pedal > lower > bass > lowest pitch) or
+    uses the specified track. Analyzes strong-beat intervals, P4/P5 motion,
+    leap-then-stepback patterns, and ostinato detection.
+
+    Args:
+        work_id: Work identifier (e.g. BWV578, BWV846_1)
+        bass_track: Explicit bass track name (auto-detect if omitted)
+    """
+    score, _, err = _load_score(work_id)
+    if err or score is None:
+        return json.dumps({"error": err})
+
+    if bass_track:
+        trk = next((t for t in score.tracks if t.name == bass_track), None)
+        if trk is None:
+            return json.dumps({"error": f"Track '{bass_track}' not found."})
+    else:
+        trk = _detect_bass_track(score)
+        if trk is None:
+            return json.dumps({"error": "No bass track detected."})
+
+    notes = trk.sorted_notes
+    if not notes:
+        return json.dumps({"error": f"Bass track '{trk.name}' has no notes."})
+
+    total_notes = len(notes)
+    pitches = [n.pitch for n in notes]
+    avg_pitch = round(sum(pitches) / len(pitches), 1)
+    pitch_range = [min(pitches), max(pitches)]
+
+    # Strong-beat bass motion: notes on strong beats or lasting >= 0.5 beats.
+    strong_beat_notes: list[Note] = []
+    for note_obj in notes:
+        beat_str = _beat_strength(note_obj.start_tick)
+        dur_beats = note_obj.duration / TICKS_PER_BEAT
+        if beat_str >= 0.5 or dur_beats >= 0.5:
+            strong_beat_notes.append(note_obj)
+
+    # Compute intervals between consecutive strong-beat notes.
+    strong_intervals: list[int] = []
+    for idx in range(len(strong_beat_notes) - 1):
+        iv = abs(strong_beat_notes[idx + 1].pitch - strong_beat_notes[idx].pitch)
+        strong_intervals.append(iv)
+
+    # P4/P5 motion ratio among strong-beat intervals.
+    p4p5_count = sum(1 for iv in strong_intervals if interval_class(iv) in (5, 7))
+    strong_beat_p4p5_ratio = (
+        round(p4p5_count / len(strong_intervals), 3) if strong_intervals else 0.0
+    )
+
+    # Leap-then-stepback pattern.
+    # After a leap (>2 semitones), next interval is step (1-2) in opposite direction.
+    all_intervals_signed: list[int] = []
+    for idx in range(len(notes) - 1):
+        all_intervals_signed.append(notes[idx + 1].pitch - notes[idx].pitch)
+
+    leap_stepback_count = 0
+    leap_count = 0
+    for idx in range(len(all_intervals_signed) - 1):
+        iv = all_intervals_signed[idx]
+        if abs(iv) > 2:
+            leap_count += 1
+            next_iv = all_intervals_signed[idx + 1]
+            if 1 <= abs(next_iv) <= 2:
+                # Opposite direction check.
+                if (iv > 0 and next_iv < 0) or (iv < 0 and next_iv > 0):
+                    leap_stepback_count += 1
+
+    leap_then_stepback_ratio = (
+        round(leap_stepback_count / leap_count, 3) if leap_count > 0 else 0.0
+    )
+
+    # Interval distribution (absolute, as interval classes).
+    iv_counts: Counter[str] = Counter()
+    for idx in range(len(notes) - 1):
+        iv = abs(notes[idx + 1].pitch - notes[idx].pitch)
+        ic = interval_class(iv)
+        iv_counts[INTERVAL_NAMES[ic]] += 1
+
+    total_ivs = sum(iv_counts.values())
+    iv_profile: dict[str, float] = {}
+    if total_ivs > 0:
+        for name, count in sorted(iv_counts.items()):
+            iv_profile[name] = round(count / total_ivs, 3)
+
+    # Rhythm distribution.
+    rhythm_counts: Counter[str] = Counter()
+    for note_obj in notes:
+        rhythm_counts[_categorize_duration(note_obj.duration)] += 1
+
+    rhythm_profile: dict[str, float] = {}
+    if total_notes > 0:
+        for cat, count in sorted(rhythm_counts.items(), key=lambda x: -x[1]):
+            rhythm_profile[cat] = round(count / total_notes, 3)
+
+    # Ostinato detection: look for repeating pitch+rhythm patterns.
+    # Extract pitch intervals and durations as a sequence, then search for
+    # repeating sub-sequences of length >= 2 notes with >= 3 repetitions.
+    ostinato_detected = False
+    if len(notes) >= 6:
+        # Build a sequence of (interval, duration_quantized) tuples.
+        pattern_seq: list[tuple[int, int]] = []
+        for idx in range(len(notes) - 1):
+            iv = notes[idx + 1].pitch - notes[idx].pitch
+            dur_q = max(1, round(notes[idx].duration / (TICKS_PER_BEAT // 4)))
+            pattern_seq.append((iv, dur_q))
+
+        # Search for patterns of length 2 to 8.
+        for pat_len in range(2, min(9, len(pattern_seq) // 3 + 1)):
+            pattern_counts: Counter[tuple] = Counter()
+            for idx in range(len(pattern_seq) - pat_len + 1):
+                sub = tuple(pattern_seq[idx:idx + pat_len])
+                pattern_counts[sub] += 1
+            # Check for >= 3 consecutive or near-consecutive occurrences.
+            for sub, count in pattern_counts.most_common(5):
+                if count >= 3:
+                    ostinato_detected = True
+                    break
+            if ostinato_detected:
+                break
+
+    result: dict[str, Any] = {
+        "work_id": work_id,
+        "bass_track": trk.name,
+        "total_notes": total_notes,
+        "strong_beat_p4p5_ratio": strong_beat_p4p5_ratio,
+        "leap_then_stepback_ratio": leap_then_stepback_ratio,
+        "ostinato_detected": ostinato_detected,
+        "interval_profile": iv_profile,
+        "rhythm_profile": rhythm_profile,
+        "avg_pitch": avg_pitch,
+        "range": pitch_range,
+    }
+    return json.dumps(result, indent=2)
+
+
+# ===== K. Phrase structure analysis (1) ======================================
+
+
+@server.tool()
+def get_phrase_structure(
+    work_id: str,
+    track: Optional[str] = None,
+) -> str:
+    """Detect phrase boundaries in a Bach work using multiple signals.
+
+    Combines cadence detection, rest/gap analysis, texture decrease, and
+    barline alignment to identify phrase boundaries. Minimum phrase length
+    is 2 bars.
+
+    Args:
+        work_id: Work identifier (e.g. BWV578, BWV846_1)
+        track: Optional track to focus gap/rest analysis on (all tracks if omitted)
+    """
+    score, raw_data, err = _load_score(work_id)
+    if err or score is None or raw_data is None:
+        return json.dumps({"error": err})
+
+    tpb = raw_data.get("ticks_per_beat", TICKS_PER_BEAT)
+    total_dur = score.total_duration
+    total_bars = score.total_bars if score.total_bars > 0 else max(1, total_dur // TICKS_PER_BAR)
+
+    # Get cadence data (use cached chords at 0.5-beat resolution).
+    chords, _ = _estimate_chords_for_work(work_id, 0.5)
+    cadence_sample_ticks = tpb // 2
+
+    # Build a set of cadence tick positions with confidence >= 0.5.
+    cadence_ticks: set[int] = set()
+    if chords and len(chords) > 1:
+        tonic_pc, is_minor_val, _ = _get_key_info(work_id)
+        if tonic_pc is None:
+            tonic_pc = 0
+            is_minor_val = False
+
+        for idx in range(1, len(chords)):
+            prev_c = chords[idx - 1]
+            curr_c = chords[idx]
+            if prev_c.confidence < 0.3 or curr_c.confidence < 0.3:
+                continue
+            # Detect cadence patterns (simplified: V->I, ->V sustained, V->vi).
+            is_cadence = False
+            base_conf = min(prev_c.confidence, curr_c.confidence)
+            tick_at = idx * cadence_sample_ticks
+
+            if prev_c.degree == 4 and curr_c.degree == 0:
+                is_cadence = True
+            elif prev_c.degree == 4 and curr_c.degree == 5:
+                is_cadence = True
+            elif curr_c.degree == 4:
+                # Half cadence: check sustain.
+                sustain = 0
+                for look in range(idx, min(idx + 4, len(chords))):
+                    if chords[look].degree == 4 and chords[look].confidence > 0.2:
+                        sustain += 1
+                    else:
+                        break
+                if sustain >= 4:
+                    is_cadence = True
+
+            if is_cadence and base_conf >= 0.5:
+                cadence_ticks.add(tick_at)
+
+    # Prepare track notes for rest/texture analysis.
+    sorted_tracks = [(trk.name, trk.sorted_notes) for trk in score.tracks]
+    track_notes_for_rest: list[tuple[str, list[Note]]] = []
+    if track:
+        for trk_name, trk_notes in sorted_tracks:
+            if trk_name == track:
+                track_notes_for_rest.append((trk_name, trk_notes))
+    else:
+        track_notes_for_rest = sorted_tracks
+
+    # Score boundary signals at each beat.
+    boundary_scores: list[tuple[int, float, dict[str, float]]] = []
+    signal_counts: Counter[str] = Counter()
+
+    tick = 0
+    while tick < total_dur:
+        signals: dict[str, float] = {}
+
+        # 1. Cadence signal (weight 0.4): cadence within 1 beat.
+        cadence_signal = 0.0
+        for offset in range(-tpb, tpb + 1, cadence_sample_ticks):
+            if (tick + offset) in cadence_ticks:
+                cadence_signal = 1.0
+                break
+        signals["cadence"] = cadence_signal
+
+        # 2. Rest signal (weight 0.3): note ending followed by gap >= 0.5 beats,
+        #    with preceding note >= 1 beat.
+        rest_signal = 0.0
+        for _, trk_notes in track_notes_for_rest:
+            for note_obj in trk_notes:
+                note_end = note_obj.start_tick + note_obj.duration
+                # Note ends near this tick (within half a beat).
+                if abs(note_end - tick) <= tpb // 2:
+                    if note_obj.duration >= tpb:  # preceding note >= 1 beat
+                        # Check for gap: no note starting in the next 0.5 beats.
+                        has_gap = True
+                        for check_note in trk_notes:
+                            if note_end <= check_note.start_tick < note_end + tpb // 2:
+                                has_gap = False
+                                break
+                        if has_gap:
+                            rest_signal = 1.0
+                            break
+            if rest_signal > 0:
+                break
+        signals["rest"] = rest_signal
+
+        # 3. Texture decrease (weight 0.2): active voices decrease by >= 1
+        #    compared to 2 beats earlier.
+        texture_signal = 0.0
+        if tick >= 2 * tpb:
+            voices_now = sum(
+                1 for _, trk_n in sorted_tracks
+                if sounding_note_at(trk_n, tick) is not None
+            )
+            voices_before = sum(
+                1 for _, trk_n in sorted_tracks
+                if sounding_note_at(trk_n, tick - 2 * tpb) is not None
+            )
+            if voices_before - voices_now >= 1:
+                texture_signal = 1.0
+        signals["texture"] = texture_signal
+
+        # 4. Barline signal (weight 0.1): position is on beat 1 of a bar.
+        barline_signal = 1.0 if tick % TICKS_PER_BAR == 0 else 0.0
+        signals["barline"] = barline_signal
+
+        # Weighted boundary score.
+        boundary_score = (
+            0.4 * cadence_signal
+            + 0.3 * rest_signal
+            + 0.2 * texture_signal
+            + 0.1 * barline_signal
+        )
+
+        boundary_scores.append((tick, boundary_score, signals))
+        tick += tpb  # sample every beat
+
+    # Extract phrase boundaries (score > 0.5) with minimum 2-bar separation.
+    min_phrase_ticks = 2 * TICKS_PER_BAR
+    phrase_boundaries: list[int] = [0]  # start of piece is always a boundary
+    boundary_signal_counts: Counter[str] = Counter()
+
+    for tick_pos, score_val, signals in boundary_scores:
+        if tick_pos == 0:
+            continue
+        if score_val > 0.5:
+            # Check minimum phrase length from last boundary.
+            if tick_pos - phrase_boundaries[-1] >= min_phrase_ticks:
+                phrase_boundaries.append(tick_pos)
+                for sig_name, sig_val in signals.items():
+                    if sig_val > 0:
+                        boundary_signal_counts[sig_name] += 1
+
+    # Build phrase list.
+    phrases: list[dict[str, Any]] = []
+    phrase_lengths: list[int] = []
+
+    for idx in range(len(phrase_boundaries)):
+        start_tick = phrase_boundaries[idx]
+        if idx + 1 < len(phrase_boundaries):
+            end_tick = phrase_boundaries[idx + 1]
+        else:
+            end_tick = total_dur
+
+        start_bar = start_tick // TICKS_PER_BAR + 1
+        end_bar = max(start_bar, (end_tick - 1) // TICKS_PER_BAR + 1)
+        length_bars = end_bar - start_bar + 1
+
+        phrases.append({
+            "start_bar": start_bar,
+            "end_bar": end_bar,
+            "length_bars": length_bars,
+        })
+        phrase_lengths.append(length_bars)
+
+    avg_phrase_length = (
+        round(sum(phrase_lengths) / len(phrase_lengths), 1) if phrase_lengths else 0.0
+    )
+
+    result: dict[str, Any] = {
+        "work_id": work_id,
+        "phrase_count": len(phrases),
+        "avg_phrase_length_bars": avg_phrase_length,
+        "phrase_lengths": phrase_lengths,
+        "phrases": phrases,
+        "boundary_signals": dict(boundary_signal_counts.most_common()),
+    }
+    return json.dumps(result, indent=2)
+
+
+# ===== L. Harmonic n-gram extraction (1) =====================================
+
+
+@server.tool()
+def extract_harmonic_ngrams(
+    category: str,
+    n: int = 2,
+    min_occurrences: int = 5,
+    top_k: int = 30,
+) -> str:
+    """Extract harmonic n-grams (degree and function sequences) from a category.
+
+    For each work in the category, estimates chords and extracts n-grams of
+    scale degree sequences (e.g. V-I, ii-V-I) and harmonic function sequences
+    (e.g. D-T, S-D-T).
+
+    Args:
+        category: Reference category (e.g. organ_fugue, wtc1, solo_cello_suite)
+        n: N-gram size (number of chords). Default 2 (bigrams).
+        min_occurrences: Minimum count to include in results. Default 5.
+        top_k: Maximum number of n-grams to return. Default 30.
+    """
+    works = _load_works_for_category(category)
+    if not works:
+        return json.dumps({"error": f"No works found for category '{category}'."})
+
+    degree_counts: Counter[tuple[str, ...]] = Counter()
+    degree_work_sets: dict[tuple[str, ...], set[str]] = {}
+    func_counts: Counter[tuple[str, ...]] = Counter()
+    func_work_sets: dict[tuple[str, ...], set[str]] = {}
+    total_ngrams = 0
+
+    for work_id, _ in works:
+        tonic_pc, is_minor_val, key_conf = _get_key_info(work_id)
+        if tonic_pc is None:
+            tonic_pc = 0
+            is_minor_val = False
+
+        chords, _ = _estimate_chords_for_work(work_id, 1.0)
+        if not chords:
+            continue
+
+        # Filter to confident chords (skip unclassified).
+        filtered_chords: list[ChordEstimate] = []
+        for chord in chords:
+            if chord.confidence > 0.0 and chord.quality != "":
+                filtered_chords.append(chord)
+
+        if len(filtered_chords) < n:
+            continue
+
+        # Extract degree and function sequences.
+        degree_seq: list[str] = []
+        func_seq: list[str] = []
+        for chord in filtered_chords:
+            roman = _degree_to_roman(chord.degree, chord.quality, is_minor_val)
+            func = _DEGREE_TO_FUNCTION.get(chord.degree, "?")
+            degree_seq.append(roman)
+            func_seq.append(func)
+
+        # Deduplicate consecutive identical chords in sequence.
+        dedup_degree: list[str] = [degree_seq[0]]
+        dedup_func: list[str] = [func_seq[0]]
+        for idx in range(1, len(degree_seq)):
+            if degree_seq[idx] != degree_seq[idx - 1]:
+                dedup_degree.append(degree_seq[idx])
+                dedup_func.append(func_seq[idx])
+
+        # Extract n-grams from deduplicated sequences.
+        for idx in range(len(dedup_degree) - n + 1):
+            deg_ngram = tuple(dedup_degree[idx:idx + n])
+            func_ngram = tuple(dedup_func[idx:idx + n])
+
+            degree_counts[deg_ngram] += 1
+            degree_work_sets.setdefault(deg_ngram, set()).add(work_id)
+
+            func_counts[func_ngram] += 1
+            func_work_sets.setdefault(func_ngram, set()).add(work_id)
+            total_ngrams += 1
+
+    # Build degree n-gram results.
+    degree_ngrams_out: list[dict[str, Any]] = []
+    for ngram, count in degree_counts.most_common():
+        if count < min_occurrences:
+            break
+        degree_ngrams_out.append({
+            "ngram": "-".join(ngram),
+            "count": count,
+            "works_containing": len(degree_work_sets.get(ngram, set())),
+            "frequency_per_1000": round(count / max(total_ngrams, 1) * 1000, 1),
+        })
+        if len(degree_ngrams_out) >= top_k:
+            break
+
+    # Build function n-gram results.
+    func_ngrams_out: list[dict[str, Any]] = []
+    for ngram, count in func_counts.most_common():
+        if count < min_occurrences:
+            break
+        func_ngrams_out.append({
+            "ngram": "-".join(ngram),
+            "count": count,
+            "works_containing": len(func_work_sets.get(ngram, set())),
+            "frequency_per_1000": round(count / max(total_ngrams, 1) * 1000, 1),
+        })
+        if len(func_ngrams_out) >= top_k:
+            break
+
+    result: dict[str, Any] = {
+        "category": category,
+        "n": n,
+        "total_works_scanned": len(works),
+        "total_ngrams": total_ngrams,
+        "degree_ngrams": degree_ngrams_out,
+        "function_ngrams": func_ngrams_out,
+    }
+    return json.dumps(result, indent=2)
+
+
+# ===== M. Harmonic rhythm analysis (1) =======================================
+
+
+@server.tool()
+def get_harmonic_rhythm_profile(work_id: str) -> str:
+    """Analyze harmonic rhythm (rate of chord changes) in a Bach work.
+
+    Estimates chords at 0.5-beat resolution and detects chord change points.
+    Reports overall and per-section (beginning/middle/ending) harmonic rhythm.
+
+    Args:
+        work_id: Work identifier (e.g. BWV578, BWV846_1)
+    """
+    chords, est_quality = _estimate_chords_for_work(work_id, 0.5)
+    if not chords:
+        return json.dumps({"error": f"No chords estimated for '{work_id}'."})
+
+    score, _, err = _load_score(work_id)
+    if err or score is None:
+        return json.dumps({"error": err})
+
+    total_bars = score.total_bars if score.total_bars > 0 else 1
+
+    # Detect chord change points.
+    sample_beats = 0.5
+    change_indices: list[int] = []
+    prev_degree = -1
+    prev_quality = ""
+
+    for idx, chord in enumerate(chords):
+        if chord.confidence <= 0.0 or chord.quality == "":
+            continue
+        if chord.degree != prev_degree or chord.quality != prev_quality:
+            if prev_degree >= 0:
+                change_indices.append(idx)
+            prev_degree = chord.degree
+            prev_quality = chord.quality
+
+    total_changes = len(change_indices)
+    total_samples = len(chords)
+    total_beats = total_samples * sample_beats
+
+    avg_beats_per_change = (
+        round(total_beats / total_changes, 2) if total_changes > 0 else 0.0
+    )
+    changes_per_bar = (
+        round(total_changes / (total_beats / 4.0), 2) if total_beats > 0 else 0.0
+    )
+
+    # Section analysis: beginning (first 25%), middle (50%), ending (25%).
+    def _section_stats(
+        start_idx: int, end_idx: int,
+    ) -> dict[str, float]:
+        section_changes = sum(
+            1 for ci in change_indices if start_idx <= ci < end_idx
+        )
+        section_samples = end_idx - start_idx
+        section_beats = section_samples * sample_beats
+        section_bars = section_beats / 4.0
+
+        return {
+            "changes_per_bar": (
+                round(section_changes / section_bars, 2) if section_bars > 0 else 0.0
+            ),
+            "avg_beats_per_change": (
+                round(section_beats / section_changes, 2) if section_changes > 0 else 0.0
+            ),
+        }
+
+    quarter = total_samples // 4
+    half = total_samples // 2
+
+    beginning_end = quarter
+    middle_end = quarter + half
+    ending_end = total_samples
+
+    by_section: dict[str, dict[str, float]] = {
+        "beginning": _section_stats(0, beginning_end),
+        "middle": _section_stats(beginning_end, middle_end),
+        "ending": _section_stats(middle_end, ending_end),
+    }
+
+    result: dict[str, Any] = {
+        "work_id": work_id,
+        "total_chord_changes": total_changes,
+        "avg_beats_per_change": avg_beats_per_change,
+        "changes_per_bar": changes_per_bar,
+        "by_section": by_section,
+        "estimation_quality": est_quality,
+    }
+    return json.dumps(result, indent=2)
 
 
 # ---------------------------------------------------------------------------

@@ -47,6 +47,12 @@ struct LeapResolutionParams {
   /// Optional: chord tone membership at a given tick. nullptr = skip
   /// harmonic awareness (falls back to contrary-step-only resolution).
   std::function<bool(Tick tick, uint8_t pitch)> is_chord_tone;
+
+  /// Probability of applying leap resolution when a candidate is found.
+  /// 1.0 = always resolve (mandatory), 0.0 = never resolve.
+  /// Default 0.85 = high-probability bias rather than mandatory rule.
+  /// Uses tick-based deterministic PRNG for reproducibility.
+  float resolution_probability = 0.85f;
 };
 
 namespace leap_detail {

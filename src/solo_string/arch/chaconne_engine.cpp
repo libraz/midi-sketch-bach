@@ -506,6 +506,64 @@ ChaconneResult generateChaconne(const ChaconneConfig& config) {
               return lhs.pitch < rhs.pitch;
             });
 
+  // --- Overlap cleanup for solo string voice ---
+  // Step 6a: Remove exact duplicates (same tick, same voice, same pitch).
+  // Keep the longer duration note.
+  {
+    std::sort(all_notes.begin(), all_notes.end(),
+              [](const NoteEvent& lhs, const NoteEvent& rhs) {
+                if (lhs.voice != rhs.voice) return lhs.voice < rhs.voice;
+                if (lhs.start_tick != rhs.start_tick) return lhs.start_tick < rhs.start_tick;
+                if (lhs.pitch != rhs.pitch) return lhs.pitch < rhs.pitch;
+                return lhs.duration > rhs.duration;  // Longer first so unique keeps it
+              });
+
+    all_notes.erase(
+        std::unique(all_notes.begin(), all_notes.end(),
+                    [](const NoteEvent& lhs, const NoteEvent& rhs) {
+                      return lhs.voice == rhs.voice &&
+                             lhs.start_tick == rhs.start_tick &&
+                             lhs.pitch == rhs.pitch;
+                    }),
+        all_notes.end());
+
+    // Step 6b: Truncate time-based overlaps within the same voice.
+    // Same-tick notes (chords/bariolage) are kept intact.
+    // Only truncate when same pitch (sustained duplicate) or overlap > 1 beat
+    // (likely a generation bug).
+    std::sort(all_notes.begin(), all_notes.end(),
+              [](const NoteEvent& lhs, const NoteEvent& rhs) {
+                if (lhs.voice != rhs.voice) return lhs.voice < rhs.voice;
+                if (lhs.start_tick != rhs.start_tick) return lhs.start_tick < rhs.start_tick;
+                return lhs.pitch < rhs.pitch;
+              });
+
+    for (size_t idx = 0; idx + 1 < all_notes.size(); ++idx) {
+      if (all_notes[idx].voice != all_notes[idx + 1].voice) continue;
+      // Skip same-tick notes (chords/bariolage -- these are structural)
+      if (all_notes[idx].start_tick == all_notes[idx + 1].start_tick) continue;
+
+      Tick end_tick = all_notes[idx].start_tick + all_notes[idx].duration;
+      if (end_tick > all_notes[idx + 1].start_tick) {
+        Tick overlap = end_tick - all_notes[idx + 1].start_tick;
+        bool same_pitch = (all_notes[idx].pitch == all_notes[idx + 1].pitch);
+        if (same_pitch || overlap > kTicksPerBeat) {
+          Tick new_dur = all_notes[idx + 1].start_tick - all_notes[idx].start_tick;
+          if (new_dur == 0) new_dur = 1;
+          all_notes[idx].duration = new_dur;
+          all_notes[idx].modified_by |= static_cast<uint8_t>(NoteModifiedBy::OverlapTrim);
+        }
+      }
+    }
+  }
+
+  // Restore sort order for subsequent leap clamping.
+  std::sort(all_notes.begin(), all_notes.end(),
+            [](const NoteEvent& lhs, const NoteEvent& rhs) {
+              if (lhs.start_tick != rhs.start_tick) return lhs.start_tick < rhs.start_tick;
+              return lhs.pitch < rhs.pitch;
+            });
+
   // Clamp excessive leaps (>12 semitones).
   // Skip bass notes (ChaconneBass/GroundBass) to preserve structural integrity.
   for (size_t idx = 1; idx < all_notes.size(); ++idx) {

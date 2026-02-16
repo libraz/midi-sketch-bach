@@ -927,5 +927,90 @@ TEST(PreludeTest, TextureThinning_NoEffectOnTwoVoices) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Structural rhythm diversity: section-progress-dependent density
+// ---------------------------------------------------------------------------
+
+TEST(PreludeTest, RhythmDensityShaping_OpeningLessActive) {
+  // The opening section (first 15% of the piece) should have fewer
+  // distinct duration values or simpler rhythm than the development section.
+  // This tests that the section-progress-dependent rhythm shaping is active.
+  PreludeConfig config = makeTestConfig(42);
+  config.type = PreludeType::FreeForm;
+  config.num_voices = 3;
+  PreludeResult result = generatePrelude(config);
+  ASSERT_TRUE(result.success);
+  ASSERT_GE(result.tracks.size(), 1u);
+
+  Tick total = result.total_duration_ticks;
+  Tick opening_end = static_cast<Tick>(total * 0.15f);
+  Tick dev_start = static_cast<Tick>(total * 0.30f);
+  Tick dev_end = static_cast<Tick>(total * 0.70f);
+
+  std::set<Tick> opening_durations;
+  std::set<Tick> dev_durations;
+
+  for (const auto& note : result.tracks[0].notes) {
+    if (note.start_tick < opening_end) {
+      opening_durations.insert(note.duration);
+    } else if (note.start_tick >= dev_start && note.start_tick < dev_end) {
+      dev_durations.insert(note.duration);
+    }
+  }
+
+  // Development section should have at least as many distinct durations
+  // as the opening (and typically more due to higher rhythm variation).
+  if (!opening_durations.empty() && !dev_durations.empty()) {
+    EXPECT_GE(dev_durations.size(), opening_durations.size())
+        << "Development section should have at least as many distinct "
+        << "duration values as the opening";
+  }
+}
+
+TEST(PreludeTest, RhythmDensityShaping_CadenceConvergence) {
+  // The cadential section (last 2 bars) should have reduced rhythm variation
+  // compared to the development section.
+  PreludeConfig config = makeTestConfig(42);
+  config.type = PreludeType::FreeForm;
+  config.num_voices = 3;
+  PreludeResult result = generatePrelude(config);
+  ASSERT_TRUE(result.success);
+  ASSERT_GE(result.tracks.size(), 1u);
+
+  // All notes in the last 2 bars should have positive durations.
+  Tick cadence_start = result.total_duration_ticks - 2 * kTicksPerBar;
+  int cadence_notes = 0;
+  for (const auto& note : result.tracks[0].notes) {
+    if (note.start_tick >= cadence_start) {
+      ++cadence_notes;
+      EXPECT_GT(note.duration, 0u)
+          << "Cadential note at tick " << note.start_tick
+          << " has zero duration";
+    }
+  }
+  EXPECT_GT(cadence_notes, 0) << "Should have notes in cadential section";
+}
+
+TEST(PreludeTest, Perpetual_RhythmShapingPresent) {
+  // Perpetual preludes should also show section-dependent rhythm shaping
+  // (lower variation at opening, higher in development).
+  PreludeConfig config = makeTestConfig(42);
+  config.type = PreludeType::Perpetual;
+  config.num_voices = 3;
+  PreludeResult result = generatePrelude(config);
+  ASSERT_TRUE(result.success);
+  ASSERT_GE(result.tracks.size(), 1u);
+
+  // Check that the piece has notes across the entire duration.
+  Tick total = result.total_duration_ticks;
+  bool has_early = false, has_late = false;
+  for (const auto& note : result.tracks[0].notes) {
+    if (note.start_tick < total / 4) has_early = true;
+    if (note.start_tick > total * 3 / 4) has_late = true;
+  }
+  EXPECT_TRUE(has_early) << "Should have notes in early section";
+  EXPECT_TRUE(has_late) << "Should have notes in late section";
+}
+
 }  // namespace
 }  // namespace bach

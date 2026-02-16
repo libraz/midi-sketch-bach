@@ -157,6 +157,7 @@ def cmd_score(args: argparse.Namespace) -> int:
         category=profile.reference_category,
         counterpoint_enabled=profile.counterpoint_enabled,
         results=results,
+        form_name=profile.form_name,
     )
 
     if args.json:

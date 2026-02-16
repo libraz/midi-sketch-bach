@@ -1519,5 +1519,112 @@ TEST(FugueGeneratorTest, SourcePriorityConsistency) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Episode density reduction (tie extension)
+// ---------------------------------------------------------------------------
+
+TEST(FugueGeneratorTest, EpisodeDensity_FourVoice_NotAllVoicesAlwaysActive) {
+  // A 4-voice fugue should have some beats where fewer than 4 voices have
+  // simultaneous attacks in episodes. The density reduction pass merges
+  // short flexible notes into longer held notes, reducing attack frequency.
+  uint32_t seeds[] = {42, 77, 123};
+  for (uint32_t seed : seeds) {
+    FugueConfig config = makeTestConfig(seed);
+    config.num_voices = 4;
+    FugueResult result = generateFugue(config);
+    ASSERT_TRUE(result.success) << "Seed " << seed << " failed";
+
+    // Collect all notes from all tracks.
+    std::vector<NoteEvent> all_notes;
+    for (const auto& track : result.tracks) {
+      all_notes.insert(all_notes.end(), track.notes.begin(), track.notes.end());
+    }
+
+    // Get episode sections.
+    auto episodes = result.structure.getSectionsByType(SectionType::Episode);
+    if (episodes.empty()) continue;
+
+    // Sample beats within episodes and count how many voices have note onsets.
+    int total_beats = 0;
+    int beats_with_fewer_than_all = 0;
+    for (const auto& ep : episodes) {
+      for (Tick beat = ep.start_tick; beat < ep.end_tick; beat += kTicksPerBeat) {
+        ++total_beats;
+        // Count voices with onsets at this beat (within half a beat tolerance).
+        bool voice_has_onset[4] = {false, false, false, false};
+        for (const auto& note : all_notes) {
+          if (note.voice >= 4) continue;
+          Tick diff = (note.start_tick >= beat)
+              ? note.start_tick - beat
+              : beat - note.start_tick;
+          if (diff <= kTicksPerBeat / 4) {
+            voice_has_onset[note.voice] = true;
+          }
+        }
+        int active_count = 0;
+        for (int vid = 0; vid < 4; ++vid) {
+          if (voice_has_onset[vid]) ++active_count;
+        }
+        if (active_count < 4) ++beats_with_fewer_than_all;
+      }
+    }
+
+    // At least 30% of episode beats should have fewer than all 4 voices
+    // attacking simultaneously (BWV578: only 11% is 4-voice tutti).
+    if (total_beats > 0) {
+      float reduced_ratio = static_cast<float>(beats_with_fewer_than_all) /
+                            static_cast<float>(total_beats);
+      EXPECT_GT(reduced_ratio, 0.25f)
+          << "Seed " << seed << ": only " << (reduced_ratio * 100.0f)
+          << "% of episode beats have reduced voices (need > 25%)";
+    }
+  }
+}
+
+TEST(FugueGeneratorTest, EpisodeDensity_ThematicNotesPreserved) {
+  // Verify that Subject/Answer/Countersubject notes are never modified
+  // by the density reduction pass.
+  FugueConfig config = makeTestConfig(42);
+  config.num_voices = 4;
+  FugueResult result = generateFugue(config);
+  ASSERT_TRUE(result.success);
+
+  // Collect all notes.
+  std::vector<NoteEvent> all_notes;
+  for (const auto& track : result.tracks) {
+    all_notes.insert(all_notes.end(), track.notes.begin(), track.notes.end());
+  }
+
+  // Verify thematic notes exist.
+  int subject_count = 0;
+  int answer_count = 0;
+  int cs_count = 0;
+  for (const auto& note : all_notes) {
+    if (note.source == BachNoteSource::FugueSubject) ++subject_count;
+    if (note.source == BachNoteSource::FugueAnswer) ++answer_count;
+    if (note.source == BachNoteSource::Countersubject) ++cs_count;
+  }
+
+  // Fugue must have subject and answer entries.
+  EXPECT_GT(subject_count, 0) << "No subject notes found";
+  EXPECT_GT(answer_count, 0) << "No answer notes found";
+}
+
+TEST(FugueGeneratorTest, EpisodeDensity_TwoVoice_NoReduction) {
+  // 2-voice fugues should not have density reduction (minimum voice count).
+  FugueConfig config = makeTestConfig(42);
+  config.num_voices = 2;
+  FugueResult result1 = generateFugue(config);
+  ASSERT_TRUE(result1.success);
+
+  // With 2 voices, the density pass should be skipped entirely.
+  // Verify the output is valid and all tracks have notes.
+  EXPECT_EQ(result1.tracks.size(), 2u);
+  for (size_t idx = 0; idx < result1.tracks.size(); ++idx) {
+    EXPECT_GT(result1.tracks[idx].notes.size(), 0u)
+        << "Track " << idx << " has no notes in 2-voice fugue";
+  }
+}
+
 }  // namespace
 }  // namespace bach

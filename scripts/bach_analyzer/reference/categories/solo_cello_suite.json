@@ -2,25 +2,102 @@
   "category": "solo_cello_suite",
   "work_count": 36,
   "scalars": {
-    "stepwise_ratio": {"mean": 0.548, "std": 0.115},
-    "leap_ratio": {"mean": 0.382, "std": 0.10},
-    "avg_interval": {"mean": 2.88, "std": 0.5},
-    "consonance_ratio": {"mean": 0.722, "std": 0.125},
-    "perfect_consonance_ratio": {"mean": 0.30, "std": 0.10},
-    "avg_active_voices": {"mean": 1.10, "std": 0.3},
-    "notes_per_bar": {"mean": 14.52, "std": 5.0}
+    "stepwise_ratio": {
+      "mean": 0.548,
+      "std": 0.115
+    },
+    "leap_ratio": {
+      "mean": 0.382,
+      "std": 0.1
+    },
+    "avg_interval": {
+      "mean": 2.88,
+      "std": 0.5
+    },
+    "consonance_ratio": {
+      "mean": 0.722,
+      "std": 0.125
+    },
+    "perfect_consonance_ratio": {
+      "mean": 0.3,
+      "std": 0.1
+    },
+    "avg_active_voices": {
+      "mean": 1.1,
+      "std": 0.3
+    },
+    "notes_per_bar": {
+      "mean": 14.52,
+      "std": 5.0
+    },
+    "cadences_per_8_bars": {
+      "mean": 0.0,
+      "std": 0.3
+    },
+    "parallel_perfects_per_100_beats": {
+      "mean": 0.07,
+      "std": 0.5
+    }
   },
   "distributions": {
     "interval": {
-      "P1": 0.074, "m2": 0.240, "M2": 0.316, "m3": 0.109,
-      "M3": 0.066, "P4": 0.060, "TT": 0.020, "P5": 0.046,
-      "m6": 0.021, "M6": 0.027, "m7": 0.017, "M7": 0.004
+      "P1": 0.074,
+      "m2": 0.24,
+      "M2": 0.316,
+      "m3": 0.109,
+      "M3": 0.066,
+      "P4": 0.06,
+      "TT": 0.02,
+      "P5": 0.046,
+      "m6": 0.021,
+      "M6": 0.027,
+      "m7": 0.017,
+      "M7": 0.004
     },
     "rhythm": {
-      "16th": 0.919, "8th": 0.075, "half": 0.006
+      "16th": 0.919,
+      "8th": 0.075,
+      "half": 0.006
     },
     "texture": {
-      "0": 0.021, "1": 0.857, "2": 0.121
+      "0": 0.021,
+      "1": 0.857,
+      "2": 0.121
+    },
+    "function": {
+      "T": 0.348,
+      "S": 0.261,
+      "D": 0.262,
+      "M": 0.128
+    },
+    "harmony_degrees": {
+      "V": 0.159,
+      "I": 0.146,
+      "ii": 0.097,
+      "IV": 0.093,
+      "vii\u00b0": 0.085,
+      "iii": 0.084,
+      "vi": 0.08,
+      "i": 0.061,
+      "VI": 0.047,
+      "III": 0.041,
+      "iv": 0.029,
+      "ii\u00b0": 0.024,
+      "II": 0.01,
+      "V+": 0.009,
+      "I+": 0.007,
+      "II+": 0.005,
+      "i\u00b0": 0.004,
+      "VII": 0.004,
+      "vi\u00b0": 0.003,
+      "vii": 0.003,
+      "v": 0.002,
+      "iv\u00b0": 0.002,
+      "v\u00b0": 0.002,
+      "III+": 0.002,
+      "iii\u00b0": 0.001,
+      "IV+": 0.001,
+      "VI+": 0.001
     }
   }
 }

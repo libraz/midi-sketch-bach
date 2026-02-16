@@ -1,0 +1,35 @@
+{
+  "category": "trio_sonata",
+  "work_count": 18,
+  "scalars": {
+    "stepwise_ratio": {"mean": 0.577, "std": 0.101},
+    "leap_ratio": {"mean": 0.366, "std": 0.1},
+    "avg_interval": {"mean": 2.826, "std": 0.421},
+    "consonance_ratio": {"mean": 0.709, "std": 0.035},
+    "perfect_consonance_ratio": {"mean": 0.244, "std": 0.04},
+    "avg_active_voices": {"mean": 2.659, "std": 0.111},
+    "notes_per_bar": {"mean": 34.524, "std": 7.085}
+  },
+  "distributions": {
+    "interval": {
+      "P1": 0.056, "m2": 0.246, "M2": 0.324, "m3": 0.107,
+      "M3": 0.064, "P4": 0.070, "TT": 0.019, "P5": 0.051,
+      "m6": 0.017, "M6": 0.024, "m7": 0.017, "M7": 0.004
+    },
+    "rhythm": {
+      "32nd": 0.181, "16th": 0.419, "8th": 0.318,
+      "quarter": 0.065, "half": 0.012, "whole": 0.003
+    },
+    "vertical": {
+      "P1": 0.135, "m2": 0.018, "M2": 0.057, "m3": 0.144,
+      "M3": 0.126, "P4": 0.098, "TT": 0.046, "P5": 0.116,
+      "m6": 0.087, "M6": 0.100, "m7": 0.053, "M7": 0.020
+    },
+    "motion": {
+      "oblique": 0.272, "contrary": 0.384, "similar": 0.295, "parallel": 0.049
+    },
+    "texture": {
+      "0": 0.012, "1": 0.027, "2": 0.245, "3": 0.716
+    }
+  }
+}

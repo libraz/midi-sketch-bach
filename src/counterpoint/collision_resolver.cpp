@@ -106,6 +106,180 @@ static float tritonePenalty(const CounterpointState& state,
   return 0.0f;
 }
 
+/// @brief Count consecutive parallel imperfect consonances (3rds/6ths) between
+/// two voices, looking backward from the current position.
+///
+/// Parallel 3rds and 6ths are natural in Bach, but extended runs (4+ beats)
+/// reduce voice independence. This function counts how many consecutive
+/// imperfect consonances have occurred in parallel motion.
+///
+/// @param state Current counterpoint state.
+/// @param rules Rule evaluator for motion classification.
+/// @param voice_id Voice being evaluated.
+/// @param other Voice to compare against.
+/// @param tick Current tick position.
+/// @return Number of consecutive parallel imperfect consonances (0 if none).
+static int countConsecutiveParallelImperfect(const CounterpointState& state,
+                                             const IRuleEvaluator& rules,
+                                             VoiceId voice_id, VoiceId other,
+                                             Tick tick) {
+  const auto& self_notes = state.getVoiceNotes(voice_id);
+  const auto& other_notes = state.getVoiceNotes(other);
+  if (self_notes.size() < 2 || other_notes.size() < 2) return 0;
+
+  int count = 0;
+  // Walk backward through recent notes to count parallel imperfect runs.
+  // We check pairs of successive note-pairs for parallel motion with
+  // imperfect consonant intervals.
+  auto self_iter = self_notes.rbegin();
+  auto other_iter = other_notes.rbegin();
+
+  // Find latest other note before tick.
+  while (other_iter != other_notes.rend() && other_iter->start_tick >= tick) {
+    ++other_iter;
+  }
+  if (other_iter == other_notes.rend()) return 0;
+
+  // Start from the latest self note.
+  uint8_t curr_self = self_iter->pitch;
+  uint8_t curr_other = other_iter->pitch;
+
+  constexpr int kMaxLookback = 6;
+  for (int step = 0; step < kMaxLookback; ++step) {
+    ++self_iter;
+    ++other_iter;
+    if (self_iter == self_notes.rend() || other_iter == other_notes.rend()) break;
+
+    uint8_t prev_self = self_iter->pitch;
+    uint8_t prev_other = other_iter->pitch;
+
+    // Check if the current interval is an imperfect consonance.
+    int curr_ivl = absoluteInterval(curr_self, curr_other);
+    int curr_reduced = interval_util::compoundToSimple(curr_ivl);
+    IntervalQuality quality = classifyInterval(curr_reduced);
+    if (quality != IntervalQuality::ImperfectConsonance) break;
+
+    // Check if motion is parallel.
+    MotionType motion = rules.classifyMotion(prev_self, curr_self,
+                                              prev_other, curr_other);
+    if (motion != MotionType::Parallel) break;
+
+    ++count;
+    curr_self = prev_self;
+    curr_other = prev_other;
+  }
+  return count;
+}
+
+/// @brief Compute voice-motion penalty/bonus for a candidate pitch.
+///
+/// Evaluates the motion type between the candidate voice and each other
+/// sounding voice, applying Bach-style preferences:
+/// - Parallel P5/P8: heavy penalty (+0.5) -- already rejected by isSafeToPlace,
+///   but adds extra scoring for near-miss candidates
+/// - Contrary motion: bonus (-0.15) -- most desirable for voice independence
+/// - Oblique motion: small bonus (-0.05) -- one voice holds, acceptable
+/// - Parallel 3rd/6th: small bonus (-0.1) for first 3 beats, then
+///   penalty (+0.1) for extended runs (4+ consecutive)
+///
+/// @param state Current counterpoint state.
+/// @param rules Rule evaluator for motion and interval classification.
+/// @param voice_id Voice placing the candidate pitch.
+/// @param cand_pitch Candidate MIDI pitch.
+/// @param tick Current tick position.
+/// @return Aggregate penalty (negative = bonus, positive = penalty).
+static float voiceMotionPenalty(const CounterpointState& state,
+                                const IRuleEvaluator& rules,
+                                VoiceId voice_id, uint8_t cand_pitch,
+                                Tick tick) {
+  const NoteEvent* prev_self = state.getLastNote(voice_id);
+  if (!prev_self) return 0.0f;
+
+  float total_penalty = 0.0f;
+  int voice_pair_count = 0;
+  const auto& voices = state.getActiveVoices();
+
+  for (VoiceId other : voices) {
+    if (other == voice_id) continue;
+
+    const NoteEvent* other_note = state.getNoteAt(other, tick);
+    if (!other_note) continue;
+
+    // Find previous note for the other voice before tick.
+    const NoteEvent* prev_other = nullptr;
+    const auto& other_notes = state.getVoiceNotes(other);
+    for (auto iter = other_notes.rbegin(); iter != other_notes.rend(); ++iter) {
+      if (iter->start_tick < tick) {
+        prev_other = &(*iter);
+        break;
+      }
+    }
+    if (!prev_other) continue;
+
+    ++voice_pair_count;
+
+    // Classify the motion this candidate would create.
+    MotionType motion = rules.classifyMotion(
+        prev_self->pitch, cand_pitch, prev_other->pitch, other_note->pitch);
+
+    // Check the resulting interval.
+    int curr_ivl = absoluteInterval(cand_pitch, other_note->pitch);
+    int curr_reduced = interval_util::compoundToSimple(curr_ivl);
+
+    switch (motion) {
+      case MotionType::Contrary:
+        // Contrary motion: most desirable for voice independence.
+        total_penalty -= 0.15f;
+        break;
+
+      case MotionType::Oblique:
+        // Oblique motion: one voice holds -- acceptable.
+        total_penalty -= 0.05f;
+        break;
+
+      case MotionType::Parallel: {
+        // Check if the resulting interval is a perfect consonance.
+        if (interval_util::isPerfectConsonance(curr_reduced)) {
+          // Parallel P5/P8: heavy penalty (isSafeToPlace rejects these,
+          // but this catches near-miss candidates in scoring).
+          total_penalty += 0.50f;
+        } else {
+          IntervalQuality quality = classifyInterval(curr_reduced);
+          if (quality == IntervalQuality::ImperfectConsonance) {
+            // Parallel 3rds/6ths: check run length.
+            int run = countConsecutiveParallelImperfect(
+                state, rules, voice_id, other, tick);
+            if (run < 3) {
+              // Short run: acceptable, small bonus for harmonic flow.
+              total_penalty -= 0.10f;
+            } else {
+              // Extended run (4+ including this note): penalize to
+              // encourage voice independence.
+              total_penalty += 0.10f;
+            }
+          }
+          // Similar intervals that are dissonant: no special handling
+          // (already penalized by consonance checks elsewhere).
+        }
+        break;
+      }
+
+      case MotionType::Similar:
+        // Similar motion: same direction, different interval.
+        // Neutral -- no bonus or penalty (unless approaching a perfect
+        // consonance, which is handled by isSafeToPlace's hidden-perfect check).
+        break;
+    }
+  }
+
+  // Average over voice pairs to avoid over-accumulation in 4-voice textures.
+  if (voice_pair_count > 1) {
+    total_penalty /= static_cast<float>(voice_pair_count);
+  }
+
+  return total_penalty;
+}
+
 // ---------------------------------------------------------------------------
 // Free-standing parallel / P4-bass checker
 // ---------------------------------------------------------------------------
@@ -214,20 +388,31 @@ bool CollisionResolver::isSafeToPlace(const CounterpointState& state,
     const NoteEvent* other_note = state.getNoteAt(other, tick);
     if (!other_note) continue;
 
-    // Check consonance on strong beats (every quarter-note boundary).
-    bool is_strong = (tick % kTicksPerBeat == 0);
+    // Tiered consonance check by metric position.
+    // Bar start (beat 1): reject all dissonances.
+    // Beats 2-4: reject only harsh dissonances (m2/TT/M7) to allow the natural
+    // ~25-34% dissonance ratio found in Bach organ fugues (reference mean=0.746).
+    bool is_on_beat = (tick % kTicksPerBeat == 0);
+    bool is_bar_start = (tick % kTicksPerBar == 0);
     int ivl = absoluteInterval(pitch, other_note->pitch);
-    if (is_strong && !rules.isIntervalConsonant(ivl, is_strong)) {
-      // Vertical law: dissonant interval is always rejected.
-      // NHT (passing/neighbor) is a melodic property and cannot
-      // override vertical safety. See: vertical sovereignty principle.
-      return false;
+    if (is_on_beat && !rules.isIntervalConsonant(ivl, is_bar_start)) {
+      if (is_bar_start) {
+        // Beat 1: reject all dissonances unconditionally.
+        return false;
+      }
+      // Beats 2-4: reject only harsh dissonances (m2=1, TT=6, M7=11).
+      int reduced = interval_util::compoundToSimple(ivl);
+      if (reduced == 1 || reduced == 6 || reduced == 11) {
+        return false;
+      }
+      // Mild dissonances (M2=2, P4=5, m7=10) are allowed on beats 2-4 as
+      // they occur naturally in Bach's counterpoint.
     }
 
     // P4 involving the bass voice is dissonant in Baroque practice, even when
     // the rule evaluator treats P4 as consonant (3+ voice context).  Only P4
     // between two upper voices is acceptable.
-    if (is_strong && rules.isIntervalConsonant(ivl, is_strong)) {
+    if (is_on_beat && rules.isIntervalConsonant(ivl, is_bar_start)) {
       int reduced = interval_util::compoundToSimple(ivl);
       if (reduced == interval::kPerfect4th) {
         const auto& active = state.getActiveVoices();
@@ -430,6 +615,9 @@ PlacementResult CollisionResolver::tryStrategy(
     float best_penalty = 2.0f;
 
     // Helper lambda: evaluate a candidate pitch and update best result.
+    // Applies Bach-style consonance priority: imperfect consonances (3rd, 6th)
+    // are preferred over perfect consonances (5th, octave) to encourage richer
+    // harmonic writing and reduce parallel-perfect risk.
     auto evaluateCandidate = [&](uint8_t cand_pitch, float base_penalty) {
       if (!isSafeToPlace(state, rules, voice_id, cand_pitch, tick,
                          duration, next_pitch))
@@ -437,6 +625,29 @@ PlacementResult CollisionResolver::tryStrategy(
 
       float penalty = base_penalty;
       penalty += crossRelationPenalty(state, voice_id, cand_pitch, tick);
+
+      // Consonance quality scoring: prefer imperfect consonances over perfect.
+      // Bach's counterpoint uses 3rds and 6ths far more than 5ths and octaves.
+      // This bonus/penalty applies to vertical intervals with all sounding voices.
+      bool strong_beat = isStrongBeat(tick);
+      for (VoiceId other_v : state.getActiveVoices()) {
+        if (other_v == voice_id) continue;
+        const NoteEvent* sounding = state.getNoteAt(other_v, tick);
+        if (!sounding) continue;
+        int sounding_ivl = absoluteInterval(cand_pitch, sounding->pitch);
+        int reduced_ivl = interval_util::compoundToSimple(sounding_ivl);
+        IntervalQuality quality = classifyInterval(reduced_ivl);
+        if (quality == IntervalQuality::ImperfectConsonance) {
+          // Imperfect consonances (m3, M3, m6, M6): preferred in Bach style.
+          penalty -= 0.15f;
+        } else if (quality == IntervalQuality::PerfectConsonance && reduced_ivl != 0) {
+          // Perfect 5th / octave: acceptable but carries parallel-motion risk.
+          // Unison (0) is excluded from penalty since it has its own constraints.
+          if (strong_beat) {
+            penalty += 0.08f;
+          }
+        }
+      }
 
       // Voice spacing penalty: penalize wide gaps between adjacent manual voices.
       for (VoiceId adj_v = 0; adj_v < state.voiceCount(); ++adj_v) {
@@ -455,6 +666,13 @@ PlacementResult CollisionResolver::tryStrategy(
       }
 
       penalty += tritonePenalty(state, voice_id, cand_pitch);
+
+      // Voice motion scoring: reward contrary/oblique motion, penalize
+      // parallel perfect consonances and extended parallel imperfect runs.
+      penalty += voiceMotionPenalty(state, rules, voice_id, cand_pitch, tick);
+
+      // Clamp penalty floor to prevent negative penalties from over-accumulating.
+      if (penalty < 0.0f) penalty = 0.0f;
 
       if (penalty < best_penalty) {
         best_penalty = penalty;
@@ -533,9 +751,13 @@ PlacementResult CollisionResolver::tryStrategy(
     }
 
     // 4. Fallback: consonant intervals (legacy behavior, or if timeline not set).
+    // Imperfect consonances (3rd, 6th) are tried before perfect consonances
+    // (5th, octave, unison) to match Bach's preference for richer harmony.
     if (!result.accepted) {
+      // Imperfect consonances first: m3, M3, m6, M6.
+      static constexpr int kImperfectFirst[] = {3, 4, 8, 9, 0, 7, 12};
       std::vector<int> consonant_offsets;
-      for (int ivl : interval_util::kConsonantIntervals) {
+      for (int ivl : kImperfectFirst) {
         consonant_offsets.push_back(ivl);
         if (ivl != 0) consonant_offsets.push_back(-ivl);
       }
@@ -599,6 +821,28 @@ PlacementResult CollisionResolver::tryStrategy(
               penalty += strong_beat ? 0.3f : 0.1f;
             }
           }
+
+          // Consonance quality preference: favor imperfect consonances (3rd, 6th)
+          // over perfect consonances (5th, octave) in step_shift candidates.
+          // This encourages richer harmonic writing characteristic of Bach.
+          for (VoiceId other_v : state.getActiveVoices()) {
+            if (other_v == voice_id) continue;
+            const NoteEvent* sounding = state.getNoteAt(other_v, tick);
+            if (!sounding) continue;
+            int sounding_ivl = absoluteInterval(cand_pitch, sounding->pitch);
+            int reduced_ivl = interval_util::compoundToSimple(sounding_ivl);
+            IntervalQuality quality = classifyInterval(reduced_ivl);
+            if (quality == IntervalQuality::ImperfectConsonance) {
+              penalty -= 0.1f;  // Imperfect consonances preferred.
+            } else if (quality == IntervalQuality::PerfectConsonance &&
+                       reduced_ivl != 0 && strong_beat) {
+              penalty += 0.05f;  // Perfect consonances carry parallel risk on strong beats.
+            }
+          }
+
+          // Voice motion scoring: reward contrary/oblique motion, penalize
+          // parallel perfect consonances and extended parallel imperfect runs.
+          penalty += voiceMotionPenalty(state, rules, voice_id, cand_pitch, tick);
 
           // Apply melodic quality penalty via MelodicContext scoring.
           if (prev_note) {
@@ -971,6 +1215,31 @@ PlacementResult CollisionResolver::trySuspension(
 
   uint8_t held_pitch = prev_note->pitch;
 
+  // --- Preparation check ---
+  // A valid suspension requires the held pitch to have been consonant on the
+  // previous beat (the preparation phase).  Without consonant preparation,
+  // the dissonance is unprepared and violates Baroque counterpoint practice.
+  {
+    const auto& voices_prep = state.getActiveVoices();
+    bool preparation_consonant = true;
+    bool has_other_voice_at_prev = false;
+    for (VoiceId other : voices_prep) {
+      if (other == voice_id) continue;
+      const NoteEvent* other_at_prev = state.getNoteAt(other, prev_tick);
+      if (!other_at_prev) continue;
+      has_other_voice_at_prev = true;
+      int prep_ivl = absoluteInterval(held_pitch, other_at_prev->pitch);
+      int prep_reduced = interval_util::compoundToSimple(prep_ivl);
+      if (!interval_util::isConsonance(prep_reduced)) {
+        preparation_consonant = false;
+        break;
+      }
+    }
+    // If no other voice was sounding at prev_tick, we cannot verify preparation.
+    // Reject: a suspension without audible harmonic context is meaningless.
+    if (!has_other_voice_at_prev || !preparation_consonant) return result;
+  }
+
   // Check if holding this pitch creates a dissonance with other voices,
   // and whether stepping down by 1 or 2 semitones resolves it consonantly.
   const auto& voices = state.getActiveVoices();
@@ -984,7 +1253,25 @@ PlacementResult CollisionResolver::trySuspension(
     int ivl = absoluteInterval(held_pitch, other_note->pitch);
     bool is_strong = (tick % kTicksPerBeat == 0);
     if (!rules.isIntervalConsonant(ivl, is_strong)) {
+      // Classify the suspension type by the dissonant interval (simple).
+      // Bach's standard suspensions: 4-3 (reduced 5), 7-6 (reduced 10),
+      // 9-8 (reduced 2/14). Other dissonant intervals are less idiomatic.
+      int reduced_ivl = interval_util::compoundToSimple(ivl);
+      float type_penalty = 0.0f;
+      if (reduced_ivl == interval::kPerfect4th ||   // 4-3 suspension
+          reduced_ivl == interval::kMinor2nd ||      // 9-8 suspension (compound)
+          reduced_ivl == interval::kMajor2nd) {      // 9-8 or 2-1 suspension
+        type_penalty = 0.0f;  // Standard suspension types: no extra penalty.
+      } else if (reduced_ivl == interval::kMinor7th ||  // 7-6 suspension
+                 reduced_ivl == interval::kMajor7th) {
+        type_penalty = 0.0f;  // 7-6 is also standard.
+      } else {
+        type_penalty = 0.1f;  // Non-standard suspension: small extra penalty.
+      }
+
+      // --- Resolution check ---
       // Verify the resolution: step down from held_pitch should be consonant.
+      // Standard resolution is downward by step (1-2 semitones).
       for (int step = 1; step <= 2; ++step) {
         int resolution_pitch = static_cast<int>(held_pitch) - step;
         if (resolution_pitch < 0) continue;
@@ -995,7 +1282,7 @@ PlacementResult CollisionResolver::trySuspension(
         // since resolutions typically land on the weak part of the beat).
         if (rules.isIntervalConsonant(res_ivl, false)) {
           result.pitch = held_pitch;
-          result.penalty = 0.15f;
+          result.penalty = 0.15f + type_penalty;
           result.accepted = true;
           return result;
         }
@@ -1105,6 +1392,9 @@ PlacementResult CollisionResolver::findSafePitchWithLookahead(
       float current_penalty =
           static_cast<float>(delta) / 12.0f * 0.3f;
       current_penalty += crossRelationPenalty(state, voice_id, cand, tick);
+
+      // Voice motion scoring: reward contrary/oblique, penalize parallel runs.
+      current_penalty += voiceMotionPenalty(state, rules, voice_id, cand, tick);
 
       // Evaluate next-beat approach quality.
       // Stepwise motion (1-2 semitones) is ideal; small leaps (3-4) are

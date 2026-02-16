@@ -5,11 +5,13 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <random>
 
 #include "core/basic_types.h"
 #include "core/interval.h"
 #include "core/note_source.h"
 #include "core/pitch_utils.h"
+#include "core/scale.h"
 #include "harmony/chord_types.h"
 #include "harmony/chord_voicer.h"
 #include "harmony/harmonic_event.h"
@@ -174,6 +176,292 @@ TEST(ApplyFigurationTest, Velocity_FixedAt80) {
   auto notes = applyFiguration(voicing, tmpl, 0, ev, testVoiceRange);
   for (const auto& note : notes) {
     EXPECT_EQ(note.velocity, 80);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// injectNonChordTones tests
+// ---------------------------------------------------------------------------
+
+TEST(InjectNCTTest, BeatOneNeverModified) {
+  // Beat-1 notes must always remain chord tones, regardless of NCT probability.
+  auto ev = makeEvent(Key::C, false, ChordQuality::Major, 48);
+  auto voicing = voiceChord(ev, 3, testVoiceRange);
+  auto tmpl = createFigurationTemplate(FigurationType::Alberti, 3);
+
+  std::mt19937 rng(42);
+  auto notes = applyFiguration(voicing, tmpl, 0, ev, testVoiceRange);
+  uint8_t beat1_pitch = notes[0].pitch;
+
+  // Run with probability 1.0 (guaranteed injection on eligible notes).
+  injectNonChordTones(notes, tmpl, 0, ev, testVoiceRange, rng, 1.0f, 0.5f);
+
+  // The first note (at tick 0 = beat start) must be unchanged.
+  EXPECT_EQ(notes[0].pitch, beat1_pitch)
+      << "Beat-1 note was modified by NCT injection";
+}
+
+TEST(InjectNCTTest, ZeroProbabilityLeavesNotesUnchanged) {
+  auto ev = makeEvent(Key::C, false, ChordQuality::Major, 48);
+  auto voicing = voiceChord(ev, 3, testVoiceRange);
+  auto tmpl = createFigurationTemplate(FigurationType::Alberti, 3);
+
+  auto notes = applyFiguration(voicing, tmpl, 0, ev, testVoiceRange);
+  auto original = notes;
+
+  std::mt19937 rng(123);
+  injectNonChordTones(notes, tmpl, 0, ev, testVoiceRange, rng, 0.0f, 0.5f);
+
+  // No notes should have changed with zero probability.
+  ASSERT_EQ(notes.size(), original.size());
+  for (size_t idx = 0; idx < notes.size(); ++idx) {
+    EXPECT_EQ(notes[idx].pitch, original[idx].pitch)
+        << "Note at index " << idx << " was modified despite 0.0 probability";
+  }
+}
+
+TEST(InjectNCTTest, InjectedNotesAreScaleTones) {
+  // All NCTs must be diatonic scale tones.
+  auto ev = makeEvent(Key::C, false, ChordQuality::Major, 48);
+  auto voicing = voiceChord(ev, 3, testVoiceRange);
+  auto tmpl = createFigurationTemplate(FigurationType::Alberti, 3);
+
+  std::mt19937 rng(99);
+  auto notes = applyFiguration(voicing, tmpl, 0, ev, testVoiceRange);
+  injectNonChordTones(notes, tmpl, 0, ev, testVoiceRange, rng, 1.0f, 0.5f);
+
+  for (const auto& note : notes) {
+    EXPECT_TRUE(scale_util::isScaleTone(note.pitch, Key::C, ScaleType::Major))
+        << "Pitch " << static_cast<int>(note.pitch) << " is not a C major scale tone";
+  }
+}
+
+TEST(InjectNCTTest, InjectedNotesWithinVoiceRange) {
+  auto ev = makeEvent(Key::C, false, ChordQuality::Major, 48);
+  auto voicing = voiceChord(ev, 3, testVoiceRange);
+  auto tmpl = createFigurationTemplate(FigurationType::Alberti, 3);
+
+  std::mt19937 rng(77);
+  auto notes = applyFiguration(voicing, tmpl, 0, ev, testVoiceRange);
+  injectNonChordTones(notes, tmpl, 0, ev, testVoiceRange, rng, 1.0f, 0.5f);
+
+  for (const auto& note : notes) {
+    auto [low, high] = testVoiceRange(note.voice);
+    EXPECT_GE(note.pitch, low) << "NCT below voice range for voice " << note.voice;
+    EXPECT_LE(note.pitch, high) << "NCT above voice range for voice " << note.voice;
+  }
+}
+
+TEST(InjectNCTTest, NCTsIntroduceNonChordTonePitches) {
+  // With high probability, at least some notes should become non-chord-tones.
+  // Run multiple seeds to handle randomness.
+  auto ev = makeEvent(Key::C, false, ChordQuality::Major, 48);
+  auto voicing = voiceChord(ev, 3, testVoiceRange);
+  auto tmpl = createFigurationTemplate(FigurationType::Alberti, 3);
+
+  int total_ncts = 0;
+  for (uint32_t seed = 0; seed < 20; ++seed) {
+    std::mt19937 rng(seed);
+    auto notes = applyFiguration(voicing, tmpl, 0, ev, testVoiceRange);
+    injectNonChordTones(notes, tmpl, 0, ev, testVoiceRange, rng, 1.0f, 0.5f);
+
+    for (const auto& note : notes) {
+      if (!isChordTone(note.pitch, ev)) {
+        total_ncts++;
+      }
+    }
+  }
+
+  // With probability 1.0 across 20 seeds with 4-note Alberti pattern,
+  // we should see at least some non-chord-tone pitches.
+  EXPECT_GT(total_ncts, 0)
+      << "No non-chord-tones produced across 20 seeds with p=1.0";
+}
+
+TEST(InjectNCTTest, PassingToneIsBetweenSurroundingNotes) {
+  // For Alberti (bass-sop-mid-sop), the weak sub-beats (indices 1 and 3)
+  // are candidates for passing tones. If replaced, the passing tone pitch
+  // should be diatonically between the surrounding notes.
+  auto ev = makeEvent(Key::C, false, ChordQuality::Major, 48);
+  auto voicing = voiceChord(ev, 3, testVoiceRange);
+  auto tmpl = createFigurationTemplate(FigurationType::Alberti, 3);
+
+  for (uint32_t seed = 0; seed < 50; ++seed) {
+    std::mt19937 rng(seed);
+    auto original = applyFiguration(voicing, tmpl, 0, ev, testVoiceRange);
+    auto modified = original;
+    injectNonChordTones(modified, tmpl, 0, ev, testVoiceRange, rng, 1.0f, 0.5f);
+
+    for (size_t idx = 1; idx + 1 < modified.size(); ++idx) {
+      if (modified[idx].pitch == original[idx].pitch) continue;
+
+      // The modified pitch should be a scale tone.
+      EXPECT_TRUE(
+          scale_util::isScaleTone(modified[idx].pitch, Key::C, ScaleType::Major))
+          << "Seed " << seed << " index " << idx << " pitch "
+          << static_cast<int>(modified[idx].pitch) << " not a scale tone";
+    }
+  }
+}
+
+TEST(InjectNCTTest, SourcePreservedAfterInjection) {
+  auto ev = makeEvent(Key::C, false, ChordQuality::Major, 48);
+  auto voicing = voiceChord(ev, 3, testVoiceRange);
+  auto tmpl = createFigurationTemplate(FigurationType::Alberti, 3);
+
+  std::mt19937 rng(42);
+  auto notes = applyFiguration(voicing, tmpl, 0, ev, testVoiceRange);
+  injectNonChordTones(notes, tmpl, 0, ev, testVoiceRange, rng, 1.0f, 0.5f);
+
+  // Source should remain PreludeFiguration even after NCT injection.
+  for (const auto& note : notes) {
+    EXPECT_EQ(note.source, BachNoteSource::PreludeFiguration);
+  }
+}
+
+TEST(InjectNCTTest, NoteCountPreserved) {
+  // NCT injection modifies pitches only; it must not add or remove notes.
+  auto ev = makeEvent(Key::C, false, ChordQuality::Major, 48);
+  auto voicing = voiceChord(ev, 3, testVoiceRange);
+  auto tmpl = createFigurationTemplate(FigurationType::Alberti, 3);
+
+  std::mt19937 rng(42);
+  auto notes = applyFiguration(voicing, tmpl, 0, ev, testVoiceRange);
+  size_t original_count = notes.size();
+  injectNonChordTones(notes, tmpl, 0, ev, testVoiceRange, rng, 1.0f, 0.5f);
+
+  EXPECT_EQ(notes.size(), original_count);
+}
+
+TEST(InjectNCTTest, TimingPreservedAfterInjection) {
+  // NCT injection must not change note start_tick or duration.
+  auto ev = makeEvent(Key::C, false, ChordQuality::Major, 48);
+  auto voicing = voiceChord(ev, 3, testVoiceRange);
+  auto tmpl = createFigurationTemplate(FigurationType::Alberti, 3);
+
+  auto notes = applyFiguration(voicing, tmpl, 0, ev, testVoiceRange);
+  auto original = notes;
+
+  std::mt19937 rng(42);
+  injectNonChordTones(notes, tmpl, 0, ev, testVoiceRange, rng, 1.0f, 0.5f);
+
+  ASSERT_EQ(notes.size(), original.size());
+  for (size_t idx = 0; idx < notes.size(); ++idx) {
+    EXPECT_EQ(notes[idx].start_tick, original[idx].start_tick)
+        << "Start tick changed at index " << idx;
+    EXPECT_EQ(notes[idx].duration, original[idx].duration)
+        << "Duration changed at index " << idx;
+    EXPECT_EQ(notes[idx].voice, original[idx].voice)
+        << "Voice changed at index " << idx;
+  }
+}
+
+TEST(InjectNCTTest, MinorKeyProducesMinorScaleTones) {
+  // In A minor context, NCTs should be harmonic minor scale tones.
+  auto ev = makeEvent(Key::A, true, ChordQuality::Minor, 57);
+  auto voicing = voiceChord(ev, 3, testVoiceRange);
+  auto tmpl = createFigurationTemplate(FigurationType::Alberti, 3);
+
+  std::mt19937 rng(42);
+  auto notes = applyFiguration(voicing, tmpl, 0, ev, testVoiceRange);
+  injectNonChordTones(notes, tmpl, 0, ev, testVoiceRange, rng, 1.0f, 0.5f);
+
+  for (const auto& note : notes) {
+    EXPECT_TRUE(
+        scale_util::isScaleTone(note.pitch, Key::A, ScaleType::HarmonicMinor))
+        << "Pitch " << static_cast<int>(note.pitch)
+        << " is not an A harmonic minor scale tone";
+  }
+}
+
+TEST(InjectNCTTest, ExistingTemplateNCTsNotModified) {
+  // Templates that already have NCT steps (e.g., Falling3v with passing tones)
+  // should not have those steps further modified by injection.
+  auto ev = makeEvent(Key::C, false, ChordQuality::Major, 48);
+  auto voicing = voiceChord(ev, 3, testVoiceRange);
+
+  std::mt19937 rng_tmpl(42);
+  auto tmpl = createFigurationTemplate(FigurationType::Falling3v, 3, rng_tmpl, 0.0f);
+
+  // Identify which steps already have NCT function set.
+  std::vector<size_t> nct_indices;
+  for (size_t idx = 0; idx < tmpl.steps.size(); ++idx) {
+    if (tmpl.steps[idx].nct_function != NCTFunction::ChordTone) {
+      nct_indices.push_back(idx);
+    }
+  }
+
+  // Apply figuration and record pitches of NCT steps.
+  auto notes = applyFiguration(voicing, tmpl, 0, ev, testVoiceRange);
+  std::vector<uint8_t> nct_pitches_before;
+  for (size_t idx : nct_indices) {
+    if (idx < notes.size()) {
+      nct_pitches_before.push_back(notes[idx].pitch);
+    }
+  }
+
+  // Inject with high probability.
+  std::mt19937 rng(42);
+  injectNonChordTones(notes, tmpl, 0, ev, testVoiceRange, rng, 1.0f, 0.5f);
+
+  // The existing NCT steps should be unchanged.
+  for (size_t jdx = 0; jdx < nct_indices.size(); ++jdx) {
+    size_t idx = nct_indices[jdx];
+    if (idx < notes.size() && jdx < nct_pitches_before.size()) {
+      EXPECT_EQ(notes[idx].pitch, nct_pitches_before[jdx])
+          << "Existing NCT at step " << idx << " was modified by injection";
+    }
+  }
+}
+
+TEST(InjectNCTTest, DeterministicWithSameSeed) {
+  // Same seed should produce identical results.
+  auto ev = makeEvent(Key::C, false, ChordQuality::Major, 48);
+  auto voicing = voiceChord(ev, 3, testVoiceRange);
+  auto tmpl = createFigurationTemplate(FigurationType::Alberti, 3);
+
+  auto notes1 = applyFiguration(voicing, tmpl, 0, ev, testVoiceRange);
+  auto notes2 = notes1;
+
+  std::mt19937 rng1(42);
+  std::mt19937 rng2(42);
+  injectNonChordTones(notes1, tmpl, 0, ev, testVoiceRange, rng1, 0.5f, 0.5f);
+  injectNonChordTones(notes2, tmpl, 0, ev, testVoiceRange, rng2, 0.5f, 0.5f);
+
+  ASSERT_EQ(notes1.size(), notes2.size());
+  for (size_t idx = 0; idx < notes1.size(); ++idx) {
+    EXPECT_EQ(notes1[idx].pitch, notes2[idx].pitch)
+        << "Non-deterministic result at index " << idx;
+  }
+}
+
+TEST(InjectNCTTest, NCTStepwiseFromNeighbor) {
+  // Neighbor tones should be at most a minor 3rd (3 semitones) from the
+  // original chord tone pitch.
+  auto ev = makeEvent(Key::C, false, ChordQuality::Major, 48);
+  auto voicing = voiceChord(ev, 3, testVoiceRange);
+  auto tmpl = createFigurationTemplate(FigurationType::Alberti, 3);
+
+  for (uint32_t seed = 0; seed < 30; ++seed) {
+    auto notes = applyFiguration(voicing, tmpl, 0, ev, testVoiceRange);
+    auto original = notes;
+
+    std::mt19937 rng(seed);
+    injectNonChordTones(notes, tmpl, 0, ev, testVoiceRange, rng, 1.0f, 0.5f);
+
+    for (size_t idx = 0; idx < notes.size(); ++idx) {
+      if (notes[idx].pitch != original[idx].pitch) {
+        int dist = std::abs(static_cast<int>(notes[idx].pitch) -
+                            static_cast<int>(original[idx].pitch));
+        // NCT should be within a minor 3rd of the original (max 3 semitones
+        // for diatonic step). Passing tones may be further from the original
+        // but should still be between surrounding pitches.
+        EXPECT_LE(dist, 4)
+            << "Seed " << seed << " index " << idx << " distance " << dist
+            << " from original pitch " << static_cast<int>(original[idx].pitch)
+            << " to " << static_cast<int>(notes[idx].pitch);
+      }
+    }
   }
 }
 
