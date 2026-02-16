@@ -20,6 +20,7 @@
 #include "harmony/chord_types.h"
 #include "harmony/harmonic_event.h"
 #include "forms/form_utils.h"
+#include "core/figure_injector.h"
 #include "counterpoint/leap_resolution.h"
 #include "counterpoint/parallel_repair.h"
 #include "counterpoint/vertical_safe.h"
@@ -357,6 +358,226 @@ size_t selectNextToneIdx(const std::vector<uint8_t>& scale_tones,
 }
 
 // ---------------------------------------------------------------------------
+// Strong-beat bass consonance enforcement (generation-time)
+// ---------------------------------------------------------------------------
+
+/// @brief NCT tolerance level for variation types.
+///
+/// Controls how strictly strong-beat notes must be consonant with the ground
+/// bass. Strict = bar + beat heads enforced. Moderate = bar heads only.
+enum class NctTolerance : uint8_t {
+  Strict,    ///< Bar heads + beat heads must be consonant with bass.
+  Moderate,  ///< Bar heads must be consonant; beat heads prefer chord tones.
+};
+
+/// @brief Ensure a candidate pitch forms a consonant interval with the
+///        sounding ground bass pitch.
+///
+/// When on a strong beat, checks the vertical interval between the candidate
+/// and the bass. If dissonant, searches nearby scale tones (within the voice
+/// range) for a consonant alternative. The search tries small adjustments
+/// first (+/-1, +/-2 semitones) to preserve melodic flow.
+///
+/// On weak beats or when no bass is sounding, returns the candidate unchanged.
+///
+/// @param candidate Current candidate pitch for the upper voice.
+/// @param tick Current tick position.
+/// @param event Current harmonic event (provides bass_pitch).
+/// @param tolerance NCT tolerance level for this variation type.
+/// @param scale_tones Available scale tones in the voice range.
+/// @param tone_idx Current index into scale_tones (updated if pitch changes).
+/// @param low_pitch Voice range lower bound.
+/// @param high_pitch Voice range upper bound.
+/// @return Adjusted pitch that is consonant with bass, or original if already
+///         consonant, no bass is sounding, or no adjustment found.
+uint8_t enforceStrongBeatBassConsonance(uint8_t candidate, Tick tick,
+                                         const HarmonicEvent& event,
+                                         NctTolerance tolerance,
+                                         const std::vector<uint8_t>& scale_tones,
+                                         size_t& tone_idx,
+                                         uint8_t low_pitch, uint8_t high_pitch) {
+  // No bass pitch available — nothing to check against.
+  if (event.bass_pitch == 0) return candidate;
+
+  // Determine if this tick requires consonance enforcement.
+  bool is_bar_head = (tick % kTicksPerBar == 0);
+  bool is_beat_head = (tick % kTicksPerBeat == 0);
+
+  bool must_enforce = false;
+  if (tolerance == NctTolerance::Strict) {
+    must_enforce = is_bar_head || is_beat_head;
+  } else {
+    // Moderate: enforce on bar heads; beat heads only get a soft preference
+    // which is already handled by chord-tone snapping in the caller.
+    must_enforce = is_bar_head;
+  }
+
+  if (!must_enforce) return candidate;
+
+  // Check current interval with bass.
+  int interval_to_bass = std::abs(static_cast<int>(candidate) -
+                                  static_cast<int>(event.bass_pitch));
+  if (interval_util::isConsonance(interval_to_bass)) return candidate;
+
+  // Dissonant with bass on a strong beat — find the nearest consonant scale tone.
+  // Search outward from current position in scale_tones array.
+  size_t best_idx = tone_idx;
+  int best_distance = 999;
+  bool found = false;
+
+  for (int offset : {1, -1, 2, -2, 3, -3, 4, -4}) {
+    int idx = static_cast<int>(tone_idx) + offset;
+    if (idx < 0 || idx >= static_cast<int>(scale_tones.size())) continue;
+    uint8_t cand = scale_tones[idx];
+    if (cand < low_pitch || cand > high_pitch) continue;
+
+    int bass_interval = std::abs(static_cast<int>(cand) -
+                                 static_cast<int>(event.bass_pitch));
+    if (!interval_util::isConsonance(bass_interval)) continue;
+
+    // Prefer minimal movement from the original candidate.
+    int melodic_dist = std::abs(static_cast<int>(cand) -
+                                static_cast<int>(candidate));
+    if (melodic_dist < best_distance) {
+      best_distance = melodic_dist;
+      best_idx = static_cast<size_t>(idx);
+      found = true;
+    }
+  }
+
+  if (found) {
+    tone_idx = best_idx;
+    return scale_tones[best_idx];
+  }
+
+  // Fallback: try direct semitone search (not restricted to scale_tones array
+  // positions, but still must be a scale tone in range).
+  for (int delta : {1, -1, 2, -2, 3, -3, 4, -4}) {
+    int adjusted = static_cast<int>(candidate) + delta;
+    if (adjusted < static_cast<int>(low_pitch) ||
+        adjusted > static_cast<int>(high_pitch)) {
+      continue;
+    }
+    uint8_t adj_pitch = static_cast<uint8_t>(adjusted);
+
+    int bass_interval = std::abs(adjusted - static_cast<int>(event.bass_pitch));
+    if (!interval_util::isConsonance(bass_interval)) continue;
+
+    // Verify it is a scale tone by checking against the scale_tones vector.
+    bool in_scale = false;
+    size_t closest_idx = tone_idx;
+    int closest_dist = 999;
+    for (size_t idx = 0; idx < scale_tones.size(); ++idx) {
+      if (scale_tones[idx] == adj_pitch) {
+        in_scale = true;
+        closest_idx = idx;
+        break;
+      }
+      int dist = std::abs(static_cast<int>(scale_tones[idx]) -
+                          static_cast<int>(adj_pitch));
+      if (dist < closest_dist) {
+        closest_dist = dist;
+        closest_idx = idx;
+      }
+    }
+    if (in_scale) {
+      tone_idx = closest_idx;
+      return adj_pitch;
+    }
+  }
+
+  return candidate;  // No consonant alternative found — keep original.
+}
+
+/// @brief Variant of bass consonance enforcement for arpeggio-based generators
+///        that use chord-tone arrays instead of scale-tone arrays.
+///
+/// @param candidate Current candidate pitch.
+/// @param tick Current tick position.
+/// @param event Current harmonic event.
+/// @param arp_pitches Available arpeggio pitches.
+/// @param arp_idx Current index into arp_pitches (updated if pitch changes).
+/// @return Adjusted pitch consonant with bass, or original.
+uint8_t enforceArpeggioBassConsonance(uint8_t candidate, Tick tick,
+                                       const HarmonicEvent& event,
+                                       const std::vector<uint8_t>& arp_pitches,
+                                       size_t& arp_idx) {
+  if (event.bass_pitch == 0) return candidate;
+  if (tick % kTicksPerBar != 0) return candidate;  // Arpeggios: bar heads only.
+
+  int interval_to_bass = std::abs(static_cast<int>(candidate) -
+                                  static_cast<int>(event.bass_pitch));
+  if (interval_util::isConsonance(interval_to_bass)) return candidate;
+
+  // Search arpeggio pitches for consonant alternative.
+  size_t best_idx = arp_idx;
+  int best_distance = 999;
+  bool found = false;
+
+  for (size_t idx = 0; idx < arp_pitches.size(); ++idx) {
+    int bass_interval = std::abs(static_cast<int>(arp_pitches[idx]) -
+                                 static_cast<int>(event.bass_pitch));
+    if (!interval_util::isConsonance(bass_interval)) continue;
+
+    int melodic_dist = std::abs(static_cast<int>(arp_pitches[idx]) -
+                                static_cast<int>(candidate));
+    if (melodic_dist < best_distance) {
+      best_distance = melodic_dist;
+      best_idx = idx;
+      found = true;
+    }
+  }
+
+  if (found) {
+    arp_idx = best_idx;
+    return arp_pitches[best_idx];
+  }
+
+  return candidate;
+}
+
+// ---------------------------------------------------------------------------
+// Vocabulary injection helper
+// ---------------------------------------------------------------------------
+
+/// @brief Try vocabulary figure injection and return next pitch if successful.
+///
+/// Calls tryInjectFigure() with the current melodic state, then scores the
+/// first target pitch against the existing melodic scoring system.
+/// Returns 0 if injection fails, the figure is too short, or the candidate
+/// scores below a minimum threshold.
+///
+/// @param mel_state Current melodic state for phrase progress.
+/// @param prev_pitch Previous MIDI pitch.
+/// @param key Current musical key.
+/// @param is_minor True if minor mode.
+/// @param tick Current tick position.
+/// @param low_pitch Voice range lower bound.
+/// @param high_pitch Voice range upper bound.
+/// @param rng Random number generator.
+/// @param inject_prob Base injection probability.
+/// @return Target pitch from vocabulary figure, or 0 if not adopted.
+uint8_t tryVocabularyNote(const MelodicState& mel_state,
+                          uint8_t prev_pitch, Key key, bool is_minor,
+                          Tick tick, uint8_t low_pitch, uint8_t high_pitch,
+                          std::mt19937& rng, float inject_prob) {
+  ScaleType scale = is_minor ? ScaleType::HarmonicMinor : ScaleType::Major;
+  auto candidate = tryInjectFigure(mel_state, prev_pitch, key, scale, tick,
+                                   low_pitch, high_pitch, rng, inject_prob);
+  if (!candidate.has_value() || candidate->pitches.size() < 2) return 0;
+
+  // Score the first target pitch using existing scoring.
+  uint8_t target = candidate->pitches[1];  // First note after current.
+  bool is_chord_tone = true;  // Approximation: figure patterns are mostly scale tones.
+  float score = scoreCandidatePitch(mel_state, prev_pitch, target, tick,
+                                    is_chord_tone);
+  // Minimum score threshold: reject if melodically very poor.
+  if (score < -0.12f) return 0;
+
+  return target;
+}
+
+// ---------------------------------------------------------------------------
 // Variation stage generators
 // ---------------------------------------------------------------------------
 
@@ -385,6 +606,7 @@ std::vector<NoteEvent> generateEstablishVariation(Tick start_tick, int bars,
 
   // Voice dynamics model for direction persistence and interval distribution.
   MelodicState mel_state;
+  mel_state.contour = {PhraseContour::Arch, 0.40f, 0.25f};
   uint8_t pending_resolution = 0;  // Non-zero: bias next note toward this pitch.
 
   // Initial scale tones for stepwise motion.
@@ -482,6 +704,23 @@ std::vector<NoteEvent> generateEstablishVariation(Tick start_tick, int bars,
     }
 
     uint8_t candidate = scale_tones[tone_idx];
+
+    // Vocabulary injection attempt (Establish: conservative 0.15).
+    if (has_prev && prev_pitch > 0) {
+      uint8_t vocab_pitch = tryVocabularyNote(
+          mel_state, prev_pitch, event.key, event.is_minor,
+          current_tick, low_pitch, high_pitch, rng, 0.15f);
+      if (vocab_pitch > 0) {
+        candidate = vocab_pitch;
+        tone_idx = findClosestToneIndex(scale_tones, candidate);
+      }
+    }
+
+    // Strong-beat bass consonance: Establish uses strict tolerance
+    // (bar heads + beat heads must be consonant with ground bass).
+    candidate = enforceStrongBeatBassConsonance(
+        candidate, current_tick, event, NctTolerance::Strict,
+        scale_tones, tone_idx, low_pitch, high_pitch);
 
     // 2-consecutive repetition guard.
     if (has_prev && candidate == prev_pitch) {
@@ -583,6 +822,7 @@ std::vector<NoteEvent> generateDevelopEarlyVariation(Tick start_tick, int bars,
 
   // Voice dynamics model for direction persistence and interval distribution.
   MelodicState mel_state;
+  mel_state.contour = {PhraseContour::Arch, 0.33f, 0.25f};
   uint8_t pending_resolution = 0;
 
   // Initial scale tones for starting position.
@@ -641,6 +881,23 @@ std::vector<NoteEvent> generateDevelopEarlyVariation(Tick start_tick, int bars,
         pending_resolution = 0;
       }
     }
+
+    // Vocabulary injection attempt (DevelopEarly: moderate 0.25).
+    if (pending_resolution == 0 && has_prev && prev_pitch > 0) {
+      uint8_t vocab_pitch = tryVocabularyNote(
+          mel_state, prev_pitch, event.key, event.is_minor,
+          current_tick, low_pitch, high_pitch, rng, 0.25f);
+      if (vocab_pitch > 0) {
+        candidate = vocab_pitch;
+        tone_idx = findClosestToneIndex(scale_tones, candidate);
+      }
+    }
+
+    // Strong-beat bass consonance: DevelopEarly uses moderate tolerance
+    // (bar heads enforced, beat heads handled by existing chord-tone preference).
+    candidate = enforceStrongBeatBassConsonance(
+        candidate, current_tick, event, NctTolerance::Moderate,
+        scale_tones, tone_idx, low_pitch, high_pitch);
 
     // 2-consecutive repetition guard with direction-based search.
     if (has_prev && candidate == prev_pitch) {
@@ -742,6 +999,7 @@ std::vector<NoteEvent> generateDevelopLateVariation(Tick start_tick, int bars,
 
   // Voice dynamics model for direction persistence.
   MelodicState mel_state;
+  mel_state.contour = {PhraseContour::Wave, 0.4f, 0.25f};
   uint8_t pending_resolution = 0;
 
   // Build initial arpeggio pitches and initialize traversal state ONCE.
@@ -814,6 +1072,22 @@ std::vector<NoteEvent> generateDevelopLateVariation(Tick start_tick, int bars,
           pending_resolution = 0;
         }
       }
+
+      // Vocabulary injection attempt (DevelopLate: elevated 0.30).
+      if (pending_resolution == 0 && has_prev && prev_pitch > 0) {
+        uint8_t vocab_pitch = tryVocabularyNote(
+            mel_state, prev_pitch, event.key, event.is_minor,
+            current_tick, low_pitch, high_pitch, rng, 0.30f);
+        if (vocab_pitch > 0) {
+          candidate = vocab_pitch;
+          arp_idx = findClosestToneIndex(arp_pitches, candidate);
+        }
+      }
+
+      // Strong-beat bass consonance: DevelopLate uses arpeggio enforcement
+      // (bar heads must be consonant with ground bass).
+      candidate = enforceArpeggioBassConsonance(
+          candidate, current_tick, event, arp_pitches, arp_idx);
 
       // 2-consecutive repetition guard for arpeggio.
       if (has_prev && candidate == prev_pitch) {
@@ -930,6 +1204,7 @@ std::vector<NoteEvent> generateAccumulateVariation(Tick start_tick, int bars,
 
   // Voice dynamics model for direction persistence and interval distribution.
   MelodicState mel_state;
+  mel_state.contour = {PhraseContour::Arch, 0.66f, 0.25f};
   uint8_t pending_resolution = 0;
 
   // Initial scale tones for starting position.
@@ -987,6 +1262,24 @@ std::vector<NoteEvent> generateAccumulateVariation(Tick start_tick, int bars,
         pending_resolution = 0;
       }
     }
+
+    // Vocabulary injection attempt (Accumulate: aggressive 0.35).
+    if (pending_resolution == 0 && has_prev && prev_pitch > 0) {
+      uint8_t vocab_pitch = tryVocabularyNote(
+          mel_state, prev_pitch, event.key, event.is_minor,
+          current_tick, low_pitch, high_pitch, rng, 0.35f);
+      if (vocab_pitch > 0) {
+        candidate = vocab_pitch;
+        tone_idx = findClosestToneIndex(scale_tones, candidate);
+      }
+    }
+
+    // Strong-beat bass consonance: Accumulate uses moderate tolerance
+    // (bar heads enforced; sixteenth-note density makes beat-level
+    // enforcement too restrictive for melodic flow).
+    candidate = enforceStrongBeatBassConsonance(
+        candidate, current_tick, event, NctTolerance::Moderate,
+        scale_tones, tone_idx, low_pitch, high_pitch);
 
     // 2-consecutive repetition guard with direction-based search.
     if (has_prev && candidate == prev_pitch) {
@@ -1091,6 +1384,7 @@ std::vector<NoteEvent> generateResolveVariation(Tick start_tick, int bars,
   Tick current_tick = start_tick;
 
   MelodicState mel_state;
+  mel_state.contour = {PhraseContour::Descent, 0.4f, 0.20f};
 
   const HarmonicEvent& first_event = timeline.getAt(start_tick);
   auto scale_tones = getScaleTones(first_event.key, first_event.is_minor,
@@ -1140,6 +1434,23 @@ std::vector<NoteEvent> generateResolveVariation(Tick start_tick, int bars,
     }
 
     uint8_t candidate = scale_tones[tone_idx];
+
+    // Vocabulary injection attempt (Resolve: conservative 0.15).
+    if (has_prev && prev_pitch > 0) {
+      uint8_t vocab_pitch = tryVocabularyNote(
+          mel_state, prev_pitch, event.key, event.is_minor,
+          current_tick, low_pitch, high_pitch, rng, 0.15f);
+      if (vocab_pitch > 0) {
+        candidate = vocab_pitch;
+        tone_idx = findClosestToneIndex(scale_tones, candidate);
+      }
+    }
+
+    // Strong-beat bass consonance: Resolve uses strict tolerance
+    // (broad rhythms — every bar and beat head must be consonant with bass).
+    candidate = enforceStrongBeatBassConsonance(
+        candidate, current_tick, event, NctTolerance::Strict,
+        scale_tones, tone_idx, low_pitch, high_pitch);
 
     // 2-consecutive repetition guard.
     if (has_prev && candidate == prev_pitch) {
@@ -1373,11 +1684,11 @@ std::vector<NoteEvent> generateVariationNotes(int variation_idx,
 ///        variation, creating a density arch across the passacaglia.
 ///
 /// The density arch follows the 5-stage structure:
-///   - Establish (vars 0-2):    2 active upper voices (thin, expository)
-///   - Develop Early (vars 3-5): gradual build to 3 upper voices
+///   - Establish (vars 0-2):    1-2 active upper voices (thin, expository)
+///   - Develop Early (vars 3-5): gradual build to 2-3 upper voices
 ///   - Develop Late (vars 6-8):  3 upper voices (full development)
 ///   - Accumulate (vars 9-N-2):  all upper voices active (climactic density)
-///   - Resolve (final 1-2):      reduce to 2-3 upper voices (denouement)
+///   - Resolve (final 1-2):      reduce to 1-2 upper voices (denouement)
 ///
 /// When total_upper_voices is 2 (3-voice passacaglia), the arch is flattened
 /// since there are not enough voices to thin.
@@ -1388,28 +1699,31 @@ std::vector<NoteEvent> generateVariationNotes(int variation_idx,
 /// @return Target number of active upper voices for this variation.
 uint8_t getTargetActiveUpperVoices(int variation_idx, int num_variations,
                                    uint8_t total_upper_voices) {
-  // With only 2 upper voices, arch is not meaningful.
-  if (total_upper_voices <= 2) return total_upper_voices;
+  // With only 1 upper voice, arch is not meaningful.
+  if (total_upper_voices <= 1) return total_upper_voices;
 
   // Resolve stage: final 1-2 variations.
   if (num_variations >= 6 && variation_idx >= num_variations - 2) {
-    // Penultimate variation: 3 voices (gradual reduction).
-    // Final variation: 2 voices (thin conclusion).
+    // Final variation: 1 voice (thin conclusion — bass + soprano only).
     if (variation_idx == num_variations - 1) {
-      return 2;
+      return 1;
     }
-    return std::min(total_upper_voices, static_cast<uint8_t>(3));
+    // Penultimate variation: 2 voices (gradual reduction).
+    return std::min(total_upper_voices, static_cast<uint8_t>(2));
   }
 
   // Establish stage: first 3 variations.
   if (variation_idx < 3) {
-    return 2;
+    // Var 0: solo soprano over bass (expose theme).
+    if (variation_idx == 0) return 1;
+    // Vars 1-2: 2 upper voices.
+    return std::min(total_upper_voices, static_cast<uint8_t>(2));
   }
 
   // Develop Early: gradual build.
   if (variation_idx < 6) {
-    // Var 3: 2 voices; Vars 4-5: 3 voices.
-    if (variation_idx == 3) return 2;
+    // Var 3: 2 voices; Vars 4-5: build to 3 if available.
+    if (variation_idx == 3) return std::min(total_upper_voices, static_cast<uint8_t>(2));
     return std::min(total_upper_voices, static_cast<uint8_t>(3));
   }
 
@@ -1420,6 +1734,132 @@ uint8_t getTargetActiveUpperVoices(int variation_idx, int num_variations,
 
   // Accumulate: all voices active (climactic density).
   return total_upper_voices;
+}
+
+/// @brief Density level controlling within-voice note thinning.
+///
+/// Determines how aggressively notes within a voice are thinned to create
+/// texture variation. Used in conjunction with thinVoiceNotes().
+enum class VoiceDensityLevel : uint8_t {
+  Full,          ///< No thinning — all generated notes kept.
+  ModerateEven,  ///< Thin even-numbered bars (0, 2, 4...), keep odd bars.
+  ModerateOdd,   ///< Thin odd-numbered bars (1, 3, 5...), keep even bars.
+  Sparse,        ///< Active only on phrase boundaries (first 2 + last 2 bars).
+};
+
+/// @brief Get the density level for a specific voice within a variation.
+///
+/// Controls within-voice note thinning to create texture variation matching
+/// the BWV 578 reference distribution (9% 1-voice, 24% 2-voice, 56% 3-voice,
+/// 11% 4-voice). The dominant texture should be 3-voice, achieved by:
+///   - Soprano thinned (Sparse) in var 0 to create 1-voice bass-only sections.
+///   - Non-soprano voices thinned (Moderate) in most stages.
+///   - Full density only in Accumulate (climax) stage.
+///   - Develop Late: highest voice gets Moderate thinning to favor 3-voice.
+///
+/// @param voice_idx Voice index within the active voices.
+/// @param target_active Total number of active upper voices this variation.
+/// @param variation_idx Zero-based variation index.
+/// @param num_variations Total number of variations.
+/// @return VoiceDensityLevel for this voice in this variation.
+VoiceDensityLevel getVoiceDensityLevel(uint8_t voice_idx, uint8_t target_active,
+                                        int variation_idx, int num_variations) {
+  // Resolve stage: thin all non-soprano voices aggressively.
+  if (num_variations >= 6 && variation_idx >= num_variations - 2) {
+    if (voice_idx == 0) return VoiceDensityLevel::ModerateEven;
+    if (voice_idx >= 2) return VoiceDensityLevel::Sparse;
+    return VoiceDensityLevel::ModerateOdd;
+  }
+
+  // Establish stage (vars 0-2):
+  //   - Var 0: soprano gets Sparse (creates bass-only = 1-voice periods).
+  //   - Vars 1-2: soprano full, second voice moderate.
+  if (variation_idx < 3) {
+    if (voice_idx == 0) {
+      return (variation_idx == 0) ? VoiceDensityLevel::Sparse
+                                  : VoiceDensityLevel::Full;
+    }
+    return VoiceDensityLevel::ModerateEven;
+  }
+
+  // Develop Early (vars 3-5): last active voice gets moderate thinning.
+  if (variation_idx < 6) {
+    if (voice_idx == 0) return VoiceDensityLevel::Full;
+    if (voice_idx == target_active - 1 && target_active >= 2) {
+      return VoiceDensityLevel::ModerateEven;
+    }
+    return VoiceDensityLevel::Full;
+  }
+
+  // Develop Late (vars 6-8): stagger thinning across voices so at most
+  // one non-soprano voice rests per bar, keeping 3-voice as dominant texture.
+  // Voice 1 (alto) thins even bars, voice 2 (tenor) thins odd bars.
+  if (variation_idx < 9) {
+    if (voice_idx == 0) return VoiceDensityLevel::Full;
+    if (voice_idx % 2 == 1) return VoiceDensityLevel::ModerateEven;
+    return VoiceDensityLevel::ModerateOdd;
+  }
+
+  // Accumulate: full density for climactic intensity.
+  return VoiceDensityLevel::Full;
+}
+
+/// @brief Thin generated voice notes according to a density level.
+///
+/// Removes notes from specific bar positions to create texture variation:
+///   - Full: no changes.
+///   - ModerateEven: remove notes in even-numbered bars (0, 2, 4...).
+///   - ModerateOdd: remove notes in odd-numbered bars (1, 3, 5...).
+///   - Sparse: keep only notes in the first 2 bars and last 2 bars.
+///
+/// The ModerateEven/ModerateOdd split allows staggering across voices so
+/// that different voices rest on different bars, maintaining 3-voice texture
+/// as the dominant density.
+///
+/// Ground bass notes (Immutable) are never thinned.
+///
+/// @param notes The generated notes for one voice in one variation.
+/// @param level Density level to apply.
+/// @param var_start Start tick of this variation.
+/// @param bars Number of bars per variation.
+/// @return Thinned note vector.
+std::vector<NoteEvent> thinVoiceNotes(const std::vector<NoteEvent>& notes,
+                                       VoiceDensityLevel level,
+                                       Tick var_start, int bars) {
+  if (level == VoiceDensityLevel::Full) return notes;
+  if (notes.empty()) return notes;
+
+  std::vector<NoteEvent> result;
+  result.reserve(notes.size());
+
+  for (const auto& note : notes) {
+    // Never thin immutable notes.
+    if (note.source == BachNoteSource::GroundBass ||
+        note.source == BachNoteSource::CantusFixed) {
+      result.push_back(note);
+      continue;
+    }
+
+    // Determine which bar within the variation this note falls in.
+    int bar_in_var = static_cast<int>((note.start_tick - var_start) / kTicksPerBar);
+
+    if (level == VoiceDensityLevel::ModerateEven) {
+      // Remove even-numbered bars: rest / active / rest / active / ...
+      if (bar_in_var % 2 == 0) continue;
+    } else if (level == VoiceDensityLevel::ModerateOdd) {
+      // Remove odd-numbered bars: active / rest / active / rest / ...
+      if (bar_in_var % 2 == 1) continue;
+    } else if (level == VoiceDensityLevel::Sparse) {
+      // Keep only first 2 bars and last 2 bars.
+      bool in_opening = (bar_in_var < 2);
+      bool in_closing = (bar_in_var >= bars - 2);
+      if (!in_opening && !in_closing) continue;
+    }
+
+    result.push_back(note);
+  }
+
+  return result;
 }
 
 /// @brief Clamp voice count to valid range [3, 5].
@@ -1612,8 +2052,8 @@ PassacagliaResult generatePassacaglia(const PassacagliaConfig& config) {
 
     // Generate upper voices through createBachNote for vertical coordination.
     // Only generate notes for voices within the target active count.
-    // Voice 0 (soprano) and voice 1 (alto) are always active; higher-numbered
-    // upper voices are added as the density arch permits.
+    // Voice 0 (soprano) is always active; higher-numbered upper voices are
+    // added and thinned as the density arch permits.
     for (uint8_t voice_idx = 0; voice_idx < num_voices - 1; ++voice_idx) {
       // Skip this voice if it exceeds the target active count.
       if (voice_idx >= target_active) continue;
@@ -1621,6 +2061,12 @@ PassacagliaResult generatePassacaglia(const PassacagliaConfig& config) {
       auto raw_notes = generateVariationNotes(
           var_idx, config.num_variations, var_start, config.ground_bass_bars,
           voice_idx, timeline, rng);
+
+      // Apply within-voice density thinning based on variation stage.
+      VoiceDensityLevel density_level = getVoiceDensityLevel(
+          voice_idx, target_active, var_idx, config.num_variations);
+      raw_notes = thinVoiceNotes(raw_notes, density_level, var_start,
+                                 config.ground_bass_bars);
 
       uint8_t prev_pitch = 0;
       for (const auto& note : raw_notes) {
@@ -1711,14 +2157,14 @@ PassacagliaResult generatePassacaglia(const PassacagliaConfig& config) {
       resolveLeaps(validated, lr_params);
 
       // Second parallel-perfect repair pass: fix parallels introduced by leap resolution.
-      // Outer voices only, max 1 iteration, minimal movement (|delta| <= 2).
+      // Conservative safety net (max 2 iterations) -- primary defense is at generation time.
       {
         ParallelRepairParams pp_params;
         pp_params.num_voices = num_voices;
         pp_params.scale = config.key.is_minor ? ScaleType::HarmonicMinor : ScaleType::Major;
         pp_params.key_at_tick = lr_params.key_at_tick;
         pp_params.voice_range_static = lr_params.voice_range_static;
-        pp_params.max_iterations = 3;  // Strengthened for parallel repair
+        pp_params.max_iterations = 2;
         repairParallelPerfect(validated, pp_params);
       }
     }
@@ -1901,6 +2347,53 @@ PassacagliaResult generatePassacaglia(const PassacagliaConfig& config) {
       }
     }
     form_utils::sortTrackNotes(tracks);
+  }
+
+  // Post-sort repeated-note repair: Sparse thinning can create cross-gap
+  // triples where bars 0-1 end with pitch P and bars 6-7 resume with pitch P.
+  // After thinning removes bars 2-5, these become consecutive in track output.
+  // Use an extended gap threshold spanning a full variation to catch these.
+  {
+    Tick var_dur = static_cast<Tick>(config.ground_bass_bars) * kTicksPerBar;
+    std::vector<NoteEvent> all_notes;
+    for (const auto& track : tracks) {
+      all_notes.insert(all_notes.end(), track.notes.begin(), track.notes.end());
+    }
+
+    RepeatedNoteRepairParams gap_repair;
+    gap_repair.max_consecutive = 2;
+    gap_repair.num_voices = num_voices;
+    gap_repair.run_gap_threshold = var_dur;  // Cover full variation gaps.
+    gap_repair.key_at_tick = [&](Tick) { return config.key.tonic; };
+    gap_repair.scale_at_tick = [&](Tick tick) {
+      if (config.enable_picardy && config.key.is_minor &&
+          tick >= total_duration - kTicksPerBar) {
+        return ScaleType::Major;
+      }
+      return config.key.is_minor ? ScaleType::HarmonicMinor : ScaleType::Major;
+    };
+    gap_repair.voice_range = [&](uint8_t v) -> std::pair<uint8_t, uint8_t> {
+      return {getVoiceLowPitch(v), getVoiceHighPitch(v)};
+    };
+
+    bool any_modified = false;
+    for (int pass = 0; pass < 3; ++pass) {
+      int modified = repairRepeatedNotes(all_notes, gap_repair);
+      if (modified == 0) break;
+      any_modified = true;
+    }
+
+    if (any_modified) {
+      for (auto& track : tracks) {
+        track.notes.clear();
+      }
+      for (auto& note : all_notes) {
+        if (note.voice < num_voices) {
+          tracks[note.voice].notes.push_back(std::move(note));
+        }
+      }
+      form_utils::sortTrackNotes(tracks);
+    }
   }
 
   result.tracks = std::move(tracks);

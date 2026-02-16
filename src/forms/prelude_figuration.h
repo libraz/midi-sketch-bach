@@ -92,7 +92,7 @@ std::vector<NoteEvent> applyFiguration(const ChordVoicing& voicing,
                                        const HarmonicEvent& event,
                                        VoiceRangeFn voice_range);
 
-/// @brief Apply figuration with section-aware NCT direction bias.
+/// @brief Apply figuration with section-aware NCT direction bias and inter-beat melodic memory.
 ///
 /// Identical to the base overload but biases non-chord-tone directions based
 /// on position within the piece:
@@ -100,19 +100,28 @@ std::vector<NoteEvent> applyFiguration(const ChordVoicing& voicing,
 ///   - Middle (0.15-0.85): balanced upper/lower neighbors (original direction).
 ///   - Closing (0.85-1.0): prefer downward resolution for passing and neighbor tones.
 ///
+/// When prev_beat_soprano is non-zero, soprano notes at beat start are adjusted
+/// for melodic continuity:
+///   - Same-note penalty: if soprano repeats the previous beat's soprano, the
+///     scale_offset direction is reversed to create melodic motion.
+///   - Large-leap mitigation: if the soprano interval exceeds 7 semitones, the
+///     opposite offset direction is tried to find a closer alternative.
+///
 /// @param voicing The chord voicing to figurate.
 /// @param tmpl The figuration template.
 /// @param beat_start_tick Absolute tick of the beat start.
 /// @param event Harmonic event (for key/scale context).
 /// @param voice_range Voice range function for pitch clamping.
 /// @param section_progress Progress within piece (0.0=start, 1.0=end).
+/// @param prev_beat_soprano Soprano pitch from the previous beat (0=none/first beat).
 /// @return Vector of NoteEvents with source=PreludeFiguration.
 std::vector<NoteEvent> applyFiguration(const ChordVoicing& voicing,
                                        const FigurationTemplate& tmpl,
                                        Tick beat_start_tick,
                                        const HarmonicEvent& event,
                                        VoiceRangeFn voice_range,
-                                       float section_progress);
+                                       float section_progress,
+                                       uint8_t prev_beat_soprano = 0);
 
 /// @brief Inject passing and neighbor tones into figuration output.
 ///
@@ -139,6 +148,10 @@ std::vector<NoteEvent> applyFiguration(const ChordVoicing& voicing,
 ///        with an NCT (0.0 = never, 1.0 = always). Recommended: 0.35-0.50.
 /// @param section_progress Progress within piece (0.0=start, 1.0=end).
 ///        Biases neighbor direction: opening/closing prefer lower, middle balanced.
+/// @param prev_beat_last Last pitch from the previous beat (0=none/first beat).
+///        When non-zero and the first note has no in-beat predecessor, this pitch
+///        is used as the "previous pitch" for passing tone computation and biases
+///        the neighbor tone direction toward it.
 void injectNonChordTones(std::vector<NoteEvent>& notes,
                          const FigurationTemplate& tmpl,
                          Tick beat_start_tick,
@@ -146,7 +159,8 @@ void injectNonChordTones(std::vector<NoteEvent>& notes,
                          VoiceRangeFn voice_range,
                          std::mt19937& rng,
                          float nct_probability = 0.40f,
-                         float section_progress = 0.5f);
+                         float section_progress = 0.5f,
+                         uint8_t prev_beat_last = 0);
 
 }  // namespace bach
 

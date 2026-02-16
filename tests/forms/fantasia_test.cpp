@@ -260,30 +260,50 @@ TEST(FantasiaTest, Voice1HasLongerNotes) {
       << (ratio * 100.0f) << "%";
 }
 
-TEST(FantasiaTest, PedalHasWholeNotes) {
+TEST(FantasiaTest, PedalHasSectionAwareRhythm) {
   FantasiaConfig config = makeTestConfig();
   FantasiaResult result = generateFantasia(config);
 
   ASSERT_TRUE(result.success);
   ASSERT_GE(result.tracks.size(), 4u);
 
-  // Voice 3 (Pedal) uses whole notes exclusively.
+  // Voice 3 (Pedal) uses section-texture-aware durations:
+  // - Passage sections: half notes (960 ticks) for rhythmic motion
+  // - Chordal/Cadential sections: whole notes (1920 ticks) for stability
+  // Expect a mix of half and whole notes, with all notes at least half note.
   const auto& pedal_notes = result.tracks[3].notes;
   ASSERT_GT(pedal_notes.size(), 0u);
 
-  constexpr Tick kMinPedalDuration = kTicksPerBeat * 4;  // Whole note = 1920.
+  constexpr Tick kHalfNoteDur = kTicksPerBeat * 2;   // 960
+  constexpr Tick kWholeNoteDur = kTicksPerBeat * 4;   // 1920
+  int half_note_count = 0;
   int whole_note_count = 0;
+  int short_note_count = 0;
   for (const auto& note : pedal_notes) {
-    if (note.duration >= kMinPedalDuration) {
+    if (note.duration >= kWholeNoteDur) {
       ++whole_note_count;
+    } else if (note.duration >= kHalfNoteDur) {
+      ++half_note_count;
+    } else {
+      ++short_note_count;
     }
   }
-  // Most pedal notes should be whole notes; only boundary truncation allowed.
-  float ratio = static_cast<float>(whole_note_count) /
-                static_cast<float>(pedal_notes.size());
-  EXPECT_GE(ratio, 0.70f)
-      << "Expected >= 70% of pedal notes to be whole notes, got "
-      << (ratio * 100.0f) << "%";
+
+  int total = static_cast<int>(pedal_notes.size());
+
+  // All notes should be at least half note duration (no 8th/quarter notes).
+  float long_ratio = static_cast<float>(half_note_count + whole_note_count) /
+                     static_cast<float>(total);
+  EXPECT_GE(long_ratio, 0.80f)
+      << "Expected >= 80% of pedal notes to be at least half notes, got "
+      << (long_ratio * 100.0f) << "% (short: " << short_note_count << ")";
+
+  // Expect both half and whole notes present for rhythm diversity.
+  // Passage sections produce half notes, chordal/cadential produce whole.
+  EXPECT_GT(half_note_count, 0)
+      << "Expected some half notes in pedal (passage sections)";
+  EXPECT_GT(whole_note_count, 0)
+      << "Expected some whole notes in pedal (chordal/cadential sections)";
 }
 
 TEST(FantasiaTest, Voice2HasMixedRhythm) {

@@ -302,7 +302,8 @@ std::vector<NoteEvent> applyFiguration(const ChordVoicing& voicing,
                                        Tick beat_start_tick,
                                        const HarmonicEvent& event,
                                        VoiceRangeFn voice_range,
-                                       float section_progress) {
+                                       float section_progress,
+                                       uint8_t prev_beat_soprano) {
   std::vector<NoteEvent> notes;
   notes.reserve(tmpl.steps.size());
 
@@ -340,6 +341,39 @@ std::vector<NoteEvent> applyFiguration(const ChordVoicing& voicing,
         int approach = static_cast<int>(pitch) - prev_pitch;
         if (std::abs(approach) > 4) {
           pitch = base_pitch;  // Fallback to chord tone.
+        }
+      }
+    }
+
+    // Inter-beat melodic memory: soprano proximity adjustment at beat start.
+    // When prev_beat_soprano is known and this is a soprano step at the beat
+    // boundary, adjust the pitch to avoid same-note repetition and large leaps.
+    if (prev_beat_soprano > 0 && vid == 0 && step.relative_tick == 0) {
+      // Same-note penalty: if the soprano repeats the previous beat's soprano
+      // and the template has a non-zero scale_offset, try the opposite direction
+      // to create melodic motion instead of a static repetition.
+      if (pitch == prev_beat_soprano && step.scale_offset != 0) {
+        int8_t alt_offset = static_cast<int8_t>(-step.scale_offset);
+        uint8_t alt_pitch = resolveScaleOffset(base_pitch, alt_offset, event,
+                                               v_low, v_high);
+        if (alt_pitch != prev_beat_soprano) {
+          pitch = alt_pitch;
+        }
+      }
+
+      // Large-leap mitigation: if the interval from prev soprano exceeds 7
+      // semitones, try the opposite offset direction for a closer alternative.
+      constexpr int kMaxSopranoLeap = 7;
+      int soprano_interval = std::abs(static_cast<int>(pitch) -
+                                      static_cast<int>(prev_beat_soprano));
+      if (soprano_interval > kMaxSopranoLeap && step.scale_offset != 0) {
+        int8_t alt_offset = static_cast<int8_t>(-step.scale_offset);
+        uint8_t alt_pitch = resolveScaleOffset(base_pitch, alt_offset, event,
+                                               v_low, v_high);
+        int alt_interval = std::abs(static_cast<int>(alt_pitch) -
+                                    static_cast<int>(prev_beat_soprano));
+        if (alt_interval < soprano_interval) {
+          pitch = alt_pitch;
         }
       }
     }
@@ -446,6 +480,81 @@ bool isWeakSubBeat(Tick note_tick, Tick beat_start) {
   return (sub_beat == 1 || sub_beat == 3);
 }
 
+/// @brief Check whether a note is eligible for NCT injection.
+///
+/// All non-beat-start positions are eligible: sub-beats 1, 2, and 3.
+/// Position 2 (eighth-note midpoint) is metrically weaker than the beat
+/// start and serves as a valid NCT site, especially for BrokenChord
+/// patterns where the soprano enters at the second eighth.
+///
+/// @param note_tick Absolute tick of the note.
+/// @param beat_start Absolute tick of the beat start.
+/// @return True if the note falls on any non-beat-start position.
+bool isNCTEligiblePosition(Tick note_tick, Tick beat_start) {
+  // Any position after the beat start is eligible.
+  return note_tick > beat_start;
+}
+
+/// @brief Validate passing tone same-direction constraint.
+///
+/// A true passing tone requires stepwise approach and departure in the SAME
+/// direction: prev -> passing -> next must all move consistently up or down.
+///
+/// @param prev Previous pitch (approach).
+/// @param passing Candidate passing tone pitch.
+/// @param next Following pitch (departure).
+/// @return True if approach and departure are in the same direction and stepwise.
+bool isValidPassingMotion(uint8_t prev, uint8_t passing, uint8_t next) {
+  int approach = static_cast<int>(passing) - static_cast<int>(prev);
+  int departure = static_cast<int>(next) - static_cast<int>(passing);
+
+  // Both must move in the same direction (both positive or both negative).
+  if (approach == 0 || departure == 0) return false;
+  if ((approach > 0) != (departure > 0)) return false;
+
+  // Both intervals must be stepwise (at most a minor 3rd = 3 semitones).
+  constexpr int kMaxStepSize = 3;
+  if (std::abs(approach) > kMaxStepSize || std::abs(departure) > kMaxStepSize) {
+    return false;
+  }
+
+  return true;
+}
+
+/// @brief Check whether a note at this position can serve as a neighbor tone
+/// with proper return-to-origin motion.
+///
+/// A neighbor tone departs from a pitch and returns to it. Either the previous
+/// note or the next note must share the same pitch as the original chord tone
+/// (the unmodified pitch at this position).
+///
+/// @param original_pitch The chord tone pitch before NCT modification.
+/// @param prev_pitch Previous pitch (0 if unavailable).
+/// @param has_prev Whether prev_pitch is available.
+/// @param next_pitch Following pitch (0 if unavailable).
+/// @param has_next Whether next_pitch is available.
+/// @return True if a return-to-origin context exists for this position.
+bool hasNeighborReturnContext(uint8_t original_pitch,
+                              uint8_t prev_pitch, bool has_prev,
+                              uint8_t next_pitch, bool has_next) {
+  // Neighbor requires at least one surrounding note to match the origin.
+  // The "return" can be on either side: prev==origin (return after) or
+  // next==origin (return before). Both are musically valid.
+  if (has_prev && prev_pitch == original_pitch) return true;
+  if (has_next && next_pitch == original_pitch) return true;
+  // Also allow when one surrounding note is within a half step of origin
+  // (accounts for register adjustments and voice leading).
+  if (has_prev && std::abs(static_cast<int>(prev_pitch) -
+                            static_cast<int>(original_pitch)) <= 2) {
+    return true;
+  }
+  if (has_next && std::abs(static_cast<int>(next_pitch) -
+                            static_cast<int>(original_pitch)) <= 2) {
+    return true;
+  }
+  return false;
+}
+
 }  // namespace
 
 void injectNonChordTones(std::vector<NoteEvent>& notes,
@@ -455,10 +564,22 @@ void injectNonChordTones(std::vector<NoteEvent>& notes,
                          VoiceRangeFn voice_range,
                          std::mt19937& rng,
                          float nct_probability,
-                         float section_progress) {
+                         float section_progress,
+                         uint8_t prev_beat_last) {
   if (notes.size() < 2) return;
 
   ScaleType scale = event.is_minor ? ScaleType::HarmonicMinor : ScaleType::Major;
+
+  // Pattern-aware NCT preference: BrokenChord prefers passing tones (fills
+  // the gap between chord-tone arpeggiation), Alberti prefers neighbor tones
+  // (preserves characteristic oscillation with stepwise embellishment).
+  bool prefer_passing = (tmpl.type == FigurationType::BrokenChord ||
+                         tmpl.type == FigurationType::Falling3v ||
+                         tmpl.type == FigurationType::Falling4v ||
+                         tmpl.type == FigurationType::SlotPattern);
+  bool prefer_neighbor = (tmpl.type == FigurationType::Alberti ||
+                          tmpl.type == FigurationType::Arch3v ||
+                          tmpl.type == FigurationType::Mixed3v);
 
   // Build a mapping from note index to template step for NCT function check.
   // Only modify notes whose template step was originally ChordTone.
@@ -468,34 +589,58 @@ void injectNonChordTones(std::vector<NoteEvent>& notes,
     // Never modify beat-1 notes (strong anchor).
     if (isStrongBeatPosition(note.start_tick, beat_start_tick)) continue;
 
-    // Only modify notes on weak sub-beats.
-    if (!isWeakSubBeat(note.start_tick, beat_start_tick)) continue;
+    // Check NCT eligibility: all non-beat-start positions are candidates.
+    // For sub-beat 2 (eighth midpoint), apply a reduced probability since it
+    // is metrically stronger than positions 1 and 3.
+    if (!isNCTEligiblePosition(note.start_tick, beat_start_tick)) continue;
 
-    // Only modify notes that were originally chord tones from the template.
-    if (idx < tmpl.steps.size() &&
-        tmpl.steps[idx].nct_function != NCTFunction::ChordTone) {
-      continue;  // Already a template-level NCT, leave it alone.
+    // Only modify notes that were originally pure chord tones from the template.
+    // Skip if the template step has an explicit NCT function OR a non-zero
+    // scale_offset (indicating an intentional passing/neighbor tone placement
+    // even if nct_function was not explicitly set, e.g., ScaleConnect).
+    if (idx < tmpl.steps.size()) {
+      const auto& tmpl_step = tmpl.steps[idx];
+      if (tmpl_step.nct_function != NCTFunction::ChordTone ||
+          tmpl_step.scale_offset != 0) {
+        continue;  // Already a template-level NCT, leave it alone.
+      }
+    }
+
+    // Position-dependent probability: sub-beat 2 gets a reduced probability
+    // (it is the eighth-note midpoint, metrically stronger than 1 and 3).
+    float effective_prob = nct_probability;
+    Tick sub_offset = note.start_tick - beat_start_tick;
+    Tick sub_beat_pos = sub_offset / kSixteenth;
+    if (sub_beat_pos == 2 && !isWeakSubBeat(note.start_tick, beat_start_tick)) {
+      effective_prob *= 0.7f;  // 30% reduction for semi-strong position.
     }
 
     // Probabilistic gate.
-    if (!rng::rollProbability(rng, nct_probability)) continue;
+    if (!rng::rollProbability(rng, effective_prob)) continue;
 
     auto [v_low, v_high] = voice_range(note.voice);
+    uint8_t original_pitch = note.pitch;
 
     // Determine NCT type based on melodic context: look at previous and next
     // notes in the same voice to decide between passing and neighbor.
     //
-    // Strategy:
-    //   - If we can find both a preceding and following note (same voice or
-    //     adjacent in the sequence), and their interval is a 3rd or larger,
-    //     use a passing tone.
-    //   - Otherwise, use a neighbor tone.
+    // Strategy (pattern-aware):
+    //   - BrokenChord/Falling/SlotPattern: prioritize passing tones to create
+    //     stepwise connections filling the harmonic leaps.
+    //   - Alberti/Arch/Mixed: prioritize neighbor tones to preserve the
+    //     characteristic oscillation pattern with diatonic embellishment.
+    //   - ScaleConnect: already has template-level NCTs, injection adds variety.
 
     // Find previous pitch (in sequence, any voice -- for melodic continuity).
+    // When prev_beat_last is available and this is the first note in the beat
+    // with no in-beat predecessor, use it as the cross-beat context.
     uint8_t prev_pitch = 0;
     bool has_prev = false;
     if (idx > 0) {
       prev_pitch = notes[idx - 1].pitch;
+      has_prev = true;
+    } else if (prev_beat_last > 0) {
+      prev_pitch = prev_beat_last;
       has_prev = true;
     }
 
@@ -511,39 +656,65 @@ void injectNonChordTones(std::vector<NoteEvent>& notes,
     // A perfect 4th keeps the NCT within the same register as the chord tone.
     constexpr int kMaxNCTDisplacement = 5;
 
+    bool nct_applied = false;
+
+    // --- Passing tone attempt ---
+    // Try passing tone first when pattern prefers it, or when both prev and
+    // next are available and the interval is a 3rd or larger.
     if (has_prev && has_next) {
       int interval_semitones = std::abs(static_cast<int>(prev_pitch) -
                                         static_cast<int>(next_pitch));
 
       // Only attempt passing tones when surrounding notes are close enough
       // that a stepwise fill makes musical sense (within an octave).
-      if (interval_semitones >= 3 && interval_semitones <= 12) {
-        // 3rd to octave interval between surrounding notes: use passing tone.
+      bool should_try_passing =
+          (interval_semitones >= 3 && interval_semitones <= 12);
+
+      // For neighbor-preferring patterns, only try passing if interval is wide.
+      if (prefer_neighbor && interval_semitones < 5) {
+        should_try_passing = false;
+      }
+
+      if (should_try_passing) {
         uint8_t passing = computePassingTone(prev_pitch, next_pitch,
                                              event.key, scale, v_low, v_high);
-        // Validate: passing tone must be between prev and next.
-        int pass_int = static_cast<int>(passing);
-        int prev_int = static_cast<int>(prev_pitch);
-        int next_int = static_cast<int>(next_pitch);
-        bool is_between = (prev_int <= pass_int && pass_int <= next_int) ||
-                          (next_int <= pass_int && pass_int <= prev_int);
 
-        // Also verify the passing tone is not too far from the original pitch.
-        int displacement = std::abs(pass_int - static_cast<int>(note.pitch));
+        // Validate: passing tone must create same-direction stepwise motion.
+        if (isValidPassingMotion(prev_pitch, passing, next_pitch)) {
+          // Also verify the passing tone is not too far from the original pitch.
+          int displacement = std::abs(static_cast<int>(passing) -
+                                      static_cast<int>(original_pitch));
 
-        if (is_between && passing != prev_pitch && passing != next_pitch &&
-            displacement <= kMaxNCTDisplacement) {
-          note.pitch = passing;
-          continue;
+          if (passing != prev_pitch && passing != next_pitch &&
+              displacement <= kMaxNCTDisplacement) {
+            note.pitch = passing;
+            nct_applied = true;
+          }
         }
       }
     }
 
-    // Fallback: neighbor tone.
-    if (has_prev || has_next) {
-      // Direction bias based on section progress.
+    // --- Neighbor tone attempt ---
+    // Try neighbor tone if passing was not applied, and the pattern context
+    // supports it (or as a fallback for any pattern).
+    if (!nct_applied && (has_prev || has_next)) {
+      // Verify return-to-origin context: at least one surrounding note should
+      // be close to the original pitch (either exact match or within a step).
+      bool neighbor_context_ok = hasNeighborReturnContext(
+          original_pitch, prev_pitch, has_prev, next_pitch, has_next);
+
+      // For passing-preferring patterns, only allow neighbor if context is good.
+      if (prefer_passing && !neighbor_context_ok) {
+        continue;  // Skip NCT entirely -- neither passing nor neighbor fits.
+      }
+
+      // Direction bias: section-aware and pattern-aware.
       int direction;
-      if (section_progress < 0.15f || section_progress > 0.85f) {
+      if (idx == 0 && prev_beat_last > 0 &&
+          section_progress >= 0.15f && section_progress <= 0.85f) {
+        // Bias toward the previous beat's last pitch for melodic connection.
+        direction = (prev_beat_last < note.pitch) ? -1 : 1;
+      } else if (section_progress < 0.15f || section_progress > 0.85f) {
         // Opening/closing: prefer lower neighbor for stability/resolution.
         direction = -1;
       } else {
@@ -551,11 +722,13 @@ void injectNonChordTones(std::vector<NoteEvent>& notes,
         direction = (idx % 2 == 0) ? 1 : -1;
       }
 
-      uint8_t neighbor = computeNeighborTone(note.pitch, direction,
+      // For Alberti pattern: diatonic neighbors preferred. Only allow
+      // chromatic neighbor at leading tone position (B in C major).
+      uint8_t neighbor = computeNeighborTone(original_pitch, direction,
                                              event.key, scale, v_low, v_high);
 
       // Only apply if the neighbor is actually different from the chord tone.
-      if (neighbor != note.pitch) {
+      if (neighbor != original_pitch) {
         note.pitch = neighbor;
       }
     }

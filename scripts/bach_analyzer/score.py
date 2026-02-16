@@ -6,7 +6,6 @@ matches Bach's compositional patterns, based on reference data from 270 works.
 
 from __future__ import annotations
 
-import math
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -21,84 +20,21 @@ from .model import (
     is_perfect_consonance,
     sounding_note_at,
 )
+from .music_theory import INTERVAL_NAME_MAP as _INTERVAL_NAMES
+from .profiles import (
+    normalize as _normalize,
+    js_divergence as jsd,
+    jsd_to_points,
+    compute_zscore,
+    zscore_to_points,
+    count_melodic_intervals,
+    bin_durations,
+    sample_vertical_intervals,
+    sample_motion_types,
+    sample_texture_density,
+)
 from .reference import load_category
 from .rules.base import RuleResult, Severity
-
-# ---------------------------------------------------------------------------
-# Interval name table (matches MCP reference format)
-# ---------------------------------------------------------------------------
-
-_INTERVAL_NAMES = {
-    0: "P1", 1: "m2", 2: "M2", 3: "m3", 4: "M3", 5: "P4",
-    6: "TT", 7: "P5", 8: "m6", 9: "M6", 10: "m7", 11: "M7",
-}
-
-# ---------------------------------------------------------------------------
-# Math foundations
-# ---------------------------------------------------------------------------
-
-
-def _normalize(d: Dict[str, float]) -> Dict[str, float]:
-    """Normalize a distribution dict to sum to 1.0."""
-    total = sum(d.values())
-    if total == 0:
-        return d
-    return {k: v / total for k, v in d.items()}
-
-
-def jsd(p: Dict[str, float], q: Dict[str, float]) -> float:
-    """Jensen-Shannon Divergence between two distributions.
-
-    Returns value in [0.0, 1.0] where 0.0 means identical.
-    Both distributions are normalized internally.
-    """
-    p = _normalize(p)
-    q = _normalize(q)
-    all_keys = set(p) | set(q)
-    if not all_keys:
-        return 0.0
-
-    # Build aligned arrays with smoothing
-    eps = 1e-12
-    m = {}
-    for k in all_keys:
-        pk = p.get(k, 0.0) + eps
-        qk = q.get(k, 0.0) + eps
-        m[k] = (pk + qk) / 2.0
-
-    def _kl(a: Dict[str, float], b: Dict[str, float]) -> float:
-        total = 0.0
-        for k in all_keys:
-            ak = a.get(k, 0.0) + eps
-            bk = b[k]
-            total += ak * math.log2(ak / bk)
-        return total
-
-    return 0.5 * _kl(p, m) + 0.5 * _kl(q, m)
-
-
-def jsd_to_points(jsd_val: float) -> float:
-    """Convert JSD to score points. JSD=0->100, higher JSD->lower score.
-
-    Uses exponential decay: 100 * exp(-12 * jsd).
-    """
-    return max(0.0, min(100.0, 100.0 * math.exp(-12.0 * jsd_val)))
-
-
-def compute_zscore(value: float, mean: float, std: float) -> float:
-    """Compute z-score. Returns 0 if std is near zero."""
-    if std < 1e-9:
-        return 0.0
-    return (value - mean) / std
-
-
-def zscore_to_points(z: float) -> float:
-    """Convert z-score to score points using Gaussian.
-
-    |z|=0->100, |z|=1->~85, |z|=2->~55, |z|>3->~20 or less.
-    Formula: 100 * exp(-0.5 * z^2)
-    """
-    return max(0.0, min(100.0, 100.0 * math.exp(-0.5 * z * z)))
 
 
 # ---------------------------------------------------------------------------
@@ -162,27 +98,26 @@ def _grade(score: float) -> str:
 
 def extract_interval_profile(score: Score) -> Dict[str, Any]:
     """Extract melodic interval distribution from a Score."""
-    counts: Dict[str, int] = {name: 0 for name in _INTERVAL_NAMES.values()}
+    all_counts: Dict[str, int] = {name: 0 for name in _INTERVAL_NAMES.values()}
     total = 0
     total_semitones = 0
+    step_count = 0
+    leap_count = 0
 
     for track in score.tracks:
-        notes = track.sorted_notes
-        for i in range(1, len(notes)):
-            semi = abs(notes[i].pitch - notes[i - 1].pitch)
-            ic = interval_class(semi)
+        ic_counts, steps, leaps, semis = count_melodic_intervals(track.sorted_notes)
+        for ic, cnt in ic_counts.items():
             name = _INTERVAL_NAMES.get(ic, "P1")
-            counts[name] += 1
-            total += 1
-            total_semitones += semi
-
-    stepwise = counts.get("m2", 0) + counts.get("M2", 0)
-    leap = total - stepwise - counts.get("P1", 0)
+            all_counts[name] += cnt
+        total += sum(ic_counts.values())
+        total_semitones += semis
+        step_count += steps
+        leap_count += leaps
 
     return {
-        "distribution": _normalize({k: float(v) for k, v in counts.items()}),
-        "stepwise_ratio": stepwise / total if total else 0.0,
-        "leap_ratio": leap / total if total else 0.0,
+        "distribution": _normalize({k: float(v) for k, v in all_counts.items()}),
+        "stepwise_ratio": step_count / total if total else 0.0,
+        "leap_ratio": leap_count / total if total else 0.0,
         "avg_interval": total_semitones / total if total else 0.0,
         "total": total,
     }
@@ -190,26 +125,8 @@ def extract_interval_profile(score: Score) -> Dict[str, Any]:
 
 def extract_rhythm_profile(score: Score) -> Dict[str, Any]:
     """Extract rhythm/duration distribution from a Score."""
-    bins = {"32nd": 0, "16th": 0, "8th": 0, "quarter": 0, "half": 0, "whole": 0, "longer": 0}
-
-    for track in score.tracks:
-        for note in track.notes:
-            beats = note.duration / TICKS_PER_BEAT
-            if beats < 0.1875:   # < 3/16 of a beat
-                bins["32nd"] += 1
-            elif beats < 0.375:  # < 3/8 of a beat
-                bins["16th"] += 1
-            elif beats < 0.75:   # < 3/4 of a beat
-                bins["8th"] += 1
-            elif beats < 1.5:
-                bins["quarter"] += 1
-            elif beats < 3.0:
-                bins["half"] += 1
-            elif beats < 6.0:
-                bins["whole"] += 1
-            else:
-                bins["longer"] += 1
-
+    all_notes = [n for track in score.tracks for n in track.notes]
+    bins = bin_durations(all_notes)
     return {"distribution": _normalize({k: float(v) for k, v in bins.items()})}
 
 
@@ -219,39 +136,19 @@ def extract_vertical_profile(score: Score) -> Dict[str, Any]:
         return {"distribution": {}, "consonance_ratio": 0.0,
                 "perfect_consonance_ratio": 0.0, "applicable": False}
 
-    counts: Dict[str, int] = {name: 0 for name in _INTERVAL_NAMES.values()}
-    consonant = 0
-    perfect = 0
-    total = 0
     voices = score.voices_dict
-    voice_names = list(voices.keys())
+    result = sample_vertical_intervals(voices, score.total_duration, TICKS_PER_BEAT)
 
-    total_ticks = score.total_duration
-    sample_step = TICKS_PER_BEAT  # Sample every beat
-
-    for tick in range(0, total_ticks, sample_step):
-        pitches = []
-        for vname in voice_names:
-            n = sounding_note_at(voices[vname], tick)
-            if n is not None:
-                pitches.append(n.pitch)
-        # Check all pairs
-        for i in range(len(pitches)):
-            for j in range(i + 1, len(pitches)):
-                semi = abs(pitches[i] - pitches[j])
-                ic = interval_class(semi)
-                name = _INTERVAL_NAMES.get(ic, "P1")
-                counts[name] += 1
-                total += 1
-                if is_consonant(semi):
-                    consonant += 1
-                if is_perfect_consonance(semi):
-                    perfect += 1
+    named_counts: Dict[str, int] = {name: 0 for name in _INTERVAL_NAMES.values()}
+    for ic, cnt in result["counts"].items():
+        name = _INTERVAL_NAMES.get(ic, "P1")
+        named_counts[name] += cnt
+    total = result["total"]
 
     return {
-        "distribution": _normalize({k: float(v) for k, v in counts.items()}),
-        "consonance_ratio": consonant / total if total else 0.0,
-        "perfect_consonance_ratio": perfect / total if total else 0.0,
+        "distribution": _normalize({k: float(v) for k, v in named_counts.items()}),
+        "consonance_ratio": result["consonant"] / total if total else 0.0,
+        "perfect_consonance_ratio": result["perfect"] / total if total else 0.0,
         "applicable": total > 0,
     }
 
@@ -261,47 +158,10 @@ def extract_motion_profile(score: Score) -> Dict[str, Any]:
     if score.num_voices < 2:
         return {"distribution": {}, "applicable": False}
 
-    motion = {"oblique": 0, "contrary": 0, "similar": 0, "parallel": 0}
-    total = 0
     voices = score.voices_dict
-    voice_names = list(voices.keys())
-
-    total_ticks = score.total_duration
-    sample_step = TICKS_PER_BEAT
-
-    for vi in range(len(voice_names)):
-        for vj in range(vi + 1, len(voice_names)):
-            notes_a = voices[voice_names[vi]]
-            notes_b = voices[voice_names[vj]]
-
-            prev_a = sounding_note_at(notes_a, 0)
-            prev_b = sounding_note_at(notes_b, 0)
-
-            for tick in range(sample_step, total_ticks, sample_step):
-                curr_a = sounding_note_at(notes_a, tick)
-                curr_b = sounding_note_at(notes_b, tick)
-
-                if prev_a and prev_b and curr_a and curr_b:
-                    da = curr_a.pitch - prev_a.pitch
-                    db = curr_b.pitch - prev_b.pitch
-
-                    if da == 0 and db == 0:
-                        pass  # No motion (skip)
-                    elif da == 0 or db == 0:
-                        motion["oblique"] += 1
-                        total += 1
-                    elif (da > 0 and db < 0) or (da < 0 and db > 0):
-                        motion["contrary"] += 1
-                        total += 1
-                    elif da == db:
-                        motion["parallel"] += 1
-                        total += 1
-                    else:
-                        motion["similar"] += 1
-                        total += 1
-
-                prev_a = curr_a
-                prev_b = curr_b
+    result = sample_motion_types(voices, score.total_duration, TICKS_PER_BEAT)
+    motion = result["motion"]
+    total = result["total"]
 
     dist = _normalize({k: float(v) for k, v in motion.items()}) if total else {}
     return {
@@ -314,25 +174,11 @@ def extract_motion_profile(score: Score) -> Dict[str, Any]:
 
 def extract_texture_profile(score: Score) -> Dict[str, Any]:
     """Extract texture density distribution."""
-    density_counts: Dict[str, int] = {}
-    total_samples = 0
-    total_active = 0
-
     voices = score.voices_dict
-    voice_names = list(voices.keys())
-    total_ticks = score.total_duration
-    sample_step = TICKS_PER_BEAT
-
-    for tick in range(0, total_ticks, sample_step):
-        active = 0
-        for vname in voice_names:
-            n = sounding_note_at(voices[vname], tick)
-            if n is not None:
-                active += 1
-        key = str(active)
-        density_counts[key] = density_counts.get(key, 0) + 1
-        total_samples += 1
-        total_active += active
+    result = sample_texture_density(voices, score.total_duration, TICKS_PER_BEAT)
+    density_counts = result["density_counts"]
+    total_samples = result["total_samples"]
+    total_active = result["total_active"]
 
     return {
         "distribution": _normalize({k: float(v) for k, v in density_counts.items()}),

@@ -34,10 +34,14 @@ TEST(CleanupTrackOverlaps, CrossVoicePreserved) {
 
   cleanupTrackOverlaps(tracks);
 
+  // Both notes survive.
   ASSERT_EQ(tracks[0].notes.size(), 2u);
-  // Both survive, durations unchanged.
-  EXPECT_EQ(tracks[0].notes[0].duration, 960u);
-  EXPECT_EQ(tracks[0].notes[1].duration, 480u);
+  // Cross-voice same-tick notes are staggered by 1 tick and truncated to avoid
+  // within-track overlap (the validator checks all notes in a track together,
+  // regardless of voice ID). First note gets truncated, second gets offset.
+  EXPECT_EQ(tracks[0].notes[0].duration, 1u);
+  EXPECT_EQ(tracks[0].notes[1].start_tick, 1u);
+  EXPECT_EQ(tracks[0].notes[1].duration, 479u);
 }
 
 TEST(CleanupTrackOverlaps, SameVoiceSameTickSamePitchDedup) {
@@ -79,7 +83,7 @@ TEST(CleanupTrackOverlaps, WithinVoiceTrim) {
             0);
 }
 
-TEST(CleanupTrackOverlaps, CrossVoiceNoTrim) {
+TEST(CleanupTrackOverlaps, CrossVoiceTrimmed) {
   Track track;
   track.notes.push_back(makeNote(0, 960, 50, 0));   // bass, overlaps texture tick
   track.notes.push_back(makeNote(480, 480, 62, 1));  // texture
@@ -88,8 +92,10 @@ TEST(CleanupTrackOverlaps, CrossVoiceNoTrim) {
   cleanupTrackOverlaps(tracks);
 
   ASSERT_EQ(tracks[0].notes.size(), 2u);
-  EXPECT_EQ(tracks[0].notes[0].duration, 960u);  // NOT trimmed
-  EXPECT_EQ(tracks[0].notes[0].modified_by &
+  // Cross-voice overlap is now trimmed so the validator sees no within-track
+  // overlap. Bass note is truncated to end at the texture note's start.
+  EXPECT_EQ(tracks[0].notes[0].duration, 480u);
+  EXPECT_NE(tracks[0].notes[0].modified_by &
                 static_cast<uint8_t>(NoteModifiedBy::OverlapTrim),
             0);
 }

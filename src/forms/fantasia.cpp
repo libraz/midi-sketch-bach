@@ -468,32 +468,64 @@ std::vector<NoteEvent> generateCountermelody(const HarmonicEvent& event,
   return notes;
 }
 
-/// @brief Generate slow bass notes for the Pedal voice.
+/// @brief Generate section-texture-aware bass notes for the Pedal voice.
 ///
-/// Creates whole note bass tones using the harmonic timeline's bass pitch.
-/// The pedal provides a deep, steady foundation characteristic of
-/// the contemplative fantasia style.
-///
-/// This function generates over the full target duration, looking up the
-/// harmonic timeline for bass context at each note start. This allows
-/// whole notes to span multiple beat-level timeline events.
+/// Creates bass tones using the harmonic timeline's bass pitch with
+/// duration adapted to the current section texture. Passage sections
+/// use half notes for rhythmic motion, chordal sections use whole notes
+/// for stability, and cadential sections use whole notes for convergence.
+/// This creates structural rhythm diversity aligned with the fantasia's
+/// sectional alternation (stylus phantasticus).
 ///
 /// @param timeline Harmonic timeline for bass pitch lookup.
 /// @param target_duration Total duration in ticks.
+/// @param vctx Optional vertical context for safety checks.
+/// @param total_bars Total number of bars (for texture determination).
 /// @return Vector of NoteEvents for the pedal bass voice.
 std::vector<NoteEvent> generateSlowBass(const HarmonicTimeline& timeline,
                                         Tick target_duration,
-                                        const VerticalContext* vctx = nullptr) {
+                                        const VerticalContext* vctx = nullptr,
+                                        int total_bars = 0) {
   std::vector<NoteEvent> notes;
+
+  if (total_bars <= 0) {
+    total_bars = static_cast<int>(target_duration / kTicksPerBar);
+  }
+  int prev_root_pc = -1;
 
   Tick current_tick = 0;
 
-  // Pedal uses whole notes exclusively for slow, sustained bass.
+  // Section-texture-aware bass: duration adapts to fantasia section structure.
   while (current_tick < target_duration) {
     // Look up the current chord from the harmonic timeline.
     const HarmonicEvent& event = timeline.getAt(current_tick);
 
-    Tick dur = kWholeNote;
+    // Determine section texture for duration selection.
+    int bar_idx = static_cast<int>(current_tick / kTicksPerBar);
+    float progress = target_duration > 0
+        ? static_cast<float>(current_tick) / static_cast<float>(target_duration)
+        : 0.5f;
+    int curr_root_pc = getPitchClass(event.chord.root_pitch);
+    FantasiaSectionTexture bass_texture = determineFantasiaSectionTexture(
+        progress, bar_idx, prev_root_pc, curr_root_pc, total_bars);
+    prev_root_pc = curr_root_pc;
+
+    // Duration selection based on section texture:
+    // - Passage: half notes for rhythmic motion matching the upper voices
+    // - Chordal: whole notes for sustained harmonic foundation
+    // - Cadential: whole notes for convergence weight
+    Tick dur;
+    switch (bass_texture) {
+      case FantasiaSectionTexture::Passage:
+        dur = kHalfNote;  // Rhythmic motion in passage sections.
+        break;
+      case FantasiaSectionTexture::Chordal:
+        dur = kWholeNote;  // Sustained foundation in chordal sections.
+        break;
+      case FantasiaSectionTexture::Cadential:
+        dur = kWholeNote;  // Convergence weight at cadences.
+        break;
+    }
     Tick remaining = target_duration - current_tick;
     if (dur > remaining) dur = remaining;
     if (dur == 0) break;
@@ -578,10 +610,12 @@ FantasiaResult generateFantasia(const FantasiaConfig& config) {
   // before Voices 0 and 2 (melody/countermelody) are generated against it.
   std::vector<NoteEvent> all_notes;
   const auto& events = timeline.events();
+  int total_bars = config.section_bars;
 
-  // Voice 3 (bass) first -- harmonic foundation.
+  // Voice 3 (bass) first -- harmonic foundation with section-texture-aware rhythm.
   if (num_voices >= 4) {
-    auto bass_notes = generateSlowBass(timeline, target_duration);
+    auto bass_notes = generateSlowBass(timeline, target_duration,
+                                       /*vctx=*/nullptr, total_bars);
     all_notes.insert(all_notes.end(), bass_notes.begin(), bass_notes.end());
   }
 
@@ -589,7 +623,6 @@ FantasiaResult generateFantasia(const FantasiaConfig& config) {
   VerticalContext vctx{&all_notes, &timeline, num_voices};
 
   // Voice 1 (sustained chords) -- harmonic support with section texture.
-  int total_bars = config.section_bars;
   if (num_voices >= 2) {
     auto chord_notes = generateSustainedChords(timeline, target_duration, rng,
                                                &vctx, total_bars);
@@ -677,7 +710,8 @@ FantasiaResult generateFantasia(const FantasiaConfig& config) {
     }
     PostValidateStats pv_stats;
     all_notes = postValidateNotes(
-        std::move(all_notes), num_voices, config.key, voice_ranges, &pv_stats);
+        std::move(all_notes), num_voices, config.key, voice_ranges, &pv_stats,
+        /*protection_overrides=*/{}, /*stylus_phantasticus=*/true);
 
     // Leap resolution: fix unresolved melodic leaps.
     {

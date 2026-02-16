@@ -143,14 +143,15 @@ std::vector<NoteEvent> postValidateNotes(
     KeySignature key_sig,
     const std::vector<std::pair<uint8_t, uint8_t>>& voice_ranges,
     PostValidateStats* stats,
-    const ProtectionOverrides& protection_overrides) {
+    const ProtectionOverrides& protection_overrides,
+    bool stylus_phantasticus) {
   auto range_fn = [&voice_ranges](uint8_t voice,
                                    Tick /*tick*/) -> std::pair<uint8_t, uint8_t> {
     if (voice < voice_ranges.size()) return voice_ranges[voice];
     return {0, 127};
   };
   return postValidateNotes(std::move(raw_notes), num_voices, key_sig, range_fn, stats,
-                           protection_overrides);
+                           protection_overrides, stylus_phantasticus);
 }
 
 std::vector<NoteEvent> postValidateNotes(
@@ -159,7 +160,8 @@ std::vector<NoteEvent> postValidateNotes(
     KeySignature key_sig,
     std::function<std::pair<uint8_t, uint8_t>(uint8_t voice, Tick tick)> voice_range_fn,
     PostValidateStats* stats,
-    const ProtectionOverrides& protection_overrides) {
+    const ProtectionOverrides& protection_overrides,
+    bool stylus_phantasticus) {
   if (raw_notes.empty()) return {};
 
   // Determine scale type for diatonic validation of step shifts.
@@ -315,13 +317,18 @@ std::vector<NoteEvent> postValidateNotes(
   // Scan consecutive same-voice notes and re-octave notes that exceed
   // voice-specific leap thresholds. This prevents unnaturally large leaps
   // while respecting that bass/pedal voices idiomatically use wider intervals.
+  //
+  // Thresholds by voice role (semitones):
+  //   soprano/alto (voice 0, 1): 16 (10th) -- upper voices rarely exceed this
+  //   tenor (voice num_voices-2):  16 (10th) -- inner voice, same as upper
+  //   bass/pedal (last voice):     17 (11th) -- octave leaps permitted (Bach
+  //     organ pedal idiom), but compound intervals beyond 11th are anomalous
+  //   stylus_phantasticus forms:   19 (12th) -- toccata/fantasia allow wider
+  //     leaps as part of the improvisatory rhetorical style
   {
-    // Voice-specific maximum leap thresholds (semitones).
-    // Voices 0-2 (soprano/alto/tenor): 16 semitones (compound 3rd / 10th).
-    // Voice 3+ (bass/pedal): 19 semitones (compound 5th / 12th) -- octave jumps
-    // are idiomatic in bass lines (Bach organ pedal frequently uses them).
-    constexpr int kUpperVoiceMaxLeap = 16;
-    constexpr int kBassVoiceMaxLeap = 19;
+    constexpr int kUpperVoiceMaxLeap = 16;    // 10th (compound minor 3rd)
+    constexpr int kBassVoiceMaxLeap = 17;     // 11th (octave + minor 3rd)
+    constexpr int kPhantasticusMaxLeap = 19;  // 12th (compound 5th)
 
     // Build per-voice index for sequential scanning.
     std::array<std::vector<size_t>, 5> voice_result_indices;
@@ -332,7 +339,11 @@ std::vector<NoteEvent> postValidateNotes(
 
     for (uint8_t vid = 0; vid < std::min(num_voices, static_cast<uint8_t>(5)); ++vid) {
       const auto& indices = voice_result_indices[vid];
-      int max_leap = (vid >= 3) ? kBassVoiceMaxLeap : kUpperVoiceMaxLeap;
+      bool is_bass_voice = (num_voices > 1 && vid == num_voices - 1);
+      int base_max_leap = is_bass_voice ? kBassVoiceMaxLeap : kUpperVoiceMaxLeap;
+      int max_leap = stylus_phantasticus
+                         ? std::max(base_max_leap, kPhantasticusMaxLeap)
+                         : base_max_leap;
 
       for (size_t pos = 1; pos < indices.size(); ++pos) {
         auto& curr = result[indices[pos]];

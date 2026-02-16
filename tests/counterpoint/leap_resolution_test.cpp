@@ -447,17 +447,34 @@ TEST(LeapResolution, NoCandidateSkips) {
 }
 
 TEST(LeapResolution, VerticalSafeRejects) {
-  // vertical_safe rejects first candidate, picks second.
+  // vertical_safe rejects first candidate, picks second via wider fallback.
   // C4->A4 (9st up). resolve_dir = -1. offset 1: 68 (not scale). offset 2: 67 (G).
-  // But vertical_safe rejects 67. No more candidates -> skip.
+  // vertical_safe rejects 67. offset 3: 66 (not scale). offset 4: 65 (F, scale).
+  // F passes vertical_safe -> selected as wider fallback candidate.
   std::vector<NoteEvent> notes = {offBeat(0, 60), offBeat(1, 69), offBeat(2, 71)};
   auto params = makeDefaultParams(1);
-  params.vertical_safe = [](Tick, uint8_t, uint8_t p) {
-    return p != 67;  // Reject G.
+  params.vertical_safe = [](Tick, uint8_t, uint8_t pitch) {
+    return pitch != 67;  // Reject G.
   };
   int modified = resolveLeaps(notes, params);
-  // offset 1: 68 (not scale). offset 2: 67 (scale but rejected by vertical_safe).
-  EXPECT_EQ(modified, 0);  // No valid candidate.
+  // offset 1: 68 (not scale). offset 2: 67 (rejected). offset 3: 66 (not scale).
+  // offset 4: 65 (F, scale, passes vertical_safe) -> selected as fallback.
+  EXPECT_EQ(modified, 1);
+  EXPECT_EQ(findNote(notes, 0, 2).pitch, 65);  // F4: wider fallback candidate.
+}
+
+TEST(LeapResolution, VerticalSafeRejectsNoFallback) {
+  // When allow_wider_fallback is disabled, vertical_safe rejection leaves no candidate.
+  // C4->A4 (9st up). resolve_dir = -1. offset 1: 68 (not scale). offset 2: 67 (G).
+  // vertical_safe rejects 67. No wider search -> no valid candidate.
+  std::vector<NoteEvent> notes = {offBeat(0, 60), offBeat(1, 69), offBeat(2, 71)};
+  auto params = makeDefaultParams(1);
+  params.vertical_safe = [](Tick, uint8_t, uint8_t pitch) {
+    return pitch != 67;  // Reject G.
+  };
+  params.allow_wider_fallback = false;
+  int modified = resolveLeaps(notes, params);
+  EXPECT_EQ(modified, 0);  // No valid candidate without wider fallback.
 }
 
 TEST(LeapResolution, VoiceRangeRespected) {
@@ -571,6 +588,85 @@ TEST(LeapDetail, IsSequencePattern) {
   // Too few pitches.
   uint8_t pitches3[] = {60, 67, 65, 72};
   EXPECT_FALSE(leap_detail::isSequencePattern(pitches3, 4));
+}
+
+// ---------------------------------------------------------------------------
+// Wider fallback and step_bonus tests
+// ---------------------------------------------------------------------------
+
+TEST(LeapResolution, WiderFallbackFindsCandidate) {
+  // C4->A4 (9st up). resolve_dir = -1.
+  // Stepwise candidates: offset 1: 68 (not scale). offset 2: 67 (G, scale).
+  // Voice range excludes 67 (range [48, 66]). Wider fallback offset 3: 66 (not
+  // scale). offset 4: 65 (F, scale, in range). -> F4 selected.
+  std::vector<NoteEvent> notes = {offBeat(0, 60), offBeat(1, 69), offBeat(2, 71)};
+  auto params = makeDefaultParams(1);
+  params.voice_range_static = [](uint8_t) -> std::pair<uint8_t, uint8_t> {
+    return {48, 66};  // Excludes G4 (67).
+  };
+  int modified = resolveLeaps(notes, params);
+  EXPECT_EQ(modified, 1);
+  EXPECT_EQ(findNote(notes, 0, 2).pitch, 65);  // F4 via wider fallback.
+}
+
+TEST(LeapResolution, StepwisePreferredOverWiderFallback) {
+  // When both stepwise and wider candidates are available, stepwise is preferred
+  // due to step_bonus scoring.
+  // C4->G4 (P5 up = 7st). resolve_dir = -1.
+  // Stepwise: offset 1: 66 (not scale). offset 2: 65 (F, scale).
+  // Wider: offset 3: 64 (E, scale). offset 4: 63 (not scale).
+  // Both F and E are valid, but F has step_bonus -> preferred.
+  std::vector<NoteEvent> notes = {offBeat(0, 60), offBeat(1, 67), offBeat(2, 69)};
+  auto params = makeDefaultParams(1);
+  int modified = resolveLeaps(notes, params);
+  EXPECT_EQ(modified, 1);
+  EXPECT_EQ(findNote(notes, 0, 2).pitch, 65);  // F4: stepwise preferred.
+}
+
+TEST(LeapResolution, WiderFallbackDisabled) {
+  // When allow_wider_fallback=false, only stepwise (offset 1-2) is searched.
+  // C4->A4 (9st up). offset 1: 68 (not scale). offset 2: 67 (G, out of range).
+  // No wider search -> no resolution.
+  std::vector<NoteEvent> notes = {offBeat(0, 60), offBeat(1, 69), offBeat(2, 71)};
+  auto params = makeDefaultParams(1);
+  params.voice_range_static = [](uint8_t) -> std::pair<uint8_t, uint8_t> {
+    return {48, 66};  // Excludes G4 (67).
+  };
+  params.allow_wider_fallback = false;
+  int modified = resolveLeaps(notes, params);
+  EXPECT_EQ(modified, 0);  // No valid candidate without wider fallback.
+}
+
+TEST(LeapResolution, StepBonusZeroStillPrefersCloser) {
+  // When step_bonus=0, closer candidates are still slightly preferred via the
+  // offset penalty (-0.05 per offset step).
+  // C4->G4 (P5 up = 7st). resolve_dir = -1.
+  // offset 2: 65 (F, scale, score = 0.0 + 0.0 - 0.10 = -0.10).
+  // offset 4: 63 (not scale). offset 3: 64 (E, scale, score = 0.0 + 0.0 - 0.15 = -0.15).
+  // F still preferred (closer offset).
+  std::vector<NoteEvent> notes = {offBeat(0, 60), offBeat(1, 67), offBeat(2, 69)};
+  auto params = makeDefaultParams(1);
+  params.step_bonus = 0.0f;
+  int modified = resolveLeaps(notes, params);
+  EXPECT_EQ(modified, 1);
+  EXPECT_EQ(findNote(notes, 0, 2).pitch, 65);  // F4: closer offset preferred.
+}
+
+TEST(LeapResolution, ChordToneGetsPreferenceInWiderFallback) {
+  // When stepwise candidates are rejected and a wider candidate is a chord tone,
+  // it gets the chord tone preference bonus.
+  // C4->A4 (9st up). resolve_dir = -1.
+  // offset 1: 68 (not scale). offset 2: 67 (G, out of range [48,66]).
+  // offset 3: 66 (not scale). offset 4: 65 (F, scale, chord tone).
+  std::vector<NoteEvent> notes = {offBeat(0, 60), offBeat(1, 69), offBeat(2, 71)};
+  auto params = makeDefaultParams(1);
+  params.voice_range_static = [](uint8_t) -> std::pair<uint8_t, uint8_t> {
+    return {48, 66};  // Excludes G4 (67).
+  };
+  params.is_chord_tone = [](Tick, uint8_t pitch) { return pitch == 65; };
+  int modified = resolveLeaps(notes, params);
+  EXPECT_EQ(modified, 1);
+  EXPECT_EQ(findNote(notes, 0, 2).pitch, 65);  // F4: chord tone + wider fallback.
 }
 
 }  // namespace

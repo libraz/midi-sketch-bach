@@ -1,59 +1,30 @@
 """Tests for n-gram extraction utilities (ScaleDegree, pitch conversion, helpers).
 
-Since bach_reference_server.py depends on the mcp package (not installed for
-tests), we extract and test the utility functions via importlib without loading
-the full module. The functions under test are pure Python with no MCP dependency.
+These functions now live in scripts.bach_analyzer.music_theory, imported directly.
 """
 
 import json
 import sys
 import unittest
 from pathlib import Path
-from unittest.mock import MagicMock
 
 # Add project root to path.
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-# ---------------------------------------------------------------------------
-# Mock the mcp package so the server module can be imported.
-# FastMCP.tool() must return a pass-through decorator.
-# ---------------------------------------------------------------------------
-
-
-class _FakeFastMCP:
-    def __init__(self, *a, **kw):
-        pass
-
-    def tool(self):
-        """Decorator that just returns the function unmodified."""
-        def _decorator(fn):
-            return fn
-        return _decorator
-
-    def run(self):
-        pass
-
-
-_mcp_mock = MagicMock()
-_mcp_mock.server.fastmcp.FastMCP = _FakeFastMCP
-sys.modules["mcp"] = _mcp_mock
-sys.modules["mcp.server"] = _mcp_mock.server
-sys.modules["mcp.server.fastmcp"] = _mcp_mock.server.fastmcp
-
-from scripts.bach_reference_server import (
-    ScaleDegree,
-    _beat_strength,
-    _build_pc_to_degree_map,
-    _classify_beat_position,
-    _is_chord_tone_simple,
-    _quantize_duration,
+from scripts.bach_analyzer.music_theory import (
     MAJOR_SCALE_SEMITONES,
     MINOR_SCALE_SEMITONES,
-    _PC_DEGREE_MAJOR,
-    _PC_DEGREE_MINOR,
-    degree_interval,
-    pitch_to_scale_degree,
+    PC_DEGREE_MAJOR as _PC_DEGREE_MAJOR,
+    PC_DEGREE_MINOR as _PC_DEGREE_MINOR,
+    ScaleDegree,
     TONIC_TO_PC,
+    beat_strength as _beat_strength,
+    build_pc_to_degree_map as _build_pc_to_degree_map,
+    classify_beat_position as _classify_beat_position,
+    degree_interval,
+    is_chord_tone_simple as _is_chord_tone_simple,
+    pitch_to_scale_degree,
+    quantize_duration as _quantize_duration,
 )
 
 from scripts.bach_analyzer.model import TICKS_PER_BEAT, TICKS_PER_BAR

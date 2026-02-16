@@ -53,6 +53,20 @@ struct LeapResolutionParams {
   /// Default 0.85 = high-probability bias rather than mandatory rule.
   /// Uses tick-based deterministic PRNG for reproducibility.
   float resolution_probability = 0.85f;
+
+  /// Score bonus for stepwise contrary-motion candidates during resolution.
+  /// Adds to the candidate preference when comparing stepwise (offset 1-2) vs
+  /// wider alternatives (offset 3-4). Higher values make stepwise resolution
+  /// more strongly preferred without making it mandatory.
+  /// Default 0.3 = strong preference for stepwise resolution.
+  float step_bonus = 0.3f;
+
+  /// When true, search wider alternatives (offset 3-4 semitones) if no
+  /// stepwise candidate (offset 1-2) passes all safety checks. This prevents
+  /// leaving leaps unresolved when the stepwise targets are out of range,
+  /// create vertical dissonances, or fail other checks.
+  /// Default true = search wider alternatives as fallback.
+  bool allow_wider_fallback = true;
 };
 
 namespace leap_detail {

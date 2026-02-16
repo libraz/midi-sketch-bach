@@ -18,6 +18,7 @@ set(BACH_TEST_SOURCES
   core/phrase_structure_test.cpp
   core/rhythm_pattern_test.cpp
   core/figure_match_test.cpp
+  core/melodic_state_test.cpp
 
   # midi/
   midi/midi_writer_test.cpp

@@ -409,6 +409,42 @@ inline constexpr int kVoiceProfileCount = 5;
 inline constexpr BassHarmonicConstraint kOrganPedalConstraint = {
     0.65f, 0.85f, 2, "BWV578:pedal"};
 
+// ---------------------------------------------------------------------------
+// Contour templates — phrase-level directional shapes
+// ---------------------------------------------------------------------------
+// note_count = number of notes = len(steps) + 1.
+// Callers map to PhraseContour at the call site (bach_vocabulary.h does not
+// depend on melodic_state.h):
+//   kArchContour    -> PhraseContour{Arch,    0.4, 0.25}
+//   kDescentContour -> PhraseContour{Descent, 0.4, 0.20}
+//   kWaveContour    -> PhraseContour{Wave,    0.4, 0.25}
+
+// Arch contour: rise to peak then descend (most common phrase shape).
+// 8 steps = ~8 beats or 2 bars at quarter-note level.
+inline constexpr ContourStep kArchContourSteps[] = {
+    ContourStep::Up, ContourStep::Up, ContourStep::Up, ContourStep::Same,
+    ContourStep::Down, ContourStep::Down, ContourStep::Down, ContourStep::Down};
+inline constexpr ContourTemplate kArchContour = {"arch", kArchContourSteps, 9};
+
+// Descent contour: sustained downward motion (cadential phrases).
+inline constexpr ContourStep kDescentContourSteps[] = {
+    ContourStep::Same, ContourStep::Down, ContourStep::Down, ContourStep::Down,
+    ContourStep::Down, ContourStep::Down, ContourStep::Down, ContourStep::Down};
+inline constexpr ContourTemplate kDescentContour = {"descent", kDescentContourSteps, 9};
+
+// Wave contour: two small arches (2-bar sub-arches x 2).
+// Pattern: Up,Up,Down,Down,Up,Up,Down,Down — beat-level evaluation.
+inline constexpr ContourStep kWaveContourSteps[] = {
+    ContourStep::Up, ContourStep::Up, ContourStep::Down, ContourStep::Down,
+    ContourStep::Up, ContourStep::Up, ContourStep::Down, ContourStep::Down};
+inline constexpr ContourTemplate kWaveContour = {"wave", kWaveContourSteps, 9};
+
+// Aggregate contour table.
+inline constexpr const ContourTemplate* kContourTemplates[] = {
+    &kArchContour, &kDescentContour, &kWaveContour,
+};
+inline constexpr int kContourTemplateCount = 3;
+
 }  // namespace bach
 
 #endif  // BACH_CORE_BACH_VOCABULARY_H

@@ -550,15 +550,24 @@ std::vector<NoteEvent> generateSingleLine(const TextureContext& ctx,
               }
             }
 
-            if (step_is_chord_tone || is_downbeat) {
-              // Step is a chord tone, or we're on a beat -- use the step.
+            if (step_is_chord_tone) {
+              // Step is a chord tone -- always use it (harmonic + stepwise).
               pitch = step_pitch;
+            } else if (is_downbeat) {
+              // On downbeat subdivisions: prefer step with high probability,
+              // but allow chord-tone anchor 25% for harmonic grounding.
+              // Bach reference: cello suite stepwise ~55%, chaconne ~34%.
+              if (rng::rollProbability(rng, 0.75f)) {
+                pitch = step_pitch;
+              } else {
+                // Pick the closest chord tone to prev_pitch to minimize leap.
+                pitch = nearestChordTone(prev_pitch, chord_pitches);
+              }
             } else {
-              // Step is a passing/neighbor tone. Use it about half the time
-              // to achieve ~55% stepwise ratio (cello suite reference).
-              // The other half snaps to the nearest chord tone, which may
-              // create a small leap and provides harmonic grounding.
-              if (rng::rollProbability(rng, 0.50f)) {
+              // Off-beat subdivisions: strongly prefer diatonic step to build
+              // scalar passages between chord-tone anchors.
+              // Only 10% chance of chord-tone snap for occasional variety.
+              if (rng::rollProbability(rng, 0.90f)) {
                 pitch = step_pitch;
               } else {
                 pitch = nearestChordTone(prev_pitch, chord_pitches);
@@ -693,17 +702,18 @@ std::vector<NoteEvent> generateImpliedPolyphony(const TextureContext& ctx,
             // Continuing in upper voice. Prefer stepwise motion.
             bool is_strong = isStrongBeatPosition(note_tick_in_bar);
             if (is_strong && sub_offset == 0) {
-              // Strong beat: chord tone.
+              // Strong beat: chord tone anchor.
               pitch = nearestChordTone(upper_prev, upper_pitches);
             } else {
-              // Weak beat/subdivision: diatonic step.
+              // Weak beat/subdivision: diatonic step toward nearest chord tone.
               uint8_t target_ct = nearestChordTone(upper_prev, upper_pitches);
               pitch = nearestDiatonicStep(upper_prev, target_ct,
                                           ctx.key.tonic, scale_type,
                                           upper_low, upper_high);
 
-              // 15% chance of chord-tone leap for variety.
-              if (upper_pitches.size() > 1 && rng::rollProbability(rng, 0.15f)) {
+              // 8% chance of chord-tone snap for variety (reduced from 15%
+              // to increase within-voice stepwise continuity).
+              if (upper_pitches.size() > 1 && rng::rollProbability(rng, 0.08f)) {
                 pitch = nearestChordTone(upper_prev, upper_pitches);
               }
             }
@@ -743,15 +753,18 @@ std::vector<NoteEvent> generateImpliedPolyphony(const TextureContext& ctx,
             // Continuing in lower voice. Prefer stepwise motion.
             bool is_strong = isStrongBeatPosition(note_tick_in_bar);
             if (is_strong && sub_offset == 0) {
+              // Strong beat: chord tone anchor.
               pitch = nearestChordTone(lower_prev, lower_pitches);
             } else {
+              // Weak beat/subdivision: diatonic step toward nearest chord tone.
               uint8_t target_ct = nearestChordTone(lower_prev, lower_pitches);
               pitch = nearestDiatonicStep(lower_prev, target_ct,
                                           ctx.key.tonic, scale_type,
                                           lower_low, lower_high);
 
-              // 15% chance of chord-tone leap for variety.
-              if (lower_pitches.size() > 1 && rng::rollProbability(rng, 0.15f)) {
+              // 8% chance of chord-tone snap for variety (reduced from 15%
+              // to increase within-voice stepwise continuity).
+              if (lower_pitches.size() > 1 && rng::rollProbability(rng, 0.08f)) {
                 pitch = nearestChordTone(lower_prev, lower_pitches);
               }
             }

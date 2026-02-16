@@ -823,7 +823,7 @@ class TestFormAwareStructureScoring(unittest.TestCase):
             form="trio_sonata",
         )
         bach_score = compute_score(
-            score, "orgelbuchlein", form_name="trio_sonata"
+            score, "trio_sonata", form_name="trio_sonata"
         )
         structure = bach_score.dimensions["structure"]
         sub_names = [s.name for s in structure.sub_scores]

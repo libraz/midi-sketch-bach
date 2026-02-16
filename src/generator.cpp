@@ -433,6 +433,46 @@ void cleanupTrackOverlaps(std::vector<Track>& tracks) {
       prev_index[v] = i;
       has_prev[v] = true;
     }
+
+    // Cross-voice overlap cleanup (final safety net after articulation).
+    // Resolves overlaps between different voices sharing a single MIDI track
+    // (e.g., chaconne bass voice=0 and texture voice=1). First stagger any
+    // remaining same-tick notes by 1 tick each, then truncate all overlaps.
+    // This runs last, after articulation, so durations are final.
+    std::sort(notes.begin(), notes.end(),
+              [](const NoteEvent& lhs, const NoteEvent& rhs) {
+                if (lhs.start_tick != rhs.start_tick) return lhs.start_tick < rhs.start_tick;
+                return lhs.pitch < rhs.pitch;
+              });
+
+    // Stagger same-tick notes by 1 tick each (post-articulation, so no minimum
+    // duration clamp will inflate them back).
+    for (size_t idx = 0; idx + 1 < notes.size(); ++idx) {
+      if (notes[idx].start_tick == notes[idx + 1].start_tick) {
+        notes[idx + 1].start_tick += 1;
+        if (notes[idx + 1].duration > 1) {
+          notes[idx + 1].duration -= 1;
+        }
+      }
+    }
+
+    // Re-sort after stagger adjustments.
+    std::sort(notes.begin(), notes.end(),
+              [](const NoteEvent& lhs, const NoteEvent& rhs) {
+                if (lhs.start_tick != rhs.start_tick) return lhs.start_tick < rhs.start_tick;
+                return lhs.pitch < rhs.pitch;
+              });
+
+    // Truncate all remaining overlaps.
+    for (size_t idx = 0; idx + 1 < notes.size(); ++idx) {
+      Tick end_tick = notes[idx].start_tick + notes[idx].duration;
+      if (end_tick > notes[idx + 1].start_tick) {
+        Tick new_dur = notes[idx + 1].start_tick - notes[idx].start_tick;
+        if (new_dur == 0) new_dur = 1;
+        notes[idx].duration = new_dur;
+        notes[idx].modified_by |= static_cast<uint8_t>(NoteModifiedBy::OverlapTrim);
+      }
+    }
   }
 }
 

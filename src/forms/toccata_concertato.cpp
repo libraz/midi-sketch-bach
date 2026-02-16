@@ -475,7 +475,9 @@ ToccataResult generateConcertatoToccata(const ToccataConfig& config) {
         std::move(all_notes), num_voices, config.key.tonic, &timeline);
 
     all_notes = postValidateNotes(
-        std::move(all_notes), num_voices, config.key, voice_ranges);
+        std::move(all_notes), num_voices, config.key, voice_ranges,
+        /*stats=*/nullptr, /*protection_overrides=*/{},
+        /*stylus_phantasticus=*/true);
 
     // Leap resolution: fix unresolved melodic leaps.
     {

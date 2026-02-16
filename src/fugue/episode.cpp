@@ -29,6 +29,7 @@
 #include "transform/motif_transform.h"
 #include "transform/sequence.h"
 
+#include "core/figure_injector.h"
 #include "core/figure_match.h"
 #include "core/bach_vocabulary.h"
 #include "fugue/fugue_vocabulary.h"
@@ -72,6 +73,37 @@ int sequenceDegreeStepForCharacter(SubjectCharacter character, std::mt19937& rng
   }
 }
 
+/// @brief Variable sequence step for later repetitions.
+///
+/// After 3+ repetitions of the same step, 30% chance of step change.
+/// Final repetition has 15% chance of upward step if not near climax.
+///
+/// @param character Subject character for base step selection.
+/// @param rep_index Current repetition index (0-based).
+/// @param total_reps Total number of sequence repetitions.
+/// @param rng Mersenne Twister instance.
+/// @return Degree step for this repetition.
+int sequenceDegreeStep(SubjectCharacter character, int rep_index,
+                       int total_reps, std::mt19937& rng) {
+  int base_step = sequenceDegreeStepForCharacter(character, rng);
+
+  // First 3 repetitions: keep consistent step.
+  if (rep_index < 3) return base_step;
+
+  // 4th+ rep: 30% chance of step variation.
+  if (rng::rollProbability(rng, 0.30f)) {
+    // Toggle between -1 and -2.
+    return (base_step == -1) ? -2 : -1;
+  }
+
+  // Final rep: 15% chance of upward step for surprise.
+  if (rep_index == total_reps - 1 && rng::rollProbability(rng, 0.15f)) {
+    return 1;
+  }
+
+  return base_step;
+}
+
 /// @brief Determine the imitation offset for the second voice.
 ///
 /// In Baroque fugue episodes, voices enter in staggered imitation (dialogic
@@ -109,6 +141,90 @@ int calculateSequenceRepetitions(Tick duration_ticks, Tick motif_dur) {
   if (reps < 1) reps = 1;
   if (reps > 4) reps = 4;
   return reps;
+}
+
+/// @brief Insert vocabulary turn ornaments between sequence repetitions.
+///
+/// After `generateDiatonicSequence` produces a flat vector of notes, this
+/// function scans for repetition boundaries (detected by timing gaps equal to
+/// the motif duration) and inserts a neighbor ornament (kLowerNbr or kUpperNbr)
+/// with 20% probability on offbeat positions. The ornament replaces the last
+/// note of the preceding repetition to avoid overlap.
+///
+/// @param seq_notes Sequence notes from generateDiatonicSequence (modified in place).
+/// @param motif_dur Duration of one motif instance (for boundary detection).
+/// @param key Current musical key.
+/// @param scale Current scale type.
+/// @param low_pitch Lower pitch bound for the voice.
+/// @param high_pitch Upper pitch bound for the voice.
+/// @param rng Mersenne Twister instance.
+void insertSequenceBreakOrnaments(std::vector<NoteEvent>& seq_notes,
+                                  Tick motif_dur, Key key, ScaleType scale,
+                                  uint8_t low_pitch, uint8_t high_pitch,
+                                  std::mt19937& rng) {
+  if (seq_notes.empty() || motif_dur == 0) return;
+
+  // Identify repetition boundary notes: the last note before each motif_dur boundary.
+  // We scan for notes whose end tick aligns with a motif_dur multiple from the first note.
+  Tick seq_start = seq_notes.front().start_tick;
+  std::vector<NoteEvent> ornament_inserts;
+
+  for (size_t idx = 1; idx < seq_notes.size(); ++idx) {
+    Tick note_tick = seq_notes[idx].start_tick;
+    Tick elapsed = note_tick - seq_start;
+
+    // Check if this note starts at a repetition boundary.
+    if (elapsed > 0 && motif_dur > 0 && (elapsed % motif_dur) == 0) {
+      // Only on offbeat positions.
+      if (metricLevel(note_tick) != MetricLevel::Offbeat) continue;
+
+      // 20% probability gate.
+      if (!rng::rollProbability(rng, 0.20f)) continue;
+
+      // Use the previous note's pitch as the ornament anchor.
+      uint8_t anchor_pitch = seq_notes[idx - 1].pitch;
+
+      // Choose kLowerNbr or kUpperNbr (50/50).
+      const MelodicFigure* figure =
+          rng::rollProbability(rng, 0.50f) ? &kLowerNbr : &kUpperNbr;
+
+      if (!figure->degree_intervals || figure->note_count < 2) continue;
+
+      // Resolve the first ornament interval to get the neighbor pitch.
+      uint8_t nbr_pitch = resolveDegreeInterval(
+          anchor_pitch, figure->degree_intervals[0], key, scale);
+      if (nbr_pitch == 0 || nbr_pitch < low_pitch || nbr_pitch > high_pitch) continue;
+
+      // Insert a short ornament note (eighth note) just before the boundary.
+      constexpr Tick kOrnamentDur = kTicksPerBeat / 2;  // Eighth note.
+      Tick ornament_tick = note_tick - kOrnamentDur;
+      if (ornament_tick <= seq_notes[idx - 1].start_tick) continue;
+
+      NoteEvent ornament;
+      ornament.start_tick = ornament_tick;
+      ornament.duration = kOrnamentDur;
+      ornament.pitch = nbr_pitch;
+      ornament.velocity = 72;  // Slightly softer than structural notes.
+      ornament.voice = seq_notes[idx].voice;
+      ornament.source = BachNoteSource::Ornament;
+      ornament_inserts.push_back(ornament);
+
+      // Trim the previous note to avoid overlap.
+      Tick prev_end = seq_notes[idx - 1].start_tick + seq_notes[idx - 1].duration;
+      if (prev_end > ornament_tick) {
+        seq_notes[idx - 1].duration = ornament_tick - seq_notes[idx - 1].start_tick;
+      }
+    }
+  }
+
+  // Append ornament notes and re-sort by tick.
+  if (!ornament_inserts.empty()) {
+    seq_notes.insert(seq_notes.end(), ornament_inserts.begin(), ornament_inserts.end());
+    std::sort(seq_notes.begin(), seq_notes.end(),
+              [](const NoteEvent& lhs, const NoteEvent& rhs) {
+                return lhs.start_tick < rhs.start_tick;
+              });
+  }
 }
 
 /// @brief Calculate median pitch of the first 3 notes in a motif.
@@ -226,15 +342,41 @@ static int countHarshDissonances(const std::vector<NoteEvent>& notes) {
   return count;
 }
 
+/// @brief Check if a note source is protected from episode consonance repair.
+///
+/// Subject, answer, and countersubject notes carry the fugue's thematic
+/// identity and must not be modified by episode-level repair.
+///
+/// @param source The BachNoteSource to check.
+/// @return True if the source should not be modified.
+static bool isEpisodeProtectedSource(BachNoteSource source) {
+  return source == BachNoteSource::FugueSubject ||
+         source == BachNoteSource::FugueAnswer ||
+         source == BachNoteSource::Countersubject ||
+         source == BachNoteSource::SubjectCore ||
+         source == BachNoteSource::CantusFixed ||
+         source == BachNoteSource::GroundBass ||
+         source == BachNoteSource::Coda ||
+         source == BachNoteSource::GrandPause;
+}
+
 /// @brief Repair dissonant vertical intervals on strong beats in episode notes.
 ///
 /// For each strong beat (beats 1 and 3 in 4/4), collects all notes sounding at
-/// that tick across voices and checks inter-voice intervals. When a dissonance
-/// is found, the note with the more flexible protection level is shifted by the
-/// smallest diatonic adjustment that produces consonance with ALL other sounding
-/// voices at that tick. Only notes with ProtectionLevel::Flexible (e.g.
-/// EpisodeMaterial) are eligible for repair; structural/immutable notes are
-/// never touched.
+/// that tick across voices and checks inter-voice intervals. Repair strictness
+/// is graduated by metric position and proximity to cadence:
+///
+///   - **Bar start (beat 1)**: repair ALL dissonances. Bach reference shows
+///     bar starts are overwhelmingly consonant (~85% consonance on beat 1).
+///   - **Beat 3**: repair only harsh dissonances (m2/TT/M7). Milder
+///     dissonances (P4, M2, m7) are left intact to preserve the natural
+///     dissonance ratio (~25-29% in Bach fugues).
+///   - **Cadence-adjacent** (last 2 beats before episode end): beat 3 is
+///     treated with bar-start strictness (repair all dissonances) to ensure
+///     clean harmonic arrival.
+///
+/// Only notes with ProtectionLevel::Flexible are eligible for repair.
+/// Protected sources (subject, answer, countersubject) are never touched.
 ///
 /// @param notes Episode notes to repair (modified in place).
 /// @param num_voices Number of voices in the fugue (used for voice range lookup).
@@ -242,12 +384,20 @@ static int countHarshDissonances(const std::vector<NoteEvent>& notes) {
 /// @param target_key Key for the second half (after modulation midpoint).
 /// @param scale Scale type for scale-tone snapping.
 /// @param mod_midpoint Tick at which key switches from start_key to target_key.
+/// @param episode_end_tick End tick of the episode (for cadence proximity).
 /// @return Number of pitch repairs applied.
 static int repairEpisodeConsonance(std::vector<NoteEvent>& notes,
                                    uint8_t num_voices,
                                    Key start_key, Key target_key,
-                                   ScaleType scale, Tick mod_midpoint) {
+                                   ScaleType scale, Tick mod_midpoint,
+                                   Tick episode_end_tick = 0) {
   if (notes.size() < 2 || num_voices < 2) return 0;
+
+  // Cadence proximity threshold: last 2 beats before episode end.
+  // Within this zone, beat 3 gets bar-start-level strictness.
+  Tick cadence_zone_start = (episode_end_tick > kTicksPerBeat * 2)
+                                ? episode_end_tick - kTicksPerBeat * 2
+                                : 0;
 
   // Collect unique strong-beat ticks across all notes.
   std::vector<Tick> strong_ticks;
@@ -274,6 +424,15 @@ static int repairEpisodeConsonance(std::vector<NoteEvent>& notes,
                          ? target_key
                          : start_key;
 
+    // Determine strictness level for this beat position.
+    // is_bar_beat: true on beat 1 (bar start) -- repair all dissonances.
+    // is_cadence_adjacent: true in last 2 beats -- elevate beat 3 to bar-level.
+    Tick beat_in_bar = (tick % kTicksPerBar) / kTicksPerBeat;
+    bool is_bar_beat = (beat_in_bar == 0);
+    bool is_cadence_adjacent = (episode_end_tick > 0 && tick >= cadence_zone_start);
+    // Full consonance required on bar starts and cadence-adjacent positions.
+    bool require_full_consonance = is_bar_beat || is_cadence_adjacent;
+
     // Gather indices of all notes sounding at this tick (started at or before,
     // ending after this tick).
     std::vector<size_t> sounding;
@@ -295,10 +454,25 @@ static int repairEpisodeConsonance(std::vector<NoteEvent>& notes,
 
         int ivl = interval_util::compoundToSimple(
             absoluteInterval(note_a.pitch, note_b.pitch));
-        // Only repair harsh dissonances (m2, tritone, M7). Milder dissonances
-        // (P4, M2, m7) are left intact to preserve the natural dissonance ratio
-        // that Bach's fugues exhibit (~25-29% dissonance).
-        if (ivl != 1 && ivl != 6 && ivl != 11) continue;
+
+        // Determine whether this interval needs repair based on strictness.
+        bool needs_repair = false;
+        if (require_full_consonance) {
+          // Bar start / cadence zone: repair all dissonances.
+          needs_repair = !interval_util::isConsonance(ivl);
+        } else {
+          // Beat 3 (non-cadence): only repair harsh dissonances (m2/TT/M7).
+          // Milder dissonances (P4, M2, m7) are left intact to preserve the
+          // natural dissonance ratio (~25-29% in Bach fugues).
+          needs_repair = (ivl == 1 || ivl == 6 || ivl == 11);
+        }
+        if (!needs_repair) continue;
+
+        // Provenance protection: never modify structural thematic sources.
+        if (isEpisodeProtectedSource(note_a.source) &&
+            isEpisodeProtectedSource(note_b.source)) {
+          continue;
+        }
 
         // Determine which note to repair (prefer Flexible over Structural).
         ProtectionLevel prot_a = getProtectionLevel(note_a.source);
@@ -330,12 +504,15 @@ static int repairEpisodeConsonance(std::vector<NoteEvent>& notes,
           continue;
         }
 
+        // Skip protected sources even if ProtectionLevel is technically Flexible.
+        if (isEpisodeProtectedSource(notes[repair_idx].source)) continue;
+
         auto& target = notes[repair_idx];
         auto [range_lo, range_hi] = getFugueVoiceRange(target.voice, num_voices);
 
-        // Try small diatonic adjustments: +-1, +-2, +-3 semitones, snapped to
-        // the nearest scale tone. Pick the smallest shift that is consonant
-        // with ALL other sounding voices at this tick.
+        // Try small diatonic adjustments: +-1, +-2, +-3, +-4 semitones,
+        // snapped to the nearest scale tone. Pick the smallest shift that
+        // is consonant with ALL other sounding voices at this tick.
         int best_pitch = -1;
         int best_cost = 9999;  // Lower is better.
         int orig_pitch = static_cast<int>(target.pitch);
@@ -413,7 +590,7 @@ namespace {  // NOLINT(google-build-namespaces) reopened for character-specific 
 void generateSevereEpisode(Episode& episode, const std::vector<NoteEvent>& motif,
                            Tick start_tick, Tick motif_dur, int deg_step,
                            int seq_reps, Tick imitation_offset, uint8_t num_voices,
-                           Key key, ScaleType scale,
+                           Key key, ScaleType scale, uint32_t ornament_seed,
                            const uint8_t* prev_pitches = nullptr) {
   // Voice 0: Original motif + diatonic sequence.
   std::vector<NoteEvent> v0_notes;
@@ -427,6 +604,14 @@ void generateSevereEpisode(Episode& episode, const std::vector<NoteEvent>& motif
       generateDiatonicSequence(motif, seq_reps, deg_step, start_tick + motif_dur, key, scale);
   for (auto& note : seq_notes) {
     note.source = BachNoteSource::SequenceNote;
+  }
+  // Insert vocabulary turn ornaments between sequence repetitions.
+  // Use a derived RNG to avoid perturbing the main episode RNG state.
+  {
+    std::mt19937 orn_rng(ornament_seed ^ 0x5365760Au);  // "SevA" voice 0
+    auto [v0_lo, v0_hi] = getFugueVoiceRange(0, num_voices);
+    insertSequenceBreakOrnaments(seq_notes, motif_dur, key, scale,
+                                 v0_lo, v0_hi, orn_rng);
   }
   for (auto& note : seq_notes) {
     note.voice = 0;
@@ -457,6 +642,13 @@ void generateSevereEpisode(Episode& episode, const std::vector<NoteEvent>& motif
                                         voice1_start + motif_dur, key, scale);
     for (auto& note : seq) {
       note.source = BachNoteSource::SequenceNote;
+    }
+    // Insert vocabulary turn ornaments between sequence repetitions.
+    {
+      std::mt19937 orn_rng(ornament_seed ^ 0x53657642u);  // "SevB" voice 1
+      auto [v1_lo, v1_hi] = getFugueVoiceRange(1, num_voices);
+      insertSequenceBreakOrnaments(seq, motif_dur, key, scale,
+                                   v1_lo, v1_hi, orn_rng);
     }
     for (auto& note : seq) {
       note.voice = 1;
@@ -490,7 +682,7 @@ void generateSevereEpisode(Episode& episode, const std::vector<NoteEvent>& motif
 void generatePlayfulEpisode(Episode& episode, const std::vector<NoteEvent>& motif,
                             Tick start_tick, Tick motif_dur, int deg_step,
                             int seq_reps, Tick imitation_offset, uint8_t num_voices,
-                            Key key, ScaleType scale,
+                            Key key, ScaleType scale, uint32_t ornament_seed,
                             const uint8_t* prev_pitches = nullptr) {
   // Voice 0: Retrograde of motif + diatonic sequence of retrograde.
   std::vector<NoteEvent> v0_notes;
@@ -503,6 +695,13 @@ void generatePlayfulEpisode(Episode& episode, const std::vector<NoteEvent>& moti
                                             start_tick + motif_dur, key, scale);
   for (auto& note : seq_notes) {
     note.source = BachNoteSource::SequenceNote;
+  }
+  // Insert vocabulary turn ornaments between sequence repetitions.
+  {
+    std::mt19937 orn_rng(ornament_seed ^ 0x506C6141u);  // "PlAa" voice 0
+    auto [v0_lo, v0_hi] = getFugueVoiceRange(0, num_voices);
+    insertSequenceBreakOrnaments(seq_notes, motif_dur, key, scale,
+                                 v0_lo, v0_hi, orn_rng);
   }
   for (auto& note : seq_notes) {
     note.voice = 0;
@@ -533,6 +732,13 @@ void generatePlayfulEpisode(Episode& episode, const std::vector<NoteEvent>& moti
                                             voice1_start + motif_dur, key, scale);
     for (auto& note : inv_seq) {
       note.source = BachNoteSource::SequenceNote;
+    }
+    // Insert vocabulary turn ornaments between sequence repetitions.
+    {
+      std::mt19937 orn_rng(ornament_seed ^ 0x506C4262u);  // "PlBb" voice 1
+      auto [v1_lo, v1_hi] = getFugueVoiceRange(1, num_voices);
+      insertSequenceBreakOrnaments(inv_seq, motif_dur, key, scale,
+                                   v1_lo, v1_hi, orn_rng);
     }
     for (auto& note : inv_seq) {
       note.voice = 1;
@@ -565,7 +771,7 @@ void generatePlayfulEpisode(Episode& episode, const std::vector<NoteEvent>& moti
 void generateNobleEpisode(Episode& episode, const std::vector<NoteEvent>& motif,
                           Tick start_tick, Tick motif_dur, int deg_step,
                           int seq_reps, Tick imitation_offset, uint8_t num_voices,
-                          Key key, ScaleType scale,
+                          Key key, ScaleType scale, uint32_t ornament_seed,
                           const uint8_t* prev_pitches = nullptr) {
   // Voice 0: Original motif + diatonic sequence (upper melodic line).
   std::vector<NoteEvent> v0_notes;
@@ -579,6 +785,13 @@ void generateNobleEpisode(Episode& episode, const std::vector<NoteEvent>& motif,
       generateDiatonicSequence(motif, seq_reps, deg_step, start_tick + motif_dur, key, scale);
   for (auto& note : seq_notes) {
     note.source = BachNoteSource::SequenceNote;
+  }
+  // Insert vocabulary turn ornaments between sequence repetitions.
+  {
+    std::mt19937 orn_rng(ornament_seed ^ 0x4E6F6241u);  // "NobA" voice 0
+    auto [v0_lo, v0_hi] = getFugueVoiceRange(0, num_voices);
+    insertSequenceBreakOrnaments(seq_notes, motif_dur, key, scale,
+                                 v0_lo, v0_hi, orn_rng);
   }
   for (auto& note : seq_notes) {
     note.voice = 0;
@@ -630,7 +843,7 @@ void generateNobleEpisode(Episode& episode, const std::vector<NoteEvent>& motif,
 void generateRestlessEpisode(Episode& episode, const std::vector<NoteEvent>& motif,
                              Tick start_tick, Tick motif_dur, int deg_step,
                              int seq_reps, Tick imitation_offset, uint8_t num_voices,
-                             Key key, ScaleType scale,
+                             Key key, ScaleType scale, uint32_t ornament_seed,
                              const uint8_t* prev_pitches = nullptr) {
   // Fragment the motif into 2 pieces for tight imitation.
   auto fragments = fragmentMotif(motif, 2);
@@ -656,6 +869,13 @@ void generateRestlessEpisode(Episode& episode, const std::vector<NoteEvent>& mot
       generateDiatonicSequence(frag0, frag_reps, deg_step, start_tick + frag0_dur, key, scale);
   for (auto& note : seq_notes) {
     note.source = BachNoteSource::SequenceNote;
+  }
+  // Insert vocabulary turn ornaments between sequence repetitions.
+  {
+    std::mt19937 orn_rng(ornament_seed ^ 0x52737441u);  // "RstA" voice 0
+    auto [v0_lo, v0_hi] = getFugueVoiceRange(0, num_voices);
+    insertSequenceBreakOrnaments(seq_notes, frag0_dur, key, scale,
+                                 v0_lo, v0_hi, orn_rng);
   }
   for (auto& note : seq_notes) {
     note.voice = 0;
@@ -687,6 +907,13 @@ void generateRestlessEpisode(Episode& episode, const std::vector<NoteEvent>& mot
                                             voice1_start + dim_dur, key, scale);
     for (auto& note : dim_seq) {
       note.source = BachNoteSource::SequenceNote;
+    }
+    // Insert vocabulary turn ornaments between sequence repetitions.
+    {
+      std::mt19937 orn_rng(ornament_seed ^ 0x52737442u);  // "RstB" voice 1
+      auto [v1_lo, v1_hi] = getFugueVoiceRange(1, num_voices);
+      insertSequenceBreakOrnaments(dim_seq, dim_dur, key, scale,
+                                   v1_lo, v1_hi, orn_rng);
     }
     for (auto& note : dim_seq) {
       note.voice = 1;
@@ -1056,7 +1283,11 @@ Episode generateEpisode(const Subject& subject, Tick start_tick, Tick duration_t
   }
 
   // Determine transformation parameters based on character.
-  int deg_step = sequenceDegreeStepForCharacter(subject.character, rng);
+  // Use episode-level variation: later episodes may vary the sequence step
+  // to avoid mechanical repetition across the fugue.
+  constexpr int kTypicalEpisodeCount = 5;  // Bach fugues typically have 3-5 episodes.
+  int deg_step = sequenceDegreeStep(subject.character, episode_index,
+                                    kTypicalEpisodeCount, rng);
   int seq_reps = calculateSequenceRepetitions(duration_ticks, motif_dur);
   Tick imitation_offset = imitationOffsetForCharacter(motif_dur, subject.character, rng);
 
@@ -1067,23 +1298,30 @@ Episode generateEpisode(const Subject& subject, Tick start_tick, Tick duration_t
   int key_diff = static_cast<int>(target_key) - static_cast<int>(start_key);
 
   // --- Character-specific voice generation ---
+  // Derive a separate ornament seed to avoid perturbing the main RNG state.
+  // The main RNG must remain stable for downstream invertible counterpoint decisions.
+  uint32_t ornament_seed = seed ^ 0x6F726E00u;  // "orn\0"
   switch (subject.character) {
     case SubjectCharacter::Playful:
       generatePlayfulEpisode(episode, motif, start_tick, motif_dur, deg_step, seq_reps,
-                             imitation_offset, num_voices, start_key, scale, prev_pitches);
+                             imitation_offset, num_voices, start_key, scale,
+                             ornament_seed, prev_pitches);
       break;
     case SubjectCharacter::Noble:
       generateNobleEpisode(episode, motif, start_tick, motif_dur, deg_step, seq_reps,
-                           imitation_offset, num_voices, start_key, scale, prev_pitches);
+                           imitation_offset, num_voices, start_key, scale,
+                           ornament_seed, prev_pitches);
       break;
     case SubjectCharacter::Restless:
       generateRestlessEpisode(episode, motif, start_tick, motif_dur, deg_step, seq_reps,
-                              imitation_offset, num_voices, start_key, scale, prev_pitches);
+                              imitation_offset, num_voices, start_key, scale,
+                              ornament_seed, prev_pitches);
       break;
     case SubjectCharacter::Severe:
     default:
       generateSevereEpisode(episode, motif, start_tick, motif_dur, deg_step, seq_reps,
-                            imitation_offset, num_voices, start_key, scale, prev_pitches);
+                            imitation_offset, num_voices, start_key, scale,
+                            ornament_seed, prev_pitches);
       break;
   }
 
@@ -1177,6 +1415,13 @@ Episode generateEpisode(const Subject& subject, Tick start_tick, Tick duration_t
       for (auto& note : inv_seq) {
         note.source = BachNoteSource::SequenceNote;
       }
+      // Insert vocabulary turn ornaments between sequence repetitions.
+      {
+        std::mt19937 orn_rng(ornament_seed ^ 0x56344F72u);  // "V4Or" voice 4
+        auto [v4_lo, v4_hi] = getFugueVoiceRange(4, num_voices);
+        insertSequenceBreakOrnaments(inv_seq, inv_dur, start_key, scale,
+                                     v4_lo, v4_hi, orn_rng);
+      }
       for (auto& note : inv_seq) {
         note.voice = 4;
         v4_notes.push_back(note);
@@ -1224,8 +1469,9 @@ Episode generateEpisode(const Subject& subject, Tick start_tick, Tick duration_t
   // to provide cleaner input for the voice-swap quality check.
   {
     Tick repair_midpoint = start_tick + duration_ticks / 2;
+    Tick repair_end = start_tick + duration_ticks;
     repairEpisodeConsonance(episode.notes, num_voices, start_key, target_key,
-                            scale, repair_midpoint);
+                            scale, repair_midpoint, repair_end);
   }
 
   // --- Invertible counterpoint with character-specific probability ---
@@ -1440,6 +1686,12 @@ Episode generateEpisode(const Subject& subject, Tick start_tick, Tick duration_t
   ScaleType scale = subject.is_minor ? ScaleType::HarmonicMinor : ScaleType::Major;
   Tick final_bar_start = (episode_end > kTicksPerBar) ? episode_end - kTicksPerBar : 0;
 
+  // Cadence proximity zone: last 2 beats before episode end.
+  // Within this zone, vertical consonance requirements are stricter.
+  Tick cadence_zone_start = (episode_end > kTicksPerBeat * 2)
+                                ? episode_end - kTicksPerBeat * 2
+                                : 0;
+
   // Step 4: Process notes in tick groups.
   // Same start_tick events form a group; within each group, voices are processed
   // in order (0→1→2→...→bass) so that earlier voices are in cp_state when later
@@ -1457,6 +1709,9 @@ Episode generateEpisode(const Subject& subject, Tick start_tick, Tick duration_t
       const auto& note = raw.notes[idx];
       MetricLevel ml = metricLevel(note.start_tick);
       const auto& harm_ev = timeline.getAt(note.start_tick);
+
+      // Cadence-adjacent flag: within last 2 beats before episode end.
+      bool is_cadence_adj = (note.start_tick >= cadence_zone_start);
 
       // Current key for diatonic snapping (midpoint switch).
       Key current_key = (note.start_tick >= start_tick + duration_ticks / 2 &&
@@ -1517,9 +1772,10 @@ Episode generateEpisode(const Subject& subject, Tick start_tick, Tick duration_t
         }
       }
 
-      // (2b) Guaranteed vertical-consonant candidate: if both chord-tone
+      // (2b) Guaranteed vertical-consonant candidate: if all chord-tone
       // candidates are vertically dissonant with other voices, add a
       // chord tone that is consonant (imperfect preferred).
+      // Triggered on Bar starts, Beat positions, and cadence-adjacent ticks.
       {
         bool all_ct_dissonant = true;
         for (const auto& cnd : candidates) {
@@ -1544,10 +1800,12 @@ Episode generateEpisode(const Subject& subject, Tick start_tick, Tick duration_t
           }
         }
 
-        if (all_ct_dissonant && ml == MetricLevel::Bar) {
-          // Bar start only: search for a chord tone that is consonant with all
-          // voices. On beats 2-4, natural dissonance is acceptable per Bach
-          // reference (~25-34% dissonance in organ fugues).
+        // Expand vertical-consonant search to Bar starts, Beat positions,
+        // and cadence-adjacent zones. This ensures the candidate pool always
+        // contains at least one vertically consonant option on strong beats.
+        if (all_ct_dissonant &&
+            (ml == MetricLevel::Bar || ml == MetricLevel::Beat ||
+             is_cadence_adj)) {
           uint8_t best_vc = 0;
           int best_vc_score = -1;
           for (int search = -12; search <= 12; ++search) {
@@ -1623,8 +1881,8 @@ Episode generateEpisode(const Subject& subject, Tick start_tick, Tick duration_t
           }
         }
 
-        // Vertical consonance: light bias toward consonant vertical intervals.
-        // Final safety is CollisionResolver's responsibility.
+        // Vertical consonance scoring: graduated penalties by metric position
+        // and cadence proximity.
         if (ml >= MetricLevel::Beat) {
           bool has_dissonance = false;
           bool has_harsh = false;
@@ -1639,7 +1897,7 @@ Episode generateEpisode(const Subject& subject, Tick start_tick, Tick duration_t
                 absoluteInterval(cand.pitch, other->pitch));
             if (!interval_util::isConsonance(ivl)) {
               has_dissonance = true;
-              // m2(1), tritone(6), M7(11) are harsh; P4(5), M2(2), m7(10) are mild.
+              // m2(1), tritone(6), M7(11) are harsh; P4(5), M2(2), m7(10) mild.
               if (ivl == 1 || ivl == 6 || ivl == 11) {
                 has_harsh = true;
               }
@@ -1649,9 +1907,20 @@ Episode generateEpisode(const Subject& subject, Tick start_tick, Tick duration_t
             if (has_dissonance) {
               cand.has_vertical_dissonance = true;
               cand.has_harsh_dissonance = has_harsh;
-              mel_score += (ml == MetricLevel::Bar) ? -0.3f : -0.15f;
+              // Graduated penalties:
+              //   Bar start: strong penalty (-0.5 harsh, -0.35 mild).
+              //   Cadence zone: elevated penalty (-0.4 harsh, -0.3 mild).
+              //   Beat 3 (normal): moderate penalty (-0.2 harsh, -0.15 mild).
+              if (ml == MetricLevel::Bar) {
+                mel_score += has_harsh ? -0.5f : -0.35f;
+              } else if (is_cadence_adj) {
+                mel_score += has_harsh ? -0.4f : -0.3f;
+              } else {
+                mel_score += has_harsh ? -0.2f : -0.15f;
+              }
             } else {
-              mel_score += 0.15f;
+              // Consonance bonus: stronger on bar starts and cadence zone.
+              mel_score += (ml == MetricLevel::Bar || is_cadence_adj) ? 0.2f : 0.15f;
             }
           }
         }
@@ -1687,28 +1956,40 @@ Episode generateEpisode(const Subject& subject, Tick start_tick, Tick duration_t
                 });
 
       // Strong-beat dissonance filter: tiered by metric position.
-      //   Bar start (beat 1): remove harsh dissonances (m2/TT/M7) only.
-      //     Mild dissonances (P4, M2, m7) are allowed -- they occur naturally
-      //     in Bach fugues at ~25-34% dissonance (reference: organ_fugue mean=0.746).
-      //   Beat 3: no hard filter -- rely on scoring penalties. Beat 3 is only
-      //     semi-strong in Baroque practice and routinely carries dissonance.
+      //   Bar start (beat 1): remove ALL dissonant candidates. Bach bar starts
+      //     are overwhelmingly consonant (~85% consonance on beat 1).
+      //   Beat 3 (cadence-adjacent): remove harsh dissonances (m2/TT/M7)
+      //     for clean harmonic arrival.
+      //   Beat 3 (normal): remove only harsh dissonances. Beat 3 is only
+      //     semi-strong in Baroque practice and routinely carries mild dissonance.
       //   Suspension-like candidates are always exempt.
       {
         Tick beat_in_bar = (note.start_tick % kTicksPerBar) / kTicksPerBeat;
         if (beat_in_bar == 0) {
-          // Bar start: remove only harsh dissonances.
+          // Bar start: remove all dissonant candidates (not just harsh).
           auto disqualify_it = std::remove_if(
               candidates.begin(), candidates.end(),
               [](const PitchCandidate& cnd) {
-                return cnd.has_harsh_dissonance && !cnd.is_suspension_like;
+                return cnd.has_vertical_dissonance && !cnd.is_suspension_like;
               });
           // Safety valve: never remove ALL candidates.
           if (disqualify_it == candidates.begin()) {
             disqualify_it = candidates.begin() + 1;
           }
           candidates.erase(disqualify_it, candidates.end());
+        } else if (beat_in_bar == 2 && is_cadence_adj) {
+          // Cadence-adjacent beat 3: remove harsh dissonances for clean arrival.
+          auto disqualify_it = std::remove_if(
+              candidates.begin(), candidates.end(),
+              [](const PitchCandidate& cnd) {
+                return cnd.has_harsh_dissonance && !cnd.is_suspension_like;
+              });
+          if (disqualify_it == candidates.begin()) {
+            disqualify_it = candidates.begin() + 1;
+          }
+          candidates.erase(disqualify_it, candidates.end());
         }
-        // Beat 3 (beat_in_bar == 2): no hard filter, scoring handles it.
+        // Beat 3 (non-cadence): no hard filter, scoring handles it.
       }
 
       // --- Sequential trial: best → 2nd → 3rd → omit. ---
@@ -1822,8 +2103,9 @@ Episode generateFortspinnungEpisode(const Subject& subject, const MotifPool& poo
     ScaleType fort_scale = subject.is_minor ? ScaleType::HarmonicMinor
                                            : ScaleType::Major;
     Tick fort_midpoint = start_tick + duration_ticks / 2;
+    Tick fort_end = start_tick + duration_ticks;
     repairEpisodeConsonance(episode.notes, num_voices, start_key, target_key,
-                            fort_scale, fort_midpoint);
+                            fort_scale, fort_midpoint, fort_end);
   }
 
   // Invertible counterpoint with character-specific probability.
@@ -1897,6 +2179,11 @@ Episode generateFortspinnungEpisode(const Subject& subject, const MotifPool& poo
 
   ScaleType scale = subject.is_minor ? ScaleType::HarmonicMinor : ScaleType::Major;
   Tick final_bar_start = (episode_end > kTicksPerBar) ? episode_end - kTicksPerBar : 0;
+
+  // Cadence proximity zone: last 2 beats before episode end.
+  Tick fort_cadence_zone = (episode_end > kTicksPerBeat * 2)
+                               ? episode_end - kTicksPerBeat * 2
+                               : 0;
 
   // --- Harmonic projection bass (basso fondamentale) ---
   // For 3-voice fugues without pedal, replace melodic bass with harmonic projection.
@@ -2086,6 +2373,9 @@ Episode generateFortspinnungEpisode(const Subject& subject, const MotifPool& poo
       MetricLevel ml = metricLevel(note.start_tick);
       const auto& harm_ev = timeline.getAt(note.start_tick);
 
+      // Cadence-adjacent flag: within last 2 beats before episode end.
+      bool is_cadence_adj = (note.start_tick >= fort_cadence_zone);
+
       // Current key for diatonic snapping (midpoint switch).
       Key current_key = (note.start_tick >= start_tick + duration_ticks / 2 &&
                          target_key != start_key)
@@ -2145,6 +2435,80 @@ Episode generateFortspinnungEpisode(const Subject& subject, const MotifPool& poo
         }
       }
 
+      // (2b) Guaranteed vertical-consonant candidate for Bar, Beat, and
+      // cadence-adjacent positions.
+      {
+        bool all_ct_dissonant = true;
+        for (const auto& cnd : candidates) {
+          if (!cnd.is_chord_tone) continue;
+          bool cnd_ok = true;
+          for (VoiceId ov_id : cp_state.getActiveVoices()) {
+            if (ov_id == note.voice) continue;
+            const NoteEvent* other = cp_state.getNoteAt(ov_id, note.start_tick);
+            if (!other || other->start_tick + other->duration <= note.start_tick)
+              continue;
+            int ivl = interval_util::compoundToSimple(
+                absoluteInterval(cnd.pitch, other->pitch));
+            if (!interval_util::isConsonance(ivl)) {
+              cnd_ok = false;
+              break;
+            }
+          }
+          if (cnd_ok) {
+            all_ct_dissonant = false;
+            break;
+          }
+        }
+
+        if (all_ct_dissonant &&
+            (ml == MetricLevel::Bar || ml == MetricLevel::Beat ||
+             is_cadence_adj)) {
+          uint8_t best_vc = 0;
+          int best_vc_score = -1;
+          for (int search = -12; search <= 12; ++search) {
+            int cand_p = static_cast<int>(note.pitch) + search;
+            if (cand_p < 0 || cand_p > 127) continue;
+            if (!isChordTone(static_cast<uint8_t>(cand_p), harm_ev)) continue;
+            bool vc_ok = true;
+            int vc_score = 0;
+            for (VoiceId ov_id : cp_state.getActiveVoices()) {
+              if (ov_id == note.voice) continue;
+              const NoteEvent* other = cp_state.getNoteAt(ov_id, note.start_tick);
+              if (!other || other->start_tick + other->duration <= note.start_tick)
+                continue;
+              int ivl = interval_util::compoundToSimple(
+                  absoluteInterval(static_cast<uint8_t>(cand_p), other->pitch));
+              if (!interval_util::isConsonance(ivl)) {
+                vc_ok = false;
+                break;
+              }
+              // Prefer imperfect consonances.
+              if (ivl == 3 || ivl == 4 || ivl == 8 || ivl == 9) {
+                vc_score += 2;
+              } else {
+                vc_score += 1;
+              }
+            }
+            if (vc_ok && vc_score > best_vc_score) {
+              best_vc_score = vc_score;
+              best_vc = static_cast<uint8_t>(cand_p);
+            }
+          }
+          if (best_vc_score > 0) {
+            bool dup = false;
+            for (const auto& cnd : candidates) {
+              if (cnd.pitch == best_vc) {
+                dup = true;
+                break;
+              }
+            }
+            if (!dup) {
+              candidates.push_back({best_vc, 0.0f, true, false, false});
+            }
+          }
+        }
+      }
+
       // --- Scoring: melodic quality + PhraseGoal. ---
       MelodicContext mel_ctx = buildMelodicContextFromState(cp_state, note.voice);
       for (auto& cand : candidates) {
@@ -2174,8 +2538,8 @@ Episode generateFortspinnungEpisode(const Subject& subject, const MotifPool& poo
           }
         }
 
-        // Vertical consonance: light bias toward consonant vertical intervals.
-        // Final safety is CollisionResolver's responsibility.
+        // Vertical consonance scoring: graduated penalties by metric position
+        // and cadence proximity.
         if (ml >= MetricLevel::Beat) {
           bool has_dissonance = false;
           bool has_harsh = false;
@@ -2190,7 +2554,7 @@ Episode generateFortspinnungEpisode(const Subject& subject, const MotifPool& poo
                 absoluteInterval(cand.pitch, other->pitch));
             if (!interval_util::isConsonance(ivl)) {
               has_dissonance = true;
-              // m2(1), tritone(6), M7(11) are harsh; P4(5), M2(2), m7(10) are mild.
+              // m2(1), tritone(6), M7(11) are harsh.
               if (ivl == 1 || ivl == 6 || ivl == 11) {
                 has_harsh = true;
               }
@@ -2200,9 +2564,15 @@ Episode generateFortspinnungEpisode(const Subject& subject, const MotifPool& poo
             if (has_dissonance) {
               cand.has_vertical_dissonance = true;
               cand.has_harsh_dissonance = has_harsh;
-              mel_score += (ml == MetricLevel::Bar) ? -0.3f : -0.15f;
+              if (ml == MetricLevel::Bar) {
+                mel_score += has_harsh ? -0.5f : -0.35f;
+              } else if (is_cadence_adj) {
+                mel_score += has_harsh ? -0.4f : -0.3f;
+              } else {
+                mel_score += has_harsh ? -0.2f : -0.15f;
+              }
             } else {
-              mel_score += 0.15f;
+              mel_score += (ml == MetricLevel::Bar || is_cadence_adj) ? 0.2f : 0.15f;
             }
           }
         }
@@ -2223,26 +2593,36 @@ Episode generateFortspinnungEpisode(const Subject& subject, const MotifPool& poo
                 });
 
       // Strong-beat dissonance filter: tiered by metric position.
-      //   Bar start (beat 1): remove harsh dissonances (m2/TT/M7) only.
-      //     Mild dissonances (P4, M2, m7) are allowed -- they occur naturally
-      //     in Bach fugues at ~25-34% dissonance (reference: organ_fugue mean=0.746).
-      //   Beat 3: no hard filter -- rely on scoring penalties.
+      //   Bar start (beat 1): remove ALL dissonant candidates.
+      //   Beat 3 (cadence-adjacent): remove harsh dissonances (m2/TT/M7).
+      //   Beat 3 (normal): no hard filter, scoring handles it.
       //   Suspension-like candidates are always exempt.
       {
         Tick beat_in_bar = (note.start_tick % kTicksPerBar) / kTicksPerBeat;
         if (beat_in_bar == 0) {
+          // Bar start: remove all dissonant candidates.
+          auto disqualify_it = std::remove_if(
+              candidates.begin(), candidates.end(),
+              [](const PitchCandidate& cnd) {
+                return cnd.has_vertical_dissonance && !cnd.is_suspension_like;
+              });
+          if (disqualify_it == candidates.begin()) {
+            disqualify_it = candidates.begin() + 1;
+          }
+          candidates.erase(disqualify_it, candidates.end());
+        } else if (beat_in_bar == 2 && is_cadence_adj) {
+          // Cadence-adjacent beat 3: remove harsh dissonances.
           auto disqualify_it = std::remove_if(
               candidates.begin(), candidates.end(),
               [](const PitchCandidate& cnd) {
                 return cnd.has_harsh_dissonance && !cnd.is_suspension_like;
               });
-          // Safety valve: never remove ALL candidates.
           if (disqualify_it == candidates.begin()) {
             disqualify_it = candidates.begin() + 1;
           }
           candidates.erase(disqualify_it, candidates.end());
         }
-        // Beat 3 (beat_in_bar == 2): no hard filter, scoring handles it.
+        // Beat 3 (non-cadence): no hard filter, scoring handles it.
       }
 
       // --- Sequential trial: best → 2nd → 3rd → omit. ---

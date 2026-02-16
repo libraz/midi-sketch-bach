@@ -99,6 +99,8 @@ struct PostValidatePolicy {
   bool fix_weak_beat_nct = false;         ///< Fix weak-beat NCTs (default: no).
   bool fix_hidden_perfect = false;        ///< Fix hidden perfect intervals (default: no).
   Tick cadence_protection_ticks = 0;      ///< Cadence protection range in ticks.
+  bool stylus_phantasticus = false;       ///< True for toccata/fantasia forms: widens
+                                          ///< large-leap thresholds (up to 12th = 19st).
 };
 
 /// @brief Post-validate raw notes through the counterpoint engine.
@@ -121,7 +123,8 @@ std::vector<NoteEvent> postValidateNotes(
     KeySignature key_sig,
     const std::vector<std::pair<uint8_t, uint8_t>>& voice_ranges,
     PostValidateStats* stats = nullptr,
-    const ProtectionOverrides& protection_overrides = {});
+    const ProtectionOverrides& protection_overrides = {},
+    bool stylus_phantasticus = false);
 
 /// @brief Tick-aware overload: voice_range_fn(voice, tick) returns (low, high).
 ///
@@ -134,6 +137,8 @@ std::vector<NoteEvent> postValidateNotes(
 /// @param voice_range_fn Function returning (low, high) for a given voice and tick.
 /// @param[out] stats Optional repair statistics.
 /// @param protection_overrides Per-voice protection level overrides.
+/// @param stylus_phantasticus If true, widen large-leap thresholds for
+///        toccata/fantasia (up to 12th = 19 semitones).
 /// @return Validated notes with counterpoint rules enforced.
 std::vector<NoteEvent> postValidateNotes(
     std::vector<NoteEvent> raw_notes,
@@ -141,7 +146,8 @@ std::vector<NoteEvent> postValidateNotes(
     KeySignature key_sig,
     std::function<std::pair<uint8_t, uint8_t>(uint8_t voice, Tick tick)> voice_range_fn,
     PostValidateStats* stats = nullptr,
-    const ProtectionOverrides& protection_overrides = {});
+    const ProtectionOverrides& protection_overrides = {},
+    bool stylus_phantasticus = false);
 
 /// @brief Post-validate notes with policy control and cadence protection.
 ///

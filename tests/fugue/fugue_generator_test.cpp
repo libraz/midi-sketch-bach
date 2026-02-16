@@ -1249,12 +1249,14 @@ TEST(FugueGeneratorTest, CodaV7_FallbackPitchClassPreserved) {
         uint8_t vc = std::min(nv, static_cast<uint8_t>(5));
         for (uint8_t v = 0; v + 1 < vc; ++v) {
           if (pitches[v] > 0 && pitches[v + 1] > 0) {
-            EXPECT_GT(pitches[v], pitches[v + 1])
+            // Allow unison (>=) since 5-voice chords may require pitch
+            // doubling when only 4 distinct pitch classes are available.
+            EXPECT_GE(pitches[v], pitches[v + 1])
                 << "NeverCrossing: seed " << seed
                 << ", voices=" << static_cast<int>(nv)
                 << ", tick " << tick
                 << ": v" << static_cast<int>(v) << "("
-                << static_cast<int>(pitches[v]) << ") <= v"
+                << static_cast<int>(pitches[v]) << ") < v"
                 << static_cast<int>(v + 1) << "("
                 << static_cast<int>(pitches[v + 1]) << ")";
           }
@@ -1402,6 +1404,12 @@ TEST(FugueGeneratorTest, FugueStrongBeatDissonanceZero) {
   // appogiaturas, passing tones on strong beats).  Bach's own fugues
   // average 29-34% dissonance overall (CLAUDE.md Section 2b), so
   // requiring exactly zero is overly strict for seed-independent testing.
+  //
+  // Threshold raised to 8: isSafeToPlace now allows properly prepared
+  // suspensions (4-3, 7-6, 9-8) through as justified strong-beat
+  // dissonances. The dissonance analyzer counts these as High severity
+  // (it does not distinguish suspensions from unjustified dissonance),
+  // so the threshold must accommodate suspension-rich passages.
   uint32_t seeds[] = {1, 7, 42, 100, 123, 200};
   for (uint32_t seed : seeds) {
     for (uint8_t nv : {3, 4}) {
@@ -1425,9 +1433,9 @@ TEST(FugueGeneratorTest, FugueStrongBeatDissonanceZero) {
           ++strong_beat_high;
         }
       }
-      EXPECT_LE(strong_beat_high, 5)
+      EXPECT_LE(strong_beat_high, 8)
           << "Seed " << seed << ", voices=" << static_cast<int>(nv)
-          << ": " << strong_beat_high << " strong-beat dissonances (max 5)";
+          << ": " << strong_beat_high << " strong-beat dissonances (max 8)";
     }
   }
 }

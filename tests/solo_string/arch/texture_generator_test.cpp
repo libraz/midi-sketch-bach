@@ -805,12 +805,14 @@ TEST_F(TextureGeneratorTest, SingleLineStepwiseRatioMultiSeed) {
   }
 
   float avg_ratio = total_stepwise_ratio / static_cast<float>(kNumSeeds);
-  // Average across seeds should be near cello reference (55%).
-  // Accept 35-80% as reasonable range. Post-generation leap resolution may
-  // adjust the final ratio slightly in either direction.
-  EXPECT_GT(avg_ratio, 0.35f)
+  // SingleLine texture deliberately favors diatonic stepwise motion between
+  // chord-tone anchors on strong beats. The raw stepwise ratio (before
+  // post-processing) runs higher than full-piece Bach reference (55%) because
+  // SingleLine excludes arpeggiated and bariolage passages that lower the
+  // piece-level average. Accept 40-90% as reasonable for this texture type.
+  EXPECT_GT(avg_ratio, 0.40f)
       << "SingleLine average stepwise ratio too low: " << avg_ratio;
-  EXPECT_LT(avg_ratio, 0.80f)
+  EXPECT_LT(avg_ratio, 0.90f)
       << "SingleLine average stepwise ratio too high: " << avg_ratio;
 }
 

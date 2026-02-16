@@ -981,12 +981,24 @@ std::vector<NoteEvent> generatePedalBass(Tick cantus_tick, Tick cantus_dur,
       consecutive_octave = 0;
     }
 
-    // Beat-position pattern: half on downbeat, quarter elsewhere.
+    // Beat-position pattern with cadence-aware broadening:
+    // - Downbeats: half note anchor for stability
+    // - Beat 2: occasional dotted quarter for rhythmic variety
+    // - Weak beats (1, 3): quarter notes, with occasional 8th-note
+    //   passing motion when approaching the next chord tone
+    // - Final 2 beats of segment: whole note for cadential weight
+    bool near_segment_end = (end_tick - current_tick) <= 2 * kTicksPerBeat;
     Tick dur;
-    if (beat == 0) {
+    if (near_segment_end && beat == 0) {
+      dur = kHalfNote;  // Cadential approach: broad half note.
+    } else if (beat == 0) {
       dur = kHalfNote;  // Downbeat: anchor with half note.
     } else if (beat == 2 && rng::rollProbability(rng, 0.3f)) {
       dur = kQuarterNote + kEighthNote;  // Beat 3: occasional dotted quarter.
+    } else if ((beat == 1 || beat == 3) && !near_segment_end &&
+               rng::rollProbability(rng, 0.25f)) {
+      // Weak beats: occasional 8th-note pair for passing motion.
+      dur = kEighthNote;
     } else {
       dur = kQuarterNote;  // Other beats: quarter note.
     }
@@ -1190,6 +1202,10 @@ std::vector<NoteEvent> generateInnerVoice(
   Tick base_note_dur = (cantus_dur >= kWholeNote) ? kEighthNote : kQuarterNote;
   Tick cadence_window_inner = 2 * kTicksPerBeat;
 
+  // Phrase-end detection: final quarter of each cantus segment is cadential,
+  // with broader note values (quarter/half) for convergence with CF.
+  Tick phrase_cadence_start = cantus_tick + (cantus_dur * 3 / 4);
+
   // Helper: find pedal pitch at a given tick.
   auto pedal_pitch_at = [&pedal_notes](Tick tick) -> uint8_t {
     for (const auto& evt : pedal_notes) {
@@ -1252,18 +1268,29 @@ std::vector<NoteEvent> generateInnerVoice(
   Tick end_tick = cantus_tick + cantus_dur;
 
   while (current_tick < end_tick) {
-    // Beat-position-aware inner voice duration:
-    // Downbeats use longer notes (quarter), middle beats use base duration,
-    // cadence regions broaden to quarter/half for convergence with CF.
+    // Beat-position-aware inner voice duration with structural motivation:
+    // - Phrase endings (approaching cadence): converge to quarter/half notes
+    // - Downbeats (beat 0): quarter note anchor (structural tone)
+    // - Beat 2 (secondary strong): quarter note for stability
+    // - Beats 1, 3 (weak): 8th-note decorative fills for rhythmic activity
+    // This creates a natural alternation between structural tones and decorations
+    // within each bar, driven by metric position rather than random choice.
     uint8_t beat = beatInBar(current_tick);
     bool near_cadence_inner = (end_tick - current_tick) <= cadence_window_inner;
+    bool in_phrase_cadence = (current_tick >= phrase_cadence_start);
     Tick dur;
-    if (near_cadence_inner) {
-      dur = kQuarterNote;  // Cadence: converge to quarter notes.
+    if (near_cadence_inner || in_phrase_cadence) {
+      // Phrase ending: converge to quarter/half for rhythmic repose.
+      dur = rng::rollProbability(rng, 0.7f) ? kQuarterNote : kHalfNote;
     } else if (beat == 0) {
-      dur = kQuarterNote;  // Downbeat: anchor with quarter note.
+      dur = kQuarterNote;  // Downbeat: quarter note anchor (structural tone).
+    } else if (beat == 2) {
+      dur = kQuarterNote;  // Secondary strong beat: quarter note stability.
+    } else if (base_note_dur <= kEighthNote) {
+      // Weak beats (1, 3) with active cantus: 8th-note decorative fills.
+      dur = kEighthNote;
     } else {
-      dur = base_note_dur;  // Use base density for middle beats.
+      dur = base_note_dur;  // Short cantus segments: use base density.
     }
     Tick remaining = end_tick - current_tick;
     if (dur > remaining) dur = remaining;
@@ -1439,87 +1466,165 @@ int countActiveVoicesAt(const std::vector<NoteEvent>& all_notes, Tick tick) {
   return count;
 }
 
-/// @brief Apply CF-aware rest policy to thin inner voice texture.
+/// @brief Classify a cantus note position as phrase-opening, middle, or ending.
 ///
-/// The cantus firmus voice (kCantusVoice) is never modified. Inner voices
-/// (voices that are neither the CF nor the bass) have their attack frequency
-/// reduced at non-cadence points where texture density exceeds 3 simultaneous
-/// voices. This is achieved by extending the previous inner voice note's
-/// duration to absorb the current note, effectively creating a tied note
-/// instead of a re-attack.
+/// Used to determine texture density targets per position:
+///   - Opening (first note of a phrase after a long note): lighter density.
+///   - Middle: maintain density.
+///   - Ending (approaching cadence, penultimate/final notes): full convergence.
 ///
-/// Only notes with source == FreeCounterpoint (Flexible protection) are
-/// candidates for absorption. Cadence points (final 2 bars) always preserve
-/// all voices for convergence.
+/// @param note_idx Index of the cantus note (0-based).
+/// @param note_count Total number of cantus notes.
+/// @param durations Array of cantus note durations in ticks.
+/// @return 0 = opening (thin), 1 = middle (normal), 2 = ending (full).
+int classifyCantusPosition(size_t note_idx, size_t note_count,
+                            const std::vector<Tick>& durations) {
+  // Final 2 notes are always "ending" (cadence convergence).
+  if (note_count >= 2 && note_idx >= note_count - 2) return 2;
+
+  // First note is always "opening" (thin start).
+  if (note_idx == 0) return 0;
+
+  // After a long cantus note (>= breve), the next position is phrase-opening.
+  if (note_idx >= 1 && durations[note_idx - 1] >= kWholeNote * 2) return 0;
+
+  return 1;  // Middle: normal density.
+}
+
+/// @brief Apply CF-aware rest policy to thin texture with phrase awareness.
+///
+/// The cantus firmus voice (kCantusVoice) is never modified. Non-CF voices
+/// have their attack frequency reduced based on cantus phrase position:
+///   - Phrase openings: inner voice silenced (CF + figuration + pedal only).
+///   - Phrase middles: inner voice thinned (absorb alternate attacks).
+///   - Phrase endings (cadence): all voices converge (no thinning).
+///   - Pedal voice: thinned at phrase openings by extending note durations.
+///
+/// Only notes with source == FreeCounterpoint or PedalPoint (Flexible
+/// protection) are candidates for absorption. CantusFixed is Immutable.
 ///
 /// @param tracks The 4 chorale prelude tracks (modified in place).
-/// @param total_duration Total piece duration in ticks.
-/// @return Number of inner voice attacks absorbed.
-int applyCFAwareRestPolicy(std::vector<Track>& tracks, Tick total_duration) {
+/// @param melody The chorale melody (for phrase position classification).
+/// @return Number of voice attacks absorbed.
+int applyCFAwareRestPolicy(std::vector<Track>& tracks,
+                            const ChoraleMelody& melody) {
   int absorbed = 0;
 
-  // Cadence region: final 2 bars — all voices should converge.
-  Tick cadence_start = (total_duration > kTicksPerBar * 2)
-      ? total_duration - kTicksPerBar * 2
-      : total_duration;
-
-  // Build a flat note list for density queries.
-  std::vector<NoteEvent> all_notes;
-  for (const auto& track : tracks) {
-    all_notes.insert(all_notes.end(), track.notes.begin(), track.notes.end());
+  // Build cantus duration array for phrase classification.
+  std::vector<Tick> cantus_durations;
+  cantus_durations.reserve(melody.note_count);
+  for (size_t idx = 0; idx < melody.note_count; ++idx) {
+    cantus_durations.push_back(
+        static_cast<Tick>(melody.notes[idx].duration_beats) * kTicksPerBeat);
   }
 
-  // Process the inner voice track (track index kInnerVoice = 2).
+  // Build cantus segment boundaries (start_tick -> phrase position class).
+  struct CantusSegment {
+    Tick start;
+    Tick end;
+    int position;  // 0=opening, 1=middle, 2=ending
+  };
+  std::vector<CantusSegment> segments;
+  segments.reserve(melody.note_count);
+  Tick seg_tick = 0;
+  for (size_t idx = 0; idx < melody.note_count; ++idx) {
+    Tick dur = cantus_durations[idx];
+    int pos = classifyCantusPosition(idx, melody.note_count, cantus_durations);
+    segments.push_back({seg_tick, seg_tick + dur, pos});
+    seg_tick += dur;
+  }
+
+  // Helper: find phrase position at a given tick.
+  auto positionAt = [&segments](Tick tick) -> int {
+    for (const auto& seg : segments) {
+      if (tick >= seg.start && tick < seg.end) return seg.position;
+    }
+    return 1;  // Default: middle (normal density).
+  };
+
+  // --- Inner voice thinning (track kInnerVoice = 2) ---
   auto& inner_notes = tracks[kInnerVoice].notes;
-  if (inner_notes.size() < 2) return 0;
+  if (inner_notes.size() >= 2) {
+    std::sort(inner_notes.begin(), inner_notes.end(),
+              [](const NoteEvent& lhs, const NoteEvent& rhs) {
+                return lhs.start_tick < rhs.start_tick;
+              });
 
-  // Sort inner notes by start_tick for sequential processing.
-  std::sort(inner_notes.begin(), inner_notes.end(),
-            [](const NoteEvent& lhs, const NoteEvent& rhs) {
-              return lhs.start_tick < rhs.start_tick;
-            });
+    for (size_t idx = 0; idx < inner_notes.size(); ++idx) {
+      auto& current = inner_notes[idx];
 
-  // Mark notes for removal by setting duration to 0.
-  for (size_t idx = 1; idx < inner_notes.size(); ++idx) {
-    auto& current = inner_notes[idx];
+      // Only absorb Flexible-protection notes.
+      if (current.source != BachNoteSource::FreeCounterpoint) continue;
 
-    // Never absorb in cadence region.
-    if (current.start_tick >= cadence_start) continue;
+      int pos = positionAt(current.start_tick);
 
-    // Only absorb Flexible-protection notes.
-    if (current.source != BachNoteSource::FreeCounterpoint) continue;
-
-    // Check density at this note's start tick.
-    int density = countActiveVoicesAt(all_notes, current.start_tick);
-    if (density <= 3) continue;
-
-    // Absorb: extend previous note's duration to cover this one.
-    auto& previous = inner_notes[idx - 1];
-    Tick extended_end = current.start_tick + current.duration;
-    Tick prev_end = previous.start_tick + previous.duration;
-    if (extended_end > prev_end) {
-      previous.duration = extended_end - previous.start_tick;
+      if (pos == 0) {
+        // Phrase opening: silence inner voice entirely.
+        current.duration = 0;
+        ++absorbed;
+      } else if (pos == 1 && idx > 0 && idx % 2 == 0) {
+        // Phrase middle: absorb every other attack (tie extension).
+        auto& previous = inner_notes[idx - 1];
+        if (previous.duration > 0) {
+          Tick extended_end = current.start_tick + current.duration;
+          Tick prev_end = previous.start_tick + previous.duration;
+          if (extended_end > prev_end) {
+            previous.duration = extended_end - previous.start_tick;
+          }
+        }
+        current.duration = 0;
+        ++absorbed;
+      }
+      // pos == 2 (ending): keep all notes for cadence convergence.
     }
 
-    // Mark current note for removal.
-    current.duration = 0;
-    ++absorbed;
-
-    // Skip every other note at most — preserve some inner voice motion.
-    // This ensures we do not absorb consecutive notes, keeping texture alive.
-    ++idx;
+    // Remove absorbed inner notes.
+    inner_notes.erase(
+        std::remove_if(inner_notes.begin(), inner_notes.end(),
+                       [](const NoteEvent& note) { return note.duration == 0; }),
+        inner_notes.end());
   }
 
-  // Remove absorbed notes (duration == 0).
-  inner_notes.erase(
-      std::remove_if(inner_notes.begin(), inner_notes.end(),
-                     [](const NoteEvent& note) { return note.duration == 0; }),
-      inner_notes.end());
+  // --- Pedal voice thinning (track kPedalVoice = 3) ---
+  // At phrase openings, extend pedal note durations and absorb re-attacks
+  // to create a sustained pedal tone instead of rhythmic bass.
+  auto& pedal_notes = tracks[kPedalVoice].notes;
+  if (pedal_notes.size() >= 2) {
+    std::sort(pedal_notes.begin(), pedal_notes.end(),
+              [](const NoteEvent& lhs, const NoteEvent& rhs) {
+                return lhs.start_tick < rhs.start_tick;
+              });
+
+    for (size_t idx = 1; idx < pedal_notes.size(); ++idx) {
+      auto& current = pedal_notes[idx];
+      if (current.source != BachNoteSource::PedalPoint) continue;
+
+      int pos = positionAt(current.start_tick);
+      if (pos == 0) {
+        // Phrase opening: extend previous pedal note, absorb this one.
+        auto& previous = pedal_notes[idx - 1];
+        if (previous.duration > 0) {
+          Tick extended_end = current.start_tick + current.duration;
+          Tick prev_end = previous.start_tick + previous.duration;
+          if (extended_end > prev_end) {
+            previous.duration = extended_end - previous.start_tick;
+          }
+        }
+        current.duration = 0;
+        ++absorbed;
+      }
+    }
+
+    pedal_notes.erase(
+        std::remove_if(pedal_notes.begin(), pedal_notes.end(),
+                       [](const NoteEvent& note) { return note.duration == 0; }),
+        pedal_notes.end());
+  }
 
   if (absorbed > 0) {
     fprintf(stderr,
-            "[ChoralePrelude] CF-aware rest policy: absorbed %d inner voice"
-            " attacks to thin texture\n", absorbed);
+            "[ChoralePrelude] CF-aware rest policy: absorbed %d voice"
+            " attacks to vary texture density\n", absorbed);
   }
 
   return absorbed;
@@ -1623,10 +1728,12 @@ ChoralePreludeResult generateChoralePrelude(const ChoralePreludeConfig& config) 
     cantus_tick += cantus_dur;
   }
 
-  // Step 6a: CF-aware rest policy — thin inner voice texture while preserving CF.
-  // The cantus firmus voice is never modified. Inner voice attacks are absorbed
-  // (extended duration) at non-cadence points where texture density > 3 voices.
-  applyCFAwareRestPolicy(tracks, total_duration);
+  // Step 6a: CF-aware rest policy — thin texture with phrase awareness.
+  // The cantus firmus voice is never modified. Inner voice and pedal attacks
+  // are absorbed at phrase openings and thinned at middles. Cadence regions
+  // preserve all voices for convergence. Creates texture variation matching
+  // Orgelbüchlein reference (not constant 4-voice density).
+  applyCFAwareRestPolicy(tracks, melody);
 
   // Step 6b: Post-validate through counterpoint engine.
   {

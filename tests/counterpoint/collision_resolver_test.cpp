@@ -1217,5 +1217,276 @@ TEST_F(CollisionResolverTest, SuspensionTypeStandard43HasLowPenalty) {
   EXPECT_FLOAT_EQ(result.penalty, 0.15f);
 }
 
+// ---------------------------------------------------------------------------
+// Strong-beat suspension validation in isSafeToPlace (Phase 1E)
+// ---------------------------------------------------------------------------
+
+/// @brief Test fixture for suspension validation in isSafeToPlace.
+///
+/// Tests that properly prepared suspensions (4-3, 7-6, 9-8) are allowed
+/// through isSafeToPlace on strong beats, while unjustified dissonances
+/// are still rejected.
+class SuspensionValidationTest : public ::testing::Test {
+ protected:
+  void SetUp() override {
+    state.registerVoice(0, 48, 84);  // Soprano: C3-C6
+    state.registerVoice(1, 36, 72);  // Alto: C2-C5
+  }
+  CounterpointState state;
+  FuxRuleEvaluator rules;
+  CollisionResolver resolver;
+};
+
+TEST_F(SuspensionValidationTest, PreparedSuspensionAllowedOnBarStart) {
+  // Set up a properly prepared suspension with enough spacing:
+  //   Preparation (tick 1440): Voice 0 has E4(64), Voice 1 has A3(57).
+  //     |64-57| = 7 (P5) = consonant. Preparation OK.
+  //   Hold (tick 1920, bar start): Voice 0 holds E4(64), Voice 1 moves to C4(60).
+  //     |64-60| = 4 (M3) -- actually consonant. Need dissonance.
+  //
+  //   Better: Preparation: Voice 0 has G4(67), Voice 1 has C4(60).
+  //     |67-60| = 7 (P5) = consonant.
+  //   Hold (tick 1920): Voice 1 moves to F4(65). G4(67) with F4(65) = 2 (M2), dissonant.
+  //   Resolution: G4-2=F4(65) with F4(65) = 0 (unison), consonant. 9-8 type!
+  //   Spacing: |67-65| = 2 < 3 -- fails strict spacing. Need wider interval.
+  //
+  //   Use wider registers to avoid strict spacing:
+  //   Preparation: Voice 0 has D5(74), Voice 1 has G4(67).
+  //     |74-67| = 7 (P5) = consonant.
+  //   Hold (tick 1920): Voice 1 moves to C5(72). D5(74) with C5(72) = 2 (M2).
+  //   But |74-72| = 2 < 3 -- strict spacing again.
+  //
+  //   Use non-adjacent spacing (>= 3 semitones dissonance):
+  //   Preparation: Voice 0 has E5(76), Voice 1 has A4(69).
+  //     |76-69| = 7 (P5), consonant.
+  //   Hold: Voice 1 moves to D4(62). E5(76) with D4(62) = 14, mod12=2 (M2).
+  //   |76-62| = 14 (> 3 semitones), so strict spacing passes.
+  //   Resolution: E5-2=D5(74) with D4(62) = 12, mod12=0 (P8), consonant. OK!
+  state.addNote(0, {1440, 480, 76, 80, 0});   // Voice 0: E5 at preparation.
+  state.addNote(1, {1440, 480, 69, 80, 1});   // Voice 1: A4 (P5 with E5, consonant).
+  state.addNote(1, {1920, 480, 62, 80, 1});   // Voice 1: D4 at bar start.
+
+  // E5(76) with D4(62) = 14, mod12=2 (M2), dissonant on bar start.
+  // Preparation: E5(76) with A4(69) = 7 (P5), consonant. OK.
+  // Resolution: E5-2=D5(74) with D4(62) = 12 (P8), consonant. OK.
+  // This is a valid 9-8 suspension. Bar start dissonance justified.
+  EXPECT_TRUE(resolver.isSafeToPlace(state, rules, 0, 76, 1920, 480));
+}
+
+TEST_F(SuspensionValidationTest, UnpreparedDissonanceRejectedOnBarStart) {
+  // No preparation: voice 0 had a different pitch on the previous beat.
+  state.addNote(0, {480, 480, 67, 80, 0});   // Voice 0: G4 at tick 480.
+  state.addNote(1, {480, 480, 60, 80, 1});   // Voice 1: C4 at tick 480.
+  state.addNote(1, {960, 480, 62, 80, 1});   // Voice 1: D4 at tick 960.
+
+  // Voice 0 wants E4(64) at tick 960. With D4(62): interval 2 (M2), dissonant.
+  // But E4 was NOT the pitch at tick 480 (G4 was). No preparation -> rejected.
+  // Tick 960 = beat 2 in bar 0 (strong beat). M2 is a mild dissonance on beats
+  // 2-4, so it may be allowed by the tiered check. Use bar start instead.
+  //
+  // Use tick 1920 (bar 1 start) where ALL dissonances are rejected.
+  state.addNote(0, {1440, 480, 67, 80, 0});   // Voice 0: G4 at tick 1440.
+  state.addNote(1, {1440, 480, 60, 80, 1});   // Voice 1: C4 at tick 1440.
+  state.addNote(1, {1920, 480, 62, 80, 1});   // Voice 1: D4 at tick 1920.
+
+  // Voice 0 wants E4(64) at bar start tick 1920.
+  // E4(64) was NOT sounding at tick 1440 (G4 was). Unprepared -> rejected.
+  EXPECT_FALSE(resolver.isSafeToPlace(state, rules, 0, 64, 1920, 480));
+}
+
+TEST_F(SuspensionValidationTest, SuspensionWithNoResolutionRejected) {
+  // Set up preparation but no valid resolution:
+  //   Preparation (tick 1440): Voice 0 has F#4(66), Voice 1 has C4(60).
+  //     |66-60| = 6 (tritone) = dissonant. Preparation itself fails.
+  //   This should be rejected even before resolution check.
+  state.addNote(0, {1440, 480, 66, 80, 0});   // Voice 0: F#4.
+  state.addNote(1, {1440, 480, 60, 80, 1});   // Voice 1: C4.
+  state.addNote(1, {1920, 480, 65, 80, 1});   // Voice 1: F4 at bar start.
+
+  // F#4(66) with F4(65): interval 1 (m2), dissonant on bar start.
+  // Preparation: F#4(66) with C4(60) at tick 1440 = 6 (tritone) = dissonant.
+  // Preparation fails -> suspension not justified -> rejected.
+  EXPECT_FALSE(resolver.isSafeToPlace(state, rules, 0, 66, 1920, 480));
+}
+
+TEST_F(SuspensionValidationTest, SuspensionRequiresSamePitchHeld) {
+  // The held pitch must be the same as the preparation pitch.
+  // Preparation: Voice 0 has E4(64) at tick 1440.
+  // But we try to place F4(65) at tick 1920 -- different pitch than preparation.
+  state.addNote(0, {1440, 480, 64, 80, 0});   // Voice 0: E4 at preparation.
+  state.addNote(1, {1440, 480, 60, 80, 1});   // Voice 1: C4 at preparation.
+  state.addNote(1, {1920, 480, 64, 80, 1});   // Voice 1: E4 at bar start.
+
+  // Voice 0 wants F4(65) at tick 1920. F4 != E4 (preparation pitch).
+  // |65-64| = 1 (m2), dissonant on bar start.
+  // The pitch 65 was NOT held from tick 1440 (64 was). Not a suspension.
+  EXPECT_FALSE(resolver.isSafeToPlace(state, rules, 0, 65, 1920, 480));
+}
+
+TEST_F(SuspensionValidationTest, ValidSuspension43Type) {
+  // 4-3 suspension: held pitch creates P4 (5 semitones) with the other voice.
+  // Resolution: downward by step to M3 (4 semitones) or m3 (3 semitones).
+  //
+  //   Preparation (tick 1440): Voice 0 has C5(72), Voice 1 has G4(67).
+  //     |72-67| = 5 (P4). In Fux 2-voice rules, P4 is dissonant.
+  //     For the preparation, we need consonance. Use different pitches.
+  //
+  //   Better: Preparation: Voice 0 has F4(65), Voice 1 has C4(60).
+  //     |65-60| = 5 (P4) -- still dissonant in 2-voice Fux.
+  //
+  //   Use 3-voice context where P4 between upper voices is consonant.
+  //   Or use an interval that IS consonant: E4(64) with C4(60) = M3 (consonant).
+  //   Then Voice 1 moves to Bb3(58). E4(64) with Bb3(58) = 6 (tritone)? No.
+  //   Voice 1 moves to B3(59). E4(64) with B3(59) = 5 (P4) -- dissonant (4-3).
+  //   Resolution: E4-1=Eb4(63) with B3(59) = 4 (M3) -- consonant. 4-3 suspension!
+  state.addNote(0, {1440, 480, 64, 80, 0});   // Voice 0: E4 at prep.
+  state.addNote(1, {1440, 480, 60, 80, 1});   // Voice 1: C4 at prep (E4-C4 = M3, consonant).
+  state.addNote(1, {1920, 480, 59, 80, 1});   // Voice 1: B3 at bar start.
+
+  // E4(64) with B3(59) = 5 (P4), dissonant on bar start.
+  // Preparation: E4(64) with C4(60) at tick 1440 = 4 (M3), consonant. OK.
+  // Resolution: E4-1=Eb4(63) with B3(59) = 4 (M3), consonant. OK.
+  // This is a valid 4-3 suspension.
+  EXPECT_TRUE(resolver.isSafeToPlace(state, rules, 0, 64, 1920, 480));
+}
+
+TEST_F(SuspensionValidationTest, ValidSuspension76Type) {
+  // 7-6 suspension: held pitch creates m7 or M7 with the other voice.
+  //   Preparation: Voice 0 has D5(74), Voice 1 has G4(67).
+  //     |74-67| = 7 (P5) = consonant. Preparation OK.
+  //   Hold: Voice 1 moves to E4(64). D5(74) with E4(64) = 10 (m7), dissonant.
+  //   Resolution: D5-1=C#5(73) with E4(64) = 9 (M6), consonant. 7-6 suspension!
+  state.addNote(0, {1440, 480, 74, 80, 0});   // Voice 0: D5 at prep.
+  state.addNote(1, {1440, 480, 67, 80, 1});   // Voice 1: G4 (P5, consonant).
+  state.addNote(1, {1920, 480, 64, 80, 1});   // Voice 1: E4 at bar start.
+
+  // D5(74) with E4(64) = 10 (m7), dissonant on bar start.
+  // Preparation: D5(74) with G4(67) = 7 (P5), consonant. OK.
+  // Resolution: D5-2=C5(72) with E4(64) = 8 (m6), consonant. OK.
+  EXPECT_TRUE(resolver.isSafeToPlace(state, rules, 0, 74, 1920, 480));
+}
+
+TEST_F(SuspensionValidationTest, ValidSuspension98Type) {
+  // 9-8 suspension: held pitch creates M2 (as compound 9th) with the other voice.
+  // Use wide register to avoid strict adjacent-voice spacing rejection (< m3).
+  //
+  //   Preparation: Voice 0 has D5(74), Voice 1 has G3(55).
+  //     |74-55| = 19, mod12=7 (P5) = consonant. Preparation OK.
+  //   Hold (tick 1920): Voice 1 moves to C4(60). D5(74) with C4(60) = 14, mod12=2 (M2).
+  //   Resolution: D5-2=C5(72) with C4(60) = 12, mod12=0 (P8), consonant. 9-8!
+  state.addNote(0, {1440, 480, 74, 80, 0});   // Voice 0: D5 at prep.
+  state.addNote(1, {1440, 480, 55, 80, 1});   // Voice 1: G3 (P5 compound, consonant).
+  state.addNote(1, {1920, 480, 60, 80, 1});   // Voice 1: C4 at bar start.
+
+  // D5(74) with C4(60) = 14, mod12=2 (M2), dissonant on bar start.
+  // Preparation: D5(74) with G3(55) = 19, mod12=7 (P5), consonant. OK.
+  // Resolution: D5-2=C5(72) with C4(60) = 12, mod12=0 (P8), consonant. OK.
+  EXPECT_TRUE(resolver.isSafeToPlace(state, rules, 0, 74, 1920, 480));
+}
+
+TEST_F(SuspensionValidationTest, HarshDissonanceAllowedAsSuspensionOnBeat2) {
+  // On beats 2-4, harsh dissonances (m2, TT, M7) are normally rejected.
+  // A valid suspension involving M7 should be allowed.
+  //   Preparation (tick 480): Voice 0 has B4(71), Voice 1 has E4(64).
+  //     |71-64| = 7 (P5), consonant. Preparation OK.
+  //   Hold (tick 960): Voice 1 moves to C4(60). B4(71) with C4(60) = 11 (M7).
+  //   Resolution: B4-1=Bb4(70) with C4(60) = 10 (m7).
+  //   m7 is not consonant in Fux rules (no P4 exception).
+  //   B4-2=A4(69) with C4(60) = 9 (M6), consonant. 7-6 type!
+  state.addNote(0, {480, 480, 71, 80, 0});   // Voice 0: B4 at tick 480.
+  state.addNote(1, {480, 480, 64, 80, 1});   // Voice 1: E4 (P5, consonant).
+  state.addNote(1, {960, 480, 60, 80, 1});   // Voice 1: C4 at tick 960 (beat 2).
+
+  // Tick 960 = beat 2 (strong). B4(71) with C4(60) = 11 (M7), harsh dissonance.
+  // Normally rejected on beats 2-4 without suspension. But this is a valid 7-6.
+  EXPECT_TRUE(resolver.isSafeToPlace(state, rules, 0, 71, 960, 480));
+}
+
+TEST_F(SuspensionValidationTest, UnpreparedHarshDissonanceStillRejectedOnBeat2) {
+  // Harsh dissonance on beat 2 without proper preparation is still rejected.
+  state.addNote(0, {480, 480, 67, 80, 0});   // Voice 0: G4 at tick 480.
+  state.addNote(1, {480, 480, 64, 80, 1});   // Voice 1: E4.
+  state.addNote(1, {960, 480, 60, 80, 1});   // Voice 1: C4 at tick 960.
+
+  // Voice 0 wants B4(71) at tick 960. B4 with C4 = 11 (M7), harsh.
+  // But B4 was NOT the pitch at tick 480 (G4 was). Not a suspension.
+  EXPECT_FALSE(resolver.isSafeToPlace(state, rules, 0, 71, 960, 480));
+}
+
+TEST_F(SuspensionValidationTest, CandidatePrioritySuspensionBelowConsonance) {
+  // When chord_tone or step_shift evaluates candidates, a valid suspension
+  // should score lower than imperfect consonances but higher than unjustified
+  // dissonance. Verify indirectly: when both consonant and suspension candidates
+  // are available, the consonant pitch should be chosen.
+  state.addNote(0, {1440, 480, 64, 80, 0});   // Voice 0: E4 at prep.
+  state.addNote(1, {1440, 480, 60, 80, 1});   // Voice 1: C4 at prep.
+  state.addNote(1, {1920, 480, 59, 80, 1});   // Voice 1: B3 at bar start.
+
+  // Desired: E4(64). This creates P4 with B3 (5 semitones), dissonant on
+  // bar start. But it IS a valid 4-3 suspension.
+  // The cascade should still prefer a consonant alternative if available.
+  auto result = resolver.findSafePitch(state, rules, 0, 64, 1920, 480);
+  EXPECT_TRUE(result.accepted);
+  // The original pitch (E4=64) is now safe (valid suspension), so it should
+  // be accepted by the "original" strategy.
+  EXPECT_EQ(result.pitch, 64);
+  EXPECT_EQ(result.strategy, "original");
+}
+
+// ---------------------------------------------------------------------------
+// Voice-dependent suspension type validation
+// ---------------------------------------------------------------------------
+
+/// @brief Test 4-3 suspension voice dependency with 3-voice fixture.
+class SuspensionVoiceDependencyTest : public ::testing::Test {
+ protected:
+  void SetUp() override {
+    state.registerVoice(0, 60, 96);  // Soprano
+    state.registerVoice(1, 48, 84);  // Alto
+    state.registerVoice(2, 36, 60);  // Bass (last voice)
+  }
+  CounterpointState state;
+  BachRuleEvaluator rules{3};
+  CollisionResolver resolver;
+};
+
+TEST_F(SuspensionVoiceDependencyTest, Suspension76AllowedInBassVoice) {
+  // 7-6 suspensions are allowed in any voice including bass.
+  //   Preparation (tick 1440): Voice 2 (bass) has G3(55), Voice 0 has C4(60).
+  //     |55-60| = 5 (P4). In 3-voice BachRuleEvaluator, P4 between bass and
+  //     soprano may still be dissonant. Use |55-62|=7 (P5) instead.
+  //   Actually, for 7-6 suspension, we need:
+  //     Preparation: consonant. Hold: m7 or M7 dissonance. Resolution: m6 or M6.
+  //
+  //   Preparation: bass has D3(50), soprano has A4(69). |69-50|=19, mod12=7 (P5), consonant.
+  //   Hold: soprano moves to E4(64). |50-64|=14, mod12=2 (M2). Not m7/M7.
+  //   Try: bass has G2(43), soprano has D4(62). |62-43|=19, mod12=7 (P5), consonant.
+  //   Hold: soprano moves to A3(57). |43-57|=14, mod12=2 (M2). Not m7.
+  //
+  //   Better: bass holds. Soprano creates the suspension.
+  //   But we want to test BASS voice holding a suspension.
+  //
+  //   Preparation: Voice 2 (bass) has Bb2(46), Voice 0 has F4(65).
+  //     |65-46|=19, mod12=7 (P5), consonant.
+  //   Hold (tick 1920): Voice 0 moves to C4(60). Bass still Bb2(46).
+  //     |46-60|=14, mod12=2 (M2). That's a 9-8 type, not 7-6.
+  //
+  //   For 7-6: need m7 (10) or M7 (11) between bass and another voice.
+  //   Preparation: bass has D3(50), soprano has A4(69). P5, consonant.
+  //   Hold: soprano moves to Eb4(63). |50-63|=13, mod12=1 (m2). Not m7.
+  //
+  //   Hold: soprano moves to C5(72). |50-72|=22, mod12=10 (m7). Yes!
+  //   Resolution: D3-2=C3(48) with C5(72): |48-72|=24, mod12=0 (unison/P8), consonant.
+  state.addNote(2, {1440, 480, 50, 80, 2});   // Bass: D3.
+  state.addNote(0, {1440, 480, 69, 80, 0});   // Soprano: A4. |69-50|=19,mod12=7 (P5).
+  state.addNote(0, {1920, 480, 72, 80, 0});   // Soprano: C5 at bar start.
+
+  // Bass D3(50) with C5(72): |50-72|=22, mod12=10 (m7), dissonant.
+  // Preparation: D3(50) with A4(69) at tick 1440 = 19, mod12=7 (P5), consonant.
+  // Resolution: D3-2=C3(48) with C5(72) = 24, mod12=0 (P8), consonant.
+  // 7-6 type: allowed in any voice including bass.
+  EXPECT_TRUE(resolver.isSafeToPlace(state, rules, 2, 50, 1920, 480));
+}
+
 }  // namespace
 }  // namespace bach

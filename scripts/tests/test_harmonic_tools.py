@@ -1,59 +1,36 @@
-"""Tests for harmonic analysis tools in bach_reference_server.py.
+"""Tests for harmonic analysis tools.
 
 Covers chord estimation, degree-to-roman conversion, suspension detection,
 bass track detection, chord support PC extraction, and scoring module
-harmonic helpers. Uses MCP mock pattern from test_ngram_tools.py.
+harmonic helpers. Functions now live in scripts.bach_analyzer library modules.
 """
 
 import sys
 import unittest
 from pathlib import Path
-from unittest.mock import MagicMock
 
 # Add project root to path.
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-# ---------------------------------------------------------------------------
-# Mock the mcp package so the server module can be imported.
-# ---------------------------------------------------------------------------
-
-
-class _FakeFastMCP:
-    def __init__(self, *a, **kw):
-        pass
-
-    def tool(self):
-        """Decorator that just returns the function unmodified."""
-        def _decorator(fn):
-            return fn
-        return _decorator
-
-    def run(self):
-        pass
-
-
-_mcp_mock = MagicMock()
-_mcp_mock.server.fastmcp.FastMCP = _FakeFastMCP
-sys.modules.setdefault("mcp", _mcp_mock)
-sys.modules.setdefault("mcp.server", _mcp_mock.server)
-sys.modules.setdefault("mcp.server.fastmcp", _mcp_mock.server.fastmcp)
-
-from scripts.bach_reference_server import (
-    CHORD_TEMPLATES,
-    ChordEstimate,
+from scripts.bach_analyzer.music_theory import (
     MAJOR_SCALE_SEMITONES,
     MINOR_SCALE_SEMITONES,
-    _DEGREE_TO_FUNCTION,
-    _MAJOR_NUMERALS,
-    _MINOR_NUMERALS,
-    _beat_strength,
-    _degree_to_roman,
-    _detect_bass_track,
-    _detect_suspension,
-    _estimate_chord,
-    _extract_chord_support_pcs,
+    beat_strength as _beat_strength,
+)
+from scripts.bach_analyzer.harmony import (
+    CHORD_TEMPLATES,
+    ChordEstimate,
+    DEGREE_TO_FUNCTION as _DEGREE_TO_FUNCTION,
+    MAJOR_NUMERALS as _MAJOR_NUMERALS,
+    MINOR_NUMERALS as _MINOR_NUMERALS,
+    degree_to_roman as _degree_to_roman,
+    detect_bass_track as _detect_bass_track,
+    detect_suspension as _detect_suspension,
+    estimate_chord as _estimate_chord,
+    extract_chord_support_pcs as _extract_chord_support_pcs,
+)
+from scripts.bach_analyzer.work_index import (
     reference_to_score,
-    sounding_note_at,
 )
 from scripts.bach_analyzer.model import (
     Note,
@@ -61,6 +38,7 @@ from scripts.bach_analyzer.model import (
     Track,
     TICKS_PER_BAR,
     TICKS_PER_BEAT,
+    sounding_note_at,
 )
 from scripts.bach_analyzer.score import (
     _count_cadences_simplified,

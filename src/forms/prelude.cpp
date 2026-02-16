@@ -329,6 +329,11 @@ std::vector<NoteEvent> generateHarmonicPreludeNotes(
   int phrase_idx = -1;
   int total_bars = static_cast<int>(total_duration / kTicksPerBar);
 
+  // Inter-beat melodic memory: track soprano pitch and last note pitch across
+  // beats so that each beat's figuration can connect smoothly to the previous.
+  uint8_t prev_beat_soprano = 0;
+  uint8_t prev_beat_last = 0;
+
   for (size_t i = 0; i < events.size(); ++i) {
     const auto& ev = events[i];
     const auto& voicing = voicings[i];
@@ -454,7 +459,8 @@ std::vector<NoteEvent> generateHarmonicPreludeNotes(
             static_cast<float>(total_duration)
           : 0.5f;
       auto fig_notes = applyFiguration(beat_voicing, beat_tmpl, beat_tick,
-                                       ev, voice_range, section_progress);
+                                       ev, voice_range, section_progress,
+                                       prev_beat_soprano);
 
       // Inject passing and neighbor tones into weak sub-beats.
       // NCT density shaped by section progress:
@@ -471,7 +477,18 @@ std::vector<NoteEvent> generateHarmonicPreludeNotes(
         nct_prob *= 0.4f;  // Pre-cadence: reduced for convergence.
       }
       injectNonChordTones(fig_notes, beat_tmpl, beat_tick, ev, voice_range,
-                          rng, nct_prob, section_progress);
+                          rng, nct_prob, section_progress, prev_beat_last);
+
+      // Update inter-beat melodic memory for the next beat's continuity.
+      // Extract soprano pitch (voice 0 at beat start) and last note pitch.
+      for (const auto& fig_note : fig_notes) {
+        if (fig_note.voice == 0 && fig_note.start_tick == beat_tick) {
+          prev_beat_soprano = fig_note.pitch;
+        }
+      }
+      if (!fig_notes.empty()) {
+        prev_beat_last = fig_notes.back().pitch;
+      }
 
       all_notes.insert(all_notes.end(), fig_notes.begin(), fig_notes.end());
     }

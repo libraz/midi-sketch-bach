@@ -228,7 +228,7 @@ int resolveLeaps(std::vector<NoteEvent>& notes,
       // === Candidate search with next-note lookahead ===
       int resolve_dir = (leap > 0) ? -1 : 1;
       int best_pitch = -1;
-      bool best_is_ct = false;
+      float best_score = -999.0f;
 
       // Next-note lookahead: if pos+3 exists, check that the candidate
       // doesn't create a new unresolved leap toward the following note.
@@ -253,7 +253,11 @@ int resolveLeaps(std::vector<NoteEvent>& notes,
         anchor_exception = true;
       }
 
-      for (int offset = 1; offset <= 2; ++offset) {
+      // Determine search range: stepwise first (offset 1-2), then wider
+      // alternatives (offset 3-4) if allow_wider_fallback is enabled.
+      int max_offset = params.allow_wider_fallback ? 4 : 2;
+
+      for (int offset = 1; offset <= max_offset; ++offset) {
         int cand = static_cast<int>(notes[i1].pitch) + resolve_dir * offset;
         if (cand < 0 || cand > 127) continue;
         auto cand_u8 = static_cast<uint8_t>(cand);
@@ -299,13 +303,26 @@ int resolveLeaps(std::vector<NoteEvent>& notes,
           }
         }
 
-        if (best_pitch < 0 || (cand_is_ct && !best_is_ct)) {
+        // Score the candidate: stepwise (offset 1-2) gets step_bonus;
+        // chord tones get additional preference; wider offsets (3-4) are
+        // penalized but still viable as fallback.
+        float cand_score = 0.0f;
+        if (offset <= 2) {
+          cand_score += params.step_bonus;  // Stepwise bonus.
+        }
+        if (cand_is_ct) {
+          cand_score += 0.2f;  // Chord tone preference.
+        }
+        // Prefer closer candidates (smaller offset).
+        cand_score -= static_cast<float>(offset) * 0.05f;
+
+        if (cand_score > best_score) {
           best_pitch = cand;
-          best_is_ct = cand_is_ct;
+          best_score = cand_score;
         }
       }
 
-      // Fallback: if both candidates were rejected (e.g., lookahead rejected
+      // Fallback: if all candidates were rejected (e.g., lookahead rejected
       // them all), keep the original pitch to avoid cascading violations.
       if (best_pitch >= 0 && static_cast<uint8_t>(best_pitch) != notes[i2].pitch) {
         // Probabilistic resolution: use tick-based deterministic PRNG to decide

@@ -1789,7 +1789,8 @@ ToccataResult generateDramaticusToccata(const ToccataConfig& config) {
 
     PostValidateStats stats;
     all_notes = postValidateNotes(
-        std::move(all_notes), num_voices, config.key, voice_ranges, &stats);
+        std::move(all_notes), num_voices, config.key, voice_ranges, &stats,
+        /*protection_overrides=*/{}, /*stylus_phantasticus=*/true);
 
     // Leap resolution.
     {
