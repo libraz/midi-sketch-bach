@@ -7,6 +7,7 @@
 #include <random>
 #include <vector>
 
+#include "core/figure_injector.h"
 #include "core/note_creator.h"
 #include "core/interval.h"
 #include "core/note_source.h"
@@ -159,12 +160,17 @@ void placeEntryNotes(const std::vector<NoteEvent>& source_notes,
                      VoiceId voice_id,
                      Tick entry_tick,
                      VoiceRegister voice_reg,
-                     std::map<VoiceId, std::vector<NoteEvent>>& voice_notes) {
+                     std::map<VoiceId, std::vector<NoteEvent>>& voice_notes,
+                     uint8_t num_voices = 0,
+                     float phase_pos = 0.0f) {
   if (source_notes.empty()) return;
 
-  // Compute octave shift using fitToRegister for optimal register placement.
-  int octave_shift = fitToRegister(source_notes,
-                                    voice_reg.low, voice_reg.high);
+  // Compute octave shift using envelope-aware register fitting when possible.
+  RegisterEnvelope envelope = getRegisterEnvelope(FormType::Fugue);
+  int octave_shift = (num_voices > 0)
+      ? fitToRegisterWithEnvelope(source_notes, voice_id, num_voices,
+                                   phase_pos, envelope)
+      : fitToRegister(source_notes, voice_reg.low, voice_reg.high);
 
   // Place all notes with octave shift.
   std::vector<NoteEvent> placed;
@@ -226,12 +232,17 @@ void placeCountersubjectNotes(const std::vector<NoteEvent>& cs_notes,
                               VoiceId voice_id,
                               Tick start_tick,
                               VoiceRegister voice_reg,
-                              std::map<VoiceId, std::vector<NoteEvent>>& voice_notes) {
+                              std::map<VoiceId, std::vector<NoteEvent>>& voice_notes,
+                              uint8_t num_voices = 0,
+                              float phase_pos = 0.0f) {
   if (cs_notes.empty()) return;
 
-  // Compute octave shift using fitToRegister for optimal register placement.
-  int octave_shift = fitToRegister(cs_notes,
-                                    voice_reg.low, voice_reg.high);
+  // Compute octave shift using envelope-aware register fitting when possible.
+  RegisterEnvelope envelope = getRegisterEnvelope(FormType::Fugue);
+  int octave_shift = (num_voices > 0)
+      ? fitToRegisterWithEnvelope(cs_notes, voice_id, num_voices,
+                                   phase_pos, envelope)
+      : fitToRegister(cs_notes, voice_reg.low, voice_reg.high);
 
   for (const auto& cs_note : cs_notes) {
     NoteEvent note = cs_note;
@@ -366,6 +377,96 @@ void placeFreeCounterpoint(VoiceId voice_id,
     uint8_t pitch = scale_util::absoluteDegreeToPitch(current_deg, key, scale);
     pitch = clampPitch(static_cast<int>(pitch), voice_reg.low, voice_reg.high);
 
+    // Attempt vocabulary figure injection (25% probability).
+    bool figure_placed = false;
+    do {
+      MelodicState mel_state;
+      mel_state.phrase_progress = 1.0f - static_cast<float>(remaining) /
+                                         static_cast<float>(duration_ticks);
+      auto fig = tryInjectFigure(mel_state, pitch, key, scale, current_tick,
+                                 voice_reg.low, voice_reg.high, rng, 0.25f);
+      if (!fig.has_value()) break;
+
+      Tick fig_dur = std::min(remaining / static_cast<Tick>(fig->pitches.size()),
+                              kTicksPerBeat / 2);
+      if (fig_dur < kTicksPerBeat / 4) break;
+
+      // Lightweight vertical safety check: reject if first figure pitch
+      // creates harsh dissonance (m2, M2, tritone, M7) with other voices.
+      bool vertically_safe = true;
+      for (const auto& [vid, vnotes] : voice_notes) {
+        if (vid == voice_id || vnotes.empty()) continue;
+        for (auto it = vnotes.rbegin(); it != vnotes.rend(); ++it) {
+          if (it->start_tick + it->duration > current_tick) {
+            int ivl = std::abs(static_cast<int>(fig->pitches[0]) -
+                               static_cast<int>(it->pitch)) % 12;
+            if (ivl == 1 || ivl == 2 || ivl == 6 || ivl == 11) {
+              vertically_safe = false;
+            }
+            break;
+          }
+        }
+      }
+      if (!vertically_safe) break;
+
+      for (uint8_t fp : fig->pitches) {
+        if (remaining < fig_dur) break;
+        NoteEvent fn;
+        fn.start_tick = current_tick;
+        fn.duration = fig_dur;
+        fn.pitch = fp;
+        fn.velocity = 80;
+        fn.voice = voice_id;
+        fn.source = BachNoteSource::FreeCounterpoint;
+        voice_notes[voice_id].push_back(fn);
+        current_tick += fig_dur;
+        remaining -= fig_dur;
+      }
+      current_deg = scale_util::pitchToAbsoluteDegree(
+          fig->pitches.back(), key, scale);
+      figure_placed = true;
+    } while (false);
+
+    if (figure_placed) {
+      // Advance direction state after figure.
+      uint8_t next_p = scale_util::absoluteDegreeToPitch(
+          current_deg, key, scale);
+      if (next_p > voice_reg.high || next_p < voice_reg.low) {
+        direction = -direction;
+        current_deg += direction * 2;
+      }
+      continue;
+    }
+
+    // Attempt rhythm cell injection (20% probability) before single note.
+    auto rhythm = tryInjectRhythmCell(energy, remaining, current_tick, rng, 0.20f);
+    if (rhythm.has_value()) {
+      bool rhythm_placed = false;
+      for (Tick rd : rhythm->durations) {
+        if (remaining < rd) break;
+        uint8_t rp = scale_util::absoluteDegreeToPitch(current_deg, key, scale);
+        rp = clampPitch(static_cast<int>(rp), voice_reg.low, voice_reg.high);
+        NoteEvent rn;
+        rn.start_tick = current_tick;
+        rn.duration = rd;
+        rn.pitch = rp;
+        rn.velocity = 80;
+        rn.voice = voice_id;
+        rn.source = BachNoteSource::FreeCounterpoint;
+        voice_notes[voice_id].push_back(rn);
+        current_tick += rd;
+        remaining -= rd;
+        rhythm_placed = true;
+        current_deg += direction;
+        uint8_t np = scale_util::absoluteDegreeToPitch(current_deg, key, scale);
+        if (np > voice_reg.high || np < voice_reg.low) {
+          direction = -direction;
+          current_deg += direction * 2;
+        }
+      }
+      if (rhythm_placed) continue;
+    }
+
     NoteEvent note;
     note.start_tick = current_tick;
     note.duration = dur;
@@ -439,7 +540,8 @@ Exposition buildExposition(const Subject& subject,
                            const Answer& answer,
                            const Countersubject& countersubject,
                            const FugueConfig& config,
-                           uint32_t seed) {
+                           uint32_t seed,
+                           Tick estimated_duration) {
   Exposition expo;
   std::mt19937 rng(seed);
 
@@ -486,8 +588,11 @@ Exposition buildExposition(const Subject& subject,
 
     // Place the main entry (subject or answer) for this voice.
     VoiceRegister entry_reg = getVoiceRegister(entry.voice_id, num_voices);
+    float phase_pos = estimated_duration > 0
+        ? static_cast<float>(entry.entry_tick) / static_cast<float>(estimated_duration)
+        : 0.0f;
     placeEntryNotes(source_notes, entry.voice_id, entry.entry_tick,
-                    entry_reg, expo.voice_notes);
+                    entry_reg, expo.voice_notes, num_voices, phase_pos);
 
     // The voice that just finished its entry (idx - 1) plays the countersubject
     // against this new entry.
@@ -503,8 +608,12 @@ Exposition buildExposition(const Subject& subject,
                                                    : ScaleType::Major);
       }
 
+      float cs_phase_pos = estimated_duration > 0
+          ? static_cast<float>(entry.entry_tick) / static_cast<float>(estimated_duration)
+          : 0.0f;
       placeCountersubjectNotes(cs_to_place, prev_voice,
-                               entry.entry_tick, prev_reg, expo.voice_notes);
+                               entry.entry_tick, prev_reg, expo.voice_notes,
+                               num_voices, cs_phase_pos);
 
       // Snap CS strong-beat dissonances against answer notes.
       // CS was generated against the subject, so it may clash with the
@@ -561,9 +670,11 @@ Exposition buildExposition(const Subject& subject,
                            CounterpointState& cp_state,
                            IRuleEvaluator& cp_rules,
                            CollisionResolver& cp_resolver,
-                           const HarmonicTimeline& timeline) {
+                           const HarmonicTimeline& timeline,
+                           Tick estimated_duration) {
   // Build using the original logic.
-  Exposition expo = buildExposition(subject, answer, countersubject, config, seed);
+  Exposition expo = buildExposition(subject, answer, countersubject, config, seed,
+                                    estimated_duration);
 
   // Post-validate free counterpoint notes through createBachNote.
   // Subject/answer/countersubject notes are kept as-is and registered in state.

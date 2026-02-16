@@ -331,9 +331,20 @@ int fitToRegisterWithEnvelope(
     }
   }
 
-  // Delegate to the existing fitToRegister with the ORIGINAL full range.
-  // Phase A: observation only, no range narrowing penalty.
-  return fitToRegister(notes, range_lo, range_hi,
+  // Apply minimum span guard: 14 semitones (short 10th) prevents melodic breakdown.
+  uint8_t safe_lo = eff_lo;
+  uint8_t safe_hi = eff_hi;
+  if (static_cast<int>(safe_hi) - static_cast<int>(safe_lo) < 14) {
+    safe_hi = static_cast<uint8_t>(
+        std::min(127, static_cast<int>(safe_lo) + 14));
+    if (static_cast<int>(safe_hi) - static_cast<int>(safe_lo) < 14) {
+      safe_lo = static_cast<uint8_t>(
+          std::max(0, static_cast<int>(safe_hi) - 14));
+    }
+  }
+
+  // Delegate to fitToRegister with envelope-narrowed range.
+  return fitToRegister(notes, safe_lo, safe_hi,
                        reference_pitch, /*prev_reference_pitch=*/0,
                        adjacent_last_pitch);
 }

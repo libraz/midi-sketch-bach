@@ -1208,6 +1208,7 @@ PlacementResult CollisionResolver::findSafePitch(
   StrategyList list;
   switch (level) {
     case ProtectionLevel::Immutable:
+    case ProtectionLevel::Architectural:
       list = {kImmutable, 2};
       break;
     case ProtectionLevel::SemiImmutable:

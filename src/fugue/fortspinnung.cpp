@@ -9,8 +9,10 @@
 #include <vector>
 
 #include "core/basic_types.h"
+#include "core/figure_injector.h"
 #include "core/pitch_utils.h"
 #include "core/rng_util.h"
+#include "core/scale.h"
 #include "fugue/motif_pool.h"
 #include "transform/motif_transform.h"
 #include "fugue/episode.h"
@@ -281,6 +283,35 @@ std::vector<NoteEvent> generateFortspinnung(const MotifPool& pool,
       Tick gap = static_cast<Tick>(
           kTicksPerBeat * 0.5f *
           std::pow(grammar.density_decay_factor, dissolution_step_count));
+
+      // Try to fill the gap with a rhythm cell (low energy = longer cells).
+      if (gap >= kTicksPerBeat / 4 && !prev_fragment.empty()) {
+        auto rhythm = tryInjectRhythmCell(
+            0.2f, gap, current_tick + start_tick, rng, 0.25f);
+        if (rhythm.has_value()) {
+          ScaleType scale = ScaleType::Major;  // C major internal convention
+          uint8_t last_p = prev_fragment.back().pitch;
+          int deg = scale_util::pitchToAbsoluteDegree(last_p, key, scale);
+          auto [v0_lo, v0_hi] = getFugueVoiceRange(0, num_voices);
+          Tick fill_tick = current_tick;
+          for (Tick rd : rhythm->durations) {
+            if (fill_tick + rd > current_tick + gap) break;
+            uint8_t p = scale_util::absoluteDegreeToPitch(deg, key, scale);
+            p = clampPitch(static_cast<int>(p), v0_lo, v0_hi);
+            NoteEvent rn;
+            rn.start_tick = fill_tick + start_tick;
+            rn.duration = rd;
+            rn.pitch = p;
+            rn.velocity = 70;
+            rn.voice = 0;
+            rn.source = BachNoteSource::EpisodeMaterial;
+            result.push_back(rn);
+            fill_tick += rd;
+            deg -= 1;  // Descending stepwise in dissolution.
+          }
+        }
+      }
+
       current_tick += gap;
       if (current_tick >= duration_ticks) break;
     }

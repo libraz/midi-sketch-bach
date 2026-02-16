@@ -116,7 +116,8 @@ std::vector<Tick> findValidStrettoIntervals(const std::vector<NoteEvent>& subjec
 Stretto generateStretto(const Subject& subject, Key home_key, Tick start_tick,
                         uint8_t num_voices, uint32_t seed,
                         SubjectCharacter character,
-                        const uint8_t* voice_last_pitches) {
+                        const uint8_t* voice_last_pitches,
+                        Tick estimated_duration) {
   Stretto stretto;
   stretto.start_tick = start_tick;
   stretto.key = home_key;
@@ -215,18 +216,15 @@ Stretto generateStretto(const Subject& subject, Key home_key, Tick start_tick,
     }
     const auto& source_notes = *source_ptr;
 
-    // Compute octave shift using fitToRegister for optimal register placement.
+    // Compute octave shift using envelope-aware register fitting.
     auto [lo, hi] = getFugueVoiceRange(idx, num_voices);
     uint8_t voice_last = voice_last_pitches ? voice_last_pitches[idx] : 0;
-    bool is_subject = (idx % 2 == 0);  // Even=original subject, odd=transform
-    int oct_shift = fitToRegister(source_notes, lo, hi,
-                                   voice_last,  // reference_pitch
-                                   0,           // prev_reference_pitch
-                                   0, 0,        // adjacent pitches (not tracked here)
-                                   0, 0,        // adjacent range (not tracked here)
-                                   is_subject,  // is_subject_voice
-                                   0,           // last_subject_pitch
-                                   false);      // is_exposition (stretto is NOT expo)
+    float phase_pos = estimated_duration > 0
+        ? static_cast<float>(cumulative_tick) / static_cast<float>(estimated_duration)
+        : 0.0f;
+    RegisterEnvelope envelope = getRegisterEnvelope(FormType::Fugue);
+    int oct_shift = fitToRegisterWithEnvelope(source_notes, idx, num_voices,
+                                               phase_pos, envelope, voice_last);
 
     entry.notes.reserve(source_notes.size());
     for (const auto& note : source_notes) {
@@ -285,11 +283,12 @@ Stretto generateStretto(const Subject& subject, Key home_key, Tick start_tick,
                         CounterpointState& cp_state, IRuleEvaluator& cp_rules,
                         CollisionResolver& cp_resolver,
                         const HarmonicTimeline& timeline,
-                        const uint8_t* voice_last_pitches) {
+                        const uint8_t* voice_last_pitches,
+                        Tick estimated_duration) {
   // Generate unvalidated stretto (with leap guard).
   Stretto stretto = generateStretto(subject, home_key, start_tick,
                                     num_voices, seed, character,
-                                    voice_last_pitches);
+                                    voice_last_pitches, estimated_duration);
 
   // Post-validate each entry's notes.
   for (size_t entry_idx = 0; entry_idx < stretto.entries.size(); ++entry_idx) {

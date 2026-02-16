@@ -1485,7 +1485,7 @@ FugueResult generateFugue(const FugueConfig& config) {
   Exposition expo = buildExposition(subject, answer, counter_subject,
                                     config, config.seed,
                                     cp_state, cp_rules, cp_resolver,
-                                    detailed_timeline);
+                                    detailed_timeline, estimated_duration);
 
   // =========================================================================
   // Collect all notes and build structure
@@ -1601,12 +1601,15 @@ FugueResult generateFugue(const FugueConfig& config) {
     bool use_false_entry = (pair_idx > 0) && (false_dist(false_entry_rng) < false_entry_prob);
 
     uint8_t entry_last = extractVoiceLastPitch(all_notes, current_tick, entry_voice);
+    float me_phase_pos = static_cast<float>(current_tick) /
+                         static_cast<float>(estimated_duration);
     MiddleEntry middle_entry = use_false_entry
-        ? generateFalseEntry(subject, target_key, current_tick, entry_voice, num_voices)
+        ? generateFalseEntry(subject, target_key, current_tick, entry_voice, num_voices,
+                             /*quote_notes=*/3, me_phase_pos)
         : generateMiddleEntry(subject, target_key,
                               current_tick, entry_voice, num_voices,
                               cp_state, cp_rules, cp_resolver,
-                              detailed_timeline, entry_last);
+                              detailed_timeline, entry_last, me_phase_pos);
     Tick middle_end = middle_entry.end_tick;
     if (middle_end <= current_tick) {
       middle_end = current_tick + subject.length_ticks;
@@ -1711,6 +1714,19 @@ FugueResult generateFugue(const FugueConfig& config) {
     (void)cadences_inserted;  // Informational; no action needed on count.
   }
 
+  // --- Cadence approach voice shaping (before post-processing) ---
+  // CadenceApproach notes get Architectural protection, surviving all post-passes.
+  KeySignature home_key_sig;
+  home_key_sig.tonic = config.key;
+  home_key_sig.is_minor = config.is_minor;
+  CadencePlan cadence_plan = CadencePlan::createForFugue(
+      structure, home_key_sig, config.is_minor);
+
+  int cadence_shapes = applyCadenceApproachToVoices(
+      all_notes, cadence_plan, config.key, config.is_minor,
+      num_voices, config.seed + 88888u);
+  (void)cadence_shapes;
+
   // --- Dominant pedal: 4 bars before stretto (Develop -> Resolve transition) ---
   // In Bach's fugues, the dominant pedal is a climactic point where the bass
   // sustains the dominant while upper voices remain highly active with
@@ -1763,7 +1779,8 @@ FugueResult generateFugue(const FugueConfig& config) {
                                     num_voices, config.seed + 4000,
                                     config.character,
                                     cp_state, cp_rules, cp_resolver,
-                                    detailed_timeline, stretto_last);
+                                    detailed_timeline, stretto_last,
+                                    estimated_duration);
   Tick stretto_end = stretto.end_tick;
   // Ensure stretto has non-zero duration.
   if (stretto_end <= current_tick) {
@@ -3869,12 +3886,7 @@ FugueResult generateFugue(const FugueConfig& config) {
     result.timeline = bar_timeline;
   }
 
-  // Apply cadence plan to the timeline (activates existing CadenceType/applyCadence).
-  KeySignature home_key_sig;
-  home_key_sig.tonic = config.key;
-  home_key_sig.is_minor = config.is_minor;
-  CadencePlan cadence_plan = CadencePlan::createForFugue(
-      structure, home_key_sig, config.is_minor);
+  // Apply cadence plan to the timeline (plan created before post-processing).
   cadence_plan.applyTo(result.timeline);
 
   // --- Apply harmonic rhythm factors (lazy evaluation on the timeline events) ---

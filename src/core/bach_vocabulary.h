@@ -310,6 +310,20 @@ inline constexpr MelodicFigure kInvTrill3 = {
     kInvTrill3_st, nullptr, detail::kEqR4, detail::kEqO4,
     4, "BWV574:upper:b3"};
 
+// 21. Wide lower oscillation (organ: BWV578 v1 b15 pattern)
+inline constexpr DegreeInterval kWideLowerOsc_dg[] = {{-2, 0}, {2, 0}, {-2, 0}};
+inline constexpr MelodicFigure kWideLowerOsc = {
+    "wide_lower_osc", IntervalMode::Degree, true,
+    nullptr, kWideLowerOsc_dg, detail::kEqR4, detail::kEqO4,
+    4, "BWV578:v1:b15"};
+
+// 22. Wide upper oscillation (organ: BWV578 v1 b28 pattern)
+inline constexpr DegreeInterval kWideUpperOsc_dg[] = {{2, 0}, {-2, 0}, {2, 0}};
+inline constexpr MelodicFigure kWideUpperOsc = {
+    "wide_upper_osc", IntervalMode::Degree, true,
+    nullptr, kWideUpperOsc_dg, detail::kEqR4, detail::kEqO4,
+    4, "BWV578:v1:b28"};
+
 // ---------------------------------------------------------------------------
 // Aggregate figure tables
 // ---------------------------------------------------------------------------
@@ -320,8 +334,9 @@ inline constexpr const MelodicFigure* kCommonFigures[] = {
     &kLeapUpStepDown, &kStepDownLeapUp, &kStepUpLeapDown, &kEchappee,
     &kCambiataNbr, &kLeapRecovery, &kChromaticDesc, &kLeapDownAscend,
     &kMordent, &kInvMordent, &kTrill3, &kInvTrill3,
+    &kWideLowerOsc, &kWideUpperOsc,
 };
-inline constexpr int kCommonFigureCount = 20;
+inline constexpr int kCommonFigureCount = 22;
 
 // ---------------------------------------------------------------------------
 // Rhythm cells — universal patterns across all categories

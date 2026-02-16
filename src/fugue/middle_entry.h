@@ -45,7 +45,8 @@ struct MiddleEntry {
 /// @return Generated MiddleEntry.
 MiddleEntry generateMiddleEntry(const Subject& subject, Key target_key, Tick start_tick,
                                 VoiceId voice_id, uint8_t num_voices = 3,
-                                uint8_t last_pitch = 0);
+                                uint8_t last_pitch = 0,
+                                float phase_pos = 0.0f);
 
 /// @brief Generate a middle entry with counterpoint validation.
 ///
@@ -68,7 +69,8 @@ MiddleEntry generateMiddleEntry(const Subject& subject, Key target_key, Tick sta
                                 CounterpointState& cp_state, IRuleEvaluator& cp_rules,
                                 CollisionResolver& cp_resolver,
                                 const HarmonicTimeline& timeline,
-                                uint8_t last_pitch = 0);
+                                uint8_t last_pitch = 0,
+                                float phase_pos = 0.0f);
 
 /// @brief Generate a false entry -- subject opening that diverges to free counterpoint.
 ///
@@ -85,7 +87,8 @@ MiddleEntry generateMiddleEntry(const Subject& subject, Key target_key, Tick sta
 /// @return MiddleEntry containing the truncated subject + divergent tail.
 MiddleEntry generateFalseEntry(const Subject& subject, Key target_key,
                                Tick start_tick, VoiceId voice_id,
-                               uint8_t num_voices = 3, uint8_t quote_notes = 3);
+                               uint8_t num_voices = 3, uint8_t quote_notes = 3,
+                               float phase_pos = 0.0f);
 
 }  // namespace bach
 

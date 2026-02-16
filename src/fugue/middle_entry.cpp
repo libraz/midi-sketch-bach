@@ -12,7 +12,8 @@ namespace bach {
 
 MiddleEntry generateMiddleEntry(const Subject& subject, Key target_key, Tick start_tick,
                                 VoiceId voice_id, uint8_t num_voices,
-                                uint8_t last_pitch) {
+                                uint8_t last_pitch,
+                                float phase_pos) {
   MiddleEntry entry;
   entry.key = target_key;
   entry.start_tick = start_tick;
@@ -29,10 +30,11 @@ MiddleEntry generateMiddleEntry(const Subject& subject, Key target_key, Tick sta
   // Use transposeMelody from the transform module.
   entry.notes = transposeMelody(subject.notes, semitones);
 
-  // Compute octave shift using fitToRegister for optimal register placement.
+  // Compute octave shift using envelope-aware register fitting.
   auto [lo, hi] = getFugueVoiceRange(voice_id, num_voices);
-  int octave_shift = fitToRegister(entry.notes, lo, hi,
-                                    last_pitch);  // reference_pitch = last_pitch
+  RegisterEnvelope envelope = getRegisterEnvelope(FormType::Fugue);
+  int octave_shift = fitToRegisterWithEnvelope(entry.notes, voice_id, num_voices,
+                                                phase_pos, envelope, last_pitch);
 
   // Offset tick positions so the entry starts at start_tick.
   Tick original_start = subject.notes[0].start_tick;
@@ -55,10 +57,11 @@ MiddleEntry generateMiddleEntry(const Subject& subject, Key target_key, Tick sta
                                 CounterpointState& cp_state, IRuleEvaluator& cp_rules,
                                 CollisionResolver& cp_resolver,
                                 const HarmonicTimeline& /*timeline*/,
-                                uint8_t last_pitch) {
+                                uint8_t last_pitch,
+                                float phase_pos) {
   // Generate raw middle entry notes (with register adjustment + leap guard).
   MiddleEntry entry = generateMiddleEntry(subject, target_key, start_tick, voice_id, num_voices,
-                                          last_pitch);
+                                          last_pitch, phase_pos);
 
   // Validate each note through createBachNote with Immutable protection.
   std::vector<NoteEvent> validated;
@@ -86,7 +89,8 @@ MiddleEntry generateMiddleEntry(const Subject& subject, Key target_key, Tick sta
 
 MiddleEntry generateFalseEntry(const Subject& subject, Key target_key,
                                Tick start_tick, VoiceId voice_id,
-                               uint8_t num_voices, uint8_t quote_notes) {
+                               uint8_t num_voices, uint8_t quote_notes,
+                               float phase_pos) {
   MiddleEntry entry;
   entry.key = target_key;
   entry.start_tick = start_tick;
@@ -115,9 +119,11 @@ MiddleEntry generateFalseEntry(const Subject& subject, Key target_key,
   // Transpose entire subject, then take only the quoted portion.
   std::vector<NoteEvent> transposed = transposeMelody(subject.notes, semitones);
 
-  // Compute octave shift using fitToRegister for optimal register placement.
+  // Compute octave shift using envelope-aware register fitting.
   auto [lo, hi] = getFugueVoiceRange(voice_id, num_voices);
-  int octave_shift = fitToRegister(transposed, lo, hi);
+  RegisterEnvelope envelope = getRegisterEnvelope(FormType::Fugue);
+  int octave_shift = fitToRegisterWithEnvelope(transposed, voice_id, num_voices,
+                                                phase_pos, envelope);
 
   // Apply octave shift to transposed notes.
   for (auto& note : transposed) {

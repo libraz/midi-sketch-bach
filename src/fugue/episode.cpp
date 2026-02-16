@@ -258,22 +258,17 @@ static uint8_t medianOfFirst3(const std::vector<NoteEvent>& notes) {
 static void fitToVoiceRegister(std::vector<NoteEvent>& notes, VoiceId voice_id,
                                uint8_t num_voices,
                                uint8_t reference_pitch = 0,
-                               uint8_t prev_pitch = 0) {
+                               uint8_t prev_pitch = 0,
+                               float phase_pos = 0.0f) {
   if (notes.empty()) return;
 
   auto [lo, hi] = getFugueVoiceRange(voice_id, num_voices);
-  uint8_t adj_lo = 0, adj_hi = 0;
-  if (voice_id > 0) {
-    std::tie(adj_lo, adj_hi) = getFugueVoiceRange(voice_id - 1, num_voices);
-  }
-  // When prev_pitch is available, use it as the primary reference for
-  // melodic_dist in fitToRegister. This penalizes octave shifts that create
-  // large intervals (including tritones) from the previous section.
+  // Use envelope-aware register fitting for phase-position awareness.
   uint8_t effective_ref = (prev_pitch > 0) ? prev_pitch : reference_pitch;
-  int shift = fitToRegister(notes, lo, hi,
-                             effective_ref, 0, 0, 0,
-                             adj_lo, adj_hi,
-                             false, 0, false);
+  RegisterEnvelope envelope = getRegisterEnvelope(FormType::Fugue);
+  int shift = fitToRegisterWithEnvelope(notes, voice_id, num_voices,
+                                         phase_pos, envelope,
+                                         effective_ref);
   for (auto& note : notes) {
     int shifted = static_cast<int>(note.pitch) + shift;
     if (shifted < static_cast<int>(lo) || shifted > static_cast<int>(hi)) {

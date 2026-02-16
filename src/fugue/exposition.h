@@ -92,7 +92,8 @@ Exposition buildExposition(const Subject& subject,
                            const Answer& answer,
                            const Countersubject& countersubject,
                            const FugueConfig& config,
-                           uint32_t seed);
+                           uint32_t seed,
+                           Tick estimated_duration = 0);
 
 /// @brief Build an exposition with counterpoint validation.
 ///
@@ -119,7 +120,8 @@ Exposition buildExposition(const Subject& subject,
                            CounterpointState& cp_state,
                            IRuleEvaluator& cp_rules,
                            CollisionResolver& cp_resolver,
-                           const HarmonicTimeline& timeline);
+                           const HarmonicTimeline& timeline,
+                           Tick estimated_duration = 0);
 
 }  // namespace bach
 

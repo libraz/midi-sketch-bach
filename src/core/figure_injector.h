@@ -78,7 +78,8 @@ inline std::optional<FigureCandidate> tryInjectFigure(
   const MelodicFigure* candidates_early[] = {
       &kAscRun4, &kTurnUp, &kStepDownLeapUp};
   const MelodicFigure* candidates_mid[] = {
-      &kLowerNbr, &kUpperNbr, &kCambiataNbr, &kEchappee};
+      &kLowerNbr, &kUpperNbr, &kCambiataNbr, &kEchappee,
+      &kWideLowerOsc, &kWideUpperOsc};
   const MelodicFigure* candidates_late[] = {
       &kDescRun4, &kCambiataDown, &kLeapUpStepDown, &kTurnDown};
 
@@ -90,7 +91,7 @@ inline std::optional<FigureCandidate> tryInjectFigure(
     pool_size = 3;
   } else if (progress < 0.6f) {
     pool = candidates_mid;
-    pool_size = 4;
+    pool_size = 6;
   } else {
     pool = candidates_late;
     pool_size = 4;
@@ -210,6 +211,74 @@ inline std::optional<FigureCandidate> generateFortspinnung(
       0, "generated"};
 
   return FigureCandidate{std::move(pitches), &kFortspinnungFigure};
+}
+
+// ---------------------------------------------------------------------------
+// Rhythm cell injection
+// ---------------------------------------------------------------------------
+
+/// @brief A candidate rhythm cell with tick-converted durations.
+struct RhythmCellCandidate {
+  const RhythmCell* cell;
+  std::vector<Tick> durations;  ///< beat_ratios converted to ticks.
+};
+
+/// @brief Try to inject a rhythm cell based on energy level and remaining time.
+///
+/// Filters candidates by energy (high → short cells, low → long cells),
+/// bar boundary constraints, and remaining ticks. Returns std::nullopt if
+/// no suitable cell is found or probability gate fails.
+///
+/// @param energy Current energy level [0.0, 1.0].
+/// @param remaining Remaining ticks in the current segment.
+/// @param current_tick Current absolute tick position.
+/// @param rng Random number generator.
+/// @param cell_probability Probability of attempting injection.
+/// @return Optional RhythmCellCandidate if injection succeeds.
+inline std::optional<RhythmCellCandidate> tryInjectRhythmCell(
+    float energy, Tick remaining, Tick current_tick,
+    std::mt19937& rng, float cell_probability = 0.25f) {
+  if (!rng::rollProbability(rng, cell_probability)) return std::nullopt;
+
+  // Energy-based candidate filtering.
+  std::vector<const RhythmCell*> candidates;
+  for (int i = 0; i < kCommonRhythmCount; ++i) {
+    const RhythmCell* cell = kCommonRhythms[i];
+    Tick cell_ticks = static_cast<Tick>(cell->total_beats * kTicksPerBeat);
+
+    // Must fit in remaining ticks.
+    if (cell_ticks > remaining) continue;
+
+    // Must not cross bar boundary.
+    Tick ticks_to_bar = kTicksPerBar - (current_tick % kTicksPerBar);
+    if (cell_ticks > ticks_to_bar) continue;
+
+    // Energy filter.
+    if (energy > 0.7f) {
+      // High energy: prefer short cells (16th, lombardic, short-long).
+      if (cell->total_beats > 1.5f) continue;
+    } else if (energy < 0.3f) {
+      // Low energy: prefer long cells (quarter, qtr_start).
+      if (cell->total_beats < 1.5f) continue;
+    }
+    // Mid energy: all candidates OK.
+
+    candidates.push_back(cell);
+  }
+
+  if (candidates.empty()) return std::nullopt;
+
+  const RhythmCell* chosen = candidates[
+      rng::rollRange(rng, 0, static_cast<int>(candidates.size()) - 1)];
+
+  RhythmCellCandidate result;
+  result.cell = chosen;
+  result.durations.reserve(chosen->note_count);
+  for (int i = 0; i < chosen->note_count; ++i) {
+    result.durations.push_back(
+        static_cast<Tick>(chosen->beat_ratios[i] * kTicksPerBeat));
+  }
+  return result;
 }
 
 }  // namespace bach
