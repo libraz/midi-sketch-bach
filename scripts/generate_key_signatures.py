@@ -110,23 +110,25 @@ def generate_cello_suite_mappings() -> dict[str, dict]:
 
 
 def generate_solo_violin_mappings() -> dict[str, dict]:
-    """Solo Violin Sonatas and Partitas BWV 1001-1006 (only 1001,1003,1004,1005 in reference).
+    """Solo Violin Sonatas and Partitas BWV 1001-1006.
 
     BWV 1001: G minor (Sonata 1, 4 mvts)
     BWV 1003: A minor (Sonata 2, 4 mvts)
     BWV 1004: D minor (Partita 2, 5 mvts - includes Chaconne)
     BWV 1005: C major (Sonata 3, 4 mvts)
+    BWV 1006: E major (Partita 3, mvts 1,3,4,5,6 - mvt 2 missing)
     """
-    violin_keys = {
-        1001: ("G", "minor", 4),
-        1003: ("A", "minor", 4),
-        1004: ("D", "minor", 5),
-        1005: ("C", "major", 4),
+    violin_keys: dict[int, tuple[str, str, list[int]]] = {
+        1001: ("G", "minor", list(range(1, 5))),
+        1003: ("A", "minor", list(range(1, 5))),
+        1004: ("D", "minor", list(range(1, 6))),
+        1005: ("C", "major", list(range(1, 5))),
+        1006: ("E", "major", [1, 3, 4, 5, 6]),
     }
     mappings = {}
-    for bwv, (tonic, mode, num_mvts) in violin_keys.items():
+    for bwv, (tonic, mode, mvts) in violin_keys.items():
         entry = make_entry(tonic, mode)
-        for mvt in range(1, num_mvts + 1):
+        for mvt in mvts:
             mappings[f"BWV{bwv}_{mvt}"] = entry
     return mappings
 
@@ -161,10 +163,15 @@ def generate_organ_prelude_fugue_mappings() -> dict[str, dict]:
         534: ("F", "minor"),
         535: ("G", "minor"),
         536: ("A", "major"),
+        539: ("D", "minor"),
+        541: ("G", "major"),
         543: ("A", "minor"),
+        544: ("B", "minor"),
+        545: ("C", "major"),
         546: ("C", "minor"),
         547: ("C", "major"),
         548: ("E", "minor"),
+        549: ("C", "minor"),
         552: ("Eb", "major"),
     }
     for bwv, (tonic, mode) in standard_pairs.items():
@@ -183,10 +190,15 @@ def generate_organ_prelude_fugue_mappings() -> dict[str, dict]:
         mappings[f"BWV{bwv}_fantasia"] = entry
         mappings[f"BWV{bwv}_fugue"] = entry
 
-    # Toccata + fugue (BWV 538)
-    entry_538 = make_entry("D", "minor")
-    mappings["BWV538_toccata"] = entry_538
-    mappings["BWV538_fugue"] = entry_538
+    # Toccata + fugue pairs
+    toccata_pairs = {
+        538: ("D", "minor"),
+        540: ("F", "major"),
+    }
+    for bwv, (tonic, mode) in toccata_pairs.items():
+        entry = make_entry(tonic, mode)
+        mappings[f"BWV{bwv}_toccata"] = entry
+        mappings[f"BWV{bwv}_fugue"] = entry
 
     return mappings
 
@@ -194,6 +206,8 @@ def generate_organ_prelude_fugue_mappings() -> dict[str, dict]:
 def generate_standalone_organ_mappings() -> dict[str, dict]:
     """Standalone organ works (single file per BWV)."""
     standalone_keys = {
+        550: ("G", "major"),
+        551: ("A", "minor"),
         561: ("A", "minor"),
         565: ("D", "minor"),
         574: ("C", "minor"),
@@ -214,6 +228,11 @@ def generate_standalone_organ_mappings() -> dict[str, dict]:
             mappings[f"BWV{bwv}_fugue"] = make_entry(tonic, mode)
         else:
             mappings[f"BWV{bwv}"] = make_entry(tonic, mode)
+
+    # BWV 552a/552b: St. Anne prelude and fugue as separate files
+    entry_552 = make_entry("Eb", "major")
+    mappings["BWV552a"] = entry_552
+    mappings["BWV552b"] = entry_552
 
     return mappings
 
@@ -260,6 +279,103 @@ def generate_schubler_mappings() -> dict[str, dict]:
     return mappings
 
 
+def generate_lute_suite_mappings() -> dict[str, dict]:
+    """Lute Suites BWV 995-998."""
+    suite_keys: dict[int, tuple[str, str, int]] = {
+        995: ("G", "minor", 6),
+        996: ("E", "minor", 6),
+        997: ("C", "minor", 4),
+        998: ("Eb", "major", 3),
+    }
+    mappings = {}
+    for bwv, (tonic, mode, num_mvts) in suite_keys.items():
+        entry = make_entry(tonic, mode)
+        for mvt in range(1, num_mvts + 1):
+            mappings[f"BWV{bwv}_{mvt}"] = entry
+    return mappings
+
+
+def generate_leipzig_chorale_mappings() -> dict[str, dict]:
+    """Leipzig Chorales BWV 651-667 ('Great Eighteen'). Confidence is 'inferred'."""
+    keys = {
+        651: ("G", "major"), 652: ("G", "major"), 653: ("G", "major"),
+        654: ("Eb", "major"), 655: ("G", "major"), 656: ("A", "major"),
+        657: ("G", "major"), 658: ("F", "minor"), 659: ("G", "minor"),
+        660: ("G", "minor"), 661: ("G", "minor"), 662: ("A", "major"),
+        663: ("G", "major"), 664: ("A", "major"), 665: ("E", "minor"),
+        666: ("E", "minor"), 667: ("G", "major"),
+    }
+    mappings = {}
+    for bwv, (tonic, mode) in keys.items():
+        mappings[f"BWV{bwv}"] = make_entry(tonic, mode, confidence="inferred")
+    return mappings
+
+
+def generate_clavierubung3_mappings() -> dict[str, dict]:
+    """Clavier-Übung III BWV 669-689. Confidence is 'inferred'."""
+    keys = {
+        669: ("C", "minor"), 670: ("Bb", "major"), 671: ("Bb", "major"),
+        672: ("A", "minor"), 673: ("A", "minor"), 674: ("A", "minor"),
+        675: ("F", "major"), 676: ("E", "minor"), 677: ("A", "major"),
+        678: ("G", "major"), 679: ("G", "major"), 680: ("D", "minor"),
+        681: ("E", "minor"), 682: ("E", "minor"), 683: ("D", "minor"),
+        684: ("G", "minor"), 685: ("A", "minor"), 686: ("A", "minor"),
+        687: ("B", "minor"), 688: ("D", "minor"), 689: ("F", "minor"),
+    }
+    mappings = {}
+    for bwv, (tonic, mode) in keys.items():
+        mappings[f"BWV{bwv}"] = make_entry(tonic, mode, confidence="inferred")
+    return mappings
+
+
+def generate_misc_chorale_mappings() -> dict[str, dict]:
+    """Kirnberger and miscellaneous chorale preludes BWV 690-765.
+
+    Confidence is 'inferred' (keys detected from pitch profile analysis).
+    """
+    # Standard BWV numbered chorales
+    keys = {
+        690: ("A", "minor"), 691: ("A", "minor"), 692: ("C", "major"),
+        693: ("C", "major"), 694: ("G", "minor"), 695: ("D", "minor"),
+        696: ("D", "minor"), 697: ("G", "major"), 698: ("G", "major"),
+        699: ("G", "minor"), 700: ("G", "major"), 701: ("C", "major"),
+        702: ("Bb", "major"), 703: ("F", "major"), 704: ("A", "minor"),
+        705: ("D", "minor"),
+        708: ("A", "major"),
+        709: ("G", "major"), 710: ("G", "minor"), 711: ("G", "major"),
+        712: ("A", "major"), 713: ("E", "minor"), 714: ("B", "major"),
+        715: ("G", "major"), 716: ("G", "major"), 717: ("G", "major"),
+        718: ("E", "minor"), 719: ("G", "major"), 720: ("D", "major"),
+        721: ("B", "minor"), 722: ("G", "major"), 723: ("G", "major"),
+        724: ("G", "major"), 725: ("A", "minor"), 726: ("G", "major"),
+        727: ("B", "minor"), 728: ("C", "major"), 729: ("A", "major"),
+        730: ("G", "major"), 731: ("G", "major"), 732: ("E", "major"),
+        733: ("D", "minor"), 734: ("G", "major"), 735: ("Bb", "major"),
+        736: ("D", "major"), 737: ("D", "minor"), 738: ("D", "major"),
+        739: ("G", "major"), 740: ("F", "major"), 741: ("G", "minor"),
+        742: ("B", "minor"), 743: ("A", "minor"), 744: ("A", "minor"),
+        745: ("E", "minor"), 746: ("D", "minor"), 747: ("G", "minor"),
+        748: ("D", "major"), 749: ("G", "major"), 750: ("D", "major"),
+        751: ("G", "major"), 752: ("G", "major"), 753: ("D", "minor"),
+        754: ("Bb", "major"), 755: ("G", "major"), 756: ("G", "major"),
+        757: ("G", "major"), 758: ("G", "major"), 759: ("F", "major"),
+        760: ("D", "minor"), 761: ("A", "minor"), 762: ("D", "minor"),
+        763: ("D", "major"), 764: ("G", "major"), 765: ("D", "minor"),
+    }
+    mappings = {}
+    for bwv, (tonic, mode) in keys.items():
+        mappings[f"BWV{bwv}"] = make_entry(tonic, mode, confidence="inferred")
+
+    # BWV 706 and 707 have a/b variants
+    for suffix_bwv, tonic, mode in [
+        ("706a", "A", "major"), ("706b", "A", "major"),
+        ("707a", "A", "minor"), ("707b", "A", "minor"),
+    ]:
+        mappings[f"BWV{suffix_bwv}"] = make_entry(tonic, mode, confidence="inferred")
+
+    return mappings
+
+
 def main() -> int:
     """Generate key_signatures.json from all BWV mappings."""
     # Build all mappings
@@ -275,6 +391,10 @@ def main() -> int:
         ("Standalone Organ", generate_standalone_organ_mappings),
         ("Orgelbuchlein", generate_orgelbuchlein_mappings),
         ("Schubler Chorales", generate_schubler_mappings),
+        ("Lute Suites", generate_lute_suite_mappings),
+        ("Leipzig Chorales", generate_leipzig_chorale_mappings),
+        ("Clavier-Ubung III", generate_clavierubung3_mappings),
+        ("Misc Chorales", generate_misc_chorale_mappings),
     ]
 
     for name, generator in generators:
@@ -328,7 +448,7 @@ def main() -> int:
         print("\nResult: WARNINGS present (see above)")
         return 1
     else:
-        print("\nResult: All 292 files mapped successfully")
+        print(f"\nResult: All {len(sorted_mappings)} files mapped successfully")
         return 0
 
 
