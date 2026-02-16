@@ -48,7 +48,8 @@ enum class BachNoteSource : uint8_t {
   ChaconneBass,       ///< Realized chaconne bass line (structural, role-dependent).
   PreludeFiguration,  ///< Harmony-first prelude figuration note (structurally consonant).
   ToccataGesture,     ///< Stylus Phantasticus gesture note (structural, octave shift only).
-  GrandPause          ///< Structural silence marker (immutable).
+  GrandPause,          ///< Structural silence marker (immutable).
+  CadenceApproach      ///< Notes shaped by cadence approach formulas.
 };
 
 /// @brief Convert BachNoteSource to human-readable string.
@@ -60,6 +61,7 @@ const char* bachNoteSourceToString(BachNoteSource source);
 /// Determines how aggressively the resolver may modify a note's pitch.
 enum class ProtectionLevel : uint8_t {
   Immutable,      ///< No pitch change allowed (subject core, cantus, ground bass).
+  Architectural,  ///< Pitch, octave, duration, tick all immutable (cadence final notes).
   SemiImmutable,  ///< Octave shift only, pitch class preserved (subject entries).
   Structural,     ///< Octave shift only (answer, countersubject, pedal point).
   Flexible        ///< Full 5-stage cascade (free counterpoint, episodes, ornaments).
@@ -84,7 +86,8 @@ inline bool isStructuralSource(BachNoteSource source) {
          source == BachNoteSource::SequenceNote ||
          source == BachNoteSource::CanonDux ||
          source == BachNoteSource::CanonComes ||
-         source == BachNoteSource::GoldbergAria;
+         source == BachNoteSource::GoldbergAria ||
+         source == BachNoteSource::CadenceApproach;
 }
 
 /// @brief Return the coordination priority tier for a note source.
@@ -103,6 +106,7 @@ inline int sourcePriority(BachNoteSource source) {
     case BachNoteSource::GoldbergAria:
     case BachNoteSource::Coda:
     case BachNoteSource::GrandPause:
+    case BachNoteSource::CadenceApproach:
       return 0;  // Tier 1: immutable (design values, never modified)
     case BachNoteSource::ToccataGesture:
       return 1;  // Tier 2: semi-fixed (gesture notes, octave shift only)

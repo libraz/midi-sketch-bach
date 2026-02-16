@@ -3,6 +3,7 @@
 #include "fugue/fortspinnung.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <random>
 #include <vector>
@@ -169,6 +170,28 @@ uint8_t mapToRegister(int pitch, int lo, int hi) {
   return clampPitch(pitch, static_cast<uint8_t>(lo), static_cast<uint8_t>(hi));
 }
 
+/// @brief Apply stepwise motion preference for dissolution phase.
+///
+/// With the given probability, replace leap intervals (>2 semitones) with
+/// stepwise motion (2 semitones) in the same direction. Creates the
+/// characteristic dissolution "winding down" toward cadence.
+void applyStepwisePreference(std::vector<NoteEvent>& fragment, float preference,
+                             std::mt19937& rng) {
+  for (size_t i = 1; i < fragment.size(); ++i) {
+    int interval = static_cast<int>(fragment[i].pitch) -
+                   static_cast<int>(fragment[i - 1].pitch);
+    if (std::abs(interval) > 2 && rng::rollProbability(rng, preference)) {
+      int direction = (interval > 0) ? 1 : -1;
+      int step = direction * 2;  // Major second.
+      fragment[i].pitch = clampPitch(
+          static_cast<int>(fragment[i - 1].pitch) + step, 0, 127);
+    }
+  }
+}
+
+/// @brief Three-phase classification within a Fortspinnung episode.
+enum class FortPhase : uint8_t { Kernel, Sequence, Dissolution };
+
 /// @brief Place a fragment at a given tick offset, assigning voice ID.
 /// @param fragment Source fragment notes (tick-normalized to 0).
 /// @param offset_tick Tick position for the first note.
@@ -207,6 +230,20 @@ std::vector<NoteEvent> generateFortspinnung(const MotifPool& pool,
   FragmentSelectionWeights weights = weightsForCharacter(character, rng);
   int seq_step = sequenceStepForCharacter(character, rng);
 
+  // Three-phase grammar calibrated per character (Bach reference data).
+  FortspinnungGrammar grammar = getFortspinnungGrammar(character);
+  Tick kernel_end = static_cast<Tick>(duration_ticks * grammar.kernel_ratio);
+  Tick sequence_end = static_cast<Tick>(
+      duration_ticks * (grammar.kernel_ratio + grammar.sequence_ratio));
+
+  // Kernel-phase weights: strongly prefer rank 0 (subject_head) for
+  // motivic identity. Limited transformations preserve the kernel's shape.
+  FragmentSelectionWeights kernel_weights;
+  kernel_weights.rank_weights[0] = 0.85f;
+  kernel_weights.rank_weights[1] = 0.10f;
+  kernel_weights.rank_weights[2] = 0.03f;
+  kernel_weights.rank_weights[3] = 0.02f;
+
   // --- Voice 0: Primary Fortspinnung line ---
   // NOTE: Vocabulary figure matching (tryVocabularyMotif) is intentionally NOT
   // applied in the Fortspinnung path. Fortspinnung draws fragments directly from
@@ -226,64 +263,97 @@ std::vector<NoteEvent> generateFortspinnung(const MotifPool& pool,
   Tick current_tick = 0;
   std::vector<NoteEvent> prev_fragment;
 
+  int dissolution_step_count = 0;
+
   while (current_tick < duration_ticks) {
-    // Select a fragment from the pool by weighted rank.
-    size_t rank = selectFragmentRank(rng, weights, pool.size());
+    // Determine current phase within the Fortspinnung arc.
+    FortPhase phase;
+    if (current_tick < kernel_end) {
+      phase = FortPhase::Kernel;
+    } else if (current_tick < sequence_end) {
+      phase = FortPhase::Sequence;
+    } else {
+      phase = FortPhase::Dissolution;
+    }
+
+    // Dissolution density decay: insert rest gap before each successive fragment.
+    if (phase == FortPhase::Dissolution && dissolution_step_count > 0) {
+      Tick gap = static_cast<Tick>(
+          kTicksPerBeat * 0.5f *
+          std::pow(grammar.density_decay_factor, dissolution_step_count));
+      current_tick += gap;
+      if (current_tick >= duration_ticks) break;
+    }
+
+    // Fragment selection: Kernel prefers rank 0, others use character weights.
+    const auto& active_weights =
+        (phase == FortPhase::Kernel) ? kernel_weights : weights;
+    size_t rank = selectFragmentRank(rng, active_weights, pool.size());
     const PooledMotif* motif = pool.getByRank(rank);
     if (motif == nullptr || motif->notes.empty()) break;
 
     std::vector<NoteEvent> fragment = motif->notes;
 
-    // Apply character-specific transformation.
-    switch (character) {
-      case SubjectCharacter::Restless:
-        // Diminution for urgency.
-        fragment = diminishMelody(fragment, 0);
-        break;
-      case SubjectCharacter::Noble:
-        // Augmentation for stateliness.
-        fragment = augmentMelody(fragment, 0);
-        break;
-      case SubjectCharacter::Playful:
-        // Alternate between normal and diminished. Per-seed diminution
-        // probability varies in [0.40, 0.60] for subtle rhythmic variety.
-        if (current_tick > 0 &&
-            rng::rollProbability(rng, rng::rollFloat(rng, 0.40f, 0.60f))) {
-          fragment = diminishMelody(fragment, 0);
-        }
-        break;
-      case SubjectCharacter::Severe:
-      default:
-        // Keep original rhythm for strictness.
-        break;
+    // Dissolution: truncate fragments for gradual fragmentation.
+    if (phase == FortPhase::Dissolution &&
+        fragment.size() > grammar.min_fragment_notes) {
+      fragment.resize(grammar.min_fragment_notes);
     }
 
-    // Apply dotted rhythm variation (30% probability, not for Severe).
-    // Alternates long-short pairs within the fragment for rhythmic interest.
-    if (character != SubjectCharacter::Severe &&
+    // Apply character-specific transformation (Kernel: skip for identity).
+    if (phase == FortPhase::Sequence) {
+      switch (character) {
+        case SubjectCharacter::Restless:
+          fragment = diminishMelody(fragment, 0);
+          break;
+        case SubjectCharacter::Noble:
+          fragment = augmentMelody(fragment, 0);
+          break;
+        case SubjectCharacter::Playful:
+          if (current_tick > 0 &&
+              rng::rollProbability(rng, rng::rollFloat(rng, 0.40f, 0.60f))) {
+            fragment = diminishMelody(fragment, 0);
+          }
+          break;
+        case SubjectCharacter::Severe:
+        default:
+          break;
+      }
+    }
+
+    // Apply dotted rhythm variation (Sequence phase only, 30%, not for Severe).
+    if (phase == FortPhase::Sequence &&
+        character != SubjectCharacter::Severe &&
         rng::rollProbability(rng, 0.30f) && fragment.size() >= 2) {
       for (size_t fi = 0; fi + 1 < fragment.size(); fi += 2) {
         Tick combined = fragment[fi].duration + fragment[fi + 1].duration;
-        // Dotted: first note gets 75%, second gets 25%.
         fragment[fi].duration = (combined * 3) / 4;
         fragment[fi + 1].duration = combined / 4;
-        // Adjust start tick of the short note.
         fragment[fi + 1].start_tick =
             fragment[fi].start_tick + fragment[fi].duration;
       }
     }
 
-    // Apply sequential transposition based on how many fragments placed so far.
-    if (current_tick > 0) {
+    // Sequential transposition (Kernel: skip, Sequence/Dissolution: apply).
+    if (phase != FortPhase::Kernel && current_tick > 0) {
       int repetition_count = static_cast<int>(current_tick / std::max(motifDuration(fragment),
                                                                        static_cast<Tick>(1)));
-      int transpose = seq_step * std::min(repetition_count, 4);
+      // Dissolution uses smaller transposition steps (half seq_step).
+      int effective_step = (phase == FortPhase::Dissolution)
+                               ? seq_step / 2
+                               : seq_step;
+      int transpose = effective_step * std::min(repetition_count, 4);
       fragment = transposeMelody(fragment, transpose);
     }
 
     // Close pitch gap with previous fragment for smooth voice-leading.
     if (!prev_fragment.empty()) {
       closeGapIfNeeded(fragment, prev_fragment.back().pitch);
+    }
+
+    // Dissolution: apply stepwise preference to replace leaps with steps.
+    if (phase == FortPhase::Dissolution) {
+      applyStepwisePreference(fragment, grammar.stepwise_preference, rng);
     }
 
     // --- Tritone repair: eliminate augmented 4th (6 semitones) melodic leaps ---
@@ -398,6 +468,9 @@ std::vector<NoteEvent> generateFortspinnung(const MotifPool& pool,
 
     prev_fragment = fragment;
     current_tick += frag_dur;
+    if (phase == FortPhase::Dissolution) {
+      ++dissolution_step_count;
+    }
   }
 
   // --- Voice 1: Inverted imitation (if 2+ voices) ---
@@ -423,16 +496,34 @@ std::vector<NoteEvent> generateFortspinnung(const MotifPool& pool,
       }
       Tick imitation_offset = std::max(first_frag_dur / 2, static_cast<Tick>(kTicksPerBeat));
 
+      // Dissolution convergence: progressively move voice 1 toward voice 0
+      // pitch in the dissolution phase, ending on a consonant interval (3rd/6th).
+      Tick dissolution_start = start_tick + sequence_end;
+      uint8_t last_v0_pitch = 0;
+      for (const auto& note : result) {
+        if (note.voice == 0) last_v0_pitch = note.pitch;
+      }
+
       for (auto& note : inverted) {
         note.start_tick += imitation_offset;
         note.voice = 1;
         note.source = BachNoteSource::EpisodeMaterial;
-        // Only include notes that fit within the episode duration.
         if (note.start_tick < start_tick + duration_ticks) {
-          // Clamp duration.
           Tick end_boundary = start_tick + duration_ticks;
           if (note.start_tick + note.duration > end_boundary) {
             note.duration = end_boundary - note.start_tick;
+          }
+          // In dissolution phase, shift pitch toward consonance with voice 0.
+          if (note.start_tick >= dissolution_start && last_v0_pitch > 0) {
+            float progress = static_cast<float>(note.start_tick - dissolution_start) /
+                             static_cast<float>(std::max(
+                                 duration_ticks - sequence_end, static_cast<Tick>(1)));
+            progress = std::min(progress, 1.0f);
+            // Target: 3rd (3 or 4 semitones) below voice 0 last pitch.
+            int target = static_cast<int>(last_v0_pitch) - 4;
+            int current = static_cast<int>(note.pitch);
+            int shift = static_cast<int>((target - current) * progress);
+            note.pitch = clampPitch(current + shift, 0, 127);
           }
           result.push_back(note);
         }
@@ -572,7 +663,9 @@ std::vector<NoteEvent> generateFortspinnung(const MotifPool& pool,
         bool emit = force_emit || rng::rollProbability(pedal_rng, emit_prob);
 
         if (!emit) {
-          int bars_skipped = std::max(1, static_cast<int>(segment_dur / kTicksPerBar));
+          // Ceiling division: a segment of 1.5 bars counts as 2 bars of silence.
+          int bars_skipped = std::max(
+              1, static_cast<int>((segment_dur + kTicksPerBar - 1) / kTicksPerBar));
           consecutive_silent_bars += bars_skipped;
           pedal_tick += segment_dur;
           use_fragment = !use_fragment;
@@ -613,6 +706,20 @@ std::vector<NoteEvent> generateFortspinnung(const MotifPool& pool,
         }
         use_fragment = !use_fragment;
       }
+    }
+  }
+
+  // Cadential lengthening: extend the last 1-2 voice 0 notes for ritardando.
+  // Applied after all voices to avoid affecting tail motif extraction.
+  {
+    std::vector<NoteEvent*> v0_ptrs;
+    for (auto& note : result) {
+      if (note.voice == 0) v0_ptrs.push_back(&note);
+    }
+    size_t lengthen_count = std::min(static_cast<size_t>(2), v0_ptrs.size());
+    for (size_t i = v0_ptrs.size() - lengthen_count; i < v0_ptrs.size(); ++i) {
+      v0_ptrs[i]->duration = static_cast<Tick>(
+          v0_ptrs[i]->duration * grammar.cadential_lengthening);
     }
   }
 

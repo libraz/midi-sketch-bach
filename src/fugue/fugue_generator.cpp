@@ -29,6 +29,7 @@
 #include "counterpoint/leap_resolution.h"
 #include "counterpoint/repeated_note_repair.h"
 #include "counterpoint/vertical_safe.h"
+#include "core/form_profile.h"
 #include "core/note_creator.h"
 #include "fugue/answer.h"
 #include "fugue/archetype_policy.h"
@@ -1896,6 +1897,98 @@ FugueResult generateFugue(const FugueConfig& config) {
   }
 
   // =========================================================================
+  // RegisterEnvelope observation metrics (Phase A: observation only, no penalty).
+  // Measures per-segment pitch extremes and envelope overflow to inform
+  // future register-shaping passes.
+  // =========================================================================
+  {
+    RegisterEnvelope envelope = getRegisterEnvelope(FormType::Fugue);
+
+    constexpr int kNumSegments = 4;
+    uint8_t max_pitch_per_segment[kNumSegments] = {};
+    uint8_t min_pitch_per_segment[kNumSegments] = {};
+    for (int seg = 0; seg < kNumSegments; ++seg) {
+      min_pitch_per_segment[seg] = 127;
+    }
+
+    int envelope_overflow_count = 0;
+
+    for (const auto& note : all_notes) {
+      if (note.voice >= num_voices) continue;
+
+      float phase_pos = estimated_duration > 0
+          ? static_cast<float>(note.start_tick) / static_cast<float>(estimated_duration)
+          : 0.0f;
+      int seg = std::min(static_cast<int>(phase_pos * kNumSegments), kNumSegments - 1);
+
+      if (note.pitch > max_pitch_per_segment[seg]) {
+        max_pitch_per_segment[seg] = note.pitch;
+      }
+      if (note.pitch < min_pitch_per_segment[seg]) {
+        min_pitch_per_segment[seg] = note.pitch;
+      }
+
+      // Check envelope overflow: compute effective range for this note's voice.
+      auto [elo, ehi] = getFugueVoiceRange(note.voice, num_voices);
+      int env_center = (static_cast<int>(elo) + static_cast<int>(ehi)) / 2;
+      int full_span = static_cast<int>(ehi) - static_cast<int>(elo);
+
+      // Piecewise linear interpolation of envelope ratio at phase_pos.
+      float ratio;
+      if (phase_pos < 0.25f) {
+        float frac = phase_pos / 0.25f;
+        ratio = envelope.opening_range_ratio +
+                frac * (envelope.middle_range_ratio - envelope.opening_range_ratio);
+      } else if (phase_pos < 0.60f) {
+        float frac = (phase_pos - 0.25f) / 0.35f;
+        ratio = envelope.middle_range_ratio +
+                frac * (envelope.climax_range_ratio - envelope.middle_range_ratio);
+      } else if (phase_pos < 0.85f) {
+        float frac = (phase_pos - 0.60f) / 0.25f;
+        ratio = envelope.climax_range_ratio +
+                frac * (envelope.closing_range_ratio - envelope.climax_range_ratio);
+      } else {
+        ratio = envelope.closing_range_ratio;
+      }
+
+      int eff_span = static_cast<int>(static_cast<float>(full_span) * ratio);
+      uint8_t eff_lo = static_cast<uint8_t>(std::max(0, env_center - eff_span / 2));
+      uint8_t eff_hi = static_cast<uint8_t>(std::min(127, env_center + eff_span / 2));
+      if (note.pitch < eff_lo || note.pitch > eff_hi) {
+        ++envelope_overflow_count;
+      }
+    }
+
+    // Climax metrics: stretto segment (seg 2) should exceed exposition segment (seg 0).
+    bool climax_achieved = max_pitch_per_segment[2] > max_pitch_per_segment[0];
+
+    // Find the tick position of the highest pitch across all voices.
+    Tick highest_tick = 0;
+    uint8_t highest_pitch = 0;
+    for (const auto& note : all_notes) {
+      if (note.voice >= num_voices) continue;
+      if (note.pitch > highest_pitch) {
+        highest_pitch = note.pitch;
+        highest_tick = note.start_tick;
+      }
+    }
+    float climax_percentile = estimated_duration > 0
+        ? static_cast<float>(highest_tick) / static_cast<float>(estimated_duration)
+        : 0.0f;
+
+    std::fprintf(stderr,
+        "[RegisterEnvelope] envelope_overflow_count=%d "
+        "max_per_seg=[%d,%d,%d,%d] min_per_seg=[%d,%d,%d,%d] "
+        "climax_tick_percentile=%.2f climax_achieved=%s\n",
+        envelope_overflow_count,
+        max_pitch_per_segment[0], max_pitch_per_segment[1],
+        max_pitch_per_segment[2], max_pitch_per_segment[3],
+        min_pitch_per_segment[0], min_pitch_per_segment[1],
+        min_pitch_per_segment[2], min_pitch_per_segment[3],
+        climax_percentile, climax_achieved ? "true" : "false");
+  }
+
+  // =========================================================================
   // Post-validation sweep: final safety net for remaining notes
   // =========================================================================
   {
@@ -2253,6 +2346,12 @@ FugueResult generateFugue(const FugueConfig& config) {
       // even for notes that are already diatonic and skip further processing.
       uint8_t prev_pitch_for_voice = dia_last_pitch[note.voice];
       dia_last_pitch[note.voice] = note.pitch;
+
+      // Architectural notes (cadence approach finals) are completely immutable
+      // through the entire post-validation pipeline — never snap.
+      if (getProtectionLevel(note.source) == ProtectionLevel::Architectural) {
+        continue;
+      }
 
       Key note_key = tonal_plan.keyAtTick(note.start_tick);
       const HarmonicEvent& harm = detailed_timeline.getAt(note.start_tick);
@@ -2917,6 +3016,7 @@ FugueResult generateFugue(const FugueConfig& config) {
         auto [lo, hi] = getFugueVoiceRange(note.voice, num_voices);
         auto level = getProtectionLevel(note.source);
         if (level != ProtectionLevel::Immutable &&
+            level != ProtectionLevel::Architectural &&
             (note.pitch < lo || note.pitch > hi)) {
           // Try octave shift first (preserves melodic contour).
           uint8_t fixed = clampPitch(static_cast<int>(note.pitch), lo, hi);
@@ -3042,8 +3142,10 @@ FugueResult generateFugue(const FugueConfig& config) {
 
               for (int ci = 0; ci < 2 && !tick_changed; ++ci) {
                 int fix_idx = candidates[ci];
-                // Coda notes are design values (Principle 4) — never alter.
+                // Coda and Architectural notes are design values — never alter.
                 if (all_notes[fix_idx].source == BachNoteSource::Coda) continue;
+                if (getProtectionLevel(all_notes[fix_idx].source) ==
+                    ProtectionLevel::Architectural) continue;
                 uint8_t fix_voice = all_notes[fix_idx].voice;
                 auto [flo, fhi] = getFugueVoiceRange(fix_voice, num_voices);
                 Key fix_key = tonal_plan.keyAtTick(

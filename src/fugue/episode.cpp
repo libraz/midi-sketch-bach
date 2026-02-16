@@ -1263,19 +1263,21 @@ Episode generateEpisode(const Subject& subject, Tick start_tick, Tick duration_t
   // Normalize motif timing to start at tick 0 for transformation operations.
   normalizeMotifToZero(motif);
 
-  // Vocabulary figure matching: replace motif with Bach vocabulary figure
-  // when a strong match is found (30-35% probability). Sequential context
-  // (seq_reps > 1) suppresses to preserve Fortspinnung flow.
-  // Imitation context guard: Noble and Restless use specialized voice 1
-  // transformations (augmented bass / diminished motif) that rely on
-  // unperturbed RNG state for correct register/duration contrasts.
+  // EpisodeVocabularyMode exclusive control: select ONE vocabulary mode per
+  // episode to prevent conflicting systems from operating simultaneously.
+  // Odd episodes favor VocabularyMotif, even episodes favor Plain.
+  EpisodeVocabularyMode vocab_mode = (episode_index % 2 != 0)
+                                         ? EpisodeVocabularyMode::VocabularyMotif
+                                         : EpisodeVocabularyMode::Plain;
+
+  // Vocabulary figure matching: only apply when VocabularyMotif mode is active.
   ScaleType motif_scale = subject.is_minor ? ScaleType::HarmonicMinor : ScaleType::Major;
-  bool has_imitation_transform =
-      subject.character == SubjectCharacter::Noble ||
-      subject.character == SubjectCharacter::Restless;
-  // Note: seq_reps not yet computed here, so pass false for is_sequential.
-  // The actual sequential suppression happens implicitly via probability gate.
-  motif = tryVocabularyMotif(motif, start_key, motif_scale, rng, has_imitation_transform);
+  if (vocab_mode == EpisodeVocabularyMode::VocabularyMotif) {
+    bool has_imitation_transform =
+        subject.character == SubjectCharacter::Noble ||
+        subject.character == SubjectCharacter::Restless;
+    motif = tryVocabularyMotif(motif, start_key, motif_scale, rng, has_imitation_transform);
+  }
 
   Tick motif_dur = motifDuration(motif);
   if (motif_dur == 0) {

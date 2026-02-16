@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "core/basic_types.h"
+#include "core/form_profile.h"
 
 namespace bach {
 
@@ -90,6 +91,38 @@ int fitToRegister(const std::vector<NoteEvent>& notes,
                   bool is_subject_voice = false,
                   uint8_t last_subject_pitch = 0,
                   bool is_exposition = false);
+
+/// @brief Phase-position-aware register fitting with envelope observation.
+///
+/// Calculates an effective narrowed range based on the RegisterEnvelope and
+/// the piece position (phase_pos), then delegates to the existing fitToRegister.
+/// Phase A (observation-only): penalty = 0; counts notes outside the envelope
+/// range via the optional overflow counter.
+///
+/// Piecewise linear interpolation between four phases:
+///   [0.00, 0.25) opening_range_ratio (exposition)
+///   [0.25, 0.60) middle_range_ratio  (development)
+///   [0.60, 0.85) climax_range_ratio  (stretto)
+///   [0.85, 1.00] closing_range_ratio (coda)
+///
+/// @param notes Vector of NoteEvent whose pitches are evaluated.
+/// @param voice_id Voice identifier (0 = soprano, increasing = lower).
+/// @param num_voices Total number of voices in the fugue.
+/// @param phase_pos Position in the piece as fraction [0.0, 1.0].
+/// @param envelope RegisterEnvelope with per-phase range ratios.
+/// @param reference_pitch Previous pitch in the same voice (0 = none).
+/// @param adjacent_last_pitch Last pitch sounded by an adjacent voice (0 = none).
+/// @param envelope_overflow_count If non-null, incremented for each note outside
+///        the envelope-narrowed range (observation only, no penalty applied).
+/// @return Optimal octave shift in semitones (multiple of 12).
+int fitToRegisterWithEnvelope(
+    const std::vector<NoteEvent>& notes,
+    uint8_t voice_id, uint8_t num_voices,
+    float phase_pos,
+    const RegisterEnvelope& envelope,
+    uint8_t reference_pitch = 0,
+    uint8_t adjacent_last_pitch = 0,
+    int* envelope_overflow_count = nullptr);
 
 }  // namespace bach
 

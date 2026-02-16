@@ -10,6 +10,8 @@
 #include "core/basic_types.h"
 #include "core/note_source.h"
 #include "core/pitch_utils.h"
+#include "fugue/cadence_plan.h"
+#include "fugue/cadence_vocabulary.h"
 #include "fugue/fugue_structure.h"
 
 namespace bach {
@@ -493,6 +495,189 @@ TEST_F(CadentialCoverageTest, DeterministicWithSameSeed) {
     EXPECT_EQ(notes1[idx].start_tick, notes2[idx].start_tick);
     EXPECT_EQ(notes1[idx].voice, notes2[idx].voice);
   }
+}
+
+// ---------------------------------------------------------------------------
+// applyCadenceApproachToVoices
+// ---------------------------------------------------------------------------
+
+class CadenceApproachTest : public ::testing::Test {};
+
+TEST_F(CadenceApproachTest, AppliesApproachToSopranoBass) {
+  // Create 4 voices across 4 bars of quarter-note filler.
+  std::vector<NoteEvent> notes;
+  for (Tick bar = 0; bar < 4; ++bar) {
+    Tick bar_start = bar * kTicksPerBar;
+    for (VoiceId voice = 0; voice < 4; ++voice) {
+      for (int beat = 0; beat < 4; ++beat) {
+        uint8_t pitch = static_cast<uint8_t>(72 - voice * 12 + beat);
+        notes.push_back(makeNote(bar_start + beat * kTicksPerBeat, pitch, voice));
+      }
+    }
+  }
+
+  // Create a CadencePlan with one Perfect cadence at bar 4.
+  CadencePlan plan;
+  CadencePoint cadence_pt;
+  cadence_pt.tick = kTicksPerBar * 4;
+  cadence_pt.type = CadenceType::Perfect;
+  cadence_pt.key.tonic = Key::C;
+  cadence_pt.key.is_minor = false;
+  plan.points.push_back(cadence_pt);
+
+  int shaped = applyCadenceApproachToVoices(notes, plan, Key::C, false, 4, 42);
+  EXPECT_GE(shaped, 1);
+
+  // Verify at least one soprano (voice 0) and one bass (voice 3) note in the
+  // cadence window now has CadenceApproach source.
+  Tick window_start = kTicksPerBar * 4 - kTicksPerBeat * 2;
+  bool found_soprano = false;
+  bool found_bass = false;
+  for (const auto& note : notes) {
+    if (note.start_tick >= window_start && note.start_tick < kTicksPerBar * 4) {
+      if (note.voice == 0 && note.source == BachNoteSource::CadenceApproach) {
+        found_soprano = true;
+      }
+      if (note.voice == 3 && note.source == BachNoteSource::CadenceApproach) {
+        found_bass = true;
+      }
+    }
+  }
+  EXPECT_TRUE(found_soprano) << "Expected at least one soprano note with CadenceApproach source";
+  EXPECT_TRUE(found_bass) << "Expected at least one bass note with CadenceApproach source";
+}
+
+TEST_F(CadenceApproachTest, ArchitecturalProtection) {
+  // Create 4 voices across 4 bars.
+  std::vector<NoteEvent> notes;
+  for (Tick bar = 0; bar < 4; ++bar) {
+    Tick bar_start = bar * kTicksPerBar;
+    for (VoiceId voice = 0; voice < 4; ++voice) {
+      for (int beat = 0; beat < 4; ++beat) {
+        uint8_t pitch = static_cast<uint8_t>(72 - voice * 12 + beat);
+        notes.push_back(makeNote(bar_start + beat * kTicksPerBeat, pitch, voice));
+      }
+    }
+  }
+
+  CadencePlan plan;
+  CadencePoint cadence_pt;
+  cadence_pt.tick = kTicksPerBar * 4;
+  cadence_pt.type = CadenceType::Perfect;
+  cadence_pt.key.tonic = Key::C;
+  cadence_pt.key.is_minor = false;
+  plan.points.push_back(cadence_pt);
+
+  applyCadenceApproachToVoices(notes, plan, Key::C, false, 4, 42);
+
+  // Verify all notes with CadenceApproach source have Architectural protection.
+  for (const auto& note : notes) {
+    if (note.source == BachNoteSource::CadenceApproach) {
+      EXPECT_EQ(getProtectionLevel(note.source), ProtectionLevel::Architectural)
+          << "CadenceApproach note at tick " << note.start_tick
+          << " voice " << static_cast<int>(note.voice)
+          << " should have Architectural protection";
+    }
+  }
+}
+
+TEST_F(CadenceApproachTest, SkipsProtectedNotes) {
+  // Create notes where some in the cadence window have FugueSubject source
+  // (SemiImmutable protection), so they should NOT be modified.
+  std::vector<NoteEvent> notes;
+  Tick window_start = kTicksPerBar * 4 - kTicksPerBeat * 2;
+
+  // Add soprano notes in the window with FugueSubject source.
+  uint8_t subject_pitch_1 = 72;
+  uint8_t subject_pitch_2 = 74;
+  notes.push_back(makeNote(window_start, subject_pitch_1, 0, kTicksPerBeat,
+                           BachNoteSource::FugueSubject));
+  notes.push_back(makeNote(window_start + kTicksPerBeat, subject_pitch_2, 0,
+                           kTicksPerBeat, BachNoteSource::FugueSubject));
+
+  // Add bass notes in the window with FugueSubject source.
+  uint8_t bass_subject_pitch = 36;
+  notes.push_back(makeNote(window_start, bass_subject_pitch, 3, kTicksPerBeat,
+                           BachNoteSource::FugueSubject));
+
+  // Add some flexible notes outside the window for context.
+  for (Tick bar = 0; bar < 3; ++bar) {
+    Tick bar_start = bar * kTicksPerBar;
+    notes.push_back(makeNote(bar_start, 65, 0));
+    notes.push_back(makeNote(bar_start, 40, 3));
+  }
+
+  CadencePlan plan;
+  CadencePoint cadence_pt;
+  cadence_pt.tick = kTicksPerBar * 4;
+  cadence_pt.type = CadenceType::Perfect;
+  cadence_pt.key.tonic = Key::C;
+  cadence_pt.key.is_minor = false;
+  plan.points.push_back(cadence_pt);
+
+  applyCadenceApproachToVoices(notes, plan, Key::C, false, 4, 42);
+
+  // Verify that the FugueSubject notes were NOT modified (pitch unchanged).
+  for (const auto& note : notes) {
+    if (note.source == BachNoteSource::FugueSubject) {
+      if (note.voice == 0 && note.start_tick == window_start) {
+        EXPECT_EQ(note.pitch, subject_pitch_1)
+            << "FugueSubject soprano note should not be modified";
+      }
+      if (note.voice == 0 && note.start_tick == window_start + kTicksPerBeat) {
+        EXPECT_EQ(note.pitch, subject_pitch_2)
+            << "FugueSubject soprano note should not be modified";
+      }
+      if (note.voice == 3 && note.start_tick == window_start) {
+        EXPECT_EQ(note.pitch, bass_subject_pitch)
+            << "FugueSubject bass note should not be modified";
+      }
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// isInCadenceZone
+// ---------------------------------------------------------------------------
+
+class IsInCadenceZoneTest : public ::testing::Test {};
+
+TEST_F(IsInCadenceZoneTest, DetectsWindow) {
+  // Cadences at bar 4 and bar 8.
+  std::vector<Tick> cadence_ticks = {kTicksPerBar * 4, kTicksPerBar * 8};
+
+  // Default window is 2 beats before each cadence tick.
+  // Bar 4 cadence at tick 7680: zone is [7680 - 960, 7680) = [6720, 7680).
+  // Bar 8 cadence at tick 15360: zone is [15360 - 960, 15360) = [14400, 15360).
+
+  // Ticks within 2 beats before bar 4 cadence should return true.
+  EXPECT_TRUE(isInCadenceZone(kTicksPerBar * 4 - kTicksPerBeat, cadence_ticks));
+  EXPECT_TRUE(isInCadenceZone(kTicksPerBar * 4 - kTicksPerBeat * 2, cadence_ticks));
+  EXPECT_TRUE(isInCadenceZone(kTicksPerBar * 4 - 1, cadence_ticks));
+
+  // Ticks within 2 beats before bar 8 cadence should return true.
+  EXPECT_TRUE(isInCadenceZone(kTicksPerBar * 8 - kTicksPerBeat, cadence_ticks));
+  EXPECT_TRUE(isInCadenceZone(kTicksPerBar * 8 - kTicksPerBeat * 2, cadence_ticks));
+
+  // Ticks outside any cadence window should return false.
+  EXPECT_FALSE(isInCadenceZone(0, cadence_ticks));
+  EXPECT_FALSE(isInCadenceZone(kTicksPerBar * 2, cadence_ticks));
+  EXPECT_FALSE(isInCadenceZone(kTicksPerBar * 4, cadence_ticks));  // At cadence, not before.
+  EXPECT_FALSE(isInCadenceZone(kTicksPerBar * 6, cadence_ticks));
+  EXPECT_FALSE(isInCadenceZone(kTicksPerBar * 8, cadence_ticks));  // At cadence, not before.
+  EXPECT_FALSE(isInCadenceZone(kTicksPerBar * 10, cadence_ticks));
+
+  // Tick just before the window should return false (3 beats before = outside 2-beat window).
+  EXPECT_FALSE(isInCadenceZone(kTicksPerBar * 4 - kTicksPerBeat * 2 - 1, cadence_ticks));
+}
+
+TEST_F(IsInCadenceZoneTest, EmptyTicksReturnsFalse) {
+  std::vector<Tick> empty_ticks;
+
+  EXPECT_FALSE(isInCadenceZone(0, empty_ticks));
+  EXPECT_FALSE(isInCadenceZone(kTicksPerBar * 4, empty_ticks));
+  EXPECT_FALSE(isInCadenceZone(kTicksPerBar * 8 - kTicksPerBeat, empty_ticks));
+  EXPECT_FALSE(isInCadenceZone(999999, empty_ticks));
 }
 
 }  // namespace

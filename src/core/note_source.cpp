@@ -46,6 +46,7 @@ const char* bachNoteSourceToString(BachNoteSource source) {
     case BachNoteSource::PreludeFiguration: return "prelude_figuration";
     case BachNoteSource::ToccataGesture: return "toccata_gesture";
     case BachNoteSource::GrandPause: return "grand_pause";
+    case BachNoteSource::CadenceApproach: return "cadence_approach";
   }
   return "unknown";
 }
@@ -116,6 +117,9 @@ ProtectionLevel getProtectionLevel(BachNoteSource source) {
 
     case BachNoteSource::GrandPause:
       return ProtectionLevel::Immutable;
+
+    case BachNoteSource::CadenceApproach:
+      return ProtectionLevel::Architectural;
 
     case BachNoteSource::PreludeFiguration:
       return ProtectionLevel::Flexible;

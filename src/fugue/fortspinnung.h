@@ -18,6 +18,51 @@
 
 namespace bach {
 
+/// Exclusive episode generation mode. Selected once per episode to prevent
+/// conflicting vocabulary systems from operating simultaneously.
+enum class EpisodeVocabularyMode : uint8_t {
+  Fortspinnung,     ///< Kernel->Sequence->Dissolution (motif pool based).
+  VocabularyMotif,  ///< Existing tryVocabularyMotif path (figure matching).
+  Plain,            ///< Standard episode (character-specific, no vocabulary).
+};
+
+/// Three-phase structure for Fortspinnung episodes.
+///
+/// Baroque Fortspinnung follows a Kernel->Sequence->Dissolution arc:
+///   - Kernel: initial motivic statement (subject-derived, minimal transformation)
+///   - Sequence: sequential development with transposition and variation
+///   - Dissolution: fragmentation toward cadence (increasing stepwise motion,
+///     decreasing density, lengthening final notes)
+///
+/// Calibrated from bach-reference episode internal arc analysis.
+struct FortspinnungGrammar {
+  float kernel_ratio = 0.25f;        ///< Fraction of episode for Kernel phase.
+  float sequence_ratio = 0.50f;      ///< Fraction for Sequence phase.
+  float dissolution_ratio = 0.25f;   ///< Fraction for Dissolution phase.
+
+  // Dissolution phase characteristics.
+  uint8_t min_fragment_notes = 2;    ///< Minimum notes in dissolution fragments.
+  float stepwise_preference = 0.70f; ///< Scoring weight for stepwise motion (0.0-1.0).
+  float density_decay_factor = 1.2f; ///< Inter-onset expansion per step (1.2 = 20% longer).
+  float cadential_lengthening = 1.5f;  ///< Final 1-2 note duration multiplier.
+};
+
+/// Get the default FortspinnungGrammar for a subject character.
+inline FortspinnungGrammar getFortspinnungGrammar(SubjectCharacter character) {
+  switch (character) {
+    case SubjectCharacter::Severe:
+      return {0.30f, 0.45f, 0.25f, 3, 0.65f, 1.15f, 1.5f};
+    case SubjectCharacter::Playful:
+      return {0.20f, 0.55f, 0.25f, 2, 0.60f, 1.25f, 1.3f};
+    case SubjectCharacter::Noble:
+      return {0.30f, 0.45f, 0.25f, 2, 0.75f, 1.20f, 1.6f};
+    case SubjectCharacter::Restless:
+      return {0.20f, 0.55f, 0.25f, 2, 0.55f, 1.30f, 1.4f};
+    default:
+      return {};
+  }
+}
+
 /// @brief Generate Fortspinnung-style episode material from the motif pool.
 ///
 /// Fortspinnung ("spinning forth") is a Baroque compositional technique

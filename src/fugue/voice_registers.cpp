@@ -255,4 +255,87 @@ int fitToRegister(const std::vector<NoteEvent>& notes,
                        is_exposition);
 }
 
+namespace {
+
+/// @brief Interpolate the RegisterEnvelope range ratio at a given phase position.
+///
+/// Uses piecewise linear interpolation between four structural phases:
+///   [0.00, 0.25) opening  (exposition)
+///   [0.25, 0.60) middle   (development)
+///   [0.60, 0.85) climax   (stretto)
+///   [0.85, 1.00] closing  (coda)
+float interpolateEnvelopeRatio(float phase_pos, const RegisterEnvelope& envelope) {
+  // Clamp to [0, 1].
+  if (phase_pos <= 0.0f) return envelope.opening_range_ratio;
+  if (phase_pos >= 1.0f) return envelope.closing_range_ratio;
+
+  // Phase boundaries.
+  constexpr float kOpenEnd = 0.25f;
+  constexpr float kMidEnd = 0.60f;
+  constexpr float kClimaxEnd = 0.85f;
+
+  if (phase_pos < kOpenEnd) {
+    // Within opening phase: interpolate from opening to middle.
+    float frac = phase_pos / kOpenEnd;
+    return envelope.opening_range_ratio +
+           frac * (envelope.middle_range_ratio - envelope.opening_range_ratio);
+  }
+  if (phase_pos < kMidEnd) {
+    // Within middle phase: interpolate from middle to climax.
+    float frac = (phase_pos - kOpenEnd) / (kMidEnd - kOpenEnd);
+    return envelope.middle_range_ratio +
+           frac * (envelope.climax_range_ratio - envelope.middle_range_ratio);
+  }
+  if (phase_pos < kClimaxEnd) {
+    // Within climax phase: interpolate from climax to closing.
+    float frac = (phase_pos - kMidEnd) / (kClimaxEnd - kMidEnd);
+    return envelope.climax_range_ratio +
+           frac * (envelope.closing_range_ratio - envelope.climax_range_ratio);
+  }
+  // Within closing phase: hold at closing ratio.
+  return envelope.closing_range_ratio;
+}
+
+}  // namespace
+
+int fitToRegisterWithEnvelope(
+    const std::vector<NoteEvent>& notes,
+    uint8_t voice_id, uint8_t num_voices,
+    float phase_pos,
+    const RegisterEnvelope& envelope,
+    uint8_t reference_pitch,
+    uint8_t adjacent_last_pitch,
+    int* envelope_overflow_count) {
+  if (notes.empty()) return 0;
+
+  // Get the full voice range.
+  auto [range_lo, range_hi] = getFugueVoiceRange(voice_id, num_voices);
+
+  // Interpolate the envelope ratio at this phase position.
+  float ratio = interpolateEnvelopeRatio(phase_pos, envelope);
+
+  // Calculate effective narrowed range.
+  int center = (static_cast<int>(range_lo) + static_cast<int>(range_hi)) / 2;
+  int full_span = static_cast<int>(range_hi) - static_cast<int>(range_lo);
+  int eff_span = static_cast<int>(static_cast<float>(full_span) * ratio);
+  uint8_t eff_lo = static_cast<uint8_t>(std::max(0, center - eff_span / 2));
+  uint8_t eff_hi = static_cast<uint8_t>(std::min(127, center + eff_span / 2));
+
+  // Phase A observation: count notes outside the envelope-narrowed range.
+  // No penalty is applied to the fitToRegister call.
+  if (envelope_overflow_count != nullptr) {
+    for (const auto& note : notes) {
+      if (note.pitch < eff_lo || note.pitch > eff_hi) {
+        ++(*envelope_overflow_count);
+      }
+    }
+  }
+
+  // Delegate to the existing fitToRegister with the ORIGINAL full range.
+  // Phase A: observation only, no range narrowing penalty.
+  return fitToRegister(notes, range_lo, range_hi,
+                       reference_pitch, /*prev_reference_pitch=*/0,
+                       adjacent_last_pitch);
+}
+
 }  // namespace bach

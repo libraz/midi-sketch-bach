@@ -12,6 +12,7 @@
 #include <vector>
 
 #include "core/basic_types.h"
+#include "fugue/cadence_plan.h"
 #include "fugue/fugue_structure.h"
 
 namespace bach {
@@ -134,6 +135,49 @@ int ensureCadentialCoverage(
     Tick total_duration,
     uint32_t seed,
     const CadenceDetectionConfig& config = {});
+
+/// @brief Check if a tick falls within any cadence zone.
+///
+/// A cadence zone extends `window_beats` before each cadence tick.
+/// Used by the post-validation pipeline to protect cadence-shaped notes.
+///
+/// @param tick The tick to check.
+/// @param cadence_ticks Sorted list of cadence positions.
+/// @param window_beats Window size in beats before each cadence (default: 2).
+/// @return True if the tick is within any cadence zone.
+bool isInCadenceZone(Tick tick, const std::vector<Tick>& cadence_ticks,
+                     Tick window_beats = 2);
+
+/// @brief Extract cadence ticks from a CadencePlan.
+/// @param plan The cadence plan.
+/// @return Sorted vector of cadence tick positions.
+std::vector<Tick> extractCadenceTicks(const CadencePlan& plan);
+
+/// @brief Apply cadence approach formulas to shape soprano and bass voices.
+///
+/// For each cadence point in the plan, locates the cadence window (2-4 beats
+/// before the cadence tick) and adjusts soprano/bass pitches according to the
+/// CadenceApproach formula. The final 2 notes at each cadence receive
+/// Architectural protection (immutable through post-validation). Earlier notes
+/// in the window receive CadenceApproach source (Architectural protection).
+///
+/// Inner voices are not directly modified but will benefit from the
+/// CadenceInnerVoiceGuidance constraints during coordinate_voices.
+///
+/// @param notes All generated notes (modified in place).
+/// @param plan The cadence plan with cadence positions and types.
+/// @param key The tonic key.
+/// @param is_minor True if the key is minor.
+/// @param num_voices Total number of voices.
+/// @param seed Deterministic PRNG seed for approach selection.
+/// @return Number of cadence windows successfully shaped.
+int applyCadenceApproachToVoices(
+    std::vector<NoteEvent>& notes,
+    const CadencePlan& plan,
+    Key key,
+    bool is_minor,
+    uint8_t num_voices,
+    uint32_t seed);
 
 }  // namespace bach
 

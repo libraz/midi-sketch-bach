@@ -2428,6 +2428,536 @@ def get_harmonic_rhythm_profile(work_id: str) -> str:
     return json.dumps(result, indent=2)
 
 
+# ===== M. Architectural vocabulary extraction (3) =============================
+
+
+@server.tool()
+def extract_cadence_formulas(
+    category: str,
+    beats_before: int = 4,
+    cadence_type: Optional[str] = None,
+    top_k: int = 10,
+) -> str:
+    """Extract cadence approach formulas from Bach reference works.
+
+    For each detected cadence, captures soprano/bass melodic approach
+    (degree intervals) in the N beats preceding the cadence point.
+    Groups by cadence type (PAC/HC/DC/PHR) and returns the most common
+    approach patterns.
+
+    Args:
+        category: Work category (e.g. organ_fugue, wtc1)
+        beats_before: Number of beats before cadence to analyze (default 4)
+        cadence_type: Filter to specific type (PAC/HC/DC/PHR), or None for all
+        top_k: Number of top patterns to return per type (default 10)
+    """
+    idx = _get_index()
+    works = idx.filter(category=category)
+    if not works:
+        return json.dumps({"error": f"No works in category '{category}'."})
+
+    # Collect approach patterns across all works.
+    patterns_by_type: dict[str, list[dict[str, Any]]] = {}
+    cadence_distances: list[int] = []  # bars between consecutive cadences
+    total_cadences = 0
+
+    for work in works:
+        work_id = work["id"]
+        tonic_pc, is_minor, _ = get_key_info(work_id)
+        if tonic_pc is None:
+            tonic_pc = 0
+            is_minor = False
+
+        chords, _ = _estimate_chords_for_work(work_id, 0.5)
+        if not chords:
+            continue
+
+        score, raw_data, err = _load_score(work_id)
+        if err or score is None or raw_data is None:
+            continue
+
+        tpb = raw_data.get("ticks_per_beat", TICKS_PER_BEAT)
+        sample_ticks = tpb // 2
+        tracks_notes = iter_track_notes(raw_data, None)
+        if not tracks_notes:
+            continue
+
+        # Detect cadences using same logic as get_cadence_profile.
+        cadence_list: list[dict[str, Any]] = []
+        for ci in range(1, len(chords)):
+            prev_ch = chords[ci - 1]
+            curr_ch = chords[ci]
+            if prev_ch.confidence < 0.3 or curr_ch.confidence < 0.3:
+                continue
+
+            ctype: Optional[str] = None
+            if prev_ch.degree == 4 and curr_ch.degree == 0:
+                ctype = "PAC" if curr_ch.inversion == "root" and curr_ch.confidence >= 0.5 else "IAC"
+            elif curr_ch.degree == 4:
+                sustain = sum(
+                    1 for look in range(ci, min(ci + 4, len(chords)))
+                    if chords[look].degree == 4 and chords[look].confidence > 0.2
+                )
+                if sustain >= 4:
+                    ctype = "HC"
+            elif prev_ch.degree == 4 and curr_ch.degree == 5:
+                ctype = "DC"
+            elif (is_minor and prev_ch.degree == 3 and curr_ch.degree == 4
+                  and prev_ch.inversion == "1st"):
+                ctype = "PHR"
+
+            if ctype is None:
+                continue
+            if cadence_type and ctype != cadence_type:
+                continue
+
+            tick_at = ci * sample_ticks
+            cadence_list.append({"type": ctype, "tick": tick_at, "chord_idx": ci})
+
+        # Compute cadence distances.
+        for i in range(1, len(cadence_list)):
+            dist_bars = (cadence_list[i]["tick"] - cadence_list[i - 1]["tick"]) // TICKS_PER_BAR
+            cadence_distances.append(dist_bars)
+
+        total_cadences += len(cadence_list)
+
+        # Extract approach patterns for soprano (first track) and bass (last track).
+        if len(tracks_notes) < 2:
+            continue
+
+        _, soprano_notes = tracks_notes[0]
+        _, bass_notes = tracks_notes[-1]
+
+        window_ticks = beats_before * tpb
+
+        for cad in cadence_list:
+            tick = cad["tick"]
+            ctype_str = cad["type"]
+
+            # Soprano approach: collect pitches in window before cadence.
+            sop_pitches: list[int] = []
+            for note in soprano_notes:
+                if tick - window_ticks <= note.start_tick < tick:
+                    sop_pitches.append(note.pitch)
+            # Convert to degree intervals (semitone differences between consecutive).
+            sop_intervals: list[int] = []
+            for si in range(1, len(sop_pitches)):
+                sop_intervals.append(sop_pitches[si] - sop_pitches[si - 1])
+
+            # Bass approach.
+            bass_pitches: list[int] = []
+            for note in bass_notes:
+                if tick - window_ticks <= note.start_tick < tick:
+                    bass_pitches.append(note.pitch)
+            bass_intervals: list[int] = []
+            for bi in range(1, len(bass_pitches)):
+                bass_intervals.append(bass_pitches[bi] - bass_pitches[bi - 1])
+
+            if not sop_intervals and not bass_intervals:
+                continue
+
+            pattern: dict[str, Any] = {
+                "soprano_intervals": sop_intervals[-3:],  # last 3 intervals
+                "bass_intervals": bass_intervals[-2:],     # last 2 intervals
+                "work_id": work_id,
+                "bar": tick // TICKS_PER_BAR + 1,
+            }
+
+            if ctype_str not in patterns_by_type:
+                patterns_by_type[ctype_str] = []
+            patterns_by_type[ctype_str].append(pattern)
+
+    # Aggregate: find most common soprano/bass interval tuples.
+    summary: dict[str, Any] = {}
+    for ctype_str, patterns in patterns_by_type.items():
+        sop_counter: Counter[str] = Counter()
+        bass_counter: Counter[str] = Counter()
+        for p in patterns:
+            sop_key = ",".join(str(x) for x in p["soprano_intervals"])
+            bass_key = ",".join(str(x) for x in p["bass_intervals"])
+            if sop_key:
+                sop_counter[sop_key] += 1
+            if bass_key:
+                bass_counter[bass_key] += 1
+
+        summary[ctype_str] = {
+            "count": len(patterns),
+            "top_soprano_approaches": [
+                {"intervals": k, "count": v}
+                for k, v in sop_counter.most_common(top_k)
+            ],
+            "top_bass_approaches": [
+                {"intervals": k, "count": v}
+                for k, v in bass_counter.most_common(top_k)
+            ],
+            "examples": patterns[:3],
+        }
+
+    # Cadence distance distribution.
+    dist_summary: dict[str, float] = {}
+    if cadence_distances:
+        dist_summary = {
+            "mean_bars": round(sum(cadence_distances) / len(cadence_distances), 1),
+            "min_bars": min(cadence_distances),
+            "max_bars": max(cadence_distances),
+            "median_bars": sorted(cadence_distances)[len(cadence_distances) // 2],
+        }
+
+    result: dict[str, Any] = {
+        "category": category,
+        "total_cadences": total_cadences,
+        "beats_before": beats_before,
+        "by_type": summary,
+        "cadence_distance": dist_summary,
+    }
+    return json.dumps(result, indent=2)
+
+
+@server.tool()
+def extract_register_evolution(
+    category: str,
+    num_segments: int = 4,
+    track: Optional[str] = None,
+) -> str:
+    """Extract register (pitch range) evolution across work segments.
+
+    Divides each work into N equal segments and computes per-voice pitch
+    statistics. Identifies climax position (highest pitch location) and
+    range expansion/contraction patterns.
+
+    Args:
+        category: Work category (e.g. organ_fugue, wtc1)
+        num_segments: Number of equal segments to divide each work into (default 4)
+        track: Specific track name to analyze, or None for all tracks
+    """
+    idx = _get_index()
+    works = idx.filter(category=category)
+    if not works:
+        return json.dumps({"error": f"No works in category '{category}'."})
+
+    all_segments: list[list[dict[str, Any]]] = [[] for _ in range(num_segments)]
+    climax_positions: list[float] = []  # 0.0-1.0 position of highest note
+    work_results: list[dict[str, Any]] = []
+
+    for work in works:
+        work_id = work["id"]
+        score, raw_data, err = _load_score(work_id)
+        if err or score is None or raw_data is None:
+            continue
+
+        total_dur = score.total_duration
+        if total_dur == 0:
+            continue
+
+        seg_dur = total_dur / num_segments
+
+        tracks_to_analyze = score.tracks
+        if track:
+            tracks_to_analyze = [t for t in score.tracks if t.name == track]
+            if not tracks_to_analyze:
+                continue
+
+        work_global_max_pitch = 0
+        work_global_max_tick = 0
+
+        per_track_segments: dict[str, list[dict[str, float]]] = {}
+
+        for tr in tracks_to_analyze:
+            track_segs: list[dict[str, float]] = []
+            for seg_idx in range(num_segments):
+                seg_start = int(seg_idx * seg_dur)
+                seg_end = int((seg_idx + 1) * seg_dur)
+
+                pitches_in_seg: list[int] = []
+                for note in tr.sorted_notes:
+                    if seg_start <= note.start_tick < seg_end:
+                        pitches_in_seg.append(note.pitch)
+
+                if not pitches_in_seg:
+                    track_segs.append({
+                        "min_pitch": 0, "max_pitch": 0,
+                        "avg_pitch": 0, "range_span": 0, "note_count": 0,
+                    })
+                    continue
+
+                min_p = min(pitches_in_seg)
+                max_p = max(pitches_in_seg)
+                avg_p = sum(pitches_in_seg) / len(pitches_in_seg)
+
+                track_segs.append({
+                    "min_pitch": min_p,
+                    "max_pitch": max_p,
+                    "avg_pitch": round(avg_p, 1),
+                    "range_span": max_p - min_p,
+                    "note_count": len(pitches_in_seg),
+                })
+
+                all_segments[seg_idx].append({
+                    "min_pitch": min_p, "max_pitch": max_p,
+                    "avg_pitch": round(avg_p, 1), "range_span": max_p - min_p,
+                })
+
+                if max_p > work_global_max_pitch:
+                    work_global_max_pitch = max_p
+                    # Find the exact tick of the max pitch.
+                    for note in tr.sorted_notes:
+                        if (seg_start <= note.start_tick < seg_end
+                                and note.pitch == max_p):
+                            work_global_max_tick = note.start_tick
+                            break
+
+            per_track_segments[tr.name] = track_segs
+
+        if total_dur > 0 and work_global_max_pitch > 0:
+            climax_pos = work_global_max_tick / total_dur
+            climax_positions.append(climax_pos)
+
+        work_results.append({
+            "work_id": work_id,
+            "tracks": per_track_segments,
+            "climax_position": round(climax_pos, 3) if total_dur > 0 else 0.0,
+            "max_pitch": work_global_max_pitch,
+        })
+
+    # Aggregate per segment across all works.
+    segment_averages: list[dict[str, float]] = []
+    for seg_idx in range(num_segments):
+        entries = all_segments[seg_idx]
+        if not entries:
+            segment_averages.append({})
+            continue
+        n = len(entries)
+        segment_averages.append({
+            "avg_min_pitch": round(sum(e["min_pitch"] for e in entries) / n, 1),
+            "avg_max_pitch": round(sum(e["max_pitch"] for e in entries) / n, 1),
+            "avg_range_span": round(sum(e["range_span"] for e in entries) / n, 1),
+            "avg_avg_pitch": round(sum(e["avg_pitch"] for e in entries) / n, 1),
+        })
+
+    # Compute range ratios relative to segment with max range.
+    max_range = max((s.get("avg_range_span", 0) for s in segment_averages), default=1)
+    if max_range > 0:
+        for seg in segment_averages:
+            if seg:
+                seg["range_ratio"] = round(seg.get("avg_range_span", 0) / max_range, 3)
+
+    climax_summary: dict[str, float] = {}
+    if climax_positions:
+        climax_summary = {
+            "mean_position": round(sum(climax_positions) / len(climax_positions), 3),
+            "median_position": round(
+                sorted(climax_positions)[len(climax_positions) // 2], 3
+            ),
+            "min_position": round(min(climax_positions), 3),
+            "max_position": round(max(climax_positions), 3),
+        }
+
+    result: dict[str, Any] = {
+        "category": category,
+        "num_segments": num_segments,
+        "num_works": len(work_results),
+        "segment_averages": segment_averages,
+        "climax_position": climax_summary,
+        "works": work_results[:5],  # First 5 works for detail.
+    }
+    return json.dumps(result, indent=2)
+
+
+@server.tool()
+def extract_episode_internal_arc(
+    category: str,
+    num_phases: int = 3,
+    min_episode_bars: int = 4,
+) -> str:
+    """Analyze internal characteristics of fugue episodes.
+
+    Estimates episode boundaries via texture decrease + harmonic rhythm change,
+    then divides each episode into phases to measure density, stepwise motion,
+    and average interval changes. Quantifies the Dissolution phase pattern.
+
+    Args:
+        category: Work category (e.g. organ_fugue, wtc1)
+        num_phases: Number of phases to divide each episode into (default 3)
+        min_episode_bars: Minimum episode length in bars (default 4)
+    """
+    idx = _get_index()
+    works = idx.filter(category=category)
+    if not works:
+        return json.dumps({"error": f"No works in category '{category}'."})
+
+    phase_stats: list[list[dict[str, float]]] = [[] for _ in range(num_phases)]
+    total_episodes = 0
+    episode_lengths: list[int] = []  # in bars
+
+    for work in works:
+        work_id = work["id"]
+        score, raw_data, err = _load_score(work_id)
+        if err or score is None or raw_data is None:
+            continue
+
+        total_dur = score.total_duration
+        if total_dur == 0 or len(score.tracks) < 2:
+            continue
+
+        tpb = raw_data.get("ticks_per_beat", TICKS_PER_BEAT)
+        tracks_notes = iter_track_notes(raw_data, None)
+        if not tracks_notes:
+            continue
+
+        # Collect all notes into one flat list for density analysis.
+        all_notes: list[Note] = []
+        for _, sorted_notes in tracks_notes:
+            all_notes.extend(sorted_notes)
+        all_notes.sort(key=lambda n: n.start_tick)
+
+        # Estimate episode boundaries: look for texture decreases followed by
+        # increased density (re-entry of voices). Simple heuristic: bars where
+        # the number of active voices drops below the track count.
+        num_tracks = len(score.tracks)
+        bar_density: list[int] = []
+        num_bars = total_dur // TICKS_PER_BAR + 1
+
+        for bar_idx in range(num_bars):
+            bar_start = bar_idx * TICKS_PER_BAR
+            bar_end = bar_start + TICKS_PER_BAR
+            voices_active = set()
+            for _, sorted_notes in tracks_notes:
+                for note in sorted_notes:
+                    if note.start_tick >= bar_end:
+                        break
+                    if note.start_tick + note.duration > bar_start and note.start_tick < bar_end:
+                        voices_active.add(id(sorted_notes))
+                        break
+            bar_density.append(len(voices_active))
+
+        # Find episode-like regions: consecutive bars with reduced texture.
+        # A simple approach: bars where density < num_tracks.
+        min_bars = min_episode_bars
+        episode_regions: list[tuple[int, int]] = []
+        ep_start = -1
+        for bar_idx in range(num_bars):
+            is_reduced = bar_density[bar_idx] < num_tracks
+            if is_reduced:
+                if ep_start < 0:
+                    ep_start = bar_idx
+            else:
+                if ep_start >= 0 and bar_idx - ep_start >= min_bars:
+                    episode_regions.append((ep_start, bar_idx))
+                ep_start = -1
+        if ep_start >= 0 and num_bars - ep_start >= min_bars:
+            episode_regions.append((ep_start, num_bars))
+
+        for ep_start_bar, ep_end_bar in episode_regions:
+            ep_len = ep_end_bar - ep_start_bar
+            episode_lengths.append(ep_len)
+            total_episodes += 1
+
+            ep_start_tick = ep_start_bar * TICKS_PER_BAR
+            ep_end_tick = ep_end_bar * TICKS_PER_BAR
+            phase_dur = (ep_end_tick - ep_start_tick) / num_phases
+
+            for phase_idx in range(num_phases):
+                phase_start = int(ep_start_tick + phase_idx * phase_dur)
+                phase_end = int(ep_start_tick + (phase_idx + 1) * phase_dur)
+
+                # Collect notes in this phase (from first track / soprano).
+                phase_notes: list[Note] = []
+                _, soprano = tracks_notes[0]
+                for note in soprano:
+                    if note.start_tick >= phase_end:
+                        break
+                    if note.start_tick >= phase_start:
+                        phase_notes.append(note)
+
+                if len(phase_notes) < 2:
+                    continue
+
+                # Compute metrics.
+                # Note density (notes per beat).
+                phase_beats = (phase_end - phase_start) / tpb
+                density = len(phase_notes) / phase_beats if phase_beats > 0 else 0
+
+                # Stepwise ratio and average interval.
+                stepwise = 0
+                total_intervals = 0
+                interval_sum = 0
+                for ni in range(1, len(phase_notes)):
+                    mel = abs(phase_notes[ni].pitch - phase_notes[ni - 1].pitch)
+                    total_intervals += 1
+                    interval_sum += mel
+                    if mel <= 2:
+                        stepwise += 1
+
+                stepwise_ratio = stepwise / total_intervals if total_intervals > 0 else 0
+                avg_interval = interval_sum / total_intervals if total_intervals > 0 else 0
+
+                # Average note duration in beats.
+                avg_dur = (
+                    sum(n.duration for n in phase_notes) / len(phase_notes) / tpb
+                )
+
+                phase_stats[phase_idx].append({
+                    "density": round(density, 2),
+                    "stepwise_ratio": round(stepwise_ratio, 3),
+                    "avg_interval": round(avg_interval, 1),
+                    "avg_duration_beats": round(avg_dur, 2),
+                })
+
+    # Aggregate per phase.
+    phase_averages: list[dict[str, float]] = []
+    for phase_idx in range(num_phases):
+        entries = phase_stats[phase_idx]
+        if not entries:
+            phase_averages.append({})
+            continue
+        n = len(entries)
+        phase_averages.append({
+            "avg_density": round(sum(e["density"] for e in entries) / n, 2),
+            "avg_stepwise_ratio": round(
+                sum(e["stepwise_ratio"] for e in entries) / n, 3
+            ),
+            "avg_interval": round(sum(e["avg_interval"] for e in entries) / n, 1),
+            "avg_duration_beats": round(
+                sum(e["avg_duration_beats"] for e in entries) / n, 2
+            ),
+            "sample_count": n,
+        })
+
+    # Dissolution characteristics (last phase vs first phase).
+    dissolution: dict[str, float] = {}
+    if len(phase_averages) >= 2 and phase_averages[0] and phase_averages[-1]:
+        first = phase_averages[0]
+        last = phase_averages[-1]
+        if first.get("avg_density", 0) > 0:
+            dissolution["density_change_ratio"] = round(
+                last.get("avg_density", 0) / first.get("avg_density", 1), 3
+            )
+        dissolution["stepwise_increase"] = round(
+            last.get("avg_stepwise_ratio", 0) - first.get("avg_stepwise_ratio", 0), 3
+        )
+        dissolution["duration_increase"] = round(
+            last.get("avg_duration_beats", 0) - first.get("avg_duration_beats", 0), 3
+        )
+
+    ep_len_summary: dict[str, float] = {}
+    if episode_lengths:
+        ep_len_summary = {
+            "mean_bars": round(sum(episode_lengths) / len(episode_lengths), 1),
+            "min_bars": min(episode_lengths),
+            "max_bars": max(episode_lengths),
+        }
+
+    result: dict[str, Any] = {
+        "category": category,
+        "total_episodes": total_episodes,
+        "num_phases": num_phases,
+        "phase_averages": phase_averages,
+        "dissolution_characteristics": dissolution,
+        "episode_length": ep_len_summary,
+    }
+    return json.dumps(result, indent=2)
+
+
 # ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------

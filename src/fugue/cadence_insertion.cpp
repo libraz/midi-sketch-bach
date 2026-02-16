@@ -6,8 +6,10 @@
 #include <cmath>
 #include <random>
 
+#include "core/note_source.h"
 #include "core/pitch_utils.h"
 #include "core/rng_util.h"
+#include "fugue/cadence_vocabulary.h"
 #include "fugue/voice_registers.h"
 
 namespace bach {
@@ -317,6 +319,138 @@ int ensureCadentialCoverage(
 
   return insertCadentialFormulas(notes, deficiencies, key, is_minor,
                                 bass_voice, num_voices, seed, config);
+}
+
+bool isInCadenceZone(Tick tick, const std::vector<Tick>& cadence_ticks,
+                     Tick window_beats) {
+  Tick window = window_beats * kTicksPerBeat;
+  for (Tick cad : cadence_ticks) {
+    if (cad < window) continue;
+    if (tick >= cad - window && tick < cad) return true;
+  }
+  return false;
+}
+
+std::vector<Tick> extractCadenceTicks(const CadencePlan& plan) {
+  std::vector<Tick> ticks;
+  ticks.reserve(plan.points.size());
+  for (const auto& pt : plan.points) {
+    ticks.push_back(pt.tick);
+  }
+  std::sort(ticks.begin(), ticks.end());
+  return ticks;
+}
+
+int applyCadenceApproachToVoices(
+    std::vector<NoteEvent>& notes,
+    const CadencePlan& plan,
+    Key /* key */,
+    bool /* is_minor */,
+    uint8_t num_voices,
+    uint32_t seed) {
+  if (plan.points.empty() || notes.empty() || num_voices == 0) return 0;
+
+  std::mt19937 approach_rng(seed ^ 0xCADE0001u);
+  int shaped_count = 0;
+
+  // Cadence window: 2 beats before each cadence tick.
+  constexpr Tick kWindowBeats = 2;
+  constexpr Tick kWindowTicks = kWindowBeats * kTicksPerBeat;
+
+  // Voice range lookup for pitch clamping.
+  auto [sop_lo, sop_hi] = getFugueVoiceRange(0, num_voices);
+  auto [bass_lo, bass_hi] = getFugueVoiceRange(num_voices - 1, num_voices);
+
+  for (const auto& cadence_point : plan.points) {
+    Tick cadence_tick = cadence_point.tick;
+    CadenceType ctype = cadence_point.type;
+    if (cadence_tick < kWindowTicks) continue;
+
+    Tick window_start = cadence_tick - kWindowTicks;
+
+    // Find matching approaches for this cadence type.
+    auto [approaches, approach_count] = getCadenceApproaches(ctype);
+    if (approaches == nullptr || approach_count == 0) continue;
+
+    // Select approach randomly.
+    size_t approach_idx = approach_rng() % approach_count;
+    const CadenceApproach& approach = approaches[approach_idx];
+
+    // Collect soprano (voice 0) and bass (last voice) notes in the window.
+    VoiceId bass_voice = num_voices - 1;
+    std::vector<size_t> sop_indices;
+    std::vector<size_t> bass_indices;
+    for (size_t i = 0; i < notes.size(); ++i) {
+      if (notes[i].start_tick >= window_start &&
+          notes[i].start_tick < cadence_tick) {
+        if (notes[i].voice == 0) {
+          // Skip structurally protected notes.
+          auto prot = getProtectionLevel(notes[i].source);
+          if (prot <= ProtectionLevel::SemiImmutable) continue;
+          sop_indices.push_back(i);
+        } else if (notes[i].voice == bass_voice) {
+          auto prot = getProtectionLevel(notes[i].source);
+          if (prot <= ProtectionLevel::SemiImmutable) continue;
+          bass_indices.push_back(i);
+        }
+      }
+    }
+
+    // Sort by start_tick.
+    auto tick_cmp = [&notes](size_t a, size_t b) {
+      return notes[a].start_tick < notes[b].start_tick;
+    };
+    std::sort(sop_indices.begin(), sop_indices.end(), tick_cmp);
+    std::sort(bass_indices.begin(), bass_indices.end(), tick_cmp);
+
+    bool shaped = false;
+
+    // Shape soprano: apply approach.soprano_approach to the last N notes.
+    if (!sop_indices.empty() && approach.soprano_len > 0) {
+      size_t apply_count = std::min(static_cast<size_t>(approach.soprano_len),
+                                     sop_indices.size());
+      size_t start_from = sop_indices.size() - apply_count;
+      // Get reference pitch from the note before the window.
+      uint8_t ref_pitch = notes[sop_indices[start_from]].pitch;
+
+      for (size_t j = 0; j < apply_count; ++j) {
+        size_t note_idx = sop_indices[start_from + j];
+        int degree_step = approach.soprano_approach[j];
+        // Convert degree step to approximate semitones (diatonic step ~= 2 semitones).
+        int semitone_shift = degree_step * 2;
+        int new_pitch = static_cast<int>(ref_pitch) + semitone_shift;
+        new_pitch = clampPitch(new_pitch, sop_lo, sop_hi);
+        notes[note_idx].pitch = static_cast<uint8_t>(new_pitch);
+        notes[note_idx].source = BachNoteSource::CadenceApproach;
+        ref_pitch = static_cast<uint8_t>(new_pitch);
+      }
+      shaped = true;
+    }
+
+    // Shape bass: apply approach.bass_approach to the last N notes.
+    if (!bass_indices.empty() && approach.bass_len > 0) {
+      size_t apply_count = std::min(static_cast<size_t>(approach.bass_len),
+                                     bass_indices.size());
+      size_t start_from = bass_indices.size() - apply_count;
+      uint8_t ref_pitch = notes[bass_indices[start_from]].pitch;
+
+      for (size_t j = 0; j < apply_count; ++j) {
+        size_t note_idx = bass_indices[start_from + j];
+        int degree_step = approach.bass_approach[j];
+        int semitone_shift = degree_step * 2;
+        int new_pitch = static_cast<int>(ref_pitch) + semitone_shift;
+        new_pitch = clampPitch(new_pitch, bass_lo, bass_hi);
+        notes[note_idx].pitch = static_cast<uint8_t>(new_pitch);
+        notes[note_idx].source = BachNoteSource::CadenceApproach;
+        ref_pitch = static_cast<uint8_t>(new_pitch);
+      }
+      shaped = true;
+    }
+
+    if (shaped) ++shaped_count;
+  }
+
+  return shaped_count;
 }
 
 }  // namespace bach
