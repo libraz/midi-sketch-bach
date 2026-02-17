@@ -28,9 +28,15 @@ from scripts.bach_analyzer.score import (
     jsd_to_points,
     zscore_to_points,
     _compute_penalties,
+    _compute_section_weighted_degree_jsd,
     _detect_cantus_firmus,
+    _detect_fugue_boundary_tick,
     _detect_ground_bass_regularity,
+    _extract_degree_distribution_for_tick_range,
+    _get_texture_reference,
     _normalize,
+    _ORGAN_PF_AVG_ACTIVE,
+    _ORGAN_PF_TEXTURE_REF,
 )
 
 
@@ -833,6 +839,322 @@ class TestFormAwareStructureScoring(unittest.TestCase):
         self.assertNotIn("cantus_firmus", sub_names)
         # Should have texture density match
         self.assertIn("texture_density_match", sub_names)
+
+
+# ---------------------------------------------------------------------------
+# Phase 4A: harmony_degree section-weighted scoring tests
+# ---------------------------------------------------------------------------
+
+def _make_toccata_and_fugue_score():
+    """Create a toccata_and_fugue score with distinct toccata and fugue sections.
+
+    Toccata section (ticks 0-7680 = 4 bars): free counterpoint material.
+    Fugue section (ticks 7680+): fugue subject entries + countersubjects.
+    """
+    # Toccata section: free counterpoint, no fugue provenance
+    soprano_toc = [
+        _n(72, 0, 480, "soprano", NoteSource.FREE_COUNTERPOINT),
+        _n(74, 480, 480, "soprano", NoteSource.FREE_COUNTERPOINT),
+        _n(76, 960, 480, "soprano", NoteSource.FREE_COUNTERPOINT),
+        _n(79, 1440, 480, "soprano", NoteSource.FREE_COUNTERPOINT),
+        _n(84, 1920, 480, "soprano", NoteSource.FREE_COUNTERPOINT),
+        _n(81, 2400, 480, "soprano", NoteSource.FREE_COUNTERPOINT),
+        _n(79, 2880, 480, "soprano", NoteSource.FREE_COUNTERPOINT),
+        _n(76, 3360, 480, "soprano", NoteSource.FREE_COUNTERPOINT),
+        _n(72, 3840, 960, "soprano", NoteSource.FREE_COUNTERPOINT),
+        _n(74, 4800, 960, "soprano", NoteSource.FREE_COUNTERPOINT),
+        _n(76, 5760, 960, "soprano", NoteSource.FREE_COUNTERPOINT),
+        _n(79, 6720, 960, "soprano", NoteSource.FREE_COUNTERPOINT),
+    ]
+    alto_toc = [
+        _n(60, 0, 960, "alto", NoteSource.FREE_COUNTERPOINT),
+        _n(62, 960, 960, "alto", NoteSource.FREE_COUNTERPOINT),
+        _n(64, 1920, 960, "alto", NoteSource.FREE_COUNTERPOINT),
+        _n(67, 2880, 960, "alto", NoteSource.FREE_COUNTERPOINT),
+        _n(60, 3840, 1920, "alto", NoteSource.FREE_COUNTERPOINT),
+        _n(64, 5760, 1920, "alto", NoteSource.FREE_COUNTERPOINT),
+    ]
+
+    # Fugue section: starts at tick 7680 (bar 5)
+    fugue_offset = 7680
+    soprano_fug = [
+        _n(72, fugue_offset, 480, "soprano", NoteSource.FUGUE_SUBJECT, entry=0),
+        _n(74, fugue_offset + 480, 480, "soprano", NoteSource.FUGUE_SUBJECT),
+        _n(76, fugue_offset + 960, 480, "soprano", NoteSource.FUGUE_SUBJECT),
+        _n(77, fugue_offset + 1440, 480, "soprano", NoteSource.FUGUE_SUBJECT),
+        _n(79, fugue_offset + 1920, 480, "soprano", NoteSource.FREE_COUNTERPOINT),
+        _n(77, fugue_offset + 2400, 480, "soprano", NoteSource.FREE_COUNTERPOINT),
+        _n(76, fugue_offset + 2880, 480, "soprano", NoteSource.FREE_COUNTERPOINT),
+        _n(74, fugue_offset + 3360, 480, "soprano", NoteSource.FREE_COUNTERPOINT),
+    ]
+    alto_fug = [
+        _n(67, fugue_offset + 1920, 480, "alto", NoteSource.FUGUE_ANSWER, entry=1),
+        _n(69, fugue_offset + 2400, 480, "alto", NoteSource.FUGUE_ANSWER),
+        _n(71, fugue_offset + 2880, 480, "alto", NoteSource.FUGUE_ANSWER),
+        _n(72, fugue_offset + 3360, 480, "alto", NoteSource.FUGUE_ANSWER),
+    ]
+    tenor_fug = [
+        _n(60, fugue_offset + 3840, 480, "tenor", NoteSource.FUGUE_SUBJECT, entry=2),
+        _n(62, fugue_offset + 4320, 480, "tenor", NoteSource.FUGUE_SUBJECT),
+        _n(64, fugue_offset + 4800, 480, "tenor", NoteSource.FUGUE_SUBJECT),
+        _n(65, fugue_offset + 5280, 480, "tenor", NoteSource.FUGUE_SUBJECT),
+    ]
+
+    return Score(
+        tracks=[
+            _track("soprano", soprano_toc + soprano_fug),
+            _track("alto", alto_toc + alto_fug),
+            _track("tenor", tenor_fug),
+        ],
+        seed=42,
+        form="toccata_and_fugue",
+        key="C_major",
+        voices=3,
+    )
+
+
+class TestDetectFugueBoundaryTick(unittest.TestCase):
+    """Tests for _detect_fugue_boundary_tick."""
+
+    def test_toccata_and_fugue_detects_boundary(self):
+        """Should detect the first fugue note tick."""
+        score = _make_toccata_and_fugue_score()
+        boundary = _detect_fugue_boundary_tick(score)
+        self.assertIsNotNone(boundary)
+        self.assertEqual(boundary, 7680)
+
+    def test_pure_fugue_starts_at_zero(self):
+        """A fugue starting at tick 0 should return 0."""
+        score = _make_fugue_score()
+        boundary = _detect_fugue_boundary_tick(score)
+        self.assertIsNotNone(boundary)
+        self.assertEqual(boundary, 0)
+
+    def test_no_fugue_material(self):
+        """Score with no fugue provenance should return None."""
+        notes_a = [_n(60, i * 480, 480, "soprano", NoteSource.FREE_COUNTERPOINT)
+                    for i in range(8)]
+        notes_b = [_n(48, i * 480, 480, "bass", NoteSource.FREE_COUNTERPOINT)
+                    for i in range(8)]
+        score = Score(
+            tracks=[_track("soprano", notes_a), _track("bass", notes_b)],
+            form="toccata_and_fugue",
+        )
+        boundary = _detect_fugue_boundary_tick(score)
+        self.assertIsNone(boundary)
+
+
+class TestExtractDegreeDistributionForTickRange(unittest.TestCase):
+    """Tests for _extract_degree_distribution_for_tick_range."""
+
+    def test_full_range_matches_overall(self):
+        """Full tick range should match the overall degree distribution."""
+        score = _make_fugue_score()
+        from scripts.bach_analyzer.score import _extract_degree_distribution
+        overall = _extract_degree_distribution(score)
+        ranged, count = _extract_degree_distribution_for_tick_range(
+            score, 0, score.total_duration)
+        # Should produce the same distribution
+        for key in overall:
+            self.assertAlmostEqual(ranged.get(key, 0.0), overall[key], places=3,
+                                   msg=f"Mismatch for degree {key}")
+        self.assertGreater(count, 0)
+
+    def test_empty_range(self):
+        """A range with no beats should return empty distribution."""
+        score = _make_fugue_score()
+        dist, count = _extract_degree_distribution_for_tick_range(score, 0, 0)
+        self.assertEqual(count, 0)
+
+    def test_partial_range(self):
+        """Partial tick range should return subset of beats."""
+        score = _make_toccata_and_fugue_score()
+        # Toccata section only (first 4 bars)
+        toc_dist, toc_count = _extract_degree_distribution_for_tick_range(
+            score, 0, 7680)
+        # Fugue section only
+        fug_dist, fug_count = _extract_degree_distribution_for_tick_range(
+            score, 7680, score.total_duration)
+        # Both sections should have some beats
+        self.assertGreater(toc_count, 0)
+        self.assertGreater(fug_count, 0)
+        # Combined count should equal full range count
+        _, total_count = _extract_degree_distribution_for_tick_range(
+            score, 0, score.total_duration)
+        self.assertEqual(toc_count + fug_count, total_count)
+
+
+class TestSectionWeightedDegreeJSD(unittest.TestCase):
+    """Tests for _compute_section_weighted_degree_jsd."""
+
+    def test_returns_none_for_non_toccata_form(self):
+        """Should return None for non-toccata forms."""
+        from scripts.bach_analyzer.reference import load_category
+        ref = load_category("organ_fugue")
+        ref_deg = ref["distributions"]["harmony_degrees"]
+        score = _make_fugue_score()
+        result = _compute_section_weighted_degree_jsd(score, ref_deg, "fugue")
+        self.assertIsNone(result)
+
+    def test_returns_none_for_no_boundary(self):
+        """Should return None when no fugue boundary detected."""
+        from scripts.bach_analyzer.reference import load_category
+        ref = load_category("organ_fugue")
+        ref_deg = ref["distributions"]["harmony_degrees"]
+        notes_a = [_n(60, i * 480, 480, "soprano", NoteSource.FREE_COUNTERPOINT)
+                    for i in range(8)]
+        notes_b = [_n(48, i * 480, 480, "bass", NoteSource.FREE_COUNTERPOINT)
+                    for i in range(8)]
+        score = Score(
+            tracks=[_track("soprano", notes_a), _track("bass", notes_b)],
+            form="toccata_and_fugue",
+        )
+        result = _compute_section_weighted_degree_jsd(
+            score, ref_deg, "toccata_and_fugue")
+        self.assertIsNone(result)
+
+    def test_returns_tuple_for_toccata_and_fugue(self):
+        """Should return a valid tuple for toccata_and_fugue with boundary."""
+        from scripts.bach_analyzer.reference import load_category
+        ref = load_category("organ_fugue")
+        ref_deg = ref["distributions"]["harmony_degrees"]
+        score = _make_toccata_and_fugue_score()
+        result = _compute_section_weighted_degree_jsd(
+            score, ref_deg, "toccata_and_fugue")
+        self.assertIsNotNone(result)
+        overall_jsd, weighted_pts, detail = result
+        self.assertGreaterEqual(overall_jsd, 0.0)
+        self.assertGreaterEqual(weighted_pts, 0.0)
+        self.assertLessEqual(weighted_pts, 100.0)
+        self.assertIn("section-weighted", detail)
+        self.assertIn("toc=", detail)
+        self.assertIn("fug=", detail)
+
+    def test_fantasia_and_fugue_also_works(self):
+        """fantasia_and_fugue should also trigger section-weighted scoring."""
+        from scripts.bach_analyzer.reference import load_category
+        ref = load_category("organ_fugue")
+        ref_deg = ref["distributions"]["harmony_degrees"]
+        score = _make_toccata_and_fugue_score()
+        score.form = "fantasia_and_fugue"
+        result = _compute_section_weighted_degree_jsd(
+            score, ref_deg, "fantasia_and_fugue")
+        self.assertIsNotNone(result)
+
+
+class TestHarmonyDegreeScoring(unittest.TestCase):
+    """Integration test for harmony_degree scoring in _score_harmony."""
+
+    def test_toccata_and_fugue_uses_section_weighting(self):
+        """Toccata+fugue form should use section-weighted harmony_degree."""
+        score = _make_toccata_and_fugue_score()
+        bach_score = compute_score(
+            score, "organ_fugue", form_name="toccata_and_fugue")
+        harmony = bach_score.dimensions["harmony"]
+        self.assertTrue(harmony.applicable)
+
+        # Find the harmony_degree_jsd sub-score
+        degree_subs = [s for s in harmony.sub_scores if s.name == "harmony_degree_jsd"]
+        self.assertEqual(len(degree_subs), 1)
+        degree_sub = degree_subs[0]
+        # Should mention section-weighted in the detail
+        self.assertIn("section-weighted", degree_sub.detail)
+
+    def test_regular_fugue_uses_default_scoring(self):
+        """Regular fugue should use default (non-section-weighted) scoring."""
+        score = _make_fugue_score()
+        bach_score = compute_score(score, "organ_fugue", form_name="fugue")
+        harmony = bach_score.dimensions["harmony"]
+        self.assertTrue(harmony.applicable)
+
+        degree_subs = [s for s in harmony.sub_scores if s.name == "harmony_degree_jsd"]
+        self.assertEqual(len(degree_subs), 1)
+        degree_sub = degree_subs[0]
+        # Should NOT mention section-weighted
+        self.assertNotIn("section-weighted", degree_sub.detail)
+        self.assertIn("half-weight", degree_sub.detail)
+
+
+# ---------------------------------------------------------------------------
+# Phase 4C: texture_density organ_pf reference tests
+# ---------------------------------------------------------------------------
+
+class TestGetTextureReference(unittest.TestCase):
+    """Tests for _get_texture_reference."""
+
+    def test_toccata_uses_organ_pf(self):
+        """toccata_and_fugue should use organ_pf texture reference."""
+        from scripts.bach_analyzer.reference import load_category
+        ref = load_category("organ_fugue")
+        tex_dist, av_scalar = _get_texture_reference(ref, "toccata_and_fugue")
+        self.assertEqual(tex_dist, _ORGAN_PF_TEXTURE_REF)
+        self.assertEqual(av_scalar, _ORGAN_PF_AVG_ACTIVE)
+
+    def test_fantasia_uses_organ_pf(self):
+        """fantasia_and_fugue should also use organ_pf texture reference."""
+        from scripts.bach_analyzer.reference import load_category
+        ref = load_category("organ_fugue")
+        tex_dist, av_scalar = _get_texture_reference(ref, "fantasia_and_fugue")
+        self.assertEqual(tex_dist, _ORGAN_PF_TEXTURE_REF)
+
+    def test_regular_fugue_uses_category_ref(self):
+        """Regular fugue should use the category's default texture reference."""
+        from scripts.bach_analyzer.reference import load_category
+        ref = load_category("organ_fugue")
+        tex_dist, av_scalar = _get_texture_reference(ref, "fugue")
+        self.assertEqual(tex_dist, ref["distributions"]["texture"])
+        self.assertEqual(av_scalar, ref["scalars"]["avg_active_voices"])
+
+    def test_empty_form_uses_category_ref(self):
+        """Empty form name should use the category's default texture reference."""
+        from scripts.bach_analyzer.reference import load_category
+        ref = load_category("organ_fugue")
+        tex_dist, av_scalar = _get_texture_reference(ref, "")
+        self.assertEqual(tex_dist, ref["distributions"]["texture"])
+
+    def test_organ_pf_distribution_sums_to_one(self):
+        """The organ_pf texture distribution should sum to approximately 1.0."""
+        total = sum(_ORGAN_PF_TEXTURE_REF.values())
+        self.assertAlmostEqual(total, 1.0, places=5)
+
+
+class TestTextureScoring(unittest.TestCase):
+    """Integration tests for texture dimension with organ_pf reference."""
+
+    def test_toccata_texture_uses_organ_pf_ref(self):
+        """Toccata+fugue should show organ_pf ref in texture sub-score details."""
+        score = _make_toccata_and_fugue_score()
+        bach_score = compute_score(
+            score, "organ_fugue", form_name="toccata_and_fugue")
+        texture = bach_score.dimensions["texture"]
+        self.assertTrue(texture.applicable)
+
+        # Both texture sub-scores should mention organ_pf ref
+        for sub in texture.sub_scores:
+            self.assertIn("organ_pf ref", sub.detail,
+                          msg=f"Sub-score '{sub.name}' missing organ_pf ref marker")
+
+    def test_toccata_structure_texture_uses_organ_pf_ref(self):
+        """Structure dimension's texture_density_match should use organ_pf for toccata."""
+        score = _make_toccata_and_fugue_score()
+        bach_score = compute_score(
+            score, "organ_fugue", form_name="toccata_and_fugue")
+        structure = bach_score.dimensions["structure"]
+        self.assertTrue(structure.applicable)
+
+        tex_subs = [s for s in structure.sub_scores
+                    if s.name == "texture_density_match"]
+        self.assertEqual(len(tex_subs), 1)
+        self.assertIn("organ_pf ref", tex_subs[0].detail)
+
+    def test_regular_fugue_texture_no_organ_pf(self):
+        """Regular fugue should NOT show organ_pf ref in texture details."""
+        score = _make_fugue_score()
+        bach_score = compute_score(score, "organ_fugue", form_name="fugue")
+        texture = bach_score.dimensions["texture"]
+        if texture.applicable:
+            for sub in texture.sub_scores:
+                self.assertNotIn("organ_pf ref", sub.detail)
 
 
 if __name__ == "__main__":

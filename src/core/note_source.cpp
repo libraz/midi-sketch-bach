@@ -86,7 +86,6 @@ ProtectionLevel getProtectionLevel(BachNoteSource source) {
     case BachNoteSource::Countersubject:
     case BachNoteSource::PedalPoint:
     case BachNoteSource::FalseEntry:
-    case BachNoteSource::Coda:
     case BachNoteSource::SequenceNote:
     case BachNoteSource::CanonDux:
     case BachNoteSource::CanonComes:
@@ -117,11 +116,12 @@ ProtectionLevel getProtectionLevel(BachNoteSource source) {
       return ProtectionLevel::Structural;
 
     case BachNoteSource::ToccataFigure:
-      return ProtectionLevel::SemiImmutable;
+      return ProtectionLevel::Immutable;
 
     case BachNoteSource::GrandPause:
       return ProtectionLevel::Immutable;
 
+    case BachNoteSource::Coda:
     case BachNoteSource::CadenceApproach:
       return ProtectionLevel::Architectural;
 

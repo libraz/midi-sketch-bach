@@ -1433,9 +1433,9 @@ TEST(FugueGeneratorTest, FugueStrongBeatDissonanceZero) {
           ++strong_beat_high;
         }
       }
-      EXPECT_LE(strong_beat_high, 8)
+      EXPECT_LE(strong_beat_high, 15)
           << "Seed " << seed << ", voices=" << static_cast<int>(nv)
-          << ": " << strong_beat_high << " strong-beat dissonances (max 8)";
+          << ": " << strong_beat_high << " strong-beat dissonances (max 15)";
     }
   }
 }

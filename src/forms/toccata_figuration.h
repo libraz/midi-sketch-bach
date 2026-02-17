@@ -47,6 +47,7 @@ struct ToccataPhaseProfile {
   PhraseContour::Shape contour; ///< Phrase-level directional contour shape.
   bool free_rhythm;             ///< If true, disable uniform durations (for recitative).
   uint8_t voice_ceiling[2];    ///< Max pitch per voice (v0 Great, v1 Swell).
+  float max_32nd_prob;          ///< 32nd probability cap (G/H=0.50, D/F=0.15, others=0.0).
 };
 
 namespace detail {
@@ -56,35 +57,35 @@ namespace detail {
 inline constexpr ToccataPhaseProfile kDramaticusProfiles[8] = {
     // Phase A: Gesture -- dramatic descending runs and trills.
     {{&kDescRun5, &kTrill5, &kBrechungDesc, nullptr},
-     3, 0.60f, 0.30f, 0.3f, PhraseContour::Descent, false, {84, 72}},
+     3, 0.60f, 0.30f, 0.3f, PhraseContour::Descent, false, {84, 72}, 0.0f},
 
     // Phase B: Echo -- quiet lower neighbor oscillation.
     {{&kLowerNbr, &kCambiataDown, nullptr, nullptr},
-     2, 0.20f, 0.25f, 1.0f, PhraseContour::Neutral, false, {84, 72}},
+     2, 0.20f, 0.25f, 1.0f, PhraseContour::Neutral, false, {84, 72}, 0.0f},
 
     // Phase C: Recitative -- free declamatory style with turns and ornaments.
     {{&kTurnDown, &kEchappee, &kCambiataNbr, &kTurnUpNbr},
-     4, 0.35f, 0.20f, 0.8f, PhraseContour::Wave, true, {86, 74}},
+     4, 0.35f, 0.20f, 0.8f, PhraseContour::Wave, true, {86, 74}, 0.0f},
 
     // Phase D: Climb1 -- ascending sequential development.
     {{&kAscRun5, &kTurnUp, &kStepDownLeapUp, nullptr},
-     3, 0.50f, 0.30f, 0.5f, PhraseContour::Arch, false, {89, 77}},
+     3, 0.50f, 0.30f, 0.5f, PhraseContour::Arch, false, {89, 77}, 0.15f},
 
     // Phase E: Break -- harmonic interruption with wide oscillation.
     {{&kWideOsc5, &kLowerNbr, nullptr, nullptr},
-     2, 0.25f, 0.25f, 1.0f, PhraseContour::Neutral, false, {84, 72}},
+     2, 0.25f, 0.25f, 1.0f, PhraseContour::Neutral, false, {84, 72}, 0.0f},
 
     // Phase F: Climb2 -- intensified ascending motion.
     {{&kAscRun5, &kAscRun4, &kLeapUpStepDown, nullptr},
-     3, 0.55f, 0.35f, 0.4f, PhraseContour::Arch, false, {93, 81}},
+     3, 0.55f, 0.35f, 0.4f, PhraseContour::Arch, false, {93, 81}, 0.15f},
 
     // Phase G: Dominant Obsession -- dominant prolongation with chromaticism.
     {{&kDescRun5, &kChromaticDesc, &kTrill5, &kDescRun4},
-     4, 0.60f, 0.35f, 0.2f, PhraseContour::Descent, false, {96, 84}},
+     4, 0.60f, 0.35f, 0.2f, PhraseContour::Descent, false, {96, 84}, 0.50f},
 
     // Phase H: Final Explosion -- climactic descending gestures.
     {{&kBrechungDesc, &kWideOsc5, &kDescRun5, nullptr},
-     3, 0.70f, 0.35f, 0.15f, PhraseContour::Descent, false, {96, 84}},
+     3, 0.70f, 0.35f, 0.15f, PhraseContour::Descent, false, {96, 84}, 0.50f},
 };
 
 }  // namespace detail
@@ -125,7 +126,13 @@ inline float computeHarmonicTension(const HarmonicEvent& harm) {
     case ChordDegree::ii:
       return 0.3f;
     case ChordDegree::V:
-      if (qual == ChordQuality::Dominant7) return 0.8f;
+      if (qual == ChordQuality::Dominant7) {
+        // Inversion-based tension differentiation for V7.
+        // 0=root (0.8), 1=3rd in bass (0.7), 3=7th in bass (0.9), other=0.8.
+        if (harm.chord.inversion == 1) return 0.7f;
+        if (harm.chord.inversion == 3) return 0.9f;
+        return 0.8f;
+      }
       return 0.6f;
     case ChordDegree::V_of_V:
     case ChordDegree::V_of_vi:
@@ -181,6 +188,7 @@ struct ToccataFigurationContext {
   float energy;                         ///< Current energy level [0.0, 1.0].
   MelodicState mel_state;              ///< Melodic state for scoring and direction.
   DegreeStep prev_degree_step;          ///< Previous degree step for Markov context.
+  uint8_t initial_pitch = 0;            ///< Starting pitch hint (0 = use range midpoint).
 };
 
 /// @brief Result of a figuration span generation.
@@ -227,6 +235,70 @@ inline NoteEvent makeFigNote(Tick tick, Tick dur, uint8_t pitch, uint8_t voice,
   note.source = source;
   return note;
 }
+
+// ---------------------------------------------------------------------------
+// Helper: Brechung chord-tone snapping utilities
+// ---------------------------------------------------------------------------
+
+namespace detail {
+
+/// @brief Find the closest chord tone to a target pitch, preserving melodic direction.
+///
+/// When two candidates are equidistant, prefers the one matching the original
+/// melodic direction (ascending or descending from prev_pitch to original_pitch).
+/// Falls back to the lower pitch on true ties with no directional preference.
+///
+/// @param original_pitch The pitch before snapping (used for distance calculation).
+/// @param prev_pitch The preceding pitch in the figure (for contour direction).
+/// @param chord_tones Non-empty vector of chord tone MIDI pitches in range.
+/// @return Closest chord tone with direction preference.
+inline uint8_t findClosestChordTone(uint8_t original_pitch, uint8_t prev_pitch,
+                                    const std::vector<uint8_t>& chord_tones) {
+  if (chord_tones.empty()) return original_pitch;
+  if (chord_tones.size() == 1) return chord_tones[0];
+
+  int direction = static_cast<int>(original_pitch) - static_cast<int>(prev_pitch);
+  // direction > 0 means ascending, < 0 descending, == 0 neutral.
+
+  uint8_t best = chord_tones[0];
+  int best_dist = std::abs(static_cast<int>(chord_tones[0])
+                           - static_cast<int>(original_pitch));
+
+  for (size_t idx = 1; idx < chord_tones.size(); ++idx) {
+    int dist = std::abs(static_cast<int>(chord_tones[idx])
+                        - static_cast<int>(original_pitch));
+    if (dist < best_dist) {
+      best = chord_tones[idx];
+      best_dist = dist;
+    } else if (dist == best_dist) {
+      // Tie-break: prefer the candidate matching the melodic direction.
+      int cand_dir = static_cast<int>(chord_tones[idx])
+                     - static_cast<int>(original_pitch);
+      int best_dir = static_cast<int>(best) - static_cast<int>(original_pitch);
+      bool cand_matches = (direction > 0 && cand_dir > 0) ||
+                          (direction < 0 && cand_dir < 0);
+      bool best_matches = (direction > 0 && best_dir > 0) ||
+                          (direction < 0 && best_dir < 0);
+      if (cand_matches && !best_matches) {
+        best = chord_tones[idx];
+        best_dist = dist;
+      }
+    }
+  }
+  return best;
+}
+
+/// @brief Check if a MIDI pitch is among the collected chord tones.
+/// @param pitch MIDI pitch to check.
+/// @param chord_tones Vector of chord tone MIDI pitches.
+/// @return True if pitch matches any entry in chord_tones.
+inline bool isPitchInChordTones(uint8_t pitch,
+                                const std::vector<uint8_t>& chord_tones) {
+  return std::find(chord_tones.begin(), chord_tones.end(), pitch)
+         != chord_tones.end();
+}
+
+}  // namespace detail
 
 // ---------------------------------------------------------------------------
 // Layer 1: selectToccataPitch()
@@ -370,10 +442,33 @@ inline FigurationResult generateFigurationSpan(
 
   const ToccataPhaseProfile& profile = *ctx.profile;
 
+  // --- Change 2: Per-span v1 ceiling fluctuation (+/-2 semitones, 20%/20%/60%).
+  // Disabled in phases G/H (detected by max_32nd_prob > 0.30).
+  uint8_t adjusted_ceiling = profile.voice_ceiling[voice < 2 ? voice : 0];
+  if (voice == 1 && profile.max_32nd_prob <= 0.30f) {
+    float ceil_roll = rng::rollFloat(rng, 0.0f, 1.0f);
+    if (ceil_roll < 0.20f) {
+      adjusted_ceiling = static_cast<uint8_t>(
+          std::min(127, static_cast<int>(adjusted_ceiling) + 2));
+    } else if (ceil_roll < 0.40f) {
+      adjusted_ceiling = static_cast<uint8_t>(
+          std::max(0, static_cast<int>(adjusted_ceiling) - 2));
+    }
+    // else: 60% no change.
+  }
+
   // Effective pitch ceiling per voice.
-  uint8_t effective_high = std::min(
-      ctx.high_pitch,
-      profile.voice_ceiling[voice < 2 ? voice : 0]);
+  uint8_t effective_high = std::min(ctx.high_pitch, adjusted_ceiling);
+
+  // --- Change 3: Phase-based figure_density cap.
+  // Phases A-F (max_32nd_prob <= 0.30): cap at 0.55.
+  // Phase C (Recit, detected by free_rhythm): cap at 0.40.
+  // Phases G/H (max_32nd_prob > 0.30): no additional cap.
+  float effective_density = profile.figure_density;
+  if (profile.max_32nd_prob <= 0.30f) {
+    float cap = profile.free_rhythm ? 0.40f : 0.55f;
+    effective_density = std::min(effective_density, cap);
+  }
 
   // Track consecutive bridge notes (force figure after 2).
   int consecutive_bridges = 0;
@@ -382,10 +477,15 @@ inline FigurationResult generateFigurationSpan(
   constexpr Tick kBase16thDuration = duration::kSixteenthNote;  // 120 ticks.
   constexpr Tick k32ndDuration = duration::kThirtySecondNote;    // 60 ticks.
 
-  // Previous pitch for interval tracking (start from middle of range).
+  // Previous pitch for interval tracking.
+  // Use initial_pitch hint if provided, otherwise start from middle of range.
   uint8_t prev_pitch = 0;
   if (!result.notes.empty()) {
     prev_pitch = result.notes.back().pitch;
+  } else if (ctx.initial_pitch > 0 &&
+             ctx.initial_pitch >= ctx.low_pitch &&
+             ctx.initial_pitch <= effective_high) {
+    prev_pitch = ctx.initial_pitch;
   } else {
     prev_pitch = static_cast<uint8_t>((ctx.low_pitch + effective_high) / 2);
     prev_pitch = scale_util::nearestScaleTone(prev_pitch, ctx.key, ctx.scale);
@@ -397,7 +497,7 @@ inline FigurationResult generateFigurationSpan(
     float tension = computeHarmonicTension(harm);
 
     // Determine whether to attempt figure injection.
-    bool try_figure = rng::rollProbability(rng, profile.figure_density);
+    bool try_figure = rng::rollProbability(rng, effective_density);
 
     // Force figure attempt after 2 consecutive bridge notes.
     if (consecutive_bridges >= 2) {
@@ -417,9 +517,10 @@ inline FigurationResult generateFigurationSpan(
         if (profile.free_rhythm) {
           fig_note_dur = detail::selectFreeRhythmDuration(rng);
         } else {
-          // Check for 32nd-note upgrade.
+          // Check for 32nd-note upgrade, capped by profile max_32nd_prob.
           float prob_32nd = compute32ndProbability(ctx.energy, tension,
                                                    profile.harmonic_tension_gate);
+          prob_32nd = std::min(prob_32nd, profile.max_32nd_prob);
           if (rng::rollProbability(rng, prob_32nd)) {
             fig_note_dur = k32ndDuration;
           }
@@ -465,6 +566,44 @@ inline FigurationResult generateFigurationSpan(
           }
 
           if (valid && fig_pitches.size() == figure->note_count) {
+            // Brechung safety: snap strong-beat pitches to chord tones and
+            // suppress large leaps created by snapping.
+            if (figure == &kBrechungDesc) {
+              auto chord_tones = collectChordTonesInRange(
+                  harm.chord, ctx.low_pitch, effective_high);
+              if (!chord_tones.empty()) {
+                constexpr int kLargeLeapThreshold = 7;  // > perfect 5th
+                int resolved_count = static_cast<int>(fig_pitches.size());
+                for (int idx = 0; idx < resolved_count; ++idx) {
+                  Tick note_tick = current_tick
+                                   + static_cast<Tick>(idx) * fig_note_dur;
+                  if (metricLevel(note_tick) >= MetricLevel::Beat) {
+                    if (!detail::isPitchInChordTones(
+                            fig_pitches[idx], chord_tones)) {
+                      uint8_t ref_pitch = (idx > 0)
+                          ? fig_pitches[idx - 1]
+                          : prev_pitch;
+                      uint8_t snapped = detail::findClosestChordTone(
+                          fig_pitches[idx], ref_pitch, chord_tones);
+                      fig_pitches[idx] = snapped;
+                      // Suppress large leap to the next note after snapping.
+                      if (idx + 1 < resolved_count) {
+                        int leap = std::abs(
+                            static_cast<int>(fig_pitches[idx + 1])
+                            - static_cast<int>(snapped));
+                        if (leap > kLargeLeapThreshold) {
+                          fig_pitches[idx + 1] =
+                              detail::findClosestChordTone(
+                                  fig_pitches[idx + 1], snapped,
+                                  chord_tones);
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+
             // Emit figure notes.
             for (size_t nidx = 0; nidx < fig_pitches.size(); ++nidx) {
               result.notes.push_back(makeFigNote(
@@ -508,6 +647,7 @@ inline FigurationResult generateFigurationSpan(
       } else {
         float prob_32nd = compute32ndProbability(ctx.energy, tension,
                                                  profile.harmonic_tension_gate);
+        prob_32nd = std::min(prob_32nd, profile.max_32nd_prob);
         if (rng::rollProbability(rng, prob_32nd)) {
           bridge_dur = k32ndDuration;
         }

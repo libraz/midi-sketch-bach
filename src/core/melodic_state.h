@@ -67,44 +67,42 @@ struct VoiceProfile {
 
 namespace voice_profiles {
 
-/// Soprano: favor shorter durations (8th/16th) for ornamental activity.
+/// Soprano: favor shorter durations (16th/8th) for ornamental activity.
 /// BWV578 v1 avg duration 0.24 beats supports rapid figuration.
+/// Bach organ fugues: 16th=61.4%, 8th=20.7% — 16th must dominate.
 /// Gravity 0.08: mild descent bias (soprano needs upward drive too).
 /// Weights: {whole, half, dotted-qtr, qtr, 8th, 16th}
-/// Strongly differentiated: 8th+16th dominate, long notes suppressed.
 constexpr VoiceProfile kSoprano = {
     0.67f, 0.22f, 0.03f, true, 1,
-    {0.1f, 0.5f, 0.6f, 1.5f, 4.0f, 3.5f}, 120,  // min=16th
+    {0.1f, 0.3f, 0.4f, 1.0f, 3.0f, 5.5f}, 120,  // min=16th; 16th dominant
     0.20f, 0.0f, 0.30f, 0.08f};
 
-/// Alto: balanced distribution, slightly favoring quarter notes.
+/// Alto: balanced distribution with increased 16th activity.
 /// BWV578 v2 avg duration 0.47 beats -- moderate activity.
 /// Gravity 0.12: standard inner voice descent bias.
 /// Weights: {whole, half, dotted-qtr, qtr, 8th, 16th}
-/// Quarter-centered with moderate 8th activity, distinct from soprano.
 constexpr VoiceProfile kAlto = {
     0.59f, 0.25f, 0.03f, true, 1,
-    {0.4f, 1.2f, 1.5f, 3.5f, 2.0f, 1.0f}, 120,
+    {0.3f, 0.8f, 1.0f, 2.5f, 2.5f, 3.5f}, 120,
     0.20f, 0.0f, 0.30f, 0.12f};
 
-/// Tenor: favor medium durations (quarter/dotted-quarter/half) for sustained support.
+/// Tenor: favor medium-short durations for active inner voice.
 /// BWV578 v3 avg duration 0.30 beats -- between upper and lower.
 /// Gravity 0.12: standard inner voice descent bias.
 /// Weights: {whole, half, dotted-qtr, qtr, 8th, 16th}
-/// Half and dotted-quarter weighted higher than alto; 8th/16th suppressed.
 constexpr VoiceProfile kTenor = {
     0.65f, 0.22f, 0.04f, true, 1,
-    {0.6f, 3.0f, 2.0f, 3.5f, 1.0f, 0.3f}, 120,
+    {0.4f, 2.0f, 1.5f, 3.0f, 2.0f, 2.0f}, 120,
     0.20f, 0.0f, 0.30f, 0.12f};
 
-/// Bass: favor longer durations (half/quarter) for harmonic foundation.
-/// BWV578 v4 avg duration 0.51 beats -- slow-moving bass line.
+/// Bass: favor longer durations (half/quarter) with some 16th activity.
+/// BWV578 v4 avg duration 0.51 beats -- slow-moving but not static.
+/// Bach pedal bass: 44% stepwise, avg interval 3.9 — bass IS active.
 /// Gravity 0.0: bass leaps are symmetric (up/down equally common).
 /// Weights: {whole, half, dotted-qtr, qtr, 8th, 16th}
-/// Half note dominant; whole note viable; 8th/16th strongly suppressed.
 constexpr VoiceProfile kBassLine = {
     0.44f, 0.24f, 0.12f, true, 2,
-    {2.0f, 4.0f, 2.5f, 3.0f, 0.8f, 0.2f}, 240,  // min=8th
+    {1.5f, 3.5f, 2.0f, 3.0f, 1.5f, 0.5f}, 240,  // min=8th
     0.10f, 0.18f, 0.30f, 0.0f};
 
 constexpr VoiceProfile kPedalPoint = {

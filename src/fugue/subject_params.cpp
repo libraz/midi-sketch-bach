@@ -78,19 +78,21 @@ void varyDurationPair(Tick dur_a, Tick dur_b, SubjectCharacter character,
   out_b = dur_b;
 
   // Determine probability and allowed substitutions by character.
+  // Non-Severe characters: increased probability for more rhythmic variety
+  // (16th note generation upper limit ~30%).
   float prob = 0.0f;
   switch (character) {
     case SubjectCharacter::Severe:
       prob = rng::rollFloat(gen, 0.10f, 0.20f);
       break;
     case SubjectCharacter::Playful:
-      prob = rng::rollFloat(gen, 0.25f, 0.40f);
+      prob = rng::rollFloat(gen, 0.30f, 0.50f);
       break;
     case SubjectCharacter::Noble:
-      prob = rng::rollFloat(gen, 0.10f, 0.20f);
+      prob = rng::rollFloat(gen, 0.15f, 0.30f);
       break;
     case SubjectCharacter::Restless:
-      prob = rng::rollFloat(gen, 0.25f, 0.40f);
+      prob = rng::rollFloat(gen, 0.30f, 0.50f);
       break;
   }
 

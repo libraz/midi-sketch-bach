@@ -223,9 +223,9 @@ constexpr float kMarkovPitchWeightSolo = 0.45f;      ///< Solo string system pit
 constexpr float kMarkovDurWeight = 0.20f;             ///< Duration weight (both systems).
 constexpr float kMarkovCadenceAttenuation = 0.5f;    ///< Cadence proximity weight reduction.
 constexpr float kMarkovPhraseStartBoost = 1.2f;      ///< Phrase start weight increase.
-constexpr float kVerticalAlpha = 0.5f;       ///< Vertical oracle weight in combined score.
-constexpr float kVerticalMinGate = 0.03f;     ///< Minimum vertical probability to pass gate.
-constexpr float kVerticalMinGateCadence = 0.08f;  ///< Stricter gate for cadence zone.
+constexpr float kVerticalAlpha = 0.65f;      ///< Vertical oracle weight in combined score.
+constexpr float kVerticalMinGate = 0.05f;     ///< Minimum vertical probability to pass gate.
+constexpr float kVerticalMinGateCadence = 0.10f;  ///< Stricter gate for cadence zone.
 
 // --- Scoring functions ---
 

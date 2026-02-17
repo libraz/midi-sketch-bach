@@ -96,9 +96,10 @@ struct FugueEnergyCurve {
   /// @param energy Energy level from getLevel().
   /// @return Minimum duration in ticks.
   static Tick minDuration(float energy) {
-    if (energy < 0.4f) return kTicksPerBeat;      // quarter note
-    if (energy < 0.7f) return kTicksPerBeat / 2;  // eighth note
-    return kTicksPerBeat / 4;                      // sixteenth note
+    // Bach organ fugues: 61% 16th notes. Allow 16ths from energy 0.4+.
+    if (energy < 0.3f) return kTicksPerBeat;      // quarter note (very low energy)
+    if (energy < 0.4f) return kTicksPerBeat / 2;  // eighth note
+    return kTicksPerBeat / 4;                      // sixteenth note (most of fugue)
   }
 
   /// @brief Select duration using VoiceProfile weights and context.

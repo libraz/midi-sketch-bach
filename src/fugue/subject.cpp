@@ -198,7 +198,8 @@ std::vector<SkeletonSlot> buildRhythmSkeleton(
     }
 
     // Pair substitution on even-indexed pairs only.
-    if (idx % 2 == 0 && idx + 1 < motif_a.durations.size() &&
+    // Guard first 3 notes from variation to preserve motif recognition.
+    if (idx >= 3 && idx % 2 == 0 && idx + 1 < motif_a.durations.size() &&
         idx + 1 < motif_a.degree_offsets.size()) {
       Tick next_dur = motif_a.durations[idx + 1];
       Tick new_a = duration, new_b = next_dur;

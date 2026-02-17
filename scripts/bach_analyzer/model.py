@@ -81,6 +81,12 @@ class NoteSource(IntEnum):
     QUODLIBET_MELODY = 28
     GOLDBERG_OVERTURE = 29
     GOLDBERG_SUSPENSION = 30
+    CHACONNE_BASS = 31
+    PRELUDE_FIGURATION = 32
+    TOCCATA_GESTURE = 33
+    TOCCATA_FIGURE = 34
+    GRAND_PAUSE = 35
+    CADENCE_APPROACH = 36
 
 
 # String name used in output.json -> NoteSource mapping.
@@ -116,6 +122,12 @@ SOURCE_STRING_MAP: Dict[str, NoteSource] = {
     "quodlibet_melody": NoteSource.QUODLIBET_MELODY,
     "goldberg_overture": NoteSource.GOLDBERG_OVERTURE,
     "goldberg_suspension": NoteSource.GOLDBERG_SUSPENSION,
+    "chaconne_bass": NoteSource.CHACONNE_BASS,
+    "prelude_figuration": NoteSource.PRELUDE_FIGURATION,
+    "toccata_gesture": NoteSource.TOCCATA_GESTURE,
+    "toccata_figure": NoteSource.TOCCATA_FIGURE,
+    "grand_pause": NoteSource.GRAND_PAUSE,
+    "cadence_approach": NoteSource.CADENCE_APPROACH,
 }
 
 

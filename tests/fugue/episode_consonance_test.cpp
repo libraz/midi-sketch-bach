@@ -192,9 +192,11 @@ TEST_F(EpisodeConsonanceTest, MultiSeedNoExtremeOutliers) {
     }
   }
 
-  // No seed should have more than 8 bar-tick pair violations in a 4-bar
+  // No seed should have more than 12 bar-tick pair violations in a 4-bar
   // episode. With 3 voices at up to 5 bar boundaries, worst case is 15 pairs.
-  EXPECT_LE(max_bar_violations, 8)
+  // Threshold accommodates NCT vocabulary scoring which increases offbeat
+  // non-chord tones (passing/neighbor) that occasionally align at bar ticks.
+  EXPECT_LE(max_bar_violations, 12)
       << "Worst seed had " << max_bar_violations << " bar-tick violations";
 }
 
@@ -378,7 +380,7 @@ TEST_F(EpisodeConsonanceTest, HighEnergyBoundedViolations) {
     }
   }
 
-  EXPECT_LE(max_violations, 8)
+  EXPECT_LE(max_violations, 12)
       << "High-energy episode worst seed had " << max_violations
       << " bar-tick violations";
 }

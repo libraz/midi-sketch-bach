@@ -494,6 +494,18 @@ std::vector<NoteEvent> createCodaNotes(Tick start_tick, Tick duration,
         notes[note_idx].pitch = best_pitch;
         upper_bound = best_pitch;
       }
+
+      // Final enforcement: bubble-sort to guarantee strict descending order.
+      // The greedy pass above can miss edge cases when voice-leading pulls
+      // a higher voice below a lower voice's chord tone.
+      for (size_t i = 0; i + 1 < held_indices.size(); ++i) {
+        for (size_t j = i + 1; j < held_indices.size(); ++j) {
+          if (notes[held_indices[j]].pitch >= notes[held_indices[i]].pitch) {
+            std::swap(notes[held_indices[i]].pitch,
+                      notes[held_indices[j]].pitch);
+          }
+        }
+      }
     }
 
     // Consonance check: ensure held chord tones (voices 1+) are consonant
@@ -3585,23 +3597,31 @@ FugueResult generateFugue(const FugueConfig& config) {
                                   Tick sec_start, Tick sec_end) -> float {
         float nv = static_cast<float>(num_voices);
         (void)sec_start;
-        (void)sec_end;
 
         switch (sec_type) {
           case SectionType::Exposition:
             // Voices accumulate gradually: no thinning (return full count).
             return nv;
           case SectionType::Episode: {
-            // BWV578: episodes are predominantly 2-3 voice texture.
-            // Target ~2.5 for 4-voice, ~2.0 for 3-voice fugues.
-            float base = (num_voices >= 4) ? 2.5f : 2.0f;
-            // Position-dependent: episodes near stretto get slightly more.
+            // BWV578: 3-voice texture dominates (56%).
+            // Target ~3.0 for 4-voice, ~2.5 for 3-voice to raise avg_active_voices.
+            float base = (num_voices >= 4) ? 3.0f : 2.5f;
+            // Position-dependent arc: early develop slightly less, pre-stretto more.
             float global_pos = (estimated_duration > 0)
                 ? static_cast<float>(tick) / static_cast<float>(estimated_duration)
                 : 0.5f;
-            if (global_pos > 0.70f) {
-              base += 0.3f;  // Pre-stretto episodes: allow more voices.
+            if (global_pos < 0.30f) {
+              base -= 0.3f;  // Early episodes: allow lighter texture.
+            } else if (global_pos > 0.70f) {
+              base += 0.3f;  // Pre-stretto episodes: near-full density.
             }
+            // Cadence approach: allow density drop 2 bars before section end.
+            Tick cadence_zone = kTicksPerBar * 2;
+            if (sec_end > cadence_zone &&
+                tick >= sec_end - cadence_zone) {
+              base -= 1.0f;  // Cadence thinning for phrase breathing.
+            }
+            base = std::max(2.0f, base);  // Never below 2 voices.
             return std::min(base, nv);
           }
           case SectionType::MiddleEntry: {
@@ -3906,6 +3926,34 @@ FugueResult generateFugue(const FugueConfig& config) {
           [](const NoteEvent& lhs, const NoteEvent& rhs) {
             return lhs.start_tick < rhs.start_tick;
           });
+    }
+  }
+
+  // =========================================================================
+  // Final Coda voice-crossing fix (after all post-processing).
+  // Post-processing (coordinateVoices, repairParallelPerfect, etc.) may
+  // octave-shift Coda held-chord notes, re-introducing voice crossings.
+  // Fix by swapping pitches to ensure strict descending order per voice index.
+  // =========================================================================
+  {
+    std::map<Tick, std::vector<size_t>> coda_by_tick;
+    for (size_t i = 0; i < all_notes.size(); ++i) {
+      if (all_notes[i].source == BachNoteSource::Coda && all_notes[i].voice >= 1) {
+        coda_by_tick[all_notes[i].start_tick].push_back(i);
+      }
+    }
+    for (auto& [tick, indices] : coda_by_tick) {
+      if (indices.size() < 2) continue;
+      std::sort(indices.begin(), indices.end(), [&](size_t a, size_t b) {
+        return all_notes[a].voice < all_notes[b].voice;
+      });
+      for (size_t i = 0; i + 1 < indices.size(); ++i) {
+        for (size_t j = i + 1; j < indices.size(); ++j) {
+          if (all_notes[indices[j]].pitch >= all_notes[indices[i]].pitch) {
+            std::swap(all_notes[indices[i]].pitch, all_notes[indices[j]].pitch);
+          }
+        }
+      }
     }
   }
 

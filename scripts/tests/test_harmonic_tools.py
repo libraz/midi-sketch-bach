@@ -34,6 +34,8 @@ from scripts.bach_analyzer.work_index import (
 )
 from scripts.bach_analyzer.model import (
     Note,
+    NoteSource,
+    Provenance,
     Score,
     Track,
     TICKS_PER_BAR,
@@ -480,8 +482,36 @@ class TestScoringEnhancements(unittest.TestCase):
         ]
         s = _score([_track("soprano", soprano), _track("bass", bass)])
         dist = _extract_nct_distribution(s)
-        # Should have some chord tones and some NCTs
-        self.assertGreater(dist.get("chord_tone", 0), 0)
+        # Chord tones are excluded; only NCTs remain.
+        # D5 is a passing tone (stepwise C->D->E in same direction).
+        self.assertGreater(dist.get("passing", 0), 0)
+        # Canonical NCT categories: passing, neighbor, ornamental, other
+        self.assertNotIn("chord_tone", dist)
+        total = sum(dist.values())
+        self.assertAlmostEqual(total, 1.0, places=3)
+
+    def test_nct_ornamental_toccata_figure(self):
+        """Notes with toccata_figure source should be classified as ornamental."""
+        toccata_prov = Provenance(source=NoteSource.TOCCATA_FIGURE)
+        bass = [_n(48, 0, 4 * TICKS_PER_BEAT, "bass")]  # C3 sustained
+        soprano = [
+            _n(72, 0, TICKS_PER_BEAT, "soprano"),  # C5, chord tone (no prov)
+            # D5 with toccata_figure provenance -- classified as ornamental
+            Note(pitch=74, velocity=80, start_tick=TICKS_PER_BEAT,
+                 duration=TICKS_PER_BEAT, voice="soprano",
+                 provenance=toccata_prov),
+            # F#5 with toccata_figure provenance -- also ornamental
+            Note(pitch=78, velocity=80, start_tick=2 * TICKS_PER_BEAT,
+                 duration=TICKS_PER_BEAT, voice="soprano",
+                 provenance=toccata_prov),
+            _n(76, 3 * TICKS_PER_BEAT, TICKS_PER_BEAT, "soprano"),  # E5, chord tone
+        ]
+        s = _score([_track("soprano", soprano), _track("bass", bass)])
+        dist = _extract_nct_distribution(s)
+        # Two toccata_figure notes should appear as ornamental
+        self.assertGreater(dist.get("ornamental", 0), 0)
+        # No chord_tone key in the distribution
+        self.assertNotIn("chord_tone", dist)
         total = sum(dist.values())
         self.assertAlmostEqual(total, 1.0, places=3)
 

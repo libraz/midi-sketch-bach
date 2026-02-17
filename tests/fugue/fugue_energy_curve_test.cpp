@@ -84,19 +84,22 @@ TEST(FugueEnergyCurveTest, TickBeyondTotalDurationClamped) {
 // ---------------------------------------------------------------------------
 
 TEST(FugueEnergyCurveTest, MinDurationLowEnergyIsQuarterNote) {
+  // energy < 0.3 → quarter note.
   EXPECT_EQ(FugueEnergyCurve::minDuration(0.2f), kTicksPerBeat);
   EXPECT_EQ(FugueEnergyCurve::minDuration(0.0f), kTicksPerBeat);
-  EXPECT_EQ(FugueEnergyCurve::minDuration(0.39f), kTicksPerBeat);
+  EXPECT_EQ(FugueEnergyCurve::minDuration(0.29f), kTicksPerBeat);
 }
 
 TEST(FugueEnergyCurveTest, MinDurationMidEnergyIsEighthNote) {
-  EXPECT_EQ(FugueEnergyCurve::minDuration(0.5f), kTicksPerBeat / 2);
-  EXPECT_EQ(FugueEnergyCurve::minDuration(0.4f), kTicksPerBeat / 2);
-  EXPECT_EQ(FugueEnergyCurve::minDuration(0.69f), kTicksPerBeat / 2);
+  // 0.3 <= energy < 0.4 → eighth note.
+  EXPECT_EQ(FugueEnergyCurve::minDuration(0.3f), kTicksPerBeat / 2);
+  EXPECT_EQ(FugueEnergyCurve::minDuration(0.35f), kTicksPerBeat / 2);
+  EXPECT_EQ(FugueEnergyCurve::minDuration(0.39f), kTicksPerBeat / 2);
 }
 
 TEST(FugueEnergyCurveTest, MinDurationHighEnergyIsSixteenthNote) {
-  EXPECT_EQ(FugueEnergyCurve::minDuration(0.8f), kTicksPerBeat / 4);
+  // energy >= 0.4 → sixteenth note.
+  EXPECT_EQ(FugueEnergyCurve::minDuration(0.4f), kTicksPerBeat / 4);
   EXPECT_EQ(FugueEnergyCurve::minDuration(0.7f), kTicksPerBeat / 4);
   EXPECT_EQ(FugueEnergyCurve::minDuration(1.0f), kTicksPerBeat / 4);
 }

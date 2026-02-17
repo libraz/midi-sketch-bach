@@ -754,11 +754,13 @@ std::vector<NoteEvent> generateClimbFromMotif(const ClimbingMotif& motif,
 // Ascending sequential motif climb for Phases D (energy 0.75) and F (energy 0.85).
 // Generates 3-4 motif statements, each transposed up by 2-3 scale steps.
 // Voice 0 carries the motif; voice 1 provides chord-tone support.
+// Connectors between motif statements use figuration engine for musical continuity.
 std::vector<NoteEvent> generateSequenceClimb(const HarmonicTimeline& timeline,
                                               const KeySignature& key_sig,
                                               const ClimbingMotif& motif,
                                               Tick start_tick, Tick end_tick,
                                               uint8_t range_ceiling,
+                                              int phase_idx,
                                               std::mt19937& rng) {
   std::vector<NoteEvent> notes;
   if (start_tick >= end_tick) return notes;
@@ -847,20 +849,78 @@ std::vector<NoteEvent> generateSequenceClimb(const HarmonicTimeline& timeline,
       }
     }
 
-    // Connector between statements: 1-2 ascending 8th notes.
+    // Connector between motif statements: figuration-driven transition.
     tick = motif_end_tick;
     if (stmt < num_statements - 1 && tick < end_tick) {
-      int num_conn = rng::rollProbability(rng, 0.5f) ? 2 : 1;
-      size_t conn_idx = current_scale_idx;
+      // Connector runs from motif_end_tick to the statement boundary.
+      Tick connector_end = std::min(stmt_end, end_tick);
+      Tick connector_dur = (connector_end > tick) ? connector_end - tick : 0;
 
-      for (int conn = 0; conn < num_conn && tick < end_tick; ++conn) {
-        if (conn_idx + 1 < scale_tones.size()) ++conn_idx;
-        Tick dur = std::min(kEighthNote, end_tick - tick);
-        if (dur == 0) break;
-        notes.push_back(makeNote(tick, dur, scale_tones[conn_idx], 0));
-        tick += dur;
+      // Determine the motif's ending pitch for figuration proximity.
+      uint8_t motif_end_pitch = base_pitch;  // Fallback to base pitch.
+      if (!motif_notes.empty()) {
+        motif_end_pitch = motif_notes.back().pitch;
       }
 
+      if (connector_dur >= kTicksPerBeat) {
+        // Use figuration engine for connector passage.
+        using namespace toccata_figuration;
+        const auto& profile = getDramaticusPhaseProfile(phase_idx);
+        ScaleType sc_type = key_sig.is_minor ? ScaleType::HarmonicMinor
+                                             : ScaleType::Major;
+        ToccataFigurationContext fig_ctx;
+        fig_ctx.profile = &profile;
+        fig_ctx.markov_model = &kToccataUpperMarkov;
+        fig_ctx.key = key_sig.tonic;
+        fig_ctx.scale = sc_type;
+        fig_ctx.low_pitch = low0;
+        fig_ctx.high_pitch = high0;
+        fig_ctx.energy = kDramaticusEnergy[phase_idx];
+        fig_ctx.mel_state = MelodicState{};
+        fig_ctx.mel_state.contour.shape = profile.contour;
+        fig_ctx.prev_degree_step = 0;
+        fig_ctx.initial_pitch = motif_end_pitch;
+
+        auto fig_result = generateFigurationSpan(
+            fig_ctx, tick, connector_end, 0, timeline, rng);
+
+        if (!fig_result.notes.empty()) {
+          notes.insert(notes.end(), fig_result.notes.begin(),
+                       fig_result.notes.end());
+          tick = fig_result.end_tick;
+        } else {
+          // Minimum 1 note guarantee: single bridge note near motif ending pitch.
+          Tick bridge_dur = std::min(kEighthNote, connector_end - tick);
+          if (bridge_dur > 0) {
+            uint8_t bridge_pitch = clampPitch(
+                static_cast<int>(motif_end_pitch) + 1, low0, high0);
+            // Strong beat fallback: ensure chord tone on beat 1 or beat 3.
+            Tick pos_in_bar = positionInBar(tick);
+            if (pos_in_bar == 0 || pos_in_bar == kTicksPerBeat * 2) {
+              const HarmonicEvent& conn_harm = timeline.getAt(tick);
+              auto conn_ct = collectChordTonesInRange(conn_harm.chord, low0, high0);
+              if (!conn_ct.empty()) {
+                bridge_pitch = conn_ct[findClosestToneIndex(conn_ct, motif_end_pitch)];
+              }
+            }
+            notes.push_back(makeNote(tick, bridge_dur, bridge_pitch, 0));
+            tick += bridge_dur;
+          }
+        }
+      } else if (connector_dur > 0) {
+        // Short connector (< 1 beat): keep simple ascending 8th-note behavior.
+        size_t conn_idx = current_scale_idx;
+        int num_conn = rng::rollProbability(rng, 0.5f) ? 2 : 1;
+        for (int conn = 0; conn < num_conn && tick < connector_end; ++conn) {
+          if (conn_idx + 1 < scale_tones.size()) ++conn_idx;
+          Tick dur = std::min(kEighthNote, connector_end - tick);
+          if (dur == 0) break;
+          notes.push_back(makeNote(tick, dur, scale_tones[conn_idx], 0));
+          tick += dur;
+        }
+      }
+
+      // Advance scale index for next motif statement (2-3 steps up).
       int step_up = rng::rollRange(rng, 2, 3);
       size_t next_idx = current_scale_idx + static_cast<size_t>(step_up);
       if (next_idx >= scale_tones.size()) {
@@ -1508,7 +1568,7 @@ ToccataResult generateDramaticusToccata(const ToccataConfig& config) {
   auto d_notes = generateSequenceClimb(
       timeline, config.key, motif,
       phases[3].start, phases[3].end,
-      kDramaticusRangeCeiling[3], rng);
+      kDramaticusRangeCeiling[3], 3, rng);
 
   // E: HarmonicBreak
   auto e_notes = generateHarmonicBreak(
@@ -1518,7 +1578,7 @@ ToccataResult generateDramaticusToccata(const ToccataConfig& config) {
   auto f_notes = generateSequenceClimb(
       timeline, config.key, motif,
       phases[5].start, phases[5].end,
-      kDramaticusRangeCeiling[5], rng);
+      kDramaticusRangeCeiling[5], 5, rng);
 
   // G: DomObsession
   auto g_notes = generateDominantObsession(

@@ -225,7 +225,7 @@ TEST(ProtectionLevelTest, StructuralSources) {
   EXPECT_EQ(getProtectionLevel(BachNoteSource::FalseEntry),
             ProtectionLevel::Structural);
   EXPECT_EQ(getProtectionLevel(BachNoteSource::Coda),
-            ProtectionLevel::Structural);
+            ProtectionLevel::Architectural);
   EXPECT_EQ(getProtectionLevel(BachNoteSource::SequenceNote),
             ProtectionLevel::Structural);
   EXPECT_EQ(getProtectionLevel(BachNoteSource::CanonDux),
@@ -279,6 +279,7 @@ TEST(ProtectionLevelTest, AllSourcesCovered) {
   for (auto src : all) {
     auto level = getProtectionLevel(src);
     EXPECT_TRUE(level == ProtectionLevel::Immutable ||
+                level == ProtectionLevel::Architectural ||
                 level == ProtectionLevel::SemiImmutable ||
                 level == ProtectionLevel::Structural ||
                 level == ProtectionLevel::Flexible)

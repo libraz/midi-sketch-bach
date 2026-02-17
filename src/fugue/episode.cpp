@@ -1595,6 +1595,86 @@ Episode generateEpisode(const Subject& subject, Tick start_tick, Tick duration_t
     }
   }
 
+  // --- Phase 1: Rhythmic subdivision for 16th note density ---
+  // Bach organ fugues target ~61% 16th notes. Subdivide quarter/8th notes on
+  // offbeats into shorter durations using voice-specific profiles.
+  // Only subdivide EpisodeMaterial and SequenceNote sources (not held tones).
+  // Phase 1: Rhythmic subdivision for 16th note density.
+  // Bach organ fugues: 16th=61.4%, 8th=20.7%.
+  // Aggressively subdivide episode notes to 16th-based figuration.
+  {
+    std::mt19937 subdiv_rng(seed ^ 0x52485944u);  // "RHYD"
+    constexpr Tick k16 = kTicksPerBeat / 4;   // 120 ticks.
+    constexpr Tick k8 = kTicksPerBeat / 2;    // 240 ticks.
+    std::vector<NoteEvent> subdivided;
+    subdivided.reserve(episode.notes.size() * 4);
+    for (const auto& note : episode.notes) {
+      if (note.source != BachNoteSource::EpisodeMaterial &&
+          note.source != BachNoteSource::SequenceNote) {
+        subdivided.push_back(note);
+        continue;
+      }
+      // Skip bass/pedal voice (3+ voices): Bach pedal rarely has 16th subdivision.
+      if (num_voices >= 3 && note.voice == num_voices - 1) {
+        subdivided.push_back(note);
+        continue;
+      }
+      VoiceProfile prof = getVoiceProfile(note.voice, num_voices);
+      float w16 = prof.dur_weights[5];
+      float w_total = 0.0f;
+      for (int d = 0; d < 6; ++d) w_total += prof.dur_weights[d];
+      // Subdivision probability: how likely this voice subdivides to 16ths.
+      // Soprano ~53%, Alto ~34%, Tenor ~19%.
+      float p_sub = (w_total > 0.0f) ? (w16 / w_total) : 0.0f;
+
+      // Any note longer than 16th can be subdivided to uniform 16ths.
+      if (note.duration > k16 && note.duration >= k8) {
+        // Target subdivision unit: 16th note.
+        int num_16ths = static_cast<int>(note.duration / k16);
+        if (num_16ths >= 2 && rng::rollProbability(subdiv_rng, p_sub)) {
+          // Subdivide entire note into 16th-note run.
+          for (int s = 0; s < num_16ths; ++s) {
+            NoteEvent sub = note;
+            sub.start_tick = note.start_tick + s * k16;
+            sub.duration = k16;
+            subdivided.push_back(sub);
+          }
+          // Handle remainder (note.duration % k16 > 0).
+          Tick remainder = note.duration - num_16ths * k16;
+          if (remainder > 0) {
+            NoteEvent rem = note;
+            rem.start_tick = note.start_tick + num_16ths * k16;
+            rem.duration = remainder;
+            subdivided.push_back(rem);
+          }
+          continue;
+        }
+        // Secondary: subdivide to 8th notes (less aggressive).
+        int num_8ths = static_cast<int>(note.duration / k8);
+        float p_8th_sub = (w_total > 0.0f)
+            ? (prof.dur_weights[4] / w_total) : 0.0f;
+        if (num_8ths >= 2 && rng::rollProbability(subdiv_rng, p_8th_sub * 0.5f)) {
+          for (int s = 0; s < num_8ths; ++s) {
+            NoteEvent sub = note;
+            sub.start_tick = note.start_tick + s * k8;
+            sub.duration = k8;
+            subdivided.push_back(sub);
+          }
+          Tick remainder = note.duration - num_8ths * k8;
+          if (remainder > 0) {
+            NoteEvent rem = note;
+            rem.start_tick = note.start_tick + num_8ths * k8;
+            rem.duration = remainder;
+            subdivided.push_back(rem);
+          }
+          continue;
+        }
+      }
+      subdivided.push_back(note);
+    }
+    episode.notes = std::move(subdivided);
+  }
+
   // --- Strong-beat vertical consonance repair ---
   // Fix dissonant intervals on beats 1 and 3 by shifting Flexible-protection
   // notes to the nearest consonant pitch. Runs before invertible counterpoint
@@ -2163,6 +2243,37 @@ Episode generateEpisode(const Subject& subject, Tick start_tick, Tick duration_t
           mel_score += 0.15f;
         }
 
+        // --- Phase 4: NCT vocabulary scoring ---
+        // On offbeats, prefer non-chord tones that form passing or neighbor patterns.
+        if (!cand.is_chord_tone && ml < MetricLevel::Beat &&
+            mel_ctx.prev_count >= 1) {
+          int step_from_prev = static_cast<int>(cand.pitch) -
+                               static_cast<int>(mel_ctx.prev_pitches[0]);
+          bool is_stepwise_from_prev = std::abs(step_from_prev) >= 1 &&
+                                       std::abs(step_from_prev) <= 2;
+          if (is_stepwise_from_prev) {
+            if (lookahead_pitch.has_value()) {
+              int step_to_next = static_cast<int>(*lookahead_pitch) -
+                                 static_cast<int>(cand.pitch);
+              bool same_dir = (step_from_prev > 0 && step_to_next > 0) ||
+                              (step_from_prev < 0 && step_to_next < 0);
+              bool returns = (*lookahead_pitch == mel_ctx.prev_pitches[0]);
+              if (same_dir && std::abs(step_to_next) <= 2) {
+                mel_score += 0.25f;  // Passing tone bonus.
+              } else if (returns) {
+                mel_score += 0.20f;  // Neighbor tone bonus.
+              } else {
+                mel_score += 0.05f;  // Stepwise approach.
+              }
+            } else {
+              mel_score += 0.10f;  // Stepwise NCT without lookahead.
+            }
+          }
+          if (!is_stepwise_from_prev) {
+            mel_score -= 0.10f;  // Non-stepwise NCT penalty.
+          }
+        }
+
         // Pedal consonance: light bias against strong-beat pedal dissonance.
         // CollisionResolver handles hard rejection; this only steers ranking.
         if (pedal_pitch > 0 && ml >= MetricLevel::Beat) {
@@ -2199,16 +2310,16 @@ Episode generateEpisode(const Subject& subject, Tick start_tick, Tick duration_t
             if (has_dissonance) {
               cand.has_vertical_dissonance = true;
               cand.has_harsh_dissonance = has_harsh;
-              // Graduated penalties:
-              //   Bar start: strong penalty (-0.5 harsh, -0.35 mild).
-              //   Cadence zone: elevated penalty (-0.4 harsh, -0.3 mild).
-              //   Beat 3 (normal): moderate penalty (-0.2 harsh, -0.15 mild).
+              // Graduated penalties (Phase 3: strengthened):
+              //   Bar start: strong penalty (-0.6 harsh, -0.4 mild).
+              //   Cadence zone: elevated penalty (-0.5 harsh, -0.35 mild).
+              //   Beat 3 (normal): moderate penalty (-0.25 harsh, -0.15 mild).
               if (ml == MetricLevel::Bar) {
-                mel_score += has_harsh ? -0.5f : -0.35f;
+                mel_score += has_harsh ? -0.6f : -0.4f;
               } else if (is_cadence_adj) {
-                mel_score += has_harsh ? -0.4f : -0.3f;
+                mel_score += has_harsh ? -0.5f : -0.35f;
               } else {
-                mel_score += has_harsh ? -0.2f : -0.15f;
+                mel_score += has_harsh ? -0.25f : -0.15f;
               }
             } else {
               // Consonance bonus: stronger on bar starts and cadence zone.
@@ -2273,6 +2384,102 @@ Episode generateEpisode(const Subject& subject, Tick start_tick, Tick duration_t
         // Upper voice affinity scoring (3rd/6th bonus).
         mel_score += scoreUpperVoiceAffinity(cand.pitch, cp_state,
                                               note.voice, note.start_tick);
+
+        // --- Phase 2: Leap resolution enforcement ---
+        // When leap_needs_resolution is set, boost the mel_score weight for
+        // candidates that resolve the leap (step in opposite direction).
+        if (mel_ctx.leap_needs_resolution && mel_ctx.prev_count >= 1) {
+          int interval = static_cast<int>(cand.pitch) -
+                         static_cast<int>(mel_ctx.prev_pitches[0]);
+          bool is_step = std::abs(interval) >= 1 && std::abs(interval) <= 2;
+          bool opposite_dir = (mel_ctx.prev_direction > 0 && interval < 0) ||
+                              (mel_ctx.prev_direction < 0 && interval > 0);
+          if (is_step && opposite_dir) {
+            mel_score += 0.4f;  // Strong bonus for proper resolution.
+          } else if (opposite_dir) {
+            mel_score += 0.15f;  // Moderate bonus for opposite direction skip.
+          } else {
+            mel_score -= 0.3f;  // Penalty for continuing after unresolved leap.
+          }
+        }
+
+        // --- Phase 5: Contrary motion bonus ---
+        // Encourage contrary motion when voices have been moving in same direction.
+        if (mel_ctx.prev_count >= 1) {
+          int cand_dir = (cand.pitch > mel_ctx.prev_pitches[0]) ? 1 :
+                         (cand.pitch < mel_ctx.prev_pitches[0]) ? -1 : 0;
+          if (cand_dir != 0) {
+            // Check if other voices are moving in a particular direction.
+            bool same_dir_with_others = false;
+            bool contrary_to_others = false;
+            for (VoiceId ov : cp_state.getActiveVoices()) {
+              if (ov == note.voice) continue;
+              const NoteEvent* other_cur = cp_state.getNoteAt(ov, note.start_tick);
+              const NoteEvent* other_prev = cp_state.getLastNote(ov);
+              if (!other_cur || !other_prev) continue;
+              int other_dir = (other_cur->pitch > other_prev->pitch) ? 1 :
+                              (other_cur->pitch < other_prev->pitch) ? -1 : 0;
+              if (other_dir == cand_dir) same_dir_with_others = true;
+              if (other_dir != 0 && other_dir == -cand_dir) contrary_to_others = true;
+            }
+            if (contrary_to_others) {
+              mel_score += 0.15f;  // Contrary motion bonus.
+            }
+            // Parallel perfect consonance penalty (P5/P8 via same direction).
+            if (same_dir_with_others) {
+              for (VoiceId ov : cp_state.getActiveVoices()) {
+                if (ov == note.voice) continue;
+                const NoteEvent* other = cp_state.getNoteAt(ov, note.start_tick);
+                if (!other || other->start_tick + other->duration <= note.start_tick)
+                  continue;
+                int ivl = interval_util::compoundToSimple(
+                    absoluteInterval(cand.pitch, other->pitch));
+                if (ivl == 0 || ivl == 7) {  // Unison/P8 or P5.
+                  mel_score -= 0.4f;  // Strengthened parallel perfect penalty.
+                }
+              }
+            }
+          }
+        }
+
+        // --- Phase 6: Register arc bias ---
+        // Bias candidates toward the target register center for melodic arc.
+        // Development: register center rises, Resolution: returns.
+        {
+          Tick ep_end = start_tick + duration_ticks;
+          float global_pos = (ep_end > 0)
+              ? static_cast<float>(note.start_tick) /
+                    static_cast<float>(ep_end)
+              : 0.5f;
+          // Register center offset: rises in Development, peaks at Stretto,
+          // returns in Resolution.
+          float register_offset = 0.0f;
+          if (global_pos < 0.25f) {
+            register_offset = 0.0f;  // Exposition: neutral.
+          } else if (global_pos < 0.70f) {
+            // Development: gradual rise up to +4 semitones.
+            register_offset = 4.0f * (global_pos - 0.25f) / 0.45f;
+          } else if (global_pos < 0.90f) {
+            // Stretto: peak at +5 semitones.
+            register_offset = 4.0f + 1.0f * (global_pos - 0.70f) / 0.20f;
+          } else {
+            // Resolution: return toward 0.
+            register_offset = 5.0f * (1.0f - (global_pos - 0.90f) / 0.10f);
+          }
+          auto [v_lo, v_hi] = getFugueVoiceRange(note.voice, num_voices);
+          float center = (static_cast<float>(v_lo) + static_cast<float>(v_hi)) / 2.0f
+                         + register_offset;
+          float dist = std::abs(static_cast<float>(cand.pitch) - center);
+          float range = static_cast<float>(v_hi - v_lo) / 2.0f;
+          if (range > 0.0f) {
+            float normalized_dist = dist / range;
+            if (normalized_dist < 0.3f) {
+              mel_score += 0.1f;   // Near center: bonus.
+            } else if (normalized_dist > 0.7f) {
+              mel_score -= 0.05f;  // Far from center: mild penalty.
+            }
+          }
+        }
 
         cand.score = mel_score;
       }
@@ -2421,6 +2628,76 @@ Episode generateFortspinnungEpisode(const Subject& subject, const MotifPool& poo
     if (note.duration > min_dur * 4) {
       note.duration = std::max(min_dur * 2, note.duration / 2);
     }
+  }
+
+  // --- Phase 1: Rhythmic subdivision for 16th note density ---
+  // Aggressively subdivide Fortspinnung episode notes to 16th-based figuration.
+  {
+    std::mt19937 subdiv_rng(seed ^ 0x52485944u);
+    constexpr Tick k16 = kTicksPerBeat / 4;
+    constexpr Tick k8 = kTicksPerBeat / 2;
+    std::vector<NoteEvent> subdivided;
+    subdivided.reserve(episode.notes.size() * 4);
+    for (const auto& note : episode.notes) {
+      // Only subdivide EpisodeMaterial, SequenceNote, Unknown sources.
+      if (note.source != BachNoteSource::EpisodeMaterial &&
+          note.source != BachNoteSource::SequenceNote &&
+          note.source != BachNoteSource::Unknown) {
+        subdivided.push_back(note);
+        continue;
+      }
+      // Skip bass/pedal voice (3+ voices): Bach pedal rarely has 16th subdivision.
+      if (num_voices >= 3 && note.voice == num_voices - 1) {
+        subdivided.push_back(note);
+        continue;
+      }
+      VoiceProfile prof = getVoiceProfile(note.voice, num_voices);
+      float w16 = prof.dur_weights[5];
+      float w_total = 0.0f;
+      for (int d = 0; d < 6; ++d) w_total += prof.dur_weights[d];
+      float p_sub = (w_total > 0.0f) ? (w16 / w_total) : 0.0f;
+
+      if (note.duration > k16 && note.duration >= k8) {
+        int num_16ths = static_cast<int>(note.duration / k16);
+        if (num_16ths >= 2 && rng::rollProbability(subdiv_rng, p_sub)) {
+          for (int s = 0; s < num_16ths; ++s) {
+            NoteEvent sub = note;
+            sub.start_tick = note.start_tick + s * k16;
+            sub.duration = k16;
+            subdivided.push_back(sub);
+          }
+          Tick remainder = note.duration - num_16ths * k16;
+          if (remainder > 0) {
+            NoteEvent rem = note;
+            rem.start_tick = note.start_tick + num_16ths * k16;
+            rem.duration = remainder;
+            subdivided.push_back(rem);
+          }
+          continue;
+        }
+        // Secondary: subdivide to 8th notes.
+        int num_8ths = static_cast<int>(note.duration / k8);
+        float p_8th_sub = (w_total > 0.0f) ? (prof.dur_weights[4] / w_total) : 0.0f;
+        if (num_8ths >= 2 && rng::rollProbability(subdiv_rng, p_8th_sub * 0.5f)) {
+          for (int s = 0; s < num_8ths; ++s) {
+            NoteEvent sub = note;
+            sub.start_tick = note.start_tick + s * k8;
+            sub.duration = k8;
+            subdivided.push_back(sub);
+          }
+          Tick remainder = note.duration - num_8ths * k8;
+          if (remainder > 0) {
+            NoteEvent rem = note;
+            rem.start_tick = note.start_tick + num_8ths * k8;
+            rem.duration = remainder;
+            subdivided.push_back(rem);
+          }
+          continue;
+        }
+      }
+      subdivided.push_back(note);
+    }
+    episode.notes = std::move(subdivided);
   }
 
   // --- Strong-beat vertical consonance repair ---
@@ -3016,6 +3293,37 @@ Episode generateFortspinnungEpisode(const Subject& subject, const MotifPool& poo
           mel_score += 0.15f;
         }
 
+        // --- Phase 4: NCT vocabulary scoring ---
+        // On offbeats, prefer non-chord tones that form passing or neighbor patterns.
+        if (!cand.is_chord_tone && ml < MetricLevel::Beat &&
+            mel_ctx.prev_count >= 1) {
+          int step_from_prev = static_cast<int>(cand.pitch) -
+                               static_cast<int>(mel_ctx.prev_pitches[0]);
+          bool is_stepwise_from_prev = std::abs(step_from_prev) >= 1 &&
+                                       std::abs(step_from_prev) <= 2;
+          if (is_stepwise_from_prev) {
+            if (lookahead_pitch.has_value()) {
+              int step_to_next = static_cast<int>(*lookahead_pitch) -
+                                 static_cast<int>(cand.pitch);
+              bool same_dir = (step_from_prev > 0 && step_to_next > 0) ||
+                              (step_from_prev < 0 && step_to_next < 0);
+              bool returns = (*lookahead_pitch == mel_ctx.prev_pitches[0]);
+              if (same_dir && std::abs(step_to_next) <= 2) {
+                mel_score += 0.25f;  // Passing tone bonus.
+              } else if (returns) {
+                mel_score += 0.20f;  // Neighbor tone bonus.
+              } else {
+                mel_score += 0.05f;  // Stepwise approach.
+              }
+            } else {
+              mel_score += 0.10f;  // Stepwise NCT without lookahead.
+            }
+          }
+          if (!is_stepwise_from_prev) {
+            mel_score -= 0.10f;  // Non-stepwise NCT penalty.
+          }
+        }
+
         // Pedal consonance: light bias against strong-beat pedal dissonance.
         // CollisionResolver handles hard rejection; this only steers ranking.
         if (pedal_pitch > 0 && ml >= MetricLevel::Beat) {
@@ -3100,6 +3408,90 @@ Episode generateFortspinnungEpisode(const Subject& subject, const MotifPool& poo
         // Upper voice affinity scoring (3rd/6th bonus).
         mel_score += scoreUpperVoiceAffinity(cand.pitch, cp_state,
                                               note.voice, note.start_tick);
+
+        // --- Phase 2: Leap resolution enforcement ---
+        if (mel_ctx.leap_needs_resolution && mel_ctx.prev_count >= 1) {
+          int interval = static_cast<int>(cand.pitch) -
+                         static_cast<int>(mel_ctx.prev_pitches[0]);
+          bool is_step = std::abs(interval) >= 1 && std::abs(interval) <= 2;
+          bool opposite_dir = (mel_ctx.prev_direction > 0 && interval < 0) ||
+                              (mel_ctx.prev_direction < 0 && interval > 0);
+          if (is_step && opposite_dir) {
+            mel_score += 0.4f;
+          } else if (opposite_dir) {
+            mel_score += 0.15f;
+          } else {
+            mel_score -= 0.3f;
+          }
+        }
+
+        // --- Phase 5: Contrary motion bonus ---
+        if (mel_ctx.prev_count >= 1) {
+          int cand_dir = (cand.pitch > mel_ctx.prev_pitches[0]) ? 1 :
+                         (cand.pitch < mel_ctx.prev_pitches[0]) ? -1 : 0;
+          if (cand_dir != 0) {
+            bool same_dir_with_others = false;
+            bool contrary_to_others = false;
+            for (VoiceId ov : cp_state.getActiveVoices()) {
+              if (ov == note.voice) continue;
+              const NoteEvent* other_cur = cp_state.getNoteAt(ov, note.start_tick);
+              const NoteEvent* other_prev = cp_state.getLastNote(ov);
+              if (!other_cur || !other_prev) continue;
+              int other_dir = (other_cur->pitch > other_prev->pitch) ? 1 :
+                              (other_cur->pitch < other_prev->pitch) ? -1 : 0;
+              if (other_dir == cand_dir) same_dir_with_others = true;
+              if (other_dir != 0 && other_dir == -cand_dir) contrary_to_others = true;
+            }
+            if (contrary_to_others) {
+              mel_score += 0.15f;
+            }
+            if (same_dir_with_others) {
+              for (VoiceId ov : cp_state.getActiveVoices()) {
+                if (ov == note.voice) continue;
+                const NoteEvent* other = cp_state.getNoteAt(ov, note.start_tick);
+                if (!other || other->start_tick + other->duration <= note.start_tick)
+                  continue;
+                int ivl = interval_util::compoundToSimple(
+                    absoluteInterval(cand.pitch, other->pitch));
+                if (ivl == 0 || ivl == 7) {
+                  mel_score -= 0.4f;
+                }
+              }
+            }
+          }
+        }
+
+        // --- Phase 6: Register arc bias ---
+        {
+          Tick ep_end = start_tick + duration_ticks;
+          float global_pos = (ep_end > 0)
+              ? static_cast<float>(note.start_tick) /
+                    static_cast<float>(ep_end)
+              : 0.5f;
+          float register_offset = 0.0f;
+          if (global_pos < 0.25f) {
+            register_offset = 0.0f;
+          } else if (global_pos < 0.70f) {
+            register_offset = 4.0f * (global_pos - 0.25f) / 0.45f;
+          } else if (global_pos < 0.90f) {
+            register_offset = 4.0f + 1.0f * (global_pos - 0.70f) / 0.20f;
+          } else {
+            register_offset = 5.0f * (1.0f - (global_pos - 0.90f) / 0.10f);
+          }
+          auto [v_lo, v_hi] = getFugueVoiceRange(note.voice, num_voices);
+          float center = (static_cast<float>(v_lo) + static_cast<float>(v_hi)) / 2.0f
+                         + register_offset;
+          float dist = std::abs(static_cast<float>(cand.pitch) - center);
+          float range = static_cast<float>(v_hi - v_lo) / 2.0f;
+          if (range > 0.0f) {
+            float normalized_dist = dist / range;
+            if (normalized_dist < 0.3f) {
+              mel_score += 0.1f;
+            } else if (normalized_dist > 0.7f) {
+              mel_score -= 0.05f;
+            }
+          }
+        }
 
         cand.score = mel_score;
 

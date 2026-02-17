@@ -299,7 +299,15 @@ def _extract_nct_distribution(score: Score) -> Dict[str, float]:
     For each beat, determines chord tones from the bass pitch class (assuming
     root-position triads in C major), then classifies non-chord tones by
     their melodic context: passing (stepwise approach and departure in same
-    direction), neighbor (stepwise approach and return), and other.
+    direction), neighbor (stepwise approach and return), ornamental (toccata
+    figuration notes identified by provenance), and other.
+
+    Notes with ``toccata_figure`` provenance source are always classified as
+    ``ornamental`` regardless of their intervallic behaviour, because toccata
+    figurations follow gesture templates rather than standard NCT patterns.
+
+    The returned distribution excludes chord tones so that it is directly
+    comparable with reference NCT profiles.
     """
     if score.num_voices < 2:
         return {}
@@ -318,12 +326,21 @@ def _extract_nct_distribution(score: Score) -> Dict[str, float]:
     _DEFAULT_TRIAD = frozenset({0, 4, 7})
 
     bass_pcs = extract_bass_per_beat(score)
-    nct_types: Dict[str, int] = {"passing": 0, "neighbor": 0, "other_nct": 0, "chord_tone": 0}
+    nct_types: Dict[str, int] = {
+        "passing": 0, "neighbor": 0, "ornamental": 0, "other": 0,
+    }
 
     for track in score.tracks:
         notes = track.sorted_notes
         for note_idx in range(len(notes)):
             note = notes[note_idx]
+
+            # Toccata figuration notes are always classified as ornamental,
+            # before any intervallic analysis.
+            if note.provenance and note.provenance.source == NoteSource.TOCCATA_FIGURE:
+                nct_types["ornamental"] += 1
+                continue
+
             # Determine which beat this note falls on
             beat_idx = note.start_tick // TICKS_PER_BEAT
             if beat_idx < 0 or beat_idx >= len(bass_pcs):
@@ -335,7 +352,8 @@ def _extract_nct_distribution(score: Score) -> Dict[str, float]:
             note_pc = note.pitch % 12
 
             if note_pc in chord_pcs:
-                nct_types["chord_tone"] += 1
+                # Chord tones are excluded from the NCT distribution.
+                continue
             else:
                 # Classify by melodic context
                 prev_interval = None
@@ -354,9 +372,9 @@ def _extract_nct_distribution(score: Score) -> Dict[str, float]:
                         else:
                             nct_types["neighbor"] += 1
                     else:
-                        nct_types["other_nct"] += 1
+                        nct_types["other"] += 1
                 else:
-                    nct_types["other_nct"] += 1
+                    nct_types["other"] += 1
 
     return _normalize({k: float(v) for k, v in nct_types.items()})
 
@@ -520,6 +538,80 @@ _GROUND_BASS_FORMS = {"passacaglia", "chaconne"}
 
 # Forms that use a cantus firmus (chorale melody) as a structural element.
 _CANTUS_FIRMUS_FORMS = {"chorale_prelude"}
+
+# Forms with a toccata section preceding a fugue section.
+_TOCCATA_FUGUE_FORMS = {"toccata_and_fugue", "fantasia_and_fugue"}
+
+# Note sources that indicate fugue material (as opposed to toccata/free sections).
+_FUGUE_SOURCES = frozenset({
+    NoteSource.FUGUE_SUBJECT,
+    NoteSource.FUGUE_ANSWER,
+    NoteSource.COUNTERSUBJECT,
+    NoteSource.EPISODE_MATERIAL,
+    NoteSource.FALSE_ENTRY,
+    NoteSource.SEQUENCE_NOTE,
+})
+
+# Organ prelude/fantasia texture reference (organ_pf).
+# Derived from Bach organ preludes, toccatas, and fantasias: avg_active ~2.75
+# voices, with more single-voice and two-voice passages than pure fugues.
+_ORGAN_PF_TEXTURE_REF: Dict[str, float] = {
+    "0": 0.02,
+    "1": 0.15,
+    "2": 0.33,
+    "3": 0.38,
+    "4": 0.12,
+}
+_ORGAN_PF_AVG_ACTIVE: Dict[str, Any] = {
+    "mean": 2.75,
+    "std": 0.5,
+}
+
+
+def _detect_fugue_boundary_tick(score: Score) -> Optional[int]:
+    """Detect the tick where the fugue section starts in a toccata+fugue form.
+
+    Scans all notes for the earliest note with a fugue-specific provenance
+    source (subject, answer, countersubject, episode_material, etc.).
+
+    Returns:
+        The start_tick of the first fugue note, or None if no fugue material found.
+    """
+    earliest_fugue_tick: Optional[int] = None
+    for track in score.tracks:
+        for note in track.sorted_notes:
+            if note.provenance and note.provenance.source in _FUGUE_SOURCES:
+                if earliest_fugue_tick is None or note.start_tick < earliest_fugue_tick:
+                    earliest_fugue_tick = note.start_tick
+                break  # Only need the first fugue note per track
+    return earliest_fugue_tick
+
+
+def _extract_degree_distribution_for_tick_range(
+    score: Score,
+    start_tick: int,
+    end_tick: int,
+) -> Tuple[Dict[str, float], int]:
+    """Extract Roman numeral degree distribution for a tick range.
+
+    Returns:
+        Tuple of (normalized distribution, note count in range).
+    """
+    bass_pcs = extract_bass_per_beat(score)
+    counts: Dict[str, int] = {}
+    note_count = 0
+
+    start_beat = start_tick // TICKS_PER_BEAT
+    end_beat = end_tick // TICKS_PER_BEAT
+
+    for beat_idx in range(start_beat, min(end_beat, len(bass_pcs))):
+        pitch_class = bass_pcs[beat_idx]
+        if pitch_class is not None:
+            degree = _BASS_PC_TO_DEGREE.get(pitch_class, "I")
+            counts[degree] = counts.get(degree, 0) + 1
+            note_count += 1
+
+    return _normalize({k: float(v) for k, v in counts.items()}), note_count
 
 
 def _detect_ground_bass_regularity(score: Score) -> float:
@@ -757,19 +849,22 @@ def _score_structure(
             detail=f"cantus firmus score: {cf_score:.1f}/100",
         ))
 
-    # Texture density JSD
+    # Texture density JSD (use organ_pf reference for toccata+fugue forms)
     tex = extract_texture_profile(score)
-    ref_tex = ref.get("distributions", {}).get("texture", {})
-    if tex["distribution"] and ref_tex:
-        j = jsd(tex["distribution"], ref_tex)
+    struct_ref_tex, _unused = _get_texture_reference(ref, form_name)
+    if tex["distribution"] and struct_ref_tex:
+        j = jsd(tex["distribution"], struct_ref_tex)
         pts = jsd_to_points(j)
+        detail = f"JSD={j:.4f}"
+        if form_name in _TOCCATA_FUGUE_FORMS:
+            detail += " (organ_pf ref)"
         sub_scores.append(SubScore(
             name="texture_density_match",
             value=j,
             reference=0.0,
             score=pts,
             method="jsd",
-            detail=f"JSD={j:.4f}",
+            detail=detail,
         ))
 
     if not sub_scores:
@@ -829,12 +924,92 @@ def _score_melody(
     return DimensionScore("melody", max(0, raw - penalty), True, sub_scores, penalty)
 
 
+def _compute_section_weighted_degree_jsd(
+    score: Score,
+    ref_deg: Dict[str, float],
+    form_name: str,
+) -> Optional[Tuple[float, float, str]]:
+    """Compute harmony degree JSD with section-aware weighting.
+
+    For toccata_and_fugue forms, computes degree JSD separately for toccata
+    and fugue sections, weighting toccata at 0.5 (figuration makes strict
+    harmony scoring less meaningful) and fugue at 1.0.
+
+    Args:
+        score: The Score to evaluate.
+        ref_deg: Reference harmony degree distribution.
+        form_name: Form name for section detection.
+
+    Returns:
+        Tuple of (jsd_value, weighted_points, detail_string) or None if
+        no section boundary detected or form is not toccata+fugue.
+    """
+    if form_name not in _TOCCATA_FUGUE_FORMS:
+        return None  # Caller should use default logic
+
+    boundary_tick = _detect_fugue_boundary_tick(score)
+    if boundary_tick is None or boundary_tick <= 0:
+        return None  # No detectable boundary; fall back to default
+
+    total_duration = score.total_duration
+
+    # Compute degree distribution for each section.
+    toc_deg, toc_count = _extract_degree_distribution_for_tick_range(
+        score, 0, boundary_tick)
+    fug_deg, fug_count = _extract_degree_distribution_for_tick_range(
+        score, boundary_tick, total_duration)
+
+    if toc_count == 0 and fug_count == 0:
+        return None
+
+    # Compute JSD for each section with available data.
+    toc_weight = 0.5
+    fug_weight = 1.0
+
+    weighted_pts = 0.0
+    total_weight = 0.0
+    jsd_parts: List[str] = []
+
+    if toc_deg and toc_count > 0:
+        toc_jsd = jsd(toc_deg, ref_deg)
+        toc_pts = jsd_to_points(toc_jsd)
+        section_w = toc_weight * toc_count
+        weighted_pts += toc_pts * section_w
+        total_weight += section_w
+        jsd_parts.append(f"toc={toc_jsd:.4f}*0.5")
+
+    if fug_deg and fug_count > 0:
+        fug_jsd = jsd(fug_deg, ref_deg)
+        fug_pts = jsd_to_points(fug_jsd)
+        section_w = fug_weight * fug_count
+        weighted_pts += fug_pts * section_w
+        total_weight += section_w
+        jsd_parts.append(f"fug={fug_jsd:.4f}*1.0")
+
+    if total_weight == 0:
+        return None
+
+    combined_pts = weighted_pts / total_weight
+    # Also compute the overall JSD for display.
+    gen_deg = _extract_degree_distribution(score)
+    overall_jsd = jsd(gen_deg, ref_deg) if gen_deg else 0.0
+    detail = f"JSD={overall_jsd:.4f} (section-weighted: {', '.join(jsd_parts)})"
+
+    return overall_jsd, combined_pts, detail
+
+
 def _score_harmony(
     score: Score,
     ref: Dict[str, Any],
     penalty: float,
+    form_name: str = "",
 ) -> DimensionScore:
-    """III. Harmony dimension (25%)."""
+    """III. Harmony dimension (25%).
+
+    For toccata_and_fugue forms, the harmony_degree sub-score uses
+    section-weighted JSD: toccata sections weighted at 0.5 (figuration
+    reduces strict harmony relevance), fugue sections at 1.0.
+    """
     if score.num_voices < 2:
         return DimensionScore("harmony", 0, False)
 
@@ -892,18 +1067,30 @@ def _score_harmony(
                 detail=f"JSD={j:.4f}",
             ))
 
-    # Harmony degree distribution JSD (half weight)
+    # Harmony degree distribution JSD (section-weighted for toccata+fugue forms)
     ref_deg = ref.get("distributions", {}).get("harmony_degrees", {})
     if ref_deg:
-        gen_deg = _extract_degree_distribution(score)
-        if gen_deg:
-            j = jsd(gen_deg, ref_deg)
-            pts = jsd_to_points(j) * 0.5
+        section_result = _compute_section_weighted_degree_jsd(score, ref_deg, form_name)
+        if section_result is not None:
+            overall_jsd, weighted_pts, detail = section_result
+            # Apply the half-weight factor that harmony_degree always uses.
+            pts = weighted_pts * 0.5
             sub_scores.append(SubScore(
                 name="harmony_degree_jsd",
-                value=j, reference=0.0, score=pts, method="jsd",
-                detail=f"JSD={j:.4f} (half-weight)",
+                value=overall_jsd, reference=0.0, score=pts, method="jsd",
+                detail=f"{detail} (half-weight)",
             ))
+        else:
+            # Default path: no section weighting (non-toccata forms or no boundary).
+            gen_deg = _extract_degree_distribution(score)
+            if gen_deg:
+                j = jsd(gen_deg, ref_deg)
+                pts = jsd_to_points(j) * 0.5
+                sub_scores.append(SubScore(
+                    name="harmony_degree_jsd",
+                    value=j, reference=0.0, score=pts, method="jsd",
+                    detail=f"JSD={j:.4f} (half-weight)",
+                ))
 
     # Cadence density z-score
     ref_cad = scalars.get("cadences_per_8_bars", {})
@@ -988,11 +1175,24 @@ def _score_counterpoint(
     ))
 
     # NCT type distribution JSD
+    # Both profiles must use identical category sets for meaningful comparison.
+    # Canonical categories: passing, neighbor, ornamental, other.
+    # Reference data may still carry a legacy "suspension" key (always 0.0);
+    # fold it into "other" for alignment.
     ref_nct = ref.get("distributions", {}).get("nct_types", {})
     if ref_nct:
         gen_nct = _extract_nct_distribution(score)
         if gen_nct:
-            j = jsd(gen_nct, ref_nct)
+            aligned_ref = dict(ref_nct)
+            # Fold legacy "suspension" into "other" if present.
+            if "suspension" in aligned_ref:
+                aligned_ref["other"] = aligned_ref.get("other", 0.0) + aligned_ref.pop("suspension")
+            # Ensure both profiles contain all canonical NCT categories.
+            _NCT_CATEGORIES = ("passing", "neighbor", "ornamental", "other")
+            for cat in _NCT_CATEGORIES:
+                aligned_ref.setdefault(cat, 0.0)
+                gen_nct.setdefault(cat, 0.0)
+            j = jsd(gen_nct, aligned_ref)
             pts = jsd_to_points(j)
             sub_scores.append(SubScore(
                 name="nct_distribution_jsd",
@@ -1068,41 +1268,77 @@ def _score_rhythm(
     return DimensionScore("rhythm", max(0, raw - penalty), True, sub_scores, penalty)
 
 
+def _get_texture_reference(
+    ref: Dict[str, Any],
+    form_name: str,
+) -> Tuple[Dict[str, float], Dict[str, Any]]:
+    """Get texture reference profile, using organ_pf for toccata+fugue forms.
+
+    For toccata_and_fugue and fantasia_and_fugue forms, the organ_pf texture
+    profile (more single/two-voice passages than pure fugue) is used instead
+    of the category default. This reflects the mixed texture of free
+    sections + fugue sections.
+
+    Args:
+        ref: The loaded reference category data.
+        form_name: Resolved form name.
+
+    Returns:
+        Tuple of (texture_distribution, avg_active_voices_scalar).
+    """
+    if form_name in _TOCCATA_FUGUE_FORMS:
+        return _ORGAN_PF_TEXTURE_REF, _ORGAN_PF_AVG_ACTIVE
+    ref_tex = ref.get("distributions", {}).get("texture", {})
+    av_scalar = ref.get("scalars", {}).get("avg_active_voices", {})
+    return ref_tex, av_scalar
+
+
 def _score_texture(
     score: Score,
     ref: Dict[str, Any],
     penalty: float,
+    form_name: str = "",
 ) -> DimensionScore:
-    """VI. Texture dimension (10%)."""
+    """VI. Texture dimension (10%).
+
+    For toccata_and_fugue forms, uses the organ_pf texture reference
+    (avg_active ~2.75) instead of organ_fugue (avg_active ~2.66), reflecting
+    the lighter texture of toccata free sections.
+    """
     if score.num_voices < 2:
         # Still score texture for single-voice works
         pass
 
     sub_scores: List[SubScore] = []
     tp = extract_texture_profile(score)
-    scalars = ref.get("scalars", {})
+
+    ref_tex, av_scalar = _get_texture_reference(ref, form_name)
 
     # Texture distribution JSD
-    ref_tex = ref.get("distributions", {}).get("texture", {})
     if tp["distribution"] and ref_tex:
         j = jsd(tp["distribution"], ref_tex)
         pts = jsd_to_points(j)
+        detail = f"JSD={j:.4f}"
+        if form_name in _TOCCATA_FUGUE_FORMS:
+            detail += " (organ_pf ref)"
         sub_scores.append(SubScore(
             name="texture_distribution_jsd",
             value=j, reference=0.0, score=pts, method="jsd",
-            detail=f"JSD={j:.4f}",
+            detail=detail,
         ))
 
     # Avg active voices z-score
-    av = scalars.get("avg_active_voices", {})
-    if av:
-        z = compute_zscore(tp["avg_active_voices"], av["mean"], av["std"])
+    if av_scalar:
+        z = compute_zscore(tp["avg_active_voices"], av_scalar["mean"], av_scalar["std"])
         pts = zscore_to_points(z)
+        detail = f"{tp['avg_active_voices']:.2f} (z={z:.2f})"
+        if form_name in _TOCCATA_FUGUE_FORMS:
+            detail += " (organ_pf ref)"
         sub_scores.append(SubScore(
             name="avg_active_voices_zscore",
-            value=tp["avg_active_voices"], reference=av["mean"], score=pts,
+            value=tp["avg_active_voices"], reference=av_scalar["mean"], score=pts,
             method="zscore",
-            detail=f"{tp['avg_active_voices']:.2f} (z={z:.2f})",
+            detail=detail,
         ))
 
     if not sub_scores:
@@ -1149,13 +1385,13 @@ def compute_score(
     dimensions["melody"] = _score_melody(
         score, ref, penalties.get("melody", 0))
     dimensions["harmony"] = _score_harmony(
-        score, ref, penalties.get("harmony", 0))
+        score, ref, penalties.get("harmony", 0), form_name=resolved_form)
     dimensions["counterpoint"] = _score_counterpoint(
         score, ref, penalties.get("counterpoint", 0), counterpoint_enabled)
     dimensions["rhythm"] = _score_rhythm(
         score, ref, penalties.get("rhythm", 0))
     dimensions["texture"] = _score_texture(
-        score, ref, penalties.get("texture", 0))
+        score, ref, penalties.get("texture", 0), form_name=resolved_form)
 
     # Compute weighted total with weight redistribution for non-applicable dims
     applicable_weight = 0.0
