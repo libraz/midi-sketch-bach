@@ -45,6 +45,7 @@ const char* bachNoteSourceToString(BachNoteSource source) {
     case BachNoteSource::ChaconneBass: return "chaconne_bass";
     case BachNoteSource::PreludeFiguration: return "prelude_figuration";
     case BachNoteSource::ToccataGesture: return "toccata_gesture";
+    case BachNoteSource::ToccataFigure: return "toccata_figure";
     case BachNoteSource::GrandPause: return "grand_pause";
     case BachNoteSource::CadenceApproach: return "cadence_approach";
   }
@@ -114,6 +115,9 @@ ProtectionLevel getProtectionLevel(BachNoteSource source) {
     case BachNoteSource::ChaconneBass:
     case BachNoteSource::ToccataGesture:
       return ProtectionLevel::Structural;
+
+    case BachNoteSource::ToccataFigure:
+      return ProtectionLevel::SemiImmutable;
 
     case BachNoteSource::GrandPause:
       return ProtectionLevel::Immutable;

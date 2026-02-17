@@ -390,7 +390,8 @@ inline std::vector<NoteEvent> coordinateVoices(
     return {getToccataLowPitch(v), getToccataHighPitch(v)};
   };
   config.immutable_sources = {BachNoteSource::PedalPoint,
-                              BachNoteSource::ToccataGesture};
+                              BachNoteSource::ToccataGesture,
+                              BachNoteSource::ToccataFigure};
   config.form_name = "Toccata";
   return bach::coordinateVoices(std::move(all_notes), config);
 }

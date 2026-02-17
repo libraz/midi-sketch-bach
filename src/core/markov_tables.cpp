@@ -260,6 +260,14 @@ const MarkovModel kViolinMarkov = {
     "Violin",
     reinterpret_cast<const PitchTransitionTable&>(markov_data::kViolinPitch),
     reinterpret_cast<const DurTransitionTable&>(markov_data::kViolinDur)};
+const MarkovModel kToccataUpperMarkov = {
+    "ToccataUpper",
+    reinterpret_cast<const PitchTransitionTable&>(markov_data::kToccataUpperPitch),
+    reinterpret_cast<const DurTransitionTable&>(markov_data::kToccataUpperDur)};
+const MarkovModel kToccataPedalMarkov = {
+    "ToccataPedal",
+    reinterpret_cast<const PitchTransitionTable&>(markov_data::kToccataPedalPitch),
+    reinterpret_cast<const DurTransitionTable&>(markov_data::kToccataPedalDur)};
 
 const VerticalIntervalTable kFugueVerticalTable =
     reinterpret_cast<const VerticalIntervalTable&>(markov_data::kFugueVertical);

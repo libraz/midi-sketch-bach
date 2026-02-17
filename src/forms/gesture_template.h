@@ -60,7 +60,7 @@ struct ArchetypeFigureHint {
 /// @brief Get vocabulary figure hints for a ToccataArchetype.
 ///
 /// Maps each archetype to characteristic Bach melodic figures:
-/// - Dramaticus: descending figures (kDescRun4, kChromaticDesc, kTurnDown)
+/// - Dramaticus: descending 5-note figures (kDescRun5, kBrechungDesc, kTrill5)
 /// - Perpetuus: oscillating figures (kUpperNbr, kLowerNbr, kAscRun4)
 /// - Concertato: leap-step figures (kLeapUpStepDown, kEscapeDown, kCambiataDown)
 /// - Sectionalis: turn figures (kTurnUp, kStepDownLeapUp, kLeapRecovery)

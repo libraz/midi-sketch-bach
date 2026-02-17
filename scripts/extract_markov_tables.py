@@ -5,11 +5,13 @@ Reads reference JSON files from data/reference/BWV*.json and computes pitch
 and duration Markov transition tables conditioned on musical context. Outputs
 C++ constexpr tables suitable for inclusion in the bach namespace.
 
-Four models are generated:
+Six models are generated:
   - FugueUpper: Upper voices from organ fugues, WTC, trio sonatas
   - FuguePedal: Bass/pedal voices from the same categories
   - Cello: Solo cello suites and lute suites
   - Violin: Solo violin sonatas and partitas
+  - ToccataUpper: Upper voices from organ preludes/toccatas/fantasias (non-fugue)
+  - ToccataPedal: Bass/pedal voices from the same non-fugue organ works
 
 Usage:
     python3 scripts/extract_markov_tables.py
@@ -39,6 +41,10 @@ CELLO_CATEGORIES = frozenset({
 VIOLIN_CATEGORIES = frozenset({
     "solo_violin_sonata", "solo_violin_partita",
 })
+TOCCATA_CATEGORIES = frozenset({"organ_pf"})
+
+# Movement-level filtering: exclude fugue movements within organ_pf
+TOCCATA_EXCLUDE_SUFFIXES = {"_fugue"}
 
 # Pedal/bass role identifiers
 PEDAL_ROLES = frozenset({"pedal", "v4"})
@@ -945,8 +951,10 @@ def process_file(
     is_fugue = category in FUGUE_CATEGORIES
     is_cello = category in CELLO_CATEGORIES
     is_violin = category in VIOLIN_CATEGORIES
+    is_toccata = category in TOCCATA_CATEGORIES and not any(
+        filepath.stem.endswith(suffix) for suffix in TOCCATA_EXCLUDE_SUFFIXES)
 
-    if not (is_fugue or is_cello or is_violin):
+    if not (is_fugue or is_cello or is_violin or is_toccata):
         return
 
     # Get global key from key_signatures.json for initial key estimation fallback
@@ -1004,6 +1012,13 @@ def process_file(
         if is_violin:
             counters["Violin"].add_track(notes, key_segments, ts_map)
 
+        if is_toccata:
+            is_pedal = is_pedal_track(role, track_idx, voice_count, total_tracks)
+            if is_pedal:
+                counters["ToccataPedal"].add_track(notes, key_segments, ts_map)
+            else:
+                counters["ToccataUpper"].add_track(notes, key_segments, ts_map)
+
     # Vertical interval extraction for fugues with 2+ voices
     if is_fugue and vert_counter is not None and voice_count >= 2 and len(vert_all_tracks) >= 2:
         # Use key segments from the first track for vertical analysis
@@ -1032,6 +1047,9 @@ def process_file(
         counters["Cello"].file_count += 1
     if is_violin:
         counters["Violin"].file_count += 1
+    if is_toccata:
+        counters["ToccataUpper"].file_count += 1
+        counters["ToccataPedal"].file_count += 1
 
 
 # ---------------------------------------------------------------------------
@@ -1171,12 +1189,14 @@ def generate_cpp_output(
     sections.append("namespace markov_data {")
     sections.append("")
 
-    model_order = ["FugueUpper", "FuguePedal", "Cello", "Violin"]
+    model_order = ["FugueUpper", "FuguePedal", "Cello", "Violin", "ToccataUpper", "ToccataPedal"]
     cpp_names = {
         "FugueUpper": "kFugueUpper",
         "FuguePedal": "kFuguePedal",
         "Cello": "kCello",
         "Violin": "kViolin",
+        "ToccataUpper": "kToccataUpper",
+        "ToccataPedal": "kToccataPedal",
     }
 
     for model_name in model_order:
@@ -1328,6 +1348,8 @@ def main() -> int:
         "FuguePedal": TransitionCounter("FuguePedal"),
         "Cello": TransitionCounter("Cello"),
         "Violin": TransitionCounter("Violin"),
+        "ToccataUpper": TransitionCounter("ToccataUpper"),
+        "ToccataPedal": TransitionCounter("ToccataPedal"),
     }
     vert_counter = VerticalTransitionCounter("FugueVertical")
 
@@ -1345,7 +1367,7 @@ def main() -> int:
             skipped_count += 1
             continue
 
-        all_categories = FUGUE_CATEGORIES | CELLO_CATEGORIES | VIOLIN_CATEGORIES
+        all_categories = FUGUE_CATEGORIES | CELLO_CATEGORIES | VIOLIN_CATEGORIES | TOCCATA_CATEGORIES
         if category not in all_categories:
             skipped_count += 1
             continue
@@ -1357,15 +1379,23 @@ def main() -> int:
     print("", file=sys.stderr)
     print("Files per category:", file=sys.stderr)
     for cat in sorted(category_counts):
-        model = "Fugue" if cat in FUGUE_CATEGORIES else (
-            "Cello" if cat in CELLO_CATEGORIES else "Violin"
-        )
+        models = []
+        if cat in FUGUE_CATEGORIES:
+            models.append("Fugue")
+        if cat in CELLO_CATEGORIES:
+            models.append("Cello")
+        if cat in VIOLIN_CATEGORIES:
+            models.append("Violin")
+        if cat in TOCCATA_CATEGORIES:
+            models.append("Toccata (non-fugue movements)")
+        model = ", ".join(models) if models else "Unknown"
         print(f"  {cat}: {category_counts[cat]} files -> {model}", file=sys.stderr)
     print(f"  (skipped {skipped_count} files from other categories)", file=sys.stderr)
 
     print("", file=sys.stderr)
     print("Transition counts:", file=sys.stderr)
-    for model_name in ["FugueUpper", "FuguePedal", "Cello", "Violin"]:
+    for model_name in ["FugueUpper", "FuguePedal", "Cello", "Violin",
+                        "ToccataUpper", "ToccataPedal"]:
         counter = counters[model_name]
         print(
             f"  {model_name}: {counter.file_count} files, {counter.track_count} tracks, "
@@ -1385,7 +1415,8 @@ def main() -> int:
     print("Row sum verification:", file=sys.stderr)
     all_ok = True
 
-    for model_name in ["FugueUpper", "FuguePedal", "Cello", "Violin"]:
+    for model_name in ["FugueUpper", "FuguePedal", "Cello", "Violin",
+                        "ToccataUpper", "ToccataPedal"]:
         counter = counters[model_name]
 
         pitch_norm = smooth_and_normalize(counter.pitch_counts, SMOOTH_K)

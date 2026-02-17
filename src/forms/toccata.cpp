@@ -25,6 +25,7 @@
 #include "counterpoint/vertical_safe.h"
 #include "forms/form_utils.h"
 #include "forms/gesture_template.h"
+#include "forms/toccata_figuration.h"
 #include "forms/toccata_internal.h"
 #include "harmony/chord_types.h"
 #include "harmony/key.h"
@@ -97,6 +98,40 @@ constexpr float kDramaticusFallbackProportions[8] = {
 // Minimum bars per phase (weighted guarantee).
 constexpr Tick kDramaticusMinBars[8] = {1, 1, 2, 2, 1, 2, 2, 2};
 
+// ---------------------------------------------------------------------------
+// Figuration engine wrapper
+// ---------------------------------------------------------------------------
+
+// Helper to create figuration context and generate a figured passage for a voice.
+std::vector<NoteEvent> generateFigured(
+    const HarmonicTimeline& timeline,
+    const KeySignature& key_sig,
+    int phase_idx,          // 0-7 for phases A-H
+    uint8_t voice,          // 0 or 1
+    Tick start_tick, Tick end_tick,
+    std::mt19937& rng) {
+  using namespace toccata_figuration;
+  const auto& profile = getDramaticusPhaseProfile(phase_idx);
+  ScaleType sc_type = key_sig.is_minor ? ScaleType::HarmonicMinor : ScaleType::Major;
+
+  uint8_t ceiling = (voice < 2) ? profile.voice_ceiling[voice]
+                                : toccata_internal::getToccataHighPitch(voice);
+  ToccataFigurationContext ctx;
+  ctx.profile = &profile;
+  ctx.markov_model = &kToccataUpperMarkov;
+  ctx.key = key_sig.tonic;
+  ctx.scale = sc_type;
+  ctx.low_pitch = toccata_internal::getToccataLowPitch(voice);
+  ctx.high_pitch = std::min(toccata_internal::getToccataHighPitch(voice), ceiling);
+  ctx.energy = kDramaticusEnergy[phase_idx];
+  ctx.mel_state = MelodicState{};
+  ctx.mel_state.contour.shape = profile.contour;
+  ctx.prev_degree_step = 0;
+
+  auto result = generateFigurationSpan(ctx, start_tick, end_tick, voice,
+                                        timeline, rng);
+  return std::move(result.notes);
+}
 
 // ---------------------------------------------------------------------------
 // Track creation
@@ -405,6 +440,9 @@ void generateBlockChordNotes(const KeySignature& key_sig, Tick tick, Tick end_ti
 }
 
 /// @brief Generate arpeggio flourish on voice 0 using chord tones.
+/// @note Currently unused by Dramaticus (replaced by figuration engine).
+///       Retained for other archetypes (Perpetuus, Concertato, Sectionalis).
+[[maybe_unused]]
 void generateArpeggioFlourish(const HarmonicTimeline& timeline,
                               Tick start_tick, Tick end_tick,
                               std::vector<NoteEvent>& notes,
@@ -522,7 +560,8 @@ std::vector<NoteEvent> generateOpeningGesture(const HarmonicTimeline& timeline,
     // Arpeggio flourish through remaining opening (voice 0 coexists with
     // pedal solo on voice 2 in the final bars).
     if (tick < end_tick) {
-      generateArpeggioFlourish(timeline, tick, end_tick, notes, rng);
+      auto fig = generateFigured(timeline, key_sig, 0, 0, tick, end_tick, rng);
+      notes.insert(notes.end(), fig.begin(), fig.end());
     }
   } else if (opening_bars >= 2) {
     // Simplified: single wave + arpeggio
@@ -531,11 +570,13 @@ std::vector<NoteEvent> generateOpeningGesture(const HarmonicTimeline& timeline,
     tick = std::min(tick + kGrandPauseDuration, end_tick);
 
     if (tick < end_tick) {
-      generateArpeggioFlourish(timeline, tick, end_tick, notes, rng);
+      auto fig = generateFigured(timeline, key_sig, 0, 0, tick, end_tick, rng);
+      notes.insert(notes.end(), fig.begin(), fig.end());
     }
   } else {
-    // Very short: just arpeggio
-    generateArpeggioFlourish(timeline, start_tick, end_tick, notes, rng);
+    // Very short: just arpeggio figuration
+    auto fig = generateFigured(timeline, key_sig, 0, 0, start_tick, end_tick, rng);
+    notes.insert(notes.end(), fig.begin(), fig.end());
   }
 
   return notes;
@@ -546,6 +587,8 @@ std::vector<NoteEvent> generateOpeningGesture(const HarmonicTimeline& timeline,
 // ---------------------------------------------------------------------------
 
 /// @brief Select a duration from the recitative weighted table.
+/// @note Currently unused by Dramaticus (replaced by figuration engine).
+[[maybe_unused]]
 Tick selectRecitDuration(std::mt19937& rng) {
   float roll = rng::rollFloat(rng, 0.0f, 1.0f);
   if (roll < 0.10f) return kThirtySecondNote;
@@ -558,6 +601,8 @@ Tick selectRecitDuration(std::mt19937& rng) {
 
 /// @brief Select a signed scale-step interval for recitative melody.
 /// @return Number of scale steps (positive = ascending, negative = descending).
+/// @note Currently unused by Dramaticus (replaced by figuration engine).
+[[maybe_unused]]
 int selectRecitScaleStep(std::mt19937& rng, bool ascending) {
   float roll = rng::rollFloat(rng, 0.0f, 1.0f);
   int magnitude;
@@ -851,30 +896,10 @@ std::vector<NoteEvent> generateEchoCollapse(const HarmonicTimeline& timeline,
   auto chord_tones_v0 = collectChordTonesInRange(harm.chord, low0, high0);
   if (chord_tones_v1.empty() || chord_tones_v0.empty()) return notes;
 
-  // Sub-section 1 (~40%): sparse motifs on voice 1 with rests.
+  // Sub-section 1 (~40%): sparse figuration on voice 1.
   {
-    Tick tick = start_tick;
-    size_t tone_idx = chord_tones_v1.size() / 2;
-
-    while (tick < sparse_end) {
-      Tick rest_dur = rng::rollProbability(rng, 0.5f) ? kQuarterNote : kHalfNote;
-      tick += rest_dur;
-      if (tick >= sparse_end) break;
-
-      int motif_len = rng::rollRange(rng, 2, 3);
-      for (int ni = 0; ni < motif_len && tick < sparse_end; ++ni) {
-        Tick dur = std::min(kEighthNote, sparse_end - tick);
-        if (dur == 0) break;
-        notes.push_back(makeNote(tick, dur, chord_tones_v1[tone_idx], 1));
-        tick += dur;
-
-        if (rng::rollProbability(rng, 0.6f)) {
-          if (tone_idx + 1 < chord_tones_v1.size()) ++tone_idx;
-        } else {
-          if (tone_idx > 0) --tone_idx;
-        }
-      }
-    }
+    auto fig = generateFigured(timeline, key_sig, 1, 1, start_tick, sparse_end, rng);
+    notes.insert(notes.end(), fig.begin(), fig.end());
   }
 
   // Sub-section 2 (~30%): sustained chord tones alternating voice 0 and 1.
@@ -952,12 +977,6 @@ std::vector<NoteEvent> generateRecitativeExpansion(const HarmonicTimeline& timel
   auto scale1 = getScaleTones(key_sig.tonic, key_sig.is_minor, low1, high1);
   if (scale0.empty() || scale1.empty()) return notes;
 
-  size_t mel_idx0 = scale0.size() / 2;
-  size_t mel_idx1 = scale1.size() / 2;
-  bool ascending = true;
-  MelodicState recit_mel_state;
-  uint8_t prev_recit_pitch = scale0[mel_idx0];
-
   ScaleType sc_type = key_sig.is_minor ? ScaleType::HarmonicMinor : ScaleType::Major;
 
   for (Tick bar = 0; bar < phase_bars; ++bar) {
@@ -982,46 +1001,19 @@ std::vector<NoteEvent> generateRecitativeExpansion(const HarmonicTimeline& timel
     // Swap melody voice every 2 bars for manual contrast.
     uint8_t melody_voice = ((bar / 2) % 2 == 0) ? 0 : 1;
     uint8_t chord_voice = 1 - melody_voice;
-    const auto& mel_scale = (melody_voice == 0) ? scale0 : scale1;
-    size_t& mel_idx = (melody_voice == 0) ? mel_idx0 : mel_idx1;
     uint8_t ch_low = (chord_voice == 0) ? low0 : low1;
     uint8_t ch_high = (chord_voice == 0) ? high0 : high1;
 
-    // Melody line: scale-indexed movement using recit helpers.
-    Tick tick = bar_start;
-    bool prev_was_forced = false;
-    while (tick < bar_end) {
-      Tick dur = selectRecitDuration(rng);
-      if (tick + dur > bar_end) dur = bar_end - tick;
-      if (dur == 0) break;
-
-      int step = selectRecitScaleStep(rng, ascending);
-      int new_idx = static_cast<int>(mel_idx) + step;
-      new_idx = std::max(0, std::min(new_idx,
-                                     static_cast<int>(mel_scale.size()) - 1));
-      uint8_t old_pitch = prev_recit_pitch;
-      mel_idx = static_cast<size_t>(new_idx);
-
-      notes.push_back(makeNote(tick, dur, mel_scale[mel_idx], melody_voice));
-      updateMelodicState(recit_mel_state, old_pitch, mel_scale[mel_idx]);
-      prev_recit_pitch = mel_scale[mel_idx];
-      tick += dur;
-
-      // Post-leap contrary enforcement (>= P4).
-      int semitones = std::abs(static_cast<int>(mel_scale[mel_idx]) -
-                               static_cast<int>(old_pitch));
-      if (semitones >= 5 && !prev_was_forced) {
-        ascending = !ascending;
-        prev_was_forced = true;
-      } else {
-        ascending = (chooseMelodicDirection(recit_mel_state, rng) > 0);
-        prev_was_forced = false;
-      }
+    // Melody line: figuration with free rhythm (recitative).
+    {
+      auto fig = generateFigured(timeline, key_sig, 2, melody_voice,
+                                  bar_start, bar_end, rng);
+      notes.insert(notes.end(), fig.begin(), fig.end());
     }
 
     // Chord layer: sustained diatonic tones.
     const auto& ch_scale = (chord_voice == 0) ? scale0 : scale1;
-    tick = bar_start;
+    Tick tick = bar_start;
     while (tick < bar_end) {
       const HarmonicEvent& event = timeline.getAt(tick);
       auto chord_tones = getChordTones(event.chord, 3);
@@ -1127,29 +1119,8 @@ std::vector<NoteEvent> generateHarmonicBreak(const HarmonicTimeline& timeline,
     auto dom_tones_v0 = collectChordTonesInRange(dom_event.chord, low0, high0);
     if (dom_tones_v0.empty()) return notes;
 
-    Tick tick = pause_end;
-    size_t arp_idx = 0;
-    bool arp_ascending = true;
-
-    while (tick < end_tick) {
-      Tick dur = std::min(kQuarterNote, end_tick - tick);
-      if (dur == 0) break;
-
-      notes.push_back(makeNote(tick, dur, dom_tones_v0[arp_idx], 0));
-      tick += dur;
-
-      if (arp_ascending) {
-        if (arp_idx + 1 < dom_tones_v0.size()) ++arp_idx;
-        else { arp_ascending = false; if (arp_idx > 0) --arp_idx; }
-      } else {
-        if (arp_idx > 0) --arp_idx;
-        else { arp_ascending = true; if (arp_idx + 1 < dom_tones_v0.size()) ++arp_idx; }
-      }
-
-      if (rng::rollProbability(rng, 0.25f)) {
-        arp_ascending = !arp_ascending;
-      }
-    }
+    auto fig = generateFigured(timeline, key_sig, 4, 0, pause_end, end_tick, rng);
+    notes.insert(notes.end(), fig.begin(), fig.end());
 
     // Voice 1 sustained chord tone in the final bar.
     Tick final_bar_start = end_tick - kTicksPerBar;
@@ -1175,6 +1146,7 @@ std::vector<NoteEvent> generateDominantObsession(const HarmonicTimeline& timelin
                                                  uint8_t num_voices,
                                                  Tick start_tick, Tick end_tick,
                                                  std::mt19937& rng) {
+  (void)num_voices;  // Reserved for future multi-voice sub-phases.
   std::vector<NoteEvent> notes;
   Tick phase_dur = end_tick - start_tick;
   if (phase_dur == 0) return notes;
@@ -1195,151 +1167,36 @@ std::vector<NoteEvent> generateDominantObsession(const HarmonicTimeline& timelin
   auto scale1 = getScaleTones(key_sig.tonic, key_sig.is_minor, low1, high1);
   if (scale0.empty() || scale1.empty()) return notes;
 
-  // Sub-phase 1: V assertion -- 8th-note scale runs, contrary motion.
+  // Sub-phase 1: V assertion -- figuration with chord attraction.
   {
-    const HarmonicEvent& evt = timeline.getAt(start_tick);
-    auto ct0 = collectChordTonesInRange(evt.chord, low0, high0);
-    auto ct1 = collectChordTonesInRange(evt.chord, low1, high1);
-    if (ct0.empty()) ct0 = scale0;
-    if (ct1.empty()) ct1 = scale1;
-
-    size_t idx0 = scale0.size() / 3;
-    size_t idx1 = scale1.size() * 2 / 3;
-
-    Tick tick = start_tick;
-    while (tick < sp1_end) {
-      Tick dur = std::min(kEighthNote, sp1_end - tick);
-      if (dur == 0) break;
-
-      notes.push_back(makeNote(tick, dur, scale0[idx0], 0));
-      notes.push_back(makeNote(tick, dur, scale1[idx1], 1));
-      tick += dur;
-
-      if (idx0 + 1 < scale0.size()) {
-        ++idx0;
-      } else {
-        idx0 = findClosestToneIndex(scale0, ct0[ct0.size() / 3]);
-      }
-
-      if (idx1 > 0) {
-        --idx1;
-      } else {
-        idx1 = findClosestToneIndex(scale1, ct1[ct1.size() * 2 / 3]);
-      }
-    }
+    auto fig0 = generateFigured(timeline, key_sig, 6, 0, start_tick, sp1_end, rng);
+    auto fig1 = generateFigured(timeline, key_sig, 6, 1, start_tick, sp1_end, rng);
+    notes.insert(notes.end(), fig0.begin(), fig0.end());
+    notes.insert(notes.end(), fig1.begin(), fig1.end());
   }
 
-  // Sub-phase 2: viio7/V color -- 16th-note arpeggios on diminished chord.
+  // Sub-phase 2: viio7/V color -- figuration with high tension.
   {
-    const HarmonicEvent& evt = timeline.getAt(sp1_end);
-    auto dim0 = collectChordTonesInRange(evt.chord, low0, high0);
-    auto dim1 = collectChordTonesInRange(evt.chord, low1, high1);
-    if (dim0.empty()) dim0 = scale0;
-    if (dim1.empty()) dim1 = scale1;
-
-    size_t idx0 = 0;
-    size_t idx1 = dim1.size() > 1 ? dim1.size() - 1 : 0;
-    bool asc0 = true;
-    bool asc1 = false;
-
-    Tick tick = sp1_end;
-    while (tick < sp2_end) {
-      Tick dur = std::min(kSixteenthNote, sp2_end - tick);
-      if (dur == 0) break;
-
-      notes.push_back(makeNote(tick, dur, dim0[idx0], 0));
-      notes.push_back(makeNote(tick, dur, dim1[idx1], 1));
-      tick += dur;
-
-      if (asc0) {
-        if (idx0 + 1 < dim0.size()) ++idx0;
-        else { asc0 = false; if (idx0 > 0) --idx0; }
-      } else {
-        if (idx0 > 0) --idx0;
-        else { asc0 = true; if (idx0 + 1 < dim0.size()) ++idx0; }
-      }
-
-      if (asc1) {
-        if (idx1 + 1 < dim1.size()) ++idx1;
-        else { asc1 = false; if (idx1 > 0) --idx1; }
-      } else {
-        if (idx1 > 0) --idx1;
-        else { asc1 = true; if (idx1 + 1 < dim1.size()) ++idx1; }
-      }
-    }
+    auto fig0 = generateFigured(timeline, key_sig, 6, 0, sp1_end, sp2_end, rng);
+    auto fig1 = generateFigured(timeline, key_sig, 6, 1, sp1_end, sp2_end, rng);
+    notes.insert(notes.end(), fig0.begin(), fig0.end());
+    notes.insert(notes.end(), fig1.begin(), fig1.end());
   }
 
-  // Sub-phase 3: V return -- 16th-note ascending scale runs toward ceiling.
+  // Sub-phase 3: V return -- ascending figuration toward ceiling.
   {
-    const HarmonicEvent& evt = timeline.getAt(sp2_end);
-    auto ct1 = collectChordTonesInRange(evt.chord, low1, high1);
-    if (ct1.empty()) ct1 = scale1;
-
-    size_t idx0 = scale0.size() / 2;
-    size_t ct_idx1 = ct1.size() / 2;
-
-    Tick tick = sp2_end;
-    Tick next_chord_change = sp2_end + kHalfNote;
-    while (tick < sp3_end) {
-      Tick dur = std::min(kSixteenthNote, sp3_end - tick);
-      if (dur == 0) break;
-
-      notes.push_back(makeNote(tick, dur, scale0[idx0], 0));
-
-      if (tick == sp2_end || tick >= next_chord_change) {
-        Tick hold_dur = std::min(kQuarterNote, sp3_end - tick);
-        if (hold_dur > 0) {
-          notes.push_back(makeNote(tick, hold_dur, ct1[ct_idx1], 1));
-          ct_idx1 = (ct_idx1 + 1) % ct1.size();
-          next_chord_change = tick + hold_dur;
-        }
-      }
-
-      tick += dur;
-
-      if (idx0 + 1 < scale0.size()) {
-        ++idx0;
-      } else {
-        idx0 = scale0.size() * 2 / 5;
-      }
-    }
+    auto fig0 = generateFigured(timeline, key_sig, 6, 0, sp2_end, sp3_end, rng);
+    auto fig1 = generateFigured(timeline, key_sig, 6, 1, sp2_end, sp3_end, rng);
+    notes.insert(notes.end(), fig0.begin(), fig0.end());
+    notes.insert(notes.end(), fig1.begin(), fig1.end());
   }
 
-  // Sub-phase 4: V7 intensification -- parallel 3rds in 16th notes.
+  // Sub-phase 4: V7 intensification -- figuration with maximum density.
   {
-    constexpr int kParallelSteps = 2;
-    size_t idx0 = scale0.size() / 2;
-    bool asc0 = true;
-
-    Tick tick = sp3_end;
-    while (tick < sp4_end) {
-      Tick dur = std::min(kSixteenthNote, sp4_end - tick);
-      if (dur == 0) break;
-
-      uint8_t pitch0 = scale0[idx0];
-      uint8_t pitch1 = pitch0;
-      for (size_t s1i = 0; s1i < scale1.size(); ++s1i) {
-        if (scale1[s1i] >= pitch0 &&
-            s1i >= static_cast<size_t>(kParallelSteps)) {
-          pitch1 = scale1[s1i - kParallelSteps];
-          break;
-        }
-      }
-      pitch1 = clampPitch(static_cast<int>(pitch1), low1, high1);
-
-      notes.push_back(makeNote(tick, dur, pitch0, 0));
-      notes.push_back(makeNote(tick, dur, pitch1, 1));
-      tick += dur;
-
-      int step = rng::rollProbability(rng, 0.15f) ? 2 : 1;
-      if (asc0) {
-        if (idx0 + step < scale0.size()) idx0 += step;
-        else { asc0 = false; if (idx0 >= static_cast<size_t>(step)) idx0 -= step; }
-      } else {
-        if (idx0 >= static_cast<size_t>(step)) idx0 -= step;
-        else { asc0 = true; if (idx0 + step < scale0.size()) idx0 += step; }
-      }
-    }
+    auto fig0 = generateFigured(timeline, key_sig, 6, 0, sp3_end, sp4_end, rng);
+    auto fig1 = generateFigured(timeline, key_sig, 6, 1, sp3_end, sp4_end, rng);
+    notes.insert(notes.end(), fig0.begin(), fig0.end());
+    notes.insert(notes.end(), fig1.begin(), fig1.end());
   }
 
   // Sub-phase 5: V sustained -- held dominant chord tones (tension plateau).
@@ -1385,69 +1242,20 @@ std::vector<NoteEvent> generateFinalExplosion(const HarmonicTimeline& timeline,
   Tick sweep_end = start_tick + phase_dur * 70 / 100;
   Tick trans_end = start_tick + phase_dur * 80 / 100;
 
-  // Sub-phase 1: V7 arpeggio sweep (32nd notes ascending).
+  // Sub-phase 1: V7 arpeggio sweep -- figuration at maximum density.
   {
-    const HarmonicEvent& evt = timeline.getAt(start_tick);
-    auto v7_tones0 = collectChordTonesInRange(evt.chord, low0, high0);
-    auto v7_tones1 = collectChordTonesInRange(evt.chord, low1, high1);
-    if (v7_tones0.empty()) {
-      uint8_t dom_root = static_cast<uint8_t>((tpc + 7) % 12);
-      v7_tones0 = collectChordTonesInRange(
-          Chord{ChordDegree::V, ChordQuality::Dominant7, dom_root, 0},
-          low0, high0);
-    }
-    if (v7_tones1.empty()) {
-      uint8_t dom_root = static_cast<uint8_t>((tpc + 7) % 12);
-      v7_tones1 = collectChordTonesInRange(
-          Chord{ChordDegree::V, ChordQuality::Dominant7, dom_root, 0},
-          low1, high1);
-    }
-
-    size_t idx0 = 0;
-    size_t idx1 = 0;
-
-    Tick tick = start_tick;
-    while (tick < sweep_end) {
-      Tick dur = std::min(kThirtySecondNote, sweep_end - tick);
-      if (dur == 0) break;
-
-      if (!v7_tones0.empty()) {
-        notes.push_back(makeNote(tick, dur, v7_tones0[idx0], 0));
-      }
-      if (!v7_tones1.empty()) {
-        notes.push_back(makeNote(tick, dur, v7_tones1[idx1], 1));
-      }
-      tick += dur;
-
-      if (!v7_tones0.empty()) {
-        idx0 = (idx0 + 1 < v7_tones0.size()) ? idx0 + 1 : 0;
-      }
-      if (!v7_tones1.empty()) {
-        idx1 = (idx1 + 1 < v7_tones1.size()) ? idx1 + 1 : 0;
-      }
-    }
+    auto fig0 = generateFigured(timeline, key_sig, 7, 0, start_tick, sweep_end, rng);
+    auto fig1 = generateFigured(timeline, key_sig, 7, 1, start_tick, sweep_end, rng);
+    notes.insert(notes.end(), fig0.begin(), fig0.end());
+    notes.insert(notes.end(), fig1.begin(), fig1.end());
   }
 
-  // Sub-phase 2: descending 16th-note scale transition.
+  // Sub-phase 2: descending figuration transition.
   {
-    auto sc0 = getScaleTones(key_sig.tonic, key_sig.is_minor, low0, high0);
-    auto sc1 = getScaleTones(key_sig.tonic, key_sig.is_minor, low1, high1);
-
-    size_t idx0 = sc0.empty() ? 0 : sc0.size() - 1;
-    size_t idx1 = sc1.empty() ? 0 : sc1.size() - 1;
-
-    Tick tick = sweep_end;
-    while (tick < trans_end) {
-      Tick dur = std::min(kSixteenthNote, trans_end - tick);
-      if (dur == 0) break;
-
-      if (!sc0.empty()) notes.push_back(makeNote(tick, dur, sc0[idx0], 0));
-      if (!sc1.empty()) notes.push_back(makeNote(tick, dur, sc1[idx1], 1));
-      tick += dur;
-
-      if (idx0 > 0) --idx0;
-      if (idx1 > 0) --idx1;
-    }
+    auto fig0 = generateFigured(timeline, key_sig, 7, 0, sweep_end, trans_end, rng);
+    auto fig1 = generateFigured(timeline, key_sig, 7, 1, sweep_end, trans_end, rng);
+    notes.insert(notes.end(), fig0.begin(), fig0.end());
+    notes.insert(notes.end(), fig1.begin(), fig1.end());
   }
 
   // Sub-phase 3: final I Major block chord (Picardy third).

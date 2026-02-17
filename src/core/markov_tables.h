@@ -116,6 +116,8 @@ extern const MarkovModel kFugueUpperMarkov;
 extern const MarkovModel kFuguePedalMarkov;
 extern const MarkovModel kCelloMarkov;
 extern const MarkovModel kViolinMarkov;
+extern const MarkovModel kToccataUpperMarkov;
+extern const MarkovModel kToccataPedalMarkov;
 extern const VerticalIntervalTable kFugueVerticalTable;
 
 // --- Utility functions ---

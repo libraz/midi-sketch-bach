@@ -88,7 +88,7 @@ std::vector<int> extractGestureCoreIntervals(
 ArchetypeFigureHint getArchetypeFigures(ToccataArchetype arch) {
   switch (arch) {
     case ToccataArchetype::Dramaticus:
-      return {{&kDescRun4, &kChromaticDesc, &kTurnDown}, 3, 0.40f};
+      return {{&kDescRun5, &kBrechungDesc, &kTrill5}, 3, 0.50f};
     case ToccataArchetype::Perpetuus:
       return {{&kUpperNbr, &kLowerNbr, &kAscRun4}, 3, 0.30f};
     case ToccataArchetype::Concertato:

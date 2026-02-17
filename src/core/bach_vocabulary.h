@@ -325,6 +325,52 @@ inline constexpr MelodicFigure kWideUpperOsc = {
     4, "BWV578:v1:b28"};
 
 // ---------------------------------------------------------------------------
+// Toccata / prelude-fantasia figures — 5-note patterns
+// ---------------------------------------------------------------------------
+
+// 23. Extended trill oscillation (organ_pf: 360 occ, 34 works)
+inline constexpr int8_t kTrill5_st[] = {1, -1, 1, -1};
+inline constexpr MelodicFigure kTrill5 = {
+    "trill_5", IntervalMode::Semitone, false,
+    kTrill5_st, nullptr, detail::kEqR5, detail::kEqO5,
+    5, "BWV565:v1:b3, BWV538_toccata:v1:b8"};
+
+// 24. Wide oscillation 5-note (organ_pf: 315 occ, 25 works)
+inline constexpr int8_t kWideOsc5_st[] = {2, -2, 2, -2};
+inline constexpr MelodicFigure kWideOsc5 = {
+    "wide_osc_5", IntervalMode::Semitone, false,
+    kWideOsc5_st, nullptr, detail::kEqR5, detail::kEqO5,
+    5, "BWV565:v1:b9, BWV531_prelude:v1:b15"};
+
+// 25. Descending scale run 5-note (organ_pf: 243 occ, 39 works)
+inline constexpr DegreeInterval kDescRun5_dg[] = {{-1, 0}, {-1, 0}, {-1, 0}, {-1, 0}};
+inline constexpr MelodicFigure kDescRun5 = {
+    "desc_run_5", IntervalMode::Degree, true,
+    nullptr, kDescRun5_dg, detail::kEqR5, detail::kEqO5,
+    5, "BWV565:v1:b12, BWV538_toccata:v1:b22"};
+
+// 26. Ascending scale run 5-note (organ_pf: 162 occ, 32 works)
+inline constexpr DegreeInterval kAscRun5_dg[] = {{1, 0}, {1, 0}, {1, 0}, {1, 0}};
+inline constexpr MelodicFigure kAscRun5 = {
+    "asc_run_5", IntervalMode::Degree, true,
+    nullptr, kAscRun5_dg, detail::kEqR5, detail::kEqO5,
+    5, "BWV565:v1:b18, BWV537_fantasia:v1:b5"};
+
+// 27. Broken descent (Brechung): leap-step-leap-step (organ_pf: 125 occ, 23 works)
+inline constexpr DegreeInterval kBrechungDesc_dg[] = {{-3, 0}, {1, 0}, {-2, 0}, {1, 0}};
+inline constexpr MelodicFigure kBrechungDesc = {
+    "brechung_desc", IntervalMode::Degree, true,
+    nullptr, kBrechungDesc_dg, detail::kEqR5, detail::kEqO5,
+    5, "BWV565:v1:b15, BWV542_fantasia:v1:b8"};
+
+// 28. Turn-up neighbor: step+step-step+step (organ_pf: 121 occ, 22 works)
+inline constexpr DegreeInterval kTurnUpNbr_dg[] = {{1, 0}, {1, 0}, {-1, 0}, {1, 0}};
+inline constexpr MelodicFigure kTurnUpNbr = {
+    "turn_up_nbr", IntervalMode::Degree, true,
+    nullptr, kTurnUpNbr_dg, detail::kEqR5, detail::kEqO5,
+    5, "BWV537_fantasia:v1:b12, BWV531_prelude:v1:b7"};
+
+// ---------------------------------------------------------------------------
 // Aggregate figure tables
 // ---------------------------------------------------------------------------
 
@@ -335,8 +381,10 @@ inline constexpr const MelodicFigure* kCommonFigures[] = {
     &kCambiataNbr, &kLeapRecovery, &kChromaticDesc, &kLeapDownAscend,
     &kMordent, &kInvMordent, &kTrill3, &kInvTrill3,
     &kWideLowerOsc, &kWideUpperOsc,
+    &kTrill5, &kWideOsc5, &kDescRun5, &kAscRun5,
+    &kBrechungDesc, &kTurnUpNbr,
 };
-inline constexpr int kCommonFigureCount = 22;
+inline constexpr int kCommonFigureCount = 28;
 
 // ---------------------------------------------------------------------------
 // Rhythm cells — universal patterns across all categories
@@ -389,6 +437,18 @@ inline constexpr float kQtrStart_r[] = {1.0f, 0.5f, 0.5f, 0.5f};
 inline constexpr float kQtrStart_o[] = {0.0f, 1.0f, 1.5f, 2.0f};
 inline constexpr RhythmCell kQtrStart = {
     "qtr_start", kQtrStart_r, kQtrStart_o, 4, 2.5f, "all categories"};
+
+// Running 32nd notes (BWV565: 25% 32nds in toccata sections)
+inline constexpr float kRunning32nd_r[] = {0.125f, 0.125f, 0.125f, 0.125f};
+inline constexpr float kRunning32nd_o[] = {0.0f, 0.125f, 0.25f, 0.375f};
+inline constexpr RhythmCell kRunning32nd = {
+    "running_32nd", kRunning32nd_r, kRunning32nd_o, 4, 0.5f, "organ_pf toccata"};
+
+// Mixed 32nd-16th transition pattern
+inline constexpr float kMixed32_16_r[] = {0.125f, 0.125f, 0.25f, 0.25f};
+inline constexpr float kMixed32_16_o[] = {0.0f, 0.125f, 0.25f, 0.5f};
+inline constexpr RhythmCell kMixed32_16 = {
+    "mixed_32_16", kMixed32_16_r, kMixed32_16_o, 4, 0.75f, "organ_pf transition"};
 
 inline constexpr const RhythmCell* kCommonRhythms[] = {
     &kRunning16th, &kRunning8th, &kRunningQtr, &kLombardic,

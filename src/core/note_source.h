@@ -48,6 +48,7 @@ enum class BachNoteSource : uint8_t {
   ChaconneBass,       ///< Realized chaconne bass line (structural, role-dependent).
   PreludeFiguration,  ///< Harmony-first prelude figuration note (structurally consonant).
   ToccataGesture,     ///< Stylus Phantasticus gesture note (structural, octave shift only).
+  ToccataFigure,      ///< Vocabulary figure note (semi-protected, octave shift only).
   GrandPause,          ///< Structural silence marker (immutable).
   CadenceApproach      ///< Notes shaped by cadence approach formulas.
 };
@@ -87,6 +88,7 @@ inline bool isStructuralSource(BachNoteSource source) {
          source == BachNoteSource::CanonDux ||
          source == BachNoteSource::CanonComes ||
          source == BachNoteSource::GoldbergAria ||
+         source == BachNoteSource::ToccataFigure ||
          source == BachNoteSource::CadenceApproach;
 }
 
@@ -109,6 +111,7 @@ inline int sourcePriority(BachNoteSource source) {
     case BachNoteSource::CadenceApproach:
       return 0;  // Tier 1: immutable (design values, never modified)
     case BachNoteSource::ToccataGesture:
+    case BachNoteSource::ToccataFigure:
       return 1;  // Tier 2: semi-fixed (gesture notes, octave shift only)
     case BachNoteSource::Countersubject:
     case BachNoteSource::EpisodeMaterial:
