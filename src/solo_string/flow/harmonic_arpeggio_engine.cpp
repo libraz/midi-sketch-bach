@@ -6,9 +6,11 @@
 #include <cmath>
 #include <random>
 
+#include "core/markov_tables.h"
 #include "core/note_source.h"
 #include "core/pitch_utils.h"
 #include "core/rng_util.h"
+#include "core/scale.h"
 #include "harmony/chord_types.h"
 #include "harmony/harmonic_event.h"
 #include "harmony/harmonic_timeline.h"
@@ -738,6 +740,50 @@ std::vector<NoteEvent> generateBarNotes(
       // naturally achieves the widest actual range at Peak.
       uint8_t pitch = fitToRegisterSmooth(
           raw_pitch, reg_range, prev_pitch, is_turn);
+
+      // Markov octave tie-breaker: when we have sufficient context (2+ previous
+      // notes), check if an alternative octave placement (+/-12 semitones) scores
+      // better in the Markov model while being within 2 semitones distance of the
+      // original choice. This refines register placement without overriding the
+      // smooth voice-leading priority.
+      if (prev_pitch != 0 && pitch != prev_pitch && notes.size() >= 2) {
+        ScaleType mk_scale = harm_event.is_minor ? ScaleType::HarmonicMinor
+                                                  : ScaleType::Major;
+        Key mk_key = harm_event.key;
+        uint8_t prev2 = notes[notes.size() - 2].pitch;
+        DegreeStep prev_ivl = computeDegreeStep(prev2, prev_pitch, mk_key, mk_scale);
+        DegreeStep curr_ivl = computeDegreeStep(prev_pitch, pitch, mk_key, mk_scale);
+
+        int prev_sd = 0;
+        scale_util::pitchToScaleDegree(prev_pitch, mk_key, mk_scale, prev_sd);
+        DegreeClass deg_cls = scaleDegreeToClass(prev_sd);
+        BeatPos beat_pos = tickToBeatPos(note_tick);
+
+        float base_mk = scoreMarkovPitch(
+            kCelloMarkov, prev_ivl, deg_cls, beat_pos, curr_ivl);
+
+        for (int alt_shift : {-12, 12}) {
+          int alt = static_cast<int>(pitch) + alt_shift;
+          if (alt < static_cast<int>(reg_range.low) ||
+              alt > static_cast<int>(reg_range.high)) {
+            continue;
+          }
+          // Accept only if alternative distance is within 2 semitones of original.
+          int orig_dist = std::abs(static_cast<int>(pitch) -
+                                   static_cast<int>(prev_pitch));
+          int alt_dist = std::abs(alt - static_cast<int>(prev_pitch));
+          if (alt_dist > orig_dist + 2) continue;
+
+          DegreeStep alt_ivl = computeDegreeStep(
+              prev_pitch, static_cast<uint8_t>(alt), mk_key, mk_scale);
+          float alt_mk = scoreMarkovPitch(
+              kCelloMarkov, prev_ivl, deg_cls, beat_pos, alt_ivl);
+          if (alt_mk > base_mk + 0.05f) {
+            pitch = static_cast<uint8_t>(alt);
+            break;
+          }
+        }
+      }
 
       // Neighbor tone on weak beats for large leaps (Step 4).
       // Skip in cadence approach to preserve resolution clarity.

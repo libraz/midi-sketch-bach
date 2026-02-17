@@ -14,6 +14,7 @@ set(BACH_LIB_SOURCES
   core/note_creator.cpp
   core/rhythm_pattern.cpp
   core/figure_match.cpp
+  core/markov_tables.cpp
 
   # midi/
   midi/midi_writer.cpp

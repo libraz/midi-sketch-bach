@@ -6,6 +6,7 @@
 #include <cmath>
 #include <random>
 
+#include "core/markov_tables.h"
 #include "core/note_source.h"
 #include "core/pitch_utils.h"
 #include "core/rng_util.h"
@@ -553,24 +554,47 @@ std::vector<NoteEvent> generateSingleLine(const TextureContext& ctx,
             if (step_is_chord_tone) {
               // Step is a chord tone -- always use it (harmonic + stepwise).
               pitch = step_pitch;
-            } else if (is_downbeat) {
-              // On downbeat subdivisions: prefer step with high probability,
-              // but allow chord-tone anchor 25% for harmonic grounding.
-              // Bach reference: cello suite stepwise ~55%, chaconne ~34%.
-              if (rng::rollProbability(rng, 0.75f)) {
-                pitch = step_pitch;
-              } else {
-                // Pick the closest chord tone to prev_pitch to minimize leap.
-                pitch = nearestChordTone(prev_pitch, chord_pitches);
-              }
             } else {
-              // Off-beat subdivisions: strongly prefer diatonic step to build
-              // scalar passages between chord-tone anchors.
-              // Only 10% chance of chord-tone snap for occasional variety.
-              if (rng::rollProbability(rng, 0.90f)) {
+              // Compute Markov-informed probability for step vs chord-tone snap.
+              // When sufficient history exists, use Markov scores to bias the
+              // choice; otherwise fall back to fixed probabilities.
+              uint8_t chord_snap = nearestChordTone(prev_pitch, chord_pitches);
+              float step_prob = is_downbeat ? 0.75f : 0.90f;
+
+              if (notes.size() >= 2 && step_pitch != chord_snap) {
+                ScaleType mk_scale = ctx.key.is_minor ? ScaleType::HarmonicMinor
+                                                      : ScaleType::Major;
+                Key mk_key = ctx.key.tonic;
+                uint8_t prev2 = notes[notes.size() - 2].pitch;
+                DegreeStep prev_ivl = computeDegreeStep(
+                    prev2, prev_pitch, mk_key, mk_scale);
+                int prev_sd = 0;
+                scale_util::pitchToScaleDegree(
+                    prev_pitch, mk_key, mk_scale, prev_sd);
+                DegreeClass deg_cls = scaleDegreeToClass(prev_sd);
+                BeatPos beat_pos = tickToBeatPos(note_tick);
+
+                DegreeStep step_ivl = computeDegreeStep(
+                    prev_pitch, step_pitch, mk_key, mk_scale);
+                DegreeStep snap_ivl = computeDegreeStep(
+                    prev_pitch, chord_snap, mk_key, mk_scale);
+
+                float mk_step = scoreMarkovPitch(
+                    kViolinMarkov, prev_ivl, deg_cls, beat_pos, step_ivl);
+                float mk_snap = scoreMarkovPitch(
+                    kViolinMarkov, prev_ivl, deg_cls, beat_pos, snap_ivl);
+
+                // Adjust step_prob by the Markov score differential, scaled
+                // by kMarkovPitchWeightSolo. Positive diff favors step.
+                float mk_diff = mk_step - mk_snap;
+                step_prob += mk_diff * kMarkovPitchWeightSolo;
+                step_prob = std::max(0.10f, std::min(0.95f, step_prob));
+              }
+
+              if (rng::rollProbability(rng, step_prob)) {
                 pitch = step_pitch;
               } else {
-                pitch = nearestChordTone(prev_pitch, chord_pitches);
+                pitch = chord_snap;
               }
             }
 

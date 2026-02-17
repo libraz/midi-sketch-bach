@@ -5,10 +5,12 @@
 #define BACH_FUGUE_FUGUE_CONFIG_H
 
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <random>
 
 #include "core/basic_types.h"
+#include "core/markov_tables.h"
 #include "core/melodic_state.h"
 #include "harmony/modulation_plan.h"
 
@@ -114,7 +116,10 @@ struct FugueEnergyCurve {
                              const VoiceProfile& profile,
                              bool allow_burst_32nd = false,
                              float density_ratio = 1.0f,
-                             bool in_cadence = false) {
+                             bool in_cadence = false,
+                             const MarkovModel* markov = nullptr,
+                             DurCategory prev_dur_cat = DurCategory::Qtr,
+                             DirIntervalClass dir_ivl = DirIntervalClass::StepUp) {
     struct DurWeight {
       Tick duration;
       float weight;
@@ -196,6 +201,17 @@ struct FugueEnergyCurve {
         } else if (other_is_long && candidates[idx].duration <= kTicksPerBeat / 2) {
           candidates[idx].weight *= 2.0f;
         }
+      }
+    }
+
+    // Markov duration scoring (after all existing weight adjustments).
+    // exp(score) maps log-odds [-0.46, +0.46] to multiplicative [0.63, 1.58].
+    if (markov != nullptr) {
+      for (int idx = 0; idx < kNumCandidates; ++idx) {
+        if (candidates[idx].weight <= 0.0f) continue;
+        DurCategory cand_dc = ticksToDurCategory(candidates[idx].duration);
+        float mk = scoreMarkovDuration(*markov, prev_dur_cat, dir_ivl, cand_dc);
+        candidates[idx].weight *= std::exp(mk);
       }
     }
 

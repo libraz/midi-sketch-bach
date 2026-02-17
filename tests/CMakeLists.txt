@@ -19,6 +19,7 @@ set(BACH_TEST_SOURCES
   core/rhythm_pattern_test.cpp
   core/figure_match_test.cpp
   core/melodic_state_test.cpp
+  core/markov_tables_test.cpp
 
   # midi/
   midi/midi_writer_test.cpp

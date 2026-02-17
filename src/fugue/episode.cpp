@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstdint>
 #include <random>
 
@@ -32,6 +33,7 @@
 #include "core/figure_injector.h"
 #include "core/figure_match.h"
 #include "core/bach_vocabulary.h"
+#include "core/markov_tables.h"
 #include "fugue/fugue_vocabulary.h"
 
 namespace bach {
@@ -57,6 +59,120 @@ struct PitchCandidate {
   bool has_harsh_dissonance = false;     ///< True if m2/TT/M7 with any sounding voice.
   bool is_suspension_like = false;       ///< True if pitch == previous note in voice (held).
 };
+
+/// @brief Find the bass note sounding at a given tick.
+static bool findSoundingBass(
+    const CounterpointState& cp_state, Tick tick,
+    uint8_t num_voices, Key key, ScaleType scale,
+    uint8_t& out_bass_pitch, int& out_bass_degree) {
+  // Bass is the lowest voice that has a sounding note.
+  for (int vid = static_cast<int>(num_voices) - 1; vid >= 0; --vid) {
+    const NoteEvent* note = cp_state.getNoteAt(vid, tick);
+    if (note && note->start_tick + note->duration > tick) {
+      out_bass_pitch = note->pitch;
+      int deg = 0;
+      scale_util::pitchToScaleDegree(note->pitch, key, scale, deg);
+      out_bass_degree = deg;
+      return true;
+    }
+  }
+  return false;
+}
+
+/// @brief Count the number of voices sounding at a given tick.
+static int countSoundingVoices(
+    const CounterpointState& cp_state, Tick tick) {
+  int count = 0;
+  for (VoiceId vid : cp_state.getActiveVoices()) {
+    const NoteEvent* note = cp_state.getNoteAt(vid, tick);
+    if (note && note->start_tick + note->duration > tick) {
+      ++count;
+    }
+  }
+  return count;
+}
+
+/// @brief Classify current harmonic context to T/S/D.
+static HarmFunc classifyHarmFunc(const HarmonicEvent& harm_ev, Key key) {
+  int root_pc = static_cast<int>(harm_ev.chord.root_pitch) % 12;
+  int key_pc = static_cast<int>(key);
+  int root_degree = ((root_pc - key_pc) % 12 + 12) % 12;
+  // Map semitone offset to scale degree (approximate).
+  // 0=I, 2=II, 4=III, 5=IV, 7=V, 9=VI, 11=VII.
+  int scale_deg = 0;
+  switch (root_degree) {
+    case 0:  scale_deg = 0; break;  // I
+    case 1:  case 2:  scale_deg = 1; break;  // II
+    case 3:  case 4:  scale_deg = 2; break;  // III
+    case 5:  scale_deg = 3; break;  // IV
+    case 6:  case 7:  scale_deg = 4; break;  // V
+    case 8:  case 9:  scale_deg = 5; break;  // VI
+    case 10: case 11: scale_deg = 6; break;  // VII
+  }
+  return degreeToHarmFunc(scale_deg);
+}
+
+/// @brief Score upper voice affinity (3rd/6th bonus, harsh penalty).
+static float scoreUpperVoiceAffinity(uint8_t cand_pitch,
+                                      const CounterpointState& cp_state,
+                                      VoiceId cand_voice, Tick tick) {
+  float affinity = 0.0f;
+  for (VoiceId ov_id : cp_state.getActiveVoices()) {
+    if (ov_id == cand_voice) continue;
+    const NoteEvent* other = cp_state.getNoteAt(ov_id, tick);
+    if (!other || other->start_tick + other->duration <= tick) continue;
+    int ivl = interval_util::compoundToSimple(
+        absoluteInterval(cand_pitch, other->pitch));
+    // 3rd/6th (imperfect consonance) bonus.
+    if (ivl == 3 || ivl == 4 || ivl == 8 || ivl == 9) affinity += 0.05f;
+    // Harsh dissonance penalty (m2, tritone, M7).
+    if (ivl == 1 || ivl == 6 || ivl == 11) affinity -= 0.1f;
+  }
+  return affinity;
+}
+
+/// @brief Intersect horizontal and vertical oracle candidates by pitch class.
+/// Returns matched candidates with combined scores.
+static int intersectByPitchClass(
+    const OracleCandidate* h_cands, int h_count,
+    const OracleCandidate* v_cands, int v_count,
+    float v_min_gate,
+    OracleCandidate* out, int max_count) {
+  int out_count = 0;
+
+  for (int idx = 0; idx < h_count && out_count < max_count; ++idx) {
+    int h_pc = h_cands[idx].pitch % 12;
+    for (int jdx = 0; jdx < v_count; ++jdx) {
+      if (v_cands[jdx].pitch == h_pc) {
+        // Min-gate: reject vertical candidates below threshold.
+        if (v_cands[jdx].prob < v_min_gate) break;  // Sorted, so lower probs follow.
+        float combined = std::log(h_cands[idx].prob + 1e-7f)
+                       + kVerticalAlpha * std::log(v_cands[jdx].prob + 1e-7f);
+        out[out_count++] = {h_cands[idx].pitch, combined};
+        break;
+      }
+    }
+  }
+  return out_count;
+}
+
+/// @brief Fit a pitch class to the nearest octave within a range.
+static uint8_t octaveFitPc(int pitch_class, uint8_t range_lo, uint8_t range_hi,
+                            uint8_t from_pitch) {
+  int best = -1;
+  int best_dist = 999;
+  for (int octave = 0; octave < 11; ++octave) {
+    int candidate = octave * 12 + (pitch_class % 12);
+    if (candidate < range_lo || candidate > range_hi) continue;
+    int dist = std::abs(candidate - static_cast<int>(from_pitch));
+    if (dist < best_dist) {
+      best_dist = dist;
+      best = candidate;
+    }
+  }
+  if (best >= 0) return static_cast<uint8_t>(best);
+  return from_pitch;  // Fallback.
+}
 
 int sequenceDegreeStepForCharacter(SubjectCharacter character, std::mt19937& rng) {
   switch (character) {
@@ -1080,16 +1196,35 @@ static std::vector<NoteEvent> generateBassSequencePattern(
     }
 
     for (int i = 0; i < kPatternLen && tick < start_tick + duration; ++i) {
+      // Markov duration context from previous bass note.
+      const MarkovModel* markov = nullptr;
+      DurCategory prev_dur_cat = DurCategory::Qtr;
+      DirIntervalClass dir_ivl = DirIntervalClass::StepUp;
+      if (!result.empty()) {
+        prev_dur_cat = ticksToDurCategory(result.back().duration);
+        int target_deg = abs_tonic + sequence_offset + pattern[i];
+        uint8_t target_pitch = scale_util::absoluteDegreeToPitch(
+            target_deg, key, scale);
+        DegreeStep step = computeDegreeStep(result.back().pitch, target_pitch,
+                                            key, scale);
+        dir_ivl = toDirIvlClass(step);
+        markov = &kFuguePedalMarkov;
+      }
+
       Tick raw_dur;
       if (i == 0) {
         // Pattern head: harmonic rhythm anchor. Lower energy for longer notes.
         raw_dur = FugueEnergyCurve::selectDuration(
             std::max(0.0f, energy - 0.15f), tick, gen, kQuarterNote,
-            voice_profiles::kBassLine);
+            voice_profiles::kBassLine,
+            false, 1.0f, false,
+            markov, prev_dur_cat, dir_ivl);
         if (raw_dur < kQuarterNote) raw_dur = kQuarterNote;  // Floor: quarter.
       } else {
         raw_dur = FugueEnergyCurve::selectDuration(energy, tick, gen, kHalfNote,
-                                                    voice_profiles::kBassLine);
+                                                    voice_profiles::kBassLine,
+                                                    false, 1.0f, false,
+                                                    markov, prev_dur_cat, dir_ivl);
         // Bass sixteenths are a style violation; floor at eighth note.
         if (raw_dur < kTicksPerBeat / 2) raw_dur = kTicksPerBeat / 2;
       }
@@ -1726,46 +1861,207 @@ Episode generateEpisode(const Subject& subject, Tick start_tick, Tick duration_t
         }
       }
 
-      // --- Candidate generation (harmony-first, max 3). ---
-      // Search center uses raw pitch to preserve the intended melodic contour.
-      // Scoring uses mel_ctx (from cp_state) to evaluate voice leading quality.
+      // --- Melodic context (needed before oracle candidate generation). ---
+      MelodicContext mel_ctx = buildMelodicContextFromState(cp_state, note.voice);
+
+      // --- Candidate generation via two-oracle system. ---
+      // Oracle provides candidates; existing safety checks provide sovereignty.
       std::vector<PitchCandidate> candidates;
-      candidates.reserve(4);
+      candidates.reserve(12);
 
-      // (1) Nearest chord tone to raw pitch (contour-preserving).
-      uint8_t ct_near = nearestChordTone(note.pitch, harm_ev);
-      candidates.push_back({ct_near, 0.0f, true});
-
-      // (2) Chord tone on the opposite side of raw pitch.
-      uint8_t probe = (ct_near >= note.pitch)
-                          ? static_cast<uint8_t>(note.pitch >= 4 ? note.pitch - 4 : 0)
-                          : static_cast<uint8_t>(note.pitch <= 123 ? note.pitch + 4 : 127);
-      uint8_t ct_other = nearestChordTone(probe, harm_ev);
-      if (ct_other != ct_near) {
-        candidates.push_back({ct_other, 0.0f, true});
+      // Oracle candidate counts, modulated by cadence/final bar.
+      int h_max = 8;
+      int v_max = 6;
+      float v_gate = kVerticalMinGate;
+      if (is_cadence_adj) {
+        h_max = 4;
+        v_max = 3;
+        v_gate = kVerticalMinGateCadence;
+      }
+      if (note.start_tick >= final_bar_start) {
+        h_max = 3;
+        v_max = 2;
+        v_gate = kVerticalMinGateCadence;
       }
 
-      // (3) Raw pitch diatonic snap (if not already a candidate).
-      uint8_t raw_diatonic = scale_util::nearestScaleTone(note.pitch, current_key, scale);
-      bool raw_is_ct = isChordTone(raw_diatonic, harm_ev);
-      bool already_present = false;
-      for (const auto& c : candidates) {
-        if (c.pitch == raw_diatonic) {
-          already_present = true;
-          break;
+      // Determine voice range for this voice.
+      auto [range_lo, range_hi] = getFugueVoiceRange(note.voice, num_voices);
+
+      // Try oracle-based candidate generation.
+      bool oracle_used = false;
+      if (mel_ctx.prev_count >= 2) {
+        ScaleType markov_scale = harm_ev.is_minor ? ScaleType::HarmonicMinor
+                                                   : ScaleType::Major;
+        DegreeStep prev_ivl = computeDegreeStep(
+            mel_ctx.prev_pitches[1], mel_ctx.prev_pitches[0],
+            harm_ev.key, markov_scale);
+        int prev_sd = 0;
+        scale_util::pitchToScaleDegree(mel_ctx.prev_pitches[0],
+                                        harm_ev.key, markov_scale, prev_sd);
+        DegreeClass deg_cls = scaleDegreeToClass(prev_sd);
+        BeatPos bp_oracle = tickToBeatPos(note.start_tick);
+        const auto& markov_model = isPedalVoice(note.voice, num_voices)
+                                       ? kFuguePedalMarkov
+                                       : kFugueUpperMarkov;
+
+        // Horizontal oracle: top-N melodically natural pitches.
+        OracleCandidate h_cands[8];
+        int h_count = getTopMelodicCandidates(
+            markov_model, prev_ivl, deg_cls, bp_oracle,
+            mel_ctx.prev_pitches[0], harm_ev.key, markov_scale,
+            range_lo, range_hi, h_cands, h_max);
+
+        // Vertical oracle: top-M harmonically common pitch classes.
+        uint8_t bass_pitch_found = 0;
+        int bass_degree = 0;
+        bool has_bass = findSoundingBass(cp_state, note.start_tick,
+                                          num_voices, harm_ev.key, markov_scale,
+                                          bass_pitch_found, bass_degree);
+
+        if (has_bass && h_count > 0) {
+          int vbin = voiceCountToBin(
+              countSoundingVoices(cp_state, note.start_tick));
+          HarmFunc hfunc = classifyHarmFunc(harm_ev, current_key);
+
+          OracleCandidate v_cands[6];
+          int v_count = getTopVerticalCandidates(
+              kFugueVerticalTable, bass_degree, bp_oracle, vbin, hfunc,
+              v_cands, v_max);
+
+          // Intersect by pitch class.
+          OracleCandidate isect[12];
+          int isect_count = intersectByPitchClass(
+              h_cands, h_count, v_cands, v_count, v_gate, isect, 12);
+
+          if (isect_count > 0) {
+            // Sort intersection by combined score descending.
+            std::sort(isect, isect + isect_count,
+                      [](const OracleCandidate& lhs, const OracleCandidate& rhs) {
+                        return lhs.prob > rhs.prob;
+                      });
+            for (int oi_idx = 0; oi_idx < isect_count; ++oi_idx) {
+              bool raw_is_ct = isChordTone(isect[oi_idx].pitch, harm_ev);
+              // MetricLevel enforcement.
+              if (ml == MetricLevel::Bar && !raw_is_ct) continue;
+              if (ml == MetricLevel::Beat && !raw_is_ct &&
+                  !lookahead_pitch.has_value()) continue;
+              candidates.push_back({isect[oi_idx].pitch, 0.0f, raw_is_ct});
+            }
+            oracle_used = !candidates.empty();
+          }
+
+          if (!oracle_used) {
+            // Union fallback: H+V candidates.
+            for (int hi_idx = 0; hi_idx < h_count; ++hi_idx) {
+              bool is_ct = isChordTone(h_cands[hi_idx].pitch, harm_ev);
+              if (ml == MetricLevel::Bar && !is_ct) continue;
+              if (ml == MetricLevel::Beat && !is_ct &&
+                  !lookahead_pitch.has_value()) continue;
+              // Find matching vertical prob.
+              float v_score = 1.0f / kPcOffsetCount;
+              int h_pc = h_cands[hi_idx].pitch % 12;
+              int bass_pc_offset = (h_pc - bass_pitch_found % 12 + 12) % 12;
+              for (int vi_idx = 0; vi_idx < v_count; ++vi_idx) {
+                if (v_cands[vi_idx].pitch == bass_pc_offset) {
+                  v_score = v_cands[vi_idx].prob;
+                  break;
+                }
+              }
+              float combined = std::log(h_cands[hi_idx].prob + 1e-7f)
+                             + kVerticalAlpha * std::log(v_score + 1e-7f);
+              candidates.push_back({h_cands[hi_idx].pitch, combined, is_ct});
+            }
+            // V candidates not in H.
+            for (int vi_idx = 0; vi_idx < v_count; ++vi_idx) {
+              if (v_cands[vi_idx].prob < v_gate) continue;
+              bool found_in_h = false;
+              for (int hi_idx = 0; hi_idx < h_count; ++hi_idx) {
+                if (h_cands[hi_idx].pitch % 12 ==
+                    (static_cast<int>(bass_pitch_found) % 12 +
+                     v_cands[vi_idx].pitch) % 12) {
+                  found_in_h = true;
+                  break;
+                }
+              }
+              if (!found_in_h) {
+                int target_pc = (static_cast<int>(bass_pitch_found) % 12 +
+                                 v_cands[vi_idx].pitch) % 12;
+                uint8_t fitted = octaveFitPc(target_pc, range_lo, range_hi,
+                                              mel_ctx.prev_pitches[0]);
+                bool is_ct = isChordTone(fitted, harm_ev);
+                if (ml == MetricLevel::Bar && !is_ct) continue;
+                if (ml == MetricLevel::Beat && !is_ct &&
+                    !lookahead_pitch.has_value()) continue;
+                float h_score = 1.0f / kDegreeStepCount;
+                float combined = std::log(h_score)
+                               + kVerticalAlpha *
+                                     std::log(v_cands[vi_idx].prob + 1e-7f);
+                candidates.push_back({fitted, combined, is_ct});
+              }
+            }
+            oracle_used = !candidates.empty();
+          }
+        } else if (h_count > 0 && !has_bass) {
+          // No bass: use horizontal oracle only.
+          for (int hi_idx = 0; hi_idx < h_count; ++hi_idx) {
+            bool is_ct = isChordTone(h_cands[hi_idx].pitch, harm_ev);
+            if (ml == MetricLevel::Bar && !is_ct) continue;
+            if (ml == MetricLevel::Beat && !is_ct &&
+                !lookahead_pitch.has_value()) continue;
+            candidates.push_back({h_cands[hi_idx].pitch, 0.0f, is_ct});
+          }
+          oracle_used = !candidates.empty();
         }
       }
-      if (!already_present) {
-        // MetricLevel enforcement:
-        //   Bar: chord tones only (NHT forbidden).
-        //   Beat: NHT only with resolution (lookahead_pitch available).
-        //   Offbeat: unrestricted.
-        if (ml == MetricLevel::Bar && !raw_is_ct) {
-          // Skip non-chord tone on bar start.
-        } else if (ml == MetricLevel::Beat && !raw_is_ct && !lookahead_pitch.has_value()) {
-          // Skip unresolvable NHT on beat.
-        } else {
-          candidates.push_back({raw_diatonic, 0.0f, raw_is_ct, false, false});
+
+      // Fallback: original candidate generation if oracle produced nothing.
+      if (!oracle_used) {
+        // (1) Nearest chord tone to raw pitch (contour-preserving).
+        uint8_t ct_near = nearestChordTone(note.pitch, harm_ev);
+        candidates.push_back({ct_near, 0.0f, true});
+
+        // (2) Chord tone on the opposite side of raw pitch.
+        uint8_t probe = (ct_near >= note.pitch)
+                            ? static_cast<uint8_t>(note.pitch >= 4 ? note.pitch - 4 : 0)
+                            : static_cast<uint8_t>(
+                                  note.pitch <= 123 ? note.pitch + 4 : 127);
+        uint8_t ct_other = nearestChordTone(probe, harm_ev);
+        if (ct_other != ct_near) {
+          candidates.push_back({ct_other, 0.0f, true});
+        }
+
+        // (3) Raw pitch diatonic snap (if not already a candidate).
+        uint8_t raw_diatonic =
+            scale_util::nearestScaleTone(note.pitch, current_key, scale);
+        bool raw_is_ct = isChordTone(raw_diatonic, harm_ev);
+        bool already_present = false;
+        for (const auto& cnd : candidates) {
+          if (cnd.pitch == raw_diatonic) {
+            already_present = true;
+            break;
+          }
+        }
+        if (!already_present) {
+          if (ml == MetricLevel::Bar && !raw_is_ct) {
+            // Skip non-chord tone on bar start.
+          } else if (ml == MetricLevel::Beat && !raw_is_ct &&
+                     !lookahead_pitch.has_value()) {
+            // Skip unresolvable NHT on beat.
+          } else {
+            candidates.push_back({raw_diatonic, 0.0f, raw_is_ct, false, false});
+          }
+        }
+      }
+
+      // Always ensure a chord tone is present (nearestChordTone fallback).
+      {
+        bool has_ct = false;
+        for (const auto& cnd : candidates) {
+          if (cnd.is_chord_tone) { has_ct = true; break; }
+        }
+        if (!has_ct) {
+          uint8_t ct_fb = nearestChordTone(note.pitch, harm_ev);
+          candidates.push_back({ct_fb, 0.0f, true});
         }
       }
 
@@ -1850,7 +2146,6 @@ Episode generateEpisode(const Subject& subject, Tick start_tick, Tick duration_t
       }
 
       // --- Scoring: melodic quality + PhraseGoal. ---
-      MelodicContext mel_ctx = buildMelodicContextFromState(cp_state, note.voice);
       for (auto& cand : candidates) {
         float mel_score = MelodicContext::scoreMelodicQuality(
             mel_ctx, cand.pitch, &phrase_goal, note.start_tick);
@@ -1942,6 +2237,42 @@ Episode generateEpisode(const Subject& subject, Tick start_tick, Tick duration_t
             }
           }
         }
+
+        // Markov melodic model scoring.
+        if (mel_ctx.prev_count >= 2) {
+          ScaleType markov_scale = harm_ev.is_minor ? ScaleType::HarmonicMinor
+                                                    : ScaleType::Major;
+          DegreeStep prev_ivl = computeDegreeStep(
+              mel_ctx.prev_pitches[1], mel_ctx.prev_pitches[0],
+              harm_ev.key, markov_scale);
+          DegreeStep next_ivl = computeDegreeStep(
+              mel_ctx.prev_pitches[0], cand.pitch,
+              harm_ev.key, markov_scale);
+          int prev_sd = 0;
+          scale_util::pitchToScaleDegree(mel_ctx.prev_pitches[0],
+                                          harm_ev.key, markov_scale, prev_sd);
+          DegreeClass deg_cls = scaleDegreeToClass(prev_sd);
+          BeatPos bp = tickToBeatPos(note.start_tick);
+          const auto& markov_model = isPedalVoice(note.voice, num_voices)
+                                         ? kFuguePedalMarkov
+                                         : kFugueUpperMarkov;
+          float markov_w = is_cadence_adj
+                               ? kMarkovPitchWeight * kMarkovCadenceAttenuation
+                               : kMarkovPitchWeight;
+          if (duration_ticks > 0) {
+            float ep_progress = static_cast<float>(note.start_tick - start_tick) /
+                                static_cast<float>(duration_ticks);
+            if (ep_progress < 0.15f) {
+              markov_w *= kMarkovPhraseStartBoost;
+            }
+          }
+          mel_score += markov_w * scoreMarkovPitch(
+              markov_model, prev_ivl, deg_cls, bp, next_ivl);
+        }
+
+        // Upper voice affinity scoring (3rd/6th bonus).
+        mel_score += scoreUpperVoiceAffinity(cand.pitch, cp_state,
+                                              note.voice, note.start_tick);
 
         cand.score = mel_score;
       }
@@ -2389,46 +2720,207 @@ Episode generateFortspinnungEpisode(const Subject& subject, const MotifPool& poo
         }
       }
 
-      // --- Candidate generation (harmony-first, max 3). ---
-      // Search center uses raw pitch to preserve the intended melodic contour.
-      // Scoring uses mel_ctx (from cp_state) to evaluate voice leading quality.
+      // --- Melodic context (needed before oracle candidate generation). ---
+      MelodicContext mel_ctx = buildMelodicContextFromState(cp_state, note.voice);
+
+      // --- Candidate generation via two-oracle system. ---
+      // Oracle provides candidates; existing safety checks provide sovereignty.
       std::vector<PitchCandidate> candidates;
-      candidates.reserve(4);
+      candidates.reserve(12);
 
-      // (1) Nearest chord tone to raw pitch (contour-preserving).
-      uint8_t ct_near = nearestChordTone(note.pitch, harm_ev);
-      candidates.push_back({ct_near, 0.0f, true});
-
-      // (2) Chord tone on the opposite side of raw pitch.
-      uint8_t probe = (ct_near >= note.pitch)
-                          ? static_cast<uint8_t>(note.pitch >= 4 ? note.pitch - 4 : 0)
-                          : static_cast<uint8_t>(note.pitch <= 123 ? note.pitch + 4 : 127);
-      uint8_t ct_other = nearestChordTone(probe, harm_ev);
-      if (ct_other != ct_near) {
-        candidates.push_back({ct_other, 0.0f, true});
+      // Oracle candidate counts, modulated by cadence/final bar.
+      int h_max = 8;
+      int v_max = 6;
+      float v_gate = kVerticalMinGate;
+      if (is_cadence_adj) {
+        h_max = 4;
+        v_max = 3;
+        v_gate = kVerticalMinGateCadence;
+      }
+      if (note.start_tick >= final_bar_start) {
+        h_max = 3;
+        v_max = 2;
+        v_gate = kVerticalMinGateCadence;
       }
 
-      // (3) Raw pitch diatonic snap (if not already a candidate).
-      uint8_t raw_diatonic = scale_util::nearestScaleTone(note.pitch, current_key, scale);
-      bool raw_is_ct = isChordTone(raw_diatonic, harm_ev);
-      bool already_present = false;
-      for (const auto& c : candidates) {
-        if (c.pitch == raw_diatonic) {
-          already_present = true;
-          break;
+      // Determine voice range for this voice.
+      auto [range_lo, range_hi] = getFugueVoiceRange(note.voice, num_voices);
+
+      // Try oracle-based candidate generation.
+      bool oracle_used = false;
+      if (mel_ctx.prev_count >= 2) {
+        ScaleType markov_scale = harm_ev.is_minor ? ScaleType::HarmonicMinor
+                                                   : ScaleType::Major;
+        DegreeStep prev_ivl = computeDegreeStep(
+            mel_ctx.prev_pitches[1], mel_ctx.prev_pitches[0],
+            harm_ev.key, markov_scale);
+        int prev_sd = 0;
+        scale_util::pitchToScaleDegree(mel_ctx.prev_pitches[0],
+                                        harm_ev.key, markov_scale, prev_sd);
+        DegreeClass deg_cls = scaleDegreeToClass(prev_sd);
+        BeatPos bp_oracle = tickToBeatPos(note.start_tick);
+        const auto& markov_model = isPedalVoice(note.voice, num_voices)
+                                       ? kFuguePedalMarkov
+                                       : kFugueUpperMarkov;
+
+        // Horizontal oracle: top-N melodically natural pitches.
+        OracleCandidate h_cands[8];
+        int h_count = getTopMelodicCandidates(
+            markov_model, prev_ivl, deg_cls, bp_oracle,
+            mel_ctx.prev_pitches[0], harm_ev.key, markov_scale,
+            range_lo, range_hi, h_cands, h_max);
+
+        // Vertical oracle: top-M harmonically common pitch classes.
+        uint8_t bass_pitch_found = 0;
+        int bass_degree = 0;
+        bool has_bass = findSoundingBass(cp_state, note.start_tick,
+                                          num_voices, harm_ev.key, markov_scale,
+                                          bass_pitch_found, bass_degree);
+
+        if (has_bass && h_count > 0) {
+          int vbin = voiceCountToBin(
+              countSoundingVoices(cp_state, note.start_tick));
+          HarmFunc hfunc = classifyHarmFunc(harm_ev, current_key);
+
+          OracleCandidate v_cands[6];
+          int v_count = getTopVerticalCandidates(
+              kFugueVerticalTable, bass_degree, bp_oracle, vbin, hfunc,
+              v_cands, v_max);
+
+          // Intersect by pitch class.
+          OracleCandidate isect[12];
+          int isect_count = intersectByPitchClass(
+              h_cands, h_count, v_cands, v_count, v_gate, isect, 12);
+
+          if (isect_count > 0) {
+            // Sort intersection by combined score descending.
+            std::sort(isect, isect + isect_count,
+                      [](const OracleCandidate& lhs, const OracleCandidate& rhs) {
+                        return lhs.prob > rhs.prob;
+                      });
+            for (int oi_idx = 0; oi_idx < isect_count; ++oi_idx) {
+              bool raw_is_ct = isChordTone(isect[oi_idx].pitch, harm_ev);
+              // MetricLevel enforcement.
+              if (ml == MetricLevel::Bar && !raw_is_ct) continue;
+              if (ml == MetricLevel::Beat && !raw_is_ct &&
+                  !lookahead_pitch.has_value()) continue;
+              candidates.push_back({isect[oi_idx].pitch, 0.0f, raw_is_ct});
+            }
+            oracle_used = !candidates.empty();
+          }
+
+          if (!oracle_used) {
+            // Union fallback: H+V candidates.
+            for (int hi_idx = 0; hi_idx < h_count; ++hi_idx) {
+              bool is_ct = isChordTone(h_cands[hi_idx].pitch, harm_ev);
+              if (ml == MetricLevel::Bar && !is_ct) continue;
+              if (ml == MetricLevel::Beat && !is_ct &&
+                  !lookahead_pitch.has_value()) continue;
+              // Find matching vertical prob.
+              float v_score = 1.0f / kPcOffsetCount;
+              int h_pc = h_cands[hi_idx].pitch % 12;
+              int bass_pc_offset = (h_pc - bass_pitch_found % 12 + 12) % 12;
+              for (int vi_idx = 0; vi_idx < v_count; ++vi_idx) {
+                if (v_cands[vi_idx].pitch == bass_pc_offset) {
+                  v_score = v_cands[vi_idx].prob;
+                  break;
+                }
+              }
+              float combined = std::log(h_cands[hi_idx].prob + 1e-7f)
+                             + kVerticalAlpha * std::log(v_score + 1e-7f);
+              candidates.push_back({h_cands[hi_idx].pitch, combined, is_ct});
+            }
+            // V candidates not in H.
+            for (int vi_idx = 0; vi_idx < v_count; ++vi_idx) {
+              if (v_cands[vi_idx].prob < v_gate) continue;
+              bool found_in_h = false;
+              for (int hi_idx = 0; hi_idx < h_count; ++hi_idx) {
+                if (h_cands[hi_idx].pitch % 12 ==
+                    (static_cast<int>(bass_pitch_found) % 12 +
+                     v_cands[vi_idx].pitch) % 12) {
+                  found_in_h = true;
+                  break;
+                }
+              }
+              if (!found_in_h) {
+                int target_pc = (static_cast<int>(bass_pitch_found) % 12 +
+                                 v_cands[vi_idx].pitch) % 12;
+                uint8_t fitted = octaveFitPc(target_pc, range_lo, range_hi,
+                                              mel_ctx.prev_pitches[0]);
+                bool is_ct = isChordTone(fitted, harm_ev);
+                if (ml == MetricLevel::Bar && !is_ct) continue;
+                if (ml == MetricLevel::Beat && !is_ct &&
+                    !lookahead_pitch.has_value()) continue;
+                float h_score = 1.0f / kDegreeStepCount;
+                float combined = std::log(h_score)
+                               + kVerticalAlpha *
+                                     std::log(v_cands[vi_idx].prob + 1e-7f);
+                candidates.push_back({fitted, combined, is_ct});
+              }
+            }
+            oracle_used = !candidates.empty();
+          }
+        } else if (h_count > 0 && !has_bass) {
+          // No bass: use horizontal oracle only.
+          for (int hi_idx = 0; hi_idx < h_count; ++hi_idx) {
+            bool is_ct = isChordTone(h_cands[hi_idx].pitch, harm_ev);
+            if (ml == MetricLevel::Bar && !is_ct) continue;
+            if (ml == MetricLevel::Beat && !is_ct &&
+                !lookahead_pitch.has_value()) continue;
+            candidates.push_back({h_cands[hi_idx].pitch, 0.0f, is_ct});
+          }
+          oracle_used = !candidates.empty();
         }
       }
-      if (!already_present) {
-        // MetricLevel enforcement:
-        //   Bar: chord tones only.
-        //   Beat: NHT only with resolution (lookahead available).
-        //   Offbeat: unrestricted.
-        if (ml == MetricLevel::Bar && !raw_is_ct) {
-          // Skip non-chord tone on bar start.
-        } else if (ml == MetricLevel::Beat && !raw_is_ct && !lookahead_pitch.has_value()) {
-          // Skip unresolvable NHT on beat.
-        } else {
-          candidates.push_back({raw_diatonic, 0.0f, raw_is_ct});
+
+      // Fallback: original candidate generation if oracle produced nothing.
+      if (!oracle_used) {
+        // (1) Nearest chord tone to raw pitch (contour-preserving).
+        uint8_t ct_near = nearestChordTone(note.pitch, harm_ev);
+        candidates.push_back({ct_near, 0.0f, true});
+
+        // (2) Chord tone on the opposite side of raw pitch.
+        uint8_t probe = (ct_near >= note.pitch)
+                            ? static_cast<uint8_t>(note.pitch >= 4 ? note.pitch - 4 : 0)
+                            : static_cast<uint8_t>(
+                                  note.pitch <= 123 ? note.pitch + 4 : 127);
+        uint8_t ct_other = nearestChordTone(probe, harm_ev);
+        if (ct_other != ct_near) {
+          candidates.push_back({ct_other, 0.0f, true});
+        }
+
+        // (3) Raw pitch diatonic snap (if not already a candidate).
+        uint8_t raw_diatonic =
+            scale_util::nearestScaleTone(note.pitch, current_key, scale);
+        bool raw_is_ct = isChordTone(raw_diatonic, harm_ev);
+        bool already_present = false;
+        for (const auto& cnd : candidates) {
+          if (cnd.pitch == raw_diatonic) {
+            already_present = true;
+            break;
+          }
+        }
+        if (!already_present) {
+          if (ml == MetricLevel::Bar && !raw_is_ct) {
+            // Skip non-chord tone on bar start.
+          } else if (ml == MetricLevel::Beat && !raw_is_ct &&
+                     !lookahead_pitch.has_value()) {
+            // Skip unresolvable NHT on beat.
+          } else {
+            candidates.push_back({raw_diatonic, 0.0f, raw_is_ct});
+          }
+        }
+      }
+
+      // Always ensure a chord tone is present (nearestChordTone fallback).
+      {
+        bool has_ct = false;
+        for (const auto& cnd : candidates) {
+          if (cnd.is_chord_tone) { has_ct = true; break; }
+        }
+        if (!has_ct) {
+          uint8_t ct_fb = nearestChordTone(note.pitch, harm_ev);
+          candidates.push_back({ct_fb, 0.0f, true});
         }
       }
 
@@ -2507,7 +2999,6 @@ Episode generateFortspinnungEpisode(const Subject& subject, const MotifPool& poo
       }
 
       // --- Scoring: melodic quality + PhraseGoal. ---
-      MelodicContext mel_ctx = buildMelodicContextFromState(cp_state, note.voice);
       for (auto& cand : candidates) {
         float mel_score = MelodicContext::scoreMelodicQuality(
             mel_ctx, cand.pitch, &phrase_goal, note.start_tick);
@@ -2573,6 +3064,42 @@ Episode generateFortspinnungEpisode(const Subject& subject, const MotifPool& poo
             }
           }
         }
+
+        // Markov melodic model scoring.
+        if (mel_ctx.prev_count >= 2) {
+          ScaleType markov_scale = harm_ev.is_minor ? ScaleType::HarmonicMinor
+                                                    : ScaleType::Major;
+          DegreeStep prev_ivl = computeDegreeStep(
+              mel_ctx.prev_pitches[1], mel_ctx.prev_pitches[0],
+              harm_ev.key, markov_scale);
+          DegreeStep next_ivl = computeDegreeStep(
+              mel_ctx.prev_pitches[0], cand.pitch,
+              harm_ev.key, markov_scale);
+          int prev_sd = 0;
+          scale_util::pitchToScaleDegree(mel_ctx.prev_pitches[0],
+                                          harm_ev.key, markov_scale, prev_sd);
+          DegreeClass deg_cls = scaleDegreeToClass(prev_sd);
+          BeatPos bp = tickToBeatPos(note.start_tick);
+          const auto& markov_model = isPedalVoice(note.voice, num_voices)
+                                         ? kFuguePedalMarkov
+                                         : kFugueUpperMarkov;
+          float markov_w = is_cadence_adj
+                               ? kMarkovPitchWeight * kMarkovCadenceAttenuation
+                               : kMarkovPitchWeight;
+          if (duration_ticks > 0) {
+            float ep_progress = static_cast<float>(note.start_tick - start_tick) /
+                                static_cast<float>(duration_ticks);
+            if (ep_progress < 0.15f) {
+              markov_w *= kMarkovPhraseStartBoost;
+            }
+          }
+          mel_score += markov_w * scoreMarkovPitch(
+              markov_model, prev_ivl, deg_cls, bp, next_ivl);
+        }
+
+        // Upper voice affinity scoring (3rd/6th bonus).
+        mel_score += scoreUpperVoiceAffinity(cand.pitch, cp_state,
+                                              note.voice, note.start_tick);
 
         cand.score = mel_score;
 

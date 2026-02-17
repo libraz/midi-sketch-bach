@@ -10,6 +10,7 @@
 #include <random>
 
 #include "core/interval.h"
+#include "core/markov_tables.h"
 #include "core/pitch_utils.h"
 #include "core/rng_util.h"
 #include "core/scale.h"
@@ -232,7 +233,10 @@ uint8_t findConsonantPitch(uint8_t subject_pitch, int direction,
 /// Select countersubject duration with style-aware constraints.
 /// 16th notes restricted to Playful/Restless characters only.
 Tick selectCSDuration(Tick subject_duration, float split_prob,
-                      Tick tick, std::mt19937& gen) {
+                      Tick tick, std::mt19937& gen,
+                      const MarkovModel* markov = nullptr,
+                      DurCategory prev_dur_cat = DurCategory::Qtr,
+                      DirIntervalClass dir_ivl = DirIntervalClass::StepUp) {
   // Map split_prob [0.5, 0.75] -> energy [0.4, 0.7].
   // Severe (0.6) -> 0.52, Noble (0.5) -> 0.40
   // Playful (0.7) -> 0.64, Restless (0.75) -> 0.70
@@ -243,7 +247,9 @@ Tick selectCSDuration(Tick subject_duration, float split_prob,
   // Use Countersubject voice profile (default: voice 1 in 4-voice texture).
   VoiceProfile cs_profile = getVoiceProfile(TextureFunction::Countersubject, 1, 4);
   Tick dur = FugueEnergyCurve::selectDuration(energy, tick, gen, subject_duration,
-                                               cs_profile);
+                                               cs_profile,
+                                               false, 1.0f, false,
+                                               markov, prev_dur_cat, dir_ivl);
 
   // 16th note restriction: forbidden when energy < 0.6 (Severe, Noble).
   // Baroque practice: CS sixteenths only in Playful/Restless contexts.
@@ -531,9 +537,20 @@ std::vector<NoteEvent> generateCSAttempt(const Subject& subject,
           subject.notes[subj_idx + 1].pitch);
     }
 
-    // Generate complementary duration.
+    // Generate complementary duration with Markov context.
+    const MarkovModel* markov = nullptr;
+    DurCategory prev_dur_cat = DurCategory::Qtr;
+    DirIntervalClass dir_ivl = DirIntervalClass::StepUp;
+    if (!result.empty()) {
+      prev_dur_cat = ticksToDurCategory(result.back().duration);
+      DegreeStep step = computeDegreeStep(result.back().pitch, current_pitch,
+                                          key, scale);
+      dir_ivl = toDirIvlClass(step);
+      markov = &kFugueUpperMarkov;
+    }
     Tick duration = selectCSDuration(subj_note.duration,
-                                     params.long_split_prob, current_tick, gen);
+                                     params.long_split_prob, current_tick, gen,
+                                     markov, prev_dur_cat, dir_ivl);
     if (current_tick + duration > total_ticks) {
       duration = total_ticks - current_tick;
       if (duration < kEighthNote) break;

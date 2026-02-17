@@ -113,9 +113,9 @@ TEST(MelodicContextTest, LeadingToneCorrectResolution_Bonus) {
   ctx.is_leading_tone = true;
 
   // Correct resolution: semitone up (interval=1, directed=+1).
-  // Gets stepwise bonus (+0.2) and resolution bonus (+0.1).
+  // Gets stepwise bonus (+0.1) and resolution bonus (+0.1).
   float score = MelodicContext::scoreMelodicQuality(ctx, 72);
-  EXPECT_FLOAT_EQ(score, 0.5f + 0.2f + 0.1f);
+  EXPECT_FLOAT_EQ(score, 0.5f + 0.1f + 0.1f);
 }
 
 TEST(MelodicContextTest, DefaultConstructor_AllZero) {
@@ -384,6 +384,74 @@ TEST(MelodicContextTest, Rule4_FourConsecutive_HeavyPenalty) {
   float repeat_score = MelodicContext::scoreMelodicQuality(ctx, 60);
   // Base 0.5 - 0.5 = 0.0
   EXPECT_NEAR(repeat_score, 0.0f, 0.01f);
+}
+
+// ---------------------------------------------------------------------------
+// Rule 9: Run length control (consecutive same-direction stepwise motion)
+// ---------------------------------------------------------------------------
+
+TEST(MelodicContextTest, RunLengthPenalty) {
+  // A long run of same-direction stepwise motion should be penalized.
+  MelodicContext ctx;
+  ctx.prev_pitches[0] = 67;  // G4
+  ctx.prev_pitches[1] = 65;  // F4
+  ctx.prev_pitches[2] = 64;  // E4
+  ctx.prev_count = 3;
+  ctx.prev_direction = 1;  // ascending
+  ctx.consecutive_same_dir = 5;  // 5 consecutive ascending steps
+
+  // Candidate: continue ascending by step (A4 = 69)
+  float score_continue = MelodicContext::scoreMelodicQuality(ctx, 69);
+
+  // Same context but short run
+  MelodicContext ctx_short = ctx;
+  ctx_short.consecutive_same_dir = 2;
+  float score_short_run = MelodicContext::scoreMelodicQuality(ctx_short, 69);
+
+  // Long run should score lower
+  EXPECT_LT(score_continue, score_short_run);
+}
+
+TEST(MelodicContextTest, RunLength_BelowThreshold_NoPenalty) {
+  // A run of 4 (below threshold of 5) should NOT trigger penalty.
+  MelodicContext ctx;
+  ctx.prev_pitches[0] = 65;  // F4
+  ctx.prev_pitches[1] = 64;  // E4
+  ctx.prev_count = 2;
+  ctx.prev_direction = 1;
+  ctx.consecutive_same_dir = 4;
+
+  float score_4 = MelodicContext::scoreMelodicQuality(ctx, 67);  // Step up
+
+  MelodicContext ctx_5 = ctx;
+  ctx_5.consecutive_same_dir = 5;
+  float score_5 = MelodicContext::scoreMelodicQuality(ctx_5, 67);
+
+  // Threshold is >= 5, so 4 should score equal or higher than 5.
+  EXPECT_GT(score_4, score_5);
+}
+
+TEST(MelodicContextTest, RunLength_DirectionChange_NoPenalty) {
+  // Changing direction should NOT trigger the run length penalty,
+  // even with a long consecutive_same_dir count.
+  MelodicContext ctx;
+  ctx.prev_pitches[0] = 67;  // G4
+  ctx.prev_pitches[1] = 65;  // F4
+  ctx.prev_count = 2;
+  ctx.prev_direction = 1;  // Was ascending
+  ctx.consecutive_same_dir = 6;
+
+  // Step DOWN (direction change): should not be penalized by Rule 9.
+  float score_reverse = MelodicContext::scoreMelodicQuality(ctx, 65);
+  // Step UP (same direction): should be penalized.
+  float score_continue = MelodicContext::scoreMelodicQuality(ctx, 69);
+
+  EXPECT_GT(score_reverse, score_continue);
+}
+
+TEST(MelodicContextTest, ConsecutiveSameDir_DefaultZero) {
+  MelodicContext ctx;
+  EXPECT_EQ(ctx.consecutive_same_dir, 0);
 }
 
 }  // namespace

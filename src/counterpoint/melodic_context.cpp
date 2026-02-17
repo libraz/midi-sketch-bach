@@ -53,26 +53,26 @@ float MelodicContext::scoreMelodicQuality(const MelodicContext& ctx, uint8_t can
   int directed = static_cast<int>(candidate) - static_cast<int>(prev);
   int direction = (directed > 0) ? 1 : (directed < 0 ? -1 : 0);
 
-  // Rule 1: Step after leap in opposite direction (+0.3)
+  // Rule 1: Step after leap in opposite direction (+0.2)
   // A leap (>= 4 semitones) followed by stepwise motion (1-2 semitones)
   // in the opposite direction is a hallmark of good Bach voice leading.
   if (ctx.prev_count >= 2 && ctx.prev_direction != 0) {
     int prev_interval = absoluteInterval(prev, ctx.prev_pitches[1]);
     if (prev_interval >= 4 && interval >= 1 && interval <= 2 && direction != 0 &&
         direction != ctx.prev_direction) {
-      score += 0.3f;
+      score += 0.2f;
     }
   }
 
-  // Rule 2: Stepwise motion (+0.2)
+  // Rule 2: Stepwise motion (+0.1)
   if (interval >= 1 && interval <= 2) {
-    score += 0.2f;
+    score += 0.1f;
   }
 
-  // Rule 3: Imperfect consonance interval (+0.1)
+  // Rule 3: Imperfect consonance interval (+0.05)
   int reduced = interval_util::compoundToSimple(interval);
   if (interval_util::isConsonance(reduced) && !interval_util::isPerfectConsonance(reduced)) {
-    score += 0.1f;
+    score += 0.05f;
   }
 
   // Rule 4: Same-pitch repetition penalty (graduated).
@@ -118,6 +118,15 @@ float MelodicContext::scoreMelodicQuality(const MelodicContext& ctx, uint8_t can
     } else {
       score -= 0.15f;  // Same-direction step: mild penalty.
     }
+  }
+
+  // Rule 9: Run length control.
+  // Penalize excessively long runs of same-direction stepwise motion.
+  // This prevents meandering scalar passages that lack the characteristic
+  // leaps and direction changes of Baroque voice leading.
+  if (ctx.consecutive_same_dir >= 5 && direction != 0 &&
+      direction == ctx.prev_direction && interval <= 2) {
+    score -= 0.15f;
   }
 
   // Clamp to [0.0, 1.0].

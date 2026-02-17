@@ -116,9 +116,37 @@ MelodicContext buildMelodicContextFromState(const CounterpointState& state, Voic
     ctx.prev_direction = (dir > 0) ? 1 : (dir < 0) ? -1 : 0;
     ctx.leap_needs_resolution = (absoluteInterval(iter->pitch, iter2->pitch) >= 5);
   }
+  if (voice_notes.size() >= 3) {
+    auto iter3 = voice_notes.rbegin();
+    ++iter3;
+    ++iter3;
+    ctx.prev_pitches[2] = iter3->pitch;
+    ctx.prev_count = 3;
+  }
   // Leading tone detection: pitch class == (key + 11) % 12
   uint8_t prev_pc = getPitchClass(ctx.prev_pitches[0]);
   ctx.is_leading_tone = (prev_pc == (static_cast<uint8_t>(state.getKey()) + 11) % 12);
+
+  // Compute consecutive same-direction stepwise run length.
+  // Walk back through the voice's recent history counting same-direction steps.
+  ctx.consecutive_same_dir = 0;
+  if (ctx.prev_count >= 2 && ctx.prev_direction != 0) {
+    int8_t run_dir = ctx.prev_direction;
+    int run = 0;
+    for (int idx = static_cast<int>(voice_notes.size()) - 1; idx >= 1; --idx) {
+      int diff = static_cast<int>(voice_notes[idx].pitch) -
+                 static_cast<int>(voice_notes[idx - 1].pitch);
+      int dir = (diff > 0) ? 1 : (diff < 0 ? -1 : 0);
+      int ivl = std::abs(diff);
+      if (dir == run_dir && ivl >= 1 && ivl <= 2) {
+        ++run;
+      } else {
+        break;
+      }
+    }
+    ctx.consecutive_same_dir = static_cast<int8_t>(run > 127 ? 127 : run);
+  }
+
   return ctx;
 }
 

@@ -1738,7 +1738,6 @@ FugueResult generateFugue(const FugueConfig& config) {
     uint8_t tonic_for_pedal = tonicBassPitchForVoices(config.key, num_voices);
     uint8_t dominant_pitch = clampPitch(
         static_cast<int>(tonic_for_pedal) + interval::kPerfect5th, ped_lo, ped_hi);
-
     // Remove existing lowest-voice notes in the pedal region.
     removeLowestVoiceNotes(all_notes, lowest_voice,
                            current_tick, current_tick + pedal_duration);
@@ -2079,7 +2078,8 @@ FugueResult generateFugue(const FugueConfig& config) {
         // Coda notes are design values (Principle 4): createCodaNotes already
         // handles voice crossing and voice-leading internally.  Skip octave
         // correction and phase-aware ceiling to preserve coda entry proximity.
-        bool skip_post_adjust = (source == BachNoteSource::Coda);
+        bool skip_post_adjust = (source == BachNoteSource::Coda ||
+                                    source == BachNoteSource::PedalPoint);
 
         // Apply octave correction for structural voice crossings.
         bool has_crossing = false;
@@ -2286,6 +2286,17 @@ FugueResult generateFugue(const FugueConfig& config) {
     ScaleType effective_scale =
         config.is_minor ? ScaleType::HarmonicMinor : ScaleType::Major;
 
+    // Snapshot PedalPoint pitches before post-processing.  Leap resolution,
+    // parallel repair, and range enforcement treat Structural notes as shiftable
+    // (octave only), but PedalPoint is a sustained design pitch that must be
+    // preserved exactly.  We restore after all repair passes complete.
+    std::map<Tick, uint8_t> pedal_pitch_snapshot;
+    for (const auto& note : all_notes) {
+      if (note.source == BachNoteSource::PedalPoint) {
+        pedal_pitch_snapshot[note.start_tick] = note.pitch;
+      }
+    }
+
     // Leap resolution: fix unresolved melodic leaps (contrary step rule).
     {
       LeapResolutionParams lr_params;
@@ -2303,7 +2314,6 @@ FugueResult generateFugue(const FugueConfig& config) {
                                             num_voices);
       resolveLeaps(all_notes, lr_params);
     }
-
     // -----------------------------------------------------------------------
     // Parallel repair pass (primary): fix parallel perfect consonances while
     // notes still have maximum pitch flexibility (before diatonic snapping).
@@ -2369,7 +2379,6 @@ FugueResult generateFugue(const FugueConfig& config) {
       if (getProtectionLevel(note.source) == ProtectionLevel::Architectural) {
         continue;
       }
-
       Key note_key = tonal_plan.keyAtTick(note.start_tick);
       const HarmonicEvent& harm = detailed_timeline.getAt(note.start_tick);
 
@@ -3014,7 +3023,6 @@ FugueResult generateFugue(const FugueConfig& config) {
       };
       repairRepeatedNotes(all_notes, rn_params);
     }
-
     // -----------------------------------------------------------------------
     // Enforce per-voice organ range before final parallel repair.
     // Uses getFugueVoiceRange (aligns with analyzer per-channel checks).
@@ -3082,6 +3090,17 @@ FugueResult generateFugue(const FugueConfig& config) {
           static_cast<int>(std::ceil(
               static_cast<float>(all_notes.size()) * 0.005f))));
       repairParallelPerfect(all_notes, final_repair_params);
+    }
+
+    // Restore PedalPoint pitches from snapshot.  Post-processing steps above
+    // may have octave-shifted or clamped them; undo those modifications.
+    for (auto& note : all_notes) {
+      if (note.source == BachNoteSource::PedalPoint) {
+        auto iter = pedal_pitch_snapshot.find(note.start_tick);
+        if (iter != pedal_pitch_snapshot.end()) {
+          note.pitch = iter->second;
+        }
+      }
     }
 
     // -----------------------------------------------------------------------
@@ -3159,8 +3178,9 @@ FugueResult generateFugue(const FugueConfig& config) {
 
               for (int ci = 0; ci < 2 && !tick_changed; ++ci) {
                 int fix_idx = candidates[ci];
-                // Coda and Architectural notes are design values — never alter.
+                // Coda, PedalPoint, and Architectural notes are design values — never alter.
                 if (all_notes[fix_idx].source == BachNoteSource::Coda) continue;
+                if (all_notes[fix_idx].source == BachNoteSource::PedalPoint) continue;
                 if (getProtectionLevel(all_notes[fix_idx].source) ==
                     ProtectionLevel::Architectural) continue;
                 uint8_t fix_voice = all_notes[fix_idx].voice;
@@ -3186,6 +3206,57 @@ FugueResult generateFugue(const FugueConfig& config) {
                 }
               }
             }
+          }
+        }
+      }
+
+      // Pedal consonance pass: fix remaining dissonances between non-pedal notes
+      // and PedalPoint notes on ANY beat.  The main sweep above only processes
+      // strong beats (0, 2), but dissonances against a sustained pedal are
+      // audible on weak beats too.  This pass targets only pedal-related pairs
+      // so it does not alter the general contrapuntal texture.
+      for (size_t nidx = 0; nidx < all_notes.size(); ++nidx) {
+        auto& note = all_notes[nidx];
+        if (note.source == BachNoteSource::PedalPoint) continue;
+        if (note.source == BachNoteSource::Coda) continue;
+        if (getProtectionLevel(note.source) == ProtectionLevel::Architectural)
+          continue;
+        if (note.start_tick % kTicksPerBeat != 0) continue;
+
+        // Find any PedalPoint note sounding at this tick.
+        uint8_t pedal_p = 0;
+        for (uint8_t vid = 0; vid < num_voices; ++vid) {
+          int pidx = soundingIdx(vid, note.start_tick);
+          if (pidx >= 0 &&
+              all_notes[pidx].source == BachNoteSource::PedalPoint) {
+            pedal_p = all_notes[pidx].pitch;
+            break;
+          }
+        }
+        if (pedal_p == 0) continue;
+
+        int ivl = interval_util::compoundToSimple(
+            absoluteInterval(note.pitch, pedal_p));
+        if (interval_util::isConsonance(ivl)) continue;
+        // P4 above bass is dissonant; P4 between upper voices is OK.
+        if (num_voices >= 3 && ivl == interval::kPerfect4th &&
+            note.pitch > pedal_p) continue;  // note is upper voice
+
+        auto [flo, fhi] = getFugueVoiceRange(note.voice, num_voices);
+        Key fix_key = tonal_plan.keyAtTick(note.start_tick);
+        for (int delta : {1, -1, 2, -2, 3, -3}) {
+          int cand = static_cast<int>(note.pitch) + delta;
+          if (cand < flo || cand > fhi) continue;
+          uint8_t ucand = static_cast<uint8_t>(cand);
+          if (!scale_util::isScaleTone(ucand, fix_key, effective_scale))
+            continue;
+          if (checkVerticalConsonance(ucand, note.voice, note.start_tick,
+                                      all_notes, detailed_timeline,
+                                      num_voices)) {
+            note.pitch = ucand;
+            note.modified_by |=
+                static_cast<uint8_t>(NoteModifiedBy::ChordToneSnap);
+            break;
           }
         }
       }

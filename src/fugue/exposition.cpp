@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "core/figure_injector.h"
+#include "core/markov_tables.h"
 #include "core/note_creator.h"
 #include "core/interval.h"
 #include "core/note_source.h"
@@ -350,11 +351,32 @@ void placeFreeCounterpoint(VoiceId voice_id,
   };
 
   VoiceProfile voice_profile = getVoiceProfile(voice_id, num_voices);
+  const MarkovModel& markov_ref = isPedalVoice(voice_id, num_voices)
+                                      ? kFuguePedalMarkov
+                                      : kFugueUpperMarkov;
 
   while (remaining > 0) {
     Tick other_dur = findOtherDuration(current_tick);
+
+    // Markov duration context from previous note in this voice.
+    const MarkovModel* markov = nullptr;
+    DurCategory prev_dur_cat = DurCategory::Qtr;
+    DirIntervalClass dir_ivl = DirIntervalClass::StepUp;
+    if (!voice_notes[voice_id].empty()) {
+      const auto& prev_note = voice_notes[voice_id].back();
+      prev_dur_cat = ticksToDurCategory(prev_note.duration);
+      uint8_t current_pitch_est = scale_util::absoluteDegreeToPitch(
+          current_deg, key, scale);
+      DegreeStep step = computeDegreeStep(prev_note.pitch, current_pitch_est,
+                                          key, scale);
+      dir_ivl = toDirIvlClass(step);
+      markov = &markov_ref;
+    }
+
     Tick raw_dur = FugueEnergyCurve::selectDuration(energy, current_tick, rng,
-                                                     other_dur, voice_profile);
+                                                     other_dur, voice_profile,
+                                                     false, 1.0f, false,
+                                                     markov, prev_dur_cat, dir_ivl);
 
     // Guard 1: Split duration at bar boundaries.
     // Non-suspension notes crossing bar lines feel unnatural in counterpoint.
