@@ -14,6 +14,8 @@
 
 namespace bach {
 
+enum class MotifOp : uint8_t;
+
 /// @brief A scored motif fragment in the pool.
 struct PooledMotif {
   std::vector<NoteEvent> notes;          ///< Note events normalized to tick 0.
@@ -72,6 +74,19 @@ class MotifPool {
   /// @brief Check if the pool is empty.
   /// @return True if no motifs are present.
   bool empty() const;
+
+  /// @brief Get an appropriate motif for a given operation.
+  ///
+  /// Maps operations to preferred pool ranks:
+  ///   Original/Invert/Retrograde/Augment/Diminish -> rank 0 (subject_head)
+  ///   Fragment -> first entry with origin "fragment" (rank 4+)
+  ///   Sequence -> rank 0 (subject head as sequence material)
+  ///
+  /// Falls back to best() if preferred rank is unavailable.
+  ///
+  /// @param op Motif operation that will be applied.
+  /// @return Pointer to appropriate motif, or nullptr if pool is empty.
+  const PooledMotif* getForOp(MotifOp op) const;
 
  private:
   std::vector<PooledMotif> motifs_;

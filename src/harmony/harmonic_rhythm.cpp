@@ -66,6 +66,7 @@ float phaseToRhythmFactor(FuguePhase phase, bool near_cadence) {
     case FuguePhase::Develop:
       return kHarmonicRhythmDevelop;
     case FuguePhase::Resolve:
+    case FuguePhase::Conclude:
       return kHarmonicRhythmResolve;
   }
   return kHarmonicRhythmDevelop;

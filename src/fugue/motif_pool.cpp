@@ -3,11 +3,10 @@
 #include "fugue/motif_pool.h"
 
 #include <algorithm>
-#include <cmath>
-#include <cstdint>
 #include <set>
 #include <vector>
 
+#include "constraint/motif_constraint.h"
 #include "core/basic_types.h"
 #include "core/pitch_utils.h"
 
@@ -234,6 +233,28 @@ size_t MotifPool::size() const {
 
 bool MotifPool::empty() const {
   return motifs_.empty();
+}
+
+const PooledMotif* MotifPool::getForOp(MotifOp op) const {
+  if (motifs_.empty()) return nullptr;
+
+  switch (op) {
+    case MotifOp::Fragment: {
+      // Find first fragment entry.
+      for (const auto& motif : motifs_) {
+        if (motif.origin == "fragment") return &motif;
+      }
+      return best();  // Fallback.
+    }
+    case MotifOp::Original:
+    case MotifOp::Invert:
+    case MotifOp::Retrograde:
+    case MotifOp::Augment:
+    case MotifOp::Diminish:
+    case MotifOp::Sequence:
+    default:
+      return best();  // Rank 0 (subject_head).
+  }
 }
 
 }  // namespace bach

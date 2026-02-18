@@ -1022,8 +1022,14 @@ PlacementResult CollisionResolver::tryStrategy(
             MelodicContext mel_ctx = buildMelodicContextFromState(state, voice_id);
             float melodic_score = MelodicContext::scoreMelodicQuality(
                 mel_ctx, cand_pitch);
-            // Invert: high melodic quality -> low penalty.
-            penalty += (1.0f - melodic_score) * 0.3f;
+            // Weak-beat Flexible sources: increase melodic weight to 0.45.
+            // Strong beats: keep 0.3 to preserve vertical safety (tritone/cross-relation).
+            float mel_weight = 0.3f;
+            if (!strong_beat &&
+                getProtectionLevel(prev_note->source) == ProtectionLevel::Flexible) {
+              mel_weight = 0.45f;
+            }
+            penalty += (1.0f - melodic_score) * mel_weight;
 
             // Leap resolution priority: favor candidates that resolve a pending leap.
             if (mel_ctx.leap_needs_resolution) {

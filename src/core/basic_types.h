@@ -159,7 +159,8 @@ const char* voiceRoleToString(VoiceRole role);
 enum class FuguePhase : uint8_t {
   Establish,  // Exposition
   Develop,    // Middle entries, episodes
-  Resolve     // Final entries, coda
+  Resolve,    // Final entries, coda
+  Conclude    // Coda / closing gesture
 };
 
 /// @brief Convert FuguePhase to human-readable string.

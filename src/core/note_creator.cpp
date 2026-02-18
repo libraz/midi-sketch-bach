@@ -13,13 +13,11 @@
 
 #include "core/interval.h"
 #include "core/pitch_utils.h"
-#include "core/scale.h"
 #include "counterpoint/bach_rule_evaluator.h"
 #include "counterpoint/melodic_context.h"
 #include "counterpoint/collision_resolver.h"
 #include "counterpoint/counterpoint_state.h"
 #include "counterpoint/i_rule_evaluator.h"
-#include "counterpoint/parallel_repair.h"
 
 namespace bach {
 
@@ -156,6 +154,7 @@ namespace {
 int protectionPriority(ProtectionLevel level) {
   switch (level) {
     case ProtectionLevel::Immutable: return 0;
+    case ProtectionLevel::Architectural: return 0;
     case ProtectionLevel::SemiImmutable: return 0;
     case ProtectionLevel::Structural: return 1;
     case ProtectionLevel::Flexible: return 2;
@@ -191,10 +190,6 @@ std::vector<NoteEvent> postValidateNotes(
     const ProtectionOverrides& protection_overrides,
     bool stylus_phantasticus) {
   if (raw_notes.empty()) return {};
-
-  // Determine scale type for diatonic validation of step shifts.
-  ScaleType effective_scale = key_sig.is_minor ? ScaleType::NaturalMinor
-                                               : ScaleType::Major;
 
   // Initialize counterpoint engine.
   // Use voice ranges at tick 0 for initial registration.
@@ -525,18 +520,6 @@ std::vector<NoteEvent> postValidateNotes(
     if (note.pitch > hi) note.pitch = hi;
   }
 
-  // Final pass: fix parallel perfect consonances via shared repair utility.
-  {
-    ParallelRepairParams repair_params;
-    repair_params.num_voices = num_voices;
-    repair_params.scale = effective_scale;
-    repair_params.key_at_tick = [&](Tick) { return key_sig.tonic; };
-    repair_params.voice_range = [&](uint8_t v, Tick t) -> std::pair<uint8_t, uint8_t> {
-      return voice_range_fn(v, t);
-    };
-    repairParallelPerfect(result, repair_params);
-  }
-
   // Log warning if drop rate exceeds threshold.
   if (local_stats.drop_rate() > 0.10f) {
     std::fprintf(stderr,
@@ -584,10 +567,14 @@ std::vector<NoteEvent> postValidateNotes(
     const ProtectionOverrides& protection_overrides,
     const PostValidatePolicy& policy,
     Tick cadence_tick) {
-  // protection_overrides and cadence_tick are reserved for future refinement
-  // (cadence-zone resolution direction, per-voice override in targeted pass).
+  // protection_overrides, cadence_tick, num_voices, key_sig, and policy are
+  // reserved for future refinement (cadence-zone resolution direction,
+  // per-voice override in targeted pass).
   (void)protection_overrides;
   (void)cadence_tick;
+  (void)num_voices;
+  (void)key_sig;
+  (void)policy;
 
   if (raw_notes.empty()) {
     if (stats) *stats = {};
@@ -599,9 +586,8 @@ std::vector<NoteEvent> postValidateNotes(
   // (which builds a fresh CounterpointState and runs the full createBachNote
   // cascade), this version performs only:
   //   1. Range clamping (non-destructive, never drops notes)
-  //   2. Conditional parallel perfect repair (per policy)
-  //   3. Shift-magnitude stat tracking
-  //   4. Protected-note integrity verification
+  //   2. Shift-magnitude stat tracking
+  //   3. Protected-note integrity verification
   //
   // This avoids the problem of re-validating already-valid notes against a
   // fresh counterpoint state, which can spuriously reject notes whose
@@ -633,22 +619,7 @@ std::vector<NoteEvent> postValidateNotes(
     }
   }
 
-  // --- Step 2: Conditional parallel perfect repair ---
-  if (policy.fix_parallel_perfect) {
-    ScaleType effective_scale = key_sig.is_minor ? ScaleType::NaturalMinor
-                                                 : ScaleType::Major;
-    ParallelRepairParams repair_params;
-    repair_params.num_voices = num_voices;
-    repair_params.scale = effective_scale;
-    repair_params.key_at_tick = [&](Tick) { return key_sig.tonic; };
-    repair_params.voice_range = [&](uint8_t v_id,
-                                     Tick tick) -> std::pair<uint8_t, uint8_t> {
-      return voice_range_fn(v_id, tick);
-    };
-    repairParallelPerfect(raw_notes, repair_params);
-  }
-
-  // --- Step 3: Compute shift statistics and protected-note tracking ---
+  // --- Step 2: Compute shift statistics and protected-note tracking ---
   uint32_t subject_touches = 0;
   uint32_t countersubject_touches = 0;
   int total_shift = 0;

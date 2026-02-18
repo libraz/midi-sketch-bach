@@ -38,6 +38,7 @@ AnalysisSystem analysisSystemForForm(FormType form) {
     case FormType::ToccataAndFugue:
     case FormType::Passacaglia:
     case FormType::FantasiaAndFugue:
+    case FormType::GoldbergVariations:
       return AnalysisSystem::Organ;
 
     case FormType::CelloPrelude:

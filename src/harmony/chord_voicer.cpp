@@ -213,19 +213,26 @@ ChordVoicing voiceChord(const HarmonicEvent& event, uint8_t num_voices,
     // Doubling priority: root > fifth > third.
     // Never double: leading tone, seventh, diminished fifth.
     bool added = false;
-    // Try root.
-    if (!isLeadingTone(root_pc, event.key, event.is_minor)) {
+    int seventh_pc = has_seventh ? chord_pcs[3] : -1;
+    // Try root (unless it's the leading tone or the seventh).
+    if ((!leading_tone_present || !isLeadingTone(root_pc, event.key, event.is_minor)) &&
+        root_pc != seventh_pc) {
       needed_pcs.push_back(root_pc);
       added = true;
     }
     if (!added && !is_diminished_fifth &&
-        !isLeadingTone(fifth_pc, event.key, event.is_minor)) {
+        (!leading_tone_present || !isLeadingTone(fifth_pc, event.key, event.is_minor)) &&
+        fifth_pc != seventh_pc) {
       needed_pcs.push_back(fifth_pc);
       added = true;
     }
+    if (!added && (!leading_tone_present || !isLeadingTone(third_pc, event.key, event.is_minor)) &&
+        third_pc != seventh_pc) {
+      needed_pcs.push_back(third_pc);
+      added = true;
+    }
     if (!added) {
-      // Fallback: double root regardless (shouldn't normally happen).
-      needed_pcs.push_back(root_pc);
+      needed_pcs.push_back(root_pc);  // Fallback
     }
     if (static_cast<int>(needed_pcs.size()) >= inner_count) break;
   }

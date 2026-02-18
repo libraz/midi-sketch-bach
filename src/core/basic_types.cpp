@@ -19,6 +19,7 @@ const char* fuguePhaseToString(FuguePhase phase) {
     case FuguePhase::Establish: return "Establish";
     case FuguePhase::Develop:   return "Develop";
     case FuguePhase::Resolve:   return "Resolve";
+    case FuguePhase::Conclude:  return "Conclude";
   }
   return "Unknown";
 }

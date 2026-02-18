@@ -372,6 +372,72 @@ GeneratorResult generatePreludeAndFugueForm(const GeneratorConfig& config) {
   return result;
 }
 
+/// @brief Result of merging a preamble form (toccata/fantasia) with a fugue.
+struct PreambleFugueResult {
+  std::vector<Track> tracks;
+  Tick total_duration_ticks;
+  std::vector<TempoEvent> tempo_events;
+  HarmonicTimeline timeline;
+  HarmonicTimeline generation_timeline;
+};
+
+/// @brief Merge preamble tracks with fugue tracks into a single result.
+///
+/// Offsets fugue notes by preamble duration, merges tracks, combines
+/// tempo maps, and offsets generation_timeline.
+///
+/// @param preamble_tracks Tracks from the preamble form (moved).
+/// @param preamble_duration Duration of the preamble in ticks.
+/// @param fugue_result Fugue generation result.
+/// @param preamble_tempo Tempo events from the preamble form.
+/// @param key_sig Key signature for timeline creation.
+/// @param bpm BPM for fugue tempo map generation.
+/// @return Combined result.
+PreambleFugueResult mergePreambleWithFugue(
+    std::vector<Track> preamble_tracks,
+    Tick preamble_duration,
+    FugueResult& fugue_result,
+    std::vector<TempoEvent> preamble_tempo,
+    KeySignature key_sig,
+    uint16_t bpm) {
+  PreambleFugueResult result;
+
+  // Compute fugue duration BEFORE offset (avoid double-counting).
+  Tick fugue_duration = calculateTotalDuration(fugue_result.tracks);
+
+  // Offset fugue notes by preamble duration and merge tracks.
+  offsetTrackNotes(fugue_result.tracks, preamble_duration);
+  result.tracks = std::move(preamble_tracks);
+  mergeTracksInPlace(result.tracks, fugue_result.tracks);
+
+  result.total_duration_ticks = preamble_duration + fugue_duration;
+
+  // Combine tempo maps: preamble tempo + offset fugue tempo.
+  result.tempo_events = std::move(preamble_tempo);
+  auto fugue_tempo = generateFugueTempoMap(fugue_result.structure, bpm);
+  for (auto& evt : fugue_tempo) {
+    evt.tick += preamble_duration;
+    result.tempo_events.push_back(evt);
+  }
+
+  result.timeline = HarmonicTimeline::createStandard(
+      key_sig, result.total_duration_ticks, HarmonicResolution::Bar);
+
+  // Offset generation_timeline by preamble duration for dual-timeline analysis.
+  if (fugue_result.generation_timeline.size() > 0) {
+    HarmonicTimeline offset_gen_tl;
+    for (const auto& ev : fugue_result.generation_timeline.events()) {
+      HarmonicEvent offset_ev = ev;
+      offset_ev.tick += preamble_duration;
+      offset_ev.end_tick += preamble_duration;
+      offset_gen_tl.addEvent(offset_ev);
+    }
+    result.generation_timeline = std::move(offset_gen_tl);
+  }
+
+  return result;
+}
+
 }  // namespace
 
 /// @brief Remove duplicate notes and truncate overlapping notes within each track.
@@ -543,40 +609,18 @@ GeneratorResult generate(const GeneratorConfig& config) {
         break;
       }
 
-      // Compute fugue duration BEFORE offset (avoid double-counting).
-      Tick fugue_duration = calculateTotalDuration(fugue_result.tracks);
-
-      // Offset fugue notes by toccata duration and merge tracks.
-      offsetTrackNotes(fugue_result.tracks, toc_duration);
-      result.tracks = std::move(toc_result.tracks);
-      mergeTracksInPlace(result.tracks, fugue_result.tracks);
-      cleanupTrackOverlaps(result.tracks);
-
-      result.total_duration_ticks = toc_duration + fugue_duration;
-
-      // Toccata tempo map + offset fugue tempo map.
-      result.tempo_events = generateToccataTempoMap(
+      auto preamble_tempo = generateToccataTempoMap(
           toc_result.archetype, toc_result.sections,
           effective_config.bpm);
-      auto fugue_tempo = generateFugueTempoMap(fugue_result.structure, effective_config.bpm);
-      for (auto& evt : fugue_tempo) {
-        evt.tick += toc_duration;
-        result.tempo_events.push_back(evt);
-      }
-
-      result.timeline = HarmonicTimeline::createStandard(
-          effective_config.key, result.total_duration_ticks, HarmonicResolution::Bar);
-      // Offset generation_timeline by toccata duration for dual-timeline analysis.
-      if (fugue_result.generation_timeline.size() > 0) {
-        HarmonicTimeline offset_gen_tl;
-        for (const auto& ev : fugue_result.generation_timeline.events()) {
-          HarmonicEvent offset_ev = ev;
-          offset_ev.tick += toc_duration;
-          offset_ev.end_tick += toc_duration;
-          offset_gen_tl.addEvent(offset_ev);
-        }
-        result.generation_timeline = std::move(offset_gen_tl);
-      }
+      auto merged = mergePreambleWithFugue(
+          std::move(toc_result.tracks), toc_duration,
+          fugue_result, std::move(preamble_tempo),
+          effective_config.key, effective_config.bpm);
+      result.tracks = std::move(merged.tracks);
+      result.total_duration_ticks = merged.total_duration_ticks;
+      result.tempo_events = std::move(merged.tempo_events);
+      result.timeline = std::move(merged.timeline);
+      result.generation_timeline = std::move(merged.generation_timeline);
       result.success = true;
       result.seed_used = effective_config.seed;
       result.form_description =
@@ -623,39 +667,17 @@ GeneratorResult generate(const GeneratorConfig& config) {
         break;
       }
 
-      // Compute fugue duration BEFORE offset (avoid double-counting).
-      Tick fugue_duration = calculateTotalDuration(fugue_result.tracks);
-
-      // Offset fugue notes and merge tracks.
-      offsetTrackNotes(fugue_result.tracks, fant_duration);
-      result.tracks = std::move(fant_result.tracks);
-      mergeTracksInPlace(result.tracks, fugue_result.tracks);
-      cleanupTrackOverlaps(result.tracks);
-
-      result.total_duration_ticks = fant_duration + fugue_duration;
-
-      // Fantasia tempo map + offset fugue tempo map.
-      result.tempo_events = generateFantasiaTempoMap(
+      auto preamble_tempo = generateFantasiaTempoMap(
           fant_duration, fant_config.section_bars, effective_config.bpm);
-      auto fugue_tempo = generateFugueTempoMap(fugue_result.structure, effective_config.bpm);
-      for (auto& evt : fugue_tempo) {
-        evt.tick += fant_duration;
-        result.tempo_events.push_back(evt);
-      }
-
-      result.timeline = HarmonicTimeline::createStandard(
-          effective_config.key, result.total_duration_ticks, HarmonicResolution::Bar);
-      // Offset generation_timeline by fantasia duration for dual-timeline analysis.
-      if (fugue_result.generation_timeline.size() > 0) {
-        HarmonicTimeline offset_gen_tl;
-        for (const auto& ev : fugue_result.generation_timeline.events()) {
-          HarmonicEvent offset_ev = ev;
-          offset_ev.tick += fant_duration;
-          offset_ev.end_tick += fant_duration;
-          offset_gen_tl.addEvent(offset_ev);
-        }
-        result.generation_timeline = std::move(offset_gen_tl);
-      }
+      auto merged = mergePreambleWithFugue(
+          std::move(fant_result.tracks), fant_duration,
+          fugue_result, std::move(preamble_tempo),
+          effective_config.key, effective_config.bpm);
+      result.tracks = std::move(merged.tracks);
+      result.total_duration_ticks = merged.total_duration_ticks;
+      result.tempo_events = std::move(merged.tempo_events);
+      result.timeline = std::move(merged.timeline);
+      result.generation_timeline = std::move(merged.generation_timeline);
       result.success = true;
       result.seed_used = effective_config.seed;
       result.form_description =
@@ -731,7 +753,6 @@ GeneratorResult generate(const GeneratorConfig& config) {
         mergeTracksInPlace(result.tracks, movement.tracks);
         accumulated_ticks += movement.total_duration_ticks;
       }
-      cleanupTrackOverlaps(result.tracks);
 
       result.total_duration_ticks = accumulated_ticks;
       result.timeline = HarmonicTimeline::createStandard(

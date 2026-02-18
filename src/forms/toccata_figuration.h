@@ -24,6 +24,7 @@
 #include "core/scale.h"
 #include "harmony/chord_types.h"
 #include "harmony/harmonic_event.h"
+#include "harmony/harmonic_tension.h"
 #include "harmony/harmonic_timeline.h"
 
 namespace bach {
@@ -96,62 +97,6 @@ inline constexpr ToccataPhaseProfile kDramaticusProfiles[8] = {
 inline const ToccataPhaseProfile& getDramaticusPhaseProfile(int phase_idx) {
   int clamped = std::clamp(phase_idx, 0, 7);
   return detail::kDramaticusProfiles[clamped];
-}
-
-// ---------------------------------------------------------------------------
-// Harmonic tension computation
-// ---------------------------------------------------------------------------
-
-/// @brief Compute harmonic tension level from a harmonic event.
-///
-/// Maps chord degree and quality to a tension value in [0.0, 1.0].
-/// Tonic/stable chords return low tension; dominant and diminished chords
-/// return high tension. Used as a gate for 32nd-note injection.
-///
-/// @param harm The harmonic event to evaluate.
-/// @return Tension level in [0.0, 1.0].
-inline float computeHarmonicTension(const HarmonicEvent& harm) {
-  ChordDegree deg = harm.chord.degree;
-  ChordQuality qual = harm.chord.quality;
-
-  switch (deg) {
-    case ChordDegree::I:
-      return 0.0f;
-    case ChordDegree::vi:
-      return 0.0f;
-    case ChordDegree::iii:
-      return 0.2f;
-    case ChordDegree::IV:
-      return 0.3f;
-    case ChordDegree::ii:
-      return 0.3f;
-    case ChordDegree::V:
-      if (qual == ChordQuality::Dominant7) {
-        // Inversion-based tension differentiation for V7.
-        // 0=root (0.8), 1=3rd in bass (0.7), 3=7th in bass (0.9), other=0.8.
-        if (harm.chord.inversion == 1) return 0.7f;
-        if (harm.chord.inversion == 3) return 0.9f;
-        return 0.8f;
-      }
-      return 0.6f;
-    case ChordDegree::V_of_V:
-    case ChordDegree::V_of_vi:
-    case ChordDegree::V_of_IV:
-    case ChordDegree::V_of_ii:
-    case ChordDegree::V_of_iii:
-      return 0.7f;
-    case ChordDegree::viiDim:
-      if (qual == ChordQuality::Diminished7) return 1.0f;
-      return 0.9f;
-    case ChordDegree::bII:
-      return 0.6f;
-    case ChordDegree::bVI:
-    case ChordDegree::bVII:
-    case ChordDegree::bIII:
-      return 0.4f;
-    default:
-      return 0.5f;
-  }
 }
 
 // ---------------------------------------------------------------------------
@@ -566,20 +511,65 @@ inline FigurationResult generateFigurationSpan(
           }
 
           if (valid && fig_pitches.size() == figure->note_count) {
-            // Brechung safety: snap strong-beat pitches to chord tones and
-            // suppress large leaps created by snapping.
-            if (figure == &kBrechungDesc) {
-              auto chord_tones = collectChordTonesInRange(
-                  harm.chord, ctx.low_pitch, effective_high);
-              if (!chord_tones.empty()) {
-                constexpr int kLargeLeapThreshold = 7;  // > perfect 5th
-                int resolved_count = static_cast<int>(fig_pitches.size());
-                for (int idx = 0; idx < resolved_count; ++idx) {
-                  Tick note_tick = current_tick
-                                   + static_cast<Tick>(idx) * fig_note_dur;
-                  if (metricLevel(note_tick) >= MetricLevel::Beat) {
-                    if (!detail::isPitchInChordTones(
-                            fig_pitches[idx], chord_tones)) {
+            // Strong-beat chord tone snap for all figure types.
+            // Figure classification determines snap threshold:
+            //   - Pure diatonic stepwise / chromatic run: Bar only
+            //   - Leap/semitone mode figures: Beat or higher
+            bool is_diatonic_run = false;
+            bool is_chromatic_run = false;
+            if (figure->degree_intervals != nullptr) {
+              bool all_stepwise = true;
+              bool has_chroma = false;
+              for (int pidx = 0;
+                   pidx < static_cast<int>(figure->note_count) - 1; ++pidx) {
+                if (std::abs(figure->degree_intervals[pidx].degree_diff) > 1) {
+                  all_stepwise = false;
+                  break;
+                }
+                if (figure->degree_intervals[pidx].chroma_offset != 0) {
+                  has_chroma = true;
+                }
+              }
+              if (all_stepwise) {
+                is_diatonic_run = !has_chroma;
+                is_chromatic_run = has_chroma;
+              }
+            }
+            bool is_any_run = is_diatonic_run || is_chromatic_run;
+            MetricLevel snap_threshold =
+                is_any_run ? MetricLevel::Bar : MetricLevel::Beat;
+            auto chord_tones = collectChordTonesInRange(
+                harm.chord, ctx.low_pitch, effective_high);
+            if (!chord_tones.empty()) {
+              constexpr int kLargeLeapThreshold = 7;  // > perfect 5th
+              int resolved_count = static_cast<int>(fig_pitches.size());
+              for (int idx = 0; idx < resolved_count; ++idx) {
+                Tick note_tick = current_tick
+                                 + static_cast<Tick>(idx) * fig_note_dur;
+                if (metricLevel(note_tick) >= snap_threshold) {
+                  if (!detail::isPitchInChordTones(
+                          fig_pitches[idx], chord_tones)) {
+                    // NCT resolution tolerance: allow appoggiatura / retard.
+                    bool has_resolution = false;
+                    if (idx + 1 < resolved_count) {
+                      int step = std::abs(
+                          static_cast<int>(fig_pitches[idx + 1])
+                          - static_cast<int>(fig_pitches[idx]));
+                      if (step <= 2 && detail::isPitchInChordTones(
+                              fig_pitches[idx + 1], chord_tones)) {
+                        has_resolution = true;
+                      }
+                      if (!has_resolution && step == 0
+                          && idx + 2 < resolved_count) {
+                        int step2 = std::abs(
+                            static_cast<int>(fig_pitches[idx + 2])
+                            - static_cast<int>(fig_pitches[idx]));
+                        has_resolution = (step2 <= 2)
+                            && detail::isPitchInChordTones(
+                                fig_pitches[idx + 2], chord_tones);
+                      }
+                    }
+                    if (!has_resolution) {
                       uint8_t ref_pitch = (idx > 0)
                           ? fig_pitches[idx - 1]
                           : prev_pitch;
@@ -639,6 +629,26 @@ inline FigurationResult generateFigurationSpan(
       // Emit a bridge note using Markov model + melodic scoring.
       uint8_t bridge_pitch = selectToccataPitch(
           ctx, prev_pitch, harm, current_tick, rng);
+
+      // Strong-beat chord tone enforcement for bridge notes.
+      {
+        MetricLevel ml = metricLevel(current_tick);
+        if (ml >= MetricLevel::Beat) {
+          auto bridge_cts = collectChordTonesInRange(
+              harm.chord, ctx.low_pitch, effective_high);
+          if (!bridge_cts.empty() &&
+              !detail::isPitchInChordTones(bridge_pitch, bridge_cts)) {
+            uint8_t snapped = detail::findClosestChordTone(
+                bridge_pitch, prev_pitch, bridge_cts);
+            int snap_dist = std::abs(
+                static_cast<int>(snapped) - static_cast<int>(bridge_pitch));
+            // Bar: unconditional snap. Beat: snap only within 2 semitones.
+            if (ml == MetricLevel::Bar || snap_dist <= 2) {
+              bridge_pitch = snapped;
+            }
+          }
+        }
+      }
 
       // Determine bridge note duration.
       Tick bridge_dur = kBase16thDuration;

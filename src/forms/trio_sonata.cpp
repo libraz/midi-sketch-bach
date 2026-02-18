@@ -67,7 +67,7 @@ constexpr Tick kPhraseTicks = kPhraseBars * kTicksPerBar;  // 7680
 constexpr VoiceProfile kTrioUpper = {
     0.58f, 0.24f, 0.02f, true, 1,
     {0.3f, 1.0f, 1.2f, 3.0f, 2.5f, 1.0f}, 120,  // min=16th
-    0.22f, 0.0f, 0.30f};
+    0.22f, 0.0f, 0.30f, 0.10f};
 
 /// @brief Right hand register bounds.
 constexpr uint8_t kRhLow = 64;
@@ -565,6 +565,18 @@ std::vector<NoteEvent> generateFiguration(Tick start_tick, Tick end_tick,
         pitch = clampPitch(static_cast<int>(pitch), range_low, range_high);
       }
     }
+
+    // Anti-oscillation: avoid A-B-A pattern (non-downbeat only).
+    if (prev1 != prev0 && pitch == prev1 && !is_downbeat) {
+      int nudge = (direction != 0) ? direction : 1;
+      uint8_t alt = scale_util::absoluteDegreeToPitch(
+          scale_util::pitchToAbsoluteDegree(pitch, key, scale) + nudge, key, scale);
+      alt = clampPitch(static_cast<int>(alt), range_low, range_high);
+      if (alt != prev0 && alt != prev1) {
+        pitch = alt;
+      }
+    }
+
     pitch = clampPitch(static_cast<int>(pitch), range_low, range_high);
 
     NoteEvent note;

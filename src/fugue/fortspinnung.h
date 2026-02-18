@@ -63,6 +63,51 @@ inline FortspinnungGrammar getFortspinnungGrammar(SubjectCharacter character) {
   }
 }
 
+/// @brief Three-phase classification within a Fortspinnung episode.
+///
+/// Baroque Fortspinnung follows a Kernel->Sequence->Dissolution arc.
+/// Promoted from anonymous namespace in fortspinnung.cpp to enable
+/// the constraint-driven episode generator (Phase 3) to reference phases.
+enum class FortPhase : uint8_t { Kernel, Sequence, Dissolution };
+
+/// @brief Planned step in a Fortspinnung episode arc.
+///
+/// planFortspinnung() returns a sequence of steps describing WHAT should
+/// happen at each point in the episode, without placing actual notes.
+/// The constraint episode generator uses these steps to place notes
+/// with ConstraintState validation.
+struct FortspinnungStep {
+  Tick tick;                  ///< Absolute tick for this step.
+  VoiceId voice;              ///< Target voice.
+  MotifOp op;                 ///< Motif operation to apply.
+  size_t pool_rank;           ///< Motif pool rank to use.
+  FortPhase phase;            ///< Phase within the Fortspinnung arc.
+  Tick suggested_duration;    ///< Suggested duration for the motif at this step.
+};
+
+/// @brief Plan the Fortspinnung arc without placing notes.
+///
+/// Returns a sequence of steps describing the motivic plan for each
+/// point in the episode. The constraint episode generator consumes
+/// this plan and places notes with ConstraintState validation.
+///
+/// Existing generateFortspinnung() is unchanged (backward compatible).
+///
+/// @param pool Motif pool for fragment selection.
+/// @param grammar Phase ratios and dissolution parameters.
+/// @param start_tick Episode start tick.
+/// @param duration Episode duration in ticks.
+/// @param num_voices Number of active voices.
+/// @param character Subject character for weight selection.
+/// @param seed RNG seed.
+/// @return Planned steps sorted by tick.
+std::vector<FortspinnungStep> planFortspinnung(const MotifPool& pool,
+                                               const FortspinnungGrammar& grammar,
+                                               Tick start_tick, Tick duration,
+                                               uint8_t num_voices,
+                                               SubjectCharacter character,
+                                               uint32_t seed);
+
 /// @brief Generate Fortspinnung-style episode material from the motif pool.
 ///
 /// Fortspinnung ("spinning forth") is a Baroque compositional technique

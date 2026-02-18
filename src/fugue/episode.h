@@ -22,6 +22,7 @@ class IRuleEvaluator;
 class CollisionResolver;
 class HarmonicTimeline;
 class MotifPool;
+struct SectionAccumulator;
 
 /// @brief Episode material derived from subject fragments.
 ///
@@ -151,7 +152,8 @@ Episode generateFortspinnungEpisode(const Subject& subject, const MotifPool& poo
                                     IRuleEvaluator& cp_rules,
                                     CollisionResolver& cp_resolver,
                                     const HarmonicTimeline& timeline,
-                                    uint8_t pedal_pitch = 0);
+                                    uint8_t pedal_pitch = 0,
+                                    const SectionAccumulator* accum = nullptr);
 
 /// @brief Extract a motif (fragment) from the beginning of the subject.
 ///

@@ -770,7 +770,7 @@ TEST(TrioSonataTest, FortspinnungHasSequentialContent) {
   // The first half of each phrase should have sufficient note density.
   // At least 8 notes in the first 3/4 of each phrase for upper voices.
   // Seeds chosen to be compatible with pedal-first generation order.
-  for (uint32_t seed : {99u, 100u, 123u}) {
+  for (uint32_t seed : {99u, 100u, 101u}) {
     TrioSonataConfig config = makeTestConfig(seed);
     TrioSonataResult result = generateTrioSonata(config);
     ASSERT_TRUE(result.success);

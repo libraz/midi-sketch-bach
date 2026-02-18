@@ -100,6 +100,7 @@ const Registration& getRegistrationForPhase(const RegistrationPlan& plan,
     case FuguePhase::Develop:
       return plan.exposition;  // No change during development
     case FuguePhase::Resolve:
+    case FuguePhase::Conclude:
       return plan.stretto;
   }
 

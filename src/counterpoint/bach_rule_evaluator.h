@@ -105,14 +105,6 @@ class BachRuleEvaluator : public IRuleEvaluator {
   /// @brief Bach allows closer voice spacing (soft penalty, not rejection).
   bool isStrictSpacing() const override { return false; }
 
- private:
-  uint8_t num_voices_;
-  bool free_counterpoint_ = false;
-
-  /// @brief Get the previous note before the given tick for a voice.
-  static const NoteEvent* getPreviousNote(const CounterpointState& state,
-                                          VoiceId voice_id, Tick tick);
-
   /// @brief Check if a voice crossing at the given tick resolves by the next beat.
   /// @param state Counterpoint state to query.
   /// @param voice1 Higher voice (by convention).
@@ -122,6 +114,14 @@ class BachRuleEvaluator : public IRuleEvaluator {
   bool isCrossingTemporary(const CounterpointState& state,
                            VoiceId voice1, VoiceId voice2,
                            Tick tick) const;
+
+ private:
+  uint8_t num_voices_;
+  bool free_counterpoint_ = false;
+
+  /// @brief Get the previous note before the given tick for a voice.
+  static const NoteEvent* getPreviousNote(const CounterpointState& state,
+                                          VoiceId voice_id, Tick tick);
 };
 
 }  // namespace bach

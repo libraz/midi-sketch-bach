@@ -352,7 +352,8 @@ TEST_F(EpisodeConsonanceTest, BarBoundaryNotesExist) {
     }
 
     for (const auto& [tick, pitches] : tick_pitches) {
-      if (tick % kTicksPerBar == 0 && pitches.size() >= 2) {
+      // Check bar and half-bar boundaries (bass/pedal now advance in half-bars).
+      if (tick % (kTicksPerBeat * 2) == 0 && pitches.size() >= 2) {
         found_multi_voice_bar = true;
         break;
       }

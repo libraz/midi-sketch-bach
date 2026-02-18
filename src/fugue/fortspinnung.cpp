@@ -8,6 +8,7 @@
 #include <random>
 #include <vector>
 
+#include "constraint/motif_constraint.h"
 #include "core/basic_types.h"
 #include "core/figure_injector.h"
 #include "core/pitch_utils.h"
@@ -191,8 +192,7 @@ void applyStepwisePreference(std::vector<NoteEvent>& fragment, float preference,
   }
 }
 
-/// @brief Three-phase classification within a Fortspinnung episode.
-enum class FortPhase : uint8_t { Kernel, Sequence, Dissolution };
+// FortPhase is now declared in fortspinnung.h (promoted for Phase 3 visibility).
 
 /// @brief Place a fragment at a given tick offset, assigning voice ID.
 /// @param fragment Source fragment notes (tick-normalized to 0).
@@ -585,7 +585,7 @@ std::vector<NoteEvent> generateFortspinnung(const MotifPool& pool,
       if (tail.size() > 3) {
         tail.resize(3);
       }
-      auto bass_fragment = augmentMelody(tail, 0, 2);
+      auto bass_fragment = tail;  // Preserve original rhythm (no augment).
 
       // Transpose fragment to appropriate register from getFugueVoiceRange.
       auto [v2_lo_u, v2_hi_u] = getFugueVoiceRange(2, num_voices);
@@ -605,7 +605,7 @@ std::vector<NoteEvent> generateFortspinnung(const MotifPool& pool,
       while (bass_tick < start_tick + duration_ticks) {
         if (!rng::rollProbability(bass_rng, emit_prob)) {
           // Skip this segment (rest).
-          bass_tick += use_fragment ? frag_dur : kTicksPerBar;
+          bass_tick += use_fragment ? frag_dur : kTicksPerBeat * 2;
           use_fragment = !use_fragment;
           continue;
         }
@@ -624,13 +624,24 @@ std::vector<NoteEvent> generateFortspinnung(const MotifPool& pool,
           }
           bass_tick += frag_dur;
         } else {
-          // Anchor note: tonic held for one bar, derived from key.
-          int v2_anchor_pitch = 48 + static_cast<int>(key);
+          // Anchor note: diatonic degree cycling (I, V, IV, vi, iii, ii, vii).
+          constexpr int kDiatonicOffsets[] = {0, 7, 5, 9, 4, 2, 11};
+          constexpr int kNumDegrees = 7;
+          int deg_idx = static_cast<int>((bass_tick - start_tick) / (kTicksPerBeat * 2))
+                        % kNumDegrees;
+          int v2_anchor_pitch = 48 + static_cast<int>(key) + kDiatonicOffsets[deg_idx];
           int bass_anchor = mapToRegister(v2_anchor_pitch, v2_lo, v2_hi);
 
-          Tick anchor_dur = std::min(kTicksPerBar,
+          // Vary anchor duration: 8th(35%), quarter(30%), half(20%), bar(15%).
+          Tick base_dur;
+          float dur_roll = rng::rollFloat(bass_rng, 0.0f, 1.0f);
+          if (dur_roll < 0.35f) base_dur = kTicksPerBeat / 2;
+          else if (dur_roll < 0.65f) base_dur = kTicksPerBeat;
+          else if (dur_roll < 0.85f) base_dur = kTicksPerBeat * 2;
+          else base_dur = kTicksPerBar;
+          Tick anchor_dur = std::min(base_dur,
                                      start_tick + duration_ticks - bass_tick);
-          if (anchor_dur > 0) {
+          if (anchor_dur >= duration::kSixteenthNote) {
             NoteEvent anchor;
             anchor.start_tick = bass_tick;
             anchor.duration = anchor_dur;
@@ -640,7 +651,7 @@ std::vector<NoteEvent> generateFortspinnung(const MotifPool& pool,
             anchor.source = BachNoteSource::EpisodeMaterial;
             result.push_back(anchor);
           }
-          bass_tick += kTicksPerBar;
+          bass_tick += kTicksPerBeat * 2;  // Half-bar advance.
         }
         use_fragment = !use_fragment;
       }
@@ -674,7 +685,7 @@ std::vector<NoteEvent> generateFortspinnung(const MotifPool& pool,
       // Augmented tail fragment from voice 0.
       auto tail = extractTailMotif(voice0_notes, 3);
       if (tail.size() > 3) tail.resize(3);
-      auto pedal_fragment = augmentMelody(tail, 0, 2);
+      auto pedal_fragment = tail;  // Preserve original rhythm (no augment).
       for (auto& note : pedal_fragment) {
         note.pitch = mapToRegister(static_cast<int>(note.pitch) - 24,
                                    kPedalLo, kPedalHiNormal);
@@ -689,7 +700,7 @@ std::vector<NoteEvent> generateFortspinnung(const MotifPool& pool,
       bool use_fragment = true;
 
       while (pedal_tick < start_tick + duration_ticks) {
-        Tick segment_dur = use_fragment ? frag_dur : kTicksPerBar;
+        Tick segment_dur = use_fragment ? frag_dur : kTicksPerBeat * 2;
         bool force_emit = (consecutive_silent_bars >= kMaxSilentBars);
         bool emit = force_emit || rng::rollProbability(pedal_rng, emit_prob);
 
@@ -719,11 +730,22 @@ std::vector<NoteEvent> generateFortspinnung(const MotifPool& pool,
           }
           pedal_tick += frag_dur;
         } else {
-          // Anchor note: tonic or dominant from key (alternating).
-          int anchor_pitch = use_fragment ? tonic_bass : dominant_bass;
-          Tick anchor_dur = std::min(kTicksPerBar,
+          // Anchor note: tonic(50%), dominant(35%), subdominant(15%).
+          int anchor_pitch;
+          float pedal_roll = rng::rollFloat(pedal_rng, 0.0f, 1.0f);
+          if (pedal_roll < 0.50f) {
+            anchor_pitch = tonic_bass;
+          } else if (pedal_roll < 0.85f) {
+            anchor_pitch = dominant_bass;
+          } else {
+            int subdominant_bass = tonic_bass + 5;
+            if (subdominant_bass > kPedalHiAnchor) subdominant_bass -= 12;
+            anchor_pitch = clampPitch(subdominant_bass, static_cast<uint8_t>(kPedalLo),
+                                      static_cast<uint8_t>(kPedalHiAnchor));
+          }
+          Tick anchor_dur = std::min(kTicksPerBeat * 2,  // Half note.
                                      start_tick + duration_ticks - pedal_tick);
-          if (anchor_dur > 0) {
+          if (anchor_dur >= duration::kSixteenthNote) {
             NoteEvent anchor;
             anchor.start_tick = pedal_tick;
             anchor.duration = anchor_dur;
@@ -733,7 +755,7 @@ std::vector<NoteEvent> generateFortspinnung(const MotifPool& pool,
             anchor.source = BachNoteSource::EpisodeMaterial;
             result.push_back(anchor);
           }
-          pedal_tick += kTicksPerBar;
+          pedal_tick += kTicksPerBeat * 2;  // Half-bar advance.
         }
         use_fragment = !use_fragment;
       }
@@ -755,6 +777,97 @@ std::vector<NoteEvent> generateFortspinnung(const MotifPool& pool,
   }
 
   return result;
+}
+
+// ---------------------------------------------------------------------------
+// planFortspinnung -- constraint-driven episode arc planning (Phase 3)
+// ---------------------------------------------------------------------------
+
+std::vector<FortspinnungStep> planFortspinnung(
+    const MotifPool& pool, const FortspinnungGrammar& grammar,
+    Tick start_tick, Tick duration, uint8_t num_voices,
+    SubjectCharacter character, uint32_t seed) {
+  std::vector<FortspinnungStep> steps;
+  if (pool.empty() || duration == 0) return steps;
+
+  std::mt19937 rng(seed ^ 0xF0A7u);  // Different mix from note generation.
+  FragmentSelectionWeights weights = weightsForCharacter(character, rng);
+  CharacterEpisodeParams params = getCharacterParams(character);
+
+  Tick kernel_end = static_cast<Tick>(duration * grammar.kernel_ratio);
+  Tick sequence_end = static_cast<Tick>(
+      duration * (grammar.kernel_ratio + grammar.sequence_ratio));
+
+  // Kernel-phase weights: strongly prefer rank 0 (subject_head).
+  FragmentSelectionWeights kernel_weights;
+  kernel_weights.rank_weights[0] = 0.85f;
+  kernel_weights.rank_weights[1] = 0.10f;
+  kernel_weights.rank_weights[2] = 0.03f;
+  kernel_weights.rank_weights[3] = 0.02f;
+
+  // Voice 0 steps.
+  Tick current = 0;
+  while (current < duration) {
+    FortPhase phase;
+    if (current < kernel_end) {
+      phase = FortPhase::Kernel;
+    } else if (current < sequence_end) {
+      phase = FortPhase::Sequence;
+    } else {
+      phase = FortPhase::Dissolution;
+    }
+
+    // Select motif rank using phase-appropriate weights.
+    const auto& active_weights =
+        (phase == FortPhase::Kernel) ? kernel_weights : weights;
+    size_t rank = selectFragmentRank(rng, active_weights, pool.size());
+
+    // Determine op based on phase and character.
+    MotifOp op_val = params.voice0_initial;
+    if (phase == FortPhase::Sequence) op_val = MotifOp::Sequence;
+    if (phase == FortPhase::Dissolution) op_val = MotifOp::Fragment;
+
+    // Estimate step duration from pool motif.
+    const PooledMotif* motif = pool.getByRank(rank);
+    Tick step_dur = motif ? motifDuration(motif->notes) : kTicksPerBeat;
+    if (step_dur == 0) step_dur = kTicksPerBeat;
+
+    // Dissolution: cap fragment duration for gradual fragmentation.
+    if (phase == FortPhase::Dissolution) {
+      step_dur = std::min(step_dur, static_cast<Tick>(kTicksPerBeat * 2));
+    }
+
+    steps.push_back({start_tick + current, 0, op_val, rank, phase, step_dur});
+    current += step_dur;
+  }
+
+  // Voice 1 steps (imitation with delay).
+  if (num_voices >= 2) {
+    float delay_beats = params.imitation_beats_lo +
+        rng::rollFloat(rng, 0.0f,
+                       params.imitation_beats_hi - params.imitation_beats_lo);
+    Tick delay = static_cast<Tick>(delay_beats * kTicksPerBeat);
+
+    // Collect voice 0 step count before appending voice 1 steps.
+    size_t v0_count = steps.size();
+    for (size_t idx = 0; idx < v0_count; ++idx) {
+      if (steps[idx].voice != 0) continue;
+      Tick v1_tick = steps[idx].tick + delay;
+      if (v1_tick >= start_tick + duration) break;
+
+      MotifOp v1_op = params.voice1_initial;
+      steps.push_back({v1_tick, 1, v1_op, steps[idx].pool_rank,
+                        steps[idx].phase, steps[idx].suggested_duration});
+    }
+  }
+
+  // Sort steps by tick for sequential consumption.
+  std::sort(steps.begin(), steps.end(),
+            [](const FortspinnungStep& lhs, const FortspinnungStep& rhs) {
+              return lhs.tick < rhs.tick;
+            });
+
+  return steps;
 }
 
 }  // namespace bach

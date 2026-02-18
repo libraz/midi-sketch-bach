@@ -63,6 +63,13 @@ set(BACH_TEST_SOURCES
   # counterpoint/ (cantus firmus)
   counterpoint/cantus_firmus_test.cpp
 
+  # constraint/
+  constraint/obligation_test.cpp
+  constraint/feasibility_harness_test.cpp
+  constraint/constraint_state_test.cpp
+  constraint/vocabulary_attestation_test.cpp
+  constraint/motif_constraint_test.cpp
+
   # fugue/
   fugue/fugue_config_test.cpp
   fugue/archetype_policy_test.cpp
@@ -102,6 +109,7 @@ set(BACH_TEST_SOURCES
   fugue/archetype_scorer_vocabulary_test.cpp
   fugue/fugue_texture_density_test.cpp
   fugue/episode_melodic_contour_test.cpp
+  fugue/fugue_pipeline_test.cpp
 
   # transform/
   transform/motif_transform_test.cpp
@@ -136,6 +144,7 @@ set(BACH_TEST_SOURCES
   harmony/extended_chord_test.cpp
   harmony/tempo_map_test.cpp
   harmony/harmonic_rhythm_test.cpp
+  harmony/harmonic_tension_test.cpp
   harmony/harmonic_time_warp_test.cpp
 
   # forms/

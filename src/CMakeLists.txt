@@ -44,6 +44,15 @@ set(BACH_LIB_SOURCES
   instrument/bowed/bow_direction.cpp
   instrument/bowed/harmonics.cpp
 
+  # constraint/
+  constraint/obligation.cpp
+  constraint/obligation_analyzer.cpp
+  constraint/feasibility_harness.cpp
+  constraint/constraint_state.cpp
+  constraint/feasibility_estimator.cpp
+  constraint/motif_constraint.cpp
+  constraint/episode_generator.cpp
+
   # counterpoint/
   counterpoint/counterpoint_state.cpp
   counterpoint/i_rule_evaluator.cpp
@@ -90,6 +99,7 @@ set(BACH_LIB_SOURCES
   fugue/motif_template.cpp
   fugue/toccata_affinity.cpp
   fugue/fugue_generator.cpp
+  fugue/fugue_pipeline.cpp
 
   # transform/
   transform/motif_transform.cpp
@@ -120,6 +130,7 @@ set(BACH_LIB_SOURCES
   harmony/modulation_plan.cpp
   harmony/chord_tone_utils.cpp
   harmony/chord_voicer.cpp
+  harmony/harmonic_tension.cpp
   harmony/tempo_map.cpp
   harmony/harmonic_rhythm.cpp
   harmony/harmonic_time_warp.cpp
