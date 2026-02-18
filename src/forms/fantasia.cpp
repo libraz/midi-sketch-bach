@@ -14,11 +14,8 @@
 #include "core/pitch_utils.h"
 #include "core/rng_util.h"
 #include "core/scale.h"
-#include "counterpoint/coordinate_voices.h"
-#include "counterpoint/leap_resolution.h"
-#include "counterpoint/parallel_repair.h"
 #include "counterpoint/vertical_context.h"
-#include "counterpoint/vertical_safe.h"
+#include "forms/form_constraint_setup.h"
 #include "harmony/chord_types.h"
 #include "harmony/harmonic_event.h"
 #include "organ/organ_techniques.h"
@@ -677,74 +674,8 @@ FantasiaResult generateFantasia(const FantasiaConfig& config) {
     (void)cadences_inserted;
   }
 
-  // ---- Unified coordination pass (vertical dissonance control) ----
-  {
-    CoordinationConfig coord_config;
-    coord_config.num_voices = num_voices;
-    coord_config.tonic = config.key.tonic;
-    coord_config.timeline = &timeline;
-    coord_config.voice_range = [](uint8_t v) -> std::pair<uint8_t, uint8_t> {
-      switch (v) {
-        case 0: return {67, 88};
-        case 1: return {52, 76};
-        case 2: return {43, 64};
-        case 3: return {organ_range::kPedalLow, organ_range::kPedalHigh};
-        default: return {52, 76};
-      }
-    };
-    coord_config.form_name = "Fantasia";
-    auto form_profile = getFormProfile(FormType::FantasiaAndFugue);
-    coord_config.dissonance_policy = form_profile.dissonance_policy;
-    all_notes = coordinateVoices(std::move(all_notes), coord_config);
-  }
-
-  // ---- postValidateNotes safety net (parallel 5ths/8ths repair) ----
-  {
-    std::vector<std::pair<uint8_t, uint8_t>> voice_ranges;
-    for (uint8_t v = 0; v < num_voices; ++v) {
-      uint8_t lo = (v == 0) ? 67 : (v == 1) ? 52 : (v == 2) ? 43
-                                              : organ_range::kPedalLow;
-      uint8_t hi = (v == 0) ? 88 : (v == 1) ? 76 : (v == 2) ? 64
-                                              : organ_range::kPedalHigh;
-      voice_ranges.push_back({lo, hi});
-    }
-    PostValidateStats pv_stats;
-    all_notes = postValidateNotes(
-        std::move(all_notes), num_voices, config.key, voice_ranges, &pv_stats,
-        /*protection_overrides=*/{}, /*stylus_phantasticus=*/true);
-
-    // Leap resolution: fix unresolved melodic leaps.
-    {
-      LeapResolutionParams lr_params;
-      lr_params.num_voices = num_voices;
-      lr_params.key_at_tick = [&](Tick) { return config.key.tonic; };
-      lr_params.scale_at_tick = [&](Tick t) {
-        const auto& ev = timeline.getAt(t);
-        return ev.is_minor ? ScaleType::HarmonicMinor : ScaleType::Major;
-      };
-      lr_params.voice_range_static = [&](uint8_t v) -> std::pair<uint8_t, uint8_t> {
-        if (v < voice_ranges.size()) return voice_ranges[v];
-        return {0, 127};
-      };
-      lr_params.is_chord_tone = [&](Tick t, uint8_t p) {
-        return isChordTone(p, timeline.getAt(t));
-      };
-      lr_params.vertical_safe =
-          makeVerticalSafeWithParallelCheck(timeline, all_notes, num_voices);
-      resolveLeaps(all_notes, lr_params);
-
-      // Second parallel-perfect repair pass after leap resolution.
-      {
-        ParallelRepairParams pp_params;
-        pp_params.num_voices = num_voices;
-        pp_params.scale = config.key.is_minor ? ScaleType::HarmonicMinor : ScaleType::Major;
-        pp_params.key_at_tick = lr_params.key_at_tick;
-        pp_params.voice_range_static = lr_params.voice_range_static;
-        pp_params.max_iterations = 2;
-        repairParallelPerfect(all_notes, pp_params);
-      }
-    }
-  }
+  // --- Lightweight finalize: within-voice overlap dedup ---
+  finalizeFormNotes(all_notes, num_voices);
 
   // Step 4: Create tracks and assign notes by voice_id.
   std::vector<Track> tracks = form_utils::createOrganTracks(num_voices);

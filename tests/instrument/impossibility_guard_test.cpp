@@ -104,18 +104,18 @@ TEST(ImpossibilityGuardTest, ImmutableNeverModified) {
   EXPECT_EQ(result, 40);
 }
 
-TEST(ImpossibilityGuardTest, StructuralOctaveShift) {
+TEST(ImpossibilityGuardTest, ImmutableOctaveShiftNotAttempted) {
   auto guard = createGuard(InstrumentType::Violin);
-  // Pitch 43 (G2) is below violin range. +12 = 55 (G3, in range).
-  uint8_t result = guard.fixPitchRange(43, ProtectionLevel::Structural, 0);
-  EXPECT_EQ(result, 55);
+  // Pitch 43 (G2) is below violin range. Immutable = no modification.
+  uint8_t result = guard.fixPitchRange(43, ProtectionLevel::Immutable, 0);
+  EXPECT_EQ(result, 43);  // Unchanged (Immutable never modified).
 }
 
-TEST(ImpossibilityGuardTest, StructuralNoClamp) {
+TEST(ImpossibilityGuardTest, ImmutableNoClampFarBelow) {
   auto guard = createGuard(InstrumentType::Violin);
-  // Pitch 30 is far below range. +12 = 42, still below. Structural = don't clamp.
-  uint8_t result = guard.fixPitchRange(30, ProtectionLevel::Structural, 0);
-  EXPECT_EQ(result, 30);  // Unchanged (structural won't clamp).
+  // Pitch 30 is far below range. Immutable = no modification.
+  uint8_t result = guard.fixPitchRange(30, ProtectionLevel::Immutable, 0);
+  EXPECT_EQ(result, 30);  // Unchanged (Immutable never modified).
 }
 
 TEST(ImpossibilityGuardTest, FlexibleClampsAsLastResort) {

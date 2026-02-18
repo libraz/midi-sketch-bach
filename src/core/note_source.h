@@ -60,13 +60,21 @@ const char* bachNoteSourceToString(BachNoteSource source);
 
 /// @brief Protection level for collision resolution.
 /// Determines how aggressively the resolver may modify a note's pitch.
+/// Simplified to two effective levels: Immutable (no pitch change) and
+/// Flexible (full cascade). Legacy aliases are retained for backward
+/// compatibility but resolve to one of these two levels.
 enum class ProtectionLevel : uint8_t {
-  Immutable,      ///< No pitch change allowed (subject core, cantus, ground bass).
-  Architectural,  ///< Pitch, octave, duration, tick all immutable (cadence final notes).
-  SemiImmutable,  ///< Octave shift only, pitch class preserved (subject entries).
-  Structural,     ///< Octave shift only (answer, countersubject, pedal point).
-  Flexible        ///< Full 5-stage cascade (free counterpoint, episodes, ornaments).
+  Immutable = 0,  ///< No pitch change allowed (subject, answer, pedal, cantus, ground bass).
+  Flexible  = 1   ///< Full cascade (free counterpoint, episodes, ornaments).
 };
+
+/// Backward-compatible aliases (all map to Immutable).
+/// Existing code using these names continues to compile unchanged.
+/// @{
+constexpr ProtectionLevel kProtectionArchitectural = ProtectionLevel::Immutable;
+constexpr ProtectionLevel kProtectionSemiImmutable = ProtectionLevel::Immutable;
+constexpr ProtectionLevel kProtectionStructural    = ProtectionLevel::Immutable;
+/// @}
 
 /// @brief Get the protection level for a given note source.
 /// @param source The note source enum value.
@@ -96,7 +104,7 @@ inline bool isStructuralSource(BachNoteSource source) {
 /// Tier 0 = immutable (subject, answer, pedal, canon, aria, coda).
 /// Tier 1 = semi-fixed (countersubject, episode, false entry, sequence).
 /// Tier 2 = fully flexible (free counterpoint, ornament, etc.).
-/// Lower value = higher priority in coordinateVoices and post-validation sort.
+/// Lower value = higher priority in finalizeFormNotes and post-validation sort.
 inline int sourcePriority(BachNoteSource source) {
   switch (source) {
     case BachNoteSource::FugueSubject:

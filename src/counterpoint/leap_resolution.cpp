@@ -124,14 +124,12 @@ int resolveLeaps(std::vector<NoteEvent>& notes,
         auto prot0 = getProtectionLevel(notes[i0].source);
         auto prot1 = getProtectionLevel(notes[i1].source);
         if (prot0 == ProtectionLevel::Immutable ||
-            prot0 == ProtectionLevel::SemiImmutable ||
-            prot1 == ProtectionLevel::Immutable ||
-            prot1 == ProtectionLevel::SemiImmutable) {
+            prot1 == ProtectionLevel::Immutable) {
           continue;
         }
       }
 
-      // P1: Source protection (Immutable/Structural -> skip).
+      // P1: Source protection (Immutable -> skip).
       if (getProtectionLevel(notes[i2].source) != ProtectionLevel::Flexible) continue;
 
       // PA: Bar-line crossing protection (SP-A: tonic cadence limited).

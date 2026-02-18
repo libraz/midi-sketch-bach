@@ -14,7 +14,7 @@
 #include "core/pitch_utils.h"
 #include "core/rng_util.h"
 #include "core/scale.h"
-#include "counterpoint/coordinate_voices.h"
+#include "forms/form_constraint_setup.h"
 #include "forms/form_utils.h"
 #include "harmony/chord_types.h"
 #include "harmony/harmonic_event.h"
@@ -369,31 +369,6 @@ inline void populateLegacyFields(ToccataResult& result) {
   }
   result.drive_start = result.sections.back().start;
   result.drive_end = result.sections.back().end;
-}
-
-/// @brief Coordinate all voices through the unified coordination pass.
-///
-/// Thin wrapper around bach::coordinateVoices with toccata-specific voice ranges.
-/// @param all_notes All generated notes (will be consumed).
-/// @param num_voices Number of active voices.
-/// @param tonic Key tonic for counterpoint state.
-/// @param timeline Optional harmonic timeline for chord-tone awareness.
-/// @return Coordinated notes with dissonances resolved.
-inline std::vector<NoteEvent> coordinateVoices(
-    std::vector<NoteEvent> all_notes, uint8_t num_voices, Key tonic,
-    const HarmonicTimeline* timeline = nullptr) {
-  CoordinationConfig config;
-  config.num_voices = num_voices;
-  config.tonic = tonic;
-  config.timeline = timeline;
-  config.voice_range = [](uint8_t v) -> std::pair<uint8_t, uint8_t> {
-    return {getToccataLowPitch(v), getToccataHighPitch(v)};
-  };
-  config.immutable_sources = {BachNoteSource::PedalPoint,
-                              BachNoteSource::ToccataGesture,
-                              BachNoteSource::ToccataFigure};
-  config.form_name = "Toccata";
-  return bach::coordinateVoices(std::move(all_notes), config);
 }
 
 }  // namespace toccata_internal

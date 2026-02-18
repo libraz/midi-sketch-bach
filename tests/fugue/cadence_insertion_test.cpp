@@ -570,20 +570,20 @@ TEST_F(CadenceApproachTest, ArchitecturalProtection) {
 
   applyCadenceApproachToVoices(notes, plan, Key::C, false, 4, 42);
 
-  // Verify all notes with CadenceApproach source have Architectural protection.
+  // Verify all notes with CadenceApproach source have Immutable protection.
   for (const auto& note : notes) {
     if (note.source == BachNoteSource::CadenceApproach) {
-      EXPECT_EQ(getProtectionLevel(note.source), ProtectionLevel::Architectural)
+      EXPECT_EQ(getProtectionLevel(note.source), ProtectionLevel::Immutable)
           << "CadenceApproach note at tick " << note.start_tick
           << " voice " << static_cast<int>(note.voice)
-          << " should have Architectural protection";
+          << " should have Immutable protection";
     }
   }
 }
 
 TEST_F(CadenceApproachTest, SkipsProtectedNotes) {
   // Create notes where some in the cadence window have FugueSubject source
-  // (SemiImmutable protection), so they should NOT be modified.
+  // (Immutable protection), so they should NOT be modified.
   std::vector<NoteEvent> notes;
   Tick window_start = kTicksPerBar * 4 - kTicksPerBeat * 2;
 

@@ -72,28 +72,32 @@ const char* bachTransformStepToString(BachTransformStep step) {
 
 ProtectionLevel getProtectionLevel(BachNoteSource source) {
   switch (source) {
+    // --- Immutable: structural identity notes, no pitch change allowed ---
     case BachNoteSource::SubjectCore:
-    case BachNoteSource::CantusFixed:
-    case BachNoteSource::GroundBass:
-    case BachNoteSource::GoldbergBass:
-    case BachNoteSource::QuodlibetMelody:
-      return ProtectionLevel::Immutable;
-
     case BachNoteSource::FugueSubject:
-      return ProtectionLevel::SemiImmutable;
-
     case BachNoteSource::FugueAnswer:
-    case BachNoteSource::Countersubject:
     case BachNoteSource::PedalPoint:
-    case BachNoteSource::FalseEntry:
-    case BachNoteSource::SequenceNote:
+    case BachNoteSource::Countersubject:
+    case BachNoteSource::CantusFixed:
     case BachNoteSource::CanonDux:
     case BachNoteSource::CanonComes:
     case BachNoteSource::GoldbergAria:
+    case BachNoteSource::GoldbergBass:
+    case BachNoteSource::QuodlibetMelody:
+    case BachNoteSource::Coda:
+    case BachNoteSource::GrandPause:
+    case BachNoteSource::CadenceApproach:
+    case BachNoteSource::GroundBass:
+    case BachNoteSource::ToccataGesture:
+    case BachNoteSource::ToccataFigure:
+    case BachNoteSource::SequenceNote:
+    case BachNoteSource::FalseEntry:
     case BachNoteSource::GoldbergSoggetto:
     case BachNoteSource::GoldbergFughetta:
-      return ProtectionLevel::Structural;
+    case BachNoteSource::ChaconneBass:
+      return ProtectionLevel::Immutable;
 
+    // --- Flexible: full cascade (free counterpoint, episodes, ornaments) ---
     case BachNoteSource::EpisodeMaterial:
     case BachNoteSource::FreeCounterpoint:
     case BachNoteSource::Ornament:
@@ -109,22 +113,6 @@ ProtectionLevel getProtectionLevel(BachNoteSource source) {
     case BachNoteSource::GoldbergInvention:
     case BachNoteSource::GoldbergOverture:
     case BachNoteSource::GoldbergSuspension:
-      return ProtectionLevel::Flexible;
-
-    case BachNoteSource::ChaconneBass:
-    case BachNoteSource::ToccataGesture:
-      return ProtectionLevel::Structural;
-
-    case BachNoteSource::ToccataFigure:
-      return ProtectionLevel::Immutable;
-
-    case BachNoteSource::GrandPause:
-      return ProtectionLevel::Immutable;
-
-    case BachNoteSource::Coda:
-    case BachNoteSource::CadenceApproach:
-      return ProtectionLevel::Architectural;
-
     case BachNoteSource::PreludeFiguration:
       return ProtectionLevel::Flexible;
   }

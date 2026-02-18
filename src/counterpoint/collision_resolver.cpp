@@ -1207,28 +1207,20 @@ PlacementResult CollisionResolver::findSafePitch(
   };
 
   static const char* kImmutable[] = {"original", "rest"};
-  static const char* kStructural[] = {"original", "octave_shift", "rest"};
   static const char* kFlexible[] = {
       "original", "chord_tone", "suspension", "step_shift", "octave_shift", "rest"};
 
   StrategyList list;
   switch (level) {
     case ProtectionLevel::Immutable:
-    case ProtectionLevel::Architectural:
       list = {kImmutable, 2};
-      break;
-    case ProtectionLevel::SemiImmutable:
-      list = {kStructural, 3};
-      break;
-    case ProtectionLevel::Structural:
-      list = {kStructural, 3};
       break;
     case ProtectionLevel::Flexible:
       list = {kFlexible, 6};
       break;
   }
 
-  // Immutable/Structural notes use relaxed adjacent spacing (19 semitones)
+  // Immutable notes use relaxed adjacent spacing (19 semitones)
   // to prevent dropping structural material like fugue subjects.
   int spacing_limit = (level != ProtectionLevel::Flexible) ? 19 : 14;
 

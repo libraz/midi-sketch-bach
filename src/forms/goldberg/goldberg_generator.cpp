@@ -4,7 +4,6 @@
 
 #include <algorithm>
 #include <cassert>
-#include <cstdio>
 #include <cmath>
 #include <map>
 
@@ -15,10 +14,7 @@
 #include "core/rng_util.h"
 #include "core/scale.h"
 #include "counterpoint/cross_relation.h"
-#include "counterpoint/leap_resolution.h"
-#include "counterpoint/parallel_repair.h"
-#include "counterpoint/vertical_safe.h"
-#include "counterpoint/repeated_note_repair.h"
+#include "forms/form_constraint_setup.h"
 #include "instrument/common/impossibility_guard.h"
 #include "instrument/keyboard/harpsichord_model.h"
 #include "forms/goldberg/goldberg_aria.h"
@@ -397,8 +393,8 @@ GoldbergResult GoldbergGenerator::generate(const GoldbergConfig& config) const {
 
   // Step 6b: Counterpoint repair pipeline.
   // Pre-dedup: collapse same-tick notes within each track to 1 note/tick.
-  // This matches cleanupTrackOverlaps in generator.cpp, ensuring postValidateNotes
-  // only processes notes that survive the final dedup (5 voices → 2 tracks).
+  // This matches cleanupTrackOverlaps in generator.cpp, ensuring downstream
+  // analysis only processes notes that survive the final dedup (5 voices → 2 tracks).
   auto dedupTrack = [](std::vector<NoteEvent>& notes) {
     if (notes.size() < 2) return;
     std::stable_sort(notes.begin(), notes.end(),
@@ -498,85 +494,6 @@ GoldbergResult GoldbergGenerator::generate(const GoldbergConfig& config) const {
       }
     }
 
-    // (0) Post-validate: route all notes through collision resolver cascade
-    //     for strong-beat consonance, parallel/hidden perfect, voice crossing.
-    {
-      std::vector<std::pair<uint8_t, uint8_t>> voice_ranges;
-      for (uint8_t v = 0; v < kGoldbergVoices; ++v) {
-        voice_ranges.push_back({kHarpsichordLow[v], kHarpsichordHigh[v]});
-      }
-      PostValidateStats pv_stats;
-      all_notes = postValidateNotes(
-          std::move(all_notes), kGoldbergVoices, config.key, voice_ranges,
-          &pv_stats);
-      if (pv_stats.drop_rate() > 0.10f) {
-        std::fprintf(stderr,
-            "[GoldbergGenerator] WARNING: postValidate drop_rate=%.1f%% "
-            "(%u/%u dropped)\n",
-            pv_stats.drop_rate() * 100.0f,
-            pv_stats.dropped, pv_stats.total_input);
-      }
-    }
-
-    // (1) Leap resolution: resolve unresolved leaps (>=5 semitones).
-    //     Uses is_chord_tone callback to protect arpeggio/broken-chord leaps
-    //     (chord-tone landings are exempt via P5 protection).
-    {
-      LeapResolutionParams lr_params;
-      lr_params.num_voices = kGoldbergVoices;
-      lr_params.key_at_tick = [&](Tick) { return config.key.tonic; };
-      lr_params.scale_at_tick = [&](Tick) {
-        return config.key.is_minor ? ScaleType::HarmonicMinor : ScaleType::Major;
-      };
-      lr_params.voice_range_static = [](uint8_t v) -> std::pair<uint8_t, uint8_t> {
-        if (v < kGoldbergVoices) {
-          return {kHarpsichordLow[v], kHarpsichordHigh[v]};
-        }
-        return {kHarpsichordGlobalLow, kHarpsichordGlobalHigh};
-      };
-      // Chord-tone awareness: protects arpeggio/broken-chord landings (P5).
-      // Without timeline, use consonant-interval heuristic against bass.
-      lr_params.is_chord_tone = [&](Tick t, uint8_t pitch) -> bool {
-        // Find bass note at this tick.
-        for (const auto& n : all_notes) {
-          if (n.start_tick <= t && n.start_tick + n.duration > t &&
-              (n.voice == kGoldbergVoices - 1 ||
-               getProtectionLevel(n.source) == ProtectionLevel::Immutable)) {
-            int ivl = interval_util::compoundToSimple(
-                absoluteInterval(pitch, n.pitch));
-            return interval_util::isConsonance(ivl);
-          }
-        }
-        return false;
-      };
-      auto lr_timeline = grid_major.toTimeline(config.key, {3, 4});
-      lr_params.vertical_safe =
-          makeVerticalSafeWithParallelCheck(lr_timeline, all_notes,
-                                            kGoldbergVoices);
-      resolveLeaps(all_notes, lr_params);
-    }
-
-    // (2) Repeated note repair: break runs of >3 identical pitches.
-    //     Short ornamental notes (16th or shorter) are exempt via
-    //     run_gap_threshold: rapid ornamental repeats don't form "runs".
-    {
-      RepeatedNoteRepairParams rn_params;
-      rn_params.num_voices = kGoldbergVoices;
-      rn_params.max_consecutive = 3;
-      rn_params.run_gap_threshold = kTicksPerBeat;
-      rn_params.key_at_tick = [&](Tick) { return config.key.tonic; };
-      rn_params.scale_at_tick = [&](Tick) {
-        return config.key.is_minor ? ScaleType::HarmonicMinor : ScaleType::Major;
-      };
-      rn_params.voice_range = [](uint8_t v) -> std::pair<uint8_t, uint8_t> {
-        if (v < kGoldbergVoices) {
-          return {kHarpsichordLow[v], kHarpsichordHigh[v]};
-        }
-        return {kHarpsichordGlobalLow, kHarpsichordGlobalHigh};
-      };
-      repairRepeatedNotes(all_notes, rn_params);
-    }
-
     // (3) Cross-relation repair: fix chromatic contradictions at same tick.
     //     Respects leading-tone function and vertical consonance.
     {
@@ -632,21 +549,8 @@ GoldbergResult GoldbergGenerator::generate(const GoldbergConfig& config) const {
       }
     }
 
-    // (4) Parallel perfect consonance repair.
-    {
-      ParallelRepairParams pp_params;
-      pp_params.num_voices = kGoldbergVoices;
-      pp_params.scale = config.key.is_minor ? ScaleType::HarmonicMinor : ScaleType::Major;
-      pp_params.key_at_tick = [&](Tick) { return config.key.tonic; };
-      pp_params.voice_range_static = [](uint8_t voice) -> std::pair<uint8_t, uint8_t> {
-        if (voice < kGoldbergVoices) {
-          return {kHarpsichordLow[voice], kHarpsichordHigh[voice]};
-        }
-        return {kHarpsichordGlobalLow, kHarpsichordGlobalHigh};
-      };
-      pp_params.max_iterations = 3;
-      repairParallelPerfect(all_notes, pp_params);
-    }
+    // --- Lightweight finalize: within-voice overlap dedup ---
+    finalizeFormNotes(all_notes, kGoldbergVoices);
 
     // (c) Redistribute repaired notes back into upper/lower tracks.
     track_upper.notes.clear();

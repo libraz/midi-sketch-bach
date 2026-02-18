@@ -154,9 +154,6 @@ namespace {
 int protectionPriority(ProtectionLevel level) {
   switch (level) {
     case ProtectionLevel::Immutable: return 0;
-    case ProtectionLevel::Architectural: return 0;
-    case ProtectionLevel::SemiImmutable: return 0;
-    case ProtectionLevel::Structural: return 1;
     case ProtectionLevel::Flexible: return 2;
   }
   return 2;
@@ -271,9 +268,8 @@ std::vector<NoteEvent> postValidateNotes(
         ? static_cast<ProtectionLevel>(voice_prot_override[note.voice])
         : getProtectionLevel(note.source);
 
-    if (prot == ProtectionLevel::Immutable ||
-        prot == ProtectionLevel::SemiImmutable) {
-      // Immutable/SemiImmutable notes are registered directly without modification.
+    if (prot == ProtectionLevel::Immutable) {
+      // Immutable notes are registered directly without modification.
       state.setCurrentTick(note.start_tick);
       state.addNote(note.voice, note);
       result.push_back(note);
@@ -372,13 +368,12 @@ std::vector<NoteEvent> postValidateNotes(
         auto& curr = result[indices[pos]];
         const auto& prev = result[indices[pos - 1]];
 
-        // Skip Immutable/SemiImmutable notes -- never modify identity notes.
+        // Skip Immutable notes -- never modify identity notes.
         ProtectionLevel curr_prot = (curr.voice < num_voices &&
                                      voice_prot_override[curr.voice] >= 0)
             ? static_cast<ProtectionLevel>(voice_prot_override[curr.voice])
             : getProtectionLevel(curr.source);
-        if (curr_prot == ProtectionLevel::Immutable ||
-            curr_prot == ProtectionLevel::SemiImmutable) {
+        if (curr_prot == ProtectionLevel::Immutable) {
           continue;
         }
 
@@ -436,8 +431,7 @@ std::vector<NoteEvent> postValidateNotes(
     // Build tick->structural note index for O(1) lookup.
     std::map<Tick, std::vector<size_t>> structural_at_tick;
     for (size_t idx = 0; idx < result.size(); ++idx) {
-      if (getProtectionLevel(result[idx].source) == ProtectionLevel::Structural &&
-          result[idx].source == BachNoteSource::Countersubject) {
+      if (result[idx].source == BachNoteSource::Countersubject) {
         structural_at_tick[result[idx].start_tick].push_back(idx);
       }
     }
@@ -663,7 +657,7 @@ std::vector<NoteEvent> postValidateNotes(
       ? static_cast<float>(total_shift) / static_cast<float>(shift_count)
       : 0.0f;
   local_stats.max_shift_semitones = max_shift;
-  local_stats.parallel_fixes = 0;  // Will be refined with repairParallelPerfect hooks.
+  local_stats.parallel_fixes = 0;
   local_stats.crossing_fixes = 0;
   local_stats.dissonance_fixes = 0;
 

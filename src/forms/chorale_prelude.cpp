@@ -17,15 +17,9 @@
 #include "core/pitch_utils.h"
 #include "core/rng_util.h"
 #include "core/scale.h"
-#include "counterpoint/bach_rule_evaluator.h"
-#include "counterpoint/collision_resolver.h"
-#include "counterpoint/coordinate_voices.h"
-#include "forms/form_utils.h"
-#include "counterpoint/counterpoint_state.h"
-#include "counterpoint/leap_resolution.h"
-#include "counterpoint/parallel_repair.h"
 #include "counterpoint/vertical_context.h"
-#include "counterpoint/vertical_safe.h"
+#include "forms/form_constraint_setup.h"
+#include "forms/form_utils.h"
 #include "harmony/chord_types.h"
 #include "harmony/harmonic_event.h"
 #include "harmony/harmonic_timeline.h"
@@ -1811,29 +1805,15 @@ ChoralePreludeResult generateChoralePrelude(const ChoralePreludeConfig& config) 
               " crossing=%d range=%d harmony=%d\n",
               fig_crossing, fig_range, fig_harmony);
 
-      // Unified coordination pass — all remaining notes are pre-validated.
-      CoordinationConfig coord_config;
-      coord_config.num_voices = kChoraleVoices;
-      coord_config.tonic = config.key.tonic;
-      coord_config.timeline = &timeline;
-      coord_config.voice_range =
-          [&voice_ranges](uint8_t v) -> std::pair<uint8_t, uint8_t> {
-        if (v < voice_ranges.size()) return voice_ranges[v];
+      // Constraint-driven finalize: lightweight overlap dedup with voice range
+      // clamping.
+      auto voice_range_fn =
+          [&voice_ranges](uint8_t vid) -> std::pair<uint8_t, uint8_t> {
+        if (vid < voice_ranges.size()) return voice_ranges[vid];
         return {36, 96};
       };
-      coord_config.immutable_sources = {BachNoteSource::CantusFixed,
-                                        BachNoteSource::PedalPoint,
-                                        BachNoteSource::FreeCounterpoint};
-      coord_config.priority = [](const NoteEvent& n) -> int {
-        if (n.source == BachNoteSource::CantusFixed) return 0;
-        if (n.source == BachNoteSource::PedalPoint) return 1;
-        if (n.voice == kInnerVoice) return 2;
-        return 3;
-      };
-      coord_config.form_name = "ChoralePrelude";
-      auto form_profile = getFormProfile(FormType::ChoralePrelude);
-      coord_config.dissonance_policy = form_profile.dissonance_policy;
-      all_notes = coordinateVoices(std::move(all_notes), coord_config);
+      finalizeFormNotes(all_notes, kChoraleVoices, voice_range_fn,
+                        /*max_consecutive=*/2);
 
       // Post-rejection repeat mitigation (weak-beat only, chord-tone-aware).
       // Shifts repeated figuration notes by nearest scale step to prevent
@@ -2012,48 +1992,19 @@ ChoralePreludeResult generateChoralePrelude(const ChoralePreludeConfig& config) 
       }
     }
 
-    ProtectionOverrides overrides = {{kPedalVoice, ProtectionLevel::Immutable}};
-    PostValidateStats stats;
-    auto validated = postValidateNotes(
-        std::move(all_notes), kChoraleVoices, config.key, voice_ranges, &stats,
-        overrides);
-
-    // Leap resolution: fix unresolved melodic leaps.
-    {
-      LeapResolutionParams lr_params;
-      lr_params.num_voices = kChoraleVoices;
-      lr_params.key_at_tick = [&](Tick) { return config.key.tonic; };
-      lr_params.scale_at_tick = [&](Tick t) {
-        const auto& ev = timeline.getAt(t);
-        return ev.is_minor ? ScaleType::HarmonicMinor : ScaleType::Major;
-      };
-      lr_params.voice_range_static = [&](uint8_t v) -> std::pair<uint8_t, uint8_t> {
-        if (v < voice_ranges.size()) return voice_ranges[v];
-        return {0, 127};
-      };
-      lr_params.is_chord_tone = [&](Tick t, uint8_t p) {
-        return isChordTone(p, timeline.getAt(t));
-      };
-      lr_params.vertical_safe =
-          makeVerticalSafeWithParallelCheck(timeline, validated, kChoraleVoices);
-      resolveLeaps(validated, lr_params);
-
-      // Second parallel-perfect repair pass after leap resolution.
-      {
-        ParallelRepairParams pp_params;
-        pp_params.num_voices = kChoraleVoices;
-        pp_params.scale = config.key.is_minor ? ScaleType::HarmonicMinor : ScaleType::Major;
-        pp_params.key_at_tick = lr_params.key_at_tick;
-        pp_params.voice_range_static = lr_params.voice_range_static;
-        pp_params.max_iterations = 2;
-        repairParallelPerfect(validated, pp_params);
-      }
-    }
+    // Constraint-driven finalize replaces the legacy post-validation pipeline.
+    auto voice_range_fn2 =
+        [&voice_ranges](uint8_t vid) -> std::pair<uint8_t, uint8_t> {
+      if (vid < voice_ranges.size()) return voice_ranges[vid];
+      return {36, 96};
+    };
+    finalizeFormNotes(all_notes, kChoraleVoices, voice_range_fn2,
+                      /*max_consecutive=*/2);
 
     for (auto& track : tracks) {
       track.notes.clear();
     }
-    for (auto& note : validated) {
+    for (auto& note : all_notes) {
       if (note.voice < kChoraleVoices) {
         tracks[note.voice].notes.push_back(std::move(note));
       }
@@ -2150,79 +2101,13 @@ ChoralePreludeResult generateChoralePrelude(const ChoralePreludeConfig& config) 
   // Step 7: Sort notes within each track by start_tick.
   form_utils::sortTrackNotes(tracks);
 
-  // Final parallel repair pass: catch parallels introduced by post-processing
-  // (Picardy third, registration changes).
+  // Final overlap dedup after Picardy/registration post-processing.
   {
     std::vector<NoteEvent> final_notes;
     for (const auto& track : tracks) {
       final_notes.insert(final_notes.end(), track.notes.begin(), track.notes.end());
     }
-
-    // Count melodic direction changes before repair for sanity check.
-    auto countDirectionChanges = [](const std::vector<NoteEvent>& notes,
-                                    uint8_t nv) -> int {
-      std::vector<std::vector<uint8_t>> voice_pitches(nv);
-      std::vector<std::vector<Tick>> voice_ticks(nv);
-      for (const auto& note : notes) {
-        if (note.voice < nv) {
-          voice_pitches[note.voice].push_back(note.pitch);
-          voice_ticks[note.voice].push_back(note.start_tick);
-        }
-      }
-      int changes = 0;
-      for (uint8_t vid = 0; vid < nv; ++vid) {
-        auto& pitches = voice_pitches[vid];
-        auto& ticks = voice_ticks[vid];
-        if (pitches.size() < 3) continue;
-        std::vector<size_t> order(pitches.size());
-        for (size_t idx = 0; idx < order.size(); ++idx) order[idx] = idx;
-        std::sort(order.begin(), order.end(),
-                  [&ticks](size_t lhs, size_t rhs) {
-                    return ticks[lhs] < ticks[rhs];
-                  });
-        int prev_dir = 0;
-        for (size_t idx = 1; idx < order.size(); ++idx) {
-          int diff = static_cast<int>(pitches[order[idx]]) -
-                     static_cast<int>(pitches[order[idx - 1]]);
-          int dir = (diff > 0) ? 1 : ((diff < 0) ? -1 : 0);
-          if (dir != 0 && prev_dir != 0 && dir != prev_dir) ++changes;
-          if (dir != 0) prev_dir = dir;
-        }
-      }
-      return changes;
-    };
-
-    int dir_changes_before = countDirectionChanges(final_notes, kChoraleVoices);
-
-    ParallelRepairParams pp_final;
-    pp_final.num_voices = kChoraleVoices;
-    pp_final.scale = config.key.is_minor ? ScaleType::HarmonicMinor : ScaleType::Major;
-    pp_final.key_at_tick = [&](Tick) { return config.key.tonic; };
-    // Voice ranges: v0=figuration(C5-E6), v1=cantus(C4-B4),
-    // v2=inner(C3-G4), v3=pedal(C1-D3).
-    static constexpr std::pair<uint8_t, uint8_t> kChoraleRanges[4] = {
-        {72, 88}, {60, 71}, {48, 67},
-        {organ_range::kPedalLow, organ_range::kPedalHigh}};
-    pp_final.voice_range_static =
-        [](uint8_t vid) -> std::pair<uint8_t, uint8_t> {
-      if (vid < kChoraleVoices) return kChoraleRanges[vid];
-      return {0, 127};
-    };
-    pp_final.max_iterations = 2;
-    repairParallelPerfect(final_notes, pp_final);
-
-    int dir_changes_after = countDirectionChanges(final_notes, kChoraleVoices);
-    if (dir_changes_before > 0 &&
-        dir_changes_after > dir_changes_before * 120 / 100) {
-      fprintf(stderr,
-              "[ChoralePrelude] WARNING: final parallel repair increased "
-              "direction changes %d -> %d (+%.0f%%)\n",
-              dir_changes_before, dir_changes_after,
-              100.0f * (dir_changes_after - dir_changes_before) /
-                  dir_changes_before);
-    }
-
-    // Redistribute repaired notes back to tracks.
+    finalizeFormNotes(final_notes, kChoraleVoices);
     for (auto& track : tracks) track.notes.clear();
     for (auto& note : final_notes) {
       if (note.voice < kChoraleVoices) {

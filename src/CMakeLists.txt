@@ -60,7 +60,6 @@ set(BACH_LIB_SOURCES
   counterpoint/bach_rule_evaluator.cpp
   counterpoint/species_rules.cpp
   counterpoint/collision_resolver.cpp
-  counterpoint/parallel_repair.cpp
   counterpoint/leap_resolution.cpp
   counterpoint/repeated_note_repair.cpp
   counterpoint/cross_relation.cpp
@@ -73,7 +72,6 @@ set(BACH_LIB_SOURCES
   counterpoint/cantus_firmus.cpp
   counterpoint/melodic_context.cpp
   counterpoint/vertical_context.cpp
-  counterpoint/coordinate_voices.cpp
 
   # fugue/
   fugue/fugue_config.cpp
@@ -137,6 +135,7 @@ set(BACH_LIB_SOURCES
   harmony/scale_degree_utils.cpp
 
   # forms/
+  forms/form_constraint_setup.cpp
   forms/prelude.cpp
   forms/prelude_figuration.cpp
   forms/trio_sonata.cpp

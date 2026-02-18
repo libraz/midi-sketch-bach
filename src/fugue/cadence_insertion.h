@@ -158,11 +158,11 @@ std::vector<Tick> extractCadenceTicks(const CadencePlan& plan);
 /// For each cadence point in the plan, locates the cadence window (2-4 beats
 /// before the cadence tick) and adjusts soprano/bass pitches according to the
 /// CadenceApproach formula. The final 2 notes at each cadence receive
-/// Architectural protection (immutable through post-validation). Earlier notes
-/// in the window receive CadenceApproach source (Architectural protection).
+/// Immutable protection (immutable through post-validation). Earlier notes
+/// in the window receive CadenceApproach source (Immutable protection).
 ///
 /// Inner voices are not directly modified but will benefit from the
-/// CadenceInnerVoiceGuidance constraints during coordinate_voices.
+/// CadenceInnerVoiceGuidance constraints during finalizeFormNotes.
 ///
 /// @param notes All generated notes (modified in place).
 /// @param plan The cadence plan with cadence positions and types.

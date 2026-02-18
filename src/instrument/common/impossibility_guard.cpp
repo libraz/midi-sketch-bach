@@ -19,9 +19,6 @@ namespace bach {
 
 namespace {
 
-/// Tactus resolution for beat-head detection (quarter note).
-constexpr Tick kTactus = kTicksPerBeat;
-
 /// Maximum tiny-offset delta in ticks for bowed simultaneous resolution.
 constexpr Tick kTinyOffsetMax = 3;
 
@@ -87,10 +84,9 @@ makeFixPitchRange(uint8_t range_low, uint8_t range_high) {
       }
     }
 
-    // Structural / SemiImmutable: retry octave shift ignoring contour
+    // Immutable: retry octave shift ignoring contour
     // (out-of-range is worse than a direction reversal).
-    if (level == ProtectionLevel::Structural ||
-        level == ProtectionLevel::SemiImmutable) {
+    if (level == ProtectionLevel::Immutable) {
       if (down >= range_low && down <= range_high && down >= 0) {
         return static_cast<uint8_t>(down);
       }
@@ -147,13 +143,7 @@ ImpossibilityGuard createBowedGuard() {
       for (size_t i = group.notes.size(); i-- > 0;) {
         auto* note = group.notes[i];
         auto level = getProtectionLevel(note->source);
-        if (level == ProtectionLevel::Immutable ||
-            level == ProtectionLevel::SemiImmutable) continue;
-        // Structural on beat-head: skip offset.
-        if (level == ProtectionLevel::Structural &&
-            note->start_tick % kTactus == 0) {
-          continue;
-        }
+        if (level == ProtectionLevel::Immutable) continue;
         // Apply tiny offset.
         note->start_tick += offset_delta;
         if (note->duration > offset_delta) {
@@ -280,8 +270,7 @@ ImpossibilityGuard createKeyboardGuard() {
               });
     for (size_t i = 0; i < group.notes.size() && i < suggested.size(); ++i) {
       auto level = getProtectionLevel(group.notes[i]->source);
-      if (level == ProtectionLevel::Immutable ||
-          level == ProtectionLevel::SemiImmutable) continue;
+      if (level == ProtectionLevel::Immutable) continue;
       group.notes[i]->pitch = suggested[i];
     }
   };
@@ -413,8 +402,7 @@ ImpossibilityGuard createHarpsichordGuard() {
               });
     for (size_t i = 0; i < group.notes.size() && i < suggested.size(); ++i) {
       auto level = getProtectionLevel(group.notes[i]->source);
-      if (level == ProtectionLevel::Immutable ||
-          level == ProtectionLevel::SemiImmutable) continue;
+      if (level == ProtectionLevel::Immutable) continue;
       group.notes[i]->pitch = suggested[i];
     }
   };

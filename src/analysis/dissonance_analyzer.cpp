@@ -78,9 +78,7 @@ bool hasStructuralNoteAt(const std::vector<NoteEvent>& sorted_voice, Tick tick) 
   for (const auto& note : sorted_voice) {
     if (note.start_tick <= tick && tick < note.start_tick + note.duration) {
       ProtectionLevel level = getProtectionLevel(note.source);
-      if (level == ProtectionLevel::Immutable ||
-          level == ProtectionLevel::SemiImmutable ||
-          level == ProtectionLevel::Structural) {
+      if (level == ProtectionLevel::Immutable) {
         return true;
       }
     }
@@ -430,9 +428,7 @@ std::vector<DissonanceEvent> detectNonChordTones(
       // density metric.
       if (severity != DissonanceSeverity::Low) {
         ProtectionLevel level = getProtectionLevel(note.source);
-        if (level == ProtectionLevel::Immutable ||
-            level == ProtectionLevel::SemiImmutable ||
-            level == ProtectionLevel::Structural) {
+        if (level == ProtectionLevel::Immutable) {
           severity = DissonanceSeverity::Low;
         }
       }

@@ -198,6 +198,7 @@ TEST(NoteProvenanceTest, StepOrderPreserved) {
 // ---------------------------------------------------------------------------
 
 TEST(ProtectionLevelTest, ImmutableSources) {
+  // Core identity notes (formerly Immutable).
   EXPECT_EQ(getProtectionLevel(BachNoteSource::SubjectCore),
             ProtectionLevel::Immutable);
   EXPECT_EQ(getProtectionLevel(BachNoteSource::CantusFixed),
@@ -208,32 +209,41 @@ TEST(ProtectionLevelTest, ImmutableSources) {
             ProtectionLevel::Immutable);
   EXPECT_EQ(getProtectionLevel(BachNoteSource::QuodlibetMelody),
             ProtectionLevel::Immutable);
-}
-
-TEST(ProtectionLevelTest, SemiImmutableSources) {
+  // Formerly SemiImmutable / Structural / Architectural -- now Immutable.
   EXPECT_EQ(getProtectionLevel(BachNoteSource::FugueSubject),
-            ProtectionLevel::SemiImmutable);
-}
-
-TEST(ProtectionLevelTest, StructuralSources) {
+            ProtectionLevel::Immutable);
   EXPECT_EQ(getProtectionLevel(BachNoteSource::FugueAnswer),
-            ProtectionLevel::Structural);
+            ProtectionLevel::Immutable);
   EXPECT_EQ(getProtectionLevel(BachNoteSource::Countersubject),
-            ProtectionLevel::Structural);
+            ProtectionLevel::Immutable);
   EXPECT_EQ(getProtectionLevel(BachNoteSource::PedalPoint),
-            ProtectionLevel::Structural);
+            ProtectionLevel::Immutable);
   EXPECT_EQ(getProtectionLevel(BachNoteSource::FalseEntry),
-            ProtectionLevel::Structural);
+            ProtectionLevel::Immutable);
   EXPECT_EQ(getProtectionLevel(BachNoteSource::Coda),
-            ProtectionLevel::Architectural);
+            ProtectionLevel::Immutable);
   EXPECT_EQ(getProtectionLevel(BachNoteSource::SequenceNote),
-            ProtectionLevel::Structural);
+            ProtectionLevel::Immutable);
   EXPECT_EQ(getProtectionLevel(BachNoteSource::CanonDux),
-            ProtectionLevel::Structural);
+            ProtectionLevel::Immutable);
   EXPECT_EQ(getProtectionLevel(BachNoteSource::CanonComes),
-            ProtectionLevel::Structural);
+            ProtectionLevel::Immutable);
   EXPECT_EQ(getProtectionLevel(BachNoteSource::GoldbergAria),
-            ProtectionLevel::Structural);
+            ProtectionLevel::Immutable);
+  EXPECT_EQ(getProtectionLevel(BachNoteSource::CadenceApproach),
+            ProtectionLevel::Immutable);
+  EXPECT_EQ(getProtectionLevel(BachNoteSource::GrandPause),
+            ProtectionLevel::Immutable);
+  EXPECT_EQ(getProtectionLevel(BachNoteSource::ToccataGesture),
+            ProtectionLevel::Immutable);
+  EXPECT_EQ(getProtectionLevel(BachNoteSource::ToccataFigure),
+            ProtectionLevel::Immutable);
+  EXPECT_EQ(getProtectionLevel(BachNoteSource::ChaconneBass),
+            ProtectionLevel::Immutable);
+  EXPECT_EQ(getProtectionLevel(BachNoteSource::GoldbergSoggetto),
+            ProtectionLevel::Immutable);
+  EXPECT_EQ(getProtectionLevel(BachNoteSource::GoldbergFughetta),
+            ProtectionLevel::Immutable);
 }
 
 TEST(ProtectionLevelTest, FlexibleSources) {
@@ -279,9 +289,6 @@ TEST(ProtectionLevelTest, AllSourcesCovered) {
   for (auto src : all) {
     auto level = getProtectionLevel(src);
     EXPECT_TRUE(level == ProtectionLevel::Immutable ||
-                level == ProtectionLevel::Architectural ||
-                level == ProtectionLevel::SemiImmutable ||
-                level == ProtectionLevel::Structural ||
                 level == ProtectionLevel::Flexible)
         << "Source " << bachNoteSourceToString(src) << " has invalid level";
   }

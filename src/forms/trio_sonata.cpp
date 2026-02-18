@@ -20,15 +20,10 @@
 #include "core/rng_util.h"
 #include "core/scale.h"
 #include "counterpoint/bach_rule_evaluator.h"
-#include "counterpoint/collision_resolver.h"
-#include "counterpoint/coordinate_voices.h"
-#include "forms/form_utils.h"
-#include "counterpoint/counterpoint_state.h"
-#include "counterpoint/leap_resolution.h"
-#include "counterpoint/parallel_repair.h"
-#include "counterpoint/vertical_context.h"
-#include "counterpoint/vertical_safe.h"
 #include "counterpoint/species_rules.h"
+#include "counterpoint/vertical_context.h"
+#include "forms/form_constraint_setup.h"
+#include "forms/form_utils.h"
 #include "harmony/chord_tone_utils.h"
 #include "harmony/chord_types.h"
 #include "harmony/harmonic_event.h"
@@ -1913,19 +1908,13 @@ TrioSonataMovement generateMovement(const KeySignature& key_sig, Tick num_bars,
   // 5. Sort notes within each track.
   form_utils::sortTrackNotes(tracks);
 
-  // 5b. Post-validate through counterpoint engine.
+  // 5b. Pre-process lightweight notes and finalize via constraint pipeline.
   {
     std::vector<NoteEvent> all_notes;
     for (const auto& track : tracks) {
       all_notes.insert(all_notes.end(), track.notes.begin(), track.notes.end());
     }
 
-    std::vector<std::pair<uint8_t, uint8_t>> voice_ranges = {
-        {kRhLow, kRhHigh},
-        {kLhLow, kLhHigh},
-        {organ_range::kPedalLow, organ_range::kPedalHigh}};
-
-    // Pedal notes are Structural (PedalPoint), upper voices are Flexible.
     assert(countUnknownSource(all_notes) == 0 &&
            "All notes should have source set by generators");
 
@@ -1972,63 +1961,19 @@ TrioSonataMovement generateMovement(const KeySignature& key_sig, Tick num_bars,
                        [](const NoteEvent& n) { return n.duration <= 0; }),
         all_notes.end());
 
-    // ---- Unified coordination pass ----
-    {
-      CoordinationConfig coord_config;
-      coord_config.num_voices = kTrioVoiceCount;
-      coord_config.tonic = key_sig.tonic;
-      coord_config.timeline = &timeline;
-      coord_config.voice_range =
-          [&voice_ranges](uint8_t v) -> std::pair<uint8_t, uint8_t> {
-        if (v < voice_ranges.size()) return voice_ranges[v];
-        return {36, 96};
-      };
-      coord_config.immutable_sources = {BachNoteSource::PedalPoint};
-      coord_config.lightweight_sources = {BachNoteSource::EpisodeMaterial,
-                                          BachNoteSource::SequenceNote};
-      coord_config.form_name = "TrioSonata";
-      auto form_profile = getFormProfile(FormType::TrioSonata);
-      coord_config.dissonance_policy = form_profile.dissonance_policy;
-      all_notes = coordinateVoices(std::move(all_notes), coord_config);
-    }
-
-    PostValidateStats stats;
-    auto validated = postValidateNotes(
-        std::move(all_notes), kTrioVoiceCount, key_sig, voice_ranges, &stats);
-
-    // Leap resolution: fix unresolved melodic leaps.
-    {
-      LeapResolutionParams lr_params;
-      lr_params.num_voices = kTrioVoiceCount;
-      lr_params.key_at_tick = [&](Tick) { return key_sig.tonic; };
-      lr_params.scale_at_tick = [&](Tick) { return scale; };
-      lr_params.voice_range_static = [&](uint8_t v) -> std::pair<uint8_t, uint8_t> {
-        if (v < voice_ranges.size()) return voice_ranges[v];
-        return {0, 127};
-      };
-      lr_params.is_chord_tone = [&](Tick t, uint8_t p) {
-        return isChordTone(p, timeline.getAt(t));
-      };
-      lr_params.vertical_safe =
-          makeVerticalSafeWithParallelCheck(timeline, validated, kTrioVoiceCount);
-      resolveLeaps(validated, lr_params);
-
-      // Second parallel-perfect repair pass after leap resolution.
-      {
-        ParallelRepairParams pp_params;
-        pp_params.num_voices = kTrioVoiceCount;
-        pp_params.scale = scale;
-        pp_params.key_at_tick = lr_params.key_at_tick;
-        pp_params.voice_range_static = lr_params.voice_range_static;
-        pp_params.max_iterations = 2;
-        repairParallelPerfect(validated, pp_params);
-      }
-    }
+    // ---- Constraint-driven finalize (overlap dedup + voice range clamp) ----
+    auto voice_range = [](uint8_t voice) -> std::pair<uint8_t, uint8_t> {
+      if (voice == 0) return {kRhLow, kRhHigh};
+      if (voice == 1) return {kLhLow, kLhHigh};
+      return {organ_range::kPedalLow, organ_range::kPedalHigh};
+    };
+    finalizeFormNotes(all_notes, kTrioVoiceCount, voice_range,
+                      /*max_consecutive=*/2);
 
     for (auto& track : tracks) {
       track.notes.clear();
     }
-    for (auto& note : validated) {
+    for (auto& note : all_notes) {
       if (note.voice < kTrioVoiceCount) {
         tracks[note.voice].notes.push_back(std::move(note));
       }
@@ -2101,9 +2046,9 @@ TrioSonataMovement generateMovement(const KeySignature& key_sig, Tick num_bars,
     }
   }
 
-  // 10b. Second parallel repair: steps 6-10 may have re-introduced parallel
-  // perfect consonances. Run postValidateNotes before ornaments and quality
-  // passes so that diatonic enforcement and voice separation still apply.
+  // 10b. Constraint-driven finalize: steps 6-10 may have introduced overlaps
+  // or voice range violations. Replace the former postValidateNotes +
+  // legacy post-validation pipeline with finalizeFormNotes.
   {
     std::vector<NoteEvent> all_notes;
     for (const auto& track : tracks) {
@@ -2111,140 +2056,17 @@ TrioSonataMovement generateMovement(const KeySignature& key_sig, Tick num_bars,
     }
     assert(countUnknownSource(all_notes) == 0 &&
            "All notes should have source set by generators");
-    std::vector<std::pair<uint8_t, uint8_t>> vr = {
-        {kRhLow, kRhHigh},
-        {kLhLow, kLhHigh},
-        {organ_range::kPedalLow, organ_range::kPedalHigh}};
-    auto validated = postValidateNotes(
-        std::move(all_notes), kTrioVoiceCount, key_sig, vr);
-
-    // Leap resolution: fix unresolved melodic leaps (second pass).
-    {
-      LeapResolutionParams lr_params;
-      lr_params.num_voices = kTrioVoiceCount;
-      lr_params.key_at_tick = [&](Tick) { return key_sig.tonic; };
-      lr_params.scale_at_tick = [&](Tick) { return scale; };
-      lr_params.voice_range_static = [&](uint8_t v) -> std::pair<uint8_t, uint8_t> {
-        if (v < vr.size()) return vr[v];
-        return {0, 127};
-      };
-      lr_params.is_chord_tone = [&](Tick t, uint8_t p) {
-        return isChordTone(p, timeline.getAt(t));
-      };
-      lr_params.vertical_safe =
-          makeVerticalSafeWithParallelCheck(timeline, validated, kTrioVoiceCount);
-      resolveLeaps(validated, lr_params);
-
-      // Second parallel-perfect repair pass after leap resolution.
-      {
-        ParallelRepairParams pp_params;
-        pp_params.num_voices = kTrioVoiceCount;
-        pp_params.scale = scale;
-        pp_params.key_at_tick = lr_params.key_at_tick;
-        pp_params.voice_range_static = lr_params.voice_range_static;
-        pp_params.max_iterations = 2;
-        repairParallelPerfect(validated, pp_params);
-      }
-    }
-
-    // Resolve excessive melodic leaps (> 13 semitones) using octave shift priority.
-    // Bach's trio sonatas maintain independent registers per voice; octave
-    // displacement is musically correct for resolving large leaps.  We generate
-    // three candidates, score them with a 3-point contour check (prev, curr,
-    // next), and pick the best one that avoids voice crossing.
-    for (uint8_t voice = 0; voice < kTrioVoiceCount - 1; ++voice) {  // pedal excluded
-      std::vector<size_t> voice_indices;
-      for (size_t idx = 0; idx < validated.size(); ++idx) {
-        if (validated[idx].voice == voice) voice_indices.push_back(idx);
-      }
-      for (size_t cur = 1; cur < voice_indices.size(); ++cur) {
-        auto& curr = validated[voice_indices[cur]];
-        const auto& prev_note = validated[voice_indices[cur - 1]];
-        int leap = static_cast<int>(curr.pitch) - static_cast<int>(prev_note.pitch);
-        if (std::abs(leap) <= 13) continue;
-
-        const uint8_t range_low = vr[voice].first;
-        const uint8_t range_high = vr[voice].second;
-
-        // Generate three octave-shift candidates.
-        int shift1 = nearestOctaveShift(leap);
-        int cand1 = static_cast<int>(curr.pitch) - shift1;
-        int shift2 = (shift1 > 0) ? shift1 - 12 : shift1 + 12;  // opposite shift
-        int cand2 = static_cast<int>(curr.pitch) - shift2;
-        int dir = (leap > 0) ? 1 : -1;
-        int cand3 = static_cast<int>(prev_note.pitch) + dir * 12;  // fallback
-
-        // Clamp all candidates to voice range.
-        uint8_t candidates[3] = {
-            clampPitch(cand1, range_low, range_high),
-            clampPitch(cand2, range_low, range_high),
-            clampPitch(cand3, range_low, range_high),
-        };
-
-        // Look up the next note pitch for continuity scoring (if available).
-        bool has_next = (cur + 1 < voice_indices.size());
-        int next_pitch = has_next
-            ? static_cast<int>(validated[voice_indices[cur + 1]].pitch)
-            : static_cast<int>(curr.pitch);
-
-        // Score each candidate.
-        constexpr double kRejectScore = 1000.0;
-        constexpr double kCrossingPenalty = 900.0;
-        constexpr double kNextWeight = 0.75;
-        double best_score = kRejectScore;
-        uint8_t best_pitch = curr.pitch;
-
-        for (int cdx = 0; cdx < 3; ++cdx) {
-          int cand_pitch = static_cast<int>(candidates[cdx]);
-          int new_leap = cand_pitch - static_cast<int>(prev_note.pitch);
-
-          // Reject if leap from prev still exceeds threshold.
-          if (std::abs(new_leap) > 13) continue;
-
-          double score = static_cast<double>(std::abs(new_leap));
-
-          // Voice crossing penalty: check against other voices at same tick.
-          bool crossing = false;
-          for (size_t odx = 0; odx < validated.size(); ++odx) {
-            const auto& other = validated[odx];
-            if (other.voice == voice) continue;
-            if (other.voice >= kTrioVoiceCount) continue;
-            // Check temporal overlap (same tick window).
-            if (other.start_tick + other.duration <= curr.start_tick) continue;
-            if (other.start_tick >= curr.start_tick + curr.duration) continue;
-            int other_pitch = static_cast<int>(other.pitch);
-            // Voice 0 (upper) must not go below other voices.
-            if (voice == 0 && cand_pitch < other_pitch) { crossing = true; break; }
-            // Voice 1 (middle) must not go above voice 0.
-            if (voice == 1 && other.voice == 0 && cand_pitch > other_pitch) {
-              crossing = true;
-              break;
-            }
-          }
-          if (crossing) {
-            score = kCrossingPenalty;
-          } else {
-            // Next note continuity bonus.
-            score += std::abs(cand_pitch - next_pitch) * kNextWeight;
-          }
-
-          if (score < best_score) {
-            best_score = score;
-            best_pitch = candidates[cdx];
-          }
-        }
-
-        // Apply only if a valid candidate was found (score < crossing penalty).
-        if (best_score < kCrossingPenalty) {
-          curr.pitch = best_pitch;
-        }
-      }
-    }
-
+    auto voice_range = [](uint8_t voice) -> std::pair<uint8_t, uint8_t> {
+      if (voice == 0) return {kRhLow, kRhHigh};
+      if (voice == 1) return {kLhLow, kLhHigh};
+      return {organ_range::kPedalLow, organ_range::kPedalHigh};
+    };
+    finalizeFormNotes(all_notes, kTrioVoiceCount, voice_range,
+                      /*max_consecutive=*/2);
     for (auto& track : tracks) {
       track.notes.clear();
     }
-    for (auto& note : validated) {
+    for (auto& note : all_notes) {
       if (note.voice < kTrioVoiceCount) {
         tracks[note.voice].notes.push_back(std::move(note));
       }
@@ -2302,6 +2124,22 @@ TrioSonataMovement generateMovement(const KeySignature& key_sig, Tick num_bars,
 
   // 12. Quality post-passes (after ornaments, ensuring final output quality).
 
+  // 12-pre. Overlap dedup before quantization (must precede 12a).
+  {
+    std::vector<NoteEvent> pre_notes;
+    for (const auto& track : tracks) {
+      pre_notes.insert(pre_notes.end(), track.notes.begin(), track.notes.end());
+    }
+    finalizeFormNotes(pre_notes, kTrioVoiceCount);
+    for (auto& track : tracks) track.notes.clear();
+    for (auto& note : pre_notes) {
+      if (note.voice < kTrioVoiceCount) {
+        tracks[note.voice].notes.push_back(std::move(note));
+      }
+    }
+    form_utils::sortTrackNotes(tracks);
+  }
+
   // 12a. Quantize all upper voice durations to allowed set.
   {
     bool is_slow = (params.primary_dur >= kQuarterNote);
@@ -2348,49 +2186,6 @@ TrioSonataMovement generateMovement(const KeySignature& key_sig, Tick num_bars,
   // 12e. Re-sort after quality post-passes.
   form_utils::sortTrackNotes(tracks);
 
-  // 12f. Final parallel repair (outer voice pairs only).
-  // Steps 12b-12d may re-introduce parallel perfect consonances. This final
-  // repair pass catches any remaining P5/P8 parallels after all post-passes.
-  {
-    std::vector<NoteEvent> final_notes;
-    for (const auto& track : tracks) {
-      final_notes.insert(final_notes.end(), track.notes.begin(), track.notes.end());
-    }
-    std::sort(final_notes.begin(), final_notes.end(),
-              [](const NoteEvent& lhs, const NoteEvent& rhs) {
-                if (lhs.start_tick != rhs.start_tick) return lhs.start_tick < rhs.start_tick;
-                if (lhs.voice != rhs.voice) return lhs.voice < rhs.voice;
-                return lhs.pitch < rhs.pitch;
-              });
-    std::vector<std::pair<uint8_t, uint8_t>> vr_final = {
-        {kRhLow, kRhHigh},
-        {kLhLow, kLhHigh},
-        {organ_range::kPedalLow, organ_range::kPedalHigh}};
-    ParallelRepairParams pp_final;
-    pp_final.num_voices = kTrioVoiceCount;
-    pp_final.scale = scale;
-    pp_final.key_at_tick = [&](Tick) { return key_sig.tonic; };
-    pp_final.voice_range_static = [&vr_final](uint8_t voice) {
-      if (voice < vr_final.size()) return vr_final[voice];
-      return std::make_pair(static_cast<uint8_t>(0), static_cast<uint8_t>(127));
-    };
-    pp_final.max_iterations = 1;
-    repairParallelPerfect(final_notes, pp_final);
-    // Redistribute repaired notes back to tracks.
-    for (auto& track : tracks) track.notes.clear();
-    for (auto& note : final_notes) {
-      if (note.voice < kTrioVoiceCount) {
-        tracks[note.voice].notes.push_back(std::move(note));
-      }
-    }
-    form_utils::sortTrackNotes(tracks);
-  }
-
-  // 12g. Re-enforce voice separation after parallel repair (12f may shift
-  // pitches in ways that violate the minimum 12-semitone RH/LH gap).
-  enforceMinimumVoiceSeparation(tracks);
-  form_utils::sortTrackNotes(tracks);
-
   // 12h. Final phrase boundary enforcement: trim upper voice notes that cross
   // phrase boundaries (post-processing steps may have re-introduced crossings).
   // Then re-quantize trimmed durations to the allowed set.
@@ -2411,14 +2206,20 @@ TrioSonataMovement generateMovement(const KeySignature& key_sig, Tick num_bars,
             note.start_tick + note.duration > breath) {
           Tick trimmed = breath - note.start_tick;
           // Quantize to largest standard duration that fits.
-          Tick best = final_allowed[0];
+          Tick best = 0;
           for (int aidx = 2; aidx >= 0; --aidx) {
             if (final_allowed[aidx] <= trimmed) { best = final_allowed[aidx]; break; }
           }
-          note.duration = best;
+          // If no allowed duration fits, mark for removal.
+          note.duration = (best > 0) ? best : 0;
           note.modified_by |= static_cast<uint8_t>(NoteModifiedBy::Articulation);
         }
       }
+      // Remove notes marked for removal (duration == 0).
+      tracks[trk].notes.erase(
+          std::remove_if(tracks[trk].notes.begin(), tracks[trk].notes.end(),
+                         [](const NoteEvent& n) { return n.duration == 0; }),
+          tracks[trk].notes.end());
     }
   }
 

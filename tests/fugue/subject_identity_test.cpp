@@ -3,7 +3,6 @@
 
 #include "fugue/subject_identity.h"
 
-#include <algorithm>
 #include <cstdlib>
 #include <vector>
 
@@ -14,7 +13,6 @@
 #include "counterpoint/collision_resolver.h"
 #include "counterpoint/counterpoint_state.h"
 #include "counterpoint/fux_rule_evaluator.h"
-#include "counterpoint/parallel_repair.h"
 
 namespace bach {
 namespace {
@@ -450,15 +448,15 @@ TEST_F(SubjectDriftTest, IntervalPatternPreservedAfterCollisionResolution) {
   ASSERT_TRUE(pre_identity_.isValid());
   ASSERT_TRUE(post_identity.isValid());
 
-  // Core intervals must be identical: FugueSubject has SemiImmutable protection,
-  // which only allows octave shifts. Interval pattern (mod 12) should be preserved.
+  // Core intervals must be identical: FugueSubject has Immutable protection,
+  // so no pitch modification is allowed. Interval pattern should be preserved.
   ASSERT_EQ(pre_identity_.essential.core_intervals.size(),
             post_identity.essential.core_intervals.size())
       << "Interval count changed after collision resolution";
 
   for (size_t idx = 0; idx < pre_identity_.essential.core_intervals.size(); ++idx) {
-    // SemiImmutable allows octave shift (+/-12), so directed intervals may
-    // differ by multiples of 12. Check that the interval mod 12 is preserved.
+    // Immutable protection means no modification. Intervals should be identical,
+    // but check mod 12 for robustness (octave transposition tolerance).
     int pre = pre_identity_.essential.core_intervals[idx];
     int post = post_identity.essential.core_intervals[idx];
     int diff = pre - post;
@@ -511,80 +509,6 @@ TEST_F(SubjectDriftTest, AccentPatternPreservedAfterCollisionResolution) {
   }
 }
 
-TEST_F(SubjectDriftTest, IdentityPreservedAfterParallelRepair) {
-  // Place subject notes directly (without collision resolver first).
-  for (const auto& note : subject_notes_) {
-    state_.addNote(note.voice, note);
-  }
-
-  // Also add a second voice (voice 1) with notes that could cause parallels.
-  std::vector<NoteEvent> bass_notes = makeSubjectNotes(
-      {48, 50, 52, 48, 55, 52, 50, 48},
-      {kTicksPerBeat, kTicksPerBeat, kTicksPerBeat, kTicksPerBeat,
-       kTicksPerBeat, kTicksPerBeat, kTicksPerBeat, kTicksPerBeat});
-  for (auto& note : bass_notes) {
-    note.voice = 1;
-    note.source = BachNoteSource::FreeCounterpoint;
-    state_.addNote(1, note);
-  }
-
-  // Combine all notes for parallel repair.
-  std::vector<NoteEvent> all_notes;
-  all_notes.insert(all_notes.end(), subject_notes_.begin(), subject_notes_.end());
-  all_notes.insert(all_notes.end(), bass_notes.begin(), bass_notes.end());
-
-  // Run parallel repair.
-  ParallelRepairParams params;
-  params.num_voices = 2;
-  params.scale = ScaleType::Major;
-  params.key_at_tick = [](Tick) { return Key::C; };
-  params.voice_range_static = [this](uint8_t voice) -> std::pair<uint8_t, uint8_t> {
-    auto range = state_.getVoiceRange(voice);
-    return range ? std::make_pair(range->low, range->high)
-                 : std::make_pair(uint8_t(36), uint8_t(84));
-  };
-
-  repairParallelPerfect(all_notes, params);
-
-  // Extract subject notes (voice 0) after repair.
-  std::vector<NoteEvent> repaired_subject;
-  for (const auto& note : all_notes) {
-    if (note.voice == 0) {
-      repaired_subject.push_back(note);
-    }
-  }
-
-  // Sort by start_tick for identity computation.
-  std::sort(repaired_subject.begin(), repaired_subject.end(),
-            [](const NoteEvent& a, const NoteEvent& b) {
-              return a.start_tick < b.start_tick;
-            });
-
-  auto post_identity = buildSubjectIdentity(repaired_subject, Key::C, false);
-
-  ASSERT_TRUE(pre_identity_.isValid());
-  ASSERT_TRUE(post_identity.isValid());
-
-  // FugueSubject has SemiImmutable protection. Parallel repair should not
-  // modify these notes (Immutable/SemiImmutable notes are skipped).
-  // Therefore the identity must be exactly preserved.
-  ASSERT_EQ(pre_identity_.essential.core_intervals.size(),
-            post_identity.essential.core_intervals.size());
-
-  for (size_t idx = 0; idx < pre_identity_.essential.core_intervals.size(); ++idx) {
-    EXPECT_EQ(pre_identity_.essential.core_intervals[idx],
-              post_identity.essential.core_intervals[idx])
-        << "Subject interval drifted after parallel repair at index " << idx;
-  }
-
-  ASSERT_EQ(pre_identity_.essential.core_rhythm.size(),
-            post_identity.essential.core_rhythm.size());
-  for (size_t idx = 0; idx < pre_identity_.essential.core_rhythm.size(); ++idx) {
-    EXPECT_EQ(pre_identity_.essential.core_rhythm[idx],
-              post_identity.essential.core_rhythm[idx])
-        << "Subject rhythm drifted after parallel repair at index " << idx;
-  }
-}
 
 // ===========================================================================
 // Test 10: BuildSubjectIdentity_EmptyNotes

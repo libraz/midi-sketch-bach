@@ -939,11 +939,22 @@ GeneratorResult generate(const GeneratorConfig& config) {
     }
   }
 
-  // Final overlap cleanup: catches any overlaps introduced by articulation,
-  // merging, or other post-processing steps.
+  // Overlap assertion: constraint-driven generation should produce clean output.
+  // If this fires, there's a generation bug to fix, not a post-processing gap.
+#ifndef NDEBUG
   if (result.success) {
-    cleanupTrackOverlaps(result.tracks);
+    for (const auto& track : result.tracks) {
+      for (size_t i = 1; i < track.notes.size(); ++i) {
+        if (track.notes[i - 1].start_tick + track.notes[i - 1].duration >
+            track.notes[i].start_tick) {
+          std::fprintf(stderr,
+                       "[generator] WARNING: overlap in voice %u at tick %u\n",
+                       track.notes[i].voice, track.notes[i].start_tick);
+        }
+      }
+    }
   }
+#endif
 
   // Pipeline exit: warn if any notes still have Unknown source.
   if (result.success) {

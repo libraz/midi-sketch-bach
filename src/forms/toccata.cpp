@@ -17,12 +17,7 @@
 #include "core/pitch_utils.h"
 #include "core/rng_util.h"
 #include "core/scale.h"
-#include "counterpoint/bach_rule_evaluator.h"
-#include "counterpoint/collision_resolver.h"
-#include "counterpoint/counterpoint_state.h"
-#include "counterpoint/leap_resolution.h"
-#include "counterpoint/parallel_repair.h"
-#include "counterpoint/vertical_safe.h"
+#include "forms/form_constraint_setup.h"
 #include "forms/form_utils.h"
 #include "forms/gesture_template.h"
 #include "forms/toccata_figuration.h"
@@ -1645,54 +1640,12 @@ ToccataResult generateDramaticusToccata(const ToccataConfig& config) {
   assert(countUnknownSource(all_notes) == 0 &&
          "All notes should have source set by generators");
 
-  // --- 9. Repair pipeline ---
-  if (num_voices >= 2) {
-    std::vector<std::pair<uint8_t, uint8_t>> voice_ranges;
-    for (uint8_t v = 0; v < num_voices; ++v) {
-      voice_ranges.emplace_back(getToccataLowPitch(v), getToccataHighPitch(v));
-    }
-
-    all_notes = toccata_internal::coordinateVoices(
-        std::move(all_notes), num_voices, config.key.tonic, &timeline);
-
-    PostValidateStats stats;
-    all_notes = postValidateNotes(
-        std::move(all_notes), num_voices, config.key, voice_ranges, &stats,
-        /*protection_overrides=*/{}, /*stylus_phantasticus=*/true);
-
-    // Leap resolution.
-    {
-      LeapResolutionParams lr_params;
-      lr_params.num_voices = num_voices;
-      lr_params.key_at_tick = [&](Tick) { return config.key.tonic; };
-      lr_params.scale_at_tick = [&](Tick t) {
-        const auto& ev = timeline.getAt(t);
-        return ev.is_minor ? ScaleType::HarmonicMinor : ScaleType::Major;
-      };
-      lr_params.voice_range_static = [&](uint8_t v) -> std::pair<uint8_t, uint8_t> {
-        if (v < voice_ranges.size()) return voice_ranges[v];
-        return {0, 127};
-      };
-      lr_params.is_chord_tone = [&](Tick t, uint8_t p) {
-        return isChordTone(p, timeline.getAt(t));
-      };
-      lr_params.vertical_safe =
-          makeVerticalSafeWithParallelCheck(timeline, all_notes, num_voices);
-      resolveLeaps(all_notes, lr_params);
-
-      // Second parallel-perfect repair pass.
-      {
-        ParallelRepairParams pp_params;
-        pp_params.num_voices = num_voices;
-        pp_params.scale = config.key.is_minor ? ScaleType::HarmonicMinor
-                                              : ScaleType::Major;
-        pp_params.key_at_tick = lr_params.key_at_tick;
-        pp_params.voice_range_static = lr_params.voice_range_static;
-        pp_params.max_iterations = 2;
-        pp_params.gesture_core_intervals = result.core_intervals;
-        repairParallelPerfect(all_notes, pp_params);
-      }
-    }
+  // --- 9. Constraint-driven finalize ---
+  {
+    auto voice_range = [](uint8_t v) -> std::pair<uint8_t, uint8_t> {
+      return {getToccataLowPitch(v), getToccataHighPitch(v)};
+    };
+    finalizeFormNotes(all_notes, num_voices, voice_range, /*max_consecutive=*/2);
   }
 
   // --- 10. Tracks ---

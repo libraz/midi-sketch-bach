@@ -16,11 +16,7 @@
 #include "core/pitch_utils.h"
 #include "core/rng_util.h"
 #include "core/scale.h"
-#include "counterpoint/coordinate_voices.h"
-#include "counterpoint/leap_resolution.h"
-#include "counterpoint/parallel_repair.h"
-#include "counterpoint/repeated_note_repair.h"
-#include "counterpoint/vertical_safe.h"
+#include "forms/form_constraint_setup.h"
 #include "harmony/chord_tone_utils.h"
 #include "harmony/chord_types.h"
 #include "harmony/chord_voicer.h"
@@ -655,84 +651,12 @@ PreludeResult generatePrelude(const PreludeConfig& config) {
     }
   }
 
-  // ---- Unified coordination pass (vertical dissonance control) ----
+  // --- Constraint-driven finalize: overlap dedup + range clamp + repeat break ---
   {
-    CoordinationConfig coord_config;
-    coord_config.num_voices = num_voices;
-    coord_config.tonic = config.key.tonic;
-    coord_config.timeline = &timeline;
-    coord_config.voice_range = [](uint8_t v) -> std::pair<uint8_t, uint8_t> {
-      return {getVoiceLowPitch(v), getVoiceHighPitch(v)};
+    auto voice_range = [](uint8_t vid) -> std::pair<uint8_t, uint8_t> {
+      return {getVoiceLowPitch(vid), getVoiceHighPitch(vid)};
     };
-    coord_config.immutable_sources = {BachNoteSource::PedalPoint};
-    coord_config.lightweight_sources = {BachNoteSource::ArpeggioFlow,
-                                        BachNoteSource::EpisodeMaterial,
-                                        BachNoteSource::PreludeFiguration};
-    coord_config.use_next_pitch_map = true;
-    coord_config.check_cross_relations = true;
-    coord_config.form_name = "Prelude";
-    auto form_profile = getFormProfile(FormType::PreludeAndFugue);
-    coord_config.dissonance_policy = form_profile.dissonance_policy;
-    all_notes = coordinateVoices(std::move(all_notes), coord_config);
-  }
-
-  // Build per-voice pitch ranges for counterpoint validation.
-  std::vector<std::pair<uint8_t, uint8_t>> voice_ranges;
-  for (uint8_t v = 0; v < num_voices; ++v) {
-    voice_ranges.push_back({getVoiceLowPitch(v), getVoiceHighPitch(v)});
-  }
-
-  // Post-validate through counterpoint engine (parallel 5ths/8ths repair).
-  PostValidateStats pv_stats;
-  all_notes = postValidateNotes(
-      std::move(all_notes), num_voices, config.key, voice_ranges, &pv_stats);
-
-  // Leap resolution: fix unresolved melodic leaps (contrary step rule).
-  {
-    LeapResolutionParams lr_params;
-    lr_params.num_voices = num_voices;
-    lr_params.key_at_tick = [&](Tick) { return config.key.tonic; };
-    lr_params.scale_at_tick = [&](Tick t) {
-      const auto& ev = timeline.getAt(t);
-      return ev.is_minor ? ScaleType::HarmonicMinor : ScaleType::Major;
-    };
-    lr_params.voice_range_static = [&](uint8_t v) -> std::pair<uint8_t, uint8_t> {
-      return {getVoiceLowPitch(v), getVoiceHighPitch(v)};
-    };
-    lr_params.is_chord_tone = [&](Tick t, uint8_t p) {
-      return isChordTone(p, timeline.getAt(t));
-    };
-    lr_params.vertical_safe =
-        makeVerticalSafeWithParallelCheck(timeline, all_notes, num_voices);
-    resolveLeaps(all_notes, lr_params);
-
-    // Second parallel-perfect repair pass after leap resolution.
-    {
-      ParallelRepairParams pp_params;
-      pp_params.num_voices = num_voices;
-      pp_params.scale = config.key.is_minor ? ScaleType::HarmonicMinor : ScaleType::Major;
-      pp_params.key_at_tick = lr_params.key_at_tick;
-      pp_params.voice_range_static = lr_params.voice_range_static;
-      pp_params.max_iterations = 2;
-      repairParallelPerfect(all_notes, pp_params);
-    }
-  }
-
-  // Repeated note repair: safety net for remaining consecutive repeated pitches.
-  {
-    RepeatedNoteRepairParams repair_params;
-    repair_params.num_voices = num_voices;
-    repair_params.key_at_tick = [&](Tick) { return config.key.tonic; };
-    repair_params.scale_at_tick = [&](Tick t) {
-      const auto& ev = timeline.getAt(t);
-      return ev.is_minor ? ScaleType::HarmonicMinor : ScaleType::Major;
-    };
-    repair_params.voice_range = [&](uint8_t v) -> std::pair<uint8_t, uint8_t> {
-      return {getVoiceLowPitch(v), getVoiceHighPitch(v)};
-    };
-    repair_params.vertical_safe =
-        makeVerticalSafeWithParallelCheck(timeline, all_notes, num_voices);
-    repairRepeatedNotes(all_notes, repair_params);
+    finalizeFormNotes(all_notes, num_voices, voice_range, /*max_consecutive=*/2);
   }
 
   // Boundary-driven texture thinning: reduce inner voice density at phrase
@@ -872,74 +796,13 @@ PreludeResult generatePrelude(const PreludeConfig& config) {
   // Step 5: Sort notes within each track.
   form_utils::sortTrackNotes(tracks);
 
-  // Final parallel repair pass: catch parallels introduced by post-processing
-  // (cadential pedal, Picardy third, registration changes).
-  if (num_voices >= 2) {
+  // Final overlap dedup after Picardy/registration post-processing.
+  {
     std::vector<NoteEvent> final_notes;
     for (const auto& track : tracks) {
       final_notes.insert(final_notes.end(), track.notes.begin(), track.notes.end());
     }
-
-    // Count melodic direction changes before repair for sanity check.
-    auto countDirectionChanges = [](const std::vector<NoteEvent>& notes,
-                                    uint8_t nv) -> int {
-      // Build per-voice sorted pitch sequences.
-      std::vector<std::vector<uint8_t>> voice_pitches(nv);
-      std::vector<std::vector<Tick>> voice_ticks(nv);
-      for (const auto& note : notes) {
-        if (note.voice < nv) {
-          voice_pitches[note.voice].push_back(note.pitch);
-          voice_ticks[note.voice].push_back(note.start_tick);
-        }
-      }
-      int changes = 0;
-      for (uint8_t vid = 0; vid < nv; ++vid) {
-        auto& pitches = voice_pitches[vid];
-        auto& ticks = voice_ticks[vid];
-        if (pitches.size() < 3) continue;
-        // Sort by tick.
-        std::vector<size_t> order(pitches.size());
-        for (size_t idx = 0; idx < order.size(); ++idx) order[idx] = idx;
-        std::sort(order.begin(), order.end(),
-                  [&ticks](size_t lhs, size_t rhs) {
-                    return ticks[lhs] < ticks[rhs];
-                  });
-        int prev_dir = 0;
-        for (size_t idx = 1; idx < order.size(); ++idx) {
-          int diff = static_cast<int>(pitches[order[idx]]) -
-                     static_cast<int>(pitches[order[idx - 1]]);
-          int dir = (diff > 0) ? 1 : ((diff < 0) ? -1 : 0);
-          if (dir != 0 && prev_dir != 0 && dir != prev_dir) ++changes;
-          if (dir != 0) prev_dir = dir;
-        }
-      }
-      return changes;
-    };
-
-    int dir_changes_before = countDirectionChanges(final_notes, num_voices);
-
-    ParallelRepairParams pp_final;
-    pp_final.num_voices = num_voices;
-    pp_final.scale = config.key.is_minor ? ScaleType::HarmonicMinor : ScaleType::Major;
-    pp_final.key_at_tick = [&](Tick) { return config.key.tonic; };
-    pp_final.voice_range_static = [&](uint8_t vid) -> std::pair<uint8_t, uint8_t> {
-      return {getVoiceLowPitch(vid), getVoiceHighPitch(vid)};
-    };
-    pp_final.max_iterations = 2;
-    repairParallelPerfect(final_notes, pp_final);
-
-    int dir_changes_after = countDirectionChanges(final_notes, num_voices);
-    if (dir_changes_before > 0 &&
-        dir_changes_after > dir_changes_before * 120 / 100) {
-      fprintf(stderr,
-              "[Prelude] WARNING: final parallel repair increased direction "
-              "changes %d -> %d (+%.0f%%)\n",
-              dir_changes_before, dir_changes_after,
-              100.0f * (dir_changes_after - dir_changes_before) /
-                  dir_changes_before);
-    }
-
-    // Redistribute repaired notes back to tracks.
+    finalizeFormNotes(final_notes, num_voices);
     for (auto& track : tracks) track.notes.clear();
     for (auto& note : final_notes) {
       if (note.voice < num_voices) {

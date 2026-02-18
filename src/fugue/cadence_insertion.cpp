@@ -386,11 +386,11 @@ int applyCadenceApproachToVoices(
         if (notes[i].voice == 0) {
           // Skip structurally protected notes.
           auto prot = getProtectionLevel(notes[i].source);
-          if (prot <= ProtectionLevel::SemiImmutable) continue;
+          if (prot == ProtectionLevel::Immutable) continue;
           sop_indices.push_back(i);
         } else if (notes[i].voice == bass_voice) {
           auto prot = getProtectionLevel(notes[i].source);
-          if (prot <= ProtectionLevel::SemiImmutable) continue;
+          if (prot == ProtectionLevel::Immutable) continue;
           bass_indices.push_back(i);
         }
       }

@@ -1394,11 +1394,11 @@ TEST(FugueGeneratorTest, CodaProximity_NoCrossing) {
 }
 
 // ---------------------------------------------------------------------------
-// coordinateVoices integration: strong-beat dissonance should be minimal
+// finalizeFormNotes integration: strong-beat dissonance should be minimal
 // ---------------------------------------------------------------------------
 
 TEST(FugueGeneratorTest, FugueStrongBeatDissonanceZero) {
-  // Verify that coordinateVoices keeps strong-beat dissonances low across
+  // Verify that finalizeFormNotes keeps strong-beat dissonances low across
   // multiple seeds and voice counts.  A small number of strong-beat
   // dissonances can occur legitimately in valid counterpoint (suspensions,
   // appogiaturas, passing tones on strong beats).  Bach's own fugues

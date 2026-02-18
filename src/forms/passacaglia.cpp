@@ -19,12 +19,9 @@
 #include "counterpoint/counterpoint_state.h"
 #include "harmony/chord_types.h"
 #include "harmony/harmonic_event.h"
+#include "forms/form_constraint_setup.h"
 #include "forms/form_utils.h"
 #include "core/figure_injector.h"
-#include "counterpoint/leap_resolution.h"
-#include "counterpoint/parallel_repair.h"
-#include "counterpoint/vertical_safe.h"
-#include "counterpoint/repeated_note_repair.h"
 #include "organ/organ_techniques.h"
 
 namespace bach {
@@ -2120,81 +2117,24 @@ PassacagliaResult generatePassacaglia(const PassacagliaConfig& config) {
     }
   }
 
-  // Step 5: Post-validate through counterpoint engine.
+  // Step 5: Constraint-driven finalize (within-voice overlap dedup).
   if (num_voices >= 2) {
-    // Collect all notes from all tracks.
     std::vector<NoteEvent> all_notes;
     for (const auto& track : tracks) {
       all_notes.insert(all_notes.end(), track.notes.begin(), track.notes.end());
     }
 
-    // Build voice ranges from the hierarchical range functions.
-    std::vector<std::pair<uint8_t, uint8_t>> voice_ranges;
-    for (uint8_t v = 0; v < num_voices; ++v) {
-      voice_ranges.emplace_back(getVoiceLowPitch(v), getVoiceHighPitch(v));
-    }
+    // --- Lightweight finalize: overlap dedup + range clamp + repeat break ---
+    auto voice_range = [](uint8_t v) -> std::pair<uint8_t, uint8_t> {
+      return {getVoiceLowPitch(v), getVoiceHighPitch(v)};
+    };
+    finalizeFormNotes(all_notes, num_voices, voice_range, /*max_consecutive=*/2);
 
-    PostValidateStats stats;
-    auto validated = postValidateNotes(
-        std::move(all_notes), num_voices, config.key, voice_ranges, &stats);
-
-    // Leap resolution: fix unresolved melodic leaps (contrary step rule).
-    {
-      LeapResolutionParams lr_params;
-      lr_params.num_voices = num_voices;
-      lr_params.key_at_tick = [&](Tick) { return config.key.tonic; };
-      lr_params.scale_at_tick = [&](Tick) {
-        return config.key.is_minor ? ScaleType::HarmonicMinor : ScaleType::Major;
-      };
-      lr_params.voice_range_static = [&](uint8_t v) -> std::pair<uint8_t, uint8_t> {
-        return {getVoiceLowPitch(v), getVoiceHighPitch(v)};
-      };
-      lr_params.is_chord_tone = [&](Tick t, uint8_t p) {
-        return isChordTone(p, timeline.getAt(t));
-      };
-      lr_params.vertical_safe =
-          makeVerticalSafeWithParallelCheck(timeline, validated, num_voices);
-      resolveLeaps(validated, lr_params);
-
-      // Second parallel-perfect repair pass: fix parallels introduced by leap resolution.
-      // Conservative safety net (max 2 iterations) -- primary defense is at generation time.
-      {
-        ParallelRepairParams pp_params;
-        pp_params.num_voices = num_voices;
-        pp_params.scale = config.key.is_minor ? ScaleType::HarmonicMinor : ScaleType::Major;
-        pp_params.key_at_tick = lr_params.key_at_tick;
-        pp_params.voice_range_static = lr_params.voice_range_static;
-        pp_params.max_iterations = 2;
-        repairParallelPerfect(validated, pp_params);
-      }
-    }
-
-    // Repeated note repair: replace 4th+ same-pitch notes with step-adjacent
-    // scale tones. Passacaglia uses fixed key (no modulation within a piece).
-    {
-      RepeatedNoteRepairParams repair_params;
-      repair_params.max_consecutive = 2;
-      repair_params.num_voices = num_voices;
-      repair_params.key_at_tick = [&](Tick) { return config.key.tonic; };
-      repair_params.scale_at_tick = [&](Tick) {
-        return config.key.is_minor ? ScaleType::HarmonicMinor : ScaleType::Major;
-      };
-      repair_params.voice_range = [&](uint8_t v) -> std::pair<uint8_t, uint8_t> {
-        return {getVoiceLowPitch(v), getVoiceHighPitch(v)};
-      };
-      // Repair in a loop until convergence: repairing a note can create a new
-      // same-pitch boundary with the next note, requiring another pass.
-      for (int pass = 0; pass < 5; ++pass) {
-        int modified = repairRepeatedNotes(validated, repair_params);
-        if (modified == 0) break;
-      }
-    }
-
-    // Redistribute validated notes back to tracks.
+    // Redistribute finalized notes back to tracks.
     for (auto& track : tracks) {
       track.notes.clear();
     }
-    for (auto& note : validated) {
+    for (auto& note : all_notes) {
       if (note.voice < num_voices) {
         tracks[note.voice].notes.push_back(std::move(note));
       }
@@ -2237,107 +2177,20 @@ PassacagliaResult generatePassacaglia(const PassacagliaConfig& config) {
       config.num_variations, var_dur);
   applyExtendedRegistrationPlan(tracks, reg_plan);
 
-  // Final repeated-note repair pass: Picardy and other post-processing steps
-  // may introduce new same-pitch runs after the main repair.
-  if (num_voices >= 2) {
+  // Final constraint-driven finalize after Picardy/registration post-processing.
+  {
     std::vector<NoteEvent> final_notes;
     for (const auto& track : tracks) {
       final_notes.insert(final_notes.end(), track.notes.begin(),
                          track.notes.end());
     }
 
-    RepeatedNoteRepairParams final_repair;
-    final_repair.max_consecutive = 2;
-    final_repair.num_voices = num_voices;
-    final_repair.key_at_tick = [&](Tick) { return config.key.tonic; };
-    final_repair.scale_at_tick = [&](Tick tick) {
-      // Picardy region uses major scale for valid candidates.
-      if (config.enable_picardy && config.key.is_minor &&
-          tick >= total_duration - kTicksPerBar) {
-        return ScaleType::Major;
-      }
-      return config.key.is_minor ? ScaleType::HarmonicMinor : ScaleType::Major;
-    };
-    final_repair.voice_range = [&](uint8_t v) -> std::pair<uint8_t, uint8_t> {
+    auto vr = [](uint8_t v) -> std::pair<uint8_t, uint8_t> {
       return {getVoiceLowPitch(v), getVoiceHighPitch(v)};
     };
+    finalizeFormNotes(final_notes, num_voices, vr, /*max_consecutive=*/2);
 
-    for (int pass = 0; pass < 3; ++pass) {
-      int modified = repairRepeatedNotes(final_notes, final_repair);
-      if (modified == 0) break;
-    }
-
-    // Second parallel repair: catch violations introduced by post-processing
-    // (repeated-note repair, Picardy third, registration changes).
-    // Ground bass is ProtectionLevel::Immutable — never modified.
-    {
-      // Count melodic direction changes before repair for sanity check.
-      auto countDirectionChanges = [](const std::vector<NoteEvent>& notes,
-                                      uint8_t nv) -> int {
-        std::vector<std::vector<uint8_t>> voice_pitches(nv);
-        std::vector<std::vector<Tick>> voice_ticks(nv);
-        for (const auto& note : notes) {
-          if (note.voice < nv) {
-            voice_pitches[note.voice].push_back(note.pitch);
-            voice_ticks[note.voice].push_back(note.start_tick);
-          }
-        }
-        int changes = 0;
-        for (uint8_t vid = 0; vid < nv; ++vid) {
-          auto& pitches = voice_pitches[vid];
-          auto& ticks = voice_ticks[vid];
-          if (pitches.size() < 3) continue;
-          std::vector<size_t> order(pitches.size());
-          for (size_t idx = 0; idx < order.size(); ++idx) order[idx] = idx;
-          std::sort(order.begin(), order.end(),
-                    [&ticks](size_t lhs, size_t rhs) {
-                      return ticks[lhs] < ticks[rhs];
-                    });
-          int prev_dir = 0;
-          for (size_t idx = 1; idx < order.size(); ++idx) {
-            int diff = static_cast<int>(pitches[order[idx]]) -
-                       static_cast<int>(pitches[order[idx - 1]]);
-            int dir = (diff > 0) ? 1 : ((diff < 0) ? -1 : 0);
-            if (dir != 0 && prev_dir != 0 && dir != prev_dir) ++changes;
-            if (dir != 0) prev_dir = dir;
-          }
-        }
-        return changes;
-      };
-
-      int dir_changes_before = countDirectionChanges(final_notes, num_voices);
-
-      ParallelRepairParams pp2;
-      pp2.num_voices = num_voices;
-      pp2.scale = config.key.is_minor ? ScaleType::HarmonicMinor : ScaleType::Major;
-      pp2.key_at_tick = [&](Tick) { return config.key.tonic; };
-      pp2.voice_range_static = [&](uint8_t v) -> std::pair<uint8_t, uint8_t> {
-        return {getVoiceLowPitch(v), getVoiceHighPitch(v)};
-      };
-      pp2.max_iterations = 2;
-      repairParallelPerfect(final_notes, pp2);
-
-      int dir_changes_after = countDirectionChanges(final_notes, num_voices);
-      if (dir_changes_before > 0 &&
-          dir_changes_after > dir_changes_before * 120 / 100) {
-        fprintf(stderr,
-                "[Passacaglia] WARNING: final parallel repair increased "
-                "direction changes %d -> %d (+%.0f%%)\n",
-                dir_changes_before, dir_changes_after,
-                100.0f * (dir_changes_after - dir_changes_before) /
-                    dir_changes_before);
-      }
-    }
-
-    // Post-parallel repeated-note repair: the second parallel repair may have
-    // moved pitches to avoid parallel 5ths/8ves, reintroducing same-pitch runs.
-    // Reuse final_repair params (same key, scale, voice ranges).
-    for (int pass = 0; pass < 3; ++pass) {
-      int modified = repairRepeatedNotes(final_notes, final_repair);
-      if (modified == 0) break;
-    }
-
-    // Redistribute repaired notes back to tracks.
+    // Redistribute finalized notes back to tracks.
     for (auto& track : tracks) {
       track.notes.clear();
     }
@@ -2347,53 +2200,6 @@ PassacagliaResult generatePassacaglia(const PassacagliaConfig& config) {
       }
     }
     form_utils::sortTrackNotes(tracks);
-  }
-
-  // Post-sort repeated-note repair: Sparse thinning can create cross-gap
-  // triples where bars 0-1 end with pitch P and bars 6-7 resume with pitch P.
-  // After thinning removes bars 2-5, these become consecutive in track output.
-  // Use an extended gap threshold spanning a full variation to catch these.
-  {
-    Tick var_dur = static_cast<Tick>(config.ground_bass_bars) * kTicksPerBar;
-    std::vector<NoteEvent> all_notes;
-    for (const auto& track : tracks) {
-      all_notes.insert(all_notes.end(), track.notes.begin(), track.notes.end());
-    }
-
-    RepeatedNoteRepairParams gap_repair;
-    gap_repair.max_consecutive = 2;
-    gap_repair.num_voices = num_voices;
-    gap_repair.run_gap_threshold = var_dur;  // Cover full variation gaps.
-    gap_repair.key_at_tick = [&](Tick) { return config.key.tonic; };
-    gap_repair.scale_at_tick = [&](Tick tick) {
-      if (config.enable_picardy && config.key.is_minor &&
-          tick >= total_duration - kTicksPerBar) {
-        return ScaleType::Major;
-      }
-      return config.key.is_minor ? ScaleType::HarmonicMinor : ScaleType::Major;
-    };
-    gap_repair.voice_range = [&](uint8_t v) -> std::pair<uint8_t, uint8_t> {
-      return {getVoiceLowPitch(v), getVoiceHighPitch(v)};
-    };
-
-    bool any_modified = false;
-    for (int pass = 0; pass < 3; ++pass) {
-      int modified = repairRepeatedNotes(all_notes, gap_repair);
-      if (modified == 0) break;
-      any_modified = true;
-    }
-
-    if (any_modified) {
-      for (auto& track : tracks) {
-        track.notes.clear();
-      }
-      for (auto& note : all_notes) {
-        if (note.voice < num_voices) {
-          tracks[note.voice].notes.push_back(std::move(note));
-        }
-      }
-      form_utils::sortTrackNotes(tracks);
-    }
   }
 
   result.tracks = std::move(tracks);
