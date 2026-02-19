@@ -17,23 +17,6 @@
 namespace bach {
 
 // ---------------------------------------------------------------------------
-// VerticalSnapshot
-// ---------------------------------------------------------------------------
-
-VerticalSnapshot VerticalSnapshot::fromState(const CounterpointState& state,
-                                             Tick tick) {
-  VerticalSnapshot snap;
-  const auto& voices = state.getActiveVoices();
-  snap.num_voices = static_cast<uint8_t>(
-      std::min(voices.size(), static_cast<size_t>(kMaxVoices)));
-  for (int i = 0; i < snap.num_voices; ++i) {
-    const NoteEvent* note = state.getNoteAt(voices[i], tick);
-    snap.pitches[i] = note ? note->pitch : 0;
-  }
-  return snap;
-}
-
-// ---------------------------------------------------------------------------
 // JSD computation
 // ---------------------------------------------------------------------------
 
@@ -374,7 +357,7 @@ float ConstraintState::evaluate(
     const BachRuleEvaluator* crossing_eval,
     const CounterpointState* cp_state,
     const uint8_t* recent_pitches, int recent_count,
-    float figure_score) const {
+    float figure_score) {
   // Layer 2: Invariant check.
   auto inv_result = invariants.satisfies(
       pitch, voice_id, tick, snap, rule_eval, crossing_eval, cp_state,
@@ -413,8 +396,15 @@ float ConstraintState::evaluate(
   float gravity_score = gravity.score(pitch, duration, ctx, snap, accumulator,
                                       decay, figure_score);
 
-  // Soft violation penalty.
+  // Soft violation penalty + recovery obligation for soft violations.
   float soft_penalty = inv_result.soft_violations * -0.1f;
+  if (inv_result.soft_violations > 0) {
+    addRecoveryObligation(
+        ObligationType::LeapResolve,
+        tick,
+        tick + kTicksPerBar * 2,
+        voice_id);
+  }
 
   return gravity_score + obligation_bonus + soft_penalty;
 }
@@ -508,16 +498,17 @@ void ConstraintState::addRecoveryObligation(ObligationType type, Tick origin,
   soft_violation_count++;
 }
 
-bool ConstraintState::is_dead() const {
+bool ConstraintState::is_dead(Tick current_tick) const {
   // Check if any Structural obligation has passed its deadline.
-  for (const auto& ob : active_obligations) {
-    if (ob.strength == ObligationStrength::Structural) {
-      // If deadline has passed and still active, it's a problem.
-      // But we can't check current tick here; caller should check.
+  for (const auto& obl : active_obligations) {
+    if (obl.strength == ObligationStrength::Structural) {
+      if (current_tick > obl.deadline) {
+        return true;  // Structural deadline exceeded, generation is stuck.
+      }
     }
   }
-  // A more sophisticated check would evaluate candidate space.
-  // For now, we consider the state dead if too many soft violations.
+  // Also check soft violation ratio -- too many soft violations means the
+  // generation quality has degraded beyond recovery.
   return soft_violation_ratio() > 0.15f;
 }
 

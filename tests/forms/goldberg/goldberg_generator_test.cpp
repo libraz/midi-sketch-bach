@@ -14,6 +14,7 @@
 #include "core/pitch_utils.h"
 #include "forms/goldberg/goldberg_plan.h"
 #include "forms/goldberg/goldberg_types.h"
+#include "test_helpers.h"
 
 namespace bach {
 namespace {
@@ -32,17 +33,6 @@ GoldbergConfig makeTestConfig(uint32_t seed = 42,
   config.seed = seed;
   config.scale = scale;
   return config;
-}
-
-/// @brief Count total notes across all tracks.
-/// @param result The generation result.
-/// @return Sum of note counts from all tracks.
-size_t totalNoteCount(const GoldbergResult& result) {
-  size_t total = 0;
-  for (const auto& track : result.tracks) {
-    total += track.notes.size();
-  }
-  return total;
 }
 
 /// @brief Check if a pitch class belongs to G major scale.
@@ -115,7 +105,7 @@ TEST(GoldbergGeneratorE2ETest, GenerateShortScale) {
   }
 
   EXPECT_TRUE(result.tracks.size() > 0u) << "Short scale should produce tracks";
-  EXPECT_GT(totalNoteCount(result), 0u) << "Short scale should produce notes";
+  EXPECT_GT(test_helpers::totalNoteCount(result), 0u) << "Short scale should produce notes";
   EXPECT_EQ(result.seed_used, 42u);
 }
 
@@ -130,8 +120,8 @@ TEST(GoldbergGeneratorE2ETest, GenerateMediumScale) {
     GTEST_SKIP() << "Generator not yet implemented";
   }
 
-  EXPECT_GT(totalNoteCount(result_medium), 0u);
-  EXPECT_GT(totalNoteCount(result_medium), totalNoteCount(result_short))
+  EXPECT_GT(test_helpers::totalNoteCount(result_medium), 0u);
+  EXPECT_GT(test_helpers::totalNoteCount(result_medium), test_helpers::totalNoteCount(result_short))
       << "Medium scale should produce more notes than Short";
 }
 
@@ -146,8 +136,8 @@ TEST(GoldbergGeneratorE2ETest, GenerateLongScale) {
     GTEST_SKIP() << "Generator not yet implemented";
   }
 
-  EXPECT_GT(totalNoteCount(result_long), 0u);
-  EXPECT_GT(totalNoteCount(result_long), totalNoteCount(result_medium))
+  EXPECT_GT(test_helpers::totalNoteCount(result_long), 0u);
+  EXPECT_GT(test_helpers::totalNoteCount(result_long), test_helpers::totalNoteCount(result_medium))
       << "Long scale should produce more notes than Medium";
 }
 
@@ -331,7 +321,7 @@ TEST(GoldbergGeneratorE2ETest, ShortScaleSubsetOfFull) {
     GTEST_SKIP() << "Generator not yet implemented";
   }
 
-  EXPECT_LT(totalNoteCount(result_short), totalNoteCount(result_full))
+  EXPECT_LT(test_helpers::totalNoteCount(result_short), test_helpers::totalNoteCount(result_full))
       << "Short scale should produce fewer total notes than Full scale";
 }
 

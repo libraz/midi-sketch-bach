@@ -494,8 +494,6 @@ std::vector<NoteEvent> generateFiguration(Tick cantus_tick, Tick cantus_dur,
 
   constexpr uint8_t kFigLow = 72;
   constexpr uint8_t kFigHigh = 88;
-  constexpr Tick kDottedEighth = kEighthNote + kSixteenthNote;  // 360
-
   // 3b: Register center control — center = cantus_pitch + 12~17, ±9 window.
   uint8_t offset = 12 + static_cast<uint8_t>(rng::rollRange(rng, 0, 5));
   uint8_t raw_center = clampPitch(
@@ -1438,28 +1436,6 @@ std::vector<NoteEvent> generateInnerVoice(
 // CF-aware rest policy — thin inner voice texture while preserving CF
 // ---------------------------------------------------------------------------
 
-/// @brief Count the number of distinct voices sounding at a given tick.
-///
-/// Scans all notes to find those whose time range [start_tick, start_tick + duration)
-/// contains the query tick.
-///
-/// @param all_notes All notes across all voices.
-/// @param tick The tick position to query.
-/// @return Number of distinct voices with notes sounding at this tick.
-int countActiveVoicesAt(const std::vector<NoteEvent>& all_notes, Tick tick) {
-  bool active[kChoraleVoices] = {};
-  int count = 0;
-  for (const auto& note : all_notes) {
-    if (note.voice >= kChoraleVoices) continue;
-    if (active[note.voice]) continue;
-    if (tick >= note.start_tick && tick < note.start_tick + note.duration) {
-      active[note.voice] = true;
-      ++count;
-    }
-  }
-  return count;
-}
-
 /// @brief Classify a cantus note position as phrase-opening, middle, or ending.
 ///
 /// Used to determine texture density targets per position:
@@ -1812,8 +1788,10 @@ ChoralePreludeResult generateChoralePrelude(const ChoralePreludeConfig& config) 
         if (vid < voice_ranges.size()) return voice_ranges[vid];
         return {36, 96};
       };
+      ScaleType ch_scale = config.key.is_minor ? ScaleType::HarmonicMinor
+                                               : ScaleType::Major;
       finalizeFormNotes(all_notes, kChoraleVoices, voice_range_fn,
-                        /*max_consecutive=*/2);
+                        config.key.tonic, ch_scale, /*max_consecutive=*/2);
 
       // Post-rejection repeat mitigation (weak-beat only, chord-tone-aware).
       // Shifts repeated figuration notes by nearest scale step to prevent
@@ -1998,8 +1976,10 @@ ChoralePreludeResult generateChoralePrelude(const ChoralePreludeConfig& config) 
       if (vid < voice_ranges.size()) return voice_ranges[vid];
       return {36, 96};
     };
+    ScaleType ch_scale2 = config.key.is_minor ? ScaleType::HarmonicMinor
+                                              : ScaleType::Major;
     finalizeFormNotes(all_notes, kChoraleVoices, voice_range_fn2,
-                      /*max_consecutive=*/2);
+                      config.key.tonic, ch_scale2, /*max_consecutive=*/2);
 
     for (auto& track : tracks) {
       track.notes.clear();
@@ -2102,20 +2082,7 @@ ChoralePreludeResult generateChoralePrelude(const ChoralePreludeConfig& config) 
   form_utils::sortTrackNotes(tracks);
 
   // Final overlap dedup after Picardy/registration post-processing.
-  {
-    std::vector<NoteEvent> final_notes;
-    for (const auto& track : tracks) {
-      final_notes.insert(final_notes.end(), track.notes.begin(), track.notes.end());
-    }
-    finalizeFormNotes(final_notes, kChoraleVoices);
-    for (auto& track : tracks) track.notes.clear();
-    for (auto& note : final_notes) {
-      if (note.voice < kChoraleVoices) {
-        tracks[note.voice].notes.push_back(std::move(note));
-      }
-    }
-    form_utils::sortTrackNotes(tracks);
-  }
+  form_utils::normalizeAndRedistribute(tracks, kChoraleVoices);
 
   result.tracks = std::move(tracks);
   result.timeline = std::move(timeline);

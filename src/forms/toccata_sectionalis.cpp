@@ -63,10 +63,13 @@ HarmonicTimeline buildSectionalisHarmonicPlan(
   ChordQuality tonic_q = minor ? ChordQuality::Minor : ChordQuality::Major;
   ChordQuality sub_q = minor ? ChordQuality::Minor : ChordQuality::Major;
 
-  // Free1: I -> V -> I -> IV -> V
+  // Free1: I -> III -> V -> I -> IV -> V (mediant adds color in middle)
   if (sections.size() >= 1) {
-    segmentChords(sections[0].start, sections[0].end, 5, {
+    ChordQuality iii_q = minor ? ChordQuality::Major : ChordQuality::Minor;
+    int iii_offset = minor ? 3 : 4;  // III in minor = relative major
+    segmentChords(sections[0].start, sections[0].end, 6, {
         {ChordDegree::I, tonic_q, 0},
+        {ChordDegree::iii, iii_q, iii_offset},
         {ChordDegree::V, ChordQuality::Major, 7},
         {ChordDegree::I, tonic_q, 0},
         {ChordDegree::IV, sub_q, 5},
@@ -87,11 +90,14 @@ HarmonicTimeline buildSectionalisHarmonicPlan(
     });
   }
 
-  // Free2: bVI -> iv -> V/V -> V (chromatic color)
+  // Free2: VI -> III -> iv -> V/V -> V (mediant chain before cadence prep)
   if (sections.size() >= 3) {
-    segmentChords(sections[2].start, sections[2].end, 4, {
-        {ChordDegree::vi, ChordQuality::Major, 8},  // bVI
-        {ChordDegree::IV, ChordQuality::Minor, 5},   // iv
+    ChordQuality iii_q = minor ? ChordQuality::Major : ChordQuality::Minor;
+    int iii_offset = minor ? 3 : 4;
+    segmentChords(sections[2].start, sections[2].end, 5, {
+        {ChordDegree::vi, ChordQuality::Major, minor ? 8 : 9},  // VI (major quality)
+        {ChordDegree::iii, iii_q, iii_offset},                   // III
+        {ChordDegree::IV, ChordQuality::Minor, 5},                // iv
         {ChordDegree::V_of_V, ChordQuality::Major, 2},
         {ChordDegree::V, ChordQuality::Major, 7},
     });
@@ -303,7 +309,7 @@ std::vector<NoteEvent> generateFreeSection(
     uint8_t num_voices, Tick start_tick, Tick end_tick,
     std::mt19937& rng) {
   std::vector<NoteEvent> notes;
-  constexpr int kMaxRangeFromCenter = 14;
+  constexpr int kMaxRangeFromCenter = 19;
 
   for (uint8_t v = 0; v < std::min(num_voices, static_cast<uint8_t>(2)); ++v) {
     uint8_t low = getToccataLowPitch(v);
@@ -316,8 +322,22 @@ std::vector<NoteEvent> generateFreeSection(
     MelodicState free_mel_state;
     uint8_t prev_free_pitch = scale[idx];
 
+    // Phrase boundary rest: insert a 1-beat gap every ~10 bars to articulate
+    // phrases and reduce continuous texture density.
+    constexpr Tick kPhraseLengthBars = 10;
+    constexpr Tick kPhraseRestDuration = kTicksPerBeat;  // 480 ticks (1 beat)
+    Tick phrase_start = start_tick;
+
     Tick tick = start_tick;
     while (tick < end_tick) {
+      // Phrase boundary check: if we have generated ~10 bars continuously,
+      // insert a 1-beat rest gap.
+      if (tick - phrase_start >= kPhraseLengthBars * kTicksPerBar) {
+        tick += kPhraseRestDuration;
+        phrase_start = tick;
+        if (tick >= end_tick) break;
+      }
+
       // Mix of 8th and 16th notes.
       Tick dur = rng::rollProbability(rng, 0.6f) ? kEighthNote : kSixteenthNote;
       if (tick + dur > end_tick) dur = end_tick - tick;
@@ -346,13 +366,60 @@ std::vector<NoteEvent> generateFreeSection(
           }
         }
       } else {
-        int step = rng::rollProbability(rng, 0.15f) ? 2 : 1;
-        if (ascending) {
-          if (idx + step < scale.size()) idx += step;
-          else { ascending = false; if (idx >= static_cast<size_t>(step)) idx -= step; }
+        // Weak beat: arpeggio-driven with NCT stepwise.
+        // 60% directional chord tone, 25% skip (3rd), 15% NCT stepwise.
+        float roll = rng::rollFloat(rng, 0.0f, 1.0f);
+        if (roll < 0.60f) {
+          // Directional chord-tone target.
+          const HarmonicEvent& evt = timeline.getAt(tick);
+          auto chord_tones = collectChordTonesInRange(evt.chord, low, high);
+          uint8_t current = scale[idx];
+          uint8_t best = current;
+          int best_dist = 127;
+          for (auto ctn : chord_tones) {
+            int dist = static_cast<int>(ctn) - static_cast<int>(current);
+            bool correct_dir = ascending ? (dist > 0) : (dist < 0);
+            int abs_dist = std::abs(dist);
+            if (correct_dir && abs_dist >= 2 && abs_dist < best_dist) {
+              best = ctn;
+              best_dist = abs_dist;
+            }
+          }
+          if (best != current) {
+            for (size_t sci = 0; sci < scale.size(); ++sci) {
+              if (scale[sci] >= best) { idx = sci; break; }
+            }
+          } else {
+            // Fallback: skip by 2-3 scale steps in current direction.
+            int step = rng::rollRange(rng, 2, 3);
+            if (ascending) {
+              if (idx + step < scale.size()) idx += step;
+              else { ascending = false; if (idx >= static_cast<size_t>(step)) idx -= step; }
+            } else {
+              if (idx >= static_cast<size_t>(step)) idx -= step;
+              else { ascending = true; if (idx + step < scale.size()) idx += step; }
+            }
+          }
+        } else if (roll < 0.85f) {
+          // Skip: 2-3 scale steps (3rd interval).
+          int step = rng::rollRange(rng, 2, 3);
+          if (ascending) {
+            if (idx + step < scale.size()) idx += step;
+            else { ascending = false; if (idx >= static_cast<size_t>(step)) idx -= step; }
+          } else {
+            if (idx >= static_cast<size_t>(step)) idx -= step;
+            else { ascending = true; if (idx + step < scale.size()) idx += step; }
+          }
         } else {
-          if (idx >= static_cast<size_t>(step)) idx -= step;
-          else { ascending = true; if (idx + step < scale.size()) idx += step; }
+          // NCT stepwise: +/-1 step (passing tone / neighbor tone role).
+          int step = 1;
+          if (ascending) {
+            if (idx + step < scale.size()) idx += step;
+            else { ascending = false; if (idx >= 1) idx -= step; }
+          } else {
+            if (idx >= 1) idx -= step;
+            else { ascending = true; if (idx + step < scale.size()) idx += step; }
+          }
         }
       }
 
@@ -481,7 +548,10 @@ ToccataResult generateSectionalisToccata(const ToccataConfig& config) {
     auto voice_range = [](uint8_t v) -> std::pair<uint8_t, uint8_t> {
       return {getToccataLowPitch(v), getToccataHighPitch(v)};
     };
-    finalizeFormNotes(all_notes, num_voices, voice_range, /*max_consecutive=*/2);
+    ScaleType sect_scale = config.key.is_minor ? ScaleType::HarmonicMinor
+                                                : ScaleType::Major;
+    finalizeFormNotes(all_notes, num_voices, voice_range, config.key.tonic,
+                      sect_scale, /*max_consecutive=*/2);
   }
 
   // Build tracks.

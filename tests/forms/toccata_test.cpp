@@ -12,6 +12,7 @@
 #include "core/gm_program.h"
 #include "core/pitch_utils.h"
 #include "harmony/key.h"
+#include "test_helpers.h"
 
 namespace bach {
 namespace {
@@ -31,17 +32,6 @@ ToccataConfig makeTestConfig(uint32_t seed = 42) {
   config.num_voices = 3;
   config.total_bars = 24;
   return config;
-}
-
-/// @brief Count total notes across all tracks.
-/// @param result The toccata result to count.
-/// @return Total number of NoteEvents across all tracks.
-size_t totalNoteCount(const ToccataResult& result) {
-  size_t count = 0;
-  for (const auto& track : result.tracks) {
-    count += track.notes.size();
-  }
-  return count;
 }
 
 /// @brief Count notes in a specific time range for a given track.
@@ -91,7 +81,7 @@ TEST(ToccataTest, ReasonableNoteCount) {
   ToccataResult result = generateToccata(config);
 
   ASSERT_TRUE(result.success);
-  size_t total = totalNoteCount(result);
+  size_t total = test_helpers::totalNoteCount(result);
   // 24 bars of toccata with fast passages should produce many notes.
   EXPECT_GT(total, 50u) << "Too few notes for a 24-bar toccata";
 }
@@ -499,7 +489,7 @@ TEST(ToccataTest, MinorKeyGeneratesSuccessfully) {
   ToccataResult result = generateToccata(config);
 
   ASSERT_TRUE(result.success);
-  EXPECT_GT(totalNoteCount(result), 0u);
+  EXPECT_GT(test_helpers::totalNoteCount(result), 0u);
 }
 
 TEST(ToccataTest, MajorKeyGeneratesSuccessfully) {
@@ -508,7 +498,7 @@ TEST(ToccataTest, MajorKeyGeneratesSuccessfully) {
   ToccataResult result = generateToccata(config);
 
   ASSERT_TRUE(result.success);
-  EXPECT_GT(totalNoteCount(result), 0u);
+  EXPECT_GT(test_helpers::totalNoteCount(result), 0u);
 }
 
 TEST(ToccataTest, DifferentKeys_ProduceDifferentOutput) {
@@ -625,7 +615,7 @@ TEST(ToccataTest, SmallSectionBars) {
 
   ASSERT_TRUE(result.success);
   EXPECT_EQ(result.total_duration_ticks, 4u * kTicksPerBar);
-  EXPECT_GT(totalNoteCount(result), 0u);
+  EXPECT_GT(test_helpers::totalNoteCount(result), 0u);
 }
 
 TEST(ToccataTest, LargeSectionBars) {
@@ -635,7 +625,7 @@ TEST(ToccataTest, LargeSectionBars) {
 
   ASSERT_TRUE(result.success);
   EXPECT_EQ(result.total_duration_ticks, 64u * kTicksPerBar);
-  EXPECT_GT(totalNoteCount(result), 100u)
+  EXPECT_GT(test_helpers::totalNoteCount(result), 100u)
       << "64-bar toccata should produce substantial number of notes";
 }
 
@@ -649,7 +639,7 @@ TEST(ToccataTest, MultipleSeeds_AllSucceed) {
     ToccataResult result = generateToccata(config);
 
     EXPECT_TRUE(result.success) << "Failed with seed " << seed;
-    EXPECT_GT(totalNoteCount(result), 0u) << "No notes with seed " << seed;
+    EXPECT_GT(test_helpers::totalNoteCount(result), 0u) << "No notes with seed " << seed;
   }
 }
 

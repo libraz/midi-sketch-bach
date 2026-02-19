@@ -486,5 +486,110 @@ class TestIsRaisedSeventhPair(unittest.TestCase):
         self.assertFalse(CrossRelation._is_raised_seventh_pair(0, 1, "G_minor"))
 
 
+class TestVoiceCrossingEpisodeExempt(unittest.TestCase):
+    """Episode material crossing -> INFO (invertible counterpoint by design)."""
+
+    def test_both_episode_material_info(self):
+        """Both voices episode_material -> INFO."""
+        prov = Provenance(source=NoteSource.EPISODE_MATERIAL)
+        soprano = _track("soprano", [
+            Note(pitch=55, velocity=80, start_tick=0, duration=480,
+                 voice="soprano", provenance=prov),
+        ])
+        alto = _track("alto", [
+            Note(pitch=65, velocity=80, start_tick=0, duration=480,
+                 voice="alto", provenance=prov),
+        ])
+        result = VoiceCrossing().check(_score([soprano, alto]))
+        self.assertFalse(result.passed)
+        self.assertEqual(result.violations[0].severity, Severity.INFO)
+
+    def test_one_episode_one_free_not_info(self):
+        """Mixed sources should NOT get INFO exemption."""
+        prov_ep = Provenance(source=NoteSource.EPISODE_MATERIAL)
+        prov_fc = Provenance(source=NoteSource.FREE_COUNTERPOINT)
+        soprano = _track("soprano", [
+            Note(pitch=55, velocity=80, start_tick=0, duration=480,
+                 voice="soprano", provenance=prov_ep),
+        ])
+        alto = _track("alto", [
+            Note(pitch=65, velocity=80, start_tick=0, duration=480,
+                 voice="alto", provenance=prov_fc),
+        ])
+        result = VoiceCrossing().check(_score([soprano, alto]))
+        self.assertFalse(result.passed)
+        self.assertNotEqual(result.violations[0].severity, Severity.INFO)
+
+
+class TestCrossRelationPedalExempt(unittest.TestCase):
+    """Pedal voice cross-relation -> INFO."""
+
+    def test_pedal_voice_cross_relation_info(self):
+        """Cross-relation involving pedal voice should be INFO."""
+        prov_pedal = Provenance(source=NoteSource.PEDAL_POINT)
+        soprano = _track("soprano", [_n(66, 0, voice="soprano")])  # F#4
+        pedal = _track("pedal", [
+            Note(pitch=29, velocity=80, start_tick=240, duration=480,
+                 voice="pedal", provenance=prov_pedal),  # F1
+        ])
+        result = CrossRelation().check(_score([soprano, pedal]))
+        self.assertFalse(result.passed)
+        self.assertEqual(result.violations[0].severity, Severity.INFO)
+
+    def test_non_pedal_voice_stays_warning(self):
+        """Non-pedal voices should remain WARNING."""
+        soprano = _track("soprano", [_n(66, 0, voice="soprano")])  # F#4
+        alto = _track("alto", [_n(65, 240, voice="alto")])  # F4
+        result = CrossRelation().check(_score([soprano, alto]))
+        self.assertFalse(result.passed)
+        self.assertEqual(result.violations[0].severity, Severity.WARNING)
+
+
+class TestAugmentedLeapEpisodeExempt(unittest.TestCase):
+    """Episode/toccata sources -> exempt from augmented leap."""
+
+    def test_episode_material_exempt(self):
+        """EPISODE_MATERIAL tritone leap should be exempt."""
+        prov = Provenance(source=NoteSource.EPISODE_MATERIAL)
+        soprano = _track("soprano", [
+            Note(pitch=60, velocity=80, start_tick=0, duration=960,
+                 voice="soprano", provenance=prov),
+            Note(pitch=66, velocity=80, start_tick=960, duration=960,
+                 voice="soprano", provenance=prov),
+        ])
+        result = AugmentedLeap().check(_score([soprano]))
+        self.assertTrue(result.passed)
+
+    def test_toccata_figure_exempt(self):
+        """TOCCATA_FIGURE tritone leap should be exempt."""
+        prov = Provenance(source=NoteSource.TOCCATA_FIGURE)
+        soprano = _track("soprano", [
+            Note(pitch=60, velocity=80, start_tick=0, duration=960,
+                 voice="soprano", provenance=prov),
+            Note(pitch=66, velocity=80, start_tick=960, duration=960,
+                 voice="soprano", provenance=prov),
+        ])
+        result = AugmentedLeap().check(_score([soprano]))
+        self.assertTrue(result.passed)
+
+    def test_arpeggio_flow_exempt(self):
+        """ARPEGGIO_FLOW tritone leap should be exempt."""
+        prov = Provenance(source=NoteSource.ARPEGGIO_FLOW)
+        soprano = _track("soprano", [
+            Note(pitch=60, velocity=80, start_tick=0, duration=960,
+                 voice="soprano", provenance=prov),
+            Note(pitch=66, velocity=80, start_tick=960, duration=960,
+                 voice="soprano", provenance=prov),
+        ])
+        result = AugmentedLeap().check(_score([soprano]))
+        self.assertTrue(result.passed)
+
+    def test_no_source_still_flagged(self):
+        """Tritone leap without special source should still be flagged."""
+        soprano = _track("soprano", [_n(60, 0, 960), _n(66, 960, 960)])
+        result = AugmentedLeap().check(_score([soprano]))
+        self.assertFalse(result.passed)
+
+
 if __name__ == "__main__":
     unittest.main()

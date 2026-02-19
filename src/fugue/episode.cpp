@@ -49,6 +49,11 @@ namespace {
 /// @param crossing_eval Bach rule evaluator for crossing checks (nullable).
 /// @param cp_state Counterpoint state context for crossing temporality (nullable).
 /// @param pipeline_accum Section accumulator from pipeline (nullable).
+/// @param prev_exit_state Previous episode's exit ConstraintState for chaining
+///        gravity/accumulator data across consecutive episodes (nullable).
+///        When provided, the entry_state is seeded from the previous exit state,
+///        preserving accumulated distribution data and gravity scores, then
+///        voice_range, energy, and phase are overridden from current parameters.
 /// @return Populated EpisodeRequest ready for generateConstraintEpisode().
 EpisodeRequest buildRequest(const Subject& subject, Tick start_tick,
                             Tick duration_ticks, Key start_key, Key target_key,
@@ -59,7 +64,8 @@ EpisodeRequest buildRequest(const Subject& subject, Tick start_tick,
                             const BachRuleEvaluator* crossing_eval = nullptr,
                             const CounterpointState* cp_state = nullptr,
                             const SectionAccumulator* pipeline_accum = nullptr,
-                            const HarmonicTimeline* timeline = nullptr) {
+                            const HarmonicTimeline* timeline = nullptr,
+                            const ConstraintState* prev_exit_state = nullptr) {
   EpisodeRequest req;
   req.start_key = start_key;
   req.end_key = target_key;
@@ -73,7 +79,14 @@ EpisodeRequest buildRequest(const Subject& subject, Tick start_tick,
   req.seed = seed;
   req.motif_pool = pool;
 
-  // Set voice range invariants spanning all voices.
+  // Seed entry_state from previous episode's exit state if available.
+  // This carries forward accumulated distribution data (rhythm/harmony counts),
+  // obligation tracking, and gravity scores from the preceding episode.
+  if (prev_exit_state) {
+    req.entry_state = *prev_exit_state;
+  }
+
+  // Set voice range invariants spanning all voices (override prev_exit values).
   if (num_voices >= 2) {
     auto [lo_soprano, hi_soprano] = getFugueVoiceRange(0, num_voices);
     auto [lo_lowest, hi_lowest] = getFugueVoiceRange(num_voices - 1, num_voices);
@@ -88,6 +101,7 @@ EpisodeRequest buildRequest(const Subject& subject, Tick start_tick,
   req.entry_state.total_duration = duration_ticks;
 
   // Wire Gravity layer with Markov models and reference data.
+  // Always override these from current parameters (not inherited from prev_exit).
   req.entry_state.gravity.melodic_model = &kFugueUpperMarkov;
   req.entry_state.gravity.vertical_table = &kFugueVerticalTable;
   req.entry_state.gravity.phase = FuguePhase::Develop;  // Episodes are development.
@@ -98,7 +112,7 @@ EpisodeRequest buildRequest(const Subject& subject, Tick start_tick,
   req.crossing_eval = crossing_eval;
   req.cp_state_ctx = cp_state;
 
-  // Import pipeline accumulator if provided.
+  // Import pipeline accumulator if provided (overrides prev_exit accumulator).
   if (pipeline_accum) {
     req.entry_state.accumulator = *pipeline_accum;
   }
@@ -283,18 +297,25 @@ Episode generateEpisode(const Subject& subject, Tick start_tick, Tick duration_t
                         CounterpointState& cp_state, IRuleEvaluator& cp_rules,
                         CollisionResolver& /*cp_resolver*/,
                         const HarmonicTimeline& timeline,
-                        uint8_t pedal_pitch) {
+                        uint8_t pedal_pitch,
+                        const ConstraintState* prev_exit_state,
+                        ConstraintState* exit_state_out) {
   MotifPool pool = buildPoolFromSubject(subject);
   EpisodeRequest req = buildRequest(subject, start_tick, duration_ticks,
                                     start_key, target_key, num_voices, seed,
                                     episode_index, energy_level, &pool,
                                     &cp_rules,
                                     dynamic_cast<const BachRuleEvaluator*>(&cp_rules),
-                                    &cp_state, nullptr, &timeline);
+                                    &cp_state, nullptr, &timeline,
+                                    prev_exit_state);
   req.pedal_pitch = pedal_pitch;
   EpisodeResult res = generateConstraintEpisode(req);
   Episode episode = resultToEpisode(res, start_tick, duration_ticks,
                                     start_key, target_key);
+
+  if (exit_state_out) {
+    *exit_state_out = std::move(res.exit_state);
+  }
 
   syncToCounterpointState(cp_state, episode.notes);
   return episode;
@@ -337,14 +358,17 @@ Episode generateFortspinnungEpisode(const Subject& subject, const MotifPool& poo
                                     CollisionResolver& cp_resolver,
                                     const HarmonicTimeline& timeline,
                                     uint8_t pedal_pitch,
-                                    const SectionAccumulator* accum) {
+                                    const SectionAccumulator* accum,
+                                    const ConstraintState* prev_exit_state,
+                                    ConstraintState* exit_state_out) {
   // Fall back to validated non-pool overload if pool is empty.
   if (pool.empty()) {
     return generateEpisode(subject, start_tick, duration_ticks,
                            start_key, target_key, num_voices, seed,
                            episode_index, energy_level,
                            cp_state, cp_rules, cp_resolver,
-                           timeline, pedal_pitch);
+                           timeline, pedal_pitch,
+                           prev_exit_state, exit_state_out);
   }
 
   EpisodeRequest req = buildRequest(subject, start_tick, duration_ticks,
@@ -352,11 +376,16 @@ Episode generateFortspinnungEpisode(const Subject& subject, const MotifPool& poo
                                     episode_index, energy_level, &pool,
                                     &cp_rules,
                                     dynamic_cast<const BachRuleEvaluator*>(&cp_rules),
-                                    &cp_state, accum, &timeline);
+                                    &cp_state, accum, &timeline,
+                                    prev_exit_state);
   req.pedal_pitch = pedal_pitch;
   EpisodeResult res = generateConstraintEpisode(req);
   Episode episode = resultToEpisode(res, start_tick, duration_ticks,
                                     start_key, target_key);
+
+  if (exit_state_out) {
+    *exit_state_out = std::move(res.exit_state);
+  }
 
   syncToCounterpointState(cp_state, episode.notes);
   return episode;

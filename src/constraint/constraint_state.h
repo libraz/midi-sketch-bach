@@ -29,9 +29,6 @@ struct VerticalSnapshot {
   static constexpr int kMaxVoices = 6;
   uint8_t pitches[kMaxVoices] = {};  ///< MIDI pitch per voice (0 = silent).
   uint8_t num_voices = 0;
-
-  /// @brief Build from CounterpointState at a specific tick.
-  static VerticalSnapshot fromState(const CounterpointState& state, Tick tick);
 };
 
 // ---------------------------------------------------------------------------
@@ -281,7 +278,7 @@ struct ConstraintState {
                  const BachRuleEvaluator* crossing_eval,
                  const CounterpointState* cp_state,
                  const uint8_t* recent_pitches, int recent_count,
-                 float figure_score) const;
+                 float figure_score);
 
   /// @brief Advance time: consume resolved obligations, expire overdue ones.
   /// @param tick Current tick after note placement.
@@ -295,8 +292,10 @@ struct ConstraintState {
                              VoiceId voice);
 
   /// @brief Check if the fugue is in an irrecoverable state.
-  /// @return True if Structural obligations cannot be met.
-  bool is_dead() const;
+  /// @param current_tick Current generation tick for deadline comparison.
+  /// @return True if a Structural obligation deadline has passed or soft
+  ///         violation ratio exceeds 15%.
+  bool is_dead(Tick current_tick) const;
 
   /// @brief Get current soft violation ratio.
   float soft_violation_ratio() const {

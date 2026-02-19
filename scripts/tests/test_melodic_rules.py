@@ -407,6 +407,59 @@ class TestConsecutiveRepeatedNotesGoldbergBass(unittest.TestCase):
         self.assertTrue(result.passed)
 
 
+class TestToccataSourceExemptions(unittest.TestCase):
+    """Toccata source exemptions for LeapResolution and MelodicTritoneOutline."""
+
+    def _notes_with_source(self, source):
+        prov = Provenance(source=source)
+        return [
+            Note(pitch=60, velocity=80, start_tick=0, duration=480, voice="s", provenance=prov),
+            Note(pitch=67, velocity=80, start_tick=480, duration=480, voice="s", provenance=prov),
+            Note(pitch=69, velocity=80, start_tick=960, duration=480, voice="s", provenance=prov),
+        ]
+
+    def test_toccata_figure_exempt_from_leap_resolution(self):
+        """TOCCATA_FIGURE (Brechung/arpeggio) should be exempt from leap resolution."""
+        notes = self._notes_with_source(NoteSource.TOCCATA_FIGURE)
+        result = LeapResolution().check(_score([_track("s", notes)]))
+        self.assertTrue(result.passed)
+
+    def test_toccata_gesture_exempt_from_leap_resolution(self):
+        """TOCCATA_GESTURE (Stylus Phantasticus) should be exempt from leap resolution."""
+        notes = self._notes_with_source(NoteSource.TOCCATA_GESTURE)
+        result = LeapResolution().check(_score([_track("s", notes)]))
+        self.assertTrue(result.passed)
+
+    def test_toccata_figure_exempt_from_tritone_outline(self):
+        """TOCCATA_FIGURE should be exempt from tritone outline check."""
+        prov = Provenance(source=NoteSource.TOCCATA_FIGURE)
+        # D4(62) -> C4(60) -> F#4(66) -> E4(64) -- tritone outline C-F#
+        notes = [
+            Note(pitch=62, velocity=80, start_tick=0, duration=480, voice="s"),
+            Note(pitch=60, velocity=80, start_tick=480, duration=480, voice="s",
+                 provenance=prov),
+            Note(pitch=66, velocity=80, start_tick=960, duration=480, voice="s",
+                 provenance=prov),
+            Note(pitch=64, velocity=80, start_tick=1440, duration=480, voice="s"),
+        ]
+        result = MelodicTritoneOutline().check(_score([_track("s", notes)]))
+        self.assertTrue(result.passed)
+
+    def test_toccata_gesture_exempt_from_tritone_outline(self):
+        """TOCCATA_GESTURE should be exempt from tritone outline check."""
+        prov = Provenance(source=NoteSource.TOCCATA_GESTURE)
+        notes = [
+            Note(pitch=62, velocity=80, start_tick=0, duration=480, voice="s"),
+            Note(pitch=60, velocity=80, start_tick=480, duration=480, voice="s",
+                 provenance=prov),
+            Note(pitch=66, velocity=80, start_tick=960, duration=480, voice="s",
+                 provenance=prov),
+            Note(pitch=64, velocity=80, start_tick=1440, duration=480, voice="s"),
+        ]
+        result = MelodicTritoneOutline().check(_score([_track("s", notes)]))
+        self.assertTrue(result.passed)
+
+
 class TestLeapResolutionThreshold(unittest.TestCase):
     def test_threshold_6_exempts_p4(self):
         """Leap of 5 semitones (P4) should pass when threshold=6."""
@@ -431,6 +484,32 @@ class TestLeapResolutionThreshold(unittest.TestCase):
         rule = LeapResolution()
         rule.configure(profile)
         self.assertEqual(rule.leap_threshold, 6)
+
+
+class TestLeapResolutionPedalExempt(unittest.TestCase):
+    """PEDAL_POINT should be exempt from leap resolution."""
+
+    def test_pedal_point_exempt(self):
+        """Leap in pedal_point voice should be exempt."""
+        prov = Provenance(source=NoteSource.PEDAL_POINT)
+        notes = [
+            Note(pitch=36, velocity=80, start_tick=0, duration=480, voice="pedal", provenance=prov),
+            Note(pitch=48, velocity=80, start_tick=480, duration=480, voice="pedal", provenance=prov),
+            Note(pitch=48, velocity=80, start_tick=960, duration=480, voice="pedal", provenance=prov),
+        ]
+        result = LeapResolution().check(_score([_track("pedal", notes)]))
+        self.assertTrue(result.passed)
+
+    def test_free_counterpoint_not_exempt(self):
+        """FREE_COUNTERPOINT should still be flagged."""
+        prov = Provenance(source=NoteSource.FREE_COUNTERPOINT)
+        notes = [
+            Note(pitch=60, velocity=80, start_tick=0, duration=480, voice="s", provenance=prov),
+            Note(pitch=67, velocity=80, start_tick=480, duration=480, voice="s", provenance=prov),
+            Note(pitch=69, velocity=80, start_tick=960, duration=480, voice="s", provenance=prov),
+        ]
+        result = LeapResolution().check(_score([_track("s", notes)]))
+        self.assertFalse(result.passed)
 
 
 if __name__ == "__main__":

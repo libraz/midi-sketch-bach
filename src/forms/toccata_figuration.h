@@ -56,8 +56,8 @@ namespace detail {
 // Dramaticus archetype phase profiles (8 phases A-H).
 // NOLINT(cert-err58-cpp): static constexpr arrays are safe here.
 inline constexpr ToccataPhaseProfile kDramaticusProfiles[8] = {
-    // Phase A: Gesture -- dramatic descending runs and trills.
-    {{&kDescRun5, &kTrill5, &kBrechungDesc, nullptr},
+    // Phase A: Gesture -- dramatic descending Brechung runs and trills.
+    {{&kBrechungWideDesc, &kTrill5, &kBrechungDesc, nullptr},
      3, 0.60f, 0.30f, 0.3f, PhraseContour::Descent, false, {84, 72}, 0.0f},
 
     // Phase B: Echo -- quiet lower neighbor oscillation.
@@ -68,24 +68,24 @@ inline constexpr ToccataPhaseProfile kDramaticusProfiles[8] = {
     {{&kTurnDown, &kEchappee, &kCambiataNbr, &kTurnUpNbr},
      4, 0.35f, 0.20f, 0.8f, PhraseContour::Wave, true, {86, 74}, 0.0f},
 
-    // Phase D: Climb1 -- ascending sequential development.
-    {{&kAscRun5, &kTurnUp, &kStepDownLeapUp, nullptr},
+    // Phase D: Climb1 -- ascending Brechung development.
+    {{&kBrechungAsc, &kTurnUp, &kArpSweepAsc, nullptr},
      3, 0.50f, 0.30f, 0.5f, PhraseContour::Arch, false, {89, 77}, 0.15f},
 
     // Phase E: Break -- harmonic interruption with wide oscillation.
     {{&kWideOsc5, &kLowerNbr, nullptr, nullptr},
      2, 0.25f, 0.25f, 1.0f, PhraseContour::Neutral, false, {84, 72}, 0.0f},
 
-    // Phase F: Climb2 -- intensified ascending motion.
-    {{&kAscRun5, &kAscRun4, &kLeapUpStepDown, nullptr},
+    // Phase F: Climb2 -- intensified ascending Brechung.
+    {{&kBrechungAsc, &kAscRun4, &kLeapUpStepDown, nullptr},
      3, 0.55f, 0.35f, 0.4f, PhraseContour::Arch, false, {93, 81}, 0.15f},
 
-    // Phase G: Dominant Obsession -- dominant prolongation with chromaticism.
-    {{&kDescRun5, &kChromaticDesc, &kTrill5, &kDescRun4},
+    // Phase G: Dominant Obsession -- dominant prolongation with Brechung.
+    {{&kBrechungWideDesc, &kChromaticDesc, &kTrill5, &kDescRun4},
      4, 0.60f, 0.35f, 0.2f, PhraseContour::Descent, false, {96, 84}, 0.50f},
 
-    // Phase H: Final Explosion -- climactic descending gestures.
-    {{&kBrechungDesc, &kWideOsc5, &kDescRun5, nullptr},
+    // Phase H: Final Explosion -- climactic descending Brechung gestures.
+    {{&kBrechungDesc, &kWideOsc5, &kArpSweepDesc, nullptr},
      3, 0.70f, 0.35f, 0.15f, PhraseContour::Descent, false, {96, 84}, 0.50f},
 };
 
@@ -312,7 +312,7 @@ inline uint8_t selectToccataPitch(
     // Melodic score from voice profile.
     float melodic_score = scoreCandidatePitch(
         ctx.mel_state, prev_pitch, cand_pitch, tick,
-        is_chord, voice_profiles::kSoprano);
+        is_chord, voice_profiles::kToccataUpper);
 
     // Blend Markov probability with melodic score.
     float markov_score = candidates[idx].prob;

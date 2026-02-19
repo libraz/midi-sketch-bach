@@ -179,13 +179,15 @@ uint8_t applyModulationShift(uint8_t pitch, float progress, int total_shift) {
 /// @param num_voices Total voice count.
 /// @param current_key Current key.
 /// @param rng RNG for probabilistic emission.
+/// @param grammar Fortspinnung grammar for phase boundary calculation.
 void placeBassFragments(std::vector<NoteEvent>& result,
                         ConstraintState& state,
                         const std::vector<NoteEvent>& placed_notes,
                         Tick start_tick, Tick duration,
                         uint8_t num_voices, Key current_key,
                         std::mt19937& rng,
-                        const HarmonicTimeline* timeline) {
+                        const HarmonicTimeline* timeline,
+                        const FortspinnungGrammar& grammar) {
   if (num_voices < 3 || placed_notes.empty()) return;
 
   // Collect voice 0 notes for tail extraction.
@@ -271,7 +273,15 @@ void placeBassFragments(std::vector<NoteEvent>& result,
       }
       bass_tick += frag_dur;
     } else {
-      // Anchor note: pitch from timeline (or diatonic cycling fallback).
+      // Anchor note: pitch from timeline, or descending circle-of-fifths fallback.
+      //
+      // Bach's episodes use 2-bar sequential patterns descending through the
+      // circle of fifths: I -> IV -> vii -> iii -> vi -> ii -> V.
+      // The vii step (offset=11) is replaced by V (offset=7) in the bass for
+      // stability — upper voices provide the diminished function.
+      //
+      // Strong beats (beat 1 of each bar) get the sequence root pitch;
+      // weak beats use diatonic passing motion between current and next step.
       int anchor_pitch;
       if (timeline) {
         const Chord& chord = timeline->getChordAt(bass_tick);
@@ -280,24 +290,79 @@ void placeBassFragments(std::vector<NoteEvent>& result,
         while (anchor_pitch > v2_hi_int) anchor_pitch -= 12;
         while (anchor_pitch < v2_lo_int) anchor_pitch += 12;
       } else {
-        // Fallback: diatonic degree cycling (I, V, IV, vi, iii, ii, vii).
-        constexpr int kDiatonicOffsets[] = {0, 7, 5, 9, 4, 2, 11};
-        constexpr int kNumDegrees = 7;
-        int deg_idx = static_cast<int>((bass_tick - start_tick) / (kTicksPerBeat * 2))
-                      % kNumDegrees;
-        anchor_pitch = 48 + static_cast<int>(current_key) + kDiatonicOffsets[deg_idx];
+        // Descending circle-of-fifths: I -> IV -> vii(->V) -> iii -> vi -> ii -> V.
+        constexpr int kCircleOfFifths[] = {0, 5, 7, 4, 9, 2, 7};
+        constexpr int kNumCircleSteps = 7;
+        constexpr int kMaxSteps = 5;  // Stop at step 4 (vi); full cycle too long.
+
+        // 2-bar unit stepping from episode start.
+        int raw_step = static_cast<int>(
+            (bass_tick - start_tick) / (kTicksPerBar * 2));
+        int step_idx = std::min(raw_step % kNumCircleSteps, kMaxSteps - 1);
+
+        // Strong beat: sequence root pitch.
+        // Weak beat: diatonic passing tone between current and next step.
+        bool is_strong_beat =
+            (bass_tick % kTicksPerBar) < static_cast<Tick>(kTicksPerBeat);
+        int root_offset = kCircleOfFifths[step_idx];
+        int base_pitch = 48 + static_cast<int>(current_key) + root_offset;
+
+        if (is_strong_beat) {
+          anchor_pitch = base_pitch;
+        } else {
+          // Interpolate toward next step via diatonic passing motion.
+          int next_idx = std::min(step_idx + 1, kMaxSteps - 1);
+          int next_offset = kCircleOfFifths[next_idx];
+          int next_pitch = 48 + static_cast<int>(current_key) + next_offset;
+
+          // Use absolute scale degrees for smooth diatonic interpolation.
+          int curr_deg = scale_util::pitchToAbsoluteDegree(
+              static_cast<uint8_t>(clampPitch(base_pitch, 0, 127)),
+              current_key, ScaleType::Major);
+          int next_deg = scale_util::pitchToAbsoluteDegree(
+              static_cast<uint8_t>(clampPitch(next_pitch, 0, 127)),
+              current_key, ScaleType::Major);
+
+          // Calculate how far into the 2-bar unit we are (fractional).
+          Tick unit_offset = (bass_tick - start_tick) % (kTicksPerBar * 2);
+          float frac = static_cast<float>(unit_offset) /
+                       static_cast<float>(kTicksPerBar * 2);
+
+          int passing_deg = curr_deg +
+              static_cast<int>((next_deg - curr_deg) * frac);
+          anchor_pitch = static_cast<int>(
+              scale_util::absoluteDegreeToPitch(passing_deg, current_key,
+                                                ScaleType::Major));
+        }
+
         while (anchor_pitch > v2_hi_int) anchor_pitch -= 12;
         while (anchor_pitch < v2_lo_int) anchor_pitch += 12;
       }
       anchor_pitch = clampPitch(anchor_pitch, v2_lo, v2_hi);
 
-      // Vary anchor duration: 8th(35%), quarter(30%), half(20%), bar(15%).
+      // Phase-dependent bass anchor duration distribution.
+      // Sequence: shorter (includes 16ths) for rhythmic drive.
+      // Kernel/Dissolution: longer for harmonic stability.
       Tick base_dur;
+      float bass_progress = static_cast<float>(bass_tick - start_tick) /
+                             static_cast<float>(std::max(duration, static_cast<Tick>(1)));
+      bool is_sequence_phase =
+          bass_progress >= grammar.kernel_ratio &&
+          bass_progress < grammar.kernel_ratio + grammar.sequence_ratio;
       float dur_roll = rng::rollFloat(rng, 0.0f, 1.0f);
-      if (dur_roll < 0.35f) base_dur = kTicksPerBeat / 2;        // 8th note
-      else if (dur_roll < 0.65f) base_dur = kTicksPerBeat;       // quarter
-      else if (dur_roll < 0.85f) base_dur = kTicksPerBeat * 2;   // half
-      else base_dur = kTicksPerBar;                               // whole
+      if (is_sequence_phase) {
+        // Sequence: 16th(20%), 8th(40%), quarter(30%), half(10%).
+        if (dur_roll < 0.20f) base_dur = duration::kSixteenthNote;
+        else if (dur_roll < 0.60f) base_dur = kTicksPerBeat / 2;
+        else if (dur_roll < 0.90f) base_dur = kTicksPerBeat;
+        else base_dur = kTicksPerBeat * 2;
+      } else {
+        // Kernel/Dissolution: 8th(30%), quarter(40%), half(20%), bar(10%).
+        if (dur_roll < 0.30f) base_dur = kTicksPerBeat / 2;
+        else if (dur_roll < 0.70f) base_dur = kTicksPerBeat;
+        else if (dur_roll < 0.90f) base_dur = kTicksPerBeat * 2;
+        else base_dur = kTicksPerBar;
+      }
       Tick anchor_dur = std::min(base_dur,
                                  start_tick + duration - bass_tick);
       if (anchor_dur >= duration::kSixteenthNote) {
@@ -572,6 +637,14 @@ EpisodeResult generateConstraintEpisode(const EpisodeRequest& request) {
   uint8_t prev_pitch_per_voice[kMaxVoices] = {};
   Tick prev_dur_per_voice[kMaxVoices] = {};
 
+  // Per-voice-per-bar sixteenth note cap: limit to 75% of bar (12 out of 16).
+  constexpr int kMaxSixteenthsPerBar = 12;
+  int sixteenth_count[kMaxVoices] = {};
+  int current_bar_idx[kMaxVoices] = {};  // Track which bar each voice is in.
+  for (int vdx = 0; vdx < kMaxVoices; ++vdx) {
+    current_bar_idx[vdx] = -1;  // Sentinel: no bar seen yet.
+  }
+
   // Initialize previous pitches from transformed motifs.
   if (!v0_transformed.empty()) {
     prev_pitch_per_voice[0] = v0_transformed[0].pitch;
@@ -619,15 +692,52 @@ EpisodeResult generateConstraintEpisode(const EpisodeRequest& request) {
     for (const auto& motif_note : motif_notes) {
       if (note_tick >= request.start_tick + request.duration) break;
 
-      // Rhythm density: diminish voice 0/1 durations probabilistically
-      // to match Bach reference rhythm distribution (61% sixteenth notes).
-      // Energy-scaled: higher energy → more diminution. Single halving only
-      // to preserve harmonic stability (double-halving causes dissonance spikes).
+      // Rhythm density: diminish all voice durations probabilistically,
+      // phase-controlled to match Bach reference rhythm distribution (61% 16ths).
+      // Uses kSixteenthNote as floor (not energy-based min_dur which is too high).
       Tick base_dur = motif_note.duration;
-      if (voice <= 1 && base_dur > min_dur) {
-        float diminish_prob = 0.35f + request.energy_level * 0.35f;  // 0.35-0.70
-        if (rng::rollProbability(rng, diminish_prob)) {
-          base_dur = std::max(base_dur / 2, min_dur);
+      {
+        constexpr Tick kDimFloor = duration::kSixteenthNote;  // 120 ticks
+        FortPhase phase = step.phase;
+        float diminish_prob;
+        switch (phase) {
+          case FortPhase::Kernel:
+            diminish_prob = 0.50f + request.energy_level * 0.20f;
+            break;
+          case FortPhase::Sequence:
+            diminish_prob = 0.75f + request.energy_level * 0.15f;
+            break;
+          case FortPhase::Dissolution:
+            diminish_prob = 0.40f + request.energy_level * 0.15f;
+            break;
+        }
+
+        if (base_dur > kDimFloor) {
+          if (rng::rollProbability(rng, diminish_prob)) {
+            base_dur = std::max(base_dur / 2, kDimFloor);
+            // Second halving in all phases at half probability.
+            if (base_dur > kDimFloor &&
+                rng::rollProbability(rng, diminish_prob * 0.5f)) {
+              base_dur = std::max(base_dur / 2, kDimFloor);
+            }
+          }
+        }
+      }
+
+      // Sixteenth note cap: if this voice already has 75% of the bar as 16ths,
+      // force remaining notes to 8th note minimum to prevent mechanical texture.
+      {
+        int bar_idx = static_cast<int>(note_tick / kTicksPerBar);
+        if (bar_idx != current_bar_idx[voice]) {
+          current_bar_idx[voice] = bar_idx;
+          sixteenth_count[voice] = 0;
+        }
+        if (base_dur <= duration::kSixteenthNote) {
+          if (sixteenth_count[voice] >= kMaxSixteenthsPerBar) {
+            base_dur = duration::kEighthNote;
+          } else {
+            sixteenth_count[voice]++;
+          }
         }
       }
 
@@ -748,7 +858,7 @@ EpisodeResult generateConstraintEpisode(const EpisodeRequest& request) {
       }
 
       // Check for deadlock.
-      if (state.is_dead()) {
+      if (state.is_dead(note_tick)) {
         result.success = false;
         result.achieved_key = current_key;
         return result;
@@ -787,7 +897,7 @@ EpisodeResult generateConstraintEpisode(const EpisodeRequest& request) {
     placeBassFragments(result.notes, state, placed_copy,
                        request.start_tick, request.duration,
                        request.num_voices, bass_key, bass_rng,
-                       request.timeline);
+                       request.timeline, request.grammar);
   }
 
   // 5c. Place pedal voice (last voice) for 4+ voice fugues.

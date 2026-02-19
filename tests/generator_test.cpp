@@ -12,6 +12,7 @@
 
 #include "core/basic_types.h"
 #include "harmony/key.h"
+#include "test_helpers.h"
 
 namespace bach {
 namespace {
@@ -35,17 +36,6 @@ GeneratorConfig makeTestConfig(uint32_t seed = 42) {
   return config;
 }
 
-/// @brief Count total notes across all tracks.
-/// @param result The generator result to count.
-/// @return Total number of NoteEvents across all tracks.
-size_t totalNoteCount(const GeneratorResult& result) {
-  size_t count = 0;
-  for (const auto& track : result.tracks) {
-    count += track.notes.size();
-  }
-  return count;
-}
-
 // ---------------------------------------------------------------------------
 // Fugue form generation
 // ---------------------------------------------------------------------------
@@ -58,7 +48,7 @@ TEST(GeneratorTest, FugueForm_Succeeds) {
   EXPECT_TRUE(result.success);
   EXPECT_TRUE(result.error_message.empty());
   EXPECT_GT(result.tracks.size(), 0u);
-  EXPECT_GT(totalNoteCount(result), 0u);
+  EXPECT_GT(test_helpers::totalNoteCount(result), 0u);
 }
 
 TEST(GeneratorTest, FugueForm_HasCorrectTrackCount) {
@@ -95,7 +85,7 @@ TEST(GeneratorTest, PreludeAndFugue_Succeeds) {
   EXPECT_TRUE(result.success);
   EXPECT_TRUE(result.error_message.empty());
   EXPECT_GT(result.tracks.size(), 0u);
-  EXPECT_GT(totalNoteCount(result), 0u);
+  EXPECT_GT(test_helpers::totalNoteCount(result), 0u);
 }
 
 TEST(GeneratorTest, PreludeAndFugue_MoreNotesThanFugueAlone) {
@@ -111,8 +101,8 @@ TEST(GeneratorTest, PreludeAndFugue_MoreNotesThanFugueAlone) {
   ASSERT_TRUE(fugue_result.success);
   ASSERT_TRUE(pf_result.success);
 
-  size_t fugue_notes = totalNoteCount(fugue_result);
-  size_t pf_notes = totalNoteCount(pf_result);
+  size_t fugue_notes = test_helpers::totalNoteCount(fugue_result);
+  size_t pf_notes = test_helpers::totalNoteCount(pf_result);
 
   EXPECT_GT(pf_notes, fugue_notes)
       << "PreludeAndFugue (" << pf_notes << " notes) should have more notes than Fugue alone ("
@@ -243,7 +233,7 @@ TEST(GeneratorTest, AutoSeed_ProducesValidResult) {
 
   EXPECT_TRUE(result.success);
   EXPECT_NE(result.seed_used, 0u) << "Auto seed should produce a non-zero seed_used";
-  EXPECT_GT(totalNoteCount(result), 0u);
+  EXPECT_GT(test_helpers::totalNoteCount(result), 0u);
 }
 
 // ---------------------------------------------------------------------------
@@ -288,7 +278,7 @@ TEST(GeneratorTest, SameSeed_PreludeAndFugue_Deterministic) {
   ASSERT_EQ(result1.tracks.size(), result2.tracks.size());
 
   // Check that total note counts match.
-  EXPECT_EQ(totalNoteCount(result1), totalNoteCount(result2));
+  EXPECT_EQ(test_helpers::totalNoteCount(result1), test_helpers::totalNoteCount(result2));
   EXPECT_EQ(result1.total_duration_ticks, result2.total_duration_ticks);
 }
 
@@ -309,7 +299,7 @@ TEST(GeneratorTest, DifferentForms_ProduceDifferentResults) {
   ASSERT_TRUE(pf_result.success);
 
   // PreludeAndFugue should have more content than a standalone Fugue.
-  EXPECT_NE(totalNoteCount(fugue_result), totalNoteCount(pf_result))
+  EXPECT_NE(test_helpers::totalNoteCount(fugue_result), test_helpers::totalNoteCount(pf_result))
       << "Different forms with same seed should produce different note counts";
 }
 
@@ -511,7 +501,7 @@ TEST(GeneratorTest, ToccataAndFugue_Succeeds) {
   GeneratorResult result = generate(config);
 
   EXPECT_TRUE(result.success);
-  EXPECT_GT(totalNoteCount(result), 0u);
+  EXPECT_GT(test_helpers::totalNoteCount(result), 0u);
 }
 
 TEST(GeneratorTest, FantasiaAndFugue_Succeeds) {
@@ -520,7 +510,7 @@ TEST(GeneratorTest, FantasiaAndFugue_Succeeds) {
   GeneratorResult result = generate(config);
 
   EXPECT_TRUE(result.success);
-  EXPECT_GT(totalNoteCount(result), 0u);
+  EXPECT_GT(test_helpers::totalNoteCount(result), 0u);
 }
 
 TEST(GeneratorTest, Passacaglia_Succeeds) {
@@ -529,7 +519,7 @@ TEST(GeneratorTest, Passacaglia_Succeeds) {
   GeneratorResult result = generate(config);
 
   EXPECT_TRUE(result.success);
-  EXPECT_GT(totalNoteCount(result), 0u);
+  EXPECT_GT(test_helpers::totalNoteCount(result), 0u);
 }
 
 // ---------------------------------------------------------------------------

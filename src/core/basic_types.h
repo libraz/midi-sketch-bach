@@ -131,6 +131,12 @@ inline constexpr MetricLevel metricLevel(Tick tick) {
   return MetricLevel::Offbeat;
 }
 
+/// Returns true if the absolute tick falls on beat 1 or 3 of its bar.
+inline bool isStrongBeatInBar(Tick tick) {
+  Tick pos = tick % kTicksPerBar;
+  return pos == 0 || pos == kTicksPerBeat * 2;
+}
+
 // ---------------------------------------------------------------------------
 // Voice
 // ---------------------------------------------------------------------------

@@ -15,8 +15,6 @@ set(BACH_TEST_SOURCES
   core/note_source_test.cpp
   core/note_creator_test.cpp
   core/rng_util_test.cpp
-  core/phrase_structure_test.cpp
-  core/rhythm_pattern_test.cpp
   core/figure_match_test.cpp
   core/melodic_state_test.cpp
   core/markov_tables_test.cpp
@@ -237,6 +235,7 @@ target_include_directories(bach_tests
   PRIVATE
     ${CMAKE_SOURCE_DIR}/src
     ${CMAKE_BINARY_DIR}/generated
+    ${CMAKE_SOURCE_DIR}/tests
 )
 
 gtest_discover_tests(bach_tests)

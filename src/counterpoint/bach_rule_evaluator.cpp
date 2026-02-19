@@ -241,23 +241,34 @@ bool BachRuleEvaluator::hasHiddenPerfect(const CounterpointState& state,
 bool BachRuleEvaluator::isCrossingTemporary(const CounterpointState& state,
                                             VoiceId voice1, VoiceId voice2,
                                             Tick tick) const {
-  // Check if voices return to proper order at the next beat.
-  Tick next_beat = tick + kTicksPerBeat;
+  // Check 2 beats ahead (matching Python analyzer _LOOKAHEAD_BEATS=2).
+  // If the crossing resolves at either offset, it is temporary.
+  for (Tick offset = kTicksPerBeat; offset <= kTicksPerBeat * 2;
+       offset += kTicksPerBeat) {
+    Tick check_tick = tick + offset;
 
-  const NoteEvent* next1 = state.getNoteAt(voice1, next_beat);
-  const NoteEvent* next2 = state.getNoteAt(voice2, next_beat);
+    const NoteEvent* next1 = state.getNoteAt(voice1, check_tick);
+    const NoteEvent* next2 = state.getNoteAt(voice2, check_tick);
 
-  if (!next1 || !next2) {
-    // No notes at next beat -- cannot confirm resolution; treat as persistent.
-    return false;
+    if (!next1 || !next2) {
+      continue;  // No notes at this offset -- try the next one.
+    }
+
+    // Convention: voice1 < voice2 means voice1 is the upper voice.
+    // Check that proper ordering is restored at this offset.
+    bool restored = false;
+    if (voice1 < voice2) {
+      restored = next1->pitch >= next2->pitch;  // Upper voice back above.
+    } else {
+      restored = next1->pitch <= next2->pitch;  // Lower voice back below.
+    }
+
+    if (restored) {
+      return true;  // Crossing resolves -- temporary.
+    }
   }
 
-  // Convention: voice1 < voice2 means voice1 is the upper voice.
-  // Check that proper ordering is restored at the next beat.
-  if (voice1 < voice2) {
-    return next1->pitch >= next2->pitch;  // Upper voice back above.
-  }
-  return next1->pitch <= next2->pitch;  // Lower voice back below.
+  return false;  // Not resolved within 2 beats -- persistent.
 }
 
 bool BachRuleEvaluator::hasVoiceCrossing(const CounterpointState& state,
@@ -277,7 +288,7 @@ bool BachRuleEvaluator::hasVoiceCrossing(const CounterpointState& state,
 
   if (!crossed) return false;
 
-  // Bach relaxation: temporary crossings (resolving within 1 beat) are allowed.
+  // Bach relaxation: temporary crossings (resolving within 2 beats) are allowed.
   if (isCrossingTemporary(state, voice1, voice2, tick)) {
     return false;  // Temporary crossing -- not a violation.
   }

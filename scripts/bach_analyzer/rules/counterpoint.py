@@ -337,6 +337,10 @@ class VoiceCrossing:
                     if (src_u in self._INVERTIBLE_SOURCES and src_l in self._INVERTIBLE_SOURCES
                             and src_u != src_l):
                         sev = Severity.INFO
+                    # Episode material: episodes use invertible counterpoint by design.
+                    elif (src_u == NoteSource.EPISODE_MATERIAL
+                          and src_l == NoteSource.EPISODE_MATERIAL):
+                        sev = Severity.INFO
                     # Small crossings (<=2 semitones) are WARNING, not ERROR.
                     elif crossing_amount <= self._MINOR_CROSSING_LIMIT:
                         sev = Severity.WARNING
@@ -446,6 +450,12 @@ class CrossRelation:
         raised_7th = (root + 11) % 12
         return {pc_a, pc_b} == {natural_7th, raised_7th}
 
+    @staticmethod
+    def _is_pedal_pair(name_a: str, va: List[Note], name_b: str, vb: List[Note]) -> bool:
+        """Check if either voice is a pedal voice."""
+        from ..model import is_pedal_voice
+        return is_pedal_voice(name_a, va) or is_pedal_voice(name_b, vb)
+
     def _check_pair(
         self, name_a: str, va: List[Note], name_b: str, vb: List[Note],
         key: str | None = None,
@@ -494,6 +504,8 @@ class CrossRelation:
                             sev = Severity.INFO
                         elif (src_a and src_a in self._DOWNGRADE_SOURCES) or (src_b and src_b in self._DOWNGRADE_SOURCES):
                             sev = Severity.INFO
+                        elif self._is_pedal_pair(name_a, va, name_b, vb):
+                            sev = Severity.INFO
                         else:
                             sev = Severity.WARNING
                         violations.append(
@@ -541,6 +553,13 @@ class AugmentedLeap:
     def configure(self, profile: FormProfile) -> None:
         pass
 
+    _SEQUENTIAL_SOURCES = {
+        NoteSource.EPISODE_MATERIAL,
+        NoteSource.TOCCATA_FIGURE,
+        NoteSource.TOCCATA_GESTURE,
+        NoteSource.ARPEGGIO_FLOW,
+    }
+
     def check(self, score: Score) -> RuleResult:
         violations: List[Violation] = []
         for voice_name, notes in score.voices_dict.items():
@@ -551,6 +570,11 @@ class AugmentedLeap:
                 if leap == TRITONE:
                     # Exempt short notes in rapid passages.
                     if n1.duration <= self._SHORT_NOTE_LIMIT and n2.duration <= self._SHORT_NOTE_LIMIT:
+                        continue
+                    # Exempt sequential figurative sources.
+                    src1 = n1.provenance.source if n1.provenance else None
+                    src2 = n2.provenance.source if n2.provenance else None
+                    if src1 in self._SEQUENTIAL_SOURCES or src2 in self._SEQUENTIAL_SOURCES:
                         continue
                     violations.append(
                         Violation(

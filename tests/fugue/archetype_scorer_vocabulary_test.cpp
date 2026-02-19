@@ -51,17 +51,18 @@ TEST(ArchetypeScorerVocabularyTest, VocabularyBonusIncreasesScore) {
 
   // Subject whose Kopfmotiv matches kDescRun4: C5, B4, A4, G4.
   Subject sub1 = makeSubjectWithKopf({72, 71, 69, 67}, Key::C, false);
-  // Subject with random intervals that won't match vocabulary.
-  Subject sub2 = makeSubjectWithKopf({72, 85, 50, 90}, Key::C, false);
+  // Subject with similar stepwise motion but shifted (no vocabulary match):
+  // D5, C#5, B4, A4 — same interval sizes but starting on non-tonic degree.
+  Subject sub2 = makeSubjectWithKopf({74, 73, 71, 69}, Key::C, false);
 
   float score1 = scorer.scoreKopfmotivStrength(sub1, policy);
   float score2 = scorer.scoreKopfmotivStrength(sub2, policy);
 
-  // sub1 (vocabulary match) should score at least as high as sub2.
-  // Note: other criteria (interval variety, rhythm, opening gesture) also matter,
-  // so we just check the bonus is positive.
+  // Both subjects have identical interval variety and contour,
+  // so the vocabulary bonus should make sub1 score higher.
   EXPECT_GE(score1, 0.0f);
   EXPECT_LE(score1, 1.0f);
+  EXPECT_GE(score1, score2) << "Vocabulary-matching subject should score >= similar non-matching";
 }
 
 TEST(ArchetypeScorerVocabularyTest, BonusCappedAtPointOne) {

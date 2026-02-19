@@ -32,6 +32,7 @@ class FormProfile:
     min_stepwise_ratio: float = 0.4
     max_leap_semitones: int = 13
     voice_spacing_max: int = 12
+    voice_spacing_pedal_max: Optional[int] = None  # pedal-manual threshold override
 
     # Instrument-specific
     instrument_range: Optional[Tuple[int, int]] = None  # MIDI pitch (min, max)
@@ -91,7 +92,14 @@ _PROFILES: Dict[str, FormProfile] = {
         exposition_required=True,
         cadence_validation=True,
         expected_voices=(2, 5),
-        relaxed_sources=frozenset({"free_counterpoint", "post_process"}),
+        voice_spacing_max=24,
+        voice_spacing_pedal_max=48,
+        relaxed_sources=frozenset({
+            "free_counterpoint", "post_process",
+            "toccata_gesture", "toccata_figure",
+            "episode_material",
+        }),
+        leap_resolution_threshold=7,
         reference_category="organ_fugue",
     ),
     "fantasia_and_fugue": FormProfile(

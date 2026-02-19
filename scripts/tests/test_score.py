@@ -33,10 +33,13 @@ from scripts.bach_analyzer.score import (
     _detect_fugue_boundary_tick,
     _detect_ground_bass_regularity,
     _extract_degree_distribution_for_tick_range,
+    _extract_interval_profile_for_tick_range,
     _get_texture_reference,
     _normalize,
     _ORGAN_PF_AVG_ACTIVE,
     _ORGAN_PF_TEXTURE_REF,
+    _ORGAN_TOCCATA_AVG_ACTIVE,
+    _ORGAN_TOCCATA_TEXTURE_REF,
 )
 
 
@@ -213,7 +216,7 @@ class TestReferenceData(unittest.TestCase):
         self.assertIn("wtc1", cats)
         self.assertIn("solo_cello_suite", cats)
         self.assertIn("trio_sonata", cats)
-        self.assertEqual(len(cats), 7)
+        self.assertEqual(len(cats), 8)
 
     def test_load_category(self):
         ref = load_category("organ_fugue")
@@ -1076,26 +1079,26 @@ class TestHarmonyDegreeScoring(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# Phase 4C: texture_density organ_pf reference tests
+# Phase 4C: texture_density organ_toccata reference tests
 # ---------------------------------------------------------------------------
 
 class TestGetTextureReference(unittest.TestCase):
     """Tests for _get_texture_reference."""
 
-    def test_toccata_uses_organ_pf(self):
-        """toccata_and_fugue should use organ_pf texture reference."""
+    def test_toccata_uses_organ_toccata(self):
+        """toccata_and_fugue should use organ_toccata texture reference."""
         from scripts.bach_analyzer.reference import load_category
         ref = load_category("organ_fugue")
         tex_dist, av_scalar = _get_texture_reference(ref, "toccata_and_fugue")
-        self.assertEqual(tex_dist, _ORGAN_PF_TEXTURE_REF)
-        self.assertEqual(av_scalar, _ORGAN_PF_AVG_ACTIVE)
+        self.assertEqual(tex_dist, _ORGAN_TOCCATA_TEXTURE_REF)
+        self.assertEqual(av_scalar, _ORGAN_TOCCATA_AVG_ACTIVE)
 
-    def test_fantasia_uses_organ_pf(self):
-        """fantasia_and_fugue should also use organ_pf texture reference."""
+    def test_fantasia_uses_organ_toccata(self):
+        """fantasia_and_fugue should also use organ_toccata texture reference."""
         from scripts.bach_analyzer.reference import load_category
         ref = load_category("organ_fugue")
         tex_dist, av_scalar = _get_texture_reference(ref, "fantasia_and_fugue")
-        self.assertEqual(tex_dist, _ORGAN_PF_TEXTURE_REF)
+        self.assertEqual(tex_dist, _ORGAN_TOCCATA_TEXTURE_REF)
 
     def test_regular_fugue_uses_category_ref(self):
         """Regular fugue should use the category's default texture reference."""
@@ -1119,20 +1122,20 @@ class TestGetTextureReference(unittest.TestCase):
 
 
 class TestTextureScoring(unittest.TestCase):
-    """Integration tests for texture dimension with organ_pf reference."""
+    """Integration tests for texture dimension with organ_toccata reference."""
 
     def test_toccata_texture_uses_organ_pf_ref(self):
-        """Toccata+fugue should show organ_pf ref in texture sub-score details."""
+        """Toccata+fugue should show organ_toccata ref in texture sub-score details."""
         score = _make_toccata_and_fugue_score()
         bach_score = compute_score(
             score, "organ_fugue", form_name="toccata_and_fugue")
         texture = bach_score.dimensions["texture"]
         self.assertTrue(texture.applicable)
 
-        # Both texture sub-scores should mention organ_pf ref
+        # Both texture sub-scores should mention organ_toccata ref
         for sub in texture.sub_scores:
-            self.assertIn("organ_pf ref", sub.detail,
-                          msg=f"Sub-score '{sub.name}' missing organ_pf ref marker")
+            self.assertIn("organ_toccata ref", sub.detail,
+                          msg=f"Sub-score '{sub.name}' missing organ_toccata ref marker")
 
     def test_toccata_structure_texture_uses_organ_pf_ref(self):
         """Structure dimension's texture_density_match should use organ_pf for toccata."""
@@ -1145,16 +1148,117 @@ class TestTextureScoring(unittest.TestCase):
         tex_subs = [s for s in structure.sub_scores
                     if s.name == "texture_density_match"]
         self.assertEqual(len(tex_subs), 1)
-        self.assertIn("organ_pf ref", tex_subs[0].detail)
+        self.assertIn("organ_toccata ref", tex_subs[0].detail)
 
     def test_regular_fugue_texture_no_organ_pf(self):
-        """Regular fugue should NOT show organ_pf ref in texture details."""
+        """Regular fugue should NOT show organ_toccata ref in texture details."""
         score = _make_fugue_score()
         bach_score = compute_score(score, "organ_fugue", form_name="fugue")
         texture = bach_score.dimensions["texture"]
         if texture.applicable:
             for sub in texture.sub_scores:
-                self.assertNotIn("organ_pf ref", sub.detail)
+                self.assertNotIn("organ_toccata ref", sub.detail)
+
+
+# ---------------------------------------------------------------------------
+# Phase 1.2: section-split melody scoring tests
+# ---------------------------------------------------------------------------
+
+class TestExtractIntervalProfileForTickRange(unittest.TestCase):
+    """Tests for _extract_interval_profile_for_tick_range."""
+
+    def test_full_range_matches_overall(self):
+        """Full tick range should match the overall interval profile."""
+        score = _make_fugue_score()
+        overall = extract_interval_profile(score)
+        ranged = _extract_interval_profile_for_tick_range(
+            score, 0, score.total_duration)
+        self.assertEqual(ranged["total"], overall["total"])
+        self.assertAlmostEqual(
+            ranged["stepwise_ratio"], overall["stepwise_ratio"], places=3)
+
+    def test_empty_range(self):
+        """A range with no notes should return empty profile."""
+        score = _make_fugue_score()
+        result = _extract_interval_profile_for_tick_range(score, 0, 0)
+        self.assertEqual(result["total"], 0)
+        self.assertEqual(result["stepwise_ratio"], 0.0)
+
+    def test_partial_range(self):
+        """Partial tick range should return a subset of intervals."""
+        score = _make_toccata_and_fugue_score()
+        # Toccata section only (first 4 bars = 7680 ticks)
+        toc_ip = _extract_interval_profile_for_tick_range(score, 0, 7680)
+        # Fugue section only
+        fug_ip = _extract_interval_profile_for_tick_range(
+            score, 7680, score.total_duration)
+        # Both sections should have intervals
+        self.assertGreater(toc_ip["total"], 0)
+        self.assertGreater(fug_ip["total"], 0)
+
+
+class TestMelodySectionSplitScoring(unittest.TestCase):
+    """Test section-split melody scoring for toccata+fugue forms."""
+
+    def test_toccata_and_fugue_uses_section_split(self):
+        """Toccata+fugue should use section-split melody scoring."""
+        score = _make_toccata_and_fugue_score()
+        bach_score = compute_score(
+            score, "organ_fugue", form_name="toccata_and_fugue")
+        melody = bach_score.dimensions["melody"]
+        self.assertTrue(melody.applicable)
+        # Should mention section-split in detail
+        details = " ".join(s.detail for s in melody.sub_scores)
+        self.assertIn("section-split", details)
+
+    def test_fantasia_and_fugue_uses_section_split(self):
+        """fantasia_and_fugue should also trigger section-split scoring."""
+        score = _make_toccata_and_fugue_score()
+        bach_score = compute_score(
+            score, "organ_fugue", form_name="fantasia_and_fugue")
+        melody = bach_score.dimensions["melody"]
+        details = " ".join(s.detail for s in melody.sub_scores)
+        self.assertIn("section-split", details)
+
+    def test_regular_fugue_no_section_split(self):
+        """Regular fugue should NOT use section-split melody scoring."""
+        score = _make_fugue_score()
+        bach_score = compute_score(score, "organ_fugue", form_name="fugue")
+        melody = bach_score.dimensions["melody"]
+        details = " ".join(s.detail for s in melody.sub_scores)
+        self.assertNotIn("section-split", details)
+
+    def test_section_split_shows_toc_and_fug(self):
+        """Section-split detail should show both toc= and fug= values."""
+        score = _make_toccata_and_fugue_score()
+        bach_score = compute_score(
+            score, "organ_fugue", form_name="toccata_and_fugue")
+        melody = bach_score.dimensions["melody"]
+        # At least the interval_distribution_jsd sub-score should have toc/fug parts
+        interval_subs = [s for s in melody.sub_scores
+                         if s.name == "interval_distribution_jsd"]
+        self.assertEqual(len(interval_subs), 1)
+        self.assertIn("toc=", interval_subs[0].detail)
+        self.assertIn("fug=", interval_subs[0].detail)
+
+    def test_no_boundary_falls_back_to_default(self):
+        """Toccata form with no fugue material should fall back to default."""
+        # All free counterpoint, no fugue provenance
+        notes_a = [_n(60 + (i % 7), i * 480, 480, "soprano",
+                       NoteSource.FREE_COUNTERPOINT) for i in range(16)]
+        notes_b = [_n(48 + (i % 5), i * 480, 480, "bass",
+                       NoteSource.FREE_COUNTERPOINT) for i in range(16)]
+        score = Score(
+            tracks=[_track("soprano", notes_a), _track("bass", notes_b)],
+            form="toccata_and_fugue",
+        )
+        bach_score = compute_score(
+            score, "organ_fugue", form_name="toccata_and_fugue")
+        melody = bach_score.dimensions["melody"]
+        self.assertTrue(melody.applicable)
+        # Should NOT have section-split (no boundary detected)
+        details = " ".join(s.detail for s in melody.sub_scores)
+        self.assertNotIn("section-split", details)
 
 
 if __name__ == "__main__":

@@ -138,41 +138,6 @@ size_t findClimaxIndex(const std::vector<NoteEvent>& notes) {
   return max_idx;
 }
 
-/// @brief Check if the head fragment pattern recurs later in the core intervals.
-bool headFragmentRecurs(const std::vector<int>& core_intervals,
-                        const std::vector<Tick>& core_rhythm,
-                        const std::vector<int>& head_intervals,
-                        const std::vector<Tick>& head_rhythm) {
-  if (head_intervals.empty() || core_intervals.empty()) {
-    return false;
-  }
-  size_t head_len = head_intervals.size();
-  if (head_len > core_intervals.size()) {
-    return false;
-  }
-
-  // Search for the head pattern starting from index 1 onward.
-  for (size_t start = 1; start + head_len <= core_intervals.size(); ++start) {
-    bool match = true;
-    for (size_t idx = 0; idx < head_len; ++idx) {
-      if (core_intervals[start + idx] != head_intervals[idx]) {
-        match = false;
-        break;
-      }
-      // Also check rhythm match (need start+idx < core_rhythm.size()).
-      if (start + idx < core_rhythm.size() && idx < head_rhythm.size() &&
-          core_rhythm[start + idx] != head_rhythm[idx]) {
-        match = false;
-        break;
-      }
-    }
-    if (match) {
-      return true;
-    }
-  }
-  return false;
-}
-
 // ---------------------------------------------------------------------------
 // Helpers for isValidKerngestalt: interval, rhythm, and accent matching
 // ---------------------------------------------------------------------------

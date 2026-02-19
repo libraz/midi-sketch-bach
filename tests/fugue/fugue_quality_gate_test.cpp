@@ -9,19 +9,10 @@
 #include "fugue/fugue_config.h"
 #include "fugue/fugue_generator.h"
 #include "harmony/chord_types.h"
+#include "test_helpers.h"
 
 namespace bach {
 namespace {
-
-/// @brief Count total notes across all tracks.
-size_t totalNoteCount(const FugueResult& result) {
-  size_t count = 0;
-  for (const auto& track : result.tracks) {
-    count += track.notes.size();
-  }
-  return count;
-}
-
 
 TEST(FugueQualityGateTest, GenerationSucceeds10Seeds) {
   for (uint32_t seed = 1000; seed < 1010; ++seed) {
@@ -33,7 +24,7 @@ TEST(FugueQualityGateTest, GenerationSucceeds10Seeds) {
 
     FugueResult result = generateFugue(config);
     EXPECT_TRUE(result.success) << "Failed for seed " << seed;
-    EXPECT_GT(totalNoteCount(result), 0u) << "No notes for seed " << seed;
+    EXPECT_GT(test_helpers::totalNoteCount(result), 0u) << "No notes for seed " << seed;
   }
 }
 
@@ -63,7 +54,7 @@ TEST(FugueQualityGateTest, PostValidationRetainsNotes) {
   ASSERT_TRUE(result.success);
 
   // Post-validation should retain most notes (>80%).
-  size_t total = totalNoteCount(result);
+  size_t total = test_helpers::totalNoteCount(result);
   EXPECT_GT(total, 20u) << "Too few notes after validation";
 }
 

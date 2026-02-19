@@ -524,12 +524,6 @@ std::vector<Tick> collectRelativeOnsets(const std::vector<NoteEvent>& notes) {
   return onsets;
 }
 
-/// @brief Check if a tick position falls on a strong beat (beat 1 or 3 in 4/4).
-bool isStrongBeatPosition(Tick tick) {
-  Tick bar_pos = tick % kTicksPerBar;
-  return bar_pos == 0 || bar_pos == kTicksPerBeat * 2;
-}
-
 /// @brief Compute peak obligation density excess from overlaid subject profiles.
 ///
 /// In stretto, each voice independently carries its own obligations. The single-voice
@@ -622,7 +616,7 @@ float estimateVerticalClash(const std::vector<Tick>& onsets, Tick offset,
 
   // Scan all strong beat positions in the combined timeline.
   for (Tick tick = 0; tick < total_span; tick += kTicksPerBeat) {
-    if (!isStrongBeatPosition(tick)) continue;
+    if (!isStrongBeatInBar(tick)) continue;
     total_strong_beats++;
 
     // Count how many voices have an onset near this strong beat.
@@ -686,7 +680,7 @@ float computeRhythmicInterference(const std::vector<NoteEvent>& notes, Tick offs
         // Accent: onset on strong beat or long note.
         bool is_onset = (sample >= rel_onset && sample < rel_onset + kStrettoSampleStep);
         if (is_onset) {
-          bool is_accent = isStrongBeatPosition(rel_onset) ||
+          bool is_accent = isStrongBeatInBar(rel_onset) ||
                            note.duration >= kTicksPerBeat;
           if (is_accent) {
             accent_voices++;

@@ -48,22 +48,25 @@ HarmonicTimeline buildConcertatoHarmonicPlan(
     timeline.addEvent(e);
   };
 
-  // Allegro: I -> V -> I -> IV -> V/V -> V -> I
+  // Allegro: I -> III -> V -> I -> IV -> V/V -> V -> I (mediant adds color)
   if (sections.size() >= 1) {
     Tick s = sections[0].start;
     Tick dur = sections[0].end - s;
-    Tick seg = dur / 7;
+    Tick seg = dur / 8;
     if (seg == 0) seg = dur;
 
     ChordQuality tonic_q = minor ? ChordQuality::Minor : ChordQuality::Major;
+    ChordQuality iii_q = minor ? ChordQuality::Major : ChordQuality::Minor;
+    int iii_offset = minor ? 3 : 4;  // III in minor = relative major
     addChord(s, s + seg, ChordDegree::I, tonic_q, 0);
-    addChord(s + seg, s + seg * 2, ChordDegree::V, ChordQuality::Major, 7);
-    addChord(s + seg * 2, s + seg * 3, ChordDegree::I, tonic_q, 0);
-    addChord(s + seg * 3, s + seg * 4,
+    addChord(s + seg, s + seg * 2, ChordDegree::iii, iii_q, iii_offset);
+    addChord(s + seg * 2, s + seg * 3, ChordDegree::V, ChordQuality::Major, 7);
+    addChord(s + seg * 3, s + seg * 4, ChordDegree::I, tonic_q, 0);
+    addChord(s + seg * 4, s + seg * 5,
              ChordDegree::IV, minor ? ChordQuality::Minor : ChordQuality::Major, 5);
-    addChord(s + seg * 4, s + seg * 5, ChordDegree::V_of_V, ChordQuality::Major, 2);
-    addChord(s + seg * 5, s + seg * 6, ChordDegree::V, ChordQuality::Major, 7);
-    addChord(s + seg * 6, sections[0].end, ChordDegree::I, tonic_q, 0);
+    addChord(s + seg * 5, s + seg * 6, ChordDegree::V_of_V, ChordQuality::Major, 2);
+    addChord(s + seg * 6, s + seg * 7, ChordDegree::V, ChordQuality::Major, 7);
+    addChord(s + seg * 7, sections[0].end, ChordDegree::I, tonic_q, 0);
   }
 
   // Adagio: vi -> IV -> ii -> V/vi -> vi -> IV -> V -> I
@@ -93,11 +96,11 @@ HarmonicTimeline buildConcertatoHarmonicPlan(
              ChordDegree::I, minor ? ChordQuality::Minor : ChordQuality::Major, 0);
   }
 
-  // Vivace: I -> V/IV -> IV -> V -> V/V -> V7 -> I
+  // Vivace: I -> V/IV -> IV -> VI -> V -> V/V -> V7 -> I (VI adds deceptive color)
   if (sections.size() >= 3) {
     Tick s = sections[2].start;
     Tick dur = sections[2].end - s;
-    Tick seg = dur / 7;
+    Tick seg = dur / 8;
     if (seg == 0) seg = dur;
 
     ChordQuality tonic_q = minor ? ChordQuality::Minor : ChordQuality::Major;
@@ -105,10 +108,13 @@ HarmonicTimeline buildConcertatoHarmonicPlan(
     addChord(s + seg, s + seg * 2, ChordDegree::V_of_IV, ChordQuality::Major, 0);
     addChord(s + seg * 2, s + seg * 3,
              ChordDegree::IV, minor ? ChordQuality::Minor : ChordQuality::Major, 5);
-    addChord(s + seg * 3, s + seg * 4, ChordDegree::V, ChordQuality::Major, 7);
-    addChord(s + seg * 4, s + seg * 5, ChordDegree::V_of_V, ChordQuality::Major, 2);
-    addChord(s + seg * 5, s + seg * 6, ChordDegree::V, ChordQuality::Dominant7, 7);
-    addChord(s + seg * 6, sections[2].end, ChordDegree::I, ChordQuality::Major, 0, 1.5f);
+    addChord(s + seg * 3, s + seg * 4,
+             ChordDegree::vi, minor ? ChordQuality::Major : ChordQuality::Minor,
+             minor ? 8 : 9);  // VI in minor = deceptive relation
+    addChord(s + seg * 4, s + seg * 5, ChordDegree::V, ChordQuality::Major, 7);
+    addChord(s + seg * 5, s + seg * 6, ChordDegree::V_of_V, ChordQuality::Major, 2);
+    addChord(s + seg * 6, s + seg * 7, ChordDegree::V, ChordQuality::Dominant7, 7);
+    addChord(s + seg * 7, sections[2].end, ChordDegree::I, ChordQuality::Major, 0, 1.5f);
   }
 
   return timeline;
@@ -213,7 +219,7 @@ std::vector<NoteEvent> generateMotoPerpetuo_Concertato(
 
   size_t idx = scale.size() / 2;
   bool ascending = true;
-  constexpr int kMaxRangeFromCenter = 14;
+  constexpr int kMaxRangeFromCenter = 19;  // ~1.5 octave each side for Brechung range.
   MelodicState mel_state;
   uint8_t prev_moto_pitch = scale[idx];
 
@@ -246,13 +252,61 @@ std::vector<NoteEvent> generateMotoPerpetuo_Concertato(
         }
       }
     } else {
-      int step = rng::rollProbability(rng, 0.15f) ? 2 : 1;
-      if (ascending) {
-        if (idx + step < scale.size()) idx += step;
-        else { ascending = false; if (idx >= static_cast<size_t>(step)) idx -= step; }
+      // Weak beat: arpeggio-driven with NCT stepwise.
+      // 60% directional chord tone, 25% skip (3rd), 15% NCT stepwise.
+      float roll = rng::rollFloat(rng, 0.0f, 1.0f);
+      if (roll < 0.60f) {
+        // Directional chord-tone target: find nearest chord tone in current direction.
+        const HarmonicEvent& evt = timeline.getAt(tick);
+        auto chord_tones = collectChordTonesInRange(evt.chord, low, high);
+        uint8_t current = scale[idx];
+        uint8_t best = current;
+        int best_dist = 127;
+        for (auto ctn : chord_tones) {
+          int dist = static_cast<int>(ctn) - static_cast<int>(current);
+          bool correct_dir = ascending ? (dist > 0) : (dist < 0);
+          int abs_dist = std::abs(dist);
+          if (correct_dir && abs_dist >= 2 && abs_dist < best_dist) {
+            best = ctn;
+            best_dist = abs_dist;
+          }
+        }
+        if (best != current) {
+          // Find the nearest scale index for this pitch.
+          for (size_t sci = 0; sci < scale.size(); ++sci) {
+            if (scale[sci] >= best) { idx = sci; break; }
+          }
+        } else {
+          // Fallback: skip by 2-3 scale steps in current direction.
+          int step = rng::rollRange(rng, 2, 3);
+          if (ascending) {
+            if (idx + step < scale.size()) idx += step;
+            else { ascending = false; if (idx >= static_cast<size_t>(step)) idx -= step; }
+          } else {
+            if (idx >= static_cast<size_t>(step)) idx -= step;
+            else { ascending = true; if (idx + step < scale.size()) idx += step; }
+          }
+        }
+      } else if (roll < 0.85f) {
+        // Skip: 2-3 scale steps (3rd interval).
+        int step = rng::rollRange(rng, 2, 3);
+        if (ascending) {
+          if (idx + step < scale.size()) idx += step;
+          else { ascending = false; if (idx >= static_cast<size_t>(step)) idx -= step; }
+        } else {
+          if (idx >= static_cast<size_t>(step)) idx -= step;
+          else { ascending = true; if (idx + step < scale.size()) idx += step; }
+        }
       } else {
-        if (idx >= static_cast<size_t>(step)) idx -= step;
-        else { ascending = true; if (idx + step < scale.size()) idx += step; }
+        // NCT stepwise: ±1 step (passing tone / neighbor tone role).
+        int step = 1;
+        if (ascending) {
+          if (idx + step < scale.size()) idx += step;
+          else { ascending = false; if (idx >= 1) idx -= step; }
+        } else {
+          if (idx >= 1) idx -= step;
+          else { ascending = true; if (idx + step < scale.size()) idx += step; }
+        }
       }
     }
 
@@ -349,13 +403,58 @@ ToccataResult generateConcertatoToccata(const ToccataConfig& config) {
 
       if (!scale1.empty()) {
         all_notes.push_back(makeNote(tick, dur, scale1[idx1], 1));
-        int step = rng::rollProbability(rng, 0.20f) ? 2 : 1;
-        if (asc1) {
-          if (idx1 + step < scale1.size()) idx1 += step;
-          else { asc1 = false; if (idx1 >= static_cast<size_t>(step)) idx1 -= step; }
+        // Arpeggio-driven: 60% directional chord tone, 25% skip, 15% stepwise.
+        float v1_roll = rng::rollFloat(rng, 0.0f, 1.0f);
+        if (v1_roll < 0.60f) {
+          // Directional chord-tone target.
+          const HarmonicEvent& evt = timeline.getAt(tick);
+          auto chord_tones = collectChordTonesInRange(evt.chord, low1, high1);
+          uint8_t current = scale1[idx1];
+          uint8_t best = current;
+          int best_dist = 127;
+          for (auto ctn : chord_tones) {
+            int dist = static_cast<int>(ctn) - static_cast<int>(current);
+            bool correct_dir = asc1 ? (dist > 0) : (dist < 0);
+            int abs_dist = std::abs(dist);
+            if (correct_dir && abs_dist >= 2 && abs_dist < best_dist) {
+              best = ctn;
+              best_dist = abs_dist;
+            }
+          }
+          if (best != current) {
+            for (size_t sci = 0; sci < scale1.size(); ++sci) {
+              if (scale1[sci] >= best) { idx1 = sci; break; }
+            }
+          } else {
+            int step = rng::rollRange(rng, 2, 3);
+            if (asc1) {
+              if (idx1 + step < scale1.size()) idx1 += step;
+              else { asc1 = false; if (idx1 >= static_cast<size_t>(step)) idx1 -= step; }
+            } else {
+              if (idx1 >= static_cast<size_t>(step)) idx1 -= step;
+              else { asc1 = true; if (idx1 + step < scale1.size()) idx1 += step; }
+            }
+          }
+        } else if (v1_roll < 0.85f) {
+          // Skip: 2-3 scale steps (3rd interval).
+          int step = rng::rollRange(rng, 2, 3);
+          if (asc1) {
+            if (idx1 + step < scale1.size()) idx1 += step;
+            else { asc1 = false; if (idx1 >= static_cast<size_t>(step)) idx1 -= step; }
+          } else {
+            if (idx1 >= static_cast<size_t>(step)) idx1 -= step;
+            else { asc1 = true; if (idx1 + step < scale1.size()) idx1 += step; }
+          }
         } else {
-          if (idx1 >= static_cast<size_t>(step)) idx1 -= step;
-          else { asc1 = true; if (idx1 + step < scale1.size()) idx1 += step; }
+          // NCT stepwise: ±1 step.
+          int step = 1;
+          if (asc1) {
+            if (idx1 + step < scale1.size()) idx1 += step;
+            else { asc1 = false; if (idx1 >= 1) idx1 -= step; }
+          } else {
+            if (idx1 >= 1) idx1 -= step;
+            else { asc1 = true; if (idx1 + step < scale1.size()) idx1 += step; }
+          }
         }
       }
       tick += dur;
@@ -468,7 +567,10 @@ ToccataResult generateConcertatoToccata(const ToccataConfig& config) {
     auto voice_range = [](uint8_t v) -> std::pair<uint8_t, uint8_t> {
       return {getToccataLowPitch(v), getToccataHighPitch(v)};
     };
-    finalizeFormNotes(all_notes, num_voices, voice_range, /*max_consecutive=*/2);
+    ScaleType conc_scale = config.key.is_minor ? ScaleType::HarmonicMinor
+                                                : ScaleType::Major;
+    finalizeFormNotes(all_notes, num_voices, voice_range, config.key.tonic,
+                      conc_scale, /*max_consecutive=*/2);
   }
 
   // Build tracks.

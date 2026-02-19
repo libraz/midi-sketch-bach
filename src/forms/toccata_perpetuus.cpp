@@ -47,7 +47,7 @@ HarmonicTimeline buildPerpetuusHarmonicPlan(
     timeline.addEvent(e);
   };
 
-  // Ascent: i -> iv -> V -> i -> VI -> iv (1 chord per 2 bars, slow)
+  // Ascent: i -> III -> iv -> V -> VI -> i (mediant color in middle)
   if (sections.size() >= 1) {
     Tick s = sections[0].start;
     Tick dur = sections[0].end - s;
@@ -57,38 +57,43 @@ HarmonicTimeline buildPerpetuusHarmonicPlan(
     addChord(s, s + seg,
              ChordDegree::I, minor ? ChordQuality::Minor : ChordQuality::Major, 0);
     addChord(s + seg, s + seg * 2,
-             ChordDegree::IV, minor ? ChordQuality::Minor : ChordQuality::Major, 5);
+             ChordDegree::iii, minor ? ChordQuality::Major : ChordQuality::Minor,
+             minor ? 3 : 4);  // III in minor = relative major
     addChord(s + seg * 2, s + seg * 3,
-             ChordDegree::V, ChordQuality::Major, 7);
+             ChordDegree::IV, minor ? ChordQuality::Minor : ChordQuality::Major, 5);
     addChord(s + seg * 3, s + seg * 4,
-             ChordDegree::I, minor ? ChordQuality::Minor : ChordQuality::Major, 0);
+             ChordDegree::V, ChordQuality::Major, 7);
     addChord(s + seg * 4, s + seg * 5,
              ChordDegree::vi, minor ? ChordQuality::Major : ChordQuality::Minor,
-             minor ? 8 : 9);
+             minor ? 8 : 9);  // VI in minor = deceptive color
     addChord(s + seg * 5, sections[0].end,
-             ChordDegree::IV, minor ? ChordQuality::Minor : ChordQuality::Major, 5);
+             ChordDegree::I, minor ? ChordQuality::Minor : ChordQuality::Major, 0);
   }
 
-  // Plateau: i -> V/iv -> iv -> V/V -> V -> viio7 -> i (1 chord per bar)
+  // Plateau: i -> VI -> iv -> III -> V/V -> V -> viio7 -> i (mediant enrichment)
   if (sections.size() >= 2) {
     Tick s = sections[1].start;
     Tick dur = sections[1].end - s;
-    Tick seg = dur / 7;
+    Tick seg = dur / 8;
     if (seg == 0) seg = dur;
 
     addChord(s, s + seg,
              ChordDegree::I, minor ? ChordQuality::Minor : ChordQuality::Major, 0);
     addChord(s + seg, s + seg * 2,
-             ChordDegree::V_of_IV, ChordQuality::Major, 0);
+             ChordDegree::vi, minor ? ChordQuality::Major : ChordQuality::Minor,
+             minor ? 8 : 9);  // VI in minor = deceptive relation
     addChord(s + seg * 2, s + seg * 3,
              ChordDegree::IV, minor ? ChordQuality::Minor : ChordQuality::Major, 5);
     addChord(s + seg * 3, s + seg * 4,
-             ChordDegree::V_of_V, ChordQuality::Major, 2);
+             ChordDegree::iii, minor ? ChordQuality::Major : ChordQuality::Minor,
+             minor ? 3 : 4);  // III in minor = relative major
     addChord(s + seg * 4, s + seg * 5,
-             ChordDegree::V, ChordQuality::Major, 7);
+             ChordDegree::V_of_V, ChordQuality::Major, 2);
     addChord(s + seg * 5, s + seg * 6,
+             ChordDegree::V, ChordQuality::Major, 7);
+    addChord(s + seg * 6, s + seg * 7,
              ChordDegree::viiDim, ChordQuality::Diminished7, 11);
-    addChord(s + seg * 6, sections[1].end,
+    addChord(s + seg * 7, sections[1].end,
              ChordDegree::I, minor ? ChordQuality::Minor : ChordQuality::Major, 0);
   }
 
@@ -118,7 +123,8 @@ HarmonicTimeline buildPerpetuusHarmonicPlan(
 
 /// @brief Generate continuous 16th-note passage targeting harmonic tones.
 /// No rests. Strong beats (1, 3) target nearest chord tone; weak beats use
-/// stepwise motion with occasional skips.
+/// arpeggio-driven motion: 60% directional chord tone, 25% skip (3rd),
+/// 15% NCT stepwise (passing/neighbor).
 std::vector<NoteEvent> generateMotoPerpetuo(
     const HarmonicTimeline& timeline,
     const KeySignature& key_sig,
@@ -138,7 +144,7 @@ std::vector<NoteEvent> generateMotoPerpetuo(
 
   // Constrain effective range to ~2 octaves around starting position.
   // This prevents the moto perpetuo from traversing the full 5-octave range.
-  constexpr int kMaxRangeFromCenter = 14;  // ~1 octave + major 2nd each side
+  constexpr int kMaxRangeFromCenter = 19;  // ~1.5 octave each side for Brechung range.
 
   Tick tick = start_tick;
   while (tick < end_tick) {
@@ -177,21 +183,60 @@ std::vector<NoteEvent> generateMotoPerpetuo(
         }
       }
     } else {
-      // Stepwise: ±1 scale step, 15% skip.
-      int step = rng::rollProbability(rng, 0.15f) ? 2 : 1;
-      if (ascending) {
-        if (idx + step < scale.size()) {
-          idx += step;
+      // Weak beat: arpeggio-driven with NCT stepwise.
+      // 60% directional chord tone, 25% skip (3rd), 15% NCT stepwise.
+      float roll = rng::rollFloat(rng, 0.0f, 1.0f);
+      if (roll < 0.60f) {
+        // Directional chord-tone target: find nearest chord tone in current direction.
+        const HarmonicEvent& evt = timeline.getAt(tick);
+        auto chord_tones = collectChordTonesInRange(evt.chord, low, high);
+        uint8_t current = scale[idx];
+        uint8_t best = current;
+        int best_dist = 127;
+        for (auto ctn : chord_tones) {
+          int dist = static_cast<int>(ctn) - static_cast<int>(current);
+          bool correct_dir = ascending ? (dist > 0) : (dist < 0);
+          int abs_dist = std::abs(dist);
+          if (correct_dir && abs_dist >= 2 && abs_dist < best_dist) {
+            best = ctn;
+            best_dist = abs_dist;
+          }
+        }
+        if (best != current) {
+          // Find the nearest scale index for this pitch.
+          for (size_t sci = 0; sci < scale.size(); ++sci) {
+            if (scale[sci] >= best) { idx = sci; break; }
+          }
         } else {
-          ascending = false;
+          // Fallback: skip by 2-3 scale steps in current direction.
+          int step = rng::rollRange(rng, 2, 3);
+          if (ascending) {
+            if (idx + step < scale.size()) idx += step;
+            else { ascending = false; if (idx >= static_cast<size_t>(step)) idx -= step; }
+          } else {
+            if (idx >= static_cast<size_t>(step)) idx -= step;
+            else { ascending = true; if (idx + step < scale.size()) idx += step; }
+          }
+        }
+      } else if (roll < 0.85f) {
+        // Skip: 2-3 scale steps (3rd interval).
+        int step = rng::rollRange(rng, 2, 3);
+        if (ascending) {
+          if (idx + step < scale.size()) idx += step;
+          else { ascending = false; if (idx >= static_cast<size_t>(step)) idx -= step; }
+        } else {
           if (idx >= static_cast<size_t>(step)) idx -= step;
+          else { ascending = true; if (idx + step < scale.size()) idx += step; }
         }
       } else {
-        if (idx >= static_cast<size_t>(step)) {
-          idx -= step;
-        } else {
-          ascending = true;
+        // NCT stepwise: ±1 step (passing tone / neighbor tone role).
+        int step = 1;
+        if (ascending) {
           if (idx + step < scale.size()) idx += step;
+          else { ascending = false; if (idx >= 1) idx -= step; }
+        } else {
+          if (idx >= 1) idx -= step;
+          else { ascending = true; if (idx + step < scale.size()) idx += step; }
         }
       }
     }
@@ -376,7 +421,10 @@ ToccataResult generatePerpetuusToccata(const ToccataConfig& config) {
     auto voice_range = [](uint8_t v) -> std::pair<uint8_t, uint8_t> {
       return {getToccataLowPitch(v), getToccataHighPitch(v)};
     };
-    finalizeFormNotes(all_notes, num_voices, voice_range, /*max_consecutive=*/2);
+    ScaleType perp_scale = config.key.is_minor ? ScaleType::HarmonicMinor
+                                                : ScaleType::Major;
+    finalizeFormNotes(all_notes, num_voices, voice_range, config.key.tonic,
+                      perp_scale, /*max_consecutive=*/2);
   }
 
   // Build tracks.

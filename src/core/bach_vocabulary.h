@@ -86,28 +86,6 @@ struct RhythmCell {
 };
 
 // ---------------------------------------------------------------------------
-// Contour templates
-// ---------------------------------------------------------------------------
-
-/// @brief Directional step in a contour template.
-enum class ContourStep : int8_t {
-  Down = -1,  ///< Pitch descends.
-  Same = 0,   ///< Pitch repeats.
-  Up = 1      ///< Pitch ascends.
-};
-
-/// @brief A named pitch contour shape abstracted from specific intervals.
-///
-/// Contour templates capture the directional "shape" of a melodic line
-/// without specifying exact intervals. They are combined with interval
-/// profiles to generate concrete pitch sequences.
-struct ContourTemplate {
-  const char* name;              ///< Human-readable identifier (e.g., "arch").
-  const ContourStep* steps;      ///< Directional steps. Length = note_count - 1.
-  uint8_t note_count;            ///< Number of notes in the contour.
-};
-
-// ---------------------------------------------------------------------------
 // Voice interval profiles
 // ---------------------------------------------------------------------------
 
@@ -371,6 +349,50 @@ inline constexpr MelodicFigure kTurnUpNbr = {
     5, "BWV537_fantasia:v1:b12, BWV531_prelude:v1:b7"};
 
 // ---------------------------------------------------------------------------
+// Toccata-specific Brechung figures (NOT in kCommonFigures)
+// ---------------------------------------------------------------------------
+
+// 29. Ascending Brechung: leap+step+leap+step (up-down-up-down arpeggio)
+inline constexpr DegreeInterval kBrechungAsc_dg[] = {
+    {3, 0}, {-1, 0}, {2, 0}, {-1, 0}};
+inline constexpr float kBrechungAsc_rhythm[] = {0.25f, 0.25f, 0.25f, 0.25f, 0.0f};
+inline constexpr float kBrechungAsc_onset[] = {0.0f, 0.25f, 0.5f, 0.75f, 1.0f};
+inline constexpr MelodicFigure kBrechungAsc = {
+    "brechung_asc", IntervalMode::Degree, true,
+    nullptr, kBrechungAsc_dg, kBrechungAsc_rhythm, kBrechungAsc_onset,
+    5, "BWV538:manual:toccata"};
+
+// 30. Wide Brechung descending: 4th-step-5th-step
+inline constexpr DegreeInterval kBrechungWideDesc_dg[] = {
+    {-4, 0}, {1, 0}, {-5, 0}, {2, 0}};
+inline constexpr float kBrechungWideDesc_rhythm[] = {0.25f, 0.25f, 0.25f, 0.25f, 0.0f};
+inline constexpr float kBrechungWideDesc_onset[] = {0.0f, 0.25f, 0.5f, 0.75f, 1.0f};
+inline constexpr MelodicFigure kBrechungWideDesc = {
+    "brechung_wide_desc", IntervalMode::Degree, true,
+    nullptr, kBrechungWideDesc_dg, kBrechungWideDesc_rhythm, kBrechungWideDesc_onset,
+    5, "BWV540:manual:toccata"};
+
+// 31. Arpeggio sweep ascending: 3rd+3rd+step
+inline constexpr DegreeInterval kArpSweepAsc_dg[] = {
+    {2, 0}, {2, 0}, {1, 0}};
+inline constexpr float kArpSweepAsc_rhythm[] = {0.33f, 0.33f, 0.33f, 0.01f};
+inline constexpr float kArpSweepAsc_onset[] = {0.0f, 0.33f, 0.66f, 1.0f};
+inline constexpr MelodicFigure kArpSweepAsc = {
+    "arp_sweep_asc", IntervalMode::Degree, true,
+    nullptr, kArpSweepAsc_dg, kArpSweepAsc_rhythm, kArpSweepAsc_onset,
+    4, "BWV538:manual:toccata"};
+
+// 32. Arpeggio sweep descending: -3rd-3rd-step
+inline constexpr DegreeInterval kArpSweepDesc_dg[] = {
+    {-2, 0}, {-2, 0}, {-1, 0}};
+inline constexpr float kArpSweepDesc_rhythm[] = {0.33f, 0.33f, 0.33f, 0.01f};
+inline constexpr float kArpSweepDesc_onset[] = {0.0f, 0.33f, 0.66f, 1.0f};
+inline constexpr MelodicFigure kArpSweepDesc = {
+    "arp_sweep_desc", IntervalMode::Degree, true,
+    nullptr, kArpSweepDesc_dg, kArpSweepDesc_rhythm, kArpSweepDesc_onset,
+    4, "BWV540:manual:toccata"};
+
+// ---------------------------------------------------------------------------
 // Aggregate figure tables
 // ---------------------------------------------------------------------------
 
@@ -483,42 +505,6 @@ inline constexpr int kVoiceProfileCount = 5;
 
 inline constexpr BassHarmonicConstraint kOrganPedalConstraint = {
     0.65f, 0.85f, 2, "BWV578:pedal"};
-
-// ---------------------------------------------------------------------------
-// Contour templates — phrase-level directional shapes
-// ---------------------------------------------------------------------------
-// note_count = number of notes = len(steps) + 1.
-// Callers map to PhraseContour at the call site (bach_vocabulary.h does not
-// depend on melodic_state.h):
-//   kArchContour    -> PhraseContour{Arch,    0.4, 0.25}
-//   kDescentContour -> PhraseContour{Descent, 0.4, 0.20}
-//   kWaveContour    -> PhraseContour{Wave,    0.4, 0.25}
-
-// Arch contour: rise to peak then descend (most common phrase shape).
-// 8 steps = ~8 beats or 2 bars at quarter-note level.
-inline constexpr ContourStep kArchContourSteps[] = {
-    ContourStep::Up, ContourStep::Up, ContourStep::Up, ContourStep::Same,
-    ContourStep::Down, ContourStep::Down, ContourStep::Down, ContourStep::Down};
-inline constexpr ContourTemplate kArchContour = {"arch", kArchContourSteps, 9};
-
-// Descent contour: sustained downward motion (cadential phrases).
-inline constexpr ContourStep kDescentContourSteps[] = {
-    ContourStep::Same, ContourStep::Down, ContourStep::Down, ContourStep::Down,
-    ContourStep::Down, ContourStep::Down, ContourStep::Down, ContourStep::Down};
-inline constexpr ContourTemplate kDescentContour = {"descent", kDescentContourSteps, 9};
-
-// Wave contour: two small arches (2-bar sub-arches x 2).
-// Pattern: Up,Up,Down,Down,Up,Up,Down,Down — beat-level evaluation.
-inline constexpr ContourStep kWaveContourSteps[] = {
-    ContourStep::Up, ContourStep::Up, ContourStep::Down, ContourStep::Down,
-    ContourStep::Up, ContourStep::Up, ContourStep::Down, ContourStep::Down};
-inline constexpr ContourTemplate kWaveContour = {"wave", kWaveContourSteps, 9};
-
-// Aggregate contour table.
-inline constexpr const ContourTemplate* kContourTemplates[] = {
-    &kArchContour, &kDescentContour, &kWaveContour,
-};
-inline constexpr int kContourTemplateCount = 3;
 
 }  // namespace bach
 

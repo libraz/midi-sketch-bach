@@ -23,6 +23,7 @@ class CollisionResolver;
 class HarmonicTimeline;
 class MotifPool;
 struct SectionAccumulator;
+struct ConstraintState;
 
 /// @brief Episode material derived from subject fragments.
 ///
@@ -99,13 +100,19 @@ Episode generateEpisode(const Subject& subject, Tick start_tick, Tick duration_t
 /// @param cp_resolver Collision resolver for pitch adjustment.
 /// @param timeline Harmonic timeline for chord-tone context.
 /// @param pedal_pitch MIDI pitch of the active pedal point (0 = none).
+/// @param prev_exit_state Previous episode's exit ConstraintState for chaining
+///        gravity/accumulator data across consecutive episodes (nullable).
+/// @param exit_state_out If non-null, receives the episode's exit ConstraintState
+///        for forwarding to the next episode or pipeline accumulator.
 /// @return Generated Episode with validated notes.
 Episode generateEpisode(const Subject& subject, Tick start_tick, Tick duration_ticks,
                         Key start_key, Key target_key, uint8_t num_voices, uint32_t seed,
                         int episode_index, float energy_level,
                         CounterpointState& cp_state, IRuleEvaluator& cp_rules,
                         CollisionResolver& cp_resolver, const HarmonicTimeline& timeline,
-                        uint8_t pedal_pitch = 0);
+                        uint8_t pedal_pitch = 0,
+                        const ConstraintState* prev_exit_state = nullptr,
+                        ConstraintState* exit_state_out = nullptr);
 
 /// @brief Generate a Fortspinnung-style episode using motif pool fragments.
 ///
@@ -143,6 +150,11 @@ Episode generateFortspinnungEpisode(const Subject& subject, const MotifPool& poo
 /// @param cp_resolver Collision resolver for pitch adjustments.
 /// @param timeline Harmonic timeline for chord-tone snapping.
 /// @param pedal_pitch MIDI pitch of the active pedal point (0 = none).
+/// @param accum Pipeline-level section accumulator (nullable).
+/// @param prev_exit_state Previous episode's exit ConstraintState for chaining
+///        gravity/accumulator data across consecutive episodes (nullable).
+/// @param exit_state_out If non-null, receives the episode's exit ConstraintState
+///        for forwarding to the next episode or pipeline accumulator.
 Episode generateFortspinnungEpisode(const Subject& subject, const MotifPool& pool,
                                     Tick start_tick, Tick duration_ticks,
                                     Key start_key, Key target_key,
@@ -153,7 +165,9 @@ Episode generateFortspinnungEpisode(const Subject& subject, const MotifPool& poo
                                     CollisionResolver& cp_resolver,
                                     const HarmonicTimeline& timeline,
                                     uint8_t pedal_pitch = 0,
-                                    const SectionAccumulator* accum = nullptr);
+                                    const SectionAccumulator* accum = nullptr,
+                                    const ConstraintState* prev_exit_state = nullptr,
+                                    ConstraintState* exit_state_out = nullptr);
 
 /// @brief Extract a motif (fragment) from the beginning of the subject.
 ///

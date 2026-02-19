@@ -1616,6 +1616,7 @@ TEST(FugueGeneratorTest, EpisodeDensity_ThematicNotesPreserved) {
   // Fugue must have subject and answer entries.
   EXPECT_GT(subject_count, 0) << "No subject notes found";
   EXPECT_GT(answer_count, 0) << "No answer notes found";
+  EXPECT_GT(cs_count, 0) << "Expected countersubject notes in 4-voice fugue";
 }
 
 TEST(FugueGeneratorTest, EpisodeDensity_TwoVoice_NoReduction) {

@@ -87,12 +87,20 @@ class TestVoiceSpacingPedal(unittest.TestCase):
         result = VoiceSpacing().check(_score([tenor, pedal]))
         self.assertTrue(result.passed)
 
-    def test_pedal_extreme_spacing_flagged(self):
-        """25 semitones between manual and pedal should be flagged (> 24 threshold)."""
+    def test_pedal_moderate_spacing_ok(self):
+        """25 semitones between manual and pedal should pass (< 36 threshold)."""
         tenor = _track("tenor", [_n(72, 0)])   # C5
         pedal_note = Note(pitch=47, velocity=80, start_tick=0, duration=480, voice="pedal")
         pedal = Track(name="pedal", channel=3, notes=[pedal_note])  # B2, gap=25
         result = VoiceSpacing().check(_score([tenor, pedal]))
+        self.assertTrue(result.passed)
+
+    def test_pedal_extreme_spacing_flagged(self):
+        """37 semitones between manual and pedal should be flagged (> 36 threshold)."""
+        soprano = _track("soprano", [_n(84, 0)])  # C6
+        pedal_note = Note(pitch=47, velocity=80, start_tick=0, duration=480, voice="pedal")
+        pedal = Track(name="pedal", channel=3, notes=[pedal_note])  # B2, gap=37
+        result = VoiceSpacing().check(_score([soprano, pedal]))
         self.assertFalse(result.passed)
 
     def test_non_pedal_still_strict(self):

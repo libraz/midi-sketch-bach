@@ -70,8 +70,8 @@ class VoiceSpacing:
 
     Default threshold is 12 semitones (one octave) between manual voices.
     When one voice is a pedal voice (organ pedal), the threshold is relaxed
-    to 24 semitones (two octaves) because large pedal-manual gaps are
-    idiomatic in Bach's organ music.
+    to 36 semitones (three octaves) because large pedal-manual gaps are
+    idiomatic in Bach's organ music (pedal range 24-50, manual up to 96).
 
     Scans every beat position and checks sounding pitches (including sustained
     notes), matching the sustained-note-aware approach used by C++ analysis.
@@ -84,7 +84,7 @@ class VoiceSpacing:
         "toccata_and_fugue", "passacaglia", "fantasia_and_fugue",
     }
 
-    def __init__(self, max_semitones: int = 12, pedal_max_semitones: int = 24):
+    def __init__(self, max_semitones: int = 12, pedal_max_semitones: int = 36):
         self.max_semitones = max_semitones
         self.pedal_max_semitones = pedal_max_semitones
 
@@ -96,6 +96,9 @@ class VoiceSpacing:
     def configure(self, profile: FormProfile) -> None:
         if profile.voice_spacing_max != 12:
             self.max_semitones = profile.voice_spacing_max
+        pedal_override = getattr(profile, "voice_spacing_pedal_max", None)
+        if pedal_override is not None:
+            self.pedal_max_semitones = pedal_override
 
     def _is_pedal(self, name: str, track_list: list, score: Score) -> bool:
         """Check if a voice is a pedal voice by name, channel, or position.

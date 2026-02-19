@@ -159,14 +159,14 @@ TEST(ConstraintStateTest, SoftViolationRatio) {
   cs.total_note_count = 100;
   cs.soft_violation_count = 7;
   EXPECT_NEAR(cs.soft_violation_ratio(), 0.07f, 1e-6f);
-  EXPECT_FALSE(cs.is_dead());  // 7% is within tolerance.
+  EXPECT_FALSE(cs.is_dead(0));  // 7% is within tolerance.
 }
 
 TEST(ConstraintStateTest, IsDeadOnExcessiveSoftViolations) {
   ConstraintState cs;
   cs.total_note_count = 100;
   cs.soft_violation_count = 20;  // 20% > 15% threshold
-  EXPECT_TRUE(cs.is_dead());
+  EXPECT_TRUE(cs.is_dead(0));
 }
 
 // ---------------------------------------------------------------------------
@@ -308,39 +308,6 @@ TEST(InvariantSetTest, CrossingPolicyAllowInEstablish) {
 }
 
 // ---------------------------------------------------------------------------
-// P2.g2: VerticalSnapshot construction
-// ---------------------------------------------------------------------------
-
-TEST(VerticalSnapshotTest, FromCounterpointState) {
-  CounterpointState state;
-  state.registerVoice(0, 48, 84);
-  state.registerVoice(1, 36, 72);
-
-  state.addNote(0, makeNote(0, 480, 72));  // C5
-  state.addNote(1, makeNote(0, 480, 48));  // C3
-
-  auto snap = VerticalSnapshot::fromState(state, 0);
-  EXPECT_EQ(snap.num_voices, 2);
-  EXPECT_EQ(snap.pitches[0], 72);
-  EXPECT_EQ(snap.pitches[1], 48);
-}
-
-TEST(VerticalSnapshotTest, SilentVoiceIsZero) {
-  CounterpointState state;
-  state.registerVoice(0, 48, 84);
-  state.registerVoice(1, 36, 72);
-
-  state.addNote(0, makeNote(0, 480, 72));
-  // Voice 1 has no note at tick 0.
-
-  // But we need to check at a tick where voice 1 has no note.
-  auto snap = VerticalSnapshot::fromState(state, 960);
-  EXPECT_EQ(snap.num_voices, 2);
-  EXPECT_EQ(snap.pitches[0], 0);  // No note at tick 960
-  EXPECT_EQ(snap.pitches[1], 0);
-}
-
-// ---------------------------------------------------------------------------
 // P2.g2: FeasibilityEstimator basic test
 // ---------------------------------------------------------------------------
 
@@ -471,6 +438,94 @@ TEST(ConstraintStateTest, AdvanceZeroDurationSkipsRecord) {
   state.advance(0, 60, 0);
   EXPECT_EQ(state.accumulator.total_rhythm, 0);
   EXPECT_EQ(state.accumulator.total_harmony, 0);
+}
+
+// ---------------------------------------------------------------------------
+// Deadlock detection: addRecoveryObligation wiring + is_dead(tick)
+// ---------------------------------------------------------------------------
+
+TEST(ConstraintStateTest, AddRecoveryObligationIncrementsCountAndAddsObligation) {
+  ConstraintState cs;
+  EXPECT_EQ(cs.soft_violation_count, 0);
+  EXPECT_TRUE(cs.active_obligations.empty());
+
+  cs.addRecoveryObligation(ObligationType::LeapResolve, 0, kTicksPerBar * 2, 0);
+  EXPECT_EQ(cs.soft_violation_count, 1);
+  EXPECT_EQ(cs.active_obligations.size(), 1u);
+  EXPECT_EQ(cs.active_obligations[0].type, ObligationType::LeapResolve);
+  EXPECT_EQ(cs.active_obligations[0].strength, ObligationStrength::Soft);
+  EXPECT_EQ(cs.active_obligations[0].origin, static_cast<Tick>(0));
+  EXPECT_EQ(cs.active_obligations[0].deadline, kTicksPerBar * 2);
+  EXPECT_EQ(cs.active_obligations[0].voice_mask, 1 << 0);
+
+  // Adding a second recovery obligation for a different voice.
+  cs.addRecoveryObligation(ObligationType::LeapResolve, 480, kTicksPerBar * 3, 1);
+  EXPECT_EQ(cs.soft_violation_count, 2);
+  EXPECT_EQ(cs.active_obligations.size(), 2u);
+  EXPECT_EQ(cs.active_obligations[1].voice_mask, 1 << 1);
+}
+
+TEST(ConstraintStateTest, IsDeadReturnsTrueWhenStructuralDeadlinePassed) {
+  ConstraintState cs;
+  cs.total_note_count = 100;
+  cs.soft_violation_count = 0;  // Low ratio, so soft check alone won't trigger.
+
+  // Add a Structural obligation with a deadline at tick 1920 (1 bar).
+  ObligationNode structural_ob;
+  structural_ob.id = 1;
+  structural_ob.type = ObligationType::CadenceStable;
+  structural_ob.strength = ObligationStrength::Structural;
+  structural_ob.origin = 0;
+  structural_ob.start_tick = 0;
+  structural_ob.deadline = kTicksPerBar;
+  cs.active_obligations.push_back(structural_ob);
+
+  // Before the deadline: not dead.
+  EXPECT_FALSE(cs.is_dead(kTicksPerBar - 1));
+  // At the deadline: not dead (deadline is inclusive in is_active_at).
+  EXPECT_FALSE(cs.is_dead(kTicksPerBar));
+  // Past the deadline: dead.
+  EXPECT_TRUE(cs.is_dead(kTicksPerBar + 1));
+}
+
+TEST(ConstraintStateTest, IsDeadReturnsTrueOnHighSoftViolationRatio) {
+  ConstraintState cs;
+  cs.total_note_count = 50;
+  cs.soft_violation_count = 10;  // 20% > 15% threshold.
+  // No structural obligations, but soft ratio is too high.
+  EXPECT_TRUE(cs.is_dead(0));
+}
+
+TEST(ConstraintStateTest, EvaluateSoftViolationCreatesRecoveryObligation) {
+  ConstraintState cs;
+  // Set up invariants with a tight spacing constraint to trigger soft violation.
+  cs.invariants.max_adjacent_spacing = 2;  // Very tight: 2 semitones max spacing.
+
+  VerticalSnapshot snap;
+  snap.num_voices = 2;
+  snap.pitches[0] = 60;  // C4
+  snap.pitches[1] = 72;  // C5 -- 12 semitones apart from voice 0.
+
+  MarkovContext ctx;
+  ctx.prev_pitch = 60;
+
+  EXPECT_EQ(cs.soft_violation_count, 0);
+  EXPECT_TRUE(cs.active_obligations.empty());
+
+  // Evaluate pitch 60 in voice 0: spacing with voice 1 (72) is 12 > 2.
+  // This should trigger a soft violation and create a recovery obligation.
+  float score = cs.evaluate(60, kTicksPerBeat, 0, 0, ctx, snap,
+                            nullptr, nullptr, nullptr, nullptr, 0, 0.0f);
+
+  // Score should be finite (no hard violation), but penalized.
+  EXPECT_GT(score, -std::numeric_limits<float>::infinity());
+
+  // Recovery obligation should have been created.
+  EXPECT_EQ(cs.soft_violation_count, 1);
+  EXPECT_EQ(cs.active_obligations.size(), 1u);
+  EXPECT_EQ(cs.active_obligations[0].type, ObligationType::LeapResolve);
+  EXPECT_EQ(cs.active_obligations[0].strength, ObligationStrength::Soft);
+  EXPECT_EQ(cs.active_obligations[0].deadline, kTicksPerBar * 2);
 }
 
 }  // namespace

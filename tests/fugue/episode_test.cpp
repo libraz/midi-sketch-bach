@@ -1279,16 +1279,18 @@ TEST(EpisodeTest, BassDurationVariety) {
       << "At least one seed in 1-20 should produce 3+ distinct bass durations";
 }
 
-TEST(EpisodeTest, BassNoSixteenthNotes) {
+TEST(EpisodeTest, BassMinimumDuration) {
+  // Bass voice (voice 2) may contain sixteenth notes during Sequence phase
+  // (P7.c phase-dependent anchor durations), but never shorter than 16th.
   Subject subject = makeTestSubject();
-  constexpr Tick kSixteenth = kTicksPerBeat / 4;
   for (uint32_t seed = 1; seed <= 10; ++seed) {
     Episode episode = generateEpisode(subject, 0, kTicksPerBar * 4,
                                       Key::C, Key::C, 3, seed, 0, 0.5f);
     for (const auto& note : episode.notes) {
       if (note.voice == 2) {
-        EXPECT_GT(note.duration, kSixteenth)
-            << "Bass voice should not contain sixteenth notes (seed=" << seed << ")";
+        EXPECT_GE(note.duration, duration::kSixteenthNote)
+            << "Bass voice should not have notes shorter than a sixteenth (seed="
+            << seed << ")";
       }
     }
   }

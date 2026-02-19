@@ -442,6 +442,10 @@ PreambleFugueResult mergePreambleWithFugue(
 
 /// @brief Remove duplicate notes and truncate overlapping notes within each track.
 ///
+/// Note: This cleanup includes pitch in the dedup key (unlike finalizeFormNotes
+/// which deduplicates by voice+tick only). Retained as a final safety net for
+/// the generator output pipeline, after articulation and instrument enforcement.
+///
 /// Sorts notes by (start_tick, voice, duration DESC), deduplicates same-tick +
 /// same-voice + same-pitch notes (keeping the longest), and truncates notes
 /// that extend past the next same-voice note's start.

@@ -249,32 +249,40 @@ HarmonicTimeline buildDramaticusHarmonicPlan(
   addChord(phases[1].start, phases[1].end,
            ChordDegree::I, minor ? ChordQuality::Minor : ChordQuality::Major, 0, 0.5f);
 
-  // C: RecitExpansion -- i -> viio7 -> V -> VI (high chord_tone_bias for viio7)
+  // C: RecitExpansion -- i -> III -> viio7 -> V -> VI (mediant before diminished)
   {
     Tick seg_start = phases[2].start, seg_end = phases[2].end;
     Tick dur = seg_end - seg_start;
-    Tick t1 = seg_start + dur * 25 / 100;
-    Tick t2 = seg_start + dur * 50 / 100;
-    Tick t3 = seg_start + dur * 75 / 100;
+    Tick t1 = seg_start + dur * 20 / 100;
+    Tick t2 = seg_start + dur * 40 / 100;
+    Tick t3 = seg_start + dur * 60 / 100;
+    Tick t4 = seg_start + dur * 80 / 100;
     addChord(seg_start, t1, ChordDegree::I,
              minor ? ChordQuality::Minor : ChordQuality::Major, 0);
-    addChord(t1, t2, ChordDegree::viiDim, ChordQuality::Diminished7, 11, 1.0f, 0.9f);
-    addChord(t2, t3, ChordDegree::V, ChordQuality::Major, 7);
-    addChord(t3, seg_end, ChordDegree::vi,
+    addChord(t1, t2, ChordDegree::iii,
+             minor ? ChordQuality::Major : ChordQuality::Minor,
+             minor ? 3 : 4);  // III in minor = relative major
+    addChord(t2, t3, ChordDegree::viiDim, ChordQuality::Diminished7, 11, 1.0f, 0.9f);
+    addChord(t3, t4, ChordDegree::V, ChordQuality::Major, 7);
+    addChord(t4, seg_end, ChordDegree::vi,
              minor ? ChordQuality::Major : ChordQuality::Minor,
              minor ? 8 : 9);  // VI (deceptive)
   }
 
-  // D: SequenceClimb1 -- iv -> V/V -> V
+  // D: SequenceClimb1 -- iv -> vi -> V/V -> V (vi adds modal color)
   {
     Tick seg_start = phases[3].start, seg_end = phases[3].end;
     Tick dur = seg_end - seg_start;
-    Tick t1 = seg_start + dur / 3;
-    Tick t2 = seg_start + dur * 2 / 3;
+    Tick t1 = seg_start + dur / 4;
+    Tick t2 = seg_start + dur * 2 / 4;
+    Tick t3 = seg_start + dur * 3 / 4;
     addChord(seg_start, t1, ChordDegree::IV,
              minor ? ChordQuality::Minor : ChordQuality::Major, 5);
-    addChord(t1, t2, ChordDegree::V_of_V, ChordQuality::Major, 2);
-    addChord(t2, seg_end, ChordDegree::V, ChordQuality::Major, 7);
+    addChord(t1, t2, ChordDegree::vi,
+             minor ? ChordQuality::Major : ChordQuality::Minor,
+             minor ? 8 : 9);  // vi/VI adds modal color before dominant prep
+    addChord(t2, t3, ChordDegree::V_of_V, ChordQuality::Major, 2);
+    addChord(t3, seg_end, ChordDegree::V, ChordQuality::Major, 7);
   }
 
   // E: HarmonicBreak -- viio7 -> V (high chord_tone_bias)
@@ -285,16 +293,20 @@ HarmonicTimeline buildDramaticusHarmonicPlan(
     addChord(mid, seg_end, ChordDegree::V, ChordQuality::Major, 7);
   }
 
-  // F: SequenceClimb2 -- iv -> V/V -> V7
+  // F: SequenceClimb2 -- III -> iv -> V/V -> V7 (III opens with mediant color)
   {
     Tick seg_start = phases[5].start, seg_end = phases[5].end;
     Tick dur = seg_end - seg_start;
-    Tick t1 = seg_start + dur / 3;
-    Tick t2 = seg_start + dur * 2 / 3;
-    addChord(seg_start, t1, ChordDegree::IV,
+    Tick t1 = seg_start + dur / 4;
+    Tick t2 = seg_start + dur * 2 / 4;
+    Tick t3 = seg_start + dur * 3 / 4;
+    addChord(seg_start, t1, ChordDegree::iii,
+             minor ? ChordQuality::Major : ChordQuality::Minor,
+             minor ? 3 : 4);  // III in minor = relative major
+    addChord(t1, t2, ChordDegree::IV,
              minor ? ChordQuality::Minor : ChordQuality::Major, 5);
-    addChord(t1, t2, ChordDegree::V_of_V, ChordQuality::Major, 2);
-    addChord(t2, seg_end, ChordDegree::V, ChordQuality::Dominant7, 7);
+    addChord(t2, t3, ChordDegree::V_of_V, ChordQuality::Major, 2);
+    addChord(t3, seg_end, ChordDegree::V, ChordQuality::Dominant7, 7);
   }
 
   // G: DomObsession -- V -> viio7/V -> V -> V7 -> V sustained
@@ -811,7 +823,8 @@ std::vector<NoteEvent> generateSequenceClimb(const HarmonicTimeline& timeline,
       if (note_end > motif_end_tick) motif_end_tick = note_end;
     }
 
-    // Voice 1: chord-tone support in quarter/half note pulses.
+    // Voice 1: chord-tone support on downbeats only (dotted-half + rest gap).
+    // Sparse texture: one note per bar at beat 0, creating breathing room.
     {
       const HarmonicEvent& evt = timeline.getAt(tick);
       auto chord_tones = collectChordTonesInRange(evt.chord, low1, high1);
@@ -825,22 +838,28 @@ std::vector<NoteEvent> generateSequenceClimb(const HarmonicTimeline& timeline,
         support_pitch = scale_tones1[findClosestToneIndex(scale_tones1, support_target)];
       }
 
-      Tick pulse_dur = rng::rollProbability(rng, 0.4f) ? kHalfNote : kQuarterNote;
+      constexpr Tick kDottedHalf = kHalfNote + kQuarterNote;  // 1200 ticks
       Tick v1_tick = tick;
       while (v1_tick < motif_end_tick) {
-        Tick dur = std::min(pulse_dur, motif_end_tick - v1_tick);
-        if (dur == 0) break;
-
-        if (v1_tick > tick && positionInBar(v1_tick) == 0) {
-          const HarmonicEvent& bar_evt = timeline.getAt(v1_tick);
-          auto new_ct = collectChordTonesInRange(bar_evt.chord, low1, high1);
-          if (!new_ct.empty()) {
-            support_pitch = new_ct[findClosestToneIndex(new_ct, support_pitch)];
-          }
+        // Only generate on downbeats (beat 0 of each bar).
+        if (beatInBar(v1_tick) != 0) {
+          v1_tick += kQuarterNote;
+          continue;
         }
 
+        // Refresh chord tone at each bar boundary.
+        const HarmonicEvent& bar_evt = timeline.getAt(v1_tick);
+        auto bar_ct = collectChordTonesInRange(bar_evt.chord, low1, high1);
+        if (!bar_ct.empty()) {
+          support_pitch = bar_ct[findClosestToneIndex(bar_ct, support_pitch)];
+        }
+
+        Tick dur = std::min(kDottedHalf, motif_end_tick - v1_tick);
+        if (dur == 0) break;
+
         notes.push_back(makeNote(v1_tick, dur, support_pitch, 1));
-        v1_tick += dur;
+        // Advance past this bar to the next downbeat (rest gap on beat 4).
+        v1_tick += kTicksPerBar;
       }
     }
 
@@ -957,28 +976,21 @@ std::vector<NoteEvent> generateEchoCollapse(const HarmonicTimeline& timeline,
     notes.insert(notes.end(), fig.begin(), fig.end());
   }
 
-  // Sub-section 2 (~30%): sustained chord tones alternating voice 0 and 1.
+  // Sub-section 2 (~30%): sustained chord tones on voice 1 only (sparse echo).
+  // Single-voice texture for the echo collapse -- dying away to near-silence.
   {
     Tick tick = sparse_end;
-    bool use_voice0 = true;
 
     while (tick < sustain_end) {
-      Tick dur = rng::rollProbability(rng, 0.4f) ? kWholeNote : kHalfNote;
+      Tick dur = kWholeNote;  // Whole notes only for maximum sparseness.
       dur = std::min(dur, sustain_end - tick);
       if (dur == 0) break;
 
-      if (use_voice0) {
-        size_t idx = rng::rollRange(rng, 0,
-                                    static_cast<int>(chord_tones_v0.size()) - 1);
-        notes.push_back(makeNote(tick, dur, chord_tones_v0[idx], 0));
-      } else {
-        size_t idx = rng::rollRange(rng, 0,
-                                    static_cast<int>(chord_tones_v1.size()) - 1);
-        notes.push_back(makeNote(tick, dur, chord_tones_v1[idx], 1));
-      }
+      size_t idx = rng::rollRange(rng, 0,
+                                  static_cast<int>(chord_tones_v1.size()) - 1);
+      notes.push_back(makeNote(tick, dur, chord_tones_v1[idx], 1));
 
       tick += dur;
-      use_voice0 = !use_voice0;
     }
   }
 
@@ -1099,7 +1111,8 @@ std::vector<NoteEvent> generateRecitativeExpansion(const HarmonicTimeline& timel
         }
       }
 
-      Tick dur = rng::rollProbability(rng, 0.5f) ? kHalfNote : kWholeNote;
+      // Whole notes only -- sparse chord pad for recitative texture.
+      Tick dur = kWholeNote;
       if (tick + dur > bar_end) dur = bar_end - tick;
       if (dur == 0) break;
 
@@ -1246,29 +1259,26 @@ std::vector<NoteEvent> generateDominantObsession(const HarmonicTimeline& timelin
     notes.insert(notes.end(), fig1.begin(), fig1.end());
   }
 
-  // Sub-phase 4: V7 intensification -- figuration with maximum density.
+  // Sub-phase 4: V7 intensification -- voice 0 only (single-voice density).
+  // Voice 1 drops out in the last 30% of the phase for texture reduction.
   {
     auto fig0 = generateFigured(timeline, key_sig, 6, 0, sp3_end, sp4_end, rng);
-    auto fig1 = generateFigured(timeline, key_sig, 6, 1, sp3_end, sp4_end, rng);
     notes.insert(notes.end(), fig0.begin(), fig0.end());
-    notes.insert(notes.end(), fig1.begin(), fig1.end());
   }
 
-  // Sub-phase 5: V sustained -- held dominant chord tones (tension plateau).
+  // Sub-phase 5: V sustained -- voice 0 held dominant chord tones (tension plateau).
+  // Single voice sustain narrows texture toward the cadence.
   {
     const HarmonicEvent& evt = timeline.getAt(sp4_end);
     auto ct0 = collectChordTonesInRange(evt.chord, low0, high0);
-    auto ct1 = collectChordTonesInRange(evt.chord, low1, high1);
 
     uint8_t sustained0 = !ct0.empty() ? ct0.back() : high0;
-    uint8_t sustained1 = !ct1.empty() ? ct1[ct1.size() / 2] : low1;
 
     Tick tick = sp4_end;
     while (tick < end_tick) {
       Tick dur = std::min(kHalfNote, end_tick - tick);
       if (dur == 0) break;
       notes.push_back(makeNote(tick, dur, sustained0, 0));
-      notes.push_back(makeNote(tick, dur, sustained1, 1));
       tick += dur;
     }
   }
@@ -1645,7 +1655,10 @@ ToccataResult generateDramaticusToccata(const ToccataConfig& config) {
     auto voice_range = [](uint8_t v) -> std::pair<uint8_t, uint8_t> {
       return {getToccataLowPitch(v), getToccataHighPitch(v)};
     };
-    finalizeFormNotes(all_notes, num_voices, voice_range, /*max_consecutive=*/2);
+    ScaleType toc_scale = config.key.is_minor ? ScaleType::HarmonicMinor
+                                              : ScaleType::Major;
+    finalizeFormNotes(all_notes, num_voices, voice_range, config.key.tonic,
+                      toc_scale, /*max_consecutive=*/2);
   }
 
   // --- 10. Tracks ---

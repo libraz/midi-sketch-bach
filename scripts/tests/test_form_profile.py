@@ -100,6 +100,10 @@ class TestFormProfileRegistry(unittest.TestCase):
         profile = get_form_profile("toccata_and_fugue")
         self.assertIn("free_counterpoint", profile.relaxed_sources)
         self.assertIn("post_process", profile.relaxed_sources)
+        self.assertIn("toccata_gesture", profile.relaxed_sources)
+        self.assertIn("toccata_figure", profile.relaxed_sources)
+        self.assertIn("episode_material", profile.relaxed_sources)
+        self.assertEqual(len(profile.relaxed_sources), 5)
 
     def test_fugue_no_relaxed_sources(self):
         profile = get_form_profile("fugue")
@@ -210,6 +214,11 @@ class TestFormProfileThresholdIsolation(unittest.TestCase):
         profile = get_form_profile("prelude_and_fugue")
         self.assertEqual(profile.leap_resolution_threshold, 7)
 
+    def test_toccata_and_fugue_threshold_7(self):
+        """Toccata_and_fugue should have threshold=7 (same as prelude_and_fugue)."""
+        profile = get_form_profile("toccata_and_fugue")
+        self.assertEqual(profile.leap_resolution_threshold, 7)
+
     def test_chorale_prelude_threshold_default(self):
         """Chorale prelude should have default threshold=5."""
         profile = get_form_profile("chorale_prelude")
@@ -224,6 +233,12 @@ class TestFormProfileThresholdIsolation(unittest.TestCase):
         """Default/unknown profile should have threshold=5."""
         profile = get_form_profile(None)
         self.assertEqual(profile.leap_resolution_threshold, 5)
+
+
+    def test_toccata_voice_spacing_pedal_max_48(self):
+        """Toccata pedal-manual spacing threshold should be 48 (4 octaves)."""
+        profile = get_form_profile("toccata_and_fugue")
+        self.assertEqual(profile.voice_spacing_pedal_max, 48)
 
 
 if __name__ == "__main__":

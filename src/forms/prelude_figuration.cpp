@@ -31,7 +31,6 @@ uint8_t resolveScaleOffset(uint8_t chord_pitch, int8_t offset,
   if (offset == 0) return chord_pitch;
 
   ScaleType scale = event.is_minor ? ScaleType::HarmonicMinor : ScaleType::Major;
-  int target = static_cast<int>(chord_pitch) + offset;
 
   // Find nearest scale tone in the offset direction.
   for (int step = 1; step <= 3; ++step) {

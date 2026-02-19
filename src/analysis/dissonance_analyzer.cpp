@@ -97,12 +97,6 @@ Tick totalEndTick(const std::vector<NoteEvent>& notes) {
   return max_end;
 }
 
-/// @brief Check if a beat is "strong" (beats 0 and 2 in 4/4 time).
-bool isStrongBeat(Tick tick) {
-  uint8_t beat = beatInBar(tick);
-  return beat == 0 || beat == 2;
-}
-
 /// @brief Check if a note at tick is a stepwise passing tone.
 ///
 /// A passing tone is approached and left by step (1-2 semitones) in the
@@ -167,7 +161,7 @@ bool isEscapeTone(const std::vector<NoteEvent>& sorted_voice, size_t note_idx) {
 bool isAppoggiatura(const std::vector<NoteEvent>& sorted_voice, size_t note_idx,
                     const HarmonicTimeline& timeline) {
   if (note_idx + 1 >= sorted_voice.size()) return false;
-  if (!isStrongBeat(sorted_voice[note_idx].start_tick)) return false;
+  if (!isStrongBeatInBar(sorted_voice[note_idx].start_tick)) return false;
 
   int curr_pitch = static_cast<int>(sorted_voice[note_idx].pitch);
   int next_pitch = static_cast<int>(sorted_voice[note_idx + 1].pitch);
@@ -332,7 +326,7 @@ std::vector<DissonanceEvent> detectSimultaneousClashes(
         if (quality == IntervalQuality::Dissonance) {
           // Determine severity.
           DissonanceSeverity severity = DissonanceSeverity::Medium;
-          if (isStrongBeat(tick)) {
+          if (isStrongBeatInBar(tick)) {
             severity = DissonanceSeverity::High;
           }
           // Wide register (>= 36 semitones apart) downgrades.
@@ -392,7 +386,7 @@ std::vector<DissonanceEvent> detectNonChordTones(
     if (!isChordTone(note.pitch, event)) {
       DissonanceSeverity severity = DissonanceSeverity::Medium;
 
-      if (isStrongBeat(note.start_tick)) {
+      if (isStrongBeatInBar(note.start_tick)) {
         severity = DissonanceSeverity::High;
       } else {
         severity = DissonanceSeverity::Medium;
@@ -487,7 +481,7 @@ std::vector<DissonanceEvent> detectSustainedOverChordChange(
       if (note.start_tick < boundary_tick && note_end > boundary_tick) {
         if (!isChordTone(note.pitch, new_event)) {
           DissonanceSeverity severity = DissonanceSeverity::Medium;
-          if (isStrongBeat(boundary_tick)) {
+          if (isStrongBeatInBar(boundary_tick)) {
             severity = DissonanceSeverity::High;
           }
 
@@ -558,7 +552,7 @@ std::vector<DissonanceEvent> detectNonDiatonicNotes(
       DissonanceSeverity severity = DissonanceSeverity::Medium;
 
       // Bach chromatic passing/neighbor tones: stepwise + weak beat = Low severity.
-      bool is_weak = !isStrongBeat(note.start_tick);
+      bool is_weak = !isStrongBeatInBar(note.start_tick);
       bool is_ornamental = false;
       if (note.voice < voices.size()) {
         size_t idx = findNoteIndex(voices[note.voice], note.pitch, note.start_tick);
@@ -570,7 +564,7 @@ std::vector<DissonanceEvent> detectNonDiatonicNotes(
 
       if (is_weak && is_ornamental) {
         severity = DissonanceSeverity::Low;
-      } else if (isStrongBeat(note.start_tick)) {
+      } else if (isStrongBeatInBar(note.start_tick)) {
         severity = DissonanceSeverity::High;
       }
 
@@ -615,7 +609,7 @@ std::vector<DissonanceEvent> detectNonDiatonicNotes(
       DissonanceSeverity severity = DissonanceSeverity::Medium;
 
       // Bach chromatic passing/neighbor tones: stepwise + weak beat = Low severity.
-      bool is_weak = !isStrongBeat(note.start_tick);
+      bool is_weak = !isStrongBeatInBar(note.start_tick);
       bool is_ornamental = false;
       if (note.voice < voices.size()) {
         size_t idx = findNoteIndex(voices[note.voice], note.pitch, note.start_tick);
@@ -627,7 +621,7 @@ std::vector<DissonanceEvent> detectNonDiatonicNotes(
 
       if (is_weak && is_ornamental) {
         severity = DissonanceSeverity::Low;
-      } else if (isStrongBeat(note.start_tick)) {
+      } else if (isStrongBeatInBar(note.start_tick)) {
         severity = DissonanceSeverity::High;
       }
 

@@ -115,6 +115,22 @@ constexpr VoiceProfile kCantusFirmus = {
     {0.5f, 2.0f, 1.5f, 3.0f, 1.0f, 0.0f}, 480,  // min=quarter
     0.25f, 0.0f, 0.30f, 0.0f};
 
+/// Toccata upper voice: Brechung-dominant figuration.
+/// BWV538/540: stepwise ~17%, leap ~76%, avg_interval ~4.8.
+/// Guard: consecutive leaps tolerated only within chord-tone arpeggio.
+constexpr VoiceProfile kToccataUpper = {
+    0.18f,  // step_prob (pure toccata value, preserves Brechung character)
+    0.32f,  // skip_prob (3rds and 4ths — Brechung skeleton)
+    0.12f,  // large_leap_prob (6th+ within leaps)
+    false,  // require_stepwise_after_large_leap (Brechung allows continued leaps)
+    4,      // max_consecutive_leaps (chord-tone arpeggio chains)
+    {0.1f, 0.2f, 0.3f, 0.8f, 2.5f, 6.0f}, 120,  // 16th dominant
+    0.08f,  // stepwise_bonus (low — step is only for NCT)
+    0.30f,  // p4p5_bonus (P4/P5 = Brechung skeleton, strong bonus)
+    0.25f,  // continuation_bonus (direction continuity for arpeggio arches)
+    0.05f   // gravity_bias (mild descent tendency)
+};
+
 }  // namespace voice_profiles
 
 /// @brief Get voice profile from voice ID and voice count.
@@ -497,6 +513,29 @@ inline float scoreCandidatePitch(const MelodicState& state,
     score += dir_f * contour_dir * state.contour.strength * 0.15f * metric_mult;
   }
 
+  // --- Brechung direction continuity bonus ---
+  // 3+ same-direction leaps (ascending/descending arpeggio arch) get extra reward.
+  // Only effective with high max_consecutive_leaps profiles (e.g., kToccataUpper).
+  if (state.consecutive_leap_count >= 2 && abs_interval >= 3
+      && direction == state.last_direction && direction != 0) {
+    score += profile.continuation_bonus * 0.5f;
+  }
+
+  // --- Chord-tone support guard ---
+  // Consecutive leaps (3rd+) without chord-tone landing = "zigzag noise" penalty.
+  // Suppresses aimless leaping; only affects profiles with max_consecutive_leaps > 1.
+  if (state.consecutive_leap_count >= 2 && !is_chord_tone
+      && abs_interval >= 3) {
+    score -= 0.30f;
+  }
+
+  // --- Arpeggio continuation bonus ---
+  // Chord-tone leap following another leap = legitimate Brechung continuation.
+  if (state.consecutive_leap_count >= 1 && is_chord_tone
+      && abs_interval >= 3) {
+    score += 0.15f;
+  }
+
   return score;
 }
 
@@ -572,49 +611,6 @@ inline uint8_t selectBestPitch(const MelodicState& state, uint8_t prev_pitch,
                                std::mt19937& rng) {
   return selectBestPitch(state, prev_pitch, candidates, tick,
                          all_chord_tones, rng, voice_profiles::kSoprano);
-}
-
-// ---------------------------------------------------------------------------
-// Section boundary state management
-// ---------------------------------------------------------------------------
-
-/// @brief Boundary type for section transitions.
-/// Controls how MelodicState is carried across section boundaries.
-enum class BoundaryType : uint8_t {
-  Cadence,      ///< After cadence: reset contour, weaken direction inertia.
-  Development,  ///< Continuing development: preserve contour and direction.
-  Reentry       ///< Subject re-entry: preserve direction, set new arch contour.
-};
-
-/// @brief Carry melodic state across a section boundary.
-/// Preserves direction inertia (capped) while resetting leap tracking.
-/// Contour management depends on boundary type.
-inline MelodicState carryMelodicState(const MelodicState& prev,
-                                       BoundaryType boundary) {
-  MelodicState next;
-  next.last_direction = prev.last_direction;
-  next.direction_run_length = std::min(prev.direction_run_length, 2);
-  next.phrase_progress = 0.0f;  // Always reset for new phrase.
-
-  switch (boundary) {
-    case BoundaryType::Cadence:
-      next.contour = {PhraseContour::Neutral, 0.4f, 0.15f};
-      next.direction_run_length = 0;  // Weaken inertia after cadence.
-      break;
-    case BoundaryType::Development:
-      next.contour = prev.contour;  // Preserve ongoing contour.
-      break;
-    case BoundaryType::Reentry:
-      next.contour = {PhraseContour::Arch, 0.4f, 0.25f};  // Fresh arch.
-      break;
-  }
-
-  // Leap tracking always resets for new phrase.
-  next.last_skip_size = 0;
-  next.last_large_leap = 0;
-  next.consecutive_leap_count = 0;
-  next.prev_was_reversal = false;
-  return next;
 }
 
 }  // namespace bach

@@ -12,7 +12,6 @@ set(BACH_LIB_SOURCES
   core/json_parser.cpp
   core/note_source.cpp
   core/note_creator.cpp
-  core/rhythm_pattern.cpp
   core/figure_match.cpp
   core/markov_tables.cpp
 
@@ -167,9 +166,6 @@ set(BACH_LIB_SOURCES
   forms/goldberg/variations/goldberg_overture.cpp
   forms/goldberg/variations/goldberg_black_pearl.cpp
   forms/goldberg/variations/goldberg_quodlibet.cpp
-
-  # core/ (phrase)
-  core/phrase_structure.cpp
 
   # generator (unified entry point)
   generator.cpp

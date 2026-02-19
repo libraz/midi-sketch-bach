@@ -12,6 +12,7 @@
 #include "core/gm_program.h"
 #include "core/pitch_utils.h"
 #include "harmony/key.h"
+#include "test_helpers.h"
 
 namespace bach {
 namespace {
@@ -31,17 +32,6 @@ FantasiaConfig makeTestConfig(uint32_t seed = 42) {
   config.num_voices = 4;
   config.section_bars = 32;
   return config;
-}
-
-/// @brief Count total notes across all tracks.
-/// @param result The fantasia result to count.
-/// @return Total number of NoteEvents across all tracks.
-size_t totalNoteCount(const FantasiaResult& result) {
-  size_t count = 0;
-  for (const auto& track : result.tracks) {
-    count += track.notes.size();
-  }
-  return count;
 }
 
 // ---------------------------------------------------------------------------
@@ -73,7 +63,7 @@ TEST(FantasiaTest, ReasonableNoteCount) {
   FantasiaResult result = generateFantasia(config);
 
   ASSERT_TRUE(result.success);
-  size_t total = totalNoteCount(result);
+  size_t total = test_helpers::totalNoteCount(result);
   // 32 bars of 4-voice music should produce a substantial number of notes.
   EXPECT_GT(total, 100u) << "Too few notes for a 32-bar fantasia";
 }
@@ -547,7 +537,7 @@ TEST(FantasiaTest, MajorKeyGeneratesSuccessfully) {
   FantasiaResult result = generateFantasia(config);
 
   ASSERT_TRUE(result.success);
-  EXPECT_GT(totalNoteCount(result), 0u);
+  EXPECT_GT(test_helpers::totalNoteCount(result), 0u);
 }
 
 TEST(FantasiaTest, DifferentKeysProduceDifferentOutput) {

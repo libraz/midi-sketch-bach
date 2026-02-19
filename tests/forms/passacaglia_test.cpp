@@ -18,6 +18,7 @@
 #include "core/note_source.h"
 #include "core/pitch_utils.h"
 #include "harmony/key.h"
+#include "test_helpers.h"
 
 namespace bach {
 namespace {
@@ -39,17 +40,6 @@ PassacagliaConfig makeTestConfig(uint32_t seed = 42) {
   config.ground_bass_bars = 8;
   config.append_fugue = false;  // No fugue section for unit tests.
   return config;
-}
-
-/// @brief Count total notes across all tracks.
-/// @param result The passacaglia result to count.
-/// @return Total number of NoteEvents across all tracks.
-size_t totalNoteCount(const PassacagliaResult& result) {
-  size_t count = 0;
-  for (const auto& track : result.tracks) {
-    count += track.notes.size();
-  }
-  return count;
 }
 
 // ---------------------------------------------------------------------------
@@ -89,7 +79,7 @@ TEST(PassacagliaTest, ReasonableNoteCount) {
   PassacagliaResult result = generatePassacaglia(config);
 
   ASSERT_TRUE(result.success);
-  size_t total = totalNoteCount(result);
+  size_t total = test_helpers::totalNoteCount(result);
   // 12 variations x 8 bars x at least 2 notes (ground bass) = 192 minimum.
   // Upper voices add substantially more.
   EXPECT_GT(total, 200u) << "Too few notes for a passacaglia";
@@ -499,7 +489,7 @@ TEST(PassacagliaTest, MajorKeyGeneratesSuccessfully) {
   PassacagliaResult result = generatePassacaglia(config);
 
   ASSERT_TRUE(result.success);
-  EXPECT_GT(totalNoteCount(result), 0u);
+  EXPECT_GT(test_helpers::totalNoteCount(result), 0u);
 }
 
 TEST(PassacagliaTest, MinorKeyGeneratesSuccessfully) {
@@ -508,7 +498,7 @@ TEST(PassacagliaTest, MinorKeyGeneratesSuccessfully) {
   PassacagliaResult result = generatePassacaglia(config);
 
   ASSERT_TRUE(result.success);
-  EXPECT_GT(totalNoteCount(result), 0u);
+  EXPECT_GT(test_helpers::totalNoteCount(result), 0u);
 }
 
 // ---------------------------------------------------------------------------
@@ -708,7 +698,7 @@ TEST(PassacagliaTest, MultiSeedGenerationSucceeds) {
     PassacagliaResult result = generatePassacaglia(config);
 
     EXPECT_TRUE(result.success) << "Failed for seed " << seed;
-    EXPECT_GT(totalNoteCount(result), 0u) << "No notes for seed " << seed;
+    EXPECT_GT(test_helpers::totalNoteCount(result), 0u) << "No notes for seed " << seed;
   }
 }
 

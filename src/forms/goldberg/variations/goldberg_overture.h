@@ -62,14 +62,12 @@ class OvertureGenerator {
   /// @param grid The 32-bar structural grid.
   /// @param key Key signature.
   /// @param time_sig Time signature.
-  /// @param start_tick Tick offset for the start of the Fugato section.
   /// @param rng Random number generator.
   /// @return Vector of NoteEvents for the Fugato section.
   std::vector<NoteEvent> generateFugato(
       const GoldbergStructuralGrid& grid,
       const KeySignature& key,
       const TimeSignature& time_sig,
-      Tick start_tick,
       std::mt19937& rng) const;
 
   /// @brief Generate bass line from the structural grid for the Grave section.

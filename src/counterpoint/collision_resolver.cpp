@@ -38,14 +38,6 @@ static bool isNearCadence(Tick tick, const std::vector<Tick>& cadence_ticks) {
   return false;
 }
 
-/// @brief Check if a tick falls on a strong beat (beats 0 or 2 in 4/4).
-// NOTE: This simple model assumes 4/4 time. Form-specific meters (3/4, 12/8)
-// may need future extension with a time-signature-aware beat model.
-static bool isStrongBeat(Tick tick) {
-  uint8_t beat = beatInBar(tick);
-  return beat == 0 || beat == 2;
-}
-
 /// @brief Determine whether a dissonant interval qualifies as a recognized
 /// suspension type and whether the voice placement is idiomatic.
 ///
@@ -649,7 +641,7 @@ bool CollisionResolver::isSafeToPlace(const CounterpointState& state,
               voices.empty() || voice_id == voices.front() || voice_id == voices.back();
           bool b_outer =
               voices.empty() || other == voices.front() || other == voices.back();
-          bool landing_on_strong = isStrongBeat(tick);
+          bool landing_on_strong = isStrongBeatInBar(tick);
 
           if (a_outer && b_outer && landing_on_strong) {
             // Outer voice pair on strong beat: flag if either voice leaps (>2st).
@@ -792,7 +784,7 @@ PlacementResult CollisionResolver::tryStrategy(
       //
       // Bach's counterpoint uses 3rds and 6ths far more than 5ths and octaves.
       // This bonus/penalty applies to vertical intervals with all sounding voices.
-      bool strong_beat = isStrongBeat(tick);
+      bool strong_beat = isStrongBeatInBar(tick);
       for (VoiceId other_v : state.getActiveVoices()) {
         if (other_v == voice_id) continue;
         const NoteEvent* sounding = state.getNoteAt(other_v, tick);
@@ -955,7 +947,7 @@ PlacementResult CollisionResolver::tryStrategy(
     }
 
     // Harmonic context for chord-tone and diatonic awareness.
-    bool strong_beat = isStrongBeat(tick);
+    bool strong_beat = isStrongBeatInBar(tick);
     const HarmonicEvent* h_event = nullptr;
     if (harmonic_timeline_) {
       h_event = &harmonic_timeline_->getAt(tick);

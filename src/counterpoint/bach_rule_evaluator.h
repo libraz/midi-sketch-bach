@@ -18,8 +18,8 @@ namespace bach {
 ///   evaluator is configured for 3+ voices (6/4 chord context).
 /// - **Hidden perfects**: Allowed when *either* voice approaches by step
 ///   (Fux only allows when the upper voice steps).
-/// - **Temporary voice crossing**: Crossings lasting 1 beat or less that
-///   resolve to proper order are permitted.
+/// - **Temporary voice crossing**: Crossings that resolve to proper order
+///   within 2 beats are permitted (matching Python analyzer _LOOKAHEAD_BEATS=2).
 /// - **Weak-beat dissonance**: In free counterpoint mode, consonances on
 ///   weak beats pass immediately. Dissonances on weak beats are rejected
 ///   by isIntervalConsonant so that the CollisionResolver's NHT check
@@ -88,7 +88,7 @@ class BachRuleEvaluator : public IRuleEvaluator {
   /// @param voice2 Second voice identifier (expected lower pitch).
   /// @param tick Tick position to check.
   /// @return True if a persistent voice crossing is detected. Temporary
-  ///         crossings (resolving within 1 beat) are allowed.
+  ///         crossings (resolving within 2 beats) are allowed.
   bool hasVoiceCrossing(const CounterpointState& state,
                         VoiceId voice1, VoiceId voice2,
                         Tick tick) const override;
@@ -105,12 +105,13 @@ class BachRuleEvaluator : public IRuleEvaluator {
   /// @brief Bach allows closer voice spacing (soft penalty, not rejection).
   bool isStrictSpacing() const override { return false; }
 
-  /// @brief Check if a voice crossing at the given tick resolves by the next beat.
+  /// @brief Check if a voice crossing at the given tick resolves within 2 beats.
   /// @param state Counterpoint state to query.
   /// @param voice1 Higher voice (by convention).
   /// @param voice2 Lower voice (by convention).
   /// @param tick Tick position where crossing was detected.
-  /// @return True if the crossing resolves within 1 beat (temporary).
+  /// @return True if the crossing resolves within 2 beats (temporary).
+  /// @note Matches Python analyzer _LOOKAHEAD_BEATS=2.
   bool isCrossingTemporary(const CounterpointState& state,
                            VoiceId voice1, VoiceId voice2,
                            Tick tick) const;

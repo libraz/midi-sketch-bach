@@ -16,6 +16,7 @@
 #include "core/pitch_utils.h"
 #include "fugue/fugue_config.h"
 #include "harmony/key.h"
+#include "test_helpers.h"
 
 namespace bach {
 namespace {
@@ -33,17 +34,6 @@ ChoralePreludeConfig makeTestConfig(uint32_t seed = 42) {
   config.bpm = 60;
   config.seed = seed;
   return config;
-}
-
-/// @brief Count total notes across all tracks.
-/// @param result The chorale prelude result to count.
-/// @return Total number of NoteEvents across all tracks.
-size_t totalNoteCount(const ChoralePreludeResult& result) {
-  size_t count = 0;
-  for (const auto& track : result.tracks) {
-    count += track.notes.size();
-  }
-  return count;
 }
 
 // ---------------------------------------------------------------------------
@@ -82,7 +72,7 @@ TEST(ChoralePreludeTest, ReasonableNoteCount) {
   ChoralePreludeResult result = generateChoralePrelude(config);
 
   ASSERT_TRUE(result.success);
-  size_t total = totalNoteCount(result);
+  size_t total = test_helpers::totalNoteCount(result);
   // Cantus has 8-16 notes, counterpoint has many more, pedal has moderate.
   EXPECT_GT(total, 30u) << "Too few notes for a chorale prelude";
 }
@@ -562,7 +552,7 @@ TEST(ChoralePreludeTest, MinorKeyGeneratesSuccessfully) {
   ChoralePreludeResult result = generateChoralePrelude(config);
 
   ASSERT_TRUE(result.success);
-  EXPECT_GT(totalNoteCount(result), 0u);
+  EXPECT_GT(test_helpers::totalNoteCount(result), 0u);
 }
 
 // ---------------------------------------------------------------------------

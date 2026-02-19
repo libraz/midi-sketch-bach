@@ -85,8 +85,7 @@ uint8_t clampPreludeVoiceCount(uint8_t num_voices) {
 /// that need long durations, and extends durations accordingly.
 ///
 /// @param tmpl Template to adjust (modified in place).
-/// @param num_voices Number of voices in the prelude.
-void enforcePreludeSlotDurations(FigurationTemplate& tmpl, uint8_t num_voices) {
+void enforcePreludeSlotDurations(FigurationTemplate& tmpl) {
   if (tmpl.steps.empty()) return;
 
   // Minimum duration per voice index in prelude context.
@@ -362,7 +361,7 @@ std::vector<NoteEvent> generateHarmonicPreludeNotes(
       if (!slot_candidates.empty()) {
         int pick = rng::rollRange(rng, 0, static_cast<int>(slot_candidates.size()) - 1);
         tmpl = createFigurationTemplateFromSlot(*slot_candidates[pick], num_voices);
-        enforcePreludeSlotDurations(tmpl, num_voices);
+        enforcePreludeSlotDurations(tmpl);
       }
     }
 
@@ -445,7 +444,7 @@ std::vector<NoteEvent> generateHarmonicPreludeNotes(
         beat_tmpl = createFigurationTemplate(current_phrase_type, num_voices,
                                              rng, effective_rhythm_var);
         // Enforce minimum voice durations (middle >= eighth, bass >= quarter).
-        enforcePreludeSlotDurations(beat_tmpl, num_voices);
+        enforcePreludeSlotDurations(beat_tmpl);
       } else {
         beat_tmpl = tmpl;
       }
@@ -656,7 +655,10 @@ PreludeResult generatePrelude(const PreludeConfig& config) {
     auto voice_range = [](uint8_t vid) -> std::pair<uint8_t, uint8_t> {
       return {getVoiceLowPitch(vid), getVoiceHighPitch(vid)};
     };
-    finalizeFormNotes(all_notes, num_voices, voice_range, /*max_consecutive=*/2);
+    ScaleType pre_scale = config.key.is_minor ? ScaleType::HarmonicMinor
+                                              : ScaleType::Major;
+    finalizeFormNotes(all_notes, num_voices, voice_range, config.key.tonic,
+                      pre_scale, /*max_consecutive=*/2);
   }
 
   // Boundary-driven texture thinning: reduce inner voice density at phrase
@@ -793,24 +795,8 @@ PreludeResult generatePrelude(const PreludeConfig& config) {
   auto reg_plan = createSimpleRegistrationPlan(0, target_duration);
   applyExtendedRegistrationPlan(tracks, reg_plan);
 
-  // Step 5: Sort notes within each track.
-  form_utils::sortTrackNotes(tracks);
-
-  // Final overlap dedup after Picardy/registration post-processing.
-  {
-    std::vector<NoteEvent> final_notes;
-    for (const auto& track : tracks) {
-      final_notes.insert(final_notes.end(), track.notes.begin(), track.notes.end());
-    }
-    finalizeFormNotes(final_notes, num_voices);
-    for (auto& track : tracks) track.notes.clear();
-    for (auto& note : final_notes) {
-      if (note.voice < num_voices) {
-        tracks[note.voice].notes.push_back(std::move(note));
-      }
-    }
-    form_utils::sortTrackNotes(tracks);
-  }
+  // Step 5: Final overlap dedup + sort after Picardy/registration post-processing.
+  form_utils::normalizeAndRedistribute(tracks, num_voices);
 
   result.tracks = std::move(tracks);
   result.timeline = std::move(timeline);

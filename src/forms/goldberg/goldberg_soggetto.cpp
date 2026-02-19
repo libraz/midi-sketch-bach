@@ -265,6 +265,7 @@ std::vector<std::vector<NoteEvent>> SoggettoGenerator::generateCandidates(
 
       current_tick += dur;
       current_pitch = pitch;
+      current_degree = target_degree;
       (void)func;  // Function used for scoring, not placement.
     }
 

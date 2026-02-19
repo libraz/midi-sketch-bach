@@ -522,7 +522,6 @@ std::vector<NoteEvent> generateFiguration(Tick start_tick, Tick end_tick,
     }
 
     int direction = chooseMelodicDirection(mel_state, rng);
-    bool ascending = (direction > 0);
 
     int abs_deg = scale_util::pitchToAbsoluteDegree(prev0, key, scale);
 
@@ -1967,8 +1966,10 @@ TrioSonataMovement generateMovement(const KeySignature& key_sig, Tick num_bars,
       if (voice == 1) return {kLhLow, kLhHigh};
       return {organ_range::kPedalLow, organ_range::kPedalHigh};
     };
-    finalizeFormNotes(all_notes, kTrioVoiceCount, voice_range,
-                      /*max_consecutive=*/2);
+    ScaleType trio_scale = key_sig.is_minor ? ScaleType::HarmonicMinor
+                                             : ScaleType::Major;
+    finalizeFormNotes(all_notes, kTrioVoiceCount, voice_range, key_sig.tonic,
+                      trio_scale, /*max_consecutive=*/2);
 
     for (auto& track : tracks) {
       track.notes.clear();
@@ -2048,30 +2049,18 @@ TrioSonataMovement generateMovement(const KeySignature& key_sig, Tick num_bars,
 
   // 10b. Constraint-driven finalize: steps 6-10 may have introduced overlaps
   // or voice range violations. Replace the former postValidateNotes +
-  // legacy post-validation pipeline with finalizeFormNotes.
+  // legacy post-validation pipeline with normalizeAndRedistribute.
   {
-    std::vector<NoteEvent> all_notes;
-    for (const auto& track : tracks) {
-      all_notes.insert(all_notes.end(), track.notes.begin(), track.notes.end());
-    }
-    assert(countUnknownSource(all_notes) == 0 &&
-           "All notes should have source set by generators");
     auto voice_range = [](uint8_t voice) -> std::pair<uint8_t, uint8_t> {
       if (voice == 0) return {kRhLow, kRhHigh};
       if (voice == 1) return {kLhLow, kLhHigh};
       return {organ_range::kPedalLow, organ_range::kPedalHigh};
     };
-    finalizeFormNotes(all_notes, kTrioVoiceCount, voice_range,
-                      /*max_consecutive=*/2);
-    for (auto& track : tracks) {
-      track.notes.clear();
-    }
-    for (auto& note : all_notes) {
-      if (note.voice < kTrioVoiceCount) {
-        tracks[note.voice].notes.push_back(std::move(note));
-      }
-    }
-    form_utils::sortTrackNotes(tracks);
+    ScaleType trio_scale2 = key_sig.is_minor ? ScaleType::HarmonicMinor
+                                              : ScaleType::Major;
+    form_utils::normalizeAndRedistribute(tracks, kTrioVoiceCount, voice_range,
+                                         key_sig.tonic, trio_scale2,
+                                         /*max_consecutive=*/2);
   }
 
   // 11. Apply ornaments with counterpoint verification.
@@ -2125,20 +2114,7 @@ TrioSonataMovement generateMovement(const KeySignature& key_sig, Tick num_bars,
   // 12. Quality post-passes (after ornaments, ensuring final output quality).
 
   // 12-pre. Overlap dedup before quantization (must precede 12a).
-  {
-    std::vector<NoteEvent> pre_notes;
-    for (const auto& track : tracks) {
-      pre_notes.insert(pre_notes.end(), track.notes.begin(), track.notes.end());
-    }
-    finalizeFormNotes(pre_notes, kTrioVoiceCount);
-    for (auto& track : tracks) track.notes.clear();
-    for (auto& note : pre_notes) {
-      if (note.voice < kTrioVoiceCount) {
-        tracks[note.voice].notes.push_back(std::move(note));
-      }
-    }
-    form_utils::sortTrackNotes(tracks);
-  }
+  form_utils::normalizeAndRedistribute(tracks, kTrioVoiceCount);
 
   // 12a. Quantize all upper voice durations to allowed set.
   {

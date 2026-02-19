@@ -776,25 +776,6 @@ std::vector<NoteEvent> generateLegacyPitchPath(
   return result;
 }
 
-/// @brief Convert a RhythmToken to tick duration.
-/// @param token The rhythm token to convert.
-/// @return Duration in ticks.
-Tick rhythmTokenToTicks(const RhythmToken& token) {
-  switch (token.kind) {
-    case RhythmToken::S:
-      return (token.base_class == 0) ? duration::kSixteenthNote : duration::kEighthNote;
-    case RhythmToken::M:
-      return kTicksPerBeat;
-    case RhythmToken::L:
-      return kTicksPerBeat * 2;
-    case RhythmToken::DL:
-      return (token.base_class == 0) ? kDottedEighth : duration::kDottedQuarter;
-    case RhythmToken::DS:
-      return (token.base_class == 0) ? duration::kSixteenthNote : duration::kEighthNote;
-  }
-  return kTicksPerBeat;  // NOLINT(clang-diagnostic-covered-switch-default): defensive
-}
-
 /// @brief Generate a pitch path using Kerngestalt cell placement.
 ///
 /// Places a core cell at the subject head, then fills remaining slots

@@ -67,7 +67,7 @@ int getFifthInterval(ChordQuality quality) {
 }
 
 // Check if a pitch class is the leading tone (major 7th scale degree) of the key.
-bool isLeadingTone(int pitch_class, Key key, bool is_minor) {
+bool isLeadingTone(int pitch_class, Key key) {
   int tonic_pc = static_cast<int>(key) % 12;
   int leading_pc = (tonic_pc + 11) % 12;
   return pitch_class == leading_pc;
@@ -140,9 +140,9 @@ ChordVoicing voiceChord(const HarmonicEvent& event, uint8_t num_voices,
   bool has_seventh = (chord_pcs.size() >= 4);
   bool is_diminished_fifth = (getFifthInterval(event.chord.quality) == 6);
   bool leading_tone_present =
-      isLeadingTone(third_pc, event.key, event.is_minor) ||
-      isLeadingTone(fifth_pc, event.key, event.is_minor) ||
-      isLeadingTone(root_pc, event.key, event.is_minor);
+      isLeadingTone(third_pc, event.key) ||
+      isLeadingTone(fifth_pc, event.key) ||
+      isLeadingTone(root_pc, event.key);
 
   // --- Step 1: Place bass voice ---
   uint8_t bass_idx = num_voices - 1;
@@ -215,18 +215,18 @@ ChordVoicing voiceChord(const HarmonicEvent& event, uint8_t num_voices,
     bool added = false;
     int seventh_pc = has_seventh ? chord_pcs[3] : -1;
     // Try root (unless it's the leading tone or the seventh).
-    if ((!leading_tone_present || !isLeadingTone(root_pc, event.key, event.is_minor)) &&
+    if ((!leading_tone_present || !isLeadingTone(root_pc, event.key)) &&
         root_pc != seventh_pc) {
       needed_pcs.push_back(root_pc);
       added = true;
     }
     if (!added && !is_diminished_fifth &&
-        (!leading_tone_present || !isLeadingTone(fifth_pc, event.key, event.is_minor)) &&
+        (!leading_tone_present || !isLeadingTone(fifth_pc, event.key)) &&
         fifth_pc != seventh_pc) {
       needed_pcs.push_back(fifth_pc);
       added = true;
     }
-    if (!added && (!leading_tone_present || !isLeadingTone(third_pc, event.key, event.is_minor)) &&
+    if (!added && (!leading_tone_present || !isLeadingTone(third_pc, event.key)) &&
         third_pc != seventh_pc) {
       needed_pcs.push_back(third_pc);
       added = true;
@@ -377,7 +377,6 @@ ChordVoicing smoothVoiceLeading(const ChordVoicing& prev,
         if (i < num_voices - 1) {  // Don't move bass.
           auto [v_low, v_high] = voice_range(i);
           int curr = static_cast<int>(result.pitches[i]);
-          int prev_pitch = static_cast<int>(prev.pitches[i]);
 
           // Try moving in the opposite direction.
           for (int offset = 1; offset <= 12; ++offset) {

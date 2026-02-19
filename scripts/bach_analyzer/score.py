@@ -15,6 +15,7 @@ from .model import (
     Note,
     NoteSource,
     Score,
+    Track,
     interval_class,
     is_consonant,
     is_perfect_consonance,
@@ -121,6 +122,46 @@ def extract_interval_profile(score: Score) -> Dict[str, Any]:
         "avg_interval": total_semitones / total if total else 0.0,
         "total": total,
     }
+
+
+def _extract_interval_profile_for_tick_range(
+    score: Score,
+    start_tick: int,
+    end_tick: int,
+) -> Dict[str, Any]:
+    """Extract melodic interval profile for notes within a tick range.
+
+    Creates a temporary Score containing only the notes whose start_tick falls
+    within [start_tick, end_tick), then delegates to extract_interval_profile().
+
+    Args:
+        score: The Score to extract from.
+        start_tick: Start of the tick range (inclusive).
+        end_tick: End of the tick range (exclusive).
+
+    Returns:
+        Same dict structure as extract_interval_profile().
+    """
+    filtered_tracks = []
+    for track in score.tracks:
+        filtered_notes = [
+            note for note in track.sorted_notes
+            if start_tick <= note.start_tick < end_tick
+        ]
+        if filtered_notes:
+            filtered_tracks.append(Track(name=track.name, notes=filtered_notes))
+
+    if not filtered_tracks:
+        return {
+            "distribution": {},
+            "stepwise_ratio": 0.0,
+            "leap_ratio": 0.0,
+            "avg_interval": 0.0,
+            "total": 0,
+        }
+
+    temp_score = Score(tracks=filtered_tracks)
+    return extract_interval_profile(temp_score)
 
 
 def extract_rhythm_profile(score: Score) -> Dict[str, Any]:
@@ -250,6 +291,35 @@ def _extract_function_distribution(score: Score) -> Dict[str, float]:
             func = _BASS_PC_TO_FUNCTION.get(pitch_class, "T")
             counts[func] += 1
     return _normalize({k: float(v) for k, v in counts.items()})
+
+
+# Collapse 28+ degree variants to 12 pitch-class-based categories.
+# The reference data has major/minor/augmented/diminished variants (I, i, I+, i°, etc.)
+# while the generator uses only basic 12 degrees (I, bII, ii, bIII, iii, IV, #IV, V, bVI, vi,
+# bVII, vii).
+_DEGREE_COLLAPSE = {
+    "I": "I", "i": "I", "I+": "I", "i°": "I",
+    "bII": "bII", "bii": "bII",
+    "ii": "ii", "II": "ii", "ii°": "ii", "II+": "ii",
+    "bIII": "bIII", "biii": "bIII",
+    "iii": "iii", "III": "iii", "iii°": "iii", "III+": "iii",
+    "IV": "IV", "iv": "IV", "iv°": "IV", "IV+": "IV",
+    "#IV": "#IV", "#iv": "#IV",
+    "V": "V", "v": "V", "V+": "V", "v°": "V",
+    "bVI": "bVI", "bvi": "bVI",
+    "vi": "vi", "VI": "vi", "vi°": "vi", "VI+": "vi",
+    "bVII": "bVII", "bvii": "bVII",
+    "vii": "vii", "VII": "vii", "vii°": "vii", "VII+": "vii",
+}
+
+
+def _collapse_degree_dist(dist: Dict[str, float]) -> Dict[str, float]:
+    """Collapse degree variants to 12 basic pitch-class categories."""
+    collapsed: Dict[str, float] = {}
+    for deg, val in dist.items():
+        key = _DEGREE_COLLAPSE.get(deg, deg)
+        collapsed[key] = collapsed.get(key, 0.0) + val
+    return collapsed
 
 
 def _extract_degree_distribution(score: Score) -> Dict[str, float]:
@@ -567,6 +637,16 @@ _ORGAN_PF_AVG_ACTIVE: Dict[str, Any] = {
     "std": 0.5,
 }
 
+# Organ toccata texture reference.
+# Derived from BWV538/540 toccata sections (manual+pedal) + organ_fugue blend.
+# Avg ~2.1 active voices (lighter than fugue sections).
+_ORGAN_TOCCATA_TEXTURE_REF: Dict[str, float] = {
+    "0": 0.02, "1": 0.30, "2": 0.38, "3": 0.25, "4": 0.05,
+}
+_ORGAN_TOCCATA_AVG_ACTIVE: Dict[str, Any] = {
+    "mean": 2.10, "std": 0.50,
+}
+
 
 def _detect_fugue_boundary_tick(score: Score) -> Optional[int]:
     """Detect the tick where the fugue section starts in a toccata+fugue form.
@@ -849,7 +929,7 @@ def _score_structure(
             detail=f"cantus firmus score: {cf_score:.1f}/100",
         ))
 
-    # Texture density JSD (use organ_pf reference for toccata+fugue forms)
+    # Texture density JSD (use organ_toccata reference for toccata+fugue forms)
     tex = extract_texture_profile(score)
     struct_ref_tex, _unused = _get_texture_reference(ref, form_name)
     if tex["distribution"] and struct_ref_tex:
@@ -857,7 +937,7 @@ def _score_structure(
         pts = jsd_to_points(j)
         detail = f"JSD={j:.4f}"
         if form_name in _TOCCATA_FUGUE_FORMS:
-            detail += " (organ_pf ref)"
+            detail += " (organ_toccata ref)"
         sub_scores.append(SubScore(
             name="texture_density_match",
             value=j,
@@ -874,14 +954,20 @@ def _score_structure(
     return DimensionScore("structure", max(0, raw - penalty), True, sub_scores, penalty)
 
 
-def _score_melody(
-    score: Score,
+def _score_melody_default(
+    ip: Dict[str, Any],
     ref: Dict[str, Any],
-    penalty: float,
-) -> DimensionScore:
-    """II. Melody dimension (20%)."""
+) -> List[SubScore]:
+    """Compute melody sub-scores using default (non-section-split) logic.
+
+    Args:
+        ip: Interval profile from extract_interval_profile().
+        ref: Reference category data.
+
+    Returns:
+        List of SubScore items for the melody dimension.
+    """
     sub_scores: List[SubScore] = []
-    ip = extract_interval_profile(score)
     scalars = ref.get("scalars", {})
 
     # Interval distribution JSD
@@ -916,6 +1002,186 @@ def _score_melody(
             value=ip["avg_interval"], reference=ai["mean"], score=pts, method="zscore",
             detail=f"{ip['avg_interval']:.2f} (z={z:.2f})",
         ))
+
+    return sub_scores
+
+
+def _score_melody_section_split(
+    score: Score,
+    ref: Dict[str, Any],
+    boundary_tick: int,
+) -> Optional[List[SubScore]]:
+    """Compute melody sub-scores with section-split for toccata+fugue forms.
+
+    Splits the score at boundary_tick into toccata and fugue sections,
+    scores each against its own reference (organ_toccata for toccata,
+    the provided ref for fugue), and combines with weights (toc=0.5, fug=1.0).
+
+    Args:
+        score: The Score to evaluate.
+        ref: Reference category data for the fugue section.
+        boundary_tick: Tick where the fugue section starts.
+
+    Returns:
+        List of SubScore items, or None if section-split is not applicable
+        (e.g., one section has no notes).
+    """
+    total_duration = score.total_duration
+
+    toc_ip = _extract_interval_profile_for_tick_range(score, 0, boundary_tick)
+    fug_ip = _extract_interval_profile_for_tick_range(score, boundary_tick, total_duration)
+
+    if toc_ip["total"] == 0 and fug_ip["total"] == 0:
+        return None
+
+    # Load organ_toccata reference for the toccata section.
+    try:
+        toc_ref = load_category("organ_toccata")
+    except FileNotFoundError:
+        return None
+
+    toc_weight = 0.5
+    fug_weight = 1.0
+
+    # --- Interval distribution JSD (section-weighted) ---
+    ref_int_fug = ref.get("distributions", {}).get("interval", {})
+    ref_int_toc = toc_ref.get("distributions", {}).get("interval", {})
+
+    weighted_jsd_pts = 0.0
+    total_w = 0.0
+    jsd_parts: List[str] = []
+
+    if toc_ip["distribution"] and ref_int_toc and toc_ip["total"] > 0:
+        toc_j = jsd(toc_ip["distribution"], ref_int_toc)
+        toc_pts = jsd_to_points(toc_j)
+        section_w = toc_weight * toc_ip["total"]
+        weighted_jsd_pts += toc_pts * section_w
+        total_w += section_w
+        jsd_parts.append(f"toc={toc_j:.4f}")
+
+    if fug_ip["distribution"] and ref_int_fug and fug_ip["total"] > 0:
+        fug_j = jsd(fug_ip["distribution"], ref_int_fug)
+        fug_pts = jsd_to_points(fug_j)
+        section_w = fug_weight * fug_ip["total"]
+        weighted_jsd_pts += fug_pts * section_w
+        total_w += section_w
+        jsd_parts.append(f"fug={fug_j:.4f}")
+
+    sub_scores: List[SubScore] = []
+
+    if total_w > 0:
+        combined_jsd_pts = weighted_jsd_pts / total_w
+        # Compute overall JSD for the value field.
+        overall_ip = extract_interval_profile(score)
+        overall_j = jsd(overall_ip["distribution"], ref_int_fug) if (
+            overall_ip["distribution"] and ref_int_fug) else 0.0
+        detail = f"JSD={overall_j:.4f} (section-split: {', '.join(jsd_parts)})"
+        sub_scores.append(SubScore(
+            name="interval_distribution_jsd",
+            value=overall_j, reference=0.0, score=combined_jsd_pts, method="jsd",
+            detail=detail,
+        ))
+
+    # --- Stepwise ratio z-score (section-weighted) ---
+    toc_sr = toc_ref.get("scalars", {}).get("stepwise_ratio", {})
+    fug_sr = ref.get("scalars", {}).get("stepwise_ratio", {})
+
+    weighted_sr_pts = 0.0
+    total_sr_w = 0.0
+    sr_parts: List[str] = []
+
+    if toc_sr and toc_ip["total"] > 0:
+        toc_z = compute_zscore(toc_ip["stepwise_ratio"], toc_sr["mean"], toc_sr["std"])
+        toc_pts = zscore_to_points(toc_z)
+        section_w = toc_weight * toc_ip["total"]
+        weighted_sr_pts += toc_pts * section_w
+        total_sr_w += section_w
+        sr_parts.append(f"toc={toc_ip['stepwise_ratio']:.3f}")
+
+    if fug_sr and fug_ip["total"] > 0:
+        fug_z = compute_zscore(fug_ip["stepwise_ratio"], fug_sr["mean"], fug_sr["std"])
+        fug_pts = zscore_to_points(fug_z)
+        section_w = fug_weight * fug_ip["total"]
+        weighted_sr_pts += fug_pts * section_w
+        total_sr_w += section_w
+        sr_parts.append(f"fug={fug_ip['stepwise_ratio']:.3f}")
+
+    if total_sr_w > 0:
+        combined_sr_pts = weighted_sr_pts / total_sr_w
+        overall_ip = extract_interval_profile(score)
+        overall_sr = overall_ip["stepwise_ratio"]
+        mean_ref = fug_sr.get("mean", 0.0) if fug_sr else 0.0
+        detail = f"{overall_sr:.3f} (section-split: {', '.join(sr_parts)})"
+        sub_scores.append(SubScore(
+            name="stepwise_ratio_zscore",
+            value=overall_sr, reference=mean_ref, score=combined_sr_pts, method="zscore",
+            detail=detail,
+        ))
+
+    # --- Avg interval z-score (section-weighted) ---
+    toc_ai = toc_ref.get("scalars", {}).get("avg_interval", {})
+    fug_ai = ref.get("scalars", {}).get("avg_interval", {})
+
+    weighted_ai_pts = 0.0
+    total_ai_w = 0.0
+    ai_parts: List[str] = []
+
+    if toc_ai and toc_ip["total"] > 0:
+        toc_z = compute_zscore(toc_ip["avg_interval"], toc_ai["mean"], toc_ai["std"])
+        toc_pts = zscore_to_points(toc_z)
+        section_w = toc_weight * toc_ip["total"]
+        weighted_ai_pts += toc_pts * section_w
+        total_ai_w += section_w
+        ai_parts.append(f"toc={toc_ip['avg_interval']:.2f}")
+
+    if fug_ai and fug_ip["total"] > 0:
+        fug_z = compute_zscore(fug_ip["avg_interval"], fug_ai["mean"], fug_ai["std"])
+        fug_pts = zscore_to_points(fug_z)
+        section_w = fug_weight * fug_ip["total"]
+        weighted_ai_pts += fug_pts * section_w
+        total_ai_w += section_w
+        ai_parts.append(f"fug={fug_ip['avg_interval']:.2f}")
+
+    if total_ai_w > 0:
+        combined_ai_pts = weighted_ai_pts / total_ai_w
+        overall_ip = extract_interval_profile(score)
+        overall_ai = overall_ip["avg_interval"]
+        mean_ref = fug_ai.get("mean", 0.0) if fug_ai else 0.0
+        detail = f"{overall_ai:.2f} (section-split: {', '.join(ai_parts)})"
+        sub_scores.append(SubScore(
+            name="avg_interval_zscore",
+            value=overall_ai, reference=mean_ref, score=combined_ai_pts, method="zscore",
+            detail=detail,
+        ))
+
+    return sub_scores if sub_scores else None
+
+
+def _score_melody(
+    score: Score,
+    ref: Dict[str, Any],
+    penalty: float,
+    form_name: str = "",
+) -> DimensionScore:
+    """II. Melody dimension (20%).
+
+    For toccata+fugue forms, uses section-split scoring: toccata section
+    scored against organ_toccata reference, fugue section against the
+    provided ref (typically organ_fugue), combined with weights toc=0.5,
+    fug=1.0.
+    """
+    sub_scores: Optional[List[SubScore]] = None
+
+    # Try section-split scoring for toccata+fugue forms.
+    if form_name in _TOCCATA_FUGUE_FORMS:
+        boundary_tick = _detect_fugue_boundary_tick(score)
+        if boundary_tick is not None and boundary_tick > 0:
+            sub_scores = _score_melody_section_split(score, ref, boundary_tick)
+
+    # Fall back to default scoring if section-split was not applicable.
+    if sub_scores is None:
+        ip = extract_interval_profile(score)
+        sub_scores = _score_melody_default(ip, ref)
 
     if not sub_scores:
         return DimensionScore("melody", 0, False)
@@ -970,8 +1236,11 @@ def _compute_section_weighted_degree_jsd(
     total_weight = 0.0
     jsd_parts: List[str] = []
 
+    # Collapse degree variants to 12 pitch-class categories before JSD.
+    collapsed_ref = _collapse_degree_dist(ref_deg)
+
     if toc_deg and toc_count > 0:
-        toc_jsd = jsd(toc_deg, ref_deg)
+        toc_jsd = jsd(_collapse_degree_dist(toc_deg), collapsed_ref)
         toc_pts = jsd_to_points(toc_jsd)
         section_w = toc_weight * toc_count
         weighted_pts += toc_pts * section_w
@@ -979,7 +1248,7 @@ def _compute_section_weighted_degree_jsd(
         jsd_parts.append(f"toc={toc_jsd:.4f}*0.5")
 
     if fug_deg and fug_count > 0:
-        fug_jsd = jsd(fug_deg, ref_deg)
+        fug_jsd = jsd(_collapse_degree_dist(fug_deg), collapsed_ref)
         fug_pts = jsd_to_points(fug_jsd)
         section_w = fug_weight * fug_count
         weighted_pts += fug_pts * section_w
@@ -992,7 +1261,7 @@ def _compute_section_weighted_degree_jsd(
     combined_pts = weighted_pts / total_weight
     # Also compute the overall JSD for display.
     gen_deg = _extract_degree_distribution(score)
-    overall_jsd = jsd(gen_deg, ref_deg) if gen_deg else 0.0
+    overall_jsd = jsd(_collapse_degree_dist(gen_deg), collapsed_ref) if gen_deg else 0.0
     detail = f"JSD={overall_jsd:.4f} (section-weighted: {', '.join(jsd_parts)})"
 
     return overall_jsd, combined_pts, detail
@@ -1084,7 +1353,7 @@ def _score_harmony(
             # Default path: no section weighting (non-toccata forms or no boundary).
             gen_deg = _extract_degree_distribution(score)
             if gen_deg:
-                j = jsd(gen_deg, ref_deg)
+                j = jsd(_collapse_degree_dist(gen_deg), _collapse_degree_dist(ref_deg))
                 pts = jsd_to_points(j) * 0.5
                 sub_scores.append(SubScore(
                     name="harmony_degree_jsd",
@@ -1272,12 +1541,12 @@ def _get_texture_reference(
     ref: Dict[str, Any],
     form_name: str,
 ) -> Tuple[Dict[str, float], Dict[str, Any]]:
-    """Get texture reference profile, using organ_pf for toccata+fugue forms.
+    """Get texture reference profile, using organ_toccata for toccata+fugue forms.
 
-    For toccata_and_fugue and fantasia_and_fugue forms, the organ_pf texture
-    profile (more single/two-voice passages than pure fugue) is used instead
-    of the category default. This reflects the mixed texture of free
-    sections + fugue sections.
+    For toccata_and_fugue and fantasia_and_fugue forms, the organ_toccata
+    texture profile (avg_active ~2.10, lighter than fugue sections) is used
+    instead of the category default. This reflects the mixed texture of free
+    toccata sections + fugue sections.
 
     Args:
         ref: The loaded reference category data.
@@ -1287,7 +1556,7 @@ def _get_texture_reference(
         Tuple of (texture_distribution, avg_active_voices_scalar).
     """
     if form_name in _TOCCATA_FUGUE_FORMS:
-        return _ORGAN_PF_TEXTURE_REF, _ORGAN_PF_AVG_ACTIVE
+        return _ORGAN_TOCCATA_TEXTURE_REF, _ORGAN_TOCCATA_AVG_ACTIVE
     ref_tex = ref.get("distributions", {}).get("texture", {})
     av_scalar = ref.get("scalars", {}).get("avg_active_voices", {})
     return ref_tex, av_scalar
@@ -1301,8 +1570,8 @@ def _score_texture(
 ) -> DimensionScore:
     """VI. Texture dimension (10%).
 
-    For toccata_and_fugue forms, uses the organ_pf texture reference
-    (avg_active ~2.75) instead of organ_fugue (avg_active ~2.66), reflecting
+    For toccata_and_fugue forms, uses the organ_toccata texture reference
+    (avg_active ~2.10) instead of organ_fugue (avg_active ~2.66), reflecting
     the lighter texture of toccata free sections.
     """
     if score.num_voices < 2:
@@ -1320,7 +1589,7 @@ def _score_texture(
         pts = jsd_to_points(j)
         detail = f"JSD={j:.4f}"
         if form_name in _TOCCATA_FUGUE_FORMS:
-            detail += " (organ_pf ref)"
+            detail += " (organ_toccata ref)"
         sub_scores.append(SubScore(
             name="texture_distribution_jsd",
             value=j, reference=0.0, score=pts, method="jsd",
@@ -1333,7 +1602,7 @@ def _score_texture(
         pts = zscore_to_points(z)
         detail = f"{tp['avg_active_voices']:.2f} (z={z:.2f})"
         if form_name in _TOCCATA_FUGUE_FORMS:
-            detail += " (organ_pf ref)"
+            detail += " (organ_toccata ref)"
         sub_scores.append(SubScore(
             name="avg_active_voices_zscore",
             value=tp["avg_active_voices"], reference=av_scalar["mean"], score=pts,
@@ -1383,7 +1652,7 @@ def compute_score(
     dimensions["structure"] = _score_structure(
         score, ref, penalties.get("structure", 0), form_name=resolved_form)
     dimensions["melody"] = _score_melody(
-        score, ref, penalties.get("melody", 0))
+        score, ref, penalties.get("melody", 0), form_name=resolved_form)
     dimensions["harmony"] = _score_harmony(
         score, ref, penalties.get("harmony", 0), form_name=resolved_form)
     dimensions["counterpoint"] = _score_counterpoint(

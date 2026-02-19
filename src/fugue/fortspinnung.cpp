@@ -473,6 +473,36 @@ std::vector<NoteEvent> generateFortspinnung(const MotifPool& pool,
       }
     }
 
+    // Phase-controlled diminution: probabilistically halve note durations
+    // to increase 16th note density toward Bach reference (61%).
+    // All phases allow double-halving; floor at kSixteenthNote.
+    {
+      float diminish_prob;
+      constexpr float kFortEnergy = 0.5f;
+      switch (phase) {
+        case FortPhase::Kernel:
+          diminish_prob = 0.50f + kFortEnergy * 0.20f;
+          break;
+        case FortPhase::Sequence:
+          diminish_prob = 0.75f + kFortEnergy * 0.15f;
+          break;
+        case FortPhase::Dissolution:
+          diminish_prob = 0.40f + kFortEnergy * 0.15f;
+          break;
+      }
+      constexpr Tick kMinDiminishDur = duration::kSixteenthNote;
+      for (auto& frag_note : fragment) {
+        if (frag_note.duration > kMinDiminishDur &&
+            rng::rollProbability(rng, diminish_prob)) {
+          frag_note.duration = std::max(frag_note.duration / 2, kMinDiminishDur);
+          if (frag_note.duration > kMinDiminishDur &&
+              rng::rollProbability(rng, diminish_prob * 0.5f)) {
+            frag_note.duration = std::max(frag_note.duration / 2, kMinDiminishDur);
+          }
+        }
+      }
+    }
+
     // Check if fragment fits within remaining duration.
     Tick frag_dur = motifDuration(fragment);
     if (frag_dur == 0) frag_dur = kTicksPerBeat;
@@ -624,21 +654,78 @@ std::vector<NoteEvent> generateFortspinnung(const MotifPool& pool,
           }
           bass_tick += frag_dur;
         } else {
-          // Anchor note: diatonic degree cycling (I, V, IV, vi, iii, ii, vii).
-          constexpr int kDiatonicOffsets[] = {0, 7, 5, 9, 4, 2, 11};
-          constexpr int kNumDegrees = 7;
-          int deg_idx = static_cast<int>((bass_tick - start_tick) / (kTicksPerBeat * 2))
-                        % kNumDegrees;
-          int v2_anchor_pitch = 48 + static_cast<int>(key) + kDiatonicOffsets[deg_idx];
-          int bass_anchor = mapToRegister(v2_anchor_pitch, v2_lo, v2_hi);
+          // Anchor note: descending circle-of-fifths 2-bar sequence.
+          //
+          // Bach's episodes descend through the circle of fifths in 2-bar
+          // units: I -> IV -> vii(->V) -> iii -> vi -> ii -> V.
+          // vii step replaced by V in bass for stability.
+          //
+          // Strong beats get the sequence root; weak beats get diatonic
+          // passing tones between current and next step.
+          constexpr int kCircleOfFifths[] = {0, 5, 7, 4, 9, 2, 7};
+          constexpr int kNumCircleSteps = 7;
+          constexpr int kMaxSteps = 5;  // Stop at step 4 (vi).
 
-          // Vary anchor duration: 8th(35%), quarter(30%), half(20%), bar(15%).
+          int raw_step = static_cast<int>(
+              (bass_tick - start_tick) / (kTicksPerBar * 2));
+          int step_idx = std::min(raw_step % kNumCircleSteps, kMaxSteps - 1);
+
+          bool is_strong_beat =
+              (bass_tick % kTicksPerBar) < static_cast<Tick>(kTicksPerBeat);
+          int root_offset = kCircleOfFifths[step_idx];
+          int base_pitch = 48 + static_cast<int>(key) + root_offset;
+
+          int bass_anchor;
+          if (is_strong_beat) {
+            bass_anchor = mapToRegister(base_pitch, v2_lo, v2_hi);
+          } else {
+            // Diatonic passing motion toward next step.
+            int next_idx = std::min(step_idx + 1, kMaxSteps - 1);
+            int next_offset = kCircleOfFifths[next_idx];
+            int next_pitch = 48 + static_cast<int>(key) + next_offset;
+
+            int curr_deg = scale_util::pitchToAbsoluteDegree(
+                clampPitch(base_pitch, 0, 127), key, ScaleType::Major);
+            int next_deg = scale_util::pitchToAbsoluteDegree(
+                clampPitch(next_pitch, 0, 127), key, ScaleType::Major);
+
+            Tick unit_offset = (bass_tick - start_tick) % (kTicksPerBar * 2);
+            float frac = static_cast<float>(unit_offset) /
+                         static_cast<float>(kTicksPerBar * 2);
+
+            int passing_deg = curr_deg +
+                static_cast<int>((next_deg - curr_deg) * frac);
+            bass_anchor = static_cast<int>(
+                scale_util::absoluteDegreeToPitch(passing_deg, key,
+                                                  ScaleType::Major));
+            bass_anchor = mapToRegister(bass_anchor, v2_lo, v2_hi);
+          }
+
+          // Phase-dependent bass anchor duration distribution.
+          // Sequence: shorter (includes 16ths) for rhythmic drive.
+          // Kernel/Dissolution: longer for harmonic stability.
           Tick base_dur;
+          float bass_progress = static_cast<float>(bass_tick - start_tick) /
+                                 static_cast<float>(std::max(duration_ticks,
+                                                             static_cast<Tick>(1)));
+          bool is_seq_phase =
+              bass_progress >= grammar.kernel_ratio &&
+              bass_progress < grammar.kernel_ratio + grammar.sequence_ratio;
           float dur_roll = rng::rollFloat(bass_rng, 0.0f, 1.0f);
-          if (dur_roll < 0.35f) base_dur = kTicksPerBeat / 2;
-          else if (dur_roll < 0.65f) base_dur = kTicksPerBeat;
-          else if (dur_roll < 0.85f) base_dur = kTicksPerBeat * 2;
-          else base_dur = kTicksPerBar;
+          if (is_seq_phase) {
+            // Sequence: 8th(30%), quarter(40%), half(25%), bar(5%).
+            // Bass retains structural coverage even in active texture.
+            if (dur_roll < 0.30f) base_dur = kTicksPerBeat / 2;
+            else if (dur_roll < 0.70f) base_dur = kTicksPerBeat;
+            else if (dur_roll < 0.95f) base_dur = kTicksPerBeat * 2;
+            else base_dur = kTicksPerBar;
+          } else {
+            // Kernel/Dissolution: 8th(30%), quarter(40%), half(20%), bar(10%).
+            if (dur_roll < 0.30f) base_dur = kTicksPerBeat / 2;
+            else if (dur_roll < 0.70f) base_dur = kTicksPerBeat;
+            else if (dur_roll < 0.90f) base_dur = kTicksPerBeat * 2;
+            else base_dur = kTicksPerBar;
+          }
           Tick anchor_dur = std::min(base_dur,
                                      start_tick + duration_ticks - bass_tick);
           if (anchor_dur >= duration::kSixteenthNote) {

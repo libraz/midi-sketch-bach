@@ -393,24 +393,10 @@ GoldbergResult GoldbergGenerator::generate(const GoldbergConfig& config) const {
 
   // Step 6b: Counterpoint repair pipeline.
   // Pre-dedup: collapse same-tick notes within each track to 1 note/tick.
-  // This matches cleanupTrackOverlaps in generator.cpp, ensuring downstream
-  // analysis only processes notes that survive the final dedup (5 voices → 2 tracks).
-  auto dedupTrack = [](std::vector<NoteEvent>& notes) {
-    if (notes.size() < 2) return;
-    std::stable_sort(notes.begin(), notes.end(),
-        [](const NoteEvent& a, const NoteEvent& b) {
-          if (a.start_tick != b.start_tick) return a.start_tick < b.start_tick;
-          return a.duration > b.duration;
-        });
-    notes.erase(
-        std::unique(notes.begin(), notes.end(),
-            [](const NoteEvent& a, const NoteEvent& b) {
-              return a.start_tick == b.start_tick;
-            }),
-        notes.end());
-  };
-  dedupTrack(track_upper.notes);
-  dedupTrack(track_lower.notes);
+  // Uses the canonical finalizeFormNotes (voice-aware dedup + overlap truncation).
+  // track_upper has voices 0-1, track_lower has voices 2-4.
+  finalizeFormNotes(track_upper.notes, 2);
+  finalizeFormNotes(track_lower.notes, 3);
 
   // Merge both tracks into a single note vector for cross-voice analysis.
   {

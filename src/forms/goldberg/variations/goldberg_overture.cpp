@@ -32,9 +32,6 @@ constexpr int kTotalBars = 32;
 /// Bars per section (Grave = first 16, Fugato = last 16).
 constexpr int kSectionBars = 16;
 
-/// Number of voices in the Grave section (melody + bass).
-constexpr int kGraveVoices = 2;
-
 /// Number of voices in the Fugato section (3-voice fugue exposition).
 constexpr int kFugatoVoices = 3;
 
@@ -238,8 +235,7 @@ OvertureResult OvertureGenerator::generate(
   auto grave_notes = generateGrave(grid, key, time_sig, rng);
 
   // --- Generate Fugato section (bars 16-31) ---
-  Tick fugato_start_tick = static_cast<Tick>(kSectionBars) * ticks_per_bar;
-  auto fugato_notes = generateFugato(grid, key, time_sig, fugato_start_tick, rng);
+  auto fugato_notes = generateFugato(grid, key, time_sig, rng);
 
   // --- Concatenate both sections ---
   std::vector<NoteEvent> all_notes;
@@ -324,7 +320,6 @@ std::vector<NoteEvent> OvertureGenerator::generateFugato(
     const GoldbergStructuralGrid& grid,
     const KeySignature& key,
     const TimeSignature& time_sig,
-    Tick start_tick,
     std::mt19937& rng) const {
   std::vector<NoteEvent> fugato_notes;
   fugato_notes.reserve(256);

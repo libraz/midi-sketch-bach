@@ -8,6 +8,7 @@
 
 #include "core/basic_types.h"
 #include "core/pitch_utils.h"
+#include "test_helpers.h"
 
 namespace bach {
 namespace {
@@ -21,12 +22,6 @@ ToccataConfig makeSectionalisConfig(uint32_t seed = 42) {
   config.num_voices = 3;
   config.total_bars = 24;
   return config;
-}
-
-size_t totalNoteCount(const ToccataResult& result) {
-  size_t count = 0;
-  for (const auto& track : result.tracks) count += track.notes.size();
-  return count;
 }
 
 size_t countNotesInRange(const Track& track, Tick start, Tick end) {
@@ -110,7 +105,7 @@ TEST(ToccataSectionalisTest, MultipleSeeds_AllSucceed) {
     auto config = makeSectionalisConfig(seed);
     auto result = generateToccata(config);
     EXPECT_TRUE(result.success) << "Failed with seed " << seed;
-    EXPECT_GT(totalNoteCount(result), 0u) << "No notes with seed " << seed;
+    EXPECT_GT(test_helpers::totalNoteCount(result), 0u) << "No notes with seed " << seed;
   }
 }
 

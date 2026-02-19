@@ -193,6 +193,8 @@ class LeapResolution:
         NoteSource.GOLDBERG_FIGURA,     # Arpeggiated variation figures
         NoteSource.GOLDBERG_OVERTURE,   # Orchestral texture
         NoteSource.ORNAMENT,            # Ornamental figures
+        NoteSource.TOCCATA_FIGURE,      # Brechung / arpeggio figures
+        NoteSource.TOCCATA_GESTURE,     # Stylus Phantasticus gestures
     }
     # Structural thematic sources: subject/answer/countersubject entries are
     # compositionally fixed melodic material where leaps are idiomatic and
@@ -206,6 +208,7 @@ class LeapResolution:
         NoteSource.CANON_COMES,         # Canon following voice (fixed material)
         NoteSource.QUODLIBET_MELODY,    # Quoted melody (fixed material)
         NoteSource.GOLDBERG_BASS,       # Ground bass (= GROUND_BASS)
+        NoteSource.PEDAL_POINT,         # Pedal voice (foot keyboard idiom)
     }
 
     def __init__(self, leap_threshold: int = 5):
@@ -440,7 +443,12 @@ class MelodicTritoneOutline:
     """
 
     _TRITONE = 6
-    _EXEMPT_SOURCES = {NoteSource.ARPEGGIO_FLOW, NoteSource.EPISODE_MATERIAL}
+    _EXEMPT_SOURCES = {
+        NoteSource.ARPEGGIO_FLOW,
+        NoteSource.EPISODE_MATERIAL,
+        NoteSource.TOCCATA_FIGURE,      # Brechung figures
+        NoteSource.TOCCATA_GESTURE,     # Stylus Phantasticus gestures
+    }
 
     @property
     def name(self) -> str:
