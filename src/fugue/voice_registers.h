@@ -9,6 +9,7 @@
 
 #include "core/basic_types.h"
 #include "core/form_profile.h"
+#include "fugue/fugue_config.h"
 
 namespace bach {
 
@@ -16,13 +17,15 @@ namespace bach {
 ///
 /// Returns the same ranges used by exposition voice assignment:
 ///   2 voices: V0(55-84), V1(36-67)
-///   3 voices: V0(60-96), V1(55-79), V2(36-60)
+///   3 voices: V0(60-96), V1(55-79), V2(48-72) [Auto/ManualBass] or V2(24-50) [TruePedal]
 ///   4+ voices: V0(60-96), V1(55-79), V2(48-72), V3(24-50)
 ///
 /// @param voice_id Voice identifier (0 = soprano/first, increasing = lower).
 /// @param num_voices Total number of voices in the fugue (2-5).
+/// @param pedal_mode Pedal voice treatment (only affects 3-voice V2).
 /// @return Pair of (low_pitch, high_pitch) inclusive MIDI pitch bounds.
-std::pair<uint8_t, uint8_t> getFugueVoiceRange(VoiceId voice_id, uint8_t num_voices);
+std::pair<uint8_t, uint8_t> getFugueVoiceRange(VoiceId voice_id, uint8_t num_voices,
+                                                PedalMode pedal_mode = PedalMode::Auto);
 
 /// @brief Per-voice pitch register boundaries.
 struct VoiceRegister {
@@ -122,7 +125,9 @@ int fitToRegisterWithEnvelope(
     const RegisterEnvelope& envelope,
     uint8_t reference_pitch = 0,
     uint8_t adjacent_last_pitch = 0,
-    int* envelope_overflow_count = nullptr);
+    int* envelope_overflow_count = nullptr,
+    uint8_t adjacent_lo = 0,
+    uint8_t adjacent_hi = 0);
 
 }  // namespace bach
 

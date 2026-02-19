@@ -198,7 +198,8 @@ std::vector<NoteEvent> generateCantabileMelody(
     if (scale[idx] > center + kCantabileRange && idx > 0) --idx;
     else if (scale[idx] < center - kCantabileRange && idx + 1 < scale.size()) ++idx;
 
-    notes.push_back(makeNote(tick, dur, scale[idx], voice));
+    notes.push_back(makeNote(tick, dur, scale[idx], voice,
+                             BachNoteSource::ToccataFigure));
     tick += dur;
   }
 
@@ -315,7 +316,8 @@ std::vector<NoteEvent> generateMotoPerpetuo_Concertato(
     if (scale[idx] > center + kMaxRangeFromCenter) ascending = false;
     else if (scale[idx] < center - kMaxRangeFromCenter) ascending = true;
 
-    notes.push_back(makeNote(tick, dur, scale[idx], voice));
+    notes.push_back(makeNote(tick, dur, scale[idx], voice,
+                             BachNoteSource::ToccataFigure));
     updateMelodicState(mel_state, prev_moto_pitch, scale[idx]);
     prev_moto_pitch = scale[idx];
     tick += dur;
@@ -402,7 +404,8 @@ ToccataResult generateConcertatoToccata(const ToccataConfig& config) {
       if (dur == 0) break;
 
       if (!scale1.empty()) {
-        all_notes.push_back(makeNote(tick, dur, scale1[idx1], 1));
+        all_notes.push_back(makeNote(tick, dur, scale1[idx1], 1,
+                                     BachNoteSource::ToccataFigure));
         // Arpeggio-driven: 60% directional chord tone, 25% skip, 15% stepwise.
         float v1_roll = rng::rollFloat(rng, 0.0f, 1.0f);
         if (v1_roll < 0.60f) {
@@ -479,7 +482,8 @@ ToccataResult generateConcertatoToccata(const ToccataConfig& config) {
       if (dur == 0) break;
       if (!chord_tones.empty()) {
         all_notes.push_back(makeNote(tick, dur,
-                                     rng::selectRandom(rng, chord_tones), 0));
+                                     rng::selectRandom(rng, chord_tones), 0,
+                                     BachNoteSource::ToccataGesture));
       }
       tick += dur;
     }
@@ -543,7 +547,8 @@ ToccataResult generateConcertatoToccata(const ToccataConfig& config) {
       if (dur == 0) break;
       if (!chord_tones.empty()) {
         all_notes.push_back(makeNote(tick, dur,
-                                     rng::selectRandom(rng, chord_tones), vi));
+                                     rng::selectRandom(rng, chord_tones), vi,
+                                     BachNoteSource::ToccataGesture));
       }
       tick += dur;
     }

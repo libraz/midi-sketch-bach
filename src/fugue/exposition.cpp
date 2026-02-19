@@ -235,14 +235,21 @@ void placeCountersubjectNotes(const std::vector<NoteEvent>& cs_notes,
                               VoiceRegister voice_reg,
                               std::map<VoiceId, std::vector<NoteEvent>>& voice_notes,
                               uint8_t num_voices = 0,
-                              float phase_pos = 0.0f) {
+                              float phase_pos = 0.0f,
+                              uint8_t adjacent_last_pitch = 0,
+                              uint8_t adjacent_lo = 0,
+                              uint8_t adjacent_hi = 0) {
   if (cs_notes.empty()) return;
 
   // Compute octave shift using envelope-aware register fitting when possible.
   RegisterEnvelope envelope = getRegisterEnvelope(FormType::Fugue);
   int octave_shift = (num_voices > 0)
       ? fitToRegisterWithEnvelope(cs_notes, voice_id, num_voices,
-                                   phase_pos, envelope)
+                                   phase_pos, envelope,
+                                   /*reference_pitch=*/0,
+                                   adjacent_last_pitch,
+                                   /*envelope_overflow_count=*/nullptr,
+                                   adjacent_lo, adjacent_hi)
       : fitToRegister(cs_notes, voice_reg.low, voice_reg.high);
 
   for (const auto& cs_note : cs_notes) {
@@ -633,9 +640,23 @@ Exposition buildExposition(const Subject& subject,
       float cs_phase_pos = estimated_duration > 0
           ? static_cast<float>(entry.entry_tick) / static_cast<float>(estimated_duration)
           : 0.0f;
+      // Extract concurrent entry voice's sounding pitch at CS start_tick.
+      uint8_t adj_pitch = 0;
+      const auto& entry_notes = expo.voice_notes[entry.voice_id];
+      for (const auto& n : entry_notes) {
+        if (n.start_tick <= entry.entry_tick &&
+            n.start_tick + n.duration > entry.entry_tick) {
+          adj_pitch = n.pitch;
+          break;
+        }
+      }
+      auto [adj_lo, adj_hi] = getFugueVoiceRange(entry.voice_id, num_voices);
       placeCountersubjectNotes(cs_to_place, prev_voice,
                                entry.entry_tick, prev_reg, expo.voice_notes,
-                               num_voices, cs_phase_pos);
+                               num_voices, cs_phase_pos,
+                               adj_pitch,
+                               static_cast<uint8_t>(adj_lo),
+                               static_cast<uint8_t>(adj_hi));
 
       // Snap CS strong-beat dissonances against answer notes.
       // CS was generated against the subject, so it may clash with the

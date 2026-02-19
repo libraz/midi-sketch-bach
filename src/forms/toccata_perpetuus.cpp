@@ -246,7 +246,8 @@ std::vector<NoteEvent> generateMotoPerpetuo(
     if (scale[idx] > center + kMaxRangeFromCenter) ascending = false;
     else if (scale[idx] < center - kMaxRangeFromCenter) ascending = true;
 
-    notes.push_back(makeNote(tick, dur, scale[idx], voice));
+    notes.push_back(makeNote(tick, dur, scale[idx], voice,
+                             BachNoteSource::ToccataFigure));
     updateMelodicState(mel_state, prev_moto_pitch, scale[idx]);
     prev_moto_pitch = scale[idx];
     tick += dur;
@@ -304,7 +305,8 @@ std::vector<NoteEvent> generateChordPad(
       if (d < best_dist) { best = ct; best_dist = d; }
     }
 
-    notes.push_back(makeNote(tick, dur, best, voice));
+    notes.push_back(makeNote(tick, dur, best, voice,
+                             BachNoteSource::ToccataFigure));
     prev_pitch = best;
     tick += dur;
   }

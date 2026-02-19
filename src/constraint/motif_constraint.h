@@ -98,6 +98,8 @@ struct EpisodeRequest {
   const CounterpointState* cp_state_ctx = nullptr;  ///< Counterpoint state context.
   const SectionAccumulator* pipeline_accumulator = nullptr;  ///< Pipeline-level accumulator.
   const HarmonicTimeline* timeline = nullptr;  ///< Harmonic timeline for bass pitch selection.
+  static constexpr int kMaxRequestVoices = 6;
+  uint8_t last_pitches[kMaxRequestVoices] = {};  ///< Per-voice last pitch (0 = unknown).
 };
 
 /// @brief Result of constraint-driven episode generation.

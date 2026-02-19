@@ -191,6 +191,7 @@ uint8_t getToccataHighPitch(uint8_t voice_idx) {
 
 NoteEvent makeNote(Tick tick, Tick dur, uint8_t pitch, uint8_t voice,
                    BachNoteSource source = BachNoteSource::FreeCounterpoint) {
+  assert(source != BachNoteSource::Unknown && "makeNote: source must be explicitly specified");
   NoteEvent n;
   n.start_tick = tick;
   n.duration = dur;
@@ -375,8 +376,8 @@ Tick generateMordentWave(uint8_t start_pitch,
   // 1. Held note (dotted quarter) -- parallel octaves on voice 0 + voice 1
   Tick held_dur = std::min(kDottedQuarter, section_end - tick);
   if (held_dur == 0) return tick;
-  notes.push_back(makeNote(tick, held_dur, p0, 0));
-  notes.push_back(makeNote(tick, held_dur, p1, 1));
+  notes.push_back(makeNote(tick, held_dur, p0, 0, BachNoteSource::ToccataGesture));
+  notes.push_back(makeNote(tick, held_dur, p1, 1, BachNoteSource::ToccataGesture));
   tick += held_dur;
   if (tick >= section_end) return tick;
 
@@ -396,8 +397,10 @@ Tick generateMordentWave(uint8_t start_pitch,
   for (int i = 0; i < 3 && tick < section_end; ++i) {
     Tick dur = std::min(kThirtySecondNote, section_end - tick);
     if (dur == 0) break;
-    notes.push_back(makeNote(tick, dur, mordent_pitches0[i], 0));
-    notes.push_back(makeNote(tick, dur, mordent_pitches1[i], 1));
+    notes.push_back(makeNote(tick, dur, mordent_pitches0[i], 0,
+                             BachNoteSource::ToccataGesture));
+    notes.push_back(makeNote(tick, dur, mordent_pitches1[i], 1,
+                             BachNoteSource::ToccataGesture));
     tick += dur;
   }
   if (tick >= section_end) return tick;
@@ -416,8 +419,8 @@ Tick generateMordentWave(uint8_t start_pitch,
     if (dur == 0) break;
     uint8_t sp0 = clampPitch(scale_tones[i], low0, high0);
     uint8_t sp1 = clampPitch(static_cast<int>(scale_tones[i]) - 12, low1, high1);
-    notes.push_back(makeNote(tick, dur, sp0, 0));
-    notes.push_back(makeNote(tick, dur, sp1, 1));
+    notes.push_back(makeNote(tick, dur, sp0, 0, BachNoteSource::ToccataGesture));
+    notes.push_back(makeNote(tick, dur, sp1, 1, BachNoteSource::ToccataGesture));
     tick += dur;
   }
 
@@ -437,8 +440,8 @@ void generateBlockChordNotes(const KeySignature& key_sig, Tick tick, Tick end_ti
   uint8_t fifth = clampPitch(60 + tpc + 7,
                              getToccataLowPitch(0), getToccataHighPitch(0));
 
-  notes.push_back(makeNote(tick, dur, fifth, 0));
-  notes.push_back(makeNote(tick, dur, third, 1));
+  notes.push_back(makeNote(tick, dur, fifth, 0, BachNoteSource::ToccataGesture));
+  notes.push_back(makeNote(tick, dur, third, 1, BachNoteSource::ToccataGesture));
   if (num_voices >= 3) {
     uint8_t bass = clampPitch(36 + tpc,
                               getToccataLowPitch(2), getToccataHighPitch(2));
@@ -482,7 +485,8 @@ void generateArpeggioFlourish(const HarmonicTimeline& timeline,
     Tick dur = std::min(kSixteenthNote, end_tick - tick);
     if (dur == 0) break;
 
-    notes.push_back(makeNote(tick, dur, chord_tones[idx], 0));
+    notes.push_back(makeNote(tick, dur, chord_tones[idx], 0,
+                             BachNoteSource::ToccataGesture));
     updateMelodicState(mel_state, prev_flourish_pitch, chord_tones[idx]);
     prev_flourish_pitch = chord_tones[idx];
     tick += dur;
@@ -751,7 +755,8 @@ std::vector<NoteEvent> generateClimbFromMotif(const ClimbingMotif& motif,
     }
     if (dur == 0) break;
 
-    notes.push_back(makeNote(tick, dur, clamped, voice));
+    notes.push_back(makeNote(tick, dur, clamped, voice,
+                             BachNoteSource::ToccataFigure));
     tick += dur;
   }
 
@@ -857,7 +862,8 @@ std::vector<NoteEvent> generateSequenceClimb(const HarmonicTimeline& timeline,
         Tick dur = std::min(kDottedHalf, motif_end_tick - v1_tick);
         if (dur == 0) break;
 
-        notes.push_back(makeNote(v1_tick, dur, support_pitch, 1));
+        notes.push_back(makeNote(v1_tick, dur, support_pitch, 1,
+                                 BachNoteSource::FreeCounterpoint));
         // Advance past this bar to the next downbeat (rest gap on beat 4).
         v1_tick += kTicksPerBar;
       }
@@ -917,7 +923,8 @@ std::vector<NoteEvent> generateSequenceClimb(const HarmonicTimeline& timeline,
                 bridge_pitch = conn_ct[findClosestToneIndex(conn_ct, motif_end_pitch)];
               }
             }
-            notes.push_back(makeNote(tick, bridge_dur, bridge_pitch, 0));
+            notes.push_back(makeNote(tick, bridge_dur, bridge_pitch, 0,
+                                     BachNoteSource::ToccataGesture));
             tick += bridge_dur;
           }
         }
@@ -929,7 +936,8 @@ std::vector<NoteEvent> generateSequenceClimb(const HarmonicTimeline& timeline,
           if (conn_idx + 1 < scale_tones.size()) ++conn_idx;
           Tick dur = std::min(kEighthNote, connector_end - tick);
           if (dur == 0) break;
-          notes.push_back(makeNote(tick, dur, scale_tones[conn_idx], 0));
+          notes.push_back(makeNote(tick, dur, scale_tones[conn_idx], 0,
+                                   BachNoteSource::ToccataGesture));
           tick += dur;
         }
       }
@@ -988,7 +996,8 @@ std::vector<NoteEvent> generateEchoCollapse(const HarmonicTimeline& timeline,
 
       size_t idx = rng::rollRange(rng, 0,
                                   static_cast<int>(chord_tones_v1.size()) - 1);
-      notes.push_back(makeNote(tick, dur, chord_tones_v1[idx], 1));
+      notes.push_back(makeNote(tick, dur, chord_tones_v1[idx], 1,
+                               BachNoteSource::ToccataGesture));
 
       tick += dur;
     }
@@ -1008,7 +1017,8 @@ std::vector<NoteEvent> generateEchoCollapse(const HarmonicTimeline& timeline,
         fade_pitch = chord_tones_v1[1];
       }
 
-      notes.push_back(makeNote(tick, dur, fade_pitch, 1));
+      notes.push_back(makeNote(tick, dur, fade_pitch, 1,
+                               BachNoteSource::ToccataGesture));
       tick += dur;
 
       if (fi == 0 && fade_count > 1) {
@@ -1060,7 +1070,8 @@ std::vector<NoteEvent> generateRecitativeExpansion(const HarmonicTimeline& timel
       if (chord_tones.size() >= 2) {
         size_t ct_idx = (chord_tones.size() >= 3) ? 2 : 1;
         uint8_t chosen = clampPitch(static_cast<int>(chord_tones[ct_idx]), low0, high0);
-        notes.push_back(makeNote(half_start, bar_end - half_start, chosen, 0));
+        notes.push_back(makeNote(half_start, bar_end - half_start, chosen, 0,
+                                 BachNoteSource::FreeCounterpoint));
       }
       continue;
     }
@@ -1117,7 +1128,7 @@ std::vector<NoteEvent> generateRecitativeExpansion(const HarmonicTimeline& timel
       if (dur == 0) break;
 
       notes.push_back(makeNote(tick, dur, rng::selectRandom(rng, valid),
-                               chord_voice));
+                               chord_voice, BachNoteSource::FreeCounterpoint));
       tick += dur;
     }
   }
@@ -1163,7 +1174,8 @@ std::vector<NoteEvent> generateHarmonicBreak(const HarmonicTimeline& timeline,
           idx = rng::rollRange(rng, static_cast<int>(tones_v0.size() / 2),
                                static_cast<int>(tones_v0.size()) - 1);
         }
-        notes.push_back(makeNote(tick, note_dur, tones_v0[idx], 0));
+        notes.push_back(makeNote(tick, note_dur, tones_v0[idx], 0,
+                                 BachNoteSource::ToccataGesture));
       }
 
       if (!tones_v1.empty()) {
@@ -1172,7 +1184,8 @@ std::vector<NoteEvent> generateHarmonicBreak(const HarmonicTimeline& timeline,
           idx = rng::rollRange(rng, 0,
                                static_cast<int>(tones_v1.size() / 2));
         }
-        notes.push_back(makeNote(tick, note_dur, tones_v1[idx], 1));
+        notes.push_back(makeNote(tick, note_dur, tones_v1[idx], 1,
+                                 BachNoteSource::ToccataGesture));
       }
 
       tick += note_dur;
@@ -1198,7 +1211,8 @@ std::vector<NoteEvent> generateHarmonicBreak(const HarmonicTimeline& timeline,
         Tick sustain_dur = std::min(kWholeNote, end_tick - final_bar_start);
         if (sustain_dur > 0) {
           notes.push_back(makeNote(final_bar_start, sustain_dur,
-                                   dom_tones_v1[0], 1));
+                                   dom_tones_v1[0], 1,
+                                   BachNoteSource::ToccataGesture));
         }
       }
     }
@@ -1278,7 +1292,8 @@ std::vector<NoteEvent> generateDominantObsession(const HarmonicTimeline& timelin
     while (tick < end_tick) {
       Tick dur = std::min(kHalfNote, end_tick - tick);
       if (dur == 0) break;
-      notes.push_back(makeNote(tick, dur, sustained0, 0));
+      notes.push_back(makeNote(tick, dur, sustained0, 0,
+                               BachNoteSource::ToccataGesture));
       tick += dur;
     }
   }
@@ -1335,8 +1350,10 @@ std::vector<NoteEvent> generateFinalExplosion(const HarmonicTimeline& timeline,
     while (tick < end_tick) {
       Tick dur = std::min(kWholeNote, end_tick - tick);
       if (dur == 0) break;
-      notes.push_back(makeNote(tick, dur, fifth, 0));
-      notes.push_back(makeNote(tick, dur, major_third, 1));
+      notes.push_back(makeNote(tick, dur, fifth, 0,
+                               BachNoteSource::ToccataGesture));
+      notes.push_back(makeNote(tick, dur, major_third, 1,
+                               BachNoteSource::ToccataGesture));
       tick += dur;
     }
 

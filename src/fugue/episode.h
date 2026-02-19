@@ -77,7 +77,7 @@ struct Episode {
 Episode generateEpisode(const Subject& subject, Tick start_tick, Tick duration_ticks,
                         Key start_key, Key target_key, uint8_t num_voices, uint32_t seed,
                         int episode_index = 0, float energy_level = 0.5f,
-                        const uint8_t* prev_pitches = nullptr);
+                        const uint8_t* last_pitches = nullptr);
 
 /// @brief Generate an episode with harmonic validation.
 ///
@@ -112,7 +112,8 @@ Episode generateEpisode(const Subject& subject, Tick start_tick, Tick duration_t
                         CollisionResolver& cp_resolver, const HarmonicTimeline& timeline,
                         uint8_t pedal_pitch = 0,
                         const ConstraintState* prev_exit_state = nullptr,
-                        ConstraintState* exit_state_out = nullptr);
+                        ConstraintState* exit_state_out = nullptr,
+                        const uint8_t* last_pitches = nullptr);
 
 /// @brief Generate a Fortspinnung-style episode using motif pool fragments.
 ///
@@ -137,7 +138,8 @@ Episode generateFortspinnungEpisode(const Subject& subject, const MotifPool& poo
                                     Tick start_tick, Tick duration_ticks,
                                     Key start_key, Key target_key,
                                     uint8_t num_voices, uint32_t seed,
-                                    int episode_index, float energy_level);
+                                    int episode_index, float energy_level,
+                                    const uint8_t* last_pitches = nullptr);
 
 /// @brief Generate a Fortspinnung-based episode with counterpoint validation.
 ///
@@ -167,7 +169,8 @@ Episode generateFortspinnungEpisode(const Subject& subject, const MotifPool& poo
                                     uint8_t pedal_pitch = 0,
                                     const SectionAccumulator* accum = nullptr,
                                     const ConstraintState* prev_exit_state = nullptr,
-                                    ConstraintState* exit_state_out = nullptr);
+                                    ConstraintState* exit_state_out = nullptr,
+                                    const uint8_t* last_pitches = nullptr);
 
 /// @brief Extract a motif (fragment) from the beginning of the subject.
 ///

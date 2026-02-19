@@ -176,7 +176,8 @@ std::vector<NoteEvent> generateQuasiFugalSection(
       int new_idx = static_cast<int>(base_idx) + motif_offsets[i];
       new_idx = std::max(0, std::min(new_idx, static_cast<int>(scale.size()) - 1));
 
-      notes.push_back(makeNote(tick, dur, scale[new_idx], v));
+      notes.push_back(makeNote(tick, dur, scale[new_idx], v,
+                               BachNoteSource::ToccataFigure));
     }
 
     // Free counterpoint after motif.
@@ -202,7 +203,8 @@ std::vector<NoteEvent> generateQuasiFugalSection(
         else { ascending = true; if (idx + step < scale.size()) idx += step; }
       }
 
-      notes.push_back(makeNote(tick, dur, scale[idx], v));
+      notes.push_back(makeNote(tick, dur, scale[idx], v,
+                               BachNoteSource::ToccataFigure));
       updateMelodicState(qf_mel_state, prev_qf_pitch, scale[idx]);
       prev_qf_pitch = scale[idx];
       tick += dur;
@@ -428,7 +430,8 @@ std::vector<NoteEvent> generateFreeSection(
       if (scale[idx] > center + kMaxRangeFromCenter) ascending = false;
       else if (scale[idx] < center - kMaxRangeFromCenter) ascending = true;
 
-      notes.push_back(makeNote(tick, dur, scale[idx], v));
+      notes.push_back(makeNote(tick, dur, scale[idx], v,
+                               BachNoteSource::ToccataFigure));
       updateMelodicState(free_mel_state, prev_free_pitch, scale[idx]);
       prev_free_pitch = scale[idx];
       tick += dur;

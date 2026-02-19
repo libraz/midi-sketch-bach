@@ -11,7 +11,8 @@
 
 namespace bach {
 
-std::pair<uint8_t, uint8_t> getFugueVoiceRange(VoiceId voice_id, uint8_t num_voices) {
+std::pair<uint8_t, uint8_t> getFugueVoiceRange(VoiceId voice_id, uint8_t num_voices,
+                                                PedalMode pedal_mode) {
   if (num_voices == 2) {
     constexpr uint8_t kRanges2[][2] = {
         {55, 84},  // Voice 0 (upper): G3-C6
@@ -21,13 +22,22 @@ std::pair<uint8_t, uint8_t> getFugueVoiceRange(VoiceId voice_id, uint8_t num_voi
     return {kRanges2[idx][0], kRanges2[idx][1]};
   }
   if (num_voices == 3) {
-    constexpr uint8_t kRanges3[][2] = {
-        {60, 96},  // Voice 0 (soprano): C4-C6
-        {55, 79},  // Voice 1 (alto): G3-G5
-        {48, 72},  // Voice 2 (tenor): C3-C5
-    };
+    // Voice 2 range depends on pedal mode:
+    //   Auto: [48, 72] original tenor range (backward compatible)
+    //   ManualBass: [36, 67] manual bass register
+    //   TruePedal: [24, 50] organ pedal register
     auto idx = voice_id < 3 ? voice_id : 2;
-    return {kRanges3[idx][0], kRanges3[idx][1]};
+    if (idx < 2) {
+      // Voices 0-1 are the same regardless of pedal mode.
+      constexpr uint8_t kUpper[][2] = {{60, 96}, {55, 79}};
+      return {kUpper[idx][0], kUpper[idx][1]};
+    }
+    // Voice 2: mode-dependent.
+    switch (pedal_mode) {
+      case PedalMode::TruePedal:   return {24, 50};
+      case PedalMode::ManualBass:  return {36, 67};
+      default:                     return {48, 72};  // Auto: legacy tenor
+    }
   }
   // 4+ voices
   constexpr uint8_t kRanges4[][2] = {
@@ -48,13 +58,15 @@ struct CharRange {
   uint8_t high;
 };
 
-CharRange getCharacteristicRange(uint8_t range_lo, uint8_t /* range_hi */) {
+CharRange getCharacteristicRange(uint8_t range_lo, uint8_t range_hi) {
   // Map voice range to characteristic sub-band by voice type.
-  //   Soprano: [60,84], Alto: [55,74], Tenor: [48,67], Bass/Pedal: [36,60]
+  //   Soprano: [60,84], Alto: [55,74], Tenor: [48,67],
+  //   TruePedal: [36,50], Bass/Manual: [36,60]
   if (range_lo >= 60) return {60, 84};   // Soprano
   if (range_lo >= 55) return {55, 74};   // Alto
   if (range_lo >= 48) return {48, 67};   // Tenor
-  return {36, 60};                       // Bass / Pedal
+  if (range_hi <= 50) return {36, 50};   // True pedal (narrow range)
+  return {36, 60};                       // Manual bass / general bass
 }
 
 int signOf(int val) {
@@ -305,7 +317,9 @@ int fitToRegisterWithEnvelope(
     const RegisterEnvelope& envelope,
     uint8_t reference_pitch,
     uint8_t adjacent_last_pitch,
-    int* envelope_overflow_count) {
+    int* envelope_overflow_count,
+    uint8_t adjacent_lo,
+    uint8_t adjacent_hi) {
   if (notes.empty()) return 0;
 
   // Get the full voice range.
@@ -346,7 +360,8 @@ int fitToRegisterWithEnvelope(
   // Delegate to fitToRegister with envelope-narrowed range.
   return fitToRegister(notes, safe_lo, safe_hi,
                        reference_pitch, /*prev_reference_pitch=*/0,
-                       adjacent_last_pitch);
+                       adjacent_last_pitch, /*adjacent_prev_pitch=*/0,
+                       adjacent_lo, adjacent_hi);
 }
 
 }  // namespace bach

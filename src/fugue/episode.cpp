@@ -65,7 +65,8 @@ EpisodeRequest buildRequest(const Subject& subject, Tick start_tick,
                             const CounterpointState* cp_state = nullptr,
                             const SectionAccumulator* pipeline_accum = nullptr,
                             const HarmonicTimeline* timeline = nullptr,
-                            const ConstraintState* prev_exit_state = nullptr) {
+                            const ConstraintState* prev_exit_state = nullptr,
+                            const uint8_t* last_pitches = nullptr) {
   EpisodeRequest req;
   req.start_key = start_key;
   req.end_key = target_key;
@@ -119,6 +120,14 @@ EpisodeRequest buildRequest(const Subject& subject, Tick start_tick,
 
   // Wire harmonic timeline for bass pitch selection.
   req.timeline = timeline;
+
+  // Transfer per-voice last pitches for voice-leading continuity.
+  if (last_pitches) {
+    for (int i = 0; i < std::min(static_cast<int>(num_voices),
+                                  EpisodeRequest::kMaxRequestVoices); ++i) {
+      req.last_pitches[i] = last_pitches[i];
+    }
+  }
 
   return req;
 }
@@ -278,11 +287,13 @@ std::vector<NoteEvent> extractCharacteristicMotif(const Subject& subject,
 Episode generateEpisode(const Subject& subject, Tick start_tick, Tick duration_ticks,
                         Key start_key, Key target_key, uint8_t num_voices, uint32_t seed,
                         int episode_index, float energy_level,
-                        const uint8_t* /*prev_pitches*/) {
+                        const uint8_t* last_pitches) {
   MotifPool pool = buildPoolFromSubject(subject);
   EpisodeRequest req = buildRequest(subject, start_tick, duration_ticks,
                                     start_key, target_key, num_voices, seed,
-                                    episode_index, energy_level, &pool);
+                                    episode_index, energy_level, &pool,
+                                    nullptr, nullptr, nullptr, nullptr, nullptr,
+                                    nullptr, last_pitches);
   EpisodeResult res = generateConstraintEpisode(req);
   return resultToEpisode(res, start_tick, duration_ticks, start_key, target_key);
 }
@@ -299,7 +310,8 @@ Episode generateEpisode(const Subject& subject, Tick start_tick, Tick duration_t
                         const HarmonicTimeline& timeline,
                         uint8_t pedal_pitch,
                         const ConstraintState* prev_exit_state,
-                        ConstraintState* exit_state_out) {
+                        ConstraintState* exit_state_out,
+                        const uint8_t* last_pitches) {
   MotifPool pool = buildPoolFromSubject(subject);
   EpisodeRequest req = buildRequest(subject, start_tick, duration_ticks,
                                     start_key, target_key, num_voices, seed,
@@ -307,7 +319,7 @@ Episode generateEpisode(const Subject& subject, Tick start_tick, Tick duration_t
                                     &cp_rules,
                                     dynamic_cast<const BachRuleEvaluator*>(&cp_rules),
                                     &cp_state, nullptr, &timeline,
-                                    prev_exit_state);
+                                    prev_exit_state, last_pitches);
   req.pedal_pitch = pedal_pitch;
   EpisodeResult res = generateConstraintEpisode(req);
   Episode episode = resultToEpisode(res, start_tick, duration_ticks,
@@ -329,17 +341,20 @@ Episode generateFortspinnungEpisode(const Subject& subject, const MotifPool& poo
                                     Tick start_tick, Tick duration_ticks,
                                     Key start_key, Key target_key,
                                     uint8_t num_voices, uint32_t seed,
-                                    int episode_index, float energy_level) {
+                                    int episode_index, float energy_level,
+                                    const uint8_t* last_pitches) {
   // Fall back to standard generation if the pool is empty.
   if (pool.empty()) {
     return generateEpisode(subject, start_tick, duration_ticks,
                            start_key, target_key, num_voices, seed,
-                           episode_index, energy_level);
+                           episode_index, energy_level, last_pitches);
   }
 
   EpisodeRequest req = buildRequest(subject, start_tick, duration_ticks,
                                     start_key, target_key, num_voices, seed,
-                                    episode_index, energy_level, &pool);
+                                    episode_index, energy_level, &pool,
+                                    nullptr, nullptr, nullptr, nullptr, nullptr,
+                                    nullptr, last_pitches);
   EpisodeResult res = generateConstraintEpisode(req);
   return resultToEpisode(res, start_tick, duration_ticks, start_key, target_key);
 }
@@ -360,7 +375,8 @@ Episode generateFortspinnungEpisode(const Subject& subject, const MotifPool& poo
                                     uint8_t pedal_pitch,
                                     const SectionAccumulator* accum,
                                     const ConstraintState* prev_exit_state,
-                                    ConstraintState* exit_state_out) {
+                                    ConstraintState* exit_state_out,
+                                    const uint8_t* last_pitches) {
   // Fall back to validated non-pool overload if pool is empty.
   if (pool.empty()) {
     return generateEpisode(subject, start_tick, duration_ticks,
@@ -368,7 +384,8 @@ Episode generateFortspinnungEpisode(const Subject& subject, const MotifPool& poo
                            episode_index, energy_level,
                            cp_state, cp_rules, cp_resolver,
                            timeline, pedal_pitch,
-                           prev_exit_state, exit_state_out);
+                           prev_exit_state, exit_state_out,
+                           last_pitches);
   }
 
   EpisodeRequest req = buildRequest(subject, start_tick, duration_ticks,
@@ -377,7 +394,7 @@ Episode generateFortspinnungEpisode(const Subject& subject, const MotifPool& poo
                                     &cp_rules,
                                     dynamic_cast<const BachRuleEvaluator*>(&cp_rules),
                                     &cp_state, accum, &timeline,
-                                    prev_exit_state);
+                                    prev_exit_state, last_pitches);
   req.pedal_pitch = pedal_pitch;
   EpisodeResult res = generateConstraintEpisode(req);
   Episode episode = resultToEpisode(res, start_tick, duration_ticks,

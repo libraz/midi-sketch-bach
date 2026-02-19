@@ -179,7 +179,11 @@ uint8_t applyModulationShift(uint8_t pitch, float progress, int total_shift) {
 /// @param num_voices Total voice count.
 /// @param current_key Current key.
 /// @param rng RNG for probabilistic emission.
+/// @param timeline Harmonic timeline for bass pitch selection (nullable).
 /// @param grammar Fortspinnung grammar for phase boundary calculation.
+/// @param rule_eval Rule evaluator for parallel perfect checks (nullable).
+/// @param crossing_eval Bach evaluator for crossing checks (nullable).
+/// @param cp_state_ctx Counterpoint state context (nullable).
 void placeBassFragments(std::vector<NoteEvent>& result,
                         ConstraintState& state,
                         const std::vector<NoteEvent>& placed_notes,
@@ -187,7 +191,10 @@ void placeBassFragments(std::vector<NoteEvent>& result,
                         uint8_t num_voices, Key current_key,
                         std::mt19937& rng,
                         const HarmonicTimeline* timeline,
-                        const FortspinnungGrammar& grammar) {
+                        const FortspinnungGrammar& grammar,
+                        const IRuleEvaluator* rule_eval,
+                        const BachRuleEvaluator* crossing_eval,
+                        const CounterpointState* cp_state_ctx) {
   if (num_voices < 3 || placed_notes.empty()) return;
 
   // Collect voice 0 notes for tail extraction.
@@ -255,7 +262,7 @@ void placeBassFragments(std::vector<NoteEvent>& result,
             bass_prev_pitch, kTicksPerBeat, note_tick, current_key);
         float score = state.evaluate(
             frag_note.pitch, frag_note.duration, 2, note_tick,
-            ctx, snap, nullptr, nullptr, nullptr, nullptr, 0, 0.0f);
+            ctx, snap, rule_eval, crossing_eval, cp_state_ctx, nullptr, 0, 0.0f);
 
         if (score > -std::numeric_limits<float>::infinity()) {
           NoteEvent evt = frag_note;
@@ -371,7 +378,7 @@ void placeBassFragments(std::vector<NoteEvent>& result,
             bass_prev_pitch, kTicksPerBeat, bass_tick, current_key);
         float score = state.evaluate(
             static_cast<uint8_t>(anchor_pitch), anchor_dur, 2, bass_tick,
-            ctx, snap, nullptr, nullptr, nullptr, nullptr, 0, 0.0f);
+            ctx, snap, rule_eval, crossing_eval, cp_state_ctx, nullptr, 0, 0.0f);
 
         if (score > -std::numeric_limits<float>::infinity()) {
           NoteEvent anchor;
@@ -390,12 +397,23 @@ void placeBassFragments(std::vector<NoteEvent>& result,
     }
     use_fragment = !use_fragment;
   }
+
+  // Post-sweep: voice 2 notes exceeding range ceiling octave-folded.
+  for (auto& note : result) {
+    if (note.voice != 2) continue;
+    if (note.start_tick < start_tick || note.start_tick >= start_tick + duration) continue;
+    int p = static_cast<int>(note.pitch);
+    while (p > v2_hi_int && p - 12 >= v2_lo_int) p -= 12;
+    while (p < v2_lo_int && p + 12 <= v2_hi_int) p += 12;
+    note.pitch = clampPitch(p, v2_lo, v2_hi);
+  }
 }
 
 /// @brief Place pedal voice (voice 3+) with tonic/dominant anchor notes.
 ///
 /// For 4+ voice fugues, voice 3 (or the last voice) alternates between
-/// tonic and dominant anchor notes in the pedal register.
+/// tonic and dominant anchor notes in the pedal register. Each note is
+/// validated through state.evaluate() before placement.
 ///
 /// @param result Output note vector (appended to).
 /// @param state Constraint state (modified via advance).
@@ -404,11 +422,17 @@ void placeBassFragments(std::vector<NoteEvent>& result,
 /// @param num_voices Total voice count.
 /// @param current_key Current key.
 /// @param rng RNG for probabilistic emission.
+/// @param rule_eval Rule evaluator for parallel perfect checks (nullable).
+/// @param crossing_eval Bach evaluator for crossing checks (nullable).
+/// @param cp_state_ctx Counterpoint state context (nullable).
 void placePedalVoice(std::vector<NoteEvent>& result,
                      ConstraintState& state,
                      Tick start_tick, Tick duration,
                      uint8_t num_voices, Key current_key,
-                     std::mt19937& rng) {
+                     std::mt19937& rng,
+                     const IRuleEvaluator* rule_eval,
+                     const BachRuleEvaluator* crossing_eval,
+                     const CounterpointState* cp_state_ctx) {
   if (num_voices < 4) return;
 
   VoiceId pedal_voice = num_voices - 1;
@@ -439,12 +463,16 @@ void placePedalVoice(std::vector<NoteEvent>& result,
     }
 
     consecutive_silent_bars = 0;
-    // Tonic(50%), dominant(35%), subdominant(15%).
+    // Tonic/dominant/subdominant distribution shifts toward dominant near episode end.
+    float progress = static_cast<float>(pedal_tick - start_tick) /
+                     static_cast<float>(std::max(duration, static_cast<Tick>(1)));
+    float t_prob = (progress >= 0.75f) ? 0.25f : 0.50f;
+    float d_prob = (progress >= 0.75f) ? 0.60f : 0.35f;
     int anchor;
     float pedal_roll = rng::rollFloat(rng, 0.0f, 1.0f);
-    if (pedal_roll < 0.50f) {
+    if (pedal_roll < t_prob) {
       anchor = tonic_bass;
-    } else if (pedal_roll < 0.85f) {
+    } else if (pedal_roll < t_prob + d_prob) {
       anchor = dominant_bass;
     } else {
       // Subdominant (IV): tonic + 5 semitones.
@@ -455,15 +483,24 @@ void placePedalVoice(std::vector<NoteEvent>& result,
     Tick anchor_dur = std::min(kTicksPerBeat * 2,  // Half note.
                                start_tick + duration - pedal_tick);
     if (anchor_dur > 0) {
-      NoteEvent note;
-      note.start_tick = pedal_tick;
-      note.duration = anchor_dur;
-      note.pitch = static_cast<uint8_t>(anchor);
-      note.velocity = 80;
-      note.voice = pedal_voice;
-      note.source = BachNoteSource::EpisodeMaterial;
-      result.push_back(note);
-      state.advance(pedal_tick, note.pitch, pedal_voice, note.duration, current_key);
+      VerticalSnapshot snap = buildSnapshot(result, pedal_tick, num_voices);
+      MarkovContext ctx = buildMarkovContext(
+          0, kTicksPerBeat, pedal_tick, current_key);
+      float score = state.evaluate(
+          static_cast<uint8_t>(anchor), anchor_dur, pedal_voice, pedal_tick,
+          ctx, snap, rule_eval, crossing_eval, cp_state_ctx, nullptr, 0, 0.0f);
+
+      if (score > -std::numeric_limits<float>::infinity()) {
+        NoteEvent note;
+        note.start_tick = pedal_tick;
+        note.duration = anchor_dur;
+        note.pitch = static_cast<uint8_t>(anchor);
+        note.velocity = 80;
+        note.voice = pedal_voice;
+        note.source = BachNoteSource::EpisodeMaterial;
+        result.push_back(note);
+        state.advance(pedal_tick, note.pitch, pedal_voice, note.duration, current_key);
+      }
     }
     pedal_tick += kTicksPerBeat * 2;  // Half-bar advance.
     use_tonic = !use_tonic;
@@ -474,20 +511,29 @@ void placePedalVoice(std::vector<NoteEvent>& result,
 ///
 /// In 4+ voice episodes, one inner voice "rests" by holding sustained
 /// notes (whole notes) while other voices have active material.
-/// The resting voice rotates based on episode_index.
+/// The resting voice rotates based on episode_index. Each held tone is
+/// validated through state.evaluate() before placement.
 ///
 /// @param result Output note vector (appended to).
 /// @param placed_notes Existing notes (for pitch reference).
+/// @param state Constraint state (modified via advance).
 /// @param start_tick Episode start tick.
 /// @param duration Episode duration.
 /// @param num_voices Total voice count.
 /// @param episode_index Episode ordinal (determines resting voice).
 /// @param current_key Current key.
+/// @param rule_eval Rule evaluator for parallel perfect checks (nullable).
+/// @param crossing_eval Bach evaluator for crossing checks (nullable).
+/// @param cp_state_ctx Counterpoint state context (nullable).
 void placeHeldTones(std::vector<NoteEvent>& result,
                     const std::vector<NoteEvent>& placed_notes,
+                    ConstraintState& state,
                     Tick start_tick, Tick duration,
                     uint8_t num_voices, int episode_index,
-                    Key current_key) {
+                    Key current_key,
+                    const IRuleEvaluator* rule_eval,
+                    const BachRuleEvaluator* crossing_eval,
+                    const CounterpointState* cp_state_ctx) {
   if (num_voices < 4) return;
 
   // Resting voice rotates through inner voices (not voice 0/1 active, not bass).
@@ -526,14 +572,24 @@ void placeHeldTones(std::vector<NoteEvent>& result,
                              start_tick + duration - held_tick);
     if (held_dur == 0) break;
 
-    NoteEvent held;
-    held.start_tick = held_tick;
-    held.duration = held_dur;
-    held.pitch = static_cast<uint8_t>(held_pitch);
-    held.velocity = 80;
-    held.voice = resting_voice;
-    held.source = BachNoteSource::EpisodeMaterial;
-    result.push_back(held);
+    VerticalSnapshot snap = buildSnapshot(result, held_tick, num_voices);
+    MarkovContext ctx = buildMarkovContext(
+        static_cast<uint8_t>(held_pitch), kTicksPerBeat, held_tick, current_key);
+    float score = state.evaluate(
+        static_cast<uint8_t>(held_pitch), held_dur, resting_voice, held_tick,
+        ctx, snap, rule_eval, crossing_eval, cp_state_ctx, nullptr, 0, 0.0f);
+
+    if (score > -std::numeric_limits<float>::infinity()) {
+      NoteEvent held;
+      held.start_tick = held_tick;
+      held.duration = held_dur;
+      held.pitch = static_cast<uint8_t>(held_pitch);
+      held.velocity = 80;
+      held.voice = resting_voice;
+      held.source = BachNoteSource::EpisodeMaterial;
+      result.push_back(held);
+      state.advance(held_tick, held.pitch, resting_voice, held_dur, current_key);
+    }
 
     held_tick += kTicksPerBeat * 2;  // Half-bar advance.
     ++held_step_count;
@@ -645,23 +701,24 @@ EpisodeResult generateConstraintEpisode(const EpisodeRequest& request) {
     current_bar_idx[vdx] = -1;  // Sentinel: no bar seen yet.
   }
 
-  // Initialize previous pitches from transformed motifs.
-  if (!v0_transformed.empty()) {
-    prev_pitch_per_voice[0] = v0_transformed[0].pitch;
-    prev_dur_per_voice[0] = v0_transformed[0].duration;
-  } else {
-    prev_pitch_per_voice[0] = 60;
-    prev_dur_per_voice[0] = kTicksPerBeat;
-  }
-  if (!v1_transformed.empty()) {
-    prev_pitch_per_voice[1] = v1_transformed[0].pitch;
-    prev_dur_per_voice[1] = v1_transformed[0].duration;
-  } else {
-    prev_pitch_per_voice[1] = 55;
-    prev_dur_per_voice[1] = kTicksPerBeat;
-  }
-  for (int vdx = 2; vdx < kMaxVoices; ++vdx) {
-    prev_pitch_per_voice[vdx] = 48;
+  // Initialize previous pitches: prefer last_pitches from previous section
+  // (voice-leading continuity), fall back to transformed motif's first pitch.
+  for (int vdx = 0; vdx < kMaxVoices; ++vdx) {
+    if (vdx < request.num_voices &&
+        vdx < EpisodeRequest::kMaxRequestVoices &&
+        request.last_pitches[vdx] > 0) {
+      prev_pitch_per_voice[vdx] = request.last_pitches[vdx];
+    } else if (vdx == 0 && !v0_transformed.empty()) {
+      prev_pitch_per_voice[vdx] = v0_transformed[0].pitch;
+    } else if (vdx == 1 && !v1_transformed.empty()) {
+      prev_pitch_per_voice[vdx] = v1_transformed[0].pitch;
+    } else {
+      // Re-entry or unknown: use voice center as neutral starting point.
+      auto [vlo, vhi] = getFugueVoiceRange(
+          static_cast<uint8_t>(vdx), request.num_voices);
+      prev_pitch_per_voice[vdx] =
+          static_cast<uint8_t>((static_cast<int>(vlo) + static_cast<int>(vhi)) / 2);
+    }
     prev_dur_per_voice[vdx] = kTicksPerBeat;
   }
 
@@ -884,9 +941,12 @@ EpisodeResult generateConstraintEpisode(const EpisodeRequest& request) {
   // 5a. Place held tones on resting voice first (so bass skips it).
   if (resting_voice != 255) {
     placeHeldTones(result.notes, result.notes,
+                   state,
                    request.start_tick, request.duration,
                    request.num_voices, request.episode_index,
-                   request.start_key);
+                   request.start_key,
+                   request.rule_eval, request.crossing_eval,
+                   request.cp_state_ctx);
   }
 
   // 5b. Place bass fragments for voice 2 (if not resting).
@@ -897,7 +957,9 @@ EpisodeResult generateConstraintEpisode(const EpisodeRequest& request) {
     placeBassFragments(result.notes, state, placed_copy,
                        request.start_tick, request.duration,
                        request.num_voices, bass_key, bass_rng,
-                       request.timeline, request.grammar);
+                       request.timeline, request.grammar,
+                       request.rule_eval, request.crossing_eval,
+                       request.cp_state_ctx);
   }
 
   // 5c. Place pedal voice (last voice) for 4+ voice fugues.
@@ -905,7 +967,9 @@ EpisodeResult generateConstraintEpisode(const EpisodeRequest& request) {
     std::mt19937 pedal_rng(request.seed ^ 0xBA550003u);
     placePedalVoice(result.notes, state,
                     request.start_tick, request.duration,
-                    request.num_voices, request.end_key, pedal_rng);
+                    request.num_voices, request.end_key, pedal_rng,
+                    request.rule_eval, request.crossing_eval,
+                    request.cp_state_ctx);
   }
 
   // 6. Apply invertible counterpoint (odd episode_index, num_voices >= 2).

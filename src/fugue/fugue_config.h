@@ -334,6 +334,18 @@ struct TextureDensityTarget {
   float max_tutti_ratio = 0.15f;   ///< Max fraction of tutti time.
 };
 
+/// @brief Pedal voice treatment for 3-voice fugues.
+///
+/// Determined once per seed during exposition planning:
+///   - TruePedal: voice 2 = organ pedal [24, 50], full pedal rules apply
+///   - ManualBass: voice 2 = manual bass [36, 67], no pedal rules
+///   - Auto: decide based on subject/answer fit to [24, 50]
+enum class PedalMode : uint8_t {
+  Auto,        ///< Decide during exposition planning (default).
+  TruePedal,   ///< Force organ pedal treatment.
+  ManualBass   ///< Force manual bass treatment.
+};
+
 /// Configuration for fugue generation.
 struct FugueConfig {
   SubjectSource subject_source = SubjectSource::Generate;
@@ -354,6 +366,7 @@ struct FugueConfig {
   bool enable_picardy = true;           ///< Apply Picardy third in minor keys.
   TextureDensityTarget density_target;  ///< Texture density guidance.
   std::vector<int> toccata_core_intervals;  ///< Toccata gesture core intervals (empty = no toccata context).
+  PedalMode pedal_mode = PedalMode::Auto;  ///< Pedal voice treatment (resolved during buildMaterial).
 };
 
 }  // namespace bach

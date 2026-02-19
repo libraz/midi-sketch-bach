@@ -149,6 +149,57 @@ uint8_t clampVoiceCount(uint8_t num_voices) {
   return num_voices;
 }
 
+/// @brief Determine pedal mode for 3-voice fugues.
+///
+/// Checks if the subject and answer can fit within the organ pedal range [24, 50]
+/// via octave transposition. If both fit, TruePedal is used; otherwise ManualBass.
+/// For non-3-voice fugues, returns the input mode unchanged.
+///
+/// @param config Fugue configuration.
+/// @param subject Generated subject.
+/// @param answer Generated answer.
+/// @return Resolved PedalMode (never Auto).
+PedalMode determinePedalMode(const FugueConfig& config,
+                             const Subject& subject,
+                             const Answer& answer) {
+  if (config.pedal_mode != PedalMode::Auto) return config.pedal_mode;
+  if (config.num_voices != 3) return PedalMode::ManualBass;
+
+  // Check if subject fits in pedal range [24, 50] at any octave.
+  constexpr uint8_t kPedalLo = 24;
+  constexpr uint8_t kPedalHi = 50;
+
+  auto fitsInPedalRange = [&](const std::vector<NoteEvent>& notes) -> bool {
+    if (notes.empty()) return false;
+    uint8_t min_p = 127, max_p = 0;
+    for (const auto& n : notes) {
+      if (n.pitch < min_p) min_p = n.pitch;
+      if (n.pitch > max_p) max_p = n.pitch;
+    }
+    int span = static_cast<int>(max_p) - static_cast<int>(min_p);
+    int target_span = static_cast<int>(kPedalHi) - static_cast<int>(kPedalLo);
+    if (span > target_span) return false;  // Subject wider than pedal range.
+
+    // Try all octave shifts.
+    for (int shift = -48; shift <= 48; shift += 12) {
+      int lo = static_cast<int>(min_p) + shift;
+      int hi = static_cast<int>(max_p) + shift;
+      if (lo >= kPedalLo && hi <= kPedalHi) return true;
+    }
+    return false;
+  };
+
+  bool subject_fits = fitsInPedalRange(subject.notes);
+  bool answer_fits = fitsInPedalRange(answer.notes);
+
+  PedalMode result = (subject_fits && answer_fits) ? PedalMode::TruePedal
+                                                    : PedalMode::ManualBass;
+  fprintf(stderr, "determinePedalMode: subject_fits=%d answer_fits=%d -> %s\n",
+          subject_fits, answer_fits,
+          result == PedalMode::TruePedal ? "TruePedal" : "ManualBass");
+  return result;
+}
+
 /// @brief Human-readable name for an organ manual.
 /// @param manual OrganManual enum value.
 /// @return Descriptive string for the manual.
@@ -648,6 +699,36 @@ static std::vector<NoteEvent> buildCodaChordNotes(Tick start_tick, Tick duration
             std::swap(notes[held_indices[idx]].pitch,
                       notes[held_indices[jdx]].pitch);
           }
+        }
+      }
+
+      // Override lowest voice to tonic pedal point (Bach coda convention).
+      // Choose the octave of tonic closest to last_pitches to avoid large jumps.
+      VoiceId lowest = num_voices - 1;
+      auto [ped_lo, ped_hi] = getFugueVoiceRange(lowest, num_voices);
+      int bass_tonic = 36 + static_cast<int>(key);  // C2 default
+      while (bass_tonic > static_cast<int>(ped_hi)) bass_tonic -= 12;
+      while (bass_tonic < static_cast<int>(ped_lo)) bass_tonic += 12;
+      if (last_pitches && last_pitches[lowest] > 0) {
+        int prev = static_cast<int>(last_pitches[lowest]);
+        int best = bass_tonic;
+        int best_dist = std::abs(prev - bass_tonic);
+        for (int oct : {-12, 12, -24, 24}) {
+          int cand = bass_tonic + oct;
+          if (cand < static_cast<int>(ped_lo) || cand > static_cast<int>(ped_hi)) continue;
+          int dist = std::abs(prev - cand);
+          if (dist < best_dist) {
+            best_dist = dist;
+            best = cand;
+          }
+        }
+        bass_tonic = best;
+      }
+      for (auto& note : notes) {
+        if (note.voice == lowest && note.start_tick == start_tick &&
+            note.duration == stage1_dur) {
+          note.pitch = clampPitch(bass_tonic, ped_lo, ped_hi);
+          break;
         }
       }
     }
@@ -2077,6 +2158,13 @@ std::vector<NoteEvent> generateSections(
           }
         }
 
+        // Extract per-voice last pitches for episode voice-leading continuity.
+        uint8_t ep_last_pitches[6] = {};
+        for (uint8_t vid = 0; vid < num_voices && vid < 6; ++vid) {
+          ep_last_pitches[vid] = extractVoiceLastPitch(
+              all_notes, current_tick, vid);
+        }
+
         ConstraintState episode_exit;
         Episode episode = generateFortspinnungEpisode(
             material.subject, material.motif_pool,
@@ -2086,7 +2174,7 @@ std::vector<NoteEvent> generateSections(
             cp_state, cp_rules, cp_resolver, plan.detailed_timeline,
             0, &pipeline_cs.accumulator,
             prev_episode_exit ? &*prev_episode_exit : nullptr,
-            &episode_exit);
+            &episode_exit, ep_last_pitches);
         // Chain exit state: update pipeline accumulator and store for next episode.
         pipeline_cs.accumulator = episode_exit.accumulator;
         prev_episode_exit = std::move(episode_exit);
@@ -2201,6 +2289,13 @@ std::vector<NoteEvent> generateSections(
                 current_tick, plan.estimated_duration);
             pipeline_cs.gravity.phase = FuguePhase::Develop;
             pipeline_cs.gravity.energy = me_energy;
+            // Extract per-voice last pitches for companion voice-leading continuity.
+            uint8_t comp_last_pitches[6] = {};
+            for (uint8_t vid = 0; vid < num_voices && vid < 6; ++vid) {
+              comp_last_pitches[vid] = extractVoiceLastPitch(
+                  all_notes, current_tick, vid);
+            }
+
             ConstraintState companion_exit;
             Episode companion = generateFortspinnungEpisode(
                 material.subject, material.motif_pool,
@@ -2210,7 +2305,7 @@ std::vector<NoteEvent> generateSections(
                 cp_state, cp_rules, cp_resolver, plan.detailed_timeline,
                 0, &pipeline_cs.accumulator,
                 prev_episode_exit ? &*prev_episode_exit : nullptr,
-                &companion_exit);
+                &companion_exit, comp_last_pitches);
             // Chain exit state from companion episode.
             pipeline_cs.accumulator = companion_exit.accumulator;
             prev_episode_exit = std::move(companion_exit);
@@ -2277,6 +2372,13 @@ std::vector<NoteEvent> generateSections(
               current_tick, plan.estimated_duration);
           pipeline_cs.gravity.phase = FuguePhase::Resolve;
           pipeline_cs.gravity.energy = pedal_energy;
+          // Extract per-voice last pitches for pedal episode voice-leading continuity.
+          uint8_t pedal_last_pitches[6] = {};
+          for (uint8_t vid = 0; vid < upper_voices && vid < 6; ++vid) {
+            pedal_last_pitches[vid] = extractVoiceLastPitch(
+                all_notes, current_tick, vid);
+          }
+
           ConstraintState pedal_exit;
           Episode pedal_episode = generateFortspinnungEpisode(
               material.subject, material.motif_pool,
@@ -2288,7 +2390,7 @@ std::vector<NoteEvent> generateSections(
               cp_state, cp_rules, cp_resolver, plan.detailed_timeline,
               dominant_pitch, &pipeline_cs.accumulator,
               prev_episode_exit ? &*prev_episode_exit : nullptr,
-              &pedal_exit);
+              &pedal_exit, pedal_last_pitches);
           // Chain exit state from pedal episode.
           pipeline_cs.accumulator = pedal_exit.accumulator;
           prev_episode_exit = std::move(pedal_exit);
@@ -2606,7 +2708,7 @@ static void repairParallelPerfectsAndTritones(
     const FugueConfig& config,
     const FuguePlan& plan,
     uint8_t num_voices) {
-  constexpr int kMaxParallelRepairs = 8;
+  constexpr int kMaxParallelRepairs = 16;
   ScaleType repair_scale =
       config.is_minor ? ScaleType::HarmonicMinor : ScaleType::Major;
   Tick total_ticks = plan.estimated_duration;
@@ -2652,6 +2754,7 @@ static void repairParallelPerfectsAndTritones(
   }
 
   int pre_count = 0;
+  int outer_count = 0;
   int repair_count = 0;
 
   // Scan consecutive beat pairs.
@@ -2686,9 +2789,13 @@ static void repairParallelPerfectsAndTritones(
       if (prev_ic != 0 && prev_ic != 7) continue;  // not P1/P8 or P5
 
       pre_count++;
-      // Skip parallel repair: reference expects ~0.84/100beats parallel perfects.
-      // Driving rate to 0 penalizes the z-score more than the violation penalty.
-      continue;
+      // Only repair outer pair (soprano-bass) parallels — CRITICAL violations.
+      // Inner pairs: preserve natural parallel rate (~0.84/100beats z-score).
+      {
+        bool is_outer = (vi == 0 && vj == static_cast<VoiceId>(num_voices - 1));
+        if (!is_outer) continue;  // inner pairs: maintain natural rate
+        outer_count++;
+      }
 
       // Determine which note to modify: must be Flexible.
       NoteEvent* target = nullptr;
@@ -2813,8 +2920,8 @@ static void repairParallelPerfectsAndTritones(
     }
   }
 
-  fprintf(stderr, "P7.d sweep: %d parallels found, %d repaired\n",
-          pre_count, repair_count);
+  fprintf(stderr, "P7.d sweep: %d parallels found (%d outer), %d repaired\n",
+          pre_count, outer_count, repair_count);
 }
 
 /// @brief Scan each beat for adjacent voice pairs where the higher-numbered
@@ -2911,6 +3018,23 @@ static void repairVoiceCrossings(
 
         // Crossing: higher-numbered voice (lower register) has higher pitch.
         if (pitch_upper >= pitch_lower) continue;
+
+        // 2-beat lookahead: skip temporary crossings (matches Python validator).
+        // Crossings that resolve within 2 beats are INFO (0pts) in scoring.
+        bool resolves_soon = false;
+        for (int ahead = 1; ahead <= 2; ++ahead) {
+          Tick future = beat + kTicksPerBeat * ahead;
+          if (future >= sec_end) break;
+          NoteEvent* fu = findNoteForVoice(vi, future);
+          NoteEvent* fl = findNoteForVoice(vj, future);
+          if (fu && fl &&
+              static_cast<int>(fu->pitch) >= static_cast<int>(fl->pitch)) {
+            resolves_soon = true;
+            break;
+          }
+        }
+        if (resolves_soon) continue;
+
         total_crossings_found++;
 
         // Determine which note to modify based on ProtectionLevel.
@@ -3162,15 +3286,21 @@ FugueResult generateFuguePipeline(const FugueConfig& config) {
     return result;
   }
 
+  // Step 1b: Resolve pedal mode (immutable for this seed).
+  FugueConfig resolved_config = config;
+  resolved_config.pedal_mode = determinePedalMode(
+      config, material.subject, material.answer);
+
   // Step 2: Plan structure.
-  FuguePlan plan = planStructure(config, material);
+  FuguePlan plan = planStructure(resolved_config, material);
 
   // Step 3: Generate sections.
   FugueStructure structure;
-  std::vector<NoteEvent> all_notes = generateSections(config, material, plan, structure);
+  std::vector<NoteEvent> all_notes = generateSections(
+      resolved_config, material, plan, structure);
 
   // Step 4: Finalize.
-  return finalize(config, material, plan, structure, std::move(all_notes));
+  return finalize(resolved_config, material, plan, structure, std::move(all_notes));
 }
 
 }  // namespace bach

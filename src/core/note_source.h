@@ -132,9 +132,20 @@ inline int sourcePriority(BachNoteSource source) {
 }
 
 /// @brief Check if a voice index is the pedal voice for a given voice count.
-/// Organ pedal is the last voice when num_voices >= 3.
-inline bool isPedalVoice(uint8_t voice, uint8_t num_voices) {
-  return num_voices >= 3 && voice == num_voices - 1;
+///
+/// For 4+ voices, the last voice is always pedal.
+/// For 3 voices, depends on pedal mode: true only when has_true_pedal is set.
+/// For 2 voices, never pedal.
+///
+/// @param voice Voice index.
+/// @param num_voices Total voice count.
+/// @param has_true_pedal True if 3-voice fugue uses TruePedal mode (default: false).
+inline bool isPedalVoice(uint8_t voice, uint8_t num_voices,
+                         bool has_true_pedal = false) {
+  if (num_voices < 3) return false;
+  if (voice != num_voices - 1) return false;
+  if (num_voices == 3) return has_true_pedal;
+  return true;  // 4+ voices: last voice is always pedal
 }
 
 /// Transformation steps applied to a note during generation.
