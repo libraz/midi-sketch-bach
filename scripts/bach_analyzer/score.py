@@ -1573,6 +1573,11 @@ def _score_texture(
     For toccata_and_fugue forms, uses the organ_toccata texture reference
     (avg_active ~2.10) instead of organ_fugue (avg_active ~2.66), reflecting
     the lighter texture of toccata free sections.
+
+    Voice count normalization: when the generated piece has fewer voices than
+    the reference (e.g., 3-voice fugue vs 4-voice organ_fugue reference), the
+    reference mean/std are scaled proportionally and texture distribution
+    buckets beyond the voice count are collapsed.
     """
     if score.num_voices < 2:
         # Still score texture for single-voice works
@@ -1582,6 +1587,27 @@ def _score_texture(
     tp = extract_texture_profile(score)
 
     ref_tex, av_scalar = _get_texture_reference(ref, form_name)
+
+    # --- Voice count normalization ---
+    # Reference data is based on 4-voice organ fugues.  Scale for fewer voices.
+    ref_voice_count = 4
+    if score.num_voices < ref_voice_count:
+        scale = score.num_voices / ref_voice_count
+        # (a) Scale avg_active_voices reference mean/std
+        if av_scalar:
+            av_scalar = dict(av_scalar)  # avoid mutating shared data
+            av_scalar["mean"] = av_scalar["mean"] * scale
+            av_scalar["std"] = max(av_scalar["std"] * scale, 0.25)
+        # (b) Collapse texture distribution buckets > num_voices into num_voices
+        if ref_tex:
+            max_v = score.num_voices
+            collapsed: Dict[str, float] = {}
+            for k, v in ref_tex.items():
+                bucket = str(min(int(k), max_v))
+                collapsed[bucket] = collapsed.get(bucket, 0.0) + v
+            total = sum(collapsed.values())
+            if total > 0:
+                ref_tex = {k: v / total for k, v in collapsed.items()}
 
     # Texture distribution JSD
     if tp["distribution"] and ref_tex:
