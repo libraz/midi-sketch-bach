@@ -69,9 +69,11 @@ std::vector<NoteEvent> generateBarRange(
     uint8_t voice_index,
     uint32_t seed,
     int start_bar,
-    int num_bars) {
+    int num_bars,
+    float theme_strength = 0.0f) {
   FigurenGenerator figuren;
-  auto all_notes = figuren.generate(profile, grid, key, time_sig, voice_index, seed);
+  auto all_notes = figuren.generate(profile, grid, key, time_sig, voice_index,
+                                     seed, nullptr, theme_strength);
 
   Tick ticks_per_bar = time_sig.ticksPerBar();
   Tick range_start = static_cast<Tick>(start_bar) * ticks_per_bar;
@@ -205,8 +207,10 @@ DanceResult DanceGenerator::generate(
 
     for (uint8_t voice_idx = 0; voice_idx < dance.voice_count; ++voice_idx) {
       uint32_t voice_seed = seed + voice_idx * 1000;
+      float strength = (voice_idx == 0) ? 0.4f : 0.0f;
       auto voice_notes = figuren.generate(
-          profile, grid, key, dance.time_sig, voice_idx, voice_seed);
+          profile, grid, key, dance.time_sig, voice_idx, voice_seed,
+          nullptr, strength);
 
       // Set the provenance source for dance notes.
       for (auto& note : voice_notes) {

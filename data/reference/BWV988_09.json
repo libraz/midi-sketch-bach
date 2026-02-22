@@ -4,6 +4,9 @@
   "instrument": "keyboard",
   "form": "variation",
   "movement": 9,
+  "tonic": "G",
+  "mode": "major",
+  "confidence": "verified",
   "ticks_per_beat": 480,
   "duration_seconds": 38.5,
   "tempos": [

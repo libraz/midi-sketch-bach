@@ -4,6 +4,9 @@
   "instrument": "organ",
   "form": "fugue",
   "movement": null,
+  "tonic": "F",
+  "mode": "major",
+  "confidence": "verified",
   "ticks_per_beat": 384,
   "duration_seconds": 284.1,
   "tempos": [

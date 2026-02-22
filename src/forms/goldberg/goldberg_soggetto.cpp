@@ -157,10 +157,19 @@ std::vector<std::vector<NoteEvent>> SoggettoGenerator::generateCandidates(
   int register_anchor = kBaseNote;
   if (params.grid != nullptr) {
     int grid_bar = static_cast<int>(params.start_bar) - 1;
-    register_anchor = static_cast<int>(
-        params.grid->getStructuralBassPitch(grid_bar));
-    // Shift up one octave for melodic register (bass is low).
-    register_anchor += 12;
+    int bass_anchor = static_cast<int>(
+        params.grid->getStructuralBassPitch(grid_bar)) + 12;
+    // Blend bass-derived anchor with Aria melody pitch for register affinity.
+    // 7/8 harmonic (bass) + 1/8 melodic (theme) — light touch to preserve
+    // harmonic differentiation while adding subtle melodic coherence.
+    if (grid_bar >= 0 && grid_bar < 32 &&
+        params.grid->getBar(grid_bar).aria_melody[0] > 0) {
+      int aria_anchor = static_cast<int>(
+          params.grid->getBar(grid_bar).aria_melody[0]);
+      register_anchor = (bass_anchor * 7 + aria_anchor) / 8;
+    } else {
+      register_anchor = bass_anchor;
+    }
   }
 
   int pitch_floor = std::max(static_cast<int>(organ_range::kManual1Low), register_anchor - 7);

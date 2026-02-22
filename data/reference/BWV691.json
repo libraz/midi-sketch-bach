@@ -4,6 +4,9 @@
   "instrument": "organ",
   "form": "",
   "movement": null,
+  "tonic": "A",
+  "mode": "minor",
+  "confidence": "inferred",
   "ticks_per_beat": 480,
   "duration_seconds": 82.1,
   "tempos": [

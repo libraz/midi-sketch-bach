@@ -67,84 +67,84 @@ TEST(ChaconneOverlapTest, WithinVoiceOverlapBounded_Seed1) {
   auto config = createOverlapTestConfig(1);
   auto result = generateChaconne(config);
   ASSERT_TRUE(result.success) << result.error_message;
-  ASSERT_EQ(result.tracks.size(), 1u);
+  ASSERT_EQ(result.tracks.size(), 2u);
 
-  int overlaps = countSamePitchOverlaps(result.tracks[0].notes);
-
-  // Deviation detection: current baseline is ~18 overlaps for seed 1.
-  // Flag regression if significantly worse. Ideal target is 0.
-  EXPECT_LE(overlaps, 50)
-      << "Seed 1: " << overlaps << " same-pitch overlaps exceeds "
-      << "regression threshold (max 50)";
+  // Check overlaps in each track independently.
+  for (size_t t = 0; t < result.tracks.size(); ++t) {
+    int overlaps = countSamePitchOverlaps(result.tracks[t].notes);
+    EXPECT_LE(overlaps, 50)
+        << "Seed 1, track " << t << ": " << overlaps
+        << " same-pitch overlaps exceeds regression threshold (max 50)";
+  }
 }
 
 TEST(ChaconneOverlapTest, WithinVoiceOverlapBounded_Seed42) {
   auto config = createOverlapTestConfig(42);
   auto result = generateChaconne(config);
   ASSERT_TRUE(result.success) << result.error_message;
-  ASSERT_EQ(result.tracks.size(), 1u);
+  ASSERT_EQ(result.tracks.size(), 2u);
 
-  int overlaps = countSamePitchOverlaps(result.tracks[0].notes);
-
-  EXPECT_LE(overlaps, 50)
-      << "Seed 42: " << overlaps << " same-pitch overlaps exceeds "
-      << "regression threshold (max 50)";
+  for (size_t t = 0; t < result.tracks.size(); ++t) {
+    int overlaps = countSamePitchOverlaps(result.tracks[t].notes);
+    EXPECT_LE(overlaps, 50)
+        << "Seed 42, track " << t << ": " << overlaps
+        << " same-pitch overlaps exceeds regression threshold (max 50)";
+  }
 }
 
 // ===========================================================================
-// Chords/bariolage preserved: different pitches at same tick
+// Chords/bariolage preserved: near-simultaneous pitches in texture track
+// After overlap cleanup, chord notes are staggered by kChordStagger (60 ticks)
+// into micro-arpeggios. Check that groups of distinct pitches within 60 ticks
+// exist, indicating preserved chord/bariolage structure.
 // ===========================================================================
+
+/// @brief Count groups of near-simultaneous distinct pitches in a sorted note vector.
+/// @param notes Notes sorted by start_tick.
+/// @param tolerance Maximum tick gap within a group.
+/// @return Number of groups with 2+ distinct pitches.
+int countNearSimultaneousGroups(const std::vector<NoteEvent>& notes, Tick tolerance) {
+  int groups = 0;
+  for (size_t i = 0; i < notes.size(); /* advanced inside */) {
+    Tick group_start = notes[i].start_tick;
+    std::set<uint8_t> pitches;
+    pitches.insert(notes[i].pitch);
+    size_t j = i + 1;
+    while (j < notes.size() && notes[j].start_tick - group_start <= tolerance) {
+      pitches.insert(notes[j].pitch);
+      ++j;
+    }
+    if (pitches.size() > 1) ++groups;
+    i = j;
+  }
+  return groups;
+}
 
 TEST(ChaconneOverlapTest, SimultaneousDifferentPitchesPreserved_Seed1) {
   auto config = createOverlapTestConfig(1);
   auto result = generateChaconne(config);
   ASSERT_TRUE(result.success) << result.error_message;
-  ASSERT_EQ(result.tracks.size(), 1u);
+  ASSERT_EQ(result.tracks.size(), 2u);
 
-  const auto& notes = result.tracks[0].notes;
+  constexpr Tick kStaggerTolerance = 60;
+  int groups = countNearSimultaneousGroups(result.tracks[1].notes, kStaggerTolerance);
 
-  // Group notes by start_tick.
-  std::map<Tick, std::set<uint8_t>> tick_pitches;
-  for (const auto& note : notes) {
-    tick_pitches[note.start_tick].insert(note.pitch);
-  }
-
-  // Count ticks with multiple different pitches (chords/bariolage).
-  int multi_pitch_ticks = 0;
-  for (const auto& [tick, pitches] : tick_pitches) {
-    if (pitches.size() > 1) {
-      ++multi_pitch_ticks;
-    }
-  }
-
-  // A chaconne should have some double stops / chords.
-  EXPECT_GT(multi_pitch_ticks, 0)
-      << "Seed 1: no simultaneous different-pitch events found "
-      << "(chords/bariolage should be preserved)";
+  EXPECT_GT(groups, 0)
+      << "Seed 1: no near-simultaneous different-pitch groups found "
+      << "(chords/bariolage should be preserved as micro-arpeggios)";
 }
 
 TEST(ChaconneOverlapTest, SimultaneousDifferentPitchesPreserved_Seed42) {
   auto config = createOverlapTestConfig(42);
   auto result = generateChaconne(config);
   ASSERT_TRUE(result.success) << result.error_message;
-  ASSERT_EQ(result.tracks.size(), 1u);
+  ASSERT_EQ(result.tracks.size(), 2u);
 
-  const auto& notes = result.tracks[0].notes;
+  constexpr Tick kStaggerTolerance = 60;
+  int groups = countNearSimultaneousGroups(result.tracks[1].notes, kStaggerTolerance);
 
-  std::map<Tick, std::set<uint8_t>> tick_pitches;
-  for (const auto& note : notes) {
-    tick_pitches[note.start_tick].insert(note.pitch);
-  }
-
-  int multi_pitch_ticks = 0;
-  for (const auto& [tick, pitches] : tick_pitches) {
-    if (pitches.size() > 1) {
-      ++multi_pitch_ticks;
-    }
-  }
-
-  EXPECT_GT(multi_pitch_ticks, 0)
-      << "Seed 42: no simultaneous different-pitch events found";
+  EXPECT_GT(groups, 0)
+      << "Seed 42: no near-simultaneous different-pitch groups found";
 }
 
 // ===========================================================================
@@ -159,16 +159,17 @@ TEST(ChaconneOverlapTest, OverlapBoundedAcrossMultipleSeeds) {
     auto config = createOverlapTestConfig(seed);
     auto result = generateChaconne(config);
     ASSERT_TRUE(result.success) << "Seed " << seed << ": " << result.error_message;
-    ASSERT_EQ(result.tracks.size(), 1u);
+    ASSERT_EQ(result.tracks.size(), 2u);
 
-    int overlaps = countSamePitchOverlaps(result.tracks[0].notes);
-    total_overlaps += overlaps;
-    total_notes += static_cast<int>(result.tracks[0].notes.size());
+    for (size_t t = 0; t < result.tracks.size(); ++t) {
+      int overlaps = countSamePitchOverlaps(result.tracks[t].notes);
+      total_overlaps += overlaps;
+      total_notes += static_cast<int>(result.tracks[t].notes.size());
 
-    // Per-seed regression threshold: no seed should have more than 50 overlaps.
-    EXPECT_LE(overlaps, 50)
-        << "Seed " << seed << ": " << overlaps
-        << " same-pitch overlaps exceeds per-seed threshold";
+      EXPECT_LE(overlaps, 50)
+          << "Seed " << seed << ", track " << t << ": " << overlaps
+          << " same-pitch overlaps exceeds per-seed threshold";
+    }
   }
 
   // Overall overlap rate across all seeds should be under 5% of total notes.

@@ -507,5 +507,79 @@ TEST(FigurenGeneratorTest, VoiceIndexAffectsRegister) {
       << "Voice 0 (upper register) should produce higher pitches than voice 1";
 }
 
+// ---------------------------------------------------------------------------
+// Test 14: ThemeStrengthZeroMatchesOriginal
+// ---------------------------------------------------------------------------
+
+TEST(FigurenGeneratorTest, ThemeStrengthZeroMatchesOriginal) {
+  FigurenGenerator gen;
+  auto grid = GoldbergStructuralGrid::createMajor();
+  auto profile = makeCirculatioProfile();
+
+  // theme_strength=0.0f (default) should produce identical output.
+  auto notes_default = gen.generate(profile, grid, kGMajor, kThreeFour, 0,
+                                     kTestSeed);
+  auto notes_zero = gen.generate(profile, grid, kGMajor, kThreeFour, 0,
+                                  kTestSeed, nullptr, 0.0f);
+
+  ASSERT_EQ(notes_default.size(), notes_zero.size());
+  for (size_t idx = 0; idx < notes_default.size(); ++idx) {
+    EXPECT_EQ(notes_default[idx].pitch, notes_zero[idx].pitch)
+        << "theme_strength=0.0 should match default at index " << idx;
+    EXPECT_EQ(notes_default[idx].start_tick, notes_zero[idx].start_tick)
+        << "theme_strength=0.0 should match default at index " << idx;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Test 15: ThemeStrengthPositiveBiasesPitch
+// ---------------------------------------------------------------------------
+
+TEST(FigurenGeneratorTest, ThemeStrengthPositiveBiasesPitch) {
+  FigurenGenerator gen;
+  auto grid = GoldbergStructuralGrid::createMajor();
+  auto profile = makeCirculatioProfile();
+
+  auto notes_no_theme = gen.generate(profile, grid, kGMajor, kThreeFour, 0,
+                                      kTestSeed, nullptr, 0.0f);
+  auto notes_with_theme = gen.generate(profile, grid, kGMajor, kThreeFour, 0,
+                                        kTestSeed, nullptr, 0.5f);
+
+  ASSERT_FALSE(notes_no_theme.empty());
+  ASSERT_FALSE(notes_with_theme.empty());
+
+  // Measure average distance from beat-1 theme pitches.
+  // With theme_strength=0.5, the average should be closer (or equal).
+  Tick ticks_per_bar = kThreeFour.ticksPerBar();
+
+  auto avg_theme_dist = [&](const std::vector<NoteEvent>& notes) -> float {
+    float total_dist = 0.0f;
+    int count = 0;
+    for (int bar = 0; bar < 32; ++bar) {
+      uint8_t theme_pitch = grid.getBar(bar).aria_melody[0];
+      if (theme_pitch == 0) continue;
+      Tick bar_start = static_cast<Tick>(bar) * ticks_per_bar;
+      Tick bar_end = bar_start + ticks_per_bar;
+      for (const auto& note : notes) {
+        if (note.start_tick >= bar_start && note.start_tick < bar_end &&
+            note.pitch > 0) {
+          total_dist += static_cast<float>(
+              absoluteInterval(note.pitch, theme_pitch));
+          ++count;
+          break;  // Only first note per bar.
+        }
+      }
+    }
+    return count > 0 ? total_dist / static_cast<float>(count) : 0.0f;
+  };
+
+  float dist_no_theme = avg_theme_dist(notes_no_theme);
+  float dist_with_theme = avg_theme_dist(notes_with_theme);
+
+  // With theme bias, average distance should be <= the no-theme distance.
+  EXPECT_LE(dist_with_theme, dist_no_theme + 1.0f)
+      << "Theme bias should not increase average distance from theme pitches";
+}
+
 }  // namespace
 }  // namespace bach

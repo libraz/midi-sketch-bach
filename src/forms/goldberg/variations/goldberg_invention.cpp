@@ -127,15 +127,16 @@ std::vector<NoteEvent> generateFreeCounterpoint(
     uint8_t voice_idx,
     int start_bar,
     int end_bar,
-    uint32_t seed) {
-  // Use FigurenGenerator with a light profile for free counterpoint fill.
+    uint32_t seed,
+    uint8_t notes_per_beat = 4) {
+  // Use FigurenGenerator with a profile for free counterpoint fill.
   FiguraProfile profile;
   profile.primary = FiguraType::Circulatio;
   profile.secondary = FiguraType::Arpeggio;
-  profile.notes_per_beat = 2;  // Eighth notes for rhythmic variety.
+  profile.notes_per_beat = notes_per_beat;
   profile.direction = DirectionBias::Symmetric;
-  profile.chord_tone_ratio = 0.6f;
-  profile.sequence_probability = 0.3f;
+  profile.chord_tone_ratio = 0.65f;
+  profile.sequence_probability = 0.35f;
 
   FigurenGenerator figuren;
   auto full_notes = figuren.generate(

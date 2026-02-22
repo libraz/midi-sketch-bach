@@ -35,18 +35,6 @@ MIN_COUNT = 3
 # Maximum number of entries in the vocabulary table.
 MAX_VOCAB_SIZE = 64
 
-# Tonic name to pitch class.
-TONIC_TO_PC = {
-    "C": 0, "C#": 1, "Db": 1, "D": 2, "D#": 3, "Eb": 3,
-    "E": 4, "Fb": 4, "E#": 5, "F": 5, "F#": 6, "Gb": 6,
-    "G": 7, "G#": 8, "Ab": 8, "A": 9, "A#": 10, "Bb": 10,
-    "B": 11, "Cb": 11,
-}
-
-# Krumhansl-Kessler key profiles for key estimation.
-KK_MAJOR = [6.35, 2.23, 3.48, 2.33, 4.38, 4.09, 2.52, 5.19, 2.39, 3.66, 2.29, 2.88]
-KK_MINOR = [6.33, 2.68, 3.52, 5.38, 2.60, 3.53, 2.54, 4.75, 3.98, 2.69, 3.34, 3.17]
-
 # Pedal/bass role identifiers.
 PEDAL_ROLES = frozenset({"pedal", "v4"})
 
@@ -175,107 +163,11 @@ def semitone_to_degree(semitones: int) -> int:
 
 
 # ---------------------------------------------------------------------------
-# Key estimation (reused from extract_gravity_reference.py)
-# ---------------------------------------------------------------------------
-
-def pearson_correlation(vec_a: list[float], vec_b: list[float]) -> float:
-    """Compute Pearson correlation between two equal-length vectors.
-
-    Args:
-        vec_a: First vector.
-        vec_b: Second vector.
-
-    Returns:
-        Pearson correlation coefficient in [-1, +1].
-    """
-    import math
-    length = len(vec_a)
-    mean_a = sum(vec_a) / length
-    mean_b = sum(vec_b) / length
-    cov = sum((vec_a[idx] - mean_a) * (vec_b[idx] - mean_b) for idx in range(length))
-    var_a = sum((vec_a[idx] - mean_a) ** 2 for idx in range(length))
-    var_b = sum((vec_b[idx] - mean_b) ** 2 for idx in range(length))
-    denom = math.sqrt(var_a * var_b)
-    if denom < 1e-12:
-        return 0.0
-    return cov / denom
-
-
-def rotate_profile(profile: list[float], shift: int) -> list[float]:
-    """Rotate a 12-element pitch class profile by shift semitones."""
-    return [profile[(idx + shift) % 12] for idx in range(12)]
-
-
-def estimate_key_from_notes(notes: list[dict]) -> tuple[int, bool]:
-    """Estimate the key of a note sequence using Krumhansl-Kessler.
-
-    Args:
-        notes: List of note dicts with 'pitch' and 'duration'.
-
-    Returns:
-        (key_pitch_class, is_minor) tuple.
-    """
-    if not notes:
-        return 0, False
-
-    histogram = [0.0] * 12
-    for note in notes:
-        pitch_class = note["pitch"] % 12
-        histogram[pitch_class] += note.get("duration", 1.0)
-
-    best_corr = -2.0
-    best_key = 0
-    best_minor = False
-
-    for key_pc in range(12):
-        corr_major = pearson_correlation(histogram, rotate_profile(KK_MAJOR, key_pc))
-        if corr_major > best_corr:
-            best_corr = corr_major
-            best_key = key_pc
-            best_minor = False
-
-        corr_minor = pearson_correlation(histogram, rotate_profile(KK_MINOR, key_pc))
-        if corr_minor > best_corr:
-            best_corr = corr_minor
-            best_key = key_pc
-            best_minor = True
-
-    return best_key, best_minor
-
-
-# ---------------------------------------------------------------------------
-# Key signatures loader
-# ---------------------------------------------------------------------------
-
-def load_key_signatures(data_dir: Path) -> dict[str, dict]:
-    """Load key_signatures.json from the data directory.
-
-    Args:
-        data_dir: Path to the reference data directory.
-
-    Returns:
-        Dict mapping work_id to key signature info, or empty dict on failure.
-    """
-    ks_path = data_dir / "key_signatures.json"
-    if not ks_path.exists():
-        print(f"  WARNING: key_signatures.json not found at {ks_path}", file=sys.stderr)
-        return {}
-
-    try:
-        with open(ks_path, "r", encoding="utf-8") as ks_file:
-            return json.load(ks_file)
-    except (json.JSONDecodeError, OSError) as err:
-        print(f"  WARNING: Failed to load key_signatures.json: {err}", file=sys.stderr)
-        return {}
-
-
-# ---------------------------------------------------------------------------
 # 5-gram extraction from reference data
 # ---------------------------------------------------------------------------
 
 def extract_five_grams(
     reference_files: list[Path],
-    key_signatures: dict[str, dict],
 ) -> dict[tuple[int, ...], int]:
     """Extract 5-note melodic interval patterns from fugue reference files.
 
@@ -284,7 +176,6 @@ def extract_five_grams(
 
     Args:
         reference_files: List of paths to BWV*_fugue.json files.
-        key_signatures: Key signature lookup from key_signatures.json.
 
     Returns:
         Dict mapping (i0, i1, i2, i3) interval tuple to occurrence count.
@@ -767,14 +658,9 @@ def main() -> int:
     if not use_fallback and data_dir.exists():
         reference_files = sorted(data_dir.glob("BWV*_fugue.json"))
         if reference_files:
-            key_signatures = load_key_signatures(data_dir)
-            if key_signatures:
-                print(f"  Loaded {len(key_signatures)} key signatures",
-                      file=sys.stderr)
-
             print(f"\nExtracting 5-grams from {len(reference_files)} "
                   f"fugue reference files...", file=sys.stderr)
-            pattern_counts = extract_five_grams(reference_files, key_signatures)
+            pattern_counts = extract_five_grams(reference_files)
 
             if pattern_counts:
                 vocab = build_vocab_from_counts(

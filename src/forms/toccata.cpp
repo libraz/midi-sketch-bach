@@ -639,7 +639,7 @@ struct ClimbingMotif {
 // Extract a climbing motif (4-6 notes) from opening gesture material.
 // Falls back to a default descending scale fragment if too few notes found.
 ClimbingMotif extractClimbingMotif(const std::vector<NoteEvent>& opening_notes,
-                                   uint8_t voice) {
+                                   uint8_t voice, Tick max_duration = 0) {
   ClimbingMotif motif;
   constexpr uint8_t kMinMotifNotes = 3;
   constexpr uint8_t kMaxMotifNotes = 6;
@@ -662,6 +662,13 @@ ClimbingMotif extractClimbingMotif(const std::vector<NoteEvent>& opening_notes,
     motif.intervals = {0, -2, -4, -5};
     motif.durations = {kEighthNote, kEighthNote, kEighthNote, kEighthNote};
     motif.num_notes = 4;
+  }
+
+  // Cap held-note durations inherited from gestures.
+  if (max_duration > 0) {
+    for (auto& dur : motif.durations) {
+      dur = std::min(dur, max_duration);
+    }
   }
 
   return motif;
@@ -1579,7 +1586,7 @@ ToccataResult generateDramaticusToccata(const ToccataConfig& config) {
       timeline, config.key, phases[2].start, phases[2].end, rng);
 
   // D: SequenceClimb1 (motif extracted from A, then vocabulary-enriched)
-  ClimbingMotif motif = extractClimbingMotif(a_notes, 0);
+  ClimbingMotif motif = extractClimbingMotif(a_notes, 0, duration::kEighthNote);
   ScaleType climb_scale = config.key.is_minor ? ScaleType::HarmonicMinor : ScaleType::Major;
   // Apply vocabulary gesture: ascending direction (climb from low register toward ceiling).
   motif = tryVocabularyGesture(
@@ -1596,9 +1603,13 @@ ToccataResult generateDramaticusToccata(const ToccataConfig& config) {
   auto e_notes = generateHarmonicBreak(
       timeline, config.key, phases[4].start, phases[4].end, rng);
 
-  // F: SequenceClimb2
+  // F: SequenceClimb2 (tighter cap for higher energy)
+  ClimbingMotif motif_f = motif;
+  for (auto& dur : motif_f.durations) {
+    dur = std::min(dur, duration::kSixteenthNote);
+  }
   auto f_notes = generateSequenceClimb(
-      timeline, config.key, motif,
+      timeline, config.key, motif_f,
       phases[5].start, phases[5].end,
       kDramaticusRangeCeiling[5], 5, rng);
 

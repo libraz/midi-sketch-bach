@@ -81,6 +81,10 @@ struct InvariantSet {
   // --- Crossing policy (Phase-dependent) ---
   CrossingPolicy crossing_policy = CrossingPolicy::AllowTemporary;
 
+  // --- Episode spacing context ---
+  FuguePhase phase_ = FuguePhase::Establish;
+  uint8_t active_voice_count_ = 4;
+
   // --- Hard repeat limit ---
   uint8_t hard_repeat_limit = 4;  ///< Max consecutive same-pitch notes.
 
@@ -100,11 +104,13 @@ struct InvariantSet {
   struct SatisfiesResult {
     int hard_violations = 0;
     int soft_violations = 0;
+    float additional_penalty = 0.0f;  ///< Depth-dependent soft penalty (E1).
     bool range_violation = false;
     bool parallel_perfect = false;
     bool crossing_violation = false;
     bool repeat_violation = false;
     bool spacing_violation = false;
+    bool close_spacing_recovery = false;  ///< Unison-near spacing → recovery.
   };
 
   SatisfiesResult satisfies(uint8_t pitch, VoiceId voice_id, Tick tick,

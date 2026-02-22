@@ -4,6 +4,9 @@
   "instrument": "organ",
   "form": "fantasia",
   "movement": null,
+  "tonic": "C",
+  "mode": "minor",
+  "confidence": "verified",
   "ticks_per_beat": 384,
   "duration_seconds": 251.4,
   "tempos": [

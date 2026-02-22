@@ -165,11 +165,18 @@ GoldbergResult GoldbergGenerator::generate(const GoldbergConfig& config) const {
 
     // Special handling for Aria: Var 0 generates, Var 31 reuses as da capo.
     if (desc.type == GoldbergVariationType::Aria && desc.variation_number == 0) {
-      const auto& grid = desc.key.is_minor ? grid_minor : grid_major;
+      auto& grid = desc.key.is_minor ? grid_minor : grid_major;
       AriaGenerator aria_gen;
       aria_original = aria_gen.generate(grid, config.key, desc.time_sig, var_seed);
       have_aria = aria_original.success;
       if (have_aria) {
+        // Write back seed-dependent Aria melody to grid for downstream variations.
+        for (int bar = 0; bar < 32; ++bar) {
+          for (int beat = 0; beat < 3; ++beat) {
+            grid.setAriaMelody(bar, beat,
+                               aria_original.theme.getPitch(bar, beat));
+          }
+        }
         var_notes = mergeNotes({&aria_original.melody_notes, &aria_original.bass_notes});
       }
     } else if (desc.type == GoldbergVariationType::Aria && desc.variation_number == 31) {
@@ -179,10 +186,15 @@ GoldbergResult GoldbergGenerator::generate(const GoldbergConfig& config) const {
         var_notes = mergeNotes({&da_capo.melody_notes, &da_capo.bass_notes});
       } else {
         // Fallback: generate fresh if Aria was not in the selected set.
-        const auto& grid = desc.key.is_minor ? grid_minor : grid_major;
+        auto& grid = desc.key.is_minor ? grid_minor : grid_major;
         AriaGenerator aria_gen;
         auto fresh = aria_gen.generate(grid, config.key, desc.time_sig, var_seed);
         if (fresh.success) {
+          for (int bar = 0; bar < 32; ++bar) {
+            for (int beat = 0; beat < 3; ++beat) {
+              grid.setAriaMelody(bar, beat, fresh.theme.getPitch(bar, beat));
+            }
+          }
           var_notes = mergeNotes({&fresh.melody_notes, &fresh.bass_notes});
         }
       }

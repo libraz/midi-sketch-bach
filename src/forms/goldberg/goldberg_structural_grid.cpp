@@ -240,6 +240,9 @@ GoldbergStructuralGrid GoldbergStructuralGrid::createMajor() {
       kBassG, kNoRes, false, 0, HF::Tonic, CD::I,
       4, CT::Perfect, SL::Global32, 0.0f, 7);
 
+  // Layer 5: Aria melody is populated per seed by the orchestrator
+  // via setAriaMelody() after calling generateAriaMelody().
+
   return grid;
 }
 
@@ -254,6 +257,12 @@ GoldbergStructuralGrid GoldbergStructuralGrid::createMinor(MinorModeProfile /*pr
 
 const StructuralBarInfo& GoldbergStructuralGrid::getBar(int bar) const {
   return bars_[static_cast<size_t>(clampBar(bar))];
+}
+
+void GoldbergStructuralGrid::setAriaMelody(int bar, int beat, uint8_t pitch) {
+  int b = std::clamp(bar, 0, 31);
+  int bt = std::clamp(beat, 0, 2);
+  bars_[static_cast<size_t>(b)].aria_melody[static_cast<size_t>(bt)] = pitch;
 }
 
 // ---------------------------------------------------------------------------

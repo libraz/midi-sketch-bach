@@ -902,4 +902,19 @@ Countersubject generateSecondCountersubject(const Subject& subject,
   return best;
 }
 
+// ---------------------------------------------------------------------------
+// adaptCSToKey
+// ---------------------------------------------------------------------------
+
+std::vector<NoteEvent> adaptCSToKey(const std::vector<NoteEvent>& cs_notes,
+                                     Key to_key, ScaleType scale) {
+  auto adapted = cs_notes;
+  for (auto& note : adapted) {
+    if (!scale_util::isScaleTone(note.pitch, to_key, scale)) {
+      note.pitch = scale_util::nearestScaleTone(note.pitch, to_key, scale);
+    }
+  }
+  return adapted;
+}
+
 }  // namespace bach

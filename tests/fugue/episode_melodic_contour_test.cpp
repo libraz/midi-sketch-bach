@@ -144,13 +144,12 @@ TEST(EpisodeMelodicContourTest, DirectionChangesInRange_AllCharacters) {
 
       int changes = countDirectionChanges(episode.notes, 0);
 
-      // Wider range for all characters: [0, 20] to accommodate character
-      // diversity. Noble/Restless with ascending motifs can produce purely
-      // ascending diatonic sequences with 0 direction changes.
+      // Wider range for all characters: [0, 25] to accommodate character
+      // diversity and motif pitch preservation (Phase A1 Kernel bonus).
       EXPECT_GE(changes, 0)
           << names[char_idx] << " seed " << seed << ": " << changes
           << " direction changes (too smooth)";
-      EXPECT_LE(changes, 20)
+      EXPECT_LE(changes, 25)
           << names[char_idx] << " seed " << seed << ": " << changes
           << " direction changes (too jagged)";
     }

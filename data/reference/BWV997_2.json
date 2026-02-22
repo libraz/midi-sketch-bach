@@ -4,6 +4,9 @@
   "instrument": "lute",
   "form": "",
   "movement": 2,
+  "tonic": "C",
+  "mode": "minor",
+  "confidence": "verified",
   "ticks_per_beat": 384,
   "duration_seconds": 369.3,
   "tempos": [

@@ -14,12 +14,12 @@ namespace bach {
 
 /// @brief Result from chaconne generation.
 ///
-/// Contains a single MIDI track (solo instrument) with bass and
-/// texture notes interleaved. The bass notes carry
-/// BachNoteSource::ChaconneBass provenance and are generated per
-/// variation based on the harmonic scheme.
+/// Contains two MIDI tracks: Track 0 is the bass voice
+/// (BachNoteSource::ChaconneBass / GroundBass, channel 0) and Track 1 is the
+/// texture voice (channel 1). Separating bass and texture avoids cross-voice
+/// overlap truncation that destroys bass note durations.
 struct ChaconneResult {
-  std::vector<Track> tracks;       ///< Usually 1 track (solo instrument).
+  std::vector<Track> tracks;       ///< 2 tracks: [0] bass, [1] texture.
   Tick total_duration_ticks = 0;   ///< Total piece duration in ticks.
   bool success = false;            ///< True if generation completed without error.
   std::string error_message;       ///< Describes the failure if success is false.

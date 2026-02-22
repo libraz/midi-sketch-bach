@@ -1618,7 +1618,8 @@ std::vector<NoteEvent> createCodaNotes(Tick start_tick, Tick duration,
 /// @return Number of active voices for this episode.
 uint8_t selectEpisodeVoiceCount(uint8_t num_voices, float phase_pos,
                                 const TextureDensityTarget& density_target,
-                                std::mt19937& rng) {
+                                std::mt19937& rng,
+                                bool post_entry = false) {
   if (num_voices <= 2) return num_voices;  // Can't reduce below 2.
 
   // In develop phase (0.25-0.70): mostly N-1 voices.
@@ -1632,10 +1633,18 @@ uint8_t selectEpisodeVoiceCount(uint8_t num_voices, float phase_pos,
   if (target_voices < 2) target_voices = 2;
   if (target_voices > num_voices) target_voices = num_voices;
 
-  // Probabilistic tutti: phase-dependent probability.
-  // Develop phase (< 0.70): 25% tutti for texture variety.
-  // Stretto phase (>= 0.70): 15% tutti (near-tutti already via density target).
-  float tutti_prob = (phase_pos < 0.70f) ? 0.25f : 0.15f;
+  // D3: Musical-trigger tutti probability.
+  // Post-entry episodes: 50% (subject re-entry warrants full texture).
+  // Develop phase (< 0.70): 40% (raised from 25% for density).
+  // Stretto phase (>= 0.70): 15% (near-tutti already via density target).
+  float tutti_prob;
+  if (post_entry) {
+    tutti_prob = 0.50f;
+  } else if (phase_pos < 0.70f) {
+    tutti_prob = 0.40f;
+  } else {
+    tutti_prob = 0.15f;
+  }
   std::uniform_real_distribution<float> dist(0.0f, 1.0f);
   if (dist(rng) < tutti_prob) {
     return num_voices;
@@ -2180,10 +2189,14 @@ std::vector<NoteEvent> generateSections(
         prev_episode_exit = std::move(episode_exit);
 
         // Texture density management: FortPhase-dependent rest voice processing.
+        // D3: Detect post-entry context for musical-trigger tutti.
+        bool post_entry = (sec_idx > 0 &&
+            plan.sections[sec_idx - 1].type == SectionType::MiddleEntry);
         float ep_phase_pos = static_cast<float>(current_tick) /
             static_cast<float>(plan.estimated_duration);
         uint8_t ep_active = selectEpisodeVoiceCount(
-            num_voices, ep_phase_pos, config.density_target, density_rng);
+            num_voices, ep_phase_pos, config.density_target, density_rng,
+            post_entry);
         if (ep_active < num_voices) {
           uint8_t rest_voice = selectRestingVoice(
               num_voices, section.episode_index, -1, prev_rest_voice);
@@ -2278,6 +2291,63 @@ std::vector<NoteEvent> generateSections(
         all_notes.insert(all_notes.end(),
                          middle_entry.notes.begin(), middle_entry.notes.end());
         record_notes(middle_entry.notes, target_key);
+
+        // C2: Countersubject placement in middle entries.
+        // In Bach practice, the countersubject accompanies each subject entry
+        // after the exposition. 85% placement for same-form entries.
+        if (!material.countersubject.notes.empty() && !use_false_entry) {
+          std::uniform_real_distribution<float> cs_dist(0.0f, 1.0f);
+          if (cs_dist(density_rng) < 0.85f) {
+            // CS voice: adjacent to entry, prefer upper voice, avoid bass.
+            uint8_t cs_voice;
+            if (entry_voice == 0) {
+              cs_voice = 1;
+            } else {
+              cs_voice = entry_voice - 1;
+            }
+            // Don't collide with bass voice for 4+ voices.
+            if (cs_voice >= num_voices - 1 && num_voices >= 4) {
+              cs_voice = static_cast<uint8_t>(
+                  (entry_voice + 1) % (num_voices - 1));
+            }
+
+            auto cs_notes = adaptCSToKey(
+                material.countersubject.notes, target_key);
+            auto [cs_lo, cs_hi] = getFugueVoiceRange(cs_voice, num_voices);
+            int cs_shift = fitToRegister(cs_notes, cs_lo, cs_hi);
+
+            // Independence check: CS start pitch != subject start (mod 12).
+            bool independent = true;
+            if (!cs_notes.empty() && !middle_entry.notes.empty()) {
+              uint8_t cs_start = static_cast<uint8_t>(clampPitch(
+                  static_cast<int>(cs_notes[0].pitch) + cs_shift, 0, 127));
+              uint8_t subj_start = middle_entry.notes[0].pitch;
+              if ((cs_start % 12) == (subj_start % 12)) {
+                independent = false;
+              }
+            }
+
+            if (independent) {
+              for (auto& note : cs_notes) {
+                note.start_tick += current_tick;
+                note.pitch = static_cast<uint8_t>(clampPitch(
+                    static_cast<int>(note.pitch) + cs_shift, 0, 127));
+                note.voice = cs_voice;
+                note.source = BachNoteSource::Countersubject;
+              }
+              // Trim notes that exceed the middle entry boundary.
+              cs_notes.erase(
+                  std::remove_if(cs_notes.begin(), cs_notes.end(),
+                                 [middle_end](const NoteEvent& n) {
+                                   return n.start_tick >= middle_end;
+                                 }),
+                  cs_notes.end());
+              all_notes.insert(all_notes.end(),
+                               cs_notes.begin(), cs_notes.end());
+              record_notes(cs_notes, target_key);
+            }
+          }
+        }
 
         // Companion counterpoint for non-entry voices.
         if (section.companion_needed) {

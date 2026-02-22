@@ -87,6 +87,11 @@ struct StructuralBarInfo {
   // Layer 4: Structural waveform.
   StructuralLevel highest_level;
   TensionProfile tension;
+
+  // Layer 5: Aria skeletal melody.
+  // Populated per seed by orchestrator after Aria generation.
+  // 0 = not yet populated (default).
+  std::array<uint8_t, 3> aria_melody = {0, 0, 0};
 };
 
 /// @brief 32-bar structural grid for Goldberg Variations (Design Value).
@@ -201,6 +206,13 @@ class GoldbergStructuralGrid {
   /// @brief Get a 16-bar half view.
   /// @param half Half index (0-1), clamped.
   Section16View getSection16(int half) const;
+
+  /// @brief Set aria melody pitch for a specific bar and beat.
+  /// Used by orchestrator to write back seed-dependent Aria melody.
+  /// @param bar Bar index (0-31), clamped.
+  /// @param beat Beat index (0-2), clamped.
+  /// @param pitch MIDI pitch to store.
+  void setAriaMelody(int bar, int beat, uint8_t pitch);
 
  private:
   std::array<StructuralBarInfo, 32> bars_;

@@ -291,7 +291,6 @@ def pitch_to_scale_degree(pitch: int, key: int, is_minor: bool) -> int:
 
 def extract_harmonic_bigrams(
     reference_files: list[Path],
-    key_signatures: dict[str, dict],
 ) -> list[list[float]]:
     """Extract chord-to-chord bigram transitions from individual fugue files.
 
@@ -301,7 +300,6 @@ def extract_harmonic_bigrams(
 
     Args:
         reference_files: List of paths to BWV*_fugue.json files.
-        key_signatures: Key signature lookup from key_signatures.json.
 
     Returns:
         12x12 raw count matrix [from_degree][to_degree].
@@ -334,12 +332,11 @@ def extract_harmonic_bigrams(
         if len(all_notes) < 4:
             continue
 
-        # Determine key from key_signatures.json or estimate
-        work_id = filepath.stem
-        if work_id in key_signatures:
-            ks_entry = key_signatures[work_id]
-            key_pc = TONIC_TO_PC.get(ks_entry.get("tonic", "C"), 0)
-            is_minor = ks_entry.get("mode", "major") == "minor"
+        # Determine key from individual JSON or estimate
+        tonic_str = data.get("tonic", "")
+        if tonic_str:
+            key_pc = TONIC_TO_PC.get(tonic_str, 0)
+            is_minor = data.get("mode", "major") == "minor"
         else:
             key_pc, is_minor = estimate_key_from_notes(all_notes)
 
@@ -402,13 +399,11 @@ def extract_harmonic_bigrams(
 
 def extract_bass_strong_beat(
     reference_files: list[Path],
-    key_signatures: dict[str, dict],
 ) -> list[float]:
     """Extract bass strong-beat interval distribution from pedal/v4 tracks.
 
     Args:
         reference_files: List of paths to BWV*_fugue.json files.
-        key_signatures: Key signature lookup from key_signatures.json.
 
     Returns:
         12-element raw count array [P1..M7] of intervals on strong beats.
@@ -446,12 +441,11 @@ def extract_bass_strong_beat(
 
         bass_notes.sort(key=lambda note: note["onset"])
 
-        # Determine key
-        work_id = filepath.stem
-        if work_id in key_signatures:
-            ks_entry = key_signatures[work_id]
-            key_pc = TONIC_TO_PC.get(ks_entry.get("tonic", "C"), 0)
-            is_minor = ks_entry.get("mode", "major") == "minor"
+        # Determine key from individual JSON or estimate
+        tonic_str = data.get("tonic", "")
+        if tonic_str:
+            key_pc = TONIC_TO_PC.get(tonic_str, 0)
+            is_minor = data.get("mode", "major") == "minor"
         else:
             key_pc, is_minor = estimate_key_from_notes(bass_notes)
 
@@ -560,32 +554,6 @@ def format_2d_array(
         lines.append(row_str)
     lines.append("};")
     return "\n".join(lines)
-
-
-# ---------------------------------------------------------------------------
-# Key signatures loader
-# ---------------------------------------------------------------------------
-
-def load_key_signatures(data_dir: Path) -> dict[str, dict]:
-    """Load key_signatures.json from the data directory.
-
-    Args:
-        data_dir: Path to the reference data directory.
-
-    Returns:
-        Dict mapping work_id to key signature info, or empty dict on failure.
-    """
-    ks_path = data_dir / "key_signatures.json"
-    if not ks_path.exists():
-        print(f"  WARNING: key_signatures.json not found at {ks_path}", file=sys.stderr)
-        return {}
-
-    try:
-        with open(ks_path, "r", encoding="utf-8") as ks_file:
-            return json.load(ks_file)
-    except (json.JSONDecodeError, OSError) as err:
-        print(f"  WARNING: Failed to load key_signatures.json: {err}", file=sys.stderr)
-        return {}
 
 
 # ---------------------------------------------------------------------------
@@ -809,14 +777,9 @@ def main() -> int:
 
     print(f"\nProcessing {len(reference_files)} fugue reference files...", file=sys.stderr)
 
-    # Load key signatures
-    key_signatures = load_key_signatures(data_dir)
-    if key_signatures:
-        print(f"  Loaded {len(key_signatures)} key signatures", file=sys.stderr)
-
     # Item 8: Harmonic bigrams
     print("  Extracting harmonic bigrams...", file=sys.stderr)
-    bigram_raw = extract_harmonic_bigrams(reference_files, key_signatures)
+    bigram_raw = extract_harmonic_bigrams(reference_files)
 
     # Trim to 7x7 (scale degrees 0-6) and normalize
     bigram_7x7 = [row[:7] for row in bigram_raw[:7]]
@@ -824,7 +787,7 @@ def main() -> int:
 
     # Item 9: Bass strong-beat intervals
     print("  Extracting bass strong-beat intervals...", file=sys.stderr)
-    bass_raw = extract_bass_strong_beat(reference_files, key_signatures)
+    bass_raw = extract_bass_strong_beat(reference_files)
     bass_norm = smooth_and_normalize_1d(bass_raw)
 
     # ---------------------------------------------------------------------------

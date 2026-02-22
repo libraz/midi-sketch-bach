@@ -700,12 +700,17 @@ TEST(ChaconneE2E, PostProcessingDestructionRate) {
   config.instrument = InstrumentType::Violin;
   auto result = generate(config);
   ASSERT_TRUE(result.success) << result.error_message;
-  ASSERT_FALSE(result.tracks.empty());
+  ASSERT_GE(result.tracks.size(), 2u);
 
-  const auto& notes = result.tracks[0].notes;
+  // Track 0 = bass, Track 1 = texture.
+  const auto& bass_notes = result.tracks[0].notes;
+  const auto& texture_notes = result.tracks[1].notes;
+
   int bass_count = 0, texture_count = 0;
-  for (const auto& n : notes) {
+  for (const auto& n : bass_notes) {
     if (n.source == BachNoteSource::ChaconneBass) ++bass_count;
+  }
+  for (const auto& n : texture_notes) {
     if (n.source == BachNoteSource::TextureNote) ++texture_count;
   }
 
@@ -713,28 +718,22 @@ TEST(ChaconneE2E, PostProcessingDestructionRate) {
       << "No texture notes survived post-processing";
   EXPECT_GT(bass_count, 0) << "No bass notes found";
 
-  // Voice separation: both voice IDs are present.
-  std::set<VoiceId> voice_ids;
-  for (const auto& n : notes) {
-    voice_ids.insert(n.voice);
-  }
-  EXPECT_GE(voice_ids.size(), 2u)
-      << "Expected at least 2 distinct voice IDs (bass=0, texture=1)";
+  // Track separation: bass and texture are on separate tracks/channels.
+  EXPECT_EQ(result.tracks[0].channel, 0u);
+  EXPECT_EQ(result.tracks[1].channel, 1u);
 
   // Temporal co-occurrence: bass and texture notes within the same beat.
-  // After overlap cleanup, bass notes are truncated to not overlap texture
-  // notes in the flat note ordering, but they should still co-occur within
-  // the same beat (staggered chords). The kChordStagger (60 ticks) offset
-  // is well within a single beat (480 ticks).
+  // With separate tracks, bass notes retain full duration. Check that
+  // bass and texture co-occur within the same beat.
   constexpr Tick kCoOccurrenceTolerance = kTicksPerBeat;
   int cooccurrences = 0;
-  for (const auto& bass_note : notes) {
-    if (bass_note.source != BachNoteSource::ChaconneBass) continue;
-    for (const auto& tex_note : notes) {
-      if (tex_note.source != BachNoteSource::TextureNote) continue;
-      Tick gap = (tex_note.start_tick >= bass_note.start_tick)
-                     ? (tex_note.start_tick - bass_note.start_tick)
-                     : (bass_note.start_tick - tex_note.start_tick);
+  for (const auto& bn : bass_notes) {
+    if (bn.source != BachNoteSource::ChaconneBass) continue;
+    for (const auto& tn : texture_notes) {
+      if (tn.source != BachNoteSource::TextureNote) continue;
+      Tick gap = (tn.start_tick >= bn.start_tick)
+                     ? (tn.start_tick - bn.start_tick)
+                     : (bn.start_tick - tn.start_tick);
       if (gap <= kCoOccurrenceTolerance) {
         ++cooccurrences;
         break;
@@ -743,7 +742,7 @@ TEST(ChaconneE2E, PostProcessingDestructionRate) {
   }
   EXPECT_GT(cooccurrences, 0)
       << "No bass-texture co-occurrence within a beat; "
-         "post-processing may have destroyed chord structure";
+         "tracks may not have aligned content";
 }
 
 TEST(ChaconneE2E, MultiSeedTexturePresence) {
@@ -754,9 +753,11 @@ TEST(ChaconneE2E, MultiSeedTexturePresence) {
     config.instrument = InstrumentType::Violin;
     auto result = generate(config);
     ASSERT_TRUE(result.success) << "seed=" << seed;
+    ASSERT_GE(result.tracks.size(), 2u) << "seed=" << seed;
 
+    // Texture notes are in tracks[1].
     int texture_count = 0;
-    for (const auto& n : result.tracks[0].notes) {
+    for (const auto& n : result.tracks[1].notes) {
       if (n.source == BachNoteSource::TextureNote) ++texture_count;
     }
     EXPECT_GT(texture_count, 0)

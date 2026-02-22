@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "core/basic_types.h"
+#include "forms/goldberg/goldberg_aria_theme.h"
 #include "forms/goldberg/goldberg_structural_grid.h"
 #include "forms/goldberg/goldberg_types.h"
 #include "harmony/key.h"
@@ -18,14 +19,15 @@ namespace bach {
 struct AriaResult {
   std::vector<NoteEvent> melody_notes;  ///< Upper voice (GoldbergAria source).
   std::vector<NoteEvent> bass_notes;    ///< Bass voice (GoldbergBass source).
+  AriaTheme theme;                      ///< Generated theme for grid write-back.
   bool success = false;
 };
 
 /// @brief Generates the Goldberg Aria (Sarabande) -- Var 0 and Var 31 (da capo).
 ///
 /// 2 voices: melody + bass, faithful to the 32-bar structural grid.
-/// Melody is generated via FigurenGenerator with Sarabande FiguraType, then
-/// enriched with Baroque ornaments. Bass line uses the structural grid's
+/// Melody is generated via 2-layer scoring (Kern + Surface) then enriched
+/// with Baroque ornaments. Bass line uses the structural grid's
 /// primary_pitch from StructuralBassMotion.
 class AriaGenerator {
  public:
@@ -34,7 +36,7 @@ class AriaGenerator {
   /// @param key Key signature (G major for standard Goldberg).
   /// @param time_sig Time signature (3/4 for Sarabande).
   /// @param seed Random seed for deterministic generation.
-  /// @return AriaResult with melody and bass notes.
+  /// @return AriaResult with melody, bass notes, and generated theme.
   AriaResult generate(
       const GoldbergStructuralGrid& grid,
       const KeySignature& key,
@@ -51,24 +53,16 @@ class AriaGenerator {
 
  private:
   /// @brief Generate bass line from structural grid.
-  /// @param grid The 32-bar structural grid.
-  /// @param key Key signature for register placement.
-  /// @param time_sig Time signature for bar duration.
-  /// @param rng Random number generator.
-  /// @return Vector of bass NoteEvents spanning 32 bars.
   std::vector<NoteEvent> generateBassLine(
       const GoldbergStructuralGrid& grid,
       const KeySignature& key,
       const TimeSignature& time_sig,
       std::mt19937& rng) const;
 
-  /// @brief Apply ornaments to melody notes.
-  /// @param notes Melody notes to ornament (modified in place).
-  /// @param key Key signature for ornament pitch selection.
-  /// @param time_sig Time signature for metric context.
-  /// @param rng Random number generator.
+  /// @brief Apply ornaments to melody notes with phrase-dependent density.
   void applyOrnaments(
       std::vector<NoteEvent>& notes,
+      const GoldbergStructuralGrid& grid,
       const KeySignature& key,
       const TimeSignature& time_sig,
       std::mt19937& rng) const;

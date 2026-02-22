@@ -44,48 +44,58 @@ def reference_to_score(data: dict) -> Score:
                 voice=t.get("role", "unknown"),
             ))
         tracks.append(Track(name=t.get("role", "unknown"), notes=notes))
+    tonic = data.get("tonic", "")
+    mode = data.get("mode", "")
+    key_str = f"{tonic}_{mode}" if tonic and mode else None
     return Score(
         tracks=tracks,
         form=data.get("form") or data.get("category", ""),
-        key=None,
+        key=key_str,
         voices=data.get("voice_count"),
     )
 
 
 # ---------------------------------------------------------------------------
-# Key signature metadata
+# Key signature metadata (read from individual reference JSON files)
 # ---------------------------------------------------------------------------
 
-_KEY_SIGS: dict[str, dict] = {}
-
-
-def load_key_signatures() -> dict[str, dict]:
-    """Load key_signatures.json lazily."""
-    global _KEY_SIGS
-    if _KEY_SIGS:
-        return _KEY_SIGS
-    ks_path = DATA_DIR / "key_signatures.json"
-    if ks_path.is_file():
-        with open(ks_path) as f:
-            _KEY_SIGS = json.load(f)
-    return _KEY_SIGS
+_KEY_CACHE: dict[str, tuple[Optional[int], Optional[bool], float]] = {}
 
 
 def get_key_info(work_id: str) -> tuple[Optional[int], Optional[bool], float]:
     """Get (tonic_pc, is_minor, confidence) for a work.
 
+    Reads tonic/mode/confidence from the individual reference JSON file.
+    Results are cached in _KEY_CACHE for subsequent lookups.
+
     Returns (None, None, 0.0) if key is unavailable.
     """
-    ks = load_key_signatures()
-    info = ks.get(work_id)
-    if not info:
+    if work_id in _KEY_CACHE:
+        return _KEY_CACHE[work_id]
+
+    json_path = DATA_DIR / f"{work_id}.json"
+    if not json_path.is_file():
+        _KEY_CACHE[work_id] = (None, None, 0.0)
         return None, None, 0.0
-    tonic_pc = TONIC_TO_PC.get(info.get("tonic", ""))
+
+    try:
+        with open(json_path) as f:
+            data = json.load(f)
+    except (json.JSONDecodeError, OSError):
+        _KEY_CACHE[work_id] = (None, None, 0.0)
+        return None, None, 0.0
+
+    tonic_str = data.get("tonic", "")
+    tonic_pc = TONIC_TO_PC.get(tonic_str)
     if tonic_pc is None:
+        _KEY_CACHE[work_id] = (None, None, 0.0)
         return None, None, 0.0
-    is_minor = info.get("mode") == "minor"
-    conf = 1.0 if info.get("confidence") == "verified" else 0.8
-    return tonic_pc, is_minor, conf
+
+    is_minor = data.get("mode") == "minor"
+    conf = 1.0 if data.get("confidence") == "verified" else 0.8
+    result = (tonic_pc, is_minor, conf)
+    _KEY_CACHE[work_id] = result
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -146,6 +156,13 @@ class WorkIndex:
                     "roles": [t.get("role", "") for t in data.get("tracks", [])],
                     "time_signatures": data.get("time_signatures", []),
                 }
+                # Pre-populate _KEY_CACHE for bulk operations
+                tonic_str = data.get("tonic", "")
+                tonic_pc = TONIC_TO_PC.get(tonic_str)
+                if tonic_pc is not None:
+                    is_minor = data.get("mode") == "minor"
+                    conf = 1.0 if data.get("confidence") == "verified" else 0.8
+                    _KEY_CACHE[key] = (tonic_pc, is_minor, conf)
             except (json.JSONDecodeError, KeyError):
                 continue
 

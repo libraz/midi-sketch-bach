@@ -4,6 +4,9 @@
   "instrument": "violin",
   "form": "",
   "movement": 6,
+  "tonic": "E",
+  "mode": "major",
+  "confidence": "verified",
   "ticks_per_beat": 384,
   "duration_seconds": 106.1,
   "tempos": [

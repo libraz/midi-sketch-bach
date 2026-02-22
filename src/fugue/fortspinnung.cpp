@@ -473,31 +473,63 @@ std::vector<NoteEvent> generateFortspinnung(const MotifPool& pool,
       }
     }
 
-    // Phase-controlled diminution: probabilistically halve note durations
-    // to increase 16th note density toward Bach reference (61%).
-    // All phases allow double-halving; floor at kSixteenthNote.
+    // Phase-controlled diminution with motif preservation (B4).
+    // B1: Kernel=0% (theme rhythm fully preserved), Sequence=25% (limited),
+    // Dissolution=40-48% (main rhythmic density site).
     {
       float diminish_prob;
       constexpr float kFortEnergy = 0.5f;
       switch (phase) {
         case FortPhase::Kernel:
-          diminish_prob = 0.50f + kFortEnergy * 0.20f;
+          diminish_prob = 0.0f;
           break;
         case FortPhase::Sequence:
-          diminish_prob = 0.75f + kFortEnergy * 0.15f;
+          diminish_prob = 0.25f;
           break;
         case FortPhase::Dissolution:
           diminish_prob = 0.40f + kFortEnergy * 0.15f;
           break;
       }
       constexpr Tick kMinDiminishDur = duration::kSixteenthNote;
-      for (auto& frag_note : fragment) {
+      for (size_t fi = 0; fi < fragment.size(); ++fi) {
+        auto& frag_note = fragment[fi];
+
+        // B2: Strong beat guard — preserve durations on strong beats
+        // (beat 1 or 3) except in Dissolution phase.
+        Tick abs_tick = frag_note.start_tick + start_tick + current_tick;
+        if (phase != FortPhase::Dissolution && isStrongBeatInBar(abs_tick)) {
+          continue;  // Skip diminution for strong-beat notes.
+        }
+
+        // B3: Resolution note protection (melodic heuristic).
+        // If the interval from note[i-2]→note[i-1] was dissonant and
+        // note[i-1]→note[i] resolves by step, protect the resolution note.
+        if (fi >= 2 && diminish_prob > 0.0f) {
+          int prev_prev_mel =
+              std::abs(static_cast<int>(fragment[fi - 1].pitch) -
+                       static_cast<int>(fragment[fi - 2].pitch)) % 12;
+          int curr_mel =
+              std::abs(static_cast<int>(frag_note.pitch) -
+                       static_cast<int>(fragment[fi - 1].pitch)) % 12;
+          bool prev_dissonant = (prev_prev_mel == 1 || prev_prev_mel == 2 ||
+                                 prev_prev_mel == 6 || prev_prev_mel == 10 ||
+                                 prev_prev_mel == 11);
+          bool resolves_by_step = (curr_mel == 1 || curr_mel == 2);
+          if (prev_dissonant && resolves_by_step) {
+            continue;  // Skip diminution for resolution notes.
+          }
+        }
+
         if (frag_note.duration > kMinDiminishDur &&
             rng::rollProbability(rng, diminish_prob)) {
-          frag_note.duration = std::max(frag_note.duration / 2, kMinDiminishDur);
-          if (frag_note.duration > kMinDiminishDur &&
+          frag_note.duration =
+              std::max(frag_note.duration / 2, kMinDiminishDur);
+          // Second halving only in Dissolution at half probability.
+          if (phase == FortPhase::Dissolution &&
+              frag_note.duration > kMinDiminishDur &&
               rng::rollProbability(rng, diminish_prob * 0.5f)) {
-            frag_note.duration = std::max(frag_note.duration / 2, kMinDiminishDur);
+            frag_note.duration =
+                std::max(frag_note.duration / 2, kMinDiminishDur);
           }
         }
       }
@@ -606,8 +638,8 @@ std::vector<NoteEvent> generateFortspinnung(const MotifPool& pool,
 
     if (!voice0_notes.empty()) {
       std::mt19937 bass_rng(seed ^ 0xBA550002u);
-      // Emission probability: 70-85% per-seed variation.
-      float emit_prob = rng::rollFloat(bass_rng, 0.70f, 0.85f);
+      // D1: Emission probability raised for denser bass texture.
+      float emit_prob = rng::rollFloat(bass_rng, 0.85f, 0.95f);
 
       // Extract tail motif (last 3 notes of voice 0) and augment (2x duration).
       auto tail = extractTailMotif(voice0_notes, 3);
@@ -726,6 +758,22 @@ std::vector<NoteEvent> generateFortspinnung(const MotifPool& pool,
             else if (dur_roll < 0.90f) base_dur = kTicksPerBeat * 2;
             else base_dur = kTicksPerBar;
           }
+          // Bass floor: sustain when upper voices have sustained figuration (>=2 beats).
+          {
+            int short_note_count = 0;
+            for (const auto& note : result) {
+              if (note.voice >= 2) continue;
+              if (note.start_tick + note.duration > bass_tick - kTicksPerBeat * 2 &&
+                  note.start_tick <= bass_tick &&
+                  note.duration <= duration::kEighthNote) {
+                ++short_note_count;
+              }
+            }
+            if (short_note_count >= 4 && base_dur < kTicksPerBeat) {
+              base_dur = kTicksPerBeat;
+            }
+          }
+
           Tick anchor_dur = std::min(base_dur,
                                      start_tick + duration_ticks - bass_tick);
           if (anchor_dur >= duration::kSixteenthNote) {
@@ -755,7 +803,8 @@ std::vector<NoteEvent> generateFortspinnung(const MotifPool& pool,
     }
     if (!voice0_notes.empty()) {
       std::mt19937 pedal_rng(seed ^ 0xBA550003u);
-      float emit_prob = rng::rollFloat(pedal_rng, 0.50f, 0.65f);
+      // D1: Emission probability raised for denser pedal texture.
+      float emit_prob = rng::rollFloat(pedal_rng, 0.65f, 0.80f);
 
       // Pedal anchor pitches from key (tonicBassPitch pattern).
       constexpr int kPedalLo = 24;          // C1
@@ -909,10 +958,10 @@ std::vector<FortspinnungStep> planFortspinnung(
         (phase == FortPhase::Kernel) ? kernel_weights : weights;
     size_t rank = selectFragmentRank(rng, active_weights, pool.size());
 
-    // Determine op based on phase and character.
+    // A2: Fixed motif op — same base transformation across all phases
+    // within one episode. Phase-specific processing (sequential transposition,
+    // truncation) is handled by the generator, not through MotifOp switching.
     MotifOp op_val = params.voice0_initial;
-    if (phase == FortPhase::Sequence) op_val = MotifOp::Sequence;
-    if (phase == FortPhase::Dissolution) op_val = MotifOp::Fragment;
 
     // Estimate step duration from pool motif.
     const PooledMotif* motif = pool.getByRank(rank);

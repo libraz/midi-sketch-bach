@@ -158,7 +158,7 @@ BlackPearlResult BlackPearlGenerator::generate(const GoldbergStructuralGrid& gri
   FiguraProfile suspirans_profile = buildSuspiransProfile();
 
   auto melody = figuren.generate(suspirans_profile, grid, key, time_sig,
-                                  kMelodyVoice, seed);
+                                  kMelodyVoice, rng(), nullptr, 0.4f);
 
   // Set source and velocity for Adagio character.
   for (auto& note : melody) {

@@ -4,6 +4,9 @@
   "instrument": "keyboard",
   "form": "fugue",
   "movement": null,
+  "tonic": "Eb",
+  "mode": "minor",
+  "confidence": "verified",
   "ticks_per_beat": 384,
   "duration_seconds": 286.9,
   "tempos": [

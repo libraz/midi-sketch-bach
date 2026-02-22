@@ -71,6 +71,12 @@ from scripts.bach_analyzer.ngrams import (
     extract_rhythm_ngrams_data,
     iter_track_notes,
 )
+from scripts.bach_analyzer.voice_separation import (
+    SeparationResult,
+    detect_voice_count,
+    evaluate_separation,
+    separate_score,
+)
 
 # ---------------------------------------------------------------------------
 # MCP Server
@@ -159,6 +165,35 @@ def _estimate_chords_for_work(
 
     _CHORD_CACHE[cache_key] = (chords, stats_out)
     return chords, stats_out
+
+
+# ---------------------------------------------------------------------------
+# Voice separation cache
+# ---------------------------------------------------------------------------
+
+_VOICE_SEP_CACHE: dict[str, tuple[Score, Optional[SeparationResult]]] = {}
+
+
+def _get_separated_score(
+    work_id: str,
+    num_voices: Optional[int] = None,
+) -> tuple[Optional[Score], Optional[SeparationResult], str]:
+    """Get voice-separated score (cached). Returns (score, result, error)."""
+    cache_key = f"{work_id}:{num_voices}"
+    if cache_key in _VOICE_SEP_CACHE:
+        s, r = _VOICE_SEP_CACHE[cache_key]
+        return s, r, ""
+
+    score, raw_data, err = _load_score(work_id)
+    if err or score is None or raw_data is None:
+        return None, None, err or "Failed to load work."
+
+    track_type = raw_data.get("track_type", "")
+    tpb = raw_data.get("ticks_per_beat", TICKS_PER_BEAT)
+
+    sep_score, sep_result = separate_score(score, track_type, num_voices, tpb)
+    _VOICE_SEP_CACHE[cache_key] = (sep_score, sep_result)
+    return sep_score, sep_result, ""
 
 
 # ---------------------------------------------------------------------------
@@ -396,6 +431,7 @@ def get_notes(
 def get_interval_profile(
     work_id: str,
     track: Optional[str] = None,
+    separated: bool = False,
 ) -> str:
     """Analyze melodic interval distribution for a work.
 
@@ -405,10 +441,18 @@ def get_interval_profile(
     Args:
         work_id: Work identifier
         track: Optional track role to analyze (all tracks if omitted)
+        separated: Use voice-separated tracks for manual-type works
     """
     score, _, err = _load_score(work_id)
     if err:
         return json.dumps({"error": err})
+
+    computed_on = "raw"
+    if separated:
+        sep_score, _, sep_err = _get_separated_score(work_id)
+        if not sep_err and sep_score is not None:
+            score = sep_score
+            computed_on = "separated"
 
     all_intervals: Counter = Counter()
     total_intervals = 0
@@ -450,6 +494,7 @@ def get_interval_profile(
 
     result: dict[str, Any] = {
         "work_id": work_id,
+        "computed_on": computed_on,
         "combined": {
             "intervals": {
                 INTERVAL_NAMES[k]: v for k, v in sorted(all_intervals.items())
@@ -475,6 +520,7 @@ def get_interval_profile(
 def get_rhythm_profile(
     work_id: str,
     track: Optional[str] = None,
+    separated: bool = False,
 ) -> str:
     """Analyze rhythm/duration distribution for a work.
 
@@ -483,10 +529,18 @@ def get_rhythm_profile(
     Args:
         work_id: Work identifier
         track: Optional track role to analyze
+        separated: Use voice-separated tracks for manual-type works
     """
     score, _, err = _load_score(work_id)
     if err:
         return json.dumps({"error": err})
+
+    computed_on = "raw"
+    if separated:
+        sep_score, _, sep_err = _get_separated_score(work_id)
+        if not sep_err and sep_score is not None:
+            score = sep_score
+            computed_on = "separated"
 
     per_track: dict[str, dict] = {}
     all_dur: Counter = Counter()
@@ -513,6 +567,7 @@ def get_rhythm_profile(
 
     result: dict[str, Any] = {
         "work_id": work_id,
+        "computed_on": computed_on,
         "combined": {
             "distribution": dict(sorted(all_dur.items(), key=lambda x: -x[1])),
             "total_notes": sum(all_dur.values()),
@@ -529,6 +584,7 @@ def get_rhythm_profile(
 def get_pitch_profile(
     work_id: str,
     track: Optional[str] = None,
+    separated: bool = False,
 ) -> str:
     """Analyze pitch distribution for a work.
 
@@ -537,10 +593,18 @@ def get_pitch_profile(
     Args:
         work_id: Work identifier
         track: Optional track role to analyze
+        separated: Use voice-separated tracks for manual-type works
     """
     score, _, err = _load_score(work_id)
     if err:
         return json.dumps({"error": err})
+
+    computed_on = "raw"
+    if separated:
+        sep_score, _, sep_err = _get_separated_score(work_id)
+        if not sep_err and sep_score is not None:
+            score = sep_score
+            computed_on = "separated"
 
     per_track: dict[str, dict] = {}
     all_pc: Counter = Counter()
@@ -573,6 +637,7 @@ def get_pitch_profile(
 
     result: dict[str, Any] = {
         "work_id": work_id,
+        "computed_on": computed_on,
         "combined": {
             "pitch_class": dict(sorted(all_pc.items(), key=lambda x: -x[1])),
             "octave": dict(sorted(all_oct.items())),
@@ -604,6 +669,7 @@ def get_vertical_profile(
     track_a: Optional[str] = None,
     track_b: Optional[str] = None,
     sample_interval_beats: float = 1.0,
+    separated: bool = False,
 ) -> str:
     """Analyze vertical (simultaneous) intervals between two voices.
 
@@ -615,10 +681,18 @@ def get_vertical_profile(
         track_a: First track (default: first track)
         track_b: Second track (default: last track)
         sample_interval_beats: Sampling interval in beats (default 1.0)
+        separated: Use voice-separated tracks for manual-type works
     """
     score, _, err = _load_score(work_id)
     if err:
         return json.dumps({"error": err})
+
+    computed_on = "raw"
+    if separated:
+        sep_score, _, sep_err = _get_separated_score(work_id)
+        if not sep_err and sep_score is not None:
+            score = sep_score
+            computed_on = "separated"
 
     ta, tb, terr = _resolve_tracks(score, track_a, track_b)
     if terr:
@@ -654,6 +728,7 @@ def get_vertical_profile(
 
     return json.dumps({
         "work_id": work_id,
+        "computed_on": computed_on,
         "track_a": ta.name,
         "track_b": tb.name,
         "sample_interval_beats": sample_interval_beats,
@@ -678,6 +753,7 @@ def get_motion_profile(
     work_id: str,
     track_a: Optional[str] = None,
     track_b: Optional[str] = None,
+    separated: bool = False,
 ) -> str:
     """Analyze voice motion types between two tracks.
 
@@ -688,10 +764,18 @@ def get_motion_profile(
         work_id: Work identifier
         track_a: First track (default: first)
         track_b: Second track (default: last)
+        separated: Use voice-separated tracks for manual-type works
     """
     score, _, err = _load_score(work_id)
     if err:
         return json.dumps({"error": err})
+
+    computed_on = "raw"
+    if separated:
+        sep_score, _, sep_err = _get_separated_score(work_id)
+        if not sep_err and sep_score is not None:
+            score = sep_score
+            computed_on = "separated"
 
     ta, tb, terr = _resolve_tracks(score, track_a, track_b)
     if terr:
@@ -736,6 +820,7 @@ def get_motion_profile(
 
     return json.dumps({
         "work_id": work_id,
+        "computed_on": computed_on,
         "track_a": ta.name,
         "track_b": tb.name,
         "total_transitions": total,
@@ -758,7 +843,10 @@ def get_motion_profile(
 
 
 @server.tool()
-def get_voice_entry_pattern(work_id: str) -> str:
+def get_voice_entry_pattern(
+    work_id: str,
+    separated: bool = False,
+) -> str:
     """Analyze voice entry order and pitch relationships.
 
     Returns the first note of each track, entry order by onset, and
@@ -766,10 +854,18 @@ def get_voice_entry_pattern(work_id: str) -> str:
 
     Args:
         work_id: Work identifier
+        separated: Use voice-separated tracks for manual-type works
     """
     score, _, err = _load_score(work_id)
     if err:
         return json.dumps({"error": err})
+
+    computed_on = "raw"
+    if separated:
+        sep_score, _, sep_err = _get_separated_score(work_id)
+        if not sep_err and sep_score is not None:
+            score = sep_score
+            computed_on = "separated"
 
     entries = []
     for tr in score.tracks:
@@ -794,6 +890,7 @@ def get_voice_entry_pattern(work_id: str) -> str:
 
     return json.dumps({
         "work_id": work_id,
+        "computed_on": computed_on,
         "entry_count": len(entries),
         "entries": entries,
     }, indent=2)
@@ -806,6 +903,7 @@ def get_voice_entry_pattern(work_id: str) -> str:
 def get_texture_profile(
     work_id: str,
     sample_interval_beats: float = 1.0,
+    separated: bool = False,
 ) -> str:
     """Analyze texture density (active voice count per sample point).
 
@@ -814,10 +912,18 @@ def get_texture_profile(
     Args:
         work_id: Work identifier
         sample_interval_beats: Sampling interval in beats (default 1.0)
+        separated: Use voice-separated tracks for manual-type works
     """
     score, _, err = _load_score(work_id)
     if err:
         return json.dumps({"error": err})
+
+    computed_on = "raw"
+    if separated:
+        sep_score, _, sep_err = _get_separated_score(work_id)
+        if not sep_err and sep_score is not None:
+            score = sep_score
+            computed_on = "separated"
 
     sample_ticks = int(sample_interval_beats * TICKS_PER_BEAT)
     total_dur = score.total_duration
@@ -843,6 +949,7 @@ def get_texture_profile(
 
     return json.dumps({
         "work_id": work_id,
+        "computed_on": computed_on,
         "total_tracks": len(score.tracks),
         "sample_interval_beats": sample_interval_beats,
         "total_samples": total_samples,
@@ -1748,6 +1855,7 @@ def get_voice_leading_profile(
     work_id: str,
     track_a: Optional[str] = None,
     track_b: Optional[str] = None,
+    separated: bool = False,
 ) -> str:
     """Analyze voice leading quality between voice pairs.
 
@@ -1759,10 +1867,18 @@ def get_voice_leading_profile(
         work_id: Work identifier (e.g. BWV578, BWV846_1)
         track_a: First track (analyzes specific pair if both given)
         track_b: Second track (analyzes specific pair if both given)
+        separated: Use voice-separated tracks for manual-type works
     """
     score, raw_data, err = _load_score(work_id)
     if err or score is None or raw_data is None:
         return json.dumps({"error": err})
+
+    computed_on = "raw"
+    if separated:
+        sep_score, _, sep_err = _get_separated_score(work_id)
+        if not sep_err and sep_score is not None:
+            score = sep_score
+            computed_on = "separated"
 
     tpb = raw_data.get("ticks_per_beat", TICKS_PER_BEAT)
 
@@ -1905,6 +2021,7 @@ def get_voice_leading_profile(
 
     result: dict[str, Any] = {
         "work_id": work_id,
+        "computed_on": computed_on,
         "summary": summary,
         "voice_pairs": pair_results,
     }
@@ -1918,6 +2035,7 @@ def get_voice_leading_profile(
 def get_bass_profile(
     work_id: str,
     bass_track: Optional[str] = None,
+    separated: bool = False,
 ) -> str:
     """Analyze bass line characteristics of a Bach work.
 
@@ -1928,10 +2046,18 @@ def get_bass_profile(
     Args:
         work_id: Work identifier (e.g. BWV578, BWV846_1)
         bass_track: Explicit bass track name (auto-detect if omitted)
+        separated: Use voice-separated tracks for manual-type works
     """
     score, _, err = _load_score(work_id)
     if err or score is None:
         return json.dumps({"error": err})
+
+    computed_on = "raw"
+    if separated:
+        sep_score, _, sep_err = _get_separated_score(work_id)
+        if not sep_err and sep_score is not None:
+            score = sep_score
+            computed_on = "separated"
 
     if bass_track:
         trk = next((t for t in score.tracks if t.name == bass_track), None)
@@ -2030,6 +2156,7 @@ def get_bass_profile(
 
     result: dict[str, Any] = {
         "work_id": work_id,
+        "computed_on": computed_on,
         "bass_track": trk.name,
         "total_notes": total_notes,
         "strong_beat_p4p5_ratio": strong_beat_p4p5_ratio,
@@ -2956,6 +3083,99 @@ def extract_episode_internal_arc(
         "episode_length": ep_len_summary,
     }
     return json.dumps(result, indent=2)
+
+
+# ===== Voice separation tools ================================================
+
+
+@server.tool()
+def get_separated_voices(
+    work_id: str,
+    num_voices: Optional[int] = None,
+) -> str:
+    """Separate a multi-voice manual track into individual voice streams.
+
+    Only works on track_type="manual" works. Returns separated voices with
+    per-voice statistics and quality metrics.
+
+    Args:
+        work_id: Work identifier (e.g. BWV846_fugue, BWV525_1)
+        num_voices: Override voice count (auto-detected if omitted)
+    """
+    sep_score, sep_result, err = _get_separated_score(work_id, num_voices)
+    if err:
+        return json.dumps({"error": err})
+
+    if sep_result is None:
+        # Not a manual track type — return raw track info.
+        score, _, load_err = _load_score(work_id)
+        if load_err or score is None:
+            return json.dumps({"error": load_err})
+        return json.dumps({
+            "work_id": work_id,
+            "note": "track_type is not 'manual'; no separation needed.",
+            "tracks": [
+                {"name": t.name, "notes": len(t.notes)} for t in score.tracks
+            ],
+        }, indent=2)
+
+    voice_stats = []
+    for tr in sep_score.tracks:
+        notes = tr.sorted_notes
+        pitches = [n.pitch for n in notes]
+        voice_stats.append({
+            "name": tr.name,
+            "note_count": len(notes),
+            "pitch_range": [min(pitches), max(pitches)] if pitches else [],
+            "avg_pitch": round(sum(pitches) / len(pitches), 1) if pitches else 0,
+            "range_names": (
+                [pitch_to_name(min(pitches)), pitch_to_name(max(pitches))]
+                if pitches else []
+            ),
+        })
+
+    quality = evaluate_separation(sep_result)
+
+    return json.dumps({
+        "work_id": work_id,
+        "num_voices": sep_result.num_voices,
+        "arpeggio_like": sep_result.arpeggio_like,
+        "unassigned_rate": round(sep_result.unassigned_rate, 4),
+        "voices": voice_stats,
+        "quality": quality,
+    }, indent=2)
+
+
+@server.tool()
+def get_separation_quality(
+    work_id: str,
+    num_voices: Optional[int] = None,
+) -> str:
+    """Get quality metrics for voice separation of a manual-track work.
+
+    Returns crossing_rate, avg_interval, gap_rate, overlap_rate,
+    register_overlap, voice_swap_events, and unassigned_rate.
+
+    Args:
+        work_id: Work identifier
+        num_voices: Override voice count (auto-detected if omitted)
+    """
+    sep_score, sep_result, err = _get_separated_score(work_id, num_voices)
+    if err:
+        return json.dumps({"error": err})
+
+    if sep_result is None:
+        return json.dumps({
+            "work_id": work_id,
+            "note": "track_type is not 'manual'; no separation needed.",
+        }, indent=2)
+
+    quality = evaluate_separation(sep_result)
+    return json.dumps({
+        "work_id": work_id,
+        "num_voices": sep_result.num_voices,
+        "quality": quality,
+    }, indent=2)
 
 
 # ---------------------------------------------------------------------------

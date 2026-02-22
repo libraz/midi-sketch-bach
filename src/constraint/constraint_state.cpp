@@ -134,7 +134,7 @@ InvariantSet::SatisfiesResult InvariantSet::satisfies(
     }
   }
 
-  // Soft: adjacent voice spacing check.
+  // Soft: adjacent voice spacing check (too wide).
   for (int i = 0; i < snap.num_voices; ++i) {
     if (i == voice_id) continue;
     if (snap.pitches[i] == 0) continue;
@@ -144,6 +144,35 @@ InvariantSet::SatisfiesResult InvariantSet::satisfies(
       result.soft_violations++;
       result.spacing_violation = true;
       break;
+    }
+  }
+
+  // E1: Close spacing penalty — depth-dependent soft penalty prevents
+  // voice clustering. Extended to 5-6st for 3-voice Develop/Conclude episodes.
+  bool episode_context = (phase_ == FuguePhase::Develop ||
+                          phase_ == FuguePhase::Conclude);
+  int close_threshold = (active_voice_count_ <= 3 && episode_context) ? 7 : 5;
+  for (int i = 0; i < snap.num_voices; ++i) {
+    if (i == voice_id) continue;
+    if (snap.pitches[i] == 0) continue;
+    int spacing = std::abs(static_cast<int>(pitch) -
+                           static_cast<int>(snap.pitches[i]));
+    if (spacing > 0 && spacing < close_threshold) {
+      if (spacing < 2) {
+        result.additional_penalty += 0.40f;
+        result.close_spacing_recovery = true;
+      } else if (spacing < 3) {
+        result.additional_penalty += 0.20f;
+      } else if (spacing < 4) {
+        result.additional_penalty += 0.15f;
+      } else if (spacing < 5) {
+        result.additional_penalty += 0.10f;
+      } else {
+        // 5-6st: mild penalty, only in 3-voice episode context.
+        result.additional_penalty += 0.08f;
+      }
+      result.spacing_violation = true;
+      break;  // One penalty per candidate (worst adjacent pair).
     }
   }
 
@@ -405,6 +434,11 @@ float ConstraintState::evaluate(
         tick + kTicksPerBar * 2,
         voice_id);
   }
+
+  // E1: Depth-dependent close-spacing penalty (score only, no recovery
+  // obligation — close spacing is common in dense fugue texture and should
+  // not inflate soft_violation_count toward the is_dead threshold).
+  soft_penalty -= inv_result.additional_penalty;
 
   return gravity_score + obligation_bonus + soft_penalty;
 }

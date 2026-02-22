@@ -370,6 +370,22 @@ void placeBassFragments(std::vector<NoteEvent>& result,
         else if (dur_roll < 0.90f) base_dur = kTicksPerBeat * 2;
         else base_dur = kTicksPerBar;
       }
+
+      // Bass floor: sustain when upper voices have sustained figuration (>=2 beats).
+      {
+        int short_note_count = 0;
+        for (const auto& note : result) {
+          if (note.voice >= 2) continue;
+          if (note.start_tick + note.duration > bass_tick - kTicksPerBeat * 2 &&
+              note.start_tick <= bass_tick &&
+              note.duration <= duration::kEighthNote) {
+            ++short_note_count;
+          }
+        }
+        if (short_note_count >= 4 && base_dur < kTicksPerBeat) {
+          base_dur = kTicksPerBeat;
+        }
+      }
       Tick anchor_dur = std::min(base_dur,
                                  start_tick + duration - bass_tick);
       if (anchor_dur >= duration::kSixteenthNote) {
@@ -749,31 +765,94 @@ EpisodeResult generateConstraintEpisode(const EpisodeRequest& request) {
     for (const auto& motif_note : motif_notes) {
       if (note_tick >= request.start_tick + request.duration) break;
 
-      // Rhythm density: diminish all voice durations probabilistically,
-      // phase-controlled to match Bach reference rhythm distribution (61% 16ths).
-      // Uses kSixteenthNote as floor (not energy-based min_dur which is too high).
+      // Rhythm density: phase-controlled diminution with motif preservation.
+      // B1: Kernel=0% (theme rhythm fully preserved), Sequence=25% (limited),
+      // Dissolution=40-55% (main rhythmic density site).
       Tick base_dur = motif_note.duration;
       {
         constexpr Tick kDimFloor = duration::kSixteenthNote;  // 120 ticks
         FortPhase phase = step.phase;
+
+        // B1: Phase-dependent diminution probability.
         float diminish_prob;
         switch (phase) {
           case FortPhase::Kernel:
-            diminish_prob = 0.50f + request.energy_level * 0.20f;
+            diminish_prob = 0.0f;
             break;
           case FortPhase::Sequence:
-            diminish_prob = 0.75f + request.energy_level * 0.15f;
+            diminish_prob = 0.25f;
             break;
           case FortPhase::Dissolution:
             diminish_prob = 0.40f + request.energy_level * 0.15f;
             break;
         }
 
+        // B2: Strong beat guard — preserve durations on strong beats
+        // (beat 1 or 3) except in Dissolution phase.
+        if (phase != FortPhase::Dissolution && isStrongBeatInBar(note_tick)) {
+          diminish_prob = 0.0f;
+        }
+
+        // B3: Resolution note protection — if previous note was dissonant
+        // with other voices and current motif pitch is consonant, skip
+        // diminution to preserve suspension-resolution voice leading.
+        if (diminish_prob > 0.0f) {
+          uint8_t prev_p = prev_pitch_per_voice[voice];
+          if (prev_p > 0) {
+            bool prev_dissonant = false;
+            for (int vi = 0; vi < request.num_voices && vi < kMaxVoices; ++vi) {
+              if (vi == voice) continue;
+              uint8_t other_p = prev_pitch_per_voice[vi];
+              if (other_p == 0) continue;
+              int ivl = std::abs(static_cast<int>(prev_p) -
+                                 static_cast<int>(other_p)) % 12;
+              // Dissonant: 2nds (1,2), 7ths (10,11), tritone (6).
+              if (ivl == 1 || ivl == 2 || ivl == 6 ||
+                  ivl == 10 || ivl == 11) {
+                prev_dissonant = true;
+                break;
+              }
+            }
+            if (prev_dissonant) {
+              uint8_t mp = motif_note.pitch;
+              for (int vi = 0; vi < request.num_voices && vi < kMaxVoices;
+                   ++vi) {
+                if (vi == voice) continue;
+                uint8_t other_p = prev_pitch_per_voice[vi];
+                if (other_p == 0) continue;
+                int ivl = std::abs(static_cast<int>(mp) -
+                                   static_cast<int>(other_p)) % 12;
+                // Consonant: unison(0), 3rds(3,4), 5th(7), 6ths(8,9).
+                if (ivl == 0 || ivl == 3 || ivl == 4 ||
+                    ivl == 7 || ivl == 8 || ivl == 9) {
+                  diminish_prob = 0.0f;
+                  break;
+                }
+              }
+            }
+          }
+        }
+
+        // B4: Intra-voice rhythm consistency — suppress diminution when it would
+        // create a mixed pattern (e.g., 8th->16th switch within a phrase).
+        // BWV578 reference: voices maintain consistent figuration patterns.
+        if (diminish_prob > 0.0f) {
+          DurCategory prev_dc = ticksToDurCategory(prev_dur_per_voice[voice]);
+          DurCategory post_diminish_dc = ticksToDurCategory(
+              std::max(base_dur / 2, kDimFloor));
+          // If previous note was 8th and diminution would create 16th, suppress.
+          // This preserves running 8th patterns (common in countersubjects).
+          if (prev_dc == DurCategory::S8 && post_diminish_dc == DurCategory::S16) {
+            diminish_prob *= 0.3f;  // Mostly suppress 8th->16th switches.
+          }
+        }
+
         if (base_dur > kDimFloor) {
           if (rng::rollProbability(rng, diminish_prob)) {
             base_dur = std::max(base_dur / 2, kDimFloor);
-            // Second halving in all phases at half probability.
-            if (base_dur > kDimFloor &&
+            // Second halving only in Dissolution at half probability.
+            if (phase == FortPhase::Dissolution &&
+                base_dur > kDimFloor &&
                 rng::rollProbability(rng, diminish_prob * 0.5f)) {
               base_dur = std::max(base_dur / 2, kDimFloor);
             }
@@ -794,6 +873,25 @@ EpisodeResult generateConstraintEpisode(const EpisodeRequest& request) {
             base_dur = duration::kEighthNote;
           } else {
             sixteenth_count[voice]++;
+          }
+        }
+      }
+
+      // B5: Intra-voice rhythm consistency — suppress mixed patterns.
+      // BWV578 reference: upper voices have 74-83% 16th notes, uniform figuration.
+      // When previous note in this voice was short (16th/8th), prefer same category.
+      {
+        DurCategory prev_dc = ticksToDurCategory(prev_dur_per_voice[voice]);
+        DurCategory cand_dc = ticksToDurCategory(base_dur);
+        bool prev_short = (prev_dc == DurCategory::S16 || prev_dc == DurCategory::S8);
+        bool cand_short = (cand_dc == DurCategory::S16 || cand_dc == DurCategory::S8);
+        if (prev_short && cand_short && prev_dc != cand_dc) {
+          // Snap to previous duration category for consistent figuration.
+          if (prev_dc == DurCategory::S16 && base_dur > duration::kSixteenthNote) {
+            base_dur = duration::kSixteenthNote;
+          } else if (prev_dc == DurCategory::S8 &&
+                     base_dur < duration::kEighthNote) {
+            base_dur = duration::kEighthNote;
           }
         }
       }
@@ -820,17 +918,25 @@ EpisodeResult generateConstraintEpisode(const EpisodeRequest& request) {
           prev_pitch_per_voice[voice], prev_dur_per_voice[voice],
           note_tick, current_key);
 
-      // Evaluate candidates: original pitch + neighbors.
+      // Evaluate candidates: phase-dependent search width.
       uint8_t base_pitch = applyModulationShift(
           motif_note.pitch, progress, total_shift);
 
       float best_score = -std::numeric_limits<float>::infinity();
       uint8_t best_pitch = base_pitch;
 
-      for (int offset_idx = 0; offset_idx < kNumCandidateOffsets;
-           ++offset_idx) {
+      // A1: Kernel phase uses 3 candidates (original ± 1 semitone) to
+      // preserve motif pitch identity. Other phases use full 5 candidates.
+      constexpr int kKernelOffsets[] = {0, -1, 1};
+      constexpr int kKernelNumOffsets = 3;
+      const int* offsets = (step.phase == FortPhase::Kernel)
+                               ? kKernelOffsets : kCandidateOffsets;
+      int num_offsets = (step.phase == FortPhase::Kernel)
+                            ? kKernelNumOffsets : kNumCandidateOffsets;
+
+      for (int offset_idx = 0; offset_idx < num_offsets; ++offset_idx) {
         int candidate_int = static_cast<int>(base_pitch) +
-                            kCandidateOffsets[offset_idx];
+                            offsets[offset_idx];
 
         // Range check.
         if (candidate_int < static_cast<int>(voice_lo) ||
@@ -864,6 +970,34 @@ EpisodeResult generateConstraintEpisode(const EpisodeRequest& request) {
           score -= 0.40f;
         }
 
+        // A1: Kernel original-pitch bonus — strongly prefer the motif's own
+        // pitch to preserve thematic identity. If no hard violation on offset 0,
+        // the original pitch wins unless another candidate is dramatically better.
+        if (step.phase == FortPhase::Kernel && offset_idx == 0) {
+          score += 0.50f;
+        }
+
+        // A1: Kernel spacing bonus — prefer wider voice separation over
+        // consonance to prevent dense clustering when pitches are locked.
+        if (step.phase == FortPhase::Kernel) {
+          int min_spacing = 127;
+          for (int vi = 0; vi < snap.num_voices; ++vi) {
+            if (vi == voice || snap.pitches[vi] == 0) continue;
+            int sp = std::abs(static_cast<int>(candidate) -
+                              static_cast<int>(snap.pitches[vi]));
+            min_spacing = std::min(min_spacing, sp);
+          }
+          if (min_spacing < 127) {
+            score += std::min(static_cast<float>(min_spacing) / 24.0f, 0.40f);
+          }
+        }
+
+        // A2: Sequence motif-pitch bonus — prefer the motif's original pitch
+        // to maintain sequential pattern coherence.
+        if (step.phase == FortPhase::Sequence && offset_idx == 0) {
+          score += 0.30f;
+        }
+
         // Pedal consonance bonus: on strong beats, prefer intervals consonant
         // with the active pedal pitch (3rd, 5th, 6th, octave).
         if (request.pedal_pitch > 0 &&
@@ -872,6 +1006,28 @@ EpisodeResult generateConstraintEpisode(const EpisodeRequest& request) {
           bool consonant = (ivl == 0 || ivl == 3 || ivl == 4 ||
                             ivl == 7 || ivl == 8 || ivl == 9);
           score += consonant ? 0.30f : -0.25f;
+        }
+
+        // Wave 4: Episode spacing bonus — encourage wider voice separation.
+        // Phase-dependent cap prevents over-spacing while ensuring clarity.
+        {
+          float spacing_cap;
+          switch (step.phase) {
+            case FortPhase::Kernel:      spacing_cap = 0.50f; break;
+            case FortPhase::Sequence:    spacing_cap = 0.40f; break;
+            case FortPhase::Dissolution: spacing_cap = 0.35f; break;
+          }
+          int min_spacing = 127;
+          for (int vi = 0; vi < snap.num_voices; ++vi) {
+            if (vi == voice || snap.pitches[vi] == 0) continue;
+            int sp = std::abs(static_cast<int>(candidate) -
+                              static_cast<int>(snap.pitches[vi]));
+            min_spacing = std::min(min_spacing, sp);
+          }
+          if (min_spacing < 127 && min_spacing > 0) {
+            float bonus = std::sqrt(static_cast<float>(min_spacing) / 24.0f);
+            score += std::min(bonus, spacing_cap);
+          }
         }
 
         if (score > best_score) {

@@ -4,6 +4,9 @@
   "instrument": "keyboard",
   "form": "prelude",
   "movement": null,
+  "tonic": "Eb",
+  "mode": "major",
+  "confidence": "verified",
   "ticks_per_beat": 384,
   "duration_seconds": 121.5,
   "tempos": [

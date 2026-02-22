@@ -228,7 +228,7 @@ std::vector<NoteEvent> QuodlibetGenerator::placeMelodyOnGrid(
     const KeySignature& key,
     const TimeSignature& time_sig,
     uint8_t voice,
-    std::mt19937& rng) const {
+    std::mt19937& /*rng*/) const {
   std::vector<NoteEvent> notes;
   notes.reserve(static_cast<size_t>(bar_count) * 4);
 
@@ -243,10 +243,6 @@ std::vector<NoteEvent> QuodlibetGenerator::placeMelodyOnGrid(
   Tick current_tick = start_tick;
   int melody_idx = 0;
   uint8_t prev_pitch = 0;
-
-  // Small random octave offset for variety across seeds.
-  int octave_jitter = (static_cast<int>(rng() % 3) - 1) * 0;  // Reserved for future use.
-  (void)octave_jitter;
 
   while (current_tick < section_end) {
     uint8_t raw_pitch = melody_pitches[melody_idx];

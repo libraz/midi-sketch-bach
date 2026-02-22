@@ -4,6 +4,9 @@
   "instrument": "violin",
   "form": "",
   "movement": 1,
+  "tonic": "G",
+  "mode": "minor",
+  "confidence": "verified",
   "ticks_per_beat": 480,
   "duration_seconds": 215.8,
   "tempos": [

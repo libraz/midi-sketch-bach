@@ -74,10 +74,12 @@ TEST(DestructionResistanceTest, HundredSeedsAllProduceNonEmptyTracks) {
     ChaconneResult result = generateChaconne(config);
     ASSERT_TRUE(result.success)
         << "Seed " << seed << " failed: " << result.error_message;
-    ASSERT_EQ(result.tracks.size(), 1u)
-        << "Seed " << seed << ": expected 1 track";
+    ASSERT_EQ(result.tracks.size(), 2u)
+        << "Seed " << seed << ": expected 2 tracks";
     EXPECT_FALSE(result.tracks[0].notes.empty())
-        << "Seed " << seed << ": track has no notes";
+        << "Seed " << seed << ": bass track has no notes";
+    EXPECT_FALSE(result.tracks[1].notes.empty())
+        << "Seed " << seed << ": texture track has no notes";
     EXPECT_GT(result.total_duration_ticks, 0u)
         << "Seed " << seed << ": total duration is zero";
   }
@@ -103,15 +105,17 @@ TEST(DestructionResistanceTest, HundredSeedsViolinNotesInRange) {
     ChaconneResult result = generateChaconne(config);
     ASSERT_TRUE(result.success)
         << "Seed " << seed << " failed: " << result.error_message;
-    ASSERT_EQ(result.tracks.size(), 1u);
+    ASSERT_EQ(result.tracks.size(), 2u);
 
-    for (const auto& note : result.tracks[0].notes) {
-      EXPECT_GE(note.pitch, kLowestNote)
-          << "Seed " << seed << ": note pitch " << static_cast<int>(note.pitch)
-          << " below range at tick " << note.start_tick;
-      EXPECT_LE(note.pitch, kHighestNote)
-          << "Seed " << seed << ": note pitch " << static_cast<int>(note.pitch)
-          << " above range at tick " << note.start_tick;
+    for (const auto& track : result.tracks) {
+      for (const auto& note : track.notes) {
+        EXPECT_GE(note.pitch, kLowestNote)
+            << "Seed " << seed << ": note pitch " << static_cast<int>(note.pitch)
+            << " below range at tick " << note.start_tick;
+        EXPECT_LE(note.pitch, kHighestNote)
+            << "Seed " << seed << ": note pitch " << static_cast<int>(note.pitch)
+            << " above range at tick " << note.start_tick;
+      }
     }
   }
 }
@@ -145,10 +149,12 @@ TEST(DestructionResistanceTest, FiftySeedsAcrossFiveKeys) {
       ASSERT_TRUE(result.success)
           << key_case.name << " seed " << seed
           << " failed: " << result.error_message;
-      ASSERT_EQ(result.tracks.size(), 1u)
-          << key_case.name << " seed " << seed << ": expected 1 track";
+      ASSERT_EQ(result.tracks.size(), 2u)
+          << key_case.name << " seed " << seed << ": expected 2 tracks";
       EXPECT_FALSE(result.tracks[0].notes.empty())
-          << key_case.name << " seed " << seed << ": no notes generated";
+          << key_case.name << " seed " << seed << ": bass track has no notes";
+      EXPECT_FALSE(result.tracks[1].notes.empty())
+          << key_case.name << " seed " << seed << ": texture track has no notes";
 
       // Verify structural invariants.
       auto scheme = ChaconneScheme::createForKey(config.key);
@@ -196,17 +202,23 @@ TEST(DestructionResistanceTest, ThirtySeeds_ThreeInstruments) {
       ASSERT_TRUE(result.success)
           << inst_case.name << " seed " << seed
           << " failed: " << result.error_message;
-      ASSERT_EQ(result.tracks.size(), 1u);
+      ASSERT_EQ(result.tracks.size(), 2u);
       EXPECT_FALSE(result.tracks[0].notes.empty())
-          << inst_case.name << " seed " << seed << ": no notes";
+          << inst_case.name << " seed " << seed << ": bass track has no notes";
+      EXPECT_FALSE(result.tracks[1].notes.empty())
+          << inst_case.name << " seed " << seed << ": texture track has no notes";
       EXPECT_EQ(result.tracks[0].program, inst_case.expected_program)
-          << inst_case.name << " seed " << seed << ": wrong GM program";
+          << inst_case.name << " seed " << seed << ": wrong GM program on bass track";
+      EXPECT_EQ(result.tracks[1].program, inst_case.expected_program)
+          << inst_case.name << " seed " << seed << ": wrong GM program on texture track";
 
-      // All notes must have non-zero duration.
-      for (const auto& note : result.tracks[0].notes) {
-        EXPECT_GT(note.duration, 0u)
-            << inst_case.name << " seed " << seed
-            << ": zero-duration note at tick " << note.start_tick;
+      // All notes in both tracks must have non-zero duration.
+      for (const auto& track : result.tracks) {
+        for (const auto& note : track.notes) {
+          EXPECT_GT(note.duration, 0u)
+              << inst_case.name << " seed " << seed
+              << ": zero-duration note at tick " << note.start_tick;
+        }
       }
     }
   }
@@ -230,22 +242,24 @@ TEST(DestructionResistanceTest, TwentySeedsAreDeterministic) {
 
     ASSERT_TRUE(result_a.success) << "Seed " << seed << " run A failed";
     ASSERT_TRUE(result_b.success) << "Seed " << seed << " run B failed";
-    ASSERT_EQ(result_a.tracks.size(), 1u);
-    ASSERT_EQ(result_b.tracks.size(), 1u);
+    ASSERT_EQ(result_a.tracks.size(), 2u);
+    ASSERT_EQ(result_b.tracks.size(), 2u);
 
-    const auto& notes_a = result_a.tracks[0].notes;
-    const auto& notes_b = result_b.tracks[0].notes;
+    for (size_t trk = 0; trk < 2; ++trk) {
+      const auto& notes_a = result_a.tracks[trk].notes;
+      const auto& notes_b = result_b.tracks[trk].notes;
 
-    ASSERT_EQ(notes_a.size(), notes_b.size())
-        << "Seed " << seed << ": note count mismatch between runs";
+      ASSERT_EQ(notes_a.size(), notes_b.size())
+          << "Seed " << seed << " track " << trk << ": note count mismatch between runs";
 
-    for (size_t idx = 0; idx < notes_a.size(); ++idx) {
-      EXPECT_EQ(notes_a[idx].pitch, notes_b[idx].pitch)
-          << "Seed " << seed << ": pitch mismatch at note " << idx;
-      EXPECT_EQ(notes_a[idx].start_tick, notes_b[idx].start_tick)
-          << "Seed " << seed << ": timing mismatch at note " << idx;
-      EXPECT_EQ(notes_a[idx].duration, notes_b[idx].duration)
-          << "Seed " << seed << ": duration mismatch at note " << idx;
+      for (size_t idx = 0; idx < notes_a.size(); ++idx) {
+        EXPECT_EQ(notes_a[idx].pitch, notes_b[idx].pitch)
+            << "Seed " << seed << " track " << trk << ": pitch mismatch at note " << idx;
+        EXPECT_EQ(notes_a[idx].start_tick, notes_b[idx].start_tick)
+            << "Seed " << seed << " track " << trk << ": timing mismatch at note " << idx;
+        EXPECT_EQ(notes_a[idx].duration, notes_b[idx].duration)
+            << "Seed " << seed << " track " << trk << ": duration mismatch at note " << idx;
+      }
     }
   }
 }

@@ -4,6 +4,9 @@
   "instrument": "organ",
   "form": "prelude",
   "movement": null,
+  "tonic": "G",
+  "mode": "major",
+  "confidence": "verified",
   "ticks_per_beat": 384,
   "duration_seconds": 205.7,
   "tempos": [

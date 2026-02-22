@@ -203,7 +203,8 @@ std::vector<NoteEvent> FigurenGenerator::generate(
     const TimeSignature& time_sig,
     uint8_t voice_index,
     uint32_t seed,
-    const IKeyboardInstrument* instrument) const {
+    const IKeyboardInstrument* instrument,
+    float theme_strength) const {
   std::vector<NoteEvent> all_notes;
   all_notes.reserve(static_cast<size_t>(kGridBars) * profile.notes_per_beat *
                     time_sig.beatsPerBar());
@@ -231,7 +232,7 @@ std::vector<NoteEvent> FigurenGenerator::generate(
 
     auto bar_notes = generateBarFigura(
         profile, bar_info, key, time_sig, prev_pitch, register_center,
-        shaping, range_low, range_high, rng);
+        shaping, range_low, range_high, theme_strength, rng);
 
     // Offset notes to correct bar position.
     Tick bar_start = static_cast<Tick>(bar_idx) * ticks_per_bar;
@@ -293,6 +294,7 @@ std::vector<NoteEvent> FigurenGenerator::generateBarFigura(
     const PhraseShapingParams& shaping,
     uint8_t range_low,
     uint8_t range_high,
+    float theme_strength,
     std::mt19937& rng) const {
   // Get harmonic pivot from the structural grid.
   uint8_t pivot = bar_info.bass_motion.primary_pitch;
@@ -378,6 +380,32 @@ std::vector<NoteEvent> FigurenGenerator::generateBarFigura(
       int snap_dist = absoluteInterval(pitch, chord_tones[closest_idx]);
       if (snap_dist <= 4) {  // Only snap if within a major 3rd.
         pitch = chord_tones[closest_idx];
+      }
+    }
+
+    // Theme distance bias: on beat starts, pull toward Aria melody pitches.
+    int notes_per_beat = static_cast<int>(effective_npb);
+    bool is_beat_start = (notes_per_beat > 0) &&
+                         (static_cast<int>(idx) % notes_per_beat == 0);
+    if (theme_strength > 0.0f && is_beat_start) {
+      int beat_idx = (notes_per_beat > 0)
+                         ? static_cast<int>(idx) / notes_per_beat
+                         : 0;
+      uint8_t theme_pitch = bar_info.aria_melody[
+          static_cast<size_t>(std::min(beat_idx, 2))];
+      if (theme_pitch > 0) {
+        int dist_to_theme = absoluteInterval(pitch, theme_pitch);
+        float effective_strength = theme_strength;
+        if (dist_to_theme > 7) {
+          effective_strength *= 0.3f;  // Dampen for distant pitches.
+        }
+        if (dist_to_theme > 4) {
+          float pull_prob = effective_strength * 0.5f;
+          if (prob_dist(rng) < pull_prob) {
+            int dir = (theme_pitch > pitch) ? 1 : -1;
+            pitch = getScaleNeighbor(pitch, dir, key, range_low, range_high);
+          }
+        }
       }
     }
 

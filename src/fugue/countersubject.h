@@ -76,6 +76,20 @@ Countersubject generateSecondCountersubject(
     uint32_t seed, int max_retries = 5,
     FugueArchetype archetype = FugueArchetype::Compact);
 
+/// @brief Adapt countersubject notes to a target key.
+///
+/// Snaps any non-scale pitches to the nearest scale tone in the target key.
+/// Used when placing the countersubject against entries in different keys
+/// (exposition answer entries, middle entries in related keys).
+///
+/// @param cs_notes Countersubject notes to adapt.
+/// @param to_key Target key.
+/// @param scale Scale type (default Major).
+/// @return Adapted notes with pitches snapped to the target key.
+std::vector<NoteEvent> adaptCSToKey(const std::vector<NoteEvent>& cs_notes,
+                                     Key to_key,
+                                     ScaleType scale = ScaleType::Major);
+
 }  // namespace bach
 
 #endif  // BACH_FUGUE_COUNTERSUBJECT_H

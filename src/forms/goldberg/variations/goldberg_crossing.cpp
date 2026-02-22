@@ -50,7 +50,7 @@ CrossingResult CrossingGenerator::generate(
 
   // Generate upper manual voice (voice_index 0 = upper register).
   auto upper_notes = figuren.generate(
-      profile, grid, key, time_sig, kUpperVoice, seed);
+      profile, grid, key, time_sig, kUpperVoice, seed, nullptr, 0.3f);
 
   // Generate lower manual voice (voice_index 1 = lower register).
   // Use a different seed derived from the base seed for voice independence.

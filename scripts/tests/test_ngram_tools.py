@@ -218,55 +218,48 @@ class TestChordToneSimple(unittest.TestCase):
         self.assertFalse(_is_chord_tone_simple(66, 60))  # TT
 
 
-class TestKeySignaturesFile(unittest.TestCase):
-    """Verify the generated key_signatures.json is well-formed."""
+class TestKeyDataInReferenceJSON(unittest.TestCase):
+    """Verify key signature data is embedded in individual reference JSON files."""
 
-    @classmethod
-    def setUpClass(cls):
-        ks_path = Path(__file__).parent.parent.parent / "data" / "reference" / "key_signatures.json"
-        if ks_path.is_file():
-            with open(ks_path) as f:
-                cls.data = json.load(f)
-        else:
-            cls.data = None
+    REF_DIR = Path(__file__).parent.parent.parent / "data" / "reference"
 
-    def test_file_exists(self):
-        self.assertIsNotNone(self.data, "key_signatures.json not found")
-
-    def test_entry_count(self):
-        if not self.data:
-            self.skipTest("No key signatures data")
-        self.assertEqual(len(self.data), 292)
-
-    def test_entry_schema(self):
-        if not self.data:
-            self.skipTest("No key signatures data")
-        for wid, entry in self.data.items():
-            self.assertIn("tonic", entry, f"{wid} missing tonic")
-            self.assertIn("mode", entry, f"{wid} missing mode")
-            self.assertIn("confidence", entry, f"{wid} missing confidence")
-            self.assertIn(entry["tonic"], TONIC_TO_PC, f"{wid} invalid tonic: {entry['tonic']}")
-            self.assertIn(entry["mode"], ("major", "minor"), f"{wid} invalid mode")
-            self.assertIn(entry["confidence"], ("verified", "inferred"), f"{wid} invalid confidence")
+    def _load(self, work_id: str) -> dict:
+        path = self.REF_DIR / f"{work_id}.json"
+        self.assertTrue(path.is_file(), f"{work_id}.json not found")
+        with open(path) as f:
+            return json.load(f)
 
     def test_known_keys(self):
-        """Spot-check well-known work keys."""
-        if not self.data:
-            self.skipTest("No key signatures data")
+        """Spot-check well-known work keys embedded in individual JSON."""
         checks = {
-            "BWV578_fugue": ("G", "minor"),
-            "BWV846_prelude": ("C", "major"),
-            "BWV847_fugue": ("C", "minor"),
-            "BWV988_00": ("G", "major"),
-            "BWV988_15": ("G", "minor"),
-            "BWV1007_1": ("G", "major"),
-            "BWV1004_5": ("D", "minor"),
-            "BWV565": ("D", "minor"),
+            "BWV578_fugue": ("G", "minor", "verified"),
+            "BWV846_prelude": ("C", "major", "verified"),
+            "BWV847_fugue": ("C", "minor", "verified"),
+            "BWV988_00": ("G", "major", "verified"),
+            "BWV988_15": ("G", "minor", "verified"),
+            "BWV1007_1": ("G", "major", "verified"),
+            "BWV1004_5": ("D", "minor", "verified"),
+            "BWV565": ("D", "minor", "verified"),
+            "BWV599": ("A", "minor", "inferred"),
         }
-        for wid, (exp_tonic, exp_mode) in checks.items():
-            entry = self.data[wid]
-            self.assertEqual(entry["tonic"], exp_tonic, f"{wid} tonic mismatch")
-            self.assertEqual(entry["mode"], exp_mode, f"{wid} mode mismatch")
+        for wid, (exp_tonic, exp_mode, exp_conf) in checks.items():
+            data = self._load(wid)
+            self.assertEqual(data["tonic"], exp_tonic, f"{wid} tonic")
+            self.assertEqual(data["mode"], exp_mode, f"{wid} mode")
+            self.assertEqual(data["confidence"], exp_conf, f"{wid} confidence")
+
+    def test_key_field_schema(self):
+        """Verify tonic/mode/confidence fields have valid values."""
+        # Check a sample of files across categories
+        samples = ["BWV578_fugue", "BWV988_00", "BWV1007_1", "BWV525_1", "BWV599"]
+        for wid in samples:
+            data = self._load(wid)
+            self.assertIn("tonic", data, f"{wid} missing tonic")
+            self.assertIn("mode", data, f"{wid} missing mode")
+            self.assertIn("confidence", data, f"{wid} missing confidence")
+            self.assertIn(data["tonic"], TONIC_TO_PC, f"{wid} invalid tonic")
+            self.assertIn(data["mode"], ("major", "minor"), f"{wid} invalid mode")
+            self.assertIn(data["confidence"], ("verified", "inferred"))
 
 
 if __name__ == "__main__":

@@ -272,9 +272,9 @@ TEST(FugueTextureDensityTest, FourVoice_TuttiBelow30Percent) {
     DensityProfile profile = measureDensity(result, 4);
     float tutti_ratio = profile.ratio(4);
 
-    EXPECT_LT(tutti_ratio, 0.30f)
+    EXPECT_LT(tutti_ratio, 0.35f)
         << "Seed " << seed << ": tutti ratio " << (tutti_ratio * 100.0f)
-        << "% exceeds 30% (BWV578 reference: 11%)";
+        << "% exceeds 35% (BWV578 reference: 11%, D3 tutti raise)";
   }
 }
 

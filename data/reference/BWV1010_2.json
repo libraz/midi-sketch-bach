@@ -4,6 +4,9 @@
   "instrument": "cello",
   "form": "",
   "movement": 2,
+  "tonic": "Eb",
+  "mode": "major",
+  "confidence": "verified",
   "ticks_per_beat": 384,
   "duration_seconds": 206.4,
   "tempos": [

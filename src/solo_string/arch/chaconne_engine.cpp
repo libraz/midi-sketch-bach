@@ -521,134 +521,116 @@ ChaconneResult generateChaconne(const ChaconneConfig& config) {
   }
 
   // -----------------------------------------------------------------------
-  // Step 6: Assemble final track.
+  // Step 6: Separate bass and texture, then clean up each independently.
   // -----------------------------------------------------------------------
-  std::sort(all_notes.begin(), all_notes.end(),
-            [](const NoteEvent& lhs, const NoteEvent& rhs) {
-              if (lhs.start_tick != rhs.start_tick) {
-                return lhs.start_tick < rhs.start_tick;
-              }
-              return lhs.pitch < rhs.pitch;
-            });
+  // BWV 1004/5 is written with implicit polyphony (2-voice 20%, 3-voice 19%).
+  // Bass and texture are independent voices that belong on separate tracks.
+  // Cleaning up overlaps within each track independently avoids the problem
+  // of cross-voice overlap truncation destroying bass note durations.
 
-  // --- Overlap cleanup for solo string voice ---
-  // All chaconne notes share voice=1 (single MIDI track). Chords and bariolage
-  // produce multiple notes at the same tick with different pitches. The validator
-  // checks consecutive note pairs (sorted by start_tick) and flags any case where
-  // n1.end_tick > n2.start_tick as within_voice_overlap. Three-step cleanup:
-  //
-  // Step 6a: Remove exact duplicates (same tick + same pitch), keeping longer.
-  // Step 6b: Stagger same-tick chord notes by 1 tick each so the validator sees
-  //          them at distinct times. This is standard MIDI practice for chords in
-  //          a monophonic voice and is imperceptible at 480 ticks/beat.
-  // Step 6c: Truncate ALL remaining time-based overlaps unconditionally.
-  {
+  std::vector<NoteEvent> bass_notes;
+  std::vector<NoteEvent> texture_notes;
+  bass_notes.reserve(all_notes.size() / 4);
+  texture_notes.reserve(all_notes.size());
+
+  for (auto& note : all_notes) {
+    if (note.source == BachNoteSource::ChaconneBass ||
+        note.source == BachNoteSource::GroundBass) {
+      bass_notes.push_back(std::move(note));
+    } else {
+      texture_notes.push_back(std::move(note));
+    }
+  }
+  all_notes.clear();  // Release memory; no longer needed.
+
+  // --- Overlap cleanup helper (applied to each track independently) ---
+  // Three-step cleanup for monophonic voice:
+  //   6a: Remove exact duplicates (same tick + same pitch), keeping longer.
+  //   6b: Stagger same-tick chord notes by kChordStagger ticks each.
+  //   6c: Truncate ALL remaining time-based overlaps unconditionally.
+  constexpr Tick kChordStagger = 60;  // Matches kMinArticulatedDuration
+
+  auto cleanupOverlaps = [](std::vector<NoteEvent>& notes) {
+    if (notes.empty()) return;
+
     // Step 6a: Remove exact duplicates (same tick, same voice, same pitch).
-    // Keep the longer duration note.
-    std::sort(all_notes.begin(), all_notes.end(),
+    std::sort(notes.begin(), notes.end(),
               [](const NoteEvent& lhs, const NoteEvent& rhs) {
                 if (lhs.voice != rhs.voice) return lhs.voice < rhs.voice;
                 if (lhs.start_tick != rhs.start_tick) return lhs.start_tick < rhs.start_tick;
                 if (lhs.pitch != rhs.pitch) return lhs.pitch < rhs.pitch;
-                return lhs.duration > rhs.duration;  // Longer first so unique keeps it
+                return lhs.duration > rhs.duration;
               });
-
-    all_notes.erase(
-        std::unique(all_notes.begin(), all_notes.end(),
+    notes.erase(
+        std::unique(notes.begin(), notes.end(),
                     [](const NoteEvent& lhs, const NoteEvent& rhs) {
                       return lhs.voice == rhs.voice &&
                              lhs.start_tick == rhs.start_tick &&
                              lhs.pitch == rhs.pitch;
                     }),
-        all_notes.end());
+        notes.end());
 
-    // Step 6b: Stagger same-tick chord notes by kChordStagger ticks each.
-    // Within a group of notes sharing the same start_tick, the lowest-pitch note
-    // keeps the original tick; each subsequent note is offset by +kChordStagger.
-    // Durations are reduced by the offset to preserve the original end_tick.
-    //
-    // The stagger must be >= the post-pipeline minimum note duration (60 ticks,
-    // enforced by articulation in expression/articulation.cpp). At 480 ticks/beat
-    // this equals 1/8th of a beat -- comparable to the natural arpeggio spread of
-    // a bowed chord on violin/cello, so the musical effect is preserved.
-    //
-    // This converts simultaneous chords into micro-arpeggios that satisfy the
-    // monophonic within-voice overlap constraint while remaining musically
-    // idiomatic for solo string instruments.
-    constexpr Tick kChordStagger = 60;  // Matches kMinArticulatedDuration
-
-    std::sort(all_notes.begin(), all_notes.end(),
+    // Step 6b: Stagger same-tick notes by kChordStagger ticks each.
+    std::sort(notes.begin(), notes.end(),
               [](const NoteEvent& lhs, const NoteEvent& rhs) {
                 if (lhs.start_tick != rhs.start_tick) return lhs.start_tick < rhs.start_tick;
                 return lhs.pitch < rhs.pitch;
               });
-
-    for (size_t idx = 0; idx < all_notes.size(); /* advanced inside */) {
-      // Find the extent of same-tick group.
-      Tick group_tick = all_notes[idx].start_tick;
+    for (size_t idx = 0; idx < notes.size(); /* advanced inside */) {
+      Tick group_tick = notes[idx].start_tick;
       size_t group_end = idx + 1;
-      while (group_end < all_notes.size() &&
-             all_notes[group_end].start_tick == group_tick) {
+      while (group_end < notes.size() &&
+             notes[group_end].start_tick == group_tick) {
         ++group_end;
       }
       size_t group_size = group_end - idx;
       if (group_size > 1) {
-        // Offset each note beyond the first by its position in the group.
         for (size_t pos = 1; pos < group_size; ++pos) {
           Tick offset = kChordStagger * static_cast<Tick>(pos);
-          all_notes[idx + pos].start_tick += offset;
-          // Reduce duration to preserve the original end_tick.
-          if (all_notes[idx + pos].duration > offset) {
-            all_notes[idx + pos].duration -= offset;
+          notes[idx + pos].start_tick += offset;
+          if (notes[idx + pos].duration > offset) {
+            notes[idx + pos].duration -= offset;
           } else {
-            all_notes[idx + pos].duration = 1;
+            notes[idx + pos].duration = 1;
           }
         }
       }
       idx = group_end;
     }
 
-    // Step 6c: Truncate ALL remaining time-based overlaps unconditionally.
-    // After staggering, each note sits at a distinct start_tick. Scan in the
-    // same order the validator uses (start_tick, pitch) and truncate any note
-    // whose end_tick exceeds the next note's start_tick. No conditional on
-    // pitch equality or overlap amount -- every overlap is trimmed.
-    std::sort(all_notes.begin(), all_notes.end(),
+    // Step 6c: Truncate remaining time-based overlaps.
+    std::sort(notes.begin(), notes.end(),
               [](const NoteEvent& lhs, const NoteEvent& rhs) {
                 if (lhs.start_tick != rhs.start_tick) return lhs.start_tick < rhs.start_tick;
                 return lhs.pitch < rhs.pitch;
               });
-
-    for (size_t idx = 0; idx + 1 < all_notes.size(); ++idx) {
-      Tick end_tick = all_notes[idx].start_tick + all_notes[idx].duration;
-      if (end_tick > all_notes[idx + 1].start_tick) {
-        Tick new_dur = all_notes[idx + 1].start_tick - all_notes[idx].start_tick;
+    for (size_t idx = 0; idx + 1 < notes.size(); ++idx) {
+      Tick end_tick = notes[idx].start_tick + notes[idx].duration;
+      if (end_tick > notes[idx + 1].start_tick) {
+        Tick new_dur = notes[idx + 1].start_tick - notes[idx].start_tick;
         if (new_dur == 0) new_dur = 1;
-        all_notes[idx].duration = new_dur;
-        all_notes[idx].modified_by |= static_cast<uint8_t>(NoteModifiedBy::OverlapTrim);
+        notes[idx].duration = new_dur;
+        notes[idx].modified_by |= static_cast<uint8_t>(NoteModifiedBy::OverlapTrim);
       }
     }
-  }
+  };
 
-  // Restore sort order for subsequent leap clamping.
-  std::sort(all_notes.begin(), all_notes.end(),
+  cleanupOverlaps(bass_notes);
+  cleanupOverlaps(texture_notes);
+
+  // Clamp excessive leaps (>12 semitones) in texture notes only.
+  // Bass notes preserve structural integrity.
+  std::sort(texture_notes.begin(), texture_notes.end(),
             [](const NoteEvent& lhs, const NoteEvent& rhs) {
               if (lhs.start_tick != rhs.start_tick) return lhs.start_tick < rhs.start_tick;
               return lhs.pitch < rhs.pitch;
             });
-
-  // Clamp excessive leaps (>12 semitones).
-  // Skip bass notes (ChaconneBass/GroundBass) to preserve structural integrity.
-  for (size_t idx = 1; idx < all_notes.size(); ++idx) {
-    if (all_notes[idx].source == BachNoteSource::ChaconneBass) continue;
-    if (all_notes[idx].source == BachNoteSource::GroundBass) continue;
-    if (all_notes[idx - 1].source == BachNoteSource::ChaconneBass) continue;
-    if (all_notes[idx - 1].source == BachNoteSource::GroundBass) continue;
-    int leap = absoluteInterval(all_notes[idx].pitch, all_notes[idx - 1].pitch);
+  for (size_t idx = 1; idx < texture_notes.size(); ++idx) {
+    int leap = absoluteInterval(texture_notes[idx].pitch, texture_notes[idx - 1].pitch);
     if (leap > 12) {
-      int pc = getPitchClass(all_notes[idx].pitch);
-      int prev = static_cast<int>(all_notes[idx - 1].pitch);
-      int best = static_cast<int>(all_notes[idx].pitch);
+      int pc = getPitchClass(texture_notes[idx].pitch);
+      int prev = static_cast<int>(texture_notes[idx - 1].pitch);
+      int best = static_cast<int>(texture_notes[idx].pitch);
       int best_dist = leap;
       for (int oct = 0; oct <= 10; ++oct) {
         int cand = oct * 12 + pc;
@@ -660,40 +642,48 @@ ChaconneResult generateChaconne(const ChaconneConfig& config) {
           best = cand;
         }
       }
-      all_notes[idx].pitch = static_cast<uint8_t>(best);
-      all_notes[idx].modified_by |= static_cast<uint8_t>(NoteModifiedBy::OctaveAdjust);
+      texture_notes[idx].pitch = static_cast<uint8_t>(best);
+      texture_notes[idx].modified_by |= static_cast<uint8_t>(NoteModifiedBy::OctaveAdjust);
     }
   }
 
-  Track track;
-  track.channel = 0;
-  track.program = profile.program;
-  track.notes = std::move(all_notes);
-
+  // -----------------------------------------------------------------------
+  // Step 7: Assemble two tracks (bass + texture).
+  // -----------------------------------------------------------------------
+  std::string instrument_name;
   switch (config.instrument) {
-    case InstrumentType::Violin:
-      track.name = "Violin";
-      break;
-    case InstrumentType::Cello:
-      track.name = "Cello";
-      break;
-    case InstrumentType::Guitar:
-      track.name = "Guitar";
-      break;
-    default:
-      track.name = "Solo String";
-      break;
+    case InstrumentType::Violin: instrument_name = "Violin"; break;
+    case InstrumentType::Cello:  instrument_name = "Cello";  break;
+    case InstrumentType::Guitar: instrument_name = "Guitar";  break;
+    default:                     instrument_name = "Solo String"; break;
   }
+
+  // Track 0: Bass (channel 0).
+  Track bass_track;
+  bass_track.channel = 0;
+  bass_track.program = profile.program;
+  bass_track.name = instrument_name + " Bass";
+  bass_track.notes = std::move(bass_notes);
+
+  // Track 1: Texture (channel 1, same program for same timbre).
+  Track texture_track;
+  texture_track.channel = 1;
+  texture_track.program = profile.program;
+  texture_track.name = instrument_name;
+  texture_track.notes = std::move(texture_notes);
 
   Tick total_duration = static_cast<Tick>(variations.size()) * bass_length;
-  for (const auto& note : track.notes) {
+  for (const auto& note : bass_track.notes) {
     Tick note_end = note.start_tick + note.duration;
-    if (note_end > total_duration) {
-      total_duration = note_end;
-    }
+    if (note_end > total_duration) total_duration = note_end;
+  }
+  for (const auto& note : texture_track.notes) {
+    Tick note_end = note.start_tick + note.duration;
+    if (note_end > total_duration) total_duration = note_end;
   }
 
-  result.tracks.push_back(std::move(track));
+  result.tracks.push_back(std::move(bass_track));
+  result.tracks.push_back(std::move(texture_track));
   result.total_duration_ticks = total_duration;
   result.timeline = std::move(full_timeline);
   result.success = true;

@@ -354,6 +354,44 @@ inline Tick selectFreeRhythmDuration(std::mt19937& rng) {
 }  // namespace detail
 
 // ---------------------------------------------------------------------------
+// Bridge duration selection with energy-aware weighting
+// ---------------------------------------------------------------------------
+
+/// @brief Select a duration for bridge notes with energy-aware weighting.
+/// @param energy Current energy level [0.0, 1.0].
+/// @param max_32nd_prob Profile cap on 32nd probability.
+/// @param tension Current harmonic tension.
+/// @param tension_gate Phase-specific minimum tension threshold.
+/// @param current_tick Current tick for beat-position check.
+/// @param rng Random number generator.
+/// @return Duration in ticks.
+inline Tick selectBridgeDuration(float energy, float max_32nd_prob,
+                                  float tension, float tension_gate,
+                                  Tick current_tick, std::mt19937& rng) {
+  constexpr float kW16th = 0.67f;
+  constexpr float kW8th = 0.18f;
+
+  // Quarter: inverse correlation with energy. Suppress at high energy.
+  bool at_beat = (current_tick % kTicksPerBeat == 0);
+  float w_qtr = at_beat ? std::max(0.0f, 0.04f * (1.0f - energy)) : 0.0f;
+
+  // 32nd: energy-dependent, suppress on beat.
+  float w_32nd = compute32ndProbability(energy, tension, tension_gate);
+  w_32nd = std::min(w_32nd, max_32nd_prob);
+  if (at_beat) w_32nd *= 0.3f;
+
+  float total = kW16th + kW8th + w_qtr + w_32nd;
+  float roll = rng::rollFloat(rng, 0.0f, total);
+
+  if (roll < w_32nd) return duration::kThirtySecondNote;
+  roll -= w_32nd;
+  if (roll < kW16th) return duration::kSixteenthNote;
+  roll -= kW16th;
+  if (roll < kW8th) return duration::kEighthNote;
+  return duration::kQuarterNote;
+}
+
+// ---------------------------------------------------------------------------
 // Layer 2: generateFigurationSpan()
 // ---------------------------------------------------------------------------
 
@@ -418,6 +456,15 @@ inline FigurationResult generateFigurationSpan(
   // Track consecutive bridge notes (force figure after 2).
   int consecutive_bridges = 0;
 
+  // Figure persistence state (lock/release + cooldown + tabu).
+  int locked_fig_idx = -1;       // Locked figure index, -1 = none.
+  int fig_repeats_left = 0;      // Remaining forced repetitions.
+  int cooldown_notes = 0;        // Bridge notes before next lock allowed.
+  int last_failed_idx = -1;      // 1-step tabu: most recently failed figure.
+  // Bridge duration micro-lock state.
+  Tick locked_bridge_dur = 0;     // 0 = no lock.
+  int bridge_dur_reps_left = 0;   // Remaining same-duration bridge notes.
+
   // Base duration for non-free-rhythm: 16th note.
   constexpr Tick kBase16thDuration = duration::kSixteenthNote;  // 120 ticks.
   constexpr Tick k32ndDuration = duration::kThirtySecondNote;    // 60 ticks.
@@ -453,7 +500,29 @@ inline FigurationResult generateFigurationSpan(
 
     if (try_figure && profile.primary_count > 0) {
       // Select a random figure from the profile's primary figures.
-      int fig_idx = rng::rollRange(rng, 0, profile.primary_count - 1);
+      int fig_idx;
+      if (profile.free_rhythm) {
+        // Phase C recitative: no persistence.
+        fig_idx = rng::rollRange(rng, 0, profile.primary_count - 1);
+      } else if (fig_repeats_left > 0 && locked_fig_idx >= 0) {
+        // Locked: reuse same figure.
+        fig_idx = locked_fig_idx;
+        fig_repeats_left--;
+      } else if (cooldown_notes > 0) {
+        // Cooldown: select randomly but don't lock.
+        fig_idx = rng::rollRange(rng, 0, profile.primary_count - 1);
+      } else {
+        // Fresh selection + lock.
+        fig_idx = rng::rollRange(rng, 0, profile.primary_count - 1);
+        // 1-step tabu: avoid the figure that just failed.
+        if (fig_idx == last_failed_idx && profile.primary_count > 1) {
+          fig_idx = (fig_idx + 1) % profile.primary_count;
+        }
+        int max_reps = 2 + static_cast<int>(4.0f * ctx.energy);  // 2-6.
+        locked_fig_idx = fig_idx;
+        fig_repeats_left = rng::rollRange(rng, 2, max_reps);
+        last_failed_idx = -1;  // Clear tabu on successful new lock.
+      }
       const MelodicFigure* figure = profile.primary_figures[fig_idx];
 
       if (figure != nullptr) {
@@ -620,6 +689,12 @@ inline FigurationResult generateFigurationSpan(
             current_tick += figure_total;
             consecutive_bridges = 0;
             figure_emitted = true;
+          } else {
+            // Figure validation failed: release lock.
+            last_failed_idx = locked_fig_idx;
+            locked_fig_idx = -1;
+            fig_repeats_left = 0;
+            cooldown_notes = 2;
           }
         }
       }
@@ -650,16 +725,24 @@ inline FigurationResult generateFigurationSpan(
         }
       }
 
-      // Determine bridge note duration.
-      Tick bridge_dur = kBase16thDuration;
+      // Determine bridge note duration with micro-lock.
+      Tick bridge_dur;
       if (profile.free_rhythm) {
         bridge_dur = detail::selectFreeRhythmDuration(rng);
+      } else if (bridge_dur_reps_left > 0 && locked_bridge_dur > 0) {
+        bridge_dur = locked_bridge_dur;
+        bridge_dur_reps_left--;
       } else {
-        float prob_32nd = compute32ndProbability(ctx.energy, tension,
-                                                 profile.harmonic_tension_gate);
-        prob_32nd = std::min(prob_32nd, profile.max_32nd_prob);
-        if (rng::rollProbability(rng, prob_32nd)) {
-          bridge_dur = k32ndDuration;
+        bridge_dur = selectBridgeDuration(ctx.energy, profile.max_32nd_prob,
+                                           tension, profile.harmonic_tension_gate,
+                                           current_tick, rng);
+        // Micro-lock: 16th/8th maintain for 1-3 notes. 32nd stays single.
+        if (bridge_dur >= duration::kSixteenthNote) {
+          locked_bridge_dur = bridge_dur;
+          bridge_dur_reps_left = rng::rollRange(rng, 1, 3);
+        } else {
+          locked_bridge_dur = 0;
+          bridge_dur_reps_left = 0;
         }
       }
 
@@ -680,6 +763,7 @@ inline FigurationResult generateFigurationSpan(
 
       prev_pitch = bridge_pitch;
       current_tick += bridge_dur;
+      if (cooldown_notes > 0) cooldown_notes--;
       consecutive_bridges++;
     }
   }

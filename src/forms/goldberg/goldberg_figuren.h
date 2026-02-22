@@ -55,7 +55,8 @@ class FigurenGenerator {
       const TimeSignature& time_sig,
       uint8_t voice_index,
       uint32_t seed,
-      const IKeyboardInstrument* instrument = nullptr) const;
+      const IKeyboardInstrument* instrument = nullptr,
+      float theme_strength = 0.0f) const;
 
  private:
   /// @brief Generate one bar of Figura pattern.
@@ -78,6 +79,7 @@ class FigurenGenerator {
       const PhraseShapingParams& shaping,
       uint8_t range_low,
       uint8_t range_high,
+      float theme_strength,
       std::mt19937& rng) const;
 
   /// @brief Generate pitch pattern for a specific FiguraType from a harmonic pivot.

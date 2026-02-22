@@ -4,6 +4,9 @@
   "instrument": "organ",
   "form": "toccata",
   "movement": null,
+  "tonic": "F",
+  "mode": "major",
+  "confidence": "verified",
   "ticks_per_beat": 384,
   "duration_seconds": 516.1,
   "tempos": [

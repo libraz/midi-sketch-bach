@@ -49,19 +49,20 @@ TEST(ChaconneEngineTest, DefaultConfigGeneratesSuccessfully) {
   EXPECT_TRUE(result.success) << result.error_message;
 }
 
-TEST(ChaconneEngineTest, ProducesSingleTrack) {
+TEST(ChaconneEngineTest, ProducesTwoTracks) {
   auto config = createTestConfig();
   auto result = generateChaconne(config);
   ASSERT_TRUE(result.success) << result.error_message;
-  EXPECT_EQ(result.tracks.size(), 1u);
+  EXPECT_EQ(result.tracks.size(), 2u);
 }
 
 TEST(ChaconneEngineTest, TrackHasNotes) {
   auto config = createTestConfig();
   auto result = generateChaconne(config);
   ASSERT_TRUE(result.success) << result.error_message;
-  ASSERT_EQ(result.tracks.size(), 1u);
+  ASSERT_EQ(result.tracks.size(), 2u);
   EXPECT_FALSE(result.tracks[0].notes.empty());
+  EXPECT_FALSE(result.tracks[1].notes.empty());
 }
 
 TEST(ChaconneEngineTest, TrackHasCorrectNameViolin) {
@@ -69,8 +70,9 @@ TEST(ChaconneEngineTest, TrackHasCorrectNameViolin) {
   config.instrument = InstrumentType::Violin;
   auto result = generateChaconne(config);
   ASSERT_TRUE(result.success) << result.error_message;
-  ASSERT_EQ(result.tracks.size(), 1u);
-  EXPECT_EQ(result.tracks[0].name, "Violin");
+  ASSERT_EQ(result.tracks.size(), 2u);
+  EXPECT_EQ(result.tracks[0].name, "Violin Bass");
+  EXPECT_EQ(result.tracks[1].name, "Violin");
 }
 
 TEST(ChaconneEngineTest, TrackHasCorrectNameCello) {
@@ -78,8 +80,9 @@ TEST(ChaconneEngineTest, TrackHasCorrectNameCello) {
   config.instrument = InstrumentType::Cello;
   auto result = generateChaconne(config);
   ASSERT_TRUE(result.success) << result.error_message;
-  ASSERT_EQ(result.tracks.size(), 1u);
-  EXPECT_EQ(result.tracks[0].name, "Cello");
+  ASSERT_EQ(result.tracks.size(), 2u);
+  EXPECT_EQ(result.tracks[0].name, "Cello Bass");
+  EXPECT_EQ(result.tracks[1].name, "Cello");
 }
 
 TEST(ChaconneEngineTest, TrackHasCorrectNameGuitar) {
@@ -87,8 +90,9 @@ TEST(ChaconneEngineTest, TrackHasCorrectNameGuitar) {
   config.instrument = InstrumentType::Guitar;
   auto result = generateChaconne(config);
   ASSERT_TRUE(result.success) << result.error_message;
-  ASSERT_EQ(result.tracks.size(), 1u);
-  EXPECT_EQ(result.tracks[0].name, "Guitar");
+  ASSERT_EQ(result.tracks.size(), 2u);
+  EXPECT_EQ(result.tracks[0].name, "Guitar Bass");
+  EXPECT_EQ(result.tracks[1].name, "Guitar");
 }
 
 // ===========================================================================
@@ -100,8 +104,9 @@ TEST(ChaconneEngineTest, ViolinTrackHasCorrectGmProgram) {
   config.instrument = InstrumentType::Violin;
   auto result = generateChaconne(config);
   ASSERT_TRUE(result.success) << result.error_message;
-  ASSERT_EQ(result.tracks.size(), 1u);
-  EXPECT_EQ(result.tracks[0].program, 40u);  // Violin GM program
+  ASSERT_EQ(result.tracks.size(), 2u);
+  EXPECT_EQ(result.tracks[0].program, 40u);  // Violin GM program (bass)
+  EXPECT_EQ(result.tracks[1].program, 40u);  // Violin GM program (texture)
 }
 
 TEST(ChaconneEngineTest, CelloTrackHasCorrectGmProgram) {
@@ -109,8 +114,9 @@ TEST(ChaconneEngineTest, CelloTrackHasCorrectGmProgram) {
   config.instrument = InstrumentType::Cello;
   auto result = generateChaconne(config);
   ASSERT_TRUE(result.success) << result.error_message;
-  ASSERT_EQ(result.tracks.size(), 1u);
-  EXPECT_EQ(result.tracks[0].program, 42u);  // Cello GM program
+  ASSERT_EQ(result.tracks.size(), 2u);
+  EXPECT_EQ(result.tracks[0].program, 42u);  // Cello GM program (bass)
+  EXPECT_EQ(result.tracks[1].program, 42u);  // Cello GM program (texture)
 }
 
 TEST(ChaconneEngineTest, GuitarTrackHasCorrectGmProgram) {
@@ -118,8 +124,9 @@ TEST(ChaconneEngineTest, GuitarTrackHasCorrectGmProgram) {
   config.instrument = InstrumentType::Guitar;
   auto result = generateChaconne(config);
   ASSERT_TRUE(result.success) << result.error_message;
-  ASSERT_EQ(result.tracks.size(), 1u);
-  EXPECT_EQ(result.tracks[0].program, 24u);  // Nylon Guitar GM program
+  ASSERT_EQ(result.tracks.size(), 2u);
+  EXPECT_EQ(result.tracks[0].program, 24u);  // Nylon Guitar GM program (bass)
+  EXPECT_EQ(result.tracks[1].program, 24u);  // Nylon Guitar GM program (texture)
 }
 
 // ===========================================================================
@@ -131,16 +138,18 @@ TEST(ChaconneEngineTest, ViolinNotesWithinRange) {
   config.instrument = InstrumentType::Violin;
   auto result = generateChaconne(config);
   ASSERT_TRUE(result.success) << result.error_message;
-  ASSERT_EQ(result.tracks.size(), 1u);
+  ASSERT_EQ(result.tracks.size(), 2u);
 
   ViolinModel violin;
-  for (const auto& note : result.tracks[0].notes) {
-    EXPECT_GE(note.pitch, violin.getLowestPitch())
-        << "Note pitch " << static_cast<int>(note.pitch) << " below violin range"
-        << " at tick " << note.start_tick;
-    EXPECT_LE(note.pitch, violin.getHighestPitch())
-        << "Note pitch " << static_cast<int>(note.pitch) << " above violin range"
-        << " at tick " << note.start_tick;
+  for (size_t trk = 0; trk < result.tracks.size(); ++trk) {
+    for (const auto& note : result.tracks[trk].notes) {
+      EXPECT_GE(note.pitch, violin.getLowestPitch())
+          << "Track " << trk << " note pitch " << static_cast<int>(note.pitch)
+          << " below violin range at tick " << note.start_tick;
+      EXPECT_LE(note.pitch, violin.getHighestPitch())
+          << "Track " << trk << " note pitch " << static_cast<int>(note.pitch)
+          << " above violin range at tick " << note.start_tick;
+    }
   }
 }
 
@@ -149,14 +158,16 @@ TEST(ChaconneEngineTest, CelloNotesWithinRange) {
   config.instrument = InstrumentType::Cello;
   auto result = generateChaconne(config);
   ASSERT_TRUE(result.success) << result.error_message;
-  ASSERT_EQ(result.tracks.size(), 1u);
+  ASSERT_EQ(result.tracks.size(), 2u);
 
-  for (const auto& note : result.tracks[0].notes) {
-    // Bass notes may go slightly below cello texture range but still
-    // within instrument capability. Use generous bounds for bass notes.
-    EXPECT_LE(note.pitch, 96u)
-        << "Note pitch " << static_cast<int>(note.pitch) << " above range"
-        << " at tick " << note.start_tick;
+  for (size_t trk = 0; trk < result.tracks.size(); ++trk) {
+    for (const auto& note : result.tracks[trk].notes) {
+      // Bass notes may go slightly below cello texture range but still
+      // within instrument capability. Use generous bounds for bass notes.
+      EXPECT_LE(note.pitch, 96u)
+          << "Track " << trk << " note pitch " << static_cast<int>(note.pitch)
+          << " above range at tick " << note.start_tick;
+    }
   }
 }
 
@@ -173,18 +184,23 @@ TEST(ChaconneEngineTest, SameSeedProducesSameOutput) {
 
   ASSERT_TRUE(result_a.success) << result_a.error_message;
   ASSERT_TRUE(result_b.success) << result_b.error_message;
-  ASSERT_EQ(result_a.tracks.size(), 1u);
-  ASSERT_EQ(result_b.tracks.size(), 1u);
+  ASSERT_EQ(result_a.tracks.size(), 2u);
+  ASSERT_EQ(result_b.tracks.size(), 2u);
 
-  // All notes must match exactly.
-  const auto& notes_a = result_a.tracks[0].notes;
-  const auto& notes_b = result_b.tracks[0].notes;
-  ASSERT_EQ(notes_a.size(), notes_b.size());
+  // All notes in both tracks must match exactly.
+  for (size_t trk = 0; trk < 2; ++trk) {
+    const auto& notes_a = result_a.tracks[trk].notes;
+    const auto& notes_b = result_b.tracks[trk].notes;
+    ASSERT_EQ(notes_a.size(), notes_b.size()) << "track " << trk;
 
-  for (size_t idx = 0; idx < notes_a.size(); ++idx) {
-    EXPECT_EQ(notes_a[idx].pitch, notes_b[idx].pitch) << "at note " << idx;
-    EXPECT_EQ(notes_a[idx].start_tick, notes_b[idx].start_tick) << "at note " << idx;
-    EXPECT_EQ(notes_a[idx].duration, notes_b[idx].duration) << "at note " << idx;
+    for (size_t idx = 0; idx < notes_a.size(); ++idx) {
+      EXPECT_EQ(notes_a[idx].pitch, notes_b[idx].pitch)
+          << "track " << trk << " at note " << idx;
+      EXPECT_EQ(notes_a[idx].start_tick, notes_b[idx].start_tick)
+          << "track " << trk << " at note " << idx;
+      EXPECT_EQ(notes_a[idx].duration, notes_b[idx].duration)
+          << "track " << trk << " at note " << idx;
+    }
   }
 
   EXPECT_EQ(result_a.total_duration_ticks, result_b.total_duration_ticks);
@@ -199,12 +215,12 @@ TEST(ChaconneEngineTest, DifferentSeedsProduceDifferentOutput) {
 
   ASSERT_TRUE(result_a.success) << result_a.error_message;
   ASSERT_TRUE(result_b.success) << result_b.error_message;
-  ASSERT_EQ(result_a.tracks.size(), 1u);
-  ASSERT_EQ(result_b.tracks.size(), 1u);
+  ASSERT_EQ(result_a.tracks.size(), 2u);
+  ASSERT_EQ(result_b.tracks.size(), 2u);
 
-  // With different seeds, at least some notes should differ.
-  const auto& notes_a = result_a.tracks[0].notes;
-  const auto& notes_b = result_b.tracks[0].notes;
+  // Compare texture tracks (tracks[1]) since bass is structural and more similar.
+  const auto& notes_a = result_a.tracks[1].notes;
+  const auto& notes_b = result_b.tracks[1].notes;
 
   // They may have the same count due to identical structural plan, but
   // the texture note pitches should differ in at least one position.
@@ -258,12 +274,14 @@ TEST(ChaconneEngineTest, AllNotesHaveNonZeroDuration) {
   auto config = createTestConfig();
   auto result = generateChaconne(config);
   ASSERT_TRUE(result.success) << result.error_message;
-  ASSERT_EQ(result.tracks.size(), 1u);
+  ASSERT_EQ(result.tracks.size(), 2u);
 
-  for (const auto& note : result.tracks[0].notes) {
-    EXPECT_GT(note.duration, 0u)
-        << "Note with zero duration at tick " << note.start_tick
-        << " pitch " << static_cast<int>(note.pitch);
+  for (size_t trk = 0; trk < result.tracks.size(); ++trk) {
+    for (const auto& note : result.tracks[trk].notes) {
+      EXPECT_GT(note.duration, 0u)
+          << "Track " << trk << " note with zero duration at tick " << note.start_tick
+          << " pitch " << static_cast<int>(note.pitch);
+    }
   }
 }
 
@@ -271,12 +289,14 @@ TEST(ChaconneEngineTest, AllNotesHaveReasonableVelocity) {
   auto config = createTestConfig();
   auto result = generateChaconne(config);
   ASSERT_TRUE(result.success) << result.error_message;
-  ASSERT_EQ(result.tracks.size(), 1u);
+  ASSERT_EQ(result.tracks.size(), 2u);
 
-  for (const auto& note : result.tracks[0].notes) {
-    EXPECT_GT(note.velocity, 0u)
-        << "Note with zero velocity at tick " << note.start_tick;
-    EXPECT_LE(note.velocity, 127u);
+  for (size_t trk = 0; trk < result.tracks.size(); ++trk) {
+    for (const auto& note : result.tracks[trk].notes) {
+      EXPECT_GT(note.velocity, 0u)
+          << "Track " << trk << " note with zero velocity at tick " << note.start_tick;
+      EXPECT_LE(note.velocity, 127u);
+    }
   }
 }
 
@@ -284,12 +304,14 @@ TEST(ChaconneEngineTest, NotesAreSortedByStartTick) {
   auto config = createTestConfig();
   auto result = generateChaconne(config);
   ASSERT_TRUE(result.success) << result.error_message;
-  ASSERT_EQ(result.tracks.size(), 1u);
+  ASSERT_EQ(result.tracks.size(), 2u);
 
-  const auto& notes = result.tracks[0].notes;
-  for (size_t idx = 1; idx < notes.size(); ++idx) {
-    EXPECT_GE(notes[idx].start_tick, notes[idx - 1].start_tick)
-        << "Notes not sorted at index " << idx;
+  for (size_t trk = 0; trk < result.tracks.size(); ++trk) {
+    const auto& notes = result.tracks[trk].notes;
+    for (size_t idx = 1; idx < notes.size(); ++idx) {
+      EXPECT_GE(notes[idx].start_tick, notes[idx - 1].start_tick)
+          << "Track " << trk << " notes not sorted at index " << idx;
+    }
   }
 }
 
@@ -301,8 +323,9 @@ TEST(ChaconneEngineTest, ChaconneBassNotesArePresentInOutput) {
   auto config = createTestConfig();
   auto result = generateChaconne(config);
   ASSERT_TRUE(result.success) << result.error_message;
-  ASSERT_EQ(result.tracks.size(), 1u);
+  ASSERT_EQ(result.tracks.size(), 2u);
 
+  // Bass notes are now in tracks[0].
   const auto& output_notes = result.tracks[0].notes;
 
   // Verify that ChaconneBass-sourced notes exist in the output.
@@ -433,12 +456,13 @@ TEST(ChaconneEngineTest, InvalidTypesInPlanReturnsError) {
 // Channel assignment
 // ===========================================================================
 
-TEST(ChaconneEngineTest, TrackUsesChannel0) {
+TEST(ChaconneEngineTest, TracksUseCorrectChannels) {
   auto config = createTestConfig();
   auto result = generateChaconne(config);
   ASSERT_TRUE(result.success) << result.error_message;
-  ASSERT_EQ(result.tracks.size(), 1u);
+  ASSERT_EQ(result.tracks.size(), 2u);
   EXPECT_EQ(result.tracks[0].channel, 0u);
+  EXPECT_EQ(result.tracks[1].channel, 1u);
 }
 
 // ===========================================================================
@@ -495,16 +519,18 @@ TEST(ChaconneSeedDiversityTest, DifferentSeedsProduceDiverseOutput) {
   // account for the new bass realization pattern.
   constexpr int kMinUnique = 2;
 
-  // Collect fingerprints: pitch class top-3 as a string.
+  // Collect fingerprints: pitch class top-3 as a string from texture track.
   std::set<std::string> fingerprints;
 
   for (int seed_idx = 1; seed_idx <= kNumSeeds; ++seed_idx) {
     auto config = createTestConfig(static_cast<uint32_t>(seed_idx));
     auto result = generateChaconne(config);
     ASSERT_TRUE(result.success) << "Seed " << seed_idx << ": " << result.error_message;
-    ASSERT_EQ(result.tracks.size(), 1u);
+    ASSERT_EQ(result.tracks.size(), 2u);
 
-    auto top = topPitchClasses(result.tracks[0].notes);
+    // Use texture track (tracks[1]) for fingerprinting since that's where
+    // pitch diversity matters.
+    auto top = topPitchClasses(result.tracks[1].notes);
     std::string fp;
     for (int pc : top) {
       fp += std::to_string(pc) + ",";
@@ -526,8 +552,9 @@ TEST(ChaconneSeedDiversityTest, SeedsProduceDifferentNoteCounts) {
     auto config = createTestConfig(static_cast<uint32_t>(seed_idx));
     auto result = generateChaconne(config);
     ASSERT_TRUE(result.success) << "Seed " << seed_idx << ": " << result.error_message;
-    ASSERT_EQ(result.tracks.size(), 1u);
-    note_counts.insert(result.tracks[0].notes.size());
+    ASSERT_EQ(result.tracks.size(), 2u);
+    // Sum notes from both tracks.
+    note_counts.insert(result.tracks[0].notes.size() + result.tracks[1].notes.size());
   }
 
   // With rhythm profile variation, we expect multiple distinct note counts.
@@ -544,17 +571,17 @@ TEST(ChaconneSeedDiversityTest, NoteContentDiffersAcrossSeeds) {
 
   ASSERT_TRUE(result_a.success) << result_a.error_message;
   ASSERT_TRUE(result_b.success) << result_b.error_message;
-  ASSERT_EQ(result_a.tracks.size(), 1u);
-  ASSERT_EQ(result_b.tracks.size(), 1u);
+  ASSERT_EQ(result_a.tracks.size(), 2u);
+  ASSERT_EQ(result_b.tracks.size(), 2u);
 
-  // Extract texture note pitches only (skip bass notes which may vary by role).
+  // Extract texture note pitches from texture track (tracks[1]).
   std::vector<uint8_t> pitches_a, pitches_b;
-  for (const auto& n : result_a.tracks[0].notes) {
+  for (const auto& n : result_a.tracks[1].notes) {
     if (n.source == BachNoteSource::TextureNote) {
       pitches_a.push_back(n.pitch);
     }
   }
-  for (const auto& n : result_b.tracks[0].notes) {
+  for (const auto& n : result_b.tracks[1].notes) {
     if (n.source == BachNoteSource::TextureNote) {
       pitches_b.push_back(n.pitch);
     }
@@ -597,9 +624,10 @@ TEST(ChaconneSeedDiversityTest, TextureTypesVaryAcrossSeeds) {
     auto config = createTestConfig(static_cast<uint32_t>(seed_idx));
     auto result = generateChaconne(config);
     ASSERT_TRUE(result.success) << "Seed " << seed_idx << ": " << result.error_message;
-    ASSERT_EQ(result.tracks.size(), 1u);
+    ASSERT_EQ(result.tracks.size(), 2u);
 
     // Count texture notes per variation by binning start_tick.
+    // Use texture track (tracks[1]) for analysis.
     auto scheme = ChaconneScheme::createForKey(config.key);
     Tick bass_length = scheme.getLengthTicks();
     ASSERT_GT(bass_length, 0u);
@@ -608,7 +636,7 @@ TEST(ChaconneSeedDiversityTest, TextureTypesVaryAcrossSeeds) {
     constexpr int kNumVariations = 10;
     int notes_per_var[kNumVariations] = {};
 
-    for (const auto& note : result.tracks[0].notes) {
+    for (const auto& note : result.tracks[1].notes) {
       if (note.source != BachNoteSource::TextureNote) continue;
       int var_idx = static_cast<int>(note.start_tick / bass_length);
       if (var_idx >= 0 && var_idx < kNumVariations) {
@@ -639,8 +667,9 @@ TEST(ChaconneE2ETest, ViolinBassNotesInRange) {
   config.instrument = InstrumentType::Violin;
   auto result = generateChaconne(config);
   ASSERT_TRUE(result.success) << result.error_message;
-  ASSERT_EQ(result.tracks.size(), 1u);
+  ASSERT_EQ(result.tracks.size(), 2u);
 
+  // Bass notes are in tracks[0].
   ViolinModel violin;
   for (const auto& note : result.tracks[0].notes) {
     if (note.source == BachNoteSource::ChaconneBass) {
@@ -657,8 +686,9 @@ TEST(ChaconneE2ETest, CelloBassNotesInRange) {
   config.instrument = InstrumentType::Cello;
   auto result = generateChaconne(config);
   ASSERT_TRUE(result.success) << result.error_message;
-  ASSERT_EQ(result.tracks.size(), 1u);
+  ASSERT_EQ(result.tracks.size(), 2u);
 
+  // Bass notes are in tracks[0].
   CelloModel cello;
   for (const auto& note : result.tracks[0].notes) {
     if (note.source == BachNoteSource::ChaconneBass) {
@@ -675,8 +705,9 @@ TEST(ChaconneE2ETest, GuitarBassNotesInRange) {
   config.instrument = InstrumentType::Guitar;
   auto result = generateChaconne(config);
   ASSERT_TRUE(result.success) << result.error_message;
-  ASSERT_EQ(result.tracks.size(), 1u);
+  ASSERT_EQ(result.tracks.size(), 2u);
 
+  // Bass notes are in tracks[0].
   GuitarModel guitar;
   for (const auto& note : result.tracks[0].notes) {
     if (note.source == BachNoteSource::ChaconneBass) {
@@ -695,8 +726,9 @@ TEST(ChaconneE2ETest, MultiSeedViolinBassInRange) {
     config.instrument = InstrumentType::Violin;
     auto result = generateChaconne(config);
     ASSERT_TRUE(result.success) << "Seed " << seed << ": " << result.error_message;
-    ASSERT_EQ(result.tracks.size(), 1u);
+    ASSERT_EQ(result.tracks.size(), 2u);
 
+    // Bass notes are in tracks[0].
     for (const auto& note : result.tracks[0].notes) {
       if (note.source == BachNoteSource::ChaconneBass) {
         EXPECT_GE(note.pitch, violin.getLowestPitch())

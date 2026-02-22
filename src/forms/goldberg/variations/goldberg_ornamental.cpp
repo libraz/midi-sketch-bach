@@ -145,7 +145,8 @@ OrnamentalResult OrnamentalGenerator::generate(
 
   // Generate melody via FigurenGenerator (voice 0 = upper register).
   FigurenGenerator figuren;
-  auto melody = figuren.generate(profile, grid, key, time_sig, 0, seed);
+  auto melody = figuren.generate(profile, grid, key, time_sig, 0, rng(),
+                                   nullptr, 0.5f);
 
   // Set BachNoteSource to GoldbergFigura for all melody notes.
   for (auto& note : melody) {

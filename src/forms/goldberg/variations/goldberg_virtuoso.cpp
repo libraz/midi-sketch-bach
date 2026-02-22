@@ -149,8 +149,10 @@ VirtuosoResult VirtuosoGenerator::generate(
     // Derive independent seeds for each voice.
     uint32_t voice_seed = seed + static_cast<uint32_t>(voice_idx) * 1000;
 
+    float strength = (voice_idx == 0) ? 0.3f : 0.0f;
     auto voice_notes = figuren.generate(
-        profile, grid, key, time_sig, voice_idx, voice_seed);
+        profile, grid, key, time_sig, voice_idx, voice_seed,
+        nullptr, strength);
 
     // Set source and voice index.
     for (auto& note : voice_notes) {

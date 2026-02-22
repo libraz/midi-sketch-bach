@@ -153,6 +153,7 @@ set(BACH_LIB_SOURCES
   forms/goldberg/goldberg_config.cpp
   forms/goldberg/goldberg_generator.cpp
   forms/goldberg/goldberg_soggetto.cpp
+  forms/goldberg/goldberg_aria_theme.cpp
   forms/goldberg/goldberg_aria.cpp
   forms/goldberg/canon/dux_buffer.cpp
   forms/goldberg/canon/canon_validator.cpp

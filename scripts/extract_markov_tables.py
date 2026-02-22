@@ -922,7 +922,6 @@ def prepare_notes(notes: list[dict]) -> list[dict]:
 def process_file(
     filepath: Path,
     counters: dict[str, TransitionCounter],
-    key_signatures: dict[str, dict],
     vert_counter: Optional["VerticalTransitionCounter"] = None,
 ) -> None:
     """Process a single reference JSON file and accumulate transitions.
@@ -930,7 +929,6 @@ def process_file(
     Args:
         filepath: Path to the JSON file.
         counters: Dict mapping model name to TransitionCounter.
-        key_signatures: Key signature lookup from key_signatures.json.
         vert_counter: Optional vertical interval counter for fugue files.
     """
     data = load_reference_file(filepath)
@@ -957,16 +955,13 @@ def process_file(
     if not (is_fugue or is_cello or is_violin or is_toccata):
         return
 
-    # Get global key from key_signatures.json for initial key estimation fallback
-    work_id = filepath.stem
+    # Get global key from individual JSON for initial key estimation fallback
     global_key_pc = 0
     global_is_minor = False
-    if work_id in key_signatures:
-        ks_entry = key_signatures[work_id]
-        tonic = ks_entry.get("tonic", "C")
-        mode = ks_entry.get("mode", "major")
+    tonic = data.get("tonic", "")
+    if tonic:
         global_key_pc = TONIC_TO_PC.get(tonic, 0)
-        global_is_minor = (mode == "minor")
+        global_is_minor = (data.get("mode", "major") == "minor")
 
     # Collect all track data for vertical interval extraction
     vert_all_tracks: list[tuple[list[dict], bool]] = []
@@ -1280,29 +1275,6 @@ def generate_cpp_output(
 # Main
 # ---------------------------------------------------------------------------
 
-def load_key_signatures(data_dir: Path) -> dict[str, dict]:
-    """Load key_signatures.json from the data directory.
-
-    Args:
-        data_dir: Path to the reference data directory.
-
-    Returns:
-        Dict mapping work_id to key signature info, or empty dict on failure.
-    """
-    ks_path = data_dir / "key_signatures.json"
-    if not ks_path.exists():
-        print(f"  WARNING: key_signatures.json not found at {ks_path}", file=sys.stderr)
-        print("  Local key estimation will be used for all files.", file=sys.stderr)
-        return {}
-
-    try:
-        with open(ks_path, "r", encoding="utf-8") as ks_file:
-            return json.load(ks_file)
-    except (json.JSONDecodeError, OSError) as err:
-        print(f"  WARNING: Failed to load key_signatures.json: {err}", file=sys.stderr)
-        return {}
-
-
 def main() -> int:
     """Entry point: extract Markov tables and write C++ output."""
     parser = argparse.ArgumentParser(
@@ -1337,11 +1309,6 @@ def main() -> int:
 
     print(f"Found {len(reference_files)} reference files in {data_dir}", file=sys.stderr)
 
-    # Load key signatures
-    key_signatures = load_key_signatures(data_dir)
-    if key_signatures:
-        print(f"Loaded {len(key_signatures)} key signatures", file=sys.stderr)
-
     # Initialize counters
     counters = {
         "FugueUpper": TransitionCounter("FugueUpper"),
@@ -1373,7 +1340,7 @@ def main() -> int:
             continue
 
         category_counts[category] = category_counts.get(category, 0) + 1
-        process_file(filepath, counters, key_signatures, vert_counter)
+        process_file(filepath, counters, vert_counter)
 
     # Print progress summary
     print("", file=sys.stderr)
