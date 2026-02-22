@@ -137,6 +137,21 @@ inline bool isStrongBeatInBar(Tick tick) {
   return pos == 0 || pos == kTicksPerBeat * 2;
 }
 
+/// Finest timing grid (sixteenth note).
+constexpr Tick kTickQuantum = duration::kSixteenthNote;  // 120
+
+/// @brief Round a duration to the nearest grid point (minimum kTickQuantum).
+inline constexpr Tick quantizeToGrid(Tick t, Tick quantum = kTickQuantum) {
+  if (t == 0) return 0;
+  Tick rounded = ((t + quantum / 2) / quantum) * quantum;
+  return (rounded > 0) ? rounded : quantum;
+}
+
+/// @brief Floor-snap a tick position to the grid.
+inline constexpr Tick quantizeTickFloor(Tick t, Tick quantum = kTickQuantum) {
+  return (t / quantum) * quantum;
+}
+
 // ---------------------------------------------------------------------------
 // Voice
 // ---------------------------------------------------------------------------

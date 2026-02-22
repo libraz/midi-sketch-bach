@@ -324,6 +324,11 @@ inline uint8_t selectToccataPitch(
       blended += kChordAttractionBonus;
     }
 
+    // Anti-repetition: strongly penalize unison to prevent same-pitch runs.
+    if (cand_pitch == prev_pitch) {
+      blended *= 0.15f;
+    }
+
     pitches.push_back(cand_pitch);
     weights.push_back(std::max(0.01f, blended + 1.0f));  // Shift to positive.
   }
@@ -464,6 +469,10 @@ inline FigurationResult generateFigurationSpan(
   // Bridge duration micro-lock state.
   Tick locked_bridge_dur = 0;     // 0 = no lock.
   int bridge_dur_reps_left = 0;   // Remaining same-duration bridge notes.
+  // Anti-repetition state.
+  int same_pitch_streak = 0;      // Consecutive notes with same pitch.
+  uint8_t prev_prev_pitch = 0;    // For oscillation detection (X-Y-X pattern).
+  int last_direction = 0;         // Last non-zero melodic direction (+1/-1).
 
   // Base duration for non-free-rhythm: 16th note.
   constexpr Tick kBase16thDuration = duration::kSixteenthNote;  // 120 ticks.
@@ -547,7 +556,21 @@ inline FigurationResult generateFigurationSpan(
           bool is_semitone_mode = (figure->primary_mode == IntervalMode::Semitone);
           std::vector<uint8_t> fig_pitches;
           fig_pitches.reserve(figure->note_count);
-          fig_pitches.push_back(prev_pitch);
+
+          // Anti-repetition: only if 3+ same-pitch streak (2 is natural at
+          // figure boundaries), offset start by applying the first interval.
+          uint8_t fig_start = prev_pitch;
+          if (same_pitch_streak >= 3 && !is_semitone_mode
+              && figure->degree_intervals != nullptr
+              && figure->note_count >= 2) {
+            uint8_t offset_pitch = resolveDegreeInterval(
+                prev_pitch, figure->degree_intervals[0], ctx.key, ctx.scale);
+            if (offset_pitch > 0 && offset_pitch >= ctx.low_pitch
+                && offset_pitch <= effective_high) {
+              fig_start = offset_pitch;
+            }
+          }
+          fig_pitches.push_back(fig_start);
 
           bool valid = true;
           for (int pidx = 0; pidx < figure->note_count - 1; ++pidx) {
@@ -685,6 +708,35 @@ inline FigurationResult generateFigurationSpan(
                   ctx.key, ctx.scale);
             }
 
+            // Update anti-repetition state from figure.
+            // Track trailing same-pitch within the figure (for streak).
+            {
+              int trailing = 0;
+              uint8_t last_fig = fig_pitches.back();
+              // Count from end: how many consecutive notes equal the last?
+              for (int fi = static_cast<int>(fig_pitches.size()) - 2;
+                   fi >= 0; --fi) {
+                if (fig_pitches[fi] == last_fig) trailing++;
+                else break;
+              }
+              // If figure's first note matched prev_pitch (boundary unison)
+              // and trailing extends to the start, add boundary count.
+              if (fig_pitches[0] == prev_pitch
+                  && trailing == static_cast<int>(fig_pitches.size()) - 1) {
+                trailing += same_pitch_streak + 1;
+              }
+              same_pitch_streak = trailing;
+            }
+            // Direction and prev_prev from figure's last two notes.
+            if (fig_pitches.size() >= 2) {
+              uint8_t pen = fig_pitches[fig_pitches.size() - 2];
+              uint8_t ult = fig_pitches.back();
+              prev_prev_pitch = pen;
+              if (ult != pen) {
+                last_direction = (ult > pen) ? 1 : -1;
+              }
+            }
+
             prev_pitch = fig_pitches.back();
             current_tick += figure_total;
             consecutive_bridges = 0;
@@ -721,6 +773,64 @@ inline FigurationResult generateFigurationSpan(
             if (ml == MetricLevel::Bar || snap_dist <= 2) {
               bridge_pitch = snapped;
             }
+          }
+          // Anti-repetition after snap: only if already in a same-pitch streak,
+          // pick the closest different chord tone to break the run.
+          if (bridge_pitch == prev_pitch && same_pitch_streak >= 1
+              && !bridge_cts.empty()) {
+            // Prefer chord tone in the direction of last melodic motion,
+            // and avoid oscillation (returning to prev_prev_pitch).
+            uint8_t best_alt = bridge_pitch;
+            int best_score = -999;
+            for (uint8_t ct : bridge_cts) {
+              if (ct == prev_pitch) continue;
+              int d = std::abs(static_cast<int>(ct)
+                               - static_cast<int>(prev_pitch));
+              int score = 100 - d;  // Prefer close.
+              // Direction bonus: prefer continuing last movement direction.
+              if (last_direction != 0) {
+                int ct_dir = (ct > prev_pitch) ? 1 : -1;
+                if (ct_dir == last_direction) score += 50;
+              }
+              // Oscillation penalty: avoid returning to prev_prev_pitch.
+              if (ct == prev_prev_pitch && prev_prev_pitch != prev_pitch) {
+                score -= 80;
+              }
+              if (score > best_score) {
+                best_score = score;
+                best_alt = ct;
+              }
+            }
+            if (best_alt != bridge_pitch) bridge_pitch = best_alt;
+          }
+        }
+      }
+
+      // Hard anti-repetition: after 3+ consecutive same-pitch notes (streak
+      // >= 2 means this would be the 3rd), force a directional scale step.
+      // Uses last_direction to continue melodic motion, falls back to random.
+      // Guards against oscillation by avoiding prev_prev_pitch.
+      if (bridge_pitch == prev_pitch && same_pitch_streak >= 2) {
+        int abs_deg = scale_util::pitchToAbsoluteDegree(
+            prev_pitch, ctx.key, ctx.scale);
+        // Prefer continuing the last melodic direction.
+        int dir = (last_direction != 0) ? last_direction
+                                        : (rng::rollProbability(rng, 0.5f) ? 1 : -1);
+        uint8_t stepped = scale_util::absoluteDegreeToPitch(
+            abs_deg + dir, ctx.key, ctx.scale);
+        // Guard: avoid oscillation (stepping to prev_prev_pitch).
+        if (stepped == prev_prev_pitch && prev_prev_pitch != prev_pitch) {
+          stepped = scale_util::absoluteDegreeToPitch(
+              abs_deg - dir, ctx.key, ctx.scale);
+        }
+        if (stepped >= ctx.low_pitch && stepped <= effective_high) {
+          bridge_pitch = stepped;
+        } else {
+          // Try other direction.
+          stepped = scale_util::absoluteDegreeToPitch(
+              abs_deg - dir, ctx.key, ctx.scale);
+          if (stepped >= ctx.low_pitch && stepped <= effective_high) {
+            bridge_pitch = stepped;
           }
         }
       }
@@ -761,6 +871,16 @@ inline FigurationResult generateFigurationSpan(
       ctx.prev_degree_step = computeDegreeStep(
           prev_pitch, bridge_pitch, ctx.key, ctx.scale);
 
+      // Update anti-repetition state.
+      if (bridge_pitch == prev_pitch) {
+        same_pitch_streak++;
+      } else {
+        same_pitch_streak = 0;
+        int dir = (bridge_pitch > prev_pitch) ? 1 : -1;
+        last_direction = dir;
+      }
+
+      prev_prev_pitch = prev_pitch;
       prev_pitch = bridge_pitch;
       current_tick += bridge_dur;
       if (cooldown_notes > 0) cooldown_notes--;

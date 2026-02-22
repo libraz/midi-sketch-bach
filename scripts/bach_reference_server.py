@@ -73,6 +73,11 @@ from scripts.bach_analyzer.ngrams import (
 )
 from scripts.bach_analyzer.voice_separation import (
     SeparationResult,
+    compute_activity,
+    compute_crossing_detail,
+    compute_imitation,
+    compute_independence,
+    compute_spacing,
     detect_voice_count,
     evaluate_separation,
     separate_score,
@@ -3175,6 +3180,357 @@ def get_separation_quality(
         "work_id": work_id,
         "num_voices": sep_result.num_voices,
         "quality": quality,
+    }, indent=2)
+
+
+# ===== Voice relationship analysis tools ====================================
+
+
+@server.tool()
+def get_voice_independence_profile(
+    work_id: str,
+    num_voices: Optional[int] = None,
+) -> str:
+    """Analyze rhythmic independence between separated voices.
+
+    Requires voice separation (manual track_type only). Returns per-pair
+    metrics: simultaneous onset ratio, contrary motion ratio, rhythmic
+    divergence, and activity correlation.
+
+    Args:
+        work_id: Work identifier (e.g. BWV846_fugue)
+        num_voices: Override voice count (auto-detected if omitted)
+    """
+    sep_score, sep_result, err = _get_separated_score(work_id, num_voices)
+    if err:
+        return json.dumps({"error": err})
+    if sep_result is None:
+        return json.dumps({
+            "work_id": work_id,
+            "error": "track_type is not 'manual'; voice separation required.",
+        })
+
+    _, raw_data, _ = _load_score(work_id)
+    tpb = raw_data.get("ticks_per_beat", TICKS_PER_BEAT) if raw_data else TICKS_PER_BEAT
+
+    # Extract voice note lists (exclude pedal).
+    voice_notes = [
+        tr.sorted_notes for tr in sep_score.tracks
+        if tr.name.startswith("v")
+    ]
+
+    result = compute_independence(voice_notes, tpb)
+    result["work_id"] = work_id
+    result["computed_on"] = "separated"
+    result["num_voices"] = len(voice_notes)
+    return json.dumps(result, indent=2)
+
+
+@server.tool()
+def get_voice_spacing_profile(
+    work_id: str,
+    num_voices: Optional[int] = None,
+) -> str:
+    """Analyze pitch spacing between adjacent separated voices.
+
+    Returns average gap in semitones, gap distribution, and close-rate
+    (proportion of samples where voices are within 3 semitones).
+
+    Args:
+        work_id: Work identifier
+        num_voices: Override voice count (auto-detected if omitted)
+    """
+    sep_score, sep_result, err = _get_separated_score(work_id, num_voices)
+    if err:
+        return json.dumps({"error": err})
+    if sep_result is None:
+        return json.dumps({
+            "work_id": work_id,
+            "error": "track_type is not 'manual'; voice separation required.",
+        })
+
+    _, raw_data, _ = _load_score(work_id)
+    tpb = raw_data.get("ticks_per_beat", TICKS_PER_BEAT) if raw_data else TICKS_PER_BEAT
+
+    voice_notes = [
+        tr.sorted_notes for tr in sep_score.tracks
+        if tr.name.startswith("v")
+    ]
+
+    result = compute_spacing(voice_notes, tpb)
+    result["work_id"] = work_id
+    result["computed_on"] = "separated"
+    return json.dumps(result, indent=2)
+
+
+@server.tool()
+def get_voice_crossing_detail(
+    work_id: str,
+    num_voices: Optional[int] = None,
+) -> str:
+    """Analyze voice crossing events with duration and resolution details.
+
+    Returns individual crossing events (pair, start bar, duration, max
+    inversion) and a summary with resolution rates.
+
+    Args:
+        work_id: Work identifier
+        num_voices: Override voice count (auto-detected if omitted)
+    """
+    sep_score, sep_result, err = _get_separated_score(work_id, num_voices)
+    if err:
+        return json.dumps({"error": err})
+    if sep_result is None:
+        return json.dumps({
+            "work_id": work_id,
+            "error": "track_type is not 'manual'; voice separation required.",
+        })
+
+    _, raw_data, _ = _load_score(work_id)
+    tpb = raw_data.get("ticks_per_beat", TICKS_PER_BEAT) if raw_data else TICKS_PER_BEAT
+
+    voice_notes = [
+        tr.sorted_notes for tr in sep_score.tracks
+        if tr.name.startswith("v")
+    ]
+
+    result = compute_crossing_detail(voice_notes, tpb)
+    result["work_id"] = work_id
+    result["computed_on"] = "separated"
+    return json.dumps(result, indent=2)
+
+
+@server.tool()
+def get_voice_activity_profile(
+    work_id: str,
+    num_voices: Optional[int] = None,
+) -> str:
+    """Analyze per-voice activity patterns (activity rate, rest durations).
+
+    Returns activity rate, average/longest rest duration for each voice,
+    entry order, and simultaneous activity distribution.
+
+    Args:
+        work_id: Work identifier
+        num_voices: Override voice count (auto-detected if omitted)
+    """
+    sep_score, sep_result, err = _get_separated_score(work_id, num_voices)
+    if err:
+        return json.dumps({"error": err})
+    if sep_result is None:
+        return json.dumps({
+            "work_id": work_id,
+            "error": "track_type is not 'manual'; voice separation required.",
+        })
+
+    _, raw_data, _ = _load_score(work_id)
+    tpb = raw_data.get("ticks_per_beat", TICKS_PER_BEAT) if raw_data else TICKS_PER_BEAT
+
+    voice_notes = [
+        tr.sorted_notes for tr in sep_score.tracks
+        if tr.name.startswith("v")
+    ]
+
+    total_dur = sep_score.total_duration
+    result = compute_activity(voice_notes, total_dur, tpb)
+    result["work_id"] = work_id
+    result["computed_on"] = "separated"
+    return json.dumps(result, indent=2)
+
+
+@server.tool()
+def get_imitation_profile(
+    work_id: str,
+    num_voices: Optional[int] = None,
+    min_pattern_length: int = 4,
+) -> str:
+    """Detect melodic imitation (repeated interval patterns) between voices.
+
+    Searches for interval patterns of given minimum length that appear in
+    one voice and are echoed in another (possibly transposed).
+
+    Args:
+        work_id: Work identifier
+        num_voices: Override voice count (auto-detected if omitted)
+        min_pattern_length: Minimum interval pattern length (default 4)
+    """
+    sep_score, sep_result, err = _get_separated_score(work_id, num_voices)
+    if err:
+        return json.dumps({"error": err})
+    if sep_result is None:
+        return json.dumps({
+            "work_id": work_id,
+            "error": "track_type is not 'manual'; voice separation required.",
+        })
+
+    _, raw_data, _ = _load_score(work_id)
+    tpb = raw_data.get("ticks_per_beat", TICKS_PER_BEAT) if raw_data else TICKS_PER_BEAT
+
+    voice_notes = [
+        tr.sorted_notes for tr in sep_score.tracks
+        if tr.name.startswith("v")
+    ]
+
+    result = compute_imitation(voice_notes, tpb, min_pattern_length)
+    result["work_id"] = work_id
+    result["computed_on"] = "separated"
+    return json.dumps(result, indent=2)
+
+
+@server.tool()
+def compare_separated_profiles(
+    category: str,
+    num_voices: Optional[int] = None,
+) -> str:
+    """Aggregate voice-level statistics across all works in a category.
+
+    Computes per-voice-rank averages for stepwise ratio, interval size,
+    pitch, activity rate, plus average spacing and independence metrics.
+
+    Args:
+        category: Category name (use list_works to see available categories)
+        num_voices: Override voice count for all works (auto-detect if omitted)
+    """
+    idx = _get_index()
+    works = idx.filter(category=category)
+    if not works:
+        return json.dumps({
+            "error": f"No works in category '{category}'.",
+            "available": idx.categories(),
+        })
+
+    # Filter to manual track_type works.
+    manual_works = []
+    for w in works:
+        data = idx.load_full(w["id"])
+        if data and data.get("track_type") == "manual":
+            manual_works.append(w)
+
+    if not manual_works:
+        return json.dumps({
+            "category": category,
+            "error": "No manual track_type works in this category.",
+            "total_works": len(works),
+        })
+
+    # Accumulate per-voice-rank stats.
+    rank_stats: dict[str, dict[str, list[float]]] = {}
+    spacing_gaps: list[float] = []
+    independence_ratios: list[float] = []
+    processed = 0
+
+    for w in manual_works:
+        sep_score, sep_result, err = _get_separated_score(w["id"], num_voices)
+        if err or sep_result is None:
+            continue
+
+        data = idx.load_full(w["id"])
+        tpb = data.get("ticks_per_beat", TICKS_PER_BEAT) if data else TICKS_PER_BEAT
+
+        voice_tracks = [
+            tr for tr in sep_score.tracks if tr.name.startswith("v")
+        ]
+        voice_notes = [tr.sorted_notes for tr in voice_tracks]
+
+        # Per-voice melodic stats.
+        for vi, tr in enumerate(voice_tracks):
+            sn = tr.sorted_notes
+            if len(sn) < 2:
+                continue
+            # Use rank labels: v1, v2, ..., and also "lowest".
+            rank = tr.name
+            if rank not in rank_stats:
+                rank_stats[rank] = {
+                    "stepwise_ratios": [],
+                    "avg_intervals": [],
+                    "avg_pitches": [],
+                    "activity_rates": [],
+                }
+
+            steps = 0
+            total_iv = 0
+            iv_sum = 0
+            for ni in range(len(sn) - 1):
+                ic = abs(sn[ni + 1].pitch - sn[ni].pitch)
+                if ic <= 2:
+                    steps += 1
+                iv_sum += ic
+                total_iv += 1
+            if total_iv:
+                rank_stats[rank]["stepwise_ratios"].append(steps / total_iv)
+                rank_stats[rank]["avg_intervals"].append(iv_sum / total_iv)
+
+            pitches = [n.pitch for n in sn]
+            rank_stats[rank]["avg_pitches"].append(sum(pitches) / len(pitches))
+
+        # Activity rates.
+        total_dur = sep_score.total_duration
+        act = compute_activity(voice_notes, total_dur, tpb)
+        for vname, vstats in act["per_voice"].items():
+            if vname in rank_stats:
+                rank_stats[vname]["activity_rates"].append(
+                    vstats["activity_rate"]
+                )
+
+        # Spacing.
+        sp = compute_spacing(voice_notes, tpb)
+        if sp["avg_adjacent_gap"] > 0:
+            spacing_gaps.append(sp["avg_adjacent_gap"])
+
+        # Independence.
+        ind = compute_independence(voice_notes, tpb)
+        if ind["overall"]["avg_simultaneous_onset_ratio"] > 0:
+            independence_ratios.append(
+                ind["overall"]["avg_simultaneous_onset_ratio"]
+            )
+
+        processed += 1
+
+    # Also compute "lowest" aggregation from the lowest voice.
+    lowest_stats: dict[str, list[float]] = {
+        "stepwise_ratios": [],
+        "avg_intervals": [],
+        "avg_pitches": [],
+        "activity_rates": [],
+    }
+    # Find the highest-numbered voice rank that has data.
+    max_rank = max(
+        (k for k in rank_stats if k.startswith("v")),
+        key=lambda k: int(k[1:]),
+        default=None,
+    )
+    if max_rank and max_rank in rank_stats:
+        lowest_stats = rank_stats[max_rank]
+
+    def _avg(lst: list[float]) -> float:
+        return round(sum(lst) / len(lst), 4) if lst else 0.0
+
+    per_voice_rank: dict[str, dict[str, float]] = {}
+    for rank, stats in sorted(rank_stats.items()):
+        per_voice_rank[rank] = {
+            "avg_stepwise_ratio": _avg(stats["stepwise_ratios"]),
+            "avg_interval": _avg(stats["avg_intervals"]),
+            "avg_pitch": _avg(stats["avg_pitches"]),
+            "avg_activity_rate": _avg(stats["activity_rates"]),
+        }
+
+    return json.dumps({
+        "category": category,
+        "num_works": len(manual_works),
+        "num_processed": processed,
+        "per_voice_rank": per_voice_rank,
+        "lowest": {
+            "avg_stepwise_ratio": _avg(lowest_stats["stepwise_ratios"]),
+            "avg_interval": _avg(lowest_stats["avg_intervals"]),
+            "avg_pitch": _avg(lowest_stats["avg_pitches"]),
+            "avg_activity_rate": _avg(lowest_stats["activity_rates"]),
+        },
+        "avg_spacing": {
+            "adjacent_gap": _avg(spacing_gaps),
+        },
+        "avg_independence": {
+            "simultaneous_onset_ratio": _avg(independence_ratios),
+        },
     }, indent=2)
 
 

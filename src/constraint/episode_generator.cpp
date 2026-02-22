@@ -228,9 +228,9 @@ void placeBassFragments(std::vector<NoteEvent>& result,
     std::mt19937 dur_rng(rng());
     for (size_t idx = 0; idx < bass_fragment.size(); ++idx) {
       float factor = rng::rollFloat(dur_rng, 0.6f, 1.6f);
-      bass_fragment[idx].duration = std::max(
+      bass_fragment[idx].duration = quantizeToGrid(std::max(
           static_cast<Tick>(bass_fragment[idx].duration * factor),
-          static_cast<Tick>(kTicksPerBeat / 2));
+          static_cast<Tick>(kTicksPerBeat / 2)));
     }
   }
 

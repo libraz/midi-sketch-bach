@@ -823,6 +823,302 @@ class TestCrossValidation(unittest.TestCase):
 # Need permutations for TestCrossValidation.
 from itertools import permutations  # noqa: E402
 
+# Import new analysis helpers.
+from scripts.bach_analyzer.voice_separation import (  # noqa: E402
+    compute_activity,
+    compute_crossing_detail,
+    compute_imitation,
+    compute_independence,
+    compute_spacing,
+)
+
+
+# ---------------------------------------------------------------------------
+# 11. TestComputeIndependence
+# ---------------------------------------------------------------------------
+
+
+class TestComputeIndependence(unittest.TestCase):
+    """Test voice independence metrics."""
+
+    def test_single_voice_empty(self):
+        """Single voice returns empty pair data."""
+        voices = [[_n(60, 0)]]
+        result = compute_independence(voices)
+        self.assertEqual(result["pair_independence"], {})
+        self.assertEqual(result["overall"]["avg_simultaneous_onset_ratio"], 0.0)
+
+    def test_identical_rhythm_high_onset_ratio(self):
+        """Two voices with identical onset times should have high simultaneous onset ratio."""
+        v1 = [_n(72, beat) for beat in range(8)]
+        v2 = [_n(60, beat) for beat in range(8)]
+        result = compute_independence([v1, v2])
+        pair = result["pair_independence"]["v1-v2"]
+        # Identical onsets => ratio = 1.0.
+        self.assertAlmostEqual(pair["simultaneous_onset_ratio"], 1.0, places=2)
+
+    def test_alternating_rhythm_low_onset_ratio(self):
+        """Two voices with alternating onsets should have low simultaneous onset ratio."""
+        v1 = [_n(72, beat * 2) for beat in range(4)]       # beats 0, 2, 4, 6
+        v2 = [_n(60, beat * 2 + 1) for beat in range(4)]   # beats 1, 3, 5, 7
+        result = compute_independence([v1, v2])
+        pair = result["pair_independence"]["v1-v2"]
+        self.assertAlmostEqual(pair["simultaneous_onset_ratio"], 0.0, places=2)
+
+    def test_contrary_motion_detected(self):
+        """Ascending v1 + descending v2 should show high contrary motion ratio."""
+        # v1: ascending C5 -> G5
+        v1 = [_n(72 + i * 2, i * 2, dur_beats=2.0) for i in range(4)]
+        # v2: descending C4 -> F#3
+        v2 = [_n(60 - i * 2, i * 2, dur_beats=2.0) for i in range(4)]
+        result = compute_independence([v1, v2])
+        pair = result["pair_independence"]["v1-v2"]
+        self.assertGreater(pair["contrary_motion_ratio"], 0.5)
+
+    def test_rhythmic_divergence_different_patterns(self):
+        """Two voices with different rhythm patterns should have high divergence."""
+        # v1: quarter notes
+        v1 = [_n(72, beat) for beat in range(8)]
+        # v2: half notes
+        v2 = [_n(60, beat * 2, dur_beats=2.0) for beat in range(4)]
+        result = compute_independence([v1, v2])
+        pair = result["pair_independence"]["v1-v2"]
+        self.assertGreater(pair["rhythmic_divergence"], 0.3)
+
+    def test_three_voices_all_pairs(self):
+        """Three voices should produce 3 pairs."""
+        v1 = [_n(84, beat) for beat in range(4)]
+        v2 = [_n(67, beat) for beat in range(4)]
+        v3 = [_n(48, beat) for beat in range(4)]
+        result = compute_independence([v1, v2, v3])
+        self.assertEqual(len(result["pair_independence"]), 3)
+        self.assertIn("v1-v2", result["pair_independence"])
+        self.assertIn("v1-v3", result["pair_independence"])
+        self.assertIn("v2-v3", result["pair_independence"])
+
+
+# ---------------------------------------------------------------------------
+# 12. TestComputeSpacing
+# ---------------------------------------------------------------------------
+
+
+class TestComputeSpacing(unittest.TestCase):
+    """Test voice spacing metrics."""
+
+    def test_single_voice_empty(self):
+        """Single voice returns empty spacing."""
+        voices = [[_n(60, 0)]]
+        result = compute_spacing(voices)
+        self.assertEqual(result["pair_spacing"], {})
+        self.assertEqual(result["avg_adjacent_gap"], 0.0)
+
+    def test_well_separated_voices(self):
+        """Two voices 12 semitones apart should have avg_gap ~12."""
+        v1 = [_n(72, beat, dur_beats=1.0) for beat in range(8)]
+        v2 = [_n(60, beat, dur_beats=1.0) for beat in range(8)]
+        result = compute_spacing([v1, v2])
+        pair = result["pair_spacing"]["v1-v2"]
+        self.assertAlmostEqual(pair["avg_gap_semitones"], 12.0, delta=1.0)
+        self.assertEqual(pair["close_rate"], 0.0)  # Never within 3 semitones.
+
+    def test_close_voices(self):
+        """Two voices 2 semitones apart should have high close_rate."""
+        v1 = [_n(62, beat, dur_beats=1.0) for beat in range(8)]
+        v2 = [_n(60, beat, dur_beats=1.0) for beat in range(8)]
+        result = compute_spacing([v1, v2])
+        pair = result["pair_spacing"]["v1-v2"]
+        self.assertAlmostEqual(pair["avg_gap_semitones"], 2.0, delta=0.5)
+        self.assertGreater(pair["close_rate"], 0.5)
+
+    def test_gap_distribution_keys(self):
+        """Gap distribution should contain all expected bucket keys."""
+        v1 = [_n(72, beat, dur_beats=1.0) for beat in range(4)]
+        v2 = [_n(60, beat, dur_beats=1.0) for beat in range(4)]
+        result = compute_spacing([v1, v2])
+        dist = result["pair_spacing"]["v1-v2"]["gap_distribution"]
+        for key in ("0-2", "3-5", "6-8", "9-12", "13+"):
+            self.assertIn(key, dist)
+
+    def test_three_voices_two_pairs(self):
+        """Three voices produce 2 adjacent pairs."""
+        v1 = [_n(84, beat, dur_beats=1.0) for beat in range(4)]
+        v2 = [_n(72, beat, dur_beats=1.0) for beat in range(4)]
+        v3 = [_n(60, beat, dur_beats=1.0) for beat in range(4)]
+        result = compute_spacing([v1, v2, v3])
+        self.assertEqual(len(result["pair_spacing"]), 2)
+        self.assertIn("v1-v2", result["pair_spacing"])
+        self.assertIn("v2-v3", result["pair_spacing"])
+
+
+# ---------------------------------------------------------------------------
+# 13. TestComputeCrossingDetail
+# ---------------------------------------------------------------------------
+
+
+class TestComputeCrossingDetail(unittest.TestCase):
+    """Test voice crossing detail analysis."""
+
+    def test_no_crossing(self):
+        """Well-separated voices should have no crossings."""
+        v1 = [_n(84, beat, dur_beats=1.0) for beat in range(8)]
+        v2 = [_n(48, beat, dur_beats=1.0) for beat in range(8)]
+        result = compute_crossing_detail([v1, v2])
+        self.assertEqual(result["summary"]["total_crossings"], 0)
+        self.assertEqual(result["crossing_events"], [])
+
+    def test_crossing_detected(self):
+        """When upper voice dips below lower voice, crossing is detected."""
+        # v1 starts high, then goes below v2.
+        v1_notes = [_n(72, 0, dur_beats=2.0), _n(48, 2, dur_beats=2.0),
+                     _n(72, 4, dur_beats=2.0)]
+        v2_notes = [_n(60, 0, dur_beats=2.0), _n(60, 2, dur_beats=2.0),
+                     _n(60, 4, dur_beats=2.0)]
+        result = compute_crossing_detail([v1_notes, v2_notes])
+        self.assertGreater(result["summary"]["total_crossings"], 0)
+
+    def test_crossing_resolution(self):
+        """A crossing that resolves should have resolved=True."""
+        v1 = [_n(72, 0, dur_beats=1.0), _n(50, 1, dur_beats=1.0),
+              _n(72, 2, dur_beats=1.0)]
+        v2 = [_n(60, 0, dur_beats=1.0), _n(60, 1, dur_beats=1.0),
+              _n(60, 2, dur_beats=1.0)]
+        result = compute_crossing_detail([v1, v2])
+        if result["crossing_events"]:
+            self.assertTrue(result["crossing_events"][0]["resolved"])
+
+    def test_summary_keys(self):
+        """Summary should contain all expected keys."""
+        v1 = [_n(72, beat) for beat in range(4)]
+        v2 = [_n(60, beat) for beat in range(4)]
+        result = compute_crossing_detail([v1, v2])
+        expected_keys = {
+            "total_crossings", "avg_duration_beats", "resolution_rate",
+            "quick_resolution_rate", "per_pair",
+        }
+        for key in expected_keys:
+            self.assertIn(key, result["summary"])
+
+    def test_single_voice_no_crossing(self):
+        """Single voice should produce no crossing data."""
+        result = compute_crossing_detail([[_n(60, 0)]])
+        self.assertEqual(result["summary"]["total_crossings"], 0)
+
+
+# ---------------------------------------------------------------------------
+# 14. TestComputeActivity
+# ---------------------------------------------------------------------------
+
+
+class TestComputeActivity(unittest.TestCase):
+    """Test voice activity analysis."""
+
+    def test_full_activity(self):
+        """Voice active for entire duration should have activity_rate ~1.0."""
+        v1 = [_n(72, beat, dur_beats=1.0) for beat in range(8)]
+        total_dur = 8 * TICKS_PER_BEAT
+        result = compute_activity([v1], total_dur)
+        self.assertGreater(result["per_voice"]["v1"]["activity_rate"], 0.9)
+
+    def test_partial_activity(self):
+        """Voice active for only half the piece should have lower rate."""
+        v1 = [_n(72, beat, dur_beats=1.0) for beat in range(4)]
+        total_dur = 8 * TICKS_PER_BEAT  # Piece is 8 beats long.
+        result = compute_activity([v1], total_dur)
+        rate = result["per_voice"]["v1"]["activity_rate"]
+        self.assertGreater(rate, 0.3)
+        self.assertLess(rate, 0.7)
+
+    def test_entry_order(self):
+        """Voices entering at different times should appear in correct order."""
+        v1 = [_n(72, 4, dur_beats=1.0)]  # Enters at beat 4.
+        v2 = [_n(60, 0, dur_beats=1.0)]  # Enters at beat 0.
+        total_dur = 8 * TICKS_PER_BEAT
+        result = compute_activity([v1, v2], total_dur)
+        self.assertEqual(result["entry_order"], ["v2", "v1"])
+
+    def test_simultaneous_activity_keys(self):
+        """Simultaneous activity should have labels for each voice count."""
+        v1 = [_n(72, beat) for beat in range(4)]
+        v2 = [_n(60, beat) for beat in range(4)]
+        total_dur = 4 * TICKS_PER_BEAT
+        result = compute_activity([v1, v2], total_dur)
+        self.assertIn("1_voice", result["simultaneous_activity"])
+        self.assertIn("2_voices", result["simultaneous_activity"])
+
+    def test_rest_duration(self):
+        """Gaps between notes should be reflected in avg_rest_duration_beats."""
+        # Notes at beats 0 and 4, each 1 beat => 3-beat gap.
+        v1 = [_n(72, 0), _n(72, 4)]
+        total_dur = 5 * TICKS_PER_BEAT
+        result = compute_activity([v1], total_dur)
+        self.assertGreater(
+            result["per_voice"]["v1"]["avg_rest_duration_beats"], 2.0
+        )
+
+    def test_empty_voices(self):
+        """Empty input should return empty result."""
+        result = compute_activity([], 0)
+        self.assertEqual(result["per_voice"], {})
+        self.assertEqual(result["entry_order"], [])
+
+
+# ---------------------------------------------------------------------------
+# 15. TestComputeImitation
+# ---------------------------------------------------------------------------
+
+
+class TestComputeImitation(unittest.TestCase):
+    """Test imitation detection."""
+
+    def test_exact_imitation_detected(self):
+        """A pattern repeated in another voice should be detected."""
+        # v1: C D E F G (ascending steps) starting at beat 0.
+        v1 = [_n(60 + i * 2, i) for i in range(6)]
+        # v2: same interval pattern starting at beat 8, transposed up 7.
+        v2 = [_n(67 + i * 2, 8 + i) for i in range(6)]
+        result = compute_imitation([v1, v2], min_len=4)
+        self.assertGreater(result["summary"]["total_imitations"], 0)
+        # Check that at least one event has correct leader/follower.
+        leaders = {e["leader"] for e in result["imitation_events"]}
+        followers = {e["follower"] for e in result["imitation_events"]}
+        self.assertIn("v1", leaders)
+        self.assertIn("v2", followers)
+
+    def test_no_imitation_different_patterns(self):
+        """Unrelated patterns should produce no imitations."""
+        v1 = [_n(60, 0), _n(62, 1), _n(64, 2), _n(65, 3), _n(67, 4)]
+        v2 = [_n(72, 8), _n(69, 9), _n(65, 10), _n(60, 11), _n(55, 12)]
+        result = compute_imitation([v1, v2], min_len=4)
+        self.assertEqual(result["summary"]["total_imitations"], 0)
+
+    def test_single_voice_no_imitation(self):
+        """Single voice cannot produce cross-voice imitation."""
+        v1 = [_n(60 + i * 2, i) for i in range(6)]
+        result = compute_imitation([v1], min_len=4)
+        self.assertEqual(result["summary"]["total_imitations"], 0)
+
+    def test_summary_keys(self):
+        """Summary should contain all expected keys."""
+        v1 = [_n(60, i) for i in range(6)]
+        v2 = [_n(72, i + 8) for i in range(6)]
+        result = compute_imitation([v1, v2], min_len=4)
+        expected = {
+            "total_imitations", "avg_lag_beats", "most_common_interval",
+            "imitative_density", "voice_pair_frequency",
+        }
+        for key in expected:
+            self.assertIn(key, result["summary"])
+
+    def test_min_len_respected(self):
+        """Short patterns below min_len should not be detected."""
+        # Pattern of length 3 with min_len=4 should find nothing.
+        v1 = [_n(60, 0), _n(62, 1), _n(64, 2), _n(67, 3)]
+        v2 = [_n(67, 8), _n(69, 9), _n(71, 10), _n(60, 11)]
+        # Only 3 intervals (2,2,3) and (2,2,-11) — don't match anyway.
+        result = compute_imitation([v1, v2], min_len=4)
+        # With min_len=4 we need 4 interval matches (5 notes).
+        self.assertEqual(result["summary"]["total_imitations"], 0)
+
 
 if __name__ == "__main__":
     unittest.main()

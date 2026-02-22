@@ -189,12 +189,12 @@ std::vector<SkeletonSlot> buildRhythmSkeleton(
     if (accel_profile.curve_type == AccelCurveType::EaseIn) {
       // Ease-in: slow start (factor ~1.0), accelerate at end (factor ~0.5).
       float factor = 1.0f - 0.5f * accel_progress * accel_progress;
-      duration = std::max(accel_profile.min_dur,
-                          static_cast<Tick>(static_cast<float>(duration) * factor));
+      duration = quantizeToGrid(std::max(accel_profile.min_dur,
+                          static_cast<Tick>(static_cast<float>(duration) * factor)));
     } else if (accel_profile.curve_type == AccelCurveType::Linear) {
       float factor = 1.0f - 0.4f * accel_progress;
-      duration = std::max(accel_profile.min_dur,
-                          static_cast<Tick>(static_cast<float>(duration) * factor));
+      duration = quantizeToGrid(std::max(accel_profile.min_dur,
+                          static_cast<Tick>(static_cast<float>(duration) * factor)));
     }
 
     // Pair substitution on even-indexed pairs only.
@@ -210,7 +210,7 @@ std::vector<SkeletonSlot> buildRhythmSkeleton(
         Tick accel_ceil = duration * 2;
         new_a = std::clamp(new_a, accel_floor, accel_ceil);
       }
-      duration = new_a;
+      duration = quantizeToGrid(new_a);
     }
 
     if (current_tick + duration > a.climax_tick) {
@@ -259,12 +259,12 @@ std::vector<SkeletonSlot> buildRhythmSkeleton(
         : 0.0f;
     if (accel_profile.curve_type == AccelCurveType::EaseIn) {
       float factor = 1.0f - 0.5f * accel_progress_b * accel_progress_b;
-      duration = std::max(accel_profile.min_dur,
-                          static_cast<Tick>(static_cast<float>(duration) * factor));
+      duration = quantizeToGrid(std::max(accel_profile.min_dur,
+                          static_cast<Tick>(static_cast<float>(duration) * factor)));
     } else if (accel_profile.curve_type == AccelCurveType::Linear) {
       float factor = 1.0f - 0.4f * accel_progress_b;
-      duration = std::max(accel_profile.min_dur,
-                          static_cast<Tick>(static_cast<float>(duration) * factor));
+      duration = quantizeToGrid(std::max(accel_profile.min_dur,
+                          static_cast<Tick>(static_cast<float>(duration) * factor)));
     }
 
     if (idx % 2 == 0 && idx + 1 < motif_b.durations.size()) {
@@ -277,7 +277,7 @@ std::vector<SkeletonSlot> buildRhythmSkeleton(
         Tick accel_ceil = duration * 2;
         new_a = std::clamp(new_a, accel_floor, accel_ceil);
       }
-      duration = new_a;
+      duration = quantizeToGrid(new_a);
     }
 
     if (current_tick + duration > a.total_ticks) {
@@ -688,7 +688,6 @@ std::vector<NoteEvent> generateLegacyPitchPath(
   }
 
   // Snap all start_ticks to 16th-note grid for metric integrity.
-  constexpr Tick kTickQuantum = kTicksPerBeat / 4;  // 120
   for (auto& note : result) {
     note.start_tick = (note.start_tick / kTickQuantum) * kTickQuantum;
   }
@@ -1221,7 +1220,6 @@ std::vector<NoteEvent> generateKerngestaltPath(
   }
 
   // Snap all start_ticks to 16th-note grid for metric integrity.
-  constexpr Tick kTickQuantum = kTicksPerBeat / 4;  // 120
   for (auto& note : result) {
     note.start_tick = (note.start_tick / kTickQuantum) * kTickQuantum;
   }

@@ -745,3 +745,591 @@ def _sounding_at(sorted_notes: List[Note], tick: int) -> Optional[Note]:
                 return n
             break
     return None
+
+
+# ---------------------------------------------------------------------------
+# 2. Voice relationship analysis helpers
+# ---------------------------------------------------------------------------
+
+
+def compute_independence(
+    voices: List[List[Note]],
+    tpb: int = TICKS_PER_BEAT,
+) -> Dict:
+    """Compute rhythmic independence metrics for all voice pairs.
+
+    Args:
+        voices: List of note lists, voices[0] = highest (v1).
+        tpb: Ticks per beat.
+
+    Returns:
+        Dict with pair_independence and overall metrics.
+    """
+    n_voices = len(voices)
+    if n_voices < 2:
+        return {"pair_independence": {}, "overall": {
+            "avg_simultaneous_onset_ratio": 0.0,
+            "avg_rhythmic_divergence": 0.0,
+        }}
+
+    # Pre-compute onset sets and per-beat rhythm patterns per voice.
+    onset_sets: List[set] = []
+    beat_patterns: List[Dict[int, List[float]]] = []  # beat_idx -> durations
+    for voice in voices:
+        onsets = set(n.start_tick for n in voice)
+        onset_sets.append(onsets)
+        patterns: Dict[int, List[float]] = {}
+        for n in voice:
+            beat_idx = n.start_tick // tpb
+            patterns.setdefault(beat_idx, []).append(n.duration / tpb)
+        beat_patterns.append(patterns)
+
+    # Find total duration for activity correlation.
+    total_dur = 0
+    for voice in voices:
+        for n in voice:
+            total_dur = max(total_dur, n.start_tick + n.duration)
+    sample_step = max(1, tpb // 4)  # 16th-note resolution
+
+    pair_results: Dict[str, Dict] = {}
+    all_sim_ratios: List[float] = []
+    all_div: List[float] = []
+
+    for i in range(n_voices):
+        for j in range(i + 1, n_voices):
+            pair_key = f"v{i+1}-v{j+1}"
+
+            # (A) Simultaneous onset ratio.
+            union = onset_sets[i] | onset_sets[j]
+            intersect = onset_sets[i] & onset_sets[j]
+            sim_ratio = len(intersect) / len(union) if union else 0.0
+
+            # (B) Contrary motion ratio (using sorted notes).
+            sorted_i = sorted(voices[i], key=lambda n: n.start_tick)
+            sorted_j = sorted(voices[j], key=lambda n: n.start_tick)
+            contrary = 0
+            motion_total = 0
+            prev_ni: Optional[Note] = None
+            prev_nj: Optional[Note] = None
+            tick = 0
+            while tick < total_dur:
+                ni = _sounding_at(sorted_i, tick)
+                nj = _sounding_at(sorted_j, tick)
+                if (ni is not None and nj is not None
+                        and prev_ni is not None and prev_nj is not None):
+                    di = ni.pitch - prev_ni.pitch
+                    dj = nj.pitch - prev_nj.pitch
+                    if di != 0 or dj != 0:
+                        motion_total += 1
+                        if (di > 0 and dj < 0) or (di < 0 and dj > 0):
+                            contrary += 1
+                prev_ni = ni
+                prev_nj = nj
+                tick += tpb
+
+            # (C) Rhythmic divergence: compare per-beat duration patterns.
+            all_beats = set(beat_patterns[i].keys()) | set(beat_patterns[j].keys())
+            divergent_beats = 0
+            for b in all_beats:
+                pi = tuple(sorted(beat_patterns[i].get(b, [])))
+                pj = tuple(sorted(beat_patterns[j].get(b, [])))
+                if pi != pj:
+                    divergent_beats += 1
+            rhythmic_div = divergent_beats / len(all_beats) if all_beats else 0.0
+
+            # (D) Activity correlation: inverse of co-activity.
+            both_active = 0
+            one_active = 0
+            tick = 0
+            while tick < total_dur:
+                ai = _sounding_at(sorted_i, tick) is not None
+                aj = _sounding_at(sorted_j, tick) is not None
+                if ai and aj:
+                    both_active += 1
+                elif ai or aj:
+                    one_active += 1
+                tick += sample_step
+            total_active = both_active + one_active
+            activity_corr = both_active / total_active if total_active else 0.0
+
+            pair_results[pair_key] = {
+                "simultaneous_onset_ratio": round(sim_ratio, 4),
+                "contrary_motion_ratio": round(
+                    contrary / motion_total, 4
+                ) if motion_total else 0.0,
+                "rhythmic_divergence": round(rhythmic_div, 4),
+                "activity_correlation": round(activity_corr, 4),
+            }
+            all_sim_ratios.append(sim_ratio)
+            all_div.append(rhythmic_div)
+
+    return {
+        "pair_independence": pair_results,
+        "overall": {
+            "avg_simultaneous_onset_ratio": round(
+                sum(all_sim_ratios) / len(all_sim_ratios), 4
+            ) if all_sim_ratios else 0.0,
+            "avg_rhythmic_divergence": round(
+                sum(all_div) / len(all_div), 4
+            ) if all_div else 0.0,
+        },
+    }
+
+
+def compute_spacing(
+    voices: List[List[Note]],
+    tpb: int = TICKS_PER_BEAT,
+) -> Dict:
+    """Compute spacing (pitch gap) between adjacent voice pairs.
+
+    Args:
+        voices: List of note lists, voices[0] = highest (v1).
+        tpb: Ticks per beat.
+
+    Returns:
+        Dict with pair_spacing and avg_adjacent_gap.
+    """
+    n_voices = len(voices)
+    if n_voices < 2:
+        return {"pair_spacing": {}, "avg_adjacent_gap": 0.0}
+
+    total_dur = 0
+    sorted_voices: List[List[Note]] = []
+    for voice in voices:
+        sv = sorted(voice, key=lambda n: n.start_tick)
+        sorted_voices.append(sv)
+        for n in voice:
+            total_dur = max(total_dur, n.start_tick + n.duration)
+
+    pair_results: Dict[str, Dict] = {}
+    all_avg_gaps: List[float] = []
+
+    for i in range(n_voices - 1):
+        pair_key = f"v{i+1}-v{i+2}"
+        gaps: List[int] = []
+
+        tick = 0
+        while tick < total_dur:
+            ni = _sounding_at(sorted_voices[i], tick)
+            nj = _sounding_at(sorted_voices[i + 1], tick)
+            if ni is not None and nj is not None:
+                gap = abs(ni.pitch - nj.pitch)
+                gaps.append(gap)
+            tick += tpb
+
+        if gaps:
+            avg_gap = sum(gaps) / len(gaps)
+            # Build distribution buckets.
+            buckets = {"0-2": 0, "3-5": 0, "6-8": 0, "9-12": 0, "13+": 0}
+            for g in gaps:
+                if g <= 2:
+                    buckets["0-2"] += 1
+                elif g <= 5:
+                    buckets["3-5"] += 1
+                elif g <= 8:
+                    buckets["6-8"] += 1
+                elif g <= 12:
+                    buckets["9-12"] += 1
+                else:
+                    buckets["13+"] += 1
+            total_g = len(gaps)
+            dist = {k: round(v / total_g, 4) for k, v in buckets.items()}
+            close_rate = round(buckets["0-2"] / total_g, 4)
+        else:
+            avg_gap = 0.0
+            dist = {}
+            close_rate = 0.0
+
+        pair_results[pair_key] = {
+            "avg_gap_semitones": round(avg_gap, 1),
+            "min_gap": min(gaps) if gaps else 0,
+            "max_gap": max(gaps) if gaps else 0,
+            "gap_distribution": dist,
+            "close_rate": close_rate,
+        }
+        all_avg_gaps.append(avg_gap)
+
+    return {
+        "pair_spacing": pair_results,
+        "avg_adjacent_gap": round(
+            sum(all_avg_gaps) / len(all_avg_gaps), 1
+        ) if all_avg_gaps else 0.0,
+    }
+
+
+def compute_crossing_detail(
+    voices: List[List[Note]],
+    tpb: int = TICKS_PER_BEAT,
+) -> Dict:
+    """Compute detailed voice crossing events between adjacent pairs.
+
+    Args:
+        voices: List of note lists, voices[0] = highest (v1).
+        tpb: Ticks per beat.
+
+    Returns:
+        Dict with crossing_events list and summary.
+    """
+    n_voices = len(voices)
+    if n_voices < 2:
+        return {
+            "crossing_events": [],
+            "summary": {
+                "total_crossings": 0,
+                "avg_duration_beats": 0.0,
+                "resolution_rate": 0.0,
+                "quick_resolution_rate": 0.0,
+                "per_pair": {},
+            },
+        }
+
+    total_dur = 0
+    sorted_voices: List[List[Note]] = []
+    for voice in voices:
+        sv = sorted(voice, key=lambda n: n.start_tick)
+        sorted_voices.append(sv)
+        for n in voice:
+            total_dur = max(total_dur, n.start_tick + n.duration)
+
+    events: List[Dict] = []
+
+    for i in range(n_voices - 1):
+        pair_key = f"v{i+1}-v{i+2}"
+        in_crossing = False
+        crossing_start = 0
+        max_inversion = 0
+
+        tick = 0
+        while tick < total_dur:
+            ni = _sounding_at(sorted_voices[i], tick)
+            nj = _sounding_at(sorted_voices[i + 1], tick)
+
+            if ni is not None and nj is not None:
+                # Voice i (higher rank) should have higher pitch.
+                crossed = ni.pitch < nj.pitch
+                if crossed:
+                    inversion = nj.pitch - ni.pitch
+                    if not in_crossing:
+                        in_crossing = True
+                        crossing_start = tick
+                        max_inversion = inversion
+                    else:
+                        max_inversion = max(max_inversion, inversion)
+                elif in_crossing:
+                    # Crossing resolved.
+                    dur_beats = (tick - crossing_start) / tpb
+                    bar = crossing_start // TICKS_PER_BAR + 1
+                    events.append({
+                        "pair": pair_key,
+                        "start_bar": bar,
+                        "duration_beats": round(dur_beats, 2),
+                        "max_inversion_semitones": max_inversion,
+                        "resolved": True,
+                    })
+                    in_crossing = False
+            elif in_crossing:
+                # One voice silent — crossing ends.
+                dur_beats = (tick - crossing_start) / tpb
+                bar = crossing_start // TICKS_PER_BAR + 1
+                events.append({
+                    "pair": pair_key,
+                    "start_bar": bar,
+                    "duration_beats": round(dur_beats, 2),
+                    "max_inversion_semitones": max_inversion,
+                    "resolved": True,
+                })
+                in_crossing = False
+
+            tick += tpb
+
+        # Handle crossing open at end of piece.
+        if in_crossing:
+            dur_beats = (total_dur - crossing_start) / tpb
+            bar = crossing_start // TICKS_PER_BAR + 1
+            events.append({
+                "pair": pair_key,
+                "start_bar": bar,
+                "duration_beats": round(dur_beats, 2),
+                "max_inversion_semitones": max_inversion,
+                "resolved": False,
+            })
+
+    # Summary.
+    total_crossings = len(events)
+    if total_crossings > 0:
+        avg_dur = sum(e["duration_beats"] for e in events) / total_crossings
+        resolved = sum(1 for e in events if e["resolved"])
+        quick = sum(1 for e in events if e["duration_beats"] <= 2.0)
+        per_pair: Dict[str, int] = {}
+        for e in events:
+            per_pair[e["pair"]] = per_pair.get(e["pair"], 0) + 1
+    else:
+        avg_dur = 0.0
+        resolved = 0
+        quick = 0
+        per_pair = {}
+
+    return {
+        "crossing_events": events,
+        "summary": {
+            "total_crossings": total_crossings,
+            "avg_duration_beats": round(avg_dur, 2),
+            "resolution_rate": round(
+                resolved / total_crossings, 4
+            ) if total_crossings else 0.0,
+            "quick_resolution_rate": round(
+                quick / total_crossings, 4
+            ) if total_crossings else 0.0,
+            "per_pair": per_pair,
+        },
+    }
+
+
+def compute_activity(
+    voices: List[List[Note]],
+    total_dur: int,
+    tpb: int = TICKS_PER_BEAT,
+) -> Dict:
+    """Compute per-voice activity patterns.
+
+    Args:
+        voices: List of note lists, voices[0] = highest (v1).
+        total_dur: Total duration in ticks.
+        tpb: Ticks per beat.
+
+    Returns:
+        Dict with per_voice stats, entry_order, and simultaneous_activity.
+    """
+    n_voices = len(voices)
+    if n_voices == 0 or total_dur <= 0:
+        return {
+            "per_voice": {},
+            "entry_order": [],
+            "simultaneous_activity": {},
+        }
+
+    sorted_voices: List[List[Note]] = []
+    for voice in voices:
+        sorted_voices.append(sorted(voice, key=lambda n: n.start_tick))
+
+    sample_step = max(1, tpb // 4)  # 16th-note resolution
+
+    # Per-voice stats.
+    per_voice: Dict[str, Dict] = {}
+    entry_times: List[Tuple[str, int]] = []
+
+    for vi, sv in enumerate(sorted_voices):
+        vname = f"v{vi+1}"
+
+        if not sv:
+            per_voice[vname] = {
+                "activity_rate": 0.0,
+                "avg_rest_duration_beats": 0.0,
+                "longest_rest_beats": 0.0,
+            }
+            continue
+
+        # Entry time.
+        entry_times.append((vname, sv[0].start_tick))
+
+        # Compute activity by sampling.
+        active_samples = 0
+        total_samples = 0
+        tick = 0
+        while tick < total_dur:
+            if _sounding_at(sv, tick) is not None:
+                active_samples += 1
+            total_samples += 1
+            tick += sample_step
+
+        activity_rate = active_samples / total_samples if total_samples else 0.0
+
+        # Compute rest durations between notes.
+        rest_durs: List[float] = []
+        # Rest before first note.
+        if sv[0].start_tick > 0:
+            rest_durs.append(sv[0].start_tick / tpb)
+        # Rests between consecutive notes.
+        for ni in range(len(sv) - 1):
+            end_tick = sv[ni].start_tick + sv[ni].duration
+            next_start = sv[ni + 1].start_tick
+            if next_start > end_tick:
+                rest_durs.append((next_start - end_tick) / tpb)
+
+        per_voice[vname] = {
+            "activity_rate": round(activity_rate, 4),
+            "avg_rest_duration_beats": round(
+                sum(rest_durs) / len(rest_durs), 2
+            ) if rest_durs else 0.0,
+            "longest_rest_beats": round(
+                max(rest_durs), 2
+            ) if rest_durs else 0.0,
+        }
+
+    # Entry order.
+    entry_times.sort(key=lambda x: x[1])
+    entry_order = [et[0] for et in entry_times]
+
+    # Simultaneous activity distribution.
+    density_counts: Dict[int, int] = {}
+    total_samples = 0
+    tick = 0
+    while tick < total_dur:
+        active = sum(
+            1 for sv in sorted_voices
+            if _sounding_at(sv, tick) is not None
+        )
+        density_counts[active] = density_counts.get(active, 0) + 1
+        total_samples += 1
+        tick += sample_step
+
+    simultaneous: Dict[str, float] = {}
+    for k in range(n_voices + 1):
+        if k == 0:
+            continue
+        label = f"{k}_voice{'s' if k > 1 else ''}"
+        simultaneous[label] = round(
+            density_counts.get(k, 0) / total_samples, 4
+        ) if total_samples else 0.0
+
+    return {
+        "per_voice": per_voice,
+        "entry_order": entry_order,
+        "simultaneous_activity": simultaneous,
+    }
+
+
+def compute_imitation(
+    voices: List[List[Note]],
+    tpb: int = TICKS_PER_BEAT,
+    min_len: int = 4,
+) -> Dict:
+    """Detect imitation (repeated interval patterns) between voices.
+
+    Looks for melodic interval patterns of length >= min_len that appear
+    in one voice and then in another voice (possibly transposed).
+
+    Args:
+        voices: List of note lists, voices[0] = highest (v1).
+        tpb: Ticks per beat.
+        min_len: Minimum pattern length in intervals.
+
+    Returns:
+        Dict with imitation_events and summary.
+    """
+    n_voices = len(voices)
+    if n_voices < 2:
+        return {
+            "imitation_events": [],
+            "summary": {
+                "total_imitations": 0,
+                "avg_lag_beats": 0.0,
+                "most_common_interval": 0,
+                "imitative_density": 0.0,
+                "voice_pair_frequency": {},
+            },
+        }
+
+    # Build interval sequences per voice.
+    voice_intervals: List[List[Tuple[int, int, int]]] = []  # (interval, start_tick, pitch)
+    for vi, voice in enumerate(voices):
+        sv = sorted(voice, key=lambda n: n.start_tick)
+        intervals: List[Tuple[int, int, int]] = []
+        for ni in range(len(sv) - 1):
+            iv = sv[ni + 1].pitch - sv[ni].pitch
+            intervals.append((iv, sv[ni].start_tick, sv[ni].pitch))
+        voice_intervals.append(intervals)
+
+    events: List[Dict] = []
+    max_events = 100  # Cap for performance.
+    total_dur = 0
+    for voice in voices:
+        for n in voice:
+            total_dur = max(total_dur, n.start_tick + n.duration)
+
+    # For each pair of voices, search for matching interval patterns.
+    for li in range(n_voices):
+        leader_iv = voice_intervals[li]
+        if len(leader_iv) < min_len:
+            continue
+
+        for fi in range(n_voices):
+            if fi == li:
+                continue
+            follower_iv = voice_intervals[fi]
+            if len(follower_iv) < min_len:
+                continue
+
+            # Try each starting position in the leader.
+            for l_start in range(len(leader_iv) - min_len + 1):
+                pattern = [x[0] for x in leader_iv[l_start:l_start + min_len]]
+                l_tick = leader_iv[l_start][1]
+                l_pitch = leader_iv[l_start][2]
+
+                # Search in follower (only after leader onset for true imitation).
+                for f_start in range(len(follower_iv) - min_len + 1):
+                    f_tick = follower_iv[f_start][1]
+                    if f_tick <= l_tick:
+                        continue  # Follower must come after leader.
+
+                    # Check if intervals match.
+                    f_pattern = [
+                        x[0] for x in follower_iv[f_start:f_start + min_len]
+                    ]
+                    if pattern == f_pattern:
+                        f_pitch = follower_iv[f_start][2]
+                        transposition = f_pitch - l_pitch
+                        lag = (f_tick - l_tick) / tpb
+                        bar = l_tick // TICKS_PER_BAR + 1
+                        events.append({
+                            "pattern": pattern,
+                            "leader": f"v{li+1}",
+                            "follower": f"v{fi+1}",
+                            "lag_beats": round(lag, 2),
+                            "transposition": transposition,
+                            "bar": bar,
+                        })
+                        if len(events) >= max_events:
+                            break
+                if len(events) >= max_events:
+                    break
+            if len(events) >= max_events:
+                break
+        if len(events) >= max_events:
+            break
+
+    # Summary.
+    total_imitations = len(events)
+    if total_imitations > 0:
+        avg_lag = sum(e["lag_beats"] for e in events) / total_imitations
+        trans_counts: Dict[int, int] = {}
+        for e in events:
+            t = abs(e["transposition"]) % 12
+            trans_counts[t] = trans_counts.get(t, 0) + 1
+        most_common = max(trans_counts, key=trans_counts.get) if trans_counts else 0
+
+        pair_freq: Dict[str, int] = {}
+        for e in events:
+            pk = f"{e['leader']}-{e['follower']}"
+            pair_freq[pk] = pair_freq.get(pk, 0) + 1
+
+        # Imitative density: approximate by counting bars with imitations.
+        total_bars = max(1, total_dur // TICKS_PER_BAR)
+        imitation_bars = len(set(e["bar"] for e in events))
+        density = imitation_bars / total_bars
+    else:
+        avg_lag = 0.0
+        most_common = 0
+        pair_freq = {}
+        density = 0.0
+
+    return {
+        "imitation_events": events,
+        "summary": {
+            "total_imitations": total_imitations,
+            "avg_lag_beats": round(avg_lag, 2),
+            "most_common_interval": most_common,
+            "imitative_density": round(density, 4),
+            "voice_pair_frequency": pair_freq,
+        },
+    }

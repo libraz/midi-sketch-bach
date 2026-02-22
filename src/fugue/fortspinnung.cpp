@@ -536,7 +536,7 @@ std::vector<NoteEvent> generateFortspinnung(const MotifPool& pool,
     }
 
     // Check if fragment fits within remaining duration.
-    Tick frag_dur = motifDuration(fragment);
+    Tick frag_dur = quantizeToGrid(motifDuration(fragment));
     if (frag_dur == 0) frag_dur = kTicksPerBeat;
 
     if (current_tick + frag_dur > duration_ticks) {
@@ -587,7 +587,8 @@ std::vector<NoteEvent> generateFortspinnung(const MotifPool& pool,
         first_frag_dur = motifDuration(pool.best()->notes);
         if (first_frag_dur == 0) first_frag_dur = kTicksPerBeat;
       }
-      Tick imitation_offset = std::max(first_frag_dur / 2, static_cast<Tick>(kTicksPerBeat));
+      Tick imitation_offset = quantizeToGrid(
+          std::max(first_frag_dur / 2, static_cast<Tick>(kTicksPerBeat)));
 
       // Dissolution convergence: progressively move voice 1 toward voice 0
       // pitch in the dissolution phase, ending on a consonant interval (3rd/6th).
@@ -967,6 +968,7 @@ std::vector<FortspinnungStep> planFortspinnung(
     const PooledMotif* motif = pool.getByRank(rank);
     Tick step_dur = motif ? motifDuration(motif->notes) : kTicksPerBeat;
     if (step_dur == 0) step_dur = kTicksPerBeat;
+    step_dur = quantizeToGrid(step_dur);
 
     // Dissolution: cap fragment duration for gradual fragmentation.
     if (phase == FortPhase::Dissolution) {
@@ -982,7 +984,7 @@ std::vector<FortspinnungStep> planFortspinnung(
     float delay_beats = params.imitation_beats_lo +
         rng::rollFloat(rng, 0.0f,
                        params.imitation_beats_hi - params.imitation_beats_lo);
-    Tick delay = static_cast<Tick>(delay_beats * kTicksPerBeat);
+    Tick delay = quantizeToGrid(static_cast<Tick>(delay_beats * kTicksPerBeat));
 
     // Collect voice 0 step count before appending voice 1 steps.
     size_t v0_count = steps.size();
