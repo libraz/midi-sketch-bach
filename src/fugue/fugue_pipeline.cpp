@@ -2596,9 +2596,9 @@ static void enforceStrongBeatConsonance(
     const FuguePlan& plan,
     uint8_t num_voices) {
   (void)config;       // reserved for future scale-aware consonance checks
-  (void)num_voices;   // reserved for future voice-count-dependent thresholds
   Tick total_ticks = plan.estimated_duration;
   for (Tick beat = 0; beat < total_ticks; beat += kTicksPerBeat) {
+    if (!isStrongBeatInBar(beat)) continue;
     // Collect indices of notes active at this beat.
     std::vector<size_t> active;
     for (size_t idx = 0; idx < all_notes.size(); ++idx) {
@@ -2623,7 +2623,11 @@ static void enforceStrongBeatConsonance(
         int diff = std::abs(static_cast<int>(all_notes[a].pitch) -
                             static_cast<int>(all_notes[b].pitch));
         int simple = interval_util::compoundToSimple(diff);
-        if (!interval_util::isConsonance(simple) && diff > 0 && diff < 36) {
+        // P4 between upper voices is consonant in Baroque practice.
+        bool p4_upper = (simple == 5) &&
+                        (all_notes[a].voice < num_voices - 1) &&
+                        (all_notes[b].voice < num_voices - 1);
+        if (!interval_util::isConsonance(simple) && !p4_upper && diff > 0 && diff < 36) {
           has_dissonance = true;
           break;
         }
@@ -2654,7 +2658,10 @@ static void enforceStrongBeatConsonance(
           if (a == b) continue;
           int diff = std::abs(cand - static_cast<int>(all_notes[b].pitch));
           int simple = interval_util::compoundToSimple(diff);
-          if (!interval_util::isConsonance(simple) && diff > 0 && diff < 36) {
+          bool p4_upper = (simple == 5) &&
+                          (this_voice < num_voices - 1) &&
+                          (all_notes[b].voice < num_voices - 1);
+          if (!interval_util::isConsonance(simple) && !p4_upper && diff > 0 && diff < 36) {
             ok = false;
             break;
           }

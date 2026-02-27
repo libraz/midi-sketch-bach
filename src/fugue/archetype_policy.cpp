@@ -51,7 +51,7 @@ const ArchetypePolicy kCantabilePolicy = {
     false,              // require_fragmentable
     0.0f,               // fragment_reusability_weight
     0.0f,               // sequence_potential_weight
-    0.15f,              // max_sixteenth_density
+    0.40f,              // max_sixteenth_density (raised: Bach cantabile still uses 16ths)
     0.6f,               // min_step_ratio
     false,              // require_invertible
     false,              // require_contour_symmetry

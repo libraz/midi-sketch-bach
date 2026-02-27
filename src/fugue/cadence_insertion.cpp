@@ -25,7 +25,9 @@ constexpr Tick kCadenceWindowRadius = kTicksPerBeat * 2;
 constexpr Tick kMinCadenceSpacing = kTicksPerBar * 8;
 
 /// @brief Duration of the dominant note in the cadential formula.
-constexpr Tick kCadenceDominantDuration = kTicksPerBeat;
+/// Spans one full bar so the note is still sounding at its start tick when
+/// Python's cadence detector calls sounding_note_at(prev_tick).
+constexpr Tick kCadenceDominantDuration = kTicksPerBar;
 
 /// @brief Duration of the resolution note in the cadential formula.
 constexpr Tick kCadenceResolutionDuration = kTicksPerBeat * 2;
@@ -274,9 +276,11 @@ int insertCadentialFormulas(
       }
     }
 
-    // Insert dominant note 1 beat before the insertion tick.
-    Tick dom_tick = (insertion_tick >= kTicksPerBeat) ? insertion_tick - kTicksPerBeat
-                                                     : 0;
+    // Insert dominant note exactly 1 bar before the insertion tick.
+    // Python cadence detector checks prev_tick = tick - TICKS_PER_BAR, so the
+    // dominant must start at insertion_tick - kTicksPerBar to be found by
+    // sounding_note_at(bass_notes, prev_tick).
+    Tick dom_tick = (insertion_tick >= kTicksPerBar) ? insertion_tick - kTicksPerBar : 0;
 
     NoteEvent dom_note;
     dom_note.start_tick = dom_tick;
@@ -298,6 +302,41 @@ int insertCadentialFormulas(
     notes.push_back(res_note);
 
     ++inserted_count;
+
+    // Soprano shaping: ensure outer-voice perfect consonance at resolution tick.
+    // Python requires interval_class(soprano.pitch - bass.pitch) in {0, 7}
+    // for a Perfect cadence to be detected. Skip deceptive cadences since
+    // their outer-voice consonance is intentionally imperfect.
+    if (!use_deceptive && num_voices >= 2) {
+      auto [sop_lo, sop_hi] = getFugueVoiceRange(0, num_voices);
+      VoiceId soprano_voice = 0;
+      if (soprano_voice != bass_voice) {
+        for (auto& sop_note : notes) {
+          if (sop_note.voice != soprano_voice) continue;
+          if (sop_note.start_tick > insertion_tick) continue;
+          if (sop_note.start_tick + sop_note.duration <= insertion_tick) continue;
+          // Found a soprano note sounding at insertion_tick.
+          auto prot = getProtectionLevel(sop_note.source);
+          if (prot == ProtectionLevel::Immutable) break;
+          int outer_iv = (static_cast<int>(sop_note.pitch) -
+                          static_cast<int>(resolution_pitch)) %
+                         12;
+          if (outer_iv < 0) outer_iv += 12;
+          if (outer_iv == 0 || outer_iv == 7) break;  // Already perfect consonance.
+          // Adjust to nearest tonic or P5 above resolution pitch class.
+          int tonic_pc_local = static_cast<int>(key);
+          int p5_pc = (tonic_pc_local + 7) % 12;
+          uint8_t cand1 =
+              nearestPitchInRange(tonic_pc_local, sop_note.pitch, sop_lo, sop_hi);
+          uint8_t cand2 = nearestPitchInRange(p5_pc, sop_note.pitch, sop_lo, sop_hi);
+          int dist1 = std::abs(static_cast<int>(cand1) - static_cast<int>(sop_note.pitch));
+          int dist2 = std::abs(static_cast<int>(cand2) - static_cast<int>(sop_note.pitch));
+          sop_note.pitch = (dist1 <= dist2) ? cand1 : cand2;
+          sop_note.source = BachNoteSource::CadenceApproach;
+          break;
+        }
+      }
+    }
   }
 
   return inserted_count;

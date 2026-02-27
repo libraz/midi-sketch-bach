@@ -474,8 +474,8 @@ std::vector<NoteEvent> generateFortspinnung(const MotifPool& pool,
     }
 
     // Phase-controlled diminution with motif preservation (B4).
-    // B1: Kernel=0% (theme rhythm fully preserved), Sequence=25% (limited),
-    // Dissolution=40-48% (main rhythmic density site).
+    // Reference: organ fugue episodes use running 16th-note motion (37% 16th, 39% 8th).
+    // Kernel=0% (theme rhythm preserved), Sequence=45%, Dissolution=50-58%.
     {
       float diminish_prob;
       constexpr float kFortEnergy = 0.5f;
@@ -484,10 +484,10 @@ std::vector<NoteEvent> generateFortspinnung(const MotifPool& pool,
           diminish_prob = 0.0f;
           break;
         case FortPhase::Sequence:
-          diminish_prob = 0.25f;
+          diminish_prob = 0.45f;
           break;
         case FortPhase::Dissolution:
-          diminish_prob = 0.40f + kFortEnergy * 0.15f;
+          diminish_prob = 0.50f + kFortEnergy * 0.15f;
           break;
       }
       constexpr Tick kMinDiminishDur = duration::kSixteenthNote;
@@ -524,10 +524,13 @@ std::vector<NoteEvent> generateFortspinnung(const MotifPool& pool,
             rng::rollProbability(rng, diminish_prob)) {
           frag_note.duration =
               std::max(frag_note.duration / 2, kMinDiminishDur);
-          // Second halving only in Dissolution at half probability.
-          if (phase == FortPhase::Dissolution &&
-              frag_note.duration > kMinDiminishDur &&
-              rng::rollProbability(rng, diminish_prob * 0.5f)) {
+          // Second halving: Dissolution at half prob, Sequence at lower prob
+          // to create running 16th-note motion from 8th-note material.
+          float second_prob = (phase == FortPhase::Dissolution)
+                                  ? diminish_prob * 0.5f
+                                  : 0.25f;
+          if (frag_note.duration > kMinDiminishDur &&
+              rng::rollProbability(rng, second_prob)) {
             frag_note.duration =
                 std::max(frag_note.duration / 2, kMinDiminishDur);
           }

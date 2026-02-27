@@ -774,16 +774,18 @@ EpisodeResult generateConstraintEpisode(const EpisodeRequest& request) {
         FortPhase phase = step.phase;
 
         // B1: Phase-dependent diminution probability.
+        // Reference: organ fugue episodes (BWV578, BWV532) use running 16th motion.
+        // Kernel preserves theme rhythm; Sequence/Dissolution drive toward density.
         float diminish_prob;
         switch (phase) {
           case FortPhase::Kernel:
             diminish_prob = 0.0f;
             break;
           case FortPhase::Sequence:
-            diminish_prob = 0.25f;
+            diminish_prob = 0.50f;
             break;
           case FortPhase::Dissolution:
-            diminish_prob = 0.40f + request.energy_level * 0.15f;
+            diminish_prob = 0.55f + request.energy_level * 0.15f;
             break;
         }
 
@@ -833,27 +835,28 @@ EpisodeResult generateConstraintEpisode(const EpisodeRequest& request) {
           }
         }
 
-        // B4: Intra-voice rhythm consistency — suppress diminution when it would
-        // create a mixed pattern (e.g., 8th->16th switch within a phrase).
-        // BWV578 reference: voices maintain consistent figuration patterns.
+        // B4: Intra-voice rhythm consistency — soften 8th->16th transitions.
+        // Bach's episodes do use 8th->16th transitions in Fortspinnung, but
+        // excessive switching creates a restless texture. Light suppression.
         if (diminish_prob > 0.0f) {
           DurCategory prev_dc = ticksToDurCategory(prev_dur_per_voice[voice]);
           DurCategory post_diminish_dc = ticksToDurCategory(
               std::max(base_dur / 2, kDimFloor));
-          // If previous note was 8th and diminution would create 16th, suppress.
-          // This preserves running 8th patterns (common in countersubjects).
           if (prev_dc == DurCategory::S8 && post_diminish_dc == DurCategory::S16) {
-            diminish_prob *= 0.3f;  // Mostly suppress 8th->16th switches.
+            diminish_prob *= 0.5f;  // Softened: allow more 8th->16th transitions.
           }
         }
 
         if (base_dur > kDimFloor) {
           if (rng::rollProbability(rng, diminish_prob)) {
             base_dur = std::max(base_dur / 2, kDimFloor);
-            // Second halving only in Dissolution at half probability.
-            if (phase == FortPhase::Dissolution &&
-                base_dur > kDimFloor &&
-                rng::rollProbability(rng, diminish_prob * 0.5f)) {
+            // Second halving: Dissolution at half prob, Sequence at lower prob
+            // to create quarter->8th->16th chains for running episode motion.
+            float second_prob = (phase == FortPhase::Dissolution)
+                                    ? diminish_prob * 0.5f
+                                    : 0.25f;
+            if (base_dur > kDimFloor &&
+                rng::rollProbability(rng, second_prob)) {
               base_dur = std::max(base_dur / 2, kDimFloor);
             }
           }

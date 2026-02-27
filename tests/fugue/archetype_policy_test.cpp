@@ -24,7 +24,7 @@ TEST(ArchetypePolicyTest, CantabilePolicy) {
   const auto& pol = getArchetypePolicy(FugueArchetype::Cantabile);
   EXPECT_EQ(pol.min_range_degrees, 5);
   EXPECT_EQ(pol.max_range_degrees, 9);
-  EXPECT_LE(pol.max_sixteenth_density, 0.15f);
+  EXPECT_LE(pol.max_sixteenth_density, 0.40f);
   EXPECT_GE(pol.min_step_ratio, 0.6f);
   EXPECT_FALSE(pol.require_fragmentable);
   EXPECT_EQ(pol.path_candidates, 8);
