@@ -146,8 +146,8 @@ TEST(VerticalSafeCallback, ChordToneConsonanceStillAccepted) {
       makeNote(0, kTicksPerBeat, 60, 0),  // C4, voice 0
   };
   auto safe = makeVerticalSafeCallback(tl, notes, 2);
-  EXPECT_TRUE(safe(0, 1, 67));   // G4: P5 with C4 -> accepted.
-  EXPECT_TRUE(safe(0, 1, 64));   // E4: M3 with C4 -> accepted.
+  EXPECT_TRUE(safe(0, 1, 67));  // G4: P5 with C4 -> accepted.
+  EXPECT_TRUE(safe(0, 1, 64));  // E4: M3 with C4 -> accepted.
 }
 
 TEST(VerticalSafeCallback, P4UpperVoicesAccepted) {
@@ -283,7 +283,7 @@ TEST(VerticalSafeParallel, ObliqueMotionAccepted) {
   auto tl = makeCMajorTimeline(kTicksPerBar * 2);
   std::vector<NoteEvent> notes = {
       makeNote(kTicksPerBeat, 2 * kTicksPerBeat, 60, 0),  // C4 sustained
-      makeNote(kTicksPerBeat, kTicksPerBeat, 67, 1),       // G4 at beat 1
+      makeNote(kTicksPerBeat, kTicksPerBeat, 67, 1),      // G4 at beat 1
   };
   auto safe = makeVerticalSafeWithParallelCheck(tl, notes, 2);
   EXPECT_TRUE(safe(2 * kTicksPerBeat, 1, 67));  // Oblique motion -> accepted.
@@ -341,11 +341,11 @@ TEST(VerticalSafeParallel, ThirdPartyPairIgnored) {
   //   All intervals consonant (m3 + M3). Passes.
   auto tl = makeCMajorTimeline(kTicksPerBar * 2);
   std::vector<NoteEvent> notes = {
-      makeNote(kTicksPerBeat, kTicksPerBeat, 60, 0),       // C4
-      makeNote(2 * kTicksPerBeat, kTicksPerBeat, 62, 0),   // D4
-      makeNote(kTicksPerBeat, kTicksPerBeat, 67, 1),       // G4
-      makeNote(2 * kTicksPerBeat, kTicksPerBeat, 69, 1),   // A4
-      makeNote(kTicksPerBeat, kTicksPerBeat, 64, 2),       // E4
+      makeNote(kTicksPerBeat, kTicksPerBeat, 60, 0),      // C4
+      makeNote(2 * kTicksPerBeat, kTicksPerBeat, 62, 0),  // D4
+      makeNote(kTicksPerBeat, kTicksPerBeat, 67, 1),      // G4
+      makeNote(2 * kTicksPerBeat, kTicksPerBeat, 69, 1),  // A4
+      makeNote(kTicksPerBeat, kTicksPerBeat, 64, 2),      // E4
   };
   auto safe = makeVerticalSafeWithParallelCheck(tl, notes, 3);
   EXPECT_TRUE(safe(2 * kTicksPerBeat, 2, 65));  // Third-party parallel ignored.
@@ -360,7 +360,7 @@ TEST(VerticalSafeParallel, TiedNoteContinuation) {
   auto tl = makeCMajorTimeline(kTicksPerBar * 2);
   std::vector<NoteEvent> notes = {
       makeNote(kTicksPerBeat, 2 * kTicksPerBeat, 60, 0),  // C4 sustained across beats
-      makeNote(kTicksPerBeat, kTicksPerBeat, 67, 1),       // G4 at beat 1
+      makeNote(kTicksPerBeat, kTicksPerBeat, 67, 1),      // G4 at beat 1
   };
   auto safe = makeVerticalSafeWithParallelCheck(tl, notes, 2);
   EXPECT_TRUE(safe(2 * kTicksPerBeat, 1, 67));  // Both stationary -> oblique -> safe.
@@ -438,9 +438,9 @@ TEST(VerticalSafeParallel, WeakBeatBypassesParallelCheck) {
   // even if motion would create parallel P5.
   auto tl = makeCMajorTimeline(kTicksPerBar * 2);
   std::vector<NoteEvent> notes = {
-      makeNote(0, kTicksPerBeat, 60, 0),                  // C4 at beat 0
-      makeNote(kTicksPerBeat, kTicksPerBeat, 62, 0),      // D4 at beat 1
-      makeNote(0, kTicksPerBeat, 67, 1),                  // G4 at beat 0
+      makeNote(0, kTicksPerBeat, 60, 0),              // C4 at beat 0
+      makeNote(kTicksPerBeat, kTicksPerBeat, 62, 0),  // D4 at beat 1
+      makeNote(0, kTicksPerBeat, 67, 1),              // G4 at beat 0
   };
   auto safe = makeVerticalSafeWithParallelCheck(tl, notes, 2);
   // Beat 1 (tick 480) is weak -> returns true before parallel check.

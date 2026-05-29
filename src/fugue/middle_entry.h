@@ -24,7 +24,7 @@ struct MiddleEntry {
   Key key = Key::C;              ///< Key of this entry.
   Tick start_tick = 0;           ///< When this entry begins.
   Tick end_tick = 0;             ///< When this entry ends.
-  VoiceId voice_id = 0;         ///< Which voice presents the subject.
+  VoiceId voice_id = 0;          ///< Which voice presents the subject.
 
   /// @brief Get duration in ticks.
   /// @return end_tick - start_tick.
@@ -44,8 +44,7 @@ struct MiddleEntry {
 /// @param num_voices Total number of voices (for register lookup).
 /// @return Generated MiddleEntry.
 MiddleEntry generateMiddleEntry(const Subject& subject, Key target_key, Tick start_tick,
-                                VoiceId voice_id, uint8_t num_voices = 3,
-                                uint8_t last_pitch = 0,
+                                VoiceId voice_id, uint8_t num_voices = 3, uint8_t last_pitch = 0,
                                 float phase_pos = 0.0f);
 
 /// @brief Generate a middle entry with counterpoint validation.
@@ -65,11 +64,9 @@ MiddleEntry generateMiddleEntry(const Subject& subject, Key target_key, Tick sta
 /// @param timeline Harmonic timeline for chord-tone context.
 /// @return Generated MiddleEntry with notes registered in cp_state.
 MiddleEntry generateMiddleEntry(const Subject& subject, Key target_key, Tick start_tick,
-                                VoiceId voice_id, uint8_t num_voices,
-                                CounterpointState& cp_state, IRuleEvaluator& cp_rules,
-                                CollisionResolver& cp_resolver,
-                                const HarmonicTimeline& timeline,
-                                uint8_t last_pitch = 0,
+                                VoiceId voice_id, uint8_t num_voices, CounterpointState& cp_state,
+                                IRuleEvaluator& cp_rules, CollisionResolver& cp_resolver,
+                                const HarmonicTimeline& timeline, uint8_t last_pitch = 0,
                                 float phase_pos = 0.0f);
 
 /// @brief Generate a false entry -- subject opening that diverges to free counterpoint.
@@ -85,9 +82,8 @@ MiddleEntry generateMiddleEntry(const Subject& subject, Key target_key, Tick sta
 /// @param num_voices Total number of voices (for register lookup).
 /// @param quote_notes Number of subject notes to quote (2-4).
 /// @return MiddleEntry containing the truncated subject + divergent tail.
-MiddleEntry generateFalseEntry(const Subject& subject, Key target_key,
-                               Tick start_tick, VoiceId voice_id,
-                               uint8_t num_voices = 3, uint8_t quote_notes = 3,
+MiddleEntry generateFalseEntry(const Subject& subject, Key target_key, Tick start_tick,
+                               VoiceId voice_id, uint8_t num_voices = 3, uint8_t quote_notes = 3,
                                float phase_pos = 0.0f);
 
 }  // namespace bach

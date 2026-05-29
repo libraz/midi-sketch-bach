@@ -39,7 +39,7 @@ int resolutionInterval(SuspensionType type) {
     case SuspensionType::Sus9_8:
       return -2;  // Down by 2 semitones
     case SuspensionType::Sus2_3:
-      return 1;   // Up by 1 semitone (ascending bass resolution)
+      return 1;  // Up by 1 semitone (ascending bass resolution)
     default:
       return -1;
   }
@@ -51,11 +51,16 @@ int resolutionInterval(SuspensionType type) {
 
 const char* suspensionTypeToString(SuspensionType type) {
   switch (type) {
-    case SuspensionType::Sus4_3: return "4-3";
-    case SuspensionType::Sus7_6: return "7-6";
-    case SuspensionType::Sus9_8: return "9-8";
-    case SuspensionType::Sus2_3: return "2-3";
-    default: return "unknown";
+    case SuspensionType::Sus4_3:
+      return "4-3";
+    case SuspensionType::Sus7_6:
+      return "7-6";
+    case SuspensionType::Sus9_8:
+      return "9-8";
+    case SuspensionType::Sus2_3:
+      return "2-3";
+    default:
+      return "unknown";
   }
 }
 
@@ -64,8 +69,7 @@ const char* suspensionTypeToString(SuspensionType type) {
 // ---------------------------------------------------------------------------
 
 SuspensionChain generateSuspensionChain(Tick start_tick, uint8_t num_suspensions,
-                                        uint8_t base_pitch, VoiceId voice,
-                                        SuspensionType type) {
+                                        uint8_t base_pitch, VoiceId voice, SuspensionType type) {
   SuspensionChain chain;
   chain.start_tick = start_tick;
 
@@ -95,8 +99,8 @@ SuspensionChain generateSuspensionChain(Tick start_tick, uint8_t num_suspensions
     event.resolution_tick = start_tick + offset + 2 * kTicksPerBeat;
 
     event.suspended_pitch = current_pitch;
-    event.resolution_pitch = clampPitch(static_cast<int>(current_pitch) + interval,
-                                         kMinPitch, kMaxPitch);
+    event.resolution_pitch =
+        clampPitch(static_cast<int>(current_pitch) + interval, kMinPitch, kMaxPitch);
 
     chain.events.push_back(event);
 
@@ -116,9 +120,8 @@ SuspensionChain generateSuspensionChain(Tick start_tick, uint8_t num_suspensions
 // ---------------------------------------------------------------------------
 
 SuspensionChain generateSuspensionChain(Tick start_tick, uint8_t num_suspensions,
-                                        uint8_t base_pitch, VoiceId voice,
-                                        SuspensionType type, Key key,
-                                        ScaleType scale) {
+                                        uint8_t base_pitch, VoiceId voice, SuspensionType type,
+                                        Key key, ScaleType scale) {
   SuspensionChain chain;
   chain.start_tick = start_tick;
 
@@ -159,7 +162,8 @@ SuspensionChain generateSuspensionChain(Tick start_tick, uint8_t num_suspensions
           break;
         }
       }
-      if (!found) break;
+      if (!found)
+        break;
     }
     event.resolution_pitch = clampPitch(res_pitch, kMinPitch, kMaxPitch);
 

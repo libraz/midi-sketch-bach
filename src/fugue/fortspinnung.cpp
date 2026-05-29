@@ -14,10 +14,10 @@
 #include "core/pitch_utils.h"
 #include "core/rng_util.h"
 #include "core/scale.h"
-#include "fugue/motif_pool.h"
-#include "transform/motif_transform.h"
 #include "fugue/episode.h"
+#include "fugue/motif_pool.h"
 #include "fugue/voice_registers.h"
+#include "transform/motif_transform.h"
 #include "transform/sequence.h"
 
 namespace bach {
@@ -41,8 +41,7 @@ struct FragmentSelectionWeights {
 /// @param character Subject character.
 /// @param rng Mersenne Twister for per-seed variation.
 /// @return Design weights with small per-seed perturbation (normalized).
-FragmentSelectionWeights weightsForCharacter(SubjectCharacter character,
-                                             std::mt19937& rng) {
+FragmentSelectionWeights weightsForCharacter(SubjectCharacter character, std::mt19937& rng) {
   FragmentSelectionWeights weights;
   switch (character) {
     case SubjectCharacter::Severe:
@@ -78,8 +77,8 @@ FragmentSelectionWeights weightsForCharacter(SubjectCharacter character,
   // Apply per-seed variation and re-normalize to sum to 1.0.
   float total = 0.0f;
   for (int idx = 0; idx < 4; ++idx) {
-    weights.rank_weights[idx] = std::max(
-        0.01f, weights.rank_weights[idx] + rng::rollFloat(rng, -0.05f, 0.05f));
+    weights.rank_weights[idx] =
+        std::max(0.01f, weights.rank_weights[idx] + rng::rollFloat(rng, -0.05f, 0.05f));
     total += weights.rank_weights[idx];
   }
   for (int idx = 0; idx < 4; ++idx) {
@@ -97,7 +96,8 @@ FragmentSelectionWeights weightsForCharacter(SubjectCharacter character,
 size_t selectFragmentRank(std::mt19937& rng, const FragmentSelectionWeights& weights,
                           size_t pool_size) {
   size_t max_rank = std::min(static_cast<size_t>(4), pool_size);
-  if (max_rank == 0) return 0;
+  if (max_rank == 0)
+    return 0;
 
   // Normalize weights to the available ranks.
   float total = 0.0f;
@@ -149,10 +149,12 @@ int sequenceStepForCharacter(SubjectCharacter character, std::mt19937& rng) {
 /// @param fragment Fragment to adjust (modified in place).
 /// @param prev_last_pitch Last pitch of the preceding fragment.
 void closeGapIfNeeded(std::vector<NoteEvent>& fragment, uint8_t prev_last_pitch) {
-  if (fragment.empty()) return;
+  if (fragment.empty())
+    return;
 
   int gap = static_cast<int>(fragment[0].pitch) - static_cast<int>(prev_last_pitch);
-  if (std::abs(gap) <= 4) return;
+  if (std::abs(gap) <= 4)
+    return;
 
   // Transpose to bring within 4 semitones. Target: prev_last_pitch + direction * 2.
   int direction = (gap > 0) ? 1 : -1;
@@ -168,8 +170,10 @@ void closeGapIfNeeded(std::vector<NoteEvent>& fragment, uint8_t prev_last_pitch)
 /// @param hi Upper bound of target register.
 /// @return Clamped pitch within [lo, hi].
 uint8_t mapToRegister(int pitch, int lo, int hi) {
-  if (pitch < lo) pitch += 12;
-  if (pitch > hi) pitch -= 12;
+  if (pitch < lo)
+    pitch += 12;
+  if (pitch > hi)
+    pitch -= 12;
   return clampPitch(pitch, static_cast<uint8_t>(lo), static_cast<uint8_t>(hi));
 }
 
@@ -181,13 +185,11 @@ uint8_t mapToRegister(int pitch, int lo, int hi) {
 void applyStepwisePreference(std::vector<NoteEvent>& fragment, float preference,
                              std::mt19937& rng) {
   for (size_t i = 1; i < fragment.size(); ++i) {
-    int interval = static_cast<int>(fragment[i].pitch) -
-                   static_cast<int>(fragment[i - 1].pitch);
+    int interval = static_cast<int>(fragment[i].pitch) - static_cast<int>(fragment[i - 1].pitch);
     if (std::abs(interval) > 2 && rng::rollProbability(rng, preference)) {
       int direction = (interval > 0) ? 1 : -1;
       int step = direction * 2;  // Major second.
-      fragment[i].pitch = clampPitch(
-          static_cast<int>(fragment[i - 1].pitch) + step, 0, 127);
+      fragment[i].pitch = clampPitch(static_cast<int>(fragment[i - 1].pitch) + step, 0, 127);
     }
   }
 }
@@ -199,8 +201,8 @@ void applyStepwisePreference(std::vector<NoteEvent>& fragment, float preference,
 /// @param offset_tick Tick position for the first note.
 /// @param voice Voice ID to assign.
 /// @return Placed notes with adjusted start ticks and voice.
-std::vector<NoteEvent> placeFragment(const std::vector<NoteEvent>& fragment,
-                                     Tick offset_tick, uint8_t voice) {
+std::vector<NoteEvent> placeFragment(const std::vector<NoteEvent>& fragment, Tick offset_tick,
+                                     uint8_t voice) {
   std::vector<NoteEvent> placed;
   placed.reserve(fragment.size());
   for (const auto& note : fragment) {
@@ -215,13 +217,9 @@ std::vector<NoteEvent> placeFragment(const std::vector<NoteEvent>& fragment,
 
 }  // namespace
 
-std::vector<NoteEvent> generateFortspinnung(const MotifPool& pool,
-                                            Tick start_tick,
-                                            Tick duration_ticks,
-                                            uint8_t num_voices,
-                                            uint32_t seed,
-                                            SubjectCharacter character,
-                                            Key key) {
+std::vector<NoteEvent> generateFortspinnung(const MotifPool& pool, Tick start_tick,
+                                            Tick duration_ticks, uint8_t num_voices, uint32_t seed,
+                                            SubjectCharacter character, Key key) {
   std::vector<NoteEvent> result;
 
   if (pool.empty() || duration_ticks == 0) {
@@ -235,8 +233,8 @@ std::vector<NoteEvent> generateFortspinnung(const MotifPool& pool,
   // Three-phase grammar calibrated per character (Bach reference data).
   FortspinnungGrammar grammar = getFortspinnungGrammar(character);
   Tick kernel_end = static_cast<Tick>(duration_ticks * grammar.kernel_ratio);
-  Tick sequence_end = static_cast<Tick>(
-      duration_ticks * (grammar.kernel_ratio + grammar.sequence_ratio));
+  Tick sequence_end =
+      static_cast<Tick>(duration_ticks * (grammar.kernel_ratio + grammar.sequence_ratio));
 
   // Kernel-phase weights: strongly prefer rank 0 (subject_head) for
   // motivic identity. Limited transformations preserve the kernel's shape.
@@ -280,14 +278,12 @@ std::vector<NoteEvent> generateFortspinnung(const MotifPool& pool,
 
     // Dissolution density decay: insert rest gap before each successive fragment.
     if (phase == FortPhase::Dissolution && dissolution_step_count > 0) {
-      Tick gap = static_cast<Tick>(
-          kTicksPerBeat * 0.5f *
-          std::pow(grammar.density_decay_factor, dissolution_step_count));
+      Tick gap = static_cast<Tick>(kTicksPerBeat * 0.5f *
+                                   std::pow(grammar.density_decay_factor, dissolution_step_count));
 
       // Try to fill the gap with a rhythm cell (low energy = longer cells).
       if (gap >= kTicksPerBeat / 4 && !prev_fragment.empty()) {
-        auto rhythm = tryInjectRhythmCell(
-            0.2f, gap, current_tick + start_tick, rng, 0.25f);
+        auto rhythm = tryInjectRhythmCell(0.2f, gap, current_tick + start_tick, rng, 0.25f);
         if (rhythm.has_value()) {
           ScaleType scale = ScaleType::Major;  // C major internal convention
           uint8_t last_p = prev_fragment.back().pitch;
@@ -295,7 +291,8 @@ std::vector<NoteEvent> generateFortspinnung(const MotifPool& pool,
           auto [v0_lo, v0_hi] = getFugueVoiceRange(0, num_voices);
           Tick fill_tick = current_tick;
           for (Tick rd : rhythm->durations) {
-            if (fill_tick + rd > current_tick + gap) break;
+            if (fill_tick + rd > current_tick + gap)
+              break;
             uint8_t p = scale_util::absoluteDegreeToPitch(deg, key, scale);
             p = clampPitch(static_cast<int>(p), v0_lo, v0_hi);
             NoteEvent rn;
@@ -313,21 +310,21 @@ std::vector<NoteEvent> generateFortspinnung(const MotifPool& pool,
       }
 
       current_tick += gap;
-      if (current_tick >= duration_ticks) break;
+      if (current_tick >= duration_ticks)
+        break;
     }
 
     // Fragment selection: Kernel prefers rank 0, others use character weights.
-    const auto& active_weights =
-        (phase == FortPhase::Kernel) ? kernel_weights : weights;
+    const auto& active_weights = (phase == FortPhase::Kernel) ? kernel_weights : weights;
     size_t rank = selectFragmentRank(rng, active_weights, pool.size());
     const PooledMotif* motif = pool.getByRank(rank);
-    if (motif == nullptr || motif->notes.empty()) break;
+    if (motif == nullptr || motif->notes.empty())
+      break;
 
     std::vector<NoteEvent> fragment = motif->notes;
 
     // Dissolution: truncate fragments for gradual fragmentation.
-    if (phase == FortPhase::Dissolution &&
-        fragment.size() > grammar.min_fragment_notes) {
+    if (phase == FortPhase::Dissolution && fragment.size() > grammar.min_fragment_notes) {
       fragment.resize(grammar.min_fragment_notes);
     }
 
@@ -341,8 +338,7 @@ std::vector<NoteEvent> generateFortspinnung(const MotifPool& pool,
           fragment = augmentMelody(fragment, 0);
           break;
         case SubjectCharacter::Playful:
-          if (current_tick > 0 &&
-              rng::rollProbability(rng, rng::rollFloat(rng, 0.40f, 0.60f))) {
+          if (current_tick > 0 && rng::rollProbability(rng, rng::rollFloat(rng, 0.40f, 0.60f))) {
             fragment = diminishMelody(fragment, 0);
           }
           break;
@@ -353,26 +349,22 @@ std::vector<NoteEvent> generateFortspinnung(const MotifPool& pool,
     }
 
     // Apply dotted rhythm variation (Sequence phase only, 30%, not for Severe).
-    if (phase == FortPhase::Sequence &&
-        character != SubjectCharacter::Severe &&
+    if (phase == FortPhase::Sequence && character != SubjectCharacter::Severe &&
         rng::rollProbability(rng, 0.30f) && fragment.size() >= 2) {
       for (size_t fi = 0; fi + 1 < fragment.size(); fi += 2) {
         Tick combined = fragment[fi].duration + fragment[fi + 1].duration;
         fragment[fi].duration = (combined * 3) / 4;
         fragment[fi + 1].duration = combined / 4;
-        fragment[fi + 1].start_tick =
-            fragment[fi].start_tick + fragment[fi].duration;
+        fragment[fi + 1].start_tick = fragment[fi].start_tick + fragment[fi].duration;
       }
     }
 
     // Sequential transposition (Kernel: skip, Sequence/Dissolution: apply).
     if (phase != FortPhase::Kernel && current_tick > 0) {
-      int repetition_count = static_cast<int>(current_tick / std::max(motifDuration(fragment),
-                                                                       static_cast<Tick>(1)));
+      int repetition_count =
+          static_cast<int>(current_tick / std::max(motifDuration(fragment), static_cast<Tick>(1)));
       // Dissolution uses smaller transposition steps (half seq_step).
-      int effective_step = (phase == FortPhase::Dissolution)
-                               ? seq_step / 2
-                               : seq_step;
+      int effective_step = (phase == FortPhase::Dissolution) ? seq_step / 2 : seq_step;
       int transpose = effective_step * std::min(repetition_count, 4);
       fragment = transposeMelody(fragment, transpose);
     }
@@ -404,7 +396,8 @@ std::vector<NoteEvent> generateFortspinnung(const MotifPool& pool,
         for (int attempt = 0; attempt < 3 && has_tritone; ++attempt) {
           size_t alt_rank = selectFragmentRank(rng, weights, pool.size());
           const PooledMotif* alt_motif = pool.getByRank(alt_rank);
-          if (alt_motif == nullptr || alt_motif->notes.empty()) continue;
+          if (alt_motif == nullptr || alt_motif->notes.empty())
+            continue;
           std::vector<NoteEvent> alt_frag = alt_motif->notes;
           if (!prev_fragment.empty()) {
             closeGapIfNeeded(alt_frag, prev_fragment.back().pitch);
@@ -428,9 +421,10 @@ std::vector<NoteEvent> generateFortspinnung(const MotifPool& pool,
       // Stages 2-4: Fix individual tritone intervals.
       if (has_tritone) {
         for (size_t idx = 1; idx < fragment.size(); ++idx) {
-          int mel = static_cast<int>(fragment[idx].pitch) -
-                    static_cast<int>(fragment[idx - 1].pitch);
-          if (std::abs(mel) != 6) continue;
+          int mel =
+              static_cast<int>(fragment[idx].pitch) - static_cast<int>(fragment[idx - 1].pitch);
+          if (std::abs(mel) != 6)
+            continue;
 
           // Stage 2: Octave transposition to eliminate tritone.
           uint8_t oct_up =
@@ -452,17 +446,15 @@ std::vector<NoteEvent> generateFortspinnung(const MotifPool& pool,
 
           // Stage 3: Neighbor substitution (+-1 semitone).
           int shift_dir = (mel > 0) ? -1 : 1;
-          uint8_t shifted = clampPitch(
-              static_cast<int>(fragment[idx].pitch) + shift_dir, 0, 127);
-          if (std::abs(static_cast<int>(shifted) -
-                       static_cast<int>(fragment[idx - 1].pitch)) != 6) {
+          uint8_t shifted = clampPitch(static_cast<int>(fragment[idx].pitch) + shift_dir, 0, 127);
+          if (std::abs(static_cast<int>(shifted) - static_cast<int>(fragment[idx - 1].pitch)) !=
+              6) {
             fragment[idx].pitch = shifted;
             continue;
           }
 
           // Stage 4: Duration extension + deletion (protect strong beats).
-          bool is_strong =
-              (fragment[idx].start_tick % kTicksPerBar) % (2 * kTicksPerBeat) == 0;
+          bool is_strong = (fragment[idx].start_tick % kTicksPerBar) % (2 * kTicksPerBeat) == 0;
           if (!is_strong) {
             fragment[idx - 1].duration += fragment[idx].duration;
             fragment.erase(fragment.begin() + static_cast<ptrdiff_t>(idx));
@@ -505,34 +497,27 @@ std::vector<NoteEvent> generateFortspinnung(const MotifPool& pool,
         // If the interval from note[i-2]→note[i-1] was dissonant and
         // note[i-1]→note[i] resolves by step, protect the resolution note.
         if (fi >= 2 && diminish_prob > 0.0f) {
-          int prev_prev_mel =
-              std::abs(static_cast<int>(fragment[fi - 1].pitch) -
-                       static_cast<int>(fragment[fi - 2].pitch)) % 12;
-          int curr_mel =
-              std::abs(static_cast<int>(frag_note.pitch) -
-                       static_cast<int>(fragment[fi - 1].pitch)) % 12;
-          bool prev_dissonant = (prev_prev_mel == 1 || prev_prev_mel == 2 ||
-                                 prev_prev_mel == 6 || prev_prev_mel == 10 ||
-                                 prev_prev_mel == 11);
+          int prev_prev_mel = std::abs(static_cast<int>(fragment[fi - 1].pitch) -
+                                       static_cast<int>(fragment[fi - 2].pitch)) %
+                              12;
+          int curr_mel = std::abs(static_cast<int>(frag_note.pitch) -
+                                  static_cast<int>(fragment[fi - 1].pitch)) %
+                         12;
+          bool prev_dissonant = (prev_prev_mel == 1 || prev_prev_mel == 2 || prev_prev_mel == 6 ||
+                                 prev_prev_mel == 10 || prev_prev_mel == 11);
           bool resolves_by_step = (curr_mel == 1 || curr_mel == 2);
           if (prev_dissonant && resolves_by_step) {
             continue;  // Skip diminution for resolution notes.
           }
         }
 
-        if (frag_note.duration > kMinDiminishDur &&
-            rng::rollProbability(rng, diminish_prob)) {
-          frag_note.duration =
-              std::max(frag_note.duration / 2, kMinDiminishDur);
+        if (frag_note.duration > kMinDiminishDur && rng::rollProbability(rng, diminish_prob)) {
+          frag_note.duration = std::max(frag_note.duration / 2, kMinDiminishDur);
           // Second halving: Dissolution at half prob, Sequence at lower prob
           // to create running 16th-note motion from 8th-note material.
-          float second_prob = (phase == FortPhase::Dissolution)
-                                  ? diminish_prob * 0.5f
-                                  : 0.25f;
-          if (frag_note.duration > kMinDiminishDur &&
-              rng::rollProbability(rng, second_prob)) {
-            frag_note.duration =
-                std::max(frag_note.duration / 2, kMinDiminishDur);
+          float second_prob = (phase == FortPhase::Dissolution) ? diminish_prob * 0.5f : 0.25f;
+          if (frag_note.duration > kMinDiminishDur && rng::rollProbability(rng, second_prob)) {
+            frag_note.duration = std::max(frag_note.duration / 2, kMinDiminishDur);
           }
         }
       }
@@ -540,19 +525,22 @@ std::vector<NoteEvent> generateFortspinnung(const MotifPool& pool,
 
     // Check if fragment fits within remaining duration.
     Tick frag_dur = quantizeToGrid(motifDuration(fragment));
-    if (frag_dur == 0) frag_dur = kTicksPerBeat;
+    if (frag_dur == 0)
+      frag_dur = kTicksPerBeat;
 
     if (current_tick + frag_dur > duration_ticks) {
       // Truncate: only place notes that fit.
       for (const auto& note : fragment) {
-        if (note.start_tick + current_tick >= duration_ticks) break;
+        if (note.start_tick + current_tick >= duration_ticks)
+          break;
         NoteEvent evt = note;
         evt.start_tick = note.start_tick + start_tick + current_tick;
         evt.voice = 0;
         evt.source = BachNoteSource::EpisodeMaterial;
         // Clamp duration to not exceed episode boundary.
         Tick remaining = duration_ticks - (current_tick + note.start_tick);
-        if (evt.duration > remaining) evt.duration = remaining;
+        if (evt.duration > remaining)
+          evt.duration = remaining;
         result.push_back(evt);
       }
       break;
@@ -588,17 +576,19 @@ std::vector<NoteEvent> generateFortspinnung(const MotifPool& pool,
       Tick first_frag_dur = kTicksPerBeat;
       if (pool.best() != nullptr && !pool.best()->notes.empty()) {
         first_frag_dur = motifDuration(pool.best()->notes);
-        if (first_frag_dur == 0) first_frag_dur = kTicksPerBeat;
+        if (first_frag_dur == 0)
+          first_frag_dur = kTicksPerBeat;
       }
-      Tick imitation_offset = quantizeToGrid(
-          std::max(first_frag_dur / 2, static_cast<Tick>(kTicksPerBeat)));
+      Tick imitation_offset =
+          quantizeToGrid(std::max(first_frag_dur / 2, static_cast<Tick>(kTicksPerBeat)));
 
       // Dissolution convergence: progressively move voice 1 toward voice 0
       // pitch in the dissolution phase, ending on a consonant interval (3rd/6th).
       Tick dissolution_start = start_tick + sequence_end;
       uint8_t last_v0_pitch = 0;
       for (const auto& note : result) {
-        if (note.voice == 0) last_v0_pitch = note.pitch;
+        if (note.voice == 0)
+          last_v0_pitch = note.pitch;
       }
 
       for (auto& note : inverted) {
@@ -612,9 +602,9 @@ std::vector<NoteEvent> generateFortspinnung(const MotifPool& pool,
           }
           // In dissolution phase, shift pitch toward consonance with voice 0.
           if (note.start_tick >= dissolution_start && last_v0_pitch > 0) {
-            float progress = static_cast<float>(note.start_tick - dissolution_start) /
-                             static_cast<float>(std::max(
-                                 duration_ticks - sequence_end, static_cast<Tick>(1)));
+            float progress =
+                static_cast<float>(note.start_tick - dissolution_start) /
+                static_cast<float>(std::max(duration_ticks - sequence_end, static_cast<Tick>(1)));
             progress = std::min(progress, 1.0f);
             // Target: 3rd (3 or 4 semitones) below voice 0 last pitch.
             int target = static_cast<int>(last_v0_pitch) - 4;
@@ -664,7 +654,8 @@ std::vector<NoteEvent> generateFortspinnung(const MotifPool& pool,
 
       Tick bass_tick = start_tick;
       Tick frag_dur = motifDuration(bass_fragment);
-      if (frag_dur == 0) frag_dur = kTicksPerBeat * 2;
+      if (frag_dur == 0)
+        frag_dur = kTicksPerBeat * 2;
 
       // Alternate between bass fragment and anchor notes across the episode.
       bool use_fragment = true;
@@ -683,9 +674,11 @@ std::vector<NoteEvent> generateFortspinnung(const MotifPool& pool,
             evt.start_tick = frag_note.start_tick + bass_tick;
             evt.voice = 2;
             evt.source = BachNoteSource::EpisodeMaterial;
-            if (evt.start_tick >= start_tick + duration_ticks) break;
+            if (evt.start_tick >= start_tick + duration_ticks)
+              break;
             Tick remaining = start_tick + duration_ticks - evt.start_tick;
-            if (evt.duration > remaining) evt.duration = remaining;
+            if (evt.duration > remaining)
+              evt.duration = remaining;
             result.push_back(evt);
           }
           bass_tick += frag_dur;
@@ -702,12 +695,10 @@ std::vector<NoteEvent> generateFortspinnung(const MotifPool& pool,
           constexpr int kNumCircleSteps = 7;
           constexpr int kMaxSteps = 5;  // Stop at step 4 (vi).
 
-          int raw_step = static_cast<int>(
-              (bass_tick - start_tick) / (kTicksPerBar * 2));
+          int raw_step = static_cast<int>((bass_tick - start_tick) / (kTicksPerBar * 2));
           int step_idx = std::min(raw_step % kNumCircleSteps, kMaxSteps - 1);
 
-          bool is_strong_beat =
-              (bass_tick % kTicksPerBar) < static_cast<Tick>(kTicksPerBeat);
+          bool is_strong_beat = (bass_tick % kTicksPerBar) < static_cast<Tick>(kTicksPerBeat);
           int root_offset = kCircleOfFifths[step_idx];
           int base_pitch = 48 + static_cast<int>(key) + root_offset;
 
@@ -720,20 +711,17 @@ std::vector<NoteEvent> generateFortspinnung(const MotifPool& pool,
             int next_offset = kCircleOfFifths[next_idx];
             int next_pitch = 48 + static_cast<int>(key) + next_offset;
 
-            int curr_deg = scale_util::pitchToAbsoluteDegree(
-                clampPitch(base_pitch, 0, 127), key, ScaleType::Major);
-            int next_deg = scale_util::pitchToAbsoluteDegree(
-                clampPitch(next_pitch, 0, 127), key, ScaleType::Major);
+            int curr_deg = scale_util::pitchToAbsoluteDegree(clampPitch(base_pitch, 0, 127), key,
+                                                             ScaleType::Major);
+            int next_deg = scale_util::pitchToAbsoluteDegree(clampPitch(next_pitch, 0, 127), key,
+                                                             ScaleType::Major);
 
             Tick unit_offset = (bass_tick - start_tick) % (kTicksPerBar * 2);
-            float frac = static_cast<float>(unit_offset) /
-                         static_cast<float>(kTicksPerBar * 2);
+            float frac = static_cast<float>(unit_offset) / static_cast<float>(kTicksPerBar * 2);
 
-            int passing_deg = curr_deg +
-                static_cast<int>((next_deg - curr_deg) * frac);
+            int passing_deg = curr_deg + static_cast<int>((next_deg - curr_deg) * frac);
             bass_anchor = static_cast<int>(
-                scale_util::absoluteDegreeToPitch(passing_deg, key,
-                                                  ScaleType::Major));
+                scale_util::absoluteDegreeToPitch(passing_deg, key, ScaleType::Major));
             bass_anchor = mapToRegister(bass_anchor, v2_lo, v2_hi);
           }
 
@@ -742,34 +730,40 @@ std::vector<NoteEvent> generateFortspinnung(const MotifPool& pool,
           // Kernel/Dissolution: longer for harmonic stability.
           Tick base_dur;
           float bass_progress = static_cast<float>(bass_tick - start_tick) /
-                                 static_cast<float>(std::max(duration_ticks,
-                                                             static_cast<Tick>(1)));
-          bool is_seq_phase =
-              bass_progress >= grammar.kernel_ratio &&
-              bass_progress < grammar.kernel_ratio + grammar.sequence_ratio;
+                                static_cast<float>(std::max(duration_ticks, static_cast<Tick>(1)));
+          bool is_seq_phase = bass_progress >= grammar.kernel_ratio &&
+                              bass_progress < grammar.kernel_ratio + grammar.sequence_ratio;
           float dur_roll = rng::rollFloat(bass_rng, 0.0f, 1.0f);
           if (is_seq_phase) {
             // Sequence: 8th(30%), quarter(40%), half(25%), bar(5%).
             // Bass retains structural coverage even in active texture.
-            if (dur_roll < 0.30f) base_dur = kTicksPerBeat / 2;
-            else if (dur_roll < 0.70f) base_dur = kTicksPerBeat;
-            else if (dur_roll < 0.95f) base_dur = kTicksPerBeat * 2;
-            else base_dur = kTicksPerBar;
+            if (dur_roll < 0.30f)
+              base_dur = kTicksPerBeat / 2;
+            else if (dur_roll < 0.70f)
+              base_dur = kTicksPerBeat;
+            else if (dur_roll < 0.95f)
+              base_dur = kTicksPerBeat * 2;
+            else
+              base_dur = kTicksPerBar;
           } else {
             // Kernel/Dissolution: 8th(30%), quarter(40%), half(20%), bar(10%).
-            if (dur_roll < 0.30f) base_dur = kTicksPerBeat / 2;
-            else if (dur_roll < 0.70f) base_dur = kTicksPerBeat;
-            else if (dur_roll < 0.90f) base_dur = kTicksPerBeat * 2;
-            else base_dur = kTicksPerBar;
+            if (dur_roll < 0.30f)
+              base_dur = kTicksPerBeat / 2;
+            else if (dur_roll < 0.70f)
+              base_dur = kTicksPerBeat;
+            else if (dur_roll < 0.90f)
+              base_dur = kTicksPerBeat * 2;
+            else
+              base_dur = kTicksPerBar;
           }
           // Bass floor: sustain when upper voices have sustained figuration (>=2 beats).
           {
             int short_note_count = 0;
             for (const auto& note : result) {
-              if (note.voice >= 2) continue;
+              if (note.voice >= 2)
+                continue;
               if (note.start_tick + note.duration > bass_tick - kTicksPerBeat * 2 &&
-                  note.start_tick <= bass_tick &&
-                  note.duration <= duration::kEighthNote) {
+                  note.start_tick <= bass_tick && note.duration <= duration::kEighthNote) {
                 ++short_note_count;
               }
             }
@@ -778,8 +772,7 @@ std::vector<NoteEvent> generateFortspinnung(const MotifPool& pool,
             }
           }
 
-          Tick anchor_dur = std::min(base_dur,
-                                     start_tick + duration_ticks - bass_tick);
+          Tick anchor_dur = std::min(base_dur, start_tick + duration_ticks - bass_tick);
           if (anchor_dur >= duration::kSixteenthNote) {
             NoteEvent anchor;
             anchor.start_tick = bass_tick;
@@ -803,7 +796,8 @@ std::vector<NoteEvent> generateFortspinnung(const MotifPool& pool,
   if (num_voices >= 4 && !result.empty()) {
     std::vector<NoteEvent> voice0_notes;
     for (const auto& note : result) {
-      if (note.voice == 0) voice0_notes.push_back(note);
+      if (note.voice == 0)
+        voice0_notes.push_back(note);
     }
     if (!voice0_notes.empty()) {
       std::mt19937 pedal_rng(seed ^ 0xBA550003u);
@@ -811,27 +805,29 @@ std::vector<NoteEvent> generateFortspinnung(const MotifPool& pool,
       float emit_prob = rng::rollFloat(pedal_rng, 0.65f, 0.80f);
 
       // Pedal anchor pitches from key (tonicBassPitch pattern).
-      constexpr int kPedalLo = 24;          // C1
-      constexpr int kPedalHiNormal = 45;    // A2 (normal upper limit)
-      constexpr int kPedalHiAnchor = 50;    // D3 (anchor exception)
+      constexpr int kPedalLo = 24;                  // C1
+      constexpr int kPedalHiNormal = 45;            // A2 (normal upper limit)
+      constexpr int kPedalHiAnchor = 50;            // D3 (anchor exception)
       int tonic_bass = 36 + static_cast<int>(key);  // C2 octave
       tonic_bass = clampPitch(tonic_bass, static_cast<uint8_t>(kPedalLo),
                               static_cast<uint8_t>(kPedalHiAnchor));
-      int dominant_bass = tonic_bass + 7;   // Perfect 5th
-      if (dominant_bass > kPedalHiAnchor) dominant_bass -= 12;
+      int dominant_bass = tonic_bass + 7;  // Perfect 5th
+      if (dominant_bass > kPedalHiAnchor)
+        dominant_bass -= 12;
       dominant_bass = clampPitch(dominant_bass, static_cast<uint8_t>(kPedalLo),
                                  static_cast<uint8_t>(kPedalHiAnchor));
 
       // Augmented tail fragment from voice 0.
       auto tail = extractTailMotif(voice0_notes, 3);
-      if (tail.size() > 3) tail.resize(3);
+      if (tail.size() > 3)
+        tail.resize(3);
       auto pedal_fragment = tail;  // Preserve original rhythm (no augment).
       for (auto& note : pedal_fragment) {
-        note.pitch = mapToRegister(static_cast<int>(note.pitch) - 24,
-                                   kPedalLo, kPedalHiNormal);
+        note.pitch = mapToRegister(static_cast<int>(note.pitch) - 24, kPedalLo, kPedalHiNormal);
       }
       Tick frag_dur = motifDuration(pedal_fragment);
-      if (frag_dur == 0) frag_dur = kTicksPerBeat * 2;
+      if (frag_dur == 0)
+        frag_dur = kTicksPerBeat * 2;
 
       // Generate with max-silence hard constraint.
       constexpr int kMaxSilentBars = 4;
@@ -846,8 +842,8 @@ std::vector<NoteEvent> generateFortspinnung(const MotifPool& pool,
 
         if (!emit) {
           // Ceiling division: a segment of 1.5 bars counts as 2 bars of silence.
-          int bars_skipped = std::max(
-              1, static_cast<int>((segment_dur + kTicksPerBar - 1) / kTicksPerBar));
+          int bars_skipped =
+              std::max(1, static_cast<int>((segment_dur + kTicksPerBar - 1) / kTicksPerBar));
           consecutive_silent_bars += bars_skipped;
           pedal_tick += segment_dur;
           use_fragment = !use_fragment;
@@ -863,9 +859,11 @@ std::vector<NoteEvent> generateFortspinnung(const MotifPool& pool,
             evt.start_tick = frag_note.start_tick + pedal_tick;
             evt.voice = 3;
             evt.source = BachNoteSource::EpisodeMaterial;
-            if (evt.start_tick >= start_tick + duration_ticks) break;
+            if (evt.start_tick >= start_tick + duration_ticks)
+              break;
             Tick remaining = start_tick + duration_ticks - evt.start_tick;
-            if (evt.duration > remaining) evt.duration = remaining;
+            if (evt.duration > remaining)
+              evt.duration = remaining;
             result.push_back(evt);
           }
           pedal_tick += frag_dur;
@@ -879,7 +877,8 @@ std::vector<NoteEvent> generateFortspinnung(const MotifPool& pool,
             anchor_pitch = dominant_bass;
           } else {
             int subdominant_bass = tonic_bass + 5;
-            if (subdominant_bass > kPedalHiAnchor) subdominant_bass -= 12;
+            if (subdominant_bass > kPedalHiAnchor)
+              subdominant_bass -= 12;
             anchor_pitch = clampPitch(subdominant_bass, static_cast<uint8_t>(kPedalLo),
                                       static_cast<uint8_t>(kPedalHiAnchor));
           }
@@ -907,12 +906,13 @@ std::vector<NoteEvent> generateFortspinnung(const MotifPool& pool,
   {
     std::vector<NoteEvent*> v0_ptrs;
     for (auto& note : result) {
-      if (note.voice == 0) v0_ptrs.push_back(&note);
+      if (note.voice == 0)
+        v0_ptrs.push_back(&note);
     }
     size_t lengthen_count = std::min(static_cast<size_t>(2), v0_ptrs.size());
     for (size_t i = v0_ptrs.size() - lengthen_count; i < v0_ptrs.size(); ++i) {
-      v0_ptrs[i]->duration = static_cast<Tick>(
-          v0_ptrs[i]->duration * grammar.cadential_lengthening);
+      v0_ptrs[i]->duration =
+          static_cast<Tick>(v0_ptrs[i]->duration * grammar.cadential_lengthening);
     }
   }
 
@@ -923,20 +923,20 @@ std::vector<NoteEvent> generateFortspinnung(const MotifPool& pool,
 // planFortspinnung -- constraint-driven episode arc planning (Phase 3)
 // ---------------------------------------------------------------------------
 
-std::vector<FortspinnungStep> planFortspinnung(
-    const MotifPool& pool, const FortspinnungGrammar& grammar,
-    Tick start_tick, Tick duration, uint8_t num_voices,
-    SubjectCharacter character, uint32_t seed) {
+std::vector<FortspinnungStep> planFortspinnung(const MotifPool& pool,
+                                               const FortspinnungGrammar& grammar, Tick start_tick,
+                                               Tick duration, uint8_t num_voices,
+                                               SubjectCharacter character, uint32_t seed) {
   std::vector<FortspinnungStep> steps;
-  if (pool.empty() || duration == 0) return steps;
+  if (pool.empty() || duration == 0)
+    return steps;
 
   std::mt19937 rng(seed ^ 0xF0A7u);  // Different mix from note generation.
   FragmentSelectionWeights weights = weightsForCharacter(character, rng);
   CharacterEpisodeParams params = getCharacterParams(character);
 
   Tick kernel_end = static_cast<Tick>(duration * grammar.kernel_ratio);
-  Tick sequence_end = static_cast<Tick>(
-      duration * (grammar.kernel_ratio + grammar.sequence_ratio));
+  Tick sequence_end = static_cast<Tick>(duration * (grammar.kernel_ratio + grammar.sequence_ratio));
 
   // Kernel-phase weights: strongly prefer rank 0 (subject_head).
   FragmentSelectionWeights kernel_weights;
@@ -958,8 +958,7 @@ std::vector<FortspinnungStep> planFortspinnung(
     }
 
     // Select motif rank using phase-appropriate weights.
-    const auto& active_weights =
-        (phase == FortPhase::Kernel) ? kernel_weights : weights;
+    const auto& active_weights = (phase == FortPhase::Kernel) ? kernel_weights : weights;
     size_t rank = selectFragmentRank(rng, active_weights, pool.size());
 
     // A2: Fixed motif op — same base transformation across all phases
@@ -970,11 +969,15 @@ std::vector<FortspinnungStep> planFortspinnung(
     // Estimate step duration from pool motif.
     const PooledMotif* motif = pool.getByRank(rank);
     Tick step_dur = motif ? motifDuration(motif->notes) : kTicksPerBeat;
-    if (step_dur == 0) step_dur = kTicksPerBeat;
+    if (step_dur == 0)
+      step_dur = kTicksPerBeat;
     step_dur = quantizeToGrid(step_dur);
 
-    // Dissolution: cap fragment duration for gradual fragmentation.
-    if (phase == FortPhase::Dissolution) {
+    // Sequence/Dissolution: cap fragment duration so Fortspinnung spins forward
+    // in shorter units instead of leaving long, sparse motif blocks.
+    if (phase == FortPhase::Sequence) {
+      step_dur = std::min(step_dur, static_cast<Tick>(kTicksPerBeat * 3));
+    } else if (phase == FortPhase::Dissolution) {
       step_dur = std::min(step_dur, static_cast<Tick>(kTicksPerBeat * 2));
     }
 
@@ -984,29 +987,50 @@ std::vector<FortspinnungStep> planFortspinnung(
 
   // Voice 1 steps (imitation with delay).
   if (num_voices >= 2) {
-    float delay_beats = params.imitation_beats_lo +
-        rng::rollFloat(rng, 0.0f,
-                       params.imitation_beats_hi - params.imitation_beats_lo);
+    float delay_beats =
+        params.imitation_beats_lo +
+        rng::rollFloat(rng, 0.0f, params.imitation_beats_hi - params.imitation_beats_lo);
     Tick delay = quantizeToGrid(static_cast<Tick>(delay_beats * kTicksPerBeat));
 
     // Collect voice 0 step count before appending voice 1 steps.
     size_t v0_count = steps.size();
     for (size_t idx = 0; idx < v0_count; ++idx) {
-      if (steps[idx].voice != 0) continue;
+      if (steps[idx].voice != 0)
+        continue;
       Tick v1_tick = steps[idx].tick + delay;
-      if (v1_tick >= start_tick + duration) break;
+      if (v1_tick >= start_tick + duration)
+        break;
 
       MotifOp v1_op = params.voice1_initial;
-      steps.push_back({v1_tick, 1, v1_op, steps[idx].pool_rank,
-                        steps[idx].phase, steps[idx].suggested_duration});
+      steps.push_back({v1_tick, 1, v1_op, steps[idx].pool_rank, steps[idx].phase,
+                       steps[idx].suggested_duration});
+    }
+  }
+
+  // Voice 2 steps: in four-voice fugues, BWV578-like episodes need the lower
+  // inner voice to carry running material, not only occasional anchors.  Add a
+  // sparse sequence/dissolution imitation layer and let the constraint engine
+  // reject unsafe placements.
+  if (num_voices == 4) {
+    size_t planned_count = steps.size();
+    for (size_t idx = 0; idx < planned_count; ++idx) {
+      if (steps[idx].voice != 0)
+        continue;
+      if (steps[idx].phase == FortPhase::Kernel)
+        continue;
+
+      Tick v2_tick = steps[idx].tick + kTicksPerBeat / 2;
+      if (v2_tick >= start_tick + duration)
+        break;
+      steps.push_back({v2_tick, 2, MotifOp::Diminish, steps[idx].pool_rank, steps[idx].phase,
+                       steps[idx].suggested_duration});
     }
   }
 
   // Sort steps by tick for sequential consumption.
-  std::sort(steps.begin(), steps.end(),
-            [](const FortspinnungStep& lhs, const FortspinnungStep& rhs) {
-              return lhs.tick < rhs.tick;
-            });
+  std::sort(
+      steps.begin(), steps.end(),
+      [](const FortspinnungStep& lhs, const FortspinnungStep& rhs) { return lhs.tick < rhs.tick; });
 
   return steps;
 }

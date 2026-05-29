@@ -14,8 +14,7 @@ namespace bach {
 namespace {
 
 /// @brief Create subject with known Kopfmotiv pitches.
-Subject makeSubjectWithKopf(const std::vector<uint8_t>& kopf_pitches,
-                            Key key, bool is_minor) {
+Subject makeSubjectWithKopf(const std::vector<uint8_t>& kopf_pitches, Key key, bool is_minor) {
   Subject sub;
   sub.key = key;
   sub.is_minor = is_minor;
@@ -100,17 +99,15 @@ TEST(ArchetypeScorerVocabularyTest, ShortSubjectHandledGracefully) {
 TEST(ArchetypeScorerVocabularyTest, VocabularyMatchDetectable) {
   // Verify figure_match can detect kDescRun4 in Kopfmotiv pitches.
   uint8_t pitches[] = {72, 71, 69, 67};
-  int idx = figure_match::findBestFigure(
-      pitches, 4, kCommonFigures, kCommonFigureCount,
-      Key::C, ScaleType::Major, 0.6f);
+  int idx = figure_match::findBestFigure(pitches, 4, kCommonFigures, kCommonFigureCount, Key::C,
+                                         ScaleType::Major, 0.6f);
   EXPECT_GE(idx, 0);  // Should find a match.
 }
 
 TEST(ArchetypeScorerVocabularyTest, NoMatchForRandomPitches) {
   uint8_t pitches[] = {60, 90, 30, 100};
-  int idx = figure_match::findBestFigure(
-      pitches, 4, kCommonFigures, kCommonFigureCount,
-      Key::C, ScaleType::Major, 0.6f);
+  int idx = figure_match::findBestFigure(pitches, 4, kCommonFigures, kCommonFigureCount, Key::C,
+                                         ScaleType::Major, 0.6f);
   EXPECT_EQ(idx, -1);  // No match for random jumps.
 }
 

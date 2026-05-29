@@ -21,11 +21,8 @@ TEST(ExpositionHarmonicTest, FugueGenerationSucceeds) {
 }
 
 TEST(ExpositionHarmonicTest, MultipleSeedsAndCharacters) {
-  SubjectCharacter characters[] = {
-      SubjectCharacter::Severe,
-      SubjectCharacter::Playful,
-      SubjectCharacter::Noble,
-      SubjectCharacter::Restless};
+  SubjectCharacter characters[] = {SubjectCharacter::Severe, SubjectCharacter::Playful,
+                                   SubjectCharacter::Noble, SubjectCharacter::Restless};
 
   for (auto character : characters) {
     for (uint32_t seed = 200; seed < 205; ++seed) {
@@ -36,9 +33,8 @@ TEST(ExpositionHarmonicTest, MultipleSeedsAndCharacters) {
       config.seed = seed;
 
       FugueResult result = generateFugue(config);
-      EXPECT_TRUE(result.success)
-          << "Failed for character=" << static_cast<int>(character)
-          << " seed=" << seed;
+      EXPECT_TRUE(result.success) << "Failed for character=" << static_cast<int>(character)
+                                  << " seed=" << seed;
     }
   }
 }

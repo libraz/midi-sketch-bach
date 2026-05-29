@@ -13,8 +13,7 @@ const std::vector<NoteEvent> CounterpointState::kEmptyNotes;
 // Voice registration
 // ---------------------------------------------------------------------------
 
-void CounterpointState::registerVoice(VoiceId voice_id, uint8_t low_pitch,
-                                      uint8_t high_pitch) {
+void CounterpointState::registerVoice(VoiceId voice_id, uint8_t low_pitch, uint8_t high_pitch) {
   // Avoid duplicate registration in the ordered list.
   if (voices_.find(voice_id) == voices_.end()) {
     active_voices_.push_back(voice_id);
@@ -43,9 +42,7 @@ void CounterpointState::addNote(VoiceId voice_id, const NoteEvent& note) {
   } else {
     auto pos = std::lower_bound(
         notes.begin(), notes.end(), note,
-        [](const NoteEvent& lhs, const NoteEvent& rhs) {
-          return lhs.start_tick < rhs.start_tick;
-        });
+        [](const NoteEvent& lhs, const NoteEvent& rhs) { return lhs.start_tick < rhs.start_tick; });
     notes.insert(pos, note);
   }
 }
@@ -54,16 +51,19 @@ void CounterpointState::addNote(VoiceId voice_id, const NoteEvent& note) {
 // Tick management
 // ---------------------------------------------------------------------------
 
-void CounterpointState::setCurrentTick(Tick tick) { current_tick_ = tick; }
+void CounterpointState::setCurrentTick(Tick tick) {
+  current_tick_ = tick;
+}
 
-Tick CounterpointState::getCurrentTick() const { return current_tick_; }
+Tick CounterpointState::getCurrentTick() const {
+  return current_tick_;
+}
 
 // ---------------------------------------------------------------------------
 // Query
 // ---------------------------------------------------------------------------
 
-const std::vector<NoteEvent>& CounterpointState::getVoiceNotes(
-    VoiceId voice_id) const {
+const std::vector<NoteEvent>& CounterpointState::getVoiceNotes(VoiceId voice_id) const {
   auto iter = voices_.find(voice_id);
   if (iter == voices_.end()) {
     return kEmptyNotes;
@@ -79,8 +79,7 @@ const NoteEvent* CounterpointState::getLastNote(VoiceId voice_id) const {
   return &iter->second.notes.back();
 }
 
-const NoteEvent* CounterpointState::getNoteAt(VoiceId voice_id,
-                                              Tick tick) const {
+const NoteEvent* CounterpointState::getNoteAt(VoiceId voice_id, Tick tick) const {
   auto iter = voices_.find(voice_id);
   if (iter == voices_.end()) {
     return nullptr;
@@ -89,17 +88,14 @@ const NoteEvent* CounterpointState::getNoteAt(VoiceId voice_id,
   const auto& notes = iter->second.notes;
 
   // Binary search: find the last note whose start_tick <= tick.
-  auto pos = std::upper_bound(
-      notes.begin(), notes.end(), tick,
-      [](Tick target, const NoteEvent& note) {
-        return target < note.start_tick;
-      });
+  auto pos =
+      std::upper_bound(notes.begin(), notes.end(), tick,
+                       [](Tick target, const NoteEvent& note) { return target < note.start_tick; });
 
   // Walk backwards to find a note that is still sounding at `tick`.
   while (pos != notes.begin()) {
     --pos;
-    if (pos->start_tick <= tick &&
-        tick < pos->start_tick + pos->duration) {
+    if (pos->start_tick <= tick && tick < pos->start_tick + pos->duration) {
       return &(*pos);
     }
     // If the note starts before the tick but has already ended, earlier
@@ -112,8 +108,7 @@ const NoteEvent* CounterpointState::getNoteAt(VoiceId voice_id,
   return nullptr;
 }
 
-bool CounterpointState::updateNotePitchAt(VoiceId voice_id, Tick tick,
-                                          uint8_t new_pitch) {
+bool CounterpointState::updateNotePitchAt(VoiceId voice_id, Tick tick, uint8_t new_pitch) {
   auto iter = voices_.find(voice_id);
   if (iter == voices_.end()) {
     return false;
@@ -121,16 +116,13 @@ bool CounterpointState::updateNotePitchAt(VoiceId voice_id, Tick tick,
 
   auto& notes = iter->second.notes;
 
-  auto pos = std::upper_bound(
-      notes.begin(), notes.end(), tick,
-      [](Tick target, const NoteEvent& note) {
-        return target < note.start_tick;
-      });
+  auto pos =
+      std::upper_bound(notes.begin(), notes.end(), tick,
+                       [](Tick target, const NoteEvent& note) { return target < note.start_tick; });
 
   while (pos != notes.begin()) {
     --pos;
-    if (pos->start_tick <= tick &&
-        tick < pos->start_tick + pos->duration) {
+    if (pos->start_tick <= tick && tick < pos->start_tick + pos->duration) {
       pos->pitch = new_pitch;
       return true;
     }
@@ -141,8 +133,7 @@ bool CounterpointState::updateNotePitchAt(VoiceId voice_id, Tick tick,
   return false;
 }
 
-const CounterpointState::VoiceRange* CounterpointState::getVoiceRange(
-    VoiceId voice_id) const {
+const CounterpointState::VoiceRange* CounterpointState::getVoiceRange(VoiceId voice_id) const {
   auto iter = voices_.find(voice_id);
   if (iter == voices_.end()) {
     return nullptr;
@@ -154,15 +145,21 @@ const std::vector<VoiceId>& CounterpointState::getActiveVoices() const {
   return active_voices_;
 }
 
-size_t CounterpointState::voiceCount() const { return voices_.size(); }
+size_t CounterpointState::voiceCount() const {
+  return voices_.size();
+}
 
 // ---------------------------------------------------------------------------
 // Key
 // ---------------------------------------------------------------------------
 
-Key CounterpointState::getKey() const { return key_; }
+Key CounterpointState::getKey() const {
+  return key_;
+}
 
-void CounterpointState::setKey(Key key) { key_ = key; }
+void CounterpointState::setKey(Key key) {
+  key_ = key;
+}
 
 // ---------------------------------------------------------------------------
 // Reset

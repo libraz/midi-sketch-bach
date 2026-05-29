@@ -53,7 +53,7 @@ Subject makeVariedRhythmSubject() {
   // Mix of half notes and eighth notes.
   // Bar 1: half note C4, then four eighth notes D4 E4 F4 E4.
   // Bar 2: whole note C4.
-  sub.notes.push_back({0, kTicksPerBeat * 2, 60, 80, 0});                // Half note
+  sub.notes.push_back({0, kTicksPerBeat * 2, 60, 80, 0});                  // Half note
   sub.notes.push_back({kTicksPerBeat * 2, kTicksPerBeat / 2, 62, 80, 0});  // Eighth
   sub.notes.push_back({kTicksPerBeat * 2 + 240, kTicksPerBeat / 2, 64, 80, 0});
   sub.notes.push_back({kTicksPerBeat * 3, kTicksPerBeat / 2, 65, 80, 0});
@@ -119,8 +119,7 @@ TEST(CountersubjectTest, DeterministicWithSeed) {
 
   ASSERT_EQ(cs1.noteCount(), cs2.noteCount());
   for (size_t idx = 0; idx < cs1.noteCount(); ++idx) {
-    EXPECT_EQ(cs1.notes[idx].pitch, cs2.notes[idx].pitch)
-        << "Mismatch at note " << idx;
+    EXPECT_EQ(cs1.notes[idx].pitch, cs2.notes[idx].pitch) << "Mismatch at note " << idx;
     EXPECT_EQ(cs1.notes[idx].duration, cs2.notes[idx].duration)
         << "Duration mismatch at note " << idx;
     EXPECT_EQ(cs1.notes[idx].start_tick, cs2.notes[idx].start_tick)
@@ -165,8 +164,7 @@ TEST(CountersubjectTest, ConsonantIntervals) {
       // Find subject note sounding at this tick.
       for (const auto& subj_note : subject.notes) {
         Tick subj_end = subj_note.start_tick + subj_note.duration;
-        if (subj_note.start_tick <= cs_note.start_tick &&
-            subj_end > cs_note.start_tick) {
+        if (subj_note.start_tick <= cs_note.start_tick && subj_end > cs_note.start_tick) {
           total_checks++;
           int abs_int = absoluteInterval(cs_note.pitch, subj_note.pitch);
           IntervalQuality quality = classifyInterval(abs_int);
@@ -180,10 +178,8 @@ TEST(CountersubjectTest, ConsonantIntervals) {
     }
 
     if (total_checks > 0) {
-      float rate = static_cast<float>(consonant_count) /
-                   static_cast<float>(total_checks);
-      EXPECT_GE(rate, 0.50f)
-          << "Consonance rate too low (seed " << seed << "): " << rate;
+      float rate = static_cast<float>(consonant_count) / static_cast<float>(total_checks);
+      EXPECT_GE(rate, 0.50f) << "Consonance rate too low (seed " << seed << "): " << rate;
     }
   }
 }
@@ -205,9 +201,10 @@ TEST(CountersubjectTest, ContainsContraryMotion) {
 
     for (size_t idx = 0; idx + 1 < cs.noteCount(); ++idx) {
       // Find subject notes at the same times.
-      int cs_motion = static_cast<int>(cs.notes[idx + 1].pitch) -
-                      static_cast<int>(cs.notes[idx].pitch);
-      if (cs_motion == 0) continue;
+      int cs_motion =
+          static_cast<int>(cs.notes[idx + 1].pitch) - static_cast<int>(cs.notes[idx].pitch);
+      if (cs_motion == 0)
+        continue;
 
       // Find subject motion at similar tick.
       Tick cs_tick = cs.notes[idx].start_tick;
@@ -221,21 +218,19 @@ TEST(CountersubjectTest, ContainsContraryMotion) {
         }
       }
 
-      if (subj_motion == 0) continue;
+      if (subj_motion == 0)
+        continue;
 
       motion_checks++;
       // Contrary = opposite signs.
-      if ((cs_motion > 0 && subj_motion < 0) ||
-          (cs_motion < 0 && subj_motion > 0)) {
+      if ((cs_motion > 0 && subj_motion < 0) || (cs_motion < 0 && subj_motion > 0)) {
         contrary_count++;
       }
     }
 
     if (motion_checks > 0) {
-      float contrary_rate = static_cast<float>(contrary_count) /
-                            static_cast<float>(motion_checks);
-      EXPECT_GT(contrary_rate, 0.0f)
-          << "No contrary motion detected (seed " << seed << ")";
+      float contrary_rate = static_cast<float>(contrary_count) / static_cast<float>(motion_checks);
+      EXPECT_GT(contrary_rate, 0.0f) << "No contrary motion detected (seed " << seed << ")";
     }
   }
 }
@@ -257,8 +252,7 @@ TEST(CountersubjectTest, ComplementaryRhythm) {
       unique_durations.insert(note.duration);
     }
 
-    EXPECT_GT(unique_durations.size(), 1u)
-        << "CS should have varied rhythm (seed " << seed << ")";
+    EXPECT_GT(unique_durations.size(), 1u) << "CS should have varied rhythm (seed " << seed << ")";
   }
 }
 
@@ -272,11 +266,78 @@ TEST(CountersubjectTest, PitchInValidRange) {
   for (uint32_t seed = 1; seed <= 10; ++seed) {
     Countersubject cs = generateCountersubject(subject, seed);
     for (const auto& note : cs.notes) {
-      EXPECT_GE(note.pitch, 36)
-          << "Pitch below minimum (seed " << seed << ")";
-      EXPECT_LE(note.pitch, 127)
-          << "Pitch above maximum (seed " << seed << ")";
+      EXPECT_GE(note.pitch, 36) << "Pitch below minimum (seed " << seed << ")";
+      EXPECT_LE(note.pitch, 127) << "Pitch above maximum (seed " << seed << ")";
     }
+  }
+}
+
+TEST(CountersubjectTest, PrimaryCountersubjectAvoidsRemoteContourBreaks) {
+  Subject subject;
+  subject.key = Key::G;
+  subject.is_minor = true;
+  subject.character = SubjectCharacter::Restless;
+  subject.length_ticks = kTicksPerBar * 2;
+
+  const uint8_t pitches[] = {67, 70, 69, 67, 74, 72, 70, 69, 66, 67, 62};
+  const Tick starts[] = {0, 480, 720, 960, 1440, 1680, 1920, 2160, 2400, 2640, 2880};
+  const Tick durs[] = {480, 240, 240, 480, 240, 240, 240, 240, 240, 240, 720};
+  for (size_t idx = 0; idx < std::size(pitches); ++idx) {
+    NoteEvent note;
+    note.start_tick = starts[idx];
+    note.duration = durs[idx];
+    note.pitch = pitches[idx];
+    note.velocity = 80;
+    note.voice = 0;
+    note.source = BachNoteSource::FugueSubject;
+    subject.notes.push_back(note);
+  }
+
+  for (uint32_t seed = 1; seed <= 32; ++seed) {
+    Countersubject cs = generateCountersubject(subject, seed, 20);
+    ASSERT_GE(cs.noteCount(), 2u);
+    for (size_t idx = 1; idx < cs.noteCount(); ++idx) {
+      int motion = absoluteInterval(cs.notes[idx - 1].pitch, cs.notes[idx].pitch);
+      EXPECT_LE(motion, 7) << "Primary countersubject should not jump remotely after "
+                           << "consonance fitting (seed " << seed << ", idx " << idx << ")";
+    }
+  }
+}
+
+TEST(CountersubjectTest, RestlessGMinorCountersubjectAvoidsOpeningSamePitchRun) {
+  Subject subject;
+  subject.key = Key::G;
+  subject.is_minor = true;
+  subject.character = SubjectCharacter::Restless;
+  subject.length_ticks = kTicksPerBar * 2;
+
+  const uint8_t pitches[] = {67, 69, 70, 67, 74, 72, 70, 69, 66, 67, 62};
+  const Tick starts[] = {0, 480, 720, 960, 1440, 1680, 1920, 2160, 2400, 2640, 2880};
+  const Tick durs[] = {480, 240, 240, 480, 240, 240, 240, 240, 240, 240, 720};
+  for (size_t idx = 0; idx < std::size(pitches); ++idx) {
+    NoteEvent note;
+    note.start_tick = starts[idx];
+    note.duration = durs[idx];
+    note.pitch = pitches[idx];
+    note.velocity = 80;
+    note.voice = 0;
+    note.source = BachNoteSource::FugueSubject;
+    subject.notes.push_back(note);
+  }
+
+  Countersubject cs = generateCountersubject(subject, 1222, 20);
+  ASSERT_GE(cs.noteCount(), 3u);
+
+  int same_pitch_run = 1;
+  for (size_t idx = 1; idx < cs.noteCount(); ++idx) {
+    if (cs.notes[idx].pitch == cs.notes[idx - 1].pitch) {
+      ++same_pitch_run;
+    } else {
+      same_pitch_run = 1;
+    }
+    EXPECT_LE(same_pitch_run, 2)
+        << "Opening countersubject should not expose a mechanical same-pitch "
+           "run in the first answer dialogue";
   }
 }
 
@@ -295,8 +356,7 @@ TEST(CountersubjectTest, SevereCharacterMoreStepwise) {
     Countersubject cs = generateCountersubject(subject, seed);
 
     for (size_t idx = 0; idx + 1 < cs.noteCount(); ++idx) {
-      int motion = absoluteInterval(cs.notes[idx].pitch,
-                                    cs.notes[idx + 1].pitch);
+      int motion = absoluteInterval(cs.notes[idx].pitch, cs.notes[idx + 1].pitch);
       if (motion <= 2) {
         total_steps++;
       } else {
@@ -307,10 +367,9 @@ TEST(CountersubjectTest, SevereCharacterMoreStepwise) {
 
   // Severe should have more steps than leaps.
   if (total_steps + total_leaps > 0) {
-    float step_rate = static_cast<float>(total_steps) /
-                      static_cast<float>(total_steps + total_leaps);
-    EXPECT_GE(step_rate, 0.40f)
-        << "Severe character should be predominantly stepwise";
+    float step_rate =
+        static_cast<float>(total_steps) / static_cast<float>(total_steps + total_leaps);
+    EXPECT_GE(step_rate, 0.40f) << "Severe character should be predominantly stepwise";
   }
 }
 
@@ -327,14 +386,12 @@ TEST(CountersubjectTest, PlayfulCharacterMoreVariety) {
     Countersubject cs_sev = generateCountersubject(subject_severe, seed);
 
     for (size_t idx = 0; idx + 1 < cs_play.noteCount(); ++idx) {
-      if (absoluteInterval(cs_play.notes[idx].pitch,
-                           cs_play.notes[idx + 1].pitch) > 2) {
+      if (absoluteInterval(cs_play.notes[idx].pitch, cs_play.notes[idx + 1].pitch) > 2) {
         playful_leaps++;
       }
     }
     for (size_t idx = 0; idx + 1 < cs_sev.noteCount(); ++idx) {
-      if (absoluteInterval(cs_sev.notes[idx].pitch,
-                           cs_sev.notes[idx + 1].pitch) > 2) {
+      if (absoluteInterval(cs_sev.notes[idx].pitch, cs_sev.notes[idx + 1].pitch) > 2) {
         severe_leaps++;
       }
     }
@@ -371,16 +428,14 @@ TEST(CountersubjectTest, MemberFunctions) {
 // ---------------------------------------------------------------------------
 
 TEST(CountersubjectTest, AllCharactersGenerate) {
-  const SubjectCharacter characters[] = {
-      SubjectCharacter::Severe, SubjectCharacter::Playful,
-      SubjectCharacter::Noble, SubjectCharacter::Restless};
+  const SubjectCharacter characters[] = {SubjectCharacter::Severe, SubjectCharacter::Playful,
+                                         SubjectCharacter::Noble, SubjectCharacter::Restless};
 
   for (auto character : characters) {
     Subject subject = makeTestSubject(character);
     Countersubject cs = generateCountersubject(subject, 42);
-    EXPECT_GT(cs.noteCount(), 0u)
-        << "Failed for character: "
-        << subjectCharacterToString(character);
+    EXPECT_GT(cs.noteCount(), 0u) << "Failed for character: "
+                                  << subjectCharacterToString(character);
   }
 }
 
@@ -470,8 +525,7 @@ TEST(CountersubjectTest, SecondCS_DifferentFromFirst) {
       break;
     }
   }
-  EXPECT_TRUE(any_different)
-      << "Second countersubject should differ from first";
+  EXPECT_TRUE(any_different) << "Second countersubject should differ from first";
 }
 
 TEST(CountersubjectTest, SecondCS_Deterministic) {
@@ -502,17 +556,15 @@ TEST(CountersubjectTest, SecondCS_EmptySubjectProducesEmpty) {
 }
 
 TEST(CountersubjectTest, SecondCS_AllCharactersGenerate) {
-  const SubjectCharacter characters[] = {
-      SubjectCharacter::Severe, SubjectCharacter::Playful,
-      SubjectCharacter::Noble, SubjectCharacter::Restless};
+  const SubjectCharacter characters[] = {SubjectCharacter::Severe, SubjectCharacter::Playful,
+                                         SubjectCharacter::Noble, SubjectCharacter::Restless};
 
   for (auto character : characters) {
     Subject subject = makeTestSubject(character);
     Countersubject cs1 = generateCountersubject(subject, 42);
     Countersubject cs2 = generateSecondCountersubject(subject, cs1, 100);
     EXPECT_GT(cs2.noteCount(), 0u)
-        << "Second CS failed for character: "
-        << subjectCharacterToString(character);
+        << "Second CS failed for character: " << subjectCharacterToString(character);
   }
 }
 
@@ -523,10 +575,8 @@ TEST(CountersubjectTest, SecondCS_PitchInValidRange) {
   for (uint32_t seed = 1; seed <= 10; ++seed) {
     Countersubject cs2 = generateSecondCountersubject(subject, cs1, seed);
     for (const auto& note : cs2.notes) {
-      EXPECT_GE(note.pitch, 36)
-          << "CS2 pitch below minimum (seed " << seed << ")";
-      EXPECT_LE(note.pitch, 127)
-          << "CS2 pitch above maximum (seed " << seed << ")";
+      EXPECT_GE(note.pitch, 36) << "CS2 pitch below minimum (seed " << seed << ")";
+      EXPECT_LE(note.pitch, 127) << "CS2 pitch above maximum (seed " << seed << ")";
     }
   }
 }
@@ -542,10 +592,9 @@ TEST(CountersubjectTest, AllNotesDiatonicInCMajor) {
     Countersubject cs = generateCountersubject(subject, seed);
     for (const auto& note : cs.notes) {
       EXPECT_TRUE(scale_util::isScaleTone(note.pitch, Key::C, ScaleType::Major))
-          << "Non-diatonic pitch " << static_cast<int>(note.pitch)
-          << " (" << pitchToNoteName(note.pitch) << ")"
-          << " at tick " << note.start_tick
-          << " (seed " << seed << ")";
+          << "Non-diatonic pitch " << static_cast<int>(note.pitch) << " ("
+          << pitchToNoteName(note.pitch) << ")"
+          << " at tick " << note.start_tick << " (seed " << seed << ")";
     }
   }
 }
@@ -555,38 +604,32 @@ TEST(CountersubjectTest, AllNotesDiatonicInGMajor) {
   subject.key = Key::G;
   // Transpose subject notes to G major (add 7 semitones).
   for (auto& note : subject.notes) {
-    note.pitch = static_cast<uint8_t>(
-        std::min(static_cast<int>(note.pitch) + 7, 127));
+    note.pitch = static_cast<uint8_t>(std::min(static_cast<int>(note.pitch) + 7, 127));
   }
 
   for (uint32_t seed = 1; seed <= 20; ++seed) {
     Countersubject cs = generateCountersubject(subject, seed);
     for (const auto& note : cs.notes) {
       EXPECT_TRUE(scale_util::isScaleTone(note.pitch, Key::G, ScaleType::Major))
-          << "Non-diatonic pitch " << static_cast<int>(note.pitch)
-          << " (" << pitchToNoteName(note.pitch) << ")"
-          << " in G major at tick " << note.start_tick
-          << " (seed " << seed << ")";
+          << "Non-diatonic pitch " << static_cast<int>(note.pitch) << " ("
+          << pitchToNoteName(note.pitch) << ")"
+          << " in G major at tick " << note.start_tick << " (seed " << seed << ")";
     }
   }
 }
 
 TEST(CountersubjectTest, AllNotesDiatonicAllCharacters) {
-  const SubjectCharacter characters[] = {
-      SubjectCharacter::Severe, SubjectCharacter::Playful,
-      SubjectCharacter::Noble, SubjectCharacter::Restless};
+  const SubjectCharacter characters[] = {SubjectCharacter::Severe, SubjectCharacter::Playful,
+                                         SubjectCharacter::Noble, SubjectCharacter::Restless};
 
   for (auto character : characters) {
     Subject subject = makeTestSubject(character);
     for (uint32_t seed = 1; seed <= 10; ++seed) {
       Countersubject cs = generateCountersubject(subject, seed);
       for (const auto& note : cs.notes) {
-        EXPECT_TRUE(
-            scale_util::isScaleTone(note.pitch, Key::C, ScaleType::Major))
-            << "Non-diatonic pitch " << static_cast<int>(note.pitch)
-            << " for character "
-            << subjectCharacterToString(character)
-            << " (seed " << seed << ")";
+        EXPECT_TRUE(scale_util::isScaleTone(note.pitch, Key::C, ScaleType::Major))
+            << "Non-diatonic pitch " << static_cast<int>(note.pitch) << " for character "
+            << subjectCharacterToString(character) << " (seed " << seed << ")";
       }
     }
   }
@@ -599,8 +642,7 @@ TEST(CountersubjectTest, SecondCS_AllNotesDiatonic) {
     Countersubject cs2 = generateSecondCountersubject(subject, cs1, seed + 500);
     for (const auto& note : cs2.notes) {
       EXPECT_TRUE(scale_util::isScaleTone(note.pitch, Key::C, ScaleType::Major))
-          << "Non-diatonic CS2 pitch " << static_cast<int>(note.pitch)
-          << " (seed " << seed << ")";
+          << "Non-diatonic CS2 pitch " << static_cast<int>(note.pitch) << " (seed " << seed << ")";
     }
   }
 }
@@ -660,20 +702,32 @@ TEST(CountersubjectTest, CSDurationVariety) {
       break;
     }
   }
-  EXPECT_TRUE(found_variety)
-      << "At least one seed in 1-20 should produce 3+ distinct CS durations";
+  EXPECT_TRUE(found_variety) << "At least one seed in 1-20 should produce 3+ distinct CS durations";
 }
 
-TEST(CountersubjectTest, SevereNoSixteenthNotes) {
+TEST(CountersubjectTest, SevereSixteenthMotionIsBounded) {
   Subject subject = makeTestSubject(SubjectCharacter::Severe);
   constexpr Tick kSixteenth = kTicksPerBeat / 4;
+  int total_notes = 0;
+  int sixteenth_notes = 0;
+  bool found_sixteenth = false;
   for (uint32_t seed = 1; seed <= 20; ++seed) {
     Countersubject cs = generateCountersubject(subject, seed);
     for (const auto& note : cs.notes) {
-      EXPECT_GE(note.duration, kSixteenth * 2)
-          << "Severe CS should not contain sixteenth notes (seed=" << seed << ")";
+      EXPECT_GE(note.duration, kSixteenth)
+          << "Severe CS should not go below sixteenth notes (seed=" << seed << ")";
+      ++total_notes;
+      if (note.duration == kSixteenth) {
+        ++sixteenth_notes;
+        found_sixteenth = true;
+      }
     }
   }
+  ASSERT_GT(total_notes, 0);
+  float sixteenth_ratio = static_cast<float>(sixteenth_notes) / static_cast<float>(total_notes);
+  EXPECT_TRUE(found_sixteenth) << "Severe CS should allow controlled sixteenth-note motion";
+  EXPECT_LT(sixteenth_ratio, 0.45f)
+      << "Severe CS should stay restrained, sixteenth ratio=" << sixteenth_ratio;
 }
 
 // ---------------------------------------------------------------------------
@@ -713,8 +767,7 @@ TEST(ChromaticArchetypeTest, StrongerContraryMotion) {
   int total_chromatic_steps = 0;
 
   for (uint32_t seed = 1; seed <= 25; ++seed) {
-    Countersubject cs = generateCountersubject(
-        subject, seed, 10, FugueArchetype::Chromatic);
+    Countersubject cs = generateCountersubject(subject, seed, 10, FugueArchetype::Chromatic);
     ASSERT_GT(cs.noteCount(), 1u);
 
     for (size_t idx = 0; idx + 1 < cs.noteCount(); ++idx) {
@@ -724,31 +777,28 @@ TEST(ChromaticArchetypeTest, StrongerContraryMotion) {
       for (size_t sdx = 0; sdx + 1 < subject.notes.size(); ++sdx) {
         if (subject.notes[sdx].start_tick <= cs_tick &&
             subject.notes[sdx + 1].start_tick > cs_tick) {
-          subj_motion = directedInterval(subject.notes[sdx].pitch,
-                                         subject.notes[sdx + 1].pitch);
+          subj_motion = directedInterval(subject.notes[sdx].pitch, subject.notes[sdx + 1].pitch);
           break;
         }
       }
       // Only count if subject step is chromatic (1 semitone).
-      if (std::abs(subj_motion) != 1) continue;
+      if (std::abs(subj_motion) != 1)
+        continue;
 
-      int cs_motion = directedInterval(cs.notes[idx].pitch,
-                                       cs.notes[idx + 1].pitch);
-      if (cs_motion == 0) continue;
+      int cs_motion = directedInterval(cs.notes[idx].pitch, cs.notes[idx + 1].pitch);
+      if (cs_motion == 0)
+        continue;
 
       total_chromatic_steps++;
-      if ((cs_motion > 0 && subj_motion < 0) ||
-          (cs_motion < 0 && subj_motion > 0)) {
+      if ((cs_motion > 0 && subj_motion < 0) || (cs_motion < 0 && subj_motion > 0)) {
         total_contrary++;
       }
     }
   }
 
   ASSERT_GT(total_chromatic_steps, 0);
-  float rate = static_cast<float>(total_contrary) /
-               static_cast<float>(total_chromatic_steps);
-  EXPECT_GE(rate, 0.60f)
-      << "Contrary motion rate at chromatic steps: " << rate;
+  float rate = static_cast<float>(total_contrary) / static_cast<float>(total_chromatic_steps);
+  EXPECT_GE(rate, 0.60f) << "Contrary motion rate at chromatic steps: " << rate;
 }
 
 TEST(ChromaticArchetypeTest, HasChromaticPassingTones) {
@@ -756,32 +806,31 @@ TEST(ChromaticArchetypeTest, HasChromaticPassingTones) {
 
   bool found_passing = false;
   for (uint32_t seed = 1; seed <= 30; ++seed) {
-    Countersubject cs = generateCountersubject(
-        subject, seed, 10, FugueArchetype::Chromatic);
+    Countersubject cs = generateCountersubject(subject, seed, 10, FugueArchetype::Chromatic);
     for (const auto& note : cs.notes) {
       if (note.source == BachNoteSource::ChromaticPassing) {
         found_passing = true;
         break;
       }
     }
-    if (found_passing) break;
+    if (found_passing)
+      break;
   }
-  EXPECT_TRUE(found_passing)
-      << "At least one seed should produce ChromaticPassing notes";
+  EXPECT_TRUE(found_passing) << "At least one seed should produce ChromaticPassing notes";
 }
 
 TEST(ChromaticArchetypeTest, PassingTonesOnWeakBeats) {
   Subject subject = makeChromaticSubject();
 
   for (uint32_t seed = 1; seed <= 25; ++seed) {
-    Countersubject cs = generateCountersubject(
-        subject, seed, 10, FugueArchetype::Chromatic);
+    Countersubject cs = generateCountersubject(subject, seed, 10, FugueArchetype::Chromatic);
     for (const auto& note : cs.notes) {
-      if (note.source != BachNoteSource::ChromaticPassing) continue;
+      if (note.source != BachNoteSource::ChromaticPassing)
+        continue;
       uint8_t beat = beatInBar(note.start_tick);
       EXPECT_TRUE(beat == 1 || beat == 3)
-          << "ChromaticPassing at beat " << static_cast<int>(beat)
-          << " (tick " << note.start_tick << ", seed " << seed << ")";
+          << "ChromaticPassing at beat " << static_cast<int>(beat) << " (tick " << note.start_tick
+          << ", seed " << seed << ")";
     }
   }
 }
@@ -790,25 +839,21 @@ TEST(ChromaticArchetypeTest, PassingTonesResolveByStep) {
   Subject subject = makeChromaticSubject();
 
   for (uint32_t seed = 1; seed <= 25; ++seed) {
-    Countersubject cs = generateCountersubject(
-        subject, seed, 10, FugueArchetype::Chromatic);
+    Countersubject cs = generateCountersubject(subject, seed, 10, FugueArchetype::Chromatic);
     for (size_t idx = 0; idx < cs.noteCount(); ++idx) {
-      if (cs.notes[idx].source != BachNoteSource::ChromaticPassing) continue;
+      if (cs.notes[idx].source != BachNoteSource::ChromaticPassing)
+        continue;
       // Check neighbor before.
       if (idx > 0) {
-        int iv = absoluteInterval(cs.notes[idx].pitch,
-                                  cs.notes[idx - 1].pitch);
-        EXPECT_LE(iv, 2)
-            << "Passing tone not stepwise from predecessor (seed " << seed
-            << ", idx " << idx << ")";
+        int iv = absoluteInterval(cs.notes[idx].pitch, cs.notes[idx - 1].pitch);
+        EXPECT_LE(iv, 2) << "Passing tone not stepwise from predecessor (seed " << seed << ", idx "
+                         << idx << ")";
       }
       // Check neighbor after (relaxed: snap + Markov duration may shift successor).
       if (idx + 1 < cs.noteCount()) {
-        int iv = absoluteInterval(cs.notes[idx].pitch,
-                                  cs.notes[idx + 1].pitch);
-        EXPECT_LE(iv, 6)
-            << "Passing tone too far from successor (seed " << seed
-            << ", idx " << idx << ", interval " << iv << ")";
+        int iv = absoluteInterval(cs.notes[idx].pitch, cs.notes[idx + 1].pitch);
+        EXPECT_LE(iv, 6) << "Passing tone too far from successor (seed " << seed << ", idx " << idx
+                         << ", interval " << iv << ")";
       }
     }
   }
@@ -819,15 +864,14 @@ TEST(ChromaticArchetypeTest, PassingLimitedCount) {
   constexpr int kMaxExpected = 2;  // max_consecutive_chromatic / 2 = 4 / 2
 
   for (uint32_t seed = 1; seed <= 25; ++seed) {
-    Countersubject cs = generateCountersubject(
-        subject, seed, 10, FugueArchetype::Chromatic);
+    Countersubject cs = generateCountersubject(subject, seed, 10, FugueArchetype::Chromatic);
     int passing_count = 0;
     for (const auto& note : cs.notes) {
-      if (note.source == BachNoteSource::ChromaticPassing) passing_count++;
+      if (note.source == BachNoteSource::ChromaticPassing)
+        passing_count++;
     }
     EXPECT_LE(passing_count, kMaxExpected)
-        << "Too many ChromaticPassing notes (seed " << seed
-        << "): " << passing_count;
+        << "Too many ChromaticPassing notes (seed " << seed << "): " << passing_count;
   }
 }
 
@@ -847,10 +891,9 @@ TEST(ChromaticArchetypeTest, NonChromaticUnaffected) {
         EXPECT_NE(note.source, BachNoteSource::ChromaticPassing)
             << "Non-chromatic archetype should not have ChromaticPassing "
             << "(seed " << seed << ")";
-        EXPECT_TRUE(
-            scale_util::isScaleTone(note.pitch, Key::C, ScaleType::Major))
-            << "Non-chromatic archetype has non-diatonic pitch "
-            << static_cast<int>(note.pitch) << " (seed " << seed << ")";
+        EXPECT_TRUE(scale_util::isScaleTone(note.pitch, Key::C, ScaleType::Major))
+            << "Non-chromatic archetype has non-diatonic pitch " << static_cast<int>(note.pitch)
+            << " (seed " << seed << ")";
       }
     }
   }
@@ -860,21 +903,21 @@ TEST(ChromaticArchetypeTest, ConsonanceStillAcceptable) {
   Subject subject = makeChromaticSubject();
 
   for (uint32_t seed = 1; seed <= 25; ++seed) {
-    Countersubject cs = generateCountersubject(
-        subject, seed, 10, FugueArchetype::Chromatic);
+    Countersubject cs = generateCountersubject(subject, seed, 10, FugueArchetype::Chromatic);
     ASSERT_GT(cs.noteCount(), 0u);
 
     int strong_checks = 0;
     int consonant = 0;
     for (const auto& cs_note : cs.notes) {
       uint8_t beat = beatInBar(cs_note.start_tick);
-      if (beat != 0 && beat != 2) continue;
-      if (cs_note.source == BachNoteSource::ChromaticPassing) continue;
+      if (beat != 0 && beat != 2)
+        continue;
+      if (cs_note.source == BachNoteSource::ChromaticPassing)
+        continue;
 
       for (const auto& subj_note : subject.notes) {
         Tick subj_end = subj_note.start_tick + subj_note.duration;
-        if (subj_note.start_tick <= cs_note.start_tick &&
-            subj_end > cs_note.start_tick) {
+        if (subj_note.start_tick <= cs_note.start_tick && subj_end > cs_note.start_tick) {
           strong_checks++;
           int abs_int = absoluteInterval(cs_note.pitch, subj_note.pitch);
           IntervalQuality quality = classifyInterval(abs_int);
@@ -888,10 +931,8 @@ TEST(ChromaticArchetypeTest, ConsonanceStillAcceptable) {
     }
 
     if (strong_checks > 0) {
-      float rate = static_cast<float>(consonant) /
-                   static_cast<float>(strong_checks);
-      EXPECT_GE(rate, 0.60f)
-          << "Strong-beat consonance too low (seed " << seed << "): " << rate;
+      float rate = static_cast<float>(consonant) / static_cast<float>(strong_checks);
+      EXPECT_GE(rate, 0.60f) << "Strong-beat consonance too low (seed " << seed << "): " << rate;
     }
   }
 }

@@ -2,19 +2,19 @@
 
 #include "fugue/subject.h"
 
-#include <cmath>
-#include <algorithm>
-#include <set>
-
 #include <gtest/gtest.h>
 
+#include <algorithm>
+#include <cmath>
+#include <map>
+#include <set>
+
+#include "core/note_source.h"
 #include "core/pitch_utils.h"
 #include "core/scale.h"
 #include "fugue/fugue_config.h"
-#include "core/note_source.h"
 #include "fugue/subject_identity.h"
 #include "fugue/subject_validator.h"
-#include <map>
 
 namespace bach {
 namespace {
@@ -118,7 +118,8 @@ TEST_F(SubjectGeneratorTest, NotesDoNotExceedTotalLength) {
     Tick note_end = note.start_tick + note.duration;
     EXPECT_LE(note_end, subject.length_ticks)
         << "Note at tick " << note.start_tick << " exceeds subject length";
-    if (note_end > last_end) last_end = note_end;
+    if (note_end > last_end)
+      last_end = note_end;
   }
 }
 
@@ -132,8 +133,7 @@ TEST_F(SubjectGeneratorTest, EndsOnTonicOrDominant) {
   int tonic_pc = static_cast<int>(config.key) % 12;
   int dominant_pc = (tonic_pc + 7) % 12;
   bool ends_ok = (last_pc == tonic_pc || last_pc == dominant_pc);
-  EXPECT_TRUE(ends_ok)
-      << "Subject should end on tonic or dominant, got pitch class " << last_pc;
+  EXPECT_TRUE(ends_ok) << "Subject should end on tonic or dominant, got pitch class " << last_pc;
 }
 
 TEST_F(SubjectGeneratorTest, StartsOnTonicOrDominant) {
@@ -142,8 +142,8 @@ TEST_F(SubjectGeneratorTest, StartsOnTonicOrDominant) {
   ASSERT_GT(subject.noteCount(), 0u);
 
   int first_pc = getPitchClass(subject.notes.front().pitch);
-  int tonic_pc = static_cast<int>(config.key) % 12;     // 0 = C
-  int dominant_pc = (tonic_pc + 7) % 12;  // 7 = G
+  int tonic_pc = static_cast<int>(config.key) % 12;  // 0 = C
+  int dominant_pc = (tonic_pc + 7) % 12;             // 7 = G
 
   bool starts_ok = (first_pc == tonic_pc || first_pc == dominant_pc);
   EXPECT_TRUE(starts_ok) << "Subject should start on tonic or dominant";
@@ -161,6 +161,85 @@ TEST_F(SubjectGeneratorTest, PreservesCharacter) {
   EXPECT_EQ(subject.character, SubjectCharacter::Playful);
 }
 
+TEST_F(SubjectGeneratorTest, MinorSubjectsDoNotProlongRaisedLeadingTone) {
+  config.key = Key::G;
+  config.is_minor = true;
+  config.character = SubjectCharacter::Restless;
+  config.subject_bars = 2;
+
+  Subject subject = generator.generate(config, 183);
+  ASSERT_GT(subject.noteCount(), 0u);
+
+  int tonic_pc = getPitchClass(static_cast<uint8_t>(config.key));
+  int raised_seventh_pc = (tonic_pc + 11) % 12;
+  for (const auto& note : subject.notes) {
+    if (note.duration <= kTicksPerBeat)
+      continue;
+    EXPECT_NE(getPitchClass(note.pitch), raised_seventh_pc)
+        << "Long raised leading tone at tick " << note.start_tick
+        << " should not carry structural weight in a minor subject";
+  }
+}
+
+TEST_F(SubjectGeneratorTest, RestlessMinorSubjectUsesBaroqueSoggettoShape) {
+  config.key = Key::G;
+  config.is_minor = true;
+  config.character = SubjectCharacter::Restless;
+  config.subject_bars = 2;
+
+  Subject subject = generator.generate(config, 183);
+  ASSERT_GE(subject.notes.size(), 6u);
+  EXPECT_EQ(subject.anacrusis_ticks, 0);
+  EXPECT_EQ(subject.length_ticks, 2u * kTicksPerBar);
+
+  const std::vector<uint8_t> expected_opening = {55, 57, 58, 55, 62, 60};
+  for (size_t idx = 0; idx < expected_opening.size(); ++idx) {
+    EXPECT_EQ(subject.notes[idx].pitch, expected_opening[idx])
+        << "Unexpected restless minor subject pitch at note " << idx;
+  }
+
+  const std::vector<uint8_t> bwv578_opening = {55, 58, 57, 55, 62, 60};
+  bool copies_bwv578_head = true;
+  for (size_t idx = 0; idx < bwv578_opening.size(); ++idx) {
+    if (subject.notes[idx].pitch != bwv578_opening[idx]) {
+      copies_bwv578_head = false;
+      break;
+    }
+  }
+  EXPECT_FALSE(copies_bwv578_head)
+      << "Restless minor generation should not hard-code the BWV578 head";
+
+  for (const auto& note : subject.notes) {
+    EXPECT_LE(note.start_tick + note.duration, subject.length_ticks);
+  }
+}
+
+TEST_F(SubjectGeneratorTest, RestlessMinorSubjectVariesBySeed) {
+  config.key = Key::G;
+  config.is_minor = true;
+  config.character = SubjectCharacter::Restless;
+  config.subject_bars = 2;
+
+  Subject first = generator.generate(config, 183);
+  Subject second = generator.generate(config, 184);
+  ASSERT_EQ(first.length_ticks, 2u * kTicksPerBar);
+  ASSERT_EQ(second.length_ticks, 2u * kTicksPerBar);
+  ASSERT_GE(first.notes.size(), 6u);
+  ASSERT_GE(second.notes.size(), 6u);
+
+  bool same_head = true;
+  const size_t count = std::min<size_t>(6, std::min(first.notes.size(), second.notes.size()));
+  for (size_t idx = 0; idx < count; ++idx) {
+    if (first.notes[idx].pitch != second.notes[idx].pitch ||
+        first.notes[idx].duration != second.notes[idx].duration) {
+      same_head = false;
+      break;
+    }
+  }
+  EXPECT_FALSE(same_head)
+      << "Restless minor soggetto choices should not collapse to one fixed quote";
+}
+
 // ---------------------------------------------------------------------------
 // Character-specific constraints
 // ---------------------------------------------------------------------------
@@ -171,8 +250,7 @@ TEST_F(SubjectGeneratorTest, SevereCharacterNarrowRange) {
   for (uint32_t seed = 1; seed <= 5; ++seed) {
     Subject subject = generator.generate(config, seed);
     EXPECT_LE(subject.range(), 12)
-        << "Severe subject range should not exceed 12 semitones (seed "
-        << seed << ")";
+        << "Severe subject range should not exceed 12 semitones (seed " << seed << ")";
   }
 }
 
@@ -181,8 +259,7 @@ TEST_F(SubjectGeneratorTest, PlayfulCharacterRange) {
   for (uint32_t seed = 1; seed <= 5; ++seed) {
     Subject subject = generator.generate(config, seed);
     EXPECT_LE(subject.range(), 16)
-        << "Playful subject range should not exceed 16 semitones (seed "
-        << seed << ")";
+        << "Playful subject range should not exceed 16 semitones (seed " << seed << ")";
   }
 }
 
@@ -195,8 +272,7 @@ TEST_F(SubjectGeneratorTest, NobleCharacterRange) {
   for (uint32_t seed = 1; seed <= 5; ++seed) {
     Subject subject = generator.generate(config, seed);
     EXPECT_LE(subject.range(), 14)
-        << "Noble subject range should not exceed 14 semitones (seed "
-        << seed << ")";
+        << "Noble subject range should not exceed 14 semitones (seed " << seed << ")";
   }
 }
 
@@ -252,8 +328,8 @@ TEST_F(SubjectGeneratorTest, NobleCharacterHasLateClimax) {
     float climax_position =
         static_cast<float>(climax_tick) / static_cast<float>(subject.length_ticks);
     EXPECT_GE(climax_position, 0.15f)
-        << "Noble subject climax should not be at the very start (seed "
-        << seed << ", tick " << climax_tick << "/" << subject.length_ticks << ")";
+        << "Noble subject climax should not be at the very start (seed " << seed << ", tick "
+        << climax_tick << "/" << subject.length_ticks << ")";
   }
 }
 
@@ -266,8 +342,7 @@ TEST_F(SubjectGeneratorTest, RestlessCharacterRange) {
   for (uint32_t seed = 1; seed <= 5; ++seed) {
     Subject subject = generator.generate(config, seed);
     EXPECT_LE(subject.range(), 16)
-        << "Restless subject range should not exceed 16 semitones (seed "
-        << seed << ")";
+        << "Restless subject range should not exceed 16 semitones (seed " << seed << ")";
   }
 }
 
@@ -315,9 +390,8 @@ TEST_F(SubjectGeneratorTest, RestlessCharacterHasDenseIntervalVariety) {
   // On average across 10 seeds, Restless should use at least 3 distinct
   // interval types per subject (reflecting varied, restless motion).
   float avg_distinct = static_cast<float>(distinct_intervals) / 10.0f;
-  EXPECT_GE(avg_distinct, 3.0f)
-      << "Restless should use diverse interval types, got avg "
-      << avg_distinct;
+  EXPECT_GE(avg_distinct, 3.0f) << "Restless should use diverse interval types, got avg "
+                                << avg_distinct;
 }
 
 // ---------------------------------------------------------------------------
@@ -348,16 +422,15 @@ TEST_F(SubjectGeneratorTest, DifferentSeedsProduceDiverseSubjects) {
   // expect at least 2 distinct first pitches and 2 distinct last pitches
   // across 20 seeds. Note counts may be uniform since pair substitution
   // preserves total duration by design.
-  EXPECT_GE(first_pitches.size(), 2u)
-      << "Expected diverse first pitches across 20 seeds";
+  EXPECT_GE(first_pitches.size(), 2u) << "Expected diverse first pitches across 20 seeds";
   EXPECT_GE(last_pitches.size(), 2u)
       << "Expected diverse last pitches across 20 seeds (tonic vs dominant)";
 }
 
 TEST_F(SubjectGeneratorTest, EndsOnTonicOrDominantAllCharacters) {
   // Across all characters and many seeds, last note should always be tonic or dominant.
-  for (auto chr : {SubjectCharacter::Severe, SubjectCharacter::Playful,
-                   SubjectCharacter::Noble, SubjectCharacter::Restless}) {
+  for (auto chr : {SubjectCharacter::Severe, SubjectCharacter::Playful, SubjectCharacter::Noble,
+                   SubjectCharacter::Restless}) {
     config.character = chr;
     for (uint32_t seed = 1; seed <= 10; ++seed) {
       Subject subject = generator.generate(config, seed);
@@ -367,10 +440,9 @@ TEST_F(SubjectGeneratorTest, EndsOnTonicOrDominantAllCharacters) {
       int tonic_pc = static_cast<int>(config.key) % 12;
       int dominant_pc = (tonic_pc + 7) % 12;
       bool ends_ok = (last_pc == tonic_pc || last_pc == dominant_pc);
-      EXPECT_TRUE(ends_ok)
-          << "Subject should end on tonic or dominant for character "
-          << static_cast<int>(chr) << " seed " << seed
-          << ", got pitch class " << last_pc;
+      EXPECT_TRUE(ends_ok) << "Subject should end on tonic or dominant for character "
+                           << static_cast<int>(chr) << " seed " << seed << ", got pitch class "
+                           << last_pc;
     }
   }
 }
@@ -445,8 +517,7 @@ TEST(SubjectAnacrusisTest, PlayfulHasHighAnacrusisProbability) {
     }
   }
   // With 70% probability, expect at least 20% to have anacrusis (conservative).
-  EXPECT_GT(anacrusis_count, kTrials / 5)
-      << "Expected many Playful subjects to have anacrusis";
+  EXPECT_GT(anacrusis_count, kTrials / 5) << "Expected many Playful subjects to have anacrusis";
 }
 
 TEST(SubjectAnacrusisTest, AnacrusisExtendsTotalLength) {
@@ -462,8 +533,7 @@ TEST(SubjectAnacrusisTest, AnacrusisExtendsTotalLength) {
     auto subject = gen.generate(config, seed);
     if (subject.anacrusis_ticks > 0) {
       // Total length should be bars*kTicksPerBar + anacrusis_ticks.
-      EXPECT_GT(subject.length_ticks,
-                static_cast<Tick>(config.subject_bars) * kTicksPerBar);
+      EXPECT_GT(subject.length_ticks, static_cast<Tick>(config.subject_bars) * kTicksPerBar);
       break;
     }
   }
@@ -482,8 +552,7 @@ TEST(SubjectAnacrusisTest, NoAnacrusis_ZeroTicks) {
   for (uint32_t seed = 0; seed < 100; ++seed) {
     auto subject = gen.generate(config, seed);
     if (subject.anacrusis_ticks == 0) {
-      EXPECT_EQ(subject.length_ticks,
-                static_cast<Tick>(config.subject_bars) * kTicksPerBar);
+      EXPECT_EQ(subject.length_ticks, static_cast<Tick>(config.subject_bars) * kTicksPerBar);
       break;
     }
   }
@@ -497,15 +566,14 @@ TEST_F(SubjectGeneratorTest, NotesAlignToBeatGrid) {
   // All note start_ticks should fall on standard subdivisions:
   // multiples of sixteenth note (kTicksPerBeat / 4 = 120 ticks).
   constexpr Tick kSixteenth = kTicksPerBeat / 4;
-  for (auto chr : {SubjectCharacter::Severe, SubjectCharacter::Playful,
-                   SubjectCharacter::Noble, SubjectCharacter::Restless}) {
+  for (auto chr : {SubjectCharacter::Severe, SubjectCharacter::Playful, SubjectCharacter::Noble,
+                   SubjectCharacter::Restless}) {
     config.character = chr;
     for (uint32_t seed = 1; seed <= 10; ++seed) {
       Subject subject = generator.generate(config, seed);
       for (const auto& note : subject.notes) {
         EXPECT_EQ(note.start_tick % kSixteenth, 0u)
-            << "Note at tick " << note.start_tick
-            << " not on 16th-note grid (character "
+            << "Note at tick " << note.start_tick << " not on 16th-note grid (character "
             << static_cast<int>(chr) << " seed " << seed << ")";
       }
     }
@@ -514,17 +582,16 @@ TEST_F(SubjectGeneratorTest, NotesAlignToBeatGrid) {
 
 TEST_F(SubjectGeneratorTest, NotesDontOverlap) {
   // Adjacent notes should not overlap in time within the subject.
-  for (auto chr : {SubjectCharacter::Severe, SubjectCharacter::Playful,
-                   SubjectCharacter::Noble, SubjectCharacter::Restless}) {
+  for (auto chr : {SubjectCharacter::Severe, SubjectCharacter::Playful, SubjectCharacter::Noble,
+                   SubjectCharacter::Restless}) {
     config.character = chr;
     for (uint32_t seed = 1; seed <= 10; ++seed) {
       Subject subject = generator.generate(config, seed);
       for (size_t idx = 1; idx < subject.notes.size(); ++idx) {
-        Tick prev_end =
-            subject.notes[idx - 1].start_tick + subject.notes[idx - 1].duration;
+        Tick prev_end = subject.notes[idx - 1].start_tick + subject.notes[idx - 1].duration;
         EXPECT_LE(prev_end, subject.notes[idx].start_tick)
-            << "Notes overlap at index " << idx << " (character "
-            << static_cast<int>(chr) << " seed " << seed << ")";
+            << "Notes overlap at index " << idx << " (character " << static_cast<int>(chr)
+            << " seed " << seed << ")";
       }
     }
   }
@@ -540,8 +607,8 @@ TEST_F(SubjectGeneratorTest, AllPitchesAreDiatonic) {
   // intentionally preserve chromatic (non-diatonic) intervals.
   config.key = Key::C;
   config.is_minor = false;
-  for (auto chr : {SubjectCharacter::Severe, SubjectCharacter::Playful,
-                   SubjectCharacter::Noble, SubjectCharacter::Restless}) {
+  for (auto chr : {SubjectCharacter::Severe, SubjectCharacter::Playful, SubjectCharacter::Noble,
+                   SubjectCharacter::Restless}) {
     config.character = chr;
     for (uint32_t seed = 1; seed <= 20; ++seed) {
       Subject subject = generator.generate(config, seed);
@@ -551,37 +618,37 @@ TEST_F(SubjectGeneratorTest, AllPitchesAreDiatonic) {
       bool has_chromatic_cell_window = false;
       if (subject.cell_window.valid) {
         for (size_t idx = subject.cell_window.start_idx;
-             idx <= subject.cell_window.end_idx && idx < subject.notes.size();
-             ++idx) {
-          if (!scale_util::isScaleTone(subject.notes[idx].pitch, config.key,
-                                       ScaleType::Major)) {
+             idx <= subject.cell_window.end_idx && idx < subject.notes.size(); ++idx) {
+          if (!scale_util::isScaleTone(subject.notes[idx].pitch, config.key, ScaleType::Major)) {
             has_chromatic_cell_window = true;
             break;
           }
         }
       }
       if (has_chromatic_cell_window ||
-          subject.identity.essential.kerngestalt_type ==
-              KerngestaltType::ChromaticCell) {
+          subject.identity.essential.kerngestalt_type == KerngestaltType::ChromaticCell) {
         continue;
       }
       for (const auto& note : subject.notes) {
-        EXPECT_TRUE(scale_util::isScaleTone(note.pitch, config.key,
-                                            ScaleType::Major))
-            << "Non-diatonic pitch " << static_cast<int>(note.pitch)
-            << " (" << pitchToNoteName(note.pitch) << ") in C major subject"
-            << " (character " << static_cast<int>(chr) << " seed " << seed
-            << ")";
+        EXPECT_TRUE(scale_util::isScaleTone(note.pitch, config.key, ScaleType::Major))
+            << "Non-diatonic pitch " << static_cast<int>(note.pitch) << " ("
+            << pitchToNoteName(note.pitch) << ") in C major subject"
+            << " (character " << static_cast<int>(chr) << " seed " << seed << ")";
       }
     }
   }
 }
 
 TEST_F(SubjectGeneratorTest, AllPitchesAreDiatonicMinor) {
+  auto is_minor_scale_tone = [](uint8_t pitch, Key key) {
+    return scale_util::isScaleTone(pitch, key, ScaleType::NaturalMinor) ||
+           scale_util::isScaleTone(pitch, key, ScaleType::HarmonicMinor);
+  };
+
   config.key = Key::G;
   config.is_minor = true;
-  for (auto chr : {SubjectCharacter::Severe, SubjectCharacter::Playful,
-                   SubjectCharacter::Noble, SubjectCharacter::Restless}) {
+  for (auto chr : {SubjectCharacter::Severe, SubjectCharacter::Playful, SubjectCharacter::Noble,
+                   SubjectCharacter::Restless}) {
     config.character = chr;
     for (uint32_t seed = 1; seed <= 10; ++seed) {
       Subject subject = generator.generate(config, seed);
@@ -589,27 +656,22 @@ TEST_F(SubjectGeneratorTest, AllPitchesAreDiatonicMinor) {
       bool has_chromatic_cell_window = false;
       if (subject.cell_window.valid) {
         for (size_t idx = subject.cell_window.start_idx;
-             idx <= subject.cell_window.end_idx && idx < subject.notes.size();
-             ++idx) {
-          if (!scale_util::isScaleTone(subject.notes[idx].pitch, config.key,
-                                       ScaleType::HarmonicMinor)) {
+             idx <= subject.cell_window.end_idx && idx < subject.notes.size(); ++idx) {
+          if (!is_minor_scale_tone(subject.notes[idx].pitch, config.key)) {
             has_chromatic_cell_window = true;
             break;
           }
         }
       }
       if (has_chromatic_cell_window ||
-          subject.identity.essential.kerngestalt_type ==
-              KerngestaltType::ChromaticCell) {
+          subject.identity.essential.kerngestalt_type == KerngestaltType::ChromaticCell) {
         continue;
       }
       for (const auto& note : subject.notes) {
-        EXPECT_TRUE(scale_util::isScaleTone(note.pitch, config.key,
-                                            ScaleType::HarmonicMinor))
-            << "Non-diatonic pitch " << static_cast<int>(note.pitch)
-            << " (" << pitchToNoteName(note.pitch) << ") in G minor subject"
-            << " (character " << static_cast<int>(chr) << " seed " << seed
-            << ")";
+        EXPECT_TRUE(is_minor_scale_tone(note.pitch, config.key))
+            << "Non-diatonic pitch " << static_cast<int>(note.pitch) << " ("
+            << pitchToNoteName(note.pitch) << ") in G minor subject"
+            << " (character " << static_cast<int>(chr) << " seed " << seed << ")";
       }
     }
   }
@@ -628,8 +690,8 @@ TEST_F(SubjectGeneratorTest, ClimaxOnStrongBeat) {
   int total_cases = 0;
   int on_strong_beat = 0;
 
-  for (auto chr : {SubjectCharacter::Severe, SubjectCharacter::Playful,
-                   SubjectCharacter::Noble, SubjectCharacter::Restless}) {
+  for (auto chr : {SubjectCharacter::Severe, SubjectCharacter::Playful, SubjectCharacter::Noble,
+                   SubjectCharacter::Restless}) {
     config.character = chr;
     config.subject_bars = 3;
     for (uint32_t seed = 1; seed <= 20; ++seed) {
@@ -649,7 +711,8 @@ TEST_F(SubjectGeneratorTest, ClimaxOnStrongBeat) {
       Tick pos_in_bar = highest_tick % kTicksPerBar;
       bool on_beat1 = (pos_in_bar == 0);
       bool on_beat3 = (pos_in_bar == kBeat3Offset);
-      if (on_beat1 || on_beat3) ++on_strong_beat;
+      if (on_beat1 || on_beat3)
+        ++on_strong_beat;
       ++total_cases;
     }
   }
@@ -657,12 +720,10 @@ TEST_F(SubjectGeneratorTest, ClimaxOnStrongBeat) {
   // With climax quantization, expect at least 30% of highest pitches on
   // strong beats (vs ~12.5% chance for random 16th-note positions).
   // Threshold is 30% to accommodate RNG stream separation across seeds.
-  float ratio = static_cast<float>(on_strong_beat) /
-                static_cast<float>(total_cases);
-  EXPECT_GE(ratio, 0.30f)
-      << "Expected at least 40% of climax notes on strong beats, got "
-      << on_strong_beat << "/" << total_cases << " (" << (ratio * 100.0f)
-      << "%)";
+  float ratio = static_cast<float>(on_strong_beat) / static_cast<float>(total_cases);
+  EXPECT_GE(ratio, 0.30f) << "Expected at least 40% of climax notes on strong beats, got "
+                          << on_strong_beat << "/" << total_cases << " (" << (ratio * 100.0f)
+                          << "%)";
 }
 
 // ---------------------------------------------------------------------------
@@ -682,15 +743,15 @@ TEST_F(SubjectGeneratorTest, EndingPrefersDominant) {
     Subject subject = generator.generate(config, seed);
     ASSERT_GT(subject.noteCount(), 0u);
     int last_pc = getPitchClass(subject.notes.back().pitch);
-    if (last_pc == dominant_pc) ++dominant_count;
-    else if (last_pc == tonic_pc) ++tonic_count;
+    if (last_pc == dominant_pc)
+      ++dominant_count;
+    else if (last_pc == tonic_pc)
+      ++tonic_count;
   }
   // With 70% dominant, expect dominant > tonic across 100 seeds.
-  EXPECT_GT(dominant_count, tonic_count)
-      << "Expected dominant endings (" << dominant_count
-      << ") > tonic endings (" << tonic_count << ")";
+  EXPECT_GT(dominant_count, tonic_count) << "Expected dominant endings (" << dominant_count
+                                         << ") > tonic endings (" << tonic_count << ")";
 }
-
 
 // ---------------------------------------------------------------------------
 // Kerngestalt generation tests (Phase C2)
@@ -708,12 +769,9 @@ TEST_F(SubjectGeneratorTest, KerngestaltDeterministic) {
     EXPECT_EQ(sub1.cell_window.end_idx, sub2.cell_window.end_idx);
   }
   for (size_t idx = 0; idx < sub1.noteCount(); ++idx) {
-    EXPECT_EQ(sub1.notes[idx].pitch, sub2.notes[idx].pitch)
-        << "pitch mismatch at " << idx;
-    EXPECT_EQ(sub1.notes[idx].duration, sub2.notes[idx].duration)
-        << "duration mismatch at " << idx;
-    EXPECT_EQ(sub1.notes[idx].start_tick, sub2.notes[idx].start_tick)
-        << "tick mismatch at " << idx;
+    EXPECT_EQ(sub1.notes[idx].pitch, sub2.notes[idx].pitch) << "pitch mismatch at " << idx;
+    EXPECT_EQ(sub1.notes[idx].duration, sub2.notes[idx].duration) << "duration mismatch at " << idx;
+    EXPECT_EQ(sub1.notes[idx].start_tick, sub2.notes[idx].start_tick) << "tick mismatch at " << idx;
   }
 }
 
@@ -724,8 +782,8 @@ TEST_F(SubjectGeneratorTest, CellWindowIsSet) {
   // so the success rate varies by character and archetype.
   int valid_count = 0;
   int total_count = 0;
-  for (auto chr : {SubjectCharacter::Severe, SubjectCharacter::Playful,
-                   SubjectCharacter::Noble, SubjectCharacter::Restless}) {
+  for (auto chr : {SubjectCharacter::Severe, SubjectCharacter::Playful, SubjectCharacter::Noble,
+                   SubjectCharacter::Restless}) {
     config.character = chr;
     for (uint32_t seed = 1; seed <= 20; ++seed) {
       ++total_count;
@@ -734,14 +792,14 @@ TEST_F(SubjectGeneratorTest, CellWindowIsSet) {
         ++valid_count;
         // Cell window indices should be within note count.
         EXPECT_LT(subject.cell_window.start_idx, subject.noteCount())
-            << "Cell window start out of range (character "
-            << static_cast<int>(chr) << " seed " << seed << ")";
+            << "Cell window start out of range (character " << static_cast<int>(chr) << " seed "
+            << seed << ")";
         EXPECT_LT(subject.cell_window.end_idx, subject.noteCount())
-            << "Cell window end out of range (character "
-            << static_cast<int>(chr) << " seed " << seed << ")";
+            << "Cell window end out of range (character " << static_cast<int>(chr) << " seed "
+            << seed << ")";
         EXPECT_LE(subject.cell_window.start_idx, subject.cell_window.end_idx)
-            << "Cell window start > end (character "
-            << static_cast<int>(chr) << " seed " << seed << ")";
+            << "Cell window start > end (character " << static_cast<int>(chr) << " seed " << seed
+            << ")";
       }
     }
   }
@@ -749,22 +807,22 @@ TEST_F(SubjectGeneratorTest, CellWindowIsSet) {
   // The Kerngestalt path rejects candidates for range/tritone/leap violations,
   // so the success rate is lower than 50%.
   EXPECT_GE(valid_count, total_count / 7)
-      << "Expected at least ~15% of subjects to have valid cell windows, got "
-      << valid_count << "/" << total_count;
+      << "Expected at least ~15% of subjects to have valid cell windows, got " << valid_count << "/"
+      << total_count;
 }
 
 TEST_F(SubjectGeneratorTest, CellWindowNotesAreSubjectCore) {
   // Notes within the cell window should have BachNoteSource::SubjectCore.
   for (uint32_t seed = 1; seed <= 20; ++seed) {
     Subject subject = generator.generate(config, seed);
-    if (!subject.cell_window.valid) continue;
+    if (!subject.cell_window.valid)
+      continue;
 
     for (size_t idx = subject.cell_window.start_idx;
-         idx <= subject.cell_window.end_idx && idx < subject.noteCount();
-         ++idx) {
+         idx <= subject.cell_window.end_idx && idx < subject.noteCount(); ++idx) {
       EXPECT_EQ(subject.notes[idx].source, BachNoteSource::SubjectCore)
-          << "Note at index " << idx
-          << " in cell window should be SubjectCore (seed " << seed << ")";
+          << "Note at index " << idx << " in cell window should be SubjectCore (seed " << seed
+          << ")";
     }
     return;  // Found one valid subject, verified.
   }
@@ -785,13 +843,15 @@ TEST_F(SubjectGeneratorTest, KerngestaltShapeMetrics) {
   int total_checked = 0;
 
   // Test across all characters.
-  for (auto chr : {SubjectCharacter::Severe, SubjectCharacter::Playful,
-                   SubjectCharacter::Noble, SubjectCharacter::Restless}) {
+  for (auto chr : {SubjectCharacter::Severe, SubjectCharacter::Playful, SubjectCharacter::Noble,
+                   SubjectCharacter::Restless}) {
     config.character = chr;
     for (uint32_t seed = 1; seed <= 10; ++seed) {
       Subject subject = generator.generate(config, seed);
-      if (!subject.cell_window.valid) continue;
-      if (!subject.identity.isValid()) continue;
+      if (!subject.cell_window.valid)
+        continue;
+      if (!subject.identity.isValid())
+        continue;
       ++total_checked;
 
       const auto& ident = subject.identity.essential;
@@ -806,14 +866,14 @@ TEST_F(SubjectGeneratorTest, KerngestaltShapeMetrics) {
             int abs_nxt = std::abs(ident.core_intervals[i + 1]);
             bool cur_third = (abs_cur == 3 || abs_cur == 4);
             bool nxt_third = (abs_nxt == 3 || abs_nxt == 4);
-            bool same_dir =
-                (ident.core_intervals[i] > 0 && ident.core_intervals[i + 1] > 0) ||
-                (ident.core_intervals[i] < 0 && ident.core_intervals[i + 1] < 0);
+            bool same_dir = (ident.core_intervals[i] > 0 && ident.core_intervals[i + 1] > 0) ||
+                            (ident.core_intervals[i] < 0 && ident.core_intervals[i + 1] < 0);
             if (cur_third && nxt_third && same_dir) {
               ++consecutive;
             }
           }
-          if (consecutive >= 1) ++arpeggio_chord_ok;
+          if (consecutive >= 1)
+            ++arpeggio_chord_ok;
           break;
         }
         case KerngestaltType::Linear: {
@@ -825,18 +885,20 @@ TEST_F(SubjectGeneratorTest, KerngestaltShapeMetrics) {
               break;
             }
           }
-          if (has_equal_pair) ++linear_rhythm_ok;
+          if (has_equal_pair)
+            ++linear_rhythm_ok;
           break;
         }
         case KerngestaltType::ChromaticCell: {
           // ChromaticCell classifier: 2+ semitone motions in first 4 intervals.
           int semitones = 0;
-          size_t head_len =
-              std::min(static_cast<size_t>(4), ident.core_intervals.size());
+          size_t head_len = std::min(static_cast<size_t>(4), ident.core_intervals.size());
           for (size_t i = 0; i < head_len; ++i) {
-            if (std::abs(ident.core_intervals[i]) == 1) ++semitones;
+            if (std::abs(ident.core_intervals[i]) == 1)
+              ++semitones;
           }
-          if (semitones >= 2) ++chromatic_semitone_ok;
+          if (semitones >= 2)
+            ++chromatic_semitone_ok;
           break;
         }
         case KerngestaltType::IntervalDriven: {
@@ -850,7 +912,8 @@ TEST_F(SubjectGeneratorTest, KerngestaltShapeMetrics) {
               break;
             }
           }
-          if (sig_ok && has_leap) ++interval_driven_leap_ok;
+          if (sig_ok && has_leap)
+            ++interval_driven_leap_ok;
           break;
         }
       }
@@ -860,16 +923,14 @@ TEST_F(SubjectGeneratorTest, KerngestaltShapeMetrics) {
   // Verify that when a type is generated, the shape metrics match the
   // classifier logic. Since the identity is built from the same intervals,
   // the match rate should be very high.
-  int total_ok = arpeggio_chord_ok + linear_rhythm_ok +
-                 chromatic_semitone_ok + interval_driven_leap_ok;
+  int total_ok =
+      arpeggio_chord_ok + linear_rhythm_ok + chromatic_semitone_ok + interval_driven_leap_ok;
   EXPECT_GT(total_checked, 0) << "No subjects with valid cell windows generated";
   if (total_checked > 0) {
-    float ok_ratio =
-        static_cast<float>(total_ok) / static_cast<float>(total_checked);
-    EXPECT_GE(ok_ratio, 0.70f)
-        << "Expected at least 70% of subjects to match type-specific shape "
-           "metrics, got "
-        << total_ok << "/" << total_checked;
+    float ok_ratio = static_cast<float>(total_ok) / static_cast<float>(total_checked);
+    EXPECT_GE(ok_ratio, 0.70f) << "Expected at least 70% of subjects to match type-specific shape "
+                                  "metrics, got "
+                               << total_ok << "/" << total_checked;
   }
 }
 
@@ -877,20 +938,16 @@ TEST_F(SubjectGeneratorTest, CellWindowIdentityPreserved) {
   // The cell_window in subject should match the one in identity.essential.
   for (uint32_t seed = 1; seed <= 10; ++seed) {
     Subject subject = generator.generate(config, seed);
-    EXPECT_EQ(subject.cell_window.valid,
-              subject.identity.essential.cell_window.valid)
+    EXPECT_EQ(subject.cell_window.valid, subject.identity.essential.cell_window.valid)
         << "Cell window valid mismatch (seed " << seed << ")";
     if (subject.cell_window.valid) {
-      EXPECT_EQ(subject.cell_window.start_idx,
-                subject.identity.essential.cell_window.start_idx)
+      EXPECT_EQ(subject.cell_window.start_idx, subject.identity.essential.cell_window.start_idx)
           << "Cell window start mismatch (seed " << seed << ")";
-      EXPECT_EQ(subject.cell_window.end_idx,
-                subject.identity.essential.cell_window.end_idx)
+      EXPECT_EQ(subject.cell_window.end_idx, subject.identity.essential.cell_window.end_idx)
           << "Cell window end mismatch (seed " << seed << ")";
     }
   }
 }
-
 
 // ---------------------------------------------------------------------------
 // Kerngestalt 30-seed batch validation
@@ -922,16 +979,16 @@ TEST_F(SubjectGeneratorTest, KerngestaltBatchValidation) {
 
   SubjectValidator validator;
 
-  for (auto chr : {SubjectCharacter::Severe, SubjectCharacter::Playful,
-                   SubjectCharacter::Noble, SubjectCharacter::Restless}) {
+  for (auto chr : {SubjectCharacter::Severe, SubjectCharacter::Playful, SubjectCharacter::Noble,
+                   SubjectCharacter::Restless}) {
     for (auto arch : {FugueArchetype::Compact, FugueArchetype::Cantabile,
                       FugueArchetype::Invertible, FugueArchetype::Chromatic}) {
       config.character = chr;
       config.archetype = arch;
       config.subject_bars = 2;
 
-      std::string group_key = std::string(subjectCharacterToString(chr)) + "+" +
-                              fugueArchetypeToString(arch);
+      std::string group_key =
+          std::string(subjectCharacterToString(chr)) + "+" + fugueArchetypeToString(arch);
       GroupStats& gs = group_stats[group_key];
 
       for (uint32_t seed = 1; seed <= 30; ++seed) {
@@ -966,9 +1023,8 @@ TEST_F(SubjectGeneratorTest, KerngestaltBatchValidation) {
   }
 
   float cell_valid_rate = static_cast<float>(cell_valid) / static_cast<float>(total);
-  float kern_valid_rate = (cell_valid > 0)
-      ? static_cast<float>(kern_valid) / static_cast<float>(cell_valid)
-      : 0.0f;
+  float kern_valid_rate =
+      (cell_valid > 0) ? static_cast<float>(kern_valid) / static_cast<float>(cell_valid) : 0.0f;
   float tier2_rate = static_cast<float>(tier2_fallback) / static_cast<float>(total);
   float avg_composite = total_composite / static_cast<float>(total);
 
@@ -976,8 +1032,8 @@ TEST_F(SubjectGeneratorTest, KerngestaltBatchValidation) {
   printf("\n");
   printf("=== Kerngestalt Batch Validation (30 seeds x 4 chars x 4 archs = %d) ===\n", total);
   printf("Cell window valid:   %d/%d (%.1f%%)\n", cell_valid, total, cell_valid_rate * 100);
-  printf("isValidKerngestalt:  %d/%d (%.1f%% of cell_valid)\n",
-         kern_valid, cell_valid, kern_valid_rate * 100);
+  printf("isValidKerngestalt:  %d/%d (%.1f%% of cell_valid)\n", kern_valid, cell_valid,
+         kern_valid_rate * 100);
   printf("Tier 2 fallback:     %d/%d (%.1f%%)\n", tier2_fallback, total, tier2_rate * 100);
   printf("Average composite:   %.3f\n", avg_composite);
   printf("\n");
@@ -985,8 +1041,7 @@ TEST_F(SubjectGeneratorTest, KerngestaltBatchValidation) {
   // Type distribution.
   printf("--- KerngestaltType distribution (all %d subjects) ---\n", total);
   for (auto& [type, count] : type_dist) {
-    printf("  %-18s %d (%.1f%%)\n",
-           kerngestaltTypeToString(type), count,
+    printf("  %-18s %d (%.1f%%)\n", kerngestaltTypeToString(type), count,
            static_cast<float>(count) / static_cast<float>(total) * 100);
   }
   printf("\n");
@@ -996,30 +1051,25 @@ TEST_F(SubjectGeneratorTest, KerngestaltBatchValidation) {
   printf("%-30s  cell%%   kern%%   avg_comp\n", "group");
   for (auto& [name, gs] : group_stats) {
     float g_cell = (gs.total > 0)
-        ? static_cast<float>(gs.cell_valid) / static_cast<float>(gs.total) * 100
-        : 0.0f;
+                       ? static_cast<float>(gs.cell_valid) / static_cast<float>(gs.total) * 100
+                       : 0.0f;
     float g_kern = (gs.cell_valid > 0)
-        ? static_cast<float>(gs.kern_valid) / static_cast<float>(gs.cell_valid) * 100
-        : 0.0f;
-    float g_comp = (gs.total > 0)
-        ? gs.composite_sum / static_cast<float>(gs.total)
-        : 0.0f;
+                       ? static_cast<float>(gs.kern_valid) / static_cast<float>(gs.cell_valid) * 100
+                       : 0.0f;
+    float g_comp = (gs.total > 0) ? gs.composite_sum / static_cast<float>(gs.total) : 0.0f;
     printf("%-30s  %5.1f   %5.1f   %.3f\n", name.c_str(), g_cell, g_kern, g_comp);
   }
   printf("\n");
 
   // Assertions.
-  EXPECT_GE(avg_composite, 0.5f)
-      << "Average composite score should be >= 0.5";
-  EXPECT_GE(cell_valid_rate, 0.10f)
-      << "Cell window valid rate should be >= 10%";
+  EXPECT_GE(avg_composite, 0.5f) << "Average composite score should be >= 0.5";
+  EXPECT_GE(cell_valid_rate, 0.10f) << "Cell window valid rate should be >= 10%";
   // isValidKerngestalt among cell_valid subjects should be meaningful.
   if (cell_valid > 0) {
     EXPECT_GE(kern_valid_rate, 0.30f)
         << "isValidKerngestalt pass rate (among cell_valid) should be >= 30%";
   }
 }
-
 
 }  // namespace
 }  // namespace bach

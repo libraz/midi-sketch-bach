@@ -1,12 +1,13 @@
 // Tests for Phase 2: ConstraintState, InvariantSet, SectionAccumulator,
 // GravityConfig, FeasibilityEstimator.
 
+#include "constraint/constraint_state.h"
+
 #include <gtest/gtest.h>
 
 #include <limits>
 #include <vector>
 
-#include "constraint/constraint_state.h"
 #include "constraint/feasibility_estimator.h"
 #include "constraint/obligation.h"
 #include "core/basic_types.h"
@@ -95,14 +96,12 @@ TEST(InvariantSetTest, RangeViolationIsHard) {
   snap.pitches[0] = 60;
 
   // Below range.
-  auto result = inv.satisfies(30, 0, 0, snap, nullptr, nullptr, nullptr,
-                              nullptr, 0);
+  auto result = inv.satisfies(30, 0, 0, snap, nullptr, nullptr, nullptr, nullptr, 0);
   EXPECT_GT(result.hard_violations, 0);
   EXPECT_TRUE(result.range_violation);
 
   // Within range.
-  result = inv.satisfies(60, 0, 0, snap, nullptr, nullptr, nullptr,
-                         nullptr, 0);
+  result = inv.satisfies(60, 0, 0, snap, nullptr, nullptr, nullptr, nullptr, 0);
   EXPECT_EQ(result.hard_violations, 0);
 }
 
@@ -115,14 +114,12 @@ TEST(InvariantSetTest, RepeatLimitIsHard) {
   snap.pitches[0] = 60;
 
   uint8_t recent[] = {60, 60, 60};
-  auto result = inv.satisfies(60, 0, 0, snap, nullptr, nullptr, nullptr,
-                              recent, 3);
+  auto result = inv.satisfies(60, 0, 0, snap, nullptr, nullptr, nullptr, recent, 3);
   EXPECT_GT(result.hard_violations, 0);
   EXPECT_TRUE(result.repeat_violation);
 
   // Different pitch is OK.
-  result = inv.satisfies(62, 0, 0, snap, nullptr, nullptr, nullptr,
-                         recent, 3);
+  result = inv.satisfies(62, 0, 0, snap, nullptr, nullptr, nullptr, recent, 3);
   EXPECT_FALSE(result.repeat_violation);
 }
 
@@ -192,7 +189,7 @@ TEST(SectionAccumulatorTest, ConvergesWithData) {
     accum.recordNote(240, 2);  // 8th note, degree 2
   }
   for (int i = 0; i < 15; ++i) {
-    accum.recordNote(60, 4);   // 32nd note, degree 4
+    accum.recordNote(60, 4);  // 32nd note, degree 4
   }
 
   float jsd_rhythm = accum.rhythm_jsd();
@@ -242,12 +239,12 @@ TEST(JsdDecayTest, FloorAt03) {
 // ---------------------------------------------------------------------------
 
 TEST(GravityTest, PhaseWeightsSumToOne) {
-  for (auto phase : {FuguePhase::Establish, FuguePhase::Develop,
-                     FuguePhase::Resolve, FuguePhase::Conclude}) {
+  for (auto phase :
+       {FuguePhase::Establish, FuguePhase::Develop, FuguePhase::Resolve, FuguePhase::Conclude}) {
     const auto& w = getPhaseWeights(phase);
     float sum = w.melodic + w.vertical + w.rhythm + w.vocabulary;
-    EXPECT_NEAR(sum, 1.0f, 1e-5f)
-        << "Phase " << fuguePhaseToString(phase) << " weights don't sum to 1";
+    EXPECT_NEAR(sum, 1.0f, 1e-5f) << "Phase " << fuguePhaseToString(phase)
+                                  << " weights don't sum to 1";
   }
 }
 
@@ -284,9 +281,7 @@ TEST(ConstraintStateTest, EvaluateRejectsOutOfRange) {
   snap.num_voices = 1;
   snap.pitches[0] = 60;
 
-  float score = cs.evaluate(30, 480, 0, 0, ctx, snap,
-                            nullptr, nullptr, nullptr,
-                            nullptr, 0, 0.0f);
+  float score = cs.evaluate(30, 480, 0, 0, ctx, snap, nullptr, nullptr, nullptr, nullptr, 0, 0.0f);
   EXPECT_EQ(score, -std::numeric_limits<float>::infinity());
 }
 
@@ -325,8 +320,7 @@ TEST(FeasibilityEstimatorTest, EmptyStateHasCandidates) {
   snap.num_voices = 1;
 
   FeasibilityEstimator estimator;
-  auto result = estimator.estimate(state, rules, resolver, 0, 0, 480,
-                                   inv, snap);
+  auto result = estimator.estimate(state, rules, resolver, 0, 0, 480, inv, snap);
   EXPECT_GT(result.min_choices, 0);
 }
 
@@ -356,7 +350,6 @@ TEST(FuguePhaseTest, ConcludeExists) {
   FuguePhase phase = FuguePhase::Conclude;
   EXPECT_STREQ(fuguePhaseToString(phase), "Conclude");
 }
-
 
 // ---------------------------------------------------------------------------
 // P4.e4: GravityConfig with models connected
@@ -514,8 +507,8 @@ TEST(ConstraintStateTest, EvaluateSoftViolationCreatesRecoveryObligation) {
 
   // Evaluate pitch 60 in voice 0: spacing with voice 1 (72) is 12 > 2.
   // This should trigger a soft violation and create a recovery obligation.
-  float score = cs.evaluate(60, kTicksPerBeat, 0, 0, ctx, snap,
-                            nullptr, nullptr, nullptr, nullptr, 0, 0.0f);
+  float score =
+      cs.evaluate(60, kTicksPerBeat, 0, 0, ctx, snap, nullptr, nullptr, nullptr, nullptr, 0, 0.0f);
 
   // Score should be finite (no hard violation), but penalized.
   EXPECT_GT(score, -std::numeric_limits<float>::infinity());
@@ -526,6 +519,26 @@ TEST(ConstraintStateTest, EvaluateSoftViolationCreatesRecoveryObligation) {
   EXPECT_EQ(cs.active_obligations[0].type, ObligationType::LeapResolve);
   EXPECT_EQ(cs.active_obligations[0].strength, ObligationStrength::Soft);
   EXPECT_EQ(cs.active_obligations[0].deadline, kTicksPerBar * 2);
+}
+
+TEST(ConstraintStateTest, EvaluateCanSkipSoftViolationCommitForCandidateSearch) {
+  ConstraintState cs;
+  cs.invariants.max_adjacent_spacing = 2;
+
+  VerticalSnapshot snap;
+  snap.num_voices = 2;
+  snap.pitches[0] = 60;
+  snap.pitches[1] = 72;
+
+  MarkovContext ctx;
+  ctx.prev_pitch = 60;
+
+  float score = cs.evaluate(60, kTicksPerBeat, 0, 0, ctx, snap, nullptr, nullptr, nullptr, nullptr,
+                            0, 0.0f, false);
+
+  EXPECT_GT(score, -std::numeric_limits<float>::infinity());
+  EXPECT_EQ(cs.soft_violation_count, 0);
+  EXPECT_TRUE(cs.active_obligations.empty());
 }
 
 }  // namespace

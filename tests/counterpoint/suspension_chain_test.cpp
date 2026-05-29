@@ -202,8 +202,8 @@ TEST(SuspensionChainTest, ResolutionIntervals) {
 TEST(SuspensionChainTest, DiatonicSus4_3_CMajor) {
   // In C major, E4(64) suspended: 4-3 resolution should step down to D4(62),
   // a whole step (2 semitones) -- not just 1 semitone as in the chromatic version.
-  auto chain = generateSuspensionChain(0, 1, 64, 0, SuspensionType::Sus4_3,
-                                       Key::C, ScaleType::Major);
+  auto chain =
+      generateSuspensionChain(0, 1, 64, 0, SuspensionType::Sus4_3, Key::C, ScaleType::Major);
   ASSERT_EQ(chain.events.size(), 1u);
   EXPECT_EQ(chain.events[0].suspended_pitch, 64);   // E4
   EXPECT_EQ(chain.events[0].resolution_pitch, 62);  // D4 (whole step down)
@@ -212,8 +212,8 @@ TEST(SuspensionChainTest, DiatonicSus4_3_CMajor) {
 TEST(SuspensionChainTest, DiatonicSus4_3_CMajorFtoE) {
   // In C major, F4(65) suspended: 4-3 resolution should step down to E4(64),
   // a half step (1 semitone).
-  auto chain = generateSuspensionChain(0, 1, 65, 0, SuspensionType::Sus4_3,
-                                       Key::C, ScaleType::Major);
+  auto chain =
+      generateSuspensionChain(0, 1, 65, 0, SuspensionType::Sus4_3, Key::C, ScaleType::Major);
   ASSERT_EQ(chain.events.size(), 1u);
   EXPECT_EQ(chain.events[0].suspended_pitch, 65);   // F4
   EXPECT_EQ(chain.events[0].resolution_pitch, 64);  // E4 (half step down)
@@ -221,8 +221,8 @@ TEST(SuspensionChainTest, DiatonicSus4_3_CMajorFtoE) {
 
 TEST(SuspensionChainTest, DiatonicSus2_3_AMinor) {
   // In A harmonic minor, G#4(68) suspended: 2-3 resolves UP to A4(69).
-  auto chain = generateSuspensionChain(0, 1, 68, 0, SuspensionType::Sus2_3,
-                                       Key::A, ScaleType::HarmonicMinor);
+  auto chain = generateSuspensionChain(0, 1, 68, 0, SuspensionType::Sus2_3, Key::A,
+                                       ScaleType::HarmonicMinor);
   ASSERT_EQ(chain.events.size(), 1u);
   EXPECT_EQ(chain.events[0].suspended_pitch, 68);   // G#4
   EXPECT_EQ(chain.events[0].resolution_pitch, 69);  // A4 (half step up)
@@ -230,8 +230,8 @@ TEST(SuspensionChainTest, DiatonicSus2_3_AMinor) {
 
 TEST(SuspensionChainTest, DiatonicSus9_8_CMajor) {
   // In C major, D5(74) suspended: 9-8 resolves down 2 diatonic steps to B4(71).
-  auto chain = generateSuspensionChain(0, 1, 74, 0, SuspensionType::Sus9_8,
-                                       Key::C, ScaleType::Major);
+  auto chain =
+      generateSuspensionChain(0, 1, 74, 0, SuspensionType::Sus9_8, Key::C, ScaleType::Major);
   ASSERT_EQ(chain.events.size(), 1u);
   EXPECT_EQ(chain.events[0].suspended_pitch, 74);   // D5
   EXPECT_EQ(chain.events[0].resolution_pitch, 71);  // B4 (2 diatonic steps down)
@@ -239,13 +239,13 @@ TEST(SuspensionChainTest, DiatonicSus9_8_CMajor) {
 
 TEST(SuspensionChainTest, DiatonicChainPreservesConnection) {
   // Chain of 2 suspensions: resolution of first becomes start of second.
-  auto chain = generateSuspensionChain(0, 2, 67, 0, SuspensionType::Sus4_3,
-                                       Key::C, ScaleType::Major);
+  auto chain =
+      generateSuspensionChain(0, 2, 67, 0, SuspensionType::Sus4_3, Key::C, ScaleType::Major);
   ASSERT_EQ(chain.events.size(), 2u);
-  EXPECT_EQ(chain.events[0].suspended_pitch, 67);   // G4
+  EXPECT_EQ(chain.events[0].suspended_pitch, 67);  // G4
   // G4 down 1 diatonic step in C major = F4(65)
   EXPECT_EQ(chain.events[0].resolution_pitch, 65);
-  EXPECT_EQ(chain.events[1].suspended_pitch, 65);   // F4 (chained)
+  EXPECT_EQ(chain.events[1].suspended_pitch, 65);  // F4 (chained)
   // F4 down 1 diatonic step = E4(64)
   EXPECT_EQ(chain.events[1].resolution_pitch, 64);
 }

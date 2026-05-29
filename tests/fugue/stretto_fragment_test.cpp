@@ -1,8 +1,7 @@
-#include "fugue/stretto.h"
-
 #include <gtest/gtest.h>
 
 #include "core/basic_types.h"
+#include "fugue/stretto.h"
 #include "fugue/subject.h"
 
 namespace bach {

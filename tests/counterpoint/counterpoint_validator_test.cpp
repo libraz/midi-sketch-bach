@@ -33,13 +33,13 @@ class CounterpointValidatorTest : public ::testing::Test {
 
 TEST_F(CounterpointValidatorTest, ValidateCleanCounterpoint) {
   // Good counterpoint: imperfect consonances, varied motion.
-  state.addNote(0, {0, 480, 64, 80, 0});     // E4
-  state.addNote(0, {480, 480, 62, 80, 0});    // D4
-  state.addNote(0, {960, 480, 60, 80, 0});    // C4
+  state.addNote(0, {0, 480, 64, 80, 0});    // E4
+  state.addNote(0, {480, 480, 62, 80, 0});  // D4
+  state.addNote(0, {960, 480, 60, 80, 0});  // C4
 
-  state.addNote(1, {0, 480, 55, 80, 1});      // G3 (M6)
-  state.addNote(1, {480, 480, 58, 80, 1});    // Bb3 (M3)
-  state.addNote(1, {960, 480, 52, 80, 1});    // E3 (m6)
+  state.addNote(1, {0, 480, 55, 80, 1});    // G3 (M6)
+  state.addNote(1, {480, 480, 58, 80, 1});  // Bb3 (M3)
+  state.addNote(1, {960, 480, 52, 80, 1});  // E3 (m6)
 
   CounterpointValidator validator(rules);
   auto violations = validator.validate(state);
@@ -47,7 +47,8 @@ TEST_F(CounterpointValidatorTest, ValidateCleanCounterpoint) {
   // Filter errors only.
   int errors = 0;
   for (const auto& viol : violations) {
-    if (viol.severity >= 1) ++errors;
+    if (viol.severity >= 1)
+      ++errors;
   }
   EXPECT_EQ(errors, 0);
 }
@@ -99,10 +100,10 @@ TEST_F(CounterpointValidatorTest, ValidateTickRange) {
 TEST_F(CounterpointValidatorTest, PerfectComplianceRate) {
   // Good counterpoint with only consonances.
   state.addNote(0, {0, 480, 64, 80, 0});    // E4
-  state.addNote(0, {480, 480, 60, 80, 0});   // C4
+  state.addNote(0, {480, 480, 60, 80, 0});  // C4
 
-  state.addNote(1, {0, 480, 55, 80, 1});     // G3 (M6)
-  state.addNote(1, {480, 480, 52, 80, 1});   // E3 (m6)
+  state.addNote(1, {0, 480, 55, 80, 1});    // G3 (M6)
+  state.addNote(1, {480, 480, 52, 80, 1});  // E3 (m6)
 
   CounterpointValidator validator(rules);
   float rate = validator.getComplianceRate(state);
@@ -165,8 +166,7 @@ TEST_F(CounterpointValidatorTest, GenerateReportContainsHeader) {
   CounterpointValidator validator(rules);
   std::string report = validator.generateReport(state);
 
-  EXPECT_NE(report.find("Counterpoint Validation Report"),
-            std::string::npos);
+  EXPECT_NE(report.find("Counterpoint Validation Report"), std::string::npos);
   EXPECT_NE(report.find("Voices:"), std::string::npos);
   EXPECT_NE(report.find("Compliance:"), std::string::npos);
 }

@@ -5,13 +5,12 @@
 // exemption (passing tone / neighbor tone) is disabled because there is no
 // continuous melodic context to justify a non-harmonic tone.
 
-#include "counterpoint/collision_resolver.h"
-
 #include <gtest/gtest.h>
 
 #include "core/interval.h"
 #include "core/pitch_utils.h"
 #include "counterpoint/bach_rule_evaluator.h"
+#include "counterpoint/collision_resolver.h"
 #include "counterpoint/counterpoint_state.h"
 #include "counterpoint/fux_rule_evaluator.h"
 
@@ -69,8 +68,8 @@ TEST_F(CollisionResolverEntryTest, ReentryForcesConsonantPitch) {
   Tick reentry_tick = kBar * 2;
   uint8_t dissonant_pitch = 54;  // F#3: tritone from C4
 
-  PlacementResult result = resolver_.findSafePitch(
-      state_, rules_, 1, dissonant_pitch, reentry_tick, kBeat);
+  PlacementResult result =
+      resolver_.findSafePitch(state_, rules_, 1, dissonant_pitch, reentry_tick, kBeat);
 
   // Should be accepted but with a DIFFERENT pitch (cascade rescued).
   EXPECT_TRUE(result.accepted);
@@ -112,8 +111,8 @@ TEST_F(CollisionResolverEntryTest, ReentryAllowsConsonant) {
   Tick reentry_tick = kBar * 2;
   uint8_t consonant_pitch = 52;  // E3
 
-  PlacementResult result = resolver_.findSafePitch(
-      state_, rules_, 1, consonant_pitch, reentry_tick, kBeat);
+  PlacementResult result =
+      resolver_.findSafePitch(state_, rules_, 1, consonant_pitch, reentry_tick, kBeat);
 
   EXPECT_TRUE(result.accepted);
   // Should accept original pitch (consonant, no cascade needed).
@@ -152,14 +151,12 @@ TEST_F(CollisionResolverEntryTest, NormalNHTExemptionPreserved) {
   // E3->F#3->G3 is stepwise ascending passing tone.
   // F#3(54) with C4(60) = 6 semitones = tritone, dissonant.
   // This should be allowed as a passing tone (NHT exemption).
-  bool safe = resolver_.isSafeToPlace(
-      state_, rules_, 1, 54, kBeat, kBeat,
-      std::optional<uint8_t>(55));  // next = G3(55)
+  bool safe = resolver_.isSafeToPlace(state_, rules_, 1, 54, kBeat, kBeat,
+                                      std::optional<uint8_t>(55));  // next = G3(55)
 
   // Vertical sovereignty: dissonant interval (tritone) is always rejected
   // regardless of NHT status or continuous voice context.
-  EXPECT_FALSE(safe)
-      << "Vertical sovereignty: dissonant interval always rejected";
+  EXPECT_FALSE(safe) << "Vertical sovereignty: dissonant interval always rejected";
 }
 
 TEST_F(CollisionResolverEntryTest, ReentryDisablesNHTExemption) {
@@ -185,12 +182,10 @@ TEST_F(CollisionResolverEntryTest, ReentryDisablesNHTExemption) {
   // F#3(54) with C4(60) = tritone = dissonant.
   // Even with next_pitch=55 (passing tone pattern), NHT should be disabled
   // because this is a reentry.
-  bool safe = resolver_.isSafeToPlace(
-      state_, rules_, 1, 54, kBar * 2, kBeat,
-      std::optional<uint8_t>(55));
+  bool safe =
+      resolver_.isSafeToPlace(state_, rules_, 1, 54, kBar * 2, kBeat, std::optional<uint8_t>(55));
 
-  EXPECT_FALSE(safe)
-      << "NHT exemption should be disabled for voice reentry";
+  EXPECT_FALSE(safe) << "NHT exemption should be disabled for voice reentry";
 }
 
 // ---------------------------------------------------------------------------
@@ -251,11 +246,9 @@ TEST_F(CollisionResolverEntryTest, FirstEntryIsNotReentry) {
 
   // Voice 1 has never played. Try dissonant pitch at tick 0 (strong beat).
   // D3(50) with C4(60) = 10 = m7, dissonant.
-  bool safe = resolver_.isSafeToPlace(
-      state_, rules_, 1, 50, 0, kBeat, std::optional<uint8_t>(52));
+  bool safe = resolver_.isSafeToPlace(state_, rules_, 1, 50, 0, kBeat, std::optional<uint8_t>(52));
 
-  EXPECT_FALSE(safe)
-      << "First entry should also force consonant placement on strong beat";
+  EXPECT_FALSE(safe) << "First entry should also force consonant placement on strong beat";
 }
 
 TEST_F(CollisionResolverEntryTest, ShortGapIsNotReentry) {
@@ -272,7 +265,7 @@ TEST_F(CollisionResolverEntryTest, ShortGapIsNotReentry) {
   NoteEvent v1_prev;
   v1_prev.start_tick = 0;
   v1_prev.duration = kBeat - 1;  // Ends at tick 479
-  v1_prev.pitch = 52;  // E3
+  v1_prev.pitch = 52;            // E3
   v1_prev.velocity = 80;
   v1_prev.voice = 1;
   state_.addNote(1, v1_prev);
@@ -281,14 +274,12 @@ TEST_F(CollisionResolverEntryTest, ShortGapIsNotReentry) {
   // This is NOT a reentry.
   // F#3(54) with C4(60) = tritone, dissonant on strong beat.
   // With next_pitch=55, passing tone E3->F#3->G3 should be allowed.
-  bool safe = resolver_.isSafeToPlace(
-      state_, rules_, 1, 54, kBeat, kBeat,
-      std::optional<uint8_t>(55));
+  bool safe =
+      resolver_.isSafeToPlace(state_, rules_, 1, 54, kBeat, kBeat, std::optional<uint8_t>(55));
 
   // Vertical sovereignty: dissonant interval always rejected regardless of
   // gap size or NHT status.
-  EXPECT_FALSE(safe)
-      << "Vertical sovereignty: dissonant interval always rejected";
+  EXPECT_FALSE(safe) << "Vertical sovereignty: dissonant interval always rejected";
 }
 
 TEST_F(CollisionResolverEntryTest, ExactBeatGapIsReentry) {
@@ -313,12 +304,10 @@ TEST_F(CollisionResolverEntryTest, ExactBeatGapIsReentry) {
   // At tick kBeat*2 (960), gap = 960 - 480 = 480 = kBeat. This IS reentry.
   // F#3(54) with C4(60) = tritone, dissonant.
   // Even with next_pitch, NHT should be disabled.
-  bool safe = resolver_.isSafeToPlace(
-      state_, rules_, 1, 54, kBeat * 2, kBeat,
-      std::optional<uint8_t>(55));
+  bool safe =
+      resolver_.isSafeToPlace(state_, rules_, 1, 54, kBeat * 2, kBeat, std::optional<uint8_t>(55));
 
-  EXPECT_FALSE(safe)
-      << "Gap == kBeat should trigger reentry; NHT exemption disabled";
+  EXPECT_FALSE(safe) << "Gap == kBeat should trigger reentry; NHT exemption disabled";
 }
 
 TEST_F(CollisionResolverEntryTest, ContinuousVoiceIsNotReentry) {
@@ -342,14 +331,12 @@ TEST_F(CollisionResolverEntryTest, ContinuousVoiceIsNotReentry) {
 
   // At tick kBeat (480), gap = 480 - 480 = 0. Continuous, NOT reentry.
   // F#3(54) dissonant with C4, but NHT exemption should apply.
-  bool safe = resolver_.isSafeToPlace(
-      state_, rules_, 1, 54, kBeat, kBeat,
-      std::optional<uint8_t>(55));
+  bool safe =
+      resolver_.isSafeToPlace(state_, rules_, 1, 54, kBeat, kBeat, std::optional<uint8_t>(55));
 
   // Vertical sovereignty: dissonant interval always rejected regardless of
   // continuous voice context.
-  EXPECT_FALSE(safe)
-      << "Vertical sovereignty: dissonant interval always rejected";
+  EXPECT_FALSE(safe) << "Vertical sovereignty: dissonant interval always rejected";
 }
 
 TEST_F(CollisionResolverEntryTest, OffbeatPositionIsNotReentry) {
@@ -378,11 +365,9 @@ TEST_F(CollisionResolverEntryTest, OffbeatPositionIsNotReentry) {
   // Use D3(50) which is M2 from C4(60) = dissonant, but |50-48|=2 (M2)
   // avoids the melodic tritone check that rejects 54 from 48 (|54-48|=6).
   Tick offbeat_tick = kBar * 2 + kBeat / 2;  // 4080 = not beat boundary
-  bool safe = resolver_.isSafeToPlace(
-      state_, rules_, 1, 50, offbeat_tick, kBeat);
+  bool safe = resolver_.isSafeToPlace(state_, rules_, 1, 50, offbeat_tick, kBeat);
 
-  EXPECT_TRUE(safe)
-      << "Off-beat positions should not enforce consonance regardless of gap";
+  EXPECT_TRUE(safe) << "Off-beat positions should not enforce consonance regardless of gap";
 }
 
 TEST_F(CollisionResolverEntryTest, ReentryWithBachRuleEvaluator) {
@@ -407,16 +392,13 @@ TEST_F(CollisionResolverEntryTest, ReentryWithBachRuleEvaluator) {
 
   // Reentry with dissonant pitch -- should be rejected by isSafeToPlace.
   Tick reentry_tick = kBar * 2;
-  bool safe = resolver_.isSafeToPlace(
-      state_, bach_rules, 1, 54, reentry_tick, kBeat,
-      std::optional<uint8_t>(55));
+  bool safe = resolver_.isSafeToPlace(state_, bach_rules, 1, 54, reentry_tick, kBeat,
+                                      std::optional<uint8_t>(55));
 
-  EXPECT_FALSE(safe)
-      << "Reentry detection should also work with BachRuleEvaluator";
+  EXPECT_FALSE(safe) << "Reentry detection should also work with BachRuleEvaluator";
 
   // But the cascade should rescue it.
-  PlacementResult result = resolver_.findSafePitch(
-      state_, bach_rules, 1, 54, reentry_tick, kBeat);
+  PlacementResult result = resolver_.findSafePitch(state_, bach_rules, 1, 54, reentry_tick, kBeat);
   EXPECT_TRUE(result.accepted);
   EXPECT_NE(result.pitch, 54);
 }

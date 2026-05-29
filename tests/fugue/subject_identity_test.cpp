@@ -3,10 +3,10 @@
 
 #include "fugue/subject_identity.h"
 
+#include <gtest/gtest.h>
+
 #include <cstdlib>
 #include <vector>
-
-#include <gtest/gtest.h>
 
 #include "core/basic_types.h"
 #include "core/note_source.h"
@@ -74,8 +74,7 @@ TEST(SubjectIdentityTest, BuildEssentialIdentity_BasicProperties) {
   // Core rhythm: one duration per note.
   ASSERT_EQ(identity.core_rhythm.size(), 5u);
   for (size_t idx = 0; idx < 5; ++idx) {
-    EXPECT_EQ(identity.core_rhythm[idx], kTicksPerBeat)
-        << "Note " << idx << " rhythm mismatch";
+    EXPECT_EQ(identity.core_rhythm[idx], kTicksPerBeat) << "Note " << idx << " rhythm mismatch";
   }
 
   // Accent pattern: all notes start on beat boundaries -> Strong.
@@ -243,9 +242,8 @@ TEST(SubjectIdentityTest, BuildDerivedTransformations_Retrograde) {
 
 TEST(SubjectIdentityTest, BuildDerivedTransformations_AugmentedDiminished) {
   // Use mixed durations: quarter (480), eighth (240), sixteenth (120).
-  auto notes = makeSubjectNotes(
-      {60, 64, 67, 65},
-      {kTicksPerBeat, duration::kEighthNote, duration::kSixteenthNote, kTicksPerBeat});
+  auto notes = makeSubjectNotes({60, 64, 67, 65}, {kTicksPerBeat, duration::kEighthNote,
+                                                   duration::kSixteenthNote, kTicksPerBeat});
   auto essential = buildEssentialIdentity(notes, Key::C, false);
   auto derived = buildDerivedTransformations(essential);
 
@@ -387,10 +385,9 @@ class SubjectDriftTest : public ::testing::Test {
     // Intervals: +4, +3, +5, -5, -3, -4, +4
     // Every pitch forms a consonance with C3(48):
     //   60-48=12(P8), 64-48=16%12=4(M3), 67-48=19%12=7(P5), 72-48=24%12=0(P8)
-    subject_notes_ = makeSubjectNotes(
-        {60, 64, 67, 72, 67, 64, 60, 64},
-        {kTicksPerBeat, kTicksPerBeat, kTicksPerBeat, kTicksPerBeat,
-         kTicksPerBeat, kTicksPerBeat, kTicksPerBeat, kTicksPerBeat});
+    subject_notes_ = makeSubjectNotes({60, 64, 67, 72, 67, 64, 60, 64},
+                                      {kTicksPerBeat, kTicksPerBeat, kTicksPerBeat, kTicksPerBeat,
+                                       kTicksPerBeat, kTicksPerBeat, kTicksPerBeat, kTicksPerBeat});
 
     // Compute pre-pipeline identity.
     pre_identity_ = buildSubjectIdentity(subject_notes_, Key::C, false);
@@ -414,10 +411,8 @@ class SubjectDriftTest : public ::testing::Test {
     // Place each subject note through the collision resolver.
     std::vector<NoteEvent> placed_notes;
     for (const auto& note : subject_notes_) {
-      auto result = resolver_.findSafePitch(
-          state_, rules_, note.voice, note.pitch,
-          note.start_tick, note.duration,
-          BachNoteSource::FugueSubject);
+      auto result = resolver_.findSafePitch(state_, rules_, note.voice, note.pitch, note.start_tick,
+                                            note.duration, BachNoteSource::FugueSubject);
 
       NoteEvent placed = note;
       if (result.accepted) {
@@ -462,10 +457,9 @@ TEST_F(SubjectDriftTest, IntervalPatternPreservedAfterCollisionResolution) {
     int diff = pre - post;
 
     // Either identical, or differing by a multiple of 12 (octave transposition).
-    EXPECT_TRUE(diff % 12 == 0)
-        << "Interval drift at index " << idx
-        << ": pre=" << pre << " post=" << post
-        << " (diff=" << diff << ", not a multiple of 12)";
+    EXPECT_TRUE(diff % 12 == 0) << "Interval drift at index " << idx << ": pre=" << pre
+                                << " post=" << post << " (diff=" << diff
+                                << ", not a multiple of 12)";
   }
 }
 
@@ -478,13 +472,11 @@ TEST_F(SubjectDriftTest, RhythmPatternPreservedAfterCollisionResolution) {
   ASSERT_TRUE(post_identity.isValid());
 
   // Collision resolution never modifies duration, so rhythm must be identical.
-  ASSERT_EQ(pre_identity_.essential.core_rhythm.size(),
-            post_identity.essential.core_rhythm.size())
+  ASSERT_EQ(pre_identity_.essential.core_rhythm.size(), post_identity.essential.core_rhythm.size())
       << "Rhythm note count changed after collision resolution";
 
   for (size_t idx = 0; idx < pre_identity_.essential.core_rhythm.size(); ++idx) {
-    EXPECT_EQ(pre_identity_.essential.core_rhythm[idx],
-              post_identity.essential.core_rhythm[idx])
+    EXPECT_EQ(pre_identity_.essential.core_rhythm[idx], post_identity.essential.core_rhythm[idx])
         << "Rhythm drift at index " << idx;
   }
 }
@@ -508,7 +500,6 @@ TEST_F(SubjectDriftTest, AccentPatternPreservedAfterCollisionResolution) {
         << "Accent drift at index " << idx;
   }
 }
-
 
 // ===========================================================================
 // Test 10: BuildSubjectIdentity_EmptyNotes
@@ -582,10 +573,10 @@ TEST(SubjectIdentityTest, AccentPattern_MixedStrongWeak) {
 
   ASSERT_TRUE(identity.isValid());
   ASSERT_EQ(identity.accent_pattern.size(), 4u);
-  EXPECT_EQ(identity.accent_pattern[0], AccentPosition::Strong);   // tick 0
-  EXPECT_EQ(identity.accent_pattern[1], AccentPosition::Weak);     // tick 240
-  EXPECT_EQ(identity.accent_pattern[2], AccentPosition::Strong);   // tick 480
-  EXPECT_EQ(identity.accent_pattern[3], AccentPosition::Weak);     // tick 600
+  EXPECT_EQ(identity.accent_pattern[0], AccentPosition::Strong);  // tick 0
+  EXPECT_EQ(identity.accent_pattern[1], AccentPosition::Weak);    // tick 240
+  EXPECT_EQ(identity.accent_pattern[2], AccentPosition::Strong);  // tick 480
+  EXPECT_EQ(identity.accent_pattern[3], AccentPosition::Weak);    // tick 600
 }
 
 TEST(SubjectIdentityTest, BuildDerivedTransformations_InvalidEssential) {
@@ -630,8 +621,8 @@ TEST(SubjectIdentityTest, BuildSubjectIdentity_CompleteRoundTrip) {
   // Full integration: build identity, verify all layers are populated.
   auto notes = makeSubjectNotes(
       {60, 64, 67, 72, 71, 67, 64, 60},
-      {kTicksPerBeat, duration::kEighthNote, duration::kEighthNote, kTicksPerBeat,
-       kTicksPerBeat, duration::kEighthNote, duration::kEighthNote, kTicksPerBeat});
+      {kTicksPerBeat, duration::kEighthNote, duration::kEighthNote, kTicksPerBeat, kTicksPerBeat,
+       duration::kEighthNote, duration::kEighthNote, kTicksPerBeat});
 
   auto identity = buildSubjectIdentity(notes, Key::C, false);
 

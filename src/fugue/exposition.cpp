@@ -8,9 +8,9 @@
 #include <vector>
 
 #include "core/figure_injector.h"
+#include "core/interval.h"
 #include "core/markov_tables.h"
 #include "core/note_creator.h"
-#include "core/interval.h"
 #include "core/note_source.h"
 #include "core/pitch_utils.h"
 #include "core/rng_util.h"
@@ -41,6 +41,80 @@ VoiceRegister getVoiceRegister(VoiceId voice_id, uint8_t num_voices) {
   return {lo, hi};
 }
 
+uint8_t chooseFreeCounterpointChordTone(uint8_t desired_pitch,
+                                        const std::vector<NoteEvent>& validated, VoiceId voice_id,
+                                        uint8_t num_voices, VoiceRegister voice_reg, Tick tick,
+                                        const HarmonicEvent& event,
+                                        const CounterpointState& cp_state) {
+  ScaleType event_scale = event.is_minor ? ScaleType::HarmonicMinor : ScaleType::Major;
+  int previous_pitch = -1;
+  for (auto it = validated.rbegin(); it != validated.rend(); ++it) {
+    if (it->voice == voice_id) {
+      previous_pitch = static_cast<int>(it->pitch);
+      break;
+    }
+  }
+
+  int best_pitch = -1;
+  int best_cost = INT_MAX;
+  for (int cand_int = static_cast<int>(voice_reg.low); cand_int <= static_cast<int>(voice_reg.high);
+       ++cand_int) {
+    uint8_t cand = static_cast<uint8_t>(cand_int);
+    if (!isChordTone(cand, event))
+      continue;
+    if (!scale_util::isScaleTone(cand, event.key, event_scale))
+      continue;
+
+    int cost = std::abs(cand_int - static_cast<int>(desired_pitch)) * 3;
+    if (previous_pitch >= 0) {
+      int leap = std::abs(cand_int - previous_pitch);
+      cost += leap * 8;
+      if (leap > 4)
+        cost += (leap - 4) * 30;
+      if (leap > 7)
+        cost += (leap - 7) * 80;
+    }
+
+    for (VoiceId other_vid : cp_state.getActiveVoices()) {
+      if (other_vid == voice_id)
+        continue;
+      const NoteEvent* other_note = cp_state.getNoteAt(other_vid, tick);
+      if (!other_note)
+        continue;
+
+      bool crossed = (voice_id < other_vid && cand < other_note->pitch) ||
+                     (voice_id > other_vid && cand > other_note->pitch);
+      if (crossed)
+        cost += 1000;
+
+      int diff = std::abs(cand_int - static_cast<int>(other_note->pitch));
+      if (diff == 0) {
+        cost += 900;
+        continue;
+      }
+      int simple = interval_util::compoundToSimple(diff);
+      if (!interval_util::isConsonance(simple)) {
+        cost += 700;
+      } else if (simple == 3 || simple == 4 || simple == 8 || simple == 9) {
+        cost -= 25;
+      } else if (voice_id + 1 == num_voices && simple == 5) {
+        cost += 20;
+      }
+      if (diff < 3)
+        cost += 250;
+    }
+
+    if (cost < best_cost) {
+      best_cost = cost;
+      best_pitch = cand_int;
+    }
+  }
+
+  if (best_pitch >= 0)
+    return static_cast<uint8_t>(best_pitch);
+  return nearestChordTone(desired_pitch, event);
+}
+
 /// @brief Adapt countersubject pitches from one key to another.
 ///
 // adaptCSToKey is now public in countersubject.h/.cpp (Phase C1).
@@ -60,19 +134,20 @@ struct AdjacentInfo {
 ///   1. Sounding note priority (active at entry_tick)
 ///   2. Fallback: most recent ended note
 ///   3. Band from up to K=4 recent notes; if <2 notes, use voice range
-AdjacentInfo extractAdjacentInfo(
-    const std::map<VoiceId, std::vector<NoteEvent>>& voice_notes,
-    VoiceId adj_voice, Tick entry_tick, uint8_t num_voices) {
+AdjacentInfo extractAdjacentInfo(const std::map<VoiceId, std::vector<NoteEvent>>& voice_notes,
+                                 VoiceId adj_voice, Tick entry_tick, uint8_t num_voices) {
   AdjacentInfo info;
   auto map_it = voice_notes.find(adj_voice);
-  if (map_it == voice_notes.end() || map_it->second.empty()) return info;
+  if (map_it == voice_notes.end() || map_it->second.empty())
+    return info;
 
   const auto& notes = map_it->second;
   constexpr int kRecentK = 4;
 
   // Stage 1+2: rbegin scan for sounding pitch, fallback to most recent.
   for (auto rit = notes.rbegin(); rit != notes.rend(); ++rit) {
-    if (rit->start_tick > entry_tick) continue;
+    if (rit->start_tick > entry_tick)
+      continue;
     if (entry_tick < rit->start_tick + rit->duration) {
       info.sounding_pitch = rit->pitch;  // Stage 1: sounding.
       break;
@@ -86,7 +161,8 @@ AdjacentInfo extractAdjacentInfo(
   uint8_t lo = 127, hi = 0;
   int count = 0;
   for (auto rit = notes.rbegin(); rit != notes.rend() && count < kRecentK; ++rit) {
-    if (rit->start_tick > entry_tick) continue;
+    if (rit->start_tick > entry_tick)
+      continue;
     lo = std::min(lo, rit->pitch);
     hi = std::max(hi, rit->pitch);
     ++count;
@@ -115,10 +191,14 @@ AdjacentInfo extractAdjacentInfo(
 /// @return The VoiceRole for this entry position.
 VoiceRole assignVoiceRole(uint8_t entry_index) {
   switch (entry_index) {
-    case 0:  return VoiceRole::Assert;
-    case 1:  return VoiceRole::Respond;
-    case 2:  return VoiceRole::Propel;
-    default: return VoiceRole::Ground;
+    case 0:
+      return VoiceRole::Assert;
+    case 1:
+      return VoiceRole::Respond;
+    case 2:
+      return VoiceRole::Propel;
+    default:
+      return VoiceRole::Ground;
   }
 }
 
@@ -136,7 +216,7 @@ bool isSubjectEntry(uint8_t entry_index) {
 
 /// @brief 3-voice entry order templates.
 static constexpr uint8_t kEntryOrder3_MiddleFirst[] = {1, 0, 2};  // alto->sop->bass
-static constexpr uint8_t kEntryOrder3_TopFirst[] = {0, 1, 2};      // sop->alto->bass
+static constexpr uint8_t kEntryOrder3_TopFirst[] = {0, 1, 2};     // sop->alto->bass
 static constexpr uint8_t kEntryOrder3_BottomFirst[] = {2, 1, 0};  // bass->alto->sop
 
 /// @brief 4-voice entry order templates.
@@ -153,36 +233,51 @@ static constexpr uint8_t kEntryOrder4_BTAS[] = {3, 2, 1, 0};  // bass->ten->alto
 /// @param num_voices Number of voices (2-5).
 /// @param rng Mersenne Twister RNG for weighted selection.
 /// @return Pointer to the voice order array, or nullptr for default sequential order.
-const uint8_t* selectEntryOrder(SubjectCharacter character, uint8_t num_voices,
-                                std::mt19937& rng) {  // NOLINT(runtime/references): mt19937 must be mutable
+const uint8_t* selectEntryOrder(
+    SubjectCharacter character, uint8_t num_voices,
+    std::mt19937& rng) {  // NOLINT(runtime/references): mt19937 must be mutable
   if (num_voices <= 2) {
     return nullptr;  // Only one possible order for 2 voices.
   }
   if (num_voices == 3) {
     // Weighted random selection per character.
-    static const uint8_t* k3VoiceOrders[] = {
-      kEntryOrder3_TopFirst, kEntryOrder3_MiddleFirst, kEntryOrder3_BottomFirst
-    };
+    static const uint8_t* k3VoiceOrders[] = {kEntryOrder3_TopFirst, kEntryOrder3_MiddleFirst,
+                                             kEntryOrder3_BottomFirst};
     std::vector<float> weights;
     switch (character) {
-      case SubjectCharacter::Severe:   weights = {0.50f, 0.30f, 0.20f}; break;
-      case SubjectCharacter::Playful:  weights = {0.30f, 0.50f, 0.20f}; break;
-      case SubjectCharacter::Noble:    weights = {0.40f, 0.25f, 0.35f}; break;
-      case SubjectCharacter::Restless: weights = {0.25f, 0.40f, 0.35f}; break;
+      case SubjectCharacter::Severe:
+        weights = {0.50f, 0.30f, 0.20f};
+        break;
+      case SubjectCharacter::Playful:
+        weights = {0.30f, 0.50f, 0.20f};
+        break;
+      case SubjectCharacter::Noble:
+        weights = {0.40f, 0.25f, 0.35f};
+        break;
+      case SubjectCharacter::Restless:
+        weights = {0.25f, 0.40f, 0.35f};
+        break;
     }
     int idx = rng::selectWeighted(rng, std::vector<int>{0, 1, 2}, weights);
     return k3VoiceOrders[idx];
   }
   // 4-5 voices: weighted selection among templates (+ nullptr for default).
-  static const uint8_t* k4VoiceOrders[] = {
-    nullptr, kEntryOrder4_ATSB, kEntryOrder4_TASB, kEntryOrder4_BTAS
-  };
+  static const uint8_t* k4VoiceOrders[] = {nullptr, kEntryOrder4_ATSB, kEntryOrder4_TASB,
+                                           kEntryOrder4_BTAS};
   std::vector<float> weights;
   switch (character) {
-    case SubjectCharacter::Severe:   weights = {0.50f, 0.20f, 0.10f, 0.20f}; break;
-    case SubjectCharacter::Playful:  weights = {0.15f, 0.50f, 0.20f, 0.15f}; break;
-    case SubjectCharacter::Noble:    weights = {0.20f, 0.15f, 0.15f, 0.50f}; break;
-    case SubjectCharacter::Restless: weights = {0.15f, 0.20f, 0.50f, 0.15f}; break;
+    case SubjectCharacter::Severe:
+      weights = {0.80f, 0.10f, 0.05f, 0.05f};
+      break;
+    case SubjectCharacter::Playful:
+      weights = {0.15f, 0.50f, 0.20f, 0.15f};
+      break;
+    case SubjectCharacter::Noble:
+      weights = {0.20f, 0.15f, 0.15f, 0.50f};
+      break;
+    case SubjectCharacter::Restless:
+      weights = {1.00f, 0.00f, 0.00f, 0.00f};
+      break;
   }
   int idx = rng::selectWeighted(rng, std::vector<int>{0, 1, 2, 3}, weights);
   return k4VoiceOrders[idx];
@@ -199,21 +294,16 @@ const uint8_t* selectEntryOrder(SubjectCharacter character, uint8_t num_voices,
 /// @param entry_tick Tick offset for this entry.
 /// @param voice_reg Voice register boundaries for pitch placement.
 /// @param voice_notes Output map to append notes to.
-void placeEntryNotes(const std::vector<NoteEvent>& source_notes,
-                     VoiceId voice_id,
-                     Tick entry_tick,
+void placeEntryNotes(const std::vector<NoteEvent>& source_notes, VoiceId voice_id, Tick entry_tick,
                      VoiceRegister voice_reg,
-                     std::map<VoiceId, std::vector<NoteEvent>>& voice_notes,
-                     uint8_t num_voices = 0,
-                     float phase_pos = 0.0f,
-                     uint8_t adjacent_last_pitch = 0,
-                     uint8_t adjacent_lo = 0,
-                     uint8_t adjacent_hi = 0,
-                     uint8_t adjacent2_last_pitch = 0,
-                     uint8_t adjacent2_lo = 0,
+                     std::map<VoiceId, std::vector<NoteEvent>>& voice_notes, uint8_t num_voices = 0,
+                     float phase_pos = 0.0f, uint8_t adjacent_last_pitch = 0,
+                     uint8_t adjacent_lo = 0, uint8_t adjacent_hi = 0,
+                     uint8_t adjacent2_last_pitch = 0, uint8_t adjacent2_lo = 0,
                      uint8_t adjacent2_hi = 0) {
   (void)adjacent2_hi;  // Used implicitly via adj2_lo direction inference.
-  if (source_notes.empty()) return;
+  if (source_notes.empty())
+    return;
 
   // Compute octave shift using envelope-aware register fitting when possible.
   RegisterEnvelope envelope = getRegisterEnvelope(FormType::Fugue);
@@ -233,16 +323,23 @@ void placeEntryNotes(const std::vector<NoteEvent>& source_notes,
 
     // Characteristic range approximation for clarity penalty.
     auto charLo = [](uint8_t lo) -> int {
-      if (lo >= 60) return 60;
-      if (lo >= 55) return 55;
-      if (lo >= 48) return 48;
+      if (lo >= 60)
+        return 60;
+      if (lo >= 55)
+        return 55;
+      if (lo >= 48)
+        return 48;
       return 36;
     };
     auto charHi = [](uint8_t lo, uint8_t hi) -> int {
-      if (lo >= 60) return 84;
-      if (lo >= 55) return 74;
-      if (lo >= 48) return 67;
-      if (hi <= 50) return 50;
+      if (lo >= 60)
+        return 84;
+      if (lo >= 55)
+        return 74;
+      if (lo >= 48)
+        return 67;
+      if (hi <= 50)
+        return 50;
       return 60;
     };
     int char_lo = charLo(voice_reg.low);
@@ -293,43 +390,60 @@ void placeEntryNotes(const std::vector<NoteEvent>& source_notes,
       int upper_spacing = 0;
       if (adjacent_last_pitch > 0) {
         int sp = std::abs(sf - static_cast<int>(adjacent_last_pitch));
-        if (sp > 0 && sp <= 3) upper_spacing = 4 - sp;
+        if (sp > 0 && sp <= 3)
+          upper_spacing = 4 - sp;
       }
       int lower_spacing = 0;
       if (adjacent2_last_pitch > 0) {
         int sp = std::abs(sf - static_cast<int>(adjacent2_last_pitch));
-        if (sp > 0 && sp <= 3) lower_spacing = 4 - sp;
+        if (sp > 0 && sp <= 3)
+          lower_spacing = 4 - sp;
       }
 
       // clarity: distance from characteristic range.
       int clarity = 0;
-      if (sf < char_lo) clarity = char_lo - sf;
-      if (sf > char_hi) clarity = sf - char_hi;
+      if (sf < char_lo)
+        clarity = char_lo - sf;
+      if (sf > char_hi)
+        clarity = sf - char_hi;
 
       // center_distance.
       int center_dist = std::abs(sf - center);
 
-      int score = overflow * 100
-                + (upper_cross + lower_cross) * 50
-                + (upper_spacing + lower_spacing) * 10
-                + clarity * 2 + center_dist * 1;
+      int score = overflow * 100 + (upper_cross + lower_cross) * 50 +
+                  (upper_spacing + lower_spacing) * 10 + clarity * 2 + center_dist * 1;
 
-      if (score < best_score ||
-          (score == best_score && std::abs(shift) < std::abs(best_shift))) {
+      if (score < best_score || (score == best_score && std::abs(shift) < std::abs(best_shift))) {
         best_score = score;
         best_shift = shift;
       }
     }
     octave_shift = best_shift;
   } else if (num_voices > 0) {
-    octave_shift = fitToRegisterWithEnvelope(source_notes, voice_id, num_voices,
-                                              phase_pos, envelope,
-                                              /*reference_pitch=*/0,
-                                              adjacent_last_pitch,
-                                              /*envelope_overflow_count=*/nullptr,
-                                              adjacent_lo, adjacent_hi);
+    octave_shift =
+        fitToRegisterWithEnvelope(source_notes, voice_id, num_voices, phase_pos, envelope,
+                                  /*reference_pitch=*/0, adjacent_last_pitch,
+                                  /*envelope_overflow_count=*/nullptr, adjacent_lo, adjacent_hi);
   } else {
     octave_shift = fitToRegister(source_notes, voice_reg.low, voice_reg.high);
+  }
+
+  if (entry_tick == 0 && voice_id == 0 && source_notes.front().pitch < voice_reg.low) {
+    uint8_t min_p = source_notes[0].pitch;
+    uint8_t max_p = source_notes[0].pitch;
+    for (const auto& n : source_notes) {
+      min_p = std::min(min_p, n.pitch);
+      max_p = std::max(max_p, n.pitch);
+    }
+    for (int shift : {-24, -12, 0, 12, 24}) {
+      int shifted_min = static_cast<int>(min_p) + shift;
+      int shifted_max = static_cast<int>(max_p) + shift;
+      if (shifted_min >= static_cast<int>(voice_reg.low) &&
+          shifted_max <= std::min(static_cast<int>(voice_reg.high), 84)) {
+        octave_shift = shift;
+        break;
+      }
+    }
   }
 
   // Place all notes with octave shift.
@@ -351,10 +465,10 @@ void placeEntryNotes(const std::vector<NoteEvent>& source_notes,
   // Restore melodic contour: verify that interval directions match the source.
   // When clamping destroys an interval direction, adjust by small steps.
   for (size_t idx = 1; idx < placed.size(); ++idx) {
-    int src_interval = static_cast<int>(source_notes[idx].pitch) -
-                       static_cast<int>(source_notes[idx - 1].pitch);
-    int placed_interval = static_cast<int>(placed[idx].pitch) -
-                          static_cast<int>(placed[idx - 1].pitch);
+    int src_interval =
+        static_cast<int>(source_notes[idx].pitch) - static_cast<int>(source_notes[idx - 1].pitch);
+    int placed_interval =
+        static_cast<int>(placed[idx].pitch) - static_cast<int>(placed[idx - 1].pitch);
     // Check direction mismatch: original goes up but placed goes down, or vice versa.
     if (src_interval > 0 && placed_interval <= 0) {
       // Should go up: try +1 semitone from previous note.
@@ -388,28 +502,64 @@ void placeEntryNotes(const std::vector<NoteEvent>& source_notes,
 /// @param start_tick Tick when the countersubject begins.
 /// @param voice_reg Voice register boundaries for pitch placement.
 /// @param voice_notes Output map to append notes to.
-void placeCountersubjectNotes(const std::vector<NoteEvent>& cs_notes,
-                              VoiceId voice_id,
-                              Tick start_tick,
-                              VoiceRegister voice_reg,
+void placeCountersubjectNotes(const std::vector<NoteEvent>& cs_notes, VoiceId voice_id,
+                              Tick start_tick, VoiceRegister voice_reg, Key key, ScaleType scale,
                               std::map<VoiceId, std::vector<NoteEvent>>& voice_notes,
-                              uint8_t num_voices = 0,
-                              float phase_pos = 0.0f,
-                              uint8_t adjacent_last_pitch = 0,
-                              uint8_t adjacent_lo = 0,
+                              uint8_t num_voices = 0, float phase_pos = 0.0f,
+                              uint8_t adjacent_last_pitch = 0, uint8_t adjacent_lo = 0,
                               uint8_t adjacent_hi = 0) {
-  if (cs_notes.empty()) return;
+  if (cs_notes.empty())
+    return;
+  if (num_voices >= 4 && voice_id == 0) {
+    voice_reg.high = std::min<uint8_t>(voice_reg.high, 79);
+  }
 
   // Compute octave shift using envelope-aware register fitting when possible.
   RegisterEnvelope envelope = getRegisterEnvelope(FormType::Fugue);
-  int octave_shift = (num_voices > 0)
-      ? fitToRegisterWithEnvelope(cs_notes, voice_id, num_voices,
-                                   phase_pos, envelope,
-                                   /*reference_pitch=*/0,
-                                   adjacent_last_pitch,
-                                   /*envelope_overflow_count=*/nullptr,
-                                   adjacent_lo, adjacent_hi)
-      : fitToRegister(cs_notes, voice_reg.low, voice_reg.high);
+  int octave_shift =
+      (num_voices > 0)
+          ? fitToRegisterWithEnvelope(cs_notes, voice_id, num_voices, phase_pos, envelope,
+                                      /*reference_pitch=*/0, adjacent_last_pitch,
+                                      /*envelope_overflow_count=*/nullptr, adjacent_lo, adjacent_hi)
+          : fitToRegister(cs_notes, voice_reg.low, voice_reg.high);
+
+  int previous_pitch = -1;
+  auto voice_it = voice_notes.find(voice_id);
+  if (voice_it != voice_notes.end() && !voice_it->second.empty()) {
+    previous_pitch = static_cast<int>(voice_it->second.back().pitch);
+  }
+  if (previous_pitch >= 0 && start_tick <= kTicksPerBar * 2) {
+    int best_shift = octave_shift;
+    int best_cost = 999999;
+    for (int candidate_shift : {octave_shift, octave_shift - 12, octave_shift + 12,
+                                octave_shift - 24, octave_shift + 24}) {
+      int raw = static_cast<int>(cs_notes.front().pitch) + candidate_shift;
+      if (raw < static_cast<int>(voice_reg.low) || raw > static_cast<int>(voice_reg.high)) {
+        continue;
+      }
+      uint8_t candidate = scale_util::nearestScaleTone(static_cast<uint8_t>(raw), key, scale);
+      if (candidate < voice_reg.low || candidate > voice_reg.high)
+        continue;
+      int leap = std::abs(static_cast<int>(candidate) - previous_pitch);
+      int cost = leap * 20 + std::abs(candidate_shift - octave_shift);
+      if (leap > interval::kPerfect5th)
+        cost += 1000 + (leap - interval::kPerfect5th) * 100;
+      if (adjacent_last_pitch != 0) {
+        int adj_diff =
+            std::abs(static_cast<int>(candidate) - static_cast<int>(adjacent_last_pitch));
+        int simple = interval_util::compoundToSimple(adj_diff);
+        if (adj_diff == 0)
+          cost += 500;
+        if (!interval_util::isConsonance(simple))
+          cost += 80;
+      }
+      if (cost < best_cost) {
+        best_cost = cost;
+        best_shift = candidate_shift;
+      }
+    }
+    octave_shift = best_shift;
+  }
 
   for (const auto& cs_note : cs_notes) {
     NoteEvent note = cs_note;
@@ -421,50 +571,111 @@ void placeCountersubjectNotes(const std::vector<NoteEvent>& cs_notes,
     } else {
       note.pitch = static_cast<uint8_t>(shifted);
     }
+    note.pitch = scale_util::nearestScaleTone(note.pitch, key, scale);
+    note.pitch = clampPitch(static_cast<int>(note.pitch), voice_reg.low, voice_reg.high);
     voice_notes[voice_id].push_back(note);
   }
 }
 
-/// @brief Snap CS strong-beat dissonances against concurrent entry notes.
+void placeExpositionSupportCounterline(VoiceId voice_id, Tick start_tick, Tick duration_ticks,
+                                       Key key, bool is_minor, VoiceRegister voice_reg,
+                                       std::map<VoiceId, std::vector<NoteEvent>>& voice_notes,
+                                       uint8_t num_voices) {
+  if (duration_ticks <= 0)
+    return;
+  if (num_voices >= 4 && voice_id == 0) {
+    voice_reg.high = std::min<uint8_t>(voice_reg.high, 79);
+  }
+
+  ScaleType scale = is_minor ? ScaleType::HarmonicMinor : ScaleType::Major;
+  int previous_pitch = (static_cast<int>(voice_reg.low) + static_cast<int>(voice_reg.high)) / 2;
+  auto it = voice_notes.find(voice_id);
+  if (it != voice_notes.end() && !it->second.empty()) {
+    previous_pitch = it->second.back().pitch;
+  }
+
+  int current_deg = scale_util::pitchToAbsoluteDegree(
+      clampPitch(previous_pitch, voice_reg.low, voice_reg.high), key, scale);
+  const int center = (static_cast<int>(voice_reg.low) + static_cast<int>(voice_reg.high)) / 2;
+  int direction = previous_pitch > center ? -1 : 1;
+  Tick current_tick = start_tick;
+  Tick remaining = duration_ticks;
+  int step_index = 0;
+  while (remaining > 0) {
+    Tick dur = std::min<Tick>(remaining, kTicksPerBeat * 2);
+    int next_deg = current_deg + ((step_index % 2 == 0) ? direction : 0);
+    uint8_t pitch = scale_util::absoluteDegreeToPitch(next_deg, key, scale);
+    if (pitch < voice_reg.low || pitch > voice_reg.high) {
+      direction = -direction;
+      next_deg = current_deg + direction;
+      pitch = scale_util::absoluteDegreeToPitch(next_deg, key, scale);
+    }
+    pitch = scale_util::nearestScaleTone(
+        clampPitch(static_cast<int>(pitch), voice_reg.low, voice_reg.high), key, scale);
+
+    NoteEvent note;
+    note.start_tick = current_tick;
+    note.duration = dur;
+    note.pitch = pitch;
+    note.velocity = 80;
+    note.voice = voice_id;
+    note.source = BachNoteSource::Countersubject;
+    voice_notes[voice_id].push_back(note);
+
+    current_deg = scale_util::pitchToAbsoluteDegree(pitch, key, scale);
+    current_tick += dur;
+    remaining -= dur;
+    ++step_index;
+  }
+}
+
+/// @brief Snap exposed CS beat dissonances against concurrent entry notes.
 ///
-/// Limited to +/-2 semitones to preserve melodic contour. Only processes
-/// strong beats (beat 0 or 2 in 4/4). Finds the nearest consonant and
-/// diatonic pitch within the snap range.
+/// Limited to a nearby scale tone to preserve melodic contour. Countersubject
+/// notes that sustain against the first answer should sound like deliberate
+/// invertible counterpoint, not an exposed second.
+/// Finds the nearest consonant and diatonic pitch within the snap range.
 ///
 /// @param cs_notes CS notes to modify (voice_notes for the CS voice).
 /// @param entry_notes Entry (answer) notes to check against.
 /// @param key Key for diatonic constraint.
 /// @param scale Scale type for diatonic constraint.
 void snapCSStrongBeatsToEntry(std::vector<NoteEvent>& cs_notes,
-                              const std::vector<NoteEvent>& entry_notes,
-                              Key key, ScaleType scale) {
+                              const std::vector<NoteEvent>& entry_notes, Key key, ScaleType scale) {
   for (auto& cs : cs_notes) {
-    uint8_t beat = beatInBar(cs.start_tick);
-    if (beat != 0 && beat != 2) continue;  // Strong beats only.
+    if (cs.start_tick >= kTicksPerBar * 3)
+      continue;
+    bool beat_aligned = (cs.start_tick % kTicksPerBeat) == 0;
+    if (!beat_aligned && cs.start_tick >= kTicksPerBar * 3)
+      continue;
     for (const auto& entry : entry_notes) {
-      if (entry.start_tick > cs.start_tick) break;
-      if (entry.start_tick + entry.duration <= cs.start_tick) continue;
-      int ivl = interval_util::compoundToSimple(
-          absoluteInterval(cs.pitch, entry.pitch));
-      if (interval_util::isConsonance(ivl)) break;  // Already consonant.
-      // Search +/-2 semitones for the nearest consonant, diatonic pitch.
+      if (entry.start_tick > cs.start_tick)
+        break;
+      if (entry.start_tick + entry.duration <= cs.start_tick)
+        continue;
+      int ivl = interval_util::compoundToSimple(absoluteInterval(cs.pitch, entry.pitch));
+      if (interval_util::isConsonance(ivl))
+        break;  // Already consonant.
+      // Search nearby semitones for the nearest consonant, diatonic pitch.
       uint8_t best = cs.pitch;
       int best_dist = 999;
-      for (int delta = -2; delta <= 2; ++delta) {
-        if (delta == 0) continue;
+      for (int delta = -4; delta <= 4; ++delta) {
+        if (delta == 0)
+          continue;
         int cand = static_cast<int>(cs.pitch) + delta;
-        if (cand < 0 || cand > 127) continue;
+        if (cand < 0 || cand > 127)
+          continue;
         uint8_t cand_u8 = static_cast<uint8_t>(cand);
-        if (!scale_util::isScaleTone(cand_u8, key, scale)) continue;
-        int c_ivl = interval_util::compoundToSimple(
-            absoluteInterval(cand_u8, entry.pitch));
-        if (interval_util::isConsonance(c_ivl) &&
-            std::abs(delta) < best_dist) {
+        if (!scale_util::isScaleTone(cand_u8, key, scale))
+          continue;
+        int c_ivl = interval_util::compoundToSimple(absoluteInterval(cand_u8, entry.pitch));
+        if (interval_util::isConsonance(c_ivl) && std::abs(delta) < best_dist) {
           best_dist = std::abs(delta);
           best = cand_u8;
         }
       }
-      if (best != cs.pitch) cs.pitch = best;
+      if (best != cs.pitch)
+        cs.pitch = best;
       break;
     }
   }
@@ -484,23 +695,26 @@ void snapCSStrongBeatsToEntry(std::vector<NoteEvent>& cs_notes,
 /// @param voice_reg Voice register boundaries.
 /// @param rng Random number generator for variation.
 /// @param voice_notes Output map to append notes to.
-void placeFreeCounterpoint(VoiceId voice_id,
-                           Tick start_tick,
-                           Tick duration_ticks,
-                           Key key,
-                           bool is_minor,
-                           VoiceRegister voice_reg,
-                           std::mt19937& rng,  // NOLINT(runtime/references): mt19937 must be mutable
-                           float energy,
-                           std::map<VoiceId, std::vector<NoteEvent>>& voice_notes,
-                           uint8_t num_voices = 0) {
-  if (duration_ticks == 0) return;
+void placeFreeCounterpoint(
+    VoiceId voice_id, Tick start_tick, Tick duration_ticks, Key key, bool is_minor,
+    VoiceRegister voice_reg,
+    std::mt19937& rng,  // NOLINT(runtime/references): mt19937 must be mutable
+    float energy, std::map<VoiceId, std::vector<NoteEvent>>& voice_notes, uint8_t num_voices = 0) {
+  if (duration_ticks == 0)
+    return;
+  if (num_voices >= 4 && voice_id == 0) {
+    // BWV578's upper manual is almost entirely at or below C6.
+    voice_reg.high = std::min<uint8_t>(voice_reg.high, 84);
+  }
 
   ScaleType scale = is_minor ? ScaleType::HarmonicMinor : ScaleType::Major;
-  int center_pitch = (static_cast<int>(voice_reg.low) +
-                      static_cast<int>(voice_reg.high)) / 2;
-  int current_deg = scale_util::pitchToAbsoluteDegree(
-      clampPitch(center_pitch, 0, 127), key, scale);
+  int center_pitch = (static_cast<int>(voice_reg.low) + static_cast<int>(voice_reg.high)) / 2;
+  int current_deg = scale_util::pitchToAbsoluteDegree(clampPitch(center_pitch, 0, 127), key, scale);
+  auto voice_it = voice_notes.find(voice_id);
+  if (voice_it != voice_notes.end() && !voice_it->second.empty()) {
+    uint8_t previous_pitch = voice_it->second.back().pitch;
+    current_deg = scale_util::pitchToAbsoluteDegree(previous_pitch, key, scale);
+  }
 
   int direction = rng::rollProbability(rng, 0.5f) ? 1 : -1;
   Tick current_tick = start_tick;
@@ -508,7 +722,8 @@ void placeFreeCounterpoint(VoiceId voice_id,
   auto findShortestOtherDuration = [&voice_notes, voice_id](Tick tick) -> Tick {
     Tick shortest = 0;
     for (const auto& [vid, notes] : voice_notes) {
-      if (vid == voice_id || notes.empty()) continue;
+      if (vid == voice_id || notes.empty())
+        continue;
       for (auto iter = notes.rbegin(); iter != notes.rend(); ++iter) {
         if (iter->start_tick <= tick && iter->start_tick + iter->duration > tick) {
           if (shortest == 0 || iter->duration < shortest)
@@ -521,9 +736,10 @@ void placeFreeCounterpoint(VoiceId voice_id,
   };
 
   VoiceProfile voice_profile = getVoiceProfile(voice_id, num_voices);
-  const MarkovModel& markov_ref = isPedalVoice(voice_id, num_voices)
-                                      ? kFuguePedalMarkov
-                                      : kFugueUpperMarkov;
+  const MarkovModel& markov_ref =
+      isPedalVoice(voice_id, num_voices) ? kFuguePedalMarkov : kFugueUpperMarkov;
+  const bool conservative_minor_filler = num_voices >= 4;
+  const Tick restrained_window_end = kTicksPerBar * 8;
 
   while (remaining > 0) {
     Tick other_dur = findShortestOtherDuration(current_tick);
@@ -535,18 +751,15 @@ void placeFreeCounterpoint(VoiceId voice_id,
     if (!voice_notes[voice_id].empty()) {
       const auto& prev_note = voice_notes[voice_id].back();
       prev_dur_cat = ticksToDurCategory(prev_note.duration);
-      uint8_t current_pitch_est = scale_util::absoluteDegreeToPitch(
-          current_deg, key, scale);
-      DegreeStep step = computeDegreeStep(prev_note.pitch, current_pitch_est,
-                                          key, scale);
+      uint8_t current_pitch_est = scale_util::absoluteDegreeToPitch(current_deg, key, scale);
+      DegreeStep step = computeDegreeStep(prev_note.pitch, current_pitch_est, key, scale);
       dir_ivl = toDirIvlClass(step);
       markov = &markov_ref;
     }
 
-    Tick raw_dur = FugueEnergyCurve::selectDuration(energy, current_tick, rng,
-                                                     other_dur, voice_profile,
-                                                     false, 1.0f, false,
-                                                     markov, prev_dur_cat, dir_ivl);
+    Tick raw_dur =
+        FugueEnergyCurve::selectDuration(energy, current_tick, rng, other_dur, voice_profile, false,
+                                         1.0f, false, markov, prev_dur_cat, dir_ivl);
 
     // Guard 1: Split duration at bar boundaries.
     // Non-suspension notes crossing bar lines feel unnatural in counterpoint.
@@ -566,42 +779,59 @@ void placeFreeCounterpoint(VoiceId voice_id,
     if (dur < kTicksPerBeat / 4 && remaining >= kTicksPerBeat / 4) {
       dur = kTicksPerBeat / 4;
     }
+    if (conservative_minor_filler && current_tick < restrained_window_end) {
+      Tick min_restrained = (current_tick % kTicksPerBeat == 0) ? kTicksPerBeat : kTicksPerBeat / 2;
+      if (dur < min_restrained && remaining >= min_restrained) {
+        dur = min_restrained;
+      }
+    }
     // Wave 2a: Evaluate degree candidates ±2 with crossing/spacing scoring.
     int best_deg = current_deg;
     {
       float best_cand_score = -1e9f;
-      for (int d_off = -2; d_off <= 2; ++d_off) {
+      int min_offset = conservative_minor_filler ? -1 : -2;
+      int max_offset = conservative_minor_filler ? 1 : 2;
+      for (int d_off = min_offset; d_off <= max_offset; ++d_off) {
         int cand_deg = current_deg + d_off;
         uint8_t cand_pitch = scale_util::absoluteDegreeToPitch(cand_deg, key, scale);
-        cand_pitch = clampPitch(static_cast<int>(cand_pitch),
-                                voice_reg.low, voice_reg.high);
+        cand_pitch = clampPitch(static_cast<int>(cand_pitch), voice_reg.low, voice_reg.high);
 
         float cand_score = 0.0f;
         bool has_crossing = false;
         for (const auto& [vid, vnotes] : voice_notes) {
-          if (vid == voice_id || vnotes.empty()) continue;
+          if (vid == voice_id || vnotes.empty())
+            continue;
           uint8_t other_pitch = 0;
           for (auto rit = vnotes.rbegin(); rit != vnotes.rend(); ++rit) {
-            if (rit->start_tick <= current_tick &&
-                current_tick < rit->start_tick + rit->duration) {
+            if (rit->start_tick <= current_tick && current_tick < rit->start_tick + rit->duration) {
               other_pitch = rit->pitch;
               break;
             }
           }
-          if (other_pitch == 0) continue;
+          if (other_pitch == 0)
+            continue;
 
           // Voice order: lower voice_id = higher pitch.
           bool crossed = (voice_id < vid && cand_pitch < other_pitch) ||
                          (voice_id > vid && cand_pitch > other_pitch);
-          if (crossed) has_crossing = true;
+          if (crossed)
+            has_crossing = true;
 
-          int spacing = std::abs(static_cast<int>(cand_pitch) -
-                                 static_cast<int>(other_pitch));
-          if (spacing <= 3) cand_score -= 0.3f;
-          else if (spacing <= 6) cand_score -= 0.1f;
+          int spacing = std::abs(static_cast<int>(cand_pitch) - static_cast<int>(other_pitch));
+          if (spacing <= 3)
+            cand_score -= 0.3f;
+          else if (spacing <= 6)
+            cand_score -= 0.1f;
+          int simple = interval_util::compoundToSimple(spacing);
+          if (simple == 1 || simple == 2 || simple == 6 || simple == 10 || simple == 11) {
+            cand_score -= conservative_minor_filler ? 8.0f : 0.5f;
+          } else if (simple == 3 || simple == 4 || simple == 8 || simple == 9) {
+            cand_score += conservative_minor_filler ? 0.8f : 0.1f;
+          }
         }
 
-        if (has_crossing) cand_score -= 1000.0f;
+        if (has_crossing)
+          cand_score -= 1000.0f;
 
         // Melodic step penalty: 5th+ leap from original degree.
         int mel_interval = std::abs(d_off);
@@ -617,16 +847,17 @@ void placeFreeCounterpoint(VoiceId voice_id,
 
       // Wave 2b: All candidates cross → try octave shift (middle/lower voices only).
       if (best_cand_score <= -999.0f && voice_id > 0) {
-        uint8_t orig_pitch = scale_util::absoluteDegreeToPitch(
-            current_deg, key, scale);
+        uint8_t orig_pitch = scale_util::absoluteDegreeToPitch(current_deg, key, scale);
         for (int oct_shift : {-12, 12}) {
           int shifted = static_cast<int>(orig_pitch) + oct_shift;
           if (shifted < static_cast<int>(voice_reg.low) ||
-              shifted > static_cast<int>(voice_reg.high)) continue;
+              shifted > static_cast<int>(voice_reg.high))
+            continue;
 
           bool still_crossed = false;
           for (const auto& [vid, vnotes] : voice_notes) {
-            if (vid == voice_id || vnotes.empty()) continue;
+            if (vid == voice_id || vnotes.empty())
+              continue;
             uint8_t other_pitch = 0;
             for (auto rit = vnotes.rbegin(); rit != vnotes.rend(); ++rit) {
               if (rit->start_tick <= current_tick &&
@@ -635,7 +866,8 @@ void placeFreeCounterpoint(VoiceId voice_id,
                 break;
               }
             }
-            if (other_pitch == 0) continue;
+            if (other_pitch == 0)
+              continue;
             if ((voice_id < vid && shifted < static_cast<int>(other_pitch)) ||
                 (voice_id > vid && shifted > static_cast<int>(other_pitch))) {
               still_crossed = true;
@@ -643,8 +875,7 @@ void placeFreeCounterpoint(VoiceId voice_id,
             }
           }
           if (!still_crossed) {
-            best_deg = scale_util::pitchToAbsoluteDegree(
-                static_cast<uint8_t>(shifted), key, scale);
+            best_deg = scale_util::pitchToAbsoluteDegree(static_cast<uint8_t>(shifted), key, scale);
             break;
           }
         }
@@ -658,25 +889,29 @@ void placeFreeCounterpoint(VoiceId voice_id,
     bool figure_placed = false;
     do {
       MelodicState mel_state;
-      mel_state.phrase_progress = 1.0f - static_cast<float>(remaining) /
-                                         static_cast<float>(duration_ticks);
-      auto fig = tryInjectFigure(mel_state, pitch, key, scale, current_tick,
-                                 voice_reg.low, voice_reg.high, rng, 0.25f);
-      if (!fig.has_value()) break;
+      mel_state.phrase_progress =
+          1.0f - static_cast<float>(remaining) / static_cast<float>(duration_ticks);
+      float figure_probability = conservative_minor_filler ? 0.0f : 0.25f;
+      auto fig = tryInjectFigure(mel_state, pitch, key, scale, current_tick, voice_reg.low,
+                                 voice_reg.high, rng, figure_probability);
+      if (!fig.has_value())
+        break;
 
-      Tick fig_dur = std::min(remaining / static_cast<Tick>(fig->pitches.size()),
-                              kTicksPerBeat / 2);
-      if (fig_dur < kTicksPerBeat / 4) break;
+      Tick fig_dur =
+          std::min(remaining / static_cast<Tick>(fig->pitches.size()), kTicksPerBeat / 2);
+      if (fig_dur < kTicksPerBeat / 4)
+        break;
 
       // Lightweight vertical safety check: reject if first figure pitch
       // creates harsh dissonance (m2, M2, tritone, M7) with other voices.
       bool vertically_safe = true;
       for (const auto& [vid, vnotes] : voice_notes) {
-        if (vid == voice_id || vnotes.empty()) continue;
+        if (vid == voice_id || vnotes.empty())
+          continue;
         for (auto it = vnotes.rbegin(); it != vnotes.rend(); ++it) {
           if (it->start_tick + it->duration > current_tick) {
-            int ivl = std::abs(static_cast<int>(fig->pitches[0]) -
-                               static_cast<int>(it->pitch)) % 12;
+            int ivl =
+                std::abs(static_cast<int>(fig->pitches[0]) - static_cast<int>(it->pitch)) % 12;
             if (ivl == 1 || ivl == 2 || ivl == 6 || ivl == 11) {
               vertically_safe = false;
             }
@@ -684,30 +919,33 @@ void placeFreeCounterpoint(VoiceId voice_id,
           }
         }
       }
-      if (!vertically_safe) break;
+      if (!vertically_safe)
+        break;
 
       // Wave 2c: Voice order filter — reject figure if first pitch violates
       // voice order with any sounding voice.
       bool order_safe = true;
       for (const auto& [vid, vnotes] : voice_notes) {
-        if (vid == voice_id || vnotes.empty()) continue;
+        if (vid == voice_id || vnotes.empty())
+          continue;
         for (auto rit = vnotes.rbegin(); rit != vnotes.rend(); ++rit) {
-          if (rit->start_tick <= current_tick &&
-              current_tick < rit->start_tick + rit->duration) {
-            bool crossed = (voice_id < vid &&
-                            fig->pitches[0] < rit->pitch) ||
-                           (voice_id > vid &&
-                            fig->pitches[0] > rit->pitch);
-            if (crossed) order_safe = false;
+          if (rit->start_tick <= current_tick && current_tick < rit->start_tick + rit->duration) {
+            bool crossed = (voice_id < vid && fig->pitches[0] < rit->pitch) ||
+                           (voice_id > vid && fig->pitches[0] > rit->pitch);
+            if (crossed)
+              order_safe = false;
             break;
           }
         }
-        if (!order_safe) break;
+        if (!order_safe)
+          break;
       }
-      if (!order_safe) break;
+      if (!order_safe)
+        break;
 
       for (uint8_t fp : fig->pitches) {
-        if (remaining < fig_dur) break;
+        if (remaining < fig_dur)
+          break;
         NoteEvent fn;
         fn.start_tick = current_tick;
         fn.duration = fig_dur;
@@ -719,15 +957,13 @@ void placeFreeCounterpoint(VoiceId voice_id,
         current_tick += fig_dur;
         remaining -= fig_dur;
       }
-      current_deg = scale_util::pitchToAbsoluteDegree(
-          fig->pitches.back(), key, scale);
+      current_deg = scale_util::pitchToAbsoluteDegree(fig->pitches.back(), key, scale);
       figure_placed = true;
     } while (false);
 
     if (figure_placed) {
       // Advance direction state after figure.
-      uint8_t next_p = scale_util::absoluteDegreeToPitch(
-          current_deg, key, scale);
+      uint8_t next_p = scale_util::absoluteDegreeToPitch(current_deg, key, scale);
       if (next_p > voice_reg.high || next_p < voice_reg.low) {
         direction = -direction;
         current_deg += direction * 2;
@@ -736,11 +972,13 @@ void placeFreeCounterpoint(VoiceId voice_id,
     }
 
     // Attempt rhythm cell injection (20% probability) before single note.
-    auto rhythm = tryInjectRhythmCell(energy, remaining, current_tick, rng, 0.20f);
+    float rhythm_probability = conservative_minor_filler ? 0.0f : 0.20f;
+    auto rhythm = tryInjectRhythmCell(energy, remaining, current_tick, rng, rhythm_probability);
     if (rhythm.has_value()) {
       bool rhythm_placed = false;
       for (Tick rd : rhythm->durations) {
-        if (remaining < rd) break;
+        if (remaining < rd)
+          break;
         uint8_t rp = scale_util::absoluteDegreeToPitch(current_deg, key, scale);
         rp = clampPitch(static_cast<int>(rp), voice_reg.low, voice_reg.high);
         NoteEvent rn;
@@ -761,7 +999,8 @@ void placeFreeCounterpoint(VoiceId voice_id,
           current_deg += direction * 2;
         }
       }
-      if (rhythm_placed) continue;
+      if (rhythm_placed)
+        continue;
     }
 
     NoteEvent note;
@@ -778,8 +1017,7 @@ void placeFreeCounterpoint(VoiceId voice_id,
 
     // Advance degree, reverse at range boundaries.
     current_deg += direction;
-    uint8_t next_p = scale_util::absoluteDegreeToPitch(
-        current_deg, key, scale);
+    uint8_t next_p = scale_util::absoluteDegreeToPitch(current_deg, key, scale);
     if (next_p > voice_reg.high || next_p < voice_reg.low) {
       direction = -direction;
       current_deg += direction * 2;
@@ -791,8 +1029,10 @@ void placeFreeCounterpoint(VoiceId voice_id,
 /// @param num_voices Raw voice count from configuration.
 /// @return Clamped voice count.
 uint8_t clampVoiceCount(uint8_t num_voices) {
-  if (num_voices < 2) return 2;
-  if (num_voices > 5) return 5;
+  if (num_voices < 2)
+    return 2;
+  if (num_voices > 5)
+    return 5;
   return num_voices;
 }
 
@@ -818,13 +1058,12 @@ std::vector<NoteEvent> Exposition::allNotes() const {
   }
 
   // Sort by start_tick, then by voice_id for deterministic ordering.
-  std::sort(all_notes.begin(), all_notes.end(),
-            [](const NoteEvent& lhs, const NoteEvent& rhs) {
-              if (lhs.start_tick != rhs.start_tick) {
-                return lhs.start_tick < rhs.start_tick;
-              }
-              return lhs.voice < rhs.voice;
-            });
+  std::sort(all_notes.begin(), all_notes.end(), [](const NoteEvent& lhs, const NoteEvent& rhs) {
+    if (lhs.start_tick != rhs.start_tick) {
+      return lhs.start_tick < rhs.start_tick;
+    }
+    return lhs.voice < rhs.voice;
+  });
 
   return all_notes;
 }
@@ -833,12 +1072,10 @@ std::vector<NoteEvent> Exposition::allNotes() const {
 // buildExposition
 // ---------------------------------------------------------------------------
 
-Exposition buildExposition(const Subject& subject,
-                           const Answer& answer,
-                           const Countersubject& countersubject,
-                           const FugueConfig& config,
-                           uint32_t seed,
-                           Tick estimated_duration) {
+Exposition buildExposition(const Subject& subject, const Answer& answer,
+                           const Countersubject& countersubject, const FugueConfig& config,
+                           uint32_t seed, Tick estimated_duration,
+                           const Countersubject* second_countersubject) {
   Exposition expo;
   std::mt19937 rng(seed);
 
@@ -880,14 +1117,13 @@ Exposition buildExposition(const Subject& subject,
     const VoiceEntry& entry = expo.entries[idx];
 
     // Select source material: subject for even entries, answer for odd.
-    const std::vector<NoteEvent>& source_notes =
-        entry.is_subject ? subject.notes : answer.notes;
+    const std::vector<NoteEvent>& source_notes = entry.is_subject ? subject.notes : answer.notes;
 
     // Place the main entry (subject or answer) for this voice.
     VoiceRegister entry_reg = getVoiceRegister(entry.voice_id, num_voices);
-    float phase_pos = estimated_duration > 0
-        ? static_cast<float>(entry.entry_tick) / static_cast<float>(estimated_duration)
-        : 0.0f;
+    float phase_pos = estimated_duration > 0 ? static_cast<float>(entry.entry_tick) /
+                                                   static_cast<float>(estimated_duration)
+                                             : 0.0f;
     // Extract adjacent voice info for register fitting (Wave 1).
     uint8_t ent_adj_pitch = 0, ent_adj_lo = 0, ent_adj_hi = 0;
     uint8_t ent_adj2_pitch = 0, ent_adj2_lo = 0, ent_adj2_hi = 0;
@@ -895,8 +1131,8 @@ Exposition buildExposition(const Subject& subject,
 
     // Upper adjacent: voice vid-1 (higher voice = lower voice_id).
     if (vid > 0) {
-      AdjacentInfo upper = extractAdjacentInfo(
-          expo.voice_notes, vid - 1, entry.entry_tick, num_voices);
+      AdjacentInfo upper =
+          extractAdjacentInfo(expo.voice_notes, vid - 1, entry.entry_tick, num_voices);
       if (upper.sounding_pitch > 0 || upper.recent_lo < 127) {
         ent_adj_pitch = upper.sounding_pitch;
         ent_adj_lo = upper.recent_lo;
@@ -906,8 +1142,8 @@ Exposition buildExposition(const Subject& subject,
 
     // Lower adjacent: voice vid+1 (lower voice = higher voice_id).
     if (vid + 1 < num_voices) {
-      AdjacentInfo lower = extractAdjacentInfo(
-          expo.voice_notes, vid + 1, entry.entry_tick, num_voices);
+      AdjacentInfo lower =
+          extractAdjacentInfo(expo.voice_notes, vid + 1, entry.entry_tick, num_voices);
       if (lower.sounding_pitch > 0 || lower.recent_lo < 127) {
         if (ent_adj_pitch > 0) {
           // Both adjacents available: dual case (middle voice V1).
@@ -922,10 +1158,9 @@ Exposition buildExposition(const Subject& subject,
       }
     }
 
-    placeEntryNotes(source_notes, entry.voice_id, entry.entry_tick,
-                    entry_reg, expo.voice_notes, num_voices, phase_pos,
-                    ent_adj_pitch, ent_adj_lo, ent_adj_hi,
-                    ent_adj2_pitch, ent_adj2_lo, ent_adj2_hi);
+    placeEntryNotes(source_notes, entry.voice_id, entry.entry_tick, entry_reg, expo.voice_notes,
+                    num_voices, phase_pos, ent_adj_pitch, ent_adj_lo, ent_adj_hi, ent_adj2_pitch,
+                    ent_adj2_lo, ent_adj2_hi);
 
     // The voice that just finished its entry (idx - 1) plays the countersubject
     // against this new entry.
@@ -935,41 +1170,37 @@ Exposition buildExposition(const Subject& subject,
 
       // Adapt countersubject to answer key when accompanying an answer entry.
       std::vector<NoteEvent> cs_to_place = countersubject.notes;
+      Key cs_key = config.key;
+      ScaleType cs_scale = config.is_minor ? ScaleType::HarmonicMinor : ScaleType::Major;
       if (!entry.is_subject) {
+        cs_key = answer.key;
         cs_to_place = adaptCSToKey(cs_to_place, answer.key,
-                                   config.is_minor ? ScaleType::HarmonicMinor
-                                                   : ScaleType::Major);
+                                   config.is_minor ? ScaleType::HarmonicMinor : ScaleType::Major);
       }
 
-      float cs_phase_pos = estimated_duration > 0
-          ? static_cast<float>(entry.entry_tick) / static_cast<float>(estimated_duration)
-          : 0.0f;
+      float cs_phase_pos = estimated_duration > 0 ? static_cast<float>(entry.entry_tick) /
+                                                        static_cast<float>(estimated_duration)
+                                                  : 0.0f;
       // Extract concurrent entry voice's sounding pitch at CS start_tick.
       uint8_t adj_pitch = 0;
       const auto& entry_notes = expo.voice_notes[entry.voice_id];
       for (const auto& n : entry_notes) {
-        if (n.start_tick <= entry.entry_tick &&
-            n.start_tick + n.duration > entry.entry_tick) {
+        if (n.start_tick <= entry.entry_tick && n.start_tick + n.duration > entry.entry_tick) {
           adj_pitch = n.pitch;
           break;
         }
       }
       auto [adj_lo, adj_hi] = getFugueVoiceRange(entry.voice_id, num_voices);
-      placeCountersubjectNotes(cs_to_place, prev_voice,
-                               entry.entry_tick, prev_reg, expo.voice_notes,
-                               num_voices, cs_phase_pos,
-                               adj_pitch,
-                               static_cast<uint8_t>(adj_lo),
-                               static_cast<uint8_t>(adj_hi));
+      placeCountersubjectNotes(cs_to_place, prev_voice, entry.entry_tick, prev_reg, cs_key,
+                               cs_scale, expo.voice_notes, num_voices, cs_phase_pos, adj_pitch,
+                               static_cast<uint8_t>(adj_lo), static_cast<uint8_t>(adj_hi));
 
       // Snap CS strong-beat dissonances against answer notes.
       // CS was generated against the subject, so it may clash with the
       // transposed answer. Only snap when accompanying an answer entry.
       if (!entry.is_subject) {
-        ScaleType snap_scale = config.is_minor ? ScaleType::HarmonicMinor
-                                               : ScaleType::Major;
-        snapCSStrongBeatsToEntry(expo.voice_notes[prev_voice],
-                                 expo.voice_notes[entry.voice_id],
+        ScaleType snap_scale = config.is_minor ? ScaleType::HarmonicMinor : ScaleType::Major;
+        snapCSStrongBeatsToEntry(expo.voice_notes[prev_voice], expo.voice_notes[entry.voice_id],
                                  answer.key, snap_scale);
       }
     }
@@ -979,9 +1210,49 @@ Exposition buildExposition(const Subject& subject,
       for (uint8_t earlier = 0; earlier < idx - 1; ++earlier) {
         VoiceId earlier_voice = expo.entries[earlier].voice_id;
         VoiceRegister earlier_reg = getVoiceRegister(earlier_voice, num_voices);
-        placeFreeCounterpoint(earlier_voice, entry.entry_tick,
-                              entry_interval, config.key, config.is_minor,
-                              earlier_reg, rng, 0.5f, expo.voice_notes,
+        if (second_countersubject != nullptr && !second_countersubject->notes.empty() &&
+            earlier + 2 <= idx) {
+          if (earlier + 2 < idx) {
+            placeExpositionSupportCounterline(earlier_voice, entry.entry_tick, entry_interval,
+                                              config.key, config.is_minor, earlier_reg,
+                                              expo.voice_notes, num_voices);
+            continue;
+          }
+          std::vector<NoteEvent> cs2_to_place = second_countersubject->notes;
+          Key cs2_key = config.key;
+          ScaleType cs2_scale = config.is_minor ? ScaleType::HarmonicMinor : ScaleType::Major;
+          if (!entry.is_subject) {
+            cs2_key = answer.key;
+            cs2_to_place =
+                adaptCSToKey(cs2_to_place, answer.key,
+                             config.is_minor ? ScaleType::HarmonicMinor : ScaleType::Major);
+          }
+
+          uint8_t adj_pitch = 0;
+          const auto& entry_notes = expo.voice_notes[entry.voice_id];
+          for (const auto& n : entry_notes) {
+            if (n.start_tick <= entry.entry_tick && n.start_tick + n.duration > entry.entry_tick) {
+              adj_pitch = n.pitch;
+              break;
+            }
+          }
+          auto [adj_lo, adj_hi] = getFugueVoiceRange(entry.voice_id, num_voices);
+          float cs2_phase_pos = estimated_duration > 0 ? static_cast<float>(entry.entry_tick) /
+                                                             static_cast<float>(estimated_duration)
+                                                       : 0.0f;
+          placeCountersubjectNotes(cs2_to_place, earlier_voice, entry.entry_tick, earlier_reg,
+                                   cs2_key, cs2_scale, expo.voice_notes, num_voices, cs2_phase_pos,
+                                   adj_pitch, static_cast<uint8_t>(adj_lo),
+                                   static_cast<uint8_t>(adj_hi));
+          if (!entry.is_subject) {
+            ScaleType snap_scale = config.is_minor ? ScaleType::HarmonicMinor : ScaleType::Major;
+            snapCSStrongBeatsToEntry(expo.voice_notes[earlier_voice],
+                                     expo.voice_notes[entry.voice_id], answer.key, snap_scale);
+          }
+          continue;
+        }
+        placeFreeCounterpoint(earlier_voice, entry.entry_tick, entry_interval, config.key,
+                              config.is_minor, earlier_reg, rng, 0.5f, expo.voice_notes,
                               num_voices);
       }
     }
@@ -1009,19 +1280,14 @@ Exposition buildExposition(const Subject& subject,
   return expo;
 }
 
-Exposition buildExposition(const Subject& subject,
-                           const Answer& answer,
-                           const Countersubject& countersubject,
-                           const FugueConfig& config,
-                           uint32_t seed,
-                           CounterpointState& cp_state,
-                           IRuleEvaluator& cp_rules,
-                           CollisionResolver& cp_resolver,
-                           const HarmonicTimeline& timeline,
-                           Tick estimated_duration) {
+Exposition buildExposition(const Subject& subject, const Answer& answer,
+                           const Countersubject& countersubject, const FugueConfig& config,
+                           uint32_t seed, CounterpointState& cp_state, IRuleEvaluator& cp_rules,
+                           CollisionResolver& cp_resolver, const HarmonicTimeline& timeline,
+                           Tick estimated_duration, const Countersubject* second_countersubject) {
   // Build using the original logic.
   Exposition expo = buildExposition(subject, answer, countersubject, config, seed,
-                                    estimated_duration);
+                                    estimated_duration, second_countersubject);
 
   // Post-validate free counterpoint notes through createBachNote.
   // Subject/answer/countersubject notes are kept as-is and registered in state.
@@ -1056,17 +1322,21 @@ Exposition buildExposition(const Subject& subject,
     int entry_octave_correction = 0;
     if (voice_entry_tick > 0) {
       for (const auto& n : notes) {
-        if (n.start_tick < voice_entry_tick) continue;
-        if (n.start_tick >= structural_end) break;
+        if (n.start_tick < voice_entry_tick)
+          continue;
+        if (n.start_tick >= structural_end)
+          break;
         // Check consonance of first structural note against sounding voices.
         bool consonant = true;
         for (VoiceId ov : cp_state.getActiveVoices()) {
-          if (ov == voice_id) continue;
+          if (ov == voice_id)
+            continue;
           const NoteEvent* on = cp_state.getNoteAt(ov, n.start_tick);
-          if (!on) continue;
-          int diff = std::abs(static_cast<int>(n.pitch) -
-                              static_cast<int>(on->pitch));
-          if (diff == 0) continue;
+          if (!on)
+            continue;
+          int diff = std::abs(static_cast<int>(n.pitch) - static_cast<int>(on->pitch));
+          if (diff == 0)
+            continue;
           int simple = interval_util::compoundToSimple(diff);
           if (!interval_util::isConsonance(simple)) {
             consonant = false;
@@ -1077,21 +1347,26 @@ Exposition buildExposition(const Subject& subject,
           auto entry_reg = getVoiceRegister(voice_id, config.num_voices);
           for (int shift : {-12, 12, -24, 24}) {
             int cand = static_cast<int>(n.pitch) + shift;
-            if (cand < entry_reg.low || cand > entry_reg.high) continue;
+            if (cand < entry_reg.low || cand > entry_reg.high)
+              continue;
             bool ok = true;
             for (VoiceId ov : cp_state.getActiveVoices()) {
-              if (ov == voice_id) continue;
+              if (ov == voice_id)
+                continue;
               const NoteEvent* on = cp_state.getNoteAt(ov, n.start_tick);
-              if (!on) continue;
+              if (!on)
+                continue;
               int d = std::abs(cand - static_cast<int>(on->pitch));
-              if (d == 0) continue;
+              if (d == 0)
+                continue;
               int s = interval_util::compoundToSimple(d);
-              if (!interval_util::isConsonance(s)) { ok = false; break; }
+              if (!interval_util::isConsonance(s)) {
+                ok = false;
+                break;
+              }
               // Preserve voice order (higher voice_id = lower pitch).
-              if ((voice_id < ov &&
-                   cand > static_cast<int>(on->pitch)) ||
-                  (voice_id > ov &&
-                   cand < static_cast<int>(on->pitch))) {
+              if ((voice_id < ov && cand > static_cast<int>(on->pitch)) ||
+                  (voice_id > ov && cand < static_cast<int>(on->pitch))) {
                 ok = false;
                 break;
               }
@@ -1107,7 +1382,9 @@ Exposition buildExposition(const Subject& subject,
     }
 
     for (const auto& note : notes) {
-      bool is_structural = (note.start_tick < structural_end);
+      bool is_structural =
+          (note.start_tick < structural_end) ||
+          (note.start_tick < kTicksPerBar * 8 && note.source == BachNoteSource::Countersubject);
 
       if (is_structural) {
         // Register structural notes in CP state, then check for voice crossing.
@@ -1121,26 +1398,37 @@ Exposition buildExposition(const Subject& subject,
         }
         bool has_crossing = false;
         for (VoiceId other_v : cp_state.getActiveVoices()) {
-          if (other_v == voice_id) continue;
+          if (other_v == voice_id)
+            continue;
           const NoteEvent* other_note = cp_state.getNoteAt(other_v, note.start_tick);
-          if (!other_note) continue;
+          if (!other_note)
+            continue;
           bool crossed = (voice_id < other_v && note.pitch < other_note->pitch) ||
                          (voice_id > other_v && note.pitch > other_note->pitch);
-          if (crossed) { has_crossing = true; break; }
+          if (crossed) {
+            has_crossing = true;
+            break;
+          }
         }
         if (has_crossing) {
+          auto structural_reg = getVoiceRegister(voice_id, config.num_voices);
+          if (config.num_voices >= 4 && voice_id == 0) {
+            structural_reg.high = std::min<uint8_t>(structural_reg.high, 84);
+          }
           for (int shift : {12, -12, 24, -24}) {
             int candidate = static_cast<int>(note.pitch) + shift;
-            if (candidate < 0 || candidate > 127) continue;
+            if (candidate < structural_reg.low || candidate > structural_reg.high) {
+              continue;
+            }
             bool resolved = true;
             for (VoiceId other_v : cp_state.getActiveVoices()) {
-              if (other_v == voice_id) continue;
+              if (other_v == voice_id)
+                continue;
               const NoteEvent* other_note = cp_state.getNoteAt(other_v, note.start_tick);
-              if (!other_note) continue;
-              if ((voice_id < other_v &&
-                   candidate < static_cast<int>(other_note->pitch)) ||
-                  (voice_id > other_v &&
-                   candidate > static_cast<int>(other_note->pitch))) {
+              if (!other_note)
+                continue;
+              if ((voice_id < other_v && candidate < static_cast<int>(other_note->pitch)) ||
+                  (voice_id > other_v && candidate > static_cast<int>(other_note->pitch))) {
                 resolved = false;
                 break;
               }
@@ -1155,14 +1443,15 @@ Exposition buildExposition(const Subject& subject,
         bool is_strong_beat = (fixed_note.start_tick % (kTicksPerBeat * 2) == 0);
         if (is_strong_beat) {
           for (VoiceId other_v : cp_state.getActiveVoices()) {
-            if (other_v == voice_id) continue;
+            if (other_v == voice_id)
+              continue;
             const NoteEvent* other_note = cp_state.getNoteAt(other_v, fixed_note.start_tick);
             if (other_note && other_note->pitch == fixed_note.pitch) {
               // Shift up by 2 semitones (diatonic step) to avoid unison.
               ScaleType sc = config.is_minor ? ScaleType::HarmonicMinor : ScaleType::Major;
               int shifted = static_cast<int>(fixed_note.pitch) + 2;
-              uint8_t snapped = scale_util::nearestScaleTone(
-                  clampPitch(shifted, 0, 127), config.key, sc);
+              uint8_t snapped =
+                  scale_util::nearestScaleTone(clampPitch(shifted, 0, 127), config.key, sc);
               if (snapped != other_note->pitch) {
                 fixed_note.pitch = snapped;
               }
@@ -1181,7 +1470,10 @@ Exposition buildExposition(const Subject& subject,
       uint8_t desired_pitch = note.pitch;
       bool is_strong = (note.start_tick % kTicksPerBeat == 0);
       if (is_strong && !isChordTone(note.pitch, harm_ev)) {
-        desired_pitch = nearestChordTone(note.pitch, harm_ev);
+        auto voice_reg = getVoiceRegister(voice_id, config.num_voices);
+        desired_pitch =
+            chooseFreeCounterpointChordTone(note.pitch, validated, voice_id, config.num_voices,
+                                            voice_reg, note.start_tick, harm_ev, cp_state);
       }
 
       // For the first free counterpoint note per voice, ensure consonance
@@ -1197,12 +1489,17 @@ Exposition buildExposition(const Subject& subject,
       if (is_first_free_note && is_strong) {
         bool consonant_with_all = true;
         for (VoiceId other_vid : cp_state.getActiveVoices()) {
-          if (other_vid == voice_id) continue;
+          if (other_vid == voice_id)
+            continue;
           const NoteEvent* other_note = cp_state.getNoteAt(other_vid, note.start_tick);
-          if (!other_note) continue;
-          int diff = std::abs(static_cast<int>(desired_pitch) -
-                              static_cast<int>(other_note->pitch));
-          if (diff < 3) { consonant_with_all = false; break; }
+          if (!other_note)
+            continue;
+          int diff =
+              std::abs(static_cast<int>(desired_pitch) - static_cast<int>(other_note->pitch));
+          if (diff < 3) {
+            consonant_with_all = false;
+            break;
+          }
           int simple = interval_util::compoundToSimple(diff);
           if (!interval_util::isConsonance(simple)) {
             consonant_with_all = false;
@@ -1215,34 +1512,39 @@ Exposition buildExposition(const Subject& subject,
           auto voice_reg = getVoiceRegister(voice_id, config.num_voices);
           int best_pitch = static_cast<int>(desired_pitch);
           int best_score = -1;
-          for (int base = static_cast<int>(voice_reg.low);
-               base <= static_cast<int>(voice_reg.high); ++base) {
+          for (int base = static_cast<int>(voice_reg.low); base <= static_cast<int>(voice_reg.high);
+               ++base) {
             uint8_t chord_tone = nearestChordTone(static_cast<uint8_t>(base), harm_ev);
-            if (chord_tone < voice_reg.low || chord_tone > voice_reg.high) continue;
+            if (chord_tone < voice_reg.low || chord_tone > voice_reg.high)
+              continue;
             int cand = static_cast<int>(chord_tone);
             bool all_ok = true;
             int score = 0;
             for (VoiceId other_vid : cp_state.getActiveVoices()) {
-              if (other_vid == voice_id) continue;
-              const NoteEvent* other_note =
-                  cp_state.getNoteAt(other_vid, note.start_tick);
-              if (!other_note) continue;
+              if (other_vid == voice_id)
+                continue;
+              const NoteEvent* other_note = cp_state.getNoteAt(other_vid, note.start_tick);
+              if (!other_note)
+                continue;
               int cand_diff = std::abs(cand - static_cast<int>(other_note->pitch));
-              if (cand_diff < 3) { all_ok = false; break; }
+              if (cand_diff < 3) {
+                all_ok = false;
+                break;
+              }
               int cand_simple = interval_util::compoundToSimple(cand_diff);
               if (!interval_util::isConsonance(cand_simple)) {
                 all_ok = false;
                 break;
               }
               // Imperfect consonance bonus (m3=3, M3=4, m6=8, M6=9).
-              if (cand_simple == 3 || cand_simple == 4 ||
-                  cand_simple == 8 || cand_simple == 9) {
+              if (cand_simple == 3 || cand_simple == 4 || cand_simple == 8 || cand_simple == 9) {
                 score += 2;
               } else {
                 score += 1;
               }
             }
-            if (!all_ok) continue;
+            if (!all_ok)
+              continue;
             // Proximity to original pitch as tiebreaker.
             int dist = std::abs(cand - static_cast<int>(desired_pitch));
             int total = score * 100 - dist;
@@ -1255,6 +1557,150 @@ Exposition buildExposition(const Subject& subject,
             desired_pitch = static_cast<uint8_t>(best_pitch);
           }
         }
+      }
+
+      // If createBachNote shifted the previous free-counterpoint note into
+      // a large leap, bias this note toward the expected contrary-step
+      // resolution before it enters the repair cascade.
+      if (validated.size() >= 2) {
+        const NoteEvent& prev2 = validated[validated.size() - 2];
+        const NoteEvent& prev1 = validated[validated.size() - 1];
+        if (prev1.source == BachNoteSource::FreeCounterpoint &&
+            prev2.source == BachNoteSource::FreeCounterpoint) {
+          int leap = static_cast<int>(prev1.pitch) - static_cast<int>(prev2.pitch);
+          int current_motion = static_cast<int>(desired_pitch) - static_cast<int>(prev1.pitch);
+          bool resolves = ((leap > 0 && current_motion < 0) || (leap < 0 && current_motion > 0)) &&
+                          std::abs(current_motion) <= 2;
+          if (std::abs(leap) >= 5 && !resolves) {
+            auto voice_reg = getVoiceRegister(voice_id, config.num_voices);
+            ScaleType sc = config.is_minor ? ScaleType::HarmonicMinor : ScaleType::Major;
+            int resolve_dir = leap > 0 ? -1 : 1;
+            int best_pitch = -1;
+            int best_cost = 999;
+            for (int step : {1, 2}) {
+              int raw = static_cast<int>(prev1.pitch) + resolve_dir * step;
+              if (raw < voice_reg.low || raw > voice_reg.high)
+                continue;
+              uint8_t cand = static_cast<uint8_t>(raw);
+              if (!scale_util::isScaleTone(cand, config.key, sc))
+                continue;
+              if (is_strong && !isChordTone(cand, harm_ev))
+                continue;
+
+              if (is_strong) {
+                bool vertical_ok = true;
+                for (VoiceId other_vid : cp_state.getActiveVoices()) {
+                  if (other_vid == voice_id)
+                    continue;
+                  const NoteEvent* other_note = cp_state.getNoteAt(other_vid, note.start_tick);
+                  if (!other_note)
+                    continue;
+                  int diff = std::abs(static_cast<int>(cand) - static_cast<int>(other_note->pitch));
+                  if (diff < 3) {
+                    vertical_ok = false;
+                    break;
+                  }
+                  int simple = interval_util::compoundToSimple(diff);
+                  if (!interval_util::isConsonance(simple)) {
+                    vertical_ok = false;
+                    break;
+                  }
+                }
+                if (!vertical_ok)
+                  continue;
+              }
+
+              int cost = std::abs(static_cast<int>(cand) - static_cast<int>(desired_pitch));
+              if (cost < best_cost) {
+                best_cost = cost;
+                best_pitch = cand;
+              }
+            }
+            if (best_pitch >= 0) {
+              desired_pitch = static_cast<uint8_t>(best_pitch);
+            }
+          }
+        }
+      }
+
+      if (config.num_voices >= 4 && note.start_tick < kTicksPerBar * 8) {
+        auto voice_reg = getVoiceRegister(voice_id, config.num_voices);
+        if (voice_id == 0) {
+          voice_reg.high = std::min<uint8_t>(voice_reg.high, 84);
+        }
+        ScaleType sc = config.is_minor ? ScaleType::HarmonicMinor : ScaleType::Major;
+        int previous_pitch = -1;
+        for (auto prev_it = validated.rbegin(); prev_it != validated.rend(); ++prev_it) {
+          if (prev_it->voice == voice_id) {
+            previous_pitch = static_cast<int>(prev_it->pitch);
+            break;
+          }
+        }
+
+        int best_pitch = static_cast<int>(desired_pitch);
+        int best_score = INT32_MIN;
+        for (int cand = static_cast<int>(voice_reg.low); cand <= static_cast<int>(voice_reg.high);
+             ++cand) {
+          uint8_t cand_u8 = static_cast<uint8_t>(cand);
+          if (!scale_util::isScaleTone(cand_u8, config.key, sc))
+            continue;
+          if (is_strong && !isChordTone(cand_u8, harm_ev))
+            continue;
+
+          int score = 100 - std::abs(cand - static_cast<int>(desired_pitch)) * 3;
+          if (previous_pitch >= 0) {
+            int melodic = std::abs(cand - previous_pitch);
+            if (melodic == 0)
+              score -= 80;
+            if (melodic > 4)
+              score -= (melodic - 4) * 60;
+            if (melodic <= 2)
+              score += 35;
+            else if (melodic <= 4)
+              score += 15;
+          }
+
+          bool rejected = false;
+          for (VoiceId other_vid : cp_state.getActiveVoices()) {
+            if (other_vid == voice_id)
+              continue;
+            const NoteEvent* other_note = cp_state.getNoteAt(other_vid, note.start_tick);
+            if (!other_note)
+              continue;
+            bool crossed = (voice_id < other_vid && cand < other_note->pitch) ||
+                           (voice_id > other_vid && cand > other_note->pitch);
+            if (crossed) {
+              rejected = true;
+              break;
+            }
+            int diff = std::abs(cand - static_cast<int>(other_note->pitch));
+            if (diff == 0 || diff < 3) {
+              rejected = true;
+              break;
+            }
+            int simple = interval_util::compoundToSimple(diff);
+            if (simple == 1 || simple == 2 || simple == 6 || simple == 10 || simple == 11) {
+              score -= is_strong ? 180 : 60;
+            } else if (simple == 3 || simple == 4 || simple == 8 || simple == 9) {
+              score += is_strong ? 40 : 15;
+            }
+          }
+          if (rejected)
+            continue;
+          if (score > best_score) {
+            best_score = score;
+            best_pitch = cand;
+          }
+        }
+
+        NoteEvent restrained = note;
+        restrained.pitch =
+            static_cast<uint8_t>(clampPitch(best_pitch, voice_reg.low, voice_reg.high));
+        restrained.source = BachNoteSource::FreeCounterpoint;
+        restrained.modified_by = 0;
+        cp_state.addNote(voice_id, restrained);
+        validated.push_back(restrained);
+        continue;
       }
 
       BachNoteOptions opts;

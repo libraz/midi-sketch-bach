@@ -52,9 +52,8 @@ TEST(ArchetypePolicyTest, ChromaticPolicy) {
 }
 
 TEST(ArchetypePolicyTest, AllArchetypesHaveValidRanges) {
-  FugueArchetype types[] = {
-      FugueArchetype::Compact, FugueArchetype::Cantabile,
-      FugueArchetype::Invertible, FugueArchetype::Chromatic};
+  FugueArchetype types[] = {FugueArchetype::Compact, FugueArchetype::Cantabile,
+                            FugueArchetype::Invertible, FugueArchetype::Chromatic};
   for (auto type : types) {
     const auto& pol = getArchetypePolicy(type);
     EXPECT_LE(pol.min_range_degrees, pol.max_range_degrees);

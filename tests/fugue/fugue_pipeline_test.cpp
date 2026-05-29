@@ -2,10 +2,10 @@
 
 #include "fugue/fugue_pipeline.h"
 
+#include <gtest/gtest.h>
+
 #include <algorithm>
 #include <vector>
-
-#include <gtest/gtest.h>
 
 #include "fugue/fugue_config.h"
 #include "fugue/fugue_structure.h"
@@ -48,8 +48,8 @@ TEST(FuguePipelineTest, TracksCreatedForVoiceCount) {
 
     if (result.success) {
       EXPECT_EQ(result.tracks.size(), voices)
-          << "Expected " << static_cast<int>(voices) << " tracks for "
-          << static_cast<int>(voices) << " voices";
+          << "Expected " << static_cast<int>(voices) << " tracks for " << static_cast<int>(voices)
+          << " voices";
     }
   }
 }
@@ -60,8 +60,7 @@ TEST(FuguePipelineTest, DifferentSeedsProduceResults) {
     FugueResult result = generateFuguePipeline(config);
 
     // Every seed should produce a valid result (subject generation).
-    EXPECT_TRUE(result.success)
-        << "Failed for seed " << (seed * 1000 + 100);
+    EXPECT_TRUE(result.success) << "Failed for seed " << (seed * 1000 + 100);
   }
 }
 
@@ -87,14 +86,12 @@ TEST(FuguePipelineTest, StabilityMultiVoiceMultiSeed) {
       FugueConfig config = makeTestConfig(seed, voices);
       FugueResult result = generateFuguePipeline(config);
 
-      EXPECT_TRUE(result.success)
-          << "Failed for voices=" << static_cast<int>(voices)
-          << " seed=" << seed << ": " << result.error_message;
+      EXPECT_TRUE(result.success) << "Failed for voices=" << static_cast<int>(voices)
+                                  << " seed=" << seed << ": " << result.error_message;
 
       if (result.success) {
         EXPECT_EQ(result.tracks.size(), voices)
-            << "Track count mismatch for voices=" << static_cast<int>(voices)
-            << " seed=" << seed;
+            << "Track count mismatch for voices=" << static_cast<int>(voices) << " seed=" << seed;
       }
     }
   }
@@ -113,9 +110,8 @@ TEST(FuguePipelineTest, MinorKeyStability) {
 
     FugueResult result = generateFuguePipeline(config);
 
-    EXPECT_TRUE(result.success)
-        << "Failed for minor key " << keyToString(k) << ": "
-        << result.error_message;
+    EXPECT_TRUE(result.success) << "Failed for minor key " << keyToString(k) << ": "
+                                << result.error_message;
   }
 }
 
@@ -133,18 +129,16 @@ TEST(FuguePipelineTest, StructureHasAllSections) {
   ASSERT_FALSE(sections.empty()) << "Structure has no sections";
 
   // Must have at least one Exposition.
-  bool has_exposition = std::any_of(
-      sections.begin(), sections.end(),
-      [](const FugueSection& s) { return s.type == SectionType::Exposition; });
+  bool has_exposition = std::any_of(sections.begin(), sections.end(), [](const FugueSection& s) {
+    return s.type == SectionType::Exposition;
+  });
   EXPECT_TRUE(has_exposition) << "No Exposition section found in structure";
 
   // Must have at least one section in the Develop phase.
-  bool has_develop = std::any_of(
-      sections.begin(), sections.end(), [](const FugueSection& s) {
-        return s.phase == FuguePhase::Develop &&
-               (s.type == SectionType::Episode ||
-                s.type == SectionType::MiddleEntry);
-      });
+  bool has_develop = std::any_of(sections.begin(), sections.end(), [](const FugueSection& s) {
+    return s.phase == FuguePhase::Develop &&
+           (s.type == SectionType::Episode || s.type == SectionType::MiddleEntry);
+  });
   EXPECT_TRUE(has_develop) << "No Develop-phase section (Episode/MiddleEntry) "
                               "found in structure";
 }
@@ -160,8 +154,7 @@ TEST(FuguePipelineTest, AllTracksHaveNotes) {
   ASSERT_EQ(result.tracks.size(), 4u);
 
   for (size_t i = 0; i < result.tracks.size(); ++i) {
-    EXPECT_FALSE(result.tracks[i].notes.empty())
-        << "Track " << i << " has no notes";
+    EXPECT_FALSE(result.tracks[i].notes.empty()) << "Track " << i << " has no notes";
   }
 }
 
@@ -180,19 +173,15 @@ TEST(FuguePipelineTest, NoWithinVoiceOverlaps) {
   for (size_t t = 0; t < result.tracks.size(); ++t) {
     std::vector<NoteEvent> notes = result.tracks[t].notes;
     std::sort(notes.begin(), notes.end(),
-              [](const NoteEvent& a, const NoteEvent& b) {
-                return a.start_tick < b.start_tick;
-              });
+              [](const NoteEvent& a, const NoteEvent& b) { return a.start_tick < b.start_tick; });
 
     for (size_t i = 1; i < notes.size(); ++i) {
       Tick prev_end = notes[i - 1].start_tick + notes[i - 1].duration;
       if (notes[i].start_tick + kOverlapTolerance < prev_end) {
-        ADD_FAILURE()
-            << "Within-voice overlap in track " << t << ": note at tick "
-            << notes[i - 1].start_tick << " (dur " << notes[i - 1].duration
-            << ", end " << prev_end << ") overlaps note at tick "
-            << notes[i].start_tick << " (pitch " << static_cast<int>(notes[i].pitch)
-            << ")";
+        ADD_FAILURE() << "Within-voice overlap in track " << t << ": note at tick "
+                      << notes[i - 1].start_tick << " (dur " << notes[i - 1].duration << ", end "
+                      << prev_end << ") overlaps note at tick " << notes[i].start_tick << " (pitch "
+                      << static_cast<int>(notes[i].pitch) << ")";
         break;  // Report only the first overlap per track.
       }
     }
@@ -213,9 +202,8 @@ TEST(FuguePipelineTest, NoteCountReasonable) {
     total_notes += track.notes.size();
   }
 
-  EXPECT_GT(total_notes, 50u)
-      << "Total note count " << total_notes
-      << " is unreasonably low for a 4-voice fugue";
+  EXPECT_GT(total_notes, 50u) << "Total note count " << total_notes
+                              << " is unreasonably low for a 4-voice fugue";
 }
 
 }  // namespace

@@ -18,11 +18,11 @@ enum class MotifOp : uint8_t;
 
 /// @brief A scored motif fragment in the pool.
 struct PooledMotif {
-  std::vector<NoteEvent> notes;          ///< Note events normalized to tick 0.
-  float characteristic_score = 0.0f;     ///< Higher = more characteristic of subject.
-  std::string origin;                    ///< Origin label: "subject_head", "subject_tail",
-                                         ///< "subject_characteristic", "countersubject",
-                                         ///< "fragment".
+  std::vector<NoteEvent> notes;       ///< Note events normalized to tick 0.
+  float characteristic_score = 0.0f;  ///< Higher = more characteristic of subject.
+  std::string origin;                 ///< Origin label: "subject_head", "subject_tail",
+                                      ///< "subject_characteristic", "countersubject",
+                                      ///< "fragment".
 };
 
 /// @brief Read-only pool of motif fragments extracted from subject and countersubject.
@@ -51,8 +51,7 @@ class MotifPool {
   /// @param countersubject_notes Countersubject note events (empty if none).
   /// @param character Subject character for scoring context.
   void build(const std::vector<NoteEvent>& subject_notes,
-             const std::vector<NoteEvent>& countersubject_notes,
-             SubjectCharacter character);
+             const std::vector<NoteEvent>& countersubject_notes, SubjectCharacter character);
 
   /// @brief Get the highest-scored motif.
   /// @return Pointer to the best motif, or nullptr if pool is empty.

@@ -248,14 +248,14 @@ TEST(FuxRuleEvaluatorTest, ValidateCleanCounterpoint) {
   // Good first-species counterpoint: imperfect consonances, contrary motion.
   // C4/E3 -> D4/B2 -> E4/C3 -> F4/A2
   state.addNote(0, {0, 480, 60, 80, 0});     // C4
-  state.addNote(0, {480, 480, 62, 80, 0});    // D4
-  state.addNote(0, {960, 480, 64, 80, 0});    // E4
-  state.addNote(0, {1440, 480, 65, 80, 0});   // F4
+  state.addNote(0, {480, 480, 62, 80, 0});   // D4
+  state.addNote(0, {960, 480, 64, 80, 0});   // E4
+  state.addNote(0, {1440, 480, 65, 80, 0});  // F4
 
-  state.addNote(1, {0, 480, 52, 80, 1});      // E3 (m6 below C4 -- wait, 60-52=8 m6)
-  state.addNote(1, {480, 480, 58, 80, 1});    // Bb3 (62-58=4 M3)
-  state.addNote(1, {960, 480, 55, 80, 1});    // G3 (64-55=9 M6)
-  state.addNote(1, {1440, 480, 57, 80, 1});   // A3 (65-57=8 m6)
+  state.addNote(1, {0, 480, 52, 80, 1});     // E3 (m6 below C4 -- wait, 60-52=8 m6)
+  state.addNote(1, {480, 480, 58, 80, 1});   // Bb3 (62-58=4 M3)
+  state.addNote(1, {960, 480, 55, 80, 1});   // G3 (64-55=9 M6)
+  state.addNote(1, {1440, 480, 57, 80, 1});  // A3 (65-57=8 m6)
 
   auto violations = rules.validate(state, 0, 1920);
 

@@ -19,10 +19,10 @@ namespace bach {
 /// Each type defines a different "nuclear shape" -- the 2-4 note cell
 /// that makes the subject perceptually identifiable even under transformation.
 enum class KerngestaltType : uint8_t {
-  IntervalDriven,   ///< Type A: Signature leap (3rd+), BWV 542 style.
-  ChromaticCell,    ///< Type B: Semitone neighbor, BWV 548 style.
-  Arpeggio,         ///< Type C: Chord tone sequence, BWV 547 style.
-  Linear            ///< Type D: Scale-based with internal repetition, BWV 578 style.
+  IntervalDriven,  ///< Type A: Signature leap (3rd+), BWV 542 style.
+  ChromaticCell,   ///< Type B: Semitone neighbor, BWV 548 style.
+  Arpeggio,        ///< Type C: Chord tone sequence, BWV 547 style.
+  Linear           ///< Type D: Scale-based with internal repetition, BWV 578 style.
 };
 
 /// @brief Convert KerngestaltType to string.
@@ -52,14 +52,14 @@ struct EssentialIdentity {
   std::vector<Tick> core_rhythm;               ///< Duration of each note.
   std::vector<AccentPosition> accent_pattern;  ///< Beat strength per note.
 
-  int signature_interval = 0;   ///< Most characteristic interval (largest non-step).
+  int signature_interval = 0;  ///< Most characteristic interval (largest non-step).
   KerngestaltType kerngestalt_type = KerngestaltType::Linear;
 
-  std::vector<int> head_fragment_intervals;    ///< First 2-3 note intervals.
-  std::vector<Tick> head_fragment_rhythm;      ///< First 2-3 note durations.
-  std::vector<int> tail_fragment_intervals;    ///< Last 2-3 note intervals.
-  std::vector<Tick> tail_fragment_rhythm;      ///< Last 2-3 note durations.
-  size_t natural_break_point = 0;              ///< Index splitting subject into head/tail.
+  std::vector<int> head_fragment_intervals;  ///< First 2-3 note intervals.
+  std::vector<Tick> head_fragment_rhythm;    ///< First 2-3 note durations.
+  std::vector<int> tail_fragment_intervals;  ///< Last 2-3 note intervals.
+  std::vector<Tick> tail_fragment_rhythm;    ///< Last 2-3 note durations.
+  size_t natural_break_point = 0;            ///< Index splitting subject into head/tail.
   CellWindow cell_window;  ///< Kerngestalt cell window (set by generator, used for protection).
 
   /// @brief Check whether this identity has been populated.
@@ -68,12 +68,12 @@ struct EssentialIdentity {
 
 /// @brief Derived Transformations (Layer 2) -- pre-computed, immutable.
 struct DerivedTransformations {
-  std::vector<int> inverted_intervals;     ///< Melodic inversion of core_intervals.
-  std::vector<Tick> inverted_rhythm;       ///< Rhythm preserved under inversion.
-  std::vector<int> retrograde_intervals;   ///< Reversed interval sequence.
-  std::vector<Tick> retrograde_rhythm;     ///< Reversed rhythm sequence.
-  std::vector<Tick> augmented_rhythm;      ///< Doubled durations.
-  std::vector<Tick> diminished_rhythm;     ///< Halved durations.
+  std::vector<int> inverted_intervals;    ///< Melodic inversion of core_intervals.
+  std::vector<Tick> inverted_rhythm;      ///< Rhythm preserved under inversion.
+  std::vector<int> retrograde_intervals;  ///< Reversed interval sequence.
+  std::vector<Tick> retrograde_rhythm;    ///< Reversed rhythm sequence.
+  std::vector<Tick> augmented_rhythm;     ///< Doubled durations.
+  std::vector<Tick> diminished_rhythm;    ///< Halved durations.
 
   /// @brief Check whether transformations have been computed.
   bool isValid() const { return !inverted_intervals.empty(); }
@@ -110,8 +110,8 @@ bool isValidKerngestalt(const EssentialIdentity& identity);
 /// @param key Musical key of the subject.
 /// @param is_minor Whether the subject is in minor mode.
 /// @return Populated EssentialIdentity.
-EssentialIdentity buildEssentialIdentity(const std::vector<NoteEvent>& notes,
-                                         Key key, bool is_minor);
+EssentialIdentity buildEssentialIdentity(const std::vector<NoteEvent>& notes, Key key,
+                                         bool is_minor);
 
 /// @brief Build Layer 2 (Derived Transformations) from Layer 1.
 /// @param essential The essential identity to derive transformations from.
@@ -123,8 +123,7 @@ DerivedTransformations buildDerivedTransformations(const EssentialIdentity& esse
 /// @param key Musical key of the subject.
 /// @param is_minor Whether the subject is in minor mode.
 /// @return Fully populated SubjectIdentity.
-SubjectIdentity buildSubjectIdentity(const std::vector<NoteEvent>& notes,
-                                      Key key, bool is_minor);
+SubjectIdentity buildSubjectIdentity(const std::vector<NoteEvent>& notes, Key key, bool is_minor);
 
 }  // namespace bach
 

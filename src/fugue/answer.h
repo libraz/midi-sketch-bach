@@ -31,8 +31,7 @@ struct Answer {
 ///        When @p type is Auto and this is not Auto, the archetype
 ///        preference overrides auto-detection.
 /// @return The derived Answer.
-Answer generateAnswer(const Subject& subject,
-                      AnswerType type = AnswerType::Auto,
+Answer generateAnswer(const Subject& subject, AnswerType type = AnswerType::Auto,
                       AnswerType archetype_preference = AnswerType::Auto);
 
 /// @brief Automatically detect whether a real or tonal answer is needed.

@@ -23,28 +23,35 @@ namespace bach {
 // Countersubject member functions
 // ---------------------------------------------------------------------------
 
-size_t Countersubject::noteCount() const { return notes.size(); }
+size_t Countersubject::noteCount() const {
+  return notes.size();
+}
 
 uint8_t Countersubject::lowestPitch() const {
-  if (notes.empty()) return 127;
+  if (notes.empty())
+    return 127;
   uint8_t lowest = 127;
   for (const auto& note : notes) {
-    if (note.pitch < lowest) lowest = note.pitch;
+    if (note.pitch < lowest)
+      lowest = note.pitch;
   }
   return lowest;
 }
 
 uint8_t Countersubject::highestPitch() const {
-  if (notes.empty()) return 0;
+  if (notes.empty())
+    return 0;
   uint8_t highest = 0;
   for (const auto& note : notes) {
-    if (note.pitch > highest) highest = note.pitch;
+    if (note.pitch > highest)
+      highest = note.pitch;
   }
   return highest;
 }
 
 int Countersubject::range() const {
-  if (notes.empty()) return 0;
+  if (notes.empty())
+    return 0;
   return static_cast<int>(highestPitch()) - static_cast<int>(lowestPitch());
 }
 
@@ -61,9 +68,9 @@ constexpr Tick kEighthNote = kTicksPerBeat / 2;
 
 /// @brief Parameters that shape countersubject generation per character.
 struct CSCharacterParams {
-  float leap_prob;       // Probability of a leap (vs step) in motion
-  int max_range;         // Maximum pitch range in semitones
-  float long_split_prob; // Probability of splitting long notes into shorter
+  float leap_prob;        // Probability of a leap (vs step) in motion
+  int max_range;          // Maximum pitch range in semitones
+  float long_split_prob;  // Probability of splitting long notes into shorter
 };
 
 /// @brief Return generation parameters based on the subject character.
@@ -96,18 +103,16 @@ CSCharacterParams getCSParams(SubjectCharacter character, std::mt19937& rng) {
   }
 
   // Apply small per-seed variation (Principle 3: fewer choices, subtle variety).
-  params.leap_prob = std::clamp(params.leap_prob + rng::rollFloat(rng, -0.05f, 0.05f),
-                                0.0f, 1.0f);
+  params.leap_prob = std::clamp(params.leap_prob + rng::rollFloat(rng, -0.05f, 0.05f), 0.0f, 1.0f);
   params.max_range = std::max(4, params.max_range + rng::rollRange(rng, -1, 1));
-  params.long_split_prob = std::clamp(
-      params.long_split_prob + rng::rollFloat(rng, -0.05f, 0.05f), 0.0f, 1.0f);
+  params.long_split_prob =
+      std::clamp(params.long_split_prob + rng::rollFloat(rng, -0.05f, 0.05f), 0.0f, 1.0f);
 
   return params;
 }
 
 /// @brief Apply archetype-specific constraints to countersubject params.
-void applyArchetypeToCSParams(CSCharacterParams& params,
-                               const ArchetypePolicy& policy) {
+void applyArchetypeToCSParams(CSCharacterParams& params, const ArchetypePolicy& policy) {
   // Cantabile: smoother melodic flow — reduce leaps, constrain range.
   if (policy.min_step_ratio > 0.5f) {
     params.leap_prob = std::min(params.leap_prob, 1.0f - policy.min_step_ratio);
@@ -152,10 +157,8 @@ constexpr uint8_t kCSPitchHigh = 96;
 /// @param scale Scale type for diatonic enforcement.
 /// @param gen Random number generator.
 /// @return A consonant, diatonic MIDI pitch, or snapped fallback.
-uint8_t findConsonantPitch(uint8_t subject_pitch, int direction,
-                           uint8_t low_range, uint8_t high_range,
-                           Key key, ScaleType scale,
-                           std::mt19937& gen) {
+uint8_t findConsonantPitch(uint8_t subject_pitch, int direction, uint8_t low_range,
+                           uint8_t high_range, Key key, ScaleType scale, std::mt19937& gen) {
   // Shuffle through imperfect consonances in the preferred direction.
   constexpr auto kImperfectCount =
       static_cast<int>(std::size(interval_util::kImperfectConsonantIntervals));
@@ -173,8 +176,7 @@ uint8_t findConsonantPitch(uint8_t subject_pitch, int direction,
 
   for (int idx = 0; idx < kImperfectCount; ++idx) {
     int candidate = static_cast<int>(subject_pitch) + offsets[idx];
-    uint8_t snapped = scale_util::nearestScaleTone(
-        clampPitch(candidate, 0, 127), key, scale);
+    uint8_t snapped = scale_util::nearestScaleTone(clampPitch(candidate, 0, 127), key, scale);
     if (snapped >= low_range && snapped <= high_range) {
       return snapped;
     }
@@ -182,10 +184,8 @@ uint8_t findConsonantPitch(uint8_t subject_pitch, int direction,
 
   // Fallback: try all consonances with diatonic snap.
   for (int consonant_interval : interval_util::kConsonantIntervals) {
-    int candidate = static_cast<int>(subject_pitch) +
-                    consonant_interval * direction;
-    uint8_t snapped = scale_util::nearestScaleTone(
-        clampPitch(candidate, 0, 127), key, scale);
+    int candidate = static_cast<int>(subject_pitch) + consonant_interval * direction;
+    uint8_t snapped = scale_util::nearestScaleTone(clampPitch(candidate, 0, 127), key, scale);
     if (snapped >= low_range && snapped <= high_range) {
       return snapped;
     }
@@ -193,8 +193,7 @@ uint8_t findConsonantPitch(uint8_t subject_pitch, int direction,
 
   // Last resort: minor 3rd in the given direction, snapped and clamped.
   int fallback = static_cast<int>(subject_pitch) + 3 * direction;
-  uint8_t snapped = scale_util::nearestScaleTone(
-      clampPitch(fallback, 0, 127), key, scale);
+  uint8_t snapped = scale_util::nearestScaleTone(clampPitch(fallback, 0, 127), key, scale);
   return clampPitch(static_cast<int>(snapped), low_range, high_range);
 }
 
@@ -232,8 +231,7 @@ uint8_t findConsonantPitch(uint8_t subject_pitch, int direction,
 
 /// Select countersubject duration with style-aware constraints.
 /// 16th notes restricted to Playful/Restless characters only.
-Tick selectCSDuration(Tick subject_duration, float split_prob,
-                      Tick tick, std::mt19937& gen,
+Tick selectCSDuration(Tick subject_duration, float split_prob, Tick tick, std::mt19937& gen,
                       const MarkovModel* markov = nullptr,
                       DurCategory prev_dur_cat = DurCategory::Qtr,
                       DirIntervalClass dir_ivl = DirIntervalClass::StepUp) {
@@ -241,19 +239,20 @@ Tick selectCSDuration(Tick subject_duration, float split_prob,
   // Severe (0.6) -> 0.52, Noble (0.5) -> 0.40
   // Playful (0.7) -> 0.64, Restless (0.75) -> 0.70
   float energy = 0.4f + (split_prob - 0.5f) * 1.2f;
-  if (energy < 0.3f) energy = 0.3f;
-  if (energy > 0.75f) energy = 0.75f;
+  if (energy < 0.3f)
+    energy = 0.3f;
+  if (energy > 0.75f)
+    energy = 0.75f;
 
   // Use Countersubject voice profile (default: voice 1 in 4-voice texture).
   VoiceProfile cs_profile = getVoiceProfile(TextureFunction::Countersubject, 1, 4);
-  Tick dur = FugueEnergyCurve::selectDuration(energy, tick, gen, subject_duration,
-                                               cs_profile,
-                                               false, 1.0f, false,
-                                               markov, prev_dur_cat, dir_ivl);
+  Tick dur = FugueEnergyCurve::selectDuration(energy, tick, gen, subject_duration, cs_profile,
+                                              false, 1.0f, false, markov, prev_dur_cat, dir_ivl);
 
-  // 16th note restriction: forbidden when energy < 0.6 (Severe, Noble).
-  // Baroque practice: CS sixteenths only in Playful/Restless contexts.
-  if (dur < kTicksPerBeat / 2 && energy < 0.6f) {
+  // 16th note restriction: only the lowest-energy countersubjects are kept
+  // at eighths. Four-voice Bach fugues often put short-note motion in inner
+  // countersubject lines even against severe subjects.
+  if (dur < kTicksPerBeat / 2 && energy < 0.45f) {
     dur = kTicksPerBeat / 2;  // Floor at eighth note.
   }
 
@@ -270,8 +269,10 @@ Tick selectCSDuration(Tick subject_duration, float split_prob,
 /// @param gen Random number generator for oblique case.
 /// @return +1 (ascending) or -1 (descending).
 int contraryDirection(int subject_direction, std::mt19937& gen) {
-  if (subject_direction > 0) return -1;  // Subject up -> CS down
-  if (subject_direction < 0) return 1;   // Subject down -> CS up
+  if (subject_direction > 0)
+    return -1;  // Subject up -> CS down
+  if (subject_direction < 0)
+    return 1;  // Subject down -> CS up
   // Oblique: subject holds, CS moves freely.
   return rng::rollProbability(gen, 0.5f) ? 1 : -1;
 }
@@ -286,29 +287,25 @@ int contraryDirection(int subject_direction, std::mt19937& gen) {
 /// @param key Musical key for diatonic enforcement.
 /// @param scale Scale type for diatonic enforcement.
 /// @return New pitch after step motion.
-uint8_t stepMotion(uint8_t current_pitch, int direction,
-                   uint8_t low_range, uint8_t high_range,
+uint8_t stepMotion(uint8_t current_pitch, int direction, uint8_t low_range, uint8_t high_range,
                    Key key, ScaleType scale) {
   // Try a major 2nd (2 semitones), check if it's diatonic in the key.
   int candidate = static_cast<int>(current_pitch) + 2 * direction;
-  if (candidate >= static_cast<int>(low_range) &&
-      candidate <= static_cast<int>(high_range) &&
+  if (candidate >= static_cast<int>(low_range) && candidate <= static_cast<int>(high_range) &&
       scale_util::isScaleTone(static_cast<uint8_t>(candidate), key, scale)) {
     return static_cast<uint8_t>(candidate);
   }
 
   // Try a minor 2nd (1 semitone), but only if it's diatonic.
   candidate = static_cast<int>(current_pitch) + 1 * direction;
-  if (candidate >= static_cast<int>(low_range) &&
-      candidate <= static_cast<int>(high_range) &&
+  if (candidate >= static_cast<int>(low_range) && candidate <= static_cast<int>(high_range) &&
       scale_util::isScaleTone(static_cast<uint8_t>(candidate), key, scale)) {
     return static_cast<uint8_t>(candidate);
   }
 
   // Snap fallback: reverse direction and snap to nearest scale tone.
   candidate = static_cast<int>(current_pitch) + 2 * (-direction);
-  uint8_t snapped = scale_util::nearestScaleTone(
-      clampPitch(candidate, 0, 127), key, scale);
+  uint8_t snapped = scale_util::nearestScaleTone(clampPitch(candidate, 0, 127), key, scale);
   return clampPitch(static_cast<int>(snapped), low_range, high_range);
 }
 
@@ -322,10 +319,8 @@ uint8_t stepMotion(uint8_t current_pitch, int direction,
 /// @param scale Scale type for diatonic enforcement.
 /// @param gen Random number generator.
 /// @return New pitch after leap, snapped to the nearest scale tone.
-uint8_t leapMotion(uint8_t current_pitch, int direction,
-                   uint8_t low_range, uint8_t high_range,
-                   Key key, ScaleType scale,
-                   std::mt19937& gen) {
+uint8_t leapMotion(uint8_t current_pitch, int direction, uint8_t low_range, uint8_t high_range,
+                   Key key, ScaleType scale, std::mt19937& gen) {
   // Choose between minor 3rd, major 3rd, perfect 4th.
   constexpr int kLeapSizes[] = {3, 4, 5};
   constexpr int kLeapCount = 3;
@@ -335,16 +330,14 @@ uint8_t leapMotion(uint8_t current_pitch, int direction,
   int candidate = static_cast<int>(current_pitch) + leap;
 
   // Snap to nearest scale tone for diatonic output.
-  uint8_t snapped = scale_util::nearestScaleTone(
-      clampPitch(candidate, 0, 127), key, scale);
+  uint8_t snapped = scale_util::nearestScaleTone(clampPitch(candidate, 0, 127), key, scale);
   if (snapped >= low_range && snapped <= high_range) {
     return snapped;
   }
 
   // Reverse direction on range violation, snap again.
   candidate = static_cast<int>(current_pitch) - leap;
-  snapped = scale_util::nearestScaleTone(
-      clampPitch(candidate, 0, 127), key, scale);
+  snapped = scale_util::nearestScaleTone(clampPitch(candidate, 0, 127), key, scale);
   return clampPitch(static_cast<int>(snapped), low_range, high_range);
 }
 
@@ -364,8 +357,8 @@ bool isConsonant(uint8_t pitch_a, uint8_t pitch_b) {
 /// @param curr_cs Current countersubject pitch.
 /// @param curr_subj Current subject pitch.
 /// @return True if parallel 5ths or octaves detected.
-bool hasParallelFifthsOrOctaves(uint8_t prev_cs, uint8_t prev_subj,
-                                uint8_t curr_cs, uint8_t curr_subj) {
+bool hasParallelFifthsOrOctaves(uint8_t prev_cs, uint8_t prev_subj, uint8_t curr_cs,
+                                uint8_t curr_subj) {
   int prev_interval = absoluteInterval(prev_cs, prev_subj);
   int curr_interval = absoluteInterval(curr_cs, curr_subj);
 
@@ -373,10 +366,10 @@ bool hasParallelFifthsOrOctaves(uint8_t prev_cs, uint8_t prev_subj,
   int cs_motion = static_cast<int>(curr_cs) - static_cast<int>(prev_cs);
   int subj_motion = static_cast<int>(curr_subj) - static_cast<int>(prev_subj);
 
-  bool same_direction = (cs_motion > 0 && subj_motion > 0) ||
-                        (cs_motion < 0 && subj_motion < 0);
+  bool same_direction = (cs_motion > 0 && subj_motion > 0) || (cs_motion < 0 && subj_motion < 0);
 
-  if (!same_direction) return false;
+  if (!same_direction)
+    return false;
 
   return isParallelFifths(prev_interval, curr_interval) ||
          isParallelOctaves(prev_interval, curr_interval);
@@ -402,14 +395,16 @@ bool hasParallelFifthsOrOctaves(uint8_t prev_cs, uint8_t prev_subj,
 /// @return Consonance rate (0.0-1.0) for the inverted pairing.
 float validateInvertedConsonanceRate(const std::vector<NoteEvent>& cs_notes,
                                      const Subject& subject) {
-  if (cs_notes.empty() || subject.notes.empty()) return 0.0f;
+  if (cs_notes.empty() || subject.notes.empty())
+    return 0.0f;
 
   int strong_beat_checks = 0;
   int consonant_count = 0;
 
   for (const auto& cs_note : cs_notes) {
     uint8_t beat = beatInBar(cs_note.start_tick);
-    if (beat != 0 && beat != 2) continue;
+    if (beat != 0 && beat != 2)
+      continue;
 
     strong_beat_checks++;
 
@@ -419,8 +414,7 @@ float validateInvertedConsonanceRate(const std::vector<NoteEvent>& cs_notes,
     // Find the subject note sounding at this tick.
     for (const auto& subj_note : subject.notes) {
       Tick subj_end = subj_note.start_tick + subj_note.duration;
-      if (subj_note.start_tick <= cs_note.start_tick &&
-          subj_end > cs_note.start_tick) {
+      if (subj_note.start_tick <= cs_note.start_tick && subj_end > cs_note.start_tick) {
         if (isConsonant(static_cast<uint8_t>(inverted_pitch), subj_note.pitch)) {
           consonant_count++;
         }
@@ -429,14 +423,14 @@ float validateInvertedConsonanceRate(const std::vector<NoteEvent>& cs_notes,
     }
   }
 
-  if (strong_beat_checks == 0) return 1.0f;
-  return static_cast<float>(consonant_count) /
-         static_cast<float>(strong_beat_checks);
+  if (strong_beat_checks == 0)
+    return 1.0f;
+  return static_cast<float>(consonant_count) / static_cast<float>(strong_beat_checks);
 }
 
-float validateConsonanceRate(const std::vector<NoteEvent>& cs_notes,
-                             const Subject& subject) {
-  if (cs_notes.empty() || subject.notes.empty()) return 0.0f;
+float validateConsonanceRate(const std::vector<NoteEvent>& cs_notes, const Subject& subject) {
+  if (cs_notes.empty() || subject.notes.empty())
+    return 0.0f;
 
   int strong_beat_checks = 0;
   int consonant_count = 0;
@@ -444,15 +438,15 @@ float validateConsonanceRate(const std::vector<NoteEvent>& cs_notes,
   for (const auto& cs_note : cs_notes) {
     // Check if this note starts on a strong beat (beat 0 or 2 in the bar).
     uint8_t beat = beatInBar(cs_note.start_tick);
-    if (beat != 0 && beat != 2) continue;
+    if (beat != 0 && beat != 2)
+      continue;
 
     strong_beat_checks++;
 
     // Find the subject note sounding at this tick.
     for (const auto& subj_note : subject.notes) {
       Tick subj_end = subj_note.start_tick + subj_note.duration;
-      if (subj_note.start_tick <= cs_note.start_tick &&
-          subj_end > cs_note.start_tick) {
+      if (subj_note.start_tick <= cs_note.start_tick && subj_end > cs_note.start_tick) {
         if (isConsonant(cs_note.pitch, subj_note.pitch)) {
           consonant_count++;
         }
@@ -461,21 +455,21 @@ float validateConsonanceRate(const std::vector<NoteEvent>& cs_notes,
     }
   }
 
-  if (strong_beat_checks == 0) return 1.0f;  // No strong beats to check.
-  return static_cast<float>(consonant_count) /
-         static_cast<float>(strong_beat_checks);
+  if (strong_beat_checks == 0)
+    return 1.0f;  // No strong beats to check.
+  return static_cast<float>(consonant_count) / static_cast<float>(strong_beat_checks);
 }
 
 /// @brief Detect if the subject is in a chromatic run at the given index.
 /// A chromatic run = 3+ consecutive notes where each interval is 1 semitone
 /// AND at least one pitch is non-diatonic (NaturalMinor/Major).
-bool inChromaticRun(const Subject& subject, size_t idx,
-                    Key key, ScaleType base_scale) {
-  if (idx + 2 >= subject.notes.size()) return false;
+bool inChromaticRun(const Subject& subject, size_t idx, Key key, ScaleType base_scale) {
+  if (idx + 2 >= subject.notes.size())
+    return false;
   for (size_t i = idx; i < idx + 2; ++i) {
-    int iv = std::abs(directedInterval(
-        subject.notes[i].pitch, subject.notes[i + 1].pitch));
-    if (iv != 1) return false;
+    int iv = std::abs(directedInterval(subject.notes[i].pitch, subject.notes[i + 1].pitch));
+    if (iv != 1)
+      return false;
   }
   // At least one non-diatonic pitch in the run.
   for (size_t i = idx; i <= idx + 2; ++i) {
@@ -483,6 +477,153 @@ bool inChromaticRun(const Subject& subject, size_t idx,
       return true;
   }
   return false;  // All diatonic (e.g. E-F-E) → not a chromatic run.
+}
+
+/// @brief Find the subject pitch sounding at a given tick.
+uint8_t findSubjectPitchAt(const Subject& subject, Tick tick) {
+  for (const auto& note : subject.notes) {
+    Tick end = note.start_tick + note.duration;
+    if (note.start_tick <= tick && end > tick)
+      return note.pitch;
+  }
+  return subject.notes.empty() ? 60 : subject.notes.back().pitch;
+}
+
+/// @brief Repair countersubject contour by replacing isolated registral jumps.
+///
+/// The countersubject is structural material, not filler.  If a consonance
+/// snap creates a remote but vertically legal note, the exposition can sound
+/// arbitrary immediately after the subject entry.  Prefer a nearby scale tone
+/// that keeps the line singable; on strong beats, keep consonance with the
+/// sounding subject.
+void smoothCountersubjectContour(std::vector<NoteEvent>& cs_notes, const Subject& subject, Key key,
+                                 ScaleType scale) {
+  if (cs_notes.size() < 2)
+    return;
+
+  constexpr int kMaxStructuralLeap = interval::kPerfect5th;
+  for (size_t idx = 1; idx < cs_notes.size(); ++idx) {
+    const uint8_t prev_pitch = cs_notes[idx - 1].pitch;
+    uint8_t& pitch = cs_notes[idx].pitch;
+    int leap = std::abs(static_cast<int>(pitch) - static_cast<int>(prev_pitch));
+    if (leap <= kMaxStructuralLeap)
+      continue;
+
+    uint8_t subj_pitch = findSubjectPitchAt(subject, cs_notes[idx].start_tick);
+    uint8_t beat = beatInBar(cs_notes[idx].start_tick);
+    bool needs_strong_consonance = (beat == 0 || beat == 2);
+
+    int best_pitch = static_cast<int>(pitch);
+    int best_cost = 1'000'000;
+    for (int cand = static_cast<int>(kCSPitchLow); cand <= static_cast<int>(kCSPitchHigh); ++cand) {
+      uint8_t cand_u8 = static_cast<uint8_t>(cand);
+      if (!scale_util::isScaleTone(cand_u8, key, scale))
+        continue;
+
+      int cand_leap = std::abs(cand - static_cast<int>(prev_pitch));
+      if (cand_leap > kMaxStructuralLeap)
+        continue;
+      if (needs_strong_consonance && !isConsonant(cand_u8, subj_pitch)) {
+        continue;
+      }
+
+      int original_dist = std::abs(cand - static_cast<int>(pitch));
+      int step_bias = cand_leap <= 2 ? -12 : 0;
+      int cost = original_dist * 4 + cand_leap * 3 + step_bias;
+      if (cost < best_cost) {
+        best_cost = cost;
+        best_pitch = cand;
+      }
+    }
+
+    if (best_cost < 1'000'000) {
+      pitch = static_cast<uint8_t>(best_pitch);
+    }
+  }
+}
+
+bool isHardVerticalAgainstSubject(uint8_t cs_pitch, uint8_t subject_pitch) {
+  int simple = interval_util::compoundToSimple(absoluteInterval(cs_pitch, subject_pitch));
+  return simple == 1 || simple == 2 || simple == 6 || simple == 10 || simple == 11;
+}
+
+/// @brief Replace exposed countersubject repeated-note runs with neighbor motion.
+///
+/// A generated countersubject may be vertically legal while still sounding
+/// mechanical, especially when later exposition placement repeats a short
+/// pitch against the answer.  Break only the excess notes in a same-pitch run,
+/// using nearby scale tones that keep the line consonant or at least avoid
+/// hard seconds, tritones, and sevenths against the subject.
+void breakCountersubjectRepeatedRuns(std::vector<NoteEvent>& cs_notes, const Subject& subject,
+                                     Key key, ScaleType scale) {
+  if (cs_notes.size() < 3)
+    return;
+
+  constexpr int kMaxRun = 2;
+  int run_count = 1;
+  int last_direction = -1;
+  for (size_t idx = 1; idx < cs_notes.size(); ++idx) {
+    if (cs_notes[idx].pitch != cs_notes[idx - 1].pitch) {
+      run_count = 1;
+      continue;
+    }
+
+    ++run_count;
+    if (run_count <= kMaxRun)
+      continue;
+
+    const uint8_t anchor = cs_notes[idx - 1].pitch;
+    const uint8_t subj_pitch = findSubjectPitchAt(subject, cs_notes[idx].start_tick);
+    const uint8_t next_pitch = (idx + 1 < cs_notes.size()) ? cs_notes[idx + 1].pitch : anchor;
+    const uint8_t beat = beatInBar(cs_notes[idx].start_tick);
+    const bool strong = (beat == 0 || beat == 2);
+
+    int best_pitch = -1;
+    int best_cost = 1'000'000;
+    for (int direction : {-1, 1}) {
+      for (int step : {1, 2}) {
+        int raw = static_cast<int>(anchor) + direction * step;
+        if (raw < static_cast<int>(kCSPitchLow) || raw > static_cast<int>(kCSPitchHigh)) {
+          continue;
+        }
+        uint8_t candidate = scale_util::nearestScaleTone(static_cast<uint8_t>(raw), key, scale);
+        if (candidate == anchor || candidate < kCSPitchLow || candidate > kCSPitchHigh) {
+          continue;
+        }
+        int motion = std::abs(static_cast<int>(candidate) - static_cast<int>(anchor));
+        if (motion > 2)
+          continue;
+
+        bool consonant = isConsonant(candidate, subj_pitch);
+        if (strong && !consonant)
+          continue;
+        if (!consonant && isHardVerticalAgainstSubject(candidate, subj_pitch)) {
+          continue;
+        }
+
+        int next_motion = std::abs(static_cast<int>(next_pitch) - static_cast<int>(candidate));
+        if (idx + 1 < cs_notes.size() && next_motion > interval::kPerfect5th) {
+          continue;
+        }
+
+        int cost = motion * 12 + next_motion * 4;
+        if (consonant)
+          cost -= 10;
+        if (direction != last_direction)
+          cost -= 3;
+        if (cost < best_cost) {
+          best_cost = cost;
+          best_pitch = candidate;
+        }
+      }
+    }
+
+    if (best_pitch >= 0) {
+      cs_notes[idx].pitch = static_cast<uint8_t>(best_pitch);
+      last_direction = best_pitch > static_cast<int>(anchor) ? 1 : -1;
+      run_count = 1;
+    }
+  }
 }
 
 /// @brief Generate a single attempt at a countersubject.
@@ -500,21 +641,19 @@ bool inChromaticRun(const Subject& subject, size_t idx,
 /// @param enforce_chromatic_contrary If true, force contrary stepwise motion
 ///        during chromatic runs in the subject.
 /// @return Vector of generated countersubject notes.
-std::vector<NoteEvent> generateCSAttempt(const Subject& subject,
-                                         const CSCharacterParams& params,
-                                         Key key, ScaleType scale,
-                                         std::mt19937& gen,
+std::vector<NoteEvent> generateCSAttempt(const Subject& subject, const CSCharacterParams& params,
+                                         Key key, ScaleType scale, std::mt19937& gen,
                                          bool enforce_chromatic_contrary = false) {
-  if (subject.notes.empty()) return {};
+  if (subject.notes.empty())
+    return {};
 
   std::vector<NoteEvent> result;
 
   // Determine starting pitch: a consonant interval above or below the
   // subject's first note (prefer a 3rd or 6th above).
   int start_direction = rng::rollProbability(gen, 0.6f) ? 1 : -1;
-  uint8_t current_pitch = findConsonantPitch(
-      subject.notes[0].pitch, start_direction,
-      kCSPitchLow, kCSPitchHigh, key, scale, gen);
+  uint8_t current_pitch = findConsonantPitch(subject.notes[0].pitch, start_direction, kCSPitchLow,
+                                             kCSPitchHigh, key, scale, gen);
 
   Tick current_tick = 0;
   Tick total_ticks = subject.length_ticks;
@@ -532,9 +671,8 @@ std::vector<NoteEvent> generateCSAttempt(const Subject& subject,
     // Determine subject motion direction.
     int subj_direction = 0;
     if (subj_idx + 1 < subject.notes.size()) {
-      subj_direction = directedInterval(
-          subject.notes[subj_idx].pitch,
-          subject.notes[subj_idx + 1].pitch);
+      subj_direction =
+          directedInterval(subject.notes[subj_idx].pitch, subject.notes[subj_idx + 1].pitch);
     }
 
     // Generate complementary duration with Markov context.
@@ -543,23 +681,21 @@ std::vector<NoteEvent> generateCSAttempt(const Subject& subject,
     DirIntervalClass dir_ivl = DirIntervalClass::StepUp;
     if (!result.empty()) {
       prev_dur_cat = ticksToDurCategory(result.back().duration);
-      DegreeStep step = computeDegreeStep(result.back().pitch, current_pitch,
-                                          key, scale);
+      DegreeStep step = computeDegreeStep(result.back().pitch, current_pitch, key, scale);
       dir_ivl = toDirIvlClass(step);
       markov = &kFugueUpperMarkov;
     }
-    Tick duration = selectCSDuration(subj_note.duration,
-                                     params.long_split_prob, current_tick, gen,
+    Tick duration = selectCSDuration(subj_note.duration, params.long_split_prob, current_tick, gen,
                                      markov, prev_dur_cat, dir_ivl);
     if (current_tick + duration > total_ticks) {
       duration = total_ticks - current_tick;
-      if (duration < kEighthNote) break;
+      if (duration < kEighthNote)
+        break;
     }
 
     // Determine motion direction (contrary to subject).
     // During chromatic runs: deterministic contrary + stepwise forced.
-    ScaleType base_scale = subject.is_minor ? ScaleType::NaturalMinor
-                                            : ScaleType::Major;
+    ScaleType base_scale = subject.is_minor ? ScaleType::NaturalMinor : ScaleType::Major;
     bool in_chromatic = false;
     if (enforce_chromatic_contrary) {
       in_chromatic = inChromaticRun(subject, subj_idx, key, base_scale);
@@ -569,16 +705,14 @@ std::vector<NoteEvent> generateCSAttempt(const Subject& subject,
     uint8_t next_pitch;
     if (in_chromatic && subj_direction != 0) {
       cs_direction = (subj_direction > 0) ? -1 : 1;
-      next_pitch = stepMotion(current_pitch, cs_direction,
-                              kCSPitchLow, kCSPitchHigh, key, scale);
+      next_pitch = stepMotion(current_pitch, cs_direction, kCSPitchLow, kCSPitchHigh, key, scale);
     } else {
       cs_direction = contraryDirection(subj_direction, gen);
       if (rng::rollProbability(gen, params.leap_prob)) {
-        next_pitch = leapMotion(current_pitch, cs_direction,
-                                kCSPitchLow, kCSPitchHigh, key, scale, gen);
+        next_pitch =
+            leapMotion(current_pitch, cs_direction, kCSPitchLow, kCSPitchHigh, key, scale, gen);
       } else {
-        next_pitch = stepMotion(current_pitch, cs_direction,
-                                kCSPitchLow, kCSPitchHigh, key, scale);
+        next_pitch = stepMotion(current_pitch, cs_direction, kCSPitchLow, kCSPitchHigh, key, scale);
       }
     }
 
@@ -589,18 +723,15 @@ std::vector<NoteEvent> generateCSAttempt(const Subject& subject,
       uint8_t prev_subj_pitch = subj_note.pitch;
       for (const auto& sn : subject.notes) {
         Tick sn_end = sn.start_tick + sn.duration;
-        if (sn.start_tick <= result.back().start_tick &&
-            sn_end > result.back().start_tick) {
+        if (sn.start_tick <= result.back().start_tick && sn_end > result.back().start_tick) {
           prev_subj_pitch = sn.pitch;
           break;
         }
       }
 
-      if (hasParallelFifthsOrOctaves(prev_cs_pitch, prev_subj_pitch,
-                                     next_pitch, subj_note.pitch)) {
+      if (hasParallelFifthsOrOctaves(prev_cs_pitch, prev_subj_pitch, next_pitch, subj_note.pitch)) {
         // Adjust by a step to avoid parallels.
-        next_pitch = stepMotion(next_pitch, cs_direction,
-                                kCSPitchLow, kCSPitchHigh, key, scale);
+        next_pitch = stepMotion(next_pitch, cs_direction, kCSPitchLow, kCSPitchHigh, key, scale);
       }
     }
 
@@ -609,12 +740,10 @@ std::vector<NoteEvent> generateCSAttempt(const Subject& subject,
     uint8_t beat = beatInBar(current_tick);
     if ((beat == 0 || beat == 2) && !isConsonant(next_pitch, subj_note.pitch)) {
       // Try finding a consonant pitch near the desired direction.
-      uint8_t consonant = findConsonantPitch(
-          subj_note.pitch, cs_direction, kCSPitchLow, kCSPitchHigh,
-          key, scale, gen);
+      uint8_t consonant = findConsonantPitch(subj_note.pitch, cs_direction, kCSPitchLow,
+                                             kCSPitchHigh, key, scale, gen);
       // Only use it if reasonably close to the intended pitch (within a 5th).
-      if (absoluteInterval(consonant, current_pitch) <=
-          interval::kPerfect5th) {
+      if (absoluteInterval(consonant, current_pitch) <= interval::kPerfect5th) {
         next_pitch = consonant;
       }
     }
@@ -638,66 +767,64 @@ std::vector<NoteEvent> generateCSAttempt(const Subject& subject,
     uint8_t last_subj_pitch = subject.notes.back().pitch;
     if (!isConsonant(result.back().pitch, last_subj_pitch)) {
       // Find a consonant ending pitch.
-      int end_dir = (static_cast<int>(result.back().pitch) >=
-                     static_cast<int>(last_subj_pitch))
-                        ? 1
-                        : -1;
-      result.back().pitch = findConsonantPitch(
-          last_subj_pitch, end_dir, kCSPitchLow, kCSPitchHigh,
-          key, scale, gen);
+      int end_dir =
+          (static_cast<int>(result.back().pitch) >= static_cast<int>(last_subj_pitch)) ? 1 : -1;
+      result.back().pitch =
+          findConsonantPitch(last_subj_pitch, end_dir, kCSPitchLow, kCSPitchHigh, key, scale, gen);
     }
   }
 
+  smoothCountersubjectContour(result, subject, key, scale);
+  breakCountersubjectRepeatedRuns(result, subject, key, scale);
   return result;
-}
-
-/// @brief Find the subject pitch sounding at a given tick.
-uint8_t findSubjectPitchAt(const Subject& subject, Tick tick) {
-  for (const auto& note : subject.notes) {
-    Tick end = note.start_tick + note.duration;
-    if (note.start_tick <= tick && end > tick) return note.pitch;
-  }
-  return subject.notes.empty() ? 60 : subject.notes.back().pitch;
 }
 
 /// @brief Insert chromatic passing tones on weak beats between whole-tone
 ///        diatonic steps in the countersubject.
-void insertCSChromaticPassingTones(std::vector<NoteEvent>& cs_notes,
-                                   Key key, ScaleType scale,
+void insertCSChromaticPassingTones(std::vector<NoteEvent>& cs_notes, Key key, ScaleType scale,
                                    int max_insertions) {
-  if (cs_notes.size() < 2 || max_insertions <= 0) return;
+  if (cs_notes.size() < 2 || max_insertions <= 0)
+    return;
 
   int insertions = 0;
   // Reverse iterate so insertions don't invalidate earlier indices.
   for (int idx = static_cast<int>(cs_notes.size()) - 2; idx >= 0; --idx) {
-    if (insertions >= max_insertions) break;
+    if (insertions >= max_insertions)
+      break;
 
     auto& curr = cs_notes[static_cast<size_t>(idx)];
     const auto& next = cs_notes[static_cast<size_t>(idx) + 1];
 
     // Condition 1: both notes diatonic.
-    if (!scale_util::isScaleTone(curr.pitch, key, scale)) continue;
-    if (!scale_util::isScaleTone(next.pitch, key, scale)) continue;
+    if (!scale_util::isScaleTone(curr.pitch, key, scale))
+      continue;
+    if (!scale_util::isScaleTone(next.pitch, key, scale))
+      continue;
 
     // Condition 2: interval = exactly whole tone (2 semitones).
     int interval = directedInterval(curr.pitch, next.pitch);
-    if (std::abs(interval) != 2) continue;
+    if (std::abs(interval) != 2)
+      continue;
 
     // Condition 3: intermediate pitch is non-diatonic.
-    uint8_t mid_pitch = static_cast<uint8_t>(
-        static_cast<int>(curr.pitch) + (interval > 0 ? 1 : -1));
-    if (scale_util::isScaleTone(mid_pitch, key, scale)) continue;
+    uint8_t mid_pitch =
+        static_cast<uint8_t>(static_cast<int>(curr.pitch) + (interval > 0 ? 1 : -1));
+    if (scale_util::isScaleTone(mid_pitch, key, scale))
+      continue;
 
     // Condition 4: duration >= eighth note.
-    if (curr.duration < kEighthNote) continue;
+    if (curr.duration < kEighthNote)
+      continue;
 
     // Condition 5: contiguous (no gap or overlap).
-    if (curr.start_tick + curr.duration != next.start_tick) continue;
+    if (curr.start_tick + curr.duration != next.start_tick)
+      continue;
 
     // Condition 6: passing tone position must land on a weak beat.
     Tick half = curr.duration / 2;
     uint8_t passing_beat = beatInBar(curr.start_tick + half);
-    if (passing_beat != 1 && passing_beat != 3) continue;
+    if (passing_beat != 1 && passing_beat != 3)
+      continue;
 
     NoteEvent passing;
     passing.start_tick = curr.start_tick + half;
@@ -716,24 +843,23 @@ void insertCSChromaticPassingTones(std::vector<NoteEvent>& cs_notes,
 
 /// @brief Snap strong-beat notes back to consonance with the subject.
 ///        Skips ChromaticPassing notes (which are on weak beats).
-void snapStrongBeatConsonance(std::vector<NoteEvent>& cs_notes,
-                              const Subject& subject,
-                              Key key, ScaleType scale,
-                              std::mt19937& gen) {
+void snapStrongBeatConsonance(std::vector<NoteEvent>& cs_notes, const Subject& subject, Key key,
+                              ScaleType scale, std::mt19937& gen) {
   for (size_t i = 0; i < cs_notes.size(); ++i) {
     auto& note = cs_notes[i];
-    if (note.source == BachNoteSource::ChromaticPassing) continue;
+    if (note.source == BachNoteSource::ChromaticPassing)
+      continue;
     // Skip if the next note is a passing tone (preserve stepwise approach).
-    if (i + 1 < cs_notes.size() &&
-        cs_notes[i + 1].source == BachNoteSource::ChromaticPassing) continue;
+    if (i + 1 < cs_notes.size() && cs_notes[i + 1].source == BachNoteSource::ChromaticPassing)
+      continue;
     uint8_t beat = beatInBar(note.start_tick);
-    if (beat != 0 && beat != 2) continue;
+    if (beat != 0 && beat != 2)
+      continue;
     uint8_t subj_pitch = findSubjectPitchAt(subject, note.start_tick);
-    if (isConsonant(note.pitch, subj_pitch)) continue;
-    int dir = (static_cast<int>(note.pitch) >= static_cast<int>(subj_pitch))
-                  ? 1 : -1;
-    uint8_t fixed = findConsonantPitch(
-        subj_pitch, dir, kCSPitchLow, kCSPitchHigh, key, scale, gen);
+    if (isConsonant(note.pitch, subj_pitch))
+      continue;
+    int dir = (static_cast<int>(note.pitch) >= static_cast<int>(subj_pitch)) ? 1 : -1;
+    uint8_t fixed = findConsonantPitch(subj_pitch, dir, kCSPitchLow, kCSPitchHigh, key, scale, gen);
     if (absoluteInterval(fixed, note.pitch) <= interval::kPerfect5th) {
       note.pitch = fixed;
     }
@@ -746,10 +872,8 @@ void snapStrongBeatConsonance(std::vector<NoteEvent>& cs_notes,
 // Public API
 // ---------------------------------------------------------------------------
 
-Countersubject generateCountersubject(const Subject& subject,
-                                       uint32_t seed,
-                                       int max_retries,
-                                       FugueArchetype archetype) {
+Countersubject generateCountersubject(const Subject& subject, uint32_t seed, int max_retries,
+                                      FugueArchetype archetype) {
   if (subject.notes.empty()) {
     Countersubject empty;
     empty.key = subject.key;
@@ -774,13 +898,11 @@ Countersubject generateCountersubject(const Subject& subject,
 
     bool enforce_chromatic_contrary = policy.require_functional_resolution;
     std::vector<NoteEvent> cs_notes =
-        generateCSAttempt(subject, params, subject.key, scale, gen,
-                          enforce_chromatic_contrary);
+        generateCSAttempt(subject, params, subject.key, scale, gen, enforce_chromatic_contrary);
 
     if (policy.require_functional_resolution) {
       int max_chromatic = policy.max_consecutive_chromatic / 2;
-      insertCSChromaticPassingTones(cs_notes, subject.key, scale,
-                                    max_chromatic);
+      insertCSChromaticPassingTones(cs_notes, subject.key, scale, max_chromatic);
       snapStrongBeatConsonance(cs_notes, subject, subject.key, scale, gen);
     }
 
@@ -798,17 +920,16 @@ Countersubject generateCountersubject(const Subject& subject,
     }
 
     // Accept if original consonance >= 70% AND inverted consonance >= 60%.
-    if (score >= 0.70f && inverted_score >= 0.60f) break;
+    if (score >= 0.70f && inverted_score >= 0.60f)
+      break;
   }
 
   return best;
 }
 
-Countersubject generateSecondCountersubject(const Subject& subject,
-                                             const Countersubject& first_cs,
-                                             uint32_t seed,
-                                             int max_retries,
-                                             FugueArchetype archetype) {
+Countersubject generateSecondCountersubject(const Subject& subject, const Countersubject& first_cs,
+                                            uint32_t seed, int max_retries,
+                                            FugueArchetype archetype) {
   if (subject.notes.empty()) {
     Countersubject empty;
     empty.key = subject.key;
@@ -856,13 +977,11 @@ Countersubject generateSecondCountersubject(const Subject& subject,
     // Generate a CS attempt against the subject.
     bool enforce_chromatic_contrary2 = policy2.require_functional_resolution;
     std::vector<NoteEvent> cs2_notes =
-        generateCSAttempt(subject, params, subject.key, scale, gen,
-                          enforce_chromatic_contrary2);
+        generateCSAttempt(subject, params, subject.key, scale, gen, enforce_chromatic_contrary2);
 
     if (policy2.require_functional_resolution) {
       int max_chromatic2 = policy2.max_consecutive_chromatic / 2;
-      insertCSChromaticPassingTones(cs2_notes, subject.key, scale,
-                                    max_chromatic2);
+      insertCSChromaticPassingTones(cs2_notes, subject.key, scale, max_chromatic2);
       snapStrongBeatConsonance(cs2_notes, subject, subject.key, scale, gen);
     }
 
@@ -896,7 +1015,8 @@ Countersubject generateSecondCountersubject(const Subject& subject,
     }
 
     // Accept if combined consonance rate is at least 60%.
-    if (best_score >= 0.60f) break;
+    if (best_score >= 0.60f)
+      break;
   }
 
   return best;
@@ -906,8 +1026,8 @@ Countersubject generateSecondCountersubject(const Subject& subject,
 // adaptCSToKey
 // ---------------------------------------------------------------------------
 
-std::vector<NoteEvent> adaptCSToKey(const std::vector<NoteEvent>& cs_notes,
-                                     Key to_key, ScaleType scale) {
+std::vector<NoteEvent> adaptCSToKey(const std::vector<NoteEvent>& cs_notes, Key to_key,
+                                    ScaleType scale) {
   auto adapted = cs_notes;
   for (auto& note : adapted) {
     if (!scale_util::isScaleTone(note.pitch, to_key, scale)) {

@@ -31,7 +31,7 @@ TEST(MelodicContextTest, StepAfterLeap_HighestBonus) {
   ctx.prev_pitches[0] = 67;  // G4 (arrived by leap from C4)
   ctx.prev_pitches[1] = 60;  // C4
   ctx.prev_count = 2;
-  ctx.prev_direction = 1;    // Was ascending
+  ctx.prev_direction = 1;  // Was ascending
 
   // Step down from G4 (opposite direction after leap) should get bonus.
   // Rule 1: step-after-leap in opposite direction (+0.3)
@@ -162,7 +162,7 @@ TEST(MelodicContextTest, PhraseGoalBonusFarFromTarget) {
   // When the candidate pitch is far from the goal pitch (> octave),
   // the bonus should be zero regardless of timing.
   PhraseGoal goal;
-  goal.target_pitch = 60;   // C4
+  goal.target_pitch = 60;  // C4
   goal.target_tick = 1920;
   goal.bonus = 0.3f;
 
@@ -178,15 +178,15 @@ TEST(MelodicContextTest, PhraseGoalBonusFarFromTarget) {
 TEST(MelodicContextTest, PhraseGoalBonusTemporalDecay) {
   // The bonus should increase as the tick approaches the target_tick.
   PhraseGoal goal;
-  goal.target_pitch = 60;   // C4
+  goal.target_pitch = 60;  // C4
   goal.target_tick = 1920;
   goal.bonus = 0.3f;
 
   // Same pitch at various times.
-  float early_bonus = computeGoalApproachBonus(60, 480, goal);   // 25% through
-  float mid_bonus = computeGoalApproachBonus(60, 960, goal);     // 50% through
-  float late_bonus = computeGoalApproachBonus(60, 1440, goal);   // 75% through
-  float at_target = computeGoalApproachBonus(60, 1920, goal);    // 100%
+  float early_bonus = computeGoalApproachBonus(60, 480, goal);  // 25% through
+  float mid_bonus = computeGoalApproachBonus(60, 960, goal);    // 50% through
+  float late_bonus = computeGoalApproachBonus(60, 1440, goal);  // 75% through
+  float at_target = computeGoalApproachBonus(60, 1920, goal);   // 100%
 
   // Temporal factor ramps linearly, so bonus should increase monotonically.
   EXPECT_LT(early_bonus, mid_bonus);
@@ -202,7 +202,7 @@ TEST(MelodicContextTest, PhraseGoalBonusIntegrationWithScoring) {
   ctx.prev_count = 1;
 
   PhraseGoal goal;
-  goal.target_pitch = 60;   // C4
+  goal.target_pitch = 60;  // C4
   goal.target_tick = 1920;
   goal.bonus = 0.3f;
 
@@ -280,7 +280,7 @@ TEST(MelodicContextTest, Rule8_CorrectResolution_Bonus) {
   ctx.prev_pitches[0] = 67;  // G4 (most recent)
   ctx.prev_pitches[1] = 60;  // C4 (before that)
   ctx.prev_count = 2;
-  ctx.prev_direction = 1;    // Was ascending
+  ctx.prev_direction = 1;  // Was ascending
   ctx.leap_needs_resolution = true;
 
   // F4 (step down = correct resolution)
@@ -330,7 +330,7 @@ TEST(MelodicContextTest, Rule8_SameDirectionStep_MildPenalty) {
   ctx.prev_pitches[0] = 48;  // C3
   ctx.prev_pitches[1] = 55;  // G3
   ctx.prev_count = 2;
-  ctx.prev_direction = -1;   // Was descending
+  ctx.prev_direction = -1;  // Was descending
   ctx.leap_needs_resolution = true;
 
   // Step down (same direction as leap)
@@ -397,7 +397,7 @@ TEST(MelodicContextTest, RunLengthPenalty) {
   ctx.prev_pitches[1] = 65;  // F4
   ctx.prev_pitches[2] = 64;  // E4
   ctx.prev_count = 3;
-  ctx.prev_direction = 1;  // ascending
+  ctx.prev_direction = 1;        // ascending
   ctx.consecutive_same_dir = 5;  // 5 consecutive ascending steps
 
   // Candidate: continue ascending by step (A4 = 69)

@@ -40,8 +40,7 @@ class ArchetypeScorer {
   /// @param subject The subject to evaluate.
   /// @param policy Archetype policy with structural requirements.
   /// @return ArchetypeScore with all dimensions filled.
-  ArchetypeScore evaluate(const Subject& subject,
-                          const ArchetypePolicy& policy) const;
+  ArchetypeScore evaluate(const Subject& subject, const ArchetypePolicy& policy) const;
 
   /// @brief Check hard gate conditions from archetype policy.
   ///
@@ -55,12 +54,10 @@ class ArchetypeScorer {
   /// @param subject The subject to check.
   /// @param policy Archetype policy with required conditions.
   /// @return True if all hard gate conditions pass.
-  bool checkHardGate(const Subject& subject,
-                     const ArchetypePolicy& policy) const;
+  bool checkHardGate(const Subject& subject, const ArchetypePolicy& policy) const;
 
   /// @brief Score how well the subject matches the archetype's structural profile.
-  float scoreArchetypeFitness(const Subject& subject,
-                              const ArchetypePolicy& policy) const;
+  float scoreArchetypeFitness(const Subject& subject, const ArchetypePolicy& policy) const;
 
   /// @brief Score the subject's quality when diatonically inverted.
   float scoreInversionQuality(const Subject& subject) const;
@@ -72,8 +69,7 @@ class ArchetypeScorer {
   /// @param subject The subject to evaluate.
   /// @param policy Archetype policy with fragment/sequence weights.
   /// @return Score in [0, 1].
-  float scoreKopfmotivStrength(const Subject& subject,
-                               const ArchetypePolicy& policy) const;
+  float scoreKopfmotivStrength(const Subject& subject, const ArchetypePolicy& policy) const;
 };
 
 }  // namespace bach

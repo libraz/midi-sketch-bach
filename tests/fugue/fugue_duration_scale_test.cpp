@@ -1,13 +1,12 @@
 // Tests for fugue duration scaling (develop_pairs and episode_bars).
 
-#include "fugue/fugue_config.h"
-#include "fugue/fugue_generator.h"
+#include <gtest/gtest.h>
 
 #include <vector>
 
-#include <gtest/gtest.h>
-
 #include "core/basic_types.h"
+#include "fugue/fugue_config.h"
+#include "fugue/fugue_generator.h"
 
 namespace bach {
 namespace {
@@ -65,8 +64,7 @@ TEST_P(FugueDurationScaleParamTest, GeneratesSuccessfully) {
   config.episode_bars = GetParam().episode_bars;
 
   FugueResult result = generateFugue(config);
-  EXPECT_TRUE(result.success) << "Failed for " << GetParam().label
-                               << ": " << result.error_message;
+  EXPECT_TRUE(result.success) << "Failed for " << GetParam().label << ": " << result.error_message;
 }
 
 TEST_P(FugueDurationScaleParamTest, HasNonEmptyTracks) {
@@ -112,7 +110,8 @@ TEST_P(FugueDurationScaleParamTest, LargerScaleProducesMoreNotes) {
   for (const auto& track : short_result.tracks) {
     for (const auto& note : track.notes) {
       Tick end = note.start_tick + note.duration;
-      if (end > short_max) short_max = end;
+      if (end > short_max)
+        short_max = end;
     }
   }
 
@@ -120,7 +119,8 @@ TEST_P(FugueDurationScaleParamTest, LargerScaleProducesMoreNotes) {
   for (const auto& track : scaled_result.tracks) {
     for (const auto& note : track.notes) {
       Tick end = note.start_tick + note.duration;
-      if (end > scaled_max) scaled_max = end;
+      if (end > scaled_max)
+        scaled_max = end;
     }
   }
 
@@ -147,24 +147,17 @@ TEST_P(FugueDurationScaleParamTest, StructureHasCorrectPhaseOrder) {
   for (const auto& section : sections) {
     uint8_t phase_val = static_cast<uint8_t>(section.phase);
     EXPECT_GE(phase_val, last_phase)
-        << "FuguePhase order violated: "
-        << fuguePhaseToString(section.phase) << " after phase " << last_phase;
+        << "FuguePhase order violated: " << fuguePhaseToString(section.phase) << " after phase "
+        << last_phase;
     last_phase = phase_val;
   }
 }
 
 INSTANTIATE_TEST_SUITE_P(
     AllScales, FugueDurationScaleParamTest,
-    ::testing::Values(
-        FugueScaleParam{2, 2, "Short"},
-        FugueScaleParam{3, 3, "Medium"},
-        FugueScaleParam{5, 3, "Long"},
-        FugueScaleParam{8, 4, "Full"}
-    ),
-    [](const ::testing::TestParamInfo<FugueScaleParam>& info) {
-      return info.param.label;
-    }
-);
+    ::testing::Values(FugueScaleParam{2, 2, "Short"}, FugueScaleParam{3, 3, "Medium"},
+                      FugueScaleParam{5, 3, "Long"}, FugueScaleParam{8, 4, "Full"}),
+    [](const ::testing::TestParamInfo<FugueScaleParam>& info) { return info.param.label; });
 
 // ===========================================================================
 // Seed determinism with different scales

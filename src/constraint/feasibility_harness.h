@@ -44,11 +44,8 @@ struct MicroSimResult {
   ///
   /// @return True if the subject passes all feasibility thresholds.
   bool feasible() const {
-    return success_rate() >= 0.90f
-        && num_critical_violations == 0
-        && num_bottleneck == 0
-        && avg_register_overlap < 0.60f
-        && max_accent_collision < 0.40f;
+    return success_rate() >= 0.90f && num_critical_violations == 0 && num_bottleneck == 0 &&
+           avg_register_overlap < 0.60f && max_accent_collision < 0.40f;
   }
 };
 
@@ -66,10 +63,7 @@ struct MicroSimResult {
 /// @param config Fugue configuration (num_voices, key, etc.).
 /// @param num_trials Number of simulation trials (default 20).
 /// @return Aggregated simulation results.
-MicroSimResult runMicroSim(
-    const Subject& subject,
-    const FugueConfig& config,
-    int num_trials = 20);
+MicroSimResult runMicroSim(const Subject& subject, const FugueConfig& config, int num_trials = 20);
 
 // ---------------------------------------------------------------------------
 // P1.g2: VoiceAssignmentSearch
@@ -98,10 +92,8 @@ struct VoiceAssignment {
 /// @param profile Constraint profile with accent contour and register arc.
 /// @param config Fugue configuration (num_voices, key, etc.).
 /// @return The best voice assignment found.
-VoiceAssignment findBestAssignment(
-    const Subject& subject,
-    const SubjectConstraintProfile& profile,
-    const FugueConfig& config);
+VoiceAssignment findBestAssignment(const Subject& subject, const SubjectConstraintProfile& profile,
+                                   const FugueConfig& config);
 
 // ---------------------------------------------------------------------------
 // P1.g3: Subject x Answer Pair Verification
@@ -125,16 +117,14 @@ struct ObligationConflict {
 /// Combines tonal answer feasibility, obligation density, cadence conflict,
 /// and detected obligation conflicts into a single feasibility assessment.
 struct PairVerificationResult {
-  bool tonal_answer_feasible;    ///< Whether the answer can be tonal.
-  float pair_peak_density;       ///< Peak simultaneous active debt density.
-  float cadence_conflict_score;  ///< 0.0-1.0, cadence overlap severity.
+  bool tonal_answer_feasible;                 ///< Whether the answer can be tonal.
+  float pair_peak_density;                    ///< Peak simultaneous active debt density.
+  float cadence_conflict_score;               ///< 0.0-1.0, cadence overlap severity.
   std::vector<ObligationConflict> conflicts;  ///< Detected obligation conflicts.
 
   /// @brief Check overall pair feasibility.
   /// @return True if no conflicts exist and cadence conflict is below threshold.
-  bool feasible() const {
-    return conflicts.empty() && cadence_conflict_score < 0.5f;
-  }
+  bool feasible() const { return conflicts.empty() && cadence_conflict_score < 0.5f; }
 };
 
 /// @brief Verify feasibility of a subject x answer pair at a given temporal offset.
@@ -153,10 +143,8 @@ struct PairVerificationResult {
 /// @param answer_prof Constraint profile of the answer.
 /// @param offset_ticks Temporal offset of the answer relative to the subject (in ticks).
 /// @return Pair verification result with feasibility assessment.
-PairVerificationResult verifyPair(
-    const SubjectConstraintProfile& subject_prof,
-    const SubjectConstraintProfile& answer_prof,
-    int offset_ticks);
+PairVerificationResult verifyPair(const SubjectConstraintProfile& subject_prof,
+                                  const SubjectConstraintProfile& answer_prof, int offset_ticks);
 
 // ---------------------------------------------------------------------------
 // P1.g4: Subject x Countersubject Solvability
@@ -169,13 +157,12 @@ PairVerificationResult verifyPair(
 struct SolvabilityResult {
   float vertical_clash_rate;          ///< Ratio of dissonant strong-beat intervals.
   float strong_beat_dissonance_rate;  ///< Strong-beat non-chord-tone rate.
-  float register_overlap;            ///< Pitch range overlap between S and CS.
+  float register_overlap;             ///< Pitch range overlap between S and CS.
 
   /// @brief Check overall solvability.
   /// @return True if all metrics are within acceptable thresholds.
   bool solvable() const {
-    return vertical_clash_rate <= 0.15f &&
-           strong_beat_dissonance_rate <= 0.05f &&
+    return vertical_clash_rate <= 0.15f && strong_beat_dissonance_rate <= 0.05f &&
            register_overlap <= 0.50f;
   }
 };
@@ -194,10 +181,8 @@ struct SolvabilityResult {
 /// @param key Musical key context.
 /// @param is_minor True for minor key context.
 /// @return Solvability result with vertical clash, dissonance, and register metrics.
-SolvabilityResult testSolvability(
-    const std::vector<NoteEvent>& subject_notes,
-    const std::vector<NoteEvent>& cs_notes,
-    Key key, bool is_minor);
+SolvabilityResult testSolvability(const std::vector<NoteEvent>& subject_notes,
+                                  const std::vector<NoteEvent>& cs_notes, Key key, bool is_minor);
 
 }  // namespace bach
 

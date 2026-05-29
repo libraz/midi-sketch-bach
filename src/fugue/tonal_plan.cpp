@@ -12,8 +12,6 @@
 
 namespace bach {
 
-
-
 // ---------------------------------------------------------------------------
 // TonalPlan member functions
 // ---------------------------------------------------------------------------
@@ -55,41 +53,44 @@ size_t TonalPlan::modulationCount() const {
 
 HarmonicTimeline TonalPlan::toDetailedTimeline(Tick total_duration) const {
   HarmonicTimeline timeline;
-  if (total_duration == 0) return timeline;
+  if (total_duration == 0)
+    return timeline;
 
   // Build list of region boundaries: each modulation starts a new key region.
   struct Region {
     Key key;
+    bool is_minor;
     Tick start;
     Tick end;
   };
   std::vector<Region> regions;
 
   if (modulations.empty()) {
-    regions.push_back({home_key, 0, total_duration});
+    regions.push_back({home_key, is_minor, 0, total_duration});
   } else {
     for (size_t idx = 0; idx < modulations.size(); ++idx) {
       Tick region_start = modulations[idx].tick;
-      Tick region_end = (idx + 1 < modulations.size()) ? modulations[idx + 1].tick
-                                                        : total_duration;
+      Tick region_end = (idx + 1 < modulations.size()) ? modulations[idx + 1].tick : total_duration;
       if (region_end > region_start) {
-        regions.push_back({modulations[idx].target_key, region_start, region_end});
+        regions.push_back(
+            {modulations[idx].target_key, modulations[idx].is_minor, region_start, region_end});
       }
     }
     // If first modulation doesn't start at tick 0, add home key region at front.
     if (!modulations.empty() && modulations[0].tick > 0) {
-      regions.insert(regions.begin(), {home_key, 0, modulations[0].tick});
+      regions.insert(regions.begin(), {home_key, is_minor, 0, modulations[0].tick});
     }
   }
 
   // For each key region, create a beat-resolution progression and merge.
   for (const auto& region : regions) {
     Tick region_duration = region.end - region.start;
-    if (region_duration == 0) continue;
+    if (region_duration == 0)
+      continue;
 
     KeySignature key_sig;
     key_sig.tonic = region.key;
-    key_sig.is_minor = is_minor;
+    key_sig.is_minor = region.is_minor;
 
     // Alternate between CircleOfFifths and DescendingFifths for harmonic variety.
     // Develop phase regions use DescendingFifths on even indices.
@@ -115,7 +116,8 @@ HarmonicTimeline TonalPlan::toDetailedTimeline(Tick total_duration) const {
 
 HarmonicTimeline TonalPlan::toHarmonicTimeline(Tick total_duration) const {
   HarmonicTimeline timeline;
-  if (total_duration == 0) return timeline;
+  if (total_duration == 0)
+    return timeline;
 
   // Generate bar-resolution events. Each bar gets an I-chord in the active key.
   for (Tick bar_tick = 0; bar_tick < total_duration; bar_tick += kTicksPerBar) {
@@ -167,6 +169,8 @@ std::string TonalPlan::toJson() const {
     writer.value(mod.tick);
     writer.key("phase");
     writer.value(std::string(fuguePhaseToString(mod.phase)));
+    writer.key("is_minor");
+    writer.value(mod.is_minor);
     writer.endObject();
   }
   writer.endArray();
@@ -186,8 +190,7 @@ std::string TonalPlan::toJson() const {
 // Tonal plan generation
 // ---------------------------------------------------------------------------
 
-TonalPlan generateTonalPlan(const FugueConfig& config, bool is_minor,
-                            Tick total_duration_ticks) {
+TonalPlan generateTonalPlan(const FugueConfig& config, bool is_minor, Tick total_duration_ticks) {
   TonalPlan plan;
   plan.home_key = config.key;
   plan.is_minor = is_minor;
@@ -215,7 +218,7 @@ TonalPlan generateTonalPlan(const FugueConfig& config, bool is_minor,
   }
 
   // 1. Establish phase: home key at tick 0.
-  plan.modulations.push_back({config.key, 0, FuguePhase::Establish});
+  plan.modulations.push_back({config.key, 0, FuguePhase::Establish, is_minor});
 
   // 2. Develop phase: modulations through near-related keys.
   KeySignature home{config.key, is_minor};
@@ -247,24 +250,30 @@ TonalPlan generateTonalPlan(const FugueConfig& config, bool is_minor,
 
     Tick current_tick = establish_end;
     for (size_t idx = 0; idx < num_develop_keys; ++idx) {
-      plan.modulations.push_back({develop_keys[idx], current_tick, FuguePhase::Develop});
+      bool target_is_minor = false;
+      if (is_minor) {
+        target_is_minor = (idx == 2);
+      } else {
+        target_is_minor = (idx == 1);
+      }
+      plan.modulations.push_back(
+          {develop_keys[idx], current_tick, FuguePhase::Develop, target_is_minor});
       current_tick += step;
     }
   } else if (num_develop_keys > 0) {
     // Not enough space for all modulations; place at least the first one.
-    plan.modulations.push_back({develop_keys[0], establish_end, FuguePhase::Develop});
+    plan.modulations.push_back({develop_keys[0], establish_end, FuguePhase::Develop, is_minor});
   }
 
   // 3. Resolve phase: return to home key.
-  plan.modulations.push_back({config.key, resolve_start, FuguePhase::Resolve});
+  plan.modulations.push_back({config.key, resolve_start, FuguePhase::Resolve, is_minor});
 
   return plan;
 }
 
 TonalPlan generateStructureAlignedTonalPlan(const FugueConfig& config,
                                             const ModulationPlan& mod_plan,
-                                            Tick subject_length_ticks,
-                                            Tick estimated_duration) {
+                                            Tick subject_length_ticks, Tick estimated_duration) {
   TonalPlan plan;
   plan.home_key = config.key;
   plan.is_minor = config.is_minor;
@@ -276,7 +285,7 @@ TonalPlan generateStructureAlignedTonalPlan(const FugueConfig& config,
   int develop_pairs = config.develop_pairs;
 
   // 1. Establish phase: home key at tick 0.
-  plan.modulations.push_back({config.key, 0, FuguePhase::Establish});
+  plan.modulations.push_back({config.key, 0, FuguePhase::Establish, config.is_minor});
 
   // 2. Develop phase: place key changes at each episode's midpoint.
   for (int pair_idx = 0; pair_idx < develop_pairs; ++pair_idx) {
@@ -284,10 +293,15 @@ TonalPlan generateStructureAlignedTonalPlan(const FugueConfig& config,
     Tick midpoint = episode_start + episode_duration / 2;
     // Snap to bar boundary.
     midpoint = (midpoint / kTicksPerBar) * kTicksPerBar;
-    if (midpoint < kTicksPerBar) midpoint = kTicksPerBar;
+    if (midpoint < kTicksPerBar)
+      midpoint = kTicksPerBar;
 
     Key target_key = mod_plan.getTargetKey(pair_idx, config.key);
-    plan.modulations.push_back({target_key, midpoint, FuguePhase::Develop});
+    bool target_is_minor = config.is_minor;
+    if (pair_idx >= 0 && pair_idx < static_cast<int>(mod_plan.targets.size())) {
+      target_is_minor = mod_plan.targets[pair_idx].target_is_minor;
+    }
+    plan.modulations.push_back({target_key, midpoint, FuguePhase::Develop, target_is_minor});
   }
 
   // 3. Return episode: transition back to home key.
@@ -299,7 +313,7 @@ TonalPlan generateStructureAlignedTonalPlan(const FugueConfig& config,
   }
 
   // 4. Resolve phase: home key from the return episode onward.
-  plan.modulations.push_back({config.key, return_midpoint, FuguePhase::Resolve});
+  plan.modulations.push_back({config.key, return_midpoint, FuguePhase::Resolve, config.is_minor});
 
   // Ensure all ticks are within estimated_duration.
   for (auto& mod : plan.modulations) {

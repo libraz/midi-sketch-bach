@@ -93,23 +93,20 @@ TEST(SubjectParamsTest, AvoidUnisonNoPreviousNote) {
 
 TEST(SubjectParamsTest, QuantizeToStrongBeatReturnsStrongBeat) {
   // Tick 500 should quantize to beat 1 (0) or beat 3 (960).
-  Tick result = quantizeToStrongBeat(500, SubjectCharacter::Severe,
-                                      kTicksPerBar * 4);
+  Tick result = quantizeToStrongBeat(500, SubjectCharacter::Severe, kTicksPerBar * 4);
   EXPECT_TRUE(result % (kTicksPerBeat * 2) == 0 || result == 0);
 }
 
 TEST(SubjectParamsTest, QuantizeToStrongBeatNobleAlwaysBeat1) {
-  Tick result = quantizeToStrongBeat(kTicksPerBeat * 2 + 100,
-                                      SubjectCharacter::Noble,
-                                      kTicksPerBar * 4);
+  Tick result =
+      quantizeToStrongBeat(kTicksPerBeat * 2 + 100, SubjectCharacter::Noble, kTicksPerBar * 4);
   // Noble: always beat 1.
   EXPECT_EQ(result % kTicksPerBar, 0u);
 }
 
 TEST(SubjectParamsTest, QuantizeMinimumOneBar) {
   // Climax too early should be pushed to at least bar 1.
-  Tick result = quantizeToStrongBeat(100, SubjectCharacter::Severe,
-                                      kTicksPerBar * 4);
+  Tick result = quantizeToStrongBeat(100, SubjectCharacter::Severe, kTicksPerBar * 4);
   EXPECT_GE(result, kTicksPerBar);
 }
 
@@ -127,16 +124,14 @@ TEST(SubjectParamsTest, ClampLeapWithinBounds) {
   std::mt19937 gen(42);
   int large_count = 0;
   // Leap of 20 semitones should be clamped.
-  int result = clampLeap(80, 60, SubjectCharacter::Severe,
-                          Key::C, ScaleType::Major, 48, 84,
-                          gen, &large_count);
+  int result = clampLeap(80, 60, SubjectCharacter::Severe, Key::C, ScaleType::Major, 48, 84, gen,
+                         &large_count);
   EXPECT_LE(std::abs(result - 60), 7);  // Severe max = 7
 }
 
 TEST(SubjectParamsTest, ClampLeapNoPreviousNote) {
   std::mt19937 gen(42);
-  int result = clampLeap(70, -1, SubjectCharacter::Severe,
-                          Key::C, ScaleType::Major, 48, 84, gen);
+  int result = clampLeap(70, -1, SubjectCharacter::Severe, Key::C, ScaleType::Major, 48, 84, gen);
   EXPECT_EQ(result, 70);
 }
 

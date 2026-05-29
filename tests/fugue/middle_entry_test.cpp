@@ -337,6 +337,20 @@ TEST(FalseEntryTest, FalseEntryDescendingSubjectDivergesUp) {
       << "First divergent note should move up when subject descends";
 }
 
+TEST(FalseEntryTest, FourVoiceUpperManualAvoidsTenorBassRegister) {
+  Subject subject = makeSubjectQuarters({64, 66, 68, 66, 65, 63});
+
+  MiddleEntry entry = generateFalseEntry(subject, Key::C, 0, 1, 4, 3, 0.5f);
+
+  ASSERT_FALSE(entry.notes.empty());
+  auto tenor_range = getFugueVoiceRange(2, 4);
+  for (const auto& note : entry.notes) {
+    EXPECT_GT(note.pitch, tenor_range.second)
+        << "4-voice upper-manual false entries should not sink into the "
+           "tenor register and become the sampled bass";
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Validated overload tests
 // ---------------------------------------------------------------------------
@@ -357,12 +371,12 @@ TEST(MiddleEntryTest, ValidatedOverload_RegistersInState) {
   }
   cp_state.setKey(Key::C);
 
-  HarmonicTimeline tl = HarmonicTimeline::createStandard(
-      {Key::C, false}, kTicksPerBar * 12, HarmonicResolution::Bar);
+  HarmonicTimeline tl =
+      HarmonicTimeline::createStandard({Key::C, false}, kTicksPerBar * 12, HarmonicResolution::Bar);
 
   VoiceId voice = 1;
-  MiddleEntry entry = generateMiddleEntry(subject, Key::G, start, voice, num_voices,
-                                          cp_state, cp_rules, cp_resolver, tl);
+  MiddleEntry entry = generateMiddleEntry(subject, Key::G, start, voice, num_voices, cp_state,
+                                          cp_rules, cp_resolver, tl);
 
   EXPECT_FALSE(entry.notes.empty());
 
@@ -372,6 +386,37 @@ TEST(MiddleEntryTest, ValidatedOverload_RegistersInState) {
     const NoteEvent* registered = cp_state.getNoteAt(voice, entry.notes[0].start_tick);
     EXPECT_NE(registered, nullptr)
         << "Validated middle entry notes should be registered in CounterpointState";
+  }
+}
+
+TEST(MiddleEntryTest, ValidatedOverloadAdaptsMinorSubjectToTimelineMode) {
+  Subject subject = makeSubjectQuarters({67, 70, 69, 67, 74}, Key::G);
+  subject.is_minor = true;
+  Tick start = kTicksPerBar * 4;
+  uint8_t num_voices = 4;
+
+  CounterpointState cp_state;
+  BachRuleEvaluator cp_rules(num_voices);
+  cp_rules.setFreeCounterpoint(true);
+  CollisionResolver cp_resolver;
+
+  for (uint8_t v = 0; v < num_voices; ++v) {
+    auto [lo, hi] = getFugueVoiceRange(v, num_voices);
+    cp_state.registerVoice(v, lo, hi);
+  }
+  cp_state.setKey(Key::Bb);
+
+  HarmonicTimeline tl = HarmonicTimeline::createStandard({Key::Bb, false}, kTicksPerBar * 12,
+                                                         HarmonicResolution::Bar);
+
+  MiddleEntry entry = generateMiddleEntry(subject, Key::Bb, start, 0, num_voices, cp_state,
+                                          cp_rules, cp_resolver, tl);
+
+  ASSERT_FALSE(entry.notes.empty());
+  for (const auto& note : entry.notes) {
+    EXPECT_TRUE(isDiatonicInKey(note.pitch, Key::Bb, false))
+        << "Validated middle entries in a major timeline should not preserve "
+        << "minor-mode accidentals such as Db/C# as structural subject notes";
   }
 }
 

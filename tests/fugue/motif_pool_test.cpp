@@ -231,8 +231,8 @@ TEST(MotifPoolTest, NormalizedToTickZero) {
   for (const auto& motif : pool.motifs()) {
     ASSERT_FALSE(motif.notes.empty()) << "Motif '" << motif.origin << "' has no notes";
     EXPECT_EQ(motif.notes[0].start_tick, 0u)
-        << "Motif '" << motif.origin << "' not normalized to tick 0 (start_tick="
-        << motif.notes[0].start_tick << ")";
+        << "Motif '" << motif.origin
+        << "' not normalized to tick 0 (start_tick=" << motif.notes[0].start_tick << ")";
   }
 }
 

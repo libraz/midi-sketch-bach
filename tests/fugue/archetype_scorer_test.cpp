@@ -13,9 +13,8 @@ namespace bach {
 namespace {
 
 // Helper: create a simple subject for testing.
-Subject makeTestSubject(std::vector<uint8_t> pitches,
-                        std::vector<Tick> durations,
-                        Key key = Key::C, bool is_minor = false) {
+Subject makeTestSubject(std::vector<uint8_t> pitches, std::vector<Tick> durations, Key key = Key::C,
+                        bool is_minor = false) {
   Subject s;
   s.key = key;
   s.is_minor = is_minor;
@@ -61,11 +60,10 @@ TEST(ArchetypeScorerTest, CompositeZeroForAllZeros) {
 
 TEST(ArchetypeScorerTest, FitnessHighForMatchingSubject) {
   // C major stepwise subject within Compact range.
-  auto subject = makeTestSubject(
-      {60, 62, 64, 65, 67, 65, 64, 62, 60},
-      {kTicksPerBeat, kTicksPerBeat, kTicksPerBeat, kTicksPerBeat,
-       kTicksPerBeat, kTicksPerBeat, kTicksPerBeat, kTicksPerBeat,
-       kTicksPerBeat});
+  auto subject =
+      makeTestSubject({60, 62, 64, 65, 67, 65, 64, 62, 60},
+                      {kTicksPerBeat, kTicksPerBeat, kTicksPerBeat, kTicksPerBeat, kTicksPerBeat,
+                       kTicksPerBeat, kTicksPerBeat, kTicksPerBeat, kTicksPerBeat});
   const auto& policy = getArchetypePolicy(FugueArchetype::Compact);
   ArchetypeScorer scorer;
   float fitness = scorer.scoreArchetypeFitness(subject, policy);
@@ -77,11 +75,10 @@ TEST(ArchetypeScorerTest, FitnessHighForMatchingSubject) {
 // ---------------------------------------------------------------------------
 
 TEST(ArchetypeScorerTest, InversionQualityNonZero) {
-  auto subject = makeTestSubject(
-      {60, 62, 64, 65, 67, 65, 64, 62, 60},
-      {kTicksPerBeat, kTicksPerBeat, kTicksPerBeat, kTicksPerBeat,
-       kTicksPerBeat, kTicksPerBeat, kTicksPerBeat, kTicksPerBeat,
-       kTicksPerBeat});
+  auto subject =
+      makeTestSubject({60, 62, 64, 65, 67, 65, 64, 62, 60},
+                      {kTicksPerBeat, kTicksPerBeat, kTicksPerBeat, kTicksPerBeat, kTicksPerBeat,
+                       kTicksPerBeat, kTicksPerBeat, kTicksPerBeat, kTicksPerBeat});
   ArchetypeScorer scorer;
   float inv = scorer.scoreInversionQuality(subject);
   EXPECT_GT(inv, 0.0f) << "Stepwise subject should have reasonable inversion";
@@ -93,10 +90,8 @@ TEST(ArchetypeScorerTest, InversionQualityNonZero) {
 
 TEST(ArchetypeScorerTest, StrettoPotentialBaseScore) {
   // Even a short subject should get at least the base score.
-  auto subject = makeTestSubject(
-      {60, 64, 67, 65, 60},
-      {kTicksPerBeat, kTicksPerBeat, kTicksPerBeat, kTicksPerBeat,
-       kTicksPerBeat});
+  auto subject = makeTestSubject({60, 64, 67, 65, 60}, {kTicksPerBeat, kTicksPerBeat, kTicksPerBeat,
+                                                        kTicksPerBeat, kTicksPerBeat});
   subject.length_ticks = kTicksPerBeat * 5;
   ArchetypeScorer scorer;
   float sp = scorer.scoreStrettoPotential(subject);
@@ -110,9 +105,8 @@ TEST(ArchetypeScorerTest, StrettoPotentialBaseScore) {
 TEST(ArchetypeScorerTest, KopfmotivStrengthWithLeap) {
   // Subject starting with a leap should score higher.
   auto subject = makeTestSubject(
-      {60, 67, 65, 64, 62, 60},
-      {kTicksPerBeat, kTicksPerBeat / 2, kTicksPerBeat / 2, kTicksPerBeat,
-       kTicksPerBeat, kTicksPerBeat});
+      {60, 67, 65, 64, 62, 60}, {kTicksPerBeat, kTicksPerBeat / 2, kTicksPerBeat / 2, kTicksPerBeat,
+                                 kTicksPerBeat, kTicksPerBeat});
   const auto& policy = getArchetypePolicy(FugueArchetype::Compact);
   ArchetypeScorer scorer;
   float kopf = scorer.scoreKopfmotivStrength(subject, policy);
@@ -122,9 +116,8 @@ TEST(ArchetypeScorerTest, KopfmotivStrengthWithLeap) {
 TEST(ArchetypeScorerTest, KopfmotivStrengthWithRepetition) {
   // Subject with repeated pitches should score lower.
   // Use Cantabile policy (zero fragment/sequence weights) to test base scoring.
-  auto subject = makeTestSubject(
-      {60, 60, 60, 60},
-      {kTicksPerBeat, kTicksPerBeat, kTicksPerBeat, kTicksPerBeat});
+  auto subject = makeTestSubject({60, 60, 60, 60},
+                                 {kTicksPerBeat, kTicksPerBeat, kTicksPerBeat, kTicksPerBeat});
   const auto& policy = getArchetypePolicy(FugueArchetype::Cantabile);
   ArchetypeScorer scorer;
   float kopf = scorer.scoreKopfmotivStrength(subject, policy);
@@ -135,9 +128,8 @@ TEST(ArchetypeScorerTest, KopfmotivStrengthPolicyWeightsAffectScore) {
   // Compact policy has fragment_reusability_weight=0.3, sequence_potential_weight=0.2.
   // A narrow-range subject with repeated durations should get a higher score under
   // Compact (reusable fragment) than under Cantabile (base scoring only).
-  auto subject = makeTestSubject(
-      {60, 62, 64, 62},
-      {kTicksPerBeat, kTicksPerBeat, kTicksPerBeat, kTicksPerBeat});
+  auto subject = makeTestSubject({60, 62, 64, 62},
+                                 {kTicksPerBeat, kTicksPerBeat, kTicksPerBeat, kTicksPerBeat});
   ArchetypeScorer scorer;
   const auto& compact_policy = getArchetypePolicy(FugueArchetype::Compact);
   const auto& cantabile_policy = getArchetypePolicy(FugueArchetype::Cantabile);
@@ -158,11 +150,10 @@ TEST(ArchetypeScorerTest, KopfmotivStrengthPolicyWeightsAffectScore) {
 // ---------------------------------------------------------------------------
 
 TEST(ArchetypeScorerTest, HardGatePassesForCompact) {
-  auto subject = makeTestSubject(
-      {60, 62, 64, 65, 67, 65, 64, 62, 60},
-      {kTicksPerBeat, kTicksPerBeat, kTicksPerBeat, kTicksPerBeat,
-       kTicksPerBeat, kTicksPerBeat, kTicksPerBeat, kTicksPerBeat,
-       kTicksPerBeat});
+  auto subject =
+      makeTestSubject({60, 62, 64, 65, 67, 65, 64, 62, 60},
+                      {kTicksPerBeat, kTicksPerBeat, kTicksPerBeat, kTicksPerBeat, kTicksPerBeat,
+                       kTicksPerBeat, kTicksPerBeat, kTicksPerBeat, kTicksPerBeat});
   const auto& policy = getArchetypePolicy(FugueArchetype::Compact);
   ArchetypeScorer scorer;
   EXPECT_TRUE(scorer.checkHardGate(subject, policy));
@@ -170,10 +161,9 @@ TEST(ArchetypeScorerTest, HardGatePassesForCompact) {
 
 TEST(ArchetypeScorerTest, HardGateContourSymmetryRejectsAscendingOnly) {
   // Purely ascending subject should fail contour symmetry.
-  auto subject = makeTestSubject(
-      {60, 62, 64, 65, 67, 69, 71, 72},
-      {kTicksPerBeat, kTicksPerBeat, kTicksPerBeat, kTicksPerBeat,
-       kTicksPerBeat, kTicksPerBeat, kTicksPerBeat, kTicksPerBeat});
+  auto subject = makeTestSubject({60, 62, 64, 65, 67, 69, 71, 72},
+                                 {kTicksPerBeat, kTicksPerBeat, kTicksPerBeat, kTicksPerBeat,
+                                  kTicksPerBeat, kTicksPerBeat, kTicksPerBeat, kTicksPerBeat});
   const auto& policy = getArchetypePolicy(FugueArchetype::Invertible);
   ArchetypeScorer scorer;
   EXPECT_FALSE(scorer.checkHardGate(subject, policy))
@@ -186,9 +176,8 @@ TEST(ArchetypeScorerTest, HardGateContourSymmetryRejectsAscendingOnly) {
 
 TEST(ArchetypeScorerTest, EvaluateReturnsAllDimensions) {
   auto subject = makeTestSubject(
-      {60, 64, 67, 65, 62, 60},
-      {kTicksPerBeat, kTicksPerBeat / 2, kTicksPerBeat / 2, kTicksPerBeat,
-       kTicksPerBeat, kTicksPerBeat});
+      {60, 64, 67, 65, 62, 60}, {kTicksPerBeat, kTicksPerBeat / 2, kTicksPerBeat / 2, kTicksPerBeat,
+                                 kTicksPerBeat, kTicksPerBeat});
   subject.length_ticks = kTicksPerBeat * 5;
   const auto& policy = getArchetypePolicy(FugueArchetype::Compact);
   ArchetypeScorer scorer;
@@ -214,10 +203,9 @@ TEST(ArchetypeScorerTest, SymmetryWeightAffectsFitness) {
   // different fitness scores under Invertible (symmetry_score_weight=0.4) vs
   // Compact (symmetry_score_weight=0.0), since the symmetry blending code
   // path in scoreArchetypeFitness is only active when the weight is nonzero.
-  auto subject = makeTestSubject(
-      {60, 62, 64, 67, 65, 64, 62, 60},
-      {kTicksPerBeat, kTicksPerBeat, kTicksPerBeat, kTicksPerBeat,
-       kTicksPerBeat, kTicksPerBeat, kTicksPerBeat, kTicksPerBeat});
+  auto subject = makeTestSubject({60, 62, 64, 67, 65, 64, 62, 60},
+                                 {kTicksPerBeat, kTicksPerBeat, kTicksPerBeat, kTicksPerBeat,
+                                  kTicksPerBeat, kTicksPerBeat, kTicksPerBeat, kTicksPerBeat});
   const auto& invertible_policy = getArchetypePolicy(FugueArchetype::Invertible);
   const auto& compact_policy = getArchetypePolicy(FugueArchetype::Compact);
 
@@ -228,10 +216,8 @@ TEST(ArchetypeScorerTest, SymmetryWeightAffectsFitness) {
       << "Compact must have zero symmetry_score_weight";
 
   ArchetypeScorer scorer;
-  float invertible_fitness =
-      scorer.scoreArchetypeFitness(subject, invertible_policy);
-  float compact_fitness =
-      scorer.scoreArchetypeFitness(subject, compact_policy);
+  float invertible_fitness = scorer.scoreArchetypeFitness(subject, invertible_policy);
+  float compact_fitness = scorer.scoreArchetypeFitness(subject, compact_policy);
 
   // The symmetry weight blends contour symmetry into fitness; with different
   // weights the scores must differ for any subject whose symmetry != raw fitness.
@@ -247,16 +233,14 @@ TEST(ArchetypeScorerTest, SymmetryWeightAffectsFitness) {
 
 TEST(ArchetypeScorerTest, SymmetricSubjectScoresHigherWithSymmetryWeight) {
   // Symmetric subject: C-D-E-G-E-D-C (balanced ascending/descending).
-  auto symmetric = makeTestSubject(
-      {60, 62, 64, 67, 64, 62, 60},
-      {kTicksPerBeat, kTicksPerBeat, kTicksPerBeat, kTicksPerBeat,
-       kTicksPerBeat, kTicksPerBeat, kTicksPerBeat});
+  auto symmetric = makeTestSubject({60, 62, 64, 67, 64, 62, 60},
+                                   {kTicksPerBeat, kTicksPerBeat, kTicksPerBeat, kTicksPerBeat,
+                                    kTicksPerBeat, kTicksPerBeat, kTicksPerBeat});
 
   // Asymmetric subject: C-D-E-F-G-A-B (all ascending, zero descending motion).
-  auto asymmetric = makeTestSubject(
-      {60, 62, 64, 65, 67, 69, 71},
-      {kTicksPerBeat, kTicksPerBeat, kTicksPerBeat, kTicksPerBeat,
-       kTicksPerBeat, kTicksPerBeat, kTicksPerBeat});
+  auto asymmetric = makeTestSubject({60, 62, 64, 65, 67, 69, 71},
+                                    {kTicksPerBeat, kTicksPerBeat, kTicksPerBeat, kTicksPerBeat,
+                                     kTicksPerBeat, kTicksPerBeat, kTicksPerBeat});
 
   const auto& policy = getArchetypePolicy(FugueArchetype::Invertible);
   ASSERT_GT(policy.symmetry_score_weight, 0.0f);

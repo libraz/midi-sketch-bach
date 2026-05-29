@@ -33,11 +33,11 @@ struct PhraseGoal {
 /// produces neutral scores (no behavioral change from prior code).
 struct MelodicContext {
   uint8_t prev_pitches[3] = {0, 0, 0};  ///< Last 3 pitches (0=unknown), [0]=most recent.
-  uint8_t prev_count = 0;                ///< Number of valid previous pitches (0-3).
-  int8_t prev_direction = 0;             ///< -1=descending, 0=unknown, 1=ascending.
-  bool is_leading_tone = false;          ///< True if prev pitch is the leading tone.
-  bool leap_needs_resolution = false;    ///< True if prev interval was a leap (>= 5 semitones).
-  int8_t consecutive_same_dir = 0;       ///< Count of consecutive same-direction stepwise motions.
+  uint8_t prev_count = 0;               ///< Number of valid previous pitches (0-3).
+  int8_t prev_direction = 0;            ///< -1=descending, 0=unknown, 1=ascending.
+  bool is_leading_tone = false;         ///< True if prev pitch is the leading tone.
+  bool leap_needs_resolution = false;   ///< True if prev interval was a leap (>= 5 semitones).
+  int8_t consecutive_same_dir = 0;      ///< Count of consecutive same-direction stepwise motions.
 
   /// @brief Evaluate melodic quality of a candidate pitch.
   ///
@@ -62,8 +62,7 @@ struct MelodicContext {
   /// @param current_tick Tick of the candidate note. Used only when goal is set.
   /// @return Quality score in [0.0, 1.0], higher = better voice leading.
   static float scoreMelodicQuality(const MelodicContext& ctx, uint8_t candidate,
-                                   const PhraseGoal* goal = nullptr,
-                                   Tick current_tick = 0);
+                                   const PhraseGoal* goal = nullptr, Tick current_tick = 0);
 };
 
 /// @brief Compute the goal approach bonus for a candidate pitch at a given tick.
@@ -84,8 +83,7 @@ struct MelodicContext {
 /// @param current_tick The tick position of the candidate note.
 /// @param goal The phrase goal containing target pitch, tick, and max bonus.
 /// @return Bonus in [0.0, goal.bonus], additive to the melodic quality score.
-float computeGoalApproachBonus(uint8_t current_pitch, Tick current_tick,
-                               const PhraseGoal& goal);
+float computeGoalApproachBonus(uint8_t current_pitch, Tick current_tick, const PhraseGoal& goal);
 
 }  // namespace bach
 

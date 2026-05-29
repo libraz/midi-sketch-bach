@@ -49,8 +49,7 @@ class BachRuleEvaluator : public IRuleEvaluator {
   /// @note P4 is consonant with 3+ voices. In free counterpoint mode,
   ///       weak-beat consonances pass; weak-beat dissonances return false
   ///       to allow CollisionResolver NHT evaluation with next_pitch.
-  bool isIntervalConsonant(int semitones,
-                           bool is_strong_beat) const override;
+  bool isIntervalConsonant(int semitones, bool is_strong_beat) const override;
 
   /// @brief Classify the motion between two successive pitch pairs.
   /// @param prev1 Previous pitch in voice 1.
@@ -58,8 +57,8 @@ class BachRuleEvaluator : public IRuleEvaluator {
   /// @param prev2 Previous pitch in voice 2.
   /// @param curr2 Current pitch in voice 2.
   /// @return Classified motion type.
-  MotionType classifyMotion(uint8_t prev1, uint8_t curr1,
-                            uint8_t prev2, uint8_t curr2) const override;
+  MotionType classifyMotion(uint8_t prev1, uint8_t curr1, uint8_t prev2,
+                            uint8_t curr2) const override;
 
   /// @brief Detect parallel perfect consonances (P5, P8) at a tick.
   /// @param state Counterpoint state to query.
@@ -67,8 +66,7 @@ class BachRuleEvaluator : public IRuleEvaluator {
   /// @param voice2 Second voice identifier.
   /// @param tick Tick position to check.
   /// @return True if parallel perfect consonances are detected.
-  bool hasParallelPerfect(const CounterpointState& state,
-                          VoiceId voice1, VoiceId voice2,
+  bool hasParallelPerfect(const CounterpointState& state, VoiceId voice1, VoiceId voice2,
                           Tick tick) const override;
 
   /// @brief Detect hidden (direct) fifths/octaves at a tick.
@@ -78,8 +76,7 @@ class BachRuleEvaluator : public IRuleEvaluator {
   /// @param tick Tick position to check.
   /// @return True if hidden perfects are detected. More lenient than Fux:
   ///         allowed when either voice approaches by step.
-  bool hasHiddenPerfect(const CounterpointState& state,
-                        VoiceId voice1, VoiceId voice2,
+  bool hasHiddenPerfect(const CounterpointState& state, VoiceId voice1, VoiceId voice2,
                         Tick tick) const override;
 
   /// @brief Detect voice crossing at a tick.
@@ -89,8 +86,7 @@ class BachRuleEvaluator : public IRuleEvaluator {
   /// @param tick Tick position to check.
   /// @return True if a persistent voice crossing is detected. Temporary
   ///         crossings (resolving within 2 beats) are allowed.
-  bool hasVoiceCrossing(const CounterpointState& state,
-                        VoiceId voice1, VoiceId voice2,
+  bool hasVoiceCrossing(const CounterpointState& state, VoiceId voice1, VoiceId voice2,
                         Tick tick) const override;
 
   /// @brief Validate all voice pairs across a tick range.
@@ -98,9 +94,8 @@ class BachRuleEvaluator : public IRuleEvaluator {
   /// @param from_tick Start of validation window (inclusive).
   /// @param to_tick End of validation window (exclusive).
   /// @return Vector of all violations found.
-  std::vector<RuleViolation> validate(
-      const CounterpointState& state,
-      Tick from_tick, Tick to_tick) const override;
+  std::vector<RuleViolation> validate(const CounterpointState& state, Tick from_tick,
+                                      Tick to_tick) const override;
 
   /// @brief Bach allows closer voice spacing (soft penalty, not rejection).
   bool isStrictSpacing() const override { return false; }
@@ -112,8 +107,7 @@ class BachRuleEvaluator : public IRuleEvaluator {
   /// @param tick Tick position where crossing was detected.
   /// @return True if the crossing resolves within 2 beats (temporary).
   /// @note Matches Python analyzer _LOOKAHEAD_BEATS=2.
-  bool isCrossingTemporary(const CounterpointState& state,
-                           VoiceId voice1, VoiceId voice2,
+  bool isCrossingTemporary(const CounterpointState& state, VoiceId voice1, VoiceId voice2,
                            Tick tick) const;
 
  private:
@@ -121,8 +115,8 @@ class BachRuleEvaluator : public IRuleEvaluator {
   bool free_counterpoint_ = false;
 
   /// @brief Get the previous note before the given tick for a voice.
-  static const NoteEvent* getPreviousNote(const CounterpointState& state,
-                                          VoiceId voice_id, Tick tick);
+  static const NoteEvent* getPreviousNote(const CounterpointState& state, VoiceId voice_id,
+                                          Tick tick);
 };
 
 }  // namespace bach

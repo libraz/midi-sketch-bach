@@ -19,8 +19,8 @@ namespace bach {
 
 /// @brief Result of scanning for cadence-deficient stretches.
 struct CadenceDeficiency {
-  Tick region_start = 0;   ///< Start tick of the deficient region.
-  Tick region_end = 0;     ///< End tick of the deficient region.
+  Tick region_start = 0;    ///< Start tick of the deficient region.
+  Tick region_end = 0;      ///< End tick of the deficient region.
   Tick insertion_tick = 0;  ///< Recommended tick for cadence insertion.
 };
 
@@ -73,12 +73,10 @@ bool isInSubjectEntry(const FugueStructure& structure, Tick tick);
 /// @param total_duration Total duration of the piece in ticks.
 /// @param config Detection configuration (thresholds).
 /// @return Vector of cadence-deficient regions with recommended insertion ticks.
-std::vector<CadenceDeficiency> detectCadenceDeficiencies(
-    const std::vector<NoteEvent>& notes,
-    const FugueStructure& structure,
-    Key key,
-    Tick total_duration,
-    const CadenceDetectionConfig& config = {});
+std::vector<CadenceDeficiency> detectCadenceDeficiencies(const std::vector<NoteEvent>& notes,
+                                                         const FugueStructure& structure, Key key,
+                                                         Tick total_duration,
+                                                         const CadenceDetectionConfig& config = {});
 
 /// @brief Insert minimal cadential formulas at detected deficiency points.
 ///
@@ -100,15 +98,10 @@ std::vector<CadenceDeficiency> detectCadenceDeficiencies(
 /// @param seed Deterministic PRNG seed.
 /// @param config Detection configuration (for deceptive cadence probability).
 /// @return Number of cadences inserted.
-int insertCadentialFormulas(
-    std::vector<NoteEvent>& notes,
-    const std::vector<CadenceDeficiency>& deficiencies,
-    Key key,
-    bool is_minor,
-    VoiceId bass_voice,
-    uint8_t num_voices,
-    uint32_t seed,
-    const CadenceDetectionConfig& config = {});
+int insertCadentialFormulas(std::vector<NoteEvent>& notes,
+                            const std::vector<CadenceDeficiency>& deficiencies, Key key,
+                            bool is_minor, VoiceId bass_voice, uint8_t num_voices, uint32_t seed,
+                            const CadenceDetectionConfig& config = {});
 
 /// @brief Combined detection and insertion for fugue generation.
 ///
@@ -125,16 +118,10 @@ int insertCadentialFormulas(
 /// @param seed Deterministic PRNG seed.
 /// @param config Detection configuration.
 /// @return Number of cadences inserted.
-int ensureCadentialCoverage(
-    std::vector<NoteEvent>& notes,
-    const FugueStructure& structure,
-    Key key,
-    bool is_minor,
-    VoiceId bass_voice,
-    uint8_t num_voices,
-    Tick total_duration,
-    uint32_t seed,
-    const CadenceDetectionConfig& config = {});
+int ensureCadentialCoverage(std::vector<NoteEvent>& notes, const FugueStructure& structure, Key key,
+                            bool is_minor, VoiceId bass_voice, uint8_t num_voices,
+                            Tick total_duration, uint32_t seed,
+                            const CadenceDetectionConfig& config = {});
 
 /// @brief Check if a tick falls within any cadence zone.
 ///
@@ -145,8 +132,7 @@ int ensureCadentialCoverage(
 /// @param cadence_ticks Sorted list of cadence positions.
 /// @param window_beats Window size in beats before each cadence (default: 2).
 /// @return True if the tick is within any cadence zone.
-bool isInCadenceZone(Tick tick, const std::vector<Tick>& cadence_ticks,
-                     Tick window_beats = 2);
+bool isInCadenceZone(Tick tick, const std::vector<Tick>& cadence_ticks, Tick window_beats = 2);
 
 /// @brief Extract cadence ticks from a CadencePlan.
 /// @param plan The cadence plan.
@@ -171,13 +157,8 @@ std::vector<Tick> extractCadenceTicks(const CadencePlan& plan);
 /// @param num_voices Total number of voices.
 /// @param seed Deterministic PRNG seed for approach selection.
 /// @return Number of cadence windows successfully shaped.
-int applyCadenceApproachToVoices(
-    std::vector<NoteEvent>& notes,
-    const CadencePlan& plan,
-    Key key,
-    bool is_minor,
-    uint8_t num_voices,
-    uint32_t seed);
+int applyCadenceApproachToVoices(std::vector<NoteEvent>& notes, const CadencePlan& plan, Key key,
+                                 bool is_minor, uint8_t num_voices, uint32_t seed);
 
 }  // namespace bach
 

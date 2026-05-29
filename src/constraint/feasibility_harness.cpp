@@ -61,7 +61,8 @@ float computeRegisterOverlap(const Exposition& expo, uint8_t num_voices) {
 
   std::vector<VoicePitchRange> ranges(num_voices);
   for (const auto& [vid, notes] : expo.voice_notes) {
-    if (vid >= num_voices) continue;
+    if (vid >= num_voices)
+      continue;
     for (const auto& note : notes) {
       ranges[vid].min_pitch = std::min(ranges[vid].min_pitch, note.pitch);
       ranges[vid].max_pitch = std::max(ranges[vid].max_pitch, note.pitch);
@@ -72,7 +73,8 @@ float computeRegisterOverlap(const Exposition& expo, uint8_t num_voices) {
   float max_overlap = 0.0f;
   for (int idx_a = 0; idx_a < num_voices; ++idx_a) {
     for (int idx_b = idx_a + 1; idx_b < num_voices; ++idx_b) {
-      if (!ranges[idx_a].has_notes || !ranges[idx_b].has_notes) continue;
+      if (!ranges[idx_a].has_notes || !ranges[idx_b].has_notes)
+        continue;
 
       int intersect_lo = std::max(static_cast<int>(ranges[idx_a].min_pitch),
                                   static_cast<int>(ranges[idx_b].min_pitch));
@@ -104,7 +106,8 @@ float computeRegisterOverlap(const Exposition& expo, uint8_t num_voices) {
 /// @param num_voices Number of voices.
 /// @return Maximum accent collision ratio [0, 1].
 float computeAccentCollision(const Exposition& expo, uint8_t num_voices) {
-  if (num_voices <= 1 || expo.total_ticks == 0) return 0.0f;
+  if (num_voices <= 1 || expo.total_ticks == 0)
+    return 0.0f;
 
   float max_ratio = 0.0f;
 
@@ -139,24 +142,23 @@ float computeAccentCollision(const Exposition& expo, uint8_t num_voices) {
 /// @param subject_high Highest pitch in the shifted subject.
 /// @param num_voices Number of voices.
 /// @return Separation score [0, 1] where 1 = excellent separation.
-float scoreVoiceSeparation(uint8_t subject_low, uint8_t subject_high,
-                           uint8_t num_voices) {
-  float subject_center = (static_cast<float>(subject_low) +
-                          static_cast<float>(subject_high)) / 2.0f;
+float scoreVoiceSeparation(uint8_t subject_low, uint8_t subject_high, uint8_t num_voices) {
+  float subject_center =
+      (static_cast<float>(subject_low) + static_cast<float>(subject_high)) / 2.0f;
   float total_distance = 0.0f;
   int pairs = 0;
 
   for (uint8_t vid = 0; vid < num_voices; ++vid) {
     auto [range_lo, range_hi] = getFugueVoiceRange(vid, num_voices);
-    float voice_center = (static_cast<float>(range_lo) +
-                          static_cast<float>(range_hi)) / 2.0f;
+    float voice_center = (static_cast<float>(range_lo) + static_cast<float>(range_hi)) / 2.0f;
     // Distance from subject center to voice center.
     float dist = std::abs(subject_center - voice_center);
     total_distance += dist;
     pairs++;
   }
 
-  if (pairs == 0) return 0.0f;
+  if (pairs == 0)
+    return 0.0f;
 
   // Average distance, normalized. 48 semitones (4 octaves) as max reasonable spread.
   float avg_dist = total_distance / static_cast<float>(pairs);
@@ -172,11 +174,10 @@ float scoreVoiceSeparation(uint8_t subject_low, uint8_t subject_high,
 /// @return Clarity score [0, 1] where 1 = perfectly centered.
 float scoreRegisterClarity(float subject_center, uint8_t num_voices) {
   auto [range_lo, range_hi] = getFugueVoiceRange(0, num_voices);
-  float voice_center = (static_cast<float>(range_lo) +
-                        static_cast<float>(range_hi)) / 2.0f;
-  float half_range = (static_cast<float>(range_hi) -
-                      static_cast<float>(range_lo)) / 2.0f;
-  if (half_range < 1.0f) return 0.0f;
+  float voice_center = (static_cast<float>(range_lo) + static_cast<float>(range_hi)) / 2.0f;
+  float half_range = (static_cast<float>(range_hi) - static_cast<float>(range_lo)) / 2.0f;
+  if (half_range < 1.0f)
+    return 0.0f;
 
   float dist = std::abs(subject_center - voice_center);
   return std::max(0.0f, 1.0f - dist / half_range);
@@ -191,15 +192,14 @@ float scoreRegisterClarity(float subject_center, uint8_t num_voices) {
 /// @param subject_center Center pitch of the shifted subject.
 /// @param num_voices Number of voices.
 /// @return Accent score [0, 1].
-float scoreAccentContour(const SubjectConstraintProfile& profile,
-                         float subject_center, uint8_t num_voices) {
+float scoreAccentContour(const SubjectConstraintProfile& profile, float subject_center,
+                         uint8_t num_voices) {
   auto [v0_lo, v0_hi] = getFugueVoiceRange(0, num_voices);
   float v0_center = (static_cast<float>(v0_lo) + static_cast<float>(v0_hi)) / 2.0f;
 
   // Front-weighted accent favors placement near the top voice (more projection).
   // Tail-weighted accent is more neutral.
-  float front_bias = profile.accent_contour.front_weight -
-                     profile.accent_contour.tail_weight;
+  float front_bias = profile.accent_contour.front_weight - profile.accent_contour.tail_weight;
 
   // If front-weighted, closer to v0 center is better.
   float dist_to_v0 = std::abs(subject_center - v0_center);
@@ -232,10 +232,7 @@ Subject shiftSubjectPitches(const Subject& subject, int semitone_offset) {
 // P1.g1: runMicroSim
 // ---------------------------------------------------------------------------
 
-MicroSimResult runMicroSim(
-    const Subject& subject,
-    const FugueConfig& config,
-    int num_trials) {
+MicroSimResult runMicroSim(const Subject& subject, const FugueConfig& config, int num_trials) {
   MicroSimResult result;
   result.num_attempts = num_trials;
 
@@ -253,8 +250,7 @@ MicroSimResult runMicroSim(
     Countersubject counter = generateCountersubject(subject, trial_seed);
 
     // Step 2: Build unvalidated exposition.
-    Exposition expo = buildExposition(
-        subject, answer, counter, config, trial_seed);
+    Exposition expo = buildExposition(subject, answer, counter, config, trial_seed);
 
     // Step 3: Create BachRuleEvaluator and CounterpointState.
     BachRuleEvaluator evaluator(config.num_voices);
@@ -314,10 +310,8 @@ MicroSimResult runMicroSim(
 // P1.g2: findBestAssignment
 // ---------------------------------------------------------------------------
 
-VoiceAssignment findBestAssignment(
-    const Subject& subject,
-    const SubjectConstraintProfile& profile,
-    const FugueConfig& config) {
+VoiceAssignment findBestAssignment(const Subject& subject, const SubjectConstraintProfile& profile,
+                                   const FugueConfig& config) {
   // Phase 1: Coarse evaluation of all 5 octave offsets.
   struct Candidate {
     int8_t offset;
@@ -344,8 +338,8 @@ VoiceAssignment findBestAssignment(
       shifted_high = std::max(shifted_high, note.pitch);
     }
 
-    float shifted_center = (static_cast<float>(shifted_low) +
-                            static_cast<float>(shifted_high)) / 2.0f;
+    float shifted_center =
+        (static_cast<float>(shifted_low) + static_cast<float>(shifted_high)) / 2.0f;
 
     // Check if the shifted subject is within any voice's range.
     bool in_range = false;
@@ -365,24 +359,21 @@ VoiceAssignment findBestAssignment(
     }
 
     // Score components.
-    float separation = scoreVoiceSeparation(shifted_low, shifted_high,
-                                            config.num_voices);
+    float separation = scoreVoiceSeparation(shifted_low, shifted_high, config.num_voices);
     float clarity = scoreRegisterClarity(shifted_center, config.num_voices);
     float accent = scoreAccentContour(profile, shifted_center, config.num_voices);
 
     // Coarse score: weighted combination. Penalize out-of-range.
     float range_penalty = in_range ? 1.0f : 0.3f;
-    float coarse = (separation * 0.4f + clarity * 0.35f + accent * 0.25f) *
-                   range_penalty;
+    float coarse = (separation * 0.4f + clarity * 0.35f + accent * 0.25f) * range_penalty;
 
     candidates.push_back({offset, coarse});
   }
 
   // Sort by coarse score descending.
-  std::sort(candidates.begin(), candidates.end(),
-            [](const Candidate& lhs, const Candidate& rhs) {
-              return lhs.coarse_score > rhs.coarse_score;
-            });
+  std::sort(candidates.begin(), candidates.end(), [](const Candidate& lhs, const Candidate& rhs) {
+    return lhs.coarse_score > rhs.coarse_score;
+  });
 
   // Phase 2: Run MicroSim on top K candidates.
   VoiceAssignment best;
@@ -430,17 +421,13 @@ namespace {
 ///   opposite directions at the same tick.
 bool isConflictingPair(ObligationType type_a, ObligationType type_b) {
   // LT vs StrongBeatHarm
-  if ((type_a == ObligationType::LeadingTone &&
-       type_b == ObligationType::StrongBeatHarm) ||
-      (type_a == ObligationType::StrongBeatHarm &&
-       type_b == ObligationType::LeadingTone)) {
+  if ((type_a == ObligationType::LeadingTone && type_b == ObligationType::StrongBeatHarm) ||
+      (type_a == ObligationType::StrongBeatHarm && type_b == ObligationType::LeadingTone)) {
     return true;
   }
   // Seventh vs LeapResolve
-  if ((type_a == ObligationType::Seventh &&
-       type_b == ObligationType::LeapResolve) ||
-      (type_a == ObligationType::LeapResolve &&
-       type_b == ObligationType::Seventh)) {
+  if ((type_a == ObligationType::Seventh && type_b == ObligationType::LeapResolve) ||
+      (type_a == ObligationType::LeapResolve && type_b == ObligationType::Seventh)) {
     return true;
   }
   return false;
@@ -448,8 +435,7 @@ bool isConflictingPair(ObligationType type_a, ObligationType type_b) {
 
 /// @brief Check if an obligation is cadence-related.
 bool isCadenceObligation(ObligationType type) {
-  return type == ObligationType::CadenceApproach ||
-         type == ObligationType::CadenceStable;
+  return type == ObligationType::CadenceApproach || type == ObligationType::CadenceStable;
 }
 
 /// @brief Find the pitch sounding in a note sequence at a given tick.
@@ -458,8 +444,7 @@ bool isCadenceObligation(ObligationType type) {
 /// If multiple notes overlap (unusual in a single voice), returns the first found.
 uint8_t findPitchAtTick(const std::vector<NoteEvent>& notes, Tick tick) {
   for (const auto& note : notes) {
-    if (note.start_tick <= tick &&
-        note.start_tick + note.duration > tick) {
+    if (note.start_tick <= tick && note.start_tick + note.duration > tick) {
       return note.pitch;
     }
   }
@@ -472,10 +457,8 @@ uint8_t findPitchAtTick(const std::vector<NoteEvent>& notes, Tick tick) {
 // P1.g3: verifyPair
 // ---------------------------------------------------------------------------
 
-PairVerificationResult verifyPair(
-    const SubjectConstraintProfile& subject_prof,
-    const SubjectConstraintProfile& answer_prof,
-    int offset_ticks) {
+PairVerificationResult verifyPair(const SubjectConstraintProfile& subject_prof,
+                                  const SubjectConstraintProfile& answer_prof, int offset_ticks) {
   PairVerificationResult result;
   result.tonal_answer_feasible = answer_prof.tonal_answer_feasible;
   result.pair_peak_density = 0.0f;
@@ -538,7 +521,8 @@ PairVerificationResult verifyPair(
   // conflicting types that are simultaneously active.
   for (const auto& obl_s : subject_prof.obligations) {
     for (const auto& obl_a : shifted_answer) {
-      if (!isConflictingPair(obl_s.type, obl_a.type)) continue;
+      if (!isConflictingPair(obl_s.type, obl_a.type))
+        continue;
 
       // Find the overlap region.
       Tick overlap_start = std::max(obl_s.start_tick, obl_a.start_tick);
@@ -587,8 +571,7 @@ PairVerificationResult verifyPair(
 
   if (total_samples > 0) {
     result.cadence_conflict_score =
-        static_cast<float>(cadence_overlap_samples) /
-        static_cast<float>(total_samples);
+        static_cast<float>(cadence_overlap_samples) / static_cast<float>(total_samples);
   }
 
   return result;
@@ -598,10 +581,9 @@ PairVerificationResult verifyPair(
 // P1.g4: testSolvability
 // ---------------------------------------------------------------------------
 
-SolvabilityResult testSolvability(
-    const std::vector<NoteEvent>& subject_notes,
-    const std::vector<NoteEvent>& cs_notes,
-    Key /*key*/, bool /*is_minor*/) {
+SolvabilityResult testSolvability(const std::vector<NoteEvent>& subject_notes,
+                                  const std::vector<NoteEvent>& cs_notes, Key /*key*/,
+                                  bool /*is_minor*/) {
   SolvabilityResult result;
   result.vertical_clash_rate = 0.0f;
   result.strong_beat_dissonance_rate = 0.0f;
@@ -612,10 +594,8 @@ SolvabilityResult testSolvability(
   }
 
   // Determine the combined time span.
-  Tick earliest = std::min(subject_notes.front().start_tick,
-                           cs_notes.front().start_tick);
-  Tick latest_subject = subject_notes.back().start_tick +
-                        subject_notes.back().duration;
+  Tick earliest = std::min(subject_notes.front().start_tick, cs_notes.front().start_tick);
+  Tick latest_subject = subject_notes.back().start_tick + subject_notes.back().duration;
   Tick latest_cs = cs_notes.back().start_tick + cs_notes.back().duration;
   Tick latest = std::max(latest_subject, latest_cs);
 
@@ -629,7 +609,8 @@ SolvabilityResult testSolvability(
     uint8_t cs_pitch = findPitchAtTick(cs_notes, tick);
 
     // Both voices must have a note sounding at this tick.
-    if (subject_pitch == 0 || cs_pitch == 0) continue;
+    if (subject_pitch == 0 || cs_pitch == 0)
+      continue;
 
     total_strong_beats++;
 
@@ -644,8 +625,8 @@ SolvabilityResult testSolvability(
       // Strong-beat dissonance: seconds (1, 2), tritone (6), sevenths (10, 11)
       // are particularly problematic as non-chord tones on strong beats.
       if (simple == interval::kMinor2nd || simple == interval::kMajor2nd ||
-          simple == interval::kTritone ||
-          simple == interval::kMinor7th || simple == interval::kMajor7th) {
+          simple == interval::kTritone || simple == interval::kMinor7th ||
+          simple == interval::kMajor7th) {
         non_chord_tone_strong_beats++;
       }
     }
@@ -654,11 +635,9 @@ SolvabilityResult testSolvability(
   // Step 4: Compute rates.
   if (total_strong_beats > 0) {
     result.vertical_clash_rate =
-        static_cast<float>(dissonant_strong_beats) /
-        static_cast<float>(total_strong_beats);
+        static_cast<float>(dissonant_strong_beats) / static_cast<float>(total_strong_beats);
     result.strong_beat_dissonance_rate =
-        static_cast<float>(non_chord_tone_strong_beats) /
-        static_cast<float>(total_strong_beats);
+        static_cast<float>(non_chord_tone_strong_beats) / static_cast<float>(total_strong_beats);
   }
 
   // Step 5: Compute register overlap.
@@ -676,21 +655,16 @@ SolvabilityResult testSolvability(
   }
 
   // Intersection of pitch ranges.
-  int intersect_low = std::max(static_cast<int>(subject_min),
-                               static_cast<int>(cs_min));
-  int intersect_high = std::min(static_cast<int>(subject_max),
-                                static_cast<int>(cs_max));
+  int intersect_low = std::max(static_cast<int>(subject_min), static_cast<int>(cs_min));
+  int intersect_high = std::min(static_cast<int>(subject_max), static_cast<int>(cs_max));
   int intersection = std::max(0, intersect_high - intersect_low);
 
   // Union of pitch ranges.
-  int union_low = std::min(static_cast<int>(subject_min),
-                           static_cast<int>(cs_min));
-  int union_high = std::max(static_cast<int>(subject_max),
-                            static_cast<int>(cs_max));
+  int union_low = std::min(static_cast<int>(subject_min), static_cast<int>(cs_min));
+  int union_high = std::max(static_cast<int>(subject_max), static_cast<int>(cs_max));
   int union_range = std::max(1, union_high - union_low);
 
-  result.register_overlap =
-      static_cast<float>(intersection) / static_cast<float>(union_range);
+  result.register_overlap = static_cast<float>(intersection) / static_cast<float>(union_range);
 
   return result;
 }

@@ -47,10 +47,10 @@ TEST(BachRuleEvaluatorTest, PerfectConsonancesStillWork) {
 
 TEST(BachRuleEvaluatorTest, ImperfectConsonancesStillWork) {
   BachRuleEvaluator rules(3);
-  EXPECT_TRUE(rules.isIntervalConsonant(3, true));   // m3
-  EXPECT_TRUE(rules.isIntervalConsonant(4, true));   // M3
-  EXPECT_TRUE(rules.isIntervalConsonant(8, true));   // m6
-  EXPECT_TRUE(rules.isIntervalConsonant(9, true));   // M6
+  EXPECT_TRUE(rules.isIntervalConsonant(3, true));  // m3
+  EXPECT_TRUE(rules.isIntervalConsonant(4, true));  // M3
+  EXPECT_TRUE(rules.isIntervalConsonant(8, true));  // m6
+  EXPECT_TRUE(rules.isIntervalConsonant(9, true));  // M6
 }
 
 TEST(BachRuleEvaluatorTest, DissonancesStillFlagged) {
@@ -155,9 +155,9 @@ TEST_F(BachVoiceCrossingTest, TemporaryCrossingAllowed) {
   // Beat 2 (tick 480):  voice0=B3(59), voice1=C4(60) -- crossed!
   // Beat 3 (tick 960):  voice0=E4(64), voice1=C4(60) -- resolved.
   state.addNote(0, {0, 480, 67, 80, 0});
-  state.addNote(0, {480, 480, 59, 80, 0});    // Crossing here.
-  state.addNote(0, {960, 480, 64, 80, 0});     // Resolved.
-  state.addNote(1, {0, 1440, 60, 80, 1});      // Held C4 throughout.
+  state.addNote(0, {480, 480, 59, 80, 0});  // Crossing here.
+  state.addNote(0, {960, 480, 64, 80, 0});  // Resolved.
+  state.addNote(1, {0, 1440, 60, 80, 1});   // Held C4 throughout.
 
   // At tick 480, voice0(59) < voice1(60) = crossed, but resolves at tick 960.
   EXPECT_FALSE(rules.hasVoiceCrossing(state, 0, 1, 480));
@@ -169,9 +169,9 @@ TEST_F(BachVoiceCrossingTest, PersistentCrossingFlagged) {
   // Beat 2 (tick 480):  voice0=B3(59), voice1=C4(60) -- crossed!
   // Beat 3 (tick 960):  voice0=A3(57), voice1=C4(60) -- still crossed!
   state.addNote(0, {0, 480, 67, 80, 0});
-  state.addNote(0, {480, 480, 59, 80, 0});    // Crossing here.
-  state.addNote(0, {960, 480, 57, 80, 0});     // Still crossed.
-  state.addNote(1, {0, 1440, 60, 80, 1});      // Held C4 throughout.
+  state.addNote(0, {480, 480, 59, 80, 0});  // Crossing here.
+  state.addNote(0, {960, 480, 57, 80, 0});  // Still crossed.
+  state.addNote(1, {0, 1440, 60, 80, 1});   // Held C4 throughout.
 
   // At tick 480, voice0(59) < voice1(60) = crossed, and at 960 still crossed.
   EXPECT_TRUE(rules.hasVoiceCrossing(state, 0, 1, 480));

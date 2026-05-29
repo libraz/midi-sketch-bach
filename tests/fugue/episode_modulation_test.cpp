@@ -62,18 +62,15 @@ TEST(EpisodeModulationTest, ModulationPlanUsedForEpisodeKeys) {
 
   // First develop episode should target the dominant (G for C major).
   EXPECT_EQ(episodes[0].key, Key::G)
-      << "First episode should target dominant key G, got "
-      << keyToString(episodes[0].key);
+      << "First episode should target dominant key G, got " << keyToString(episodes[0].key);
 
   // Second develop episode should target the relative minor (A for C major).
   EXPECT_EQ(episodes[1].key, Key::A)
-      << "Second episode should target relative minor key A, got "
-      << keyToString(episodes[1].key);
+      << "Second episode should target relative minor key A, got " << keyToString(episodes[1].key);
 
   // Third develop episode should target the subdominant (F for C major).
   EXPECT_EQ(episodes[2].key, Key::F)
-      << "Third episode should target subdominant key F, got "
-      << keyToString(episodes[2].key);
+      << "Third episode should target subdominant key F, got " << keyToString(episodes[2].key);
 }
 
 // ---------------------------------------------------------------------------
@@ -179,8 +176,8 @@ TEST(EpisodeModulationTest, FugueWithModulationPlanSucceeds) {
 
   // Structure should validate without violations.
   auto violations = result.structure.validate();
-  EXPECT_TRUE(violations.empty())
-      << "Structure validation failed with " << violations.size() << " violation(s)";
+  EXPECT_TRUE(violations.empty()) << "Structure validation failed with " << violations.size()
+                                  << " violation(s)";
 
   // Must have all three phases.
   auto establish = result.structure.getSectionsByPhase(FuguePhase::Establish);
@@ -192,8 +189,7 @@ TEST(EpisodeModulationTest, FugueWithModulationPlanSucceeds) {
 
   // All tracks should have notes.
   for (size_t idx = 0; idx < result.tracks.size(); ++idx) {
-    EXPECT_GT(result.tracks[idx].notes.size(), 0u)
-        << "Track " << idx << " has no notes";
+    EXPECT_GT(result.tracks[idx].notes.size(), 0u) << "Track " << idx << " has no notes";
   }
 }
 
@@ -293,12 +289,11 @@ TEST(EpisodeModulationTest, DeterministicEpisodeKeys) {
 TEST(EpisodeModulationTest, AllMajorKeysSucceed) {
   for (int key_val = 0; key_val < 12; ++key_val) {
     Key home = static_cast<Key>(key_val);
-    FugueConfig config = makeModulationTestConfig(home, /*is_minor=*/false,
-                                                  static_cast<uint32_t>(key_val + 100));
+    FugueConfig config =
+        makeModulationTestConfig(home, /*is_minor=*/false, static_cast<uint32_t>(key_val + 100));
     config.develop_pairs = 2;  // Keep it short for speed.
     FugueResult result = generateFugue(config);
-    EXPECT_TRUE(result.success)
-        << "Fugue generation failed for major key " << keyToString(home);
+    EXPECT_TRUE(result.success) << "Fugue generation failed for major key " << keyToString(home);
   }
 }
 
@@ -309,12 +304,11 @@ TEST(EpisodeModulationTest, AllMajorKeysSucceed) {
 TEST(EpisodeModulationTest, AllMinorKeysSucceed) {
   for (int key_val = 0; key_val < 12; ++key_val) {
     Key home = static_cast<Key>(key_val);
-    FugueConfig config = makeModulationTestConfig(home, /*is_minor=*/true,
-                                                  static_cast<uint32_t>(key_val + 200));
+    FugueConfig config =
+        makeModulationTestConfig(home, /*is_minor=*/true, static_cast<uint32_t>(key_val + 200));
     config.develop_pairs = 2;
     FugueResult result = generateFugue(config);
-    EXPECT_TRUE(result.success)
-        << "Fugue generation failed for minor key " << keyToString(home);
+    EXPECT_TRUE(result.success) << "Fugue generation failed for minor key " << keyToString(home);
   }
 }
 

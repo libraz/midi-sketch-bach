@@ -11,8 +11,7 @@ namespace bach {
 namespace {
 
 // Helper: build a subject from pitches (all quarter notes).
-Subject makeSubjectQuarters(const std::vector<uint8_t>& pitches,
-                            Key key = Key::C) {
+Subject makeSubjectQuarters(const std::vector<uint8_t>& pitches, Key key = Key::C) {
   Subject subject;
   subject.key = key;
   Tick current_tick = 0;
@@ -80,6 +79,18 @@ TEST(AnswerTest, RealAnswerDifferentKey) {
 
   // Dominant of G = D.
   EXPECT_EQ(answer.key, Key::D);
+}
+
+TEST(AnswerTest, MajorRealAnswerAvoidsRaisedFourthAgainstHomeKey) {
+  // B in a C-major subject would transpose to F# in a strict real answer.
+  // For generated Bach-style fugues this creates persistent #IV bass-degree
+  // patterns; normalize it to F natural.
+  Subject subject = makeSubjectQuarters({71});
+  subject.key = Key::C;
+  Answer answer = generateAnswer(subject, AnswerType::Real);
+
+  ASSERT_EQ(answer.notes.size(), 1u);
+  EXPECT_EQ(answer.notes[0].pitch, 77);  // F5, not F#5.
 }
 
 // ---------------------------------------------------------------------------
@@ -220,9 +231,8 @@ TEST(AnswerTest, ExplicitTypeOverridesPreference) {
   // should be ignored even if it says Real.
   Subject subject = makeSubjectQuarters({60, 67, 64, 62, 60});
   Answer answer = generateAnswer(subject, AnswerType::Tonal, AnswerType::Real);
-  EXPECT_EQ(answer.type, AnswerType::Tonal)
-      << "Explicit type=Tonal should take precedence over "
-         "archetype_preference=Real";
+  EXPECT_EQ(answer.type, AnswerType::Tonal) << "Explicit type=Tonal should take precedence over "
+                                               "archetype_preference=Real";
 }
 
 }  // namespace

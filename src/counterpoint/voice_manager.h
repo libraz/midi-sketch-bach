@@ -25,8 +25,8 @@ class VoiceManager {
   /// @param name Display name (e.g. "Soprano", "Pedal").
   /// @param low_pitch Lowest playable MIDI pitch (inclusive).
   /// @param high_pitch Highest playable MIDI pitch (inclusive).
-  void registerVoice(VoiceId voice_id, const std::string& name,
-                     uint8_t low_pitch, uint8_t high_pitch);
+  void registerVoice(VoiceId voice_id, const std::string& name, uint8_t low_pitch,
+                     uint8_t high_pitch);
 
   /// @brief Check whether a voice has been registered.
   bool isRegistered(VoiceId voice_id) const;

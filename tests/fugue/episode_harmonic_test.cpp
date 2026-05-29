@@ -129,23 +129,26 @@ TEST(EpisodeHarmonicTest, DominantPedalEpisode_StrongBeatConsonance) {
           pedal_start = note.start_tick;
         }
         Tick note_end = note.start_tick + note.duration;
-        if (note_end > pedal_end) pedal_end = note_end;
+        if (note_end > pedal_end)
+          pedal_end = note_end;
       }
     }
-    if (pedal_pitch == 0) continue;
+    if (pedal_pitch == 0)
+      continue;
 
     // Count consonant/dissonant episode notes on strong beats over pedal.
     int consonant = 0;
     int dissonant = 0;
     for (const auto& note : all_notes) {
-      if (note.source != BachNoteSource::EpisodeMaterial) continue;
+      if (note.source != BachNoteSource::EpisodeMaterial)
+        continue;
       if (note.start_tick < pedal_start || note.start_tick >= pedal_end)
         continue;
-      if (note.start_tick % kTicksPerBeat != 0) continue;
+      if (note.start_tick % kTicksPerBeat != 0)
+        continue;
 
       int ivl = absoluteInterval(note.pitch, pedal_pitch) % 12;
-      bool is_consonant = (ivl == 0 || ivl == 3 || ivl == 4 ||
-                           ivl == 7 || ivl == 8 || ivl == 9);
+      bool is_consonant = (ivl == 0 || ivl == 3 || ivl == 4 || ivl == 7 || ivl == 8 || ivl == 9);
       if (is_consonant)
         ++consonant;
       else
@@ -153,18 +156,18 @@ TEST(EpisodeHarmonicTest, DominantPedalEpisode_StrongBeatConsonance) {
     }
 
     int total = consonant + dissonant;
-    if (total == 0) continue;
+    if (total == 0)
+      continue;
 
     float ratio = static_cast<float>(consonant) / static_cast<float>(total);
     // Threshold 50%: manualiter pedal register may shift consonance ratios
     // slightly vs pedaliter due to different compound interval reductions.
     // Lowered from 55% after tritone avoidance expansion altered subject
     // pitch paths, cascading into episode material for borderline seeds.
-    EXPECT_GE(ratio, 0.50f)
-        << "Seed " << seed << ": only " << consonant << "/" << total
-        << " (" << static_cast<int>(ratio * 100) << "%) strong-beat episode "
-        << "notes consonant with dominant pedal "
-        << static_cast<int>(pedal_pitch);
+    EXPECT_GE(ratio, 0.50f) << "Seed " << seed << ": only " << consonant << "/" << total << " ("
+                            << static_cast<int>(ratio * 100) << "%) strong-beat episode "
+                            << "notes consonant with dominant pedal "
+                            << static_cast<int>(pedal_pitch);
   }
 }
 
@@ -193,17 +196,21 @@ TEST(EpisodeHarmonicTest, EpisodeVerticalConsonance_BarLevel) {
     int bar_consonant = 0;
     int bar_dissonant = 0;
     for (const auto& note : all_notes) {
-      if (note.source != BachNoteSource::EpisodeMaterial) continue;
-      if (note.start_tick % kTicksPerBar != 0) continue;
+      if (note.source != BachNoteSource::EpisodeMaterial)
+        continue;
+      if (note.start_tick % kTicksPerBar != 0)
+        continue;
 
       for (const auto& other : all_notes) {
-        if (other.voice == note.voice) continue;
-        if (other.start_tick > note.start_tick) continue;
-        if (other.start_tick + other.duration <= note.start_tick) continue;
+        if (other.voice == note.voice)
+          continue;
+        if (other.start_tick > note.start_tick)
+          continue;
+        if (other.start_tick + other.duration <= note.start_tick)
+          continue;
 
         int ivl = absoluteInterval(note.pitch, other.pitch) % 12;
-        bool is_consonant = (ivl == 0 || ivl == 3 || ivl == 4 ||
-                             ivl == 7 || ivl == 8 || ivl == 9);
+        bool is_consonant = (ivl == 0 || ivl == 3 || ivl == 4 || ivl == 7 || ivl == 8 || ivl == 9);
         if (is_consonant)
           ++bar_consonant;
         else
@@ -212,14 +219,13 @@ TEST(EpisodeHarmonicTest, EpisodeVerticalConsonance_BarLevel) {
     }
 
     int total = bar_consonant + bar_dissonant;
-    if (total == 0) continue;
+    if (total == 0)
+      continue;
 
-    float ratio =
-        static_cast<float>(bar_consonant) / static_cast<float>(total);
-    EXPECT_GE(ratio, 0.4f)
-        << "Seed " << seed << ": only " << bar_consonant << "/" << total
-        << " (" << static_cast<int>(ratio * 100)
-        << "%) bar-level episode vertical intervals are consonant";
+    float ratio = static_cast<float>(bar_consonant) / static_cast<float>(total);
+    EXPECT_GE(ratio, 0.4f) << "Seed " << seed << ": only " << bar_consonant << "/" << total << " ("
+                           << static_cast<int>(ratio * 100)
+                           << "%) bar-level episode vertical intervals are consonant";
   }
 }
 

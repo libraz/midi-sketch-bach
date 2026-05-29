@@ -26,16 +26,13 @@ namespace {
 /// @param total_duration Total fugue duration in ticks.
 /// @return The matched CadenceType, or nullopt if no rule matches.
 std::optional<CadenceType> matchContextRule(SectionType section_type,
-                                            const FugueStructure& structure,
-                                            size_t section_idx,
-                                            int num_episodes,
-                                            int total_episodes,
-                                            Tick last_pac_tick,
-                                            Tick total_duration) {
+                                            const FugueStructure& structure, size_t section_idx,
+                                            int num_episodes, int total_episodes,
+                                            Tick last_pac_tick, Tick total_duration) {
   bool is_exposition_end = (section_type == SectionType::Exposition);
   bool is_episode_end = (section_type == SectionType::Episode);
-  bool is_section_final = (num_episodes == total_episodes && is_episode_end) ||
-                          (section_type == SectionType::Coda);
+  bool is_section_final =
+      (num_episodes == total_episodes && is_episode_end) || (section_type == SectionType::Coda);
   bool is_near_stretto = false;
   // Check if next section is Stretto.
   if (section_idx + 1 < structure.sections.size()) {
@@ -47,23 +44,25 @@ std::optional<CadenceType> matchContextRule(SectionType section_type,
                         ? static_cast<float>(current_tick) / static_cast<float>(total_duration)
                         : 0.0f;
   int bars_since_last_pac =
-      (last_pac_tick > 0)
-          ? static_cast<int>((current_tick - last_pac_tick) / kTicksPerBar)
-          : 999;
+      (last_pac_tick > 0) ? static_cast<int>((current_tick - last_pac_tick) / kTicksPerBar) : 999;
 
   for (const auto& rule : kCadenceContextRules) {
     // Check structural conditions.
-    if (rule.requires_exposition_end && !is_exposition_end) continue;
-    if (rule.requires_episode_end && !is_episode_end) continue;
-    if (rule.requires_section_final && !is_section_final) continue;
-    if (rule.avoid_near_stretto && is_near_stretto) continue;
+    if (rule.requires_exposition_end && !is_exposition_end)
+      continue;
+    if (rule.requires_episode_end && !is_episode_end)
+      continue;
+    if (rule.requires_section_final && !is_section_final)
+      continue;
+    if (rule.avoid_near_stretto && is_near_stretto)
+      continue;
 
     // Check phase position.
-    if (phase_pos < rule.min_phase_pos) continue;
+    if (phase_pos < rule.min_phase_pos)
+      continue;
 
     // Check PAC spacing.
-    if (rule.type == CadenceType::Perfect &&
-        bars_since_last_pac < rule.min_bars_since_last_pac) {
+    if (rule.type == CadenceType::Perfect && bars_since_last_pac < rule.min_bars_since_last_pac) {
       continue;
     }
 
@@ -80,11 +79,11 @@ std::optional<CadenceType> matchContextRule(SectionType section_type,
 }  // namespace
 
 CadencePlan CadencePlan::createForFugue(const FugueStructure& structure,
-                                         const KeySignature& home_key,
-                                         bool is_minor) {
+                                        const KeySignature& home_key, bool is_minor) {
   CadencePlan plan;
 
-  if (structure.sections.empty()) return plan;
+  if (structure.sections.empty())
+    return plan;
 
   const auto& sections = structure.sections;
   int num_episodes = 0;
@@ -92,7 +91,8 @@ CadencePlan CadencePlan::createForFugue(const FugueStructure& structure,
 
   // Count total episodes for determining which is final.
   for (const auto& sec : sections) {
-    if (sec.type == SectionType::Episode) ++total_episodes;
+    if (sec.type == SectionType::Episode)
+      ++total_episodes;
   }
 
   Tick last_pac_tick = 0;
@@ -112,8 +112,7 @@ CadencePlan CadencePlan::createForFugue(const FugueStructure& structure,
     // Stretto and Coda have special handling that the context rules don't fully
     // capture (deceptive pre-stretto placement, Picardy third). MiddleEntry
     // never gets a cadence. These bypass the rule table entirely.
-    if (section.type == SectionType::Stretto ||
-        section.type == SectionType::Coda ||
+    if (section.type == SectionType::Stretto || section.type == SectionType::Coda ||
         section.type == SectionType::MiddleEntry) {
       switch (section.type) {
         case SectionType::Stretto: {
@@ -159,8 +158,8 @@ CadencePlan CadencePlan::createForFugue(const FugueStructure& structure,
     }
 
     // For Exposition and Episode sections, try the context rule table first.
-    auto matched = matchContextRule(section.type, structure, idx, num_episodes,
-                                    total_episodes, last_pac_tick, total_duration);
+    auto matched = matchContextRule(section.type, structure, idx, num_episodes, total_episodes,
+                                    last_pac_tick, total_duration);
     if (matched) {
       CadencePoint matched_cp;
       matched_cp.tick = section.end_tick - kTicksPerBar;

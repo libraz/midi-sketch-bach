@@ -126,9 +126,7 @@ TEST(VerticalContextTest, WeakBeatM2AllowedByPredicate) {
   VerticalContext vctx{&placed, &tl, 2};
 
   // Allow all weak-beat dissonances.
-  vctx.weak_beat_allow = [](Tick, uint8_t, uint8_t, uint8_t, int, uint8_t) {
-    return true;
-  };
+  vctx.weak_beat_allow = [](Tick, uint8_t, uint8_t, uint8_t, int, uint8_t) { return true; };
 
   // Beat 1: m2(1) now allowed by predicate.
   EXPECT_TRUE(vctx.isSafe(kTicksPerBeat, 0, 49));

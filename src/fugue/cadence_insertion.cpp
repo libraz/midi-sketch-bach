@@ -64,14 +64,15 @@ int submediantPitchClass(Key key, bool is_minor) {
 /// @param range_lo Minimum MIDI pitch.
 /// @param range_hi Maximum MIDI pitch.
 /// @return Nearest MIDI pitch with the target pitch class, clamped to range.
-uint8_t nearestPitchInRange(int target_pc, uint8_t reference,
-                            uint8_t range_lo, uint8_t range_hi) {
+uint8_t nearestPitchInRange(int target_pc, uint8_t reference, uint8_t range_lo, uint8_t range_hi) {
   int best = -1;
   int best_dist = 999;
   for (int oct = 0; oct <= 10; ++oct) {
     int candidate = target_pc + oct * 12;
-    if (candidate < static_cast<int>(range_lo)) continue;
-    if (candidate > static_cast<int>(range_hi)) break;
+    if (candidate < static_cast<int>(range_lo))
+      continue;
+    if (candidate > static_cast<int>(range_hi))
+      break;
     int dist = std::abs(candidate - static_cast<int>(reference));
     if (dist < best_dist) {
       best_dist = dist;
@@ -105,7 +106,8 @@ bool hasCadentialResolution(const std::vector<NoteEvent>& notes, Tick tick, Key 
   std::vector<PitchOccurrence> tonic_notes;
 
   for (const auto& note : notes) {
-    if (note.start_tick < window_start || note.start_tick > window_end) continue;
+    if (note.start_tick < window_start || note.start_tick > window_end)
+      continue;
 
     int note_pc = getPitchClass(note.pitch);
     if (note_pc == leading_pc) {
@@ -132,8 +134,7 @@ bool hasCadentialResolution(const std::vector<NoteEvent>& notes, Tick tick, Key 
 
 bool isInSubjectEntry(const FugueStructure& structure, Tick tick) {
   for (const auto& section : structure.sections) {
-    if (section.type == SectionType::Exposition ||
-        section.type == SectionType::MiddleEntry ||
+    if (section.type == SectionType::Exposition || section.type == SectionType::MiddleEntry ||
         section.type == SectionType::Stretto) {
       if (tick >= section.start_tick && tick < section.end_tick) {
         return true;
@@ -143,15 +144,14 @@ bool isInSubjectEntry(const FugueStructure& structure, Tick tick) {
   return false;
 }
 
-std::vector<CadenceDeficiency> detectCadenceDeficiencies(
-    const std::vector<NoteEvent>& notes,
-    const FugueStructure& structure,
-    Key key,
-    Tick total_duration,
-    const CadenceDetectionConfig& config) {
+std::vector<CadenceDeficiency> detectCadenceDeficiencies(const std::vector<NoteEvent>& notes,
+                                                         const FugueStructure& structure, Key key,
+                                                         Tick total_duration,
+                                                         const CadenceDetectionConfig& config) {
   std::vector<CadenceDeficiency> deficiencies;
 
-  if (total_duration == 0 || notes.empty()) return deficiencies;
+  if (total_duration == 0 || notes.empty())
+    return deficiencies;
 
   Tick max_gap_ticks = static_cast<Tick>(config.max_bars_without_cadence) * kTicksPerBar;
   Tick scan_step = static_cast<Tick>(config.scan_window_bars) * kTicksPerBar;
@@ -180,7 +180,8 @@ std::vector<CadenceDeficiency> detectCadenceDeficiencies(
   Tick last_inserted = 0;
   for (size_t idx = 1; idx < boundaries.size(); ++idx) {
     Tick gap = boundaries[idx] - boundaries[idx - 1];
-    if (gap <= max_gap_ticks) continue;
+    if (gap <= max_gap_ticks)
+      continue;
 
     // This gap is too long. Find a good insertion point.
     // Prefer the middle of the gap, snapped to a bar boundary.
@@ -196,16 +197,17 @@ std::vector<CadenceDeficiency> detectCadenceDeficiencies(
     }
     if (bar_aligned >= gap_end) {
       bar_aligned = gap_end - kTicksPerBar;
-      if (bar_aligned < gap_start) bar_aligned = gap_start;
+      if (bar_aligned < gap_start)
+        bar_aligned = gap_start;
       bar_aligned = (bar_aligned / kTicksPerBar) * kTicksPerBar;
     }
 
     // Skip if this point is within a subject entry (structural articulation).
-    if (isInSubjectEntry(structure, bar_aligned)) continue;
+    if (isInSubjectEntry(structure, bar_aligned))
+      continue;
 
     // Skip if too close to the last inserted cadence.
-    if (bar_aligned > 0 && bar_aligned - last_inserted < kMinCadenceSpacing &&
-        last_inserted > 0) {
+    if (bar_aligned > 0 && bar_aligned - last_inserted < kMinCadenceSpacing && last_inserted > 0) {
       continue;
     }
 
@@ -224,16 +226,12 @@ std::vector<CadenceDeficiency> detectCadenceDeficiencies(
   return deficiencies;
 }
 
-int insertCadentialFormulas(
-    std::vector<NoteEvent>& notes,
-    const std::vector<CadenceDeficiency>& deficiencies,
-    Key key,
-    bool is_minor,
-    VoiceId bass_voice,
-    uint8_t num_voices,
-    uint32_t seed,
-    const CadenceDetectionConfig& config) {
-  if (deficiencies.empty()) return 0;
+int insertCadentialFormulas(std::vector<NoteEvent>& notes,
+                            const std::vector<CadenceDeficiency>& deficiencies, Key key,
+                            bool is_minor, VoiceId bass_voice, uint8_t num_voices, uint32_t seed,
+                            const CadenceDetectionConfig& config) {
+  if (deficiencies.empty())
+    return 0;
 
   std::mt19937 cadence_rng(seed + 77777u);
   auto [range_lo, range_hi] = getFugueVoiceRange(bass_voice, num_voices);
@@ -264,8 +262,8 @@ int insertCadentialFormulas(
     }
 
     uint8_t dominant_pitch = nearestPitchInRange(dom_pc, ref_pitch, range_lo, range_hi);
-    uint8_t resolution_pitch = nearestPitchInRange(resolution_pc, dominant_pitch,
-                                                   range_lo, range_hi);
+    uint8_t resolution_pitch =
+        nearestPitchInRange(resolution_pc, dominant_pitch, range_lo, range_hi);
 
     // Ensure dominant -> resolution moves downward (typical bass motion V->I).
     // If resolution is above dominant, try an octave lower.
@@ -312,22 +310,26 @@ int insertCadentialFormulas(
       VoiceId soprano_voice = 0;
       if (soprano_voice != bass_voice) {
         for (auto& sop_note : notes) {
-          if (sop_note.voice != soprano_voice) continue;
-          if (sop_note.start_tick > insertion_tick) continue;
-          if (sop_note.start_tick + sop_note.duration <= insertion_tick) continue;
+          if (sop_note.voice != soprano_voice)
+            continue;
+          if (sop_note.start_tick > insertion_tick)
+            continue;
+          if (sop_note.start_tick + sop_note.duration <= insertion_tick)
+            continue;
           // Found a soprano note sounding at insertion_tick.
           auto prot = getProtectionLevel(sop_note.source);
-          if (prot == ProtectionLevel::Immutable) break;
-          int outer_iv = (static_cast<int>(sop_note.pitch) -
-                          static_cast<int>(resolution_pitch)) %
-                         12;
-          if (outer_iv < 0) outer_iv += 12;
-          if (outer_iv == 0 || outer_iv == 7) break;  // Already perfect consonance.
+          if (prot == ProtectionLevel::Immutable)
+            break;
+          int outer_iv =
+              (static_cast<int>(sop_note.pitch) - static_cast<int>(resolution_pitch)) % 12;
+          if (outer_iv < 0)
+            outer_iv += 12;
+          if (outer_iv == 0 || outer_iv == 7)
+            break;  // Already perfect consonance.
           // Adjust to nearest tonic or P5 above resolution pitch class.
           int tonic_pc_local = static_cast<int>(key);
           int p5_pc = (tonic_pc_local + 7) % 12;
-          uint8_t cand1 =
-              nearestPitchInRange(tonic_pc_local, sop_note.pitch, sop_lo, sop_hi);
+          uint8_t cand1 = nearestPitchInRange(tonic_pc_local, sop_note.pitch, sop_lo, sop_hi);
           uint8_t cand2 = nearestPitchInRange(p5_pc, sop_note.pitch, sop_lo, sop_hi);
           int dist1 = std::abs(static_cast<int>(cand1) - static_cast<int>(sop_note.pitch));
           int dist2 = std::abs(static_cast<int>(cand2) - static_cast<int>(sop_note.pitch));
@@ -342,30 +344,25 @@ int insertCadentialFormulas(
   return inserted_count;
 }
 
-int ensureCadentialCoverage(
-    std::vector<NoteEvent>& notes,
-    const FugueStructure& structure,
-    Key key,
-    bool is_minor,
-    VoiceId bass_voice,
-    uint8_t num_voices,
-    Tick total_duration,
-    uint32_t seed,
-    const CadenceDetectionConfig& config) {
-  auto deficiencies = detectCadenceDeficiencies(notes, structure, key,
-                                                total_duration, config);
-  if (deficiencies.empty()) return 0;
+int ensureCadentialCoverage(std::vector<NoteEvent>& notes, const FugueStructure& structure, Key key,
+                            bool is_minor, VoiceId bass_voice, uint8_t num_voices,
+                            Tick total_duration, uint32_t seed,
+                            const CadenceDetectionConfig& config) {
+  auto deficiencies = detectCadenceDeficiencies(notes, structure, key, total_duration, config);
+  if (deficiencies.empty())
+    return 0;
 
-  return insertCadentialFormulas(notes, deficiencies, key, is_minor,
-                                bass_voice, num_voices, seed, config);
+  return insertCadentialFormulas(notes, deficiencies, key, is_minor, bass_voice, num_voices, seed,
+                                 config);
 }
 
-bool isInCadenceZone(Tick tick, const std::vector<Tick>& cadence_ticks,
-                     Tick window_beats) {
+bool isInCadenceZone(Tick tick, const std::vector<Tick>& cadence_ticks, Tick window_beats) {
   Tick window = window_beats * kTicksPerBeat;
   for (Tick cad : cadence_ticks) {
-    if (cad < window) continue;
-    if (tick >= cad - window && tick < cad) return true;
+    if (cad < window)
+      continue;
+    if (tick >= cad - window && tick < cad)
+      return true;
   }
   return false;
 }
@@ -380,14 +377,11 @@ std::vector<Tick> extractCadenceTicks(const CadencePlan& plan) {
   return ticks;
 }
 
-int applyCadenceApproachToVoices(
-    std::vector<NoteEvent>& notes,
-    const CadencePlan& plan,
-    Key /* key */,
-    bool /* is_minor */,
-    uint8_t num_voices,
-    uint32_t seed) {
-  if (plan.points.empty() || notes.empty() || num_voices == 0) return 0;
+int applyCadenceApproachToVoices(std::vector<NoteEvent>& notes, const CadencePlan& plan,
+                                 Key /* key */, bool /* is_minor */, uint8_t num_voices,
+                                 uint32_t seed) {
+  if (plan.points.empty() || notes.empty() || num_voices == 0)
+    return 0;
 
   std::mt19937 approach_rng(seed ^ 0xCADE0001u);
   int shaped_count = 0;
@@ -403,13 +397,15 @@ int applyCadenceApproachToVoices(
   for (const auto& cadence_point : plan.points) {
     Tick cadence_tick = cadence_point.tick;
     CadenceType ctype = cadence_point.type;
-    if (cadence_tick < kWindowTicks) continue;
+    if (cadence_tick < kWindowTicks)
+      continue;
 
     Tick window_start = cadence_tick - kWindowTicks;
 
     // Find matching approaches for this cadence type.
     auto [approaches, approach_count] = getCadenceApproaches(ctype);
-    if (approaches == nullptr || approach_count == 0) continue;
+    if (approaches == nullptr || approach_count == 0)
+      continue;
 
     // Select approach randomly.
     size_t approach_idx = approach_rng() % approach_count;
@@ -420,16 +416,17 @@ int applyCadenceApproachToVoices(
     std::vector<size_t> sop_indices;
     std::vector<size_t> bass_indices;
     for (size_t i = 0; i < notes.size(); ++i) {
-      if (notes[i].start_tick >= window_start &&
-          notes[i].start_tick < cadence_tick) {
+      if (notes[i].start_tick >= window_start && notes[i].start_tick < cadence_tick) {
         if (notes[i].voice == 0) {
           // Skip structurally protected notes.
           auto prot = getProtectionLevel(notes[i].source);
-          if (prot == ProtectionLevel::Immutable) continue;
+          if (prot == ProtectionLevel::Immutable)
+            continue;
           sop_indices.push_back(i);
         } else if (notes[i].voice == bass_voice) {
           auto prot = getProtectionLevel(notes[i].source);
-          if (prot == ProtectionLevel::Immutable) continue;
+          if (prot == ProtectionLevel::Immutable)
+            continue;
           bass_indices.push_back(i);
         }
       }
@@ -446,8 +443,7 @@ int applyCadenceApproachToVoices(
 
     // Shape soprano: apply approach.soprano_approach to the last N notes.
     if (!sop_indices.empty() && approach.soprano_len > 0) {
-      size_t apply_count = std::min(static_cast<size_t>(approach.soprano_len),
-                                     sop_indices.size());
+      size_t apply_count = std::min(static_cast<size_t>(approach.soprano_len), sop_indices.size());
       size_t start_from = sop_indices.size() - apply_count;
       // Get reference pitch from the note before the window.
       uint8_t ref_pitch = notes[sop_indices[start_from]].pitch;
@@ -468,8 +464,7 @@ int applyCadenceApproachToVoices(
 
     // Shape bass: apply approach.bass_approach to the last N notes.
     if (!bass_indices.empty() && approach.bass_len > 0) {
-      size_t apply_count = std::min(static_cast<size_t>(approach.bass_len),
-                                     bass_indices.size());
+      size_t apply_count = std::min(static_cast<size_t>(approach.bass_len), bass_indices.size());
       size_t start_from = bass_indices.size() - apply_count;
       uint8_t ref_pitch = notes[bass_indices[start_from]].pitch;
 
@@ -486,7 +481,8 @@ int applyCadenceApproachToVoices(
       shaped = true;
     }
 
-    if (shaped) ++shaped_count;
+    if (shaped)
+      ++shaped_count;
   }
 
   return shaped_count;

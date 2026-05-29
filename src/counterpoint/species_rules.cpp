@@ -18,11 +18,16 @@ namespace bach {
 /// @return A C-string name for the species (e.g. "first_species").
 const char* speciesToString(SpeciesType species) {
   switch (species) {
-    case SpeciesType::First:  return "first_species";
-    case SpeciesType::Second: return "second_species";
-    case SpeciesType::Third:  return "third_species";
-    case SpeciesType::Fourth: return "fourth_species";
-    case SpeciesType::Fifth:  return "fifth_species";
+    case SpeciesType::First:
+      return "first_species";
+    case SpeciesType::Second:
+      return "second_species";
+    case SpeciesType::Third:
+      return "third_species";
+    case SpeciesType::Fourth:
+      return "fourth_species";
+    case SpeciesType::Fifth:
+      return "fifth_species";
   }
   return "unknown_species";
 }
@@ -33,15 +38,22 @@ const char* speciesToString(SpeciesType species) {
 
 SpeciesRules::SpeciesRules(SpeciesType species) : species_(species) {}
 
-SpeciesType SpeciesRules::getSpecies() const { return species_; }
+SpeciesType SpeciesRules::getSpecies() const {
+  return species_;
+}
 
 int SpeciesRules::notesPerBeat() const {
   switch (species_) {
-    case SpeciesType::First:  return 1;
-    case SpeciesType::Second: return 2;
-    case SpeciesType::Third:  return 4;
-    case SpeciesType::Fourth: return 1;  // Syncopated, same ratio as 1st.
-    case SpeciesType::Fifth:  return 0;  // Varies (florid).
+    case SpeciesType::First:
+      return 1;
+    case SpeciesType::Second:
+      return 2;
+    case SpeciesType::Third:
+      return 4;
+    case SpeciesType::Fourth:
+      return 1;  // Syncopated, same ratio as 1st.
+    case SpeciesType::Fifth:
+      return 0;  // Varies (florid).
   }
   return 1;
 }
@@ -93,20 +105,22 @@ bool SpeciesRules::isStep(int semitones) {
 // Passing tone validation
 // ---------------------------------------------------------------------------
 
-bool SpeciesRules::isValidPassingTone(uint8_t prev, uint8_t current,
-                                      uint8_t next) const {
+bool SpeciesRules::isValidPassingTone(uint8_t prev, uint8_t current, uint8_t next) const {
   // Passing tones are not allowed in first species.
-  if (species_ == SpeciesType::First) return false;
+  if (species_ == SpeciesType::First)
+    return false;
 
   int interval_in = static_cast<int>(current) - static_cast<int>(prev);
   int interval_out = static_cast<int>(next) - static_cast<int>(current);
 
   // Both intervals must be stepwise.
-  if (!isStep(interval_in) || !isStep(interval_out)) return false;
+  if (!isStep(interval_in) || !isStep(interval_out))
+    return false;
 
   // Direction must be the same (ascending through or descending through).
   // Both positive (ascending) or both negative (descending).
-  if ((interval_in > 0) != (interval_out > 0)) return false;
+  if ((interval_in > 0) != (interval_out > 0))
+    return false;
 
   return true;
 }
@@ -115,15 +129,15 @@ bool SpeciesRules::isValidPassingTone(uint8_t prev, uint8_t current,
 // Neighbor tone validation
 // ---------------------------------------------------------------------------
 
-bool SpeciesRules::isValidNeighborTone(uint8_t prev, uint8_t current,
-                                       uint8_t next) const {
+bool SpeciesRules::isValidNeighborTone(uint8_t prev, uint8_t current, uint8_t next) const {
   // Neighbor tones appear in 3rd species and above.
   if (species_ == SpeciesType::First || species_ == SpeciesType::Second) {
     return false;
   }
 
   // A neighbor tone departs by step and returns to the original pitch.
-  if (prev != next) return false;
+  if (prev != next)
+    return false;
 
   int interval = static_cast<int>(current) - static_cast<int>(prev);
   return isStep(interval);
@@ -134,11 +148,10 @@ bool SpeciesRules::isValidNeighborTone(uint8_t prev, uint8_t current,
 // ---------------------------------------------------------------------------
 
 NonHarmonicToneType classifyNonHarmonicTone(uint8_t prev_pitch, uint8_t current_pitch,
-                                             std::optional<uint8_t> next_pitch,
-                                             bool is_chord_tone,
-                                             bool prev_is_chord_tone,
-                                             bool next_is_chord_tone) {
-  if (is_chord_tone) return NonHarmonicToneType::ChordTone;
+                                            std::optional<uint8_t> next_pitch, bool is_chord_tone,
+                                            bool prev_is_chord_tone, bool next_is_chord_tone) {
+  if (is_chord_tone)
+    return NonHarmonicToneType::ChordTone;
 
   bool has_prev = prev_pitch > 0;
   bool has_next = next_pitch.has_value();
@@ -149,8 +162,7 @@ NonHarmonicToneType classifyNonHarmonicTone(uint8_t prev_pitch, uint8_t current_
 
     // Passing tone: stepwise from prev, stepwise to next, same direction,
     // both neighbors are chord tones.
-    if (step_from_prev <= 2 && step_to_next <= 2 && prev_is_chord_tone &&
-        next_is_chord_tone) {
+    if (step_from_prev <= 2 && step_to_next <= 2 && prev_is_chord_tone && next_is_chord_tone) {
       int dir1 = static_cast<int>(current_pitch) - static_cast<int>(prev_pitch);
       int dir2 = static_cast<int>(*next_pitch) - static_cast<int>(current_pitch);
       if ((dir1 > 0 && dir2 > 0) || (dir1 < 0 && dir2 < 0)) {
@@ -186,14 +198,13 @@ NonHarmonicToneType classifyNonHarmonicTone(uint8_t prev_pitch, uint8_t current_
     }
 
     // Anticipation: next chord tone sounded early, entered by step.
-    if (step_from_prev <= 2 && next_is_chord_tone &&
-        current_pitch == *next_pitch) {
+    if (step_from_prev <= 2 && next_is_chord_tone && current_pitch == *next_pitch) {
       return NonHarmonicToneType::Anticipation;
     }
 
     // Changing tone (double neighbor): step in one direction, leap to other side.
-    if (step_from_prev <= 2 && step_to_next <= 2 && prev_is_chord_tone &&
-        next_is_chord_tone && prev_pitch != *next_pitch) {
+    if (step_from_prev <= 2 && step_to_next <= 2 && prev_is_chord_tone && next_is_chord_tone &&
+        prev_pitch != *next_pitch) {
       if ((dir_in > 0 && dir_out < 0) || (dir_in < 0 && dir_out > 0)) {
         return NonHarmonicToneType::ChangingTone;
       }

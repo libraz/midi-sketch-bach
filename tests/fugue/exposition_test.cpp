@@ -56,8 +56,7 @@ Answer makeTestAnswer(const Subject& subject) {
 
   for (const auto& note : subject.notes) {
     NoteEvent transposed = note;
-    transposed.pitch = static_cast<uint8_t>(
-        std::min(static_cast<int>(note.pitch) + 7, 127));
+    transposed.pitch = static_cast<uint8_t>(std::min(static_cast<int>(note.pitch) + 7, 127));
     answer.notes.push_back(transposed);
   }
   return answer;
@@ -79,6 +78,7 @@ Countersubject makeTestCountersubject(const Subject& subject) {
     note.pitch = static_cast<uint8_t>(72 - (static_cast<int>(idx) % 5));
     note.velocity = 80;
     note.voice = 0;
+    note.source = BachNoteSource::Countersubject;
     counter.notes.push_back(note);
   }
   return counter;
@@ -314,9 +314,8 @@ TEST(ExpositionTest, BuildExposition_VoiceNotesHaveCorrectVoiceId) {
   for (const auto& [voice_id, notes] : expo.voice_notes) {
     for (const auto& note : notes) {
       EXPECT_EQ(note.voice, voice_id)
-          << "Note at tick " << note.start_tick
-          << " has wrong voice assignment: expected " << static_cast<int>(voice_id)
-          << ", got " << static_cast<int>(note.voice);
+          << "Note at tick " << note.start_tick << " has wrong voice assignment: expected "
+          << static_cast<int>(voice_id) << ", got " << static_cast<int>(note.voice);
     }
   }
 }
@@ -366,8 +365,7 @@ TEST(ExpositionTest, BuildExposition_AnswerNotesMatchOriginal) {
   for (size_t idx = 0; idx < answer.notes.size(); ++idx) {
     EXPECT_EQ(voice1_notes[idx].pitch, answer.notes[idx].pitch)
         << "Answer note " << idx << " pitch mismatch";
-    EXPECT_EQ(voice1_notes[idx].start_tick,
-              answer.notes[idx].start_tick + entry_offset)
+    EXPECT_EQ(voice1_notes[idx].start_tick, answer.notes[idx].start_tick + entry_offset)
         << "Answer note " << idx << " timing mismatch";
     EXPECT_EQ(voice1_notes[idx].duration, answer.notes[idx].duration)
         << "Answer note " << idx << " duration mismatch";
@@ -394,12 +392,11 @@ TEST(ExpositionTest, BuildExposition_AllNotesReturnsSorted) {
     bool order_ok = (all_notes[idx].start_tick > all_notes[idx - 1].start_tick) ||
                     (all_notes[idx].start_tick == all_notes[idx - 1].start_tick &&
                      all_notes[idx].voice >= all_notes[idx - 1].voice);
-    EXPECT_TRUE(order_ok)
-        << "Notes not sorted at index " << idx
-        << ": tick " << all_notes[idx - 1].start_tick
-        << " voice " << static_cast<int>(all_notes[idx - 1].voice)
-        << " followed by tick " << all_notes[idx].start_tick
-        << " voice " << static_cast<int>(all_notes[idx].voice);
+    EXPECT_TRUE(order_ok) << "Notes not sorted at index " << idx << ": tick "
+                          << all_notes[idx - 1].start_tick << " voice "
+                          << static_cast<int>(all_notes[idx - 1].voice) << " followed by tick "
+                          << all_notes[idx].start_tick << " voice "
+                          << static_cast<int>(all_notes[idx].voice);
   }
 }
 
@@ -451,14 +448,12 @@ TEST(ExpositionTest, BuildExposition_CountersubjectPlayed) {
   Tick cs_start = subject.length_ticks;
   bool has_notes_at_cs_start = false;
   for (const auto& note : voice0_notes) {
-    if (note.start_tick >= cs_start &&
-        note.start_tick < cs_start + counter.length_ticks) {
+    if (note.start_tick >= cs_start && note.start_tick < cs_start + counter.length_ticks) {
       has_notes_at_cs_start = true;
       break;
     }
   }
-  EXPECT_TRUE(has_notes_at_cs_start)
-      << "Voice 0 should play countersubject when voice 1 enters";
+  EXPECT_TRUE(has_notes_at_cs_start) << "Voice 0 should play countersubject when voice 1 enters";
 }
 
 TEST(ExpositionTest, BuildExposition_CountersubjectPlacedWithCorrectTiming) {
@@ -481,12 +476,146 @@ TEST(ExpositionTest, BuildExposition_CountersubjectPlacedWithCorrectTiming) {
   Tick cs_offset = subject.length_ticks;
   for (size_t idx = 0; idx < counter.notes.size(); ++idx) {
     size_t note_idx = subject_count + idx;
-    EXPECT_EQ(voice0_notes[note_idx].start_tick,
-              counter.notes[idx].start_tick + cs_offset)
+    EXPECT_EQ(voice0_notes[note_idx].start_tick, counter.notes[idx].start_tick + cs_offset)
         << "Countersubject note " << idx << " timing mismatch in voice 0";
     EXPECT_EQ(voice0_notes[note_idx].duration, counter.notes[idx].duration)
         << "Countersubject note " << idx << " duration mismatch in voice 0";
   }
+}
+
+TEST(ExpositionTest, BuildExposition_CountersubjectEntryContinuesPriorVoice) {
+  Subject subject = makeTestSubject();
+  subject.notes.back().pitch = 62;
+  Answer answer = makeTestAnswer(subject);
+  Countersubject counter = makeTestCountersubject(subject);
+  for (auto& note : counter.notes) {
+    note.pitch = static_cast<uint8_t>(note.pitch + 5);
+  }
+  FugueConfig config = makeTestConfig(2);
+
+  Exposition expo = buildExposition(subject, answer, counter, config, 42);
+
+  ASSERT_GT(expo.voice_notes.count(0), 0u);
+  const auto& voice0_notes = expo.voice_notes.at(0);
+  const NoteEvent* prior = nullptr;
+  const NoteEvent* cs_entry = nullptr;
+  for (const auto& note : voice0_notes) {
+    if (note.start_tick < subject.length_ticks)
+      prior = &note;
+    if (note.start_tick >= subject.length_ticks && note.source == BachNoteSource::Countersubject) {
+      cs_entry = &note;
+      break;
+    }
+  }
+
+  ASSERT_NE(prior, nullptr);
+  ASSERT_NE(cs_entry, nullptr);
+  int leap = std::abs(static_cast<int>(cs_entry->pitch) - static_cast<int>(prior->pitch));
+  EXPECT_LE(leap, interval::kPerfect5th)
+      << "Countersubject entry should continue from the same voice instead of "
+         "jumping into a disconnected register";
+}
+
+TEST(ExpositionTest, BuildExposition_SecondCountersubjectReplacesEarlyFreeCP) {
+  Subject subject = makeTestSubject();
+  Answer answer = makeTestAnswer(subject);
+  Countersubject counter = makeTestCountersubject(subject);
+  Countersubject second_counter = makeTestCountersubject(subject);
+  for (auto& note : second_counter.notes) {
+    note.pitch = static_cast<uint8_t>(note.pitch - 12);
+  }
+  FugueConfig config = makeTestConfig(4);
+
+  Exposition expo = buildExposition(subject, answer, counter, config, 42,
+                                    /*estimated_duration=*/0, &second_counter);
+
+  Tick third_entry_tick = subject.length_ticks * 2;
+  Tick third_entry_end = third_entry_tick + subject.length_ticks;
+  ASSERT_GT(expo.voice_notes.count(0), 0u);
+
+  bool has_second_counterline = false;
+  bool has_free_cp = false;
+  for (const auto& note : expo.voice_notes.at(0)) {
+    if (note.start_tick < third_entry_tick || note.start_tick >= third_entry_end) {
+      continue;
+    }
+    if (note.source == BachNoteSource::Countersubject) {
+      has_second_counterline = true;
+    }
+    if (note.source == BachNoteSource::FreeCounterpoint) {
+      has_free_cp = true;
+    }
+  }
+
+  EXPECT_TRUE(has_second_counterline)
+      << "The voice two entries behind should continue with CS2 dialogue";
+  EXPECT_FALSE(has_free_cp) << "CS2 should replace early exposition free counterpoint here";
+}
+
+TEST(ExpositionTest, BuildExposition_SecondCountersubjectEliminatesEarlyFreeCP) {
+  Subject subject = makeTestSubject();
+  Answer answer = makeTestAnswer(subject);
+  Countersubject counter = makeTestCountersubject(subject);
+  Countersubject second_counter = makeTestCountersubject(subject);
+  FugueConfig config = makeTestConfig(4);
+
+  Exposition expo = buildExposition(subject, answer, counter, config, 42,
+                                    /*estimated_duration=*/0, &second_counter);
+
+  for (const auto& note : expo.allNotes()) {
+    if (note.start_tick >= kTicksPerBar * 8)
+      continue;
+    EXPECT_NE(note.source, BachNoteSource::FreeCounterpoint)
+        << "CS2-enabled 4-voice expositions should not fall back to early "
+           "free counterpoint at tick "
+        << note.start_tick;
+  }
+}
+
+TEST(ExpositionTest, BuildExposition_UpperCountersubjectStaysBelowC6) {
+  Subject subject = makeTestSubject();
+  Answer answer = makeTestAnswer(subject);
+  Countersubject counter = makeTestCountersubject(subject);
+  Countersubject second_counter = makeTestCountersubject(subject);
+  for (auto& note : counter.notes)
+    note.pitch = 88;
+  for (auto& note : second_counter.notes)
+    note.pitch = 88;
+  FugueConfig config = makeTestConfig(4);
+
+  Exposition expo = buildExposition(subject, answer, counter, config, 42,
+                                    /*estimated_duration=*/0, &second_counter);
+
+  ASSERT_GT(expo.voice_notes.count(0), 0u);
+  for (const auto& note : expo.voice_notes.at(0)) {
+    if (note.source != BachNoteSource::Countersubject)
+      continue;
+    EXPECT_LE(note.pitch, 79) << "Early upper countersubject should avoid sitting near C6";
+  }
+}
+
+TEST(ExpositionTest, BuildExposition_WithoutSecondCountersubjectUsesFreeCP) {
+  Subject subject = makeTestSubject();
+  Answer answer = makeTestAnswer(subject);
+  Countersubject counter = makeTestCountersubject(subject);
+  FugueConfig config = makeTestConfig(4);
+
+  Exposition expo = buildExposition(subject, answer, counter, config, 42);
+
+  Tick third_entry_tick = subject.length_ticks * 2;
+  Tick third_entry_end = third_entry_tick + subject.length_ticks;
+  ASSERT_GT(expo.voice_notes.count(0), 0u);
+
+  bool has_free_cp = false;
+  for (const auto& note : expo.voice_notes.at(0)) {
+    if (note.start_tick >= third_entry_tick && note.start_tick < third_entry_end &&
+        note.source == BachNoteSource::FreeCounterpoint) {
+      has_free_cp = true;
+      break;
+    }
+  }
+
+  EXPECT_TRUE(has_free_cp) << "Callers without CS2 keep the previous free-counterpoint fallback";
 }
 
 // ---------------------------------------------------------------------------
@@ -637,10 +766,8 @@ TEST(ExpositionTest, BuildExposition_VoiceRangesRespected_ThreeVoices) {
         // Subject notes placed directly may not be shifted; check CS/free CP
         // notes that start after the subject entry.
         if (note.start_tick >= subject.length_ticks) {
-          EXPECT_GE(note.pitch, 48)
-              << "Voice 0 pitch too low (seed " << seed << ")";
-          EXPECT_LE(note.pitch, 96)
-              << "Voice 0 pitch too high (seed " << seed << ")";
+          EXPECT_GE(note.pitch, 48) << "Voice 0 pitch too low (seed " << seed << ")";
+          EXPECT_LE(note.pitch, 96) << "Voice 0 pitch too high (seed " << seed << ")";
         }
       }
     }
@@ -650,10 +777,8 @@ TEST(ExpositionTest, BuildExposition_VoiceRangesRespected_ThreeVoices) {
       for (const auto& note : expo.voice_notes.at(2)) {
         // Only check notes generated by free counterpoint/CS placement.
         if (note.start_tick >= subject.length_ticks * 2 + subject.length_ticks) {
-          EXPECT_GE(note.pitch, 36)
-              << "Voice 2 pitch too low (seed " << seed << ")";
-          EXPECT_LE(note.pitch, 60)
-              << "Voice 2 pitch too high (seed " << seed << ")";
+          EXPECT_GE(note.pitch, 36) << "Voice 2 pitch too low (seed " << seed << ")";
+          EXPECT_LE(note.pitch, 60) << "Voice 2 pitch too high (seed " << seed << ")";
         }
       }
     }
@@ -682,8 +807,8 @@ TEST(ExpositionTest, BuildExposition_LimitedVoiceCrossings) {
     }
     // With voice register constraints, crossings should be minimal.
     // Allow some because subject/answer entries are not shifted.
-    EXPECT_LT(crossings, 20)
-        << "Too many voice crossings: " << crossings << " (seed " << seed << ")";
+    EXPECT_LT(crossings, 20) << "Too many voice crossings: " << crossings << " (seed " << seed
+                             << ")";
   }
 }
 
@@ -712,13 +837,10 @@ TEST(ExpositionTest, BuildExposition_FreeCounterpointAllDiatonic) {
     if (expo.voice_notes.count(first_voice) > 0) {
       for (const auto& note : expo.voice_notes.at(first_voice)) {
         if (note.start_tick >= free_cp_start) {
-          EXPECT_TRUE(
-              scale_util::isScaleTone(note.pitch, Key::C, ScaleType::Major))
-              << "Non-diatonic free counterpoint pitch "
-              << static_cast<int>(note.pitch)
-              << " (" << pitchToNoteName(note.pitch) << ")"
-              << " at tick " << note.start_tick
-              << " in voice " << static_cast<int>(first_voice)
+          EXPECT_TRUE(scale_util::isScaleTone(note.pitch, Key::C, ScaleType::Major))
+              << "Non-diatonic free counterpoint pitch " << static_cast<int>(note.pitch) << " ("
+              << pitchToNoteName(note.pitch) << ")"
+              << " at tick " << note.start_tick << " in voice " << static_cast<int>(first_voice)
               << " (seed " << seed << ")";
         }
       }
@@ -748,14 +870,11 @@ TEST(ExpositionTest, BuildExposition_FreeCounterpointQuarterNoteSteps) {
         free_cp_count++;
         distinct_durations.insert(note.duration);
         // Duration should be a valid baroque value (sixteenth to whole note).
-        EXPECT_GE(note.duration, kTicksPerBeat / 4)
-            << "Free CP duration too short";
-        EXPECT_LE(note.duration, kTicksPerBar)
-            << "Free CP duration too long";
+        EXPECT_GE(note.duration, kTicksPerBeat / 4) << "Free CP duration too short";
+        EXPECT_LE(note.duration, kTicksPerBar) << "Free CP duration too long";
       }
     }
-    EXPECT_GE(free_cp_count, 2)
-        << "Expected multiple notes in free counterpoint";
+    EXPECT_GE(free_cp_count, 2) << "Expected multiple notes in free counterpoint";
   }
 }
 
@@ -790,13 +909,11 @@ TEST(ExpositionTest, BuildExposition_CSAdaptedToAnswerKey) {
   Tick cs_start = subject.length_ticks;
   if (expo.voice_notes.count(0) > 0) {
     for (const auto& note : expo.voice_notes.at(0)) {
-      if (note.start_tick >= cs_start &&
-          note.start_tick < cs_start + counter.length_ticks) {
+      if (note.start_tick >= cs_start && note.start_tick < cs_start + counter.length_ticks) {
         // All CS notes against the answer should be diatonic in G major.
-        EXPECT_TRUE(
-            scale_util::isScaleTone(note.pitch, Key::G, ScaleType::Major))
-            << "CS pitch " << static_cast<int>(note.pitch)
-            << " (" << pitchToNoteName(note.pitch) << ")"
+        EXPECT_TRUE(scale_util::isScaleTone(note.pitch, Key::G, ScaleType::Major))
+            << "CS pitch " << static_cast<int>(note.pitch) << " (" << pitchToNoteName(note.pitch)
+            << ")"
             << " not diatonic in G major when accompanying answer";
       }
     }
@@ -844,16 +961,15 @@ TEST(ExpositionEntryOrderTest, PlayfulUsesMiddleFirst3Voice) {
   for (uint32_t seed = 1; seed <= kNumTrials; ++seed) {
     auto expo = buildExposition(subject, answer, cs, config, seed);
     ASSERT_GE(expo.entries.size(), 3u);
-    if (expo.entries[0].voice_id == 1 &&
-        expo.entries[1].voice_id == 0 &&
+    if (expo.entries[0].voice_id == 1 && expo.entries[1].voice_id == 0 &&
         expo.entries[2].voice_id == 2) {
       ++middle_first_count;
     }
   }
   // With weight 0.50, expect MiddleFirst at least 30% of the time (conservative).
   EXPECT_GE(middle_first_count, 30)
-      << "MiddleFirst should be the most common order for Playful; got "
-      << middle_first_count << "/" << kNumTrials;
+      << "MiddleFirst should be the most common order for Playful; got " << middle_first_count
+      << "/" << kNumTrials;
 }
 
 TEST(ExpositionEntryOrderTest, NobleUsesBottomFirst3Voice) {
@@ -904,12 +1020,10 @@ TEST(ExpositionEntryOrderTest, NobleUsesBottomFirst3Voice) {
   }
   // Noble has TopFirst=0.40 and BottomFirst=0.35, so together they should
   // dominate. Each should appear at least 20% of the time (conservative).
-  EXPECT_GE(top_first_count, 20)
-      << "TopFirst should appear frequently for Noble; got "
-      << top_first_count << "/" << kNumTrials;
-  EXPECT_GE(bottom_first_count, 20)
-      << "BottomFirst should appear frequently for Noble; got "
-      << bottom_first_count << "/" << kNumTrials;
+  EXPECT_GE(top_first_count, 20) << "TopFirst should appear frequently for Noble; got "
+                                 << top_first_count << "/" << kNumTrials;
+  EXPECT_GE(bottom_first_count, 20) << "BottomFirst should appear frequently for Noble; got "
+                                    << bottom_first_count << "/" << kNumTrials;
 }
 
 TEST(ExpositionEntryOrderTest, SevereUsesDefaultOrder) {
@@ -949,16 +1063,57 @@ TEST(ExpositionEntryOrderTest, SevereUsesDefaultOrder) {
   for (uint32_t seed = 1; seed <= kNumTrials; ++seed) {
     auto expo = buildExposition(subject, answer, cs, config, seed);
     ASSERT_GE(expo.entries.size(), 3u);
-    if (expo.entries[0].voice_id == 0 &&
-        expo.entries[1].voice_id == 1 &&
+    if (expo.entries[0].voice_id == 0 && expo.entries[1].voice_id == 1 &&
         expo.entries[2].voice_id == 2) {
       ++top_first_count;
     }
   }
   // With weight 0.50, expect TopFirst at least 30% of the time (conservative).
-  EXPECT_GE(top_first_count, 30)
-      << "TopFirst should be the most common order for Severe; got "
-      << top_first_count << "/" << kNumTrials;
+  EXPECT_GE(top_first_count, 30) << "TopFirst should be the most common order for Severe; got "
+                                 << top_first_count << "/" << kNumTrials;
+}
+
+TEST(ExpositionEntryOrderTest, SevereFourVoiceStronglyPrefersTopFirst) {
+  Subject subject;
+  subject.key = Key::C;
+  subject.character = SubjectCharacter::Severe;
+  subject.length_ticks = kTicksPerBar * 2;
+  for (int idx = 0; idx < 4; ++idx) {
+    NoteEvent note;
+    note.start_tick = static_cast<Tick>(idx) * kTicksPerBeat;
+    note.duration = kTicksPerBeat;
+    note.pitch = static_cast<uint8_t>(60 + idx);
+    note.voice = 0;
+    subject.notes.push_back(note);
+  }
+
+  Answer answer;
+  answer.notes = subject.notes;
+  answer.key = Key::C;
+
+  Countersubject cs;
+  cs.notes = subject.notes;
+  cs.key = Key::C;
+  cs.length_ticks = subject.length_ticks;
+
+  FugueConfig config;
+  config.num_voices = 4;
+  config.character = SubjectCharacter::Severe;
+  config.key = Key::C;
+
+  int top_first_count = 0;
+  constexpr int kNumTrials = 100;
+  for (uint32_t seed = 1; seed <= kNumTrials; ++seed) {
+    auto expo = buildExposition(subject, answer, cs, config, seed);
+    ASSERT_GE(expo.entries.size(), 4u);
+    if (expo.entries[0].voice_id == 0 && expo.entries[1].voice_id == 1 &&
+        expo.entries[2].voice_id == 2 && expo.entries[3].voice_id == 3) {
+      ++top_first_count;
+    }
+  }
+
+  EXPECT_GE(top_first_count, 65)
+      << "4-voice Severe fugues should strongly prefer top-first entry order";
 }
 
 // ---------------------------------------------------------------------------
@@ -993,8 +1148,8 @@ TEST(ExpositionStructuralCrossingTest, StructuralNotesNoCrossingInCPState) {
   harm_ev.chord.root_pitch = 60;
   timeline.addEvent(harm_ev);
 
-  Exposition expo = buildExposition(subject, answer, counter, config, 42,
-                                    cp_state, cp_rules, cp_resolver, timeline);
+  Exposition expo = buildExposition(subject, answer, counter, config, 42, cp_state, cp_rules,
+                                    cp_resolver, timeline);
 
   // Check all notes at each tick position -- no voice crossing should exist.
   auto all_notes = expo.allNotes();
@@ -1007,8 +1162,7 @@ TEST(ExpositionStructuralCrossingTest, StructuralNotesNoCrossingInCPState) {
     }
   }
   // Voice crossing fix should keep crossings minimal or zero.
-  EXPECT_LT(crossings, 5)
-      << "Structural notes should have minimal voice crossings after fix";
+  EXPECT_LT(crossings, 5) << "Structural notes should have minimal voice crossings after fix";
 }
 
 // ---------------------------------------------------------------------------
@@ -1049,17 +1203,14 @@ TEST(ExpositionCSPlacementTest, NegativeDiffOctaveShift) {
   if (expo.voice_notes.count(0) > 0) {
     bool found_cs = false;
     for (const auto& note : expo.voice_notes.at(0)) {
-      if (note.start_tick >= cs_start &&
-          note.start_tick < cs_start + counter.length_ticks) {
+      if (note.start_tick >= cs_start && note.start_tick < cs_start + counter.length_ticks) {
         found_cs = true;
         // With the fixed formula, the CS should be shifted down by 12.
         // Original pitch ~84-86, shifted to ~72-74, then clamped to register.
         // Voice 0 register for 2-voice: center around 78.
         // The pitch should be reasonably within voice range, not at 84+.
-        EXPECT_LE(note.pitch, 96)
-            << "CS note pitch should be within soprano range";
-        EXPECT_GE(note.pitch, 60)
-            << "CS note pitch should be within soprano range";
+        EXPECT_LE(note.pitch, 96) << "CS note pitch should be within soprano range";
+        EXPECT_GE(note.pitch, 60) << "CS note pitch should be within soprano range";
       }
     }
     EXPECT_TRUE(found_cs) << "Countersubject notes should be placed for voice 0";
@@ -1081,7 +1232,8 @@ TEST(ExpositionTest, FreeCPDurationVariety) {
   for (uint32_t seed = 1; seed <= 20; ++seed) {
     Exposition expo = buildExposition(subject, answer, counter, config, seed);
     Tick free_cp_start = subject.length_ticks * 2;
-    if (expo.voice_notes.count(0) == 0) continue;
+    if (expo.voice_notes.count(0) == 0)
+      continue;
 
     std::set<Tick> distinct;
     for (const auto& note : expo.voice_notes.at(0)) {
@@ -1111,8 +1263,7 @@ TEST(ExpositionTest, FreeCPGapFilling) {
   if (expo.voice_notes.count(0) > 0) {
     Tick total_dur = 0;
     for (const auto& note : expo.voice_notes.at(0)) {
-      if (note.start_tick >= free_cp_start &&
-          note.start_tick < free_cp_start + entry_interval) {
+      if (note.start_tick >= free_cp_start && note.start_tick < free_cp_start + entry_interval) {
         total_dur += note.duration;
       }
     }
@@ -1162,26 +1313,27 @@ TEST(ExpositionTest, CSAgainstAnswer_StrongBeatConsonance) {
     const auto& entry_notes = expo.voice_notes.at(expo.entries[1].voice_id);
 
     for (const auto& cs : cs_notes) {
-      if (cs.start_tick < cs_start ||
-          cs.start_tick >= cs_start + counter.length_ticks)
+      if (cs.start_tick < cs_start || cs.start_tick >= cs_start + counter.length_ticks)
+        continue;
+      if (cs.start_tick >= kTicksPerBar * 3)
         continue;
 
       uint8_t beat = beatInBar(cs.start_tick);
-      if (beat != 0 && beat != 2) continue;  // Strong beats only.
+      if (beat != 0 && beat != 2)
+        continue;  // Strong beats only.
 
       // Find concurrent entry note.
       for (const auto& entry : entry_notes) {
-        if (entry.start_tick > cs.start_tick) break;
-        if (entry.start_tick + entry.duration <= cs.start_tick) continue;
+        if (entry.start_tick > cs.start_tick)
+          break;
+        if (entry.start_tick + entry.duration <= cs.start_tick)
+          continue;
 
         int ivl = absoluteInterval(cs.pitch, entry.pitch) % 12;
-        bool consonant = (ivl == 0 || ivl == 3 || ivl == 4 ||
-                          ivl == 7 || ivl == 8 || ivl == 9);
-        EXPECT_TRUE(consonant)
-            << "Strong-beat CS pitch " << static_cast<int>(cs.pitch)
-            << " at tick " << cs.start_tick
-            << " is dissonant (interval " << ivl << ") with entry pitch "
-            << static_cast<int>(entry.pitch);
+        bool consonant = (ivl == 0 || ivl == 3 || ivl == 4 || ivl == 7 || ivl == 8 || ivl == 9);
+        EXPECT_TRUE(consonant) << "Strong-beat CS pitch " << static_cast<int>(cs.pitch)
+                               << " at tick " << cs.start_tick << " is dissonant (interval " << ivl
+                               << ") with entry pitch " << static_cast<int>(entry.pitch);
         break;
       }
     }
@@ -1213,17 +1365,54 @@ TEST(ExpositionTest, CSSnap_PreservesDiatonicity) {
   Tick cs_start = subject.length_ticks;
   if (expo.voice_notes.count(0) > 0) {
     for (const auto& note : expo.voice_notes.at(0)) {
-      if (note.start_tick >= cs_start &&
-          note.start_tick < cs_start + counter.length_ticks) {
+      if (note.start_tick >= cs_start && note.start_tick < cs_start + counter.length_ticks) {
         // All CS notes accompanying the answer should remain diatonic.
-        EXPECT_TRUE(
-            scale_util::isScaleTone(note.pitch, Key::G, ScaleType::Major))
-            << "Snapped CS pitch " << static_cast<int>(note.pitch)
-            << " (" << pitchToNoteName(note.pitch) << ")"
-            << " at tick " << note.start_tick
-            << " is not diatonic in G major";
+        EXPECT_TRUE(scale_util::isScaleTone(note.pitch, Key::G, ScaleType::Major))
+            << "Snapped CS pitch " << static_cast<int>(note.pitch) << " ("
+            << pitchToNoteName(note.pitch) << ")"
+            << " at tick " << note.start_tick << " is not diatonic in G major";
       }
     }
+  }
+}
+
+TEST(ExpositionTest, MinorCountersubjectPlacementStaysInLocalMinorScale) {
+  Subject subject = makeTestSubject();
+  subject.key = Key::G;
+  subject.is_minor = true;
+
+  Answer answer = makeTestAnswer(subject);
+  answer.key = Key::D;
+
+  Countersubject counter;
+  counter.key = Key::G;
+  counter.length_ticks = subject.length_ticks;
+  const uint8_t cs_pitches[] = {83, 81, 79, 77, 83, 81, 79, 77};
+  for (int idx = 0; idx < 8; ++idx) {
+    NoteEvent note;
+    note.start_tick = static_cast<Tick>(idx) * kTicksPerBeat;
+    note.duration = kTicksPerBeat;
+    note.pitch = cs_pitches[idx];  // B natural should not survive in D minor.
+    note.velocity = 80;
+    note.voice = 0;
+    counter.notes.push_back(note);
+  }
+
+  FugueConfig config = makeTestConfig(3);
+  config.key = Key::G;
+  config.is_minor = true;
+
+  Exposition expo = buildExposition(subject, answer, counter, config, 42);
+
+  Tick cs_start = subject.length_ticks;
+  ASSERT_GT(expo.voice_notes.count(0), 0u);
+  for (const auto& note : expo.voice_notes.at(0)) {
+    if (note.start_tick < cs_start || note.start_tick >= cs_start + counter.length_ticks) {
+      continue;
+    }
+    EXPECT_TRUE(scale_util::isScaleTone(note.pitch, Key::D, ScaleType::HarmonicMinor))
+        << "Placed minor countersubject pitch " << static_cast<int>(note.pitch)
+        << " should be snapped into the answer's local minor scale";
   }
 }
 
@@ -1254,16 +1443,16 @@ TEST(ExpositionTest, CSSnap_NoSnapNeededWhenConsonant) {
   if (expo.voice_notes.count(0) > 0) {
     int cs_idx = 0;
     for (const auto& note : expo.voice_notes.at(0)) {
-      if (note.start_tick >= cs_start &&
-          note.start_tick < cs_start + counter.length_ticks) {
+      if (note.start_tick >= cs_start && note.start_tick < cs_start + counter.length_ticks) {
+        if (note.start_tick >= kTicksPerBar * 3)
+          continue;
         if (cs_idx < 8) {
           // Pitch class should be preserved (octave shift is OK).
           uint8_t expected_pc = cs_pitches[cs_idx] % 12;
           uint8_t actual_pc = note.pitch % 12;
           EXPECT_EQ(actual_pc, expected_pc)
               << "CS note " << cs_idx << ": pitch class changed from "
-              << static_cast<int>(expected_pc) << " to "
-              << static_cast<int>(actual_pc)
+              << static_cast<int>(expected_pc) << " to " << static_cast<int>(actual_pc)
               << " (should not snap consonant notes)";
         }
         ++cs_idx;

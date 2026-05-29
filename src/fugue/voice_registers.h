@@ -25,7 +25,7 @@ namespace bach {
 /// @param pedal_mode Pedal voice treatment (only affects 3-voice V2).
 /// @return Pair of (low_pitch, high_pitch) inclusive MIDI pitch bounds.
 std::pair<uint8_t, uint8_t> getFugueVoiceRange(VoiceId voice_id, uint8_t num_voices,
-                                                PedalMode pedal_mode = PedalMode::Auto);
+                                               PedalMode pedal_mode = PedalMode::Auto);
 
 /// @brief Per-voice pitch register boundaries.
 struct VoiceRegister {
@@ -59,16 +59,11 @@ struct VoiceRegister {
 /// @param last_subject_pitch Last subject entry's starting pitch (0 = none).
 /// @param is_exposition True if currently in exposition phase (enables drift penalty).
 /// @return Optimal octave shift in semitones (multiple of 12).
-int fitToRegister(const uint8_t* pitches, size_t num_pitches,
-                  uint8_t range_lo, uint8_t range_hi,
-                  uint8_t reference_pitch = 0,
-                  uint8_t prev_reference_pitch = 0,
-                  uint8_t adjacent_last_pitch = 0,
-                  uint8_t adjacent_prev_pitch = 0,
-                  uint8_t adjacent_lo = 0, uint8_t adjacent_hi = 0,
-                  bool is_subject_voice = false,
-                  uint8_t last_subject_pitch = 0,
-                  bool is_exposition = false);
+int fitToRegister(const uint8_t* pitches, size_t num_pitches, uint8_t range_lo, uint8_t range_hi,
+                  uint8_t reference_pitch = 0, uint8_t prev_reference_pitch = 0,
+                  uint8_t adjacent_last_pitch = 0, uint8_t adjacent_prev_pitch = 0,
+                  uint8_t adjacent_lo = 0, uint8_t adjacent_hi = 0, bool is_subject_voice = false,
+                  uint8_t last_subject_pitch = 0, bool is_exposition = false);
 
 /// @brief NoteEvent vector overload of fitToRegister.
 /// @param notes Vector of NoteEvent whose pitches are evaluated.
@@ -84,16 +79,11 @@ int fitToRegister(const uint8_t* pitches, size_t num_pitches,
 /// @param last_subject_pitch Last subject entry's starting pitch (0 = none).
 /// @param is_exposition True if currently in exposition phase (enables drift penalty).
 /// @return Optimal octave shift in semitones (multiple of 12).
-int fitToRegister(const std::vector<NoteEvent>& notes,
-                  uint8_t range_lo, uint8_t range_hi,
-                  uint8_t reference_pitch = 0,
-                  uint8_t prev_reference_pitch = 0,
-                  uint8_t adjacent_last_pitch = 0,
-                  uint8_t adjacent_prev_pitch = 0,
-                  uint8_t adjacent_lo = 0, uint8_t adjacent_hi = 0,
-                  bool is_subject_voice = false,
-                  uint8_t last_subject_pitch = 0,
-                  bool is_exposition = false);
+int fitToRegister(const std::vector<NoteEvent>& notes, uint8_t range_lo, uint8_t range_hi,
+                  uint8_t reference_pitch = 0, uint8_t prev_reference_pitch = 0,
+                  uint8_t adjacent_last_pitch = 0, uint8_t adjacent_prev_pitch = 0,
+                  uint8_t adjacent_lo = 0, uint8_t adjacent_hi = 0, bool is_subject_voice = false,
+                  uint8_t last_subject_pitch = 0, bool is_exposition = false);
 
 /// @brief Phase-position-aware register fitting with envelope observation.
 ///
@@ -118,16 +108,11 @@ int fitToRegister(const std::vector<NoteEvent>& notes,
 /// @param envelope_overflow_count If non-null, incremented for each note outside
 ///        the envelope-narrowed range (observation only, no penalty applied).
 /// @return Optimal octave shift in semitones (multiple of 12).
-int fitToRegisterWithEnvelope(
-    const std::vector<NoteEvent>& notes,
-    uint8_t voice_id, uint8_t num_voices,
-    float phase_pos,
-    const RegisterEnvelope& envelope,
-    uint8_t reference_pitch = 0,
-    uint8_t adjacent_last_pitch = 0,
-    int* envelope_overflow_count = nullptr,
-    uint8_t adjacent_lo = 0,
-    uint8_t adjacent_hi = 0);
+int fitToRegisterWithEnvelope(const std::vector<NoteEvent>& notes, uint8_t voice_id,
+                              uint8_t num_voices, float phase_pos, const RegisterEnvelope& envelope,
+                              uint8_t reference_pitch = 0, uint8_t adjacent_last_pitch = 0,
+                              int* envelope_overflow_count = nullptr, uint8_t adjacent_lo = 0,
+                              uint8_t adjacent_hi = 0);
 
 }  // namespace bach
 

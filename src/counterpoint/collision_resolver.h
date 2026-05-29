@@ -22,10 +22,10 @@ class IRuleEvaluator;
 
 /// @brief Result of a collision resolution attempt.
 struct PlacementResult {
-  uint8_t pitch = 0;        ///< Final pitch chosen.
-  float penalty = 0.0f;     ///< 0.0 = ideal, 1.0 = rejection threshold.
-  std::string strategy;     ///< Strategy that succeeded ("original", "chord_tone", etc.).
-  bool accepted = false;    ///< True if a safe pitch was found.
+  uint8_t pitch = 0;      ///< Final pitch chosen.
+  float penalty = 0.0f;   ///< 0.0 = ideal, 1.0 = rejection threshold.
+  std::string strategy;   ///< Strategy that succeeded ("original", "chord_tone", etc.).
+  bool accepted = false;  ///< True if a safe pitch was found.
 };
 
 /// @brief Result of checking for parallel perfect intervals and P4 over bass.
@@ -48,9 +48,9 @@ struct ParallelCheckResult {
 /// @param tick Tick position.
 /// @param num_voices Total number of voices.
 /// @return ParallelCheckResult with detected issues.
-ParallelCheckResult checkParallelsAndP4Bass(
-    const CounterpointState& state, const IRuleEvaluator& rules,
-    VoiceId voice_id, uint8_t pitch, Tick tick, uint8_t num_voices);
+ParallelCheckResult checkParallelsAndP4Bass(const CounterpointState& state,
+                                            const IRuleEvaluator& rules, VoiceId voice_id,
+                                            uint8_t pitch, Tick tick, uint8_t num_voices);
 
 /// @brief Resolves counterpoint collisions via a 6-stage strategy cascade.
 ///
@@ -82,10 +82,8 @@ class CollisionResolver {
   /// @param next_pitch Next pitch in the voice (0 if unknown, enables non-harmonic
   ///        tone classification when provided).
   /// @return True if no violations would result.
-  bool isSafeToPlace(const CounterpointState& state,
-                     const IRuleEvaluator& rules,
-                     VoiceId voice_id, uint8_t pitch,
-                     Tick tick, Tick duration,
+  bool isSafeToPlace(const CounterpointState& state, const IRuleEvaluator& rules, VoiceId voice_id,
+                     uint8_t pitch, Tick tick, Tick duration,
                      std::optional<uint8_t> next_pitch = std::nullopt,
                      int adjacent_spacing_limit = 14) const;
 
@@ -108,10 +106,8 @@ class CollisionResolver {
   /// @param next_pitch Next pitch in the voice (0 if unknown, enables
   ///        non-harmonic tone classification in isSafeToPlace).
   /// @return PlacementResult with the best available pitch and strategy.
-  PlacementResult findSafePitch(const CounterpointState& state,
-                                const IRuleEvaluator& rules,
-                                VoiceId voice_id, uint8_t desired_pitch,
-                                Tick tick, Tick duration,
+  PlacementResult findSafePitch(const CounterpointState& state, const IRuleEvaluator& rules,
+                                VoiceId voice_id, uint8_t desired_pitch, Tick tick, Tick duration,
                                 std::optional<uint8_t> next_pitch = std::nullopt) const;
 
   /// @brief Find a safe pitch respecting the source's protection level.
@@ -124,10 +120,8 @@ class CollisionResolver {
   /// @param source The note source (determines allowed strategies).
   /// @param next_pitch Next pitch in the voice (0 if unknown, enables
   ///        non-harmonic tone classification in isSafeToPlace).
-  PlacementResult findSafePitch(const CounterpointState& state,
-                                const IRuleEvaluator& rules,
-                                VoiceId voice_id, uint8_t desired_pitch,
-                                Tick tick, Tick duration,
+  PlacementResult findSafePitch(const CounterpointState& state, const IRuleEvaluator& rules,
+                                VoiceId voice_id, uint8_t desired_pitch, Tick tick, Tick duration,
                                 BachNoteSource source,
                                 std::optional<uint8_t> next_pitch = std::nullopt) const;
 
@@ -136,10 +130,9 @@ class CollisionResolver {
   /// Same as findSafePitch() but also considers the voice range penalty
   /// when scoring candidates, preferring pitches that stay within the
   /// registered voice range.
-  PlacementResult resolvePedal(const CounterpointState& state,
-                               const IRuleEvaluator& rules,
-                               VoiceId voice_id, uint8_t desired_pitch,
-                               Tick tick, Tick duration) const;
+  PlacementResult resolvePedal(const CounterpointState& state, const IRuleEvaluator& rules,
+                               VoiceId voice_id, uint8_t desired_pitch, Tick tick,
+                               Tick duration) const;
 
   /// @brief Try to create a suspension pattern (preparation-suspension-resolution).
   ///
@@ -155,10 +148,9 @@ class CollisionResolver {
   /// @param tick Current tick position.
   /// @param duration Note duration.
   /// @return PlacementResult with suspension if viable, otherwise not accepted.
-  PlacementResult trySuspension(const CounterpointState& state,
-                                const IRuleEvaluator& rules,
-                                VoiceId voice_id, uint8_t desired_pitch,
-                                Tick tick, Tick duration) const;
+  PlacementResult trySuspension(const CounterpointState& state, const IRuleEvaluator& rules,
+                                VoiceId voice_id, uint8_t desired_pitch, Tick tick,
+                                Tick duration) const;
 
   /// @brief Find a safe pitch using 2-beat lookahead scoring.
   ///
@@ -175,11 +167,9 @@ class CollisionResolver {
   /// @param next_desired_pitch Desired pitch for the next beat (0 if unknown).
   /// @return PlacementResult with the best lookahead pitch.
   PlacementResult findSafePitchWithLookahead(const CounterpointState& state,
-                                              const IRuleEvaluator& rules,
-                                              VoiceId voice_id,
-                                              uint8_t desired_pitch, Tick tick,
-                                              Tick duration,
-                                              uint8_t next_desired_pitch) const;
+                                             const IRuleEvaluator& rules, VoiceId voice_id,
+                                             uint8_t desired_pitch, Tick tick, Tick duration,
+                                             uint8_t next_desired_pitch) const;
 
   /// @brief Set the maximum search range (in semitones) for step_shift.
   /// @param semitones Maximum distance to search (default: 12).
@@ -238,18 +228,15 @@ class CollisionResolver {
   mutable uint32_t reentry_rescue_count_ = 0;
 
   /// @brief Attempt a specific resolution strategy.
-  PlacementResult tryStrategy(const CounterpointState& state,
-                              const IRuleEvaluator& rules,
-                              VoiceId voice_id, uint8_t desired_pitch,
-                              Tick tick, Tick duration,
+  PlacementResult tryStrategy(const CounterpointState& state, const IRuleEvaluator& rules,
+                              VoiceId voice_id, uint8_t desired_pitch, Tick tick, Tick duration,
                               const std::string& strategy,
                               std::optional<uint8_t> next_pitch = std::nullopt) const;
 
   /// @brief Check if a pitch would cross an adjacent voice.
   /// @return True if the candidate pitch crosses above a higher voice
   ///         or below a lower voice at the given tick.
-  bool wouldCrossVoice(const CounterpointState& state,
-                       VoiceId voice_id, uint8_t pitch,
+  bool wouldCrossVoice(const CounterpointState& state, VoiceId voice_id, uint8_t pitch,
                        Tick tick) const;
 };
 

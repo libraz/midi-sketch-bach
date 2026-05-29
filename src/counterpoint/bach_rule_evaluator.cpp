@@ -18,8 +18,7 @@ namespace bach {
 // Construction
 // ---------------------------------------------------------------------------
 
-BachRuleEvaluator::BachRuleEvaluator(uint8_t num_voices)
-    : num_voices_(num_voices) {}
+BachRuleEvaluator::BachRuleEvaluator(uint8_t num_voices) : num_voices_(num_voices) {}
 
 void BachRuleEvaluator::setFreeCounterpoint(bool enabled) {
   free_counterpoint_ = enabled;
@@ -47,11 +46,7 @@ uint8_t BachRuleEvaluator::numVoices() const {
 /// @param reduced Interval modulo 12, in range [0, 11].
 /// @return True if the interval is a consonance (P1/P5/m3/M3/m6/M6).
 
-
-
-
-bool BachRuleEvaluator::isIntervalConsonant(int semitones,
-                                            bool is_strong_beat) const {
+bool BachRuleEvaluator::isIntervalConsonant(int semitones, bool is_strong_beat) const {
   // Free counterpoint mode: consonances always OK on weak beats.
   // Dissonances on weak beats are rejected so that the collision resolver's
   // NHT check (passing tone / neighbor tone) can evaluate with next_pitch context.
@@ -91,8 +86,7 @@ bool BachRuleEvaluator::isIntervalConsonant(int semitones,
 // Motion classification
 // ---------------------------------------------------------------------------
 
-MotionType BachRuleEvaluator::classifyMotion(uint8_t prev1, uint8_t curr1,
-                                             uint8_t prev2,
+MotionType BachRuleEvaluator::classifyMotion(uint8_t prev1, uint8_t curr1, uint8_t prev2,
                                              uint8_t curr2) const {
   int dir1 = static_cast<int>(curr1) - static_cast<int>(prev1);
   int dir2 = static_cast<int>(curr2) - static_cast<int>(prev2);
@@ -108,10 +102,8 @@ MotionType BachRuleEvaluator::classifyMotion(uint8_t prev1, uint8_t curr1,
   }
 
   // Both voices move in the same direction.
-  int interval_prev = std::abs(static_cast<int>(prev1) -
-                               static_cast<int>(prev2));
-  int interval_curr = std::abs(static_cast<int>(curr1) -
-                               static_cast<int>(curr2));
+  int interval_prev = std::abs(static_cast<int>(prev1) - static_cast<int>(prev2));
+  int interval_curr = std::abs(static_cast<int>(curr1) - static_cast<int>(curr2));
 
   // Parallel: same direction AND same interval size.
   if (interval_prev == interval_curr) {
@@ -126,8 +118,8 @@ MotionType BachRuleEvaluator::classifyMotion(uint8_t prev1, uint8_t curr1,
 // Helpers
 // ---------------------------------------------------------------------------
 
-const NoteEvent* BachRuleEvaluator::getPreviousNote(
-    const CounterpointState& state, VoiceId voice_id, Tick tick) {
+const NoteEvent* BachRuleEvaluator::getPreviousNote(const CounterpointState& state,
+                                                    VoiceId voice_id, Tick tick) {
   const auto& notes = state.getVoiceNotes(voice_id);
 
   // Find the last note that starts strictly before `tick`.
@@ -145,21 +137,20 @@ const NoteEvent* BachRuleEvaluator::getPreviousNote(
 // Parallel perfect detection
 // ---------------------------------------------------------------------------
 
-bool BachRuleEvaluator::hasParallelPerfect(const CounterpointState& state,
-                                           VoiceId voice1, VoiceId voice2,
-                                           Tick tick) const {
+bool BachRuleEvaluator::hasParallelPerfect(const CounterpointState& state, VoiceId voice1,
+                                           VoiceId voice2, Tick tick) const {
   const NoteEvent* curr1 = state.getNoteAt(voice1, tick);
   const NoteEvent* curr2 = state.getNoteAt(voice2, tick);
-  if (!curr1 || !curr2) return false;
+  if (!curr1 || !curr2)
+    return false;
 
   const NoteEvent* prev1 = getPreviousNote(state, voice1, tick);
   const NoteEvent* prev2 = getPreviousNote(state, voice2, tick);
-  if (!prev1 || !prev2) return false;
+  if (!prev1 || !prev2)
+    return false;
 
-  int prev_interval = std::abs(static_cast<int>(prev1->pitch) -
-                               static_cast<int>(prev2->pitch));
-  int curr_interval = std::abs(static_cast<int>(curr1->pitch) -
-                               static_cast<int>(curr2->pitch));
+  int prev_interval = std::abs(static_cast<int>(prev1->pitch) - static_cast<int>(prev2->pitch));
+  int curr_interval = std::abs(static_cast<int>(curr1->pitch) - static_cast<int>(curr2->pitch));
 
   // Both intervals must be perfect consonances (P1/P5/P8).
   if (!interval_util::isPerfectConsonance(prev_interval) ||
@@ -170,11 +161,11 @@ bool BachRuleEvaluator::hasParallelPerfect(const CounterpointState& state,
   // Both intervals must be the same type (both P5, or both P1/P8).
   int prev_reduced = interval_util::compoundToSimple(prev_interval);
   int curr_reduced = interval_util::compoundToSimple(curr_interval);
-  if (prev_reduced != curr_reduced) return false;
+  if (prev_reduced != curr_reduced)
+    return false;
 
   // Motion must be in the same direction (parallel, not contrary).
-  MotionType motion = classifyMotion(prev1->pitch, curr1->pitch,
-                                     prev2->pitch, curr2->pitch);
+  MotionType motion = classifyMotion(prev1->pitch, curr1->pitch, prev2->pitch, curr2->pitch);
   return motion == MotionType::Parallel || motion == MotionType::Similar;
 }
 
@@ -182,26 +173,26 @@ bool BachRuleEvaluator::hasParallelPerfect(const CounterpointState& state,
 // Hidden perfect detection -- more lenient than Fux
 // ---------------------------------------------------------------------------
 
-bool BachRuleEvaluator::hasHiddenPerfect(const CounterpointState& state,
-                                         VoiceId voice1, VoiceId voice2,
-                                         Tick tick) const {
+bool BachRuleEvaluator::hasHiddenPerfect(const CounterpointState& state, VoiceId voice1,
+                                         VoiceId voice2, Tick tick) const {
   const NoteEvent* curr1 = state.getNoteAt(voice1, tick);
   const NoteEvent* curr2 = state.getNoteAt(voice2, tick);
-  if (!curr1 || !curr2) return false;
+  if (!curr1 || !curr2)
+    return false;
 
   const NoteEvent* prev1 = getPreviousNote(state, voice1, tick);
   const NoteEvent* prev2 = getPreviousNote(state, voice2, tick);
-  if (!prev1 || !prev2) return false;
+  if (!prev1 || !prev2)
+    return false;
 
-  int curr_interval = std::abs(static_cast<int>(curr1->pitch) -
-                               static_cast<int>(curr2->pitch));
+  int curr_interval = std::abs(static_cast<int>(curr1->pitch) - static_cast<int>(curr2->pitch));
 
   // The arriving interval must be a perfect consonance.
-  if (!interval_util::isPerfectConsonance(curr_interval)) return false;
+  if (!interval_util::isPerfectConsonance(curr_interval))
+    return false;
 
   // The previous interval must NOT be the same perfect consonance.
-  int prev_interval = std::abs(static_cast<int>(prev1->pitch) -
-                               static_cast<int>(prev2->pitch));
+  int prev_interval = std::abs(static_cast<int>(prev1->pitch) - static_cast<int>(prev2->pitch));
   int prev_reduced = interval_util::compoundToSimple(prev_interval);
   int curr_reduced = interval_util::compoundToSimple(curr_interval);
   if (prev_reduced == curr_reduced) {
@@ -209,8 +200,7 @@ bool BachRuleEvaluator::hasHiddenPerfect(const CounterpointState& state,
   }
 
   // Voices must move in the same direction (similar motion).
-  MotionType motion = classifyMotion(prev1->pitch, curr1->pitch,
-                                     prev2->pitch, curr2->pitch);
+  MotionType motion = classifyMotion(prev1->pitch, curr1->pitch, prev2->pitch, curr2->pitch);
   if (motion != MotionType::Similar && motion != MotionType::Parallel) {
     return false;
   }
@@ -219,13 +209,11 @@ bool BachRuleEvaluator::hasHiddenPerfect(const CounterpointState& state,
   // approaches by step (<=2 semitones).  Fux only allows the upper voice.
   uint8_t upper_prev = std::max(prev1->pitch, prev2->pitch);
   uint8_t upper_curr = std::max(curr1->pitch, curr2->pitch);
-  int upper_motion = std::abs(static_cast<int>(upper_curr) -
-                              static_cast<int>(upper_prev));
+  int upper_motion = std::abs(static_cast<int>(upper_curr) - static_cast<int>(upper_prev));
 
   uint8_t lower_prev = std::min(prev1->pitch, prev2->pitch);
   uint8_t lower_curr = std::min(curr1->pitch, curr2->pitch);
-  int lower_motion = std::abs(static_cast<int>(lower_curr) -
-                              static_cast<int>(lower_prev));
+  int lower_motion = std::abs(static_cast<int>(lower_curr) - static_cast<int>(lower_prev));
 
   if (upper_motion <= 2 || lower_motion <= 2) {
     return false;  // Either voice approaches by step -- allowed in Bach style.
@@ -238,13 +226,11 @@ bool BachRuleEvaluator::hasHiddenPerfect(const CounterpointState& state,
 // Voice crossing detection -- allows temporary crossings
 // ---------------------------------------------------------------------------
 
-bool BachRuleEvaluator::isCrossingTemporary(const CounterpointState& state,
-                                            VoiceId voice1, VoiceId voice2,
-                                            Tick tick) const {
+bool BachRuleEvaluator::isCrossingTemporary(const CounterpointState& state, VoiceId voice1,
+                                            VoiceId voice2, Tick tick) const {
   // Check 2 beats ahead (matching Python analyzer _LOOKAHEAD_BEATS=2).
   // If the crossing resolves at either offset, it is temporary.
-  for (Tick offset = kTicksPerBeat; offset <= kTicksPerBeat * 2;
-       offset += kTicksPerBeat) {
+  for (Tick offset = kTicksPerBeat; offset <= kTicksPerBeat * 2; offset += kTicksPerBeat) {
     Tick check_tick = tick + offset;
 
     const NoteEvent* next1 = state.getNoteAt(voice1, check_tick);
@@ -271,12 +257,12 @@ bool BachRuleEvaluator::isCrossingTemporary(const CounterpointState& state,
   return false;  // Not resolved within 2 beats -- persistent.
 }
 
-bool BachRuleEvaluator::hasVoiceCrossing(const CounterpointState& state,
-                                         VoiceId voice1, VoiceId voice2,
-                                         Tick tick) const {
+bool BachRuleEvaluator::hasVoiceCrossing(const CounterpointState& state, VoiceId voice1,
+                                         VoiceId voice2, Tick tick) const {
   const NoteEvent* note1 = state.getNoteAt(voice1, tick);
   const NoteEvent* note2 = state.getNoteAt(voice2, tick);
-  if (!note1 || !note2) return false;
+  if (!note1 || !note2)
+    return false;
 
   // Check if voices are in the wrong order right now.
   bool crossed = false;
@@ -286,7 +272,8 @@ bool BachRuleEvaluator::hasVoiceCrossing(const CounterpointState& state,
     crossed = note1->pitch > note2->pitch;
   }
 
-  if (!crossed) return false;
+  if (!crossed)
+    return false;
 
   // Bach relaxation: temporary crossings (resolving within 2 beats) are allowed.
   if (isCrossingTemporary(state, voice1, voice2, tick)) {
@@ -300,12 +287,13 @@ bool BachRuleEvaluator::hasVoiceCrossing(const CounterpointState& state,
 // Full validation
 // ---------------------------------------------------------------------------
 
-std::vector<RuleViolation> BachRuleEvaluator::validate(
-    const CounterpointState& state, Tick from_tick, Tick to_tick) const {
+std::vector<RuleViolation> BachRuleEvaluator::validate(const CounterpointState& state,
+                                                       Tick from_tick, Tick to_tick) const {
   std::vector<RuleViolation> violations;
 
   const auto& voices = state.getActiveVoices();
-  if (voices.size() < 2) return violations;
+  if (voices.size() < 2)
+    return violations;
 
   // Check every beat position in the range.
   for (Tick tick = from_tick; tick < to_tick; tick += kTicksPerBeat) {
@@ -321,8 +309,7 @@ std::vector<RuleViolation> BachRuleEvaluator::validate(
         const NoteEvent* note_a = state.getNoteAt(va, tick);
         const NoteEvent* note_b = state.getNoteAt(vb, tick);
         if (note_a && note_b && is_strong_beat) {
-          int ivl = std::abs(static_cast<int>(note_a->pitch) -
-                             static_cast<int>(note_b->pitch));
+          int ivl = std::abs(static_cast<int>(note_a->pitch) - static_cast<int>(note_b->pitch));
           if (!isIntervalConsonant(ivl, is_strong_beat)) {
             RuleViolation viol;
             viol.voice1 = va;
@@ -342,9 +329,9 @@ std::vector<RuleViolation> BachRuleEvaluator::validate(
           viol.tick = tick;
           const NoteEvent* ca = state.getNoteAt(va, tick);
           const NoteEvent* cb = state.getNoteAt(vb, tick);
-          int ivl_mod = (ca && cb)
-              ? interval_util::compoundToSimple(absoluteInterval(ca->pitch, cb->pitch))
-              : 0;
+          int ivl_mod =
+              (ca && cb) ? interval_util::compoundToSimple(absoluteInterval(ca->pitch, cb->pitch))
+                         : 0;
           viol.rule = (ivl_mod == 7) ? "parallel_fifths" : "parallel_octaves";
           viol.severity = 1;
           violations.push_back(viol);
@@ -358,9 +345,9 @@ std::vector<RuleViolation> BachRuleEvaluator::validate(
           viol.tick = tick;
           const NoteEvent* ca = state.getNoteAt(va, tick);
           const NoteEvent* cb = state.getNoteAt(vb, tick);
-          int ivl_mod = (ca && cb)
-              ? interval_util::compoundToSimple(absoluteInterval(ca->pitch, cb->pitch))
-              : 0;
+          int ivl_mod =
+              (ca && cb) ? interval_util::compoundToSimple(absoluteInterval(ca->pitch, cb->pitch))
+                         : 0;
           viol.rule = (ivl_mod == 7) ? "hidden_fifths" : "hidden_octaves";
           viol.severity = 0;  // Warning, not error.
           violations.push_back(viol);

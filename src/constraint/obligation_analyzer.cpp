@@ -14,12 +14,12 @@ namespace {
 // Constants
 // ---------------------------------------------------------------------------
 
-constexpr int kLeapThresholdSemitones = 5;  // P4 or larger triggers LeapResolve
+constexpr int kLeapThresholdSemitones = 5;              // P4 or larger triggers LeapResolve
 constexpr Tick kLeapResolveWindow = kTicksPerBeat * 2;  // 2 beats to resolve
 constexpr Tick kLeadingToneDeadline = kTicksPerBeat * 2;
 constexpr Tick kSeventhDeadline = kTicksPerBeat * 2;
 constexpr Tick kCadenceStableWindow = kTicksPerBeat * 4;  // Last bar
-constexpr int kCadenceApproachNotes = 4;  // Last N notes for approach detection
+constexpr int kCadenceApproachNotes = 4;                  // Last N notes for approach detection
 
 // Harmonic impulse analysis window (in ticks).
 constexpr Tick kHarmonicWindowSize = kTicksPerBeat * 2;
@@ -32,7 +32,7 @@ constexpr int kSubdominantDegree = 3;
 // ---------------------------------------------------------------------------
 
 struct ScaleInfo {
-  int degree;        // 0-based scale degree (0=root, 6=7th), -1 if chromatic
+  int degree;  // 0-based scale degree (0=root, 6=7th), -1 if chromatic
   bool is_chromatic;
 };
 
@@ -43,8 +43,7 @@ ScaleInfo identifyScaleFunction(uint8_t pitch, Key key, bool is_minor) {
 
   if (!on_scale && is_minor) {
     // Try natural minor for non-harmonic-minor tones.
-    on_scale =
-        scale_util::pitchToScaleDegree(pitch, key, ScaleType::NaturalMinor, degree);
+    on_scale = scale_util::pitchToScaleDegree(pitch, key, ScaleType::NaturalMinor, degree);
   }
 
   return {degree, !on_scale};
@@ -68,10 +67,8 @@ bool isChordSeventh(uint8_t pitch, Key key, bool is_minor) {
 // P1.b3: LeadingTone / Seventh detection
 // ---------------------------------------------------------------------------
 
-void detectLeadingTones(const std::vector<NoteEvent>& notes, Key key,
-                        bool is_minor,
-                        std::vector<ObligationNode>& obligations,
-                        uint16_t& next_id) {
+void detectLeadingTones(const std::vector<NoteEvent>& notes, Key key, bool is_minor,
+                        std::vector<ObligationNode>& obligations, uint16_t& next_id) {
   for (size_t i = 0; i < notes.size(); ++i) {
     if (isLeadingTone(notes[i].pitch, key, is_minor)) {
       ObligationNode node;
@@ -88,10 +85,8 @@ void detectLeadingTones(const std::vector<NoteEvent>& notes, Key key,
   }
 }
 
-void detectSevenths(const std::vector<NoteEvent>& notes, Key key,
-                    bool is_minor,
-                    std::vector<ObligationNode>& obligations,
-                    uint16_t& next_id) {
+void detectSevenths(const std::vector<NoteEvent>& notes, Key key, bool is_minor,
+                    std::vector<ObligationNode>& obligations, uint16_t& next_id) {
   for (size_t i = 0; i < notes.size(); ++i) {
     if (isChordSeventh(notes[i].pitch, key, is_minor)) {
       ObligationNode node;
@@ -113,11 +108,9 @@ void detectSevenths(const std::vector<NoteEvent>& notes, Key key,
 // ---------------------------------------------------------------------------
 
 void detectLeapResolves(const std::vector<NoteEvent>& notes,
-                        std::vector<ObligationNode>& obligations,
-                        uint16_t& next_id) {
+                        std::vector<ObligationNode>& obligations, uint16_t& next_id) {
   for (size_t i = 1; i < notes.size(); ++i) {
-    int interval = static_cast<int>(notes[i].pitch) -
-                   static_cast<int>(notes[i - 1].pitch);
+    int interval = static_cast<int>(notes[i].pitch) - static_cast<int>(notes[i - 1].pitch);
     int abs_interval = std::abs(interval);
     if (abs_interval >= kLeapThresholdSemitones) {
       ObligationNode node;
@@ -139,13 +132,11 @@ void detectLeapResolves(const std::vector<NoteEvent>& notes,
 // ---------------------------------------------------------------------------
 
 void detectStrongBeatHarm(const std::vector<NoteEvent>& notes,
-                          std::vector<ObligationNode>& obligations,
-                          uint16_t& next_id) {
+                          std::vector<ObligationNode>& obligations, uint16_t& next_id) {
   for (size_t i = 0; i < notes.size(); ++i) {
     Tick beat_pos = notes[i].start_tick % kTicksPerBar;
     // Strong beats: beat 1 (0) and beat 3 (kTicksPerBeat * 2)
-    bool is_strong = (beat_pos == 0) ||
-                     (beat_pos == kTicksPerBeat * 2);
+    bool is_strong = (beat_pos == 0) || (beat_pos == kTicksPerBeat * 2);
     if (is_strong) {
       ObligationNode node;
       node.id = next_id++;
@@ -164,22 +155,18 @@ void detectStrongBeatHarm(const std::vector<NoteEvent>& notes,
 // P1.b6: CadenceStable detection
 // ---------------------------------------------------------------------------
 
-void detectCadenceStable(const std::vector<NoteEvent>& notes, Key key,
-                         bool is_minor,
-                         std::vector<ObligationNode>& obligations,
-                         uint16_t& next_id) {
-  if (notes.size() < 2) return;
+void detectCadenceStable(const std::vector<NoteEvent>& notes, Key key, bool is_minor,
+                         std::vector<ObligationNode>& obligations, uint16_t& next_id) {
+  if (notes.size() < 2)
+    return;
 
   Tick subject_end = notes.back().start_tick + notes.back().duration;
-  Tick cadence_start = (subject_end > kCadenceStableWindow)
-                           ? subject_end - kCadenceStableWindow
-                           : 0;
+  Tick cadence_start =
+      (subject_end > kCadenceStableWindow) ? subject_end - kCadenceStableWindow : 0;
 
   // Check if the last note is on a stable degree (root or 5th).
-  ScaleInfo last_info =
-      identifyScaleFunction(notes.back().pitch, key, is_minor);
-  bool ends_stable =
-      !last_info.is_chromatic && (last_info.degree == 0 || last_info.degree == 4);
+  ScaleInfo last_info = identifyScaleFunction(notes.back().pitch, key, is_minor);
+  bool ends_stable = !last_info.is_chromatic && (last_info.degree == 0 || last_info.degree == 4);
 
   if (!ends_stable) {
     ObligationNode node;
@@ -197,24 +184,21 @@ void detectCadenceStable(const std::vector<NoteEvent>& notes, Key key,
 // P1.b7: CadenceApproach detection
 // ---------------------------------------------------------------------------
 
-void detectCadenceApproach(const std::vector<NoteEvent>& notes, Key /*key*/,
-                           bool /*is_minor*/,
-                           std::vector<ObligationNode>& obligations,
-                           uint16_t& next_id) {
-  if (notes.size() < 3) return;
+void detectCadenceApproach(const std::vector<NoteEvent>& notes, Key /*key*/, bool /*is_minor*/,
+                           std::vector<ObligationNode>& obligations, uint16_t& next_id) {
+  if (notes.size() < 3)
+    return;
 
   Tick subject_end = notes.back().start_tick + notes.back().duration;
-  size_t approach_start =
-      (notes.size() > static_cast<size_t>(kCadenceApproachNotes))
-          ? notes.size() - kCadenceApproachNotes
-          : 0;
+  size_t approach_start = (notes.size() > static_cast<size_t>(kCadenceApproachNotes))
+                              ? notes.size() - kCadenceApproachNotes
+                              : 0;
 
   // Check if the final notes form a stepwise approach to tonic or dominant.
   bool has_stepwise_approach = false;
   for (size_t i = approach_start + 1; i < notes.size(); ++i) {
     int interval =
-        std::abs(static_cast<int>(notes[i].pitch) -
-                 static_cast<int>(notes[i - 1].pitch));
+        std::abs(static_cast<int>(notes[i].pitch) - static_cast<int>(notes[i - 1].pitch));
     if (interval <= 2) {  // Stepwise (semitone or whole tone)
       has_stepwise_approach = true;
     }
@@ -230,8 +214,7 @@ void detectCadenceApproach(const std::vector<NoteEvent>& notes, Key /*key*/,
   node.start_tick = notes[approach_start].start_tick;
   node.deadline = subject_end;
   // Default to Soft; caller upgrades to Structural for section-final cadences.
-  node.strength =
-      has_stepwise_approach ? ObligationStrength::Soft : ObligationStrength::Structural;
+  node.strength = has_stepwise_approach ? ObligationStrength::Soft : ObligationStrength::Structural;
   obligations.push_back(node);
 }
 
@@ -242,13 +225,13 @@ void detectCadenceApproach(const std::vector<NoteEvent>& notes, Key /*key*/,
 /// @brief Estimate implied chord degree from a pitch-class set.
 /// Returns 1-7 (scale degree) and a confidence strength.
 struct ImpliedHarmony {
-  uint8_t degree;   // 1-7
-  float strength;   // 0.0-1.0
+  uint8_t degree;  // 1-7
+  float strength;  // 0.0-1.0
 };
 
-ImpliedHarmony estimateImpliedDegree(const std::vector<uint8_t>& pitches,
-                                     Key key, bool is_minor) {
-  if (pitches.empty()) return {1, 0.0f};
+ImpliedHarmony estimateImpliedDegree(const std::vector<uint8_t>& pitches, Key key, bool is_minor) {
+  if (pitches.empty())
+    return {1, 0.0f};
 
   // Count pitch classes relative to tonic.
   uint8_t tonic_pc = static_cast<uint8_t>(key);
@@ -269,8 +252,7 @@ ImpliedHarmony estimateImpliedDegree(const std::vector<uint8_t>& pitches,
     int root = intervals[d];
     int third = intervals[(d + 2) % 7];
     int fifth = intervals[(d + 4) % 7];
-    int score = pc_counts[root % 12] * 3 + pc_counts[third % 12] * 2 +
-                pc_counts[fifth % 12] * 2;
+    int score = pc_counts[root % 12] * 3 + pc_counts[third % 12] * 2 + pc_counts[fifth % 12] * 2;
     if (score > best_score) {
       best_score = score;
       best_degree = d;
@@ -285,11 +267,10 @@ ImpliedHarmony estimateImpliedDegree(const std::vector<uint8_t>& pitches,
 /// @brief Map 1-7 scale degree to tension level (simplified from computeHarmonicTension).
 float degreeTensionLevel(uint8_t degree, bool is_minor) {
   // I=0.0, ii=0.3, iii=0.2, IV=0.3, V=0.6, vi=0.0, vii=0.9
-  static constexpr float kMajorTension[7] = {0.0f, 0.3f, 0.2f, 0.3f,
-                                              0.6f, 0.0f, 0.9f};
-  static constexpr float kMinorTension[7] = {0.0f, 0.3f, 0.2f, 0.3f,
-                                              0.6f, 0.1f, 0.9f};
-  if (degree < 1 || degree > 7) return 0.5f;
+  static constexpr float kMajorTension[7] = {0.0f, 0.3f, 0.2f, 0.3f, 0.6f, 0.0f, 0.9f};
+  static constexpr float kMinorTension[7] = {0.0f, 0.3f, 0.2f, 0.3f, 0.6f, 0.1f, 0.9f};
+  if (degree < 1 || degree > 7)
+    return 0.5f;
   return is_minor ? kMinorTension[degree - 1] : kMajorTension[degree - 1];
 }
 
@@ -307,10 +288,10 @@ int8_t directionalTendency(uint8_t degree) {
   }
 }
 
-void extractHarmonicImpulses(const std::vector<NoteEvent>& notes,
-                             Key key, bool is_minor,
+void extractHarmonicImpulses(const std::vector<NoteEvent>& notes, Key key, bool is_minor,
                              std::vector<HarmonicImpulse>& impulses) {
-  if (notes.empty()) return;
+  if (notes.empty())
+    return;
 
   Tick subject_start = notes.front().start_tick;
   Tick subject_end = notes.back().start_tick + notes.back().duration;
@@ -327,10 +308,12 @@ void extractHarmonicImpulses(const std::vector<NoteEvent>& notes,
       }
     }
 
-    if (window_pitches.empty()) continue;
+    if (window_pitches.empty())
+      continue;
 
     ImpliedHarmony implied = estimateImpliedDegree(window_pitches, key, is_minor);
-    if (implied.strength < 0.1f) continue;
+    if (implied.strength < 0.1f)
+      continue;
 
     HarmonicImpulse imp;
     imp.tick = window_start;
@@ -348,7 +331,8 @@ void extractHarmonicImpulses(const std::vector<NoteEvent>& notes,
 
 RegisterTrajectory extractRegisterTrajectory(const std::vector<NoteEvent>& notes) {
   RegisterTrajectory traj;
-  if (notes.empty()) return traj;
+  if (notes.empty())
+    return traj;
 
   traj.opening_pitch = notes.front().pitch;
   traj.closing_pitch = notes.back().pitch;
@@ -368,14 +352,12 @@ RegisterTrajectory extractRegisterTrajectory(const std::vector<NoteEvent>& notes
   Tick subject_end = notes.back().start_tick + notes.back().duration;
   Tick total_len = subject_end - subject_start;
   if (total_len > 0) {
-    traj.peak_position =
-        static_cast<float>(notes[peak_idx].start_tick - subject_start) /
-        static_cast<float>(total_len);
+    traj.peak_position = static_cast<float>(notes[peak_idx].start_tick - subject_start) /
+                         static_cast<float>(total_len);
   }
 
   // Overall direction: compare opening and closing pitch.
-  int diff = static_cast<int>(traj.closing_pitch) -
-             static_cast<int>(traj.opening_pitch);
+  int diff = static_cast<int>(traj.closing_pitch) - static_cast<int>(traj.opening_pitch);
   if (diff > 2)
     traj.overall_direction = +1;
   else if (diff < -2)
@@ -392,12 +374,14 @@ RegisterTrajectory extractRegisterTrajectory(const std::vector<NoteEvent>& notes
 
 AccentContour extractAccentContour(const std::vector<NoteEvent>& notes) {
   AccentContour contour;
-  if (notes.empty()) return contour;
+  if (notes.empty())
+    return contour;
 
   Tick subject_start = notes.front().start_tick;
   Tick subject_end = notes.back().start_tick + notes.back().duration;
   Tick total_len = subject_end - subject_start;
-  if (total_len == 0) return contour;
+  if (total_len == 0)
+    return contour;
 
   Tick third = total_len / 3;
   float front_accent = 0.0f, mid_accent = 0.0f, tail_accent = 0.0f;
@@ -408,10 +392,11 @@ AccentContour extractAccentContour(const std::vector<NoteEvent>& notes) {
     Tick beat_pos = n.start_tick % kTicksPerBeat;
 
     // Accent weight: strong beat + long duration.
-    bool on_strong_beat = (n.start_tick % kTicksPerBar == 0) ||
-                          (n.start_tick % kTicksPerBar == kTicksPerBeat * 2);
+    bool on_strong_beat =
+        (n.start_tick % kTicksPerBar == 0) || (n.start_tick % kTicksPerBar == kTicksPerBeat * 2);
     float weight = static_cast<float>(n.duration) / static_cast<float>(kTicksPerBeat);
-    if (on_strong_beat) weight *= 1.5f;
+    if (on_strong_beat)
+      weight *= 1.5f;
 
     // Syncopation: note starts on weak beat but is relatively long.
     if (!on_strong_beat && beat_pos != 0 && n.duration >= kTicksPerBeat) {
@@ -449,11 +434,11 @@ struct DensityMetrics {
   float synchronous_pressure;
 };
 
-DensityMetrics computeDensityMetrics(
-    const std::vector<ObligationNode>& obligations,
-    Tick subject_start, Tick subject_end) {
+DensityMetrics computeDensityMetrics(const std::vector<ObligationNode>& obligations,
+                                     Tick subject_start, Tick subject_end) {
   DensityMetrics metrics = {0.0f, 0.0f, 0.0f};
-  if (obligations.empty() || subject_end <= subject_start) return metrics;
+  if (obligations.empty() || subject_end <= subject_start)
+    return metrics;
 
   float weighted_sum = 0.0f;
   int ticks_with_debt = 0;
@@ -468,7 +453,8 @@ DensityMetrics computeDensityMetrics(
     bool has_gate = false;
 
     for (const auto& ob : obligations) {
-      if (!ob.is_active_at(t)) continue;
+      if (!ob.is_active_at(t))
+        continue;
       if (ob.is_debt()) {
         debt_count++;
       } else if (ob.type == ObligationType::StrongBeatHarm) {
@@ -482,8 +468,10 @@ DensityMetrics computeDensityMetrics(
     weighted_sum += static_cast<float>(debt_count);
     sample_count++;
 
-    if (debt_count > 0) ticks_with_debt++;
-    if (debt_count > 0 && has_gate) ticks_with_debt_and_gate++;
+    if (debt_count > 0)
+      ticks_with_debt++;
+    if (debt_count > 0 && has_gate)
+      ticks_with_debt_and_gate++;
   }
 
   if (sample_count > 0) {
@@ -491,8 +479,7 @@ DensityMetrics computeDensityMetrics(
   }
   if (ticks_with_debt > 0) {
     metrics.synchronous_pressure =
-        static_cast<float>(ticks_with_debt_and_gate) /
-        static_cast<float>(ticks_with_debt);
+        static_cast<float>(ticks_with_debt_and_gate) / static_cast<float>(ticks_with_debt);
   }
 
   return metrics;
@@ -514,7 +501,8 @@ constexpr Tick kStrettoSampleStep = kTicksPerBeat / 4;
 /// @brief Collect note onset ticks relative to subject start.
 /// Returns a sorted vector of ticks where notes begin (relative to tick 0).
 std::vector<Tick> collectRelativeOnsets(const std::vector<NoteEvent>& notes) {
-  if (notes.empty()) return {};
+  if (notes.empty())
+    return {};
   Tick base = notes.front().start_tick;
   std::vector<Tick> onsets;
   onsets.reserve(notes.size());
@@ -538,16 +526,18 @@ std::vector<Tick> collectRelativeOnsets(const std::vector<NoteEvent>& notes) {
 /// @param num_voices Number of simultaneous subject presentations.
 /// @param subject_length Total subject duration in ticks.
 /// @return Peak excess obligation density (0 = no excess, higher = more conflict).
-float computePeakObligation(const std::vector<ObligationNode>& obligations,
-                            Tick offset, int num_voices, Tick subject_length) {
-  if (obligations.empty()) return 0.0f;
+float computePeakObligation(const std::vector<ObligationNode>& obligations, Tick offset,
+                            int num_voices, Tick subject_length) {
+  if (obligations.empty())
+    return 0.0f;
 
   // Compute single-voice peak debt as baseline.
   float single_voice_peak = 0.0f;
   for (Tick sample = 0; sample < subject_length; sample += kStrettoSampleStep) {
     int debt_count = 0;
     for (const auto& obl : obligations) {
-      if (!obl.is_debt()) continue;
+      if (!obl.is_debt())
+        continue;
       if (sample >= obl.start_tick && sample <= obl.deadline) {
         debt_count++;
       }
@@ -572,7 +562,8 @@ float computePeakObligation(const std::vector<ObligationNode>& obligations,
       active_voices++;
 
       for (const auto& obl : obligations) {
-        if (!obl.is_debt()) continue;
+        if (!obl.is_debt())
+          continue;
         Tick shifted_start = obl.start_tick + voice_offset;
         Tick shifted_deadline = obl.deadline + voice_offset;
         if (sample >= shifted_start && sample <= shifted_deadline) {
@@ -581,13 +572,14 @@ float computePeakObligation(const std::vector<ObligationNode>& obligations,
       }
     }
 
-    if (active_voices <= 1) continue;
+    if (active_voices <= 1)
+      continue;
 
     // Excess = total debt beyond what each voice would independently carry.
     // If N voices each have their own obligations, the expected independent total
     // is active_voices * avg_per_voice. The excess is what is above single_voice_peak.
-    float excess = static_cast<float>(total_debt) -
-                   single_voice_peak * static_cast<float>(active_voices);
+    float excess =
+        static_cast<float>(total_debt) - single_voice_peak * static_cast<float>(active_voices);
     peak_excess = std::max(peak_excess, std::max(excess, 0.0f));
   }
 
@@ -605,9 +597,10 @@ float computePeakObligation(const std::vector<ObligationNode>& obligations,
 /// @param num_voices Number of simultaneous subject presentations.
 /// @param subject_length Total subject duration.
 /// @return Estimated vertical clash probability in [0.0, 1.0].
-float estimateVerticalClash(const std::vector<Tick>& onsets, Tick offset,
-                            int num_voices, Tick subject_length) {
-  if (onsets.empty() || num_voices < 2) return 0.0f;
+float estimateVerticalClash(const std::vector<Tick>& onsets, Tick offset, int num_voices,
+                            Tick subject_length) {
+  if (onsets.empty() || num_voices < 2)
+    return 0.0f;
 
   int strong_beat_collisions = 0;
   int total_strong_beats = 0;
@@ -616,7 +609,8 @@ float estimateVerticalClash(const std::vector<Tick>& onsets, Tick offset,
 
   // Scan all strong beat positions in the combined timeline.
   for (Tick tick = 0; tick < total_span; tick += kTicksPerBeat) {
-    if (!isStrongBeatInBar(tick)) continue;
+    if (!isStrongBeatInBar(tick))
+      continue;
     total_strong_beats++;
 
     // Count how many voices have an onset near this strong beat.
@@ -639,9 +633,9 @@ float estimateVerticalClash(const std::vector<Tick>& onsets, Tick offset,
     }
   }
 
-  if (total_strong_beats == 0) return 0.0f;
-  return static_cast<float>(strong_beat_collisions) /
-         static_cast<float>(total_strong_beats);
+  if (total_strong_beats == 0)
+    return 0.0f;
+  return static_cast<float>(strong_beat_collisions) / static_cast<float>(total_strong_beats);
 }
 
 /// @brief Compute rhythmic interference: ratio of ticks with multiple accent collisions.
@@ -654,9 +648,10 @@ float estimateVerticalClash(const std::vector<Tick>& onsets, Tick offset,
 /// @param num_voices Number of simultaneous subject presentations.
 /// @param subject_length Total subject duration.
 /// @return Rhythmic interference ratio in [0.0, 1.0].
-float computeRhythmicInterference(const std::vector<NoteEvent>& notes, Tick offset,
-                                   int num_voices, Tick subject_length) {
-  if (notes.empty() || num_voices < 2) return 0.0f;
+float computeRhythmicInterference(const std::vector<NoteEvent>& notes, Tick offset, int num_voices,
+                                  Tick subject_length) {
+  if (notes.empty() || num_voices < 2)
+    return 0.0f;
 
   Tick base = notes.front().start_tick;
   Tick total_span = subject_length + static_cast<Tick>(offset) * (num_voices - 1);
@@ -680,8 +675,7 @@ float computeRhythmicInterference(const std::vector<NoteEvent>& notes, Tick offs
         // Accent: onset on strong beat or long note.
         bool is_onset = (sample >= rel_onset && sample < rel_onset + kStrettoSampleStep);
         if (is_onset) {
-          bool is_accent = isStrongBeatInBar(rel_onset) ||
-                           note.duration >= kTicksPerBeat;
+          bool is_accent = isStrongBeatInBar(rel_onset) || note.duration >= kTicksPerBeat;
           if (is_accent) {
             accent_voices++;
             break;  // One accent per voice per sample is enough.
@@ -695,7 +689,8 @@ float computeRhythmicInterference(const std::vector<NoteEvent>& notes, Tick offs
     }
   }
 
-  if (total_samples == 0) return 0.0f;
+  if (total_samples == 0)
+    return 0.0f;
   return static_cast<float>(collision_samples) / static_cast<float>(total_samples);
 }
 
@@ -711,15 +706,16 @@ float computeRhythmicInterference(const std::vector<NoteEvent>& notes, Tick offs
 /// @param num_voices Number of simultaneous subject presentations.
 /// @param subject_length Total subject duration.
 /// @return Register overlap ratio in [0.0, 1.0].
-float computeRegisterOverlap(const RegisterTrajectory& register_arc, Tick offset,
-                              int num_voices, Tick subject_length) {
-  if (num_voices < 2 || subject_length == 0) return 0.0f;
+float computeRegisterOverlap(const RegisterTrajectory& register_arc, Tick offset, int num_voices,
+                             Tick subject_length) {
+  if (num_voices < 2 || subject_length == 0)
+    return 0.0f;
 
   // Pitch range of the subject.
   int range = static_cast<int>(register_arc.peak_pitch) -
-              static_cast<int>(std::min(register_arc.opening_pitch,
-                                        register_arc.closing_pitch));
-  if (range <= 0) range = 1;
+              static_cast<int>(std::min(register_arc.opening_pitch, register_arc.closing_pitch));
+  if (range <= 0)
+    range = 1;
 
   // Temporal overlap: what fraction of time do multiple voices overlap.
   // Voice i starts at offset*i and ends at offset*i + subject_length.
@@ -737,8 +733,8 @@ float computeRegisterOverlap(const RegisterTrajectory& register_arc, Tick offset
 
   // Combined: temporal overlap weighted by range narrowness.
   // More voices increase the overlap density.
-  float voice_factor = static_cast<float>(num_voices - 1) /
-                       static_cast<float>(kMaxStrettoVoices - 1);
+  float voice_factor =
+      static_cast<float>(num_voices - 1) / static_cast<float>(kMaxStrettoVoices - 1);
   return std::min(temporal_ratio * range_factor * (0.5f + 0.5f * voice_factor), 1.0f);
 }
 
@@ -752,21 +748,21 @@ float computeRegisterOverlap(const RegisterTrajectory& register_arc, Tick offset
 /// @param subject_length Total subject duration.
 /// @param num_voices Number of simultaneous presentations.
 /// @return Perceptual overlap score in [0.0, 1.0].
-float computePerceptualOverlap(const AccentContour& contour, Tick offset,
-                                Tick subject_length, int num_voices) {
-  if (num_voices < 2 || subject_length == 0) return 0.0f;
+float computePerceptualOverlap(const AccentContour& contour, Tick offset, Tick subject_length,
+                               int num_voices) {
+  if (num_voices < 2 || subject_length == 0)
+    return 0.0f;
 
   // Determine where the accent peak is (front, mid, or tail).
   // The peak third has the highest weight.
-  float peak_weight = std::max({contour.front_weight, contour.mid_weight,
-                                contour.tail_weight});
-  if (peak_weight < 0.01f) return 0.0f;
+  float peak_weight = std::max({contour.front_weight, contour.mid_weight, contour.tail_weight});
+  if (peak_weight < 0.01f)
+    return 0.0f;
 
   // Find which third contains the peak.
   Tick third = subject_length / 3;
   Tick peak_center = 0;
-  if (contour.front_weight >= contour.mid_weight &&
-      contour.front_weight >= contour.tail_weight) {
+  if (contour.front_weight >= contour.mid_weight && contour.front_weight >= contour.tail_weight) {
     peak_center = third / 2;  // Center of front third.
   } else if (contour.mid_weight >= contour.tail_weight) {
     peak_center = third + third / 2;  // Center of mid third.
@@ -808,7 +804,8 @@ float computePerceptualOverlap(const AccentContour& contour, Tick offset,
     }
   }
 
-  if (pair_count == 0) return 0.0f;
+  if (pair_count == 0)
+    return 0.0f;
   return std::min(collision_score / static_cast<float>(pair_count), 1.0f);
 }
 
@@ -823,20 +820,21 @@ float computePerceptualOverlap(const AccentContour& contour, Tick offset,
 /// @param num_voices Number of simultaneous subject presentations.
 /// @param subject_length Total subject duration.
 /// @return Cadence conflict score in [0.0, 1.0].
-float computeCadenceConflict(const std::vector<ObligationNode>& obligations,
-                              Tick offset, int num_voices, Tick subject_length) {
-  if (num_voices < 2) return 0.0f;
+float computeCadenceConflict(const std::vector<ObligationNode>& obligations, Tick offset,
+                             int num_voices, Tick subject_length) {
+  if (num_voices < 2)
+    return 0.0f;
 
   // Collect cadence obligations (CadenceStable and CadenceApproach).
   std::vector<const ObligationNode*> cadence_obs;
   for (const auto& obl : obligations) {
-    if (obl.type == ObligationType::CadenceStable ||
-        obl.type == ObligationType::CadenceApproach) {
+    if (obl.type == ObligationType::CadenceStable || obl.type == ObligationType::CadenceApproach) {
       cadence_obs.push_back(&obl);
     }
   }
 
-  if (cadence_obs.empty()) return 0.0f;
+  if (cadence_obs.empty())
+    return 0.0f;
 
   // For each pair of voices, check if cadence regions overlap with non-cadence
   // regions of the other voice (i.e., one voice needs cadential stability while
@@ -851,10 +849,8 @@ float computeCadenceConflict(const std::vector<ObligationNode>& obligations,
 
       for (const auto* cad_obl : cadence_obs) {
         // Voice A's cadence region.
-        Tick cad_start_a = cad_obl->start_tick +
-                           static_cast<Tick>(voice_a) * offset;
-        Tick cad_end_a = cad_obl->deadline +
-                         static_cast<Tick>(voice_a) * offset;
+        Tick cad_start_a = cad_obl->start_tick + static_cast<Tick>(voice_a) * offset;
+        Tick cad_end_a = cad_obl->deadline + static_cast<Tick>(voice_a) * offset;
 
         // Voice B's subject is active from voice_b*offset to voice_b*offset + subject_length.
         Tick voice_b_start = static_cast<Tick>(voice_b) * offset;
@@ -866,10 +862,8 @@ float computeCadenceConflict(const std::vector<ObligationNode>& obligations,
         }
 
         // Also check reverse: voice B's cadence vs voice A's development.
-        Tick cad_start_b = cad_obl->start_tick + shift +
-                           static_cast<Tick>(voice_a) * offset;
-        Tick cad_end_b = cad_obl->deadline + shift +
-                         static_cast<Tick>(voice_a) * offset;
+        Tick cad_start_b = cad_obl->start_tick + shift + static_cast<Tick>(voice_a) * offset;
+        Tick cad_end_b = cad_obl->deadline + shift + static_cast<Tick>(voice_a) * offset;
         Tick voice_a_start = static_cast<Tick>(voice_a) * offset;
         Tick voice_a_mid_end = voice_a_start + subject_length / 2;
 
@@ -882,10 +876,9 @@ float computeCadenceConflict(const std::vector<ObligationNode>& obligations,
 
   // Normalize: max possible conflicts = pair_count * cadence_obs.size() * 2.
   int max_conflicts = pair_count * static_cast<int>(cadence_obs.size()) * 2;
-  if (max_conflicts == 0) return 0.0f;
-  return std::min(static_cast<float>(conflict_count) /
-                      static_cast<float>(max_conflicts),
-                  1.0f);
+  if (max_conflicts == 0)
+    return 0.0f;
+  return std::min(static_cast<float>(conflict_count) / static_cast<float>(max_conflicts), 1.0f);
 }
 
 }  // anonymous namespace
@@ -894,10 +887,11 @@ float computeCadenceConflict(const std::vector<ObligationNode>& obligations,
 // Public API
 // ---------------------------------------------------------------------------
 
-SubjectConstraintProfile analyzeObligations(
-    const std::vector<NoteEvent>& notes, Key key, bool is_minor) {
+SubjectConstraintProfile analyzeObligations(const std::vector<NoteEvent>& notes, Key key,
+                                            bool is_minor) {
   SubjectConstraintProfile profile;
-  if (notes.empty()) return profile;
+  if (notes.empty())
+    return profile;
 
   uint16_t next_id = 0;
 
@@ -920,8 +914,7 @@ SubjectConstraintProfile analyzeObligations(
   // P1.c1: Density metrics
   Tick subject_start = notes.front().start_tick;
   Tick subject_end = notes.back().start_tick + notes.back().duration;
-  DensityMetrics dm =
-      computeDensityMetrics(profile.obligations, subject_start, subject_end);
+  DensityMetrics dm = computeDensityMetrics(profile.obligations, subject_start, subject_end);
   profile.peak_density = dm.peak_density;
   profile.avg_density = dm.avg_density;
   profile.synchronous_pressure = dm.synchronous_pressure;
@@ -952,14 +945,12 @@ SubjectConstraintProfile analyzeObligations(
   // Cadence gravity: ratio of CadenceStable/CadenceApproach obligations.
   int cadence_obs = 0;
   for (const auto& ob : profile.obligations) {
-    if (ob.type == ObligationType::CadenceStable ||
-        ob.type == ObligationType::CadenceApproach) {
+    if (ob.type == ObligationType::CadenceStable || ob.type == ObligationType::CadenceApproach) {
       cadence_obs++;
     }
   }
-  profile.cadence_gravity =
-      static_cast<float>(cadence_obs) /
-      std::max(static_cast<float>(profile.obligations.size()), 1.0f);
+  profile.cadence_gravity = static_cast<float>(cadence_obs) /
+                            std::max(static_cast<float>(profile.obligations.size()), 1.0f);
 
   // P1.e: Stretto feasibility matrix
   Tick subject_length = subject_end - subject_start;
@@ -968,13 +959,12 @@ SubjectConstraintProfile analyzeObligations(
   return profile;
 }
 
-void computeStrettoFeasibility(
-    SubjectConstraintProfile& profile,
-    const std::vector<NoteEvent>& notes,
-    Tick subject_length) {
+void computeStrettoFeasibility(SubjectConstraintProfile& profile,
+                               const std::vector<NoteEvent>& notes, Tick subject_length) {
   profile.stretto_matrix.clear();
 
-  if (notes.empty() || subject_length <= kTicksPerBeat) return;
+  if (notes.empty() || subject_length <= kTicksPerBeat)
+    return;
 
   std::vector<Tick> onsets = collectRelativeOnsets(notes);
 
@@ -984,31 +974,29 @@ void computeStrettoFeasibility(
   constexpr Tick kOffsetStep = kTicksPerBeat / 2;
 
   for (Tick offset = kTicksPerBeat; offset < subject_length; offset += kOffsetStep) {
-    for (int num_voices = kMinStrettoVoices; num_voices <= kMaxStrettoVoices;
-         ++num_voices) {
+    for (int num_voices = kMinStrettoVoices; num_voices <= kMaxStrettoVoices; ++num_voices) {
       StrettoFeasibilityEntry entry;
       entry.offset_ticks = static_cast<int>(offset);
       entry.num_voices = num_voices;
 
       // Peak obligation density across overlaid profiles.
-      entry.peak_obligation = computePeakObligation(
-          profile.obligations, offset, num_voices, subject_length);
+      entry.peak_obligation =
+          computePeakObligation(profile.obligations, offset, num_voices, subject_length);
 
       // Musical indices.
-      entry.vertical_clash = estimateVerticalClash(
-          onsets, offset, num_voices, subject_length);
+      entry.vertical_clash = estimateVerticalClash(onsets, offset, num_voices, subject_length);
 
-      entry.rhythmic_interference = computeRhythmicInterference(
-          notes, offset, num_voices, subject_length);
+      entry.rhythmic_interference =
+          computeRhythmicInterference(notes, offset, num_voices, subject_length);
 
-      entry.register_overlap = computeRegisterOverlap(
-          profile.register_arc, offset, num_voices, subject_length);
+      entry.register_overlap =
+          computeRegisterOverlap(profile.register_arc, offset, num_voices, subject_length);
 
-      entry.perceptual_overlap_score = computePerceptualOverlap(
-          profile.accent_contour, offset, subject_length, num_voices);
+      entry.perceptual_overlap_score =
+          computePerceptualOverlap(profile.accent_contour, offset, subject_length, num_voices);
 
-      entry.cadence_conflict_score = computeCadenceConflict(
-          profile.obligations, offset, num_voices, subject_length);
+      entry.cadence_conflict_score =
+          computeCadenceConflict(profile.obligations, offset, num_voices, subject_length);
 
       profile.stretto_matrix.push_back(entry);
     }

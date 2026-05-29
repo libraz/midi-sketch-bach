@@ -1,8 +1,8 @@
 // Tests for FugueEnergyCurve -- energy design values and rhythm density.
 
-#include "fugue/fugue_config.h"
-
 #include <gtest/gtest.h>
+
+#include "fugue/fugue_config.h"
 
 namespace bach {
 namespace {

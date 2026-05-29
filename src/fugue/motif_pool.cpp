@@ -17,7 +17,8 @@ namespace {
 /// @brief Normalize a motif so the first note starts at tick 0.
 /// @param notes Note events to normalize in place.
 void normalizeToTickZero(std::vector<NoteEvent>& notes) {
-  if (notes.empty()) return;
+  if (notes.empty())
+    return;
   Tick offset = notes[0].start_tick;
   for (auto& note : notes) {
     note.start_tick = (note.start_tick >= offset) ? note.start_tick - offset : 0;
@@ -38,7 +39,8 @@ std::vector<NoteEvent> extractHead(const std::vector<NoteEvent>& notes, size_t m
 /// @param num_notes Number of tail notes to extract.
 /// @return Last min(num_notes, notes.size()) notes.
 std::vector<NoteEvent> extractTail(const std::vector<NoteEvent>& notes, size_t num_notes) {
-  if (num_notes >= notes.size()) return notes;
+  if (num_notes >= notes.size())
+    return notes;
   return std::vector<NoteEvent>(notes.end() - static_cast<int>(num_notes), notes.end());
 }
 
@@ -75,7 +77,8 @@ float scoreWindow(const std::vector<NoteEvent>& notes, size_t start, size_t leng
       break;
     }
   }
-  if (has_leap) score += 0.3f;
+  if (has_leap)
+    score += 0.3f;
 
   // Proximity to opening.
   float proximity = (window_count > 0)
@@ -92,7 +95,8 @@ float scoreWindow(const std::vector<NoteEvent>& notes, size_t start, size_t leng
       break;
     }
   }
-  if (has_root) score += 0.2f;
+  if (has_root)
+    score += 0.2f;
 
   return score;
 }
@@ -121,9 +125,8 @@ std::vector<NoteEvent> findCharacteristicWindow(const std::vector<NoteEvent>& no
     }
   }
 
-  auto result = std::vector<NoteEvent>(
-      notes.begin() + static_cast<int>(best_start),
-      notes.begin() + static_cast<int>(best_start + motif_length));
+  auto result = std::vector<NoteEvent>(notes.begin() + static_cast<int>(best_start),
+                                       notes.begin() + static_cast<int>(best_start + motif_length));
   normalizeToTickZero(result);
   return result;
 }
@@ -135,7 +138,8 @@ void MotifPool::build(const std::vector<NoteEvent>& subject_notes,
                       SubjectCharacter /*character*/) {
   motifs_.clear();
 
-  if (subject_notes.empty()) return;
+  if (subject_notes.empty())
+    return;
 
   // --- 1. Subject head (first 4 notes) -- highest characteristic score ---
   constexpr size_t kHeadLength = 4;
@@ -192,11 +196,10 @@ void MotifPool::build(const std::vector<NoteEvent>& subject_notes,
     size_t frag_size = subject_notes.size() / kNumFragments;
     for (size_t frag_idx = 0; frag_idx < kNumFragments; ++frag_idx) {
       size_t start = frag_idx * frag_size;
-      size_t end = (frag_idx + 1 == kNumFragments) ? subject_notes.size()
-                                                    : (frag_idx + 1) * frag_size;
-      auto frag_notes = std::vector<NoteEvent>(
-          subject_notes.begin() + static_cast<int>(start),
-          subject_notes.begin() + static_cast<int>(end));
+      size_t end =
+          (frag_idx + 1 == kNumFragments) ? subject_notes.size() : (frag_idx + 1) * frag_size;
+      auto frag_notes = std::vector<NoteEvent>(subject_notes.begin() + static_cast<int>(start),
+                                               subject_notes.begin() + static_cast<int>(end));
       normalizeToTickZero(frag_notes);
       PooledMotif motif;
       motif.notes = std::move(frag_notes);
@@ -207,19 +210,20 @@ void MotifPool::build(const std::vector<NoteEvent>& subject_notes,
   }
 
   // --- 6. Sort by descending characteristic score ---
-  std::sort(motifs_.begin(), motifs_.end(),
-            [](const PooledMotif& lhs, const PooledMotif& rhs) {
-              return lhs.characteristic_score > rhs.characteristic_score;
-            });
+  std::sort(motifs_.begin(), motifs_.end(), [](const PooledMotif& lhs, const PooledMotif& rhs) {
+    return lhs.characteristic_score > rhs.characteristic_score;
+  });
 }
 
 const PooledMotif* MotifPool::best() const {
-  if (motifs_.empty()) return nullptr;
+  if (motifs_.empty())
+    return nullptr;
   return &motifs_[0];
 }
 
 const PooledMotif* MotifPool::getByRank(size_t rank) const {
-  if (rank >= motifs_.size()) return nullptr;
+  if (rank >= motifs_.size())
+    return nullptr;
   return &motifs_[rank];
 }
 
@@ -236,13 +240,15 @@ bool MotifPool::empty() const {
 }
 
 const PooledMotif* MotifPool::getForOp(MotifOp op) const {
-  if (motifs_.empty()) return nullptr;
+  if (motifs_.empty())
+    return nullptr;
 
   switch (op) {
     case MotifOp::Fragment: {
       // Find first fragment entry.
       for (const auto& motif : motifs_) {
-        if (motif.origin == "fragment") return &motif;
+        if (motif.origin == "fragment")
+          return &motif;
       }
       return best();  // Fallback.
     }

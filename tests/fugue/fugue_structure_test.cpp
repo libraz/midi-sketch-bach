@@ -40,8 +40,8 @@ TEST(FugueStructureTest, SectionTypeToStringCoda) {
 
 TEST(FugueStructureTest, FugueSectionDuration) {
   FugueSection section;
-  section.start_tick = kTicksPerBar;      // 1920
-  section.end_tick = kTicksPerBar * 5;    // 9600
+  section.start_tick = kTicksPerBar;                     // 1920
+  section.end_tick = kTicksPerBar * 5;                   // 9600
   EXPECT_EQ(section.durationTicks(), kTicksPerBar * 4);  // 7680
 }
 
@@ -60,12 +60,12 @@ TEST(FugueStructureTest, AddSectionValidOrder) {
   FugueStructure structure;
 
   // Establish -> Develop -> Resolve
-  EXPECT_TRUE(structure.addSection(
-      SectionType::Exposition, FuguePhase::Establish, 0, kTicksPerBar * 4, Key::C));
-  EXPECT_TRUE(structure.addSection(
-      SectionType::Episode, FuguePhase::Develop, kTicksPerBar * 4, kTicksPerBar * 8, Key::G));
-  EXPECT_TRUE(structure.addSection(
-      SectionType::Coda, FuguePhase::Resolve, kTicksPerBar * 8, kTicksPerBar * 12, Key::C));
+  EXPECT_TRUE(structure.addSection(SectionType::Exposition, FuguePhase::Establish, 0,
+                                   kTicksPerBar * 4, Key::C));
+  EXPECT_TRUE(structure.addSection(SectionType::Episode, FuguePhase::Develop, kTicksPerBar * 4,
+                                   kTicksPerBar * 8, Key::G));
+  EXPECT_TRUE(structure.addSection(SectionType::Coda, FuguePhase::Resolve, kTicksPerBar * 8,
+                                   kTicksPerBar * 12, Key::C));
 
   EXPECT_EQ(structure.sectionCount(), 3u);
 }
@@ -74,14 +74,14 @@ TEST(FugueStructureTest, AddSectionSamePhase) {
   FugueStructure structure;
 
   // Multiple sections in the same phase is allowed.
-  EXPECT_TRUE(structure.addSection(
-      SectionType::Exposition, FuguePhase::Establish, 0, kTicksPerBar * 4));
-  EXPECT_TRUE(structure.addSection(
-      SectionType::Episode, FuguePhase::Develop, kTicksPerBar * 4, kTicksPerBar * 8));
-  EXPECT_TRUE(structure.addSection(
-      SectionType::MiddleEntry, FuguePhase::Develop, kTicksPerBar * 8, kTicksPerBar * 12));
-  EXPECT_TRUE(structure.addSection(
-      SectionType::Episode, FuguePhase::Develop, kTicksPerBar * 12, kTicksPerBar * 16));
+  EXPECT_TRUE(
+      structure.addSection(SectionType::Exposition, FuguePhase::Establish, 0, kTicksPerBar * 4));
+  EXPECT_TRUE(structure.addSection(SectionType::Episode, FuguePhase::Develop, kTicksPerBar * 4,
+                                   kTicksPerBar * 8));
+  EXPECT_TRUE(structure.addSection(SectionType::MiddleEntry, FuguePhase::Develop, kTicksPerBar * 8,
+                                   kTicksPerBar * 12));
+  EXPECT_TRUE(structure.addSection(SectionType::Episode, FuguePhase::Develop, kTicksPerBar * 12,
+                                   kTicksPerBar * 16));
 
   EXPECT_EQ(structure.sectionCount(), 4u);
 }
@@ -93,12 +93,10 @@ TEST(FugueStructureTest, AddSectionSamePhase) {
 TEST(FugueStructureTest, AddSectionInvalidOrderResolveToEstablish) {
   FugueStructure structure;
 
-  EXPECT_TRUE(structure.addSection(
-      SectionType::Coda, FuguePhase::Resolve, 0, kTicksPerBar * 4));
+  EXPECT_TRUE(structure.addSection(SectionType::Coda, FuguePhase::Resolve, 0, kTicksPerBar * 4));
   // Trying to go backward: Resolve -> Establish should fail.
-  EXPECT_FALSE(structure.addSection(
-      SectionType::Exposition, FuguePhase::Establish,
-      kTicksPerBar * 4, kTicksPerBar * 8));
+  EXPECT_FALSE(structure.addSection(SectionType::Exposition, FuguePhase::Establish,
+                                    kTicksPerBar * 4, kTicksPerBar * 8));
 
   EXPECT_EQ(structure.sectionCount(), 1u);
 }
@@ -106,14 +104,13 @@ TEST(FugueStructureTest, AddSectionInvalidOrderResolveToEstablish) {
 TEST(FugueStructureTest, AddSectionInvalidOrderDevelopToEstablish) {
   FugueStructure structure;
 
-  EXPECT_TRUE(structure.addSection(
-      SectionType::Exposition, FuguePhase::Establish, 0, kTicksPerBar * 4));
-  EXPECT_TRUE(structure.addSection(
-      SectionType::Episode, FuguePhase::Develop, kTicksPerBar * 4, kTicksPerBar * 8));
+  EXPECT_TRUE(
+      structure.addSection(SectionType::Exposition, FuguePhase::Establish, 0, kTicksPerBar * 4));
+  EXPECT_TRUE(structure.addSection(SectionType::Episode, FuguePhase::Develop, kTicksPerBar * 4,
+                                   kTicksPerBar * 8));
   // Trying to go backward: Develop -> Establish should fail.
-  EXPECT_FALSE(structure.addSection(
-      SectionType::MiddleEntry, FuguePhase::Establish,
-      kTicksPerBar * 8, kTicksPerBar * 12));
+  EXPECT_FALSE(structure.addSection(SectionType::MiddleEntry, FuguePhase::Establish,
+                                    kTicksPerBar * 8, kTicksPerBar * 12));
 
   EXPECT_EQ(structure.sectionCount(), 2u);
 }
@@ -121,8 +118,7 @@ TEST(FugueStructureTest, AddSectionInvalidOrderDevelopToEstablish) {
 TEST(FugueStructureTest, AddSectionFirstSectionAlwaysSucceeds) {
   // Any phase for first section should be accepted.
   FugueStructure structure;
-  EXPECT_TRUE(structure.addSection(
-      SectionType::Stretto, FuguePhase::Develop, 0, kTicksPerBar * 4));
+  EXPECT_TRUE(structure.addSection(SectionType::Stretto, FuguePhase::Develop, 0, kTicksPerBar * 4));
   EXPECT_EQ(structure.sectionCount(), 1u);
 }
 
@@ -144,24 +140,18 @@ TEST(FugueStructureTest, ValidateEmptyStructure) {
 
 TEST(FugueStructureTest, ValidateValidStructure) {
   FugueStructure structure;
-  structure.addSection(
-      SectionType::Exposition, FuguePhase::Establish, 0, kTicksPerBar * 4, Key::C);
-  structure.addSection(
-      SectionType::Episode, FuguePhase::Develop,
-      kTicksPerBar * 4, kTicksPerBar * 8, Key::G);
-  structure.addSection(
-      SectionType::MiddleEntry, FuguePhase::Develop,
-      kTicksPerBar * 8, kTicksPerBar * 12, Key::D);
-  structure.addSection(
-      SectionType::Stretto, FuguePhase::Resolve,
-      kTicksPerBar * 12, kTicksPerBar * 16, Key::C);
-  structure.addSection(
-      SectionType::Coda, FuguePhase::Resolve,
-      kTicksPerBar * 16, kTicksPerBar * 20, Key::C);
+  structure.addSection(SectionType::Exposition, FuguePhase::Establish, 0, kTicksPerBar * 4, Key::C);
+  structure.addSection(SectionType::Episode, FuguePhase::Develop, kTicksPerBar * 4,
+                       kTicksPerBar * 8, Key::G);
+  structure.addSection(SectionType::MiddleEntry, FuguePhase::Develop, kTicksPerBar * 8,
+                       kTicksPerBar * 12, Key::D);
+  structure.addSection(SectionType::Stretto, FuguePhase::Resolve, kTicksPerBar * 12,
+                       kTicksPerBar * 16, Key::C);
+  structure.addSection(SectionType::Coda, FuguePhase::Resolve, kTicksPerBar * 16, kTicksPerBar * 20,
+                       Key::C);
 
   auto violations = structure.validate();
-  EXPECT_TRUE(violations.empty())
-      << "Expected no violations, got: " << violations.front();
+  EXPECT_TRUE(violations.empty()) << "Expected no violations, got: " << violations.front();
 }
 
 // ---------------------------------------------------------------------------
@@ -171,8 +161,7 @@ TEST(FugueStructureTest, ValidateValidStructure) {
 TEST(FugueStructureTest, ValidateMissingExposition) {
   FugueStructure structure;
   // Start with Episode instead of Exposition.
-  structure.addSection(
-      SectionType::Episode, FuguePhase::Establish, 0, kTicksPerBar * 4);
+  structure.addSection(SectionType::Episode, FuguePhase::Establish, 0, kTicksPerBar * 4);
 
   auto violations = structure.validate();
   EXPECT_FALSE(violations.empty());
@@ -191,8 +180,7 @@ TEST(FugueStructureTest, ValidateMissingExposition) {
 TEST(FugueStructureTest, ValidateFirstSectionWrongPhase) {
   FugueStructure structure;
   // Exposition but in wrong phase.
-  structure.addSection(
-      SectionType::Exposition, FuguePhase::Develop, 0, kTicksPerBar * 4);
+  structure.addSection(SectionType::Exposition, FuguePhase::Develop, 0, kTicksPerBar * 4);
 
   auto violations = structure.validate();
   EXPECT_FALSE(violations.empty());
@@ -211,11 +199,9 @@ TEST(FugueStructureTest, ValidateFirstSectionWrongPhase) {
 TEST(FugueStructureTest, ValidateOverlappingSections) {
   FugueStructure structure;
   // Sections overlap in tick space.
-  structure.addSection(
-      SectionType::Exposition, FuguePhase::Establish, 0, kTicksPerBar * 6);
-  structure.addSection(
-      SectionType::Episode, FuguePhase::Develop,
-      kTicksPerBar * 4, kTicksPerBar * 10);  // Overlaps previous
+  structure.addSection(SectionType::Exposition, FuguePhase::Establish, 0, kTicksPerBar * 6);
+  structure.addSection(SectionType::Episode, FuguePhase::Develop, kTicksPerBar * 4,
+                       kTicksPerBar * 10);  // Overlaps previous
 
   auto violations = structure.validate();
   EXPECT_FALSE(violations.empty());
@@ -236,17 +222,13 @@ TEST(FugueStructureTest, ValidateOverlappingSections) {
 
 TEST(FugueStructureTest, GetSectionsByPhase) {
   FugueStructure structure;
-  structure.addSection(
-      SectionType::Exposition, FuguePhase::Establish, 0, kTicksPerBar * 4);
-  structure.addSection(
-      SectionType::Episode, FuguePhase::Develop,
-      kTicksPerBar * 4, kTicksPerBar * 8);
-  structure.addSection(
-      SectionType::MiddleEntry, FuguePhase::Develop,
-      kTicksPerBar * 8, kTicksPerBar * 12);
-  structure.addSection(
-      SectionType::Coda, FuguePhase::Resolve,
-      kTicksPerBar * 12, kTicksPerBar * 16);
+  structure.addSection(SectionType::Exposition, FuguePhase::Establish, 0, kTicksPerBar * 4);
+  structure.addSection(SectionType::Episode, FuguePhase::Develop, kTicksPerBar * 4,
+                       kTicksPerBar * 8);
+  structure.addSection(SectionType::MiddleEntry, FuguePhase::Develop, kTicksPerBar * 8,
+                       kTicksPerBar * 12);
+  structure.addSection(SectionType::Coda, FuguePhase::Resolve, kTicksPerBar * 12,
+                       kTicksPerBar * 16);
 
   auto establish = structure.getSectionsByPhase(FuguePhase::Establish);
   EXPECT_EQ(establish.size(), 1u);
@@ -264,8 +246,7 @@ TEST(FugueStructureTest, GetSectionsByPhase) {
 
 TEST(FugueStructureTest, GetSectionsByPhaseEmpty) {
   FugueStructure structure;
-  structure.addSection(
-      SectionType::Exposition, FuguePhase::Establish, 0, kTicksPerBar * 4);
+  structure.addSection(SectionType::Exposition, FuguePhase::Establish, 0, kTicksPerBar * 4);
 
   auto develop = structure.getSectionsByPhase(FuguePhase::Develop);
   EXPECT_TRUE(develop.empty());
@@ -277,17 +258,13 @@ TEST(FugueStructureTest, GetSectionsByPhaseEmpty) {
 
 TEST(FugueStructureTest, GetSectionsByType) {
   FugueStructure structure;
-  structure.addSection(
-      SectionType::Exposition, FuguePhase::Establish, 0, kTicksPerBar * 4);
-  structure.addSection(
-      SectionType::Episode, FuguePhase::Develop,
-      kTicksPerBar * 4, kTicksPerBar * 8);
-  structure.addSection(
-      SectionType::MiddleEntry, FuguePhase::Develop,
-      kTicksPerBar * 8, kTicksPerBar * 12);
-  structure.addSection(
-      SectionType::Episode, FuguePhase::Develop,
-      kTicksPerBar * 12, kTicksPerBar * 16);
+  structure.addSection(SectionType::Exposition, FuguePhase::Establish, 0, kTicksPerBar * 4);
+  structure.addSection(SectionType::Episode, FuguePhase::Develop, kTicksPerBar * 4,
+                       kTicksPerBar * 8);
+  structure.addSection(SectionType::MiddleEntry, FuguePhase::Develop, kTicksPerBar * 8,
+                       kTicksPerBar * 12);
+  structure.addSection(SectionType::Episode, FuguePhase::Develop, kTicksPerBar * 12,
+                       kTicksPerBar * 16);
 
   auto episodes = structure.getSectionsByType(SectionType::Episode);
   EXPECT_EQ(episodes.size(), 2u);
@@ -312,11 +289,9 @@ TEST(FugueStructureTest, TotalDurationEmpty) {
 
 TEST(FugueStructureTest, TotalDuration) {
   FugueStructure structure;
-  structure.addSection(
-      SectionType::Exposition, FuguePhase::Establish, 0, kTicksPerBar * 4);
-  structure.addSection(
-      SectionType::Episode, FuguePhase::Develop,
-      kTicksPerBar * 4, kTicksPerBar * 10);
+  structure.addSection(SectionType::Exposition, FuguePhase::Establish, 0, kTicksPerBar * 4);
+  structure.addSection(SectionType::Episode, FuguePhase::Develop, kTicksPerBar * 4,
+                       kTicksPerBar * 10);
 
   EXPECT_EQ(structure.totalDurationTicks(), kTicksPerBar * 10);
 }
@@ -332,13 +307,11 @@ TEST(FugueStructureTest, SectionCountEmpty) {
 
 TEST(FugueStructureTest, SectionCountAfterAdds) {
   FugueStructure structure;
-  structure.addSection(
-      SectionType::Exposition, FuguePhase::Establish, 0, kTicksPerBar * 4);
+  structure.addSection(SectionType::Exposition, FuguePhase::Establish, 0, kTicksPerBar * 4);
   EXPECT_EQ(structure.sectionCount(), 1u);
 
-  structure.addSection(
-      SectionType::Episode, FuguePhase::Develop,
-      kTicksPerBar * 4, kTicksPerBar * 8);
+  structure.addSection(SectionType::Episode, FuguePhase::Develop, kTicksPerBar * 4,
+                       kTicksPerBar * 8);
   EXPECT_EQ(structure.sectionCount(), 2u);
 }
 
@@ -348,12 +321,9 @@ TEST(FugueStructureTest, SectionCountAfterAdds) {
 
 TEST(FugueStructureTest, ToJsonContainsExpectedFields) {
   FugueStructure structure;
-  structure.addSection(
-      SectionType::Exposition, FuguePhase::Establish,
-      0, kTicksPerBar * 4, Key::C);
-  structure.addSection(
-      SectionType::Episode, FuguePhase::Develop,
-      kTicksPerBar * 4, kTicksPerBar * 8, Key::G);
+  structure.addSection(SectionType::Exposition, FuguePhase::Establish, 0, kTicksPerBar * 4, Key::C);
+  structure.addSection(SectionType::Episode, FuguePhase::Develop, kTicksPerBar * 4,
+                       kTicksPerBar * 8, Key::G);
 
   std::string json = structure.toJson();
 
@@ -403,17 +373,14 @@ TEST(FugueStructureTest, FugueSectionDefaults) {
 
 TEST(FugueStructureTest, AddSectionPreservesKey) {
   FugueStructure structure;
-  structure.addSection(
-      SectionType::Exposition, FuguePhase::Establish,
-      0, kTicksPerBar * 4, Key::G);
+  structure.addSection(SectionType::Exposition, FuguePhase::Establish, 0, kTicksPerBar * 4, Key::G);
 
   EXPECT_EQ(structure.sections[0].key, Key::G);
 }
 
 TEST(FugueStructureTest, AddSectionDefaultKey) {
   FugueStructure structure;
-  structure.addSection(
-      SectionType::Exposition, FuguePhase::Establish, 0, kTicksPerBar * 4);
+  structure.addSection(SectionType::Exposition, FuguePhase::Establish, 0, kTicksPerBar * 4);
 
   // Default key parameter is Key::C.
   EXPECT_EQ(structure.sections[0].key, Key::C);

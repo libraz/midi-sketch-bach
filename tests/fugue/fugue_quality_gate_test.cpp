@@ -58,6 +58,28 @@ TEST(FugueQualityGateTest, PostValidationRetainsNotes) {
   EXPECT_GT(total, 20u) << "Too few notes after validation";
 }
 
+TEST(FugueQualityGateTest, RepeatedNoteRepairRunsInPipeline) {
+  FugueConfig config;
+  config.key = Key::C;
+  config.num_voices = 4;
+  config.character = SubjectCharacter::Severe;
+  config.seed = 42;
+
+  FugueResult result = generateFugue(config);
+  ASSERT_TRUE(result.success);
+
+  size_t repaired = 0;
+  for (const auto& track : result.tracks) {
+    for (const auto& note : track.notes) {
+      if ((note.modified_by & static_cast<uint8_t>(NoteModifiedBy::RepeatedNoteRep)) != 0) {
+        ++repaired;
+      }
+    }
+  }
+
+  EXPECT_GT(repaired, 0u) << "Fugue finalize should repair flexible repeated-note runs";
+}
+
 TEST(FugueQualityGateTest, BatchDissonanceDensity) {
   for (uint32_t seed = 500; seed < 510; ++seed) {
     FugueConfig config;
@@ -71,8 +93,7 @@ TEST(FugueQualityGateTest, BatchDissonanceDensity) {
 
     // Dissonance per beat should be well below the original 2.07.
     EXPECT_LT(result.quality.dissonance_per_beat, 1.5f)
-        << "High dissonance for seed " << seed
-        << ": " << result.quality.dissonance_per_beat;
+        << "High dissonance for seed " << seed << ": " << result.quality.dissonance_per_beat;
   }
 }
 

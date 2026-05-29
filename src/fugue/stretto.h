@@ -24,7 +24,7 @@ class HarmonicTimeline;
 /// within the stretto section. Entries overlap with each other,
 /// creating the dense imitative texture characteristic of stretto.
 struct StrettoEntry {
-  VoiceId voice_id = 0;         ///< Which voice presents this entry.
+  VoiceId voice_id = 0;          ///< Which voice presents this entry.
   Tick entry_tick = 0;           ///< When this voice enters.
   std::vector<NoteEvent> notes;  ///< Notes for this entry.
 };
@@ -95,11 +95,9 @@ std::vector<Tick> findValidStrettoIntervals(const std::vector<NoteEvent>& subjec
 /// @param seed Random seed for deterministic generation.
 /// @param character Subject character controlling odd-entry transform selection.
 /// @return Generated Stretto.
-Stretto generateStretto(const Subject& subject, Key home_key, Tick start_tick,
-                        uint8_t num_voices, uint32_t seed,
-                        SubjectCharacter character = SubjectCharacter::Severe,
-                        const uint8_t* voice_last_pitches = nullptr,
-                        Tick estimated_duration = 0);
+Stretto generateStretto(const Subject& subject, Key home_key, Tick start_tick, uint8_t num_voices,
+                        uint32_t seed, SubjectCharacter character = SubjectCharacter::Severe,
+                        const uint8_t* voice_last_pitches = nullptr, Tick estimated_duration = 0);
 
 /// @brief Generate a stretto section with counterpoint validation.
 ///
@@ -119,14 +117,11 @@ Stretto generateStretto(const Subject& subject, Key home_key, Tick start_tick,
 /// @param cp_resolver Collision resolver.
 /// @param timeline Harmonic timeline for chord-tone context.
 /// @return Generated Stretto with validated notes.
-Stretto generateStretto(const Subject& subject, Key home_key, Tick start_tick,
-                        uint8_t num_voices, uint32_t seed,
-                        SubjectCharacter character,
-                        CounterpointState& cp_state, IRuleEvaluator& cp_rules,
-                        CollisionResolver& cp_resolver,
+Stretto generateStretto(const Subject& subject, Key home_key, Tick start_tick, uint8_t num_voices,
+                        uint32_t seed, SubjectCharacter character, CounterpointState& cp_state,
+                        IRuleEvaluator& cp_rules, CollisionResolver& cp_resolver,
                         const HarmonicTimeline& timeline,
-                        const uint8_t* voice_last_pitches = nullptr,
-                        Tick estimated_duration = 0);
+                        const uint8_t* voice_last_pitches = nullptr, Tick estimated_duration = 0);
 
 /// @brief Create a stretto fragment from the subject head.
 ///
@@ -137,8 +132,7 @@ Stretto generateStretto(const Subject& subject, Key home_key, Tick start_tick,
 /// @param subject The complete fugue subject.
 /// @param fragment_ratio Fraction of the subject to use (0.0-1.0, default 0.5).
 /// @return Vector of notes representing the subject fragment.
-std::vector<NoteEvent> createStrettoFragment(const Subject& subject,
-                                              float fragment_ratio = 0.5f);
+std::vector<NoteEvent> createStrettoFragment(const Subject& subject, float fragment_ratio = 0.5f);
 
 }  // namespace bach
 

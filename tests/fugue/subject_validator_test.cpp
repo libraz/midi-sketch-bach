@@ -11,8 +11,7 @@ namespace bach {
 namespace {
 
 // Helper to build a simple subject from pitch and duration arrays.
-Subject makeSubject(const std::vector<uint8_t>& pitches,
-                    const std::vector<Tick>& durations,
+Subject makeSubject(const std::vector<uint8_t>& pitches, const std::vector<Tick>& durations,
                     Key key = Key::C) {
   Subject subject;
   subject.key = key;
@@ -27,8 +26,7 @@ Subject makeSubject(const std::vector<uint8_t>& pitches,
 }
 
 // Simpler helper: all quarter notes.
-Subject makeSubjectQuarters(const std::vector<uint8_t>& pitches,
-                            Key key = Key::C) {
+Subject makeSubjectQuarters(const std::vector<uint8_t>& pitches, Key key = Key::C) {
   std::vector<Tick> durations(pitches.size(), kTicksPerBeat);
   return makeSubject(pitches, durations, key);
 }
@@ -51,8 +49,8 @@ TEST_F(SubjectValidatorTest, IntervalVarietyMonotone) {
   // All same pitch: unison only.
   Subject subject = makeSubjectQuarters({60, 60, 60, 60});
   float score = validator.scoreIntervalVariety(subject);
-  EXPECT_GT(score, 0.0f);   // One unique interval (unison).
-  EXPECT_LT(score, 0.5f);   // But very low variety.
+  EXPECT_GT(score, 0.0f);  // One unique interval (unison).
+  EXPECT_LT(score, 0.5f);  // But very low variety.
 }
 
 TEST_F(SubjectValidatorTest, IntervalVarietyDiverse) {
@@ -76,8 +74,7 @@ TEST_F(SubjectValidatorTest, RhythmDiversityAllSameDuration) {
 TEST_F(SubjectValidatorTest, RhythmDiversityMixed) {
   // Mixed durations: quarter, eighth, half, quarter.
   Subject subject = makeSubject(
-      {60, 62, 64, 62},
-      {kTicksPerBeat, kTicksPerBeat / 2, kTicksPerBeat * 2, kTicksPerBeat});
+      {60, 62, 64, 62}, {kTicksPerBeat, kTicksPerBeat / 2, kTicksPerBeat * 2, kTicksPerBeat});
   float score = validator.scoreRhythmDiversity(subject);
   EXPECT_GT(score, 0.5f);
 }
@@ -86,8 +83,7 @@ TEST_F(SubjectValidatorTest, RhythmDiversityPerfect) {
   // 4 notes, all different durations: max_count = 1, ratio = 25%.
   Subject subject = makeSubject(
       {60, 62, 64, 65},
-      {kTicksPerBeat, kTicksPerBeat / 2, kTicksPerBeat * 2,
-       kTicksPerBeat + kTicksPerBeat / 2});
+      {kTicksPerBeat, kTicksPerBeat / 2, kTicksPerBeat * 2, kTicksPerBeat + kTicksPerBeat / 2});
   float score = validator.scoreRhythmDiversity(subject);
   EXPECT_FLOAT_EQ(score, 1.0f);
 }
@@ -241,22 +237,16 @@ TEST_F(SubjectValidatorTest, GoodSubjectIsAcceptable) {
   // starts/ends tonic, good range, all diatonic).
   Subject subject = makeSubject(
       {60, 62, 64, 65, 67, 65, 64, 62, 60},
-      {kTicksPerBeat, kTicksPerBeat / 2, kTicksPerBeat,
-       kTicksPerBeat / 2, kTicksPerBeat * 2,
-       kTicksPerBeat, kTicksPerBeat / 2, kTicksPerBeat,
-       kTicksPerBeat});
+      {kTicksPerBeat, kTicksPerBeat / 2, kTicksPerBeat, kTicksPerBeat / 2, kTicksPerBeat * 2,
+       kTicksPerBeat, kTicksPerBeat / 2, kTicksPerBeat, kTicksPerBeat});
   subject.key = Key::C;
 
   SubjectScore score = validator.evaluate(subject);
   EXPECT_TRUE(score.isAcceptable())
-      << "Composite = " << score.composite()
-      << " (interval=" << score.interval_variety
-      << " rhythm=" << score.rhythm_diversity
-      << " contour=" << score.contour_balance
-      << " range=" << score.range_score
-      << " step=" << score.step_motion_ratio
-      << " tonal=" << score.tonal_stability
-      << " answer=" << score.answer_compatibility << ")";
+      << "Composite = " << score.composite() << " (interval=" << score.interval_variety
+      << " rhythm=" << score.rhythm_diversity << " contour=" << score.contour_balance
+      << " range=" << score.range_score << " step=" << score.step_motion_ratio
+      << " tonal=" << score.tonal_stability << " answer=" << score.answer_compatibility << ")";
 }
 
 // ---------------------------------------------------------------------------
@@ -288,11 +278,11 @@ TEST_F(SubjectValidatorTest, GeneratedSevereSubjectScoresReasonably) {
   for (uint32_t seed = 1; seed <= 10; ++seed) {
     Subject subject = gen.generate(config, seed);
     SubjectScore score = validator.evaluate(subject);
-    if (score.isAcceptable()) acceptable_count++;
+    if (score.isAcceptable())
+      acceptable_count++;
   }
   // At least some should pass.
-  EXPECT_GT(acceptable_count, 0)
-      << "No Severe subjects were acceptable across 10 seeds";
+  EXPECT_GT(acceptable_count, 0) << "No Severe subjects were acceptable across 10 seeds";
 }
 
 }  // namespace

@@ -51,10 +51,8 @@ static bool isNearCadence(Tick tick, const std::vector<Tick>& cadence_ticks) {
 /// @param voice_id Voice holding the suspension.
 /// @param num_voices Total number of voices (bass = num_voices - 1).
 /// @return True if this is a recognized suspension type for the given voice.
-static bool isSuspensionTypeValid(int reduced_ivl, VoiceId voice_id,
-                                  size_t num_voices) {
-  bool is_upper_voice = (num_voices <= 1) ||
-                        (voice_id < static_cast<VoiceId>(num_voices - 1));
+static bool isSuspensionTypeValid(int reduced_ivl, VoiceId voice_id, size_t num_voices) {
+  bool is_upper_voice = (num_voices <= 1) || (voice_id < static_cast<VoiceId>(num_voices - 1));
 
   // 4-3 suspension: P4 (5 semitones) -- upper voices only.
   if (reduced_ivl == interval::kPerfect4th) {
@@ -94,13 +92,12 @@ static bool isSuspensionTypeValid(int reduced_ivl, VoiceId voice_id,
 /// @param other_voice Voice causing the dissonant interval.
 /// @param other_pitch Pitch of the other voice at tick.
 /// @return True if the dissonance is a properly justified suspension.
-static bool isJustifiedSuspension(const CounterpointState& state,
-                                  const IRuleEvaluator& rules,
-                                  VoiceId voice_id, uint8_t pitch,
-                                  Tick tick,
-                                  VoiceId other_voice, uint8_t other_pitch) {
+static bool isJustifiedSuspension(const CounterpointState& state, const IRuleEvaluator& rules,
+                                  VoiceId voice_id, uint8_t pitch, Tick tick, VoiceId other_voice,
+                                  uint8_t other_pitch) {
   // Must be on a beat boundary to be a suspension.
-  if (tick < kTicksPerBeat) return false;
+  if (tick < kTicksPerBeat)
+    return false;
 
   // Check the dissonant interval type and voice validity.
   int ivl = absoluteInterval(pitch, other_pitch);
@@ -133,7 +130,8 @@ static bool isJustifiedSuspension(const CounterpointState& state,
   // Standard resolution: downward by step (1-2 semitones).
   for (int step = 1; step <= 2; ++step) {
     int resolution_pitch = static_cast<int>(pitch) - step;
-    if (resolution_pitch < 0) continue;
+    if (resolution_pitch < 0)
+      continue;
 
     int res_ivl = std::abs(resolution_pitch - static_cast<int>(other_pitch));
     // Resolution checked as weak-beat consonance (resolutions typically land
@@ -157,25 +155,27 @@ static bool isJustifiedSuspension(const CounterpointState& state,
 /// @param pitch Candidate pitch.
 /// @param tick Current tick.
 /// @return Penalty value (0.0 = no cross-relation, 0.3 = cross-relation detected).
-static float crossRelationPenalty(const CounterpointState& state,
-                                  VoiceId voice_id, uint8_t pitch, Tick tick) {
+static float crossRelationPenalty(const CounterpointState& state, VoiceId voice_id, uint8_t pitch,
+                                  Tick tick) {
   int pitch_class = getPitchClass(pitch);
   const auto& voices = state.getActiveVoices();
 
   for (VoiceId other : voices) {
-    if (other == voice_id) continue;
+    if (other == voice_id)
+      continue;
 
     // Check the most recent note in the other voice within 1 beat.
     const NoteEvent* other_note = state.getNoteAt(other, tick);
     if (!other_note) {
       // Also check the previous note if no note at tick.
       other_note = state.getLastNote(other);
-      if (!other_note) continue;
+      if (!other_note)
+        continue;
       // Must be within 1 beat proximity.
-      Tick dist = (tick >= other_note->start_tick)
-                      ? (tick - other_note->start_tick)
-                      : (other_note->start_tick - tick);
-      if (dist > kTicksPerBeat) continue;
+      Tick dist = (tick >= other_note->start_tick) ? (tick - other_note->start_tick)
+                                                   : (other_note->start_tick - tick);
+      if (dist > kTicksPerBeat)
+        continue;
     }
 
     int other_pc = getPitchClass(other_note->pitch);
@@ -185,9 +185,12 @@ static float crossRelationPenalty(const CounterpointState& state,
       // Exclude natural half-steps E/F (4,5) and B/C (11,0).
       int low_pc = (pitch_class < other_pc) ? pitch_class : other_pc;
       int high_pc = (pitch_class < other_pc) ? other_pc : pitch_class;
-      if (low_pc == 4 && high_pc == 5) continue;   // E/F natural
-      if (low_pc == 0 && high_pc == 11) continue;   // B/C natural (wrapped)
-      if (low_pc == 0 && high_pc == 1) continue;    // B#/C = enharmonic, skip
+      if (low_pc == 4 && high_pc == 5)
+        continue;  // E/F natural
+      if (low_pc == 0 && high_pc == 11)
+        continue;  // B/C natural (wrapped)
+      if (low_pc == 0 && high_pc == 1)
+        continue;  // B#/C = enharmonic, skip
       return 1.0f;
     }
   }
@@ -198,13 +201,15 @@ static float crossRelationPenalty(const CounterpointState& state,
 /// Only penalizes ascending tritone (prev->cand = +6 semitones). Descending
 /// tritone is common in Bach bass lines and countersubjects. Compound
 /// intervals (abs > 12) are exempt.
-static float tritonePenalty(const CounterpointState& state,
-                            VoiceId voice_id, uint8_t pitch) {
+static float tritonePenalty(const CounterpointState& state, VoiceId voice_id, uint8_t pitch) {
   const NoteEvent* prev = state.getLastNote(voice_id);
-  if (!prev) return 0.0f;
+  if (!prev)
+    return 0.0f;
   int leap = static_cast<int>(pitch) - static_cast<int>(prev->pitch);
-  if (std::abs(leap) > 12) return 0.0f;  // compound exempt
-  if (leap == 6) return 1.0f;            // ascending tritone only
+  if (std::abs(leap) > 12)
+    return 0.0f;  // compound exempt
+  if (leap == 6)
+    return 1.0f;  // ascending tritone only
   return 0.0f;
 }
 
@@ -222,12 +227,12 @@ static float tritonePenalty(const CounterpointState& state,
 /// @param tick Current tick position.
 /// @return Number of consecutive parallel imperfect consonances (0 if none).
 static int countConsecutiveParallelImperfect(const CounterpointState& state,
-                                             const IRuleEvaluator& rules,
-                                             VoiceId voice_id, VoiceId other,
-                                             Tick tick) {
+                                             const IRuleEvaluator& rules, VoiceId voice_id,
+                                             VoiceId other, Tick tick) {
   const auto& self_notes = state.getVoiceNotes(voice_id);
   const auto& other_notes = state.getVoiceNotes(other);
-  if (self_notes.size() < 2 || other_notes.size() < 2) return 0;
+  if (self_notes.size() < 2 || other_notes.size() < 2)
+    return 0;
 
   int count = 0;
   // Walk backward through recent notes to count parallel imperfect runs.
@@ -240,7 +245,8 @@ static int countConsecutiveParallelImperfect(const CounterpointState& state,
   while (other_iter != other_notes.rend() && other_iter->start_tick >= tick) {
     ++other_iter;
   }
-  if (other_iter == other_notes.rend()) return 0;
+  if (other_iter == other_notes.rend())
+    return 0;
 
   // Start from the latest self note.
   uint8_t curr_self = self_iter->pitch;
@@ -250,7 +256,8 @@ static int countConsecutiveParallelImperfect(const CounterpointState& state,
   for (int step = 0; step < kMaxLookback; ++step) {
     ++self_iter;
     ++other_iter;
-    if (self_iter == self_notes.rend() || other_iter == other_notes.rend()) break;
+    if (self_iter == self_notes.rend() || other_iter == other_notes.rend())
+      break;
 
     uint8_t prev_self = self_iter->pitch;
     uint8_t prev_other = other_iter->pitch;
@@ -259,12 +266,13 @@ static int countConsecutiveParallelImperfect(const CounterpointState& state,
     int curr_ivl = absoluteInterval(curr_self, curr_other);
     int curr_reduced = interval_util::compoundToSimple(curr_ivl);
     IntervalQuality quality = classifyInterval(curr_reduced);
-    if (quality != IntervalQuality::ImperfectConsonance) break;
+    if (quality != IntervalQuality::ImperfectConsonance)
+      break;
 
     // Check if motion is parallel.
-    MotionType motion = rules.classifyMotion(prev_self, curr_self,
-                                              prev_other, curr_other);
-    if (motion != MotionType::Parallel) break;
+    MotionType motion = rules.classifyMotion(prev_self, curr_self, prev_other, curr_other);
+    if (motion != MotionType::Parallel)
+      break;
 
     ++count;
     curr_self = prev_self;
@@ -297,12 +305,11 @@ static int countConsecutiveParallelImperfect(const CounterpointState& state,
 /// @param cand_pitch Candidate MIDI pitch.
 /// @param tick Current tick position.
 /// @return Aggregate penalty (negative = bonus, positive = penalty).
-static float voiceMotionPenalty(const CounterpointState& state,
-                                const IRuleEvaluator& rules,
-                                VoiceId voice_id, uint8_t cand_pitch,
-                                Tick tick) {
+static float voiceMotionPenalty(const CounterpointState& state, const IRuleEvaluator& rules,
+                                VoiceId voice_id, uint8_t cand_pitch, Tick tick) {
   const NoteEvent* prev_self = state.getLastNote(voice_id);
-  if (!prev_self) return 0.0f;
+  if (!prev_self)
+    return 0.0f;
 
   // Separate parallel-perfect penalties from general motion scoring.
   // Parallel P5/P8 is Bach's strictest rule and must not be diluted
@@ -315,10 +322,12 @@ static float voiceMotionPenalty(const CounterpointState& state,
   const auto& voices = state.getActiveVoices();
 
   for (VoiceId other : voices) {
-    if (other == voice_id) continue;
+    if (other == voice_id)
+      continue;
 
     const NoteEvent* other_note = state.getNoteAt(other, tick);
-    if (!other_note) continue;
+    if (!other_note)
+      continue;
 
     // Find previous note for the other voice before tick.
     const NoteEvent* prev_other = nullptr;
@@ -329,13 +338,14 @@ static float voiceMotionPenalty(const CounterpointState& state,
         break;
       }
     }
-    if (!prev_other) continue;
+    if (!prev_other)
+      continue;
 
     ++voice_pair_count;
 
     // Classify the motion this candidate would create.
-    MotionType motion = rules.classifyMotion(
-        prev_self->pitch, cand_pitch, prev_other->pitch, other_note->pitch);
+    MotionType motion =
+        rules.classifyMotion(prev_self->pitch, cand_pitch, prev_other->pitch, other_note->pitch);
 
     // Check the resulting interval.
     int curr_ivl = absoluteInterval(cand_pitch, other_note->pitch);
@@ -368,8 +378,7 @@ static float voiceMotionPenalty(const CounterpointState& state,
           if (quality == IntervalQuality::ImperfectConsonance) {
             // Parallel 3rds/6ths: legitimate Bach technique.
             // Check run length to penalize extended parallel runs.
-            int run = countConsecutiveParallelImperfect(
-                state, rules, voice_id, other, tick);
+            int run = countConsecutiveParallelImperfect(state, rules, voice_id, other, tick);
             if (run < 4) {
               // Short run (up to 4 beats including this note): acceptable,
               // small bonus for harmonic flow.
@@ -418,18 +427,20 @@ static float voiceMotionPenalty(const CounterpointState& state,
 // Free-standing parallel / P4-bass checker
 // ---------------------------------------------------------------------------
 
-ParallelCheckResult checkParallelsAndP4Bass(
-    const CounterpointState& state, const IRuleEvaluator& rules,
-    VoiceId voice_id, uint8_t pitch, Tick tick, uint8_t num_voices) {
+ParallelCheckResult checkParallelsAndP4Bass(const CounterpointState& state,
+                                            const IRuleEvaluator& rules, VoiceId voice_id,
+                                            uint8_t pitch, Tick tick, uint8_t num_voices) {
   ParallelCheckResult result;
   const auto& voices = state.getActiveVoices();
   VoiceId bass_voice = (num_voices > 0) ? (num_voices - 1) : 0;
 
   for (VoiceId other : voices) {
-    if (other == voice_id) continue;
+    if (other == voice_id)
+      continue;
 
     const NoteEvent* other_note = state.getNoteAt(other, tick);
-    if (!other_note) continue;
+    if (!other_note)
+      continue;
 
     int ivl = absoluteInterval(pitch, other_note->pitch);
 
@@ -462,9 +473,8 @@ ParallelCheckResult checkParallelsAndP4Bass(
       bool curr_perfect = interval_util::isPerfectConsonance(curr_reduced);
 
       if (prev_perfect && curr_perfect && prev_reduced == curr_reduced) {
-        MotionType motion = rules.classifyMotion(
-            prev_self->pitch, pitch,
-            prev_other->pitch, other_note->pitch);
+        MotionType motion =
+            rules.classifyMotion(prev_self->pitch, pitch, prev_other->pitch, other_note->pitch);
         if (motion == MotionType::Parallel || motion == MotionType::Similar) {
           result.has_parallel_perfect = true;
           result.conflicting_voice = other;
@@ -492,12 +502,13 @@ ParallelCheckResult checkParallelsAndP4Bass(
 /// @param voice_id Voice to check.
 /// @param tick Current tick.
 /// @return True if this is a voice reentry moment.
-static bool isVoiceReentry(const CounterpointState& state,
-                           VoiceId voice_id, Tick tick) {
+static bool isVoiceReentry(const CounterpointState& state, VoiceId voice_id, Tick tick) {
   const NoteEvent* last = state.getLastNote(voice_id);
-  if (!last) return true;  // First entry ever.
+  if (!last)
+    return true;  // First entry ever.
   // Check that current tick is on a beat boundary.
-  if (tick % kTicksPerBeat != 0) return false;
+  if (tick % kTicksPerBeat != 0)
+    return false;
   // Eighth-note rests and shorter are normal articulation.
   // Quarter-rest or longer signals a voice gap where melodic context is lost.
   Tick last_end = last->start_tick + last->duration;
@@ -508,19 +519,19 @@ static bool isVoiceReentry(const CounterpointState& state,
 // Safety check
 // ---------------------------------------------------------------------------
 
-bool CollisionResolver::isSafeToPlace(const CounterpointState& state,
-                                      const IRuleEvaluator& rules,
-                                      VoiceId voice_id, uint8_t pitch,
-                                      Tick tick, Tick /*duration*/,
+bool CollisionResolver::isSafeToPlace(const CounterpointState& state, const IRuleEvaluator& rules,
+                                      VoiceId voice_id, uint8_t pitch, Tick tick, Tick /*duration*/,
                                       std::optional<uint8_t> next_pitch,
                                       int adjacent_spacing_limit) const {
   const auto& voices = state.getActiveVoices();
 
   for (VoiceId other : voices) {
-    if (other == voice_id) continue;
+    if (other == voice_id)
+      continue;
 
     const NoteEvent* other_note = state.getNoteAt(other, tick);
-    if (!other_note) continue;
+    if (!other_note)
+      continue;
 
     // Tiered consonance check by metric position.
     // Bar start (beat 1): reject all dissonances unless justified as suspension.
@@ -534,8 +545,8 @@ bool CollisionResolver::isSafeToPlace(const CounterpointState& state,
       // suspension (preparation + downward step resolution). Suspensions
       // (4-3, 7-6, 9-8) are a critical part of Bach's counterpoint style
       // and must be allowed when all three conditions are met.
-      bool is_valid_suspension = isJustifiedSuspension(
-          state, rules, voice_id, pitch, tick, other, other_note->pitch);
+      bool is_valid_suspension =
+          isJustifiedSuspension(state, rules, voice_id, pitch, tick, other, other_note->pitch);
 
       if (is_bar_start) {
         // Beat 1: reject all dissonances unless justified as suspension.
@@ -580,15 +591,17 @@ bool CollisionResolver::isSafeToPlace(const CounterpointState& state,
               const NoteEvent* prev_self = state.getLastNote(voice_id);
               if (prev_self) {
                 SpeciesRules species_rules(SpeciesType::Fifth);
-                bool is_passing = species_rules.isValidPassingTone(
-                    prev_self->pitch, pitch, *next_pitch);
-                bool is_neighbor = species_rules.isValidNeighborTone(
-                    prev_self->pitch, pitch, *next_pitch);
-                if (is_passing || is_neighbor) p4_bass_allowed = true;
+                bool is_passing =
+                    species_rules.isValidPassingTone(prev_self->pitch, pitch, *next_pitch);
+                bool is_neighbor =
+                    species_rules.isValidNeighborTone(prev_self->pitch, pitch, *next_pitch);
+                if (is_passing || is_neighbor)
+                  p4_bass_allowed = true;
               }
             }
           }
-          if (!p4_bass_allowed) return false;
+          if (!p4_bass_allowed)
+            return false;
         }
       }
     }
@@ -600,8 +613,7 @@ bool CollisionResolver::isSafeToPlace(const CounterpointState& state,
 
     // Find previous note for the other voice before tick.
     const auto& other_notes = state.getVoiceNotes(other);
-    for (auto iter = other_notes.rbegin(); iter != other_notes.rend();
-         ++iter) {
+    for (auto iter = other_notes.rbegin(); iter != other_notes.rend(); ++iter) {
       if (iter->start_tick < tick) {
         prev_other = &(*iter);
         break;
@@ -620,11 +632,9 @@ bool CollisionResolver::isSafeToPlace(const CounterpointState& state,
       bool curr_perfect = interval_util::isPerfectConsonance(curr_reduced);
 
       if (prev_perfect && curr_perfect && prev_reduced == curr_reduced) {
-        MotionType motion = rules.classifyMotion(
-            prev_self->pitch, pitch,
-            prev_other->pitch, other_note->pitch);
-        if (motion == MotionType::Parallel ||
-            motion == MotionType::Similar) {
+        MotionType motion =
+            rules.classifyMotion(prev_self->pitch, pitch, prev_other->pitch, other_note->pitch);
+        if (motion == MotionType::Parallel || motion == MotionType::Similar) {
           return false;
         }
       }
@@ -634,13 +644,10 @@ bool CollisionResolver::isSafeToPlace(const CounterpointState& state,
       // Inner voice pairs or weak beat: keep original threshold (>7st both).
       if (curr_perfect) {
         int dir_a = static_cast<int>(pitch) - static_cast<int>(prev_self->pitch);
-        int dir_b = static_cast<int>(other_note->pitch) -
-                    static_cast<int>(prev_other->pitch);
+        int dir_b = static_cast<int>(other_note->pitch) - static_cast<int>(prev_other->pitch);
         if (dir_a != 0 && dir_b != 0 && (dir_a > 0) == (dir_b > 0)) {
-          bool a_outer =
-              voices.empty() || voice_id == voices.front() || voice_id == voices.back();
-          bool b_outer =
-              voices.empty() || other == voices.front() || other == voices.back();
+          bool a_outer = voices.empty() || voice_id == voices.front() || voice_id == voices.back();
+          bool b_outer = voices.empty() || other == voices.front() || other == voices.back();
           bool landing_on_strong = isStrongBeatInBar(tick);
 
           if (a_outer && b_outer && landing_on_strong) {
@@ -666,9 +673,11 @@ bool CollisionResolver::isSafeToPlace(const CounterpointState& state,
   const NoteEvent* melodic_prev = state.getLastNote(voice_id);
   if (melodic_prev) {
     int leap = absoluteInterval(pitch, melodic_prev->pitch);
-    if (leap > 12) return false;  // > octave forbidden
+    if (leap > 12)
+      return false;  // > octave forbidden
     int leap_class = leap % 12;
-    if (leap_class == 6) return false;  // tritone forbidden
+    if (leap_class == 6)
+      return false;  // tritone forbidden
   }
 
   // Check voice crossing.
@@ -683,15 +692,18 @@ bool CollisionResolver::isSafeToPlace(const CounterpointState& state,
     bool is_strong_beat = (tick % kTicksPerBeat == 0);
     if (is_strong_beat) {
       for (VoiceId other : voices) {
-        if (other == voice_id) continue;
+        if (other == voice_id)
+          continue;
         const NoteEvent* other_note = state.getNoteAt(other, tick);
-        if (!other_note) continue;
+        if (!other_note)
+          continue;
         // Only check adjacent voices (voice IDs differ by 1).
-        int voice_dist = std::abs(static_cast<int>(voice_id) -
-                                  static_cast<int>(other));
-        if (voice_dist != 1) continue;
+        int voice_dist = std::abs(static_cast<int>(voice_id) - static_cast<int>(other));
+        if (voice_dist != 1)
+          continue;
         int pitch_dist = absoluteInterval(pitch, other_note->pitch);
-        if (pitch_dist > 0 && pitch_dist < 3) return false;  // < minor 3rd
+        if (pitch_dist > 0 && pitch_dist < 3)
+          return false;  // < minor 3rd
       }
     }
   }
@@ -704,16 +716,20 @@ bool CollisionResolver::isSafeToPlace(const CounterpointState& state,
   {
     VoiceId bass_voice = voices.empty() ? 0 : voices.back();
     for (VoiceId other : voices) {
-      if (other == voice_id) continue;
-      int voice_dist = std::abs(static_cast<int>(voice_id) -
-                                static_cast<int>(other));
-      if (voice_dist != 1) continue;
+      if (other == voice_id)
+        continue;
+      int voice_dist = std::abs(static_cast<int>(voice_id) - static_cast<int>(other));
+      if (voice_dist != 1)
+        continue;
       // Skip pedal-manual pairs.
-      if (voice_id == bass_voice || other == bass_voice) continue;
+      if (voice_id == bass_voice || other == bass_voice)
+        continue;
       const NoteEvent* adj_note = state.getNoteAt(other, tick);
-      if (!adj_note) continue;
+      if (!adj_note)
+        continue;
       int pitch_dist = absoluteInterval(pitch, adj_note->pitch);
-      if (pitch_dist > adjacent_spacing_limit) return false;
+      if (pitch_dist > adjacent_spacing_limit)
+        return false;
     }
   }
 
@@ -728,7 +744,8 @@ bool CollisionResolver::isSafeToPlace(const CounterpointState& state,
     } else {
       distance = pitch - range->high;
     }
-    if (distance > range_tolerance_) return false;
+    if (distance > range_tolerance_)
+      return false;
   }
 
   return true;
@@ -738,16 +755,16 @@ bool CollisionResolver::isSafeToPlace(const CounterpointState& state,
 // Strategy cascade
 // ---------------------------------------------------------------------------
 
-PlacementResult CollisionResolver::tryStrategy(
-    const CounterpointState& state, const IRuleEvaluator& rules,
-    VoiceId voice_id, uint8_t desired_pitch, Tick tick, Tick duration,
-    const std::string& strategy, std::optional<uint8_t> next_pitch) const {
+PlacementResult CollisionResolver::tryStrategy(const CounterpointState& state,
+                                               const IRuleEvaluator& rules, VoiceId voice_id,
+                                               uint8_t desired_pitch, Tick tick, Tick duration,
+                                               const std::string& strategy,
+                                               std::optional<uint8_t> next_pitch) const {
   PlacementResult result;
   result.strategy = strategy;
 
   if (strategy == "original") {
-    if (isSafeToPlace(state, rules, voice_id, desired_pitch, tick,
-                      duration, next_pitch)) {
+    if (isSafeToPlace(state, rules, voice_id, desired_pitch, tick, duration, next_pitch)) {
       // Soft cross-relation gate: if the original pitch creates a chromatic
       // conflict with another voice, skip it so that chord_tone / step_shift
       // can find a non-conflicting alternative.
@@ -769,8 +786,7 @@ PlacementResult CollisionResolver::tryStrategy(
     // are preferred over perfect consonances (5th, octave) to encourage richer
     // harmonic writing and reduce parallel-perfect risk.
     auto evaluateCandidate = [&](uint8_t cand_pitch, float base_penalty) {
-      if (!isSafeToPlace(state, rules, voice_id, cand_pitch, tick,
-                         duration, next_pitch))
+      if (!isSafeToPlace(state, rules, voice_id, cand_pitch, tick, duration, next_pitch))
         return;
 
       float penalty = base_penalty;
@@ -786,9 +802,11 @@ PlacementResult CollisionResolver::tryStrategy(
       // This bonus/penalty applies to vertical intervals with all sounding voices.
       bool strong_beat = isStrongBeatInBar(tick);
       for (VoiceId other_v : state.getActiveVoices()) {
-        if (other_v == voice_id) continue;
+        if (other_v == voice_id)
+          continue;
         const NoteEvent* sounding = state.getNoteAt(other_v, tick);
-        if (!sounding) continue;
+        if (!sounding)
+          continue;
         int sounding_ivl = absoluteInterval(cand_pitch, sounding->pitch);
         int reduced_ivl = interval_util::compoundToSimple(sounding_ivl);
         IntervalQuality quality = classifyInterval(reduced_ivl);
@@ -811,14 +829,20 @@ PlacementResult CollisionResolver::tryStrategy(
 
       // Voice spacing penalty: penalize wide gaps between adjacent manual voices.
       for (VoiceId adj_v = 0; adj_v < state.voiceCount(); ++adj_v) {
-        if (adj_v == voice_id) continue;
+        if (adj_v == voice_id)
+          continue;
         int vdist = std::abs(static_cast<int>(voice_id) - static_cast<int>(adj_v));
-        if (vdist != 1) continue;
-        if (adj_v == state.voiceCount() - 1 && state.voiceCount() >= 3) continue;
-        if (voice_id == state.voiceCount() - 1 && state.voiceCount() >= 3) continue;
+        if (vdist != 1)
+          continue;
+        if (adj_v == state.voiceCount() - 1 && state.voiceCount() >= 3)
+          continue;
+        if (voice_id == state.voiceCount() - 1 && state.voiceCount() >= 3)
+          continue;
         const NoteEvent* adj_note = state.getNoteAt(adj_v, tick);
-        if (!adj_note) adj_note = state.getLastNote(adj_v);
-        if (!adj_note) continue;
+        if (!adj_note)
+          adj_note = state.getLastNote(adj_v);
+        if (!adj_note)
+          continue;
         int spacing = absoluteInterval(cand_pitch, adj_note->pitch);
         if (spacing > 12) {
           penalty += static_cast<float>(spacing - 12) / 7.0f * 0.3f;
@@ -832,7 +856,8 @@ PlacementResult CollisionResolver::tryStrategy(
       penalty += voiceMotionPenalty(state, rules, voice_id, cand_pitch, tick);
 
       // Clamp penalty floor to prevent negative penalties from over-accumulating.
-      if (penalty < 0.0f) penalty = 0.0f;
+      if (penalty < 0.0f)
+        penalty = 0.0f;
 
       if (penalty < best_penalty) {
         best_penalty = penalty;
@@ -848,9 +873,9 @@ PlacementResult CollisionResolver::tryStrategy(
 
       // 1. Try nearestChordTone(desired_pitch) -- minimal displacement.
       uint8_t nearest = nearestChordTone(desired_pitch, event);
-      float dist_penalty = static_cast<float>(
-          std::abs(static_cast<int>(nearest) - static_cast<int>(desired_pitch))) /
-          12.0f * 0.3f;
+      float dist_penalty = static_cast<float>(std::abs(static_cast<int>(nearest) -
+                                                       static_cast<int>(desired_pitch))) /
+                           12.0f * 0.3f;
       evaluateCandidate(nearest, dist_penalty);
 
       // 2. Try all chord tones across octaves (closest to desired_pitch first).
@@ -878,15 +903,15 @@ PlacementResult CollisionResolver::tryStrategy(
       for (int pc : chord_pcs) {
         for (int oct_offset = -24; oct_offset <= 24; oct_offset += 12) {
           int cand = base_octave + pc + oct_offset;
-          if (cand < 0 || cand > 127) continue;
+          if (cand < 0 || cand > 127)
+            continue;
           int dist = std::abs(cand - static_cast<int>(desired_pitch));
           candidates.push_back({static_cast<uint8_t>(cand), dist});
         }
       }
-      std::sort(candidates.begin(), candidates.end(),
-                [](const ChordCandidate& a, const ChordCandidate& b) {
-                  return a.distance < b.distance;
-                });
+      std::sort(
+          candidates.begin(), candidates.end(),
+          [](const ChordCandidate& a, const ChordCandidate& b) { return a.distance < b.distance; });
 
       for (const auto& c : candidates) {
         float penalty = static_cast<float>(c.distance) / 12.0f * 0.3f;
@@ -898,14 +923,16 @@ PlacementResult CollisionResolver::tryStrategy(
         for (int delta = 1; delta <= 7; ++delta) {
           for (int sign = -1; sign <= 1; sign += 2) {
             int cand = static_cast<int>(desired_pitch) + delta * sign;
-            if (cand < 0 || cand > 127) continue;
+            if (cand < 0 || cand > 127)
+              continue;
             if (isDiatonicInKey(cand, event.key, event.is_minor) &&
                 !isChordTone(static_cast<uint8_t>(cand), event)) {
               float penalty = static_cast<float>(delta) / 12.0f * 0.3f + 0.1f;
               evaluateCandidate(static_cast<uint8_t>(cand), penalty);
             }
           }
-          if (result.accepted) break;
+          if (result.accepted)
+            break;
         }
       }
     }
@@ -919,11 +946,13 @@ PlacementResult CollisionResolver::tryStrategy(
       std::vector<int> consonant_offsets;
       for (int ivl : kImperfectFirst) {
         consonant_offsets.push_back(ivl);
-        if (ivl != 0) consonant_offsets.push_back(-ivl);
+        if (ivl != 0)
+          consonant_offsets.push_back(-ivl);
       }
       for (int offset : consonant_offsets) {
         int candidate = static_cast<int>(desired_pitch) + offset;
-        if (candidate < 0 || candidate > 127) continue;
+        if (candidate < 0 || candidate > 127)
+          continue;
         auto cand_pitch = static_cast<uint8_t>(candidate);
         float penalty = static_cast<float>(std::abs(offset)) / 12.0f * 0.3f;
         evaluateCandidate(cand_pitch, penalty);
@@ -957,11 +986,11 @@ PlacementResult CollisionResolver::tryStrategy(
       // Try both directions: up and down.
       for (int sign = -1; sign <= 1; sign += 2) {
         int candidate = static_cast<int>(desired_pitch) + delta * sign;
-        if (candidate < 0 || candidate > 127) continue;
+        if (candidate < 0 || candidate > 127)
+          continue;
 
         auto cand_pitch = static_cast<uint8_t>(candidate);
-        if (isSafeToPlace(state, rules, voice_id, cand_pitch, tick,
-                          duration, next_pitch)) {
+        if (isSafeToPlace(state, rules, voice_id, cand_pitch, tick, duration, next_pitch)) {
           float penalty = static_cast<float>(delta) / 12.0f * 0.5f;
 
           // Apply cross-relation penalty.
@@ -987,16 +1016,18 @@ PlacementResult CollisionResolver::tryStrategy(
           //   2. Perfect consonances (5th, octave): acceptable, parallel risk
           //   3. Valid suspension (dissonant but justified): moderate penalty
           for (VoiceId other_v : state.getActiveVoices()) {
-            if (other_v == voice_id) continue;
+            if (other_v == voice_id)
+              continue;
             const NoteEvent* sounding = state.getNoteAt(other_v, tick);
-            if (!sounding) continue;
+            if (!sounding)
+              continue;
             int sounding_ivl = absoluteInterval(cand_pitch, sounding->pitch);
             int reduced_ivl = interval_util::compoundToSimple(sounding_ivl);
             IntervalQuality quality = classifyInterval(reduced_ivl);
             if (quality == IntervalQuality::ImperfectConsonance) {
               penalty -= 0.1f;  // Imperfect consonances preferred.
-            } else if (quality == IntervalQuality::PerfectConsonance &&
-                       reduced_ivl != 0 && strong_beat) {
+            } else if (quality == IntervalQuality::PerfectConsonance && reduced_ivl != 0 &&
+                       strong_beat) {
               penalty += 0.05f;  // Perfect consonances carry parallel risk on strong beats.
             } else if (quality == IntervalQuality::Dissonance && strong_beat) {
               // If isSafeToPlace accepted this, it is a justified suspension.
@@ -1012,8 +1043,7 @@ PlacementResult CollisionResolver::tryStrategy(
           // Apply melodic quality penalty via MelodicContext scoring.
           if (prev_note) {
             MelodicContext mel_ctx = buildMelodicContextFromState(state, voice_id);
-            float melodic_score = MelodicContext::scoreMelodicQuality(
-                mel_ctx, cand_pitch);
+            float melodic_score = MelodicContext::scoreMelodicQuality(mel_ctx, cand_pitch);
             // Weak-beat Flexible sources: increase melodic weight to 0.45.
             // Strong beats: keep 0.3 to preserve vertical safety (tritone/cross-relation).
             float mel_weight = 0.3f;
@@ -1027,25 +1057,27 @@ PlacementResult CollisionResolver::tryStrategy(
             if (mel_ctx.leap_needs_resolution) {
               int cand_interval = absoluteInterval(cand_pitch, prev_note->pitch);
               int cand_dir = (cand_pitch > prev_note->pitch) ? 1 : -1;
-              if (cand_interval >= 1 && cand_interval <= 2 &&
-                  cand_dir != mel_ctx.prev_direction) {
+              if (cand_interval >= 1 && cand_interval <= 2 && cand_dir != mel_ctx.prev_direction) {
                 penalty -= 0.25f;
               }
             }
 
             // Voice spacing penalty: penalize wide gaps between adjacent manual voices.
             for (VoiceId adj_v = 0; adj_v < state.voiceCount(); ++adj_v) {
-              if (adj_v == voice_id) continue;
-              int vdist =
-                  std::abs(static_cast<int>(voice_id) - static_cast<int>(adj_v));
-              if (vdist != 1) continue;
+              if (adj_v == voice_id)
+                continue;
+              int vdist = std::abs(static_cast<int>(voice_id) - static_cast<int>(adj_v));
+              if (vdist != 1)
+                continue;
               if (adj_v == state.voiceCount() - 1 && state.voiceCount() >= 3)
                 continue;
               if (voice_id == state.voiceCount() - 1 && state.voiceCount() >= 3)
                 continue;
               const NoteEvent* adj_note = state.getNoteAt(adj_v, tick);
-              if (!adj_note) adj_note = state.getLastNote(adj_v);
-              if (!adj_note) continue;
+              if (!adj_note)
+                adj_note = state.getLastNote(adj_v);
+              if (!adj_note)
+                continue;
               int spacing = absoluteInterval(cand_pitch, adj_note->pitch);
               if (spacing > 12) {
                 penalty += static_cast<float>(spacing - 12) / 7.0f * 0.3f;
@@ -1054,7 +1086,8 @@ PlacementResult CollisionResolver::tryStrategy(
           }
 
           // Clamp penalty floor.
-          if (penalty < 0.0f) penalty = 0.0f;
+          if (penalty < 0.0f)
+            penalty = 0.0f;
 
           // Apply cadence voice-leading bonus.
           if (near_cadence && prev_note) {
@@ -1063,7 +1096,8 @@ PlacementResult CollisionResolver::tryStrategy(
             // Leading tone (B in C major, pitch class 11) resolving up by semitone.
             if (prev_pitch_class == 11 && directed == 1) {
               penalty -= 0.3f;
-              if (penalty < 0.0f) penalty = 0.0f;
+              if (penalty < 0.0f)
+                penalty = 0.0f;
             }
 
             // 7th of V7 chord resolving stepwise downward (-1 or -2 semitones).
@@ -1071,7 +1105,8 @@ PlacementResult CollisionResolver::tryStrategy(
             // More generally, any pitch that was the 7th resolving down.
             if (prev_pitch_class == 5 && (directed == -1 || directed == -2)) {
               penalty -= 0.3f;
-              if (penalty < 0.0f) penalty = 0.0f;
+              if (penalty < 0.0f)
+                penalty = 0.0f;
             }
           }
 
@@ -1084,7 +1119,8 @@ PlacementResult CollisionResolver::tryStrategy(
         }
       }
       // Stop as soon as we find a valid pitch at this distance.
-      if (result.accepted) return result;
+      if (result.accepted)
+        return result;
     }
     return result;
   }
@@ -1094,14 +1130,17 @@ PlacementResult CollisionResolver::tryStrategy(
     auto computeMinAdjacentSpacing = [&](uint8_t pitch) -> int {
       int min_spacing = 127;
       for (VoiceId adj_v = 0; adj_v < state.voiceCount(); ++adj_v) {
-        if (adj_v == voice_id) continue;
-        int vdist =
-            std::abs(static_cast<int>(voice_id) - static_cast<int>(adj_v));
-        if (vdist != 1) continue;
+        if (adj_v == voice_id)
+          continue;
+        int vdist = std::abs(static_cast<int>(voice_id) - static_cast<int>(adj_v));
+        if (vdist != 1)
+          continue;
         const NoteEvent* adj_note = state.getLastNote(adj_v);
-        if (!adj_note) continue;
+        if (!adj_note)
+          continue;
         int spc = absoluteInterval(pitch, adj_note->pitch);
-        if (spc < min_spacing) min_spacing = spc;
+        if (spc < min_spacing)
+          min_spacing = spc;
       }
       return min_spacing;
     };
@@ -1109,27 +1148,24 @@ PlacementResult CollisionResolver::tryStrategy(
     int up_pitch = static_cast<int>(desired_pitch) + 12;
     int dn_pitch = static_cast<int>(desired_pitch) - 12;
     int up_spacing =
-        (up_pitch <= 127)
-            ? computeMinAdjacentSpacing(static_cast<uint8_t>(up_pitch))
-            : 127;
+        (up_pitch <= 127) ? computeMinAdjacentSpacing(static_cast<uint8_t>(up_pitch)) : 127;
     int dn_spacing =
-        (dn_pitch >= 0)
-            ? computeMinAdjacentSpacing(static_cast<uint8_t>(dn_pitch))
-            : 127;
+        (dn_pitch >= 0) ? computeMinAdjacentSpacing(static_cast<uint8_t>(dn_pitch)) : 127;
     int first = (up_spacing <= dn_spacing) ? 12 : -12;
     int second = (first == 12) ? -12 : 12;
 
     for (int shift : {first, second}) {
       int candidate = static_cast<int>(desired_pitch) + shift;
-      if (candidate < 0 || candidate > 127) continue;
+      if (candidate < 0 || candidate > 127)
+        continue;
 
       auto cand_pitch = static_cast<uint8_t>(candidate);
-      if (!isSafeToPlace(state, rules, voice_id, cand_pitch, tick, duration,
-                         next_pitch))
+      if (!isSafeToPlace(state, rules, voice_id, cand_pitch, tick, duration, next_pitch))
         continue;
 
       // Reject if the octave shift would cross an adjacent voice.
-      if (wouldCrossVoice(state, voice_id, cand_pitch, tick)) continue;
+      if (wouldCrossVoice(state, voice_id, cand_pitch, tick))
+        continue;
 
       result.pitch = cand_pitch;
       result.penalty = 0.7f;
@@ -1150,27 +1186,27 @@ PlacementResult CollisionResolver::tryStrategy(
   return result;
 }
 
-PlacementResult CollisionResolver::findSafePitch(
-    const CounterpointState& state, const IRuleEvaluator& rules,
-    VoiceId voice_id, uint8_t desired_pitch, Tick tick,
-    Tick duration, std::optional<uint8_t> next_pitch) const {
+PlacementResult CollisionResolver::findSafePitch(const CounterpointState& state,
+                                                 const IRuleEvaluator& rules, VoiceId voice_id,
+                                                 uint8_t desired_pitch, Tick tick, Tick duration,
+                                                 std::optional<uint8_t> next_pitch) const {
   // 6-stage strategy cascade (suspension inserted between chord_tone and step_shift).
-  static const char* kStrategies[] = {
-      "original", "chord_tone", "suspension", "step_shift", "octave_shift", "rest"};
+  static const char* kStrategies[] = {"original",   "chord_tone",   "suspension",
+                                      "step_shift", "octave_shift", "rest"};
 
   for (const char* strategy : kStrategies) {
     // The suspension strategy uses a dedicated method.
     if (std::string(strategy) == "suspension") {
-      PlacementResult result =
-          trySuspension(state, rules, voice_id, desired_pitch, tick, duration);
-      if (result.accepted) return result;
+      PlacementResult result = trySuspension(state, rules, voice_id, desired_pitch, tick, duration);
+      if (result.accepted)
+        return result;
       continue;
     }
 
-    PlacementResult result = tryStrategy(state, rules, voice_id,
-                                         desired_pitch, tick, duration,
-                                         strategy, next_pitch);
-    if (result.accepted) return result;
+    PlacementResult result =
+        tryStrategy(state, rules, voice_id, desired_pitch, tick, duration, strategy, next_pitch);
+    if (result.accepted)
+      return result;
   }
 
   // If all strategies fail, return a rest result.
@@ -1186,10 +1222,11 @@ PlacementResult CollisionResolver::findSafePitch(
 // Source-aware strategy cascade
 // ---------------------------------------------------------------------------
 
-PlacementResult CollisionResolver::findSafePitch(
-    const CounterpointState& state, const IRuleEvaluator& rules,
-    VoiceId voice_id, uint8_t desired_pitch, Tick tick, Tick duration,
-    BachNoteSource source, std::optional<uint8_t> next_pitch) const {
+PlacementResult CollisionResolver::findSafePitch(const CounterpointState& state,
+                                                 const IRuleEvaluator& rules, VoiceId voice_id,
+                                                 uint8_t desired_pitch, Tick tick, Tick duration,
+                                                 BachNoteSource source,
+                                                 std::optional<uint8_t> next_pitch) const {
   ProtectionLevel level = getProtectionLevel(source);
 
   // Select allowed strategies based on protection level.
@@ -1199,8 +1236,8 @@ PlacementResult CollisionResolver::findSafePitch(
   };
 
   static const char* kImmutable[] = {"original", "rest"};
-  static const char* kFlexible[] = {
-      "original", "chord_tone", "suspension", "step_shift", "octave_shift", "rest"};
+  static const char* kFlexible[] = {"original",   "chord_tone",   "suspension",
+                                    "step_shift", "octave_shift", "rest"};
 
   StrategyList list;
   switch (level) {
@@ -1221,8 +1258,7 @@ PlacementResult CollisionResolver::findSafePitch(
   // to the cascade (chord_tone/step_shift) to find a resolving alternative.
   // Falls back to original if no cascade candidate resolves the leap.
   bool apply_leap_gate = false;
-  if (level == ProtectionLevel::Flexible &&
-      source != BachNoteSource::EpisodeMaterial &&
+  if (level == ProtectionLevel::Flexible && source != BachNoteSource::EpisodeMaterial &&
       source != BachNoteSource::ArpeggioFlow) {
     // One-sided cadence exemption: only exempt ticks in [cadence - kTicksPerBeat, cadence).
     bool near_cadence_before = false;
@@ -1238,13 +1274,13 @@ PlacementResult CollisionResolver::findSafePitch(
         auto iter = voice_notes.rbegin();
         uint8_t last_pitch = iter->pitch;
         ++iter;
-        int prev_leap = static_cast<int>(last_pitch) -
-                        static_cast<int>(iter->pitch);
+        int prev_leap = static_cast<int>(last_pitch) - static_cast<int>(iter->pitch);
         if (std::abs(prev_leap) >= 5) {
-          int res = static_cast<int>(desired_pitch) -
-                    static_cast<int>(last_pitch);
-          // Step (1-2 semitones) in any direction counts as resolution.
-          bool resolves = (std::abs(res) >= 1 && std::abs(res) <= 2);
+          int res = static_cast<int>(desired_pitch) - static_cast<int>(last_pitch);
+          // Bach melodic practice requires a leap to resolve by step in the
+          // opposite direction. Same-direction steps keep the leap exposed.
+          bool contrary = (prev_leap > 0 && res < 0) || (prev_leap < 0 && res > 0);
+          bool resolves = contrary && (std::abs(res) >= 1 && std::abs(res) <= 2);
           apply_leap_gate = !resolves;
         }
       }
@@ -1257,8 +1293,7 @@ PlacementResult CollisionResolver::findSafePitch(
   for (int idx = 0; idx < list.count; ++idx) {
     // The suspension strategy uses a dedicated method.
     if (std::string(list.strategies[idx]) == "suspension") {
-      PlacementResult result =
-          trySuspension(state, rules, voice_id, desired_pitch, tick, duration);
+      PlacementResult result = trySuspension(state, rules, voice_id, desired_pitch, tick, duration);
       if (result.accepted) {
         // Apply repetition gate to suspension results as well.
         if (source == BachNoteSource::FreeCounterpoint) {
@@ -1266,15 +1301,17 @@ PlacementResult CollisionResolver::findSafePitch(
           constexpr Tick kSuspRunGap = 2 * kTicksPerBar;
           int run_len = 0;
           Tick ref = tick;
-          for (auto iter = voice_notes.rbegin(); iter != voice_notes.rend();
-               ++iter) {
-            if (iter->pitch != result.pitch) break;
+          for (auto iter = voice_notes.rbegin(); iter != voice_notes.rend(); ++iter) {
+            if (iter->pitch != result.pitch)
+              break;
             Tick nend = iter->start_tick + iter->duration;
-            if (ref > nend && (ref - nend) > kSuspRunGap) break;
+            if (ref > nend && (ref - nend) > kSuspRunGap)
+              break;
             ++run_len;
             ref = iter->start_tick;
           }
-          if (run_len >= 2) continue;  // Would be 3+ same pitch; reject.
+          if (run_len >= 2)
+            continue;  // Would be 3+ same pitch; reject.
         }
         return result;
       }
@@ -1283,10 +1320,9 @@ PlacementResult CollisionResolver::findSafePitch(
 
     // For "original" strategy with Immutable/Structural sources, call
     // isSafeToPlace directly with relaxed spacing to avoid note drops.
-    if (std::string(list.strategies[idx]) == "original" &&
-        level != ProtectionLevel::Flexible) {
-      if (isSafeToPlace(state, rules, voice_id, desired_pitch, tick,
-                         duration, next_pitch, spacing_limit)) {
+    if (std::string(list.strategies[idx]) == "original" && level != ProtectionLevel::Flexible) {
+      if (isSafeToPlace(state, rules, voice_id, desired_pitch, tick, duration, next_pitch,
+                        spacing_limit)) {
         PlacementResult result;
         result.pitch = desired_pitch;
         result.penalty = 0.0f;
@@ -1297,8 +1333,7 @@ PlacementResult CollisionResolver::findSafePitch(
       continue;
     }
 
-    PlacementResult result = tryStrategy(state, rules, voice_id,
-                                         desired_pitch, tick, duration,
+    PlacementResult result = tryStrategy(state, rules, voice_id, desired_pitch, tick, duration,
                                          list.strategies[idx], next_pitch);
     if (result.accepted) {
       // Leap resolution gate: when the previous note was a leap and the
@@ -1321,14 +1356,16 @@ PlacementResult CollisionResolver::findSafePitch(
         int run_length = 0;
         Tick ref_tick = tick;
         for (auto it = voice_notes.rbegin(); it != voice_notes.rend(); ++it) {
-          if (it->pitch != result.pitch) break;
+          if (it->pitch != result.pitch)
+            break;
           Tick note_end = it->start_tick + it->duration;
           if (ref_tick > note_end && (ref_tick - note_end) > kRunGapThreshold)
             break;
           ++run_length;
           ref_tick = it->start_tick;
         }
-        if (run_length >= 2) continue;  // Would be 3+ same pitch; reject.
+        if (run_length >= 2)
+          continue;  // Would be 3+ same pitch; reject.
       }
       return result;
     }
@@ -1353,20 +1390,22 @@ PlacementResult CollisionResolver::findSafePitch(
 // Suspension strategy
 // ---------------------------------------------------------------------------
 
-PlacementResult CollisionResolver::trySuspension(
-    const CounterpointState& state, const IRuleEvaluator& rules,
-    VoiceId voice_id, uint8_t /*desired_pitch*/, Tick tick,
-    Tick /*duration*/) const {
+PlacementResult CollisionResolver::trySuspension(const CounterpointState& state,
+                                                 const IRuleEvaluator& rules, VoiceId voice_id,
+                                                 uint8_t /*desired_pitch*/, Tick tick,
+                                                 Tick /*duration*/) const {
   PlacementResult result;
   result.strategy = "suspension";
 
   // A suspension requires a previous pitch to hold.
-  if (tick < kTicksPerBeat) return result;
+  if (tick < kTicksPerBeat)
+    return result;
 
   // Find the pitch this voice had on the previous beat.
   Tick prev_tick = tick - kTicksPerBeat;
   const NoteEvent* prev_note = state.getNoteAt(voice_id, prev_tick);
-  if (!prev_note) return result;
+  if (!prev_note)
+    return result;
 
   // Guard: reject suspension if it would create 3+ consecutive same pitches.
   // PedalPoint is exempt -- pedal points sustain the same pitch by design.
@@ -1388,9 +1427,11 @@ PlacementResult CollisionResolver::trySuspension(
             break;
           }
           // Only check last few notes.
-          if (std::distance(vn.rbegin(), pit) >= 3) break;
+          if (std::distance(vn.rbegin(), pit) >= 3)
+            break;
         }
-        if (!is_pedal) return result;
+        if (!is_pedal)
+          return result;
       }
     }
   }
@@ -1406,9 +1447,11 @@ PlacementResult CollisionResolver::trySuspension(
     bool preparation_consonant = true;
     bool has_other_voice_at_prev = false;
     for (VoiceId other : voices_prep) {
-      if (other == voice_id) continue;
+      if (other == voice_id)
+        continue;
       const NoteEvent* other_at_prev = state.getNoteAt(other, prev_tick);
-      if (!other_at_prev) continue;
+      if (!other_at_prev)
+        continue;
       has_other_voice_at_prev = true;
       int prep_ivl = absoluteInterval(held_pitch, other_at_prev->pitch);
       int prep_reduced = interval_util::compoundToSimple(prep_ivl);
@@ -1419,7 +1462,8 @@ PlacementResult CollisionResolver::trySuspension(
     }
     // If no other voice was sounding at prev_tick, we cannot verify preparation.
     // Reject: a suspension without audible harmonic context is meaningless.
-    if (!has_other_voice_at_prev || !preparation_consonant) return result;
+    if (!has_other_voice_at_prev || !preparation_consonant)
+      return result;
   }
 
   // Check if holding this pitch creates a dissonance with other voices,
@@ -1427,10 +1471,12 @@ PlacementResult CollisionResolver::trySuspension(
   const auto& voices = state.getActiveVoices();
 
   for (VoiceId other : voices) {
-    if (other == voice_id) continue;
+    if (other == voice_id)
+      continue;
 
     const NoteEvent* other_note = state.getNoteAt(other, tick);
-    if (!other_note) continue;
+    if (!other_note)
+      continue;
 
     int ivl = absoluteInterval(held_pitch, other_note->pitch);
     bool is_strong = (tick % kTicksPerBeat == 0);
@@ -1440,10 +1486,10 @@ PlacementResult CollisionResolver::trySuspension(
       // 9-8 (reduced 2/14). Other dissonant intervals are less idiomatic.
       int reduced_ivl = interval_util::compoundToSimple(ivl);
       float type_penalty = 0.0f;
-      if (reduced_ivl == interval::kPerfect4th ||   // 4-3 suspension
-          reduced_ivl == interval::kMinor2nd ||      // 9-8 suspension (compound)
-          reduced_ivl == interval::kMajor2nd) {      // 9-8 or 2-1 suspension
-        type_penalty = 0.0f;  // Standard suspension types: no extra penalty.
+      if (reduced_ivl == interval::kPerfect4th ||  // 4-3 suspension
+          reduced_ivl == interval::kMinor2nd ||    // 9-8 suspension (compound)
+          reduced_ivl == interval::kMajor2nd) {    // 9-8 or 2-1 suspension
+        type_penalty = 0.0f;                       // Standard suspension types: no extra penalty.
       } else if (reduced_ivl == interval::kMinor7th ||  // 7-6 suspension
                  reduced_ivl == interval::kMajor7th) {
         type_penalty = 0.0f;  // 7-6 is also standard.
@@ -1456,10 +1502,10 @@ PlacementResult CollisionResolver::trySuspension(
       // Standard resolution is downward by step (1-2 semitones).
       for (int step = 1; step <= 2; ++step) {
         int resolution_pitch = static_cast<int>(held_pitch) - step;
-        if (resolution_pitch < 0) continue;
+        if (resolution_pitch < 0)
+          continue;
 
-        int res_ivl = std::abs(resolution_pitch -
-                               static_cast<int>(other_note->pitch));
+        int res_ivl = std::abs(resolution_pitch - static_cast<int>(other_note->pitch));
         // Resolution interval must be consonant (check as if on a weak beat
         // since resolutions typically land on the weak part of the beat).
         if (rules.isIntervalConsonant(res_ivl, false)) {
@@ -1481,25 +1527,28 @@ PlacementResult CollisionResolver::trySuspension(
 // Voice crossing check for octave shift
 // ---------------------------------------------------------------------------
 
-bool CollisionResolver::wouldCrossVoice(const CounterpointState& state,
-                                        VoiceId voice_id, uint8_t pitch,
-                                        Tick tick) const {
+bool CollisionResolver::wouldCrossVoice(const CounterpointState& state, VoiceId voice_id,
+                                        uint8_t pitch, Tick tick) const {
   const auto& voices = state.getActiveVoices();
 
   for (VoiceId other : voices) {
-    if (other == voice_id) continue;
+    if (other == voice_id)
+      continue;
 
     const NoteEvent* other_note = state.getNoteAt(other, tick);
-    if (!other_note) continue;
+    if (!other_note)
+      continue;
 
     // Determine voice ordering from registration order.
     // Lower voice_id = higher voice (soprano=0, alto=1, tenor=2, bass=3).
     if (voice_id < other) {
       // We are a higher voice; our pitch must not go below the other.
-      if (pitch < other_note->pitch) return true;
+      if (pitch < other_note->pitch)
+        return true;
     } else {
       // We are a lower voice; our pitch must not go above the other.
-      if (pitch > other_note->pitch) return true;
+      if (pitch > other_note->pitch)
+        return true;
     }
   }
   return false;
@@ -1509,13 +1558,12 @@ bool CollisionResolver::wouldCrossVoice(const CounterpointState& state,
 // Pedal resolver
 // ---------------------------------------------------------------------------
 
-PlacementResult CollisionResolver::resolvePedal(
-    const CounterpointState& state, const IRuleEvaluator& rules,
-    VoiceId voice_id, uint8_t desired_pitch, Tick tick,
-    Tick duration) const {
+PlacementResult CollisionResolver::resolvePedal(const CounterpointState& state,
+                                                const IRuleEvaluator& rules, VoiceId voice_id,
+                                                uint8_t desired_pitch, Tick tick,
+                                                Tick duration) const {
   // Same cascade as findSafePitch, but add voice-range penalty.
-  PlacementResult result =
-      findSafePitch(state, rules, voice_id, desired_pitch, tick, duration);
+  PlacementResult result = findSafePitch(state, rules, voice_id, desired_pitch, tick, duration);
 
   if (result.accepted) {
     // Add range penalty if the final pitch is outside the voice range.
@@ -1523,11 +1571,9 @@ PlacementResult CollisionResolver::resolvePedal(
     if (range) {
       float range_penalty = 0.0f;
       if (result.pitch < range->low) {
-        range_penalty =
-            static_cast<float>(range->low - result.pitch) * 0.05f;
+        range_penalty = static_cast<float>(range->low - result.pitch) * 0.05f;
       } else if (result.pitch > range->high) {
-        range_penalty =
-            static_cast<float>(result.pitch - range->high) * 0.05f;
+        range_penalty = static_cast<float>(result.pitch - range->high) * 0.05f;
       }
       result.penalty += range_penalty;
     }
@@ -1541,9 +1587,8 @@ PlacementResult CollisionResolver::resolvePedal(
 // ---------------------------------------------------------------------------
 
 PlacementResult CollisionResolver::findSafePitchWithLookahead(
-    const CounterpointState& state, const IRuleEvaluator& rules,
-    VoiceId voice_id, uint8_t desired_pitch, Tick tick, Tick duration,
-    uint8_t next_desired_pitch) const {
+    const CounterpointState& state, const IRuleEvaluator& rules, VoiceId voice_id,
+    uint8_t desired_pitch, Tick tick, Tick duration, uint8_t next_desired_pitch) const {
   // If no lookahead info, fall back to regular resolution.
   if (next_desired_pitch == 0) {
     return findSafePitch(state, rules, voice_id, desired_pitch, tick, duration);
@@ -1564,15 +1609,15 @@ PlacementResult CollisionResolver::findSafePitchWithLookahead(
   for (int delta = 0; delta <= max_search_range_; ++delta) {
     for (int sign = (delta == 0 ? 1 : -1); sign <= 1; sign += 2) {
       int candidate_pitch = static_cast<int>(desired_pitch) + delta * sign;
-      if (candidate_pitch < 0 || candidate_pitch > 127) continue;
+      if (candidate_pitch < 0 || candidate_pitch > 127)
+        continue;
 
       auto cand = static_cast<uint8_t>(candidate_pitch);
       if (!isSafeToPlace(state, rules, voice_id, cand, tick, duration)) {
         continue;
       }
 
-      float current_penalty =
-          static_cast<float>(delta) / 12.0f * 0.3f;
+      float current_penalty = static_cast<float>(delta) / 12.0f * 0.3f;
       current_penalty += crossRelationPenalty(state, voice_id, cand, tick);
 
       // Voice motion scoring: reward contrary/oblique, penalize parallel runs.
@@ -1581,8 +1626,8 @@ PlacementResult CollisionResolver::findSafePitchWithLookahead(
       // Evaluate next-beat approach quality.
       // Stepwise motion (1-2 semitones) is ideal; small leaps (3-4) are
       // acceptable; larger leaps receive increasing penalty.
-      int interval_to_next = std::abs(static_cast<int>(cand) -
-                                      static_cast<int>(next_desired_pitch));
+      int interval_to_next =
+          std::abs(static_cast<int>(cand) - static_cast<int>(next_desired_pitch));
       float next_penalty = 0.0f;
       if (interval_to_next <= 2) {
         next_penalty = 0.0f;  // Stepwise -- ideal approach.
@@ -1595,9 +1640,11 @@ PlacementResult CollisionResolver::findSafePitchWithLookahead(
       float total = current_penalty + 0.5f * next_penalty;
       candidates.push_back({cand, current_penalty, next_penalty, total});
 
-      if (candidates.size() >= kMaxCandidates) break;
+      if (candidates.size() >= kMaxCandidates)
+        break;
     }
-    if (candidates.size() >= kMaxCandidates) break;
+    if (candidates.size() >= kMaxCandidates)
+      break;
   }
 
   if (candidates.empty()) {
@@ -1608,9 +1655,7 @@ PlacementResult CollisionResolver::findSafePitchWithLookahead(
   // Select the candidate with the lowest total score.
   auto best = std::min_element(
       candidates.begin(), candidates.end(),
-      [](const Candidate& lhs, const Candidate& rhs) {
-        return lhs.total_score < rhs.total_score;
-      });
+      [](const Candidate& lhs, const Candidate& rhs) { return lhs.total_score < rhs.total_score; });
 
   PlacementResult result;
   result.pitch = best->pitch;

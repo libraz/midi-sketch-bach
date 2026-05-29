@@ -17,11 +17,11 @@ namespace bach {
 
 /// Section types that make up a fugue's formal structure.
 enum class SectionType : uint8_t {
-  Exposition,    // Initial subject/answer entries
-  Episode,       // Modulatory, sequential material
-  MiddleEntry,   // Subject re-entry in related key
-  Stretto,       // Overlapping subject entries
-  Coda           // Final closing section
+  Exposition,   // Initial subject/answer entries
+  Episode,      // Modulatory, sequential material
+  MiddleEntry,  // Subject re-entry in related key
+  Stretto,      // Overlapping subject entries
+  Coda          // Final closing section
 };
 
 /// @brief Convert SectionType to human-readable string.
@@ -60,8 +60,8 @@ struct FugueStructure {
   /// @param end_tick End position in ticks.
   /// @param key Musical key for this section.
   /// @return True if the section was added, false if phase ordering violated.
-  bool addSection(SectionType type, FuguePhase phase,
-                  Tick start_tick, Tick end_tick, Key key = Key::C);
+  bool addSection(SectionType type, FuguePhase phase, Tick start_tick, Tick end_tick,
+                  Key key = Key::C);
 
   /// @brief Get total duration in ticks (end of last section).
   /// @return End tick of the final section, or 0 if empty.

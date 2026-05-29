@@ -24,9 +24,9 @@ enum class SubjectSource : uint8_t {
 
 /// Answer type for the fugue comes entry.
 enum class AnswerType : uint8_t {
-  Auto,   // Automatically detect based on subject analysis
-  Real,   // Exact transposition up a perfect 5th
-  Tonal   // Tonal adjustment of tonic-dominant relationships
+  Auto,  // Automatically detect based on subject analysis
+  Real,  // Exact transposition up a perfect 5th
+  Tonal  // Tonal adjustment of tonic-dominant relationships
 };
 
 /// @brief Convert AnswerType to human-readable string.
@@ -71,13 +71,17 @@ struct FugueEnergyCurve {
   /// @param total_duration Total fugue duration in ticks.
   /// @return Energy level in [0.0, 1.0].
   static float getLevel(Tick tick, Tick total_duration) {
-    if (total_duration == 0) return 0.5f;
+    if (total_duration == 0)
+      return 0.5f;
     float pos = static_cast<float>(tick) / static_cast<float>(total_duration);
-    if (pos < 0.0f) pos = 0.0f;
-    if (pos > 1.0f) pos = 1.0f;
+    if (pos < 0.0f)
+      pos = 0.0f;
+    if (pos > 1.0f)
+      pos = 1.0f;
 
     // Establish (0-25%): steady 0.5
-    if (pos < 0.25f) return 0.5f;
+    if (pos < 0.25f)
+      return 0.5f;
     // Develop (25-70%): 0.5 -> 0.7 with linear ramp
     if (pos < 0.70f) {
       float develop_pos = (pos - 0.25f) / 0.45f;  // 0..1 within Develop
@@ -97,9 +101,11 @@ struct FugueEnergyCurve {
   /// @return Minimum duration in ticks.
   static Tick minDuration(float energy) {
     // Bach organ fugues: 61% 16th notes. Allow 16ths from energy 0.4+.
-    if (energy < 0.3f) return kTicksPerBeat;      // quarter note (very low energy)
-    if (energy < 0.4f) return kTicksPerBeat / 2;  // eighth note
-    return kTicksPerBeat / 4;                      // sixteenth note (most of fugue)
+    if (energy < 0.3f)
+      return kTicksPerBeat;  // quarter note (very low energy)
+    if (energy < 0.4f)
+      return kTicksPerBeat / 2;  // eighth note
+    return kTicksPerBeat / 4;    // sixteenth note (most of fugue)
   }
 
   /// @brief Select duration using VoiceProfile weights and context.
@@ -112,12 +118,9 @@ struct FugueEnergyCurve {
   /// @param density_ratio Ratio of actual/target notes-per-bar (1.0 = on target).
   ///        Used for density steering with a dead zone of 0.9-1.1.
   /// @param in_cadence If true, raise effective min duration to suppress short notes.
-  static Tick selectDuration(float energy, Tick tick, std::mt19937& rng,
-                             Tick other_voice_duration,
-                             const VoiceProfile& profile,
-                             bool allow_burst_32nd = false,
-                             float density_ratio = 1.0f,
-                             bool in_cadence = false,
+  static Tick selectDuration(float energy, Tick tick, std::mt19937& rng, Tick other_voice_duration,
+                             const VoiceProfile& profile, bool allow_burst_32nd = false,
+                             float density_ratio = 1.0f, bool in_cadence = false,
                              const MarkovModel* markov = nullptr,
                              DurCategory prev_dur_cat = DurCategory::Qtr,
                              DirIntervalClass dir_ivl = DirIntervalClass::StepUp) {
@@ -126,15 +129,14 @@ struct FugueEnergyCurve {
       float weight;
     };
     DurWeight candidates[] = {
-        {kTicksPerBar,          profile.dur_weights[0]},  // Whole note
-        {kTicksPerBeat * 2,     profile.dur_weights[1]},  // Half note
+        {kTicksPerBar, profile.dur_weights[0]},           // Whole note
+        {kTicksPerBeat * 2, profile.dur_weights[1]},      // Half note
         {kTicksPerBeat * 3 / 2, profile.dur_weights[2]},  // Dotted quarter
-        {kTicksPerBeat,         profile.dur_weights[3]},  // Quarter note
-        {kTicksPerBeat / 2,     profile.dur_weights[4]},  // Eighth note
-        {kTicksPerBeat / 4,     profile.dur_weights[5]},  // Sixteenth note
+        {kTicksPerBeat, profile.dur_weights[3]},          // Quarter note
+        {kTicksPerBeat / 2, profile.dur_weights[4]},      // Eighth note
+        {kTicksPerBeat / 4, profile.dur_weights[5]},      // Sixteenth note
         {kTicksPerBeat / 8,                               // Thirty-second note
-         (allow_burst_32nd && profile.min_duration <= kTicksPerBeat / 4)
-             ? 0.5f : 0.0f},
+         (allow_burst_32nd && profile.min_duration <= kTicksPerBeat / 4) ? 0.5f : 0.0f},
     };
     constexpr int kNumCandidates = 7;
 
@@ -183,7 +185,7 @@ struct FugueEnergyCurve {
       if (min_dur <= kTicksPerBeat / 4) {
         cadence_min = kTicksPerBeat / 2;  // 16th -> 8th
       } else if (min_dur <= kTicksPerBeat / 2) {
-        cadence_min = kTicksPerBeat;      // 8th -> quarter
+        cadence_min = kTicksPerBeat;  // 8th -> quarter
       }
       for (int idx = 0; idx < kNumCandidates; ++idx) {
         if (candidates[idx].duration < cadence_min) {
@@ -209,7 +211,8 @@ struct FugueEnergyCurve {
     // exp(score) maps log-odds [-0.46, +0.46] to multiplicative [0.63, 1.58].
     if (markov != nullptr) {
       for (int idx = 0; idx < kNumCandidates; ++idx) {
-        if (candidates[idx].weight <= 0.0f) continue;
+        if (candidates[idx].weight <= 0.0f)
+          continue;
         DurCategory cand_dc = ticksToDurCategory(candidates[idx].duration);
         float mk = scoreMarkovDuration(*markov, prev_dur_cat, dir_ivl, cand_dc);
         candidates[idx].weight *= std::exp(mk);
@@ -221,7 +224,8 @@ struct FugueEnergyCurve {
     for (int idx = 0; idx < kNumCandidates; ++idx) {
       total += candidates[idx].weight;
     }
-    if (total <= 0.0f) return kTicksPerBeat;
+    if (total <= 0.0f)
+      return kTicksPerBeat;
 
     std::uniform_real_distribution<float> dist(0.0f, total);
     float roll = dist(rng);
@@ -252,20 +256,19 @@ struct FugueEnergyCurve {
   ///        near-zero sixteenths). Based on BWV578 pedal avg 0.51 beats.
   /// @return Selected duration in ticks.
   static Tick selectDuration(float energy, Tick tick, std::mt19937& rng,
-                             Tick other_voice_duration = 0,
-                             bool is_bass = false) {
+                             Tick other_voice_duration = 0, bool is_bass = false) {
     // Standard Baroque durations with base weights.
     struct DurWeight {
       Tick duration;
       float weight;
     };
     DurWeight candidates[] = {
-        {kTicksPerBar,          is_bass ? 1.0f : 0.5f},   // Whole note
-        {kTicksPerBeat * 2,     is_bass ? 3.0f : 1.5f},   // Half note
-        {kTicksPerBeat * 3 / 2, is_bass ? 2.0f : 1.2f},   // Dotted quarter
-        {kTicksPerBeat,         3.0f},                      // Quarter note
-        {kTicksPerBeat / 2,     is_bass ? 1.0f : 2.0f},   // Eighth note
-        {kTicksPerBeat / 4,     is_bass ? 0.1f : 0.8f},   // Sixteenth note
+        {kTicksPerBar, is_bass ? 1.0f : 0.5f},           // Whole note
+        {kTicksPerBeat * 2, is_bass ? 3.0f : 1.5f},      // Half note
+        {kTicksPerBeat * 3 / 2, is_bass ? 2.0f : 1.2f},  // Dotted quarter
+        {kTicksPerBeat, 3.0f},                           // Quarter note
+        {kTicksPerBeat / 2, is_bass ? 1.0f : 2.0f},      // Eighth note
+        {kTicksPerBeat / 4, is_bass ? 0.1f : 0.8f},      // Sixteenth note
     };
     constexpr int kNumCandidates = 6;
 
@@ -307,7 +310,8 @@ struct FugueEnergyCurve {
     for (int idx = 0; idx < kNumCandidates; ++idx) {
       total += candidates[idx].weight;
     }
-    if (total <= 0.0f) return kTicksPerBeat;  // Fallback: quarter note.
+    if (total <= 0.0f)
+      return kTicksPerBeat;  // Fallback: quarter note.
 
     std::uniform_real_distribution<float> dist(0.0f, total);
     float roll = dist(rng);
@@ -329,9 +333,9 @@ struct FugueEnergyCurve {
 struct TextureDensityTarget {
   /// Target active voice count for each phase (as fraction of num_voices).
   /// 1.0 = all voices active, 0.75 = 3/4 of voices active.
-  float develop_density = 0.75f;   ///< Develop: mostly N-1 voices.
-  float stretto_density = 0.90f;   ///< Stretto: near-tutti.
-  float max_tutti_ratio = 0.15f;   ///< Max fraction of tutti time.
+  float develop_density = 0.75f;  ///< Develop: mostly N-1 voices.
+  float stretto_density = 0.90f;  ///< Stretto: near-tutti.
+  float max_tutti_ratio = 0.15f;  ///< Max fraction of tutti time.
 };
 
 /// @brief Pedal voice treatment for 3-voice fugues.
@@ -341,9 +345,9 @@ struct TextureDensityTarget {
 ///   - ManualBass: voice 2 = manual bass [36, 67], no pedal rules
 ///   - Auto: decide based on subject/answer fit to [24, 50]
 enum class PedalMode : uint8_t {
-  Auto,        ///< Decide during exposition planning (default).
-  TruePedal,   ///< Force organ pedal treatment.
-  ManualBass   ///< Force manual bass treatment.
+  Auto,       ///< Decide during exposition planning (default).
+  TruePedal,  ///< Force organ pedal treatment.
+  ManualBass  ///< Force manual bass treatment.
 };
 
 /// Configuration for fugue generation.
@@ -354,19 +358,21 @@ struct FugueConfig {
   AnswerType answer_type = AnswerType::Auto;
   uint8_t num_voices = 3;
   Key key = Key::C;
-  bool is_minor = false;          ///< Whether the home key is minor.
+  bool is_minor = false;  ///< Whether the home key is minor.
   uint16_t bpm = 72;
   uint32_t seed = 0;
-  uint8_t subject_bars = 2;       // Length in bars (2-4)
-  int max_subject_retries = 10;   // Maximum generation attempts
-  int develop_pairs = 2;          ///< Number of Episode+MiddleEntry pairs in Develop phase.
-  int episode_bars = 2;           ///< Duration of each episode in bars.
+  uint8_t subject_bars = 2;             // Length in bars (2-4)
+  int max_subject_retries = 10;         // Maximum generation attempts
+  int develop_pairs = 2;                ///< Number of Episode+MiddleEntry pairs in Develop phase.
+  int episode_bars = 2;                 ///< Duration of each episode in bars.
   ModulationPlan modulation_plan;       ///< Key plan for episode modulations.
   bool has_modulation_plan = false;     ///< Whether modulation_plan was explicitly set.
   bool enable_picardy = true;           ///< Apply Picardy third in minor keys.
   TextureDensityTarget density_target;  ///< Texture density guidance.
-  std::vector<int> toccata_core_intervals;  ///< Toccata gesture core intervals (empty = no toccata context).
-  PedalMode pedal_mode = PedalMode::Auto;  ///< Pedal voice treatment (resolved during buildMaterial).
+  std::vector<int>
+      toccata_core_intervals;  ///< Toccata gesture core intervals (empty = no toccata context).
+  PedalMode pedal_mode =
+      PedalMode::Auto;  ///< Pedal voice treatment (resolved during buildMaterial).
 };
 
 }  // namespace bach

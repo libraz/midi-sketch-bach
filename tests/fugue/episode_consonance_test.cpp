@@ -10,8 +10,6 @@
 //   - Consonance is reasonable (not perfect, but within tolerances)
 //   - Multi-seed stability (no extreme outlier violations)
 
-#include "fugue/episode.h"
-
 #include <gtest/gtest.h>
 
 #include <map>
@@ -20,6 +18,7 @@
 #include "core/interval.h"
 #include "core/pitch_utils.h"
 #include "core/scale.h"
+#include "fugue/episode.h"
 #include "fugue/subject.h"
 
 namespace bach {
@@ -29,9 +28,8 @@ namespace {
 // Helper: create a diatonic test subject (C major scale tones only)
 // ---------------------------------------------------------------------------
 
-Subject makeConsonanceTestSubject(
-    Key key = Key::C,
-    SubjectCharacter character = SubjectCharacter::Severe) {
+Subject makeConsonanceTestSubject(Key key = Key::C,
+                                  SubjectCharacter character = SubjectCharacter::Severe) {
   Subject subject;
   subject.key = key;
   subject.is_minor = false;
@@ -78,12 +76,14 @@ ConsonanceStats analyzeConsonance(const Episode& ep) {
   }
 
   for (const auto& [tick, pitches] : tick_pitches) {
-    if (pitches.size() < 2) continue;
+    if (pitches.size() < 2)
+      continue;
 
     bool is_bar = (tick % kTicksPerBar == 0);
     bool is_beat = (tick % kTicksPerBeat == 0);
 
-    if (!is_beat) continue;
+    if (!is_beat)
+      continue;
 
     int violations = 0;
     for (size_t i = 0; i < pitches.size(); ++i) {
@@ -113,9 +113,7 @@ ConsonanceStats analyzeConsonance(const Episode& ep) {
 
 class EpisodeConsonanceTest : public ::testing::Test {
  protected:
-  void SetUp() override {
-    subject_ = makeConsonanceTestSubject();
-  }
+  void SetUp() override { subject_ = makeConsonanceTestSubject(); }
 
   Subject subject_;
 };
@@ -125,8 +123,7 @@ class EpisodeConsonanceTest : public ::testing::Test {
 // ---------------------------------------------------------------------------
 
 TEST_F(EpisodeConsonanceTest, EpisodeHasMultiVoiceNotes) {
-  Episode ep = generateEpisode(subject_, 0, kTicksPerBar * 4,
-                                Key::C, Key::C, 3, 42, 0, 0.5f);
+  Episode ep = generateEpisode(subject_, 0, kTicksPerBar * 4, Key::C, Key::C, 3, 42, 0, 0.5f);
 
   ASSERT_FALSE(ep.notes.empty()) << "Episode should contain notes";
 
@@ -137,8 +134,7 @@ TEST_F(EpisodeConsonanceTest, EpisodeHasMultiVoiceNotes) {
     EXPECT_GE(note.pitch, 24u) << "Pitch below C1 is abnormally low";
     EXPECT_LE(note.pitch, 108u) << "Pitch above C8 is abnormally high";
   }
-  EXPECT_GE(voices.size(), 2u)
-      << "3-voice episode should use at least 2 voices";
+  EXPECT_GE(voices.size(), 2u) << "3-voice episode should use at least 2 voices";
 }
 
 // ---------------------------------------------------------------------------
@@ -154,8 +150,7 @@ TEST_F(EpisodeConsonanceTest, BarBoundaryConsonanceReasonable) {
   int total_checks = 0;
 
   for (uint32_t seed = 1; seed <= 20; ++seed) {
-    Episode ep = generateEpisode(subject_, 0, kTicksPerBar * 4,
-                                  Key::C, Key::C, 3, seed, 0, 0.5f);
+    Episode ep = generateEpisode(subject_, 0, kTicksPerBar * 4, Key::C, Key::C, 3, seed, 0, 0.5f);
 
     ConsonanceStats stats = analyzeConsonance(ep);
     total_violations += stats.bar_tick_violations;
@@ -165,11 +160,9 @@ TEST_F(EpisodeConsonanceTest, BarBoundaryConsonanceReasonable) {
   // With register placement, we expect violations to be bounded. The basic
   // overload is less strict than the validated overload, so allow up to 80%.
   if (total_checks > 0) {
-    float rate = static_cast<float>(total_violations) /
-                 static_cast<float>(total_checks);
-    EXPECT_LT(rate, 1.5f)
-        << total_violations << " violations in " << total_checks
-        << " bar-tick groups across 20 seeds (rate = " << rate << ")";
+    float rate = static_cast<float>(total_violations) / static_cast<float>(total_checks);
+    EXPECT_LT(rate, 1.5f) << total_violations << " violations in " << total_checks
+                          << " bar-tick groups across 20 seeds (rate = " << rate << ")";
   }
 }
 
@@ -183,8 +176,7 @@ TEST_F(EpisodeConsonanceTest, MultiSeedNoExtremeOutliers) {
   int max_bar_violations = 0;
 
   for (uint32_t seed = 1; seed <= 20; ++seed) {
-    Episode ep = generateEpisode(subject_, 0, kTicksPerBar * 4,
-                                  Key::C, Key::C, 3, seed, 0, 0.5f);
+    Episode ep = generateEpisode(subject_, 0, kTicksPerBar * 4, Key::C, Key::C, 3, seed, 0, 0.5f);
 
     ConsonanceStats stats = analyzeConsonance(ep);
     if (stats.bar_tick_violations > max_bar_violations) {
@@ -220,8 +212,7 @@ TEST_F(EpisodeConsonanceTest, AllCharactersBoundedViolations) {
     int total_checks = 0;
 
     for (uint32_t seed = 1; seed <= 5; ++seed) {
-      Episode ep = generateEpisode(subject, 0, kTicksPerBar * 4,
-                                    Key::C, Key::C, 3, seed, 0, 0.5f);
+      Episode ep = generateEpisode(subject, 0, kTicksPerBar * 4, Key::C, Key::C, 3, seed, 0, 0.5f);
 
       ConsonanceStats stats = analyzeConsonance(ep);
       total_violations += stats.bar_tick_violations;
@@ -229,12 +220,10 @@ TEST_F(EpisodeConsonanceTest, AllCharactersBoundedViolations) {
     }
 
     if (total_checks > 0) {
-      float rate = static_cast<float>(total_violations) /
-                   static_cast<float>(total_checks);
-      EXPECT_LT(rate, 1.5f)
-          << names[char_idx] << ": " << total_violations
-          << " bar-tick violations in " << total_checks << " checks"
-          << " (rate = " << rate << ")";
+      float rate = static_cast<float>(total_violations) / static_cast<float>(total_checks);
+      EXPECT_LT(rate, 1.5f) << names[char_idx] << ": " << total_violations
+                            << " bar-tick violations in " << total_checks << " checks"
+                            << " (rate = " << rate << ")";
     }
   }
 }
@@ -248,8 +237,7 @@ TEST_F(EpisodeConsonanceTest, TwoVoiceBoundedViolations) {
   int total_checks = 0;
 
   for (uint32_t seed = 1; seed <= 10; ++seed) {
-    Episode ep = generateEpisode(subject_, 0, kTicksPerBar * 4,
-                                  Key::C, Key::C, 2, seed, 0, 0.5f);
+    Episode ep = generateEpisode(subject_, 0, kTicksPerBar * 4, Key::C, Key::C, 2, seed, 0, 0.5f);
 
     ConsonanceStats stats = analyzeConsonance(ep);
     total_violations += stats.bar_tick_violations;
@@ -259,11 +247,9 @@ TEST_F(EpisodeConsonanceTest, TwoVoiceBoundedViolations) {
   // Two voices means only one vertical pair per tick. Violation rate should
   // be lower than 3+ voice episodes.
   if (total_checks > 0) {
-    float rate = static_cast<float>(total_violations) /
-                 static_cast<float>(total_checks);
-    EXPECT_LT(rate, 1.0f)
-        << total_violations << " violations in " << total_checks
-        << " bar-tick groups across 10 seeds (2 voices)";
+    float rate = static_cast<float>(total_violations) / static_cast<float>(total_checks);
+    EXPECT_LT(rate, 1.0f) << total_violations << " violations in " << total_checks
+                          << " bar-tick groups across 10 seeds (2 voices)";
   }
 }
 
@@ -274,8 +260,7 @@ TEST_F(EpisodeConsonanceTest, TwoVoiceBoundedViolations) {
 TEST_F(EpisodeConsonanceTest, ModulatedEpisodeBoundedViolations) {
   int max_violations = 0;
   for (uint32_t seed = 1; seed <= 10; ++seed) {
-    Episode ep = generateEpisode(subject_, 0, kTicksPerBar * 4,
-                                  Key::C, Key::G, 3, seed, 0, 0.5f);
+    Episode ep = generateEpisode(subject_, 0, kTicksPerBar * 4, Key::C, Key::G, 3, seed, 0, 0.5f);
 
     ConsonanceStats stats = analyzeConsonance(ep);
     if (stats.bar_tick_violations > max_violations) {
@@ -283,9 +268,8 @@ TEST_F(EpisodeConsonanceTest, ModulatedEpisodeBoundedViolations) {
     }
   }
 
-  EXPECT_LE(max_violations, 8)
-      << "Modulated episode worst seed had " << max_violations
-      << " bar-tick violations";
+  EXPECT_LE(max_violations, 8) << "Modulated episode worst seed had " << max_violations
+                               << " bar-tick violations";
 }
 
 // ---------------------------------------------------------------------------
@@ -297,9 +281,8 @@ TEST_F(EpisodeConsonanceTest, InvertibleBoundedViolations) {
   int total_checks = 0;
 
   for (uint32_t seed = 1; seed <= 10; ++seed) {
-    Episode ep = generateEpisode(subject_, 0, kTicksPerBar * 4,
-                                  Key::C, Key::C, 3, seed,
-                                  /*episode_index=*/1, 0.5f);
+    Episode ep = generateEpisode(subject_, 0, kTicksPerBar * 4, Key::C, Key::C, 3, seed,
+                                 /*episode_index=*/1, 0.5f);
 
     ConsonanceStats stats = analyzeConsonance(ep);
     total_violations += stats.bar_tick_violations;
@@ -307,11 +290,9 @@ TEST_F(EpisodeConsonanceTest, InvertibleBoundedViolations) {
   }
 
   if (total_checks > 0) {
-    float rate = static_cast<float>(total_violations) /
-                 static_cast<float>(total_checks);
-    EXPECT_LT(rate, 1.5f)
-        << total_violations << " violations in " << total_checks
-        << " bar-tick groups across 10 seeds (invertible counterpoint)";
+    float rate = static_cast<float>(total_violations) / static_cast<float>(total_checks);
+    EXPECT_LT(rate, 1.5f) << total_violations << " violations in " << total_checks
+                          << " bar-tick groups across 10 seeds (invertible counterpoint)";
   }
 }
 
@@ -325,8 +306,7 @@ TEST_F(EpisodeConsonanceTest, EmptySubjectNoViolations) {
   empty.is_minor = false;
   empty.character = SubjectCharacter::Severe;
 
-  Episode ep = generateEpisode(empty, 0, kTicksPerBar * 4,
-                                Key::C, Key::C, 3, 42, 0, 0.5f);
+  Episode ep = generateEpisode(empty, 0, kTicksPerBar * 4, Key::C, Key::C, 3, 42, 0, 0.5f);
 
   // Should handle gracefully: no notes, no violations to check.
   ConsonanceStats stats = analyzeConsonance(ep);
@@ -343,8 +323,7 @@ TEST_F(EpisodeConsonanceTest, BarBoundaryNotesExist) {
   bool found_multi_voice_bar = false;
 
   for (uint32_t seed = 1; seed <= 10; ++seed) {
-    Episode ep = generateEpisode(subject_, 0, kTicksPerBar * 4,
-                                  Key::C, Key::C, 3, seed, 0, 0.5f);
+    Episode ep = generateEpisode(subject_, 0, kTicksPerBar * 4, Key::C, Key::C, 3, seed, 0, 0.5f);
 
     std::map<Tick, std::vector<uint8_t>> tick_pitches;
     for (const auto& note : ep.notes) {
@@ -358,7 +337,8 @@ TEST_F(EpisodeConsonanceTest, BarBoundaryNotesExist) {
         break;
       }
     }
-    if (found_multi_voice_bar) break;
+    if (found_multi_voice_bar)
+      break;
   }
 
   EXPECT_TRUE(found_multi_voice_bar)
@@ -372,8 +352,7 @@ TEST_F(EpisodeConsonanceTest, BarBoundaryNotesExist) {
 TEST_F(EpisodeConsonanceTest, HighEnergyBoundedViolations) {
   int max_violations = 0;
   for (uint32_t seed = 1; seed <= 10; ++seed) {
-    Episode ep = generateEpisode(subject_, 0, kTicksPerBar * 4,
-                                  Key::C, Key::C, 3, seed, 0, 0.9f);
+    Episode ep = generateEpisode(subject_, 0, kTicksPerBar * 4, Key::C, Key::C, 3, seed, 0, 0.9f);
 
     ConsonanceStats stats = analyzeConsonance(ep);
     if (stats.bar_tick_violations > max_violations) {
@@ -381,9 +360,8 @@ TEST_F(EpisodeConsonanceTest, HighEnergyBoundedViolations) {
     }
   }
 
-  EXPECT_LE(max_violations, 12)
-      << "High-energy episode worst seed had " << max_violations
-      << " bar-tick violations";
+  EXPECT_LE(max_violations, 12) << "High-energy episode worst seed had " << max_violations
+                                << " bar-tick violations";
 }
 
 }  // namespace

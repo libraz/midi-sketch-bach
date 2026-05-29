@@ -19,11 +19,11 @@ enum class SuspensionType : uint8_t {
 /// @brief A single suspension event in a chain.
 struct SuspensionEvent {
   SuspensionType type;
-  Tick preparation_tick = 0;  ///< Consonant preparation beat.
-  Tick dissonance_tick = 0;   ///< Held note becomes dissonant (strong beat).
-  Tick resolution_tick = 0;   ///< Stepwise resolution.
-  uint8_t suspended_pitch = 0;    ///< The held pitch.
-  uint8_t resolution_pitch = 0;   ///< The resolution target pitch.
+  Tick preparation_tick = 0;     ///< Consonant preparation beat.
+  Tick dissonance_tick = 0;      ///< Held note becomes dissonant (strong beat).
+  Tick resolution_tick = 0;      ///< Stepwise resolution.
+  uint8_t suspended_pitch = 0;   ///< The held pitch.
+  uint8_t resolution_pitch = 0;  ///< The resolution target pitch.
   VoiceId voice = 0;
 };
 
@@ -66,9 +66,8 @@ SuspensionChain generateSuspensionChain(Tick start_tick, uint8_t num_suspensions
 /// @param scale Scale type for pitch computation.
 /// @return Generated suspension chain with diatonic resolution pitches.
 SuspensionChain generateSuspensionChain(Tick start_tick, uint8_t num_suspensions,
-                                        uint8_t base_pitch, VoiceId voice,
-                                        SuspensionType type, Key key,
-                                        ScaleType scale);
+                                        uint8_t base_pitch, VoiceId voice, SuspensionType type,
+                                        Key key, ScaleType scale);
 
 /// @brief Convert SuspensionType to human-readable string.
 const char* suspensionTypeToString(SuspensionType type);

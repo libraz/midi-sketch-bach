@@ -9,8 +9,7 @@
 
 namespace bach {
 
-bool hasCrossRelation(const std::vector<NoteEvent>& notes,
-                      uint8_t num_voices, uint8_t voice,
+bool hasCrossRelation(const std::vector<NoteEvent>& notes, uint8_t num_voices, uint8_t voice,
                       uint8_t pitch, Tick tick) {
   int pitch_class = getPitchClass(pitch);
   // Track which voices we've already checked (one sounding note per voice).
@@ -18,12 +17,14 @@ bool hasCrossRelation(const std::vector<NoteEvent>& notes,
   checked[voice] = true;
 
   for (const auto& other_note : notes) {
-    if (other_note.voice == voice) continue;
-    if (other_note.voice >= num_voices || other_note.voice >= 5) continue;
-    if (checked[other_note.voice]) continue;
+    if (other_note.voice == voice)
+      continue;
+    if (other_note.voice >= num_voices || other_note.voice >= 5)
+      continue;
+    if (checked[other_note.voice])
+      continue;
     // Check if this note is sounding at the given tick.
-    if (other_note.start_tick <= tick &&
-        other_note.start_tick + other_note.duration > tick) {
+    if (other_note.start_tick <= tick && other_note.start_tick + other_note.duration > tick) {
       checked[other_note.voice] = true;
       int other_pc = getPitchClass(other_note.pitch);
       int diff = std::abs(pitch_class - other_pc);
@@ -31,9 +32,12 @@ bool hasCrossRelation(const std::vector<NoteEvent>& notes,
         // Exclude natural half-steps E/F and B/C.
         int low_pc = std::min(pitch_class, other_pc);
         int high_pc = std::max(pitch_class, other_pc);
-        if (low_pc == 4 && high_pc == 5) continue;   // E/F
-        if (low_pc == 0 && high_pc == 11) continue;   // B/C (wrapped)
-        if (low_pc == 0 && high_pc == 1) continue;    // B#/C enharmonic
+        if (low_pc == 4 && high_pc == 5)
+          continue;  // E/F
+        if (low_pc == 0 && high_pc == 11)
+          continue;  // B/C (wrapped)
+        if (low_pc == 0 && high_pc == 1)
+          continue;  // B#/C enharmonic
         return true;
       }
     }

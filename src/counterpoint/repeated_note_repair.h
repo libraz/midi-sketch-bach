@@ -39,6 +39,13 @@ struct RepeatedNoteRepairParams {
   /// Candidates outside this range are rejected.
   std::function<std::pair<uint8_t, uint8_t>(uint8_t)> voice_range;
 
+  /// Whether coda notes may be repaired.  Defaults to false because coda notes
+  /// are structural in most forms; fugue coda figuration may opt in.
+  bool repair_coda = false;
+
+  /// If non-negative, only this coda voice may be repaired.
+  int repair_coda_voice = -1;
+
   /// Optional: vertical safety check. Returns true if the candidate pitch
   /// is acceptable at the given tick in the given voice. Returns false if
   /// the candidate would create parallel 5ths/octaves or other problematic
@@ -60,8 +67,7 @@ struct RepeatedNoteRepairParams {
 /// @param notes All notes across all voices (modified in place).
 /// @param params Configuration for repair behavior.
 /// @return Number of notes actually modified.
-int repairRepeatedNotes(std::vector<NoteEvent>& notes,
-                        const RepeatedNoteRepairParams& params);
+int repairRepeatedNotes(std::vector<NoteEvent>& notes, const RepeatedNoteRepairParams& params);
 
 }  // namespace bach
 

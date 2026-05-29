@@ -9,8 +9,8 @@ namespace bach {
 
 const std::string VoiceManager::kEmptyName;
 
-void VoiceManager::registerVoice(VoiceId voice_id, const std::string& name,
-                                 uint8_t low_pitch, uint8_t high_pitch) {
+void VoiceManager::registerVoice(VoiceId voice_id, const std::string& name, uint8_t low_pitch,
+                                 uint8_t high_pitch) {
   // Avoid duplicate insertion into the ordered list.
   if (voices_.find(voice_id) == voices_.end()) {
     voice_order_.push_back(voice_id);
@@ -51,7 +51,9 @@ float VoiceManager::pitchPenalty(VoiceId voice_id, uint8_t pitch) const {
   return static_cast<float>(pitch - info.high) * kPenaltyPerSemitone;
 }
 
-size_t VoiceManager::voiceCount() const { return voices_.size(); }
+size_t VoiceManager::voiceCount() const {
+  return voices_.size();
+}
 
 std::vector<VoiceId> VoiceManager::getVoiceIds() const {
   return voice_order_;

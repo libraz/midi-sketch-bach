@@ -53,16 +53,14 @@ NoteEvent offBeat(int index, uint8_t pitch, uint8_t voice = 0,
 }
 
 // Sort notes by (voice, start_tick) to find a particular note.
-const NoteEvent& findNote(const std::vector<NoteEvent>& notes,
-                          uint8_t voice, int index) {
+const NoteEvent& findNote(const std::vector<NoteEvent>& notes, uint8_t voice, int index) {
   std::vector<const NoteEvent*> voice_notes;
   for (const auto& n : notes) {
-    if (n.voice == voice) voice_notes.push_back(&n);
+    if (n.voice == voice)
+      voice_notes.push_back(&n);
   }
   std::sort(voice_notes.begin(), voice_notes.end(),
-            [](const NoteEvent* a, const NoteEvent* b) {
-              return a->start_tick < b->start_tick;
-            });
+            [](const NoteEvent* a, const NoteEvent* b) { return a->start_tick < b->start_tick; });
   return *voice_notes[static_cast<size_t>(index)];
 }
 
@@ -191,7 +189,7 @@ TEST(LeapResolution, FB2_ZigzagNotProtected) {
   // C4->G4 (P5 up), then A4 (up, same dir, not resolved).
   std::vector<NoteEvent> notes = {
       offBeat(0, 60), offBeat(1, 67), offBeat(2, 69),  // leap + same dir
-      offBeat(3, 67), offBeat(4, 69)  // zigzag after
+      offBeat(3, 67), offBeat(4, 69)                   // zigzag after
   };
   auto params = makeDefaultParams(1);
   // dir_a = sign(69-67) = +1, dir_b = sign(67-69) = -1. Not same -> P4 doesn't protect.
@@ -203,12 +201,19 @@ TEST(LeapResolution, FB3_StrongBeatProtected) {
   // notes[k+2] on a strong beat (tick % kTicksPerBeat == 0) + non-leading-tone
   // -> protected.
   std::vector<NoteEvent> notes = {
-      makeNote(240, 60, 0),    // off-beat
-      makeNote(480, 67, 0),    // beat 1 (on-beat but this is k+1)
-      makeNote(960, 69, 0)     // beat 2 (strong beat, this is k+2, non-leading-tone A)
+      makeNote(240, 60, 0),  // off-beat
+      makeNote(480, 67, 0),  // beat 1 (on-beat but this is k+1)
+      makeNote(960, 69, 0)   // beat 2 (strong beat, this is k+2, non-leading-tone A)
   };
   auto params = makeDefaultParams(1);
   EXPECT_EQ(resolveLeaps(notes, params), 0);  // Protected: strong beat + non-leading-tone.
+}
+
+TEST(LeapResolution, FB3_StrongBeatProtectionCanBeDisabled) {
+  std::vector<NoteEvent> notes = {makeNote(240, 60, 0), makeNote(480, 67, 0), makeNote(960, 69, 0)};
+  auto params = makeDefaultParams(1);
+  params.protect_strong_beat_resolution = false;
+  EXPECT_EQ(resolveLeaps(notes, params), 1);
 }
 
 TEST(LeapResolution, FB3_LeadingToneOnStrongBeatNotProtected) {
@@ -216,9 +221,9 @@ TEST(LeapResolution, FB3_LeadingToneOnStrongBeatNotProtected) {
   // C4->G4 (P5=7st up), then B4 on strong beat.
   // B (pitch class 11) is leading tone in C major. abs_leap = 7 >= 7. -> NOT protected.
   std::vector<NoteEvent> notes = {
-      makeNote(240, 60, 0),    // off-beat
-      makeNote(720, 67, 0),    // off-beat (this is k+1)
-      makeNote(960, 71, 0)     // strong beat, B4=leading tone, k+2
+      makeNote(240, 60, 0),  // off-beat
+      makeNote(720, 67, 0),  // off-beat (this is k+1)
+      makeNote(960, 71, 0)   // strong beat, B4=leading tone, k+2
   };
   auto params = makeDefaultParams(1);
   int modified = resolveLeaps(notes, params);
@@ -232,8 +237,8 @@ TEST(LeapResolution, FB3_LeadingToneOnStrongBeatNotProtected) {
 TEST(LeapResolution, SPA_BarlineCrossTonicProtected) {
   // notes[k+1] in bar 0, notes[k+2] in bar 1. Next bar is tonic -> protect.
   std::vector<NoteEvent> notes = {
-      offBeat(0, 60),      // bar 0
-      offBeat(2, 67),      // bar 0 (tick ~1200)
+      offBeat(0, 60),              // bar 0
+      offBeat(2, 67),              // bar 0 (tick ~1200)
       makeNote(1920 + 240, 69, 0)  // bar 1, off-beat (tick 2160)
   };
   auto params = makeDefaultParams(1);
@@ -248,9 +253,7 @@ TEST(LeapResolution, SPA_BarlineCrossTonicProtected) {
 TEST(LeapResolution, SPA_BarlineCrossNonTonicAllowed) {
   // Same bar crossing but next bar is NOT tonic -> modification allowed.
   std::vector<NoteEvent> notes = {
-      offBeat(0, 60),
-      offBeat(2, 67),
-      makeNote(1920 + 240, 69, 0)  // bar 1, off-beat
+      offBeat(0, 60), offBeat(2, 67), makeNote(1920 + 240, 69, 0)  // bar 1, off-beat
   };
   auto params = makeDefaultParams(1);
   // is_chord_tone: returns false for tonic pitch -> non-tonic bar.
@@ -268,8 +271,10 @@ TEST(LeapResolution, SPB_PreviousHarmonyResolution) {
   Tick tick1 = notes[1].start_tick;
   Tick tick2 = notes[2].start_tick;
   params.is_chord_tone = [tick1, tick2](Tick t, uint8_t p) {
-    if (t == tick2) return false;  // Not chord tone at current tick.
-    if (t == tick1 && p == 65) return true;  // F is chord tone at previous tick.
+    if (t == tick2)
+      return false;  // Not chord tone at current tick.
+    if (t == tick1 && p == 65)
+      return true;  // F is chord tone at previous tick.
     return false;
   };
   EXPECT_EQ(resolveLeaps(notes, params), 0);  // Preserved: previous harmony resolution.
@@ -281,9 +286,8 @@ TEST(LeapResolution, SPC_TwoConsecutiveStepChainProtected) {
   // C4->G4 (P5 up), then F4(65), E4(64), D4(62) -- all descending steps.
   // dir_a = sign(65-67) = -1, dir_b = sign(64-65) = -1, dir_c = sign(62-64) = -1.
   // All same. step_a = |65-67| = 2 <= 2, step_b = |64-65| = 1 <= 2. -> Protected.
-  std::vector<NoteEvent> notes = {
-      offBeat(0, 60), offBeat(1, 67), offBeat(2, 65), offBeat(3, 64), offBeat(4, 62)
-  };
+  std::vector<NoteEvent> notes = {offBeat(0, 60), offBeat(1, 67), offBeat(2, 65), offBeat(3, 64),
+                                  offBeat(4, 62)};
   auto params = makeDefaultParams(1);
   params.is_chord_tone = [](Tick, uint8_t) { return false; };
   // Contrary step from 67->65 (down 2) but not chord tone, not tendency.
@@ -295,7 +299,7 @@ TEST(LeapResolution, SPC_SingleStepNotProtected) {
   // After leap, k+2 steps, but k+3 changes direction -> not 2 consecutive same-dir.
   std::vector<NoteEvent> notes = {
       offBeat(0, 60), offBeat(1, 67), offBeat(2, 69),  // same dir (not resolved)
-      offBeat(3, 67), offBeat(4, 69)  // direction changes
+      offBeat(3, 67), offBeat(4, 69)                   // direction changes
   };
   auto params = makeDefaultParams(1);
   // dir_a = +1 (69>67), dir_b = -1 (67<69). Not same -> P4 doesn't protect.
@@ -308,9 +312,9 @@ TEST(LeapResolution, SPD_LeadingToneSmallLeapProtected) {
   // D4(62)->G4(67), P4 up (5st). notes[k+2] = B4(71) on strong beat.
   // B is leading tone. abs_leap = 5 < 7. -> Protected by P2.
   std::vector<NoteEvent> notes = {
-      makeNote(240, 62, 0),    // off-beat
-      makeNote(480, 67, 0),    // beat 1
-      makeNote(960, 71, 0)     // strong beat, B = leading tone
+      makeNote(240, 62, 0),  // off-beat
+      makeNote(480, 67, 0),  // beat 1
+      makeNote(960, 71, 0)   // strong beat, B = leading tone
   };
   auto params = makeDefaultParams(1);
   EXPECT_EQ(resolveLeaps(notes, params), 0);  // Protected: small leap + strong-beat LT.
@@ -320,9 +324,8 @@ TEST(LeapResolution, SPD_LeadingToneLargeLeapModified) {
   // Leap >= 7st (P5 = 7st), leading tone on strong beat -> NOT protected.
   // C4(60)->G4(67), P5 up (7st). notes[k+2] = B4(71) on strong beat.
   std::vector<NoteEvent> notes = {
-      makeNote(240, 60, 0),
-      makeNote(720, 67, 0),
-      makeNote(960, 71, 0)     // strong beat, B = leading tone, but large leap
+      makeNote(240, 60, 0), makeNote(720, 67, 0),
+      makeNote(960, 71, 0)  // strong beat, B = leading tone, but large leap
   };
   auto params = makeDefaultParams(1);
   int modified = resolveLeaps(notes, params);
@@ -339,9 +342,8 @@ TEST(LeapResolution, FA_SequencePatternProtected) {
   // k=0: leap 60->69 (M6=9st). notes[k+2]=66 (F#4, not in C major).
   // Without PF, the algorithm would replace 66 with G4(67).
   // PF detects the repeating interval pattern and protects notes[k+2].
-  std::vector<NoteEvent> notes = {
-      offBeat(0, 60), offBeat(1, 69), offBeat(2, 66), offBeat(3, 75), offBeat(4, 72)
-  };
+  std::vector<NoteEvent> notes = {offBeat(0, 60), offBeat(1, 69), offBeat(2, 66), offBeat(3, 75),
+                                  offBeat(4, 72)};
   auto params = makeDefaultParams(1);
   params.is_chord_tone = [](Tick, uint8_t) { return false; };
   uint8_t original_k2 = notes[2].pitch;  // 66
@@ -357,7 +359,7 @@ TEST(LeapResolution, FB_AlreadyModifiedSkipped) {
   notes[2].modified_by = static_cast<uint8_t>(NoteModifiedBy::LeapResolution);
   auto params = makeDefaultParams(1);
   EXPECT_EQ(resolveLeaps(notes, params), 0);  // Skipped: already modified.
-  EXPECT_EQ(notes[2].pitch, 69);  // Unchanged.
+  EXPECT_EQ(notes[2].pitch, 69);              // Unchanged.
 }
 
 TEST(LeapResolution, FC_SeventhToSixthResolution) {
@@ -380,8 +382,7 @@ TEST(LeapResolution, FC_SeventhToSixthResolution) {
 TEST(LeapResolution, ImmutableProtected) {
   // FugueSubject -> Immutable -> skip.
   std::vector<NoteEvent> notes = {
-      offBeat(0, 60),
-      offBeat(1, 67),
+      offBeat(0, 60), offBeat(1, 67),
       offBeat(2, 69, 0, BachNoteSource::FugueSubject)  // Immutable source.
   };
   auto params = makeDefaultParams(1);
@@ -390,11 +391,8 @@ TEST(LeapResolution, ImmutableProtected) {
 
 TEST(LeapResolution, StructuralProtected) {
   // FugueAnswer -> Structural -> skip.
-  std::vector<NoteEvent> notes = {
-      offBeat(0, 60),
-      offBeat(1, 67),
-      offBeat(2, 69, 0, BachNoteSource::FugueAnswer)
-  };
+  std::vector<NoteEvent> notes = {offBeat(0, 60), offBeat(1, 67),
+                                  offBeat(2, 69, 0, BachNoteSource::FugueAnswer)};
   auto params = makeDefaultParams(1);
   EXPECT_EQ(resolveLeaps(notes, params), 0);
 }
@@ -405,6 +403,14 @@ TEST(LeapResolution, ChordToneLandingProtected) {
   auto params = makeDefaultParams(1);
   params.is_chord_tone = [](Tick, uint8_t p) { return p == 69; };  // A is chord tone.
   EXPECT_EQ(resolveLeaps(notes, params), 0);
+}
+
+TEST(LeapResolution, ChordToneLandingProtectionCanBeDisabled) {
+  std::vector<NoteEvent> notes = {offBeat(0, 60), offBeat(1, 67), offBeat(2, 69)};
+  auto params = makeDefaultParams(1);
+  params.is_chord_tone = [](Tick, uint8_t p) { return p == 69; };
+  params.protect_chord_tone_resolution = false;
+  EXPECT_EQ(resolveLeaps(notes, params), 1);
 }
 
 // ---------------------------------------------------------------------------
@@ -546,7 +552,7 @@ TEST(LeapResolution, LeadingToneResolutionPreserved) {
 TEST(LeapDetail, IsLeadingTone_Major) {
   // B (pc=11) is leading tone in C major.
   EXPECT_TRUE(leap_detail::isLeadingTone(71, Key::C, ScaleType::Major));
-  EXPECT_TRUE(leap_detail::isLeadingTone(59, Key::C, ScaleType::Major));  // B3
+  EXPECT_TRUE(leap_detail::isLeadingTone(59, Key::C, ScaleType::Major));   // B3
   EXPECT_FALSE(leap_detail::isLeadingTone(69, Key::C, ScaleType::Major));  // A, not leading.
 }
 
@@ -667,6 +673,24 @@ TEST(LeapResolution, ChordToneGetsPreferenceInWiderFallback) {
   int modified = resolveLeaps(notes, params);
   EXPECT_EQ(modified, 1);
   EXPECT_EQ(findNote(notes, 0, 2).pitch, 65);  // F4: chord tone + wider fallback.
+}
+
+TEST(LeapResolution, SourceFilterRestrictsLeapLandingSource) {
+  std::vector<NoteEvent> notes = {
+      offBeat(0, 60, 0, BachNoteSource::EpisodeMaterial),
+      offBeat(1, 67, 0, BachNoteSource::EpisodeMaterial),
+      offBeat(2, 69, 0, BachNoteSource::FreeCounterpoint),
+  };
+  auto params = makeDefaultParams(1);
+  params.applies_to_leap_source = [](BachNoteSource source) {
+    return source == BachNoteSource::FreeCounterpoint;
+  };
+  EXPECT_EQ(resolveLeaps(notes, params), 0);
+  EXPECT_EQ(findNote(notes, 0, 2).pitch, 69);
+
+  notes[1].source = BachNoteSource::FreeCounterpoint;
+  EXPECT_EQ(resolveLeaps(notes, params), 1);
+  EXPECT_EQ(findNote(notes, 0, 2).pitch, 65);
 }
 
 }  // namespace

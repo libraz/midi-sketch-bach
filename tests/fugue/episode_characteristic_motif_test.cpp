@@ -1,8 +1,7 @@
-#include "fugue/episode.h"
-
 #include <gtest/gtest.h>
 
 #include "core/basic_types.h"
+#include "fugue/episode.h"
 #include "fugue/subject.h"
 
 namespace bach {

@@ -44,23 +44,20 @@ NoteEvent makeNote(Tick tick, uint8_t pitch, uint8_t voice,
 
 /// @brief Create a run of consecutive notes at quarter-note spacing with the
 /// same pitch in a single voice.
-std::vector<NoteEvent> makeRun(int count, uint8_t pitch, uint8_t voice,
-                               Tick start_tick = 0,
+std::vector<NoteEvent> makeRun(int count, uint8_t pitch, uint8_t voice, Tick start_tick = 0,
                                BachNoteSource source = BachNoteSource::FreeCounterpoint) {
   std::vector<NoteEvent> notes;
   notes.reserve(static_cast<size_t>(count));
   for (int i = 0; i < count; ++i) {
     notes.push_back(
-        makeNote(start_tick + static_cast<Tick>(i) * kTicksPerBeat,
-                 pitch, voice, source));
+        makeNote(start_tick + static_cast<Tick>(i) * kTicksPerBeat, pitch, voice, source));
   }
   return notes;
 }
 
 /// @brief Check if the RepeatedNoteRep flag is set on a note.
 bool hasRepairFlag(const NoteEvent& note) {
-  return (note.modified_by &
-          static_cast<uint8_t>(NoteModifiedBy::RepeatedNoteRep)) != 0;
+  return (note.modified_by & static_cast<uint8_t>(NoteModifiedBy::RepeatedNoteRep)) != 0;
 }
 
 // ---------------------------------------------------------------------------
@@ -99,8 +96,7 @@ TEST(RepeatedNoteRepairTest, RunAboveThreshold_RepairsExcess) {
 
   // First 3 notes unchanged.
   for (int i = 0; i < 3; ++i) {
-    EXPECT_EQ(notes[static_cast<size_t>(i)].pitch, 60)
-        << "Note " << i << " should be unchanged";
+    EXPECT_EQ(notes[static_cast<size_t>(i)].pitch, 60) << "Note " << i << " should be unchanged";
     EXPECT_FALSE(hasRepairFlag(notes[static_cast<size_t>(i)]));
   }
 
@@ -135,6 +131,50 @@ TEST(RepeatedNoteRepairTest, StructuralSourceProtected) {
   for (const auto& n : notes) {
     EXPECT_EQ(n.pitch, 60);
     EXPECT_FALSE(hasRepairFlag(n));
+  }
+}
+
+TEST(RepeatedNoteRepairTest, CodaProtectedByDefault) {
+  auto notes = makeRun(5, 60, 0, 0, BachNoteSource::Coda);
+
+  auto params = makeDefaultParams(1);
+  params.max_consecutive = 3;
+
+  int modified = repairRepeatedNotes(notes, params);
+
+  EXPECT_EQ(modified, 0);
+  for (const auto& note : notes) {
+    EXPECT_EQ(note.pitch, 60);
+    EXPECT_FALSE(hasRepairFlag(note));
+  }
+}
+
+TEST(RepeatedNoteRepairTest, CodaOptInRepairsOnlySelectedVoice) {
+  std::vector<NoteEvent> notes;
+  auto voice0 = makeRun(5, 60, 0, 0, BachNoteSource::Coda);
+  auto voice2 = makeRun(5, 67, 2, 0, BachNoteSource::Coda);
+  notes.insert(notes.end(), voice0.begin(), voice0.end());
+  notes.insert(notes.end(), voice2.begin(), voice2.end());
+
+  auto params = makeDefaultParams(3);
+  params.max_consecutive = 3;
+  params.repair_coda = true;
+  params.repair_coda_voice = 2;
+
+  int modified = repairRepeatedNotes(notes, params);
+
+  EXPECT_EQ(modified, 2);
+  for (int idx = 0; idx < 5; ++idx) {
+    EXPECT_EQ(notes[static_cast<size_t>(idx)].pitch, 60);
+    EXPECT_FALSE(hasRepairFlag(notes[static_cast<size_t>(idx)]));
+  }
+  for (int idx = 5; idx < 8; ++idx) {
+    EXPECT_EQ(notes[static_cast<size_t>(idx)].pitch, 67);
+    EXPECT_FALSE(hasRepairFlag(notes[static_cast<size_t>(idx)]));
+  }
+  for (int idx = 8; idx < 10; ++idx) {
+    EXPECT_NE(notes[static_cast<size_t>(idx)].pitch, 67);
+    EXPECT_TRUE(hasRepairFlag(notes[static_cast<size_t>(idx)]));
   }
 }
 
@@ -218,14 +258,12 @@ TEST(RepeatedNoteRepairTest, ScaleDegreeReplacement) {
 
     // Must be a C major scale tone.
     EXPECT_TRUE(scale_util::isScaleTone(p, Key::C, ScaleType::Major))
-        << "Replacement pitch " << static_cast<int>(p)
-        << " is not a C major scale tone";
+        << "Replacement pitch " << static_cast<int>(p) << " is not a C major scale tone";
 
     // Must be within 3 semitones of base pitch 60.
     int diff = std::abs(static_cast<int>(p) - 60);
-    EXPECT_LE(diff, 3)
-        << "Replacement pitch " << static_cast<int>(p)
-        << " is " << diff << " semitones from base (max 3)";
+    EXPECT_LE(diff, 3) << "Replacement pitch " << static_cast<int>(p) << " is " << diff
+                       << " semitones from base (max 3)";
   }
 }
 
@@ -293,8 +331,7 @@ TEST(RepeatedNoteRepairTest, DirectionAlternation) {
   notes.push_back(makeNote(0, 58, 0));
   // Run of 8 C4 notes.
   for (int i = 0; i < 8; ++i) {
-    notes.push_back(
-        makeNote(kTicksPerBeat + static_cast<Tick>(i) * kTicksPerBeat, 60, 0));
+    notes.push_back(makeNote(kTicksPerBeat + static_cast<Tick>(i) * kTicksPerBeat, 60, 0));
   }
 
   auto params = makeDefaultParams(1);
@@ -314,12 +351,9 @@ TEST(RepeatedNoteRepairTest, DirectionAlternation) {
 
   // At least some notes should go up AND some down (alternation).
   if (directions.size() >= 2) {
-    bool has_up = std::any_of(directions.begin(), directions.end(),
-                              [](int d) { return d > 0; });
-    bool has_down = std::any_of(directions.begin(), directions.end(),
-                                [](int d) { return d < 0; });
-    EXPECT_TRUE(has_up && has_down)
-        << "Expected direction alternation among repaired notes";
+    bool has_up = std::any_of(directions.begin(), directions.end(), [](int d) { return d > 0; });
+    bool has_down = std::any_of(directions.begin(), directions.end(), [](int d) { return d < 0; });
+    EXPECT_TRUE(has_up && has_down) << "Expected direction alternation among repaired notes";
   }
 }
 
@@ -423,9 +457,7 @@ TEST(RepeatedNoteRepairTest, VoiceRangeConstraint) {
   auto notes = makeRun(5, 60, 0);
   auto params = makeDefaultParams(1);
   params.max_consecutive = 3;
-  params.voice_range = [](uint8_t) -> std::pair<uint8_t, uint8_t> {
-    return {58, 63};
-  };
+  params.voice_range = [](uint8_t) -> std::pair<uint8_t, uint8_t> { return {58, 63}; };
 
   int modified = repairRepeatedNotes(notes, params);
 
@@ -459,8 +491,7 @@ TEST(RepeatedNoteRepairTest, MixedProtectedAndFlexible) {
   EXPECT_FALSE(hasRepairFlag(notes[3]));
 
   for (int i = 4; i < 7; ++i) {
-    EXPECT_NE(notes[static_cast<size_t>(i)].pitch, 60)
-        << "Note " << i << " should be repaired";
+    EXPECT_NE(notes[static_cast<size_t>(i)].pitch, 60) << "Note " << i << " should be repaired";
     EXPECT_TRUE(hasRepairFlag(notes[static_cast<size_t>(i)]));
   }
 }
@@ -489,8 +520,7 @@ TEST(RepeatedNoteRepairTest, DifferentPitchesNotARun) {
   std::vector<NoteEvent> notes;
   uint8_t pitches[] = {60, 62, 64, 65, 67, 69};
   for (int i = 0; i < 6; ++i) {
-    notes.push_back(makeNote(static_cast<Tick>(i) * kTicksPerBeat,
-                             pitches[i], 0));
+    notes.push_back(makeNote(static_cast<Tick>(i) * kTicksPerBeat, pitches[i], 0));
   }
 
   auto params = makeDefaultParams(1);
@@ -510,10 +540,10 @@ TEST(RepeatedNoteRepairTest, UnsortedNotes_StillWorks) {
   // indices by start_tick, so it should still detect the run.
   std::vector<NoteEvent> notes;
   notes.push_back(makeNote(4 * kTicksPerBeat, 60, 0));  // index 0: tick 1920
-  notes.push_back(makeNote(0, 60, 0));                   // index 1: tick 0
-  notes.push_back(makeNote(2 * kTicksPerBeat, 60, 0));   // index 2: tick 960
-  notes.push_back(makeNote(3 * kTicksPerBeat, 60, 0));   // index 3: tick 1440
-  notes.push_back(makeNote(kTicksPerBeat, 60, 0));       // index 4: tick 480
+  notes.push_back(makeNote(0, 60, 0));                  // index 1: tick 0
+  notes.push_back(makeNote(2 * kTicksPerBeat, 60, 0));  // index 2: tick 960
+  notes.push_back(makeNote(3 * kTicksPerBeat, 60, 0));  // index 3: tick 1440
+  notes.push_back(makeNote(kTicksPerBeat, 60, 0));      // index 4: tick 480
 
   auto params = makeDefaultParams(1);
   params.max_consecutive = 3;

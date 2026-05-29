@@ -1,6 +1,6 @@
-#include "counterpoint/species_rules.h"
-
 #include <gtest/gtest.h>
+
+#include "counterpoint/species_rules.h"
 
 namespace bach {
 namespace {

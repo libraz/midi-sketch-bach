@@ -133,8 +133,7 @@ TEST(SelectDurationTest, EnergyFloorSuppressesShortDurations) {
   // energy=0.2 -> minDuration returns kTicksPerBeat (quarter note).
   for (int i = 0; i < 1000; ++i) {
     Tick dur = FugueEnergyCurve::selectDuration(0.2f, 0, rng, 0);
-    EXPECT_GE(dur, kTicksPerBeat)
-        << "Low energy (0.2) should never produce sub-quarter durations";
+    EXPECT_GE(dur, kTicksPerBeat) << "Low energy (0.2) should never produce sub-quarter durations";
   }
 }
 
@@ -150,8 +149,10 @@ TEST(SelectDurationTest, BarStartFavorsLongNotes) {
     rng_off.seed(static_cast<uint32_t>(i));
     Tick d_bar = FugueEnergyCurve::selectDuration(0.5f, 0, rng_bar, 0);
     Tick d_off = FugueEnergyCurve::selectDuration(0.5f, kTicksPerBeat, rng_off, 0);
-    if (d_bar >= kTicksPerBeat * 2) bar_long++;
-    if (d_off >= kTicksPerBeat * 2) off_long++;
+    if (d_bar >= kTicksPerBeat * 2)
+      bar_long++;
+    if (d_off >= kTicksPerBeat * 2)
+      off_long++;
   }
   EXPECT_GT(bar_long, off_long)
       << "Bar start (tick=0) should produce more half-note-or-longer than offbeat";
@@ -164,7 +165,8 @@ TEST(SelectDurationTest, ComplementarityPrefersContrast) {
   for (int i = 0; i < kTrials; ++i) {
     // other_dur = eighth note (short) should bias toward quarter+.
     Tick dur = FugueEnergyCurve::selectDuration(0.6f, 0, rng, kTicksPerBeat / 2);
-    if (dur >= kTicksPerBeat) long_count++;
+    if (dur >= kTicksPerBeat)
+      long_count++;
   }
   EXPECT_GT(long_count, kTrials / 2)
       << "When other voice has short notes, quarter+ should be majority";
@@ -178,8 +180,7 @@ TEST(SelectDurationTest, HighEnergyReachesAllDurations) {
     seen.insert(dur);
   }
   // All 6 baroque durations should appear at energy=0.8.
-  EXPECT_GE(seen.size(), 5u)
-      << "High energy should produce at least 5 distinct durations";
+  EXPECT_GE(seen.size(), 5u) << "High energy should produce at least 5 distinct durations";
 }
 
 TEST(SelectDurationTest, BarStartLongNoteRatioAboveHalf) {
@@ -188,11 +189,11 @@ TEST(SelectDurationTest, BarStartLongNoteRatioAboveHalf) {
   constexpr int kTrials = 2000;
   for (int i = 0; i < kTrials; ++i) {
     Tick dur = FugueEnergyCurve::selectDuration(0.5f, 0, rng, 0);
-    if (dur >= kTicksPerBeat) long_count++;
+    if (dur >= kTicksPerBeat)
+      long_count++;
   }
   // At bar start with moderate energy, quarter+ should dominate.
-  EXPECT_GT(long_count, kTrials / 2)
-      << "Bar start should produce >50% quarter-note-or-longer";
+  EXPECT_GT(long_count, kTrials / 2) << "Bar start should produce >50% quarter-note-or-longer";
 }
 
 }  // namespace

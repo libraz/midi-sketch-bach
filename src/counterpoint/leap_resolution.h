@@ -48,6 +48,10 @@ struct LeapResolutionParams {
   /// harmonic awareness (falls back to contrary-step-only resolution).
   std::function<bool(Tick tick, uint8_t pitch)> is_chord_tone;
 
+  /// Optional: only resolve leaps whose landing note source passes this
+  /// predicate. Empty = all non-protected flexible sources.
+  std::function<bool(BachNoteSource source)> applies_to_leap_source;
+
   /// Probability of applying leap resolution when a candidate is found.
   /// 1.0 = always resolve (mandatory), 0.0 = never resolve.
   /// Default 0.85 = high-probability bias rather than mandatory rule.
@@ -67,6 +71,16 @@ struct LeapResolutionParams {
   /// create vertical dissonances, or fail other checks.
   /// Default true = search wider alternatives as fallback.
   bool allow_wider_fallback = true;
+
+  /// Protect strong-beat resolution notes from modification. Disable only for
+  /// flexible filler material when the validator's contrary-step rule is a
+  /// stronger signal than preserving the original downbeat pitch.
+  bool protect_strong_beat_resolution = true;
+
+  /// Protect chord-tone resolution notes from modification. Disable only for
+  /// flexible filler material; structural/thematic sources are still protected
+  /// by source level.
+  bool protect_chord_tone_resolution = true;
 };
 
 namespace leap_detail {
@@ -80,8 +94,7 @@ bool isLeadingTone(uint8_t pitch, Key key, ScaleType scale);
 /// resolution: leading tone -> tonic (ascending semitone), fa -> mi
 /// (4th degree descending to 3rd), or 7th -> 6th (prepared seventh
 /// resolving down).
-bool isTendencyResolution(uint8_t prev_pitch, uint8_t curr_pitch,
-                          Key key, ScaleType scale);
+bool isTendencyResolution(uint8_t prev_pitch, uint8_t curr_pitch, Key key, ScaleType scale);
 
 /// @brief Detect sequential interval patterns (for episode protection).
 /// Returns true if pitches[0..count-1] exhibit an interval pattern where
@@ -111,8 +124,7 @@ bool isSequencePattern(const uint8_t* pitches, int count);
 /// @param notes All notes across all voices (modified in place).
 /// @param params Configuration for resolution behavior.
 /// @return Number of notes actually modified.
-int resolveLeaps(std::vector<NoteEvent>& notes,
-                 const LeapResolutionParams& params);
+int resolveLeaps(std::vector<NoteEvent>& notes, const LeapResolutionParams& params);
 
 }  // namespace bach
 

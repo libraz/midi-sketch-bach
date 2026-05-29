@@ -44,14 +44,14 @@ TEST(SpeciesRulesTest, FirstSpeciesNoDissonance) {
 
 TEST(SpeciesRulesTest, SecondSpeciesWeakBeatDissonance) {
   SpeciesRules rules(SpeciesType::Second);
-  EXPECT_FALSE(rules.isDissonanceAllowed(true));   // Strong beat: no
-  EXPECT_TRUE(rules.isDissonanceAllowed(false));   // Weak beat: yes
+  EXPECT_FALSE(rules.isDissonanceAllowed(true));  // Strong beat: no
+  EXPECT_TRUE(rules.isDissonanceAllowed(false));  // Weak beat: yes
 }
 
 TEST(SpeciesRulesTest, ThirdSpeciesWeakBeatDissonance) {
   SpeciesRules rules(SpeciesType::Third);
-  EXPECT_FALSE(rules.isDissonanceAllowed(true));   // Strong beat: no
-  EXPECT_TRUE(rules.isDissonanceAllowed(false));   // Weak beat: yes
+  EXPECT_FALSE(rules.isDissonanceAllowed(true));  // Strong beat: no
+  EXPECT_TRUE(rules.isDissonanceAllowed(false));  // Weak beat: yes
 }
 
 TEST(SpeciesRulesTest, FourthSpeciesSuspensionOnStrongBeat) {

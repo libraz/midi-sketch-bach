@@ -21,6 +21,7 @@
 #include "fugue/fortspinnung.h"
 #include "fugue/motif_pool.h"
 #include "fugue/subject.h"
+#include "fugue/thematic_plan.h"
 #include "fugue/voice_registers.h"
 #include "harmony/harmonic_timeline.h"
 
@@ -55,21 +56,18 @@ namespace {
 ///        preserving accumulated distribution data and gravity scores, then
 ///        voice_range, energy, and phase are overridden from current parameters.
 /// @return Populated EpisodeRequest ready for generateConstraintEpisode().
-EpisodeRequest buildRequest(const Subject& subject, Tick start_tick,
-                            Tick duration_ticks, Key start_key, Key target_key,
-                            uint8_t num_voices, uint32_t seed,
-                            int episode_index, float energy_level,
-                            const MotifPool* pool,
-                            const IRuleEvaluator* rule_eval = nullptr,
-                            const BachRuleEvaluator* crossing_eval = nullptr,
-                            const CounterpointState* cp_state = nullptr,
-                            const SectionAccumulator* pipeline_accum = nullptr,
-                            const HarmonicTimeline* timeline = nullptr,
-                            const ConstraintState* prev_exit_state = nullptr,
-                            const uint8_t* last_pitches = nullptr) {
+EpisodeRequest buildRequest(
+    const Subject& subject, Tick start_tick, Tick duration_ticks, Key start_key, Key target_key,
+    uint8_t num_voices, uint32_t seed, int episode_index, float energy_level, const MotifPool* pool,
+    const IRuleEvaluator* rule_eval = nullptr, const BachRuleEvaluator* crossing_eval = nullptr,
+    const CounterpointState* cp_state = nullptr, const SectionAccumulator* pipeline_accum = nullptr,
+    const HarmonicTimeline* timeline = nullptr, const ConstraintState* prev_exit_state = nullptr,
+    const uint8_t* last_pitches = nullptr, const ThematicPlan* thematic_plan = nullptr) {
   EpisodeRequest req;
   req.start_key = start_key;
   req.end_key = target_key;
+  req.home_key = subject.key;
+  req.home_is_minor = subject.is_minor;
   req.start_tick = start_tick;
   req.duration = duration_ticks;
   req.num_voices = num_voices;
@@ -79,6 +77,7 @@ EpisodeRequest buildRequest(const Subject& subject, Tick start_tick,
   req.energy_level = energy_level;
   req.seed = seed;
   req.motif_pool = pool;
+  req.thematic_plan = thematic_plan;
 
   // Seed entry_state from previous episode's exit state if available.
   // This carries forward accumulated distribution data (rhythm/harmony counts),
@@ -123,8 +122,8 @@ EpisodeRequest buildRequest(const Subject& subject, Tick start_tick,
 
   // Transfer per-voice last pitches for voice-leading continuity.
   if (last_pitches) {
-    for (int i = 0; i < std::min(static_cast<int>(num_voices),
-                                  EpisodeRequest::kMaxRequestVoices); ++i) {
+    for (int i = 0; i < std::min(static_cast<int>(num_voices), EpisodeRequest::kMaxRequestVoices);
+         ++i) {
       req.last_pitches[i] = last_pitches[i];
     }
   }
@@ -142,8 +141,8 @@ EpisodeRequest buildRequest(const Subject& subject, Tick start_tick,
 /// @param target_key Requested target key (used when constraint pipeline
 ///        does not report an achieved key).
 /// @return Episode with notes and key/timing metadata.
-Episode resultToEpisode(const EpisodeResult& res, Tick start_tick,
-                        Tick duration_ticks, Key start_key, Key target_key) {
+Episode resultToEpisode(const EpisodeResult& res, Tick start_tick, Tick duration_ticks,
+                        Key start_key, Key target_key) {
   Episode episode;
   episode.start_tick = start_tick;
   episode.end_tick = start_tick + duration_ticks;
@@ -173,8 +172,7 @@ MotifPool buildPoolFromSubject(const Subject& subject) {
 ///
 /// @param cp_state Counterpoint state to update (modified in place).
 /// @param notes Episode notes to add.
-void syncToCounterpointState(CounterpointState& cp_state,
-                             const std::vector<NoteEvent>& notes) {
+void syncToCounterpointState(CounterpointState& cp_state, const std::vector<NoteEvent>& notes) {
   for (const auto& note : notes) {
     cp_state.addNote(note.voice, note);
   }
@@ -197,27 +195,30 @@ std::vector<NoteEvent> extractMotif(const Subject& subject, size_t max_notes) {
 }
 
 std::vector<NoteEvent> extractTailMotif(const std::vector<NoteEvent>& notes, size_t num_notes) {
-  if (num_notes >= notes.size()) return notes;
+  if (num_notes >= notes.size())
+    return notes;
   return std::vector<NoteEvent>(notes.end() - static_cast<int>(num_notes), notes.end());
 }
 
 std::vector<std::vector<NoteEvent>> fragmentMotif(const std::vector<NoteEvent>& notes,
-                                                   size_t num_fragments) {
+                                                  size_t num_fragments) {
   std::vector<std::vector<NoteEvent>> fragments;
-  if (num_fragments == 0 || notes.empty()) return fragments;
+  if (num_fragments == 0 || notes.empty())
+    return fragments;
   size_t frag_size = notes.size() / num_fragments;
-  if (frag_size == 0) frag_size = 1;
+  if (frag_size == 0)
+    frag_size = 1;
   for (size_t idx = 0; idx < notes.size(); idx += frag_size) {
     size_t end = std::min(idx + frag_size, notes.size());
     fragments.emplace_back(notes.begin() + static_cast<int>(idx),
                            notes.begin() + static_cast<int>(end));
-    if (fragments.size() >= num_fragments) break;
+    if (fragments.size() >= num_fragments)
+      break;
   }
   return fragments;
 }
 
-std::vector<NoteEvent> extractCharacteristicMotif(const Subject& subject,
-                                                   size_t motif_length) {
+std::vector<NoteEvent> extractCharacteristicMotif(const Subject& subject, size_t motif_length) {
   if (subject.notes.size() <= motif_length) {
     return subject.notes;
   }
@@ -239,10 +240,10 @@ std::vector<NoteEvent> extractCharacteristicMotif(const Subject& subject,
           break;
         }
       }
-      if (!found) durations.push_back(subject.notes[idx].duration);
+      if (!found)
+        durations.push_back(subject.notes[idx].duration);
     }
-    score += 0.3f * static_cast<float>(durations.size()) /
-             static_cast<float>(motif_length);
+    score += 0.3f * static_cast<float>(durations.size()) / static_cast<float>(motif_length);
 
     // Intervallic interest: contains a leap (>= 3 semitones).
     bool has_leap = false;
@@ -253,7 +254,8 @@ std::vector<NoteEvent> extractCharacteristicMotif(const Subject& subject,
         break;
       }
     }
-    if (has_leap) score += 0.3f;
+    if (has_leap)
+      score += 0.3f;
 
     // Proximity to opening.
     float proximity = 1.0f - static_cast<float>(start) / static_cast<float>(window_count);
@@ -268,7 +270,8 @@ std::vector<NoteEvent> extractCharacteristicMotif(const Subject& subject,
         break;
       }
     }
-    if (has_root) score += 0.2f;
+    if (has_root)
+      score += 0.2f;
 
     if (score > best_score) {
       best_score = score;
@@ -277,23 +280,20 @@ std::vector<NoteEvent> extractCharacteristicMotif(const Subject& subject,
   }
 
   return std::vector<NoteEvent>(subject.notes.begin() + best_start,
-                                 subject.notes.begin() + best_start + motif_length);
+                                subject.notes.begin() + best_start + motif_length);
 }
 
 // ---------------------------------------------------------------------------
 // generateEpisode (raw, no counterpoint validation)
 // ---------------------------------------------------------------------------
 
-Episode generateEpisode(const Subject& subject, Tick start_tick, Tick duration_ticks,
-                        Key start_key, Key target_key, uint8_t num_voices, uint32_t seed,
-                        int episode_index, float energy_level,
-                        const uint8_t* last_pitches) {
+Episode generateEpisode(const Subject& subject, Tick start_tick, Tick duration_ticks, Key start_key,
+                        Key target_key, uint8_t num_voices, uint32_t seed, int episode_index,
+                        float energy_level, const uint8_t* last_pitches) {
   MotifPool pool = buildPoolFromSubject(subject);
-  EpisodeRequest req = buildRequest(subject, start_tick, duration_ticks,
-                                    start_key, target_key, num_voices, seed,
-                                    episode_index, energy_level, &pool,
-                                    nullptr, nullptr, nullptr, nullptr, nullptr,
-                                    nullptr, last_pitches);
+  EpisodeRequest req = buildRequest(subject, start_tick, duration_ticks, start_key, target_key,
+                                    num_voices, seed, episode_index, energy_level, &pool, nullptr,
+                                    nullptr, nullptr, nullptr, nullptr, nullptr, last_pitches);
   EpisodeResult res = generateConstraintEpisode(req);
   return resultToEpisode(res, start_tick, duration_ticks, start_key, target_key);
 }
@@ -302,28 +302,20 @@ Episode generateEpisode(const Subject& subject, Tick start_tick, Tick duration_t
 // generateEpisode (validated, with counterpoint state)
 // ---------------------------------------------------------------------------
 
-Episode generateEpisode(const Subject& subject, Tick start_tick, Tick duration_ticks,
-                        Key start_key, Key target_key, uint8_t num_voices, uint32_t seed,
-                        int episode_index, float energy_level,
-                        CounterpointState& cp_state, IRuleEvaluator& cp_rules,
-                        CollisionResolver& /*cp_resolver*/,
-                        const HarmonicTimeline& timeline,
-                        uint8_t pedal_pitch,
-                        const ConstraintState* prev_exit_state,
-                        ConstraintState* exit_state_out,
-                        const uint8_t* last_pitches) {
+Episode generateEpisode(const Subject& subject, Tick start_tick, Tick duration_ticks, Key start_key,
+                        Key target_key, uint8_t num_voices, uint32_t seed, int episode_index,
+                        float energy_level, CounterpointState& cp_state, IRuleEvaluator& cp_rules,
+                        CollisionResolver& /*cp_resolver*/, const HarmonicTimeline& timeline,
+                        uint8_t pedal_pitch, const ConstraintState* prev_exit_state,
+                        ConstraintState* exit_state_out, const uint8_t* last_pitches) {
   MotifPool pool = buildPoolFromSubject(subject);
-  EpisodeRequest req = buildRequest(subject, start_tick, duration_ticks,
-                                    start_key, target_key, num_voices, seed,
-                                    episode_index, energy_level, &pool,
-                                    &cp_rules,
-                                    dynamic_cast<const BachRuleEvaluator*>(&cp_rules),
-                                    &cp_state, nullptr, &timeline,
-                                    prev_exit_state, last_pitches);
+  EpisodeRequest req = buildRequest(subject, start_tick, duration_ticks, start_key, target_key,
+                                    num_voices, seed, episode_index, energy_level, &pool, &cp_rules,
+                                    dynamic_cast<const BachRuleEvaluator*>(&cp_rules), &cp_state,
+                                    nullptr, &timeline, prev_exit_state, last_pitches);
   req.pedal_pitch = pedal_pitch;
   EpisodeResult res = generateConstraintEpisode(req);
-  Episode episode = resultToEpisode(res, start_tick, duration_ticks,
-                                    start_key, target_key);
+  Episode episode = resultToEpisode(res, start_tick, duration_ticks, start_key, target_key);
 
   if (exit_state_out) {
     *exit_state_out = std::move(res.exit_state);
@@ -337,24 +329,21 @@ Episode generateEpisode(const Subject& subject, Tick start_tick, Tick duration_t
 // generateFortspinnungEpisode (raw, no counterpoint validation)
 // ---------------------------------------------------------------------------
 
-Episode generateFortspinnungEpisode(const Subject& subject, const MotifPool& pool,
-                                    Tick start_tick, Tick duration_ticks,
-                                    Key start_key, Key target_key,
-                                    uint8_t num_voices, uint32_t seed,
-                                    int episode_index, float energy_level,
-                                    const uint8_t* last_pitches) {
+Episode generateFortspinnungEpisode(const Subject& subject, const MotifPool& pool, Tick start_tick,
+                                    Tick duration_ticks, Key start_key, Key target_key,
+                                    uint8_t num_voices, uint32_t seed, int episode_index,
+                                    float energy_level, const uint8_t* last_pitches,
+                                    const ThematicPlan* thematic_plan) {
   // Fall back to standard generation if the pool is empty.
   if (pool.empty()) {
-    return generateEpisode(subject, start_tick, duration_ticks,
-                           start_key, target_key, num_voices, seed,
-                           episode_index, energy_level, last_pitches);
+    return generateEpisode(subject, start_tick, duration_ticks, start_key, target_key, num_voices,
+                           seed, episode_index, energy_level, last_pitches);
   }
 
-  EpisodeRequest req = buildRequest(subject, start_tick, duration_ticks,
-                                    start_key, target_key, num_voices, seed,
-                                    episode_index, energy_level, &pool,
-                                    nullptr, nullptr, nullptr, nullptr, nullptr,
-                                    nullptr, last_pitches);
+  EpisodeRequest req =
+      buildRequest(subject, start_tick, duration_ticks, start_key, target_key, num_voices, seed,
+                   episode_index, energy_level, &pool, nullptr, nullptr, nullptr, nullptr, nullptr,
+                   nullptr, last_pitches, thematic_plan);
   EpisodeResult res = generateConstraintEpisode(req);
   return resultToEpisode(res, start_tick, duration_ticks, start_key, target_key);
 }
@@ -363,42 +352,30 @@ Episode generateFortspinnungEpisode(const Subject& subject, const MotifPool& poo
 // generateFortspinnungEpisode (validated, with counterpoint state)
 // ---------------------------------------------------------------------------
 
-Episode generateFortspinnungEpisode(const Subject& subject, const MotifPool& pool,
-                                    Tick start_tick, Tick duration_ticks,
-                                    Key start_key, Key target_key,
-                                    uint8_t num_voices, uint32_t seed,
-                                    int episode_index, float energy_level,
-                                    CounterpointState& cp_state,
-                                    IRuleEvaluator& cp_rules,
-                                    CollisionResolver& cp_resolver,
-                                    const HarmonicTimeline& timeline,
-                                    uint8_t pedal_pitch,
+Episode generateFortspinnungEpisode(const Subject& subject, const MotifPool& pool, Tick start_tick,
+                                    Tick duration_ticks, Key start_key, Key target_key,
+                                    uint8_t num_voices, uint32_t seed, int episode_index,
+                                    float energy_level, CounterpointState& cp_state,
+                                    IRuleEvaluator& cp_rules, CollisionResolver& cp_resolver,
+                                    const HarmonicTimeline& timeline, uint8_t pedal_pitch,
                                     const SectionAccumulator* accum,
                                     const ConstraintState* prev_exit_state,
-                                    ConstraintState* exit_state_out,
-                                    const uint8_t* last_pitches) {
+                                    ConstraintState* exit_state_out, const uint8_t* last_pitches,
+                                    const ThematicPlan* thematic_plan) {
   // Fall back to validated non-pool overload if pool is empty.
   if (pool.empty()) {
-    return generateEpisode(subject, start_tick, duration_ticks,
-                           start_key, target_key, num_voices, seed,
-                           episode_index, energy_level,
-                           cp_state, cp_rules, cp_resolver,
-                           timeline, pedal_pitch,
-                           prev_exit_state, exit_state_out,
-                           last_pitches);
+    return generateEpisode(subject, start_tick, duration_ticks, start_key, target_key, num_voices,
+                           seed, episode_index, energy_level, cp_state, cp_rules, cp_resolver,
+                           timeline, pedal_pitch, prev_exit_state, exit_state_out, last_pitches);
   }
 
-  EpisodeRequest req = buildRequest(subject, start_tick, duration_ticks,
-                                    start_key, target_key, num_voices, seed,
-                                    episode_index, energy_level, &pool,
-                                    &cp_rules,
-                                    dynamic_cast<const BachRuleEvaluator*>(&cp_rules),
-                                    &cp_state, accum, &timeline,
-                                    prev_exit_state, last_pitches);
+  EpisodeRequest req = buildRequest(subject, start_tick, duration_ticks, start_key, target_key,
+                                    num_voices, seed, episode_index, energy_level, &pool, &cp_rules,
+                                    dynamic_cast<const BachRuleEvaluator*>(&cp_rules), &cp_state,
+                                    accum, &timeline, prev_exit_state, last_pitches, thematic_plan);
   req.pedal_pitch = pedal_pitch;
   EpisodeResult res = generateConstraintEpisode(req);
-  Episode episode = resultToEpisode(res, start_tick, duration_ticks,
-                                    start_key, target_key);
+  Episode episode = resultToEpisode(res, start_tick, duration_ticks, start_key, target_key);
 
   if (exit_state_out) {
     *exit_state_out = std::move(res.exit_state);

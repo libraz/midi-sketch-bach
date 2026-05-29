@@ -25,7 +25,7 @@ struct Subject {
   SubjectCharacter character = SubjectCharacter::Severe;
   Tick anacrusis_ticks = 0;  ///< Duration of the anacrusis (0 = no anacrusis).
   SubjectIdentity identity;  ///< Kerngestalt identity (Layers 1+2, immutable after generate).
-  CellWindow cell_window;  ///< Kerngestalt cell window (shortcut, also in identity.essential).
+  CellWindow cell_window;    ///< Kerngestalt cell window (shortcut, also in identity.essential).
 
   /// @brief Get the lowest MIDI pitch in the subject.
   /// @return Lowest pitch, or 127 if subject is empty.
@@ -81,9 +81,7 @@ class SubjectGenerator {
   /// @param bars Number of bars (1-4, already clamped by archetype).
   /// @param seed Random seed.
   /// @return GenerateResult with notes and cell window.
-  GenerateResult generateNotes(const FugueConfig& config,
-                               uint8_t bars,
-                               uint32_t seed) const;
+  GenerateResult generateNotes(const FugueConfig& config, uint8_t bars, uint32_t seed) const;
 };
 
 // ---------------------------------------------------------------------------
@@ -109,9 +107,8 @@ int maxLeapForCharacter(SubjectCharacter ch);
 /// @param floor Minimum allowed pitch.
 /// @param ceil Maximum allowed pitch.
 /// @return Normalized ending pitch.
-int normalizeEndingPitch(int target_pitch_class, int prev_pitch,
-                         int max_leap, Key key, ScaleType scale,
-                         int floor, int ceil);
+int normalizeEndingPitch(int target_pitch_class, int prev_pitch, int max_leap, Key key,
+                         ScaleType scale, int floor, int ceil);
 
 }  // namespace bach
 

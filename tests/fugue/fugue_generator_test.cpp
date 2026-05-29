@@ -7,6 +7,9 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
+#include <map>
+#include <optional>
 #include <set>
 #include <string>
 
@@ -16,6 +19,7 @@
 #include "core/gm_program.h"
 #include "core/note_source.h"
 #include "core/pitch_utils.h"
+#include "core/scale.h"
 #include "fugue/fugue_config.h"
 #include "fugue/fugue_structure.h"
 #include "fugue/voice_registers.h"
@@ -39,6 +43,15 @@ FugueConfig makeTestConfig(uint32_t seed = 42) {
   config.character = SubjectCharacter::Severe;
   config.max_subject_retries = 10;
   return config;
+}
+
+bool isEpisodeLineSource(BachNoteSource source) {
+  return source == BachNoteSource::EpisodeMaterial || source == BachNoteSource::SequenceNote;
+}
+
+bool isSubjectLineSource(BachNoteSource source) {
+  return source == BachNoteSource::SubjectCore || source == BachNoteSource::FugueSubject ||
+         source == BachNoteSource::FugueAnswer;
 }
 
 // ---------------------------------------------------------------------------
@@ -86,8 +99,7 @@ TEST(FugueGeneratorTest, GenerateFugue_DeterministicWithSeed) {
   for (size_t track_idx = 0; track_idx < result1.tracks.size(); ++track_idx) {
     const auto& notes1 = result1.tracks[track_idx].notes;
     const auto& notes2 = result2.tracks[track_idx].notes;
-    ASSERT_EQ(notes1.size(), notes2.size())
-        << "Track " << track_idx << " note count differs";
+    ASSERT_EQ(notes1.size(), notes2.size()) << "Track " << track_idx << " note count differs";
 
     for (size_t note_idx = 0; note_idx < notes1.size(); ++note_idx) {
       EXPECT_EQ(notes1[note_idx].start_tick, notes2[note_idx].start_tick)
@@ -180,8 +192,8 @@ TEST(FugueGeneratorTest, GenerateFugue_StructureValidates) {
   ASSERT_TRUE(result.success);
 
   auto violations = result.structure.validate();
-  EXPECT_TRUE(violations.empty())
-      << "Structure validation failed with " << violations.size() << " violation(s)";
+  EXPECT_TRUE(violations.empty()) << "Structure validation failed with " << violations.size()
+                                  << " violation(s)";
   for (const auto& violation : violations) {
     ADD_FAILURE() << "Violation: " << violation;
   }
@@ -278,9 +290,8 @@ TEST(FugueGeneratorTest, GenerateFugue_FourVoices_StructureValid) {
   ASSERT_TRUE(result.success);
 
   auto violations = result.structure.validate();
-  EXPECT_TRUE(violations.empty())
-      << "4-voice structure validation failed with " << violations.size()
-      << " violation(s)";
+  EXPECT_TRUE(violations.empty()) << "4-voice structure validation failed with "
+                                  << violations.size() << " violation(s)";
 }
 
 TEST(FugueGeneratorTest, GenerateFugue_FiveVoices_HasAllTracks) {
@@ -320,9 +331,8 @@ TEST(FugueGeneratorTest, GenerateFugue_FiveVoices_StructureValid) {
   ASSERT_TRUE(result.success);
 
   auto violations = result.structure.validate();
-  EXPECT_TRUE(violations.empty())
-      << "5-voice structure validation failed with " << violations.size()
-      << " violation(s)";
+  EXPECT_TRUE(violations.empty()) << "5-voice structure validation failed with "
+                                  << violations.size() << " violation(s)";
 }
 
 TEST(FugueGeneratorTest, GenerateFugue_FourVoices_NotesSorted) {
@@ -426,12 +436,11 @@ TEST(FugueGeneratorTest, GenerateFugue_NotesInValidRange) {
   for (const auto& track : result.tracks) {
     for (const auto& note : track.notes) {
       // All organ pitches should be within [24, 96] (Pedal low to Manual high).
-      EXPECT_GE(note.pitch, organ_range::kPedalLow)
-          << "Pitch " << static_cast<int>(note.pitch)
-          << " below organ range in track " << track.name;
+      EXPECT_GE(note.pitch, organ_range::kPedalLow) << "Pitch " << static_cast<int>(note.pitch)
+                                                    << " below organ range in track " << track.name;
       EXPECT_LE(note.pitch, organ_range::kManual1High)
-          << "Pitch " << static_cast<int>(note.pitch)
-          << " above organ range in track " << track.name;
+          << "Pitch " << static_cast<int>(note.pitch) << " above organ range in track "
+          << track.name;
     }
   }
 }
@@ -493,6 +502,114 @@ TEST(FugueGeneratorTest, GenerateFugue_HasStrettoSection) {
   EXPECT_EQ(strettos.size(), 1u);
 }
 
+TEST(FugueGeneratorTest, StrettoAddsPreEntryLeadIn) {
+  FugueConfig config = makeTestConfig(1);
+  config.num_voices = 4;
+  FugueResult result = generateFugue(config);
+  ASSERT_TRUE(result.success);
+
+  auto strettos = result.structure.getSectionsByType(SectionType::Stretto);
+  ASSERT_EQ(strettos.size(), 1u);
+  Tick stretto_start = strettos[0].start_tick;
+  Tick lead_window_end = stretto_start + kTicksPerBar;
+
+  int lead_notes = 0;
+  bool has_eighth = false;
+  for (const auto& track : result.tracks) {
+    for (const auto& note : track.notes) {
+      if (note.voice == 1 && note.source == BachNoteSource::EpisodeMaterial &&
+          note.start_tick >= stretto_start && note.start_tick < lead_window_end) {
+        ++lead_notes;
+        has_eighth = has_eighth || note.duration == duration::kEighthNote;
+      }
+    }
+  }
+
+  EXPECT_GE(lead_notes, 4);
+  EXPECT_TRUE(has_eighth);
+}
+
+TEST(FugueGeneratorTest, StrettoAddsPostEntryTailFiguration) {
+  FugueConfig config = makeTestConfig(1);
+  config.num_voices = 4;
+  FugueResult result = generateFugue(config);
+  ASSERT_TRUE(result.success);
+
+  auto strettos = result.structure.getSectionsByType(SectionType::Stretto);
+  ASSERT_EQ(strettos.size(), 1u);
+  Tick stretto_start = strettos[0].start_tick;
+  Tick stretto_end = strettos[0].end_tick;
+
+  int tail_notes = 0;
+  bool has_eighth = false;
+  for (const auto& track : result.tracks) {
+    for (const auto& note : track.notes) {
+      if (note.voice == 0 && note.source == BachNoteSource::EpisodeMaterial &&
+          note.start_tick >= stretto_start && note.start_tick < stretto_end) {
+        ++tail_notes;
+        has_eighth = has_eighth || note.duration == duration::kEighthNote;
+      }
+    }
+  }
+
+  EXPECT_GE(tail_notes, 8);
+  EXPECT_TRUE(has_eighth);
+}
+
+TEST(FugueGeneratorTest, FourVoiceStrettoKeepsLowerInnerVoiceMoving) {
+  FugueConfig config = makeTestConfig(1);
+  config.num_voices = 4;
+  FugueResult result = generateFugue(config);
+  ASSERT_TRUE(result.success);
+
+  auto strettos = result.structure.getSectionsByType(SectionType::Stretto);
+  ASSERT_EQ(strettos.size(), 1u);
+  Tick stretto_start = strettos[0].start_tick;
+  Tick stretto_end = strettos[0].end_tick;
+
+  int inner_tail_notes = 0;
+  bool has_eighth = false;
+  for (const auto& track : result.tracks) {
+    for (const auto& note : track.notes) {
+      if (note.voice == 2 && note.source == BachNoteSource::EpisodeMaterial &&
+          note.start_tick >= stretto_start && note.start_tick < stretto_end) {
+        ++inner_tail_notes;
+        has_eighth = has_eighth || note.duration == duration::kEighthNote;
+      }
+    }
+  }
+
+  EXPECT_GE(inner_tail_notes, 8);
+  EXPECT_TRUE(has_eighth);
+}
+
+TEST(FugueGeneratorTest, FourVoiceStrettoPreservesLaterSubjectCoreEntries) {
+  FugueConfig config = makeTestConfig(1);
+  config.num_voices = 4;
+  FugueResult result = generateFugue(config);
+  ASSERT_TRUE(result.success);
+
+  auto strettos = result.structure.getSectionsByType(SectionType::Stretto);
+  ASSERT_EQ(strettos.size(), 1u);
+  Tick stretto_start = strettos[0].start_tick;
+  Tick stretto_end = strettos[0].end_tick;
+
+  int later_subject_core_notes = 0;
+  std::set<VoiceId> later_subject_core_voices;
+  for (const auto& track : result.tracks) {
+    for (const auto& note : track.notes) {
+      if (note.source == BachNoteSource::SubjectCore && note.voice > 0 &&
+          note.start_tick >= stretto_start && note.start_tick < stretto_end) {
+        ++later_subject_core_notes;
+        later_subject_core_voices.insert(note.voice);
+      }
+    }
+  }
+
+  EXPECT_GE(later_subject_core_notes, 8);
+  EXPECT_GE(later_subject_core_voices.size(), 2u);
+}
+
 TEST(FugueGeneratorTest, GenerateFugue_HasAllThreePhases) {
   FugueConfig config = makeTestConfig();
   FugueResult result = generateFugue(config);
@@ -545,8 +662,7 @@ TEST(FugueGeneratorTest, GenerateFugue_AllSectionsPositiveDuration) {
   ASSERT_TRUE(result.success);
 
   for (size_t idx = 0; idx < result.structure.sections.size(); ++idx) {
-    EXPECT_GT(result.structure.sections[idx].end_tick,
-              result.structure.sections[idx].start_tick)
+    EXPECT_GT(result.structure.sections[idx].end_tick, result.structure.sections[idx].start_tick)
         << "Section " << idx << " has zero or negative duration";
   }
 }
@@ -608,8 +724,7 @@ TEST(FugueGeneratorTest, DominantPedalBeforeStretto) {
       break;
     }
   }
-  EXPECT_TRUE(has_pre_stretto_pedal)
-      << "Expected dominant pedal point notes before stretto start";
+  EXPECT_TRUE(has_pre_stretto_pedal) << "Expected dominant pedal point notes before stretto start";
 }
 
 TEST(FugueGeneratorTest, TonicPedalInCoda) {
@@ -628,13 +743,14 @@ TEST(FugueGeneratorTest, TonicPedalInCoda) {
   bool has_coda_pedal = false;
   for (const auto& track : result.tracks) {
     for (const auto& note : track.notes) {
-      if (note.source == BachNoteSource::PedalPoint &&
-          note.start_tick >= coda_start && note.start_tick < coda_end) {
+      if (note.source == BachNoteSource::PedalPoint && note.start_tick >= coda_start &&
+          note.start_tick < coda_end) {
         has_coda_pedal = true;
         break;
       }
     }
-    if (has_coda_pedal) break;
+    if (has_coda_pedal)
+      break;
   }
   EXPECT_TRUE(has_coda_pedal) << "Expected tonic pedal point notes in coda";
 }
@@ -650,9 +766,9 @@ TEST(FugueGeneratorTest, PedalPointInLowestVoice) {
     for (const auto& note : track.notes) {
       if (note.source == BachNoteSource::PedalPoint) {
         EXPECT_EQ(note.voice, expected_lowest)
-            << "Pedal point at tick " << note.start_tick
-            << " should be in lowest voice (" << static_cast<int>(expected_lowest)
-            << ") but was in voice " << static_cast<int>(note.voice);
+            << "Pedal point at tick " << note.start_tick << " should be in lowest voice ("
+            << static_cast<int>(expected_lowest) << ") but was in voice "
+            << static_cast<int>(note.voice);
       }
     }
   }
@@ -677,6 +793,41 @@ TEST(FugueGeneratorTest, PedalPointInLowestVoice_FourVoices) {
   EXPECT_TRUE(found_pedal) << "4-voice fugue should have pedal point notes";
 }
 
+TEST(FugueGeneratorTest, FourVoiceDominantPedalKeepsManualIIIActive) {
+  FugueConfig config = makeTestConfig(1);
+  config.num_voices = 4;
+  FugueResult result = generateFugue(config);
+  ASSERT_TRUE(result.success);
+
+  auto codas = result.structure.getSectionsByType(SectionType::Coda);
+  ASSERT_EQ(codas.size(), 1u);
+  Tick coda_start = codas[0].start_tick;
+
+  Tick pedal_start = 0;
+  Tick pedal_end = 0;
+  for (const auto& note : result.tracks[3].notes) {
+    if (note.source != BachNoteSource::PedalPoint || note.start_tick >= coda_start) {
+      continue;
+    }
+    if (pedal_start == 0 || note.start_tick < pedal_start) {
+      pedal_start = note.start_tick;
+    }
+    pedal_end = std::max(pedal_end, note.start_tick + note.duration);
+  }
+  ASSERT_GT(pedal_end, pedal_start) << "4-voice fugue should have a dominant pedal before coda";
+
+  int manual_iii_notes = 0;
+  for (const auto& note : result.tracks[2].notes) {
+    if (note.source == BachNoteSource::EpisodeMaterial && note.start_tick >= pedal_start &&
+        note.start_tick < pedal_end) {
+      ++manual_iii_notes;
+    }
+  }
+
+  EXPECT_GT(manual_iii_notes, 0)
+      << "Manual III should not be completely rested over the dominant pedal";
+}
+
 TEST(FugueGeneratorTest, DominantPedalPitchIsFifthAboveTonic) {
   FugueConfig config = makeTestConfig();
   config.num_voices = 3;
@@ -694,12 +845,10 @@ TEST(FugueGeneratorTest, DominantPedalPitchIsFifthAboveTonic) {
   VoiceId lowest = config.num_voices - 1;
   for (const auto& track : result.tracks) {
     for (const auto& note : track.notes) {
-      if (note.source == BachNoteSource::PedalPoint &&
-          note.voice == lowest &&
+      if (note.source == BachNoteSource::PedalPoint && note.voice == lowest &&
           note.start_tick < stretto_start) {
         EXPECT_EQ(getPitchClass(note.pitch), 7u)
-            << "Dominant pedal in C major should be G, got pitch "
-            << static_cast<int>(note.pitch);
+            << "Dominant pedal in C major should be G, got pitch " << static_cast<int>(note.pitch);
       }
     }
   }
@@ -720,16 +869,51 @@ TEST(FugueGeneratorTest, TonicPedalPitchIsRoot) {
   VoiceId lowest = config.num_voices - 1;
   for (const auto& track : result.tracks) {
     for (const auto& note : track.notes) {
-      if (note.source == BachNoteSource::PedalPoint &&
-          note.voice == lowest &&
+      if (note.source == BachNoteSource::PedalPoint && note.voice == lowest &&
           note.start_tick >= coda_start && note.start_tick < coda_end) {
         // Tonic pedal should be C (pitch class 0).
         EXPECT_EQ(getPitchClass(note.pitch), 0u)
-            << "Tonic pedal in C major should be C, got pitch "
-            << static_cast<int>(note.pitch);
+            << "Tonic pedal in C major should be C, got pitch " << static_cast<int>(note.pitch);
       }
     }
   }
+}
+
+TEST(FugueGeneratorTest, FinalCodaBassLocksDominantToTonic) {
+  FugueConfig config = makeTestConfig(2);
+  config.num_voices = 4;
+  config.key = Key::C;
+  FugueResult result = generateFugue(config);
+  ASSERT_TRUE(result.success);
+  ASSERT_GE(result.tracks.size(), 4u);
+
+  Tick coda_start = std::numeric_limits<Tick>::max();
+  for (const auto& track : result.tracks) {
+    for (const auto& note : track.notes) {
+      if (note.source == BachNoteSource::Coda) {
+        coda_start = std::min(coda_start, note.start_tick);
+      }
+    }
+  }
+  ASSERT_NE(coda_start, std::numeric_limits<Tick>::max());
+
+  Tick dominant_tick = coda_start + kTicksPerBar * 2;
+  Tick tonic_tick = dominant_tick + kTicksPerBar / 2;
+  const auto& bass_notes = result.tracks[config.num_voices - 1].notes;
+
+  auto pitchAt = [&](Tick tick) -> int {
+    for (const auto& note : bass_notes) {
+      if (note.start_tick <= tick && note.start_tick + note.duration > tick) {
+        return note.pitch;
+      }
+    }
+    return -1;
+  };
+
+  ASSERT_GE(pitchAt(dominant_tick), 0);
+  ASSERT_GE(pitchAt(tonic_tick), 0);
+  EXPECT_EQ(getPitchClass(static_cast<uint8_t>(pitchAt(dominant_tick))), 7u);
+  EXPECT_EQ(getPitchClass(static_cast<uint8_t>(pitchAt(tonic_tick))), 0u);
 }
 
 TEST(FugueGeneratorTest, CodaNotesHaveCodaSource) {
@@ -763,6 +947,448 @@ TEST(FugueGeneratorTest, CodaNotesHaveCodaSource) {
       << "All non-pedal coda notes should have BachNoteSource::Coda";
 }
 
+TEST(FugueGeneratorTest, CodaStage1_HasRestrainedInnerFiguration) {
+  FugueConfig config = makeTestConfig(7);
+  config.num_voices = 4;
+  FugueResult result = generateFugue(config);
+  ASSERT_TRUE(result.success);
+
+  auto codas = result.structure.getSectionsByType(SectionType::Coda);
+  ASSERT_EQ(codas.size(), 1u);
+  Tick coda_start = codas[0].start_tick;
+  Tick stage1_end = coda_start + kTicksPerBar * 2;
+
+  std::vector<NoteEvent> inner_notes;
+  for (const auto& note : result.tracks[2].notes) {
+    if (note.source == BachNoteSource::Coda && note.start_tick >= coda_start &&
+        note.start_tick < stage1_end) {
+      inner_notes.push_back(note);
+    }
+  }
+  ASSERT_GE(inner_notes.size(), 8u)
+      << "Lower manual inner voice should stay active in coda Stage 1";
+
+  bool has_eighth = false;
+  int sixteenth_count = 0;
+  int pitch_repair_count = 0;
+  for (size_t idx = 0; idx < inner_notes.size(); ++idx) {
+    if (inner_notes[idx].duration == duration::kEighthNote) {
+      has_eighth = true;
+    }
+    if (inner_notes[idx].duration == duration::kSixteenthNote) {
+      ++sixteenth_count;
+    }
+    if ((inner_notes[idx].modified_by & (static_cast<uint8_t>(NoteModifiedBy::ParallelRepair) |
+                                         static_cast<uint8_t>(NoteModifiedBy::ChordToneSnap) |
+                                         static_cast<uint8_t>(NoteModifiedBy::OctaveAdjust) |
+                                         static_cast<uint8_t>(NoteModifiedBy::LeapResolution) |
+                                         static_cast<uint8_t>(NoteModifiedBy::RepeatedNoteRep))) !=
+        0) {
+      ++pitch_repair_count;
+    }
+    if (idx > 0) {
+      int leap = std::abs(static_cast<int>(inner_notes[idx].pitch) -
+                          static_cast<int>(inner_notes[idx - 1].pitch));
+      EXPECT_LE(leap, 9) << "Coda inner figuration should avoid exposed octave-sized leaps";
+    }
+  }
+  EXPECT_TRUE(has_eighth) << "Expected eighth-note coda inner figuration";
+  EXPECT_LE(sixteenth_count, 2) << "Coda should not depend on running 16th-note filler";
+  EXPECT_LE(pitch_repair_count, 2) << "Coda figuration should be composed, not repaired into place";
+}
+
+TEST(FugueGeneratorTest, CodaStage1_UsesSubjectDerivedHeadContour) {
+  FugueConfig config = makeTestConfig(7);
+  config.num_voices = 4;
+  FugueResult result = generateFugue(config);
+  ASSERT_TRUE(result.success);
+
+  auto codas = result.structure.getSectionsByType(SectionType::Coda);
+  ASSERT_EQ(codas.size(), 1u);
+  Tick coda_start = codas[0].start_tick;
+
+  std::vector<NoteEvent> opening_subject;
+  for (const auto& track : result.tracks) {
+    for (const auto& note : track.notes) {
+      if (isSubjectLineSource(note.source) && note.start_tick < kTicksPerBar * 2) {
+        opening_subject.push_back(note);
+      }
+    }
+  }
+  std::sort(opening_subject.begin(), opening_subject.end(),
+            [](const NoteEvent& lhs, const NoteEvent& rhs) {
+              if (lhs.start_tick != rhs.start_tick) {
+                return lhs.start_tick < rhs.start_tick;
+              }
+              return lhs.voice < rhs.voice;
+            });
+  ASSERT_GE(opening_subject.size(), 4u);
+
+  std::vector<NoteEvent> coda_head;
+  for (const auto& note : result.tracks[0].notes) {
+    if (note.source == BachNoteSource::Coda && note.start_tick >= coda_start &&
+        note.start_tick < coda_start + kTicksPerBar) {
+      coda_head.push_back(note);
+    }
+  }
+  std::sort(coda_head.begin(), coda_head.end(), [](const NoteEvent& lhs, const NoteEvent& rhs) {
+    return lhs.start_tick < rhs.start_tick;
+  });
+  ASSERT_GE(coda_head.size(), 4u);
+
+  for (size_t idx = 1; idx < 4; ++idx) {
+    int subject_interval =
+        static_cast<int>(opening_subject[idx].pitch) - static_cast<int>(opening_subject[0].pitch);
+    int coda_interval =
+        static_cast<int>(coda_head[idx].pitch) - static_cast<int>(coda_head[0].pitch);
+    EXPECT_EQ(coda_interval, subject_interval)
+        << "Coda head should close with the subject-derived contour, not a "
+           "generic tonic arpeggio";
+  }
+}
+
+TEST(FugueGeneratorTest, FourVoiceRestlessUsesProtectedThematicEpisodeLayer) {
+  FugueConfig config = makeTestConfig(183);
+  config.num_voices = 4;
+  config.character = SubjectCharacter::Restless;
+  config.develop_pairs = 3;
+  config.episode_bars = 3;
+  FugueResult result = generateFugue(config);
+  ASSERT_TRUE(result.success);
+  ASSERT_EQ(result.tracks.size(), 4u);
+
+  EXPECT_GE(result.tracks[0].notes.size(), 210u)
+      << "Manual I should keep enough thematic episode activity to audit "
+         "without relying on coda filler density";
+  EXPECT_GE(result.tracks[2].notes.size(), 140u)
+      << "Manual III should keep enough support activity without BWV578 "
+         "density sweeps";
+  EXPECT_GE(result.tracks[3].notes.size(), 75u)
+      << "Pedal should keep enough harmonic support without BWV578 density "
+         "sweeps";
+
+  int protected_upper_dialogue_notes = 0;
+  int flexible_support_notes = 0;
+  for (const auto& section : result.structure.sections) {
+    if (section.type != SectionType::Episode)
+      continue;
+    for (size_t track_idx = 0; track_idx < result.tracks.size(); ++track_idx) {
+      for (const auto& note : result.tracks[track_idx].notes) {
+        Tick note_end = note.start_tick + note.duration;
+        if (note_end <= section.start_tick || note.start_tick >= section.end_tick) {
+          continue;
+        }
+        if (track_idx <= 1 && note.source == BachNoteSource::SequenceNote) {
+          ++protected_upper_dialogue_notes;
+        }
+        if (track_idx >= 2 && note.source == BachNoteSource::EpisodeMaterial) {
+          ++flexible_support_notes;
+        }
+      }
+    }
+  }
+  EXPECT_GT(protected_upper_dialogue_notes, 30)
+      << "Upper episode dialogue should be protected as thematic sequence "
+         "material before late repair sweeps";
+  EXPECT_GT(flexible_support_notes, 30)
+      << "Lower voices should keep flexible episode material for constraint "
+         "and repair work around the protected dialogue";
+
+  int late_manual_i_episode_notes = 0;
+  int late_manual_i_large_steps = 0;
+  std::optional<NoteEvent> prev_late_manual_i;
+  for (const auto& section : result.structure.sections) {
+    if (section.type != SectionType::Episode || section.start_tick < kTicksPerBar * 13 ||
+        section.start_tick >= kTicksPerBar * 24) {
+      continue;
+    }
+    for (const auto& note : result.tracks[0].notes) {
+      if (!isEpisodeLineSource(note.source))
+        continue;
+      Tick note_end = note.start_tick + note.duration;
+      if (note_end <= section.start_tick || note.start_tick >= section.end_tick) {
+        continue;
+      }
+      ++late_manual_i_episode_notes;
+      if (prev_late_manual_i) {
+        int gap =
+            std::abs(static_cast<int>(note.pitch) - static_cast<int>(prev_late_manual_i->pitch));
+        if (gap > 7)
+          ++late_manual_i_large_steps;
+      }
+      prev_late_manual_i = note;
+    }
+  }
+  ASSERT_GT(late_manual_i_episode_notes, 20)
+      << "Expected enough late Manual I protected dialogue to audit";
+  EXPECT_LE(late_manual_i_large_steps, late_manual_i_episode_notes / 5)
+      << "Late Manual I dialogue should mostly remain singable after repair";
+
+  int middle_manual_ii_high_episode_notes = 0;
+  for (const auto& note : result.tracks[1].notes) {
+    if (!isEpisodeLineSource(note.source))
+      continue;
+    int bar = static_cast<int>(note.start_tick / kTicksPerBar) + 1;
+    if (bar < 19 || bar > 27)
+      continue;
+    if (note.pitch >= 72)
+      ++middle_manual_ii_high_episode_notes;
+  }
+  EXPECT_LE(middle_manual_ii_high_episode_notes, 8)
+      << "Manual II should not remain above the soprano lane after the "
+         "middle interleaving repair";
+
+  int middle_manual_i_dialogue_notes = 0;
+  int middle_manual_i_large_steps = 0;
+  std::optional<NoteEvent> prev_middle_manual_i;
+  for (const auto& note : result.tracks[0].notes) {
+    int bar = static_cast<int>(note.start_tick / kTicksPerBar) + 1;
+    if (bar < 14 || bar > 23 || !isEpisodeLineSource(note.source))
+      continue;
+    ++middle_manual_i_dialogue_notes;
+    if (prev_middle_manual_i) {
+      int gap =
+          std::abs(static_cast<int>(note.pitch) - static_cast<int>(prev_middle_manual_i->pitch));
+      if (gap > 7)
+        ++middle_manual_i_large_steps;
+    }
+    prev_middle_manual_i = note;
+  }
+  ASSERT_GT(middle_manual_i_dialogue_notes, 20)
+      << "Expected enough protected Manual I episode dialogue to audit";
+  EXPECT_LE(middle_manual_i_large_steps, middle_manual_i_dialogue_notes / 6)
+      << "Protected Manual I episode dialogue should mostly move by singable "
+         "intervals instead of relying on local fixed-pitch repairs";
+
+  int accepted_manual_episode_notes = 0;
+  int accepted_manual_episode_leap_repaired = 0;
+  for (const auto* track : {&result.tracks[0], &result.tracks[2]}) {
+    for (const auto& note : track->notes) {
+      int bar = static_cast<int>(note.start_tick / kTicksPerBar) + 1;
+      if (bar < 9 || bar > 27 || !isEpisodeLineSource(note.source)) {
+        continue;
+      }
+      ++accepted_manual_episode_notes;
+      if (note.modified_by & static_cast<uint8_t>(NoteModifiedBy::LeapResolution)) {
+        ++accepted_manual_episode_leap_repaired;
+      }
+    }
+  }
+  ASSERT_GT(accepted_manual_episode_notes, 100)
+      << "Expected enough smoothed manual episode notes to audit";
+  EXPECT_LT(accepted_manual_episode_leap_repaired, accepted_manual_episode_notes)
+      << "Smoothed Manual I/III episode lines should not all read as "
+         "leap-resolution filler";
+
+  int middle_manual_iii_episode_notes = 0;
+  int middle_manual_iii_large_entries = 0;
+  std::optional<NoteEvent> prev_middle_manual_iii;
+  for (const auto& note : result.tracks[2].notes) {
+    int bar = static_cast<int>(note.start_tick / kTicksPerBar) + 1;
+    if (bar < 18 || bar > 27)
+      continue;
+    if (!isEpisodeLineSource(note.source)) {
+      continue;
+    }
+    ++middle_manual_iii_episode_notes;
+    if (prev_middle_manual_iii) {
+      int gap =
+          std::abs(static_cast<int>(note.pitch) - static_cast<int>(prev_middle_manual_iii->pitch));
+      if (gap > 4)
+        ++middle_manual_iii_large_entries;
+    }
+    prev_middle_manual_iii = note;
+  }
+  ASSERT_GT(middle_manual_iii_episode_notes, 20)
+      << "Expected enough middle Manual III material to audit episode lines";
+  EXPECT_LE(middle_manual_iii_large_entries, 2)
+      << "Middle Manual III episodes should sing through stepwise motion "
+         "instead of entering with repaired large leaps";
+
+  int lower_manual_cs_tail_leap_repaired = 0;
+  int lower_manual_cs_tail_notes = 0;
+  int lower_manual_cs_tail_large_steps = 0;
+  std::optional<NoteEvent> prev_lower_manual_cs_tail;
+  for (const auto& note : result.tracks[2].notes) {
+    if (note.source != BachNoteSource::Countersubject)
+      continue;
+    if (note.start_tick < kTicksPerBar * 7 + kTicksPerBeat * 3 ||
+        note.start_tick >= kTicksPerBar * 8) {
+      continue;
+    }
+    ++lower_manual_cs_tail_notes;
+    if (prev_lower_manual_cs_tail) {
+      int gap = std::abs(static_cast<int>(note.pitch) -
+                         static_cast<int>(prev_lower_manual_cs_tail->pitch));
+      if (gap > 7)
+        ++lower_manual_cs_tail_large_steps;
+    }
+    prev_lower_manual_cs_tail = note;
+    if (note.modified_by & static_cast<uint8_t>(NoteModifiedBy::LeapResolution)) {
+      ++lower_manual_cs_tail_leap_repaired;
+    }
+  }
+  ASSERT_GE(lower_manual_cs_tail_notes, 2)
+      << "Expected the lower manual countersubject tail-drop audit window";
+  EXPECT_LE(lower_manual_cs_tail_large_steps, 1)
+      << "The lower manual countersubject should turn inward instead of "
+         "dropping an exposed octave near the bar-8 cadence";
+  EXPECT_EQ(lower_manual_cs_tail_leap_repaired, 0)
+      << "The intentional lower-manual tail turn should not read as repaired filler";
+
+  int lower_manual_bar8_countersubject = 0;
+  int lower_manual_bar8_large_steps = 0;
+  std::optional<NoteEvent> prev_lower_manual_bar8;
+  for (const auto& note : result.tracks[2].notes) {
+    if (note.source != BachNoteSource::Countersubject)
+      continue;
+    int bar = static_cast<int>(note.start_tick / kTicksPerBar) + 1;
+    if (bar != 8)
+      continue;
+    ++lower_manual_bar8_countersubject;
+    if (prev_lower_manual_bar8) {
+      int gap =
+          std::abs(static_cast<int>(note.pitch) - static_cast<int>(prev_lower_manual_bar8->pitch));
+      if (gap > 7)
+        ++lower_manual_bar8_large_steps;
+    }
+    prev_lower_manual_bar8 = note;
+  }
+  EXPECT_GE(lower_manual_bar8_countersubject, 5)
+      << "Manual III bar-8 countersubject should form a directed turn, not "
+         "a repaired oscillation cell";
+  EXPECT_EQ(lower_manual_bar8_large_steps, 0)
+      << "Manual III bar-8 countersubject should avoid exposed large jumps";
+
+  int early_lower_manual_countersubject = 0;
+  int early_lower_manual_leap_repaired = 0;
+  for (const auto& note : result.tracks[2].notes) {
+    if (note.source != BachNoteSource::Countersubject)
+      continue;
+    int bar = static_cast<int>(note.start_tick / kTicksPerBar) + 1;
+    if (bar < 7 || bar > 8)
+      continue;
+    ++early_lower_manual_countersubject;
+    if (note.modified_by & static_cast<uint8_t>(NoteModifiedBy::LeapResolution)) {
+      ++early_lower_manual_leap_repaired;
+    }
+  }
+  ASSERT_GT(early_lower_manual_countersubject, 8)
+      << "Expected to audit the early lower-manual countersubject line";
+  EXPECT_LT(early_lower_manual_leap_repaired, early_lower_manual_countersubject)
+      << "The early lower-manual countersubject line should not all read as "
+         "repaired filler";
+
+  auto sounding_pitch = [](const Track& track, Tick tick) -> int {
+    for (const auto& note : track.notes) {
+      if (note.start_tick <= tick && note.start_tick + note.duration > tick) {
+        return static_cast<int>(note.pitch);
+      }
+    }
+    return -1;
+  };
+  Tick middle_crossing_tick = kTicksPerBar * 17 + kTicksPerBeat * 2;
+  int manual_i_pitch = sounding_pitch(result.tracks[0], middle_crossing_tick);
+  int manual_ii_pitch = sounding_pitch(result.tracks[1], middle_crossing_tick);
+  if (manual_i_pitch >= 0 && manual_ii_pitch >= 0) {
+    EXPECT_GE(manual_i_pitch, manual_ii_pitch)
+        << "Manual II false-entry repair should clear the bar-18 sustained crossing";
+  }
+
+  int early_manual_i_countersubject = 0;
+  int early_manual_i_leap_repaired = 0;
+  int early_manual_i_longer = 0;
+  for (const auto& note : result.tracks[0].notes) {
+    if (note.source != BachNoteSource::Countersubject)
+      continue;
+    if (note.start_tick < kTicksPerBar * 3 || note.start_tick >= kTicksPerBar * 5) {
+      continue;
+    }
+    ++early_manual_i_countersubject;
+    if (note.duration >= duration::kEighthNote)
+      ++early_manual_i_longer;
+    if (note.modified_by & static_cast<uint8_t>(NoteModifiedBy::LeapResolution)) {
+      ++early_manual_i_leap_repaired;
+    }
+  }
+  EXPECT_GE(early_manual_i_longer, 4)
+      << "The early Manual I countersubject should retain longer note values "
+         "around the 10s listening hotspot";
+  EXPECT_LE(early_manual_i_leap_repaired, early_manual_i_countersubject / 2)
+      << "The early countersubject should not sound like all repaired "
+         "sixteenth-note filler";
+
+  std::vector<NoteEvent> all_notes;
+  for (const auto& track : result.tracks) {
+    all_notes.insert(all_notes.end(), track.notes.begin(), track.notes.end());
+  }
+  auto output_dissonance = analyzeOrganDissonance(all_notes, config.num_voices, result.timeline,
+                                                  KeySignature{config.key, config.is_minor});
+  int high_sustained = 0;
+  for (const auto& event : output_dissonance.events) {
+    if (event.type == DissonanceType::SustainedOverChordChange &&
+        event.severity == DissonanceSeverity::High) {
+      ++high_sustained;
+    }
+  }
+  EXPECT_EQ(high_sustained, 0) << "The output should not sustain non-chord tones across strong "
+                                  "harmonic boundaries";
+
+  int flexible_high_output_events = 0;
+  for (const auto& event : output_dissonance.events) {
+    if (event.severity != DissonanceSeverity::High)
+      continue;
+    for (const auto& note : all_notes) {
+      if (note.voice == event.voice_a && note.start_tick == event.tick &&
+          getProtectionLevel(note.source) == ProtectionLevel::Flexible) {
+        ++flexible_high_output_events;
+        break;
+      }
+    }
+  }
+  EXPECT_EQ(flexible_high_output_events, 0)
+      << "Flexible support should be composed or snapped to fit strong-beat "
+         "output harmony instead of leaving exposed high-severity NCTs";
+
+  auto dissonance = analyzeOrganDissonance(all_notes, config.num_voices, result.timeline,
+                                           KeySignature{config.key, config.is_minor},
+                                           &result.generation_timeline);
+
+  int false_entry_notes = 0;
+  int false_entry_outside_local_scale = 0;
+  for (const auto& note : all_notes) {
+    if (note.source != BachNoteSource::FalseEntry)
+      continue;
+    ++false_entry_notes;
+    const HarmonicEvent& event = result.generation_timeline.getAt(note.start_tick);
+    if (!isDiatonicInKey(note.pitch, event.key, event.is_minor)) {
+      ++false_entry_outside_local_scale;
+    }
+  }
+  EXPECT_GT(false_entry_notes, 0) << "Seed 183 should include false-entry material for this audit";
+  EXPECT_EQ(false_entry_outside_local_scale, 0)
+      << "False entries should be composed in the active local mode instead "
+         "of relying on later chromatic repair";
+
+  int flexible_medium_chromatic = 0;
+  for (const auto& event : dissonance.events) {
+    if (event.type != DissonanceType::NonDiatonicNote ||
+        event.severity != DissonanceSeverity::Medium) {
+      continue;
+    }
+    for (const auto& note : all_notes) {
+      if (note.voice == event.voice_a && note.start_tick == event.tick &&
+          getProtectionLevel(note.source) == ProtectionLevel::Flexible) {
+        ++flexible_medium_chromatic;
+        break;
+      }
+    }
+  }
+  EXPECT_LE(flexible_medium_chromatic, 1)
+      << "Replaceable episode/free-counterpoint chromatic tones should be "
+         "replaced by local-mode material before final scoring";
+}
+
 TEST(FugueGeneratorTest, PedalPointVelocityIsOrganDefault) {
   FugueConfig config = makeTestConfig();
   config.num_voices = 3;
@@ -772,8 +1398,7 @@ TEST(FugueGeneratorTest, PedalPointVelocityIsOrganDefault) {
   for (const auto& track : result.tracks) {
     for (const auto& note : track.notes) {
       if (note.source == BachNoteSource::PedalPoint) {
-        EXPECT_EQ(note.velocity, 80u)
-            << "Pedal point velocity must be organ default (80)";
+        EXPECT_EQ(note.velocity, 80u) << "Pedal point velocity must be organ default (80)";
       }
     }
   }
@@ -793,8 +1418,7 @@ TEST(FugueGeneratorTest, DominantPedalSpansFourBars) {
   std::vector<NoteEvent> dominant_pedals;
   for (const auto& track : result.tracks) {
     for (const auto& note : track.notes) {
-      if (note.source == BachNoteSource::PedalPoint &&
-          note.start_tick < stretto_start) {
+      if (note.source == BachNoteSource::PedalPoint && note.start_tick < stretto_start) {
         dominant_pedals.push_back(note);
       }
     }
@@ -804,8 +1428,7 @@ TEST(FugueGeneratorTest, DominantPedalSpansFourBars) {
 
   // The dominant pedal should span exactly 4 bars (4 * 1920 = 7680 ticks).
   // It is split into bar-length notes, so there should be 4 notes.
-  EXPECT_EQ(dominant_pedals.size(), 4u)
-      << "Dominant pedal should be split into 4 bar-length notes";
+  EXPECT_EQ(dominant_pedals.size(), 4u) << "Dominant pedal should be split into 4 bar-length notes";
 
   // Total duration should equal 4 bars.
   Tick total_duration = 0;
@@ -836,17 +1459,15 @@ TEST(FugueGeneratorTest, BassDensity_ThreeVoices) {
     // Compute total bars from the structure.
     Tick total_ticks = 0;
     for (const auto& section : result.structure.sections) {
-      if (section.end_tick > total_ticks) total_ticks = section.end_tick;
+      if (section.end_tick > total_ticks)
+        total_ticks = section.end_tick;
     }
-    float total_bars = static_cast<float>(total_ticks) /
-                       static_cast<float>(kTicksPerBar);
+    float total_bars = static_cast<float>(total_ticks) / static_cast<float>(kTicksPerBar);
 
-    float notes_per_bar = (total_bars > 0)
-        ? static_cast<float>(bass_notes) / total_bars : 0.0f;
+    float notes_per_bar = (total_bars > 0) ? static_cast<float>(bass_notes) / total_bars : 0.0f;
 
     EXPECT_GT(notes_per_bar, 0.5f)
-        << "Seed " << seed << ": bass notes/bar = " << notes_per_bar
-        << " (need > 0.5)";
+        << "Seed " << seed << ": bass notes/bar = " << notes_per_bar << " (need > 0.5)";
   }
 }
 
@@ -866,12 +1487,12 @@ TEST(FugueGeneratorTest, BassMaxConsecutiveSilence_ThreeVoices) {
     Tick max_gap = 0;
     if (!bass_track.notes.empty()) {
       for (size_t i = 0; i + 1 < bass_track.notes.size(); ++i) {
-        Tick end_of_current = bass_track.notes[i].start_tick +
-                              bass_track.notes[i].duration;
+        Tick end_of_current = bass_track.notes[i].start_tick + bass_track.notes[i].duration;
         Tick start_of_next = bass_track.notes[i + 1].start_tick;
         if (start_of_next > end_of_current) {
           Tick gap = start_of_next - end_of_current;
-          if (gap > max_gap) max_gap = gap;
+          if (gap > max_gap)
+            max_gap = gap;
         }
       }
     }
@@ -879,8 +1500,8 @@ TEST(FugueGeneratorTest, BassMaxConsecutiveSilence_ThreeVoices) {
     // Max consecutive silence: 8 bars.
     Tick max_silence_ticks = kTicksPerBar * 8;
     EXPECT_LE(max_gap, max_silence_ticks)
-        << "Seed " << seed << ": max bass silence = "
-        << (max_gap / kTicksPerBar) << " bars (limit: 8)";
+        << "Seed " << seed << ": max bass silence = " << (max_gap / kTicksPerBar)
+        << " bars (limit: 8)";
   }
 }
 
@@ -909,13 +1530,15 @@ TEST(FugueGeneratorTest, CodaVoiceLeading_NoLargeJumps) {
       const NoteEvent* last_pre = nullptr;
       const NoteEvent* first_coda = nullptr;
       for (const auto& n : notes) {
-        if (n.start_tick < coda_start) last_pre = &n;
-        if (n.start_tick >= coda_start && !first_coda) first_coda = &n;
+        if (n.start_tick < coda_start)
+          last_pre = &n;
+        if (n.start_tick >= coda_start && !first_coda)
+          first_coda = &n;
       }
 
       if (last_pre && first_coda) {
-        int jump = std::abs(static_cast<int>(first_coda->pitch) -
-                            static_cast<int>(last_pre->pitch));
+        int jump =
+            std::abs(static_cast<int>(first_coda->pitch) - static_cast<int>(last_pre->pitch));
         // All voices: max 12st (octave) at coda entry.
         // Quantized subject rhythms can shift pitch paths, making inner
         // voices occasionally need up to an octave jump.
@@ -924,8 +1547,8 @@ TEST(FugueGeneratorTest, CodaVoiceLeading_NoLargeJumps) {
         // Pedal voice excluded (it has a pedal point).
         if (first_coda->source != BachNoteSource::PedalPoint) {
           EXPECT_LE(jump, max_jump)
-              << "Seed " << seed << ", track " << track_idx
-              << ": coda entry jump = " << jump << "st (max " << max_jump << ")";
+              << "Seed " << seed << ", track " << track_idx << ": coda entry jump = " << jump
+              << "st (max " << max_jump << ")";
         }
       }
     }
@@ -953,20 +1576,17 @@ TEST(FugueGeneratorTest, ZeroNonStructuralParallels_AllSeeds) {
     }
 
     auto analysis = analyzeCounterpoint(all_notes, config.num_voices);
-    uint32_t non_structural =
-        analysis.parallel_perfect_count - analysis.structural_parallel_count;
+    uint32_t non_structural = analysis.parallel_perfect_count - analysis.structural_parallel_count;
     // Parallel budget: 1.5% of notes capped 1-8. Kernel pitch preservation
     // (Phase A1) and crossing-aware pitch selection (Wave 2) may produce
     // slightly more parallels. BWV578 reference: ~4% parallel ratio.
-    uint32_t budget = static_cast<uint32_t>(std::max(1, std::min(8,
-        static_cast<int>(std::ceil(
-            static_cast<float>(all_notes.size()) * 0.015f)))));
+    uint32_t budget = static_cast<uint32_t>(std::max(
+        1,
+        std::min(8, static_cast<int>(std::ceil(static_cast<float>(all_notes.size()) * 0.015f)))));
     EXPECT_LE(non_structural, budget)
         << "Seed " << seed << ": " << non_structural
-        << " non-structural parallel perfects (total: "
-        << analysis.parallel_perfect_count
-        << ", structural: " << analysis.structural_parallel_count
-        << ", budget: " << budget << ")";
+        << " non-structural parallel perfects (total: " << analysis.parallel_perfect_count
+        << ", structural: " << analysis.structural_parallel_count << ", budget: " << budget << ")";
   }
 }
 
@@ -993,17 +1613,14 @@ TEST(FugueGeneratorTest, CodaChordNotes_AllVoicesInStage2_3Voice) {
   int lowest_stage2_notes = 0;
   for (const auto& track : result.tracks) {
     for (const auto& note : track.notes) {
-      if (note.source == BachNoteSource::Coda &&
-          note.voice == lowest_voice &&
-          note.start_tick >= stage2_start &&
-          note.start_tick < stage3_start) {
+      if (note.source == BachNoteSource::Coda && note.voice == lowest_voice &&
+          note.start_tick >= stage2_start && note.start_tick < stage3_start) {
         ++lowest_stage2_notes;
       }
     }
   }
 
-  EXPECT_GE(lowest_stage2_notes, 2)
-      << "Lowest voice should participate in V7-I cadence (Stage 2)";
+  EXPECT_GE(lowest_stage2_notes, 2) << "Lowest voice should participate in V7-I cadence (Stage 2)";
 }
 
 TEST(FugueGeneratorTest, CodaChordNotes_AllVoicesInStage2_4Voice) {
@@ -1023,10 +1640,8 @@ TEST(FugueGeneratorTest, CodaChordNotes_AllVoicesInStage2_4Voice) {
   int lowest_stage2_notes = 0;
   for (const auto& track : result.tracks) {
     for (const auto& note : track.notes) {
-      if (note.source == BachNoteSource::Coda &&
-          note.voice == lowest_voice &&
-          note.start_tick >= stage2_start &&
-          note.start_tick < stage3_start) {
+      if (note.source == BachNoteSource::Coda && note.voice == lowest_voice &&
+          note.start_tick >= stage2_start && note.start_tick < stage3_start) {
         ++lowest_stage2_notes;
       }
     }
@@ -1058,28 +1673,28 @@ TEST(FugueGeneratorTest, CodaV7Chord_HasConsonantAnchor) {
     uint8_t pedal_pitch = 0;
     for (const auto& track : result.tracks) {
       for (const auto& note : track.notes) {
-        if (note.source == BachNoteSource::PedalPoint &&
-            note.start_tick <= stage2_start &&
+        if (note.source == BachNoteSource::PedalPoint && note.start_tick <= stage2_start &&
             note.start_tick + note.duration > stage2_start) {
           pedal_pitch = note.pitch;
           break;
         }
       }
-      if (pedal_pitch > 0) break;
+      if (pedal_pitch > 0)
+        break;
     }
-    if (pedal_pitch == 0) continue;
+    if (pedal_pitch == 0)
+      continue;
 
     // Check that at least one V7 chord note is consonant with pedal.
     bool has_consonant_anchor = false;
     for (const auto& track : result.tracks) {
       for (const auto& note : track.notes) {
-        if (note.source == BachNoteSource::Coda &&
-            note.start_tick >= stage2_start &&
+        if (note.source == BachNoteSource::Coda && note.start_tick >= stage2_start &&
             note.start_tick < stage2_half) {
           int ivl = absoluteInterval(note.pitch, pedal_pitch) % 12;
-          bool consonant = (ivl == 0 || ivl == 3 || ivl == 4 ||
-                            ivl == 7 || ivl == 8 || ivl == 9);
-          if (consonant) has_consonant_anchor = true;
+          bool consonant = (ivl == 0 || ivl == 3 || ivl == 4 || ivl == 7 || ivl == 8 || ivl == 9);
+          if (consonant)
+            has_consonant_anchor = true;
         }
       }
     }
@@ -1110,7 +1725,8 @@ TEST(FugueGeneratorTest, CodaV7_FallbackStrictOrder_3Voice) {
 
     // Stage 2 starts after 2 bars.
     Tick stage2_start = coda_start + kTicksPerBar * 2;
-    if (stage2_start >= coda_end) continue;
+    if (stage2_start >= coda_end)
+      continue;
 
     // Check all ticks in Stage 2 and Stage 3 for strict voice order.
     // Collect distinct start ticks of coda notes in this region.
@@ -1129,8 +1745,7 @@ TEST(FugueGeneratorTest, CodaV7_FallbackStrictOrder_3Voice) {
       for (const auto& track : result.tracks) {
         for (const auto& note : track.notes) {
           // Only check Coda-source notes (PedalPoint is independent).
-          if (note.voice < 5 && note.source == BachNoteSource::Coda &&
-              note.start_tick <= tick &&
+          if (note.voice < 5 && note.source == BachNoteSource::Coda && note.start_tick <= tick &&
               tick < note.start_tick + note.duration) {
             pitches[note.voice] = note.pitch;
           }
@@ -1139,9 +1754,8 @@ TEST(FugueGeneratorTest, CodaV7_FallbackStrictOrder_3Voice) {
       for (uint8_t v = 0; v + 1 < config.num_voices; ++v) {
         if (pitches[v] > 0 && pitches[v + 1] > 0) {
           EXPECT_GT(pitches[v], pitches[v + 1])
-              << "Seed " << seed << ", tick " << tick
-              << ": v" << static_cast<int>(v) << "(" << static_cast<int>(pitches[v])
-              << ") <= v" << static_cast<int>(v + 1) << "("
+              << "Seed " << seed << ", tick " << tick << ": v" << static_cast<int>(v) << "("
+              << static_cast<int>(pitches[v]) << ") <= v" << static_cast<int>(v + 1) << "("
               << static_cast<int>(pitches[v + 1]) << ")";
         }
       }
@@ -1173,20 +1787,21 @@ TEST(FugueGeneratorTest, CodaV7_FallbackVoiceLeading_3Voice) {
     Tick stage2_start = coda_start + kTicksPerBar * 2;
     Tick half_bar = kTicksPerBar / 2;
     Tick stage2_half = stage2_start + half_bar;
-    if (stage2_half >= coda_end) continue;
+    if (stage2_half >= coda_end)
+      continue;
 
     // Collect V7 and I chord pitches per voice.
     uint8_t v7[3] = {0, 0, 0};
     uint8_t i_chord[3] = {0, 0, 0};
     for (const auto& track : result.tracks) {
       for (const auto& note : track.notes) {
-        if (note.voice >= 3) continue;
-        if (note.source == BachNoteSource::Coda &&
-            note.start_tick >= stage2_start && note.start_tick < stage2_half) {
+        if (note.voice >= 3)
+          continue;
+        if (note.source == BachNoteSource::Coda && note.start_tick >= stage2_start &&
+            note.start_tick < stage2_half) {
           v7[note.voice] = note.pitch;
         }
-        if (note.source == BachNoteSource::Coda &&
-            note.start_tick >= stage2_half &&
+        if (note.source == BachNoteSource::Coda && note.start_tick >= stage2_half &&
             note.start_tick < stage2_start + kTicksPerBar) {
           i_chord[note.voice] = note.pitch;
         }
@@ -1197,9 +1812,8 @@ TEST(FugueGeneratorTest, CodaV7_FallbackVoiceLeading_3Voice) {
     for (uint8_t v = 0; v < 3; ++v) {
       if (v7[v] > 0 && i_chord[v] > 0) {
         int diff = std::abs(static_cast<int>(i_chord[v]) - static_cast<int>(v7[v]));
-        EXPECT_LE(diff, 7)
-            << "Seed " << seed << ": voice " << static_cast<int>(v)
-            << " V7->I jump = " << diff << "st (max 7)";
+        EXPECT_LE(diff, 7) << "Seed " << seed << ": voice " << static_cast<int>(v)
+                           << " V7->I jump = " << diff << "st (max 7)";
       }
     }
   }
@@ -1214,16 +1828,17 @@ TEST(FugueGeneratorTest, CodaV7_FallbackPitchClassPreserved) {
       FugueConfig config = makeTestConfig(seed);
       config.num_voices = nv;
       FugueResult result = generateFugue(config);
-      ASSERT_TRUE(result.success)
-          << "Seed " << seed << ", voices=" << static_cast<int>(nv);
+      ASSERT_TRUE(result.success) << "Seed " << seed << ", voices=" << static_cast<int>(nv);
 
       auto codas = result.structure.getSectionsByType(SectionType::Coda);
-      if (codas.empty()) continue;
+      if (codas.empty())
+        continue;
       Tick coda_start = codas[0].start_tick;
       Tick coda_end = codas[0].end_tick;
 
       Tick stage2_start = coda_start + kTicksPerBar * 2;
-      if (stage2_start >= coda_end) continue;
+      if (stage2_start >= coda_end)
+        continue;
 
       // NeverCrossing assertion: at every tick in Stage 2/3, v0 > v1 > ...
       std::set<Tick> check_ticks;
@@ -1240,8 +1855,7 @@ TEST(FugueGeneratorTest, CodaV7_FallbackPitchClassPreserved) {
         for (const auto& track : result.tracks) {
           for (const auto& note : track.notes) {
             // Only check Coda-source notes (PedalPoint is independent).
-            if (note.voice < 5 && note.source == BachNoteSource::Coda &&
-                note.start_tick <= tick &&
+            if (note.voice < 5 && note.source == BachNoteSource::Coda && note.start_tick <= tick &&
                 tick < note.start_tick + note.duration) {
               pitches[note.voice] = note.pitch;
             }
@@ -1253,12 +1867,9 @@ TEST(FugueGeneratorTest, CodaV7_FallbackPitchClassPreserved) {
             // Allow unison (>=) since 5-voice chords may require pitch
             // doubling when only 4 distinct pitch classes are available.
             EXPECT_GE(pitches[v], pitches[v + 1])
-                << "NeverCrossing: seed " << seed
-                << ", voices=" << static_cast<int>(nv)
-                << ", tick " << tick
-                << ": v" << static_cast<int>(v) << "("
-                << static_cast<int>(pitches[v]) << ") < v"
-                << static_cast<int>(v + 1) << "("
+                << "NeverCrossing: seed " << seed << ", voices=" << static_cast<int>(nv)
+                << ", tick " << tick << ": v" << static_cast<int>(v) << "("
+                << static_cast<int>(pitches[v]) << ") < v" << static_cast<int>(v + 1) << "("
                 << static_cast<int>(pitches[v + 1]) << ")";
           }
         }
@@ -1281,11 +1892,11 @@ TEST(FugueGeneratorTest, CodaStage1_HeldChordStrictOrder) {
       FugueConfig config = makeTestConfig(seed);
       config.num_voices = nv;
       FugueResult result = generateFugue(config);
-      ASSERT_TRUE(result.success)
-          << "Seed " << seed << ", voices=" << static_cast<int>(nv);
+      ASSERT_TRUE(result.success) << "Seed " << seed << ", voices=" << static_cast<int>(nv);
 
       auto codas = result.structure.getSectionsByType(SectionType::Coda);
-      if (codas.empty()) continue;
+      if (codas.empty())
+        continue;
       Tick coda_start = codas[0].start_tick;
       Tick stage1_end = coda_start + kTicksPerBar * 2;
 
@@ -1305,10 +1916,8 @@ TEST(FugueGeneratorTest, CodaStage1_HeldChordStrictOrder) {
         uint8_t pitches[5] = {0, 0, 0, 0, 0};
         for (const auto& track : result.tracks) {
           for (const auto& note : track.notes) {
-            if (note.voice >= 1 && note.voice < 5 &&
-                note.source == BachNoteSource::Coda &&
-                note.start_tick <= tick &&
-                tick < note.start_tick + note.duration) {
+            if (note.voice >= 1 && note.voice < 5 && note.source == BachNoteSource::Coda &&
+                note.start_tick <= tick && tick < note.start_tick + note.duration) {
               pitches[note.voice] = note.pitch;
             }
           }
@@ -1317,12 +1926,9 @@ TEST(FugueGeneratorTest, CodaStage1_HeldChordStrictOrder) {
         for (uint8_t v = 1; v + 1 < vc; ++v) {
           if (pitches[v] > 0 && pitches[v + 1] > 0) {
             EXPECT_GT(pitches[v], pitches[v + 1])
-                << "HeldChordStrictOrder: seed " << seed
-                << ", voices=" << static_cast<int>(nv)
-                << ", tick " << tick
-                << ": v" << static_cast<int>(v) << "("
-                << static_cast<int>(pitches[v]) << ") <= v"
-                << static_cast<int>(v + 1) << "("
+                << "HeldChordStrictOrder: seed " << seed << ", voices=" << static_cast<int>(nv)
+                << ", tick " << tick << ": v" << static_cast<int>(v) << "("
+                << static_cast<int>(pitches[v]) << ") <= v" << static_cast<int>(v + 1) << "("
                 << static_cast<int>(pitches[v + 1]) << ")";
           }
         }
@@ -1343,11 +1949,11 @@ TEST(FugueGeneratorTest, CodaProximity_NoCrossing) {
       FugueConfig config = makeTestConfig(seed);
       config.num_voices = nv;
       FugueResult result = generateFugue(config);
-      ASSERT_TRUE(result.success)
-          << "Seed " << seed << ", voices=" << static_cast<int>(nv);
+      ASSERT_TRUE(result.success) << "Seed " << seed << ", voices=" << static_cast<int>(nv);
 
       auto codas = result.structure.getSectionsByType(SectionType::Coda);
-      if (codas.empty()) continue;
+      if (codas.empty())
+        continue;
       Tick coda_start = codas[0].start_tick;
       Tick coda_end = codas[0].end_tick;
 
@@ -1355,8 +1961,8 @@ TEST(FugueGeneratorTest, CodaProximity_NoCrossing) {
       std::set<Tick> check_ticks;
       for (const auto& track : result.tracks) {
         for (const auto& note : track.notes) {
-          if (note.source == BachNoteSource::Coda &&
-              note.start_tick >= coda_start && note.start_tick < coda_end) {
+          if (note.source == BachNoteSource::Coda && note.start_tick >= coda_start &&
+              note.start_tick < coda_end) {
             check_ticks.insert(note.start_tick);
           }
         }
@@ -1366,8 +1972,7 @@ TEST(FugueGeneratorTest, CodaProximity_NoCrossing) {
         uint8_t pitches[5] = {0, 0, 0, 0, 0};
         for (const auto& track : result.tracks) {
           for (const auto& note : track.notes) {
-            if (note.voice < 5 && note.source == BachNoteSource::Coda &&
-                note.start_tick <= tick &&
+            if (note.voice < 5 && note.source == BachNoteSource::Coda && note.start_tick <= tick &&
                 tick < note.start_tick + note.duration) {
               pitches[note.voice] = note.pitch;
             }
@@ -1380,12 +1985,9 @@ TEST(FugueGeneratorTest, CodaProximity_NoCrossing) {
         for (uint8_t v = 1; v + 1 < vc; ++v) {
           if (pitches[v] > 0 && pitches[v + 1] > 0) {
             EXPECT_GE(pitches[v], pitches[v + 1])
-                << "CodaProximityNoCrossing: seed " << seed
-                << ", voices=" << static_cast<int>(nv)
-                << ", tick " << tick
-                << ": v" << static_cast<int>(v) << "("
-                << static_cast<int>(pitches[v]) << ") < v"
-                << static_cast<int>(v + 1) << "("
+                << "CodaProximityNoCrossing: seed " << seed << ", voices=" << static_cast<int>(nv)
+                << ", tick " << tick << ": v" << static_cast<int>(v) << "("
+                << static_cast<int>(pitches[v]) << ") < v" << static_cast<int>(v + 1) << "("
                 << static_cast<int>(pitches[v + 1]) << ")";
           }
         }
@@ -1417,8 +2019,7 @@ TEST(FugueGeneratorTest, FugueStrongBeatDissonanceZero) {
       FugueConfig config = makeTestConfig(seed);
       config.num_voices = nv;
       FugueResult result = generateFugue(config);
-      ASSERT_TRUE(result.success)
-          << "Seed " << seed << ", voices=" << static_cast<int>(nv);
+      ASSERT_TRUE(result.success) << "Seed " << seed << ", voices=" << static_cast<int>(nv);
 
       std::vector<NoteEvent> all_notes;
       for (const auto& track : result.tracks) {
@@ -1435,8 +2036,8 @@ TEST(FugueGeneratorTest, FugueStrongBeatDissonanceZero) {
         }
       }
       EXPECT_LE(strong_beat_high, 15)
-          << "Seed " << seed << ", voices=" << static_cast<int>(nv)
-          << ": " << strong_beat_high << " strong-beat dissonances (max 15)";
+          << "Seed " << seed << ", voices=" << static_cast<int>(nv) << ": " << strong_beat_high
+          << " strong-beat dissonances (max 15)";
     }
   }
 }
@@ -1459,14 +2060,15 @@ TEST(FugueGeneratorTest, FuguePostValidationTierOrder) {
     }
   }
 
-  std::sort(all_notes.begin(), all_notes.end(),
-            [](const NoteEvent& a, const NoteEvent& b) {
-              if (a.start_tick != b.start_tick) return a.start_tick < b.start_tick;
-              int pa = sourcePriority(a.source);
-              int pb = sourcePriority(b.source);
-              if (pa != pb) return pa < pb;
-              return a.voice < b.voice;
-            });
+  std::sort(all_notes.begin(), all_notes.end(), [](const NoteEvent& a, const NoteEvent& b) {
+    if (a.start_tick != b.start_tick)
+      return a.start_tick < b.start_tick;
+    int pa = sourcePriority(a.source);
+    int pb = sourcePriority(b.source);
+    if (pa != pb)
+      return pa < pb;
+    return a.voice < b.voice;
+  });
 
   // At each tick, Tier 1 notes must appear before Tier 2/3.
   Tick prev_tick = 0;
@@ -1479,8 +2081,7 @@ TEST(FugueGeneratorTest, FuguePostValidationTierOrder) {
     int pri = sourcePriority(note.source);
     // Priority should be non-decreasing within same tick.
     EXPECT_GE(pri, max_priority_seen)
-        << "Tick " << note.start_tick << ": priority " << pri
-        << " after " << max_priority_seen;
+        << "Tick " << note.start_tick << ": priority " << pri << " after " << max_priority_seen;
     max_priority_seen = std::max(max_priority_seen, pri);
   }
 }
@@ -1494,13 +2095,12 @@ TEST(FugueGeneratorTest, SourcePriorityConsistency) {
   // All structural sources must have priority <= 1.
   // Tier 3 (priority 2) sources must NOT be structural.
   BachNoteSource all_sources[] = {
-      BachNoteSource::FugueSubject, BachNoteSource::FugueAnswer,
-      BachNoteSource::SubjectCore,  BachNoteSource::PedalPoint,
-      BachNoteSource::CanonDux,     BachNoteSource::CanonComes,
-      BachNoteSource::GoldbergAria,
-      BachNoteSource::Countersubject, BachNoteSource::EpisodeMaterial,
-      BachNoteSource::FalseEntry,   BachNoteSource::SequenceNote,
-      BachNoteSource::Coda,
+      BachNoteSource::FugueSubject,     BachNoteSource::FugueAnswer,
+      BachNoteSource::SubjectCore,      BachNoteSource::PedalPoint,
+      BachNoteSource::CanonDux,         BachNoteSource::CanonComes,
+      BachNoteSource::GoldbergAria,     BachNoteSource::Countersubject,
+      BachNoteSource::EpisodeMaterial,  BachNoteSource::FalseEntry,
+      BachNoteSource::SequenceNote,     BachNoteSource::Coda,
       BachNoteSource::FreeCounterpoint, BachNoteSource::Ornament,
       BachNoteSource::Unknown,
   };
@@ -1509,21 +2109,18 @@ TEST(FugueGeneratorTest, SourcePriorityConsistency) {
     bool structural = isStructuralSource(src);
     if (pri == 0) {
       // Tier 1 (immutable): must be structural.
-      EXPECT_TRUE(structural)
-          << "Source " << static_cast<int>(src)
-          << " has priority 0 but is not structural";
+      EXPECT_TRUE(structural) << "Source " << static_cast<int>(src)
+                              << " has priority 0 but is not structural";
     }
     if (structural) {
       // All structural sources must be Tier 1 or Tier 2.
-      EXPECT_LE(pri, 1)
-          << "Source " << static_cast<int>(src)
-          << " is structural but has priority " << pri;
+      EXPECT_LE(pri, 1) << "Source " << static_cast<int>(src) << " is structural but has priority "
+                        << pri;
     }
     if (pri == 2) {
       // Tier 3: must NOT be structural.
-      EXPECT_FALSE(structural)
-          << "Source " << static_cast<int>(src)
-          << " has priority 2 but is structural";
+      EXPECT_FALSE(structural) << "Source " << static_cast<int>(src)
+                               << " has priority 2 but is structural";
     }
   }
 }
@@ -1551,7 +2148,8 @@ TEST(FugueGeneratorTest, EpisodeDensity_FourVoice_NotAllVoicesAlwaysActive) {
 
     // Get episode sections.
     auto episodes = result.structure.getSectionsByType(SectionType::Episode);
-    if (episodes.empty()) continue;
+    if (episodes.empty())
+      continue;
 
     // Sample beats within episodes and count how many voices have note onsets.
     int total_beats = 0;
@@ -1562,30 +2160,30 @@ TEST(FugueGeneratorTest, EpisodeDensity_FourVoice_NotAllVoicesAlwaysActive) {
         // Count voices with onsets at this beat (within half a beat tolerance).
         bool voice_has_onset[4] = {false, false, false, false};
         for (const auto& note : all_notes) {
-          if (note.voice >= 4) continue;
-          Tick diff = (note.start_tick >= beat)
-              ? note.start_tick - beat
-              : beat - note.start_tick;
+          if (note.voice >= 4)
+            continue;
+          Tick diff = (note.start_tick >= beat) ? note.start_tick - beat : beat - note.start_tick;
           if (diff <= kTicksPerBeat / 4) {
             voice_has_onset[note.voice] = true;
           }
         }
         int active_count = 0;
         for (int vid = 0; vid < 4; ++vid) {
-          if (voice_has_onset[vid]) ++active_count;
+          if (voice_has_onset[vid])
+            ++active_count;
         }
-        if (active_count < 4) ++beats_with_fewer_than_all;
+        if (active_count < 4)
+          ++beats_with_fewer_than_all;
       }
     }
 
     // At least 30% of episode beats should have fewer than all 4 voices
     // attacking simultaneously (BWV578: only 11% is 4-voice tutti).
     if (total_beats > 0) {
-      float reduced_ratio = static_cast<float>(beats_with_fewer_than_all) /
-                            static_cast<float>(total_beats);
-      EXPECT_GT(reduced_ratio, 0.25f)
-          << "Seed " << seed << ": only " << (reduced_ratio * 100.0f)
-          << "% of episode beats have reduced voices (need > 25%)";
+      float reduced_ratio =
+          static_cast<float>(beats_with_fewer_than_all) / static_cast<float>(total_beats);
+      EXPECT_GT(reduced_ratio, 0.25f) << "Seed " << seed << ": only " << (reduced_ratio * 100.0f)
+                                      << "% of episode beats have reduced voices (need > 25%)";
     }
   }
 }
@@ -1609,9 +2207,12 @@ TEST(FugueGeneratorTest, EpisodeDensity_ThematicNotesPreserved) {
   int answer_count = 0;
   int cs_count = 0;
   for (const auto& note : all_notes) {
-    if (note.source == BachNoteSource::FugueSubject) ++subject_count;
-    if (note.source == BachNoteSource::FugueAnswer) ++answer_count;
-    if (note.source == BachNoteSource::Countersubject) ++cs_count;
+    if (note.source == BachNoteSource::FugueSubject)
+      ++subject_count;
+    if (note.source == BachNoteSource::FugueAnswer)
+      ++answer_count;
+    if (note.source == BachNoteSource::Countersubject)
+      ++cs_count;
   }
 
   // Fugue must have subject and answer entries.

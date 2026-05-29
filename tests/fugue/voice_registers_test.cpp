@@ -364,7 +364,8 @@ TEST(FitToRegisterTest, AlwaysReturnsMultipleOf12) {
   auto pts = makePitches({63, 67, 70, 74, 77});
   for (uint8_t lo : {24, 36, 48, 55, 60}) {
     for (uint8_t hi : {50, 60, 72, 79, 96}) {
-      if (hi <= lo) continue;
+      if (hi <= lo)
+        continue;
       int shift = fitToRegister(pts.data(), pts.size(), lo, hi);
       EXPECT_EQ(shift % 12, 0) << "lo=" << int(lo) << " hi=" << int(hi);
     }

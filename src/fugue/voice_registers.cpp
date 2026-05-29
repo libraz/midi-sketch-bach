@@ -12,7 +12,7 @@
 namespace bach {
 
 std::pair<uint8_t, uint8_t> getFugueVoiceRange(VoiceId voice_id, uint8_t num_voices,
-                                                PedalMode pedal_mode) {
+                                               PedalMode pedal_mode) {
   if (num_voices == 2) {
     constexpr uint8_t kRanges2[][2] = {
         {55, 84},  // Voice 0 (upper): G3-C6
@@ -34,9 +34,12 @@ std::pair<uint8_t, uint8_t> getFugueVoiceRange(VoiceId voice_id, uint8_t num_voi
     }
     // Voice 2: mode-dependent.
     switch (pedal_mode) {
-      case PedalMode::TruePedal:   return {24, 50};
-      case PedalMode::ManualBass:  return {36, 67};
-      default:                     return {48, 72};  // Auto: legacy tenor
+      case PedalMode::TruePedal:
+        return {24, 50};
+      case PedalMode::ManualBass:
+        return {36, 67};
+      default:
+        return {48, 72};  // Auto: legacy tenor
     }
   }
   // 4+ voices
@@ -62,42 +65,46 @@ CharRange getCharacteristicRange(uint8_t range_lo, uint8_t range_hi) {
   // Map voice range to characteristic sub-band by voice type.
   //   Soprano: [60,84], Alto: [55,74], Tenor: [48,67],
   //   TruePedal: [36,50], Bass/Manual: [36,60]
-  if (range_lo >= 60) return {60, 84};   // Soprano
-  if (range_lo >= 55) return {55, 74};   // Alto
-  if (range_lo >= 48) return {48, 67};   // Tenor
-  if (range_hi <= 50) return {36, 50};   // True pedal (narrow range)
-  return {36, 60};                       // Manual bass / general bass
+  if (range_lo >= 60)
+    return {60, 84};  // Soprano
+  if (range_lo >= 55)
+    return {55, 74};  // Alto
+  if (range_lo >= 48)
+    return {48, 67};  // Tenor
+  if (range_hi <= 50)
+    return {36, 50};  // True pedal (narrow range)
+  return {36, 60};    // Manual bass / general bass
 }
 
 int signOf(int val) {
-  if (val > 0) return 1;
-  if (val < 0) return -1;
+  if (val > 0)
+    return 1;
+  if (val < 0)
+    return -1;
   return 0;
 }
 
 }  // namespace
 
-int fitToRegister(const uint8_t* pitches, size_t num_pitches,
-                  uint8_t range_lo, uint8_t range_hi,
-                  uint8_t reference_pitch,
-                  uint8_t prev_reference_pitch,
-                  uint8_t adjacent_last_pitch,
-                  uint8_t adjacent_prev_pitch,
-                  uint8_t adjacent_lo, uint8_t adjacent_hi,
-                  bool is_subject_voice,
-                  uint8_t last_subject_pitch,
+int fitToRegister(const uint8_t* pitches, size_t num_pitches, uint8_t range_lo, uint8_t range_hi,
+                  uint8_t reference_pitch, uint8_t prev_reference_pitch,
+                  uint8_t adjacent_last_pitch, uint8_t adjacent_prev_pitch, uint8_t adjacent_lo,
+                  uint8_t adjacent_hi, bool is_subject_voice, uint8_t last_subject_pitch,
                   bool is_exposition) {
   // Reserved for future melodic contour analysis between prev_reference and reference.
   (void)prev_reference_pitch;
 
-  if (num_pitches == 0) return 0;
+  if (num_pitches == 0)
+    return 0;
 
   // Find min and max pitch in the input.
   uint8_t min_pitch = pitches[0];
   uint8_t max_pitch = pitches[0];
   for (size_t idx = 1; idx < num_pitches; ++idx) {
-    if (pitches[idx] < min_pitch) min_pitch = pitches[idx];
-    if (pitches[idx] > max_pitch) max_pitch = pitches[idx];
+    if (pitches[idx] < min_pitch)
+      min_pitch = pitches[idx];
+    if (pitches[idx] > max_pitch)
+      max_pitch = pitches[idx];
   }
 
   uint8_t first_pitch = pitches[0];
@@ -144,8 +151,8 @@ int fitToRegister(const uint8_t* pitches, size_t num_pitches,
     // (c) parallel_risk: both voices move in same direction to perfect consonance.
     int parallel_risk = 0;
     if (adjacent_last_pitch > 0 && adjacent_prev_pitch > 0 && num_pitches >= 2) {
-      int adj_motion = static_cast<int>(adjacent_last_pitch) -
-                       static_cast<int>(adjacent_prev_pitch);
+      int adj_motion =
+          static_cast<int>(adjacent_last_pitch) - static_cast<int>(adjacent_prev_pitch);
       int entry_motion = shifted_second - shifted_first;
       if (signOf(adj_motion) == signOf(entry_motion) && signOf(adj_motion) != 0) {
         int simple = interval_util::compoundToSimple(
@@ -165,8 +172,8 @@ int fitToRegister(const uint8_t* pitches, size_t num_pitches,
     // (e) order_violation: sustained voice order inversion.
     int order_violation = 0;
     if (adjacent_last_pitch > 0 && num_pitches >= 2) {
-      bool adj_is_lower = (adjacent_lo < range_lo) ||
-                          (adjacent_lo == range_lo && adjacent_hi < range_hi);
+      bool adj_is_lower =
+          (adjacent_lo < range_lo) || (adjacent_lo == range_lo && adjacent_hi < range_hi);
       if (adj_is_lower) {
         // Adjacent is lower voice; this voice should be higher.
         if (shifted_first < static_cast<int>(adjacent_last_pitch) &&
@@ -209,7 +216,8 @@ int fitToRegister(const uint8_t* pitches, size_t num_pitches,
     int entry_leap_penalty = 0;
     if (reference_pitch > 0) {
       int ref_dist = std::abs(shifted_first - static_cast<int>(reference_pitch));
-      if (ref_dist > 12) entry_leap_penalty = ref_dist - 12;
+      if (ref_dist > 12)
+        entry_leap_penalty = ref_dist - 12;
     }
 
     // (j) max_internal_leap: penalize >octave leaps between adjacent notes.
@@ -217,23 +225,16 @@ int fitToRegister(const uint8_t* pitches, size_t num_pitches,
     int max_internal_leap = 0;
     for (size_t i = 1; i < num_pitches; ++i) {
       int d = std::abs(static_cast<int>(pitches[i]) - static_cast<int>(pitches[i - 1]));
-      if (d > 12) max_internal_leap = std::max(max_internal_leap, d - 12);
+      if (d > 12)
+        max_internal_leap = std::max(max_internal_leap, d - 12);
     }
 
-    int score = 100 * overflow
-              + cross_weight * instant_cross
-              + 20 * parallel_risk
-              + 10 * melodic_dist
-              + 40 * entry_leap_penalty
-              + 15 * max_internal_leap
-              +  5 * order_violation
-              +  3 * register_drift
-              +  2 * clarity
-              +  1 * center_dist;
+    int score = 100 * overflow + cross_weight * instant_cross + 20 * parallel_risk +
+                10 * melodic_dist + 40 * entry_leap_penalty + 15 * max_internal_leap +
+                5 * order_violation + 3 * register_drift + 2 * clarity + 1 * center_dist;
 
     // Prefer smaller absolute shift on tie.
-    if (score < best_score ||
-        (score == best_score && std::abs(shift) < std::abs(best_shift))) {
+    if (score < best_score || (score == best_score && std::abs(shift) < std::abs(best_shift))) {
       best_score = score;
       best_shift = shift;
     }
@@ -242,29 +243,21 @@ int fitToRegister(const uint8_t* pitches, size_t num_pitches,
   return best_shift;
 }
 
-int fitToRegister(const std::vector<NoteEvent>& notes,
-                  uint8_t range_lo, uint8_t range_hi,
-                  uint8_t reference_pitch,
-                  uint8_t prev_reference_pitch,
-                  uint8_t adjacent_last_pitch,
-                  uint8_t adjacent_prev_pitch,
-                  uint8_t adjacent_lo, uint8_t adjacent_hi,
-                  bool is_subject_voice,
-                  uint8_t last_subject_pitch,
+int fitToRegister(const std::vector<NoteEvent>& notes, uint8_t range_lo, uint8_t range_hi,
+                  uint8_t reference_pitch, uint8_t prev_reference_pitch,
+                  uint8_t adjacent_last_pitch, uint8_t adjacent_prev_pitch, uint8_t adjacent_lo,
+                  uint8_t adjacent_hi, bool is_subject_voice, uint8_t last_subject_pitch,
                   bool is_exposition) {
-  if (notes.empty()) return 0;
+  if (notes.empty())
+    return 0;
   std::vector<uint8_t> pitch_buf;
   pitch_buf.reserve(notes.size());
   for (const auto& note : notes) {
     pitch_buf.push_back(note.pitch);
   }
-  return fitToRegister(pitch_buf.data(), pitch_buf.size(),
-                       range_lo, range_hi,
-                       reference_pitch, prev_reference_pitch,
-                       adjacent_last_pitch, adjacent_prev_pitch,
-                       adjacent_lo, adjacent_hi,
-                       is_subject_voice, last_subject_pitch,
-                       is_exposition);
+  return fitToRegister(pitch_buf.data(), pitch_buf.size(), range_lo, range_hi, reference_pitch,
+                       prev_reference_pitch, adjacent_last_pitch, adjacent_prev_pitch, adjacent_lo,
+                       adjacent_hi, is_subject_voice, last_subject_pitch, is_exposition);
 }
 
 namespace {
@@ -278,8 +271,10 @@ namespace {
 ///   [0.85, 1.00] closing  (coda)
 float interpolateEnvelopeRatio(float phase_pos, const RegisterEnvelope& envelope) {
   // Clamp to [0, 1].
-  if (phase_pos <= 0.0f) return envelope.opening_range_ratio;
-  if (phase_pos >= 1.0f) return envelope.closing_range_ratio;
+  if (phase_pos <= 0.0f)
+    return envelope.opening_range_ratio;
+  if (phase_pos >= 1.0f)
+    return envelope.closing_range_ratio;
 
   // Phase boundaries.
   constexpr float kOpenEnd = 0.25f;
@@ -310,17 +305,13 @@ float interpolateEnvelopeRatio(float phase_pos, const RegisterEnvelope& envelope
 
 }  // namespace
 
-int fitToRegisterWithEnvelope(
-    const std::vector<NoteEvent>& notes,
-    uint8_t voice_id, uint8_t num_voices,
-    float phase_pos,
-    const RegisterEnvelope& envelope,
-    uint8_t reference_pitch,
-    uint8_t adjacent_last_pitch,
-    int* envelope_overflow_count,
-    uint8_t adjacent_lo,
-    uint8_t adjacent_hi) {
-  if (notes.empty()) return 0;
+int fitToRegisterWithEnvelope(const std::vector<NoteEvent>& notes, uint8_t voice_id,
+                              uint8_t num_voices, float phase_pos, const RegisterEnvelope& envelope,
+                              uint8_t reference_pitch, uint8_t adjacent_last_pitch,
+                              int* envelope_overflow_count, uint8_t adjacent_lo,
+                              uint8_t adjacent_hi) {
+  if (notes.empty())
+    return 0;
 
   // Get the full voice range.
   auto [range_lo, range_hi] = getFugueVoiceRange(voice_id, num_voices);
@@ -349,19 +340,15 @@ int fitToRegisterWithEnvelope(
   uint8_t safe_lo = eff_lo;
   uint8_t safe_hi = eff_hi;
   if (static_cast<int>(safe_hi) - static_cast<int>(safe_lo) < 14) {
-    safe_hi = static_cast<uint8_t>(
-        std::min(127, static_cast<int>(safe_lo) + 14));
+    safe_hi = static_cast<uint8_t>(std::min(127, static_cast<int>(safe_lo) + 14));
     if (static_cast<int>(safe_hi) - static_cast<int>(safe_lo) < 14) {
-      safe_lo = static_cast<uint8_t>(
-          std::max(0, static_cast<int>(safe_hi) - 14));
+      safe_lo = static_cast<uint8_t>(std::max(0, static_cast<int>(safe_hi) - 14));
     }
   }
 
   // Delegate to fitToRegister with envelope-narrowed range.
-  return fitToRegister(notes, safe_lo, safe_hi,
-                       reference_pitch, /*prev_reference_pitch=*/0,
-                       adjacent_last_pitch, /*adjacent_prev_pitch=*/0,
-                       adjacent_lo, adjacent_hi);
+  return fitToRegister(notes, safe_lo, safe_hi, reference_pitch, /*prev_reference_pitch=*/0,
+                       adjacent_last_pitch, /*adjacent_prev_pitch=*/0, adjacent_lo, adjacent_hi);
 }
 
 }  // namespace bach

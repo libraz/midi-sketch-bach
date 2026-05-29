@@ -114,12 +114,9 @@ struct InvariantSet {
   };
 
   SatisfiesResult satisfies(uint8_t pitch, VoiceId voice_id, Tick tick,
-                            const VerticalSnapshot& snap,
-                            const IRuleEvaluator* rule_eval,
-                            const BachRuleEvaluator* crossing_eval,
-                            const CounterpointState* state,
-                            const uint8_t* recent_pitches,
-                            int recent_count) const;
+                            const VerticalSnapshot& snap, const IRuleEvaluator* rule_eval,
+                            const BachRuleEvaluator* crossing_eval, const CounterpointState* state,
+                            const uint8_t* recent_pitches, int recent_count) const;
 };
 
 // ---------------------------------------------------------------------------
@@ -179,10 +176,10 @@ void normalizeDistribution(const int* counts, float* out, int n);
 
 /// @brief Phase-specific weight configuration for Gravity scoring.
 struct PhaseWeights {
-  float melodic = 0.35f;    ///< Markov melodic weight.
-  float vertical = 0.30f;   ///< Vertical interval weight.
-  float rhythm = 0.20f;     ///< Rhythm distribution JSD weight.
-  float vocabulary = 0.15f; ///< Figure vocabulary match weight.
+  float melodic = 0.35f;     ///< Markov melodic weight.
+  float vertical = 0.30f;    ///< Vertical interval weight.
+  float rhythm = 0.20f;      ///< Rhythm distribution JSD weight.
+  float vocabulary = 0.15f;  ///< Figure vocabulary match weight.
 };
 
 /// @brief Get phase weights for a FuguePhase.
@@ -195,8 +192,7 @@ const PhaseWeights& getPhaseWeights(FuguePhase phase);
 /// @param cadence_ticks Sorted cadence positions.
 /// @param energy Current energy level.
 /// @return Factor in [0.3, 1.0] (lower = more lenient).
-float jsd_decay_factor(Tick tick, Tick total_duration,
-                       const std::vector<Tick>& cadence_ticks,
+float jsd_decay_factor(Tick tick, Tick total_duration, const std::vector<Tick>& cadence_ticks,
                        float energy);
 
 /// @brief Gravity scoring configuration.
@@ -226,11 +222,8 @@ struct GravityConfig {
   /// @param decay JSD decay factor.
   /// @param figure_score Vocabulary figure match score [0,1].
   /// @return Composite score (higher = better).
-  float score(uint8_t pitch, Tick duration,
-              const MarkovContext& ctx,
-              const VerticalSnapshot& snap,
-              const SectionAccumulator& accum,
-              float decay, float figure_score) const;
+  float score(uint8_t pitch, Tick duration, const MarkovContext& ctx, const VerticalSnapshot& snap,
+              const SectionAccumulator& accum, float decay, float figure_score) const;
 };
 
 // ---------------------------------------------------------------------------
@@ -277,25 +270,24 @@ struct ConstraintState {
   /// @param recent_pitches Recent pitches for repeat check.
   /// @param recent_count Count of recent pitches.
   /// @param figure_score Vocabulary match score.
+  /// @param commit_soft_violations Whether soft violations should add
+  ///        recovery obligations. Candidate search should pass false.
   /// @return Composite score. Negative infinity if Hard violated.
   float evaluate(uint8_t pitch, Tick duration, VoiceId voice_id, Tick tick,
                  const MarkovContext& ctx, const VerticalSnapshot& snap,
-                 const IRuleEvaluator* rule_eval,
-                 const BachRuleEvaluator* crossing_eval,
-                 const CounterpointState* cp_state,
-                 const uint8_t* recent_pitches, int recent_count,
-                 float figure_score);
+                 const IRuleEvaluator* rule_eval, const BachRuleEvaluator* crossing_eval,
+                 const CounterpointState* cp_state, const uint8_t* recent_pitches, int recent_count,
+                 float figure_score, bool commit_soft_violations = true);
 
   /// @brief Advance time: consume resolved obligations, expire overdue ones.
   /// @param tick Current tick after note placement.
   /// @param placed_pitch Pitch that was placed.
   /// @param placed_voice Voice that received the note.
-  void advance(Tick tick, uint8_t placed_pitch, VoiceId placed_voice,
-               Tick duration = 0, Key key = Key::C);
+  void advance(Tick tick, uint8_t placed_pitch, VoiceId placed_voice, Tick duration = 0,
+               Key key = Key::C);
 
   /// @brief Add a recovery obligation for a soft invariant violation.
-  void addRecoveryObligation(ObligationType type, Tick origin, Tick deadline,
-                             VoiceId voice);
+  void addRecoveryObligation(ObligationType type, Tick origin, Tick deadline, VoiceId voice);
 
   /// @brief Check if the fugue is in an irrecoverable state.
   /// @param current_tick Current generation tick for deadline comparison.
@@ -305,9 +297,8 @@ struct ConstraintState {
 
   /// @brief Get current soft violation ratio.
   float soft_violation_ratio() const {
-    return total_note_count > 0
-               ? static_cast<float>(soft_violation_count) / total_note_count
-               : 0.0f;
+    return total_note_count > 0 ? static_cast<float>(soft_violation_count) / total_note_count
+                                : 0.0f;
   }
 };
 

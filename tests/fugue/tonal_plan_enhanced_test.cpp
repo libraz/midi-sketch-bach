@@ -26,8 +26,7 @@ TEST(TonalPlanEnhancedTest, DetailedTimelineProducesBeatResolutionEvents) {
 
   // Check that events occur at beat boundaries.
   for (const auto& ev : timeline.events()) {
-    EXPECT_EQ(ev.tick % kTicksPerBeat, 0u)
-        << "Event at tick " << ev.tick << " is not beat-aligned";
+    EXPECT_EQ(ev.tick % kTicksPerBeat, 0u) << "Event at tick " << ev.tick << " is not beat-aligned";
   }
 
   // Should have more events than bar-only (12 bars -> 12 events for bar,
@@ -70,8 +69,7 @@ TEST(TonalPlanEnhancedTest, DetailedTimelineKeyChangesMatchModulations) {
     Tick mod_tick = plan.modulations[idx].tick;
     Key expected_key = plan.modulations[idx].target_key;
     Key timeline_key = timeline.getKeyAt(mod_tick);
-    EXPECT_EQ(timeline_key, expected_key)
-        << "Key mismatch at modulation tick " << mod_tick;
+    EXPECT_EQ(timeline_key, expected_key) << "Key mismatch at modulation tick " << mod_tick;
   }
 }
 

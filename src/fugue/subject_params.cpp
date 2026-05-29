@@ -19,36 +19,37 @@ namespace bach {
 CharacterParams getCharacterParams(SubjectCharacter character, std::mt19937& rng_eng) {
   switch (character) {
     case SubjectCharacter::Severe:
-      return {rng::rollFloat(rng_eng, 0.10f, 0.20f), 7,
-              kSevereDurations, kSevereDurCount};    // octave (BWV 542/547/578)
+      return {rng::rollFloat(rng_eng, 0.10f, 0.20f), 7, kSevereDurations,
+              kSevereDurCount};  // octave (BWV 542/547/578)
     case SubjectCharacter::Playful:
-      return {rng::rollFloat(rng_eng, 0.35f, 0.50f), 7,
-              kPlayfulDurations, kPlayfulDurCount};  // octave (12 semitones)
+      return {rng::rollFloat(rng_eng, 0.35f, 0.50f), 7, kPlayfulDurations,
+              kPlayfulDurCount};  // octave (12 semitones)
     case SubjectCharacter::Noble:
-      return {rng::rollFloat(rng_eng, 0.20f, 0.30f), 8,
-              kNobleDurations, kNobleDurCount};      // 9th (~14 semitones)
+      return {rng::rollFloat(rng_eng, 0.20f, 0.30f), 8, kNobleDurations,
+              kNobleDurCount};  // 9th (~14 semitones)
     case SubjectCharacter::Restless:
-      return {rng::rollFloat(rng_eng, 0.30f, 0.45f), 9,
-              kRestlessDurations, kRestlessDurCount}; // 10th (~16 semitones)
+      return {rng::rollFloat(rng_eng, 0.30f, 0.45f), 9, kRestlessDurations,
+              kRestlessDurCount};  // 10th (~16 semitones)
   }
   return {0.20f, 7, kSevereDurations, kSevereDurCount};
 }
 
-int clampLeap(int pitch, int prev_pitch, SubjectCharacter character,
-              Key key, ScaleType scale, int pitch_floor, int pitch_ceil,
-              std::mt19937& gen, int* large_leap_count) {
-  if (prev_pitch < 0) return pitch;
+int clampLeap(int pitch, int prev_pitch, SubjectCharacter character, Key key, ScaleType scale,
+              int pitch_floor, int pitch_ceil, std::mt19937& gen, int* large_leap_count) {
+  if (prev_pitch < 0)
+    return pitch;
   int interval = std::abs(pitch - prev_pitch);
   int max_leap = maxLeapForCharacter(character);
-  if (interval <= max_leap) return pitch;
+  if (interval <= max_leap)
+    return pitch;
 
   // Playful/Restless: allow 8-9st (6th) but only once per subject.
-  if ((character == SubjectCharacter::Playful ||
-       character == SubjectCharacter::Restless) &&
+  if ((character == SubjectCharacter::Playful || character == SubjectCharacter::Restless) &&
       interval <= 9) {
     int current_count = large_leap_count ? *large_leap_count : 0;
     if (current_count < 1 && rng::rollProbability(gen, 0.20f)) {
-      if (large_leap_count) ++(*large_leap_count);
+      if (large_leap_count)
+        ++(*large_leap_count);
       return pitch;
     }
   }
@@ -65,15 +66,15 @@ int clampLeap(int pitch, int prev_pitch, SubjectCharacter character,
   // Final check: if snapToScale pushed the pitch beyond max_leap,
   // progressively reduce until a scale tone fits within the limit.
   for (int attempt = max_leap; attempt >= 1; --attempt) {
-    if (std::abs(best - prev_pitch) <= max_leap) break;
-    best = snapToScale(prev_pitch + direction * attempt,
-                       key, scale, pitch_floor, pitch_ceil);
+    if (std::abs(best - prev_pitch) <= max_leap)
+      break;
+    best = snapToScale(prev_pitch + direction * attempt, key, scale, pitch_floor, pitch_ceil);
   }
   return best;
 }
 
-void varyDurationPair(Tick dur_a, Tick dur_b, SubjectCharacter character,
-                      std::mt19937& gen, Tick& out_a, Tick& out_b) {
+void varyDurationPair(Tick dur_a, Tick dur_b, SubjectCharacter character, std::mt19937& gen,
+                      Tick& out_a, Tick& out_b) {
   out_a = dur_a;
   out_b = dur_b;
 
@@ -96,7 +97,8 @@ void varyDurationPair(Tick dur_a, Tick dur_b, SubjectCharacter character,
       break;
   }
 
-  if (!rng::rollProbability(gen, prob)) return;
+  if (!rng::rollProbability(gen, prob))
+    return;
 
   Tick sum = dur_a + dur_b;
 
@@ -170,22 +172,23 @@ void varyDurationPair(Tick dur_a, Tick dur_b, SubjectCharacter character,
   }
 }
 
-int avoidUnison(int pitch, int prev_pitch, Key key, ScaleType scale,
-                int floor_pitch, int ceil_pitch) {
-  if (prev_pitch < 0 || pitch != prev_pitch) return pitch;
+int avoidUnison(int pitch, int prev_pitch, Key key, ScaleType scale, int floor_pitch,
+                int ceil_pitch) {
+  if (prev_pitch < 0 || pitch != prev_pitch)
+    return pitch;
 
   // Try up: nearest scale tone above.
   for (int delta = 1; delta <= 2; ++delta) {
-    int candidate = static_cast<int>(scale_util::nearestScaleTone(
-        clampPitch(pitch + delta, 0, 127), key, scale));
+    int candidate = static_cast<int>(
+        scale_util::nearestScaleTone(clampPitch(pitch + delta, 0, 127), key, scale));
     if (candidate != pitch && candidate <= ceil_pitch && candidate >= floor_pitch) {
       return candidate;
     }
   }
   // Try down: nearest scale tone below.
   for (int delta = 1; delta <= 2; ++delta) {
-    int candidate = static_cast<int>(scale_util::nearestScaleTone(
-        clampPitch(pitch - delta, 0, 127), key, scale));
+    int candidate = static_cast<int>(
+        scale_util::nearestScaleTone(clampPitch(pitch - delta, 0, 127), key, scale));
     if (candidate != pitch && candidate >= floor_pitch && candidate <= ceil_pitch) {
       return candidate;
     }
@@ -193,30 +196,24 @@ int avoidUnison(int pitch, int prev_pitch, Key key, ScaleType scale,
   return pitch;  // Unavoidable in extremely narrow range.
 }
 
-int snapToScale(int pitch, Key key, ScaleType scale, int floor_pitch,
-                int ceil_pitch) {
+int snapToScale(int pitch, Key key, ScaleType scale, int floor_pitch, int ceil_pitch) {
   pitch = std::max(floor_pitch, std::min(ceil_pitch, pitch));
-  int snapped = static_cast<int>(scale_util::nearestScaleTone(
-      clampPitch(pitch, 0, 127), key, scale));
+  int snapped =
+      static_cast<int>(scale_util::nearestScaleTone(clampPitch(pitch, 0, 127), key, scale));
   // Ensure snapped result respects ceiling (nearestScaleTone may snap up).
   if (snapped > ceil_pitch) {
     // Find the scale tone below the ceiling.
-    int abs_deg = scale_util::pitchToAbsoluteDegree(
-        clampPitch(ceil_pitch, 0, 127),
-        key, scale);
-    int candidate = static_cast<int>(
-        scale_util::absoluteDegreeToPitch(abs_deg, key, scale));
+    int abs_deg = scale_util::pitchToAbsoluteDegree(clampPitch(ceil_pitch, 0, 127), key, scale);
+    int candidate = static_cast<int>(scale_util::absoluteDegreeToPitch(abs_deg, key, scale));
     if (candidate > ceil_pitch && abs_deg > 0) {
-      candidate = static_cast<int>(
-          scale_util::absoluteDegreeToPitch(abs_deg - 1, key, scale));
+      candidate = static_cast<int>(scale_util::absoluteDegreeToPitch(abs_deg - 1, key, scale));
     }
     snapped = std::max(floor_pitch, candidate);
   }
   return snapped;
 }
 
-Tick quantizeToStrongBeat(Tick raw_tick, SubjectCharacter character,
-                          Tick total_ticks) {
+Tick quantizeToStrongBeat(Tick raw_tick, SubjectCharacter character, Tick total_ticks) {
   Tick bar = raw_tick / kTicksPerBar;
   Tick beat1 = bar * kTicksPerBar;
   Tick beat3 = bar * kTicksPerBar + kTicksPerBeat * 2;
@@ -256,8 +253,7 @@ CadentialFormula getCadentialFormula(SubjectCharacter character) {
   return {kSevereCadDegrees, kSevereCadDurations, 3};
 }
 
-void applyArchetypeConstraints(CharacterParams& params,
-                                const ArchetypePolicy& policy) {
+void applyArchetypeConstraints(CharacterParams& params, const ArchetypePolicy& policy) {
   // Tighten range: use the intersection of character and archetype ranges.
   if (params.max_range_degrees > policy.max_range_degrees) {
     params.max_range_degrees = policy.max_range_degrees;
@@ -267,8 +263,7 @@ void applyArchetypeConstraints(CharacterParams& params,
   }
 }
 
-AccelProfile getAccelProfile(SubjectCharacter character,
-                             FugueArchetype /* archetype */,
+AccelProfile getAccelProfile(SubjectCharacter character, FugueArchetype /* archetype */,
                              std::mt19937& rng) {
   AccelProfile profile;
 
@@ -276,7 +271,7 @@ AccelProfile getAccelProfile(SubjectCharacter character,
   float none_prob = 0.25f;  // Default 25%.
   switch (character) {
     case SubjectCharacter::Severe:
-      none_prob = 0.30f;   // Severe: slightly higher None probability.
+      none_prob = 0.30f;  // Severe: slightly higher None probability.
       break;
     case SubjectCharacter::Playful:
       none_prob = 0.25f;
@@ -285,7 +280,7 @@ AccelProfile getAccelProfile(SubjectCharacter character,
       none_prob = 0.25f;
       break;
     case SubjectCharacter::Restless:
-      none_prob = 0.15f;   // Restless: lower None probability.
+      none_prob = 0.15f;  // Restless: lower None probability.
       break;
   }
 
@@ -293,9 +288,8 @@ AccelProfile getAccelProfile(SubjectCharacter character,
     profile.curve_type = AccelCurveType::None;
   } else {
     // Remaining: 70% EaseIn, 30% Linear.
-    profile.curve_type = rng::rollProbability(rng, 0.70f)
-                             ? AccelCurveType::EaseIn
-                             : AccelCurveType::Linear;
+    profile.curve_type =
+        rng::rollProbability(rng, 0.70f) ? AccelCurveType::EaseIn : AccelCurveType::Linear;
   }
 
   // min_dur: organ = kSixteenthNote (120 ticks) for all combinations.

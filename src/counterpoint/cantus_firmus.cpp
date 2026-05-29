@@ -21,19 +21,23 @@ size_t CantusFirmus::noteCount() const {
 }
 
 uint8_t CantusFirmus::lowestPitch() const {
-  if (notes.empty()) return 127;
+  if (notes.empty())
+    return 127;
   uint8_t lowest = 127;
   for (const auto& note : notes) {
-    if (note.pitch < lowest) lowest = note.pitch;
+    if (note.pitch < lowest)
+      lowest = note.pitch;
   }
   return lowest;
 }
 
 uint8_t CantusFirmus::highestPitch() const {
-  if (notes.empty()) return 0;
+  if (notes.empty())
+    return 0;
   uint8_t highest = 0;
   for (const auto& note : notes) {
-    if (note.pitch > highest) highest = note.pitch;
+    if (note.pitch > highest)
+      highest = note.pitch;
   }
   return highest;
 }
@@ -49,13 +53,14 @@ constexpr float kThirdProb = 0.2f;
 
 }  // namespace
 
-CantusFirmus CantusFirmusGenerator::generate(Key key, uint8_t length_bars,
-                                             uint32_t seed) const {
+CantusFirmus CantusFirmusGenerator::generate(Key key, uint8_t length_bars, uint32_t seed) const {
   std::mt19937 gen(seed);
 
   // Clamp length to 4-8 bars.
-  if (length_bars < 4) length_bars = 4;
-  if (length_bars > 8) length_bars = 8;
+  if (length_bars < 4)
+    length_bars = 4;
+  if (length_bars > 8)
+    length_bars = 8;
 
   int key_offset = static_cast<int>(key);
   constexpr int kBaseNote = 60;  // C4
@@ -71,8 +76,7 @@ CantusFirmus CantusFirmusGenerator::generate(Key key, uint8_t length_bars,
   // middle of the melody.
 
   int num_notes = static_cast<int>(length_bars);
-  int climax_position = rng::rollRange(gen, num_notes / 3,
-                                       (num_notes * 2) / 3);
+  int climax_position = rng::rollRange(gen, num_notes / 3, (num_notes * 2) / 3);
 
   // Generate the melody as scale degrees.
   std::vector<int> degrees(num_notes, 0);
@@ -96,7 +100,8 @@ CantusFirmus CantusFirmusGenerator::generate(Key key, uint8_t length_bars,
     current_degree += step;
 
     // Clamp to keep range within an octave (7 diatonic degrees).
-    if (current_degree > 7) current_degree = 7;
+    if (current_degree > 7)
+      current_degree = 7;
     degrees[idx] = current_degree;
   }
 
@@ -105,7 +110,8 @@ CantusFirmus CantusFirmusGenerator::generate(Key key, uint8_t length_bars,
   if (climax_position > 0 && climax_degree <= degrees[climax_position - 1]) {
     climax_degree = degrees[climax_position - 1] + 1;
   }
-  if (climax_degree > 7) climax_degree = 7;
+  if (climax_degree > 7)
+    climax_degree = 7;
   degrees[climax_position] = climax_degree;
 
   // Generate descending phase (from climax to penultimate note).
@@ -122,8 +128,10 @@ CantusFirmus CantusFirmusGenerator::generate(Key key, uint8_t length_bars,
     current_degree += step;
 
     // Clamp: do not go below degree 0 (tonic) until the final note.
-    if (current_degree < 1) current_degree = 1;
-    if (current_degree > 7) current_degree = 7;
+    if (current_degree < 1)
+      current_degree = 1;
+    if (current_degree > 7)
+      current_degree = 7;
     degrees[idx] = current_degree;
   }
 

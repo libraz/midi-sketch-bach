@@ -10,17 +10,18 @@
 
 namespace bach {
 
-float computeGoalApproachBonus(uint8_t current_pitch, Tick current_tick,
-                               const PhraseGoal& goal) {
+float computeGoalApproachBonus(uint8_t current_pitch, Tick current_tick, const PhraseGoal& goal) {
   // No target pitch set (0 is an invalid musical target) -- no bonus.
-  if (goal.target_pitch == 0 || goal.target_tick == 0) return 0.0f;
+  if (goal.target_pitch == 0 || goal.target_tick == 0)
+    return 0.0f;
 
   // Pitch proximity: inverse linear within an octave. Beyond 12 semitones, no bonus.
   int pitch_distance = absoluteInterval(current_pitch, goal.target_pitch);
   constexpr int kMaxPitchDistance = 12;  // One octave.
   float pitch_factor = 0.0f;
   if (pitch_distance < kMaxPitchDistance) {
-    pitch_factor = 1.0f - static_cast<float>(pitch_distance) / static_cast<float>(kMaxPitchDistance);
+    pitch_factor =
+        1.0f - static_cast<float>(pitch_distance) / static_cast<float>(kMaxPitchDistance);
   }
 
   // Temporal proximity: ramps linearly from 0.0 (tick 0) to 1.0 (at or past target).
@@ -43,7 +44,8 @@ float MelodicContext::scoreMelodicQuality(const MelodicContext& ctx, uint8_t can
     if (goal != nullptr) {
       base += computeGoalApproachBonus(candidate, current_tick, *goal);
     }
-    if (base > 1.0f) base = 1.0f;
+    if (base > 1.0f)
+      base = 1.0f;
     return base;
   }
 
@@ -112,9 +114,9 @@ float MelodicContext::scoreMelodicQuality(const MelodicContext& ctx, uint8_t can
     bool is_step = (interval >= 1 && interval <= 2);
     bool is_opposite = (direction != 0 && direction != ctx.prev_direction);
     if (is_step && is_opposite) {
-      score += 0.4f;   // Correct resolution: strong bonus.
+      score += 0.4f;  // Correct resolution: strong bonus.
     } else if (interval > 2) {
-      score -= 0.4f;   // Consecutive leaps: strong suppression.
+      score -= 0.4f;  // Consecutive leaps: strong suppression.
     } else {
       score -= 0.15f;  // Same-direction step: mild penalty.
     }
@@ -124,14 +126,16 @@ float MelodicContext::scoreMelodicQuality(const MelodicContext& ctx, uint8_t can
   // Penalize excessively long runs of same-direction stepwise motion.
   // This prevents meandering scalar passages that lack the characteristic
   // leaps and direction changes of Baroque voice leading.
-  if (ctx.consecutive_same_dir >= 5 && direction != 0 &&
-      direction == ctx.prev_direction && interval <= 2) {
+  if (ctx.consecutive_same_dir >= 5 && direction != 0 && direction == ctx.prev_direction &&
+      interval <= 2) {
     score -= 0.15f;
   }
 
   // Clamp to [0.0, 1.0].
-  if (score < 0.0f) score = 0.0f;
-  if (score > 1.0f) score = 1.0f;
+  if (score < 0.0f)
+    score = 0.0f;
+  if (score > 1.0f)
+    score = 1.0f;
 
   return score;
 }

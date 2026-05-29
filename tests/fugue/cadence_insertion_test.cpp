@@ -20,8 +20,7 @@ namespace {
 // ---------------------------------------------------------------------------
 // Helper: create a note at a given tick, pitch, and voice.
 // ---------------------------------------------------------------------------
-NoteEvent makeNote(Tick tick, uint8_t pitch, VoiceId voice,
-                   Tick dur = kTicksPerBeat,
+NoteEvent makeNote(Tick tick, uint8_t pitch, VoiceId voice, Tick dur = kTicksPerBeat,
                    BachNoteSource src = BachNoteSource::EpisodeMaterial) {
   NoteEvent note;
   note.start_tick = tick;
@@ -43,8 +42,8 @@ TEST_F(CadentialResolutionTest, DetectsLeadingToneToTonicInCMajor) {
   // C major: leading tone = B (pitch class 11), tonic = C (pitch class 0).
   std::vector<NoteEvent> notes;
   // B4 at tick 480, then C5 at tick 960.
-  notes.push_back(makeNote(480, 71, 0));   // B4
-  notes.push_back(makeNote(960, 72, 0));   // C5
+  notes.push_back(makeNote(480, 71, 0));  // B4
+  notes.push_back(makeNote(960, 72, 0));  // C5
 
   // Check at tick 720 (between the two notes).
   EXPECT_TRUE(hasCadentialResolution(notes, 720, Key::C));
@@ -62,8 +61,8 @@ TEST_F(CadentialResolutionTest, DetectsResolutionInGMinor) {
 TEST_F(CadentialResolutionTest, DetectsCrossVoiceResolution) {
   // Leading tone in voice 0, tonic in voice 2.
   std::vector<NoteEvent> notes;
-  notes.push_back(makeNote(500, 71, 0));   // B4 in voice 0
-  notes.push_back(makeNote(800, 60, 2));   // C4 in voice 2
+  notes.push_back(makeNote(500, 71, 0));  // B4 in voice 0
+  notes.push_back(makeNote(800, 60, 2));  // C4 in voice 2
 
   EXPECT_TRUE(hasCadentialResolution(notes, 650, Key::C));
 }
@@ -80,8 +79,8 @@ TEST_F(CadentialResolutionTest, RejectsTonicBeforeLeadingTone) {
 TEST_F(CadentialResolutionTest, RejectsOutsideWindow) {
   // Notes too far apart (more than 4 beats window).
   std::vector<NoteEvent> notes;
-  notes.push_back(makeNote(0, 71, 0));       // B4 at tick 0
-  notes.push_back(makeNote(5000, 60, 0));    // C4 at tick 5000
+  notes.push_back(makeNote(0, 71, 0));     // B4 at tick 0
+  notes.push_back(makeNote(5000, 60, 0));  // C4 at tick 5000
 
   // Check at tick 2500 -- B is within window but C is 2500 ticks after B,
   // exceeding the 960-tick radius from B.
@@ -110,18 +109,18 @@ class SubjectEntryDetectionTest : public ::testing::Test {
  protected:
   FugueStructure buildStructure() {
     FugueStructure structure;
-    structure.addSection(SectionType::Exposition, FuguePhase::Establish,
-                         0, kTicksPerBar * 4, Key::C);
-    structure.addSection(SectionType::Episode, FuguePhase::Develop,
-                         kTicksPerBar * 4, kTicksPerBar * 8, Key::G);
-    structure.addSection(SectionType::MiddleEntry, FuguePhase::Develop,
-                         kTicksPerBar * 8, kTicksPerBar * 12, Key::G);
-    structure.addSection(SectionType::Episode, FuguePhase::Develop,
-                         kTicksPerBar * 12, kTicksPerBar * 16, Key::C);
-    structure.addSection(SectionType::Stretto, FuguePhase::Resolve,
-                         kTicksPerBar * 16, kTicksPerBar * 20, Key::C);
-    structure.addSection(SectionType::Coda, FuguePhase::Resolve,
-                         kTicksPerBar * 20, kTicksPerBar * 22, Key::C);
+    structure.addSection(SectionType::Exposition, FuguePhase::Establish, 0, kTicksPerBar * 4,
+                         Key::C);
+    structure.addSection(SectionType::Episode, FuguePhase::Develop, kTicksPerBar * 4,
+                         kTicksPerBar * 8, Key::G);
+    structure.addSection(SectionType::MiddleEntry, FuguePhase::Develop, kTicksPerBar * 8,
+                         kTicksPerBar * 12, Key::G);
+    structure.addSection(SectionType::Episode, FuguePhase::Develop, kTicksPerBar * 12,
+                         kTicksPerBar * 16, Key::C);
+    structure.addSection(SectionType::Stretto, FuguePhase::Resolve, kTicksPerBar * 16,
+                         kTicksPerBar * 20, Key::C);
+    structure.addSection(SectionType::Coda, FuguePhase::Resolve, kTicksPerBar * 20,
+                         kTicksPerBar * 22, Key::C);
     return structure;
   }
 };
@@ -164,13 +163,13 @@ class CadenceDeficiencyTest : public ::testing::Test {
  protected:
   FugueStructure buildLongStructure() {
     FugueStructure structure;
-    structure.addSection(SectionType::Exposition, FuguePhase::Establish,
-                         0, kTicksPerBar * 4, Key::C);
+    structure.addSection(SectionType::Exposition, FuguePhase::Establish, 0, kTicksPerBar * 4,
+                         Key::C);
     // Long episode: 4-40 bars (no subject entry).
-    structure.addSection(SectionType::Episode, FuguePhase::Develop,
-                         kTicksPerBar * 4, kTicksPerBar * 40, Key::G);
-    structure.addSection(SectionType::Stretto, FuguePhase::Resolve,
-                         kTicksPerBar * 40, kTicksPerBar * 44, Key::C);
+    structure.addSection(SectionType::Episode, FuguePhase::Develop, kTicksPerBar * 4,
+                         kTicksPerBar * 40, Key::G);
+    structure.addSection(SectionType::Stretto, FuguePhase::Resolve, kTicksPerBar * 40,
+                         kTicksPerBar * 44, Key::C);
     return structure;
   }
 };
@@ -188,8 +187,7 @@ TEST_F(CadenceDeficiencyTest, NoCadenceInLongStretch_FlagsDeficiency) {
   CadenceDetectionConfig config;
   config.max_bars_without_cadence = 16;
 
-  auto deficiencies = detectCadenceDeficiencies(notes, structure, Key::C,
-                                                total_duration, config);
+  auto deficiencies = detectCadenceDeficiencies(notes, structure, Key::C, total_duration, config);
   EXPECT_GE(deficiencies.size(), 1u);
 }
 
@@ -213,18 +211,17 @@ TEST_F(CadenceDeficiencyTest, FrequentCadences_NoDeficiency) {
   CadenceDetectionConfig config;
   config.max_bars_without_cadence = 16;
 
-  auto deficiencies = detectCadenceDeficiencies(notes, structure, Key::C,
-                                                total_duration, config);
+  auto deficiencies = detectCadenceDeficiencies(notes, structure, Key::C, total_duration, config);
   EXPECT_EQ(deficiencies.size(), 0u);
 }
 
 TEST_F(CadenceDeficiencyTest, SubjectEntrySkipped) {
   // Structure where the long gap is entirely within a subject entry.
   FugueStructure structure;
-  structure.addSection(SectionType::Exposition, FuguePhase::Establish,
-                       0, kTicksPerBar * 30, Key::C);
-  structure.addSection(SectionType::Coda, FuguePhase::Resolve,
-                       kTicksPerBar * 30, kTicksPerBar * 32, Key::C);
+  structure.addSection(SectionType::Exposition, FuguePhase::Establish, 0, kTicksPerBar * 30,
+                       Key::C);
+  structure.addSection(SectionType::Coda, FuguePhase::Resolve, kTicksPerBar * 30, kTicksPerBar * 32,
+                       Key::C);
   Tick total_duration = kTicksPerBar * 32;
 
   // No cadences at all, but the gap is within an Exposition.
@@ -236,8 +233,7 @@ TEST_F(CadenceDeficiencyTest, SubjectEntrySkipped) {
   CadenceDetectionConfig config;
   config.max_bars_without_cadence = 16;
 
-  auto deficiencies = detectCadenceDeficiencies(notes, structure, Key::C,
-                                                total_duration, config);
+  auto deficiencies = detectCadenceDeficiencies(notes, structure, Key::C, total_duration, config);
   // Deficiencies should be filtered: the insertion tick falls within Exposition.
   for (const auto& def : deficiencies) {
     EXPECT_FALSE(isInSubjectEntry(structure, def.insertion_tick));
@@ -266,8 +262,7 @@ TEST_F(CadenceDeficiencyTest, FantasiaRelaxedThreshold) {
   CadenceDetectionConfig config;
   config.max_bars_without_cadence = 24;
 
-  auto deficiencies = detectCadenceDeficiencies(notes, structure, Key::C,
-                                                total_duration, config);
+  auto deficiencies = detectCadenceDeficiencies(notes, structure, Key::C, total_duration, config);
   EXPECT_EQ(deficiencies.size(), 0u);
 }
 
@@ -288,8 +283,7 @@ TEST_F(CadenceInsertionTest, InsertsNotesAtDeficiencyPoint) {
 
   std::vector<CadenceDeficiency> deficiencies = {deficiency};
 
-  int count = insertCadentialFormulas(notes, deficiencies, Key::C, false,
-                                     3, 4, 42);
+  int count = insertCadentialFormulas(notes, deficiencies, Key::C, false, 3, 4, 42);
   EXPECT_EQ(count, 1);
 
   // Should have added 2 notes (dominant + resolution).
@@ -310,8 +304,7 @@ TEST_F(CadenceInsertionTest, DominantPrecedesResolution) {
   deficiency.region_end = kTicksPerBar * 24;
   deficiency.insertion_tick = kTicksPerBar * 14;
 
-  int count = insertCadentialFormulas(notes, {deficiency}, Key::C, false,
-                                     3, 4, 42);
+  int count = insertCadentialFormulas(notes, {deficiency}, Key::C, false, 3, 4, 42);
   EXPECT_EQ(count, 1);
   ASSERT_EQ(notes.size(), 2u);
 
@@ -414,12 +407,11 @@ class CadentialCoverageTest : public ::testing::Test {};
 
 TEST_F(CadentialCoverageTest, InsertsWhenDeficient) {
   FugueStructure structure;
-  structure.addSection(SectionType::Exposition, FuguePhase::Establish,
-                       0, kTicksPerBar * 4, Key::C);
-  structure.addSection(SectionType::Episode, FuguePhase::Develop,
-                       kTicksPerBar * 4, kTicksPerBar * 40, Key::G);
-  structure.addSection(SectionType::Stretto, FuguePhase::Resolve,
-                       kTicksPerBar * 40, kTicksPerBar * 44, Key::C);
+  structure.addSection(SectionType::Exposition, FuguePhase::Establish, 0, kTicksPerBar * 4, Key::C);
+  structure.addSection(SectionType::Episode, FuguePhase::Develop, kTicksPerBar * 4,
+                       kTicksPerBar * 40, Key::G);
+  structure.addSection(SectionType::Stretto, FuguePhase::Resolve, kTicksPerBar * 40,
+                       kTicksPerBar * 44, Key::C);
   Tick total_duration = kTicksPerBar * 44;
 
   // Notes with no cadences in the episode region.
@@ -429,20 +421,18 @@ TEST_F(CadentialCoverageTest, InsertsWhenDeficient) {
   }
   size_t original_count = notes.size();
 
-  int count = ensureCadentialCoverage(notes, structure, Key::C, false,
-                                      3, 4, total_duration, 42);
+  int count = ensureCadentialCoverage(notes, structure, Key::C, false, 3, 4, total_duration, 42);
   EXPECT_GT(count, 0);
   EXPECT_GT(notes.size(), original_count);
 }
 
 TEST_F(CadentialCoverageTest, NoInsertionWhenCovered) {
   FugueStructure structure;
-  structure.addSection(SectionType::Exposition, FuguePhase::Establish,
-                       0, kTicksPerBar * 4, Key::C);
-  structure.addSection(SectionType::Episode, FuguePhase::Develop,
-                       kTicksPerBar * 4, kTicksPerBar * 20, Key::G);
-  structure.addSection(SectionType::Stretto, FuguePhase::Resolve,
-                       kTicksPerBar * 20, kTicksPerBar * 24, Key::C);
+  structure.addSection(SectionType::Exposition, FuguePhase::Establish, 0, kTicksPerBar * 4, Key::C);
+  structure.addSection(SectionType::Episode, FuguePhase::Develop, kTicksPerBar * 4,
+                       kTicksPerBar * 20, Key::G);
+  structure.addSection(SectionType::Stretto, FuguePhase::Resolve, kTicksPerBar * 20,
+                       kTicksPerBar * 24, Key::C);
   Tick total_duration = kTicksPerBar * 24;
 
   // Notes with cadential resolutions every 4 bars.
@@ -457,20 +447,18 @@ TEST_F(CadentialCoverageTest, NoInsertionWhenCovered) {
   }
   size_t original_count = notes.size();
 
-  int count = ensureCadentialCoverage(notes, structure, Key::C, false,
-                                      3, 4, total_duration, 42);
+  int count = ensureCadentialCoverage(notes, structure, Key::C, false, 3, 4, total_duration, 42);
   EXPECT_EQ(count, 0);
   EXPECT_EQ(notes.size(), original_count);
 }
 
 TEST_F(CadentialCoverageTest, DeterministicWithSameSeed) {
   FugueStructure structure;
-  structure.addSection(SectionType::Exposition, FuguePhase::Establish,
-                       0, kTicksPerBar * 4, Key::C);
-  structure.addSection(SectionType::Episode, FuguePhase::Develop,
-                       kTicksPerBar * 4, kTicksPerBar * 40, Key::G);
-  structure.addSection(SectionType::Stretto, FuguePhase::Resolve,
-                       kTicksPerBar * 40, kTicksPerBar * 44, Key::C);
+  structure.addSection(SectionType::Exposition, FuguePhase::Establish, 0, kTicksPerBar * 4, Key::C);
+  structure.addSection(SectionType::Episode, FuguePhase::Develop, kTicksPerBar * 4,
+                       kTicksPerBar * 40, Key::G);
+  structure.addSection(SectionType::Stretto, FuguePhase::Resolve, kTicksPerBar * 40,
+                       kTicksPerBar * 44, Key::C);
   Tick total_duration = kTicksPerBar * 44;
 
   auto makeNotes = [&]() {
@@ -484,10 +472,8 @@ TEST_F(CadentialCoverageTest, DeterministicWithSameSeed) {
   std::vector<NoteEvent> notes1 = makeNotes();
   std::vector<NoteEvent> notes2 = makeNotes();
 
-  ensureCadentialCoverage(notes1, structure, Key::C, false, 3, 4,
-                          total_duration, 42);
-  ensureCadentialCoverage(notes2, structure, Key::C, false, 3, 4,
-                          total_duration, 42);
+  ensureCadentialCoverage(notes1, structure, Key::C, false, 3, 4, total_duration, 42);
+  ensureCadentialCoverage(notes2, structure, Key::C, false, 3, 4, total_duration, 42);
 
   ASSERT_EQ(notes1.size(), notes2.size());
   for (size_t idx = 0; idx < notes1.size(); ++idx) {
@@ -574,9 +560,8 @@ TEST_F(CadenceApproachTest, ArchitecturalProtection) {
   for (const auto& note : notes) {
     if (note.source == BachNoteSource::CadenceApproach) {
       EXPECT_EQ(getProtectionLevel(note.source), ProtectionLevel::Immutable)
-          << "CadenceApproach note at tick " << note.start_tick
-          << " voice " << static_cast<int>(note.voice)
-          << " should have Immutable protection";
+          << "CadenceApproach note at tick " << note.start_tick << " voice "
+          << static_cast<int>(note.voice) << " should have Immutable protection";
     }
   }
 }
@@ -590,15 +575,15 @@ TEST_F(CadenceApproachTest, SkipsProtectedNotes) {
   // Add soprano notes in the window with FugueSubject source.
   uint8_t subject_pitch_1 = 72;
   uint8_t subject_pitch_2 = 74;
-  notes.push_back(makeNote(window_start, subject_pitch_1, 0, kTicksPerBeat,
+  notes.push_back(
+      makeNote(window_start, subject_pitch_1, 0, kTicksPerBeat, BachNoteSource::FugueSubject));
+  notes.push_back(makeNote(window_start + kTicksPerBeat, subject_pitch_2, 0, kTicksPerBeat,
                            BachNoteSource::FugueSubject));
-  notes.push_back(makeNote(window_start + kTicksPerBeat, subject_pitch_2, 0,
-                           kTicksPerBeat, BachNoteSource::FugueSubject));
 
   // Add bass notes in the window with FugueSubject source.
   uint8_t bass_subject_pitch = 36;
-  notes.push_back(makeNote(window_start, bass_subject_pitch, 3, kTicksPerBeat,
-                           BachNoteSource::FugueSubject));
+  notes.push_back(
+      makeNote(window_start, bass_subject_pitch, 3, kTicksPerBeat, BachNoteSource::FugueSubject));
 
   // Add some flexible notes outside the window for context.
   for (Tick bar = 0; bar < 3; ++bar) {

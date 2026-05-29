@@ -39,9 +39,8 @@ struct CadencePlan {
   /// @param home_key The fugue's home key.
   /// @param is_minor True if the fugue is in a minor key.
   /// @return CadencePlan with cadence points at structural boundaries.
-  static CadencePlan createForFugue(const FugueStructure& structure,
-                                     const KeySignature& home_key,
-                                     bool is_minor);
+  static CadencePlan createForFugue(const FugueStructure& structure, const KeySignature& home_key,
+                                    bool is_minor);
 
   /// @brief Apply all cadence points to a harmonic timeline.
   ///

@@ -38,11 +38,11 @@ const char* motionTypeToString(MotionType type);
 
 /// @brief A single counterpoint rule violation detected during validation.
 struct RuleViolation {
-  VoiceId voice1 = 0;     ///< First voice involved.
-  VoiceId voice2 = 0;     ///< Second voice involved.
-  Tick tick = 0;           ///< Tick position of the violation.
-  std::string rule;        ///< Rule name (e.g. "parallel_fifths").
-  uint8_t severity = 1;   ///< 0 = warning, 1 = error.
+  VoiceId voice1 = 0;    ///< First voice involved.
+  VoiceId voice2 = 0;    ///< Second voice involved.
+  Tick tick = 0;         ///< Tick position of the violation.
+  std::string rule;      ///< Rule name (e.g. "parallel_fifths").
+  uint8_t severity = 1;  ///< 0 = warning, 1 = error.
 };
 
 // ---------------------------------------------------------------------------
@@ -63,8 +63,7 @@ class IRuleEvaluator {
   /// @param semitones Absolute interval in semitones.
   /// @param is_strong_beat True if the interval occurs on a strong beat.
   /// @return True if the interval is consonant under this ruleset.
-  virtual bool isIntervalConsonant(int semitones,
-                                   bool is_strong_beat) const = 0;
+  virtual bool isIntervalConsonant(int semitones, bool is_strong_beat) const = 0;
 
   /// @brief Classify the motion between two successive pitch pairs.
   /// @param prev1 Previous pitch in voice 1.
@@ -72,22 +71,19 @@ class IRuleEvaluator {
   /// @param prev2 Previous pitch in voice 2.
   /// @param curr2 Current pitch in voice 2.
   /// @return Classified motion type.
-  virtual MotionType classifyMotion(uint8_t prev1, uint8_t curr1,
-                                    uint8_t prev2, uint8_t curr2) const = 0;
+  virtual MotionType classifyMotion(uint8_t prev1, uint8_t curr1, uint8_t prev2,
+                                    uint8_t curr2) const = 0;
 
   /// @brief Detect parallel perfect fifths/octaves at a given tick.
-  virtual bool hasParallelPerfect(const CounterpointState& state,
-                                  VoiceId voice1, VoiceId voice2,
+  virtual bool hasParallelPerfect(const CounterpointState& state, VoiceId voice1, VoiceId voice2,
                                   Tick tick) const = 0;
 
   /// @brief Detect hidden (direct) fifths/octaves at a given tick.
-  virtual bool hasHiddenPerfect(const CounterpointState& state,
-                                VoiceId voice1, VoiceId voice2,
+  virtual bool hasHiddenPerfect(const CounterpointState& state, VoiceId voice1, VoiceId voice2,
                                 Tick tick) const = 0;
 
   /// @brief Detect voice crossing at a given tick.
-  virtual bool hasVoiceCrossing(const CounterpointState& state,
-                                VoiceId voice1, VoiceId voice2,
+  virtual bool hasVoiceCrossing(const CounterpointState& state, VoiceId voice1, VoiceId voice2,
                                 Tick tick) const = 0;
 
   /// @brief Validate all voice pairs in a tick range.
@@ -95,9 +91,8 @@ class IRuleEvaluator {
   /// @param from_tick Start of validation window (inclusive).
   /// @param to_tick End of validation window (exclusive).
   /// @return Vector of all violations found.
-  virtual std::vector<RuleViolation> validate(
-      const CounterpointState& state,
-      Tick from_tick, Tick to_tick) const = 0;
+  virtual std::vector<RuleViolation> validate(const CounterpointState& state, Tick from_tick,
+                                              Tick to_tick) const = 0;
 
   /// @brief Whether adjacent voice spacing < minor 3rd is a hard rejection.
   ///

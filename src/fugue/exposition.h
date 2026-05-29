@@ -31,11 +31,11 @@ class HarmonicTimeline;
 /// alternate between presenting the subject and the answer. The entry order
 /// and roles are fixed at construction and never changed (immutable by design).
 struct VoiceEntry {
-  VoiceId voice_id = 0;                    ///< Which voice enters.
-  VoiceRole role = VoiceRole::Assert;      ///< Structural role (immutable).
-  Tick entry_tick = 0;                     ///< Absolute tick when voice enters.
-  bool is_subject = true;                  ///< true = subject, false = answer.
-  uint8_t entry_number = 0;               ///< 1-based entry number in exposition.
+  VoiceId voice_id = 0;                ///< Which voice enters.
+  VoiceRole role = VoiceRole::Assert;  ///< Structural role (immutable).
+  Tick entry_tick = 0;                 ///< Absolute tick when voice enters.
+  bool is_subject = true;              ///< true = subject, false = answer.
+  uint8_t entry_number = 0;            ///< 1-based entry number in exposition.
 };
 
 /// @brief Complete exposition structure with voice entries and generated notes.
@@ -44,8 +44,8 @@ struct VoiceEntry {
 /// material (voice_notes). It belongs to FuguePhase::Establish and must be
 /// the first section in the fugue structure.
 struct Exposition {
-  std::vector<VoiceEntry> entries;         ///< Ordered voice entry plan.
-  Tick total_ticks = 0;                    ///< Total duration of the exposition.
+  std::vector<VoiceEntry> entries;  ///< Ordered voice entry plan.
+  Tick total_ticks = 0;             ///< Total duration of the exposition.
 
   /// All generated notes organized by voice.
   std::map<VoiceId, std::vector<NoteEvent>> voice_notes;
@@ -88,12 +88,10 @@ struct Exposition {
 /// @param config Fugue configuration (num_voices, key, etc.).
 /// @param seed Random seed for deterministic free counterpoint generation.
 /// @return Complete Exposition with voice entries and notes.
-Exposition buildExposition(const Subject& subject,
-                           const Answer& answer,
-                           const Countersubject& countersubject,
-                           const FugueConfig& config,
-                           uint32_t seed,
-                           Tick estimated_duration = 0);
+Exposition buildExposition(const Subject& subject, const Answer& answer,
+                           const Countersubject& countersubject, const FugueConfig& config,
+                           uint32_t seed, Tick estimated_duration = 0,
+                           const Countersubject* second_countersubject = nullptr);
 
 /// @brief Build an exposition with counterpoint validation.
 ///
@@ -112,16 +110,12 @@ Exposition buildExposition(const Subject& subject,
 /// @param cp_resolver Collision resolver.
 /// @param timeline Harmonic timeline for chord-tone context.
 /// @return Complete Exposition with validated free counterpoint.
-Exposition buildExposition(const Subject& subject,
-                           const Answer& answer,
-                           const Countersubject& countersubject,
-                           const FugueConfig& config,
-                           uint32_t seed,
-                           CounterpointState& cp_state,
-                           IRuleEvaluator& cp_rules,
-                           CollisionResolver& cp_resolver,
-                           const HarmonicTimeline& timeline,
-                           Tick estimated_duration = 0);
+Exposition buildExposition(const Subject& subject, const Answer& answer,
+                           const Countersubject& countersubject, const FugueConfig& config,
+                           uint32_t seed, CounterpointState& cp_state, IRuleEvaluator& cp_rules,
+                           CollisionResolver& cp_resolver, const HarmonicTimeline& timeline,
+                           Tick estimated_duration = 0,
+                           const Countersubject* second_countersubject = nullptr);
 
 }  // namespace bach
 

@@ -34,8 +34,7 @@ class CounterpointValidator {
   /// @param from_tick Start of range (inclusive).
   /// @param to_tick End of range (exclusive).
   /// @return Violations found within the range.
-  std::vector<RuleViolation> validate(const CounterpointState& state,
-                                      Tick from_tick,
+  std::vector<RuleViolation> validate(const CounterpointState& state, Tick from_tick,
                                       Tick to_tick) const;
 
   /// @brief Calculate the compliance rate for the entire state.

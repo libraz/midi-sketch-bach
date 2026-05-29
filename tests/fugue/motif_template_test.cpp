@@ -2,9 +2,9 @@
 
 #include "fugue/motif_template.h"
 
-#include <random>
-
 #include <gtest/gtest.h>
+
+#include <random>
 
 #include "core/basic_types.h"
 
@@ -69,8 +69,10 @@ TEST(GoalToneTest, DifferentSeedsProduceVariation) {
   for (uint32_t seed = 2; seed < 20; ++seed) {
     std::mt19937 rng_trial(seed);
     GoalTone trial = goalToneForCharacter(SubjectCharacter::Playful, rng_trial);
-    if (trial.position_ratio != base.position_ratio) found_position_diff = true;
-    if (trial.pitch_ratio != base.pitch_ratio) found_pitch_diff = true;
+    if (trial.position_ratio != base.position_ratio)
+      found_position_diff = true;
+    if (trial.pitch_ratio != base.pitch_ratio)
+      found_pitch_diff = true;
   }
   EXPECT_TRUE(found_position_diff);
   EXPECT_TRUE(found_pitch_diff);
@@ -110,32 +112,30 @@ TEST(MotifTemplateTest, RestlessHasTwoTemplates) {
 
 TEST(MotifTemplateTest, DurationsMatchOffsets) {
   // All 4 character templates x 4 indices should have matching sizes.
-  for (auto chr : {SubjectCharacter::Severe, SubjectCharacter::Playful,
-                   SubjectCharacter::Noble, SubjectCharacter::Restless}) {
+  for (auto chr : {SubjectCharacter::Severe, SubjectCharacter::Playful, SubjectCharacter::Noble,
+                   SubjectCharacter::Restless}) {
     for (uint32_t idx = 0; idx < 4; ++idx) {
       auto [mot_a, mot_b] = motifTemplatesForCharacter(chr, idx);
       EXPECT_EQ(mot_a.degree_offsets.size(), mot_a.durations.size())
-          << "Motif A mismatch for character " << static_cast<int>(chr)
-          << " idx " << idx;
+          << "Motif A mismatch for character " << static_cast<int>(chr) << " idx " << idx;
       EXPECT_EQ(mot_b.degree_offsets.size(), mot_b.durations.size())
-          << "Motif B mismatch for character " << static_cast<int>(chr)
-          << " idx " << idx;
+          << "Motif B mismatch for character " << static_cast<int>(chr) << " idx " << idx;
     }
   }
 }
 
 TEST(MotifTemplateTest, AllDurationsPositive) {
-  for (auto chr : {SubjectCharacter::Severe, SubjectCharacter::Playful,
-                   SubjectCharacter::Noble, SubjectCharacter::Restless}) {
+  for (auto chr : {SubjectCharacter::Severe, SubjectCharacter::Playful, SubjectCharacter::Noble,
+                   SubjectCharacter::Restless}) {
     for (uint32_t idx = 0; idx < 4; ++idx) {
       auto [mot_a, mot_b] = motifTemplatesForCharacter(chr, idx);
       for (Tick dur : mot_a.durations) {
-        EXPECT_GT(dur, 0u) << "Zero duration in motif A, character "
-                           << static_cast<int>(chr) << " idx " << idx;
+        EXPECT_GT(dur, 0u) << "Zero duration in motif A, character " << static_cast<int>(chr)
+                           << " idx " << idx;
       }
       for (Tick dur : mot_b.durations) {
-        EXPECT_GT(dur, 0u) << "Zero duration in motif B, character "
-                           << static_cast<int>(chr) << " idx " << idx;
+        EXPECT_GT(dur, 0u) << "Zero duration in motif B, character " << static_cast<int>(chr)
+                           << " idx " << idx;
       }
     }
   }
@@ -147,8 +147,8 @@ TEST(MotifTemplateTest, AllDurationsPositive) {
 
 TEST(MotifTemplateTest, FourTemplatesPerCharacter) {
   // Each character should return 4 distinct template pairs.
-  for (auto chr : {SubjectCharacter::Severe, SubjectCharacter::Playful,
-                   SubjectCharacter::Noble, SubjectCharacter::Restless}) {
+  for (auto chr : {SubjectCharacter::Severe, SubjectCharacter::Playful, SubjectCharacter::Noble,
+                   SubjectCharacter::Restless}) {
     for (uint32_t idx = 0; idx < 4; ++idx) {
       auto [mot_a, mot_b] = motifTemplatesForCharacter(chr, idx);
       EXPECT_FALSE(mot_a.degree_offsets.empty())
@@ -161,8 +161,8 @@ TEST(MotifTemplateTest, FourTemplatesPerCharacter) {
 
 TEST(MotifTemplateTest, TemplateIdxWrapsModulo5) {
   // template_idx values 0 and 5 should return the same template (mod 5).
-  for (auto chr : {SubjectCharacter::Severe, SubjectCharacter::Playful,
-                   SubjectCharacter::Noble, SubjectCharacter::Restless}) {
+  for (auto chr : {SubjectCharacter::Severe, SubjectCharacter::Playful, SubjectCharacter::Noble,
+                   SubjectCharacter::Restless}) {
     auto [mot_a0, mot_b0] = motifTemplatesForCharacter(chr, 0);
     auto [mot_a5, mot_b5] = motifTemplatesForCharacter(chr, 5);
     EXPECT_EQ(mot_a0.degree_offsets, mot_a5.degree_offsets);
@@ -174,8 +174,8 @@ TEST(MotifTemplateTest, TemplateIdxWrapsModulo5) {
 
 TEST(MotifTemplateTest, DifferentIndicesProduceDifferentTemplates) {
   // At least some template indices should produce different motif types or offsets.
-  for (auto chr : {SubjectCharacter::Severe, SubjectCharacter::Playful,
-                   SubjectCharacter::Noble, SubjectCharacter::Restless}) {
+  for (auto chr : {SubjectCharacter::Severe, SubjectCharacter::Playful, SubjectCharacter::Noble,
+                   SubjectCharacter::Restless}) {
     bool found_difference = false;
     auto [base_a, base_b] = motifTemplatesForCharacter(chr, 0);
     for (uint32_t idx = 1; idx < 4; ++idx) {
@@ -186,8 +186,8 @@ TEST(MotifTemplateTest, DifferentIndicesProduceDifferentTemplates) {
         break;
       }
     }
-    EXPECT_TRUE(found_difference)
-        << "All 4 templates identical for character " << static_cast<int>(chr);
+    EXPECT_TRUE(found_difference) << "All 4 templates identical for character "
+                                  << static_cast<int>(chr);
   }
 }
 
@@ -223,8 +223,8 @@ TEST(MotifTemplateTest, RestlessIdx3IsRhythmicAndScale) {
 
 TEST(MotifTemplateTest, DefaultIndexIsZero) {
   // Calling without template_idx (default=0) should match explicit idx=0.
-  for (auto chr : {SubjectCharacter::Severe, SubjectCharacter::Playful,
-                   SubjectCharacter::Noble, SubjectCharacter::Restless}) {
+  for (auto chr : {SubjectCharacter::Severe, SubjectCharacter::Playful, SubjectCharacter::Noble,
+                   SubjectCharacter::Restless}) {
     auto [def_a, def_b] = motifTemplatesForCharacter(chr);
     auto [exp_a, exp_b] = motifTemplatesForCharacter(chr, 0);
     EXPECT_EQ(def_a.degree_offsets, exp_a.degree_offsets);
@@ -237,26 +237,22 @@ TEST(MotifTemplateTest, DefaultIndexIsZero) {
 // ---------------------------------------------------------------------------
 
 TEST(MotifTemplateTest, FunctionsMatchDegreeOffsets) {
-  SubjectCharacter characters[] = {
-      SubjectCharacter::Severe, SubjectCharacter::Playful,
-      SubjectCharacter::Noble, SubjectCharacter::Restless};
+  SubjectCharacter characters[] = {SubjectCharacter::Severe, SubjectCharacter::Playful,
+                                   SubjectCharacter::Noble, SubjectCharacter::Restless};
   for (auto character : characters) {
     for (uint32_t idx = 0; idx < 4; ++idx) {
       auto [mot_a, mot_b] = motifTemplatesForCharacter(character, idx);
       EXPECT_EQ(mot_a.functions.size(), mot_a.degree_offsets.size())
-          << "character=" << static_cast<int>(character) << " idx=" << idx
-          << " motif_a";
+          << "character=" << static_cast<int>(character) << " idx=" << idx << " motif_a";
       EXPECT_EQ(mot_b.functions.size(), mot_b.degree_offsets.size())
-          << "character=" << static_cast<int>(character) << " idx=" << idx
-          << " motif_b";
+          << "character=" << static_cast<int>(character) << " idx=" << idx << " motif_b";
     }
   }
 }
 
 TEST(MotifTemplateTest, AllFunctionsNonEmpty) {
-  SubjectCharacter characters[] = {
-      SubjectCharacter::Severe, SubjectCharacter::Playful,
-      SubjectCharacter::Noble, SubjectCharacter::Restless};
+  SubjectCharacter characters[] = {SubjectCharacter::Severe, SubjectCharacter::Playful,
+                                   SubjectCharacter::Noble, SubjectCharacter::Restless};
   for (auto character : characters) {
     for (uint32_t idx = 0; idx < 4; ++idx) {
       auto [mot_a, mot_b] = motifTemplatesForCharacter(character, idx);

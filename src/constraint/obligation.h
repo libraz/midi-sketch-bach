@@ -69,18 +69,18 @@ const char* obligationStrengthToString(ObligationStrength strength);
 /// Phase 1: conflicts/satisfies not present; inter-obligation interaction
 /// is approximated via synchronous_pressure.
 struct ObligationNode {
-  uint16_t id = 0;                           ///< Unique ID within profile
+  uint16_t id = 0;  ///< Unique ID within profile
   ObligationType type = ObligationType::LeadingTone;
-  Tick origin = 0;                           ///< Tick of the note that spawned this
-  Tick start_tick = 0;                       ///< Earliest tick for resolution
-  Tick deadline = 0;                         ///< Resolution deadline
+  Tick origin = 0;      ///< Tick of the note that spawned this
+  Tick start_tick = 0;  ///< Earliest tick for resolution
+  Tick deadline = 0;    ///< Resolution deadline
 
-  int8_t direction = 0;                      ///< +1=up, -1=down, 0=any
-  uint8_t voice_mask = 0;                    ///< 0=unknown (unassigned in Phase 1)
+  int8_t direction = 0;    ///< +1=up, -1=down, 0=any
+  uint8_t voice_mask = 0;  ///< 0=unknown (unassigned in Phase 1)
   ObligationStrength strength = ObligationStrength::Structural;
-  int8_t required_interval_semitones = 0;    ///< Resolution interval (LT=+1, 7th=-1)
-  bool require_strong_beat = false;          ///< For StrongBeatHarm gate
-  uint16_t require_pitch_class_mask = 0;     ///< Future use (0=unknown)
+  int8_t required_interval_semitones = 0;  ///< Resolution interval (LT=+1, 7th=-1)
+  bool require_strong_beat = false;        ///< For StrongBeatHarm gate
+  uint16_t require_pitch_class_mask = 0;   ///< Future use (0=unknown)
 
   /// IDs of obligations that cannot co-resolve (conflict graph).
   std::vector<uint16_t> conflicts;
@@ -89,14 +89,11 @@ struct ObligationNode {
 
   /// @brief Whether this obligation counts as debt (not a gate).
   bool is_debt() const {
-    return type != ObligationType::StrongBeatHarm &&
-           type != ObligationType::InvariantRecovery;
+    return type != ObligationType::StrongBeatHarm && type != ObligationType::InvariantRecovery;
   }
 
   /// @brief Whether this obligation is active at a given tick.
-  bool is_active_at(Tick tick) const {
-    return tick >= start_tick && tick <= deadline;
-  }
+  bool is_active_at(Tick tick) const { return tick >= start_tick && tick <= deadline; }
 };
 
 // ---------------------------------------------------------------------------
@@ -119,27 +116,27 @@ struct Feasibility {
 /// (Phase 2) for directional guidance, NOT promoted to Obligation.
 struct HarmonicImpulse {
   Tick tick = 0;
-  uint8_t implied_degree = 0;      ///< 1-7 (scale degree)
-  float strength = 0.0f;           ///< 0.0-1.0 (harmonic implication strength)
-  int8_t directional_tendency = 0; ///< +1=dominant dir, -1=subdominant dir, 0=return
-  float tension_level = 0.0f;      ///< 0.0-1.0: from computeHarmonicTension()
+  uint8_t implied_degree = 0;       ///< 1-7 (scale degree)
+  float strength = 0.0f;            ///< 0.0-1.0 (harmonic implication strength)
+  int8_t directional_tendency = 0;  ///< +1=dominant dir, -1=subdominant dir, 0=return
+  float tension_level = 0.0f;       ///< 0.0-1.0: from computeHarmonicTension()
 };
 
 /// @brief Register trajectory: pitch envelope of the subject.
 struct RegisterTrajectory {
-  uint8_t opening_pitch = 0;      ///< Starting pitch (MIDI note)
-  uint8_t peak_pitch = 0;         ///< Highest pitch (climax position)
-  uint8_t closing_pitch = 0;      ///< Ending pitch (MIDI note)
-  float peak_position = 0.0f;     ///< 0.0-1.0 (climax position ratio within subject)
-  int8_t overall_direction = 0;   ///< +1=ascending, -1=descending, 0=return type
+  uint8_t opening_pitch = 0;     ///< Starting pitch (MIDI note)
+  uint8_t peak_pitch = 0;        ///< Highest pitch (climax position)
+  uint8_t closing_pitch = 0;     ///< Ending pitch (MIDI note)
+  float peak_position = 0.0f;    ///< 0.0-1.0 (climax position ratio within subject)
+  int8_t overall_direction = 0;  ///< +1=ascending, -1=descending, 0=return type
 };
 
 /// @brief Accent contour: strong-beat and long-note distribution pattern.
 struct AccentContour {
-  float front_weight = 0.0f;      ///< Accent density in first 1/3
-  float mid_weight = 0.0f;        ///< Accent density in middle 1/3
-  float tail_weight = 0.0f;       ///< Accent density in final 1/3
-  float syncopation_ratio = 0.0f; ///< Syncopation ratio
+  float front_weight = 0.0f;       ///< Accent density in first 1/3
+  float mid_weight = 0.0f;         ///< Accent density in middle 1/3
+  float tail_weight = 0.0f;        ///< Accent density in final 1/3
+  float syncopation_ratio = 0.0f;  ///< Syncopation ratio
 };
 
 /// @brief Stretto feasibility entry for a specific offset/voice configuration.
@@ -147,14 +144,14 @@ struct AccentContour {
 /// Evaluates both logical feasibility (obligation peaks) and musical
 /// feasibility (counterpoint clashes, register overlap, perceptual clarity).
 struct StrettoFeasibilityEntry {
-  int offset_ticks = 0;       ///< Inter-subject onset distance
-  int num_voices = 0;         ///< Number of simultaneous subject presentations
+  int offset_ticks = 0;          ///< Inter-subject onset distance
+  int num_voices = 0;            ///< Number of simultaneous subject presentations
   float peak_obligation = 0.0f;  ///< Max simultaneous active debt count
 
   // Musical indices (beyond logical feasibility)
-  float vertical_clash = 0.0f;           ///< P5/P8 parallel probability
-  float rhythmic_interference = 0.0f;    ///< Simultaneous accent ratio
-  float register_overlap = 0.0f;         ///< Pitch range intersection / union
+  float vertical_clash = 0.0f;         ///< P5/P8 parallel probability
+  float rhythmic_interference = 0.0f;  ///< Simultaneous accent ratio
+  float register_overlap = 0.0f;       ///< Pitch range intersection / union
 
   float perceptual_overlap_score = 0.0f;  ///< Subject Kerngestalt audibility
   float cadence_conflict_score = 0.0f;    ///< CadenceStable/Approach vs LT conflict
@@ -172,13 +169,12 @@ struct StrettoFeasibilityEntry {
     float norm_cadence = 1.0f - cadence_conflict_score;
 
     // Floor guard: any dimension < 0.2 -> infeasible
-    float floor = std::min({norm_peak, norm_clash, norm_register,
-                            norm_percept, norm_cadence});
-    if (floor < 0.2f) return floor;
+    float floor = std::min({norm_peak, norm_clash, norm_register, norm_percept, norm_cadence});
+    if (floor < 0.2f)
+      return floor;
 
     // Geometric mean (5th root)
-    float product = norm_peak * norm_clash * norm_register *
-                    norm_percept * norm_cadence;
+    float product = norm_peak * norm_clash * norm_register * norm_percept * norm_cadence;
     return std::pow(product, 1.0f / 5.0f);
   }
 
@@ -221,8 +217,7 @@ struct SubjectConstraintProfile {
   /// @brief Quick feasibility check based on density metrics.
   /// @param num_voices Number of fugue voices (3-5).
   bool feasible_for(int num_voices) const {
-    return peak_density <= num_voices - 1 &&
-           synchronous_pressure < 0.6f;
+    return peak_density <= num_voices - 1 && synchronous_pressure < 0.6f;
   }
 };
 

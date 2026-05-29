@@ -4,9 +4,9 @@
 
 #include "fugue/cadence_plan.h"
 
-#include <algorithm>
-
 #include <gtest/gtest.h>
+
+#include <algorithm>
 
 #include "core/basic_types.h"
 #include "fugue/cadence_insertion.h"
@@ -23,23 +23,23 @@ class CadencePlanTest : public ::testing::Test {
   FugueStructure buildBasicStructure() {
     FugueStructure structure;
     // Exposition: 0 - 4 bars
-    structure.addSection(SectionType::Exposition, FuguePhase::Establish,
-                         0, kTicksPerBar * 4, Key::C);
+    structure.addSection(SectionType::Exposition, FuguePhase::Establish, 0, kTicksPerBar * 4,
+                         Key::C);
     // Episode 1: 4 - 6 bars
-    structure.addSection(SectionType::Episode, FuguePhase::Develop,
-                         kTicksPerBar * 4, kTicksPerBar * 6, Key::G);
+    structure.addSection(SectionType::Episode, FuguePhase::Develop, kTicksPerBar * 4,
+                         kTicksPerBar * 6, Key::G);
     // Middle Entry: 6 - 8 bars
-    structure.addSection(SectionType::MiddleEntry, FuguePhase::Develop,
-                         kTicksPerBar * 6, kTicksPerBar * 8, Key::G);
+    structure.addSection(SectionType::MiddleEntry, FuguePhase::Develop, kTicksPerBar * 6,
+                         kTicksPerBar * 8, Key::G);
     // Episode 2 (return): 8 - 10 bars
-    structure.addSection(SectionType::Episode, FuguePhase::Develop,
-                         kTicksPerBar * 8, kTicksPerBar * 10, Key::C);
+    structure.addSection(SectionType::Episode, FuguePhase::Develop, kTicksPerBar * 8,
+                         kTicksPerBar * 10, Key::C);
     // Stretto: 10 - 14 bars
-    structure.addSection(SectionType::Stretto, FuguePhase::Resolve,
-                         kTicksPerBar * 10, kTicksPerBar * 14, Key::C);
+    structure.addSection(SectionType::Stretto, FuguePhase::Resolve, kTicksPerBar * 10,
+                         kTicksPerBar * 14, Key::C);
     // Coda: 14 - 16 bars
-    structure.addSection(SectionType::Coda, FuguePhase::Resolve,
-                         kTicksPerBar * 14, kTicksPerBar * 16, Key::C);
+    structure.addSection(SectionType::Coda, FuguePhase::Resolve, kTicksPerBar * 14,
+                         kTicksPerBar * 16, Key::C);
     return structure;
   }
 };
@@ -125,8 +125,8 @@ TEST_F(CadencePlanTest, ApplyToTimeline_DoesNotCrash) {
   KeySignature home{Key::C, false};
   CadencePlan plan = CadencePlan::createForFugue(structure, home, false);
 
-  HarmonicTimeline timeline = HarmonicTimeline::createStandard(
-      home, kTicksPerBar * 16, HarmonicResolution::Bar);
+  HarmonicTimeline timeline =
+      HarmonicTimeline::createStandard(home, kTicksPerBar * 16, HarmonicResolution::Bar);
 
   // Should not crash.
   plan.applyTo(timeline);
@@ -167,10 +167,8 @@ TEST_F(CadencePlanTest, ContextRulesMatchStructuralPositions) {
   for (const auto& cadence_point : plan.points) {
     // Cadence points are placed at section.end_tick - kTicksPerBar or at
     // section boundaries, so check within the episode tick ranges.
-    if ((cadence_point.tick >= kTicksPerBar * 4 &&
-         cadence_point.tick <= episode1_end) ||
-        (cadence_point.tick >= kTicksPerBar * 8 &&
-         cadence_point.tick <= episode2_end)) {
+    if ((cadence_point.tick >= kTicksPerBar * 4 && cadence_point.tick <= episode1_end) ||
+        (cadence_point.tick >= kTicksPerBar * 8 && cadence_point.tick <= episode2_end)) {
       found_episode_cadence = true;
       break;
     }
@@ -221,8 +219,8 @@ TEST_F(CadencePlanTest, ExtractCadenceTicks) {
         break;
       }
     }
-    EXPECT_TRUE(found_in_plan)
-        << "Tick " << tick << " from extractCadenceTicks not found in plan points";
+    EXPECT_TRUE(found_in_plan) << "Tick " << tick
+                               << " from extractCadenceTicks not found in plan points";
   }
 }
 
@@ -243,8 +241,7 @@ TEST_F(CadenceVocabularyTest, GetApproachesForAllTypes) {
 
   for (CadenceType cad_type : types_with_approaches) {
     auto [approaches, count] = getCadenceApproaches(cad_type);
-    EXPECT_GT(count, 0u) << "Expected approaches for cadence type "
-                         << static_cast<int>(cad_type);
+    EXPECT_GT(count, 0u) << "Expected approaches for cadence type " << static_cast<int>(cad_type);
     ASSERT_NE(approaches, nullptr)
         << "Null pointer for cadence type " << static_cast<int>(cad_type);
 

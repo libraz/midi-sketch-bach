@@ -61,8 +61,8 @@ TEST(StrettoTest, GenerateStretto_OverlappingEntries) {
 TEST(StrettoTest, GenerateStretto_ProgressiveShortening) {
   // Entry intervals should decrease (or stay at minimum) as entries progress.
   // Use a longer subject so the initial interval is well above minimum.
-  Subject subject = makeSubjectQuarters({60, 62, 64, 65, 67, 65, 64, 62,
-                                         60, 62, 64, 65, 67, 65, 64, 62});
+  Subject subject =
+      makeSubjectQuarters({60, 62, 64, 65, 67, 65, 64, 62, 60, 62, 64, 65, 67, 65, 64, 62});
   // 16 quarter notes = 4 bars = 7680 ticks. With 4 voices: 7680/4 = 1920.
   Stretto stretto = generateStretto(subject, Key::C, 0, 4, 42);
 
@@ -71,27 +71,24 @@ TEST(StrettoTest, GenerateStretto_ProgressiveShortening) {
   // Collect intervals between consecutive entries.
   std::vector<Tick> intervals;
   for (size_t idx = 1; idx < stretto.entryCount(); ++idx) {
-    intervals.push_back(stretto.entries[idx].entry_tick -
-                        stretto.entries[idx - 1].entry_tick);
+    intervals.push_back(stretto.entries[idx].entry_tick - stretto.entries[idx - 1].entry_tick);
   }
 
   // Each interval should be <= the previous one (progressive shortening).
   for (size_t idx = 1; idx < intervals.size(); ++idx) {
     EXPECT_LE(intervals[idx], intervals[idx - 1])
-        << "Interval " << idx << " (" << intervals[idx]
-        << ") is not <= previous (" << intervals[idx - 1] << ")";
+        << "Interval " << idx << " (" << intervals[idx] << ") is not <= previous ("
+        << intervals[idx - 1] << ")";
   }
 
   // All intervals must be on beat boundaries.
   for (size_t idx = 0; idx < intervals.size(); ++idx) {
-    EXPECT_EQ(intervals[idx] % kTicksPerBeat, 0u)
-        << "Interval " << idx << " not on beat boundary";
+    EXPECT_EQ(intervals[idx] % kTicksPerBeat, 0u) << "Interval " << idx << " not on beat boundary";
   }
 
   // All intervals must be at least 1 bar.
   for (size_t idx = 0; idx < intervals.size(); ++idx) {
-    EXPECT_GE(intervals[idx], kTicksPerBar)
-        << "Interval " << idx << " below minimum 1 bar";
+    EXPECT_GE(intervals[idx], kTicksPerBar) << "Interval " << idx << " below minimum 1 bar";
   }
 }
 
@@ -131,9 +128,9 @@ TEST(StrettoTest, GenerateStretto_AllNotesSorted) {
   auto all = stretto.allNotes();
 
   for (size_t idx = 1; idx < all.size(); ++idx) {
-    bool in_order = (all[idx].start_tick > all[idx - 1].start_tick) ||
-                    (all[idx].start_tick == all[idx - 1].start_tick &&
-                     all[idx].voice >= all[idx - 1].voice);
+    bool in_order =
+        (all[idx].start_tick > all[idx - 1].start_tick) ||
+        (all[idx].start_tick == all[idx - 1].start_tick && all[idx].voice >= all[idx - 1].voice);
     EXPECT_TRUE(in_order) << "Notes not sorted at index " << idx;
   }
 }
@@ -151,8 +148,7 @@ TEST(StrettoTest, GenerateStretto_DeterministicWithSeed) {
   for (size_t idx = 0; idx < stretto_a.entryCount(); ++idx) {
     ASSERT_EQ(stretto_a.entries[idx].notes.size(), stretto_b.entries[idx].notes.size());
     for (size_t nidx = 0; nidx < stretto_a.entries[idx].notes.size(); ++nidx) {
-      EXPECT_EQ(stretto_a.entries[idx].notes[nidx].pitch,
-                stretto_b.entries[idx].notes[nidx].pitch);
+      EXPECT_EQ(stretto_a.entries[idx].notes[nidx].pitch, stretto_b.entries[idx].notes[nidx].pitch);
       EXPECT_EQ(stretto_a.entries[idx].notes[nidx].start_tick,
                 stretto_b.entries[idx].notes[nidx].start_tick);
     }
@@ -336,8 +332,7 @@ TEST(StrettoTest, ProgressiveShortening_MinimumFloor) {
   ASSERT_EQ(stretto.entryCount(), 5u);
   for (size_t idx = 1; idx < stretto.entryCount(); ++idx) {
     Tick interval = stretto.entries[idx].entry_tick - stretto.entries[idx - 1].entry_tick;
-    EXPECT_GE(interval, kTicksPerBar)
-        << "Entry " << idx << " interval below minimum 1 bar";
+    EXPECT_GE(interval, kTicksPerBar) << "Entry " << idx << " interval below minimum 1 bar";
   }
 }
 
@@ -348,8 +343,7 @@ TEST(StrettoTest, ProgressiveShortening_MinimumFloor) {
 TEST(StrettoTest, CharacterSevere_OddEntriesInverted) {
   // Severe character uses inversion for odd entries (same as legacy behavior).
   Subject subject = makeSubjectQuarters({60, 64, 67});
-  Stretto stretto = generateStretto(subject, Key::C, 0, 2, 42,
-                                    SubjectCharacter::Severe);
+  Stretto stretto = generateStretto(subject, Key::C, 0, 2, 42, SubjectCharacter::Severe);
 
   ASSERT_GE(stretto.entryCount(), 2u);
   ASSERT_GE(stretto.entries[1].notes.size(), 3u);
@@ -363,8 +357,7 @@ TEST(StrettoTest, CharacterSevere_OddEntriesInverted) {
 TEST(StrettoTest, CharacterPlayful_OddEntriesRetrograde) {
   // Playful character uses retrograde for odd entries.
   Subject subject = makeSubjectQuarters({60, 64, 67, 72});
-  Stretto stretto = generateStretto(subject, Key::C, 0, 2, 42,
-                                    SubjectCharacter::Playful);
+  Stretto stretto = generateStretto(subject, Key::C, 0, 2, 42, SubjectCharacter::Playful);
 
   ASSERT_GE(stretto.entryCount(), 2u);
   ASSERT_GE(stretto.entries[1].notes.size(), 4u);
@@ -380,8 +373,7 @@ TEST(StrettoTest, CharacterPlayful_OddEntriesRetrograde) {
 TEST(StrettoTest, CharacterNoble_OddEntriesAugmented) {
   // Noble character uses augmentation for odd entries (doubled duration).
   Subject subject = makeSubjectQuarters({60, 64, 67});
-  Stretto stretto = generateStretto(subject, Key::C, 0, 2, 42,
-                                    SubjectCharacter::Noble);
+  Stretto stretto = generateStretto(subject, Key::C, 0, 2, 42, SubjectCharacter::Noble);
 
   ASSERT_GE(stretto.entryCount(), 2u);
   ASSERT_GE(stretto.entries[1].notes.size(), 3u);
@@ -401,8 +393,7 @@ TEST(StrettoTest, CharacterNoble_OddEntriesAugmented) {
 TEST(StrettoTest, CharacterRestless_OddEntriesInverted) {
   // Restless character uses inversion (same as Severe).
   Subject subject = makeSubjectQuarters({60, 64, 67});
-  Stretto stretto = generateStretto(subject, Key::C, 0, 2, 42,
-                                    SubjectCharacter::Restless);
+  Stretto stretto = generateStretto(subject, Key::C, 0, 2, 42, SubjectCharacter::Restless);
 
   ASSERT_GE(stretto.entryCount(), 2u);
   ASSERT_GE(stretto.entries[1].notes.size(), 3u);
@@ -417,13 +408,11 @@ TEST(StrettoTest, CharacterDefault_IsServe) {
   // Default character parameter should behave identically to explicit Severe.
   Subject subject = makeSubjectQuarters({60, 64, 67});
   Stretto stretto_default = generateStretto(subject, Key::C, 0, 2, 42);
-  Stretto stretto_severe = generateStretto(subject, Key::C, 0, 2, 42,
-                                           SubjectCharacter::Severe);
+  Stretto stretto_severe = generateStretto(subject, Key::C, 0, 2, 42, SubjectCharacter::Severe);
 
   ASSERT_EQ(stretto_default.entryCount(), stretto_severe.entryCount());
   for (size_t idx = 0; idx < stretto_default.entryCount(); ++idx) {
-    ASSERT_EQ(stretto_default.entries[idx].notes.size(),
-              stretto_severe.entries[idx].notes.size());
+    ASSERT_EQ(stretto_default.entries[idx].notes.size(), stretto_severe.entries[idx].notes.size());
     for (size_t nidx = 0; nidx < stretto_default.entries[idx].notes.size(); ++nidx) {
       EXPECT_EQ(stretto_default.entries[idx].notes[nidx].pitch,
                 stretto_severe.entries[idx].notes[nidx].pitch);
@@ -434,8 +423,8 @@ TEST(StrettoTest, CharacterDefault_IsServe) {
 TEST(StrettoTest, EvenEntries_AlwaysOriginal_RegardlessOfCharacter) {
   // Even-indexed entries (0, 2, 4) always use the original (transposed) subject.
   Subject subject = makeSubjectQuarters({60, 64, 67});
-  auto characters = {SubjectCharacter::Severe, SubjectCharacter::Playful,
-                     SubjectCharacter::Noble, SubjectCharacter::Restless};
+  auto characters = {SubjectCharacter::Severe, SubjectCharacter::Playful, SubjectCharacter::Noble,
+                     SubjectCharacter::Restless};
 
   for (auto character : characters) {
     Stretto stretto = generateStretto(subject, Key::C, 0, 3, 42, character);
@@ -465,13 +454,21 @@ TEST(FindValidStrettoIntervalsTest, SimpleSubject) {
   NoteEvent note;
   note.voice = 0;
   note.velocity = 80;
-  note.pitch = 60; note.start_tick = 0; note.duration = kTicksPerBeat;
+  note.pitch = 60;
+  note.start_tick = 0;
+  note.duration = kTicksPerBeat;
   subject.push_back(note);
-  note.pitch = 64; note.start_tick = kTicksPerBeat; note.duration = kTicksPerBeat;
+  note.pitch = 64;
+  note.start_tick = kTicksPerBeat;
+  note.duration = kTicksPerBeat;
   subject.push_back(note);
-  note.pitch = 67; note.start_tick = kTicksPerBeat * 2; note.duration = kTicksPerBeat;
+  note.pitch = 67;
+  note.start_tick = kTicksPerBeat * 2;
+  note.duration = kTicksPerBeat;
   subject.push_back(note);
-  note.pitch = 60; note.start_tick = kTicksPerBeat * 3; note.duration = kTicksPerBeat;
+  note.pitch = 60;
+  note.start_tick = kTicksPerBeat * 3;
+  note.duration = kTicksPerBeat;
   subject.push_back(note);
 
   auto intervals = findValidStrettoIntervals(subject, kTicksPerBeat * 4);
@@ -494,7 +491,9 @@ TEST(FindValidStrettoIntervalsTest, SingleNote) {
   NoteEvent note;
   note.voice = 0;
   note.velocity = 80;
-  note.pitch = 60; note.start_tick = 0; note.duration = kTicksPerBeat;
+  note.pitch = 60;
+  note.start_tick = 0;
+  note.duration = kTicksPerBeat;
   subject.push_back(note);
   auto intervals = findValidStrettoIntervals(subject, kTicksPerBeat * 4);
   // Single note can't overlap with itself meaningfully.
@@ -506,13 +505,21 @@ TEST(FindValidStrettoIntervalsTest, IntervalsAreSorted) {
   NoteEvent note;
   note.voice = 0;
   note.velocity = 80;
-  note.pitch = 60; note.start_tick = 0; note.duration = kTicksPerBeat;
+  note.pitch = 60;
+  note.start_tick = 0;
+  note.duration = kTicksPerBeat;
   subject.push_back(note);
-  note.pitch = 67; note.start_tick = kTicksPerBeat; note.duration = kTicksPerBeat;
+  note.pitch = 67;
+  note.start_tick = kTicksPerBeat;
+  note.duration = kTicksPerBeat;
   subject.push_back(note);
-  note.pitch = 64; note.start_tick = kTicksPerBeat * 2; note.duration = kTicksPerBeat;
+  note.pitch = 64;
+  note.start_tick = kTicksPerBeat * 2;
+  note.duration = kTicksPerBeat;
   subject.push_back(note);
-  note.pitch = 60; note.start_tick = kTicksPerBeat * 3; note.duration = kTicksPerBeat;
+  note.pitch = 60;
+  note.start_tick = kTicksPerBeat * 3;
+  note.duration = kTicksPerBeat;
   subject.push_back(note);
 
   auto intervals = findValidStrettoIntervals(subject, kTicksPerBeat * 4);
@@ -527,13 +534,21 @@ TEST(FindValidStrettoIntervalsTest, DissonantSubject_FewerIntervals) {
   NoteEvent note;
   note.voice = 0;
   note.velocity = 80;
-  note.pitch = 60; note.start_tick = 0; note.duration = kTicksPerBeat;
+  note.pitch = 60;
+  note.start_tick = 0;
+  note.duration = kTicksPerBeat;
   subject.push_back(note);
-  note.pitch = 66; note.start_tick = kTicksPerBeat; note.duration = kTicksPerBeat;
+  note.pitch = 66;
+  note.start_tick = kTicksPerBeat;
+  note.duration = kTicksPerBeat;
   subject.push_back(note);  // tritone from 60
-  note.pitch = 60; note.start_tick = kTicksPerBeat * 2; note.duration = kTicksPerBeat;
+  note.pitch = 60;
+  note.start_tick = kTicksPerBeat * 2;
+  note.duration = kTicksPerBeat;
   subject.push_back(note);
-  note.pitch = 66; note.start_tick = kTicksPerBeat * 3; note.duration = kTicksPerBeat;
+  note.pitch = 66;
+  note.start_tick = kTicksPerBeat * 3;
+  note.duration = kTicksPerBeat;
   subject.push_back(note);
 
   auto intervals = findValidStrettoIntervals(subject, kTicksPerBeat * 4);
@@ -550,13 +565,21 @@ TEST(FindValidStrettoIntervalsTest, AllIntervalsWithinRange) {
   NoteEvent note;
   note.voice = 0;
   note.velocity = 80;
-  note.pitch = 60; note.start_tick = 0; note.duration = kTicksPerBeat;
+  note.pitch = 60;
+  note.start_tick = 0;
+  note.duration = kTicksPerBeat;
   subject.push_back(note);
-  note.pitch = 64; note.start_tick = kTicksPerBeat; note.duration = kTicksPerBeat;
+  note.pitch = 64;
+  note.start_tick = kTicksPerBeat;
+  note.duration = kTicksPerBeat;
   subject.push_back(note);
-  note.pitch = 67; note.start_tick = kTicksPerBeat * 2; note.duration = kTicksPerBeat;
+  note.pitch = 67;
+  note.start_tick = kTicksPerBeat * 2;
+  note.duration = kTicksPerBeat;
   subject.push_back(note);
-  note.pitch = 60; note.start_tick = kTicksPerBeat * 3; note.duration = kTicksPerBeat;
+  note.pitch = 60;
+  note.start_tick = kTicksPerBeat * 3;
+  note.duration = kTicksPerBeat;
   subject.push_back(note);
 
   Tick max_offset = kTicksPerBeat * 4;

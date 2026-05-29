@@ -1,5 +1,3 @@
-#include "fugue/subject.h"
-
 #include <gtest/gtest.h>
 
 #include <cmath>
@@ -7,6 +5,7 @@
 #include "fugue/archetype_policy.h"
 #include "fugue/archetype_scorer.h"
 #include "fugue/fugue_config.h"
+#include "fugue/subject.h"
 #include "fugue/subject_validator.h"
 
 namespace bach {
@@ -15,8 +14,8 @@ namespace {
 class SubjectArchetypeTest : public ::testing::Test {
  protected:
   Subject generateWithArchetype(FugueArchetype archetype,
-                                 SubjectCharacter character = SubjectCharacter::Severe,
-                                 uint32_t seed = 42) {
+                                SubjectCharacter character = SubjectCharacter::Severe,
+                                uint32_t seed = 42) {
     FugueConfig config;
     config.character = character;
     config.archetype = archetype;
@@ -31,35 +30,33 @@ class SubjectArchetypeTest : public ::testing::Test {
 TEST_F(SubjectArchetypeTest, CompactNarrowRange) {
   const auto& policy = getArchetypePolicy(FugueArchetype::Compact);
   for (uint32_t seed = 0; seed < 10; ++seed) {
-    Subject sub = generateWithArchetype(FugueArchetype::Compact,
-                                         SubjectCharacter::Severe, seed);
+    Subject sub = generateWithArchetype(FugueArchetype::Compact, SubjectCharacter::Severe, seed);
     // Compact range should be <= max_range_degrees in semitones.
     // (7 degrees ~ 12 semitones for major scale)
-    EXPECT_LE(sub.range(), (policy.max_range_degrees + 1) * 2)
-        << "seed=" << seed;
+    EXPECT_LE(sub.range(), (policy.max_range_degrees + 1) * 2) << "seed=" << seed;
   }
 }
 
 TEST_F(SubjectArchetypeTest, CantabileWiderRange) {
   for (uint32_t seed = 0; seed < 10; ++seed) {
-    Subject sub = generateWithArchetype(FugueArchetype::Cantabile,
-                                         SubjectCharacter::Noble, seed);
+    Subject sub = generateWithArchetype(FugueArchetype::Cantabile, SubjectCharacter::Noble, seed);
     EXPECT_GT(sub.noteCount(), 0u) << "seed=" << seed;
   }
 }
 
 TEST_F(SubjectArchetypeTest, CantabileSmoothMotion) {
   for (uint32_t seed = 0; seed < 10; ++seed) {
-    Subject sub = generateWithArchetype(FugueArchetype::Cantabile,
-                                         SubjectCharacter::Noble, seed);
-    if (sub.noteCount() < 2) continue;
+    Subject sub = generateWithArchetype(FugueArchetype::Cantabile, SubjectCharacter::Noble, seed);
+    if (sub.noteCount() < 2)
+      continue;
     // Count step motion (<=2 semitones) vs total intervals.
     int steps = 0;
     int total = 0;
     for (size_t idx = 1; idx < sub.notes.size(); ++idx) {
       int interval = std::abs(static_cast<int>(sub.notes[idx].pitch) -
-                               static_cast<int>(sub.notes[idx - 1].pitch));
-      if (interval <= 2) ++steps;
+                              static_cast<int>(sub.notes[idx - 1].pitch));
+      if (interval <= 2)
+        ++steps;
       ++total;
     }
     if (total > 0) {
@@ -103,10 +100,10 @@ TEST_F(SubjectArchetypeTest, DifferentArchetypesProduceDifferentResults) {
   int differ_count = 0;
 
   for (uint32_t seed = 100; seed < 100 + kTestSeeds; ++seed) {
-    Subject compact = generateWithArchetype(FugueArchetype::Compact,
-                                             SubjectCharacter::Severe, seed);
-    Subject invertible = generateWithArchetype(FugueArchetype::Invertible,
-                                                SubjectCharacter::Severe, seed);
+    Subject compact =
+        generateWithArchetype(FugueArchetype::Compact, SubjectCharacter::Severe, seed);
+    Subject invertible =
+        generateWithArchetype(FugueArchetype::Invertible, SubjectCharacter::Severe, seed);
     ASSERT_GT(compact.noteCount(), 0u) << "Compact empty at seed=" << seed;
     ASSERT_GT(invertible.noteCount(), 0u) << "Invertible empty at seed=" << seed;
 
@@ -131,9 +128,8 @@ TEST_F(SubjectArchetypeTest, DifferentArchetypesProduceDifferentResults) {
   // With 5 seeds, the majority should produce different results across
   // archetypes. The archetypes have different path_candidates (6 vs 12),
   // different hard gates, and different scoring weights.
-  EXPECT_GE(differ_count, 3)
-      << "At least 3 out of 5 seeds should produce different subjects "
-         "for Compact vs Invertible archetypes";
+  EXPECT_GE(differ_count, 3) << "At least 3 out of 5 seeds should produce different subjects "
+                                "for Compact vs Invertible archetypes";
 }
 
 // ---------------------------------------------------------------------------
@@ -156,25 +152,19 @@ TEST_F(SubjectArchetypeTest, OuterLoopProducesValidSubjectsForAllArchetypes) {
   for (auto archetype : archetypes) {
     const auto& policy = getArchetypePolicy(archetype);
     for (uint32_t seed = 0; seed < 5; ++seed) {
-      Subject sub = generateWithArchetype(archetype,
-                                           SubjectCharacter::Severe, seed);
+      Subject sub = generateWithArchetype(archetype, SubjectCharacter::Severe, seed);
       ASSERT_GT(sub.noteCount(), 0u)
-          << "archetype=" << static_cast<int>(archetype)
-          << " seed=" << seed;
+          << "archetype=" << static_cast<int>(archetype) << " seed=" << seed;
 
       // The outer loop blends base_quality_weight * base + (1 - w) * archetype.
       // Both the base and archetype scores should be computable and in range.
       float base = validator.evaluate(sub).composite();
       float arch = archetype_scorer.evaluate(sub, policy).composite();
-      float combined = base * policy.base_quality_weight +
-                       arch * (1.0f - policy.base_quality_weight);
+      float combined =
+          base * policy.base_quality_weight + arch * (1.0f - policy.base_quality_weight);
 
-      EXPECT_GE(combined, 0.0f)
-          << "archetype=" << static_cast<int>(archetype)
-          << " seed=" << seed;
-      EXPECT_LE(combined, 1.0f)
-          << "archetype=" << static_cast<int>(archetype)
-          << " seed=" << seed;
+      EXPECT_GE(combined, 0.0f) << "archetype=" << static_cast<int>(archetype) << " seed=" << seed;
+      EXPECT_LE(combined, 1.0f) << "archetype=" << static_cast<int>(archetype) << " seed=" << seed;
     }
   }
 }
@@ -188,33 +178,27 @@ TEST_F(SubjectArchetypeTest, ArchetypeScoringInfluencesSelection) {
   SubjectValidator validator;
   ArchetypeScorer archetype_scorer;
 
-  Subject compact = generateWithArchetype(FugueArchetype::Compact,
-                                           SubjectCharacter::Severe, kSeed);
-  Subject cantabile = generateWithArchetype(FugueArchetype::Cantabile,
-                                             SubjectCharacter::Severe, kSeed);
+  Subject compact = generateWithArchetype(FugueArchetype::Compact, SubjectCharacter::Severe, kSeed);
+  Subject cantabile =
+      generateWithArchetype(FugueArchetype::Cantabile, SubjectCharacter::Severe, kSeed);
 
   const auto& compact_policy = getArchetypePolicy(FugueArchetype::Compact);
   const auto& cantabile_policy = getArchetypePolicy(FugueArchetype::Cantabile);
 
   // Verify the policies have different base_quality_weight.
-  ASSERT_NE(compact_policy.base_quality_weight,
-            cantabile_policy.base_quality_weight)
+  ASSERT_NE(compact_policy.base_quality_weight, cantabile_policy.base_quality_weight)
       << "Compact and Cantabile should have different base_quality_weight";
 
   // Compute the outer-loop combined score for each.
   float compact_base = validator.evaluate(compact).composite();
-  float compact_arch =
-      archetype_scorer.evaluate(compact, compact_policy).composite();
-  float compact_combined =
-      compact_base * compact_policy.base_quality_weight +
-      compact_arch * (1.0f - compact_policy.base_quality_weight);
+  float compact_arch = archetype_scorer.evaluate(compact, compact_policy).composite();
+  float compact_combined = compact_base * compact_policy.base_quality_weight +
+                           compact_arch * (1.0f - compact_policy.base_quality_weight);
 
   float cantabile_base = validator.evaluate(cantabile).composite();
-  float cantabile_arch =
-      archetype_scorer.evaluate(cantabile, cantabile_policy).composite();
-  float cantabile_combined =
-      cantabile_base * cantabile_policy.base_quality_weight +
-      cantabile_arch * (1.0f - cantabile_policy.base_quality_weight);
+  float cantabile_arch = archetype_scorer.evaluate(cantabile, cantabile_policy).composite();
+  float cantabile_combined = cantabile_base * cantabile_policy.base_quality_weight +
+                             cantabile_arch * (1.0f - cantabile_policy.base_quality_weight);
 
   // Both combined scores must be valid.
   EXPECT_GE(compact_combined, 0.0f);
@@ -270,10 +254,10 @@ TEST_F(SubjectArchetypeTest, MoreCandidatesMaintainsQuality) {
   constexpr int kSeeds = 10;
 
   for (uint32_t seed = 0; seed < kSeeds; ++seed) {
-    Subject compact = generateWithArchetype(FugueArchetype::Compact,
-                                             SubjectCharacter::Severe, seed);
-    Subject invertible = generateWithArchetype(FugueArchetype::Invertible,
-                                                SubjectCharacter::Severe, seed);
+    Subject compact =
+        generateWithArchetype(FugueArchetype::Compact, SubjectCharacter::Severe, seed);
+    Subject invertible =
+        generateWithArchetype(FugueArchetype::Invertible, SubjectCharacter::Severe, seed);
 
     if (compact.noteCount() > 0) {
       compact_sum += validator.evaluate(compact).composite();
@@ -290,8 +274,8 @@ TEST_F(SubjectArchetypeTest, MoreCandidatesMaintainsQuality) {
   // keeping average quality within a reasonable margin of Compact.
   EXPECT_GE(invertible_avg, compact_avg - 0.15f)
       << "Invertible average quality should not fall too far below Compact "
-         "(compact_avg=" << compact_avg
-      << ", invertible_avg=" << invertible_avg << ")";
+         "(compact_avg="
+      << compact_avg << ", invertible_avg=" << invertible_avg << ")";
 }
 
 }  // namespace

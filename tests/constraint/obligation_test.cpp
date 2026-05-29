@@ -1,8 +1,9 @@
 // Tests for obligation extraction and subject constraint profiling.
 
+#include "constraint/obligation.h"
+
 #include <gtest/gtest.h>
 
-#include "constraint/obligation.h"
 #include "constraint/obligation_analyzer.h"
 #include "core/basic_types.h"
 
@@ -31,7 +32,7 @@ TEST(ObligationDetectionTest, LeadingToneInGMinor) {
   // G minor: tonic = G (MIDI pitch class 7). Leading tone = F# (pitch class 6).
   // F#4 = MIDI 66
   std::vector<NoteEvent> notes = {
-      makeNote(0, kTicksPerBeat, 67),   // G4
+      makeNote(0, kTicksPerBeat, 67),              // G4
       makeNote(kTicksPerBeat, kTicksPerBeat, 66),  // F#4 (leading tone)
   };
 
@@ -81,8 +82,7 @@ TEST(ObligationDetectionTest, NoLeapResolveForSmallInterval) {
   auto profile = analyzeObligations(notes, Key::C, false);
 
   for (const auto& ob : profile.obligations) {
-    EXPECT_NE(ob.type, ObligationType::LeapResolve)
-        << "M3 should not trigger LeapResolve";
+    EXPECT_NE(ob.type, ObligationType::LeapResolve) << "M3 should not trigger LeapResolve";
   }
 }
 
@@ -90,8 +90,8 @@ TEST(ObligationDetectionTest, NoLeapResolveForSmallInterval) {
 TEST(ObligationDetectionTest, StrongBeatHarmDetection) {
   // Note on beat 1 (tick 0) should be StrongBeatHarm
   std::vector<NoteEvent> notes = {
-      makeNote(0, kTicksPerBeat, 60),  // Beat 1 (strong)
-      makeNote(kTicksPerBeat, kTicksPerBeat, 62),  // Beat 2 (weak)
+      makeNote(0, kTicksPerBeat, 60),                  // Beat 1 (strong)
+      makeNote(kTicksPerBeat, kTicksPerBeat, 62),      // Beat 2 (weak)
       makeNote(kTicksPerBeat * 2, kTicksPerBeat, 64),  // Beat 3 (strong)
   };
 
@@ -111,8 +111,8 @@ TEST(ObligationDetectionTest, StrongBeatHarmDetection) {
 TEST(ObligationDetectionTest, CadenceStableOnUnstableEnding) {
   // End on D4 (degree 2 in C major) - not stable
   std::vector<NoteEvent> notes = {
-      makeNote(0, kTicksPerBeat, 60),              // C4
-      makeNote(kTicksPerBeat, kTicksPerBeat, 64),  // E4
+      makeNote(0, kTicksPerBeat, 60),                  // C4
+      makeNote(kTicksPerBeat, kTicksPerBeat, 64),      // E4
       makeNote(kTicksPerBeat * 2, kTicksPerBeat, 62),  // D4 (unstable ending)
   };
 
@@ -131,16 +131,15 @@ TEST(ObligationDetectionTest, CadenceStableOnUnstableEnding) {
 TEST(ObligationDetectionTest, NoCadenceStableOnTonic) {
   // End on C4 (root in C major) - stable
   std::vector<NoteEvent> notes = {
-      makeNote(0, kTicksPerBeat, 64),              // E4
-      makeNote(kTicksPerBeat, kTicksPerBeat, 62),  // D4
+      makeNote(0, kTicksPerBeat, 64),                  // E4
+      makeNote(kTicksPerBeat, kTicksPerBeat, 62),      // D4
       makeNote(kTicksPerBeat * 2, kTicksPerBeat, 60),  // C4 (stable ending)
   };
 
   auto profile = analyzeObligations(notes, Key::C, false);
 
   for (const auto& ob : profile.obligations) {
-    EXPECT_NE(ob.type, ObligationType::CadenceStable)
-        << "No CadenceStable when ending on tonic";
+    EXPECT_NE(ob.type, ObligationType::CadenceStable) << "No CadenceStable when ending on tonic";
   }
 }
 
@@ -178,18 +177,30 @@ std::vector<NoteEvent> makeBWV578Subject() {
   Tick e = kTicksPerBeat / 2;  // Eighth
 
   // G4=67, D5=74, C5=72, Bb4=70, A4=69, G4=67, F#4=66
-  notes.push_back(makeNote(t, q * 2, 67));  t += q * 2;  // G4 (half note)
-  notes.push_back(makeNote(t, q, 74));      t += q;      // D5
-  notes.push_back(makeNote(t, e, 72));      t += e;      // C5
-  notes.push_back(makeNote(t, e, 70));      t += e;      // Bb4
-  notes.push_back(makeNote(t, e, 69));      t += e;      // A4
-  notes.push_back(makeNote(t, e, 67));      t += e;      // G4
-  notes.push_back(makeNote(t, e, 66));      t += e;      // F#4 (leading tone)
-  notes.push_back(makeNote(t, q, 67));      t += q;      // G4
-  notes.push_back(makeNote(t, e, 69));      t += e;      // A4
-  notes.push_back(makeNote(t, e, 70));      t += e;      // Bb4
-  notes.push_back(makeNote(t, q, 69));      t += q;      // A4
-  notes.push_back(makeNote(t, q * 2, 62));  t += q * 2;  // D4 (half note)
+  notes.push_back(makeNote(t, q * 2, 67));
+  t += q * 2;  // G4 (half note)
+  notes.push_back(makeNote(t, q, 74));
+  t += q;  // D5
+  notes.push_back(makeNote(t, e, 72));
+  t += e;  // C5
+  notes.push_back(makeNote(t, e, 70));
+  t += e;  // Bb4
+  notes.push_back(makeNote(t, e, 69));
+  t += e;  // A4
+  notes.push_back(makeNote(t, e, 67));
+  t += e;  // G4
+  notes.push_back(makeNote(t, e, 66));
+  t += e;  // F#4 (leading tone)
+  notes.push_back(makeNote(t, q, 67));
+  t += q;  // G4
+  notes.push_back(makeNote(t, e, 69));
+  t += e;  // A4
+  notes.push_back(makeNote(t, e, 70));
+  t += e;  // Bb4
+  notes.push_back(makeNote(t, q, 69));
+  t += q;  // A4
+  notes.push_back(makeNote(t, q * 2, 62));
+  t += q * 2;  // D4 (half note)
   return notes;
 }
 
@@ -285,8 +296,7 @@ TEST(BWV578ProfileTest, AccentContour) {
   // BWV578: front-weighted (half note opening on strong beat)
   EXPECT_GT(profile.accent_contour.front_weight, 0.0f);
   // Weights should sum to approximately 1.0
-  float total = profile.accent_contour.front_weight +
-                profile.accent_contour.mid_weight +
+  float total = profile.accent_contour.front_weight + profile.accent_contour.mid_weight +
                 profile.accent_contour.tail_weight;
   EXPECT_NEAR(total, 1.0f, 0.01f);
 }
@@ -410,17 +420,14 @@ TEST(StrettoFeasibilityMatrixTest, BWV578TwoVoiceAtOneBarFeasible) {
   bool found_entry = false;
   bool found_feasible = false;
   for (const auto& entry : profile.stretto_matrix) {
-    if (entry.num_voices == 2 &&
-        entry.offset_ticks == static_cast<int>(kTicksPerBar)) {
+    if (entry.num_voices == 2 && entry.offset_ticks == static_cast<int>(kTicksPerBar)) {
       found_entry = true;
-      found_feasible = (entry.feasibility_score() >=
-                        StrettoFeasibilityEntry::kMinFeasibleScore);
+      found_feasible = (entry.feasibility_score() >= StrettoFeasibilityEntry::kMinFeasibleScore);
       break;
     }
   }
   EXPECT_TRUE(found_entry) << "Should have a 2-voice entry at 1-bar offset";
-  EXPECT_TRUE(found_feasible)
-      << "BWV578: 2-voice stretto at 1-bar offset should be feasible";
+  EXPECT_TRUE(found_feasible) << "BWV578: 2-voice stretto at 1-bar offset should be feasible";
 }
 
 TEST(StrettoFeasibilityMatrixTest, BWV578MinSafeStrettoOffset) {
@@ -429,8 +436,7 @@ TEST(StrettoFeasibilityMatrixTest, BWV578MinSafeStrettoOffset) {
 
   // min_safe_stretto_offset for 2 voices should return a valid offset.
   int min_offset = profile.min_safe_stretto_offset(2);
-  EXPECT_GT(min_offset, 0)
-      << "BWV578 should have at least one feasible 2-voice stretto offset";
+  EXPECT_GT(min_offset, 0) << "BWV578 should have at least one feasible 2-voice stretto offset";
 
   // The minimum offset should be at least 1 beat.
   EXPECT_GE(min_offset, static_cast<int>(kTicksPerBeat));
@@ -454,8 +460,7 @@ TEST(StrettoFeasibilityMatrixTest, HighDensitySubjectFiveVoicesHarder) {
 
   auto profile = analyzeObligations(dense_notes, Key::C, false);
 
-  EXPECT_GT(static_cast<int>(profile.stretto_matrix.size()), 0)
-      << "Should have stretto entries";
+  EXPECT_GT(static_cast<int>(profile.stretto_matrix.size()), 0) << "Should have stretto entries";
 
   // 5-voice stretto should be harder than 2-voice stretto at the same offset.
   // Compare average scores: 5-voice should score lower than 2-voice.
@@ -477,8 +482,7 @@ TEST(StrettoFeasibilityMatrixTest, HighDensitySubjectFiveVoicesHarder) {
 
   float avg_2v = sum_2v / static_cast<float>(count_2v);
   float avg_5v = sum_5v / static_cast<float>(count_5v);
-  EXPECT_GT(avg_2v, avg_5v)
-      << "5-voice stretto should be harder than 2-voice on average";
+  EXPECT_GT(avg_2v, avg_5v) << "5-voice stretto should be harder than 2-voice on average";
 }
 
 TEST(StrettoFeasibilityMatrixTest, MatrixCoversAllVoiceCounts) {
@@ -488,10 +492,14 @@ TEST(StrettoFeasibilityMatrixTest, MatrixCoversAllVoiceCounts) {
   // Matrix should contain entries for voice counts 2 through 5.
   bool has_2v = false, has_3v = false, has_4v = false, has_5v = false;
   for (const auto& entry : profile.stretto_matrix) {
-    if (entry.num_voices == 2) has_2v = true;
-    if (entry.num_voices == 3) has_3v = true;
-    if (entry.num_voices == 4) has_4v = true;
-    if (entry.num_voices == 5) has_5v = true;
+    if (entry.num_voices == 2)
+      has_2v = true;
+    if (entry.num_voices == 3)
+      has_3v = true;
+    if (entry.num_voices == 4)
+      has_4v = true;
+    if (entry.num_voices == 5)
+      has_5v = true;
   }
   EXPECT_TRUE(has_2v) << "Matrix should have 2-voice entries";
   EXPECT_TRUE(has_3v) << "Matrix should have 3-voice entries";
@@ -512,7 +520,8 @@ TEST(StrettoFeasibilityMatrixTest, LargerOffsetsMoreFeasible) {
   int max_offset_val = 0;
 
   for (const auto& entry : profile.stretto_matrix) {
-    if (entry.num_voices != 2) continue;
+    if (entry.num_voices != 2)
+      continue;
     if (entry.offset_ticks < min_offset_val) {
       min_offset_val = entry.offset_ticks;
       min_offset_score = entry.feasibility_score();
@@ -523,8 +532,7 @@ TEST(StrettoFeasibilityMatrixTest, LargerOffsetsMoreFeasible) {
     }
   }
 
-  EXPECT_GT(max_offset_val, min_offset_val)
-      << "Should have a range of offsets";
+  EXPECT_GT(max_offset_val, min_offset_val) << "Should have a range of offsets";
   EXPECT_GE(max_offset_score, min_offset_score)
       << "Larger offsets should be at least as feasible as smaller offsets";
 }
@@ -533,8 +541,7 @@ TEST(StrettoFeasibilityMatrixTest, EmptyNotesProducesEmptyMatrix) {
   std::vector<NoteEvent> empty_notes;
   auto profile = analyzeObligations(empty_notes, Key::C, false);
 
-  EXPECT_TRUE(profile.stretto_matrix.empty())
-      << "Empty notes should produce empty stretto matrix";
+  EXPECT_TRUE(profile.stretto_matrix.empty()) << "Empty notes should produce empty stretto matrix";
 }
 
 TEST(StrettoFeasibilityMatrixTest, ScoresInValidRange) {

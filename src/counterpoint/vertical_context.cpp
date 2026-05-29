@@ -11,23 +11,24 @@
 namespace bach {
 
 bool VerticalContext::isSafe(Tick tick, uint8_t voice, uint8_t pitch) const {
-  if (!placed_notes || !timeline) return true;
+  if (!placed_notes || !timeline)
+    return true;
 
   uint8_t beat = beatInBar(tick);
 
   // Strong beats (0, 2): delegate entirely to checkVerticalConsonance.
   if (beat == 0 || beat == 2) {
-    return checkVerticalConsonance(pitch, voice, tick, *placed_notes, *timeline,
-                                   num_voices);
+    return checkVerticalConsonance(pitch, voice, tick, *placed_notes, *timeline, num_voices);
   }
 
   // Weak beats: reject harsh dissonances (m2=1, TT=6, M7=11).
   uint8_t melodic_prev = findPrevPitch(voice, tick);
   for (const auto& note : *placed_notes) {
-    if (note.voice == voice) continue;
-    if (note.start_tick + note.duration <= tick || note.start_tick > tick) continue;
-    int simple =
-        interval_util::compoundToSimple(absoluteInterval(pitch, note.pitch));
+    if (note.voice == voice)
+      continue;
+    if (note.start_tick + note.duration <= tick || note.start_tick > tick)
+      continue;
+    int simple = interval_util::compoundToSimple(absoluteInterval(pitch, note.pitch));
     if (simple == 1 || simple == 6 || simple == 11) {
       // Check if weak_beat_allow permits this dissonance.
       if (weak_beat_allow &&
@@ -41,8 +42,10 @@ bool VerticalContext::isSafe(Tick tick, uint8_t voice, uint8_t pitch) const {
 }
 
 float VerticalContext::score(Tick tick, uint8_t voice, uint8_t pitch) const {
-  if (!isSafe(tick, voice, pitch)) return 0.0f;
-  if (!placed_notes) return 1.0f;
+  if (!isSafe(tick, voice, pitch))
+    return 0.0f;
+  if (!placed_notes)
+    return 1.0f;
 
   // Count sounding notes at this tick (excluding self).
   int consonance_count = 0;
@@ -51,12 +54,13 @@ float VerticalContext::score(Tick tick, uint8_t voice, uint8_t pitch) const {
   int total_sounding = 0;
 
   for (const auto& note : *placed_notes) {
-    if (note.voice == voice) continue;
-    if (note.start_tick + note.duration <= tick || note.start_tick > tick) continue;
+    if (note.voice == voice)
+      continue;
+    if (note.start_tick + note.duration <= tick || note.start_tick > tick)
+      continue;
     ++total_sounding;
 
-    int simple =
-        interval_util::compoundToSimple(absoluteInterval(pitch, note.pitch));
+    int simple = interval_util::compoundToSimple(absoluteInterval(pitch, note.pitch));
     if (interval_util::isPerfectConsonance(simple)) {
       ++perfect_count;
       ++consonance_count;
@@ -66,12 +70,15 @@ float VerticalContext::score(Tick tick, uint8_t voice, uint8_t pitch) const {
     }
   }
 
-  if (total_sounding == 0) return 1.0f;
+  if (total_sounding == 0)
+    return 1.0f;
 
   // Graduated scoring based on consonance quality.
   if (consonance_count == total_sounding) {
-    if (perfect_count == total_sounding) return 1.0f;
-    if (imperfect_count > 0) return 0.8f;
+    if (perfect_count == total_sounding)
+      return 1.0f;
+    if (imperfect_count > 0)
+      return 0.8f;
     return 0.5f;  // P4 between upper voices.
   }
   // Some non-consonant intervals (allowed on weak beats).
@@ -79,11 +86,13 @@ float VerticalContext::score(Tick tick, uint8_t voice, uint8_t pitch) const {
 }
 
 uint8_t VerticalContext::findPrevPitch(uint8_t voice, Tick before_tick) const {
-  if (!placed_notes) return 0;
+  if (!placed_notes)
+    return 0;
   uint8_t best_pitch = 0;
   Tick best_tick = 0;
   for (const auto& note : *placed_notes) {
-    if (note.voice != voice) continue;
+    if (note.voice != voice)
+      continue;
     if (note.start_tick < before_tick && note.start_tick >= best_tick) {
       best_tick = note.start_tick;
       best_pitch = note.pitch;

@@ -2,13 +2,12 @@
 // Verifies: properly prepared suspensions resolve to consonance, and
 // unprepared dissonances on strong beats are rejected.
 
-#include "counterpoint/collision_resolver.h"
-
 #include <gtest/gtest.h>
 
 #include "core/basic_types.h"
 #include "core/interval.h"
 #include "core/pitch_utils.h"
+#include "counterpoint/collision_resolver.h"
 #include "counterpoint/counterpoint_state.h"
 #include "counterpoint/fux_rule_evaluator.h"
 
@@ -43,13 +42,12 @@ TEST_F(SuspensionResolutionTest, PreparedSuspensionResolvesToConsonance) {
   //     Interval |64-62| = 2 (M2) = dissonant.
   //   Resolution: E4-2=D4(62) with D4(62) = unison (0) = consonant.
   state.addNote(0, {0, 480, 69, 80, 0});    // Voice 0: A4 at tick 0.
-  state.addNote(1, {480, 480, 60, 80, 1});   // Voice 1: C4 at tick 480.
-  state.addNote(0, {480, 480, 64, 80, 0});   // Voice 0: E4 at tick 480 (prep).
-  state.addNote(1, {960, 480, 62, 80, 1});   // Voice 1: D4 at tick 960.
+  state.addNote(1, {480, 480, 60, 80, 1});  // Voice 1: C4 at tick 480.
+  state.addNote(0, {480, 480, 64, 80, 0});  // Voice 0: E4 at tick 480 (prep).
+  state.addNote(1, {960, 480, 62, 80, 1});  // Voice 1: D4 at tick 960.
 
   auto result = resolver.trySuspension(state, rules, 0, 72, 960, 480);
-  EXPECT_TRUE(result.accepted)
-      << "A properly prepared suspension should be accepted";
+  EXPECT_TRUE(result.accepted) << "A properly prepared suspension should be accepted";
   EXPECT_EQ(result.pitch, 64)  // Held E4.
       << "Suspension should hold the preparation pitch";
   EXPECT_EQ(result.strategy, "suspension");
@@ -94,9 +92,9 @@ TEST_F(SuspensionResolutionTest, DissonantPreparationRejectsSuspension) {
   // If the held pitch was dissonant at the preparation beat, the suspension
   // should be rejected (proper suspensions require consonant preparation).
   state.addNote(0, {0, 480, 64, 80, 0});    // Voice 0: E4 at tick 0.
-  state.addNote(1, {480, 480, 60, 80, 1});   // Voice 1: C4 at tick 480.
-  state.addNote(0, {480, 480, 62, 80, 0});   // Voice 0: D4 (prep: M2 with C4 = dissonant).
-  state.addNote(1, {960, 480, 60, 80, 1});   // Voice 1: C4 at tick 960.
+  state.addNote(1, {480, 480, 60, 80, 1});  // Voice 1: C4 at tick 480.
+  state.addNote(0, {480, 480, 62, 80, 0});  // Voice 0: D4 (prep: M2 with C4 = dissonant).
+  state.addNote(1, {960, 480, 60, 80, 1});  // Voice 1: C4 at tick 960.
 
   auto result = resolver.trySuspension(state, rules, 0, 67, 960, 480);
   EXPECT_FALSE(result.accepted)
@@ -139,9 +137,9 @@ TEST_F(SuspensionResolutionTest, SuspensionAtTickZeroRejected) {
 
 TEST_F(SuspensionResolutionTest, NoHarmonicContextAtPrepRejected) {
   state.addNote(0, {0, 480, 60, 80, 0});    // Voice 0: C4 at tick 0.
-  state.addNote(0, {480, 480, 64, 80, 0});   // Voice 0: E4 at tick 480.
+  state.addNote(0, {480, 480, 64, 80, 0});  // Voice 0: E4 at tick 480.
   // Voice 1 only enters at tick 960 -- no harmonic context at preparation.
-  state.addNote(1, {960, 480, 62, 80, 1});   // Voice 1: D4 at tick 960.
+  state.addNote(1, {960, 480, 62, 80, 1});  // Voice 1: D4 at tick 960.
 
   auto result = resolver.trySuspension(state, rules, 0, 67, 960, 480);
   EXPECT_FALSE(result.accepted)
@@ -166,15 +164,13 @@ TEST_F(SuspensionResolutionTest, Proper43SuspensionAccepted) {
   //   Resolution: E4-1 = Eb4(63) with B3(59): |63-59| = 4 (M3) = consonant.
   //   Or E4-2 = D4(62) with B3(59): |62-59| = 3 (m3) = consonant.
   state.addNote(0, {0, 480, 60, 80, 0});    // Voice 0: C4 at tick 0.
-  state.addNote(1, {480, 480, 57, 80, 1});   // Voice 1: A3 at tick 480.
-  state.addNote(0, {480, 480, 64, 80, 0});   // Voice 0: E4 at tick 480 (prep).
-  state.addNote(1, {960, 480, 59, 80, 1});   // Voice 1: B3 at tick 960.
+  state.addNote(1, {480, 480, 57, 80, 1});  // Voice 1: A3 at tick 480.
+  state.addNote(0, {480, 480, 64, 80, 0});  // Voice 0: E4 at tick 480 (prep).
+  state.addNote(1, {960, 480, 59, 80, 1});  // Voice 1: B3 at tick 960.
 
   auto result = resolver.trySuspension(state, rules, 0, 72, 960, 480);
-  EXPECT_TRUE(result.accepted)
-      << "Properly prepared 4-3 type suspension should be accepted";
-  EXPECT_EQ(result.pitch, 64)
-      << "Should hold the preparation pitch E4";
+  EXPECT_TRUE(result.accepted) << "Properly prepared 4-3 type suspension should be accepted";
+  EXPECT_EQ(result.pitch, 64) << "Should hold the preparation pitch E4";
 }
 
 }  // namespace

@@ -3,9 +3,9 @@
 
 #include "constraint/feasibility_harness.h"
 
-#include <cstdio>
-
 #include <gtest/gtest.h>
+
+#include <cstdio>
 
 #include "constraint/obligation.h"
 #include "constraint/obligation_analyzer.h"
@@ -68,14 +68,22 @@ Subject makeBWV578Subject() {
   Tick eighth = kTicksPerBeat / 2;
   Tick tick = 0;
 
-  subject.notes.push_back(makeNote(tick, qtr * 2, 67));  tick += qtr * 2;  // G4
-  subject.notes.push_back(makeNote(tick, qtr, 74));       tick += qtr;      // D5
-  subject.notes.push_back(makeNote(tick, eighth, 72));    tick += eighth;   // C5
-  subject.notes.push_back(makeNote(tick, eighth, 70));    tick += eighth;   // Bb4
-  subject.notes.push_back(makeNote(tick, eighth, 69));    tick += eighth;   // A4
-  subject.notes.push_back(makeNote(tick, eighth, 67));    tick += eighth;   // G4
-  subject.notes.push_back(makeNote(tick, eighth, 66));    tick += eighth;   // F#4
-  subject.notes.push_back(makeNote(tick, qtr, 67));       tick += qtr;     // G4
+  subject.notes.push_back(makeNote(tick, qtr * 2, 67));
+  tick += qtr * 2;  // G4
+  subject.notes.push_back(makeNote(tick, qtr, 74));
+  tick += qtr;  // D5
+  subject.notes.push_back(makeNote(tick, eighth, 72));
+  tick += eighth;  // C5
+  subject.notes.push_back(makeNote(tick, eighth, 70));
+  tick += eighth;  // Bb4
+  subject.notes.push_back(makeNote(tick, eighth, 69));
+  tick += eighth;  // A4
+  subject.notes.push_back(makeNote(tick, eighth, 67));
+  tick += eighth;  // G4
+  subject.notes.push_back(makeNote(tick, eighth, 66));
+  tick += eighth;  // F#4
+  subject.notes.push_back(makeNote(tick, qtr, 67));
+  tick += qtr;  // G4
 
   subject.length_ticks = tick;
   for (auto& note : subject.notes) {
@@ -358,16 +366,14 @@ TEST(VoiceAssignmentStructTest, DefaultValues) {
 // ===========================================================================
 
 // Helper: create a SubjectConstraintProfile with specific obligations.
-SubjectConstraintProfile makeProfileWithObligations(
-    std::vector<ObligationNode> obligations) {
+SubjectConstraintProfile makeProfileWithObligations(std::vector<ObligationNode> obligations) {
   SubjectConstraintProfile profile;
   profile.obligations = std::move(obligations);
   profile.tonal_answer_feasible = true;
   return profile;
 }
 
-ObligationNode makeObligation(uint16_t node_id, ObligationType type,
-                              Tick start, Tick deadline) {
+ObligationNode makeObligation(uint16_t node_id, ObligationType type, Tick start, Tick deadline) {
   ObligationNode node;
   node.id = node_id;
   node.type = type;
@@ -392,13 +398,10 @@ TEST(PairVerificationTest, NonOverlappingObligationsFeasible) {
 
   // Offset large enough that obligations don't overlap.
   // Subject: [0, 480], Answer shifted by 960: [960, 1440]
-  auto result = verifyPair(subject_prof, answer_prof,
-                           static_cast<int>(kTicksPerBeat * 2));
+  auto result = verifyPair(subject_prof, answer_prof, static_cast<int>(kTicksPerBeat * 2));
 
-  EXPECT_TRUE(result.feasible())
-      << "Non-overlapping obligations should be feasible";
-  EXPECT_TRUE(result.conflicts.empty())
-      << "No conflicts expected for non-overlapping obligations";
+  EXPECT_TRUE(result.feasible()) << "Non-overlapping obligations should be feasible";
+  EXPECT_TRUE(result.conflicts.empty()) << "No conflicts expected for non-overlapping obligations";
   EXPECT_LT(result.cadence_conflict_score, 0.5f);
 }
 
@@ -406,15 +409,13 @@ TEST(PairVerificationTest, NonOverlappingObligationsFeasible) {
 TEST(PairVerificationTest, LeadingToneVsStrongBeatHarmConflict) {
   // Subject: LeadingTone active at [480, 1440]
   SubjectConstraintProfile subject_prof = makeProfileWithObligations({
-      makeObligation(0, ObligationType::LeadingTone,
-                     kTicksPerBeat, kTicksPerBeat * 3),
+      makeObligation(0, ObligationType::LeadingTone, kTicksPerBeat, kTicksPerBeat * 3),
   });
 
   // Answer: StrongBeatHarm gate at [960, 960] (instantaneous at strong beat)
   // With offset=0, this should overlap with the subject's LeadingTone.
   SubjectConstraintProfile answer_prof = makeProfileWithObligations({
-      makeObligation(0, ObligationType::StrongBeatHarm,
-                     kTicksPerBeat * 2, kTicksPerBeat * 2),
+      makeObligation(0, ObligationType::StrongBeatHarm, kTicksPerBeat * 2, kTicksPerBeat * 2),
   });
 
   auto result = verifyPair(subject_prof, answer_prof, 0);
@@ -432,8 +433,7 @@ TEST(PairVerificationTest, LeadingToneVsStrongBeatHarmConflict) {
       found_lt_sbh_conflict = true;
     }
   }
-  EXPECT_TRUE(found_lt_sbh_conflict)
-      << "Should detect LT vs StrongBeatHarm conflict";
+  EXPECT_TRUE(found_lt_sbh_conflict) << "Should detect LT vs StrongBeatHarm conflict";
 }
 
 // Test: Seventh vs LeapResolve conflict
@@ -450,8 +450,7 @@ TEST(PairVerificationTest, SeventhVsLeapResolveConflict) {
 
   auto result = verifyPair(subject_prof, answer_prof, 0);
 
-  EXPECT_FALSE(result.conflicts.empty())
-      << "Seventh vs LeapResolve should produce a conflict";
+  EXPECT_FALSE(result.conflicts.empty()) << "Seventh vs LeapResolve should produce a conflict";
 
   bool found_sev_lr = false;
   for (const auto& conflict : result.conflicts) {
@@ -462,28 +461,24 @@ TEST(PairVerificationTest, SeventhVsLeapResolveConflict) {
       found_sev_lr = true;
     }
   }
-  EXPECT_TRUE(found_sev_lr)
-      << "Should detect Seventh vs LeapResolve conflict";
+  EXPECT_TRUE(found_sev_lr) << "Should detect Seventh vs LeapResolve conflict";
 }
 
 // Test: Cadence conflict score rises when both have cadence obligations
 TEST(PairVerificationTest, CadenceConflictDetected) {
   // Subject: CadenceApproach active during [1920, 3840]
   SubjectConstraintProfile subject_prof = makeProfileWithObligations({
-      makeObligation(0, ObligationType::CadenceApproach,
-                     kTicksPerBar, kTicksPerBar * 2),
+      makeObligation(0, ObligationType::CadenceApproach, kTicksPerBar, kTicksPerBar * 2),
   });
 
   // Answer: CadenceStable active during [0, 1920]
   // With offset = kTicksPerBar, answer's cadence shifts to [1920, 3840],
   // perfectly overlapping subject's cadence.
   SubjectConstraintProfile answer_prof = makeProfileWithObligations({
-      makeObligation(0, ObligationType::CadenceStable,
-                     0, kTicksPerBar),
+      makeObligation(0, ObligationType::CadenceStable, 0, kTicksPerBar),
   });
 
-  auto result = verifyPair(subject_prof, answer_prof,
-                           static_cast<int>(kTicksPerBar));
+  auto result = verifyPair(subject_prof, answer_prof, static_cast<int>(kTicksPerBar));
 
   // Both cadence obligations are active at [1920, 3840], overlapping entirely.
   EXPECT_GT(result.cadence_conflict_score, 0.0f)
@@ -534,8 +529,7 @@ TEST(PairVerificationTest, TonalAnswerFeasibilityPropagated) {
 
   auto result = verifyPair(subject_prof, answer_prof, 0);
 
-  EXPECT_FALSE(result.tonal_answer_feasible)
-      << "Should propagate answer's tonal_answer_feasible";
+  EXPECT_FALSE(result.tonal_answer_feasible) << "Should propagate answer's tonal_answer_feasible";
 }
 
 // ===========================================================================
@@ -546,24 +540,23 @@ TEST(PairVerificationTest, TonalAnswerFeasibilityPropagated) {
 TEST(SolvabilityTest, ConsonantIntervalsSolvable) {
   // Subject: C4 half notes on strong beats (C4, E4, G4, C5)
   std::vector<NoteEvent> subject = {
-      makeNote(0, kTicksPerBeat * 2, 60),                        // C4
-      makeNote(kTicksPerBeat * 2, kTicksPerBeat * 2, 64),        // E4
-      makeNote(kTicksPerBeat * 4, kTicksPerBeat * 2, 67),        // G4
-      makeNote(kTicksPerBeat * 6, kTicksPerBeat * 2, 72),        // C5
+      makeNote(0, kTicksPerBeat * 2, 60),                  // C4
+      makeNote(kTicksPerBeat * 2, kTicksPerBeat * 2, 64),  // E4
+      makeNote(kTicksPerBeat * 4, kTicksPerBeat * 2, 67),  // G4
+      makeNote(kTicksPerBeat * 6, kTicksPerBeat * 2, 72),  // C5
   };
 
   // CS: a third above (E4, G4, B4, E5) -- consonant 3rds throughout
   std::vector<NoteEvent> counter = {
-      makeNote(0, kTicksPerBeat * 2, 64),                        // E4
-      makeNote(kTicksPerBeat * 2, kTicksPerBeat * 2, 67),        // G4
-      makeNote(kTicksPerBeat * 4, kTicksPerBeat * 2, 71),        // B4
-      makeNote(kTicksPerBeat * 6, kTicksPerBeat * 2, 76),        // E5
+      makeNote(0, kTicksPerBeat * 2, 64),                  // E4
+      makeNote(kTicksPerBeat * 2, kTicksPerBeat * 2, 67),  // G4
+      makeNote(kTicksPerBeat * 4, kTicksPerBeat * 2, 71),  // B4
+      makeNote(kTicksPerBeat * 6, kTicksPerBeat * 2, 76),  // E5
   };
 
   auto result = testSolvability(subject, counter, Key::C, false);
 
-  EXPECT_TRUE(result.solvable())
-      << "Parallel thirds should be solvable";
+  EXPECT_TRUE(result.solvable()) << "Parallel thirds should be solvable";
   EXPECT_LE(result.vertical_clash_rate, 0.15f);
   EXPECT_LE(result.strong_beat_dissonance_rate, 0.05f);
 }
@@ -582,8 +575,7 @@ TEST(SolvabilityTest, ManyDissonancesNotSolvable) {
 
   auto result = testSolvability(subject, counter, Key::C, false);
 
-  EXPECT_FALSE(result.solvable())
-      << "Sustained minor 2nd should not be solvable";
+  EXPECT_FALSE(result.solvable()) << "Sustained minor 2nd should not be solvable";
   EXPECT_GT(result.vertical_clash_rate, 0.15f);
 }
 
@@ -591,7 +583,7 @@ TEST(SolvabilityTest, ManyDissonancesNotSolvable) {
 TEST(SolvabilityTest, RegisterOverlapCalculation) {
   // Subject: C4(60) to G4(67) range = 7 semitones
   std::vector<NoteEvent> subject = {
-      makeNote(0, kTicksPerBeat * 2, 60),  // C4
+      makeNote(0, kTicksPerBeat * 2, 60),                  // C4
       makeNote(kTicksPerBeat * 2, kTicksPerBeat * 2, 67),  // G4
   };
 
@@ -600,7 +592,7 @@ TEST(SolvabilityTest, RegisterOverlapCalculation) {
   // Union: C4(60) to B4(71) = 11 semitones
   // Overlap = 3/11 ~ 0.273
   std::vector<NoteEvent> counter = {
-      makeNote(0, kTicksPerBeat * 2, 64),  // E4
+      makeNote(0, kTicksPerBeat * 2, 64),                  // E4
       makeNote(kTicksPerBeat * 2, kTicksPerBeat * 2, 71),  // B4
   };
 
@@ -647,17 +639,17 @@ TEST(SolvabilityTest, EmptyInputsZeroRates) {
 TEST(SolvabilityTest, PerfectFifthsConsonant) {
   // Subject and CS in perfect 5ths -- should be consonant
   std::vector<NoteEvent> subject = {
-      makeNote(0, kTicksPerBeat * 2, 60),                        // C4
-      makeNote(kTicksPerBeat * 2, kTicksPerBeat * 2, 62),        // D4
-      makeNote(kTicksPerBeat * 4, kTicksPerBeat * 2, 64),        // E4
-      makeNote(kTicksPerBeat * 6, kTicksPerBeat * 2, 65),        // F4
+      makeNote(0, kTicksPerBeat * 2, 60),                  // C4
+      makeNote(kTicksPerBeat * 2, kTicksPerBeat * 2, 62),  // D4
+      makeNote(kTicksPerBeat * 4, kTicksPerBeat * 2, 64),  // E4
+      makeNote(kTicksPerBeat * 6, kTicksPerBeat * 2, 65),  // F4
   };
 
   std::vector<NoteEvent> counter = {
-      makeNote(0, kTicksPerBeat * 2, 67),                        // G4 (P5 above C4)
-      makeNote(kTicksPerBeat * 2, kTicksPerBeat * 2, 69),        // A4 (P5 above D4)
-      makeNote(kTicksPerBeat * 4, kTicksPerBeat * 2, 71),        // B4 (P5 above E4)
-      makeNote(kTicksPerBeat * 6, kTicksPerBeat * 2, 72),        // C5 (P5 above F4)
+      makeNote(0, kTicksPerBeat * 2, 67),                  // G4 (P5 above C4)
+      makeNote(kTicksPerBeat * 2, kTicksPerBeat * 2, 69),  // A4 (P5 above D4)
+      makeNote(kTicksPerBeat * 4, kTicksPerBeat * 2, 71),  // B4 (P5 above E4)
+      makeNote(kTicksPerBeat * 6, kTicksPerBeat * 2, 72),  // C5 (P5 above F4)
   };
 
   auto result = testSolvability(subject, counter, Key::C, false);
@@ -701,18 +693,30 @@ std::vector<NoteEvent> makeBWV578FullSubjectNotes() {
   Tick qtr = kTicksPerBeat;
   Tick eth = kTicksPerBeat / 2;
 
-  notes.push_back(makeNote(tick, qtr * 2, 67));  tick += qtr * 2;  // G4
-  notes.push_back(makeNote(tick, qtr, 74));      tick += qtr;      // D5
-  notes.push_back(makeNote(tick, eth, 72));      tick += eth;      // C5
-  notes.push_back(makeNote(tick, eth, 70));      tick += eth;      // Bb4
-  notes.push_back(makeNote(tick, eth, 69));      tick += eth;      // A4
-  notes.push_back(makeNote(tick, eth, 67));      tick += eth;      // G4
-  notes.push_back(makeNote(tick, eth, 66));      tick += eth;      // F#4
-  notes.push_back(makeNote(tick, qtr, 67));      tick += qtr;      // G4
-  notes.push_back(makeNote(tick, eth, 69));      tick += eth;      // A4
-  notes.push_back(makeNote(tick, eth, 70));      tick += eth;      // Bb4
-  notes.push_back(makeNote(tick, qtr, 69));      tick += qtr;      // A4
-  notes.push_back(makeNote(tick, qtr * 2, 62));  tick += qtr * 2;  // D4
+  notes.push_back(makeNote(tick, qtr * 2, 67));
+  tick += qtr * 2;  // G4
+  notes.push_back(makeNote(tick, qtr, 74));
+  tick += qtr;  // D5
+  notes.push_back(makeNote(tick, eth, 72));
+  tick += eth;  // C5
+  notes.push_back(makeNote(tick, eth, 70));
+  tick += eth;  // Bb4
+  notes.push_back(makeNote(tick, eth, 69));
+  tick += eth;  // A4
+  notes.push_back(makeNote(tick, eth, 67));
+  tick += eth;  // G4
+  notes.push_back(makeNote(tick, eth, 66));
+  tick += eth;  // F#4
+  notes.push_back(makeNote(tick, qtr, 67));
+  tick += qtr;  // G4
+  notes.push_back(makeNote(tick, eth, 69));
+  tick += eth;  // A4
+  notes.push_back(makeNote(tick, eth, 70));
+  tick += eth;  // Bb4
+  notes.push_back(makeNote(tick, qtr, 69));
+  tick += qtr;  // A4
+  notes.push_back(makeNote(tick, qtr * 2, 62));
+  tick += qtr * 2;  // D4
   return notes;
 }
 
@@ -727,26 +731,36 @@ TEST(PairVerificationIntegrationTest, BWV578SubjectVsAnswerFeasible) {
   Tick qtr = kTicksPerBeat;
   Tick eth = kTicksPerBeat / 2;
 
-  answer_notes.push_back(makeNote(tick, qtr * 2, 74));  tick += qtr * 2;  // D5
-  answer_notes.push_back(makeNote(tick, qtr, 79));      tick += qtr;      // G5
-  answer_notes.push_back(makeNote(tick, eth, 77));      tick += eth;      // F5
-  answer_notes.push_back(makeNote(tick, eth, 76));      tick += eth;      // E5
-  answer_notes.push_back(makeNote(tick, eth, 74));      tick += eth;      // D5
-  answer_notes.push_back(makeNote(tick, eth, 72));      tick += eth;      // C5
-  answer_notes.push_back(makeNote(tick, eth, 71));      tick += eth;      // B4
-  answer_notes.push_back(makeNote(tick, qtr, 72));      tick += qtr;      // C5
-  answer_notes.push_back(makeNote(tick, eth, 74));      tick += eth;      // D5
-  answer_notes.push_back(makeNote(tick, eth, 76));      tick += eth;      // E5
-  answer_notes.push_back(makeNote(tick, qtr, 74));      tick += qtr;      // D5
-  answer_notes.push_back(makeNote(tick, qtr * 2, 67));  tick += qtr * 2;  // G4
+  answer_notes.push_back(makeNote(tick, qtr * 2, 74));
+  tick += qtr * 2;  // D5
+  answer_notes.push_back(makeNote(tick, qtr, 79));
+  tick += qtr;  // G5
+  answer_notes.push_back(makeNote(tick, eth, 77));
+  tick += eth;  // F5
+  answer_notes.push_back(makeNote(tick, eth, 76));
+  tick += eth;  // E5
+  answer_notes.push_back(makeNote(tick, eth, 74));
+  tick += eth;  // D5
+  answer_notes.push_back(makeNote(tick, eth, 72));
+  tick += eth;  // C5
+  answer_notes.push_back(makeNote(tick, eth, 71));
+  tick += eth;  // B4
+  answer_notes.push_back(makeNote(tick, qtr, 72));
+  tick += qtr;  // C5
+  answer_notes.push_back(makeNote(tick, eth, 74));
+  tick += eth;  // D5
+  answer_notes.push_back(makeNote(tick, eth, 76));
+  tick += eth;  // E5
+  answer_notes.push_back(makeNote(tick, qtr, 74));
+  tick += qtr;  // D5
+  answer_notes.push_back(makeNote(tick, qtr * 2, 67));
+  tick += qtr * 2;  // G4
 
   auto answer_prof = analyzeObligations(answer_notes, Key::D, true);
 
   // Use full subject length as offset (answer enters after subject completes).
-  Tick subject_length = subject_notes.back().start_tick +
-                        subject_notes.back().duration;
-  auto result = verifyPair(subject_prof, answer_prof,
-                           static_cast<int>(subject_length));
+  Tick subject_length = subject_notes.back().start_tick + subject_notes.back().duration;
+  auto result = verifyPair(subject_prof, answer_prof, static_cast<int>(subject_length));
 
   // BWV578 subject + answer should be feasible when answer enters sequentially.
   // The full subject (including resolution notes) has all debts resolved before
@@ -830,16 +844,16 @@ TEST(FeasibilityBaselineTest, DISABLED_P1g5_BaselinePassRates) {
     Countersubject csubject = generateCountersubject(subject, static_cast<uint32_t>(seed));
 
     // Test CS solvability.
-    auto solv_result = testSolvability(subject.notes, csubject.notes,
-                                       subject.key, subject.is_minor);
+    auto solv_result =
+        testSolvability(subject.notes, csubject.notes, subject.key, subject.is_minor);
     bool cs_solvable = solv_result.solvable();
     if (cs_solvable) {
       ++cs_solvable_count;
     }
 
     // Pair verification (subject vs answer at sequential offset).
-    auto pair_result = verifyPair(subject_prof, answer_prof,
-                                  static_cast<int>(subject.length_ticks));
+    auto pair_result =
+        verifyPair(subject_prof, answer_prof, static_cast<int>(subject.length_ticks));
     bool pair_feasible = pair_result.feasible();
 
     // Test each voice count: 3, 4, 5.
@@ -861,51 +875,52 @@ TEST(FeasibilityBaselineTest, DISABLED_P1g5_BaselinePassRates) {
       bool passes = sim_feasible && pair_feasible && cs_solvable;
 
       if (passes) {
-        if (num_voices == 3) ++pass_3v;
-        if (num_voices == 4) ++pass_4v;
-        if (num_voices == 5) ++pass_5v;
+        if (num_voices == 3)
+          ++pass_3v;
+        if (num_voices == 4)
+          ++pass_4v;
+        if (num_voices == 5)
+          ++pass_5v;
       }
     }
   }
 
   // Compute rates.
   float rate_3v = valid_subjects > 0
-      ? 100.0f * static_cast<float>(pass_3v) / static_cast<float>(valid_subjects)
-      : 0.0f;
+                      ? 100.0f * static_cast<float>(pass_3v) / static_cast<float>(valid_subjects)
+                      : 0.0f;
   float rate_4v = valid_subjects > 0
-      ? 100.0f * static_cast<float>(pass_4v) / static_cast<float>(valid_subjects)
-      : 0.0f;
+                      ? 100.0f * static_cast<float>(pass_4v) / static_cast<float>(valid_subjects)
+                      : 0.0f;
   float rate_5v = valid_subjects > 0
-      ? 100.0f * static_cast<float>(pass_5v) / static_cast<float>(valid_subjects)
-      : 0.0f;
-  float tonal_rate = valid_subjects > 0
-      ? 100.0f * static_cast<float>(tonal_answer_feasible_count)
-            / static_cast<float>(valid_subjects)
-      : 0.0f;
-  float cs_rate = valid_subjects > 0
-      ? 100.0f * static_cast<float>(cs_solvable_count)
-            / static_cast<float>(valid_subjects)
-      : 0.0f;
+                      ? 100.0f * static_cast<float>(pass_5v) / static_cast<float>(valid_subjects)
+                      : 0.0f;
+  float tonal_rate = valid_subjects > 0 ? 100.0f * static_cast<float>(tonal_answer_feasible_count) /
+                                              static_cast<float>(valid_subjects)
+                                        : 0.0f;
+  float cs_rate = valid_subjects > 0 ? 100.0f * static_cast<float>(cs_solvable_count) /
+                                           static_cast<float>(valid_subjects)
+                                     : 0.0f;
   float avg_microsim_4v = microsim_4v_count > 0
-      ? microsim_4v_success_sum / static_cast<float>(microsim_4v_count)
-      : 0.0f;
+                              ? microsim_4v_success_sum / static_cast<float>(microsim_4v_count)
+                              : 0.0f;
 
   // Print summary table.
   fprintf(stderr, "\n");
   fprintf(stderr, "=============================================================\n");
-  fprintf(stderr, " P1.g5 Baseline Pass Rates (%d seeds, %d valid subjects)\n",
-          kNumSeeds, valid_subjects);
+  fprintf(stderr, " P1.g5 Baseline Pass Rates (%d seeds, %d valid subjects)\n", kNumSeeds,
+          valid_subjects);
   fprintf(stderr, "=============================================================\n");
-  fprintf(stderr, " 3-voice pass rate:              %6.1f%% (%d / %d)\n",
-          rate_3v, pass_3v, valid_subjects);
-  fprintf(stderr, " 4-voice pass rate:              %6.1f%% (%d / %d)\n",
-          rate_4v, pass_4v, valid_subjects);
-  fprintf(stderr, " 5-voice pass rate:              %6.1f%% (%d / %d)\n",
-          rate_5v, pass_5v, valid_subjects);
-  fprintf(stderr, " Tonal answer feasible rate:     %6.1f%% (%d / %d)\n",
-          tonal_rate, tonal_answer_feasible_count, valid_subjects);
-  fprintf(stderr, " CS solvability rate:            %6.1f%% (%d / %d)\n",
-          cs_rate, cs_solvable_count, valid_subjects);
+  fprintf(stderr, " 3-voice pass rate:              %6.1f%% (%d / %d)\n", rate_3v, pass_3v,
+          valid_subjects);
+  fprintf(stderr, " 4-voice pass rate:              %6.1f%% (%d / %d)\n", rate_4v, pass_4v,
+          valid_subjects);
+  fprintf(stderr, " 5-voice pass rate:              %6.1f%% (%d / %d)\n", rate_5v, pass_5v,
+          valid_subjects);
+  fprintf(stderr, " Tonal answer feasible rate:     %6.1f%% (%d / %d)\n", tonal_rate,
+          tonal_answer_feasible_count, valid_subjects);
+  fprintf(stderr, " CS solvability rate:            %6.1f%% (%d / %d)\n", cs_rate,
+          cs_solvable_count, valid_subjects);
   fprintf(stderr, " Avg MicroSim success (4-voice): %6.3f\n", avg_microsim_4v);
   fprintf(stderr, "=============================================================\n");
   fprintf(stderr, "\n");

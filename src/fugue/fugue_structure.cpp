@@ -8,17 +8,22 @@ namespace bach {
 
 const char* sectionTypeToString(SectionType type) {
   switch (type) {
-    case SectionType::Exposition:   return "Exposition";
-    case SectionType::Episode:      return "Episode";
-    case SectionType::MiddleEntry:  return "MiddleEntry";
-    case SectionType::Stretto:      return "Stretto";
-    case SectionType::Coda:         return "Coda";
+    case SectionType::Exposition:
+      return "Exposition";
+    case SectionType::Episode:
+      return "Episode";
+    case SectionType::MiddleEntry:
+      return "MiddleEntry";
+    case SectionType::Stretto:
+      return "Stretto";
+    case SectionType::Coda:
+      return "Coda";
   }
   return "Unknown";
 }
 
-bool FugueStructure::addSection(SectionType type, FuguePhase phase,
-                                Tick start_tick, Tick end_tick, Key key) {
+bool FugueStructure::addSection(SectionType type, FuguePhase phase, Tick start_tick, Tick end_tick,
+                                Key key) {
   // Validate phase ordering: new phase must be >= last section's phase.
   if (!sections.empty()) {
     auto last_phase = sections.back().phase;
@@ -88,26 +93,24 @@ std::vector<std::string> FugueStructure::validate() const {
     auto prev_phase = static_cast<uint8_t>(sections[idx - 1].phase);
     auto curr_phase = static_cast<uint8_t>(sections[idx].phase);
     if (curr_phase < prev_phase) {
-      violations.emplace_back(
-          "Phase regression at section " + std::to_string(idx) + ": " +
-          fuguePhaseToString(sections[idx].phase) + " after " +
-          fuguePhaseToString(sections[idx - 1].phase));
+      violations.emplace_back("Phase regression at section " + std::to_string(idx) + ": " +
+                              fuguePhaseToString(sections[idx].phase) + " after " +
+                              fuguePhaseToString(sections[idx - 1].phase));
     }
   }
 
   // Check 4: Tick consistency -- no negative duration, sections do not go backward.
   for (size_t idx = 0; idx < sections.size(); ++idx) {
     if (sections[idx].end_tick < sections[idx].start_tick) {
-      violations.emplace_back("Section " + std::to_string(idx) +
-                              " has negative duration (start=" +
-                              std::to_string(sections[idx].start_tick) + ", end=" +
-                              std::to_string(sections[idx].end_tick) + ")");
+      violations.emplace_back("Section " + std::to_string(idx) + " has negative duration (start=" +
+                              std::to_string(sections[idx].start_tick) +
+                              ", end=" + std::to_string(sections[idx].end_tick) + ")");
     }
     if (idx > 0 && sections[idx].start_tick < sections[idx - 1].end_tick) {
       violations.emplace_back("Section " + std::to_string(idx) +
                               " starts before previous section ends (start=" +
-                              std::to_string(sections[idx].start_tick) + ", prev_end=" +
-                              std::to_string(sections[idx - 1].end_tick) + ")");
+                              std::to_string(sections[idx].start_tick) +
+                              ", prev_end=" + std::to_string(sections[idx - 1].end_tick) + ")");
     }
   }
 

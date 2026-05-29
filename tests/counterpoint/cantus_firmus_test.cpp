@@ -76,8 +76,7 @@ TEST_F(CantusFirmusGeneratorTest, LengthClampedToMax8) {
 TEST_F(CantusFirmusGeneratorTest, AllWholeNotes) {
   CantusFirmus cantus = generator.generate(Key::C, 6, 42);
   for (const auto& note : cantus.notes) {
-    EXPECT_EQ(note.duration, kTicksPerBar)
-        << "Cantus firmus notes should be whole notes";
+    EXPECT_EQ(note.duration, kTicksPerBar) << "Cantus firmus notes should be whole notes";
   }
 }
 
@@ -116,21 +115,19 @@ TEST_F(CantusFirmusGeneratorTest, SingleClimaxPoint) {
 
     int peak_count = 0;
     for (const auto& note : cantus.notes) {
-      if (note.pitch == highest) peak_count++;
+      if (note.pitch == highest)
+        peak_count++;
     }
 
-    EXPECT_EQ(peak_count, 1)
-        << "CF should have exactly one climax (seed " << seed << ")";
+    EXPECT_EQ(peak_count, 1) << "CF should have exactly one climax (seed " << seed << ")";
   }
 }
 
 TEST_F(CantusFirmusGeneratorTest, RangeWithinOctave) {
   for (uint32_t seed = 1; seed <= 10; ++seed) {
     CantusFirmus cantus = generator.generate(Key::C, 6, seed);
-    int range = static_cast<int>(cantus.highestPitch()) -
-                static_cast<int>(cantus.lowestPitch());
-    EXPECT_LE(range, 12)
-        << "CF range should be within an octave (seed " << seed << ")";
+    int range = static_cast<int>(cantus.highestPitch()) - static_cast<int>(cantus.lowestPitch());
+    EXPECT_LE(range, 12) << "CF range should be within an octave (seed " << seed << ")";
   }
 }
 
@@ -141,18 +138,17 @@ TEST_F(CantusFirmusGeneratorTest, MostlyStepwiseMotion) {
     int total_intervals = 0;
 
     for (size_t idx = 1; idx < cantus.notes.size(); ++idx) {
-      int abs_interval = absoluteInterval(cantus.notes[idx].pitch,
-                                          cantus.notes[idx - 1].pitch);
+      int abs_interval = absoluteInterval(cantus.notes[idx].pitch, cantus.notes[idx - 1].pitch);
       total_intervals++;
       // Steps are 1-2 semitones; thirds are 3-4.
-      if (abs_interval <= 4) step_count++;
+      if (abs_interval <= 4)
+        step_count++;
     }
 
     if (total_intervals > 0) {
       float step_ratio = static_cast<float>(step_count) / total_intervals;
-      EXPECT_GT(step_ratio, 0.5f)
-          << "CF should be mostly stepwise (seed " << seed
-          << ", ratio=" << step_ratio << ")";
+      EXPECT_GT(step_ratio, 0.5f) << "CF should be mostly stepwise (seed " << seed
+                                  << ", ratio=" << step_ratio << ")";
     }
   }
 }

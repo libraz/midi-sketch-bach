@@ -71,8 +71,7 @@ class SpeciesRules {
   /// @param current MIDI pitch of the potential passing tone.
   /// @param next MIDI pitch after the potential passing tone.
   /// @return True if the pattern is a valid passing tone.
-  bool isValidPassingTone(uint8_t prev, uint8_t current,
-                          uint8_t next) const;
+  bool isValidPassingTone(uint8_t prev, uint8_t current, uint8_t next) const;
 
   /// @brief Validate a neighbor tone pattern (step away and return).
   ///
@@ -83,8 +82,7 @@ class SpeciesRules {
   /// @param current MIDI pitch of the potential neighbor tone.
   /// @param next MIDI pitch after the potential neighbor tone.
   /// @return True if the pattern is a valid neighbor tone.
-  bool isValidNeighborTone(uint8_t prev, uint8_t current,
-                           uint8_t next) const;
+  bool isValidNeighborTone(uint8_t prev, uint8_t current, uint8_t next) const;
 
  private:
   SpeciesType species_;
@@ -107,10 +105,8 @@ class SpeciesRules {
 /// @param next_is_chord_tone True if next_pitch belongs to the current chord.
 /// @return The classified non-harmonic tone type.
 NonHarmonicToneType classifyNonHarmonicTone(uint8_t prev_pitch, uint8_t current_pitch,
-                                             std::optional<uint8_t> next_pitch,
-                                             bool is_chord_tone,
-                                             bool prev_is_chord_tone,
-                                             bool next_is_chord_tone);
+                                            std::optional<uint8_t> next_pitch, bool is_chord_tone,
+                                            bool prev_is_chord_tone, bool next_is_chord_tone);
 
 }  // namespace bach
 

@@ -153,7 +153,7 @@ TEST(VocabularyAttestationTest, WeightedScoreTooFewNotes) {
 
 TEST(VocabularyAttestationTest, SemitoneToDegreeMapping) {
   // Verify key semitone-to-degree conversions used by attestationRate.
-  EXPECT_EQ(vocab_data::semitoneToDegree(0), 0);    // unison
+  EXPECT_EQ(vocab_data::semitoneToDegree(0), 0);     // unison
   EXPECT_EQ(vocab_data::semitoneToDegree(1), 1);     // m2 -> step
   EXPECT_EQ(vocab_data::semitoneToDegree(2), 1);     // M2 -> step
   EXPECT_EQ(vocab_data::semitoneToDegree(3), 2);     // m3 -> third
@@ -187,8 +187,7 @@ TEST(VocabularyAttestationTest, AttestationRateFromMotifOp) {
   }
 
   int ops_with_attestation = 0;
-  MotifOp ops[] = {MotifOp::Original, MotifOp::Invert,
-                   MotifOp::Retrograde, MotifOp::Diminish};
+  MotifOp ops[] = {MotifOp::Original, MotifOp::Invert, MotifOp::Retrograde, MotifOp::Diminish};
 
   for (MotifOp op : ops) {
     auto transformed = applyMotifOp(motif, op, Key::C, ScaleType::Major, -1);
@@ -198,8 +197,7 @@ TEST(VocabularyAttestationTest, AttestationRateFromMotifOp) {
       for (const auto& n : transformed) {
         pitches.push_back(n.pitch);
       }
-      float rate = vocab_data::attestationRate(
-          pitches.data(), static_cast<int>(pitches.size()));
+      float rate = vocab_data::attestationRate(pitches.data(), static_cast<int>(pitches.size()));
       if (rate > 0.0f) {
         ++ops_with_attestation;
       }
@@ -246,8 +244,7 @@ TEST(VocabularyAttestationTest, VocabTableSizeConsistent) {
 
 TEST(VocabularyAttestationTest, VocabEntriesHavePositiveCounts) {
   for (int idx = 0; idx < vocab_data::kEpisodeVocabSize; ++idx) {
-    EXPECT_GT(vocab_data::kEpisodeVocab[idx].count, 0)
-        << "Entry " << idx << " has zero count";
+    EXPECT_GT(vocab_data::kEpisodeVocab[idx].count, 0) << "Entry " << idx << " has zero count";
   }
 }
 

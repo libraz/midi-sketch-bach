@@ -110,8 +110,7 @@ TEST(TonalPlanTest, GetRelative_RoundTrip) {
     Key key = static_cast<Key>(idx);
     KeySignature rel = getRelative(KeySignature{key, false});
     Key back_to_major = getRelative(rel).tonic;
-    EXPECT_EQ(back_to_major, key)
-        << "Round trip failed for key " << keyToString(key);
+    EXPECT_EQ(back_to_major, key) << "Round trip failed for key " << keyToString(key);
   }
 }
 
@@ -125,7 +124,8 @@ TEST(TonalPlanTest, GetCloselyRelatedKeys_CMajor) {
 
   auto contains = [&](Key target) {
     for (const auto& ks : key_sigs) {
-      if (ks.tonic == target) return true;
+      if (ks.tonic == target)
+        return true;
     }
     return false;
   };
@@ -141,7 +141,8 @@ TEST(TonalPlanTest, GetCloselyRelatedKeys_DMinor) {
 
   auto contains = [&](Key target) {
     for (const auto& ks : key_sigs) {
-      if (ks.tonic == target) return true;
+      if (ks.tonic == target)
+        return true;
     }
     return false;
   };
@@ -157,10 +158,8 @@ TEST(TonalPlanTest, GetCloselyRelatedKeys_IncludesSelf) {
     Key key = static_cast<Key>(idx);
     auto key_sigs = getCloselyRelatedKeys(KeySignature{key, false});
     ASSERT_FALSE(key_sigs.empty());
-    EXPECT_EQ(key_sigs[0].tonic, key)
-        << "First entry should be home key " << keyToString(key);
-    EXPECT_FALSE(key_sigs[0].is_minor)
-        << "First entry should be major for " << keyToString(key);
+    EXPECT_EQ(key_sigs[0].tonic, key) << "First entry should be home key " << keyToString(key);
+    EXPECT_FALSE(key_sigs[0].is_minor) << "First entry should be major for " << keyToString(key);
   }
 }
 
@@ -349,6 +348,28 @@ TEST(TonalPlanTest, GenerateTonalPlan_MajorKeyVisitsRelativeMinor) {
 
   // Major fugue should visit relative minor (A).
   EXPECT_TRUE(contains(Key::A)) << "C major fugue should visit relative minor A";
+
+  auto rel =
+      std::find_if(plan.modulations.begin(), plan.modulations.end(), [](const KeyChange& mod) {
+        return mod.target_key == Key::A && mod.phase == FuguePhase::Develop;
+      });
+  ASSERT_NE(rel, plan.modulations.end());
+  EXPECT_TRUE(rel->is_minor) << "Relative A target must retain minor mode";
+}
+
+TEST(TonalPlanTest, GenerateTonalPlan_MinorKeyKeepsDominantMajor) {
+  FugueConfig config;
+  config.key = Key::D;
+  Tick duration = kTicksPerBar * 24;
+
+  TonalPlan plan = generateTonalPlan(config, true, duration);
+
+  auto dominant =
+      std::find_if(plan.modulations.begin(), plan.modulations.end(), [](const KeyChange& mod) {
+        return mod.target_key == Key::A && mod.phase == FuguePhase::Develop;
+      });
+  ASSERT_NE(dominant, plan.modulations.end());
+  EXPECT_FALSE(dominant->is_minor) << "Baroque minor-key dominant target should be major";
 }
 
 // ---------------------------------------------------------------------------
@@ -450,6 +471,26 @@ TEST(TonalPlanTest, GenerateTonalPlan_AllBarAligned) {
     EXPECT_EQ(mod.tick % kTicksPerBar, 0u)
         << "Modulation at tick " << mod.tick << " is not bar-aligned";
   }
+}
+
+TEST(TonalPlanTest, StructureAlignedPlanUsesModulationTargetModes) {
+  FugueConfig config;
+  config.key = Key::C;
+  config.is_minor = false;
+  config.num_voices = 4;
+  config.episode_bars = 4;
+  config.develop_pairs = 3;
+
+  ModulationPlan mod_plan = ModulationPlan::createForMajor(config.key);
+  TonalPlan plan =
+      generateStructureAlignedTonalPlan(config, mod_plan, kTicksPerBar, kTicksPerBar * 40);
+
+  auto relative =
+      std::find_if(plan.modulations.begin(), plan.modulations.end(), [](const KeyChange& mod) {
+        return mod.target_key == Key::A && mod.phase == FuguePhase::Develop;
+      });
+  ASSERT_NE(relative, plan.modulations.end());
+  EXPECT_TRUE(relative->is_minor);
 }
 
 // ---------------------------------------------------------------------------

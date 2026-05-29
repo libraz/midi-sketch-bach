@@ -1,6 +1,8 @@
 // Tests for Phase 3: MotifOp transformations, CharacterEpisodeParams,
 // generateConstraintEpisode, planFortspinnung, and motifOpToString.
 
+#include "constraint/motif_constraint.h"
+
 #include <gtest/gtest.h>
 
 #include <algorithm>
@@ -10,11 +12,11 @@
 
 #include "constraint/constraint_state.h"
 #include "constraint/episode_generator.h"
-#include "constraint/motif_constraint.h"
 #include "core/basic_types.h"
 #include "fugue/fortspinnung.h"
 #include "fugue/motif_pool.h"
 #include "fugue/subject.h"
+#include "fugue/thematic_plan.h"
 #include "transform/motif_transform.h"
 #include "transform/sequence.h"
 
@@ -75,9 +77,7 @@ MotifPool buildTestPool(SubjectCharacter character = SubjectCharacter::Severe) {
 }
 
 /// @brief Build a minimal EpisodeRequest with sensible defaults.
-EpisodeRequest makeTestRequest(const MotifPool& pool,
-                               uint32_t seed = 42,
-                               uint8_t num_voices = 2) {
+EpisodeRequest makeTestRequest(const MotifPool& pool, uint32_t seed = 42, uint8_t num_voices = 2) {
   EpisodeRequest req;
   req.entry_state = ConstraintState();
   req.start_key = Key::C;
@@ -110,12 +110,9 @@ TEST(MotifConstraintTest, ApplyMotifOpOriginal) {
   // Original returns an exact copy — same pitches and durations.
   ASSERT_EQ(result.size(), motif.size());
   for (size_t i = 0; i < motif.size(); ++i) {
-    EXPECT_EQ(result[i].pitch, motif[i].pitch)
-        << "Pitch mismatch at index " << i;
-    EXPECT_EQ(result[i].duration, motif[i].duration)
-        << "Duration mismatch at index " << i;
-    EXPECT_EQ(result[i].start_tick, motif[i].start_tick)
-        << "Start tick mismatch at index " << i;
+    EXPECT_EQ(result[i].pitch, motif[i].pitch) << "Pitch mismatch at index " << i;
+    EXPECT_EQ(result[i].duration, motif[i].duration) << "Duration mismatch at index " << i;
+    EXPECT_EQ(result[i].start_tick, motif[i].start_tick) << "Start tick mismatch at index " << i;
   }
 }
 
@@ -126,8 +123,7 @@ TEST(MotifConstraintTest, ApplyMotifOpInvert) {
   // Invert reverses intervals diatonically around the first pitch.
   // The first pitch should remain the same (pivot).
   ASSERT_EQ(result.size(), motif.size());
-  EXPECT_EQ(result[0].pitch, motif[0].pitch)
-      << "Pivot pitch should remain unchanged";
+  EXPECT_EQ(result[0].pitch, motif[0].pitch) << "Pivot pitch should remain unchanged";
 
   // Original: C4(60)->D4(62) = ascending 2nd.
   // Inverted: C4(60) -> descending 2nd = Bb3(58) in diatonic.
@@ -179,8 +175,7 @@ TEST(MotifConstraintTest, ApplyMotifOpDiminish) {
 
   // Pitches should be preserved.
   for (size_t i = 0; i < result.size(); ++i) {
-    EXPECT_EQ(result[i].pitch, motif[i].pitch)
-        << "Pitch should be preserved at index " << i;
+    EXPECT_EQ(result[i].pitch, motif[i].pitch) << "Pitch should be preserved at index " << i;
   }
 }
 
@@ -202,8 +197,7 @@ TEST(MotifConstraintTest, ApplyMotifOpAugment) {
 
   // Pitches should be preserved.
   for (size_t i = 0; i < result.size(); ++i) {
-    EXPECT_EQ(result[i].pitch, motif[i].pitch)
-        << "Pitch should be preserved at index " << i;
+    EXPECT_EQ(result[i].pitch, motif[i].pitch) << "Pitch should be preserved at index " << i;
   }
 }
 
@@ -233,8 +227,7 @@ TEST(MotifConstraintTest, ApplyMotifOpFragment) {
 
 TEST(MotifConstraintTest, ApplyMotifOpSequence) {
   auto motif = makeTestMotif();
-  auto result = applyMotifOp(motif, MotifOp::Sequence, Key::C,
-                             ScaleType::Major, -1);
+  auto result = applyMotifOp(motif, MotifOp::Sequence, Key::C, ScaleType::Major, -1);
 
   // Sequence returns a diatonic sequence (1 repetition) of the input.
   // generateDiatonicSequence produces the transposed copy only (not original).
@@ -250,15 +243,13 @@ TEST(MotifConstraintTest, ApplyMotifOpSequence) {
       break;
     }
   }
-  EXPECT_TRUE(any_different)
-      << "Sequence pitches should differ from original (transposed)";
+  EXPECT_TRUE(any_different) << "Sequence pitches should differ from original (transposed)";
 }
 
 TEST(MotifConstraintTest, ApplyMotifOpEmptyInput) {
   std::vector<NoteEvent> empty;
   auto result = applyMotifOp(empty, MotifOp::Original);
-  EXPECT_TRUE(result.empty())
-      << "Empty input should produce empty output for all ops";
+  EXPECT_TRUE(result.empty()) << "Empty input should produce empty output for all ops";
 
   result = applyMotifOp(empty, MotifOp::Invert);
   EXPECT_TRUE(result.empty());
@@ -336,8 +327,7 @@ TEST(MotifConstraintTest, GenerateEpisodeProducesNotes) {
   EpisodeResult result = generateConstraintEpisode(req);
 
   // Non-empty output with at least 4 notes.
-  EXPECT_GE(result.notes.size(), 4u)
-      << "Episode should produce at least 4 notes";
+  EXPECT_GE(result.notes.size(), 4u) << "Episode should produce at least 4 notes";
 }
 
 TEST(MotifConstraintTest, GenerateEpisodeSuccess) {
@@ -345,8 +335,7 @@ TEST(MotifConstraintTest, GenerateEpisodeSuccess) {
   auto req = makeTestRequest(pool);
   EpisodeResult result = generateConstraintEpisode(req);
 
-  EXPECT_TRUE(result.success)
-      << "Episode generation should succeed for a simple case";
+  EXPECT_TRUE(result.success) << "Episode generation should succeed for a simple case";
 }
 
 TEST(MotifConstraintTest, GenerateEpisodeRespectsStartTick) {
@@ -358,8 +347,7 @@ TEST(MotifConstraintTest, GenerateEpisodeRespectsStartTick) {
   for (const auto& note : result.notes) {
     EXPECT_GE(note.start_tick, req.start_tick)
         << "All notes must start at or after the requested start_tick. "
-        << "Found note at tick " << note.start_tick
-        << " but start_tick is " << req.start_tick;
+        << "Found note at tick " << note.start_tick << " but start_tick is " << req.start_tick;
   }
 }
 
@@ -371,10 +359,9 @@ TEST(MotifConstraintTest, GenerateEpisodeRespectsDuration) {
   ASSERT_TRUE(result.success);
   Tick episode_end = req.start_tick + req.duration;
   for (const auto& note : result.notes) {
-    EXPECT_LT(note.start_tick, episode_end)
-        << "All notes must start before episode end. "
-        << "Found note starting at tick " << note.start_tick
-        << " but episode ends at tick " << episode_end;
+    EXPECT_LT(note.start_tick, episode_end) << "All notes must start before episode end. "
+                                            << "Found note starting at tick " << note.start_tick
+                                            << " but episode ends at tick " << episode_end;
   }
 }
 
@@ -409,6 +396,61 @@ TEST(MotifConstraintTest, GenerateEpisodeWithMultipleVoices) {
       << "With 3 voices, output should include notes in at least 2 voices";
 }
 
+TEST(MotifConstraintTest, ThematicPlanDrivesProtectedEpisodeOpening) {
+  auto subject = makeTestSubject(SubjectCharacter::Restless);
+  MotifPool pool;
+  std::vector<NoteEvent> empty_cs;
+  pool.build(subject.notes, empty_cs, SubjectCharacter::Restless);
+  ThematicPlan plan = buildThematicPlan(subject, pool, 4, Key::C);
+
+  auto req = makeTestRequest(pool, /*seed=*/183, /*num_voices=*/4);
+  req.character = SubjectCharacter::Restless;
+  req.grammar = getFortspinnungGrammar(SubjectCharacter::Restless);
+  req.home_key = Key::C;
+  req.home_is_minor = false;
+  req.thematic_plan = &plan;
+
+  EpisodeResult result = generateConstraintEpisode(req);
+
+  ASSERT_TRUE(result.success);
+  std::vector<NoteEvent> opening;
+  for (const auto& note : result.notes) {
+    if (note.voice == 0 && note.start_tick < req.start_tick + kTicksPerBar) {
+      opening.push_back(note);
+    }
+  }
+  ASSERT_GE(opening.size(), 3u);
+  EXPECT_EQ(opening[0].source, BachNoteSource::SequenceNote);
+  EXPECT_EQ(opening[0].pitch, 60);
+  EXPECT_EQ(opening[1].pitch, 62);
+  EXPECT_EQ(opening[2].pitch, 64);
+}
+
+TEST(MotifConstraintTest, ThematicFourVoiceEpisodeContainsUpperRegister) {
+  auto subject = makeTestSubject(SubjectCharacter::Restless);
+  MotifPool pool;
+  std::vector<NoteEvent> empty_cs;
+  pool.build(subject.notes, empty_cs, SubjectCharacter::Restless);
+  ThematicPlan plan = buildThematicPlan(subject, pool, 4, Key::C);
+
+  auto req = makeTestRequest(pool, /*seed=*/183, /*num_voices=*/4);
+  req.character = SubjectCharacter::Restless;
+  req.grammar = getFortspinnungGrammar(SubjectCharacter::Restless);
+  req.home_key = Key::C;
+  req.home_is_minor = false;
+  req.thematic_plan = &plan;
+
+  EpisodeResult result = generateConstraintEpisode(req);
+
+  ASSERT_TRUE(result.success);
+  for (const auto& note : result.notes) {
+    if (note.voice <= 1 && note.source == BachNoteSource::SequenceNote) {
+      EXPECT_LE(note.pitch, 84) << "Protected upper thematic episode material should not escape "
+                                << "above the organ upper manual containment ceiling";
+    }
+  }
+}
+
 TEST(MotifConstraintTest, GenerateEpisodeInvertibleCounterpoint) {
   auto pool = buildTestPool();
   auto req = makeTestRequest(pool, /*seed=*/42, /*num_voices=*/2);
@@ -422,8 +464,10 @@ TEST(MotifConstraintTest, GenerateEpisodeInvertibleCounterpoint) {
   bool has_voice0 = false;
   bool has_voice1 = false;
   for (const auto& note : result.notes) {
-    if (note.voice == 0) has_voice0 = true;
-    if (note.voice == 1) has_voice1 = true;
+    if (note.voice == 0)
+      has_voice0 = true;
+    if (note.voice == 1)
+      has_voice1 = true;
   }
   EXPECT_TRUE(has_voice0) << "Invertible episode should include voice 0 notes";
   EXPECT_TRUE(has_voice1) << "Invertible episode should include voice 1 notes";
@@ -434,10 +478,8 @@ TEST(MotifConstraintTest, GenerateEpisodeEmptyPool) {
   auto req = makeTestRequest(empty_pool);
   EpisodeResult result = generateConstraintEpisode(req);
 
-  EXPECT_FALSE(result.success)
-      << "Empty pool should cause generation to fail";
-  EXPECT_TRUE(result.notes.empty())
-      << "Failed generation should produce no notes";
+  EXPECT_FALSE(result.success) << "Empty pool should cause generation to fail";
+  EXPECT_TRUE(result.notes.empty()) << "Failed generation should produce no notes";
 }
 
 TEST(MotifConstraintTest, GenerateEpisodeNullPool) {
@@ -448,8 +490,7 @@ TEST(MotifConstraintTest, GenerateEpisodeNullPool) {
   req.seed = 42;
   EpisodeResult result = generateConstraintEpisode(req);
 
-  EXPECT_FALSE(result.success)
-      << "Null pool should cause generation to fail";
+  EXPECT_FALSE(result.success) << "Null pool should cause generation to fail";
 }
 
 TEST(MotifConstraintTest, GenerateEpisodeZeroDuration) {
@@ -458,8 +499,7 @@ TEST(MotifConstraintTest, GenerateEpisodeZeroDuration) {
   req.duration = 0;
   EpisodeResult result = generateConstraintEpisode(req);
 
-  EXPECT_FALSE(result.success)
-      << "Zero duration should cause generation to fail";
+  EXPECT_FALSE(result.success) << "Zero duration should cause generation to fail";
 }
 
 TEST(MotifConstraintTest, GenerateEpisodeDeterministic) {
@@ -512,8 +552,7 @@ TEST(MotifConstraintTest, GenerateEpisodeDifferentSeeds) {
       }
     }
   }
-  EXPECT_TRUE(any_difference)
-      << "Different seeds should produce different note sequences";
+  EXPECT_TRUE(any_difference) << "Different seeds should produce different note sequences";
 }
 
 TEST(MotifConstraintTest, GenerateEpisodeNotesAreSorted) {
@@ -527,12 +566,11 @@ TEST(MotifConstraintTest, GenerateEpisodeNotesAreSorted) {
     bool ordered = (result.notes[i].start_tick > result.notes[i - 1].start_tick) ||
                    (result.notes[i].start_tick == result.notes[i - 1].start_tick &&
                     result.notes[i].voice >= result.notes[i - 1].voice);
-    EXPECT_TRUE(ordered)
-        << "Notes should be sorted by (start_tick, voice). "
-        << "Index " << i << ": tick=" << result.notes[i].start_tick
-        << ",voice=" << static_cast<int>(result.notes[i].voice)
-        << " vs previous tick=" << result.notes[i - 1].start_tick
-        << ",voice=" << static_cast<int>(result.notes[i - 1].voice);
+    EXPECT_TRUE(ordered) << "Notes should be sorted by (start_tick, voice). "
+                         << "Index " << i << ": tick=" << result.notes[i].start_tick
+                         << ",voice=" << static_cast<int>(result.notes[i].voice)
+                         << " vs previous tick=" << result.notes[i - 1].start_tick
+                         << ",voice=" << static_cast<int>(result.notes[i - 1].voice);
   }
 }
 
@@ -547,6 +585,32 @@ TEST(MotifConstraintTest, GenerateEpisodeNoteSource) {
     EXPECT_EQ(note.source, BachNoteSource::EpisodeMaterial)
         << "All episode notes should have EpisodeMaterial source";
   }
+}
+
+TEST(MotifConstraintTest, ThematicPlanMarksProtectedEpisodeDialogue) {
+  auto subject = makeTestSubject();
+  MotifPool pool;
+  std::vector<NoteEvent> empty_cs;
+  pool.build(subject.notes, empty_cs, subject.character);
+  ThematicPlan plan = buildThematicPlan(subject, pool, 4, Key::C);
+  auto req = makeTestRequest(pool, 42, 4);
+  req.thematic_plan = &plan;
+
+  EpisodeResult result = generateConstraintEpisode(req);
+
+  ASSERT_TRUE(result.success);
+  bool found_protected_dialogue = false;
+  bool found_flexible_support = false;
+  for (const auto& note : result.notes) {
+    if (note.voice <= 1 && note.source == BachNoteSource::SequenceNote) {
+      found_protected_dialogue = true;
+    }
+    if (note.voice >= 2 && note.source == BachNoteSource::EpisodeMaterial) {
+      found_flexible_support = true;
+    }
+  }
+  EXPECT_TRUE(found_protected_dialogue);
+  EXPECT_TRUE(found_flexible_support);
 }
 
 TEST(MotifConstraintTest, GenerateEpisodeExitState) {
@@ -576,12 +640,10 @@ TEST(MotifConstraintTest, GenerateEpisodeAllCharacters) {
     req.grammar = getFortspinnungGrammar(character);
     EpisodeResult result = generateConstraintEpisode(req);
 
-    EXPECT_TRUE(result.success)
-        << "Episode generation should succeed for character "
-        << subjectCharacterToString(character);
+    EXPECT_TRUE(result.success) << "Episode generation should succeed for character "
+                                << subjectCharacterToString(character);
     EXPECT_GE(result.notes.size(), 2u)
-        << "Episode for character "
-        << subjectCharacterToString(character)
+        << "Episode for character " << subjectCharacterToString(character)
         << " should produce at least 2 notes";
   }
 }
@@ -596,11 +658,9 @@ TEST(MotifConstraintTest, PlanFortspinnungProducesSteps) {
   Tick start = kTicksPerBar * 4;
   Tick dur = kTicksPerBar * 4;
 
-  auto steps = planFortspinnung(pool, grammar, start, dur, 2,
-                                SubjectCharacter::Severe, 42);
+  auto steps = planFortspinnung(pool, grammar, start, dur, 2, SubjectCharacter::Severe, 42);
 
-  EXPECT_FALSE(steps.empty())
-      << "planFortspinnung should produce a non-empty step sequence";
+  EXPECT_FALSE(steps.empty()) << "planFortspinnung should produce a non-empty step sequence";
   EXPECT_GE(steps.size(), 3u)
       << "Plan should have at least 3 steps (Kernel + Sequence + Dissolution)";
 }
@@ -611,8 +671,7 @@ TEST(MotifConstraintTest, PlanFortspinnungPhaseCoverage) {
   Tick start = kTicksPerBar * 4;
   Tick dur = kTicksPerBar * 8;  // 8 bars for more phases.
 
-  auto steps = planFortspinnung(pool, grammar, start, dur, 2,
-                                SubjectCharacter::Severe, 42);
+  auto steps = planFortspinnung(pool, grammar, start, dur, 2, SubjectCharacter::Severe, 42);
 
   ASSERT_FALSE(steps.empty());
 
@@ -621,9 +680,8 @@ TEST(MotifConstraintTest, PlanFortspinnungPhaseCoverage) {
   for (const auto& step : steps) {
     phases.insert(step.phase);
   }
-  EXPECT_GE(phases.size(), 2u)
-      << "Steps should span at least 2 Fortspinnung phases "
-      << "(Kernel, Sequence, and/or Dissolution)";
+  EXPECT_GE(phases.size(), 2u) << "Steps should span at least 2 Fortspinnung phases "
+                               << "(Kernel, Sequence, and/or Dissolution)";
 }
 
 TEST(MotifConstraintTest, PlanFortspinnungVoiceAssignment) {
@@ -632,8 +690,7 @@ TEST(MotifConstraintTest, PlanFortspinnungVoiceAssignment) {
   Tick start = kTicksPerBar * 4;
   Tick dur = kTicksPerBar * 8;
 
-  auto steps = planFortspinnung(pool, grammar, start, dur, 2,
-                                SubjectCharacter::Severe, 42);
+  auto steps = planFortspinnung(pool, grammar, start, dur, 2, SubjectCharacter::Severe, 42);
 
   ASSERT_FALSE(steps.empty());
 
@@ -642,14 +699,68 @@ TEST(MotifConstraintTest, PlanFortspinnungVoiceAssignment) {
     voices.insert(step.voice);
   }
   // With 2 voices, steps should include both voice 0 and voice 1.
-  EXPECT_GE(voices.size(), 1u)
-      << "Steps should include at least 1 voice";
+  EXPECT_GE(voices.size(), 1u) << "Steps should include at least 1 voice";
   // Check voice IDs are within the valid range.
   for (const auto& step : steps) {
-    EXPECT_LT(step.voice, 2u)
-        << "Voice ID " << static_cast<int>(step.voice)
-        << " should be < num_voices (2)";
+    EXPECT_LT(step.voice, 2u) << "Voice ID " << static_cast<int>(step.voice)
+                              << " should be < num_voices (2)";
   }
+}
+
+TEST(MotifConstraintTest, PlanFortspinnungFourVoicesAddsInnerDissolutionLayer) {
+  auto pool = buildTestPool();
+  auto grammar = getFortspinnungGrammar(SubjectCharacter::Severe);
+  Tick start = kTicksPerBar * 4;
+  Tick dur = kTicksPerBar * 8;
+
+  auto steps = planFortspinnung(pool, grammar, start, dur, 4, SubjectCharacter::Severe, 42);
+
+  ASSERT_FALSE(steps.empty());
+
+  std::vector<FortspinnungStep> voice0_steps;
+  int voice2_kernel = 0;
+  int voice2_sequence = 0;
+  int voice2_dissolution = 0;
+  for (const auto& step : steps) {
+    if (step.voice == 0) {
+      voice0_steps.push_back(step);
+    } else if (step.voice == 2) {
+      if (step.phase == FortPhase::Kernel)
+        ++voice2_kernel;
+      if (step.phase == FortPhase::Sequence)
+        ++voice2_sequence;
+      if (step.phase == FortPhase::Dissolution)
+        ++voice2_dissolution;
+      EXPECT_EQ(step.op, MotifOp::Diminish)
+          << "Four-voice inner Fortspinnung layer should use diminished motif";
+    }
+  }
+
+  std::sort(
+      voice0_steps.begin(), voice0_steps.end(),
+      [](const FortspinnungStep& lhs, const FortspinnungStep& rhs) { return lhs.tick < rhs.tick; });
+
+  int expected_dissolution = 0;
+  int voice0_sequence = 0;
+  for (size_t idx = 0; idx < voice0_steps.size(); ++idx) {
+    const auto& step = voice0_steps[idx];
+    if (step.tick + kTicksPerBeat / 2 >= start + dur)
+      continue;
+    if (step.phase == FortPhase::Dissolution) {
+      ++expected_dissolution;
+    } else if (step.phase == FortPhase::Sequence) {
+      ++voice0_sequence;
+    }
+  }
+
+  EXPECT_EQ(voice2_kernel, 0) << "Voice 2 should not thicken the kernel phase";
+  EXPECT_EQ(voice2_dissolution, expected_dissolution)
+      << "Voice 2 should fill every available dissolution voice-0 step";
+  EXPECT_GT(voice2_sequence, 0) << "Voice 2 should answer at least part of the sequence phase";
+  EXPECT_LE(voice2_sequence, voice0_sequence)
+      << "Voice 2 should not exceed the primary sequence activity";
+  EXPECT_GT(voice2_dissolution, 0)
+      << "Long four-voice Fortspinnung plans should include inner dissolution";
 }
 
 TEST(MotifConstraintTest, PlanFortspinnungTicksInRange) {
@@ -658,15 +769,12 @@ TEST(MotifConstraintTest, PlanFortspinnungTicksInRange) {
   Tick start = kTicksPerBar * 4;
   Tick dur = kTicksPerBar * 4;
 
-  auto steps = planFortspinnung(pool, grammar, start, dur, 2,
-                                SubjectCharacter::Severe, 42);
+  auto steps = planFortspinnung(pool, grammar, start, dur, 2, SubjectCharacter::Severe, 42);
 
   ASSERT_FALSE(steps.empty());
   for (const auto& step : steps) {
-    EXPECT_GE(step.tick, start)
-        << "Step tick should be >= start_tick";
-    EXPECT_LT(step.tick, start + dur)
-        << "Step tick should be < start_tick + duration";
+    EXPECT_GE(step.tick, start) << "Step tick should be >= start_tick";
+    EXPECT_LT(step.tick, start + dur) << "Step tick should be < start_tick + duration";
   }
 }
 
@@ -676,13 +784,11 @@ TEST(MotifConstraintTest, PlanFortspinnungSortedByTick) {
   Tick start = kTicksPerBar * 4;
   Tick dur = kTicksPerBar * 4;
 
-  auto steps = planFortspinnung(pool, grammar, start, dur, 2,
-                                SubjectCharacter::Severe, 42);
+  auto steps = planFortspinnung(pool, grammar, start, dur, 2, SubjectCharacter::Severe, 42);
 
   ASSERT_FALSE(steps.empty());
   for (size_t i = 1; i < steps.size(); ++i) {
-    EXPECT_GE(steps[i].tick, steps[i - 1].tick)
-        << "Steps should be sorted by tick";
+    EXPECT_GE(steps[i].tick, steps[i - 1].tick) << "Steps should be sorted by tick";
   }
 }
 
@@ -692,11 +798,9 @@ TEST(MotifConstraintTest, PlanFortspinnungEmptyPool) {
   Tick start = kTicksPerBar * 4;
   Tick dur = kTicksPerBar * 4;
 
-  auto steps = planFortspinnung(empty_pool, grammar, start, dur, 2,
-                                SubjectCharacter::Severe, 42);
+  auto steps = planFortspinnung(empty_pool, grammar, start, dur, 2, SubjectCharacter::Severe, 42);
 
-  EXPECT_TRUE(steps.empty())
-      << "Empty pool should produce no Fortspinnung steps";
+  EXPECT_TRUE(steps.empty()) << "Empty pool should produce no Fortspinnung steps";
 }
 
 // ===========================================================================
@@ -706,13 +810,8 @@ TEST(MotifConstraintTest, PlanFortspinnungEmptyPool) {
 TEST(MotifConstraintTest, MotifOpToString) {
   // All 7 ops should return non-null, non-empty strings.
   MotifOp ops[] = {
-      MotifOp::Original,
-      MotifOp::Invert,
-      MotifOp::Retrograde,
-      MotifOp::Diminish,
-      MotifOp::Augment,
-      MotifOp::Fragment,
-      MotifOp::Sequence,
+      MotifOp::Original, MotifOp::Invert,   MotifOp::Retrograde, MotifOp::Diminish,
+      MotifOp::Augment,  MotifOp::Fragment, MotifOp::Sequence,
   };
 
   for (auto op : ops) {
@@ -752,8 +851,7 @@ TEST(MotifConstraintTest, ApplyMotifOpSingleNote) {
 
   auto inverted = applyMotifOp(single, MotifOp::Invert, Key::C);
   EXPECT_EQ(inverted.size(), 1u);
-  EXPECT_EQ(inverted[0].pitch, 60)
-      << "Single note inversion should return the pivot pitch";
+  EXPECT_EQ(inverted[0].pitch, 60) << "Single note inversion should return the pivot pitch";
 
   auto retrograde = applyMotifOp(single, MotifOp::Retrograde);
   EXPECT_EQ(retrograde.size(), 1u);
@@ -787,8 +885,7 @@ TEST(MotifConstraintTest, GenerateEpisodeHighEnergy) {
   req.energy_level = 1.0f;  // Maximum energy.
   EpisodeResult result = generateConstraintEpisode(req);
 
-  EXPECT_TRUE(result.success)
-      << "High energy episode should still succeed";
+  EXPECT_TRUE(result.success) << "High energy episode should still succeed";
 }
 
 TEST(MotifConstraintTest, GenerateEpisodeLowEnergy) {
@@ -797,8 +894,7 @@ TEST(MotifConstraintTest, GenerateEpisodeLowEnergy) {
   req.energy_level = 0.0f;  // Minimum energy.
   EpisodeResult result = generateConstraintEpisode(req);
 
-  EXPECT_TRUE(result.success)
-      << "Low energy episode should still succeed";
+  EXPECT_TRUE(result.success) << "Low energy episode should still succeed";
 }
 
 TEST(MotifConstraintTest, GenerateEpisodeLargeVoiceCount) {
@@ -809,8 +905,7 @@ TEST(MotifConstraintTest, GenerateEpisodeLargeVoiceCount) {
   // Should succeed or fail gracefully — no crash with 5 voices.
   if (result.success) {
     for (const auto& note : result.notes) {
-      EXPECT_LT(note.voice, 5u)
-          << "Voice ID should be within the valid range [0, num_voices)";
+      EXPECT_LT(note.voice, 5u) << "Voice ID should be within the valid range [0, num_voices)";
     }
   }
 }

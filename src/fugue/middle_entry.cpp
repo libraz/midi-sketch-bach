@@ -5,14 +5,14 @@
 #include "core/note_creator.h"
 #include "core/note_source.h"
 #include "core/pitch_utils.h"
+#include "core/scale.h"
 #include "fugue/voice_registers.h"
 #include "transform/motif_transform.h"
 
 namespace bach {
 
 MiddleEntry generateMiddleEntry(const Subject& subject, Key target_key, Tick start_tick,
-                                VoiceId voice_id, uint8_t num_voices,
-                                uint8_t last_pitch,
+                                VoiceId voice_id, uint8_t num_voices, uint8_t last_pitch,
                                 float phase_pos) {
   MiddleEntry entry;
   entry.key = target_key;
@@ -33,8 +33,8 @@ MiddleEntry generateMiddleEntry(const Subject& subject, Key target_key, Tick sta
   // Compute octave shift using envelope-aware register fitting.
   auto [lo, hi] = getFugueVoiceRange(voice_id, num_voices);
   RegisterEnvelope envelope = getRegisterEnvelope(FormType::Fugue);
-  int octave_shift = fitToRegisterWithEnvelope(entry.notes, voice_id, num_voices,
-                                                phase_pos, envelope, last_pitch);
+  int octave_shift =
+      fitToRegisterWithEnvelope(entry.notes, voice_id, num_voices, phase_pos, envelope, last_pitch);
 
   // Offset tick positions so the entry starts at start_tick.
   Tick original_start = subject.notes[0].start_tick;
@@ -53,11 +53,9 @@ MiddleEntry generateMiddleEntry(const Subject& subject, Key target_key, Tick sta
 }
 
 MiddleEntry generateMiddleEntry(const Subject& subject, Key target_key, Tick start_tick,
-                                VoiceId voice_id, uint8_t num_voices,
-                                CounterpointState& cp_state, IRuleEvaluator& cp_rules,
-                                CollisionResolver& cp_resolver,
-                                const HarmonicTimeline& /*timeline*/,
-                                uint8_t last_pitch,
+                                VoiceId voice_id, uint8_t num_voices, CounterpointState& cp_state,
+                                IRuleEvaluator& cp_rules, CollisionResolver& cp_resolver,
+                                const HarmonicTimeline& timeline, uint8_t last_pitch,
                                 float phase_pos) {
   // Generate raw middle entry notes (with register adjustment + leap guard).
   MiddleEntry entry = generateMiddleEntry(subject, target_key, start_tick, voice_id, num_voices,
@@ -67,7 +65,15 @@ MiddleEntry generateMiddleEntry(const Subject& subject, Key target_key, Tick sta
   std::vector<NoteEvent> validated;
   validated.reserve(entry.notes.size());
 
-  for (const auto& note : entry.notes) {
+  for (auto note : entry.notes) {
+    if (timeline.size() > 0) {
+      const HarmonicEvent& event = timeline.getAt(note.start_tick);
+      if (!isDiatonicInKey(note.pitch, event.key, event.is_minor)) {
+        ScaleType scale = event.is_minor ? ScaleType::HarmonicMinor : ScaleType::Major;
+        note.pitch = scale_util::nearestScaleTone(note.pitch, event.key, scale);
+      }
+    }
+
     BachNoteOptions opts;
     opts.voice = note.voice;
     opts.desired_pitch = note.pitch;
@@ -87,9 +93,8 @@ MiddleEntry generateMiddleEntry(const Subject& subject, Key target_key, Tick sta
   return entry;
 }
 
-MiddleEntry generateFalseEntry(const Subject& subject, Key target_key,
-                               Tick start_tick, VoiceId voice_id,
-                               uint8_t num_voices, uint8_t quote_notes,
+MiddleEntry generateFalseEntry(const Subject& subject, Key target_key, Tick start_tick,
+                               VoiceId voice_id, uint8_t num_voices, uint8_t quote_notes,
                                float phase_pos) {
   MiddleEntry entry;
   entry.key = target_key;
@@ -102,10 +107,11 @@ MiddleEntry generateFalseEntry(const Subject& subject, Key target_key,
   }
 
   // Clamp quote_notes to [2, min(4, subject note count)].
-  uint8_t max_quote = static_cast<uint8_t>(
-      subject.notes.size() < 4 ? subject.notes.size() : 4);
-  if (quote_notes < 2) quote_notes = 2;
-  if (quote_notes > max_quote) quote_notes = max_quote;
+  uint8_t max_quote = static_cast<uint8_t>(subject.notes.size() < 4 ? subject.notes.size() : 4);
+  if (quote_notes < 2)
+    quote_notes = 2;
+  if (quote_notes > max_quote)
+    quote_notes = max_quote;
 
   // If subject has fewer than 2 notes, return empty.
   if (subject.notes.size() < 2) {
@@ -122,8 +128,8 @@ MiddleEntry generateFalseEntry(const Subject& subject, Key target_key,
   // Compute octave shift using envelope-aware register fitting.
   auto [lo, hi] = getFugueVoiceRange(voice_id, num_voices);
   RegisterEnvelope envelope = getRegisterEnvelope(FormType::Fugue);
-  int octave_shift = fitToRegisterWithEnvelope(transposed, voice_id, num_voices,
-                                                phase_pos, envelope);
+  int octave_shift =
+      fitToRegisterWithEnvelope(transposed, voice_id, num_voices, phase_pos, envelope);
 
   // Apply octave shift to transposed notes.
   for (auto& note : transposed) {
@@ -144,7 +150,8 @@ MiddleEntry generateFalseEntry(const Subject& subject, Key target_key,
     total_duration += note.duration;
   }
   Tick avg_duration = total_duration / static_cast<Tick>(subject.notes.size());
-  if (avg_duration == 0) avg_duration = kTicksPerBeat;
+  if (avg_duration == 0)
+    avg_duration = kTicksPerBeat;
 
   // Build quoted portion.
   Tick current_tick = start_tick;
@@ -199,6 +206,22 @@ MiddleEntry generateFalseEntry(const Subject& subject, Key target_key,
   }
 
   entry.end_tick = current_tick;
+
+  if (num_voices == 4 && voice_id < 2 && !entry.notes.empty()) {
+    uint8_t min_pitch = entry.notes.front().pitch;
+    uint8_t max_pitch = entry.notes.front().pitch;
+    for (const auto& note : entry.notes) {
+      min_pitch = std::min(min_pitch, note.pitch);
+      max_pitch = std::max(max_pitch, note.pitch);
+    }
+    auto tenor_range = getFugueVoiceRange(2, num_voices);
+    if (min_pitch < tenor_range.second && max_pitch <= 68) {
+      for (auto& note : entry.notes) {
+        note.pitch = clampPitch(static_cast<int>(note.pitch) + 12, lo, hi);
+      }
+    }
+  }
+
   return entry;
 }
 

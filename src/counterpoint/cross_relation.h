@@ -26,8 +26,7 @@ namespace bach {
 /// @param pitch Candidate MIDI pitch.
 /// @param tick Note start tick.
 /// @return true if cross-relation detected.
-bool hasCrossRelation(const std::vector<NoteEvent>& notes,
-                      uint8_t num_voices, uint8_t voice,
+bool hasCrossRelation(const std::vector<NoteEvent>& notes, uint8_t num_voices, uint8_t voice,
                       uint8_t pitch, Tick tick);
 
 }  // namespace bach

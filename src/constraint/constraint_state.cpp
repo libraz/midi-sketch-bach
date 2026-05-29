@@ -8,10 +8,10 @@
 
 #include "core/gravity_reference_data.inc"
 #include "core/harmonic_bigram_data.inc"
+#include "core/scale.h"
 #include "counterpoint/bach_rule_evaluator.h"
 #include "counterpoint/counterpoint_state.h"
 #include "counterpoint/i_rule_evaluator.h"
-#include "core/scale.h"
 #include "fugue/cadence_insertion.h"
 
 namespace bach {
@@ -22,26 +22,32 @@ namespace bach {
 
 void normalizeDistribution(const uint16_t* counts, float* out, int n) {
   uint32_t total = 0;
-  for (int i = 0; i < n; ++i) total += counts[i];
+  for (int i = 0; i < n; ++i)
+    total += counts[i];
   if (total == 0) {
     float uniform = 1.0f / static_cast<float>(n);
-    for (int i = 0; i < n; ++i) out[i] = uniform;
+    for (int i = 0; i < n; ++i)
+      out[i] = uniform;
     return;
   }
   float inv = 1.0f / static_cast<float>(total);
-  for (int i = 0; i < n; ++i) out[i] = static_cast<float>(counts[i]) * inv;
+  for (int i = 0; i < n; ++i)
+    out[i] = static_cast<float>(counts[i]) * inv;
 }
 
 void normalizeDistribution(const int* counts, float* out, int n) {
   int total = 0;
-  for (int i = 0; i < n; ++i) total += counts[i];
+  for (int i = 0; i < n; ++i)
+    total += counts[i];
   if (total == 0) {
     float uniform = 1.0f / static_cast<float>(n);
-    for (int i = 0; i < n; ++i) out[i] = uniform;
+    for (int i = 0; i < n; ++i)
+      out[i] = uniform;
     return;
   }
   float inv = 1.0f / static_cast<float>(total);
-  for (int i = 0; i < n; ++i) out[i] = static_cast<float>(counts[i]) * inv;
+  for (int i = 0; i < n; ++i)
+    out[i] = static_cast<float>(counts[i]) * inv;
 }
 
 float computeJSD(const float* p, const float* q, int n) {
@@ -50,7 +56,8 @@ float computeJSD(const float* p, const float* q, int n) {
   float jsd = 0.0f;
   for (int i = 0; i < n; ++i) {
     float m = 0.5f * (p[i] + q[i]);
-    if (m < 1e-12f) continue;
+    if (m < 1e-12f)
+      continue;
     if (p[i] > 1e-12f) {
       jsd += 0.5f * p[i] * std::log2(p[i] / m);
     }
@@ -66,10 +73,9 @@ float computeJSD(const float* p, const float* q, int n) {
 // ---------------------------------------------------------------------------
 
 InvariantSet::SatisfiesResult InvariantSet::satisfies(
-    uint8_t pitch, VoiceId voice_id, Tick tick,
-    const VerticalSnapshot& snap, const IRuleEvaluator* rule_eval,
-    const BachRuleEvaluator* crossing_eval, const CounterpointState* state,
-    const uint8_t* recent_pitches, int recent_count) const {
+    uint8_t pitch, VoiceId voice_id, Tick tick, const VerticalSnapshot& snap,
+    const IRuleEvaluator* rule_eval, const BachRuleEvaluator* crossing_eval,
+    const CounterpointState* state, const uint8_t* recent_pitches, int recent_count) const {
   SatisfiesResult result;
 
   // Hard: voice range check.
@@ -81,11 +87,11 @@ InvariantSet::SatisfiesResult InvariantSet::satisfies(
   // Hard: parallel perfect consonance check.
   if (rule_eval && state) {
     for (int i = 0; i < snap.num_voices; ++i) {
-      if (i == voice_id) continue;
-      if (snap.pitches[i] == 0) continue;
-      if (rule_eval->hasParallelPerfect(*state,
-                                        voice_id, static_cast<VoiceId>(i),
-                                        tick)) {
+      if (i == voice_id)
+        continue;
+      if (snap.pitches[i] == 0)
+        continue;
+      if (rule_eval->hasParallelPerfect(*state, voice_id, static_cast<VoiceId>(i), tick)) {
         result.hard_violations++;
         result.parallel_perfect = true;
         break;
@@ -96,11 +102,12 @@ InvariantSet::SatisfiesResult InvariantSet::satisfies(
   // Crossing check (policy-dependent).
   if (crossing_eval && state) {
     for (int i = 0; i < snap.num_voices; ++i) {
-      if (i == voice_id) continue;
-      if (snap.pitches[i] == 0) continue;
-      bool is_crossing = rule_eval && rule_eval->hasVoiceCrossing(
-                                          *state, voice_id,
-                                          static_cast<VoiceId>(i), tick);
+      if (i == voice_id)
+        continue;
+      if (snap.pitches[i] == 0)
+        continue;
+      bool is_crossing =
+          rule_eval && rule_eval->hasVoiceCrossing(*state, voice_id, static_cast<VoiceId>(i), tick);
       if (is_crossing) {
         if (crossing_policy == CrossingPolicy::Reject) {
           result.hard_violations++;
@@ -108,8 +115,8 @@ InvariantSet::SatisfiesResult InvariantSet::satisfies(
           break;
         } else {
           // AllowTemporary: check if temporary.
-          bool temp = crossing_eval->isCrossingTemporary(
-              *state, voice_id, static_cast<VoiceId>(i), tick);
+          bool temp =
+              crossing_eval->isCrossingTemporary(*state, voice_id, static_cast<VoiceId>(i), tick);
           if (!temp) {
             result.soft_violations++;
             result.crossing_violation = true;
@@ -136,10 +143,11 @@ InvariantSet::SatisfiesResult InvariantSet::satisfies(
 
   // Soft: adjacent voice spacing check (too wide).
   for (int i = 0; i < snap.num_voices; ++i) {
-    if (i == voice_id) continue;
-    if (snap.pitches[i] == 0) continue;
-    int spacing = std::abs(static_cast<int>(pitch) -
-                           static_cast<int>(snap.pitches[i]));
+    if (i == voice_id)
+      continue;
+    if (snap.pitches[i] == 0)
+      continue;
+    int spacing = std::abs(static_cast<int>(pitch) - static_cast<int>(snap.pitches[i]));
     if (spacing > max_adjacent_spacing) {
       result.soft_violations++;
       result.spacing_violation = true;
@@ -149,14 +157,14 @@ InvariantSet::SatisfiesResult InvariantSet::satisfies(
 
   // E1: Close spacing penalty — depth-dependent soft penalty prevents
   // voice clustering. Extended to 5-6st for 3-voice Develop/Conclude episodes.
-  bool episode_context = (phase_ == FuguePhase::Develop ||
-                          phase_ == FuguePhase::Conclude);
+  bool episode_context = (phase_ == FuguePhase::Develop || phase_ == FuguePhase::Conclude);
   int close_threshold = (active_voice_count_ <= 3 && episode_context) ? 7 : 5;
   for (int i = 0; i < snap.num_voices; ++i) {
-    if (i == voice_id) continue;
-    if (snap.pitches[i] == 0) continue;
-    int spacing = std::abs(static_cast<int>(pitch) -
-                           static_cast<int>(snap.pitches[i]));
+    if (i == voice_id)
+      continue;
+    if (snap.pitches[i] == 0)
+      continue;
+    int spacing = std::abs(static_cast<int>(pitch) - static_cast<int>(snap.pitches[i]));
     if (spacing > 0 && spacing < close_threshold) {
       if (spacing < 2) {
         result.additional_penalty += 0.40f;
@@ -187,13 +195,19 @@ namespace {
 
 int durationToRhythmBin(Tick dur) {
   // 32nd, 16th, 8th, quarter, half, whole, longer
-  if (dur <= 75) return 0;       // 32nd (~60 ticks)
-  if (dur <= 180) return 1;      // 16th (~120 ticks)
-  if (dur <= 360) return 2;      // 8th (~240 ticks)
-  if (dur <= 720) return 3;      // quarter (~480 ticks)
-  if (dur <= 1440) return 4;     // half (~960 ticks)
-  if (dur <= 2400) return 5;     // whole (~1920 ticks)
-  return 6;                      // longer
+  if (dur <= 75)
+    return 0;  // 32nd (~60 ticks)
+  if (dur <= 180)
+    return 1;  // 16th (~120 ticks)
+  if (dur <= 360)
+    return 2;  // 8th (~240 ticks)
+  if (dur <= 720)
+    return 3;  // quarter (~480 ticks)
+  if (dur <= 1440)
+    return 4;  // half (~960 ticks)
+  if (dur <= 2400)
+    return 5;  // whole (~1920 ticks)
+  return 6;    // longer
 }
 
 /// @brief Fold 12-entry harmony degree targets into 7 scale degrees.
@@ -212,9 +226,11 @@ void getReferenceDegreeDistribution(float* out) {
       0                  // VII (not in top-12)
   };
   int total = 0;
-  for (int i = 0; i < 7; ++i) total += counts[i];
+  for (int i = 0; i < 7; ++i)
+    total += counts[i];
   float inv = 1.0f / static_cast<float>(total);
-  for (int i = 0; i < 7; ++i) out[i] = static_cast<float>(counts[i]) * inv;
+  for (int i = 0; i < 7; ++i)
+    out[i] = static_cast<float>(counts[i]) * inv;
 }
 
 }  // namespace
@@ -266,10 +282,14 @@ static constexpr PhaseWeights kConcludeWeights = {0.25f, 0.40f, 0.20f, 0.15f};
 
 const PhaseWeights& getPhaseWeights(FuguePhase phase) {
   switch (phase) {
-    case FuguePhase::Establish: return kEstablishWeights;
-    case FuguePhase::Develop:   return kDevelopWeights;
-    case FuguePhase::Resolve:   return kResolveWeights;
-    case FuguePhase::Conclude:  return kConcludeWeights;
+    case FuguePhase::Establish:
+      return kEstablishWeights;
+    case FuguePhase::Develop:
+      return kDevelopWeights;
+    case FuguePhase::Resolve:
+      return kResolveWeights;
+    case FuguePhase::Conclude:
+      return kConcludeWeights;
   }
   return kDevelopWeights;
 }
@@ -278,8 +298,7 @@ const PhaseWeights& getPhaseWeights(FuguePhase phase) {
 // jsd_decay_factor
 // ---------------------------------------------------------------------------
 
-float jsd_decay_factor(Tick tick, Tick total_duration,
-                       const std::vector<Tick>& cadence_ticks,
+float jsd_decay_factor(Tick tick, Tick total_duration, const std::vector<Tick>& cadence_ticks,
                        float energy) {
   float factor = 1.0f;
 
@@ -291,7 +310,7 @@ float jsd_decay_factor(Tick tick, Tick total_duration,
   // High energy decay: energy > 0.8 reduces JSD strictness.
   if (energy > 0.8f) {
     float excess = (energy - 0.8f) / 0.2f;  // 0..1
-    factor *= (1.0f - 0.4f * excess);        // -> 0.6 at energy=1.0
+    factor *= (1.0f - 0.4f * excess);       // -> 0.6 at energy=1.0
   }
 
   // Phrase boundary decay: near end of fugue.
@@ -310,25 +329,21 @@ float jsd_decay_factor(Tick tick, Tick total_duration,
 // GravityConfig::score
 // ---------------------------------------------------------------------------
 
-float GravityConfig::score(uint8_t pitch, Tick duration,
-                           const MarkovContext& ctx,
-                           const VerticalSnapshot& snap,
-                           const SectionAccumulator& accum,
+float GravityConfig::score(uint8_t pitch, Tick duration, const MarkovContext& ctx,
+                           const VerticalSnapshot& snap, const SectionAccumulator& accum,
                            float decay, float figure_score) const {
   const PhaseWeights& w = getPhaseWeights(phase);
 
   // Layer 1: Melodic (Markov pitch + duration).
   float melodic_score = 0.0f;
   if (melodic_model) {
-    DegreeStep next_step = computeDegreeStep(ctx.prev_pitch, pitch,
-                                              ctx.key, ctx.scale);
-    melodic_score += scoreMarkovPitch(*melodic_model, ctx.prev_step,
-                                       ctx.deg_class, ctx.beat, next_step);
+    DegreeStep next_step = computeDegreeStep(ctx.prev_pitch, pitch, ctx.key, ctx.scale);
+    melodic_score +=
+        scoreMarkovPitch(*melodic_model, ctx.prev_step, ctx.deg_class, ctx.beat, next_step);
 
     DurCategory next_dur = ticksToDurCategory(duration);
     DirIntervalClass dir = toDirIvlClass(next_step);
-    melodic_score += scoreMarkovDuration(*melodic_model, ctx.prev_dur,
-                                          dir, next_dur) *
+    melodic_score += scoreMarkovDuration(*melodic_model, ctx.prev_dur, dir, next_dur) *
                      0.5f;  // Duration weight within melodic layer.
   }
 
@@ -338,14 +353,15 @@ float GravityConfig::score(uint8_t pitch, Tick duration,
     // Score against each sounding voice.
     int scored = 0;
     for (int i = 0; i < snap.num_voices; ++i) {
-      if (snap.pitches[i] == 0) continue;
+      if (snap.pitches[i] == 0)
+        continue;
       int pc_offset = ((pitch - snap.pitches[i]) % 12 + 12) % 12;
       // Use bass degree 0 as default (simplified; full impl uses harmony).
       int bass_deg = 0;
       int vbin = voiceCountToBin(snap.num_voices);
       HarmFunc hf = HarmFunc::Tonic;
-      vertical_score += scoreVerticalInterval(*vertical_table, bass_deg,
-                                               ctx.beat, vbin, hf, pc_offset);
+      vertical_score +=
+          scoreVerticalInterval(*vertical_table, bass_deg, ctx.beat, vbin, hf, pc_offset);
       scored++;
     }
     if (scored > 0) {
@@ -365,10 +381,8 @@ float GravityConfig::score(uint8_t pitch, Tick duration,
   float vocab_score = figure_score * 0.5f;  // Scale to reasonable range.
 
   // Composite: phase-weighted sum.
-  float composite = w.melodic * melodic_score +
-                    w.vertical * vertical_score +
-                    w.rhythm * jsd_penalty +
-                    w.vocabulary * vocab_score;
+  float composite = w.melodic * melodic_score + w.vertical * vertical_score +
+                    w.rhythm * jsd_penalty + w.vocabulary * vocab_score;
 
   // Energy modulation: higher energy amplifies score magnitude.
   float energy_mult = 0.8f + 0.4f * energy;  // [0.8, 1.2]
@@ -379,18 +393,15 @@ float GravityConfig::score(uint8_t pitch, Tick duration,
 // ConstraintState
 // ---------------------------------------------------------------------------
 
-float ConstraintState::evaluate(
-    uint8_t pitch, Tick duration, VoiceId voice_id, Tick tick,
-    const MarkovContext& ctx, const VerticalSnapshot& snap,
-    const IRuleEvaluator* rule_eval,
-    const BachRuleEvaluator* crossing_eval,
-    const CounterpointState* cp_state,
-    const uint8_t* recent_pitches, int recent_count,
-    float figure_score) {
+float ConstraintState::evaluate(uint8_t pitch, Tick duration, VoiceId voice_id, Tick tick,
+                                const MarkovContext& ctx, const VerticalSnapshot& snap,
+                                const IRuleEvaluator* rule_eval,
+                                const BachRuleEvaluator* crossing_eval,
+                                const CounterpointState* cp_state, const uint8_t* recent_pitches,
+                                int recent_count, float figure_score, bool commit_soft_violations) {
   // Layer 2: Invariant check.
-  auto inv_result = invariants.satisfies(
-      pitch, voice_id, tick, snap, rule_eval, crossing_eval, cp_state,
-      recent_pitches, recent_count);
+  auto inv_result = invariants.satisfies(pitch, voice_id, tick, snap, rule_eval, crossing_eval,
+                                         cp_state, recent_pitches, recent_count);
 
   if (inv_result.hard_violations > 0) {
     return -std::numeric_limits<float>::infinity();
@@ -400,39 +411,32 @@ float ConstraintState::evaluate(
   // would help resolve active obligations).
   float obligation_bonus = 0.0f;
   for (const auto& ob : active_obligations) {
-    if (!ob.is_active_at(tick)) continue;
-    if (ob.voice_mask != 0 && !(ob.voice_mask & (1 << voice_id))) continue;
+    if (!ob.is_active_at(tick))
+      continue;
+    if (ob.voice_mask != 0 && !(ob.voice_mask & (1 << voice_id)))
+      continue;
 
     // Check if this pitch helps resolve the obligation.
     if (ob.direction != 0) {
       int dir = (pitch > ctx.prev_pitch) ? 1 : (pitch < ctx.prev_pitch ? -1 : 0);
       if (dir == ob.direction) {
-        int interval = std::abs(static_cast<int>(pitch) -
-                                static_cast<int>(ctx.prev_pitch));
+        int interval = std::abs(static_cast<int>(pitch) - static_cast<int>(ctx.prev_pitch));
         if (ob.required_interval_semitones == 0 ||
             interval == std::abs(ob.required_interval_semitones)) {
-          obligation_bonus += (ob.strength == ObligationStrength::Structural)
-                                  ? 0.3f
-                                  : 0.15f;
+          obligation_bonus += (ob.strength == ObligationStrength::Structural) ? 0.3f : 0.15f;
         }
       }
     }
   }
 
   // Layer 3: Gravity score.
-  float decay = jsd_decay_factor(tick, total_duration, cadence_ticks,
-                                 gravity.energy);
-  float gravity_score = gravity.score(pitch, duration, ctx, snap, accumulator,
-                                      decay, figure_score);
+  float decay = jsd_decay_factor(tick, total_duration, cadence_ticks, gravity.energy);
+  float gravity_score = gravity.score(pitch, duration, ctx, snap, accumulator, decay, figure_score);
 
   // Soft violation penalty + recovery obligation for soft violations.
   float soft_penalty = inv_result.soft_violations * -0.1f;
-  if (inv_result.soft_violations > 0) {
-    addRecoveryObligation(
-        ObligationType::LeapResolve,
-        tick,
-        tick + kTicksPerBar * 2,
-        voice_id);
+  if (commit_soft_violations && inv_result.soft_violations > 0) {
+    addRecoveryObligation(ObligationType::LeapResolve, tick, tick + kTicksPerBar * 2, voice_id);
   }
 
   // E1: Depth-dependent close-spacing penalty (score only, no recovery
@@ -443,9 +447,8 @@ float ConstraintState::evaluate(
   return gravity_score + obligation_bonus + soft_penalty;
 }
 
-void ConstraintState::advance(Tick tick, uint8_t placed_pitch,
-                              VoiceId placed_voice,
-                              Tick duration, Key key) {
+void ConstraintState::advance(Tick tick, uint8_t placed_pitch, VoiceId placed_voice, Tick duration,
+                              Key key) {
   total_note_count++;
 
   // Resolve obligations that match.
@@ -453,8 +456,7 @@ void ConstraintState::advance(Tick tick, uint8_t placed_pitch,
   while (it != active_obligations.end()) {
     if (!it->is_active_at(tick)) {
       // Expired.
-      if (tick > it->deadline &&
-          it->strength == ObligationStrength::Structural) {
+      if (tick > it->deadline && it->strength == ObligationStrength::Structural) {
         // Structural obligation expired unresolved -- this is bad but we
         // track it rather than crash.
       }
@@ -485,11 +487,8 @@ void ConstraintState::advance(Tick tick, uint8_t placed_pitch,
       // Also resolve any obligations in the satisfies list.
       for (uint16_t sat_id : it->satisfies) {
         active_obligations.erase(
-            std::remove_if(active_obligations.begin(),
-                           active_obligations.end(),
-                           [sat_id](const ObligationNode& o) {
-                             return o.id == sat_id;
-                           }),
+            std::remove_if(active_obligations.begin(), active_obligations.end(),
+                           [sat_id](const ObligationNode& o) { return o.id == sat_id; }),
             active_obligations.end());
       }
       it = active_obligations.erase(it);
@@ -501,16 +500,13 @@ void ConstraintState::advance(Tick tick, uint8_t placed_pitch,
   // Expire overdue obligations.
   active_obligations.erase(
       std::remove_if(active_obligations.begin(), active_obligations.end(),
-                     [tick](const ObligationNode& o) {
-                       return tick > o.deadline;
-                     }),
+                     [tick](const ObligationNode& o) { return tick > o.deadline; }),
       active_obligations.end());
 
   // Record placement in accumulator for distribution tracking.
   if (duration > 0) {
     int degree = 0;
-    if (!scale_util::pitchToScaleDegree(placed_pitch, key,
-                                         ScaleType::Major, degree)) {
+    if (!scale_util::pitchToScaleDegree(placed_pitch, key, ScaleType::Major, degree)) {
       // Non-scale pitch: use nearest scale degree approximation.
       degree = (static_cast<int>(placed_pitch) % 12) * 7 / 12;
     }
@@ -518,8 +514,8 @@ void ConstraintState::advance(Tick tick, uint8_t placed_pitch,
   }
 }
 
-void ConstraintState::addRecoveryObligation(ObligationType type, Tick origin,
-                                            Tick deadline, VoiceId voice) {
+void ConstraintState::addRecoveryObligation(ObligationType type, Tick origin, Tick deadline,
+                                            VoiceId voice) {
   ObligationNode ob;
   ob.id = static_cast<uint16_t>(active_obligations.size() + 1000);
   ob.type = type;

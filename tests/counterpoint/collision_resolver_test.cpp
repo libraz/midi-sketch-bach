@@ -86,7 +86,8 @@ TEST_F(CollisionResolverTest, FindSafePitchNeedsAdjustment) {
 
   // Verify the final pitch is consonant with C3.
   int ivl = static_cast<int>(result.pitch) - 48;
-  if (ivl < 0) ivl = -ivl;
+  if (ivl < 0)
+    ivl = -ivl;
   EXPECT_TRUE(rules.isIntervalConsonant(ivl, true));
 }
 
@@ -150,8 +151,7 @@ TEST_F(CollisionResolverTest, ImmutableSourceAcceptsOriginal) {
   state.addNote(1, {0, 480, 48, 80, 1});
 
   // G4(67) is consonant (P5) with C3(48). Immutable source should accept.
-  auto result = resolver.findSafePitch(state, rules, 0, 67, 0, 480,
-                                       BachNoteSource::FugueSubject);
+  auto result = resolver.findSafePitch(state, rules, 0, 67, 0, 480, BachNoteSource::FugueSubject);
   EXPECT_TRUE(result.accepted);
   EXPECT_EQ(result.pitch, 67);
   EXPECT_EQ(result.strategy, "original");
@@ -161,24 +161,21 @@ TEST_F(CollisionResolverTest, ImmutableSourceRejectsAdjustment) {
   state.addNote(1, {0, 480, 48, 80, 1});
 
   // D4(62) is dissonant (M2) with C3(48). Immutable must NOT adjust.
-  auto result = resolver.findSafePitch(state, rules, 0, 62, 0, 480,
-                                       BachNoteSource::FugueSubject);
+  auto result = resolver.findSafePitch(state, rules, 0, 62, 0, 480, BachNoteSource::FugueSubject);
   EXPECT_FALSE(result.accepted);
 }
 
 TEST_F(CollisionResolverTest, ImmutableCantusFixedRejectsAdjustment) {
   state.addNote(1, {0, 480, 48, 80, 1});
 
-  auto result = resolver.findSafePitch(state, rules, 0, 62, 0, 480,
-                                       BachNoteSource::CantusFixed);
+  auto result = resolver.findSafePitch(state, rules, 0, 62, 0, 480, BachNoteSource::CantusFixed);
   EXPECT_FALSE(result.accepted);
 }
 
 TEST_F(CollisionResolverTest, ImmutableGroundBassRejectsAdjustment) {
   state.addNote(1, {0, 480, 48, 80, 1});
 
-  auto result = resolver.findSafePitch(state, rules, 0, 62, 0, 480,
-                                       BachNoteSource::GroundBass);
+  auto result = resolver.findSafePitch(state, rules, 0, 62, 0, 480, BachNoteSource::GroundBass);
   EXPECT_FALSE(result.accepted);
 }
 
@@ -213,14 +210,12 @@ TEST_F(CollisionResolverTest, StructuralSourceAllowsOctaveShift) {
   //
   // Simplest: just verify structural doesn't use chord_tone/step_shift.
   // If original fails AND octave fails, structural rejects.
-  auto result = resolver.findSafePitch(state, rules, 0, 62, 0, 480,
-                                       BachNoteSource::FugueAnswer);
+  auto result = resolver.findSafePitch(state, rules, 0, 62, 0, 480, BachNoteSource::FugueAnswer);
   // D4(62) dissonant, D5(74) dissonant (same interval class) -> rejected.
   EXPECT_FALSE(result.accepted);
 
   // But flexible would succeed via chord_tone or step_shift.
-  auto flex = resolver.findSafePitch(state, rules, 0, 62, 0, 480,
-                                     BachNoteSource::FreeCounterpoint);
+  auto flex = resolver.findSafePitch(state, rules, 0, 62, 0, 480, BachNoteSource::FreeCounterpoint);
   EXPECT_TRUE(flex.accepted);
   EXPECT_NE(flex.pitch, 62);
 }
@@ -229,8 +224,7 @@ TEST_F(CollisionResolverTest, StructuralSourceAcceptsOriginal) {
   state.addNote(1, {0, 480, 48, 80, 1});
 
   // G4(67) is consonant. Structural should accept at original pitch.
-  auto result = resolver.findSafePitch(state, rules, 0, 67, 0, 480,
-                                       BachNoteSource::FugueAnswer);
+  auto result = resolver.findSafePitch(state, rules, 0, 67, 0, 480, BachNoteSource::FugueAnswer);
   EXPECT_TRUE(result.accepted);
   EXPECT_EQ(result.pitch, 67);
   EXPECT_EQ(result.strategy, "original");
@@ -244,8 +238,8 @@ TEST_F(CollisionResolverTest, FlexibleSourceFullCascade) {
   state.addNote(1, {0, 480, 48, 80, 1});
 
   // D4(62) dissonant -> flexible finds a consonant pitch via cascade.
-  auto result = resolver.findSafePitch(state, rules, 0, 62, 0, 480,
-                                       BachNoteSource::FreeCounterpoint);
+  auto result =
+      resolver.findSafePitch(state, rules, 0, 62, 0, 480, BachNoteSource::FreeCounterpoint);
   EXPECT_TRUE(result.accepted);
   EXPECT_NE(result.pitch, 62);
 
@@ -285,8 +279,8 @@ TEST_F(CollisionResolverTest, OctaveShiftRejectsVoiceCrossing) {
   // Octave up: Db5(73) with E4(64) = 9 (M6) consonant, no crossing. OK.
   // Octave down: Db3(49) with E4(64) = crossing (soprano below alto).
   // The resolver should prefer octave up.
-  auto result = resolver.findSafePitch(state, rules, 0, 61, 480, 480,
-                                       BachNoteSource::Countersubject);
+  auto result =
+      resolver.findSafePitch(state, rules, 0, 61, 480, 480, BachNoteSource::Countersubject);
   // Structural: only original + octave_shift.
   // Original fails (m7 dissonant on strong beat, tick 480 = beat 1 weak).
   // Actually tick 480 = beat 1 which is weak (beats 0 and 2 are strong).
@@ -312,14 +306,14 @@ TEST_F(CollisionResolverTest, WouldCrossVoiceDetected) {
   // Octave up: D5(74) with A3(57) = 17, mod 12 = 5 (P4) -- still dissonant.
   // Octave down: D3(50) with A3(57) = 7 (P5) -- consonant! But crossing.
   // Soprano (voice 0) at 50 < alto (voice 1) at 57 = voice crossing.
-  auto result = resolver.findSafePitch(state, rules, 0, 62, 1920, 480,
-                                       BachNoteSource::Countersubject);
+  auto result =
+      resolver.findSafePitch(state, rules, 0, 62, 1920, 480, BachNoteSource::Countersubject);
   // Both octave shifts fail (one dissonant, one crossing). Structural rejects.
   EXPECT_FALSE(result.accepted);
 
   // Flexible would find a solution via chord_tone/step_shift.
-  auto flex = resolver.findSafePitch(state, rules, 0, 62, 1920, 480,
-                                     BachNoteSource::FreeCounterpoint);
+  auto flex =
+      resolver.findSafePitch(state, rules, 0, 62, 1920, 480, BachNoteSource::FreeCounterpoint);
   EXPECT_TRUE(flex.accepted);
 }
 
@@ -413,9 +407,9 @@ TEST_F(CollisionResolverTest, SuspensionStrategyHeldPitch) {
   // First note is C4 (not E4) to avoid triggering the same-pitch repetition
   // guard that rejects suspensions creating 3+ consecutive same pitches.
   state.addNote(0, {0, 480, 60, 80, 0});    // Voice 0: C4 at tick 0.
-  state.addNote(1, {480, 480, 60, 80, 1});   // Voice 1: C4 at tick 480 (prep context).
-  state.addNote(0, {480, 480, 64, 80, 0});   // Voice 0: E4 at tick 480 (preparation).
-  state.addNote(1, {960, 480, 62, 80, 1});   // Voice 1: D4 at tick 960 (dissonance).
+  state.addNote(1, {480, 480, 60, 80, 1});  // Voice 1: C4 at tick 480 (prep context).
+  state.addNote(0, {480, 480, 64, 80, 0});  // Voice 0: E4 at tick 480 (preparation).
+  state.addNote(1, {960, 480, 62, 80, 1});  // Voice 1: D4 at tick 960 (dissonance).
 
   auto result = resolver.trySuspension(state, rules, 0, 67, 960, 480);
   // E4(64) held against D4(62) = M2 (dissonant on strong beat).
@@ -447,8 +441,8 @@ TEST_F(CollisionResolverTest, SuspensionRejectsAtTickZero) {
 TEST_F(CollisionResolverTest, SuspensionInCascade) {
   // Verify that the suspension strategy is attempted in findSafePitch cascade.
   // Set up a scenario where original and chord_tone fail but suspension works.
-  state.addNote(0, {480, 480, 62, 80, 0});   // Voice 0: D4 at tick 480.
-  state.addNote(1, {960, 480, 60, 80, 1});   // Voice 1: C4 at tick 960.
+  state.addNote(0, {480, 480, 62, 80, 0});  // Voice 0: D4 at tick 480.
+  state.addNote(1, {960, 480, 60, 80, 1});  // Voice 1: C4 at tick 960.
 
   // Voice 0 wants F#4(66) at tick 960. With C4(60): 6 semitones = tritone,
   // dissonant on strong beat. Original fails.
@@ -470,8 +464,7 @@ TEST_F(CollisionResolverTest, LookaheadPrefersStepwiseApproachToNextPitch) {
   state.addNote(1, {0, kTicksPerBeat, 60, 80, 1});
 
   // Voice 0 wants C5(72), with next desired pitch D5(74).
-  auto result = resolver.findSafePitchWithLookahead(
-      state, rules, 0, 72, 0, kTicksPerBeat, 74);
+  auto result = resolver.findSafePitchWithLookahead(state, rules, 0, 72, 0, kTicksPerBeat, 74);
 
   EXPECT_TRUE(result.accepted);
   EXPECT_EQ(result.strategy, "lookahead");
@@ -481,8 +474,7 @@ TEST_F(CollisionResolverTest, LookaheadPrefersStepwiseApproachToNextPitch) {
 
 TEST_F(CollisionResolverTest, LookaheadFallsBackWithZeroNextPitch) {
   // With next_desired_pitch = 0, should fall back to regular resolution.
-  auto result = resolver.findSafePitchWithLookahead(
-      state, rules, 0, 60, 0, kTicksPerBeat, 0);
+  auto result = resolver.findSafePitchWithLookahead(state, rules, 0, 60, 0, kTicksPerBeat, 0);
 
   EXPECT_TRUE(result.accepted);
   // Strategy should not be "lookahead" since we fell back.
@@ -492,16 +484,14 @@ TEST_F(CollisionResolverTest, LookaheadFallsBackWithZeroNextPitch) {
 TEST_F(CollisionResolverTest, LookaheadLimitsCandidates) {
   // Even with a wide search range, should still return a result.
   resolver.setMaxSearchRange(24);
-  auto result = resolver.findSafePitchWithLookahead(
-      state, rules, 0, 60, 0, kTicksPerBeat, 72);
+  auto result = resolver.findSafePitchWithLookahead(state, rules, 0, 60, 0, kTicksPerBeat, 72);
 
   EXPECT_TRUE(result.accepted);
 }
 
 TEST_F(CollisionResolverTest, LookaheadDesiredPitchPreferredWhenBothSafe) {
   // With no other voices sounding, desired pitch should be preferred.
-  auto result = resolver.findSafePitchWithLookahead(
-      state, rules, 0, 60, 0, kTicksPerBeat, 62);
+  auto result = resolver.findSafePitchWithLookahead(state, rules, 0, 60, 0, kTicksPerBeat, 62);
 
   EXPECT_TRUE(result.accepted);
   EXPECT_EQ(result.pitch, 60);  // Desired pitch should win when safe.
@@ -559,7 +549,7 @@ TEST_F(CollisionResolverTest, LeadingToneResolvesAtCadence) {
   resolver.setCadenceTicks({960});
 
   state.addNote(1, {960, 480, 64, 80, 1});  // Voice 1: E4.
-  state.addNote(0, {480, 480, 71, 80, 0});   // Voice 0 prev: B4 (leading tone).
+  state.addNote(0, {480, 480, 71, 80, 0});  // Voice 0 prev: B4 (leading tone).
 
   // Desired pitch: something dissonant with E4 that forces step_shift.
   // D#4(63) with E4(64) = 1 (m2), dissonant on strong beat.
@@ -646,9 +636,9 @@ TEST_F(CollisionResolverTest, HiddenPerfectBothLeapM6ToOctaveRejected) {
   // Voice 1 curr: C4(60). Voice 0 wants C5(72).
   // dir_a = 72-60 = +12 (octave up), dir_b = 60-51 = +9 (M6 up).
   // Both positive, both > 7. curr_ivl = |72-60| = 12 = P8 (perfect). Rejected!
-  state.addNote(0, {0, 480, 60, 80, 0});   // Voice 0 prev: C4
-  state.addNote(1, {0, 480, 51, 80, 1});   // Voice 1 prev: Eb3
-  state.addNote(1, {480, 480, 60, 80, 1}); // Voice 1 curr: C4
+  state.addNote(0, {0, 480, 60, 80, 0});    // Voice 0 prev: C4
+  state.addNote(1, {0, 480, 51, 80, 1});    // Voice 1 prev: Eb3
+  state.addNote(1, {480, 480, 60, 80, 1});  // Voice 1 curr: C4
 
   // Voice 0 wants C5(72) at tick 480. Tick 480 % 480 == 0 (strong beat).
   // Interval: |72-60| = 12 = P8 (consonant). Parallel check: prev interval
@@ -664,9 +654,9 @@ TEST_F(CollisionResolverTest, HiddenPerfectOneStepOneLargeLeapAllowed) {
   // dir_a = 62-60 = +2 (step), dir_b = 50-43 = +7 (P5, NOT > 7).
   // curr_ivl = |62-50| = 12 = P8. Both positive but dir_a=2 (<=7).
   // Hidden perfect should NOT reject.
-  state.addNote(0, {0, 480, 60, 80, 0});   // Voice 0 prev: C4
-  state.addNote(1, {0, 480, 43, 80, 1});   // Voice 1 prev: G2
-  state.addNote(1, {480, 480, 50, 80, 1}); // Voice 1 curr: D3
+  state.addNote(0, {0, 480, 60, 80, 0});    // Voice 0 prev: C4
+  state.addNote(1, {0, 480, 43, 80, 1});    // Voice 1 prev: G2
+  state.addNote(1, {480, 480, 50, 80, 1});  // Voice 1 curr: D3
 
   // Voice 0 wants D4(62). |62-50|=12 (P8). dir_a=+2, dir_b=+7.
   // dir_b=7 is NOT > 7. So hidden perfect does not fire.
@@ -959,9 +949,8 @@ TEST_F(WeakBeatNHTTest, SourceAwareOverloadPassesNextPitch) {
   // D4(62) with C3(48) = 14 semitones, mod 12 = 2 (M2), dissonant on bar start.
   // Without next_pitch, rejected. With next_pitch=64 (passing tone C4->D4->E4),
   // original still rejected on bar start; cascade finds alternative.
-  auto result = resolver.findSafePitch(
-      state, bach_rules, 0, 62, 1920, 480,
-      BachNoteSource::FreeCounterpoint, 64);
+  auto result = resolver.findSafePitch(state, bach_rules, 0, 62, 1920, 480,
+                                       BachNoteSource::FreeCounterpoint, 64);
   // Vertical sovereignty: dissonant D4(62) rejected on bar start. Cascade finds alternative.
   EXPECT_TRUE(result.accepted);
   // Cascade may shift pitch via chord_tone/step_shift strategy.
@@ -983,8 +972,8 @@ TEST_F(CollisionResolverTest, LeapGateTriggersOnUnresolvedLeap) {
 
   // Desired pitch A4(69) at tick 960. Interval from G4: +2 (step up) = resolves.
   // This should NOT trigger the gate.
-  auto result = resolver.findSafePitch(state, rules, 0, 69, 960, 480,
-                                       BachNoteSource::FreeCounterpoint);
+  auto result =
+      resolver.findSafePitch(state, rules, 0, 69, 960, 480, BachNoteSource::FreeCounterpoint);
   // A4(69) with E4(64) = 5 (P4) which is dissonant on strong beat.
   // So "original" fails consonance, cascade finds something else.
   // The leap gate does not affect this since resolution condition is met.
@@ -999,8 +988,8 @@ TEST_F(CollisionResolverTest, LeapGateSkippedForEpisodeMaterial) {
 
   // Desired pitch B4(71) at tick 960: G4->B4 = +4 (M3, not step resolution).
   // For EpisodeMaterial, leap gate should not apply.
-  auto result = resolver.findSafePitch(state, rules, 0, 71, 960, 480,
-                                       BachNoteSource::EpisodeMaterial);
+  auto result =
+      resolver.findSafePitch(state, rules, 0, 71, 960, 480, BachNoteSource::EpisodeMaterial);
   // B4(71) with C3(48) = 23, mod 12 = 11 (M7) -- dissonant on strong beat.
   // Structural/Flexible cascade should handle it.
   // EpisodeMaterial has Flexible protection level, but leap gate exempt.
@@ -1014,8 +1003,7 @@ TEST_F(CollisionResolverTest, LeapGateSkippedForImmutableSource) {
   state.addNote(1, {960, 480, 48, 80, 1});
 
   // Desired pitch B4(71) at tick 960. Immutable only tries original.
-  auto result = resolver.findSafePitch(state, rules, 0, 71, 960, 480,
-                                       BachNoteSource::FugueSubject);
+  auto result = resolver.findSafePitch(state, rules, 0, 71, 960, 480, BachNoteSource::FugueSubject);
   // B4(71) with C3(48) = M7 dissonant -- Immutable rejects. That's expected.
   // The key is: no crash, no leap gate interference.
   EXPECT_FALSE(result.accepted);
@@ -1024,23 +1012,41 @@ TEST_F(CollisionResolverTest, LeapGateSkippedForImmutableSource) {
 TEST_F(CollisionResolverTest, LeapGateFallbackPreventsDrop) {
   // When the leap gate fires but no cascade alternative resolves the leap,
   // the original pitch should be used as fallback (no drop).
-  state.addNote(0, {0, 480, 60, 80, 0});   // C4
-  state.addNote(0, {480, 480, 68, 80, 0}); // Ab4 (leap of +8, m6)
+  state.addNote(0, {0, 480, 60, 80, 0});    // C4
+  state.addNote(0, {480, 480, 68, 80, 0});  // Ab4 (leap of +8, m6)
 
   // No other voice sounding -- original will always pass isSafeToPlace.
-  // desired_pitch = Bb4(70): Ab4->Bb4 = +2 (step, resolves). Gate should NOT fire.
-  auto result_resolves = resolver.findSafePitch(
-      state, rules, 0, 70, 960, 480, BachNoteSource::FreeCounterpoint);
+  // desired_pitch = F#4(66): Ab4->F#4 = -2, contrary step resolves.
+  auto result_resolves =
+      resolver.findSafePitch(state, rules, 0, 66, 960, 480, BachNoteSource::FreeCounterpoint);
   EXPECT_TRUE(result_resolves.accepted);
-  EXPECT_EQ(result_resolves.pitch, 70);  // Original accepted, no gate.
+  EXPECT_EQ(result_resolves.pitch, 66);  // Original accepted, no gate.
 
   // desired_pitch = C5(72): Ab4->C5 = +4 (M3, not step). Gate fires.
   // But no other voice -- cascade "original" is gated, chord_tone/step_shift/etc.
   // will find alternatives. If none resolves the leap, fallback to C5(72).
-  auto result_no_resolve = resolver.findSafePitch(
-      state, rules, 0, 72, 960, 480, BachNoteSource::FreeCounterpoint);
+  auto result_no_resolve =
+      resolver.findSafePitch(state, rules, 0, 72, 960, 480, BachNoteSource::FreeCounterpoint);
   EXPECT_TRUE(result_no_resolve.accepted);
   // Should still produce a result (either a resolving cascade candidate or fallback).
+}
+
+TEST_F(CollisionResolverTest, LeapGateTreatsSameDirectionStepAsUnresolved) {
+  state.addNote(0, {0, 480, 60, 80, 0});    // C4
+  state.addNote(0, {480, 480, 68, 80, 0});  // Ab4 (leap of +8)
+
+  auto [t0, f0] = resolver.getLeapGateStats();
+  EXPECT_EQ(t0, 0u);
+  EXPECT_EQ(f0, 0u);
+
+  // Ab4->Bb4 is a step, but it continues in the same direction as the leap.
+  // It must remain unresolved so the gate can search for a contrary step.
+  auto same_dir =
+      resolver.findSafePitch(state, rules, 0, 70, 960, 480, BachNoteSource::FreeCounterpoint);
+  EXPECT_TRUE(same_dir.accepted);
+
+  auto [t1, f1] = resolver.getLeapGateStats();
+  EXPECT_GE(t1, 1u);
 }
 
 TEST_F(CollisionResolverTest, LeapGateDiagnosticCounters) {
@@ -1050,13 +1056,12 @@ TEST_F(CollisionResolverTest, LeapGateDiagnosticCounters) {
   EXPECT_EQ(f0, 0u);
 
   // Create a leap that the gate should trigger on.
-  state.addNote(0, {0, 480, 60, 80, 0});   // C4
-  state.addNote(0, {480, 480, 68, 80, 0}); // Ab4 (leap +8)
+  state.addNote(0, {0, 480, 60, 80, 0});    // C4
+  state.addNote(0, {480, 480, 68, 80, 0});  // Ab4 (leap +8)
 
   // desired_pitch = C5(72): not step resolution from Ab4.
   // No other voice -- original safe, gate fires, cascade may find alternative.
-  resolver.findSafePitch(state, rules, 0, 72, 960, 480,
-                         BachNoteSource::FreeCounterpoint);
+  resolver.findSafePitch(state, rules, 0, 72, 960, 480, BachNoteSource::FreeCounterpoint);
 
   auto [t1, f1] = resolver.getLeapGateStats();
   EXPECT_GE(t1, 1u);  // Gate should have triggered at least once.
@@ -1075,8 +1080,8 @@ TEST_F(CollisionResolverTest, LeapGateCadenceExemption) {
 
   // Tick 960: cadence at 1440, cad - tick = 480 = kTicksPerBeat. tick < cad: yes.
   // --> exempt from leap gate.
-  auto result = resolver.findSafePitch(
-      state, rules, 0, 72, 960, 480, BachNoteSource::FreeCounterpoint);
+  auto result =
+      resolver.findSafePitch(state, rules, 0, 72, 960, 480, BachNoteSource::FreeCounterpoint);
   EXPECT_TRUE(result.accepted);
   EXPECT_EQ(result.pitch, 72);  // No gate -- original accepted.
 }
@@ -1096,9 +1101,9 @@ TEST_F(CollisionResolverTest, SuspensionRejectsUnpreparedDissonance) {
   // Even though resolution exists (D4-2=C4 with C4 = unison), the suspension
   // should be REJECTED because the preparation was not consonant.
   state.addNote(0, {0, 480, 64, 80, 0});    // Voice 0: E4 at tick 0.
-  state.addNote(1, {480, 480, 60, 80, 1});   // Voice 1: C4 at tick 480.
-  state.addNote(0, {480, 480, 62, 80, 0});   // Voice 0: D4 at tick 480 (dissonant prep).
-  state.addNote(1, {960, 480, 60, 80, 1});   // Voice 1: C4 at tick 960.
+  state.addNote(1, {480, 480, 60, 80, 1});  // Voice 1: C4 at tick 480.
+  state.addNote(0, {480, 480, 62, 80, 0});  // Voice 0: D4 at tick 480 (dissonant prep).
+  state.addNote(1, {960, 480, 60, 80, 1});  // Voice 1: C4 at tick 960.
 
   auto result = resolver.trySuspension(state, rules, 0, 67, 960, 480);
   // D4(62) with C4(60) at prep tick 480 = M2 (dissonant). Preparation fails.
@@ -1109,9 +1114,9 @@ TEST_F(CollisionResolverTest, SuspensionRejectsNoOtherVoiceAtPreparation) {
   // If no other voice was sounding at the preparation beat, the suspension
   // has no harmonic context and should be rejected.
   state.addNote(0, {0, 480, 60, 80, 0});    // Voice 0: C4 at tick 0.
-  state.addNote(0, {480, 480, 64, 80, 0});   // Voice 0: E4 at tick 480.
+  state.addNote(0, {480, 480, 64, 80, 0});  // Voice 0: E4 at tick 480.
   // Voice 1 only enters at tick 960 -- not sounding during preparation.
-  state.addNote(1, {960, 480, 62, 80, 1});   // Voice 1: D4 at tick 960.
+  state.addNote(1, {960, 480, 62, 80, 1});  // Voice 1: D4 at tick 960.
 
   auto result = resolver.trySuspension(state, rules, 0, 67, 960, 480);
   EXPECT_FALSE(result.accepted);
@@ -1125,9 +1130,9 @@ TEST_F(CollisionResolverTest, SuspensionAcceptsProperPreparation) {
   //     Interval |67-65| = 2 (M2) = dissonant. Hold creates dissonance.
   //   Resolution: G4-2=F4(65) with F4(65) = unison (consonant). Resolution OK.
   state.addNote(0, {0, 480, 60, 80, 0});    // Voice 0: C4 at tick 0.
-  state.addNote(1, {480, 480, 60, 80, 1});   // Voice 1: C4 at tick 480.
-  state.addNote(0, {480, 480, 67, 80, 0});   // Voice 0: G4 at tick 480 (preparation).
-  state.addNote(1, {960, 480, 65, 80, 1});   // Voice 1: F4 at tick 960.
+  state.addNote(1, {480, 480, 60, 80, 1});  // Voice 1: C4 at tick 480.
+  state.addNote(0, {480, 480, 67, 80, 0});  // Voice 0: G4 at tick 480 (preparation).
+  state.addNote(1, {960, 480, 65, 80, 1});  // Voice 1: F4 at tick 960.
 
   auto result = resolver.trySuspension(state, rules, 0, 72, 960, 480);
   EXPECT_TRUE(result.accepted);
@@ -1207,9 +1212,9 @@ TEST_F(CollisionResolverTest, SuspensionTypeStandard43HasLowPenalty) {
   //   Hold: G4(67) against F4(65): |67-65| = 2 = M2 = dissonant.
   //   Resolution: G4-2=F4(65) against F4(65) = 0 = unison = consonant.
   state.addNote(0, {0, 480, 60, 80, 0});    // Avoid repetition guard.
-  state.addNote(1, {480, 480, 60, 80, 1});   // Voice 1: C4 at tick 480.
-  state.addNote(0, {480, 480, 67, 80, 0});   // Voice 0: G4 at tick 480.
-  state.addNote(1, {960, 480, 65, 80, 1});   // Voice 1: F4 at tick 960.
+  state.addNote(1, {480, 480, 60, 80, 1});  // Voice 1: C4 at tick 480.
+  state.addNote(0, {480, 480, 67, 80, 0});  // Voice 0: G4 at tick 480.
+  state.addNote(1, {960, 480, 65, 80, 1});  // Voice 1: F4 at tick 960.
 
   auto result = resolver.trySuspension(state, rules, 0, 72, 960, 480);
   EXPECT_TRUE(result.accepted);
@@ -1262,9 +1267,9 @@ TEST_F(SuspensionValidationTest, PreparedSuspensionAllowedOnBarStart) {
   //   Hold: Voice 1 moves to D4(62). E5(76) with D4(62) = 14, mod12=2 (M2).
   //   |76-62| = 14 (> 3 semitones), so strict spacing passes.
   //   Resolution: E5-2=D5(74) with D4(62) = 12, mod12=0 (P8), consonant. OK!
-  state.addNote(0, {1440, 480, 76, 80, 0});   // Voice 0: E5 at preparation.
-  state.addNote(1, {1440, 480, 69, 80, 1});   // Voice 1: A4 (P5 with E5, consonant).
-  state.addNote(1, {1920, 480, 62, 80, 1});   // Voice 1: D4 at bar start.
+  state.addNote(0, {1440, 480, 76, 80, 0});  // Voice 0: E5 at preparation.
+  state.addNote(1, {1440, 480, 69, 80, 1});  // Voice 1: A4 (P5 with E5, consonant).
+  state.addNote(1, {1920, 480, 62, 80, 1});  // Voice 1: D4 at bar start.
 
   // E5(76) with D4(62) = 14, mod12=2 (M2), dissonant on bar start.
   // Preparation: E5(76) with A4(69) = 7 (P5), consonant. OK.
@@ -1275,9 +1280,9 @@ TEST_F(SuspensionValidationTest, PreparedSuspensionAllowedOnBarStart) {
 
 TEST_F(SuspensionValidationTest, UnpreparedDissonanceRejectedOnBarStart) {
   // No preparation: voice 0 had a different pitch on the previous beat.
-  state.addNote(0, {480, 480, 67, 80, 0});   // Voice 0: G4 at tick 480.
-  state.addNote(1, {480, 480, 60, 80, 1});   // Voice 1: C4 at tick 480.
-  state.addNote(1, {960, 480, 62, 80, 1});   // Voice 1: D4 at tick 960.
+  state.addNote(0, {480, 480, 67, 80, 0});  // Voice 0: G4 at tick 480.
+  state.addNote(1, {480, 480, 60, 80, 1});  // Voice 1: C4 at tick 480.
+  state.addNote(1, {960, 480, 62, 80, 1});  // Voice 1: D4 at tick 960.
 
   // Voice 0 wants E4(64) at tick 960. With D4(62): interval 2 (M2), dissonant.
   // But E4 was NOT the pitch at tick 480 (G4 was). No preparation -> rejected.
@@ -1285,9 +1290,9 @@ TEST_F(SuspensionValidationTest, UnpreparedDissonanceRejectedOnBarStart) {
   // 2-4, so it may be allowed by the tiered check. Use bar start instead.
   //
   // Use tick 1920 (bar 1 start) where ALL dissonances are rejected.
-  state.addNote(0, {1440, 480, 67, 80, 0});   // Voice 0: G4 at tick 1440.
-  state.addNote(1, {1440, 480, 60, 80, 1});   // Voice 1: C4 at tick 1440.
-  state.addNote(1, {1920, 480, 62, 80, 1});   // Voice 1: D4 at tick 1920.
+  state.addNote(0, {1440, 480, 67, 80, 0});  // Voice 0: G4 at tick 1440.
+  state.addNote(1, {1440, 480, 60, 80, 1});  // Voice 1: C4 at tick 1440.
+  state.addNote(1, {1920, 480, 62, 80, 1});  // Voice 1: D4 at tick 1920.
 
   // Voice 0 wants E4(64) at bar start tick 1920.
   // E4(64) was NOT sounding at tick 1440 (G4 was). Unprepared -> rejected.
@@ -1299,9 +1304,9 @@ TEST_F(SuspensionValidationTest, SuspensionWithNoResolutionRejected) {
   //   Preparation (tick 1440): Voice 0 has F#4(66), Voice 1 has C4(60).
   //     |66-60| = 6 (tritone) = dissonant. Preparation itself fails.
   //   This should be rejected even before resolution check.
-  state.addNote(0, {1440, 480, 66, 80, 0});   // Voice 0: F#4.
-  state.addNote(1, {1440, 480, 60, 80, 1});   // Voice 1: C4.
-  state.addNote(1, {1920, 480, 65, 80, 1});   // Voice 1: F4 at bar start.
+  state.addNote(0, {1440, 480, 66, 80, 0});  // Voice 0: F#4.
+  state.addNote(1, {1440, 480, 60, 80, 1});  // Voice 1: C4.
+  state.addNote(1, {1920, 480, 65, 80, 1});  // Voice 1: F4 at bar start.
 
   // F#4(66) with F4(65): interval 1 (m2), dissonant on bar start.
   // Preparation: F#4(66) with C4(60) at tick 1440 = 6 (tritone) = dissonant.
@@ -1313,9 +1318,9 @@ TEST_F(SuspensionValidationTest, SuspensionRequiresSamePitchHeld) {
   // The held pitch must be the same as the preparation pitch.
   // Preparation: Voice 0 has E4(64) at tick 1440.
   // But we try to place F4(65) at tick 1920 -- different pitch than preparation.
-  state.addNote(0, {1440, 480, 64, 80, 0});   // Voice 0: E4 at preparation.
-  state.addNote(1, {1440, 480, 60, 80, 1});   // Voice 1: C4 at preparation.
-  state.addNote(1, {1920, 480, 64, 80, 1});   // Voice 1: E4 at bar start.
+  state.addNote(0, {1440, 480, 64, 80, 0});  // Voice 0: E4 at preparation.
+  state.addNote(1, {1440, 480, 60, 80, 1});  // Voice 1: C4 at preparation.
+  state.addNote(1, {1920, 480, 64, 80, 1});  // Voice 1: E4 at bar start.
 
   // Voice 0 wants F4(65) at tick 1920. F4 != E4 (preparation pitch).
   // |65-64| = 1 (m2), dissonant on bar start.
@@ -1339,9 +1344,9 @@ TEST_F(SuspensionValidationTest, ValidSuspension43Type) {
   //   Then Voice 1 moves to Bb3(58). E4(64) with Bb3(58) = 6 (tritone)? No.
   //   Voice 1 moves to B3(59). E4(64) with B3(59) = 5 (P4) -- dissonant (4-3).
   //   Resolution: E4-1=Eb4(63) with B3(59) = 4 (M3) -- consonant. 4-3 suspension!
-  state.addNote(0, {1440, 480, 64, 80, 0});   // Voice 0: E4 at prep.
-  state.addNote(1, {1440, 480, 60, 80, 1});   // Voice 1: C4 at prep (E4-C4 = M3, consonant).
-  state.addNote(1, {1920, 480, 59, 80, 1});   // Voice 1: B3 at bar start.
+  state.addNote(0, {1440, 480, 64, 80, 0});  // Voice 0: E4 at prep.
+  state.addNote(1, {1440, 480, 60, 80, 1});  // Voice 1: C4 at prep (E4-C4 = M3, consonant).
+  state.addNote(1, {1920, 480, 59, 80, 1});  // Voice 1: B3 at bar start.
 
   // E4(64) with B3(59) = 5 (P4), dissonant on bar start.
   // Preparation: E4(64) with C4(60) at tick 1440 = 4 (M3), consonant. OK.
@@ -1356,9 +1361,9 @@ TEST_F(SuspensionValidationTest, ValidSuspension76Type) {
   //     |74-67| = 7 (P5) = consonant. Preparation OK.
   //   Hold: Voice 1 moves to E4(64). D5(74) with E4(64) = 10 (m7), dissonant.
   //   Resolution: D5-1=C#5(73) with E4(64) = 9 (M6), consonant. 7-6 suspension!
-  state.addNote(0, {1440, 480, 74, 80, 0});   // Voice 0: D5 at prep.
-  state.addNote(1, {1440, 480, 67, 80, 1});   // Voice 1: G4 (P5, consonant).
-  state.addNote(1, {1920, 480, 64, 80, 1});   // Voice 1: E4 at bar start.
+  state.addNote(0, {1440, 480, 74, 80, 0});  // Voice 0: D5 at prep.
+  state.addNote(1, {1440, 480, 67, 80, 1});  // Voice 1: G4 (P5, consonant).
+  state.addNote(1, {1920, 480, 64, 80, 1});  // Voice 1: E4 at bar start.
 
   // D5(74) with E4(64) = 10 (m7), dissonant on bar start.
   // Preparation: D5(74) with G4(67) = 7 (P5), consonant. OK.
@@ -1374,9 +1379,9 @@ TEST_F(SuspensionValidationTest, ValidSuspension98Type) {
   //     |74-55| = 19, mod12=7 (P5) = consonant. Preparation OK.
   //   Hold (tick 1920): Voice 1 moves to C4(60). D5(74) with C4(60) = 14, mod12=2 (M2).
   //   Resolution: D5-2=C5(72) with C4(60) = 12, mod12=0 (P8), consonant. 9-8!
-  state.addNote(0, {1440, 480, 74, 80, 0});   // Voice 0: D5 at prep.
-  state.addNote(1, {1440, 480, 55, 80, 1});   // Voice 1: G3 (P5 compound, consonant).
-  state.addNote(1, {1920, 480, 60, 80, 1});   // Voice 1: C4 at bar start.
+  state.addNote(0, {1440, 480, 74, 80, 0});  // Voice 0: D5 at prep.
+  state.addNote(1, {1440, 480, 55, 80, 1});  // Voice 1: G3 (P5 compound, consonant).
+  state.addNote(1, {1920, 480, 60, 80, 1});  // Voice 1: C4 at bar start.
 
   // D5(74) with C4(60) = 14, mod12=2 (M2), dissonant on bar start.
   // Preparation: D5(74) with G3(55) = 19, mod12=7 (P5), consonant. OK.
@@ -1393,9 +1398,9 @@ TEST_F(SuspensionValidationTest, HarshDissonanceAllowedAsSuspensionOnBeat2) {
   //   Resolution: B4-1=Bb4(70) with C4(60) = 10 (m7).
   //   m7 is not consonant in Fux rules (no P4 exception).
   //   B4-2=A4(69) with C4(60) = 9 (M6), consonant. 7-6 type!
-  state.addNote(0, {480, 480, 71, 80, 0});   // Voice 0: B4 at tick 480.
-  state.addNote(1, {480, 480, 64, 80, 1});   // Voice 1: E4 (P5, consonant).
-  state.addNote(1, {960, 480, 60, 80, 1});   // Voice 1: C4 at tick 960 (beat 2).
+  state.addNote(0, {480, 480, 71, 80, 0});  // Voice 0: B4 at tick 480.
+  state.addNote(1, {480, 480, 64, 80, 1});  // Voice 1: E4 (P5, consonant).
+  state.addNote(1, {960, 480, 60, 80, 1});  // Voice 1: C4 at tick 960 (beat 2).
 
   // Tick 960 = beat 2 (strong). B4(71) with C4(60) = 11 (M7), harsh dissonance.
   // Normally rejected on beats 2-4 without suspension. But this is a valid 7-6.
@@ -1404,9 +1409,9 @@ TEST_F(SuspensionValidationTest, HarshDissonanceAllowedAsSuspensionOnBeat2) {
 
 TEST_F(SuspensionValidationTest, UnpreparedHarshDissonanceStillRejectedOnBeat2) {
   // Harsh dissonance on beat 2 without proper preparation is still rejected.
-  state.addNote(0, {480, 480, 67, 80, 0});   // Voice 0: G4 at tick 480.
-  state.addNote(1, {480, 480, 64, 80, 1});   // Voice 1: E4.
-  state.addNote(1, {960, 480, 60, 80, 1});   // Voice 1: C4 at tick 960.
+  state.addNote(0, {480, 480, 67, 80, 0});  // Voice 0: G4 at tick 480.
+  state.addNote(1, {480, 480, 64, 80, 1});  // Voice 1: E4.
+  state.addNote(1, {960, 480, 60, 80, 1});  // Voice 1: C4 at tick 960.
 
   // Voice 0 wants B4(71) at tick 960. B4 with C4 = 11 (M7), harsh.
   // But B4 was NOT the pitch at tick 480 (G4 was). Not a suspension.
@@ -1418,9 +1423,9 @@ TEST_F(SuspensionValidationTest, CandidatePrioritySuspensionBelowConsonance) {
   // should score lower than imperfect consonances but higher than unjustified
   // dissonance. Verify indirectly: when both consonant and suspension candidates
   // are available, the consonant pitch should be chosen.
-  state.addNote(0, {1440, 480, 64, 80, 0});   // Voice 0: E4 at prep.
-  state.addNote(1, {1440, 480, 60, 80, 1});   // Voice 1: C4 at prep.
-  state.addNote(1, {1920, 480, 59, 80, 1});   // Voice 1: B3 at bar start.
+  state.addNote(0, {1440, 480, 64, 80, 0});  // Voice 0: E4 at prep.
+  state.addNote(1, {1440, 480, 60, 80, 1});  // Voice 1: C4 at prep.
+  state.addNote(1, {1920, 480, 59, 80, 1});  // Voice 1: B3 at bar start.
 
   // Desired: E4(64). This creates P4 with B3 (5 semitones), dissonant on
   // bar start. But it IS a valid 4-3 suspension.
@@ -1477,9 +1482,9 @@ TEST_F(SuspensionVoiceDependencyTest, Suspension76AllowedInBassVoice) {
   //
   //   Hold: soprano moves to C5(72). |50-72|=22, mod12=10 (m7). Yes!
   //   Resolution: D3-2=C3(48) with C5(72): |48-72|=24, mod12=0 (unison/P8), consonant.
-  state.addNote(2, {1440, 480, 50, 80, 2});   // Bass: D3.
-  state.addNote(0, {1440, 480, 69, 80, 0});   // Soprano: A4. |69-50|=19,mod12=7 (P5).
-  state.addNote(0, {1920, 480, 72, 80, 0});   // Soprano: C5 at bar start.
+  state.addNote(2, {1440, 480, 50, 80, 2});  // Bass: D3.
+  state.addNote(0, {1440, 480, 69, 80, 0});  // Soprano: A4. |69-50|=19,mod12=7 (P5).
+  state.addNote(0, {1920, 480, 72, 80, 0});  // Soprano: C5 at bar start.
 
   // Bass D3(50) with C5(72): |50-72|=22, mod12=10 (m7), dissonant.
   // Preparation: D3(50) with A4(69) at tick 1440 = 19, mod12=7 (P5), consonant.

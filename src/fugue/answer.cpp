@@ -12,8 +12,6 @@ namespace bach {
 
 namespace {
 
-
-
 /// @brief Generate a real answer by transposing all notes up a perfect 5th.
 /// @param subject The source subject.
 /// @param dominant_key The dominant key.
@@ -51,8 +49,7 @@ Answer generateRealAnswer(const Subject& subject, Key dominant_key) {
 /// @return Index of the mutation boundary (0-based, exclusive). Notes
 ///         before this index get the tonal adjustment; notes at and
 ///         after this index get a straight real-answer transposition.
-size_t findMutationPoint(const Subject& subject,
-                         int tonic_class, int dominant_class) {
+size_t findMutationPoint(const Subject& subject, int tonic_class, int dominant_class) {
   // Scan forward from the beginning. The mutation zone covers the
   // initial notes that move between tonic and dominant pitch classes.
   for (size_t idx = 0; idx < subject.notes.size(); ++idx) {
@@ -82,8 +79,7 @@ size_t findMutationPoint(const Subject& subject,
 /// @param dominant_class Dominant pitch class.
 /// @param in_mutation_zone Whether this note is within the mutation zone.
 /// @return The adjusted note for the answer.
-NoteEvent applyTonalAdjustment(const NoteEvent& note,
-                               int tonic_class, int dominant_class,
+NoteEvent applyTonalAdjustment(const NoteEvent& note, int tonic_class, int dominant_class,
                                bool in_mutation_zone) {
   NoteEvent result = note;
   result.source = BachNoteSource::FugueAnswer;
@@ -133,8 +129,8 @@ Answer generateTonalAnswer(const Subject& subject, Key dominant_key) {
 
   for (size_t idx = 0; idx < subject.notes.size(); ++idx) {
     bool in_mutation = (idx < mutation_end);
-    NoteEvent adjusted = applyTonalAdjustment(
-        subject.notes[idx], tonic_class, dominant_class, in_mutation);
+    NoteEvent adjusted =
+        applyTonalAdjustment(subject.notes[idx], tonic_class, dominant_class, in_mutation);
     answer.notes.push_back(adjusted);
   }
 
@@ -148,7 +144,8 @@ Answer generateTonalAnswer(const Subject& subject, Key dominant_key) {
 // ---------------------------------------------------------------------------
 
 AnswerType autoDetectAnswerType(const Subject& subject) {
-  if (subject.noteCount() < 2) return AnswerType::Real;
+  if (subject.noteCount() < 2)
+    return AnswerType::Real;
 
   int tonic_class = getPitchClass(static_cast<uint8_t>(subject.key));
   int dominant_class = (tonic_class + interval::kPerfect5th) % 12;
@@ -167,10 +164,8 @@ AnswerType autoDetectAnswerType(const Subject& subject) {
     bool next_is_dominant = (pc_next == dominant_class);
 
     // Tonic -> Dominant or Dominant -> Tonic leap at the start.
-    if ((curr_is_tonic && next_is_dominant) ||
-        (curr_is_dominant && next_is_tonic)) {
-      int abs_int = absoluteInterval(subject.notes[idx].pitch,
-                                     subject.notes[idx + 1].pitch);
+    if ((curr_is_tonic && next_is_dominant) || (curr_is_dominant && next_is_tonic)) {
+      int abs_int = absoluteInterval(subject.notes[idx].pitch, subject.notes[idx + 1].pitch);
       // Must be a significant interval (at least a 4th) to qualify as a
       // "tonic-dominant leap".
       if (abs_int >= interval::kPerfect4th) {
@@ -182,8 +177,7 @@ AnswerType autoDetectAnswerType(const Subject& subject) {
   return AnswerType::Real;
 }
 
-Answer generateAnswer(const Subject& subject, AnswerType type,
-                      AnswerType archetype_preference) {
+Answer generateAnswer(const Subject& subject, AnswerType type, AnswerType archetype_preference) {
   Key dominant_key = getDominant(KeySignature{subject.key, false}).tonic;
 
   if (type == AnswerType::Auto) {
@@ -192,8 +186,7 @@ Answer generateAnswer(const Subject& subject, AnswerType type,
       type = archetype_preference;
       // Warn if Real answer is forced on a tonic-dominant head subject,
       // which normally requires tonal mutation.
-      if (type == AnswerType::Real &&
-          autoDetectAnswerType(subject) == AnswerType::Tonal) {
+      if (type == AnswerType::Real && autoDetectAnswerType(subject) == AnswerType::Tonal) {
         // Structural contradiction: subject has tonic-dominant head but
         // archetype requires Real answer. Log for visibility.
         // (No rejection -- archetype priority principle.)
@@ -218,17 +211,27 @@ Answer generateAnswer(const Subject& subject, AnswerType type,
 
     // Target: dominant of the answer key (tonic of the subject key).
     int target_pc = getPitchClass(static_cast<uint8_t>(subject.key));
-    ScaleType scale =
-        subject.is_minor ? ScaleType::HarmonicMinor : ScaleType::Major;
+    ScaleType scale = subject.is_minor ? ScaleType::HarmonicMinor : ScaleType::Major;
 
     // Pitch bounds from subject.
     int floor_pitch = static_cast<int>(subject.lowestPitch());
     int ceil_pitch = clampPitch(static_cast<int>(subject.highestPitch()) + 12, 0, 127);
 
-    int ending = normalizeEndingPitch(target_pc, prev_pitch, max_leap,
-                                      dominant_key, scale,
+    int ending = normalizeEndingPitch(target_pc, prev_pitch, max_leap, dominant_key, scale,
                                       floor_pitch, ceil_pitch);
     answer.notes.back().pitch = static_cast<uint8_t>(ending);
+  }
+
+  if (!subject.is_minor) {
+    int tonic_pc = getPitchClass(static_cast<uint8_t>(subject.key));
+    int raised_fourth_pc = (tonic_pc + 6) % 12;
+    for (auto& note : answer.notes) {
+      if (getPitchClass(note.pitch) != raised_fourth_pc)
+        continue;
+      if (note.pitch == 0)
+        continue;
+      note.pitch = static_cast<uint8_t>(note.pitch - 1);
+    }
   }
 
   return answer;

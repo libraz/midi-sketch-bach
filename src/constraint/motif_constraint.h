@@ -19,6 +19,7 @@ class IRuleEvaluator;
 class BachRuleEvaluator;
 class CollisionResolver;
 class HarmonicTimeline;
+struct ThematicPlan;
 
 /// @brief Motif transformation operations for constraint-driven episodes.
 enum class MotifOp : uint8_t {
@@ -43,13 +44,13 @@ const char* motifOpToString(MotifOp op);
 ///   - Noble: original + augmented retrograde, wide imitation
 ///   - Restless: fragment + diminution, tight imitation
 struct CharacterEpisodeParams {
-  MotifOp voice0_initial;      ///< Voice 0 initial transformation.
-  MotifOp voice1_initial;      ///< Voice 1 initial transformation.
-  MotifOp voice1_secondary;    ///< Secondary op for Noble (Retrograde after Augment).
-                               ///< Set to Original for no secondary.
-  float imitation_beats_lo;    ///< Imitation delay lower bound (beats).
-  float imitation_beats_hi;    ///< Imitation delay upper bound (beats).
-  int sequence_step;           ///< Sequence degree step (negative = descending).
+  MotifOp voice0_initial;    ///< Voice 0 initial transformation.
+  MotifOp voice1_initial;    ///< Voice 1 initial transformation.
+  MotifOp voice1_secondary;  ///< Secondary op for Noble (Retrograde after Augment).
+                             ///< Set to Original for no secondary.
+  float imitation_beats_lo;  ///< Imitation delay lower bound (beats).
+  float imitation_beats_hi;  ///< Imitation delay upper bound (beats).
+  int sequence_step;         ///< Sequence degree step (negative = descending).
 };
 
 /// @brief Get character-specific episode parameters.
@@ -80,34 +81,37 @@ std::vector<NoteEvent> applyMotifOp(const std::vector<NoteEvent>& notes, MotifOp
 
 /// @brief Request for constraint-driven episode generation.
 struct EpisodeRequest {
-  ConstraintState entry_state;   ///< Constraint state at episode start.
-  Key start_key = Key::C;       ///< Key at episode start.
-  Key end_key = Key::C;         ///< Target key at episode end.
-  Tick start_tick = 0;           ///< Absolute tick of episode start.
-  Tick duration = 0;             ///< Episode duration in ticks.
-  uint8_t num_voices = 2;       ///< Number of active voices (1-5).
+  ConstraintState entry_state;            ///< Constraint state at episode start.
+  Key start_key = Key::C;                 ///< Key at episode start.
+  Key end_key = Key::C;                   ///< Target key at episode end.
+  Key home_key = Key::C;                  ///< Fugue tonic key for mode-aware local scale.
+  bool home_is_minor = false;             ///< Whether the fugue tonic is minor.
+  Tick start_tick = 0;                    ///< Absolute tick of episode start.
+  Tick duration = 0;                      ///< Episode duration in ticks.
+  uint8_t num_voices = 2;                 ///< Number of active voices (1-5).
   const MotifPool* motif_pool = nullptr;  ///< Motif pool (read-only).
   SubjectCharacter character = SubjectCharacter::Severe;
-  FortspinnungGrammar grammar;   ///< Fortspinnung phase ratios.
-  int episode_index = 0;         ///< Episode ordinal (odd = invertible counterpoint).
-  float energy_level = 0.5f;     ///< Energy level [0,1].
-  uint32_t seed = 0;             ///< RNG seed.
-  uint8_t pedal_pitch = 0;      ///< Active pedal pitch (0 = none).
-  const IRuleEvaluator* rule_eval = nullptr;       ///< Rule evaluator for constraint evaluation.
-  const BachRuleEvaluator* crossing_eval = nullptr; ///< Bach evaluator for crossing checks.
-  const CounterpointState* cp_state_ctx = nullptr;  ///< Counterpoint state context.
+  FortspinnungGrammar grammar;                ///< Fortspinnung phase ratios.
+  int episode_index = 0;                      ///< Episode ordinal (odd = invertible counterpoint).
+  float energy_level = 0.5f;                  ///< Energy level [0,1].
+  uint32_t seed = 0;                          ///< RNG seed.
+  uint8_t pedal_pitch = 0;                    ///< Active pedal pitch (0 = none).
+  const IRuleEvaluator* rule_eval = nullptr;  ///< Rule evaluator for constraint evaluation.
+  const BachRuleEvaluator* crossing_eval = nullptr;  ///< Bach evaluator for crossing checks.
+  const CounterpointState* cp_state_ctx = nullptr;   ///< Counterpoint state context.
   const SectionAccumulator* pipeline_accumulator = nullptr;  ///< Pipeline-level accumulator.
-  const HarmonicTimeline* timeline = nullptr;  ///< Harmonic timeline for bass pitch selection.
+  const HarmonicTimeline* timeline = nullptr;   ///< Harmonic timeline for bass pitch selection.
+  const ThematicPlan* thematic_plan = nullptr;  ///< Protected intent/drawer plan.
   static constexpr int kMaxRequestVoices = 6;
   uint8_t last_pitches[kMaxRequestVoices] = {};  ///< Per-voice last pitch (0 = unknown).
 };
 
 /// @brief Result of constraint-driven episode generation.
 struct EpisodeResult {
-  std::vector<NoteEvent> notes;    ///< Generated episode notes.
-  ConstraintState exit_state;      ///< Constraint state at episode end.
-  Key achieved_key = Key::C;       ///< Actual key at episode end.
-  bool success = false;            ///< False if deadlocked or failed.
+  std::vector<NoteEvent> notes;  ///< Generated episode notes.
+  ConstraintState exit_state;    ///< Constraint state at episode end.
+  Key achieved_key = Key::C;     ///< Actual key at episode end.
+  bool success = false;          ///< False if deadlocked or failed.
 };
 
 }  // namespace bach

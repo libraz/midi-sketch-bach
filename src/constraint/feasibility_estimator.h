@@ -40,11 +40,9 @@ class FeasibilityEstimator {
   /// @param invariants Current invariant set (Hard checks applied).
   /// @param snap Current vertical snapshot.
   /// @return Feasibility with min/max choice bounds.
-  Feasibility estimate(const CounterpointState& state,
-                       const IRuleEvaluator& rules,
-                       const CollisionResolver& resolver,
-                       VoiceId voice_id, Tick tick, Tick duration,
-                       const InvariantSet& invariants,
+  Feasibility estimate(const CounterpointState& state, const IRuleEvaluator& rules,
+                       const CollisionResolver& resolver, VoiceId voice_id, Tick tick,
+                       Tick duration, const InvariantSet& invariants,
                        const VerticalSnapshot& snap) const;
 
   /// @brief Estimate solution space using CollisionResolver's full cascade.
@@ -66,11 +64,9 @@ class FeasibilityEstimator {
   /// @param invariants Current invariant set (Hard checks applied).
   /// @param snap Current vertical snapshot.
   /// @return Feasibility with min/max choice bounds reflecting cascade solutions.
-  Feasibility estimateWithCascade(const CounterpointState& state,
-                                  const IRuleEvaluator& rules,
-                                  const CollisionResolver& resolver,
-                                  VoiceId voice_id, Tick tick, Tick duration,
-                                  const InvariantSet& invariants,
+  Feasibility estimateWithCascade(const CounterpointState& state, const IRuleEvaluator& rules,
+                                  const CollisionResolver& resolver, VoiceId voice_id, Tick tick,
+                                  Tick duration, const InvariantSet& invariants,
                                   const VerticalSnapshot& snap) const;
 };
 

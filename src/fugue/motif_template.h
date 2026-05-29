@@ -44,9 +44,9 @@ enum class NoteFunction : uint8_t {
 /// and are never generated randomly.
 struct MotifTemplate {
   MotifType type;
-  std::vector<int> degree_offsets;       ///< Relative scale degrees from start (0-based).
-  std::vector<Tick> durations;           ///< Duration for each note.
-  std::vector<NoteFunction> functions;   ///< Structural function per note.
+  std::vector<int> degree_offsets;      ///< Relative scale degrees from start (0-based).
+  std::vector<Tick> durations;          ///< Duration for each note.
+  std::vector<NoteFunction> functions;  ///< Structural function per note.
 };
 
 /// @brief Goal tone position and pitch for subject climax.
@@ -80,7 +80,7 @@ GoalTone goalToneForCharacter(SubjectCharacter character, std::mt19937& rng);
 /// @return GoalTone with ratios clamped to archetype bounds.
 struct ArchetypePolicy;
 GoalTone goalToneForCharacter(SubjectCharacter character, std::mt19937& rng,
-                               const ArchetypePolicy& policy);
+                              const ArchetypePolicy& policy);
 
 // ---------------------------------------------------------------------------
 // Acceleration profile for rhythm progression
@@ -88,9 +88,9 @@ GoalTone goalToneForCharacter(SubjectCharacter character, std::mt19937& rng,
 
 /// @brief Acceleration curve type for subject rhythm progression.
 enum class AccelCurveType : uint8_t {
-  None,     ///< Equal rhythm (no acceleration). 20-30% of subjects.
-  EaseIn,   ///< Hold early values, accelerate toward end. Most common.
-  Linear    ///< Steady acceleration throughout.
+  None,    ///< Equal rhythm (no acceleration). 20-30% of subjects.
+  EaseIn,  ///< Hold early values, accelerate toward end. Most common.
+  Linear   ///< Steady acceleration throughout.
 };
 
 /// @brief Acceleration profile for rhythm progression within a subject.
@@ -143,8 +143,7 @@ const KerngestaltCell& getCoreCell(KerngestaltType type, int index);
 /// @param archetype Fugue archetype.
 /// @param rng Random number generator.
 /// @return Selected KerngestaltType.
-KerngestaltType selectKerngestaltType(SubjectCharacter character,
-                                      FugueArchetype archetype,
+KerngestaltType selectKerngestaltType(SubjectCharacter character, FugueArchetype archetype,
                                       std::mt19937& rng);
 
 /// @brief Get the pair of MotifTemplates (A and B) for a given character.
@@ -159,8 +158,8 @@ KerngestaltType selectKerngestaltType(SubjectCharacter character,
 /// @param character Subject character type.
 /// @param template_idx Index to select among 5 template pairs (taken mod 5).
 /// @return Pair of templates: first = Motif A (ascending), second = Motif B (descending).
-std::pair<MotifTemplate, MotifTemplate> motifTemplatesForCharacter(
-    SubjectCharacter character, uint32_t template_idx = 0);
+std::pair<MotifTemplate, MotifTemplate> motifTemplatesForCharacter(SubjectCharacter character,
+                                                                   uint32_t template_idx = 0);
 
 }  // namespace bach
 

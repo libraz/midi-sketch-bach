@@ -24,8 +24,7 @@ class MotionAnalyzer {
 
   /// @brief Classify motion between two successive pitch pairs.
   /// Delegates directly to the rule evaluator.
-  MotionType classifyMotion(uint8_t prev1, uint8_t curr1,
-                            uint8_t prev2, uint8_t curr2) const;
+  MotionType classifyMotion(uint8_t prev1, uint8_t curr1, uint8_t prev2, uint8_t curr2) const;
 
   /// Aggregate motion statistics for a voice pair.
   struct MotionStats {
@@ -47,8 +46,8 @@ class MotionAnalyzer {
   /// @param voice1 First voice.
   /// @param voice2 Second voice.
   /// @return Aggregate motion statistics.
-  MotionStats analyzeVoicePair(const CounterpointState& state,
-                               VoiceId voice1, VoiceId voice2) const;
+  MotionStats analyzeVoicePair(const CounterpointState& state, VoiceId voice1,
+                               VoiceId voice2) const;
 
  private:
   const IRuleEvaluator& rules_;

@@ -36,14 +36,14 @@ enum class EpisodeVocabularyMode : uint8_t {
 ///
 /// Calibrated from bach-reference episode internal arc analysis.
 struct FortspinnungGrammar {
-  float kernel_ratio = 0.25f;        ///< Fraction of episode for Kernel phase.
-  float sequence_ratio = 0.50f;      ///< Fraction for Sequence phase.
-  float dissolution_ratio = 0.25f;   ///< Fraction for Dissolution phase.
+  float kernel_ratio = 0.25f;       ///< Fraction of episode for Kernel phase.
+  float sequence_ratio = 0.50f;     ///< Fraction for Sequence phase.
+  float dissolution_ratio = 0.25f;  ///< Fraction for Dissolution phase.
 
   // Dissolution phase characteristics.
-  uint8_t min_fragment_notes = 2;    ///< Minimum notes in dissolution fragments.
-  float stepwise_preference = 0.70f; ///< Scoring weight for stepwise motion (0.0-1.0).
-  float density_decay_factor = 1.2f; ///< Inter-onset expansion per step (1.2 = 20% longer).
+  uint8_t min_fragment_notes = 2;      ///< Minimum notes in dissolution fragments.
+  float stepwise_preference = 0.70f;   ///< Scoring weight for stepwise motion (0.0-1.0).
+  float density_decay_factor = 1.2f;   ///< Inter-onset expansion per step (1.2 = 20% longer).
   float cadential_lengthening = 1.5f;  ///< Final 1-2 note duration multiplier.
 };
 
@@ -77,12 +77,12 @@ enum class FortPhase : uint8_t { Kernel, Sequence, Dissolution };
 /// The constraint episode generator uses these steps to place notes
 /// with ConstraintState validation.
 struct FortspinnungStep {
-  Tick tick;                  ///< Absolute tick for this step.
-  VoiceId voice;              ///< Target voice.
-  MotifOp op;                 ///< Motif operation to apply.
-  size_t pool_rank;           ///< Motif pool rank to use.
-  FortPhase phase;            ///< Phase within the Fortspinnung arc.
-  Tick suggested_duration;    ///< Suggested duration for the motif at this step.
+  Tick tick;                ///< Absolute tick for this step.
+  VoiceId voice;            ///< Target voice.
+  MotifOp op;               ///< Motif operation to apply.
+  size_t pool_rank;         ///< Motif pool rank to use.
+  FortPhase phase;          ///< Phase within the Fortspinnung arc.
+  Tick suggested_duration;  ///< Suggested duration for the motif at this step.
 };
 
 /// @brief Plan the Fortspinnung arc without placing notes.
@@ -102,11 +102,9 @@ struct FortspinnungStep {
 /// @param seed RNG seed.
 /// @return Planned steps sorted by tick.
 std::vector<FortspinnungStep> planFortspinnung(const MotifPool& pool,
-                                               const FortspinnungGrammar& grammar,
-                                               Tick start_tick, Tick duration,
-                                               uint8_t num_voices,
-                                               SubjectCharacter character,
-                                               uint32_t seed);
+                                               const FortspinnungGrammar& grammar, Tick start_tick,
+                                               Tick duration, uint8_t num_voices,
+                                               SubjectCharacter character, uint32_t seed);
 
 /// @brief Generate Fortspinnung-style episode material from the motif pool.
 ///
@@ -129,13 +127,9 @@ std::vector<FortspinnungStep> planFortspinnung(const MotifPool& pool,
 /// @param character Subject character (influences fragment choice probability).
 /// @param key Musical key for pedal anchor pitch calculation.
 /// @return Vector of NoteEvents for the Fortspinnung passage.
-std::vector<NoteEvent> generateFortspinnung(const MotifPool& pool,
-                                            Tick start_tick,
-                                            Tick duration_ticks,
-                                            uint8_t num_voices,
-                                            uint32_t seed,
-                                            SubjectCharacter character,
-                                            Key key);
+std::vector<NoteEvent> generateFortspinnung(const MotifPool& pool, Tick start_tick,
+                                            Tick duration_ticks, uint8_t num_voices, uint32_t seed,
+                                            SubjectCharacter character, Key key);
 
 }  // namespace bach
 

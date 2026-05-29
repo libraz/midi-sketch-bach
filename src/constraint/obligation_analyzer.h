@@ -20,8 +20,8 @@ namespace bach {
 /// @param key Tonic pitch class.
 /// @param is_minor True for minor key context.
 /// @return Complete constraint profile for the subject.
-SubjectConstraintProfile analyzeObligations(
-    const std::vector<NoteEvent>& notes, Key key, bool is_minor);
+SubjectConstraintProfile analyzeObligations(const std::vector<NoteEvent>& notes, Key key,
+                                            bool is_minor);
 
 /// @brief Compute the stretto feasibility matrix for a subject.
 ///
@@ -33,10 +33,8 @@ SubjectConstraintProfile analyzeObligations(
 /// @param profile Constraint profile to populate (must have obligations and lateral dynamics).
 /// @param notes Subject notes (sorted by start_tick).
 /// @param subject_length Total subject duration in ticks.
-void computeStrettoFeasibility(
-    SubjectConstraintProfile& profile,
-    const std::vector<NoteEvent>& notes,
-    Tick subject_length);
+void computeStrettoFeasibility(SubjectConstraintProfile& profile,
+                               const std::vector<NoteEvent>& notes, Tick subject_length);
 
 }  // namespace bach
 

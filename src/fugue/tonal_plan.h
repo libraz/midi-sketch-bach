@@ -16,8 +16,9 @@ namespace bach {
 /// @brief A key change event within the tonal plan.
 struct KeyChange {
   Key target_key = Key::C;
-  Tick tick = 0;                               // When the modulation occurs
-  FuguePhase phase = FuguePhase::Establish;    // Which phase this belongs to
+  Tick tick = 0;                             // When the modulation occurs
+  FuguePhase phase = FuguePhase::Establish;  // Which phase this belongs to
+  bool is_minor = false;                     // Mode active after this change
 };
 
 /// @brief Tonal plan for an entire fugue.
@@ -69,7 +70,6 @@ struct TonalPlan {
   std::string toJson() const;
 };
 
-
 /// @brief Generate a tonal plan for a fugue.
 ///
 /// Creates a standard fugue modulation schedule:
@@ -84,8 +84,7 @@ struct TonalPlan {
 /// @param is_minor Whether the fugue key is minor.
 /// @param total_duration_ticks Total fugue duration in ticks.
 /// @return Generated TonalPlan.
-TonalPlan generateTonalPlan(const FugueConfig& config, bool is_minor,
-                            Tick total_duration_ticks);
+TonalPlan generateTonalPlan(const FugueConfig& config, bool is_minor, Tick total_duration_ticks);
 
 /// @brief Generate a tonal plan aligned with actual fugue section boundaries.
 ///
@@ -101,8 +100,7 @@ TonalPlan generateTonalPlan(const FugueConfig& config, bool is_minor,
 /// @return TonalPlan with key changes aligned to episode midpoints.
 TonalPlan generateStructureAlignedTonalPlan(const FugueConfig& config,
                                             const ModulationPlan& mod_plan,
-                                            Tick subject_length_ticks,
-                                            Tick estimated_duration);
+                                            Tick subject_length_ticks, Tick estimated_duration);
 
 }  // namespace bach
 

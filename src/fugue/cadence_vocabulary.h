@@ -28,13 +28,13 @@ namespace bach {
 ///       chromatic adjustment, since cadence formulas operate at the harmonic
 ///       skeleton level before ornamental elaboration.
 struct CadenceApproach {
-  const char* name;                  ///< Human-readable identifier (e.g., "PAC_StepDown").
-  CadenceType type;                  ///< Cadence type from harmonic_timeline.h.
-  const int8_t* soprano_approach;    ///< Degree intervals approaching cadence.
-  uint8_t soprano_len;               ///< Length of soprano_approach array.
-  const int8_t* bass_approach;       ///< Degree intervals approaching cadence.
-  uint8_t bass_len;                  ///< Length of bass_approach array.
-  const char* provenance;            ///< Bach reference source (e.g., "BWV578 bar 20").
+  const char* name;                ///< Human-readable identifier (e.g., "PAC_StepDown").
+  CadenceType type;                ///< Cadence type from harmonic_timeline.h.
+  const int8_t* soprano_approach;  ///< Degree intervals approaching cadence.
+  uint8_t soprano_len;             ///< Length of soprano_approach array.
+  const int8_t* bass_approach;     ///< Degree intervals approaching cadence.
+  uint8_t bass_len;                ///< Length of bass_approach array.
+  const char* provenance;          ///< Bach reference source (e.g., "BWV578 bar 20").
 };
 
 // ---------------------------------------------------------------------------
@@ -47,16 +47,16 @@ struct CadenceApproach {
 /// position within the fugue's formal plan. The cadence planner evaluates
 /// these rules against current state to select the most appropriate cadence.
 struct CadenceContextRule {
-  CadenceType type;                      ///< Cadence type this rule governs.
-  bool requires_exposition_end;          ///< Must occur at end of exposition.
-  bool requires_episode_end;             ///< Must occur at end of an episode.
-  bool requires_section_final;           ///< Must occur at a section boundary.
-  bool avoid_near_stretto;               ///< Avoid placement near stretto entries.
-  bool requires_dominant_preparation;    ///< Requires preceding dominant harmony.
-  bool requires_tonic_stability;         ///< Requires surrounding tonic stability.
-  bool allow_on_modulating_episode;      ///< Permitted during modulating episodes.
-  uint8_t min_bars_since_last_pac;       ///< Minimum bars since last perfect cadence.
-  float min_phase_pos;                   ///< Minimum position (0.0-1.0) in the piece.
+  CadenceType type;                    ///< Cadence type this rule governs.
+  bool requires_exposition_end;        ///< Must occur at end of exposition.
+  bool requires_episode_end;           ///< Must occur at end of an episode.
+  bool requires_section_final;         ///< Must occur at a section boundary.
+  bool avoid_near_stretto;             ///< Avoid placement near stretto entries.
+  bool requires_dominant_preparation;  ///< Requires preceding dominant harmony.
+  bool requires_tonic_stability;       ///< Requires surrounding tonic stability.
+  bool allow_on_modulating_episode;    ///< Permitted during modulating episodes.
+  uint8_t min_bars_since_last_pac;     ///< Minimum bars since last perfect cadence.
+  float min_phase_pos;                 ///< Minimum position (0.0-1.0) in the piece.
 };
 
 // ---------------------------------------------------------------------------
@@ -69,9 +69,9 @@ struct CadenceContextRule {
 /// to avoid masking the structural soprano-bass framework. These defaults
 /// are derived from Bach's practice in 4-voice organ fugues.
 struct CadenceInnerVoiceGuidance {
-  uint8_t max_leap_semitones = 4;        ///< Maximum leap in semitones (default: M3).
-  bool prefer_4_3_resolution = true;     ///< Prefer 4th resolving down to 3rd (sus4->3).
-  bool prefer_7_6_resolution = true;     ///< Prefer 7th resolving down to 6th.
+  uint8_t max_leap_semitones = 4;     ///< Maximum leap in semitones (default: M3).
+  bool prefer_4_3_resolution = true;  ///< Prefer 4th resolving down to 3rd (sus4->3).
+  bool prefer_7_6_resolution = true;  ///< Prefer 7th resolving down to 6th.
 };
 
 // ---------------------------------------------------------------------------
@@ -82,37 +82,49 @@ struct CadenceInnerVoiceGuidance {
 /// Bass leaps up a 4th (V->I). Common in BWV578 internal cadences.
 inline constexpr int8_t kPAC_StepDown_sop[] = {-2, -1};
 inline constexpr int8_t kPAC_StepDown_bass[] = {+4};
-inline constexpr CadenceApproach kPAC_StepDown = {
-    "PAC_StepDown", CadenceType::Perfect,
-    kPAC_StepDown_sop, 2, kPAC_StepDown_bass, 1,
-    "BWV578 bar 20, BWV574 bar 96"};
+inline constexpr CadenceApproach kPAC_StepDown = {"PAC_StepDown",
+                                                  CadenceType::Perfect,
+                                                  kPAC_StepDown_sop,
+                                                  2,
+                                                  kPAC_StepDown_bass,
+                                                  1,
+                                                  "BWV578 bar 20, BWV574 bar 96"};
 
 /// PAC_LeadingTone: soprano resolves leading tone up to tonic (7->1).
 /// Bass drops a 5th (V->I, equivalent to 4th up). Standard final cadence.
 inline constexpr int8_t kPAC_LeadingTone_sop[] = {-1};
 inline constexpr int8_t kPAC_LeadingTone_bass[] = {-3};
-inline constexpr CadenceApproach kPAC_LeadingTone = {
-    "PAC_LeadingTone", CadenceType::Perfect,
-    kPAC_LeadingTone_sop, 1, kPAC_LeadingTone_bass, 1,
-    "BWV578 bar 69, BWV575 bar 88"};
+inline constexpr CadenceApproach kPAC_LeadingTone = {"PAC_LeadingTone",
+                                                     CadenceType::Perfect,
+                                                     kPAC_LeadingTone_sop,
+                                                     1,
+                                                     kPAC_LeadingTone_bass,
+                                                     1,
+                                                     "BWV578 bar 69, BWV575 bar 88"};
 
 /// PAC_DoubleStep: soprano descends 3 steps (4->3->2->1) for extended approach.
 /// Bass leaps up a 4th (V->I). Used in final cadences with preparation.
 inline constexpr int8_t kPAC_DoubleStep_sop[] = {-1, -1, -1};
 inline constexpr int8_t kPAC_DoubleStep_bass[] = {+4};
-inline constexpr CadenceApproach kPAC_DoubleStep = {
-    "PAC_DoubleStep", CadenceType::Perfect,
-    kPAC_DoubleStep_sop, 3, kPAC_DoubleStep_bass, 1,
-    "BWV578 bar 68, BWV577 bar 59"};
+inline constexpr CadenceApproach kPAC_DoubleStep = {"PAC_DoubleStep",
+                                                    CadenceType::Perfect,
+                                                    kPAC_DoubleStep_sop,
+                                                    3,
+                                                    kPAC_DoubleStep_bass,
+                                                    1,
+                                                    "BWV578 bar 68, BWV577 bar 59"};
 
 /// PAC_BassWalk: soprano steps down to tonic (2->1).
 /// Bass walks up stepwise through leading tone (7->1 via +1, +1).
 inline constexpr int8_t kPAC_BassWalk_sop[] = {-1, -1};
 inline constexpr int8_t kPAC_BassWalk_bass[] = {+1, +1};
-inline constexpr CadenceApproach kPAC_BassWalk = {
-    "PAC_BassWalk", CadenceType::Perfect,
-    kPAC_BassWalk_sop, 2, kPAC_BassWalk_bass, 2,
-    "BWV576 bar 70, BWV574 bar 55"};
+inline constexpr CadenceApproach kPAC_BassWalk = {"PAC_BassWalk",
+                                                  CadenceType::Perfect,
+                                                  kPAC_BassWalk_sop,
+                                                  2,
+                                                  kPAC_BassWalk_bass,
+                                                  2,
+                                                  "BWV576 bar 70, BWV574 bar 55"};
 
 // ---------------------------------------------------------------------------
 // HC (Half Cadence) approach data
@@ -122,28 +134,37 @@ inline constexpr CadenceApproach kPAC_BassWalk = {
 /// Bass leaps up a 4th to dominant (I->V).
 inline constexpr int8_t kHC_StepUp_sop[] = {+1, +2};
 inline constexpr int8_t kHC_StepUp_bass[] = {+4};
-inline constexpr CadenceApproach kHC_StepUp = {
-    "HC_StepUp", CadenceType::Half,
-    kHC_StepUp_sop, 2, kHC_StepUp_bass, 1,
-    "BWV578 bar 10, BWV576 bar 28"};
+inline constexpr CadenceApproach kHC_StepUp = {"HC_StepUp",
+                                               CadenceType::Half,
+                                               kHC_StepUp_sop,
+                                               2,
+                                               kHC_StepUp_bass,
+                                               1,
+                                               "BWV578 bar 10, BWV576 bar 28"};
 
 /// HC_Descent: soprano descends then holds on dominant (6->5).
 /// Bass drops a 5th to dominant.
 inline constexpr int8_t kHC_Descent_sop[] = {-1};
 inline constexpr int8_t kHC_Descent_bass[] = {-4};
-inline constexpr CadenceApproach kHC_Descent = {
-    "HC_Descent", CadenceType::Half,
-    kHC_Descent_sop, 1, kHC_Descent_bass, 1,
-    "BWV578 bar 36, BWV575 bar 24"};
+inline constexpr CadenceApproach kHC_Descent = {"HC_Descent",
+                                                CadenceType::Half,
+                                                kHC_Descent_sop,
+                                                1,
+                                                kHC_Descent_bass,
+                                                1,
+                                                "BWV578 bar 36, BWV575 bar 24"};
 
 /// HC_LeapDown: soprano leaps down a 3rd to dominant (7->5).
 /// Bass steps up to dominant.
 inline constexpr int8_t kHC_LeapDown_sop[] = {-1, -2};
 inline constexpr int8_t kHC_LeapDown_bass[] = {+1};
-inline constexpr CadenceApproach kHC_LeapDown = {
-    "HC_LeapDown", CadenceType::Half,
-    kHC_LeapDown_sop, 2, kHC_LeapDown_bass, 1,
-    "BWV574 bar 42, BWV577 bar 18"};
+inline constexpr CadenceApproach kHC_LeapDown = {"HC_LeapDown",
+                                                 CadenceType::Half,
+                                                 kHC_LeapDown_sop,
+                                                 2,
+                                                 kHC_LeapDown_bass,
+                                                 1,
+                                                 "BWV574 bar 42, BWV577 bar 18"};
 
 // ---------------------------------------------------------------------------
 // DC (Deceptive Cadence) approach data
@@ -153,19 +174,25 @@ inline constexpr CadenceApproach kHC_LeapDown = {
 /// The soprano expectation of resolution is thwarted by the bass.
 inline constexpr int8_t kDC_Deceptive_sop[] = {-2, -1};
 inline constexpr int8_t kDC_Deceptive_bass[] = {+1};
-inline constexpr CadenceApproach kDC_Deceptive = {
-    "DC_Deceptive", CadenceType::Deceptive,
-    kDC_Deceptive_sop, 2, kDC_Deceptive_bass, 1,
-    "BWV578 bar 52, BWV575 bar 64"};
+inline constexpr CadenceApproach kDC_Deceptive = {"DC_Deceptive",
+                                                  CadenceType::Deceptive,
+                                                  kDC_Deceptive_sop,
+                                                  2,
+                                                  kDC_Deceptive_bass,
+                                                  1,
+                                                  "BWV578 bar 52, BWV575 bar 64"};
 
 /// DC_LeadingTone: soprano resolves leading tone up (7->1) but bass steps up
 /// to vi instead of resolving to I. Creates surprise continuation.
 inline constexpr int8_t kDC_LeadingTone_sop[] = {+1};
 inline constexpr int8_t kDC_LeadingTone_bass[] = {+1};
-inline constexpr CadenceApproach kDC_LeadingTone = {
-    "DC_LeadingTone", CadenceType::Deceptive,
-    kDC_LeadingTone_sop, 1, kDC_LeadingTone_bass, 1,
-    "BWV578 bar 51, BWV574 bar 78"};
+inline constexpr CadenceApproach kDC_LeadingTone = {"DC_LeadingTone",
+                                                    CadenceType::Deceptive,
+                                                    kDC_LeadingTone_sop,
+                                                    1,
+                                                    kDC_LeadingTone_bass,
+                                                    1,
+                                                    "BWV578 bar 51, BWV574 bar 78"};
 
 // ---------------------------------------------------------------------------
 // PHR (Phrygian Cadence) approach data
@@ -176,27 +203,32 @@ inline constexpr CadenceApproach kDC_LeadingTone = {
 inline constexpr int8_t kPHR_Bass_sop[] = {-1};
 inline constexpr int8_t kPHR_Bass_bass[] = {-1};
 inline constexpr CadenceApproach kPHR_Bass = {
-    "PHR_Bass", CadenceType::Phrygian,
-    kPHR_Bass_sop, 1, kPHR_Bass_bass, 1,
-    "BWV578 bar 44, BWV575 bar 36"};
+    "PHR_Bass", CadenceType::Phrygian,         kPHR_Bass_sop, 1, kPHR_Bass_bass,
+    1,          "BWV578 bar 44, BWV575 bar 36"};
 
 /// PHR_Extended: extended Phrygian descent with soprano countermotion.
 /// Soprano ascends a step then resolves down while bass descends stepwise.
 inline constexpr int8_t kPHR_Extended_sop[] = {+1, -1};
 inline constexpr int8_t kPHR_Extended_bass[] = {-1, -1};
-inline constexpr CadenceApproach kPHR_Extended = {
-    "PHR_Extended", CadenceType::Phrygian,
-    kPHR_Extended_sop, 2, kPHR_Extended_bass, 2,
-    "BWV574 bar 62, BWV577 bar 40"};
+inline constexpr CadenceApproach kPHR_Extended = {"PHR_Extended",
+                                                  CadenceType::Phrygian,
+                                                  kPHR_Extended_sop,
+                                                  2,
+                                                  kPHR_Extended_bass,
+                                                  2,
+                                                  "BWV574 bar 62, BWV577 bar 40"};
 
 /// PHR_SopranoHold: soprano holds while bass descends in Phrygian motion.
 /// Creates tension through oblique motion at the cadence point.
 inline constexpr int8_t kPHR_SopranoHold_sop[] = {-1, -1};
 inline constexpr int8_t kPHR_SopranoHold_bass[] = {-1};
-inline constexpr CadenceApproach kPHR_SopranoHold = {
-    "PHR_SopranoHold", CadenceType::Phrygian,
-    kPHR_SopranoHold_sop, 2, kPHR_SopranoHold_bass, 1,
-    "BWV575 bar 48, BWV576 bar 52"};
+inline constexpr CadenceApproach kPHR_SopranoHold = {"PHR_SopranoHold",
+                                                     CadenceType::Phrygian,
+                                                     kPHR_SopranoHold_sop,
+                                                     2,
+                                                     kPHR_SopranoHold_bass,
+                                                     1,
+                                                     "BWV575 bar 48, BWV576 bar 52"};
 
 // ---------------------------------------------------------------------------
 // Plagal cadence approach (bonus -- used in coda)
@@ -206,10 +238,13 @@ inline constexpr CadenceApproach kPHR_SopranoHold = {
 /// bass drops a 4th. Typically used in final bars.
 inline constexpr int8_t kPlagal_Amen_sop[] = {-1};
 inline constexpr int8_t kPlagal_Amen_bass[] = {-3};
-inline constexpr CadenceApproach kPlagal_Amen = {
-    "Plagal_Amen", CadenceType::Plagal,
-    kPlagal_Amen_sop, 1, kPlagal_Amen_bass, 1,
-    "BWV578 bar 70, BWV577 bar 61"};
+inline constexpr CadenceApproach kPlagal_Amen = {"Plagal_Amen",
+                                                 CadenceType::Plagal,
+                                                 kPlagal_Amen_sop,
+                                                 1,
+                                                 kPlagal_Amen_bass,
+                                                 1,
+                                                 "BWV578 bar 70, BWV577 bar 61"};
 
 // ---------------------------------------------------------------------------
 // Aggregate approach tables

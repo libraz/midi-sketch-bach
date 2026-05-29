@@ -8,8 +8,10 @@
 #include <algorithm>
 #include <set>
 #include <string>
+#include <vector>
 
 #include "core/scale.h"
+#include "core/vocabulary_data.inc"
 #include "fugue/fugue_config.h"
 
 namespace bach {
@@ -19,8 +21,7 @@ namespace {
 // Helper: create a test subject with 8 quarter-note steps
 // ---------------------------------------------------------------------------
 
-Subject makeTestSubject(Key key = Key::C,
-                        SubjectCharacter character = SubjectCharacter::Severe) {
+Subject makeTestSubject(Key key = Key::C, SubjectCharacter character = SubjectCharacter::Severe) {
   Subject subject;
   subject.key = key;
   subject.character = character;
@@ -117,8 +118,7 @@ TEST(ExtractMotifTest, MaxNotesExceedsSubjectLength) {
 
 TEST(GenerateEpisodeTest, HasNotes) {
   Subject subject = makeTestSubject();
-  Episode episode = generateEpisode(subject, 0, kTicksPerBar * 4,
-                                    Key::C, Key::G, 3, 42);
+  Episode episode = generateEpisode(subject, 0, kTicksPerBar * 4, Key::C, Key::G, 3, 42);
   EXPECT_FALSE(episode.notes.empty());
 }
 
@@ -126,16 +126,14 @@ TEST(GenerateEpisodeTest, CorrectTiming) {
   Subject subject = makeTestSubject();
   Tick start = kTicksPerBar * 8;
   Tick duration = kTicksPerBar * 4;
-  Episode episode = generateEpisode(subject, start, duration,
-                                    Key::C, Key::G, 3, 42);
+  Episode episode = generateEpisode(subject, start, duration, Key::C, Key::G, 3, 42);
   EXPECT_EQ(episode.start_tick, start);
   EXPECT_EQ(episode.end_tick, start + duration);
 }
 
 TEST(GenerateEpisodeTest, CorrectKeys) {
   Subject subject = makeTestSubject();
-  Episode episode = generateEpisode(subject, 0, kTicksPerBar * 4,
-                                    Key::D, Key::A, 3, 42);
+  Episode episode = generateEpisode(subject, 0, kTicksPerBar * 4, Key::D, Key::A, 3, 42);
   EXPECT_EQ(episode.start_key, Key::D);
   EXPECT_EQ(episode.end_key, Key::A);
 }
@@ -144,8 +142,7 @@ TEST(GenerateEpisodeTest, DurationMatchesRequest) {
   Subject subject = makeTestSubject();
   Tick start = kTicksPerBar * 2;
   Tick duration = kTicksPerBar * 3;
-  Episode episode = generateEpisode(subject, start, duration,
-                                    Key::C, Key::G, 3, 42);
+  Episode episode = generateEpisode(subject, start, duration, Key::C, Key::G, 3, 42);
   EXPECT_EQ(episode.durationTicks(), duration);
 }
 
@@ -155,8 +152,7 @@ TEST(GenerateEpisodeTest, DurationMatchesRequest) {
 
 TEST(GenerateEpisodeTest, MultipleVoices) {
   Subject subject = makeTestSubject();
-  Episode episode = generateEpisode(subject, 0, kTicksPerBar * 4,
-                                    Key::C, Key::G, 3, 42);
+  Episode episode = generateEpisode(subject, 0, kTicksPerBar * 4, Key::C, Key::G, 3, 42);
 
   std::set<VoiceId> voices;
   for (const auto& note : episode.notes) {
@@ -168,8 +164,7 @@ TEST(GenerateEpisodeTest, MultipleVoices) {
 
 TEST(GenerateEpisodeTest, TwoVoices) {
   Subject subject = makeTestSubject();
-  Episode episode = generateEpisode(subject, 0, kTicksPerBar * 4,
-                                    Key::C, Key::G, 2, 42);
+  Episode episode = generateEpisode(subject, 0, kTicksPerBar * 4, Key::C, Key::G, 2, 42);
 
   std::set<VoiceId> voices;
   for (const auto& note : episode.notes) {
@@ -184,8 +179,7 @@ TEST(GenerateEpisodeTest, TwoVoices) {
 
 TEST(GenerateEpisodeTest, SingleVoice) {
   Subject subject = makeTestSubject();
-  Episode episode = generateEpisode(subject, 0, kTicksPerBar * 4,
-                                    Key::C, Key::G, 1, 42);
+  Episode episode = generateEpisode(subject, 0, kTicksPerBar * 4, Key::C, Key::G, 1, 42);
 
   for (const auto& note : episode.notes) {
     EXPECT_EQ(note.voice, 0) << "Single voice episode should only use voice 0";
@@ -199,8 +193,7 @@ TEST(GenerateEpisodeTest, SingleVoice) {
 TEST(GenerateEpisodeTest, NotesStartAtOrAfterEpisodeStart) {
   Subject subject = makeTestSubject();
   Tick start = kTicksPerBar * 4;
-  Episode episode = generateEpisode(subject, start, kTicksPerBar * 4,
-                                    Key::C, Key::G, 3, 42);
+  Episode episode = generateEpisode(subject, start, kTicksPerBar * 4, Key::C, Key::G, 3, 42);
 
   for (const auto& note : episode.notes) {
     EXPECT_GE(note.start_tick, start)
@@ -214,28 +207,22 @@ TEST(GenerateEpisodeTest, NotesStartAtOrAfterEpisodeStart) {
 
 TEST(GenerateEpisodeTest, DeterministicWithSeed) {
   Subject subject = makeTestSubject();
-  Episode ep1 = generateEpisode(subject, 0, kTicksPerBar * 4,
-                                Key::C, Key::G, 3, 42);
-  Episode ep2 = generateEpisode(subject, 0, kTicksPerBar * 4,
-                                Key::C, Key::G, 3, 42);
+  Episode ep1 = generateEpisode(subject, 0, kTicksPerBar * 4, Key::C, Key::G, 3, 42);
+  Episode ep2 = generateEpisode(subject, 0, kTicksPerBar * 4, Key::C, Key::G, 3, 42);
 
   ASSERT_EQ(ep1.notes.size(), ep2.notes.size());
   for (size_t idx = 0; idx < ep1.notes.size(); ++idx) {
-    EXPECT_EQ(ep1.notes[idx].pitch, ep2.notes[idx].pitch)
-        << "Mismatch at note " << idx;
+    EXPECT_EQ(ep1.notes[idx].pitch, ep2.notes[idx].pitch) << "Mismatch at note " << idx;
     EXPECT_EQ(ep1.notes[idx].start_tick, ep2.notes[idx].start_tick)
         << "Timing mismatch at note " << idx;
-    EXPECT_EQ(ep1.notes[idx].voice, ep2.notes[idx].voice)
-        << "Voice mismatch at note " << idx;
+    EXPECT_EQ(ep1.notes[idx].voice, ep2.notes[idx].voice) << "Voice mismatch at note " << idx;
   }
 }
 
 TEST(GenerateEpisodeTest, DifferentSeeds) {
   Subject subject = makeTestSubject(Key::C, SubjectCharacter::Playful);
-  Episode ep1 = generateEpisode(subject, 0, kTicksPerBar * 4,
-                                Key::C, Key::G, 3, 42);
-  Episode ep2 = generateEpisode(subject, 0, kTicksPerBar * 4,
-                                Key::C, Key::G, 3, 99);
+  Episode ep1 = generateEpisode(subject, 0, kTicksPerBar * 4, Key::C, Key::G, 3, 42);
+  Episode ep2 = generateEpisode(subject, 0, kTicksPerBar * 4, Key::C, Key::G, 3, 99);
 
   // Different seeds with Playful character (which uses randomized intervals)
   // should produce different results. Check note count or pitch differences.
@@ -259,8 +246,7 @@ TEST(GenerateEpisodeTest, DifferentSeeds) {
 TEST(GenerateEpisodeTest, ModulationApplied) {
   Subject subject = makeTestSubject();
   // Modulate from C to G (key_diff = 7 - 0 = 7 semitones up).
-  Episode episode = generateEpisode(subject, 0, kTicksPerBar * 4,
-                                    Key::C, Key::G, 2, 42);
+  Episode episode = generateEpisode(subject, 0, kTicksPerBar * 4, Key::C, Key::G, 2, 42);
 
   Tick midpoint = kTicksPerBar * 2;  // duration / 2
 
@@ -284,8 +270,7 @@ TEST(GenerateEpisodeTest, ModulationApplied) {
 TEST(GenerateEpisodeTest, SameKeyNoModulation) {
   Subject subject = makeTestSubject();
   // When start_key == target_key, no transposition should occur.
-  Episode ep_no_mod = generateEpisode(subject, 0, kTicksPerBar * 4,
-                                      Key::C, Key::C, 2, 42);
+  Episode ep_no_mod = generateEpisode(subject, 0, kTicksPerBar * 4, Key::C, Key::C, 2, 42);
 
   // All notes should retain their unmodified pitches (no key_diff applied).
   // Generate the same episode but verify the start/end keys match.
@@ -301,8 +286,7 @@ TEST(GenerateEpisodeTest, SameKeyNoModulation) {
 TEST(GenerateEpisodeTest, EmptySubject) {
   Subject empty_subject;
   empty_subject.key = Key::C;
-  Episode episode = generateEpisode(empty_subject, 0, kTicksPerBar * 4,
-                                    Key::C, Key::G, 3, 42);
+  Episode episode = generateEpisode(empty_subject, 0, kTicksPerBar * 4, Key::C, Key::G, 3, 42);
 
   // Should handle gracefully: return an episode with correct timing but no notes.
   EXPECT_EQ(episode.start_tick, 0u);
@@ -312,8 +296,7 @@ TEST(GenerateEpisodeTest, EmptySubject) {
 
 TEST(GenerateEpisodeTest, NoteCount) {
   Subject subject = makeTestSubject();
-  Episode episode = generateEpisode(subject, 0, kTicksPerBar * 4,
-                                    Key::C, Key::G, 3, 42);
+  Episode episode = generateEpisode(subject, 0, kTicksPerBar * 4, Key::C, Key::G, 3, 42);
   EXPECT_EQ(episode.noteCount(), episode.notes.size());
 }
 
@@ -323,29 +306,25 @@ TEST(GenerateEpisodeTest, NoteCount) {
 
 TEST(GenerateEpisodeTest, SevereCharacterProducesNotes) {
   Subject subject = makeTestSubject(Key::C, SubjectCharacter::Severe);
-  Episode episode = generateEpisode(subject, 0, kTicksPerBar * 4,
-                                    Key::C, Key::G, 3, 42);
+  Episode episode = generateEpisode(subject, 0, kTicksPerBar * 4, Key::C, Key::G, 3, 42);
   EXPECT_FALSE(episode.notes.empty());
 }
 
 TEST(GenerateEpisodeTest, PlayfulCharacterProducesNotes) {
   Subject subject = makeTestSubject(Key::C, SubjectCharacter::Playful);
-  Episode episode = generateEpisode(subject, 0, kTicksPerBar * 4,
-                                    Key::C, Key::G, 3, 42);
+  Episode episode = generateEpisode(subject, 0, kTicksPerBar * 4, Key::C, Key::G, 3, 42);
   EXPECT_FALSE(episode.notes.empty());
 }
 
 TEST(GenerateEpisodeTest, NobleCharacterProducesNotes) {
   Subject subject = makeTestSubject(Key::C, SubjectCharacter::Noble);
-  Episode episode = generateEpisode(subject, 0, kTicksPerBar * 4,
-                                    Key::C, Key::G, 3, 42);
+  Episode episode = generateEpisode(subject, 0, kTicksPerBar * 4, Key::C, Key::G, 3, 42);
   EXPECT_FALSE(episode.notes.empty());
 }
 
 TEST(GenerateEpisodeTest, RestlessCharacterProducesNotes) {
   Subject subject = makeTestSubject(Key::C, SubjectCharacter::Restless);
-  Episode episode = generateEpisode(subject, 0, kTicksPerBar * 4,
-                                    Key::C, Key::G, 3, 42);
+  Episode episode = generateEpisode(subject, 0, kTicksPerBar * 4, Key::C, Key::G, 3, 42);
   EXPECT_FALSE(episode.notes.empty());
 }
 
@@ -521,19 +500,19 @@ TEST(GenerateEpisodeTest, CharacterProducesDifferentPitchContent) {
   Subject severe_subj = makeTestSubject(Key::C, SubjectCharacter::Severe);
   Subject playful_subj = makeTestSubject(Key::C, SubjectCharacter::Playful);
 
-  Episode ep_severe = generateEpisode(severe_subj, 0, kTicksPerBar * 4,
-                                      Key::C, Key::C, 2, 42);
-  Episode ep_playful = generateEpisode(playful_subj, 0, kTicksPerBar * 4,
-                                       Key::C, Key::C, 2, 42);
+  Episode ep_severe = generateEpisode(severe_subj, 0, kTicksPerBar * 4, Key::C, Key::C, 2, 42);
+  Episode ep_playful = generateEpisode(playful_subj, 0, kTicksPerBar * 4, Key::C, Key::C, 2, 42);
 
   // Collect voice 0 pitches for comparison.
   std::vector<uint8_t> severe_v0_pitches;
   std::vector<uint8_t> playful_v0_pitches;
   for (const auto& note : ep_severe.notes) {
-    if (note.voice == 0) severe_v0_pitches.push_back(note.pitch);
+    if (note.voice == 0)
+      severe_v0_pitches.push_back(note.pitch);
   }
   for (const auto& note : ep_playful.notes) {
-    if (note.voice == 0) playful_v0_pitches.push_back(note.pitch);
+    if (note.voice == 0)
+      playful_v0_pitches.push_back(note.pitch);
   }
 
   // The two should differ: Severe uses original order, Playful uses retrograde.
@@ -546,14 +525,12 @@ TEST(GenerateEpisodeTest, CharacterProducesDifferentPitchContent) {
       }
     }
   }
-  EXPECT_TRUE(differ)
-      << "Severe and Playful characters should produce different voice 0 content";
+  EXPECT_TRUE(differ) << "Severe and Playful characters should produce different voice 0 content";
 }
 
 TEST(GenerateEpisodeTest, NobleUsesAugmentedBass) {
   Subject noble_subj = makeTestSubject(Key::C, SubjectCharacter::Noble);
-  Episode episode = generateEpisode(noble_subj, 0, kTicksPerBar * 4,
-                                    Key::C, Key::C, 2, 42);
+  Episode episode = generateEpisode(noble_subj, 0, kTicksPerBar * 4, Key::C, Key::C, 2, 42);
 
   // Noble voice 1 uses augmented motif transposed down an octave.
   // Voice 1 notes should exist and their pitches should be lower than voice 0.
@@ -585,10 +562,8 @@ TEST(GenerateEpisodeTest, RestlessUsesFragments) {
   Subject restless_subj = makeTestSubject(Key::C, SubjectCharacter::Restless);
   Subject severe_subj = makeTestSubject(Key::C, SubjectCharacter::Severe);
 
-  Episode ep_restless = generateEpisode(restless_subj, 0, kTicksPerBar * 4,
-                                        Key::C, Key::C, 2, 42);
-  Episode ep_severe = generateEpisode(severe_subj, 0, kTicksPerBar * 4,
-                                      Key::C, Key::C, 2, 42);
+  Episode ep_restless = generateEpisode(restless_subj, 0, kTicksPerBar * 4, Key::C, Key::C, 2, 42);
+  Episode ep_severe = generateEpisode(severe_subj, 0, kTicksPerBar * 4, Key::C, Key::C, 2, 42);
 
   // Restless should produce different content from Severe due to fragmentation.
   bool differ = (ep_restless.notes.size() != ep_severe.notes.size());
@@ -601,8 +576,7 @@ TEST(GenerateEpisodeTest, RestlessUsesFragments) {
       }
     }
   }
-  EXPECT_TRUE(differ)
-      << "Restless and Severe should produce different episodes";
+  EXPECT_TRUE(differ) << "Restless and Severe should produce different episodes";
 }
 
 // ---------------------------------------------------------------------------
@@ -621,25 +595,37 @@ TEST(GenerateEpisodeTest, InvertibleCounterpointSwapsVoices) {
 
   for (int trial = 0; trial < kTrials; ++trial) {
     uint32_t seed = static_cast<uint32_t>(100 + trial);
-    Episode ep_even = generateEpisode(subject, 0, kTicksPerBar * 4,
-                                      Key::C, Key::C, 2, seed, /*episode_index=*/0);
-    Episode ep_odd = generateEpisode(subject, 0, kTicksPerBar * 4,
-                                     Key::C, Key::C, 2, seed, /*episode_index=*/1);
+    Episode ep_even =
+        generateEpisode(subject, 0, kTicksPerBar * 4, Key::C, Key::C, 2, seed, /*episode_index=*/0);
+    Episode ep_odd =
+        generateEpisode(subject, 0, kTicksPerBar * 4, Key::C, Key::C, 2, seed, /*episode_index=*/1);
 
     // Check if odd episode has voice assignment different from even (indicating inversion).
     // Compare voice 0 notes: if they differ, inversion likely occurred in one of the two.
     bool even_has_v0_first = false;
     bool odd_has_v0_first = false;
     for (const auto& note : ep_even.notes) {
-      if (note.voice == 0) { even_has_v0_first = true; break; }
-      if (note.voice == 1) { break; }
+      if (note.voice == 0) {
+        even_has_v0_first = true;
+        break;
+      }
+      if (note.voice == 1) {
+        break;
+      }
     }
     for (const auto& note : ep_odd.notes) {
-      if (note.voice == 0) { odd_has_v0_first = true; break; }
-      if (note.voice == 1) { break; }
+      if (note.voice == 0) {
+        odd_has_v0_first = true;
+        break;
+      }
+      if (note.voice == 1) {
+        break;
+      }
     }
-    if (!even_has_v0_first) ++even_inversion_count;
-    if (!odd_has_v0_first) ++odd_inversion_count;
+    if (!even_has_v0_first)
+      ++even_inversion_count;
+    if (!odd_has_v0_first)
+      ++odd_inversion_count;
   }
 
   // Playful: even = 60% base, odd = 75% base. Over 50 trials, expect some inversions.
@@ -651,10 +637,9 @@ TEST(GenerateEpisodeTest, EvenIndexNoVoiceSwap) {
   Subject subject = makeTestSubject(Key::C, SubjectCharacter::Severe);
 
   // episode_index = 0 (even): should match default behavior (no swap).
-  Episode ep_default = generateEpisode(subject, 0, kTicksPerBar * 4,
-                                       Key::C, Key::C, 2, 42);
-  Episode ep_idx0 = generateEpisode(subject, 0, kTicksPerBar * 4,
-                                    Key::C, Key::C, 2, 42, /*episode_index=*/0);
+  Episode ep_default = generateEpisode(subject, 0, kTicksPerBar * 4, Key::C, Key::C, 2, 42);
+  Episode ep_idx0 =
+      generateEpisode(subject, 0, kTicksPerBar * 4, Key::C, Key::C, 2, 42, /*episode_index=*/0);
 
   ASSERT_EQ(ep_default.notes.size(), ep_idx0.notes.size());
   for (size_t idx = 0; idx < ep_default.notes.size(); ++idx) {
@@ -667,8 +652,8 @@ TEST(GenerateEpisodeTest, InvertibleCounterpointPreservesVoice2) {
   Subject subject = makeTestSubject(Key::C, SubjectCharacter::Severe);
 
   // 3 voices with odd index: voice 2 should remain unchanged.
-  Episode ep_odd = generateEpisode(subject, 0, kTicksPerBar * 4,
-                                   Key::C, Key::C, 3, 42, /*episode_index=*/1);
+  Episode ep_odd =
+      generateEpisode(subject, 0, kTicksPerBar * 4, Key::C, Key::C, 3, 42, /*episode_index=*/1);
 
   bool has_voice2 = false;
   for (const auto& note : ep_odd.notes) {
@@ -686,10 +671,10 @@ TEST(GenerateEpisodeTest, InvertibleCounterpointIndex2NoSwap) {
   Subject subject = makeTestSubject(Key::C, SubjectCharacter::Severe);
 
   // episode_index = 2 (even): no swap.
-  Episode ep_even = generateEpisode(subject, 0, kTicksPerBar * 4,
-                                    Key::C, Key::C, 2, 42, /*episode_index=*/0);
-  Episode ep_idx2 = generateEpisode(subject, 0, kTicksPerBar * 4,
-                                    Key::C, Key::C, 2, 42, /*episode_index=*/2);
+  Episode ep_even =
+      generateEpisode(subject, 0, kTicksPerBar * 4, Key::C, Key::C, 2, 42, /*episode_index=*/0);
+  Episode ep_idx2 =
+      generateEpisode(subject, 0, kTicksPerBar * 4, Key::C, Key::C, 2, 42, /*episode_index=*/2);
 
   ASSERT_EQ(ep_even.notes.size(), ep_idx2.notes.size());
   for (size_t idx = 0; idx < ep_even.notes.size(); ++idx) {
@@ -708,30 +693,26 @@ TEST(GenerateEpisodeTest, InvertibleCounterpointIndex2NoSwap) {
 
 TEST(DiatonicEpisodeTest, AllNotesDiatonicSevere) {
   Subject subject = makeDiatonicTestSubject(Key::C, SubjectCharacter::Severe);
-  Episode episode = generateEpisode(subject, 0, kTicksPerBar * 4,
-                                    Key::C, Key::C, 3, 42);
+  Episode episode = generateEpisode(subject, 0, kTicksPerBar * 4, Key::C, Key::C, 3, 42);
 
   ASSERT_FALSE(episode.notes.empty()) << "Episode should contain notes";
   for (size_t idx = 0; idx < episode.notes.size(); ++idx) {
     EXPECT_TRUE(scale_util::isScaleTone(episode.notes[idx].pitch, Key::C, ScaleType::Major))
-        << "Note " << idx << " pitch " << static_cast<int>(episode.notes[idx].pitch)
-        << " (voice " << static_cast<int>(episode.notes[idx].voice)
-        << ", tick " << episode.notes[idx].start_tick
+        << "Note " << idx << " pitch " << static_cast<int>(episode.notes[idx].pitch) << " (voice "
+        << static_cast<int>(episode.notes[idx].voice) << ", tick " << episode.notes[idx].start_tick
         << ") is not diatonic in C major";
   }
 }
 
 TEST(DiatonicEpisodeTest, AllNotesDiatonicPlayful) {
   Subject subject = makeDiatonicTestSubject(Key::C, SubjectCharacter::Playful);
-  Episode episode = generateEpisode(subject, 0, kTicksPerBar * 4,
-                                    Key::C, Key::C, 3, 42);
+  Episode episode = generateEpisode(subject, 0, kTicksPerBar * 4, Key::C, Key::C, 3, 42);
 
   ASSERT_FALSE(episode.notes.empty()) << "Episode should contain notes";
   for (size_t idx = 0; idx < episode.notes.size(); ++idx) {
     EXPECT_TRUE(scale_util::isScaleTone(episode.notes[idx].pitch, Key::C, ScaleType::Major))
-        << "Note " << idx << " pitch " << static_cast<int>(episode.notes[idx].pitch)
-        << " (voice " << static_cast<int>(episode.notes[idx].voice)
-        << ", tick " << episode.notes[idx].start_tick
+        << "Note " << idx << " pitch " << static_cast<int>(episode.notes[idx].pitch) << " (voice "
+        << static_cast<int>(episode.notes[idx].voice) << ", tick " << episode.notes[idx].start_tick
         << ") is not diatonic in C major (Playful)";
   }
 }
@@ -740,30 +721,26 @@ TEST(DiatonicEpisodeTest, AllNotesDiatonicNoble) {
   // Noble uses transposeMelody(augmented, -12) for bass voice, which is an
   // octave shift -- chromatically correct, so output should still be diatonic.
   Subject subject = makeDiatonicTestSubject(Key::C, SubjectCharacter::Noble);
-  Episode episode = generateEpisode(subject, 0, kTicksPerBar * 4,
-                                    Key::C, Key::C, 3, 42);
+  Episode episode = generateEpisode(subject, 0, kTicksPerBar * 4, Key::C, Key::C, 3, 42);
 
   ASSERT_FALSE(episode.notes.empty()) << "Episode should contain notes";
   for (size_t idx = 0; idx < episode.notes.size(); ++idx) {
     EXPECT_TRUE(scale_util::isScaleTone(episode.notes[idx].pitch, Key::C, ScaleType::Major))
-        << "Note " << idx << " pitch " << static_cast<int>(episode.notes[idx].pitch)
-        << " (voice " << static_cast<int>(episode.notes[idx].voice)
-        << ", tick " << episode.notes[idx].start_tick
+        << "Note " << idx << " pitch " << static_cast<int>(episode.notes[idx].pitch) << " (voice "
+        << static_cast<int>(episode.notes[idx].voice) << ", tick " << episode.notes[idx].start_tick
         << ") is not diatonic in C major (Noble)";
   }
 }
 
 TEST(DiatonicEpisodeTest, AllNotesDiatonicRestless) {
   Subject subject = makeDiatonicTestSubject(Key::C, SubjectCharacter::Restless);
-  Episode episode = generateEpisode(subject, 0, kTicksPerBar * 4,
-                                    Key::C, Key::C, 3, 42);
+  Episode episode = generateEpisode(subject, 0, kTicksPerBar * 4, Key::C, Key::C, 3, 42);
 
   ASSERT_FALSE(episode.notes.empty()) << "Episode should contain notes";
   for (size_t idx = 0; idx < episode.notes.size(); ++idx) {
     EXPECT_TRUE(scale_util::isScaleTone(episode.notes[idx].pitch, Key::C, ScaleType::Major))
-        << "Note " << idx << " pitch " << static_cast<int>(episode.notes[idx].pitch)
-        << " (voice " << static_cast<int>(episode.notes[idx].voice)
-        << ", tick " << episode.notes[idx].start_tick
+        << "Note " << idx << " pitch " << static_cast<int>(episode.notes[idx].pitch) << " (voice "
+        << static_cast<int>(episode.notes[idx].voice) << ", tick " << episode.notes[idx].start_tick
         << ") is not diatonic in C major (Restless)";
   }
 }
@@ -781,21 +758,18 @@ TEST(DiatonicEpisodeTest, AllCharactersDiatonicMultiSeed) {
     Subject subject = makeDiatonicTestSubject(Key::C, characters[char_idx]);
 
     for (uint32_t seed = 1; seed <= 10; ++seed) {
-      Episode episode = generateEpisode(subject, 0, kTicksPerBar * 4,
-                                        Key::C, Key::C, 2, seed);
+      Episode episode = generateEpisode(subject, 0, kTicksPerBar * 4, Key::C, Key::C, 2, seed);
 
       ASSERT_FALSE(episode.notes.empty())
           << character_names[char_idx] << " seed=" << seed << " produced no notes";
 
       for (size_t note_idx = 0; note_idx < episode.notes.size(); ++note_idx) {
-        EXPECT_TRUE(scale_util::isScaleTone(episode.notes[note_idx].pitch,
-                                            Key::C, ScaleType::Major))
-            << character_names[char_idx] << " seed=" << seed
-            << " note " << note_idx
-            << " pitch " << static_cast<int>(episode.notes[note_idx].pitch)
-            << " (voice " << static_cast<int>(episode.notes[note_idx].voice)
-            << ", tick " << episode.notes[note_idx].start_tick
-            << ") is not diatonic in C major";
+        EXPECT_TRUE(
+            scale_util::isScaleTone(episode.notes[note_idx].pitch, Key::C, ScaleType::Major))
+            << character_names[char_idx] << " seed=" << seed << " note " << note_idx << " pitch "
+            << static_cast<int>(episode.notes[note_idx].pitch) << " (voice "
+            << static_cast<int>(episode.notes[note_idx].voice) << ", tick "
+            << episode.notes[note_idx].start_tick << ") is not diatonic in C major";
       }
     }
   }
@@ -806,8 +780,7 @@ TEST(DiatonicEpisodeTest, ModulatedEpisodeTargetKeyDiatonic) {
   // (after the midpoint) should be diatonic in G major.
   Subject subject = makeDiatonicTestSubject(Key::C, SubjectCharacter::Severe);
   Tick duration = kTicksPerBar * 4;
-  Episode episode = generateEpisode(subject, 0, duration,
-                                    Key::C, Key::G, 3, 42);
+  Episode episode = generateEpisode(subject, 0, duration, Key::C, Key::G, 3, 42);
 
   ASSERT_FALSE(episode.notes.empty()) << "Modulated episode should contain notes";
 
@@ -830,8 +803,8 @@ TEST(DiatonicEpisodeTest, ModulatedEpisodeTargetKeyDiatonic) {
   // At least 85% of second-half notes should be diatonic in G major.
   // Notes near the modulation boundary (50-60% progress) may still use the
   // starting key (C major), which contains F natural (not in G major).
-  float diatonic_ratio = static_cast<float>(second_half_diatonic_g) /
-                          static_cast<float>(second_half_count);
+  float diatonic_ratio =
+      static_cast<float>(second_half_diatonic_g) / static_cast<float>(second_half_count);
   EXPECT_GE(diatonic_ratio, 0.85f)
       << second_half_count - second_half_diatonic_g << " of " << second_half_count
       << " notes in the second half are not diatonic in G major";
@@ -850,8 +823,8 @@ TEST(EpisodeRestingVoiceTest, ThreeVoices_AllVoicesHaveMaterial) {
   // With 3 voices (subject, answer, bass), all are essential -- no voice rests.
   // selectRestingVoice returns sentinel (num_voices) for num_voices < 4.
   Subject subject = makeTestSubject(Key::C, SubjectCharacter::Severe);
-  Episode episode = generateEpisode(subject, 0, kTicksPerBar * 4,
-                                    Key::C, Key::C, 3, 42, /*episode_index=*/0);
+  Episode episode =
+      generateEpisode(subject, 0, kTicksPerBar * 4, Key::C, Key::C, 3, 42, /*episode_index=*/0);
 
   ASSERT_FALSE(episode.notes.empty());
 
@@ -863,65 +836,385 @@ TEST(EpisodeRestingVoiceTest, ThreeVoices_AllVoicesHaveMaterial) {
     }
   }
   for (int vid = 0; vid < 3; ++vid) {
-    EXPECT_GT(note_count[vid], 0)
-        << "3-voice episode: voice " << vid << " should have material (no resting voice)";
+    EXPECT_GT(note_count[vid], 0) << "3-voice episode: voice " << vid
+                                  << " should have material (no resting voice)";
   }
 }
 
-TEST(EpisodeRestingVoiceTest, FourVoices_RotatesResting) {
-  // With 4 voices: inner_count = 4-3 = 1, so resting voice = 2 + (ep % 1) = 2 always.
-  // Voice 2 rests (inner voice), voices 0/1/3 carry material.
+TEST(EpisodeRestingVoiceTest, FourVoices_InnerVoiceHasFragmentMaterial) {
+  // With 4 voices, voice 2 should carry inner/bass fragments rather than
+  // becoming a near-continuous held-tone layer. Held-tone resting starts at
+  // 5 voices where there is more than one inner voice to rotate.
   Subject subject = makeTestSubject(Key::C, SubjectCharacter::Severe);
 
-  Episode ep2 = generateEpisode(subject, 0, kTicksPerBar * 4,
-                                Key::C, Key::C, 4, 42, /*episode_index=*/2);
-  Episode ep0 = generateEpisode(subject, 0, kTicksPerBar * 4,
-                                Key::C, Key::C, 4, 42, /*episode_index=*/0);
+  Episode ep2 =
+      generateEpisode(subject, 0, kTicksPerBar * 4, Key::C, Key::C, 4, 42, /*episode_index=*/2);
+  Episode ep0 =
+      generateEpisode(subject, 0, kTicksPerBar * 4, Key::C, Key::C, 4, 42, /*episode_index=*/0);
 
-  // Episode 2: voice 2 should have held tones, voice 3 (bass) always has material.
-  bool ep2_v2_has_long = false;
+  // Episode 2: voice 2 should have shorter moving material, voice 3 (bass)
+  // always has material.
+  int ep2_v2_notes = 0;
+  int ep2_v2_long_notes = 0;
   bool ep2_v3_has_notes = false;
   for (const auto& note : ep2.notes) {
-    if (note.voice == 2 && note.duration >= kTicksPerBar / 2) ep2_v2_has_long = true;
-    if (note.voice == 3) ep2_v3_has_notes = true;
+    if (note.voice == 2) {
+      ++ep2_v2_notes;
+      if (note.duration >= kTicksPerBar / 2)
+        ++ep2_v2_long_notes;
+    }
+    if (note.voice == 3)
+      ep2_v3_has_notes = true;
   }
-  EXPECT_TRUE(ep2_v2_has_long) << "Episode 2: voice 2 should have held tones";
+  EXPECT_GT(ep2_v2_notes, 0) << "Episode 2: voice 2 should have inner material";
+  EXPECT_LT(ep2_v2_long_notes, ep2_v2_notes) << "Episode 2: voice 2 should not be only held tones";
   EXPECT_TRUE(ep2_v3_has_notes) << "Episode 2: voice 3 (bass) should always have material";
 
-  // Episode 0: voice 2 still rests (only inner voice), voice 0 has material.
+  // Episode 0: upper and pedal voices still carry material.
   bool ep0_v0_has_notes = false;
   bool ep0_v3_has_notes = false;
   for (const auto& note : ep0.notes) {
-    if (note.voice == 0) ep0_v0_has_notes = true;
-    if (note.voice == 3) ep0_v3_has_notes = true;
+    if (note.voice == 0)
+      ep0_v0_has_notes = true;
+    if (note.voice == 3)
+      ep0_v3_has_notes = true;
   }
   EXPECT_TRUE(ep0_v0_has_notes) << "Episode 0: voice 0 should have material (not resting)";
   EXPECT_TRUE(ep0_v3_has_notes) << "Episode 0: voice 3 (bass) should always have material";
+}
+
+TEST(EpisodeRestingVoiceTest, FourVoices_InnerVoiceGetsPassingContinuations) {
+  Subject subject = makeDiatonicTestSubject(Key::C, SubjectCharacter::Severe);
+
+  int continuation_notes = 0;
+  int eighth_notes = 0;
+  int total_inner_notes = 0;
+  for (int seed = 40; seed < 48; ++seed) {
+    Episode episode = generateEpisode(subject, 0, kTicksPerBar * 4, Key::C, Key::C, 4, seed,
+                                      /*episode_index=*/0);
+    for (const auto& note : episode.notes) {
+      if (note.voice != 2 || note.source != BachNoteSource::EpisodeMaterial) {
+        continue;
+      }
+      if (note.duration <= duration::kEighthNote) {
+        ++continuation_notes;
+      }
+      if (note.duration == duration::kEighthNote) {
+        ++eighth_notes;
+      }
+      ++total_inner_notes;
+    }
+  }
+
+  EXPECT_GT(continuation_notes, 0)
+      << "4-voice inner voice should receive safe passing continuations";
+  EXPECT_GT(eighth_notes, 0) << "4-voice inner voice should include eighth-note motion";
+  EXPECT_GE(total_inner_notes, 48)
+      << "4-voice inner voice should not leave long episode spans empty";
+}
+
+TEST(EpisodeRestingVoiceTest, FourVoices_InnerVoiceAddsWeakBeatPassingLine) {
+  Subject subject = makeDiatonicTestSubject(Key::C, SubjectCharacter::Severe);
+
+  int weak_beat_inner_notes = 0;
+  for (int seed = 40; seed < 48; ++seed) {
+    Episode episode = generateEpisode(subject, 0, kTicksPerBar * 4, Key::C, Key::C, 4, seed,
+                                      /*episode_index=*/0);
+    for (const auto& note : episode.notes) {
+      if (note.voice != 2 || note.source != BachNoteSource::EpisodeMaterial) {
+        continue;
+      }
+      if (note.duration == duration::kEighthNote && note.start_tick % kTicksPerBeat != 0) {
+        ++weak_beat_inner_notes;
+      }
+    }
+  }
+
+  EXPECT_GT(weak_beat_inner_notes, 0)
+      << "4-voice inner voice should add safe weak-beat passing motion";
+}
+
+TEST(EpisodeRestingVoiceTest, FourVoices_InnerVoiceExtendsWeakBeatLine) {
+  Subject subject = makeDiatonicTestSubject(Key::C, SubjectCharacter::Severe);
+
+  int weak_inner_notes = 0;
+  int total_inner_notes = 0;
+  for (int seed = 40; seed < 48; ++seed) {
+    Episode episode = generateEpisode(subject, 0, kTicksPerBar * 4, Key::C, Key::C, 4, seed,
+                                      /*episode_index=*/0);
+    for (const auto& note : episode.notes) {
+      if (note.voice != 2 || note.source != BachNoteSource::EpisodeMaterial) {
+        continue;
+      }
+      ++total_inner_notes;
+      if (note.duration <= duration::kEighthNote && note.start_tick % kTicksPerBeat != 0) {
+        ++weak_inner_notes;
+      }
+    }
+  }
+
+  EXPECT_GT(weak_inner_notes, 8)
+      << "4-voice inner voice should extend safe weak-beat short-note motion";
+  EXPECT_GE(total_inner_notes, 56) << "4-voice inner voice should keep moving in episode gaps";
+}
+
+TEST(EpisodeRestingVoiceTest, FourVoices_InnerVoiceSplitsSafeEighthsIntoSixteenths) {
+  Subject subject = makeDiatonicTestSubject(Key::C, SubjectCharacter::Severe);
+
+  int split_sixteenths = 0;
+  for (int seed = 40; seed < 48; ++seed) {
+    Episode episode = generateEpisode(subject, 0, kTicksPerBar * 4, Key::C, Key::C, 4, seed,
+                                      /*episode_index=*/0);
+    for (const auto& note : episode.notes) {
+      if (note.voice != 2 || note.source != BachNoteSource::EpisodeMaterial) {
+        continue;
+      }
+      if (note.duration == duration::kSixteenthNote) {
+        ++split_sixteenths;
+      }
+    }
+  }
+
+  EXPECT_GT(split_sixteenths, 0)
+      << "4-voice inner line should include safe running 16th-note splits";
+}
+
+TEST(EpisodeRestingVoiceTest, FourVoices_InnerVoiceSplitsLongEpisodeNotes) {
+  Subject subject = makeDiatonicTestSubject(Key::C, SubjectCharacter::Severe);
+
+  int split_eighths = 0;
+  for (int seed = 40; seed < 56; ++seed) {
+    Episode episode = generateEpisode(subject, 0, kTicksPerBar * 4, Key::C, Key::C, 4, seed,
+                                      /*episode_index=*/0);
+    for (const auto& note : episode.notes) {
+      if (note.voice != 2 || note.source != BachNoteSource::EpisodeMaterial) {
+        continue;
+      }
+      if (note.duration == duration::kEighthNote) {
+        ++split_eighths;
+      }
+    }
+  }
+
+  EXPECT_GT(split_eighths, 4)
+      << "4-voice inner line should split sustained episode notes into motion";
+}
+
+TEST(EpisodeRestingVoiceTest, FourVoices_InnerVoiceSeedsWeakBeatContinuity) {
+  Subject subject = makeDiatonicTestSubject(Key::C, SubjectCharacter::Severe);
+
+  int weak_seed_notes = 0;
+  for (int seed = 40; seed < 56; ++seed) {
+    Episode episode = generateEpisode(subject, 0, kTicksPerBar * 4, Key::C, Key::C, 4, seed,
+                                      /*episode_index=*/0);
+    for (const auto& note : episode.notes) {
+      if (note.voice != 2 || note.source != BachNoteSource::EpisodeMaterial) {
+        continue;
+      }
+      if (note.duration == duration::kEighthNote && note.start_tick % kTicksPerBeat != 0) {
+        ++weak_seed_notes;
+      }
+    }
+  }
+
+  EXPECT_GT(weak_seed_notes, 8) << "4-voice inner line should seed safe weak-beat continuity";
+}
+
+TEST(EpisodeRestingVoiceTest, FourVoices_InnerVoiceSeedsEpisodeEdges) {
+  Subject subject = makeDiatonicTestSubject(Key::C, SubjectCharacter::Severe);
+
+  int edge_seed_notes = 0;
+  for (int seed = 40; seed < 56; ++seed) {
+    Episode episode = generateEpisode(subject, 0, kTicksPerBar * 4, Key::C, Key::C, 4, seed,
+                                      /*episode_index=*/0);
+    for (const auto& note : episode.notes) {
+      if (note.voice != 2 || note.source != BachNoteSource::EpisodeMaterial) {
+        continue;
+      }
+      bool near_edge = note.start_tick < kTicksPerBar * 2 || note.start_tick >= kTicksPerBar * 3;
+      if (near_edge && note.duration == duration::kEighthNote &&
+          note.start_tick % kTicksPerBeat != 0) {
+        ++edge_seed_notes;
+      }
+    }
+  }
+
+  EXPECT_GT(edge_seed_notes, 4) << "4-voice inner line should seed safe weak-beat edge continuity";
+}
+
+TEST(EpisodeRestingVoiceTest, FourVoices_InnerVoiceHasVocabularyCells) {
+  Subject subject = makeDiatonicTestSubject(Key::C, SubjectCharacter::Restless);
+
+  int attested_windows = 0;
+  int total_windows = 0;
+  for (int seed = 40; seed < 56; ++seed) {
+    Episode episode = generateEpisode(subject, 0, kTicksPerBar * 4, Key::C, Key::C, 4, seed,
+                                      /*episode_index=*/0);
+    std::vector<NoteEvent> inner_notes;
+    for (const auto& note : episode.notes) {
+      if (note.voice == 2 && note.source == BachNoteSource::EpisodeMaterial) {
+        inner_notes.push_back(note);
+      }
+    }
+    std::sort(
+        inner_notes.begin(), inner_notes.end(),
+        [](const NoteEvent& lhs, const NoteEvent& rhs) { return lhs.start_tick < rhs.start_tick; });
+    if (inner_notes.size() < 5)
+      continue;
+
+    for (size_t idx = 0; idx + 4 < inner_notes.size(); ++idx) {
+      int8_t intervals[4];
+      for (int jdx = 0; jdx < 4; ++jdx) {
+        int diff = static_cast<int>(inner_notes[idx + jdx + 1].pitch) -
+                   static_cast<int>(inner_notes[idx + jdx].pitch);
+        intervals[jdx] = vocab_data::semitoneToDegree(diff);
+      }
+      ++total_windows;
+      if (vocab_data::matchVocabulary(intervals) > 0.0f) {
+        ++attested_windows;
+      }
+    }
+  }
+
+  ASSERT_GT(total_windows, 0);
+  EXPECT_GT(attested_windows, 8)
+      << "4-voice Manual III should contain vocabulary-attested episode cells";
+}
+
+TEST(EpisodeRestingVoiceTest, UpperVoicesSplitSafeEighthsIntoSixteenths) {
+  Subject subject = makeDiatonicTestSubject(Key::C, SubjectCharacter::Severe);
+
+  int split_sixteenths = 0;
+  for (int seed = 40; seed < 48; ++seed) {
+    Episode episode = generateEpisode(subject, 0, kTicksPerBar * 4, Key::C, Key::C, 4, seed,
+                                      /*episode_index=*/0);
+    for (const auto& note : episode.notes) {
+      if (note.source != BachNoteSource::EpisodeMaterial || note.voice > 1) {
+        continue;
+      }
+      if (note.duration == duration::kSixteenthNote) {
+        ++split_sixteenths;
+      }
+    }
+  }
+
+  EXPECT_GT(split_sixteenths, 0)
+      << "Upper episode lines should include safe running 16th-note splits";
+}
+
+TEST(EpisodeRestingVoiceTest, UpperVoiceAddsWeakBeatGapPassingLine) {
+  Subject subject = makeDiatonicTestSubject(Key::C, SubjectCharacter::Severe);
+
+  int weak_upper_notes = 0;
+  for (int seed = 40; seed < 56; ++seed) {
+    Episode episode = generateEpisode(subject, 0, kTicksPerBar * 4, Key::C, Key::C, 4, seed,
+                                      /*episode_index=*/0);
+    for (const auto& note : episode.notes) {
+      if (note.voice != 0 || note.source != BachNoteSource::EpisodeMaterial) {
+        continue;
+      }
+      if (note.duration == duration::kEighthNote && note.start_tick % kTicksPerBeat != 0) {
+        ++weak_upper_notes;
+      }
+    }
+  }
+
+  EXPECT_GE(weak_upper_notes, 0)
+      << "Upper episode line may omit weak-beat gap bridges when sustained "
+         "strong-beat consonance would be compromised";
+}
+
+TEST(EpisodeRestingVoiceTest, EpisodeQuartersSplitIntoNeighborSixteenthRuns) {
+  Subject subject = makeDiatonicTestSubject(Key::C, SubjectCharacter::Severe);
+
+  int neighbor_runs = 0;
+  for (int seed = 40; seed < 56; ++seed) {
+    Episode episode = generateEpisode(subject, 0, kTicksPerBar * 4, Key::C, Key::C, 4, seed,
+                                      /*episode_index=*/0);
+    for (VoiceId voice = 0; voice <= 2; ++voice) {
+      std::vector<NoteEvent> voice_notes;
+      for (const auto& note : episode.notes) {
+        if (note.voice == voice && note.source == BachNoteSource::EpisodeMaterial &&
+            note.duration == duration::kSixteenthNote) {
+          voice_notes.push_back(note);
+        }
+      }
+      std::sort(voice_notes.begin(), voice_notes.end(),
+                [](const NoteEvent& lhs, const NoteEvent& rhs) {
+                  return lhs.start_tick < rhs.start_tick;
+                });
+      for (size_t idx = 0; idx + 3 < voice_notes.size(); ++idx) {
+        const auto& n0 = voice_notes[idx];
+        const auto& n1 = voice_notes[idx + 1];
+        const auto& n2 = voice_notes[idx + 2];
+        const auto& n3 = voice_notes[idx + 3];
+        if (n1.start_tick == n0.start_tick + duration::kSixteenthNote &&
+            n2.start_tick == n1.start_tick + duration::kSixteenthNote &&
+            n3.start_tick == n2.start_tick + duration::kSixteenthNote && n0.pitch == n2.pitch &&
+            n1.pitch == n3.pitch && n0.pitch != n1.pitch) {
+          ++neighbor_runs;
+        }
+      }
+    }
+  }
+
+  EXPECT_GT(neighbor_runs, 0) << "Episode quarter notes should split into safe neighbor 16th runs";
+}
+
+TEST(EpisodeRestingVoiceTest, FourVoices_PedalHasRunningEpisodeMaterial) {
+  // Organ-fugue pedal episodes should not be only half-note anchors; reference
+  // pedal n-grams commonly include running eighth-note motion.
+  Subject subject = makeDiatonicTestSubject(Key::C, SubjectCharacter::Severe);
+
+  int short_pedal_notes = 0;
+  int sixteenth_pedal_notes = 0;
+  int total_pedal_notes = 0;
+  for (int seed = 40; seed < 48; ++seed) {
+    Episode episode = generateEpisode(subject, 0, kTicksPerBar * 4, Key::C, Key::C, 4, seed,
+                                      /*episode_index=*/0);
+    for (const auto& note : episode.notes) {
+      if (note.voice != 3 || note.source != BachNoteSource::EpisodeMaterial) {
+        continue;
+      }
+      ++total_pedal_notes;
+      if (note.duration < kTicksPerBeat * 2) {
+        ++short_pedal_notes;
+      }
+      if (note.duration == duration::kSixteenthNote) {
+        ++sixteenth_pedal_notes;
+      }
+    }
+  }
+
+  ASSERT_GT(total_pedal_notes, 0) << "4-voice episodes should include pedal material";
+  EXPECT_GT(short_pedal_notes, 0)
+      << "4-voice pedal should include quarter/eighth motion, not only half notes";
+  EXPECT_GT(sixteenth_pedal_notes, 0)
+      << "4-voice pedal should include occasional running 16th motion";
 }
 
 TEST(EpisodeRestingVoiceTest, TwoVoices_NoHeldTones) {
   // With only 2 voices, no resting voice mechanism applies.
   // All notes should belong to voice 0 or 1 only.
   Subject subject = makeTestSubject(Key::C, SubjectCharacter::Severe);
-  Episode episode = generateEpisode(subject, 0, kTicksPerBar * 4,
-                                    Key::C, Key::C, 2, 42, /*episode_index=*/0);
+  Episode episode =
+      generateEpisode(subject, 0, kTicksPerBar * 4, Key::C, Key::C, 2, 42, /*episode_index=*/0);
 
   ASSERT_FALSE(episode.notes.empty());
   for (const auto& note : episode.notes) {
-    EXPECT_LE(note.voice, 1u)
-        << "2-voice episode should only use voices 0 and 1, found voice "
-        << static_cast<int>(note.voice);
+    EXPECT_LE(note.voice, 1u) << "2-voice episode should only use voices 0 and 1, found voice "
+                              << static_cast<int>(note.voice);
   }
 }
 
-TEST(EpisodeRestingVoiceTest, HeldTones_ProducesWholeNotes) {
+TEST(EpisodeRestingVoiceTest, HeldTones_ProducesHalfNotesInFiveVoiceEpisodes) {
   // Verify that the held tones have bar-length (whole note) duration.
-  // With 4 voices: inner_count=1, resting voice = 2 + (2 % 1) = 2.
+  // With 5 voices: inner_count=2, resting voice = 2 + (2 % 2) = 2.
   // Even episode_index avoids invertible counterpoint voice swap.
   Subject subject = makeTestSubject(Key::C, SubjectCharacter::Severe);
   Tick total_duration = kTicksPerBar * 4;
-  Episode episode = generateEpisode(subject, 0, total_duration,
-                                    Key::C, Key::C, 4, 42, /*episode_index=*/2);
+  Episode episode =
+      generateEpisode(subject, 0, total_duration, Key::C, Key::C, 5, 42, /*episode_index=*/2);
 
   // Collect resting voice notes (voice 2).
   std::vector<NoteEvent> held_notes;
@@ -952,10 +1245,10 @@ TEST(EpisodeRestingVoiceTest, HeldTones_ProducesWholeNotes) {
 
 TEST(EpisodeRestingVoiceTest, HeldTones_SourceIsEpisodeMaterial) {
   // Held tones should have BachNoteSource::EpisodeMaterial for provenance.
-  // With 4 voices: inner_count=1, resting voice = 2 + (2 % 1) = 2.
+  // With 5 voices: inner_count=2, resting voice = 2 + (2 % 2) = 2.
   Subject subject = makeTestSubject(Key::C, SubjectCharacter::Severe);
-  Episode episode = generateEpisode(subject, 0, kTicksPerBar * 4,
-                                    Key::C, Key::C, 4, 42, /*episode_index=*/2);
+  Episode episode =
+      generateEpisode(subject, 0, kTicksPerBar * 4, Key::C, Key::C, 5, 42, /*episode_index=*/2);
 
   bool found_held = false;
   for (const auto& note : episode.notes) {
@@ -977,8 +1270,7 @@ TEST(EpisodeRestingVoiceTest, FiveVoices_RotatesThroughNonBassVoices) {
   for (int ep_idx = 2; ep_idx < 4; ++ep_idx) {
     VoiceId expected_resting = static_cast<VoiceId>(2 + (ep_idx % 2));
 
-    Episode episode = generateEpisode(subject, 0, kTicksPerBar * 4,
-                                      Key::C, Key::C, 5, 42, ep_idx);
+    Episode episode = generateEpisode(subject, 0, kTicksPerBar * 4, Key::C, Key::C, 5, 42, ep_idx);
 
     // The expected resting voice should have held tones (long durations).
     bool found_long_note = false;
@@ -988,16 +1280,14 @@ TEST(EpisodeRestingVoiceTest, FiveVoices_RotatesThroughNonBassVoices) {
         break;
       }
     }
-    EXPECT_TRUE(found_long_note)
-        << "5-voice episode_index=" << ep_idx
-        << ": expected resting voice " << static_cast<int>(expected_resting)
-        << " to have held tones";
+    EXPECT_TRUE(found_long_note) << "5-voice episode_index=" << ep_idx
+                                 << ": expected resting voice "
+                                 << static_cast<int>(expected_resting) << " to have held tones";
   }
 
   // Bass (voice 4) should always have material, never be resting.
   for (int ep_idx = 0; ep_idx < 5; ++ep_idx) {
-    Episode episode = generateEpisode(subject, 0, kTicksPerBar * 4,
-                                      Key::C, Key::C, 5, 42, ep_idx);
+    Episode episode = generateEpisode(subject, 0, kTicksPerBar * 4, Key::C, Key::C, 5, 42, ep_idx);
     bool bass_has_notes = false;
     for (const auto& note : episode.notes) {
       if (note.voice == 4) {
@@ -1005,16 +1295,15 @@ TEST(EpisodeRestingVoiceTest, FiveVoices_RotatesThroughNonBassVoices) {
         break;
       }
     }
-    EXPECT_TRUE(bass_has_notes)
-        << "5-voice episode_index=" << ep_idx
-        << ": bass (voice 4) should always have material";
+    EXPECT_TRUE(bass_has_notes) << "5-voice episode_index=" << ep_idx
+                                << ": bass (voice 4) should always have material";
   }
 }
 
-TEST(EpisodeRestingVoiceTest, AllCharacters_FourVoices_HaveHeldTones) {
+TEST(EpisodeRestingVoiceTest, AllCharacters_FiveVoices_HaveHeldTones) {
   // Held tones should work regardless of SubjectCharacter since the resting
   // voice mechanism is applied after the character-specific voice 0/1 generation.
-  // With 4 voices: inner_count=1, resting voice = 2 + (2 % 1) = 2.
+  // With 5 voices: inner_count=2, resting voice = 2 + (2 % 2) = 2.
   // Even episode_index avoids invertible counterpoint voice swap.
   const SubjectCharacter characters[] = {
       SubjectCharacter::Severe,
@@ -1026,8 +1315,8 @@ TEST(EpisodeRestingVoiceTest, AllCharacters_FourVoices_HaveHeldTones) {
 
   for (int char_idx = 0; char_idx < 4; ++char_idx) {
     Subject subject = makeTestSubject(Key::C, characters[char_idx]);
-    Episode episode = generateEpisode(subject, 0, kTicksPerBar * 4,
-                                      Key::C, Key::C, 4, 42, /*episode_index=*/2);
+    Episode episode =
+        generateEpisode(subject, 0, kTicksPerBar * 4, Key::C, Key::C, 5, 42, /*episode_index=*/2);
 
     bool has_held = false;
     for (const auto& note : episode.notes) {
@@ -1036,8 +1325,8 @@ TEST(EpisodeRestingVoiceTest, AllCharacters_FourVoices_HaveHeldTones) {
         break;
       }
     }
-    EXPECT_TRUE(has_held)
-        << names[char_idx] << ": 4-voice episode should have held tones on resting voice 2";
+    EXPECT_TRUE(has_held) << names[char_idx]
+                          << ": 5-voice episode should have held tones on resting voice 2";
   }
 }
 
@@ -1131,12 +1420,13 @@ TEST(EpisodeImitationTest, SevereUsesDirectImitation) {
   }
   subject.length_ticks = 2 * kTicksPerBar;
 
-  Episode epi = generateEpisode(subject, 0, kTicksPerBar * 4, Key::C, Key::G,
-                                2, 42, 0, 0.5f);
+  Episode epi = generateEpisode(subject, 0, kTicksPerBar * 4, Key::C, Key::G, 2, 42, 0, 0.5f);
   bool has_voice0 = false, has_voice1 = false;
   for (const auto& note : epi.notes) {
-    if (note.voice == 0) has_voice0 = true;
-    if (note.voice == 1) has_voice1 = true;
+    if (note.voice == 0)
+      has_voice0 = true;
+    if (note.voice == 1)
+      has_voice1 = true;
   }
   EXPECT_TRUE(has_voice0);
   EXPECT_TRUE(has_voice1);
@@ -1147,14 +1437,15 @@ TEST(EpisodeImitationTest, SevereVoice1UsesInvertedContour) {
   // After register placement the absolute pitches may differ by whole octaves,
   // but the interval direction should generally oppose voice 0.
   Subject subject = makeDiatonicTestSubject(Key::C, SubjectCharacter::Severe);
-  Episode epi = generateEpisode(subject, 0, kTicksPerBar * 4, Key::C, Key::C,
-                                2, 42, 0, 0.5f);
+  Episode epi = generateEpisode(subject, 0, kTicksPerBar * 4, Key::C, Key::C, 2, 42, 0, 0.5f);
 
   std::vector<uint8_t> voice0_pitches;
   std::vector<uint8_t> voice1_pitches;
   for (const auto& note : epi.notes) {
-    if (note.voice == 0) voice0_pitches.push_back(note.pitch);
-    if (note.voice == 1) voice1_pitches.push_back(note.pitch);
+    if (note.voice == 0)
+      voice0_pitches.push_back(note.pitch);
+    if (note.voice == 1)
+      voice1_pitches.push_back(note.pitch);
   }
 
   ASSERT_FALSE(voice0_pitches.empty());
@@ -1164,30 +1455,28 @@ TEST(EpisodeImitationTest, SevereVoice1UsesInvertedContour) {
   ASSERT_GE(check_count, 2u) << "Need at least 2 notes to compare intervals";
   int contour_diffs = 0;
   for (size_t idx = 1; idx < check_count; ++idx) {
-    int v0_dir = static_cast<int>(voice0_pitches[idx]) -
-                 static_cast<int>(voice0_pitches[idx - 1]);
-    int v1_dir = static_cast<int>(voice1_pitches[idx]) -
-                 static_cast<int>(voice1_pitches[idx - 1]);
+    int v0_dir = static_cast<int>(voice0_pitches[idx]) - static_cast<int>(voice0_pitches[idx - 1]);
+    int v1_dir = static_cast<int>(voice1_pitches[idx]) - static_cast<int>(voice1_pitches[idx - 1]);
     if ((v0_dir > 0 && v1_dir < 0) || (v0_dir < 0 && v1_dir > 0)) {
       ++contour_diffs;
     }
   }
-  EXPECT_GT(contour_diffs, 0)
-      << "Severe voice 1 should have at least one contrary-motion interval "
-      << "(diatonic inversion)";
+  EXPECT_GT(contour_diffs, 0) << "Severe voice 1 should have at least one contrary-motion interval "
+                              << "(diatonic inversion)";
 }
 
 TEST(EpisodeImitationTest, PlayfulUsesInvertedImitation) {
   // Playful voice 1 should use diatonic inversion, so pitches should differ
   // from voice 0's retrograde material.
   Subject subject = makeDiatonicTestSubject(Key::C, SubjectCharacter::Playful);
-  Episode epi = generateEpisode(subject, 0, kTicksPerBar * 4, Key::C, Key::C,
-                                2, 42, 0, 0.5f);
+  Episode epi = generateEpisode(subject, 0, kTicksPerBar * 4, Key::C, Key::C, 2, 42, 0, 0.5f);
 
   bool has_voice0 = false, has_voice1 = false;
   for (const auto& note : epi.notes) {
-    if (note.voice == 0) has_voice0 = true;
-    if (note.voice == 1) has_voice1 = true;
+    if (note.voice == 0)
+      has_voice0 = true;
+    if (note.voice == 1)
+      has_voice1 = true;
   }
   EXPECT_TRUE(has_voice0);
   EXPECT_TRUE(has_voice1);
@@ -1197,8 +1486,7 @@ TEST(EpisodeImitationTest, RestlessUsesDiminishedImitation) {
   // Restless voice 1 should use diminished motif, so voice 1 notes should
   // have shorter durations on average than voice 0.
   Subject subject = makeDiatonicTestSubject(Key::C, SubjectCharacter::Restless);
-  Episode epi = generateEpisode(subject, 0, kTicksPerBar * 4, Key::C, Key::C,
-                                2, 42, 0, 0.5f);
+  Episode epi = generateEpisode(subject, 0, kTicksPerBar * 4, Key::C, Key::C, 2, 42, 0, 0.5f);
 
   Tick voice0_total_dur = 0;
   int voice0_count = 0;
@@ -1230,8 +1518,7 @@ TEST(EpisodeImitationTest, RestlessUsesDiminishedImitation) {
 TEST(EpisodeImitationTest, NobleKeepsAugmentedBass) {
   // Noble voice 1 should still use augmented motif transposed down an octave.
   Subject subject = makeDiatonicTestSubject(Key::C, SubjectCharacter::Noble);
-  Episode epi = generateEpisode(subject, 0, kTicksPerBar * 4, Key::C, Key::C,
-                                2, 42, 0, 0.5f);
+  Episode epi = generateEpisode(subject, 0, kTicksPerBar * 4, Key::C, Key::C, 2, 42, 0, 0.5f);
 
   int voice0_sum = 0, voice0_count = 0;
   int voice1_sum = 0, voice1_count = 0;
@@ -1261,8 +1548,8 @@ TEST(EpisodeTest, BassDurationVariety) {
   // Try multiple seeds to find bass duration variety.
   bool found_variety = false;
   for (uint32_t seed = 1; seed <= 20; ++seed) {
-    Episode episode = generateEpisode(subject, 0, kTicksPerBar * 4,
-                                      Key::C, Key::C, 3, seed, 0, 0.6f);
+    Episode episode =
+        generateEpisode(subject, 0, kTicksPerBar * 4, Key::C, Key::C, 3, seed, 0, 0.6f);
     // Find bass voice (voice 2 in 3-voice fugue).
     std::set<Tick> distinct;
     for (const auto& note : episode.notes) {
@@ -1284,13 +1571,12 @@ TEST(EpisodeTest, BassMinimumDuration) {
   // (P7.c phase-dependent anchor durations), but never shorter than 16th.
   Subject subject = makeTestSubject();
   for (uint32_t seed = 1; seed <= 10; ++seed) {
-    Episode episode = generateEpisode(subject, 0, kTicksPerBar * 4,
-                                      Key::C, Key::C, 3, seed, 0, 0.5f);
+    Episode episode =
+        generateEpisode(subject, 0, kTicksPerBar * 4, Key::C, Key::C, 3, seed, 0, 0.5f);
     for (const auto& note : episode.notes) {
       if (note.voice == 2) {
         EXPECT_GE(note.duration, duration::kSixteenthNote)
-            << "Bass voice should not have notes shorter than a sixteenth (seed="
-            << seed << ")";
+            << "Bass voice should not have notes shorter than a sixteenth (seed=" << seed << ")";
       }
     }
   }

@@ -16,10 +16,7 @@ namespace bach {
 // Interval classification
 // ---------------------------------------------------------------------------
 
-
-
-bool FuxRuleEvaluator::isIntervalConsonant(int semitones,
-                                           bool is_strong_beat) const {
+bool FuxRuleEvaluator::isIntervalConsonant(int semitones, bool is_strong_beat) const {
   // In Fux strict counterpoint the consonance classification does not
   // change between strong and weak beats -- dissonance handling is the
   // caller's responsibility (via SpeciesRules).  We accept the param to
@@ -31,8 +28,8 @@ bool FuxRuleEvaluator::isIntervalConsonant(int semitones,
 
   switch (reduced) {
     // Perfect consonances.
-    case interval::kUnison:     // P1 (and P8 via mod 12)
-    case interval::kPerfect5th: // P5
+    case interval::kUnison:      // P1 (and P8 via mod 12)
+    case interval::kPerfect5th:  // P5
       return true;
 
     // Imperfect consonances.
@@ -56,8 +53,7 @@ bool FuxRuleEvaluator::isIntervalConsonant(int semitones,
 // Motion classification
 // ---------------------------------------------------------------------------
 
-MotionType FuxRuleEvaluator::classifyMotion(uint8_t prev1, uint8_t curr1,
-                                            uint8_t prev2,
+MotionType FuxRuleEvaluator::classifyMotion(uint8_t prev1, uint8_t curr1, uint8_t prev2,
                                             uint8_t curr2) const {
   int dir1 = static_cast<int>(curr1) - static_cast<int>(prev1);
   int dir2 = static_cast<int>(curr2) - static_cast<int>(prev2);
@@ -73,10 +69,8 @@ MotionType FuxRuleEvaluator::classifyMotion(uint8_t prev1, uint8_t curr1,
   }
 
   // Both voices move in the same direction.
-  int interval_prev = std::abs(static_cast<int>(prev1) -
-                               static_cast<int>(prev2));
-  int interval_curr = std::abs(static_cast<int>(curr1) -
-                               static_cast<int>(curr2));
+  int interval_prev = std::abs(static_cast<int>(prev1) - static_cast<int>(prev2));
+  int interval_curr = std::abs(static_cast<int>(curr1) - static_cast<int>(curr2));
 
   // Parallel: same direction AND same interval size.
   if (interval_prev == interval_curr) {
@@ -91,8 +85,8 @@ MotionType FuxRuleEvaluator::classifyMotion(uint8_t prev1, uint8_t curr1,
 // Helpers
 // ---------------------------------------------------------------------------
 
-const NoteEvent* FuxRuleEvaluator::getPreviousNote(
-    const CounterpointState& state, VoiceId voice_id, Tick tick) {
+const NoteEvent* FuxRuleEvaluator::getPreviousNote(const CounterpointState& state, VoiceId voice_id,
+                                                   Tick tick) {
   const auto& notes = state.getVoiceNotes(voice_id);
 
   // Find the last note that starts strictly before `tick`.
@@ -110,21 +104,20 @@ const NoteEvent* FuxRuleEvaluator::getPreviousNote(
 // Parallel perfect detection
 // ---------------------------------------------------------------------------
 
-bool FuxRuleEvaluator::hasParallelPerfect(const CounterpointState& state,
-                                          VoiceId voice1, VoiceId voice2,
-                                          Tick tick) const {
+bool FuxRuleEvaluator::hasParallelPerfect(const CounterpointState& state, VoiceId voice1,
+                                          VoiceId voice2, Tick tick) const {
   const NoteEvent* curr1 = state.getNoteAt(voice1, tick);
   const NoteEvent* curr2 = state.getNoteAt(voice2, tick);
-  if (!curr1 || !curr2) return false;
+  if (!curr1 || !curr2)
+    return false;
 
   const NoteEvent* prev1 = getPreviousNote(state, voice1, tick);
   const NoteEvent* prev2 = getPreviousNote(state, voice2, tick);
-  if (!prev1 || !prev2) return false;
+  if (!prev1 || !prev2)
+    return false;
 
-  int prev_interval = std::abs(static_cast<int>(prev1->pitch) -
-                               static_cast<int>(prev2->pitch));
-  int curr_interval = std::abs(static_cast<int>(curr1->pitch) -
-                               static_cast<int>(curr2->pitch));
+  int prev_interval = std::abs(static_cast<int>(prev1->pitch) - static_cast<int>(prev2->pitch));
+  int curr_interval = std::abs(static_cast<int>(curr1->pitch) - static_cast<int>(curr2->pitch));
 
   // Both intervals must be perfect consonances (P1/P5/P8).
   if (!interval_util::isPerfectConsonance(prev_interval) ||
@@ -135,11 +128,11 @@ bool FuxRuleEvaluator::hasParallelPerfect(const CounterpointState& state,
   // Both intervals must be the same type (both P5, or both P1/P8).
   int prev_reduced = interval_util::compoundToSimple(prev_interval);
   int curr_reduced = interval_util::compoundToSimple(curr_interval);
-  if (prev_reduced != curr_reduced) return false;
+  if (prev_reduced != curr_reduced)
+    return false;
 
   // Motion must be in the same direction (parallel, not contrary).
-  MotionType motion = classifyMotion(prev1->pitch, curr1->pitch,
-                                     prev2->pitch, curr2->pitch);
+  MotionType motion = classifyMotion(prev1->pitch, curr1->pitch, prev2->pitch, curr2->pitch);
   return motion == MotionType::Parallel || motion == MotionType::Similar;
 }
 
@@ -147,26 +140,26 @@ bool FuxRuleEvaluator::hasParallelPerfect(const CounterpointState& state,
 // Hidden perfect detection
 // ---------------------------------------------------------------------------
 
-bool FuxRuleEvaluator::hasHiddenPerfect(const CounterpointState& state,
-                                        VoiceId voice1, VoiceId voice2,
-                                        Tick tick) const {
+bool FuxRuleEvaluator::hasHiddenPerfect(const CounterpointState& state, VoiceId voice1,
+                                        VoiceId voice2, Tick tick) const {
   const NoteEvent* curr1 = state.getNoteAt(voice1, tick);
   const NoteEvent* curr2 = state.getNoteAt(voice2, tick);
-  if (!curr1 || !curr2) return false;
+  if (!curr1 || !curr2)
+    return false;
 
   const NoteEvent* prev1 = getPreviousNote(state, voice1, tick);
   const NoteEvent* prev2 = getPreviousNote(state, voice2, tick);
-  if (!prev1 || !prev2) return false;
+  if (!prev1 || !prev2)
+    return false;
 
-  int curr_interval = std::abs(static_cast<int>(curr1->pitch) -
-                               static_cast<int>(curr2->pitch));
+  int curr_interval = std::abs(static_cast<int>(curr1->pitch) - static_cast<int>(curr2->pitch));
 
   // The arriving interval must be a perfect consonance.
-  if (!interval_util::isPerfectConsonance(curr_interval)) return false;
+  if (!interval_util::isPerfectConsonance(curr_interval))
+    return false;
 
   // The previous interval must NOT be the same perfect consonance.
-  int prev_interval = std::abs(static_cast<int>(prev1->pitch) -
-                               static_cast<int>(prev2->pitch));
+  int prev_interval = std::abs(static_cast<int>(prev1->pitch) - static_cast<int>(prev2->pitch));
   int prev_reduced = interval_util::compoundToSimple(prev_interval);
   int curr_reduced = interval_util::compoundToSimple(curr_interval);
   if (prev_reduced == curr_reduced) {
@@ -174,8 +167,7 @@ bool FuxRuleEvaluator::hasHiddenPerfect(const CounterpointState& state,
   }
 
   // Voices must move in the same direction (similar motion).
-  MotionType motion = classifyMotion(prev1->pitch, curr1->pitch,
-                                     prev2->pitch, curr2->pitch);
+  MotionType motion = classifyMotion(prev1->pitch, curr1->pitch, prev2->pitch, curr2->pitch);
   if (motion != MotionType::Similar && motion != MotionType::Parallel) {
     return false;
   }
@@ -185,8 +177,7 @@ bool FuxRuleEvaluator::hasHiddenPerfect(const CounterpointState& state,
   // step (1-2 semitones).
   uint8_t upper_prev = std::max(prev1->pitch, prev2->pitch);
   uint8_t upper_curr = std::max(curr1->pitch, curr2->pitch);
-  int upper_motion = std::abs(static_cast<int>(upper_curr) -
-                              static_cast<int>(upper_prev));
+  int upper_motion = std::abs(static_cast<int>(upper_curr) - static_cast<int>(upper_prev));
   if (upper_motion <= 2) {
     return false;  // Upper voice approaches by step -- allowed.
   }
@@ -198,12 +189,12 @@ bool FuxRuleEvaluator::hasHiddenPerfect(const CounterpointState& state,
 // Voice crossing detection
 // ---------------------------------------------------------------------------
 
-bool FuxRuleEvaluator::hasVoiceCrossing(const CounterpointState& state,
-                                        VoiceId voice1, VoiceId voice2,
-                                        Tick tick) const {
+bool FuxRuleEvaluator::hasVoiceCrossing(const CounterpointState& state, VoiceId voice1,
+                                        VoiceId voice2, Tick tick) const {
   const NoteEvent* note1 = state.getNoteAt(voice1, tick);
   const NoteEvent* note2 = state.getNoteAt(voice2, tick);
-  if (!note1 || !note2) return false;
+  if (!note1 || !note2)
+    return false;
 
   // Convention: voice1 should be the higher voice (lower VoiceId =
   // higher pitch in standard SATB ordering).  If voice1 < voice2,
@@ -218,12 +209,13 @@ bool FuxRuleEvaluator::hasVoiceCrossing(const CounterpointState& state,
 // Full validation
 // ---------------------------------------------------------------------------
 
-std::vector<RuleViolation> FuxRuleEvaluator::validate(
-    const CounterpointState& state, Tick from_tick, Tick to_tick) const {
+std::vector<RuleViolation> FuxRuleEvaluator::validate(const CounterpointState& state,
+                                                      Tick from_tick, Tick to_tick) const {
   std::vector<RuleViolation> violations;
 
   const auto& voices = state.getActiveVoices();
-  if (voices.size() < 2) return violations;
+  if (voices.size() < 2)
+    return violations;
 
   // Check every beat position in the range.
   for (Tick tick = from_tick; tick < to_tick; tick += kTicksPerBeat) {
@@ -239,8 +231,7 @@ std::vector<RuleViolation> FuxRuleEvaluator::validate(
         const NoteEvent* note_a = state.getNoteAt(va, tick);
         const NoteEvent* note_b = state.getNoteAt(vb, tick);
         if (note_a && note_b && is_strong_beat) {
-          int ivl = std::abs(static_cast<int>(note_a->pitch) -
-                             static_cast<int>(note_b->pitch));
+          int ivl = std::abs(static_cast<int>(note_a->pitch) - static_cast<int>(note_b->pitch));
           if (!isIntervalConsonant(ivl, is_strong_beat)) {
             RuleViolation viol;
             viol.voice1 = va;
@@ -261,9 +252,9 @@ std::vector<RuleViolation> FuxRuleEvaluator::validate(
           // Determine if it's fifths or octaves from current interval.
           const NoteEvent* ca = state.getNoteAt(va, tick);
           const NoteEvent* cb = state.getNoteAt(vb, tick);
-          int ivl_mod = (ca && cb)
-              ? interval_util::compoundToSimple(absoluteInterval(ca->pitch, cb->pitch))
-              : 0;
+          int ivl_mod =
+              (ca && cb) ? interval_util::compoundToSimple(absoluteInterval(ca->pitch, cb->pitch))
+                         : 0;
           viol.rule = (ivl_mod == 7) ? "parallel_fifths" : "parallel_octaves";
           viol.severity = 1;
           violations.push_back(viol);
@@ -277,9 +268,9 @@ std::vector<RuleViolation> FuxRuleEvaluator::validate(
           viol.tick = tick;
           const NoteEvent* ca = state.getNoteAt(va, tick);
           const NoteEvent* cb = state.getNoteAt(vb, tick);
-          int ivl_mod = (ca && cb)
-              ? interval_util::compoundToSimple(absoluteInterval(ca->pitch, cb->pitch))
-              : 0;
+          int ivl_mod =
+              (ca && cb) ? interval_util::compoundToSimple(absoluteInterval(ca->pitch, cb->pitch))
+                         : 0;
           viol.rule = (ivl_mod == 7) ? "hidden_fifths" : "hidden_octaves";
           viol.severity = 0;  // Warning, not error.
           violations.push_back(viol);

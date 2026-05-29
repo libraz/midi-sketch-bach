@@ -10,10 +10,14 @@ namespace bach {
 /// @return A C-string name for the motion type (e.g. "parallel", "contrary").
 const char* motionTypeToString(MotionType type) {
   switch (type) {
-    case MotionType::Parallel: return "parallel";
-    case MotionType::Similar:  return "similar";
-    case MotionType::Contrary: return "contrary";
-    case MotionType::Oblique:  return "oblique";
+    case MotionType::Parallel:
+      return "parallel";
+    case MotionType::Similar:
+      return "similar";
+    case MotionType::Contrary:
+      return "contrary";
+    case MotionType::Oblique:
+      return "oblique";
   }
   return "unknown";
 }

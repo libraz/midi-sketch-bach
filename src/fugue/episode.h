@@ -22,6 +22,7 @@ class IRuleEvaluator;
 class CollisionResolver;
 class HarmonicTimeline;
 class MotifPool;
+struct ThematicPlan;
 struct SectionAccumulator;
 struct ConstraintState;
 
@@ -32,8 +33,8 @@ struct ConstraintState;
 /// and motivic transformations of subject fragments.
 struct Episode {
   std::vector<NoteEvent> notes;  ///< All episode notes (multi-voice).
-  Key start_key = Key::C;       ///< Key at episode start.
-  Key end_key = Key::C;         ///< Key at episode end (after modulation).
+  Key start_key = Key::C;        ///< Key at episode start.
+  Key end_key = Key::C;          ///< Key at episode end (after modulation).
   Tick start_tick = 0;           ///< Absolute tick of episode start.
   Tick end_tick = 0;             ///< Absolute tick of episode end.
 
@@ -74,10 +75,9 @@ struct Episode {
 /// @param energy_level Energy level in [0,1] for rhythm density control (default 0.5).
 ///        Higher energy allows shorter note durations via FugueEnergyCurve::minDuration().
 /// @return Generated Episode.
-Episode generateEpisode(const Subject& subject, Tick start_tick, Tick duration_ticks,
-                        Key start_key, Key target_key, uint8_t num_voices, uint32_t seed,
-                        int episode_index = 0, float energy_level = 0.5f,
-                        const uint8_t* last_pitches = nullptr);
+Episode generateEpisode(const Subject& subject, Tick start_tick, Tick duration_ticks, Key start_key,
+                        Key target_key, uint8_t num_voices, uint32_t seed, int episode_index = 0,
+                        float energy_level = 0.5f, const uint8_t* last_pitches = nullptr);
 
 /// @brief Generate an episode with harmonic validation.
 ///
@@ -105,13 +105,11 @@ Episode generateEpisode(const Subject& subject, Tick start_tick, Tick duration_t
 /// @param exit_state_out If non-null, receives the episode's exit ConstraintState
 ///        for forwarding to the next episode or pipeline accumulator.
 /// @return Generated Episode with validated notes.
-Episode generateEpisode(const Subject& subject, Tick start_tick, Tick duration_ticks,
-                        Key start_key, Key target_key, uint8_t num_voices, uint32_t seed,
-                        int episode_index, float energy_level,
-                        CounterpointState& cp_state, IRuleEvaluator& cp_rules,
+Episode generateEpisode(const Subject& subject, Tick start_tick, Tick duration_ticks, Key start_key,
+                        Key target_key, uint8_t num_voices, uint32_t seed, int episode_index,
+                        float energy_level, CounterpointState& cp_state, IRuleEvaluator& cp_rules,
                         CollisionResolver& cp_resolver, const HarmonicTimeline& timeline,
-                        uint8_t pedal_pitch = 0,
-                        const ConstraintState* prev_exit_state = nullptr,
+                        uint8_t pedal_pitch = 0, const ConstraintState* prev_exit_state = nullptr,
                         ConstraintState* exit_state_out = nullptr,
                         const uint8_t* last_pitches = nullptr);
 
@@ -134,12 +132,11 @@ Episode generateEpisode(const Subject& subject, Tick start_tick, Tick duration_t
 ///        trigger invertible counterpoint (voice swap).
 /// @param energy_level Energy level in [0,1] for rhythm density control.
 /// @return Generated Episode.
-Episode generateFortspinnungEpisode(const Subject& subject, const MotifPool& pool,
-                                    Tick start_tick, Tick duration_ticks,
-                                    Key start_key, Key target_key,
-                                    uint8_t num_voices, uint32_t seed,
-                                    int episode_index, float energy_level,
-                                    const uint8_t* last_pitches = nullptr);
+Episode generateFortspinnungEpisode(const Subject& subject, const MotifPool& pool, Tick start_tick,
+                                    Tick duration_ticks, Key start_key, Key target_key,
+                                    uint8_t num_voices, uint32_t seed, int episode_index,
+                                    float energy_level, const uint8_t* last_pitches = nullptr,
+                                    const ThematicPlan* thematic_plan = nullptr);
 
 /// @brief Generate a Fortspinnung-based episode with counterpoint validation.
 ///
@@ -157,20 +154,14 @@ Episode generateFortspinnungEpisode(const Subject& subject, const MotifPool& poo
 ///        gravity/accumulator data across consecutive episodes (nullable).
 /// @param exit_state_out If non-null, receives the episode's exit ConstraintState
 ///        for forwarding to the next episode or pipeline accumulator.
-Episode generateFortspinnungEpisode(const Subject& subject, const MotifPool& pool,
-                                    Tick start_tick, Tick duration_ticks,
-                                    Key start_key, Key target_key,
-                                    uint8_t num_voices, uint32_t seed,
-                                    int episode_index, float energy_level,
-                                    CounterpointState& cp_state,
-                                    IRuleEvaluator& cp_rules,
-                                    CollisionResolver& cp_resolver,
-                                    const HarmonicTimeline& timeline,
-                                    uint8_t pedal_pitch = 0,
-                                    const SectionAccumulator* accum = nullptr,
-                                    const ConstraintState* prev_exit_state = nullptr,
-                                    ConstraintState* exit_state_out = nullptr,
-                                    const uint8_t* last_pitches = nullptr);
+Episode generateFortspinnungEpisode(
+    const Subject& subject, const MotifPool& pool, Tick start_tick, Tick duration_ticks,
+    Key start_key, Key target_key, uint8_t num_voices, uint32_t seed, int episode_index,
+    float energy_level, CounterpointState& cp_state, IRuleEvaluator& cp_rules,
+    CollisionResolver& cp_resolver, const HarmonicTimeline& timeline, uint8_t pedal_pitch = 0,
+    const SectionAccumulator* accum = nullptr, const ConstraintState* prev_exit_state = nullptr,
+    ConstraintState* exit_state_out = nullptr, const uint8_t* last_pitches = nullptr,
+    const ThematicPlan* thematic_plan = nullptr);
 
 /// @brief Extract a motif (fragment) from the beginning of the subject.
 ///
@@ -197,8 +188,7 @@ std::vector<NoteEvent> extractMotif(const Subject& subject, size_t max_notes = 4
 /// @param subject Source subject.
 /// @param motif_length Number of notes in the extracted motif (default: 4).
 /// @return Vector of notes forming the characteristic motif.
-std::vector<NoteEvent> extractCharacteristicMotif(const Subject& subject,
-                                                   size_t motif_length = 4);
+std::vector<NoteEvent> extractCharacteristicMotif(const Subject& subject, size_t motif_length = 4);
 
 /// @brief Extract the tail portion of a melody (last N notes).
 /// @param notes Source melody notes.
@@ -212,7 +202,7 @@ std::vector<NoteEvent> extractTailMotif(const std::vector<NoteEvent>& notes, siz
 /// @return Vector of fragment vectors. The last fragment may be shorter if
 ///         the note count is not evenly divisible.
 std::vector<std::vector<NoteEvent>> fragmentMotif(const std::vector<NoteEvent>& notes,
-                                                   size_t num_fragments);
+                                                  size_t num_fragments);
 
 }  // namespace bach
 

@@ -28,14 +28,13 @@ float MotionAnalyzer::MotionStats::contraryRatio() const {
 
 MotionAnalyzer::MotionAnalyzer(const IRuleEvaluator& rules) : rules_(rules) {}
 
-MotionType MotionAnalyzer::classifyMotion(uint8_t prev1, uint8_t curr1,
-                                          uint8_t prev2,
+MotionType MotionAnalyzer::classifyMotion(uint8_t prev1, uint8_t curr1, uint8_t prev2,
                                           uint8_t curr2) const {
   return rules_.classifyMotion(prev1, curr1, prev2, curr2);
 }
 
-MotionAnalyzer::MotionStats MotionAnalyzer::analyzeVoicePair(
-    const CounterpointState& state, VoiceId voice1, VoiceId voice2) const {
+MotionAnalyzer::MotionStats MotionAnalyzer::analyzeVoicePair(const CounterpointState& state,
+                                                             VoiceId voice1, VoiceId voice2) const {
   MotionStats stats;
 
   const auto& notes1 = state.getVoiceNotes(voice1);
@@ -74,20 +73,26 @@ MotionAnalyzer::MotionStats MotionAnalyzer::analyzeVoicePair(
     }
 
     // Only classify when at least one voice has actually changed pitch.
-    if (prev_note1->pitch == curr_note1->pitch &&
-        prev_note2->pitch == curr_note2->pitch) {
+    if (prev_note1->pitch == curr_note1->pitch && prev_note2->pitch == curr_note2->pitch) {
       continue;
     }
 
-    MotionType motion = rules_.classifyMotion(
-        prev_note1->pitch, curr_note1->pitch,
-        prev_note2->pitch, curr_note2->pitch);
+    MotionType motion = rules_.classifyMotion(prev_note1->pitch, curr_note1->pitch,
+                                              prev_note2->pitch, curr_note2->pitch);
 
     switch (motion) {
-      case MotionType::Parallel: ++stats.parallel; break;
-      case MotionType::Similar:  ++stats.similar;  break;
-      case MotionType::Contrary: ++stats.contrary; break;
-      case MotionType::Oblique:  ++stats.oblique;  break;
+      case MotionType::Parallel:
+        ++stats.parallel;
+        break;
+      case MotionType::Similar:
+        ++stats.similar;
+        break;
+      case MotionType::Contrary:
+        ++stats.contrary;
+        break;
+      case MotionType::Oblique:
+        ++stats.oblique;
+        break;
     }
   }
 

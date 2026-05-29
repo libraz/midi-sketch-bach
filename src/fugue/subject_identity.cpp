@@ -18,10 +18,14 @@ namespace bach {
 
 const char* kerngestaltTypeToString(KerngestaltType type) {
   switch (type) {
-    case KerngestaltType::IntervalDriven: return "interval_driven";
-    case KerngestaltType::ChromaticCell:  return "chromatic_cell";
-    case KerngestaltType::Arpeggio:       return "arpeggio";
-    case KerngestaltType::Linear:         return "linear";
+    case KerngestaltType::IntervalDriven:
+      return "interval_driven";
+    case KerngestaltType::ChromaticCell:
+      return "chromatic_cell";
+    case KerngestaltType::Arpeggio:
+      return "arpeggio";
+    case KerngestaltType::Linear:
+      return "linear";
   }
   return "unknown";  // NOLINT(clang-diagnostic-covered-switch-default): defensive
 }
@@ -36,8 +40,8 @@ namespace {
 /// Chord-tone intervals: minor 3rd (3), major 3rd (4), perfect 4th (5),
 /// perfect 5th (7), minor 6th (8), major 6th (9).
 bool isChordToneInterval(int abs_interval) {
-  return abs_interval == 3 || abs_interval == 4 || abs_interval == 5 ||
-         abs_interval == 7 || abs_interval == 8 || abs_interval == 9;
+  return abs_interval == 3 || abs_interval == 4 || abs_interval == 5 || abs_interval == 7 ||
+         abs_interval == 8 || abs_interval == 9;
 }
 
 /// @brief Check the Arpeggio condition: consecutive same-direction 3rd-class
@@ -85,8 +89,7 @@ bool isArpeggioPattern(const std::vector<int>& intervals) {
 ///   - IntervalDriven: signature interval abs >= 3 and has a leap.
 ///   - ChromaticCell: 2+ semitone motions (abs==1) in first 6 intervals.
 ///   - Linear: default (scale-based with internal repetition).
-KerngestaltType classifyKerngestalt(const std::vector<int>& intervals,
-                                    int signature_interval) {
+KerngestaltType classifyKerngestalt(const std::vector<int>& intervals, int signature_interval) {
   // Check Arpeggio first (highest priority).
   if (isArpeggioPattern(intervals)) {
     return KerngestaltType::Arpeggio;
@@ -151,8 +154,10 @@ enum class DurationClass : uint8_t {
 
 /// @brief Classify a tick duration into a duration class.
 DurationClass classifyDuration(Tick dur) {
-  if (dur <= 240) return DurationClass::Short;
-  if (dur <= 600) return DurationClass::Medium;
+  if (dur <= 240)
+    return DurationClass::Short;
+  if (dur <= 600)
+    return DurationClass::Medium;
   return DurationClass::Long;
 }
 
@@ -168,8 +173,7 @@ DurationClass classifyDuration(Tick dur) {
 /// @param type Kerngestalt type (ChromaticCell gets tolerance).
 /// @return True if a match is found at the given offset.
 bool intervalSequenceMatchesAt(const std::vector<int>& haystack, size_t start,
-                               const std::vector<int>& needle,
-                               KerngestaltType type) {
+                               const std::vector<int>& needle, KerngestaltType type) {
   if (start + needle.size() > haystack.size()) {
     return false;
   }
@@ -215,9 +219,8 @@ bool intervalSequenceMatchesAt(const std::vector<int>& haystack, size_t start,
 /// @param needle The interval pattern to find.
 /// @param type Kerngestalt type for match rules.
 /// @return True if the needle (or a valid transformation) is found.
-bool intervalSequenceMatches(const std::vector<int>& haystack,
-                             size_t search_start, size_t search_end,
-                             const std::vector<int>& needle,
+bool intervalSequenceMatches(const std::vector<int>& haystack, size_t search_start,
+                             size_t search_end, const std::vector<int>& needle,
                              KerngestaltType type) {
   if (needle.empty() || haystack.empty()) {
     return false;
@@ -243,15 +246,14 @@ bool intervalSequenceMatches(const std::vector<int>& haystack,
 /// @param needle_rhythm The rhythm pattern to find.
 /// @return True if the duration-class sequences match within edit distance 1.
 bool rhythmSequenceMatchesAt(const std::vector<Tick>& haystack_rhythm, size_t start,
-                              const std::vector<Tick>& needle_rhythm) {
+                             const std::vector<Tick>& needle_rhythm) {
   if (start + needle_rhythm.size() > haystack_rhythm.size()) {
     return false;
   }
 
   int mismatches = 0;
   for (size_t idx = 0; idx < needle_rhythm.size(); ++idx) {
-    if (classifyDuration(haystack_rhythm[start + idx]) !=
-        classifyDuration(needle_rhythm[idx])) {
+    if (classifyDuration(haystack_rhythm[start + idx]) != classifyDuration(needle_rhythm[idx])) {
       ++mismatches;
       if (mismatches > 1) {
         return false;
@@ -262,9 +264,8 @@ bool rhythmSequenceMatchesAt(const std::vector<Tick>& haystack_rhythm, size_t st
 }
 
 /// @brief Search for a rhythm sequence match within a haystack range.
-bool rhythmSequenceMatches(const std::vector<Tick>& haystack_rhythm,
-                            size_t search_start, size_t search_end,
-                            const std::vector<Tick>& needle_rhythm) {
+bool rhythmSequenceMatches(const std::vector<Tick>& haystack_rhythm, size_t search_start,
+                           size_t search_end, const std::vector<Tick>& needle_rhythm) {
   if (needle_rhythm.empty() || haystack_rhythm.empty()) {
     return false;
   }
@@ -281,7 +282,7 @@ bool rhythmSequenceMatches(const std::vector<Tick>& haystack_rhythm,
 
 /// @brief Check if an accent sequence matches at a given offset (exact S/W pattern).
 bool accentSequenceMatchesAt(const std::vector<AccentPosition>& haystack, size_t start,
-                              const std::vector<AccentPosition>& needle) {
+                             const std::vector<AccentPosition>& needle) {
   if (start + needle.size() > haystack.size()) {
     return false;
   }
@@ -294,9 +295,8 @@ bool accentSequenceMatchesAt(const std::vector<AccentPosition>& haystack, size_t
 }
 
 /// @brief Search for an accent sequence match within a haystack range.
-bool accentSequenceMatches(const std::vector<AccentPosition>& haystack,
-                            size_t search_start, size_t search_end,
-                            const std::vector<AccentPosition>& needle) {
+bool accentSequenceMatches(const std::vector<AccentPosition>& haystack, size_t search_start,
+                           size_t search_end, const std::vector<AccentPosition>& needle) {
   if (needle.empty() || haystack.empty()) {
     return false;
   }
@@ -317,8 +317,8 @@ bool accentSequenceMatches(const std::vector<AccentPosition>& haystack,
 // buildEssentialIdentity
 // ---------------------------------------------------------------------------
 
-EssentialIdentity buildEssentialIdentity(const std::vector<NoteEvent>& notes,
-                                         Key /*key*/, bool /*is_minor*/) {
+EssentialIdentity buildEssentialIdentity(const std::vector<NoteEvent>& notes, Key /*key*/,
+                                         bool /*is_minor*/) {
   EssentialIdentity identity;
 
   if (notes.size() < 2) {
@@ -328,8 +328,7 @@ EssentialIdentity buildEssentialIdentity(const std::vector<NoteEvent>& notes,
   // 1. Core intervals: directed (signed) intervals between consecutive notes.
   identity.core_intervals.reserve(notes.size() - 1);
   for (size_t idx = 0; idx + 1 < notes.size(); ++idx) {
-    int directed = static_cast<int>(notes[idx + 1].pitch) -
-                   static_cast<int>(notes[idx].pitch);
+    int directed = static_cast<int>(notes[idx + 1].pitch) - static_cast<int>(notes[idx].pitch);
     identity.core_intervals.push_back(directed);
   }
 
@@ -372,13 +371,13 @@ EssentialIdentity buildEssentialIdentity(const std::vector<NoteEvent>& notes,
 
   // 5. Head fragment: first min(3, size) intervals and durations.
   size_t head_count = std::min(static_cast<size_t>(3), identity.core_intervals.size());
-  identity.head_fragment_intervals.assign(identity.core_intervals.begin(),
-                                           identity.core_intervals.begin() +
-                                               static_cast<ptrdiff_t>(head_count));
+  identity.head_fragment_intervals.assign(
+      identity.core_intervals.begin(),
+      identity.core_intervals.begin() + static_cast<ptrdiff_t>(head_count));
   size_t head_rhythm_count = std::min(static_cast<size_t>(3), identity.core_rhythm.size());
-  identity.head_fragment_rhythm.assign(identity.core_rhythm.begin(),
-                                        identity.core_rhythm.begin() +
-                                            static_cast<ptrdiff_t>(head_rhythm_count));
+  identity.head_fragment_rhythm.assign(
+      identity.core_rhythm.begin(),
+      identity.core_rhythm.begin() + static_cast<ptrdiff_t>(head_rhythm_count));
 
   // 6. Tail fragment: last min(3, size) intervals and durations.
   size_t tail_count = std::min(static_cast<size_t>(3), identity.core_intervals.size());
@@ -402,8 +401,8 @@ EssentialIdentity buildEssentialIdentity(const std::vector<NoteEvent>& notes,
   }
 
   // 8. Kerngestalt type classification.
-  identity.kerngestalt_type = classifyKerngestalt(
-      identity.core_intervals, identity.signature_interval);
+  identity.kerngestalt_type =
+      classifyKerngestalt(identity.core_intervals, identity.signature_interval);
 
   return identity;
 }
@@ -430,14 +429,13 @@ DerivedTransformations buildDerivedTransformations(const EssentialIdentity& esse
 
   // 3. Retrograde intervals: reverse the sequence and negate each.
   derived.retrograde_intervals.reserve(essential.core_intervals.size());
-  for (auto iter = essential.core_intervals.rbegin();
-       iter != essential.core_intervals.rend(); ++iter) {
+  for (auto iter = essential.core_intervals.rbegin(); iter != essential.core_intervals.rend();
+       ++iter) {
     derived.retrograde_intervals.push_back(-(*iter));
   }
 
   // 4. Retrograde rhythm: reverse the duration sequence.
-  derived.retrograde_rhythm.assign(essential.core_rhythm.rbegin(),
-                                    essential.core_rhythm.rend());
+  derived.retrograde_rhythm.assign(essential.core_rhythm.rbegin(), essential.core_rhythm.rend());
 
   // 5. Augmented rhythm: double each duration.
   derived.augmented_rhythm.reserve(essential.core_rhythm.size());
@@ -460,8 +458,7 @@ DerivedTransformations buildDerivedTransformations(const EssentialIdentity& esse
 // buildSubjectIdentity
 // ---------------------------------------------------------------------------
 
-SubjectIdentity buildSubjectIdentity(const std::vector<NoteEvent>& notes,
-                                      Key key, bool is_minor) {
+SubjectIdentity buildSubjectIdentity(const std::vector<NoteEvent>& notes, Key key, bool is_minor) {
   SubjectIdentity identity;
   identity.essential = buildEssentialIdentity(notes, key, is_minor);
   identity.derived = buildDerivedTransformations(identity.essential);
@@ -523,15 +520,15 @@ bool isValidKerngestalt(const EssentialIdentity& identity) {
       identity.accent_pattern.begin() + static_cast<ptrdiff_t>(head_accent_len));
 
   // Check the 3 signature conditions.
-  bool interval_match = intervalSequenceMatches(
-      identity.core_intervals, search_start, interval_search_end,
-      head_intervals, identity.kerngestalt_type);
+  bool interval_match =
+      intervalSequenceMatches(identity.core_intervals, search_start, interval_search_end,
+                              head_intervals, identity.kerngestalt_type);
 
-  bool rhythm_match = rhythmSequenceMatches(
-      identity.core_rhythm, search_start, rhythm_search_end, head_rhythm);
+  bool rhythm_match =
+      rhythmSequenceMatches(identity.core_rhythm, search_start, rhythm_search_end, head_rhythm);
 
-  bool accent_match = accentSequenceMatches(
-      identity.accent_pattern, search_start, accent_search_end, head_accents);
+  bool accent_match =
+      accentSequenceMatches(identity.accent_pattern, search_start, accent_search_end, head_accents);
 
   // For subjects with >= 8 notes, require all 3 conditions (AND).
   // For subjects with < 8 notes, require at least 1 condition (OR).
@@ -585,11 +582,13 @@ bool isValidKerngestalt(const EssentialIdentity& identity) {
       if (!identity.core_intervals.empty()) {
         int step_count = 0;
         for (int interval : identity.core_intervals) {
-          if (std::abs(interval) <= 2) ++step_count;
+          if (std::abs(interval) <= 2)
+            ++step_count;
         }
-        float step_ratio = static_cast<float>(step_count) /
-                           static_cast<float>(identity.core_intervals.size());
-        if (step_ratio >= 0.60f) return true;
+        float step_ratio =
+            static_cast<float>(step_count) / static_cast<float>(identity.core_intervals.size());
+        if (step_ratio >= 0.60f)
+          return true;
       }
       return false;
     }

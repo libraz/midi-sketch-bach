@@ -41,8 +41,7 @@ constexpr Tick kSevereDurations[] = {kHalfNote, kQuarterNote, kEighthNote};
 constexpr int kSevereDurCount = 3;
 
 /// @brief Durations for Playful character: includes dotted values.
-constexpr Tick kPlayfulDurations[] = {
-    kQuarterNote, kEighthNote, kDottedQuarter, kDottedEighth};
+constexpr Tick kPlayfulDurations[] = {kQuarterNote, kEighthNote, kDottedQuarter, kDottedEighth};
 constexpr int kPlayfulDurCount = 4;
 
 /// @brief Durations for Noble character: stately, longer values preferred.
@@ -53,8 +52,8 @@ constexpr int kNobleDurCount = 4;
 /// @brief Durations for Restless character: short, syncopated, nervous.
 /// Emphasizes eighth and sixteenth notes with occasional dotted values for
 /// off-beat syncopation.
-constexpr Tick kRestlessDurations[] = {
-    kEighthNote, kSixteenthNote, kDottedEighth, kQuarterNote, kDottedQuarter};
+constexpr Tick kRestlessDurations[] = {kEighthNote, kSixteenthNote, kDottedEighth, kQuarterNote,
+                                       kDottedQuarter};
 constexpr int kRestlessDurCount = 5;
 
 // ---------------------------------------------------------------------------
@@ -128,15 +127,14 @@ constexpr int kSevereCadDegrees[] = {2, 1, 0};
 constexpr Tick kSevereCadDurations[] = {kQuarterNote, kQuarterNote, kHalfNote};
 
 constexpr int kPlayfulCadDegrees[] = {4, 3, 2, 1, 0};
-constexpr Tick kPlayfulCadDurations[] = {
-    kEighthNote, kEighthNote, kEighthNote, kEighthNote, kQuarterNote};
+constexpr Tick kPlayfulCadDurations[] = {kEighthNote, kEighthNote, kEighthNote, kEighthNote,
+                                         kQuarterNote};
 
 constexpr int kNobleCadDegrees[] = {1, 0};
 constexpr Tick kNobleCadDurations[] = {kHalfNote, kHalfNote};
 
 constexpr int kRestlessCadDegrees[] = {3, 2, 1, 0};
-constexpr Tick kRestlessCadDurations[] = {
-    kEighthNote, kEighthNote, kEighthNote, kQuarterNote};
+constexpr Tick kRestlessCadDurations[] = {kEighthNote, kEighthNote, kEighthNote, kQuarterNote};
 
 // ---------------------------------------------------------------------------
 // Helper functions
@@ -165,9 +163,8 @@ CharacterParams getCharacterParams(SubjectCharacter character, std::mt19937& rng
 /// @param gen RNG engine (for probabilistic 6th allowance).
 /// @param large_leap_count Optional pointer to large leap counter.
 /// @return Adjusted pitch within the leap limit.
-int clampLeap(int pitch, int prev_pitch, SubjectCharacter character,
-              Key key, ScaleType scale, int pitch_floor, int pitch_ceil,
-              std::mt19937& gen, int* large_leap_count = nullptr);
+int clampLeap(int pitch, int prev_pitch, SubjectCharacter character, Key key, ScaleType scale,
+              int pitch_floor, int pitch_ceil, std::mt19937& gen, int* large_leap_count = nullptr);
 
 /// @brief Metrically neutral pair substitution for rhythm variation.
 ///
@@ -181,8 +178,8 @@ int clampLeap(int pitch, int prev_pitch, SubjectCharacter character,
 /// @param gen RNG.
 /// @param[out] out_a Output: new duration for the first note.
 /// @param[out] out_b Output: new duration for the second note.
-void varyDurationPair(Tick dur_a, Tick dur_b, SubjectCharacter character,
-                      std::mt19937& gen, Tick& out_a, Tick& out_b);
+void varyDurationPair(Tick dur_a, Tick dur_b, SubjectCharacter character, std::mt19937& gen,
+                      Tick& out_a, Tick& out_b);
 
 /// @brief Avoid consecutive same-pitch notes by shifting to adjacent scale degree.
 ///
@@ -197,8 +194,8 @@ void varyDurationPair(Tick dur_a, Tick dur_b, SubjectCharacter character,
 /// @param floor_pitch Minimum allowed pitch.
 /// @param ceil_pitch Maximum allowed pitch.
 /// @return Adjusted pitch avoiding unison with prev_pitch, or original if unavoidable.
-int avoidUnison(int pitch, int prev_pitch, Key key, ScaleType scale,
-                int floor_pitch, int ceil_pitch);
+int avoidUnison(int pitch, int prev_pitch, Key key, ScaleType scale, int floor_pitch,
+                int ceil_pitch);
 
 /// @brief Snap a pitch to the nearest scale tone within bounds.
 /// @param pitch Raw pitch value.
@@ -207,16 +204,14 @@ int avoidUnison(int pitch, int prev_pitch, Key key, ScaleType scale,
 /// @param floor_pitch Minimum allowed pitch.
 /// @param ceil_pitch Maximum allowed pitch.
 /// @return Scale-snapped, clamped MIDI pitch.
-int snapToScale(int pitch, Key key, ScaleType scale, int floor_pitch,
-                int ceil_pitch);
+int snapToScale(int pitch, Key key, ScaleType scale, int floor_pitch, int ceil_pitch);
 
 /// @brief Quantize a tick position to the nearest strong beat (beat 1 or 3).
 /// @param raw_tick Raw tick position.
 /// @param character Subject character type (Noble always uses beat 1).
 /// @param total_ticks Total subject length for bounds checking.
 /// @return Quantized tick on beat 1 or beat 3.
-Tick quantizeToStrongBeat(Tick raw_tick, SubjectCharacter character,
-                          Tick total_ticks);
+Tick quantizeToStrongBeat(Tick raw_tick, SubjectCharacter character, Tick total_ticks);
 
 /// @brief Get the cadential formula for a given character.
 /// @param character Subject character type.
@@ -233,8 +228,7 @@ struct ArchetypePolicy;  // Forward declaration.
 ///
 /// @param params Character parameters to constrain (modified in place).
 /// @param policy Archetype policy providing range bounds.
-void applyArchetypeConstraints(CharacterParams& params,
-                                const ArchetypePolicy& policy);
+void applyArchetypeConstraints(CharacterParams& params, const ArchetypePolicy& policy);
 
 /// @brief Get acceleration profile for a character x archetype combination.
 ///
