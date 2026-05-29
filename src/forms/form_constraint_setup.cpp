@@ -14,12 +14,8 @@
 namespace bach {
 
 ConstraintState setupFormConstraintState(
-    uint8_t num_voices,
-    std::function<std::pair<uint8_t, uint8_t>(uint8_t)> voice_range,
-    Tick total_duration,
-    FuguePhase phase,
-    float energy,
-    const std::vector<Tick>& cadence_ticks) {
+    uint8_t num_voices, std::function<std::pair<uint8_t, uint8_t>(uint8_t)> voice_range,
+    Tick total_duration, FuguePhase phase, float energy, const std::vector<Tick>& cadence_ticks) {
   ConstraintState cs;
 
   // Layer 2: InvariantSet -- use voice 0's range as the default.
@@ -45,32 +41,31 @@ ConstraintState setupFormConstraintState(
   return cs;
 }
 
-void finalizeFormNotes(std::vector<NoteEvent>& notes,
-                       uint8_t /*num_voices*/) {
-  if (notes.size() < 2) return;
+void finalizeFormNotes(std::vector<NoteEvent>& notes, uint8_t /*num_voices*/) {
+  if (notes.size() < 2)
+    return;
 
   // Sort by voice, then tick, then duration descending (longer note wins).
-  std::sort(notes.begin(), notes.end(),
-            [](const NoteEvent& lhs, const NoteEvent& rhs) {
-              if (lhs.voice != rhs.voice) return lhs.voice < rhs.voice;
-              if (lhs.start_tick != rhs.start_tick)
-                return lhs.start_tick < rhs.start_tick;
-              return lhs.duration > rhs.duration;
-            });
+  std::sort(notes.begin(), notes.end(), [](const NoteEvent& lhs, const NoteEvent& rhs) {
+    if (lhs.voice != rhs.voice)
+      return lhs.voice < rhs.voice;
+    if (lhs.start_tick != rhs.start_tick)
+      return lhs.start_tick < rhs.start_tick;
+    return lhs.duration > rhs.duration;
+  });
 
   // Remove same-tick duplicates within each voice.
-  notes.erase(
-      std::unique(notes.begin(), notes.end(),
-                  [](const NoteEvent& lhs, const NoteEvent& rhs) {
-                    return lhs.voice == rhs.voice &&
-                           lhs.start_tick == rhs.start_tick;
-                  }),
-      notes.end());
+  notes.erase(std::unique(notes.begin(), notes.end(),
+                          [](const NoteEvent& lhs, const NoteEvent& rhs) {
+                            return lhs.voice == rhs.voice && lhs.start_tick == rhs.start_tick;
+                          }),
+              notes.end());
 
   // Truncate overlapping notes within each voice.
   // Drop notes truncated below kSixteenthNote (120 ticks).
   for (size_t idx = 0; idx + 1 < notes.size(); ++idx) {
-    if (notes[idx].voice != notes[idx + 1].voice) continue;
+    if (notes[idx].voice != notes[idx + 1].voice)
+      continue;
     Tick end_tick = notes[idx].start_tick + notes[idx].duration;
     if (end_tick > notes[idx + 1].start_tick) {
       Tick trimmed = notes[idx + 1].start_tick - notes[idx].start_tick;
@@ -81,9 +76,7 @@ void finalizeFormNotes(std::vector<NoteEvent>& notes,
   // Remove notes with sub-sixteenth duration (from truncation or ornaments).
   notes.erase(
       std::remove_if(notes.begin(), notes.end(),
-                     [](const NoteEvent& n) {
-                       return n.duration < duration::kSixteenthNote;
-                     }),
+                     [](const NoteEvent& n) { return n.duration < duration::kSixteenthNote; }),
       notes.end());
 }
 
@@ -95,7 +88,8 @@ void finalizeFormNotes(std::vector<NoteEvent>& notes,
 static int diatonicStepAbove(uint8_t pitch, Key key, ScaleType scale) {
   for (int offset = 1; offset <= 3; ++offset) {
     int cand = static_cast<int>(pitch) + offset;
-    if (cand > 127) break;
+    if (cand > 127)
+      break;
     if (scale_util::isScaleTone(static_cast<uint8_t>(cand), key, scale)) {
       return offset;
     }
@@ -111,7 +105,8 @@ static int diatonicStepAbove(uint8_t pitch, Key key, ScaleType scale) {
 static int diatonicStepBelow(uint8_t pitch, Key key, ScaleType scale) {
   for (int offset = 1; offset <= 3; ++offset) {
     int cand = static_cast<int>(pitch) - offset;
-    if (cand < 0) break;
+    if (cand < 0)
+      break;
     if (scale_util::isScaleTone(static_cast<uint8_t>(cand), key, scale)) {
       return offset;
     }
@@ -137,8 +132,8 @@ static int diatonicStepBelow(uint8_t pitch, Key key, ScaleType scale) {
 /// @param lo Voice range low bound.
 /// @param hi Voice range high bound.
 /// @return Decorated pitch, or base_pitch if no valid decoration found.
-static uint8_t decorateRepeat(uint8_t base_pitch, int run, Key key,
-                              ScaleType scale, uint8_t lo, uint8_t hi) {
+static uint8_t decorateRepeat(uint8_t base_pitch, int run, Key key, ScaleType scale, uint8_t lo,
+                              uint8_t hi) {
   int pos = run - 3;  // 0-indexed position past max_consecutive (assuming default 2).
   int pitch_int = static_cast<int>(base_pitch);
   int cand = pitch_int;
@@ -166,9 +161,7 @@ static uint8_t decorateRepeat(uint8_t base_pitch, int run, Key key,
       // Accumulate diatonic steps upward.
       int total = 0;
       for (int step = 0; step < disp; ++step) {
-        uint8_t cur = (pitch_int + total > 127)
-                          ? 127
-                          : static_cast<uint8_t>(pitch_int + total);
+        uint8_t cur = (pitch_int + total > 127) ? 127 : static_cast<uint8_t>(pitch_int + total);
         total += diatonicStepAbove(cur, key, scale);
       }
       cand = pitch_int + total;
@@ -176,9 +169,7 @@ static uint8_t decorateRepeat(uint8_t base_pitch, int run, Key key,
       // Accumulate diatonic steps downward.
       int total = 0;
       for (int step = 0; step < disp; ++step) {
-        uint8_t cur = (pitch_int - total < 0)
-                          ? 0
-                          : static_cast<uint8_t>(pitch_int - total);
+        uint8_t cur = (pitch_int - total < 0) ? 0 : static_cast<uint8_t>(pitch_int - total);
         total += diatonicStepBelow(cur, key, scale);
       }
       cand = pitch_int - total;
@@ -202,33 +193,35 @@ static uint8_t decorateRepeat(uint8_t base_pitch, int run, Key key,
   return scale_util::nearestScaleTone(static_cast<uint8_t>(cand), key, scale);
 }
 
-void finalizeFormNotes(
-    std::vector<NoteEvent>& notes, uint8_t num_voices,
-    std::function<std::pair<uint8_t, uint8_t>(uint8_t)> voice_range,
-    Key key, ScaleType scale,
-    int max_consecutive) {
+void finalizeFormNotes(std::vector<NoteEvent>& notes, uint8_t num_voices,
+                       std::function<std::pair<uint8_t, uint8_t>(uint8_t)> voice_range, Key key,
+                       ScaleType scale, int max_consecutive) {
   // Base finalize: overlap dedup.
   finalizeFormNotes(notes, num_voices);
 
-  if (!voice_range) return;
+  if (!voice_range)
+    return;
 
   // Voice range clamping (skip protected notes).
   for (auto& note : notes) {
     auto prot = getProtectionLevel(note.source);
-    if (prot == ProtectionLevel::Immutable) continue;
+    if (prot == ProtectionLevel::Immutable)
+      continue;
     auto [lo, hi] = voice_range(note.voice);
-    if (note.pitch < lo) note.pitch = lo;
-    if (note.pitch > hi) note.pitch = hi;
+    if (note.pitch < lo)
+      note.pitch = lo;
+    if (note.pitch > hi)
+      note.pitch = hi;
   }
 
   // Break runs of consecutive same-pitch notes within each voice.
   // Notes are already sorted by voice/tick from the base finalize.
   // Skip protected notes (subject, pedal, ground bass, etc.).
-  if (max_consecutive < 1) return;
+  if (max_consecutive < 1)
+    return;
   int run = 1;
   for (size_t idx = 1; idx < notes.size(); ++idx) {
-    if (notes[idx].voice == notes[idx - 1].voice &&
-        notes[idx].pitch == notes[idx - 1].pitch) {
+    if (notes[idx].voice == notes[idx - 1].voice && notes[idx].pitch == notes[idx - 1].pitch) {
       ++run;
       if (run > max_consecutive &&
           getProtectionLevel(notes[idx].source) == ProtectionLevel::Flexible) {
@@ -245,38 +238,42 @@ void finalizeFormNotes(
   // Only modifies Flexible notes; skips if it would flatten the contour.
   for (size_t idx = 1; idx + 1 < notes.size(); ++idx) {
     // Only process consecutive notes within the same voice.
-    if (notes[idx - 1].voice != notes[idx].voice) continue;
-    if (notes[idx].voice != notes[idx + 1].voice) continue;
+    if (notes[idx - 1].voice != notes[idx].voice)
+      continue;
+    if (notes[idx].voice != notes[idx + 1].voice)
+      continue;
 
-    int leap = static_cast<int>(notes[idx].pitch) -
-               static_cast<int>(notes[idx - 1].pitch);
+    int leap = static_cast<int>(notes[idx].pitch) - static_cast<int>(notes[idx - 1].pitch);
     int abs_leap = std::abs(leap);
-    if (abs_leap <= 5) continue;  // Not a leap worth resolving.
+    if (abs_leap <= 5)
+      continue;  // Not a leap worth resolving.
 
     // The note after the leap should move stepwise in the opposite direction.
-    if (getProtectionLevel(notes[idx + 1].source) != ProtectionLevel::Flexible) continue;
+    if (getProtectionLevel(notes[idx + 1].source) != ProtectionLevel::Flexible)
+      continue;
 
     // Compute desired resolution pitch: one diatonic step opposite to leap.
     int resolved;
     if (leap > 0) {
       // Leapt up -> resolve down by one diatonic step.
-      resolved = static_cast<int>(notes[idx].pitch) -
-                 diatonicStepBelow(notes[idx].pitch, key, scale);
+      resolved =
+          static_cast<int>(notes[idx].pitch) - diatonicStepBelow(notes[idx].pitch, key, scale);
     } else {
       // Leapt down -> resolve up by one diatonic step.
-      resolved = static_cast<int>(notes[idx].pitch) +
-                 diatonicStepAbove(notes[idx].pitch, key, scale);
+      resolved =
+          static_cast<int>(notes[idx].pitch) + diatonicStepAbove(notes[idx].pitch, key, scale);
     }
 
     // Check voice range.
     auto [lo, hi] = voice_range(notes[idx + 1].voice);
-    if (resolved < static_cast<int>(lo) || resolved > static_cast<int>(hi)) continue;
+    if (resolved < static_cast<int>(lo) || resolved > static_cast<int>(hi))
+      continue;
 
     // Contour flattening guard: if fixing would make all 3 contour signs
     // identical, skip it.  sign(a-b) for the 3 pairs: (i-1->i), (i->i+1_new),
     // and check the note after i+1 if available.
     int sign_before = (leap > 0) ? 1 : -1;
-    int sign_after_new = (resolved > static_cast<int>(notes[idx].pitch)) ? 1
+    int sign_after_new = (resolved > static_cast<int>(notes[idx].pitch))   ? 1
                          : (resolved < static_cast<int>(notes[idx].pitch)) ? -1
                                                                            : 0;
 
@@ -285,25 +282,21 @@ void finalizeFormNotes(
       int sign_next = static_cast<int>(notes[idx + 2].pitch) - resolved;
       int sign_next_dir = (sign_next > 0) ? 1 : (sign_next < 0) ? -1 : 0;
       // If all three contour directions are the same, skip (would flatten).
-      if (sign_before == sign_after_new && sign_after_new == sign_next_dir &&
-          sign_before != 0) {
+      if (sign_before == sign_after_new && sign_after_new == sign_next_dir && sign_before != 0) {
         continue;
       }
     }
 
     // Apply the resolution.
-    notes[idx + 1].pitch =
-        scale_util::nearestScaleTone(static_cast<uint8_t>(resolved), key, scale);
+    notes[idx + 1].pitch = scale_util::nearestScaleTone(static_cast<uint8_t>(resolved), key, scale);
   }
 }
 
 namespace form_utils {
 
-void normalizeAndRedistribute(
-    std::vector<Track>& tracks, uint8_t num_voices,
-    std::function<std::pair<uint8_t, uint8_t>(uint8_t)> voice_range,
-    Key key, ScaleType scale,
-    int max_consecutive) {
+void normalizeAndRedistribute(std::vector<Track>& tracks, uint8_t num_voices,
+                              std::function<std::pair<uint8_t, uint8_t>(uint8_t)> voice_range,
+                              Key key, ScaleType scale, int max_consecutive) {
   // Flatten all tracks into a single note vector.
   std::vector<NoteEvent> all_notes;
   for (const auto& track : tracks) {

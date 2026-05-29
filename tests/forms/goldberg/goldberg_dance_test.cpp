@@ -2,10 +2,10 @@
 
 #include "forms/goldberg/variations/goldberg_dance.h"
 
+#include <gtest/gtest.h>
+
 #include <algorithm>
 #include <set>
-
-#include <gtest/gtest.h>
 
 #include "forms/goldberg/goldberg_structural_grid.h"
 
@@ -167,7 +167,8 @@ TEST(DanceGeneratorTest, NotesSpan32Bars) {
   Tick max_end = 0;
   for (const auto& note : result.notes) {
     Tick note_end = note.start_tick + note.duration;
-    if (note_end > max_end) max_end = note_end;
+    if (note_end > max_end)
+      max_end = note_end;
   }
 
   // The last note should end near the full repeated duration.
@@ -197,10 +198,12 @@ TEST(DanceGeneratorTest, DifferentSeedsDifferent) {
   std::set<uint8_t> pitches_a;
   std::set<uint8_t> pitches_b;
   for (const auto& note : result_a.notes) {
-    if (note.pitch > 0) pitches_a.insert(note.pitch);
+    if (note.pitch > 0)
+      pitches_a.insert(note.pitch);
   }
   for (const auto& note : result_b.notes) {
-    if (note.pitch > 0) pitches_b.insert(note.pitch);
+    if (note.pitch > 0)
+      pitches_b.insert(note.pitch);
   }
 
   // With different seeds, pitch distributions or note counts should differ.
@@ -226,8 +229,7 @@ TEST(DanceGeneratorTest, InvalidVariationNumber) {
   auto grid = GoldbergStructuralGrid::createMajor();
   auto result = gen.generate(1, grid, kGMajor, kTestSeed);
 
-  EXPECT_TRUE(result.success)
-      << "Generator should handle non-dance variation numbers gracefully";
+  EXPECT_TRUE(result.success) << "Generator should handle non-dance variation numbers gracefully";
   EXPECT_FALSE(result.notes.empty());
 }
 

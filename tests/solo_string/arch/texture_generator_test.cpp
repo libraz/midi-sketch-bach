@@ -2,12 +2,12 @@
 
 #include "solo_string/arch/texture_generator.h"
 
+#include <gtest/gtest.h>
+
 #include <algorithm>
 #include <cstdint>
 #include <map>
 #include <set>
-
-#include <gtest/gtest.h>
 
 #include "core/basic_types.h"
 #include "core/pitch_utils.h"
@@ -42,11 +42,10 @@ class TextureGeneratorTest : public ::testing::Test {
       ChordQuality quality;
       float weight;
     };
-    BarChord progression[4] = {
-        {ChordDegree::I, ChordQuality::Minor, 1.0f},
-        {ChordDegree::IV, ChordQuality::Minor, 0.5f},
-        {ChordDegree::V, ChordQuality::Major, 0.75f},
-        {ChordDegree::I, ChordQuality::Minor, 1.0f}};
+    BarChord progression[4] = {{ChordDegree::I, ChordQuality::Minor, 1.0f},
+                               {ChordDegree::IV, ChordQuality::Minor, 0.5f},
+                               {ChordDegree::V, ChordQuality::Major, 0.75f},
+                               {ChordDegree::I, ChordQuality::Minor, 1.0f}};
 
     for (int bar = 0; bar < 4; ++bar) {
       Chord chord;
@@ -54,8 +53,7 @@ class TextureGeneratorTest : public ::testing::Test {
       chord.quality = progression[bar].quality;
 
       uint8_t semitone_offset = degreeMinorSemitones(chord.degree);
-      int root_midi = (kChordOctave + 1) * 12 +
-                      static_cast<int>(d_minor.tonic) + semitone_offset;
+      int root_midi = (kChordOctave + 1) * 12 + static_cast<int>(d_minor.tonic) + semitone_offset;
       chord.root_pitch = static_cast<uint8_t>(root_midi);
       chord.inversion = 0;
 
@@ -77,15 +75,14 @@ class TextureGeneratorTest : public ::testing::Test {
   }
 
   /// @brief Create a default texture context for testing.
-  TextureContext makeDefaultContext(TextureType texture,
-                                   bool is_climax = false) const {
+  TextureContext makeDefaultContext(TextureType texture, bool is_climax = false) const {
     TextureContext ctx;
     ctx.texture = texture;
     ctx.key = {Key::D, true};
     ctx.start_tick = 0;
     ctx.duration_ticks = 4 * kTicksPerBar;  // 7680
-    ctx.register_low = 55;   // G3 (violin low)
-    ctx.register_high = 93;  // A6
+    ctx.register_low = 55;                  // G3 (violin low)
+    ctx.register_high = 93;                 // A6
     ctx.is_major_section = false;
     ctx.is_climax = is_climax;
     ctx.rhythm_density = 1.0f;
@@ -187,9 +184,8 @@ TEST_F(TextureGeneratorTest, ZeroDurationProducesEmpty) {
 // All notes in register range
 // ---------------------------------------------------------------------------
 
-class AllTexturesInRegisterTest
-    : public TextureGeneratorTest,
-      public ::testing::WithParamInterface<TextureType> {};
+class AllTexturesInRegisterTest : public TextureGeneratorTest,
+                                  public ::testing::WithParamInterface<TextureType> {};
 
 TEST_P(AllTexturesInRegisterTest, NotesWithinRegister) {
   TextureType texture = GetParam();
@@ -199,13 +195,11 @@ TEST_P(AllTexturesInRegisterTest, NotesWithinRegister) {
 
   for (const auto& note : notes) {
     EXPECT_GE(note.pitch, ctx.register_low)
-        << "Pitch " << static_cast<int>(note.pitch)
-        << " below register_low " << static_cast<int>(ctx.register_low)
-        << " at tick " << note.start_tick;
+        << "Pitch " << static_cast<int>(note.pitch) << " below register_low "
+        << static_cast<int>(ctx.register_low) << " at tick " << note.start_tick;
     EXPECT_LE(note.pitch, ctx.register_high)
-        << "Pitch " << static_cast<int>(note.pitch)
-        << " above register_high " << static_cast<int>(ctx.register_high)
-        << " at tick " << note.start_tick;
+        << "Pitch " << static_cast<int>(note.pitch) << " above register_high "
+        << static_cast<int>(ctx.register_high) << " at tick " << note.start_tick;
   }
 }
 
@@ -248,17 +242,10 @@ TEST_P(AllTexturesInRegisterTest, VelocityInValidRange) {
   }
 }
 
-INSTANTIATE_TEST_SUITE_P(
-    AllTextures,
-    AllTexturesInRegisterTest,
-    ::testing::Values(
-        TextureType::SingleLine,
-        TextureType::ImpliedPolyphony,
-        TextureType::FullChords,
-        TextureType::Arpeggiated,
-        TextureType::ScalePassage,
-        TextureType::Bariolage
-    ));
+INSTANTIATE_TEST_SUITE_P(AllTextures, AllTexturesInRegisterTest,
+                         ::testing::Values(TextureType::SingleLine, TextureType::ImpliedPolyphony,
+                                           TextureType::FullChords, TextureType::Arpeggiated,
+                                           TextureType::ScalePassage, TextureType::Bariolage));
 
 // ---------------------------------------------------------------------------
 // SingleLine specifics
@@ -272,9 +259,8 @@ TEST_F(TextureGeneratorTest, SingleLineProducesEighthNotes) {
 
   // SingleLine should produce 8th-note durations (240 ticks).
   for (const auto& note : notes) {
-    EXPECT_EQ(note.duration, kTicksPerBeat / 2)
-        << "SingleLine note at tick " << note.start_tick
-        << " has unexpected duration " << note.duration;
+    EXPECT_EQ(note.duration, kTicksPerBeat / 2) << "SingleLine note at tick " << note.start_tick
+                                                << " has unexpected duration " << note.duration;
   }
 }
 
@@ -297,8 +283,7 @@ TEST_F(TextureGeneratorTest, ImpliedPolyphonyUsesRegisterHalves) {
 
   EXPECT_FALSE(notes.empty());
 
-  int mid_point = (static_cast<int>(ctx.register_low) +
-                   static_cast<int>(ctx.register_high)) / 2;
+  int mid_point = (static_cast<int>(ctx.register_low) + static_cast<int>(ctx.register_high)) / 2;
 
   int notes_above_mid = 0;
   int notes_below_mid = 0;
@@ -316,8 +301,7 @@ TEST_F(TextureGeneratorTest, ImpliedPolyphonyUsesRegisterHalves) {
   EXPECT_GT(notes_below_mid, 0) << "No notes in lower register half";
 
   // Neither half should dominate completely (expect at least 20% in each).
-  double upper_ratio = static_cast<double>(notes_above_mid) /
-                       static_cast<double>(notes.size());
+  double upper_ratio = static_cast<double>(notes_above_mid) / static_cast<double>(notes.size());
   EXPECT_GT(upper_ratio, 0.15) << "Upper voice too sparse for implied polyphony";
   EXPECT_LT(upper_ratio, 0.85) << "Lower voice too sparse for implied polyphony";
 }
@@ -328,8 +312,7 @@ TEST_F(TextureGeneratorTest, ImpliedPolyphonyHasRegisterAlternation) {
 
   ASSERT_GE(notes.size(), 4u);
 
-  int mid_point = (static_cast<int>(ctx.register_low) +
-                   static_cast<int>(ctx.register_high)) / 2;
+  int mid_point = (static_cast<int>(ctx.register_low) + static_cast<int>(ctx.register_high)) / 2;
 
   // Count register crossings (upper -> lower or lower -> upper).
   int crossings = 0;
@@ -342,8 +325,7 @@ TEST_F(TextureGeneratorTest, ImpliedPolyphonyHasRegisterAlternation) {
   }
 
   // Should have frequent alternation (at least 25% of transitions).
-  double crossing_ratio = static_cast<double>(crossings) /
-                          static_cast<double>(notes.size() - 1);
+  double crossing_ratio = static_cast<double>(crossings) / static_cast<double>(notes.size() - 1);
   EXPECT_GT(crossing_ratio, 0.2)
       << "Implied polyphony should alternate between register halves frequently";
 }
@@ -413,9 +395,8 @@ TEST_F(TextureGeneratorTest, ArpeggiatedProduces16thNotes) {
 
   // All notes should be 16th-note duration (120 ticks).
   for (const auto& note : notes) {
-    EXPECT_EQ(note.duration, kTicksPerBeat / 4)
-        << "Arpeggiated note at tick " << note.start_tick
-        << " has unexpected duration " << note.duration;
+    EXPECT_EQ(note.duration, kTicksPerBeat / 4) << "Arpeggiated note at tick " << note.start_tick
+                                                << " has unexpected duration " << note.duration;
   }
 }
 
@@ -441,9 +422,8 @@ TEST_F(TextureGeneratorTest, ScalePassageProduces16thNotes) {
   EXPECT_FALSE(notes.empty());
 
   for (const auto& note : notes) {
-    EXPECT_EQ(note.duration, kTicksPerBeat / 4)
-        << "ScalePassage note at tick " << note.start_tick
-        << " has unexpected duration " << note.duration;
+    EXPECT_EQ(note.duration, kTicksPerBeat / 4) << "ScalePassage note at tick " << note.start_tick
+                                                << " has unexpected duration " << note.duration;
   }
 }
 
@@ -461,11 +441,9 @@ TEST_F(TextureGeneratorTest, ScalePassageUsesScaleTones) {
     }
   }
 
-  double scale_ratio = static_cast<double>(scale_tone_count) /
-                       static_cast<double>(notes.size());
-  EXPECT_GT(scale_ratio, 0.8)
-      << "ScalePassage should produce mostly scale tones (got "
-      << scale_ratio * 100 << "%)";
+  double scale_ratio = static_cast<double>(scale_tone_count) / static_cast<double>(notes.size());
+  EXPECT_GT(scale_ratio, 0.8) << "ScalePassage should produce mostly scale tones (got "
+                              << scale_ratio * 100 << "%)";
 }
 
 TEST_F(TextureGeneratorTest, ScalePassageHasStepwiseMotion) {
@@ -481,8 +459,8 @@ TEST_F(TextureGeneratorTest, ScalePassageHasStepwiseMotion) {
   for (size_t idx = 1; idx < notes.size(); ++idx) {
     // Only check within the same beat group (4 notes per beat).
     if (notes[idx].start_tick - notes[idx - 1].start_tick == kTicksPerBeat / 4) {
-      int interval = std::abs(
-          static_cast<int>(notes[idx].pitch) - static_cast<int>(notes[idx - 1].pitch));
+      int interval =
+          std::abs(static_cast<int>(notes[idx].pitch) - static_cast<int>(notes[idx - 1].pitch));
       ++total_transitions;
       if (interval <= 4) {  // Allow up to major 3rd for scale steps.
         ++stepwise_count;
@@ -491,8 +469,8 @@ TEST_F(TextureGeneratorTest, ScalePassageHasStepwiseMotion) {
   }
 
   if (total_transitions > 0) {
-    double stepwise_ratio = static_cast<double>(stepwise_count) /
-                            static_cast<double>(total_transitions);
+    double stepwise_ratio =
+        static_cast<double>(stepwise_count) / static_cast<double>(total_transitions);
     EXPECT_GT(stepwise_ratio, 0.5)
         << "ScalePassage should have mostly stepwise motion within beats";
   }
@@ -510,9 +488,8 @@ TEST_F(TextureGeneratorTest, BariolageProduces16thNotes) {
   EXPECT_FALSE(notes.empty());
 
   for (const auto& note : notes) {
-    EXPECT_EQ(note.duration, kTicksPerBeat / 4)
-        << "Bariolage note at tick " << note.start_tick
-        << " has unexpected duration " << note.duration;
+    EXPECT_EQ(note.duration, kTicksPerBeat / 4) << "Bariolage note at tick " << note.start_tick
+                                                << " has unexpected duration " << note.duration;
   }
 }
 
@@ -532,9 +509,8 @@ TEST_F(TextureGeneratorTest, BariolageAlternatesPitches) {
   }
 
   for (const auto& [beat, pitches] : beat_pitches) {
-    EXPECT_LE(pitches.size(), 2u)
-        << "Bariolage beat at tick " << (beat * kTicksPerBeat)
-        << " should use at most 2 distinct pitches (stopped + open)";
+    EXPECT_LE(pitches.size(), 2u) << "Bariolage beat at tick " << (beat * kTicksPerBeat)
+                                  << " should use at most 2 distinct pitches (stopped + open)";
   }
 }
 
@@ -599,8 +575,7 @@ TEST_F(TextureGeneratorTest, DifferentSeedsProduceDifferentOutput) {
       break;
     }
   }
-  EXPECT_TRUE(found_difference)
-      << "Different seeds should produce at least some different pitches";
+  EXPECT_TRUE(found_difference) << "Different seeds should produce at least some different pitches";
 }
 
 // ---------------------------------------------------------------------------
@@ -610,8 +585,8 @@ TEST_F(TextureGeneratorTest, DifferentSeedsProduceDifferentOutput) {
 TEST_F(TextureGeneratorTest, MajorSectionContextDoesNotCrash) {
   // Build a D major timeline for the major section.
   KeySignature d_major = {Key::D, false};
-  HarmonicTimeline major_timeline = HarmonicTimeline::createStandard(
-      d_major, 4 * kTicksPerBar, HarmonicResolution::Bar);
+  HarmonicTimeline major_timeline =
+      HarmonicTimeline::createStandard(d_major, 4 * kTicksPerBar, HarmonicResolution::Bar);
 
   auto ctx = makeDefaultContext(TextureType::SingleLine);
   ctx.key = d_major;
@@ -628,13 +603,13 @@ TEST_F(TextureGeneratorTest, MajorSectionContextDoesNotCrash) {
 
 TEST_F(TextureGeneratorTest, NonZeroStartTickOffset) {
   auto ctx = makeDefaultContext(TextureType::Arpeggiated);
-  ctx.start_tick = 4 * kTicksPerBar;  // Start at bar 4
+  ctx.start_tick = 4 * kTicksPerBar;      // Start at bar 4
   ctx.duration_ticks = 2 * kTicksPerBar;  // 2 bars only
 
   // Create a longer timeline to accommodate the offset.
   KeySignature d_minor = {Key::D, true};
-  HarmonicTimeline long_timeline = HarmonicTimeline::createStandard(
-      d_minor, 8 * kTicksPerBar, HarmonicResolution::Bar);
+  HarmonicTimeline long_timeline =
+      HarmonicTimeline::createStandard(d_minor, 8 * kTicksPerBar, HarmonicResolution::Bar);
 
   auto notes = generateTexture(ctx, long_timeline);
   EXPECT_FALSE(notes.empty());
@@ -769,9 +744,10 @@ static std::pair<int, int> countStepwiseRatio(const std::vector<NoteEvent>& note
   int total_transitions = 0;
 
   for (size_t idx = 1; idx < notes.size(); ++idx) {
-    int interval = std::abs(
-        static_cast<int>(notes[idx].pitch) - static_cast<int>(notes[idx - 1].pitch));
-    if (interval == 0) continue;  // Skip unisons.
+    int interval =
+        std::abs(static_cast<int>(notes[idx].pitch) - static_cast<int>(notes[idx - 1].pitch));
+    if (interval == 0)
+      continue;  // Skip unisons.
     ++total_transitions;
     if (interval <= 2) {
       ++stepwise_count;
@@ -800,8 +776,8 @@ TEST_F(TextureGeneratorTest, SingleLineStepwiseRatioMultiSeed) {
     total_stepwise_ratio += ratio;
 
     // Individual seed: at least 30% stepwise (generous lower bound).
-    EXPECT_GT(ratio, 0.30f)
-        << "SingleLine seed " << ctx.seed << " stepwise ratio too low: " << ratio;
+    EXPECT_GT(ratio, 0.30f) << "SingleLine seed " << ctx.seed
+                            << " stepwise ratio too low: " << ratio;
   }
 
   float avg_ratio = total_stepwise_ratio / static_cast<float>(kNumSeeds);
@@ -810,10 +786,8 @@ TEST_F(TextureGeneratorTest, SingleLineStepwiseRatioMultiSeed) {
   // post-processing) runs higher than full-piece Bach reference (55%) because
   // SingleLine excludes arpeggiated and bariolage passages that lower the
   // piece-level average. Accept 40-90% as reasonable for this texture type.
-  EXPECT_GT(avg_ratio, 0.40f)
-      << "SingleLine average stepwise ratio too low: " << avg_ratio;
-  EXPECT_LT(avg_ratio, 0.90f)
-      << "SingleLine average stepwise ratio too high: " << avg_ratio;
+  EXPECT_GT(avg_ratio, 0.40f) << "SingleLine average stepwise ratio too low: " << avg_ratio;
+  EXPECT_LT(avg_ratio, 0.90f) << "SingleLine average stepwise ratio too high: " << avg_ratio;
 }
 
 TEST_F(TextureGeneratorTest, ImpliedPolyphonyStepwiseWithinVoice) {
@@ -830,9 +804,10 @@ TEST_F(TextureGeneratorTest, ImpliedPolyphonyStepwiseWithinVoice) {
   int stepwise = 0;
   int total = 0;
   for (size_t idx = 1; idx < notes.size(); ++idx) {
-    int interval = std::abs(
-        static_cast<int>(notes[idx].pitch) - static_cast<int>(notes[idx - 1].pitch));
-    if (interval == 0) continue;
+    int interval =
+        std::abs(static_cast<int>(notes[idx].pitch) - static_cast<int>(notes[idx - 1].pitch));
+    if (interval == 0)
+      continue;
 
     // Voice-switch leaps (crossing between register halves) are expected and
     // acceptable -- they create the polyphonic illusion. We count all transitions
@@ -880,9 +855,10 @@ TEST_F(TextureGeneratorTest, SingleLineWeakBeatPrefersDiatonicStep) {
     bool is_on_beat = (tick_in_bar % kTicksPerBeat == 0);
 
     if (!is_on_beat) {
-      int interval = std::abs(
-          static_cast<int>(notes[idx].pitch) - static_cast<int>(notes[idx - 1].pitch));
-      if (interval == 0) continue;
+      int interval =
+          std::abs(static_cast<int>(notes[idx].pitch) - static_cast<int>(notes[idx - 1].pitch));
+      if (interval == 0)
+        continue;
       ++weak_beat_total;
       if (interval <= 2) {
         ++weak_beat_steps;
@@ -891,12 +867,10 @@ TEST_F(TextureGeneratorTest, SingleLineWeakBeatPrefersDiatonicStep) {
   }
 
   if (weak_beat_total > 0) {
-    float ratio = static_cast<float>(weak_beat_steps) /
-                  static_cast<float>(weak_beat_total);
+    float ratio = static_cast<float>(weak_beat_steps) / static_cast<float>(weak_beat_total);
     // Weak beat notes should be predominantly stepwise (at least 50%).
-    EXPECT_GT(ratio, 0.45f)
-        << "Weak beat stepwise ratio too low: " << ratio
-        << " (" << weak_beat_steps << "/" << weak_beat_total << ")";
+    EXPECT_GT(ratio, 0.45f) << "Weak beat stepwise ratio too low: " << ratio << " ("
+                            << weak_beat_steps << "/" << weak_beat_total << ")";
   }
 }
 

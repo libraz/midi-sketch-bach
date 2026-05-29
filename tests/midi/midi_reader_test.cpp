@@ -149,7 +149,7 @@ TEST(MidiReaderTest, RoundTripSingleTrackSingleNote) {
   NoteEvent note;
   note.start_tick = 0;
   note.duration = 480;
-  note.pitch = 60;      // C4
+  note.pitch = 60;  // C4
   note.velocity = 80;
   note.voice = 0;
   track.notes.push_back(note);
@@ -334,13 +334,8 @@ TEST(MidiReaderTest, SecondReadResetsState) {
   EXPECT_FALSE(reader.getError().empty());
 
   // Second read: valid header-only file.
-  std::vector<uint8_t> valid_header = {
-      0x4D, 0x54, 0x68, 0x64,
-      0x00, 0x00, 0x00, 0x06,
-      0x00, 0x01,
-      0x00, 0x00,
-      0x01, 0xE0
-  };
+  std::vector<uint8_t> valid_header = {0x4D, 0x54, 0x68, 0x64, 0x00, 0x00, 0x00,
+                                       0x06, 0x00, 0x01, 0x00, 0x00, 0x01, 0xE0};
   EXPECT_TRUE(reader.read(valid_header));
   EXPECT_TRUE(reader.getError().empty());
   EXPECT_EQ(reader.getParsedMidi().division, 480);

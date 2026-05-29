@@ -35,8 +35,8 @@ namespace bach {
 ///                         (C.P.E. Bach default). If false, begins on main note.
 /// @return Vector of sub-notes replacing the original note. Returns the
 ///         original note unchanged if the duration is too short for a trill.
-std::vector<NoteEvent> generateTrill(const NoteEvent& note, uint8_t upper_pitch,
-                                     uint8_t speed = 4, bool start_from_upper = true);
+std::vector<NoteEvent> generateTrill(const NoteEvent& note, uint8_t upper_pitch, uint8_t speed = 4,
+                                     bool start_from_upper = true);
 
 /// @brief Compute recommended trill speed based on tempo.
 ///

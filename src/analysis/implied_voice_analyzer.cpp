@@ -22,7 +22,7 @@ namespace {
 /// @param lower Lower voice notes (sorted by start_tick).
 /// @return Number of parallel perfect interval violations.
 uint32_t countImpliedParallels(const std::vector<NoteEvent>& upper,
-                                const std::vector<NoteEvent>& lower) {
+                               const std::vector<NoteEvent>& lower) {
   uint32_t count = 0;
 
   // Build a tick-aligned comparison using the smaller voice's tick positions.
@@ -31,18 +31,18 @@ uint32_t countImpliedParallels(const std::vector<NoteEvent>& upper,
 
   while (ui < upper.size() && li < lower.size()) {
     // Advance to the nearest aligned pair.
-    while (ui < upper.size() && li < lower.size() &&
-           upper[ui].start_tick != lower[li].start_tick) {
+    while (ui < upper.size() && li < lower.size() && upper[ui].start_tick != lower[li].start_tick) {
       if (upper[ui].start_tick < lower[li].start_tick) {
         ++ui;
       } else {
         ++li;
       }
     }
-    if (ui >= upper.size() || li >= lower.size()) break;
+    if (ui >= upper.size() || li >= lower.size())
+      break;
 
-    int interval = interval_util::compoundToSimple(
-        absoluteInterval(upper[ui].pitch, lower[li].pitch));
+    int interval =
+        interval_util::compoundToSimple(absoluteInterval(upper[ui].pitch, lower[li].pitch));
 
     bool is_perfect = interval_util::isPerfectConsonance(interval);
 
@@ -63,10 +63,12 @@ uint32_t countImpliedParallels(const std::vector<NoteEvent>& upper,
 
 /// @brief Calculate standard deviation of a pitch set.
 float pitchStdDev(const std::vector<NoteEvent>& notes) {
-  if (notes.size() < 2) return 0.0f;
+  if (notes.size() < 2)
+    return 0.0f;
 
   float sum = 0.0f;
-  for (const auto& note : notes) sum += static_cast<float>(note.pitch);
+  for (const auto& note : notes)
+    sum += static_cast<float>(note.pitch);
   float mean = sum / static_cast<float>(notes.size());
 
   float var_sum = 0.0f;
@@ -79,9 +81,8 @@ float pitchStdDev(const std::vector<NoteEvent>& notes) {
 
 }  // namespace
 
-ImpliedVoiceAnalysisResult ImpliedVoiceAnalyzer::analyze(
-    const std::vector<NoteEvent>& melody,
-    uint8_t register_split_pitch) {
+ImpliedVoiceAnalysisResult ImpliedVoiceAnalyzer::analyze(const std::vector<NoteEvent>& melody,
+                                                         uint8_t register_split_pitch) {
   ImpliedVoiceAnalysisResult result;
 
   if (melody.size() < 4) {
@@ -102,8 +103,7 @@ ImpliedVoiceAnalysisResult ImpliedVoiceAnalyzer::analyze(
   }
 
   // Calculate implied voice count based on register distribution.
-  float upper_ratio = static_cast<float>(upper_voice.size()) /
-                       static_cast<float>(melody.size());
+  float upper_ratio = static_cast<float>(upper_voice.size()) / static_cast<float>(melody.size());
 
   // Voice count estimate: base 1.0 + contribution from each register.
   // Even distribution (50/50) implies 2 voices; skewed implies fewer.
@@ -122,17 +122,16 @@ ImpliedVoiceAnalysisResult ImpliedVoiceAnalyzer::analyze(
   result.implied_parallel_count = countImpliedParallels(upper_voice, lower_voice);
 
   // Quality gate: voice count in [2.3, 2.8] and no more than 2 parallel violations.
-  result.passes_quality_gate =
-      result.implied_voice_count >= 2.3f &&
-      result.implied_voice_count <= 2.8f &&
-      result.implied_parallel_count <= 2;
+  result.passes_quality_gate = result.implied_voice_count >= 2.3f &&
+                               result.implied_voice_count <= 2.8f &&
+                               result.implied_parallel_count <= 2;
 
   return result;
 }
 
-uint8_t ImpliedVoiceAnalyzer::estimateSplitPitch(
-    const std::vector<NoteEvent>& melody) {
-  if (melody.empty()) return 60;  // Default to C4.
+uint8_t ImpliedVoiceAnalyzer::estimateSplitPitch(const std::vector<NoteEvent>& melody) {
+  if (melody.empty())
+    return 60;  // Default to C4.
 
   std::vector<uint8_t> pitches;
   pitches.reserve(melody.size());

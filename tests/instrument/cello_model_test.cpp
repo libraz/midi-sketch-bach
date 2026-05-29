@@ -71,10 +71,10 @@ TEST(CelloModelTest, MiddleOfRangePlayable) {
 
 TEST(CelloModelTest, OpenStringPitchesIdentified) {
   CelloModel cello;
-  EXPECT_TRUE(cello.isOpenString(36));   // C2
-  EXPECT_TRUE(cello.isOpenString(43));   // G2
-  EXPECT_TRUE(cello.isOpenString(50));   // D3
-  EXPECT_TRUE(cello.isOpenString(57));   // A3
+  EXPECT_TRUE(cello.isOpenString(36));  // C2
+  EXPECT_TRUE(cello.isOpenString(43));  // G2
+  EXPECT_TRUE(cello.isOpenString(50));  // D3
+  EXPECT_TRUE(cello.isOpenString(57));  // A3
 }
 
 TEST(CelloModelTest, NonOpenStringPitchesRejected) {

@@ -18,10 +18,8 @@ namespace bach {
 /// @param section_ticks Duration of one 16-bar section in ticks.
 /// @param ornament_variation If true, slightly vary ornaments on repeats (future).
 /// @return Notes with repeats applied (A-A-B-B ordering).
-std::vector<NoteEvent> applyBinaryRepeats(
-    const std::vector<NoteEvent>& unique_notes,
-    Tick section_ticks,
-    bool ornament_variation = false);
+std::vector<NoteEvent> applyBinaryRepeats(const std::vector<NoteEvent>& unique_notes,
+                                          Tick section_ticks, bool ornament_variation = false);
 
 }  // namespace bach
 

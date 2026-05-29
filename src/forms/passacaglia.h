@@ -17,12 +17,13 @@ struct PassacagliaConfig {
   KeySignature key = {Key::C, true};  ///< C minor default (BWV 582).
   uint16_t bpm = 60;
   uint32_t seed = 42;
-  uint8_t num_voices = 4;        ///< 3-5 voices.
-  int num_variations = 12;       ///< Number of ground bass variations.
-  int ground_bass_bars = 8;      ///< Length of ground bass theme in bars.
-  bool append_fugue = true;      ///< Whether to append a fugue section.
-  bool enable_picardy = true;    ///< Apply Picardy third in minor keys.
-};;
+  uint8_t num_voices = 4;      ///< 3-5 voices.
+  int num_variations = 12;     ///< Number of ground bass variations.
+  int ground_bass_bars = 8;    ///< Length of ground bass theme in bars.
+  bool append_fugue = true;    ///< Whether to append a fugue section.
+  bool enable_picardy = true;  ///< Apply Picardy third in minor keys.
+};
+;
 
 /// @brief Result of passacaglia generation.
 struct PassacagliaResult {
@@ -65,8 +66,8 @@ PassacagliaResult generatePassacaglia(const PassacagliaConfig& config);
 /// @param bars Number of bars for the ground bass.
 /// @param seed RNG seed.
 /// @return Vector of NoteEvent forming the ground bass.
-std::vector<NoteEvent> generatePassacagliaGroundBass(const KeySignature& key,
-                                                     int bars, uint32_t seed);
+std::vector<NoteEvent> generatePassacagliaGroundBass(const KeySignature& key, int bars,
+                                                     uint32_t seed);
 
 }  // namespace bach
 

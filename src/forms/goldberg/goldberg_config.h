@@ -14,13 +14,13 @@ namespace bach {
 
 /// @brief Configuration for Goldberg Variations generation.
 struct GoldbergConfig {
-  KeySignature key = {Key::G, false};       ///< Key (default: G major).
-  uint16_t bpm = 60;                        ///< Base tempo (Aria tempo).
-  uint32_t seed = 0;                        ///< Random seed (0 = auto).
+  KeySignature key = {Key::G, false};  ///< Key (default: G major).
+  uint16_t bpm = 60;                   ///< Base tempo (Aria tempo).
+  uint32_t seed = 0;                   ///< Random seed (0 = auto).
   InstrumentType instrument = InstrumentType::Harpsichord;
   DurationScale scale = DurationScale::Short;
-  bool apply_repeats = true;                ///< Apply binary form repeats.
-  bool ornament_variation_on_repeat = false; ///< Vary ornaments on repeats.
+  bool apply_repeats = true;                  ///< Apply binary form repeats.
+  bool ornament_variation_on_repeat = false;  ///< Vary ornaments on repeats.
 };
 
 /// @brief Result from Goldberg Variations generation.

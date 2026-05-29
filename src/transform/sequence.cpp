@@ -10,7 +10,8 @@
 namespace bach {
 
 Tick motifDuration(const std::vector<NoteEvent>& notes) {
-  if (notes.empty()) return 0;
+  if (notes.empty())
+    return 0;
 
   Tick min_start = notes.front().start_tick;
   Tick max_end = 0;
@@ -30,7 +31,8 @@ Tick motifDuration(const std::vector<NoteEvent>& notes) {
 
 std::vector<NoteEvent> generateSequence(const std::vector<NoteEvent>& motif, int repetitions,
                                         int interval_step, Tick start_tick) {
-  if (motif.empty() || repetitions <= 0) return {};
+  if (motif.empty() || repetitions <= 0)
+    return {};
 
   Tick dur = motifDuration(motif);
   Tick motif_start = motif.front().start_tick;
@@ -61,9 +63,10 @@ std::vector<NoteEvent> generateSequence(const std::vector<NoteEvent>& motif, int
 }
 
 std::vector<NoteEvent> generateDiatonicSequence(const std::vector<NoteEvent>& motif,
-                                                int repetitions, int degree_step,
-                                                Tick start_tick, Key key, ScaleType scale) {
-  if (motif.empty() || repetitions <= 0) return {};
+                                                int repetitions, int degree_step, Tick start_tick,
+                                                Key key, ScaleType scale) {
+  if (motif.empty() || repetitions <= 0)
+    return {};
 
   Tick dur = motifDuration(motif);
   Tick motif_start = motif.front().start_tick;

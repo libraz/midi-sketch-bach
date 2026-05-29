@@ -28,9 +28,8 @@ namespace figure_match {
 /// @param key Current musical key.
 /// @param scale Current scale type.
 /// @return Match quality in [0.0, 1.0]. Returns 0.0 if count != figure.note_count.
-float matchFigure(const uint8_t* pitches, int count,
-                  const MelodicFigure& figure,
-                  Key key, ScaleType scale);
+float matchFigure(const uint8_t* pitches, int count, const MelodicFigure& figure, Key key,
+                  ScaleType scale);
 
 /// @brief Find the best matching figure from a table.
 ///
@@ -45,10 +44,8 @@ float matchFigure(const uint8_t* pitches, int count,
 /// @param scale Current scale type.
 /// @param threshold Minimum match quality to accept (default 0.7).
 /// @return Index of best match in table, or -1 if none meets threshold.
-int findBestFigure(const uint8_t* pitches, int count,
-                   const MelodicFigure* const* table, int table_size,
-                   Key key, ScaleType scale,
-                   float threshold = 0.7f);
+int findBestFigure(const uint8_t* pitches, int count, const MelodicFigure* const* table,
+                   int table_size, Key key, ScaleType scale, float threshold = 0.7f);
 
 }  // namespace figure_match
 }  // namespace bach

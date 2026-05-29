@@ -24,10 +24,9 @@ std::vector<NoteEvent> filterAndSort(const std::vector<NoteEvent>& notes, VoiceI
       result.push_back(note);
     }
   }
-  std::sort(result.begin(), result.end(),
-            [](const NoteEvent& lhs, const NoteEvent& rhs) {
-              return lhs.start_tick < rhs.start_tick;
-            });
+  std::sort(result.begin(), result.end(), [](const NoteEvent& lhs, const NoteEvent& rhs) {
+    return lhs.start_tick < rhs.start_tick;
+  });
   return result;
 }
 
@@ -60,15 +59,19 @@ int pitchAtTick(const std::vector<NoteEvent>& sorted_notes, Tick tick) {
 /// @brief Classify melodic direction between two consecutive pitch values.
 /// @return -1 for down, 0 for same, +1 for up.
 int melodicDirection(int prev_pitch, int curr_pitch) {
-  if (curr_pitch > prev_pitch) return 1;
-  if (curr_pitch < prev_pitch) return -1;
+  if (curr_pitch > prev_pitch)
+    return 1;
+  if (curr_pitch < prev_pitch)
+    return -1;
   return 0;
 }
 
 /// @brief Clamp a float to [0, 1].
 float clamp01(float val) {
-  if (val < 0.0f) return 0.0f;
-  if (val > 1.0f) return 1.0f;
+  if (val < 0.0f)
+    return 0.0f;
+  if (val > 1.0f)
+    return 1.0f;
   return val;
 }
 
@@ -79,8 +82,7 @@ float clamp01(float val) {
 // ---------------------------------------------------------------------------
 
 float VoiceIndependenceScore::composite() const {
-  return clamp01(0.4f * rhythm_independence +
-                 0.3f * contour_independence +
+  return clamp01(0.4f * rhythm_independence + 0.3f * contour_independence +
                  0.3f * register_separation);
 }
 
@@ -199,8 +201,7 @@ float calculateContourIndependence(const std::vector<NoteEvent>& voice_a_notes,
   if (total_comparisons == 0) {
     return 0.0f;
   }
-  return clamp01(static_cast<float>(opposite_count) /
-                 static_cast<float>(total_comparisons));
+  return clamp01(static_cast<float>(opposite_count) / static_cast<float>(total_comparisons));
 }
 
 // ---------------------------------------------------------------------------
@@ -216,14 +217,18 @@ float calculateRegisterSeparation(const std::vector<NoteEvent>& voice_a_notes,
   // Find min/max pitch for each voice.
   uint8_t min_a = 127, max_a = 0;
   for (const auto& note : voice_a_notes) {
-    if (note.pitch < min_a) min_a = note.pitch;
-    if (note.pitch > max_a) max_a = note.pitch;
+    if (note.pitch < min_a)
+      min_a = note.pitch;
+    if (note.pitch > max_a)
+      max_a = note.pitch;
   }
 
   uint8_t min_b = 127, max_b = 0;
   for (const auto& note : voice_b_notes) {
-    if (note.pitch < min_b) min_b = note.pitch;
-    if (note.pitch > max_b) max_b = note.pitch;
+    if (note.pitch < min_b)
+      min_b = note.pitch;
+    if (note.pitch > max_b)
+      max_b = note.pitch;
   }
 
   // Compute overlap in semitones.
@@ -245,8 +250,8 @@ float calculateRegisterSeparation(const std::vector<NoteEvent>& voice_a_notes,
 // Pair analysis
 // ---------------------------------------------------------------------------
 
-VoiceIndependenceScore analyzeVoicePair(const std::vector<NoteEvent>& notes,
-                                        VoiceId voice_a, VoiceId voice_b) {
+VoiceIndependenceScore analyzeVoicePair(const std::vector<NoteEvent>& notes, VoiceId voice_a,
+                                        VoiceId voice_b) {
   auto notes_a = filterAndSort(notes, voice_a);
   auto notes_b = filterAndSort(notes, voice_b);
 
@@ -261,8 +266,7 @@ VoiceIndependenceScore analyzeVoicePair(const std::vector<NoteEvent>& notes,
 // Overall analysis (minimum across all pairs)
 // ---------------------------------------------------------------------------
 
-VoiceIndependenceScore analyzeOverall(const std::vector<NoteEvent>& notes,
-                                      uint8_t num_voices) {
+VoiceIndependenceScore analyzeOverall(const std::vector<NoteEvent>& notes, uint8_t num_voices) {
   if (num_voices < 2) {
     return {};
   }

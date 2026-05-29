@@ -7,22 +7,26 @@
 namespace bach {
 
 int JsonValue::asInt(int default_val) const {
-  if (type == Number) return static_cast<int>(number_val);
+  if (type == Number)
+    return static_cast<int>(number_val);
   return default_val;
 }
 
 uint32_t JsonValue::asUint(uint32_t default_val) const {
-  if (type == Number) return static_cast<uint32_t>(number_val);
+  if (type == Number)
+    return static_cast<uint32_t>(number_val);
   return default_val;
 }
 
 bool JsonValue::asBool(bool default_val) const {
-  if (type == Bool) return bool_val;
+  if (type == Bool)
+    return bool_val;
   return default_val;
 }
 
 std::string JsonValue::asString(const std::string& default_val) const {
-  if (type == String) return string_val;
+  if (type == String)
+    return string_val;
   return default_val;
 }
 
@@ -38,7 +42,8 @@ void skipWhitespace(const char* json, size_t length, size_t& pos) {
 /// @brief Parse a JSON string literal (expects pos at opening quote).
 /// @return Parsed string, pos advanced past closing quote.
 std::string parseString(const char* json, size_t length, size_t& pos) {
-  if (pos >= length || json[pos] != '"') return "";
+  if (pos >= length || json[pos] != '"')
+    return "";
   ++pos;  // skip opening quote
 
   std::string result;
@@ -46,13 +51,27 @@ std::string parseString(const char* json, size_t length, size_t& pos) {
     if (json[pos] == '\\' && pos + 1 < length) {
       ++pos;
       switch (json[pos]) {
-        case '"':  result += '"'; break;
-        case '\\': result += '\\'; break;
-        case '/':  result += '/'; break;
-        case 'n':  result += '\n'; break;
-        case 't':  result += '\t'; break;
-        case 'r':  result += '\r'; break;
-        default:   result += json[pos]; break;
+        case '"':
+          result += '"';
+          break;
+        case '\\':
+          result += '\\';
+          break;
+        case '/':
+          result += '/';
+          break;
+        case 'n':
+          result += '\n';
+          break;
+        case 't':
+          result += '\t';
+          break;
+        case 'r':
+          result += '\r';
+          break;
+        default:
+          result += json[pos];
+          break;
       }
     } else {
       result += json[pos];
@@ -60,7 +79,8 @@ std::string parseString(const char* json, size_t length, size_t& pos) {
     ++pos;
   }
 
-  if (pos < length) ++pos;  // skip closing quote
+  if (pos < length)
+    ++pos;  // skip closing quote
   return result;
 }
 
@@ -70,11 +90,14 @@ JsonValue parseNumber(const char* json, size_t length, size_t& pos) {
   val.type = JsonValue::Number;
 
   size_t start = pos;
-  if (pos < length && json[pos] == '-') ++pos;
-  while (pos < length && std::isdigit(static_cast<unsigned char>(json[pos]))) ++pos;
+  if (pos < length && json[pos] == '-')
+    ++pos;
+  while (pos < length && std::isdigit(static_cast<unsigned char>(json[pos])))
+    ++pos;
   if (pos < length && json[pos] == '.') {
     ++pos;
-    while (pos < length && std::isdigit(static_cast<unsigned char>(json[pos]))) ++pos;
+    while (pos < length && std::isdigit(static_cast<unsigned char>(json[pos])))
+      ++pos;
   }
 
   std::string num_str(json + start, pos - start);
@@ -85,7 +108,8 @@ JsonValue parseNumber(const char* json, size_t length, size_t& pos) {
 /// @brief Skip a JSON value (for nested objects/arrays we don't parse).
 void skipValue(const char* json, size_t length, size_t& pos) {
   skipWhitespace(json, length, pos);
-  if (pos >= length) return;
+  if (pos >= length)
+    return;
 
   if (json[pos] == '"') {
     parseString(json, length, pos);
@@ -99,8 +123,10 @@ void skipValue(const char* json, size_t length, size_t& pos) {
         parseString(json, length, pos);
         continue;
       }
-      if (json[pos] == open) ++depth;
-      if (json[pos] == close) --depth;
+      if (json[pos] == open)
+        ++depth;
+      if (json[pos] == close)
+        --depth;
       ++pos;
     }
   } else {
@@ -116,16 +142,19 @@ void skipValue(const char* json, size_t length, size_t& pos) {
 
 std::map<std::string, JsonValue> parseJsonObject(const char* json, size_t length) {
   std::map<std::string, JsonValue> result;
-  if (!json || length == 0) return result;
+  if (!json || length == 0)
+    return result;
 
   size_t pos = 0;
   skipWhitespace(json, length, pos);
-  if (pos >= length || json[pos] != '{') return result;
+  if (pos >= length || json[pos] != '{')
+    return result;
   ++pos;  // skip '{'
 
   while (pos < length) {
     skipWhitespace(json, length, pos);
-    if (pos >= length || json[pos] == '}') break;
+    if (pos >= length || json[pos] == '}')
+      break;
 
     // Skip comma between entries
     if (json[pos] == ',') {
@@ -133,19 +162,23 @@ std::map<std::string, JsonValue> parseJsonObject(const char* json, size_t length
       skipWhitespace(json, length, pos);
     }
 
-    if (pos >= length || json[pos] == '}') break;
+    if (pos >= length || json[pos] == '}')
+      break;
 
     // Parse key
-    if (json[pos] != '"') break;
+    if (json[pos] != '"')
+      break;
     std::string key = parseString(json, length, pos);
 
     // Skip colon
     skipWhitespace(json, length, pos);
-    if (pos >= length || json[pos] != ':') break;
+    if (pos >= length || json[pos] != ':')
+      break;
     ++pos;
     skipWhitespace(json, length, pos);
 
-    if (pos >= length) break;
+    if (pos >= length)
+      break;
 
     // Parse value
     if (json[pos] == '"') {

@@ -24,19 +24,19 @@ enum class SuspensionPhase : uint8_t {
 /// A single suspension event describing one full Prepare-Suspend-Resolve cycle.
 struct SuspensionEvent {
   SuspensionPhase phase;
-  uint8_t suspended_pitch;    ///< Pitch held through suspension.
-  uint8_t resolution_pitch;   ///< Descending 2nd resolution target.
-  Tick duration;              ///< Duration of this phase in ticks.
+  uint8_t suspended_pitch;   ///< Pitch held through suspension.
+  uint8_t resolution_pitch;  ///< Descending 2nd resolution target.
+  Tick duration;             ///< Duration of this phase in ticks.
 };
 
 /// Dissonance control profile for Var 25 generation.
 struct DissonanceProfile {
-  int max_chain_length = 4;                 ///< Maximum suspension chain length.
-  float chain_probability = 0.4f;           ///< Probability of extending a chain.
-  bool allow_chromatic_neighbor = true;     ///< Allow chromatic neighbor tones.
-  bool allow_appoggiatura_on_strong = true; ///< Allow appoggiaturas on strong beats.
-  float max_dissonance_duration = 2.0f;     ///< Maximum dissonance in beats.
-  bool enable_chromatic_tetrachord = true;  ///< Enable lamento bass chromatic descent.
+  int max_chain_length = 4;                  ///< Maximum suspension chain length.
+  float chain_probability = 0.4f;            ///< Probability of extending a chain.
+  bool allow_chromatic_neighbor = true;      ///< Allow chromatic neighbor tones.
+  bool allow_appoggiatura_on_strong = true;  ///< Allow appoggiaturas on strong beats.
+  float max_dissonance_duration = 2.0f;      ///< Maximum dissonance in beats.
+  bool enable_chromatic_tetrachord = true;   ///< Enable lamento bass chromatic descent.
 };
 
 /// @brief Result of BlackPearl variation generation.
@@ -60,10 +60,8 @@ class BlackPearlGenerator {
   /// @param time_sig Time signature for tick calculation.
   /// @param seed Random seed for deterministic generation.
   /// @return BlackPearlResult with generated notes, suspension count, and success status.
-  BlackPearlResult generate(const GoldbergStructuralGrid& grid,
-                            const KeySignature& key,
-                            const TimeSignature& time_sig,
-                            uint32_t seed) const;
+  BlackPearlResult generate(const GoldbergStructuralGrid& grid, const KeySignature& key,
+                            const TimeSignature& time_sig, uint32_t seed) const;
 
  private:
   /// @brief Generate a suspension chain (Prepared -> Suspended -> Resolved).
@@ -81,12 +79,9 @@ class BlackPearlGenerator {
   /// @param key Key signature for scale-step resolution.
   /// @param rng Random number generator for chain type selection.
   /// @return Vector of NoteEvents forming the suspension chain.
-  std::vector<NoteEvent> generateSuspensionChain(uint8_t start_pitch,
-                                                  int chain_length,
-                                                  Tick start_tick,
-                                                  Tick beat_duration,
-                                                  const KeySignature& key,
-                                                  std::mt19937& rng) const;
+  std::vector<NoteEvent> generateSuspensionChain(uint8_t start_pitch, int chain_length,
+                                                 Tick start_tick, Tick beat_duration,
+                                                 const KeySignature& key, std::mt19937& rng) const;
 
   /// @brief Generate chromatic descending tetrachord (lamento bass).
   ///
@@ -99,20 +94,17 @@ class BlackPearlGenerator {
   /// @param bar_duration Duration of one bar in ticks.
   /// @param key Key signature for tonic determination.
   /// @return Vector of NoteEvents forming the descending tetrachord bass.
-  std::vector<NoteEvent> generateLamentoBass(Tick start_tick,
-                                              int span_bars,
-                                              Tick bar_duration,
-                                              const KeySignature& key) const;
+  std::vector<NoteEvent> generateLamentoBass(Tick start_tick, int span_bars, Tick bar_duration,
+                                             const KeySignature& key) const;
 
   /// @brief Generate structural bass line from the grid for non-lamento bars.
   /// @param grid The 32-bar structural grid.
   /// @param time_sig Time signature for bar duration.
   /// @param lamento_bars Set of bar indices covered by lamento bass.
   /// @return Vector of bass NoteEvents for non-lamento bars.
-  std::vector<NoteEvent> generateStructuralBass(
-      const GoldbergStructuralGrid& grid,
-      const TimeSignature& time_sig,
-      const std::vector<bool>& lamento_bars) const;
+  std::vector<NoteEvent> generateStructuralBass(const GoldbergStructuralGrid& grid,
+                                                const TimeSignature& time_sig,
+                                                const std::vector<bool>& lamento_bars) const;
 
   /// Dissonance control profile (design value).
   DissonanceProfile profile_;

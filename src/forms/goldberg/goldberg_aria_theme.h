@@ -67,10 +67,8 @@ struct AriaTheme {
 /// @param key Key signature for scale-aware generation.
 /// @param seed Random seed for deterministic generation.
 /// @return AriaTheme with 96 beats of generated melody.
-AriaTheme generateAriaMelody(
-    const GoldbergStructuralGrid& grid,
-    const KeySignature& key,
-    uint32_t seed);
+AriaTheme generateAriaMelody(const GoldbergStructuralGrid& grid, const KeySignature& key,
+                             uint32_t seed);
 
 }  // namespace bach
 

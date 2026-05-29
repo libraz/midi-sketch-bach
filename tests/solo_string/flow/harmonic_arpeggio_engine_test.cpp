@@ -3,11 +3,11 @@
 
 #include "solo_string/flow/harmonic_arpeggio_engine.h"
 
+#include <gtest/gtest.h>
+
 #include <algorithm>
 #include <cstdint>
 #include <set>
-
-#include <gtest/gtest.h>
 
 #include "core/basic_types.h"
 #include "solo_string/flow/arpeggio_flow_config.h"
@@ -25,10 +25,9 @@ namespace {
 /// @param instrument Instrument type.
 /// @param seed Deterministic seed (0 = auto).
 /// @return Configured ArpeggioFlowConfig with default arc.
-ArpeggioFlowConfig makeEngineConfig(int num_sections = 6,
-                                     int bars_per_section = 4,
-                                     InstrumentType instrument = InstrumentType::Cello,
-                                     uint32_t seed = 42) {
+ArpeggioFlowConfig makeEngineConfig(int num_sections = 6, int bars_per_section = 4,
+                                    InstrumentType instrument = InstrumentType::Cello,
+                                    uint32_t seed = 42) {
   ArpeggioFlowConfig config;
   config.num_sections = num_sections;
   config.bars_per_section = bars_per_section;
@@ -74,12 +73,10 @@ TEST(HarmonicArpeggioEngineTest, AllNotesWithinCelloRange) {
   constexpr uint8_t kCelloHigh = 81;  // A5
 
   for (const auto& note : result.tracks[0].notes) {
-    EXPECT_GE(note.pitch, kCelloLow)
-        << "Pitch " << static_cast<int>(note.pitch)
-        << " below cello range at tick " << note.start_tick;
-    EXPECT_LE(note.pitch, kCelloHigh)
-        << "Pitch " << static_cast<int>(note.pitch)
-        << " above cello range at tick " << note.start_tick;
+    EXPECT_GE(note.pitch, kCelloLow) << "Pitch " << static_cast<int>(note.pitch)
+                                     << " below cello range at tick " << note.start_tick;
+    EXPECT_LE(note.pitch, kCelloHigh) << "Pitch " << static_cast<int>(note.pitch)
+                                      << " above cello range at tick " << note.start_tick;
   }
 }
 
@@ -93,12 +90,10 @@ TEST(HarmonicArpeggioEngineTest, AllNotesWithinViolinRange) {
   constexpr uint8_t kViolinHigh = 96;  // C7
 
   for (const auto& note : result.tracks[0].notes) {
-    EXPECT_GE(note.pitch, kViolinLow)
-        << "Pitch " << static_cast<int>(note.pitch)
-        << " below violin range at tick " << note.start_tick;
-    EXPECT_LE(note.pitch, kViolinHigh)
-        << "Pitch " << static_cast<int>(note.pitch)
-        << " above violin range at tick " << note.start_tick;
+    EXPECT_GE(note.pitch, kViolinLow) << "Pitch " << static_cast<int>(note.pitch)
+                                      << " below violin range at tick " << note.start_tick;
+    EXPECT_LE(note.pitch, kViolinHigh) << "Pitch " << static_cast<int>(note.pitch)
+                                       << " above violin range at tick " << note.start_tick;
   }
 }
 
@@ -112,12 +107,10 @@ TEST(HarmonicArpeggioEngineTest, AllNotesWithinGuitarRange) {
   constexpr uint8_t kGuitarHigh = 83;  // B5
 
   for (const auto& note : result.tracks[0].notes) {
-    EXPECT_GE(note.pitch, kGuitarLow)
-        << "Pitch " << static_cast<int>(note.pitch)
-        << " below guitar range at tick " << note.start_tick;
-    EXPECT_LE(note.pitch, kGuitarHigh)
-        << "Pitch " << static_cast<int>(note.pitch)
-        << " above guitar range at tick " << note.start_tick;
+    EXPECT_GE(note.pitch, kGuitarLow) << "Pitch " << static_cast<int>(note.pitch)
+                                      << " below guitar range at tick " << note.start_tick;
+    EXPECT_LE(note.pitch, kGuitarHigh) << "Pitch " << static_cast<int>(note.pitch)
+                                       << " above guitar range at tick " << note.start_tick;
   }
 }
 
@@ -145,11 +138,10 @@ TEST(HarmonicArpeggioEngineTest, MostNotesAreSixteenthDuration) {
 
   // Most notes should be 16th notes. Allow some to be 8th notes (cadence
   // simplification) and quarter notes (final bar). At least 70% should be 16ths.
-  float sixteenth_ratio = static_cast<float>(sixteenth_count) /
-                          static_cast<float>(total_count);
+  float sixteenth_ratio = static_cast<float>(sixteenth_count) / static_cast<float>(total_count);
   EXPECT_GE(sixteenth_ratio, 0.70f)
-      << "Only " << sixteenth_count << " of " << total_count
-      << " notes are 16th duration (" << (sixteenth_ratio * 100.0f) << "%)";
+      << "Only " << sixteenth_count << " of " << total_count << " notes are 16th duration ("
+      << (sixteenth_ratio * 100.0f) << "%)";
 }
 
 TEST(HarmonicArpeggioEngineTest, AllNotesHavePositiveDuration) {
@@ -159,8 +151,7 @@ TEST(HarmonicArpeggioEngineTest, AllNotesHavePositiveDuration) {
   ASSERT_EQ(result.tracks.size(), 1u);
 
   for (const auto& note : result.tracks[0].notes) {
-    EXPECT_GT(note.duration, 0u)
-        << "Zero-duration note at tick " << note.start_tick;
+    EXPECT_GT(note.duration, 0u) << "Zero-duration note at tick " << note.start_tick;
   }
 }
 
@@ -179,10 +170,9 @@ TEST(HarmonicArpeggioEngineTest, NotesAreContinuous) {
 
   // Sort notes by start_tick for analysis.
   auto sorted_notes = notes;
-  std::sort(sorted_notes.begin(), sorted_notes.end(),
-            [](const NoteEvent& lhs, const NoteEvent& rhs) {
-              return lhs.start_tick < rhs.start_tick;
-            });
+  std::sort(
+      sorted_notes.begin(), sorted_notes.end(),
+      [](const NoteEvent& lhs, const NoteEvent& rhs) { return lhs.start_tick < rhs.start_tick; });
 
   // Count gaps larger than a 16th note between consecutive notes.
   constexpr Tick kMaxAcceptableGap = kTicksPerBeat / 4 + 10;  // 130 ticks tolerance
@@ -197,10 +187,8 @@ TEST(HarmonicArpeggioEngineTest, NotesAreContinuous) {
   }
 
   // Allow very few gaps (e.g., bar transitions, cadence simplification).
-  float gap_ratio = static_cast<float>(gap_count) /
-                    static_cast<float>(sorted_notes.size() - 1);
-  EXPECT_LT(gap_ratio, 0.05f)
-      << gap_count << " gaps found in " << sorted_notes.size() << " notes";
+  float gap_ratio = static_cast<float>(gap_count) / static_cast<float>(sorted_notes.size() - 1);
+  EXPECT_LT(gap_ratio, 0.05f) << gap_count << " gaps found in " << sorted_notes.size() << " notes";
 }
 
 // ===========================================================================
@@ -208,18 +196,14 @@ TEST(HarmonicArpeggioEngineTest, NotesAreContinuous) {
 // ===========================================================================
 
 TEST(HarmonicArpeggioEngineTest, MultipleInstrumentsWork) {
-  InstrumentType instruments[] = {
-      InstrumentType::Cello,
-      InstrumentType::Violin,
-      InstrumentType::Guitar
-  };
+  InstrumentType instruments[] = {InstrumentType::Cello, InstrumentType::Violin,
+                                  InstrumentType::Guitar};
 
   for (auto inst : instruments) {
     auto config = makeEngineConfig(4, 4, inst, 100);
     auto result = generateArpeggioFlow(config);
-    EXPECT_TRUE(result.success)
-        << "Failed for instrument " << instrumentTypeToString(inst)
-        << ": " << result.error_message;
+    EXPECT_TRUE(result.success) << "Failed for instrument " << instrumentTypeToString(inst) << ": "
+                                << result.error_message;
     EXPECT_FALSE(result.tracks.empty())
         << "No tracks for instrument " << instrumentTypeToString(inst);
     EXPECT_FALSE(result.tracks[0].notes.empty())
@@ -245,14 +229,10 @@ TEST(HarmonicArpeggioEngineTest, SameSeedProducesIdenticalOutput) {
   ASSERT_EQ(notes_a.size(), notes_b.size());
 
   for (size_t idx = 0; idx < notes_a.size(); ++idx) {
-    EXPECT_EQ(notes_a[idx].start_tick, notes_b[idx].start_tick)
-        << "Mismatch at note index " << idx;
-    EXPECT_EQ(notes_a[idx].pitch, notes_b[idx].pitch)
-        << "Mismatch at note index " << idx;
-    EXPECT_EQ(notes_a[idx].duration, notes_b[idx].duration)
-        << "Mismatch at note index " << idx;
-    EXPECT_EQ(notes_a[idx].velocity, notes_b[idx].velocity)
-        << "Mismatch at note index " << idx;
+    EXPECT_EQ(notes_a[idx].start_tick, notes_b[idx].start_tick) << "Mismatch at note index " << idx;
+    EXPECT_EQ(notes_a[idx].pitch, notes_b[idx].pitch) << "Mismatch at note index " << idx;
+    EXPECT_EQ(notes_a[idx].duration, notes_b[idx].duration) << "Mismatch at note index " << idx;
+    EXPECT_EQ(notes_a[idx].velocity, notes_b[idx].velocity) << "Mismatch at note index " << idx;
   }
 }
 
@@ -282,9 +262,8 @@ TEST(HarmonicArpeggioEngineTest, DifferentSeedsProduceDifferentOutput) {
 
   // Seed-dependent randomization should produce >20% pitch differences.
   int total = static_cast<int>(compare_count);
-  EXPECT_GT(diff_count, total * 20 / 100)
-      << "diff_count=" << diff_count << " / " << total
-      << " (" << (100 * diff_count / std::max(total, 1)) << "%)";
+  EXPECT_GT(diff_count, total * 20 / 100) << "diff_count=" << diff_count << " / " << total << " ("
+                                          << (100 * diff_count / std::max(total, 1)) << "%)";
 }
 
 TEST(HarmonicArpeggioEngineTest, MultiSeedDiversityOver20Percent) {
@@ -308,15 +287,14 @@ TEST(HarmonicArpeggioEngineTest, MultiSeedDiversityOver20Percent) {
   for (int i = 0; i < kNumSeeds; ++i) {
     for (int j = i + 1; j < kNumSeeds; ++j) {
       int diff = 0;
-      size_t len = std::min(pitch_sequences[i].size(),
-                            pitch_sequences[j].size());
+      size_t len = std::min(pitch_sequences[i].size(), pitch_sequences[j].size());
       for (size_t k = 0; k < len; ++k) {
-        if (pitch_sequences[i][k] != pitch_sequences[j][k]) ++diff;
+        if (pitch_sequences[i][k] != pitch_sequences[j][k])
+          ++diff;
       }
       int total = static_cast<int>(len);
       EXPECT_GT(diff, total * 20 / 100)
-          << "Seeds " << kSeeds[i] << " vs " << kSeeds[j]
-          << ": diff=" << diff << "/" << total;
+          << "Seeds " << kSeeds[i] << " vs " << kSeeds[j] << ": diff=" << diff << "/" << total;
     }
   }
 }
@@ -342,7 +320,7 @@ TEST(HarmonicArpeggioEngineTest, AutoSeedResolvesToNonZero) {
 TEST(HarmonicArpeggioEngineTest, TooFewSectionsReturnsError) {
   auto config = makeEngineConfig();
   config.num_sections = 2;  // Less than 3
-  config.arc = {};  // Will be empty since createDefaultArcConfig(2) is empty
+  config.arc = {};          // Will be empty since createDefaultArcConfig(2) is empty
 
   auto result = generateArpeggioFlow(config);
   EXPECT_FALSE(result.success);
@@ -380,11 +358,7 @@ TEST(HarmonicArpeggioEngineTest, InvalidArcConfigReturnsError) {
 
   // Create an invalid arc: reversed order.
   config.arc.phase_assignment = {
-      {0, ArcPhase::Descent},
-      {1, ArcPhase::Peak},
-      {2, ArcPhase::Ascent},
-      {3, ArcPhase::Ascent}
-  };
+      {0, ArcPhase::Descent}, {1, ArcPhase::Peak}, {2, ArcPhase::Ascent}, {3, ArcPhase::Ascent}};
 
   auto result = generateArpeggioFlow(config);
   EXPECT_FALSE(result.success);
@@ -457,23 +431,18 @@ TEST(HarmonicArpeggioEngineTest, TotalDurationMatchesDifferentConfigs) {
   };
 
   TestCase cases[] = {
-      {3, 2},
-      {4, 4},
-      {6, 4},
-      {8, 3},
-      {10, 2},
+      {3, 2}, {4, 4}, {6, 4}, {8, 3}, {10, 2},
   };
 
   for (const auto& test_case : cases) {
     auto config = makeEngineConfig(test_case.num_sections, test_case.bars_per_section,
-                                    InstrumentType::Cello, 42);
+                                   InstrumentType::Cello, 42);
     auto result = generateArpeggioFlow(config);
-    ASSERT_TRUE(result.success)
-        << "Failed for sections=" << test_case.num_sections
-        << " bars=" << test_case.bars_per_section;
+    ASSERT_TRUE(result.success) << "Failed for sections=" << test_case.num_sections
+                                << " bars=" << test_case.bars_per_section;
 
-    Tick expected = static_cast<Tick>(test_case.num_sections * test_case.bars_per_section)
-                    * kTicksPerBar;
+    Tick expected =
+        static_cast<Tick>(test_case.num_sections * test_case.bars_per_section) * kTicksPerBar;
     EXPECT_EQ(result.total_duration_ticks, expected)
         << "Duration mismatch for sections=" << test_case.num_sections
         << " bars=" << test_case.bars_per_section;
@@ -491,12 +460,10 @@ TEST(HarmonicArpeggioEngineTest, VelocityIsReasonable) {
   ASSERT_EQ(result.tracks.size(), 1u);
 
   for (const auto& note : result.tracks[0].notes) {
-    EXPECT_GE(note.velocity, 60u)
-        << "Velocity " << static_cast<int>(note.velocity)
-        << " too low at tick " << note.start_tick;
-    EXPECT_LE(note.velocity, 127u)
-        << "Velocity " << static_cast<int>(note.velocity)
-        << " exceeds MIDI max at tick " << note.start_tick;
+    EXPECT_GE(note.velocity, 60u) << "Velocity " << static_cast<int>(note.velocity)
+                                  << " too low at tick " << note.start_tick;
+    EXPECT_LE(note.velocity, 127u) << "Velocity " << static_cast<int>(note.velocity)
+                                   << " exceeds MIDI max at tick " << note.start_tick;
   }
 }
 
@@ -593,8 +560,8 @@ TEST(HarmonicArpeggioEngineTest, AllNotesHaveVoiceZero) {
   ASSERT_EQ(result.tracks.size(), 1u);
 
   for (const auto& note : result.tracks[0].notes) {
-    EXPECT_EQ(note.voice, 0u)
-        << "Solo instrument note should have voice=0 at tick " << note.start_tick;
+    EXPECT_EQ(note.voice, 0u) << "Solo instrument note should have voice=0 at tick "
+                              << note.start_tick;
   }
 }
 

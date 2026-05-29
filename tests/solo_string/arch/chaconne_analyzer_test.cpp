@@ -2,10 +2,10 @@
 
 #include "solo_string/arch/chaconne_analyzer.h"
 
+#include <gtest/gtest.h>
+
 #include <random>
 #include <vector>
-
-#include <gtest/gtest.h>
 
 #include "core/basic_types.h"
 #include "solo_string/arch/chaconne_config.h"
@@ -40,11 +40,10 @@ ChaconneConfig createTestChaconneConfig() {
 /// @param config Chaconne config with variation plan.
 /// @param scheme The harmonic scheme defining bass positions.
 /// @param[out] track Track to append bass notes to.
-void addSchemeBassTicks(const ChaconneConfig& config,
-                        const ChaconneScheme& scheme,
-                        Track& track) {
+void addSchemeBassTicks(const ChaconneConfig& config, const ChaconneScheme& scheme, Track& track) {
   Tick cycle_length = scheme.getLengthTicks();
-  if (cycle_length == 0) return;
+  if (cycle_length == 0)
+    return;
 
   int num_variations = static_cast<int>(config.variations.size());
   const auto& entries = scheme.entries();
@@ -54,10 +53,8 @@ void addSchemeBassTicks(const ChaconneConfig& config,
 
     for (const auto& entry : entries) {
       NoteEvent note;
-      note.start_tick =
-          var_start + static_cast<Tick>(entry.position_beats) * kTicksPerBeat;
-      note.duration =
-          static_cast<Tick>(entry.duration_beats) * kTicksPerBeat;
+      note.start_tick = var_start + static_cast<Tick>(entry.position_beats) * kTicksPerBeat;
+      note.duration = static_cast<Tick>(entry.duration_beats) * kTicksPerBeat;
       note.pitch = 50;  // D3 -- typical bass range for violin chaconne
       note.velocity = 80;
       note.voice = 0;
@@ -76,15 +73,15 @@ void addSchemeBassTicks(const ChaconneConfig& config,
 /// @param config Chaconne config with variation plan.
 /// @param scheme The harmonic scheme defining bass positions.
 /// @return Track with bass + upper voice notes.
-Track createIdealChaconneTrack(const ChaconneConfig& config,
-                               const ChaconneScheme& scheme) {
+Track createIdealChaconneTrack(const ChaconneConfig& config, const ChaconneScheme& scheme) {
   Track track;
   track.channel = 0;
   track.program = 40;  // Violin
   track.name = "Violin";
 
   Tick cycle_length = scheme.getLengthTicks();
-  if (cycle_length == 0) return track;
+  if (cycle_length == 0)
+    return track;
 
   int num_variations = static_cast<int>(config.variations.size());
 
@@ -130,14 +127,14 @@ Track createIdealChaconneTrack(const ChaconneConfig& config,
       // Skip ticks where a bass note starts (to avoid duplicate ticks).
       bool is_bass_tick = false;
       for (const auto& entry : entries) {
-        Tick bass_tick =
-            var_start + static_cast<Tick>(entry.position_beats) * kTicksPerBeat;
+        Tick bass_tick = var_start + static_cast<Tick>(entry.position_beats) * kTicksPerBeat;
         if (tick == bass_tick) {
           is_bass_tick = true;
           break;
         }
       }
-      if (is_bass_tick) continue;
+      if (is_bass_tick)
+        continue;
 
       NoteEvent note;
       note.start_tick = tick;
@@ -150,8 +147,10 @@ Track createIdealChaconneTrack(const ChaconneConfig& config,
       int offsets[] = {0, -5, 7, -3, 4, -7, 2, -4};
       int pitch_offset = offsets[offset_idx % 8];
       int pitch = static_cast<int>(base_pitch) + pitch_offset;
-      if (pitch < 55) pitch = 55;  // Violin low limit
-      if (pitch > 96) pitch = 96;  // Violin high limit
+      if (pitch < 55)
+        pitch = 55;  // Violin low limit
+      if (pitch > 96)
+        pitch = 96;  // Violin high limit
       note.pitch = static_cast<uint8_t>(pitch);
 
       track.notes.push_back(note);
@@ -159,10 +158,9 @@ Track createIdealChaconneTrack(const ChaconneConfig& config,
   }
 
   // Sort notes by start_tick for consistency.
-  std::sort(track.notes.begin(), track.notes.end(),
-            [](const NoteEvent& lhs, const NoteEvent& rhs) {
-              return lhs.start_tick < rhs.start_tick;
-            });
+  std::sort(track.notes.begin(), track.notes.end(), [](const NoteEvent& lhs, const NoteEvent& rhs) {
+    return lhs.start_tick < rhs.start_tick;
+  });
 
   return track;
 }
@@ -175,15 +173,15 @@ Track createIdealChaconneTrack(const ChaconneConfig& config,
 /// @param config Chaconne config.
 /// @param scheme Harmonic scheme for variation length.
 /// @return Track with implied polyphony patterns.
-Track createImpliedPolyphonyTrack(const ChaconneConfig& config,
-                                  const ChaconneScheme& scheme) {
+Track createImpliedPolyphonyTrack(const ChaconneConfig& config, const ChaconneScheme& scheme) {
   Track track;
   track.channel = 0;
   track.program = 40;  // Violin
   track.name = "Violin";
 
   Tick cycle_length = scheme.getLengthTicks();
-  if (cycle_length == 0) return track;
+  if (cycle_length == 0)
+    return track;
 
   int num_variations = static_cast<int>(config.variations.size());
   const auto& entries = scheme.entries();
@@ -194,10 +192,8 @@ Track createImpliedPolyphonyTrack(const ChaconneConfig& config,
     // Place ChaconneBass notes at scheme positions.
     for (const auto& entry : entries) {
       NoteEvent note;
-      note.start_tick =
-          var_start + static_cast<Tick>(entry.position_beats) * kTicksPerBeat;
-      note.duration =
-          static_cast<Tick>(entry.duration_beats) * kTicksPerBeat;
+      note.start_tick = var_start + static_cast<Tick>(entry.position_beats) * kTicksPerBeat;
+      note.duration = static_cast<Tick>(entry.duration_beats) * kTicksPerBeat;
       note.pitch = 50;  // D3
       note.velocity = 80;
       note.voice = 0;
@@ -214,14 +210,14 @@ Track createImpliedPolyphonyTrack(const ChaconneConfig& config,
         // Skip bass note ticks.
         bool is_bass_tick = false;
         for (const auto& entry : entries) {
-          Tick bass_tick =
-              var_start + static_cast<Tick>(entry.position_beats) * kTicksPerBeat;
+          Tick bass_tick = var_start + static_cast<Tick>(entry.position_beats) * kTicksPerBeat;
           if (tick == bass_tick) {
             is_bass_tick = true;
             break;
           }
         }
-        if (is_bass_tick) continue;
+        if (is_bass_tick)
+          continue;
 
         int beat_pos = static_cast<int>((tick - var_start) / sixteenth) % 4;
 
@@ -241,14 +237,14 @@ Track createImpliedPolyphonyTrack(const ChaconneConfig& config,
       for (Tick tick = var_start; tick < var_start + cycle_length; tick += eighth) {
         bool is_bass_tick = false;
         for (const auto& entry : entries) {
-          Tick bass_tick =
-              var_start + static_cast<Tick>(entry.position_beats) * kTicksPerBeat;
+          Tick bass_tick = var_start + static_cast<Tick>(entry.position_beats) * kTicksPerBeat;
           if (tick == bass_tick) {
             is_bass_tick = true;
             break;
           }
         }
-        if (is_bass_tick) continue;
+        if (is_bass_tick)
+          continue;
 
         NoteEvent note;
         note.start_tick = tick;
@@ -261,10 +257,9 @@ Track createImpliedPolyphonyTrack(const ChaconneConfig& config,
     }
   }
 
-  std::sort(track.notes.begin(), track.notes.end(),
-            [](const NoteEvent& lhs, const NoteEvent& rhs) {
-              return lhs.start_tick < rhs.start_tick;
-            });
+  std::sort(track.notes.begin(), track.notes.end(), [](const NoteEvent& lhs, const NoteEvent& rhs) {
+    return lhs.start_tick < rhs.start_tick;
+  });
 
   return track;
 }
@@ -273,19 +268,17 @@ Track createImpliedPolyphonyTrack(const ChaconneConfig& config,
 /// @param config Chaconne config.
 /// @param scheme Harmonic scheme.
 /// @return Track with missing bass coverage in variation 0.
-Track createMissingBassTrack(const ChaconneConfig& config,
-                              const ChaconneScheme& scheme) {
+Track createMissingBassTrack(const ChaconneConfig& config, const ChaconneScheme& scheme) {
   Track track = createIdealChaconneTrack(config, scheme);
 
   // Remove all ChaconneBass notes from variation 0.
   Tick cycle_length = scheme.getLengthTicks();
-  track.notes.erase(
-      std::remove_if(track.notes.begin(), track.notes.end(),
-                     [cycle_length](const NoteEvent& note) {
-                       return note.start_tick < cycle_length &&
-                              note.source == BachNoteSource::ChaconneBass;
-                     }),
-      track.notes.end());
+  track.notes.erase(std::remove_if(track.notes.begin(), track.notes.end(),
+                                   [cycle_length](const NoteEvent& note) {
+                                     return note.start_tick < cycle_length &&
+                                            note.source == BachNoteSource::ChaconneBass;
+                                   }),
+                    track.notes.end());
 
   return track;
 }
@@ -368,10 +361,9 @@ TEST(ChaconneAnalyzerTest, ClimaxPresenceFailsWithTwoAccumulate) {
   auto config = createTestChaconneConfig();
 
   // Remove one Accumulate variation.
-  auto iter = std::find_if(config.variations.begin(), config.variations.end(),
-                           [](const ChaconneVariation& var) {
-                             return var.role == VariationRole::Accumulate;
-                           });
+  auto iter = std::find_if(
+      config.variations.begin(), config.variations.end(),
+      [](const ChaconneVariation& var) { return var.role == VariationRole::Accumulate; });
   if (iter != config.variations.end()) {
     config.variations.erase(iter);
   }
@@ -385,10 +377,9 @@ TEST(ChaconneAnalyzerTest, ClimaxPresenceFailsWithFourAccumulate) {
   auto config = createTestChaconneConfig();
 
   // Add an extra Accumulate variation before Resolve.
-  auto resolve_iter = std::find_if(config.variations.begin(), config.variations.end(),
-                                   [](const ChaconneVariation& var) {
-                                     return var.role == VariationRole::Resolve;
-                                   });
+  auto resolve_iter =
+      std::find_if(config.variations.begin(), config.variations.end(),
+                   [](const ChaconneVariation& var) { return var.role == VariationRole::Resolve; });
   ChaconneVariation extra_acc;
   extra_acc.role = VariationRole::Accumulate;
   extra_acc.type = VariationType::Virtuosic;
@@ -697,9 +688,12 @@ TEST(ChaconneAnalyzerTest, TextureTransitionWithSingleVariation) {
   ChaconneConfig config;
   config.key = {Key::D, true};
   // Single variation: Resolve with Theme.
-  config.variations.push_back(
-      {0, VariationRole::Resolve, VariationType::Theme,
-       TextureType::SingleLine, {Key::D, true}, false});
+  config.variations.push_back({0,
+                               VariationRole::Resolve,
+                               VariationType::Theme,
+                               TextureType::SingleLine,
+                               {Key::D, true},
+                               false});
 
   auto scheme = ChaconneScheme::createStandardDMinor();
   auto result = analyzeChaconne({}, config, scheme);

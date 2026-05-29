@@ -28,11 +28,9 @@ namespace bach {
 /// @param energy_level Current energy level [0.0, 1.0].
 /// @param seed Deterministic RNG seed.
 /// @return New note sequence with chromatic passing tones inserted.
-std::vector<NoteEvent> insertChromaticPassingTones(
-    const std::vector<NoteEvent>& notes,
-    const HarmonicTimeline& timeline,
-    float energy_level,
-    uint32_t seed);
+std::vector<NoteEvent> insertChromaticPassingTones(const std::vector<NoteEvent>& notes,
+                                                   const HarmonicTimeline& timeline,
+                                                   float energy_level, uint32_t seed);
 
 /// @brief Check if a chromatic passing tone can be inserted between two notes.
 ///

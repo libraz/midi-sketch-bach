@@ -74,7 +74,7 @@ uint32_t countAugmentedLeaps(const std::vector<NoteEvent>& notes, uint8_t num_vo
 /// @param proximity_threshold Maximum tick distance for cross-relation (default: 1 beat).
 /// @return Number of cross-relation violations.
 uint32_t countCrossRelations(const std::vector<NoteEvent>& notes, uint8_t num_voices,
-                              Tick proximity_threshold = kTicksPerBeat);
+                             Tick proximity_threshold = kTicksPerBeat);
 
 /// @brief Build a FailReport from counterpoint analysis.
 /// @param notes All notes across all voices.

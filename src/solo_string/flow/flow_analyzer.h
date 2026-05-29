@@ -96,8 +96,7 @@ struct FlowAnalysisResult {
 /// @param config The ArpeggioFlowConfig used for generation.
 /// @param timeline The HarmonicTimeline used during generation.
 /// @return FlowAnalysisResult with all metric scores populated.
-FlowAnalysisResult analyzeFlow(const std::vector<Track>& tracks,
-                               const ArpeggioFlowConfig& config,
+FlowAnalysisResult analyzeFlow(const std::vector<Track>& tracks, const ArpeggioFlowConfig& config,
                                const HarmonicTimeline& timeline);
 
 }  // namespace bach

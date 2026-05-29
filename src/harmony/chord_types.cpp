@@ -10,22 +10,38 @@ namespace bach {
 ChordQuality majorKeyQuality(ChordDegree degree) {
   // Major key diatonic triads: I=Maj, ii=min, iii=min, IV=Maj, V=Maj, vi=min, vii=dim
   switch (degree) {
-    case ChordDegree::I:       return ChordQuality::Major;
-    case ChordDegree::ii:      return ChordQuality::Minor;
-    case ChordDegree::iii:     return ChordQuality::Minor;
-    case ChordDegree::IV:      return ChordQuality::Major;
-    case ChordDegree::V:       return ChordQuality::Major;
-    case ChordDegree::vi:      return ChordQuality::Minor;
-    case ChordDegree::viiDim:  return ChordQuality::Diminished;
-    case ChordDegree::bII:     return ChordQuality::Major;
-    case ChordDegree::V_of_V:  return ChordQuality::Dominant7;
-    case ChordDegree::V_of_vi: return ChordQuality::Dominant7;
-    case ChordDegree::V_of_IV: return ChordQuality::Dominant7;
-    case ChordDegree::V_of_ii: return ChordQuality::Dominant7;
-    case ChordDegree::bVI:     return ChordQuality::Major;
-    case ChordDegree::bVII:    return ChordQuality::Major;
-    case ChordDegree::bIII:    return ChordQuality::Major;
-    case ChordDegree::V_of_iii: return ChordQuality::Dominant7;
+    case ChordDegree::I:
+      return ChordQuality::Major;
+    case ChordDegree::ii:
+      return ChordQuality::Minor;
+    case ChordDegree::iii:
+      return ChordQuality::Minor;
+    case ChordDegree::IV:
+      return ChordQuality::Major;
+    case ChordDegree::V:
+      return ChordQuality::Major;
+    case ChordDegree::vi:
+      return ChordQuality::Minor;
+    case ChordDegree::viiDim:
+      return ChordQuality::Diminished;
+    case ChordDegree::bII:
+      return ChordQuality::Major;
+    case ChordDegree::V_of_V:
+      return ChordQuality::Dominant7;
+    case ChordDegree::V_of_vi:
+      return ChordQuality::Dominant7;
+    case ChordDegree::V_of_IV:
+      return ChordQuality::Dominant7;
+    case ChordDegree::V_of_ii:
+      return ChordQuality::Dominant7;
+    case ChordDegree::bVI:
+      return ChordQuality::Major;
+    case ChordDegree::bVII:
+      return ChordQuality::Major;
+    case ChordDegree::bIII:
+      return ChordQuality::Major;
+    case ChordDegree::V_of_iii:
+      return ChordQuality::Dominant7;
   }
   return ChordQuality::Major;
 }
@@ -34,22 +50,38 @@ ChordQuality minorKeyQuality(ChordDegree degree) {
   // Minor key triads using harmonic minor practice (Bach standard):
   // i=min, ii=dim, III=Maj, iv=min, V=Maj (raised 7th), VI=Maj, vii=dim (raised 7th)
   switch (degree) {
-    case ChordDegree::I:       return ChordQuality::Minor;
-    case ChordDegree::ii:      return ChordQuality::Diminished;
-    case ChordDegree::iii:     return ChordQuality::Major;
-    case ChordDegree::IV:      return ChordQuality::Minor;
-    case ChordDegree::V:       return ChordQuality::Major;
-    case ChordDegree::vi:      return ChordQuality::Major;
-    case ChordDegree::viiDim:  return ChordQuality::Diminished;
-    case ChordDegree::bII:     return ChordQuality::Major;
-    case ChordDegree::V_of_V:  return ChordQuality::Dominant7;
-    case ChordDegree::V_of_vi: return ChordQuality::Dominant7;
-    case ChordDegree::V_of_IV: return ChordQuality::Dominant7;
-    case ChordDegree::V_of_ii: return ChordQuality::Dominant7;
-    case ChordDegree::bVI:     return ChordQuality::Major;   // Same as natural minor VI
-    case ChordDegree::bVII:    return ChordQuality::Major;   // Same as natural minor VII
-    case ChordDegree::bIII:    return ChordQuality::Major;   // Same as natural minor III
-    case ChordDegree::V_of_iii: return ChordQuality::Dominant7;
+    case ChordDegree::I:
+      return ChordQuality::Minor;
+    case ChordDegree::ii:
+      return ChordQuality::Diminished;
+    case ChordDegree::iii:
+      return ChordQuality::Major;
+    case ChordDegree::IV:
+      return ChordQuality::Minor;
+    case ChordDegree::V:
+      return ChordQuality::Major;
+    case ChordDegree::vi:
+      return ChordQuality::Major;
+    case ChordDegree::viiDim:
+      return ChordQuality::Diminished;
+    case ChordDegree::bII:
+      return ChordQuality::Major;
+    case ChordDegree::V_of_V:
+      return ChordQuality::Dominant7;
+    case ChordDegree::V_of_vi:
+      return ChordQuality::Dominant7;
+    case ChordDegree::V_of_IV:
+      return ChordQuality::Dominant7;
+    case ChordDegree::V_of_ii:
+      return ChordQuality::Dominant7;
+    case ChordDegree::bVI:
+      return ChordQuality::Major;  // Same as natural minor VI
+    case ChordDegree::bVII:
+      return ChordQuality::Major;  // Same as natural minor VII
+    case ChordDegree::bIII:
+      return ChordQuality::Major;  // Same as natural minor III
+    case ChordDegree::V_of_iii:
+      return ChordQuality::Dominant7;
   }
   return ChordQuality::Minor;
 }
@@ -57,22 +89,38 @@ ChordQuality minorKeyQuality(ChordDegree degree) {
 uint8_t degreeSemitones(ChordDegree degree) {
   // Major scale degree offsets: C D E F G A B = 0 2 4 5 7 9 11
   switch (degree) {
-    case ChordDegree::I:       return 0;
-    case ChordDegree::ii:      return 2;
-    case ChordDegree::iii:     return 4;
-    case ChordDegree::IV:      return 5;
-    case ChordDegree::V:       return 7;
-    case ChordDegree::vi:      return 9;
-    case ChordDegree::viiDim:  return 11;
-    case ChordDegree::bII:     return 1;   // Lowered 2nd = 1 semitone
-    case ChordDegree::V_of_V:  return 2;   // D in C major (V/V root)
-    case ChordDegree::V_of_vi: return 4;   // E in C major (V/vi root)
-    case ChordDegree::V_of_IV: return 0;   // C in C major (V/IV root)
-    case ChordDegree::V_of_ii: return 9;   // A in C major (V/ii root)
-    case ChordDegree::bVI:     return 8;   // Ab in C major
-    case ChordDegree::bVII:    return 10;  // Bb in C major
-    case ChordDegree::bIII:    return 3;   // Eb in C major
-    case ChordDegree::V_of_iii: return 11; // B in C major (V/iii root)
+    case ChordDegree::I:
+      return 0;
+    case ChordDegree::ii:
+      return 2;
+    case ChordDegree::iii:
+      return 4;
+    case ChordDegree::IV:
+      return 5;
+    case ChordDegree::V:
+      return 7;
+    case ChordDegree::vi:
+      return 9;
+    case ChordDegree::viiDim:
+      return 11;
+    case ChordDegree::bII:
+      return 1;  // Lowered 2nd = 1 semitone
+    case ChordDegree::V_of_V:
+      return 2;  // D in C major (V/V root)
+    case ChordDegree::V_of_vi:
+      return 4;  // E in C major (V/vi root)
+    case ChordDegree::V_of_IV:
+      return 0;  // C in C major (V/IV root)
+    case ChordDegree::V_of_ii:
+      return 9;  // A in C major (V/ii root)
+    case ChordDegree::bVI:
+      return 8;  // Ab in C major
+    case ChordDegree::bVII:
+      return 10;  // Bb in C major
+    case ChordDegree::bIII:
+      return 3;  // Eb in C major
+    case ChordDegree::V_of_iii:
+      return 11;  // B in C major (V/iii root)
   }
   return 0;
 }
@@ -80,63 +128,108 @@ uint8_t degreeSemitones(ChordDegree degree) {
 uint8_t degreeMinorSemitones(ChordDegree degree) {
   // Natural minor scale degree offsets: 0 2 3 5 7 8 10
   switch (degree) {
-    case ChordDegree::I:       return 0;
-    case ChordDegree::ii:      return 2;
-    case ChordDegree::iii:     return 3;
-    case ChordDegree::IV:      return 5;
-    case ChordDegree::V:       return 7;
-    case ChordDegree::vi:      return 8;
-    case ChordDegree::viiDim:  return 10;
-    case ChordDegree::bII:     return 1;
-    case ChordDegree::V_of_V:  return 2;
-    case ChordDegree::V_of_vi: return 3;
-    case ChordDegree::V_of_IV: return 0;
-    case ChordDegree::V_of_ii: return 8;
-    case ChordDegree::bVI:     return 8;   // Ab in A minor
-    case ChordDegree::bVII:    return 10;  // G in A minor (same as natural minor VII)
-    case ChordDegree::bIII:    return 3;   // C in A minor (same as natural minor III)
-    case ChordDegree::V_of_iii: return 11; // B in minor context (V/iii root)
+    case ChordDegree::I:
+      return 0;
+    case ChordDegree::ii:
+      return 2;
+    case ChordDegree::iii:
+      return 3;
+    case ChordDegree::IV:
+      return 5;
+    case ChordDegree::V:
+      return 7;
+    case ChordDegree::vi:
+      return 8;
+    case ChordDegree::viiDim:
+      return 10;
+    case ChordDegree::bII:
+      return 1;
+    case ChordDegree::V_of_V:
+      return 2;
+    case ChordDegree::V_of_vi:
+      return 3;
+    case ChordDegree::V_of_IV:
+      return 0;
+    case ChordDegree::V_of_ii:
+      return 8;
+    case ChordDegree::bVI:
+      return 8;  // Ab in A minor
+    case ChordDegree::bVII:
+      return 10;  // G in A minor (same as natural minor VII)
+    case ChordDegree::bIII:
+      return 3;  // C in A minor (same as natural minor III)
+    case ChordDegree::V_of_iii:
+      return 11;  // B in minor context (V/iii root)
   }
   return 0;
 }
 
 const char* chordQualityToString(ChordQuality quality) {
   switch (quality) {
-    case ChordQuality::Major:            return "Major";
-    case ChordQuality::Minor:            return "Minor";
-    case ChordQuality::Diminished:       return "Diminished";
-    case ChordQuality::Augmented:        return "Augmented";
-    case ChordQuality::Dominant7:        return "Dominant7";
-    case ChordQuality::Minor7:           return "Minor7";
-    case ChordQuality::MajorMajor7:      return "MajorMajor7";
-    case ChordQuality::Diminished7:      return "Diminished7";
-    case ChordQuality::HalfDiminished7:  return "HalfDiminished7";
-    case ChordQuality::AugmentedSixth:   return "AugmentedSixth";
-    case ChordQuality::AugSixthItalian: return "AugSixthItalian";
-    case ChordQuality::AugSixthFrench:  return "AugSixthFrench";
-    case ChordQuality::AugSixthGerman:  return "AugSixthGerman";
+    case ChordQuality::Major:
+      return "Major";
+    case ChordQuality::Minor:
+      return "Minor";
+    case ChordQuality::Diminished:
+      return "Diminished";
+    case ChordQuality::Augmented:
+      return "Augmented";
+    case ChordQuality::Dominant7:
+      return "Dominant7";
+    case ChordQuality::Minor7:
+      return "Minor7";
+    case ChordQuality::MajorMajor7:
+      return "MajorMajor7";
+    case ChordQuality::Diminished7:
+      return "Diminished7";
+    case ChordQuality::HalfDiminished7:
+      return "HalfDiminished7";
+    case ChordQuality::AugmentedSixth:
+      return "AugmentedSixth";
+    case ChordQuality::AugSixthItalian:
+      return "AugSixthItalian";
+    case ChordQuality::AugSixthFrench:
+      return "AugSixthFrench";
+    case ChordQuality::AugSixthGerman:
+      return "AugSixthGerman";
   }
   return "Unknown";
 }
 
 const char* chordDegreeToString(ChordDegree degree) {
   switch (degree) {
-    case ChordDegree::I:       return "I";
-    case ChordDegree::ii:      return "ii";
-    case ChordDegree::iii:     return "iii";
-    case ChordDegree::IV:      return "IV";
-    case ChordDegree::V:       return "V";
-    case ChordDegree::vi:      return "vi";
-    case ChordDegree::viiDim:  return "viiDim";
-    case ChordDegree::bII:     return "bII";
-    case ChordDegree::V_of_V:  return "V/V";
-    case ChordDegree::V_of_vi: return "V/vi";
-    case ChordDegree::V_of_IV: return "V/IV";
-    case ChordDegree::V_of_ii: return "V/ii";
-    case ChordDegree::bVI:     return "bVI";
-    case ChordDegree::bVII:    return "bVII";
-    case ChordDegree::bIII:    return "bIII";
-    case ChordDegree::V_of_iii: return "V/iii";
+    case ChordDegree::I:
+      return "I";
+    case ChordDegree::ii:
+      return "ii";
+    case ChordDegree::iii:
+      return "iii";
+    case ChordDegree::IV:
+      return "IV";
+    case ChordDegree::V:
+      return "V";
+    case ChordDegree::vi:
+      return "vi";
+    case ChordDegree::viiDim:
+      return "viiDim";
+    case ChordDegree::bII:
+      return "bII";
+    case ChordDegree::V_of_V:
+      return "V/V";
+    case ChordDegree::V_of_vi:
+      return "V/vi";
+    case ChordDegree::V_of_IV:
+      return "V/IV";
+    case ChordDegree::V_of_ii:
+      return "V/ii";
+    case ChordDegree::bVI:
+      return "bVI";
+    case ChordDegree::bVII:
+      return "bVII";
+    case ChordDegree::bIII:
+      return "bIII";
+    case ChordDegree::V_of_iii:
+      return "V/iii";
   }
   return "?";
 }
@@ -145,7 +238,8 @@ bool isChordTone(uint8_t pitch, const HarmonicEvent& event) {
   int pitch_class = getPitchClass(pitch);
   int root_pc = getPitchClass(event.chord.root_pitch);
 
-  if (pitch_class == root_pc) return true;
+  if (pitch_class == root_pc)
+    return true;
 
   int third_interval = 0;
   int fifth_interval = 0;
@@ -202,7 +296,8 @@ bool isChordTone(uint8_t pitch, const HarmonicEvent& event) {
   int third_pc = (root_pc + third_interval) % 12;
   int fifth_pc = (root_pc + fifth_interval) % 12;
 
-  if (pitch_class == third_pc || pitch_class == fifth_pc) return true;
+  if (pitch_class == third_pc || pitch_class == fifth_pc)
+    return true;
 
   // Check 7th for seventh chord qualities.
   int seventh_interval = -1;
@@ -216,13 +311,13 @@ bool isChordTone(uint8_t pitch, const HarmonicEvent& event) {
       seventh_interval = 11;  // Major 7th
       break;
     case ChordQuality::Diminished7:
-      seventh_interval = 9;   // Diminished 7th
+      seventh_interval = 9;  // Diminished 7th
       break;
     case ChordQuality::AugSixthFrench:
-      seventh_interval = 8;   // Fr+6 4th tone: #4 = root + 8 semitones
+      seventh_interval = 8;  // Fr+6 4th tone: #4 = root + 8 semitones
       break;
     case ChordQuality::AugSixthGerman:
-      seventh_interval = 8;   // Ger+6 4th tone: #4 = root + 8 semitones
+      seventh_interval = 8;  // Ger+6 4th tone: #4 = root + 8 semitones
       break;
     default:
       break;
@@ -230,7 +325,8 @@ bool isChordTone(uint8_t pitch, const HarmonicEvent& event) {
 
   if (seventh_interval >= 0) {
     int seventh_pc = (root_pc + seventh_interval) % 12;
-    if (pitch_class == seventh_pc) return true;
+    if (pitch_class == seventh_pc)
+      return true;
   }
 
   return false;
@@ -256,7 +352,8 @@ ChordDegree scaleDegreeToChordDegree(int degree, bool is_minor) {
       ChordDegree::viiDim,  // 6: vii°
   };
 
-  if (degree < 0 || degree > 6) return ChordDegree::I;
+  if (degree < 0 || degree > 6)
+    return ChordDegree::I;
   return is_minor ? kMinorMap[degree] : kMajorMap[degree];
 }
 

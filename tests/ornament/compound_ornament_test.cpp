@@ -150,8 +150,7 @@ TEST(CompoundOrnamentTest, SubNotesAreContiguous) {
 
   for (size_t idx = 1; idx < result.size(); ++idx) {
     Tick prev_end = result[idx - 1].start_tick + result[idx - 1].duration;
-    EXPECT_LE(result[idx].start_tick, prev_end + 1)
-        << "Sub-note gap at index " << idx;
+    EXPECT_LE(result[idx].start_tick, prev_end + 1) << "Sub-note gap at index " << idx;
   }
 }
 

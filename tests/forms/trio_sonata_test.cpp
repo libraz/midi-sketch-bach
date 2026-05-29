@@ -165,12 +165,9 @@ TEST(TrioSonataTest, TrackChannelMapping) {
     const auto& tracks = result.movements[mov_idx].tracks;
     ASSERT_EQ(tracks.size(), 3u);
 
-    EXPECT_EQ(tracks[0].channel, 0u)
-        << "Movement " << mov_idx << " RH should be Ch 0";
-    EXPECT_EQ(tracks[1].channel, 1u)
-        << "Movement " << mov_idx << " LH should be Ch 1";
-    EXPECT_EQ(tracks[2].channel, 3u)
-        << "Movement " << mov_idx << " Pedal should be Ch 3";
+    EXPECT_EQ(tracks[0].channel, 0u) << "Movement " << mov_idx << " RH should be Ch 0";
+    EXPECT_EQ(tracks[1].channel, 1u) << "Movement " << mov_idx << " LH should be Ch 1";
+    EXPECT_EQ(tracks[2].channel, 3u) << "Movement " << mov_idx << " Pedal should be Ch 3";
   }
 }
 
@@ -211,12 +208,9 @@ TEST(TrioSonataTest, TrackNamesCorrect) {
     const auto& tracks = result.movements[mov_idx].tracks;
     ASSERT_EQ(tracks.size(), 3u);
 
-    EXPECT_EQ(tracks[0].name, "Right Hand (Great)")
-        << "Movement " << mov_idx;
-    EXPECT_EQ(tracks[1].name, "Left Hand (Swell)")
-        << "Movement " << mov_idx;
-    EXPECT_EQ(tracks[2].name, "Pedal")
-        << "Movement " << mov_idx;
+    EXPECT_EQ(tracks[0].name, "Right Hand (Great)") << "Movement " << mov_idx;
+    EXPECT_EQ(tracks[1].name, "Left Hand (Swell)") << "Movement " << mov_idx;
+    EXPECT_EQ(tracks[2].name, "Pedal") << "Movement " << mov_idx;
   }
 }
 
@@ -236,31 +230,29 @@ TEST(TrioSonataTest, NotesWithinOrganRanges) {
     // Track 0 (RH on Great): C2-C6 (36-96) -- actually uses upper range 60-96.
     for (const auto& note : tracks[0].notes) {
       EXPECT_GE(note.pitch, organ_range::kManual1Low)
-          << "Movement " << mov_idx << " RH pitch below Great range: "
-          << static_cast<int>(note.pitch);
+          << "Movement " << mov_idx
+          << " RH pitch below Great range: " << static_cast<int>(note.pitch);
       EXPECT_LE(note.pitch, organ_range::kManual1High)
-          << "Movement " << mov_idx << " RH pitch above Great range: "
-          << static_cast<int>(note.pitch);
+          << "Movement " << mov_idx
+          << " RH pitch above Great range: " << static_cast<int>(note.pitch);
     }
 
     // Track 1 (LH on Swell): C2-C6 (36-96) -- actually uses lower range 36-71.
     for (const auto& note : tracks[1].notes) {
       EXPECT_GE(note.pitch, organ_range::kManual2Low)
-          << "Movement " << mov_idx << " LH pitch below Swell range: "
-          << static_cast<int>(note.pitch);
+          << "Movement " << mov_idx
+          << " LH pitch below Swell range: " << static_cast<int>(note.pitch);
       EXPECT_LE(note.pitch, organ_range::kManual2High)
-          << "Movement " << mov_idx << " LH pitch above Swell range: "
-          << static_cast<int>(note.pitch);
+          << "Movement " << mov_idx
+          << " LH pitch above Swell range: " << static_cast<int>(note.pitch);
     }
 
     // Track 2 (Pedal): C1-D3 (24-50).
     for (const auto& note : tracks[2].notes) {
       EXPECT_GE(note.pitch, organ_range::kPedalLow)
-          << "Movement " << mov_idx << " Pedal pitch below range: "
-          << static_cast<int>(note.pitch);
+          << "Movement " << mov_idx << " Pedal pitch below range: " << static_cast<int>(note.pitch);
       EXPECT_LE(note.pitch, organ_range::kPedalHigh)
-          << "Movement " << mov_idx << " Pedal pitch above range: "
-          << static_cast<int>(note.pitch);
+          << "Movement " << mov_idx << " Pedal pitch above range: " << static_cast<int>(note.pitch);
     }
   }
 }
@@ -354,8 +346,8 @@ TEST(TrioSonataTest, AllNotesHavePositiveDuration) {
     for (const auto& track : result.movements[mov_idx].tracks) {
       for (const auto& note : track.notes) {
         EXPECT_GT(note.duration, 0u)
-            << "Note at tick " << note.start_tick << " has zero duration in movement "
-            << mov_idx << " track " << track.name;
+            << "Note at tick " << note.start_tick << " has zero duration in movement " << mov_idx
+            << " track " << track.name;
       }
     }
   }
@@ -401,8 +393,8 @@ TEST(TrioSonataTest, NotesSortedByStartTick) {
     for (const auto& track : result.movements[mov_idx].tracks) {
       for (size_t idx = 1; idx < track.notes.size(); ++idx) {
         EXPECT_LE(track.notes[idx - 1].start_tick, track.notes[idx].start_tick)
-            << "Notes not sorted in movement " << mov_idx << " track " << track.name
-            << " at index " << idx;
+            << "Notes not sorted in movement " << mov_idx << " track " << track.name << " at index "
+            << idx;
       }
     }
   }
@@ -442,21 +434,26 @@ size_t countUniquePitches(const TrioSonataMovement& movement, size_t track_idx) 
 
 /// @brief Calculate same-as-previous pitch ratio for a track.
 float sameAsPrevRatio(const TrioSonataMovement& movement, size_t track_idx) {
-  if (track_idx >= movement.tracks.size()) return 0.0f;
+  if (track_idx >= movement.tracks.size())
+    return 0.0f;
   const auto& notes = movement.tracks[track_idx].notes;
-  if (notes.size() < 2) return 0.0f;
+  if (notes.size() < 2)
+    return 0.0f;
   size_t same_count = 0;
   for (size_t i = 1; i < notes.size(); ++i) {
-    if (notes[i].pitch == notes[i - 1].pitch) ++same_count;
+    if (notes[i].pitch == notes[i - 1].pitch)
+      ++same_count;
   }
   return static_cast<float>(same_count) / static_cast<float>(notes.size() - 1);
 }
 
 /// @brief Calculate average note duration for a track.
 double avgDuration(const TrioSonataMovement& movement, size_t track_idx) {
-  if (track_idx >= movement.tracks.size()) return 0.0;
+  if (track_idx >= movement.tracks.size())
+    return 0.0;
   const auto& notes = movement.tracks[track_idx].notes;
-  if (notes.empty()) return 0.0;
+  if (notes.empty())
+    return 0.0;
   double total = 0.0;
   for (const auto& note : notes) {
     total += static_cast<double>(note.duration);
@@ -484,9 +481,8 @@ TEST(TrioSonataTest, MelodicDiversity_RightHand) {
     ASSERT_TRUE(result.success);
     for (size_t mov = 0; mov < result.movements.size(); ++mov) {
       size_t unique = countUniquePitches(result.movements[mov], 0);
-      EXPECT_GE(unique, 10u)
-          << "Seed " << seed << " movement " << mov
-          << " RH unique pitches: " << unique << " (need >= 10)";
+      EXPECT_GE(unique, 10u) << "Seed " << seed << " movement " << mov
+                             << " RH unique pitches: " << unique << " (need >= 10)";
     }
   }
 }
@@ -501,9 +497,8 @@ TEST(TrioSonataTest, MelodicDiversity_LeftHand) {
     ASSERT_TRUE(result.success);
     for (size_t mov = 0; mov < result.movements.size(); ++mov) {
       size_t unique = countUniquePitches(result.movements[mov], 1);
-      EXPECT_GE(unique, 8u)
-          << "Seed " << seed << " movement " << mov
-          << " LH unique pitches: " << unique << " (need >= 8)";
+      EXPECT_GE(unique, 8u) << "Seed " << seed << " movement " << mov
+                            << " LH unique pitches: " << unique << " (need >= 8)";
     }
   }
 }
@@ -516,9 +511,8 @@ TEST(TrioSonataTest, MelodicDiversity_Pedal) {
     ASSERT_TRUE(result.success);
     for (size_t mov = 0; mov < result.movements.size(); ++mov) {
       size_t unique = countUniquePitches(result.movements[mov], 2);
-      EXPECT_GE(unique, 6u)
-          << "Seed " << seed << " movement " << mov
-          << " Pedal unique pitches: " << unique << " (need >= 6)";
+      EXPECT_GE(unique, 6u) << "Seed " << seed << " movement " << mov
+                            << " Pedal unique pitches: " << unique << " (need >= 6)";
     }
   }
 }
@@ -554,12 +548,13 @@ TEST(TrioSonataTest, MelodicIntervalVariety) {
   for (size_t mov : {size_t(0), size_t(2)}) {
     for (size_t trk = 0; trk < 2; ++trk) {
       const auto& notes = result.movements[mov].tracks[trk].notes;
-      if (notes.size() < 10) continue;
+      if (notes.size() < 10)
+        continue;
 
       size_t steps = 0, skips = 0, leaps = 0;
       for (size_t i = 1; i < notes.size(); ++i) {
-        int interval = std::abs(static_cast<int>(notes[i].pitch) -
-                                static_cast<int>(notes[i - 1].pitch));
+        int interval =
+            std::abs(static_cast<int>(notes[i].pitch) - static_cast<int>(notes[i - 1].pitch));
         if (interval <= 2) {
           ++steps;
         } else if (interval <= 5) {
@@ -569,24 +564,21 @@ TEST(TrioSonataTest, MelodicIntervalVariety) {
         }
       }
       size_t total = steps + skips + leaps;
-      if (total == 0) continue;
+      if (total == 0)
+        continue;
 
       float step_pct = static_cast<float>(steps) / static_cast<float>(total);
       float skip_pct = static_cast<float>(skips) / static_cast<float>(total);
       float leap_pct = static_cast<float>(leaps) / static_cast<float>(total);
 
-      EXPECT_GE(step_pct, 0.25f)
-          << "Movement " << mov << " track " << trk
-          << " step% too low: " << step_pct;
-      EXPECT_LE(step_pct, 0.85f)
-          << "Movement " << mov << " track " << trk
-          << " step% too high: " << step_pct;
-      EXPECT_GE(skip_pct, 0.08f)
-          << "Movement " << mov << " track " << trk
-          << " skip% too low: " << skip_pct;
-      EXPECT_LE(leap_pct, 0.40f)
-          << "Movement " << mov << " track " << trk
-          << " leap% too high: " << leap_pct;
+      EXPECT_GE(step_pct, 0.25f) << "Movement " << mov << " track " << trk
+                                 << " step% too low: " << step_pct;
+      EXPECT_LE(step_pct, 0.85f) << "Movement " << mov << " track " << trk
+                                 << " step% too high: " << step_pct;
+      EXPECT_GE(skip_pct, 0.08f) << "Movement " << mov << " track " << trk
+                                 << " skip% too low: " << skip_pct;
+      EXPECT_LE(leap_pct, 0.40f) << "Movement " << mov << " track " << trk
+                                 << " leap% too high: " << leap_pct;
     }
   }
 }
@@ -600,17 +592,17 @@ TEST(TrioSonataTest, NoExcessiveRhythmRepetition) {
   for (size_t mov = 0; mov < result.movements.size(); ++mov) {
     for (size_t trk = 0; trk < 2; ++trk) {
       const auto& notes = result.movements[mov].tracks[trk].notes;
-      if (notes.size() < 5) continue;
+      if (notes.size() < 5)
+        continue;
 
       size_t same_rhythm = 0;
       for (size_t i = 1; i < notes.size(); ++i) {
-        if (notes[i].duration == notes[i - 1].duration) ++same_rhythm;
+        if (notes[i].duration == notes[i - 1].duration)
+          ++same_rhythm;
       }
-      float ratio = static_cast<float>(same_rhythm) /
-                     static_cast<float>(notes.size() - 1);
-      EXPECT_LT(ratio, 0.75f)
-          << "Movement " << mov << " track " << trk
-          << " same-rhythm ratio: " << ratio << " (need < 0.70)";
+      float ratio = static_cast<float>(same_rhythm) / static_cast<float>(notes.size() - 1);
+      EXPECT_LT(ratio, 0.75f) << "Movement " << mov << " track " << trk
+                              << " same-rhythm ratio: " << ratio << " (need < 0.70)";
     }
   }
 }
@@ -627,12 +619,10 @@ TEST(TrioSonataTest, SlowMovementHasLongerNotes) {
   double avg_mov2 = avgDuration(result.movements[1], 0);
   double avg_mov3 = avgDuration(result.movements[2], 0);
 
-  EXPECT_GT(avg_mov2, avg_mov1)
-      << "Adagio avg duration (" << avg_mov2
-      << ") should be > Allegro (" << avg_mov1 << ")";
-  EXPECT_GT(avg_mov2, avg_mov3)
-      << "Adagio avg duration (" << avg_mov2
-      << ") should be > Vivace (" << avg_mov3 << ")";
+  EXPECT_GT(avg_mov2, avg_mov1) << "Adagio avg duration (" << avg_mov2 << ") should be > Allegro ("
+                                << avg_mov1 << ")";
+  EXPECT_GT(avg_mov2, avg_mov3) << "Adagio avg duration (" << avg_mov2 << ") should be > Vivace ("
+                                << avg_mov3 << ")";
 }
 
 TEST(TrioSonataTest, HarmonicDiversity) {
@@ -643,9 +633,8 @@ TEST(TrioSonataTest, HarmonicDiversity) {
     ASSERT_TRUE(result.success);
     for (size_t mov = 0; mov < result.movements.size(); ++mov) {
       size_t distinct = countDistinctDegrees(result.movements[mov]);
-      EXPECT_GT(distinct, 4u)
-          << "Seed " << seed << " movement " << mov
-          << " distinct bass pitch classes: " << distinct << " (need > 4)";
+      EXPECT_GT(distinct, 4u) << "Seed " << seed << " movement " << mov
+                              << " distinct bass pitch classes: " << distinct << " (need > 4)";
     }
   }
 }
@@ -670,7 +659,8 @@ TEST(TrioSonataTest, NHT_StrongBeatsAreChordTones) {
       size_t strong_beat_count = 0;
       for (const auto& n : notes) {
         uint8_t beat = static_cast<uint8_t>((n.start_tick % 1920) / 480);
-        if (beat == 0 || beat == 2) ++strong_beat_count;
+        if (beat == 0 || beat == 2)
+          ++strong_beat_count;
       }
       // Just verify strong beats have notes (not empty after validation).
       EXPECT_GT(strong_beat_count, 0u)
@@ -718,8 +708,8 @@ TEST(TrioSonataTest, BreathingRests_NotesDontCrossBoundaries) {
             // Note should not extend past breath_start into the boundary.
             if (note.start_tick < breath_start && note_end > breath_start) {
               EXPECT_LE(note_end, boundary)
-                  << "Seed " << seed << " mov " << mov << " track " << trk
-                  << " note at " << note.start_tick << " crosses boundary " << boundary;
+                  << "Seed " << seed << " mov " << mov << " track " << trk << " note at "
+                  << note.start_tick << " crosses boundary " << boundary;
             }
           }
         }
@@ -742,7 +732,8 @@ TEST(TrioSonataTest, CadentialSuspension_PresenceCheck) {
 
     for (Tick p = 1; p <= num_phrases; ++p) {
       Tick cadence = p * 4 * 1920;
-      if (cadence > total_dur) cadence = total_dur;
+      if (cadence > total_dur)
+        cadence = total_dur;
       Tick search_start = (cadence > 1920) ? cadence - 1920 : 0;
 
       bool found = false;
@@ -753,11 +744,11 @@ TEST(TrioSonataTest, CadentialSuspension_PresenceCheck) {
             break;
           }
         }
-        if (found) break;
+        if (found)
+          break;
       }
-      EXPECT_TRUE(found)
-          << "Mov " << mov << " phrase " << p
-          << ": no upper voice notes near cadence at " << cadence;
+      EXPECT_TRUE(found) << "Mov " << mov << " phrase " << p
+                         << ": no upper voice notes near cadence at " << cadence;
     }
   }
 }
@@ -782,11 +773,11 @@ TEST(TrioSonataTest, FortspinnungHasSequentialContent) {
         // Count notes in the first phrase's first 3/4 (0 to 5760 ticks).
         size_t first_phrase_count = 0;
         for (const auto& n : notes) {
-          if (n.start_tick < 5760) ++first_phrase_count;
+          if (n.start_tick < 5760)
+            ++first_phrase_count;
         }
-        EXPECT_GE(first_phrase_count, 8u)
-            << "Seed " << seed << " mov " << mov << " track " << trk
-            << " first 3/4 phrase notes: " << first_phrase_count;
+        EXPECT_GE(first_phrase_count, 8u) << "Seed " << seed << " mov " << mov << " track " << trk
+                                          << " first 3/4 phrase notes: " << first_phrase_count;
       }
     }
   }
@@ -843,20 +834,20 @@ TEST(TrioSonataTest, Ornaments_NotesStillInRange) {
       // RH: 60-84 (within Great manual range 36-96).
       for (const auto& note : result.movements[mov].tracks[0].notes) {
         EXPECT_GE(note.pitch, organ_range::kManual1Low)
-            << "Seed " << seed << " mov " << mov << " RH pitch too low: "
-            << static_cast<int>(note.pitch);
+            << "Seed " << seed << " mov " << mov
+            << " RH pitch too low: " << static_cast<int>(note.pitch);
         EXPECT_LE(note.pitch, organ_range::kManual1High)
-            << "Seed " << seed << " mov " << mov << " RH pitch too high: "
-            << static_cast<int>(note.pitch);
+            << "Seed " << seed << " mov " << mov
+            << " RH pitch too high: " << static_cast<int>(note.pitch);
       }
       // LH: 48-72 (within Swell manual range 36-96).
       for (const auto& note : result.movements[mov].tracks[1].notes) {
         EXPECT_GE(note.pitch, organ_range::kManual2Low)
-            << "Seed " << seed << " mov " << mov << " LH pitch too low: "
-            << static_cast<int>(note.pitch);
+            << "Seed " << seed << " mov " << mov
+            << " LH pitch too low: " << static_cast<int>(note.pitch);
         EXPECT_LE(note.pitch, organ_range::kManual2High)
-            << "Seed " << seed << " mov " << mov << " LH pitch too high: "
-            << static_cast<int>(note.pitch);
+            << "Seed " << seed << " mov " << mov
+            << " LH pitch too high: " << static_cast<int>(note.pitch);
       }
     }
   }
@@ -869,8 +860,7 @@ TEST(TrioSonataTest, Ornaments_CounterpointNotWorse) {
     TrioSonataResult result = generateTrioSonata(config);
     ASSERT_TRUE(result.success);
     EXPECT_LT(result.counterpoint_report.total(), 80u)
-        << "Seed " << seed << " total violations: "
-        << result.counterpoint_report.total();
+        << "Seed " << seed << " total violations: " << result.counterpoint_report.total();
   }
 }
 
@@ -894,14 +884,14 @@ TEST(TrioSonataTest, VoiceSeparationMinimum) {
         for (const auto& lh : lh_notes) {
           Tick lh_end = lh.start_tick + lh.duration;
           // Check temporal overlap.
-          if (lh.start_tick >= rh_end || rh.start_tick >= lh_end) continue;
+          if (lh.start_tick >= rh_end || rh.start_tick >= lh_end)
+            continue;
 
           int interval = static_cast<int>(rh.pitch) - static_cast<int>(lh.pitch);
-          EXPECT_GE(interval, 12)
-              << "Seed " << seed << " mov " << mov
-              << " RH(" << static_cast<int>(rh.pitch) << ")@" << rh.start_tick
-              << " - LH(" << static_cast<int>(lh.pitch) << ")@" << lh.start_tick
-              << " interval=" << interval << " (need >= 12)";
+          EXPECT_GE(interval, 12) << "Seed " << seed << " mov " << mov << " RH("
+                                  << static_cast<int>(rh.pitch) << ")@" << rh.start_tick << " - LH("
+                                  << static_cast<int>(lh.pitch) << ")@" << lh.start_tick
+                                  << " interval=" << interval << " (need >= 12)";
         }
       }
     }
@@ -929,9 +919,8 @@ TEST(TrioSonataTest, MajorMovementDiatonic) {
         for (const auto& note : result.movements[mov].tracks[trk].notes) {
           int pc = note.pitch % 12;
           EXPECT_TRUE(c_major_pcs.count(pc) > 0)
-              << "Seed " << seed << " mov " << mov << " track " << trk
-              << " non-diatonic pitch " << static_cast<int>(note.pitch)
-              << " (pc=" << pc << ")";
+              << "Seed " << seed << " mov " << mov << " track " << trk << " non-diatonic pitch "
+              << static_cast<int>(note.pitch) << " (pc=" << pc << ")";
         }
       }
     }
@@ -960,14 +949,14 @@ TEST(TrioSonataTest, FastMovementDurationsInSet) {
           const auto& note = notes[idx];
           // Duration must be at least the minimum allowed value.
           EXPECT_GE(note.duration, kMinAllowed)
-              << "Seed " << seed << " mov " << mov << " track " << trk
-              << " duration " << note.duration << " below minimum " << kMinAllowed;
+              << "Seed " << seed << " mov " << mov << " track " << trk << " duration "
+              << note.duration << " below minimum " << kMinAllowed;
           // If not in the standard set, must be boundary-clamped (no overlap).
           if (allowed.count(note.duration) == 0 && idx + 1 < notes.size()) {
             Tick gap = notes[idx + 1].start_tick - note.start_tick;
             EXPECT_LE(note.duration, gap)
-                << "Seed " << seed << " mov " << mov << " track " << trk
-                << " duration " << note.duration << " exceeds gap " << gap;
+                << "Seed " << seed << " mov " << mov << " track " << trk << " duration "
+                << note.duration << " exceeds gap " << gap;
           }
         }
       }
@@ -988,8 +977,8 @@ TEST(TrioSonataTest, SlowMovementDurationsInSet) {
     for (size_t trk = 0; trk < 2; ++trk) {
       for (const auto& note : result.movements[1].tracks[trk].notes) {
         EXPECT_TRUE(allowed.count(note.duration) > 0)
-            << "Seed " << seed << " mov 1 track " << trk
-            << " duration " << note.duration << " not in {240,480,960}";
+            << "Seed " << seed << " mov 1 track " << trk << " duration " << note.duration
+            << " not in {240,480,960}";
       }
     }
   }
@@ -1039,10 +1028,10 @@ TEST(TrioSonataTest, DownbeatConsonance) {
         // Check pairs: RH-LH, RH-Pedal, LH-Pedal.
         size_t pair_indices[][2] = {{0, 1}, {0, 2}, {1, 2}};
         for (const auto& p : pair_indices) {
-          if (!active[p[0]] || !active[p[1]]) continue;
+          if (!active[p[0]] || !active[p[1]])
+            continue;
           ++total_pairs;
-          int interval = static_cast<int>(pitches[p[0]]) -
-                         static_cast<int>(pitches[p[1]]);
+          int interval = static_cast<int>(pitches[p[0]]) - static_cast<int>(pitches[p[1]]);
           if (!isConsonant(interval)) {
             ++dissonant_pairs;
           }
@@ -1050,14 +1039,13 @@ TEST(TrioSonataTest, DownbeatConsonance) {
       }
 
       if (total_pairs > 0) {
-        float dissonance_rate = static_cast<float>(dissonant_pairs) /
-                                static_cast<float>(total_pairs);
+        float dissonance_rate =
+            static_cast<float>(dissonant_pairs) / static_cast<float>(total_pairs);
         // Reference: trio sonata consonance mean=0.709 (std=0.035), so
         // dissonance ~29%. Allow up to 35% for natural variation.
         EXPECT_LT(dissonance_rate, 0.35f)
-            << "Seed " << seed << " mov " << mov
-            << " dissonance rate=" << dissonance_rate
-            << " (" << dissonant_pairs << "/" << total_pairs << ")";
+            << "Seed " << seed << " mov " << mov << " dissonance rate=" << dissonance_rate << " ("
+            << dissonant_pairs << "/" << total_pairs << ")";
       }
     }
   }

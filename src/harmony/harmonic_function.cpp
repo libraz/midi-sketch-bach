@@ -40,11 +40,16 @@ HarmonicFunction classifyFunction(ChordDegree degree, bool /*is_minor*/) {
 
 const char* harmonicFunctionToString(HarmonicFunction func) {
   switch (func) {
-    case HarmonicFunction::Tonic:       return "Tonic";
-    case HarmonicFunction::Subdominant: return "Subdominant";
-    case HarmonicFunction::Dominant:    return "Dominant";
-    case HarmonicFunction::Mediant:     return "Mediant";
-    case HarmonicFunction::Applied:    return "Applied";
+    case HarmonicFunction::Tonic:
+      return "Tonic";
+    case HarmonicFunction::Subdominant:
+      return "Subdominant";
+    case HarmonicFunction::Dominant:
+      return "Dominant";
+    case HarmonicFunction::Mediant:
+      return "Mediant";
+    case HarmonicFunction::Applied:
+      return "Applied";
   }
   return "Unknown";
 }
@@ -52,8 +57,8 @@ const char* harmonicFunctionToString(HarmonicFunction func) {
 Chord createSecondaryDominant(ChordDegree target, const KeySignature& key_sig) {
   // The secondary dominant is built a perfect 5th below the target's root.
   // Its quality is always Dominant7.
-  uint8_t target_semitones = key_sig.is_minor ? degreeMinorSemitones(target)
-                                              : degreeSemitones(target);
+  uint8_t target_semitones =
+      key_sig.is_minor ? degreeMinorSemitones(target) : degreeSemitones(target);
 
   // Root of secondary dominant = target root - perfect 5th (7 semitones)
   // = target root + perfect 4th (5 semitones) mod 12
@@ -66,7 +71,8 @@ Chord createSecondaryDominant(ChordDegree target, const KeySignature& key_sig) {
   chord.quality = ChordQuality::Dominant7;
   // Place in octave 4
   chord.root_pitch = static_cast<uint8_t>(60 + sec_dom_root_pc);
-  if (chord.root_pitch < 60) chord.root_pitch += 12;
+  if (chord.root_pitch < 60)
+    chord.root_pitch += 12;
   chord.inversion = 0;
 
   return chord;
@@ -81,7 +87,8 @@ Chord createNeapolitanSixth(const KeySignature& key_sig) {
   chord.degree = ChordDegree::ii;  // Closest standard degree
   chord.quality = ChordQuality::Major;
   chord.root_pitch = static_cast<uint8_t>(60 + flat_two_pc);
-  if (chord.root_pitch < 60) chord.root_pitch += 12;
+  if (chord.root_pitch < 60)
+    chord.root_pitch += 12;
   chord.inversion = 1;  // First inversion (6 position)
 
   return chord;
@@ -121,12 +128,18 @@ bool isValidDegreeProgression(ChordDegree from, ChordDegree to, bool is_minor) {
 
 ChordDegree getSecondaryDominantTarget(ChordDegree degree) {
   switch (degree) {
-    case ChordDegree::V_of_V:   return ChordDegree::V;
-    case ChordDegree::V_of_vi:  return ChordDegree::vi;
-    case ChordDegree::V_of_IV:  return ChordDegree::IV;
-    case ChordDegree::V_of_ii:  return ChordDegree::ii;
-    case ChordDegree::V_of_iii: return ChordDegree::iii;
-    default:                    return ChordDegree::I;
+    case ChordDegree::V_of_V:
+      return ChordDegree::V;
+    case ChordDegree::V_of_vi:
+      return ChordDegree::vi;
+    case ChordDegree::V_of_IV:
+      return ChordDegree::IV;
+    case ChordDegree::V_of_ii:
+      return ChordDegree::ii;
+    case ChordDegree::V_of_iii:
+      return ChordDegree::iii;
+    default:
+      return ChordDegree::I;
   }
 }
 

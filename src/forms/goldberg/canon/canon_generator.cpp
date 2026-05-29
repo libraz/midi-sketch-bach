@@ -49,8 +49,10 @@ constexpr int kMaxBacktrackBeats = 3;
 /// @param canon_interval Diatonic interval (0-8).
 /// @return SubjectCharacter matching the interval's expressive range.
 SubjectCharacter characterForInterval(int canon_interval) {
-  if (canon_interval <= 1) return SubjectCharacter::Severe;
-  if (canon_interval <= 3) return SubjectCharacter::Playful;
+  if (canon_interval <= 1)
+    return SubjectCharacter::Severe;
+  if (canon_interval <= 3)
+    return SubjectCharacter::Playful;
   return SubjectCharacter::Noble;
 }
 
@@ -59,7 +61,8 @@ SubjectCharacter characterForInterval(int canon_interval) {
 /// @param profile Minor mode profile (used only for minor keys).
 /// @return Appropriate ScaleType.
 ScaleType getScaleForKey(const KeySignature& key, MinorModeProfile profile) {
-  if (!key.is_minor) return ScaleType::Major;
+  if (!key.is_minor)
+    return ScaleType::Major;
   switch (profile) {
     case MinorModeProfile::NaturalMinor:
       return ScaleType::NaturalMinor;
@@ -77,10 +80,8 @@ ScaleType getScaleForKey(const KeySignature& key, MinorModeProfile profile) {
 // Public: generate
 // ---------------------------------------------------------------------------
 
-CanonResult CanonGenerator::generate(const CanonSpec& spec,
-                                     const GoldbergStructuralGrid& grid,
-                                     const TimeSignature& time_sig,
-                                     uint32_t seed) const {
+CanonResult CanonGenerator::generate(const CanonSpec& spec, const GoldbergStructuralGrid& grid,
+                                     const TimeSignature& time_sig, uint32_t seed) const {
   CanonResult result;
   result.success = false;
 
@@ -134,8 +135,7 @@ CanonResult CanonGenerator::generate(const CanonSpec& spec,
     int bar = beat / beats_per_bar;
     int beat_in_bar = beat % beats_per_bar;
     const auto& bar_info = grid.getBar(bar);
-    MetricalStrength strength = getMetricalStrength(beat_in_bar,
-                                                     MeterProfile::StandardTriple);
+    MetricalStrength strength = getMetricalStrength(beat_in_bar, MeterProfile::StandardTriple);
 
     uint8_t dux_pitch;
 
@@ -148,15 +148,13 @@ CanonResult CanonGenerator::generate(const CanonSpec& spec,
       dux_pitch = scale_util::nearestScaleTone(dux_pitch, spec.key.tonic, scale);
     } else {
       // Generate from candidates.
-      auto candidates = buildCandidates(prev_dux_pitch, spec.key,
-                                        spec.key.is_minor, max_leap);
+      auto candidates = buildCandidates(prev_dux_pitch, spec.key, spec.key.is_minor, max_leap);
       if (candidates.empty()) {
         // Fallback: use previous pitch.
         dux_pitch = prev_dux_pitch;
       } else {
-        dux_pitch = selectBestDuxPitch(candidates, prev_dux_pitch, buffer,
-                                       beat, grid, bar_info, strength,
-                                       0, 0, character, rng);
+        dux_pitch = selectBestDuxPitch(candidates, prev_dux_pitch, buffer, beat, grid, bar_info,
+                                       strength, 0, 0, character, rng);
       }
     }
 
@@ -170,7 +168,8 @@ CanonResult CanonGenerator::generate(const CanonSpec& spec,
     opts.source = BachNoteSource::CanonDux;
 
     auto note_result = createBachNote(nullptr, nullptr, nullptr, opts);
-    if (!note_result.accepted) continue;
+    if (!note_result.accepted)
+      continue;
     NoteEvent dux_note = note_result.note;
     dux_note.pitch = dux_pitch;  // Phase 0: no adjustment.
     dux_note.source = BachNoteSource::CanonDux;
@@ -185,8 +184,7 @@ CanonResult CanonGenerator::generate(const CanonSpec& spec,
     int bar = beat / beats_per_bar;
     int beat_in_bar = beat % beats_per_bar;
     const auto& bar_info = grid.getBar(bar);
-    MetricalStrength strength = getMetricalStrength(beat_in_bar,
-                                                     MeterProfile::StandardTriple);
+    MetricalStrength strength = getMetricalStrength(beat_in_bar, MeterProfile::StandardTriple);
 
     // Reset phrase backtrack counter at phrase boundaries.
     int phrase_idx = bar / 4;
@@ -204,8 +202,7 @@ CanonResult CanonGenerator::generate(const CanonSpec& spec,
     }
 
     // (B) Dux generation with scoring.
-    auto candidates = buildCandidates(prev_dux_pitch, spec.key,
-                                      spec.key.is_minor, max_leap);
+    auto candidates = buildCandidates(prev_dux_pitch, spec.key, spec.key.is_minor, max_leap);
 
     uint8_t bass_pitch = 0;
     if (!result.bass_notes.empty()) {
@@ -216,34 +213,26 @@ CanonResult CanonGenerator::generate(const CanonSpec& spec,
     if (candidates.empty()) {
       dux_pitch = prev_dux_pitch;
     } else {
-      dux_pitch = selectBestDuxPitch(candidates, prev_dux_pitch, buffer,
-                                     beat, grid, bar_info, strength,
-                                     comes_pitch, bass_pitch, character,
-                                     rng);
+      dux_pitch = selectBestDuxPitch(candidates, prev_dux_pitch, buffer, beat, grid, bar_info,
+                                     strength, comes_pitch, bass_pitch, character, rng);
 
       // Check if best candidate is below backtrack threshold.
-      float best_score = scoreDuxCandidate(dux_pitch, prev_dux_pitch, buffer,
-                                           beat, grid, bar_info, strength,
-                                           comes_pitch, bass_pitch, character);
+      float best_score = scoreDuxCandidate(dux_pitch, prev_dux_pitch, buffer, beat, grid, bar_info,
+                                           strength, comes_pitch, bass_pitch, character);
 
-      if (best_score < kBacktrackThreshold &&
-          phrase_backtracks < kMaxBacktracksPerPhrase) {
+      if (best_score < kBacktrackThreshold && phrase_backtracks < kMaxBacktracksPerPhrase) {
         // Local backtrack: erase last few beats and retry with different RNG.
-        int backtrack_beats = std::min(kMaxBacktrackBeats,
-                                       beat - delay_beats);
+        int backtrack_beats = std::min(kMaxBacktrackBeats, beat - delay_beats);
         if (backtrack_beats > 0) {
           // Remove last backtrack_beats dux notes.
-          for (int idx = 0; idx < backtrack_beats &&
-                            !result.dux_notes.empty(); ++idx) {
+          for (int idx = 0; idx < backtrack_beats && !result.dux_notes.empty(); ++idx) {
             result.dux_notes.pop_back();
           }
           // Remove corresponding comes notes.
-          for (int idx = 0; idx < backtrack_beats &&
-                            !result.comes_notes.empty(); ++idx) {
+          for (int idx = 0; idx < backtrack_beats && !result.comes_notes.empty(); ++idx) {
             auto& last = result.comes_notes.back();
             // Only remove if it was derived after the backtrack point.
-            if (last.start_tick >= static_cast<Tick>(beat - backtrack_beats) *
-                                       ticks_per_beat) {
+            if (last.start_tick >= static_cast<Tick>(beat - backtrack_beats) * ticks_per_beat) {
               result.comes_notes.pop_back();
             }
           }
@@ -256,9 +245,7 @@ CanonResult CanonGenerator::generate(const CanonSpec& spec,
 
           // Rewind beat counter and prev_dux_pitch.
           beat -= backtrack_beats;
-          prev_dux_pitch = result.dux_notes.empty()
-                               ? start_pitch
-                               : result.dux_notes.back().pitch;
+          prev_dux_pitch = result.dux_notes.empty() ? start_pitch : result.dux_notes.back().pitch;
 
           backtrack_count++;
           phrase_backtracks++;
@@ -281,7 +268,8 @@ CanonResult CanonGenerator::generate(const CanonSpec& spec,
     dux_opts.source = BachNoteSource::CanonDux;
 
     auto dux_result = createBachNote(nullptr, nullptr, nullptr, dux_opts);
-    if (!dux_result.accepted) continue;
+    if (!dux_result.accepted)
+      continue;
     NoteEvent dux_note = dux_result.note;
     dux_note.pitch = dux_pitch;
     dux_note.source = BachNoteSource::CanonDux;
@@ -292,14 +280,10 @@ CanonResult CanonGenerator::generate(const CanonSpec& spec,
 
     // (C) Free bass generation: on strong beats only (beat 1 of each bar).
     if (beat_in_bar == 0) {
-      NoteEvent bass_note = generateBassNote(
-          bar_info,
-          static_cast<Tick>(beat) * ticks_per_beat,
-          static_cast<Tick>(beats_per_bar) * ticks_per_beat,  // One bar duration.
-          spec.key,
-          dux_pitch,
-          comes_pitch,
-          rng);
+      NoteEvent bass_note =
+          generateBassNote(bar_info, static_cast<Tick>(beat) * ticks_per_beat,
+                           static_cast<Tick>(beats_per_bar) * ticks_per_beat,  // One bar duration.
+                           spec.key, dux_pitch, comes_pitch, rng);
       result.bass_notes.push_back(bass_note);
     }
   }
@@ -323,16 +307,12 @@ CanonResult CanonGenerator::generate(const CanonSpec& spec,
 // Private: scoreDuxCandidate
 // ---------------------------------------------------------------------------
 
-float CanonGenerator::scoreDuxCandidate(uint8_t candidate,
-                                        uint8_t prev_dux_pitch,
-                                        const DuxBuffer& buffer,
-                                        int current_beat,
+float CanonGenerator::scoreDuxCandidate(uint8_t candidate, uint8_t prev_dux_pitch,
+                                        const DuxBuffer& buffer, int current_beat,
                                         const GoldbergStructuralGrid& grid,
                                         const StructuralBarInfo& bar_info,
-                                        MetricalStrength strength,
-                                        uint8_t comes_pitch,
-                                        uint8_t bass_pitch,
-                                        SubjectCharacter character) const {
+                                        MetricalStrength strength, uint8_t comes_pitch,
+                                        uint8_t bass_pitch, SubjectCharacter character) const {
   float score = 0.0f;
   const auto& spec = buffer.spec();
 
@@ -357,8 +337,7 @@ float CanonGenerator::scoreDuxCandidate(uint8_t candidate,
   }
 
   // 2. Melodic quality.
-  int leap = std::abs(static_cast<int>(candidate) -
-                      static_cast<int>(prev_dux_pitch));
+  int leap = std::abs(static_cast<int>(candidate) - static_cast<int>(prev_dux_pitch));
   int max_leap = maxLeapForCharacter(character);
 
   if (leap <= 2) {
@@ -381,8 +360,7 @@ float CanonGenerator::scoreDuxCandidate(uint8_t candidate,
   if (bass_pitch > 0) {
     uint8_t future_comes = buffer.previewFutureComes(candidate);
     int future_interval = interval_util::compoundToSimple(
-        std::abs(static_cast<int>(future_comes) -
-                 static_cast<int>(bass_pitch)));
+        std::abs(static_cast<int>(future_comes) - static_cast<int>(bass_pitch)));
     if (interval_util::isConsonance(future_interval)) {
       score += 0.5f;
     } else {
@@ -394,8 +372,7 @@ float CanonGenerator::scoreDuxCandidate(uint8_t candidate,
   score -= buffer.scoreClimaxAlignment(candidate, current_beat, grid);
 
   // 6. Cadence alignment.
-  if (bar_info.cadence.has_value() &&
-      bar_info.phrase_pos == PhrasePosition::Cadence) {
+  if (bar_info.cadence.has_value() && bar_info.phrase_pos == PhrasePosition::Cadence) {
     CadenceType cad = bar_info.cadence.value();
     int tonic_pc = static_cast<int>(spec.key.tonic);
     int target_pc;
@@ -411,8 +388,8 @@ float CanonGenerator::scoreDuxCandidate(uint8_t candidate,
         target_pc = (tonic_pc + 7) % 12;  // Dominant.
         break;
       case CadenceType::Deceptive:
-        target_pc = spec.key.is_minor ? (tonic_pc + 8) % 12    // bVI
-                                      : (tonic_pc + 9) % 12;   // vi
+        target_pc = spec.key.is_minor ? (tonic_pc + 8) % 12   // bVI
+                                      : (tonic_pc + 9) % 12;  // vi
         break;
     }
 
@@ -439,19 +416,15 @@ float CanonGenerator::scoreDuxCandidate(uint8_t candidate,
 // Private: selectBestDuxPitch
 // ---------------------------------------------------------------------------
 
-uint8_t CanonGenerator::selectBestDuxPitch(
-    const std::vector<uint8_t>& candidates,
-    uint8_t prev_dux_pitch,
-    const DuxBuffer& buffer,
-    int current_beat,
-    const GoldbergStructuralGrid& grid,
-    const StructuralBarInfo& bar_info,
-    MetricalStrength strength,
-    uint8_t comes_pitch,
-    uint8_t bass_pitch,
-    SubjectCharacter character,
-    std::mt19937& rng) const {
-  if (candidates.empty()) return prev_dux_pitch;
+uint8_t CanonGenerator::selectBestDuxPitch(const std::vector<uint8_t>& candidates,
+                                           uint8_t prev_dux_pitch, const DuxBuffer& buffer,
+                                           int current_beat, const GoldbergStructuralGrid& grid,
+                                           const StructuralBarInfo& bar_info,
+                                           MetricalStrength strength, uint8_t comes_pitch,
+                                           uint8_t bass_pitch, SubjectCharacter character,
+                                           std::mt19937& rng) const {
+  if (candidates.empty())
+    return prev_dux_pitch;
 
   // Small random perturbation range for tie-breaking and seed-dependent
   // variation. Keeps the scoring deterministic in direction but allows
@@ -464,10 +437,8 @@ uint8_t CanonGenerator::selectBestDuxPitch(
   uint8_t best_pitch = candidates[0];
 
   for (uint8_t cand : candidates) {
-    float cur_score = scoreDuxCandidate(cand, prev_dux_pitch, buffer,
-                                        current_beat, grid, bar_info,
-                                        strength, comes_pitch, bass_pitch,
-                                        character);
+    float cur_score = scoreDuxCandidate(cand, prev_dux_pitch, buffer, current_beat, grid, bar_info,
+                                        strength, comes_pitch, bass_pitch, character);
     // Add small random perturbation for seed-dependent variation.
     cur_score += perturb_dist(rng);
 
@@ -484,40 +455,37 @@ uint8_t CanonGenerator::selectBestDuxPitch(
 // Private: generateBassNote
 // ---------------------------------------------------------------------------
 
-NoteEvent CanonGenerator::generateBassNote(const StructuralBarInfo& bar_info,
-                                           Tick tick,
-                                           Tick dur,
-                                           const KeySignature& key,
-                                           uint8_t dux_pitch,
-                                           uint8_t comes_pitch,
-                                           std::mt19937& /*rng*/) const {
+NoteEvent CanonGenerator::generateBassNote(const StructuralBarInfo& bar_info, Tick tick, Tick dur,
+                                           const KeySignature& key, uint8_t dux_pitch,
+                                           uint8_t comes_pitch, std::mt19937& /*rng*/) const {
   // Use structural bass pitch as the target.
   uint8_t target_pitch = bar_info.bass_motion.primary_pitch;
 
   // Ensure bass is in bass register (C2-C4).
   int bass_candidate = static_cast<int>(target_pitch);
-  while (bass_candidate > kBassHigh) bass_candidate -= 12;
-  while (bass_candidate < kBassLow) bass_candidate += 12;
+  while (bass_candidate > kBassHigh)
+    bass_candidate -= 12;
+  while (bass_candidate < kBassLow)
+    bass_candidate += 12;
 
   uint8_t bass_pitch = clampPitch(bass_candidate, kBassLow, kBassHigh);
 
   // Check consonance with dux and comes; try octave adjustments if dissonant.
   auto check_consonance = [](uint8_t bass, uint8_t other) -> bool {
-    if (other == 0) return true;
-    int interval = interval_util::compoundToSimple(
-        std::abs(static_cast<int>(bass) - static_cast<int>(other)));
+    if (other == 0)
+      return true;
+    int interval =
+        interval_util::compoundToSimple(std::abs(static_cast<int>(bass) - static_cast<int>(other)));
     return interval_util::isConsonance(interval);
   };
 
   // If dissonant with either voice, try adjacent scale tones in bass register.
-  if (!check_consonance(bass_pitch, dux_pitch) ||
-      !check_consonance(bass_pitch, comes_pitch)) {
+  if (!check_consonance(bass_pitch, dux_pitch) || !check_consonance(bass_pitch, comes_pitch)) {
     // Try a few scale-adjacent options.
     uint8_t best_bass = bass_pitch;
     float best_score = -100.0f;
 
-    auto scale_tones = getScaleTones(key.tonic, key.is_minor,
-                                     kBassLow, kBassHigh);
+    auto scale_tones = getScaleTones(key.tonic, key.is_minor, kBassLow, kBassHigh);
     for (uint8_t tone : scale_tones) {
       float tone_score = 0.0f;
 
@@ -525,16 +493,20 @@ NoteEvent CanonGenerator::generateBassNote(const StructuralBarInfo& bar_info,
       if (dux_pitch > 0) {
         int interval = interval_util::compoundToSimple(
             std::abs(static_cast<int>(tone) - static_cast<int>(dux_pitch)));
-        if (interval_util::isConsonance(interval)) tone_score += 1.0f;
-        else tone_score -= 2.0f;
+        if (interval_util::isConsonance(interval))
+          tone_score += 1.0f;
+        else
+          tone_score -= 2.0f;
       }
 
       // Consonance with comes.
       if (comes_pitch > 0) {
         int interval = interval_util::compoundToSimple(
             std::abs(static_cast<int>(tone) - static_cast<int>(comes_pitch)));
-        if (interval_util::isConsonance(interval)) tone_score += 1.0f;
-        else tone_score -= 2.0f;
+        if (interval_util::isConsonance(interval))
+          tone_score += 1.0f;
+        else
+          tone_score -= 2.0f;
       }
 
       // Proximity to structural bass pitch.
@@ -554,8 +526,10 @@ NoteEvent CanonGenerator::generateBassNote(const StructuralBarInfo& bar_info,
   if (bar_info.bass_motion.resolution_pitch.has_value()) {
     // Place resolution pitch in the bass register.
     int res = static_cast<int>(bar_info.bass_motion.resolution_pitch.value());
-    while (res > kBassHigh) res -= 12;
-    while (res < kBassLow) res += 12;
+    while (res > kBassHigh)
+      res -= 12;
+    while (res < kBassLow)
+      res += 12;
     // Split duration: primary for first 2/3, resolution for last 1/3.
     // For simplicity, use primary pitch for the full bar.
     // Bass resolution is a structural refinement for future enhancement.
@@ -582,19 +556,16 @@ NoteEvent CanonGenerator::generateBassNote(const StructuralBarInfo& bar_info,
 // Private: isBarChordTone
 // ---------------------------------------------------------------------------
 
-bool CanonGenerator::isBarChordTone(int pitch_class,
-                                    const StructuralBarInfo& bar_info,
+bool CanonGenerator::isBarChordTone(int pitch_class, const StructuralBarInfo& bar_info,
                                     const KeySignature& key) const {
   // Compute root offset from chord degree.
-  int root_offset = key.is_minor
-                        ? static_cast<int>(degreeMinorSemitones(bar_info.chord_degree))
-                        : static_cast<int>(degreeSemitones(bar_info.chord_degree));
+  int root_offset = key.is_minor ? static_cast<int>(degreeMinorSemitones(bar_info.chord_degree))
+                                 : static_cast<int>(degreeSemitones(bar_info.chord_degree));
   int root_pc = (static_cast<int>(key.tonic) + root_offset) % 12;
 
   // Determine chord quality.
-  ChordQuality quality = key.is_minor
-                              ? minorKeyQuality(bar_info.chord_degree)
-                              : majorKeyQuality(bar_info.chord_degree);
+  ChordQuality quality = key.is_minor ? minorKeyQuality(bar_info.chord_degree)
+                                      : majorKeyQuality(bar_info.chord_degree);
 
   // Compute third and fifth offsets.
   int third_offset = 0;
@@ -630,37 +601,28 @@ bool CanonGenerator::isBarChordTone(int pitch_class,
   int third_pc = (root_pc + third_offset) % 12;
   int fifth_pc = (root_pc + fifth_offset) % 12;
 
-  return pitch_class == root_pc || pitch_class == third_pc ||
-         pitch_class == fifth_pc;
+  return pitch_class == root_pc || pitch_class == third_pc || pitch_class == fifth_pc;
 }
 
 // ---------------------------------------------------------------------------
 // Private: buildCandidates
 // ---------------------------------------------------------------------------
 
-std::vector<uint8_t> CanonGenerator::buildCandidates(
-    uint8_t ref_pitch,
-    const KeySignature& key,
-    bool is_minor,
-    int max_leap) const {
+std::vector<uint8_t> CanonGenerator::buildCandidates(uint8_t ref_pitch, const KeySignature& key,
+                                                     bool is_minor, int max_leap) const {
   // Get all scale tones within max_leap of the reference pitch,
   // clamped to the dux register.
-  int low = std::max(static_cast<int>(kDuxLow),
-                     static_cast<int>(ref_pitch) - max_leap);
-  int high = std::min(static_cast<int>(kDuxHigh),
-                      static_cast<int>(ref_pitch) + max_leap);
+  int low = std::max(static_cast<int>(kDuxLow), static_cast<int>(ref_pitch) - max_leap);
+  int high = std::min(static_cast<int>(kDuxHigh), static_cast<int>(ref_pitch) + max_leap);
 
   if (low > high) {
     // Fallback: widen range slightly.
-    low = std::max(static_cast<int>(kDuxLow),
-                   static_cast<int>(ref_pitch) - 12);
-    high = std::min(static_cast<int>(kDuxHigh),
-                    static_cast<int>(ref_pitch) + 12);
+    low = std::max(static_cast<int>(kDuxLow), static_cast<int>(ref_pitch) - 12);
+    high = std::min(static_cast<int>(kDuxHigh), static_cast<int>(ref_pitch) + 12);
   }
 
-  auto tones = getScaleTones(key.tonic, is_minor,
-                              clampPitch(low, 0, 127),
-                              clampPitch(high, 0, 127));
+  auto tones =
+      getScaleTones(key.tonic, is_minor, clampPitch(low, 0, 127), clampPitch(high, 0, 127));
 
   return tones;
 }

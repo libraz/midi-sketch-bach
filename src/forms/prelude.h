@@ -13,8 +13,8 @@ namespace bach {
 
 /// @brief Type of prelude style.
 enum class PreludeType : uint8_t {
-  FreeForm,   ///< Free-form with passage work (BWV 532 style).
-  Perpetual   ///< Perpetual motion, continuous 16th notes (BWV 543 style).
+  FreeForm,  ///< Free-form with passage work (BWV 532 style).
+  Perpetual  ///< Perpetual motion, continuous 16th notes (BWV 543 style).
 };
 
 /// @brief Configuration for prelude generation.
@@ -26,13 +26,14 @@ struct PreludeConfig {
   uint32_t seed = 42;
   Tick fugue_length_ticks = 0;  ///< Used to scale prelude length (60-80% of fugue).
   bool enable_picardy = true;   ///< Apply Picardy third in minor keys.
-};;
+};
+;
 
 /// @brief Result of prelude generation.
 struct PreludeResult {
-  std::vector<Track> tracks;        ///< MIDI tracks for each voice/manual.
-  HarmonicTimeline timeline;        ///< Harmonic analysis of the prelude.
-  Tick total_duration_ticks = 0;    ///< Total length in ticks.
+  std::vector<Track> tracks;      ///< MIDI tracks for each voice/manual.
+  HarmonicTimeline timeline;      ///< Harmonic analysis of the prelude.
+  Tick total_duration_ticks = 0;  ///< Total length in ticks.
   bool success = false;
 };
 

@@ -159,31 +159,33 @@ bool MidiReader::parseTrack(const uint8_t* data, size_t size, size_t& offset) {
     uint32_t delta = readVariableLength(data, offset, track_end);
     abs_tick += delta;
 
-    if (offset >= track_end) break;
+    if (offset >= track_end)
+      break;
 
     uint8_t byte = data[offset];
 
     // Meta event
     if (byte == 0xFF) {
       ++offset;  // Skip 0xFF
-      if (offset >= track_end) break;
+      if (offset >= track_end)
+        break;
 
       uint8_t meta_type = data[offset++];
-      if (offset >= track_end) break;
+      if (offset >= track_end)
+        break;
 
       uint32_t meta_len = readVariableLength(data, offset, track_end);
-      if (offset + meta_len > track_end) break;
+      if (offset + meta_len > track_end)
+        break;
 
       if (meta_type == 0x03 && meta_len > 0) {
         // Track Name
-        parsed_track.name.assign(
-            reinterpret_cast<const char*>(data + offset), meta_len);
+        parsed_track.name.assign(reinterpret_cast<const char*>(data + offset), meta_len);
       } else if (meta_type == 0x51 && meta_len == 3) {
         // Tempo
-        uint32_t usec_per_beat =
-            (static_cast<uint32_t>(data[offset]) << 16) |
-            (static_cast<uint32_t>(data[offset + 1]) << 8) |
-             static_cast<uint32_t>(data[offset + 2]);
+        uint32_t usec_per_beat = (static_cast<uint32_t>(data[offset]) << 16) |
+                                 (static_cast<uint32_t>(data[offset + 1]) << 8) |
+                                 static_cast<uint32_t>(data[offset + 2]);
         if (usec_per_beat > 0) {
           midi_.bpm = static_cast<uint16_t>(kMicrosecondsPerMinute / usec_per_beat);
         }
@@ -192,8 +194,7 @@ bool MidiReader::parseTrack(const uint8_t* data, size_t size, size_t& offset) {
         std::string text(reinterpret_cast<const char*>(data + offset), meta_len);
         constexpr const char* kBachPrefix = "BACH:";
         constexpr size_t kPrefixLen = 5;
-        if (text.size() >= kPrefixLen &&
-            text.compare(0, kPrefixLen, kBachPrefix) == 0) {
+        if (text.size() >= kPrefixLen && text.compare(0, kPrefixLen, kBachPrefix) == 0) {
           midi_.metadata = text.substr(kPrefixLen);
         }
       } else if (meta_type == 0x2F) {
@@ -232,7 +233,8 @@ bool MidiReader::parseTrack(const uint8_t* data, size_t size, size_t& offset) {
     // Read data bytes based on message type.
     if (msg_type == 0x90 || msg_type == 0x80) {
       // Note On / Note Off: 2 data bytes
-      if (offset + 1 >= track_end) break;
+      if (offset + 1 >= track_end)
+        break;
       uint8_t pitch = data[offset++] & 0x7F;
       uint8_t velocity = data[offset++] & 0x7F;
 
@@ -261,7 +263,8 @@ bool MidiReader::parseTrack(const uint8_t* data, size_t size, size_t& offset) {
       }
     } else if (msg_type == 0xC0 || msg_type == 0xD0) {
       // Program Change / Channel Pressure: 1 data byte
-      if (offset >= track_end) break;
+      if (offset >= track_end)
+        break;
       uint8_t data1 = data[offset++] & 0x7F;
       if (msg_type == 0xC0) {
         parsed_track.program = data1;
@@ -270,7 +273,8 @@ bool MidiReader::parseTrack(const uint8_t* data, size_t size, size_t& offset) {
     } else {
       // All other channel messages: 2 data bytes
       // (Control Change, Pitch Bend, Key Pressure, etc.)
-      if (offset + 1 >= track_end) break;
+      if (offset + 1 >= track_end)
+        break;
       offset += 2;
     }
   }
@@ -279,10 +283,9 @@ bool MidiReader::parseTrack(const uint8_t* data, size_t size, size_t& offset) {
   offset = track_end;
 
   // Sort notes by start tick.
-  std::sort(parsed_track.notes.begin(), parsed_track.notes.end(),
-            [](const NoteEvent& lhs, const NoteEvent& rhs) {
-              return lhs.start_tick < rhs.start_tick;
-            });
+  std::sort(
+      parsed_track.notes.begin(), parsed_track.notes.end(),
+      [](const NoteEvent& lhs, const NoteEvent& rhs) { return lhs.start_tick < rhs.start_tick; });
 
   midi_.tracks.push_back(std::move(parsed_track));
   return true;

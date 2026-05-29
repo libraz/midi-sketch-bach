@@ -91,8 +91,7 @@ std::vector<NoteEvent> generateTurnThenTrill(const NoteEvent& note, uint8_t uppe
 
 }  // namespace
 
-std::vector<NoteEvent> generateCompoundOrnament(const NoteEvent& note,
-                                                CompoundOrnamentType type,
+std::vector<NoteEvent> generateCompoundOrnament(const NoteEvent& note, CompoundOrnamentType type,
                                                 uint8_t upper_pitch, uint8_t lower_pitch,
                                                 uint8_t speed) {
   // Minimum duration for compound ornaments: one full beat.

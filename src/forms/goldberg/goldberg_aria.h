@@ -37,35 +37,25 @@ class AriaGenerator {
   /// @param time_sig Time signature (3/4 for Sarabande).
   /// @param seed Random seed for deterministic generation.
   /// @return AriaResult with melody, bass notes, and generated theme.
-  AriaResult generate(
-      const GoldbergStructuralGrid& grid,
-      const KeySignature& key,
-      const TimeSignature& time_sig,
-      uint32_t seed) const;
+  AriaResult generate(const GoldbergStructuralGrid& grid, const KeySignature& key,
+                      const TimeSignature& time_sig, uint32_t seed) const;
 
   /// @brief Create da capo (Var 31) by offsetting Var 0 notes.
   /// @param original The original Var 0 AriaResult.
   /// @param tick_offset Tick offset to apply to all notes.
   /// @return New AriaResult with offset notes.
-  static AriaResult createDaCapo(
-      const AriaResult& original,
-      Tick tick_offset);
+  static AriaResult createDaCapo(const AriaResult& original, Tick tick_offset);
 
  private:
   /// @brief Generate bass line from structural grid.
-  std::vector<NoteEvent> generateBassLine(
-      const GoldbergStructuralGrid& grid,
-      const KeySignature& key,
-      const TimeSignature& time_sig,
-      std::mt19937& rng) const;
+  std::vector<NoteEvent> generateBassLine(const GoldbergStructuralGrid& grid,
+                                          const KeySignature& key, const TimeSignature& time_sig,
+                                          std::mt19937& rng) const;
 
   /// @brief Apply ornaments to melody notes with phrase-dependent density.
-  void applyOrnaments(
-      std::vector<NoteEvent>& notes,
-      const GoldbergStructuralGrid& grid,
-      const KeySignature& key,
-      const TimeSignature& time_sig,
-      std::mt19937& rng) const;
+  void applyOrnaments(std::vector<NoteEvent>& notes, const GoldbergStructuralGrid& grid,
+                      const KeySignature& key, const TimeSignature& time_sig,
+                      std::mt19937& rng) const;
 };
 
 }  // namespace bach

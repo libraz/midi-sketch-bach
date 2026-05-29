@@ -53,12 +53,12 @@ constexpr int kScaleMixolydian[7] = {0, 2, 4, 5, 7, 9, 10};
 // ---------------------------------------------------------------------------
 
 /// Note names for pitch classes 0-11 (C=0).
-constexpr const char* kNoteNames[] = {
-    "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"};
+constexpr const char* kNoteNames[] = {"C",  "C#", "D",  "D#", "E",  "F",
+                                      "F#", "G",  "G#", "A",  "A#", "B"};
 
 /// True if the pitch class belongs to C major diatonic scale.
-constexpr bool kDiatonicPitchClass[12] = {
-    true, false, true, false, true, true, false, true, false, true, false, true};
+constexpr bool kDiatonicPitchClass[12] = {true,  false, true,  false, true,  true,
+                                          false, true,  false, true,  false, true};
 
 // ---------------------------------------------------------------------------
 // Organ pitch ranges (MIDI note numbers)
@@ -178,8 +178,10 @@ inline bool isDiatonic(int pitch) {
 /// @param high Maximum MIDI note number.
 /// @return Clamped pitch value.
 inline uint8_t clampPitch(int pitch, uint8_t low, uint8_t high) {
-  if (pitch < static_cast<int>(low)) return low;
-  if (pitch > static_cast<int>(high)) return high;
+  if (pitch < static_cast<int>(low))
+    return low;
+  if (pitch > static_cast<int>(high))
+    return high;
   return static_cast<uint8_t>(pitch);
 }
 
@@ -195,8 +197,7 @@ const int* getScaleIntervals(ScaleType scale);
 /// @param key_offset Semitone offset for key transposition (0=C, 2=D, etc.).
 /// @param scale Scale type (default: Major).
 /// @return MIDI note number.
-int degreeToPitch(int degree, int base_note, int key_offset,
-                  ScaleType scale = ScaleType::Major);
+int degreeToPitch(int degree, int base_note, int key_offset, ScaleType scale = ScaleType::Major);
 
 /// @brief Convert a MIDI note number to a human-readable note name.
 /// @param pitch MIDI note number (0-127).
@@ -248,8 +249,7 @@ const char* intervalToName(int semitones);
 /// @param low_pitch Lowest MIDI pitch to include.
 /// @param high_pitch Highest MIDI pitch to include.
 /// @return Vector of scale-member MIDI pitches in ascending order.
-std::vector<uint8_t> getScaleTones(Key key, bool is_minor, uint8_t low_pitch,
-                                   uint8_t high_pitch);
+std::vector<uint8_t> getScaleTones(Key key, bool is_minor, uint8_t low_pitch, uint8_t high_pitch);
 
 /// @brief Get chord tones as MIDI pitches for a given chord and base octave.
 ///
@@ -266,8 +266,7 @@ std::vector<uint8_t> getChordTones(const struct Chord& chord, int octave);
 /// @param low Lowest MIDI pitch to include.
 /// @param high Highest MIDI pitch to include.
 /// @return Vector of MIDI pitches that are chord tones within the range.
-std::vector<uint8_t> collectChordTonesInRange(const struct Chord& chord,
-                                              uint8_t low, uint8_t high);
+std::vector<uint8_t> collectChordTonesInRange(const struct Chord& chord, uint8_t low, uint8_t high);
 
 // ---------------------------------------------------------------------------
 // Chromatic alteration validation
@@ -286,8 +285,7 @@ struct HarmonicEvent;
 /// @param scale Scale type.
 /// @param harm_ev Pointer to the current harmonic event (may be null).
 /// @return True if the pitch is a permitted chromatic alteration.
-bool isAllowedChromatic(uint8_t pitch, Key key, ScaleType scale,
-                        const HarmonicEvent* harm_ev);
+bool isAllowedChromatic(uint8_t pitch, Key key, ScaleType scale, const HarmonicEvent* harm_ev);
 
 /// @brief Calculate the octave shift needed to bring a pitch difference close to zero.
 /// @param pitch_diff Signed pitch difference in semitones.
@@ -295,8 +293,7 @@ bool isAllowedChromatic(uint8_t pitch, Key key, ScaleType scale,
 ///
 /// Example: nearestOctaveShift(14) -> 12, nearestOctaveShift(-14) -> -12.
 inline int nearestOctaveShift(int pitch_diff) {
-  return (pitch_diff >= 0) ? ((pitch_diff + 6) / 12) * 12
-                           : -(((-pitch_diff + 5) / 12) * 12);
+  return (pitch_diff >= 0) ? ((pitch_diff + 6) / 12) * 12 : -(((-pitch_diff + 5) / 12) * 12);
 }
 
 /// @brief Find the index of the closest pitch in a tone vector.

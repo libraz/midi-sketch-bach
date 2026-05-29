@@ -16,7 +16,9 @@ constexpr int kScaleDegreeCount = 7;
 
 /// @brief Get the number of degrees in a diatonic scale.
 /// @return Always 7.
-inline constexpr int scaleDegreeCount() { return kScaleDegreeCount; }
+inline constexpr int scaleDegreeCount() {
+  return kScaleDegreeCount;
+}
 
 /// @brief Check if a MIDI pitch belongs to a given scale in a given key.
 /// @param pitch MIDI note number (0-127).
@@ -40,8 +42,7 @@ uint8_t nearestScaleTone(uint8_t pitch, Key key, ScaleType scale);
 /// @param scale Scale type.
 /// @param out_degree Output: scale degree (0 = root, 6 = 7th) if found.
 /// @return True if the pitch is a scale tone, false otherwise.
-bool pitchToScaleDegree(uint8_t pitch, Key key, ScaleType scale,
-                        int& out_degree);
+bool pitchToScaleDegree(uint8_t pitch, Key key, ScaleType scale, int& out_degree);
 
 /// @brief Convert a MIDI pitch to an absolute scale degree spanning octaves.
 ///

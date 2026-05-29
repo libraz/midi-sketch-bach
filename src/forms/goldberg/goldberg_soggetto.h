@@ -23,13 +23,12 @@ namespace bach {
 /// variations operating in MelodyMode::Inventio. They are aligned to the
 /// Goldberg 32-bar structural grid.
 struct SoggettoParams {
-  uint8_t length_bars = 2;                 ///< Subject length in bars (1-4).
+  uint8_t length_bars = 2;  ///< Subject length in bars (1-4).
   SubjectCharacter character =
-      SubjectCharacter::Severe;            ///< Character (Severe/Playful/Noble/Restless).
-  const GoldbergStructuralGrid* grid =
-      nullptr;                             ///< Structural grid reference (required).
-  uint8_t start_bar = 1;                   ///< Starting bar (1-based position on grid).
-  int path_candidates = 8;                ///< N candidate count for scoring.
+      SubjectCharacter::Severe;                  ///< Character (Severe/Playful/Noble/Restless).
+  const GoldbergStructuralGrid* grid = nullptr;  ///< Structural grid reference (required).
+  uint8_t start_bar = 1;                         ///< Starting bar (1-based position on grid).
+  int path_candidates = 8;                       ///< N candidate count for scoring.
 };
 
 /// @brief Generates short subjects (soggetti) aligned to the Goldberg structural grid.
@@ -48,10 +47,8 @@ class SoggettoGenerator {
   /// @param time_sig Time signature for bar duration calculation.
   /// @param seed Random seed for deterministic generation.
   /// @return Generated Subject with grid-aligned notes.
-  Subject generate(const SoggettoParams& params,
-                   const KeySignature& key,
-                   const TimeSignature& time_sig,
-                   uint32_t seed) const;
+  Subject generate(const SoggettoParams& params, const KeySignature& key,
+                   const TimeSignature& time_sig, uint32_t seed) const;
 
   /// @brief Score candidate path for structural grid alignment.
   /// @param candidate Candidate note sequence.
@@ -59,20 +56,15 @@ class SoggettoGenerator {
   /// @param key Key signature.
   /// @param time_sig Time signature.
   /// @return Weighted alignment score (higher = better).
-  float scoreGridAlignment(
-      const std::vector<NoteEvent>& candidate,
-      const SoggettoParams& params,
-      const KeySignature& key,
-      const TimeSignature& time_sig) const;
+  float scoreGridAlignment(const std::vector<NoteEvent>& candidate, const SoggettoParams& params,
+                           const KeySignature& key, const TimeSignature& time_sig) const;
 
  private:
   /// @brief Compute goal tone aligned to structural grid positions.
   /// @param params Soggetto parameters.
   /// @param rng RNG for small perturbation.
   /// @return GoalTone with position_ratio guided by Intensification bars.
-  GoalTone computeGridAlignedGoalTone(
-      const SoggettoParams& params,
-      std::mt19937& rng) const;
+  GoalTone computeGridAlignedGoalTone(const SoggettoParams& params, std::mt19937& rng) const;
 
   /// @brief Generate candidate pitch paths using MotifTemplate.
   /// @param params Soggetto parameters.
@@ -81,12 +73,11 @@ class SoggettoGenerator {
   /// @param time_sig Time signature.
   /// @param rng RNG for path generation.
   /// @return Vector of candidate note sequences.
-  std::vector<std::vector<NoteEvent>> generateCandidates(
-      const SoggettoParams& params,
-      const GoalTone& goal,
-      const KeySignature& key,
-      const TimeSignature& time_sig,
-      std::mt19937& rng) const;
+  std::vector<std::vector<NoteEvent>> generateCandidates(const SoggettoParams& params,
+                                                         const GoalTone& goal,
+                                                         const KeySignature& key,
+                                                         const TimeSignature& time_sig,
+                                                         std::mt19937& rng) const;
 };
 
 }  // namespace bach

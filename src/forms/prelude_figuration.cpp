@@ -14,9 +14,9 @@
 namespace bach {
 namespace {
 
-constexpr Tick kBeat = kTicksPerBeat;          // 480
-constexpr Tick kEighth = kTicksPerBeat / 2;    // 240
-constexpr Tick kSixteenth = kTicksPerBeat / 4; // 120
+constexpr Tick kBeat = kTicksPerBeat;           // 480
+constexpr Tick kEighth = kTicksPerBeat / 2;     // 240
+constexpr Tick kSixteenth = kTicksPerBeat / 4;  // 120
 
 // Clamp voice index to available voices.
 uint8_t clampVoice(uint8_t idx, uint8_t num_voices) {
@@ -25,17 +25,18 @@ uint8_t clampVoice(uint8_t idx, uint8_t num_voices) {
 
 // Resolve scale offset: given a chord tone pitch, find the adjacent scale tone
 // at the given offset direction (±1).
-uint8_t resolveScaleOffset(uint8_t chord_pitch, int8_t offset,
-                           const HarmonicEvent& event,
+uint8_t resolveScaleOffset(uint8_t chord_pitch, int8_t offset, const HarmonicEvent& event,
                            uint8_t low, uint8_t high) {
-  if (offset == 0) return chord_pitch;
+  if (offset == 0)
+    return chord_pitch;
 
   ScaleType scale = event.is_minor ? ScaleType::HarmonicMinor : ScaleType::Major;
 
   // Find nearest scale tone in the offset direction.
   for (int step = 1; step <= 3; ++step) {
     int candidate = static_cast<int>(chord_pitch) + offset * step;
-    if (candidate < 0 || candidate > 127) break;
+    if (candidate < 0 || candidate > 127)
+      break;
     auto cu8 = static_cast<uint8_t>(candidate);
     if (scale_util::isScaleTone(cu8, event.key, scale)) {
       return clampPitch(candidate, low, high);
@@ -48,8 +49,7 @@ uint8_t resolveScaleOffset(uint8_t chord_pitch, int8_t offset,
 
 }  // namespace
 
-FigurationTemplate createFigurationTemplate(FigurationType type,
-                                            uint8_t num_voices) {
+FigurationTemplate createFigurationTemplate(FigurationType type, uint8_t num_voices) {
   FigurationTemplate tmpl;
   tmpl.type = type;
   assert(num_voices >= 2);
@@ -63,9 +63,9 @@ FigurationTemplate createFigurationTemplate(FigurationType type,
     case FigurationType::BrokenChord: {
       // BWV 846 pattern: bass sustained full beat, mid onset with bass,
       // soprano enters on second eighth.
-      tmpl.steps.push_back({bass, 0, 0, kBeat});      // bass: full beat
-      tmpl.steps.push_back({mid, 0, 0, kBeat});       // mid: sustain full beat
-      tmpl.steps.push_back({sop, 0, kEighth, kEighth}); // soprano: second eighth
+      tmpl.steps.push_back({bass, 0, 0, kBeat});         // bass: full beat
+      tmpl.steps.push_back({mid, 0, 0, kBeat});          // mid: sustain full beat
+      tmpl.steps.push_back({sop, 0, kEighth, kEighth});  // soprano: second eighth
       break;
     }
 
@@ -81,10 +81,11 @@ FigurationTemplate createFigurationTemplate(FigurationType type,
     case FigurationType::ScaleConnect: {
       // BWV 543 type perpetual motion: 4 sixteenth notes per beat using all voices.
       // sop → mid → sop(passing) → bass: descending sweep each beat.
-      tmpl.steps.push_back({sop, 0, 0, kSixteenth});             // strong: soprano chord tone
-      tmpl.steps.push_back({mid, 0, kSixteenth, kSixteenth});    // mid chord tone
-      tmpl.steps.push_back({sop, -1, kSixteenth * 2, kSixteenth}); // passing: scale step down from soprano
-      tmpl.steps.push_back({bass, 0, kSixteenth * 3, kSixteenth}); // bass chord tone
+      tmpl.steps.push_back({sop, 0, 0, kSixteenth});           // strong: soprano chord tone
+      tmpl.steps.push_back({mid, 0, kSixteenth, kSixteenth});  // mid chord tone
+      tmpl.steps.push_back(
+          {sop, -1, kSixteenth * 2, kSixteenth});  // passing: scale step down from soprano
+      tmpl.steps.push_back({bass, 0, kSixteenth * 3, kSixteenth});  // bass chord tone
       break;
     }
 
@@ -102,8 +103,8 @@ FigurationTemplate createFigurationTemplate(FigurationType type,
   return tmpl;
 }
 
-FigurationTemplate createFigurationTemplateFromSlot(
-    const FigurationSlotPattern& pattern, uint8_t num_voices) {
+FigurationTemplate createFigurationTemplateFromSlot(const FigurationSlotPattern& pattern,
+                                                    uint8_t num_voices) {
   FigurationTemplate tmpl;
   tmpl.type = FigurationType::SlotPattern;
 
@@ -125,15 +126,11 @@ FigurationTemplate createFigurationTemplateFromSlot(
   return tmpl;
 }
 
-FigurationTemplate createFigurationTemplate(FigurationType type,
-                                            uint8_t num_voices,
-                                            std::mt19937& rng,
-                                            float rhythm_variation_prob) {
+FigurationTemplate createFigurationTemplate(FigurationType type, uint8_t num_voices,
+                                            std::mt19937& rng, float rhythm_variation_prob) {
   // For existing types, delegate to original overload.
-  if (type == FigurationType::BrokenChord ||
-      type == FigurationType::Alberti ||
-      type == FigurationType::ScaleConnect ||
-      type == FigurationType::SlotPattern) {
+  if (type == FigurationType::BrokenChord || type == FigurationType::Alberti ||
+      type == FigurationType::ScaleConnect || type == FigurationType::SlotPattern) {
     return createFigurationTemplate(type, num_voices);
   }
 
@@ -157,17 +154,13 @@ FigurationTemplate createFigurationTemplate(FigurationType type,
         // 8th+16th+16th: extended first note for gestural opening.
         tmpl.steps.push_back({sop, 0, 0, kEighth, NCTFunction::ChordTone});
         tmpl.steps.push_back({mid, -1, kEighth, kSixteenth, NCTFunction::Passing});
-        tmpl.steps.push_back({bass, 0, kEighth + kSixteenth, kSixteenth,
-                              NCTFunction::ChordTone});
+        tmpl.steps.push_back({bass, 0, kEighth + kSixteenth, kSixteenth, NCTFunction::ChordTone});
       } else {
         // 4x16th standard: sop->mid->passing->bass descending.
         tmpl.steps.push_back({sop, 0, 0, kSixteenth, NCTFunction::ChordTone});
-        tmpl.steps.push_back({mid, 0, kSixteenth, kSixteenth,
-                              NCTFunction::ChordTone});
-        tmpl.steps.push_back({mid, -1, kSixteenth * 2, kSixteenth,
-                              NCTFunction::Passing});
-        tmpl.steps.push_back({bass, 0, kSixteenth * 3, kSixteenth,
-                              NCTFunction::ChordTone});
+        tmpl.steps.push_back({mid, 0, kSixteenth, kSixteenth, NCTFunction::ChordTone});
+        tmpl.steps.push_back({mid, -1, kSixteenth * 2, kSixteenth, NCTFunction::Passing});
+        tmpl.steps.push_back({bass, 0, kSixteenth * 3, kSixteenth, NCTFunction::ChordTone});
       }
       break;
     }
@@ -178,17 +171,13 @@ FigurationTemplate createFigurationTemplate(FigurationType type,
         Tick dotted = kEighth + kSixteenth;  // 360
         tmpl.steps.push_back({bass, 0, 0, dotted, NCTFunction::ChordTone});
         tmpl.steps.push_back({sop, 0, dotted, kSixteenth, NCTFunction::ChordTone});
-        tmpl.steps.push_back({mid, 0, dotted + kSixteenth, kSixteenth,
-                              NCTFunction::ChordTone});
+        tmpl.steps.push_back({mid, 0, dotted + kSixteenth, kSixteenth, NCTFunction::ChordTone});
       } else {
         // 4x16th: bass->mid->sop->mid arch.
         tmpl.steps.push_back({bass, 0, 0, kSixteenth, NCTFunction::ChordTone});
-        tmpl.steps.push_back({mid, 0, kSixteenth, kSixteenth,
-                              NCTFunction::ChordTone});
-        tmpl.steps.push_back({sop, 0, kSixteenth * 2, kSixteenth,
-                              NCTFunction::ChordTone});
-        tmpl.steps.push_back({mid, 1, kSixteenth * 3, kSixteenth,
-                              NCTFunction::Neighbor});
+        tmpl.steps.push_back({mid, 0, kSixteenth, kSixteenth, NCTFunction::ChordTone});
+        tmpl.steps.push_back({sop, 0, kSixteenth * 2, kSixteenth, NCTFunction::ChordTone});
+        tmpl.steps.push_back({mid, 1, kSixteenth * 3, kSixteenth, NCTFunction::Neighbor});
       }
       break;
     }
@@ -198,17 +187,13 @@ FigurationTemplate createFigurationTemplate(FigurationType type,
         // 16th+8th+16th: syncopated inner voice.
         tmpl.steps.push_back({sop, 0, 0, kSixteenth, NCTFunction::ChordTone});
         tmpl.steps.push_back({bass, 0, kSixteenth, kEighth, NCTFunction::ChordTone});
-        tmpl.steps.push_back({mid, -1, kSixteenth * 3, kSixteenth,
-                              NCTFunction::Neighbor});
+        tmpl.steps.push_back({mid, -1, kSixteenth * 3, kSixteenth, NCTFunction::Neighbor});
       } else {
         // 4x16th: sop->bass->mid->sop(neighbor) alternating.
         tmpl.steps.push_back({sop, 0, 0, kSixteenth, NCTFunction::ChordTone});
-        tmpl.steps.push_back({bass, 0, kSixteenth, kSixteenth,
-                              NCTFunction::ChordTone});
-        tmpl.steps.push_back({mid, 0, kSixteenth * 2, kSixteenth,
-                              NCTFunction::ChordTone});
-        tmpl.steps.push_back({sop, 1, kSixteenth * 3, kSixteenth,
-                              NCTFunction::Neighbor});
+        tmpl.steps.push_back({bass, 0, kSixteenth, kSixteenth, NCTFunction::ChordTone});
+        tmpl.steps.push_back({mid, 0, kSixteenth * 2, kSixteenth, NCTFunction::ChordTone});
+        tmpl.steps.push_back({sop, 1, kSixteenth * 3, kSixteenth, NCTFunction::Neighbor});
       }
       break;
     }
@@ -217,25 +202,21 @@ FigurationTemplate createFigurationTemplate(FigurationType type,
       // Only meaningful with 4+ voices; fall back to Falling3v otherwise.
       if (num_voices < 4) {
         tmpl.type = FigurationType::Falling3v;
-        return createFigurationTemplate(FigurationType::Falling3v, num_voices,
-                                        rng, rhythm_variation_prob);
+        return createFigurationTemplate(FigurationType::Falling3v, num_voices, rng,
+                                        rhythm_variation_prob);
       }
       uint8_t mid2 = clampVoice(2, num_voices);
       if (vary) {
         // 8th+3x16th grouped descent.
         tmpl.steps.push_back({sop, 0, 0, kEighth, NCTFunction::ChordTone});
         tmpl.steps.push_back({mid, -1, kEighth, kSixteenth, NCTFunction::Passing});
-        tmpl.steps.push_back({mid2, 0, kEighth + kSixteenth, kSixteenth,
-                              NCTFunction::ChordTone});
+        tmpl.steps.push_back({mid2, 0, kEighth + kSixteenth, kSixteenth, NCTFunction::ChordTone});
       } else {
         // 4x16th: sop->mid->mid2(passing)->bass.
         tmpl.steps.push_back({sop, 0, 0, kSixteenth, NCTFunction::ChordTone});
-        tmpl.steps.push_back({mid, 0, kSixteenth, kSixteenth,
-                              NCTFunction::ChordTone});
-        tmpl.steps.push_back({mid2, -1, kSixteenth * 2, kSixteenth,
-                              NCTFunction::Passing});
-        tmpl.steps.push_back({bass, 0, kSixteenth * 3, kSixteenth,
-                              NCTFunction::ChordTone});
+        tmpl.steps.push_back({mid, 0, kSixteenth, kSixteenth, NCTFunction::ChordTone});
+        tmpl.steps.push_back({mid2, -1, kSixteenth * 2, kSixteenth, NCTFunction::Passing});
+        tmpl.steps.push_back({bass, 0, kSixteenth * 3, kSixteenth, NCTFunction::ChordTone});
       }
       break;
     }
@@ -248,17 +229,16 @@ FigurationTemplate createFigurationTemplate(FigurationType type,
   return tmpl;
 }
 
-std::vector<NoteEvent> applyFiguration(const ChordVoicing& voicing,
-                                       const FigurationTemplate& tmpl,
-                                       Tick beat_start_tick,
-                                       const HarmonicEvent& event,
+std::vector<NoteEvent> applyFiguration(const ChordVoicing& voicing, const FigurationTemplate& tmpl,
+                                       Tick beat_start_tick, const HarmonicEvent& event,
                                        VoiceRangeFn voice_range) {
   std::vector<NoteEvent> notes;
   notes.reserve(tmpl.steps.size());
 
   for (const auto& step : tmpl.steps) {
     uint8_t vid = step.voice_index;
-    if (vid >= voicing.num_voices) vid = voicing.num_voices - 1;
+    if (vid >= voicing.num_voices)
+      vid = voicing.num_voices - 1;
 
     uint8_t base_pitch = voicing.pitches[vid];
     auto [v_low, v_high] = voice_range(vid);
@@ -296,19 +276,17 @@ std::vector<NoteEvent> applyFiguration(const ChordVoicing& voicing,
   return notes;
 }
 
-std::vector<NoteEvent> applyFiguration(const ChordVoicing& voicing,
-                                       const FigurationTemplate& tmpl,
-                                       Tick beat_start_tick,
-                                       const HarmonicEvent& event,
-                                       VoiceRangeFn voice_range,
-                                       float section_progress,
+std::vector<NoteEvent> applyFiguration(const ChordVoicing& voicing, const FigurationTemplate& tmpl,
+                                       Tick beat_start_tick, const HarmonicEvent& event,
+                                       VoiceRangeFn voice_range, float section_progress,
                                        uint8_t prev_beat_soprano) {
   std::vector<NoteEvent> notes;
   notes.reserve(tmpl.steps.size());
 
   for (const auto& step : tmpl.steps) {
     uint8_t vid = step.voice_index;
-    if (vid >= voicing.num_voices) vid = voicing.num_voices - 1;
+    if (vid >= voicing.num_voices)
+      vid = voicing.num_voices - 1;
 
     uint8_t base_pitch = voicing.pitches[vid];
     auto [v_low, v_high] = voice_range(vid);
@@ -353,8 +331,7 @@ std::vector<NoteEvent> applyFiguration(const ChordVoicing& voicing,
       // to create melodic motion instead of a static repetition.
       if (pitch == prev_beat_soprano && step.scale_offset != 0) {
         int8_t alt_offset = static_cast<int8_t>(-step.scale_offset);
-        uint8_t alt_pitch = resolveScaleOffset(base_pitch, alt_offset, event,
-                                               v_low, v_high);
+        uint8_t alt_pitch = resolveScaleOffset(base_pitch, alt_offset, event, v_low, v_high);
         if (alt_pitch != prev_beat_soprano) {
           pitch = alt_pitch;
         }
@@ -363,14 +340,13 @@ std::vector<NoteEvent> applyFiguration(const ChordVoicing& voicing,
       // Large-leap mitigation: if the interval from prev soprano exceeds 7
       // semitones, try the opposite offset direction for a closer alternative.
       constexpr int kMaxSopranoLeap = 7;
-      int soprano_interval = std::abs(static_cast<int>(pitch) -
-                                      static_cast<int>(prev_beat_soprano));
+      int soprano_interval =
+          std::abs(static_cast<int>(pitch) - static_cast<int>(prev_beat_soprano));
       if (soprano_interval > kMaxSopranoLeap && step.scale_offset != 0) {
         int8_t alt_offset = static_cast<int8_t>(-step.scale_offset);
-        uint8_t alt_pitch = resolveScaleOffset(base_pitch, alt_offset, event,
-                                               v_low, v_high);
-        int alt_interval = std::abs(static_cast<int>(alt_pitch) -
-                                    static_cast<int>(prev_beat_soprano));
+        uint8_t alt_pitch = resolveScaleOffset(base_pitch, alt_offset, event, v_low, v_high);
+        int alt_interval =
+            std::abs(static_cast<int>(alt_pitch) - static_cast<int>(prev_beat_soprano));
         if (alt_interval < soprano_interval) {
           pitch = alt_pitch;
         }
@@ -410,8 +386,7 @@ namespace {
 /// @param low Voice range low bound.
 /// @param high Voice range high bound.
 /// @return Passing tone pitch, or src_pitch if no valid passing tone exists.
-uint8_t computePassingTone(uint8_t src_pitch, uint8_t dst_pitch,
-                           Key key, ScaleType scale,
+uint8_t computePassingTone(uint8_t src_pitch, uint8_t dst_pitch, Key key, ScaleType scale,
                            uint8_t low, uint8_t high) {
   int src_deg = scale_util::pitchToAbsoluteDegree(src_pitch, key, scale);
   int dst_deg = scale_util::pitchToAbsoluteDegree(dst_pitch, key, scale);
@@ -438,16 +413,14 @@ uint8_t computePassingTone(uint8_t src_pitch, uint8_t dst_pitch,
 /// @param low Voice range low bound.
 /// @param high Voice range high bound.
 /// @return Neighbor tone pitch, or chord_pitch if out of range.
-uint8_t computeNeighborTone(uint8_t chord_pitch, int direction,
-                            Key key, ScaleType scale,
+uint8_t computeNeighborTone(uint8_t chord_pitch, int direction, Key key, ScaleType scale,
                             uint8_t low, uint8_t high) {
   int base_deg = scale_util::pitchToAbsoluteDegree(chord_pitch, key, scale);
   int neighbor_deg = base_deg + direction;
   uint8_t neighbor_pitch = scale_util::absoluteDegreeToPitch(neighbor_deg, key, scale);
 
   // Verify the neighbor is actually one step away (sanity check).
-  int semitone_dist = std::abs(static_cast<int>(neighbor_pitch) -
-                               static_cast<int>(chord_pitch));
+  int semitone_dist = std::abs(static_cast<int>(neighbor_pitch) - static_cast<int>(chord_pitch));
   if (semitone_dist > 3) {
     // More than a minor 3rd -- something went wrong, fall back.
     return chord_pitch;
@@ -508,8 +481,10 @@ bool isValidPassingMotion(uint8_t prev, uint8_t passing, uint8_t next) {
   int departure = static_cast<int>(next) - static_cast<int>(passing);
 
   // Both must move in the same direction (both positive or both negative).
-  if (approach == 0 || departure == 0) return false;
-  if ((approach > 0) != (departure > 0)) return false;
+  if (approach == 0 || departure == 0)
+    return false;
+  if ((approach > 0) != (departure > 0))
+    return false;
 
   // Both intervals must be stepwise (at most a minor 3rd = 3 semitones).
   constexpr int kMaxStepSize = 3;
@@ -533,22 +508,21 @@ bool isValidPassingMotion(uint8_t prev, uint8_t passing, uint8_t next) {
 /// @param next_pitch Following pitch (0 if unavailable).
 /// @param has_next Whether next_pitch is available.
 /// @return True if a return-to-origin context exists for this position.
-bool hasNeighborReturnContext(uint8_t original_pitch,
-                              uint8_t prev_pitch, bool has_prev,
+bool hasNeighborReturnContext(uint8_t original_pitch, uint8_t prev_pitch, bool has_prev,
                               uint8_t next_pitch, bool has_next) {
   // Neighbor requires at least one surrounding note to match the origin.
   // The "return" can be on either side: prev==origin (return after) or
   // next==origin (return before). Both are musically valid.
-  if (has_prev && prev_pitch == original_pitch) return true;
-  if (has_next && next_pitch == original_pitch) return true;
+  if (has_prev && prev_pitch == original_pitch)
+    return true;
+  if (has_next && next_pitch == original_pitch)
+    return true;
   // Also allow when one surrounding note is within a half step of origin
   // (accounts for register adjustments and voice leading).
-  if (has_prev && std::abs(static_cast<int>(prev_pitch) -
-                            static_cast<int>(original_pitch)) <= 2) {
+  if (has_prev && std::abs(static_cast<int>(prev_pitch) - static_cast<int>(original_pitch)) <= 2) {
     return true;
   }
-  if (has_next && std::abs(static_cast<int>(next_pitch) -
-                            static_cast<int>(original_pitch)) <= 2) {
+  if (has_next && std::abs(static_cast<int>(next_pitch) - static_cast<int>(original_pitch)) <= 2) {
     return true;
   }
   return false;
@@ -556,29 +530,24 @@ bool hasNeighborReturnContext(uint8_t original_pitch,
 
 }  // namespace
 
-void injectNonChordTones(std::vector<NoteEvent>& notes,
-                         const FigurationTemplate& tmpl,
-                         Tick beat_start_tick,
-                         const HarmonicEvent& event,
-                         VoiceRangeFn voice_range,
-                         std::mt19937& rng,
-                         float nct_probability,
-                         float section_progress,
+void injectNonChordTones(std::vector<NoteEvent>& notes, const FigurationTemplate& tmpl,
+                         Tick beat_start_tick, const HarmonicEvent& event, VoiceRangeFn voice_range,
+                         std::mt19937& rng, float nct_probability, float section_progress,
                          uint8_t prev_beat_last) {
-  if (notes.size() < 2) return;
+  if (notes.size() < 2)
+    return;
 
   ScaleType scale = event.is_minor ? ScaleType::HarmonicMinor : ScaleType::Major;
 
   // Pattern-aware NCT preference: BrokenChord prefers passing tones (fills
   // the gap between chord-tone arpeggiation), Alberti prefers neighbor tones
   // (preserves characteristic oscillation with stepwise embellishment).
-  bool prefer_passing = (tmpl.type == FigurationType::BrokenChord ||
-                         tmpl.type == FigurationType::Falling3v ||
-                         tmpl.type == FigurationType::Falling4v ||
-                         tmpl.type == FigurationType::SlotPattern);
-  bool prefer_neighbor = (tmpl.type == FigurationType::Alberti ||
-                          tmpl.type == FigurationType::Arch3v ||
-                          tmpl.type == FigurationType::Mixed3v);
+  bool prefer_passing =
+      (tmpl.type == FigurationType::BrokenChord || tmpl.type == FigurationType::Falling3v ||
+       tmpl.type == FigurationType::Falling4v || tmpl.type == FigurationType::SlotPattern);
+  bool prefer_neighbor =
+      (tmpl.type == FigurationType::Alberti || tmpl.type == FigurationType::Arch3v ||
+       tmpl.type == FigurationType::Mixed3v);
 
   // Build a mapping from note index to template step for NCT function check.
   // Only modify notes whose template step was originally ChordTone.
@@ -586,12 +555,14 @@ void injectNonChordTones(std::vector<NoteEvent>& notes,
     auto& note = notes[idx];
 
     // Never modify beat-1 notes (strong anchor).
-    if (isStrongBeatPosition(note.start_tick, beat_start_tick)) continue;
+    if (isStrongBeatPosition(note.start_tick, beat_start_tick))
+      continue;
 
     // Check NCT eligibility: all non-beat-start positions are candidates.
     // For sub-beat 2 (eighth midpoint), apply a reduced probability since it
     // is metrically stronger than positions 1 and 3.
-    if (!isNCTEligiblePosition(note.start_tick, beat_start_tick)) continue;
+    if (!isNCTEligiblePosition(note.start_tick, beat_start_tick))
+      continue;
 
     // Only modify notes that were originally pure chord tones from the template.
     // Skip if the template step has an explicit NCT function OR a non-zero
@@ -599,8 +570,7 @@ void injectNonChordTones(std::vector<NoteEvent>& notes,
     // even if nct_function was not explicitly set, e.g., ScaleConnect).
     if (idx < tmpl.steps.size()) {
       const auto& tmpl_step = tmpl.steps[idx];
-      if (tmpl_step.nct_function != NCTFunction::ChordTone ||
-          tmpl_step.scale_offset != 0) {
+      if (tmpl_step.nct_function != NCTFunction::ChordTone || tmpl_step.scale_offset != 0) {
         continue;  // Already a template-level NCT, leave it alone.
       }
     }
@@ -615,7 +585,8 @@ void injectNonChordTones(std::vector<NoteEvent>& notes,
     }
 
     // Probabilistic gate.
-    if (!rng::rollProbability(rng, effective_prob)) continue;
+    if (!rng::rollProbability(rng, effective_prob))
+      continue;
 
     auto [v_low, v_high] = voice_range(note.voice);
     uint8_t original_pitch = note.pitch;
@@ -661,13 +632,12 @@ void injectNonChordTones(std::vector<NoteEvent>& notes,
     // Try passing tone first when pattern prefers it, or when both prev and
     // next are available and the interval is a 3rd or larger.
     if (has_prev && has_next) {
-      int interval_semitones = std::abs(static_cast<int>(prev_pitch) -
-                                        static_cast<int>(next_pitch));
+      int interval_semitones =
+          std::abs(static_cast<int>(prev_pitch) - static_cast<int>(next_pitch));
 
       // Only attempt passing tones when surrounding notes are close enough
       // that a stepwise fill makes musical sense (within an octave).
-      bool should_try_passing =
-          (interval_semitones >= 3 && interval_semitones <= 12);
+      bool should_try_passing = (interval_semitones >= 3 && interval_semitones <= 12);
 
       // For neighbor-preferring patterns, only try passing if interval is wide.
       if (prefer_neighbor && interval_semitones < 5) {
@@ -675,14 +645,13 @@ void injectNonChordTones(std::vector<NoteEvent>& notes,
       }
 
       if (should_try_passing) {
-        uint8_t passing = computePassingTone(prev_pitch, next_pitch,
-                                             event.key, scale, v_low, v_high);
+        uint8_t passing =
+            computePassingTone(prev_pitch, next_pitch, event.key, scale, v_low, v_high);
 
         // Validate: passing tone must create same-direction stepwise motion.
         if (isValidPassingMotion(prev_pitch, passing, next_pitch)) {
           // Also verify the passing tone is not too far from the original pitch.
-          int displacement = std::abs(static_cast<int>(passing) -
-                                      static_cast<int>(original_pitch));
+          int displacement = std::abs(static_cast<int>(passing) - static_cast<int>(original_pitch));
 
           if (passing != prev_pitch && passing != next_pitch &&
               displacement <= kMaxNCTDisplacement) {
@@ -699,8 +668,8 @@ void injectNonChordTones(std::vector<NoteEvent>& notes,
     if (!nct_applied && (has_prev || has_next)) {
       // Verify return-to-origin context: at least one surrounding note should
       // be close to the original pitch (either exact match or within a step).
-      bool neighbor_context_ok = hasNeighborReturnContext(
-          original_pitch, prev_pitch, has_prev, next_pitch, has_next);
+      bool neighbor_context_ok =
+          hasNeighborReturnContext(original_pitch, prev_pitch, has_prev, next_pitch, has_next);
 
       // For passing-preferring patterns, only allow neighbor if context is good.
       if (prefer_passing && !neighbor_context_ok) {
@@ -709,8 +678,8 @@ void injectNonChordTones(std::vector<NoteEvent>& notes,
 
       // Direction bias: section-aware and pattern-aware.
       int direction;
-      if (idx == 0 && prev_beat_last > 0 &&
-          section_progress >= 0.15f && section_progress <= 0.85f) {
+      if (idx == 0 && prev_beat_last > 0 && section_progress >= 0.15f &&
+          section_progress <= 0.85f) {
         // Bias toward the previous beat's last pitch for melodic connection.
         direction = (prev_beat_last < note.pitch) ? -1 : 1;
       } else if (section_progress < 0.15f || section_progress > 0.85f) {
@@ -723,8 +692,8 @@ void injectNonChordTones(std::vector<NoteEvent>& notes,
 
       // For Alberti pattern: diatonic neighbors preferred. Only allow
       // chromatic neighbor at leading tone position (B in C major).
-      uint8_t neighbor = computeNeighborTone(original_pitch, direction,
-                                             event.key, scale, v_low, v_high);
+      uint8_t neighbor =
+          computeNeighborTone(original_pitch, direction, event.key, scale, v_low, v_high);
 
       // Only apply if the neighbor is actually different from the chord tone.
       if (neighbor != original_pitch) {

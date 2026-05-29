@@ -10,12 +10,12 @@ namespace bach {
 GuitarModel::GuitarModel() = default;
 
 bool GuitarModel::isPitchPlayable(uint8_t pitch) const {
-  if (pitch < kLowestPitch || pitch > kHighestPitch) return false;
+  if (pitch < kLowestPitch || pitch > kHighestPitch)
+    return false;
 
   // Check if at least one string can produce this pitch within fret range.
   for (uint8_t idx = 0; idx < kNumStrings; ++idx) {
-    if (pitch >= kOpenStrings[idx] &&
-        pitch <= kOpenStrings[idx] + kMaxFret) {
+    if (pitch >= kOpenStrings[idx] && pitch <= kOpenStrings[idx] + kMaxFret) {
       return true;
     }
   }
@@ -61,16 +61,17 @@ PlayabilityCost GuitarModel::calculateCost(uint8_t pitch) const {
   return result;
 }
 
-bool GuitarModel::findBestString(uint8_t pitch, uint8_t& out_string_idx,
-                                 uint8_t& out_fret) const {
+bool GuitarModel::findBestString(uint8_t pitch, uint8_t& out_string_idx, uint8_t& out_fret) const {
   uint8_t best_fret = std::numeric_limits<uint8_t>::max();
   bool found = false;
 
   for (uint8_t idx = 0; idx < kNumStrings; ++idx) {
-    if (pitch < kOpenStrings[idx]) continue;
+    if (pitch < kOpenStrings[idx])
+      continue;
 
     uint8_t fret_on_string = pitch - kOpenStrings[idx];
-    if (fret_on_string > kMaxFret) continue;
+    if (fret_on_string > kMaxFret)
+      continue;
 
     // Prefer the string that gives the lowest fret number (most comfortable).
     if (fret_on_string < best_fret) {

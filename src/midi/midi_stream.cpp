@@ -79,9 +79,8 @@ void writeBE32(std::vector<uint8_t>& buf, uint32_t value) {
 /// @param offset Byte offset to read from.
 /// @return Decoded 16-bit value.
 uint16_t readBE16(const uint8_t* data, size_t offset) {
-  return static_cast<uint16_t>(
-      (static_cast<uint16_t>(data[offset]) << 8) |
-       static_cast<uint16_t>(data[offset + 1]));
+  return static_cast<uint16_t>((static_cast<uint16_t>(data[offset]) << 8) |
+                               static_cast<uint16_t>(data[offset + 1]));
 }
 
 /// @brief Read a 32-bit big-endian value from a byte buffer.
@@ -91,8 +90,7 @@ uint16_t readBE16(const uint8_t* data, size_t offset) {
 uint32_t readBE32(const uint8_t* data, size_t offset) {
   return (static_cast<uint32_t>(data[offset]) << 24) |
          (static_cast<uint32_t>(data[offset + 1]) << 16) |
-         (static_cast<uint32_t>(data[offset + 2]) << 8) |
-          static_cast<uint32_t>(data[offset + 3]);
+         (static_cast<uint32_t>(data[offset + 2]) << 8) | static_cast<uint32_t>(data[offset + 3]);
 }
 
 }  // namespace bach

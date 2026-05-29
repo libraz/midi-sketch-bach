@@ -36,11 +36,8 @@ class InventionGenerator {
   /// @param time_sig Time signature (3/4 for Var 2).
   /// @param seed Random seed for deterministic generation.
   /// @return InventionResult with notes across 3 voices and success status.
-  InventionResult generate(
-      const GoldbergStructuralGrid& grid,
-      const KeySignature& key,
-      const TimeSignature& time_sig,
-      uint32_t seed) const;
+  InventionResult generate(const GoldbergStructuralGrid& grid, const KeySignature& key,
+                           const TimeSignature& time_sig, uint32_t seed) const;
 };
 
 }  // namespace bach

@@ -114,8 +114,8 @@ TEST(PassacagliaTest, GroundBassWholeNoteDurations) {
   constexpr Tick kExpectedDuration = kTicksPerBar;  // Whole note = 1920.
   for (const auto& note : ground_bass) {
     EXPECT_EQ(note.duration, kExpectedDuration)
-        << "Ground bass note at tick " << note.start_tick
-        << " should be a whole note (" << kExpectedDuration << " ticks)";
+        << "Ground bass note at tick " << note.start_tick << " should be a whole note ("
+        << kExpectedDuration << " ticks)";
   }
 }
 
@@ -139,8 +139,7 @@ TEST(PassacagliaTest, GroundBassIsImmutable) {
 
   // Collect ground bass notes (source == GroundBass) grouped by variation.
   int notes_per_variation = config.ground_bass_bars;
-  Tick variation_duration =
-      static_cast<Tick>(config.ground_bass_bars) * kTicksPerBar;
+  Tick variation_duration = static_cast<Tick>(config.ground_bass_bars) * kTicksPerBar;
 
   // Extract just ground bass notes.
   std::vector<NoteEvent> ground_bass_notes;
@@ -158,21 +157,16 @@ TEST(PassacagliaTest, GroundBassIsImmutable) {
   for (int var_idx = 1; var_idx < config.num_variations; ++var_idx) {
     for (int note_idx = 0; note_idx < notes_per_variation; ++note_idx) {
       size_t first_idx = static_cast<size_t>(note_idx);
-      size_t current_idx =
-          static_cast<size_t>(var_idx * notes_per_variation + note_idx);
+      size_t current_idx = static_cast<size_t>(var_idx * notes_per_variation + note_idx);
 
-      EXPECT_EQ(ground_bass_notes[current_idx].pitch,
-                ground_bass_notes[first_idx].pitch)
-          << "Ground bass pitch differs in variation " << var_idx
-          << " note " << note_idx;
-      EXPECT_EQ(ground_bass_notes[current_idx].duration,
-                ground_bass_notes[first_idx].duration)
-          << "Ground bass duration differs in variation " << var_idx
-          << " note " << note_idx;
+      EXPECT_EQ(ground_bass_notes[current_idx].pitch, ground_bass_notes[first_idx].pitch)
+          << "Ground bass pitch differs in variation " << var_idx << " note " << note_idx;
+      EXPECT_EQ(ground_bass_notes[current_idx].duration, ground_bass_notes[first_idx].duration)
+          << "Ground bass duration differs in variation " << var_idx << " note " << note_idx;
 
       // Verify tick offset is correct for the variation.
-      Tick expected_tick = ground_bass_notes[first_idx].start_tick +
-                           static_cast<Tick>(var_idx) * variation_duration;
+      Tick expected_tick =
+          ground_bass_notes[first_idx].start_tick + static_cast<Tick>(var_idx) * variation_duration;
       EXPECT_EQ(ground_bass_notes[current_idx].start_tick, expected_tick)
           << "Ground bass tick offset wrong in variation " << var_idx;
     }
@@ -185,11 +179,9 @@ TEST(PassacagliaTest, GroundBassPitchInPedalRange) {
 
   for (const auto& note : ground_bass) {
     EXPECT_GE(note.pitch, organ_range::kPedalLow)
-        << "Ground bass pitch " << static_cast<int>(note.pitch)
-        << " below pedal range";
+        << "Ground bass pitch " << static_cast<int>(note.pitch) << " below pedal range";
     EXPECT_LE(note.pitch, organ_range::kPedalHigh)
-        << "Ground bass pitch " << static_cast<int>(note.pitch)
-        << " above pedal range";
+        << "Ground bass pitch " << static_cast<int>(note.pitch) << " above pedal range";
   }
 }
 
@@ -211,8 +203,7 @@ TEST(PassacagliaTest, VariationComplexityIncreases) {
 
   // Analyze the top voice (track 0 / Manual I) which has the primary figuration.
   const auto& top_voice = result.tracks[0];
-  Tick variation_duration =
-      static_cast<Tick>(config.ground_bass_bars) * kTicksPerBar;
+  Tick variation_duration = static_cast<Tick>(config.ground_bass_bars) * kTicksPerBar;
 
   // Collect average durations for each variation stage.
   // Stage 0 (Establish, vars 0-2): quarter notes
@@ -236,14 +227,11 @@ TEST(PassacagliaTest, VariationComplexityIncreases) {
   // Establish stage: variations 0-2.
   double establish_avg = avgDurationInRange(0, 3 * variation_duration);
   // Develop early: variations 3-5.
-  double develop_early_avg =
-      avgDurationInRange(3 * variation_duration, 6 * variation_duration);
+  double develop_early_avg = avgDurationInRange(3 * variation_duration, 6 * variation_duration);
   // Accumulate: variation 9 only (before Resolve simplification).
-  double accumulate_avg =
-      avgDurationInRange(9 * variation_duration, 10 * variation_duration);
+  double accumulate_avg = avgDurationInRange(9 * variation_duration, 10 * variation_duration);
   // Resolve: variations 10-11 (simplification for conclusion).
-  double resolve_avg =
-      avgDurationInRange(10 * variation_duration, 12 * variation_duration);
+  double resolve_avg = avgDurationInRange(10 * variation_duration, 12 * variation_duration);
 
   // Earlier stages should have longer average note durations (less complex).
   EXPECT_GT(establish_avg, develop_early_avg)
@@ -341,8 +329,7 @@ TEST(PassacagliaTest, DeterministicOutput) {
   for (size_t track_idx = 0; track_idx < result1.tracks.size(); ++track_idx) {
     const auto& notes1 = result1.tracks[track_idx].notes;
     const auto& notes2 = result2.tracks[track_idx].notes;
-    ASSERT_EQ(notes1.size(), notes2.size())
-        << "Track " << track_idx << " note count differs";
+    ASSERT_EQ(notes1.size(), notes2.size()) << "Track " << track_idx << " note count differs";
 
     for (size_t note_idx = 0; note_idx < notes1.size(); ++note_idx) {
       EXPECT_EQ(notes1[note_idx].start_tick, notes2[note_idx].start_tick)
@@ -438,8 +425,8 @@ TEST(PassacagliaTest, AllNotesVelocity80) {
   for (const auto& track : result.tracks) {
     for (const auto& note : track.notes) {
       EXPECT_EQ(note.velocity, 80u)
-          << "Organ velocity must be 80, found "
-          << static_cast<int>(note.velocity) << " in track " << track.name;
+          << "Organ velocity must be 80, found " << static_cast<int>(note.velocity) << " in track "
+          << track.name;
     }
   }
 }
@@ -473,8 +460,7 @@ TEST(PassacagliaTest, AllNotesHavePositiveDuration) {
   for (const auto& track : result.tracks) {
     for (const auto& note : track.notes) {
       EXPECT_GT(note.duration, 0u)
-          << "Note at tick " << note.start_tick << " has zero duration in track "
-          << track.name;
+          << "Note at tick " << note.start_tick << " has zero duration in track " << track.name;
     }
   }
 }
@@ -538,8 +524,7 @@ TEST(PassacagliaTest, GroundBassDifferentKeys) {
       break;
     }
   }
-  EXPECT_TRUE(any_different)
-      << "Different keys should produce different ground bass pitches";
+  EXPECT_TRUE(any_different) << "Different keys should produce different ground bass pitches";
 }
 
 // ---------------------------------------------------------------------------
@@ -554,8 +539,7 @@ TEST(PassacagliaTest, GroundBassStartsOnTonic) {
 
     int tonic_class = static_cast<int>(key.tonic);
     int first_class = ground_bass[0].pitch % 12;
-    EXPECT_EQ(first_class, tonic_class)
-        << "First note should be tonic (seed " << seed << ")";
+    EXPECT_EQ(first_class, tonic_class) << "First note should be tonic (seed " << seed << ")";
   }
 }
 
@@ -567,8 +551,7 @@ TEST(PassacagliaTest, GroundBassEndsOnTonic) {
 
     int tonic_class = static_cast<int>(key.tonic);
     int last_class = ground_bass.back().pitch % 12;
-    EXPECT_EQ(last_class, tonic_class)
-        << "Last note should be tonic (seed " << seed << ")";
+    EXPECT_EQ(last_class, tonic_class) << "Last note should be tonic (seed " << seed << ")";
   }
 }
 
@@ -580,9 +563,8 @@ TEST(PassacagliaTest, GroundBassMaxTwoConsecutiveSamePitch) {
     for (size_t idx = 2; idx < ground_bass.size(); ++idx) {
       bool three_same = (ground_bass[idx].pitch == ground_bass[idx - 1].pitch) &&
                         (ground_bass[idx - 1].pitch == ground_bass[idx - 2].pitch);
-      EXPECT_FALSE(three_same)
-          << "Three consecutive same pitches at index " << idx
-          << " (seed " << seed << ")";
+      EXPECT_FALSE(three_same) << "Three consecutive same pitches at index " << idx << " (seed "
+                               << seed << ")";
     }
   }
 }
@@ -599,9 +581,8 @@ TEST(PassacagliaTest, GroundBassNoLeapAboveMajor6th) {
       // may have wider leaps for leading-tone resolution (up to 11 semitones).
       bool is_cadential_tail = (idx >= ground_bass.size() - 2);
       int max_leap = is_cadential_tail ? 12 : 9;
-      EXPECT_LE(interval, max_leap)
-          << "Leap of " << interval << " semitones between index "
-          << (idx - 1) << " and " << idx << " (seed " << seed << ")";
+      EXPECT_LE(interval, max_leap) << "Leap of " << interval << " semitones between index "
+                                    << (idx - 1) << " and " << idx << " (seed " << seed << ")";
     }
   }
 }
@@ -610,18 +591,19 @@ TEST(PassacagliaTest, GroundBassStepwiseRatio) {
   for (uint32_t seed = 0; seed < 10; ++seed) {
     KeySignature key = {Key::C, true};
     auto ground_bass = generatePassacagliaGroundBass(key, 8, seed);
-    if (ground_bass.size() < 2) continue;
+    if (ground_bass.size() < 2)
+      continue;
 
     int stepwise_count = 0;
     int total_intervals = static_cast<int>(ground_bass.size()) - 1;
     for (size_t idx = 1; idx < ground_bass.size(); ++idx) {
       int interval = std::abs(static_cast<int>(ground_bass[idx].pitch) -
                               static_cast<int>(ground_bass[idx - 1].pitch));
-      if (interval <= 2) ++stepwise_count;
+      if (interval <= 2)
+        ++stepwise_count;
     }
     double ratio = static_cast<double>(stepwise_count) / total_intervals;
-    EXPECT_GE(ratio, 0.5)
-        << "Stepwise ratio " << ratio << " below 50% (seed " << seed << ")";
+    EXPECT_GE(ratio, 0.5) << "Stepwise ratio " << ratio << " below 50% (seed " << seed << ")";
   }
 }
 
@@ -636,8 +618,7 @@ TEST(PassacagliaTest, GroundBassVarietyAcrossSeeds) {
     }
     unique_patterns.insert(pattern);
   }
-  EXPECT_GE(unique_patterns.size(), 3u)
-      << "At least 3 distinct patterns expected across 50 seeds";
+  EXPECT_GE(unique_patterns.size(), 3u) << "At least 3 distinct patterns expected across 50 seeds";
 }
 
 TEST(PassacagliaTest, GroundBassTwoConsecutiveOnlyAtOpening) {
@@ -648,8 +629,8 @@ TEST(PassacagliaTest, GroundBassTwoConsecutiveOnlyAtOpening) {
     for (size_t idx = 2; idx < ground_bass.size(); ++idx) {
       // Consecutive same pitch after bar 1 should not occur.
       EXPECT_NE(ground_bass[idx].pitch, ground_bass[idx - 1].pitch)
-          << "Same pitch at index " << (idx - 1) << "-" << idx
-          << " (only allowed at 0-1, seed " << seed << ")";
+          << "Same pitch at index " << (idx - 1) << "-" << idx << " (only allowed at 0-1, seed "
+          << seed << ")";
     }
   }
 }
@@ -741,15 +722,13 @@ TEST(PassacagliaTest, GroundBassCadentialTailNotSmoothed) {
     if (penultimate % 12 == 11) {
       ++leading_tone_count;
       // Final note should be C in low register (C2=36 or C3=48), not C4=60.
-      EXPECT_LE(final_note, 48u)
-          << "Leading tone B(" << static_cast<int>(penultimate)
-          << ")->C should resolve to low register, got "
-          << static_cast<int>(final_note) << " (seed " << seed << ")";
+      EXPECT_LE(final_note, 48u) << "Leading tone B(" << static_cast<int>(penultimate)
+                                 << ")->C should resolve to low register, got "
+                                 << static_cast<int>(final_note) << " (seed " << seed << ")";
     }
   }
   // Sanity: at least some seeds should produce leading-tone cadences.
-  EXPECT_GT(leading_tone_count, 0)
-      << "No leading-tone cadences found in 100 seeds";
+  EXPECT_GT(leading_tone_count, 0) << "No leading-tone cadences found in 100 seeds";
 }
 
 TEST(PassacagliaTest, GroundBassTonicStartEndMultipleKeys) {
@@ -768,11 +747,9 @@ TEST(PassacagliaTest, GroundBassTonicStartEndMultipleKeys) {
       int last_class = ground_bass.back().pitch % 12;
 
       EXPECT_EQ(first_class, tonic_class)
-          << "First note wrong for key " << static_cast<int>(k)
-          << " minor=" << is_minor;
+          << "First note wrong for key " << static_cast<int>(k) << " minor=" << is_minor;
       EXPECT_EQ(last_class, tonic_class)
-          << "Last note wrong for key " << static_cast<int>(k)
-          << " minor=" << is_minor;
+          << "Last note wrong for key " << static_cast<int>(k) << " minor=" << is_minor;
     }
   }
 }
@@ -793,8 +770,7 @@ TEST(PassacagliaTest, GroundBassCadentialLeadingTone) {
     }
   }
   EXPECT_GE(leading_tone_count, 10)
-      << "Leading tone appeared only " << leading_tone_count
-      << "/100 times (expected >= 10%)";
+      << "Leading tone appeared only " << leading_tone_count << "/100 times (expected >= 10%)";
 }
 
 TEST(PassacagliaTest, GroundBassExtendedLength) {
@@ -820,8 +796,7 @@ TEST(PassacagliaTest, GroundBassExtendedLength) {
       bool is_cadential_tail = (idx >= ground_bass.size() - 2);
       int max_leap = is_cadential_tail ? 12 : 9;
       EXPECT_LE(interval, max_leap)
-          << "Leap of " << interval << " at index " << idx
-          << " (seed " << seed << ")";
+          << "Leap of " << interval << " at index " << idx << " (seed " << seed << ")";
     }
 
     // Tonic ending.
@@ -845,8 +820,7 @@ TEST(PassacagliaTest, GroundBassAudible) {
   ASSERT_TRUE(result.success);
 
   const auto& pedal_track = result.tracks.back();
-  Tick variation_duration =
-      static_cast<Tick>(config.ground_bass_bars) * kTicksPerBar;
+  Tick variation_duration = static_cast<Tick>(config.ground_bass_bars) * kTicksPerBar;
 
   // Each variation must have ground bass notes in the pedal track.
   for (int var_idx = 0; var_idx < config.num_variations; ++var_idx) {
@@ -860,8 +834,7 @@ TEST(PassacagliaTest, GroundBassAudible) {
         ++bass_count;
       }
     }
-    EXPECT_GT(bass_count, 0)
-        << "No ground bass notes in variation " << var_idx;
+    EXPECT_GT(bass_count, 0) << "No ground bass notes in variation " << var_idx;
   }
 }
 
@@ -875,7 +848,8 @@ TEST(PassacagliaTest, HarmonyMatchesBassDegree) {
   int total_checked = 0;
 
   for (const auto& note : pedal_track.notes) {
-    if (note.source != BachNoteSource::GroundBass) continue;
+    if (note.source != BachNoteSource::GroundBass)
+      continue;
     const auto& event = result.timeline.getAt(note.start_tick);
 
     // The timeline's bass_pitch should match the ground bass note pitch.
@@ -886,8 +860,7 @@ TEST(PassacagliaTest, HarmonyMatchesBassDegree) {
   }
 
   EXPECT_GT(total_checked, 0) << "No ground bass notes to check";
-  EXPECT_EQ(mismatches, 0)
-      << mismatches << "/" << total_checked << " bass-harmony mismatches";
+  EXPECT_EQ(mismatches, 0) << mismatches << "/" << total_checked << " bass-harmony mismatches";
 }
 
 TEST(PassacagliaTest, StrongBeatConsonance) {
@@ -912,28 +885,27 @@ TEST(PassacagliaTest, StrongBeatConsonance) {
   for (size_t track_idx = 0; track_idx < result.tracks.size() - 1; ++track_idx) {
     for (const auto& note : result.tracks[track_idx].notes) {
       auto it = bass_at_bar.find(note.start_tick);
-      if (it == bass_at_bar.end()) continue;
+      if (it == bass_at_bar.end())
+        continue;
 
       uint8_t bass_pitch = it->second;
-      int interval = std::abs(static_cast<int>(note.pitch) -
-                              static_cast<int>(bass_pitch)) % 12;
+      int interval = std::abs(static_cast<int>(note.pitch) - static_cast<int>(bass_pitch)) % 12;
 
       // Consonant intervals: unison(0), m3(3), M3(4), P4(5), P5(7),
       // m6(8), M6(9), octave(0).
-      bool consonant = (interval == 0 || interval == 3 || interval == 4 ||
-                        interval == 5 || interval == 7 || interval == 8 ||
-                        interval == 9);
-      if (consonant) ++consonant_count;
+      bool consonant = (interval == 0 || interval == 3 || interval == 4 || interval == 5 ||
+                        interval == 7 || interval == 8 || interval == 9);
+      if (consonant)
+        ++consonant_count;
       ++total_checked;
     }
   }
 
   if (total_checked > 0) {
     double ratio = static_cast<double>(consonant_count) / total_checked;
-    EXPECT_GE(ratio, 0.5)
-        << "Only " << (ratio * 100) << "% of strong-beat intervals are "
-        << "consonant with bass (" << consonant_count << "/" << total_checked
-        << ")";
+    EXPECT_GE(ratio, 0.5) << "Only " << (ratio * 100) << "% of strong-beat intervals are "
+                          << "consonant with bass (" << consonant_count << "/" << total_checked
+                          << ")";
   }
 }
 
@@ -947,8 +919,7 @@ TEST(PassacagliaTest, MinVoicesEnforced) {
   PassacagliaResult result = generatePassacaglia(config);
 
   ASSERT_TRUE(result.success);
-  EXPECT_GE(result.tracks.size(), 3u)
-      << "Direct API should clamp to at least 3 voices";
+  EXPECT_GE(result.tracks.size(), 3u) << "Direct API should clamp to at least 3 voices";
 }
 
 // ---------------------------------------------------------------------------
@@ -962,30 +933,23 @@ TEST(PassacagliaTest, NoTripleRepeat) {
     PassacagliaResult result = generatePassacaglia(config);
     ASSERT_TRUE(result.success) << "Generation failed for seed " << seed;
 
-    Tick variation_duration =
-        static_cast<Tick>(config.ground_bass_bars) * kTicksPerBar;
+    Tick variation_duration = static_cast<Tick>(config.ground_bass_bars) * kTicksPerBar;
 
     // Check all upper voice tracks (exclude pedal = last track).
-    for (size_t track_idx = 0; track_idx + 1 < result.tracks.size();
-         ++track_idx) {
+    for (size_t track_idx = 0; track_idx + 1 < result.tracks.size(); ++track_idx) {
       const auto& track_notes = result.tracks[track_idx].notes;
       for (size_t idx = 2; idx < track_notes.size(); ++idx) {
-        bool triple =
-            (track_notes[idx].pitch == track_notes[idx - 1].pitch) &&
-            (track_notes[idx - 1].pitch == track_notes[idx - 2].pitch);
+        bool triple = (track_notes[idx].pitch == track_notes[idx - 1].pitch) &&
+                      (track_notes[idx - 1].pitch == track_notes[idx - 2].pitch);
         if (triple) {
           // Compute variation index and bar for diagnostics.
           Tick tick = track_notes[idx].start_tick;
           int var_idx = static_cast<int>(tick / variation_duration);
-          int bar = static_cast<int>(
-              (tick % variation_duration) / kTicksPerBar);
-          FAIL() << "Triple repeat at seed " << seed
-                 << " track " << track_idx
-                 << " variation " << var_idx
-                 << " bar " << bar
-                 << " tick " << tick
-                 << " pitch " << static_cast<int>(track_notes[idx].pitch)
-                 << " (note indices " << (idx - 2) << "-" << idx << ")";
+          int bar = static_cast<int>((tick % variation_duration) / kTicksPerBar);
+          FAIL() << "Triple repeat at seed " << seed << " track " << track_idx << " variation "
+                 << var_idx << " bar " << bar << " tick " << tick << " pitch "
+                 << static_cast<int>(track_notes[idx].pitch) << " (note indices " << (idx - 2)
+                 << "-" << idx << ")";
         }
       }
     }
@@ -1001,10 +965,10 @@ TEST(PassacagliaTest, GroundBassNotModifiedByRepair) {
 
     for (const auto& track : result.tracks) {
       for (const auto& note : track.notes) {
-        if (note.source != BachNoteSource::GroundBass) continue;
+        if (note.source != BachNoteSource::GroundBass)
+          continue;
         bool has_repair_flag =
-            (note.modified_by &
-             static_cast<uint8_t>(NoteModifiedBy::RepeatedNoteRep)) != 0;
+            (note.modified_by & static_cast<uint8_t>(NoteModifiedBy::RepeatedNoteRep)) != 0;
         EXPECT_FALSE(has_repair_flag)
             << "Ground bass note at tick " << note.start_tick
             << " was modified by repeated note repair (seed " << seed << ")";
@@ -1026,24 +990,20 @@ TEST(PassacagliaTest, DeterminismMultiSeed) {
     ASSERT_EQ(result1.tracks.size(), result2.tracks.size())
         << "Track count differs for seed " << seed;
 
-    for (size_t track_idx = 0; track_idx < result1.tracks.size();
-         ++track_idx) {
+    for (size_t track_idx = 0; track_idx < result1.tracks.size(); ++track_idx) {
       const auto& notes1 = result1.tracks[track_idx].notes;
       const auto& notes2 = result2.tracks[track_idx].notes;
       ASSERT_EQ(notes1.size(), notes2.size())
-          << "Note count differs in track " << track_idx
-          << " for seed " << seed;
+          << "Note count differs in track " << track_idx << " for seed " << seed;
 
       for (size_t note_idx = 0; note_idx < notes1.size(); ++note_idx) {
         EXPECT_EQ(notes1[note_idx].pitch, notes2[note_idx].pitch)
-            << "Pitch mismatch at track " << track_idx
-            << " note " << note_idx << " seed " << seed;
+            << "Pitch mismatch at track " << track_idx << " note " << note_idx << " seed " << seed;
         EXPECT_EQ(notes1[note_idx].start_tick, notes2[note_idx].start_tick)
-            << "Tick mismatch at track " << track_idx
-            << " note " << note_idx << " seed " << seed;
+            << "Tick mismatch at track " << track_idx << " note " << note_idx << " seed " << seed;
         EXPECT_EQ(notes1[note_idx].duration, notes2[note_idx].duration)
-            << "Duration mismatch at track " << track_idx
-            << " note " << note_idx << " seed " << seed;
+            << "Duration mismatch at track " << track_idx << " note " << note_idx << " seed "
+            << seed;
       }
     }
   }

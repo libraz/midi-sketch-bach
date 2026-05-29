@@ -37,10 +37,10 @@ enum class NCTFunction : uint8_t {
 
 /// @brief A single step within a figuration pattern.
 struct FigurationStep {
-  uint8_t voice_index;    ///< Index into ChordVoicing pitches.
-  int8_t scale_offset;    ///< 0=chord tone, +/-1=adjacent scale tone (passing/neighbor).
-  Tick relative_tick;     ///< Offset from beat start (in ticks).
-  Tick duration;          ///< Duration of this note (in ticks).
+  uint8_t voice_index;  ///< Index into ChordVoicing pitches.
+  int8_t scale_offset;  ///< 0=chord tone, +/-1=adjacent scale tone (passing/neighbor).
+  Tick relative_tick;   ///< Offset from beat start (in ticks).
+  Tick duration;        ///< Duration of this note (in ticks).
   NCTFunction nct_function = NCTFunction::ChordTone;  ///< Non-chord-tone function label.
 };
 
@@ -54,8 +54,7 @@ struct FigurationTemplate {
 /// @param type Figuration type.
 /// @param num_voices Number of voices in the voicing (2-5).
 /// @return A template with steps spanning one beat (kTicksPerBeat ticks).
-FigurationTemplate createFigurationTemplate(FigurationType type,
-                                            uint8_t num_voices);
+FigurationTemplate createFigurationTemplate(FigurationType type, uint8_t num_voices);
 
 /// @brief Create a figuration template with rhythm variation support.
 /// @param type Figuration type.
@@ -63,17 +62,15 @@ FigurationTemplate createFigurationTemplate(FigurationType type,
 /// @param rng Random number generator for rhythm variation.
 /// @param rhythm_variation_prob Probability of rhythm variation (0.0-1.0).
 /// @return A template with steps spanning one beat (kTicksPerBeat ticks).
-FigurationTemplate createFigurationTemplate(FigurationType type,
-                                            uint8_t num_voices,
-                                            std::mt19937& rng,
-                                            float rhythm_variation_prob = 0.0f);
+FigurationTemplate createFigurationTemplate(FigurationType type, uint8_t num_voices,
+                                            std::mt19937& rng, float rhythm_variation_prob = 0.0f);
 
 /// @brief Create a figuration template from a vocabulary slot pattern.
 /// @param pattern The slot pattern defining the chord tone ordering.
 /// @param num_voices Number of voices in the voicing (2-5).
 /// @return A template with steps spanning one beat (kTicksPerBeat ticks).
-FigurationTemplate createFigurationTemplateFromSlot(
-    const FigurationSlotPattern& pattern, uint8_t num_voices);
+FigurationTemplate createFigurationTemplateFromSlot(const FigurationSlotPattern& pattern,
+                                                    uint8_t num_voices);
 
 /// @brief Apply a figuration template to a chord voicing, producing NoteEvents.
 ///
@@ -86,10 +83,8 @@ FigurationTemplate createFigurationTemplateFromSlot(
 /// @param event Harmonic event (for key/scale context).
 /// @param voice_range Voice range function for pitch clamping.
 /// @return Vector of NoteEvents with source=PreludeFiguration.
-std::vector<NoteEvent> applyFiguration(const ChordVoicing& voicing,
-                                       const FigurationTemplate& tmpl,
-                                       Tick beat_start_tick,
-                                       const HarmonicEvent& event,
+std::vector<NoteEvent> applyFiguration(const ChordVoicing& voicing, const FigurationTemplate& tmpl,
+                                       Tick beat_start_tick, const HarmonicEvent& event,
                                        VoiceRangeFn voice_range);
 
 /// @brief Apply figuration with section-aware NCT direction bias and inter-beat melodic memory.
@@ -115,12 +110,9 @@ std::vector<NoteEvent> applyFiguration(const ChordVoicing& voicing,
 /// @param section_progress Progress within piece (0.0=start, 1.0=end).
 /// @param prev_beat_soprano Soprano pitch from the previous beat (0=none/first beat).
 /// @return Vector of NoteEvents with source=PreludeFiguration.
-std::vector<NoteEvent> applyFiguration(const ChordVoicing& voicing,
-                                       const FigurationTemplate& tmpl,
-                                       Tick beat_start_tick,
-                                       const HarmonicEvent& event,
-                                       VoiceRangeFn voice_range,
-                                       float section_progress,
+std::vector<NoteEvent> applyFiguration(const ChordVoicing& voicing, const FigurationTemplate& tmpl,
+                                       Tick beat_start_tick, const HarmonicEvent& event,
+                                       VoiceRangeFn voice_range, float section_progress,
                                        uint8_t prev_beat_soprano = 0);
 
 /// @brief Inject passing and neighbor tones into figuration output.
@@ -152,15 +144,10 @@ std::vector<NoteEvent> applyFiguration(const ChordVoicing& voicing,
 ///        When non-zero and the first note has no in-beat predecessor, this pitch
 ///        is used as the "previous pitch" for passing tone computation and biases
 ///        the neighbor tone direction toward it.
-void injectNonChordTones(std::vector<NoteEvent>& notes,
-                         const FigurationTemplate& tmpl,
-                         Tick beat_start_tick,
-                         const HarmonicEvent& event,
-                         VoiceRangeFn voice_range,
-                         std::mt19937& rng,
-                         float nct_probability = 0.40f,
-                         float section_progress = 0.5f,
-                         uint8_t prev_beat_last = 0);
+void injectNonChordTones(std::vector<NoteEvent>& notes, const FigurationTemplate& tmpl,
+                         Tick beat_start_tick, const HarmonicEvent& event, VoiceRangeFn voice_range,
+                         std::mt19937& rng, float nct_probability = 0.40f,
+                         float section_progress = 0.5f, uint8_t prev_beat_last = 0);
 
 }  // namespace bach
 

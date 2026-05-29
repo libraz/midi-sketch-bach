@@ -17,8 +17,6 @@
 #include "solo_string/arch/texture_generator.h"
 #include "solo_string/arch/variation_types.h"
 
-
-
 namespace bach {
 
 namespace {
@@ -29,9 +27,9 @@ namespace {
 
 /// @brief GM program numbers and ranges per instrument type.
 struct InstrumentProfile {
-  uint8_t program;       ///< GM program number (0-indexed).
-  uint8_t register_low;  ///< Lowest playable MIDI pitch.
-  uint8_t register_high; ///< Highest playable MIDI pitch.
+  uint8_t program;        ///< GM program number (0-indexed).
+  uint8_t register_low;   ///< Lowest playable MIDI pitch.
+  uint8_t register_high;  ///< Highest playable MIDI pitch.
 };
 
 /// @brief Get the instrument profile for a given instrument type.
@@ -58,8 +56,6 @@ InstrumentProfile getInstrumentProfile(InstrumentType instrument) {
   }
 }
 
-
-
 /// @brief Select a RhythmProfile based on VariationType and VariationRole.
 ///
 /// Maps variation character to appropriate rhythmic subdivisions with
@@ -82,44 +78,35 @@ InstrumentProfile getInstrumentProfile(InstrumentType instrument) {
 /// @param type The variation's character type.
 /// @param role The variation's structural role.
 /// @return Selected RhythmProfile.
-RhythmProfile selectRhythmProfile(std::mt19937& rng,
-                                   VariationType type,
-                                   VariationRole role) {
+RhythmProfile selectRhythmProfile(std::mt19937& rng, VariationType type, VariationRole role) {
   // Establish: always sparse (QuarterNote or EighthNote).
   if (role == VariationRole::Establish) {
-    return rng::rollProbability(rng, 0.7f) ? RhythmProfile::QuarterNote
-                                            : RhythmProfile::EighthNote;
+    return rng::rollProbability(rng, 0.7f) ? RhythmProfile::QuarterNote : RhythmProfile::EighthNote;
   }
   // Resolve: primarily QuarterNote for finality, occasionally DottedEighth
   // for a graceful closing gesture rather than mechanical uniformity.
   if (role == VariationRole::Resolve) {
     return rng::rollProbability(rng, 0.80f) ? RhythmProfile::QuarterNote
-                                             : RhythmProfile::DottedEighth;
+                                            : RhythmProfile::DottedEighth;
   }
 
   switch (type) {
     case VariationType::Theme:
       return RhythmProfile::QuarterNote;
     case VariationType::Lyrical: {
-      std::vector<RhythmProfile> opts = {
-          RhythmProfile::EighthNote,
-          RhythmProfile::DottedEighth,
-          RhythmProfile::Triplet};
+      std::vector<RhythmProfile> opts = {RhythmProfile::EighthNote, RhythmProfile::DottedEighth,
+                                         RhythmProfile::Triplet};
       std::vector<float> wts = {0.40f, 0.35f, 0.25f};
       return rng::selectWeighted(rng, opts, wts);
     }
     case VariationType::Rhythmic: {
-      std::vector<RhythmProfile> opts = {
-          RhythmProfile::DottedEighth,
-          RhythmProfile::Mixed8th16th,
-          RhythmProfile::Triplet};
+      std::vector<RhythmProfile> opts = {RhythmProfile::DottedEighth, RhythmProfile::Mixed8th16th,
+                                         RhythmProfile::Triplet};
       std::vector<float> wts = {0.35f, 0.40f, 0.25f};
       return rng::selectWeighted(rng, opts, wts);
     }
     case VariationType::Virtuosic: {
-      std::vector<RhythmProfile> opts = {
-          RhythmProfile::Sixteenth,
-          RhythmProfile::Mixed8th16th};
+      std::vector<RhythmProfile> opts = {RhythmProfile::Sixteenth, RhythmProfile::Mixed8th16th};
       std::vector<float> wts = {0.60f, 0.40f};
       return rng::selectWeighted(rng, opts, wts);
     }
@@ -127,10 +114,8 @@ RhythmProfile selectRhythmProfile(std::mt19937& rng,
       // Chordal variations emphasize harmonic weight with broad note values.
       // QuarterNote is the primary choice; DottedEighth provides a stately
       // French overture character. EighthNote only as a light alternative.
-      std::vector<RhythmProfile> opts = {
-          RhythmProfile::QuarterNote,
-          RhythmProfile::DottedEighth,
-          RhythmProfile::EighthNote};
+      std::vector<RhythmProfile> opts = {RhythmProfile::QuarterNote, RhythmProfile::DottedEighth,
+                                         RhythmProfile::EighthNote};
       std::vector<float> wts = {0.50f, 0.30f, 0.20f};
       return rng::selectWeighted(rng, opts, wts);
     }
@@ -207,8 +192,7 @@ TextureType applyTextureArcBias(std::mt19937& rng, TextureType current_texture,
     float override_prob = (arc.double_stop_ratio + arc.chord_ratio - 0.30f) * 0.5f;
     if (rng::rollProbability(rng, override_prob)) {
       return rng::selectWeighted(
-          rng,
-          std::vector<TextureType>{TextureType::ImpliedPolyphony, TextureType::Bariolage},
+          rng, std::vector<TextureType>{TextureType::ImpliedPolyphony, TextureType::Bariolage},
           {0.60f, 0.40f});
     }
   }
@@ -234,14 +218,11 @@ TextureType applyTextureArcBias(std::mt19937& rng, TextureType current_texture,
 /// @param rhythm_profile Selected rhythm profile for this variation.
 /// @param accumulate_index Position within Accumulate block (0-based), or -1 if not Accumulate.
 /// @return Configured TextureContext.
-TextureContext buildTextureContext(const ChaconneVariation& variation,
-                                  Tick offset_tick, Tick bass_length,
-                                  const InstrumentProfile& profile,
-                                  const ClimaxDesign& climax_design,
-                                  const MajorSectionConstraints& major_constraints,
-                                  uint32_t seed,
-                                  RhythmProfile rhythm_profile,
-                                  int accumulate_index) {
+TextureContext buildTextureContext(const ChaconneVariation& variation, Tick offset_tick,
+                                   Tick bass_length, const InstrumentProfile& profile,
+                                   const ClimaxDesign& climax_design,
+                                   const MajorSectionConstraints& major_constraints, uint32_t seed,
+                                   RhythmProfile rhythm_profile, int accumulate_index) {
   TextureContext ctx;
   ctx.texture = variation.primary_texture;
   ctx.key = variation.key;
@@ -264,22 +245,20 @@ TextureContext buildTextureContext(const ChaconneVariation& variation,
 
   // Apply seed-dependent register variation for non-anchor, non-climax variations.
   // Establish, Resolve, and Accumulate retain design-fixed register.
-  if (variation.role != VariationRole::Establish &&
-      variation.role != VariationRole::Resolve &&
+  if (variation.role != VariationRole::Establish && variation.role != VariationRole::Resolve &&
       variation.role != VariationRole::Accumulate) {
     std::mt19937 reg_rng(seed);
     int reg_offset = rng::rollRange(reg_rng, -3, 3);
-    ctx.register_low = static_cast<uint8_t>(clampPitch(
-        static_cast<int>(profile.register_low) + reg_offset,
-        profile.register_low, profile.register_high));
-    ctx.register_high = static_cast<uint8_t>(clampPitch(
-        static_cast<int>(profile.register_high) - std::abs(reg_offset),
-        profile.register_low, profile.register_high));
+    ctx.register_low =
+        static_cast<uint8_t>(clampPitch(static_cast<int>(profile.register_low) + reg_offset,
+                                        profile.register_low, profile.register_high));
+    ctx.register_high = static_cast<uint8_t>(
+        clampPitch(static_cast<int>(profile.register_high) - std::abs(reg_offset),
+                   profile.register_low, profile.register_high));
     // Ensure minimum range of 12 semitones.
     if (ctx.register_high - ctx.register_low < 12) {
-      ctx.register_high = static_cast<uint8_t>(std::min(
-          static_cast<int>(ctx.register_low) + 12,
-          static_cast<int>(profile.register_high)));
+      ctx.register_high = static_cast<uint8_t>(std::min(static_cast<int>(ctx.register_low) + 12,
+                                                        static_cast<int>(profile.register_high)));
     }
   }
 
@@ -299,9 +278,9 @@ TextureContext buildTextureContext(const ChaconneVariation& variation,
         // Build-up: ImpliedPolyphony with slightly narrowed register.
         ctx.texture = TextureType::ImpliedPolyphony;
         ctx.register_low = climax_design.fixed_register_low;
-        ctx.register_high = static_cast<uint8_t>(std::max(
-            static_cast<int>(climax_design.fixed_register_high) - 5,
-            static_cast<int>(climax_design.fixed_register_low) + 12));
+        ctx.register_high =
+            static_cast<uint8_t>(std::max(static_cast<int>(climax_design.fixed_register_high) - 5,
+                                          static_cast<int>(climax_design.fixed_register_low) + 12));
         break;
       case 1:
         // Climax peak: FullChords with full register.
@@ -313,9 +292,9 @@ TextureContext buildTextureContext(const ChaconneVariation& variation,
         break;
       default: {
         // Wind-down: seed-dependent texture, register narrowed from below.
-        ctx.register_low = static_cast<uint8_t>(std::min(
-            static_cast<int>(climax_design.fixed_register_low) + 3,
-            static_cast<int>(climax_design.fixed_register_high) - 12));
+        ctx.register_low = static_cast<uint8_t>(
+            std::min(static_cast<int>(climax_design.fixed_register_low) + 3,
+                     static_cast<int>(climax_design.fixed_register_high) - 12));
         ctx.register_high = climax_design.fixed_register_high;
         // 50/50 between FullChords and ImpliedPolyphony based on seed.
         std::mt19937 accum_rng(seed);
@@ -331,7 +310,6 @@ TextureContext buildTextureContext(const ChaconneVariation& variation,
 
   return ctx;
 }
-
 
 }  // namespace
 
@@ -394,7 +372,8 @@ ChaconneResult generateChaconne(const ChaconneConfig& config) {
   // Step 3-4: Generate each variation.
   // -----------------------------------------------------------------------
   std::vector<NoteEvent> all_notes;
-  size_t estimated_notes = variations.size() *
+  size_t estimated_notes =
+      variations.size() *
       (scheme.size() * 4 + static_cast<size_t>(bass_length / kTicksPerBar) * 12);
   all_notes.reserve(estimated_notes);
 
@@ -413,11 +392,9 @@ ChaconneResult generateChaconne(const ChaconneConfig& config) {
     // Step 4a: Generate bass line from harmonic scheme (role-dependent).
     uint32_t var_seed = rng::splitmix32(seed, static_cast<uint32_t>(var_idx));
 
-    std::vector<NoteEvent> bass_notes = realizeBass(
-        scheme, variation.key, variation.role,
-        profile.register_low, profile.register_high,
-        var_seed,
-        std::max(accumulate_index, 0));
+    std::vector<NoteEvent> bass_notes =
+        realizeBass(scheme, variation.key, variation.role, profile.register_low,
+                    profile.register_high, var_seed, std::max(accumulate_index, 0));
 
     // Offset bass notes to this variation's position.
     for (auto& note : bass_notes) {
@@ -442,18 +419,18 @@ ChaconneResult generateChaconne(const ChaconneConfig& config) {
     // Avoid consecutive identical rhythm profiles to ensure audible contrast
     // between adjacent variations. Re-roll up to 3 times if a conflict is found.
     for (int reroll = 0; reroll < 3; ++reroll) {
-      bool conflicts = (!prev_profiles.empty() && rhythm == prev_profiles.back()) ||
-                       (prev_profiles.size() >= 2 &&
-                        rhythm == prev_profiles[prev_profiles.size() - 2]);
-      if (!conflicts) break;
+      bool conflicts =
+          (!prev_profiles.empty() && rhythm == prev_profiles.back()) ||
+          (prev_profiles.size() >= 2 && rhythm == prev_profiles[prev_profiles.size() - 2]);
+      if (!conflicts)
+        break;
       rhythm = selectRhythmProfile(var_rng, variation.type, variation.role);
     }
     prev_profiles.push_back(rhythm);
 
-    TextureContext ctx = buildTextureContext(
-        variation, offset_tick, bass_length, profile,
-        config.climax, config.major_constraints, var_seed, rhythm,
-        accumulate_index);
+    TextureContext ctx =
+        buildTextureContext(variation, offset_tick, bass_length, profile, config.climax,
+                            config.major_constraints, var_seed, rhythm, accumulate_index);
 
     // Step 4d: Generate texture notes with retry.
     std::vector<NoteEvent> texture_notes;
@@ -494,8 +471,8 @@ ChaconneResult generateChaconne(const ChaconneConfig& config) {
       size_t start_idx = var_idx * events_per_var;
       if (start_idx + events_per_var > all_events.size()) {
         result.success = false;
-        result.error_message = "Variation " + std::to_string(var_idx) +
-            ": insufficient timeline events";
+        result.error_message =
+            "Variation " + std::to_string(var_idx) + ": insufficient timeline events";
         return result;
       }
 
@@ -513,8 +490,8 @@ ChaconneResult generateChaconne(const ChaconneConfig& config) {
       auto integrity_report = scheme.verifyIntegrityReport(var_timeline);
       if (integrity_report.hasCritical()) {
         result.success = false;
-        result.error_message = "Harmonic scheme integrity check failed: " +
-            integrity_report.toJson();
+        result.error_message =
+            "Harmonic scheme integrity check failed: " + integrity_report.toJson();
         return result;
       }
     }
@@ -534,8 +511,7 @@ ChaconneResult generateChaconne(const ChaconneConfig& config) {
   texture_notes.reserve(all_notes.size());
 
   for (auto& note : all_notes) {
-    if (note.source == BachNoteSource::ChaconneBass ||
-        note.source == BachNoteSource::GroundBass) {
+    if (note.source == BachNoteSource::ChaconneBass || note.source == BachNoteSource::GroundBass) {
       bass_notes.push_back(std::move(note));
     } else {
       texture_notes.push_back(std::move(note));
@@ -551,36 +527,36 @@ ChaconneResult generateChaconne(const ChaconneConfig& config) {
   constexpr Tick kChordStagger = 60;  // Matches kMinArticulatedDuration
 
   auto cleanupOverlaps = [](std::vector<NoteEvent>& notes) {
-    if (notes.empty()) return;
+    if (notes.empty())
+      return;
 
     // Step 6a: Remove exact duplicates (same tick, same voice, same pitch).
-    std::sort(notes.begin(), notes.end(),
-              [](const NoteEvent& lhs, const NoteEvent& rhs) {
-                if (lhs.voice != rhs.voice) return lhs.voice < rhs.voice;
-                if (lhs.start_tick != rhs.start_tick) return lhs.start_tick < rhs.start_tick;
-                if (lhs.pitch != rhs.pitch) return lhs.pitch < rhs.pitch;
-                return lhs.duration > rhs.duration;
-              });
-    notes.erase(
-        std::unique(notes.begin(), notes.end(),
-                    [](const NoteEvent& lhs, const NoteEvent& rhs) {
-                      return lhs.voice == rhs.voice &&
-                             lhs.start_tick == rhs.start_tick &&
-                             lhs.pitch == rhs.pitch;
-                    }),
-        notes.end());
+    std::sort(notes.begin(), notes.end(), [](const NoteEvent& lhs, const NoteEvent& rhs) {
+      if (lhs.voice != rhs.voice)
+        return lhs.voice < rhs.voice;
+      if (lhs.start_tick != rhs.start_tick)
+        return lhs.start_tick < rhs.start_tick;
+      if (lhs.pitch != rhs.pitch)
+        return lhs.pitch < rhs.pitch;
+      return lhs.duration > rhs.duration;
+    });
+    notes.erase(std::unique(notes.begin(), notes.end(),
+                            [](const NoteEvent& lhs, const NoteEvent& rhs) {
+                              return lhs.voice == rhs.voice && lhs.start_tick == rhs.start_tick &&
+                                     lhs.pitch == rhs.pitch;
+                            }),
+                notes.end());
 
     // Step 6b: Stagger same-tick notes by kChordStagger ticks each.
-    std::sort(notes.begin(), notes.end(),
-              [](const NoteEvent& lhs, const NoteEvent& rhs) {
-                if (lhs.start_tick != rhs.start_tick) return lhs.start_tick < rhs.start_tick;
-                return lhs.pitch < rhs.pitch;
-              });
+    std::sort(notes.begin(), notes.end(), [](const NoteEvent& lhs, const NoteEvent& rhs) {
+      if (lhs.start_tick != rhs.start_tick)
+        return lhs.start_tick < rhs.start_tick;
+      return lhs.pitch < rhs.pitch;
+    });
     for (size_t idx = 0; idx < notes.size(); /* advanced inside */) {
       Tick group_tick = notes[idx].start_tick;
       size_t group_end = idx + 1;
-      while (group_end < notes.size() &&
-             notes[group_end].start_tick == group_tick) {
+      while (group_end < notes.size() && notes[group_end].start_tick == group_tick) {
         ++group_end;
       }
       size_t group_size = group_end - idx;
@@ -599,16 +575,17 @@ ChaconneResult generateChaconne(const ChaconneConfig& config) {
     }
 
     // Step 6c: Truncate remaining time-based overlaps.
-    std::sort(notes.begin(), notes.end(),
-              [](const NoteEvent& lhs, const NoteEvent& rhs) {
-                if (lhs.start_tick != rhs.start_tick) return lhs.start_tick < rhs.start_tick;
-                return lhs.pitch < rhs.pitch;
-              });
+    std::sort(notes.begin(), notes.end(), [](const NoteEvent& lhs, const NoteEvent& rhs) {
+      if (lhs.start_tick != rhs.start_tick)
+        return lhs.start_tick < rhs.start_tick;
+      return lhs.pitch < rhs.pitch;
+    });
     for (size_t idx = 0; idx + 1 < notes.size(); ++idx) {
       Tick end_tick = notes[idx].start_tick + notes[idx].duration;
       if (end_tick > notes[idx + 1].start_tick) {
         Tick new_dur = notes[idx + 1].start_tick - notes[idx].start_tick;
-        if (new_dur == 0) new_dur = 1;
+        if (new_dur == 0)
+          new_dur = 1;
         notes[idx].duration = new_dur;
         notes[idx].modified_by |= static_cast<uint8_t>(NoteModifiedBy::OverlapTrim);
       }
@@ -622,7 +599,8 @@ ChaconneResult generateChaconne(const ChaconneConfig& config) {
   // Bass notes preserve structural integrity.
   std::sort(texture_notes.begin(), texture_notes.end(),
             [](const NoteEvent& lhs, const NoteEvent& rhs) {
-              if (lhs.start_tick != rhs.start_tick) return lhs.start_tick < rhs.start_tick;
+              if (lhs.start_tick != rhs.start_tick)
+                return lhs.start_tick < rhs.start_tick;
               return lhs.pitch < rhs.pitch;
             });
   for (size_t idx = 1; idx < texture_notes.size(); ++idx) {
@@ -635,7 +613,8 @@ ChaconneResult generateChaconne(const ChaconneConfig& config) {
       for (int oct = 0; oct <= 10; ++oct) {
         int cand = oct * 12 + pc;
         if (cand < static_cast<int>(profile.register_low) ||
-            cand > static_cast<int>(profile.register_high)) continue;
+            cand > static_cast<int>(profile.register_high))
+          continue;
         int dist = std::abs(cand - prev);
         if (dist < best_dist) {
           best_dist = dist;
@@ -652,10 +631,18 @@ ChaconneResult generateChaconne(const ChaconneConfig& config) {
   // -----------------------------------------------------------------------
   std::string instrument_name;
   switch (config.instrument) {
-    case InstrumentType::Violin: instrument_name = "Violin"; break;
-    case InstrumentType::Cello:  instrument_name = "Cello";  break;
-    case InstrumentType::Guitar: instrument_name = "Guitar";  break;
-    default:                     instrument_name = "Solo String"; break;
+    case InstrumentType::Violin:
+      instrument_name = "Violin";
+      break;
+    case InstrumentType::Cello:
+      instrument_name = "Cello";
+      break;
+    case InstrumentType::Guitar:
+      instrument_name = "Guitar";
+      break;
+    default:
+      instrument_name = "Solo String";
+      break;
   }
 
   // Track 0: Bass (channel 0).
@@ -675,11 +662,13 @@ ChaconneResult generateChaconne(const ChaconneConfig& config) {
   Tick total_duration = static_cast<Tick>(variations.size()) * bass_length;
   for (const auto& note : bass_track.notes) {
     Tick note_end = note.start_tick + note.duration;
-    if (note_end > total_duration) total_duration = note_end;
+    if (note_end > total_duration)
+      total_duration = note_end;
   }
   for (const auto& note : texture_track.notes) {
     Tick note_end = note.start_tick + note.duration;
-    if (note_end > total_duration) total_duration = note_end;
+    if (note_end > total_duration)
+      total_duration = note_end;
   }
 
   result.tracks.push_back(std::move(bass_track));

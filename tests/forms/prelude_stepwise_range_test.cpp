@@ -8,15 +8,14 @@
 //   Perpetual motion top voice is naturally high stepwise (continuous runs).
 //   FreeForm has varied passage work with more leaps.
 
-#include "forms/prelude.h"
+#include <gtest/gtest.h>
 
 #include <algorithm>
 #include <cmath>
 #include <vector>
 
-#include <gtest/gtest.h>
-
 #include "core/basic_types.h"
+#include "forms/prelude.h"
 #include "harmony/key.h"
 
 namespace bach {
@@ -30,23 +29,22 @@ namespace {
 /// @param notes The notes to analyze.
 /// @return Ratio of stepwise intervals (interval <= 2 semitones) to total.
 double calculateStepwiseRatio(const std::vector<NoteEvent>& notes) {
-  if (notes.size() < 2) return 0.0;
+  if (notes.size() < 2)
+    return 0.0;
 
   int stepwise_count = 0;
   int total_intervals = 0;
 
   for (size_t i = 1; i < notes.size(); ++i) {
-    int interval = std::abs(static_cast<int>(notes[i].pitch) -
-                            static_cast<int>(notes[i - 1].pitch));
+    int interval =
+        std::abs(static_cast<int>(notes[i].pitch) - static_cast<int>(notes[i - 1].pitch));
     ++total_intervals;
     if (interval <= 2) {
       ++stepwise_count;
     }
   }
 
-  return total_intervals > 0
-             ? static_cast<double>(stepwise_count) / total_intervals
-             : 0.0;
+  return total_intervals > 0 ? static_cast<double>(stepwise_count) / total_intervals : 0.0;
 }
 
 // ---------------------------------------------------------------------------
@@ -71,10 +69,8 @@ TEST(PreludeStepwiseRangeTest, Perpetual_Seed1_TopVoiceStepwiseInRange) {
   ASSERT_GE(result.tracks.size(), 1u);
 
   double ratio = calculateStepwiseRatio(result.tracks[0].notes);
-  EXPECT_GE(ratio, 0.30)
-      << "Perpetual seed 1: stepwise ratio " << ratio << " below 0.30";
-  EXPECT_LE(ratio, 0.95)
-      << "Perpetual seed 1: stepwise ratio " << ratio << " above 0.95";
+  EXPECT_GE(ratio, 0.30) << "Perpetual seed 1: stepwise ratio " << ratio << " below 0.30";
+  EXPECT_LE(ratio, 0.95) << "Perpetual seed 1: stepwise ratio " << ratio << " above 0.95";
 }
 
 TEST(PreludeStepwiseRangeTest, Perpetual_Seed7_TopVoiceStepwiseInRange) {
@@ -91,10 +87,8 @@ TEST(PreludeStepwiseRangeTest, Perpetual_Seed7_TopVoiceStepwiseInRange) {
   ASSERT_GE(result.tracks.size(), 1u);
 
   double ratio = calculateStepwiseRatio(result.tracks[0].notes);
-  EXPECT_GE(ratio, 0.30)
-      << "Perpetual seed 7: stepwise ratio " << ratio << " below 0.30";
-  EXPECT_LE(ratio, 0.95)
-      << "Perpetual seed 7: stepwise ratio " << ratio << " above 0.95";
+  EXPECT_GE(ratio, 0.30) << "Perpetual seed 7: stepwise ratio " << ratio << " below 0.30";
+  EXPECT_LE(ratio, 0.95) << "Perpetual seed 7: stepwise ratio " << ratio << " above 0.95";
 }
 
 TEST(PreludeStepwiseRangeTest, Perpetual_Seed42_TopVoiceStepwiseInRange) {
@@ -111,10 +105,8 @@ TEST(PreludeStepwiseRangeTest, Perpetual_Seed42_TopVoiceStepwiseInRange) {
   ASSERT_GE(result.tracks.size(), 1u);
 
   double ratio = calculateStepwiseRatio(result.tracks[0].notes);
-  EXPECT_GE(ratio, 0.30)
-      << "Perpetual seed 42: stepwise ratio " << ratio << " below 0.30";
-  EXPECT_LE(ratio, 0.95)
-      << "Perpetual seed 42: stepwise ratio " << ratio << " above 0.95";
+  EXPECT_GE(ratio, 0.30) << "Perpetual seed 42: stepwise ratio " << ratio << " below 0.30";
+  EXPECT_LE(ratio, 0.95) << "Perpetual seed 42: stepwise ratio " << ratio << " above 0.95";
 }
 
 // ---------------------------------------------------------------------------
@@ -140,14 +132,12 @@ TEST(PreludeStepwiseRangeTest, FreeForm_MultiSeedStepwiseInRange) {
     ASSERT_GE(result.tracks.size(), 1u);
 
     double ratio = calculateStepwiseRatio(result.tracks[0].notes);
-    EXPECT_GE(ratio, 0.20)
-        << "FreeForm seed " << seed << ": stepwise ratio " << ratio
-        << " below 0.20 (too many leaps)";
+    EXPECT_GE(ratio, 0.20) << "FreeForm seed " << seed << ": stepwise ratio " << ratio
+                           << " below 0.20 (too many leaps)";
     // Phase 6: Threshold relaxed from 0.75 to 0.90 after removing
     // resolveLeaps post-repair. Gravity model integration will improve this.
-    EXPECT_LE(ratio, 0.90)
-        << "FreeForm seed " << seed << ": stepwise ratio " << ratio
-        << " above 0.90 (too few leaps for FreeForm)";
+    EXPECT_LE(ratio, 0.90) << "FreeForm seed " << seed << ": stepwise ratio " << ratio
+                           << " above 0.90 (too few leaps for FreeForm)";
   }
 }
 
@@ -169,18 +159,17 @@ TEST(PreludeStepwiseRangeTest, AllVoices_StepwiseReasonable) {
 
   for (size_t track_idx = 0; track_idx < result.tracks.size(); ++track_idx) {
     const auto& notes = result.tracks[track_idx].notes;
-    if (notes.size() < 4) continue;  // Skip voices with too few notes.
+    if (notes.size() < 4)
+      continue;  // Skip voices with too few notes.
 
     double ratio = calculateStepwiseRatio(notes);
     // All voices should have some stepwise motion (at least 15%).
     // Perpetual top voice can be up to 95% stepwise (continuous runs).
     // Middle/bass voices have more varied motion.
-    EXPECT_GE(ratio, 0.15)
-        << "Track " << track_idx << " stepwise ratio " << ratio
-        << " is unreasonably low";
-    EXPECT_LE(ratio, 0.95)
-        << "Track " << track_idx << " stepwise ratio " << ratio
-        << " is unreasonably high (potential stuck notes)";
+    EXPECT_GE(ratio, 0.15) << "Track " << track_idx << " stepwise ratio " << ratio
+                           << " is unreasonably low";
+    EXPECT_LE(ratio, 0.95) << "Track " << track_idx << " stepwise ratio " << ratio
+                           << " is unreasonably high (potential stuck notes)";
   }
 }
 
@@ -212,8 +201,10 @@ TEST(PreludeStepwiseRangeTest, PerpetualHigherStepwiseThanFreeForm) {
     PreludeResult result_p = generatePrelude(config_p);
     PreludeResult result_f = generatePrelude(config_f);
 
-    if (!result_p.success || !result_f.success) continue;
-    if (result_p.tracks.empty() || result_f.tracks.empty()) continue;
+    if (!result_p.success || !result_f.success)
+      continue;
+    if (result_p.tracks.empty() || result_f.tracks.empty())
+      continue;
 
     perp_total += calculateStepwiseRatio(result_p.tracks[0].notes);
     free_total += calculateStepwiseRatio(result_f.tracks[0].notes);
@@ -223,9 +214,8 @@ TEST(PreludeStepwiseRangeTest, PerpetualHigherStepwiseThanFreeForm) {
   if (count > 0) {
     double perp_avg = perp_total / count;
     double free_avg = free_total / count;
-    EXPECT_GE(perp_avg, free_avg)
-        << "Perpetual avg stepwise (" << perp_avg
-        << ") should be >= FreeForm avg (" << free_avg << ")";
+    EXPECT_GE(perp_avg, free_avg) << "Perpetual avg stepwise (" << perp_avg
+                                  << ") should be >= FreeForm avg (" << free_avg << ")";
   }
 }
 

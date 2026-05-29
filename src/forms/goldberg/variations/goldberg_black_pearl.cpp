@@ -70,8 +70,8 @@ constexpr int kLamentoPhraseGroupCount = 4;
 /// The suspension interval determines which chord tone is suspended.
 enum class ChainType : uint8_t {
   Chain_7_6 = 0,  // 7th resolves to 6th (most common).
-  Chain_4_3,       // 4th resolves to 3rd.
-  Chain_9_8        // 9th resolves to octave.
+  Chain_4_3,      // 4th resolves to 3rd.
+  Chain_9_8       // 9th resolves to octave.
 };
 
 /// @brief Get the suspension interval for a chain type.
@@ -79,10 +79,14 @@ enum class ChainType : uint8_t {
 /// @return Interval in semitones above the resolution pitch.
 int getSuspensionInterval(ChainType type) {
   switch (type) {
-    case ChainType::Chain_7_6: return 2;  // Major 2nd above resolution.
-    case ChainType::Chain_4_3: return 1;  // Minor 2nd above resolution.
-    case ChainType::Chain_9_8: return 2;  // Major 2nd above resolution (octave context).
-    default: return 2;
+    case ChainType::Chain_7_6:
+      return 2;  // Major 2nd above resolution.
+    case ChainType::Chain_4_3:
+      return 1;  // Minor 2nd above resolution.
+    case ChainType::Chain_9_8:
+      return 2;  // Major 2nd above resolution (octave context).
+    default:
+      return 2;
   }
 }
 
@@ -92,9 +96,11 @@ int getSuspensionInterval(ChainType type) {
 ChainType selectChainType(std::mt19937& rng) {
   std::uniform_int_distribution<int> dist(0, 9);
   int val = dist(rng);
-  if (val < 5) return ChainType::Chain_7_6;   // 50%
-  if (val < 8) return ChainType::Chain_4_3;   // 30%
-  return ChainType::Chain_9_8;                 // 20%
+  if (val < 5)
+    return ChainType::Chain_7_6;  // 50%
+  if (val < 8)
+    return ChainType::Chain_4_3;  // 30%
+  return ChainType::Chain_9_8;    // 20%
 }
 
 /// @brief Get the scale step below a pitch in the given key.
@@ -126,12 +132,12 @@ uint8_t scaleStepBelow(uint8_t pitch, const KeySignature& key) {
 /// Slow, sighing figures with descending bias.
 FiguraProfile buildSuspiransProfile() {
   return {
-      FiguraType::Suspirans,   // primary
-      FiguraType::Suspirans,   // secondary (consistent sighing character)
-      1,                       // notes_per_beat (slow Adagio density)
+      FiguraType::Suspirans,  // primary
+      FiguraType::Suspirans,  // secondary (consistent sighing character)
+      1,                      // notes_per_beat (slow Adagio density)
       DirectionBias::Descending,
-      0.5f,                    // chord_tone_ratio (moderate, allow passing tones)
-      0.1f                     // sequence_probability (low, organic)
+      0.5f,  // chord_tone_ratio (moderate, allow passing tones)
+      0.1f   // sequence_probability (low, organic)
   };
 }
 
@@ -142,9 +148,8 @@ FiguraProfile buildSuspiransProfile() {
 // ---------------------------------------------------------------------------
 
 BlackPearlResult BlackPearlGenerator::generate(const GoldbergStructuralGrid& grid,
-                                                const KeySignature& key,
-                                                const TimeSignature& time_sig,
-                                                uint32_t seed) const {
+                                               const KeySignature& key,
+                                               const TimeSignature& time_sig, uint32_t seed) const {
   BlackPearlResult result;
   std::mt19937 rng(seed);
 
@@ -157,8 +162,8 @@ BlackPearlResult BlackPearlGenerator::generate(const GoldbergStructuralGrid& gri
   FigurenGenerator figuren;
   FiguraProfile suspirans_profile = buildSuspiransProfile();
 
-  auto melody = figuren.generate(suspirans_profile, grid, key, time_sig,
-                                  kMelodyVoice, rng(), nullptr, 0.4f);
+  auto melody =
+      figuren.generate(suspirans_profile, grid, key, time_sig, kMelodyVoice, rng(), nullptr, 0.4f);
 
   // Set source and velocity for Adagio character.
   for (auto& note : melody) {
@@ -222,13 +227,13 @@ BlackPearlResult BlackPearlGenerator::generate(const GoldbergStructuralGrid& gri
     // Start pitch: pick a melody-register pitch near the structural bass + octave.
     uint8_t bass_pitch = grid.getStructuralBassPitch(bar_idx);
     // Suspension in melody register: bass pitch + 12 (octave above, in melody range).
-    uint8_t start_pitch = clampPitch(
-        static_cast<int>(bass_pitch) + 12 + 7, kMelodyLow, kMelodyHigh);
+    uint8_t start_pitch =
+        clampPitch(static_cast<int>(bass_pitch) + 12 + 7, kMelodyLow, kMelodyHigh);
 
     Tick chain_start = static_cast<Tick>(bar_idx) * ticks_per_bar;
 
-    auto chain = generateSuspensionChain(start_pitch, chain_length,
-                                          chain_start, beat_duration, key, rng);
+    auto chain =
+        generateSuspensionChain(start_pitch, chain_length, chain_start, beat_duration, key, rng);
     suspension_count += chain_length;
     suspension_notes.insert(suspension_notes.end(), chain.begin(), chain.end());
   }
@@ -245,10 +250,9 @@ BlackPearlResult BlackPearlGenerator::generate(const GoldbergStructuralGrid& gri
   all_notes.insert(all_notes.end(), suspension_notes.begin(), suspension_notes.end());
 
   // Sort by start_tick for consistent ordering.
-  std::sort(all_notes.begin(), all_notes.end(),
-            [](const NoteEvent& lhs, const NoteEvent& rhs) {
-              return lhs.start_tick < rhs.start_tick;
-            });
+  std::sort(all_notes.begin(), all_notes.end(), [](const NoteEvent& lhs, const NoteEvent& rhs) {
+    return lhs.start_tick < rhs.start_tick;
+  });
 
   // Apply binary repeats: ||: A :||: B :||
   Tick section_ticks = static_cast<Tick>(kSectionBars) * ticks_per_bar;
@@ -263,12 +267,8 @@ BlackPearlResult BlackPearlGenerator::generate(const GoldbergStructuralGrid& gri
 // ---------------------------------------------------------------------------
 
 std::vector<NoteEvent> BlackPearlGenerator::generateSuspensionChain(
-    uint8_t start_pitch,
-    int chain_length,
-    Tick start_tick,
-    Tick beat_duration,
-    const KeySignature& key,
-    std::mt19937& rng) const {
+    uint8_t start_pitch, int chain_length, Tick start_tick, Tick beat_duration,
+    const KeySignature& key, std::mt19937& rng) const {
   std::vector<NoteEvent> notes;
   notes.reserve(static_cast<size_t>(chain_length) * 3);
 
@@ -321,8 +321,8 @@ std::vector<NoteEvent> BlackPearlGenerator::generateSuspensionChain(
     // Verify the interval relationship; adjust if needed.
     if (absoluteInterval(current_pitch, resolution_pitch) > 3) {
       // Fallback: resolve by minor 2nd down.
-      resolution_pitch = static_cast<uint8_t>(
-          std::max(0, static_cast<int>(current_pitch) - susp_interval));
+      resolution_pitch =
+          static_cast<uint8_t>(std::max(0, static_cast<int>(current_pitch) - susp_interval));
     }
 
     {
@@ -352,11 +352,9 @@ std::vector<NoteEvent> BlackPearlGenerator::generateSuspensionChain(
 // BlackPearlGenerator::generateLamentoBass
 // ---------------------------------------------------------------------------
 
-std::vector<NoteEvent> BlackPearlGenerator::generateLamentoBass(
-    Tick start_tick,
-    int span_bars,
-    Tick bar_duration,
-    const KeySignature& /*key*/) const {
+std::vector<NoteEvent> BlackPearlGenerator::generateLamentoBass(Tick start_tick, int span_bars,
+                                                                Tick bar_duration,
+                                                                const KeySignature& /*key*/) const {
   std::vector<NoteEvent> notes;
   notes.reserve(kLamentoPitchCount);
 
@@ -394,8 +392,7 @@ std::vector<NoteEvent> BlackPearlGenerator::generateLamentoBass(
 // ---------------------------------------------------------------------------
 
 std::vector<NoteEvent> BlackPearlGenerator::generateStructuralBass(
-    const GoldbergStructuralGrid& grid,
-    const TimeSignature& time_sig,
+    const GoldbergStructuralGrid& grid, const TimeSignature& time_sig,
     const std::vector<bool>& lamento_bars) const {
   std::vector<NoteEvent> bass_notes;
   bass_notes.reserve(kGridBars);
@@ -415,8 +412,7 @@ std::vector<NoteEvent> BlackPearlGenerator::generateStructuralBass(
     int target_center = (kBassLow + kBassHigh) / 2;
     int diff = static_cast<int>(primary_pitch) - target_center;
     int shift = nearestOctaveShift(diff);
-    uint8_t bass_pitch = clampPitch(
-        static_cast<int>(primary_pitch) - shift, kBassLow, kBassHigh);
+    uint8_t bass_pitch = clampPitch(static_cast<int>(primary_pitch) - shift, kBassLow, kBassHigh);
 
     Tick bar_start = static_cast<Tick>(bar_idx) * ticks_per_bar;
 
@@ -443,8 +439,8 @@ std::vector<NoteEvent> BlackPearlGenerator::generateStructuralBass(
       uint8_t res_pitch_raw = bar_info.bass_motion.resolution_pitch.value();
       int res_diff = static_cast<int>(res_pitch_raw) - target_center;
       int res_shift = nearestOctaveShift(res_diff);
-      uint8_t res_pitch = clampPitch(
-          static_cast<int>(res_pitch_raw) - res_shift, kBassLow, kBassHigh);
+      uint8_t res_pitch =
+          clampPitch(static_cast<int>(res_pitch_raw) - res_shift, kBassLow, kBassHigh);
 
       BachNoteOptions res_opts{};
       res_opts.voice = kBassVoice;

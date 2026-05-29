@@ -21,16 +21,20 @@ namespace {
 
 std::pair<uint8_t, uint8_t> testVoiceRange(uint8_t voice_idx) {
   switch (voice_idx) {
-    case 0: return {60, 88};
-    case 1: return {52, 76};
-    case 2: return {48, 64};
-    case 3: return {24, 50};
-    default: return {52, 76};
+    case 0:
+      return {60, 88};
+    case 1:
+      return {52, 76};
+    case 2:
+      return {48, 64};
+    case 3:
+      return {24, 50};
+    default:
+      return {52, 76};
   }
 }
 
-HarmonicEvent makeEvent(Key key, bool is_minor, ChordQuality quality,
-                        uint8_t root_pitch) {
+HarmonicEvent makeEvent(Key key, bool is_minor, ChordQuality quality, uint8_t root_pitch) {
   HarmonicEvent ev;
   ev.key = key;
   ev.is_minor = is_minor;
@@ -76,9 +80,8 @@ TEST(ApplyFigurationTest, BrokenChord_CMajor_AllChordTones) {
   for (const auto& note : notes) {
     int pc = getPitchClass(note.pitch);
     bool is_chord_tone = (pc == 0 || pc == 4 || pc == 7);
-    EXPECT_TRUE(is_chord_tone)
-        << "Pitch " << static_cast<int>(note.pitch) << " (pc=" << pc
-        << ") is not a C major chord tone";
+    EXPECT_TRUE(is_chord_tone) << "Pitch " << static_cast<int>(note.pitch) << " (pc=" << pc
+                               << ") is not a C major chord tone";
   }
 }
 
@@ -100,8 +103,8 @@ TEST(ApplyFigurationTest, BrokenChord_ZeroSimultaneousClash) {
   for (const auto& [tick, pitches] : tick_groups) {
     for (size_t i = 0; i < pitches.size(); ++i) {
       for (size_t j = i + 1; j < pitches.size(); ++j) {
-        int iv = interval_util::compoundToSimple(
-            std::abs(static_cast<int>(pitches[i]) - pitches[j]));
+        int iv =
+            interval_util::compoundToSimple(std::abs(static_cast<int>(pitches[i]) - pitches[j]));
         // M2(2), m2(1), M7(11), m7(10), tritone(6) are clashes.
         if (iv == 1 || iv == 2 || iv == 6 || iv == 10 || iv == 11) {
           ++clash_count;
@@ -161,9 +164,8 @@ TEST(ApplyFigurationTest, ScaleConnect_StrongBeatsAreChordTones) {
     if (tmpl.steps[i].scale_offset == 0 && i < notes.size()) {
       int pc = getPitchClass(notes[i].pitch);
       bool is_chord_tone = (pc == 0 || pc == 4 || pc == 7);
-      EXPECT_TRUE(is_chord_tone)
-          << "Strong beat note pitch=" << static_cast<int>(notes[i].pitch)
-          << " (pc=" << pc << ") not a chord tone";
+      EXPECT_TRUE(is_chord_tone) << "Strong beat note pitch=" << static_cast<int>(notes[i].pitch)
+                                 << " (pc=" << pc << ") not a chord tone";
     }
   }
 }
@@ -197,8 +199,7 @@ TEST(InjectNCTTest, BeatOneNeverModified) {
   injectNonChordTones(notes, tmpl, 0, ev, testVoiceRange, rng, 1.0f, 0.5f);
 
   // The first note (at tick 0 = beat start) must be unchanged.
-  EXPECT_EQ(notes[0].pitch, beat1_pitch)
-      << "Beat-1 note was modified by NCT injection";
+  EXPECT_EQ(notes[0].pitch, beat1_pitch) << "Beat-1 note was modified by NCT injection";
 }
 
 TEST(InjectNCTTest, ZeroProbabilityLeavesNotesUnchanged) {
@@ -274,8 +275,7 @@ TEST(InjectNCTTest, NCTsIntroduceNonChordTonePitches) {
 
   // With probability 1.0 across 20 seeds with 4-note Alberti pattern,
   // we should see at least some non-chord-tone pitches.
-  EXPECT_GT(total_ncts, 0)
-      << "No non-chord-tones produced across 20 seeds with p=1.0";
+  EXPECT_GT(total_ncts, 0) << "No non-chord-tones produced across 20 seeds with p=1.0";
 }
 
 TEST(InjectNCTTest, PassingToneIsBetweenSurroundingNotes) {
@@ -293,11 +293,11 @@ TEST(InjectNCTTest, PassingToneIsBetweenSurroundingNotes) {
     injectNonChordTones(modified, tmpl, 0, ev, testVoiceRange, rng, 1.0f, 0.5f);
 
     for (size_t idx = 1; idx + 1 < modified.size(); ++idx) {
-      if (modified[idx].pitch == original[idx].pitch) continue;
+      if (modified[idx].pitch == original[idx].pitch)
+        continue;
 
       // The modified pitch should be a scale tone.
-      EXPECT_TRUE(
-          scale_util::isScaleTone(modified[idx].pitch, Key::C, ScaleType::Major))
+      EXPECT_TRUE(scale_util::isScaleTone(modified[idx].pitch, Key::C, ScaleType::Major))
           << "Seed " << seed << " index " << idx << " pitch "
           << static_cast<int>(modified[idx].pitch) << " not a scale tone";
     }
@@ -349,10 +349,8 @@ TEST(InjectNCTTest, TimingPreservedAfterInjection) {
   for (size_t idx = 0; idx < notes.size(); ++idx) {
     EXPECT_EQ(notes[idx].start_tick, original[idx].start_tick)
         << "Start tick changed at index " << idx;
-    EXPECT_EQ(notes[idx].duration, original[idx].duration)
-        << "Duration changed at index " << idx;
-    EXPECT_EQ(notes[idx].voice, original[idx].voice)
-        << "Voice changed at index " << idx;
+    EXPECT_EQ(notes[idx].duration, original[idx].duration) << "Duration changed at index " << idx;
+    EXPECT_EQ(notes[idx].voice, original[idx].voice) << "Voice changed at index " << idx;
   }
 }
 
@@ -367,10 +365,8 @@ TEST(InjectNCTTest, MinorKeyProducesMinorScaleTones) {
   injectNonChordTones(notes, tmpl, 0, ev, testVoiceRange, rng, 1.0f, 0.5f);
 
   for (const auto& note : notes) {
-    EXPECT_TRUE(
-        scale_util::isScaleTone(note.pitch, Key::A, ScaleType::HarmonicMinor))
-        << "Pitch " << static_cast<int>(note.pitch)
-        << " is not an A harmonic minor scale tone";
+    EXPECT_TRUE(scale_util::isScaleTone(note.pitch, Key::A, ScaleType::HarmonicMinor))
+        << "Pitch " << static_cast<int>(note.pitch) << " is not an A harmonic minor scale tone";
   }
 }
 
@@ -430,8 +426,7 @@ TEST(InjectNCTTest, DeterministicWithSameSeed) {
 
   ASSERT_EQ(notes1.size(), notes2.size());
   for (size_t idx = 0; idx < notes1.size(); ++idx) {
-    EXPECT_EQ(notes1[idx].pitch, notes2[idx].pitch)
-        << "Non-deterministic result at index " << idx;
+    EXPECT_EQ(notes1[idx].pitch, notes2[idx].pitch) << "Non-deterministic result at index " << idx;
   }
 }
 
@@ -451,15 +446,14 @@ TEST(InjectNCTTest, NCTStepwiseFromNeighbor) {
 
     for (size_t idx = 0; idx < notes.size(); ++idx) {
       if (notes[idx].pitch != original[idx].pitch) {
-        int dist = std::abs(static_cast<int>(notes[idx].pitch) -
-                            static_cast<int>(original[idx].pitch));
+        int dist =
+            std::abs(static_cast<int>(notes[idx].pitch) - static_cast<int>(original[idx].pitch));
         // NCT should be within a minor 3rd of the original (max 3 semitones
         // for diatonic step). Passing tones may be further from the original
         // but should still be between surrounding pitches.
-        EXPECT_LE(dist, 4)
-            << "Seed " << seed << " index " << idx << " distance " << dist
-            << " from original pitch " << static_cast<int>(original[idx].pitch)
-            << " to " << static_cast<int>(notes[idx].pitch);
+        EXPECT_LE(dist, 4) << "Seed " << seed << " index " << idx << " distance " << dist
+                           << " from original pitch " << static_cast<int>(original[idx].pitch)
+                           << " to " << static_cast<int>(notes[idx].pitch);
       }
     }
   }
@@ -478,12 +472,11 @@ TEST(MelodicMemoryTest, ZeroPrevSopranoMatchesBaseOverload) {
 
   auto notes_default = applyFiguration(voicing, tmpl, 0, ev, testVoiceRange, 0.5f);
   auto notes_zero = applyFiguration(voicing, tmpl, 0, ev, testVoiceRange, 0.5f,
-                                     /*prev_beat_soprano=*/0);
+                                    /*prev_beat_soprano=*/0);
 
   ASSERT_EQ(notes_default.size(), notes_zero.size());
   for (size_t idx = 0; idx < notes_default.size(); ++idx) {
-    EXPECT_EQ(notes_default[idx].pitch, notes_zero[idx].pitch)
-        << "Mismatch at index " << idx;
+    EXPECT_EQ(notes_default[idx].pitch, notes_zero[idx].pitch) << "Mismatch at index " << idx;
   }
 }
 
@@ -502,18 +495,17 @@ TEST(MelodicMemoryTest, SameNotePenaltyAvoidsSopranoRepetition) {
   FigurationTemplate tmpl;
   tmpl.type = FigurationType::ScaleConnect;
   tmpl.steps.push_back({0, -1, 0, 120, NCTFunction::Passing});  // sop, offset -1
-  tmpl.steps.push_back({1, 0, 120, 120});                        // mid, chord tone
-  tmpl.steps.push_back({2, 0, 240, 240});                        // bass, chord tone
+  tmpl.steps.push_back({1, 0, 120, 120});                       // mid, chord tone
+  tmpl.steps.push_back({2, 0, 240, 240});                       // bass, chord tone
 
   // First: get pitch without memory.
   auto notes_no_mem = applyFiguration(voicing, tmpl, 0, ev, testVoiceRange, 0.5f,
-                                       /*prev_beat_soprano=*/0);
+                                      /*prev_beat_soprano=*/0);
   uint8_t soprano_no_mem = notes_no_mem[0].pitch;
 
   // Now: set prev_beat_soprano to the same pitch that would be produced.
   // The same-note penalty should try the opposite direction.
-  auto notes_with_mem = applyFiguration(voicing, tmpl, 0, ev, testVoiceRange, 0.5f,
-                                         soprano_no_mem);
+  auto notes_with_mem = applyFiguration(voicing, tmpl, 0, ev, testVoiceRange, 0.5f, soprano_no_mem);
 
   // The soprano with memory should differ (opposite offset direction tried).
   // If it cannot differ (e.g., both directions resolve to the same pitch),
@@ -548,23 +540,22 @@ TEST(MelodicMemoryTest, LargeLeapMitigationPrefersCloserPitch) {
   uint8_t far_prev_soprano = 60;  // C4, 12 semitones below C5.
 
   auto notes_no_mem = applyFiguration(voicing, tmpl, 0, ev, testVoiceRange, 0.5f,
-                                       /*prev_beat_soprano=*/0);
-  auto notes_with_mem = applyFiguration(voicing, tmpl, 0, ev, testVoiceRange, 0.5f,
-                                         far_prev_soprano);
+                                      /*prev_beat_soprano=*/0);
+  auto notes_with_mem =
+      applyFiguration(voicing, tmpl, 0, ev, testVoiceRange, 0.5f, far_prev_soprano);
 
   // With memory from a lower pitch, the opposite offset (+1 instead of -1)
   // should produce a pitch closer to C4 (60). At minimum, the result should
   // be at least as close to far_prev_soprano as the no-memory result, or
   // the same if no better alternative exists.
-  int dist_no_mem = std::abs(static_cast<int>(notes_no_mem[0].pitch) -
-                             static_cast<int>(far_prev_soprano));
-  int dist_with_mem = std::abs(static_cast<int>(notes_with_mem[0].pitch) -
-                               static_cast<int>(far_prev_soprano));
-  EXPECT_LE(dist_with_mem, dist_no_mem)
-      << "Melodic memory did not produce a closer pitch. "
-      << "no_mem=" << static_cast<int>(notes_no_mem[0].pitch)
-      << " with_mem=" << static_cast<int>(notes_with_mem[0].pitch)
-      << " prev=" << static_cast<int>(far_prev_soprano);
+  int dist_no_mem =
+      std::abs(static_cast<int>(notes_no_mem[0].pitch) - static_cast<int>(far_prev_soprano));
+  int dist_with_mem =
+      std::abs(static_cast<int>(notes_with_mem[0].pitch) - static_cast<int>(far_prev_soprano));
+  EXPECT_LE(dist_with_mem, dist_no_mem) << "Melodic memory did not produce a closer pitch. "
+                                        << "no_mem=" << static_cast<int>(notes_no_mem[0].pitch)
+                                        << " with_mem=" << static_cast<int>(notes_with_mem[0].pitch)
+                                        << " prev=" << static_cast<int>(far_prev_soprano);
 }
 
 TEST(MelodicMemoryTest, NonSopranoVoicesUnaffected) {
@@ -575,9 +566,9 @@ TEST(MelodicMemoryTest, NonSopranoVoicesUnaffected) {
   auto tmpl = createFigurationTemplate(FigurationType::Alberti, 3);
 
   auto notes_no_mem = applyFiguration(voicing, tmpl, 0, ev, testVoiceRange, 0.5f,
-                                       /*prev_beat_soprano=*/0);
+                                      /*prev_beat_soprano=*/0);
   auto notes_with_mem = applyFiguration(voicing, tmpl, 0, ev, testVoiceRange, 0.5f,
-                                         /*prev_beat_soprano=*/72);
+                                        /*prev_beat_soprano=*/72);
 
   ASSERT_EQ(notes_no_mem.size(), notes_with_mem.size());
   for (size_t idx = 0; idx < notes_no_mem.size(); ++idx) {
@@ -599,9 +590,9 @@ TEST(MelodicMemoryTest, PrevBeatSopranoDoesNotAffectChordToneSteps) {
 
   // BrokenChord has all chord tone steps (scale_offset == 0).
   auto notes_no_mem = applyFiguration(voicing, tmpl, 0, ev, testVoiceRange, 0.5f,
-                                       /*prev_beat_soprano=*/0);
+                                      /*prev_beat_soprano=*/0);
   auto notes_with_mem = applyFiguration(voicing, tmpl, 0, ev, testVoiceRange, 0.5f,
-                                         /*prev_beat_soprano=*/72);
+                                        /*prev_beat_soprano=*/72);
 
   ASSERT_EQ(notes_no_mem.size(), notes_with_mem.size());
   for (size_t idx = 0; idx < notes_no_mem.size(); ++idx) {
@@ -628,12 +619,11 @@ TEST(NCTMemoryTest, ZeroPrevBeatLastMatchesBaseCall) {
   std::mt19937 rng2(42);
   injectNonChordTones(notes1, tmpl, 0, ev, testVoiceRange, rng1, 0.5f, 0.5f);
   injectNonChordTones(notes2, tmpl, 0, ev, testVoiceRange, rng2, 0.5f, 0.5f,
-                       /*prev_beat_last=*/0);
+                      /*prev_beat_last=*/0);
 
   ASSERT_EQ(notes1.size(), notes2.size());
   for (size_t idx = 0; idx < notes1.size(); ++idx) {
-    EXPECT_EQ(notes1[idx].pitch, notes2[idx].pitch)
-        << "Mismatch at index " << idx;
+    EXPECT_EQ(notes1[idx].pitch, notes2[idx].pitch) << "Mismatch at index " << idx;
   }
 }
 
@@ -652,7 +642,7 @@ TEST(NCTMemoryTest, PrevBeatLastUsedAsContextForFirstNote) {
 
   std::mt19937 rng(42);
   injectNonChordTones(notes, tmpl, 0, ev, testVoiceRange, rng, 1.0f, 0.5f,
-                       /*prev_beat_last=*/65);
+                      /*prev_beat_last=*/65);
 
   EXPECT_EQ(notes.size(), original_count);
   for (const auto& note : notes) {
@@ -673,14 +663,12 @@ TEST(NCTMemoryTest, AllNotesRemainScaleTonesWithMemory) {
     auto notes = applyFiguration(voicing, tmpl, 0, ev, testVoiceRange);
     std::mt19937 rng(seed);
     uint8_t prev_last = static_cast<uint8_t>(60 + (seed % 12));
-    injectNonChordTones(notes, tmpl, 0, ev, testVoiceRange, rng, 1.0f, 0.5f,
-                         prev_last);
+    injectNonChordTones(notes, tmpl, 0, ev, testVoiceRange, rng, 1.0f, 0.5f, prev_last);
 
     for (const auto& note : notes) {
       EXPECT_TRUE(scale_util::isScaleTone(note.pitch, Key::C, ScaleType::Major))
           << "Seed " << seed << " pitch " << static_cast<int>(note.pitch)
-          << " is not a C major scale tone (prev_beat_last="
-          << static_cast<int>(prev_last) << ")";
+          << " is not a C major scale tone (prev_beat_last=" << static_cast<int>(prev_last) << ")";
     }
   }
 }

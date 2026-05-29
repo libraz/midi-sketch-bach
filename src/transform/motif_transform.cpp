@@ -10,11 +10,7 @@
 
 namespace bach {
 
-namespace {
-
-
-
-}  // namespace
+namespace {}  // namespace
 
 std::vector<NoteEvent> invertMelody(const std::vector<NoteEvent>& notes, uint8_t pivot) {
   std::vector<NoteEvent> result;
@@ -29,7 +25,8 @@ std::vector<NoteEvent> invertMelody(const std::vector<NoteEvent>& notes, uint8_t
 }
 
 std::vector<NoteEvent> retrogradeMelody(const std::vector<NoteEvent>& notes, Tick start_tick) {
-  if (notes.empty()) return {};
+  if (notes.empty())
+    return {};
 
   // Collect the original offsets relative to the first note's start_tick and durations.
   // We reverse the note order but preserve the rhythmic structure.
@@ -85,8 +82,10 @@ std::vector<NoteEvent> retrogradeMelody(const std::vector<NoteEvent>& notes, Tic
 
 std::vector<NoteEvent> augmentMelody(const std::vector<NoteEvent>& notes, Tick start_tick,
                                      int factor) {
-  if (notes.empty()) return {};
-  if (factor <= 0) factor = 1;
+  if (notes.empty())
+    return {};
+  if (factor <= 0)
+    factor = 1;
 
   Tick original_start = notes.front().start_tick;
   std::vector<NoteEvent> result;
@@ -106,8 +105,10 @@ std::vector<NoteEvent> augmentMelody(const std::vector<NoteEvent>& notes, Tick s
 
 std::vector<NoteEvent> diminishMelody(const std::vector<NoteEvent>& notes, Tick start_tick,
                                       int factor) {
-  if (notes.empty()) return {};
-  if (factor <= 0) factor = 1;
+  if (notes.empty())
+    return {};
+  if (factor <= 0)
+    factor = 1;
 
   Tick original_start = notes.front().start_tick;
   Tick ufactor = static_cast<Tick>(factor);
@@ -139,7 +140,8 @@ std::vector<NoteEvent> transposeMelody(const std::vector<NoteEvent>& notes, int 
 
 std::vector<NoteEvent> invertMelodyDiatonic(const std::vector<NoteEvent>& notes, uint8_t pivot,
                                             Key key, ScaleType scale) {
-  if (notes.empty()) return {};
+  if (notes.empty())
+    return {};
 
   int pivot_degree = scale_util::pitchToAbsoluteDegree(pivot, key, scale);
 
@@ -157,7 +159,8 @@ std::vector<NoteEvent> invertMelodyDiatonic(const std::vector<NoteEvent>& notes,
 
 std::vector<NoteEvent> transposeMelodyDiatonic(const std::vector<NoteEvent>& notes,
                                                int degree_steps, Key key, ScaleType scale) {
-  if (notes.empty()) return {};
+  if (notes.empty())
+    return {};
 
   std::vector<NoteEvent> result;
   result.reserve(notes.size());
@@ -191,7 +194,8 @@ std::vector<NoteEvent> transposeMelodyDiatonic(const std::vector<NoteEvent>& not
             found_upper = true;
           }
         }
-        if (found_lower && found_upper) break;
+        if (found_lower && found_upper)
+          break;
       }
 
       // Choose candidate that preserves melodic direction.
@@ -200,9 +204,9 @@ std::vector<NoteEvent> transposeMelodyDiatonic(const std::vector<NoteEvent>& not
           int dir = (degree_steps > 0) ? 1 : (degree_steps < 0) ? -1 : 0;
           if (idx > 0) {
             // Use transposed pitches for direction (not original pitches).
-            int local_dir = static_cast<int>(raw_pitch) -
-                            static_cast<int>(prev_pitch);
-            if (local_dir != 0) dir = (local_dir > 0) ? 1 : -1;
+            int local_dir = static_cast<int>(raw_pitch) - static_cast<int>(prev_pitch);
+            if (local_dir != 0)
+              dir = (local_dir > 0) ? 1 : -1;
           }
           if (dir > 0) {
             raw_pitch = upper;

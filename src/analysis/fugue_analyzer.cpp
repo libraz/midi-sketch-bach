@@ -21,19 +21,20 @@ namespace {
 std::vector<NoteEvent> extractVoice(const std::vector<NoteEvent>& notes, VoiceId voice) {
   std::vector<NoteEvent> result;
   for (const auto& note : notes) {
-    if (note.voice == voice) result.push_back(note);
+    if (note.voice == voice)
+      result.push_back(note);
   }
-  std::sort(result.begin(), result.end(),
-            [](const NoteEvent& lhs, const NoteEvent& rhs) {
-              return lhs.start_tick < rhs.start_tick;
-            });
+  std::sort(result.begin(), result.end(), [](const NoteEvent& lhs, const NoteEvent& rhs) {
+    return lhs.start_tick < rhs.start_tick;
+  });
   return result;
 }
 
 /// @brief Compute interval sequence (signed pitch diffs between consecutive notes).
 std::vector<int> intervalSequence(const std::vector<NoteEvent>& sorted_notes) {
   std::vector<int> intervals;
-  if (sorted_notes.size() < 2) return intervals;
+  if (sorted_notes.size() < 2)
+    return intervals;
   intervals.reserve(sorted_notes.size() - 1);
   for (size_t idx = 1; idx < sorted_notes.size(); ++idx) {
     intervals.push_back(static_cast<int>(sorted_notes[idx].pitch) -
@@ -43,15 +44,20 @@ std::vector<int> intervalSequence(const std::vector<NoteEvent>& sorted_notes) {
 }
 
 /// @brief Check if candidate contains the subject interval pattern (sliding window).
-bool matchesIntervalPattern(const std::vector<int>& candidate,
-                            const std::vector<int>& subject, int tolerance = 1) {
-  if (candidate.size() < subject.size()) return false;
+bool matchesIntervalPattern(const std::vector<int>& candidate, const std::vector<int>& subject,
+                            int tolerance = 1) {
+  if (candidate.size() < subject.size())
+    return false;
   for (size_t start = 0; start + subject.size() <= candidate.size(); ++start) {
     bool match = true;
     for (size_t idx = 0; idx < subject.size(); ++idx) {
-      if (std::abs(candidate[start + idx] - subject[idx]) > tolerance) { match = false; break; }
+      if (std::abs(candidate[start + idx] - subject[idx]) > tolerance) {
+        match = false;
+        break;
+      }
     }
-    if (match) return true;
+    if (match)
+      return true;
   }
   return false;
 }
@@ -60,17 +66,20 @@ Tick totalEndTick(const std::vector<NoteEvent>& notes) {
   Tick max_end = 0;
   for (const auto& note : notes) {
     Tick end = note.start_tick + note.duration;
-    if (end > max_end) max_end = end;
+    if (end > max_end)
+      max_end = end;
   }
   return max_end;
 }
 
 int dominantPitchClass(const std::vector<NoteEvent>& notes) {
   uint32_t counts[12] = {};
-  for (const auto& note : notes) counts[getPitchClass(note.pitch)]++;
+  for (const auto& note : notes)
+    counts[getPitchClass(note.pitch)]++;
   int best = 0;
   for (int idx = 1; idx < 12; ++idx) {
-    if (counts[idx] > counts[best]) best = idx;
+    if (counts[idx] > counts[best])
+      best = idx;
   }
   return best;
 }
@@ -78,19 +87,23 @@ int dominantPitchClass(const std::vector<NoteEvent>& notes) {
 std::vector<NoteEvent> notesInRange(const std::vector<NoteEvent>& notes, Tick start, Tick end) {
   std::vector<NoteEvent> result;
   for (const auto& note : notes) {
-    if (note.start_tick >= start && note.start_tick < end) result.push_back(note);
+    if (note.start_tick >= start && note.start_tick < end)
+      result.push_back(note);
   }
   return result;
 }
 
-float clamp01(float val) { return val < 0.0f ? 0.0f : (val > 1.0f ? 1.0f : val); }
+float clamp01(float val) {
+  return val < 0.0f ? 0.0f : (val > 1.0f ? 1.0f : val);
+}
 
 /// @brief Compute the subject's tick duration.
 Tick subjectDuration(const std::vector<NoteEvent>& subject_notes) {
   Tick max_end = 0;
   for (const auto& note : subject_notes) {
     Tick end = note.start_tick + note.duration;
-    if (end > max_end) max_end = end;
+    if (end > max_end)
+      max_end = end;
   }
   return max_end > 0 ? max_end : kTicksPerBar;
 }
@@ -101,12 +114,13 @@ Tick subjectDuration(const std::vector<NoteEvent>& subject_notes) {
 // expositionCompletenessScore
 // ---------------------------------------------------------------------------
 
-float expositionCompletenessScore(const std::vector<NoteEvent>& notes,
-                                  uint8_t num_voices,
+float expositionCompletenessScore(const std::vector<NoteEvent>& notes, uint8_t num_voices,
                                   const std::vector<NoteEvent>& subject_notes) {
-  if (num_voices == 0 || subject_notes.size() < 2) return 0.0f;
+  if (num_voices == 0 || subject_notes.size() < 2)
+    return 0.0f;
   auto subj_ivl = intervalSequence(subject_notes);
-  if (subj_ivl.empty()) return 0.0f;
+  if (subj_ivl.empty())
+    return 0.0f;
 
   Tick expo_end = subjectDuration(subject_notes) * num_voices + kTicksPerBar;
   uint8_t voices_found = 0;
@@ -115,10 +129,13 @@ float expositionCompletenessScore(const std::vector<NoteEvent>& notes,
     auto voice = extractVoice(notes, vid);
     std::vector<NoteEvent> expo_notes;
     for (const auto& note : voice) {
-      if (note.start_tick < expo_end) expo_notes.push_back(note);
+      if (note.start_tick < expo_end)
+        expo_notes.push_back(note);
     }
-    if (expo_notes.size() < subject_notes.size()) continue;
-    if (matchesIntervalPattern(intervalSequence(expo_notes), subj_ivl)) ++voices_found;
+    if (expo_notes.size() < subject_notes.size())
+      continue;
+    if (matchesIntervalPattern(intervalSequence(expo_notes), subj_ivl))
+      ++voices_found;
   }
   return static_cast<float>(voices_found) / static_cast<float>(num_voices);
 }
@@ -128,9 +145,11 @@ float expositionCompletenessScore(const std::vector<NoteEvent>& notes,
 // ---------------------------------------------------------------------------
 
 float tonalPlanScore(const std::vector<NoteEvent>& notes) {
-  if (notes.empty()) return 0.0f;
+  if (notes.empty())
+    return 0.0f;
   Tick end = totalEndTick(notes);
-  if (end == 0) return 0.0f;
+  if (end == 0)
+    return 0.0f;
 
   constexpr int kQuarters = 4;
   Tick qlen = std::max(end / kQuarters, static_cast<Tick>(1));
@@ -147,12 +166,17 @@ float tonalPlanScore(const std::vector<NoteEvent>& notes) {
   int unique = 0;
   bool seen[12] = {};
   for (int qtr = 0; qtr < kQuarters; ++qtr) {
-    if (centers[qtr] >= 0 && !seen[centers[qtr]]) { seen[centers[qtr]] = true; ++unique; }
+    if (centers[qtr] >= 0 && !seen[centers[qtr]]) {
+      seen[centers[qtr]] = true;
+      ++unique;
+    }
   }
 
   float score = clamp01(static_cast<float>(unique) / 4.0f);
-  if (centers[0] >= 0 && centers[0] == centers[kQuarters - 1]) score += 0.15f;  // Tonal return.
-  if (centers[0] >= 0 && centers[1] >= 0 && centers[0] != centers[1]) score += 0.1f;  // Modulation.
+  if (centers[0] >= 0 && centers[0] == centers[kQuarters - 1])
+    score += 0.15f;  // Tonal return.
+  if (centers[0] >= 0 && centers[1] >= 0 && centers[0] != centers[1])
+    score += 0.1f;  // Modulation.
   return clamp01(score);
 }
 
@@ -160,8 +184,7 @@ float tonalPlanScore(const std::vector<NoteEvent>& notes) {
 // analyzeFugue
 // ---------------------------------------------------------------------------
 
-FugueAnalysisResult analyzeFugue(const std::vector<NoteEvent>& notes,
-                                 uint8_t num_voices,
+FugueAnalysisResult analyzeFugue(const std::vector<NoteEvent>& notes, uint8_t num_voices,
                                  const std::vector<NoteEvent>& subject_notes) {
   FugueAnalysisResult result;
   result.exposition_completeness_score =
@@ -175,12 +198,15 @@ FugueAnalysisResult analyzeFugue(const std::vector<NoteEvent>& notes,
     if (answer_voice.size() >= subject_notes.size()) {
       auto ans_ivl = intervalSequence(answer_voice);
       if (matchesIntervalPattern(ans_ivl, subj_ivl, 1)) {
-        int trans = static_cast<int>(answer_voice[0].pitch) -
-                    static_cast<int>(subject_notes[0].pitch);
+        int trans =
+            static_cast<int>(answer_voice[0].pitch) - static_cast<int>(subject_notes[0].pitch);
         int abs_trans = interval_util::compoundToSimple(trans);
-        if (abs_trans == 7 || abs_trans == 5) result.answer_accuracy_score = 1.0f;
-        else if (abs_trans == 0) result.answer_accuracy_score = 0.5f;
-        else result.answer_accuracy_score = 0.3f;
+        if (abs_trans == 7 || abs_trans == 5)
+          result.answer_accuracy_score = 1.0f;
+        else if (abs_trans == 0)
+          result.answer_accuracy_score = 0.5f;
+        else
+          result.answer_accuracy_score = 0.3f;
       }
     }
   }
@@ -202,8 +228,10 @@ FugueAnalysisResult analyzeFugue(const std::vector<NoteEvent>& notes,
         uint32_t voices_with_motif = 0;
         for (uint8_t vid = 0; vid < num_voices; ++vid) {
           auto vpost = extractVoice(post_expo, vid);
-          if (vpost.size() < fragment.size() + 1) continue;
-          if (matchesIntervalPattern(intervalSequence(vpost), fragment, 2)) ++voices_with_motif;
+          if (vpost.size() < fragment.size() + 1)
+            continue;
+          if (matchesIntervalPattern(intervalSequence(vpost), fragment, 2))
+            ++voices_with_motif;
         }
         result.episode_motif_usage_rate =
             clamp01(static_cast<float>(voices_with_motif) / static_cast<float>(num_voices));
@@ -219,7 +247,8 @@ FugueAnalysisResult analyzeFugue(const std::vector<NoteEvent>& notes,
 
 float computeCadenceDetectionRate(const HarmonicTimeline& timeline,
                                   const std::vector<Tick>& section_end_ticks) {
-  if (section_end_ticks.empty()) return 0.0f;
+  if (section_end_ticks.empty())
+    return 0.0f;
 
   auto detected = detectCadences(timeline);
   return cadenceDetectionRate(detected, section_end_ticks);
@@ -230,24 +259,25 @@ float computeCadenceDetectionRate(const HarmonicTimeline& timeline,
 // ---------------------------------------------------------------------------
 
 float computeMotivicUnityScore(const std::vector<NoteEvent>& notes,
-                                const std::vector<NoteEvent>& subject_notes,
-                                uint8_t num_voices) {
-  if (notes.empty() || subject_notes.size() < 4 || num_voices == 0) return 0.0f;
+                               const std::vector<NoteEvent>& subject_notes, uint8_t num_voices) {
+  if (notes.empty() || subject_notes.size() < 4 || num_voices == 0)
+    return 0.0f;
 
   // Extract a 3-interval fragment from the subject (first 4 notes -> 3 intervals).
   auto sorted_subject = subject_notes;
-  std::sort(sorted_subject.begin(), sorted_subject.end(),
-            [](const NoteEvent& lhs, const NoteEvent& rhs) {
-              return lhs.start_tick < rhs.start_tick;
-            });
+  std::sort(
+      sorted_subject.begin(), sorted_subject.end(),
+      [](const NoteEvent& lhs, const NoteEvent& rhs) { return lhs.start_tick < rhs.start_tick; });
   auto full_ivl = intervalSequence(sorted_subject);
-  if (full_ivl.size() < 3) return 0.0f;
+  if (full_ivl.size() < 3)
+    return 0.0f;
 
   std::vector<int> fragment(full_ivl.begin(), full_ivl.begin() + 3);
 
   // Divide piece into 4 equal time quarters.
   Tick end_tick = totalEndTick(notes);
-  if (end_tick == 0) return 0.0f;
+  if (end_tick == 0)
+    return 0.0f;
 
   constexpr int kQuarters = 4;
   Tick quarter_len = std::max(end_tick / kQuarters, static_cast<Tick>(1));
@@ -262,7 +292,8 @@ float computeMotivicUnityScore(const std::vector<NoteEvent>& notes,
 
     for (uint8_t vid = 0; vid < num_voices; ++vid) {
       auto voice_notes = extractVoice(qtr_notes, vid);
-      if (voice_notes.size() < 4) continue;  // Need at least 4 notes for 3 intervals.
+      if (voice_notes.size() < 4)
+        continue;  // Need at least 4 notes for 3 intervals.
       auto voice_ivl = intervalSequence(voice_notes);
       if (matchesIntervalPattern(voice_ivl, fragment, 2)) {
         ++cells_hit;
@@ -277,9 +308,10 @@ float computeMotivicUnityScore(const std::vector<NoteEvent>& notes,
 // computeTonalConsistencyScore
 // ---------------------------------------------------------------------------
 
-float computeTonalConsistencyScore(const std::vector<NoteEvent>& notes,
-                                    Key tonic_key, bool is_minor) {
-  if (notes.empty()) return 0.0f;
+float computeTonalConsistencyScore(const std::vector<NoteEvent>& notes, Key tonic_key,
+                                   bool is_minor) {
+  if (notes.empty())
+    return 0.0f;
 
   // Count pitch class distribution (12 bins).
   uint32_t counts[12] = {};
@@ -288,7 +320,8 @@ float computeTonalConsistencyScore(const std::vector<NoteEvent>& notes,
     counts[getPitchClass(note.pitch)]++;
     ++total_notes;
   }
-  if (total_notes == 0) return 0.0f;
+  if (total_notes == 0)
+    return 0.0f;
 
   const int* scale_offsets = is_minor ? kScaleNaturalMinor : kScaleMajor;
   int tonic_pc = static_cast<int>(tonic_key);
@@ -331,10 +364,10 @@ float computeTonalConsistencyScore(const std::vector<NoteEvent>& notes,
 // ---------------------------------------------------------------------------
 
 float invertibleCounterpointScore(const std::vector<NoteEvent>& subject_notes,
-                                   const std::vector<NoteEvent>& counter_notes,
-                                   uint8_t num_voices) {
+                                  const std::vector<NoteEvent>& counter_notes, uint8_t num_voices) {
   (void)num_voices;  // Inversion analysis is always between two voice parts.
-  if (subject_notes.empty() || counter_notes.empty()) return 1.0f;
+  if (subject_notes.empty() || counter_notes.empty())
+    return 1.0f;
 
   // Create inverted version: swap octave relationship.
   // Original: subject in upper, counter in lower.
@@ -365,14 +398,17 @@ float invertibleCounterpointScore(const std::vector<NoteEvent>& subject_notes,
   Tick total_end = 0;
   for (const auto& note : inverted_notes) {
     Tick end = note.start_tick + note.duration;
-    if (end > total_end) total_end = end;
+    if (end > total_end)
+      total_end = end;
   }
   uint32_t total_beats = static_cast<uint32_t>(total_end / kTicksPerBeat);
-  if (total_beats == 0) return 1.0f;
+  if (total_beats == 0)
+    return 1.0f;
 
   float violation_rate = static_cast<float>(violations) / static_cast<float>(total_beats);
   float score = 1.0f - violation_rate;
-  if (score < 0.0f) score = 0.0f;
+  if (score < 0.0f)
+    score = 0.0f;
   return score;
 }
 

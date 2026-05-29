@@ -1,8 +1,8 @@
 // Tests for DurationScale enum conversion utilities.
 
-#include "core/basic_types.h"
-
 #include <gtest/gtest.h>
+
+#include "core/basic_types.h"
 
 namespace bach {
 namespace {
@@ -58,8 +58,8 @@ TEST(DurationScaleTest, FromStringUnrecognizedDefaultsToShort) {
 // ===========================================================================
 
 TEST(DurationScaleTest, RoundtripAllValues) {
-  for (auto scale : {DurationScale::Short, DurationScale::Medium,
-                     DurationScale::Long, DurationScale::Full}) {
+  for (auto scale :
+       {DurationScale::Short, DurationScale::Medium, DurationScale::Long, DurationScale::Full}) {
     EXPECT_EQ(durationScaleFromString(durationScaleToString(scale)), scale);
   }
 }

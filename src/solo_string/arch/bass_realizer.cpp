@@ -45,8 +45,8 @@ namespace {
 /// @param bass_octave The octave for root placement (MIDI octave numbering).
 /// @return Root MIDI pitch clamped to [0, 127].
 int computeRootPitch(const SchemeEntry& entry, const KeySignature& key, int bass_octave) {
-  uint8_t semitone_offset = key.is_minor ? degreeMinorSemitones(entry.degree)
-                                         : degreeSemitones(entry.degree);
+  uint8_t semitone_offset =
+      key.is_minor ? degreeMinorSemitones(entry.degree) : degreeSemitones(entry.degree);
   return (bass_octave + 1) * 12 + static_cast<int>(key.tonic) + semitone_offset;
 }
 
@@ -95,7 +95,8 @@ std::vector<int> getChordPitches(int root_pitch, ChordQuality quality) {
 /// @return Octave number suitable for root placement.
 int bassOctaveFromProfile(const BassRegisterProfile& profile) {
   // Place the bass in the octave that centers within the register.
-  int mid = (static_cast<int>(profile.effective_low) + static_cast<int>(profile.effective_high)) / 2;
+  int mid =
+      (static_cast<int>(profile.effective_low) + static_cast<int>(profile.effective_high)) / 2;
   return (mid / 12) - 1;
 }
 
@@ -151,9 +152,8 @@ BassRealizationStyle getRealizationStyle(VariationRole role) {
 // Public: getBassRegisterProfile
 // ---------------------------------------------------------------------------
 
-BassRegisterProfile getBassRegisterProfile(
-    VariationRole role, uint8_t instrument_low, uint8_t instrument_high,
-    int accumulate_index) {
+BassRegisterProfile getBassRegisterProfile(VariationRole role, uint8_t instrument_low,
+                                           uint8_t instrument_high, int accumulate_index) {
   // Base register: inner portion of the instrument range.
   // Bass sits in the lower third of the instrument range.
   int range = static_cast<int>(instrument_high) - static_cast<int>(instrument_low);
@@ -191,9 +191,7 @@ BassRegisterProfile getBassRegisterProfile(
     }
   }
 
-  return BassRegisterProfile{
-      static_cast<uint8_t>(base_low),
-      static_cast<uint8_t>(base_high)};
+  return BassRegisterProfile{static_cast<uint8_t>(base_low), static_cast<uint8_t>(base_high)};
 }
 
 // ---------------------------------------------------------------------------
@@ -203,9 +201,8 @@ BassRegisterProfile getBassRegisterProfile(
 namespace {
 
 /// @brief Generate Simple bass: one note per SchemeEntry at chord root.
-std::vector<NoteEvent> realizeSimple(
-    const ChaconneScheme& scheme, const KeySignature& key,
-    const BassRegisterProfile& profile) {
+std::vector<NoteEvent> realizeSimple(const ChaconneScheme& scheme, const KeySignature& key,
+                                     const BassRegisterProfile& profile) {
   std::vector<NoteEvent> notes;
   notes.reserve(scheme.size());
 
@@ -223,9 +220,8 @@ std::vector<NoteEvent> realizeSimple(
 }
 
 /// @brief Generate Walking bass: chord tones on strong beats, stepwise passing on weak beats.
-std::vector<NoteEvent> realizeWalking(
-    const ChaconneScheme& scheme, const KeySignature& key,
-    const BassRegisterProfile& profile, uint32_t seed) {
+std::vector<NoteEvent> realizeWalking(const ChaconneScheme& scheme, const KeySignature& key,
+                                      const BassRegisterProfile& profile, uint32_t seed) {
   std::vector<NoteEvent> notes;
   notes.reserve(scheme.size() * 4);  // Rough upper bound.
 
@@ -285,9 +281,8 @@ std::vector<NoteEvent> realizeWalking(
 }
 
 /// @brief Generate Syncopated bass: chord tones only, some weak-beat emphasis.
-std::vector<NoteEvent> realizeSyncopated(
-    const ChaconneScheme& scheme, const KeySignature& key,
-    const BassRegisterProfile& profile, uint32_t seed) {
+std::vector<NoteEvent> realizeSyncopated(const ChaconneScheme& scheme, const KeySignature& key,
+                                         const BassRegisterProfile& profile, uint32_t seed) {
   std::vector<NoteEvent> notes;
   notes.reserve(scheme.size() * 3);
 
@@ -356,9 +351,8 @@ std::vector<NoteEvent> realizeSyncopated(
 }
 
 /// @brief Generate Lyrical bass: half-note base with occasional 3rd/5th leaps.
-std::vector<NoteEvent> realizeLyrical(
-    const ChaconneScheme& scheme, const KeySignature& key,
-    const BassRegisterProfile& profile, uint32_t seed) {
+std::vector<NoteEvent> realizeLyrical(const ChaconneScheme& scheme, const KeySignature& key,
+                                      const BassRegisterProfile& profile, uint32_t seed) {
   std::vector<NoteEvent> notes;
   notes.reserve(scheme.size() * 2);
 
@@ -383,8 +377,7 @@ std::vector<NoteEvent> realizeLyrical(
       notes.push_back(makeBassNote(entry_start, kHalfNote, root_pitch));
 
       // Second half: leap to 3rd or 5th for lyrical character.
-      float leap_roll =
-          static_cast<float>(rng::splitmix32(seed, rng_index++) & 0xFFFF) / 65535.0f;
+      float leap_roll = static_cast<float>(rng::splitmix32(seed, rng_index++) & 0xFFFF) / 65535.0f;
       int leap_target;
       if (leap_roll < 0.5f) {
         leap_target = chord_pitches[1];  // Third.
@@ -402,9 +395,8 @@ std::vector<NoteEvent> realizeLyrical(
 }
 
 /// @brief Generate Elaborate bass: eighth-note arpeggios through chord tones.
-std::vector<NoteEvent> realizeElaborate(
-    const ChaconneScheme& scheme, const KeySignature& key,
-    const BassRegisterProfile& profile, uint32_t seed) {
+std::vector<NoteEvent> realizeElaborate(const ChaconneScheme& scheme, const KeySignature& key,
+                                        const BassRegisterProfile& profile, uint32_t seed) {
   std::vector<NoteEvent> notes;
   notes.reserve(scheme.size() * 8);  // Up to 8 eighth notes per entry.
 
@@ -439,8 +431,7 @@ std::vector<NoteEvent> realizeElaborate(
       size_t pool_idx = static_cast<size_t>(eighth) % arp_pool.size();
 
       // Occasionally vary the pool selection for musical interest.
-      float vary_roll =
-          static_cast<float>(rng::splitmix32(seed, rng_index++) & 0xFFFF) / 65535.0f;
+      float vary_roll = static_cast<float>(rng::splitmix32(seed, rng_index++) & 0xFFFF) / 65535.0f;
       if (vary_roll < 0.2f && arp_pool.size() > 1) {
         pool_idx = rng::splitmix32(seed, rng_index++) % arp_pool.size();
       }
@@ -459,13 +450,9 @@ std::vector<NoteEvent> realizeElaborate(
 // Public: realizeBass
 // ---------------------------------------------------------------------------
 
-std::vector<NoteEvent> realizeBass(
-    const ChaconneScheme& scheme,
-    const KeySignature& key,
-    VariationRole role,
-    uint8_t register_low, uint8_t register_high,
-    uint32_t seed,
-    int accumulate_index) {
+std::vector<NoteEvent> realizeBass(const ChaconneScheme& scheme, const KeySignature& key,
+                                   VariationRole role, uint8_t register_low, uint8_t register_high,
+                                   uint32_t seed, int accumulate_index) {
   if (scheme.size() == 0) {
     return {};
   }

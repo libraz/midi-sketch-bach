@@ -52,12 +52,9 @@ class CrossingGenerator {
   /// @param seed Random seed for deterministic generation.
   /// @return CrossingResult with generated notes and success status.
   ///         Returns success=false for unsupported variation numbers.
-  CrossingResult generate(
-      int variation_number,
-      const GoldbergStructuralGrid& grid,
-      const KeySignature& key,
-      const TimeSignature& time_sig,
-      uint32_t seed) const;
+  CrossingResult generate(int variation_number, const GoldbergStructuralGrid& grid,
+                          const KeySignature& key, const TimeSignature& time_sig,
+                          uint32_t seed) const;
 
  private:
   /// @brief Build the FiguraProfile for a given hand-crossing variation.
@@ -79,10 +76,8 @@ class CrossingGenerator {
   /// @param notes Notes to clamp (modified in place).
   /// @param manual The manual assignment defining valid register bounds.
   /// @param is_upper True for upper manual voice, false for lower manual voice.
-  void applyRegisterProtection(
-      std::vector<NoteEvent>& notes,
-      const ManualAssignment& manual,
-      bool is_upper) const;
+  void applyRegisterProtection(std::vector<NoteEvent>& notes, const ManualAssignment& manual,
+                               bool is_upper) const;
 
   /// @brief Apply crossing logic at structurally appropriate positions.
   ///
@@ -95,11 +90,8 @@ class CrossingGenerator {
   /// @param lower_notes Lower manual notes (modified in place).
   /// @param grid The structural grid for phrase position queries.
   /// @param time_sig Time signature for bar duration calculation.
-  void applyCrossingLogic(
-      std::vector<NoteEvent>& upper_notes,
-      std::vector<NoteEvent>& lower_notes,
-      const GoldbergStructuralGrid& grid,
-      const TimeSignature& time_sig) const;
+  void applyCrossingLogic(std::vector<NoteEvent>& upper_notes, std::vector<NoteEvent>& lower_notes,
+                          const GoldbergStructuralGrid& grid, const TimeSignature& time_sig) const;
 
   /// @brief Check if a variation number is a supported hand-crossing variation.
   /// @param variation_number The variation number to check.

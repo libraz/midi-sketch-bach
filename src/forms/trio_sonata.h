@@ -22,9 +22,9 @@ struct TrioSonataConfig {
 
 /// @brief Counterpoint violation breakdown for trio sonata analysis.
 struct TrioSonataCPReport {
-  uint32_t parallel_perfect = 0;   ///< Parallel 5ths + 8ths.
-  uint32_t voice_crossing = 0;     ///< Voice crossing violations.
-  uint32_t strong_beat_P4 = 0;     ///< Perfect 4ths on strong beats over bass.
+  uint32_t parallel_perfect = 0;  ///< Parallel 5ths + 8ths.
+  uint32_t voice_crossing = 0;    ///< Voice crossing violations.
+  uint32_t strong_beat_P4 = 0;    ///< Perfect 4ths on strong beats over bass.
 
   /// @brief Total counterpoint violations.
   uint32_t total() const { return parallel_perfect + voice_crossing + strong_beat_P4; }
@@ -39,18 +39,18 @@ struct TrioSonataCPReport {
 
 /// @brief A single movement of the trio sonata.
 struct TrioSonataMovement {
-  std::vector<Track> tracks;        ///< 3 tracks: RH (Great), LH (Swell), Pedal.
+  std::vector<Track> tracks;  ///< 3 tracks: RH (Great), LH (Swell), Pedal.
   Tick total_duration_ticks = 0;
   uint16_t bpm = 120;
   KeySignature key = {Key::C, false};
-  TrioSonataCPReport cp_report;    ///< Counterpoint violation breakdown.
+  TrioSonataCPReport cp_report;  ///< Counterpoint violation breakdown.
 };
 
 /// @brief Result of trio sonata generation.
 struct TrioSonataResult {
   std::vector<TrioSonataMovement> movements;  ///< 3 movements: fast-slow-fast.
   bool success = false;
-  TrioSonataCPReport counterpoint_report;     ///< All movements combined.
+  TrioSonataCPReport counterpoint_report;  ///< All movements combined.
 };
 
 /// @brief Generate a BWV 525-530 style trio sonata.

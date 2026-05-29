@@ -63,14 +63,14 @@ TEST(HarmonicsTest, PitchesAreSortedAscending) {
 
 TEST(HarmonicsTest, ViolinOctaveHarmonicsDetected) {
   // Octave harmonics on each string.
-  EXPECT_TRUE(isNaturalHarmonic(67, InstrumentType::Violin));   // G3 + 12
-  EXPECT_TRUE(isNaturalHarmonic(74, InstrumentType::Violin));   // D4 + 12
-  EXPECT_TRUE(isNaturalHarmonic(81, InstrumentType::Violin));   // A4 + 12
-  EXPECT_TRUE(isNaturalHarmonic(88, InstrumentType::Violin));   // E5 + 12
+  EXPECT_TRUE(isNaturalHarmonic(67, InstrumentType::Violin));  // G3 + 12
+  EXPECT_TRUE(isNaturalHarmonic(74, InstrumentType::Violin));  // D4 + 12
+  EXPECT_TRUE(isNaturalHarmonic(81, InstrumentType::Violin));  // A4 + 12
+  EXPECT_TRUE(isNaturalHarmonic(88, InstrumentType::Violin));  // E5 + 12
 }
 
 TEST(HarmonicsTest, ViolinFifthHarmonicsDetected) {
-  EXPECT_TRUE(isNaturalHarmonic(95, InstrumentType::Violin));   // E5 + 19
+  EXPECT_TRUE(isNaturalHarmonic(95, InstrumentType::Violin));  // E5 + 19
 }
 
 TEST(HarmonicsTest, NonHarmonicPitchReturnsFalse) {

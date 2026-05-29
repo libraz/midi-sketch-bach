@@ -83,20 +83,20 @@ enum class FiguraType : uint8_t {
 
 /// Direction bias for figura patterns.
 enum class DirectionBias : uint8_t {
-  Ascending,    ///< Upward dominant.
-  Descending,   ///< Downward dominant.
-  Symmetric,    ///< Symmetric (circular patterns).
-  Alternating   ///< Alternating (Batterie patterns).
+  Ascending,   ///< Upward dominant.
+  Descending,  ///< Downward dominant.
+  Symmetric,   ///< Symmetric (circular patterns).
+  Alternating  ///< Alternating (Batterie patterns).
 };
 
 /// @brief Figura profile: concrete parameters for a figura type.
 struct FiguraProfile {
-  FiguraType primary;           ///< Primary figura type.
-  FiguraType secondary;         ///< Secondary figura (phrase contrast).
-  uint8_t notes_per_beat;       ///< Density (1=quarter, 2=eighth, 4=sixteenth).
-  DirectionBias direction;      ///< Direction bias.
-  float chord_tone_ratio;       ///< Chord tone ratio (0.7=stable, 0.4=more passing).
-  float sequence_probability;   ///< Probability of sequential repetition.
+  FiguraType primary;          ///< Primary figura type.
+  FiguraType secondary;        ///< Secondary figura (phrase contrast).
+  uint8_t notes_per_beat;      ///< Density (1=quarter, 2=eighth, 4=sixteenth).
+  DirectionBias direction;     ///< Direction bias.
+  float chord_tone_ratio;      ///< Chord tone ratio (0.7=stable, 0.4=more passing).
+  float sequence_probability;  ///< Probability of sequential repetition.
 };
 
 /// @brief Canon interval and inversion descriptor.
@@ -117,18 +117,18 @@ enum class GoldbergTempoCharacter : uint8_t {
 };
 
 struct GoldbergVariationDescriptor {
-  int variation_number;                 ///< 0=Aria, 1-30, 31=da capo.
+  int variation_number;  ///< 0=Aria, 1-30, 31=da capo.
   GoldbergVariationType type;
   MelodyMode melody_mode;
-  KeySignature key;                     ///< G major or G minor.
-  TimeSignature time_sig;               ///< Default 3/4.
+  KeySignature key;        ///< G major or G minor.
+  TimeSignature time_sig;  ///< Default 3/4.
   MeterProfile meter_profile;
-  uint8_t num_voices;                   ///< 2-4.
-  CanonDescriptor canon;                ///< Canon parameters (Canon type only).
-  uint16_t bpm_override;               ///< 0 = use global BPM.
-  std::pair<int, int> tempo_ratio;      ///< Integer ratio to Aria (Proportionslehre).
+  uint8_t num_voices;               ///< 2-4.
+  CanonDescriptor canon;            ///< Canon parameters (Canon type only).
+  uint16_t bpm_override;            ///< 0 = use global BPM.
+  std::pair<int, int> tempo_ratio;  ///< Integer ratio to Aria (Proportionslehre).
   TempoReferenceUnit tempo_reference;
-  MinorModeProfile minor_profile;       ///< Minor key variations only.
+  MinorModeProfile minor_profile;  ///< Minor key variations only.
   ArticulationProfile articulation;
   float grid_strictness = 1.0f;         ///< Grid dominance (0.0-1.0).
   FiguraProfile figura;                 ///< Elaboratio mode parameters.
@@ -139,9 +139,9 @@ struct GoldbergVariationDescriptor {
 
 /// Manual assignment policy for Goldberg voicing checks.
 enum class ManualPolicy : uint8_t {
-  Standard,       ///< voice 0,1=Upper, 2,3,4=Lower (most variations).
-  HandCrossing,   ///< Hand crossing: skip one-hand playability checks.
-  SingleManual,   ///< All voices on single manual: full isVoicingPlayable().
+  Standard,      ///< voice 0,1=Upper, 2,3,4=Lower (most variations).
+  HandCrossing,  ///< Hand crossing: skip one-hand playability checks.
+  SingleManual,  ///< All voices on single manual: full isVoicingPlayable().
 };
 
 /// Get the manual policy for a given variation type.

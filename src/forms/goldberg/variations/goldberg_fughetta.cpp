@@ -56,8 +56,7 @@ constexpr int kEntryOrder[kNumVoices] = {0, 1, 2, 3};
 /// @param variation_number 10 (Playful) or 22 (Severe).
 /// @return SubjectCharacter for the variation.
 SubjectCharacter characterForVariation(int variation_number) {
-  return (variation_number == 22) ? SubjectCharacter::Severe
-                                  : SubjectCharacter::Playful;
+  return (variation_number == 22) ? SubjectCharacter::Severe : SubjectCharacter::Playful;
 }
 
 /// @brief Get the base note duration multiplier for alla breve style.
@@ -82,20 +81,15 @@ int durationMultiplier(int variation_number) {
 /// @param scale Scale type.
 /// @param start_tick Tick offset for the entry.
 /// @return Transposed notes placed at start_tick, assigned to voice_idx.
-std::vector<NoteEvent> placeEntry(const std::vector<NoteEvent>& notes,
-                                  int voice_idx,
-                                  int degree_steps,
-                                  Key key,
-                                  ScaleType scale,
-                                  Tick start_tick) {
+std::vector<NoteEvent> placeEntry(const std::vector<NoteEvent>& notes, int voice_idx,
+                                  int degree_steps, Key key, ScaleType scale, Tick start_tick) {
   // First transpose diatonically.
   std::vector<NoteEvent> transposed =
-      (degree_steps != 0)
-          ? transposeMelodyDiatonic(notes, degree_steps, key, scale)
-          : notes;
+      (degree_steps != 0) ? transposeMelodyDiatonic(notes, degree_steps, key, scale) : notes;
 
   // Calculate median pitch of transposed entry.
-  if (transposed.empty()) return transposed;
+  if (transposed.empty())
+    return transposed;
 
   int sum_pitch = 0;
   for (const auto& note : transposed) {
@@ -137,15 +131,11 @@ std::vector<NoteEvent> placeEntry(const std::vector<NoteEvent>& notes,
 /// @param dur_multiplier Duration multiplier (1=normal, 2=alla breve).
 /// @param rng Random number generator.
 /// @return Vector of NoteEvents for the free counterpoint fill.
-std::vector<NoteEvent> generateFreeCounterpoint(
-    int voice_idx,
-    int start_bar,
-    int num_bars,
-    const GoldbergStructuralGrid& grid,
-    const KeySignature& key,
-    const TimeSignature& time_sig,
-    int dur_multiplier,
-    std::mt19937& rng) {
+std::vector<NoteEvent> generateFreeCounterpoint(int voice_idx, int start_bar, int num_bars,
+                                                const GoldbergStructuralGrid& grid,
+                                                const KeySignature& key,
+                                                const TimeSignature& time_sig, int dur_multiplier,
+                                                std::mt19937& rng) {
   std::vector<NoteEvent> result;
   ScaleType scale = key.is_minor ? ScaleType::HarmonicMinor : ScaleType::Major;
   const auto& range = kVoiceRanges[voice_idx];
@@ -156,8 +146,10 @@ std::vector<NoteEvent> generateFreeCounterpoint(
 
   // Start from the structural bass pitch adjusted to the voice register.
   int bar = start_bar;
-  if (bar < 0) bar = 0;
-  if (bar >= kTotalBars) return result;
+  if (bar < 0)
+    bar = 0;
+  if (bar >= kTotalBars)
+    return result;
 
   uint8_t prev_pitch = grid.getStructuralBassPitch(bar);
   // Move to voice register.
@@ -166,12 +158,12 @@ std::vector<NoteEvent> generateFreeCounterpoint(
   prev_pitch = clampPitch(static_cast<int>(prev_pitch) + oct_shift, range.low, range.high);
   prev_pitch = scale_util::nearestScaleTone(prev_pitch, key.tonic, scale);
 
-  for (int bar_idx = start_bar; bar_idx < start_bar + num_bars && bar_idx < kTotalBars;
-       ++bar_idx) {
+  for (int bar_idx = start_bar; bar_idx < start_bar + num_bars && bar_idx < kTotalBars; ++bar_idx) {
     int grid_bar = std::max(0, std::min(31, bar_idx));
     Tick bar_start = static_cast<Tick>(bar_idx) * ticks_per_bar;
     int notes_in_bar = static_cast<int>(ticks_per_bar / base_dur);
-    if (notes_in_bar < 1) notes_in_bar = 1;
+    if (notes_in_bar < 1)
+      notes_in_bar = 1;
 
     // Get structural bass pitch for harmonic alignment.
     uint8_t bass_pitch = grid.getStructuralBassPitch(grid_bar);
@@ -208,7 +200,8 @@ std::vector<NoteEvent> generateFreeCounterpoint(
       opts.source = BachNoteSource::GoldbergFughetta;
 
       auto note_result = createBachNote(nullptr, nullptr, nullptr, opts);
-      if (!note_result.accepted) continue;
+      if (!note_result.accepted)
+        continue;
       NoteEvent note = note_result.note;
       note.pitch = new_pitch;
       note.source = BachNoteSource::GoldbergFughetta;
@@ -235,20 +228,16 @@ std::vector<NoteEvent> generateFreeCounterpoint(
 /// @param dur_multiplier Duration multiplier.
 /// @param rng Random number generator.
 /// @return Vector of NoteEvents for the development section.
-std::vector<NoteEvent> generateDevelopment(
-    const Subject& soggetto,
-    int start_bar,
-    int end_bar,
-    const GoldbergStructuralGrid& grid,
-    const KeySignature& key,
-    const TimeSignature& time_sig,
-    int dur_multiplier,
-    std::mt19937& rng) {
+std::vector<NoteEvent> generateDevelopment(const Subject& soggetto, int start_bar, int end_bar,
+                                           const GoldbergStructuralGrid& grid,
+                                           const KeySignature& key, const TimeSignature& time_sig,
+                                           int dur_multiplier, std::mt19937& rng) {
   std::vector<NoteEvent> result;
   ScaleType scale = key.is_minor ? ScaleType::HarmonicMinor : ScaleType::Major;
   Tick ticks_per_bar = time_sig.ticksPerBar();
 
-  if (soggetto.notes.empty()) return result;
+  if (soggetto.notes.empty())
+    return result;
 
   // Extract Kopfmotiv (head motif) for sequential development.
   auto kopfmotiv = soggetto.extractKopfmotiv(4);
@@ -266,8 +255,7 @@ std::vector<NoteEvent> generateDevelopment(
 
     if (strategy == 0 && remaining_bars >= 4) {
       // Diatonic sequence of the Kopfmotiv (descending by step, 3 repetitions).
-      auto sequence = generateDiatonicSequence(kopfmotiv, 3, -1,
-                                                current_tick, key.tonic, scale);
+      auto sequence = generateDiatonicSequence(kopfmotiv, 3, -1, current_tick, key.tonic, scale);
       for (auto& note : sequence) {
         note.voice = static_cast<VoiceId>(dev_voice % kNumVoices);
         const auto& range = kVoiceRanges[note.voice];
@@ -278,10 +266,10 @@ std::vector<NoteEvent> generateDevelopment(
 
       // Fill other voices with free counterpoint.
       for (int vox = 0; vox < kNumVoices; ++vox) {
-        if (vox == dev_voice % kNumVoices) continue;
-        auto fill = generateFreeCounterpoint(
-            vox, current_bar, std::min(4, remaining_bars),
-            grid, key, time_sig, dur_multiplier, rng);
+        if (vox == dev_voice % kNumVoices)
+          continue;
+        auto fill = generateFreeCounterpoint(vox, current_bar, std::min(4, remaining_bars), grid,
+                                             key, time_sig, dur_multiplier, rng);
         result.insert(result.end(), fill.begin(), fill.end());
       }
 
@@ -297,10 +285,10 @@ std::vector<NoteEvent> generateDevelopment(
 
       // Fill other voices with free counterpoint.
       for (int vox = 0; vox < kNumVoices; ++vox) {
-        if (vox == entry_voice) continue;
-        auto fill = generateFreeCounterpoint(
-            vox, current_bar, std::min(kEntryBars, remaining_bars),
-            grid, key, time_sig, dur_multiplier, rng);
+        if (vox == entry_voice)
+          continue;
+        auto fill = generateFreeCounterpoint(vox, current_bar, std::min(kEntryBars, remaining_bars),
+                                             grid, key, time_sig, dur_multiplier, rng);
         result.insert(result.end(), fill.begin(), fill.end());
       }
 
@@ -310,9 +298,8 @@ std::vector<NoteEvent> generateDevelopment(
       // Free counterpoint fill for all voices.
       int fill_bars = std::min(2, remaining_bars);
       for (int vox = 0; vox < kNumVoices; ++vox) {
-        auto fill = generateFreeCounterpoint(
-            vox, current_bar, fill_bars,
-            grid, key, time_sig, dur_multiplier, rng);
+        auto fill = generateFreeCounterpoint(vox, current_bar, fill_bars, grid, key, time_sig,
+                                             dur_multiplier, rng);
         result.insert(result.end(), fill.begin(), fill.end());
       }
       current_bar += fill_bars;
@@ -331,7 +318,8 @@ std::vector<NoteEvent> generateDevelopment(
 /// @param notes Notes to scale (modified in place).
 /// @param multiplier Duration multiplier.
 void applyDurationScaling(std::vector<NoteEvent>& notes, int multiplier) {
-  if (multiplier <= 1) return;
+  if (multiplier <= 1)
+    return;
   Tick base_tick = notes.empty() ? 0 : notes[0].start_tick;
   for (auto& note : notes) {
     Tick relative = note.start_tick - base_tick;
@@ -346,12 +334,9 @@ void applyDurationScaling(std::vector<NoteEvent>& notes, int multiplier) {
 // Public: generate
 // ---------------------------------------------------------------------------
 
-FughettaResult FughettaGenerator::generate(
-    int variation_number,
-    const GoldbergStructuralGrid& grid,
-    const KeySignature& key,
-    const TimeSignature& time_sig,
-    uint32_t seed) const {
+FughettaResult FughettaGenerator::generate(int variation_number, const GoldbergStructuralGrid& grid,
+                                           const KeySignature& key, const TimeSignature& time_sig,
+                                           uint32_t seed) const {
   FughettaResult result;
   result.success = false;
 
@@ -371,7 +356,8 @@ FughettaResult FughettaGenerator::generate(
   soggetto_params.path_candidates = 8;
 
   Subject soggetto = soggetto_gen.generate(soggetto_params, key, time_sig, seed);
-  if (soggetto.notes.empty()) return result;
+  if (soggetto.notes.empty())
+    return result;
 
   // Apply alla breve duration scaling if needed.
   if (dur_mult > 1) {
@@ -397,23 +383,22 @@ FughettaResult FughettaGenerator::generate(
     // Alternate tonic/dominant entries.
     int degree_step = (entry_idx % 2 == 0) ? 0 : kAnswerDegreeStep;
 
-    auto entry = placeEntry(soggetto.notes, voice_idx, degree_step,
-                            key.tonic, scale, entry_tick);
+    auto entry = placeEntry(soggetto.notes, voice_idx, degree_step, key.tonic, scale, entry_tick);
     all_notes.insert(all_notes.end(), entry.begin(), entry.end());
 
     // Fill previously entered voices with free counterpoint during this entry.
     for (int prev = 0; prev < entry_idx; ++prev) {
       int prev_voice = kEntryOrder[prev];
-      auto fill = generateFreeCounterpoint(
-          prev_voice, entry_bar, kEntryBars, grid, key, time_sig, dur_mult, rng);
+      auto fill = generateFreeCounterpoint(prev_voice, entry_bar, kEntryBars, grid, key, time_sig,
+                                           dur_mult, rng);
       all_notes.insert(all_notes.end(), fill.begin(), fill.end());
     }
   }
 
   // --- Step 3: Development (bars 8-31) ---
   int dev_start_bar = kNumVoices * kEntryBars;  // Bar 8.
-  auto development = generateDevelopment(
-      soggetto, dev_start_bar, kTotalBars, grid, key, time_sig, dur_mult, rng);
+  auto development =
+      generateDevelopment(soggetto, dev_start_bar, kTotalBars, grid, key, time_sig, dur_mult, rng);
   all_notes.insert(all_notes.end(), development.begin(), development.end());
 
   // --- Step 4: Apply binary repeats ---

@@ -22,8 +22,10 @@ float computeHarmonicTension(ChordDegree degree, ChordQuality quality, int inver
       if (quality == ChordQuality::Dominant7) {
         // Inversion-based tension differentiation for V7.
         // 0=root (0.8), 1=3rd in bass (0.7), 3=7th in bass (0.9), other=0.8.
-        if (inversion == 1) return 0.7f;
-        if (inversion == 3) return 0.9f;
+        if (inversion == 1)
+          return 0.7f;
+        if (inversion == 3)
+          return 0.9f;
         return 0.8f;
       }
       return 0.6f;
@@ -34,7 +36,8 @@ float computeHarmonicTension(ChordDegree degree, ChordQuality quality, int inver
     case ChordDegree::V_of_iii:
       return 0.7f;
     case ChordDegree::viiDim:
-      if (quality == ChordQuality::Diminished7) return 1.0f;
+      if (quality == ChordQuality::Diminished7)
+        return 1.0f;
       return 0.9f;
     case ChordDegree::bII:
       return 0.6f;

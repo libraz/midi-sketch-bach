@@ -2,15 +2,15 @@
 
 #include "solo_string/arch/chaconne_config.h"
 
+#include <gtest/gtest.h>
+
 #include <algorithm>
 #include <random>
 #include <set>
 #include <vector>
 
-#include <gtest/gtest.h>
-
-#include "core/basic_types.h"
 #include "analysis/fail_report.h"
+#include "core/basic_types.h"
 #include "harmony/key.h"
 #include "solo_string/arch/variation_types.h"
 
@@ -214,8 +214,7 @@ TEST(ChaconneConfigTest, StandardPlanMajorSectionUsesParallelMajor) {
 
   for (const auto& var : plan) {
     if (var.is_major_section) {
-      EXPECT_EQ(var.key, d_major)
-          << "Major section variation should use parallel major key";
+      EXPECT_EQ(var.key, d_major) << "Major section variation should use parallel major key";
     }
   }
 }
@@ -299,10 +298,9 @@ TEST(ChaconneConfigTest, ValidateRejectsWrongAccumulateCount) {
   auto plan = createStandardVariationPlan(d_minor, rng);
 
   // Remove one Accumulate
-  auto iter = std::find_if(plan.begin(), plan.end(),
-                           [](const ChaconneVariation& var) {
-                             return var.role == VariationRole::Accumulate;
-                           });
+  auto iter = std::find_if(plan.begin(), plan.end(), [](const ChaconneVariation& var) {
+    return var.role == VariationRole::Accumulate;
+  });
   ASSERT_NE(iter, plan.end());
   plan.erase(iter);
 
@@ -312,10 +310,18 @@ TEST(ChaconneConfigTest, ValidateRejectsWrongAccumulateCount) {
 TEST(ChaconneConfigTest, ValidateRejectsInvalidRoleOrder) {
   // Create a plan with reversed role order.
   std::vector<ChaconneVariation> bad_plan;
-  bad_plan.push_back({0, VariationRole::Resolve, VariationType::Theme,
-                      TextureType::SingleLine, {Key::D, true}, false});
-  bad_plan.push_back({1, VariationRole::Establish, VariationType::Theme,
-                      TextureType::SingleLine, {Key::D, true}, false});
+  bad_plan.push_back({0,
+                      VariationRole::Resolve,
+                      VariationType::Theme,
+                      TextureType::SingleLine,
+                      {Key::D, true},
+                      false});
+  bad_plan.push_back({1,
+                      VariationRole::Establish,
+                      VariationType::Theme,
+                      TextureType::SingleLine,
+                      {Key::D, true},
+                      false});
   EXPECT_FALSE(validateVariationPlan(bad_plan));
 }
 
@@ -342,27 +348,67 @@ TEST(ChaconneConfigTest, ValidateRejectsResolveNotTheme) {
 TEST(ChaconneConfigTest, ValidateRejectsResolveNotFinal) {
   // Plan where Resolve is not the last variation.
   std::vector<ChaconneVariation> plan;
-  plan.push_back({0, VariationRole::Establish, VariationType::Theme,
-                  TextureType::SingleLine, {Key::D, true}, false});
-  plan.push_back({1, VariationRole::Develop, VariationType::Rhythmic,
-                  TextureType::ImpliedPolyphony, {Key::D, true}, false});
-  plan.push_back({2, VariationRole::Destabilize, VariationType::Virtuosic,
-                  TextureType::ScalePassage, {Key::D, true}, false});
-  plan.push_back({3, VariationRole::Illuminate, VariationType::Lyrical,
-                  TextureType::SingleLine, {Key::D, false}, true});
-  plan.push_back({4, VariationRole::Destabilize, VariationType::Virtuosic,
-                  TextureType::ScalePassage, {Key::D, true}, false});
-  plan.push_back({5, VariationRole::Accumulate, VariationType::Virtuosic,
-                  TextureType::FullChords, {Key::D, true}, false});
-  plan.push_back({6, VariationRole::Accumulate, VariationType::Chordal,
-                  TextureType::FullChords, {Key::D, true}, false});
-  plan.push_back({7, VariationRole::Accumulate, VariationType::Virtuosic,
-                  TextureType::FullChords, {Key::D, true}, false});
-  plan.push_back({8, VariationRole::Resolve, VariationType::Theme,
-                  TextureType::SingleLine, {Key::D, true}, false});
+  plan.push_back({0,
+                  VariationRole::Establish,
+                  VariationType::Theme,
+                  TextureType::SingleLine,
+                  {Key::D, true},
+                  false});
+  plan.push_back({1,
+                  VariationRole::Develop,
+                  VariationType::Rhythmic,
+                  TextureType::ImpliedPolyphony,
+                  {Key::D, true},
+                  false});
+  plan.push_back({2,
+                  VariationRole::Destabilize,
+                  VariationType::Virtuosic,
+                  TextureType::ScalePassage,
+                  {Key::D, true},
+                  false});
+  plan.push_back({3,
+                  VariationRole::Illuminate,
+                  VariationType::Lyrical,
+                  TextureType::SingleLine,
+                  {Key::D, false},
+                  true});
+  plan.push_back({4,
+                  VariationRole::Destabilize,
+                  VariationType::Virtuosic,
+                  TextureType::ScalePassage,
+                  {Key::D, true},
+                  false});
+  plan.push_back({5,
+                  VariationRole::Accumulate,
+                  VariationType::Virtuosic,
+                  TextureType::FullChords,
+                  {Key::D, true},
+                  false});
+  plan.push_back({6,
+                  VariationRole::Accumulate,
+                  VariationType::Chordal,
+                  TextureType::FullChords,
+                  {Key::D, true},
+                  false});
+  plan.push_back({7,
+                  VariationRole::Accumulate,
+                  VariationType::Virtuosic,
+                  TextureType::FullChords,
+                  {Key::D, true},
+                  false});
+  plan.push_back({8,
+                  VariationRole::Resolve,
+                  VariationType::Theme,
+                  TextureType::SingleLine,
+                  {Key::D, true},
+                  false});
   // Extra variation after Resolve breaks the constraint.
-  plan.push_back({9, VariationRole::Resolve, VariationType::Theme,
-                  TextureType::SingleLine, {Key::D, true}, false});
+  plan.push_back({9,
+                  VariationRole::Resolve,
+                  VariationType::Theme,
+                  TextureType::SingleLine,
+                  {Key::D, true},
+                  false});
 
   EXPECT_FALSE(validateVariationPlan(plan));
 }
@@ -381,7 +427,6 @@ TEST(ChaconneVariationTest, DefaultValues) {
   EXPECT_TRUE(var.key.is_minor);
   EXPECT_FALSE(var.is_major_section);
 }
-
 
 // ===========================================================================
 // validateVariationPlanReport
@@ -415,7 +460,10 @@ TEST(ChaconneConfigTest, ReportInvalidTypeForRole) {
   // Should have an issue with rule "invalid_type_for_role"
   bool found = false;
   for (const auto& issue : report.issues) {
-    if (issue.rule == "invalid_type_for_role") { found = true; break; }
+    if (issue.rule == "invalid_type_for_role") {
+      found = true;
+      break;
+    }
   }
   EXPECT_TRUE(found);
 }
@@ -425,14 +473,19 @@ TEST(ChaconneConfigTest, ReportWrongAccumulateCount) {
   std::mt19937 rng(42);
   auto plan = createStandardVariationPlan(d_minor, rng);
   // Remove an Accumulate variation
-  auto iter = std::find_if(plan.begin(), plan.end(),
-      [](const ChaconneVariation& v) { return v.role == VariationRole::Accumulate; });
-  if (iter != plan.end()) plan.erase(iter);
+  auto iter = std::find_if(plan.begin(), plan.end(), [](const ChaconneVariation& v) {
+    return v.role == VariationRole::Accumulate;
+  });
+  if (iter != plan.end())
+    plan.erase(iter);
   auto report = validateVariationPlanReport(plan);
   EXPECT_TRUE(report.hasCritical());
   bool found = false;
   for (const auto& issue : report.issues) {
-    if (issue.rule == "accumulate_count") { found = true; break; }
+    if (issue.rule == "accumulate_count") {
+      found = true;
+      break;
+    }
   }
   EXPECT_TRUE(found);
 }
@@ -446,7 +499,10 @@ TEST(ChaconneConfigTest, ReportFinalNotResolve) {
   EXPECT_TRUE(report.hasCritical());
   bool found = false;
   for (const auto& issue : report.issues) {
-    if (issue.rule == "final_not_resolve") { found = true; break; }
+    if (issue.rule == "final_not_resolve") {
+      found = true;
+      break;
+    }
   }
   EXPECT_TRUE(found);
 }

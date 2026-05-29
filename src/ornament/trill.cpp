@@ -6,8 +6,8 @@
 
 namespace bach {
 
-std::vector<NoteEvent> generateTrill(const NoteEvent& note, uint8_t upper_pitch,
-                                     uint8_t speed, bool start_from_upper) {
+std::vector<NoteEvent> generateTrill(const NoteEvent& note, uint8_t upper_pitch, uint8_t speed,
+                                     bool start_from_upper) {
   std::vector<NoteEvent> result;
 
   // Calculate number of sub-notes using tick-based calculation.
@@ -15,9 +15,10 @@ std::vector<NoteEvent> generateTrill(const NoteEvent& note, uint8_t upper_pitch,
   // Trill sub-note duration = kTicksPerBeat / (speed * 2).
   // Total sub-notes = duration / trill_note_duration.
   Tick trill_note_duration = kTicksPerBeat / (static_cast<Tick>(speed) * 2);
-  if (trill_note_duration == 0) trill_note_duration = 1;
-  uint32_t total_subnotes = std::max(
-      2u, static_cast<uint32_t>(note.duration / trill_note_duration));
+  if (trill_note_duration == 0)
+    trill_note_duration = 1;
+  uint32_t total_subnotes =
+      std::max(2u, static_cast<uint32_t>(note.duration / trill_note_duration));
 
   // Minimum 3 sub-notes for a trill to make sense.
   if (total_subnotes < 3) {

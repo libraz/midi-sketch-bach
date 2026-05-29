@@ -15,19 +15,20 @@ namespace bach {
 /// Represents a chord active over a time span [tick, end_tick).
 /// Carries key context, chord identity, bass pitch, and metric weight.
 struct HarmonicEvent {
-  Tick tick = 0;          // Start tick (inclusive)
-  Tick end_tick = 0;      // End tick (exclusive)
-  Key key = Key::C;       // Current key context
-  bool is_minor = false;  // Major or minor mode
-  Chord chord;            // Current chord
-  uint8_t bass_pitch = 0; // Bass note MIDI pitch
-  float weight = 1.0f;    // Harmonic weight (1.0 = strong beat, 0.5 = weak)
-  float rhythm_factor = 1.0f;  // Harmonic rhythm multiplier (1.0 = normal, <1.0 = faster, >1.0 = slower)
+  Tick tick = 0;           // Start tick (inclusive)
+  Tick end_tick = 0;       // End tick (exclusive)
+  Key key = Key::C;        // Current key context
+  bool is_minor = false;   // Major or minor mode
+  Chord chord;             // Current chord
+  uint8_t bass_pitch = 0;  // Bass note MIDI pitch
+  float weight = 1.0f;     // Harmonic weight (1.0 = strong beat, 0.5 = weak)
+  float rhythm_factor =
+      1.0f;  // Harmonic rhythm multiplier (1.0 = normal, <1.0 = faster, >1.0 = slower)
   bool is_immutable = false;  // If true, cannot be altered by generation
   /// Reserved for future modulation support.
   Key modulation_target = Key::C;  // Target key for modulation (same as key if none)
   /// Reserved for future modulation support.
-  bool has_modulation = false;     // Whether this event represents a modulation point
+  bool has_modulation = false;  // Whether this event represents a modulation point
 
   /// Probability of selecting chord tones during note generation (0.0-1.0).
   /// Higher values reduce dissonance in chromatic contexts (e.g., bII, bVI).

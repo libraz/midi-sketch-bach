@@ -28,7 +28,7 @@ struct GeneratorConfig {
   bool strict = false;
   uint8_t max_retry = 3;
   DurationScale scale = DurationScale::Short;  ///< Duration control.
-  uint16_t target_bars = 0;  ///< Override: target bar count (0 = use scale).
+  uint16_t target_bars = 0;                    ///< Override: target bar count (0 = use scale).
 };
 
 /// @brief Result from unified generation.
@@ -40,8 +40,10 @@ struct GeneratorResult {
   uint32_t seed_used = 0;
   std::string form_description;
   std::string error_message;
-  HarmonicTimeline timeline;  ///< Harmonic context for analysis.
-  HarmonicTimeline generation_timeline;  ///< Beat-resolution timeline from generation (for analysis).
+  std::string structure_json;  ///< Optional formal-structure JSON for diagnostics.
+  HarmonicTimeline timeline;   ///< Harmonic context for analysis.
+  HarmonicTimeline
+      generation_timeline;  ///< Beat-resolution timeline from generation (for analysis).
 };
 
 /// @brief Generate a Bach composition based on configuration.

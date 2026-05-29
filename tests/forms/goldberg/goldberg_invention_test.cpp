@@ -2,11 +2,11 @@
 
 #include "forms/goldberg/variations/goldberg_invention.h"
 
+#include <gtest/gtest.h>
+
 #include <algorithm>
 #include <cstdint>
 #include <set>
-
-#include <gtest/gtest.h>
 
 #include "core/basic_types.h"
 #include "forms/goldberg/goldberg_structural_grid.h"
@@ -22,9 +22,7 @@ constexpr uint32_t kTestSeed = 42;
 
 class InventionTest : public ::testing::Test {
  protected:
-  void SetUp() override {
-    grid_ = GoldbergStructuralGrid::createMajor();
-  }
+  void SetUp() override { grid_ = GoldbergStructuralGrid::createMajor(); }
 
   GoldbergStructuralGrid grid_;
   InventionGenerator generator_;
@@ -37,8 +35,7 @@ class InventionTest : public ::testing::Test {
 TEST_F(InventionTest, GenerateProducesResult) {
   auto result = generator_.generate(grid_, kGMajor, kTriple, kTestSeed);
   EXPECT_TRUE(result.success) << "Invention generation should succeed";
-  EXPECT_FALSE(result.notes.empty())
-      << "Invention should produce non-empty output";
+  EXPECT_FALSE(result.notes.empty()) << "Invention should produce non-empty output";
 }
 
 // ---------------------------------------------------------------------------
@@ -69,7 +66,8 @@ TEST_F(InventionTest, NotesSpan32Bars) {
   Tick max_tick = 0;
   for (const auto& note : result.notes) {
     Tick end_tick = note.start_tick + note.duration;
-    if (end_tick > max_tick) max_tick = end_tick;
+    if (end_tick > max_tick)
+      max_tick = end_tick;
   }
 
   Tick ticks_per_bar = kTriple.ticksPerBar();
@@ -77,14 +75,12 @@ TEST_F(InventionTest, NotesSpan32Bars) {
   // Notes should span at least 24 bars (development + recap).
   Tick expected_min = 24 * ticks_per_bar;
   EXPECT_GE(max_tick, expected_min)
-      << "Notes should span at least 24 bars, got "
-      << (max_tick / ticks_per_bar) << " bars";
+      << "Notes should span at least 24 bars, got " << (max_tick / ticks_per_bar) << " bars";
 
   // Notes should not exceed 32 bars.
   Tick expected_max = 32 * ticks_per_bar;
   EXPECT_LE(max_tick, expected_max)
-      << "Notes should not exceed 32 bars, got "
-      << (max_tick / ticks_per_bar) << " bars";
+      << "Notes should not exceed 32 bars, got " << (max_tick / ticks_per_bar) << " bars";
 }
 
 // ---------------------------------------------------------------------------
@@ -97,8 +93,10 @@ TEST_F(InventionTest, DifferentSeedsDifferent) {
     auto result1 = generator_.generate(grid_, kGMajor, kTriple, base);
     auto result2 = generator_.generate(grid_, kGMajor, kTriple, base + 7777);
 
-    if (!result1.success || !result2.success) continue;
-    if (result1.notes.empty() || result2.notes.empty()) continue;
+    if (!result1.success || !result2.success)
+      continue;
+    if (result1.notes.empty() || result2.notes.empty())
+      continue;
 
     size_t compare_count = std::min(result1.notes.size(), result2.notes.size());
     for (size_t idx = 0; idx < compare_count; ++idx) {
@@ -149,7 +147,8 @@ TEST_F(InventionTest, ExpositionHasStaggeredEntries) {
   // Find the earliest note for each voice within the exposition.
   std::map<VoiceId, Tick> first_entry;
   for (const auto& note : result.notes) {
-    if (note.start_tick >= exposition_end) continue;
+    if (note.start_tick >= exposition_end)
+      continue;
     auto iter = first_entry.find(note.voice);
     if (iter == first_entry.end() || note.start_tick < iter->second) {
       first_entry[note.voice] = note.start_tick;
@@ -164,8 +163,7 @@ TEST_F(InventionTest, ExpositionHasStaggeredEntries) {
     unique_starts.insert(pair.second);
   }
 
-  EXPECT_GT(unique_starts.size(), 1u)
-      << "Voice entries should be staggered in the exposition";
+  EXPECT_GT(unique_starts.size(), 1u) << "Voice entries should be staggered in the exposition";
 }
 
 // ---------------------------------------------------------------------------
@@ -177,12 +175,12 @@ TEST_F(InventionTest, AllNotesWithinMidiRange) {
   ASSERT_TRUE(result.success);
 
   for (const auto& note : result.notes) {
-    EXPECT_GE(note.pitch, 36)
-        << "All pitches should be >= C2 (36), got " << static_cast<int>(note.pitch)
-        << " in voice " << static_cast<int>(note.voice);
-    EXPECT_LE(note.pitch, 96)
-        << "All pitches should be <= C6 (96), got " << static_cast<int>(note.pitch)
-        << " in voice " << static_cast<int>(note.voice);
+    EXPECT_GE(note.pitch, 36) << "All pitches should be >= C2 (36), got "
+                              << static_cast<int>(note.pitch) << " in voice "
+                              << static_cast<int>(note.voice);
+    EXPECT_LE(note.pitch, 96) << "All pitches should be <= C6 (96), got "
+                              << static_cast<int>(note.pitch) << " in voice "
+                              << static_cast<int>(note.voice);
   }
 }
 
@@ -199,9 +197,8 @@ TEST_F(InventionTest, NotesHaveValidSource) {
     // GoldbergInvention (free counterpoint, inversions, sequences).
     bool valid_source = note.source == BachNoteSource::GoldbergSoggetto ||
                         note.source == BachNoteSource::GoldbergInvention;
-    EXPECT_TRUE(valid_source)
-        << "Note source should be GoldbergSoggetto or GoldbergInvention, got "
-        << bachNoteSourceToString(note.source);
+    EXPECT_TRUE(valid_source) << "Note source should be GoldbergSoggetto or GoldbergInvention, got "
+                              << bachNoteSourceToString(note.source);
   }
 }
 
@@ -219,9 +216,8 @@ TEST_F(InventionTest, EachVoiceHasSufficientNotes) {
   }
 
   for (uint8_t voice = 0; voice < 3; ++voice) {
-    EXPECT_GT(voice_counts[voice], 10u)
-        << "Voice " << static_cast<int>(voice)
-        << " should have substantial note content (>10 notes)";
+    EXPECT_GT(voice_counts[voice], 10u) << "Voice " << static_cast<int>(voice)
+                                        << " should have substantial note content (>10 notes)";
   }
 }
 

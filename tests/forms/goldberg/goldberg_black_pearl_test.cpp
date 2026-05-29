@@ -2,11 +2,11 @@
 
 #include "forms/goldberg/variations/goldberg_black_pearl.h"
 
+#include <gtest/gtest.h>
+
 #include <algorithm>
 #include <cstdint>
 #include <set>
-
-#include <gtest/gtest.h>
 
 #include "core/basic_types.h"
 #include "core/pitch_utils.h"
@@ -38,7 +38,8 @@ class BlackPearlGeneratorTest : public ::testing::Test {
     Tick max_end = 0;
     for (const auto& note : notes) {
       Tick note_end = note.start_tick + note.duration;
-      if (note_end > max_end) max_end = note_end;
+      if (note_end > max_end)
+        max_end = note_end;
     }
     return max_end;
   }
@@ -72,7 +73,8 @@ TEST_F(BlackPearlGeneratorTest, IsInMinorKey) {
   int in_scale = 0;
   int total = 0;
   for (const auto& note : result.notes) {
-    if (note.pitch == 0) continue;
+    if (note.pitch == 0)
+      continue;
     int pitch_class = getPitchClass(note.pitch);
     if (g_minor_pcs.count(pitch_class) > 0) {
       ++in_scale;
@@ -84,9 +86,8 @@ TEST_F(BlackPearlGeneratorTest, IsInMinorKey) {
   float ratio = static_cast<float>(in_scale) / static_cast<float>(total);
 
   // At least 70% of pitches should be in G minor scale (allowing chromatic passing tones).
-  EXPECT_GE(ratio, 0.7f)
-      << "At least 70% of pitches should belong to G minor scale, got "
-      << (ratio * 100.0f) << "%";
+  EXPECT_GE(ratio, 0.7f) << "At least 70% of pitches should belong to G minor scale, got "
+                         << (ratio * 100.0f) << "%";
 }
 
 // ---------------------------------------------------------------------------
@@ -175,11 +176,9 @@ TEST_F(BlackPearlGeneratorTest, SlowDensity) {
 
   // BlackPearl (Adagio, 1 npb) should have lower density than ornamental (4 npb).
   // Expect fewer than 8 melody notes per bar on average (generous upper bound).
-  EXPECT_LT(notes_per_bar, 8.0f)
-      << "BlackPearl Adagio should have low note density, got "
-      << notes_per_bar << " notes/bar";
-  EXPECT_GT(notes_per_bar, 0.5f)
-      << "BlackPearl should have at least some melody content";
+  EXPECT_LT(notes_per_bar, 8.0f) << "BlackPearl Adagio should have low note density, got "
+                                 << notes_per_bar << " notes/bar";
+  EXPECT_GT(notes_per_bar, 0.5f) << "BlackPearl should have at least some melody content";
 }
 
 // ---------------------------------------------------------------------------
@@ -199,10 +198,12 @@ TEST_F(BlackPearlGeneratorTest, DifferentSeedsDifferent) {
   std::set<uint8_t> pitches_a;
   std::set<uint8_t> pitches_b;
   for (const auto& note : result_a.notes) {
-    if (note.pitch > 0) pitches_a.insert(note.pitch);
+    if (note.pitch > 0)
+      pitches_a.insert(note.pitch);
   }
   for (const auto& note : result_b.notes) {
-    if (note.pitch > 0) pitches_b.insert(note.pitch);
+    if (note.pitch > 0)
+      pitches_b.insert(note.pitch);
   }
 
   bool differ_in_size = result_a.notes.size() != result_b.notes.size();
@@ -220,10 +221,8 @@ TEST_F(BlackPearlGeneratorTest, DifferentSeedsDifferent) {
 TEST_F(BlackPearlGeneratorTest, SuccessAcrossSeeds) {
   for (uint32_t seed = 1; seed <= 10; ++seed) {
     auto result = generateVariation(seed);
-    EXPECT_TRUE(result.success)
-        << "BlackPearl should succeed with seed " << seed;
-    EXPECT_FALSE(result.notes.empty())
-        << "BlackPearl should produce notes with seed " << seed;
+    EXPECT_TRUE(result.success) << "BlackPearl should succeed with seed " << seed;
+    EXPECT_FALSE(result.notes.empty()) << "BlackPearl should produce notes with seed " << seed;
     EXPECT_GT(result.suspension_count, 0)
         << "BlackPearl should have suspensions with seed " << seed;
   }
@@ -263,8 +262,7 @@ TEST_F(BlackPearlGeneratorTest, BassNotesHaveGoldbergBassSource) {
   for (const auto& note : result.notes) {
     if (note.voice == 1) {
       EXPECT_EQ(note.source, BachNoteSource::GoldbergBass)
-          << "Bass note at tick " << note.start_tick
-          << " should have GoldbergBass source";
+          << "Bass note at tick " << note.start_tick << " should have GoldbergBass source";
       ++bass_count;
     }
   }

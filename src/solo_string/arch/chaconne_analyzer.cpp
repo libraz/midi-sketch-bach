@@ -38,8 +38,7 @@ std::vector<NoteEvent> collectAllNotes(const std::vector<Track>& tracks) {
 /// @param start Start tick (inclusive).
 /// @param end End tick (exclusive).
 /// @return Notes whose start_tick falls within the range.
-std::vector<NoteEvent> notesInRange(const std::vector<NoteEvent>& all_notes,
-                                    Tick start, Tick end) {
+std::vector<NoteEvent> notesInRange(const std::vector<NoteEvent>& all_notes, Tick start, Tick end) {
   return analysis_util::notesInRange(all_notes, start, end);
 }
 
@@ -65,7 +64,8 @@ float averagePitch(const std::vector<NoteEvent>& notes) {
 /// @param range_ticks Total tick length of the range.
 /// @return Notes per tick, or 0.0 if range is zero.
 float noteDensity(const std::vector<NoteEvent>& notes, Tick range_ticks) {
-  if (range_ticks == 0) return 0.0f;
+  if (range_ticks == 0)
+    return 0.0f;
   return static_cast<float>(notes.size()) / static_cast<float>(range_ticks);
 }
 
@@ -88,8 +88,7 @@ namespace {
 /// @param scheme The harmonic scheme defining the expected progression.
 /// @return 1.0 if ALL variations have bass notes at scheme positions, 0.0 otherwise.
 float computeHarmonicSchemeIntegrity(const std::vector<NoteEvent>& all_notes,
-                                     const ChaconneConfig& config,
-                                     const ChaconneScheme& scheme) {
+                                     const ChaconneConfig& config, const ChaconneScheme& scheme) {
   if (scheme.size() == 0 || config.variations.empty()) {
     return 0.0f;
   }
@@ -109,14 +108,12 @@ float computeHarmonicSchemeIntegrity(const std::vector<NoteEvent>& all_notes,
     // For each scheme entry, verify a ChaconneBass-sourced note exists at
     // the expected beat position within this variation.
     for (const auto& entry : entries) {
-      Tick expected_tick =
-          var_start + static_cast<Tick>(entry.position_beats) * kTicksPerBeat;
+      Tick expected_tick = var_start + static_cast<Tick>(entry.position_beats) * kTicksPerBeat;
 
       // Find any ChaconneBass-sourced note at the expected tick.
       bool found = false;
       for (const auto& note : var_notes) {
-        if (note.start_tick == expected_tick &&
-            note.source == BachNoteSource::ChaconneBass) {
+        if (note.start_tick == expected_tick && note.source == BachNoteSource::ChaconneBass) {
           found = true;
           break;
         }
@@ -126,8 +123,7 @@ float computeHarmonicSchemeIntegrity(const std::vector<NoteEvent>& all_notes,
       // for backward compatibility, then lowest-pitch match.
       if (!found) {
         for (const auto& note : var_notes) {
-          if (note.start_tick == expected_tick &&
-              note.source == BachNoteSource::GroundBass) {
+          if (note.start_tick == expected_tick && note.source == BachNoteSource::GroundBass) {
             found = true;
             break;
           }
@@ -212,8 +208,7 @@ float computeClimaxPresenceScore(const ChaconneConfig& config) {
   // Using the center avoids penalizing legitimate placements where the block
   // spans slightly beyond the boundary while remaining correctly positioned.
   float center_ratio =
-      (static_cast<float>(first_accumulate_idx) +
-       static_cast<float>(last_accumulate_idx + 1)) /
+      (static_cast<float>(first_accumulate_idx) + static_cast<float>(last_accumulate_idx + 1)) /
       (2.0f * static_cast<float>(num_variations));
 
   if (center_ratio < config.climax.position_ratio_min ||
@@ -237,8 +232,7 @@ float computeClimaxPresenceScore(const ChaconneConfig& config) {
 /// @param[out] avg_voice_count Diagnostic: average implied voice count.
 /// @return 1.0 if in range or not applicable, 0.0 if out of range.
 float computeImpliedPolyphonyScore(const std::vector<NoteEvent>& all_notes,
-                                   const ChaconneConfig& config,
-                                   const ChaconneScheme& scheme,
+                                   const ChaconneConfig& config, const ChaconneScheme& scheme,
                                    float& avg_voice_count) {
   avg_voice_count = 0.0f;
 
@@ -268,7 +262,8 @@ float computeImpliedPolyphonyScore(const std::vector<NoteEvent>& all_notes,
     auto [var_start, var_end] = variationTickRange(var_idx, bass_length);
     auto var_notes = notesInRange(all_notes, var_start, var_end);
 
-    if (var_notes.empty()) continue;
+    if (var_notes.empty())
+      continue;
 
     // Sample at each beat position within the variation.
     for (Tick beat_tick = var_start; beat_tick < var_end; beat_tick += kTicksPerBeat) {
@@ -295,8 +290,7 @@ float computeImpliedPolyphonyScore(const std::vector<NoteEvent>& all_notes,
       }
 
       // Use the larger of active or nearby band counts.
-      int voice_count = static_cast<int>(
-          std::max(active_bands.size(), nearby_bands.size()));
+      int voice_count = static_cast<int>(std::max(active_bands.size(), nearby_bands.size()));
       if (voice_count > 0) {
         total_voice_count += static_cast<float>(voice_count);
         ++total_beats;
@@ -358,15 +352,16 @@ float computeVariationDiversity(const ChaconneConfig& config) {
   // Normalize by maximum possible entropy (log2 of total number of TextureType values).
   // There are 6 TextureType values defined.
   constexpr int kTotalTextureTypes = 6;
-  float max_entropy = std::log2(static_cast<float>(
-      std::min(kTotalTextureTypes, static_cast<int>(config.variations.size()))));
+  float max_entropy = std::log2(
+      static_cast<float>(std::min(kTotalTextureTypes, static_cast<int>(config.variations.size()))));
 
   if (max_entropy <= 0.0f) {
     return 0.0f;
   }
 
   float normalized = entropy / max_entropy;
-  if (normalized > 1.0f) normalized = 1.0f;
+  if (normalized > 1.0f)
+    normalized = 1.0f;
 
   return normalized;
 }
@@ -408,9 +403,8 @@ float computeTextureTransitionScore(const ChaconneConfig& config) {
     // Others: moderate
     // SingleLine <-> FullChords: large jump
 
-    auto pair = std::make_pair(
-        std::min(static_cast<uint8_t>(prev), static_cast<uint8_t>(curr)),
-        std::max(static_cast<uint8_t>(prev), static_cast<uint8_t>(curr)));
+    auto pair = std::make_pair(std::min(static_cast<uint8_t>(prev), static_cast<uint8_t>(curr)),
+                               std::max(static_cast<uint8_t>(prev), static_cast<uint8_t>(curr)));
 
     // Smooth pairs (score 1.0).
     bool is_smooth =
@@ -467,7 +461,8 @@ float computeSectionBalance(const ChaconneConfig& config) {
   for (int idx = 0; idx < num_variations; ++idx) {
     if (config.variations[static_cast<size_t>(idx)].is_major_section) {
       ++major_section;
-      if (first_major < 0) first_major = idx;
+      if (first_major < 0)
+        first_major = idx;
       last_major = idx;
     }
   }
@@ -492,14 +487,14 @@ float computeSectionBalance(const ChaconneConfig& config) {
   constexpr float kIdealBack = 0.50f;
 
   // L1 distance from ideal.
-  float distance = std::abs(front_ratio - kIdealFront) +
-                   std::abs(major_ratio - kIdealMajor) +
+  float distance = std::abs(front_ratio - kIdealFront) + std::abs(major_ratio - kIdealMajor) +
                    std::abs(back_ratio - kIdealBack);
 
   // Maximum possible L1 distance is 2.0 (completely wrong proportions).
   // Score = 1.0 - distance/2.0, clamped to [0, 1].
   float score = 1.0f - distance / 2.0f;
-  if (score < 0.0f) score = 0.0f;
+  if (score < 0.0f)
+    score = 0.0f;
 
   return score;
 }
@@ -515,8 +510,7 @@ float computeSectionBalance(const ChaconneConfig& config) {
 /// @param scheme Harmonic scheme for variation length.
 /// @return Score in [0.0, 1.0].
 float computeMajorSectionSeparation(const std::vector<NoteEvent>& all_notes,
-                                    const ChaconneConfig& config,
-                                    const ChaconneScheme& scheme) {
+                                    const ChaconneConfig& config, const ChaconneScheme& scheme) {
   if (config.variations.empty() || scheme.size() == 0) {
     return 0.0f;
   }
@@ -538,12 +532,10 @@ float computeMajorSectionSeparation(const std::vector<NoteEvent>& all_notes,
 
     if (config.variations[static_cast<size_t>(idx)].is_major_section) {
       major_notes.insert(major_notes.end(), var_notes.begin(), var_notes.end());
-      major_textures.insert(
-          config.variations[static_cast<size_t>(idx)].primary_texture);
+      major_textures.insert(config.variations[static_cast<size_t>(idx)].primary_texture);
     } else {
       minor_notes.insert(minor_notes.end(), var_notes.begin(), var_notes.end());
-      minor_textures.insert(
-          config.variations[static_cast<size_t>(idx)].primary_texture);
+      minor_textures.insert(config.variations[static_cast<size_t>(idx)].primary_texture);
     }
   }
 
@@ -608,13 +600,14 @@ float computeMajorSectionSeparation(const std::vector<NoteEvent>& all_notes,
     }
   }
 
-  int total_textures = static_cast<int>(major_textures.size()) +
-                       static_cast<int>(minor_textures.size());
+  int total_textures =
+      static_cast<int>(major_textures.size()) + static_cast<int>(minor_textures.size());
   if (total_textures > 0) {
     score += static_cast<float>(exclusive_textures) / static_cast<float>(total_textures);
   }
 
-  if (checks == 0) return 0.0f;
+  if (checks == 0)
+    return 0.0f;
   return score / static_cast<float>(checks);
 }
 
@@ -629,8 +622,7 @@ float computeMajorSectionSeparation(const std::vector<NoteEvent>& all_notes,
 /// @param scheme Harmonic scheme for piece length calculation.
 /// @return Score in [0.0, 1.0].
 float computeVoiceSwitchFrequency(const std::vector<NoteEvent>& all_notes,
-                                  const ChaconneConfig& config,
-                                  const ChaconneScheme& scheme) {
+                                  const ChaconneConfig& config, const ChaconneScheme& scheme) {
   if (all_notes.size() < 2 || scheme.size() == 0) {
     return 0.0f;
   }
@@ -641,8 +633,7 @@ float computeVoiceSwitchFrequency(const std::vector<NoteEvent>& all_notes,
   }
 
   // Calculate total beats in the piece.
-  Tick total_ticks =
-      static_cast<Tick>(config.variations.size()) * bass_length;
+  Tick total_ticks = static_cast<Tick>(config.variations.size()) * bass_length;
   float total_beats = static_cast<float>(total_ticks) / static_cast<float>(kTicksPerBeat);
 
   if (total_beats <= 0.0f) {
@@ -690,7 +681,8 @@ float computeVoiceSwitchFrequency(const std::vector<NoteEvent>& all_notes,
   float excess = frequency - kMaxFreq;
   float penalty = excess / kMaxFreq;
   float score = 1.0f - penalty;
-  if (score < 0.0f) score = 0.0f;
+  if (score < 0.0f)
+    score = 0.0f;
 
   return score;
 }
@@ -703,20 +695,29 @@ float computeVoiceSwitchFrequency(const std::vector<NoteEvent>& all_notes,
 
 bool ChaconneAnalysisResult::isPass() const {
   // Instant-FAIL checks (exact values required).
-  if (harmonic_scheme_integrity != 1.0f) return false;
-  if (role_order_score != 1.0f) return false;
-  if (climax_presence_score != 1.0f) return false;
-  if (implied_polyphony_score != 1.0f) return false;
+  if (harmonic_scheme_integrity != 1.0f)
+    return false;
+  if (role_order_score != 1.0f)
+    return false;
+  if (climax_presence_score != 1.0f)
+    return false;
+  if (implied_polyphony_score != 1.0f)
+    return false;
 
   // Threshold checks.
-  if (variation_diversity < 0.7f) return false;
-  if (texture_transition_score < 0.5f) return false;
-  if (section_balance < 0.7f) return false;
-  if (major_section_separation < 0.6f) return false;
+  if (variation_diversity < 0.7f)
+    return false;
+  if (texture_transition_score < 0.5f)
+    return false;
+  if (section_balance < 0.7f)
+    return false;
+  if (major_section_separation < 0.6f)
+    return false;
 
   // voice_switch_frequency: no hard threshold, but include in pass check
   // as a reasonable minimum. A score of 0.0 indicates problematic content.
-  if (voice_switch_frequency <= 0.0f) return false;
+  if (voice_switch_frequency <= 0.0f)
+    return false;
 
   return true;
 }
@@ -736,12 +737,10 @@ std::vector<std::string> ChaconneAnalysisResult::getFailures() const {
         formatMetric("harmonic_scheme_integrity", harmonic_scheme_integrity, "must be 1.0"));
   }
   if (role_order_score != 1.0f) {
-    failures.push_back(
-        formatMetric("role_order_score", role_order_score, "must be 1.0"));
+    failures.push_back(formatMetric("role_order_score", role_order_score, "must be 1.0"));
   }
   if (climax_presence_score != 1.0f) {
-    failures.push_back(
-        formatMetric("climax_presence_score", climax_presence_score, "must be 1.0"));
+    failures.push_back(formatMetric("climax_presence_score", climax_presence_score, "must be 1.0"));
   }
   if (implied_polyphony_score != 1.0f) {
     failures.push_back(
@@ -750,24 +749,22 @@ std::vector<std::string> ChaconneAnalysisResult::getFailures() const {
 
   // Threshold checks.
   if (variation_diversity < 0.7f) {
-    failures.push_back(
-        formatMetric("variation_diversity", variation_diversity, "threshold: 0.70"));
+    failures.push_back(formatMetric("variation_diversity", variation_diversity, "threshold: 0.70"));
   }
   if (texture_transition_score < 0.5f) {
-    failures.push_back(formatMetric("texture_transition_score", texture_transition_score,
-                                    "threshold: 0.50"));
+    failures.push_back(
+        formatMetric("texture_transition_score", texture_transition_score, "threshold: 0.50"));
   }
   if (section_balance < 0.7f) {
-    failures.push_back(
-        formatMetric("section_balance", section_balance, "threshold: 0.70"));
+    failures.push_back(formatMetric("section_balance", section_balance, "threshold: 0.70"));
   }
   if (major_section_separation < 0.6f) {
-    failures.push_back(formatMetric("major_section_separation", major_section_separation,
-                                    "threshold: 0.60"));
+    failures.push_back(
+        formatMetric("major_section_separation", major_section_separation, "threshold: 0.60"));
   }
   if (voice_switch_frequency <= 0.0f) {
-    failures.push_back(formatMetric("voice_switch_frequency", voice_switch_frequency,
-                                    "must be > 0.0"));
+    failures.push_back(
+        formatMetric("voice_switch_frequency", voice_switch_frequency, "must be > 0.0"));
   }
 
   return failures;
@@ -808,8 +805,7 @@ std::string ChaconneAnalysisResult::summary() const {
 // ===========================================================================
 
 ChaconneAnalysisResult analyzeChaconne(const std::vector<Track>& tracks,
-                                       const ChaconneConfig& config,
-                                       const ChaconneScheme& scheme) {
+                                       const ChaconneConfig& config, const ChaconneScheme& scheme) {
   ChaconneAnalysisResult result;
 
   auto all_notes = collectAllNotes(tracks);
@@ -822,12 +818,11 @@ ChaconneAnalysisResult analyzeChaconne(const std::vector<Track>& tracks,
   }
 
   // Instant-FAIL metrics.
-  result.harmonic_scheme_integrity =
-      computeHarmonicSchemeIntegrity(all_notes, config, scheme);
+  result.harmonic_scheme_integrity = computeHarmonicSchemeIntegrity(all_notes, config, scheme);
   result.role_order_score = computeRoleOrderScore(config);
   result.climax_presence_score = computeClimaxPresenceScore(config);
-  result.implied_polyphony_score = computeImpliedPolyphonyScore(
-      all_notes, config, scheme, result.implied_voice_count_avg);
+  result.implied_polyphony_score =
+      computeImpliedPolyphonyScore(all_notes, config, scheme, result.implied_voice_count_avg);
 
   // Threshold metrics (config-derived).
   result.variation_diversity = computeVariationDiversity(config);
@@ -835,10 +830,8 @@ ChaconneAnalysisResult analyzeChaconne(const std::vector<Track>& tracks,
   result.section_balance = computeSectionBalance(config);
 
   // Threshold metrics (note-derived).
-  result.major_section_separation =
-      computeMajorSectionSeparation(all_notes, config, scheme);
-  result.voice_switch_frequency =
-      computeVoiceSwitchFrequency(all_notes, config, scheme);
+  result.major_section_separation = computeMajorSectionSeparation(all_notes, config, scheme);
+  result.voice_switch_frequency = computeVoiceSwitchFrequency(all_notes, config, scheme);
 
   return result;
 }

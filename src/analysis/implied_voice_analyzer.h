@@ -12,10 +12,10 @@ namespace bach {
 
 /// @brief Result of implied voice analysis for a single-line melody.
 struct ImpliedVoiceAnalysisResult {
-  float implied_voice_count = 0.0f;       ///< Estimated number of implied voices.
-  float register_consistency = 0.0f;      ///< Register coherence within each voice [0,1].
-  uint32_t implied_parallel_count = 0;    ///< Parallel 5ths/8ths between implied voices.
-  bool passes_quality_gate = false;       ///< True if voice count in [2.3, 2.8] range.
+  float implied_voice_count = 0.0f;     ///< Estimated number of implied voices.
+  float register_consistency = 0.0f;    ///< Register coherence within each voice [0,1].
+  uint32_t implied_parallel_count = 0;  ///< Parallel 5ths/8ths between implied voices.
+  bool passes_quality_gate = false;     ///< True if voice count in [2.3, 2.8] range.
 };
 
 /// @brief Analyzer for implied polyphony in monophonic lines.
@@ -37,9 +37,8 @@ class ImpliedVoiceAnalyzer {
   ///        Notes at or above this pitch go to the upper voice;
   ///        notes below go to the lower voice.
   /// @return Analysis result with voice count, consistency, and violations.
-  static ImpliedVoiceAnalysisResult analyze(
-      const std::vector<NoteEvent>& melody,
-      uint8_t register_split_pitch);
+  static ImpliedVoiceAnalysisResult analyze(const std::vector<NoteEvent>& melody,
+                                            uint8_t register_split_pitch);
 
   /// @brief Estimate the optimal split pitch from the melody's register range.
   ///

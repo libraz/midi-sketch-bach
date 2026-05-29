@@ -243,13 +243,13 @@ TEST(ChaconneSchemeTest, StandardDMinorQualitySequenceIsCorrect) {
   ASSERT_EQ(scheme.size(), 7u);
 
   const auto& entries = scheme.entries();
-  EXPECT_EQ(entries[0].quality, ChordQuality::Minor);   // i
-  EXPECT_EQ(entries[1].quality, ChordQuality::Major);   // V
-  EXPECT_EQ(entries[2].quality, ChordQuality::Minor);   // i
-  EXPECT_EQ(entries[3].quality, ChordQuality::Minor);   // iv
-  EXPECT_EQ(entries[4].quality, ChordQuality::Major);   // VII
-  EXPECT_EQ(entries[5].quality, ChordQuality::Major);   // III
-  EXPECT_EQ(entries[6].quality, ChordQuality::Major);   // V
+  EXPECT_EQ(entries[0].quality, ChordQuality::Minor);  // i
+  EXPECT_EQ(entries[1].quality, ChordQuality::Major);  // V
+  EXPECT_EQ(entries[2].quality, ChordQuality::Minor);  // i
+  EXPECT_EQ(entries[3].quality, ChordQuality::Minor);  // iv
+  EXPECT_EQ(entries[4].quality, ChordQuality::Major);  // VII
+  EXPECT_EQ(entries[5].quality, ChordQuality::Major);  // III
+  EXPECT_EQ(entries[6].quality, ChordQuality::Major);  // V
 }
 
 // ===========================================================================

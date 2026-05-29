@@ -21,8 +21,8 @@ namespace {
 
 /// @brief Create a harmonic event with the given parameters.
 HarmonicEvent makeEvent(Tick tick, Tick end_tick, ChordDegree degree,
-                        ChordQuality quality = ChordQuality::Major,
-                        bool is_minor = false, uint8_t inversion = 0) {
+                        ChordQuality quality = ChordQuality::Major, bool is_minor = false,
+                        uint8_t inversion = 0) {
   HarmonicEvent evt;
   evt.tick = tick;
   evt.end_tick = end_tick;
@@ -40,8 +40,7 @@ HarmonicEvent makeEvent(Tick tick, Tick end_tick, ChordDegree degree,
 HarmonicTimeline makeV_I_Timeline() {
   HarmonicTimeline tl;
   tl.addEvent(makeEvent(0, kTicksPerBar, ChordDegree::I));
-  tl.addEvent(makeEvent(kTicksPerBar, kTicksPerBar * 2, ChordDegree::V,
-                        ChordQuality::Dominant7));
+  tl.addEvent(makeEvent(kTicksPerBar, kTicksPerBar * 2, ChordDegree::V, ChordQuality::Dominant7));
   tl.addEvent(makeEvent(kTicksPerBar * 2, kTicksPerBar * 3, ChordDegree::I));
   return tl;
 }
@@ -50,10 +49,8 @@ HarmonicTimeline makeV_I_Timeline() {
 HarmonicTimeline makeV_vi_Timeline() {
   HarmonicTimeline tl;
   tl.addEvent(makeEvent(0, kTicksPerBar, ChordDegree::I));
-  tl.addEvent(makeEvent(kTicksPerBar, kTicksPerBar * 2, ChordDegree::V,
-                        ChordQuality::Dominant7));
-  tl.addEvent(makeEvent(kTicksPerBar * 2, kTicksPerBar * 3, ChordDegree::vi,
-                        ChordQuality::Minor));
+  tl.addEvent(makeEvent(kTicksPerBar, kTicksPerBar * 2, ChordDegree::V, ChordQuality::Dominant7));
+  tl.addEvent(makeEvent(kTicksPerBar * 2, kTicksPerBar * 3, ChordDegree::vi, ChordQuality::Minor));
   return tl;
 }
 
@@ -147,11 +144,10 @@ TEST(CadenceDetectorTest, DetectHalfCadence) {
 TEST(CadenceDetectorTest, DetectPhrygianCadence) {
   HarmonicTimeline tl;
   // iv6 -> V in minor key.
-  tl.addEvent(makeEvent(0, kTicksPerBar, ChordDegree::IV,
-                        ChordQuality::Minor, /*is_minor=*/true,
+  tl.addEvent(makeEvent(0, kTicksPerBar, ChordDegree::IV, ChordQuality::Minor, /*is_minor=*/true,
                         /*inversion=*/1));
-  tl.addEvent(makeEvent(kTicksPerBar, kTicksPerBar * 2, ChordDegree::V,
-                        ChordQuality::Major, /*is_minor=*/true));
+  tl.addEvent(makeEvent(kTicksPerBar, kTicksPerBar * 2, ChordDegree::V, ChordQuality::Major,
+                        /*is_minor=*/true));
   auto cadences = detectCadences(tl);
 
   ASSERT_GE(cadences.size(), 1u);
@@ -214,8 +210,7 @@ TEST(CadenceDetectorTest, NoCadencePattern) {
   HarmonicTimeline tl;
   tl.addEvent(makeEvent(0, kTicksPerBar, ChordDegree::I));
   tl.addEvent(makeEvent(kTicksPerBar, kTicksPerBar * 2, ChordDegree::IV));
-  tl.addEvent(makeEvent(kTicksPerBar * 2, kTicksPerBar * 3, ChordDegree::ii,
-                        ChordQuality::Minor));
+  tl.addEvent(makeEvent(kTicksPerBar * 2, kTicksPerBar * 3, ChordDegree::ii, ChordQuality::Minor));
   auto cadences = detectCadences(tl);
 
   // No V->I, V->vi, or *->V pattern. Should be empty.
@@ -225,13 +220,11 @@ TEST(CadenceDetectorTest, NoCadencePattern) {
 TEST(CadenceDetectorTest, MultipleCadences) {
   HarmonicTimeline tl;
   // V -> I at bar 1, then V -> vi at bar 3.
-  tl.addEvent(makeEvent(0, kTicksPerBar, ChordDegree::V,
-                        ChordQuality::Dominant7));
+  tl.addEvent(makeEvent(0, kTicksPerBar, ChordDegree::V, ChordQuality::Dominant7));
   tl.addEvent(makeEvent(kTicksPerBar, kTicksPerBar * 2, ChordDegree::I));
-  tl.addEvent(makeEvent(kTicksPerBar * 2, kTicksPerBar * 3, ChordDegree::V,
-                        ChordQuality::Dominant7));
-  tl.addEvent(makeEvent(kTicksPerBar * 3, kTicksPerBar * 4, ChordDegree::vi,
-                        ChordQuality::Minor));
+  tl.addEvent(
+      makeEvent(kTicksPerBar * 2, kTicksPerBar * 3, ChordDegree::V, ChordQuality::Dominant7));
+  tl.addEvent(makeEvent(kTicksPerBar * 3, kTicksPerBar * 4, ChordDegree::vi, ChordQuality::Minor));
 
   auto cadences = detectCadences(tl);
   EXPECT_GE(cadences.size(), 2u);
@@ -250,8 +243,7 @@ TEST(CadenceDetectorTest, VtoVNotDetectedAsHalf) {
 
   auto cadences = detectCadences(tl);
   for (const auto& cad : cadences) {
-    EXPECT_NE(cad.type, CadenceType::Half)
-        << "V->V should not be detected as half cadence";
+    EXPECT_NE(cad.type, CadenceType::Half) << "V->V should not be detected as half cadence";
   }
 }
 
@@ -300,8 +292,7 @@ TEST(CadenceDetectionRateTest, DetectionRateEmptyDetected) {
 TEST(CadenceDetectionRateTest, ToleranceWindowMatches) {
   std::vector<DetectedCadence> detected;
   // Detected slightly before the planned tick.
-  detected.push_back({CadenceType::Perfect,
-                      kTicksPerBar * 2 + kTicksPerBeat / 2, 0.9f});
+  detected.push_back({CadenceType::Perfect, kTicksPerBar * 2 + kTicksPerBeat / 2, 0.9f});
 
   std::vector<Tick> planned = {kTicksPerBar * 2};
 
@@ -324,8 +315,7 @@ TEST(CadenceDetectionRateTest, ToleranceWindowMisses) {
 TEST(CadenceDetectionRateTest, CustomTolerance) {
   std::vector<DetectedCadence> detected;
   // Detected 2 beats away from planned.
-  detected.push_back({CadenceType::Perfect,
-                      kTicksPerBar * 2 + kTicksPerBeat * 2, 0.9f});
+  detected.push_back({CadenceType::Perfect, kTicksPerBar * 2 + kTicksPerBeat * 2, 0.9f});
 
   std::vector<Tick> planned = {kTicksPerBar * 2};
 

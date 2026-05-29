@@ -28,8 +28,7 @@ struct FugueAnalysisResult {
 /// @param num_voices Number of voices in the fugue.
 /// @param subject_notes The original subject notes for comparison.
 /// @return Analysis result with scores in [0,1].
-FugueAnalysisResult analyzeFugue(const std::vector<NoteEvent>& notes,
-                                 uint8_t num_voices,
+FugueAnalysisResult analyzeFugue(const std::vector<NoteEvent>& notes, uint8_t num_voices,
                                  const std::vector<NoteEvent>& subject_notes);
 
 /// @brief Check exposition completeness (each voice should enter once with subject).
@@ -37,8 +36,7 @@ FugueAnalysisResult analyzeFugue(const std::vector<NoteEvent>& notes,
 /// @param num_voices Number of voices in the fugue.
 /// @param subject_notes The original subject notes for interval pattern matching.
 /// @return Score in [0,1]; 1.0 means every voice has a subject entry.
-float expositionCompletenessScore(const std::vector<NoteEvent>& notes,
-                                  uint8_t num_voices,
+float expositionCompletenessScore(const std::vector<NoteEvent>& notes, uint8_t num_voices,
                                   const std::vector<NoteEvent>& subject_notes);
 
 /// @brief Evaluate tonal plan diversity across the piece.
@@ -69,8 +67,7 @@ float computeCadenceDetectionRate(const HarmonicTimeline& timeline,
 /// @param num_voices Number of voices.
 /// @return Unity score [0.0, 1.0].
 float computeMotivicUnityScore(const std::vector<NoteEvent>& notes,
-                                const std::vector<NoteEvent>& subject_notes,
-                                uint8_t num_voices);
+                               const std::vector<NoteEvent>& subject_notes, uint8_t num_voices);
 
 /// @brief Compute tonal consistency score.
 ///
@@ -83,8 +80,8 @@ float computeMotivicUnityScore(const std::vector<NoteEvent>& notes,
 /// @param tonic_key The expected tonic key.
 /// @param is_minor Whether the key is minor.
 /// @return Consistency score [0.0, 1.0].
-float computeTonalConsistencyScore(const std::vector<NoteEvent>& notes,
-                                    Key tonic_key, bool is_minor);
+float computeTonalConsistencyScore(const std::vector<NoteEvent>& notes, Key tonic_key,
+                                   bool is_minor);
 
 /// @brief Compute invertible counterpoint score.
 ///
@@ -97,8 +94,7 @@ float computeTonalConsistencyScore(const std::vector<NoteEvent>& notes,
 /// @param num_voices Number of voices.
 /// @return Score in [0,1]; 1.0 = fully invertible, 0.0 = many violations.
 float invertibleCounterpointScore(const std::vector<NoteEvent>& subject_notes,
-                                   const std::vector<NoteEvent>& counter_notes,
-                                   uint8_t num_voices);
+                                  const std::vector<NoteEvent>& counter_notes, uint8_t num_voices);
 
 }  // namespace bach
 

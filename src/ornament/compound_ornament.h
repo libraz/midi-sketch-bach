@@ -35,8 +35,7 @@ enum class CompoundOrnamentType : uint8_t {
 /// @param speed Trill speed (alternation cycles per beat, default 4).
 /// @return Vector of sub-notes replacing the original note. Returns
 ///         {original_note} unchanged if duration is too short.
-std::vector<NoteEvent> generateCompoundOrnament(const NoteEvent& note,
-                                                CompoundOrnamentType type,
+std::vector<NoteEvent> generateCompoundOrnament(const NoteEvent& note, CompoundOrnamentType type,
                                                 uint8_t upper_pitch, uint8_t lower_pitch,
                                                 uint8_t speed = 4);
 

@@ -22,8 +22,8 @@ namespace bach {
 
 /// @brief A candidate pitch sequence from a vocabulary figure.
 struct FigureCandidate {
-  std::vector<uint8_t> pitches;   ///< Concrete MIDI pitches.
-  const MelodicFigure* source;    ///< Provenance tracking (which figure).
+  std::vector<uint8_t> pitches;  ///< Concrete MIDI pitches.
+  const MelodicFigure* source;   ///< Provenance tracking (which figure).
 };
 
 /// @brief Resolve a DegreeInterval to a concrete pitch from a starting pitch.
@@ -32,15 +32,15 @@ struct FigureCandidate {
 /// @param key Current musical key.
 /// @param scale Current scale type.
 /// @return Resolved MIDI pitch, or 0 if out of range.
-inline uint8_t resolveDegreeInterval(uint8_t start_pitch,
-                                     const DegreeInterval& di,
-                                     Key key, ScaleType scale) {
+inline uint8_t resolveDegreeInterval(uint8_t start_pitch, const DegreeInterval& di, Key key,
+                                     ScaleType scale) {
   int start_deg = scale_util::pitchToAbsoluteDegree(start_pitch, key, scale);
   int target_deg = start_deg + di.degree_diff;
   uint8_t target_pitch = scale_util::absoluteDegreeToPitch(target_deg, key, scale);
   // Apply chromatic offset.
   int adjusted = static_cast<int>(target_pitch) + di.chroma_offset;
-  if (adjusted < 0 || adjusted > 127) return 0;
+  if (adjusted < 0 || adjusted > 127)
+    return 0;
   return static_cast<uint8_t>(adjusted);
 }
 
@@ -59,11 +59,11 @@ inline uint8_t resolveDegreeInterval(uint8_t start_pitch,
 /// @param rng Random number generator.
 /// @param figure_probability Base probability of attempting injection.
 /// @return Optional FigureCandidate if injection succeeds.
-inline std::optional<FigureCandidate> tryInjectFigure(
-    const MelodicState& state, uint8_t current_pitch,
-    Key key, ScaleType scale, Tick current_tick,
-    uint8_t low_pitch, uint8_t high_pitch,
-    std::mt19937& rng, float figure_probability) {
+inline std::optional<FigureCandidate> tryInjectFigure(const MelodicState& state,
+                                                      uint8_t current_pitch, Key key,
+                                                      ScaleType scale, Tick current_tick,
+                                                      uint8_t low_pitch, uint8_t high_pitch,
+                                                      std::mt19937& rng, float figure_probability) {
   // Probabilistic gate with offbeat bonus.
   float effective_prob = figure_probability;
   if (metricLevel(current_tick) == MetricLevel::Offbeat) {
@@ -75,13 +75,11 @@ inline std::optional<FigureCandidate> tryInjectFigure(
 
   // Select figure based on phrase_progress.
   // Early: ascending/turn-up patterns. Mid: neighbors/cambiata. Late: descending.
-  const MelodicFigure* candidates_early[] = {
-      &kAscRun4, &kTurnUp, &kStepDownLeapUp};
-  const MelodicFigure* candidates_mid[] = {
-      &kLowerNbr, &kUpperNbr, &kCambiataNbr, &kEchappee,
-      &kWideLowerOsc, &kWideUpperOsc};
-  const MelodicFigure* candidates_late[] = {
-      &kDescRun4, &kCambiataDown, &kLeapUpStepDown, &kTurnDown};
+  const MelodicFigure* candidates_early[] = {&kAscRun4, &kTurnUp, &kStepDownLeapUp};
+  const MelodicFigure* candidates_mid[] = {&kLowerNbr, &kUpperNbr,     &kCambiataNbr,
+                                           &kEchappee, &kWideLowerOsc, &kWideUpperOsc};
+  const MelodicFigure* candidates_late[] = {&kDescRun4, &kCambiataDown, &kLeapUpStepDown,
+                                            &kTurnDown};
 
   const MelodicFigure** pool;
   int pool_size;
@@ -110,8 +108,7 @@ inline std::optional<FigureCandidate> tryInjectFigure(
 
   for (int idx = 0; idx < figure->note_count - 1; ++idx) {
     uint8_t prev = pitches.back();
-    uint8_t next = resolveDegreeInterval(prev, figure->degree_intervals[idx],
-                                         key, scale);
+    uint8_t next = resolveDegreeInterval(prev, figure->degree_intervals[idx], key, scale);
     if (next == 0 || next < low_pitch || next > high_pitch) {
       return std::nullopt;  // Out of range -- abort entire figure.
     }
@@ -135,10 +132,10 @@ inline std::optional<FigureCandidate> tryInjectFigure(
 /// @param high_pitch Upper pitch bound.
 /// @param rng Random number generator.
 /// @return Optional FigureCandidate if generation succeeds.
-inline std::optional<FigureCandidate> generateFortspinnung(
-    uint8_t current_pitch, Key key, ScaleType scale,
-    Tick current_tick, uint8_t low_pitch, uint8_t high_pitch,
-    std::mt19937& rng) {
+inline std::optional<FigureCandidate> generateFortspinnung(uint8_t current_pitch, Key key,
+                                                           ScaleType scale, Tick current_tick,
+                                                           uint8_t low_pitch, uint8_t high_pitch,
+                                                           std::mt19937& rng) {
   // Choose leap size: 3rd (60%), 4th (35%), 5th (5% on bar only).
   int leap_degrees;
   float roll = rng::rollFloat(rng, 0.0f, 1.0f);
@@ -206,9 +203,8 @@ inline std::optional<FigureCandidate> generateFortspinnung(
 
   // Static figure reference for provenance.
   static const MelodicFigure kFortspinnungFigure = {
-      "fortspinnung", IntervalMode::Degree, true,
-      nullptr, nullptr, nullptr, nullptr,
-      0, "generated"};
+      "fortspinnung", IntervalMode::Degree, true, nullptr, nullptr, nullptr, nullptr, 0,
+      "generated"};
 
   return FigureCandidate{std::move(pitches), &kFortspinnungFigure};
 }
@@ -235,10 +231,11 @@ struct RhythmCellCandidate {
 /// @param rng Random number generator.
 /// @param cell_probability Probability of attempting injection.
 /// @return Optional RhythmCellCandidate if injection succeeds.
-inline std::optional<RhythmCellCandidate> tryInjectRhythmCell(
-    float energy, Tick remaining, Tick current_tick,
-    std::mt19937& rng, float cell_probability = 0.25f) {
-  if (!rng::rollProbability(rng, cell_probability)) return std::nullopt;
+inline std::optional<RhythmCellCandidate> tryInjectRhythmCell(float energy, Tick remaining,
+                                                              Tick current_tick, std::mt19937& rng,
+                                                              float cell_probability = 0.25f) {
+  if (!rng::rollProbability(rng, cell_probability))
+    return std::nullopt;
 
   // Energy-based candidate filtering.
   std::vector<const RhythmCell*> candidates;
@@ -247,36 +244,40 @@ inline std::optional<RhythmCellCandidate> tryInjectRhythmCell(
     Tick cell_ticks = static_cast<Tick>(cell->total_beats * kTicksPerBeat);
 
     // Must fit in remaining ticks.
-    if (cell_ticks > remaining) continue;
+    if (cell_ticks > remaining)
+      continue;
 
     // Must not cross bar boundary.
     Tick ticks_to_bar = kTicksPerBar - (current_tick % kTicksPerBar);
-    if (cell_ticks > ticks_to_bar) continue;
+    if (cell_ticks > ticks_to_bar)
+      continue;
 
     // Energy filter.
     if (energy > 0.7f) {
       // High energy: prefer short cells (16th, lombardic, short-long).
-      if (cell->total_beats > 1.5f) continue;
+      if (cell->total_beats > 1.5f)
+        continue;
     } else if (energy < 0.3f) {
       // Low energy: prefer long cells (quarter, qtr_start).
-      if (cell->total_beats < 1.5f) continue;
+      if (cell->total_beats < 1.5f)
+        continue;
     }
     // Mid energy: all candidates OK.
 
     candidates.push_back(cell);
   }
 
-  if (candidates.empty()) return std::nullopt;
+  if (candidates.empty())
+    return std::nullopt;
 
-  const RhythmCell* chosen = candidates[
-      rng::rollRange(rng, 0, static_cast<int>(candidates.size()) - 1)];
+  const RhythmCell* chosen =
+      candidates[rng::rollRange(rng, 0, static_cast<int>(candidates.size()) - 1)];
 
   RhythmCellCandidate result;
   result.cell = chosen;
   result.durations.reserve(chosen->note_count);
   for (int i = 0; i < chosen->note_count; ++i) {
-    result.durations.push_back(
-        static_cast<Tick>(chosen->beat_ratios[i] * kTicksPerBeat));
+    result.durations.push_back(static_cast<Tick>(chosen->beat_ratios[i] * kTicksPerBeat));
   }
   return result;
 }

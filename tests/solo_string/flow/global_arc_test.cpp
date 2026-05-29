@@ -1,17 +1,16 @@
 // Tests for GlobalArc integration -- arc structure validation, register evolution,
 // and how the harmonic arpeggio engine uses the global arc during generation.
 
-#include "solo_string/flow/arpeggio_flow_config.h"
-#include "solo_string/flow/harmonic_arpeggio_engine.h"
+#include <gtest/gtest.h>
 
 #include <algorithm>
 #include <cstdint>
 #include <map>
 #include <vector>
 
-#include <gtest/gtest.h>
-
 #include "core/basic_types.h"
+#include "solo_string/flow/arpeggio_flow_config.h"
+#include "solo_string/flow/harmonic_arpeggio_engine.h"
 
 namespace bach {
 namespace {
@@ -21,9 +20,8 @@ namespace {
 // ===========================================================================
 
 /// @brief Build a valid ArpeggioFlowConfig with given parameters.
-ArpeggioFlowConfig makeArcTestConfig(int num_sections = 6,
-                                      int bars_per_section = 4,
-                                      uint32_t seed = 42) {
+ArpeggioFlowConfig makeArcTestConfig(int num_sections = 6, int bars_per_section = 4,
+                                     uint32_t seed = 42) {
   ArpeggioFlowConfig config;
   config.num_sections = num_sections;
   config.bars_per_section = bars_per_section;
@@ -42,11 +40,10 @@ ArpeggioFlowConfig makeArcTestConfig(int num_sections = 6,
 /// @param section_idx 0-based section index.
 /// @param bars_per_section Number of bars per section.
 /// @return The register range in semitones, or -1 if no notes in the section.
-int computeSectionRegisterRange(const std::vector<NoteEvent>& notes,
-                                int section_idx, int bars_per_section) {
+int computeSectionRegisterRange(const std::vector<NoteEvent>& notes, int section_idx,
+                                int bars_per_section) {
   Tick section_start = static_cast<Tick>(section_idx * bars_per_section) * kTicksPerBar;
-  Tick section_end = section_start +
-                     static_cast<Tick>(bars_per_section) * kTicksPerBar;
+  Tick section_end = section_start + static_cast<Tick>(bars_per_section) * kTicksPerBar;
 
   uint8_t min_pitch = 127;
   uint8_t max_pitch = 0;
@@ -54,27 +51,30 @@ int computeSectionRegisterRange(const std::vector<NoteEvent>& notes,
 
   for (const auto& note : notes) {
     if (note.start_tick >= section_start && note.start_tick < section_end) {
-      if (note.pitch < min_pitch) min_pitch = note.pitch;
-      if (note.pitch > max_pitch) max_pitch = note.pitch;
+      if (note.pitch < min_pitch)
+        min_pitch = note.pitch;
+      if (note.pitch > max_pitch)
+        max_pitch = note.pitch;
       found = true;
     }
   }
 
-  if (!found) return -1;
+  if (!found)
+    return -1;
   return static_cast<int>(max_pitch) - static_cast<int>(min_pitch);
 }
 
 /// @brief Get the maximum pitch within a section.
-uint8_t getMaxPitchInSection(const std::vector<NoteEvent>& notes,
-                             int section_idx, int bars_per_section) {
+uint8_t getMaxPitchInSection(const std::vector<NoteEvent>& notes, int section_idx,
+                             int bars_per_section) {
   Tick section_start = static_cast<Tick>(section_idx * bars_per_section) * kTicksPerBar;
-  Tick section_end = section_start +
-                     static_cast<Tick>(bars_per_section) * kTicksPerBar;
+  Tick section_end = section_start + static_cast<Tick>(bars_per_section) * kTicksPerBar;
 
   uint8_t max_pitch = 0;
   for (const auto& note : notes) {
     if (note.start_tick >= section_start && note.start_tick < section_end) {
-      if (note.pitch > max_pitch) max_pitch = note.pitch;
+      if (note.pitch > max_pitch)
+        max_pitch = note.pitch;
     }
   }
   return max_pitch;
@@ -95,9 +95,12 @@ TEST(GlobalArcTest, DefaultArcConfigHasCorrectStructure) {
   bool has_peak = false;
   bool has_descent = false;
   for (const auto& [sec_id, phase] : config.phase_assignment) {
-    if (phase == ArcPhase::Ascent) has_ascent = true;
-    if (phase == ArcPhase::Peak) has_peak = true;
-    if (phase == ArcPhase::Descent) has_descent = true;
+    if (phase == ArcPhase::Ascent)
+      has_ascent = true;
+    if (phase == ArcPhase::Peak)
+      has_peak = true;
+    if (phase == ArcPhase::Descent)
+      has_descent = true;
   }
   EXPECT_TRUE(has_ascent);
   EXPECT_TRUE(has_peak);
@@ -121,9 +124,8 @@ TEST(GlobalArcTest, PeakIsAlwaysExactlyOneSectionForVariousCounts) {
       }
     }
 
-    EXPECT_EQ(peak_count, 1)
-        << "Expected exactly 1 Peak section for num_sections=" << num_sections
-        << ", got " << peak_count;
+    EXPECT_EQ(peak_count, 1) << "Expected exactly 1 Peak section for num_sections=" << num_sections
+                             << ", got " << peak_count;
   }
 }
 
@@ -143,16 +145,13 @@ TEST(GlobalArcTest, PhaseOrderIsMonotonic) {
 
     for (const auto& [sec_id, phase] : config.phase_assignment) {
       if (phase == ArcPhase::Peak) {
-        EXPECT_FALSE(seen_descent)
-            << "Peak found after Descent for num_sections=" << num_sections;
+        EXPECT_FALSE(seen_descent) << "Peak found after Descent for num_sections=" << num_sections;
         seen_peak = true;
       } else if (phase == ArcPhase::Descent) {
-        EXPECT_TRUE(seen_peak)
-            << "Descent found before Peak for num_sections=" << num_sections;
+        EXPECT_TRUE(seen_peak) << "Descent found before Peak for num_sections=" << num_sections;
         seen_descent = true;
       } else if (phase == ArcPhase::Ascent) {
-        EXPECT_FALSE(seen_peak)
-            << "Ascent found after Peak for num_sections=" << num_sections;
+        EXPECT_FALSE(seen_peak) << "Ascent found after Peak for num_sections=" << num_sections;
         EXPECT_FALSE(seen_descent)
             << "Ascent found after Descent for num_sections=" << num_sections;
       }
@@ -172,11 +171,7 @@ TEST(GlobalArcTest, EngineRejectsInvalidArcInConfig) {
 
   // Two peaks -- invalid.
   config.arc.phase_assignment = {
-      {0, ArcPhase::Ascent},
-      {1, ArcPhase::Peak},
-      {2, ArcPhase::Peak},
-      {3, ArcPhase::Descent}
-  };
+      {0, ArcPhase::Ascent}, {1, ArcPhase::Peak}, {2, ArcPhase::Peak}, {3, ArcPhase::Descent}};
 
   auto result = generateArpeggioFlow(config);
   EXPECT_FALSE(result.success);
@@ -190,10 +185,7 @@ TEST(GlobalArcTest, EngineRejectsReversedArc) {
   config.seed = 42;
 
   config.arc.phase_assignment = {
-      {0, ArcPhase::Descent},
-      {1, ArcPhase::Peak},
-      {2, ArcPhase::Ascent}
-  };
+      {0, ArcPhase::Descent}, {1, ArcPhase::Peak}, {2, ArcPhase::Ascent}};
 
   auto result = generateArpeggioFlow(config);
   EXPECT_FALSE(result.success);
@@ -234,18 +226,19 @@ TEST(GlobalArcTest, PeakSectionHasWidestRegister) {
   }
   ASSERT_GE(peak_section, 0);
 
-  int peak_range = computeSectionRegisterRange(notes, peak_section,
-                                                config.bars_per_section);
+  int peak_range = computeSectionRegisterRange(notes, peak_section, config.bars_per_section);
   ASSERT_GE(peak_range, 0) << "No notes in peak section";
 
   // The peak section should have a register range at least as wide as every
   // non-cadence section. We exclude the last section since the final bar has
   // a special cadence generator that may use a different register.
   for (int sec = 0; sec < config.num_sections - 1; ++sec) {
-    if (sec == peak_section) continue;
+    if (sec == peak_section)
+      continue;
 
     int sec_range = computeSectionRegisterRange(notes, sec, config.bars_per_section);
-    if (sec_range < 0) continue;  // No notes
+    if (sec_range < 0)
+      continue;  // No notes
 
     EXPECT_GE(peak_range, sec_range)
         << "Peak section (" << peak_section << ") register range (" << peak_range
@@ -274,10 +267,9 @@ TEST(GlobalArcTest, AscentMaxPitchGenerallyIncreases) {
   // We check that the last Ascent section's max pitch is at least as high
   // as the first Ascent section's max pitch.
   if (ascent_sections.size() >= 2) {
-    uint8_t first_max = getMaxPitchInSection(notes, ascent_sections.front(),
-                                              config.bars_per_section);
-    uint8_t last_max = getMaxPitchInSection(notes, ascent_sections.back(),
-                                             config.bars_per_section);
+    uint8_t first_max =
+        getMaxPitchInSection(notes, ascent_sections.front(), config.bars_per_section);
+    uint8_t last_max = getMaxPitchInSection(notes, ascent_sections.back(), config.bars_per_section);
 
     EXPECT_GE(last_max, first_max)
         << "Max pitch in last Ascent section (" << static_cast<int>(last_max)
@@ -297,8 +289,7 @@ TEST(GlobalArcTest, DescentMaxPitchGenerallyDecreases) {
   // Collect Descent sections (excluding the last one which has the final bar).
   std::vector<int> descent_sections;
   for (const auto& [sec_id, phase] : config.arc.phase_assignment) {
-    if (phase == ArcPhase::Descent &&
-        static_cast<int>(sec_id) < config.num_sections - 1) {
+    if (phase == ArcPhase::Descent && static_cast<int>(sec_id) < config.num_sections - 1) {
       descent_sections.push_back(static_cast<int>(sec_id));
     }
   }
@@ -307,10 +298,10 @@ TEST(GlobalArcTest, DescentMaxPitchGenerallyDecreases) {
   // We check that the first Descent section has higher max pitch
   // than the last non-final Descent section.
   if (descent_sections.size() >= 2) {
-    uint8_t first_max = getMaxPitchInSection(notes, descent_sections.front(),
-                                              config.bars_per_section);
-    uint8_t last_max = getMaxPitchInSection(notes, descent_sections.back(),
-                                             config.bars_per_section);
+    uint8_t first_max =
+        getMaxPitchInSection(notes, descent_sections.front(), config.bars_per_section);
+    uint8_t last_max =
+        getMaxPitchInSection(notes, descent_sections.back(), config.bars_per_section);
 
     EXPECT_GE(first_max, last_max)
         << "Max pitch in first Descent section (" << static_cast<int>(first_max)
@@ -351,30 +342,26 @@ TEST(GlobalArcTest, RegisterRangeNarrowerAtExtremesThanAtPeak) {
   ASSERT_GE(first_ascent, 0);
   ASSERT_GE(last_descent, 0);
 
-  int peak_range = computeSectionRegisterRange(notes, peak_section,
-                                                config.bars_per_section);
-  int first_range = computeSectionRegisterRange(notes, first_ascent,
-                                                 config.bars_per_section);
+  int peak_range = computeSectionRegisterRange(notes, peak_section, config.bars_per_section);
+  int first_range = computeSectionRegisterRange(notes, first_ascent, config.bars_per_section);
 
   // Skip last_descent check if it is the final section (cadence bar interference).
   int last_range = -1;
   if (last_descent < config.num_sections - 1) {
-    last_range = computeSectionRegisterRange(notes, last_descent,
-                                              config.bars_per_section);
+    last_range = computeSectionRegisterRange(notes, last_descent, config.bars_per_section);
   }
 
   // The first Ascent section should have a narrower register than Peak.
   if (peak_range > 0 && first_range >= 0) {
     EXPECT_GE(peak_range, first_range)
-        << "Peak range (" << peak_range << ") should be >= first Ascent range ("
-        << first_range << ")";
+        << "Peak range (" << peak_range << ") should be >= first Ascent range (" << first_range
+        << ")";
   }
 
   // If the last non-final Descent section exists, it should be narrower than Peak.
   if (peak_range > 0 && last_range >= 0) {
-    EXPECT_GE(peak_range, last_range)
-        << "Peak range (" << peak_range << ") should be >= last Descent range ("
-        << last_range << ")";
+    EXPECT_GE(peak_range, last_range) << "Peak range (" << peak_range
+                                      << ") should be >= last Descent range (" << last_range << ")";
   }
 }
 
@@ -392,10 +379,8 @@ TEST(GlobalArcTest, DefaultArcIsConfigFixedNotSeedDependent) {
   ASSERT_EQ(config_a.phase_assignment.size(), config_b.phase_assignment.size());
 
   for (size_t idx = 0; idx < config_a.phase_assignment.size(); ++idx) {
-    EXPECT_EQ(config_a.phase_assignment[idx].first,
-              config_b.phase_assignment[idx].first);
-    EXPECT_EQ(config_a.phase_assignment[idx].second,
-              config_b.phase_assignment[idx].second);
+    EXPECT_EQ(config_a.phase_assignment[idx].first, config_b.phase_assignment[idx].first);
+    EXPECT_EQ(config_a.phase_assignment[idx].second, config_b.phase_assignment[idx].second);
   }
 }
 

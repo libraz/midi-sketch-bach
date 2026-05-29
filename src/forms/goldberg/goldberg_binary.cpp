@@ -6,10 +6,8 @@
 
 namespace bach {
 
-std::vector<NoteEvent> applyBinaryRepeats(
-    const std::vector<NoteEvent>& unique_notes,
-    Tick section_ticks,
-    bool /*ornament_variation*/) {
+std::vector<NoteEvent> applyBinaryRepeats(const std::vector<NoteEvent>& unique_notes,
+                                          Tick section_ticks, bool /*ornament_variation*/) {
   // Split notes into A section (0 to section_ticks) and B section.
   std::vector<NoteEvent> a_notes;
   std::vector<NoteEvent> b_notes;
@@ -50,10 +48,9 @@ std::vector<NoteEvent> applyBinaryRepeats(
   }
 
   // Sort by start_tick for clean output
-  std::sort(result.begin(), result.end(),
-            [](const NoteEvent& lhs, const NoteEvent& rhs) {
-              return lhs.start_tick < rhs.start_tick;
-            });
+  std::sort(result.begin(), result.end(), [](const NoteEvent& lhs, const NoteEvent& rhs) {
+    return lhs.start_tick < rhs.start_tick;
+  });
 
   return result;
 }

@@ -43,8 +43,7 @@ RegistrationPlan createDefaultRegistrationPlan();
 /// @param phase Current fugue phase.
 /// @param is_coda True if we are in the coda section.
 /// @return The appropriate Registration.
-const Registration& getRegistrationForPhase(const RegistrationPlan& plan,
-                                            FuguePhase phase,
+const Registration& getRegistrationForPhase(const RegistrationPlan& plan, FuguePhase phase,
                                             bool is_coda = false);
 
 /// @brief Generate MIDI CC events for a registration change.
@@ -68,11 +67,8 @@ std::vector<MidiEvent> generateRegistrationEvents(const Registration& reg, Tick 
 /// @param exposition_tick Start tick of exposition.
 /// @param stretto_tick Start tick of stretto (0 = no stretto).
 /// @param coda_tick Start tick of coda (0 = no coda).
-void applyRegistrationPlan(std::vector<Track>& tracks,
-                           const RegistrationPlan& plan,
-                           Tick exposition_tick,
-                           Tick stretto_tick = 0,
-                           Tick coda_tick = 0);
+void applyRegistrationPlan(std::vector<Track>& tracks, const RegistrationPlan& plan,
+                           Tick exposition_tick, Tick stretto_tick = 0, Tick coda_tick = 0);
 
 /// @brief Generate CC#7 (Volume) events from energy curve at section boundaries.
 ///
@@ -91,9 +87,9 @@ std::vector<MidiEvent> generateEnergyRegistrationEvents(
 
 /// @brief A registration change point at a specific tick position.
 struct RegistrationPoint {
-  Tick tick = 0;                ///< Tick position for this registration change.
-  Registration registration;    ///< The registration settings to apply.
-  std::string label;            ///< Descriptive label (e.g., "exposition", "episode_1").
+  Tick tick = 0;              ///< Tick position for this registration change.
+  Registration registration;  ///< The registration settings to apply.
+  std::string label;          ///< Descriptive label (e.g., "exposition", "episode_1").
 };
 
 /// @brief Extended registration plan with N structural trigger points.
@@ -132,8 +128,8 @@ struct ExtendedRegistrationPlan {
 /// @param sections Fugue structure sections for timing and type information.
 /// @param total_duration Total piece duration for energy curve computation.
 /// @return ExtendedRegistrationPlan with N points (one per section).
-ExtendedRegistrationPlan createExtendedRegistrationPlan(
-    const std::vector<FugueSection>& sections, Tick total_duration);
+ExtendedRegistrationPlan createExtendedRegistrationPlan(const std::vector<FugueSection>& sections,
+                                                        Tick total_duration);
 
 /// @brief Apply an extended registration plan to tracks by inserting CC events.
 ///
@@ -143,7 +139,7 @@ ExtendedRegistrationPlan createExtendedRegistrationPlan(
 /// @param tracks Tracks to modify (events appended to matching channels).
 /// @param plan Extended registration plan.
 void applyExtendedRegistrationPlan(std::vector<Track>& tracks,
-                                    const ExtendedRegistrationPlan& plan);
+                                   const ExtendedRegistrationPlan& plan);
 
 }  // namespace bach
 

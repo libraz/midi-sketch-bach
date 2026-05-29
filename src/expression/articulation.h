@@ -27,8 +27,8 @@ enum class ArticulationType : uint8_t {
 /// dynamic level for non-organ instruments.
 struct ArticulationRule {
   ArticulationType type = ArticulationType::NonLegato;
-  float gate_ratio = 0.85f;       ///< Note-on to note-off ratio (0.0-1.0)
-  int8_t velocity_offset = 0;     ///< Velocity adjustment (-127 to 127)
+  float gate_ratio = 0.85f;    ///< Note-on to note-off ratio (0.0-1.0)
+  int8_t velocity_offset = 0;  ///< Velocity adjustment (-127 to 127)
 };
 
 /// @brief Get the default articulation rule for a given voice role.

@@ -17,9 +17,9 @@ namespace bach {
 /// Grid-vs-melody clash policy for Quodlibet.
 /// Controls how aggressively melody notes are snapped to grid harmony.
 struct QuodlibetClashPolicy {
-  static constexpr int kStrongBeatMaxClash = 0;         ///< Semitones allowed on strong beats.
-  static constexpr int kWeakBeatMaxClash = 2;            ///< Semitones allowed on weak beats.
-  static constexpr float kWeakBeatMaxDuration = 1.0f;    ///< Max beats for weak-beat clash.
+  static constexpr int kStrongBeatMaxClash = 0;            ///< Semitones allowed on strong beats.
+  static constexpr int kWeakBeatMaxClash = 2;              ///< Semitones allowed on weak beats.
+  static constexpr float kWeakBeatMaxDuration = 1.0f;      ///< Max beats for weak-beat clash.
   static constexpr float kClashPenaltyPerSemitone = 1.5f;  ///< Penalty weight per semitone.
 };
 
@@ -47,11 +47,8 @@ class QuodlibetGenerator {
   /// @param time_sig Time signature (typically 3/4).
   /// @param seed Random seed for deterministic generation.
   /// @return QuodlibetResult with generated notes and success status.
-  QuodlibetResult generate(
-      const GoldbergStructuralGrid& grid,
-      const KeySignature& key,
-      const TimeSignature& time_sig,
-      uint32_t seed) const;
+  QuodlibetResult generate(const GoldbergStructuralGrid& grid, const KeySignature& key,
+                           const TimeSignature& time_sig, uint32_t seed) const;
 
  private:
   /// @brief Place a folk melody onto the grid, adjusting pitches for harmonic alignment.
@@ -72,47 +69,38 @@ class QuodlibetGenerator {
   /// @param voice Voice index for the melody placement.
   /// @param rng Random engine for minor variation.
   /// @return Vector of NoteEvents with QuodlibetMelody source.
-  std::vector<NoteEvent> placeMelodyOnGrid(
-      const uint8_t* melody_pitches,
-      const Tick* melody_durations,
-      int melody_length,
-      Tick start_tick,
-      int bar_count,
-      const GoldbergStructuralGrid& grid,
-      const KeySignature& key,
-      const TimeSignature& time_sig,
-      uint8_t voice,
-      std::mt19937& rng) const;
+  std::vector<NoteEvent> placeMelodyOnGrid(const uint8_t* melody_pitches,
+                                           const Tick* melody_durations, int melody_length,
+                                           Tick start_tick, int bar_count,
+                                           const GoldbergStructuralGrid& grid,
+                                           const KeySignature& key, const TimeSignature& time_sig,
+                                           uint8_t voice, std::mt19937& rng) const;
 
   /// @brief Generate structural bass line from the grid.
   /// @param grid The structural grid.
   /// @param key Key signature.
   /// @param time_sig Time signature.
   /// @return Vector of bass NoteEvents with GoldbergBass source.
-  std::vector<NoteEvent> generateBassLine(
-      const GoldbergStructuralGrid& grid,
-      const KeySignature& key,
-      const TimeSignature& time_sig) const;
+  std::vector<NoteEvent> generateBassLine(const GoldbergStructuralGrid& grid,
+                                          const KeySignature& key,
+                                          const TimeSignature& time_sig) const;
 
   /// @brief Snap a pitch to the nearest chord tone of the bar's harmony.
   /// @param pitch Original MIDI pitch.
   /// @param bar_info Structural bar info containing chord information.
   /// @param key Key signature for chord tone calculation.
   /// @return Adjusted MIDI pitch (nearest chord tone).
-  uint8_t snapToChordTone(
-      uint8_t pitch,
-      const StructuralBarInfo& bar_info,
-      const KeySignature& key) const;
+  uint8_t snapToChordTone(uint8_t pitch, const StructuralBarInfo& bar_info,
+                          const KeySignature& key) const;
 
   /// @brief Validate cadence alignment between folk melody and grid.
   /// @param notes Generated melody notes to check.
   /// @param grid The structural grid with cadence positions.
   /// @param time_sig Time signature for bar calculation.
   /// @return True if cadence positions align with melody phrase endings.
-  bool validateCadenceAlignment(
-      const std::vector<NoteEvent>& notes,
-      const GoldbergStructuralGrid& grid,
-      const TimeSignature& time_sig) const;
+  bool validateCadenceAlignment(const std::vector<NoteEvent>& notes,
+                                const GoldbergStructuralGrid& grid,
+                                const TimeSignature& time_sig) const;
 };
 
 }  // namespace bach

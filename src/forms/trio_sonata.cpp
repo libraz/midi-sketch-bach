@@ -60,9 +60,8 @@ constexpr Tick kPhraseTicks = kPhraseBars * kTicksPerBar;  // 7680
 /// Custom trio sonata upper voice profile: higher stepwise ratio than default.
 /// Based on trio_sonata category avg: step 57.7%, interval 2.83.
 constexpr VoiceProfile kTrioUpper = {
-    0.58f, 0.24f, 0.02f, true, 1,
-    {0.3f, 1.0f, 1.2f, 3.0f, 2.5f, 1.0f}, 120,  // min=16th
-    0.22f, 0.0f, 0.30f, 0.10f};
+    0.58f, 0.24f, 0.02f, true, 1, {0.3f, 1.0f, 1.2f, 3.0f, 2.5f, 1.0f}, 120,  // min=16th
+    0.22f, 0.0f,  0.30f, 0.10f};
 
 /// @brief Right hand register bounds.
 constexpr uint8_t kRhLow = 64;
@@ -83,14 +82,14 @@ enum class TrioMovementCharacter : uint8_t { Allegro, Adagio, Vivace };
 
 /// @brief Design values for each movement character.
 struct CharacterParams {
-  Tick primary_dur;        ///< Primary note duration.
-  Tick secondary_dur;      ///< Secondary (shorter) note duration.
-  float secondary_prob;    ///< Probability of secondary duration.
-  int motif_len_min;       ///< Minimum motif length (notes).
-  int motif_len_max;       ///< Maximum motif length (notes).
-  float step_ratio;        ///< Probability of stepwise motion in motif.
-  float skip_ratio;        ///< Probability of 3rd skip in motif.
-  float pedal_dur;         ///< Primary pedal note duration.
+  Tick primary_dur;          ///< Primary note duration.
+  Tick secondary_dur;        ///< Secondary (shorter) note duration.
+  float secondary_prob;      ///< Probability of secondary duration.
+  int motif_len_min;         ///< Minimum motif length (notes).
+  int motif_len_max;         ///< Maximum motif length (notes).
+  float step_ratio;          ///< Probability of stepwise motion in motif.
+  float skip_ratio;          ///< Probability of 3rd skip in motif.
+  float pedal_dur;           ///< Primary pedal note duration.
   float thematic_bass_prob;  ///< Probability of thematic bass phrase.
 
   // Harmonic progression weights: DescFifths, CircleOfFifths, ChromCircle, Subdominant, Borrowed.
@@ -99,34 +98,36 @@ struct CharacterParams {
 
 /// @brief Get character parameters for a movement type.
 const CharacterParams& getCharacterParams(TrioMovementCharacter ch) {
-  static const CharacterParams kAllegro = {
-      kEighthNote, kSixteenthNote, 0.30f,
-      6, 8,
-      0.55f, 0.28f,
-      static_cast<float>(kQuarterNote),
-      0.20f,
-      {0.30f, 0.25f, 0.20f, 0.15f, 0.10f}};
+  static const CharacterParams kAllegro = {kEighthNote, kSixteenthNote,
+                                           0.30f,       6,
+                                           8,           0.55f,
+                                           0.28f,       static_cast<float>(kQuarterNote),
+                                           0.20f,       {0.30f, 0.25f, 0.20f, 0.15f, 0.10f}};
 
-  static const CharacterParams kAdagio = {
-      kQuarterNote, kEighthNote, 0.50f,
-      5, 7,
-      0.65f, 0.25f,
-      static_cast<float>(kHalfNote),
-      0.30f,
-      {0.20f, 0.25f, 0.10f, 0.30f, 0.15f}};
+  static const CharacterParams kAdagio = {kQuarterNote,
+                                          kEighthNote,
+                                          0.50f,
+                                          5,
+                                          7,
+                                          0.65f,
+                                          0.25f,
+                                          static_cast<float>(kHalfNote),
+                                          0.30f,
+                                          {0.20f, 0.25f, 0.10f, 0.30f, 0.15f}};
 
-  static const CharacterParams kVivace = {
-      kEighthNote, kSixteenthNote, 0.40f,
-      4, 6,
-      0.55f, 0.28f,
-      static_cast<float>(kQuarterNote),
-      0.25f,
-      {0.20f, 0.20f, 0.30f, 0.15f, 0.15f}};
+  static const CharacterParams kVivace = {kEighthNote, kSixteenthNote,
+                                          0.40f,       4,
+                                          6,           0.55f,
+                                          0.28f,       static_cast<float>(kQuarterNote),
+                                          0.25f,       {0.20f, 0.20f, 0.30f, 0.15f, 0.15f}};
 
   switch (ch) {
-    case TrioMovementCharacter::Adagio: return kAdagio;
-    case TrioMovementCharacter::Vivace: return kVivace;
-    default: return kAllegro;
+    case TrioMovementCharacter::Adagio:
+      return kAdagio;
+    case TrioMovementCharacter::Vivace:
+      return kVivace;
+    default:
+      return kAllegro;
   }
 }
 
@@ -169,11 +170,11 @@ std::vector<Track> createTrioSonataTracks() {
 /// The final phrase always ends with a cadence. Modulations to dominant or
 /// relative key may occur in middle phrases.
 HarmonicTimeline buildMovementTimeline(const KeySignature& key_sig, Tick duration,
-                                       const CharacterParams& params,
-                                       std::mt19937& rng) {
+                                       const CharacterParams& params, std::mt19937& rng) {
   HarmonicTimeline combined;
   Tick num_phrases = duration / kPhraseTicks;
-  if (num_phrases == 0) num_phrases = 1;
+  if (num_phrases == 0)
+    num_phrases = 1;
 
   static const std::vector<ProgressionType> kProgTypes = {
       ProgressionType::DescendingFifths, ProgressionType::CircleOfFifths,
@@ -206,8 +207,7 @@ HarmonicTimeline buildMovementTimeline(const KeySignature& key_sig, Tick duratio
     // Choose key for this phrase: home key, with 25% chance of dominant in mid phrases.
     KeySignature phrase_key = key_sig;
     if (p > 0 && p < num_phrases - 1 && rng::rollProbability(rng, 0.25f)) {
-      phrase_key = rng::rollProbability(rng, 0.6f) ? getDominant(key_sig)
-                                                   : getRelative(key_sig);
+      phrase_key = rng::rollProbability(rng, 0.6f) ? getDominant(key_sig) : getRelative(key_sig);
     }
 
     // Final phrase: use Subdominant or CircleOfFifths for stable ending.
@@ -220,8 +220,7 @@ HarmonicTimeline buildMovementTimeline(const KeySignature& key_sig, Tick duratio
     }
 
     HarmonicTimeline phrase_tl =
-        HarmonicTimeline::createProgression(phrase_key, phrase_dur,
-                                            HarmonicResolution::Bar, prog);
+        HarmonicTimeline::createProgression(phrase_key, phrase_dur, HarmonicResolution::Bar, prog);
 
     // Apply cadence to non-first phrases.
     if (p == num_phrases - 1) {
@@ -229,8 +228,7 @@ HarmonicTimeline buildMovementTimeline(const KeySignature& key_sig, Tick duratio
     } else if (p > 0 && rng::rollProbability(rng, 0.60f)) {
       CadenceType cad = rng::selectWeighted(
           rng,
-          std::vector<CadenceType>{CadenceType::Half, CadenceType::Deceptive,
-                                   CadenceType::Perfect},
+          std::vector<CadenceType>{CadenceType::Half, CadenceType::Deceptive, CadenceType::Perfect},
           std::vector<float>{0.40f, 0.30f, 0.30f});
       phrase_tl.applyCadence(cad, phrase_key);
     }
@@ -263,10 +261,8 @@ HarmonicTimeline buildMovementTimeline(const KeySignature& key_sig, Tick duratio
 /// @param is_minor Mode.
 /// @param rng RNG.
 /// @return Vector of NoteEvents with tick starting at 0 and pitches in C4-C5 range.
-std::vector<NoteEvent> generateMotif(const HarmonicEvent& event,
-                                     const CharacterParams& params,
-                                     Key key, bool is_minor,
-                                     std::mt19937& rng) {
+std::vector<NoteEvent> generateMotif(const HarmonicEvent& event, const CharacterParams& params,
+                                     Key key, bool is_minor, std::mt19937& rng) {
   std::vector<NoteEvent> motif;
   ScaleType scale = is_minor ? ScaleType::HarmonicMinor : ScaleType::Major;
 
@@ -284,9 +280,8 @@ std::vector<NoteEvent> generateMotif(const HarmonicEvent& event,
 
   for (int i = 0; i < num_notes; ++i) {
     // Choose duration.
-    Tick dur = rng::rollProbability(rng, params.secondary_prob)
-                   ? params.secondary_dur
-                   : params.primary_dur;
+    Tick dur = rng::rollProbability(rng, params.secondary_prob) ? params.secondary_dur
+                                                                : params.primary_dur;
 
     uint8_t pitch;
     if (i == 0) {
@@ -339,8 +334,7 @@ std::vector<NoteEvent> generateMotif(const HarmonicEvent& event,
   if (!motif.empty()) {
     motif.back().pitch = nearestChordTone(motif.back().pitch, event);
     motif.back().modified_by |= static_cast<uint8_t>(NoteModifiedBy::ChordToneSnap);
-    motif.back().pitch =
-        clampPitch(static_cast<int>(motif.back().pitch), 48, 84);
+    motif.back().pitch = clampPitch(static_cast<int>(motif.back().pitch), 48, 84);
     motif.back().modified_by |= static_cast<uint8_t>(NoteModifiedBy::OctaveAdjust);
   }
 
@@ -352,14 +346,15 @@ std::vector<NoteEvent> generateMotif(const HarmonicEvent& event,
 // ---------------------------------------------------------------------------
 
 /// @brief Transpose a motif to a target register center.
-std::vector<NoteEvent> placeInRegister(const std::vector<NoteEvent>& motif,
-                                       uint8_t target_center, uint8_t range_low,
-                                       uint8_t range_high) {
-  if (motif.empty()) return motif;
+std::vector<NoteEvent> placeInRegister(const std::vector<NoteEvent>& motif, uint8_t target_center,
+                                       uint8_t range_low, uint8_t range_high) {
+  if (motif.empty())
+    return motif;
 
   // Find average pitch of motif.
   int sum = 0;
-  for (const auto& n : motif) sum += n.pitch;
+  for (const auto& n : motif)
+    sum += n.pitch;
   int avg = sum / static_cast<int>(motif.size());
   int shift = static_cast<int>(target_center) - avg;
 
@@ -381,13 +376,13 @@ std::vector<NoteEvent> placeInRegister(const std::vector<NoteEvent>& motif,
 /// @param threshold Maximum allowed interval in semitones (default 12).
 /// @param center Register center pitch for voice role preservation.
 /// @param phrase_end End tick of the current phrase (for cadence window).
-void clampExcessiveLeaps(std::vector<NoteEvent>& notes, int threshold,
-                         uint8_t center, Tick phrase_end) {
-  if (notes.size() < 2) return;
+void clampExcessiveLeaps(std::vector<NoteEvent>& notes, int threshold, uint8_t center,
+                         Tick phrase_end) {
+  if (notes.size() < 2)
+    return;
 
   // Cadence window: last 2 beats of phrase are exempt.
-  Tick cadence_start = (phrase_end > kTicksPerBeat * 2)
-                           ? (phrase_end - kTicksPerBeat * 2) : 0;
+  Tick cadence_start = (phrase_end > kTicksPerBeat * 2) ? (phrase_end - kTicksPerBeat * 2) : 0;
 
   bool prev_was_large = false;
 
@@ -453,8 +448,7 @@ void setVoice(std::vector<NoteEvent>& notes, uint8_t voice) {
 }
 
 /// @brief Choose a duration with dotted rhythm variety.
-Tick chooseDuration(const CharacterParams& params, std::mt19937& rng,
-                    Tick remaining = 0) {
+Tick chooseDuration(const CharacterParams& params, std::mt19937& rng, Tick remaining = 0) {
   // Allowed duration sets based on movement tempo.
   // Fast (Allegro/Vivace): {120, 240, 480} — 16th, 8th, quarter.
   // Slow (Adagio): {240, 480, 960} — 8th, quarter, half.
@@ -471,7 +465,8 @@ Tick chooseDuration(const CharacterParams& params, std::mt19937& rng,
       candidates[count++] = durs[i];
     }
   }
-  if (count == 0) return 0;  // No duration fits — signal rest/skip.
+  if (count == 0)
+    return 0;  // No duration fits — signal rest/skip.
 
   // Weighted selection: prefer primary duration.
   float roll = rng::rollFloat(rng, 0.0f, 1.0f);
@@ -491,11 +486,9 @@ Tick chooseDuration(const CharacterParams& params, std::mt19937& rng,
 /// previous melodic direction is preferred.
 std::vector<NoteEvent> generateFiguration(Tick start_tick, Tick end_tick,
                                           const HarmonicTimeline& timeline,
-                                          const CharacterParams& params,
-                                          uint8_t range_low, uint8_t range_high,
-                                          uint8_t voice, uint8_t last_pitch,
-                                          Key key, bool is_minor,
-                                          std::mt19937& rng,
+                                          const CharacterParams& params, uint8_t range_low,
+                                          uint8_t range_high, uint8_t voice, uint8_t last_pitch,
+                                          Key key, bool is_minor, std::mt19937& rng,
                                           bool is_bass = false) {
   std::vector<NoteEvent> notes;
   ScaleType scale = is_minor ? ScaleType::HarmonicMinor : ScaleType::Major;
@@ -509,7 +502,8 @@ std::vector<NoteEvent> generateFiguration(Tick start_tick, Tick end_tick,
   while (current < end_tick) {
     Tick remaining = end_tick - current;
     Tick dur = chooseDuration(params, rng, remaining);
-    if (dur == 0) break;  // No valid duration fits — rest/skip.
+    if (dur == 0)
+      break;  // No valid duration fits — rest/skip.
 
     const HarmonicEvent& ev = timeline.getAt(current);
     // Only bar downbeats are "strong" (chord tone anchor).
@@ -525,8 +519,7 @@ std::vector<NoteEvent> generateFiguration(Tick start_tick, Tick end_tick,
 
     int abs_deg = scale_util::pitchToAbsoluteDegree(prev0, key, scale);
 
-    const VoiceProfile& voice_prof =
-        is_bass ? voice_profiles::kBassLine : kTrioUpper;
+    const VoiceProfile& voice_prof = is_bass ? voice_profiles::kBassLine : kTrioUpper;
 
     uint8_t pitch;
     if (is_downbeat) {
@@ -536,8 +529,7 @@ std::vector<NoteEvent> generateFiguration(Tick start_tick, Tick end_tick,
         auto chord_tones = collectChordTonesInRange(ev.chord, range_low, range_high);
         if (chord_tones.size() > 1) {
           // Score candidates for best voice-leading.
-          pitch = selectBestPitch(mel_state, prev0, chord_tones, current, true,
-                                  rng, voice_prof);
+          pitch = selectBestPitch(mel_state, prev0, chord_tones, current, true, rng, voice_prof);
         } else {
           // Shift by one scale step to avoid repetition.
           pitch = scale_util::absoluteDegreeToPitch(abs_deg + direction, key, scale);
@@ -607,9 +599,8 @@ std::vector<NoteEvent> generateFiguration(Tick start_tick, Tick end_tick,
 /// @param out_leader Output: leader notes.
 /// @param out_follower Output: follower notes.
 void generateUpperVoicePhrase(Tick phrase_start, const std::vector<NoteEvent>& motif,
-                              const HarmonicTimeline& timeline,
-                              const CharacterParams& params, uint8_t leader_voice,
-                              Key key, bool is_minor, std::mt19937& rng,
+                              const HarmonicTimeline& timeline, const CharacterParams& params,
+                              uint8_t leader_voice, Key key, bool is_minor, std::mt19937& rng,
                               std::vector<NoteEvent>& out_leader,
                               std::vector<NoteEvent>& out_follower) {
   ScaleType scale = is_minor ? ScaleType::HarmonicMinor : ScaleType::Major;
@@ -673,12 +664,10 @@ void generateUpperVoicePhrase(Tick phrase_start, const std::vector<NoteEvent>& m
     if (leader_seq.size() >= 4) {
       bool has_parallel = false;
       for (size_t i = 2; i < leader_seq.size(); ++i) {
-        int ivl_prev = interval_util::compoundToSimple(
-            static_cast<int>(leader_seq[i - 1].pitch) -
-            static_cast<int>(leader_seq[i - 2].pitch));
-        int ivl_curr = interval_util::compoundToSimple(
-            static_cast<int>(leader_seq[i].pitch) -
-            static_cast<int>(leader_seq[i - 1].pitch));
+        int ivl_prev = interval_util::compoundToSimple(static_cast<int>(leader_seq[i - 1].pitch) -
+                                                       static_cast<int>(leader_seq[i - 2].pitch));
+        int ivl_curr = interval_util::compoundToSimple(static_cast<int>(leader_seq[i].pitch) -
+                                                       static_cast<int>(leader_seq[i - 1].pitch));
         if ((ivl_prev == interval::kPerfect5th && ivl_curr == interval::kPerfect5th) ||
             (ivl_prev == interval::kUnison && ivl_curr == interval::kUnison) ||
             (ivl_prev == interval::kOctave && ivl_curr == interval::kOctave)) {
@@ -695,15 +684,14 @@ void generateUpperVoicePhrase(Tick phrase_start, const std::vector<NoteEvent>& m
   // --- Follower: delayed imitation (bars 1-2) ---
   // Compute imitation offset from motif duration.
   Tick raw_offset = motif_dur / 2;
-  Tick imitation_offset =
-      ((raw_offset + kEighthNote) / kQuarterNote) * kQuarterNote;
-  if (imitation_offset < kQuarterNote) imitation_offset = kQuarterNote;
+  Tick imitation_offset = ((raw_offset + kEighthNote) / kQuarterNote) * kQuarterNote;
+  if (imitation_offset < kQuarterNote)
+    imitation_offset = kQuarterNote;
 
   // Choose transformation.
   enum TransformType { Direct, Inversion, Diminution, Retrograde };
   TransformType transform = rng::selectWeighted(
-      rng,
-      std::vector<TransformType>{Direct, Inversion, Diminution, Retrograde},
+      rng, std::vector<TransformType>{Direct, Inversion, Diminution, Retrograde},
       std::vector<float>{0.40f, 0.30f, 0.15f, 0.15f});
 
   std::vector<NoteEvent> follower_imitation;
@@ -740,36 +728,36 @@ void generateUpperVoicePhrase(Tick phrase_start, const std::vector<NoteEvent>& m
       n.modified_by |= static_cast<uint8_t>(NoteModifiedBy::OverlapTrim);
     }
   }
-  follower_imitation.erase(
-      std::remove_if(follower_imitation.begin(), follower_imitation.end(),
-                     [half_phrase](const NoteEvent& n) {
-                       return n.start_tick >= half_phrase || n.duration == 0;
-                     }),
-      follower_imitation.end());
+  follower_imitation.erase(std::remove_if(follower_imitation.begin(), follower_imitation.end(),
+                                          [half_phrase](const NoteEvent& n) {
+                                            return n.start_tick >= half_phrase || n.duration == 0;
+                                          }),
+                           follower_imitation.end());
 
   // --- Free figuration for remaining phrase ---
   // Leader figuration starts after Fortspinnung; follower after imitation half.
   Tick leader_fig_start = fortspinnung_end;
   if (!leader_seq.empty()) {
     Tick seq_end = leader_seq.back().start_tick + leader_seq.back().duration;
-    if (seq_end > leader_fig_start) leader_fig_start = seq_end;
+    if (seq_end > leader_fig_start)
+      leader_fig_start = seq_end;
   }
 
   uint8_t leader_last = leader_motif.empty() ? leader_center : leader_motif.back().pitch;
-  if (!leader_seq.empty()) leader_last = leader_seq.back().pitch;
+  if (!leader_seq.empty())
+    leader_last = leader_seq.back().pitch;
 
   uint8_t follower_last =
       follower_imitation.empty() ? follower_center : follower_imitation.back().pitch;
 
   Tick phrase_end = phrase_start + kPhraseTicks;
 
-  auto leader_fig = generateFiguration(leader_fig_start, phrase_end, timeline, params,
-                                       leader_low, leader_high, leader_voice,
-                                       leader_last, key, is_minor, rng);
+  auto leader_fig = generateFiguration(leader_fig_start, phrase_end, timeline, params, leader_low,
+                                       leader_high, leader_voice, leader_last, key, is_minor, rng);
 
-  auto follower_fig = generateFiguration(half_phrase, phrase_end, timeline, params,
-                                         follower_low, follower_high, follower_voice,
-                                         follower_last, key, is_minor, rng);
+  auto follower_fig =
+      generateFiguration(half_phrase, phrase_end, timeline, params, follower_low, follower_high,
+                         follower_voice, follower_last, key, is_minor, rng);
 
   // Assemble leader output.
   out_leader.insert(out_leader.end(), leader_motif.begin(), leader_motif.end());
@@ -777,8 +765,7 @@ void generateUpperVoicePhrase(Tick phrase_start, const std::vector<NoteEvent>& m
   out_leader.insert(out_leader.end(), leader_fig.begin(), leader_fig.end());
 
   // Assemble follower output.
-  out_follower.insert(out_follower.end(), follower_imitation.begin(),
-                      follower_imitation.end());
+  out_follower.insert(out_follower.end(), follower_imitation.begin(), follower_imitation.end());
   out_follower.insert(out_follower.end(), follower_fig.begin(), follower_fig.end());
 }
 
@@ -802,8 +789,7 @@ void generateUpperVoicePhrase(Tick phrase_start, const std::vector<NoteEvent>& m
 /// @return Pedal voice notes.
 std::vector<NoteEvent> generateWalkingBass(Tick phrase_start, Tick phrase_end,
                                            const HarmonicTimeline& timeline,
-                                           const CharacterParams& params,
-                                           Key key, bool is_minor,
+                                           const CharacterParams& params, Key key, bool is_minor,
                                            std::mt19937& rng,
                                            const VerticalContext* vctx = nullptr) {
   std::vector<NoteEvent> notes;
@@ -818,8 +804,7 @@ std::vector<NoteEvent> generateWalkingBass(Tick phrase_start, Tick phrase_end,
     if (vctx && !vctx->isSafe(tick, voice, pitch)) {
       for (int d : {1, -1, 2, -2}) {
         uint8_t alt = clampPitch(static_cast<int>(pitch) + d, lo, hi);
-        if (scale_util::isScaleTone(alt, key, scale) &&
-            vctx->isSafe(tick, voice, alt)) {
+        if (scale_util::isScaleTone(alt, key, scale) && vctx->isSafe(tick, voice, alt)) {
           pitch = alt;
           break;
         }
@@ -827,15 +812,14 @@ std::vector<NoteEvent> generateWalkingBass(Tick phrase_start, Tick phrase_end,
     }
   };
 
-  for (Tick bar_start = phrase_start; bar_start < phrase_end;
-       bar_start += kTicksPerBar) {
+  for (Tick bar_start = phrase_start; bar_start < phrase_end; bar_start += kTicksPerBar) {
     const HarmonicEvent& ev = timeline.getAt(bar_start);
-    uint8_t root = clampPitch(static_cast<int>(ev.bass_pitch),
-                              organ_range::kPedalLow, organ_range::kPedalHigh);
+    uint8_t root = clampPitch(static_cast<int>(ev.bass_pitch), organ_range::kPedalLow,
+                              organ_range::kPedalHigh);
 
     // Compute 5th and 3rd within pedal range.
-    auto chord_tones = collectChordTonesInRange(
-        ev.chord, organ_range::kPedalLow, organ_range::kPedalHigh);
+    auto chord_tones =
+        collectChordTonesInRange(ev.chord, organ_range::kPedalLow, organ_range::kPedalHigh);
     uint8_t fifth = root;
     uint8_t third = root;
     if (!chord_tones.empty()) {
@@ -846,9 +830,15 @@ std::vector<NoteEvent> generateWalkingBass(Tick phrase_start, Tick phrase_end,
       int best3_dist = 127;
       for (uint8_t ct : chord_tones) {
         int d5 = std::abs(static_cast<int>(ct) - target5);
-        if (d5 < best5_dist) { best5_dist = d5; fifth = ct; }
+        if (d5 < best5_dist) {
+          best5_dist = d5;
+          fifth = ct;
+        }
         int d3 = std::abs(static_cast<int>(ct) - target3);
-        if (d3 < best3_dist) { best3_dist = d3; third = ct; }
+        if (d3 < best3_dist) {
+          best3_dist = d3;
+          third = ct;
+        }
       }
     }
 
@@ -869,8 +859,8 @@ std::vector<NoteEvent> generateWalkingBass(Tick phrase_start, Tick phrase_end,
         // Beat 2: scale step between root and target.
         int abs_root_q = scale_util::pitchToAbsoluteDegree(root, key, scale);
         uint8_t bq2_pitch = scale_util::absoluteDegreeToPitch(abs_root_q + 1, key, scale);
-        bq2_pitch = clampPitch(static_cast<int>(bq2_pitch),
-                               organ_range::kPedalLow, organ_range::kPedalHigh);
+        bq2_pitch = clampPitch(static_cast<int>(bq2_pitch), organ_range::kPedalLow,
+                               organ_range::kPedalHigh);
         NoteEvent bq2;
         bq2.start_tick = bar_start + kQuarterNote;
         bq2.duration = kQuarterNote;
@@ -897,12 +887,11 @@ std::vector<NoteEvent> generateWalkingBass(Tick phrase_start, Tick phrase_end,
         if (next_bar_q < phrase_end) {
           const HarmonicEvent& next_ev_q = timeline.getAt(next_bar_q);
           uint8_t next_root_q = clampPitch(static_cast<int>(next_ev_q.bass_pitch),
-                                           organ_range::kPedalLow,
-                                           organ_range::kPedalHigh);
+                                           organ_range::kPedalLow, organ_range::kPedalHigh);
           int next_abs_q = scale_util::pitchToAbsoluteDegree(next_root_q, key, scale);
           approach_q = scale_util::absoluteDegreeToPitch(next_abs_q - 1, key, scale);
-          approach_q = clampPitch(static_cast<int>(approach_q),
-                                  organ_range::kPedalLow, organ_range::kPedalHigh);
+          approach_q = clampPitch(static_cast<int>(approach_q), organ_range::kPedalLow,
+                                  organ_range::kPedalHigh);
         }
         NoteEvent bq4;
         bq4.start_tick = bar_start + 3 * kQuarterNote;
@@ -931,13 +920,11 @@ std::vector<NoteEvent> generateWalkingBass(Tick phrase_start, Tick phrase_end,
         if (next_bar < phrase_end) {
           const HarmonicEvent& next_ev = timeline.getAt(next_bar);
           uint8_t next_root = clampPitch(static_cast<int>(next_ev.bass_pitch),
-                                         organ_range::kPedalLow,
-                                         organ_range::kPedalHigh);
+                                         organ_range::kPedalLow, organ_range::kPedalHigh);
           if (next_root != root) {
             int abs_deg = scale_util::pitchToAbsoluteDegree(next_root, key, scale);
             p2 = scale_util::absoluteDegreeToPitch(abs_deg - 1, key, scale);
-            p2 = clampPitch(static_cast<int>(p2),
-                            organ_range::kPedalLow, organ_range::kPedalHigh);
+            p2 = clampPitch(static_cast<int>(p2), organ_range::kPedalLow, organ_range::kPedalHigh);
           }
         }
 
@@ -974,20 +961,20 @@ std::vector<NoteEvent> generateWalkingBass(Tick phrase_start, Tick phrase_end,
       } else {
         // Passing tone.
         int abs_root = scale_util::pitchToAbsoluteDegree(root, key, scale);
-        beat3_pitch =
-            scale_util::absoluteDegreeToPitch(abs_root + 2, key, scale);
-        beat3_pitch = clampPitch(static_cast<int>(beat3_pitch),
-                                 organ_range::kPedalLow, organ_range::kPedalHigh);
+        beat3_pitch = scale_util::absoluteDegreeToPitch(abs_root + 2, key, scale);
+        beat3_pitch = clampPitch(static_cast<int>(beat3_pitch), organ_range::kPedalLow,
+                                 organ_range::kPedalHigh);
       }
 
       // Beat 2: passing tone between root and beat 3 target.
       int abs_root = scale_util::pitchToAbsoluteDegree(root, key, scale);
       int abs_b3 = scale_util::pitchToAbsoluteDegree(beat3_pitch, key, scale);
       int mid_deg = (abs_root + abs_b3) / 2;
-      if (mid_deg == abs_root) mid_deg = abs_root + 1;
+      if (mid_deg == abs_root)
+        mid_deg = abs_root + 1;
       uint8_t beat2_pitch = scale_util::absoluteDegreeToPitch(mid_deg, key, scale);
-      beat2_pitch = clampPitch(static_cast<int>(beat2_pitch),
-                               organ_range::kPedalLow, organ_range::kPedalHigh);
+      beat2_pitch = clampPitch(static_cast<int>(beat2_pitch), organ_range::kPedalLow,
+                               organ_range::kPedalHigh);
 
       NoteEvent b2;
       b2.start_tick = bar_start + kQuarterNote;
@@ -1014,20 +1001,19 @@ std::vector<NoteEvent> generateWalkingBass(Tick phrase_start, Tick phrase_end,
       Tick next_bar = bar_start + kTicksPerBar;
       if (next_bar < phrase_end) {
         const HarmonicEvent& next_ev = timeline.getAt(next_bar);
-        uint8_t next_root = clampPitch(static_cast<int>(next_ev.bass_pitch),
-                                       organ_range::kPedalLow,
+        uint8_t next_root = clampPitch(static_cast<int>(next_ev.bass_pitch), organ_range::kPedalLow,
                                        organ_range::kPedalHigh);
         // Approach from one scale step below.
         int next_abs = scale_util::pitchToAbsoluteDegree(next_root, key, scale);
         approach = scale_util::absoluteDegreeToPitch(next_abs - 1, key, scale);
-        approach = clampPitch(static_cast<int>(approach),
-                              organ_range::kPedalLow, organ_range::kPedalHigh);
+        approach =
+            clampPitch(static_cast<int>(approach), organ_range::kPedalLow, organ_range::kPedalHigh);
       } else {
         // Last bar: use leading tone approach.
         int root_abs = scale_util::pitchToAbsoluteDegree(root, key, scale);
         approach = scale_util::absoluteDegreeToPitch(root_abs - 1, key, scale);
-        approach = clampPitch(static_cast<int>(approach),
-                              organ_range::kPedalLow, organ_range::kPedalHigh);
+        approach =
+            clampPitch(static_cast<int>(approach), organ_range::kPedalLow, organ_range::kPedalHigh);
       }
 
       NoteEvent b4;
@@ -1047,9 +1033,8 @@ std::vector<NoteEvent> generateWalkingBass(Tick phrase_start, Tick phrase_end,
 /// @brief Generate thematic bass: augmented motif in pedal register.
 std::vector<NoteEvent> generateThematicBass(Tick phrase_start, Tick phrase_end,
                                             const std::vector<NoteEvent>& motif,
-                                            const HarmonicTimeline& timeline,
-                                            Key /*key*/, bool /*is_minor*/,
-                                            std::mt19937& /*rng*/,
+                                            const HarmonicTimeline& timeline, Key /*key*/,
+                                            bool /*is_minor*/, std::mt19937& /*rng*/,
                                             const VerticalContext* vctx = nullptr) {
   // Augment motif by factor 2 and transpose to pedal register.
   auto bass_motif = augmentMelody(motif, 0, 2);
@@ -1057,8 +1042,8 @@ std::vector<NoteEvent> generateThematicBass(Tick phrase_start, Tick phrase_end,
 
   // Place in pedal register.
   for (auto& n : bass_motif) {
-    n.pitch = clampPitch(static_cast<int>(n.pitch),
-                         organ_range::kPedalLow, organ_range::kPedalHigh);
+    n.pitch =
+        clampPitch(static_cast<int>(n.pitch), organ_range::kPedalLow, organ_range::kPedalHigh);
     n.modified_by |= static_cast<uint8_t>(NoteModifiedBy::OctaveAdjust);
     n.voice = 2;
     n.source = BachNoteSource::PedalPoint;
@@ -1068,9 +1053,7 @@ std::vector<NoteEvent> generateThematicBass(Tick phrase_start, Tick phrase_end,
   // Trim to phrase boundary.
   bass_motif.erase(
       std::remove_if(bass_motif.begin(), bass_motif.end(),
-                     [phrase_end](const NoteEvent& n) {
-                       return n.start_tick >= phrase_end;
-                     }),
+                     [phrase_end](const NoteEvent& n) { return n.start_tick >= phrase_end; }),
       bass_motif.end());
 
   for (auto& n : bass_motif) {
@@ -1107,8 +1090,8 @@ std::vector<NoteEvent> generateThematicBass(Tick phrase_start, Tick phrase_end,
   if (thematic_end < phrase_end) {
     // Simple fill: hold root.
     const HarmonicEvent& ev = timeline.getAt(thematic_end);
-    uint8_t root = clampPitch(static_cast<int>(ev.bass_pitch),
-                              organ_range::kPedalLow, organ_range::kPedalHigh);
+    uint8_t root = clampPitch(static_cast<int>(ev.bass_pitch), organ_range::kPedalLow,
+                              organ_range::kPedalHigh);
     NoteEvent fill;
     fill.start_tick = thematic_end;
     fill.duration = phrase_end - thematic_end;
@@ -1118,8 +1101,8 @@ std::vector<NoteEvent> generateThematicBass(Tick phrase_start, Tick phrase_end,
     fill.source = BachNoteSource::PedalPoint;
     if (vctx && !vctx->isSafe(fill.start_tick, fill.voice, fill.pitch)) {
       for (int s : {12, -12}) {
-        uint8_t alt = clampPitch(static_cast<int>(fill.pitch) + s,
-                                 organ_range::kPedalLow, organ_range::kPedalHigh);
+        uint8_t alt = clampPitch(static_cast<int>(fill.pitch) + s, organ_range::kPedalLow,
+                                 organ_range::kPedalHigh);
         if (vctx->isSafe(fill.start_tick, fill.voice, alt)) {
           fill.pitch = alt;
           break;
@@ -1148,13 +1131,15 @@ std::vector<NoteEvent> generateThematicBass(Tick phrase_start, Tick phrase_end,
 /// @param key Current key.
 /// @param scale Scale type.
 /// @return True if suspension was inserted.
-bool insertCadentialSuspension(std::vector<Track>& tracks, Tick cadence_tick,
-                                uint8_t leader_voice, Key key, ScaleType scale) {
-  if (cadence_tick < kTicksPerBar) return false;
+bool insertCadentialSuspension(std::vector<Track>& tracks, Tick cadence_tick, uint8_t leader_voice,
+                               Key key, ScaleType scale) {
+  if (cadence_tick < kTicksPerBar)
+    return false;
   Tick search_start = cadence_tick - kTicksPerBar;
 
   auto& notes = tracks[leader_voice].notes;
-  if (notes.empty()) return false;
+  if (notes.empty())
+    return false;
 
   // Find the last note in the search window.
   int target_idx = -1;
@@ -1164,7 +1149,8 @@ bool insertCadentialSuspension(std::vector<Track>& tracks, Tick cadence_tick,
       break;
     }
   }
-  if (target_idx < 0) return false;
+  if (target_idx < 0)
+    return false;
 
   uint8_t orig_pitch = notes[target_idx].pitch;
   uint8_t range_low = (leader_voice == 0) ? kRhLow : kLhLow;
@@ -1185,8 +1171,8 @@ bool insertCadentialSuspension(std::vector<Track>& tracks, Tick cadence_tick,
 
   // Suspension candidates: Sus4_3 (up 1 degree, resolve down), Sus7_6 (up 4 degrees, resolve down).
   struct SusCand {
-    int sus_degrees;   // Scale degrees above original for suspension.
-    int res_degrees;   // Scale degrees for resolution (negative = down).
+    int sus_degrees;  // Scale degrees above original for suspension.
+    int res_degrees;  // Scale degrees for resolution (negative = down).
   };
   static constexpr SusCand kCandidates[] = {{1, -1}, {4, -1}};
 
@@ -1194,19 +1180,25 @@ bool insertCadentialSuspension(std::vector<Track>& tracks, Tick cadence_tick,
 
   for (const auto& cand : kCandidates) {
     uint8_t sus_pitch = scale_util::absoluteDegreeToPitch(abs_deg + cand.sus_degrees, key, scale);
-    uint8_t res_pitch = scale_util::absoluteDegreeToPitch(abs_deg + cand.sus_degrees + cand.res_degrees, key, scale);
+    uint8_t res_pitch = scale_util::absoluteDegreeToPitch(
+        abs_deg + cand.sus_degrees + cand.res_degrees, key, scale);
 
     // Melodic legality: resolution within 4 semitones of original.
-    if (absoluteInterval(res_pitch, orig_pitch) > 4) continue;
+    if (absoluteInterval(res_pitch, orig_pitch) > 4)
+      continue;
 
     // Range check.
-    if (sus_pitch < range_low || sus_pitch > range_high) continue;
-    if (res_pitch < range_low || res_pitch > range_high) continue;
+    if (sus_pitch < range_low || sus_pitch > range_high)
+      continue;
+    if (res_pitch < range_low || res_pitch > range_high)
+      continue;
 
     // Voice crossing check.
     if (has_other) {
-      if (leader_voice == 0 && sus_pitch < other_pitch) continue;  // RH below LH.
-      if (leader_voice == 1 && sus_pitch > other_pitch) continue;  // LH above RH.
+      if (leader_voice == 0 && sus_pitch < other_pitch)
+        continue;  // RH below LH.
+      if (leader_voice == 1 && sus_pitch > other_pitch)
+        continue;  // LH above RH.
     }
 
     // Apply: extend note duration to cadence_tick, set pitch to sus_pitch.
@@ -1215,11 +1207,14 @@ bool insertCadentialSuspension(std::vector<Track>& tracks, Tick cadence_tick,
     Tick new_dur = cadence_tick - notes[target_idx].start_tick;
     if (new_dur > 0) {
       // Quantize to largest standard duration that fits.
-      static constexpr Tick kStdDurs[] = {kWholeNote, kHalfNote, kQuarterNote,
-                                          kEighthNote, kSixteenthNote};
+      static constexpr Tick kStdDurs[] = {kWholeNote, kHalfNote, kQuarterNote, kEighthNote,
+                                          kSixteenthNote};
       Tick quantized = kSixteenthNote;
       for (Tick dur : kStdDurs) {
-        if (dur <= new_dur) { quantized = dur; break; }
+        if (dur <= new_dur) {
+          quantized = dur;
+          break;
+        }
       }
       notes[target_idx].duration = quantized;
       notes[target_idx].modified_by |= static_cast<uint8_t>(NoteModifiedBy::OverlapTrim);
@@ -1250,14 +1245,13 @@ bool insertCadentialSuspension(std::vector<Track>& tracks, Tick cadence_tick,
 /// progressions) and truncates upper voice notes (voice 0 and 1) that extend
 /// into the last sixteenth note before each cadence. Pedal (voice 2) is exempt
 /// (organ pedal sustains across phrase boundaries per BWV 525-530 practice).
-void insertBreathingRests(std::vector<Track>& tracks,
-                          const HarmonicTimeline& timeline, Tick duration) {
+void insertBreathingRests(std::vector<Track>& tracks, const HarmonicTimeline& timeline,
+                          Tick duration) {
   // Collect breathing boundaries: phrase boundaries + harmonic cadences.
   std::vector<Tick> cadence_ticks;
 
   // Phrase boundaries (every kPhraseTicks).
-  for (Tick boundary = kPhraseTicks; boundary < duration;
-       boundary += kPhraseTicks) {
+  for (Tick boundary = kPhraseTicks; boundary < duration; boundary += kPhraseTicks) {
     cadence_ticks.push_back(boundary);
   }
 
@@ -1276,15 +1270,13 @@ void insertBreathingRests(std::vector<Track>& tracks,
 
   // Deduplicate and sort.
   std::sort(cadence_ticks.begin(), cadence_ticks.end());
-  cadence_ticks.erase(std::unique(cadence_ticks.begin(), cadence_ticks.end()),
-                      cadence_ticks.end());
+  cadence_ticks.erase(std::unique(cadence_ticks.begin(), cadence_ticks.end()), cadence_ticks.end());
 
   for (Tick cad_tick : cadence_ticks) {
     Tick breath_start = cad_tick - kSixteenthNote;
     for (size_t trk = 0; trk < 2 && trk < tracks.size(); ++trk) {
       for (auto& note : tracks[trk].notes) {
-        if (note.start_tick < breath_start &&
-            note.start_tick + note.duration > breath_start &&
+        if (note.start_tick < breath_start && note.start_tick + note.duration > breath_start &&
             note.duration > kEighthNote) {  // Protect short notes.
           note.duration = breath_start - note.start_tick;
           note.modified_by |= static_cast<uint8_t>(NoteModifiedBy::Articulation);
@@ -1298,24 +1290,22 @@ void insertBreathingRests(std::vector<Track>& tracks,
 // Step 5d: Non-harmonic tone validation (post-processing)
 // ---------------------------------------------------------------------------
 
-
 /// @brief Validate non-harmonic tones and snap invalid weak-beat dissonances.
 ///
 /// For each upper voice track:
 /// - Strong beats (0, 2): non-chord tones are snapped to nearest chord tone.
 /// - Weak beats: checked via SpeciesRules (Fifth species) for valid passing/neighbor.
 ///   If invalid and harmonic context is unstable, snap to chord tone.
-void validateNonHarmonicTones(std::vector<Track>& tracks,
-                               const HarmonicTimeline& timeline,
-                               Key /*key*/, ScaleType /*scale*/) {
-
+void validateNonHarmonicTones(std::vector<Track>& tracks, const HarmonicTimeline& timeline,
+                              Key /*key*/, ScaleType /*scale*/) {
   for (size_t trk = 0; trk < 2 && trk < tracks.size(); ++trk) {
     auto& notes = tracks[trk].notes;
     for (size_t i = 0; i < notes.size(); ++i) {
       const HarmonicEvent& ev = timeline.getAt(notes[i].start_tick);
       bool is_ct = isChordTone(notes[i].pitch, ev);
 
-      if (is_ct) continue;  // Chord tones are always fine.
+      if (is_ct)
+        continue;  // Chord tones are always fine.
 
       uint8_t beat = beatInBar(notes[i].start_tick);
 
@@ -1324,8 +1314,8 @@ void validateNonHarmonicTones(std::vector<Track>& tracks,
         for (const auto& bn : tracks[2].notes) {
           if (bn.start_tick <= notes[i].start_tick &&
               bn.start_tick + bn.duration > notes[i].start_tick) {
-            int ivl = interval_util::compoundToSimple(
-                static_cast<int>(notes[i].pitch) - static_cast<int>(bn.pitch));
+            int ivl = interval_util::compoundToSimple(static_cast<int>(notes[i].pitch) -
+                                                      static_cast<int>(bn.pitch));
             if (ivl == interval::kMinor2nd || ivl == interval::kMajor2nd ||
                 ivl == interval::kTritone) {
               notes[i].pitch = nearestChordTone(notes[i].pitch, ev);
@@ -1344,19 +1334,19 @@ void validateNonHarmonicTones(std::vector<Track>& tracks,
 
       bool prev_is_ct = (i > 0) ? isChordTone(prev_pitch, ev) : true;
       bool next_is_ct = (i + 1 < notes.size())
-                             ? isChordTone(next_pitch, timeline.getAt(notes[i + 1].start_tick))
-                             : true;
+                            ? isChordTone(next_pitch, timeline.getAt(notes[i + 1].start_tick))
+                            : true;
 
-      auto nht_type = classifyNonHarmonicTone(prev_pitch, notes[i].pitch, next_pitch,
-                                               false, prev_is_ct, next_is_ct);
+      auto nht_type = classifyNonHarmonicTone(prev_pitch, notes[i].pitch, next_pitch, false,
+                                              prev_is_ct, next_is_ct);
 
       if (nht_type == NonHarmonicToneType::Unknown) {
         // Only snap if also dissonant with bass (2nd, tritone).
         for (const auto& bn : tracks[2].notes) {
           if (bn.start_tick <= notes[i].start_tick &&
               bn.start_tick + bn.duration > notes[i].start_tick) {
-            int ivl = interval_util::compoundToSimple(
-                static_cast<int>(notes[i].pitch) - static_cast<int>(bn.pitch));
+            int ivl = interval_util::compoundToSimple(static_cast<int>(notes[i].pitch) -
+                                                      static_cast<int>(bn.pitch));
             if (ivl == interval::kMinor2nd || ivl == interval::kMajor2nd ||
                 ivl == interval::kTritone) {
               notes[i].pitch = nearestChordTone(notes[i].pitch, ev);
@@ -1375,11 +1365,9 @@ void validateNonHarmonicTones(std::vector<Track>& tracks,
 // ---------------------------------------------------------------------------
 
 /// @brief Swap registers of two voice groups for invertible counterpoint.
-void swapVoiceRegisters(std::vector<NoteEvent>& upper_notes,
-                        std::vector<NoteEvent>& lower_notes,
-                        uint8_t upper_center, uint8_t upper_low,
-                        uint8_t upper_high, uint8_t lower_center,
-                        uint8_t lower_low, uint8_t lower_high) {
+void swapVoiceRegisters(std::vector<NoteEvent>& upper_notes, std::vector<NoteEvent>& lower_notes,
+                        uint8_t upper_center, uint8_t upper_low, uint8_t upper_high,
+                        uint8_t lower_center, uint8_t lower_low, uint8_t lower_high) {
   // Move upper notes to lower register and vice versa.
   for (auto& n : upper_notes) {
     int offset = static_cast<int>(n.pitch) - static_cast<int>(upper_center);
@@ -1403,21 +1391,20 @@ void swapVoiceRegisters(std::vector<NoteEvent>& upper_notes,
 ///
 /// Replaces the first 2 bars of upper voice material with half-note chord tone
 /// outlines, letting the pedal lead be heard clearly.
-void simplifyForPedalLead(std::vector<NoteEvent>& upper_notes, Tick phrase_start,
-                           Tick phrase_end, const HarmonicTimeline& timeline,
-                           uint8_t range_low, uint8_t range_high, uint8_t voice) {
+void simplifyForPedalLead(std::vector<NoteEvent>& upper_notes, Tick phrase_start, Tick phrase_end,
+                          const HarmonicTimeline& timeline, uint8_t range_low, uint8_t range_high,
+                          uint8_t voice) {
   Tick simplify_end = phrase_start + 2 * kTicksPerBar;
-  if (simplify_end > phrase_end) simplify_end = phrase_end;
+  if (simplify_end > phrase_end)
+    simplify_end = phrase_end;
 
   // Remove upper voice notes in the first 2 bars.
-  upper_notes.erase(
-      std::remove_if(upper_notes.begin(), upper_notes.end(),
-                     [phrase_start, simplify_end, voice](const NoteEvent& n) {
-                       return n.voice == voice &&
-                              n.start_tick >= phrase_start &&
-                              n.start_tick < simplify_end;
-                     }),
-      upper_notes.end());
+  upper_notes.erase(std::remove_if(upper_notes.begin(), upper_notes.end(),
+                                   [phrase_start, simplify_end, voice](const NoteEvent& n) {
+                                     return n.voice == voice && n.start_tick >= phrase_start &&
+                                            n.start_tick < simplify_end;
+                                   }),
+                    upper_notes.end());
 
   // Insert half-note chord tone outlines.
   uint8_t center = (range_low + range_high) / 2;
@@ -1438,7 +1425,8 @@ void simplifyForPedalLead(std::vector<NoteEvent>& upper_notes, Tick phrase_start
     }
 
     Tick dur = kHalfNote;
-    if (t + dur > simplify_end) dur = simplify_end - t;
+    if (t + dur > simplify_end)
+      dur = simplify_end - t;
 
     NoteEvent note;
     note.start_tick = t;
@@ -1467,9 +1455,9 @@ void simplifyForPedalLead(std::vector<NoteEvent>& upper_notes, Tick phrase_start
 ///        RH and LH notes. Shifts RH up or LH down by an octave when too close.
 /// @param tracks The 3-element track vector (RH=0, LH=1, Pedal=2).
 /// @param min_semitones Minimum interval in semitones (default 12).
-void enforceMinimumVoiceSeparation(std::vector<Track>& tracks,
-                                   int min_semitones = 12) {
-  if (tracks.size() < 2) return;
+void enforceMinimumVoiceSeparation(std::vector<Track>& tracks, int min_semitones = 12) {
+  if (tracks.size() < 2)
+    return;
   auto& rh_notes = tracks[0].notes;
   auto& lh_notes = tracks[1].notes;
 
@@ -1481,10 +1469,12 @@ void enforceMinimumVoiceSeparation(std::vector<Track>& tracks,
       for (auto& lh : lh_notes) {
         Tick lh_end = lh.start_tick + lh.duration;
         // Check if notes overlap in time.
-        if (lh.start_tick >= rh_end || rh.start_tick >= lh_end) continue;
+        if (lh.start_tick >= rh_end || rh.start_tick >= lh_end)
+          continue;
 
         int interval = static_cast<int>(rh.pitch) - static_cast<int>(lh.pitch);
-        if (interval >= min_semitones) continue;
+        if (interval >= min_semitones)
+          continue;
 
         // RH should be above LH; try shifting RH up first.
         int rh_candidate = static_cast<int>(rh.pitch) + 12;
@@ -1503,7 +1493,8 @@ void enforceMinimumVoiceSeparation(std::vector<Track>& tracks,
         }
       }
     }
-    if (!any_changed) break;
+    if (!any_changed)
+      break;
   }
 }
 
@@ -1517,7 +1508,8 @@ void enforceMinimumVoiceSeparation(std::vector<Track>& tracks,
 /// @param key The tonic key.
 /// @param is_minor Whether the movement is in a minor key.
 void enforceDiatonicPitches(std::vector<Track>& tracks, Key key, bool is_minor) {
-  if (is_minor) return;  // Minor keys allow chromatic alterations (leading tone).
+  if (is_minor)
+    return;  // Minor keys allow chromatic alterations (leading tone).
 
   ScaleType scale = ScaleType::Major;
 
@@ -1526,16 +1518,17 @@ void enforceDiatonicPitches(std::vector<Track>& tracks, Key key, bool is_minor) 
   auto creates_parallel = [&](size_t src_trk, const NoteEvent& src_note,
                               uint8_t candidate) -> bool {
     for (size_t other_trk = 0; other_trk < tracks.size(); ++other_trk) {
-      if (other_trk == src_trk) continue;
+      if (other_trk == src_trk)
+        continue;
       for (const auto& other : tracks[other_trk].notes) {
-        if (other.start_tick > src_note.start_tick + src_note.duration) break;
-        if (other.start_tick + other.duration <= src_note.start_tick) continue;
+        if (other.start_tick > src_note.start_tick + src_note.duration)
+          break;
+        if (other.start_tick + other.duration <= src_note.start_tick)
+          continue;
         int old_simple = interval_util::compoundToSimple(
-            std::abs(static_cast<int>(src_note.pitch) -
-                     static_cast<int>(other.pitch)));
+            std::abs(static_cast<int>(src_note.pitch) - static_cast<int>(other.pitch)));
         int new_simple = interval_util::compoundToSimple(
-            std::abs(static_cast<int>(candidate) -
-                     static_cast<int>(other.pitch)));
+            std::abs(static_cast<int>(candidate) - static_cast<int>(other.pitch)));
         if ((new_simple == 0 || new_simple == 7) && old_simple != new_simple) {
           return true;
         }
@@ -1551,11 +1544,14 @@ void enforceDiatonicPitches(std::vector<Track>& tracks, Key key, bool is_minor) 
         // Clamp to voice range.
         uint8_t low, high;
         if (note.voice == 0) {
-          low = kRhLow; high = kRhHigh;
+          low = kRhLow;
+          high = kRhHigh;
         } else if (note.voice == 1) {
-          low = kLhLow; high = kLhHigh;
+          low = kLhLow;
+          high = kLhHigh;
         } else {
-          low = organ_range::kPedalLow; high = organ_range::kPedalHigh;
+          low = organ_range::kPedalLow;
+          high = organ_range::kPedalHigh;
         }
         uint8_t new_pitch = clampPitch(static_cast<int>(snapped), low, high);
 
@@ -1571,9 +1567,11 @@ void enforceDiatonicPitches(std::vector<Track>& tracks, Key key, bool is_minor) 
         bool found = false;
         for (int delta : {1, -1, 2, -2, 3, -3, 4, -4}) {
           int cand = static_cast<int>(snapped) + delta;
-          if (cand < low || cand > high) continue;
+          if (cand < low || cand > high)
+            continue;
           auto cand_u8 = static_cast<uint8_t>(cand);
-          if (!scale_util::isScaleTone(cand_u8, key, scale)) continue;
+          if (!scale_util::isScaleTone(cand_u8, key, scale))
+            continue;
           if (!creates_parallel(trk, note, cand_u8)) {
             note.pitch = cand_u8;
             note.modified_by |= static_cast<uint8_t>(NoteModifiedBy::ChordToneSnap);
@@ -1596,24 +1594,23 @@ void enforceDiatonicPitches(std::vector<Track>& tracks, Key key, bool is_minor) 
 // Post-pass: Enforce consonance on strong beats
 // ---------------------------------------------------------------------------
 
-
-
 /// @brief Enforce consonance on strong beats (bar downbeat and beat 3).
 ///
 /// Two-stage fix:
 /// 1. Chord tone snap: if nearest chord tone is ≤2 semitones away, snap to it.
 /// 2. Simultaneous clash resolution: fix {m2, tritone, M7} between voice pairs.
-void enforceStrongBeatConsonance(std::vector<Track>& tracks,
-                                 const HarmonicTimeline& timeline,
+void enforceStrongBeatConsonance(std::vector<Track>& tracks, const HarmonicTimeline& timeline,
                                  Key /*key*/, bool /*is_minor*/) {
-  if (tracks.size() < 2) return;
+  if (tracks.size() < 2)
+    return;
 
   // Collect all strong beat ticks up to max duration.
   Tick max_dur = 0;
   for (const auto& track : tracks) {
     for (const auto& n : track.notes) {
       Tick end = n.start_tick + n.duration;
-      if (end > max_dur) max_dur = end;
+      if (end > max_dur)
+        max_dur = end;
     }
   }
 
@@ -1636,15 +1633,16 @@ void enforceStrongBeatConsonance(std::vector<Track>& tracks,
       }
     }
 
-    if (sounding.size() < 2) continue;
+    if (sounding.size() < 2)
+      continue;
 
     // Step 11a: Guard — check if a candidate pitch would create parallel
     // perfect (P1/P5/P8) with any other sounding note at this tick.
-    auto would_create_parallel_perfect =
-        [&sounding](size_t fix_idx, uint8_t new_pitch) -> bool {
+    auto would_create_parallel_perfect = [&sounding](size_t fix_idx, uint8_t new_pitch) -> bool {
       uint8_t old_pitch = sounding[fix_idx].note->pitch;
       for (size_t idx = 0; idx < sounding.size(); ++idx) {
-        if (idx == fix_idx) continue;
+        if (idx == fix_idx)
+          continue;
         uint8_t other_pitch = sounding[idx].note->pitch;
         int old_simple = interval_util::compoundToSimple(
             std::abs(static_cast<int>(old_pitch) - static_cast<int>(other_pitch)));
@@ -1660,33 +1658,31 @@ void enforceStrongBeatConsonance(std::vector<Track>& tracks,
     // Check all pairs for dissonance and fix.
     for (size_t idx_i = 0; idx_i < sounding.size(); ++idx_i) {
       for (size_t idx_j = idx_i + 1; idx_j < sounding.size(); ++idx_j) {
-        int interval = interval_util::compoundToSimple(
-            static_cast<int>(sounding[idx_i].note->pitch) -
-            static_cast<int>(sounding[idx_j].note->pitch));
-        if (interval_util::isConsonance(interval)) continue;
+        int interval =
+            interval_util::compoundToSimple(static_cast<int>(sounding[idx_i].note->pitch) -
+                                            static_cast<int>(sounding[idx_j].note->pitch));
+        if (interval_util::isConsonance(interval))
+          continue;
 
         // Fix the upper voice (lower track index = higher register in trio).
         // Try: snap to nearest chord tone, then octave shift.
-        size_t fix_idx =
-            (sounding[idx_i].track_idx < sounding[idx_j].track_idx) ? idx_i : idx_j;
+        size_t fix_idx = (sounding[idx_i].track_idx < sounding[idx_j].track_idx) ? idx_i : idx_j;
         size_t other_idx = (fix_idx == idx_i) ? idx_j : idx_i;
         NoteEvent* fix_note = sounding[fix_idx].note;
         NoteEvent* other_note = sounding[other_idx].note;
         size_t fix_trk = sounding[fix_idx].track_idx;
 
-        uint8_t low = (fix_trk == 0) ? kRhLow
-                     : (fix_trk == 1) ? kLhLow
-                                      : organ_range::kPedalLow;
-        uint8_t high = (fix_trk == 0) ? kRhHigh
-                      : (fix_trk == 1) ? kLhHigh
-                                       : organ_range::kPedalHigh;
+        uint8_t low = (fix_trk == 0) ? kRhLow : (fix_trk == 1) ? kLhLow : organ_range::kPedalLow;
+        uint8_t high = (fix_trk == 0)   ? kRhHigh
+                       : (fix_trk == 1) ? kLhHigh
+                                        : organ_range::kPedalHigh;
 
         // Strategy 1: Snap to nearest chord tone within ±3 semitones.
         uint8_t nearest = nearestChordTone(fix_note->pitch, ev);
         int dist = absoluteInterval(nearest, fix_note->pitch);
         if (dist <= 3 && nearest >= low && nearest <= high) {
-          int new_ivl = interval_util::compoundToSimple(
-              static_cast<int>(nearest) - static_cast<int>(other_note->pitch));
+          int new_ivl = interval_util::compoundToSimple(static_cast<int>(nearest) -
+                                                        static_cast<int>(other_note->pitch));
           if (interval_util::isConsonance(new_ivl) &&
               !would_create_parallel_perfect(fix_idx, nearest)) {
             fix_note->pitch = nearest;
@@ -1698,25 +1694,25 @@ void enforceStrongBeatConsonance(std::vector<Track>& tracks,
         bool resolved = false;
         for (int delta : {1, -1, 2, -2, 3, -3}) {
           int cand = static_cast<int>(fix_note->pitch) + delta;
-          if (cand < low || cand > high) continue;
-          int new_ivl = interval_util::compoundToSimple(
-              cand - static_cast<int>(other_note->pitch));
-          if (interval_util::isConsonance(new_ivl) &&
-              isChordTone(static_cast<uint8_t>(cand), ev) &&
+          if (cand < low || cand > high)
+            continue;
+          int new_ivl = interval_util::compoundToSimple(cand - static_cast<int>(other_note->pitch));
+          if (interval_util::isConsonance(new_ivl) && isChordTone(static_cast<uint8_t>(cand), ev) &&
               !would_create_parallel_perfect(fix_idx, static_cast<uint8_t>(cand))) {
             fix_note->pitch = static_cast<uint8_t>(cand);
             resolved = true;
             break;
           }
         }
-        if (resolved) continue;
+        if (resolved)
+          continue;
 
         // Strategy 3: Any consonant pitch within ±3 (not necessarily chord tone).
         for (int delta : {1, -1, 2, -2, 3, -3}) {
           int cand = static_cast<int>(fix_note->pitch) + delta;
-          if (cand < low || cand > high) continue;
-          int new_ivl = interval_util::compoundToSimple(
-              cand - static_cast<int>(other_note->pitch));
+          if (cand < low || cand > high)
+            continue;
+          int new_ivl = interval_util::compoundToSimple(cand - static_cast<int>(other_note->pitch));
           if (interval_util::isConsonance(new_ivl) &&
               !would_create_parallel_perfect(fix_idx, static_cast<uint8_t>(cand))) {
             fix_note->pitch = static_cast<uint8_t>(cand);
@@ -1724,14 +1720,15 @@ void enforceStrongBeatConsonance(std::vector<Track>& tracks,
             break;
           }
         }
-        if (resolved) continue;
+        if (resolved)
+          continue;
 
         // Strategy 4: Octave shift.
         for (int shift : {12, -12}) {
           int cand = static_cast<int>(fix_note->pitch) + shift;
           if (cand >= low && cand <= high) {
-            int new_ivl = interval_util::compoundToSimple(
-                cand - static_cast<int>(other_note->pitch));
+            int new_ivl =
+                interval_util::compoundToSimple(cand - static_cast<int>(other_note->pitch));
             if (interval_util::isConsonance(new_ivl) &&
                 !would_create_parallel_perfect(fix_idx, static_cast<uint8_t>(cand))) {
               fix_note->pitch = static_cast<uint8_t>(cand);
@@ -1761,14 +1758,15 @@ uint32_t countStrongBeatP4OverBass(const std::vector<NoteEvent>& all_notes) {
   for (const auto* upper : upper_notes) {
     // Only check strong beats (beat 0 and 2 in 4/4).
     uint8_t beat = beatInBar(upper->start_tick);
-    if (beat != 0 && beat != 2) continue;
+    if (beat != 0 && beat != 2)
+      continue;
 
     // Find bass note sounding at this tick.
     for (const auto* bass : bass_notes) {
       if (bass->start_tick <= upper->start_tick &&
           bass->start_tick + bass->duration > upper->start_tick) {
-        int ivl = interval_util::compoundToSimple(
-            static_cast<int>(upper->pitch) - static_cast<int>(bass->pitch));
+        int ivl = interval_util::compoundToSimple(static_cast<int>(upper->pitch) -
+                                                  static_cast<int>(bass->pitch));
         if (ivl == interval::kPerfect4th) {
           ++count;
         }
@@ -1799,9 +1797,8 @@ TrioSonataCPReport buildTrioCPReport(const std::vector<Track>& tracks) {
 // Step 7: Movement generation
 // ---------------------------------------------------------------------------
 
-TrioSonataMovement generateMovement(const KeySignature& key_sig, Tick num_bars,
-                                    uint16_t bpm, uint32_t seed,
-                                    TrioMovementCharacter character) {
+TrioSonataMovement generateMovement(const KeySignature& key_sig, Tick num_bars, uint16_t bpm,
+                                    uint32_t seed, TrioMovementCharacter character) {
   TrioSonataMovement movement;
   movement.bpm = bpm;
   movement.key = key_sig;
@@ -1813,20 +1810,19 @@ TrioSonataMovement generateMovement(const KeySignature& key_sig, Tick num_bars,
   const CharacterParams& params = getCharacterParams(character);
 
   // 1. Build harmonic timeline with varied progressions.
-  HarmonicTimeline timeline =
-      buildMovementTimeline(key_sig, duration, params, rng);
+  HarmonicTimeline timeline = buildMovementTimeline(key_sig, duration, params, rng);
 
   // 2. Generate motif for this movement.
   const HarmonicEvent& first_event = timeline.getAt(0);
-  auto motif = generateMotif(first_event, params, key_sig.tonic,
-                             key_sig.is_minor, rng);
+  auto motif = generateMotif(first_event, params, key_sig.tonic, key_sig.is_minor, rng);
 
   // 3. Create tracks.
   std::vector<Track> tracks = createTrioSonataTracks();
 
   // 4. Generate phrase by phrase.
   Tick num_phrases = duration / kPhraseTicks;
-  if (num_phrases == 0) num_phrases = 1;
+  if (num_phrases == 0)
+    num_phrases = 1;
 
   ScaleType scale = key_sig.is_minor ? ScaleType::HarmonicMinor : ScaleType::Major;
 
@@ -1837,7 +1833,8 @@ TrioSonataMovement generateMovement(const KeySignature& key_sig, Tick num_bars,
   for (Tick p = 0; p < num_phrases; ++p) {
     Tick phrase_start = p * kPhraseTicks;
     Tick phrase_end = phrase_start + kPhraseTicks;
-    if (phrase_end > duration) phrase_end = duration;
+    if (phrase_end > duration)
+      phrase_end = duration;
 
     // Leader/follower alternation.
     uint8_t leader_voice = (p % 2 == 0) ? 0 : 1;  // RH=0, LH=1.
@@ -1846,7 +1843,8 @@ TrioSonataMovement generateMovement(const KeySignature& key_sig, Tick num_bars,
     auto phrase_motif = motif;
     if (p > 0) {
       int shift = rng::rollRange(rng, -2, 2);
-      if (shift == 0) shift = 1;
+      if (shift == 0)
+        shift = 1;
       phrase_motif = transposeMelodyDiatonic(motif, shift, key_sig.tonic, scale);
     }
 
@@ -1854,12 +1852,10 @@ TrioSonataMovement generateMovement(const KeySignature& key_sig, Tick num_bars,
     std::vector<NoteEvent> pedal_notes;
     bool is_thematic_bass = rng::rollProbability(rng, params.thematic_bass_prob);
     if (is_thematic_bass) {
-      pedal_notes = generateThematicBass(phrase_start, phrase_end, motif,
-                                         timeline, key_sig.tonic,
+      pedal_notes = generateThematicBass(phrase_start, phrase_end, motif, timeline, key_sig.tonic,
                                          key_sig.is_minor, rng, &vctx);
     } else {
-      pedal_notes = generateWalkingBass(phrase_start, phrase_end, timeline,
-                                        params, key_sig.tonic,
+      pedal_notes = generateWalkingBass(phrase_start, phrase_end, timeline, params, key_sig.tonic,
                                         key_sig.is_minor, rng, &vctx);
     }
     for (auto& n : pedal_notes) {
@@ -1869,16 +1865,13 @@ TrioSonataMovement generateMovement(const KeySignature& key_sig, Tick num_bars,
 
     // Step 2: Generate upper voices (with vctx available).
     std::vector<NoteEvent> leader_notes, follower_notes;
-    generateUpperVoicePhrase(phrase_start, phrase_motif, timeline, params,
-                             leader_voice, key_sig.tonic, key_sig.is_minor,
-                             rng, leader_notes, follower_notes);
+    generateUpperVoicePhrase(phrase_start, phrase_motif, timeline, params, leader_voice,
+                             key_sig.tonic, key_sig.is_minor, rng, leader_notes, follower_notes);
 
     // Invertible counterpoint: 12% chance.
     if (rng::rollProbability(rng, 0.12f)) {
-      swapVoiceRegisters(leader_notes, follower_notes,
-                         leader_voice == 0 ? kRhCenter : kLhCenter,
-                         leader_voice == 0 ? kRhLow : kLhLow,
-                         leader_voice == 0 ? kRhHigh : kLhHigh,
+      swapVoiceRegisters(leader_notes, follower_notes, leader_voice == 0 ? kRhCenter : kLhCenter,
+                         leader_voice == 0 ? kRhLow : kLhLow, leader_voice == 0 ? kRhHigh : kLhHigh,
                          leader_voice == 0 ? kLhCenter : kRhCenter,
                          leader_voice == 0 ? kLhLow : kRhLow,
                          leader_voice == 0 ? kLhHigh : kRhHigh);
@@ -1897,10 +1890,8 @@ TrioSonataMovement generateMovement(const KeySignature& key_sig, Tick num_bars,
     // Pedal lead: simplify upper voices when thematic bass is active.
     // Skip first phrase (p == 0) to preserve motif establishment.
     if (is_thematic_bass && p > 0) {
-      simplifyForPedalLead(tracks[0].notes, phrase_start, phrase_end, timeline,
-                           kRhLow, kRhHigh, 0);
-      simplifyForPedalLead(tracks[1].notes, phrase_start, phrase_end, timeline,
-                           kLhLow, kLhHigh, 1);
+      simplifyForPedalLead(tracks[0].notes, phrase_start, phrase_end, timeline, kRhLow, kRhHigh, 0);
+      simplifyForPedalLead(tracks[1].notes, phrase_start, phrase_end, timeline, kLhLow, kLhHigh, 1);
     }
   }
 
@@ -1914,8 +1905,7 @@ TrioSonataMovement generateMovement(const KeySignature& key_sig, Tick num_bars,
       all_notes.insert(all_notes.end(), track.notes.begin(), track.notes.end());
     }
 
-    assert(countUnknownSource(all_notes) == 0 &&
-           "All notes should have source set by generators");
+    assert(countUnknownSource(all_notes) == 0 && "All notes should have source set by generators");
 
     // ---- Pre-process lightweight notes: trim and quantize durations ----
     for (auto& note : all_notes) {
@@ -1932,8 +1922,7 @@ TrioSonataMovement generateMovement(const KeySignature& key_sig, Tick num_bars,
       }
       // Quantize non-standard durations.
       if (note.duration > 0) {
-        static constexpr Tick kStdDurs[] = {kWholeNote, kHalfNote,
-                                            kQuarterNote, kEighthNote,
+        static constexpr Tick kStdDurs[] = {kWholeNote, kHalfNote, kQuarterNote, kEighthNote,
                                             kSixteenthNote};
         bool is_standard = false;
         for (Tick dur : kStdDurs) {
@@ -1955,21 +1944,21 @@ TrioSonataMovement generateMovement(const KeySignature& key_sig, Tick num_bars,
       }
     }
     // Remove notes with non-positive duration after trimming.
-    all_notes.erase(
-        std::remove_if(all_notes.begin(), all_notes.end(),
-                       [](const NoteEvent& n) { return n.duration <= 0; }),
-        all_notes.end());
+    all_notes.erase(std::remove_if(all_notes.begin(), all_notes.end(),
+                                   [](const NoteEvent& n) { return n.duration <= 0; }),
+                    all_notes.end());
 
     // ---- Constraint-driven finalize (overlap dedup + voice range clamp) ----
     auto voice_range = [](uint8_t voice) -> std::pair<uint8_t, uint8_t> {
-      if (voice == 0) return {kRhLow, kRhHigh};
-      if (voice == 1) return {kLhLow, kLhHigh};
+      if (voice == 0)
+        return {kRhLow, kRhHigh};
+      if (voice == 1)
+        return {kLhLow, kLhHigh};
       return {organ_range::kPedalLow, organ_range::kPedalHigh};
     };
-    ScaleType trio_scale = key_sig.is_minor ? ScaleType::HarmonicMinor
-                                             : ScaleType::Major;
-    finalizeFormNotes(all_notes, kTrioVoiceCount, voice_range, key_sig.tonic,
-                      trio_scale, /*max_consecutive=*/2);
+    ScaleType trio_scale = key_sig.is_minor ? ScaleType::HarmonicMinor : ScaleType::Major;
+    finalizeFormNotes(all_notes, kTrioVoiceCount, voice_range, key_sig.tonic, trio_scale,
+                      /*max_consecutive=*/2);
 
     for (auto& track : tracks) {
       track.notes.clear();
@@ -1988,7 +1977,8 @@ TrioSonataMovement generateMovement(const KeySignature& key_sig, Tick num_bars,
   // 7. Cadential suspensions at phrase boundaries.
   for (Tick p = 1; p <= num_phrases; ++p) {
     Tick cadence_tick = p * kPhraseTicks;
-    if (cadence_tick > duration) cadence_tick = duration;
+    if (cadence_tick > duration)
+      cadence_tick = duration;
     // Alternate leader voice for suspension placement.
     uint8_t sus_voice = ((p - 1) % 2 == 0) ? 0 : 1;
     insertCadentialSuspension(tracks, cadence_tick, sus_voice, key_sig.tonic, scale);
@@ -2009,24 +1999,28 @@ TrioSonataMovement generateMovement(const KeySignature& key_sig, Tick num_bars,
       if (notes[i].pitch == notes[i - 1].pitch) {
         uint8_t low, high, center;
         if (notes[i].voice == 0) {
-          low = kRhLow; high = kRhHigh; center = kRhCenter;
+          low = kRhLow;
+          high = kRhHigh;
+          center = kRhCenter;
         } else if (notes[i].voice == 1) {
-          low = kLhLow; high = kLhHigh; center = kLhCenter;
+          low = kLhLow;
+          high = kLhHigh;
+          center = kLhCenter;
         } else {
-          low = organ_range::kPedalLow; high = organ_range::kPedalHigh;
+          low = organ_range::kPedalLow;
+          high = organ_range::kPedalHigh;
           center = (organ_range::kPedalLow + organ_range::kPedalHigh) / 2;
         }
 
-        int abs_deg = scale_util::pitchToAbsoluteDegree(notes[i].pitch,
-                                                         key_sig.tonic, scale);
+        int abs_deg = scale_util::pitchToAbsoluteDegree(notes[i].pitch, key_sig.tonic, scale);
         // Move toward range center to avoid boundary issues.
         int dir = (notes[i].pitch < center) ? 1 : -1;
 
         // Try shifts of 1 and 2 degrees in primary and reverse direction.
         bool fixed = false;
         for (int try_shift : {dir, -dir, 2 * dir, -2 * dir}) {
-          uint8_t cand = scale_util::absoluteDegreeToPitch(
-              abs_deg + try_shift, key_sig.tonic, scale);
+          uint8_t cand =
+              scale_util::absoluteDegreeToPitch(abs_deg + try_shift, key_sig.tonic, scale);
           cand = clampPitch(static_cast<int>(cand), low, high);
           if (cand != notes[i - 1].pitch) {
             notes[i].pitch = cand;
@@ -2037,10 +2031,9 @@ TrioSonataMovement generateMovement(const KeySignature& key_sig, Tick num_bars,
         }
         if (!fixed) {
           // Last resort: shift by 3 degrees.
-          notes[i].pitch = clampPitch(
-              static_cast<int>(scale_util::absoluteDegreeToPitch(
-                  abs_deg + 3 * dir, key_sig.tonic, scale)),
-              low, high);
+          notes[i].pitch = clampPitch(static_cast<int>(scale_util::absoluteDegreeToPitch(
+                                          abs_deg + 3 * dir, key_sig.tonic, scale)),
+                                      low, high);
           notes[i].modified_by |= static_cast<uint8_t>(NoteModifiedBy::RepeatedNoteRep);
         }
       }
@@ -2052,14 +2045,15 @@ TrioSonataMovement generateMovement(const KeySignature& key_sig, Tick num_bars,
   // legacy post-validation pipeline with normalizeAndRedistribute.
   {
     auto voice_range = [](uint8_t voice) -> std::pair<uint8_t, uint8_t> {
-      if (voice == 0) return {kRhLow, kRhHigh};
-      if (voice == 1) return {kLhLow, kLhHigh};
+      if (voice == 0)
+        return {kRhLow, kRhHigh};
+      if (voice == 1)
+        return {kLhLow, kLhHigh};
       return {organ_range::kPedalLow, organ_range::kPedalHigh};
     };
-    ScaleType trio_scale2 = key_sig.is_minor ? ScaleType::HarmonicMinor
-                                              : ScaleType::Major;
-    form_utils::normalizeAndRedistribute(tracks, kTrioVoiceCount, voice_range,
-                                         key_sig.tonic, trio_scale2,
+    ScaleType trio_scale2 = key_sig.is_minor ? ScaleType::HarmonicMinor : ScaleType::Major;
+    form_utils::normalizeAndRedistribute(tracks, kTrioVoiceCount, voice_range, key_sig.tonic,
+                                         trio_scale2,
                                          /*max_consecutive=*/2);
   }
 
@@ -2068,9 +2062,15 @@ TrioSonataMovement generateMovement(const KeySignature& key_sig, Tick num_bars,
     // Determine ornament density based on movement character.
     float density;
     switch (character) {
-      case TrioMovementCharacter::Adagio: density = 0.08f; break;
-      case TrioMovementCharacter::Vivace: density = 0.06f; break;
-      default: density = 0.08f; break;  // Allegro.
+      case TrioMovementCharacter::Adagio:
+        density = 0.08f;
+        break;
+      case TrioMovementCharacter::Vivace:
+        density = 0.06f;
+        break;
+      default:
+        density = 0.08f;
+        break;  // Allegro.
     }
 
     OrnamentConfig orn_config;
@@ -2120,28 +2120,30 @@ TrioSonataMovement generateMovement(const KeySignature& key_sig, Tick num_bars,
   {
     bool is_slow = (params.primary_dur >= kQuarterNote);
     // Fast: {120, 240, 480}; Slow: {240, 480, 960}.
-    const Tick allowed[3] = {
-        is_slow ? kEighthNote : kSixteenthNote,
-        is_slow ? kQuarterNote : kEighthNote,
-        is_slow ? kHalfNote : kQuarterNote};
+    const Tick allowed[3] = {is_slow ? kEighthNote : kSixteenthNote,
+                             is_slow ? kQuarterNote : kEighthNote,
+                             is_slow ? kHalfNote : kQuarterNote};
     for (size_t trk = 0; trk < 2 && trk < tracks.size(); ++trk) {
       auto& notes = tracks[trk].notes;
       for (size_t ni = 0; ni < notes.size(); ++ni) {
         auto& note = notes[ni];
-        bool in_set = (note.duration == allowed[0] ||
-                       note.duration == allowed[1] ||
+        bool in_set = (note.duration == allowed[0] || note.duration == allowed[1] ||
                        note.duration == allowed[2]);
         if (!in_set) {
           // Determine max duration from next-note boundary to prevent overlap.
           Tick max_dur = allowed[2];
           if (ni + 1 < notes.size()) {
             Tick gap = notes[ni + 1].start_tick - note.start_tick;
-            if (gap < max_dur) max_dur = gap;
+            if (gap < max_dur)
+              max_dur = gap;
           }
           // Pick the largest standard duration that fits within max_dur.
           Tick best = allowed[0];  // Smallest as fallback.
           for (int aidx = 2; aidx >= 0; --aidx) {
-            if (allowed[aidx] <= max_dur) { best = allowed[aidx]; break; }
+            if (allowed[aidx] <= max_dur) {
+              best = allowed[aidx];
+              break;
+            }
           }
           note.duration = best;
           note.modified_by |= static_cast<uint8_t>(NoteModifiedBy::Articulation);
@@ -2167,24 +2169,26 @@ TrioSonataMovement generateMovement(const KeySignature& key_sig, Tick num_bars,
   // Then re-quantize trimmed durations to the allowed set.
   {
     bool is_slow = (params.primary_dur >= kQuarterNote);
-    const Tick final_allowed[3] = {
-        is_slow ? kEighthNote : kSixteenthNote,
-        is_slow ? kQuarterNote : kEighthNote,
-        is_slow ? kHalfNote : kQuarterNote};
+    const Tick final_allowed[3] = {is_slow ? kEighthNote : kSixteenthNote,
+                                   is_slow ? kQuarterNote : kEighthNote,
+                                   is_slow ? kHalfNote : kQuarterNote};
 
     for (size_t trk = 0; trk < 2 && trk < tracks.size(); ++trk) {
       for (auto& note : tracks[trk].notes) {
         Tick phrase_idx = note.start_tick / kPhraseTicks;
         Tick next_boundary = (phrase_idx + 1) * kPhraseTicks;
-        if (next_boundary > duration) continue;
+        if (next_boundary > duration)
+          continue;
         Tick breath = next_boundary - kSixteenthNote;
-        if (note.start_tick < breath &&
-            note.start_tick + note.duration > breath) {
+        if (note.start_tick < breath && note.start_tick + note.duration > breath) {
           Tick trimmed = breath - note.start_tick;
           // Quantize to largest standard duration that fits.
           Tick best = 0;
           for (int aidx = 2; aidx >= 0; --aidx) {
-            if (final_allowed[aidx] <= trimmed) { best = final_allowed[aidx]; break; }
+            if (final_allowed[aidx] <= trimmed) {
+              best = final_allowed[aidx];
+              break;
+            }
           }
           // If no allowed duration fits, mark for removal.
           note.duration = (best > 0) ? best : 0;
@@ -2192,10 +2196,9 @@ TrioSonataMovement generateMovement(const KeySignature& key_sig, Tick num_bars,
         }
       }
       // Remove notes marked for removal (duration == 0).
-      tracks[trk].notes.erase(
-          std::remove_if(tracks[trk].notes.begin(), tracks[trk].notes.end(),
-                         [](const NoteEvent& n) { return n.duration == 0; }),
-          tracks[trk].notes.end());
+      tracks[trk].notes.erase(std::remove_if(tracks[trk].notes.begin(), tracks[trk].notes.end(),
+                                             [](const NoteEvent& n) { return n.duration == 0; }),
+                              tracks[trk].notes.end());
     }
   }
 
@@ -2217,20 +2220,19 @@ TrioSonataResult generateTrioSonata(const TrioSonataConfig& config) {
   result.success = false;
 
   // Movement 1: Allegro, home key.
-  TrioSonataMovement mov1 = generateMovement(
-      config.key, kFastMovementBars, config.bpm_fast, config.seed,
-      TrioMovementCharacter::Allegro);
+  TrioSonataMovement mov1 = generateMovement(config.key, kFastMovementBars, config.bpm_fast,
+                                             config.seed, TrioMovementCharacter::Allegro);
 
   // Movement 2: Adagio, related key.
   KeySignature slow_key = getRelative(config.key);
-  TrioSonataMovement mov2 = generateMovement(
-      slow_key, kSlowMovementBars, config.bpm_slow,
-      config.seed + kMovement2SeedOffset, TrioMovementCharacter::Adagio);
+  TrioSonataMovement mov2 =
+      generateMovement(slow_key, kSlowMovementBars, config.bpm_slow,
+                       config.seed + kMovement2SeedOffset, TrioMovementCharacter::Adagio);
 
   // Movement 3: Vivace, home key.
-  TrioSonataMovement mov3 = generateMovement(
-      config.key, kFastMovementBars, config.bpm_fast,
-      config.seed + kMovement3SeedOffset, TrioMovementCharacter::Vivace);
+  TrioSonataMovement mov3 =
+      generateMovement(config.key, kFastMovementBars, config.bpm_fast,
+                       config.seed + kMovement3SeedOffset, TrioMovementCharacter::Vivace);
 
   // Registration and Picardy (shared organ techniques).
   Registration mov_regs[] = {
@@ -2249,9 +2251,8 @@ TrioSonataResult generateTrioSonata(const TrioSonataConfig& config) {
     if (config.enable_picardy && mov_keys[m].is_minor &&
         movs[m]->total_duration_ticks > kTicksPerBar) {
       for (auto& track : movs[m]->tracks) {
-        applyPicardyToFinalChord(
-            track.notes, mov_keys[m],
-            movs[m]->total_duration_ticks - kTicksPerBar);
+        applyPicardyToFinalChord(track.notes, mov_keys[m],
+                                 movs[m]->total_duration_ticks - kTicksPerBar);
       }
     }
   }

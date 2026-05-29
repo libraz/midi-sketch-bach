@@ -73,10 +73,14 @@ bach::GeneratorConfig configFromJson(const std::map<std::string, bach::JsonValue
   it = kv.find("character");
   if (it != kv.end() && it->second.type == bach::JsonValue::String) {
     const auto& val = it->second.string_val;
-    if (val == "severe") config.character = bach::SubjectCharacter::Severe;
-    else if (val == "playful") config.character = bach::SubjectCharacter::Playful;
-    else if (val == "noble") config.character = bach::SubjectCharacter::Noble;
-    else if (val == "restless") config.character = bach::SubjectCharacter::Restless;
+    if (val == "severe")
+      config.character = bach::SubjectCharacter::Severe;
+    else if (val == "playful")
+      config.character = bach::SubjectCharacter::Playful;
+    else if (val == "noble")
+      config.character = bach::SubjectCharacter::Noble;
+    else if (val == "restless")
+      config.character = bach::SubjectCharacter::Restless;
   } else if (it != kv.end() && it->second.type == bach::JsonValue::Number) {
     auto char_id = static_cast<uint8_t>(it->second.number_val);
     if (char_id <= 3) {
@@ -120,7 +124,8 @@ bach::GeneratorConfig configFromJson(const std::map<std::string, bach::JsonValue
 
 /// @brief Validate a GeneratorConfig and return an error code.
 BachError validateConfig(const bach::GeneratorConfig& config) {
-  if (static_cast<uint8_t>(config.form) > static_cast<uint8_t>(bach::FormType::GoldbergVariations)) {
+  if (static_cast<uint8_t>(config.form) >
+      static_cast<uint8_t>(bach::FormType::GoldbergVariations)) {
     return BACH_ERROR_INVALID_FORM;
   }
   if (static_cast<uint8_t>(config.key.tonic) > 11) {
@@ -144,16 +149,8 @@ BachError validateConfig(const bach::GeneratorConfig& config) {
 
 // Display names for form types (human-readable)
 const char* kFormDisplayNames[] = {
-    "Fugue",
-    "Prelude and Fugue",
-    "Trio Sonata",
-    "Chorale Prelude",
-    "Toccata and Fugue",
-    "Passacaglia",
-    "Fantasia and Fugue",
-    "Cello Prelude",
-    "Chaconne",
-    "Goldberg Variations",
+    "Fugue",       "Prelude and Fugue",  "Trio Sonata",   "Chorale Prelude", "Toccata and Fugue",
+    "Passacaglia", "Fantasia and Fugue", "Cello Prelude", "Chaconne",        "Goldberg Variations",
 };
 
 constexpr uint8_t kFormCount = 10;
@@ -208,8 +205,7 @@ BachError bach_generate_from_json(BachHandle handle, const char* json, size_t le
 
   // Build MIDI bytes
   bach::MidiWriter writer;
-  writer.build(instance->result.tracks, instance->result.tempo_events,
-               instance->config.key.tonic);
+  writer.build(instance->result.tracks, instance->result.tempo_events, instance->config.key.tonic);
   instance->midi_bytes = writer.toBytes();
 
   // Build events JSON
@@ -224,12 +220,15 @@ BachError bach_generate_from_json(BachHandle handle, const char* json, size_t le
 // ============================================================================
 
 BachMidiData* bach_get_midi(BachHandle handle) {
-  if (!handle) return nullptr;
+  if (!handle)
+    return nullptr;
   auto* instance = static_cast<BachInstance*>(handle);
-  if (!instance->has_result || instance->midi_bytes.empty()) return nullptr;
+  if (!instance->has_result || instance->midi_bytes.empty())
+    return nullptr;
 
   auto* result = static_cast<BachMidiData*>(malloc(sizeof(BachMidiData)));
-  if (!result) return nullptr;
+  if (!result)
+    return nullptr;
 
   result->size = instance->midi_bytes.size();
   result->data = static_cast<uint8_t*>(malloc(result->size));
@@ -250,12 +249,15 @@ void bach_free_midi(BachMidiData* data) {
 }
 
 BachEventData* bach_get_events(BachHandle handle) {
-  if (!handle) return nullptr;
+  if (!handle)
+    return nullptr;
   auto* instance = static_cast<BachInstance*>(handle);
-  if (!instance->has_result) return nullptr;
+  if (!instance->has_result)
+    return nullptr;
 
   auto* result = static_cast<BachEventData*>(malloc(sizeof(BachEventData)));
-  if (!result) return nullptr;
+  if (!result)
+    return nullptr;
 
   result->length = instance->events_json.size();
   result->json = static_cast<char*>(malloc(result->length + 1));
@@ -280,10 +282,12 @@ static BachInfo s_info;
 
 BachInfo* bach_get_info(BachHandle handle) {
   s_info = {};
-  if (!handle) return &s_info;
+  if (!handle)
+    return &s_info;
 
   auto* instance = static_cast<BachInstance*>(handle);
-  if (!instance->has_result) return &s_info;
+  if (!instance->has_result)
+    return &s_info;
 
   s_info.total_ticks = instance->result.total_duration_ticks;
   s_info.total_bars =
@@ -304,12 +308,14 @@ uint8_t bach_form_count(void) {
 }
 
 const char* bach_form_name(uint8_t id) {
-  if (id >= kFormCount) return "";
+  if (id >= kFormCount)
+    return "";
   return bach::formTypeToString(static_cast<bach::FormType>(id));
 }
 
 const char* bach_form_display(uint8_t id) {
-  if (id >= kFormCount) return "";
+  if (id >= kFormCount)
+    return "";
   return kFormDisplayNames[id];
 }
 
@@ -322,7 +328,8 @@ uint8_t bach_instrument_count(void) {
 }
 
 const char* bach_instrument_name(uint8_t id) {
-  if (id >= kInstrumentCount) return "";
+  if (id >= kInstrumentCount)
+    return "";
   return bach::instrumentTypeToString(static_cast<bach::InstrumentType>(id));
 }
 
@@ -335,7 +342,8 @@ uint8_t bach_character_count(void) {
 }
 
 const char* bach_character_name(uint8_t id) {
-  if (id >= kCharacterCount) return "";
+  if (id >= kCharacterCount)
+    return "";
   return bach::subjectCharacterToString(static_cast<bach::SubjectCharacter>(id));
 }
 
@@ -348,7 +356,8 @@ uint8_t bach_key_count(void) {
 }
 
 const char* bach_key_name(uint8_t id) {
-  if (id >= kKeyCount) return "";
+  if (id >= kKeyCount)
+    return "";
   return bach::keyToString(static_cast<bach::Key>(id));
 }
 
@@ -361,7 +370,8 @@ uint8_t bach_scale_count(void) {
 }
 
 const char* bach_scale_name(uint8_t id) {
-  if (id >= kScaleCount) return "";
+  if (id >= kScaleCount)
+    return "";
   return bach::durationScaleToString(static_cast<bach::DurationScale>(id));
 }
 
@@ -370,9 +380,9 @@ const char* bach_scale_name(uint8_t id) {
 // ============================================================================
 
 uint8_t bach_default_instrument_for_form(uint8_t form_id) {
-  if (form_id >= kFormCount) return 0;
-  return static_cast<uint8_t>(
-      bach::defaultInstrumentForForm(static_cast<bach::FormType>(form_id)));
+  if (form_id >= kFormCount)
+    return 0;
+  return static_cast<uint8_t>(bach::defaultInstrumentForForm(static_cast<bach::FormType>(form_id)));
 }
 
 // ============================================================================
@@ -381,14 +391,22 @@ uint8_t bach_default_instrument_for_form(uint8_t form_id) {
 
 const char* bach_error_string(BachError error) {
   switch (error) {
-    case BACH_OK: return "No error";
-    case BACH_ERROR_INVALID_PARAM: return "Invalid parameter";
-    case BACH_ERROR_GENERATION_FAILED: return "Generation failed";
-    case BACH_ERROR_INVALID_FORM: return "Invalid form type";
-    case BACH_ERROR_INVALID_KEY: return "Invalid key (must be 0-11)";
-    case BACH_ERROR_INVALID_CHARACTER: return "Invalid character";
-    case BACH_ERROR_INVALID_INSTRUMENT: return "Invalid instrument";
-    case BACH_ERROR_INCOMPATIBLE_CHARACTER_FORM: return "Incompatible character for this form";
+    case BACH_OK:
+      return "No error";
+    case BACH_ERROR_INVALID_PARAM:
+      return "Invalid parameter";
+    case BACH_ERROR_GENERATION_FAILED:
+      return "Generation failed";
+    case BACH_ERROR_INVALID_FORM:
+      return "Invalid form type";
+    case BACH_ERROR_INVALID_KEY:
+      return "Invalid key (must be 0-11)";
+    case BACH_ERROR_INVALID_CHARACTER:
+      return "Invalid character";
+    case BACH_ERROR_INVALID_INSTRUMENT:
+      return "Invalid instrument";
+    case BACH_ERROR_INCOMPATIBLE_CHARACTER_FORM:
+      return "Incompatible character for this form";
   }
   return "Unknown error";
 }

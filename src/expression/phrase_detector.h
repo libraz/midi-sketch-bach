@@ -15,8 +15,8 @@ namespace bach {
 /// Phrase boundaries are inferred from harmonic progressions. The cadence
 /// type indicates the strength and character of the boundary.
 struct PhraseBoundary {
-  Tick tick = 0;                                ///< Tick position of the boundary
-  CadenceType cadence = CadenceType::Perfect;   ///< Type of cadence at boundary
+  Tick tick = 0;                               ///< Tick position of the boundary
+  CadenceType cadence = CadenceType::Perfect;  ///< Type of cadence at boundary
 };
 
 /// @brief Detect phrase boundaries by scanning a harmonic timeline.

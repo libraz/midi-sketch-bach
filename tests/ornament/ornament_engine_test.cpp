@@ -24,8 +24,7 @@ NoteEvent makeNote(Tick start, uint8_t pitch, Tick duration, uint8_t voice = 0) 
 }
 
 /// Helper: create a default ornament context with a given role and seed.
-OrnamentContext makeContext(VoiceRole role, uint32_t seed = 42,
-                           float density = 1.0f) {
+OrnamentContext makeContext(VoiceRole role, uint32_t seed = 42, float density = 1.0f) {
   OrnamentContext ctx;
   ctx.config.enable_trill = true;
   ctx.config.enable_mordent = true;
@@ -522,8 +521,7 @@ TEST(VerifyOrnamentCounterpointTest, NoViolationPassesThrough) {
   Tick sub_dur = kTicksPerBeat / 4;
   for (int idx = 0; idx < 4; ++idx) {
     uint8_t pitch = (idx % 2 == 0) ? 72 : 74;  // C5, D5 alternation
-    ornamented_notes.push_back(
-        makeNote(static_cast<Tick>(idx) * sub_dur, pitch, sub_dur, 0));
+    ornamented_notes.push_back(makeNote(static_cast<Tick>(idx) * sub_dur, pitch, sub_dur, 0));
   }
 
   // Voice 1: sustained E4 (well below voice 0, no crossing possible).
@@ -568,7 +566,7 @@ TEST(VerifyOrnamentCounterpointTest, ParallelFifthsReverted) {
   // Ornament on beat 1 replaces A4 with D5 (74) -> creates P5 parallel.
 
   std::vector<NoteEvent> original_v0 = {
-      makeNote(0, 72, kTicksPerBeat, 0),           // C5 at beat 0
+      makeNote(0, 72, kTicksPerBeat, 0),              // C5 at beat 0
       makeNote(kTicksPerBeat, 69, kTicksPerBeat, 0),  // A4 at beat 1
   };
 
@@ -580,7 +578,7 @@ TEST(VerifyOrnamentCounterpointTest, ParallelFifthsReverted) {
   };
 
   std::vector<NoteEvent> voice1 = {
-      makeNote(0, 65, kTicksPerBeat, 1),           // F4 at beat 0
+      makeNote(0, 65, kTicksPerBeat, 1),              // F4 at beat 0
       makeNote(kTicksPerBeat, 67, kTicksPerBeat, 1),  // G4 at beat 1
   };
 
@@ -588,14 +586,18 @@ TEST(VerifyOrnamentCounterpointTest, ParallelFifthsReverted) {
 
   // Verify: the ornamented version should have parallel 5ths.
   std::vector<NoteEvent> check_notes;
-  for (const auto& note : ornamented_v0) check_notes.push_back(note);
-  for (const auto& note : voice1) check_notes.push_back(note);
+  for (const auto& note : ornamented_v0)
+    check_notes.push_back(note);
+  for (const auto& note : voice1)
+    check_notes.push_back(note);
   ASSERT_GT(countParallelPerfect(check_notes, 2), 0u);
 
   // Verify: the original version should NOT have parallel 5ths.
   std::vector<NoteEvent> ref_notes;
-  for (const auto& note : original_v0) ref_notes.push_back(note);
-  for (const auto& note : voice1) ref_notes.push_back(note);
+  for (const auto& note : original_v0)
+    ref_notes.push_back(note);
+  for (const auto& note : voice1)
+    ref_notes.push_back(note);
   ASSERT_EQ(countParallelPerfect(ref_notes, 2), 0u);
 
   verifyOrnamentCounterpoint(ornamented_v0, original_v0, all_voices, 2);
@@ -634,14 +636,18 @@ TEST(VerifyOrnamentCounterpointTest, VoiceCrossingReverted) {
 
   // Verify: ornamented version should have voice crossing.
   std::vector<NoteEvent> check_notes;
-  for (const auto& note : ornamented_v0) check_notes.push_back(note);
-  for (const auto& note : voice1) check_notes.push_back(note);
+  for (const auto& note : ornamented_v0)
+    check_notes.push_back(note);
+  for (const auto& note : voice1)
+    check_notes.push_back(note);
   ASSERT_GT(countVoiceCrossings(check_notes, 2), 0u);
 
   // Verify: original version should NOT have voice crossing.
   std::vector<NoteEvent> ref_notes;
-  for (const auto& note : original_v0) ref_notes.push_back(note);
-  for (const auto& note : voice1) ref_notes.push_back(note);
+  for (const auto& note : original_v0)
+    ref_notes.push_back(note);
+  for (const auto& note : voice1)
+    ref_notes.push_back(note);
   ASSERT_EQ(countVoiceCrossings(ref_notes, 2), 0u);
 
   verifyOrnamentCounterpoint(ornamented_v0, original_v0, all_voices, 2);
@@ -744,8 +750,8 @@ TEST(ScaleAwareOrnamentTest, CMajorETrillUsesF) {
   // In C major, E(64) upper neighbor should be F(65) -- a half step,
   // not the chromatic G(66).
   KeySignature key_sig{Key::C, false};
-  auto timeline = HarmonicTimeline::createStandard(key_sig, kTicksPerBar * 2,
-                                                    HarmonicResolution::Beat);
+  auto timeline =
+      HarmonicTimeline::createStandard(key_sig, kTicksPerBar * 2, HarmonicResolution::Beat);
 
   auto note = makeNote(0, 64, kTicksPerBeat);  // E4 on beat 0
 
@@ -777,8 +783,8 @@ TEST(ScaleAwareOrnamentTest, CMajorETrillUsesF) {
 TEST(ScaleAwareOrnamentTest, AMinorGSharpTrillUsesA) {
   // In A harmonic minor, G#(68) upper neighbor should be A(69).
   KeySignature key_sig{Key::A, true};
-  auto timeline = HarmonicTimeline::createStandard(key_sig, kTicksPerBar * 2,
-                                                    HarmonicResolution::Beat);
+  auto timeline =
+      HarmonicTimeline::createStandard(key_sig, kTicksPerBar * 2, HarmonicResolution::Beat);
 
   auto note = makeNote(0, 68, kTicksPerBeat);  // G#4 on beat 0
 

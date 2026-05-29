@@ -21,7 +21,8 @@ namespace {
 /// @param open_strings Open string pitches, sorted low to high.
 /// @return String index (0-based from lowest).
 int estimateStringIndex(uint8_t pitch, const std::vector<uint8_t>& open_strings) {
-  if (open_strings.empty()) return 0;
+  if (open_strings.empty())
+    return 0;
 
   int best_idx = 0;
   for (size_t idx = 0; idx < open_strings.size(); ++idx) {
@@ -58,7 +59,8 @@ std::vector<uint8_t> getOpenStrings(InstrumentType instrument) {
 
 bool isLargeStringCrossing(uint8_t from_pitch, uint8_t to_pitch,
                            const std::vector<uint8_t>& open_strings) {
-  if (open_strings.empty()) return false;
+  if (open_strings.empty())
+    return false;
 
   int from_string = estimateStringIndex(from_pitch, open_strings);
   int to_string = estimateStringIndex(to_pitch, open_strings);
@@ -66,9 +68,9 @@ bool isLargeStringCrossing(uint8_t from_pitch, uint8_t to_pitch,
   return distance >= 3;
 }
 
-void assignBowDirections(std::vector<NoteEvent>& notes,
-                         const std::vector<uint8_t>& open_strings) {
-  if (notes.empty()) return;
+void assignBowDirections(std::vector<NoteEvent>& notes, const std::vector<uint8_t>& open_strings) {
+  if (notes.empty())
+    return;
 
   BowDirection current_dir = BowDirection::Down;
 

@@ -63,10 +63,10 @@ HarmonicTimeline makeCMajorTimeline(int num_bars) {
 TEST(DissonancePhase1, CleanConsonance_ZeroDetections) {
   // Two voices in parallel 3rds -- no clashes.
   std::vector<NoteEvent> notes = {
-      qn(0, 60, 0),               // C4
-      qn(kTicksPerBeat, 62, 0),   // D4
-      qn(0, 64, 1),               // E4 (M3 above C)
-      qn(kTicksPerBeat, 65, 1),   // F4 (m3 above D)
+      qn(0, 60, 0),              // C4
+      qn(kTicksPerBeat, 62, 0),  // D4
+      qn(0, 64, 1),              // E4 (M3 above C)
+      qn(kTicksPerBeat, 65, 1),  // F4 (m3 above D)
   };
   auto result = detectSimultaneousClashes(notes, 2);
   EXPECT_EQ(result.size(), 0u);
@@ -244,9 +244,9 @@ TEST(DissonancePhase2, VChord_ChordTones) {
   auto tl = makeCMajorTimeline(2);
   // In bar 1 (V chord): G, B, D are chord tones.
   std::vector<NoteEvent> notes = {
-      qn(kTicksPerBar, 67, 0),      // G4
-      qn(kTicksPerBar, 71, 1),      // B4
-      qn(kTicksPerBar, 62, 2),      // D4
+      qn(kTicksPerBar, 67, 0),  // G4
+      qn(kTicksPerBar, 71, 1),  // B4
+      qn(kTicksPerBar, 62, 2),  // D4
   };
   auto result = detectNonChordTones(notes, tl);
   EXPECT_EQ(result.size(), 0u);
@@ -260,8 +260,8 @@ TEST(DissonancePhase3, NoSustainedNotes_ZeroDetections) {
   auto tl = makeCMajorTimeline(2);
   // Notes don't cross the bar 0->1 boundary.
   std::vector<NoteEvent> notes = {
-      qn(0, 60, 0),            // C4 in bar 0 only
-      qn(kTicksPerBar, 67, 0), // G4 in bar 1 only
+      qn(0, 60, 0),             // C4 in bar 0 only
+      qn(kTicksPerBar, 67, 0),  // G4 in bar 1 only
   };
   auto result = detectSustainedOverChordChange(notes, 1, tl);
   EXPECT_EQ(result.size(), 0u);
@@ -316,8 +316,8 @@ TEST(DissonancePhase4, DiatonicNotes_ZeroDetections) {
   KeySignature ks = {Key::C, false};
   // All C major diatonic: C D E F G A B
   std::vector<NoteEvent> notes = {
-      qn(0, 60, 0),               // C4
-      qn(kTicksPerBeat, 62, 0),   // D4
+      qn(0, 60, 0),                  // C4
+      qn(kTicksPerBeat, 62, 0),      // D4
       qn(kTicksPerBeat * 2, 64, 0),  // E4
       qn(kTicksPerBeat * 3, 65, 0),  // F4
   };
@@ -363,8 +363,8 @@ TEST(DissonancePhase4, ChromaticStrongBeat_HighSeverity) {
 TEST(DissonancePhase4, MinorKey_DiatonicCheck) {
   KeySignature ks = {Key::A, true};  // A minor: A B C D E F G
   std::vector<NoteEvent> notes = {
-      qn(0, 57, 0),   // A3 (diatonic in A minor)
-      qn(kTicksPerBeat, 59, 0),  // B3
+      qn(0, 57, 0),                  // A3 (diatonic in A minor)
+      qn(kTicksPerBeat, 59, 0),      // B3
       qn(kTicksPerBeat * 2, 60, 0),  // C4
   };
   auto result = detectNonDiatonicNotes(notes, ks);
@@ -391,8 +391,8 @@ TEST(DissonancePhase4, EmptyInput_NoDetections) {
 TEST(DissonancePhase4, DMinorDiatonic) {
   KeySignature ks = {Key::D, true};  // D minor: D E F G A Bb C
   std::vector<NoteEvent> notes = {
-      qn(0, 62, 0),   // D4
-      qn(kTicksPerBeat, 64, 0),   // E4
+      qn(0, 62, 0),                  // D4
+      qn(kTicksPerBeat, 64, 0),      // E4
       qn(kTicksPerBeat * 2, 65, 0),  // F4
       qn(kTicksPerBeat * 3, 67, 0),  // G4
   };
@@ -544,8 +544,7 @@ TEST(DissonancePhase1, P4UpperVoices_Skipped) {
     if (ev.voice_a == 1 && ev.voice_b == 2) {
       // If a clash between voices 1 and 2 is reported, its interval
       // should not be a P4 (5 semitones).
-      EXPECT_NE(ev.interval % 12, 5)
-          << "P4 between upper voices should not be flagged";
+      EXPECT_NE(ev.interval % 12, 5) << "P4 between upper voices should not be flagged";
     }
   }
 }
@@ -589,7 +588,7 @@ TEST(DissonancePhase3, Suspension_DowngradeToLow) {
   tl.addEvent(ev2);
 
   // E4 held across boundary, then resolves to D4.
-  NoteEvent held = {0, kTicksPerBar + kTicksPerBeat, 64, 80, 0};  // E4
+  NoteEvent held = {0, kTicksPerBar + kTicksPerBeat, 64, 80, 0};                    // E4
   NoteEvent resolution = {kTicksPerBar + kTicksPerBeat, kTicksPerBeat, 62, 80, 0};  // D4
   std::vector<NoteEvent> notes = {held, resolution};
 
@@ -621,7 +620,7 @@ TEST(DissonancePhase3, NonSuspension_NotDowngraded) {
   tl.addEvent(ev2);
 
   // F4 is NOT a chord tone of I chord, so no preparation -> not a suspension.
-  NoteEvent held = {0, kTicksPerBar + kTicksPerBeat, 65, 80, 0};  // F4
+  NoteEvent held = {0, kTicksPerBar + kTicksPerBeat, 65, 80, 0};              // F4
   NoteEvent next = {kTicksPerBar + kTicksPerBeat, kTicksPerBeat, 64, 80, 0};  // E4
   std::vector<NoteEvent> notes = {held, next};
 
@@ -663,6 +662,29 @@ TEST(DissonancePhase4, MinorKey_LeadingToneNowDiatonic) {
   };
   auto result = detectNonDiatonicNotes(notes, ks);
   EXPECT_EQ(result.size(), 0u) << "G# should be diatonic in A minor (harmonic/melodic)";
+}
+
+TEST(DissonancePhase4, ImmutableChromaticStructuralTone_DowngradedToLow) {
+  KeySignature ks = {Key::C, false};
+  NoteEvent note = qn(kTicksPerBeat, 66, 0);  // F#4, weak beat
+  note.source = BachNoteSource::FugueAnswer;
+
+  auto result = detectNonDiatonicNotes({note}, ks);
+  ASSERT_EQ(result.size(), 1u);
+  EXPECT_EQ(result[0].severity, DissonanceSeverity::Low)
+      << "Protected answer chromaticism should consume context budget, not "
+         "count like replaceable filler";
+}
+
+TEST(DissonancePhase4, FlexibleChromaticTone_RemainsPenaltyAffecting) {
+  KeySignature ks = {Key::C, false};
+  NoteEvent note = qn(kTicksPerBeat, 66, 0);  // F#4, weak beat
+  note.source = BachNoteSource::EpisodeMaterial;
+
+  auto result = detectNonDiatonicNotes({note}, ks);
+  ASSERT_EQ(result.size(), 1u);
+  EXPECT_EQ(result[0].severity, DissonanceSeverity::Medium)
+      << "Replaceable flexible chromaticism should remain budget-visible";
 }
 
 // ===========================================================================
@@ -787,8 +809,8 @@ TEST(DissonancePhase2, Appoggiatura_StrongBeatResolvesToChordTone_DowngradedToLo
   // D4 on beat 0 (strong beat): not a chord tone of I (C, E, G).
   // Resolves by step down to C4 (chord tone) = appoggiatura.
   std::vector<NoteEvent> notes = {
-      qn(0, 62, 0),               // D4 (appoggiatura, strong beat)
-      qn(kTicksPerBeat, 60, 0),   // C4 (resolution, chord tone)
+      qn(0, 62, 0),              // D4 (appoggiatura, strong beat)
+      qn(kTicksPerBeat, 60, 0),  // C4 (resolution, chord tone)
   };
   auto result = detectNonChordTones(notes, tl);
   // D4 should be downgraded from High to Low (recognized appoggiatura).
@@ -806,8 +828,8 @@ TEST(DissonancePhase2, NonAppoggiatura_StrongBeatLeapResolution_StaysHigh) {
   // D4 on beat 0 (strong beat): not a chord tone.
   // Followed by G4 (leap, not stepwise) = NOT appoggiatura.
   std::vector<NoteEvent> notes = {
-      qn(0, 62, 0),               // D4 (strong beat)
-      qn(kTicksPerBeat, 67, 0),   // G4 (leap resolution)
+      qn(0, 62, 0),              // D4 (strong beat)
+      qn(kTicksPerBeat, 67, 0),  // G4 (leap resolution)
   };
   auto result = detectNonChordTones(notes, tl);
   bool found_high_d = false;

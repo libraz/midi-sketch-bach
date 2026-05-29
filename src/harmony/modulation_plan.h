@@ -15,7 +15,7 @@ namespace bach {
 struct ModulationTarget {
   Key target_key = Key::C;
   bool target_is_minor = false;
-  FuguePhase phase = FuguePhase::Develop;       // When to modulate
+  FuguePhase phase = FuguePhase::Develop;            // When to modulate
   CadenceType entry_cadence = CadenceType::Perfect;  // How to enter the new key
 };
 

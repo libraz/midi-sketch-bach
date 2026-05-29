@@ -25,8 +25,7 @@ namespace bach {
 // getRhythmSubdivisions -- public
 // ===========================================================================
 
-std::vector<std::pair<Tick, Tick>> getRhythmSubdivisions(
-    RhythmProfile profile, Tick beat_ticks) {
+std::vector<std::pair<Tick, Tick>> getRhythmSubdivisions(RhythmProfile profile, Tick beat_ticks) {
   switch (profile) {
     case RhythmProfile::QuarterNote:
       return {{0, beat_ticks}};
@@ -98,8 +97,7 @@ constexpr int kViolinOpenStringCount = 4;
 /// @param reg_high Highest allowed MIDI pitch.
 /// @param ref_pitch Reference pitch to minimize distance to.
 /// @return MIDI pitch within [reg_low, reg_high], or clamped if no exact fit.
-int fitPitchClassToRegister(int pitch_class, uint8_t reg_low,
-                            uint8_t reg_high, int ref_pitch) {
+int fitPitchClassToRegister(int pitch_class, uint8_t reg_low, uint8_t reg_high, int ref_pitch) {
   int center = (static_cast<int>(reg_low) + static_cast<int>(reg_high)) / 2;
   int shift = nearestOctaveShift(center - pitch_class);
   int candidate = pitch_class + shift;
@@ -139,12 +137,12 @@ int fitPitchClassToRegister(int pitch_class, uint8_t reg_low,
 /// @param reg_low Lowest allowed MIDI pitch.
 /// @param reg_high Highest allowed MIDI pitch.
 /// @return Vector of 3 or 4 MIDI pitches, sorted low to high.
-std::vector<uint8_t> chordToPitches(const Chord& chord, bool is_minor,
-                                    uint8_t reg_low, uint8_t reg_high) {
+std::vector<uint8_t> chordToPitches(const Chord& chord, bool is_minor, uint8_t reg_low,
+                                    uint8_t reg_high) {
   // Determine chord tone degrees based on quality.
-  bool is_seventh = (chord.quality == ChordQuality::Dominant7 ||
-                     chord.quality == ChordQuality::Minor7 ||
-                     chord.quality == ChordQuality::MajorMajor7);
+  bool is_seventh =
+      (chord.quality == ChordQuality::Dominant7 || chord.quality == ChordQuality::Minor7 ||
+       chord.quality == ChordQuality::MajorMajor7);
 
   // Scale degrees relative to chord root: 0=root, 2=3rd, 4=5th, 6=7th.
   std::vector<int> chord_degrees = {0, 2, 4};
@@ -188,8 +186,7 @@ uint8_t fitPitchToRegister(uint8_t pitch, uint8_t reg_low, uint8_t reg_high) {
   }
 
   int pitch_class = getPitchClass(pitch);
-  int fitted = fitPitchClassToRegister(pitch_class, reg_low, reg_high,
-                                       static_cast<int>(pitch));
+  int fitted = fitPitchClassToRegister(pitch_class, reg_low, reg_high, static_cast<int>(pitch));
   return static_cast<uint8_t>(fitted);
 }
 
@@ -203,8 +200,7 @@ uint8_t fitPitchToRegister(uint8_t pitch, uint8_t reg_low, uint8_t reg_high) {
 /// @param reg_low Lowest MIDI pitch.
 /// @param reg_high Highest MIDI pitch.
 /// @return Vector of all scale-tone MIDI pitches in [reg_low, reg_high].
-std::vector<uint8_t> getScalePitches(Key key, bool is_minor,
-                                     uint8_t reg_low, uint8_t reg_high) {
+std::vector<uint8_t> getScalePitches(Key key, bool is_minor, uint8_t reg_low, uint8_t reg_high) {
   ScaleType scale_type = is_minor ? ScaleType::NaturalMinor : ScaleType::Major;
   std::vector<uint8_t> pitches;
   pitches.reserve(64);
@@ -218,7 +214,6 @@ std::vector<uint8_t> getScalePitches(Key key, bool is_minor,
 
   return pitches;
 }
-
 
 /// @brief Compute velocity with beat-position-aware accents.
 /// @param tick_in_bar Position within the bar (0 to kTicksPerBar-1).
@@ -241,8 +236,10 @@ uint8_t computeVelocity(Tick tick_in_bar, uint8_t base_velocity, bool is_climax)
     vel += kClimaxVelocityBoost;
   }
 
-  if (vel > 127) vel = 127;
-  if (vel < 1) vel = 1;
+  if (vel > 127)
+    vel = 127;
+  if (vel < 1)
+    vel = 1;
   return static_cast<uint8_t>(vel);
 }
 
@@ -253,8 +250,8 @@ uint8_t computeVelocity(Tick tick_in_bar, uint8_t base_velocity, bool is_climax)
 /// @param tick_in_bar Position within bar for velocity computation.
 /// @param is_climax Whether this variation is the climax.
 /// @return Configured NoteEvent with voice=0.
-NoteEvent makeTextureNote(Tick tick, Tick duration, uint8_t pitch,
-                          Tick tick_in_bar, bool is_climax) {
+NoteEvent makeTextureNote(Tick tick, Tick duration, uint8_t pitch, Tick tick_in_bar,
+                          bool is_climax) {
   NoteEvent note;
   note.start_tick = tick;
   note.duration = duration;
@@ -296,13 +293,14 @@ uint8_t findNearestOpenString(uint8_t target, uint8_t reg_low, uint8_t reg_high)
 ///
 /// When a note creates a leap >12 semitones from the previous note, adjust it
 /// to the nearest octave placement that keeps the interval within 12 semitones.
-void clampExcessiveLeaps(std::vector<NoteEvent>& notes,
-                         uint8_t reg_low, uint8_t reg_high) {
-  if (notes.size() < 2) return;
+void clampExcessiveLeaps(std::vector<NoteEvent>& notes, uint8_t reg_low, uint8_t reg_high) {
+  if (notes.size() < 2)
+    return;
 
   for (size_t i = 1; i < notes.size(); ++i) {
     int leap = absoluteInterval(notes[i].pitch, notes[i - 1].pitch);
-    if (leap <= 12) continue;
+    if (leap <= 12)
+      continue;
 
     // Find the octave-transposition of notes[i] closest to notes[i-1].
     int pc = getPitchClass(notes[i].pitch);
@@ -312,7 +310,6 @@ void clampExcessiveLeaps(std::vector<NoteEvent>& notes,
     notes[i].modified_by |= static_cast<uint8_t>(NoteModifiedBy::OctaveAdjust);
   }
 }
-
 
 // ---------------------------------------------------------------------------
 // Helper: find the nearest diatonic step from a pitch toward a direction
@@ -332,8 +329,7 @@ void clampExcessiveLeaps(std::vector<NoteEvent>& notes,
 /// @param range_low Lower register bound.
 /// @param range_high Upper register bound.
 /// @return A pitch one diatonic step from from_pitch, or from_pitch if stuck.
-uint8_t nearestDiatonicStep(uint8_t from_pitch, uint8_t target_pitch,
-                            Key key, ScaleType scale,
+uint8_t nearestDiatonicStep(uint8_t from_pitch, uint8_t target_pitch, Key key, ScaleType scale,
                             uint8_t range_low, uint8_t range_high) {
   int abs_deg = scale_util::pitchToAbsoluteDegree(from_pitch, key, scale);
 
@@ -370,7 +366,8 @@ uint8_t nearestDiatonicStep(uint8_t from_pitch, uint8_t target_pitch,
 /// @return True if on beat 0 or beat 2.
 bool isStrongBeatPosition(Tick tick_in_bar) {
   Tick beat_offset = tick_in_bar % kTicksPerBeat;
-  if (beat_offset != 0) return false;
+  if (beat_offset != 0)
+    return false;
   uint8_t beat = static_cast<uint8_t>(tick_in_bar / kTicksPerBeat);
   return (beat == 0 || beat == 2);
 }
@@ -410,7 +407,7 @@ std::vector<NoteEvent> generateTexture(const TextureContext& ctx,
     clampExcessiveLeaps(notes, ctx.register_low, ctx.register_high);
     {
       LeapResolutionParams lr_params;
-      lr_params.num_voices = 1;  // Solo string.
+      lr_params.num_voices = 1;      // Solo string.
       lr_params.leap_threshold = 7;  // P5+ only (existing behavior).
       lr_params.key_at_tick = [&](Tick) { return ctx.key.tonic; };
       lr_params.scale_at_tick = [&](Tick) {
@@ -459,10 +456,11 @@ std::vector<NoteEvent> generateSingleLine(const TextureContext& ctx,
       Tick tick_in_bar = static_cast<Tick>(beat_idx) * kTicksPerBeat;
 
       const HarmonicEvent& harm = timeline.getAt(beat_tick);
-      std::vector<uint8_t> chord_pitches = chordToPitches(
-          harm.chord, harm.is_minor, ctx.register_low, ctx.register_high);
+      std::vector<uint8_t> chord_pitches =
+          chordToPitches(harm.chord, harm.is_minor, ctx.register_low, ctx.register_high);
 
-      if (chord_pitches.empty()) continue;
+      if (chord_pitches.empty())
+        continue;
 
       for (const auto& [sub_offset, sub_duration] : subdivisions) {
         Tick note_tick = beat_tick + sub_offset;
@@ -471,23 +469,20 @@ std::vector<NoteEvent> generateSingleLine(const TextureContext& ctx,
         uint8_t pitch;
         if (prev_pitch == 0) {
           // First note: pick a chord tone near the middle of the register.
-          int center = (static_cast<int>(ctx.register_low) +
-                        static_cast<int>(ctx.register_high)) / 2;
-          int range = static_cast<int>(ctx.register_high) -
-                      static_cast<int>(ctx.register_low);
+          int center =
+              (static_cast<int>(ctx.register_low) + static_cast<int>(ctx.register_high)) / 2;
+          int range = static_cast<int>(ctx.register_high) - static_cast<int>(ctx.register_low);
           int offset = rng::rollRange(rng, -range / 4, range / 4);
-          uint8_t mid = static_cast<uint8_t>(clampPitch(
-              center + offset, ctx.register_low, ctx.register_high));
+          uint8_t mid = static_cast<uint8_t>(
+              clampPitch(center + offset, ctx.register_low, ctx.register_high));
           pitch = nearestChordTone(mid, chord_pitches);
           melodic_direction = rng::rollProbability(rng, 0.5f) ? 1 : -1;
         } else if (just_leaped) {
           // After a leap, resolve by stepping in the opposite direction.
           int comp_dir = (last_leap_direction > 0) ? -1 : 1;
-          uint8_t comp_target = clampPitch(
-              static_cast<int>(prev_pitch) + comp_dir * 7,
-              ctx.register_low, ctx.register_high);
-          pitch = nearestDiatonicStep(prev_pitch, comp_target,
-                                      ctx.key.tonic, scale_type,
+          uint8_t comp_target = clampPitch(static_cast<int>(prev_pitch) + comp_dir * 7,
+                                           ctx.register_low, ctx.register_high);
+          pitch = nearestDiatonicStep(prev_pitch, comp_target, ctx.key.tonic, scale_type,
                                       ctx.register_low, ctx.register_high);
           melodic_direction = comp_dir;
           just_leaped = false;
@@ -534,13 +529,11 @@ std::vector<NoteEvent> generateSingleLine(const TextureContext& ctx,
             }
 
             // Calculate diatonic step.
-            uint8_t step_target = clampPitch(
-                static_cast<int>(prev_pitch) + step_dir * 3,
-                ctx.register_low, ctx.register_high);
-            uint8_t step_pitch = nearestDiatonicStep(
-                prev_pitch, step_target,
-                ctx.key.tonic, scale_type,
-                ctx.register_low, ctx.register_high);
+            uint8_t step_target = clampPitch(static_cast<int>(prev_pitch) + step_dir * 3,
+                                             ctx.register_low, ctx.register_high);
+            uint8_t step_pitch =
+                nearestDiatonicStep(prev_pitch, step_target, ctx.key.tonic, scale_type,
+                                    ctx.register_low, ctx.register_high);
 
             // Check if the step is also a chord tone (ideal).
             bool step_is_chord_tone = false;
@@ -562,27 +555,22 @@ std::vector<NoteEvent> generateSingleLine(const TextureContext& ctx,
               float step_prob = is_downbeat ? 0.75f : 0.90f;
 
               if (notes.size() >= 2 && step_pitch != chord_snap) {
-                ScaleType mk_scale = ctx.key.is_minor ? ScaleType::HarmonicMinor
-                                                      : ScaleType::Major;
+                ScaleType mk_scale = ctx.key.is_minor ? ScaleType::HarmonicMinor : ScaleType::Major;
                 Key mk_key = ctx.key.tonic;
                 uint8_t prev2 = notes[notes.size() - 2].pitch;
-                DegreeStep prev_ivl = computeDegreeStep(
-                    prev2, prev_pitch, mk_key, mk_scale);
+                DegreeStep prev_ivl = computeDegreeStep(prev2, prev_pitch, mk_key, mk_scale);
                 int prev_sd = 0;
-                scale_util::pitchToScaleDegree(
-                    prev_pitch, mk_key, mk_scale, prev_sd);
+                scale_util::pitchToScaleDegree(prev_pitch, mk_key, mk_scale, prev_sd);
                 DegreeClass deg_cls = scaleDegreeToClass(prev_sd);
                 BeatPos beat_pos = tickToBeatPos(note_tick);
 
-                DegreeStep step_ivl = computeDegreeStep(
-                    prev_pitch, step_pitch, mk_key, mk_scale);
-                DegreeStep snap_ivl = computeDegreeStep(
-                    prev_pitch, chord_snap, mk_key, mk_scale);
+                DegreeStep step_ivl = computeDegreeStep(prev_pitch, step_pitch, mk_key, mk_scale);
+                DegreeStep snap_ivl = computeDegreeStep(prev_pitch, chord_snap, mk_key, mk_scale);
 
-                float mk_step = scoreMarkovPitch(
-                    kViolinMarkov, prev_ivl, deg_cls, beat_pos, step_ivl);
-                float mk_snap = scoreMarkovPitch(
-                    kViolinMarkov, prev_ivl, deg_cls, beat_pos, snap_ivl);
+                float mk_step =
+                    scoreMarkovPitch(kViolinMarkov, prev_ivl, deg_cls, beat_pos, step_ivl);
+                float mk_snap =
+                    scoreMarkovPitch(kViolinMarkov, prev_ivl, deg_cls, beat_pos, snap_ivl);
 
                 // Adjust step_prob by the Markov score differential, scaled
                 // by kMarkovPitchWeightSolo. Positive diff favors step.
@@ -614,8 +602,8 @@ std::vector<NoteEvent> generateSingleLine(const TextureContext& ctx,
           }
         }
 
-        notes.push_back(makeTextureNote(
-            note_tick, sub_duration, pitch, note_tick_in_bar, ctx.is_climax));
+        notes.push_back(
+            makeTextureNote(note_tick, sub_duration, pitch, note_tick_in_bar, ctx.is_climax));
         prev_pitch = pitch;
       }
     }
@@ -687,10 +675,10 @@ std::vector<NoteEvent> generateImpliedPolyphony(const TextureContext& ctx,
 
       const HarmonicEvent& harm = timeline.getAt(beat_tick);
 
-      std::vector<uint8_t> upper_pitches = chordToPitches(
-          harm.chord, harm.is_minor, upper_low, upper_high);
-      std::vector<uint8_t> lower_pitches = chordToPitches(
-          harm.chord, harm.is_minor, lower_low, lower_high);
+      std::vector<uint8_t> upper_pitches =
+          chordToPitches(harm.chord, harm.is_minor, upper_low, upper_high);
+      std::vector<uint8_t> lower_pitches =
+          chordToPitches(harm.chord, harm.is_minor, lower_low, lower_high);
 
       for (const auto& [sub_offset, sub_duration] : subdivisions) {
         Tick note_tick = beat_tick + sub_offset;
@@ -702,8 +690,8 @@ std::vector<NoteEvent> generateImpliedPolyphony(const TextureContext& ctx,
         uint8_t pitch;
         if (use_upper) {
           if (upper_pitches.empty()) {
-            std::vector<uint8_t> fallback = chordToPitches(
-                harm.chord, harm.is_minor, ctx.register_low, ctx.register_high);
+            std::vector<uint8_t> fallback =
+                chordToPitches(harm.chord, harm.is_minor, ctx.register_low, ctx.register_high);
             pitch = fallback.empty() ? ctx.register_high : fallback.back();
           } else if (upper_prev == 0) {
             // First note in upper voice: pick a chord tone.
@@ -718,9 +706,8 @@ std::vector<NoteEvent> generateImpliedPolyphony(const TextureContext& ctx,
             // First continuation note after switching to upper voice.
             // Connect by diatonic step to the previous note in this voice.
             uint8_t target_ct = nearestChordTone(upper_prev, upper_pitches);
-            pitch = nearestDiatonicStep(upper_prev, target_ct,
-                                        ctx.key.tonic, scale_type,
-                                        upper_low, upper_high);
+            pitch = nearestDiatonicStep(upper_prev, target_ct, ctx.key.tonic, scale_type, upper_low,
+                                        upper_high);
             upper_just_switched = false;
           } else {
             // Continuing in upper voice. Prefer stepwise motion.
@@ -731,8 +718,7 @@ std::vector<NoteEvent> generateImpliedPolyphony(const TextureContext& ctx,
             } else {
               // Weak beat/subdivision: diatonic step toward nearest chord tone.
               uint8_t target_ct = nearestChordTone(upper_prev, upper_pitches);
-              pitch = nearestDiatonicStep(upper_prev, target_ct,
-                                          ctx.key.tonic, scale_type,
+              pitch = nearestDiatonicStep(upper_prev, target_ct, ctx.key.tonic, scale_type,
                                           upper_low, upper_high);
 
               // 8% chance of chord-tone snap for variety (reduced from 15%
@@ -746,17 +732,17 @@ std::vector<NoteEvent> generateImpliedPolyphony(const TextureContext& ctx,
           if (upper_prev > 0) {
             int leap = absoluteInterval(pitch, upper_prev);
             if (leap > 12) {
-              uint8_t close_target = clampPitch(
-                  static_cast<int>(upper_prev) + ((pitch > upper_prev) ? 7 : -7),
-                  upper_low, upper_high);
+              uint8_t close_target =
+                  clampPitch(static_cast<int>(upper_prev) + ((pitch > upper_prev) ? 7 : -7),
+                             upper_low, upper_high);
               pitch = nearestChordTone(close_target, upper_pitches);
             }
           }
           upper_prev = pitch;
         } else {
           if (lower_pitches.empty()) {
-            std::vector<uint8_t> fallback = chordToPitches(
-                harm.chord, harm.is_minor, ctx.register_low, ctx.register_high);
+            std::vector<uint8_t> fallback =
+                chordToPitches(harm.chord, harm.is_minor, ctx.register_low, ctx.register_high);
             pitch = fallback.empty() ? ctx.register_low : fallback.front();
           } else if (lower_prev == 0) {
             // First note in lower voice: pick a chord tone.
@@ -769,9 +755,8 @@ std::vector<NoteEvent> generateImpliedPolyphony(const TextureContext& ctx,
           } else if (lower_just_switched) {
             // First continuation after switching to lower voice: connect by step.
             uint8_t target_ct = nearestChordTone(lower_prev, lower_pitches);
-            pitch = nearestDiatonicStep(lower_prev, target_ct,
-                                        ctx.key.tonic, scale_type,
-                                        lower_low, lower_high);
+            pitch = nearestDiatonicStep(lower_prev, target_ct, ctx.key.tonic, scale_type, lower_low,
+                                        lower_high);
             lower_just_switched = false;
           } else {
             // Continuing in lower voice. Prefer stepwise motion.
@@ -782,8 +767,7 @@ std::vector<NoteEvent> generateImpliedPolyphony(const TextureContext& ctx,
             } else {
               // Weak beat/subdivision: diatonic step toward nearest chord tone.
               uint8_t target_ct = nearestChordTone(lower_prev, lower_pitches);
-              pitch = nearestDiatonicStep(lower_prev, target_ct,
-                                          ctx.key.tonic, scale_type,
+              pitch = nearestDiatonicStep(lower_prev, target_ct, ctx.key.tonic, scale_type,
                                           lower_low, lower_high);
 
               // 8% chance of chord-tone snap for variety (reduced from 15%
@@ -797,17 +781,17 @@ std::vector<NoteEvent> generateImpliedPolyphony(const TextureContext& ctx,
           if (lower_prev > 0) {
             int leap = absoluteInterval(pitch, lower_prev);
             if (leap > 12) {
-              uint8_t close_target = clampPitch(
-                  static_cast<int>(lower_prev) + ((pitch > lower_prev) ? 7 : -7),
-                  lower_low, lower_high);
+              uint8_t close_target =
+                  clampPitch(static_cast<int>(lower_prev) + ((pitch > lower_prev) ? 7 : -7),
+                             lower_low, lower_high);
               pitch = nearestChordTone(close_target, lower_pitches);
             }
           }
           lower_prev = pitch;
         }
 
-        notes.push_back(makeTextureNote(
-            note_tick, sub_duration, pitch, note_tick_in_bar, ctx.is_climax));
+        notes.push_back(
+            makeTextureNote(note_tick, sub_duration, pitch, note_tick_in_bar, ctx.is_climax));
 
         was_upper = use_upper;
         if (rng::rollProbability(rng, alt_prob)) {
@@ -849,10 +833,11 @@ std::vector<NoteEvent> generateFullChords(const TextureContext& ctx,
       Tick tick_in_bar = static_cast<Tick>(half_idx) * (kTicksPerBar / 2);
 
       const HarmonicEvent& harm = timeline.getAt(chord_tick);
-      std::vector<uint8_t> chord_pitches = chordToPitches(
-          harm.chord, harm.is_minor, ctx.register_low, ctx.register_high);
+      std::vector<uint8_t> chord_pitches =
+          chordToPitches(harm.chord, harm.is_minor, ctx.register_low, ctx.register_high);
 
-      if (chord_pitches.empty()) continue;
+      if (chord_pitches.empty())
+        continue;
 
       // Ensure at least 3 notes. If we only have a triad, that is fine.
       // If we have fewer than 3, duplicate the root in another octave.
@@ -895,9 +880,8 @@ std::vector<NoteEvent> generateFullChords(const TextureContext& ctx,
           note_tick_in_bar = tick_in_bar + 2 * kGraceNoteDuration;
         }
 
-        notes.push_back(makeTextureNote(
-            note_tick, duration, chord_pitches[note_idx],
-            note_tick_in_bar, true));
+        notes.push_back(
+            makeTextureNote(note_tick, duration, chord_pitches[note_idx], note_tick_in_bar, true));
       }
     }
   }
@@ -936,9 +920,8 @@ std::vector<NoteEvent> generateArpeggiated(const TextureContext& ctx,
     ArcPhase phase = (bar_offset < half_duration) ? ArcPhase::Ascent : ArcPhase::Descent;
 
     Tick bars_in_half = half_duration / kTicksPerBar;
-    Tick bar_in_half = (bar_offset < half_duration)
-        ? bar_offset / kTicksPerBar
-        : (bar_offset - half_duration) / kTicksPerBar;
+    Tick bar_in_half = (bar_offset < half_duration) ? bar_offset / kTicksPerBar
+                                                    : (bar_offset - half_duration) / kTicksPerBar;
 
     PatternRole role;
     if (bars_in_half <= 1) {
@@ -962,12 +945,12 @@ std::vector<NoteEvent> generateArpeggiated(const TextureContext& ctx,
 
       bool is_section_start = (bar_in_half == 0 && beat_idx == 0);
 
-      ArpeggioPattern pattern = generatePattern(
-          chord_degrees, phase, role, false,
-          rng, prev_pattern, is_section_start);
+      ArpeggioPattern pattern =
+          generatePattern(chord_degrees, phase, role, false, rng, prev_pattern, is_section_start);
       prev_pattern = pattern.type;
 
-      if (pattern.degrees.empty()) continue;
+      if (pattern.degrees.empty())
+        continue;
 
       // Per-beat 20% chance to reverse arpeggio direction.
       std::vector<int> degrees = pattern.degrees;
@@ -987,12 +970,11 @@ std::vector<NoteEvent> generateArpeggiated(const TextureContext& ctx,
         int offset = degreeToPitchOffset(pattern_degree, harm.is_minor);
         int raw_pitch = static_cast<int>(harm.chord.root_pitch) + offset;
 
-        uint8_t pitch = fitPitchToRegister(
-            clampPitch(raw_pitch, 0, 127),
-            ctx.register_low, ctx.register_high);
+        uint8_t pitch =
+            fitPitchToRegister(clampPitch(raw_pitch, 0, 127), ctx.register_low, ctx.register_high);
 
-        notes.push_back(makeTextureNote(
-            note_tick, sub_duration, pitch, note_tick_in_bar, ctx.is_climax));
+        notes.push_back(
+            makeTextureNote(note_tick, sub_duration, pitch, note_tick_in_bar, ctx.is_climax));
       }
     }
   }
@@ -1017,8 +999,8 @@ std::vector<NoteEvent> generateScalePassage(const TextureContext& ctx,
   Tick num_bars = ctx.duration_ticks / kTicksPerBar;
   notes.reserve(static_cast<size_t>(num_bars) * subdivisions.size() * kBeatsPerBar);
 
-  std::vector<uint8_t> scale_pitches = getScalePitches(
-      ctx.key.tonic, ctx.key.is_minor, ctx.register_low, ctx.register_high);
+  std::vector<uint8_t> scale_pitches =
+      getScalePitches(ctx.key.tonic, ctx.key.is_minor, ctx.register_low, ctx.register_high);
 
   if (scale_pitches.empty()) {
     return notes;
@@ -1043,23 +1025,23 @@ std::vector<NoteEvent> generateScalePassage(const TextureContext& ctx,
 
       const HarmonicEvent& harm = timeline.getAt(beat_tick);
 
-      std::vector<uint8_t> chord_pitches = chordToPitches(
-          harm.chord, harm.is_minor, ctx.register_low, ctx.register_high);
+      std::vector<uint8_t> chord_pitches =
+          chordToPitches(harm.chord, harm.is_minor, ctx.register_low, ctx.register_high);
 
-      if (chord_pitches.empty()) continue;
+      if (chord_pitches.empty())
+        continue;
 
       uint8_t mid = static_cast<uint8_t>(std::max(
           static_cast<int>(ctx.register_low),
           std::min(static_cast<int>(ctx.register_high),
-                   (static_cast<int>(ctx.register_low) +
-                    static_cast<int>(ctx.register_high)) / 2 + pitch_offset)));
+                   (static_cast<int>(ctx.register_low) + static_cast<int>(ctx.register_high)) / 2 +
+                       pitch_offset)));
       uint8_t start_pitch = nearestChordTone(mid, chord_pitches);
 
       int start_idx = 0;
       int best_dist = 999;
       for (int idx = 0; idx < static_cast<int>(scale_pitches.size()); ++idx) {
-        int dist = std::abs(
-            static_cast<int>(scale_pitches[idx]) - static_cast<int>(start_pitch));
+        int dist = std::abs(static_cast<int>(scale_pitches[idx]) - static_cast<int>(start_pitch));
         if (dist < best_dist) {
           best_dist = dist;
           start_idx = idx;
@@ -1091,8 +1073,8 @@ std::vector<NoteEvent> generateScalePassage(const TextureContext& ctx,
         }
 
         uint8_t pitch = scale_pitches[scale_idx];
-        notes.push_back(makeTextureNote(
-            note_tick, sub_duration, pitch, note_tick_in_bar, ctx.is_climax));
+        notes.push_back(
+            makeTextureNote(note_tick, sub_duration, pitch, note_tick_in_bar, ctx.is_climax));
       }
 
       // Markov chain direction reversal (seed-dependent probability).
@@ -1130,10 +1112,11 @@ std::vector<NoteEvent> generateBariolage(const TextureContext& ctx,
       Tick tick_in_bar = static_cast<Tick>(beat_idx) * kTicksPerBeat;
 
       const HarmonicEvent& harm = timeline.getAt(beat_tick);
-      std::vector<uint8_t> chord_pitches = chordToPitches(
-          harm.chord, harm.is_minor, ctx.register_low, ctx.register_high);
+      std::vector<uint8_t> chord_pitches =
+          chordToPitches(harm.chord, harm.is_minor, ctx.register_low, ctx.register_high);
 
-      if (chord_pitches.empty()) continue;
+      if (chord_pitches.empty())
+        continue;
 
       // Select chord tone using RNG for variety across seeds.
       uint8_t stopped_pitch;
@@ -1158,8 +1141,8 @@ std::vector<NoteEvent> generateBariolage(const TextureContext& ctx,
         stopped_pitch = chord_pitches[0];
       }
 
-      uint8_t open_pitch = findNearestOpenString(
-          stopped_pitch, ctx.register_low, ctx.register_high);
+      uint8_t open_pitch =
+          findNearestOpenString(stopped_pitch, ctx.register_low, ctx.register_high);
 
       if (open_pitch == 0) {
         open_pitch = chord_pitches.front();
@@ -1172,10 +1155,10 @@ std::vector<NoteEvent> generateBariolage(const TextureContext& ctx,
 
         // 25% chance of double stop (both pitches simultaneously).
         if (stopped_pitch != open_pitch && rng::rollProbability(rng, 0.25f)) {
-          notes.push_back(makeTextureNote(
-              note_tick, sub_duration, stopped_pitch, note_tick_in_bar, ctx.is_climax));
-          notes.push_back(makeTextureNote(
-              note_tick, sub_duration, open_pitch, note_tick_in_bar, ctx.is_climax));
+          notes.push_back(makeTextureNote(note_tick, sub_duration, stopped_pitch, note_tick_in_bar,
+                                          ctx.is_climax));
+          notes.push_back(makeTextureNote(note_tick, sub_duration, open_pitch, note_tick_in_bar,
+                                          ctx.is_climax));
         } else if (stopped_pitch == open_pitch) {
           // Vocabulary fallback: when no open string contrast available,
           // use kBariolage figure's chromatic neighbor alternation pattern.
@@ -1194,15 +1177,14 @@ std::vector<NoteEvent> generateBariolage(const TextureContext& ctx,
               offset = kBariolage.degree_intervals[ivl_idx].degree_diff;
             }
           }
-          uint8_t alt_pitch = clampPitch(
-              static_cast<int>(stopped_pitch) + offset,
-              ctx.register_low, ctx.register_high);
-          notes.push_back(makeTextureNote(
-              note_tick, sub_duration, alt_pitch, note_tick_in_bar, ctx.is_climax));
+          uint8_t alt_pitch = clampPitch(static_cast<int>(stopped_pitch) + offset, ctx.register_low,
+                                         ctx.register_high);
+          notes.push_back(
+              makeTextureNote(note_tick, sub_duration, alt_pitch, note_tick_in_bar, ctx.is_climax));
         } else {
           uint8_t pitch = (sub_idx % 2 == 0) ? stopped_pitch : open_pitch;
-          notes.push_back(makeTextureNote(
-              note_tick, sub_duration, pitch, note_tick_in_bar, ctx.is_climax));
+          notes.push_back(
+              makeTextureNote(note_tick, sub_duration, pitch, note_tick_in_bar, ctx.is_climax));
         }
       }
     }

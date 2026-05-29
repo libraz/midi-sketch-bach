@@ -4,21 +4,20 @@
 // structural invariants: ground bass immutability, role order, climax count,
 // and instrument range compliance.
 
-#include "solo_string/arch/chaconne_analyzer.h"
-#include "solo_string/arch/chaconne_config.h"
-#include "solo_string/arch/chaconne_engine.h"
-#include "solo_string/arch/chaconne_scheme.h"
+#include <gtest/gtest.h>
 
 #include <cstdint>
 #include <random>
 #include <string>
 #include <vector>
 
-#include <gtest/gtest.h>
-
 #include "core/basic_types.h"
 #include "harmony/key.h"
 #include "instrument/bowed/violin_model.h"
+#include "solo_string/arch/chaconne_analyzer.h"
+#include "solo_string/arch/chaconne_config.h"
+#include "solo_string/arch/chaconne_engine.h"
+#include "solo_string/arch/chaconne_scheme.h"
 
 namespace bach {
 namespace {
@@ -35,8 +34,8 @@ TEST(DestructionResistanceTest, HundredSeedsAllMaintainStructure) {
     config.instrument = InstrumentType::Violin;
 
     ChaconneResult result = generateChaconne(config);
-    ASSERT_TRUE(result.success)
-        << "Seed " << seed << " failed generation: " << result.error_message;
+    ASSERT_TRUE(result.success) << "Seed " << seed
+                                << " failed generation: " << result.error_message;
 
     // Verify structural integrity via analyzer.
     auto scheme = ChaconneScheme::createForKey(config.key);
@@ -50,13 +49,11 @@ TEST(DestructionResistanceTest, HundredSeedsAllMaintainStructure) {
 
     EXPECT_FLOAT_EQ(analysis.harmonic_scheme_integrity, 1.0f)
         << "Seed " << seed << ": harmonic scheme integrity violated";
-    EXPECT_FLOAT_EQ(analysis.role_order_score, 1.0f)
-        << "Seed " << seed << ": role order violated";
+    EXPECT_FLOAT_EQ(analysis.role_order_score, 1.0f) << "Seed " << seed << ": role order violated";
     EXPECT_FLOAT_EQ(analysis.climax_presence_score, 1.0f)
         << "Seed " << seed << ": climax presence violated";
     EXPECT_EQ(analysis.accumulate_count, 3)
-        << "Seed " << seed << ": expected 3 Accumulate, got "
-        << analysis.accumulate_count;
+        << "Seed " << seed << ": expected 3 Accumulate, got " << analysis.accumulate_count;
   }
 }
 
@@ -72,16 +69,12 @@ TEST(DestructionResistanceTest, HundredSeedsAllProduceNonEmptyTracks) {
     config.instrument = InstrumentType::Violin;
 
     ChaconneResult result = generateChaconne(config);
-    ASSERT_TRUE(result.success)
-        << "Seed " << seed << " failed: " << result.error_message;
-    ASSERT_EQ(result.tracks.size(), 2u)
-        << "Seed " << seed << ": expected 2 tracks";
-    EXPECT_FALSE(result.tracks[0].notes.empty())
-        << "Seed " << seed << ": bass track has no notes";
+    ASSERT_TRUE(result.success) << "Seed " << seed << " failed: " << result.error_message;
+    ASSERT_EQ(result.tracks.size(), 2u) << "Seed " << seed << ": expected 2 tracks";
+    EXPECT_FALSE(result.tracks[0].notes.empty()) << "Seed " << seed << ": bass track has no notes";
     EXPECT_FALSE(result.tracks[1].notes.empty())
         << "Seed " << seed << ": texture track has no notes";
-    EXPECT_GT(result.total_duration_ticks, 0u)
-        << "Seed " << seed << ": total duration is zero";
+    EXPECT_GT(result.total_duration_ticks, 0u) << "Seed " << seed << ": total duration is zero";
   }
 }
 
@@ -103,8 +96,7 @@ TEST(DestructionResistanceTest, HundredSeedsViolinNotesInRange) {
     config.instrument = InstrumentType::Violin;
 
     ChaconneResult result = generateChaconne(config);
-    ASSERT_TRUE(result.success)
-        << "Seed " << seed << " failed: " << result.error_message;
+    ASSERT_TRUE(result.success) << "Seed " << seed << " failed: " << result.error_message;
     ASSERT_EQ(result.tracks.size(), 2u);
 
     for (const auto& track : result.tracks) {
@@ -131,11 +123,8 @@ TEST(DestructionResistanceTest, FiftySeedsAcrossFiveKeys) {
   };
 
   KeyTestCase keys[] = {
-      {Key::D, "D minor"},
-      {Key::C, "C minor"},
-      {Key::G, "G minor"},
-      {Key::A, "A minor"},
-      {Key::E, "E minor"},
+      {Key::D, "D minor"}, {Key::C, "C minor"}, {Key::G, "G minor"},
+      {Key::A, "A minor"}, {Key::E, "E minor"},
   };
 
   for (const auto& key_case : keys) {
@@ -146,9 +135,8 @@ TEST(DestructionResistanceTest, FiftySeedsAcrossFiveKeys) {
       config.instrument = InstrumentType::Violin;
 
       ChaconneResult result = generateChaconne(config);
-      ASSERT_TRUE(result.success)
-          << key_case.name << " seed " << seed
-          << " failed: " << result.error_message;
+      ASSERT_TRUE(result.success) << key_case.name << " seed " << seed
+                                  << " failed: " << result.error_message;
       ASSERT_EQ(result.tracks.size(), 2u)
           << key_case.name << " seed " << seed << ": expected 2 tracks";
       EXPECT_FALSE(result.tracks[0].notes.empty())
@@ -199,9 +187,8 @@ TEST(DestructionResistanceTest, ThirtySeeds_ThreeInstruments) {
       config.instrument = inst_case.instrument;
 
       ChaconneResult result = generateChaconne(config);
-      ASSERT_TRUE(result.success)
-          << inst_case.name << " seed " << seed
-          << " failed: " << result.error_message;
+      ASSERT_TRUE(result.success) << inst_case.name << " seed " << seed
+                                  << " failed: " << result.error_message;
       ASSERT_EQ(result.tracks.size(), 2u);
       EXPECT_FALSE(result.tracks[0].notes.empty())
           << inst_case.name << " seed " << seed << ": bass track has no notes";
@@ -215,9 +202,8 @@ TEST(DestructionResistanceTest, ThirtySeeds_ThreeInstruments) {
       // All notes in both tracks must have non-zero duration.
       for (const auto& track : result.tracks) {
         for (const auto& note : track.notes) {
-          EXPECT_GT(note.duration, 0u)
-              << inst_case.name << " seed " << seed
-              << ": zero-duration note at tick " << note.start_tick;
+          EXPECT_GT(note.duration, 0u) << inst_case.name << " seed " << seed
+                                       << ": zero-duration note at tick " << note.start_tick;
         }
       }
     }

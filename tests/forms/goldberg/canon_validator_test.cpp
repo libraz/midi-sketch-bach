@@ -2,11 +2,11 @@
 
 #include "forms/goldberg/canon/canon_validator.h"
 
+#include <gtest/gtest.h>
+
 #include <cstdint>
 #include <string>
 #include <vector>
-
-#include <gtest/gtest.h>
 
 #include "core/basic_types.h"
 #include "core/pitch_utils.h"
@@ -39,8 +39,7 @@ CanonSpec makeSpec(int interval, CanonTransform transform = CanonTransform::Regu
 }
 
 /// @brief Helper: create a NoteEvent at a specific tick.
-NoteEvent makeNote(uint8_t pitch, Tick start_tick,
-                   Tick note_duration = kTicksPerBeat,
+NoteEvent makeNote(uint8_t pitch, Tick start_tick, Tick note_duration = kTicksPerBeat,
                    BachNoteSource source = BachNoteSource::CanonDux) {
   NoteEvent note;
   note.pitch = pitch;
@@ -57,11 +56,10 @@ NoteEvent makeNote(uint8_t pitch, Tick start_tick,
 /// Used to build correct comes data for tests without hardcoding pitches
 /// that may break if the scale system changes.
 uint8_t expectedComesPitch(uint8_t dux_pitch, const CanonSpec& spec) {
-  ScaleType scale = spec.key.is_minor
-      ? (spec.minor_profile == MinorModeProfile::HarmonicMinor
-             ? ScaleType::HarmonicMinor
-             : ScaleType::NaturalMinor)
-      : ScaleType::Major;
+  ScaleType scale = spec.key.is_minor ? (spec.minor_profile == MinorModeProfile::HarmonicMinor
+                                             ? ScaleType::HarmonicMinor
+                                             : ScaleType::NaturalMinor)
+                                      : ScaleType::Major;
   Key key = spec.key.tonic;
 
   if (spec.transform == CanonTransform::Regular) {
@@ -84,8 +82,7 @@ uint8_t expectedComesPitch(uint8_t dux_pitch, const CanonSpec& spec) {
 ///
 /// Produces a perfectly valid comes: each dux note is transformed in pitch,
 /// offset in time by the delay, and duration is preserved.
-std::vector<NoteEvent> buildCorrectComes(const std::vector<NoteEvent>& dux,
-                                         const CanonSpec& spec,
+std::vector<NoteEvent> buildCorrectComes(const std::vector<NoteEvent>& dux, const CanonSpec& spec,
                                          const TimeSignature& time_sig) {
   Tick delay_ticks = static_cast<Tick>(spec.delay_bars) * time_sig.ticksPerBar();
   std::vector<NoteEvent> comes;
@@ -107,9 +104,7 @@ std::vector<NoteEvent> buildCorrectComes(const std::vector<NoteEvent>& dux,
 
 class CanonValidatorTest : public ::testing::Test {
  protected:
-  void SetUp() override {
-    grid_ = GoldbergStructuralGrid::createMajor();
-  }
+  void SetUp() override { grid_ = GoldbergStructuralGrid::createMajor(); }
 
   GoldbergStructuralGrid grid_;
 };
@@ -151,9 +146,9 @@ TEST_F(CanonValidatorTest, PerfectSecondCanon) {
   CanonSpec spec = makeSpec(1);
 
   std::vector<NoteEvent> dux = {
-      makeNote(67, 0),                  // G4
-      makeNote(69, kTicksPerBeat),      // A4
-      makeNote(71, kTicksPerBeat * 2),  // B4
+      makeNote(67, 0),                      // G4
+      makeNote(69, kTicksPerBeat),          // A4
+      makeNote(71, kTicksPerBeat * 2),      // B4
       makeNote(72, kTriple.ticksPerBar()),  // C5
   };
 
@@ -271,8 +266,7 @@ TEST_F(CanonValidatorTest, EmptyInputs) {
   {
     std::vector<NoteEvent> empty;
     std::vector<NoteEvent> comes = {
-        makeNote(67, kTriple.ticksPerBar(), kTicksPerBeat,
-                 BachNoteSource::CanonComes)};
+        makeNote(67, kTriple.ticksPerBar(), kTicksPerBeat, BachNoteSource::CanonComes)};
     auto result = validateCanonIntegrity(empty, comes, spec, kTriple);
     EXPECT_TRUE(result.passed) << "Empty dux should pass vacuously";
     EXPECT_EQ(result.total_pairs, 0);
@@ -289,9 +283,9 @@ TEST_F(CanonValidatorTest, InvertedCanon) {
   CanonSpec spec = makeSpec(0, CanonTransform::Inverted);
 
   std::vector<NoteEvent> dux = {
-      makeNote(67, 0),                  // G4 -> inverted around G = G4 (67)
-      makeNote(69, kTicksPerBeat),      // A4 -> inverted around G = F#4 (66)
-      makeNote(71, kTicksPerBeat * 2),  // B4 -> inverted around G = E4 (64)
+      makeNote(67, 0),                      // G4 -> inverted around G = G4 (67)
+      makeNote(69, kTicksPerBeat),          // A4 -> inverted around G = F#4 (66)
+      makeNote(71, kTicksPerBeat * 2),      // B4 -> inverted around G = E4 (64)
       makeNote(72, kTriple.ticksPerBar()),  // C5 -> inverted around G = D4 (62)
   };
 
@@ -368,10 +362,8 @@ TEST_F(CanonValidatorTest, ValidationMessages) {
     if (msg.find("Pitch:") != std::string::npos) {
       found_pitch_msg = true;
       // Message should contain note names or pitch numbers.
-      EXPECT_NE(msg.find("67"), std::string::npos)
-          << "Message should reference dux pitch";
-      EXPECT_NE(msg.find("60"), std::string::npos)
-          << "Message should reference actual comes pitch";
+      EXPECT_NE(msg.find("67"), std::string::npos) << "Message should reference dux pitch";
+      EXPECT_NE(msg.find("60"), std::string::npos) << "Message should reference actual comes pitch";
     }
   }
   EXPECT_TRUE(found_pitch_msg) << "Should have a pitch violation message";
@@ -388,21 +380,21 @@ TEST_F(CanonValidatorTest, ClimaxAlignmentPass) {
 
   // Dux peak at bar 2 (Intensification), comes peak at bar 6 (Intensification).
   std::vector<NoteEvent> dux = {
-      makeNote(60, 0),                                        // bar 0
-      makeNote(65, ticks_per_bar),                            // bar 1
-      makeNote(80, ticks_per_bar * 2),                        // bar 2 (peak, Intensification)
-      makeNote(65, ticks_per_bar * 3),                        // bar 3
+      makeNote(60, 0),                  // bar 0
+      makeNote(65, ticks_per_bar),      // bar 1
+      makeNote(80, ticks_per_bar * 2),  // bar 2 (peak, Intensification)
+      makeNote(65, ticks_per_bar * 3),  // bar 3
   };
 
   std::vector<NoteEvent> comes = {
       makeNote(60, ticks_per_bar * 4, kTicksPerBeat,
-               BachNoteSource::CanonComes),                    // bar 4
+               BachNoteSource::CanonComes),  // bar 4
       makeNote(65, ticks_per_bar * 5, kTicksPerBeat,
-               BachNoteSource::CanonComes),                    // bar 5
+               BachNoteSource::CanonComes),  // bar 5
       makeNote(82, ticks_per_bar * 6, kTicksPerBeat,
-               BachNoteSource::CanonComes),                    // bar 6 (peak, Intensification)
+               BachNoteSource::CanonComes),  // bar 6 (peak, Intensification)
       makeNote(65, ticks_per_bar * 7, kTicksPerBeat,
-               BachNoteSource::CanonComes),                    // bar 7
+               BachNoteSource::CanonComes),  // bar 7
   };
 
   bool aligned = validateClimaxAlignment(dux, comes, grid_, kTriple);
@@ -452,24 +444,23 @@ TEST_F(CanonValidatorTest, ClimaxAlignmentFail) {
 
   // Peaks at bar 0 (distance 2 from Intensification at bar 2).
   std::vector<NoteEvent> dux = {
-      makeNote(90, 0),                         // bar 0 (peak)
-      makeNote(60, ticks_per_bar),             // bar 1
+      makeNote(90, 0),              // bar 0 (peak)
+      makeNote(60, ticks_per_bar),  // bar 1
   };
 
   std::vector<NoteEvent> comes = {
       makeNote(90, ticks_per_bar * 4, kTicksPerBeat,
-               BachNoteSource::CanonComes),    // bar 4 (peak)
+               BachNoteSource::CanonComes),  // bar 4 (peak)
       makeNote(60, ticks_per_bar * 5, kTicksPerBeat,
-               BachNoteSource::CanonComes),    // bar 5
+               BachNoteSource::CanonComes),  // bar 5
   };
 
   // In a 4-bar phrase grid, max distance from Intensification is 2.
   // Bar 0 is distance 2 from bar 2. Bar 4 is distance 2 from bar 2 or 6.
   // Both are within tolerance of 2, so this should pass.
   bool aligned = validateClimaxAlignment(dux, comes, grid_, kTriple);
-  EXPECT_TRUE(aligned)
-      << "In standard 32-bar grid, max distance from Intensification is 2 "
-         "(within tolerance)";
+  EXPECT_TRUE(aligned) << "In standard 32-bar grid, max distance from Intensification is 2 "
+                          "(within tolerance)";
 }
 
 // ---------------------------------------------------------------------------
@@ -479,13 +470,12 @@ TEST_F(CanonValidatorTest, ClimaxAlignmentFail) {
 TEST_F(CanonValidatorTest, MinorKeyValidation) {
   // Canon at the 2nd in G natural minor.
   // G natural minor: G A Bb C D Eb F.
-  CanonSpec spec = makeSpec(1, CanonTransform::Regular, kGMinor,
-                            MinorModeProfile::NaturalMinor);
+  CanonSpec spec = makeSpec(1, CanonTransform::Regular, kGMinor, MinorModeProfile::NaturalMinor);
 
   std::vector<NoteEvent> dux = {
-      makeNote(67, 0),                  // G4
-      makeNote(69, kTicksPerBeat),      // A4
-      makeNote(70, kTicksPerBeat * 2),  // Bb4
+      makeNote(67, 0),                      // G4
+      makeNote(69, kTicksPerBeat),          // A4
+      makeNote(70, kTicksPerBeat * 2),      // Bb4
       makeNote(72, kTriple.ticksPerBar()),  // C5
   };
 
@@ -507,9 +497,9 @@ TEST_F(CanonValidatorTest, OctaveCanon) {
   CanonSpec spec = makeSpec(7);
 
   std::vector<NoteEvent> dux = {
-      makeNote(67, 0),                  // G4
-      makeNote(69, kTicksPerBeat),      // A4
-      makeNote(71, kTicksPerBeat * 2),  // B4
+      makeNote(67, 0),                      // G4
+      makeNote(69, kTicksPerBeat),          // A4
+      makeNote(71, kTicksPerBeat * 2),      // B4
       makeNote(72, kTriple.ticksPerBar()),  // C5
   };
 
@@ -549,7 +539,7 @@ TEST_F(CanonValidatorTest, MultipleViolationTypes) {
   };
 
   auto comes = buildCorrectComes(dux, spec, kTriple);
-  comes[0].pitch = 60;                     // Pitch violation.
+  comes[0].pitch = 60;                      // Pitch violation.
   comes[2].duration = duration::kHalfNote;  // Duration violation.
 
   auto result = validateCanonIntegrity(dux, comes, spec, kTriple);
@@ -587,21 +577,19 @@ TEST_F(CanonValidatorTest, ClimaxAlignmentEmptyVoices) {
 TEST_F(CanonValidatorTest, HarmonicMinorCanon) {
   // Canon at the 2nd in G harmonic minor.
   // G harmonic minor: G A Bb C D Eb F#.
-  CanonSpec spec = makeSpec(1, CanonTransform::Regular, kGMinor,
-                            MinorModeProfile::HarmonicMinor);
+  CanonSpec spec = makeSpec(1, CanonTransform::Regular, kGMinor, MinorModeProfile::HarmonicMinor);
 
   std::vector<NoteEvent> dux = {
-      makeNote(67, 0),                  // G4
-      makeNote(69, kTicksPerBeat),      // A4
-      makeNote(70, kTicksPerBeat * 2),  // Bb4
+      makeNote(67, 0),                      // G4
+      makeNote(69, kTicksPerBeat),          // A4
+      makeNote(70, kTicksPerBeat * 2),      // Bb4
       makeNote(72, kTriple.ticksPerBar()),  // C5
   };
 
   auto comes = buildCorrectComes(dux, spec, kTriple);
   auto result = validateCanonIntegrity(dux, comes, spec, kTriple);
 
-  EXPECT_TRUE(result.passed)
-      << "Harmonic minor canon with correct transposition should pass";
+  EXPECT_TRUE(result.passed) << "Harmonic minor canon with correct transposition should pass";
   EXPECT_EQ(result.pitch_violations, 0);
 }
 
@@ -644,8 +632,7 @@ TEST_F(CanonValidatorTest, TimingToleranceExactBoundary) {
   // Comes offset by exactly 1 tick: should still match.
   {
     std::vector<NoteEvent> comes = {
-        makeNote(67, delay_ticks + 1, kTicksPerBeat,
-                 BachNoteSource::CanonComes)};
+        makeNote(67, delay_ticks + 1, kTicksPerBeat, BachNoteSource::CanonComes)};
     auto result = validateCanonIntegrity(dux, comes, spec, kTriple);
     EXPECT_EQ(result.total_pairs, 1);
     EXPECT_EQ(result.pitch_violations, 0);
@@ -655,8 +642,7 @@ TEST_F(CanonValidatorTest, TimingToleranceExactBoundary) {
   // Comes offset by 2 ticks: should not match (beyond tolerance).
   {
     std::vector<NoteEvent> comes = {
-        makeNote(67, delay_ticks + 2, kTicksPerBeat,
-                 BachNoteSource::CanonComes)};
+        makeNote(67, delay_ticks + 2, kTicksPerBeat, BachNoteSource::CanonComes)};
     auto result = validateCanonIntegrity(dux, comes, spec, kTriple);
     // The note is at delay_ticks+2, tolerance is 1, so no pair is matched.
     EXPECT_EQ(result.total_pairs, 0);

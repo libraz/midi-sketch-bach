@@ -13,8 +13,7 @@ namespace bach {
 // Construction
 // ---------------------------------------------------------------------------
 
-ChaconneScheme::ChaconneScheme(std::vector<SchemeEntry> entries)
-    : entries_(std::move(entries)) {}
+ChaconneScheme::ChaconneScheme(std::vector<SchemeEntry> entries) : entries_(std::move(entries)) {}
 
 // ---------------------------------------------------------------------------
 // Factory methods
@@ -34,13 +33,13 @@ ChaconneScheme ChaconneScheme::createStandardDMinor() {
   entries.reserve(7);
 
   // position_beats: 0  4  6  8  10  12  14  (total = 16 beats)
-  entries.push_back({ChordDegree::I,    ChordQuality::Minor, 0, 1.0f,   0, 4});  // i
-  entries.push_back({ChordDegree::V,    ChordQuality::Major, 0, 0.75f,  4, 2});  // V
-  entries.push_back({ChordDegree::I,    ChordQuality::Minor, 0, 1.0f,   6, 2});  // i
-  entries.push_back({ChordDegree::IV,   ChordQuality::Minor, 0, 0.5f,   8, 2});  // iv
-  entries.push_back({ChordDegree::bVII, ChordQuality::Major, 0, 0.5f,  10, 2});  // VII
-  entries.push_back({ChordDegree::iii,  ChordQuality::Major, 0, 0.5f,  12, 2});  // III
-  entries.push_back({ChordDegree::V,    ChordQuality::Major, 0, 0.75f, 14, 2});  // V (cadential)
+  entries.push_back({ChordDegree::I, ChordQuality::Minor, 0, 1.0f, 0, 4});      // i
+  entries.push_back({ChordDegree::V, ChordQuality::Major, 0, 0.75f, 4, 2});     // V
+  entries.push_back({ChordDegree::I, ChordQuality::Minor, 0, 1.0f, 6, 2});      // i
+  entries.push_back({ChordDegree::IV, ChordQuality::Minor, 0, 0.5f, 8, 2});     // iv
+  entries.push_back({ChordDegree::bVII, ChordQuality::Major, 0, 0.5f, 10, 2});  // VII
+  entries.push_back({ChordDegree::iii, ChordQuality::Major, 0, 0.5f, 12, 2});   // III
+  entries.push_back({ChordDegree::V, ChordQuality::Major, 0, 0.75f, 14, 2});    // V (cadential)
 
   return ChaconneScheme(std::move(entries));
 }
@@ -55,8 +54,7 @@ ChaconneScheme ChaconneScheme::createForKey(const KeySignature& /*key_sig*/) {
 // Timeline generation
 // ---------------------------------------------------------------------------
 
-HarmonicTimeline ChaconneScheme::toTimeline(const KeySignature& key,
-                                             Tick duration) const {
+HarmonicTimeline ChaconneScheme::toTimeline(const KeySignature& key, Tick duration) const {
   HarmonicTimeline timeline;
   if (entries_.empty()) {
     return timeline;
@@ -78,12 +76,11 @@ HarmonicTimeline ChaconneScheme::toTimeline(const KeySignature& key,
     }
 
     // Compute semitone offset from tonic using the appropriate scale context.
-    uint8_t semitone_offset = key.is_minor ? degreeMinorSemitones(entry.degree)
-                                           : degreeSemitones(entry.degree);
+    uint8_t semitone_offset =
+        key.is_minor ? degreeMinorSemitones(entry.degree) : degreeSemitones(entry.degree);
 
     // Root pitch at chord octave.
-    int root_midi = (kChordOctave + 1) * 12 +
-                    static_cast<int>(key.tonic) + semitone_offset;
+    int root_midi = (kChordOctave + 1) * 12 + static_cast<int>(key.tonic) + semitone_offset;
 
     Chord chord;
     chord.degree = entry.degree;
@@ -92,8 +89,7 @@ HarmonicTimeline ChaconneScheme::toTimeline(const KeySignature& key,
     chord.inversion = 0;  // Always root position in timeline.
 
     // Bass pitch = root at bass octave.
-    int bass_midi = (kBassOctave + 1) * 12 +
-                    static_cast<int>(key.tonic) + semitone_offset;
+    int bass_midi = (kBassOctave + 1) * 12 + static_cast<int>(key.tonic) + semitone_offset;
 
     HarmonicEvent event;
     event.tick = tick;
@@ -119,8 +115,7 @@ bool ChaconneScheme::verifyIntegrity(const HarmonicTimeline& timeline) const {
   return !verifyIntegrityReport(timeline).hasCritical();
 }
 
-FailReport ChaconneScheme::verifyIntegrityReport(
-    const HarmonicTimeline& timeline) const {
+FailReport ChaconneScheme::verifyIntegrityReport(const HarmonicTimeline& timeline) const {
   FailReport report;
   const auto& events = timeline.events();
 
@@ -130,8 +125,7 @@ FailReport ChaconneScheme::verifyIntegrityReport(
     issue.kind = FailKind::StructuralFail;
     issue.severity = FailSeverity::Critical;
     issue.rule = "scheme_event_count_mismatch";
-    issue.description = "Expected " + std::to_string(entries_.size()) +
-                        " harmonic events, found " +
+    issue.description = "Expected " + std::to_string(entries_.size()) + " harmonic events, found " +
                         std::to_string(events.size());
     report.addIssue(issue);
     return report;  // Cannot check per-entry matches if counts differ.
@@ -211,8 +205,8 @@ Tick ChaconneScheme::getLengthTicks() const {
   // Find the maximum extent: position_beats + duration_beats across all entries.
   uint32_t max_end_beats = 0;
   for (const auto& entry : entries_) {
-    uint32_t end_beats = static_cast<uint32_t>(entry.position_beats) +
-                         static_cast<uint32_t>(entry.duration_beats);
+    uint32_t end_beats =
+        static_cast<uint32_t>(entry.position_beats) + static_cast<uint32_t>(entry.duration_beats);
     if (end_beats > max_end_beats) {
       max_end_beats = end_beats;
     }

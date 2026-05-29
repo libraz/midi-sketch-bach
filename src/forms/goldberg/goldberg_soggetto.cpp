@@ -38,8 +38,8 @@ int cadenceTargetPitchClass(CadenceType cadence, const KeySignature& key) {
       return (tonic_pc + 7) % 12;  // End on dominant.
     case CadenceType::Deceptive:
       // Deceptive: end on vi (submediant).
-      return key.is_minor ? (tonic_pc + 8) % 12    // bVI in minor
-                          : (tonic_pc + 9) % 12;   // vi in major
+      return key.is_minor ? (tonic_pc + 8) % 12   // bVI in minor
+                          : (tonic_pc + 9) % 12;  // vi in major
   }
   return tonic_pc;
 }
@@ -50,12 +50,10 @@ int cadenceTargetPitchClass(CadenceType cadence, const KeySignature& key) {
 /// @param key Key signature.
 /// @return True if the pitch class is root, third, or fifth of the chord.
 bool isChordTone(int pitch_class, ChordDegree degree, const KeySignature& key) {
-  int root_offset = key.is_minor ? degreeMinorSemitones(degree)
-                                 : degreeSemitones(degree);
+  int root_offset = key.is_minor ? degreeMinorSemitones(degree) : degreeSemitones(degree);
   int root_pc = (static_cast<int>(key.tonic) + root_offset) % 12;
 
-  ChordQuality quality = key.is_minor ? minorKeyQuality(degree)
-                                      : majorKeyQuality(degree);
+  ChordQuality quality = key.is_minor ? minorKeyQuality(degree) : majorKeyQuality(degree);
 
   // Build chord tones based on quality.
   int third_offset = 0;
@@ -91,8 +89,7 @@ bool isChordTone(int pitch_class, ChordDegree degree, const KeySignature& key) {
   int third_pc = (root_pc + third_offset) % 12;
   int fifth_pc = (root_pc + fifth_offset) % 12;
 
-  return pitch_class == root_pc || pitch_class == third_pc ||
-         pitch_class == fifth_pc;
+  return pitch_class == root_pc || pitch_class == third_pc || pitch_class == fifth_pc;
 }
 
 }  // namespace
@@ -101,9 +98,8 @@ bool isChordTone(int pitch_class, ChordDegree degree, const KeySignature& key) {
 // GoalTone computation
 // ---------------------------------------------------------------------------
 
-GoalTone SoggettoGenerator::computeGridAlignedGoalTone(
-    const SoggettoParams& params,
-    std::mt19937& rng) const {
+GoalTone SoggettoGenerator::computeGridAlignedGoalTone(const SoggettoParams& params,
+                                                       std::mt19937& rng) const {
   // Start with base GoalTone from character.
   GoalTone goal = goalToneForCharacter(params.character, rng);
 
@@ -123,8 +119,7 @@ GoalTone SoggettoGenerator::computeGridAlignedGoalTone(
       // Place climax at the Intensification bar's relative position.
       int bar_offset = bar - grid_start;
       intensification_ratio =
-          (static_cast<float>(bar_offset) + 0.5f) /
-          static_cast<float>(params.length_bars);
+          (static_cast<float>(bar_offset) + 0.5f) / static_cast<float>(params.length_bars);
       break;
     }
   }
@@ -138,11 +133,8 @@ GoalTone SoggettoGenerator::computeGridAlignedGoalTone(
 // ---------------------------------------------------------------------------
 
 std::vector<std::vector<NoteEvent>> SoggettoGenerator::generateCandidates(
-    const SoggettoParams& params,
-    const GoalTone& goal,
-    const KeySignature& key,
-    const TimeSignature& time_sig,
-    std::mt19937& rng) const {
+    const SoggettoParams& params, const GoalTone& goal, const KeySignature& key,
+    const TimeSignature& time_sig, std::mt19937& rng) const {
   std::vector<std::vector<NoteEvent>> candidates;
   candidates.reserve(static_cast<size_t>(params.path_candidates));
 
@@ -157,15 +149,12 @@ std::vector<std::vector<NoteEvent>> SoggettoGenerator::generateCandidates(
   int register_anchor = kBaseNote;
   if (params.grid != nullptr) {
     int grid_bar = static_cast<int>(params.start_bar) - 1;
-    int bass_anchor = static_cast<int>(
-        params.grid->getStructuralBassPitch(grid_bar)) + 12;
+    int bass_anchor = static_cast<int>(params.grid->getStructuralBassPitch(grid_bar)) + 12;
     // Blend bass-derived anchor with Aria melody pitch for register affinity.
     // 7/8 harmonic (bass) + 1/8 melodic (theme) — light touch to preserve
     // harmonic differentiation while adding subtle melodic coherence.
-    if (grid_bar >= 0 && grid_bar < 32 &&
-        params.grid->getBar(grid_bar).aria_melody[0] > 0) {
-      int aria_anchor = static_cast<int>(
-          params.grid->getBar(grid_bar).aria_melody[0]);
+    if (grid_bar >= 0 && grid_bar < 32 && params.grid->getBar(grid_bar).aria_melody[0] > 0) {
+      int aria_anchor = static_cast<int>(params.grid->getBar(grid_bar).aria_melody[0]);
       register_anchor = (bass_anchor * 7 + aria_anchor) / 8;
     } else {
       register_anchor = bass_anchor;
@@ -181,18 +170,15 @@ std::vector<std::vector<NoteEvent>> SoggettoGenerator::generateCandidates(
   start_pitch = std::max(pitch_floor, std::min(pitch_ceil, start_pitch));
 
   // Compute climax pitch from goal.
-  int climax_pitch = start_pitch +
-      static_cast<int>(static_cast<float>(pitch_ceil - start_pitch) *
-                        goal.pitch_ratio);
+  int climax_pitch = start_pitch + static_cast<int>(static_cast<float>(pitch_ceil - start_pitch) *
+                                                    goal.pitch_ratio);
   climax_pitch = std::max(pitch_floor, std::min(pitch_ceil, climax_pitch));
-  Tick climax_tick =
-      static_cast<Tick>(static_cast<float>(total_ticks) * goal.position_ratio);
+  Tick climax_tick = static_cast<Tick>(static_cast<float>(total_ticks) * goal.position_ratio);
 
   // Determine cadence target (if grid provides one at end bar).
   std::optional<int> cadence_target_pc;
   if (params.grid != nullptr) {
-    int end_bar = static_cast<int>(params.start_bar) - 1 +
-                  static_cast<int>(params.length_bars) - 1;
+    int end_bar = static_cast<int>(params.start_bar) - 1 + static_cast<int>(params.length_bars) - 1;
     auto cad = params.grid->getCadenceType(end_bar);
     if (cad.has_value()) {
       cadence_target_pc = cadenceTargetPitchClass(cad.value(), key);
@@ -207,8 +193,7 @@ std::vector<std::vector<NoteEvent>> SoggettoGenerator::generateCandidates(
 
     // Select motif template pair.
     uint32_t template_idx = path_rng() % 4;
-    auto [motif_a, motif_b] = motifTemplatesForCharacter(
-        params.character, template_idx);
+    auto [motif_a, motif_b] = motifTemplatesForCharacter(params.character, template_idx);
 
     std::vector<NoteEvent> notes;
     notes.reserve(16);
@@ -218,50 +203,42 @@ std::vector<std::vector<NoteEvent>> SoggettoGenerator::generateCandidates(
     int current_degree = start_degree;
     int current_pitch = start_pitch;
 
-    for (size_t mot_idx = 0;
-         mot_idx < motif_a.degree_offsets.size() && current_tick < climax_tick;
+    for (size_t mot_idx = 0; mot_idx < motif_a.degree_offsets.size() && current_tick < climax_tick;
          ++mot_idx) {
-      Tick dur = (mot_idx < motif_a.durations.size())
-                     ? motif_a.durations[mot_idx]
-                     : kTicksPerBeat;
+      Tick dur = (mot_idx < motif_a.durations.size()) ? motif_a.durations[mot_idx] : kTicksPerBeat;
       if (current_tick + dur > climax_tick) {
         dur = climax_tick - current_tick;
-        if (dur < kTicksPerBeat / 4) break;
+        if (dur < kTicksPerBeat / 4)
+          break;
       }
 
       int target_degree = start_degree + motif_a.degree_offsets[mot_idx];
 
       // Interpolate toward climax.
       float progress = (climax_tick > 0)
-                            ? static_cast<float>(current_tick) /
-                                  static_cast<float>(climax_tick)
-                            : 0.0f;
-      int interp_pitch = start_pitch +
-          static_cast<int>(
-              static_cast<float>(climax_pitch - start_pitch) * progress);
+                           ? static_cast<float>(current_tick) / static_cast<float>(climax_tick)
+                           : 0.0f;
+      int interp_pitch =
+          start_pitch + static_cast<int>(static_cast<float>(climax_pitch - start_pitch) * progress);
 
-      int target_pitch = degreeToPitch(target_degree, register_anchor,
-                                        key_offset, scale);
+      int target_pitch = degreeToPitch(target_degree, register_anchor, key_offset, scale);
       if (target_pitch < interp_pitch) {
         target_degree += (interp_pitch - target_pitch + 1) / 2;
       }
 
-      int pitch = snapToScale(
-          degreeToPitch(target_degree, register_anchor, key_offset, scale),
-          key.tonic, scale, pitch_floor, climax_pitch);
+      int pitch = snapToScale(degreeToPitch(target_degree, register_anchor, key_offset, scale),
+                              key.tonic, scale, pitch_floor, climax_pitch);
 
       // Clamp leap from previous note.
       if (!notes.empty()) {
         int prev_p = static_cast<int>(notes.back().pitch);
-        pitch = clampLeap(pitch, prev_p, params.character, key.tonic, scale,
-                          pitch_floor, climax_pitch, path_rng);
-        pitch = avoidUnison(pitch, prev_p, key.tonic, scale,
-                            pitch_floor, climax_pitch);
+        pitch = clampLeap(pitch, prev_p, params.character, key.tonic, scale, pitch_floor,
+                          climax_pitch, path_rng);
+        pitch = avoidUnison(pitch, prev_p, key.tonic, scale, pitch_floor, climax_pitch);
       }
 
-      NoteFunction func = (mot_idx < motif_a.functions.size())
-                               ? motif_a.functions[mot_idx]
-                               : NoteFunction::StructuralTone;
+      NoteFunction func = (mot_idx < motif_a.functions.size()) ? motif_a.functions[mot_idx]
+                                                               : NoteFunction::StructuralTone;
 
       NoteEvent note;
       note.start_tick = current_tick;
@@ -288,9 +265,8 @@ std::vector<std::vector<NoteEvent>> SoggettoGenerator::generateCandidates(
       int final_climax = climax_pitch;
       if (!notes.empty()) {
         int prev_p = static_cast<int>(notes.back().pitch);
-        final_climax = clampLeap(climax_pitch, prev_p, params.character,
-                                  key.tonic, scale, pitch_floor, pitch_ceil,
-                                  path_rng);
+        final_climax = clampLeap(climax_pitch, prev_p, params.character, key.tonic, scale,
+                                 pitch_floor, pitch_ceil, path_rng);
       }
 
       NoteEvent note;
@@ -307,32 +283,27 @@ std::vector<std::vector<NoteEvent>> SoggettoGenerator::generateCandidates(
     }
 
     // --- Motif B: descending from climax ---
-    for (size_t mot_idx = 0;
-         mot_idx < motif_b.degree_offsets.size() && current_tick < total_ticks;
+    for (size_t mot_idx = 0; mot_idx < motif_b.degree_offsets.size() && current_tick < total_ticks;
          ++mot_idx) {
-      Tick dur = (mot_idx < motif_b.durations.size())
-                     ? motif_b.durations[mot_idx]
-                     : kTicksPerBeat;
+      Tick dur = (mot_idx < motif_b.durations.size()) ? motif_b.durations[mot_idx] : kTicksPerBeat;
       if (current_tick + dur > total_ticks) {
         dur = total_ticks - current_tick;
-        if (dur < kTicksPerBeat / 4) break;
+        if (dur < kTicksPerBeat / 4)
+          break;
       }
 
-      int climax_abs_degree = scale_util::pitchToAbsoluteDegree(
-          clampPitch(current_pitch, 0, 127),
-          key.tonic, scale);
+      int climax_abs_degree =
+          scale_util::pitchToAbsoluteDegree(clampPitch(current_pitch, 0, 127), key.tonic, scale);
       int target_abs = climax_abs_degree + motif_b.degree_offsets[mot_idx];
       int pitch = snapToScale(
-          static_cast<int>(scale_util::absoluteDegreeToPitch(
-              target_abs, key.tonic, scale)),
+          static_cast<int>(scale_util::absoluteDegreeToPitch(target_abs, key.tonic, scale)),
           key.tonic, scale, pitch_floor, pitch_ceil);
 
       if (!notes.empty()) {
         int prev_p = static_cast<int>(notes.back().pitch);
-        pitch = clampLeap(pitch, prev_p, params.character, key.tonic, scale,
-                          pitch_floor, pitch_ceil, path_rng);
-        pitch = avoidUnison(pitch, prev_p, key.tonic, scale,
-                            pitch_floor, pitch_ceil);
+        pitch = clampLeap(pitch, prev_p, params.character, key.tonic, scale, pitch_floor,
+                          pitch_ceil, path_rng);
+        pitch = avoidUnison(pitch, prev_p, key.tonic, scale, pitch_floor, pitch_ceil);
       }
 
       NoteEvent note;
@@ -350,13 +321,10 @@ std::vector<std::vector<NoteEvent>> SoggettoGenerator::generateCandidates(
 
     // --- Cadence alignment: adjust ending note to match grid CadenceType ---
     if (cadence_target_pc.has_value() && !notes.empty()) {
-      int prev_pitch_for_end =
-          (notes.size() >= 2)
-              ? static_cast<int>(notes[notes.size() - 2].pitch)
-              : static_cast<int>(notes.back().pitch);
-      int ending = normalizeEndingPitch(
-          cadence_target_pc.value(), prev_pitch_for_end, max_leap,
-          key.tonic, scale, pitch_floor, pitch_ceil);
+      int prev_pitch_for_end = (notes.size() >= 2) ? static_cast<int>(notes[notes.size() - 2].pitch)
+                                                   : static_cast<int>(notes.back().pitch);
+      int ending = normalizeEndingPitch(cadence_target_pc.value(), prev_pitch_for_end, max_leap,
+                                        key.tonic, scale, pitch_floor, pitch_ceil);
       notes.back().pitch = clampPitch(ending, 0, 127);
     }
 
@@ -386,8 +354,7 @@ std::vector<std::vector<NoteEvent>> SoggettoGenerator::generateCandidates(
         for (int attempt = max_leap; attempt >= 0; --attempt) {
           int cand = prev_p + direction * attempt;
           cand = std::max(pitch_floor, std::min(pitch_ceil, cand));
-          int snapped = snapToScale(cand, key.tonic, scale,
-                                     pitch_floor, pitch_ceil);
+          int snapped = snapToScale(cand, key.tonic, scale, pitch_floor, pitch_ceil);
           if (std::abs(snapped - prev_p) <= max_leap) {
             notes[nidx].pitch = clampPitch(snapped, 0, 127);
             break;
@@ -408,11 +375,9 @@ std::vector<std::vector<NoteEvent>> SoggettoGenerator::generateCandidates(
 // Grid alignment scoring
 // ---------------------------------------------------------------------------
 
-float SoggettoGenerator::scoreGridAlignment(
-    const std::vector<NoteEvent>& candidate,
-    const SoggettoParams& params,
-    const KeySignature& key,
-    const TimeSignature& time_sig) const {
+float SoggettoGenerator::scoreGridAlignment(const std::vector<NoteEvent>& candidate,
+                                            const SoggettoParams& params, const KeySignature& key,
+                                            const TimeSignature& time_sig) const {
   if (candidate.empty() || params.grid == nullptr) {
     return 0.0f;
   }
@@ -428,8 +393,10 @@ float SoggettoGenerator::scoreGridAlignment(
     // Determine which grid bar this note falls in.
     int bar_offset = static_cast<int>(note.start_tick / ticks_per_bar);
     int grid_bar = grid_start + bar_offset;
-    if (grid_bar < 0) grid_bar = 0;
-    if (grid_bar > 31) grid_bar = 31;
+    if (grid_bar < 0)
+      grid_bar = 0;
+    if (grid_bar > 31)
+      grid_bar = 31;
 
     const auto& bar_info = params.grid->getBar(grid_bar);
 
@@ -481,11 +448,8 @@ float SoggettoGenerator::scoreGridAlignment(
 // Main generation pipeline
 // ---------------------------------------------------------------------------
 
-Subject SoggettoGenerator::generate(
-    const SoggettoParams& params,
-    const KeySignature& key,
-    const TimeSignature& time_sig,
-    uint32_t seed) const {
+Subject SoggettoGenerator::generate(const SoggettoParams& params, const KeySignature& key,
+                                    const TimeSignature& time_sig, uint32_t seed) const {
   Subject subject;
   subject.key = key.tonic;
   subject.is_minor = key.is_minor;
@@ -493,8 +457,10 @@ Subject SoggettoGenerator::generate(
 
   // Clamp length_bars to [1, 4].
   uint8_t bars = params.length_bars;
-  if (bars < 1) bars = 1;
-  if (bars > 4) bars = 4;
+  if (bars < 1)
+    bars = 1;
+  if (bars > 4)
+    bars = 4;
 
   Tick ticks_per_bar = time_sig.ticksPerBar();
   subject.length_ticks = static_cast<Tick>(bars) * ticks_per_bar;
@@ -517,8 +483,7 @@ Subject SoggettoGenerator::generate(
   size_t best_idx = 0;
 
   for (size_t idx = 0; idx < candidates.size(); ++idx) {
-    float alignment_score = scoreGridAlignment(
-        candidates[idx], working_params, key, time_sig);
+    float alignment_score = scoreGridAlignment(candidates[idx], working_params, key, time_sig);
     if (alignment_score > best_score) {
       best_score = alignment_score;
       best_idx = idx;

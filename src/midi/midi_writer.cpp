@@ -29,8 +29,10 @@ struct WriteEvent {
 uint8_t applyKeyTranspose(uint8_t pitch, Key key) {
   int offset = static_cast<int>(key);
   int result = static_cast<int>(pitch) + offset;
-  if (result < 0) result = 0;
-  if (result > 127) result = 127;
+  if (result < 0)
+    result = 0;
+  if (result > 127)
+    result = 127;
   return static_cast<uint8_t>(result);
 }
 
@@ -39,15 +41,15 @@ uint8_t applyKeyTranspose(uint8_t pitch, Key key) {
 MidiWriter::MidiWriter() = default;
 
 void MidiWriter::build(const std::vector<Track>& tracks,
-                        const std::vector<TempoEvent>& tempo_events,
-                        Key key, const std::string& metadata) {
+                       const std::vector<TempoEvent>& tempo_events, Key key,
+                       const std::string& metadata) {
   build(tracks, tempo_events, {}, key, metadata);
 }
 
 void MidiWriter::build(const std::vector<Track>& tracks,
-                        const std::vector<TempoEvent>& tempo_events,
-                        const std::vector<TimeSignatureEvent>& time_sig_events,
-                        Key key, const std::string& metadata) {
+                       const std::vector<TempoEvent>& tempo_events,
+                       const std::vector<TimeSignatureEvent>& time_sig_events, Key key,
+                       const std::string& metadata) {
   data_.clear();
 
   // Count non-empty tracks, plus one for the metadata track.
@@ -158,11 +160,11 @@ void MidiWriter::writeTrack(const Track& track, Key key) {
   }
 
   // Sort by tick, then by priority (note-off before note-on).
-  std::sort(events.begin(), events.end(),
-            [](const WriteEvent& lhs, const WriteEvent& rhs) {
-              if (lhs.tick != rhs.tick) return lhs.tick < rhs.tick;
-              return lhs.priority < rhs.priority;
-            });
+  std::sort(events.begin(), events.end(), [](const WriteEvent& lhs, const WriteEvent& rhs) {
+    if (lhs.tick != rhs.tick)
+      return lhs.tick < rhs.tick;
+    return lhs.priority < rhs.priority;
+  });
 
   // Write events with delta times.
   uint32_t prev_tick = 0;
@@ -191,8 +193,8 @@ void MidiWriter::writeTrack(const Track& track, Key key) {
 }
 
 void MidiWriter::writeMetadataTrack(const std::vector<TempoEvent>& tempo_events,
-                                     const std::vector<TimeSignatureEvent>& time_sig_events,
-                                     const std::string& metadata) {
+                                    const std::vector<TimeSignatureEvent>& time_sig_events,
+                                    const std::string& metadata) {
   std::vector<uint8_t> track_buf;
 
   // Track name: "BACH"
@@ -209,9 +211,7 @@ void MidiWriter::writeMetadataTrack(const std::vector<TempoEvent>& tempo_events,
   // Sort tempo events by tick and write each as FF 51 03.
   std::vector<TempoEvent> sorted_events = tempo_events;
   std::sort(sorted_events.begin(), sorted_events.end(),
-            [](const TempoEvent& lhs, const TempoEvent& rhs) {
-              return lhs.tick < rhs.tick;
-            });
+            [](const TempoEvent& lhs, const TempoEvent& rhs) { return lhs.tick < rhs.tick; });
 
   // If no events provided, write a default 120 BPM event at tick 0.
   if (sorted_events.empty()) {

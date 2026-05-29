@@ -8,16 +8,15 @@
 
 namespace bach {
 
-CelloModel::CelloModel()
-    : tuning_(kOpenStrings, kOpenStrings + kNumStrings) {}
+CelloModel::CelloModel() : tuning_(kOpenStrings, kOpenStrings + kNumStrings) {}
 
 bool CelloModel::isPitchPlayable(uint8_t pitch) const {
-  if (pitch < kLowestPitch || pitch > kHighestPitch) return false;
+  if (pitch < kLowestPitch || pitch > kHighestPitch)
+    return false;
 
   // Check if at least one string can produce this pitch.
   for (uint8_t idx = 0; idx < kNumStrings; ++idx) {
-    if (pitch >= kOpenStrings[idx] &&
-        pitch <= kOpenStrings[idx] + kMaxSemitonesAboveOpen[idx]) {
+    if (pitch >= kOpenStrings[idx] && pitch <= kOpenStrings[idx] + kMaxSemitonesAboveOpen[idx]) {
       return true;
     }
   }
@@ -26,20 +25,24 @@ bool CelloModel::isPitchPlayable(uint8_t pitch) const {
 
 bool CelloModel::isOpenString(uint8_t pitch) const {
   for (uint8_t idx = 0; idx < kNumStrings; ++idx) {
-    if (pitch == kOpenStrings[idx]) return true;
+    if (pitch == kOpenStrings[idx])
+      return true;
   }
   return false;
 }
 
 std::vector<FingerPosition> CelloModel::getPositionsForPitch(uint8_t pitch) const {
   std::vector<FingerPosition> positions;
-  if (pitch < kLowestPitch || pitch > kHighestPitch) return positions;
+  if (pitch < kLowestPitch || pitch > kHighestPitch)
+    return positions;
 
   for (uint8_t idx = 0; idx < kNumStrings; ++idx) {
-    if (pitch < kOpenStrings[idx]) continue;
+    if (pitch < kOpenStrings[idx])
+      continue;
 
     uint8_t semitones_above = pitch - kOpenStrings[idx];
-    if (semitones_above > kMaxSemitonesAboveOpen[idx]) continue;
+    if (semitones_above > kMaxSemitonesAboveOpen[idx])
+      continue;
 
     FingerPosition pos;
     pos.string_idx = idx;
@@ -65,7 +68,8 @@ std::vector<FingerPosition> CelloModel::getPositionsForPitch(uint8_t pitch) cons
   // Sort by ergonomic preference: lower position number first, then lower string.
   std::sort(positions.begin(), positions.end(),
             [](const FingerPosition& lhs, const FingerPosition& rhs) {
-              if (lhs.position != rhs.position) return lhs.position < rhs.position;
+              if (lhs.position != rhs.position)
+                return lhs.position < rhs.position;
               return lhs.string_idx < rhs.string_idx;
             });
 
@@ -73,8 +77,10 @@ std::vector<FingerPosition> CelloModel::getPositionsForPitch(uint8_t pitch) cons
 }
 
 bool CelloModel::isDoubleStopFeasible(uint8_t pitch_a, uint8_t pitch_b) const {
-  if (!isPitchPlayable(pitch_a) || !isPitchPlayable(pitch_b)) return false;
-  if (pitch_a == pitch_b) return false;  // Same pitch is not a double stop
+  if (!isPitchPlayable(pitch_a) || !isPitchPlayable(pitch_b))
+    return false;
+  if (pitch_a == pitch_b)
+    return false;  // Same pitch is not a double stop
 
   // Find all possible strings for each pitch.
   auto positions_a = getPositionsForPitch(pitch_a);
@@ -83,20 +89,22 @@ bool CelloModel::isDoubleStopFeasible(uint8_t pitch_a, uint8_t pitch_b) const {
   // Check if any combination uses adjacent strings.
   for (const auto& pos_a : positions_a) {
     for (const auto& pos_b : positions_b) {
-      if (pos_a.string_idx == pos_b.string_idx) continue;  // Same string
+      if (pos_a.string_idx == pos_b.string_idx)
+        continue;  // Same string
 
-      int string_distance = static_cast<int>(pos_a.string_idx) -
-                            static_cast<int>(pos_b.string_idx);
-      if (string_distance < 0) string_distance = -string_distance;
+      int string_distance = static_cast<int>(pos_a.string_idx) - static_cast<int>(pos_b.string_idx);
+      if (string_distance < 0)
+        string_distance = -string_distance;
 
       if (string_distance == 1) {
         // Adjacent strings -- check position compatibility.
         // Both fingers must be reachable in a similar position (within 3 semitones).
-        int position_diff = static_cast<int>(pos_a.position) -
-                            static_cast<int>(pos_b.position);
-        if (position_diff < 0) position_diff = -position_diff;
+        int position_diff = static_cast<int>(pos_a.position) - static_cast<int>(pos_b.position);
+        if (position_diff < 0)
+          position_diff = -position_diff;
 
-        if (position_diff <= 1) return true;
+        if (position_diff <= 1)
+          return true;
       }
     }
   }
@@ -104,7 +112,8 @@ bool CelloModel::isDoubleStopFeasible(uint8_t pitch_a, uint8_t pitch_b) const {
 }
 
 float CelloModel::doubleStopCost(uint8_t pitch_a, uint8_t pitch_b) const {
-  if (!isDoubleStopFeasible(pitch_a, pitch_b)) return 1e6f;
+  if (!isDoubleStopFeasible(pitch_a, pitch_b))
+    return 1e6f;
 
   auto positions_a = getPositionsForPitch(pitch_a);
   auto positions_b = getPositionsForPitch(pitch_b);
@@ -113,17 +122,20 @@ float CelloModel::doubleStopCost(uint8_t pitch_a, uint8_t pitch_b) const {
 
   for (const auto& pos_a : positions_a) {
     for (const auto& pos_b : positions_b) {
-      if (pos_a.string_idx == pos_b.string_idx) continue;
+      if (pos_a.string_idx == pos_b.string_idx)
+        continue;
 
-      int string_distance = static_cast<int>(pos_a.string_idx) -
-                            static_cast<int>(pos_b.string_idx);
-      if (string_distance < 0) string_distance = -string_distance;
-      if (string_distance != 1) continue;
+      int string_distance = static_cast<int>(pos_a.string_idx) - static_cast<int>(pos_b.string_idx);
+      if (string_distance < 0)
+        string_distance = -string_distance;
+      if (string_distance != 1)
+        continue;
 
-      int position_diff = static_cast<int>(pos_a.position) -
-                          static_cast<int>(pos_b.position);
-      if (position_diff < 0) position_diff = -position_diff;
-      if (position_diff > 1) continue;
+      int position_diff = static_cast<int>(pos_a.position) - static_cast<int>(pos_b.position);
+      if (position_diff < 0)
+        position_diff = -position_diff;
+      if (position_diff > 1)
+        continue;
 
       // Cost: higher positions are harder, position mismatch adds stretch.
       float cost = 0.0f;
@@ -151,20 +163,23 @@ float CelloModel::doubleStopCost(uint8_t pitch_a, uint8_t pitch_b) const {
 }
 
 bool CelloModel::requiresArpeggiation(const std::vector<uint8_t>& pitches) const {
-  if (pitches.size() <= 2) return false;
+  if (pitches.size() <= 2)
+    return false;
 
   // Three or more notes always require arpeggiation on a bowed instrument.
   // The bow can only sustain at most 2 adjacent strings simultaneously.
   return true;
 }
 
-float CelloModel::stringCrossingCost(uint8_t from_string,
-                                     uint8_t to_string) const {
-  if (from_string >= kNumStrings || to_string >= kNumStrings) return 1e6f;
-  if (from_string == to_string) return 0.0f;
+float CelloModel::stringCrossingCost(uint8_t from_string, uint8_t to_string) const {
+  if (from_string >= kNumStrings || to_string >= kNumStrings)
+    return 1e6f;
+  if (from_string == to_string)
+    return 0.0f;
 
   int distance = static_cast<int>(from_string) - static_cast<int>(to_string);
-  if (distance < 0) distance = -distance;
+  if (distance < 0)
+    distance = -distance;
 
   // Adjacent string crossings are natural (cost 0.1).
   // Skipping one string is moderately costly (cost 0.3).
@@ -213,9 +228,8 @@ BowedPlayabilityCost CelloModel::calculateCost(uint8_t pitch) const {
   return result;
 }
 
-BowedPlayabilityCost CelloModel::calculateTransitionCost(
-    uint8_t from_pitch, uint8_t to_pitch,
-    const BowedPerformerState& state) const {
+BowedPlayabilityCost CelloModel::calculateTransitionCost(uint8_t from_pitch, uint8_t to_pitch,
+                                                         const BowedPerformerState& state) const {
   BowedPlayabilityCost result;
 
   // Check playability of destination pitch.
@@ -240,9 +254,10 @@ BowedPlayabilityCost CelloModel::calculateTransitionCost(
   // Position shift cost: based on distance between current and target position.
   auto dest_positions = getPositionsForPitch(to_pitch);
   if (!dest_positions.empty()) {
-    int pos_diff = static_cast<int>(dest_positions[0].position) -
-                   static_cast<int>(state.current_position);
-    if (pos_diff < 0) pos_diff = -pos_diff;
+    int pos_diff =
+        static_cast<int>(dest_positions[0].position) - static_cast<int>(state.current_position);
+    if (pos_diff < 0)
+      pos_diff = -pos_diff;
 
     if (pos_diff > 0) {
       result.shift_cost = static_cast<float>(pos_diff) * kShiftCostPerPosition;
@@ -276,9 +291,8 @@ void CelloModel::updateState(BowedPerformerState& state, uint8_t pitch) const {
   }
 
   // Alternate bow direction.
-  state.bow_direction = (state.bow_direction == BowDirection::Down)
-                            ? BowDirection::Up
-                            : BowDirection::Down;
+  state.bow_direction =
+      (state.bow_direction == BowDirection::Down) ? BowDirection::Up : BowDirection::Down;
 }
 
 BowedPerformerState CelloModel::createInitialState() const {
@@ -296,8 +310,7 @@ bool CelloModel::requiresThumbPosition(uint8_t pitch) const {
   // Find the most comfortable string for this pitch and check threshold.
   for (uint8_t idx = kNumStrings; idx > 0; --idx) {
     uint8_t str = idx - 1;
-    if (pitch >= kOpenStrings[str] &&
-        pitch <= kOpenStrings[str] + kMaxSemitonesAboveOpen[str]) {
+    if (pitch >= kOpenStrings[str] && pitch <= kOpenStrings[str] + kMaxSemitonesAboveOpen[str]) {
       return pitch >= kThumbPositionThreshold[str];
     }
   }
@@ -313,10 +326,12 @@ bool CelloModel::findBestString(uint8_t pitch, uint8_t& out_string_idx,
   bool found = false;
 
   for (uint8_t idx = 0; idx < kNumStrings; ++idx) {
-    if (pitch < kOpenStrings[idx]) continue;
+    if (pitch < kOpenStrings[idx])
+      continue;
 
     uint8_t semitones = pitch - kOpenStrings[idx];
-    if (semitones > kMaxSemitonesAboveOpen[idx]) continue;
+    if (semitones > kMaxSemitonesAboveOpen[idx])
+      continue;
 
     // Prefer the string giving the lowest semitone count (lowest position).
     if (semitones < best_semitones) {

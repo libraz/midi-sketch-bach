@@ -91,7 +91,8 @@ TEST(GoldbergBinaryTest, TotalDurationIs4xSection) {
   Tick max_tick = 0;
   for (const auto& evt : result) {
     Tick end = evt.start_tick + evt.duration;
-    if (end > max_tick) max_tick = end;
+    if (end > max_tick)
+      max_tick = end;
   }
   EXPECT_LE(max_tick, section_ticks * 4);
 }

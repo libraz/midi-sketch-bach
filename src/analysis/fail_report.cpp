@@ -15,9 +15,12 @@ namespace bach {
 
 const char* failSeverityToString(FailSeverity severity) {
   switch (severity) {
-    case FailSeverity::Info:     return "info";
-    case FailSeverity::Warning:  return "warning";
-    case FailSeverity::Critical: return "critical";
+    case FailSeverity::Info:
+      return "info";
+    case FailSeverity::Warning:
+      return "warning";
+    case FailSeverity::Critical:
+      return "critical";
   }
   return "unknown";
 }
@@ -31,9 +34,12 @@ namespace {
 /// @brief Convert FailKind to lowercase JSON-friendly string.
 const char* failKindToJsonString(FailKind kind) {
   switch (kind) {
-    case FailKind::StructuralFail: return "structural";
-    case FailKind::MusicalFail:    return "musical";
-    case FailKind::ConfigFail:     return "config";
+    case FailKind::StructuralFail:
+      return "structural";
+    case FailKind::MusicalFail:
+      return "musical";
+    case FailKind::ConfigFail:
+      return "config";
   }
   return "unknown";
 }

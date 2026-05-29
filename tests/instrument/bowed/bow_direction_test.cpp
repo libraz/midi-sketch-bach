@@ -77,8 +77,7 @@ TEST(BowDirectionTest, ThreeStringCrossingIsLarge) {
 
 TEST(BowDirectionTest, LargeCrossingSymmetric) {
   auto strings = getOpenStrings(InstrumentType::Violin);
-  EXPECT_EQ(isLargeStringCrossing(55, 76, strings),
-            isLargeStringCrossing(76, 55, strings));
+  EXPECT_EQ(isLargeStringCrossing(55, 76, strings), isLargeStringCrossing(76, 55, strings));
 }
 
 TEST(BowDirectionTest, EmptyStringsNeverLargeCrossing) {

@@ -9,6 +9,10 @@
         "run",
         "scripts/bach_reference_server.py"
       ]
+    },
+    "bach": {
+      "command": "node",
+      "args": ["../bach-mcp/dist/index.js"]
     }
   }
 }

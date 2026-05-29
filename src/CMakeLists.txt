@@ -92,6 +92,7 @@ set(BACH_LIB_SOURCES
   fugue/cadence_insertion.cpp
   fugue/voice_registers.cpp
   fugue/motif_pool.cpp
+  fugue/thematic_plan.cpp
   fugue/fortspinnung.cpp
   fugue/motif_template.cpp
   fugue/toccata_affinity.cpp
@@ -219,6 +220,16 @@ target_include_directories(bach_lib
 target_compile_features(bach_lib PUBLIC cxx_std_17)
 
 # ============================================================================
+# Composer rebuild targets (isolated from bach_lib)
+# ============================================================================
+#
+# Boundaries enforced by ci/check_composer_isolation.sh (registered as a CTest
+# in tests/CMakeLists.txt) and by per-target CMakeLists.txt guards.
+
+add_subdirectory(composer)
+add_subdirectory(eval_client)
+
+# ============================================================================
 # WASM executable
 # ============================================================================
 
@@ -245,5 +256,5 @@ if(BUILD_WASM)
 
 elseif(BUILD_CLI)
   add_executable(bach_cli cli_main.cpp)
-  target_link_libraries(bach_cli PRIVATE bach_lib)
+  target_link_libraries(bach_cli PRIVATE bach_lib bach_composer_lib)
 endif()

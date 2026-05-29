@@ -51,9 +51,10 @@ TEST(ClassifyIntervalTest, ImperfectConsonances) {
 }
 
 TEST(ClassifyIntervalTest, Dissonances) {
-  EXPECT_EQ(classifyInterval(1), IntervalQuality::Dissonance);   // Minor 2nd
-  EXPECT_EQ(classifyInterval(2), IntervalQuality::Dissonance);   // Major 2nd
-  EXPECT_EQ(classifyInterval(5), IntervalQuality::Dissonance);   // Perfect 4th (dissonant in 2-voice)
+  EXPECT_EQ(classifyInterval(1), IntervalQuality::Dissonance);  // Minor 2nd
+  EXPECT_EQ(classifyInterval(2), IntervalQuality::Dissonance);  // Major 2nd
+  EXPECT_EQ(classifyInterval(5),
+            IntervalQuality::Dissonance);  // Perfect 4th (dissonant in 2-voice)
   EXPECT_EQ(classifyInterval(6), IntervalQuality::Dissonance);   // Tritone
   EXPECT_EQ(classifyInterval(10), IntervalQuality::Dissonance);  // Minor 7th
   EXPECT_EQ(classifyInterval(11), IntervalQuality::Dissonance);  // Major 7th
@@ -71,21 +72,21 @@ TEST(ClassifyIntervalTest, NegativeIntervals) {
 // ---------------------------------------------------------------------------
 
 TEST(ParallelDetectionTest, ParallelFifths) {
-  EXPECT_TRUE(isParallelFifths(7, 7));    // Both perfect 5ths
-  EXPECT_TRUE(isParallelFifths(19, 7));   // Compound 5th to 5th
-  EXPECT_TRUE(isParallelFifths(7, 19));   // 5th to compound 5th
-  EXPECT_FALSE(isParallelFifths(7, 3));   // 5th to 3rd
-  EXPECT_FALSE(isParallelFifths(0, 0));   // Unisons, not 5ths
-  EXPECT_FALSE(isParallelFifths(12, 12)); // Octaves, not 5ths
+  EXPECT_TRUE(isParallelFifths(7, 7));     // Both perfect 5ths
+  EXPECT_TRUE(isParallelFifths(19, 7));    // Compound 5th to 5th
+  EXPECT_TRUE(isParallelFifths(7, 19));    // 5th to compound 5th
+  EXPECT_FALSE(isParallelFifths(7, 3));    // 5th to 3rd
+  EXPECT_FALSE(isParallelFifths(0, 0));    // Unisons, not 5ths
+  EXPECT_FALSE(isParallelFifths(12, 12));  // Octaves, not 5ths
 }
 
 TEST(ParallelDetectionTest, ParallelOctaves) {
-  EXPECT_TRUE(isParallelOctaves(12, 12));   // Both octaves
-  EXPECT_TRUE(isParallelOctaves(0, 0));     // Both unisons
-  EXPECT_TRUE(isParallelOctaves(0, 12));    // Unison to octave
-  EXPECT_TRUE(isParallelOctaves(24, 12));   // Double octave to octave
-  EXPECT_FALSE(isParallelOctaves(7, 7));    // 5ths, not octaves
-  EXPECT_FALSE(isParallelOctaves(12, 7));   // Octave to 5th
+  EXPECT_TRUE(isParallelOctaves(12, 12));  // Both octaves
+  EXPECT_TRUE(isParallelOctaves(0, 0));    // Both unisons
+  EXPECT_TRUE(isParallelOctaves(0, 12));   // Unison to octave
+  EXPECT_TRUE(isParallelOctaves(24, 12));  // Double octave to octave
+  EXPECT_FALSE(isParallelOctaves(7, 7));   // 5ths, not octaves
+  EXPECT_FALSE(isParallelOctaves(12, 7));  // Octave to 5th
 }
 
 // ---------------------------------------------------------------------------
@@ -93,21 +94,21 @@ TEST(ParallelDetectionTest, ParallelOctaves) {
 // ---------------------------------------------------------------------------
 
 TEST(PitchUtilsTest, GetPitchClass) {
-  EXPECT_EQ(getPitchClass(60), 0);    // C4
-  EXPECT_EQ(getPitchClass(61), 1);    // C#4
-  EXPECT_EQ(getPitchClass(62), 2);    // D4
-  EXPECT_EQ(getPitchClass(69), 9);    // A4
-  EXPECT_EQ(getPitchClass(72), 0);    // C5
-  EXPECT_EQ(getPitchClass(0), 0);     // Lowest MIDI
-  EXPECT_EQ(getPitchClass(127), 7);   // Highest MIDI = G9
+  EXPECT_EQ(getPitchClass(60), 0);   // C4
+  EXPECT_EQ(getPitchClass(61), 1);   // C#4
+  EXPECT_EQ(getPitchClass(62), 2);   // D4
+  EXPECT_EQ(getPitchClass(69), 9);   // A4
+  EXPECT_EQ(getPitchClass(72), 0);   // C5
+  EXPECT_EQ(getPitchClass(0), 0);    // Lowest MIDI
+  EXPECT_EQ(getPitchClass(127), 7);  // Highest MIDI = G9
 }
 
 TEST(PitchUtilsTest, GetOctave) {
-  EXPECT_EQ(getOctave(60), 4);   // C4
-  EXPECT_EQ(getOctave(72), 5);   // C5
-  EXPECT_EQ(getOctave(48), 3);   // C3
-  EXPECT_EQ(getOctave(24), 1);   // C1
-  EXPECT_EQ(getOctave(0), -1);   // C-1
+  EXPECT_EQ(getOctave(60), 4);  // C4
+  EXPECT_EQ(getOctave(72), 5);  // C5
+  EXPECT_EQ(getOctave(48), 3);  // C3
+  EXPECT_EQ(getOctave(24), 1);  // C1
+  EXPECT_EQ(getOctave(0), -1);  // C-1
 }
 
 // ---------------------------------------------------------------------------
@@ -116,13 +117,13 @@ TEST(PitchUtilsTest, GetOctave) {
 
 TEST(PitchUtilsTest, IsDiatonic) {
   // C major scale: C D E F G A B
-  EXPECT_TRUE(isDiatonic(60));   // C
-  EXPECT_TRUE(isDiatonic(62));   // D
-  EXPECT_TRUE(isDiatonic(64));   // E
-  EXPECT_TRUE(isDiatonic(65));   // F
-  EXPECT_TRUE(isDiatonic(67));   // G
-  EXPECT_TRUE(isDiatonic(69));   // A
-  EXPECT_TRUE(isDiatonic(71));   // B
+  EXPECT_TRUE(isDiatonic(60));  // C
+  EXPECT_TRUE(isDiatonic(62));  // D
+  EXPECT_TRUE(isDiatonic(64));  // E
+  EXPECT_TRUE(isDiatonic(65));  // F
+  EXPECT_TRUE(isDiatonic(67));  // G
+  EXPECT_TRUE(isDiatonic(69));  // A
+  EXPECT_TRUE(isDiatonic(71));  // B
 
   // Non-diatonic (accidentals)
   EXPECT_FALSE(isDiatonic(61));  // C#
@@ -136,7 +137,7 @@ TEST(PitchUtilsTest, IsDiatonicDifferentOctaves) {
   // Diatonic check should work across octaves
   EXPECT_TRUE(isDiatonic(48));   // C3
   EXPECT_TRUE(isDiatonic(36));   // C2
-  EXPECT_FALSE(isDiatonic(49)); // C#3
+  EXPECT_FALSE(isDiatonic(49));  // C#3
 }
 
 // ---------------------------------------------------------------------------
@@ -181,11 +182,11 @@ TEST(PitchUtilsTest, GetScaleIntervals) {
   EXPECT_EQ(harmonic_minor[6], 11);  // Raised 7th
 
   const int* natural_minor = getScaleIntervals(ScaleType::NaturalMinor);
-  EXPECT_EQ(natural_minor[6], 10);   // Flat 7th
+  EXPECT_EQ(natural_minor[6], 10);  // Flat 7th
 
   const int* dorian = getScaleIntervals(ScaleType::Dorian);
-  EXPECT_EQ(dorian[2], 3);   // Minor 3rd
-  EXPECT_EQ(dorian[5], 9);   // Major 6th (distinguishes from natural minor)
+  EXPECT_EQ(dorian[2], 3);  // Minor 3rd
+  EXPECT_EQ(dorian[5], 9);  // Major 6th (distinguishes from natural minor)
 }
 
 // ---------------------------------------------------------------------------
@@ -277,10 +278,10 @@ TEST(PitchUtilsTest, AbsoluteInterval) {
 }
 
 TEST(PitchUtilsTest, DirectedInterval) {
-  EXPECT_EQ(directedInterval(60, 67), 7);    // Ascending P5
-  EXPECT_EQ(directedInterval(67, 60), -7);   // Descending P5
-  EXPECT_EQ(directedInterval(60, 60), 0);    // Unison
-  EXPECT_EQ(directedInterval(60, 72), 12);   // Ascending octave
+  EXPECT_EQ(directedInterval(60, 67), 7);   // Ascending P5
+  EXPECT_EQ(directedInterval(67, 60), -7);  // Descending P5
+  EXPECT_EQ(directedInterval(60, 60), 0);   // Unison
+  EXPECT_EQ(directedInterval(60, 72), 12);  // Ascending octave
 }
 
 // ---------------------------------------------------------------------------

@@ -38,8 +38,7 @@ class GuitarModel : public IFrettedInstrument {
   /// @param out_string_idx Output: index of the best string (0-5).
   /// @param out_fret Output: fret number on that string.
   /// @return True if the pitch is reachable on at least one string.
-  bool findBestString(uint8_t pitch, uint8_t& out_string_idx,
-                      uint8_t& out_fret) const;
+  bool findBestString(uint8_t pitch, uint8_t& out_string_idx, uint8_t& out_fret) const;
 };
 
 }  // namespace bach

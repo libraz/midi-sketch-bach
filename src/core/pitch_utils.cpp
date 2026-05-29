@@ -56,12 +56,18 @@ bool isParallelOctaves(int interval1, int interval2) {
 
 const int* getScaleIntervals(ScaleType scale) {
   switch (scale) {
-    case ScaleType::Major:         return kScaleMajor;
-    case ScaleType::NaturalMinor:  return kScaleNaturalMinor;
-    case ScaleType::HarmonicMinor: return kScaleHarmonicMinor;
-    case ScaleType::MelodicMinor:  return kScaleMelodicMinor;
-    case ScaleType::Dorian:        return kScaleDorian;
-    case ScaleType::Mixolydian:    return kScaleMixolydian;
+    case ScaleType::Major:
+      return kScaleMajor;
+    case ScaleType::NaturalMinor:
+      return kScaleNaturalMinor;
+    case ScaleType::HarmonicMinor:
+      return kScaleHarmonicMinor;
+    case ScaleType::MelodicMinor:
+      return kScaleMelodicMinor;
+    case ScaleType::Dorian:
+      return kScaleDorian;
+    case ScaleType::Mixolydian:
+      return kScaleMixolydian;
   }
   return kScaleMajor;  // Fallback
 }
@@ -97,8 +103,10 @@ uint8_t transposePitch(uint8_t pitch, Key key) {
   int transposed = static_cast<int>(pitch) + offset;
 
   // Clamp to valid MIDI range
-  if (transposed < 0) transposed = 0;
-  if (transposed > 127) transposed = 127;
+  if (transposed < 0)
+    transposed = 0;
+  if (transposed > 127)
+    transposed = 127;
 
   return static_cast<uint8_t>(transposed);
 }
@@ -109,7 +117,8 @@ bool isDiatonicInKey(int pitch, Key key, bool is_minor) {
 
   if (!is_minor) {
     for (int i = 0; i < 7; ++i) {
-      if (kScaleMajor[i] == pitch_class) return true;
+      if (kScaleMajor[i] == pitch_class)
+        return true;
     }
     return false;
   }
@@ -118,9 +127,12 @@ bool isDiatonicInKey(int pitch, Key key, bool is_minor) {
   // Bach routinely uses raised 6th (melodic) and raised 7th (harmonic/melodic),
   // so all three scale forms are valid diatonic pitch classes.
   for (int i = 0; i < 7; ++i) {
-    if (kScaleNaturalMinor[i] == pitch_class) return true;
-    if (kScaleHarmonicMinor[i] == pitch_class) return true;
-    if (kScaleMelodicMinor[i] == pitch_class) return true;
+    if (kScaleNaturalMinor[i] == pitch_class)
+      return true;
+    if (kScaleHarmonicMinor[i] == pitch_class)
+      return true;
+    if (kScaleMelodicMinor[i] == pitch_class)
+      return true;
   }
   return false;
 }
@@ -128,18 +140,30 @@ bool isDiatonicInKey(int pitch, Key key, bool is_minor) {
 const char* intervalToName(int semitones) {
   int normalized = interval_util::compoundToSimple(semitones);
   switch (normalized) {
-    case 0:  return "unison";
-    case 1:  return "minor 2nd";
-    case 2:  return "major 2nd";
-    case 3:  return "minor 3rd";
-    case 4:  return "major 3rd";
-    case 5:  return "perfect 4th";
-    case 6:  return "tritone";
-    case 7:  return "perfect 5th";
-    case 8:  return "minor 6th";
-    case 9:  return "major 6th";
-    case 10: return "minor 7th";
-    case 11: return "major 7th";
+    case 0:
+      return "unison";
+    case 1:
+      return "minor 2nd";
+    case 2:
+      return "major 2nd";
+    case 3:
+      return "minor 3rd";
+    case 4:
+      return "major 3rd";
+    case 5:
+      return "perfect 4th";
+    case 6:
+      return "tritone";
+    case 7:
+      return "perfect 5th";
+    case 8:
+      return "minor 6th";
+    case 9:
+      return "major 6th";
+    case 10:
+      return "minor 7th";
+    case 11:
+      return "major 7th";
   }
   return "unknown";
 }
@@ -148,13 +172,11 @@ const char* intervalToName(int semitones) {
 // Scale / chord tone collection
 // ---------------------------------------------------------------------------
 
-std::vector<uint8_t> getScaleTones(Key key, bool is_minor, uint8_t low_pitch,
-                                   uint8_t high_pitch) {
+std::vector<uint8_t> getScaleTones(Key key, bool is_minor, uint8_t low_pitch, uint8_t high_pitch) {
   std::vector<uint8_t> tones;
   ScaleType scale_type = is_minor ? ScaleType::HarmonicMinor : ScaleType::Major;
 
-  for (int pitch = static_cast<int>(low_pitch);
-       pitch <= static_cast<int>(high_pitch); ++pitch) {
+  for (int pitch = static_cast<int>(low_pitch); pitch <= static_cast<int>(high_pitch); ++pitch) {
     if (scale_util::isScaleTone(static_cast<uint8_t>(pitch), key, scale_type)) {
       tones.push_back(static_cast<uint8_t>(pitch));
     }
@@ -171,8 +193,7 @@ std::vector<uint8_t> getChordTones(const Chord& chord, int octave) {
 
   // Determine third interval based on quality.
   int third_offset = 4;  // Major third default.
-  if (chord.quality == ChordQuality::Minor ||
-      chord.quality == ChordQuality::Diminished ||
+  if (chord.quality == ChordQuality::Minor || chord.quality == ChordQuality::Diminished ||
       chord.quality == ChordQuality::Minor7) {
     third_offset = 3;  // Minor third.
   }
@@ -186,8 +207,10 @@ std::vector<uint8_t> getChordTones(const Chord& chord, int octave) {
   }
 
   auto clamp_midi = [](int pitch) -> uint8_t {
-    if (pitch < 0) return 0;
-    if (pitch > 127) return 127;
+    if (pitch < 0)
+      return 0;
+    if (pitch > 127)
+      return 127;
     return static_cast<uint8_t>(pitch);
   };
 
@@ -198,14 +221,12 @@ std::vector<uint8_t> getChordTones(const Chord& chord, int octave) {
   return tones;
 }
 
-std::vector<uint8_t> collectChordTonesInRange(const Chord& chord,
-                                              uint8_t low, uint8_t high) {
+std::vector<uint8_t> collectChordTonesInRange(const Chord& chord, uint8_t low, uint8_t high) {
   std::vector<uint8_t> tones;
   int root_pc = getPitchClass(chord.root_pitch);
 
   int third_offset = 4;
-  if (chord.quality == ChordQuality::Minor ||
-      chord.quality == ChordQuality::Diminished ||
+  if (chord.quality == ChordQuality::Minor || chord.quality == ChordQuality::Diminished ||
       chord.quality == ChordQuality::Minor7) {
     third_offset = 3;
   }
@@ -218,8 +239,7 @@ std::vector<uint8_t> collectChordTonesInRange(const Chord& chord,
 
   int intervals[] = {0, third_offset, fifth_offset};
 
-  for (int pitch = static_cast<int>(low); pitch <= static_cast<int>(high);
-       ++pitch) {
+  for (int pitch = static_cast<int>(low); pitch <= static_cast<int>(high); ++pitch) {
     int pc = pitch % 12;
     for (int intv : intervals) {
       if (pc == (root_pc + intv) % 12) {
@@ -231,25 +251,27 @@ std::vector<uint8_t> collectChordTonesInRange(const Chord& chord,
   return tones;
 }
 
-bool isAllowedChromatic(uint8_t pitch, Key key, ScaleType scale,
-                        const HarmonicEvent* harm_ev) {
+bool isAllowedChromatic(uint8_t pitch, Key key, ScaleType scale, const HarmonicEvent* harm_ev) {
   int key_offset = static_cast<int>(key);
   int pc = getPitchClass(pitch);
 
   // 1. Raised 7th in harmonic minor is always allowed.
   if (scale == ScaleType::HarmonicMinor || scale == ScaleType::NaturalMinor) {
     int raised_7th = (key_offset + kScaleHarmonicMinor[6]) % 12;
-    if (pc == raised_7th) return true;
+    if (pc == raised_7th)
+      return true;
   }
 
   // 2. Chord tones of the current harmonic event (secondary dominants etc.).
-  if (harm_ev != nullptr && isChordTone(pitch, *harm_ev)) return true;
+  if (harm_ev != nullptr && isChordTone(pitch, *harm_ev))
+    return true;
 
   return false;
 }
 
 size_t findClosestToneIndex(const std::vector<uint8_t>& tones, uint8_t target) {
-  if (tones.empty()) return 0;
+  if (tones.empty())
+    return 0;
   size_t best = 0;
   int best_dist = std::abs(static_cast<int>(tones[0]) - static_cast<int>(target));
   for (size_t i = 1; i < tones.size(); ++i) {

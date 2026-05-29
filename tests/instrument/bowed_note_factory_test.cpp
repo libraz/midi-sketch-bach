@@ -19,7 +19,7 @@ TEST(BowedNoteFactoryTest, CelloCreatesNoteWithinRange) {
   BowedNoteFactory factory(cello);
 
   NoteEvent note = factory.createNote(60, 480, 240, 80, BachNoteSource::Unknown);
-  EXPECT_EQ(note.pitch, 60);      // C4, within cello range
+  EXPECT_EQ(note.pitch, 60);  // C4, within cello range
   EXPECT_EQ(note.start_tick, 480u);
   EXPECT_EQ(note.duration, 240u);
   EXPECT_EQ(note.velocity, 80);
@@ -31,7 +31,7 @@ TEST(BowedNoteFactoryTest, CelloClampsAboveRange) {
   BowedNoteFactory factory(cello);
 
   NoteEvent note = factory.createNote(100, 0, 480, 80, BachNoteSource::Unknown);  // Above A5
-  EXPECT_EQ(note.pitch, 81);  // Clamped to A5
+  EXPECT_EQ(note.pitch, 81);                                                      // Clamped to A5
 }
 
 TEST(BowedNoteFactoryTest, CelloClampsBelowRange) {
@@ -39,7 +39,7 @@ TEST(BowedNoteFactoryTest, CelloClampsBelowRange) {
   BowedNoteFactory factory(cello);
 
   NoteEvent note = factory.createNote(20, 0, 480, 80, BachNoteSource::Unknown);  // Below C2
-  EXPECT_EQ(note.pitch, 36);  // Clamped to C2
+  EXPECT_EQ(note.pitch, 36);                                                     // Clamped to C2
 }
 
 TEST(BowedNoteFactoryTest, CelloVelocityClampsAt127) {
@@ -59,7 +59,7 @@ TEST(BowedNoteFactoryTest, ViolinCreatesNoteWithinRange) {
   BowedNoteFactory factory(violin);
 
   NoteEvent note = factory.createNote(72, 960, 480, 90, BachNoteSource::Unknown);
-  EXPECT_EQ(note.pitch, 72);       // C5, within violin range
+  EXPECT_EQ(note.pitch, 72);  // C5, within violin range
   EXPECT_EQ(note.start_tick, 960u);
   EXPECT_EQ(note.duration, 480u);
   EXPECT_EQ(note.velocity, 90);
@@ -70,7 +70,7 @@ TEST(BowedNoteFactoryTest, ViolinClampsAboveRange) {
   BowedNoteFactory factory(violin);
 
   NoteEvent note = factory.createNote(110, 0, 480, 80, BachNoteSource::Unknown);  // Above C7
-  EXPECT_EQ(note.pitch, 96);  // Clamped to C7
+  EXPECT_EQ(note.pitch, 96);                                                      // Clamped to C7
 }
 
 TEST(BowedNoteFactoryTest, ViolinClampsBelowRange) {
@@ -78,7 +78,7 @@ TEST(BowedNoteFactoryTest, ViolinClampsBelowRange) {
   BowedNoteFactory factory(violin);
 
   NoteEvent note = factory.createNote(40, 0, 480, 80, BachNoteSource::Unknown);  // Below G3
-  EXPECT_EQ(note.pitch, 55);  // Clamped to G3
+  EXPECT_EQ(note.pitch, 55);                                                     // Clamped to G3
 }
 
 // ---------------------------------------------------------------------------

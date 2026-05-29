@@ -101,10 +101,9 @@ class GroundBass {
   ///
   /// @param key_sig The target key signature.
   /// @return A GroundBass in the specified key.
-    /// @param register_low If > 0, octave-shift the entire bass pattern up
+  /// @param register_low If > 0, octave-shift the entire bass pattern up
   ///                     so the lowest note is >= register_low.
-  static GroundBass createForKey(const KeySignature& key_sig,
-                                 uint8_t register_low = 0);
+  static GroundBass createForKey(const KeySignature& key_sig, uint8_t register_low = 0);
 
  private:
   std::vector<NoteEvent> bass_notes_;

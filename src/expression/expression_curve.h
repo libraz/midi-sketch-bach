@@ -16,7 +16,7 @@ namespace bach {
 /// Expression events control the dynamic envelope within phrases,
 /// creating the subtle swells and decays characteristic of musical phrasing.
 struct ExpressionEvent {
-  Tick tick = 0;         ///< Tick position of the CC event
+  Tick tick = 0;        ///< Tick position of the CC event
   uint8_t channel = 0;  ///< MIDI channel (0-15)
   uint8_t value = 100;  ///< CC#11 value (0-127)
 };
@@ -40,8 +40,8 @@ struct ExpressionEvent {
 /// @param total_duration Total duration of the piece in ticks.
 /// @return Vector of ExpressionEvent structs in chronological order.
 ///         Returns a single event at tick 0 with value 100 if phrases is empty.
-std::vector<ExpressionEvent> generateExpressionCurve(
-    const std::vector<PhraseBoundary>& phrases, uint8_t channel, Tick total_duration);
+std::vector<ExpressionEvent> generateExpressionCurve(const std::vector<PhraseBoundary>& phrases,
+                                                     uint8_t channel, Tick total_duration);
 
 }  // namespace bach
 

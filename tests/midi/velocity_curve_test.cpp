@@ -72,7 +72,8 @@ TEST(VelocityCurveTest, ViolinGetsModifiedVelocity) {
   // Velocity should no longer all be 80.
   bool any_different = false;
   for (const auto& note : notes) {
-    if (note.velocity != 80) any_different = true;
+    if (note.velocity != 80)
+      any_different = true;
   }
   EXPECT_TRUE(any_different) << "Violin notes should have varied velocity";
 }
@@ -86,8 +87,7 @@ TEST(VelocityCurveTest, PreCadenceDiminuendo) {
   std::vector<Tick> cadences = {cadence_tick};
 
   // Note 2 beats before cadence should be slightly softer.
-  uint8_t pre_cadence_vel =
-      computeVelocity(cadence_tick - kTicksPerBeat * 2, cadences);
+  uint8_t pre_cadence_vel = computeVelocity(cadence_tick - kTicksPerBeat * 2, cadences);
   // Note well before cadence.
   uint8_t normal_vel = computeVelocity(0, cadences);
 

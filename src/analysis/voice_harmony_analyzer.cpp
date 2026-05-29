@@ -28,8 +28,10 @@ bool isStepwise(uint8_t pitch_a, uint8_t pitch_b) {
 /// @param pitch_b Later pitch.
 /// @return +1 ascending, -1 descending, 0 same.
 int melodicDirection(uint8_t pitch_a, uint8_t pitch_b) {
-  if (pitch_b > pitch_a) return 1;
-  if (pitch_b < pitch_a) return -1;
+  if (pitch_b > pitch_a)
+    return 1;
+  if (pitch_b < pitch_a)
+    return -1;
   return 0;
 }
 
@@ -124,8 +126,8 @@ VoiceHarmonyReport analyzeVoiceHarmony(const std::vector<Track>& tracks,
     // Add per-track observation.
     if (track_report.total_notes > 0) {
       std::ostringstream oss;
-      oss << "Track " << track_idx << ": "
-          << formatPercent(track_report.chord_tone_coverage) << " chord tones";
+      oss << "Track " << track_idx << ": " << formatPercent(track_report.chord_tone_coverage)
+          << " chord tones";
       report.observations.push_back(oss.str());
     }
   }

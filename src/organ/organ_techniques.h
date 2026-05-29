@@ -43,9 +43,8 @@ enum class PedalPointType : uint8_t { Tonic, Dominant };
 /// @param type Tonic or Dominant pedal.
 /// @param voice_id Voice index for the pedal notes.
 /// @return Vector of NoteEvents forming the pedal point.
-std::vector<NoteEvent> generateCadentialPedal(
-    const KeySignature& key_sig, Tick start_tick, Tick end_tick,
-    PedalPointType type, uint8_t voice_id);
+std::vector<NoteEvent> generateCadentialPedal(const KeySignature& key_sig, Tick start_tick,
+                                              Tick end_tick, PedalPointType type, uint8_t voice_id);
 
 // ---------------------------------------------------------------------------
 // Picardy third
@@ -59,8 +58,7 @@ std::vector<NoteEvent> generateCadentialPedal(
 /// @param notes Note vector to modify in-place.
 /// @param key_sig Key signature (only applies when is_minor == true).
 /// @param final_bar_tick Start tick of the final bar.
-void applyPicardyToFinalChord(std::vector<NoteEvent>& notes,
-                              const KeySignature& key_sig,
+void applyPicardyToFinalChord(std::vector<NoteEvent>& notes, const KeySignature& key_sig,
                               Tick final_bar_tick);
 
 // ---------------------------------------------------------------------------
@@ -79,8 +77,7 @@ void applyPicardyToFinalChord(std::vector<NoteEvent>& notes,
 /// @param voice_ranges Low/high pitch pairs for each voice.
 /// @return Vector of NoteEvents forming the block chord.
 std::vector<NoteEvent> generateBlockChord(
-    const KeySignature& key_sig, Tick tick, Tick duration,
-    uint8_t num_voices,
+    const KeySignature& key_sig, Tick tick, Tick duration, uint8_t num_voices,
     const std::vector<std::pair<uint8_t, uint8_t>>& voice_ranges);
 
 // ---------------------------------------------------------------------------
@@ -118,8 +115,7 @@ struct OrganRegistrationPresets {
 /// @param start_tick Piece start tick.
 /// @param end_tick Piece end tick.
 /// @return ExtendedRegistrationPlan with 3 points.
-ExtendedRegistrationPlan createSimpleRegistrationPlan(
-    Tick start_tick, Tick end_tick);
+ExtendedRegistrationPlan createSimpleRegistrationPlan(Tick start_tick, Tick end_tick);
 
 /// @brief Create a gradual crescendo registration plan for variation forms.
 ///
@@ -128,8 +124,8 @@ ExtendedRegistrationPlan createSimpleRegistrationPlan(
 /// @param num_variations Total number of variations.
 /// @param variation_duration Duration of each variation in ticks.
 /// @return ExtendedRegistrationPlan with one point per variation.
-ExtendedRegistrationPlan createVariationRegistrationPlan(
-    int num_variations, Tick variation_duration);
+ExtendedRegistrationPlan createVariationRegistrationPlan(int num_variations,
+                                                         Tick variation_duration);
 
 }  // namespace bach
 

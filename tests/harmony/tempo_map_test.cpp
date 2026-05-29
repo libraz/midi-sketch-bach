@@ -60,16 +60,15 @@ TEST(TempoMapTest, FugueTempoMapEmptyStructure) {
 
 TEST(TempoMapTest, FugueTempoMapSorted) {
   FugueStructure structure;
-  structure.addSection(SectionType::Exposition, FuguePhase::Establish,
-                       0, 4 * kTicksPerBar, Key::C);
-  structure.addSection(SectionType::Episode, FuguePhase::Develop,
-                       4 * kTicksPerBar, 8 * kTicksPerBar, Key::G);
-  structure.addSection(SectionType::MiddleEntry, FuguePhase::Develop,
-                       8 * kTicksPerBar, 12 * kTicksPerBar, Key::G);
-  structure.addSection(SectionType::Stretto, FuguePhase::Resolve,
-                       12 * kTicksPerBar, 16 * kTicksPerBar, Key::C);
-  structure.addSection(SectionType::Coda, FuguePhase::Resolve,
-                       16 * kTicksPerBar, 18 * kTicksPerBar, Key::C);
+  structure.addSection(SectionType::Exposition, FuguePhase::Establish, 0, 4 * kTicksPerBar, Key::C);
+  structure.addSection(SectionType::Episode, FuguePhase::Develop, 4 * kTicksPerBar,
+                       8 * kTicksPerBar, Key::G);
+  structure.addSection(SectionType::MiddleEntry, FuguePhase::Develop, 8 * kTicksPerBar,
+                       12 * kTicksPerBar, Key::G);
+  structure.addSection(SectionType::Stretto, FuguePhase::Resolve, 12 * kTicksPerBar,
+                       16 * kTicksPerBar, Key::C);
+  structure.addSection(SectionType::Coda, FuguePhase::Resolve, 16 * kTicksPerBar, 18 * kTicksPerBar,
+                       Key::C);
 
   auto events = generateFugueTempoMap(structure, 100);
 
@@ -77,19 +76,17 @@ TEST(TempoMapTest, FugueTempoMapSorted) {
 
   // Verify sorted by tick.
   for (size_t idx = 1; idx < events.size(); ++idx) {
-    EXPECT_LE(events[idx - 1].tick, events[idx].tick)
-        << "Events must be sorted by tick";
+    EXPECT_LE(events[idx - 1].tick, events[idx].tick) << "Events must be sorted by tick";
   }
 }
 
 TEST(TempoMapTest, FugueTempoMapSectionCount) {
   FugueStructure structure;
-  structure.addSection(SectionType::Exposition, FuguePhase::Establish,
-                       0, 4 * kTicksPerBar, Key::C);
-  structure.addSection(SectionType::Episode, FuguePhase::Develop,
-                       4 * kTicksPerBar, 8 * kTicksPerBar, Key::G);
-  structure.addSection(SectionType::Coda, FuguePhase::Resolve,
-                       8 * kTicksPerBar, 10 * kTicksPerBar, Key::C);
+  structure.addSection(SectionType::Exposition, FuguePhase::Establish, 0, 4 * kTicksPerBar, Key::C);
+  structure.addSection(SectionType::Episode, FuguePhase::Develop, 4 * kTicksPerBar,
+                       8 * kTicksPerBar, Key::G);
+  structure.addSection(SectionType::Coda, FuguePhase::Resolve, 8 * kTicksPerBar, 10 * kTicksPerBar,
+                       Key::C);
 
   auto events = generateFugueTempoMap(structure, 100);
 
@@ -99,8 +96,7 @@ TEST(TempoMapTest, FugueTempoMapSectionCount) {
 
 TEST(TempoMapTest, FugueTempoMapExpositionIsBaseTempo) {
   FugueStructure structure;
-  structure.addSection(SectionType::Exposition, FuguePhase::Establish,
-                       0, 4 * kTicksPerBar, Key::C);
+  structure.addSection(SectionType::Exposition, FuguePhase::Establish, 0, 4 * kTicksPerBar, Key::C);
 
   auto events = generateFugueTempoMap(structure, 100);
 
@@ -111,10 +107,9 @@ TEST(TempoMapTest, FugueTempoMapExpositionIsBaseTempo) {
 
 TEST(TempoMapTest, FugueTempoMapEpisodeFaster) {
   FugueStructure structure;
-  structure.addSection(SectionType::Exposition, FuguePhase::Establish,
-                       0, 4 * kTicksPerBar, Key::C);
-  structure.addSection(SectionType::Episode, FuguePhase::Develop,
-                       4 * kTicksPerBar, 8 * kTicksPerBar, Key::G);
+  structure.addSection(SectionType::Exposition, FuguePhase::Establish, 0, 4 * kTicksPerBar, Key::C);
+  structure.addSection(SectionType::Episode, FuguePhase::Develop, 4 * kTicksPerBar,
+                       8 * kTicksPerBar, Key::G);
 
   auto events = generateFugueTempoMap(structure, 100);
 
@@ -131,10 +126,9 @@ TEST(TempoMapTest, FugueTempoMapEpisodeFaster) {
 
 TEST(TempoMapTest, FugueTempoMapCodaSlower) {
   FugueStructure structure;
-  structure.addSection(SectionType::Exposition, FuguePhase::Establish,
-                       0, 4 * kTicksPerBar, Key::C);
-  structure.addSection(SectionType::Coda, FuguePhase::Resolve,
-                       4 * kTicksPerBar, 6 * kTicksPerBar, Key::C);
+  structure.addSection(SectionType::Exposition, FuguePhase::Establish, 0, 4 * kTicksPerBar, Key::C);
+  structure.addSection(SectionType::Coda, FuguePhase::Resolve, 4 * kTicksPerBar, 6 * kTicksPerBar,
+                       Key::C);
 
   auto events = generateFugueTempoMap(structure, 100);
 
@@ -161,9 +155,8 @@ TEST(TempoMapTest, ToccataTempoMapStructure) {
   Tick drive_start = recit_end;
   Tick drive_end = drive_start + 6 * kTicksPerBar;
 
-  auto events = generateToccataTempoMap(
-      opening_start, opening_end, recit_start, recit_end,
-      drive_start, drive_end, 80);
+  auto events = generateToccataTempoMap(opening_start, opening_end, recit_start, recit_end,
+                                        drive_start, drive_end, 80);
 
   EXPECT_GE(events.size(), 4u) << "Should have opening, recit, drive, and transition events";
 
@@ -174,11 +167,8 @@ TEST(TempoMapTest, ToccataTempoMapStructure) {
 }
 
 TEST(TempoMapTest, ToccataTempoMapOpeningFaster) {
-  auto events = generateToccataTempoMap(
-      0, 6 * kTicksPerBar,
-      6 * kTicksPerBar, 18 * kTicksPerBar,
-      18 * kTicksPerBar, 24 * kTicksPerBar,
-      80);
+  auto events = generateToccataTempoMap(0, 6 * kTicksPerBar, 6 * kTicksPerBar, 18 * kTicksPerBar,
+                                        18 * kTicksPerBar, 24 * kTicksPerBar, 80);
 
   // First event is opening, should be faster than base (+8%).
   ASSERT_GE(events.size(), 1u);
@@ -187,11 +177,8 @@ TEST(TempoMapTest, ToccataTempoMapOpeningFaster) {
 }
 
 TEST(TempoMapTest, ToccataTempoMapHasFermatas) {
-  auto events = generateToccataTempoMap(
-      0, 6 * kTicksPerBar,
-      6 * kTicksPerBar, 18 * kTicksPerBar,
-      18 * kTicksPerBar, 24 * kTicksPerBar,
-      80);
+  auto events = generateToccataTempoMap(0, 6 * kTicksPerBar, 6 * kTicksPerBar, 18 * kTicksPerBar,
+                                        18 * kTicksPerBar, 24 * kTicksPerBar, 80);
 
   // Should contain fermata events (very slow, -25%).
   uint16_t fermata_bpm = adjustBpm(80, -25.0f);
@@ -259,8 +246,7 @@ TEST(TempoMapTest, FantasiaTempoMapSorted) {
   auto events = generateFantasiaTempoMap(total_duration, 32, 66);
 
   for (size_t idx = 1; idx < events.size(); ++idx) {
-    EXPECT_LE(events[idx - 1].tick, events[idx].tick)
-        << "Events must be sorted by tick";
+    EXPECT_LE(events[idx - 1].tick, events[idx].tick) << "Events must be sorted by tick";
   }
 }
 
@@ -274,8 +260,7 @@ TEST(TempoMapTest, FantasiaTempoMapFinalBroadening) {
   for (const auto& evt : events) {
     if (evt.tick == final_tick) {
       found_final = true;
-      EXPECT_LT(evt.bpm, adjustBpm(100, -5.0f))
-          << "Final broadening should be slower than base";
+      EXPECT_LT(evt.bpm, adjustBpm(100, -5.0f)) << "Final broadening should be slower than base";
     }
   }
   EXPECT_TRUE(found_final) << "Should have a final broadening event";
@@ -372,8 +357,7 @@ TEST(TempoMapTest, CadenceRitardandoMultipleCadencesOverlapDedup) {
   auto events = generateCadenceRitardando(100, cadences);
 
   // Without dedup: 8 events. With dedup at beat 5: 7 events.
-  EXPECT_EQ(events.size(), 7u)
-      << "Overlapping tick should be deduplicated to a single event";
+  EXPECT_EQ(events.size(), 7u) << "Overlapping tick should be deduplicated to a single event";
 
   // Verify no duplicate ticks.
   for (size_t idx = 1; idx < events.size(); ++idx) {

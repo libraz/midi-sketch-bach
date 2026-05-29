@@ -142,8 +142,8 @@ TEST(ChoralePreludeTest, CantusHasLongNotes) {
 
   for (const auto& note : cantus_notes) {
     EXPECT_GE(note.duration, kTicksPerBeat * 2)
-        << "Cantus note at tick " << note.start_tick
-        << " has duration " << note.duration << " (less than a half note)";
+        << "Cantus note at tick " << note.start_tick << " has duration " << note.duration
+        << " (less than a half note)";
   }
 }
 
@@ -186,8 +186,7 @@ TEST(ChoralePreludeTest, InnerVoiceHasNotes) {
   ASSERT_TRUE(result.success);
   ASSERT_GE(result.tracks.size(), 4u);
 
-  EXPECT_GT(result.tracks[2].notes.size(), 0u)
-      << "Inner voice track should have notes";
+  EXPECT_GT(result.tracks[2].notes.size(), 0u) << "Inner voice track should have notes";
 }
 
 TEST(ChoralePreludeTest, InnerVoicePitchRange) {
@@ -197,10 +196,8 @@ TEST(ChoralePreludeTest, InnerVoicePitchRange) {
   ASSERT_GE(result.tracks.size(), 4u);
 
   for (const auto& note : result.tracks[2].notes) {
-    EXPECT_GE(note.pitch, 48u)
-        << "Inner voice pitch below C3: " << static_cast<int>(note.pitch);
-    EXPECT_LE(note.pitch, 67u)
-        << "Inner voice pitch above G4: " << static_cast<int>(note.pitch);
+    EXPECT_GE(note.pitch, 48u) << "Inner voice pitch below C3: " << static_cast<int>(note.pitch);
+    EXPECT_LE(note.pitch, 67u) << "Inner voice pitch above G4: " << static_cast<int>(note.pitch);
   }
 }
 
@@ -228,11 +225,11 @@ TEST(ChoralePreludeTest, InnerVoiceBelowCantus) {
   }
   // Allow some crossings (from post-validation adjustments), but < 5%.
   float crossing_rate = result.tracks[2].notes.empty()
-      ? 0.0f
-      : 100.0f * static_cast<float>(crossings) /
-            static_cast<float>(result.tracks[2].notes.size());
-  EXPECT_LT(crossing_rate, 5.0f)
-      << "Inner voice crosses cantus too often: " << crossing_rate << "%";
+                            ? 0.0f
+                            : 100.0f * static_cast<float>(crossings) /
+                                  static_cast<float>(result.tracks[2].notes.size());
+  EXPECT_LT(crossing_rate, 5.0f) << "Inner voice crosses cantus too often: " << crossing_rate
+                                 << "%";
 }
 
 // ---------------------------------------------------------------------------
@@ -251,11 +248,10 @@ TEST(ChoralePreludeTest, PedalCoverageAbove90Percent) {
       pedal_covered += note.duration;
     }
     float coverage = result.total_duration_ticks > 0
-        ? 100.0f * static_cast<float>(pedal_covered) /
-              static_cast<float>(result.total_duration_ticks)
-        : 0.0f;
-    EXPECT_GE(coverage, 90.0f)
-        << "Pedal coverage " << coverage << "% for seed " << seed;
+                         ? 100.0f * static_cast<float>(pedal_covered) /
+                               static_cast<float>(result.total_duration_ticks)
+                         : 0.0f;
+    EXPECT_GE(coverage, 90.0f) << "Pedal coverage " << coverage << "% for seed " << seed;
   }
 }
 
@@ -270,19 +266,23 @@ TEST(ChoralePreludeTest, VoiceOrderingSATB) {
 
   // Compute medians for each voice track.
   auto median = [](std::vector<uint8_t>& pitches) -> float {
-    if (pitches.empty()) return 0.0f;
+    if (pitches.empty())
+      return 0.0f;
     std::sort(pitches.begin(), pitches.end());
     size_t mid = pitches.size() / 2;
-    return pitches.size() % 2 == 0
-        ? (pitches[mid - 1] + pitches[mid]) / 2.0f
-        : static_cast<float>(pitches[mid]);
+    return pitches.size() % 2 == 0 ? (pitches[mid - 1] + pitches[mid]) / 2.0f
+                                   : static_cast<float>(pitches[mid]);
   };
 
   std::vector<uint8_t> fig_pitches, cantus_pitches, inner_pitches, pedal_pitches;
-  for (const auto& n : result.tracks[0].notes) fig_pitches.push_back(n.pitch);
-  for (const auto& n : result.tracks[1].notes) cantus_pitches.push_back(n.pitch);
-  for (const auto& n : result.tracks[2].notes) inner_pitches.push_back(n.pitch);
-  for (const auto& n : result.tracks[3].notes) pedal_pitches.push_back(n.pitch);
+  for (const auto& n : result.tracks[0].notes)
+    fig_pitches.push_back(n.pitch);
+  for (const auto& n : result.tracks[1].notes)
+    cantus_pitches.push_back(n.pitch);
+  for (const auto& n : result.tracks[2].notes)
+    inner_pitches.push_back(n.pitch);
+  for (const auto& n : result.tracks[3].notes)
+    pedal_pitches.push_back(n.pitch);
 
   float med_fig = median(fig_pitches);
   float med_cantus = median(cantus_pitches);
@@ -316,20 +316,21 @@ TEST(ChoralePreludeTest, StrongBeatDissonanceReasonable) {
   int total = 0, dissonant = 0;
   // Exclude last 2 bars (cadence window).
   Tick cadence_start = result.total_duration_ticks > kTicksPerBar * 2
-      ? result.total_duration_ticks - kTicksPerBar * 2
-      : 0;
+                           ? result.total_duration_ticks - kTicksPerBar * 2
+                           : 0;
 
   for (size_t track_idx : {0u, 2u, 3u}) {
     for (const auto& note : result.tracks[track_idx].notes) {
       uint8_t beat = beatInBar(note.start_tick);
-      if (beat != 0 && beat != 2) continue;
-      if (note.start_tick >= cadence_start) continue;
+      if (beat != 0 && beat != 2)
+        continue;
+      if (note.start_tick >= cadence_start)
+        continue;
 
       ++total;
       int cp = cantus_at(note.start_tick);
       if (cp >= 0) {
-        int ivl = interval_util::compoundToSimple(
-            std::abs(static_cast<int>(note.pitch) - cp));
+        int ivl = interval_util::compoundToSimple(std::abs(static_cast<int>(note.pitch) - cp));
         if (!interval_util::isConsonance(ivl)) {
           ++dissonant;
         }
@@ -337,11 +338,9 @@ TEST(ChoralePreludeTest, StrongBeatDissonanceReasonable) {
     }
   }
 
-  float rate = total > 0 ? 100.0f * static_cast<float>(dissonant) /
-                               static_cast<float>(total)
-                         : 0.0f;
-  EXPECT_LT(rate, 30.0f)
-      << "Strong-beat dissonance rate " << rate << "% exceeds 30% threshold";
+  float rate =
+      total > 0 ? 100.0f * static_cast<float>(dissonant) / static_cast<float>(total) : 0.0f;
+  EXPECT_LT(rate, 30.0f) << "Strong-beat dissonance rate " << rate << "% exceeds 30% threshold";
 }
 
 // ---------------------------------------------------------------------------
@@ -356,8 +355,8 @@ TEST(ChoralePreludeTest, AllNotesVelocity80) {
   for (const auto& track : result.tracks) {
     for (const auto& note : track.notes) {
       EXPECT_EQ(note.velocity, 80u)
-          << "Organ velocity must be 80, found " << static_cast<int>(note.velocity)
-          << " in track " << track.name;
+          << "Organ velocity must be 80, found " << static_cast<int>(note.velocity) << " in track "
+          << track.name;
     }
   }
 }
@@ -448,8 +447,7 @@ TEST(ChoralePreludeTest, AllNotesHavePositiveDuration) {
   for (const auto& track : result.tracks) {
     for (const auto& note : track.notes) {
       EXPECT_GT(note.duration, 0u)
-          << "Note at tick " << note.start_tick << " has zero duration in track "
-          << track.name;
+          << "Note at tick " << note.start_tick << " has zero duration in track " << track.name;
     }
   }
 }
@@ -470,8 +468,7 @@ TEST(ChoralePreludeTest, DeterministicWithSameSeed) {
   for (size_t track_idx = 0; track_idx < result1.tracks.size(); ++track_idx) {
     const auto& notes1 = result1.tracks[track_idx].notes;
     const auto& notes2 = result2.tracks[track_idx].notes;
-    ASSERT_EQ(notes1.size(), notes2.size())
-        << "Track " << track_idx << " note count differs";
+    ASSERT_EQ(notes1.size(), notes2.size()) << "Track " << track_idx << " note count differs";
 
     for (size_t note_idx = 0; note_idx < notes1.size(); ++note_idx) {
       EXPECT_EQ(notes1[note_idx].start_tick, notes2[note_idx].start_tick);
@@ -535,10 +532,9 @@ TEST(ChoralePreludeTest, SeedSelectsDifferentChorales) {
       << "Same chorale (seed % 3 == 0) should have same cantus length";
 
   // At least two of the three chorales should have different total durations.
-  bool lengths_differ =
-      (result0.total_duration_ticks != result1.total_duration_ticks) ||
-      (result1.total_duration_ticks != result2.total_duration_ticks) ||
-      (result0.total_duration_ticks != result2.total_duration_ticks);
+  bool lengths_differ = (result0.total_duration_ticks != result1.total_duration_ticks) ||
+                        (result1.total_duration_ticks != result2.total_duration_ticks) ||
+                        (result0.total_duration_ticks != result2.total_duration_ticks);
   EXPECT_TRUE(lengths_differ) << "Different chorales should have different durations";
 }
 
@@ -645,10 +641,9 @@ TEST(ChoralePreludeTest, FigurationDownbeatsHaveLongerNotes) {
   }
 
   if (downbeat_count > 0 && midbeat_count > 0) {
-    float avg_downbeat = static_cast<float>(total_downbeat_dur) /
-                         static_cast<float>(downbeat_count);
-    float avg_midbeat = static_cast<float>(total_midbeat_dur) /
-                        static_cast<float>(midbeat_count);
+    float avg_downbeat =
+        static_cast<float>(total_downbeat_dur) / static_cast<float>(downbeat_count);
+    float avg_midbeat = static_cast<float>(total_midbeat_dur) / static_cast<float>(midbeat_count);
     EXPECT_GT(avg_downbeat, avg_midbeat)
         << "Downbeat figuration (avg=" << avg_downbeat
         << ") should have longer durations than midbeat (avg=" << avg_midbeat
@@ -695,11 +690,9 @@ TEST(ChoralePreludeTest, InnerVoiceDownbeatsHaveQuarterNotes) {
   }
 
   if (downbeat_total > 0) {
-    float ratio = static_cast<float>(downbeat_quarter_count) /
-                  static_cast<float>(downbeat_total);
-    EXPECT_GE(ratio, 0.70f)
-        << "Inner voice downbeats should use quarter notes >= 70% of the time, "
-        << "got " << (ratio * 100.0f) << "%";
+    float ratio = static_cast<float>(downbeat_quarter_count) / static_cast<float>(downbeat_total);
+    EXPECT_GE(ratio, 0.70f) << "Inner voice downbeats should use quarter notes >= 70% of the time, "
+                            << "got " << (ratio * 100.0f) << "%";
   }
 }
 

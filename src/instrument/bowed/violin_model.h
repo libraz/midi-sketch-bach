@@ -49,9 +49,8 @@ class ViolinModel : public IBowedStringInstrument {
 
   // Playability cost
   BowedPlayabilityCost calculateCost(uint8_t pitch) const override;
-  BowedPlayabilityCost calculateTransitionCost(
-      uint8_t from_pitch, uint8_t to_pitch,
-      const BowedPerformerState& state) const override;
+  BowedPlayabilityCost calculateTransitionCost(uint8_t from_pitch, uint8_t to_pitch,
+                                               const BowedPerformerState& state) const override;
   void updateState(BowedPerformerState& state, uint8_t pitch) const override;
   BowedPerformerState createInitialState() const override;
 
@@ -103,8 +102,7 @@ class ViolinModel : public IBowedStringInstrument {
   /// @param out_string_idx Output: index of the best string (0-3).
   /// @param out_semitones Output: semitones above the open string.
   /// @return True if the pitch is reachable on at least one string.
-  bool findBestString(uint8_t pitch, uint8_t& out_string_idx,
-                      uint8_t& out_semitones) const;
+  bool findBestString(uint8_t pitch, uint8_t& out_string_idx, uint8_t& out_semitones) const;
 
   /// @brief Find the string index for a given pitch (lowest position preferred).
   /// @param pitch MIDI pitch number.

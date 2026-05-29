@@ -1,10 +1,9 @@
 // Tests for generator_internal.h -- voice-aware overlap cleanup.
 
-#include "generator_internal.h"
-
 #include <gtest/gtest.h>
 
 #include "core/basic_types.h"
+#include "generator_internal.h"
 
 namespace bach {
 namespace {
@@ -78,14 +77,12 @@ TEST(CleanupTrackOverlaps, WithinVoiceTrim) {
 
   ASSERT_EQ(tracks[0].notes.size(), 2u);
   EXPECT_EQ(tracks[0].notes[0].duration, 480u);  // trimmed
-  EXPECT_NE(tracks[0].notes[0].modified_by &
-                static_cast<uint8_t>(NoteModifiedBy::OverlapTrim),
-            0);
+  EXPECT_NE(tracks[0].notes[0].modified_by & static_cast<uint8_t>(NoteModifiedBy::OverlapTrim), 0);
 }
 
 TEST(CleanupTrackOverlaps, CrossVoiceTrimmed) {
   Track track;
-  track.notes.push_back(makeNote(0, 960, 50, 0));   // bass, overlaps texture tick
+  track.notes.push_back(makeNote(0, 960, 50, 0));    // bass, overlaps texture tick
   track.notes.push_back(makeNote(480, 480, 62, 1));  // texture
   std::vector<Track> tracks = {track};
 
@@ -95,9 +92,7 @@ TEST(CleanupTrackOverlaps, CrossVoiceTrimmed) {
   // Cross-voice overlap is now trimmed so the validator sees no within-track
   // overlap. Bass note is truncated to end at the texture note's start.
   EXPECT_EQ(tracks[0].notes[0].duration, 480u);
-  EXPECT_NE(tracks[0].notes[0].modified_by &
-                static_cast<uint8_t>(NoteModifiedBy::OverlapTrim),
-            0);
+  EXPECT_NE(tracks[0].notes[0].modified_by & static_cast<uint8_t>(NoteModifiedBy::OverlapTrim), 0);
 }
 
 TEST(CleanupTrackOverlaps, ZeroDurationBecomesOne) {

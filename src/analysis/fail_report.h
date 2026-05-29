@@ -14,9 +14,9 @@ namespace bach {
 
 /// Severity classification for analysis issues.
 enum class FailSeverity : uint8_t {
-  Info,      ///< Informational, no action needed.
-  Warning,   ///< Minor issue, acceptable in some contexts.
-  Critical   ///< Must be fixed, fails quality gate.
+  Info,     ///< Informational, no action needed.
+  Warning,  ///< Minor issue, acceptable in some contexts.
+  Critical  ///< Must be fixed, fails quality gate.
 };
 
 /// @brief Convert FailSeverity to human-readable string.

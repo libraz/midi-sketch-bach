@@ -18,29 +18,23 @@ namespace {
 
 /// Create a simple ascending quarter-note line on the given voice.
 /// Pitches: base, base+2, base+4, base+6 (whole-tone ascent).
-std::vector<NoteEvent> makeAscendingLine(VoiceId voice, uint8_t base_pitch,
-                                         Tick start = 0) {
+std::vector<NoteEvent> makeAscendingLine(VoiceId voice, uint8_t base_pitch, Tick start = 0) {
   return {
       {start, kTicksPerBeat, base_pitch, 80, voice},
       {start + kTicksPerBeat, kTicksPerBeat, static_cast<uint8_t>(base_pitch + 2), 80, voice},
-      {start + kTicksPerBeat * 2, kTicksPerBeat, static_cast<uint8_t>(base_pitch + 4), 80,
-       voice},
-      {start + kTicksPerBeat * 3, kTicksPerBeat, static_cast<uint8_t>(base_pitch + 6), 80,
-       voice},
+      {start + kTicksPerBeat * 2, kTicksPerBeat, static_cast<uint8_t>(base_pitch + 4), 80, voice},
+      {start + kTicksPerBeat * 3, kTicksPerBeat, static_cast<uint8_t>(base_pitch + 6), 80, voice},
   };
 }
 
 /// Create a descending quarter-note line on the given voice.
 /// Pitches: base, base-2, base-4, base-6.
-std::vector<NoteEvent> makeDescendingLine(VoiceId voice, uint8_t base_pitch,
-                                          Tick start = 0) {
+std::vector<NoteEvent> makeDescendingLine(VoiceId voice, uint8_t base_pitch, Tick start = 0) {
   return {
       {start, kTicksPerBeat, base_pitch, 80, voice},
       {start + kTicksPerBeat, kTicksPerBeat, static_cast<uint8_t>(base_pitch - 2), 80, voice},
-      {start + kTicksPerBeat * 2, kTicksPerBeat, static_cast<uint8_t>(base_pitch - 4), 80,
-       voice},
-      {start + kTicksPerBeat * 3, kTicksPerBeat, static_cast<uint8_t>(base_pitch - 6), 80,
-       voice},
+      {start + kTicksPerBeat * 2, kTicksPerBeat, static_cast<uint8_t>(base_pitch - 4), 80, voice},
+      {start + kTicksPerBeat * 3, kTicksPerBeat, static_cast<uint8_t>(base_pitch - 6), 80, voice},
   };
 }
 
@@ -486,8 +480,8 @@ TEST(VoiceIndependenceEdgeTest, LargeTickValues) {
 
 TEST(VoiceIndependenceEdgeTest, SameRhythmDifferentPitches) {
   // Same rhythm (simultaneous attacks) but different pitch ranges.
-  auto voice_a = makeAscendingLine(0, 36);   // C2 range
-  auto voice_b = makeAscendingLine(1, 84);   // C6 range
+  auto voice_a = makeAscendingLine(0, 36);  // C2 range
+  auto voice_b = makeAscendingLine(1, 84);  // C6 range
   float rhythm = calculateRhythmIndependence(voice_a, voice_b);
   float reg = calculateRegisterSeparation(voice_a, voice_b);
   EXPECT_NEAR(rhythm, 0.0f, kEpsilon);  // Identical onsets.
@@ -506,8 +500,8 @@ TEST(VoiceIndependenceEdgeTest, DifferentRhythmSamePitches) {
   };
   float rhythm = calculateRhythmIndependence(voice_a, voice_b);
   float reg = calculateRegisterSeparation(voice_a, voice_b);
-  EXPECT_GT(rhythm, 0.5f);              // Off-beat onsets.
-  EXPECT_NEAR(reg, 0.0f, kEpsilon);     // Same pitch range.
+  EXPECT_GT(rhythm, 0.5f);           // Off-beat onsets.
+  EXPECT_NEAR(reg, 0.0f, kEpsilon);  // Same pitch range.
 }
 
 }  // namespace

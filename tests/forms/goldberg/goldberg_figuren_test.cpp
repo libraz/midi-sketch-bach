@@ -2,11 +2,11 @@
 
 #include "forms/goldberg/goldberg_figuren.h"
 
+#include <gtest/gtest.h>
+
 #include <algorithm>
 #include <cmath>
 #include <numeric>
-
-#include <gtest/gtest.h>
 
 #include "core/pitch_utils.h"
 
@@ -21,12 +21,12 @@ constexpr uint32_t kTestSeed = 42;
 /// @brief Create a default Circulatio FiguraProfile for testing.
 FiguraProfile makeCirculatioProfile() {
   return {
-      FiguraType::Circulatio,   // primary
-      FiguraType::Circulatio,   // secondary
-      4,                        // notes_per_beat
+      FiguraType::Circulatio,  // primary
+      FiguraType::Circulatio,  // secondary
+      4,                       // notes_per_beat
       DirectionBias::Symmetric,
-      0.7f,                     // chord_tone_ratio
-      0.3f                      // sequence_probability
+      0.7f,  // chord_tone_ratio
+      0.3f   // sequence_probability
   };
 }
 
@@ -44,50 +44,27 @@ FiguraProfile makeTirataProfile() {
 
 /// @brief Create a Batterie FiguraProfile for testing.
 FiguraProfile makeBatterieProfile() {
-  return {
-      FiguraType::Batterie,
-      FiguraType::Batterie,
-      4,
-      DirectionBias::Alternating,
-      0.7f,
-      0.0f
-  };
+  return {FiguraType::Batterie, FiguraType::Batterie, 4, DirectionBias::Alternating, 0.7f, 0.0f};
 }
 
 /// @brief Create an Arpeggio FiguraProfile for testing.
 FiguraProfile makeArpeggioProfile() {
-  return {
-      FiguraType::Arpeggio,
-      FiguraType::Arpeggio,
-      4,
-      DirectionBias::Ascending,
-      0.7f,
-      0.0f
-  };
+  return {FiguraType::Arpeggio, FiguraType::Arpeggio, 4, DirectionBias::Ascending, 0.7f, 0.0f};
 }
 
 /// @brief Create a Suspirans FiguraProfile for testing.
 FiguraProfile makeSuspiransProfile() {
-  return {
-      FiguraType::Suspirans,
-      FiguraType::Suspirans,
-      4,
-      DirectionBias::Descending,
-      0.7f,
-      0.0f
-  };
+  return {FiguraType::Suspirans, FiguraType::Suspirans, 4, DirectionBias::Descending, 0.7f, 0.0f};
 }
 
 /// @brief Create a DottedGrave FiguraProfile for testing.
 FiguraProfile makeDottedGraveProfile() {
-  return {
-      FiguraType::DottedGrave,
-      FiguraType::DottedGrave,
-      2,  // Lower density for dotted rhythm.
-      DirectionBias::Symmetric,
-      0.7f,
-      0.0f
-  };
+  return {FiguraType::DottedGrave,
+          FiguraType::DottedGrave,
+          2,  // Lower density for dotted rhythm.
+          DirectionBias::Symmetric,
+          0.7f,
+          0.0f};
 }
 
 // ---------------------------------------------------------------------------
@@ -124,12 +101,12 @@ TEST(FigurenGeneratorTest, NotesSpan32Bars) {
   Tick max_end = 0;
   for (const auto& note : notes) {
     Tick note_end = note.start_tick + note.duration;
-    if (note_end > max_end) max_end = note_end;
+    if (note_end > max_end)
+      max_end = note_end;
   }
 
   // The last note should end at or near the 32-bar boundary.
-  EXPECT_GE(max_end, expected_total - ticks_per_bar)
-      << "Notes should span close to 32 bars";
+  EXPECT_GE(max_end, expected_total - ticks_per_bar) << "Notes should span close to 32 bars";
   EXPECT_LE(max_end, expected_total + ticks_per_bar)
       << "Notes should not extend far beyond 32 bars";
 }
@@ -195,8 +172,7 @@ TEST(FigurenGeneratorTest, TirataPattern) {
   }
 
   if (bar0_pitches.size() > 1) {
-    float step_ratio = static_cast<float>(step_count) /
-                       static_cast<float>(bar0_pitches.size() - 1);
+    float step_ratio = static_cast<float>(step_count) / static_cast<float>(bar0_pitches.size() - 1);
     EXPECT_GT(step_ratio, 0.5f) << "Tirata should be predominantly stepwise";
   }
 }
@@ -267,8 +243,7 @@ TEST(FigurenGeneratorTest, ArpeggioPattern) {
   }
 
   if (total_count > 0) {
-    float chord_ratio = static_cast<float>(chord_tone_count) /
-                        static_cast<float>(total_count);
+    float chord_ratio = static_cast<float>(chord_tone_count) / static_cast<float>(total_count);
     EXPECT_GT(chord_ratio, 0.4f) << "Arpeggio should contain many chord tones";
   }
 }
@@ -320,14 +295,13 @@ TEST(FigurenGeneratorTest, DottedGravePattern) {
   Tick bar_end = kThreeFour.ticksPerBar();
   int notes_in_bar0 = 0;
   for (const auto& note : notes) {
-    if (note.start_tick < bar_end) ++notes_in_bar0;
+    if (note.start_tick < bar_end)
+      ++notes_in_bar0;
   }
 
   // With npb=2, 3 beats -> ~6 notes per bar.
-  EXPECT_LE(notes_in_bar0, 12)
-      << "DottedGrave with npb=2 should not produce excessive notes";
-  EXPECT_GE(notes_in_bar0, 2)
-      << "DottedGrave should produce at least a few notes";
+  EXPECT_LE(notes_in_bar0, 12) << "DottedGrave with npb=2 should not produce excessive notes";
+  EXPECT_GE(notes_in_bar0, 2) << "DottedGrave should produce at least a few notes";
 }
 
 // ---------------------------------------------------------------------------
@@ -416,14 +390,14 @@ TEST(FigurenGeneratorTest, SequenceApplication) {
 
   // With sequence_probability=1.0, we should get notes. The exact behavior
   // depends on whether non-cadence bars trigger sequence application.
-  EXPECT_FALSE(notes.empty())
-      << "With sequence_probability=1.0, should still produce notes";
+  EXPECT_FALSE(notes.empty()) << "With sequence_probability=1.0, should still produce notes";
 
   // Verify notes still span the grid.
   Tick tpb = kThreeFour.ticksPerBar();
   Tick max_tick = 0;
   for (const auto& note : notes) {
-    if (note.start_tick > max_tick) max_tick = note.start_tick;
+    if (note.start_tick > max_tick)
+      max_tick = note.start_tick;
   }
   EXPECT_GE(max_tick, 20 * tpb)
       << "Sequential patterns should cover a significant portion of 32 bars";
@@ -451,7 +425,8 @@ TEST(FigurenGeneratorTest, ChordToneRatio) {
   int total_count = 0;
 
   for (const auto& note : notes) {
-    if (note.pitch == 0) continue;  // Skip rests.
+    if (note.pitch == 0)
+      continue;  // Skip rests.
     int pitch_class = getPitchClass(note.pitch);
     for (int chord_pc : kGMajorChordPCs) {
       if (pitch_class == chord_pc) {
@@ -466,8 +441,7 @@ TEST(FigurenGeneratorTest, ChordToneRatio) {
     float ratio = static_cast<float>(chord_count) / static_cast<float>(total_count);
     // With chord_tone_ratio=0.9 and snapping, expect a high proportion.
     // But circulatio includes neighbor tones, so the actual ratio will be lower.
-    EXPECT_GT(ratio, 0.2f)
-        << "With high chord_tone_ratio, chord tones should be well-represented";
+    EXPECT_GT(ratio, 0.2f) << "With high chord_tone_ratio, chord tones should be well-represented";
   }
 }
 
@@ -517,10 +491,8 @@ TEST(FigurenGeneratorTest, ThemeStrengthZeroMatchesOriginal) {
   auto profile = makeCirculatioProfile();
 
   // theme_strength=0.0f (default) should produce identical output.
-  auto notes_default = gen.generate(profile, grid, kGMajor, kThreeFour, 0,
-                                     kTestSeed);
-  auto notes_zero = gen.generate(profile, grid, kGMajor, kThreeFour, 0,
-                                  kTestSeed, nullptr, 0.0f);
+  auto notes_default = gen.generate(profile, grid, kGMajor, kThreeFour, 0, kTestSeed);
+  auto notes_zero = gen.generate(profile, grid, kGMajor, kThreeFour, 0, kTestSeed, nullptr, 0.0f);
 
   ASSERT_EQ(notes_default.size(), notes_zero.size());
   for (size_t idx = 0; idx < notes_default.size(); ++idx) {
@@ -540,10 +512,10 @@ TEST(FigurenGeneratorTest, ThemeStrengthPositiveBiasesPitch) {
   auto grid = GoldbergStructuralGrid::createMajor();
   auto profile = makeCirculatioProfile();
 
-  auto notes_no_theme = gen.generate(profile, grid, kGMajor, kThreeFour, 0,
-                                      kTestSeed, nullptr, 0.0f);
-  auto notes_with_theme = gen.generate(profile, grid, kGMajor, kThreeFour, 0,
-                                        kTestSeed, nullptr, 0.5f);
+  auto notes_no_theme =
+      gen.generate(profile, grid, kGMajor, kThreeFour, 0, kTestSeed, nullptr, 0.0f);
+  auto notes_with_theme =
+      gen.generate(profile, grid, kGMajor, kThreeFour, 0, kTestSeed, nullptr, 0.5f);
 
   ASSERT_FALSE(notes_no_theme.empty());
   ASSERT_FALSE(notes_with_theme.empty());
@@ -557,14 +529,13 @@ TEST(FigurenGeneratorTest, ThemeStrengthPositiveBiasesPitch) {
     int count = 0;
     for (int bar = 0; bar < 32; ++bar) {
       uint8_t theme_pitch = grid.getBar(bar).aria_melody[0];
-      if (theme_pitch == 0) continue;
+      if (theme_pitch == 0)
+        continue;
       Tick bar_start = static_cast<Tick>(bar) * ticks_per_bar;
       Tick bar_end = bar_start + ticks_per_bar;
       for (const auto& note : notes) {
-        if (note.start_tick >= bar_start && note.start_tick < bar_end &&
-            note.pitch > 0) {
-          total_dist += static_cast<float>(
-              absoluteInterval(note.pitch, theme_pitch));
+        if (note.start_tick >= bar_start && note.start_tick < bar_end && note.pitch > 0) {
+          total_dist += static_cast<float>(absoluteInterval(note.pitch, theme_pitch));
           ++count;
           break;  // Only first note per bar.
         }

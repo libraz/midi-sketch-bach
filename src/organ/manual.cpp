@@ -16,10 +16,14 @@ namespace {
 /// @return Appropriate VoiceRole for the given position.
 VoiceRole fugueRoleForVoice(uint8_t voice_index) {
   switch (voice_index) {
-    case 0: return VoiceRole::Assert;
-    case 1: return VoiceRole::Respond;
-    case 2: return VoiceRole::Propel;
-    default: return VoiceRole::Ground;
+    case 0:
+      return VoiceRole::Assert;
+    case 1:
+      return VoiceRole::Respond;
+    case 2:
+      return VoiceRole::Propel;
+    default:
+      return VoiceRole::Ground;
   }
 }
 

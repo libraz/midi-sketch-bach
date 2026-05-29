@@ -208,8 +208,7 @@ TEST(CircleOfFifthsDistanceTest, MixedModesOneStep) {
 TEST(CircleOfFifthsDistanceTest, Symmetry) {
   KeySignature c_major = {Key::C, false};
   KeySignature d_major = {Key::D, false};
-  EXPECT_EQ(circleOfFifthsDistance(c_major, d_major),
-            circleOfFifthsDistance(d_major, c_major));
+  EXPECT_EQ(circleOfFifthsDistance(c_major, d_major), circleOfFifthsDistance(d_major, c_major));
 }
 
 // ---------------------------------------------------------------------------
@@ -227,10 +226,10 @@ TEST(GetCloselyRelatedKeysTest, CMajorIncludes) {
     });
   };
 
-  EXPECT_TRUE(has_key(Key::C, false));   // Self
-  EXPECT_TRUE(has_key(Key::G, false));   // Dominant
-  EXPECT_TRUE(has_key(Key::F, false));   // Subdominant
-  EXPECT_TRUE(has_key(Key::A, true));    // Relative minor
+  EXPECT_TRUE(has_key(Key::C, false));  // Self
+  EXPECT_TRUE(has_key(Key::G, false));  // Dominant
+  EXPECT_TRUE(has_key(Key::F, false));  // Subdominant
+  EXPECT_TRUE(has_key(Key::A, true));   // Relative minor
 }
 
 TEST(GetCloselyRelatedKeysTest, IncludesParallel) {

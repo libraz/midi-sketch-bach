@@ -27,11 +27,8 @@ namespace bach {
 /// @param cadence_ticks Sorted tick positions of cadences.
 /// @return Fully configured ConstraintState.
 ConstraintState setupFormConstraintState(
-    uint8_t num_voices,
-    std::function<std::pair<uint8_t, uint8_t>(uint8_t)> voice_range,
-    Tick total_duration,
-    FuguePhase phase = FuguePhase::Develop,
-    float energy = 0.5f,
+    uint8_t num_voices, std::function<std::pair<uint8_t, uint8_t>(uint8_t)> voice_range,
+    Tick total_duration, FuguePhase phase = FuguePhase::Develop, float energy = 0.5f,
     const std::vector<Tick>& cadence_ticks = {});
 
 /// @brief Lightweight finalize: within-voice overlap dedup.
@@ -67,11 +64,9 @@ void finalizeFormNotes(std::vector<NoteEvent>& notes, uint8_t num_voices);
 /// @param key Musical key (tonic pitch class).
 /// @param scale Scale type for diatonic snapping.
 /// @param max_consecutive Maximum consecutive same-pitch notes (default 2).
-void finalizeFormNotes(
-    std::vector<NoteEvent>& notes, uint8_t num_voices,
-    std::function<std::pair<uint8_t, uint8_t>(uint8_t)> voice_range,
-    Key key, ScaleType scale,
-    int max_consecutive = 2);
+void finalizeFormNotes(std::vector<NoteEvent>& notes, uint8_t num_voices,
+                       std::function<std::pair<uint8_t, uint8_t>(uint8_t)> voice_range, Key key,
+                       ScaleType scale, int max_consecutive = 2);
 
 namespace form_utils {
 
@@ -93,11 +88,10 @@ namespace form_utils {
 /// @param scale         Scale type (default: Major).
 /// @param max_consecutive  Maximum consecutive same-pitch notes before decoration
 ///                         (default: 0 = skip repeat breaking).
-void normalizeAndRedistribute(
-    std::vector<Track>& tracks, uint8_t num_voices,
-    std::function<std::pair<uint8_t, uint8_t>(uint8_t)> voice_range = {},
-    Key key = Key::C, ScaleType scale = ScaleType::Major,
-    int max_consecutive = 0);
+void normalizeAndRedistribute(std::vector<Track>& tracks, uint8_t num_voices,
+                              std::function<std::pair<uint8_t, uint8_t>(uint8_t)> voice_range = {},
+                              Key key = Key::C, ScaleType scale = ScaleType::Major,
+                              int max_consecutive = 0);
 
 }  // namespace form_utils
 

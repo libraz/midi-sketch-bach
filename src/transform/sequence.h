@@ -41,8 +41,8 @@ std::vector<NoteEvent> generateSequence(const std::vector<NoteEvent>& motif, int
 /// @param scale Scale type.
 /// @return All repetitions concatenated (does not include the original motif).
 std::vector<NoteEvent> generateDiatonicSequence(const std::vector<NoteEvent>& motif,
-                                                int repetitions, int degree_step,
-                                                Tick start_tick, Key key, ScaleType scale);
+                                                int repetitions, int degree_step, Tick start_tick,
+                                                Key key, ScaleType scale);
 
 }  // namespace bach
 

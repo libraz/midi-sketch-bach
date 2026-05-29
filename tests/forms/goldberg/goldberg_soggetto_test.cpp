@@ -2,10 +2,10 @@
 
 #include "forms/goldberg/goldberg_soggetto.h"
 
+#include <gtest/gtest.h>
+
 #include <algorithm>
 #include <cstdint>
-
-#include <gtest/gtest.h>
 
 #include "core/basic_types.h"
 #include "core/pitch_utils.h"
@@ -23,9 +23,7 @@ constexpr uint32_t kTestSeed = 42;
 
 class SoggettoTest : public ::testing::Test {
  protected:
-  void SetUp() override {
-    grid_ = GoldbergStructuralGrid::createMajor();
-  }
+  void SetUp() override { grid_ = GoldbergStructuralGrid::createMajor(); }
 
   GoldbergStructuralGrid grid_;
   SoggettoGenerator generator_;
@@ -43,8 +41,7 @@ TEST_F(SoggettoTest, GenerateProducesSubject) {
   params.start_bar = 1;
 
   Subject result = generator_.generate(params, kGMajor, kTriple, kTestSeed);
-  EXPECT_FALSE(result.notes.empty())
-      << "generate() should produce a Subject with non-empty notes";
+  EXPECT_FALSE(result.notes.empty()) << "generate() should produce a Subject with non-empty notes";
 }
 
 // ---------------------------------------------------------------------------
@@ -58,11 +55,10 @@ TEST_F(SoggettoTest, SubjectHasCorrectCharacter) {
   params.start_bar = 1;
 
   for (auto character : {SubjectCharacter::Severe, SubjectCharacter::Playful,
-                          SubjectCharacter::Noble, SubjectCharacter::Restless}) {
+                         SubjectCharacter::Noble, SubjectCharacter::Restless}) {
     params.character = character;
     Subject result = generator_.generate(params, kGMajor, kTriple, kTestSeed);
-    EXPECT_EQ(result.character, character)
-        << "Subject.character should match params.character";
+    EXPECT_EQ(result.character, character) << "Subject.character should match params.character";
   }
 }
 
@@ -110,11 +106,9 @@ TEST_F(SoggettoTest, SevereCharacterSmallLeaps) {
   for (uint32_t seed = 100; seed < 120; ++seed) {
     Subject result = generator_.generate(params, kGMajor, kTriple, seed);
     for (size_t idx = 1; idx < result.notes.size(); ++idx) {
-      int interval_dist = absoluteInterval(result.notes[idx].pitch,
-                                            result.notes[idx - 1].pitch);
+      int interval_dist = absoluteInterval(result.notes[idx].pitch, result.notes[idx - 1].pitch);
       EXPECT_LE(interval_dist, max_leap)
-          << "Severe character leap at note " << idx
-          << " (seed=" << seed << "): " << interval_dist
+          << "Severe character leap at note " << idx << " (seed=" << seed << "): " << interval_dist
           << " exceeds max " << max_leap;
     }
   }
@@ -132,20 +126,17 @@ TEST_F(SoggettoTest, PlayfulCharacterLargerLeaps) {
   params.start_bar = 1;
   params.path_candidates = 16;
 
-  int max_leap = maxLeapForCharacter(SubjectCharacter::Playful);  // 9
+  int max_leap = maxLeapForCharacter(SubjectCharacter::Playful);   // 9
   int severe_max = maxLeapForCharacter(SubjectCharacter::Severe);  // 7
-  EXPECT_GT(max_leap, severe_max)
-      << "Playful should allow wider leaps than Severe";
+  EXPECT_GT(max_leap, severe_max) << "Playful should allow wider leaps than Severe";
 
   // All leaps should still be within the Playful max.
   for (uint32_t seed = 100; seed < 120; ++seed) {
     Subject result = generator_.generate(params, kGMajor, kTriple, seed);
     for (size_t idx = 1; idx < result.notes.size(); ++idx) {
-      int interval_dist = absoluteInterval(result.notes[idx].pitch,
-                                            result.notes[idx - 1].pitch);
+      int interval_dist = absoluteInterval(result.notes[idx].pitch, result.notes[idx - 1].pitch);
       EXPECT_LE(interval_dist, max_leap)
-          << "Playful character leap at note " << idx
-          << " (seed=" << seed << "): " << interval_dist
+          << "Playful character leap at note " << idx << " (seed=" << seed << "): " << interval_dist
           << " exceeds max " << max_leap;
     }
   }
@@ -196,10 +187,8 @@ TEST_F(SoggettoTest, GridAlignmentScoring) {
   note.pitch = 70;  // Bb4
   misaligned.push_back(note);
 
-  float aligned_score = generator_.scoreGridAlignment(
-      aligned, params, kGMajor, kTriple);
-  float misaligned_score = generator_.scoreGridAlignment(
-      misaligned, params, kGMajor, kTriple);
+  float aligned_score = generator_.scoreGridAlignment(aligned, params, kGMajor, kTriple);
+  float misaligned_score = generator_.scoreGridAlignment(misaligned, params, kGMajor, kTriple);
 
   EXPECT_GT(aligned_score, misaligned_score)
       << "Chord-tone-aligned candidate should score higher than misaligned";
@@ -221,8 +210,7 @@ TEST_F(SoggettoTest, CadenceAlignment) {
   // Test across multiple seeds.
   int tonic_endings = 0;
   int total_tests = 20;
-  for (uint32_t seed = 200; seed < 200 + static_cast<uint32_t>(total_tests);
-       ++seed) {
+  for (uint32_t seed = 200; seed < 200 + static_cast<uint32_t>(total_tests); ++seed) {
     Subject result = generator_.generate(params, kGMajor, kTriple, seed);
     if (!result.notes.empty()) {
       int ending_pc = getPitchClass(result.notes.back().pitch);
@@ -254,17 +242,15 @@ TEST_F(SoggettoTest, GoalTonePosition) {
   int climax_in_second_half = 0;
   int total_tests = 20;
 
-  for (uint32_t seed = 300; seed < 300 + static_cast<uint32_t>(total_tests);
-       ++seed) {
+  for (uint32_t seed = 300; seed < 300 + static_cast<uint32_t>(total_tests); ++seed) {
     Subject result = generator_.generate(params, kGMajor, kTriple, seed);
-    if (result.notes.size() < 3) continue;
+    if (result.notes.size() < 3)
+      continue;
 
     // Find the highest pitch and its position.
     auto max_it = std::max_element(
         result.notes.begin(), result.notes.end(),
-        [](const NoteEvent& lhs, const NoteEvent& rhs) {
-          return lhs.pitch < rhs.pitch;
-        });
+        [](const NoteEvent& lhs, const NoteEvent& rhs) { return lhs.pitch < rhs.pitch; });
     Tick climax_tick = max_it->start_tick;
     Tick half_point = result.length_ticks / 2;
 
@@ -299,7 +285,8 @@ TEST_F(SoggettoTest, DifferentSeedsProduceDifferentSubjects) {
     Subject result1 = generator_.generate(params, kGMajor, kTriple, base);
     Subject result2 = generator_.generate(params, kGMajor, kTriple, base + 7777);
 
-    if (result1.notes.empty() || result2.notes.empty()) continue;
+    if (result1.notes.empty() || result2.notes.empty())
+      continue;
 
     size_t compare_count = std::min(result1.notes.size(), result2.notes.size());
     for (size_t idx = 0; idx < compare_count; ++idx) {
@@ -339,13 +326,11 @@ TEST_F(SoggettoTest, PathCandidateSelection) {
 
     params.path_candidates = 2;
     Subject few = generator_.generate(params, kGMajor, kTriple, seed);
-    float score_few = generator_.scoreGridAlignment(
-        few.notes, params, kGMajor, kTriple);
+    float score_few = generator_.scoreGridAlignment(few.notes, params, kGMajor, kTriple);
 
     params.path_candidates = 16;
     Subject many = generator_.generate(params, kGMajor, kTriple, seed);
-    float score_many = generator_.scoreGridAlignment(
-        many.notes, params, kGMajor, kTriple);
+    float score_many = generator_.scoreGridAlignment(many.notes, params, kGMajor, kTriple);
 
     total_score_few += score_few;
     total_score_many += score_many;
@@ -354,8 +339,7 @@ TEST_F(SoggettoTest, PathCandidateSelection) {
   // On average, more candidates should not be worse.
   EXPECT_GE(total_score_many, total_score_few * 0.9f)
       << "More candidates should produce at least comparable quality: "
-      << "few=" << total_score_few / test_count
-      << " many=" << total_score_many / test_count;
+      << "few=" << total_score_few / test_count << " many=" << total_score_many / test_count;
 }
 
 // ---------------------------------------------------------------------------
@@ -393,8 +377,7 @@ TEST_F(SoggettoTest, StartBarAffectsHarmony) {
     any_different = true;
   }
 
-  EXPECT_TRUE(any_different)
-      << "Different start_bar positions should produce different soggetti";
+  EXPECT_TRUE(any_different) << "Different start_bar positions should produce different soggetti";
 }
 
 // ---------------------------------------------------------------------------

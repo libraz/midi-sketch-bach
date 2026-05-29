@@ -17,8 +17,8 @@ namespace {
 // Helper: create a harmonic event
 // ---------------------------------------------------------------------------
 
-static HarmonicEvent makeHarmEvent(Tick tick, Tick end_tick, ChordDegree degree,
-                                   Key key = Key::C, bool is_minor = false) {
+static HarmonicEvent makeHarmEvent(Tick tick, Tick end_tick, ChordDegree degree, Key key = Key::C,
+                                   bool is_minor = false) {
   HarmonicEvent evt;
   evt.tick = tick;
   evt.end_tick = end_tick;

@@ -99,7 +99,7 @@ TEST(CreateBachNoteTest, DefaultOptionsProduceValidNote) {
   auto result = createBachNote(nullptr, nullptr, nullptr, opts);
 
   EXPECT_TRUE(result.accepted);
-  EXPECT_EQ(result.note.pitch, 60);           // Default: C4
+  EXPECT_EQ(result.note.pitch, 60);  // Default: C4
   EXPECT_EQ(result.note.start_tick, 0u);
   EXPECT_EQ(result.note.duration, kTicksPerBeat);  // 480
   EXPECT_EQ(result.note.velocity, 80);
@@ -127,18 +127,12 @@ TEST(CreateBachNoteTest, DifferentVoicesAccepted) {
 TEST(CreateBachNoteTest, AllSourceTypesAccepted) {
   // Phase 0 stub must accept notes regardless of source.
   const BachNoteSource sources[] = {
-      BachNoteSource::FugueSubject,
-      BachNoteSource::FugueAnswer,
-      BachNoteSource::Countersubject,
-      BachNoteSource::EpisodeMaterial,
-      BachNoteSource::FreeCounterpoint,
-      BachNoteSource::CantusFixed,
-      BachNoteSource::Ornament,
-      BachNoteSource::PedalPoint,
-      BachNoteSource::ArpeggioFlow,
-      BachNoteSource::TextureNote,
-      BachNoteSource::GroundBass,
-      BachNoteSource::CollisionAvoid,
+      BachNoteSource::FugueSubject,     BachNoteSource::FugueAnswer,
+      BachNoteSource::Countersubject,   BachNoteSource::EpisodeMaterial,
+      BachNoteSource::FreeCounterpoint, BachNoteSource::CantusFixed,
+      BachNoteSource::Ornament,         BachNoteSource::PedalPoint,
+      BachNoteSource::ArpeggioFlow,     BachNoteSource::TextureNote,
+      BachNoteSource::GroundBass,       BachNoteSource::CollisionAvoid,
       BachNoteSource::PostProcess,
   };
 
@@ -149,17 +143,16 @@ TEST(CreateBachNoteTest, AllSourceTypesAccepted) {
 
     auto result = createBachNote(nullptr, nullptr, nullptr, opts);
 
-    EXPECT_TRUE(result.accepted)
-        << "Source " << bachNoteSourceToString(src) << " rejected";
+    EXPECT_TRUE(result.accepted) << "Source " << bachNoteSourceToString(src) << " rejected";
     EXPECT_EQ(result.provenance.source, src);
   }
 }
 
 TEST(CreateBachNoteTest, ExtremeTickAndDurationValues) {
   BachNoteOptions opts;
-  opts.tick = 1920 * 100;     // Bar 100
-  opts.duration = 1920 * 4;   // 4 bars (whole note in 4/4)
-  opts.desired_pitch = 36;    // C2 (low pedal range)
+  opts.tick = 1920 * 100;    // Bar 100
+  opts.duration = 1920 * 4;  // 4 bars (whole note in 4/4)
+  opts.desired_pitch = 36;   // C2 (low pedal range)
   opts.source = BachNoteSource::PedalPoint;
 
   auto result = createBachNote(nullptr, nullptr, nullptr, opts);
@@ -221,9 +214,9 @@ TEST(BuildMelodicContextTest, TwoNotes_SetsPrevCount2) {
 
   auto ctx = buildMelodicContextFromState(state, 0);
   EXPECT_EQ(ctx.prev_count, 2);
-  EXPECT_EQ(ctx.prev_pitches[0], 67);  // Most recent
-  EXPECT_EQ(ctx.prev_pitches[1], 60);  // Previous
-  EXPECT_EQ(ctx.prev_direction, 1);    // Ascending (60->67)
+  EXPECT_EQ(ctx.prev_pitches[0], 67);      // Most recent
+  EXPECT_EQ(ctx.prev_pitches[1], 60);      // Previous
+  EXPECT_EQ(ctx.prev_direction, 1);        // Ascending (60->67)
   EXPECT_TRUE(ctx.leap_needs_resolution);  // 7 semitones >= 5
 }
 
@@ -313,10 +306,10 @@ TEST(PostValidatePolicyTest, EmptyInputReturnsEmpty) {
   std::vector<NoteEvent> empty;
   PostValidatePolicy policy;
   PostValidateStats stats;
-  auto result = postValidateNotes(std::move(empty), 4,
-                                   KeySignature{Key::C, false},
-                                   std::vector<std::pair<uint8_t, uint8_t>>{{48, 84}, {48, 84}, {36, 72}, {24, 60}},
-                                   &stats, {}, policy);
+  auto result = postValidateNotes(
+      std::move(empty), 4, KeySignature{Key::C, false},
+      std::vector<std::pair<uint8_t, uint8_t>>{{48, 84}, {48, 84}, {36, 72}, {24, 60}}, &stats, {},
+      policy);
   EXPECT_TRUE(result.empty());
   EXPECT_EQ(stats.total_input, 0u);
   EXPECT_EQ(stats.dropped, 0u);
@@ -334,10 +327,9 @@ TEST(PostValidatePolicyTest, NeverDropsNotes) {
 
   PostValidatePolicy policy;
   PostValidateStats stats;
-  auto result = postValidateNotes(std::move(notes), 3,
-                                   KeySignature{Key::C, false},
-                                   std::vector<std::pair<uint8_t, uint8_t>>{{60, 84}, {48, 72}, {36, 60}},
-                                   &stats, {}, policy);
+  auto result = postValidateNotes(
+      std::move(notes), 3, KeySignature{Key::C, false},
+      std::vector<std::pair<uint8_t, uint8_t>>{{60, 84}, {48, 72}, {36, 60}}, &stats, {}, policy);
   EXPECT_EQ(result.size(), 6u);
   EXPECT_EQ(stats.dropped, 0u);
   EXPECT_EQ(stats.total_input, 6u);
@@ -352,10 +344,9 @@ TEST(PostValidatePolicyTest, SubjectPitchesProtected) {
 
   PostValidatePolicy policy;
   PostValidateStats stats;
-  auto result = postValidateNotes(std::move(notes), 2,
-                                   KeySignature{Key::C, false},
-                                   std::vector<std::pair<uint8_t, uint8_t>>{{60, 84}, {48, 72}},
-                                   &stats, {}, policy);
+  auto result = postValidateNotes(std::move(notes), 2, KeySignature{Key::C, false},
+                                  std::vector<std::pair<uint8_t, uint8_t>>{{60, 84}, {48, 72}},
+                                  &stats, {}, policy);
   // Subject pitches must be preserved.
   bool found_subject_0 = false;
   bool found_subject_1 = false;
@@ -379,10 +370,9 @@ TEST(PostValidatePolicyTest, SubjectCoreProtected) {
 
   PostValidatePolicy policy;
   PostValidateStats stats;
-  auto result = postValidateNotes(std::move(notes), 2,
-                                   KeySignature{Key::C, false},
-                                   std::vector<std::pair<uint8_t, uint8_t>>{{60, 84}, {48, 72}},
-                                   &stats, {}, policy);
+  auto result = postValidateNotes(std::move(notes), 2, KeySignature{Key::C, false},
+                                  std::vector<std::pair<uint8_t, uint8_t>>{{60, 84}, {48, 72}},
+                                  &stats, {}, policy);
   ASSERT_EQ(result.size(), 1u);
   EXPECT_EQ(result[0].pitch, 65u);
 }
@@ -393,10 +383,9 @@ TEST(PostValidatePolicyTest, AnswerPitchProtected) {
 
   PostValidatePolicy policy;
   PostValidateStats stats;
-  auto result = postValidateNotes(std::move(notes), 2,
-                                   KeySignature{Key::C, false},
-                                   std::vector<std::pair<uint8_t, uint8_t>>{{60, 84}, {48, 72}},
-                                   &stats, {}, policy);
+  auto result = postValidateNotes(std::move(notes), 2, KeySignature{Key::C, false},
+                                  std::vector<std::pair<uint8_t, uint8_t>>{{60, 84}, {48, 72}},
+                                  &stats, {}, policy);
   ASSERT_EQ(result.size(), 1u);
   EXPECT_EQ(result[0].pitch, 67u);
 }
@@ -407,10 +396,9 @@ TEST(PostValidatePolicyTest, CountersubjectProtected) {
 
   PostValidatePolicy policy;
   PostValidateStats stats;
-  auto result = postValidateNotes(std::move(notes), 2,
-                                   KeySignature{Key::C, false},
-                                   std::vector<std::pair<uint8_t, uint8_t>>{{60, 84}, {48, 72}},
-                                   &stats, {}, policy);
+  auto result = postValidateNotes(std::move(notes), 2, KeySignature{Key::C, false},
+                                  std::vector<std::pair<uint8_t, uint8_t>>{{60, 84}, {48, 72}},
+                                  &stats, {}, policy);
   ASSERT_EQ(result.size(), 1u);
   EXPECT_EQ(result[0].pitch, 64u);
 }
@@ -425,10 +413,9 @@ TEST(PostValidatePolicyTest, RangeClampingApplied) {
 
   PostValidatePolicy policy;
   PostValidateStats stats;
-  auto result = postValidateNotes(std::move(notes), 2,
-                                   KeySignature{Key::C, false},
-                                   std::vector<std::pair<uint8_t, uint8_t>>{{60, 84}, {48, 72}},
-                                   &stats, {}, policy);
+  auto result = postValidateNotes(std::move(notes), 2, KeySignature{Key::C, false},
+                                  std::vector<std::pair<uint8_t, uint8_t>>{{60, 84}, {48, 72}},
+                                  &stats, {}, policy);
   ASSERT_EQ(result.size(), 2u);
   EXPECT_EQ(result[0].pitch, 84u);  // Clamped to upper bound.
   EXPECT_EQ(result[1].pitch, 48u);  // Clamped to lower bound.
@@ -442,10 +429,9 @@ TEST(PostValidatePolicyTest, ImmutableNotesNotRangeClamped) {
 
   PostValidatePolicy policy;
   PostValidateStats stats;
-  auto result = postValidateNotes(std::move(notes), 2,
-                                   KeySignature{Key::C, false},
-                                   std::vector<std::pair<uint8_t, uint8_t>>{{60, 84}, {48, 72}},
-                                   &stats, {}, policy);
+  auto result = postValidateNotes(std::move(notes), 2, KeySignature{Key::C, false},
+                                  std::vector<std::pair<uint8_t, uint8_t>>{{60, 84}, {48, 72}},
+                                  &stats, {}, policy);
   ASSERT_EQ(result.size(), 1u);
   EXPECT_EQ(result[0].pitch, 90u);  // Not clamped: immutable.
 }
@@ -462,10 +448,9 @@ TEST(PostValidatePolicyTest, ParallelRepairDisabled) {
   notes.push_back(makeNote(1, 67, 480, 480, BachNoteSource::FreeCounterpoint));
 
   PostValidateStats stats;
-  auto result = postValidateNotes(std::move(notes), 2,
-                                   KeySignature{Key::C, false},
-                                   std::vector<std::pair<uint8_t, uint8_t>>{{60, 84}, {48, 72}},
-                                   &stats, {}, policy);
+  auto result = postValidateNotes(std::move(notes), 2, KeySignature{Key::C, false},
+                                  std::vector<std::pair<uint8_t, uint8_t>>{{60, 84}, {48, 72}},
+                                  &stats, {}, policy);
   // With repair disabled, parallel 5ths may remain. No notes dropped.
   EXPECT_EQ(result.size(), 4u);
   EXPECT_EQ(stats.dropped, 0u);
@@ -479,10 +464,9 @@ TEST(PostValidatePolicyTest, StatsTrackShiftMagnitude) {
 
   PostValidatePolicy policy;
   PostValidateStats stats;
-  auto result = postValidateNotes(std::move(notes), 2,
-                                   KeySignature{Key::C, false},
-                                   std::vector<std::pair<uint8_t, uint8_t>>{{60, 84}, {48, 72}},
-                                   &stats, {}, policy);
+  auto result = postValidateNotes(std::move(notes), 2, KeySignature{Key::C, false},
+                                  std::vector<std::pair<uint8_t, uint8_t>>{{60, 84}, {48, 72}},
+                                  &stats, {}, policy);
   EXPECT_GE(stats.max_shift_semitones, 6);
   EXPECT_GT(stats.avg_shift_semitones, 0.0f);
 }
@@ -494,14 +478,13 @@ TEST(PostValidatePolicyTest, FunctionBasedRangeOverload) {
 
   PostValidatePolicy policy;
   PostValidateStats stats;
-  auto range_fn = [](uint8_t voice,
-                     Tick /*tick*/) -> std::pair<uint8_t, uint8_t> {
-    if (voice == 0) return {60, 84};
+  auto range_fn = [](uint8_t voice, Tick /*tick*/) -> std::pair<uint8_t, uint8_t> {
+    if (voice == 0)
+      return {60, 84};
     return {48, 72};
   };
-  auto result = postValidateNotes(std::move(notes), 2,
-                                   KeySignature{Key::C, false},
-                                   range_fn, &stats, {}, policy);
+  auto result = postValidateNotes(std::move(notes), 2, KeySignature{Key::C, false}, range_fn,
+                                  &stats, {}, policy);
   EXPECT_EQ(result.size(), 2u);
   EXPECT_EQ(stats.dropped, 0u);
 }
@@ -521,17 +504,15 @@ TEST(PostValidatePolicyTest, VectorAndFunctionOverloadsProduceSameResult) {
   PostValidatePolicy policy;
   PostValidateStats stats_vec, stats_fn;
 
-  auto result_vec = postValidateNotes(make_test_notes(), 2,
-                                       KeySignature{Key::C, false},
-                                       ranges, &stats_vec, {}, policy);
-  auto range_fn = [&ranges](uint8_t voice,
-                             Tick /*tick*/) -> std::pair<uint8_t, uint8_t> {
-    if (voice < ranges.size()) return ranges[voice];
+  auto result_vec = postValidateNotes(make_test_notes(), 2, KeySignature{Key::C, false}, ranges,
+                                      &stats_vec, {}, policy);
+  auto range_fn = [&ranges](uint8_t voice, Tick /*tick*/) -> std::pair<uint8_t, uint8_t> {
+    if (voice < ranges.size())
+      return ranges[voice];
     return {0, 127};
   };
-  auto result_fn = postValidateNotes(make_test_notes(), 2,
-                                      KeySignature{Key::C, false},
-                                      range_fn, &stats_fn, {}, policy);
+  auto result_fn = postValidateNotes(make_test_notes(), 2, KeySignature{Key::C, false}, range_fn,
+                                     &stats_fn, {}, policy);
 
   ASSERT_EQ(result_vec.size(), result_fn.size());
   for (size_t idx = 0; idx < result_vec.size(); ++idx) {
@@ -579,11 +560,9 @@ TEST(PostValidateLeapThreshold, SopranoLeapAbove10thReoctaved) {
   notes.push_back(makeNote(0, 78, 480, 480, BachNoteSource::FreeCounterpoint));
 
   PostValidateStats stats;
-  auto result = postValidateNotes(std::move(notes), 4,
-                                   KeySignature{Key::C, false},
-                                   std::vector<std::pair<uint8_t, uint8_t>>{
-                                       {48, 96}, {48, 84}, {36, 72}, {24, 60}},
-                                   &stats);
+  auto result = postValidateNotes(
+      std::move(notes), 4, KeySignature{Key::C, false},
+      std::vector<std::pair<uint8_t, uint8_t>>{{48, 96}, {48, 84}, {36, 72}, {24, 60}}, &stats);
   // The soprano note at pitch 78 should be re-octaved to F#4=66.
   bool found_soprano_reoctaved = false;
   for (const auto& note : result) {
@@ -601,15 +580,13 @@ TEST(PostValidateLeapThreshold, BassOctaveLeapPermitted) {
   // Bass voice (last voice, index 3 in a 4-voice texture) with octave leap
   // (12 semitones) should NOT be re-octaved -- octave leaps are idiomatic.
   std::vector<NoteEvent> notes;
-  notes.push_back(makeNote(3, 36, 0, 480, BachNoteSource::FreeCounterpoint));   // C2
-  notes.push_back(makeNote(3, 48, 480, 480, BachNoteSource::FreeCounterpoint)); // C3 (octave up)
+  notes.push_back(makeNote(3, 36, 0, 480, BachNoteSource::FreeCounterpoint));    // C2
+  notes.push_back(makeNote(3, 48, 480, 480, BachNoteSource::FreeCounterpoint));  // C3 (octave up)
 
   PostValidateStats stats;
-  auto result = postValidateNotes(std::move(notes), 4,
-                                   KeySignature{Key::C, false},
-                                   std::vector<std::pair<uint8_t, uint8_t>>{
-                                       {60, 84}, {48, 72}, {36, 60}, {24, 60}},
-                                   &stats);
+  auto result = postValidateNotes(
+      std::move(notes), 4, KeySignature{Key::C, false},
+      std::vector<std::pair<uint8_t, uint8_t>>{{60, 84}, {48, 72}, {36, 60}, {24, 60}}, &stats);
   // Bass octave leap (12st < 17st threshold) should be preserved.
   for (const auto& note : result) {
     if (note.voice == 3 && note.start_tick == 480) {
@@ -621,20 +598,17 @@ TEST(PostValidateLeapThreshold, BassOctaveLeapPermitted) {
 TEST(PostValidateLeapThreshold, BassLeapAbove11thReoctaved) {
   // Bass (voice 3 in 4-voice) with 18 semitones > 17 threshold -> re-octave.
   std::vector<NoteEvent> notes;
-  notes.push_back(makeNote(3, 36, 0, 480, BachNoteSource::FreeCounterpoint));   // C2
-  notes.push_back(makeNote(3, 54, 480, 480, BachNoteSource::FreeCounterpoint)); // F#3 (18st)
+  notes.push_back(makeNote(3, 36, 0, 480, BachNoteSource::FreeCounterpoint));    // C2
+  notes.push_back(makeNote(3, 54, 480, 480, BachNoteSource::FreeCounterpoint));  // F#3 (18st)
 
   PostValidateStats stats;
-  auto result = postValidateNotes(std::move(notes), 4,
-                                   KeySignature{Key::C, false},
-                                   std::vector<std::pair<uint8_t, uint8_t>>{
-                                       {60, 84}, {48, 72}, {36, 60}, {24, 60}},
-                                   &stats);
+  auto result = postValidateNotes(
+      std::move(notes), 4, KeySignature{Key::C, false},
+      std::vector<std::pair<uint8_t, uint8_t>>{{60, 84}, {48, 72}, {36, 60}, {24, 60}}, &stats);
   for (const auto& note : result) {
     if (note.voice == 3 && note.start_tick == 480) {
       int interval = std::abs(static_cast<int>(note.pitch) - 36);
-      EXPECT_LE(interval, 17)
-          << "Bass interval " << interval << " exceeds 11th threshold";
+      EXPECT_LE(interval, 17) << "Bass interval " << interval << " exceeds 11th threshold";
     }
   }
 }
@@ -694,8 +668,7 @@ TEST(PostValidateLeapThreshold, StylusPhantasticusWidensThreshold) {
   auto make_test = [](uint8_t flexible_pitch) {
     std::vector<NoteEvent> notes;
     notes.push_back(makeNote(0, 72, 0, 480, BachNoteSource::SubjectCore));
-    notes.push_back(makeNote(0, flexible_pitch, 480, 480,
-                             BachNoteSource::EpisodeMaterial));
+    notes.push_back(makeNote(0, flexible_pitch, 480, 480, BachNoteSource::EpisodeMaterial));
     return notes;
   };
 
@@ -703,26 +676,25 @@ TEST(PostValidateLeapThreshold, StylusPhantasticusWidensThreshold) {
   // After collision resolver (Flexible, 6-stage cascade), the pitch may be
   // adjusted. Phase 3b then re-octaves if the result still exceeds threshold.
   PostValidateStats stats_no, stats_yes;
-  auto result_no = postValidateNotes(make_test(50), 1,
-                                      KeySignature{Key::C, false},
-                                      std::vector<std::pair<uint8_t, uint8_t>>{{36, 96}},
-                                      &stats_no,
-                                      /*protection_overrides=*/{},
-                                      /*stylus_phantasticus=*/false);
-  auto result_yes = postValidateNotes(make_test(50), 1,
-                                       KeySignature{Key::C, false},
-                                       std::vector<std::pair<uint8_t, uint8_t>>{{36, 96}},
-                                       &stats_yes,
-                                       /*protection_overrides=*/{},
-                                       /*stylus_phantasticus=*/true);
+  auto result_no = postValidateNotes(make_test(50), 1, KeySignature{Key::C, false},
+                                     std::vector<std::pair<uint8_t, uint8_t>>{{36, 96}}, &stats_no,
+                                     /*protection_overrides=*/{},
+                                     /*stylus_phantasticus=*/false);
+  auto result_yes =
+      postValidateNotes(make_test(50), 1, KeySignature{Key::C, false},
+                        std::vector<std::pair<uint8_t, uint8_t>>{{36, 96}}, &stats_yes,
+                        /*protection_overrides=*/{},
+                        /*stylus_phantasticus=*/true);
 
   // Find the second note in each result.
   uint8_t pitch_no = 0, pitch_yes = 0;
   for (const auto& note : result_no) {
-    if (note.voice == 0 && note.start_tick == 480) pitch_no = note.pitch;
+    if (note.voice == 0 && note.start_tick == 480)
+      pitch_no = note.pitch;
   }
   for (const auto& note : result_yes) {
-    if (note.voice == 0 && note.start_tick == 480) pitch_yes = note.pitch;
+    if (note.voice == 0 && note.start_tick == 480)
+      pitch_yes = note.pitch;
   }
 
   // Both should produce valid results.
@@ -733,10 +705,8 @@ TEST(PostValidateLeapThreshold, StylusPhantasticusWidensThreshold) {
   // The phantasticus result should allow a larger (or equal) interval.
   int interval_no = std::abs(static_cast<int>(pitch_no) - 72);
   int interval_yes = std::abs(static_cast<int>(pitch_yes) - 72);
-  EXPECT_LE(interval_no, 16)
-      << "Without phantasticus, Phase 3b should enforce <=16st";
-  EXPECT_GE(interval_yes, interval_no)
-      << "Phantasticus should allow at least as wide an interval";
+  EXPECT_LE(interval_no, 16) << "Without phantasticus, Phase 3b should enforce <=16st";
+  EXPECT_GE(interval_yes, interval_no) << "Phantasticus should allow at least as wide an interval";
 }
 
 TEST(PostValidateLeapThreshold, StylusPhantasticusStillCapsExtremeLeaps) {
@@ -747,18 +717,15 @@ TEST(PostValidateLeapThreshold, StylusPhantasticusStillCapsExtremeLeaps) {
   notes.push_back(makeNote(0, 80, 480, 480, BachNoteSource::FreeCounterpoint));
 
   PostValidateStats stats;
-  auto result = postValidateNotes(std::move(notes), 4,
-                                   KeySignature{Key::C, false},
-                                   std::vector<std::pair<uint8_t, uint8_t>>{
-                                       {48, 96}, {48, 84}, {36, 72}, {24, 60}},
-                                   &stats,
-                                   /*protection_overrides=*/{},
-                                   /*stylus_phantasticus=*/true);
+  auto result = postValidateNotes(
+      std::move(notes), 4, KeySignature{Key::C, false},
+      std::vector<std::pair<uint8_t, uint8_t>>{{48, 96}, {48, 84}, {36, 72}, {24, 60}}, &stats,
+      /*protection_overrides=*/{},
+      /*stylus_phantasticus=*/true);
   for (const auto& note : result) {
     if (note.voice == 0 && note.start_tick == 480) {
       int interval = std::abs(static_cast<int>(note.pitch) - 60);
-      EXPECT_LE(interval, 19)
-          << "Even stylus_phantasticus caps at 12th (19st), got " << interval;
+      EXPECT_LE(interval, 19) << "Even stylus_phantasticus caps at 12th (19st), got " << interval;
     }
   }
 }

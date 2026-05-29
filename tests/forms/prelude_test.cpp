@@ -177,8 +177,8 @@ TEST(PreludeTest, AllNotesVelocity80) {
   for (const auto& track : result.tracks) {
     for (const auto& note : track.notes) {
       EXPECT_EQ(note.velocity, 80u)
-          << "Organ velocity must be 80, found " << static_cast<int>(note.velocity)
-          << " in track " << track.name;
+          << "Organ velocity must be 80, found " << static_cast<int>(note.velocity) << " in track "
+          << track.name;
     }
   }
 }
@@ -239,27 +239,21 @@ TEST(PreludeTest, NotesWithinOrganRange) {
 
   // Voice 0 (Great): 60-88
   for (const auto& note : result.tracks[0].notes) {
-    EXPECT_GE(note.pitch, 60)
-        << "Great pitch below range: " << static_cast<int>(note.pitch);
-    EXPECT_LE(note.pitch, 88)
-        << "Great pitch above range: " << static_cast<int>(note.pitch);
+    EXPECT_GE(note.pitch, 60) << "Great pitch below range: " << static_cast<int>(note.pitch);
+    EXPECT_LE(note.pitch, 88) << "Great pitch above range: " << static_cast<int>(note.pitch);
   }
 
   // Voice 1 (Swell): 52-76
   for (const auto& note : result.tracks[1].notes) {
-    EXPECT_GE(note.pitch, 52)
-        << "Swell pitch below range: " << static_cast<int>(note.pitch);
-    EXPECT_LE(note.pitch, 76)
-        << "Swell pitch above range: " << static_cast<int>(note.pitch);
+    EXPECT_GE(note.pitch, 52) << "Swell pitch below range: " << static_cast<int>(note.pitch);
+    EXPECT_LE(note.pitch, 76) << "Swell pitch above range: " << static_cast<int>(note.pitch);
   }
 
   // Voice 2 (Positiv): 43-64
   if (result.tracks.size() > 2) {
     for (const auto& note : result.tracks[2].notes) {
-      EXPECT_GE(note.pitch, 43)
-          << "Positiv pitch below range: " << static_cast<int>(note.pitch);
-      EXPECT_LE(note.pitch, 64)
-          << "Positiv pitch above range: " << static_cast<int>(note.pitch);
+      EXPECT_GE(note.pitch, 43) << "Positiv pitch below range: " << static_cast<int>(note.pitch);
+      EXPECT_LE(note.pitch, 64) << "Positiv pitch above range: " << static_cast<int>(note.pitch);
     }
   }
 
@@ -345,8 +339,7 @@ TEST(PreludeTest, DeterministicWithSameSeed) {
   for (size_t track_idx = 0; track_idx < result1.tracks.size(); ++track_idx) {
     const auto& notes1 = result1.tracks[track_idx].notes;
     const auto& notes2 = result2.tracks[track_idx].notes;
-    ASSERT_EQ(notes1.size(), notes2.size())
-        << "Track " << track_idx << " note count differs";
+    ASSERT_EQ(notes1.size(), notes2.size()) << "Track " << track_idx << " note count differs";
 
     for (size_t note_idx = 0; note_idx < notes1.size(); ++note_idx) {
       EXPECT_EQ(notes1[note_idx].start_tick, notes2[note_idx].start_tick)
@@ -406,17 +399,14 @@ TEST(PreludeTest, KeyIsRespected_ScaleTones) {
   for (const auto& note : top_notes) {
     int pitch_class = getPitchClass(note.pitch);
     // C major pitch classes: C(0), D(2), E(4), F(5), G(7), A(9), B(11).
-    if (pitch_class == 0 || pitch_class == 2 || pitch_class == 4 ||
-        pitch_class == 5 || pitch_class == 7 || pitch_class == 9 ||
-        pitch_class == 11) {
+    if (pitch_class == 0 || pitch_class == 2 || pitch_class == 4 || pitch_class == 5 ||
+        pitch_class == 7 || pitch_class == 9 || pitch_class == 11) {
       ++scale_tone_count;
     }
   }
 
-  float ratio =
-      static_cast<float>(scale_tone_count) / static_cast<float>(top_notes.size());
-  EXPECT_GE(ratio, 0.80f)
-      << "Expected >= 80% C major scale tones, got " << (ratio * 100.0f) << "%";
+  float ratio = static_cast<float>(scale_tone_count) / static_cast<float>(top_notes.size());
+  EXPECT_GE(ratio, 0.80f) << "Expected >= 80% C major scale tones, got " << (ratio * 100.0f) << "%";
 }
 
 TEST(PreludeTest, MinorKey_GeneratesSuccessfully) {
@@ -496,8 +486,7 @@ TEST(PreludeTest, AllNotesHavePositiveDuration) {
   for (const auto& track : result.tracks) {
     for (const auto& note : track.notes) {
       EXPECT_GT(note.duration, 0u)
-          << "Note at tick " << note.start_tick << " has zero duration in track "
-          << track.name;
+          << "Note at tick " << note.start_tick << " has zero duration in track " << track.name;
     }
   }
 }
@@ -564,7 +553,8 @@ TEST(PreludeTest, MiddleVoice_NoRepeating4NotePattern) {
   ASSERT_GE(result.tracks.size(), 2u);
 
   const auto& notes = result.tracks[1].notes;
-  if (notes.size() < 12) return;  // Not enough notes to check.
+  if (notes.size() < 12)
+    return;  // Not enough notes to check.
 
   // Build per-bar pitch sequences.
   Tick total = result.total_duration_ticks;
@@ -581,13 +571,11 @@ TEST(PreludeTest, MiddleVoice_NoRepeating4NotePattern) {
   // Check for 3+ consecutive bars with identical pitch patterns.
   int consecutive_same = 1;
   for (size_t bar_idx = 1; bar_idx < bar_pitches.size(); ++bar_idx) {
-    if (!bar_pitches[bar_idx].empty() &&
-        bar_pitches[bar_idx] == bar_pitches[bar_idx - 1]) {
+    if (!bar_pitches[bar_idx].empty() && bar_pitches[bar_idx] == bar_pitches[bar_idx - 1]) {
       ++consecutive_same;
       EXPECT_LT(consecutive_same, 3)
-          << "Middle voice has identical pitch pattern repeating for "
-          << consecutive_same << " consecutive bars starting at bar "
-          << (bar_idx - consecutive_same + 1);
+          << "Middle voice has identical pitch pattern repeating for " << consecutive_same
+          << " consecutive bars starting at bar " << (bar_idx - consecutive_same + 1);
     } else {
       consecutive_same = 1;
     }
@@ -619,7 +607,8 @@ TEST(PreludeTest, BassVoice_PitchVariety) {
     bool first = true;
 
     for (const auto& note : result.tracks[2].notes) {
-      if (note.start_tick >= kBar8End) break;
+      if (note.start_tick >= kBar8End)
+        break;
       unique_pitches.insert(note.pitch);
 
       if (first) {
@@ -629,21 +618,22 @@ TEST(PreludeTest, BassVoice_PitchVariety) {
         if (note.pitch == prev_pitch) {
           ++current_run;
         } else {
-          if (current_run > max_same_run) max_same_run = current_run;
+          if (current_run > max_same_run)
+            max_same_run = current_run;
           current_run = 1;
         }
         prev_pitch = note.pitch;
       }
     }
-    if (current_run > max_same_run) max_same_run = current_run;
+    if (current_run > max_same_run)
+      max_same_run = current_run;
 
     EXPECT_GE(unique_pitches.size(), 4u)
         << "Bass voice (seed=" << kTestSeeds[seed_idx]
         << ") has too few unique pitches: " << unique_pitches.size();
 
-    EXPECT_LT(max_same_run, 8)
-        << "Bass voice (seed=" << kTestSeeds[seed_idx]
-        << ") has same-note run of " << max_same_run;
+    EXPECT_LT(max_same_run, 8) << "Bass voice (seed=" << kTestSeeds[seed_idx]
+                               << ") has same-note run of " << max_same_run;
   }
 }
 
@@ -674,9 +664,8 @@ TEST(PreludeTest, MiddleVoice_QuantizedDurationsOnly) {
         break;
       }
     }
-    EXPECT_TRUE(valid)
-        << "Middle voice note at tick " << note.start_tick
-        << " has non-standard duration " << note.duration;
+    EXPECT_TRUE(valid) << "Middle voice note at tick " << note.start_tick
+                       << " has non-standard duration " << note.duration;
   }
 }
 
@@ -701,9 +690,8 @@ TEST(PreludeTest, BassVoice_QuantizedDurationsOnly) {
         break;
       }
     }
-    EXPECT_TRUE(valid)
-        << "Bass voice note at tick " << note.start_tick
-        << " has non-standard duration " << note.duration;
+    EXPECT_TRUE(valid) << "Bass voice note at tick " << note.start_tick
+                       << " has non-standard duration " << note.duration;
   }
 }
 
@@ -767,8 +755,7 @@ TEST(PreludeTest, Perpetual_HasOpeningTonicPedal) {
   if (pedal_count > 1) {
     uint8_t first_pedal_pitch = 0;
     for (const auto& note : bass_notes) {
-      if (note.start_tick < kTicksPerBar * 3 &&
-          note.source == BachNoteSource::PedalPoint) {
+      if (note.start_tick < kTicksPerBar * 3 && note.source == BachNoteSource::PedalPoint) {
         if (first_pedal_pitch == 0) {
           first_pedal_pitch = note.pitch;
         } else {
@@ -780,8 +767,7 @@ TEST(PreludeTest, Perpetual_HasOpeningTonicPedal) {
 
     // Verify the pedal pitch is the tonic pitch class (C = 0).
     EXPECT_EQ(first_pedal_pitch % 12, 0)
-        << "Pedal pitch should be C (tonic), got "
-        << static_cast<int>(first_pedal_pitch);
+        << "Pedal pitch should be C (tonic), got " << static_cast<int>(first_pedal_pitch);
   }
 }
 
@@ -815,12 +801,10 @@ TEST(PreludeTest, Perpetual_OpeningPedalInDMinor) {
 
   const auto& bass_notes = result.tracks[2].notes;
   for (const auto& note : bass_notes) {
-    if (note.start_tick < kTicksPerBar * 3 &&
-        note.source == BachNoteSource::PedalPoint) {
+    if (note.start_tick < kTicksPerBar * 3 && note.source == BachNoteSource::PedalPoint) {
       // D = pitch class 2.
       EXPECT_EQ(note.pitch % 12, 2)
-          << "Pedal should be D in D minor, got "
-          << static_cast<int>(note.pitch);
+          << "Pedal should be D in D minor, got " << static_cast<int>(note.pitch);
     }
   }
 }
@@ -850,8 +834,7 @@ TEST(PreludeTest, TextureThinning_InnerVoiceShorterAtBoundaries) {
 
   for (const auto& note : mid_notes) {
     int bar_idx = static_cast<int>(note.start_tick / kTicksPerBar);
-    int beat_in_bar = static_cast<int>(
-        (note.start_tick % kTicksPerBar) / kTicksPerBeat);
+    int beat_in_bar = static_cast<int>((note.start_tick % kTicksPerBar) / kTicksPerBeat);
     bool is_phrase_end = (bar_idx % 2 == 1) && (beat_in_bar == 3);
 
     if (is_phrase_end) {
@@ -865,10 +848,9 @@ TEST(PreludeTest, TextureThinning_InnerVoiceShorterAtBoundaries) {
 
   // Both categories should have notes.
   if (boundary_count > 0 && normal_count > 0) {
-    float avg_boundary = static_cast<float>(total_boundary_dur) /
-                         static_cast<float>(boundary_count);
-    float avg_normal = static_cast<float>(total_normal_dur) /
-                       static_cast<float>(normal_count);
+    float avg_boundary =
+        static_cast<float>(total_boundary_dur) / static_cast<float>(boundary_count);
+    float avg_normal = static_cast<float>(total_normal_dur) / static_cast<float>(normal_count);
 
     // Boundary durations should be shorter on average.
     EXPECT_LE(avg_boundary, avg_normal)
@@ -889,14 +871,13 @@ TEST(PreludeTest, TextureThinning_OuterVoicesUnchanged) {
 
   // Soprano (voice 0): check all notes have positive duration.
   for (const auto& note : result.tracks[0].notes) {
-    EXPECT_GT(note.duration, 0u)
-        << "Soprano note at tick " << note.start_tick << " has zero duration";
+    EXPECT_GT(note.duration, 0u) << "Soprano note at tick " << note.start_tick
+                                 << " has zero duration";
   }
 
   // Bass (voice 2): check quantized durations still hold.
   for (const auto& note : result.tracks[2].notes) {
-    EXPECT_GT(note.duration, 0u)
-        << "Bass note at tick " << note.start_tick << " has zero duration";
+    EXPECT_GT(note.duration, 0u) << "Bass note at tick " << note.start_tick << " has zero duration";
   }
 }
 
@@ -974,8 +955,7 @@ TEST(PreludeTest, RhythmDensityShaping_CadenceConvergence) {
     if (note.start_tick >= cadence_start) {
       ++cadence_notes;
       EXPECT_GT(note.duration, 0u)
-          << "Cadential note at tick " << note.start_tick
-          << " has zero duration";
+          << "Cadential note at tick " << note.start_tick << " has zero duration";
     }
   }
   EXPECT_GT(cadence_notes, 0) << "Should have notes in cadential section";
@@ -995,8 +975,10 @@ TEST(PreludeTest, Perpetual_RhythmShapingPresent) {
   Tick total = result.total_duration_ticks;
   bool has_early = false, has_late = false;
   for (const auto& note : result.tracks[0].notes) {
-    if (note.start_tick < total / 4) has_early = true;
-    if (note.start_tick > total * 3 / 4) has_late = true;
+    if (note.start_tick < total / 4)
+      has_early = true;
+    if (note.start_tick > total * 3 / 4)
+      has_late = true;
   }
   EXPECT_TRUE(has_early) << "Should have notes in early section";
   EXPECT_TRUE(has_late) << "Should have notes in late section";

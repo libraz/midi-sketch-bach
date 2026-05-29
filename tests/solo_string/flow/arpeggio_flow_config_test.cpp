@@ -38,35 +38,21 @@ TEST(ArpeggioFlowConfigTest, CadenceDefaults) {
 
 TEST(ValidateGlobalArcConfigTest, ValidThreeSections) {
   GlobalArcConfig config;
-  config.phase_assignment = {
-    {0, ArcPhase::Ascent},
-    {1, ArcPhase::Peak},
-    {2, ArcPhase::Descent}
-  };
+  config.phase_assignment = {{0, ArcPhase::Ascent}, {1, ArcPhase::Peak}, {2, ArcPhase::Descent}};
   EXPECT_TRUE(validateGlobalArcConfig(config));
 }
 
 TEST(ValidateGlobalArcConfigTest, ValidSixSections) {
   GlobalArcConfig config;
-  config.phase_assignment = {
-    {0, ArcPhase::Ascent},
-    {1, ArcPhase::Ascent},
-    {2, ArcPhase::Ascent},
-    {3, ArcPhase::Peak},
-    {4, ArcPhase::Descent},
-    {5, ArcPhase::Descent}
-  };
+  config.phase_assignment = {{0, ArcPhase::Ascent}, {1, ArcPhase::Ascent},  {2, ArcPhase::Ascent},
+                             {3, ArcPhase::Peak},   {4, ArcPhase::Descent}, {5, ArcPhase::Descent}};
   EXPECT_TRUE(validateGlobalArcConfig(config));
 }
 
 TEST(ValidateGlobalArcConfigTest, ValidMultipleAscentBeforePeak) {
   GlobalArcConfig config;
   config.phase_assignment = {
-    {0, ArcPhase::Ascent},
-    {1, ArcPhase::Ascent},
-    {2, ArcPhase::Peak},
-    {3, ArcPhase::Descent}
-  };
+      {0, ArcPhase::Ascent}, {1, ArcPhase::Ascent}, {2, ArcPhase::Peak}, {3, ArcPhase::Descent}};
   EXPECT_TRUE(validateGlobalArcConfig(config));
 }
 
@@ -81,63 +67,40 @@ TEST(ValidateGlobalArcConfigTest, EmptyConfigInvalid) {
 
 TEST(ValidateGlobalArcConfigTest, NoPeakInvalid) {
   GlobalArcConfig config;
-  config.phase_assignment = {
-    {0, ArcPhase::Ascent},
-    {1, ArcPhase::Ascent},
-    {2, ArcPhase::Descent}
-  };
+  config.phase_assignment = {{0, ArcPhase::Ascent}, {1, ArcPhase::Ascent}, {2, ArcPhase::Descent}};
   EXPECT_FALSE(validateGlobalArcConfig(config));
 }
 
 TEST(ValidateGlobalArcConfigTest, TwoPeaksInvalid) {
   GlobalArcConfig config;
   config.phase_assignment = {
-    {0, ArcPhase::Ascent},
-    {1, ArcPhase::Peak},
-    {2, ArcPhase::Peak},
-    {3, ArcPhase::Descent}
-  };
+      {0, ArcPhase::Ascent}, {1, ArcPhase::Peak}, {2, ArcPhase::Peak}, {3, ArcPhase::Descent}};
   EXPECT_FALSE(validateGlobalArcConfig(config));
 }
 
 TEST(ValidateGlobalArcConfigTest, ReversedOrderInvalid) {
   // Descent before Ascent
   GlobalArcConfig config;
-  config.phase_assignment = {
-    {0, ArcPhase::Descent},
-    {1, ArcPhase::Peak},
-    {2, ArcPhase::Ascent}
-  };
+  config.phase_assignment = {{0, ArcPhase::Descent}, {1, ArcPhase::Peak}, {2, ArcPhase::Ascent}};
   EXPECT_FALSE(validateGlobalArcConfig(config));
 }
 
 TEST(ValidateGlobalArcConfigTest, DescentBeforePeakInvalid) {
   GlobalArcConfig config;
-  config.phase_assignment = {
-    {0, ArcPhase::Ascent},
-    {1, ArcPhase::Descent},
-    {2, ArcPhase::Peak}
-  };
+  config.phase_assignment = {{0, ArcPhase::Ascent}, {1, ArcPhase::Descent}, {2, ArcPhase::Peak}};
   EXPECT_FALSE(validateGlobalArcConfig(config));
 }
 
 TEST(ValidateGlobalArcConfigTest, StartsWithPeakInvalid) {
   GlobalArcConfig config;
-  config.phase_assignment = {
-    {0, ArcPhase::Peak},
-    {1, ArcPhase::Descent}
-  };
+  config.phase_assignment = {{0, ArcPhase::Peak}, {1, ArcPhase::Descent}};
   EXPECT_FALSE(validateGlobalArcConfig(config));
 }
 
 TEST(ValidateGlobalArcConfigTest, AscentAfterDescentInvalid) {
   GlobalArcConfig config;
   config.phase_assignment = {
-    {0, ArcPhase::Ascent},
-    {1, ArcPhase::Peak},
-    {2, ArcPhase::Descent},
-    {3, ArcPhase::Ascent}
-  };
+      {0, ArcPhase::Ascent}, {1, ArcPhase::Peak}, {2, ArcPhase::Descent}, {3, ArcPhase::Ascent}};
   EXPECT_FALSE(validateGlobalArcConfig(config));
 }
 
@@ -206,8 +169,7 @@ TEST(CreateDefaultArcConfigTest, AlwaysProducesValidConfig) {
   // Test a range of section counts to ensure all produce valid configs.
   for (int num = 3; num <= 12; ++num) {
     auto config = createDefaultArcConfig(num);
-    EXPECT_TRUE(validateGlobalArcConfig(config))
-        << "Invalid config for num_sections=" << num;
+    EXPECT_TRUE(validateGlobalArcConfig(config)) << "Invalid config for num_sections=" << num;
   }
 }
 
@@ -217,7 +179,6 @@ TEST(CreateDefaultArcConfigTest, SectionIdsAreSequential) {
     EXPECT_EQ(config.phase_assignment[idx].first, static_cast<SectionId>(idx));
   }
 }
-
 
 // ---------------------------------------------------------------------------
 // validateGlobalArcConfigReport
@@ -247,7 +208,10 @@ TEST(ValidateGlobalArcConfigTest, ReportFirstNotAscent) {
   EXPECT_TRUE(report.hasCritical());
   bool found = false;
   for (const auto& issue : report.issues) {
-    if (issue.rule == "first_not_ascent") { found = true; break; }
+    if (issue.rule == "first_not_ascent") {
+      found = true;
+      break;
+    }
   }
   EXPECT_TRUE(found);
 }
@@ -259,7 +223,10 @@ TEST(ValidateGlobalArcConfigTest, ReportPhaseRegression) {
   EXPECT_TRUE(report.hasCritical());
   bool found = false;
   for (const auto& issue : report.issues) {
-    if (issue.rule == "phase_regression") { found = true; break; }
+    if (issue.rule == "phase_regression") {
+      found = true;
+      break;
+    }
   }
   EXPECT_TRUE(found);
 }
@@ -267,13 +234,15 @@ TEST(ValidateGlobalArcConfigTest, ReportPhaseRegression) {
 TEST(ValidateGlobalArcConfigTest, ReportWrongPeakCount) {
   GlobalArcConfig config;
   config.phase_assignment = {
-    {0, ArcPhase::Ascent}, {1, ArcPhase::Peak}, {2, ArcPhase::Peak}, {3, ArcPhase::Descent}
-  };
+      {0, ArcPhase::Ascent}, {1, ArcPhase::Peak}, {2, ArcPhase::Peak}, {3, ArcPhase::Descent}};
   auto report = validateGlobalArcConfigReport(config);
   EXPECT_TRUE(report.hasCritical());
   bool found = false;
   for (const auto& issue : report.issues) {
-    if (issue.rule == "peak_count") { found = true; break; }
+    if (issue.rule == "peak_count") {
+      found = true;
+      break;
+    }
   }
   EXPECT_TRUE(found);
 }

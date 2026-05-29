@@ -2,11 +2,11 @@
 
 #include "forms/goldberg/variations/goldberg_overture.h"
 
+#include <gtest/gtest.h>
+
 #include <algorithm>
 #include <cstdint>
 #include <numeric>
-
-#include <gtest/gtest.h>
 
 #include "core/basic_types.h"
 #include "forms/goldberg/goldberg_structural_grid.h"
@@ -28,9 +28,7 @@ constexpr int kSectionBars = 16;
 
 class OvertureTest : public ::testing::Test {
  protected:
-  void SetUp() override {
-    grid_ = GoldbergStructuralGrid::createMajor();
-  }
+  void SetUp() override { grid_ = GoldbergStructuralGrid::createMajor(); }
 
   GoldbergStructuralGrid grid_;
   OvertureGenerator generator_;
@@ -43,8 +41,7 @@ class OvertureTest : public ::testing::Test {
 TEST_F(OvertureTest, GenerateProducesResult) {
   auto result = generator_.generate(grid_, kGMajor, kAllaBreve, kTestSeed);
   EXPECT_TRUE(result.success) << "French Overture should succeed";
-  EXPECT_FALSE(result.notes.empty())
-      << "French Overture should produce non-empty output";
+  EXPECT_FALSE(result.notes.empty()) << "French Overture should produce non-empty output";
 }
 
 // ---------------------------------------------------------------------------
@@ -60,13 +57,13 @@ TEST_F(OvertureTest, NotesSpan32Bars) {
   Tick max_tick = 0;
   for (const auto& note : result.notes) {
     Tick end_tick = note.start_tick + note.duration;
-    if (end_tick > max_tick) max_tick = end_tick;
+    if (end_tick > max_tick)
+      max_tick = end_tick;
   }
 
   Tick ticks_per_bar = kAllaBreve.ticksPerBar();
   Tick expected_min = static_cast<Tick>(kTotalBars) * ticks_per_bar;
-  EXPECT_GE(max_tick, expected_min)
-      << "Notes should span at least 32 bars (with binary repeats)";
+  EXPECT_GE(max_tick, expected_min) << "Notes should span at least 32 bars (with binary repeats)";
 }
 
 // ---------------------------------------------------------------------------
@@ -149,8 +146,8 @@ TEST_F(OvertureTest, FugatoSectionHasMoreNotes) {
   ASSERT_GT(fugato_count, 0) << "Fugato section should have notes";
 
   EXPECT_GT(fugato_count, grave_count)
-      << "Fugato section (" << fugato_count
-      << " notes) should have more notes than Grave section (" << grave_count << ")";
+      << "Fugato section (" << fugato_count << " notes) should have more notes than Grave section ("
+      << grave_count << ")";
 }
 
 // ---------------------------------------------------------------------------
@@ -164,8 +161,10 @@ TEST_F(OvertureTest, DifferentSeedsDifferent) {
     auto result1 = generator_.generate(grid_, kGMajor, kAllaBreve, base);
     auto result2 = generator_.generate(grid_, kGMajor, kAllaBreve, base + 7777);
 
-    if (!result1.success || !result2.success) continue;
-    if (result1.notes.empty() || result2.notes.empty()) continue;
+    if (!result1.success || !result2.success)
+      continue;
+    if (result1.notes.empty() || result2.notes.empty())
+      continue;
 
     size_t compare_count = std::min(result1.notes.size(), result2.notes.size());
     for (size_t idx = 0; idx < compare_count; ++idx) {
@@ -193,11 +192,11 @@ TEST_F(OvertureTest, SuccessAcrossSeeds) {
 
   for (uint32_t seed = 100; seed < 100 + kNumSeeds; ++seed) {
     auto result = generator_.generate(grid_, kGMajor, kAllaBreve, seed);
-    if (result.success && !result.notes.empty()) ++success_count;
+    if (result.success && !result.notes.empty())
+      ++success_count;
   }
 
-  EXPECT_EQ(success_count, kNumSeeds)
-      << "All seeds should produce successful output";
+  EXPECT_EQ(success_count, kNumSeeds) << "All seeds should produce successful output";
 }
 
 // ---------------------------------------------------------------------------
@@ -221,7 +220,8 @@ TEST_F(OvertureTest, BothSectionsHaveNotes) {
     } else if (note.start_tick >= section_boundary) {
       has_fugato = true;
     }
-    if (has_grave && has_fugato) break;
+    if (has_grave && has_fugato)
+      break;
   }
 
   EXPECT_TRUE(has_grave) << "Grave section (first 16 bars) should have notes";

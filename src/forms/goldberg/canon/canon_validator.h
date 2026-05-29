@@ -20,11 +20,11 @@ namespace bach {
 /// duration violations are found.
 struct CanonValidationResult {
   bool passed = true;
-  int total_pairs = 0;          ///< Number of dux-comes pairs checked.
-  int pitch_violations = 0;     ///< Pairs where comes pitch != expected transform.
-  int timing_violations = 0;    ///< Pairs where comes tick != dux tick + delay.
-  int duration_violations = 0;  ///< Pairs where comes duration != dux duration.
-  float pitch_accuracy = 1.0f;  ///< Ratio of correct pitch pairs.
+  int total_pairs = 0;                ///< Number of dux-comes pairs checked.
+  int pitch_violations = 0;           ///< Pairs where comes pitch != expected transform.
+  int timing_violations = 0;          ///< Pairs where comes tick != dux tick + delay.
+  int duration_violations = 0;        ///< Pairs where comes duration != dux duration.
+  float pitch_accuracy = 1.0f;        ///< Ratio of correct pitch pairs.
   std::vector<std::string> messages;  ///< Diagnostic messages for failures.
 };
 
@@ -44,11 +44,9 @@ struct CanonValidationResult {
 /// @param spec Canon specification (interval, transform, key, delay).
 /// @param time_sig Time signature for delay-to-tick conversion.
 /// @return Validation result with pass/fail status and diagnostics.
-CanonValidationResult validateCanonIntegrity(
-    const std::vector<NoteEvent>& dux_notes,
-    const std::vector<NoteEvent>& comes_notes,
-    const CanonSpec& spec,
-    const TimeSignature& time_sig);
+CanonValidationResult validateCanonIntegrity(const std::vector<NoteEvent>& dux_notes,
+                                             const std::vector<NoteEvent>& comes_notes,
+                                             const CanonSpec& spec, const TimeSignature& time_sig);
 
 /// @brief Validate climax alignment with the structural grid.
 ///
@@ -60,11 +58,9 @@ CanonValidationResult validateCanonIntegrity(
 /// @param grid The 32-bar structural grid.
 /// @param time_sig Time signature for tick-to-bar conversion.
 /// @return True if both peaks are within 2 bars of Intensification.
-bool validateClimaxAlignment(
-    const std::vector<NoteEvent>& dux_notes,
-    const std::vector<NoteEvent>& comes_notes,
-    const GoldbergStructuralGrid& grid,
-    const TimeSignature& time_sig);
+bool validateClimaxAlignment(const std::vector<NoteEvent>& dux_notes,
+                             const std::vector<NoteEvent>& comes_notes,
+                             const GoldbergStructuralGrid& grid, const TimeSignature& time_sig);
 
 }  // namespace bach
 

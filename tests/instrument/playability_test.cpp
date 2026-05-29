@@ -39,7 +39,7 @@ TEST(CalculateTransitionCostTest, SameFretZeroCost) {
 TEST(CalculateTransitionCostTest, AdjacentFretLowCost) {
   auto cost = calculateTransitionCost(3, 4, 0);
   EXPECT_GT(cost.stretch_cost, 0.0f);
-  EXPECT_FLOAT_EQ(cost.position_shift_cost, 0.0f);  // Within comfortable span
+  EXPECT_FLOAT_EQ(cost.position_shift_cost, 0.0f);   // Within comfortable span
   EXPECT_FLOAT_EQ(cost.string_crossing_cost, 0.0f);  // Same string
 }
 
@@ -57,8 +57,8 @@ TEST(CalculateTransitionCostTest, FourFretSpanComfortable) {
 TEST(CalculateTransitionCostTest, FiveFretShift) {
   auto cost = calculateTransitionCost(1, 6, 0);
   // 5-fret distance: beyond comfortable span by 1
-  EXPECT_GT(cost.stretch_cost, 0.4f);          // More than 4-fret comfortable cost
-  EXPECT_GT(cost.position_shift_cost, 0.0f);   // Requires position shift
+  EXPECT_GT(cost.stretch_cost, 0.4f);         // More than 4-fret comfortable cost
+  EXPECT_GT(cost.position_shift_cost, 0.0f);  // Requires position shift
 }
 
 TEST(CalculateTransitionCostTest, LargeShiftHighCost) {

@@ -8,14 +8,14 @@
 
 #include "core/gm_program.h"
 #include "core/melodic_state.h"
-#include "forms/form_utils.h"
-#include "fugue/cadence_insertion.h"
 #include "core/note_creator.h"
 #include "core/pitch_utils.h"
 #include "core/rng_util.h"
 #include "core/scale.h"
 #include "counterpoint/vertical_context.h"
 #include "forms/form_constraint_setup.h"
+#include "forms/form_utils.h"
+#include "fugue/cadence_insertion.h"
 #include "harmony/chord_types.h"
 #include "harmony/harmonic_event.h"
 #include "organ/organ_techniques.h"
@@ -53,9 +53,9 @@ enum class FantasiaSectionTexture : uint8_t {
 /// @param curr_root_pc Current event root pitch class.
 /// @param total_bars Total number of bars in the piece.
 /// @return FantasiaSectionTexture for this event.
-FantasiaSectionTexture determineFantasiaSectionTexture(
-    float event_progress, int bar_idx, int prev_root_pc, int curr_root_pc,
-    int total_bars) {
+FantasiaSectionTexture determineFantasiaSectionTexture(float event_progress, int bar_idx,
+                                                       int prev_root_pc, int curr_root_pc,
+                                                       int total_bars) {
   // Final 2 bars: cadential convergence.
   if (bar_idx >= total_bars - 2) {
     return FantasiaSectionTexture::Cadential;
@@ -72,13 +72,11 @@ FantasiaSectionTexture determineFantasiaSectionTexture(
   if (at_harmonic_boundary && event_progress > 0.15f && event_progress < 0.85f) {
     // Shift: passage sections get an extra push at harmonic boundaries.
     if (cycle_pos == 1 || cycle_pos == 3) {
-      return (cycle_pos < 2) ? FantasiaSectionTexture::Chordal
-                             : FantasiaSectionTexture::Passage;
+      return (cycle_pos < 2) ? FantasiaSectionTexture::Chordal : FantasiaSectionTexture::Passage;
     }
   }
 
-  return (cycle_pos < 2) ? FantasiaSectionTexture::Passage
-                         : FantasiaSectionTexture::Chordal;
+  return (cycle_pos < 2) ? FantasiaSectionTexture::Passage : FantasiaSectionTexture::Chordal;
 }
 
 // ---------------------------------------------------------------------------
@@ -95,11 +93,9 @@ FantasiaSectionTexture determineFantasiaSectionTexture(
 /// @param event Current harmonic event providing chord context.
 /// @param rng Random number generator for pitch/rhythm choices.
 /// @return Vector of NoteEvents for the ornamental melody voice.
-std::vector<NoteEvent> generateOrnamentalMelody(const HarmonicEvent& event,
-                                                std::mt19937& rng,
-                                                const VerticalContext* vctx = nullptr,
-                                                FantasiaSectionTexture texture =
-                                                    FantasiaSectionTexture::Passage) {
+std::vector<NoteEvent> generateOrnamentalMelody(
+    const HarmonicEvent& event, std::mt19937& rng, const VerticalContext* vctx = nullptr,
+    FantasiaSectionTexture texture = FantasiaSectionTexture::Passage) {
   std::vector<NoteEvent> notes;
 
   // Ornamental melody sits in the upper register of Manual I.
@@ -158,8 +154,10 @@ std::vector<NoteEvent> generateOrnamentalMelody(const HarmonicEvent& event,
         break;
     }
     Tick remaining = (event.tick + event_duration) - current_tick;
-    if (dur > remaining) dur = remaining;
-    if (dur == 0) break;
+    if (dur > remaining)
+      dur = remaining;
+    if (dur == 0)
+      break;
 
     NoteEvent note;
     note.start_tick = current_tick;
@@ -171,11 +169,9 @@ std::vector<NoteEvent> generateOrnamentalMelody(const HarmonicEvent& event,
 
     // Category B: safe alternative when vertically unsafe.
     if (vctx && !vctx->isSafe(current_tick, note.voice, note.pitch)) {
-      ScaleType mel_scale =
-          event.is_minor ? ScaleType::NaturalMinor : ScaleType::Major;
+      ScaleType mel_scale = event.is_minor ? ScaleType::NaturalMinor : ScaleType::Major;
       for (int delta : {1, -1, 2, -2}) {
-        uint8_t alt = clampPitch(static_cast<int>(note.pitch) + delta,
-                                 kMelodyLow, kMelodyHigh);
+        uint8_t alt = clampPitch(static_cast<int>(note.pitch) + delta, kMelodyLow, kMelodyHigh);
         if (scale_util::isScaleTone(alt, event.key, mel_scale) &&
             vctx->isSafe(current_tick, note.voice, alt)) {
           note.pitch = alt;
@@ -242,8 +238,7 @@ std::vector<NoteEvent> generateOrnamentalMelody(const HarmonicEvent& event,
 /// @param rng Random number generator for tone selection.
 /// @return Vector of NoteEvents for the sustained chord voice.
 std::vector<NoteEvent> generateSustainedChords(const HarmonicTimeline& timeline,
-                                               Tick target_duration,
-                                               std::mt19937& rng,
+                                               Tick target_duration, std::mt19937& rng,
                                                const VerticalContext* vctx = nullptr,
                                                int total_bars = 0) {
   std::vector<NoteEvent> notes;
@@ -284,11 +279,11 @@ std::vector<NoteEvent> generateSustainedChords(const HarmonicTimeline& timeline,
     // Section-texture-aware duration for sustained chords.
     int bar_idx = static_cast<int>(current_tick / kTicksPerBar);
     float progress = target_duration > 0
-        ? static_cast<float>(current_tick) / static_cast<float>(target_duration)
-        : 0.5f;
+                         ? static_cast<float>(current_tick) / static_cast<float>(target_duration)
+                         : 0.5f;
     int curr_root_pc = getPitchClass(event.chord.root_pitch);
-    FantasiaSectionTexture chd_texture = determineFantasiaSectionTexture(
-        progress, bar_idx, prev_root_pc, curr_root_pc, total_bars);
+    FantasiaSectionTexture chd_texture =
+        determineFantasiaSectionTexture(progress, bar_idx, prev_root_pc, curr_root_pc, total_bars);
     prev_root_pc = curr_root_pc;
 
     Tick dur;
@@ -308,8 +303,10 @@ std::vector<NoteEvent> generateSustainedChords(const HarmonicTimeline& timeline,
         break;
     }
     Tick remaining = target_duration - current_tick;
-    if (dur > remaining) dur = remaining;
-    if (dur == 0) break;
+    if (dur > remaining)
+      dur = remaining;
+    if (dur == 0)
+      break;
 
     NoteEvent note;
     note.start_tick = current_tick;
@@ -321,11 +318,9 @@ std::vector<NoteEvent> generateSustainedChords(const HarmonicTimeline& timeline,
 
     // Category B: safe alternative when vertically unsafe.
     if (vctx && !vctx->isSafe(current_tick, note.voice, note.pitch)) {
-      ScaleType chd_scale =
-          event.is_minor ? ScaleType::NaturalMinor : ScaleType::Major;
+      ScaleType chd_scale = event.is_minor ? ScaleType::NaturalMinor : ScaleType::Major;
       for (int delta : {1, -1, 2, -2}) {
-        uint8_t alt = clampPitch(static_cast<int>(note.pitch) + delta,
-                                 kChordLow, kChordHigh);
+        uint8_t alt = clampPitch(static_cast<int>(note.pitch) + delta, kChordLow, kChordHigh);
         if (scale_util::isScaleTone(alt, event.key, chd_scale) &&
             vctx->isSafe(current_tick, note.voice, alt)) {
           note.pitch = alt;
@@ -352,19 +347,16 @@ std::vector<NoteEvent> generateSustainedChords(const HarmonicTimeline& timeline,
 /// @param event Current harmonic event providing chord context.
 /// @param rng Random number generator for pitch choices.
 /// @return Vector of NoteEvents for the countermelody voice.
-std::vector<NoteEvent> generateCountermelody(const HarmonicEvent& event,
-                                             std::mt19937& rng,
-                                             const VerticalContext* vctx = nullptr,
-                                             FantasiaSectionTexture texture =
-                                                 FantasiaSectionTexture::Passage) {
+std::vector<NoteEvent> generateCountermelody(
+    const HarmonicEvent& event, std::mt19937& rng, const VerticalContext* vctx = nullptr,
+    FantasiaSectionTexture texture = FantasiaSectionTexture::Passage) {
   std::vector<NoteEvent> notes;
 
   // Countermelody sits in the Positiv range, focusing on the middle register.
   constexpr uint8_t kCounterLow = 43;   // G2
   constexpr uint8_t kCounterHigh = 64;  // E4
 
-  auto scale_tones =
-      getScaleTones(event.key, event.is_minor, kCounterLow, kCounterHigh);
+  auto scale_tones = getScaleTones(event.key, event.is_minor, kCounterLow, kCounterHigh);
   if (scale_tones.empty()) {
     return notes;
   }
@@ -396,8 +388,10 @@ std::vector<NoteEvent> generateCountermelody(const HarmonicEvent& event,
         break;
     }
     Tick remaining = (event.tick + event_duration) - current_tick;
-    if (dur > remaining) dur = remaining;
-    if (dur == 0) break;
+    if (dur > remaining)
+      dur = remaining;
+    if (dur == 0)
+      break;
 
     NoteEvent note;
     note.start_tick = current_tick;
@@ -409,11 +403,9 @@ std::vector<NoteEvent> generateCountermelody(const HarmonicEvent& event,
 
     // Category B: safe alternative when vertically unsafe.
     if (vctx && !vctx->isSafe(current_tick, note.voice, note.pitch)) {
-      ScaleType ctr_scale =
-          event.is_minor ? ScaleType::NaturalMinor : ScaleType::Major;
+      ScaleType ctr_scale = event.is_minor ? ScaleType::NaturalMinor : ScaleType::Major;
       for (int delta : {1, -1, 2, -2}) {
-        uint8_t alt = clampPitch(static_cast<int>(note.pitch) + delta,
-                                 kCounterLow, kCounterHigh);
+        uint8_t alt = clampPitch(static_cast<int>(note.pitch) + delta, kCounterLow, kCounterHigh);
         if (scale_util::isScaleTone(alt, event.key, ctr_scale) &&
             vctx->isSafe(current_tick, note.voice, alt)) {
           note.pitch = alt;
@@ -479,10 +471,8 @@ std::vector<NoteEvent> generateCountermelody(const HarmonicEvent& event,
 /// @param vctx Optional vertical context for safety checks.
 /// @param total_bars Total number of bars (for texture determination).
 /// @return Vector of NoteEvents for the pedal bass voice.
-std::vector<NoteEvent> generateSlowBass(const HarmonicTimeline& timeline,
-                                        Tick target_duration,
-                                        const VerticalContext* vctx = nullptr,
-                                        int total_bars = 0) {
+std::vector<NoteEvent> generateSlowBass(const HarmonicTimeline& timeline, Tick target_duration,
+                                        const VerticalContext* vctx = nullptr, int total_bars = 0) {
   std::vector<NoteEvent> notes;
 
   if (total_bars <= 0) {
@@ -500,11 +490,11 @@ std::vector<NoteEvent> generateSlowBass(const HarmonicTimeline& timeline,
     // Determine section texture for duration selection.
     int bar_idx = static_cast<int>(current_tick / kTicksPerBar);
     float progress = target_duration > 0
-        ? static_cast<float>(current_tick) / static_cast<float>(target_duration)
-        : 0.5f;
+                         ? static_cast<float>(current_tick) / static_cast<float>(target_duration)
+                         : 0.5f;
     int curr_root_pc = getPitchClass(event.chord.root_pitch);
-    FantasiaSectionTexture bass_texture = determineFantasiaSectionTexture(
-        progress, bar_idx, prev_root_pc, curr_root_pc, total_bars);
+    FantasiaSectionTexture bass_texture =
+        determineFantasiaSectionTexture(progress, bar_idx, prev_root_pc, curr_root_pc, total_bars);
     prev_root_pc = curr_root_pc;
 
     // Duration selection based on section texture:
@@ -524,19 +514,20 @@ std::vector<NoteEvent> generateSlowBass(const HarmonicTimeline& timeline,
         break;
     }
     Tick remaining = target_duration - current_tick;
-    if (dur > remaining) dur = remaining;
-    if (dur == 0) break;
+    if (dur > remaining)
+      dur = remaining;
+    if (dur == 0)
+      break;
 
-    uint8_t bass = clampPitch(static_cast<int>(event.bass_pitch),
-                              organ_range::kPedalLow, organ_range::kPedalHigh);
+    uint8_t bass = clampPitch(static_cast<int>(event.bass_pitch), organ_range::kPedalLow,
+                              organ_range::kPedalHigh);
 
     // Category B: safe alternative when vertically unsafe.
     if (vctx && !vctx->isSafe(current_tick, 3, bass)) {
-      ScaleType bass_scale =
-          event.is_minor ? ScaleType::NaturalMinor : ScaleType::Major;
+      ScaleType bass_scale = event.is_minor ? ScaleType::NaturalMinor : ScaleType::Major;
       for (int delta : {1, -1, 2, -2}) {
-        uint8_t alt = clampPitch(static_cast<int>(bass) + delta,
-                                 organ_range::kPedalLow, organ_range::kPedalHigh);
+        uint8_t alt = clampPitch(static_cast<int>(bass) + delta, organ_range::kPedalLow,
+                                 organ_range::kPedalHigh);
         if (scale_util::isScaleTone(alt, event.key, bass_scale) &&
             vctx->isSafe(current_tick, 3, alt)) {
           bass = alt;
@@ -564,8 +555,10 @@ std::vector<NoteEvent> generateSlowBass(const HarmonicTimeline& timeline,
 /// @param num_voices Raw voice count from configuration.
 /// @return Clamped voice count.
 uint8_t clampFantasiaVoiceCount(uint8_t num_voices) {
-  if (num_voices < 2) return 2;
-  if (num_voices > 5) return 5;
+  if (num_voices < 2)
+    return 2;
+  if (num_voices > 5)
+    return 5;
   return num_voices;
 }
 
@@ -596,8 +589,8 @@ FantasiaResult generateFantasia(const FantasiaConfig& config) {
       ProgressionType::BorrowedChord,
   };
   auto prog = kProgTypes[config.seed % 3];
-  HarmonicTimeline timeline = HarmonicTimeline::createProgression(
-      config.key, target_duration, HarmonicResolution::Beat, prog);
+  HarmonicTimeline timeline = HarmonicTimeline::createProgression(config.key, target_duration,
+                                                                  HarmonicResolution::Beat, prog);
   timeline.applyCadence(CadenceType::Perfect, config.key);
 
   // Step 3: Generate notes for each voice.
@@ -621,8 +614,7 @@ FantasiaResult generateFantasia(const FantasiaConfig& config) {
 
   // Voice 1 (sustained chords) -- harmonic support with section texture.
   if (num_voices >= 2) {
-    auto chord_notes = generateSustainedChords(timeline, target_duration, rng,
-                                               &vctx, total_bars);
+    auto chord_notes = generateSustainedChords(timeline, target_duration, rng, &vctx, total_bars);
     all_notes.insert(all_notes.end(), chord_notes.begin(), chord_notes.end());
   }
 
@@ -634,9 +626,9 @@ FantasiaResult generateFantasia(const FantasiaConfig& config) {
 
     // Compute section texture for this event.
     int bar_idx = static_cast<int>(event.tick / kTicksPerBar);
-    float event_progress = target_duration > 0
-        ? static_cast<float>(event.tick) / static_cast<float>(target_duration)
-        : 0.5f;
+    float event_progress =
+        target_duration > 0 ? static_cast<float>(event.tick) / static_cast<float>(target_duration)
+                            : 0.5f;
     int curr_root_pc = getPitchClass(event.chord.root_pitch);
     FantasiaSectionTexture texture = determineFantasiaSectionTexture(
         event_progress, bar_idx, prev_melody_root_pc, curr_root_pc, total_bars);
@@ -668,9 +660,8 @@ FantasiaResult generateFantasia(const FantasiaConfig& config) {
     VoiceId bass_voice = (num_voices >= 4) ? static_cast<VoiceId>(num_voices - 1)
                                            : static_cast<VoiceId>(num_voices - 1);
     int cadences_inserted = ensureCadentialCoverage(
-        all_notes, empty_structure, config.key.tonic, config.key.is_minor,
-        bass_voice, num_voices, target_duration,
-        config.seed + 66666u, cadence_config);
+        all_notes, empty_structure, config.key.tonic, config.key.is_minor, bass_voice, num_voices,
+        target_duration, config.seed + 66666u, cadence_config);
     (void)cadences_inserted;
   }
 
@@ -692,9 +683,8 @@ FantasiaResult generateFantasia(const FantasiaConfig& config) {
   // Cadential pedal point on tonic (last 2 bars).
   if (num_voices >= 4 && target_duration > kTicksPerBar * 2) {
     Tick pedal_start = target_duration - kTicksPerBar * 2;
-    auto pedal_notes = generateCadentialPedal(
-        config.key, pedal_start, target_duration,
-        PedalPointType::Tonic, num_voices - 1);
+    auto pedal_notes = generateCadentialPedal(config.key, pedal_start, target_duration,
+                                              PedalPointType::Tonic, num_voices - 1);
     for (auto& n : pedal_notes) {
       if (n.voice < tracks.size()) {
         tracks[n.voice].notes.push_back(n);
@@ -705,8 +695,7 @@ FantasiaResult generateFantasia(const FantasiaConfig& config) {
   // Picardy third (minor keys only).
   if (config.enable_picardy && config.key.is_minor) {
     for (auto& track : tracks) {
-      applyPicardyToFinalChord(track.notes, config.key,
-                               target_duration - kTicksPerBar);
+      applyPicardyToFinalChord(track.notes, config.key, target_duration - kTicksPerBar);
     }
   }
 

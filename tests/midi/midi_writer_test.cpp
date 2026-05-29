@@ -4,8 +4,8 @@
 
 #include <gtest/gtest.h>
 
-#include <cstdio>
 #include <cstdint>
+#include <cstdio>
 #include <string>
 #include <vector>
 
@@ -19,8 +19,8 @@ namespace {
 // Helper: create a Track with a single note for reuse across tests.
 // ---------------------------------------------------------------------------
 
-Track makeSimpleTrack(uint8_t channel, uint8_t program, const std::string& name,
-                      uint8_t pitch, Tick start, Tick duration) {
+Track makeSimpleTrack(uint8_t channel, uint8_t program, const std::string& name, uint8_t pitch,
+                      Tick start, Tick duration) {
   Track track;
   track.channel = channel;
   track.program = program;
@@ -284,8 +284,7 @@ TEST(MidiWriterTest, WriteToFileContentMatchesToBytes) {
   std::fread(file_content.data(), 1, file_content.size(), file);
   std::fclose(file);
 
-  EXPECT_EQ(file_content, expected)
-      << "File content should exactly match toBytes() output";
+  EXPECT_EQ(file_content, expected) << "File content should exactly match toBytes() output";
 
   std::remove(path.c_str());
 }
@@ -318,8 +317,7 @@ TEST(MidiWriterTest, BuildWithKeyTranspositionProducesDifferentOutput) {
   // Both should be valid (non-empty), but differ due to transposition
   EXPECT_FALSE(bytes_c.empty());
   EXPECT_FALSE(bytes_g.empty());
-  EXPECT_NE(bytes_c, bytes_g)
-      << "Transposing to G should produce different output than C";
+  EXPECT_NE(bytes_c, bytes_g) << "Transposing to G should produce different output than C";
 }
 
 // ---------------------------------------------------------------------------
@@ -356,8 +354,8 @@ TEST(MidiWriterTest, OutputContainsMTrkChunks) {
   // Expected: 2 (1 metadata track + 1 content track)
   int mtrk_count = 0;
   for (size_t idx = 0; idx + 3 < bytes.size(); ++idx) {
-    if (bytes[idx] == 'M' && bytes[idx + 1] == 'T' &&
-        bytes[idx + 2] == 'r' && bytes[idx + 3] == 'k') {
+    if (bytes[idx] == 'M' && bytes[idx + 1] == 'T' && bytes[idx + 2] == 'r' &&
+        bytes[idx + 3] == 'k') {
       ++mtrk_count;
     }
   }

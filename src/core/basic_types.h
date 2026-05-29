@@ -26,12 +26,12 @@ constexpr Tick kTicksPerBar = kTicksPerBeat * kBeatsPerBar;  // 1920
 namespace duration {
 
 constexpr Tick kWholeNote = kTicksPerBar;                           // 1920
-constexpr Tick kHalfNote = kTicksPerBeat * 2;                      // 960
-constexpr Tick kDottedQuarter = kTicksPerBeat + kTicksPerBeat / 2; // 720
-constexpr Tick kQuarterNote = kTicksPerBeat;                       // 480
-constexpr Tick kEighthNote = kTicksPerBeat / 2;                    // 240
-constexpr Tick kSixteenthNote = kTicksPerBeat / 4;                 // 120
-constexpr Tick kThirtySecondNote = kTicksPerBeat / 8;              // 60
+constexpr Tick kHalfNote = kTicksPerBeat * 2;                       // 960
+constexpr Tick kDottedQuarter = kTicksPerBeat + kTicksPerBeat / 2;  // 720
+constexpr Tick kQuarterNote = kTicksPerBeat;                        // 480
+constexpr Tick kEighthNote = kTicksPerBeat / 2;                     // 240
+constexpr Tick kSixteenthNote = kTicksPerBeat / 4;                  // 120
+constexpr Tick kThirtySecondNote = kTicksPerBeat / 8;               // 60
 
 }  // namespace duration
 
@@ -55,14 +55,10 @@ struct TimeSignature {
   constexpr uint8_t beatsPerBar() const { return numerator; }
 
   /// @brief Check if this is a compound time signature (6/8, 9/8, 12/8).
-  constexpr bool isCompound() const {
-    return numerator % 3 == 0 && numerator > 3;
-  }
+  constexpr bool isCompound() const { return numerator % 3 == 0 && numerator > 3; }
 
   /// @brief Get musical pulse count (6/8->2, 9/8->3, 3/4->3).
-  constexpr uint8_t pulsesPerBar() const {
-    return isCompound() ? numerator / 3 : numerator;
-  }
+  constexpr uint8_t pulsesPerBar() const { return isCompound() ? numerator / 3 : numerator; }
 };
 
 /// @brief Time signature change event at a specific tick position.
@@ -82,8 +78,8 @@ enum class MetricalStrength : uint8_t {
 /// @brief Meter profile for beat emphasis patterns.
 /// Sarabande's beat 2 emphasis requires distinct handling.
 enum class MeterProfile : uint8_t {
-  StandardTriple,   ///< Normal 3/4: Strong-Medium-Weak (most variations).
-  SarabandeTriple   ///< Sarabande 3/4: Strong-Strong-Weak (Aria, Var 13 etc).
+  StandardTriple,  ///< Normal 3/4: Strong-Medium-Weak (most variations).
+  SarabandeTriple  ///< Sarabande 3/4: Strong-Strong-Weak (Aria, Var 13 etc).
 };
 
 /// @brief Determine metrical strength for a beat position.
@@ -99,13 +95,19 @@ constexpr uint8_t kMidiC4 = 60;
 // ---------------------------------------------------------------------------
 
 /// @brief Convert tick to bar number (0-based).
-inline constexpr Tick tickToBar(Tick tick) { return tick / kTicksPerBar; }
+inline constexpr Tick tickToBar(Tick tick) {
+  return tick / kTicksPerBar;
+}
 
 /// @brief Convert tick to beat number (0-based, global).
-inline constexpr Tick tickToBeat(Tick tick) { return tick / kTicksPerBeat; }
+inline constexpr Tick tickToBeat(Tick tick) {
+  return tick / kTicksPerBeat;
+}
 
 /// @brief Get tick position within current bar.
-inline constexpr Tick positionInBar(Tick tick) { return tick % kTicksPerBar; }
+inline constexpr Tick positionInBar(Tick tick) {
+  return tick % kTicksPerBar;
+}
 
 /// @brief Get beat index within current bar (0-3 for 4/4).
 inline constexpr uint8_t beatInBar(Tick tick) {
@@ -113,7 +115,9 @@ inline constexpr uint8_t beatInBar(Tick tick) {
 }
 
 /// @brief Convert bar number to tick (start of bar).
-inline constexpr Tick barToTick(Tick bar) { return bar * kTicksPerBar; }
+inline constexpr Tick barToTick(Tick bar) {
+  return bar * kTicksPerBar;
+}
 
 /// @brief Metric hierarchy level for a given tick position.
 /// Used to enforce Baroque counterpoint rules: strong beats require chord tones,
@@ -126,8 +130,10 @@ enum class MetricLevel : uint8_t {
 
 /// @brief Determine the metric level of a tick position.
 inline constexpr MetricLevel metricLevel(Tick tick) {
-  if (tick % kTicksPerBar == 0) return MetricLevel::Bar;
-  if (tick % kTicksPerBeat == 0) return MetricLevel::Beat;
+  if (tick % kTicksPerBar == 0)
+    return MetricLevel::Bar;
+  if (tick % kTicksPerBeat == 0)
+    return MetricLevel::Beat;
   return MetricLevel::Offbeat;
 }
 
@@ -142,7 +148,8 @@ constexpr Tick kTickQuantum = duration::kSixteenthNote;  // 120
 
 /// @brief Round a duration to the nearest grid point (minimum kTickQuantum).
 inline constexpr Tick quantizeToGrid(Tick t, Tick quantum = kTickQuantum) {
-  if (t == 0) return 0;
+  if (t == 0)
+    return 0;
   Tick rounded = ((t + quantum / 2) / quantum) * quantum;
   return (rounded > 0) ? rounded : quantum;
 }
@@ -189,12 +196,7 @@ const char* fuguePhaseToString(FuguePhase phase);
 
 /// Subject character affects the personality of the entire fugue.
 /// Phase restrictions: Severe/Playful (Ph1-2), Noble (Ph3+), Restless (Ph4+).
-enum class SubjectCharacter : uint8_t {
-  Severe,
-  Playful,
-  Noble,
-  Restless
-};
+enum class SubjectCharacter : uint8_t { Severe, Playful, Noble, Restless };
 
 /// @brief Convert SubjectCharacter to human-readable string.
 const char* subjectCharacterToString(SubjectCharacter character);
@@ -206,10 +208,10 @@ const char* subjectCharacterToString(SubjectCharacter character);
 /// Toccata structural archetype. Each archetype defines a distinct section
 /// layout, energy curve, and harmonic design. Dispatched via generateToccata().
 enum class ToccataArchetype : uint8_t {
-  Dramaticus,   ///< BWV 565. U-energy. Gesture->Recitative->Drive.
-  Perpetuus,    ///< BWV 538. Ascending energy. Continuous 16th-note moto perpetuo.
-  Concertato,   ///< BWV 564. Arch energy. Allegro->Adagio->Vivace.
-  Sectionalis   ///< BWV 566. Wave energy. Free->QuasiFugal->Free->Cadenza->Coda.
+  Dramaticus,  ///< BWV 565. U-energy. Gesture->Recitative->Drive.
+  Perpetuus,   ///< BWV 538. Ascending energy. Continuous 16th-note moto perpetuo.
+  Concertato,  ///< BWV 564. Arch energy. Allegro->Adagio->Vivace.
+  Sectionalis  ///< BWV 566. Wave energy. Free->QuasiFugal->Free->Cadenza->Coda.
 };
 
 /// @brief Convert ToccataArchetype to human-readable string.
@@ -241,25 +243,41 @@ const char* fugueArchetypeToString(FugueArchetype archetype);
 /// Section identifiers for toccata structural boundaries.
 enum class ToccataSectionId : uint8_t {
   // Dramaticus (legacy 3-section)
-  Opening, Recitative, Drive,
+  Opening,
+  Recitative,
+  Drive,
   // Perpetuus
-  Ascent, Plateau, Climax,
+  Ascent,
+  Plateau,
+  Climax,
   // Concertato
-  Allegro, Adagio, Vivace,
+  Allegro,
+  Adagio,
+  Vivace,
   // Sectionalis
-  Free1, QuasiFugal, Free2, Cadenza, Coda,
+  Free1,
+  QuasiFugal,
+  Free2,
+  Cadenza,
+  Coda,
   // Dramaticus 8-phase (new)
-  Gesture, EchoCollapse, RecitExpansion, SequenceClimb1,
-  HarmonicBreak, SequenceClimb2, DomObsession, FinalExplosion
+  Gesture,
+  EchoCollapse,
+  RecitExpansion,
+  SequenceClimb1,
+  HarmonicBreak,
+  SequenceClimb2,
+  DomObsession,
+  FinalExplosion
 };
 
 /// @brief Toccata style mode for Dramaticus 8-phase sections.
 /// Groups related ToccataSectionId phases into stylistic categories.
 enum class ToccataStyleMode : uint8_t {
-  Phantasticus,   ///< Gesture, EchoCollapse — rhetorical gestures and echo effects.
-  Recitativo,     ///< RecitExpansion — free declamatory style.
-  Sequence,       ///< SequenceClimb1/2 — sequential motivic development.
-  Transitional    ///< HarmonicBreak, DomObsession, FinalExplosion — harmonic transitions.
+  Phantasticus,  ///< Gesture, EchoCollapse — rhetorical gestures and echo effects.
+  Recitativo,    ///< RecitExpansion — free declamatory style.
+  Sequence,      ///< SequenceClimb1/2 — sequential motivic development.
+  Transitional   ///< HarmonicBreak, DomObsession, FinalExplosion — harmonic transitions.
 };
 
 // ---------------------------------------------------------------------------
@@ -268,11 +286,7 @@ enum class ToccataStyleMode : uint8_t {
 
 /// Arc phases for solo string flow pieces (e.g. BWV 1007).
 /// Peak is exactly 1 section, config-fixed (seed-independent).
-enum class ArcPhase : uint8_t {
-  Ascent,
-  Peak,
-  Descent
-};
+enum class ArcPhase : uint8_t { Ascent, Peak, Descent };
 
 /// @brief Convert ArcPhase to human-readable string.
 const char* arcPhaseToString(ArcPhase phase);
@@ -332,22 +346,13 @@ const char* formTypeToString(FormType form);
 FormType formTypeFromString(const std::string& str);
 
 /// Musical key (pitch class of tonic).
-enum class Key : uint8_t {
-  C = 0, Cs, D, Eb, E, F, Fs, G, Ab, A, Bb, B
-};
+enum class Key : uint8_t { C = 0, Cs, D, Eb, E, F, Fs, G, Ab, A, Bb, B };
 
 /// @brief Convert Key to human-readable string.
 const char* keyToString(Key key);
 
 /// Instrument type for output routing and range constraints.
-enum class InstrumentType : uint8_t {
-  Organ,
-  Harpsichord,
-  Piano,
-  Violin,
-  Cello,
-  Guitar
-};
+enum class InstrumentType : uint8_t { Organ, Harpsichord, Piano, Violin, Cello, Guitar };
 
 /// @brief Convert InstrumentType to human-readable string.
 const char* instrumentTypeToString(InstrumentType inst);
@@ -385,12 +390,12 @@ DurationScale durationScaleFromString(const std::string& str);
 /// @brief Role of a note within a multi-note gesture group.
 /// Notes sharing the same gesture_id form a single musical gesture.
 enum class GestureRole : uint8_t {
-  None = 0,      ///< Not part of any gesture.
-  Leader,        ///< Primary melodic voice of the gesture.
-  OctaveEcho,    ///< Octave doubling of the leader.
-  LowerEcho,     ///< Lower register echo of the leader.
-  PedalHit,      ///< Pedal strike accompanying the gesture.
-  Accumulation   ///< Chord buildup within the gesture.
+  None = 0,     ///< Not part of any gesture.
+  Leader,       ///< Primary melodic voice of the gesture.
+  OctaveEcho,   ///< Octave doubling of the leader.
+  LowerEcho,    ///< Lower register echo of the leader.
+  PedalHit,     ///< Pedal strike accompanying the gesture.
+  Accumulation  ///< Chord buildup within the gesture.
 };
 
 /// @brief Texture function for voice-specific parameter selection.
@@ -426,10 +431,10 @@ struct NoteEvent {
   uint8_t velocity = 80;
   VoiceId voice = 0;
   BachNoteSource source = BachNoteSource::Unknown;  ///< Provenance source for debugging.
-  uint8_t bow_direction = 0;  ///< BowDirection cast (0=Natural, 1=Down, 2=Up).
-  uint8_t is_harmonic = 0;    ///< 0=normal, 1=natural harmonic.
-  uint8_t modified_by = 0;    ///< NoteModifiedBy bit flags.
-  uint16_t gesture_id = 0;    ///< Gesture group id (0 = not part of gesture).
+  uint8_t bow_direction = 0;                     ///< BowDirection cast (0=Natural, 1=Down, 2=Up).
+  uint8_t is_harmonic = 0;                       ///< 0=normal, 1=natural harmonic.
+  uint8_t modified_by = 0;                       ///< NoteModifiedBy bit flags.
+  uint16_t gesture_id = 0;                       ///< Gesture group id (0 = not part of gesture).
   GestureRole gesture_role = GestureRole::None;  ///< Role within the gesture group.
 };
 

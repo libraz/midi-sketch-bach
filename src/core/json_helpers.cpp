@@ -111,6 +111,14 @@ void JsonWriter::valueNull() {
   }
 }
 
+void JsonWriter::valueRaw(std::string_view raw_json) {
+  maybeComma();
+  buffer_.append(raw_json.data(), raw_json.size());
+  if (!needs_comma_.empty()) {
+    needs_comma_.back() = true;
+  }
+}
+
 std::string JsonWriter::toString() const {
   return buffer_;
 }
@@ -163,8 +171,7 @@ std::string JsonWriter::toPrettyString(int indent_size) const {
         result += chr;
         ++depth;
         // Check if next char is closing bracket (empty container).
-        if (pos + 1 < buffer_.size() &&
-            (buffer_[pos + 1] == '}' || buffer_[pos + 1] == ']')) {
+        if (pos + 1 < buffer_.size() && (buffer_[pos + 1] == '}' || buffer_[pos + 1] == ']')) {
           // Keep empty containers compact: {} or [].
         } else {
           indent();
@@ -214,13 +221,27 @@ std::string JsonWriter::escapeString(std::string_view input) {
 
   for (char chr : input) {
     switch (chr) {
-      case '"':  result += "\\\""; break;
-      case '\\': result += "\\\\"; break;
-      case '\b': result += "\\b";  break;
-      case '\f': result += "\\f";  break;
-      case '\n': result += "\\n";  break;
-      case '\r': result += "\\r";  break;
-      case '\t': result += "\\t";  break;
+      case '"':
+        result += "\\\"";
+        break;
+      case '\\':
+        result += "\\\\";
+        break;
+      case '\b':
+        result += "\\b";
+        break;
+      case '\f':
+        result += "\\f";
+        break;
+      case '\n':
+        result += "\\n";
+        break;
+      case '\r':
+        result += "\\r";
+        break;
+      case '\t':
+        result += "\\t";
+        break;
       default:
         // Escape control characters (0x00-0x1F) as \u00XX.
         if (static_cast<unsigned char>(chr) < 0x20) {

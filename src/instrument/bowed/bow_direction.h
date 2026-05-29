@@ -23,8 +23,7 @@ namespace bach {
 ///
 /// @param notes Notes to assign bow directions to (modified in-place).
 /// @param open_strings Open string pitches for the instrument (e.g., {55,62,69,76} for violin).
-void assignBowDirections(std::vector<NoteEvent>& notes,
-                         const std::vector<uint8_t>& open_strings);
+void assignBowDirections(std::vector<NoteEvent>& notes, const std::vector<uint8_t>& open_strings);
 
 /// @brief Check if a pitch change requires crossing 3+ strings.
 ///

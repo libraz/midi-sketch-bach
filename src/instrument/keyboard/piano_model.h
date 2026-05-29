@@ -27,17 +27,14 @@ class PianoModel : public IKeyboardInstrument {
   uint8_t getHighestPitch() const override;
   bool isPitchInRange(uint8_t pitch) const override;
 
-  VoicingHandAssignment assignHands(
-      const std::vector<uint8_t>& pitches) const override;
+  VoicingHandAssignment assignHands(const std::vector<uint8_t>& pitches) const override;
 
-  bool isPlayableByOneHand(const std::vector<uint8_t>& pitches,
-                           Hand hand) const override;
+  bool isPlayableByOneHand(const std::vector<uint8_t>& pitches, Hand hand) const override;
 
   bool isVoicingPlayable(const std::vector<uint8_t>& pitches) const override;
 
   KeyboardPlayabilityCost calculateTransitionCost(
-      const KeyboardState& from_state,
-      const std::vector<uint8_t>& to_pitches) const override;
+      const KeyboardState& from_state, const std::vector<uint8_t>& to_pitches) const override;
 
   std::vector<uint8_t> suggestPlayableVoicing(
       const std::vector<uint8_t>& desired_pitches) const override;
@@ -56,8 +53,7 @@ class PianoModel : public IKeyboardInstrument {
   /// @param pitches Sorted pitches assigned to one hand.
   /// @param hand_state Current state of the hand.
   /// @return Cost value (0.0 = trivial).
-  float computeHandCost(const std::vector<uint8_t>& pitches,
-                        const HandState& hand_state) const;
+  float computeHandCost(const std::vector<uint8_t>& pitches, const HandState& hand_state) const;
 
   /// @brief Clamp a pitch to the piano range.
   uint8_t clampPitch(uint8_t pitch) const;

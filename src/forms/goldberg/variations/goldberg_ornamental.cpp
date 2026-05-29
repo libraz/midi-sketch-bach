@@ -37,17 +37,15 @@ constexpr float kTrillEtudeDensity = 0.20f;
 // ---------------------------------------------------------------------------
 
 bool OrnamentalGenerator::isSupportedVariation(int variation_number) {
-  return variation_number == 1 || variation_number == 5 ||
-         variation_number == 13 || variation_number == 14 ||
-         variation_number == 28;
+  return variation_number == 1 || variation_number == 5 || variation_number == 13 ||
+         variation_number == 14 || variation_number == 28;
 }
 
 // ---------------------------------------------------------------------------
 // OrnamentalGenerator::buildProfile
 // ---------------------------------------------------------------------------
 
-FiguraProfile OrnamentalGenerator::buildProfile(int variation_number,
-                                                GoldbergVariationType& type) {
+FiguraProfile OrnamentalGenerator::buildProfile(int variation_number, GoldbergVariationType& type) {
   FiguraProfile profile;
 
   switch (variation_number) {
@@ -125,12 +123,10 @@ FiguraProfile OrnamentalGenerator::buildProfile(int variation_number,
 // OrnamentalGenerator::generate
 // ---------------------------------------------------------------------------
 
-OrnamentalResult OrnamentalGenerator::generate(
-    int variation_number,
-    const GoldbergStructuralGrid& grid,
-    const KeySignature& key,
-    const TimeSignature& time_sig,
-    uint32_t seed) const {
+OrnamentalResult OrnamentalGenerator::generate(int variation_number,
+                                               const GoldbergStructuralGrid& grid,
+                                               const KeySignature& key,
+                                               const TimeSignature& time_sig, uint32_t seed) const {
   OrnamentalResult result;
 
   if (!isSupportedVariation(variation_number)) {
@@ -145,8 +141,7 @@ OrnamentalResult OrnamentalGenerator::generate(
 
   // Generate melody via FigurenGenerator (voice 0 = upper register).
   FigurenGenerator figuren;
-  auto melody = figuren.generate(profile, grid, key, time_sig, 0, rng(),
-                                   nullptr, 0.5f);
+  auto melody = figuren.generate(profile, grid, key, time_sig, 0, rng(), nullptr, 0.5f);
 
   // Set BachNoteSource to GoldbergFigura for all melody notes.
   for (auto& note : melody) {
@@ -167,10 +162,9 @@ OrnamentalResult OrnamentalGenerator::generate(
   result.notes.insert(result.notes.end(), bass.begin(), bass.end());
 
   // Sort by start_tick for consistent ordering.
-  std::sort(result.notes.begin(), result.notes.end(),
-            [](const NoteEvent& lhs, const NoteEvent& rhs) {
-              return lhs.start_tick < rhs.start_tick;
-            });
+  std::sort(
+      result.notes.begin(), result.notes.end(),
+      [](const NoteEvent& lhs, const NoteEvent& rhs) { return lhs.start_tick < rhs.start_tick; });
 
   result.success = true;
   return result;
@@ -180,9 +174,8 @@ OrnamentalResult OrnamentalGenerator::generate(
 // OrnamentalGenerator::generateBassLine
 // ---------------------------------------------------------------------------
 
-std::vector<NoteEvent> OrnamentalGenerator::generateBassLine(
-    const GoldbergStructuralGrid& grid,
-    const TimeSignature& time_sig) const {
+std::vector<NoteEvent> OrnamentalGenerator::generateBassLine(const GoldbergStructuralGrid& grid,
+                                                             const TimeSignature& time_sig) const {
   std::vector<NoteEvent> bass_notes;
   bass_notes.reserve(kGridBars * 2);
 
@@ -196,8 +189,7 @@ std::vector<NoteEvent> OrnamentalGenerator::generateBassLine(
     int target_center = (kBassLow + kBassHigh) / 2;  // ~C3 (48)
     int diff = static_cast<int>(primary_pitch) - target_center;
     int shift = nearestOctaveShift(diff);
-    uint8_t bass_pitch = clampPitch(
-        static_cast<int>(primary_pitch) - shift, kBassLow, kBassHigh);
+    uint8_t bass_pitch = clampPitch(static_cast<int>(primary_pitch) - shift, kBassLow, kBassHigh);
 
     Tick bar_start = static_cast<Tick>(bar_idx) * ticks_per_bar;
 
@@ -224,8 +216,8 @@ std::vector<NoteEvent> OrnamentalGenerator::generateBassLine(
       uint8_t res_pitch_raw = bar_info.bass_motion.resolution_pitch.value();
       int res_diff = static_cast<int>(res_pitch_raw) - target_center;
       int res_shift = nearestOctaveShift(res_diff);
-      uint8_t res_pitch = clampPitch(
-          static_cast<int>(res_pitch_raw) - res_shift, kBassLow, kBassHigh);
+      uint8_t res_pitch =
+          clampPitch(static_cast<int>(res_pitch_raw) - res_shift, kBassLow, kBassHigh);
 
       BachNoteOptions res_opts{};
       res_opts.voice = 1;
@@ -263,10 +255,8 @@ std::vector<NoteEvent> OrnamentalGenerator::generateBassLine(
 // OrnamentalGenerator::applyOrnaments
 // ---------------------------------------------------------------------------
 
-void OrnamentalGenerator::applyOrnaments(
-    std::vector<NoteEvent>& notes,
-    bool is_trill_etude,
-    uint32_t seed) const {
+void OrnamentalGenerator::applyOrnaments(std::vector<NoteEvent>& notes, bool is_trill_etude,
+                                         uint32_t seed) const {
   // Piano style: disable harpsichord-specific ornaments.
   OrnamentConfig config;
   config.enable_turn = false;

@@ -76,19 +76,15 @@ constexpr VoiceRange kFugatoRanges[kFugatoVoices] = {
 /// @param scale Scale type.
 /// @param start_tick Tick offset for the entry.
 /// @return Transposed notes placed at start_tick, assigned to voice_idx.
-std::vector<NoteEvent> placeFugatoEntry(const std::vector<NoteEvent>& notes,
-                                        int voice_idx,
-                                        int degree_steps,
-                                        Key key,
-                                        ScaleType scale,
+std::vector<NoteEvent> placeFugatoEntry(const std::vector<NoteEvent>& notes, int voice_idx,
+                                        int degree_steps, Key key, ScaleType scale,
                                         Tick start_tick) {
   // First transpose diatonically.
   std::vector<NoteEvent> transposed =
-      (degree_steps != 0)
-          ? transposeMelodyDiatonic(notes, degree_steps, key, scale)
-          : notes;
+      (degree_steps != 0) ? transposeMelodyDiatonic(notes, degree_steps, key, scale) : notes;
 
-  if (transposed.empty()) return transposed;
+  if (transposed.empty())
+    return transposed;
 
   // Calculate median pitch of transposed entry.
   int sum_pitch = 0;
@@ -132,14 +128,11 @@ std::vector<NoteEvent> placeFugatoEntry(const std::vector<NoteEvent>& notes,
 /// @param time_sig Time signature.
 /// @param rng Random number generator.
 /// @return Vector of NoteEvents for the free counterpoint fill.
-std::vector<NoteEvent> generateFugatoCounterpoint(
-    int voice_idx,
-    int start_bar,
-    int num_bars,
-    const GoldbergStructuralGrid& grid,
-    const KeySignature& key,
-    const TimeSignature& time_sig,
-    std::mt19937& rng) {
+std::vector<NoteEvent> generateFugatoCounterpoint(int voice_idx, int start_bar, int num_bars,
+                                                  const GoldbergStructuralGrid& grid,
+                                                  const KeySignature& key,
+                                                  const TimeSignature& time_sig,
+                                                  std::mt19937& rng) {
   std::vector<NoteEvent> result;
   ScaleType scale = key.is_minor ? ScaleType::HarmonicMinor : ScaleType::Major;
 
@@ -151,7 +144,8 @@ std::vector<NoteEvent> generateFugatoCounterpoint(
   Tick base_dur = kTicksPerBeat / 2;  // Eighth note.
 
   int bar = std::max(0, start_bar);
-  if (bar >= kTotalBars) return result;
+  if (bar >= kTotalBars)
+    return result;
 
   // Start from the structural bass pitch adjusted to the voice register.
   int grid_bar = std::min(31, bar);
@@ -161,12 +155,12 @@ std::vector<NoteEvent> generateFugatoCounterpoint(
   prev_pitch = clampPitch(static_cast<int>(prev_pitch) + oct_shift, range.low, range.high);
   prev_pitch = scale_util::nearestScaleTone(prev_pitch, key.tonic, scale);
 
-  for (int bar_idx = start_bar; bar_idx < start_bar + num_bars && bar_idx < kTotalBars;
-       ++bar_idx) {
+  for (int bar_idx = start_bar; bar_idx < start_bar + num_bars && bar_idx < kTotalBars; ++bar_idx) {
     grid_bar = std::max(0, std::min(31, bar_idx));
     Tick bar_start = static_cast<Tick>(bar_idx) * ticks_per_bar;
     int notes_in_bar = static_cast<int>(ticks_per_bar / base_dur);
-    if (notes_in_bar < 1) notes_in_bar = 1;
+    if (notes_in_bar < 1)
+      notes_in_bar = 1;
 
     // Get structural bass pitch for harmonic alignment.
     uint8_t bass_pitch = grid.getStructuralBassPitch(grid_bar);
@@ -201,7 +195,8 @@ std::vector<NoteEvent> generateFugatoCounterpoint(
       opts.source = BachNoteSource::GoldbergOverture;
 
       auto note_result = createBachNote(nullptr, nullptr, nullptr, opts);
-      if (!note_result.accepted) continue;
+      if (!note_result.accepted)
+        continue;
       NoteEvent note = note_result.note;
       note.pitch = new_pitch;
       note.source = BachNoteSource::GoldbergOverture;
@@ -220,11 +215,9 @@ std::vector<NoteEvent> generateFugatoCounterpoint(
 // OvertureGenerator::generate
 // ---------------------------------------------------------------------------
 
-OvertureResult OvertureGenerator::generate(
-    const GoldbergStructuralGrid& grid,
-    const KeySignature& key,
-    const TimeSignature& time_sig,
-    uint32_t seed) const {
+OvertureResult OvertureGenerator::generate(const GoldbergStructuralGrid& grid,
+                                           const KeySignature& key, const TimeSignature& time_sig,
+                                           uint32_t seed) const {
   OvertureResult result;
   result.success = false;
 
@@ -249,10 +242,9 @@ OvertureResult OvertureGenerator::generate(
   }
 
   // Sort by start_tick for clean output.
-  std::sort(all_notes.begin(), all_notes.end(),
-            [](const NoteEvent& lhs, const NoteEvent& rhs) {
-              return lhs.start_tick < rhs.start_tick;
-            });
+  std::sort(all_notes.begin(), all_notes.end(), [](const NoteEvent& lhs, const NoteEvent& rhs) {
+    return lhs.start_tick < rhs.start_tick;
+  });
 
   // --- Apply binary repeats ---
   Tick section_ticks = static_cast<Tick>(kSectionBars) * ticks_per_bar;
@@ -267,11 +259,10 @@ OvertureResult OvertureGenerator::generate(
 // OvertureGenerator::generateGrave
 // ---------------------------------------------------------------------------
 
-std::vector<NoteEvent> OvertureGenerator::generateGrave(
-    const GoldbergStructuralGrid& grid,
-    const KeySignature& key,
-    const TimeSignature& time_sig,
-    std::mt19937& rng) const {
+std::vector<NoteEvent> OvertureGenerator::generateGrave(const GoldbergStructuralGrid& grid,
+                                                        const KeySignature& key,
+                                                        const TimeSignature& time_sig,
+                                                        std::mt19937& rng) const {
   std::vector<NoteEvent> grave_notes;
 
   // FiguraProfile for DottedGrave: stately dotted rhythms, French style.
@@ -316,11 +307,10 @@ std::vector<NoteEvent> OvertureGenerator::generateGrave(
 // OvertureGenerator::generateFugato
 // ---------------------------------------------------------------------------
 
-std::vector<NoteEvent> OvertureGenerator::generateFugato(
-    const GoldbergStructuralGrid& grid,
-    const KeySignature& key,
-    const TimeSignature& time_sig,
-    std::mt19937& rng) const {
+std::vector<NoteEvent> OvertureGenerator::generateFugato(const GoldbergStructuralGrid& grid,
+                                                         const KeySignature& key,
+                                                         const TimeSignature& time_sig,
+                                                         std::mt19937& rng) const {
   std::vector<NoteEvent> fugato_notes;
   fugato_notes.reserve(256);
 
@@ -337,7 +327,8 @@ std::vector<NoteEvent> OvertureGenerator::generateFugato(
   soggetto_params.path_candidates = 8;
 
   Subject soggetto = soggetto_gen.generate(soggetto_params, key, time_sig, rng());
-  if (soggetto.notes.empty()) return fugato_notes;
+  if (soggetto.notes.empty())
+    return fugato_notes;
 
   // --- Step 2: Build 3-voice fugue exposition (bars 16-19) ---
   // Voice 0 (soprano): bar 16, soggetto on tonic.
@@ -354,14 +345,14 @@ std::vector<NoteEvent> OvertureGenerator::generateFugato(
     // Alternate tonic/dominant entries.
     int degree_step = (entry_idx % 2 == 0) ? 0 : kAnswerDegreeStep;
 
-    auto entry = placeFugatoEntry(soggetto.notes, entry_idx, degree_step,
-                                  key.tonic, scale, entry_tick);
+    auto entry =
+        placeFugatoEntry(soggetto.notes, entry_idx, degree_step, key.tonic, scale, entry_tick);
     fugato_notes.insert(fugato_notes.end(), entry.begin(), entry.end());
 
     // Fill previously entered voices with free counterpoint during this entry.
     for (int prev = 0; prev < entry_idx; ++prev) {
-      auto fill = generateFugatoCounterpoint(
-          prev, entry_bar, kSoggettoBars, grid, key, time_sig, rng);
+      auto fill =
+          generateFugatoCounterpoint(prev, entry_bar, kSoggettoBars, grid, key, time_sig, rng);
       fugato_notes.insert(fugato_notes.end(), fill.begin(), fill.end());
     }
   }
@@ -385,8 +376,7 @@ std::vector<NoteEvent> OvertureGenerator::generateFugato(
 
       if (strategy == 0 && remaining_bars >= 3) {
         // Diatonic sequence of the Kopfmotiv (descending by step, 2 repetitions).
-        auto sequence = generateDiatonicSequence(kopfmotiv, 2, -1,
-                                                  current_tick, key.tonic, scale);
+        auto sequence = generateDiatonicSequence(kopfmotiv, 2, -1, current_tick, key.tonic, scale);
         for (auto& note : sequence) {
           note.voice = static_cast<VoiceId>(dev_voice % kFugatoVoices);
           const auto& range = kFugatoRanges[note.voice];
@@ -397,10 +387,10 @@ std::vector<NoteEvent> OvertureGenerator::generateFugato(
 
         // Fill other voices.
         for (int vox = 0; vox < kFugatoVoices; ++vox) {
-          if (vox == dev_voice % kFugatoVoices) continue;
-          auto fill = generateFugatoCounterpoint(
-              vox, current_bar, std::min(3, remaining_bars),
-              grid, key, time_sig, rng);
+          if (vox == dev_voice % kFugatoVoices)
+            continue;
+          auto fill = generateFugatoCounterpoint(vox, current_bar, std::min(3, remaining_bars),
+                                                 grid, key, time_sig, rng);
           fugato_notes.insert(fugato_notes.end(), fill.begin(), fill.end());
         }
 
@@ -411,16 +401,15 @@ std::vector<NoteEvent> OvertureGenerator::generateFugato(
         uint8_t pivot = soggetto.notes[0].pitch;
         auto inverted = invertMelodyDiatonic(soggetto.notes, pivot, key.tonic, scale);
         int entry_voice = dev_voice % kFugatoVoices;
-        auto placed = placeFugatoEntry(inverted, entry_voice, 0,
-                                       key.tonic, scale, current_tick);
+        auto placed = placeFugatoEntry(inverted, entry_voice, 0, key.tonic, scale, current_tick);
         fugato_notes.insert(fugato_notes.end(), placed.begin(), placed.end());
 
         // Fill other voices.
         for (int vox = 0; vox < kFugatoVoices; ++vox) {
-          if (vox == entry_voice) continue;
-          auto fill = generateFugatoCounterpoint(
-              vox, current_bar, kSoggettoBars,
-              grid, key, time_sig, rng);
+          if (vox == entry_voice)
+            continue;
+          auto fill =
+              generateFugatoCounterpoint(vox, current_bar, kSoggettoBars, grid, key, time_sig, rng);
           fugato_notes.insert(fugato_notes.end(), fill.begin(), fill.end());
         }
 
@@ -430,9 +419,8 @@ std::vector<NoteEvent> OvertureGenerator::generateFugato(
         // Free counterpoint fill for all voices.
         int fill_bars = std::min(2, remaining_bars);
         for (int vox = 0; vox < kFugatoVoices; ++vox) {
-          auto fill = generateFugatoCounterpoint(
-              vox, current_bar, fill_bars,
-              grid, key, time_sig, rng);
+          auto fill =
+              generateFugatoCounterpoint(vox, current_bar, fill_bars, grid, key, time_sig, rng);
           fugato_notes.insert(fugato_notes.end(), fill.begin(), fill.end());
         }
         current_bar += fill_bars;
@@ -446,9 +434,8 @@ std::vector<NoteEvent> OvertureGenerator::generateFugato(
   if (final_start_bar < kTotalBars) {
     int final_bars = kTotalBars - final_start_bar;
     for (int vox = 0; vox < kFugatoVoices; ++vox) {
-      auto fill = generateFugatoCounterpoint(
-          vox, final_start_bar, final_bars,
-          grid, key, time_sig, rng);
+      auto fill =
+          generateFugatoCounterpoint(vox, final_start_bar, final_bars, grid, key, time_sig, rng);
       fugato_notes.insert(fugato_notes.end(), fill.begin(), fill.end());
     }
   }
@@ -460,20 +447,17 @@ std::vector<NoteEvent> OvertureGenerator::generateFugato(
 // OvertureGenerator::generateBassLine
 // ---------------------------------------------------------------------------
 
-std::vector<NoteEvent> OvertureGenerator::generateBassLine(
-    const GoldbergStructuralGrid& grid,
-    const KeySignature& /*key*/,
-    const TimeSignature& time_sig,
-    int start_bar,
-    int num_bars) const {
+std::vector<NoteEvent> OvertureGenerator::generateBassLine(const GoldbergStructuralGrid& grid,
+                                                           const KeySignature& /*key*/,
+                                                           const TimeSignature& time_sig,
+                                                           int start_bar, int num_bars) const {
   std::vector<NoteEvent> bass_notes;
   bass_notes.reserve(static_cast<size_t>(num_bars) * 2);
 
   Tick ticks_per_bar = time_sig.ticksPerBar();
   int target_center = (kBassLow + kBassHigh) / 2;  // ~C3 (48)
 
-  for (int bar_idx = start_bar; bar_idx < start_bar + num_bars && bar_idx < kTotalBars;
-       ++bar_idx) {
+  for (int bar_idx = start_bar; bar_idx < start_bar + num_bars && bar_idx < kTotalBars; ++bar_idx) {
     int grid_bar = std::max(0, std::min(31, bar_idx));
     const auto& bar_info = grid.getBar(grid_bar);
     uint8_t primary_pitch = bar_info.bass_motion.primary_pitch;
@@ -481,8 +465,7 @@ std::vector<NoteEvent> OvertureGenerator::generateBassLine(
     // Place primary pitch in bass register (C2-C4) using nearestOctaveShift.
     int diff = static_cast<int>(primary_pitch) - target_center;
     int shift = nearestOctaveShift(diff);
-    uint8_t bass_pitch = clampPitch(
-        static_cast<int>(primary_pitch) - shift, kBassLow, kBassHigh);
+    uint8_t bass_pitch = clampPitch(static_cast<int>(primary_pitch) - shift, kBassLow, kBassHigh);
 
     Tick bar_start = static_cast<Tick>(bar_idx) * ticks_per_bar;
 
@@ -509,8 +492,8 @@ std::vector<NoteEvent> OvertureGenerator::generateBassLine(
       uint8_t res_pitch_raw = bar_info.bass_motion.resolution_pitch.value();
       int res_diff = static_cast<int>(res_pitch_raw) - target_center;
       int res_shift = nearestOctaveShift(res_diff);
-      uint8_t res_pitch = clampPitch(
-          static_cast<int>(res_pitch_raw) - res_shift, kBassLow, kBassHigh);
+      uint8_t res_pitch =
+          clampPitch(static_cast<int>(res_pitch_raw) - res_shift, kBassLow, kBassHigh);
 
       BachNoteOptions res_opts{};
       res_opts.voice = 1;

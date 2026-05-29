@@ -86,9 +86,9 @@ TEST(GoldbergGridTest, TensionResolvesAtBar32) {
 
 TEST(GoldbergGridTest, BassResolutionAtCadenceBars) {
   auto grid = GoldbergStructuralGrid::createMajor();
-  EXPECT_TRUE(grid.hasBassResolution(7));    // Bar 8
-  EXPECT_TRUE(grid.hasBassResolution(15));   // Bar 16
-  EXPECT_FALSE(grid.hasBassResolution(0));   // Bar 1
+  EXPECT_TRUE(grid.hasBassResolution(7));   // Bar 8
+  EXPECT_TRUE(grid.hasBassResolution(15));  // Bar 16
+  EXPECT_FALSE(grid.hasBassResolution(0));  // Bar 1
 }
 
 TEST(GoldbergGridTest, Phrase4ViewCadence) {
@@ -217,10 +217,8 @@ TEST(GoldbergGridTest, TimelineKeyIsG) {
   auto timeline = grid.toTimeline(key, time_sig);
 
   for (size_t idx = 0; idx < timeline.size(); ++idx) {
-    EXPECT_EQ(timeline.events()[idx].key, Key::G)
-        << "Event " << idx << " should be in G";
-    EXPECT_FALSE(timeline.events()[idx].is_minor)
-        << "Event " << idx << " should be major";
+    EXPECT_EQ(timeline.events()[idx].key, Key::G) << "Event " << idx << " should be in G";
+    EXPECT_FALSE(timeline.events()[idx].is_minor) << "Event " << idx << " should be major";
   }
 }
 

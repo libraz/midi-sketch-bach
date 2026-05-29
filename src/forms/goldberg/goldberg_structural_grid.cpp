@@ -29,18 +29,11 @@ constexpr int clampBar(int bar) {
 }
 
 /// @brief Build a StructuralBarInfo entry.
-StructuralBarInfo makeBarInfo(
-    uint8_t primary_pitch,
-    std::optional<uint8_t> resolution_pitch,
-    bool is_descending,
-    uint8_t scale_idx,
-    HarmonicFunction function,
-    ChordDegree degree,
-    BarInPhrase bip,
-    std::optional<CadenceType> cadence,
-    StructuralLevel level,
-    float tension_val,
-    uint8_t phrase_group) {
+StructuralBarInfo makeBarInfo(uint8_t primary_pitch, std::optional<uint8_t> resolution_pitch,
+                              bool is_descending, uint8_t scale_idx, HarmonicFunction function,
+                              ChordDegree degree, BarInPhrase bip,
+                              std::optional<CadenceType> cadence, StructuralLevel level,
+                              float tension_val, uint8_t phrase_group) {
   StructuralBarInfo info{};
   info.bass_motion.primary_pitch = primary_pitch;
   info.bass_motion.resolution_pitch = resolution_pitch;
@@ -78,167 +71,135 @@ GoldbergStructuralGrid GoldbergStructuralGrid::createMajor() {
 
   // Bar 1-8: First phrase group (descending bass scale G-F#-E-D-C-B-A-G).
   // Bar 1: I, G(55), BIP=1, Opening, no cadence, BarLevel, T=0.1
-  grid.bars_[0] = makeBarInfo(
-      kBassG, kNoRes, true, 0, HF::Tonic, CD::I,
-      1, kNoCad, SL::BarLevel, 0.1f, 0);
+  grid.bars_[0] =
+      makeBarInfo(kBassG, kNoRes, true, 0, HF::Tonic, CD::I, 1, kNoCad, SL::BarLevel, 0.1f, 0);
 
   // Bar 2: V6, F#(54), BIP=2, Expansion, no cadence, BarLevel, T=0.2
-  grid.bars_[1] = makeBarInfo(
-      kBassFs, kNoRes, true, 1, HF::Dominant, CD::V,
-      2, kNoCad, SL::BarLevel, 0.2f, 0);
+  grid.bars_[1] =
+      makeBarInfo(kBassFs, kNoRes, true, 1, HF::Dominant, CD::V, 2, kNoCad, SL::BarLevel, 0.2f, 0);
 
   // Bar 3: vi, E(52), BIP=3, Intensification, no cadence, BarLevel, T=0.3
-  grid.bars_[2] = makeBarInfo(
-      kBassE, kNoRes, true, 2, HF::Tonic, CD::vi,
-      3, kNoCad, SL::BarLevel, 0.3f, 0);
+  grid.bars_[2] =
+      makeBarInfo(kBassE, kNoRes, true, 2, HF::Tonic, CD::vi, 3, kNoCad, SL::BarLevel, 0.3f, 0);
 
   // Bar 4: iii->V, D(50), BIP=4, Cadence, Half, Phrase4, T=0.4
-  grid.bars_[3] = makeBarInfo(
-      kBassD, kNoRes, true, 3, HF::Mediant, CD::iii,
-      4, CT::Half, SL::Phrase4, 0.4f, 0);
+  grid.bars_[3] =
+      makeBarInfo(kBassD, kNoRes, true, 3, HF::Mediant, CD::iii, 4, CT::Half, SL::Phrase4, 0.4f, 0);
 
   // Bar 5: IV, C(48), BIP=1, Opening, no cadence, BarLevel, T=0.3
-  grid.bars_[4] = makeBarInfo(
-      kBassC, kNoRes, true, 4, HF::Subdominant, CD::IV,
-      1, kNoCad, SL::BarLevel, 0.3f, 1);
+  grid.bars_[4] = makeBarInfo(kBassC, kNoRes, true, 4, HF::Subdominant, CD::IV, 1, kNoCad,
+                              SL::BarLevel, 0.3f, 1);
 
   // Bar 6: I6, B(47), BIP=2, Expansion, no cadence, BarLevel, T=0.4
-  grid.bars_[5] = makeBarInfo(
-      kBassB, kNoRes, true, 5, HF::Tonic, CD::I,
-      2, kNoCad, SL::BarLevel, 0.4f, 1);
+  grid.bars_[5] =
+      makeBarInfo(kBassB, kNoRes, true, 5, HF::Tonic, CD::I, 2, kNoCad, SL::BarLevel, 0.4f, 1);
 
   // Bar 7: ii->V, A(45), BIP=3, Intensification, no cadence, BarLevel, T=0.5
-  grid.bars_[6] = makeBarInfo(
-      kBassA, kNoRes, true, 6, HF::Subdominant, CD::ii,
-      3, kNoCad, SL::BarLevel, 0.5f, 1);
+  grid.bars_[6] = makeBarInfo(kBassA, kNoRes, true, 6, HF::Subdominant, CD::ii, 3, kNoCad,
+                              SL::BarLevel, 0.5f, 1);
 
   // Bar 8: I, B(47)->G(55), BIP=4, Cadence, Perfect, Phrase8, T=0.2
-  grid.bars_[7] = makeBarInfo(
-      kBassB, kBassG, true, 7, HF::Tonic, CD::I,
-      4, CT::Perfect, SL::Phrase8, 0.2f, 1);
+  grid.bars_[7] =
+      makeBarInfo(kBassB, kBassG, true, 7, HF::Tonic, CD::I, 4, CT::Perfect, SL::Phrase8, 0.2f, 1);
 
   // Bar 9-16: Second phrase group (no descending scale).
   // Bar 9: ii, A(45), BIP=1, Opening, no cadence, BarLevel, T=0.3
-  grid.bars_[8] = makeBarInfo(
-      kBassA, kNoRes, false, 0, HF::Subdominant, CD::ii,
-      1, kNoCad, SL::BarLevel, 0.3f, 2);
+  grid.bars_[8] = makeBarInfo(kBassA, kNoRes, false, 0, HF::Subdominant, CD::ii, 1, kNoCad,
+                              SL::BarLevel, 0.3f, 2);
 
   // Bar 10: V, D(50), BIP=2, Expansion, no cadence, BarLevel, T=0.5
-  grid.bars_[9] = makeBarInfo(
-      kBassD, kNoRes, false, 0, HF::Dominant, CD::V,
-      2, kNoCad, SL::BarLevel, 0.5f, 2);
+  grid.bars_[9] =
+      makeBarInfo(kBassD, kNoRes, false, 0, HF::Dominant, CD::V, 2, kNoCad, SL::BarLevel, 0.5f, 2);
 
   // Bar 11: vi, E(52), BIP=3, Intensification, no cadence, BarLevel, T=0.6
-  grid.bars_[10] = makeBarInfo(
-      kBassE, kNoRes, false, 0, HF::Tonic, CD::vi,
-      3, kNoCad, SL::BarLevel, 0.6f, 2);
+  grid.bars_[10] =
+      makeBarInfo(kBassE, kNoRes, false, 0, HF::Tonic, CD::vi, 3, kNoCad, SL::BarLevel, 0.6f, 2);
 
   // Bar 12: V/vi, B(47), BIP=4, Cadence, Half, Phrase4, T=0.5
-  grid.bars_[11] = makeBarInfo(
-      kBassB, kNoRes, false, 0, HF::Applied, CD::V_of_vi,
-      4, CT::Half, SL::Phrase4, 0.5f, 2);
+  grid.bars_[11] = makeBarInfo(kBassB, kNoRes, false, 0, HF::Applied, CD::V_of_vi, 4, CT::Half,
+                               SL::Phrase4, 0.5f, 2);
 
   // Bar 13: IV, C(48), BIP=1, Opening, no cadence, BarLevel, T=0.4
-  grid.bars_[12] = makeBarInfo(
-      kBassC, kNoRes, false, 0, HF::Subdominant, CD::IV,
-      1, kNoCad, SL::BarLevel, 0.4f, 3);
+  grid.bars_[12] = makeBarInfo(kBassC, kNoRes, false, 0, HF::Subdominant, CD::IV, 1, kNoCad,
+                               SL::BarLevel, 0.4f, 3);
 
   // Bar 14: V, D(50), BIP=2, Expansion, no cadence, BarLevel, T=0.6
-  grid.bars_[13] = makeBarInfo(
-      kBassD, kNoRes, false, 0, HF::Dominant, CD::V,
-      2, kNoCad, SL::BarLevel, 0.6f, 3);
+  grid.bars_[13] =
+      makeBarInfo(kBassD, kNoRes, false, 0, HF::Dominant, CD::V, 2, kNoCad, SL::BarLevel, 0.6f, 3);
 
   // Bar 15: I, G(55), BIP=3, Intensification, no cadence, BarLevel, T=0.7
-  grid.bars_[14] = makeBarInfo(
-      kBassG, kNoRes, false, 0, HF::Tonic, CD::I,
-      3, kNoCad, SL::BarLevel, 0.7f, 3);
+  grid.bars_[14] =
+      makeBarInfo(kBassG, kNoRes, false, 0, HF::Tonic, CD::I, 3, kNoCad, SL::BarLevel, 0.7f, 3);
 
   // Bar 16: V->I, D(50)->G(55), BIP=4, Cadence, Half, Section16, T=0.5
-  grid.bars_[15] = makeBarInfo(
-      kBassD, kBassG, false, 0, HF::Dominant, CD::V,
-      4, CT::Half, SL::Section16, 0.5f, 3);
+  grid.bars_[15] = makeBarInfo(kBassD, kBassG, false, 0, HF::Dominant, CD::V, 4, CT::Half,
+                               SL::Section16, 0.5f, 3);
 
   // Bar 17-24: Third phrase group (second half begins).
   // Bar 17: I, G(55), BIP=1, Opening, no cadence, BarLevel, T=0.2
-  grid.bars_[16] = makeBarInfo(
-      kBassG, kNoRes, false, 0, HF::Tonic, CD::I,
-      1, kNoCad, SL::BarLevel, 0.2f, 4);
+  grid.bars_[16] =
+      makeBarInfo(kBassG, kNoRes, false, 0, HF::Tonic, CD::I, 1, kNoCad, SL::BarLevel, 0.2f, 4);
 
   // Bar 18: viio6, F#(54), BIP=2, Expansion, no cadence, BarLevel, T=0.3
-  grid.bars_[17] = makeBarInfo(
-      kBassFs, kNoRes, false, 0, HF::Dominant, CD::viiDim,
-      2, kNoCad, SL::BarLevel, 0.3f, 4);
+  grid.bars_[17] = makeBarInfo(kBassFs, kNoRes, false, 0, HF::Dominant, CD::viiDim, 2, kNoCad,
+                               SL::BarLevel, 0.3f, 4);
 
   // Bar 19: ii, A(45), BIP=3, Intensification, no cadence, BarLevel, T=0.4
-  grid.bars_[18] = makeBarInfo(
-      kBassA, kNoRes, false, 0, HF::Subdominant, CD::ii,
-      3, kNoCad, SL::BarLevel, 0.4f, 4);
+  grid.bars_[18] = makeBarInfo(kBassA, kNoRes, false, 0, HF::Subdominant, CD::ii, 3, kNoCad,
+                               SL::BarLevel, 0.4f, 4);
 
   // Bar 20: V/V, A(45)->D(50), BIP=4, Cadence, Half, Phrase4, T=0.5
-  grid.bars_[19] = makeBarInfo(
-      kBassA, kBassD, false, 0, HF::Applied, CD::V_of_V,
-      4, CT::Half, SL::Phrase4, 0.5f, 4);
+  grid.bars_[19] = makeBarInfo(kBassA, kBassD, false, 0, HF::Applied, CD::V_of_V, 4, CT::Half,
+                               SL::Phrase4, 0.5f, 4);
 
   // Bar 21: V, D(50), BIP=1, Opening, no cadence, BarLevel, T=0.3
-  grid.bars_[20] = makeBarInfo(
-      kBassD, kNoRes, false, 0, HF::Dominant, CD::V,
-      1, kNoCad, SL::BarLevel, 0.3f, 5);
+  grid.bars_[20] =
+      makeBarInfo(kBassD, kNoRes, false, 0, HF::Dominant, CD::V, 1, kNoCad, SL::BarLevel, 0.3f, 5);
 
   // Bar 22: I6, B(47), BIP=2, Expansion, no cadence, BarLevel, T=0.4
-  grid.bars_[21] = makeBarInfo(
-      kBassB, kNoRes, false, 0, HF::Tonic, CD::I,
-      2, kNoCad, SL::BarLevel, 0.4f, 5);
+  grid.bars_[21] =
+      makeBarInfo(kBassB, kNoRes, false, 0, HF::Tonic, CD::I, 2, kNoCad, SL::BarLevel, 0.4f, 5);
 
   // Bar 23: ii7, A(45), BIP=3, Intensification, no cadence, BarLevel, T=0.5
-  grid.bars_[22] = makeBarInfo(
-      kBassA, kNoRes, false, 0, HF::Subdominant, CD::ii,
-      3, kNoCad, SL::BarLevel, 0.5f, 5);
+  grid.bars_[22] = makeBarInfo(kBassA, kNoRes, false, 0, HF::Subdominant, CD::ii, 3, kNoCad,
+                               SL::BarLevel, 0.5f, 5);
 
   // Bar 24: V->I, B(47)->G(55), BIP=4, Cadence, Perfect, Phrase8, T=0.3
-  grid.bars_[23] = makeBarInfo(
-      kBassB, kBassG, false, 0, HF::Dominant, CD::V,
-      4, CT::Perfect, SL::Phrase8, 0.3f, 5);
+  grid.bars_[23] = makeBarInfo(kBassB, kBassG, false, 0, HF::Dominant, CD::V, 4, CT::Perfect,
+                               SL::Phrase8, 0.3f, 5);
 
   // Bar 25-32: Fourth phrase group (final buildup and resolution).
   // Bar 25: vi, E(52), BIP=1, Opening, no cadence, BarLevel, T=0.4
-  grid.bars_[24] = makeBarInfo(
-      kBassE, kNoRes, false, 0, HF::Tonic, CD::vi,
-      1, kNoCad, SL::BarLevel, 0.4f, 6);
+  grid.bars_[24] =
+      makeBarInfo(kBassE, kNoRes, false, 0, HF::Tonic, CD::vi, 1, kNoCad, SL::BarLevel, 0.4f, 6);
 
   // Bar 26: IV, C(48), BIP=2, Expansion, no cadence, BarLevel, T=0.5
-  grid.bars_[25] = makeBarInfo(
-      kBassC, kNoRes, false, 0, HF::Subdominant, CD::IV,
-      2, kNoCad, SL::BarLevel, 0.5f, 6);
+  grid.bars_[25] = makeBarInfo(kBassC, kNoRes, false, 0, HF::Subdominant, CD::IV, 2, kNoCad,
+                               SL::BarLevel, 0.5f, 6);
 
   // Bar 27: viio/V, C#(49)->D(50), BIP=3, Intensification, no cadence, BarLevel, T=0.6
-  grid.bars_[26] = makeBarInfo(
-      kBassCs, kBassD, false, 0, HF::Dominant, CD::viiDim,
-      3, kNoCad, SL::BarLevel, 0.6f, 6);
+  grid.bars_[26] = makeBarInfo(kBassCs, kBassD, false, 0, HF::Dominant, CD::viiDim, 3, kNoCad,
+                               SL::BarLevel, 0.6f, 6);
 
   // Bar 28: V, D(50), BIP=4, Cadence, Half, Phrase4, T=0.7
-  grid.bars_[27] = makeBarInfo(
-      kBassD, kNoRes, false, 0, HF::Dominant, CD::V,
-      4, CT::Half, SL::Phrase4, 0.7f, 6);
+  grid.bars_[27] =
+      makeBarInfo(kBassD, kNoRes, false, 0, HF::Dominant, CD::V, 4, CT::Half, SL::Phrase4, 0.7f, 6);
 
   // Bar 29: I6/4, G(55), BIP=1, Opening, no cadence, BarLevel, T=0.8
-  grid.bars_[28] = makeBarInfo(
-      kBassG, kNoRes, false, 0, HF::Tonic, CD::I,
-      1, kNoCad, SL::BarLevel, 0.8f, 7);
+  grid.bars_[28] =
+      makeBarInfo(kBassG, kNoRes, false, 0, HF::Tonic, CD::I, 1, kNoCad, SL::BarLevel, 0.8f, 7);
 
   // Bar 30: V7, D(50), BIP=2, Expansion, no cadence, BarLevel, T=0.85
-  grid.bars_[29] = makeBarInfo(
-      kBassD, kNoRes, false, 0, HF::Dominant, CD::V,
-      2, kNoCad, SL::BarLevel, 0.85f, 7);
+  grid.bars_[29] =
+      makeBarInfo(kBassD, kNoRes, false, 0, HF::Dominant, CD::V, 2, kNoCad, SL::BarLevel, 0.85f, 7);
 
   // Bar 31: V->I, D(50)->G(55), BIP=3, Intensification, no cadence, BarLevel, T=0.9
-  grid.bars_[30] = makeBarInfo(
-      kBassD, kBassG, false, 0, HF::Dominant, CD::V,
-      3, kNoCad, SL::BarLevel, 0.9f, 7);
+  grid.bars_[30] =
+      makeBarInfo(kBassD, kBassG, false, 0, HF::Dominant, CD::V, 3, kNoCad, SL::BarLevel, 0.9f, 7);
 
   // Bar 32: I, G(55), BIP=4, Cadence, Perfect, Global32, T=0.0
-  grid.bars_[31] = makeBarInfo(
-      kBassG, kNoRes, false, 0, HF::Tonic, CD::I,
-      4, CT::Perfect, SL::Global32, 0.0f, 7);
+  grid.bars_[31] = makeBarInfo(kBassG, kNoRes, false, 0, HF::Tonic, CD::I, 4, CT::Perfect,
+                               SL::Global32, 0.0f, 7);
 
   // Layer 5: Aria melody is populated per seed by the orchestrator
   // via setAriaMelody() after calling generateAriaMelody().
@@ -326,8 +287,7 @@ bool GoldbergStructuralGrid::isSectionBoundary(int bar) const {
 // Hierarchical views
 // ---------------------------------------------------------------------------
 
-GoldbergStructuralGrid::Phrase4View GoldbergStructuralGrid::getPhrase4(
-    int phrase_index) const {
+GoldbergStructuralGrid::Phrase4View GoldbergStructuralGrid::getPhrase4(int phrase_index) const {
   int clamped = std::clamp(phrase_index, 0, 7);
   int start = clamped * 4;
 
@@ -350,8 +310,7 @@ GoldbergStructuralGrid::Phrase4View GoldbergStructuralGrid::getPhrase4(
   return view;
 }
 
-GoldbergStructuralGrid::Phrase8View GoldbergStructuralGrid::getPhrase8(
-    int section_index) const {
+GoldbergStructuralGrid::Phrase8View GoldbergStructuralGrid::getPhrase8(int section_index) const {
   int clamped = std::clamp(section_index, 0, 3);
   int start = clamped * 8;
 
@@ -382,7 +341,7 @@ GoldbergStructuralGrid::Section16View GoldbergStructuralGrid::getSection16(int h
 // ---------------------------------------------------------------------------
 
 HarmonicTimeline GoldbergStructuralGrid::toTimeline(const KeySignature& key,
-                                                     const TimeSignature& time_sig) const {
+                                                    const TimeSignature& time_sig) const {
   HarmonicTimeline timeline;
   Tick ticks_per_bar = time_sig.ticksPerBar();
 

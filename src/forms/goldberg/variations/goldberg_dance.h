@@ -26,14 +26,14 @@ struct DanceResult {
 /// directional bias. These are design values derived from the historical
 /// Goldberg Variations.
 struct DanceProfile {
-  FiguraType primary_figura;     ///< Dominant figura type for the dance.
-  FiguraType secondary_figura;   ///< Contrast figura for phrase variety.
-  TimeSignature time_sig;        ///< Time signature (3/8, 6/8, 3/4).
-  uint8_t notes_per_beat;        ///< Rhythmic density per beat.
-  DirectionBias direction;       ///< Dominant melodic direction.
-  float chord_tone_ratio;        ///< Proportion of chord-tone alignment.
-  float sequence_probability;    ///< Probability of sequential repetition.
-  uint8_t voice_count;           ///< Number of voices (2 or 3).
+  FiguraType primary_figura;    ///< Dominant figura type for the dance.
+  FiguraType secondary_figura;  ///< Contrast figura for phrase variety.
+  TimeSignature time_sig;       ///< Time signature (3/8, 6/8, 3/4).
+  uint8_t notes_per_beat;       ///< Rhythmic density per beat.
+  DirectionBias direction;      ///< Dominant melodic direction.
+  float chord_tone_ratio;       ///< Proportion of chord-tone alignment.
+  float sequence_probability;   ///< Probability of sequential repetition.
+  uint8_t voice_count;          ///< Number of voices (2 or 3).
 };
 
 /// @brief Returns the dance profile for the given variation number.
@@ -61,11 +61,8 @@ class DanceGenerator {
   /// @param key Key signature for scale-aware pitch generation.
   /// @param seed Random seed for deterministic generation.
   /// @return DanceResult with generated notes and success status.
-  DanceResult generate(
-      int variation_number,
-      const GoldbergStructuralGrid& grid,
-      const KeySignature& key,
-      uint32_t seed) const;
+  DanceResult generate(int variation_number, const GoldbergStructuralGrid& grid,
+                       const KeySignature& key, uint32_t seed) const;
 };
 
 }  // namespace bach

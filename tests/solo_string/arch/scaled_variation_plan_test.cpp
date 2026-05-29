@@ -1,15 +1,14 @@
 // Tests for createScaledVariationPlan -- chaconne duration scaling.
 
-#include "solo_string/arch/chaconne_config.h"
+#include <gtest/gtest.h>
 
 #include <algorithm>
 #include <random>
 #include <vector>
 
-#include <gtest/gtest.h>
-
 #include "core/basic_types.h"
 #include "harmony/key.h"
+#include "solo_string/arch/chaconne_config.h"
 #include "solo_string/arch/variation_types.h"
 
 namespace bach {
@@ -34,8 +33,8 @@ class ScaledVariationPlanTest : public ::testing::TestWithParam<ScaleTestParam> 
 TEST_P(ScaledVariationPlanTest, ValidatePassesForAllScales) {
   auto plan = createScaledVariationPlan(kDMinor, GetParam().target_variations, rng);
   EXPECT_TRUE(validateVariationPlan(plan))
-      << "Plan validation failed for " << GetParam().label
-      << " (" << GetParam().target_variations << " variations)";
+      << "Plan validation failed for " << GetParam().label << " (" << GetParam().target_variations
+      << " variations)";
 }
 
 TEST_P(ScaledVariationPlanTest, HasCorrectVariationCount) {
@@ -54,7 +53,8 @@ TEST_P(ScaledVariationPlanTest, HasExactlyThreeAccumulate) {
   auto plan = createScaledVariationPlan(kDMinor, GetParam().target_variations, rng);
   int count = 0;
   for (const auto& v : plan) {
-    if (v.role == VariationRole::Accumulate) ++count;
+    if (v.role == VariationRole::Accumulate)
+      ++count;
   }
   EXPECT_EQ(count, 3);
 }
@@ -76,7 +76,8 @@ TEST_P(ScaledVariationPlanTest, LastIsResolveTheme) {
 TEST_P(ScaledVariationPlanTest, RoleOrderIsValid) {
   auto plan = createScaledVariationPlan(kDMinor, GetParam().target_variations, rng);
   std::vector<VariationRole> roles;
-  for (const auto& v : plan) roles.push_back(v.role);
+  for (const auto& v : plan)
+    roles.push_back(v.role);
   EXPECT_TRUE(isRoleOrderValid(roles));
 }
 
@@ -84,16 +85,16 @@ TEST_P(ScaledVariationPlanTest, AllTypesAllowedForRoles) {
   auto plan = createScaledVariationPlan(kDMinor, GetParam().target_variations, rng);
   for (const auto& v : plan) {
     EXPECT_TRUE(isTypeAllowedForRole(v.type, v.role))
-        << "Type " << variationTypeToString(v.type)
-        << " not allowed for role " << variationRoleToString(v.role)
-        << " at variation " << v.variation_number;
+        << "Type " << variationTypeToString(v.type) << " not allowed for role "
+        << variationRoleToString(v.role) << " at variation " << v.variation_number;
   }
 }
 
 TEST_P(ScaledVariationPlanTest, AccumulatePositionInRange70to85Percent) {
   auto plan = createScaledVariationPlan(kDMinor, GetParam().target_variations, rng);
   int total = static_cast<int>(plan.size());
-  if (total <= 0) return;
+  if (total <= 0)
+    return;
 
   // Find first Accumulate.
   int first_accum = -1;
@@ -110,8 +111,8 @@ TEST_P(ScaledVariationPlanTest, AccumulatePositionInRange70to85Percent) {
   // Position = (N-4)/N: 0.60 for N=10, 0.94 for N=64.
   float expected = static_cast<float>(total - 4) / static_cast<float>(total);
   EXPECT_NEAR(position, expected, 0.02f)
-      << "Accumulate at unexpected position " << position
-      << " (expected ~" << expected << " for " << total << " variations)";
+      << "Accumulate at unexpected position " << position << " (expected ~" << expected << " for "
+      << total << " variations)";
 }
 
 TEST_P(ScaledVariationPlanTest, VariationNumbersAreSequential) {
@@ -121,18 +122,13 @@ TEST_P(ScaledVariationPlanTest, VariationNumbersAreSequential) {
   }
 }
 
-INSTANTIATE_TEST_SUITE_P(
-    AllScales, ScaledVariationPlanTest,
-    ::testing::Values(
-        ScaleTestParam{10, "Short"},
-        ScaleTestParam{24, "Medium"},
-        ScaleTestParam{40, "Long"},
-        ScaleTestParam{64, "Full"}
-    ),
-    [](const ::testing::TestParamInfo<ScaleTestParam>& info) {
-      return info.param.label;
-    }
-);
+INSTANTIATE_TEST_SUITE_P(AllScales, ScaledVariationPlanTest,
+                         ::testing::Values(ScaleTestParam{10, "Short"},
+                                           ScaleTestParam{24, "Medium"}, ScaleTestParam{40, "Long"},
+                                           ScaleTestParam{64, "Full"}),
+                         [](const ::testing::TestParamInfo<ScaleTestParam>& info) {
+                           return info.param.label;
+                         });
 
 // ===========================================================================
 // Short scale = identical to standard plan
@@ -146,10 +142,8 @@ TEST(ScaledVariationPlanTest, ShortScaleMatchesStandardPlan) {
 
   ASSERT_EQ(standard.size(), scaled.size());
   for (size_t idx = 0; idx < standard.size(); ++idx) {
-    EXPECT_EQ(standard[idx].role, scaled[idx].role)
-        << "Role mismatch at variation " << idx;
-    EXPECT_EQ(standard[idx].type, scaled[idx].type)
-        << "Type mismatch at variation " << idx;
+    EXPECT_EQ(standard[idx].role, scaled[idx].role) << "Role mismatch at variation " << idx;
+    EXPECT_EQ(standard[idx].type, scaled[idx].type) << "Type mismatch at variation " << idx;
     EXPECT_EQ(standard[idx].is_major_section, scaled[idx].is_major_section)
         << "Major section mismatch at variation " << idx;
   }
@@ -205,8 +199,7 @@ TEST(ScaledVariationPlanTest, IslandKeysAreNotMinorHome) {
     if (v.role == VariationRole::Illuminate && !v.is_major_section) {
       // Island keys should be major (related keys).
       EXPECT_FALSE(v.key.is_minor)
-          << "Illuminate island at variation " << v.variation_number
-          << " should use a major key";
+          << "Illuminate island at variation " << v.variation_number << " should use a major key";
     }
   }
 }
@@ -235,10 +228,8 @@ TEST(ScaledVariationPlanTest, WorksWithGMinor) {
 
 TEST(ScaledVariationPlanDestructionTest, AllScalesAllKeysValidate) {
   // Test across multiple keys and all scale targets.
-  std::vector<KeySignature> keys = {
-      {Key::D, true}, {Key::C, true}, {Key::G, true},
-      {Key::A, true}, {Key::E, true}, {Key::F, true}
-  };
+  std::vector<KeySignature> keys = {{Key::D, true}, {Key::C, true}, {Key::G, true},
+                                    {Key::A, true}, {Key::E, true}, {Key::F, true}};
   std::vector<int> targets = {10, 24, 40, 64};
 
   for (const auto& key : keys) {
@@ -246,8 +237,7 @@ TEST(ScaledVariationPlanDestructionTest, AllScalesAllKeysValidate) {
       std::mt19937 rng(42);
       auto plan = createScaledVariationPlan(key, target, rng);
       EXPECT_TRUE(validateVariationPlan(plan))
-          << "Failed for key=" << keyToString(key.tonic)
-          << " target=" << target;
+          << "Failed for key=" << keyToString(key.tonic) << " target=" << target;
     }
   }
 }

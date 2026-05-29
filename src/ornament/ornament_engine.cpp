@@ -45,11 +45,11 @@ float effectiveDensity(float base_density, VoiceRole role) {
     case VoiceRole::Assert:
       return base_density * 0.5f;  // Minimal ornamentation for subject
     case VoiceRole::Respond:
-      return base_density;         // Normal density for answer
+      return base_density;  // Normal density for answer
     case VoiceRole::Propel:
-      return base_density;         // Full density for free counterpoint
+      return base_density;  // Full density for free counterpoint
     case VoiceRole::Ground:
-      return 0.0f;                 // No ornaments on pedal/bass
+      return 0.0f;  // No ornaments on pedal/bass
   }
   return base_density;
 }
@@ -105,8 +105,8 @@ uint8_t lowerNeighborPitch(uint8_t pitch) {
 /// @param scale Scale type for diatonic neighbor calculation.
 /// @param has_key True when key context is available (false = legacy behavior).
 /// @return Vector of sub-notes replacing the original.
-std::vector<NoteEvent> applyOrnamentToNote(const NoteEvent& note, OrnamentType type,
-                                           Key key, ScaleType scale, bool has_key) {
+std::vector<NoteEvent> applyOrnamentToNote(const NoteEvent& note, OrnamentType type, Key key,
+                                           ScaleType scale, bool has_key) {
   uint8_t upper;
   uint8_t lower;
   if (has_key) {
@@ -130,8 +130,7 @@ std::vector<NoteEvent> applyOrnamentToNote(const NoteEvent& note, OrnamentType t
       uint8_t beat = beatInBar(note.start_tick);
       bool use_lower = (beat == 1 || beat == 3);
       uint8_t neighbor = use_lower ? lower : upper;
-      ApproachDirection dir = use_lower ? ApproachDirection::Lower
-                                        : ApproachDirection::Upper;
+      ApproachDirection dir = use_lower ? ApproachDirection::Lower : ApproachDirection::Upper;
       return generateAppoggiatura(note, neighbor, dir);
     }
     case OrnamentType::Pralltriller:
@@ -141,15 +140,16 @@ std::vector<NoteEvent> applyOrnamentToNote(const NoteEvent& note, OrnamentType t
     case OrnamentType::Nachschlag:
       return generateNachschlag(note, lower);
     case OrnamentType::CompoundTrillNachschlag:
-      return generateCompoundOrnament(note, CompoundOrnamentType::TrillWithNachschlag,
-                                      upper, lower);
+      return generateCompoundOrnament(note, CompoundOrnamentType::TrillWithNachschlag, upper,
+                                      lower);
     case OrnamentType::CompoundTurnTrill:
       return generateCompoundOrnament(note, CompoundOrnamentType::TurnThenTrill, upper, lower);
     case OrnamentType::Schleifer:
       if (has_key) {
-        return generateSchleifer(note, key, scale == ScaleType::NaturalMinor ||
-                                             scale == ScaleType::HarmonicMinor ||
-                                             scale == ScaleType::MelodicMinor);
+        return generateSchleifer(note, key,
+                                 scale == ScaleType::NaturalMinor ||
+                                     scale == ScaleType::HarmonicMinor ||
+                                     scale == ScaleType::MelodicMinor);
       }
       return {note};  // Schleifer requires key context.
     default:
@@ -163,8 +163,8 @@ std::vector<NoteEvent> applyOrnamentToNote(const NoteEvent& note, OrnamentType t
 /// @return true if at least one ornament type is enabled.
 bool anyOrnamentEnabled(const OrnamentConfig& config) {
   return config.enable_trill || config.enable_mordent || config.enable_turn ||
-         config.enable_appoggiatura || config.enable_pralltriller ||
-         config.enable_vorschlag || config.enable_nachschlag || config.enable_compound;
+         config.enable_appoggiatura || config.enable_pralltriller || config.enable_vorschlag ||
+         config.enable_nachschlag || config.enable_compound;
 }
 
 }  // namespace
@@ -186,21 +186,34 @@ OrnamentType selectOrnamentType(const NoteEvent& note, const OrnamentConfig& con
 
   if (strong_beat) {
     // Strong beats prefer trills and appoggiaturas (on-beat emphasis).
-    if (config.enable_trill) return OrnamentType::Trill;
-    if (config.enable_appoggiatura) return OrnamentType::Appoggiatura;
-    if (config.enable_vorschlag) return OrnamentType::Vorschlag;
-    if (config.enable_mordent) return OrnamentType::Mordent;
-    if (config.enable_turn) return OrnamentType::Turn;
-    if (config.enable_pralltriller) return OrnamentType::Pralltriller;
+    if (config.enable_trill)
+      return OrnamentType::Trill;
+    if (config.enable_appoggiatura)
+      return OrnamentType::Appoggiatura;
+    if (config.enable_vorschlag)
+      return OrnamentType::Vorschlag;
+    if (config.enable_mordent)
+      return OrnamentType::Mordent;
+    if (config.enable_turn)
+      return OrnamentType::Turn;
+    if (config.enable_pralltriller)
+      return OrnamentType::Pralltriller;
   } else {
     // Weak beats prefer mordents and pralltriller (lighter ornaments).
-    if (config.enable_mordent) return OrnamentType::Mordent;
-    if (config.enable_pralltriller) return OrnamentType::Pralltriller;
-    if (config.enable_nachschlag) return OrnamentType::Nachschlag;
-    if (config.enable_trill) return OrnamentType::Trill;
-    if (config.enable_turn) return OrnamentType::Turn;
-    if (config.enable_appoggiatura) return OrnamentType::Appoggiatura;
-    if (config.enable_vorschlag) return OrnamentType::Vorschlag;
+    if (config.enable_mordent)
+      return OrnamentType::Mordent;
+    if (config.enable_pralltriller)
+      return OrnamentType::Pralltriller;
+    if (config.enable_nachschlag)
+      return OrnamentType::Nachschlag;
+    if (config.enable_trill)
+      return OrnamentType::Trill;
+    if (config.enable_turn)
+      return OrnamentType::Turn;
+    if (config.enable_appoggiatura)
+      return OrnamentType::Appoggiatura;
+    if (config.enable_vorschlag)
+      return OrnamentType::Vorschlag;
   }
 
   // Fallback: trill (always available as last resort).
@@ -227,10 +240,12 @@ OrnamentType selectOrnamentType(const NoteEvent& note, const OrnamentConfig& con
 
   // Chord tones prefer sustained ornaments (trill).
   if (chord_tone) {
-    if (config.enable_trill) return OrnamentType::Trill;
+    if (config.enable_trill)
+      return OrnamentType::Trill;
   } else {
     // Non-chord tones prefer approach ornaments (vorschlag).
-    if (config.enable_vorschlag) return OrnamentType::Vorschlag;
+    if (config.enable_vorschlag)
+      return OrnamentType::Vorschlag;
   }
 
   // Fall back to metric-position-based selection.
@@ -277,8 +292,7 @@ std::vector<NoteEvent> applyOrnaments(const std::vector<NoteEvent>& notes,
       for (Tick cad_tick : context.cadence_ticks) {
         // Note within 1 beat before cadence, with sufficient duration.
         if (cad_tick > 0 && note.start_tick + note.duration >= cad_tick &&
-            note.start_tick >= cad_tick - kTicksPerBeat &&
-            note.start_tick < cad_tick &&
+            note.start_tick >= cad_tick - kTicksPerBeat && note.start_tick < cad_tick &&
             note.duration >= kTicksPerBeat / 2 &&
             (context.role == VoiceRole::Assert || context.role == VoiceRole::Respond)) {
           // 95% obligation for cadence trills.
@@ -426,9 +440,8 @@ void verifyOrnamentCounterpoint(std::vector<NoteEvent>& notes,
   for (auto region_iter = regions.rbegin(); region_iter != regions.rend(); ++region_iter) {
     const auto& region = *region_iter;
 
-    Tick window_start = (region.start_tick > kContextWindow)
-                            ? region.start_tick - kContextWindow
-                            : 0;
+    Tick window_start =
+        (region.start_tick > kContextWindow) ? region.start_tick - kContextWindow : 0;
     Tick window_end = region.end_tick + kContextWindow;
 
     // Build a flat note list for the local window across all voices.
@@ -438,16 +451,14 @@ void verifyOrnamentCounterpoint(std::vector<NoteEvent>& notes,
       if (vid == ornamented_voice) {
         // Use the ornamented notes for this voice.
         for (const auto& note : notes) {
-          if (note.start_tick + note.duration > window_start &&
-              note.start_tick < window_end) {
+          if (note.start_tick + note.duration > window_start && note.start_tick < window_end) {
             local_notes.push_back(note);
           }
         }
       } else {
         // Use the original voice notes.
         for (const auto& note : all_voices[vid]) {
-          if (note.start_tick + note.duration > window_start &&
-              note.start_tick < window_end) {
+          if (note.start_tick + note.duration > window_start && note.start_tick < window_end) {
             local_notes.push_back(note);
           }
         }
@@ -459,15 +470,13 @@ void verifyOrnamentCounterpoint(std::vector<NoteEvent>& notes,
     for (uint8_t vid = 0; vid < num_voices; ++vid) {
       if (vid == ornamented_voice) {
         for (const auto& note : original_notes) {
-          if (note.start_tick + note.duration > window_start &&
-              note.start_tick < window_end) {
+          if (note.start_tick + note.duration > window_start && note.start_tick < window_end) {
             reference_notes.push_back(note);
           }
         }
       } else {
         for (const auto& note : all_voices[vid]) {
-          if (note.start_tick + note.duration > window_start &&
-              note.start_tick < window_end) {
+          if (note.start_tick + note.duration > window_start && note.start_tick < window_end) {
             reference_notes.push_back(note);
           }
         }
@@ -487,14 +496,10 @@ void verifyOrnamentCounterpoint(std::vector<NoteEvent>& notes,
     if (has_new_violations) {
       // Revert: replace the ornament region with the original note.
       const auto& orig = original_notes[region.orig_idx];
-      auto erase_begin = notes.begin() +
-                         static_cast<std::ptrdiff_t>(region.result_begin);
-      auto erase_end = notes.begin() +
-                       static_cast<std::ptrdiff_t>(region.result_end);
+      auto erase_begin = notes.begin() + static_cast<std::ptrdiff_t>(region.result_begin);
+      auto erase_end = notes.begin() + static_cast<std::ptrdiff_t>(region.result_end);
       notes.erase(erase_begin, erase_end);
-      notes.insert(notes.begin() +
-                       static_cast<std::ptrdiff_t>(region.result_begin),
-                   orig);
+      notes.insert(notes.begin() + static_cast<std::ptrdiff_t>(region.result_begin), orig);
     }
   }
 }

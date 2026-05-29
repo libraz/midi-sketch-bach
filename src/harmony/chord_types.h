@@ -16,12 +16,12 @@ enum class ChordQuality : uint8_t {
   Dominant7,
   Minor7,
   MajorMajor7,
-  Diminished7,       // Fully diminished seventh (dim3 + dim3 + dim3)
-  HalfDiminished7,   // Half-diminished seventh (min3 + dim3 + maj3)
-  AugmentedSixth,    // Generic augmented sixth
-  AugSixthItalian,   // It+6: b6, 1, #4
-  AugSixthFrench,    // Fr+6: b6, 1, 2, #4
-  AugSixthGerman     // Ger+6: b6, 1, b3, #4
+  Diminished7,      // Fully diminished seventh (dim3 + dim3 + dim3)
+  HalfDiminished7,  // Half-diminished seventh (min3 + dim3 + maj3)
+  AugmentedSixth,   // Generic augmented sixth
+  AugSixthItalian,  // It+6: b6, 1, #4
+  AugSixthFrench,   // Fr+6: b6, 1, 2, #4
+  AugSixthGerman    // Ger+6: b6, 1, b3, #4
 };
 
 /// Roman numeral chord degree (functional harmony).
@@ -33,23 +33,23 @@ enum class ChordDegree : uint8_t {
   V,
   vi,
   viiDim,
-  bII,       // Neapolitan (lowered II)
-  V_of_V,    // Secondary dominant: V/V
-  V_of_vi,   // Secondary dominant: V/vi
-  V_of_IV,   // Secondary dominant: V/IV
-  V_of_ii,   // Secondary dominant: V/ii
-  bVI,       // Borrowed chord (from parallel minor)
-  bVII,      // Borrowed chord (from parallel minor)
-  bIII,      // Borrowed chord (from parallel minor)
-  V_of_iii   // Secondary dominant: V/iii
+  bII,      // Neapolitan (lowered II)
+  V_of_V,   // Secondary dominant: V/V
+  V_of_vi,  // Secondary dominant: V/vi
+  V_of_IV,  // Secondary dominant: V/IV
+  V_of_ii,  // Secondary dominant: V/ii
+  bVI,      // Borrowed chord (from parallel minor)
+  bVII,     // Borrowed chord (from parallel minor)
+  bIII,     // Borrowed chord (from parallel minor)
+  V_of_iii  // Secondary dominant: V/iii
 };
 
 /// A chord with degree, quality, root pitch, and inversion.
 struct Chord {
   ChordDegree degree = ChordDegree::I;
   ChordQuality quality = ChordQuality::Major;
-  uint8_t root_pitch = 0;    // MIDI pitch of chord root
-  uint8_t inversion = 0;     // 0=root, 1=first, 2=second
+  uint8_t root_pitch = 0;  // MIDI pitch of chord root
+  uint8_t inversion = 0;   // 0=root, 1=first, 2=second
 };
 
 /// @brief Get chord quality for a diatonic degree in major key.

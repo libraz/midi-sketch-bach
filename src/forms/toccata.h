@@ -19,9 +19,11 @@ struct ToccataConfig {
   uint16_t bpm = 80;
   uint32_t seed = 42;
   uint8_t num_voices = 3;
-  int total_bars = 24;                ///< Total toccata length in bars.
-  bool enable_picardy = true;         ///< Apply Picardy third in minor keys.
-};;;
+  int total_bars = 24;         ///< Total toccata length in bars.
+  bool enable_picardy = true;  ///< Apply Picardy third in minor keys.
+};
+;
+;
 
 /// @brief Result of toccata free section generation.
 /// @brief Section boundary within a toccata.
@@ -51,7 +53,8 @@ struct ToccataResult {
   Tick recit_end = 0;
   Tick drive_start = 0;
   Tick drive_end = 0;
-};;
+};
+;
 
 /// @brief Generate a toccata free section (BWV 565 opening style).
 ///

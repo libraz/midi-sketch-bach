@@ -2,9 +2,9 @@
 
 #include "core/note_source.h"
 
-#include <cstring>
-
 #include <gtest/gtest.h>
+
+#include <cstring>
 
 #include "core/basic_types.h"
 
@@ -86,18 +86,12 @@ TEST(BachNoteSourceTest, SpecificSourceStringsMatchJsonFormat) {
 
 TEST(BachTransformStepTest, AllStepsHaveStringRepresentation) {
   const BachTransformStep all_steps[] = {
-      BachTransformStep::None,
-      BachTransformStep::TonalAnswer,
-      BachTransformStep::RealAnswer,
-      BachTransformStep::Inversion,
-      BachTransformStep::Retrograde,
-      BachTransformStep::Augmentation,
-      BachTransformStep::Diminution,
-      BachTransformStep::Sequence,
-      BachTransformStep::CollisionAvoid,
-      BachTransformStep::RangeClamp,
-      BachTransformStep::OctaveAdjust,
-      BachTransformStep::KeyTranspose,
+      BachTransformStep::None,           BachTransformStep::TonalAnswer,
+      BachTransformStep::RealAnswer,     BachTransformStep::Inversion,
+      BachTransformStep::Retrograde,     BachTransformStep::Augmentation,
+      BachTransformStep::Diminution,     BachTransformStep::Sequence,
+      BachTransformStep::CollisionAvoid, BachTransformStep::RangeClamp,
+      BachTransformStep::OctaveAdjust,   BachTransformStep::KeyTranspose,
   };
 
   for (auto step : all_steps) {
@@ -165,8 +159,7 @@ TEST(NoteProvenanceTest, AddStepRejectsWhenFull) {
 
   // Fill all kMaxSteps slots.
   for (size_t idx = 0; idx < NoteProvenance::kMaxSteps; ++idx) {
-    EXPECT_TRUE(prov.addStep(BachTransformStep::Sequence))
-        << "Failed to add step at index " << idx;
+    EXPECT_TRUE(prov.addStep(BachTransformStep::Sequence)) << "Failed to add step at index " << idx;
   }
   EXPECT_EQ(prov.step_count, NoteProvenance::kMaxSteps);
 
@@ -199,97 +192,64 @@ TEST(NoteProvenanceTest, StepOrderPreserved) {
 
 TEST(ProtectionLevelTest, ImmutableSources) {
   // Core identity notes (formerly Immutable).
-  EXPECT_EQ(getProtectionLevel(BachNoteSource::SubjectCore),
-            ProtectionLevel::Immutable);
-  EXPECT_EQ(getProtectionLevel(BachNoteSource::CantusFixed),
-            ProtectionLevel::Immutable);
-  EXPECT_EQ(getProtectionLevel(BachNoteSource::GroundBass),
-            ProtectionLevel::Immutable);
-  EXPECT_EQ(getProtectionLevel(BachNoteSource::GoldbergBass),
-            ProtectionLevel::Immutable);
-  EXPECT_EQ(getProtectionLevel(BachNoteSource::QuodlibetMelody),
-            ProtectionLevel::Immutable);
+  EXPECT_EQ(getProtectionLevel(BachNoteSource::SubjectCore), ProtectionLevel::Immutable);
+  EXPECT_EQ(getProtectionLevel(BachNoteSource::CantusFixed), ProtectionLevel::Immutable);
+  EXPECT_EQ(getProtectionLevel(BachNoteSource::GroundBass), ProtectionLevel::Immutable);
+  EXPECT_EQ(getProtectionLevel(BachNoteSource::GoldbergBass), ProtectionLevel::Immutable);
+  EXPECT_EQ(getProtectionLevel(BachNoteSource::QuodlibetMelody), ProtectionLevel::Immutable);
   // Formerly SemiImmutable / Structural / Architectural -- now Immutable.
-  EXPECT_EQ(getProtectionLevel(BachNoteSource::FugueSubject),
-            ProtectionLevel::Immutable);
-  EXPECT_EQ(getProtectionLevel(BachNoteSource::FugueAnswer),
-            ProtectionLevel::Immutable);
-  EXPECT_EQ(getProtectionLevel(BachNoteSource::Countersubject),
-            ProtectionLevel::Immutable);
-  EXPECT_EQ(getProtectionLevel(BachNoteSource::PedalPoint),
-            ProtectionLevel::Immutable);
-  EXPECT_EQ(getProtectionLevel(BachNoteSource::FalseEntry),
-            ProtectionLevel::Immutable);
-  EXPECT_EQ(getProtectionLevel(BachNoteSource::Coda),
-            ProtectionLevel::Immutable);
-  EXPECT_EQ(getProtectionLevel(BachNoteSource::SequenceNote),
-            ProtectionLevel::Immutable);
-  EXPECT_EQ(getProtectionLevel(BachNoteSource::CanonDux),
-            ProtectionLevel::Immutable);
-  EXPECT_EQ(getProtectionLevel(BachNoteSource::CanonComes),
-            ProtectionLevel::Immutable);
-  EXPECT_EQ(getProtectionLevel(BachNoteSource::GoldbergAria),
-            ProtectionLevel::Immutable);
-  EXPECT_EQ(getProtectionLevel(BachNoteSource::CadenceApproach),
-            ProtectionLevel::Immutable);
-  EXPECT_EQ(getProtectionLevel(BachNoteSource::GrandPause),
-            ProtectionLevel::Immutable);
-  EXPECT_EQ(getProtectionLevel(BachNoteSource::ToccataGesture),
-            ProtectionLevel::Immutable);
-  EXPECT_EQ(getProtectionLevel(BachNoteSource::ToccataFigure),
-            ProtectionLevel::Immutable);
-  EXPECT_EQ(getProtectionLevel(BachNoteSource::ChaconneBass),
-            ProtectionLevel::Immutable);
-  EXPECT_EQ(getProtectionLevel(BachNoteSource::GoldbergSoggetto),
-            ProtectionLevel::Immutable);
-  EXPECT_EQ(getProtectionLevel(BachNoteSource::GoldbergFughetta),
-            ProtectionLevel::Immutable);
+  EXPECT_EQ(getProtectionLevel(BachNoteSource::FugueSubject), ProtectionLevel::Immutable);
+  EXPECT_EQ(getProtectionLevel(BachNoteSource::FugueAnswer), ProtectionLevel::Immutable);
+  EXPECT_EQ(getProtectionLevel(BachNoteSource::Countersubject), ProtectionLevel::Immutable);
+  EXPECT_EQ(getProtectionLevel(BachNoteSource::PedalPoint), ProtectionLevel::Immutable);
+  EXPECT_EQ(getProtectionLevel(BachNoteSource::FalseEntry), ProtectionLevel::Immutable);
+  EXPECT_EQ(getProtectionLevel(BachNoteSource::Coda), ProtectionLevel::Immutable);
+  EXPECT_EQ(getProtectionLevel(BachNoteSource::SequenceNote), ProtectionLevel::Immutable);
+  EXPECT_EQ(getProtectionLevel(BachNoteSource::CanonDux), ProtectionLevel::Immutable);
+  EXPECT_EQ(getProtectionLevel(BachNoteSource::CanonComes), ProtectionLevel::Immutable);
+  EXPECT_EQ(getProtectionLevel(BachNoteSource::GoldbergAria), ProtectionLevel::Immutable);
+  EXPECT_EQ(getProtectionLevel(BachNoteSource::CadenceApproach), ProtectionLevel::Immutable);
+  EXPECT_EQ(getProtectionLevel(BachNoteSource::GrandPause), ProtectionLevel::Immutable);
+  EXPECT_EQ(getProtectionLevel(BachNoteSource::ToccataGesture), ProtectionLevel::Immutable);
+  EXPECT_EQ(getProtectionLevel(BachNoteSource::ToccataFigure), ProtectionLevel::Immutable);
+  EXPECT_EQ(getProtectionLevel(BachNoteSource::ChaconneBass), ProtectionLevel::Immutable);
+  EXPECT_EQ(getProtectionLevel(BachNoteSource::GoldbergSoggetto), ProtectionLevel::Immutable);
+  EXPECT_EQ(getProtectionLevel(BachNoteSource::GoldbergFughetta), ProtectionLevel::Immutable);
 }
 
 TEST(ProtectionLevelTest, FlexibleSources) {
-  EXPECT_EQ(getProtectionLevel(BachNoteSource::EpisodeMaterial),
-            ProtectionLevel::Flexible);
-  EXPECT_EQ(getProtectionLevel(BachNoteSource::FreeCounterpoint),
-            ProtectionLevel::Flexible);
-  EXPECT_EQ(getProtectionLevel(BachNoteSource::Ornament),
-            ProtectionLevel::Flexible);
-  EXPECT_EQ(getProtectionLevel(BachNoteSource::ArpeggioFlow),
-            ProtectionLevel::Flexible);
-  EXPECT_EQ(getProtectionLevel(BachNoteSource::TextureNote),
-            ProtectionLevel::Flexible);
-  EXPECT_EQ(getProtectionLevel(BachNoteSource::CollisionAvoid),
-            ProtectionLevel::Flexible);
-  EXPECT_EQ(getProtectionLevel(BachNoteSource::PostProcess),
-            ProtectionLevel::Flexible);
-  EXPECT_EQ(getProtectionLevel(BachNoteSource::ChromaticPassing),
-            ProtectionLevel::Flexible);
-  EXPECT_EQ(getProtectionLevel(BachNoteSource::Unknown),
-            ProtectionLevel::Flexible);
-  EXPECT_EQ(getProtectionLevel(BachNoteSource::CanonFreeBass),
-            ProtectionLevel::Flexible);
+  EXPECT_EQ(getProtectionLevel(BachNoteSource::EpisodeMaterial), ProtectionLevel::Flexible);
+  EXPECT_EQ(getProtectionLevel(BachNoteSource::FreeCounterpoint), ProtectionLevel::Flexible);
+  EXPECT_EQ(getProtectionLevel(BachNoteSource::Ornament), ProtectionLevel::Flexible);
+  EXPECT_EQ(getProtectionLevel(BachNoteSource::ArpeggioFlow), ProtectionLevel::Flexible);
+  EXPECT_EQ(getProtectionLevel(BachNoteSource::TextureNote), ProtectionLevel::Flexible);
+  EXPECT_EQ(getProtectionLevel(BachNoteSource::CollisionAvoid), ProtectionLevel::Flexible);
+  EXPECT_EQ(getProtectionLevel(BachNoteSource::PostProcess), ProtectionLevel::Flexible);
+  EXPECT_EQ(getProtectionLevel(BachNoteSource::ChromaticPassing), ProtectionLevel::Flexible);
+  EXPECT_EQ(getProtectionLevel(BachNoteSource::Unknown), ProtectionLevel::Flexible);
+  EXPECT_EQ(getProtectionLevel(BachNoteSource::CanonFreeBass), ProtectionLevel::Flexible);
 }
 
 TEST(ProtectionLevelTest, AllSourcesCovered) {
   // Ensure every source maps to a valid protection level.
   const BachNoteSource all[] = {
       BachNoteSource::Unknown,          BachNoteSource::FugueSubject,
-      BachNoteSource::SubjectCore,       BachNoteSource::FugueAnswer,
-      BachNoteSource::Countersubject,
-      BachNoteSource::EpisodeMaterial,   BachNoteSource::FreeCounterpoint,
-      BachNoteSource::CantusFixed,       BachNoteSource::Ornament,
-      BachNoteSource::PedalPoint,        BachNoteSource::ArpeggioFlow,
-      BachNoteSource::TextureNote,       BachNoteSource::GroundBass,
-      BachNoteSource::CollisionAvoid,    BachNoteSource::PostProcess,
-      BachNoteSource::ChromaticPassing,  BachNoteSource::FalseEntry,
-      BachNoteSource::Coda,              BachNoteSource::SequenceNote,
-      BachNoteSource::CanonDux,          BachNoteSource::CanonComes,
-      BachNoteSource::CanonFreeBass,     BachNoteSource::GoldbergAria,
-      BachNoteSource::GoldbergBass,      BachNoteSource::QuodlibetMelody,
+      BachNoteSource::SubjectCore,      BachNoteSource::FugueAnswer,
+      BachNoteSource::Countersubject,   BachNoteSource::EpisodeMaterial,
+      BachNoteSource::FreeCounterpoint, BachNoteSource::CantusFixed,
+      BachNoteSource::Ornament,         BachNoteSource::PedalPoint,
+      BachNoteSource::ArpeggioFlow,     BachNoteSource::TextureNote,
+      BachNoteSource::GroundBass,       BachNoteSource::CollisionAvoid,
+      BachNoteSource::PostProcess,      BachNoteSource::ChromaticPassing,
+      BachNoteSource::FalseEntry,       BachNoteSource::Coda,
+      BachNoteSource::SequenceNote,     BachNoteSource::CanonDux,
+      BachNoteSource::CanonComes,       BachNoteSource::CanonFreeBass,
+      BachNoteSource::GoldbergAria,     BachNoteSource::GoldbergBass,
+      BachNoteSource::QuodlibetMelody,
   };
   for (auto src : all) {
     auto level = getProtectionLevel(src);
-    EXPECT_TRUE(level == ProtectionLevel::Immutable ||
-                level == ProtectionLevel::Flexible)
+    EXPECT_TRUE(level == ProtectionLevel::Immutable || level == ProtectionLevel::Flexible)
         << "Source " << bachNoteSourceToString(src) << " has invalid level";
   }
 }
@@ -379,12 +339,12 @@ TEST(NoteModifiedByTest, UnknownHighBitIgnored) {
 }
 
 TEST(NoteModifiedByTest, EnumValuesArePowersOfTwo) {
-  EXPECT_EQ(static_cast<uint8_t>(NoteModifiedBy::ParallelRepair),  1);
-  EXPECT_EQ(static_cast<uint8_t>(NoteModifiedBy::ChordToneSnap),   2);
-  EXPECT_EQ(static_cast<uint8_t>(NoteModifiedBy::LeapResolution),  4);
-  EXPECT_EQ(static_cast<uint8_t>(NoteModifiedBy::OverlapTrim),     8);
-  EXPECT_EQ(static_cast<uint8_t>(NoteModifiedBy::OctaveAdjust),   16);
-  EXPECT_EQ(static_cast<uint8_t>(NoteModifiedBy::Articulation),   32);
+  EXPECT_EQ(static_cast<uint8_t>(NoteModifiedBy::ParallelRepair), 1);
+  EXPECT_EQ(static_cast<uint8_t>(NoteModifiedBy::ChordToneSnap), 2);
+  EXPECT_EQ(static_cast<uint8_t>(NoteModifiedBy::LeapResolution), 4);
+  EXPECT_EQ(static_cast<uint8_t>(NoteModifiedBy::OverlapTrim), 8);
+  EXPECT_EQ(static_cast<uint8_t>(NoteModifiedBy::OctaveAdjust), 16);
+  EXPECT_EQ(static_cast<uint8_t>(NoteModifiedBy::Articulation), 32);
   EXPECT_EQ(static_cast<uint8_t>(NoteModifiedBy::RepeatedNoteRep), 64);
 }
 
@@ -426,27 +386,42 @@ TEST(CountUnknownSourceTest, MixedSourcesCountsOnlyUnknown) {
 
 TEST(BachNoteSourceTest, NonUnknownSourcesNeverReturnUnknownString) {
   const BachNoteSource non_unknown[] = {
-      BachNoteSource::FugueSubject,     BachNoteSource::SubjectCore,
-      BachNoteSource::FugueAnswer,      BachNoteSource::Countersubject,
-      BachNoteSource::EpisodeMaterial,   BachNoteSource::FreeCounterpoint,
-      BachNoteSource::CantusFixed,       BachNoteSource::Ornament,
-      BachNoteSource::PedalPoint,        BachNoteSource::ArpeggioFlow,
-      BachNoteSource::TextureNote,       BachNoteSource::GroundBass,
-      BachNoteSource::CollisionAvoid,    BachNoteSource::PostProcess,
-      BachNoteSource::ChromaticPassing,  BachNoteSource::FalseEntry,
-      BachNoteSource::Coda,              BachNoteSource::SequenceNote,
-      BachNoteSource::CanonDux,          BachNoteSource::CanonComes,
-      BachNoteSource::CanonFreeBass,     BachNoteSource::GoldbergAria,
-      BachNoteSource::GoldbergBass,      BachNoteSource::GoldbergFigura,
-      BachNoteSource::GoldbergSoggetto,  BachNoteSource::GoldbergDance,
-      BachNoteSource::GoldbergFughetta,  BachNoteSource::GoldbergInvention,
-      BachNoteSource::QuodlibetMelody,   BachNoteSource::GoldbergOverture,
+      BachNoteSource::FugueSubject,
+      BachNoteSource::SubjectCore,
+      BachNoteSource::FugueAnswer,
+      BachNoteSource::Countersubject,
+      BachNoteSource::EpisodeMaterial,
+      BachNoteSource::FreeCounterpoint,
+      BachNoteSource::CantusFixed,
+      BachNoteSource::Ornament,
+      BachNoteSource::PedalPoint,
+      BachNoteSource::ArpeggioFlow,
+      BachNoteSource::TextureNote,
+      BachNoteSource::GroundBass,
+      BachNoteSource::CollisionAvoid,
+      BachNoteSource::PostProcess,
+      BachNoteSource::ChromaticPassing,
+      BachNoteSource::FalseEntry,
+      BachNoteSource::Coda,
+      BachNoteSource::SequenceNote,
+      BachNoteSource::CanonDux,
+      BachNoteSource::CanonComes,
+      BachNoteSource::CanonFreeBass,
+      BachNoteSource::GoldbergAria,
+      BachNoteSource::GoldbergBass,
+      BachNoteSource::GoldbergFigura,
+      BachNoteSource::GoldbergSoggetto,
+      BachNoteSource::GoldbergDance,
+      BachNoteSource::GoldbergFughetta,
+      BachNoteSource::GoldbergInvention,
+      BachNoteSource::QuodlibetMelody,
+      BachNoteSource::GoldbergOverture,
       BachNoteSource::GoldbergSuspension,
   };
   for (auto src : non_unknown) {
     const char* str = bachNoteSourceToString(src);
-    EXPECT_STRNE(str, "unknown")
-        << "Source " << static_cast<int>(src) << " incorrectly maps to \"unknown\"";
+    EXPECT_STRNE(str, "unknown") << "Source " << static_cast<int>(src)
+                                 << " incorrectly maps to \"unknown\"";
   }
 }
 

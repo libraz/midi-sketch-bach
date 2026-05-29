@@ -35,8 +35,8 @@ enum class RhythmProfile : uint8_t {
 /// @param profile The rhythm profile to use.
 /// @param beat_ticks Duration of one beat in ticks (default: kTicksPerBeat = 480).
 /// @return Vector of {offset, duration} pairs for one beat.
-std::vector<std::pair<Tick, Tick>> getRhythmSubdivisions(
-    RhythmProfile profile, Tick beat_ticks = kTicksPerBeat);
+std::vector<std::pair<Tick, Tick>> getRhythmSubdivisions(RhythmProfile profile,
+                                                         Tick beat_ticks = kTicksPerBeat);
 
 /// @brief Context for texture generation within a single chaconne variation.
 ///
@@ -48,14 +48,14 @@ struct TextureContext {
   KeySignature key = {Key::D, true};  ///< D minor default (BWV1004)
   Tick start_tick = 0;                ///< Absolute start tick of this variation
   Tick duration_ticks = 0;            ///< Length (typically 4 bars = 7680 ticks)
-  uint8_t register_low = 55;         ///< G3 (violin default low)
-  uint8_t register_high = 93;        ///< A6 (violin default high)
+  uint8_t register_low = 55;          ///< G3 (violin default low)
+  uint8_t register_high = 93;         ///< A6 (violin default high)
   bool is_major_section = false;      ///< True for Illuminate variations
   bool is_climax = false;             ///< True only for Accumulate variations
   float rhythm_density = 1.0f;        ///< 1.0 = normal, 0.6 = major section cap
   uint32_t seed = 0;                  ///< RNG seed for this variation
   RhythmProfile rhythm_profile = RhythmProfile::EighthNote;  ///< Rhythmic subdivision
-  VariationType variation_type = VariationType::Theme;        ///< Character of variation
+  VariationType variation_type = VariationType::Theme;       ///< Character of variation
 };
 
 /// @brief Generate notes for a single variation using the specified texture.
@@ -76,8 +76,7 @@ struct TextureContext {
 /// @param timeline Harmonic timeline for chord/key lookup at each tick.
 /// @return Vector of NoteEvents for the variation. Empty if generation fails
 ///         (e.g. FullChords requested without is_climax).
-std::vector<NoteEvent> generateTexture(const TextureContext& ctx,
-                                       const HarmonicTimeline& timeline);
+std::vector<NoteEvent> generateTexture(const TextureContext& ctx, const HarmonicTimeline& timeline);
 
 /// @brief Generate a SingleLine texture -- simple melody following chord tones.
 ///

@@ -15,10 +15,10 @@ namespace bach {
 /// range is available; 0.65 means only 65% of the range is used.
 /// Calibrated from Bach reference data (BWV578, WTC1 category averages).
 struct RegisterEnvelope {
-  float opening_range_ratio = 0.65f;   ///< Exposition: restricted range for clarity.
-  float middle_range_ratio = 0.85f;    ///< Development: expanding range.
-  float climax_range_ratio = 1.0f;     ///< Stretto/climax: full range available.
-  float closing_range_ratio = 0.75f;   ///< Coda: contracting for resolution.
+  float opening_range_ratio = 0.65f;  ///< Exposition: restricted range for clarity.
+  float middle_range_ratio = 0.85f;   ///< Development: expanding range.
+  float climax_range_ratio = 1.0f;    ///< Stretto/climax: full range available.
+  float closing_range_ratio = 0.75f;  ///< Coda: contracting for resolution.
 };
 
 /// Get the canonical RegisterEnvelope for a given form type.

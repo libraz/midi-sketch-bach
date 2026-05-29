@@ -8,16 +8,15 @@
 
 namespace bach {
 
-ViolinModel::ViolinModel()
-    : tuning_(kOpenStrings, kOpenStrings + kNumStrings) {}
+ViolinModel::ViolinModel() : tuning_(kOpenStrings, kOpenStrings + kNumStrings) {}
 
 bool ViolinModel::isPitchPlayable(uint8_t pitch) const {
-  if (pitch < kLowestPitch || pitch > kHighestPitch) return false;
+  if (pitch < kLowestPitch || pitch > kHighestPitch)
+    return false;
 
   // Check if at least one string can produce this pitch.
   for (uint8_t idx = 0; idx < kNumStrings; ++idx) {
-    if (pitch >= kOpenStrings[idx] &&
-        pitch <= kOpenStrings[idx] + kMaxSemitonesAboveOpen[idx]) {
+    if (pitch >= kOpenStrings[idx] && pitch <= kOpenStrings[idx] + kMaxSemitonesAboveOpen[idx]) {
       return true;
     }
   }
@@ -26,20 +25,24 @@ bool ViolinModel::isPitchPlayable(uint8_t pitch) const {
 
 bool ViolinModel::isOpenString(uint8_t pitch) const {
   for (uint8_t idx = 0; idx < kNumStrings; ++idx) {
-    if (pitch == kOpenStrings[idx]) return true;
+    if (pitch == kOpenStrings[idx])
+      return true;
   }
   return false;
 }
 
 std::vector<FingerPosition> ViolinModel::getPositionsForPitch(uint8_t pitch) const {
   std::vector<FingerPosition> positions;
-  if (pitch < kLowestPitch || pitch > kHighestPitch) return positions;
+  if (pitch < kLowestPitch || pitch > kHighestPitch)
+    return positions;
 
   for (uint8_t idx = 0; idx < kNumStrings; ++idx) {
-    if (pitch < kOpenStrings[idx]) continue;
+    if (pitch < kOpenStrings[idx])
+      continue;
 
     uint8_t semitones_above = pitch - kOpenStrings[idx];
-    if (semitones_above > kMaxSemitonesAboveOpen[idx]) continue;
+    if (semitones_above > kMaxSemitonesAboveOpen[idx])
+      continue;
 
     FingerPosition pos;
     pos.string_idx = idx;
@@ -53,7 +56,8 @@ std::vector<FingerPosition> ViolinModel::getPositionsForPitch(uint8_t pitch) con
       // Positions: 1st = semitones 1-4, 2nd = 3-6, 3rd = 5-8, etc.
       // Using simplified model: position = ceil(semitones / 3.5).
       pos.position = static_cast<uint8_t>((semitones_above + 2) / 3);
-      if (pos.position == 0) pos.position = 1;
+      if (pos.position == 0)
+        pos.position = 1;
     }
 
     positions.push_back(pos);
@@ -63,7 +67,8 @@ std::vector<FingerPosition> ViolinModel::getPositionsForPitch(uint8_t pitch) con
   // (violin prefers higher strings in general for timbral reasons).
   std::sort(positions.begin(), positions.end(),
             [](const FingerPosition& lhs, const FingerPosition& rhs) {
-              if (lhs.position != rhs.position) return lhs.position < rhs.position;
+              if (lhs.position != rhs.position)
+                return lhs.position < rhs.position;
               return lhs.string_idx > rhs.string_idx;  // Prefer higher string
             });
 
@@ -71,27 +76,31 @@ std::vector<FingerPosition> ViolinModel::getPositionsForPitch(uint8_t pitch) con
 }
 
 bool ViolinModel::isDoubleStopFeasible(uint8_t pitch_a, uint8_t pitch_b) const {
-  if (!isPitchPlayable(pitch_a) || !isPitchPlayable(pitch_b)) return false;
-  if (pitch_a == pitch_b) return false;
+  if (!isPitchPlayable(pitch_a) || !isPitchPlayable(pitch_b))
+    return false;
+  if (pitch_a == pitch_b)
+    return false;
 
   auto positions_a = getPositionsForPitch(pitch_a);
   auto positions_b = getPositionsForPitch(pitch_b);
 
   for (const auto& pos_a : positions_a) {
     for (const auto& pos_b : positions_b) {
-      if (pos_a.string_idx == pos_b.string_idx) continue;
+      if (pos_a.string_idx == pos_b.string_idx)
+        continue;
 
-      int string_distance = static_cast<int>(pos_a.string_idx) -
-                            static_cast<int>(pos_b.string_idx);
-      if (string_distance < 0) string_distance = -string_distance;
+      int string_distance = static_cast<int>(pos_a.string_idx) - static_cast<int>(pos_b.string_idx);
+      if (string_distance < 0)
+        string_distance = -string_distance;
 
       if (string_distance == 1) {
         // Adjacent strings -- check position compatibility.
-        int position_diff = static_cast<int>(pos_a.position) -
-                            static_cast<int>(pos_b.position);
-        if (position_diff < 0) position_diff = -position_diff;
+        int position_diff = static_cast<int>(pos_a.position) - static_cast<int>(pos_b.position);
+        if (position_diff < 0)
+          position_diff = -position_diff;
 
-        if (position_diff <= 1) return true;
+        if (position_diff <= 1)
+          return true;
       }
     }
   }
@@ -99,7 +108,8 @@ bool ViolinModel::isDoubleStopFeasible(uint8_t pitch_a, uint8_t pitch_b) const {
 }
 
 float ViolinModel::doubleStopCost(uint8_t pitch_a, uint8_t pitch_b) const {
-  if (!isDoubleStopFeasible(pitch_a, pitch_b)) return 1e6f;
+  if (!isDoubleStopFeasible(pitch_a, pitch_b))
+    return 1e6f;
 
   auto positions_a = getPositionsForPitch(pitch_a);
   auto positions_b = getPositionsForPitch(pitch_b);
@@ -108,17 +118,20 @@ float ViolinModel::doubleStopCost(uint8_t pitch_a, uint8_t pitch_b) const {
 
   for (const auto& pos_a : positions_a) {
     for (const auto& pos_b : positions_b) {
-      if (pos_a.string_idx == pos_b.string_idx) continue;
+      if (pos_a.string_idx == pos_b.string_idx)
+        continue;
 
-      int string_distance = static_cast<int>(pos_a.string_idx) -
-                            static_cast<int>(pos_b.string_idx);
-      if (string_distance < 0) string_distance = -string_distance;
-      if (string_distance != 1) continue;
+      int string_distance = static_cast<int>(pos_a.string_idx) - static_cast<int>(pos_b.string_idx);
+      if (string_distance < 0)
+        string_distance = -string_distance;
+      if (string_distance != 1)
+        continue;
 
-      int position_diff = static_cast<int>(pos_a.position) -
-                          static_cast<int>(pos_b.position);
-      if (position_diff < 0) position_diff = -position_diff;
-      if (position_diff > 1) continue;
+      int position_diff = static_cast<int>(pos_a.position) - static_cast<int>(pos_b.position);
+      if (position_diff < 0)
+        position_diff = -position_diff;
+      if (position_diff > 1)
+        continue;
 
       float cost = 0.0f;
       uint8_t max_position = std::max(pos_a.position, pos_b.position);
@@ -145,19 +158,22 @@ float ViolinModel::doubleStopCost(uint8_t pitch_a, uint8_t pitch_b) const {
 }
 
 bool ViolinModel::requiresArpeggiation(const std::vector<uint8_t>& pitches) const {
-  if (pitches.size() <= 2) return false;
+  if (pitches.size() <= 2)
+    return false;
 
   // Three or more notes always require arpeggiation on a bowed instrument.
   return true;
 }
 
-float ViolinModel::stringCrossingCost(uint8_t from_string,
-                                      uint8_t to_string) const {
-  if (from_string >= kNumStrings || to_string >= kNumStrings) return 1e6f;
-  if (from_string == to_string) return 0.0f;
+float ViolinModel::stringCrossingCost(uint8_t from_string, uint8_t to_string) const {
+  if (from_string >= kNumStrings || to_string >= kNumStrings)
+    return 1e6f;
+  if (from_string == to_string)
+    return 0.0f;
 
   int distance = static_cast<int>(from_string) - static_cast<int>(to_string);
-  if (distance < 0) distance = -distance;
+  if (distance < 0)
+    distance = -distance;
 
   // Violin string crossings are slightly easier than cello due to flatter bridge.
   // Adjacent crossings: cost 0.08. Skipping: quadratically more costly.
@@ -205,9 +221,8 @@ BowedPlayabilityCost ViolinModel::calculateCost(uint8_t pitch) const {
   return result;
 }
 
-BowedPlayabilityCost ViolinModel::calculateTransitionCost(
-    uint8_t from_pitch, uint8_t to_pitch,
-    const BowedPerformerState& state) const {
+BowedPlayabilityCost ViolinModel::calculateTransitionCost(uint8_t from_pitch, uint8_t to_pitch,
+                                                          const BowedPerformerState& state) const {
   BowedPlayabilityCost result;
 
   if (!isPitchPlayable(to_pitch)) {
@@ -231,9 +246,10 @@ BowedPlayabilityCost ViolinModel::calculateTransitionCost(
   // Position shift cost.
   auto dest_positions = getPositionsForPitch(to_pitch);
   if (!dest_positions.empty()) {
-    int pos_diff = static_cast<int>(dest_positions[0].position) -
-                   static_cast<int>(state.current_position);
-    if (pos_diff < 0) pos_diff = -pos_diff;
+    int pos_diff =
+        static_cast<int>(dest_positions[0].position) - static_cast<int>(state.current_position);
+    if (pos_diff < 0)
+      pos_diff = -pos_diff;
 
     if (pos_diff > 0) {
       result.shift_cost = static_cast<float>(pos_diff) * kShiftCostPerPosition;
@@ -267,9 +283,8 @@ void ViolinModel::updateState(BowedPerformerState& state, uint8_t pitch) const {
   }
 
   // Alternate bow direction.
-  state.bow_direction = (state.bow_direction == BowDirection::Down)
-                            ? BowDirection::Up
-                            : BowDirection::Down;
+  state.bow_direction =
+      (state.bow_direction == BowDirection::Down) ? BowDirection::Up : BowDirection::Down;
 }
 
 BowedPerformerState ViolinModel::createInitialState() const {
@@ -287,8 +302,7 @@ bool ViolinModel::isHighPosition(uint8_t pitch) const {
   // Find the most comfortable string and check high-position threshold.
   for (uint8_t idx = kNumStrings; idx > 0; --idx) {
     uint8_t str = idx - 1;
-    if (pitch >= kOpenStrings[str] &&
-        pitch <= kOpenStrings[str] + kMaxSemitonesAboveOpen[str]) {
+    if (pitch >= kOpenStrings[str] && pitch <= kOpenStrings[str] + kMaxSemitonesAboveOpen[str]) {
       return pitch >= kHighPositionThreshold[str];
     }
   }
@@ -301,10 +315,12 @@ bool ViolinModel::findBestString(uint8_t pitch, uint8_t& out_string_idx,
   bool found = false;
 
   for (uint8_t idx = 0; idx < kNumStrings; ++idx) {
-    if (pitch < kOpenStrings[idx]) continue;
+    if (pitch < kOpenStrings[idx])
+      continue;
 
     uint8_t semitones = pitch - kOpenStrings[idx];
-    if (semitones > kMaxSemitonesAboveOpen[idx]) continue;
+    if (semitones > kMaxSemitonesAboveOpen[idx])
+      continue;
 
     if (semitones < best_semitones) {
       best_semitones = semitones;

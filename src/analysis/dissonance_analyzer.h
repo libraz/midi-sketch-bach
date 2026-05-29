@@ -39,13 +39,13 @@ struct DissonanceEvent {
   DissonanceType type = DissonanceType::SimultaneousClash;
   DissonanceSeverity severity = DissonanceSeverity::Medium;
   Tick tick = 0;
-  uint32_t bar = 0;    ///< 1-based bar number.
-  uint8_t beat = 0;    ///< 1-based beat number within bar.
+  uint32_t bar = 0;  ///< 1-based bar number.
+  uint8_t beat = 0;  ///< 1-based beat number within bar.
   uint8_t pitch = 0;
   uint8_t other_pitch = 0;  ///< Second pitch for clash events, 0 if N/A.
   VoiceId voice_a = 0;
   VoiceId voice_b = 0;
-  int interval = 0;         ///< Interval in semitones (for clash events).
+  int interval = 0;  ///< Interval in semitones (for clash events).
   std::string description;
 };
 
@@ -84,8 +84,8 @@ struct DissonanceAnalysisResult {
 /// @param num_voices Number of distinct voices.
 /// @return Detected clash events.
 /// @note Organ system only -- scans each beat for dissonant intervals.
-std::vector<DissonanceEvent> detectSimultaneousClashes(
-    const std::vector<NoteEvent>& notes, uint8_t num_voices);
+std::vector<DissonanceEvent> detectSimultaneousClashes(const std::vector<NoteEvent>& notes,
+                                                       uint8_t num_voices);
 
 /// @brief Phase 2: Detect non-chord tones against the harmonic timeline.
 /// @param notes All notes (may span multiple voices or single voice).
@@ -104,16 +104,16 @@ std::vector<DissonanceEvent> detectNonChordTones(
 /// @param timeline Harmonic timeline providing chord boundaries.
 /// @return Detected sustained-clash events.
 /// @note Organ system only -- checks held notes at chord boundaries.
-std::vector<DissonanceEvent> detectSustainedOverChordChange(
-    const std::vector<NoteEvent>& notes, uint8_t num_voices,
-    const HarmonicTimeline& timeline);
+std::vector<DissonanceEvent> detectSustainedOverChordChange(const std::vector<NoteEvent>& notes,
+                                                            uint8_t num_voices,
+                                                            const HarmonicTimeline& timeline);
 
 /// @brief Phase 4: Detect non-diatonic notes (chromatic pitches).
 /// @param notes All notes.
 /// @param key_sig Key signature for diatonic context.
 /// @return Detected non-diatonic events.
-std::vector<DissonanceEvent> detectNonDiatonicNotes(
-    const std::vector<NoteEvent>& notes, const KeySignature& key_sig);
+std::vector<DissonanceEvent> detectNonDiatonicNotes(const std::vector<NoteEvent>& notes,
+                                                    const KeySignature& key_sig);
 
 /// @brief Phase 4 (modulation-aware): Detect non-diatonic notes using timeline.
 ///
@@ -125,8 +125,8 @@ std::vector<DissonanceEvent> detectNonDiatonicNotes(
 /// @param notes All notes.
 /// @param timeline Harmonic timeline providing per-tick key context.
 /// @return Detected non-diatonic events.
-std::vector<DissonanceEvent> detectNonDiatonicNotes(
-    const std::vector<NoteEvent>& notes, const HarmonicTimeline& timeline);
+std::vector<DissonanceEvent> detectNonDiatonicNotes(const std::vector<NoteEvent>& notes,
+                                                    const HarmonicTimeline& timeline);
 
 // ---------------------------------------------------------------------------
 // Orchestrator functions
@@ -141,18 +141,17 @@ std::vector<DissonanceEvent> detectNonDiatonicNotes(
 ///        NCT downgrade. nullptr preserves backward-compatible single-timeline behavior.
 /// @return Complete dissonance analysis result.
 DissonanceAnalysisResult analyzeOrganDissonance(
-    const std::vector<NoteEvent>& notes, uint8_t num_voices,
-    const HarmonicTimeline& timeline, const KeySignature& key_sig,
-    const HarmonicTimeline* generation_timeline = nullptr);
+    const std::vector<NoteEvent>& notes, uint8_t num_voices, const HarmonicTimeline& timeline,
+    const KeySignature& key_sig, const HarmonicTimeline* generation_timeline = nullptr);
 
 /// @brief Run phases 2 + 4 for Solo String system.
 /// @param notes All notes (single melodic line).
 /// @param timeline Harmonic timeline.
 /// @param key_sig Key signature.
 /// @return Complete dissonance analysis result.
-DissonanceAnalysisResult analyzeSoloStringDissonance(
-    const std::vector<NoteEvent>& notes,
-    const HarmonicTimeline& timeline, const KeySignature& key_sig);
+DissonanceAnalysisResult analyzeSoloStringDissonance(const std::vector<NoteEvent>& notes,
+                                                     const HarmonicTimeline& timeline,
+                                                     const KeySignature& key_sig);
 
 }  // namespace bach
 

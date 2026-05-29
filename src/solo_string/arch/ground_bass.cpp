@@ -10,8 +10,7 @@
 
 namespace bach {
 
-GroundBass::GroundBass(std::vector<NoteEvent> bass_notes)
-    : bass_notes_(std::move(bass_notes)) {}
+GroundBass::GroundBass(std::vector<NoteEvent> bass_notes) : bass_notes_(std::move(bass_notes)) {}
 
 const std::vector<NoteEvent>& GroundBass::getNotes() const {
   return bass_notes_;
@@ -68,8 +67,7 @@ bool GroundBass::verifyIntegrity(const std::vector<NoteEvent>& generated_bass) c
   return !verifyIntegrityReport(generated_bass).hasCritical();
 }
 
-FailReport GroundBass::verifyIntegrityReport(
-    const std::vector<NoteEvent>& generated_bass) const {
+FailReport GroundBass::verifyIntegrityReport(const std::vector<NoteEvent>& generated_bass) const {
   FailReport report;
 
   // Check 1: Note count mismatch.
@@ -78,8 +76,8 @@ FailReport GroundBass::verifyIntegrityReport(
     issue.kind = FailKind::StructuralFail;
     issue.severity = FailSeverity::Critical;
     issue.rule = "note_count_mismatch";
-    issue.description = "Expected " + std::to_string(bass_notes_.size()) +
-                        " notes, found " + std::to_string(generated_bass.size());
+    issue.description = "Expected " + std::to_string(bass_notes_.size()) + " notes, found " +
+                        std::to_string(generated_bass.size());
     report.addIssue(issue);
     return report;
   }
@@ -181,8 +179,7 @@ GroundBass GroundBass::createStandardDMinor() {
   return GroundBass(std::move(notes));
 }
 
-GroundBass GroundBass::createForKey(const KeySignature& key_sig,
-                                   uint8_t register_low) {
+GroundBass GroundBass::createForKey(const KeySignature& key_sig, uint8_t register_low) {
   // Start from the standard D minor pattern and transpose.
   GroundBass standard = createStandardDMinor();
 
@@ -211,7 +208,8 @@ GroundBass GroundBass::createForKey(const KeySignature& key_sig,
   if (register_low > 0) {
     uint8_t lowest = 127;
     for (const auto& note : transposed_notes) {
-      if (note.pitch < lowest) lowest = note.pitch;
+      if (note.pitch < lowest)
+        lowest = note.pitch;
     }
     if (lowest < register_low) {
       int shift = ((static_cast<int>(register_low) - static_cast<int>(lowest) + 11) / 12) * 12;

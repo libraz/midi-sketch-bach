@@ -31,8 +31,7 @@ std::vector<NoteEvent> makeTestNotes(TimeSignature ts, int total_bars = 32) {
   for (int bar = 0; bar < total_bars; ++bar) {
     for (int beat = 0; beat < beats; ++beat) {
       NoteEvent n;
-      n.start_tick = static_cast<Tick>(bar) * bar_ticks
-                   + static_cast<Tick>(beat) * beat_ticks;
+      n.start_tick = static_cast<Tick>(bar) * bar_ticks + static_cast<Tick>(beat) * beat_ticks;
       n.duration = beat_ticks / 2;
       n.pitch = 60;
       n.velocity = 80;
@@ -46,8 +45,7 @@ std::vector<NoteEvent> makeTestNotes(TimeSignature ts, int total_bars = 32) {
 /// @brief Create a descriptor for testing.
 GoldbergVariationDescriptor makeTestDesc(
     GoldbergTempoCharacter character = GoldbergTempoCharacter::Dance,
-    MeterProfile meter = MeterProfile::StandardTriple,
-    TimeSignature ts = kThreeFour) {
+    MeterProfile meter = MeterProfile::StandardTriple, TimeSignature ts = kThreeFour) {
   GoldbergVariationDescriptor desc{};
   desc.variation_number = 1;
   desc.type = GoldbergVariationType::Ornamental;
@@ -93,11 +91,9 @@ TEST(HarmonicTimeWarpTest, PhraseBoundaryInvariant) {
 
   // Phrase boundary notes should be ±1 tick from original.
   for (auto [idx, orig_tick] : boundary_notes) {
-    int64_t diff = static_cast<int64_t>(notes[idx].start_tick)
-                 - static_cast<int64_t>(orig_tick);
-    EXPECT_LE(std::abs(diff), 1)
-        << "Phrase boundary note at original tick " << orig_tick
-        << " moved to " << notes[idx].start_tick;
+    int64_t diff = static_cast<int64_t>(notes[idx].start_tick) - static_cast<int64_t>(orig_tick);
+    EXPECT_LE(std::abs(diff), 1) << "Phrase boundary note at original tick " << orig_tick
+                                 << " moved to " << notes[idx].start_tick;
   }
 }
 
@@ -126,8 +122,7 @@ TEST(HarmonicTimeWarpTest, CadenceTickInvariant) {
 
   // Cadence bar starts should have limited displacement.
   for (auto [idx, orig_tick] : cadence_notes) {
-    int64_t diff = static_cast<int64_t>(notes[idx].start_tick)
-                 - static_cast<int64_t>(orig_tick);
+    int64_t diff = static_cast<int64_t>(notes[idx].start_tick) - static_cast<int64_t>(orig_tick);
     Tick beat_ticks = bar_ticks / kThreeFour.pulsesPerBar();
     // Max displacement bounded by max_delta * beat_ticks * beats.
     // For Dance: max delta ≈ 3%, so max shift ≈ 3% * 480 * 3 ≈ 43 ticks.
@@ -144,7 +139,8 @@ TEST(HarmonicTimeWarpTest, CanonPhaseInvariant) {
   // Save original ticks.
   std::vector<Tick> orig_ticks;
   orig_ticks.reserve(notes.size());
-  for (const auto& n : notes) orig_ticks.push_back(n.start_tick);
+  for (const auto& n : notes)
+    orig_ticks.push_back(n.start_tick);
 
   applyHarmonicTimeWarp(notes, grid, desc, kTestSeed);
 
@@ -154,8 +150,7 @@ TEST(HarmonicTimeWarpTest, CanonPhaseInvariant) {
   // Allow up to 3% of beat_ticks for cumulative shift.
   Tick max_shift = static_cast<Tick>(beat_ticks * 0.03f);
   for (size_t i = 0; i < notes.size(); ++i) {
-    int64_t diff = static_cast<int64_t>(notes[i].start_tick)
-                 - static_cast<int64_t>(orig_ticks[i]);
+    int64_t diff = static_cast<int64_t>(notes[i].start_tick) - static_cast<int64_t>(orig_ticks[i]);
     EXPECT_LE(std::abs(diff), static_cast<int64_t>(max_shift))
         << "Stable/Canon variation displaced too much at index " << i;
   }
@@ -187,8 +182,7 @@ TEST(HarmonicTimeWarpTest, Deterministic) {
 
   ASSERT_EQ(notes1.size(), notes2.size());
   for (size_t i = 0; i < notes1.size(); ++i) {
-    EXPECT_EQ(notes1[i].start_tick, notes2[i].start_tick)
-        << "Non-deterministic at index " << i;
+    EXPECT_EQ(notes1[i].start_tick, notes2[i].start_tick) << "Non-deterministic at index " << i;
     EXPECT_EQ(notes1[i].duration, notes2[i].duration);
   }
 }
@@ -217,8 +211,7 @@ TEST(HarmonicTimeWarpTest, SeedVariation) {
 TEST(HarmonicTimeWarpTest, SarabandeBeat2Stretch) {
   auto grid = GoldbergStructuralGrid::createMajor();
   // Sarabande: beat 2 (index 1) is Strong, beat 3 (index 2) is Weak.
-  auto desc = makeTestDesc(GoldbergTempoCharacter::Expressive,
-                           MeterProfile::SarabandeTriple);
+  auto desc = makeTestDesc(GoldbergTempoCharacter::Expressive, MeterProfile::SarabandeTriple);
   Tick bar_ticks = kThreeFour.ticksPerBar();
   Tick beat_ticks = bar_ticks / 3;
 
@@ -237,8 +230,7 @@ TEST(HarmonicTimeWarpTest, SarabandeBeat2Stretch) {
   for (int bar = 1; bar < 4; ++bar) {
     for (int beat = 0; beat < 3; ++beat) {
       NoteEvent n;
-      n.start_tick = static_cast<Tick>(bar) * bar_ticks
-                   + static_cast<Tick>(beat) * beat_ticks;
+      n.start_tick = static_cast<Tick>(bar) * bar_ticks + static_cast<Tick>(beat) * beat_ticks;
       n.duration = beat_ticks / 2;
       n.pitch = 60;
       n.velocity = 80;
@@ -266,7 +258,8 @@ TEST(HarmonicTimeWarpTest, HarmonicGradientDriven) {
   // than bars without. Measure via note displacement magnitude.
   auto notes = makeTestNotes(kThreeFour);
   std::vector<Tick> orig;
-  for (const auto& n : notes) orig.push_back(n.start_tick);
+  for (const auto& n : notes)
+    orig.push_back(n.start_tick);
 
   applyHarmonicTimeWarp(notes, grid, desc, kTestSeed);
 
@@ -279,8 +272,7 @@ TEST(HarmonicTimeWarpTest, HarmonicGradientDriven) {
   for (size_t i = 0; i < notes.size(); ++i) {
     int bar = static_cast<int>(orig[i] / bar_ticks);
     int grid_bar = bar % 32;
-    double disp = std::abs(static_cast<double>(notes[i].start_tick)
-                         - static_cast<double>(orig[i]));
+    double disp = std::abs(static_cast<double>(notes[i].start_tick) - static_cast<double>(orig[i]));
     if (grid.isCadenceBar(grid_bar)) {
       cadence_disp += disp;
       ++cadence_count;
@@ -306,7 +298,8 @@ TEST(HarmonicTimeWarpTest, DurationScaled) {
   auto desc = makeTestDesc(GoldbergTempoCharacter::Expressive);
   auto notes = makeTestNotes(kThreeFour);
   std::vector<Tick> orig_dur;
-  for (const auto& n : notes) orig_dur.push_back(n.duration);
+  for (const auto& n : notes)
+    orig_dur.push_back(n.duration);
 
   applyHarmonicTimeWarp(notes, grid, desc, kTestSeed);
 
@@ -329,8 +322,7 @@ TEST(HarmonicTimeWarpTest, DurationScaled) {
 TEST(HarmonicTimeWarpTest, CompoundMeter6_8) {
   auto grid = GoldbergStructuralGrid::createMajor();
   TimeSignature six_eight = {6, 8};
-  auto desc = makeTestDesc(GoldbergTempoCharacter::Dance,
-                           MeterProfile::StandardTriple, six_eight);
+  auto desc = makeTestDesc(GoldbergTempoCharacter::Dance, MeterProfile::StandardTriple, six_eight);
   auto notes = makeTestNotes(six_eight);
 
   // Should not crash.
@@ -345,8 +337,7 @@ TEST(HarmonicTimeWarpTest, CompoundMeter6_8) {
 TEST(HarmonicTimeWarpTest, AllaBreveMeter2_2) {
   auto grid = GoldbergStructuralGrid::createMajor();
   TimeSignature two_two = {2, 2};
-  auto desc = makeTestDesc(GoldbergTempoCharacter::Stable,
-                           MeterProfile::StandardTriple, two_two);
+  auto desc = makeTestDesc(GoldbergTempoCharacter::Stable, MeterProfile::StandardTriple, two_two);
   auto notes = makeTestNotes(two_two);
 
   applyHarmonicTimeWarp(notes, grid, desc, kTestSeed);

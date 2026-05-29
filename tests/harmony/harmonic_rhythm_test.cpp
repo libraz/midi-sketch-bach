@@ -1,5 +1,7 @@
 // Tests for harmonic rhythm dynamic control.
 
+#include "harmony/harmonic_rhythm.h"
+
 #include <gtest/gtest.h>
 
 #include <cmath>
@@ -7,7 +9,6 @@
 
 #include "core/basic_types.h"
 #include "harmony/harmonic_event.h"
-#include "harmony/harmonic_rhythm.h"
 
 namespace bach {
 namespace {
@@ -24,8 +25,7 @@ TEST(HarmonicRhythmTest, ComputeRhythmFactor_Establish_ReturnsDesignValue) {
   std::vector<Tick> no_cadences;
 
   // Beginning of the piece.
-  EXPECT_FLOAT_EQ(kHarmonicRhythmEstablish,
-                  computeRhythmFactor(0, kTestDuration, no_cadences));
+  EXPECT_FLOAT_EQ(kHarmonicRhythmEstablish, computeRhythmFactor(0, kTestDuration, no_cadences));
 
   // Middle of Establish phase (quarter of first third).
   Tick mid_establish = kTestDuration / 6;  // 960 ticks
@@ -94,16 +94,14 @@ TEST(HarmonicRhythmTest, ComputeRhythmFactor_PreCadenceTakesPriority) {
   std::vector<Tick> cadences = {cadence_tick};
 
   Tick in_window = cadence_tick - kTicksPerBeat;  // 1 beat before cadence
-  EXPECT_FLOAT_EQ(kPreCadenceAcceleration,
-                  computeRhythmFactor(in_window, kTestDuration, cadences));
+  EXPECT_FLOAT_EQ(kPreCadenceAcceleration, computeRhythmFactor(in_window, kTestDuration, cadences));
 }
 
 TEST(HarmonicRhythmTest, ComputeRhythmFactor_NoCadences_ReturnsPhaseOnly) {
   // Empty cadence list should still return phase-based values.
   std::vector<Tick> empty_cadences;
 
-  EXPECT_FLOAT_EQ(kHarmonicRhythmEstablish,
-                  computeRhythmFactor(0, kTestDuration, empty_cadences));
+  EXPECT_FLOAT_EQ(kHarmonicRhythmEstablish, computeRhythmFactor(0, kTestDuration, empty_cadences));
   EXPECT_FLOAT_EQ(kHarmonicRhythmDevelop,
                   computeRhythmFactor(kTestDuration / 2, kTestDuration, empty_cadences));
   EXPECT_FLOAT_EQ(kHarmonicRhythmResolve,
@@ -139,8 +137,7 @@ TEST(HarmonicRhythmTest, ComputeRhythmFactor_CadenceAtTickZero) {
   std::vector<Tick> cadences = {kTicksPerBeat};  // Cadence at beat 1
 
   // Tick 0 is within the pre-cadence window of a cadence at beat 1.
-  EXPECT_FLOAT_EQ(kPreCadenceAcceleration,
-                  computeRhythmFactor(0, kTestDuration, cadences));
+  EXPECT_FLOAT_EQ(kPreCadenceAcceleration, computeRhythmFactor(0, kTestDuration, cadences));
 }
 
 // ---------------------------------------------------------------------------

@@ -25,9 +25,7 @@ struct KeySignature {
   }
 
   /// @brief Inequality comparison.
-  bool operator!=(const KeySignature& other) const {
-    return !(*this == other);
-  }
+  bool operator!=(const KeySignature& other) const { return !(*this == other); }
 };
 
 /// @brief Get the dominant key (perfect 5th above, same mode).

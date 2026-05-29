@@ -22,10 +22,8 @@ static bool isDominant(const Chord& chord) {
 
 /// @brief Check if a chord has seventh quality (V7-style).
 static bool hasSeventh(const Chord& chord) {
-  return chord.quality == ChordQuality::Dominant7 ||
-         chord.quality == ChordQuality::Minor7 ||
-         chord.quality == ChordQuality::MajorMajor7 ||
-         chord.quality == ChordQuality::Diminished7 ||
+  return chord.quality == ChordQuality::Dominant7 || chord.quality == ChordQuality::Minor7 ||
+         chord.quality == ChordQuality::MajorMajor7 || chord.quality == ChordQuality::Diminished7 ||
          chord.quality == ChordQuality::HalfDiminished7;
 }
 
@@ -112,8 +110,7 @@ std::vector<DetectedCadence> detectCadences(const HarmonicTimeline& timeline) {
 // ---------------------------------------------------------------------------
 
 float cadenceDetectionRate(const std::vector<DetectedCadence>& detected,
-                           const std::vector<Tick>& planned,
-                           Tick tolerance_ticks) {
+                           const std::vector<Tick>& planned, Tick tolerance_ticks) {
   if (planned.empty()) {
     return 0.0f;
   }
@@ -121,8 +118,8 @@ float cadenceDetectionRate(const std::vector<DetectedCadence>& detected,
   int matched = 0;
   for (Tick planned_tick : planned) {
     for (const auto& det : detected) {
-      Tick distance = (det.tick >= planned_tick) ? (det.tick - planned_tick)
-                                                : (planned_tick - det.tick);
+      Tick distance =
+          (det.tick >= planned_tick) ? (det.tick - planned_tick) : (planned_tick - det.tick);
       if (distance <= tolerance_ticks) {
         ++matched;
         break;

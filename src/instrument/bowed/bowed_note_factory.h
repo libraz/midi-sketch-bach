@@ -17,11 +17,11 @@ class IBowedStringInstrument;
 /// for note creation. The factory uses these to create NoteEvents
 /// clamped to the instrument's playable range.
 struct BowedNoteOptions {
-  uint8_t pitch = 0;          // Desired MIDI pitch
-  Tick tick = 0;               // Absolute tick position
-  Tick duration = 0;           // Duration in ticks
-  uint8_t velocity = 80;      // MIDI velocity (0-127)
-  bool prefer_open_string = true;  // Prefer open string when pitch matches
+  uint8_t pitch = 0;                                // Desired MIDI pitch
+  Tick tick = 0;                                    // Absolute tick position
+  Tick duration = 0;                                // Duration in ticks
+  uint8_t velocity = 80;                            // MIDI velocity (0-127)
+  bool prefer_open_string = true;                   // Prefer open string when pitch matches
   BachNoteSource source = BachNoteSource::Unknown;  // Provenance source
 };
 
@@ -49,8 +49,7 @@ class BowedNoteFactory {
   /// @param velocity MIDI velocity (0-127).
   /// @param source Provenance source for the note.
   /// @return NoteEvent with pitch guaranteed to be within instrument range.
-  NoteEvent createNote(uint8_t pitch, Tick start, Tick duration,
-                       uint8_t velocity,
+  NoteEvent createNote(uint8_t pitch, Tick start, Tick duration, uint8_t velocity,
                        BachNoteSource source) const;
 
  private:

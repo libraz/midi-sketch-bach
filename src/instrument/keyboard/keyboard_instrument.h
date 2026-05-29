@@ -34,15 +34,13 @@ class IKeyboardInstrument {
   /// @brief Assign pitches to left and right hands.
   /// @param pitches Sorted (ascending) vector of simultaneous pitches.
   /// @return Hand assignment with validity flag.
-  virtual VoicingHandAssignment assignHands(
-      const std::vector<uint8_t>& pitches) const = 0;
+  virtual VoicingHandAssignment assignHands(const std::vector<uint8_t>& pitches) const = 0;
 
   /// @brief Check if all pitches can be played by a single hand.
   /// @param pitches Sorted vector of pitches.
   /// @param hand Which hand to check.
   /// @return True if playable by the specified hand alone.
-  virtual bool isPlayableByOneHand(const std::vector<uint8_t>& pitches,
-                                   Hand hand) const = 0;
+  virtual bool isPlayableByOneHand(const std::vector<uint8_t>& pitches, Hand hand) const = 0;
 
   /// @brief Check if a full voicing (both hands) is playable.
   /// @param pitches Sorted vector of all simultaneous pitches.
@@ -54,8 +52,7 @@ class IKeyboardInstrument {
   /// @param to_pitches Next set of pitches to play.
   /// @return Playability cost with component breakdown.
   virtual KeyboardPlayabilityCost calculateTransitionCost(
-      const KeyboardState& from_state,
-      const std::vector<uint8_t>& to_pitches) const = 0;
+      const KeyboardState& from_state, const std::vector<uint8_t>& to_pitches) const = 0;
 
   /// @brief Suggest a playable voicing close to the desired pitches.
   /// @param desired_pitches The ideal set of pitches.

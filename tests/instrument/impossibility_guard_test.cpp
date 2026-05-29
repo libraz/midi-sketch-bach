@@ -16,8 +16,7 @@ namespace {
 // ---------------------------------------------------------------------------
 
 NoteEvent makeNote(uint8_t pitch, Tick start, Tick duration,
-                   BachNoteSource source = BachNoteSource::FreeCounterpoint,
-                   VoiceId voice = 0) {
+                   BachNoteSource source = BachNoteSource::FreeCounterpoint, VoiceId voice = 0) {
   NoteEvent note;
   note.pitch = pitch;
   note.start_tick = start;
@@ -33,9 +32,8 @@ NoteEvent makeNote(uint8_t pitch, Tick start, Tick duration,
 // ---------------------------------------------------------------------------
 
 TEST(ImpossibilityGuardTest, CreateGuardForAllInstruments) {
-  for (auto type : {InstrumentType::Organ, InstrumentType::Harpsichord,
-                    InstrumentType::Piano, InstrumentType::Violin,
-                    InstrumentType::Cello, InstrumentType::Guitar}) {
+  for (auto type : {InstrumentType::Organ, InstrumentType::Harpsichord, InstrumentType::Piano,
+                    InstrumentType::Violin, InstrumentType::Cello, InstrumentType::Guitar}) {
     auto guard = createGuard(type);
     EXPECT_TRUE(guard.isPitchPlayable != nullptr);
     EXPECT_TRUE(guard.fixPitchRange != nullptr);
@@ -65,9 +63,9 @@ TEST(ImpossibilityGuardTest, ViolinRejectsLowPitches) {
 
 TEST(ImpossibilityGuardTest, CelloRejectsHighPitches) {
   auto guard = createGuard(InstrumentType::Cello);
-  EXPECT_TRUE(guard.isPitchPlayable(36));   // C2 (lowest string)
-  EXPECT_TRUE(guard.isPitchPlayable(60));   // C4
-  EXPECT_FALSE(guard.isPitchPlayable(100)); // Above cello range
+  EXPECT_TRUE(guard.isPitchPlayable(36));    // C2 (lowest string)
+  EXPECT_TRUE(guard.isPitchPlayable(60));    // C4
+  EXPECT_FALSE(guard.isPitchPlayable(100));  // Above cello range
 }
 
 TEST(ImpossibilityGuardTest, GuitarRange) {
@@ -270,32 +268,25 @@ TEST(ImpossibilityGuardTest, EnforceDroppedNotesRemoved) {
 // ---------------------------------------------------------------------------
 
 TEST(ManualPolicyTest, StandardForCanon) {
-  EXPECT_EQ(getManualPolicy(GoldbergVariationType::Canon),
-            ManualPolicy::Standard);
+  EXPECT_EQ(getManualPolicy(GoldbergVariationType::Canon), ManualPolicy::Standard);
 }
 
 TEST(ManualPolicyTest, HandCrossingForHandCrossing) {
-  EXPECT_EQ(getManualPolicy(GoldbergVariationType::HandCrossing),
-            ManualPolicy::HandCrossing);
+  EXPECT_EQ(getManualPolicy(GoldbergVariationType::HandCrossing), ManualPolicy::HandCrossing);
 }
 
 TEST(ManualPolicyTest, SingleManualForToccata) {
-  EXPECT_EQ(getManualPolicy(GoldbergVariationType::Toccata),
-            ManualPolicy::SingleManual);
+  EXPECT_EQ(getManualPolicy(GoldbergVariationType::Toccata), ManualPolicy::SingleManual);
 }
 
 TEST(ManualPolicyTest, SingleManualForBravuraChordal) {
-  EXPECT_EQ(getManualPolicy(GoldbergVariationType::BravuraChordal),
-            ManualPolicy::SingleManual);
+  EXPECT_EQ(getManualPolicy(GoldbergVariationType::BravuraChordal), ManualPolicy::SingleManual);
 }
 
 TEST(ManualPolicyTest, StandardIsDefault) {
-  EXPECT_EQ(getManualPolicy(GoldbergVariationType::Ornamental),
-            ManualPolicy::Standard);
-  EXPECT_EQ(getManualPolicy(GoldbergVariationType::Fughetta),
-            ManualPolicy::Standard);
-  EXPECT_EQ(getManualPolicy(GoldbergVariationType::AllaBreveFugal),
-            ManualPolicy::Standard);
+  EXPECT_EQ(getManualPolicy(GoldbergVariationType::Ornamental), ManualPolicy::Standard);
+  EXPECT_EQ(getManualPolicy(GoldbergVariationType::Fughetta), ManualPolicy::Standard);
+  EXPECT_EQ(getManualPolicy(GoldbergVariationType::AllaBreveFugal), ManualPolicy::Standard);
 }
 
 }  // namespace

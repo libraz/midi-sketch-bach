@@ -27,8 +27,7 @@ class FrettedNoteFactory {
   /// @param duration Duration in ticks.
   /// @param velocity MIDI velocity (0-127).
   /// @return NoteEvent with pitch guaranteed to be within instrument range.
-  NoteEvent createNote(uint8_t pitch, Tick start, Tick duration,
-                       uint8_t velocity,
+  NoteEvent createNote(uint8_t pitch, Tick start, Tick duration, uint8_t velocity,
                        BachNoteSource source) const;
 
  private:

@@ -38,12 +38,12 @@ struct ChaconneVariation {
 ///
 /// Principle: Trust Design Values. Do not search or score; output directly.
 struct ClimaxDesign {
-  int accumulate_variations = 3;        ///< Exactly 3 (design invariant)
-  float harmonic_weight_peak = 2.0f;    ///< Harmonic weight multiplier at climax
-  bool unlock_max_register = true;      ///< Allow full instrument range
-  bool allow_full_chords = true;        ///< Enable FullChords texture
-  float position_ratio_min = 0.70f;     ///< Climax starts at 70% of piece
-  float position_ratio_max = 0.85f;     ///< Climax ends by 85% of piece
+  int accumulate_variations = 3;      ///< Exactly 3 (design invariant)
+  float harmonic_weight_peak = 2.0f;  ///< Harmonic weight multiplier at climax
+  bool unlock_max_register = true;    ///< Allow full instrument range
+  bool allow_full_chords = true;      ///< Enable FullChords texture
+  float position_ratio_min = 0.70f;   ///< Climax starts at 70% of piece
+  float position_ratio_max = 0.85f;   ///< Climax ends by 85% of piece
 
   // Fixed design values (no search -- Principle 4).
   TextureType fixed_texture = TextureType::FullChords;
@@ -60,11 +60,8 @@ struct ClimaxDesign {
 /// constrained register.
 struct MajorSectionConstraints {
   bool allow_full_chords = false;  ///< No full chords in major section
-  std::set<TextureType> allowed_textures = {
-    TextureType::SingleLine,
-    TextureType::Arpeggiated,
-    TextureType::Bariolage
-  };
+  std::set<TextureType> allowed_textures = {TextureType::SingleLine, TextureType::Arpeggiated,
+                                            TextureType::Bariolage};
   float rhythm_density_cap = 0.6f;  ///< Lower rhythmic density
   uint8_t register_low = 55;        ///< G3
   uint8_t register_high = 84;       ///< C6
@@ -102,7 +99,7 @@ TextureArcTarget getTextureArcTarget(VariationRole role);
 struct ChaconneConfig {
   KeySignature key = {Key::D, true};  ///< D minor (BWV1004)
   uint16_t bpm = 60;
-  uint32_t seed = 0;                  ///< 0 = auto (time-based)
+  uint32_t seed = 0;  ///< 0 = auto (time-based)
   InstrumentType instrument = InstrumentType::Violin;
 
   /// @deprecated Use custom_scheme instead. Ignored when custom_scheme is non-empty.
@@ -144,7 +141,7 @@ struct ChaconneConfig {
 /// @param rng Mersenne Twister RNG for VariationType selection.
 /// @return Vector of ChaconneVariation with roles and types assigned.
 std::vector<ChaconneVariation> createStandardVariationPlan(const KeySignature& key,
-                                                            std::mt19937& rng);
+                                                           std::mt19937& rng);
 
 /// @brief Create a scaled variation plan for a chaconne with a target variation count.
 ///
@@ -165,8 +162,7 @@ std::vector<ChaconneVariation> createStandardVariationPlan(const KeySignature& k
 /// @param rng Mersenne Twister RNG for VariationType selection.
 /// @return Vector of ChaconneVariation with roles and types assigned.
 std::vector<ChaconneVariation> createScaledVariationPlan(const KeySignature& key,
-                                                          int target_variations,
-                                                          std::mt19937& rng);
+                                                         int target_variations, std::mt19937& rng);
 
 /// @brief Validate a variation plan for structural correctness.
 ///

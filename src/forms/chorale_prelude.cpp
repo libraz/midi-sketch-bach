@@ -43,7 +43,7 @@ constexpr uint8_t kPedalChannel = 3;
 /// @brief Voice indices for chorale prelude voices.
 constexpr uint8_t kFigurationVoice = 0;  // Great: ornamental soprano
 constexpr uint8_t kCantusVoice = 1;      // Swell: cantus firmus (tenor/alto)
-constexpr uint8_t kInnerVoice = 2;  // Great: inner voice
+constexpr uint8_t kInnerVoice = 2;       // Great: inner voice
 constexpr uint8_t kPedalVoice = 3;       // Pedal: bass
 
 /// @brief Total number of voices in a chorale prelude.
@@ -58,8 +58,8 @@ constexpr int kChoraleCount = 3;
 
 /// @brief A single note in a chorale melody (pitch + duration in beats).
 struct ChoraleNote {
-  uint8_t pitch;          ///< MIDI pitch in C major context.
-  uint8_t duration_beats; ///< Duration in beats (4 = whole note, 8 = breve).
+  uint8_t pitch;           ///< MIDI pitch in C major context.
+  uint8_t duration_beats;  ///< Duration in beats (4 = whole note, 8 = breve).
 };
 
 /// @brief A built-in chorale melody with name and notes.
@@ -77,18 +77,18 @@ struct ChoraleMelody {
 /// Inspired by the opening of Philipp Nicolai's hymn tune (1599).
 constexpr ChoraleNote kWachetAuf[] = {
     {60, 4}, {62, 4}, {64, 4}, {65, 4},  // C D E F (ascending)
-    {67, 8},                               // G (held)
+    {67, 8},                             // G (held)
     {65, 4}, {64, 4}, {62, 4}, {60, 4},  // F E D C (descending)
-    {62, 4}, {64, 8},                      // D E (half close)
+    {62, 4}, {64, 8},                    // D E (half close)
     {67, 4}, {65, 4}, {64, 4}, {62, 4},  // G F E D
-    {60, 8},                               // C (final)
+    {60, 8},                             // C (final)
 };
 
 /// "Nun komm" (Now Come) -- stepwise motion melody with gentle arc.
 /// Inspired by the Advent hymn tune (15th century).
 constexpr ChoraleNote kNunKomm[] = {
     {64, 4}, {62, 4}, {60, 4}, {62, 4},  // E D C D
-    {64, 4}, {64, 4}, {64, 8},            // E E E (held)
+    {64, 4}, {64, 4}, {64, 8},           // E E E (held)
     {65, 4}, {67, 4}, {69, 4}, {67, 4},  // F G A G
     {65, 4}, {64, 4}, {62, 4}, {60, 8},  // F E D C (final)
 };
@@ -99,7 +99,7 @@ constexpr ChoraleNote kEinFesteBurg[] = {
     {67, 4}, {67, 4}, {67, 4}, {64, 4},  // G G G E
     {65, 4}, {67, 4}, {69, 4}, {67, 8},  // F G A G (held)
     {65, 4}, {64, 4}, {62, 4}, {64, 4},  // F E D E
-    {60, 4}, {62, 4}, {60, 8},            // C D C (final)
+    {60, 4}, {62, 4}, {60, 8},           // C D C (final)
 };
 
 /// @brief Array of all built-in chorale melodies.
@@ -229,11 +229,9 @@ uint8_t choraleBassPitch(const Chord& chord, int bass_octave) {
 /// @param melody The chorale melody.
 /// @param key Key signature.
 /// @return A HarmonicTimeline with cantus-driven harmony.
-HarmonicTimeline createChoraleTimeline(const ChoraleMelody& melody,
-                                       const KeySignature& key) {
+HarmonicTimeline createChoraleTimeline(const ChoraleMelody& melody, const KeySignature& key) {
   HarmonicTimeline timeline;
-  ScaleType scale_type = key.is_minor ? ScaleType::HarmonicMinor
-                                      : ScaleType::Major;
+  ScaleType scale_type = key.is_minor ? ScaleType::HarmonicMinor : ScaleType::Major;
   int bass_octave = 2;
 
   std::vector<HarmonicEvent> events;
@@ -250,19 +248,16 @@ HarmonicTimeline createChoraleTimeline(const ChoraleMelody& melody,
 
     Chord chord;
     chord.degree = chord_degree;
-    chord.quality = key.is_minor ? minorKeyQuality(chord_degree)
-                                 : majorKeyQuality(chord_degree);
+    chord.quality = key.is_minor ? minorKeyQuality(chord_degree) : majorKeyQuality(chord_degree);
     if (key.is_minor && chord_degree == ChordDegree::V) {
       chord.quality = ChordQuality::Major;
     }
 
-    uint8_t semitone_offset = key.is_minor
-                                  ? degreeMinorSemitones(chord_degree)
-                                  : degreeSemitones(chord_degree);
-    int root_midi = (bass_octave + 1) * 12 +
-                    static_cast<int>(key.tonic) + semitone_offset;
-    chord.root_pitch = static_cast<uint8_t>(
-        root_midi > 127 ? 127 : (root_midi < 0 ? 0 : root_midi));
+    uint8_t semitone_offset =
+        key.is_minor ? degreeMinorSemitones(chord_degree) : degreeSemitones(chord_degree);
+    int root_midi = (bass_octave + 1) * 12 + static_cast<int>(key.tonic) + semitone_offset;
+    chord.root_pitch =
+        static_cast<uint8_t>(root_midi > 127 ? 127 : (root_midi < 0 ? 0 : root_midi));
 
     // Step 1b: Inversion logic for bass smoothness.
     // vi always gets first inversion; ii gets first inversion when preceded by I or iii.
@@ -328,9 +323,8 @@ void placeCantus(const ChoraleMelody& melody, Track& track) {
 }
 
 /// Insert passing tones into long cantus notes (weak-beat, stepwise only).
-void addCantusPassingTones(Track& track,
-                           const std::pair<uint8_t, uint8_t>& voice_range,
-                           Key key, bool is_minor) {
+void addCantusPassingTones(Track& track, const std::pair<uint8_t, uint8_t>& voice_range, Key key,
+                           bool is_minor) {
   ScaleType scale = is_minor ? ScaleType::HarmonicMinor : ScaleType::Major;
   std::vector<NoteEvent> enriched;
   auto& notes = track.notes;
@@ -365,8 +359,7 @@ void addCantusPassingTones(Track& track,
 
     int dir = (next_deg > cur_deg) ? 1 : -1;
     uint8_t passing = scale_util::absoluteDegreeToPitch(cur_deg + dir, key, scale);
-    passing = clampPitch(static_cast<int>(passing),
-                         voice_range.first, voice_range.second);
+    passing = clampPitch(static_cast<int>(passing), voice_range.first, voice_range.second);
 
     // Split: first half original, second half passing tone.
     note.duration = half;
@@ -390,23 +383,24 @@ void addCantusPassingTones(Track& track,
 
 /// A motif extracted from the first figuration segment.
 struct FigurationMotif {
-  int intervals[4] = {};    // Diatonic intervals (signed, relative to first note).
-  Tick durations[5] = {};   // Duration of each note.
-  int length = 0;           // Number of notes (3-5).
+  int intervals[4] = {};   // Diatonic intervals (signed, relative to first note).
+  Tick durations[5] = {};  // Duration of each note.
+  int length = 0;          // Number of notes (3-5).
   bool valid = false;
 };
 
 /// Extract a motif from the first few notes of a figuration segment.
 FigurationMotif extractMotif(const std::vector<NoteEvent>& notes) {
   FigurationMotif motif;
-  if (notes.size() < 3) return motif;
+  if (notes.size() < 3)
+    return motif;
 
   int count = std::min(static_cast<int>(notes.size()), 5);
   motif.length = count;
   motif.durations[0] = notes[0].duration;
   for (int idx = 1; idx < count; ++idx) {
-    motif.intervals[idx - 1] = static_cast<int>(notes[idx].pitch) -
-                                 static_cast<int>(notes[idx - 1].pitch);
+    motif.intervals[idx - 1] =
+        static_cast<int>(notes[idx].pitch) - static_cast<int>(notes[idx - 1].pitch);
     motif.durations[idx] = notes[idx].duration;
   }
   motif.valid = true;
@@ -415,12 +409,12 @@ FigurationMotif extractMotif(const std::vector<NoteEvent>& notes) {
 
 /// Apply a motif starting from a given anchor pitch.
 /// Returns the notes generated by applying the motif intervals.
-std::vector<NoteEvent> applyMotif(const FigurationMotif& motif,
-                                   uint8_t anchor_pitch, Tick start_tick,
-                                   uint8_t voice, uint8_t low, uint8_t high,
-                                   const KeySignature& key_sig) {
+std::vector<NoteEvent> applyMotif(const FigurationMotif& motif, uint8_t anchor_pitch,
+                                  Tick start_tick, uint8_t voice, uint8_t low, uint8_t high,
+                                  const KeySignature& key_sig) {
   std::vector<NoteEvent> notes;
-  if (!motif.valid || motif.length < 3) return notes;
+  if (!motif.valid || motif.length < 3)
+    return notes;
 
   ScaleType scale = key_sig.is_minor ? ScaleType::NaturalMinor : ScaleType::Major;
 
@@ -433,13 +427,11 @@ std::vector<NoteEvent> applyMotif(const FigurationMotif& motif,
     if (!scale_util::isScaleTone(pit, key_sig.tonic, scale)) {
       // Snap to nearest scale tone.
       for (int delta = 1; delta <= 2; ++delta) {
-        if (pit + delta <= high &&
-            scale_util::isScaleTone(pit + delta, key_sig.tonic, scale)) {
+        if (pit + delta <= high && scale_util::isScaleTone(pit + delta, key_sig.tonic, scale)) {
           pit = pit + delta;
           break;
         }
-        if (pit >= delta + low &&
-            scale_util::isScaleTone(pit - delta, key_sig.tonic, scale)) {
+        if (pit >= delta + low && scale_util::isScaleTone(pit - delta, key_sig.tonic, scale)) {
           pit = pit - delta;
           break;
         }
@@ -484,10 +476,8 @@ std::vector<NoteEvent> applyMotif(const FigurationMotif& motif,
 /// @return Vector of NoteEvents for the counterpoint voice.
 std::vector<NoteEvent> generateFiguration(Tick cantus_tick, Tick cantus_dur,
                                           const HarmonicTimeline& timeline,
-                                          const KeySignature& key_sig,
-                                          uint8_t cantus_pitch,
-                                          uint8_t& hint_center,
-                                          std::mt19937& rng,
+                                          const KeySignature& key_sig, uint8_t cantus_pitch,
+                                          uint8_t& hint_center, std::mt19937& rng,
                                           const FigurationMotif* motif = nullptr,
                                           const VerticalContext* vctx = nullptr) {
   std::vector<NoteEvent> notes;
@@ -496,8 +486,7 @@ std::vector<NoteEvent> generateFiguration(Tick cantus_tick, Tick cantus_dur,
   constexpr uint8_t kFigHigh = 88;
   // 3b: Register center control — center = cantus_pitch + 12~17, ±9 window.
   uint8_t offset = 12 + static_cast<uint8_t>(rng::rollRange(rng, 0, 5));
-  uint8_t raw_center = clampPitch(
-      static_cast<int>(cantus_pitch) + offset, kFigLow, kFigHigh);
+  uint8_t raw_center = clampPitch(static_cast<int>(cantus_pitch) + offset, kFigLow, kFigHigh);
   uint8_t center;
   if (hint_center == 0) {
     center = raw_center;
@@ -513,17 +502,14 @@ std::vector<NoteEvent> generateFiguration(Tick cantus_tick, Tick cantus_dur,
 
   // Figuration runs use natural minor to avoid augmented 2nd exposure;
   // harmonic minor reserved for cadence/leading-tone contexts.
-  ScaleType run_scale_type = key_sig.is_minor ? ScaleType::NaturalMinor
-                                              : ScaleType::Major;
-  ScaleType cadence_scale_type = key_sig.is_minor ? ScaleType::HarmonicMinor
-                                                  : ScaleType::Major;
+  ScaleType run_scale_type = key_sig.is_minor ? ScaleType::NaturalMinor : ScaleType::Major;
+  ScaleType cadence_scale_type = key_sig.is_minor ? ScaleType::HarmonicMinor : ScaleType::Major;
   (void)cadence_scale_type;  // Reserved for future cadence-context use.
 
   // Collect scale tones in the effective range (using run scale type).
   std::vector<uint8_t> scale_tones;
   for (int p = static_cast<int>(eff_low); p <= static_cast<int>(eff_high); ++p) {
-    if (scale_util::isScaleTone(static_cast<uint8_t>(p), key_sig.tonic,
-                                run_scale_type)) {
+    if (scale_util::isScaleTone(static_cast<uint8_t>(p), key_sig.tonic, run_scale_type)) {
       scale_tones.push_back(static_cast<uint8_t>(p));
     }
   }
@@ -541,8 +527,7 @@ std::vector<NoteEvent> generateFiguration(Tick cantus_tick, Tick cantus_dur,
   size_t tone_idx = 0;
   int min_dist = 999;
   for (size_t i = 0; i < scale_tones.size(); ++i) {
-    int d = std::abs(static_cast<int>(scale_tones[i]) -
-                     static_cast<int>(start_ref));
+    int d = std::abs(static_cast<int>(scale_tones[i]) - static_cast<int>(start_ref));
     if (d < min_dist) {
       min_dist = d;
       tone_idx = i;
@@ -552,13 +537,14 @@ std::vector<NoteEvent> generateFiguration(Tick cantus_tick, Tick cantus_dur,
   // Motif presentation: anchor on cantus_pitch.
   if (motif && motif->valid && cantus_dur > kWholeNote) {
     uint8_t anchor = clampPitch(static_cast<int>(cantus_pitch) + 12, kFigLow, kFigHigh);
-    auto motif_notes = applyMotif(*motif, anchor, cantus_tick, kFigurationVoice,
-                                   kFigLow, kFigHigh, key_sig);
+    auto motif_notes =
+        applyMotif(*motif, anchor, cantus_tick, kFigurationVoice, kFigLow, kFigHigh, key_sig);
     Tick motif_end = cantus_tick;
     for (const auto& mn : motif_notes) {
       notes.push_back(mn);
       Tick end = mn.start_tick + mn.duration;
-      if (end > motif_end) motif_end = end;
+      if (end > motif_end)
+        motif_end = end;
     }
     // Advance current_tick past the motif.
     if (motif_end > current_tick) {
@@ -568,16 +554,19 @@ std::vector<NoteEvent> generateFiguration(Tick cantus_tick, Tick cantus_dur,
         uint8_t last_motif_pitch = motif_notes.back().pitch;
         int md = 999;
         for (size_t mi = 0; mi < scale_tones.size(); ++mi) {
-          int dist = std::abs(static_cast<int>(scale_tones[mi]) -
-                              static_cast<int>(last_motif_pitch));
-          if (dist < md) { md = dist; tone_idx = mi; }
+          int dist =
+              std::abs(static_cast<int>(scale_tones[mi]) - static_cast<int>(last_motif_pitch));
+          if (dist < md) {
+            md = dist;
+            tone_idx = mi;
+          }
         }
       }
     }
   }
 
   bool ascending = rng::rollProbability(rng, 0.5f);
-  int run_remaining = 0;  // Steps remaining in current directional run (Fortspinnung).
+  int run_remaining = 0;            // Steps remaining in current directional run (Fortspinnung).
   bool prev_step_was_skip = false;  // Consecutive skip guard (max 1 per run).
   Tick prev_harm_start = timeline.getAt(cantus_tick).tick;
   int neighbor_return = -1;  // Saved tone_idx for neighbor return, -1 = none.
@@ -614,8 +603,10 @@ std::vector<NoteEvent> generateFiguration(Tick cantus_tick, Tick cantus_dur,
       }
     }
     Tick remaining = end_tick - current_tick;
-    if (dur > remaining) dur = remaining;
-    if (dur == 0) break;
+    if (dur > remaining)
+      dur = remaining;
+    if (dur == 0)
+      break;
 
     size_t prev_tone_idx = tone_idx;  // Save for run disruption check.
 
@@ -627,40 +618,33 @@ std::vector<NoteEvent> generateFiguration(Tick cantus_tick, Tick cantus_dur,
       if (!isChordTone(scale_tones[tone_idx], event)) {
         size_t saved_idx = tone_idx;
         bool found = false;
-        for (size_t search = 1; search < scale_tones.size() && !found;
-             ++search) {
+        for (size_t search = 1; search < scale_tones.size() && !found; ++search) {
           size_t forward, backward;
           if (ascending) {
             forward = tone_idx + search;
-            backward = (tone_idx >= search) ? tone_idx - search
-                                            : scale_tones.size();
+            backward = (tone_idx >= search) ? tone_idx - search : scale_tones.size();
           } else {
-            forward = (tone_idx >= search) ? tone_idx - search
-                                           : scale_tones.size();
+            forward = (tone_idx >= search) ? tone_idx - search : scale_tones.size();
             backward = tone_idx + search;
           }
-          if (forward < scale_tones.size() &&
-              isChordTone(scale_tones[forward], event)) {
+          if (forward < scale_tones.size() && isChordTone(scale_tones[forward], event)) {
             tone_idx = forward;
             found = true;
-          } else if (backward < scale_tones.size() &&
-                     isChordTone(scale_tones[backward], event)) {
+          } else if (backward < scale_tones.size() && isChordTone(scale_tones[backward], event)) {
             tone_idx = backward;
             found = true;
           }
         }
         // Cantus protection: on strong beats, prefer chord tones away from cantus.
         if (found) {
-          int cantus_dist = std::abs(static_cast<int>(scale_tones[tone_idx]) -
-                                     static_cast<int>(cantus_pitch));
+          int cantus_dist =
+              std::abs(static_cast<int>(scale_tones[tone_idx]) - static_cast<int>(cantus_pitch));
           if (cantus_dist <= 5) {
-            size_t alt_idx = ascending
-                ? (tone_idx >= 2 ? tone_idx - 2 : 0)
-                : std::min(tone_idx + 2, scale_tones.size() - 1);
-            if (alt_idx < scale_tones.size() &&
-                isChordTone(scale_tones[alt_idx], event) &&
-                std::abs(static_cast<int>(scale_tones[alt_idx]) -
-                         static_cast<int>(cantus_pitch)) > 5) {
+            size_t alt_idx = ascending ? (tone_idx >= 2 ? tone_idx - 2 : 0)
+                                       : std::min(tone_idx + 2, scale_tones.size() - 1);
+            if (alt_idx < scale_tones.size() && isChordTone(scale_tones[alt_idx], event) &&
+                std::abs(static_cast<int>(scale_tones[alt_idx]) - static_cast<int>(cantus_pitch)) >
+                    5) {
               tone_idx = alt_idx;
             }
           }
@@ -668,8 +652,7 @@ std::vector<NoteEvent> generateFiguration(Tick cantus_tick, Tick cantus_dur,
 
         // Avoid repeat: if snap recreates previous pitch, revert to
         // allow passing tone rather than stagnation.
-        if (found && !notes.empty() &&
-            scale_tones[tone_idx] == notes.back().pitch) {
+        if (found && !notes.empty() && scale_tones[tone_idx] == notes.back().pitch) {
           tone_idx = saved_idx;
         }
       }
@@ -696,8 +679,7 @@ std::vector<NoteEvent> generateFiguration(Tick cantus_tick, Tick cantus_dur,
     // against direction or made a large jump (even in run direction).
     if (run_remaining > 0) {
       int snap_delta = static_cast<int>(tone_idx) - static_cast<int>(prev_tone_idx);
-      bool snap_against = (ascending && snap_delta < -1) ||
-                          (!ascending && snap_delta > 1);
+      bool snap_against = (ascending && snap_delta < -1) || (!ascending && snap_delta > 1);
       bool large_jump = std::abs(snap_delta) >= 3;
       if (snap_against || large_jump) {
         run_remaining = 0;
@@ -709,8 +691,7 @@ std::vector<NoteEvent> generateFiguration(Tick cantus_tick, Tick cantus_dur,
     // Category A: vctx safety filter — try stepwise alternatives if unsafe.
     if (vctx && !vctx->isSafe(current_tick, kFigurationVoice, fig_pitch)) {
       for (int delta : {1, -1, 2, -2}) {
-        uint8_t alt = clampPitch(static_cast<int>(fig_pitch) + delta,
-                                 eff_low, eff_high);
+        uint8_t alt = clampPitch(static_cast<int>(fig_pitch) + delta, eff_low, eff_high);
         if (scale_util::isScaleTone(alt, key_sig.tonic, run_scale_type) &&
             vctx->isSafe(current_tick, kFigurationVoice, alt)) {
           fig_pitch = alt;
@@ -774,12 +755,11 @@ std::vector<NoteEvent> generateFiguration(Tick cantus_tick, Tick cantus_dur,
       if (run_remaining <= 0 || at_harmony_boundary) {
         // Register balance: bias direction toward under-represented register.
         if (scale_tones.size() > 1) {
-          float rel_pos = static_cast<float>(tone_idx) /
-                          static_cast<float>(scale_tones.size() - 1);
+          float rel_pos = static_cast<float>(tone_idx) / static_cast<float>(scale_tones.size() - 1);
           if (rel_pos > 0.7f) {
             ascending = false;  // Near top: descend.
           } else if (rel_pos < 0.3f) {
-            ascending = true;   // Near bottom: ascend.
+            ascending = true;  // Near bottom: ascend.
           } else {
             // Mid-register: alternate at harmonic boundaries.
             ascending = at_harmony_boundary ? !ascending : ascending;
@@ -790,8 +770,7 @@ std::vector<NoteEvent> generateFiguration(Tick cantus_tick, Tick cantus_dur,
         int max_run = (scale_tones.size() <= 6) ? 3 : 4;
         run_remaining = 4 + rng::rollRange(rng, 0, max_run);
         // Safety cap: never exceed available scale tones + 1 boundary step.
-        run_remaining = std::min(run_remaining,
-                                 static_cast<int>(scale_tones.size()) + 1);
+        run_remaining = std::min(run_remaining, static_cast<int>(scale_tones.size()) + 1);
         prev_step_was_skip = false;
       }
 
@@ -811,7 +790,8 @@ std::vector<NoteEvent> generateFiguration(Tick cantus_tick, Tick cantus_dur,
           // Register boundary: reverse and end run.
           ascending = false;
           run_remaining = 0;
-          if (tone_idx >= 1) tone_idx -= 1;
+          if (tone_idx >= 1)
+            tone_idx -= 1;
         }
       } else {
         if (tone_idx >= static_cast<size_t>(step)) {
@@ -820,7 +800,8 @@ std::vector<NoteEvent> generateFiguration(Tick cantus_tick, Tick cantus_dur,
           // Register boundary: reverse and end run.
           ascending = true;
           run_remaining = 0;
-          if (tone_idx + 1 < scale_tones.size()) tone_idx += 1;
+          if (tone_idx + 1 < scale_tones.size())
+            tone_idx += 1;
         }
       }
 
@@ -860,8 +841,7 @@ std::vector<NoteEvent> generateFiguration(Tick cantus_tick, Tick cantus_dur,
 /// @param rng Mersenne Twister RNG instance.
 /// @return Vector of NoteEvents for the pedal voice.
 std::vector<NoteEvent> generatePedalBass(Tick cantus_tick, Tick cantus_dur,
-                                         const HarmonicTimeline& timeline,
-                                         Tick piece_end_tick,
+                                         const HarmonicTimeline& timeline, Tick piece_end_tick,
                                          uint8_t cantus_pitch,
                                          const std::vector<NoteEvent>* next_segment_chord_tones,
                                          std::mt19937& rng) {
@@ -875,17 +855,16 @@ std::vector<NoteEvent> generatePedalBass(Tick cantus_tick, Tick cantus_dur,
   while (current_tick < end_tick) {
     const HarmonicEvent& event = timeline.getAt(current_tick);
 
-    uint8_t bass = clampPitch(static_cast<int>(event.bass_pitch),
-                              organ_range::kPedalLow + 2,
+    uint8_t bass = clampPitch(static_cast<int>(event.bass_pitch), organ_range::kPedalLow + 2,
                               organ_range::kPedalHigh - 2);
 
     int fifth_pitch = static_cast<int>(bass) + interval::kPerfect5th;
-    uint8_t fifth = clampPitch(fifth_pitch, organ_range::kPedalLow + 2,
-                               organ_range::kPedalHigh - 2);
+    uint8_t fifth =
+        clampPitch(fifth_pitch, organ_range::kPedalLow + 2, organ_range::kPedalHigh - 2);
 
     int octave_pitch = static_cast<int>(bass) - interval::kOctave;
-    uint8_t octave = clampPitch(octave_pitch, organ_range::kPedalLow + 2,
-                                organ_range::kPedalHigh - 2);
+    uint8_t octave =
+        clampPitch(octave_pitch, organ_range::kPedalLow + 2, organ_range::kPedalHigh - 2);
 
     uint8_t chosen_pitch;
 
@@ -897,11 +876,12 @@ std::vector<NoteEvent> generatePedalBass(Tick cantus_tick, Tick cantus_dur,
       // 2+ consecutive octaves -> octave forbidden.
       bool octave_allowed = (octave != bass);
       if (!notes.empty()) {
-        int dist = std::abs(static_cast<int>(octave) -
-                            static_cast<int>(notes.back().pitch));
-        if (dist > 7) octave_allowed = false;
+        int dist = std::abs(static_cast<int>(octave) - static_cast<int>(notes.back().pitch));
+        if (dist > 7)
+          octave_allowed = false;
       }
-      if (consecutive_octave >= 2) octave_allowed = false;
+      if (consecutive_octave >= 2)
+        octave_allowed = false;
 
       // root(50%) / fifth(30%) / octave(20%).
       int rval = rng::rollRange(rng, 0, 9);
@@ -937,8 +917,7 @@ std::vector<NoteEvent> generatePedalBass(Tick cantus_tick, Tick cantus_dur,
           } else {
             // Root fallback: compute root pitch in pedal range.
             uint8_t root = clampPitch(static_cast<int>(event.chord.root_pitch),
-                                      organ_range::kPedalLow + 2,
-                                      organ_range::kPedalHigh - 2);
+                                      organ_range::kPedalLow + 2, organ_range::kPedalHigh - 2);
             // Octave-adjust root to pedal range if needed.
             while (root > organ_range::kPedalHigh - 2 && root >= 12) {
               root -= 12;
@@ -950,16 +929,15 @@ std::vector<NoteEvent> generatePedalBass(Tick cantus_tick, Tick cantus_dur,
     } else {
       // Weak beats (1, 3): allow passing tones if stepwise from previous.
       if (!notes.empty()) {
-        int step_from_prev = std::abs(static_cast<int>(chosen_pitch) -
-                                      static_cast<int>(notes.back().pitch));
+        int step_from_prev =
+            std::abs(static_cast<int>(chosen_pitch) - static_cast<int>(notes.back().pitch));
         if (step_from_prev <= 2) {
           // Stepwise motion allowed — passing tone is acceptable.
           // No additional consonance check on weak beats.
         } else {
           // Non-stepwise on weak beat: enforce consonance with cantus.
           int ivl = interval_util::compoundToSimple(
-              std::abs(static_cast<int>(chosen_pitch) -
-                       static_cast<int>(cantus_pitch)));
+              std::abs(static_cast<int>(chosen_pitch) - static_cast<int>(cantus_pitch)));
           if (!interval_util::isConsonance(ivl)) {
             chosen_pitch = bass;  // Fall back to chord bass.
           }
@@ -987,16 +965,17 @@ std::vector<NoteEvent> generatePedalBass(Tick cantus_tick, Tick cantus_dur,
       dur = kHalfNote;  // Downbeat: anchor with half note.
     } else if (beat == 2 && rng::rollProbability(rng, 0.3f)) {
       dur = kQuarterNote + kEighthNote;  // Beat 3: occasional dotted quarter.
-    } else if ((beat == 1 || beat == 3) && !near_segment_end &&
-               rng::rollProbability(rng, 0.25f)) {
+    } else if ((beat == 1 || beat == 3) && !near_segment_end && rng::rollProbability(rng, 0.25f)) {
       // Weak beats: occasional 8th-note pair for passing motion.
       dur = kEighthNote;
     } else {
       dur = kQuarterNote;  // Other beats: quarter note.
     }
     Tick remaining = end_tick - current_tick;
-    if (dur > remaining) dur = remaining;
-    if (dur == 0) break;
+    if (dur > remaining)
+      dur = remaining;
+    if (dur == 0)
+      break;
 
     NoteEvent note;
     note.start_tick = current_tick;
@@ -1025,17 +1004,16 @@ struct ChordToneSet {
   bool contains(uint8_t pitch) const {
     int pc_val = getPitchClass(pitch);
     for (int idx = 0; idx < count; ++idx) {
-      if (getPitchClass(tones[idx]) == pc_val) return true;
+      if (getPitchClass(tones[idx]) == pc_val)
+        return true;
     }
     return false;
   }
 };
 
 /// Get chord tones at the next strong beat within a voice range.
-ChordToneSet getNextStrongBeatChordTones(const HarmonicTimeline& timeline,
-                                          Tick current_tick,
-                                          uint8_t voice_low,
-                                          uint8_t voice_high) {
+ChordToneSet getNextStrongBeatChordTones(const HarmonicTimeline& timeline, Tick current_tick,
+                                         uint8_t voice_low, uint8_t voice_high) {
   ChordToneSet result;
   // Find the next strong beat (beat 0 or 2).
   Tick bar_pos = current_tick % kTicksPerBar;
@@ -1071,8 +1049,7 @@ ChordToneSet getNextStrongBeatChordTones(const HarmonicTimeline& timeline,
 /// @param timeline Harmonic timeline.
 /// @param tick Current tick.
 /// @return true if the pitch is acceptable on a strong beat.
-bool isStrongBeatSafe(uint8_t pitch, uint8_t cantus_pitch,
-                      uint8_t pedal_pitch, uint8_t prev_pitch,
+bool isStrongBeatSafe(uint8_t pitch, uint8_t cantus_pitch, uint8_t pedal_pitch, uint8_t prev_pitch,
                       const HarmonicTimeline& timeline, Tick tick) {
   (void)timeline;
   (void)tick;
@@ -1095,7 +1072,8 @@ bool isStrongBeatSafe(uint8_t pitch, uint8_t cantus_pitch,
         std::abs(static_cast<int>(pitch) - static_cast<int>(pedal_pitch)));
     // 4th against bass is dissonant.
     if (!interval_util::isConsonance(ivl_pedal)) {
-      if (prev_pitch == pitch) return true;  // Suspension exception.
+      if (prev_pitch == pitch)
+        return true;  // Suspension exception.
       return false;
     }
   }
@@ -1110,8 +1088,7 @@ bool isStrongBeatSafe(uint8_t pitch, uint8_t cantus_pitch,
 /// @param next_chord_tones Chord tones at the next strong beat.
 /// @param cantus_pitch Current cantus pitch.
 /// @return true if the pitch is acceptable on a weak beat.
-bool isWeakBeatAllowed(uint8_t pitch, uint8_t prev_pitch,
-                       const ChordToneSet& next_chord_tones,
+bool isWeakBeatAllowed(uint8_t pitch, uint8_t prev_pitch, const ChordToneSet& next_chord_tones,
                        uint8_t cantus_pitch) {
   // Chord tones are always allowed.
   int ivl_cantus = interval_util::compoundToSimple(
@@ -1121,18 +1098,21 @@ bool isWeakBeatAllowed(uint8_t pitch, uint8_t prev_pitch,
   }
 
   // Non-chord-tone check: must be stepwise AND resolvable.
-  if (prev_pitch == 0) return false;  // No context for stepwise check.
+  if (prev_pitch == 0)
+    return false;  // No context for stepwise check.
 
   int step = std::abs(static_cast<int>(pitch) - static_cast<int>(prev_pitch));
   // Condition (i): stepwise = semitone (1) or whole-tone (2).
-  if (step > 2) return false;
+  if (step > 2)
+    return false;
 
   // Condition (ii): must be able to resolve stepwise to a next-strong-beat chord tone.
   // Check if any chord tone in the set is within 2 semitones of this pitch.
   for (int idx = 0; idx < next_chord_tones.count; ++idx) {
-    int resolve_dist = std::abs(static_cast<int>(pitch) -
-                                static_cast<int>(next_chord_tones.tones[idx]));
-    if (resolve_dist <= 2) return true;
+    int resolve_dist =
+        std::abs(static_cast<int>(pitch) - static_cast<int>(next_chord_tones.tones[idx]));
+    if (resolve_dist <= 2)
+      return true;
   }
 
   return false;
@@ -1161,21 +1141,21 @@ enum class InnerFsmState { Prepare, Dissonance, Resolve };
 /// @param prev_inner_pitch Previous inner voice pitch (0 = first call).
 /// @param rng Mersenne Twister RNG instance.
 /// @return Vector of NoteEvents for the inner voice.
-std::vector<NoteEvent> generateInnerVoice(
-    Tick cantus_tick, Tick cantus_dur, uint8_t cantus_pitch,
-    const HarmonicTimeline& timeline, const KeySignature& key_sig,
-    const std::vector<NoteEvent>& pedal_notes,
-    uint8_t& prev_inner_pitch, std::mt19937& rng,
-    const VerticalContext* vctx = nullptr) {
+std::vector<NoteEvent> generateInnerVoice(Tick cantus_tick, Tick cantus_dur, uint8_t cantus_pitch,
+                                          const HarmonicTimeline& timeline,
+                                          const KeySignature& key_sig,
+                                          const std::vector<NoteEvent>& pedal_notes,
+                                          uint8_t& prev_inner_pitch, std::mt19937& rng,
+                                          const VerticalContext* vctx = nullptr) {
   std::vector<NoteEvent> notes;
 
   constexpr uint8_t kInnerLow = 48;   // C3
   constexpr uint8_t kInnerHigh = 67;  // G4
 
   // Dynamic upper limit: stay below cantus.
-  uint8_t eff_high = std::min(kInnerHigh,
-      static_cast<uint8_t>(std::max(static_cast<int>(kInnerLow),
-                                     static_cast<int>(cantus_pitch) - 2)));
+  uint8_t eff_high =
+      std::min(kInnerHigh, static_cast<uint8_t>(std::max(static_cast<int>(kInnerLow),
+                                                         static_cast<int>(cantus_pitch) - 2)));
 
   ScaleType scale_type = key_sig.is_minor ? ScaleType::NaturalMinor : ScaleType::Major;
 
@@ -1186,7 +1166,8 @@ std::vector<NoteEvent> generateInnerVoice(
       scale_tones.push_back(static_cast<uint8_t>(pit));
     }
   }
-  if (scale_tones.empty()) return notes;
+  if (scale_tones.empty())
+    return notes;
 
   // Density control: base duration adapts to cantus length.
   // Long cantus notes (>= whole) -> eighth notes; shorter -> quarter.
@@ -1216,8 +1197,8 @@ std::vector<NoteEvent> generateInnerVoice(
     for (uint8_t tone : scale_tones) {
       if (isChordTone(tone, evt)) {
         int dist = (prev_inner_pitch > 0)
-            ? std::abs(static_cast<int>(tone) - static_cast<int>(prev_inner_pitch))
-            : std::abs(static_cast<int>(tone) - static_cast<int>(cantus_pitch) + 12);
+                       ? std::abs(static_cast<int>(tone) - static_cast<int>(prev_inner_pitch))
+                       : std::abs(static_cast<int>(tone) - static_cast<int>(cantus_pitch) + 12);
         if (dist < best_dist) {
           best_dist = dist;
           best = tone;
@@ -1234,9 +1215,11 @@ std::vector<NoteEvent> generateInnerVoice(
     // Try down first (standard suspension resolution).
     for (int delta : {-1, -2, 1, 2}) {
       int cand = static_cast<int>(from_pitch) + delta;
-      if (cand < kInnerLow || cand > static_cast<int>(eff_high)) continue;
+      if (cand < kInnerLow || cand > static_cast<int>(eff_high))
+        continue;
       uint8_t cand_pitch = static_cast<uint8_t>(cand);
-      if (!scale_util::isScaleTone(cand_pitch, key_sig.tonic, scale_type)) continue;
+      if (!scale_util::isScaleTone(cand_pitch, key_sig.tonic, scale_type))
+        continue;
       // Resolution must be consonant with cantus.
       int ivl = interval_util::compoundToSimple(
           std::abs(static_cast<int>(cand_pitch) - static_cast<int>(cantus_pitch)));
@@ -1246,7 +1229,8 @@ std::vector<NoteEvent> generateInnerVoice(
         if (ped > 0) {
           int ped_ivl = interval_util::compoundToSimple(
               std::abs(static_cast<int>(cand_pitch) - static_cast<int>(ped)));
-          if (!interval_util::isConsonance(ped_ivl)) continue;
+          if (!interval_util::isConsonance(ped_ivl))
+            continue;
         }
         return cand_pitch;
       }
@@ -1285,8 +1269,10 @@ std::vector<NoteEvent> generateInnerVoice(
       dur = base_note_dur;  // Short cantus segments: use base density.
     }
     Tick remaining = end_tick - current_tick;
-    if (dur > remaining) dur = remaining;
-    if (dur == 0) break;
+    if (dur > remaining)
+      dur = remaining;
+    if (dur == 0)
+      break;
 
     bool is_strong = (beat == 0 || beat == 2);
     uint8_t pedal_p = pedal_pitch_at(current_tick);
@@ -1297,15 +1283,14 @@ std::vector<NoteEvent> generateInnerVoice(
         // Place a chord tone (consonant with cantus and pedal).
         chosen_pitch = nearest_chord_tone(current_tick);
         // Verify strong-beat safety.
-        if (is_strong && !isStrongBeatSafe(chosen_pitch, cantus_pitch, pedal_p,
-                                            prev_inner_pitch, timeline,
-                                            current_tick)) {
+        if (is_strong && !isStrongBeatSafe(chosen_pitch, cantus_pitch, pedal_p, prev_inner_pitch,
+                                           timeline, current_tick)) {
           // Try alternate chord tones.
           const HarmonicEvent& evt = timeline.getAt(current_tick);
           for (uint8_t tone : scale_tones) {
             if (isChordTone(tone, evt) &&
-                isStrongBeatSafe(tone, cantus_pitch, pedal_p, prev_inner_pitch,
-                                  timeline, current_tick)) {
+                isStrongBeatSafe(tone, cantus_pitch, pedal_p, prev_inner_pitch, timeline,
+                                 current_tick)) {
               chosen_pitch = tone;
               break;
             }
@@ -1313,10 +1298,9 @@ std::vector<NoteEvent> generateInnerVoice(
         }
         // Check weak-beat allowance.
         if (!is_strong && prev_inner_pitch > 0) {
-          ChordToneSet next_cts = getNextStrongBeatChordTones(
-              timeline, current_tick, kInnerLow, eff_high);
-          if (!isWeakBeatAllowed(chosen_pitch, prev_inner_pitch, next_cts,
-                                 cantus_pitch)) {
+          ChordToneSet next_cts =
+              getNextStrongBeatChordTones(timeline, current_tick, kInnerLow, eff_high);
+          if (!isWeakBeatAllowed(chosen_pitch, prev_inner_pitch, next_cts, cantus_pitch)) {
             chosen_pitch = nearest_chord_tone(current_tick);
           }
         }
@@ -1325,8 +1309,7 @@ std::vector<NoteEvent> generateInnerVoice(
         if (vctx && !vctx->isSafe(current_tick, kInnerVoice, chosen_pitch)) {
           const HarmonicEvent& evt = timeline.getAt(current_tick);
           for (uint8_t tone : scale_tones) {
-            if (isChordTone(tone, evt) &&
-                vctx->isSafe(current_tick, kInnerVoice, tone)) {
+            if (isChordTone(tone, evt) && vctx->isSafe(current_tick, kInnerVoice, tone)) {
               chosen_pitch = tone;
               break;
             }
@@ -1342,14 +1325,11 @@ std::vector<NoteEvent> generateInnerVoice(
             const HarmonicEvent& curr_ev = timeline.getAt(current_tick);
             const HarmonicEvent& next_ev = timeline.getAt(next_tick);
             // Chord change + current pitch is consonant + will be dissonant.
-            if (curr_ev.tick != next_ev.tick &&
-                isChordTone(chosen_pitch, curr_ev)) {
+            if (curr_ev.tick != next_ev.tick && isChordTone(chosen_pitch, curr_ev)) {
               int next_ivl = interval_util::compoundToSimple(
-                  std::abs(static_cast<int>(chosen_pitch) -
-                           static_cast<int>(cantus_pitch)));
+                  std::abs(static_cast<int>(chosen_pitch) - static_cast<int>(cantus_pitch)));
               // Will be dissonant at next strong beat -> prepare for suspension.
-              if (!interval_util::isConsonance(next_ivl) ||
-                  !isChordTone(chosen_pitch, next_ev)) {
+              if (!interval_util::isConsonance(next_ivl) || !isChordTone(chosen_pitch, next_ev)) {
                 // Only prepare if we can resolve.
                 Tick resolve_tick = next_tick + dur;
                 if (resolve_tick < end_tick) {
@@ -1364,8 +1344,7 @@ std::vector<NoteEvent> generateInnerVoice(
           }
         }
         // Occasional suspension attempt (30% probability on prepare beats).
-        if (state == InnerFsmState::Prepare &&
-            rng::rollProbability(rng, 0.30f)) {
+        if (state == InnerFsmState::Prepare && rng::rollProbability(rng, 0.30f)) {
           Tick next_tick2 = current_tick + dur;
           if (next_tick2 < end_tick) {
             uint8_t next_beat2 = beatInBar(next_tick2);
@@ -1379,13 +1358,11 @@ std::vector<NoteEvent> generateInnerVoice(
 
       case InnerFsmState::Dissonance: {
         // Hold previous pitch (suspension) on strong beat.
-        if (prev_inner_pitch > 0 && prev_inner_pitch >= kInnerLow &&
-            prev_inner_pitch <= eff_high) {
+        if (prev_inner_pitch > 0 && prev_inner_pitch >= kInnerLow && prev_inner_pitch <= eff_high) {
           chosen_pitch = prev_inner_pitch;
           // Verify: is it actually dissonant? If consonant, just treat as Prepare.
           int ivl = interval_util::compoundToSimple(
-              std::abs(static_cast<int>(chosen_pitch) -
-                       static_cast<int>(cantus_pitch)));
+              std::abs(static_cast<int>(chosen_pitch) - static_cast<int>(cantus_pitch)));
           const HarmonicEvent& evt = timeline.getAt(current_tick);
           if (interval_util::isConsonance(ivl) && isChordTone(chosen_pitch, evt)) {
             // Not actually dissonant -- revert to Prepare.
@@ -1447,16 +1424,18 @@ std::vector<NoteEvent> generateInnerVoice(
 /// @param note_count Total number of cantus notes.
 /// @param durations Array of cantus note durations in ticks.
 /// @return 0 = opening (thin), 1 = middle (normal), 2 = ending (full).
-int classifyCantusPosition(size_t note_idx, size_t note_count,
-                            const std::vector<Tick>& durations) {
+int classifyCantusPosition(size_t note_idx, size_t note_count, const std::vector<Tick>& durations) {
   // Final 2 notes are always "ending" (cadence convergence).
-  if (note_count >= 2 && note_idx >= note_count - 2) return 2;
+  if (note_count >= 2 && note_idx >= note_count - 2)
+    return 2;
 
   // First note is always "opening" (thin start).
-  if (note_idx == 0) return 0;
+  if (note_idx == 0)
+    return 0;
 
   // After a long cantus note (>= breve), the next position is phrase-opening.
-  if (note_idx >= 1 && durations[note_idx - 1] >= kWholeNote * 2) return 0;
+  if (note_idx >= 1 && durations[note_idx - 1] >= kWholeNote * 2)
+    return 0;
 
   return 1;  // Middle: normal density.
 }
@@ -1476,16 +1455,14 @@ int classifyCantusPosition(size_t note_idx, size_t note_count,
 /// @param tracks The 4 chorale prelude tracks (modified in place).
 /// @param melody The chorale melody (for phrase position classification).
 /// @return Number of voice attacks absorbed.
-int applyCFAwareRestPolicy(std::vector<Track>& tracks,
-                            const ChoraleMelody& melody) {
+int applyCFAwareRestPolicy(std::vector<Track>& tracks, const ChoraleMelody& melody) {
   int absorbed = 0;
 
   // Build cantus duration array for phrase classification.
   std::vector<Tick> cantus_durations;
   cantus_durations.reserve(melody.note_count);
   for (size_t idx = 0; idx < melody.note_count; ++idx) {
-    cantus_durations.push_back(
-        static_cast<Tick>(melody.notes[idx].duration_beats) * kTicksPerBeat);
+    cantus_durations.push_back(static_cast<Tick>(melody.notes[idx].duration_beats) * kTicksPerBeat);
   }
 
   // Build cantus segment boundaries (start_tick -> phrase position class).
@@ -1507,7 +1484,8 @@ int applyCFAwareRestPolicy(std::vector<Track>& tracks,
   // Helper: find phrase position at a given tick.
   auto positionAt = [&segments](Tick tick) -> int {
     for (const auto& seg : segments) {
-      if (tick >= seg.start && tick < seg.end) return seg.position;
+      if (tick >= seg.start && tick < seg.end)
+        return seg.position;
     }
     return 1;  // Default: middle (normal density).
   };
@@ -1515,16 +1493,16 @@ int applyCFAwareRestPolicy(std::vector<Track>& tracks,
   // --- Inner voice thinning (track kInnerVoice = 2) ---
   auto& inner_notes = tracks[kInnerVoice].notes;
   if (inner_notes.size() >= 2) {
-    std::sort(inner_notes.begin(), inner_notes.end(),
-              [](const NoteEvent& lhs, const NoteEvent& rhs) {
-                return lhs.start_tick < rhs.start_tick;
-              });
+    std::sort(
+        inner_notes.begin(), inner_notes.end(),
+        [](const NoteEvent& lhs, const NoteEvent& rhs) { return lhs.start_tick < rhs.start_tick; });
 
     for (size_t idx = 0; idx < inner_notes.size(); ++idx) {
       auto& current = inner_notes[idx];
 
       // Only absorb Flexible-protection notes.
-      if (current.source != BachNoteSource::FreeCounterpoint) continue;
+      if (current.source != BachNoteSource::FreeCounterpoint)
+        continue;
 
       int pos = positionAt(current.start_tick);
 
@@ -1549,10 +1527,9 @@ int applyCFAwareRestPolicy(std::vector<Track>& tracks,
     }
 
     // Remove absorbed inner notes.
-    inner_notes.erase(
-        std::remove_if(inner_notes.begin(), inner_notes.end(),
-                       [](const NoteEvent& note) { return note.duration == 0; }),
-        inner_notes.end());
+    inner_notes.erase(std::remove_if(inner_notes.begin(), inner_notes.end(),
+                                     [](const NoteEvent& note) { return note.duration == 0; }),
+                      inner_notes.end());
   }
 
   // --- Pedal voice thinning (track kPedalVoice = 3) ---
@@ -1560,14 +1537,14 @@ int applyCFAwareRestPolicy(std::vector<Track>& tracks,
   // to create a sustained pedal tone instead of rhythmic bass.
   auto& pedal_notes = tracks[kPedalVoice].notes;
   if (pedal_notes.size() >= 2) {
-    std::sort(pedal_notes.begin(), pedal_notes.end(),
-              [](const NoteEvent& lhs, const NoteEvent& rhs) {
-                return lhs.start_tick < rhs.start_tick;
-              });
+    std::sort(
+        pedal_notes.begin(), pedal_notes.end(),
+        [](const NoteEvent& lhs, const NoteEvent& rhs) { return lhs.start_tick < rhs.start_tick; });
 
     for (size_t idx = 1; idx < pedal_notes.size(); ++idx) {
       auto& current = pedal_notes[idx];
-      if (current.source != BachNoteSource::PedalPoint) continue;
+      if (current.source != BachNoteSource::PedalPoint)
+        continue;
 
       int pos = positionAt(current.start_tick);
       if (pos == 0) {
@@ -1585,16 +1562,16 @@ int applyCFAwareRestPolicy(std::vector<Track>& tracks,
       }
     }
 
-    pedal_notes.erase(
-        std::remove_if(pedal_notes.begin(), pedal_notes.end(),
-                       [](const NoteEvent& note) { return note.duration == 0; }),
-        pedal_notes.end());
+    pedal_notes.erase(std::remove_if(pedal_notes.begin(), pedal_notes.end(),
+                                     [](const NoteEvent& note) { return note.duration == 0; }),
+                      pedal_notes.end());
   }
 
   if (absorbed > 0) {
     fprintf(stderr,
             "[ChoralePrelude] CF-aware rest policy: absorbed %d voice"
-            " attacks to vary texture density\n", absorbed);
+            " attacks to vary texture density\n",
+            absorbed);
   }
 
   return absorbed;
@@ -1629,8 +1606,7 @@ ChoralePreludeResult generateChoralePrelude(const ChoralePreludeConfig& config) 
 
   // Step 5: Place cantus firmus on Swell (track 1).
   placeCantus(melody, tracks[1]);
-  addCantusPassingTones(tracks[1], {60, 71},
-                        config.key.tonic, config.key.is_minor);
+  addCantusPassingTones(tracks[1], {60, 71}, config.key.tonic, config.key.is_minor);
 
   // Step 6: Generate pedal, inner voice, and figuration for each cantus note.
   // Order: pedal first (references cantus only), inner voice (references cantus
@@ -1640,9 +1616,9 @@ ChoralePreludeResult generateChoralePrelude(const ChoralePreludeConfig& config) 
   // Each subsequent voice sees all previously placed notes for vertical safety.
   std::mt19937 rng(config.seed);
   Tick cantus_tick = 0;
-  uint8_t fig_center = 0;      // Figuration center hint (0 = first call).
-  uint8_t inner_center = 0;    // Inner voice previous pitch (0 = first call).
-  FigurationMotif fig_motif;   // Motif extracted from first figuration segment.
+  uint8_t fig_center = 0;     // Figuration center hint (0 = first call).
+  uint8_t inner_center = 0;   // Inner voice previous pitch (0 = first call).
+  FigurationMotif fig_motif;  // Motif extracted from first figuration segment.
 
   // Seed placed_notes with cantus (immutable, placed first).
   std::vector<NoteEvent> placed_notes;
@@ -1657,35 +1633,29 @@ ChoralePreludeResult generateChoralePrelude(const ChoralePreludeConfig& config) 
   vctx.num_voices = kChoraleVoices;
 
   for (size_t idx = 0; idx < melody.note_count; ++idx) {
-    Tick cantus_dur =
-        static_cast<Tick>(melody.notes[idx].duration_beats) * kTicksPerBeat;
-    uint8_t cantus_pitch = clampPitch(
-        static_cast<int>(melody.notes[idx].pitch), 60, 71);
+    Tick cantus_dur = static_cast<Tick>(melody.notes[idx].duration_beats) * kTicksPerBeat;
+    uint8_t cantus_pitch = clampPitch(static_cast<int>(melody.notes[idx].pitch), 60, 71);
 
     // 1. Pedal first (references cantus only) — track 3.
-    auto pedal_notes = generatePedalBass(cantus_tick, cantus_dur, timeline,
-                                         total_duration, cantus_pitch,
-                                         nullptr, rng);
+    auto pedal_notes = generatePedalBass(cantus_tick, cantus_dur, timeline, total_duration,
+                                         cantus_pitch, nullptr, rng);
     for (auto& note : pedal_notes) {
       tracks[3].notes.push_back(note);
       placed_notes.push_back(note);
     }
 
     // 2. Inner voice (references cantus + pedal via vctx) — track 2.
-    auto inner_notes = generateInnerVoice(cantus_tick, cantus_dur, cantus_pitch,
-                                           timeline, config.key, tracks[3].notes,
-                                           inner_center, rng, &vctx);
+    auto inner_notes = generateInnerVoice(cantus_tick, cantus_dur, cantus_pitch, timeline,
+                                          config.key, tracks[3].notes, inner_center, rng, &vctx);
     for (auto& note : inner_notes) {
       tracks[2].notes.push_back(note);
       placed_notes.push_back(note);
     }
 
     // 3. Figuration last (references cantus + pedal + inner via vctx) — track 0.
-    auto fig_notes = generateFiguration(cantus_tick, cantus_dur, timeline,
-                                        config.key, cantus_pitch,
-                                        fig_center, rng,
-                                        fig_motif.valid ? &fig_motif : nullptr,
-                                        &vctx);
+    auto fig_notes =
+        generateFiguration(cantus_tick, cantus_dur, timeline, config.key, cantus_pitch, fig_center,
+                           rng, fig_motif.valid ? &fig_motif : nullptr, &vctx);
     // Extract motif from first segment.
     if (idx == 0 && !fig_motif.valid && fig_notes.size() >= 3) {
       fig_motif = extractMotif(fig_notes);
@@ -1714,8 +1684,7 @@ ChoralePreludeResult generateChoralePrelude(const ChoralePreludeConfig& config) 
 
     // Tag sources: cantus = CantusFixed (already tagged), figuration = FreeCounterpoint,
     // inner = FreeCounterpoint, pedal = PedalPoint.
-    assert(countUnknownSource(all_notes) == 0 &&
-           "All notes should have source set by generators");
+    assert(countUnknownSource(all_notes) == 0 && "All notes should have source set by generators");
 
     std::vector<std::pair<uint8_t, uint8_t>> voice_ranges = {
         {72, 88},  // Voice 0: Great figuration (C5-E6, soprano)
@@ -1738,42 +1707,39 @@ ChoralePreludeResult generateChoralePrelude(const ChoralePreludeConfig& config) 
       // Pre-filter: reject inner voice out of range, figuration crossing/range/harmony.
       int fig_crossing = 0, fig_range = 0, fig_harmony = 0;
       all_notes.erase(
-          std::remove_if(
-              all_notes.begin(), all_notes.end(),
-              [&](const NoteEvent& note) {
-                if (note.source == BachNoteSource::CantusFixed ||
-                    note.source == BachNoteSource::PedalPoint) {
-                  return false;
-                }
+          std::remove_if(all_notes.begin(), all_notes.end(),
+                         [&](const NoteEvent& note) {
+                           if (note.source == BachNoteSource::CantusFixed ||
+                               note.source == BachNoteSource::PedalPoint) {
+                             return false;
+                           }
 
-                // Inner voice: range check only.
-                if (note.voice == kInnerVoice) {
-                  return note.pitch < voice_ranges[kInnerVoice].first ||
-                         note.pitch > voice_ranges[kInnerVoice].second;
-                }
+                           // Inner voice: range check only.
+                           if (note.voice == kInnerVoice) {
+                             return note.pitch < voice_ranges[kInnerVoice].first ||
+                                    note.pitch > voice_ranges[kInnerVoice].second;
+                           }
 
-                // Figuration: crossing + range + harmony.
-                int cantus_p = cantus_pitch_at(note.start_tick);
-                if (cantus_p >= 0 &&
-                    static_cast<int>(note.pitch) <= cantus_p) {
-                  ++fig_crossing;
-                  return true;
-                }
-                if (note.pitch < voice_ranges[kFigurationVoice].first ||
-                    note.pitch > voice_ranges[kFigurationVoice].second) {
-                  ++fig_range;
-                  return true;
-                }
-                if (note.start_tick % kTicksPerBeat == 0) {
-                  const HarmonicEvent& harm =
-                      timeline.getAt(note.start_tick);
-                  if (!isChordTone(note.pitch, harm)) {
-                    ++fig_harmony;
-                    return true;
-                  }
-                }
-                return false;
-              }),
+                           // Figuration: crossing + range + harmony.
+                           int cantus_p = cantus_pitch_at(note.start_tick);
+                           if (cantus_p >= 0 && static_cast<int>(note.pitch) <= cantus_p) {
+                             ++fig_crossing;
+                             return true;
+                           }
+                           if (note.pitch < voice_ranges[kFigurationVoice].first ||
+                               note.pitch > voice_ranges[kFigurationVoice].second) {
+                             ++fig_range;
+                             return true;
+                           }
+                           if (note.start_tick % kTicksPerBeat == 0) {
+                             const HarmonicEvent& harm = timeline.getAt(note.start_tick);
+                             if (!isChordTone(note.pitch, harm)) {
+                               ++fig_harmony;
+                               return true;
+                             }
+                           }
+                           return false;
+                         }),
           all_notes.end());
 
       fprintf(stderr,
@@ -1783,15 +1749,14 @@ ChoralePreludeResult generateChoralePrelude(const ChoralePreludeConfig& config) 
 
       // Constraint-driven finalize: lightweight overlap dedup with voice range
       // clamping.
-      auto voice_range_fn =
-          [&voice_ranges](uint8_t vid) -> std::pair<uint8_t, uint8_t> {
-        if (vid < voice_ranges.size()) return voice_ranges[vid];
+      auto voice_range_fn = [&voice_ranges](uint8_t vid) -> std::pair<uint8_t, uint8_t> {
+        if (vid < voice_ranges.size())
+          return voice_ranges[vid];
         return {36, 96};
       };
-      ScaleType ch_scale = config.key.is_minor ? ScaleType::HarmonicMinor
-                                               : ScaleType::Major;
-      finalizeFormNotes(all_notes, kChoraleVoices, voice_range_fn,
-                        config.key.tonic, ch_scale, /*max_consecutive=*/2);
+      ScaleType ch_scale = config.key.is_minor ? ScaleType::HarmonicMinor : ScaleType::Major;
+      finalizeFormNotes(all_notes, kChoraleVoices, voice_range_fn, config.key.tonic, ch_scale,
+                        /*max_consecutive=*/2);
 
       // Post-rejection repeat mitigation (weak-beat only, chord-tone-aware).
       // Shifts repeated figuration notes by nearest scale step to prevent
@@ -1799,13 +1764,11 @@ ChoralePreludeResult generateChoralePrelude(const ChoralePreludeConfig& config) 
       // reintroducing dissonance on metrically accented positions.
       {
         // Build scale-tone lookup for index-based shifting.
-        ScaleType shift_scale = config.key.is_minor ? ScaleType::NaturalMinor
-                                                    : ScaleType::Major;
+        ScaleType shift_scale = config.key.is_minor ? ScaleType::NaturalMinor : ScaleType::Major;
         std::vector<uint8_t> shift_tones;
         for (int p = voice_ranges[kFigurationVoice].first;
              p <= voice_ranges[kFigurationVoice].second; ++p) {
-          if (scale_util::isScaleTone(static_cast<uint8_t>(p), config.key.tonic,
-                                      shift_scale)) {
+          if (scale_util::isScaleTone(static_cast<uint8_t>(p), config.key.tonic, shift_scale)) {
             shift_tones.push_back(static_cast<uint8_t>(p));
           }
         }
@@ -1813,31 +1776,32 @@ ChoralePreludeResult generateChoralePrelude(const ChoralePreludeConfig& config) 
         uint8_t last_fig_pitch = 0;
         bool has_last_fig = false;
         for (auto& note : all_notes) {
-          if (note.voice != kFigurationVoice) continue;
+          if (note.voice != kFigurationVoice)
+            continue;
           if (has_last_fig && note.pitch == last_fig_pitch) {
             // Strong beats: only shift to a chord tone (harmonic safety).
             // Weak beats: shift to any scale tone.
             bool on_strong_beat = (note.start_tick % kTicksPerBeat == 0);
 
             // Find exact position in shift_tones.
-            auto it = std::find(shift_tones.begin(), shift_tones.end(),
-                                note.pitch);
+            auto it = std::find(shift_tones.begin(), shift_tones.end(), note.pitch);
             if (it != shift_tones.end()) {
-              size_t st_idx = static_cast<size_t>(
-                  std::distance(shift_tones.begin(), it));
+              size_t st_idx = static_cast<size_t>(std::distance(shift_tones.begin(), it));
 
               // Try adjacent scale-tone indices: +/-1, +/-2.
               for (int d : {1, -1, 2, -2}) {
                 int cand_idx = static_cast<int>(st_idx) + d;
-                if (cand_idx < 0 ||
-                    cand_idx >= static_cast<int>(shift_tones.size())) continue;
+                if (cand_idx < 0 || cand_idx >= static_cast<int>(shift_tones.size()))
+                  continue;
                 uint8_t cand = shift_tones[static_cast<size_t>(cand_idx)];
-                if (cand == last_fig_pitch) continue;
+                if (cand == last_fig_pitch)
+                  continue;
 
                 if (on_strong_beat) {
                   // Strong beat: require chord tone.
                   const HarmonicEvent& harm = timeline.getAt(note.start_tick);
-                  if (!isChordTone(cand, harm)) continue;
+                  if (!isChordTone(cand, harm))
+                    continue;
                 }
 
                 note.pitch = cand;
@@ -1858,10 +1822,8 @@ ChoralePreludeResult generateChoralePrelude(const ChoralePreludeConfig& config) 
         merged.reserve(all_notes.size());
         for (const auto& n : all_notes) {
           if (n.voice == kFigurationVoice && !merged.empty() &&
-              merged.back().voice == kFigurationVoice &&
-              merged.back().pitch == n.pitch &&
-              merged.back().start_tick + merged.back().duration ==
-                  n.start_tick) {
+              merged.back().voice == kFigurationVoice && merged.back().pitch == n.pitch &&
+              merged.back().start_tick + merged.back().duration == n.start_tick) {
             merged.back().duration += n.duration;
           } else {
             merged.push_back(n);
@@ -1871,7 +1833,8 @@ ChoralePreludeResult generateChoralePrelude(const ChoralePreludeConfig& config) 
         if (merged_count > 0) {
           fprintf(stderr,
                   "[ChoralePrelude] merged %d consecutive repeated figuration"
-                  " notes\n", merged_count);
+                  " notes\n",
+                  merged_count);
         }
         all_notes = std::move(merged);
       }
@@ -1892,17 +1855,14 @@ ChoralePreludeResult generateChoralePrelude(const ChoralePreludeConfig& config) 
         if (vp.size() >= 5) {
           std::sort(vp.begin(), vp.end());
           size_t mid = vp.size() / 2;
-          medians[v] = (vp.size() % 2 == 0)
-                           ? (vp[mid - 1] + vp[mid]) / 2.0f
-                           : static_cast<float>(vp[mid]);
+          medians[v] =
+              (vp.size() % 2 == 0) ? (vp[mid - 1] + vp[mid]) / 2.0f : static_cast<float>(vp[mid]);
           float q25 = static_cast<float>(vp[vp.size() / 4]);
           float q75 = static_cast<float>(vp[vp.size() * 3 / 4]);
-          fprintf(stderr,
-                  "[ChoralePrelude] voice %d: median=%.0f IQR=[%.0f, %.0f] n=%zu\n",
-                  v, medians[v], q25, q75, vp.size());
+          fprintf(stderr, "[ChoralePrelude] voice %d: median=%.0f IQR=[%.0f, %.0f] n=%zu\n", v,
+                  medians[v], q25, q75, vp.size());
         } else {
-          fprintf(stderr, "[ChoralePrelude] voice %d: n=%zu (skipped, < 5 notes)\n",
-                  v, vp.size());
+          fprintf(stderr, "[ChoralePrelude] voice %d: n=%zu (skipped, < 5 notes)\n", v, vp.size());
         }
       }
 
@@ -1939,8 +1899,10 @@ ChoralePreludeResult generateChoralePrelude(const ChoralePreludeConfig& config) 
         if (n.voice == kFigurationVoice) {
           hist[getPitchClass(n.pitch)]++;
           ++fig_note_count;
-          if (n.pitch < fig_min) fig_min = n.pitch;
-          if (n.pitch > fig_max) fig_max = n.pitch;
+          if (n.pitch < fig_min)
+            fig_min = n.pitch;
+          if (n.pitch > fig_max)
+            fig_max = n.pitch;
         }
       }
       if (fig_note_count > 0) {
@@ -1960,26 +1922,27 @@ ChoralePreludeResult generateChoralePrelude(const ChoralePreludeConfig& config) 
         if (h < 2.0f) {
           fprintf(stderr,
                   "[ChoralePrelude] WARNING: low figuration entropy"
-                  " (%.2f < 2.0)\n", h);
+                  " (%.2f < 2.0)\n",
+                  h);
         }
         if (fig_max - fig_min < 12) {
           fprintf(stderr,
                   "[ChoralePrelude] WARNING: narrow figuration range"
-                  " (%d < 12)\n", fig_max - fig_min);
+                  " (%d < 12)\n",
+                  fig_max - fig_min);
         }
       }
     }
 
     // Constraint-driven finalize replaces the legacy post-validation pipeline.
-    auto voice_range_fn2 =
-        [&voice_ranges](uint8_t vid) -> std::pair<uint8_t, uint8_t> {
-      if (vid < voice_ranges.size()) return voice_ranges[vid];
+    auto voice_range_fn2 = [&voice_ranges](uint8_t vid) -> std::pair<uint8_t, uint8_t> {
+      if (vid < voice_ranges.size())
+        return voice_ranges[vid];
       return {36, 96};
     };
-    ScaleType ch_scale2 = config.key.is_minor ? ScaleType::HarmonicMinor
-                                              : ScaleType::Major;
-    finalizeFormNotes(all_notes, kChoraleVoices, voice_range_fn2,
-                      config.key.tonic, ch_scale2, /*max_consecutive=*/2);
+    ScaleType ch_scale2 = config.key.is_minor ? ScaleType::HarmonicMinor : ScaleType::Major;
+    finalizeFormNotes(all_notes, kChoraleVoices, voice_range_fn2, config.key.tonic, ch_scale2,
+                      /*max_consecutive=*/2);
 
     for (auto& track : tracks) {
       track.notes.clear();
@@ -1998,9 +1961,8 @@ ChoralePreludeResult generateChoralePrelude(const ChoralePreludeConfig& config) 
       for (const auto& evt : tracks[3].notes) {
         pedal_covered += evt.duration;
       }
-      float pedal_coverage = total_duration > 0
-          ? 100.0f * static_cast<float>(pedal_covered) / total_duration
-          : 0.0f;
+      float pedal_coverage =
+          total_duration > 0 ? 100.0f * static_cast<float>(pedal_covered) / total_duration : 0.0f;
       fprintf(stderr, "[ChoralePrelude] pedal coverage=%.0f%%\n", pedal_coverage);
     }
 
@@ -2008,44 +1970,44 @@ ChoralePreludeResult generateChoralePrelude(const ChoralePreludeConfig& config) 
     {
       int strong_beat_total = 0;
       int strong_beat_dissonant = 0;
-      Tick cadence_start = total_duration > kTicksPerBar * 2
-          ? total_duration - kTicksPerBar * 2 : 0;
+      Tick cadence_start =
+          total_duration > kTicksPerBar * 2 ? total_duration - kTicksPerBar * 2 : 0;
 
       // Rebuild validated from tracks for iteration (original was moved-from).
       std::vector<NoteEvent> all_validated;
       for (const auto& track : tracks) {
-        all_validated.insert(all_validated.end(),
-                             track.notes.begin(), track.notes.end());
+        all_validated.insert(all_validated.end(), track.notes.begin(), track.notes.end());
       }
 
       for (const auto& evt : all_validated) {
-        if (evt.voice == kCantusVoice) continue;  // Skip cantus (reference).
+        if (evt.voice == kCantusVoice)
+          continue;  // Skip cantus (reference).
         uint8_t beat = beatInBar(evt.start_tick);
-        if (beat != 0 && beat != 2) continue;  // Only strong beats.
-        if (evt.start_tick >= cadence_start) continue;  // Exclude cadence window.
+        if (beat != 0 && beat != 2)
+          continue;  // Only strong beats.
+        if (evt.start_tick >= cadence_start)
+          continue;  // Exclude cadence window.
 
         ++strong_beat_total;
         // Find cantus pitch at this tick.
         int cantus_p = -1;
         for (const auto& cn : tracks[kCantusVoice].notes) {
-          if (evt.start_tick >= cn.start_tick &&
-              evt.start_tick < cn.start_tick + cn.duration) {
+          if (evt.start_tick >= cn.start_tick && evt.start_tick < cn.start_tick + cn.duration) {
             cantus_p = cn.pitch;
             break;
           }
         }
         if (cantus_p >= 0) {
-          int ivl = interval_util::compoundToSimple(
-              std::abs(static_cast<int>(evt.pitch) - cantus_p));
+          int ivl =
+              interval_util::compoundToSimple(std::abs(static_cast<int>(evt.pitch) - cantus_p));
           if (!interval_util::isConsonance(ivl)) {
             ++strong_beat_dissonant;
           }
         }
       }
 
-      float dissonance_rate = strong_beat_total > 0
-          ? 100.0f * strong_beat_dissonant / strong_beat_total
-          : 0.0f;
+      float dissonance_rate =
+          strong_beat_total > 0 ? 100.0f * strong_beat_dissonant / strong_beat_total : 0.0f;
       fprintf(stderr,
               "[ChoralePrelude] strong-beat dissonance=%.0f%% (%d/%d)"
               " [target: <=10%%]\n",
@@ -2053,8 +2015,7 @@ ChoralePreludeResult generateChoralePrelude(const ChoralePreludeConfig& config) 
     }
 
     // Inner voice presence.
-    fprintf(stderr, "[ChoralePrelude] inner voice notes=%zu\n",
-            tracks[2].notes.size());
+    fprintf(stderr, "[ChoralePrelude] inner voice notes=%zu\n", tracks[2].notes.size());
   }
 
   // ---------------------------------------------------------------------------
@@ -2064,8 +2025,7 @@ ChoralePreludeResult generateChoralePrelude(const ChoralePreludeConfig& config) 
   // Picardy third (minor keys only).
   if (config.enable_picardy && config.key.is_minor && total_duration > kTicksPerBar) {
     for (auto& track : tracks) {
-      applyPicardyToFinalChord(track.notes, config.key,
-                               total_duration - kTicksPerBar);
+      applyPicardyToFinalChord(track.notes, config.key, total_duration - kTicksPerBar);
     }
   }
 

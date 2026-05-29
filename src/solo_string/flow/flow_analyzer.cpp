@@ -48,8 +48,7 @@ std::pair<Tick, Tick> sectionTickRange(int section_idx, int bars_per_section) {
 /// @param start Start tick (inclusive).
 /// @param end End tick (exclusive).
 /// @return Notes whose start_tick falls within the range.
-std::vector<NoteEvent> notesInRange(const std::vector<NoteEvent>& all_notes,
-                                    Tick start, Tick end) {
+std::vector<NoteEvent> notesInRange(const std::vector<NoteEvent>& all_notes, Tick start, Tick end) {
   return analysis_util::notesInRange(all_notes, start, end);
 }
 
@@ -63,8 +62,10 @@ int registerRange(const std::vector<NoteEvent>& notes) {
   uint8_t min_pitch = 127;
   uint8_t max_pitch = 0;
   for (const auto& note : notes) {
-    if (note.pitch < min_pitch) min_pitch = note.pitch;
-    if (note.pitch > max_pitch) max_pitch = note.pitch;
+    if (note.pitch < min_pitch)
+      min_pitch = note.pitch;
+    if (note.pitch > max_pitch)
+      max_pitch = note.pitch;
   }
   return static_cast<int>(max_pitch) - static_cast<int>(min_pitch);
 }
@@ -80,8 +81,8 @@ float averagePitch(const std::vector<NoteEvent>& notes) {
 /// @param config Flow config.
 /// @return Total duration in ticks.
 Tick totalPieceDuration(const ArpeggioFlowConfig& config) {
-  return static_cast<Tick>(config.num_sections) *
-         static_cast<Tick>(config.bars_per_section) * kTicksPerBar;
+  return static_cast<Tick>(config.num_sections) * static_cast<Tick>(config.bars_per_section) *
+         kTicksPerBar;
 }
 
 }  // namespace
@@ -117,7 +118,8 @@ float computeHarmonicMotionScore(const std::vector<NoteEvent>& all_notes,
     }
   }
 
-  if (total_notes == 0) return 0.0f;
+  if (total_notes == 0)
+    return 0.0f;
   return static_cast<float>(chord_tone_notes) / static_cast<float>(total_notes);
 }
 
@@ -156,7 +158,8 @@ float computeRegisterExpansionScore(const std::vector<NoteEvent>& all_notes,
     }
   }
 
-  if (peak_section < 0) return 0.0f;
+  if (peak_section < 0)
+    return 0.0f;
 
   int total_checks = 0;
   int passed_checks = 0;
@@ -171,16 +174,19 @@ float computeRegisterExpansionScore(const std::vector<NoteEvent>& all_notes,
     }
   }
   ++total_checks;
-  if (peak_is_max) ++passed_checks;
+  if (peak_is_max)
+    ++passed_checks;
 
   // Check Ascent sections: non-decreasing range.
   int prev_range = -1;
   for (const auto& [sec_id, phase] : config.arc.phase_assignment) {
-    if (phase != ArcPhase::Ascent) continue;
+    if (phase != ArcPhase::Ascent)
+      continue;
     int range = section_ranges[static_cast<size_t>(sec_id)];
     if (prev_range >= 0) {
       ++total_checks;
-      if (range >= prev_range) ++passed_checks;
+      if (range >= prev_range)
+        ++passed_checks;
     }
     prev_range = range;
   }
@@ -188,16 +194,19 @@ float computeRegisterExpansionScore(const std::vector<NoteEvent>& all_notes,
   // Check Descent sections: non-increasing range.
   prev_range = -1;
   for (const auto& [sec_id, phase] : config.arc.phase_assignment) {
-    if (phase != ArcPhase::Descent) continue;
+    if (phase != ArcPhase::Descent)
+      continue;
     int range = section_ranges[static_cast<size_t>(sec_id)];
     if (prev_range >= 0) {
       ++total_checks;
-      if (range <= prev_range) ++passed_checks;
+      if (range <= prev_range)
+        ++passed_checks;
     }
     prev_range = range;
   }
 
-  if (total_checks == 0) return 1.0f;
+  if (total_checks == 0)
+    return 1.0f;
   return static_cast<float>(passed_checks) / static_cast<float>(total_checks);
 }
 
@@ -260,7 +269,8 @@ float computePatternNaturalnessScore(const std::vector<NoteEvent>& all_notes,
     Tick bar_end = bar_start + kTicksPerBar;
     auto bar_notes = notesInRange(all_notes, bar_start, bar_end);
 
-    if (bar_notes.size() < 2) continue;
+    if (bar_notes.size() < 2)
+      continue;
     ++bars_analyzed;
 
     // Count intervals within the bar.
@@ -278,12 +288,14 @@ float computePatternNaturalnessScore(const std::vector<NoteEvent>& all_notes,
       }
     }
 
-    if (total_intervals == 0) continue;
+    if (total_intervals == 0)
+      continue;
 
     // Interval variety: number of distinct intervals / max reasonable variety.
     // Cap at 6 distinct intervals for a full score.
     float variety = static_cast<float>(interval_counts.size()) / 6.0f;
-    if (variety > 1.0f) variety = 1.0f;
+    if (variety > 1.0f)
+      variety = 1.0f;
 
     // Repetition penalty: if any single interval appears > 60% of the time, penalize.
     float repetition_penalty = 0.0f;
@@ -293,21 +305,24 @@ float computePatternNaturalnessScore(const std::vector<NoteEvent>& all_notes,
         repetition_penalty += (ratio - 0.6f);
       }
     }
-    if (repetition_penalty > 1.0f) repetition_penalty = 1.0f;
+    if (repetition_penalty > 1.0f)
+      repetition_penalty = 1.0f;
 
     // Large jump penalty: proportion of jumps > octave.
-    float jump_penalty =
-        static_cast<float>(large_jump_count) / static_cast<float>(total_intervals);
+    float jump_penalty = static_cast<float>(large_jump_count) / static_cast<float>(total_intervals);
 
     // Bar score = variety * (1 - repetition_penalty) * (1 - jump_penalty).
     float bar_score = variety * (1.0f - repetition_penalty) * (1.0f - jump_penalty);
-    if (bar_score < 0.0f) bar_score = 0.0f;
-    if (bar_score > 1.0f) bar_score = 1.0f;
+    if (bar_score < 0.0f)
+      bar_score = 0.0f;
+    if (bar_score > 1.0f)
+      bar_score = 1.0f;
 
     total_score += bar_score;
   }
 
-  if (bars_analyzed == 0) return 0.0f;
+  if (bars_analyzed == 0)
+    return 0.0f;
   return total_score / static_cast<float>(bars_analyzed);
 }
 
@@ -336,7 +351,8 @@ float computeDramaturgicOrderScore(const ArpeggioFlowConfig& config) {
 
   for (const auto& [sec_id, phase] : config.arc.phase_assignment) {
     if (first) {
-      if (phase != ArcPhase::Ascent) return 0.0f;
+      if (phase != ArcPhase::Ascent)
+        return 0.0f;
       prev_phase = phase;
       first = false;
       continue;
@@ -362,12 +378,12 @@ float computeDramaturgicOrderScore(const ArpeggioFlowConfig& config) {
 /// @return Score in [0.0, 1.0].
 float computeCadenceScore(const std::vector<NoteEvent>& all_notes,
                           const ArpeggioFlowConfig& config) {
-  if (all_notes.empty()) return 0.0f;
+  if (all_notes.empty())
+    return 0.0f;
 
   Tick piece_duration = totalPieceDuration(config);
   Tick cadence_start =
-      piece_duration -
-      static_cast<Tick>(config.cadence.cadence_bars) * kTicksPerBar;
+      piece_duration - static_cast<Tick>(config.cadence.cadence_bars) * kTicksPerBar;
 
   // If cadence region is larger than the piece, treat entire piece as cadence.
   if (cadence_start >= piece_duration) {
@@ -399,7 +415,8 @@ float computeCadenceScore(const std::vector<NoteEvent>& all_notes,
     // Partial credit based on how close the registers are.
     float diff = cadence_avg - body_avg;
     float penalty = diff / 12.0f;  // 12 semitones (octave) = full penalty
-    if (penalty > 1.0f) penalty = 1.0f;
+    if (penalty > 1.0f)
+      penalty = 1.0f;
     score += (1.0f - penalty);
   }
 
@@ -410,7 +427,8 @@ float computeCadenceScore(const std::vector<NoteEvent>& all_notes,
   } else {
     float diff = static_cast<float>(cadence_range - body_range);
     float penalty = diff / 12.0f;
-    if (penalty > 1.0f) penalty = 1.0f;
+    if (penalty > 1.0f)
+      penalty = 1.0f;
     score += (1.0f - penalty);
   }
 
@@ -437,7 +455,8 @@ float computeWeightUtilizationScore(const std::vector<NoteEvent>& all_notes,
 
   for (const auto& event : events) {
     auto event_notes = notesInRange(all_notes, event.tick, event.end_tick);
-    if (event_notes.empty()) continue;
+    if (event_notes.empty())
+      continue;
 
     int range = registerRange(event_notes);
     float avg_vel = 0.0f;
@@ -529,8 +548,7 @@ float computeArcProhibitionScore(const std::vector<NoteEvent>& all_notes,
   int violations = 0;
 
   for (const auto& [sec_id, phase] : config.arc.phase_assignment) {
-    auto [sec_start, sec_end] = sectionTickRange(static_cast<int>(sec_id),
-                                                 config.bars_per_section);
+    auto [sec_start, sec_end] = sectionTickRange(static_cast<int>(sec_id), config.bars_per_section);
 
     // Check bar-to-bar register changes within this section.
     int prev_bar_range = -1;
@@ -568,18 +586,28 @@ float computeArcProhibitionScore(const std::vector<NoteEvent>& all_notes,
 
 bool FlowAnalysisResult::isPass() const {
   // Instant-FAIL checks (exact values required).
-  if (global_arc_score != 1.0f) return false;
-  if (peak_uniqueness_score != 1.0f) return false;
-  if (arc_prohibition_score > 0.0f) return false;
-  if (dramaturgic_order_score != 1.0f) return false;
+  if (global_arc_score != 1.0f)
+    return false;
+  if (peak_uniqueness_score != 1.0f)
+    return false;
+  if (arc_prohibition_score > 0.0f)
+    return false;
+  if (dramaturgic_order_score != 1.0f)
+    return false;
 
   // Threshold checks.
-  if (harmonic_motion_score < 0.5f) return false;
-  if (register_expansion_score < 0.3f) return false;
-  if (phrase_continuity_score < 0.95f) return false;
-  if (pattern_naturalness_score < 0.7f) return false;
-  if (cadence_score < 0.7f) return false;
-  if (weight_utilization_score < 0.6f) return false;
+  if (harmonic_motion_score < 0.5f)
+    return false;
+  if (register_expansion_score < 0.3f)
+    return false;
+  if (phrase_continuity_score < 0.95f)
+    return false;
+  if (pattern_naturalness_score < 0.7f)
+    return false;
+  if (cadence_score < 0.7f)
+    return false;
+  if (weight_utilization_score < 0.6f)
+    return false;
 
   return true;
 }
@@ -598,12 +626,10 @@ std::vector<std::string> FlowAnalysisResult::getFailures() const {
     failures.push_back(formatMetric("global_arc_score", global_arc_score, "must be 1.0"));
   }
   if (peak_uniqueness_score != 1.0f) {
-    failures.push_back(
-        formatMetric("peak_uniqueness_score", peak_uniqueness_score, "must be 1.0"));
+    failures.push_back(formatMetric("peak_uniqueness_score", peak_uniqueness_score, "must be 1.0"));
   }
   if (arc_prohibition_score > 0.0f) {
-    failures.push_back(
-        formatMetric("arc_prohibition_score", arc_prohibition_score, "must be 0.0"));
+    failures.push_back(formatMetric("arc_prohibition_score", arc_prohibition_score, "must be 0.0"));
   }
   if (dramaturgic_order_score != 1.0f) {
     failures.push_back(
@@ -624,8 +650,8 @@ std::vector<std::string> FlowAnalysisResult::getFailures() const {
         formatMetric("phrase_continuity_score", phrase_continuity_score, "threshold: 0.95"));
   }
   if (pattern_naturalness_score < 0.7f) {
-    failures.push_back(formatMetric("pattern_naturalness_score", pattern_naturalness_score,
-                                    "threshold: 0.70"));
+    failures.push_back(
+        formatMetric("pattern_naturalness_score", pattern_naturalness_score, "threshold: 0.70"));
   }
   if (cadence_score < 0.7f) {
     failures.push_back(formatMetric("cadence_score", cadence_score, "threshold: 0.70"));
@@ -671,8 +697,7 @@ std::string FlowAnalysisResult::summary() const {
 // Main analysis entry point
 // ===========================================================================
 
-FlowAnalysisResult analyzeFlow(const std::vector<Track>& tracks,
-                               const ArpeggioFlowConfig& config,
+FlowAnalysisResult analyzeFlow(const std::vector<Track>& tracks, const ArpeggioFlowConfig& config,
                                const HarmonicTimeline& timeline) {
   FlowAnalysisResult result;
 

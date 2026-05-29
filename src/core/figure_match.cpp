@@ -19,8 +19,10 @@ namespace figure_match {
 /// @return Score for this interval: 1.0 exact, 0.3 off-by-one, 0.0 otherwise.
 static float scoreSemitoneInterval(int actual, int expected) {
   int diff = std::abs(actual - expected);
-  if (diff == 0) return 1.0f;
-  if (diff == 1) return 0.3f;
+  if (diff == 0)
+    return 1.0f;
+  if (diff == 1)
+    return 0.3f;
   return 0.0f;
 }
 
@@ -36,8 +38,7 @@ static float scoreSemitoneInterval(int actual, int expected) {
 /// @param key Current musical key.
 /// @param scale Current scale type.
 /// @return Signed degree difference (positive = ascending, negative = descending).
-static int computeDegreeDiff(uint8_t pitch_a, uint8_t pitch_b,
-                             Key key, ScaleType scale) {
+static int computeDegreeDiff(uint8_t pitch_a, uint8_t pitch_b, Key key, ScaleType scale) {
   // Snap both pitches to scale tones for degree counting.
   uint8_t snapped_a = scale_util::nearestScaleTone(pitch_a, key, scale);
   uint8_t snapped_b = scale_util::nearestScaleTone(pitch_b, key, scale);
@@ -69,8 +70,7 @@ static int computeDegreeDiff(uint8_t pitch_a, uint8_t pitch_b,
 /// @param key Current musical key.
 /// @param scale Current scale type.
 /// @return Score for this interval in [0.0, 1.1].
-static float scoreDegreeInterval(const uint8_t* pitches, int idx,
-                                 const MelodicFigure& figure,
+static float scoreDegreeInterval(const uint8_t* pitches, int idx, const MelodicFigure& figure,
                                  Key key, ScaleType scale) {
   int actual_deg_diff = computeDegreeDiff(pitches[idx], pitches[idx + 1], key, scale);
   int expected_deg_diff = figure.degree_intervals[idx].degree_diff;
@@ -97,8 +97,7 @@ static float scoreDegreeInterval(const uint8_t* pitches, int idx,
     // for this degree diff, then compare actual vs natural to get chroma.
     uint8_t snapped_p0 = scale_util::nearestScaleTone(pitches[idx], key, scale);
     int abs_deg_0 = scale_util::pitchToAbsoluteDegree(snapped_p0, key, scale);
-    uint8_t natural_p1 =
-        scale_util::absoluteDegreeToPitch(abs_deg_0 + actual_deg_diff, key, scale);
+    uint8_t natural_p1 = scale_util::absoluteDegreeToPitch(abs_deg_0 + actual_deg_diff, key, scale);
     int actual_semitones = static_cast<int>(pitches[idx + 1]) - static_cast<int>(pitches[idx]);
     int natural_semitones = static_cast<int>(natural_p1) - static_cast<int>(snapped_p0);
     int actual_chroma = actual_semitones - natural_semitones;
@@ -110,11 +109,12 @@ static float scoreDegreeInterval(const uint8_t* pitches, int idx,
   return interval_score;
 }
 
-float matchFigure(const uint8_t* pitches, int count,
-                  const MelodicFigure& figure,
-                  Key key, ScaleType scale) {
-  if (count != figure.note_count) return 0.0f;
-  if (count < 2) return 0.0f;
+float matchFigure(const uint8_t* pitches, int count, const MelodicFigure& figure, Key key,
+                  ScaleType scale) {
+  if (count != figure.note_count)
+    return 0.0f;
+  if (count < 2)
+    return 0.0f;
 
   int interval_count = count - 1;
   float total_score = 0.0f;
@@ -143,15 +143,14 @@ float matchFigure(const uint8_t* pitches, int count,
   return total_score / static_cast<float>(interval_count);
 }
 
-int findBestFigure(const uint8_t* pitches, int count,
-                   const MelodicFigure* const* table, int table_size,
-                   Key key, ScaleType scale,
-                   float threshold) {
+int findBestFigure(const uint8_t* pitches, int count, const MelodicFigure* const* table,
+                   int table_size, Key key, ScaleType scale, float threshold) {
   float best_score = 0.0f;
   int best_index = -1;
 
   for (int idx = 0; idx < table_size; ++idx) {
-    if (table[idx]->note_count != count) continue;
+    if (table[idx]->note_count != count)
+      continue;
 
     float score = matchFigure(pitches, count, *table[idx], key, scale);
     if (score > best_score) {
@@ -160,7 +159,8 @@ int findBestFigure(const uint8_t* pitches, int count,
     }
   }
 
-  if (best_score >= threshold) return best_index;
+  if (best_score >= threshold)
+    return best_index;
   return -1;
 }
 

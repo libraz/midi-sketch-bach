@@ -77,29 +77,22 @@ struct ProgressionEntry {
 
 /// @brief Standard BWV1007-style 4-bar progression: i - iv - V - i (minor).
 ///                                                or: I - IV - V - I (major).
-constexpr ProgressionEntry kProgression_A[4] = {
-    {ChordDegree::I, 1.0f},
-    {ChordDegree::IV, 0.5f},
-    {ChordDegree::V, 0.75f},
-    {ChordDegree::I, 1.0f}
-};
+constexpr ProgressionEntry kProgression_A[4] = {{ChordDegree::I, 1.0f},
+                                                {ChordDegree::IV, 0.5f},
+                                                {ChordDegree::V, 0.75f},
+                                                {ChordDegree::I, 1.0f}};
 
 /// @brief Secondary progression: i - vi - ii - V (leading to next section).
-constexpr ProgressionEntry kProgression_B[4] = {
-    {ChordDegree::I, 1.0f},
-    {ChordDegree::vi, 0.5f},
-    {ChordDegree::ii, 0.6f},
-    {ChordDegree::V, 0.8f}
-};
+constexpr ProgressionEntry kProgression_B[4] = {{ChordDegree::I, 1.0f},
+                                                {ChordDegree::vi, 0.5f},
+                                                {ChordDegree::ii, 0.6f},
+                                                {ChordDegree::V, 0.8f}};
 
 /// @brief Climactic progression: i - iv - vii - III (minor) or I - IV - vii - V (major).
-constexpr ProgressionEntry kProgression_C[4] = {
-    {ChordDegree::I, 1.0f},
-    {ChordDegree::IV, 0.8f},
-    {ChordDegree::viiDim, 0.9f},
-    {ChordDegree::V, 1.0f}
-};
-
+constexpr ProgressionEntry kProgression_C[4] = {{ChordDegree::I, 1.0f},
+                                                {ChordDegree::IV, 0.8f},
+                                                {ChordDegree::viiDim, 0.9f},
+                                                {ChordDegree::V, 1.0f}};
 
 /// @brief Compute the MIDI pitch for a chord degree in a given key and octave.
 ///
@@ -107,12 +100,13 @@ constexpr ProgressionEntry kProgression_C[4] = {
 /// @param pattern_degree The scale degree from the arpeggio pattern (0=root, 2=3rd, 4=5th).
 /// @param is_minor Whether the current key is minor.
 /// @return MIDI pitch for the pattern degree relative to the chord root.
-uint8_t patternDegreeToMidiPitch(uint8_t chord_root_pitch, int pattern_degree,
-                                 bool is_minor) {
+uint8_t patternDegreeToMidiPitch(uint8_t chord_root_pitch, int pattern_degree, bool is_minor) {
   int offset = degreeToPitchOffset(pattern_degree, is_minor);
   int result = static_cast<int>(chord_root_pitch) + offset;
-  if (result < 0) result = 0;
-  if (result > 127) result = 127;
+  if (result < 0)
+    result = 0;
+  if (result > 127)
+    result = 127;
   return static_cast<uint8_t>(result);
 }
 
@@ -141,8 +135,7 @@ uint8_t fitToRegister(uint8_t pitch, const RegisterRange& range) {
 
   for (int octave = 0; octave <= 10; ++octave) {
     int candidate = (octave + 1) * 12 + pitch_class;
-    if (candidate < static_cast<int>(range.low) ||
-        candidate > static_cast<int>(range.high)) {
+    if (candidate < static_cast<int>(range.low) || candidate > static_cast<int>(range.high)) {
       continue;
     }
 
@@ -158,7 +151,8 @@ uint8_t fitToRegister(uint8_t pitch, const RegisterRange& range) {
   }
 
   // No octave fits -- clamp to the nearest range boundary.
-  if (pitch < range.low) return range.low;
+  if (pitch < range.low)
+    return range.low;
   return range.high;
 }
 
@@ -179,8 +173,8 @@ uint8_t fitToRegister(uint8_t pitch, const RegisterRange& range) {
 /// @param prev_pitch Previous note's MIDI pitch (0 = no previous, use fitToRegister).
 /// @param is_harmonic_turn True at chord root changes or bar start (relaxes leap limit).
 /// @return MIDI pitch adjusted for smooth voice leading within register range.
-uint8_t fitToRegisterSmooth(uint8_t pitch, const RegisterRange& range,
-                            uint8_t prev_pitch, bool is_harmonic_turn) {
+uint8_t fitToRegisterSmooth(uint8_t pitch, const RegisterRange& range, uint8_t prev_pitch,
+                            bool is_harmonic_turn) {
   // No previous context: fall back to original placement.
   if (prev_pitch == 0) {
     return fitToRegister(pitch, range);
@@ -199,8 +193,7 @@ uint8_t fitToRegisterSmooth(uint8_t pitch, const RegisterRange& range,
 
   for (int octave = 0; octave <= 10; ++octave) {
     int cand = (octave + 1) * 12 + pitch_class;
-    if (cand < static_cast<int>(range.low) ||
-        cand > static_cast<int>(range.high)) {
+    if (cand < static_cast<int>(range.low) || cand > static_cast<int>(range.high)) {
       continue;
     }
     int dist = std::abs(cand - prev);
@@ -209,15 +202,14 @@ uint8_t fitToRegisterSmooth(uint8_t pitch, const RegisterRange& range,
 
   if (num_candidates == 0) {
     // No octave fits: clamp to boundary.
-    if (pitch < range.low) return range.low;
+    if (pitch < range.low)
+      return range.low;
     return range.high;
   }
 
   // Sort candidates by distance to prev_pitch.
   std::sort(candidates, candidates + num_candidates,
-            [](const Candidate& a, const Candidate& b) {
-              return a.distance < b.distance;
-            });
+            [](const Candidate& a, const Candidate& b) { return a.distance < b.distance; });
 
   // Priority 1: within P5 (7 semitones).
   for (int i = 0; i < num_candidates; ++i) {
@@ -267,8 +259,8 @@ uint8_t fitToRegisterSmooth(uint8_t pitch, const RegisterRange& range,
 /// @param inst_low Lowest MIDI pitch of the instrument.
 /// @param inst_high Highest MIDI pitch of the instrument.
 /// @return RegisterRange for note placement.
-RegisterRange computeRegisterRange(ArcPhase phase, float progress,
-                                   uint8_t inst_low, uint8_t inst_high) {
+RegisterRange computeRegisterRange(ArcPhase phase, float progress, uint8_t inst_low,
+                                   uint8_t inst_high) {
   RegisterRange range;
   int full_range = static_cast<int>(inst_high) - static_cast<int>(inst_low);
   int mid_point = static_cast<int>(inst_low) + full_range / 2;
@@ -284,10 +276,9 @@ RegisterRange computeRegisterRange(ArcPhase phase, float progress,
       // Low stays near instrument low; high expands from mid toward the cap.
       range.low = inst_low;
       int cap = static_cast<int>(inst_high) - kPeakRegisterMargin;
-      int expanding_high = mid_point + static_cast<int>(
-          static_cast<float>(cap - mid_point) * progress);
-      range.high = static_cast<uint8_t>(
-          std::min(expanding_high, cap));
+      int expanding_high =
+          mid_point + static_cast<int>(static_cast<float>(cap - mid_point) * progress);
+      range.high = static_cast<uint8_t>(std::min(expanding_high, cap));
       break;
     }
     case ArcPhase::Peak: {
@@ -302,10 +293,8 @@ RegisterRange computeRegisterRange(ArcPhase phase, float progress,
       // toward mid-point.
       range.low = inst_low;
       int cap = static_cast<int>(inst_high) - kPeakRegisterMargin;
-      int contracting_high = cap - static_cast<int>(
-          static_cast<float>(cap - mid_point) * progress);
-      range.high = static_cast<uint8_t>(
-          std::max(contracting_high, mid_point));
+      int contracting_high = cap - static_cast<int>(static_cast<float>(cap - mid_point) * progress);
+      range.high = static_cast<uint8_t>(std::max(contracting_high, mid_point));
       break;
     }
   }
@@ -330,10 +319,10 @@ RegisterRange computeRegisterRange(ArcPhase phase, float progress,
 /// @param same_count Number of consecutive sections using the same progression.
 /// @param rng Random number generator for Markov transitions.
 /// @return Pointer to a 4-element ProgressionEntry array.
-const ProgressionEntry* selectProgressionForSection(
-    int section_idx, ArcPhase phase, int total_sections,
-    const ProgressionEntry* prev_progression, int same_count,
-    std::mt19937& rng) {
+const ProgressionEntry* selectProgressionForSection(int section_idx, ArcPhase phase,
+                                                    int total_sections,
+                                                    const ProgressionEntry* prev_progression,
+                                                    int same_count, std::mt19937& rng) {
   // Peak section always uses the climactic progression (design value).
   if (phase == ArcPhase::Peak) {
     return kProgression_C;
@@ -431,8 +420,7 @@ std::vector<PatternRole> assignPatternRoles(int bars_in_section) {
 /// @param bias Open string preference bias [0.0, 1.0].
 /// @param rng Random number generator for stochastic decisions.
 /// @return True if the pitch should use an open string variant.
-bool shouldPreferOpenString(uint8_t pitch,
-                            const std::vector<uint8_t>& open_string_pitches,
+bool shouldPreferOpenString(uint8_t pitch, const std::vector<uint8_t>& open_string_pitches,
                             float bias, std::mt19937& rng) {
   // Check if pitch matches any open string (in any octave).
   int pitch_class = getPitchClass(pitch);
@@ -458,12 +446,11 @@ bool shouldPreferOpenString(uint8_t pitch,
 /// @param open_string_pitches Open string MIDI pitches.
 /// @param range Register range to constrain the result.
 /// @return The open string MIDI pitch within range, or 0 if none fits.
-uint8_t findOpenStringPitch(int pitch_class,
-                            const std::vector<uint8_t>& open_string_pitches,
+uint8_t findOpenStringPitch(int pitch_class, const std::vector<uint8_t>& open_string_pitches,
                             const RegisterRange& range) {
   for (uint8_t open_pitch : open_string_pitches) {
-    if (getPitchClass(open_pitch) == pitch_class &&
-        open_pitch >= range.low && open_pitch <= range.high) {
+    if (getPitchClass(open_pitch) == pitch_class && open_pitch >= range.low &&
+        open_pitch <= range.high) {
       return open_pitch;
     }
   }
@@ -493,8 +480,7 @@ float cadenceProgress(int bar_idx, int total_bars, int cadence_bars) {
   if (bar_idx < cadence_start || cadence_bars <= 0) {
     return 0.0f;
   }
-  return static_cast<float>(bar_idx - cadence_start) /
-         static_cast<float>(cadence_bars);
+  return static_cast<float>(bar_idx - cadence_start) / static_cast<float>(cadence_bars);
 }
 
 // ---------------------------------------------------------------------------
@@ -580,8 +566,7 @@ InstrumentProps getInstrumentProps(InstrumentType instrument) {
 /// @param base_seed Seed for decorrelating progression selection.
 /// @return HarmonicTimeline at bar resolution.
 HarmonicTimeline buildFlowTimeline(const ArpeggioFlowConfig& config,
-                                   const GlobalArcConfig& arc_config,
-                                   uint32_t base_seed) {
+                                   const GlobalArcConfig& arc_config, uint32_t base_seed) {
   HarmonicTimeline timeline;
 
   int total_sections = config.num_sections;
@@ -603,9 +588,8 @@ HarmonicTimeline buildFlowTimeline(const ArpeggioFlowConfig& config,
 
   for (int section_idx = 0; section_idx < total_sections; ++section_idx) {
     ArcPhase phase = getPhaseForSection(section_idx);
-    const ProgressionEntry* progression =
-        selectProgressionForSection(section_idx, phase, total_sections,
-                                    prev_progression, same_count, timeline_rng);
+    const ProgressionEntry* progression = selectProgressionForSection(
+        section_idx, phase, total_sections, prev_progression, same_count, timeline_rng);
 
     // Track consecutive same-progression count.
     if (progression == prev_progression) {
@@ -615,8 +599,7 @@ HarmonicTimeline buildFlowTimeline(const ArpeggioFlowConfig& config,
     }
     prev_progression = progression;
 
-    for (int bar_in_section = 0; bar_in_section < config.bars_per_section;
-         ++bar_in_section) {
+    for (int bar_in_section = 0; bar_in_section < config.bars_per_section; ++bar_in_section) {
       // Cycle through the 4-chord progression within each section.
       int prog_idx = bar_in_section % 4;
 
@@ -632,12 +615,10 @@ HarmonicTimeline buildFlowTimeline(const ArpeggioFlowConfig& config,
       // Build chord in octave 3 (appropriate for cello/violin bass register).
       Chord chord;
       chord.degree = degree;
-      chord.quality = config.key.is_minor ? minorKeyQuality(degree)
-                                          : majorKeyQuality(degree);
+      chord.quality = config.key.is_minor ? minorKeyQuality(degree) : majorKeyQuality(degree);
 
-      uint8_t semitone_offset = config.key.is_minor
-                                    ? degreeMinorSemitones(degree)
-                                    : degreeSemitones(degree);
+      uint8_t semitone_offset =
+          config.key.is_minor ? degreeMinorSemitones(degree) : degreeSemitones(degree);
       int root_midi = 4 * 12 + static_cast<int>(config.key.tonic) + semitone_offset;
       chord.root_pitch = clampPitch(root_midi, 0, 127);
       chord.inversion = 0;
@@ -685,21 +666,14 @@ HarmonicTimeline buildFlowTimeline(const ArpeggioFlowConfig& config,
 /// @param rhythm_simplification Amount of rhythmic simplification [0.0, 1.0].
 /// @param rng Random number generator.
 /// @return Vector of NoteEvent for this bar.
-std::vector<NoteEvent> generateBarNotes(
-    Tick bar_tick,
-    const HarmonicEvent& harm_event,
-    const ArpeggioPattern& pattern,
-    const RegisterRange& reg_range,
-    const InstrumentProps& instrument,
-    float open_string_bias,
-    bool is_cadence_bar,
-    float cadence_prog,
-    float rhythm_simplification,
-    std::mt19937& rng,
-    uint8_t& prev_pitch,
-    uint8_t prev_chord_root,
-    [[maybe_unused]] ArcPhase phase,
-    float neighbor_prob) {
+std::vector<NoteEvent> generateBarNotes(Tick bar_tick, const HarmonicEvent& harm_event,
+                                        const ArpeggioPattern& pattern,
+                                        const RegisterRange& reg_range,
+                                        const InstrumentProps& instrument, float open_string_bias,
+                                        bool is_cadence_bar, float cadence_prog,
+                                        float rhythm_simplification, std::mt19937& rng,
+                                        uint8_t& prev_pitch, uint8_t prev_chord_root,
+                                        [[maybe_unused]] ArcPhase phase, float neighbor_prob) {
   std::vector<NoteEvent> notes;
 
   if (pattern.degrees.empty()) {
@@ -707,39 +681,36 @@ std::vector<NoteEvent> generateBarNotes(
   }
 
   // Detect harmonic turning point: chord root changed from previous bar.
-  bool chord_root_changed = (prev_chord_root != 0 &&
-                             prev_chord_root != harm_event.chord.root_pitch);
+  bool chord_root_changed =
+      (prev_chord_root != 0 && prev_chord_root != harm_event.chord.root_pitch);
 
   // In cadence region, occasionally merge consecutive 16ths into 8ths.
-  bool simplify_rhythm = is_cadence_bar &&
-                         rng::rollProbability(rng, rhythm_simplification * cadence_prog);
+  bool simplify_rhythm =
+      is_cadence_bar && rng::rollProbability(rng, rhythm_simplification * cadence_prog);
 
   int degree_count = static_cast<int>(pattern.degrees.size());
   int note_idx = 0;
 
   for (int beat_idx = 0; beat_idx < kBeatsPerBar; ++beat_idx) {
     for (int sub_idx = 0; sub_idx < kSubdivisionsPerBeat; ++sub_idx) {
-      Tick note_tick = bar_tick +
-                       static_cast<Tick>(beat_idx) * kTicksPerBeat +
+      Tick note_tick = bar_tick + static_cast<Tick>(beat_idx) * kTicksPerBeat +
                        static_cast<Tick>(sub_idx) * kSixteenthDuration;
 
       // Select the pattern degree (cycle through pattern.degrees).
       int pattern_degree = pattern.degrees[note_idx % degree_count];
 
       // Map the pattern degree to a MIDI pitch.
-      uint8_t raw_pitch = patternDegreeToMidiPitch(
-          harm_event.chord.root_pitch, pattern_degree, harm_event.is_minor);
+      uint8_t raw_pitch = patternDegreeToMidiPitch(harm_event.chord.root_pitch, pattern_degree,
+                                                   harm_event.is_minor);
 
       // Harmonic turn: first note of bar at chord change, or beat 1.
-      bool is_turn = (note_idx == 0 && chord_root_changed) ||
-                     (beat_idx == 0 && sub_idx == 0);
+      bool is_turn = (note_idx == 0 && chord_root_changed) || (beat_idx == 0 && sub_idx == 0);
 
       // Fit to register range with smooth voice leading for all phases.
       // Peak has the widest available register (guaranteed by
       // computeRegisterRange's kPeakRegisterMargin), so smooth placement
       // naturally achieves the widest actual range at Peak.
-      uint8_t pitch = fitToRegisterSmooth(
-          raw_pitch, reg_range, prev_pitch, is_turn);
+      uint8_t pitch = fitToRegisterSmooth(raw_pitch, reg_range, prev_pitch, is_turn);
 
       // Markov octave tie-breaker: when we have sufficient context (2+ previous
       // notes), check if an alternative octave placement (+/-12 semitones) scores
@@ -747,8 +718,7 @@ std::vector<NoteEvent> generateBarNotes(
       // original choice. This refines register placement without overriding the
       // smooth voice-leading priority.
       if (prev_pitch != 0 && pitch != prev_pitch && notes.size() >= 2) {
-        ScaleType mk_scale = harm_event.is_minor ? ScaleType::HarmonicMinor
-                                                  : ScaleType::Major;
+        ScaleType mk_scale = harm_event.is_minor ? ScaleType::HarmonicMinor : ScaleType::Major;
         Key mk_key = harm_event.key;
         uint8_t prev2 = notes[notes.size() - 2].pitch;
         DegreeStep prev_ivl = computeDegreeStep(prev2, prev_pitch, mk_key, mk_scale);
@@ -759,25 +729,22 @@ std::vector<NoteEvent> generateBarNotes(
         DegreeClass deg_cls = scaleDegreeToClass(prev_sd);
         BeatPos beat_pos = tickToBeatPos(note_tick);
 
-        float base_mk = scoreMarkovPitch(
-            kCelloMarkov, prev_ivl, deg_cls, beat_pos, curr_ivl);
+        float base_mk = scoreMarkovPitch(kCelloMarkov, prev_ivl, deg_cls, beat_pos, curr_ivl);
 
         for (int alt_shift : {-12, 12}) {
           int alt = static_cast<int>(pitch) + alt_shift;
-          if (alt < static_cast<int>(reg_range.low) ||
-              alt > static_cast<int>(reg_range.high)) {
+          if (alt < static_cast<int>(reg_range.low) || alt > static_cast<int>(reg_range.high)) {
             continue;
           }
           // Accept only if alternative distance is within 2 semitones of original.
-          int orig_dist = std::abs(static_cast<int>(pitch) -
-                                   static_cast<int>(prev_pitch));
+          int orig_dist = std::abs(static_cast<int>(pitch) - static_cast<int>(prev_pitch));
           int alt_dist = std::abs(alt - static_cast<int>(prev_pitch));
-          if (alt_dist > orig_dist + 2) continue;
+          if (alt_dist > orig_dist + 2)
+            continue;
 
-          DegreeStep alt_ivl = computeDegreeStep(
-              prev_pitch, static_cast<uint8_t>(alt), mk_key, mk_scale);
-          float alt_mk = scoreMarkovPitch(
-              kCelloMarkov, prev_ivl, deg_cls, beat_pos, alt_ivl);
+          DegreeStep alt_ivl =
+              computeDegreeStep(prev_pitch, static_cast<uint8_t>(alt), mk_key, mk_scale);
+          float alt_mk = scoreMarkovPitch(kCelloMarkov, prev_ivl, deg_cls, beat_pos, alt_ivl);
           if (alt_mk > base_mk + 0.05f) {
             pitch = static_cast<uint8_t>(alt);
             break;
@@ -788,16 +755,13 @@ std::vector<NoteEvent> generateBarNotes(
       // Neighbor tone on weak beats for large leaps (Step 4).
       // Skip in cadence approach to preserve resolution clarity.
       bool in_cadence_approach = is_cadence_bar && cadence_prog >= 0.8f;
-      if ((sub_idx == 1 || sub_idx == 3) && prev_pitch > 0 &&
-          !in_cadence_approach) {
-        int leap = std::abs(static_cast<int>(pitch) -
-                            static_cast<int>(prev_pitch));
+      if ((sub_idx == 1 || sub_idx == 3) && prev_pitch > 0 && !in_cadence_approach) {
+        int leap = std::abs(static_cast<int>(pitch) - static_cast<int>(prev_pitch));
         if (leap >= 3 && rng::rollProbability(rng, neighbor_prob)) {
           int step = (pitch > prev_pitch) ? 1 : -1;
-          pitch = static_cast<uint8_t>(clampPitch(
-              static_cast<int>(prev_pitch) +
-                  step * rng::rollRange(rng, 1, 2),
-              reg_range.low, reg_range.high));
+          pitch = static_cast<uint8_t>(
+              clampPitch(static_cast<int>(prev_pitch) + step * rng::rollRange(rng, 1, 2),
+                         reg_range.low, reg_range.high));
         }
       }
 
@@ -811,16 +775,15 @@ std::vector<NoteEvent> generateBarNotes(
         effective_bias = std::min(1.0f, effective_bias + 0.2f * cadence_prog);
       }
 
-      if (shouldPreferOpenString(pitch, instrument.open_strings,
-                                 effective_bias, rng)) {
+      if (shouldPreferOpenString(pitch, instrument.open_strings, effective_bias, rng)) {
         int pitch_class = getPitchClass(pitch);
-        uint8_t open_pitch = findOpenStringPitch(
-            pitch_class, instrument.open_strings, reg_range);
+        uint8_t open_pitch = findOpenStringPitch(pitch_class, instrument.open_strings, reg_range);
         if (open_pitch > 0) {
           // Accept only if it doesn't exceed the smooth leap limit.
-          int open_leap = (prev_pitch > 0)
-              ? std::abs(static_cast<int>(open_pitch) - static_cast<int>(prev_pitch))
-              : 0;
+          int open_leap =
+              (prev_pitch > 0)
+                  ? std::abs(static_cast<int>(open_pitch) - static_cast<int>(prev_pitch))
+                  : 0;
           int smooth_limit = is_turn ? 12 : 7;
           if (prev_pitch == 0 || open_leap <= smooth_limit) {
             pitch = open_pitch;
@@ -829,16 +792,17 @@ std::vector<NoteEvent> generateBarNotes(
       }
 
       // Clamp to instrument range.
-      if (pitch < instrument.lowest_pitch) pitch = instrument.lowest_pitch;
-      if (pitch > instrument.highest_pitch) pitch = instrument.highest_pitch;
+      if (pitch < instrument.lowest_pitch)
+        pitch = instrument.lowest_pitch;
+      if (pitch > instrument.highest_pitch)
+        pitch = instrument.highest_pitch;
 
       // Save sub_idx before any rhythm simplification for accent check.
       int original_sub_idx = sub_idx;
 
       // Determine note duration.
       Tick duration = kSixteenthDuration;
-      if (simplify_rhythm && sub_idx % 2 == 0 &&
-          sub_idx + 1 < kSubdivisionsPerBeat) {
+      if (simplify_rhythm && sub_idx % 2 == 0 && sub_idx + 1 < kSubdivisionsPerBeat) {
         // Merge into an 8th note.
         duration = kSixteenthDuration * 2;
         ++sub_idx;  // Skip the next subdivision
@@ -846,8 +810,8 @@ std::vector<NoteEvent> generateBarNotes(
 
       // Calculate velocity: jitter -> weight boost -> accent (accent last to
       // prevent jitter from weakening strong-beat structure).
-      uint32_t vel_hash = rng::splitmix32(
-          static_cast<uint32_t>(bar_tick), static_cast<uint32_t>(note_idx));
+      uint32_t vel_hash =
+          rng::splitmix32(static_cast<uint32_t>(bar_tick), static_cast<uint32_t>(note_idx));
       int vel_jitter = static_cast<int>(vel_hash % 7) - 3;  // [-3, +3]
       int velocity = static_cast<int>(kBaseVelocity) + vel_jitter;
 
@@ -885,8 +849,7 @@ std::vector<NoteEvent> generateBarNotes(
 /// @param key_sig Key signature for tonic resolution.
 /// @param instrument Instrument properties.
 /// @return Vector of NoteEvent for the final bar.
-std::vector<NoteEvent> generateFinalBar(Tick bar_tick,
-                                        const KeySignature& key_sig,
+std::vector<NoteEvent> generateFinalBar(Tick bar_tick, const KeySignature& key_sig,
                                         const InstrumentProps& instrument) {
   std::vector<NoteEvent> notes;
 
@@ -1037,8 +1000,10 @@ ArpeggioFlowResult generateArpeggioFlow(const ArpeggioFlowConfig& config) {
   int ascent_count = 0;
   int descent_count = 0;
   for (const auto& [sid, phase] : arc_config.phase_assignment) {
-    if (phase == ArcPhase::Ascent) ++ascent_count;
-    if (phase == ArcPhase::Descent) ++descent_count;
+    if (phase == ArcPhase::Ascent)
+      ++ascent_count;
+    if (phase == ArcPhase::Descent)
+      ++descent_count;
   }
 
   int ascent_seen = 0;
@@ -1061,49 +1026,47 @@ ArpeggioFlowResult generateArpeggioFlow(const ArpeggioFlowConfig& config) {
     float phase_progress = 0.0f;
     switch (phase) {
       case ArcPhase::Ascent:
-        phase_progress = ascent_count > 1
-            ? static_cast<float>(ascent_seen) / static_cast<float>(ascent_count - 1)
-            : 1.0f;
+        phase_progress = ascent_count > 1 ? static_cast<float>(ascent_seen) /
+                                                static_cast<float>(ascent_count - 1)
+                                          : 1.0f;
         ++ascent_seen;
         break;
       case ArcPhase::Peak:
         phase_progress = 1.0f;  // Peak is always at maximum
         break;
       case ArcPhase::Descent:
-        phase_progress = descent_count > 1
-            ? static_cast<float>(descent_seen) / static_cast<float>(descent_count - 1)
-            : 1.0f;
+        phase_progress = descent_count > 1 ? static_cast<float>(descent_seen) /
+                                                 static_cast<float>(descent_count - 1)
+                                           : 1.0f;
         ++descent_seen;
         break;
     }
 
     // Compute register range for this section.
-    RegisterRange reg_range = computeRegisterRange(
-        phase, phase_progress, instrument.lowest_pitch, instrument.highest_pitch);
+    RegisterRange reg_range = computeRegisterRange(phase, phase_progress, instrument.lowest_pitch,
+                                                   instrument.highest_pitch);
 
     // Assign PatternRoles for each bar in this section.
     std::vector<PatternRole> bar_roles = assignPatternRoles(config.bars_per_section);
 
     // Per-section sub-seed for local randomization.
-    std::mt19937 section_rng(rng::splitmix32(effective_seed,
-                                            static_cast<uint32_t>(section_idx)));
+    std::mt19937 section_rng(rng::splitmix32(effective_seed, static_cast<uint32_t>(section_idx)));
 
     // Section-level seventh chord decision (Step 5).
-    float seventh_prob = (phase == ArcPhase::Peak) ? 0.30f
-                       : (phase == ArcPhase::Ascent) ? 0.20f
-                       : 0.12f;
+    float seventh_prob = (phase == ArcPhase::Peak)     ? 0.30f
+                         : (phase == ArcPhase::Ascent) ? 0.20f
+                                                       : 0.12f;
     bool section_has_seventh = rng::rollProbability(section_rng, seventh_prob);
 
     // Neighbor tone probability varies by phase (Step 4).
-    float neighbor_prob = (phase == ArcPhase::Peak) ? 0.20f
-                        : (phase == ArcPhase::Ascent) ? 0.12f
-                        : 0.08f;
+    float neighbor_prob = (phase == ArcPhase::Peak)     ? 0.20f
+                          : (phase == ArcPhase::Ascent) ? 0.12f
+                                                        : 0.08f;
 
     // Track previous pattern type for persistence; reset at section start.
     ArpeggioPatternType prev_pattern = ArpeggioPatternType::Rising;
 
-    for (int bar_in_section = 0; bar_in_section < config.bars_per_section;
-         ++bar_in_section) {
+    for (int bar_in_section = 0; bar_in_section < config.bars_per_section; ++bar_in_section) {
       int global_bar_idx = section_idx * config.bars_per_section + bar_in_section;
       Tick bar_tick = static_cast<Tick>(global_bar_idx) * kTicksPerBar;
 
@@ -1134,46 +1097,41 @@ ArpeggioFlowResult generateArpeggioFlow(const ArpeggioFlowConfig& config) {
       }
 
       // Determine open string preference based on phase and cadence.
-      bool use_open_strings = (phase == ArcPhase::Descent) ||
-                              rng::rollProbability(rng, kDefaultOpenStringBias);
+      bool use_open_strings =
+          (phase == ArcPhase::Descent) || rng::rollProbability(rng, kDefaultOpenStringBias);
 
       bool is_section_start = (bar_in_section == 0);
 
       // Generate the arpeggio pattern for this bar.
-      ArpeggioPattern pattern = generatePattern(
-          chord_degrees, phase, role, use_open_strings,
-          rng, prev_pattern, is_section_start);
+      ArpeggioPattern pattern = generatePattern(chord_degrees, phase, role, use_open_strings, rng,
+                                                prev_pattern, is_section_start);
       prev_pattern = pattern.type;
 
       // Cadence processing.
-      bool is_cadence = isInCadenceRegion(
-          global_bar_idx, total_bars, config.cadence.cadence_bars);
-      float cad_prog = cadenceProgress(
-          global_bar_idx, total_bars, config.cadence.cadence_bars);
+      bool is_cadence = isInCadenceRegion(global_bar_idx, total_bars, config.cadence.cadence_bars);
+      float cad_prog = cadenceProgress(global_bar_idx, total_bars, config.cadence.cadence_bars);
 
-      float open_bias = is_cadence ? config.cadence.open_string_bias
-                                   : kDefaultOpenStringBias;
+      float open_bias = is_cadence ? config.cadence.open_string_bias : kDefaultOpenStringBias;
 
       // If in cadence and restrict_high_register is set, lower the ceiling.
       RegisterRange effective_range = reg_range;
       if (is_cadence && config.cadence.restrict_high_register) {
-        int range_span = static_cast<int>(effective_range.high) -
-                         static_cast<int>(effective_range.low);
+        int range_span =
+            static_cast<int>(effective_range.high) - static_cast<int>(effective_range.low);
         int reduction = static_cast<int>(static_cast<float>(range_span) * 0.3f * cad_prog);
         int new_high = static_cast<int>(effective_range.high) - reduction;
         if (new_high < static_cast<int>(effective_range.low) + 12) {
           new_high = static_cast<int>(effective_range.low) + 12;
         }
-        effective_range.high = static_cast<uint8_t>(
-            std::min(new_high, static_cast<int>(instrument.highest_pitch)));
+        effective_range.high =
+            static_cast<uint8_t>(std::min(new_high, static_cast<int>(instrument.highest_pitch)));
       }
 
       // Generate notes for this bar.
-      auto bar_notes = generateBarNotes(
-          bar_tick, harm_event, pattern, effective_range,
-          instrument, open_bias, is_cadence, cad_prog,
-          config.cadence.rhythm_simplification, rng,
-          prev_pitch, prev_chord_root, phase, neighbor_prob);
+      auto bar_notes =
+          generateBarNotes(bar_tick, harm_event, pattern, effective_range, instrument, open_bias,
+                           is_cadence, cad_prog, config.cadence.rhythm_simplification, rng,
+                           prev_pitch, prev_chord_root, phase, neighbor_prob);
 
       all_notes.insert(all_notes.end(), bar_notes.begin(), bar_notes.end());
       prev_chord_root = harm_event.chord.root_pitch;

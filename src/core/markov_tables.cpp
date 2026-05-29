@@ -12,13 +12,14 @@ namespace bach {
 // computeDegreeStep
 // ---------------------------------------------------------------------------
 
-DegreeStep computeDegreeStep(uint8_t from_pitch, uint8_t to_pitch,
-                              Key key, ScaleType scale) {
+DegreeStep computeDegreeStep(uint8_t from_pitch, uint8_t to_pitch, Key key, ScaleType scale) {
   int from_deg = scale_util::pitchToAbsoluteDegree(from_pitch, key, scale);
   int to_deg = scale_util::pitchToAbsoluteDegree(to_pitch, key, scale);
   int step = to_deg - from_deg;
-  if (step > 8) return 9;    // LargeLeapUp
-  if (step < -8) return -9;  // LargeLeapDown
+  if (step > 8)
+    return 9;  // LargeLeapUp
+  if (step < -8)
+    return -9;  // LargeLeapDown
   return static_cast<DegreeStep>(step);
 }
 
@@ -26,17 +27,14 @@ DegreeStep computeDegreeStep(uint8_t from_pitch, uint8_t to_pitch,
 // Scoring functions
 // ---------------------------------------------------------------------------
 
-float scoreMarkovPitch(const MarkovModel& model,
-                       DegreeStep prev_step, DegreeClass deg_class,
+float scoreMarkovPitch(const MarkovModel& model, DegreeStep prev_step, DegreeClass deg_class,
                        BeatPos beat, DegreeStep next_step) {
   int prev_idx = degreeStepToIndex(prev_step);
   int deg_cls = static_cast<int>(deg_class);
   int beat_pos = static_cast<int>(beat);
   int next_idx = degreeStepToIndex(next_step);
 
-  int row = prev_idx * kDegreeClassCount * kBeatPosCount
-          + deg_cls * kBeatPosCount
-          + beat_pos;
+  int row = prev_idx * kDegreeClassCount * kBeatPosCount + deg_cls * kBeatPosCount + beat_pos;
   uint16_t prob_raw = model.pitch.prob[row][next_idx];
 
   // Compute row sum for normalization (should be ~10000 but verify).
@@ -44,22 +42,23 @@ float scoreMarkovPitch(const MarkovModel& model,
   for (int col = 0; col < kDegreeStepCount; ++col) {
     row_sum += model.pitch.prob[row][col];
   }
-  if (row_sum == 0) return 0.0f;
+  if (row_sum == 0)
+    return 0.0f;
 
   float prob = static_cast<float>(prob_raw) / static_cast<float>(row_sum);
   float p_uniform = 1.0f / static_cast<float>(kDegreeStepCount);
 
   // Avoid log(0).
-  if (prob < 1e-7f) prob = 1e-7f;
+  if (prob < 1e-7f)
+    prob = 1e-7f;
 
   float raw = std::log(prob) - std::log(p_uniform);
   // Soft clip: tanhf(raw * 0.5) gives range ~[-0.46, +0.46].
   return std::tanh(raw * 0.5f);
 }
 
-float scoreMarkovDuration(const MarkovModel& model,
-                          DurCategory prev_dur, DirIntervalClass dir_class,
-                          DurCategory next_dur) {
+float scoreMarkovDuration(const MarkovModel& model, DurCategory prev_dur,
+                          DirIntervalClass dir_class, DurCategory next_dur) {
   int prev_d = static_cast<int>(prev_dur);
   int dir_ivl = static_cast<int>(dir_class);
   int next_d = static_cast<int>(next_dur);
@@ -71,12 +70,14 @@ float scoreMarkovDuration(const MarkovModel& model,
   for (int col = 0; col < kDurCatCount; ++col) {
     row_sum += model.duration.prob[row][col];
   }
-  if (row_sum == 0) return 0.0f;
+  if (row_sum == 0)
+    return 0.0f;
 
   float prob = static_cast<float>(prob_raw) / static_cast<float>(row_sum);
   float p_uniform = 1.0f / static_cast<float>(kDurCatCount);
 
-  if (prob < 1e-7f) prob = 1e-7f;
+  if (prob < 1e-7f)
+    prob = 1e-7f;
 
   float raw = std::log(prob) - std::log(p_uniform);
   return std::tanh(raw * 0.5f);
@@ -86,13 +87,14 @@ float scoreMarkovDuration(const MarkovModel& model,
 // scoreVerticalInterval
 // ---------------------------------------------------------------------------
 
-float scoreVerticalInterval(const VerticalIntervalTable& table,
-                            int bass_degree, BeatPos beat,
+float scoreVerticalInterval(const VerticalIntervalTable& table, int bass_degree, BeatPos beat,
                             int voice_bin, HarmFunc hf, int pc_offset) {
   bass_degree = ((bass_degree % 7) + 7) % 7;
   pc_offset = ((pc_offset % 12) + 12) % 12;
-  if (voice_bin < 0) voice_bin = 0;
-  if (voice_bin > 2) voice_bin = 2;
+  if (voice_bin < 0)
+    voice_bin = 0;
+  if (voice_bin > 2)
+    voice_bin = 2;
 
   int row = verticalRowIndex(bass_degree, beat, voice_bin, hf);
   uint16_t prob_raw = table.prob[row][pc_offset];
@@ -101,12 +103,14 @@ float scoreVerticalInterval(const VerticalIntervalTable& table,
   for (int col = 0; col < kPcOffsetCount; ++col) {
     row_sum += table.prob[row][col];
   }
-  if (row_sum == 0) return 0.0f;
+  if (row_sum == 0)
+    return 0.0f;
 
   float prob = static_cast<float>(prob_raw) / static_cast<float>(row_sum);
   float p_uniform = 1.0f / static_cast<float>(kPcOffsetCount);
 
-  if (prob < 1e-7f) prob = 1e-7f;
+  if (prob < 1e-7f)
+    prob = 1e-7f;
 
   float raw = std::log(prob) - std::log(p_uniform);
   return std::tanh(raw * 0.5f);
@@ -116,26 +120,23 @@ float scoreVerticalInterval(const VerticalIntervalTable& table,
 // getTopMelodicCandidates
 // ---------------------------------------------------------------------------
 
-int getTopMelodicCandidates(
-    const MarkovModel& model,
-    DegreeStep prev_step, DegreeClass deg_class, BeatPos beat,
-    uint8_t from_pitch, Key key, ScaleType scale,
-    uint8_t range_lo, uint8_t range_hi,
-    OracleCandidate* out, int max_count) {
+int getTopMelodicCandidates(const MarkovModel& model, DegreeStep prev_step, DegreeClass deg_class,
+                            BeatPos beat, uint8_t from_pitch, Key key, ScaleType scale,
+                            uint8_t range_lo, uint8_t range_hi, OracleCandidate* out,
+                            int max_count) {
   int prev_idx = degreeStepToIndex(prev_step);
   int deg_cls = static_cast<int>(deg_class);
   int beat_pos = static_cast<int>(beat);
 
-  int row = prev_idx * kDegreeClassCount * kBeatPosCount
-          + deg_cls * kBeatPosCount
-          + beat_pos;
+  int row = prev_idx * kDegreeClassCount * kBeatPosCount + deg_cls * kBeatPosCount + beat_pos;
 
   // Read row and compute total.
   uint32_t row_sum = 0;
   for (int col = 0; col < kDegreeStepCount; ++col) {
     row_sum += model.pitch.prob[row][col];
   }
-  if (row_sum == 0) return 0;
+  if (row_sum == 0)
+    return 0;
 
   // Compute from_degree for pitch conversion.
   int from_deg = scale_util::pitchToAbsoluteDegree(from_pitch, key, scale);
@@ -151,13 +152,14 @@ int getTopMelodicCandidates(
   for (int col = 0; col < kDegreeStepCount; ++col) {
     DegreeStep step = static_cast<DegreeStep>(col - kDegreeOffset);
     int target_deg = from_deg + static_cast<int>(step);
-    if (target_deg < 0) continue;
+    if (target_deg < 0)
+      continue;
 
     uint8_t target_pitch = scale_util::absoluteDegreeToPitch(target_deg, key, scale);
-    if (target_pitch < range_lo || target_pitch > range_hi) continue;
+    if (target_pitch < range_lo || target_pitch > range_hi)
+      continue;
 
-    float prob = static_cast<float>(model.pitch.prob[row][col])
-               / static_cast<float>(row_sum);
+    float prob = static_cast<float>(model.pitch.prob[row][col]) / static_cast<float>(row_sum);
     raw[raw_count++] = {target_pitch, prob};
   }
 
@@ -184,13 +186,13 @@ int getTopMelodicCandidates(
 // getTopVerticalCandidates
 // ---------------------------------------------------------------------------
 
-int getTopVerticalCandidates(
-    const VerticalIntervalTable& table,
-    int bass_degree, BeatPos beat, int voice_bin, HarmFunc hf,
-    OracleCandidate* out, int max_count) {
+int getTopVerticalCandidates(const VerticalIntervalTable& table, int bass_degree, BeatPos beat,
+                             int voice_bin, HarmFunc hf, OracleCandidate* out, int max_count) {
   bass_degree = ((bass_degree % 7) + 7) % 7;
-  if (voice_bin < 0) voice_bin = 0;
-  if (voice_bin > 2) voice_bin = 2;
+  if (voice_bin < 0)
+    voice_bin = 0;
+  if (voice_bin > 2)
+    voice_bin = 2;
 
   int row = verticalRowIndex(bass_degree, beat, voice_bin, hf);
 
@@ -198,7 +200,8 @@ int getTopVerticalCandidates(
   for (int col = 0; col < kPcOffsetCount; ++col) {
     row_sum += table.prob[row][col];
   }
-  if (row_sum == 0) return 0;
+  if (row_sum == 0)
+    return 0;
 
   // Collect all 12 pitch classes with probabilities.
   struct RawCand {
@@ -208,8 +211,7 @@ int getTopVerticalCandidates(
   RawCand raw[kPcOffsetCount];
   for (int col = 0; col < kPcOffsetCount; ++col) {
     raw[col] = {static_cast<uint8_t>(col),
-                static_cast<float>(table.prob[row][col])
-                    / static_cast<float>(row_sum)};
+                static_cast<float>(table.prob[row][col]) / static_cast<float>(row_sum)};
   }
 
   // Sort by probability descending.
@@ -245,28 +247,22 @@ int getTopVerticalCandidates(
 // constexpr arrays in markov_data, so reinterpret_cast is layout-safe.
 
 const MarkovModel kFugueUpperMarkov = {
-    "FugueUpper",
-    reinterpret_cast<const PitchTransitionTable&>(markov_data::kFugueUpperPitch),
+    "FugueUpper", reinterpret_cast<const PitchTransitionTable&>(markov_data::kFugueUpperPitch),
     reinterpret_cast<const DurTransitionTable&>(markov_data::kFugueUpperDur)};
 const MarkovModel kFuguePedalMarkov = {
-    "FuguePedal",
-    reinterpret_cast<const PitchTransitionTable&>(markov_data::kFuguePedalPitch),
+    "FuguePedal", reinterpret_cast<const PitchTransitionTable&>(markov_data::kFuguePedalPitch),
     reinterpret_cast<const DurTransitionTable&>(markov_data::kFuguePedalDur)};
 const MarkovModel kCelloMarkov = {
-    "Cello",
-    reinterpret_cast<const PitchTransitionTable&>(markov_data::kCelloPitch),
+    "Cello", reinterpret_cast<const PitchTransitionTable&>(markov_data::kCelloPitch),
     reinterpret_cast<const DurTransitionTable&>(markov_data::kCelloDur)};
 const MarkovModel kViolinMarkov = {
-    "Violin",
-    reinterpret_cast<const PitchTransitionTable&>(markov_data::kViolinPitch),
+    "Violin", reinterpret_cast<const PitchTransitionTable&>(markov_data::kViolinPitch),
     reinterpret_cast<const DurTransitionTable&>(markov_data::kViolinDur)};
 const MarkovModel kToccataUpperMarkov = {
-    "ToccataUpper",
-    reinterpret_cast<const PitchTransitionTable&>(markov_data::kToccataUpperPitch),
+    "ToccataUpper", reinterpret_cast<const PitchTransitionTable&>(markov_data::kToccataUpperPitch),
     reinterpret_cast<const DurTransitionTable&>(markov_data::kToccataUpperDur)};
 const MarkovModel kToccataPedalMarkov = {
-    "ToccataPedal",
-    reinterpret_cast<const PitchTransitionTable&>(markov_data::kToccataPedalPitch),
+    "ToccataPedal", reinterpret_cast<const PitchTransitionTable&>(markov_data::kToccataPedalPitch),
     reinterpret_cast<const DurTransitionTable&>(markov_data::kToccataPedalDur)};
 
 const VerticalIntervalTable kFugueVerticalTable =

@@ -32,8 +32,7 @@ bool isNaturalHarmonic(uint8_t pitch, InstrumentType instrument);
 /// @param notes Notes to check and mark (modified in-place).
 /// @param instrument The instrument type.
 /// @param arc_phase Current arc phase (only Peak enables harmonics).
-void markHarmonics(std::vector<NoteEvent>& notes, InstrumentType instrument,
-                   ArcPhase arc_phase);
+void markHarmonics(std::vector<NoteEvent>& notes, InstrumentType instrument, ArcPhase arc_phase);
 
 /// @brief Get all natural harmonic pitches for an instrument.
 ///

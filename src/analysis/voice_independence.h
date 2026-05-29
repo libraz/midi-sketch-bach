@@ -37,8 +37,8 @@ struct VoiceIndependenceScore {
 /// @param voice_b Second voice ID.
 /// @return Independence score between the two voices.
 ///         Returns all-zero score if either voice has no notes.
-VoiceIndependenceScore analyzeVoicePair(const std::vector<NoteEvent>& notes,
-                                        VoiceId voice_a, VoiceId voice_b);
+VoiceIndependenceScore analyzeVoicePair(const std::vector<NoteEvent>& notes, VoiceId voice_a,
+                                        VoiceId voice_b);
 
 /// @brief Analyze overall voice independence across all voice pairs.
 ///
@@ -49,8 +49,7 @@ VoiceIndependenceScore analyzeVoicePair(const std::vector<NoteEvent>& notes,
 /// @param num_voices Total number of voices (voice IDs 0 .. num_voices-1).
 /// @return Minimum pairwise independence score.
 ///         Returns all-zero score if fewer than 2 voices are present.
-VoiceIndependenceScore analyzeOverall(const std::vector<NoteEvent>& notes,
-                                      uint8_t num_voices);
+VoiceIndependenceScore analyzeOverall(const std::vector<NoteEvent>& notes, uint8_t num_voices);
 
 /// @brief Calculate rhythm independence between two note sequences.
 ///

@@ -12,21 +12,30 @@ namespace bach {
 
 const char* arpeggioPatternTypeToString(ArpeggioPatternType type) {
   switch (type) {
-    case ArpeggioPatternType::Rising:        return "Rising";
-    case ArpeggioPatternType::Falling:       return "Falling";
-    case ArpeggioPatternType::Oscillating:   return "Oscillating";
-    case ArpeggioPatternType::PedalPoint:    return "PedalPoint";
-    case ArpeggioPatternType::ScaleFragment: return "ScaleFragment";
+    case ArpeggioPatternType::Rising:
+      return "Rising";
+    case ArpeggioPatternType::Falling:
+      return "Falling";
+    case ArpeggioPatternType::Oscillating:
+      return "Oscillating";
+    case ArpeggioPatternType::PedalPoint:
+      return "PedalPoint";
+    case ArpeggioPatternType::ScaleFragment:
+      return "ScaleFragment";
   }
   return "Unknown";
 }
 
 const char* patternRoleToString(PatternRole role) {
   switch (role) {
-    case PatternRole::Drive:   return "Drive";
-    case PatternRole::Expand:  return "Expand";
-    case PatternRole::Sustain: return "Sustain";
-    case PatternRole::Release: return "Release";
+    case PatternRole::Drive:
+      return "Drive";
+    case PatternRole::Expand:
+      return "Expand";
+    case PatternRole::Sustain:
+      return "Sustain";
+    case PatternRole::Release:
+      return "Release";
   }
   return "Unknown";
 }
@@ -51,22 +60,18 @@ std::vector<ArpeggioPatternType> getAllowedPatternsForPhase(ArcPhase phase) {
   switch (phase) {
     case ArcPhase::Ascent:
       // Ascending energy: no Falling (register shrinking), no PedalPoint (static).
-      return {ArpeggioPatternType::Rising,
-              ArpeggioPatternType::Oscillating,
+      return {ArpeggioPatternType::Rising, ArpeggioPatternType::Oscillating,
               ArpeggioPatternType::ScaleFragment};
 
     case ArcPhase::Peak:
       // Maximum variety at climax: all types allowed.
-      return {ArpeggioPatternType::Rising,
-              ArpeggioPatternType::Falling,
-              ArpeggioPatternType::Oscillating,
-              ArpeggioPatternType::PedalPoint,
+      return {ArpeggioPatternType::Rising, ArpeggioPatternType::Falling,
+              ArpeggioPatternType::Oscillating, ArpeggioPatternType::PedalPoint,
               ArpeggioPatternType::ScaleFragment};
 
     case ArcPhase::Descent:
       // Winding down: no Rising (register expansion), no ScaleFragment (forward motion).
-      return {ArpeggioPatternType::Falling,
-              ArpeggioPatternType::Oscillating,
+      return {ArpeggioPatternType::Falling, ArpeggioPatternType::Oscillating,
               ArpeggioPatternType::PedalPoint};
   }
 
@@ -115,7 +120,8 @@ std::vector<int> arrangeOscillating(std::vector<int> degrees) {
       ++low_idx;
     } else {
       result.push_back(degrees[high_idx]);
-      if (high_idx == 0) break;  // Prevent underflow on unsigned
+      if (high_idx == 0)
+        break;  // Prevent underflow on unsigned
       --high_idx;
     }
     pick_low = !pick_low;
@@ -167,9 +173,7 @@ std::vector<int> arrangeScaleFragment(std::vector<int> degrees) {
   result.reserve(degrees.size());
 
   // Fill stepwise from min, limited to the number of original degrees.
-  for (int deg = min_deg;
-       deg <= max_deg && result.size() < degrees.size();
-       ++deg) {
+  for (int deg = min_deg; deg <= max_deg && result.size() < degrees.size(); ++deg) {
     result.push_back(deg);
   }
 
@@ -193,10 +197,8 @@ std::vector<int> arrangeScaleFragment(std::vector<int> degrees) {
 /// @param prev_pattern The pattern type used in the previous bar/beat.
 /// @param is_section_start True if this is the first bar/beat of a new section.
 /// @return Selected ArpeggioPatternType.
-ArpeggioPatternType selectPatternType(ArcPhase phase, PatternRole role,
-                                      std::mt19937& rng,
-                                      ArpeggioPatternType prev_pattern,
-                                      bool is_section_start) {
+ArpeggioPatternType selectPatternType(ArcPhase phase, PatternRole role, std::mt19937& rng,
+                                      ArpeggioPatternType prev_pattern, bool is_section_start) {
   auto allowed = getAllowedPatternsForPhase(phase);
 
   // Non-section-start: 70% persistence of previous pattern (if allowed).
@@ -249,8 +251,7 @@ ArpeggioPatternType selectPatternType(ArcPhase phase, PatternRole role,
       addIfAllowed(ArpeggioPatternType::Oscillating, 0.30f);
       // Fill remaining allowed patterns.
       for (auto type : allowed) {
-        if (type != ArpeggioPatternType::PedalPoint &&
-            type != ArpeggioPatternType::Oscillating) {
+        if (type != ArpeggioPatternType::PedalPoint && type != ArpeggioPatternType::Oscillating) {
           addIfAllowed(type, 0.15f);
         }
       }
@@ -284,8 +285,7 @@ ArpeggioPatternType selectPatternType(ArcPhase phase, PatternRole role,
 /// @param degrees Input scale degrees.
 /// @param type The arpeggio pattern type.
 /// @return Degrees arranged per the pattern type.
-std::vector<int> arrangeDegrees(const std::vector<int>& degrees,
-                                ArpeggioPatternType type) {
+std::vector<int> arrangeDegrees(const std::vector<int>& degrees, ArpeggioPatternType type) {
   switch (type) {
     case ArpeggioPatternType::Rising:
       return arrangeRising(degrees);
@@ -303,18 +303,17 @@ std::vector<int> arrangeDegrees(const std::vector<int>& degrees,
 
 /// @brief Arrange degrees using a vocabulary slot pattern.
 /// Maps chord degrees to slots by sorting and indexing.
-static std::vector<int> arrangeDegreesFromSlots(
-    const std::vector<int>& degrees,
-    const FigurationSlotPattern& pattern) {
+static std::vector<int> arrangeDegreesFromSlots(const std::vector<int>& degrees,
+                                                const FigurationSlotPattern& pattern) {
   auto sorted = degrees;
   std::sort(sorted.begin(), sorted.end());
   std::vector<int> result;
   result.reserve(pattern.slot_count);
   for (uint8_t idx = 0; idx < pattern.slot_count; ++idx) {
     uint8_t slot = pattern.slots[idx];
-    int deg_idx = std::min(static_cast<int>(slot),
-                           static_cast<int>(sorted.size()) - 1);
-    if (deg_idx < 0) deg_idx = 0;
+    int deg_idx = std::min(static_cast<int>(slot), static_cast<int>(sorted.size()) - 1);
+    if (deg_idx < 0)
+      deg_idx = 0;
     result.push_back(sorted[deg_idx]);
   }
   return result;
@@ -322,10 +321,11 @@ static std::vector<int> arrangeDegreesFromSlots(
 
 /// @brief Select a vocabulary slot pattern matching the voice count.
 /// Returns nullptr if no pattern matches or probability check fails.
-static const FigurationSlotPattern* selectSlotPattern(
-    size_t voice_count, ArcPhase /* phase */, std::mt19937& rng) {
+static const FigurationSlotPattern* selectSlotPattern(size_t voice_count, ArcPhase /* phase */,
+                                                      std::mt19937& rng) {
   // 40% probability gate.
-  if (!rng::rollProbability(rng, 0.40f)) return nullptr;
+  if (!rng::rollProbability(rng, 0.40f))
+    return nullptr;
 
   // Filter by voice_count.
   std::vector<const FigurationSlotPattern*> candidates;
@@ -335,34 +335,30 @@ static const FigurationSlotPattern* selectSlotPattern(
       candidates.push_back(kSoloFigurations[idx]);
     }
   }
-  if (candidates.empty()) return nullptr;
+  if (candidates.empty())
+    return nullptr;
   return candidates[rng::rollRange(rng, 0, static_cast<int>(candidates.size()) - 1)];
 }
 
 }  // namespace
 
-ArpeggioPattern generatePattern(const std::vector<int>& chord_degrees,
-                                ArcPhase phase, PatternRole role,
-                                bool use_open_strings,
-                                std::mt19937& rng,
-                                ArpeggioPatternType prev_pattern,
-                                bool is_section_start) {
+ArpeggioPattern generatePattern(const std::vector<int>& chord_degrees, ArcPhase phase,
+                                PatternRole role, bool use_open_strings, std::mt19937& rng,
+                                ArpeggioPatternType prev_pattern, bool is_section_start) {
   ArpeggioPattern pattern;
   pattern.role = role;
   pattern.use_open_string = use_open_strings;
   pattern.notes_per_beat = 4;  // Standard 16th-note arpeggio
 
   // Select type with weighted randomization and persistence.
-  pattern.type = selectPatternType(phase, role, rng, prev_pattern,
-                                   is_section_start);
+  pattern.type = selectPatternType(phase, role, rng, prev_pattern, is_section_start);
 
   // Determine effective degrees (default triad if empty).
   std::vector<int> effective_degrees =
       chord_degrees.empty() ? std::vector<int>{0, 2, 4} : chord_degrees;
 
   // 40% chance: use vocabulary slot pattern from Bach reference.
-  const FigurationSlotPattern* slot =
-      selectSlotPattern(effective_degrees.size(), phase, rng);
+  const FigurationSlotPattern* slot = selectSlotPattern(effective_degrees.size(), phase, rng);
   if (slot) {
     pattern.degrees = arrangeDegreesFromSlots(effective_degrees, *slot);
   } else {

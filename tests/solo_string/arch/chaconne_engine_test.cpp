@@ -2,12 +2,12 @@
 
 #include "solo_string/arch/chaconne_engine.h"
 
+#include <gtest/gtest.h>
+
 #include <algorithm>
 #include <random>
 #include <set>
 #include <vector>
-
-#include <gtest/gtest.h>
 
 #include "core/basic_types.h"
 #include "harmony/key.h"
@@ -164,9 +164,9 @@ TEST(ChaconneEngineTest, CelloNotesWithinRange) {
     for (const auto& note : result.tracks[trk].notes) {
       // Bass notes may go slightly below cello texture range but still
       // within instrument capability. Use generous bounds for bass notes.
-      EXPECT_LE(note.pitch, 96u)
-          << "Track " << trk << " note pitch " << static_cast<int>(note.pitch)
-          << " above range at tick " << note.start_tick;
+      EXPECT_LE(note.pitch, 96u) << "Track " << trk << " note pitch "
+                                 << static_cast<int>(note.pitch) << " above range at tick "
+                                 << note.start_tick;
     }
   }
 }
@@ -194,8 +194,7 @@ TEST(ChaconneEngineTest, SameSeedProducesSameOutput) {
     ASSERT_EQ(notes_a.size(), notes_b.size()) << "track " << trk;
 
     for (size_t idx = 0; idx < notes_a.size(); ++idx) {
-      EXPECT_EQ(notes_a[idx].pitch, notes_b[idx].pitch)
-          << "track " << trk << " at note " << idx;
+      EXPECT_EQ(notes_a[idx].pitch, notes_b[idx].pitch) << "track " << trk << " at note " << idx;
       EXPECT_EQ(notes_a[idx].start_tick, notes_b[idx].start_tick)
           << "track " << trk << " at note " << idx;
       EXPECT_EQ(notes_a[idx].duration, notes_b[idx].duration)
@@ -278,9 +277,8 @@ TEST(ChaconneEngineTest, AllNotesHaveNonZeroDuration) {
 
   for (size_t trk = 0; trk < result.tracks.size(); ++trk) {
     for (const auto& note : result.tracks[trk].notes) {
-      EXPECT_GT(note.duration, 0u)
-          << "Track " << trk << " note with zero duration at tick " << note.start_tick
-          << " pitch " << static_cast<int>(note.pitch);
+      EXPECT_GT(note.duration, 0u) << "Track " << trk << " note with zero duration at tick "
+                                   << note.start_tick << " pitch " << static_cast<int>(note.pitch);
     }
   }
 }
@@ -339,8 +337,7 @@ TEST(ChaconneEngineTest, ChaconneBassNotesArePresentInOutput) {
   // With 10 variations and at least 7 scheme entries per variation (Simple style
   // produces one note per entry), we expect a minimum of 70 bass notes.
   EXPECT_GE(bass_note_count, 70)
-      << "Expected at least 70 ChaconneBass notes across 10 variations, got "
-      << bass_note_count;
+      << "Expected at least 70 ChaconneBass notes across 10 variations, got " << bass_note_count;
 
   // Verify bass notes span all 10 variations using the scheme cycle length.
   auto scheme = ChaconneScheme::createForKey(config.key);
@@ -354,15 +351,14 @@ TEST(ChaconneEngineTest, ChaconneBassNotesArePresentInOutput) {
     bool found_bass = false;
 
     for (const auto& note : output_notes) {
-      if (note.source == BachNoteSource::ChaconneBass &&
-          note.start_tick >= var_start && note.start_tick < var_end) {
+      if (note.source == BachNoteSource::ChaconneBass && note.start_tick >= var_start &&
+          note.start_tick < var_end) {
         found_bass = true;
         break;
       }
     }
 
-    EXPECT_TRUE(found_bass)
-        << "Variation " << var_idx << " has no ChaconneBass notes";
+    EXPECT_TRUE(found_bass) << "Variation " << var_idx << " has no ChaconneBass notes";
   }
 }
 
@@ -415,12 +411,18 @@ TEST(ChaconneEngineTest, InvalidVariationPlanReturnsError) {
   config.seed = 42;
 
   // Create an invalid plan: reversed role order.
-  config.variations.push_back(
-      {0, VariationRole::Resolve, VariationType::Theme,
-       TextureType::SingleLine, {Key::D, true}, false});
-  config.variations.push_back(
-      {1, VariationRole::Establish, VariationType::Theme,
-       TextureType::SingleLine, {Key::D, true}, false});
+  config.variations.push_back({0,
+                               VariationRole::Resolve,
+                               VariationType::Theme,
+                               TextureType::SingleLine,
+                               {Key::D, true},
+                               false});
+  config.variations.push_back({1,
+                               VariationRole::Establish,
+                               VariationType::Theme,
+                               TextureType::SingleLine,
+                               {Key::D, true},
+                               false});
 
   auto result = generateChaconne(config);
   EXPECT_FALSE(result.success);
@@ -539,8 +541,8 @@ TEST(ChaconneSeedDiversityTest, DifferentSeedsProduceDiverseOutput) {
   }
 
   EXPECT_GE(fingerprints.size(), static_cast<size_t>(kMinUnique))
-      << "Expected at least " << kMinUnique << " unique fingerprints across "
-      << kNumSeeds << " seeds, got " << fingerprints.size();
+      << "Expected at least " << kMinUnique << " unique fingerprints across " << kNumSeeds
+      << " seeds, got " << fingerprints.size();
 }
 
 TEST(ChaconneSeedDiversityTest, SeedsProduceDifferentNoteCounts) {
@@ -558,8 +560,7 @@ TEST(ChaconneSeedDiversityTest, SeedsProduceDifferentNoteCounts) {
   }
 
   // With rhythm profile variation, we expect multiple distinct note counts.
-  EXPECT_GE(note_counts.size(), 3u)
-      << "Expected at least 3 distinct note counts across 10 seeds";
+  EXPECT_GE(note_counts.size(), 3u) << "Expected at least 3 distinct note counts across 10 seeds";
 }
 
 TEST(ChaconneSeedDiversityTest, NoteContentDiffersAcrossSeeds) {
@@ -602,16 +603,15 @@ TEST(ChaconneSeedDiversityTest, NoteContentDiffersAcrossSeeds) {
   }
 
   // Also count the length difference as diffs.
-  int size_diff = static_cast<int>(
-      std::max(pitches_a.size(), pitches_b.size()) - compare_len);
+  int size_diff = static_cast<int>(std::max(pitches_a.size(), pitches_b.size()) - compare_len);
   diff_count += size_diff;
 
   int total = static_cast<int>(std::max(pitches_a.size(), pitches_b.size()));
   float diff_ratio = static_cast<float>(diff_count) / static_cast<float>(total);
 
-  EXPECT_GE(diff_ratio, 0.30f)
-      << "Expected >= 30% pitch differences between seeds, got "
-      << (diff_ratio * 100.0f) << "% (" << diff_count << "/" << total << ")";
+  EXPECT_GE(diff_ratio, 0.30f) << "Expected >= 30% pitch differences between seeds, got "
+                               << (diff_ratio * 100.0f) << "% (" << diff_count << "/" << total
+                               << ")";
 }
 
 TEST(ChaconneSeedDiversityTest, TextureTypesVaryAcrossSeeds) {
@@ -637,7 +637,8 @@ TEST(ChaconneSeedDiversityTest, TextureTypesVaryAcrossSeeds) {
     int notes_per_var[kNumVariations] = {};
 
     for (const auto& note : result.tracks[1].notes) {
-      if (note.source != BachNoteSource::TextureNote) continue;
+      if (note.source != BachNoteSource::TextureNote)
+        continue;
       int var_idx = static_cast<int>(note.start_tick / bass_length);
       if (var_idx >= 0 && var_idx < kNumVariations) {
         ++notes_per_var[var_idx];
@@ -653,9 +654,8 @@ TEST(ChaconneSeedDiversityTest, TextureTypesVaryAcrossSeeds) {
   }
 
   EXPECT_GE(fingerprints.size(), static_cast<size_t>(kMinCombinations))
-      << "Expected at least " << kMinCombinations
-      << " distinct texture combinations across " << kNumSeeds
-      << " seeds, got " << fingerprints.size();
+      << "Expected at least " << kMinCombinations << " distinct texture combinations across "
+      << kNumSeeds << " seeds, got " << fingerprints.size();
 }
 
 // ===========================================================================
@@ -732,8 +732,8 @@ TEST(ChaconneE2ETest, MultiSeedViolinBassInRange) {
     for (const auto& note : result.tracks[0].notes) {
       if (note.source == BachNoteSource::ChaconneBass) {
         EXPECT_GE(note.pitch, violin.getLowestPitch())
-            << "Seed " << seed << ": bass pitch "
-            << static_cast<int>(note.pitch) << " below violin range";
+            << "Seed " << seed << ": bass pitch " << static_cast<int>(note.pitch)
+            << " below violin range";
       }
     }
   }

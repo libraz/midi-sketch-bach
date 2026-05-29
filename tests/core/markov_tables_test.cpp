@@ -2,10 +2,10 @@
 
 #include "core/markov_tables.h"
 
+#include <gtest/gtest.h>
+
 #include <cmath>
 #include <cstdint>
-
-#include <gtest/gtest.h>
 
 namespace bach {
 namespace {
@@ -28,8 +28,7 @@ static const ModelParam kAllModels[] = {
     {&kViolinMarkov, "Violin"},
 };
 
-INSTANTIATE_TEST_SUITE_P(AllModels, MarkovModelTest,
-                         ::testing::ValuesIn(kAllModels),
+INSTANTIATE_TEST_SUITE_P(AllModels, MarkovModelTest, ::testing::ValuesIn(kAllModels),
                          [](const auto& info) { return info.param.label; });
 
 // ---------------------------------------------------------------------------
@@ -38,8 +37,7 @@ INSTANTIATE_TEST_SUITE_P(AllModels, MarkovModelTest,
 
 TEST_P(MarkovModelTest, PitchRowSumsApprox10000) {
   const auto& model = *GetParam().model;
-  constexpr int kNumRows =
-      kDegreeStepCount * kDegreeClassCount * kBeatPosCount;  // 228
+  constexpr int kNumRows = kDegreeStepCount * kDegreeClassCount * kBeatPosCount;  // 228
 
   int non_zero_rows = 0;
   for (int row = 0; row < kNumRows; ++row) {
@@ -50,16 +48,13 @@ TEST_P(MarkovModelTest, PitchRowSumsApprox10000) {
     // Some rows may be all-zero if no data existed for that context.
     // Non-zero rows must sum to approximately 10000.
     if (row_sum > 0) {
-      EXPECT_GE(row_sum, 9900u)
-          << "Pitch row " << row << " sum too low: " << row_sum;
-      EXPECT_LE(row_sum, 10100u)
-          << "Pitch row " << row << " sum too high: " << row_sum;
+      EXPECT_GE(row_sum, 9900u) << "Pitch row " << row << " sum too low: " << row_sum;
+      EXPECT_LE(row_sum, 10100u) << "Pitch row " << row << " sum too high: " << row_sum;
       ++non_zero_rows;
     }
   }
   // At least half the rows should have data.
-  EXPECT_GT(non_zero_rows, kNumRows / 2)
-      << "Too few non-zero pitch rows in model " << model.name;
+  EXPECT_GT(non_zero_rows, kNumRows / 2) << "Too few non-zero pitch rows in model " << model.name;
 }
 
 // ---------------------------------------------------------------------------
@@ -77,10 +72,8 @@ TEST_P(MarkovModelTest, DurationRowSumsApprox10000) {
       row_sum += model.duration.prob[row][col];
     }
     if (row_sum > 0) {
-      EXPECT_GE(row_sum, 9900u)
-          << "Duration row " << row << " sum too low: " << row_sum;
-      EXPECT_LE(row_sum, 10100u)
-          << "Duration row " << row << " sum too high: " << row_sum;
+      EXPECT_GE(row_sum, 9900u) << "Duration row " << row << " sum too low: " << row_sum;
+      EXPECT_LE(row_sum, 10100u) << "Duration row " << row << " sum too high: " << row_sum;
       ++non_zero_rows;
     }
   }
@@ -99,9 +92,8 @@ TEST_P(MarkovModelTest, PitchScoreWithinRange) {
   for (int prev = -9; prev <= 9; ++prev) {
     for (int next = -9; next <= 9; ++next) {
       for (int beat = 0; beat < kBeatPosCount; ++beat) {
-        float score = scoreMarkovPitch(
-            model, static_cast<DegreeStep>(prev), DegreeClass::Stable,
-            static_cast<BeatPos>(beat), static_cast<DegreeStep>(next));
+        float score = scoreMarkovPitch(model, static_cast<DegreeStep>(prev), DegreeClass::Stable,
+                                       static_cast<BeatPos>(beat), static_cast<DegreeStep>(next));
         // tanh(x * 0.5) is bounded by [-1, +1]; with real data, expect
         // approximately [-0.5, +0.5].
         EXPECT_GE(score, -1.0f);
@@ -120,10 +112,9 @@ TEST_P(MarkovModelTest, DurationScoreWithinRange) {
   for (int prev_dur = 0; prev_dur < kDurCatCount; ++prev_dur) {
     for (int dir = 0; dir < kDirIvlClassCount; ++dir) {
       for (int next_dur = 0; next_dur < kDurCatCount; ++next_dur) {
-        float score = scoreMarkovDuration(
-            model, static_cast<DurCategory>(prev_dur),
-            static_cast<DirIntervalClass>(dir),
-            static_cast<DurCategory>(next_dur));
+        float score = scoreMarkovDuration(model, static_cast<DurCategory>(prev_dur),
+                                          static_cast<DirIntervalClass>(dir),
+                                          static_cast<DurCategory>(next_dur));
         EXPECT_GE(score, -1.0f);
         EXPECT_LE(score, 1.0f);
       }
@@ -139,19 +130,16 @@ TEST_P(MarkovModelTest, NoCrashOnExtremeInputs) {
   const auto& model = *GetParam().model;
 
   // Large degree steps (clamped to +/-9 internally).
-  float score_large_up = scoreMarkovPitch(model, 9, DegreeClass::Motion,
-                                          BeatPos::Off16, 9);
+  float score_large_up = scoreMarkovPitch(model, 9, DegreeClass::Motion, BeatPos::Off16, 9);
   EXPECT_FALSE(std::isnan(score_large_up));
   EXPECT_FALSE(std::isinf(score_large_up));
 
-  float score_large_down = scoreMarkovPitch(model, -9, DegreeClass::Motion,
-                                            BeatPos::Off16, -9);
+  float score_large_down = scoreMarkovPitch(model, -9, DegreeClass::Motion, BeatPos::Off16, -9);
   EXPECT_FALSE(std::isnan(score_large_down));
   EXPECT_FALSE(std::isinf(score_large_down));
 
   // Duration edge: HalfPlus -> HalfPlus with LeapDown.
-  float dur_score = scoreMarkovDuration(model, DurCategory::HalfPlus,
-                                        DirIntervalClass::LeapDown,
+  float dur_score = scoreMarkovDuration(model, DurCategory::HalfPlus, DirIntervalClass::LeapDown,
                                         DurCategory::HalfPlus);
   EXPECT_FALSE(std::isnan(dur_score));
   EXPECT_FALSE(std::isinf(dur_score));
@@ -169,12 +157,10 @@ TEST(MarkovAsymmetryTest, UpDownStepsDifferInFugueUpper) {
 
   for (int deg_cls = 0; deg_cls < kDegreeClassCount; ++deg_cls) {
     for (int beat = 0; beat < kBeatPosCount; ++beat) {
-      float score_up = scoreMarkovPitch(
-          kFugueUpperMarkov, 0, static_cast<DegreeClass>(deg_cls),
-          static_cast<BeatPos>(beat), 1);
-      float score_down = scoreMarkovPitch(
-          kFugueUpperMarkov, 0, static_cast<DegreeClass>(deg_cls),
-          static_cast<BeatPos>(beat), -1);
+      float score_up = scoreMarkovPitch(kFugueUpperMarkov, 0, static_cast<DegreeClass>(deg_cls),
+                                        static_cast<BeatPos>(beat), 1);
+      float score_down = scoreMarkovPitch(kFugueUpperMarkov, 0, static_cast<DegreeClass>(deg_cls),
+                                          static_cast<BeatPos>(beat), -1);
       if (std::abs(score_up - score_down) > 1e-6f) {
         ++differ_count;
       }
@@ -196,38 +182,34 @@ TEST(MarkovModelDifferentiationTest, FugueUpperVsCelloDiffer) {
 
   for (int next = -2; next <= 2; ++next) {
     for (int beat = 0; beat < kBeatPosCount; ++beat) {
-      float fugue_score = scoreMarkovPitch(
-          kFugueUpperMarkov, 1, DegreeClass::Stable,
-          static_cast<BeatPos>(beat), static_cast<DegreeStep>(next));
-      float cello_score = scoreMarkovPitch(
-          kCelloMarkov, 1, DegreeClass::Stable,
-          static_cast<BeatPos>(beat), static_cast<DegreeStep>(next));
+      float fugue_score =
+          scoreMarkovPitch(kFugueUpperMarkov, 1, DegreeClass::Stable, static_cast<BeatPos>(beat),
+                           static_cast<DegreeStep>(next));
+      float cello_score =
+          scoreMarkovPitch(kCelloMarkov, 1, DegreeClass::Stable, static_cast<BeatPos>(beat),
+                           static_cast<DegreeStep>(next));
       if (std::abs(fugue_score - cello_score) > 1e-6f) {
         ++differ_count;
       }
     }
   }
   int total = kStepsToTest * kBeatPosCount;  // 20
-  EXPECT_GT(differ_count, total / 2)
-      << "FugueUpper and Cello should differ in most contexts";
+  EXPECT_GT(differ_count, total / 2) << "FugueUpper and Cello should differ in most contexts";
 }
 
 TEST(MarkovModelDifferentiationTest, FugueUpperVsPedalDiffer) {
   // Upper voices and pedal have very different melodic profiles.
   int differ_count = 0;
   for (int next = -4; next <= 4; ++next) {
-    float upper_score = scoreMarkovPitch(
-        kFugueUpperMarkov, 1, DegreeClass::Dominant, BeatPos::Beat,
-        static_cast<DegreeStep>(next));
-    float pedal_score = scoreMarkovPitch(
-        kFuguePedalMarkov, 1, DegreeClass::Dominant, BeatPos::Beat,
-        static_cast<DegreeStep>(next));
+    float upper_score = scoreMarkovPitch(kFugueUpperMarkov, 1, DegreeClass::Dominant, BeatPos::Beat,
+                                         static_cast<DegreeStep>(next));
+    float pedal_score = scoreMarkovPitch(kFuguePedalMarkov, 1, DegreeClass::Dominant, BeatPos::Beat,
+                                         static_cast<DegreeStep>(next));
     if (std::abs(upper_score - pedal_score) > 1e-6f) {
       ++differ_count;
     }
   }
-  EXPECT_GT(differ_count, 4)
-      << "FugueUpper and FuguePedal should differ for most step sizes";
+  EXPECT_GT(differ_count, 4) << "FugueUpper and FuguePedal should differ for most step sizes";
 }
 
 // ---------------------------------------------------------------------------
@@ -245,15 +227,14 @@ TEST(MarkovLeadingToneTest, DominantDegreeStepUpFavored) {
   int resolution_favored = 0;
   int total_tests = 0;
 
-  const MarkovModel* models[] = {&kFugueUpperMarkov, &kCelloMarkov,
-                                 &kViolinMarkov};
+  const MarkovModel* models[] = {&kFugueUpperMarkov, &kCelloMarkov, &kViolinMarkov};
   for (const auto* mdl : models) {
     for (int beat = 0; beat < kBeatPosCount; ++beat) {
       // Previous step was +1 (approaching from below -- classic leading tone).
-      float score_resolve = scoreMarkovPitch(
-          *mdl, 1, DegreeClass::Dominant, static_cast<BeatPos>(beat), 1);
-      float score_retreat = scoreMarkovPitch(
-          *mdl, 1, DegreeClass::Dominant, static_cast<BeatPos>(beat), -1);
+      float score_resolve =
+          scoreMarkovPitch(*mdl, 1, DegreeClass::Dominant, static_cast<BeatPos>(beat), 1);
+      float score_retreat =
+          scoreMarkovPitch(*mdl, 1, DegreeClass::Dominant, static_cast<BeatPos>(beat), -1);
 
       ++total_tests;
       if (score_resolve > score_retreat) {
@@ -399,8 +380,8 @@ TEST(ScaleDegreeToClassTest, MotionDegrees) {
 
 TEST(ScaleDegreeToClassTest, NormalizesNegativeAndLarge) {
   // Negative degrees and degrees > 6 are normalized via modulo.
-  EXPECT_EQ(scaleDegreeToClass(7), DegreeClass::Stable);   // 7 % 7 = 0
-  EXPECT_EQ(scaleDegreeToClass(14), DegreeClass::Stable);  // 14 % 7 = 0
+  EXPECT_EQ(scaleDegreeToClass(7), DegreeClass::Stable);     // 7 % 7 = 0
+  EXPECT_EQ(scaleDegreeToClass(14), DegreeClass::Stable);    // 14 % 7 = 0
   EXPECT_EQ(scaleDegreeToClass(-1), DegreeClass::Dominant);  // (-1%7+7)%7 = 6
   EXPECT_EQ(scaleDegreeToClass(-7), DegreeClass::Stable);    // (-7%7+7)%7 = 0
 }
@@ -493,10 +474,8 @@ TEST(ComputeDegreeStepTest, WorksInGMajor) {
 TEST(MarkovPitchScoreTest, CommonTransitionsScorePositive) {
   // In Stable degree class at Bar position, stepwise motion (step +1 or -1)
   // should be relatively common and score near-zero or positive.
-  float step_up = scoreMarkovPitch(kFugueUpperMarkov, 1, DegreeClass::Stable,
-                                   BeatPos::Bar, 1);
-  float step_down = scoreMarkovPitch(kFugueUpperMarkov, 1, DegreeClass::Stable,
-                                     BeatPos::Bar, -1);
+  float step_up = scoreMarkovPitch(kFugueUpperMarkov, 1, DegreeClass::Stable, BeatPos::Bar, 1);
+  float step_down = scoreMarkovPitch(kFugueUpperMarkov, 1, DegreeClass::Stable, BeatPos::Bar, -1);
   // At least one of step up or step down should be above uniform (score > 0).
   EXPECT_TRUE(step_up > 0.0f || step_down > 0.0f)
       << "At least one stepwise direction should be above uniform probability "
@@ -507,31 +486,25 @@ TEST(MarkovPitchScoreTest, StepwiseOutscoresLargeLeap) {
   // Stepwise motion (step +1 or -1) should score higher than large leaps
   // (step +/-8) in most contexts. Step +/-9 is a catch-all bin that
   // aggregates all leaps >= octave, so we use +/-8 to test true large leaps.
-  float step = scoreMarkovPitch(kFugueUpperMarkov, 1, DegreeClass::Stable,
-                                BeatPos::Beat, 1);
-  float large_leap = scoreMarkovPitch(kFugueUpperMarkov, 1, DegreeClass::Stable,
-                                      BeatPos::Beat, 8);
-  EXPECT_GT(step, large_leap)
-      << "Stepwise motion should outscore a large leap (octave minus one)";
+  float step = scoreMarkovPitch(kFugueUpperMarkov, 1, DegreeClass::Stable, BeatPos::Beat, 1);
+  float large_leap = scoreMarkovPitch(kFugueUpperMarkov, 1, DegreeClass::Stable, BeatPos::Beat, 8);
+  EXPECT_GT(step, large_leap) << "Stepwise motion should outscore a large leap (octave minus one)";
 }
 
 TEST(MarkovDurationScoreTest, SixteenthAfterSixteenthCommon) {
   // Runs of sixteenth notes are very common in fugue upper voices.
-  float score = scoreMarkovDuration(kFugueUpperMarkov, DurCategory::S16,
-                                    DirIntervalClass::StepUp, DurCategory::S16);
+  float score = scoreMarkovDuration(kFugueUpperMarkov, DurCategory::S16, DirIntervalClass::StepUp,
+                                    DurCategory::S16);
   // The data shows kFugueUpperDur[0] = {8057, 856, 488, 438, 161} for S16/StepUp,
   // so S16 -> S16 has probability ~80% which is far above uniform (20%).
-  EXPECT_GT(score, 0.0f)
-      << "S16 -> S16 in FugueUpper should score above uniform";
+  EXPECT_GT(score, 0.0f) << "S16 -> S16 in FugueUpper should score above uniform";
 }
 
 TEST(MarkovDurationScoreTest, HalfPlusAfterSixteenthRare) {
   // Jumping from sixteenth note to half-plus is rare.
-  float score = scoreMarkovDuration(kFugueUpperMarkov, DurCategory::S16,
-                                    DirIntervalClass::StepUp,
+  float score = scoreMarkovDuration(kFugueUpperMarkov, DurCategory::S16, DirIntervalClass::StepUp,
                                     DurCategory::HalfPlus);
-  EXPECT_LT(score, 0.0f)
-      << "S16 -> HalfPlus in FugueUpper should score below uniform";
+  EXPECT_LT(score, 0.0f) << "S16 -> HalfPlus in FugueUpper should score below uniform";
 }
 
 // ---------------------------------------------------------------------------
@@ -566,9 +539,8 @@ TEST(VerticalTableTest, VerticalScoreWithinRange) {
       for (int vb = 0; vb < kVoiceBinCount; ++vb) {
         for (int hf = 0; hf < kHarmFuncCount; ++hf) {
           for (int pc = 0; pc < kPcOffsetCount; ++pc) {
-            float score = scoreVerticalInterval(
-                kFugueVerticalTable, bd, static_cast<BeatPos>(bp),
-                vb, static_cast<HarmFunc>(hf), pc);
+            float score = scoreVerticalInterval(kFugueVerticalTable, bd, static_cast<BeatPos>(bp),
+                                                vb, static_cast<HarmFunc>(hf), pc);
             EXPECT_GE(score, -1.0f);
             EXPECT_LE(score, 1.0f);
           }
@@ -583,28 +555,23 @@ TEST(VerticalTableTest, OctaveP5FavoredOnTonic) {
   // voice_bin 0 (2-voice context where real data exists),
   // the unison (offset 0) and P5 (offset 7) should score higher than
   // the tritone (offset 6).
-  float unison = scoreVerticalInterval(kFugueVerticalTable, 0, BeatPos::Bar,
-                                        0, HarmFunc::Tonic, 0);
-  float p5 = scoreVerticalInterval(kFugueVerticalTable, 0, BeatPos::Bar,
-                                    0, HarmFunc::Tonic, 7);
-  float tritone = scoreVerticalInterval(kFugueVerticalTable, 0, BeatPos::Bar,
-                                         0, HarmFunc::Tonic, 6);
-  EXPECT_GT(unison, tritone)
-      << "Unison should outscore tritone on tonic";
-  EXPECT_GT(p5, tritone)
-      << "P5 should outscore tritone on tonic";
+  float unison = scoreVerticalInterval(kFugueVerticalTable, 0, BeatPos::Bar, 0, HarmFunc::Tonic, 0);
+  float p5 = scoreVerticalInterval(kFugueVerticalTable, 0, BeatPos::Bar, 0, HarmFunc::Tonic, 7);
+  float tritone =
+      scoreVerticalInterval(kFugueVerticalTable, 0, BeatPos::Bar, 0, HarmFunc::Tonic, 6);
+  EXPECT_GT(unison, tritone) << "Unison should outscore tritone on tonic";
+  EXPECT_GT(p5, tritone) << "P5 should outscore tritone on tonic";
 }
 
 TEST(VerticalTableTest, DominantFunctionDistinct) {
   // The minor 7th (offset 10) should score higher on a dominant-function
   // context (bd=4, hf=Dominant) than on a tonic-function context
   // (bd=0, hf=Tonic). Both rows use voice_bin 0 (2v) where real data exists.
-  float m7_dom = scoreVerticalInterval(kFugueVerticalTable, 4, BeatPos::Beat,
-                                        0, HarmFunc::Dominant, 10);
-  float m7_ton = scoreVerticalInterval(kFugueVerticalTable, 0, BeatPos::Bar,
-                                        0, HarmFunc::Tonic, 10);
-  EXPECT_GT(m7_dom, m7_ton)
-      << "Minor 7th should score higher on Dominant than Tonic function";
+  float m7_dom =
+      scoreVerticalInterval(kFugueVerticalTable, 4, BeatPos::Beat, 0, HarmFunc::Dominant, 10);
+  float m7_ton =
+      scoreVerticalInterval(kFugueVerticalTable, 0, BeatPos::Bar, 0, HarmFunc::Tonic, 10);
+  EXPECT_GT(m7_dom, m7_ton) << "Minor 7th should score higher on Dominant than Tonic function";
 }
 
 // ---------------------------------------------------------------------------
@@ -613,9 +580,8 @@ TEST(VerticalTableTest, DominantFunctionDistinct) {
 
 TEST(OracleFunctionTest, HorizontalOracleValidPitches) {
   OracleCandidate out[8];
-  int count = getTopMelodicCandidates(
-      kFugueUpperMarkov, 1, DegreeClass::Stable, BeatPos::Beat,
-      60, Key::C, ScaleType::Major, 48, 84, out, 8);
+  int count = getTopMelodicCandidates(kFugueUpperMarkov, 1, DegreeClass::Stable, BeatPos::Beat, 60,
+                                      Key::C, ScaleType::Major, 48, 84, out, 8);
   EXPECT_GT(count, 0) << "Should return at least one candidate";
   // All pitches within range and probability descending.
   for (int i = 0; i < count; ++i) {
@@ -631,9 +597,8 @@ TEST(OracleFunctionTest, HorizontalOracleValidPitches) {
 
 TEST(OracleFunctionTest, VerticalOracleReturnsPitchClasses) {
   OracleCandidate out[6];
-  int count = getTopVerticalCandidates(
-      kFugueVerticalTable, 0, BeatPos::Bar, 1, HarmFunc::Tonic,
-      out, 6);
+  int count =
+      getTopVerticalCandidates(kFugueVerticalTable, 0, BeatPos::Bar, 1, HarmFunc::Tonic, out, 6);
   EXPECT_GT(count, 0) << "Should return at least one candidate";
   // All pitch classes within 0-11 and probability descending.
   for (int i = 0; i < count; ++i) {
@@ -652,9 +617,9 @@ TEST(OracleFunctionTest, VerticalOracleReturnsPitchClasses) {
 // ---------------------------------------------------------------------------
 
 TEST(DegreeToHarmFuncTest, TonicDegrees) {
-  EXPECT_EQ(degreeToHarmFunc(0), HarmFunc::Tonic);    // I
-  EXPECT_EQ(degreeToHarmFunc(5), HarmFunc::Tonic);    // vi
-  EXPECT_EQ(degreeToHarmFunc(2), HarmFunc::Tonic);    // iii
+  EXPECT_EQ(degreeToHarmFunc(0), HarmFunc::Tonic);  // I
+  EXPECT_EQ(degreeToHarmFunc(5), HarmFunc::Tonic);  // vi
+  EXPECT_EQ(degreeToHarmFunc(2), HarmFunc::Tonic);  // iii
 }
 
 TEST(DegreeToHarmFuncTest, SubdominantDegrees) {
@@ -668,8 +633,8 @@ TEST(DegreeToHarmFuncTest, DominantDegrees) {
 }
 
 TEST(DegreeToHarmFuncTest, NormalizesOutOfRange) {
-  EXPECT_EQ(degreeToHarmFunc(7), HarmFunc::Tonic);   // 7 % 7 = 0
-  EXPECT_EQ(degreeToHarmFunc(-1), HarmFunc::Dominant); // (-1+7)%7 = 6
+  EXPECT_EQ(degreeToHarmFunc(7), HarmFunc::Tonic);      // 7 % 7 = 0
+  EXPECT_EQ(degreeToHarmFunc(-1), HarmFunc::Dominant);  // (-1+7)%7 = 6
 }
 
 // ---------------------------------------------------------------------------

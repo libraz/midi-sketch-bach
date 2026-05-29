@@ -39,8 +39,7 @@ const char* intervalName(int semitones) {
 
 bool isPerfectInterval(int semitones) {
   int simple = compoundToSimple(semitones);
-  return simple == interval::kUnison ||
-         simple == interval::kPerfect4th ||
+  return simple == interval::kUnison || simple == interval::kPerfect4th ||
          simple == interval::kPerfect5th;
   // Octave reduces to 0 (unison) via mod 12, so it is covered.
 }

@@ -23,11 +23,11 @@ enum class Violation : uint8_t {
 /// Repair action taken (policy, separate from violation).
 enum class RepairAction : uint8_t {
   NoAction,
-  OctaveShift,       // +/-12 with melodic contour preservation.
-  ClampToRange,      // Last resort range clamping.
-  TinyOffset,        // Bowed: 1-3 tick micro-offset for simultaneous notes.
-  DropByPriority,    // Drop Flexible voice first.
-  SuggestVoicing,    // Keyboard: suggestPlayableVoicing().
+  OctaveShift,     // +/-12 with melodic contour preservation.
+  ClampToRange,    // Last resort range clamping.
+  TinyOffset,      // Bowed: 1-3 tick micro-offset for simultaneous notes.
+  DropByPriority,  // Drop Flexible voice first.
+  SuggestVoicing,  // Keyboard: suggestPlayableVoicing().
 };
 
 /// Set of notes sounding at a given tick (sustain-aware).
@@ -46,8 +46,7 @@ struct ImpossibilityGuard {
   /// Structural -> octave shift only (melodic contour condition).
   /// Flexible -> octave shift -> clamp.
   /// prev_pitch: previous note for contour check (0 = unknown).
-  std::function<uint8_t(uint8_t pitch, ProtectionLevel level,
-                         uint8_t prev_pitch)> fixPitchRange;
+  std::function<uint8_t(uint8_t pitch, ProtectionLevel level, uint8_t prev_pitch)> fixPitchRange;
 
   /// Simultaneous sounding violation detection.
   std::function<Violation(const SoundingGroup& group)> checkSounding;
@@ -61,8 +60,7 @@ ImpossibilityGuard createGuard(InstrumentType instrument);
 
 /// Enforce physical impossibility constraints on all tracks.
 /// Returns the number of notes modified.
-uint32_t enforceImpossibilityGuard(std::vector<Track>& tracks,
-                                    const ImpossibilityGuard& guard);
+uint32_t enforceImpossibilityGuard(std::vector<Track>& tracks, const ImpossibilityGuard& guard);
 
 }  // namespace bach
 

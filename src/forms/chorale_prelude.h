@@ -16,12 +16,14 @@ struct ChoralePreludeConfig {
   KeySignature key = {Key::C, false};
   uint16_t bpm = 60;
   uint32_t seed = 42;
-  bool enable_picardy = true;   ///< Apply Picardy third in minor keys.
-};;
+  bool enable_picardy = true;  ///< Apply Picardy third in minor keys.
+};
+;
 
 /// @brief Result of chorale prelude generation.
 struct ChoralePreludeResult {
-  std::vector<Track> tracks;  ///< 4 tracks: figuration (Great), cantus (Swell), inner (Great), pedal.
+  std::vector<Track>
+      tracks;  ///< 4 tracks: figuration (Great), cantus (Swell), inner (Great), pedal.
   Tick total_duration_ticks = 0;
   bool success = false;
   HarmonicTimeline timeline;  ///< Harmonic context used during generation.

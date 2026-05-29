@@ -75,22 +75,22 @@ bool isLeadingTone(int pitch_class, Key key) {
 
 // Check if two voices form parallel fifths or octaves.
 // Returns true only when both voices move in the same direction.
-bool hasParallelPerfect(int prev_upper, int prev_lower,
-                        int curr_upper, int curr_lower) {
+bool hasParallelPerfect(int prev_upper, int prev_lower, int curr_upper, int curr_lower) {
   int prev_iv = interval_util::compoundToSimple(std::abs(prev_upper - prev_lower));
   int curr_iv = interval_util::compoundToSimple(std::abs(curr_upper - curr_lower));
 
   // Check parallel P5 or P8.
   bool is_target = (prev_iv == 7 && curr_iv == 7) || (prev_iv == 0 && curr_iv == 0);
-  if (!is_target) return false;
+  if (!is_target)
+    return false;
 
   int motion_upper = curr_upper - prev_upper;
   int motion_lower = curr_lower - prev_lower;
 
   // Both must move in the same direction (both positive or both negative).
-  if (motion_upper == 0 || motion_lower == 0) return false;
-  return (motion_upper > 0 && motion_lower > 0) ||
-         (motion_upper < 0 && motion_lower < 0);
+  if (motion_upper == 0 || motion_lower == 0)
+    return false;
+  return (motion_upper > 0 && motion_lower > 0) || (motion_upper < 0 && motion_lower < 0);
 }
 
 // Find the best octave placement of a pitch class within a range, nearest to target.
@@ -99,7 +99,8 @@ int bestOctavePlacement(int pitch_class, int target, int low, int high) {
   int best_dist = 999;
   for (int octave = 0; octave <= 10; ++octave) {
     int candidate = octave * 12 + pitch_class;
-    if (candidate < low || candidate > high) continue;
+    if (candidate < low || candidate > high)
+      continue;
     int dist = std::abs(candidate - target);
     if (dist < best_dist) {
       best_dist = dist;
@@ -116,16 +117,14 @@ std::vector<int> getChordPitchClasses(ChordQuality quality, int root_pc) {
   int fifth = getFifthInterval(quality);
   int seventh = getSeventhInterval(quality);
 
-  std::vector<int> pcs = {
-      root_pc % 12, (root_pc + third) % 12, (root_pc + fifth) % 12};
+  std::vector<int> pcs = {root_pc % 12, (root_pc + third) % 12, (root_pc + fifth) % 12};
   if (seventh >= 0) {
     pcs.push_back((root_pc + seventh) % 12);
   }
   return pcs;
 }
 
-ChordVoicing voiceChord(const HarmonicEvent& event, uint8_t num_voices,
-                        VoiceRangeFn voice_range) {
+ChordVoicing voiceChord(const HarmonicEvent& event, uint8_t num_voices, VoiceRangeFn voice_range) {
   assert(num_voices >= 2 && num_voices <= kMaxVoicingVoices);
 
   ChordVoicing result;
@@ -139,27 +138,25 @@ ChordVoicing voiceChord(const HarmonicEvent& event, uint8_t num_voices,
   // Determine which pitch classes should NOT be doubled.
   bool has_seventh = (chord_pcs.size() >= 4);
   bool is_diminished_fifth = (getFifthInterval(event.chord.quality) == 6);
-  bool leading_tone_present =
-      isLeadingTone(third_pc, event.key) ||
-      isLeadingTone(fifth_pc, event.key) ||
-      isLeadingTone(root_pc, event.key);
+  bool leading_tone_present = isLeadingTone(third_pc, event.key) ||
+                              isLeadingTone(fifth_pc, event.key) ||
+                              isLeadingTone(root_pc, event.key);
 
   // --- Step 1: Place bass voice ---
   uint8_t bass_idx = num_voices - 1;
   auto [bass_low, bass_high] = voice_range(bass_idx);
   int bass_pitch;
   if (event.bass_pitch > 0) {
-    bass_pitch = bestOctavePlacement(
-        getPitchClass(event.bass_pitch),
-        (static_cast<int>(bass_low) + static_cast<int>(bass_high)) / 2,
-        bass_low, bass_high);
+    bass_pitch = bestOctavePlacement(getPitchClass(event.bass_pitch),
+                                     (static_cast<int>(bass_low) + static_cast<int>(bass_high)) / 2,
+                                     bass_low, bass_high);
   } else {
-    bass_pitch = bestOctavePlacement(
-        root_pc,
-        (static_cast<int>(bass_low) + static_cast<int>(bass_high)) / 2,
-        bass_low, bass_high);
+    bass_pitch =
+        bestOctavePlacement(root_pc, (static_cast<int>(bass_low) + static_cast<int>(bass_high)) / 2,
+                            bass_low, bass_high);
   }
-  if (bass_pitch < 0) bass_pitch = clampPitch(event.bass_pitch, bass_low, bass_high);
+  if (bass_pitch < 0)
+    bass_pitch = clampPitch(event.bass_pitch, bass_low, bass_high);
   result.pitches[bass_idx] = static_cast<uint8_t>(bass_pitch);
 
   // --- Step 2: Place soprano (voice 0) ---
@@ -170,14 +167,16 @@ ChordVoicing voiceChord(const HarmonicEvent& event, uint8_t num_voices,
   int best_sop_dist = 999;
   for (int pc : chord_pcs) {
     int placed = bestOctavePlacement(pc, sop_center, sop_low, sop_high);
-    if (placed < 0) continue;
+    if (placed < 0)
+      continue;
     int dist = std::abs(placed - sop_center);
     if (dist < best_sop_dist) {
       best_sop_dist = dist;
       best_sop = placed;
     }
   }
-  if (best_sop < 0) best_sop = clampPitch(sop_center, sop_low, sop_high);
+  if (best_sop < 0)
+    best_sop = clampPitch(sop_center, sop_low, sop_high);
   result.pitches[0] = static_cast<uint8_t>(best_sop);
 
   // --- Step 3: Distribute inner voices ---
@@ -215,14 +214,12 @@ ChordVoicing voiceChord(const HarmonicEvent& event, uint8_t num_voices,
     bool added = false;
     int seventh_pc = has_seventh ? chord_pcs[3] : -1;
     // Try root (unless it's the leading tone or the seventh).
-    if ((!leading_tone_present || !isLeadingTone(root_pc, event.key)) &&
-        root_pc != seventh_pc) {
+    if ((!leading_tone_present || !isLeadingTone(root_pc, event.key)) && root_pc != seventh_pc) {
       needed_pcs.push_back(root_pc);
       added = true;
     }
     if (!added && !is_diminished_fifth &&
-        (!leading_tone_present || !isLeadingTone(fifth_pc, event.key)) &&
-        fifth_pc != seventh_pc) {
+        (!leading_tone_present || !isLeadingTone(fifth_pc, event.key)) && fifth_pc != seventh_pc) {
       needed_pcs.push_back(fifth_pc);
       added = true;
     }
@@ -234,7 +231,8 @@ ChordVoicing voiceChord(const HarmonicEvent& event, uint8_t num_voices,
     if (!added) {
       needed_pcs.push_back(root_pc);  // Fallback
     }
-    if (static_cast<int>(needed_pcs.size()) >= inner_count) break;
+    if (static_cast<int>(needed_pcs.size()) >= inner_count)
+      break;
   }
 
   // Assign inner voices (voices 1 to num_voices-2).
@@ -245,12 +243,12 @@ ChordVoicing voiceChord(const HarmonicEvent& event, uint8_t num_voices,
     int pc_to_place = (i < static_cast<int>(needed_pcs.size())) ? needed_pcs[i] : root_pc;
 
     // Target: interpolate between soprano and bass for this voice position.
-    float frac =
-        static_cast<float>(vid) / static_cast<float>(num_voices - 1);
+    float frac = static_cast<float>(vid) / static_cast<float>(num_voices - 1);
     int target = static_cast<int>(best_sop * (1.0f - frac) + bass_pitch * frac);
 
     int placed = bestOctavePlacement(pc_to_place, target, v_low, v_high);
-    if (placed < 0) placed = clampPitch(target, v_low, v_high);
+    if (placed < 0)
+      placed = clampPitch(target, v_low, v_high);
     result.pitches[vid] = static_cast<uint8_t>(placed);
   }
 
@@ -273,10 +271,8 @@ ChordVoicing voiceChord(const HarmonicEvent& event, uint8_t num_voices,
   return result;
 }
 
-ChordVoicing smoothVoiceLeading(const ChordVoicing& prev,
-                                const HarmonicEvent& next_event,
-                                uint8_t num_voices,
-                                VoiceRangeFn voice_range) {
+ChordVoicing smoothVoiceLeading(const ChordVoicing& prev, const HarmonicEvent& next_event,
+                                uint8_t num_voices, VoiceRangeFn voice_range) {
   assert(num_voices >= 2 && num_voices <= kMaxVoicingVoices);
   assert(prev.num_voices == num_voices);
 
@@ -296,14 +292,11 @@ ChordVoicing smoothVoiceLeading(const ChordVoicing& prev,
   // --- Step 1: Bass voice moves to nearest bass_pitch placement ---
   uint8_t bass_idx = num_voices - 1;
   auto [bass_low, bass_high] = voice_range(bass_idx);
-  int bass_pc = (next_event.bass_pitch > 0)
-                    ? getPitchClass(next_event.bass_pitch)
-                    : root_pc;
-  int bass_target = bestOctavePlacement(
-      bass_pc, static_cast<int>(prev.pitches[bass_idx]), bass_low, bass_high);
+  int bass_pc = (next_event.bass_pitch > 0) ? getPitchClass(next_event.bass_pitch) : root_pc;
+  int bass_target =
+      bestOctavePlacement(bass_pc, static_cast<int>(prev.pitches[bass_idx]), bass_low, bass_high);
   if (bass_target < 0) {
-    bass_target = clampPitch(static_cast<int>(prev.pitches[bass_idx]),
-                             bass_low, bass_high);
+    bass_target = clampPitch(static_cast<int>(prev.pitches[bass_idx]), bass_low, bass_high);
   }
   result.pitches[bass_idx] = static_cast<uint8_t>(bass_target);
 
@@ -320,8 +313,7 @@ ChordVoicing smoothVoiceLeading(const ChordVoicing& prev,
     if (prev_pc == leading_pc && !next_event.is_minor) {
       // Leading tone resolves up to tonic.
       int resolved = prev_pitch + 1;
-      if (getPitchClassSigned(resolved) == tonic_pc &&
-          resolved >= v_low && resolved <= v_high) {
+      if (getPitchClassSigned(resolved) == tonic_pc && resolved >= v_low && resolved <= v_high) {
         result.pitches[v] = static_cast<uint8_t>(resolved);
         // Mark tonic as used if it's in chord_pcs.
         for (size_t k = 0; k < chord_pcs.size(); ++k) {
@@ -349,7 +341,8 @@ ChordVoicing smoothVoiceLeading(const ChordVoicing& prev,
 
     for (size_t k = 0; k < chord_pcs.size(); ++k) {
       int placed = bestOctavePlacement(chord_pcs[k], prev_pitch, v_low, v_high);
-      if (placed < 0) continue;
+      if (placed < 0)
+        continue;
       int dist = std::abs(placed - prev_pitch);
       if (dist < best_dist) {
         best_dist = dist;
@@ -371,8 +364,8 @@ ChordVoicing smoothVoiceLeading(const ChordVoicing& prev,
   // For each pair of voices, if parallel perfect interval exists, nudge one voice.
   for (uint8_t i = 0; i < num_voices; ++i) {
     for (uint8_t j = i + 1; j < num_voices; ++j) {
-      if (hasParallelPerfect(prev.pitches[i], prev.pitches[j],
-                             result.pitches[i], result.pitches[j])) {
+      if (hasParallelPerfect(prev.pitches[i], prev.pitches[j], result.pitches[i],
+                             result.pitches[j])) {
         // Fix by moving voice i to the next nearest chord tone.
         if (i < num_voices - 1) {  // Don't move bass.
           auto [v_low, v_high] = voice_range(i);
@@ -382,7 +375,8 @@ ChordVoicing smoothVoiceLeading(const ChordVoicing& prev,
           for (int offset = 1; offset <= 12; ++offset) {
             for (int dir : {1, -1}) {
               int candidate = curr + dir * offset;
-              if (candidate < v_low || candidate > v_high) continue;
+              if (candidate < v_low || candidate > v_high)
+                continue;
 
               // Must be a chord tone.
               int cand_pc = getPitchClassSigned(candidate);
@@ -393,14 +387,16 @@ ChordVoicing smoothVoiceLeading(const ChordVoicing& prev,
                   break;
                 }
               }
-              if (!is_chord) continue;
+              if (!is_chord)
+                continue;
 
               // Must not create new parallel perfect.
               bool creates_new = false;
               for (uint8_t k = 0; k < num_voices; ++k) {
-                if (k == i) continue;
-                if (hasParallelPerfect(prev.pitches[i], prev.pitches[k],
-                                       candidate, result.pitches[k])) {
+                if (k == i)
+                  continue;
+                if (hasParallelPerfect(prev.pitches[i], prev.pitches[k], candidate,
+                                       result.pitches[k])) {
                   creates_new = true;
                   break;
                 }

@@ -13,12 +13,7 @@ namespace bach {
 
 /// @brief Harmonic function for gesture accumulation chords.
 /// Derived pitch sets from key context; stable across modulations.
-enum class HarmonicFunction : uint8_t {
-  Tonic,
-  Dominant,
-  LeadingTone,
-  Subdominant
-};
+enum class HarmonicFunction : uint8_t { Tonic, Dominant, LeadingTone, Subdominant };
 
 /// @brief Result of gesture generation.
 struct GestureResult {
@@ -46,15 +41,15 @@ void tagGestureNotes(std::vector<NoteEvent>& notes, uint16_t gesture_id);
 /// @param notes All notes (may contain non-gesture notes).
 /// @param gesture_id Gesture to extract from.
 /// @return Directed intervals of the descent portion (negative values = descending).
-std::vector<int> extractGestureCoreIntervals(
-    const std::vector<NoteEvent>& notes, uint16_t gesture_id);
+std::vector<int> extractGestureCoreIntervals(const std::vector<NoteEvent>& notes,
+                                             uint16_t gesture_id);
 
 /// @brief Figure hints mapped to a ToccataArchetype.
 /// Each archetype has 1-3 characteristic melodic figures and an activation probability.
 struct ArchetypeFigureHint {
   const MelodicFigure* figures[3];  ///< Up to 3 characteristic figures.
-  int count;                         ///< Number of valid figures (1-3).
-  float activation_prob;             ///< Probability of applying vocabulary (0.0-1.0).
+  int count;                        ///< Number of valid figures (1-3).
+  float activation_prob;            ///< Probability of applying vocabulary (0.0-1.0).
 };
 
 /// @brief Get vocabulary figure hints for a ToccataArchetype.

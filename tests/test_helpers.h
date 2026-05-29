@@ -11,7 +11,8 @@ namespace test_helpers {
 template <typename Result>
 size_t totalNoteCount(const Result& result) {
   size_t count = 0;
-  for (const auto& track : result.tracks) count += track.notes.size();
+  for (const auto& track : result.tracks)
+    count += track.notes.size();
   return count;
 }
 

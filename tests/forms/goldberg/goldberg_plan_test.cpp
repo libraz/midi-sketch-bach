@@ -27,8 +27,7 @@ TEST(GoldbergPlanTest, Entry31IsDaCapoAria) {
 TEST(GoldbergPlanTest, EveryThirdVariationIsCanon) {
   auto plan = createGoldbergPlan();
   for (int idx = 3; idx <= 27; idx += 3) {
-    EXPECT_EQ(plan[idx].type, GoldbergVariationType::Canon)
-        << "Var " << idx << " should be Canon";
+    EXPECT_EQ(plan[idx].type, GoldbergVariationType::Canon) << "Var " << idx << " should be Canon";
   }
 }
 
@@ -66,8 +65,7 @@ TEST(GoldbergPlanTest, Var30IsQuodlibet) {
 TEST(GoldbergPlanTest, AllKeysAreG) {
   auto plan = createGoldbergPlan();
   for (const auto& desc : plan) {
-    EXPECT_EQ(desc.key.tonic, Key::G)
-        << "Var " << desc.variation_number << " should be in G";
+    EXPECT_EQ(desc.key.tonic, Key::G) << "Var " << desc.variation_number << " should be in G";
   }
 }
 

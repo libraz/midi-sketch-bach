@@ -16,8 +16,8 @@ namespace {
 // Helper: create a note event
 // ---------------------------------------------------------------------------
 
-static NoteEvent makeNote(Tick start, uint8_t pitch, Tick duration,
-                          uint8_t velocity = 80, uint8_t voice = 0) {
+static NoteEvent makeNote(Tick start, uint8_t pitch, Tick duration, uint8_t velocity = 80,
+                          uint8_t voice = 0) {
   NoteEvent note;
   note.start_tick = start;
   note.pitch = pitch;
@@ -28,8 +28,8 @@ static NoteEvent makeNote(Tick start, uint8_t pitch, Tick duration,
 }
 
 /// Helper: create a harmonic event with specified chord degree.
-static HarmonicEvent makeHarmEvent(Tick tick, Tick end_tick, ChordDegree degree,
-                                   Key key = Key::C, bool is_minor = false) {
+static HarmonicEvent makeHarmEvent(Tick tick, Tick end_tick, ChordDegree degree, Key key = Key::C,
+                                   bool is_minor = false) {
   HarmonicEvent evt;
   evt.tick = tick;
   evt.end_tick = end_tick;
@@ -271,7 +271,7 @@ TEST(ArticulationMultiNoteTest, AllNotesDurationsReduced) {
 
 TEST(ArticulationOrganTest, OrganPreservesMetricDurations) {
   std::vector<NoteEvent> notes;
-  notes.push_back(makeNote(0, 60, kTicksPerBeat));    // 480
+  notes.push_back(makeNote(0, 60, kTicksPerBeat));  // 480
   notes.push_back(makeNote(kTicksPerBeat, 62, kTicksPerBeat));
 
   applyArticulation(notes, VoiceRole::Assert, nullptr, true);

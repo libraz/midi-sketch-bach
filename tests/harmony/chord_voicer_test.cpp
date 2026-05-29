@@ -19,17 +19,23 @@ namespace {
 // Standard voice ranges matching prelude.cpp organ registers.
 std::pair<uint8_t, uint8_t> testVoiceRange(uint8_t voice_idx) {
   switch (voice_idx) {
-    case 0: return {60, 88};   // C4-E6 (Great)
-    case 1: return {52, 76};   // E3-E5 (Swell)
-    case 2: return {48, 64};   // C3-E4 (Positiv)
-    case 3: return {24, 50};   // C1-D3 (Pedal)
-    case 4: return {24, 50};   // Same as pedal
-    default: return {52, 76};
+    case 0:
+      return {60, 88};  // C4-E6 (Great)
+    case 1:
+      return {52, 76};  // E3-E5 (Swell)
+    case 2:
+      return {48, 64};  // C3-E4 (Positiv)
+    case 3:
+      return {24, 50};  // C1-D3 (Pedal)
+    case 4:
+      return {24, 50};  // Same as pedal
+    default:
+      return {52, 76};
   }
 }
 
-HarmonicEvent makeEvent(Key key, bool is_minor, ChordQuality quality,
-                        uint8_t root_pitch, uint8_t bass_pitch = 0) {
+HarmonicEvent makeEvent(Key key, bool is_minor, ChordQuality quality, uint8_t root_pitch,
+                        uint8_t bass_pitch = 0) {
   HarmonicEvent ev;
   ev.key = key;
   ev.is_minor = is_minor;
@@ -61,9 +67,8 @@ TEST(ChordVoicerTest, CMajorTriad_3Voices_AllChordTones) {
   for (uint8_t i = 0; i < voicing.num_voices; ++i) {
     int pc = getPitchClass(voicing.pitches[i]);
     bool is_chord_tone = (pc == 0 || pc == 4 || pc == 7);  // C, E, G
-    EXPECT_TRUE(is_chord_tone)
-        << "Voice " << static_cast<int>(i) << " pitch="
-        << static_cast<int>(voicing.pitches[i]) << " pc=" << pc;
+    EXPECT_TRUE(is_chord_tone) << "Voice " << static_cast<int>(i)
+                               << " pitch=" << static_cast<int>(voicing.pitches[i]) << " pc=" << pc;
   }
 }
 
@@ -75,9 +80,8 @@ TEST(ChordVoicerTest, CMajorTriad_4Voices_AllChordTones) {
   for (uint8_t i = 0; i < voicing.num_voices; ++i) {
     int pc = getPitchClass(voicing.pitches[i]);
     bool is_chord_tone = (pc == 0 || pc == 4 || pc == 7);
-    EXPECT_TRUE(is_chord_tone)
-        << "Voice " << static_cast<int>(i) << " pitch="
-        << static_cast<int>(voicing.pitches[i]);
+    EXPECT_TRUE(is_chord_tone) << "Voice " << static_cast<int>(i)
+                               << " pitch=" << static_cast<int>(voicing.pitches[i]);
   }
 }
 
@@ -88,9 +92,8 @@ TEST(ChordVoicerTest, MinorTriad_3Voices) {
   for (uint8_t i = 0; i < voicing.num_voices; ++i) {
     int pc = getPitchClass(voicing.pitches[i]);
     bool is_chord_tone = (pc == 9 || pc == 0 || pc == 4);  // A, C, E
-    EXPECT_TRUE(is_chord_tone)
-        << "Voice " << static_cast<int>(i) << " pitch="
-        << static_cast<int>(voicing.pitches[i]);
+    EXPECT_TRUE(is_chord_tone) << "Voice " << static_cast<int>(i)
+                               << " pitch=" << static_cast<int>(voicing.pitches[i]);
   }
 }
 
@@ -102,9 +105,8 @@ TEST(ChordVoicerTest, Dominant7_4Voices_AllChordTones) {
   for (uint8_t i = 0; i < voicing.num_voices; ++i) {
     int pc = getPitchClass(voicing.pitches[i]);
     bool is_chord_tone = (pc == 7 || pc == 11 || pc == 2 || pc == 5);
-    EXPECT_TRUE(is_chord_tone)
-        << "Voice " << static_cast<int>(i) << " pitch="
-        << static_cast<int>(voicing.pitches[i]);
+    EXPECT_TRUE(is_chord_tone) << "Voice " << static_cast<int>(i)
+                               << " pitch=" << static_cast<int>(voicing.pitches[i]);
   }
 }
 
@@ -114,10 +116,8 @@ TEST(ChordVoicerTest, VoicesWithinRange) {
 
   for (uint8_t i = 0; i < voicing.num_voices; ++i) {
     auto [lo, hi] = testVoiceRange(i);
-    EXPECT_GE(voicing.pitches[i], lo)
-        << "Voice " << static_cast<int>(i) << " below range";
-    EXPECT_LE(voicing.pitches[i], hi)
-        << "Voice " << static_cast<int>(i) << " above range";
+    EXPECT_GE(voicing.pitches[i], lo) << "Voice " << static_cast<int>(i) << " below range";
+    EXPECT_LE(voicing.pitches[i], hi) << "Voice " << static_cast<int>(i) << " above range";
   }
 }
 
@@ -129,7 +129,8 @@ TEST(ChordVoicerTest, LeadingToneNotDoubled_CMajor) {
 
   int b_count = 0;
   for (uint8_t i = 0; i < voicing.num_voices; ++i) {
-    if (getPitchClass(voicing.pitches[i]) == 11) ++b_count;
+    if (getPitchClass(voicing.pitches[i]) == 11)
+      ++b_count;
   }
   EXPECT_LE(b_count, 1) << "Leading tone B should not be doubled";
 }
@@ -142,19 +143,16 @@ TEST(ChordVoicerTest, DiminishedTriad_3Voices) {
   for (uint8_t i = 0; i < voicing.num_voices; ++i) {
     int pc = getPitchClass(voicing.pitches[i]);
     bool is_chord_tone = (pc == 11 || pc == 2 || pc == 5);
-    EXPECT_TRUE(is_chord_tone)
-        << "Voice " << static_cast<int>(i) << " pitch="
-        << static_cast<int>(voicing.pitches[i]);
+    EXPECT_TRUE(is_chord_tone) << "Voice " << static_cast<int>(i)
+                               << " pitch=" << static_cast<int>(voicing.pitches[i]);
   }
 }
 
 TEST(ChordVoicerTest, AllQualities_3Voices_NoVoiceCrossing) {
   ChordQuality qualities[] = {
-      ChordQuality::Major, ChordQuality::Minor,
-      ChordQuality::Diminished, ChordQuality::Augmented,
-      ChordQuality::Dominant7, ChordQuality::Minor7,
-      ChordQuality::MajorMajor7, ChordQuality::Diminished7,
-      ChordQuality::HalfDiminished7,
+      ChordQuality::Major,       ChordQuality::Minor,       ChordQuality::Diminished,
+      ChordQuality::Augmented,   ChordQuality::Dominant7,   ChordQuality::Minor7,
+      ChordQuality::MajorMajor7, ChordQuality::Diminished7, ChordQuality::HalfDiminished7,
   };
 
   for (auto q : qualities) {
@@ -189,9 +187,8 @@ TEST(SmoothVoiceLeadingTest, I_IV_MinimalMotion) {
   for (uint8_t i = 0; i < v2.num_voices; ++i) {
     int pc = getPitchClass(v2.pitches[i]);
     bool is_f_chord = (pc == 5 || pc == 9 || pc == 0);
-    EXPECT_TRUE(is_f_chord)
-        << "Voice " << static_cast<int>(i) << " pitch="
-        << static_cast<int>(v2.pitches[i]);
+    EXPECT_TRUE(is_f_chord) << "Voice " << static_cast<int>(i)
+                            << " pitch=" << static_cast<int>(v2.pitches[i]);
   }
 }
 
@@ -207,8 +204,7 @@ TEST(SmoothVoiceLeadingTest, NoParallelFifths) {
   auto v4 = smoothVoiceLeading(v3, ev_c, 3, testVoiceRange);
 
   // Check each transition for parallel P5/P8.
-  auto check_no_parallel = [](const ChordVoicing& prev, const ChordVoicing& curr,
-                              uint8_t nv) {
+  auto check_no_parallel = [](const ChordVoicing& prev, const ChordVoicing& curr, uint8_t nv) {
     for (uint8_t i = 0; i < nv; ++i) {
       for (uint8_t j = i + 1; j < nv; ++j) {
         int prev_iv = interval_util::compoundToSimple(
@@ -220,9 +216,8 @@ TEST(SmoothVoiceLeadingTest, NoParallelFifths) {
           int mi = curr.pitches[i] - prev.pitches[i];
           int mj = curr.pitches[j] - prev.pitches[j];
           bool parallel = (mi > 0 && mj > 0) || (mi < 0 && mj < 0);
-          EXPECT_FALSE(parallel)
-              << "Parallel perfect between voices " << static_cast<int>(i)
-              << " and " << static_cast<int>(j);
+          EXPECT_FALSE(parallel) << "Parallel perfect between voices " << static_cast<int>(i)
+                                 << " and " << static_cast<int>(j);
         }
       }
     }
@@ -247,10 +242,8 @@ TEST(SmoothVoiceLeadingTest, V7toI_LeadingToneResolvesUp) {
       // Should resolve to C (pc=0), one semitone up.
       int motion = static_cast<int>(v2.pitches[i]) - v1.pitches[i];
       EXPECT_EQ(getPitchClass(v2.pitches[i]), 0)
-          << "Leading tone in voice " << static_cast<int>(i)
-          << " should resolve to tonic";
-      EXPECT_GT(motion, 0)
-          << "Leading tone should resolve upward";
+          << "Leading tone in voice " << static_cast<int>(i) << " should resolve to tonic";
+      EXPECT_GT(motion, 0) << "Leading tone should resolve upward";
     }
   }
 }
@@ -264,8 +257,7 @@ TEST(SmoothVoiceLeadingTest, NoVoiceCrossing_AfterLeading) {
 
   for (uint8_t i = 0; i + 1 < v2.num_voices; ++i) {
     EXPECT_GE(v2.pitches[i], v2.pitches[i + 1])
-        << "Voice crossing between " << static_cast<int>(i)
-        << " and " << static_cast<int>(i + 1);
+        << "Voice crossing between " << static_cast<int>(i) << " and " << static_cast<int>(i + 1);
   }
 }
 

@@ -13,8 +13,8 @@ namespace bach {
 /// @brief Detected cadence with type and tick location.
 struct DetectedCadence {
   CadenceType type = CadenceType::Perfect;
-  Tick tick = 0;           ///< Tick position of the cadence resolution chord.
-  float confidence = 0.0f; ///< Detection confidence [0.0, 1.0].
+  Tick tick = 0;            ///< Tick position of the cadence resolution chord.
+  float confidence = 0.0f;  ///< Detection confidence [0.0, 1.0].
 };
 
 /// @brief Detect cadences from a harmonic timeline (read-only analysis).
@@ -42,8 +42,7 @@ std::vector<DetectedCadence> detectCadences(const HarmonicTimeline& timeline);
 /// @return Ratio of matched planned cadences [0.0, 1.0].
 ///         Returns 0.0 if planned is empty.
 float cadenceDetectionRate(const std::vector<DetectedCadence>& detected,
-                           const std::vector<Tick>& planned,
-                           Tick tolerance_ticks = kTicksPerBeat);
+                           const std::vector<Tick>& planned, Tick tolerance_ticks = kTicksPerBeat);
 
 }  // namespace bach
 

@@ -21,11 +21,11 @@ TEST(CompoundToSimpleTest, SimpleIntervalsUnchanged) {
 }
 
 TEST(CompoundToSimpleTest, CompoundIntervalsReduced) {
-  EXPECT_EQ(interval_util::compoundToSimple(12), 0);   // Octave -> unison
-  EXPECT_EQ(interval_util::compoundToSimple(13), 1);   // Minor 9th -> minor 2nd
-  EXPECT_EQ(interval_util::compoundToSimple(19), 7);   // Compound 5th -> P5
-  EXPECT_EQ(interval_util::compoundToSimple(24), 0);   // Double octave -> unison
-  EXPECT_EQ(interval_util::compoundToSimple(15), 3);   // Compound m3
+  EXPECT_EQ(interval_util::compoundToSimple(12), 0);  // Octave -> unison
+  EXPECT_EQ(interval_util::compoundToSimple(13), 1);  // Minor 9th -> minor 2nd
+  EXPECT_EQ(interval_util::compoundToSimple(19), 7);  // Compound 5th -> P5
+  EXPECT_EQ(interval_util::compoundToSimple(24), 0);  // Double octave -> unison
+  EXPECT_EQ(interval_util::compoundToSimple(15), 3);  // Compound m3
 }
 
 TEST(CompoundToSimpleTest, NegativeIntervals) {
@@ -78,10 +78,10 @@ TEST(IsPerfectIntervalTest, PerfectIntervals) {
 }
 
 TEST(IsPerfectIntervalTest, ImperfectIntervals) {
-  EXPECT_FALSE(interval_util::isPerfectInterval(3));   // Minor 3rd
-  EXPECT_FALSE(interval_util::isPerfectInterval(4));   // Major 3rd
-  EXPECT_FALSE(interval_util::isPerfectInterval(8));   // Minor 6th
-  EXPECT_FALSE(interval_util::isPerfectInterval(9));   // Major 6th
+  EXPECT_FALSE(interval_util::isPerfectInterval(3));  // Minor 3rd
+  EXPECT_FALSE(interval_util::isPerfectInterval(4));  // Major 3rd
+  EXPECT_FALSE(interval_util::isPerfectInterval(8));  // Minor 6th
+  EXPECT_FALSE(interval_util::isPerfectInterval(9));  // Major 6th
 }
 
 TEST(IsPerfectIntervalTest, Dissonances) {
@@ -93,9 +93,9 @@ TEST(IsPerfectIntervalTest, Dissonances) {
 }
 
 TEST(IsPerfectIntervalTest, CompoundPerfect) {
-  EXPECT_TRUE(interval_util::isPerfectInterval(17));   // Compound P4 (17 % 12 = 5)
-  EXPECT_TRUE(interval_util::isPerfectInterval(19));   // Compound P5 (19 % 12 = 7)
-  EXPECT_TRUE(interval_util::isPerfectInterval(24));   // Double octave -> unison
+  EXPECT_TRUE(interval_util::isPerfectInterval(17));  // Compound P4 (17 % 12 = 5)
+  EXPECT_TRUE(interval_util::isPerfectInterval(19));  // Compound P5 (19 % 12 = 7)
+  EXPECT_TRUE(interval_util::isPerfectInterval(24));  // Double octave -> unison
 }
 
 TEST(IsPerfectIntervalTest, NegativeIntervals) {
@@ -115,10 +115,10 @@ TEST(IsConsonanceTest, PerfectConsonances) {
 }
 
 TEST(IsConsonanceTest, ImperfectConsonances) {
-  EXPECT_TRUE(interval_util::isConsonance(3));   // Minor 3rd
-  EXPECT_TRUE(interval_util::isConsonance(4));   // Major 3rd
-  EXPECT_TRUE(interval_util::isConsonance(8));   // Minor 6th
-  EXPECT_TRUE(interval_util::isConsonance(9));   // Major 6th
+  EXPECT_TRUE(interval_util::isConsonance(3));  // Minor 3rd
+  EXPECT_TRUE(interval_util::isConsonance(4));  // Major 3rd
+  EXPECT_TRUE(interval_util::isConsonance(8));  // Minor 6th
+  EXPECT_TRUE(interval_util::isConsonance(9));  // Major 6th
 }
 
 TEST(IsConsonanceTest, Dissonances) {
@@ -135,18 +135,18 @@ TEST(IsConsonanceTest, Dissonances) {
 // ---------------------------------------------------------------------------
 
 TEST(InvertIntervalTest, StandardInversions) {
-  EXPECT_EQ(interval_util::invertInterval(0), 0);    // Unison -> unison
-  EXPECT_EQ(interval_util::invertInterval(1), 11);   // m2 -> M7
-  EXPECT_EQ(interval_util::invertInterval(2), 10);   // M2 -> m7
-  EXPECT_EQ(interval_util::invertInterval(3), 9);    // m3 -> M6
-  EXPECT_EQ(interval_util::invertInterval(4), 8);    // M3 -> m6
-  EXPECT_EQ(interval_util::invertInterval(5), 7);    // P4 -> P5
-  EXPECT_EQ(interval_util::invertInterval(6), 6);    // Tritone -> tritone
-  EXPECT_EQ(interval_util::invertInterval(7), 5);    // P5 -> P4
-  EXPECT_EQ(interval_util::invertInterval(8), 4);    // m6 -> M3
-  EXPECT_EQ(interval_util::invertInterval(9), 3);    // M6 -> m3
-  EXPECT_EQ(interval_util::invertInterval(10), 2);   // m7 -> M2
-  EXPECT_EQ(interval_util::invertInterval(11), 1);   // M7 -> m2
+  EXPECT_EQ(interval_util::invertInterval(0), 0);   // Unison -> unison
+  EXPECT_EQ(interval_util::invertInterval(1), 11);  // m2 -> M7
+  EXPECT_EQ(interval_util::invertInterval(2), 10);  // M2 -> m7
+  EXPECT_EQ(interval_util::invertInterval(3), 9);   // m3 -> M6
+  EXPECT_EQ(interval_util::invertInterval(4), 8);   // M3 -> m6
+  EXPECT_EQ(interval_util::invertInterval(5), 7);   // P4 -> P5
+  EXPECT_EQ(interval_util::invertInterval(6), 6);   // Tritone -> tritone
+  EXPECT_EQ(interval_util::invertInterval(7), 5);   // P5 -> P4
+  EXPECT_EQ(interval_util::invertInterval(8), 4);   // m6 -> M3
+  EXPECT_EQ(interval_util::invertInterval(9), 3);   // M6 -> m3
+  EXPECT_EQ(interval_util::invertInterval(10), 2);  // m7 -> M2
+  EXPECT_EQ(interval_util::invertInterval(11), 1);  // M7 -> m2
 }
 
 TEST(InvertIntervalTest, CompoundIntervalsReducedFirst) {

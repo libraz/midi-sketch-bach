@@ -31,10 +31,14 @@ enum class PhrasePosition : uint8_t {
 /// @brief Convert BarInPhrase (1-4) to PhrasePosition.
 constexpr PhrasePosition toPhrasePosition(BarInPhrase bar_in_phrase) {
   switch (bar_in_phrase) {
-    case 1: return PhrasePosition::Opening;
-    case 2: return PhrasePosition::Expansion;
-    case 3: return PhrasePosition::Intensification;
-    default: return PhrasePosition::Cadence;
+    case 1:
+      return PhrasePosition::Opening;
+    case 2:
+      return PhrasePosition::Expansion;
+    case 3:
+      return PhrasePosition::Intensification;
+    default:
+      return PhrasePosition::Cadence;
   }
 }
 
@@ -57,10 +61,10 @@ struct StructuralBassMotion {
 
 /// @brief Multi-dimensional tension profile.
 struct TensionProfile {
-  float harmonic = 0.0f;   ///< Harmonic tension (dissonance, modulation distance).
-  float melodic = 0.0f;    ///< Melodic tension (range expansion, leap frequency).
-  float rhythmic = 0.0f;   ///< Rhythmic tension (note density, syncopation).
-  float textural = 0.0f;   ///< Textural tension (voice density, register spread).
+  float harmonic = 0.0f;  ///< Harmonic tension (dissonance, modulation distance).
+  float melodic = 0.0f;   ///< Melodic tension (range expansion, leap frequency).
+  float rhythmic = 0.0f;  ///< Rhythmic tension (note density, syncopation).
+  float textural = 0.0f;  ///< Textural tension (voice density, register spread).
 
   /// @brief Weighted aggregate tension.
   float aggregate() const {
@@ -78,7 +82,7 @@ struct StructuralBarInfo {
   ChordDegree chord_degree;
 
   // Layer 3: Phrase structure.
-  BarInPhrase bar_in_phrase;           ///< 1-4.
+  BarInPhrase bar_in_phrase;  ///< 1-4.
   PhrasePosition phrase_pos;
   std::optional<CadenceType> cadence;  ///< std::nullopt if no cadence.
   bool is_structural_bar;              ///< 4th bar of each phrase.
@@ -118,8 +122,7 @@ class GoldbergStructuralGrid {
   /// @param key Key signature for the timeline events.
   /// @param time_sig Time signature for bar duration calculation.
   /// @return HarmonicTimeline with one event per bar.
-  HarmonicTimeline toTimeline(const KeySignature& key,
-                              const TimeSignature& time_sig) const;
+  HarmonicTimeline toTimeline(const KeySignature& key, const TimeSignature& time_sig) const;
 
   // Bass queries.
 

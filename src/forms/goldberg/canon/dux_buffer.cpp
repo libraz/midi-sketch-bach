@@ -12,8 +12,7 @@
 namespace bach {
 
 DuxBuffer::DuxBuffer(const CanonSpec& spec, const TimeSignature& time_sig)
-    : spec_(spec),
-      delay_beats_(spec.delay_bars * static_cast<int>(time_sig.beatsPerBar())) {
+    : spec_(spec), delay_beats_(spec.delay_bars * static_cast<int>(time_sig.beatsPerBar())) {
   // Reserve space for a full 32-bar variation worth of beats.
   // 32 bars * beatsPerBar is the maximum for Goldberg variations.
   int max_beats = 32 * static_cast<int>(time_sig.beatsPerBar());
@@ -21,7 +20,8 @@ DuxBuffer::DuxBuffer(const CanonSpec& spec, const TimeSignature& time_sig)
 }
 
 void DuxBuffer::recordDux(int beat_index, const NoteEvent& note) {
-  if (beat_index < 0) return;
+  if (beat_index < 0)
+    return;
 
   // Grow buffer if needed.
   auto idx = static_cast<size_t>(beat_index);
@@ -59,8 +59,7 @@ std::optional<NoteEvent> DuxBuffer::deriveComes(int beat_index) const {
   // Build comes note: transformed pitch, offset tick, same duration.
   NoteEvent comes = dux_note;
   comes.pitch = transformPitch(dux_note.pitch);
-  comes.start_tick = dux_note.start_tick +
-                     static_cast<Tick>(delay_beats_) * kTicksPerBeat;
+  comes.start_tick = dux_note.start_tick + static_cast<Tick>(delay_beats_) * kTicksPerBeat;
   comes.source = BachNoteSource::CanonComes;
 
   return comes;
@@ -80,9 +79,8 @@ float DuxBuffer::scoreClimaxAlignment(uint8_t candidate_pitch, int current_beat,
   // Determine which bar the current beat falls in.
   // Assuming beatsPerBar derived from the delay configuration:
   // For 3/4 time, delay_beats_ / spec_.delay_bars gives beatsPerBar.
-  int beats_per_bar = (spec_.delay_bars > 0)
-                          ? delay_beats_ / spec_.delay_bars
-                          : 3;  // Fallback to 3/4.
+  int beats_per_bar =
+      (spec_.delay_bars > 0) ? delay_beats_ / spec_.delay_bars : 3;  // Fallback to 3/4.
   int current_bar = (beats_per_bar > 0) ? current_beat / beats_per_bar : 0;
 
   // Clamp bar to grid range [0, 31].

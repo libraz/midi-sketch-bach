@@ -16,13 +16,13 @@ namespace bach {
 /// This is a READ-ONLY analysis product. It never feeds back into
 /// generation and never modifies any notes or timeline events.
 struct VoiceHarmonyReport {
-  float chord_tone_coverage = 0.0f;    ///< Ratio of notes that are chord tones [0,1].
-  float voice_leading_quality = 0.0f;  ///< Ratio of stepwise motion [0,1].
-  float contrary_motion_ratio = 0.0f;  ///< Ratio of contrary motion between voices [0,1].
-  int suspension_count = 0;            ///< Number of detected suspensions.
-  int total_notes = 0;                 ///< Total notes analyzed.
-  int chord_tone_notes = 0;            ///< Notes that are chord tones.
-  int stepwise_notes = 0;              ///< Notes reached by step (1-2 semitones).
+  float chord_tone_coverage = 0.0f;       ///< Ratio of notes that are chord tones [0,1].
+  float voice_leading_quality = 0.0f;     ///< Ratio of stepwise motion [0,1].
+  float contrary_motion_ratio = 0.0f;     ///< Ratio of contrary motion between voices [0,1].
+  int suspension_count = 0;               ///< Number of detected suspensions.
+  int total_notes = 0;                    ///< Total notes analyzed.
+  int chord_tone_notes = 0;               ///< Notes that are chord tones.
+  int stepwise_notes = 0;                 ///< Notes reached by step (1-2 semitones).
   std::vector<std::string> observations;  ///< Human-readable analysis notes.
 };
 

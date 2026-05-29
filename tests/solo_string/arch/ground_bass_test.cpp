@@ -2,12 +2,11 @@
 
 #include "solo_string/arch/ground_bass.h"
 
-#include <vector>
-
 #include <gtest/gtest.h>
 
-#include "analysis/fail_report.h"
+#include <vector>
 
+#include "analysis/fail_report.h"
 #include "core/basic_types.h"
 #include "harmony/key.h"
 
@@ -333,10 +332,10 @@ TEST(GroundBassTest, CreateForKeyPreservesIntervalStructure) {
   ASSERT_EQ(std_notes.size(), trn_notes.size());
 
   for (size_t idx = 1; idx < std_notes.size(); ++idx) {
-    int std_interval = static_cast<int>(std_notes[idx].pitch) -
-                       static_cast<int>(std_notes[idx - 1].pitch);
-    int trn_interval = static_cast<int>(trn_notes[idx].pitch) -
-                       static_cast<int>(trn_notes[idx - 1].pitch);
+    int std_interval =
+        static_cast<int>(std_notes[idx].pitch) - static_cast<int>(std_notes[idx - 1].pitch);
+    int trn_interval =
+        static_cast<int>(trn_notes[idx].pitch) - static_cast<int>(trn_notes[idx - 1].pitch);
     EXPECT_EQ(std_interval, trn_interval)
         << "Interval mismatch between notes " << (idx - 1) << " and " << idx;
   }
@@ -357,7 +356,6 @@ TEST(GroundBassTest, CustomNotesAreStoredCorrectly) {
   EXPECT_EQ(bass.getLengthTicks(), 3840u);
   EXPECT_FALSE(bass.isEmpty());
 }
-
 
 // ===========================================================================
 // verifyIntegrityReport
@@ -390,7 +388,10 @@ TEST(GroundBassTest, IntegrityReportPitchMismatch) {
   EXPECT_TRUE(report.hasCritical());
   bool found = false;
   for (const auto& issue : report.issues) {
-    if (issue.rule == "pitch_mismatch") { found = true; break; }
+    if (issue.rule == "pitch_mismatch") {
+      found = true;
+      break;
+    }
   }
   EXPECT_TRUE(found);
 }
@@ -403,7 +404,10 @@ TEST(GroundBassTest, IntegrityReportTimingMismatch) {
   EXPECT_TRUE(report.hasCritical());
   bool found = false;
   for (const auto& issue : report.issues) {
-    if (issue.rule == "timing_mismatch") { found = true; break; }
+    if (issue.rule == "timing_mismatch") {
+      found = true;
+      break;
+    }
   }
   EXPECT_TRUE(found);
 }
@@ -416,7 +420,10 @@ TEST(GroundBassTest, IntegrityReportDurationMismatch) {
   EXPECT_TRUE(report.hasCritical());
   bool found = false;
   for (const auto& issue : report.issues) {
-    if (issue.rule == "duration_mismatch") { found = true; break; }
+    if (issue.rule == "duration_mismatch") {
+      found = true;
+      break;
+    }
   }
   EXPECT_TRUE(found);
 }
@@ -435,7 +442,8 @@ TEST(GroundBassTest, CreateForKeyRespectsRegisterLow) {
   // G2(43)+12 = G3(55). Lowest should be exactly G3(55).
   uint8_t lowest = 127;
   for (const auto& note : bass.getNotes()) {
-    if (note.pitch < lowest) lowest = note.pitch;
+    if (note.pitch < lowest)
+      lowest = note.pitch;
   }
   EXPECT_EQ(lowest, 55u);
 }
@@ -471,8 +479,7 @@ TEST(GroundBassTest, CreateForKeyPreservesIntervalsAfterShift) {
                         static_cast<int>(bass_no_shift.getNotes()[i - 1].pitch);
     int interval_shifted = static_cast<int>(bass_shifted.getNotes()[i].pitch) -
                            static_cast<int>(bass_shifted.getNotes()[i - 1].pitch);
-    EXPECT_EQ(interval_orig, interval_shifted)
-        << "Interval mismatch at note " << i;
+    EXPECT_EQ(interval_orig, interval_shifted) << "Interval mismatch at note " << i;
   }
 }
 

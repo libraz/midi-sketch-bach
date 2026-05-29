@@ -15,10 +15,7 @@
 namespace bach {
 
 /// Which generation system a form belongs to for analysis routing.
-enum class AnalysisSystem : uint8_t {
-  Organ,
-  SoloString
-};
+enum class AnalysisSystem : uint8_t { Organ, SoloString };
 
 /// @brief Determine the analysis system for a given form type.
 /// @param form The form type.
@@ -30,7 +27,15 @@ struct AnalysisReport {
   bool has_counterpoint = false;
   CounterpointAnalysisResult counterpoint;
   DissonanceAnalysisResult dissonance;
-  bool overall_pass = true;  ///< No High severity + compliance > 0.8.
+  bool overall_pass = true;                   ///< No High severity + compliance > 0.8.
+  float selection_score = 0.0f;               ///< Machine selection score [0,1].
+  bool selection_pass = false;                ///< True if selection_score reaches target.
+  uint32_t penalty_affecting_violations = 0;  ///< High + Medium penalty events.
+  float penalty_affecting_density = 0.0f;     ///< Weighted penalty density / beat.
+  bool melodic_structure_pass = true;         ///< False when flexible voices have remote jumps.
+  uint32_t flexible_large_leap_count = 0;     ///< Flexible-source leaps > perfect fifth.
+  uint32_t flexible_remote_leap_count = 0;    ///< Flexible-source leaps > octave.
+  uint32_t max_flexible_leap = 0;             ///< Largest flexible-source melodic leap.
 
   // Info-level metrics (not quality gate).
   float rhythm_diversity = -1.0f;     ///< [0,1] rhythm diversity (-1 = not computed).
@@ -53,9 +58,8 @@ struct AnalysisReport {
 /// @param generation_timeline Optional beat-resolution timeline for dual-timeline
 ///        NCT downgrade. nullptr preserves backward-compatible single-timeline behavior.
 /// @return Unified AnalysisReport.
-AnalysisReport runAnalysis(const std::vector<Track>& tracks, FormType form,
-                           uint8_t num_voices, const HarmonicTimeline& timeline,
-                           const KeySignature& key_sig,
+AnalysisReport runAnalysis(const std::vector<Track>& tracks, FormType form, uint8_t num_voices,
+                           const HarmonicTimeline& timeline, const KeySignature& key_sig,
                            const HarmonicTimeline* generation_timeline = nullptr);
 
 }  // namespace bach

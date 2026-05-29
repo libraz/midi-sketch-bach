@@ -1,4 +1,5 @@
 #include <gtest/gtest.h>
+
 #include <random>
 
 #include "core/bach_vocabulary.h"
@@ -63,8 +64,7 @@ TEST(GestureVocabularyTest, DramaticusFiguresAreTransposable) {
     // kTrill5 uses Semitone mode (ornamental), others use Degree mode.
     if (hint.figures[idx]->primary_mode == IntervalMode::Degree) {
       EXPECT_TRUE(hint.figures[idx]->allow_transposition)
-          << "Figure " << idx << " (" << hint.figures[idx]->name
-          << ") should be transposable";
+          << "Figure " << idx << " (" << hint.figures[idx]->name << ") should be transposable";
     }
   }
 }
@@ -78,8 +78,7 @@ TEST(GestureVocabularyTest, AllFiguresHaveDegreeIntervals) {
       // Semitone-mode figures (e.g., kTrill5) don't have degree_intervals.
       if (hint.figures[idx]->primary_mode == IntervalMode::Degree) {
         EXPECT_NE(hint.figures[idx]->degree_intervals, nullptr)
-            << "Figure " << hint.figures[idx]->name
-            << " for archetype " << static_cast<int>(arch)
+            << "Figure " << hint.figures[idx]->name << " for archetype " << static_cast<int>(arch)
             << " must have degree_intervals for scale-relative transposition";
       }
     }
@@ -93,10 +92,9 @@ TEST(GestureVocabularyTest, FigureNoteCountsAreConsistent) {
     for (int idx = 0; idx < hint.count; ++idx) {
       ASSERT_NE(hint.figures[idx], nullptr);
       // Vocabulary figures are 4-note or 5-note.
-      EXPECT_TRUE(hint.figures[idx]->note_count == 4 ||
-                  hint.figures[idx]->note_count == 5)
-          << "Figure " << hint.figures[idx]->name
-          << " has unexpected note_count " << hint.figures[idx]->note_count;
+      EXPECT_TRUE(hint.figures[idx]->note_count == 4 || hint.figures[idx]->note_count == 5)
+          << "Figure " << hint.figures[idx]->name << " has unexpected note_count "
+          << hint.figures[idx]->note_count;
     }
   }
 }

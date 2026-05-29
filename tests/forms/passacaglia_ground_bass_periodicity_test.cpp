@@ -2,18 +2,17 @@
 // Verifies: bass pitch class pattern repeats with regularity at bar
 // boundaries across all variations.
 
-#include "forms/passacaglia.h"
+#include <gtest/gtest.h>
 
 #include <algorithm>
 #include <map>
 #include <set>
 #include <vector>
 
-#include <gtest/gtest.h>
-
 #include "core/basic_types.h"
 #include "core/note_source.h"
 #include "core/pitch_utils.h"
+#include "forms/passacaglia.h"
 #include "harmony/key.h"
 
 namespace bach {
@@ -58,10 +57,8 @@ TEST(PassacagliaPeriodicityTest, BassPitchClassRepeatsAcrossVariations) {
 
   // Expected: ground_bass_bars notes per variation.
   int notes_per_var = config.ground_bass_bars;
-  ASSERT_EQ(bass_notes.size(),
-            static_cast<size_t>(notes_per_var * config.num_variations))
-      << "Expected " << notes_per_var * config.num_variations
-      << " ground bass notes";
+  ASSERT_EQ(bass_notes.size(), static_cast<size_t>(notes_per_var * config.num_variations))
+      << "Expected " << notes_per_var * config.num_variations << " ground bass notes";
 
   // Extract pitch class sequence from the first variation.
   std::vector<int> first_var_pcs;
@@ -81,10 +78,9 @@ TEST(PassacagliaPeriodicityTest, BassPitchClassRepeatsAcrossVariations) {
     }
   }
 
-  EXPECT_EQ(mismatches, 0)
-      << "Ground bass pitch class pattern should repeat identically across "
-      << "all " << config.num_variations << " variations, found "
-      << mismatches << " mismatches";
+  EXPECT_EQ(mismatches, 0) << "Ground bass pitch class pattern should repeat identically across "
+                           << "all " << config.num_variations << " variations, found " << mismatches
+                           << " mismatches";
 }
 
 TEST(PassacagliaPeriodicityTest, BassPitchRepeatsExactly) {
@@ -102,21 +98,18 @@ TEST(PassacagliaPeriodicityTest, BassPitchRepeatsExactly) {
   }
 
   int notes_per_var = config.ground_bass_bars;
-  ASSERT_EQ(bass_pitches.size(),
-            static_cast<size_t>(notes_per_var * config.num_variations));
+  ASSERT_EQ(bass_pitches.size(), static_cast<size_t>(notes_per_var * config.num_variations));
 
   // Extract first variation pattern.
-  std::vector<uint8_t> pattern(bass_pitches.begin(),
-                                bass_pitches.begin() + notes_per_var);
+  std::vector<uint8_t> pattern(bass_pitches.begin(), bass_pitches.begin() + notes_per_var);
 
   // Verify all subsequent variations match exactly.
   for (int var_idx = 1; var_idx < config.num_variations; ++var_idx) {
     for (int i = 0; i < notes_per_var; ++i) {
       size_t idx = static_cast<size_t>(var_idx * notes_per_var + i);
       EXPECT_EQ(bass_pitches[idx], pattern[i])
-          << "Variation " << var_idx << " note " << i
-          << ": expected pitch " << static_cast<int>(pattern[i])
-          << " got " << static_cast<int>(bass_pitches[idx]);
+          << "Variation " << var_idx << " note " << i << ": expected pitch "
+          << static_cast<int>(pattern[i]) << " got " << static_cast<int>(bass_pitches[idx]);
     }
   }
 }
@@ -136,8 +129,7 @@ TEST(PassacagliaPeriodicityTest, MultiSeed_BassPeriodicityPreserved) {
     }
 
     int notes_per_var = config.ground_bass_bars;
-    ASSERT_EQ(bass_pitches.size(),
-              static_cast<size_t>(notes_per_var * config.num_variations))
+    ASSERT_EQ(bass_pitches.size(), static_cast<size_t>(notes_per_var * config.num_variations))
         << "Seed " << seed;
 
     // Check all variations against first.
@@ -161,8 +153,7 @@ TEST(PassacagliaPeriodicityTest, BarBoundaryBassHasRegularPeriod) {
   PassacagliaResult result = generatePassacaglia(config);
   ASSERT_TRUE(result.success);
 
-  Tick variation_duration =
-      static_cast<Tick>(config.ground_bass_bars) * kTicksPerBar;
+  Tick variation_duration = static_cast<Tick>(config.ground_bass_bars) * kTicksPerBar;
 
   // Collect bass pitch at every bar boundary.
   const auto& pedal_track = result.tracks.back();
@@ -180,8 +171,8 @@ TEST(PassacagliaPeriodicityTest, BarBoundaryBassHasRegularPeriod) {
 
   for (int var_idx = 0; var_idx + 1 < config.num_variations; ++var_idx) {
     for (int bar = 0; bar < config.ground_bass_bars; ++bar) {
-      Tick tick_a = static_cast<Tick>(var_idx) * variation_duration +
-                    static_cast<Tick>(bar) * kTicksPerBar;
+      Tick tick_a =
+          static_cast<Tick>(var_idx) * variation_duration + static_cast<Tick>(bar) * kTicksPerBar;
       Tick tick_b = static_cast<Tick>(var_idx + 1) * variation_duration +
                     static_cast<Tick>(bar) * kTicksPerBar;
 
@@ -201,10 +192,9 @@ TEST(PassacagliaPeriodicityTest, BarBoundaryBassHasRegularPeriod) {
 
   // Ground bass is immutable, so all pairs should match.
   double match_ratio = static_cast<double>(matched_pairs) / total_pairs;
-  EXPECT_GE(match_ratio, 1.0)
-      << "Bass periodicity ratio " << match_ratio
-      << " (expected 1.0 for immutable ground bass): "
-      << matched_pairs << "/" << total_pairs << " matched";
+  EXPECT_GE(match_ratio, 1.0) << "Bass periodicity ratio " << match_ratio
+                              << " (expected 1.0 for immutable ground bass): " << matched_pairs
+                              << "/" << total_pairs << " matched";
 }
 
 // ---------------------------------------------------------------------------

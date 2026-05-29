@@ -66,8 +66,7 @@ TEST(HarmonicTensionTest, DiminishedTriadReturns09) {
 }
 
 TEST(HarmonicTensionTest, FullyDiminished7Returns10) {
-  EXPECT_FLOAT_EQ(1.0f,
-                  computeHarmonicTension(ChordDegree::viiDim, ChordQuality::Diminished7));
+  EXPECT_FLOAT_EQ(1.0f, computeHarmonicTension(ChordDegree::viiDim, ChordQuality::Diminished7));
 }
 
 TEST(HarmonicTensionTest, NeapolitanReturns06) {
@@ -132,25 +131,21 @@ TEST(HarmonicTensionTest, EventOverloadDiminished7) {
 TEST(HarmonicTensionTest, AllResultsInUnitRange) {
   // Test all ChordDegree values with a few qualities to ensure [0.0, 1.0].
   ChordDegree degrees[] = {
-      ChordDegree::I,      ChordDegree::ii,      ChordDegree::iii,
-      ChordDegree::IV,     ChordDegree::V,       ChordDegree::vi,
-      ChordDegree::viiDim, ChordDegree::bII,     ChordDegree::V_of_V,
-      ChordDegree::V_of_vi, ChordDegree::V_of_IV, ChordDegree::V_of_ii,
-      ChordDegree::bVI,    ChordDegree::bVII,    ChordDegree::bIII,
-      ChordDegree::V_of_iii};
-  ChordQuality qualities[] = {ChordQuality::Major, ChordQuality::Minor,
-                               ChordQuality::Dominant7, ChordQuality::Diminished7};
+      ChordDegree::I,      ChordDegree::ii,      ChordDegree::iii,     ChordDegree::IV,
+      ChordDegree::V,      ChordDegree::vi,      ChordDegree::viiDim,  ChordDegree::bII,
+      ChordDegree::V_of_V, ChordDegree::V_of_vi, ChordDegree::V_of_IV, ChordDegree::V_of_ii,
+      ChordDegree::bVI,    ChordDegree::bVII,    ChordDegree::bIII,    ChordDegree::V_of_iii};
+  ChordQuality qualities[] = {ChordQuality::Major, ChordQuality::Minor, ChordQuality::Dominant7,
+                              ChordQuality::Diminished7};
 
   for (auto deg : degrees) {
     for (auto qual : qualities) {
       for (int inv = 0; inv <= 3; ++inv) {
         float tension = computeHarmonicTension(deg, qual, inv);
-        EXPECT_GE(tension, 0.0f)
-            << "degree=" << static_cast<int>(deg)
-            << " quality=" << static_cast<int>(qual) << " inv=" << inv;
-        EXPECT_LE(tension, 1.0f)
-            << "degree=" << static_cast<int>(deg)
-            << " quality=" << static_cast<int>(qual) << " inv=" << inv;
+        EXPECT_GE(tension, 0.0f) << "degree=" << static_cast<int>(deg)
+                                 << " quality=" << static_cast<int>(qual) << " inv=" << inv;
+        EXPECT_LE(tension, 1.0f) << "degree=" << static_cast<int>(deg)
+                                 << " quality=" << static_cast<int>(qual) << " inv=" << inv;
       }
     }
   }

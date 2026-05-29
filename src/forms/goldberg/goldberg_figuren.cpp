@@ -23,7 +23,7 @@ constexpr uint8_t kDefaultVelocity = 80;
 
 /// Harpsichord range limits (MIDI pitch).
 constexpr uint8_t kHarpsichordLow = 36;   // C2
-constexpr uint8_t kHarpsichordHigh = 96;   // C7
+constexpr uint8_t kHarpsichordHigh = 96;  // C7
 
 /// Register offset per voice index (semitones relative to tonic octave 4).
 /// voice_index 0 = melody register (~G4), 1 = middle (~G3), 2+ = lower (~G2).
@@ -47,9 +47,8 @@ const int* scaleIntervalsForKey(const KeySignature& key) {
 /// @param register_offset Octave offset from pivot.
 /// @return Vector of 3 chord-tone MIDI pitches.
 std::vector<uint8_t> buildChordTones(uint8_t pivot_pitch, const KeySignature& key,
-                                      int register_offset,
-                                      uint8_t range_low = kHarpsichordLow,
-                                      uint8_t range_high = kHarpsichordHigh) {
+                                     int register_offset, uint8_t range_low = kHarpsichordLow,
+                                     uint8_t range_high = kHarpsichordHigh) {
   int root_pc = static_cast<int>(key.tonic);
   const int* scale = scaleIntervalsForKey(key);
   int pivot_pc = getPitchClass(pivot_pitch);
@@ -81,8 +80,10 @@ std::vector<uint8_t> buildChordTones(uint8_t pivot_pitch, const KeySignature& ke
     int pc = (root_pc + scale[deg]) % 12;
     int target = base + (pc - getPitchClass(static_cast<uint8_t>(base)));
     // Ensure we go in the right direction.
-    if (target < base - 6) target += 12;
-    if (target > base + 18) target -= 12;
+    if (target < base - 6)
+      target += 12;
+    if (target > base + 18)
+      target -= 12;
     target += octave_add * 12;
     tones.push_back(clampPitch(target, range_low, range_high));
   }
@@ -139,8 +140,7 @@ uint8_t getScaleNeighbor(uint8_t pitch, int direction, const KeySignature& key,
 /// @param key Key signature.
 /// @return MIDI pitch after the given scale steps.
 uint8_t scaleStep(uint8_t pitch, int steps, const KeySignature& key,
-                  uint8_t range_low = kHarpsichordLow,
-                  uint8_t range_high = kHarpsichordHigh) {
+                  uint8_t range_low = kHarpsichordLow, uint8_t range_high = kHarpsichordHigh) {
   uint8_t result = pitch;
   int dir = steps > 0 ? 1 : -1;
   int remaining = steps > 0 ? steps : -steps;
@@ -157,9 +157,8 @@ uint8_t scaleStep(uint8_t pitch, int steps, const KeySignature& key,
 /// @param key Key signature.
 /// @return Vector of scale pitches from 'from' toward 'to_pitch'.
 std::vector<uint8_t> fillScaleRun(uint8_t from, uint8_t to_pitch, int count,
-                                   const KeySignature& key,
-                                   uint8_t range_low = kHarpsichordLow,
-                                   uint8_t range_high = kHarpsichordHigh) {
+                                  const KeySignature& key, uint8_t range_low = kHarpsichordLow,
+                                  uint8_t range_high = kHarpsichordHigh) {
   std::vector<uint8_t> result;
   result.reserve(static_cast<size_t>(count));
 
@@ -197,14 +196,9 @@ PhraseShapingParams getDefaultPhraseShaping(PhrasePosition pos) {
 // ---------------------------------------------------------------------------
 
 std::vector<NoteEvent> FigurenGenerator::generate(
-    const FiguraProfile& profile,
-    const GoldbergStructuralGrid& grid,
-    const KeySignature& key,
-    const TimeSignature& time_sig,
-    uint8_t voice_index,
-    uint32_t seed,
-    const IKeyboardInstrument* instrument,
-    float theme_strength) const {
+    const FiguraProfile& profile, const GoldbergStructuralGrid& grid, const KeySignature& key,
+    const TimeSignature& time_sig, uint8_t voice_index, uint32_t seed,
+    const IKeyboardInstrument* instrument, float theme_strength) const {
   std::vector<NoteEvent> all_notes;
   all_notes.reserve(static_cast<size_t>(kGridBars) * profile.notes_per_beat *
                     time_sig.beatsPerBar());
@@ -216,12 +210,9 @@ std::vector<NoteEvent> FigurenGenerator::generate(
   const uint8_t range_high = instrument ? instrument->getHighestPitch() : kHarpsichordHigh;
 
   // Determine starting pitch based on voice index and key.
-  int reg_offset = (voice_index < kNumRegisterOffsets)
-                       ? kVoiceRegisterOffsets[voice_index]
-                       : 0;
-  uint8_t register_center = clampPitch(
-      static_cast<int>(tonicPitch(key.tonic, 4)) + reg_offset,
-      range_low, range_high);
+  int reg_offset = (voice_index < kNumRegisterOffsets) ? kVoiceRegisterOffsets[voice_index] : 0;
+  uint8_t register_center =
+      clampPitch(static_cast<int>(tonicPitch(key.tonic, 4)) + reg_offset, range_low, range_high);
   uint8_t prev_pitch = register_center;
 
   Tick ticks_per_bar = time_sig.ticksPerBar();
@@ -230,9 +221,9 @@ std::vector<NoteEvent> FigurenGenerator::generate(
     const auto& bar_info = grid.getBar(bar_idx);
     PhraseShapingParams shaping = getDefaultPhraseShaping(bar_info.phrase_pos);
 
-    auto bar_notes = generateBarFigura(
-        profile, bar_info, key, time_sig, prev_pitch, register_center,
-        shaping, range_low, range_high, theme_strength, rng);
+    auto bar_notes =
+        generateBarFigura(profile, bar_info, key, time_sig, prev_pitch, register_center, shaping,
+                          range_low, range_high, theme_strength, rng);
 
     // Offset notes to correct bar position.
     Tick bar_start = static_cast<Tick>(bar_idx) * ticks_per_bar;
@@ -285,16 +276,9 @@ std::vector<NoteEvent> FigurenGenerator::generate(
 // ---------------------------------------------------------------------------
 
 std::vector<NoteEvent> FigurenGenerator::generateBarFigura(
-    const FiguraProfile& profile,
-    const StructuralBarInfo& bar_info,
-    const KeySignature& key,
-    const TimeSignature& time_sig,
-    uint8_t prev_pitch,
-    uint8_t register_center,
-    const PhraseShapingParams& shaping,
-    uint8_t range_low,
-    uint8_t range_high,
-    float theme_strength,
+    const FiguraProfile& profile, const StructuralBarInfo& bar_info, const KeySignature& key,
+    const TimeSignature& time_sig, uint8_t prev_pitch, uint8_t register_center,
+    const PhraseShapingParams& shaping, uint8_t range_low, uint8_t range_high, float theme_strength,
     std::mt19937& rng) const {
   // Get harmonic pivot from the structural grid.
   uint8_t pivot = bar_info.bass_motion.primary_pitch;
@@ -320,22 +304,24 @@ std::vector<NoteEvent> FigurenGenerator::generateBarFigura(
   }
 
   // Compute register offset from register_center (not prev_pitch) to avoid drift.
-  int voice_reg = nearestOctaveShift(
-      static_cast<int>(register_center) - static_cast<int>(pivot));
+  int voice_reg = nearestOctaveShift(static_cast<int>(register_center) - static_cast<int>(pivot));
 
   // Generate the pitch pattern.
-  auto pitches = generateFiguraPattern(
-      active_type, pivot, effective_npb, effective_dir, key, voice_reg,
-      range_low, range_high, rng);
+  auto pitches = generateFiguraPattern(active_type, pivot, effective_npb, effective_dir, key,
+                                       voice_reg, range_low, range_high, rng);
 
-  if (pitches.empty()) return {};
+  if (pitches.empty())
+    return {};
 
   // Smooth melodic connection: adjust first non-rest pitch to be close to prev_pitch.
   if (prev_pitch > 0 && !pitches.empty()) {
     // Find first non-rest pitch.
     uint8_t first_sounding = 0;
     for (auto val : pitches) {
-      if (val > 0) { first_sounding = val; break; }
+      if (val > 0) {
+        first_sounding = val;
+        break;
+      }
     }
     if (first_sounding > 0) {
       int diff = static_cast<int>(first_sounding) - static_cast<int>(prev_pitch);
@@ -343,8 +329,7 @@ std::vector<NoteEvent> FigurenGenerator::generateBarFigura(
         int shift = nearestOctaveShift(diff);
         for (auto& pitch : pitches) {
           if (pitch > 0) {  // Only adjust sounding pitches, not rest markers.
-            pitch = clampPitch(static_cast<int>(pitch) - shift,
-                               range_low, range_high);
+            pitch = clampPitch(static_cast<int>(pitch) - shift, range_low, range_high);
           }
         }
       }
@@ -372,7 +357,8 @@ std::vector<NoteEvent> FigurenGenerator::generateBarFigura(
     uint8_t pitch = pitches[idx];
 
     // Pitch 0 is a rest marker (e.g., Suspirans sigh gap). Skip it.
-    if (pitch == 0) continue;
+    if (pitch == 0)
+      continue;
 
     // Apply chord tone ratio: with probability chord_ratio, snap to nearest chord tone.
     if (prob_dist(rng) < chord_ratio && !chord_tones.empty()) {
@@ -385,14 +371,10 @@ std::vector<NoteEvent> FigurenGenerator::generateBarFigura(
 
     // Theme distance bias: on beat starts, pull toward Aria melody pitches.
     int notes_per_beat = static_cast<int>(effective_npb);
-    bool is_beat_start = (notes_per_beat > 0) &&
-                         (static_cast<int>(idx) % notes_per_beat == 0);
+    bool is_beat_start = (notes_per_beat > 0) && (static_cast<int>(idx) % notes_per_beat == 0);
     if (theme_strength > 0.0f && is_beat_start) {
-      int beat_idx = (notes_per_beat > 0)
-                         ? static_cast<int>(idx) / notes_per_beat
-                         : 0;
-      uint8_t theme_pitch = bar_info.aria_melody[
-          static_cast<size_t>(std::min(beat_idx, 2))];
+      int beat_idx = (notes_per_beat > 0) ? static_cast<int>(idx) / notes_per_beat : 0;
+      uint8_t theme_pitch = bar_info.aria_melody[static_cast<size_t>(std::min(beat_idx, 2))];
       if (theme_pitch > 0) {
         int dist_to_theme = absoluteInterval(pitch, theme_pitch);
         float effective_strength = theme_strength;
@@ -435,27 +417,21 @@ std::vector<NoteEvent> FigurenGenerator::generateBarFigura(
 // ---------------------------------------------------------------------------
 
 std::vector<uint8_t> FigurenGenerator::generateFiguraPattern(
-    FiguraType type,
-    uint8_t pivot_pitch,
-    uint8_t notes_per_beat,
-    DirectionBias direction,
-    const KeySignature& key,
-    int register_offset,
-    uint8_t range_low,
-    uint8_t range_high,
+    FiguraType type, uint8_t pivot_pitch, uint8_t notes_per_beat, DirectionBias direction,
+    const KeySignature& key, int register_offset, uint8_t range_low, uint8_t range_high,
     std::mt19937& rng) const {
   // Total notes for one bar (3 beats typical for 3/4).
   // The caller determines beats from time_sig, but we generate based on notes_per_beat.
   // Aim for 3 beats * notes_per_beat as a baseline (adjusted by caller if needed).
   constexpr int kDefaultBeats = 3;
   int total_notes = kDefaultBeats * static_cast<int>(notes_per_beat);
-  if (total_notes <= 0) total_notes = 3;
+  if (total_notes <= 0)
+    total_notes = 3;
 
   std::vector<uint8_t> pattern;
   pattern.reserve(static_cast<size_t>(total_notes));
 
-  auto chord_tones = buildChordTones(pivot_pitch, key, register_offset,
-                                      range_low, range_high);
+  auto chord_tones = buildChordTones(pivot_pitch, key, register_offset, range_low, range_high);
 
   switch (type) {
     case FiguraType::Circulatio: {
@@ -465,10 +441,18 @@ std::vector<uint8_t> FigurenGenerator::generateFiguraPattern(
       uint8_t lower = getScaleNeighbor(center, -1, key);
       for (int idx = 0; idx < total_notes; ++idx) {
         switch (idx % 4) {
-          case 0: pattern.push_back(center); break;
-          case 1: pattern.push_back(upper); break;
-          case 2: pattern.push_back(center); break;
-          case 3: pattern.push_back(lower); break;
+          case 0:
+            pattern.push_back(center);
+            break;
+          case 1:
+            pattern.push_back(upper);
+            break;
+          case 2:
+            pattern.push_back(center);
+            break;
+          case 3:
+            pattern.push_back(lower);
+            break;
         }
       }
       break;
@@ -480,12 +464,10 @@ std::vector<uint8_t> FigurenGenerator::generateFiguraPattern(
       if (direction == DirectionBias::Descending) {
         target = getScaleNeighbor(pivot_pitch, -1, key);
         // Fill downward.
-        target = clampPitch(static_cast<int>(pivot_pitch) - 12,
-                            range_low, range_high);
+        target = clampPitch(static_cast<int>(pivot_pitch) - 12, range_low, range_high);
       }
-      pattern = fillScaleRun(
-          chord_tones.empty() ? pivot_pitch : chord_tones[0],
-          target, total_notes, key);
+      pattern = fillScaleRun(chord_tones.empty() ? pivot_pitch : chord_tones[0], target,
+                             total_notes, key);
       break;
     }
 
@@ -494,9 +476,9 @@ std::vector<uint8_t> FigurenGenerator::generateFiguraPattern(
       if (chord_tones.size() < 2) {
         // Fallback: alternate pivot with octave above.
         for (int idx = 0; idx < total_notes; ++idx) {
-          pattern.push_back(idx % 2 == 0 ? pivot_pitch
-                                         : clampPitch(static_cast<int>(pivot_pitch) + 12,
-                                                      range_low, range_high));
+          pattern.push_back(
+              idx % 2 == 0 ? pivot_pitch
+                           : clampPitch(static_cast<int>(pivot_pitch) + 12, range_low, range_high));
         }
       } else {
         // Alternate between lowest and highest chord tones.
@@ -522,8 +504,7 @@ std::vector<uint8_t> FigurenGenerator::generateFiguraPattern(
       auto tones = chord_tones;
       // Add octave of root.
       if (!tones.empty()) {
-        uint8_t octave_root = clampPitch(static_cast<int>(tones[0]) + 12,
-                                          range_low, range_high);
+        uint8_t octave_root = clampPitch(static_cast<int>(tones[0]) + 12, range_low, range_high);
         tones.push_back(octave_root);
       }
       if (direction == DirectionBias::Descending) {
@@ -585,8 +566,8 @@ std::vector<uint8_t> FigurenGenerator::generateFiguraPattern(
         } else {
           // Short note: scale step toward next chord tone.
           uint8_t prev = pattern.back();
-          pattern.push_back(getScaleNeighbor(prev, direction == DirectionBias::Descending ? -1 : 1,
-                                              key));
+          pattern.push_back(
+              getScaleNeighbor(prev, direction == DirectionBias::Descending ? -1 : 1, key));
         }
       }
       break;
@@ -601,8 +582,8 @@ std::vector<uint8_t> FigurenGenerator::generateFiguraPattern(
         }
       } else {
         uint8_t low_tone = chord_tones[0];
-        uint8_t high_tone = clampPitch(static_cast<int>(chord_tones.back()) + 12,
-                                        range_low, range_high);
+        uint8_t high_tone =
+            clampPitch(static_cast<int>(chord_tones.back()) + 12, range_low, range_high);
         for (int idx = 0; idx < total_notes; ++idx) {
           pattern.push_back(idx % 2 == 0 ? low_tone : high_tone);
         }
@@ -634,9 +615,12 @@ std::vector<uint8_t> FigurenGenerator::generateFiguraPattern(
         pattern.push_back(current);
         // Symmetric: reverse direction when reaching register bounds.
         if (direction == DirectionBias::Symmetric || direction == DirectionBias::Alternating) {
-          if (current >= range_high - 5) dir = -1;
-          else if (current <= range_low + 5) dir = 1;
-          else if (idx % 6 == 5) dir = -dir;  // Alternate every 6 notes.
+          if (current >= range_high - 5)
+            dir = -1;
+          else if (current <= range_low + 5)
+            dir = 1;
+          else if (idx % 6 == 5)
+            dir = -dir;  // Alternate every 6 notes.
         }
         if (leap_dist(rng) == 0) {
           current = scaleStep(current, dir * 2, key);
@@ -658,8 +642,7 @@ std::vector<uint8_t> FigurenGenerator::generateFiguraPattern(
           current = scaleStep(current, direction == DirectionBias::Descending ? -2 : 2, key);
         } else {
           // Step.
-          current = getScaleNeighbor(current,
-                                      direction == DirectionBias::Descending ? -1 : 1, key);
+          current = getScaleNeighbor(current, direction == DirectionBias::Descending ? -1 : 1, key);
         }
       }
       break;
@@ -673,11 +656,10 @@ std::vector<uint8_t> FigurenGenerator::generateFiguraPattern(
 // FigurenGenerator::applyPhraseShaping
 // ---------------------------------------------------------------------------
 
-void FigurenGenerator::applyPhraseShaping(
-    std::vector<NoteEvent>& notes,
-    PhrasePosition pos,
-    const TensionProfile& tension) const {
-  if (notes.empty()) return;
+void FigurenGenerator::applyPhraseShaping(std::vector<NoteEvent>& notes, PhrasePosition pos,
+                                          const TensionProfile& tension) const {
+  if (notes.empty())
+    return;
 
   switch (pos) {
     case PhrasePosition::Opening:
@@ -687,8 +669,7 @@ void FigurenGenerator::applyPhraseShaping(
     case PhrasePosition::Expansion:
       // Slight velocity increase for expansion.
       for (auto& note : notes) {
-        note.velocity = clampPitch(
-            static_cast<int>(note.velocity) + 5, 1, 127);
+        note.velocity = clampPitch(static_cast<int>(note.velocity) + 5, 1, 127);
       }
       break;
 
@@ -696,8 +677,7 @@ void FigurenGenerator::applyPhraseShaping(
       // Build tension: increase velocity proportional to tension.
       int vel_boost = static_cast<int>(tension.aggregate() * 15.0f);
       for (auto& note : notes) {
-        note.velocity = clampPitch(
-            static_cast<int>(note.velocity) + vel_boost, 1, 127);
+        note.velocity = clampPitch(static_cast<int>(note.velocity) + vel_boost, 1, 127);
       }
       break;
     }
@@ -709,8 +689,8 @@ void FigurenGenerator::applyPhraseShaping(
         size_t taper_start = notes.size() * 3 / 4;
         for (size_t idx = taper_start; idx < notes.size(); ++idx) {
           int reduction = static_cast<int>((idx - taper_start + 1) * 3);
-          notes[idx].velocity = clampPitch(
-              static_cast<int>(notes[idx].velocity) - reduction, 40, 127);
+          notes[idx].velocity =
+              clampPitch(static_cast<int>(notes[idx].velocity) - reduction, 40, 127);
         }
       }
       break;
@@ -722,22 +702,21 @@ void FigurenGenerator::applyPhraseShaping(
 // FigurenGenerator::applySequence
 // ---------------------------------------------------------------------------
 
-std::vector<NoteEvent> FigurenGenerator::applySequence(
-    const std::vector<NoteEvent>& motif,
-    int degree_step,
-    int repetitions,
-    const KeySignature& key) const {
-  if (motif.empty() || repetitions <= 0) return {};
+std::vector<NoteEvent> FigurenGenerator::applySequence(const std::vector<NoteEvent>& motif,
+                                                       int degree_step, int repetitions,
+                                                       const KeySignature& key) const {
+  if (motif.empty() || repetitions <= 0)
+    return {};
 
   Tick dur = motifDuration(motif);
-  if (dur == 0) return {};
+  if (dur == 0)
+    return {};
 
   // Find start tick of the motif.
   Tick motif_end = motif.front().start_tick + dur;
 
   ScaleType scale = key.is_minor ? ScaleType::NaturalMinor : ScaleType::Major;
-  return generateDiatonicSequence(motif, repetitions, degree_step, motif_end,
-                                  key.tonic, scale);
+  return generateDiatonicSequence(motif, repetitions, degree_step, motif_end, key.tonic, scale);
 }
 
 }  // namespace bach

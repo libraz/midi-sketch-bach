@@ -37,10 +37,8 @@ class FughettaGenerator {
   /// @param time_sig Time signature (3/4 for Var 10, 2/2 for Var 22).
   /// @param seed Random seed for deterministic generation.
   /// @return FughettaResult with notes across 4 voices and success status.
-  FughettaResult generate(int variation_number,
-                          const GoldbergStructuralGrid& grid,
-                          const KeySignature& key,
-                          const TimeSignature& time_sig,
+  FughettaResult generate(int variation_number, const GoldbergStructuralGrid& grid,
+                          const KeySignature& key, const TimeSignature& time_sig,
                           uint32_t seed) const;
 };
 

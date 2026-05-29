@@ -37,13 +37,8 @@ constexpr uint8_t kBassHigh = 60;  // C4
 ///   Hold: extend previous note (no new onset).
 ///   Suspension43: beat 1 duration extends into beat 2 head, resolution on beat 2 weak part.
 ///   Appoggiatura: non-chord onset on beat 2, resolution mid-beat.
-void placeSkeletonBar(
-    std::vector<NoteEvent>& notes,
-    const AriaTheme& theme,
-    int bar_idx,
-    Tick bar_start,
-    Tick beat_duration,
-    const KeySignature& key) {
+void placeSkeletonBar(std::vector<NoteEvent>& notes, const AriaTheme& theme, int bar_idx,
+                      Tick bar_start, Tick beat_duration, const KeySignature& key) {
   for (int beat = 0; beat < 3; ++beat) {
     BeatFunction func = theme.getFunction(bar_idx, beat);
     uint8_t pitch = theme.getPitch(bar_idx, beat);
@@ -54,8 +49,7 @@ void placeSkeletonBar(
     if (func == BeatFunction::Hold) {
       if (!notes.empty()) {
         auto& prev = notes.back();
-        if (prev.start_tick >= bar_start ||
-            prev.start_tick + prev.duration >= bar_start) {
+        if (prev.start_tick >= bar_start || prev.start_tick + prev.duration >= bar_start) {
           prev.duration += beat_duration;
           continue;
         }
@@ -79,7 +73,8 @@ void placeSkeletonBar(
         res_opts.velocity = kMelodyVelocity;
         res_opts.source = BachNoteSource::GoldbergAria;
         auto res = createBachNote(nullptr, nullptr, nullptr, res_opts);
-        if (res.accepted) notes.push_back(res.note);
+        if (res.accepted)
+          notes.push_back(res.note);
         continue;
       }
     }
@@ -96,7 +91,8 @@ void placeSkeletonBar(
       app_opts.velocity = kMelodyVelocity;
       app_opts.source = BachNoteSource::GoldbergAria;
       auto app_res = createBachNote(nullptr, nullptr, nullptr, app_opts);
-      if (app_res.accepted) notes.push_back(app_res.note);
+      if (app_res.accepted)
+        notes.push_back(app_res.note);
 
       // Resolution: the beat 3 pitch provides the resolution.
       // Place it as the second half of beat 2.
@@ -109,7 +105,8 @@ void placeSkeletonBar(
       res_opts.velocity = kMelodyVelocity;
       res_opts.source = BachNoteSource::GoldbergAria;
       auto res = createBachNote(nullptr, nullptr, nullptr, res_opts);
-      if (res.accepted) notes.push_back(res.note);
+      if (res.accepted)
+        notes.push_back(res.note);
       continue;
     }
 
@@ -133,13 +130,19 @@ void placeSkeletonBar(
 
 /// Ornament density per phrase position (bar_in_phrase 1-4).
 float getOrnamentDensity(uint8_t bar_in_phrase, bool next_is_cadence) {
-  if (next_is_cadence) return 0.25f;  // Peak before cadence.
+  if (next_is_cadence)
+    return 0.25f;  // Peak before cadence.
   switch (bar_in_phrase) {
-    case 1: return 0.08f;   // Opening: restrained.
-    case 2: return 0.15f;   // Expansion.
-    case 3: return 0.20f;   // Intensification.
-    case 4: return 0.10f;   // Cadence: don't disturb resolution.
-    default: return 0.10f;
+    case 1:
+      return 0.08f;  // Opening: restrained.
+    case 2:
+      return 0.15f;  // Expansion.
+    case 3:
+      return 0.20f;  // Intensification.
+    case 4:
+      return 0.10f;  // Cadence: don't disturb resolution.
+    default:
+      return 0.10f;
   }
 }
 
@@ -149,11 +152,8 @@ float getOrnamentDensity(uint8_t bar_in_phrase, bool next_is_cadence) {
 // AriaGenerator::generate
 // ---------------------------------------------------------------------------
 
-AriaResult AriaGenerator::generate(
-    const GoldbergStructuralGrid& grid,
-    const KeySignature& key,
-    const TimeSignature& time_sig,
-    uint32_t seed) const {
+AriaResult AriaGenerator::generate(const GoldbergStructuralGrid& grid, const KeySignature& key,
+                                   const TimeSignature& time_sig, uint32_t seed) const {
   AriaResult result;
   std::mt19937 rng(seed);
 
@@ -190,9 +190,7 @@ AriaResult AriaGenerator::generate(
 // AriaGenerator::createDaCapo
 // ---------------------------------------------------------------------------
 
-AriaResult AriaGenerator::createDaCapo(
-    const AriaResult& original,
-    Tick tick_offset) {
+AriaResult AriaGenerator::createDaCapo(const AriaResult& original, Tick tick_offset) {
   AriaResult result;
 
   result.melody_notes.reserve(original.melody_notes.size());
@@ -216,11 +214,10 @@ AriaResult AriaGenerator::createDaCapo(
 // AriaGenerator::generateBassLine
 // ---------------------------------------------------------------------------
 
-std::vector<NoteEvent> AriaGenerator::generateBassLine(
-    const GoldbergStructuralGrid& grid,
-    const KeySignature& /*key*/,
-    const TimeSignature& time_sig,
-    std::mt19937& /*rng*/) const {
+std::vector<NoteEvent> AriaGenerator::generateBassLine(const GoldbergStructuralGrid& grid,
+                                                       const KeySignature& /*key*/,
+                                                       const TimeSignature& time_sig,
+                                                       std::mt19937& /*rng*/) const {
   std::vector<NoteEvent> bass_notes;
   bass_notes.reserve(kGridBars * 2);
 
@@ -233,8 +230,7 @@ std::vector<NoteEvent> AriaGenerator::generateBassLine(
     int target_center = (kBassLow + kBassHigh) / 2;
     int diff = static_cast<int>(primary_pitch) - target_center;
     int shift = nearestOctaveShift(diff);
-    uint8_t bass_pitch = clampPitch(
-        static_cast<int>(primary_pitch) - shift, kBassLow, kBassHigh);
+    uint8_t bass_pitch = clampPitch(static_cast<int>(primary_pitch) - shift, kBassLow, kBassHigh);
 
     Tick bar_start = static_cast<Tick>(bar_idx) * ticks_per_bar;
 
@@ -259,8 +255,8 @@ std::vector<NoteEvent> AriaGenerator::generateBassLine(
       uint8_t res_pitch_raw = bar_info.bass_motion.resolution_pitch.value();
       int res_diff = static_cast<int>(res_pitch_raw) - target_center;
       int res_shift = nearestOctaveShift(res_diff);
-      uint8_t res_pitch = clampPitch(
-          static_cast<int>(res_pitch_raw) - res_shift, kBassLow, kBassHigh);
+      uint8_t res_pitch =
+          clampPitch(static_cast<int>(res_pitch_raw) - res_shift, kBassLow, kBassHigh);
 
       BachNoteOptions res_opts{};
       res_opts.voice = 1;
@@ -297,12 +293,9 @@ std::vector<NoteEvent> AriaGenerator::generateBassLine(
 // AriaGenerator::applyOrnaments
 // ---------------------------------------------------------------------------
 
-void AriaGenerator::applyOrnaments(
-    std::vector<NoteEvent>& notes,
-    const GoldbergStructuralGrid& grid,
-    const KeySignature& /*key*/,
-    const TimeSignature& time_sig,
-    std::mt19937& rng) const {
+void AriaGenerator::applyOrnaments(std::vector<NoteEvent>& notes,
+                                   const GoldbergStructuralGrid& grid, const KeySignature& /*key*/,
+                                   const TimeSignature& time_sig, std::mt19937& rng) const {
   Tick ticks_per_bar = time_sig.ticksPerBar();
 
   // Apply ornaments per phrase segment with varying density.
@@ -316,8 +309,7 @@ void AriaGenerator::applyOrnaments(
     Tick bar_end = bar_start + ticks_per_bar;
 
     const auto& bar_info = grid.getBar(bar_idx);
-    bool next_is_cadence = (bar_idx < 31) &&
-                           grid.getBar(bar_idx + 1).cadence.has_value();
+    bool next_is_cadence = (bar_idx < 31) && grid.getBar(bar_idx + 1).cadence.has_value();
     float density = getOrnamentDensity(bar_info.bar_in_phrase, next_is_cadence);
 
     // Collect notes in this bar.
@@ -328,7 +320,8 @@ void AriaGenerator::applyOrnaments(
       }
     }
 
-    if (bar_notes.empty()) continue;
+    if (bar_notes.empty())
+      continue;
 
     OrnamentConfig config;
     config.enable_trill = true;

@@ -39,11 +39,8 @@ class OvertureGenerator {
   /// @param time_sig Time signature (2/2 alla breve for Var 16).
   /// @param seed Random seed for deterministic generation.
   /// @return OvertureResult with notes spanning 32 bars (pre-repeat) and success status.
-  OvertureResult generate(
-      const GoldbergStructuralGrid& grid,
-      const KeySignature& key,
-      const TimeSignature& time_sig,
-      uint32_t seed) const;
+  OvertureResult generate(const GoldbergStructuralGrid& grid, const KeySignature& key,
+                          const TimeSignature& time_sig, uint32_t seed) const;
 
  private:
   /// @brief Generate Grave section (bars 0-15): stately dotted rhythms.
@@ -52,11 +49,8 @@ class OvertureGenerator {
   /// @param time_sig Time signature.
   /// @param rng Random number generator.
   /// @return Vector of NoteEvents for the Grave section.
-  std::vector<NoteEvent> generateGrave(
-      const GoldbergStructuralGrid& grid,
-      const KeySignature& key,
-      const TimeSignature& time_sig,
-      std::mt19937& rng) const;
+  std::vector<NoteEvent> generateGrave(const GoldbergStructuralGrid& grid, const KeySignature& key,
+                                       const TimeSignature& time_sig, std::mt19937& rng) const;
 
   /// @brief Generate Fugato section (bars 16-31): lively fugue-like entries.
   /// @param grid The 32-bar structural grid.
@@ -64,11 +58,8 @@ class OvertureGenerator {
   /// @param time_sig Time signature.
   /// @param rng Random number generator.
   /// @return Vector of NoteEvents for the Fugato section.
-  std::vector<NoteEvent> generateFugato(
-      const GoldbergStructuralGrid& grid,
-      const KeySignature& key,
-      const TimeSignature& time_sig,
-      std::mt19937& rng) const;
+  std::vector<NoteEvent> generateFugato(const GoldbergStructuralGrid& grid, const KeySignature& key,
+                                        const TimeSignature& time_sig, std::mt19937& rng) const;
 
   /// @brief Generate bass line from the structural grid for the Grave section.
   /// @param grid The 32-bar structural grid.
@@ -77,12 +68,9 @@ class OvertureGenerator {
   /// @param start_bar First bar (0-indexed).
   /// @param num_bars Number of bars to generate.
   /// @return Vector of bass NoteEvents.
-  std::vector<NoteEvent> generateBassLine(
-      const GoldbergStructuralGrid& grid,
-      const KeySignature& key,
-      const TimeSignature& time_sig,
-      int start_bar,
-      int num_bars) const;
+  std::vector<NoteEvent> generateBassLine(const GoldbergStructuralGrid& grid,
+                                          const KeySignature& key, const TimeSignature& time_sig,
+                                          int start_bar, int num_bars) const;
 };
 
 }  // namespace bach

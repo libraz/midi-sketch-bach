@@ -57,13 +57,14 @@ constexpr float kPassacagliaFinal = -3.0f;
 uint16_t adjustBpm(uint16_t base_bpm, float percent_change) {
   float adjusted = static_cast<float>(base_bpm) * (1.0f + percent_change / 100.0f);
   int rounded = static_cast<int>(std::round(adjusted));
-  if (rounded < kMinBpm) rounded = kMinBpm;
-  if (rounded > kMaxBpm) rounded = kMaxBpm;
+  if (rounded < kMinBpm)
+    rounded = kMinBpm;
+  if (rounded > kMaxBpm)
+    rounded = kMaxBpm;
   return static_cast<uint16_t>(rounded);
 }
 
-std::vector<TempoEvent> generateFugueTempoMap(const FugueStructure& structure,
-                                               uint16_t base_bpm) {
+std::vector<TempoEvent> generateFugueTempoMap(const FugueStructure& structure, uint16_t base_bpm) {
   std::vector<TempoEvent> events;
 
   if (structure.sections.empty()) {
@@ -111,8 +112,7 @@ std::vector<TempoEvent> generateFugueTempoMap(const FugueStructure& structure,
     }
 
     // Insert dominant pedal zone event before stretto if applicable.
-    if (has_stretto && !dom_pedal_emitted &&
-        section.start_tick >= dom_pedal_tick &&
+    if (has_stretto && !dom_pedal_emitted && section.start_tick >= dom_pedal_tick &&
         section.type != SectionType::Coda) {
       if (dom_pedal_tick > 0 && dom_pedal_tick < section.start_tick) {
         events.push_back({dom_pedal_tick, adjustBpm(base_bpm, kFugueDominantPedal)});
@@ -129,17 +129,14 @@ std::vector<TempoEvent> generateFugueTempoMap(const FugueStructure& structure,
 
   // Sort by tick and deduplicate at same tick (keep last).
   std::sort(events.begin(), events.end(),
-            [](const TempoEvent& a, const TempoEvent& b) {
-              return a.tick < b.tick;
-            });
+            [](const TempoEvent& a, const TempoEvent& b) { return a.tick < b.tick; });
 
   return events;
 }
 
 std::vector<TempoEvent> generateToccataTempoMap(Tick opening_start, Tick opening_end,
-                                                 Tick recit_start, Tick recit_end,
-                                                 Tick drive_start, Tick drive_end,
-                                                 uint16_t base_bpm) {
+                                                Tick recit_start, Tick recit_end, Tick drive_start,
+                                                Tick drive_end, uint16_t base_bpm) {
   std::vector<TempoEvent> events;
 
   // Opening gesture: energetic.
@@ -179,9 +176,7 @@ std::vector<TempoEvent> generateToccataTempoMap(Tick opening_start, Tick opening
   }
 
   std::sort(events.begin(), events.end(),
-            [](const TempoEvent& a, const TempoEvent& b) {
-              return a.tick < b.tick;
-            });
+            [](const TempoEvent& a, const TempoEvent& b) { return a.tick < b.tick; });
 
   return events;
 }
@@ -211,17 +206,15 @@ constexpr float kSectionalisCoda = 3.0f;
 constexpr float kSectionalisRit = -12.0f;
 
 std::vector<TempoEvent> generateToccataTempoMap(ToccataArchetype archetype,
-                                                 const std::vector<ToccataSectionBoundary>& sections,
-                                                 uint16_t base_bpm) {
-  if (sections.empty()) return {};
+                                                const std::vector<ToccataSectionBoundary>& sections,
+                                                uint16_t base_bpm) {
+  if (sections.empty())
+    return {};
 
   // Dramaticus: delegate to the legacy 6-arg overload.
   if (archetype == ToccataArchetype::Dramaticus && sections.size() >= 3) {
-    return generateToccataTempoMap(
-        sections[0].start, sections[0].end,
-        sections[1].start, sections[1].end,
-        sections[2].start, sections[2].end,
-        base_bpm);
+    return generateToccataTempoMap(sections[0].start, sections[0].end, sections[1].start,
+                                   sections[1].end, sections[2].start, sections[2].end, base_bpm);
   }
 
   std::vector<TempoEvent> events;
@@ -272,15 +265,13 @@ std::vector<TempoEvent> generateToccataTempoMap(ToccataArchetype archetype,
   }
 
   std::sort(events.begin(), events.end(),
-            [](const TempoEvent& a, const TempoEvent& b) {
-              return a.tick < b.tick;
-            });
+            [](const TempoEvent& a, const TempoEvent& b) { return a.tick < b.tick; });
 
   return events;
 }
 
 std::vector<TempoEvent> generateFantasiaTempoMap(Tick total_duration, int section_bars,
-                                                  uint16_t base_bpm) {
+                                                 uint16_t base_bpm) {
   std::vector<TempoEvent> events;
 
   // Contemplative base tempo.
@@ -309,16 +300,13 @@ std::vector<TempoEvent> generateFantasiaTempoMap(Tick total_duration, int sectio
   }
 
   std::sort(events.begin(), events.end(),
-            [](const TempoEvent& a, const TempoEvent& b) {
-              return a.tick < b.tick;
-            });
+            [](const TempoEvent& a, const TempoEvent& b) { return a.tick < b.tick; });
 
   return events;
 }
 
-std::vector<TempoEvent> generatePassacagliaTempoMap(int num_variations,
-                                                     int ground_bass_bars,
-                                                     uint16_t base_bpm) {
+std::vector<TempoEvent> generatePassacagliaTempoMap(int num_variations, int ground_bass_bars,
+                                                    uint16_t base_bpm) {
   std::vector<TempoEvent> events;
 
   // Steady base tempo for all variations.
@@ -335,15 +323,15 @@ std::vector<TempoEvent> generatePassacagliaTempoMap(int num_variations,
 }
 
 std::vector<TempoEvent> generateCadenceRitardando(uint16_t base_bpm,
-                                                    const std::vector<Tick>& cadence_ticks) {
+                                                  const std::vector<Tick>& cadence_ticks) {
   std::vector<TempoEvent> events;
 
-  const uint16_t bpm_2beats = static_cast<uint16_t>(
-      std::round(static_cast<float>(base_bpm) * kRitardandoFactor2Beats));
-  const uint16_t bpm_1beat = static_cast<uint16_t>(
-      std::round(static_cast<float>(base_bpm) * kRitardandoFactor1Beat));
-  const uint16_t bpm_cadence = static_cast<uint16_t>(
-      std::round(static_cast<float>(base_bpm) * kRitardandoFactorCadence));
+  const uint16_t bpm_2beats =
+      static_cast<uint16_t>(std::round(static_cast<float>(base_bpm) * kRitardandoFactor2Beats));
+  const uint16_t bpm_1beat =
+      static_cast<uint16_t>(std::round(static_cast<float>(base_bpm) * kRitardandoFactor1Beat));
+  const uint16_t bpm_cadence =
+      static_cast<uint16_t>(std::round(static_cast<float>(base_bpm) * kRitardandoFactorCadence));
 
   for (const Tick cadence_tick : cadence_ticks) {
     // Skip cadences too early for a full 2-beat lead-in.
@@ -362,9 +350,7 @@ std::vector<TempoEvent> generateCadenceRitardando(uint16_t base_bpm,
 
   // Sort by tick.
   std::sort(events.begin(), events.end(),
-            [](const TempoEvent& lhs, const TempoEvent& rhs) {
-              return lhs.tick < rhs.tick;
-            });
+            [](const TempoEvent& lhs, const TempoEvent& rhs) { return lhs.tick < rhs.tick; });
 
   // Deduplicate: keep only the last event at each tick position.
   // After sorting, consecutive events with the same tick keep the last one.

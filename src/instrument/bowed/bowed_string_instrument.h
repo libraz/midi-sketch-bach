@@ -23,9 +23,12 @@ enum class BowDirection : uint8_t {
 /// @return "Natural", "Down", or "Up".
 inline const char* bowDirectionToString(BowDirection direction) {
   switch (direction) {
-    case BowDirection::Natural: return "Natural";
-    case BowDirection::Down:    return "Down";
-    case BowDirection::Up:      return "Up";
+    case BowDirection::Natural:
+      return "Natural";
+    case BowDirection::Down:
+      return "Down";
+    case BowDirection::Up:
+      return "Up";
   }
   return "Unknown";  // NOLINT(clang-diagnostic-covered-switch-default): safety for cast values
 }
@@ -35,9 +38,9 @@ inline const char* bowDirectionToString(BowDirection direction) {
 /// Describes where a pitch is produced: which string, which position (shift),
 /// and any enharmonic offset from the default fingering.
 struct FingerPosition {
-  uint8_t string_idx = 0;    // String index (0 = lowest string)
-  uint8_t position = 0;      // Position/shift number (0 = open, 1 = 1st, etc.)
-  int8_t pitch_offset = 0;   // Offset from open string pitch in semitones
+  uint8_t string_idx = 0;   // String index (0 = lowest string)
+  uint8_t position = 0;     // Position/shift number (0 = open, 1 = 1st, etc.)
+  int8_t pitch_offset = 0;  // Offset from open string pitch in semitones
 };
 
 /// @brief Ergonomic cost breakdown for a bowed string note or transition.
@@ -45,11 +48,11 @@ struct FingerPosition {
 /// Used by the flow and arch generators to penalize difficult left-hand
 /// shifts and bow movements on bowed instruments.
 struct BowedPlayabilityCost {
-  float total = 0.0f;              // Overall playability cost
-  float left_hand_cost = 0.0f;     // Fingering difficulty (position, stretch)
+  float total = 0.0f;                 // Overall playability cost
+  float left_hand_cost = 0.0f;        // Fingering difficulty (position, stretch)
   float string_crossing_cost = 0.0f;  // Cost of crossing strings with the bow
-  float shift_cost = 0.0f;         // Cost of left-hand position shift
-  bool is_playable = true;         // Whether the note is physically possible
+  float shift_cost = 0.0f;            // Cost of left-hand position shift
+  bool is_playable = true;            // Whether the note is physically possible
 };
 
 /// @brief Mutable state of a bowed string performer during generation.
@@ -167,8 +170,7 @@ class IBowedStringInstrument {
   /// @param from_string Source string index (0 = lowest).
   /// @param to_string Destination string index.
   /// @return Cost value where 0.0 = same string, increasing with distance.
-  virtual float stringCrossingCost(uint8_t from_string,
-                                   uint8_t to_string) const = 0;
+  virtual float stringCrossingCost(uint8_t from_string, uint8_t to_string) const = 0;
 
   /// @brief Check if this instrument supports bariolage technique.
   ///
@@ -193,9 +195,8 @@ class IBowedStringInstrument {
   /// @param to_pitch Next MIDI pitch.
   /// @param state Current performer state (bow, string, position).
   /// @return BowedPlayabilityCost with transition-specific component breakdown.
-  virtual BowedPlayabilityCost calculateTransitionCost(
-      uint8_t from_pitch, uint8_t to_pitch,
-      const BowedPerformerState& state) const = 0;
+  virtual BowedPlayabilityCost calculateTransitionCost(uint8_t from_pitch, uint8_t to_pitch,
+                                                       const BowedPerformerState& state) const = 0;
 
   /// @brief Update performer state after playing a note.
   /// @param state Performer state to mutate.

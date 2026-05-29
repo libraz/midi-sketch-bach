@@ -15,12 +15,10 @@
 #include "core/scale.h"
 #include "counterpoint/cross_relation.h"
 #include "forms/form_constraint_setup.h"
-#include "instrument/common/impossibility_guard.h"
-#include "instrument/keyboard/harpsichord_model.h"
-#include "forms/goldberg/goldberg_aria.h"
-#include "forms/goldberg/goldberg_binary.h"
 #include "forms/goldberg/canon/canon_generator.h"
 #include "forms/goldberg/canon/canon_types.h"
+#include "forms/goldberg/goldberg_aria.h"
+#include "forms/goldberg/goldberg_binary.h"
 #include "forms/goldberg/variations/goldberg_black_pearl.h"
 #include "forms/goldberg/variations/goldberg_crossing.h"
 #include "forms/goldberg/variations/goldberg_dance.h"
@@ -31,6 +29,8 @@
 #include "forms/goldberg/variations/goldberg_quodlibet.h"
 #include "forms/goldberg/variations/goldberg_virtuoso.h"
 #include "harmony/harmonic_time_warp.h"
+#include "instrument/common/impossibility_guard.h"
+#include "instrument/keyboard/harpsichord_model.h"
 
 namespace bach {
 
@@ -89,16 +89,26 @@ std::vector<NoteEvent> mergeNotes(std::initializer_list<const std::vector<NoteEv
 int semitonesToDiatonicDegree(int semitones) {
   // Map common semitone intervals to diatonic degrees.
   switch (semitones) {
-    case 0:  return 0;   // Unison
-    case 2:  return 1;   // 2nd
-    case 4:  return 2;   // 3rd
-    case 5:  return 3;   // 4th
-    case 7:  return 4;   // 5th
-    case 9:  return 5;   // 6th
-    case 11: return 6;   // 7th
-    case 12: return 7;   // Octave
-    case 14: return 8;   // 9th
-    default: return semitones / 2;  // Rough fallback.
+    case 0:
+      return 0;  // Unison
+    case 2:
+      return 1;  // 2nd
+    case 4:
+      return 2;  // 3rd
+    case 5:
+      return 3;  // 4th
+    case 7:
+      return 4;  // 5th
+    case 9:
+      return 5;  // 6th
+    case 11:
+      return 6;  // 7th
+    case 12:
+      return 7;  // Octave
+    case 14:
+      return 8;  // 9th
+    default:
+      return semitones / 2;  // Rough fallback.
   }
 }
 
@@ -153,7 +163,8 @@ GoldbergResult GoldbergGenerator::generate(const GoldbergConfig& config) const {
 
   for (size_t sel_idx = 0; sel_idx < selected.size(); ++sel_idx) {
     size_t plan_idx = selected[sel_idx];
-    if (plan_idx >= plan.size()) continue;
+    if (plan_idx >= plan.size())
+      continue;
 
     const auto& desc = plan[plan_idx];
 
@@ -173,8 +184,7 @@ GoldbergResult GoldbergGenerator::generate(const GoldbergConfig& config) const {
         // Write back seed-dependent Aria melody to grid for downstream variations.
         for (int bar = 0; bar < 32; ++bar) {
           for (int beat = 0; beat < 3; ++beat) {
-            grid.setAriaMelody(bar, beat,
-                               aria_original.theme.getPitch(bar, beat));
+            grid.setAriaMelody(bar, beat, aria_original.theme.getPitch(bar, beat));
           }
         }
         var_notes = mergeNotes({&aria_original.melody_notes, &aria_original.bass_notes});
@@ -210,7 +220,8 @@ GoldbergResult GoldbergGenerator::generate(const GoldbergConfig& config) const {
              "Goldberg variation note missing provenance source");
     }
 
-    if (var_notes.empty()) continue;
+    if (var_notes.empty())
+      continue;
 
     // ManualPolicy voicing enforcement: ensure notes at each tick
     // are physically playable per manual (one-hand span check).
@@ -226,11 +237,13 @@ GoldbergResult GoldbergGenerator::generate(const GoldbergConfig& config) const {
         }
 
         // Check playability for a group of simultaneous notes.
-        auto isGroupPlayable = [&](const std::vector<size_t>& group,
-                                   ManualPolicy pol, Hand hand) -> bool {
+        auto isGroupPlayable = [&](const std::vector<size_t>& group, ManualPolicy pol,
+                                   Hand hand) -> bool {
           std::vector<uint8_t> pitches;
-          for (size_t idx : group) pitches.push_back(var_notes[idx].pitch);
-          if (pitches.size() < 2) return true;
+          for (size_t idx : group)
+            pitches.push_back(var_notes[idx].pitch);
+          if (pitches.size() < 2)
+            return true;
           if (pol == ManualPolicy::SingleManual) {
             return harpsichord.isVoicingPlayable(pitches);
           }
@@ -238,51 +251,49 @@ GoldbergResult GoldbergGenerator::generate(const GoldbergConfig& config) const {
         };
 
         // Fix a group of simultaneous notes to be playable.
-        auto fixGroup = [&](std::vector<size_t>& group, ManualPolicy pol,
-                            Hand hand) {
-          if (isGroupPlayable(group, pol, hand)) return;
+        auto fixGroup = [&](std::vector<size_t>& group, ManualPolicy pol, Hand hand) {
+          if (isGroupPlayable(group, pol, hand))
+            return;
 
           // Phase 1: Octave-shift flexible notes toward group pitch center.
           int sum = 0;
-          for (size_t idx : group) sum += var_notes[idx].pitch;
+          for (size_t idx : group)
+            sum += var_notes[idx].pitch;
           int center = sum / static_cast<int>(group.size());
 
           for (size_t idx : group) {
-            if (getProtectionLevel(var_notes[idx].source) !=
-                ProtectionLevel::Flexible) {
+            if (getProtectionLevel(var_notes[idx].source) != ProtectionLevel::Flexible) {
               continue;
             }
             int cur = var_notes[idx].pitch;
-            int shifted = (cur > center + 6)   ? cur - 12
-                          : (cur < center - 6) ? cur + 12
-                                               : cur;
-            if (shifted >= kHarpsichordGlobalLow &&
-                shifted <= kHarpsichordGlobalHigh && shifted != cur) {
+            int shifted = (cur > center + 6) ? cur - 12 : (cur < center - 6) ? cur + 12 : cur;
+            if (shifted >= kHarpsichordGlobalLow && shifted <= kHarpsichordGlobalHigh &&
+                shifted != cur) {
               var_notes[idx].pitch = static_cast<uint8_t>(shifted);
-              var_notes[idx].modified_by |=
-                  static_cast<uint8_t>(NoteModifiedBy::OctaveAdjust);
+              var_notes[idx].modified_by |= static_cast<uint8_t>(NoteModifiedBy::OctaveAdjust);
             }
           }
 
-          if (isGroupPlayable(group, pol, hand)) return;
+          if (isGroupPlayable(group, pol, hand))
+            return;
 
           // Phase 2: Drop outermost flexible notes until playable.
-          std::sort(group.begin(), group.end(), [&](size_t a, size_t b) {
-            return var_notes[a].pitch < var_notes[b].pitch;
-          });
+          std::sort(group.begin(), group.end(),
+                    [&](size_t a, size_t b) { return var_notes[a].pitch < var_notes[b].pitch; });
           for (int attempt = 0; attempt < 3 && group.size() >= 2; ++attempt) {
-            if (isGroupPlayable(group, pol, hand)) break;
+            if (isGroupPlayable(group, pol, hand))
+              break;
             bool dropped = false;
             for (auto it = group.rbegin(); it != group.rend(); ++it) {
-              if (getProtectionLevel(var_notes[*it].source) ==
-                  ProtectionLevel::Flexible) {
+              if (getProtectionLevel(var_notes[*it].source) == ProtectionLevel::Flexible) {
                 var_notes[*it].duration = 0;
                 group.erase(std::next(it).base());
                 dropped = true;
                 break;
               }
             }
-            if (!dropped) break;
+            if (!dropped)
+              break;
           }
         };
 
@@ -304,10 +315,9 @@ GoldbergResult GoldbergGenerator::generate(const GoldbergConfig& config) const {
         }
 
         // Remove muted notes (duration == 0).
-        var_notes.erase(
-            std::remove_if(var_notes.begin(), var_notes.end(),
-                           [](const NoteEvent& n) { return n.duration == 0; }),
-            var_notes.end());
+        var_notes.erase(std::remove_if(var_notes.begin(), var_notes.end(),
+                                       [](const NoteEvent& n) { return n.duration == 0; }),
+                        var_notes.end());
       }
     }
 
@@ -317,8 +327,7 @@ GoldbergResult GoldbergGenerator::generate(const GoldbergConfig& config) const {
     Tick variation_duration = static_cast<Tick>(kTotalBars) * bar_ticks;
 
     if (apply_repeats) {
-      var_notes = applyBinaryRepeats(var_notes, section_ticks,
-                                     config.ornament_variation_on_repeat);
+      var_notes = applyBinaryRepeats(var_notes, section_ticks, config.ornament_variation_on_repeat);
       variation_duration *= 2;  // A-A-B-B doubles the duration.
     }
 
@@ -368,16 +377,14 @@ GoldbergResult GoldbergGenerator::generate(const GoldbergConfig& config) const {
     uint8_t prev_lower = 0;
     for (auto& note : track_upper.notes) {
       auto level = getProtectionLevel(note.source);
-      if (level != ProtectionLevel::Immutable &&
-          !guard.isPitchPlayable(note.pitch)) {
+      if (level != ProtectionLevel::Immutable && !guard.isPitchPlayable(note.pitch)) {
         note.pitch = guard.fixPitchRange(note.pitch, level, prev_upper);
       }
       prev_upper = note.pitch;
     }
     for (auto& note : track_lower.notes) {
       auto level = getProtectionLevel(note.source);
-      if (level != ProtectionLevel::Immutable &&
-          !guard.isPitchPlayable(note.pitch)) {
+      if (level != ProtectionLevel::Immutable && !guard.isPitchPlayable(note.pitch)) {
         note.pitch = guard.fixPitchRange(note.pitch, level, prev_lower);
       }
       prev_lower = note.pitch;
@@ -395,10 +402,9 @@ GoldbergResult GoldbergGenerator::generate(const GoldbergConfig& config) const {
 
   // Step 6: Sort notes within each track by start_tick for MIDI compliance.
   auto sortByTick = [](std::vector<NoteEvent>& notes) {
-    std::sort(notes.begin(), notes.end(),
-              [](const NoteEvent& lhs, const NoteEvent& rhs) {
-                return lhs.start_tick < rhs.start_tick;
-              });
+    std::sort(notes.begin(), notes.end(), [](const NoteEvent& lhs, const NoteEvent& rhs) {
+      return lhs.start_tick < rhs.start_tick;
+    });
   };
   sortByTick(track_upper.notes);
   sortByTick(track_lower.notes);
@@ -418,8 +424,7 @@ GoldbergResult GoldbergGenerator::generate(const GoldbergConfig& config) const {
     all_notes.insert(all_notes.end(), track_lower.notes.begin(), track_lower.notes.end());
 
     // (b) Per-voice tritone sweep: fix tritone leaps between consecutive notes.
-    ScaleType tritone_scale =
-        config.key.is_minor ? ScaleType::HarmonicMinor : ScaleType::Major;
+    ScaleType tritone_scale = config.key.is_minor ? ScaleType::HarmonicMinor : ScaleType::Major;
     for (uint8_t vid = 0; vid < kGoldbergVoices; ++vid) {
       // Collect indices belonging to this voice.
       std::vector<size_t> voice_indices;
@@ -429,14 +434,12 @@ GoldbergResult GoldbergGenerator::generate(const GoldbergConfig& config) const {
         }
       }
       // Sort by tick for consecutive-pair analysis.
-      std::sort(voice_indices.begin(), voice_indices.end(),
-                [&all_notes](size_t lhs, size_t rhs) {
-                  return all_notes[lhs].start_tick < all_notes[rhs].start_tick;
-                });
+      std::sort(voice_indices.begin(), voice_indices.end(), [&all_notes](size_t lhs, size_t rhs) {
+        return all_notes[lhs].start_tick < all_notes[rhs].start_tick;
+      });
 
       uint8_t voice_lo = (vid < kGoldbergVoices) ? kHarpsichordLow[vid] : kHarpsichordGlobalLow;
-      uint8_t voice_hi =
-          (vid < kGoldbergVoices) ? kHarpsichordHigh[vid] : kHarpsichordGlobalHigh;
+      uint8_t voice_hi = (vid < kGoldbergVoices) ? kHarpsichordHigh[vid] : kHarpsichordGlobalHigh;
 
       for (size_t pos = 1; pos < voice_indices.size(); ++pos) {
         size_t prev_idx = voice_indices[pos - 1];
@@ -445,8 +448,10 @@ GoldbergResult GoldbergGenerator::generate(const GoldbergConfig& config) const {
         auto& cur_note = all_notes[cur_idx];
 
         // Skip protected notes (Immutable or Structural sources).
-        if (getProtectionLevel(prev_note.source) != ProtectionLevel::Flexible) continue;
-        if (getProtectionLevel(cur_note.source) != ProtectionLevel::Flexible) continue;
+        if (getProtectionLevel(prev_note.source) != ProtectionLevel::Flexible)
+          continue;
+        if (getProtectionLevel(cur_note.source) != ProtectionLevel::Flexible)
+          continue;
 
         // Skip short passing notes (both durations <= 240 ticks).
         if (prev_note.duration <= kPassingNoteThreshold &&
@@ -457,25 +462,27 @@ GoldbergResult GoldbergGenerator::generate(const GoldbergConfig& config) const {
         int prev_p = static_cast<int>(prev_note.pitch);
         int cur_p = static_cast<int>(cur_note.pitch);
         int simple = interval_util::compoundToSimple(std::abs(cur_p - prev_p));
-        if (simple != interval::kTritone) continue;
+        if (simple != interval::kTritone)
+          continue;
 
         // Try adjustments {+1, -1, +2, -2}, pick best non-tritone candidate.
         int best_cand = cur_p;
         int best_cost = 9999;
         for (int delta : {1, -1, 2, -2}) {
           int shifted = cur_p + delta;
-          uint8_t snapped =
-              scale_util::nearestScaleTone(clampPitch(shifted, voice_lo, voice_hi),
-                                           config.key.tonic, tritone_scale);
+          uint8_t snapped = scale_util::nearestScaleTone(clampPitch(shifted, voice_lo, voice_hi),
+                                                         config.key.tonic, tritone_scale);
           int cand = static_cast<int>(snapped);
           int new_simple = interval_util::compoundToSimple(std::abs(cand - prev_p));
-          if (new_simple == interval::kTritone) continue;  // Still a tritone.
+          if (new_simple == interval::kTritone)
+            continue;  // Still a tritone.
 
           // Check forward: avoid creating tritone with next note in voice.
           if (pos + 1 < voice_indices.size()) {
             int next_p = static_cast<int>(all_notes[voice_indices[pos + 1]].pitch);
             int fwd_simple = interval_util::compoundToSimple(std::abs(cand - next_p));
-            if (fwd_simple == interval::kTritone) continue;
+            if (fwd_simple == interval::kTritone)
+              continue;
           }
 
           // Minimize interval distance; penalize unison with previous note.
@@ -497,50 +504,53 @@ GoldbergResult GoldbergGenerator::generate(const GoldbergConfig& config) const {
     {
       // Stable sort by (tick, voice) for reproducibility.
       std::stable_sort(all_notes.begin(), all_notes.end(),
-          [](const NoteEvent& a, const NoteEvent& b) {
-            if (a.start_tick != b.start_tick) return a.start_tick < b.start_tick;
-            return a.voice < b.voice;
-          });
-      ScaleType cr_scale =
-          config.key.is_minor ? ScaleType::HarmonicMinor : ScaleType::Major;
+                       [](const NoteEvent& a, const NoteEvent& b) {
+                         if (a.start_tick != b.start_tick)
+                           return a.start_tick < b.start_tick;
+                         return a.voice < b.voice;
+                       });
+      ScaleType cr_scale = config.key.is_minor ? ScaleType::HarmonicMinor : ScaleType::Major;
       for (size_t i = 0; i < all_notes.size(); ++i) {
         auto& note = all_notes[i];
-        if (getProtectionLevel(note.source) != ProtectionLevel::Flexible) continue;
-        if (!hasCrossRelation(all_notes, kGoldbergVoices, note.voice,
-                              note.pitch, note.start_tick)) {
+        if (getProtectionLevel(note.source) != ProtectionLevel::Flexible)
+          continue;
+        if (!hasCrossRelation(all_notes, kGoldbergVoices, note.voice, note.pitch,
+                              note.start_tick)) {
           continue;
         }
         // Skip if this note is a leading tone (scale degree 7 in minor).
         if (config.key.is_minor) {
-          int pc = getPitchClassSigned(static_cast<int>(note.pitch) - static_cast<int>(config.key.tonic));
-          if (pc == 11) continue;  // raised 7th = leading tone, preserve.
+          int pc = getPitchClassSigned(static_cast<int>(note.pitch) -
+                                       static_cast<int>(config.key.tonic));
+          if (pc == 11)
+            continue;  // raised 7th = leading tone, preserve.
         }
-        uint8_t lo = (note.voice < kGoldbergVoices)
-            ? kHarpsichordLow[note.voice] : kHarpsichordGlobalLow;
-        uint8_t hi = (note.voice < kGoldbergVoices)
-            ? kHarpsichordHigh[note.voice] : kHarpsichordGlobalHigh;
+        uint8_t lo =
+            (note.voice < kGoldbergVoices) ? kHarpsichordLow[note.voice] : kHarpsichordGlobalLow;
+        uint8_t hi =
+            (note.voice < kGoldbergVoices) ? kHarpsichordHigh[note.voice] : kHarpsichordGlobalHigh;
         for (int delta : {1, -1, 2, -2}) {
           uint8_t cand = scale_util::nearestScaleTone(
-              clampPitch(static_cast<int>(note.pitch) + delta, lo, hi),
-              config.key.tonic, cr_scale);
-          if (hasCrossRelation(all_notes, kGoldbergVoices, note.voice,
-                               cand, note.start_tick)) {
+              clampPitch(static_cast<int>(note.pitch) + delta, lo, hi), config.key.tonic, cr_scale);
+          if (hasCrossRelation(all_notes, kGoldbergVoices, note.voice, cand, note.start_tick)) {
             continue;
           }
           // Vertical consonance check: reject if candidate creates
           // harsh dissonance (m2/M7) with any sounding note at same tick.
           bool vertically_safe = true;
           for (const auto& other : all_notes) {
-            if (other.start_tick != note.start_tick) continue;
-            if (other.voice == note.voice) continue;
-            int ivl = interval_util::compoundToSimple(
-                absoluteInterval(cand, other.pitch));
+            if (other.start_tick != note.start_tick)
+              continue;
+            if (other.voice == note.voice)
+              continue;
+            int ivl = interval_util::compoundToSimple(absoluteInterval(cand, other.pitch));
             if (ivl == 1 || ivl == 11) {
               vertically_safe = false;
               break;
             }
           }
-          if (!vertically_safe) continue;
+          if (!vertically_safe)
+            continue;
           note.pitch = cand;
           break;
         }
@@ -581,11 +591,8 @@ GoldbergResult GoldbergGenerator::generate(const GoldbergConfig& config) const {
 }
 
 std::vector<NoteEvent> GoldbergGenerator::generateVariation(
-    const GoldbergVariationDescriptor& desc,
-    const GoldbergStructuralGrid& grid_major,
-    const GoldbergStructuralGrid& grid_minor,
-    const KeySignature& key,
-    uint32_t seed) const {
+    const GoldbergVariationDescriptor& desc, const GoldbergStructuralGrid& grid_major,
+    const GoldbergStructuralGrid& grid_minor, const KeySignature& key, uint32_t seed) const {
   // Select grid based on variation key.
   const auto& grid = desc.key.is_minor ? grid_minor : grid_major;
 
@@ -594,28 +601,30 @@ std::vector<NoteEvent> GoldbergGenerator::generateVariation(
       // Aria is handled specially in the main loop for da capo support.
       AriaGenerator gen;
       auto result = gen.generate(grid, key, desc.time_sig, seed);
-      if (!result.success) return {};
+      if (!result.success)
+        return {};
       return mergeNotes({&result.melody_notes, &result.bass_notes});
     }
 
     case GoldbergVariationType::Canon: {
       CanonSpec spec;
       spec.canon_interval = semitonesToDiatonicDegree(desc.canon.interval_semitones);
-      spec.transform = desc.canon.is_inverted ? CanonTransform::Inverted
-                                              : CanonTransform::Regular;
+      spec.transform = desc.canon.is_inverted ? CanonTransform::Inverted : CanonTransform::Regular;
       spec.key = {key.tonic, desc.key.is_minor};
       spec.minor_profile = desc.minor_profile;
       spec.delay_bars = desc.canon.delay_beats;
       CanonGenerator gen;
       auto result = gen.generate(spec, grid, desc.time_sig, seed);
-      if (!result.success) return {};
+      if (!result.success)
+        return {};
       return mergeNotes({&result.dux_notes, &result.comes_notes, &result.bass_notes});
     }
 
     case GoldbergVariationType::Dance: {
       DanceGenerator gen;
       auto result = gen.generate(desc.variation_number, grid, key, seed);
-      if (!result.success) return {};
+      if (!result.success)
+        return {};
       return result.notes;
     }
 
@@ -623,7 +632,8 @@ std::vector<NoteEvent> GoldbergGenerator::generateVariation(
     case GoldbergVariationType::TrillEtude: {
       OrnamentalGenerator gen;
       auto result = gen.generate(desc.variation_number, grid, key, desc.time_sig, seed);
-      if (!result.success) return {};
+      if (!result.success)
+        return {};
       return result.notes;
     }
 
@@ -631,28 +641,32 @@ std::vector<NoteEvent> GoldbergGenerator::generateVariation(
     case GoldbergVariationType::AllaBreveFugal: {
       FughettaGenerator gen;
       auto result = gen.generate(desc.variation_number, grid, key, desc.time_sig, seed);
-      if (!result.success) return {};
+      if (!result.success)
+        return {};
       return result.notes;
     }
 
     case GoldbergVariationType::Invention: {
       InventionGenerator gen;
       auto result = gen.generate(grid, key, desc.time_sig, seed);
-      if (!result.success) return {};
+      if (!result.success)
+        return {};
       return result.notes;
     }
 
     case GoldbergVariationType::HandCrossing: {
       CrossingGenerator gen;
       auto result = gen.generate(desc.variation_number, grid, key, desc.time_sig, seed);
-      if (!result.success) return {};
+      if (!result.success)
+        return {};
       return result.notes;
     }
 
     case GoldbergVariationType::FrenchOverture: {
       OvertureGenerator gen;
       auto result = gen.generate(grid, key, desc.time_sig, seed);
-      if (!result.success) return {};
+      if (!result.success)
+        return {};
       return result.notes;
     }
 
@@ -661,21 +675,24 @@ std::vector<NoteEvent> GoldbergGenerator::generateVariation(
     case GoldbergVariationType::BravuraChordal: {
       VirtuosoGenerator gen;
       auto result = gen.generate(desc.variation_number, grid, key, desc.time_sig, seed);
-      if (!result.success) return {};
+      if (!result.success)
+        return {};
       return result.notes;
     }
 
     case GoldbergVariationType::BlackPearl: {
       BlackPearlGenerator gen;
       auto result = gen.generate(grid, {key.tonic, true}, desc.time_sig, seed);
-      if (!result.success) return {};
+      if (!result.success)
+        return {};
       return result.notes;
     }
 
     case GoldbergVariationType::Quodlibet: {
       QuodlibetGenerator gen;
       auto result = gen.generate(grid, key, desc.time_sig, seed);
-      if (!result.success) return {};
+      if (!result.success)
+        return {};
       return result.notes;
     }
   }
@@ -684,8 +701,7 @@ std::vector<NoteEvent> GoldbergGenerator::generateVariation(
 }
 
 std::vector<size_t> GoldbergGenerator::selectVariations(
-    const std::vector<GoldbergVariationDescriptor>& plan,
-    DurationScale scale) const {
+    const std::vector<GoldbergVariationDescriptor>& plan, DurationScale scale) const {
   std::vector<size_t> indices;
 
   switch (scale) {
@@ -748,9 +764,8 @@ std::vector<size_t> GoldbergGenerator::selectVariations(
   return indices;
 }
 
-void GoldbergGenerator::applyArticulation(
-    std::vector<NoteEvent>& notes,
-    ArticulationProfile profile) const {
+void GoldbergGenerator::applyArticulation(std::vector<NoteEvent>& notes,
+                                          ArticulationProfile profile) const {
   float ratio = 1.0f;
   switch (profile) {
     case ArticulationProfile::Legato:
@@ -773,7 +788,8 @@ void GoldbergGenerator::applyArticulation(
           // Short note: crisp articulation.
           note.duration = static_cast<Tick>(note.duration * 0.50f);
         }
-        if (note.duration == 0) note.duration = 1;
+        if (note.duration == 0)
+          note.duration = 1;
         note.modified_by |= static_cast<uint8_t>(NoteModifiedBy::Articulation);
       }
       return;  // FrenchDotted has its own per-note logic, skip uniform ratio.
@@ -787,7 +803,8 @@ void GoldbergGenerator::applyArticulation(
           note.duration = static_cast<Tick>(note.duration * 0.60f);
         }
         // Chords keep full duration (no modification).
-        if (note.duration == 0) note.duration = 1;
+        if (note.duration == 0)
+          note.duration = 1;
         note.modified_by |= static_cast<uint8_t>(NoteModifiedBy::Articulation);
       }
       return;  // Brillante has its own per-note logic.
@@ -796,24 +813,27 @@ void GoldbergGenerator::applyArticulation(
   // Apply uniform ratio for Legato, Moderato, Detache.
   for (auto& note : notes) {
     note.duration = static_cast<Tick>(note.duration * ratio);
-    if (note.duration == 0) note.duration = 1;
+    if (note.duration == 0)
+      note.duration = 1;
     note.modified_by |= static_cast<uint8_t>(NoteModifiedBy::Articulation);
   }
 }
 
-uint16_t GoldbergGenerator::calculateVariationBpm(
-    const GoldbergVariationDescriptor& desc,
-    uint16_t base_bpm) const {
+uint16_t GoldbergGenerator::calculateVariationBpm(const GoldbergVariationDescriptor& desc,
+                                                  uint16_t base_bpm) const {
   if (desc.bpm_override > 0) {
     return desc.bpm_override;
   }
   // Apply Proportionslehre tempo ratio.
   auto [num, den] = desc.tempo_ratio;
-  if (den == 0) den = 1;
+  if (den == 0)
+    den = 1;
   uint16_t var_bpm = static_cast<uint16_t>(base_bpm * num / den);
   // Clamp to reasonable range.
-  if (var_bpm < 30) var_bpm = 30;
-  if (var_bpm > 200) var_bpm = 200;
+  if (var_bpm < 30)
+    var_bpm = 30;
+  if (var_bpm > 200)
+    var_bpm = 200;
   return var_bpm;
 }
 

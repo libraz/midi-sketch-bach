@@ -28,7 +28,8 @@ class GravityBiasTest : public ::testing::Test {
     for (int i = 0; i < kTrials; ++i) {
       std::mt19937 rng(kSeed + static_cast<uint32_t>(i));
       int dir = chooseMelodicDirection(state, profile, rng);
-      if (dir != state.last_direction) ++reversals;
+      if (dir != state.last_direction)
+        ++reversals;
     }
     return reversals;
   }
@@ -55,8 +56,7 @@ TEST_F(GravityBiasTest, ZeroGravityIsSymmetric) {
   // Allow +/- 8% of trials.
   float diff = std::abs(static_cast<float>(asc_reversals - desc_reversals));
   EXPECT_LT(diff, kTrials * 0.08f)
-      << "asc_reversals=" << asc_reversals
-      << " desc_reversals=" << desc_reversals;
+      << "asc_reversals=" << asc_reversals << " desc_reversals=" << desc_reversals;
 }
 
 TEST_F(GravityBiasTest, SopranoGravityFavorsDescending) {
@@ -139,9 +139,8 @@ TEST_F(GravityBiasTest, CadenceWindowAtOneZerosGravity) {
   int without_gravity = countReversals(end_no_gravity, no_gravity);
 
   float diff = std::abs(static_cast<float>(with_gravity - without_gravity));
-  EXPECT_LT(diff, kTrials * 0.05f)
-      << "At progress=1.0, gravity should be zero. "
-      << "with=" << with_gravity << " without=" << without_gravity;
+  EXPECT_LT(diff, kTrials * 0.05f) << "At progress=1.0, gravity should be zero. "
+                                   << "with=" << with_gravity << " without=" << without_gravity;
 }
 
 // ===========================================================================
@@ -174,30 +173,21 @@ TEST_F(ContourDirectionTest, ArchAtPeak) {
 }
 
 TEST_F(ContourDirectionTest, DescentAlwaysNegative) {
-  EXPECT_FLOAT_EQ(computeContourDirection(PhraseContour::Descent, 0.0f, 0.4f),
-                   -1.0f);
-  EXPECT_FLOAT_EQ(computeContourDirection(PhraseContour::Descent, 0.5f, 0.4f),
-                   -1.0f);
-  EXPECT_FLOAT_EQ(computeContourDirection(PhraseContour::Descent, 1.0f, 0.4f),
-                   -1.0f);
+  EXPECT_FLOAT_EQ(computeContourDirection(PhraseContour::Descent, 0.0f, 0.4f), -1.0f);
+  EXPECT_FLOAT_EQ(computeContourDirection(PhraseContour::Descent, 0.5f, 0.4f), -1.0f);
+  EXPECT_FLOAT_EQ(computeContourDirection(PhraseContour::Descent, 1.0f, 0.4f), -1.0f);
 }
 
 TEST_F(ContourDirectionTest, AscentAlwaysPositive) {
-  EXPECT_FLOAT_EQ(computeContourDirection(PhraseContour::Ascent, 0.0f, 0.4f),
-                   1.0f);
-  EXPECT_FLOAT_EQ(computeContourDirection(PhraseContour::Ascent, 0.5f, 0.4f),
-                   1.0f);
-  EXPECT_FLOAT_EQ(computeContourDirection(PhraseContour::Ascent, 1.0f, 0.4f),
-                   1.0f);
+  EXPECT_FLOAT_EQ(computeContourDirection(PhraseContour::Ascent, 0.0f, 0.4f), 1.0f);
+  EXPECT_FLOAT_EQ(computeContourDirection(PhraseContour::Ascent, 0.5f, 0.4f), 1.0f);
+  EXPECT_FLOAT_EQ(computeContourDirection(PhraseContour::Ascent, 1.0f, 0.4f), 1.0f);
 }
 
 TEST_F(ContourDirectionTest, NeutralAlwaysZero) {
-  EXPECT_FLOAT_EQ(
-      computeContourDirection(PhraseContour::Neutral, 0.0f, 0.4f), 0.0f);
-  EXPECT_FLOAT_EQ(
-      computeContourDirection(PhraseContour::Neutral, 0.5f, 0.4f), 0.0f);
-  EXPECT_FLOAT_EQ(
-      computeContourDirection(PhraseContour::Neutral, 1.0f, 0.4f), 0.0f);
+  EXPECT_FLOAT_EQ(computeContourDirection(PhraseContour::Neutral, 0.0f, 0.4f), 0.0f);
+  EXPECT_FLOAT_EQ(computeContourDirection(PhraseContour::Neutral, 0.5f, 0.4f), 0.0f);
+  EXPECT_FLOAT_EQ(computeContourDirection(PhraseContour::Neutral, 1.0f, 0.4f), 0.0f);
 }
 
 TEST_F(ContourDirectionTest, WaveAlternates) {
@@ -254,14 +244,19 @@ class BeatPositionScoringTest : public ::testing::Test {
     // Choose tick that produces the desired metric level.
     Tick tick = 0;
     switch (level) {
-      case MetricLevel::Bar: tick = 0; break;        // Start of bar.
-      case MetricLevel::Beat: tick = kTicksPerBeat; break;  // Beat 2.
-      case MetricLevel::Offbeat: tick = kTicksPerBeat / 2; break;  // 8th note.
+      case MetricLevel::Bar:
+        tick = 0;
+        break;  // Start of bar.
+      case MetricLevel::Beat:
+        tick = kTicksPerBeat;
+        break;  // Beat 2.
+      case MetricLevel::Offbeat:
+        tick = kTicksPerBeat / 2;
+        break;  // 8th note.
     }
 
     return scoreCandidatePitch(state, prev, candidate, tick,
-                                /*is_chord_tone=*/true,
-                                voice_profiles::kSoprano);
+                               /*is_chord_tone=*/true, voice_profiles::kSoprano);
   }
 };
 
@@ -270,8 +265,7 @@ TEST_F(BeatPositionScoringTest, BarFavorsSkipOverStep) {
   // step (+1 semitone) due to cross-term bonus for 3rd/4th on bar.
   float step_score = scoreAtLevel(1, MetricLevel::Bar);
   float skip_score = scoreAtLevel(3, MetricLevel::Bar);
-  EXPECT_GT(skip_score, step_score)
-      << "Bar: skip=" << skip_score << " step=" << step_score;
+  EXPECT_GT(skip_score, step_score) << "Bar: skip=" << skip_score << " step=" << step_score;
 }
 
 TEST_F(BeatPositionScoringTest, OffbeatFavorsStepOverSkip) {
@@ -279,8 +273,7 @@ TEST_F(BeatPositionScoringTest, OffbeatFavorsStepOverSkip) {
   // cross-term bonus for steps on offbeat and penalty for skips.
   float step_score = scoreAtLevel(1, MetricLevel::Offbeat);
   float skip_score = scoreAtLevel(3, MetricLevel::Offbeat);
-  EXPECT_GT(step_score, skip_score)
-      << "Offbeat: step=" << step_score << " skip=" << skip_score;
+  EXPECT_GT(step_score, skip_score) << "Offbeat: step=" << step_score << " skip=" << skip_score;
 }
 
 TEST_F(BeatPositionScoringTest, BeatLevelUnchanged) {
@@ -308,10 +301,8 @@ TEST_F(BeatPositionScoringTest, BeatLevelUnchanged) {
   float skip_at_bar = scoreAtLevel(3, MetricLevel::Bar);
   float step_diff = std::abs(step_at_beat - step_at_bar);
   float skip_diff = std::abs(skip_at_beat - skip_at_bar);
-  EXPECT_GT(step_diff, 0.01f)
-      << "Beat and Bar should differ for steps due to cross terms";
-  EXPECT_GT(skip_diff, 0.01f)
-      << "Beat and Bar should differ for skips due to cross terms";
+  EXPECT_GT(step_diff, 0.01f) << "Beat and Bar should differ for steps due to cross terms";
+  EXPECT_GT(skip_diff, 0.01f) << "Beat and Bar should differ for skips due to cross terms";
 }
 
 // ===========================================================================
@@ -321,8 +312,7 @@ TEST_F(BeatPositionScoringTest, BeatLevelUnchanged) {
 class ContourScoringTest : public ::testing::Test {
  protected:
   /// @brief Score a candidate at a specific direction with an Arch contour.
-  float scoreWithContour(PhraseContour::Shape shape, float progress,
-                          int candidate_offset) {
+  float scoreWithContour(PhraseContour::Shape shape, float progress, int candidate_offset) {
     MelodicState state{};
     state.last_direction = 0;  // No prior direction.
     state.direction_run_length = 0;
@@ -334,8 +324,7 @@ class ContourScoringTest : public ::testing::Test {
     Tick tick = kTicksPerBeat;  // Beat position (moderate metric weight).
 
     return scoreCandidatePitch(state, prev, candidate, tick,
-                                /*is_chord_tone=*/true,
-                                voice_profiles::kSoprano);
+                               /*is_chord_tone=*/true, voice_profiles::kSoprano);
   }
 };
 
@@ -345,9 +334,8 @@ TEST_F(ContourScoringTest, UpwardCandidateGetsArchBonus) {
   // descending candidate (-2 semitones).
   float up_score = scoreWithContour(PhraseContour::Arch, 0.2f, 2);
   float down_score = scoreWithContour(PhraseContour::Arch, 0.2f, -2);
-  EXPECT_GT(up_score, down_score)
-      << "Arch before peak: ascending=" << up_score
-      << " descending=" << down_score;
+  EXPECT_GT(up_score, down_score) << "Arch before peak: ascending=" << up_score
+                                  << " descending=" << down_score;
 }
 
 TEST_F(ContourScoringTest, DownwardCandidateGetsArchPenalty) {
@@ -355,9 +343,8 @@ TEST_F(ContourScoringTest, DownwardCandidateGetsArchPenalty) {
   // Descending candidate should now score higher.
   float up_score = scoreWithContour(PhraseContour::Arch, 0.8f, 2);
   float down_score = scoreWithContour(PhraseContour::Arch, 0.8f, -2);
-  EXPECT_GT(down_score, up_score)
-      << "Arch after peak: descending=" << down_score
-      << " ascending=" << up_score;
+  EXPECT_GT(down_score, up_score) << "Arch after peak: descending=" << down_score
+                                  << " ascending=" << up_score;
 }
 
 TEST_F(ContourScoringTest, NeutralContourNoEffect) {
@@ -365,8 +352,7 @@ TEST_F(ContourScoringTest, NeutralContourNoEffect) {
   // should receive identical contour bonus.
   float up_score = scoreWithContour(PhraseContour::Neutral, 0.5f, 2);
   float down_score = scoreWithContour(PhraseContour::Neutral, 0.5f, -2);
-  EXPECT_FLOAT_EQ(up_score, down_score)
-      << "Neutral: up=" << up_score << " down=" << down_score;
+  EXPECT_FLOAT_EQ(up_score, down_score) << "Neutral: up=" << up_score << " down=" << down_score;
 }
 
 TEST_F(ContourScoringTest, ContourStrengthZeroNoEffect) {
@@ -375,28 +361,23 @@ TEST_F(ContourScoringTest, ContourStrengthZeroNoEffect) {
   state.phrase_progress = 0.2f;
   state.contour = {PhraseContour::Arch, 0.4f, 0.0f};  // strength=0
 
-  float up = scoreCandidatePitch(state, 60, 62, kTicksPerBeat, true,
-                                  voice_profiles::kSoprano);
-  float down = scoreCandidatePitch(state, 60, 58, kTicksPerBeat, true,
-                                    voice_profiles::kSoprano);
-  EXPECT_FLOAT_EQ(up, down)
-      << "Zero strength: up=" << up << " down=" << down;
+  float up = scoreCandidatePitch(state, 60, 62, kTicksPerBeat, true, voice_profiles::kSoprano);
+  float down = scoreCandidatePitch(state, 60, 58, kTicksPerBeat, true, voice_profiles::kSoprano);
+  EXPECT_FLOAT_EQ(up, down) << "Zero strength: up=" << up << " down=" << down;
 }
 
 TEST_F(ContourScoringTest, DescentContourFavorsDescending) {
   // Descent contour should always favor descending candidates.
   float up_score = scoreWithContour(PhraseContour::Descent, 0.5f, 2);
   float down_score = scoreWithContour(PhraseContour::Descent, 0.5f, -2);
-  EXPECT_GT(down_score, up_score)
-      << "Descent contour: down=" << down_score << " up=" << up_score;
+  EXPECT_GT(down_score, up_score) << "Descent contour: down=" << down_score << " up=" << up_score;
 }
 
 TEST_F(ContourScoringTest, AscentContourFavorsAscending) {
   // Ascent contour should always favor ascending candidates.
   float up_score = scoreWithContour(PhraseContour::Ascent, 0.5f, 2);
   float down_score = scoreWithContour(PhraseContour::Ascent, 0.5f, -2);
-  EXPECT_GT(up_score, down_score)
-      << "Ascent contour: up=" << up_score << " down=" << down_score;
+  EXPECT_GT(up_score, down_score) << "Ascent contour: up=" << up_score << " down=" << down_score;
 }
 
 // ===========================================================================
@@ -434,9 +415,9 @@ class BeatPositionIntervalChoiceTest : public ::testing::Test {
   /// @brief Count interval type distribution for chooseMelodicInterval
   ///        with tick-based overload.
   struct Distribution {
-    int steps = 0;   // interval == 1
-    int skips = 0;   // interval == 2
-    int leaps = 0;   // interval == 3
+    int steps = 0;  // interval == 1
+    int skips = 0;  // interval == 2
+    int leaps = 0;  // interval == 3
   };
 
   Distribution getDistribution(Tick tick, const VoiceProfile& profile) {
@@ -446,10 +427,17 @@ class BeatPositionIntervalChoiceTest : public ::testing::Test {
       MelodicState state{};  // Clean state each trial.
       int interval = chooseMelodicInterval(state, rng, profile, tick);
       switch (interval) {
-        case 1: ++dist.steps; break;
-        case 2: ++dist.skips; break;
-        case 3: ++dist.leaps; break;
-        default: break;
+        case 1:
+          ++dist.steps;
+          break;
+        case 2:
+          ++dist.skips;
+          break;
+        case 3:
+          ++dist.leaps;
+          break;
+        default:
+          break;
       }
     }
     return dist;
@@ -459,7 +447,7 @@ class BeatPositionIntervalChoiceTest : public ::testing::Test {
 TEST_F(BeatPositionIntervalChoiceTest, BarIncreasesSkipProbability) {
   // At bar position, skip_prob *= 1.12 and step_prob *= 0.94.
   // Compare against beat position (no adjustment).
-  Tick bar_tick = 0;           // MetricLevel::Bar
+  Tick bar_tick = 0;               // MetricLevel::Bar
   Tick beat_tick = kTicksPerBeat;  // MetricLevel::Beat
 
   auto bar_dist = getDistribution(bar_tick, voice_profiles::kSoprano);
@@ -469,14 +457,14 @@ TEST_F(BeatPositionIntervalChoiceTest, BarIncreasesSkipProbability) {
   float beat_skip_ratio = static_cast<float>(beat_dist.skips) / kTrials;
 
   EXPECT_GT(bar_skip_ratio, beat_skip_ratio)
-      << "Bar skip ratio (" << bar_skip_ratio
-      << ") should exceed beat skip ratio (" << beat_skip_ratio << ")";
+      << "Bar skip ratio (" << bar_skip_ratio << ") should exceed beat skip ratio ("
+      << beat_skip_ratio << ")";
 }
 
 TEST_F(BeatPositionIntervalChoiceTest, OffbeatIncreasesStepProbability) {
   // At offbeat, step_prob *= 1.08 and skip_prob *= 0.95.
   Tick offbeat_tick = kTicksPerBeat / 2;  // MetricLevel::Offbeat
-  Tick beat_tick = kTicksPerBeat;          // MetricLevel::Beat
+  Tick beat_tick = kTicksPerBeat;         // MetricLevel::Beat
 
   auto off_dist = getDistribution(offbeat_tick, voice_profiles::kSoprano);
   auto beat_dist = getDistribution(beat_tick, voice_profiles::kSoprano);
@@ -485,8 +473,8 @@ TEST_F(BeatPositionIntervalChoiceTest, OffbeatIncreasesStepProbability) {
   float beat_step_ratio = static_cast<float>(beat_dist.steps) / kTrials;
 
   EXPECT_GT(off_step_ratio, beat_step_ratio)
-      << "Offbeat step ratio (" << off_step_ratio
-      << ") should exceed beat step ratio (" << beat_step_ratio << ")";
+      << "Offbeat step ratio (" << off_step_ratio << ") should exceed beat step ratio ("
+      << beat_step_ratio << ")";
 }
 
 // ===========================================================================
@@ -589,7 +577,8 @@ class GravityChainLengthTest : public ::testing::Test {
     for (int i = 0; i < kTrials; ++i) {
       std::mt19937 rng(100 + static_cast<uint32_t>(i));
       int dir = chooseMelodicDirection(state, profile, rng);
-      if (dir != 1) ++reversals;
+      if (dir != 1)
+        ++reversals;
     }
     return reversals;
   }

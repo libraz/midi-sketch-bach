@@ -8,7 +8,7 @@ std::vector<NoteEvent> generateNachschlag(const NoteEvent& note, uint8_t resolut
   std::vector<NoteEvent> result;
 
   // Each ending sub-note is 1/8 of a beat (60 ticks). Two ending notes = 120 ticks.
-  constexpr Tick kSubNoteDuration = kTicksPerBeat / 8;  // 60 ticks
+  constexpr Tick kSubNoteDuration = kTicksPerBeat / 8;    // 60 ticks
   constexpr Tick kEndingDuration = kSubNoteDuration * 2;  // 120 ticks
 
   // Minimum note duration: half beat (240 ticks) to leave meaningful main note.

@@ -2,12 +2,12 @@
 
 #include "forms/goldberg/variations/goldberg_fughetta.h"
 
+#include <gtest/gtest.h>
+
 #include <algorithm>
 #include <cstdint>
 #include <numeric>
 #include <set>
-
-#include <gtest/gtest.h>
 
 #include "core/basic_types.h"
 #include "forms/goldberg/goldberg_structural_grid.h"
@@ -18,15 +18,13 @@ namespace {
 
 // Common test fixtures.
 constexpr KeySignature kGMajor = {Key::G, false};
-constexpr TimeSignature kTriple = {3, 4};      // Var 10: 3/4
-constexpr TimeSignature kAllaBrève = {2, 2};    // Var 22: 2/2
+constexpr TimeSignature kTriple = {3, 4};     // Var 10: 3/4
+constexpr TimeSignature kAllaBrève = {2, 2};  // Var 22: 2/2
 constexpr uint32_t kTestSeed = 42;
 
 class FughettaTest : public ::testing::Test {
  protected:
-  void SetUp() override {
-    grid_ = GoldbergStructuralGrid::createMajor();
-  }
+  void SetUp() override { grid_ = GoldbergStructuralGrid::createMajor(); }
 
   GoldbergStructuralGrid grid_;
   FughettaGenerator generator_;
@@ -39,8 +37,7 @@ class FughettaTest : public ::testing::Test {
 TEST_F(FughettaTest, Var10FughettaGenerate) {
   auto result = generator_.generate(10, grid_, kGMajor, kTriple, kTestSeed);
   EXPECT_TRUE(result.success) << "Var 10 fughetta should succeed";
-  EXPECT_FALSE(result.notes.empty())
-      << "Var 10 fughetta should produce non-empty output";
+  EXPECT_FALSE(result.notes.empty()) << "Var 10 fughetta should produce non-empty output";
 }
 
 // ---------------------------------------------------------------------------
@@ -50,8 +47,7 @@ TEST_F(FughettaTest, Var10FughettaGenerate) {
 TEST_F(FughettaTest, Var22AllaBreveFugalGenerate) {
   auto result = generator_.generate(22, grid_, kGMajor, kAllaBrève, kTestSeed);
   EXPECT_TRUE(result.success) << "Var 22 alla breve fugal should succeed";
-  EXPECT_FALSE(result.notes.empty())
-      << "Var 22 alla breve fugal should produce non-empty output";
+  EXPECT_FALSE(result.notes.empty()) << "Var 22 alla breve fugal should produce non-empty output";
 }
 
 // ---------------------------------------------------------------------------
@@ -84,14 +80,14 @@ TEST_F(FughettaTest, NotesSpan32Bars) {
   Tick max_tick = 0;
   for (const auto& note : result.notes) {
     Tick end_tick = note.start_tick + note.duration;
-    if (end_tick > max_tick) max_tick = end_tick;
+    if (end_tick > max_tick)
+      max_tick = end_tick;
   }
 
   // Binary repeats: AABB = 4 * 16 bars = 64 bars total.
   Tick ticks_per_bar = kTriple.ticksPerBar();
   Tick expected_min = 32 * ticks_per_bar;  // At minimum 32 bars with repeats.
-  EXPECT_GE(max_tick, expected_min)
-      << "Notes should span at least 32 bars (with binary repeats)";
+  EXPECT_GE(max_tick, expected_min) << "Notes should span at least 32 bars (with binary repeats)";
 }
 
 // ---------------------------------------------------------------------------
@@ -118,9 +114,8 @@ TEST_F(FughettaTest, Var22HasLongerNotes) {
   double avg10 = avg_duration(result10.notes);
   double avg22 = avg_duration(result22.notes);
 
-  EXPECT_GT(avg22, avg10)
-      << "Var 22 (alla breve) average note duration (" << avg22
-      << ") should be longer than Var 10 (" << avg10 << ")";
+  EXPECT_GT(avg22, avg10) << "Var 22 (alla breve) average note duration (" << avg22
+                          << ") should be longer than Var 10 (" << avg10 << ")";
 }
 
 // ---------------------------------------------------------------------------
@@ -157,8 +152,10 @@ TEST_F(FughettaTest, DifferentSeedsDifferent) {
     auto result1 = generator_.generate(10, grid_, kGMajor, kTriple, base);
     auto result2 = generator_.generate(10, grid_, kGMajor, kTriple, base + 7777);
 
-    if (!result1.success || !result2.success) continue;
-    if (result1.notes.empty() || result2.notes.empty()) continue;
+    if (!result1.success || !result2.success)
+      continue;
+    if (result1.notes.empty() || result2.notes.empty())
+      continue;
 
     size_t compare_count = std::min(result1.notes.size(), result2.notes.size());
     for (size_t idx = 0; idx < compare_count; ++idx) {
@@ -189,14 +186,14 @@ TEST_F(FughettaTest, BothVariationsSucceed) {
   for (uint32_t seed = 100; seed < 100 + kNumSeeds; ++seed) {
     auto result10 = generator_.generate(10, grid_, kGMajor, kTriple, seed);
     auto result22 = generator_.generate(22, grid_, kGMajor, kAllaBrève, seed);
-    if (result10.success && !result10.notes.empty()) ++success_count_10;
-    if (result22.success && !result22.notes.empty()) ++success_count_22;
+    if (result10.success && !result10.notes.empty())
+      ++success_count_10;
+    if (result22.success && !result22.notes.empty())
+      ++success_count_22;
   }
 
-  EXPECT_EQ(success_count_10, kNumSeeds)
-      << "All Var 10 seeds should succeed";
-  EXPECT_EQ(success_count_22, kNumSeeds)
-      << "All Var 22 seeds should succeed";
+  EXPECT_EQ(success_count_10, kNumSeeds) << "All Var 10 seeds should succeed";
+  EXPECT_EQ(success_count_22, kNumSeeds) << "All Var 22 seeds should succeed";
 }
 
 // ---------------------------------------------------------------------------

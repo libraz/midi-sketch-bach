@@ -45,10 +45,7 @@ uint8_t nearestChordTone(uint8_t pitch, const HarmonicEvent& event) {
   }
 
   // Chord pitch classes.
-  int chord_pcs[3] = {
-      root_pc,
-      (root_pc + third_interval) % 12,
-      (root_pc + fifth_interval) % 12};
+  int chord_pcs[3] = {root_pc, (root_pc + third_interval) % 12, (root_pc + fifth_interval) % 12};
 
   // Find closest chord tone across same and adjacent octaves.
   int best_pitch = pitch;
@@ -59,7 +56,8 @@ uint8_t nearestChordTone(uint8_t pitch, const HarmonicEvent& event) {
     int base_octave = (static_cast<int>(pitch) / 12) * 12;
     for (int oct_offset = -12; oct_offset <= 12; oct_offset += 12) {
       int candidate = base_octave + pc + oct_offset;
-      if (candidate < 0 || candidate > 127) continue;
+      if (candidate < 0 || candidate > 127)
+        continue;
       int dist = std::abs(candidate - static_cast<int>(pitch));
       if (dist < best_dist) {
         best_dist = dist;
@@ -71,8 +69,7 @@ uint8_t nearestChordTone(uint8_t pitch, const HarmonicEvent& event) {
   return static_cast<uint8_t>(best_pitch);
 }
 
-uint8_t nearestChordTone(uint8_t target,
-                         const std::vector<uint8_t>& chord_pitches) {
+uint8_t nearestChordTone(uint8_t target, const std::vector<uint8_t>& chord_pitches) {
   if (chord_pitches.empty()) {
     return target;
   }

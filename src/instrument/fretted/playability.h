@@ -20,9 +20,7 @@ struct TransitionCost {
   float string_crossing_cost = 0.0f;  // Cost of crossing strings
 
   /// @brief Total combined cost.
-  float total() const {
-    return stretch_cost + position_shift_cost + string_crossing_cost;
-  }
+  float total() const { return stretch_cost + position_shift_cost + string_crossing_cost; }
 };
 
 /// @brief Calculate the ergonomic transition cost between two fret positions.

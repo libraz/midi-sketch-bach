@@ -47,8 +47,7 @@ constexpr Tick kPreCadenceWindow = kTicksPerBeat * 2;
 /// @param total_duration Total piece duration in ticks.
 /// @param cadence_ticks Planned cadence positions (sorted).
 /// @return Rhythm factor: 1.0 = normal, <1.0 = faster harmonic rhythm, >1.0 = slower.
-float computeRhythmFactor(Tick tick, Tick total_duration,
-                          const std::vector<Tick>& cadence_ticks);
+float computeRhythmFactor(Tick tick, Tick total_duration, const std::vector<Tick>& cadence_ticks);
 
 /// @brief Apply rhythm factors to a harmonic timeline's events.
 ///
@@ -59,8 +58,7 @@ float computeRhythmFactor(Tick tick, Tick total_duration,
 /// @param events Mutable reference to timeline events.
 /// @param total_duration Total piece duration.
 /// @param cadence_ticks Planned cadence positions.
-void applyRhythmFactors(std::vector<HarmonicEvent>& events,
-                        Tick total_duration,
+void applyRhythmFactors(std::vector<HarmonicEvent>& events, Tick total_duration,
                         const std::vector<Tick>& cadence_ticks);
 
 /// @brief Compute rhythm factor directly from a FuguePhase value.

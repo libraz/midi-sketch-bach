@@ -100,8 +100,7 @@ struct ChaconneAnalysisResult {
 /// @param scheme The harmonic scheme for integrity verification.
 /// @return ChaconneAnalysisResult with all metric scores populated.
 ChaconneAnalysisResult analyzeChaconne(const std::vector<Track>& tracks,
-                                       const ChaconneConfig& config,
-                                       const ChaconneScheme& scheme);
+                                       const ChaconneConfig& config, const ChaconneScheme& scheme);
 
 }  // namespace bach
 

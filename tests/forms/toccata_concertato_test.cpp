@@ -1,7 +1,5 @@
 // Tests for Concertato archetype toccata generation.
 
-#include "forms/toccata.h"
-
 #include <gtest/gtest.h>
 
 #include <algorithm>
@@ -9,6 +7,7 @@
 
 #include "core/basic_types.h"
 #include "core/pitch_utils.h"
+#include "forms/toccata.h"
 #include "test_helpers.h"
 
 namespace bach {
@@ -28,7 +27,8 @@ ToccataConfig makeConcertatoConfig(uint32_t seed = 42) {
 size_t countNotesInRange(const Track& track, Tick start, Tick end) {
   size_t count = 0;
   for (const auto& note : track.notes) {
-    if (note.start_tick >= start && note.start_tick < end) ++count;
+    if (note.start_tick >= start && note.start_tick < end)
+      ++count;
   }
   return count;
 }
@@ -136,8 +136,8 @@ TEST(ToccataConcertatoTest, ThreeSectionContrast_AdagioHasLongerNotes) {
   float adagio_avg = avgDur(1);
 
   EXPECT_GT(adagio_avg, allegro_avg * 1.5f)
-      << "Adagio avg duration (" << adagio_avg
-      << ") should be > 1.5x Allegro avg duration (" << allegro_avg << ")";
+      << "Adagio avg duration (" << adagio_avg << ") should be > 1.5x Allegro avg duration ("
+      << allegro_avg << ")";
 }
 
 TEST(ToccataConcertatoTest, AdagioCantabile_StepwiseMotion) {
@@ -153,21 +153,24 @@ TEST(ToccataConcertatoTest, AdagioCantabile_StepwiseMotion) {
   int total_pairs = 0;
 
   for (size_t i = 1; i < notes.size(); ++i) {
-    if (notes[i].start_tick < result.sections[1].start) continue;
-    if (notes[i].start_tick >= result.sections[1].end) break;
-    if (notes[i - 1].start_tick < result.sections[1].start) continue;
+    if (notes[i].start_tick < result.sections[1].start)
+      continue;
+    if (notes[i].start_tick >= result.sections[1].end)
+      break;
+    if (notes[i - 1].start_tick < result.sections[1].start)
+      continue;
 
-    int interval = std::abs(static_cast<int>(notes[i].pitch) -
-                            static_cast<int>(notes[i - 1].pitch));
+    int interval =
+        std::abs(static_cast<int>(notes[i].pitch) - static_cast<int>(notes[i - 1].pitch));
     ++total_pairs;
-    if (interval <= 4) ++stepwise;  // Up to major 3rd is "stepwise-ish".
+    if (interval <= 4)
+      ++stepwise;  // Up to major 3rd is "stepwise-ish".
   }
 
   if (total_pairs > 0) {
     float ratio = static_cast<float>(stepwise) / total_pairs;
-    EXPECT_GE(ratio, 0.50f)
-        << "Adagio stepwise motion ratio should be >= 50%, got "
-        << (ratio * 100) << "%";
+    EXPECT_GE(ratio, 0.50f) << "Adagio stepwise motion ratio should be >= 50%, got "
+                            << (ratio * 100) << "%";
   }
 }
 
@@ -183,8 +186,7 @@ TEST(ToccataConcertatoTest, RegistrationContrast) {
   for (size_t si = 0; si < 3; ++si) {
     size_t count = 0;
     for (const auto& track : result.tracks) {
-      count += countNotesInRange(track, result.sections[si].start,
-                                 result.sections[si].end);
+      count += countNotesInRange(track, result.sections[si].start, result.sections[si].end);
     }
     EXPECT_GT(count, 0u) << "Section " << si << " should have notes";
   }

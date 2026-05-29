@@ -63,8 +63,7 @@ uint8_t VirtuosoGenerator::getVoiceCount(int variation_number) {
 // VirtuosoGenerator::buildProfile
 // ---------------------------------------------------------------------------
 
-FiguraProfile VirtuosoGenerator::buildProfile(int variation_number,
-                                              GoldbergVariationType& type) {
+FiguraProfile VirtuosoGenerator::buildProfile(int variation_number, GoldbergVariationType& type) {
   FiguraProfile profile;
 
   switch (variation_number) {
@@ -121,12 +120,9 @@ FiguraProfile VirtuosoGenerator::buildProfile(int variation_number,
 // VirtuosoGenerator::generate
 // ---------------------------------------------------------------------------
 
-VirtuosoResult VirtuosoGenerator::generate(
-    int variation_number,
-    const GoldbergStructuralGrid& grid,
-    const KeySignature& key,
-    const TimeSignature& time_sig,
-    uint32_t seed) const {
+VirtuosoResult VirtuosoGenerator::generate(int variation_number, const GoldbergStructuralGrid& grid,
+                                           const KeySignature& key, const TimeSignature& time_sig,
+                                           uint32_t seed) const {
   VirtuosoResult result;
 
   if (!isSupportedVariation(variation_number)) {
@@ -150,9 +146,8 @@ VirtuosoResult VirtuosoGenerator::generate(
     uint32_t voice_seed = seed + static_cast<uint32_t>(voice_idx) * 1000;
 
     float strength = (voice_idx == 0) ? 0.3f : 0.0f;
-    auto voice_notes = figuren.generate(
-        profile, grid, key, time_sig, voice_idx, voice_seed,
-        nullptr, strength);
+    auto voice_notes =
+        figuren.generate(profile, grid, key, time_sig, voice_idx, voice_seed, nullptr, strength);
 
     // Set source and voice index.
     for (auto& note : voice_notes) {
@@ -174,10 +169,9 @@ VirtuosoResult VirtuosoGenerator::generate(
   }
 
   // Sort by start_tick for consistent ordering.
-  std::sort(all_notes.begin(), all_notes.end(),
-            [](const NoteEvent& lhs, const NoteEvent& rhs) {
-              return lhs.start_tick < rhs.start_tick;
-            });
+  std::sort(all_notes.begin(), all_notes.end(), [](const NoteEvent& lhs, const NoteEvent& rhs) {
+    return lhs.start_tick < rhs.start_tick;
+  });
 
   // Apply binary repeats: ||: A(16 bars) :||: B(16 bars) :||
   Tick section_ticks = static_cast<Tick>(kBarsPerSection) * time_sig.ticksPerBar();
@@ -191,10 +185,9 @@ VirtuosoResult VirtuosoGenerator::generate(
 // VirtuosoGenerator::generateBassLine
 // ---------------------------------------------------------------------------
 
-std::vector<NoteEvent> VirtuosoGenerator::generateBassLine(
-    const GoldbergStructuralGrid& grid,
-    const TimeSignature& time_sig,
-    uint8_t bass_voice) const {
+std::vector<NoteEvent> VirtuosoGenerator::generateBassLine(const GoldbergStructuralGrid& grid,
+                                                           const TimeSignature& time_sig,
+                                                           uint8_t bass_voice) const {
   std::vector<NoteEvent> bass_notes;
   bass_notes.reserve(kGridBars * 2);
 
@@ -208,8 +201,7 @@ std::vector<NoteEvent> VirtuosoGenerator::generateBassLine(
     int target_center = (kBassLow + kBassHigh) / 2;  // ~C3 (48)
     int diff = static_cast<int>(primary_pitch) - target_center;
     int shift = nearestOctaveShift(diff);
-    uint8_t bass_pitch = clampPitch(
-        static_cast<int>(primary_pitch) - shift, kBassLow, kBassHigh);
+    uint8_t bass_pitch = clampPitch(static_cast<int>(primary_pitch) - shift, kBassLow, kBassHigh);
 
     Tick bar_start = static_cast<Tick>(bar_idx) * ticks_per_bar;
 
@@ -236,8 +228,8 @@ std::vector<NoteEvent> VirtuosoGenerator::generateBassLine(
       uint8_t res_pitch_raw = bar_info.bass_motion.resolution_pitch.value();
       int res_diff = static_cast<int>(res_pitch_raw) - target_center;
       int res_shift = nearestOctaveShift(res_diff);
-      uint8_t res_pitch = clampPitch(
-          static_cast<int>(res_pitch_raw) - res_shift, kBassLow, kBassHigh);
+      uint8_t res_pitch =
+          clampPitch(static_cast<int>(res_pitch_raw) - res_shift, kBassLow, kBassHigh);
 
       BachNoteOptions res_opts{};
       res_opts.voice = bass_voice;
@@ -275,16 +267,16 @@ std::vector<NoteEvent> VirtuosoGenerator::generateBassLine(
 // VirtuosoGenerator::applyClimaxIntensification
 // ---------------------------------------------------------------------------
 
-void VirtuosoGenerator::applyClimaxIntensification(
-    std::vector<NoteEvent>& notes,
-    const GoldbergStructuralGrid& grid,
-    const TimeSignature& time_sig) const {
+void VirtuosoGenerator::applyClimaxIntensification(std::vector<NoteEvent>& notes,
+                                                   const GoldbergStructuralGrid& grid,
+                                                   const TimeSignature& time_sig) const {
   Tick ticks_per_bar = time_sig.ticksPerBar();
 
   for (auto& note : notes) {
     // Determine which bar this note belongs to.
     int bar_idx = static_cast<int>(note.start_tick / ticks_per_bar);
-    if (bar_idx >= kGridBars) bar_idx = kGridBars - 1;
+    if (bar_idx >= kGridBars)
+      bar_idx = kGridBars - 1;
 
     // Scale velocity based on tension profile for dramatic climax shape.
     float tension = grid.getTension(bar_idx).aggregate();
@@ -292,8 +284,8 @@ void VirtuosoGenerator::applyClimaxIntensification(
     // Map tension [0.0, 1.0] to velocity [kClimaxVelocityMin, kClimaxVelocityMax].
     float velocity_f = static_cast<float>(kClimaxVelocityMin) +
                        tension * static_cast<float>(kClimaxVelocityMax - kClimaxVelocityMin);
-    uint8_t new_velocity = static_cast<uint8_t>(
-        std::min(static_cast<float>(kClimaxVelocityMax), velocity_f));
+    uint8_t new_velocity =
+        static_cast<uint8_t>(std::min(static_cast<float>(kClimaxVelocityMax), velocity_f));
     if (new_velocity > note.velocity) {
       note.velocity = new_velocity;
     }
@@ -302,8 +294,7 @@ void VirtuosoGenerator::applyClimaxIntensification(
     if (note.source != BachNoteSource::GoldbergBass && tension > 0.6f) {
       int expand = static_cast<int>(tension * static_cast<float>(kClimaxRegisterExpand));
       int expanded_pitch = static_cast<int>(note.pitch) + expand;
-      note.pitch = clampPitch(expanded_pitch, organ_range::kManual1Low,
-                             organ_range::kManual1High);
+      note.pitch = clampPitch(expanded_pitch, organ_range::kManual1Low, organ_range::kManual1High);
     }
   }
 }

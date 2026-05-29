@@ -2,9 +2,9 @@
 
 #include "forms/goldberg/canon/canon_generator.h"
 
-#include <cstdint>
-
 #include <gtest/gtest.h>
+
+#include <cstdint>
 
 #include "core/basic_types.h"
 #include "core/interval.h"
@@ -22,8 +22,7 @@ constexpr KeySignature kGMinor = {Key::G, true};
 constexpr TimeSignature kTriple = {3, 4};  // 3/4 time (BWV 988 standard).
 
 /// @brief Helper: create a CanonSpec for testing.
-CanonSpec makeCanonSpec(int interval,
-                        CanonTransform transform = CanonTransform::Regular,
+CanonSpec makeCanonSpec(int interval, CanonTransform transform = CanonTransform::Regular,
                         KeySignature key = kGMajor,
                         MinorModeProfile minor_profile = MinorModeProfile::NaturalMinor,
                         int delay_bars = 1) {
@@ -39,9 +38,7 @@ CanonSpec makeCanonSpec(int interval,
 
 class CanonGeneratorTest : public ::testing::Test {
  protected:
-  void SetUp() override {
-    grid_ = GoldbergStructuralGrid::createMajor();
-  }
+  void SetUp() override { grid_ = GoldbergStructuralGrid::createMajor(); }
 
   GoldbergStructuralGrid grid_;
   CanonGenerator generator_;
@@ -187,8 +184,7 @@ TEST_F(CanonGeneratorTest, NotesSpan32Bars) {
   Tick max_tick_with_tail = max_tick + kTriple.ticksPerBar();  // +1 bar tail.
 
   for (const auto& note : result.dux_notes) {
-    EXPECT_LT(note.start_tick, max_tick)
-        << "Dux note should be within 32 bars";
+    EXPECT_LT(note.start_tick, max_tick) << "Dux note should be within 32 bars";
   }
 
   for (const auto& note : result.comes_notes) {
@@ -197,8 +193,7 @@ TEST_F(CanonGeneratorTest, NotesSpan32Bars) {
   }
 
   for (const auto& note : result.bass_notes) {
-    EXPECT_LT(note.start_tick, max_tick)
-        << "Bass note should be within 32 bars";
+    EXPECT_LT(note.start_tick, max_tick) << "Bass note should be within 32 bars";
   }
 }
 
@@ -225,7 +220,8 @@ TEST_F(CanonGeneratorTest, StrongBeatConsonance) {
 
   for (const auto& dux : result.dux_notes) {
     // Check if this dux note is on beat 1 (start of a bar).
-    if (dux.start_tick % kTriple.ticksPerBar() != 0) continue;
+    if (dux.start_tick % kTriple.ticksPerBar() != 0)
+      continue;
 
     // Find a comes note at the same tick.
     for (const auto& [tick, pitch] : comes_by_tick) {
@@ -242,11 +238,10 @@ TEST_F(CanonGeneratorTest, StrongBeatConsonance) {
   }
 
   if (strong_beat_count > 0) {
-    float consonance_rate = static_cast<float>(consonant_count) /
-                            static_cast<float>(strong_beat_count);
+    float consonance_rate =
+        static_cast<float>(consonant_count) / static_cast<float>(strong_beat_count);
     EXPECT_GT(consonance_rate, 0.6f)
-        << "Strong beat consonance rate should be >60%, got "
-        << (consonance_rate * 100.0f) << "% ("
+        << "Strong beat consonance rate should be >60%, got " << (consonance_rate * 100.0f) << "% ("
         << consonant_count << "/" << strong_beat_count << ")";
   }
 }
@@ -268,7 +263,8 @@ TEST_F(CanonGeneratorTest, BassUsesStructuralPitch) {
 
   for (const auto& bass : result.bass_notes) {
     int bar = static_cast<int>(bass.start_tick / kTriple.ticksPerBar());
-    if (bar >= 32) continue;
+    if (bar >= 32)
+      continue;
 
     uint8_t structural_pitch = grid_.getStructuralBassPitch(bar);
     // Check if bass pitch class matches structural bass pitch class.
@@ -282,11 +278,9 @@ TEST_F(CanonGeneratorTest, BassUsesStructuralPitch) {
   }
 
   if (total_bass > 0) {
-    float match_rate = static_cast<float>(structural_match) /
-                       static_cast<float>(total_bass);
-    EXPECT_GT(match_rate, 0.3f)
-        << "Bass should use structural pitch class >30% of the time, got "
-        << (match_rate * 100.0f) << "%";
+    float match_rate = static_cast<float>(structural_match) / static_cast<float>(total_bass);
+    EXPECT_GT(match_rate, 0.3f) << "Bass should use structural pitch class >30% of the time, got "
+                                << (match_rate * 100.0f) << "%";
   }
 }
 
@@ -305,8 +299,7 @@ TEST_F(CanonGeneratorTest, DifferentSeedsDifferentOutput) {
 
   // Compare a few dux pitches -- at least one should differ.
   bool found_difference = false;
-  size_t compare_count = std::min(result_a.dux_notes.size(),
-                                  result_b.dux_notes.size());
+  size_t compare_count = std::min(result_a.dux_notes.size(), result_b.dux_notes.size());
   compare_count = std::min(compare_count, static_cast<size_t>(20));
 
   for (size_t idx = 0; idx < compare_count; ++idx) {
@@ -316,8 +309,7 @@ TEST_F(CanonGeneratorTest, DifferentSeedsDifferentOutput) {
     }
   }
 
-  EXPECT_TRUE(found_difference)
-      << "Different seeds should produce different dux melodies";
+  EXPECT_TRUE(found_difference) << "Different seeds should produce different dux melodies";
 }
 
 // ---------------------------------------------------------------------------
@@ -331,8 +323,7 @@ TEST_F(CanonGeneratorTest, BacktrackCountReasonable) {
 
   ASSERT_TRUE(result.success);
   EXPECT_LT(result.backtrack_count, 20)
-      << "Backtrack count should be reasonable (< 20), got "
-      << result.backtrack_count;
+      << "Backtrack count should be reasonable (< 20), got " << result.backtrack_count;
 }
 
 // ---------------------------------------------------------------------------
@@ -341,8 +332,8 @@ TEST_F(CanonGeneratorTest, BacktrackCountReasonable) {
 
 TEST_F(CanonGeneratorTest, Var15InvertedMinor) {
   // Var 15: Canon at the 5th inverted (interval=4, inverted), G minor.
-  CanonSpec spec = makeCanonSpec(4, CanonTransform::Inverted, kGMinor,
-                                 MinorModeProfile::MixedBaroqueMinor);
+  CanonSpec spec =
+      makeCanonSpec(4, CanonTransform::Inverted, kGMinor, MinorModeProfile::MixedBaroqueMinor);
   auto result = generator_.generate(spec, grid_, kTriple, 1234);
 
   EXPECT_TRUE(result.success) << "Inverted minor canon should succeed";
@@ -356,8 +347,8 @@ TEST_F(CanonGeneratorTest, Var15InvertedMinor) {
 
 TEST_F(CanonGeneratorTest, Var21MinorCanon) {
   // Var 21: Canon at the 7th (interval=6), G minor.
-  CanonSpec spec = makeCanonSpec(6, CanonTransform::Regular, kGMinor,
-                                 MinorModeProfile::HarmonicMinor);
+  CanonSpec spec =
+      makeCanonSpec(6, CanonTransform::Regular, kGMinor, MinorModeProfile::HarmonicMinor);
   auto result = generator_.generate(spec, grid_, kTriple, 5678);
 
   EXPECT_TRUE(result.success) << "7th minor canon should succeed";
@@ -376,11 +367,11 @@ TEST_F(CanonGeneratorTest, CanonSuccessRate) {
 
   for (uint32_t seed = 1; seed <= 10; ++seed) {
     auto result = generator_.generate(spec, grid_, kTriple, seed * 137);
-    if (result.success) success_count++;
+    if (result.success)
+      success_count++;
   }
 
-  EXPECT_EQ(success_count, 10)
-      << "All 10 unison canon generations should succeed";
+  EXPECT_EQ(success_count, 10) << "All 10 unison canon generations should succeed";
 }
 
 // ---------------------------------------------------------------------------
@@ -393,8 +384,7 @@ TEST_F(CanonGeneratorTest, DuxNotesHaveCorrectSource) {
 
   ASSERT_TRUE(result.success);
   for (const auto& note : result.dux_notes) {
-    EXPECT_EQ(note.source, BachNoteSource::CanonDux)
-        << "All dux notes should have CanonDux source";
+    EXPECT_EQ(note.source, BachNoteSource::CanonDux) << "All dux notes should have CanonDux source";
   }
 }
 
@@ -457,10 +447,8 @@ TEST_F(CanonGeneratorTest, BassPitchesInRegister) {
 
   ASSERT_TRUE(result.success);
   for (const auto& note : result.bass_notes) {
-    EXPECT_GE(note.pitch, 36)
-        << "Bass pitch should be >= C2 (36)";
-    EXPECT_LE(note.pitch, 60)
-        << "Bass pitch should be <= C4 (60)";
+    EXPECT_GE(note.pitch, 36) << "Bass pitch should be >= C2 (36)";
+    EXPECT_LE(note.pitch, 60) << "Bass pitch should be <= C4 (60)";
   }
 }
 
@@ -475,8 +463,7 @@ TEST_F(CanonGeneratorTest, MultipleIntervalsSucceed) {
   for (int interval = 0; interval <= 8; ++interval) {
     CanonSpec spec = makeCanonSpec(interval);
     auto result = generator_.generate(spec, grid_, kTriple, 42 + interval);
-    EXPECT_TRUE(result.success)
-        << "Canon at interval " << interval << " should succeed";
+    EXPECT_TRUE(result.success) << "Canon at interval " << interval << " should succeed";
     EXPECT_FALSE(result.dux_notes.empty())
         << "Canon at interval " << interval << " should produce dux notes";
   }

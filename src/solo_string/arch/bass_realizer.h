@@ -54,9 +54,8 @@ BassRealizationStyle getRealizationStyle(VariationRole role);
 /// @param instrument_high Instrument's highest MIDI pitch.
 /// @param accumulate_index Position within Accumulate block (0-based), ignored for other roles.
 /// @return BassRegisterProfile with effective bounds.
-BassRegisterProfile getBassRegisterProfile(
-    VariationRole role, uint8_t instrument_low, uint8_t instrument_high,
-    int accumulate_index = 0);
+BassRegisterProfile getBassRegisterProfile(VariationRole role, uint8_t instrument_low,
+                                           uint8_t instrument_high, int accumulate_index = 0);
 
 /// @brief Generate a bass line from the harmonic scheme.
 ///
@@ -74,13 +73,9 @@ BassRegisterProfile getBassRegisterProfile(
 /// @param seed RNG seed for deterministic generation.
 /// @param accumulate_index Position within Accumulate block (0-based), ignored for other roles.
 /// @return Vector of NoteEvents forming the bass line.
-std::vector<NoteEvent> realizeBass(
-    const ChaconneScheme& scheme,
-    const KeySignature& key,
-    VariationRole role,
-    uint8_t register_low, uint8_t register_high,
-    uint32_t seed,
-    int accumulate_index = 0);
+std::vector<NoteEvent> realizeBass(const ChaconneScheme& scheme, const KeySignature& key,
+                                   VariationRole role, uint8_t register_low, uint8_t register_high,
+                                   uint32_t seed, int accumulate_index = 0);
 
 }  // namespace bach
 

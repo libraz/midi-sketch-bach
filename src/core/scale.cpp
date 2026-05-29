@@ -66,8 +66,7 @@ uint8_t nearestScaleTone(uint8_t pitch, Key key, ScaleType scale) {
   return pitch;
 }
 
-bool pitchToScaleDegree(uint8_t pitch, Key key, ScaleType scale,
-                        int& out_degree) {
+bool pitchToScaleDegree(uint8_t pitch, Key key, ScaleType scale, int& out_degree) {
   int key_offset = static_cast<int>(key);
   const int* intervals = getScaleIntervals(scale);
   int pitch_class = getPitchClass(pitch);
@@ -112,8 +111,10 @@ uint8_t absoluteDegreeToPitch(int abs_degree, Key key, ScaleType scale) {
   int midi_pitch = octave * 12 + key_offset + intervals[deg];
 
   // Clamp to valid MIDI range.
-  if (midi_pitch < 0) return 0;
-  if (midi_pitch > 127) return 127;
+  if (midi_pitch < 0)
+    return 0;
+  if (midi_pitch > 127)
+    return 127;
   return static_cast<uint8_t>(midi_pitch);
 }
 

@@ -15,8 +15,7 @@ FailReport validateGlobalArcConfigReport(const GlobalArcConfig& config) {
   if (config.phase_assignment.empty()) {
     report.addIssue({FailKind::ConfigFail, FailSeverity::Critical,
                      /*tick=*/0, /*bar=*/0, /*beat=*/0,
-                     /*voice_a=*/0, /*voice_b=*/0,
-                     "empty_phases", "phase_assignment is empty"});
+                     /*voice_a=*/0, /*voice_b=*/0, "empty_phases", "phase_assignment is empty"});
     return report;
   }
 
@@ -34,12 +33,11 @@ FailReport validateGlobalArcConfigReport(const GlobalArcConfig& config) {
     if (first) {
       // First section must be Ascent (cannot start at Peak or Descent).
       if (phase != ArcPhase::Ascent) {
-        report.addIssue({FailKind::ConfigFail, FailSeverity::Critical,
-                         /*tick=*/0, /*bar=*/0, /*beat=*/0,
-                         /*voice_a=*/0, /*voice_b=*/0,
-                         "first_not_ascent",
-                         std::string("First section must be Ascent, found ") +
-                             arcPhaseToString(phase)});
+        report.addIssue(
+            {FailKind::ConfigFail, FailSeverity::Critical,
+             /*tick=*/0, /*bar=*/0, /*beat=*/0,
+             /*voice_a=*/0, /*voice_b=*/0, "first_not_ascent",
+             std::string("First section must be Ascent, found ") + arcPhaseToString(phase)});
       }
       prev_phase = phase;
       first = false;
@@ -54,12 +52,9 @@ FailReport validateGlobalArcConfigReport(const GlobalArcConfig& config) {
                        /*tick=*/0,
                        /*bar=*/static_cast<uint8_t>(section_index),
                        /*beat=*/0,
-                       /*voice_a=*/0, /*voice_b=*/0,
-                       "phase_regression",
-                       "Section " + std::to_string(section_index) +
-                           ": phase regression from " +
-                           arcPhaseToString(prev_phase) + " to " +
-                           arcPhaseToString(phase)});
+                       /*voice_a=*/0, /*voice_b=*/0, "phase_regression",
+                       "Section " + std::to_string(section_index) + ": phase regression from " +
+                           arcPhaseToString(prev_phase) + " to " + arcPhaseToString(phase)});
     }
 
     prev_phase = phase;
@@ -70,10 +65,8 @@ FailReport validateGlobalArcConfigReport(const GlobalArcConfig& config) {
   if (peak_count != 1) {
     report.addIssue({FailKind::ConfigFail, FailSeverity::Critical,
                      /*tick=*/0, /*bar=*/0, /*beat=*/0,
-                     /*voice_a=*/0, /*voice_b=*/0,
-                     "peak_count",
-                     "Expected exactly 1 Peak, found " +
-                         std::to_string(peak_count)});
+                     /*voice_a=*/0, /*voice_b=*/0, "peak_count",
+                     "Expected exactly 1 Peak, found " + std::to_string(peak_count)});
   }
 
   return report;

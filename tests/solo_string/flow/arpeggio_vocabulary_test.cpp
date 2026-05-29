@@ -1,6 +1,7 @@
 // Tests for vocabulary slot pattern integration in arpeggio generation.
 
 #include <gtest/gtest.h>
+
 #include <random>
 
 #include "core/basic_types.h"
@@ -12,9 +13,8 @@ namespace {
 
 TEST(ArpeggioVocabularyTest, GeneratePatternDoesNotCrash) {
   std::mt19937 rng(42);
-  auto pattern = generatePattern({0, 2, 4}, ArcPhase::Ascent,
-                                  PatternRole::Drive, false, rng,
-                                  ArpeggioPatternType::Rising, false);
+  auto pattern = generatePattern({0, 2, 4}, ArcPhase::Ascent, PatternRole::Drive, false, rng,
+                                 ArpeggioPatternType::Rising, false);
   EXPECT_FALSE(pattern.degrees.empty());
 }
 
@@ -23,9 +23,8 @@ TEST(ArpeggioVocabularyTest, SlotPatternVariety) {
   int vocab_count = 0;
   for (uint32_t seed = 1; seed <= 50; ++seed) {
     std::mt19937 rng(seed);
-    auto pattern = generatePattern({0, 2, 4}, ArcPhase::Ascent,
-                                    PatternRole::Drive, false, rng,
-                                    ArpeggioPatternType::Rising, true);
+    auto pattern = generatePattern({0, 2, 4}, ArcPhase::Ascent, PatternRole::Drive, false, rng,
+                                   ArpeggioPatternType::Rising, true);
     // Vocabulary patterns may have different degree ordering.
     if (!pattern.degrees.empty()) {
       // Check if it differs from simple rising (0, 2, 4).
@@ -40,26 +39,23 @@ TEST(ArpeggioVocabularyTest, SlotPatternVariety) {
 
 TEST(ArpeggioVocabularyTest, EmptyDegreesUseDefault) {
   std::mt19937 rng(7);
-  auto pattern = generatePattern({}, ArcPhase::Peak,
-                                  PatternRole::Drive, false, rng,
-                                  ArpeggioPatternType::Falling, false);
+  auto pattern = generatePattern({}, ArcPhase::Peak, PatternRole::Drive, false, rng,
+                                 ArpeggioPatternType::Falling, false);
   EXPECT_FALSE(pattern.degrees.empty());
 }
 
 TEST(ArpeggioVocabularyTest, FourVoicePattern) {
   std::mt19937 rng(99);
-  auto pattern = generatePattern({0, 2, 4, 7}, ArcPhase::Descent,
-                                  PatternRole::Release, false, rng,
-                                  ArpeggioPatternType::Oscillating, false);
+  auto pattern = generatePattern({0, 2, 4, 7}, ArcPhase::Descent, PatternRole::Release, false, rng,
+                                 ArpeggioPatternType::Oscillating, false);
   EXPECT_FALSE(pattern.degrees.empty());
 }
 
 TEST(ArpeggioVocabularyTest, ThirtySeeds) {
   for (uint32_t seed = 1; seed <= 30; ++seed) {
     std::mt19937 rng(seed);
-    auto pattern = generatePattern({0, 2, 4}, ArcPhase::Ascent,
-                                    PatternRole::Drive, false, rng,
-                                    ArpeggioPatternType::Rising, false);
+    auto pattern = generatePattern({0, 2, 4}, ArcPhase::Ascent, PatternRole::Drive, false, rng,
+                                   ArpeggioPatternType::Rising, false);
     EXPECT_FALSE(pattern.degrees.empty()) << "seed=" << seed;
   }
 }

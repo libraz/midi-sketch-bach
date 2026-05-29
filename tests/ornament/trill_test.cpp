@@ -26,7 +26,7 @@ NoteEvent makeNote(Tick start, uint8_t pitch, Tick duration, uint8_t voice = 0) 
 
 TEST(TrillTest, QuarterNoteTrillProducesMultipleSubnotes) {
   auto note = makeNote(0, 60, kTicksPerBeat);  // C4, quarter note
-  auto result = generateTrill(note, 62);        // Upper = D4
+  auto result = generateTrill(note, 62);       // Upper = D4
 
   // Should produce more than 1 note.
   EXPECT_GT(result.size(), 1u);
@@ -53,7 +53,7 @@ TEST(TrillTest, EndsOnMainNote) {
 
 TEST(TrillTest, UpperStartAlternatesBetweenUpperAndMain) {
   auto note = makeNote(0, 64, kTicksPerBeat);  // E4
-  auto result = generateTrill(note, 66);        // Upper = F#4
+  auto result = generateTrill(note, 66);       // Upper = F#4
 
   ASSERT_GE(result.size(), 5u);
   // Pattern: upper, main, upper, ..., [nachschlag: lower, main].
@@ -67,7 +67,7 @@ TEST(TrillTest, UpperStartAlternatesBetweenUpperAndMain) {
   }
   // Nachschlag: lower chromatic neighbor, then main note.
   EXPECT_EQ(result[result.size() - 2].pitch, 63);  // Lower neighbor (E4 - 1 = Eb4)
-  EXPECT_EQ(result[result.size() - 1].pitch, 64);   // Main note
+  EXPECT_EQ(result[result.size() - 1].pitch, 64);  // Main note
 }
 
 TEST(TrillTest, LegacyStartsOnMainNote) {
@@ -93,7 +93,7 @@ TEST(TrillTest, LegacyAlternatesBetweenMainAndUpper) {
   }
   // Nachschlag: lower chromatic neighbor, then main note.
   EXPECT_EQ(result[result.size() - 2].pitch, 63);  // Lower neighbor (E4 - 1 = Eb4)
-  EXPECT_EQ(result[result.size() - 1].pitch, 64);   // Main note
+  EXPECT_EQ(result[result.size() - 1].pitch, 64);  // Main note
 }
 
 TEST(TrillTest, TotalDurationEqualsOriginal) {
@@ -161,7 +161,8 @@ TEST(TrillTest, WholeNoteTrillCoversFullDuration) {
   for (const auto& sub : result) {
     total_dur += sub.duration;
     Tick end_tick = sub.start_tick + sub.duration;
-    if (end_tick > last_end) last_end = end_tick;
+    if (end_tick > last_end)
+      last_end = end_tick;
   }
   EXPECT_EQ(total_dur, kTicksPerBar);
   EXPECT_EQ(last_end, kTicksPerBar);
@@ -174,8 +175,7 @@ TEST(TrillTest, SubnotesAreContiguous) {
   for (size_t idx = 1; idx < result.size(); ++idx) {
     Tick prev_end = result[idx - 1].start_tick + result[idx - 1].duration;
     // Allow small tolerance due to integer division.
-    EXPECT_LE(result[idx].start_tick, prev_end + 1)
-        << "Sub-note gap at index " << idx;
+    EXPECT_LE(result[idx].start_tick, prev_end + 1) << "Sub-note gap at index " << idx;
   }
 }
 
@@ -190,7 +190,7 @@ TEST(TrillNachschlagTest, QuarterNoteTrillHasNachschlag) {
   ASSERT_GE(result.size(), 5u);
   // Last 2 sub-notes: lower neighbor (B3 = 59), then main note (C4 = 60).
   EXPECT_EQ(result[result.size() - 2].pitch, 59);  // Lower chromatic neighbor
-  EXPECT_EQ(result[result.size() - 1].pitch, 60);   // Main note
+  EXPECT_EQ(result[result.size() - 1].pitch, 60);  // Main note
 }
 
 TEST(TrillNachschlagTest, HalfNoteTrillHasNachschlag) {

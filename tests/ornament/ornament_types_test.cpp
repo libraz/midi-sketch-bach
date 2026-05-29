@@ -49,8 +49,7 @@ TEST(OrnamentTypesTest, CompoundTrillNachschlagToString) {
 }
 
 TEST(OrnamentTypesTest, CompoundTurnTrillToString) {
-  EXPECT_STREQ(ornamentTypeToString(OrnamentType::CompoundTurnTrill),
-               "compound_turn_trill");
+  EXPECT_STREQ(ornamentTypeToString(OrnamentType::CompoundTurnTrill), "compound_turn_trill");
 }
 
 // ---------------------------------------------------------------------------

@@ -38,8 +38,7 @@ using VoiceRangeFn = std::function<std::pair<uint8_t, uint8_t>(uint8_t)>;
 /// @param num_voices Number of voices (2-5).
 /// @param voice_range Function returning (low, high) pitch range per voice index.
 /// @return ChordVoicing with pitches in descending order.
-ChordVoicing voiceChord(const HarmonicEvent& event, uint8_t num_voices,
-                        VoiceRangeFn voice_range);
+ChordVoicing voiceChord(const HarmonicEvent& event, uint8_t num_voices, VoiceRangeFn voice_range);
 
 /// @brief Create a smooth voice leading from prev voicing to the next chord.
 ///
@@ -52,10 +51,8 @@ ChordVoicing voiceChord(const HarmonicEvent& event, uint8_t num_voices,
 /// @param num_voices Number of voices (must match prev.num_voices).
 /// @param voice_range Function returning (low, high) pitch range per voice index.
 /// @return New voicing with minimal total voice motion.
-ChordVoicing smoothVoiceLeading(const ChordVoicing& prev,
-                                const HarmonicEvent& next_event,
-                                uint8_t num_voices,
-                                VoiceRangeFn voice_range);
+ChordVoicing smoothVoiceLeading(const ChordVoicing& prev, const HarmonicEvent& next_event,
+                                uint8_t num_voices, VoiceRangeFn voice_range);
 
 /// @brief Get all chord tone pitch classes for a given chord quality and root.
 /// @param quality Chord quality.

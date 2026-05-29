@@ -17,8 +17,7 @@ namespace {
 
 TEST(CadentialPedalTest, TonicProducesCorrectPitch) {
   KeySignature key = {Key::C, false};
-  auto notes = generateCadentialPedal(key, 0, kTicksPerBar * 2,
-                                      PedalPointType::Tonic, 3);
+  auto notes = generateCadentialPedal(key, 0, kTicksPerBar * 2, PedalPointType::Tonic, 3);
   ASSERT_FALSE(notes.empty());
   for (const auto& n : notes) {
     EXPECT_EQ(n.pitch % 12, 0) << "Tonic pedal in C should be pitch class C";
@@ -29,8 +28,7 @@ TEST(CadentialPedalTest, TonicProducesCorrectPitch) {
 
 TEST(CadentialPedalTest, DominantProducesCorrectPitch) {
   KeySignature key = {Key::C, false};
-  auto notes = generateCadentialPedal(key, 0, kTicksPerBar * 2,
-                                      PedalPointType::Dominant, 3);
+  auto notes = generateCadentialPedal(key, 0, kTicksPerBar * 2, PedalPointType::Dominant, 3);
   ASSERT_FALSE(notes.empty());
   for (const auto& n : notes) {
     EXPECT_EQ(n.pitch % 12, 7) << "Dominant pedal in C should be pitch class G";
@@ -39,8 +37,7 @@ TEST(CadentialPedalTest, DominantProducesCorrectPitch) {
 
 TEST(CadentialPedalTest, MinorKeyTonicPitch) {
   KeySignature key = {Key::D, true};  // D minor.
-  auto notes = generateCadentialPedal(key, 0, kTicksPerBar,
-                                      PedalPointType::Tonic, 3);
+  auto notes = generateCadentialPedal(key, 0, kTicksPerBar, PedalPointType::Tonic, 3);
   ASSERT_FALSE(notes.empty());
   for (const auto& n : notes) {
     EXPECT_EQ(n.pitch % 12, 2) << "Tonic pedal in D minor should be pitch class D";
@@ -49,19 +46,16 @@ TEST(CadentialPedalTest, MinorKeyTonicPitch) {
 
 TEST(CadentialPedalTest, NoOverlapBetweenRearticulatedNotes) {
   KeySignature key = {Key::C, false};
-  auto notes = generateCadentialPedal(key, 0, kTicksPerBar * 4,
-                                      PedalPointType::Tonic, 3);
+  auto notes = generateCadentialPedal(key, 0, kTicksPerBar * 4, PedalPointType::Tonic, 3);
   for (size_t i = 1; i < notes.size(); ++i) {
     Tick prev_end = notes[i - 1].start_tick + notes[i - 1].duration;
-    EXPECT_LE(prev_end, notes[i].start_tick)
-        << "Pedal notes must not overlap";
+    EXPECT_LE(prev_end, notes[i].start_tick) << "Pedal notes must not overlap";
   }
 }
 
 TEST(CadentialPedalTest, EmptyWhenStartEqualsEnd) {
   KeySignature key = {Key::C, false};
-  auto notes = generateCadentialPedal(key, 1000, 1000,
-                                      PedalPointType::Tonic, 3);
+  auto notes = generateCadentialPedal(key, 1000, 1000, PedalPointType::Tonic, 3);
   EXPECT_TRUE(notes.empty());
 }
 
@@ -141,8 +135,7 @@ TEST(PicardyTest, DMinorRaisesF) {
 
 TEST(BlockChordTest, VoiceCountMatchesInput) {
   KeySignature key = {Key::C, false};
-  std::vector<std::pair<uint8_t, uint8_t>> ranges = {
-      {36, 96}, {36, 96}, {48, 96}, {24, 50}};
+  std::vector<std::pair<uint8_t, uint8_t>> ranges = {{36, 96}, {36, 96}, {48, 96}, {24, 50}};
 
   auto notes = generateBlockChord(key, 0, kTicksPerBar, 4, ranges);
   EXPECT_EQ(notes.size(), 4u);
@@ -156,8 +149,7 @@ TEST(BlockChordTest, VoiceCountMatchesInput) {
 
 TEST(BlockChordTest, AllNotesAreChordTones) {
   KeySignature key = {Key::C, false};
-  std::vector<std::pair<uint8_t, uint8_t>> ranges = {
-      {36, 96}, {36, 96}};
+  std::vector<std::pair<uint8_t, uint8_t>> ranges = {{36, 96}, {36, 96}};
 
   auto notes = generateBlockChord(key, 0, kTicksPerBar, 2, ranges);
   for (const auto& n : notes) {
@@ -210,7 +202,7 @@ TEST(RegistrationPlanTest, VariationProgressivelyLouder) {
   auto plan = createVariationRegistrationPlan(8, kTicksPerBar * 4);
   // First variation should be quieter than last.
   EXPECT_LT(plan.points.front().registration.velocity_hint,
-             plan.points.back().registration.velocity_hint);
+            plan.points.back().registration.velocity_hint);
 }
 
 }  // namespace

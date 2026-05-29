@@ -62,8 +62,8 @@ std::vector<Track> makeCleanSoloStringTracks() {
   t0.name = "Cello";
   // All C major chord tones.
   t0.notes = {
-      qn(0, 48, 0),               // C3
-      qn(kTicksPerBeat, 52, 0),   // E3
+      qn(0, 48, 0),                  // C3
+      qn(kTicksPerBeat, 52, 0),      // E3
       qn(kTicksPerBeat * 2, 55, 0),  // G3
       qn(kTicksPerBeat * 3, 48, 0),  // C3
   };
@@ -109,6 +109,8 @@ TEST(AnalysisRunner, OrganClean_OverallPass) {
 
   auto report = runAnalysis(tracks, FormType::Fugue, 3, tl, ks);
   EXPECT_TRUE(report.overall_pass);
+  EXPECT_TRUE(report.selection_pass);
+  EXPECT_GE(report.selection_score, 0.70f);
 }
 
 TEST(AnalysisRunner, OrganDissonant_OverallFail) {
@@ -121,6 +123,26 @@ TEST(AnalysisRunner, OrganDissonant_OverallFail) {
 
   auto report = runAnalysis({t0, t1}, FormType::Fugue, 2, tl, ks);
   EXPECT_FALSE(report.overall_pass);  // High severity events present.
+  EXPECT_GT(report.penalty_affecting_violations, 0u);
+}
+
+TEST(AnalysisRunner, OrganFlexibleRemoteLeapFailsSelectionGate) {
+  Track t0;
+  NoteEvent first = qn(0, 60, 0);
+  first.source = BachNoteSource::EpisodeMaterial;
+  NoteEvent second = qn(kTicksPerBeat, 76, 0);
+  second.source = BachNoteSource::EpisodeMaterial;
+  t0.notes = {first, second};
+
+  auto tl = makeCMajorTimeline(1);
+  KeySignature ks = {Key::C, false};
+
+  auto report = runAnalysis({t0}, FormType::Fugue, 1, tl, ks);
+  EXPECT_FALSE(report.melodic_structure_pass);
+  EXPECT_FALSE(report.selection_pass);
+  EXPECT_EQ(report.flexible_large_leap_count, 1u);
+  EXPECT_EQ(report.flexible_remote_leap_count, 1u);
+  EXPECT_EQ(report.max_flexible_leap, 16u);
 }
 
 // ===========================================================================
@@ -158,6 +180,8 @@ TEST(AnalysisRunner, TextSummary_ContainsOrganSection) {
   std::string text = report.toTextSummary(FormType::Fugue, 3);
   EXPECT_NE(text.find("Organ"), std::string::npos);
   EXPECT_NE(text.find("Counterpoint"), std::string::npos);
+  EXPECT_NE(text.find("Selection Gate"), std::string::npos);
+  EXPECT_NE(text.find("Melodic structure"), std::string::npos);
 }
 
 TEST(AnalysisRunner, TextSummary_SoloStringNoCounterpoint) {
@@ -185,8 +209,15 @@ TEST(AnalysisRunner, JsonOutput_ValidStructure) {
   EXPECT_NE(json.find("\"system\""), std::string::npos);
   EXPECT_NE(json.find("\"Organ\""), std::string::npos);
   EXPECT_NE(json.find("\"overall_pass\""), std::string::npos);
+  EXPECT_NE(json.find("\"selection_score\""), std::string::npos);
+  EXPECT_NE(json.find("\"selection_pass\""), std::string::npos);
+  EXPECT_NE(json.find("\"analysis_gate_pass\""), std::string::npos);
+  EXPECT_NE(json.find("\"melodic_structure_pass\""), std::string::npos);
+  EXPECT_NE(json.find("\"flexible_large_leap_count\""), std::string::npos);
+  EXPECT_NE(json.find("\"penalty_affecting_density\""), std::string::npos);
   EXPECT_NE(json.find("\"dissonance\""), std::string::npos);
   EXPECT_NE(json.find("\"counterpoint\""), std::string::npos);
+  EXPECT_NE(json.find("\"structural_parallel_count\""), std::string::npos);
 }
 
 TEST(AnalysisRunner, JsonOutput_SoloStringNoCounterpoint) {

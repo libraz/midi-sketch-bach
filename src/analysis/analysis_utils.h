@@ -20,8 +20,7 @@ std::vector<NoteEvent> collectAllNotes(const std::vector<Track>& tracks);
 /// @param start Start tick (inclusive).
 /// @param end End tick (exclusive).
 /// @return Notes whose start_tick falls within the range.
-std::vector<NoteEvent> notesInRange(const std::vector<NoteEvent>& all_notes,
-                                    Tick start, Tick end);
+std::vector<NoteEvent> notesInRange(const std::vector<NoteEvent>& all_notes, Tick start, Tick end);
 
 /// @brief Get the average pitch of a set of notes.
 /// @param notes Notes to analyze.

@@ -44,7 +44,8 @@ uint8_t getDiatonicNeighbor(uint8_t pitch, bool upper, Key key, bool is_minor) {
     // Find the next occurrence of next_pc above pitch.
     while (getPitchClass(static_cast<uint8_t>(result)) != next_pc || result <= pitch) {
       ++result;
-      if (result > 127) return pitch + 1;
+      if (result > 127)
+        return pitch + 1;
     }
     return static_cast<uint8_t>(result);
   } else {
@@ -54,7 +55,8 @@ uint8_t getDiatonicNeighbor(uint8_t pitch, bool upper, Key key, bool is_minor) {
     // Find the next occurrence of prev_pc below pitch.
     while (getPitchClass(static_cast<uint8_t>(result)) != prev_pc || result >= pitch) {
       --result;
-      if (result < 0) return pitch - 1;
+      if (result < 0)
+        return pitch - 1;
     }
     return static_cast<uint8_t>(result);
   }
@@ -64,7 +66,8 @@ std::vector<NoteEvent> generateSchleifer(const NoteEvent& note, Key key, bool is
   std::vector<NoteEvent> result;
 
   // Check minimum duration.
-  if (note.duration < kMinSchleiferDuration) return result;
+  if (note.duration < kMinSchleiferDuration)
+    return result;
 
   // Start from a diatonic 3rd below the main note.
   uint8_t step1 = getDiatonicNeighbor(note.pitch, false, key, is_minor);

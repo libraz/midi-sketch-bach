@@ -1,7 +1,5 @@
 // Tests for context-dependent ornament selection using harmonic information.
 
-#include "ornament/ornament_engine.h"
-
 #include <gtest/gtest.h>
 
 #include "core/basic_types.h"
@@ -9,6 +7,7 @@
 #include "harmony/harmonic_event.h"
 #include "harmony/harmonic_timeline.h"
 #include "harmony/key.h"
+#include "ornament/ornament_engine.h"
 #include "ornament/trill.h"
 
 namespace bach {
@@ -184,7 +183,7 @@ TEST(ContextOrnamentTest, ApplyOrnamentsWithTimeline) {
   auto timeline = makeCMajorTimeline();
 
   std::vector<NoteEvent> notes = {
-      makeNote(0, 60, kTicksPerBeat),           // C4: chord tone, strong beat
+      makeNote(0, 60, kTicksPerBeat),              // C4: chord tone, strong beat
       makeNote(kTicksPerBeat, 62, kTicksPerBeat),  // D4: non-chord tone, weak beat
   };
 

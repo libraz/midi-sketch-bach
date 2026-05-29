@@ -2,10 +2,10 @@
 
 #include "forms/goldberg/variations/goldberg_ornamental.h"
 
+#include <gtest/gtest.h>
+
 #include <algorithm>
 #include <cstdint>
-
-#include <gtest/gtest.h>
 
 #include "core/basic_types.h"
 #include "forms/goldberg/goldberg_structural_grid.h"
@@ -22,9 +22,7 @@ constexpr int kGridBars = 32;
 
 class OrnamentalGeneratorTest : public ::testing::Test {
  protected:
-  void SetUp() override {
-    grid_ = GoldbergStructuralGrid::createMajor();
-  }
+  void SetUp() override { grid_ = GoldbergStructuralGrid::createMajor(); }
 
   /// @brief Helper to compute total note count for a given variation.
   OrnamentalResult generateVariation(int var_num, uint32_t seed = kTestSeed) {
@@ -36,7 +34,8 @@ class OrnamentalGeneratorTest : public ::testing::Test {
     Tick max_end = 0;
     for (const auto& note : notes) {
       Tick note_end = note.start_tick + note.duration;
-      if (note_end > max_end) max_end = note_end;
+      if (note_end > max_end)
+        max_end = note_end;
     }
     return max_end;
   }
@@ -150,8 +149,7 @@ TEST_F(OrnamentalGeneratorTest, DifferentSeedsDifferent) {
   ASSERT_FALSE(result_seed2.notes.empty());
 
   // Compare pitches -- different seeds should produce different results.
-  size_t compare_len = std::min(result_seed1.notes.size(),
-                                result_seed2.notes.size());
+  size_t compare_len = std::min(result_seed1.notes.size(), result_seed2.notes.size());
   int diff_count = 0;
   for (size_t idx = 0; idx < compare_len; ++idx) {
     if (result_seed1.notes[idx].pitch != result_seed2.notes[idx].pitch) {
@@ -159,8 +157,7 @@ TEST_F(OrnamentalGeneratorTest, DifferentSeedsDifferent) {
     }
   }
 
-  EXPECT_GT(diff_count, 0)
-      << "Different seeds should produce different note pitches";
+  EXPECT_GT(diff_count, 0) << "Different seeds should produce different note pitches";
 }
 
 // ---------------------------------------------------------------------------
@@ -170,10 +167,8 @@ TEST_F(OrnamentalGeneratorTest, DifferentSeedsDifferent) {
 TEST_F(OrnamentalGeneratorTest, AllVariationsSucceed) {
   for (int var_num : {1, 5, 13, 14, 28}) {
     auto result = generateVariation(var_num);
-    EXPECT_TRUE(result.success)
-        << "Variation " << var_num << " should succeed";
-    EXPECT_FALSE(result.notes.empty())
-        << "Variation " << var_num << " should produce notes";
+    EXPECT_TRUE(result.success) << "Variation " << var_num << " should succeed";
+    EXPECT_FALSE(result.notes.empty()) << "Variation " << var_num << " should produce notes";
   }
 }
 
@@ -183,10 +178,8 @@ TEST_F(OrnamentalGeneratorTest, AllVariationsSucceed) {
 
 TEST_F(OrnamentalGeneratorTest, UnsupportedVariationFails) {
   auto result = generateVariation(99);
-  EXPECT_FALSE(result.success)
-      << "Unsupported variation number should return success=false";
-  EXPECT_TRUE(result.notes.empty())
-      << "Unsupported variation should produce no notes";
+  EXPECT_FALSE(result.success) << "Unsupported variation number should return success=false";
+  EXPECT_TRUE(result.notes.empty()) << "Unsupported variation should produce no notes";
 }
 
 // ---------------------------------------------------------------------------
@@ -202,8 +195,7 @@ TEST_F(OrnamentalGeneratorTest, BassNotesHaveGoldbergBassSource) {
   for (const auto& note : result.notes) {
     if (note.voice == 1) {
       EXPECT_EQ(note.source, BachNoteSource::GoldbergBass)
-          << "Bass note at tick " << note.start_tick
-          << " should have GoldbergBass source";
+          << "Bass note at tick " << note.start_tick << " should have GoldbergBass source";
       ++bass_count;
     }
   }
@@ -223,10 +215,8 @@ TEST_F(OrnamentalGeneratorTest, MelodyNotesHaveProperSource) {
       // Melody notes should be either GoldbergFigura or Ornament.
       bool valid_source = (note.source == BachNoteSource::GoldbergFigura ||
                            note.source == BachNoteSource::Ornament);
-      EXPECT_TRUE(valid_source)
-          << "Melody note at tick " << note.start_tick
-          << " has unexpected source: "
-          << static_cast<int>(note.source);
+      EXPECT_TRUE(valid_source) << "Melody note at tick " << note.start_tick
+                                << " has unexpected source: " << static_cast<int>(note.source);
     }
   }
 }

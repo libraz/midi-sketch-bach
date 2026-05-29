@@ -35,20 +35,16 @@ class OrnamentalGenerator {
   /// @param seed Random seed for deterministic generation.
   /// @return OrnamentalResult with notes and success status.
   ///         Returns success=false for unsupported variation numbers.
-  OrnamentalResult generate(
-      int variation_number,
-      const GoldbergStructuralGrid& grid,
-      const KeySignature& key,
-      const TimeSignature& time_sig,
-      uint32_t seed) const;
+  OrnamentalResult generate(int variation_number, const GoldbergStructuralGrid& grid,
+                            const KeySignature& key, const TimeSignature& time_sig,
+                            uint32_t seed) const;
 
  private:
   /// @brief Build the FiguraProfile for a given variation number.
   /// @param variation_number The variation number (1, 5, 13, 14, or 28).
   /// @param[out] type Set to the GoldbergVariationType (Ornamental or TrillEtude).
   /// @return FiguraProfile with variation-specific parameters.
-  static FiguraProfile buildProfile(int variation_number,
-                                    GoldbergVariationType& type);
+  static FiguraProfile buildProfile(int variation_number, GoldbergVariationType& type);
 
   /// @brief Check if a variation number is a supported ornamental/trill etude.
   /// @param variation_number The variation number to check.
@@ -59,17 +55,14 @@ class OrnamentalGenerator {
   /// @param grid The 32-bar structural grid.
   /// @param time_sig Time signature for bar duration.
   /// @return Vector of bass NoteEvents spanning 32 bars.
-  std::vector<NoteEvent> generateBassLine(
-      const GoldbergStructuralGrid& grid,
-      const TimeSignature& time_sig) const;
+  std::vector<NoteEvent> generateBassLine(const GoldbergStructuralGrid& grid,
+                                          const TimeSignature& time_sig) const;
 
   /// @brief Apply ornaments to melody notes.
   /// @param notes Melody notes to ornament (modified in place via swap).
   /// @param is_trill_etude If true, apply higher trill density for trill etude variations.
   /// @param seed Random seed for ornament engine.
-  void applyOrnaments(std::vector<NoteEvent>& notes,
-                      bool is_trill_etude,
-                      uint32_t seed) const;
+  void applyOrnaments(std::vector<NoteEvent>& notes, bool is_trill_etude, uint32_t seed) const;
 };
 
 }  // namespace bach

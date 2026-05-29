@@ -2,10 +2,10 @@
 
 #include "forms/goldberg/canon/dux_buffer.h"
 
+#include <gtest/gtest.h>
+
 #include <cstdint>
 #include <optional>
-
-#include <gtest/gtest.h>
 
 #include "core/basic_types.h"
 #include "core/pitch_utils.h"
@@ -51,9 +51,7 @@ NoteEvent makeDuxNote(uint8_t pitch, int beat_index) {
 
 class DuxBufferTest : public ::testing::Test {
  protected:
-  void SetUp() override {
-    grid_ = GoldbergStructuralGrid::createMajor();
-  }
+  void SetUp() override { grid_ = GoldbergStructuralGrid::createMajor(); }
 
   GoldbergStructuralGrid grid_;
 };
@@ -167,8 +165,7 @@ TEST_F(DuxBufferTest, InvertedCanonDeriveComes) {
 
   // A4 is degree+1 from G4 (tonic). Invert: tonic_degree - 1 = F#.
   // F#4 = 66 in G major.
-  EXPECT_EQ(comes->pitch, 66)
-      << "Inverted unison: A4(69) inverted around G = F#4(66)";
+  EXPECT_EQ(comes->pitch, 66) << "Inverted unison: A4(69) inverted around G = F#4(66)";
 }
 
 // ---------------------------------------------------------------------------
@@ -233,8 +230,7 @@ TEST_F(DuxBufferTest, PreviewFutureComes) {
   auto comes = buffer.deriveComes(3);
 
   ASSERT_TRUE(comes.has_value());
-  EXPECT_EQ(preview, comes->pitch)
-      << "previewFutureComes should match deriveComes pitch";
+  EXPECT_EQ(preview, comes->pitch) << "previewFutureComes should match deriveComes pitch";
 }
 
 // ---------------------------------------------------------------------------
@@ -284,8 +280,7 @@ TEST_F(DuxBufferTest, ClimaxAlignment) {
   int intensification_beat = 2 * 3;  // Bar 2, beat 6 in 3/4.
 
   // A candidate pitch higher than current max at Intensification position.
-  float score_at_intensification = buffer.scoreClimaxAlignment(
-      80, intensification_beat, grid_);
+  float score_at_intensification = buffer.scoreClimaxAlignment(80, intensification_beat, grid_);
 
   // Same pitch at a non-Intensification position (bar 0, beat 0).
   float score_at_opening = buffer.scoreClimaxAlignment(80, 0, grid_);
@@ -300,8 +295,7 @@ TEST_F(DuxBufferTest, ClimaxAlignment) {
 
 TEST_F(DuxBufferTest, MinorKeyTransposition) {
   // Canon at the 2nd in G minor: G4 -> Ab4 (natural minor: G A Bb C D Eb F).
-  CanonSpec spec = makeSpec(1, CanonTransform::Regular, kGMinor,
-                            MinorModeProfile::NaturalMinor);
+  CanonSpec spec = makeSpec(1, CanonTransform::Regular, kGMinor, MinorModeProfile::NaturalMinor);
   DuxBuffer buffer(spec, kTriple);
 
   NoteEvent dux = makeDuxNote(67, 0);  // G4
@@ -311,16 +305,14 @@ TEST_F(DuxBufferTest, MinorKeyTransposition) {
   ASSERT_TRUE(comes.has_value());
   // G natural minor scale: G(67), A(69), Bb(70), C(72), D(74), Eb(75), F(77).
   // G + 1 degree in natural minor = A = 69.
-  EXPECT_EQ(comes->pitch, 69)
-      << "G minor natural, 2nd canon: G4(67) + 1 degree = A4(69)";
+  EXPECT_EQ(comes->pitch, 69) << "G minor natural, 2nd canon: G4(67) + 1 degree = A4(69)";
 
   // Test with Bb: Bb + 1 degree = C.
   DuxBuffer buffer2(spec, kTriple);
   buffer2.recordDux(0, makeDuxNote(70, 0));  // Bb4
   auto comes2 = buffer2.deriveComes(3);
   ASSERT_TRUE(comes2.has_value());
-  EXPECT_EQ(comes2->pitch, 72)
-      << "G minor natural, 2nd canon: Bb4(70) + 1 degree = C5(72)";
+  EXPECT_EQ(comes2->pitch, 72) << "G minor natural, 2nd canon: Bb4(70) + 1 degree = C5(72)";
 }
 
 // ---------------------------------------------------------------------------
@@ -358,12 +350,10 @@ TEST_F(DuxBufferTest, ComesHasCorrectTick) {
   ASSERT_TRUE(comes.has_value());
 
   // Delay is 3 beats in 3/4. Comes tick = dux tick + 3 * 480 = 1440.
-  Tick expected_tick = dux.start_tick +
-                       static_cast<Tick>(buffer.delayBeats()) * kTicksPerBeat;
+  Tick expected_tick = dux.start_tick + static_cast<Tick>(buffer.delayBeats()) * kTicksPerBeat;
   EXPECT_EQ(comes->start_tick, expected_tick)
       << "Comes tick should be dux tick + delay * ticksPerBeat";
-  EXPECT_EQ(comes->start_tick, 1440u)
-      << "Comes at beat 3 in 3/4: 0 + 3*480 = 1440";
+  EXPECT_EQ(comes->start_tick, 1440u) << "Comes at beat 3 in 3/4: 0 + 3*480 = 1440";
 }
 
 // ---------------------------------------------------------------------------
@@ -371,8 +361,8 @@ TEST_F(DuxBufferTest, ComesHasCorrectTick) {
 // ---------------------------------------------------------------------------
 
 TEST_F(DuxBufferTest, SpecAccessor) {
-  CanonSpec spec = makeSpec(4, CanonTransform::Inverted, kGMinor,
-                            MinorModeProfile::HarmonicMinor, 2);
+  CanonSpec spec =
+      makeSpec(4, CanonTransform::Inverted, kGMinor, MinorModeProfile::HarmonicMinor, 2);
   DuxBuffer buffer(spec, kTriple);
 
   EXPECT_EQ(buffer.spec().canon_interval, 4);
@@ -390,8 +380,7 @@ TEST_F(DuxBufferTest, SpecAccessor) {
 TEST_F(DuxBufferTest, HarmonicMinorTransposition) {
   // Canon at the 2nd in G harmonic minor: G A Bb C D Eb F#.
   // F4 + 1 degree = F#4 (leading tone preserved in harmonic minor).
-  CanonSpec spec = makeSpec(1, CanonTransform::Regular, kGMinor,
-                            MinorModeProfile::HarmonicMinor);
+  CanonSpec spec = makeSpec(1, CanonTransform::Regular, kGMinor, MinorModeProfile::HarmonicMinor);
   DuxBuffer buffer(spec, kTriple);
 
   // Eb4 = 75. Eb + 1 degree in G harmonic minor = F# (since Eb->F# is a gap
@@ -426,8 +415,7 @@ TEST_F(DuxBufferTest, HarmonicMinorTransposition) {
   buffer.recordDux(0, makeDuxNote(67, 0));  // G4
   auto comes = buffer.deriveComes(3);
   ASSERT_TRUE(comes.has_value());
-  EXPECT_EQ(comes->pitch, 69)
-      << "G harmonic minor, 2nd canon: G4(67) + 1 degree = A4(69)";
+  EXPECT_EQ(comes->pitch, 69) << "G harmonic minor, 2nd canon: G4(67) + 1 degree = A4(69)";
 }
 
 // ---------------------------------------------------------------------------
@@ -440,8 +428,7 @@ TEST_F(DuxBufferTest, NonExistentBeatReturnsNullopt) {
 
   // No dux recorded at beat 0, so comes at beat 3 should be nullopt.
   auto comes = buffer.deriveComes(3);
-  EXPECT_FALSE(comes.has_value())
-      << "No dux note at source beat should return nullopt";
+  EXPECT_FALSE(comes.has_value()) << "No dux note at source beat should return nullopt";
 }
 
 // ---------------------------------------------------------------------------
@@ -498,8 +485,7 @@ TEST_F(DuxBufferTest, ComesDurationMatchesDux) {
   buffer.recordDux(0, dux);
   auto comes = buffer.deriveComes(3);
   ASSERT_TRUE(comes.has_value());
-  EXPECT_EQ(comes->duration, duration::kHalfNote)
-      << "Comes duration should match dux duration";
+  EXPECT_EQ(comes->duration, duration::kHalfNote) << "Comes duration should match dux duration";
 }
 
 }  // namespace

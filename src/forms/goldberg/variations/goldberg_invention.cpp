@@ -45,9 +45,7 @@ constexpr uint8_t kBassHigh = 64;     // E4
 /// @param voice_idx Voice index to assign.
 /// @param low Minimum MIDI pitch for this register.
 /// @param high Maximum MIDI pitch for this register.
-void assignVoiceRegister(std::vector<NoteEvent>& notes,
-                         uint8_t voice_idx,
-                         uint8_t low,
+void assignVoiceRegister(std::vector<NoteEvent>& notes, uint8_t voice_idx, uint8_t low,
                          uint8_t high) {
   for (auto& note : notes) {
     note.voice = voice_idx;
@@ -77,11 +75,9 @@ void tagSource(std::vector<NoteEvent>& notes, BachNoteSource source) {
 /// @param start_bar First bar (0-based) to generate.
 /// @param end_bar Last bar (exclusive, 0-based).
 /// @return Bass notes with whole-bar durations.
-std::vector<NoteEvent> generateStructuralBass(
-    const GoldbergStructuralGrid& grid,
-    const TimeSignature& time_sig,
-    int start_bar,
-    int end_bar) {
+std::vector<NoteEvent> generateStructuralBass(const GoldbergStructuralGrid& grid,
+                                              const TimeSignature& time_sig, int start_bar,
+                                              int end_bar) {
   std::vector<NoteEvent> bass;
   Tick ticks_per_bar = time_sig.ticksPerBar();
 
@@ -120,15 +116,11 @@ std::vector<NoteEvent> generateStructuralBass(
 /// @param end_bar Last bar (exclusive, 0-based).
 /// @param seed Random seed.
 /// @return Fill notes for the specified bars and voice.
-std::vector<NoteEvent> generateFreeCounterpoint(
-    const GoldbergStructuralGrid& grid,
-    const KeySignature& key,
-    const TimeSignature& time_sig,
-    uint8_t voice_idx,
-    int start_bar,
-    int end_bar,
-    uint32_t seed,
-    uint8_t notes_per_beat = 4) {
+std::vector<NoteEvent> generateFreeCounterpoint(const GoldbergStructuralGrid& grid,
+                                                const KeySignature& key,
+                                                const TimeSignature& time_sig, uint8_t voice_idx,
+                                                int start_bar, int end_bar, uint32_t seed,
+                                                uint8_t notes_per_beat = 4) {
   // Use FigurenGenerator with a profile for free counterpoint fill.
   FiguraProfile profile;
   profile.primary = FiguraType::Circulatio;
@@ -139,8 +131,7 @@ std::vector<NoteEvent> generateFreeCounterpoint(
   profile.sequence_probability = 0.35f;
 
   FigurenGenerator figuren;
-  auto full_notes = figuren.generate(
-      profile, grid, key, time_sig, voice_idx, seed);
+  auto full_notes = figuren.generate(profile, grid, key, time_sig, voice_idx, seed);
 
   // Filter to only the requested bar range.
   Tick ticks_per_bar = time_sig.ticksPerBar();
@@ -166,22 +157,31 @@ int selectDevelopmentTechnique(std::mt19937& rng, int bar_in_section) {
   uint32_t roll = rng() % 100;
   if (bar_in_section < 4) {
     // Early development: more soggetto statements.
-    if (roll < 35) return 0;       // Soggetto statement.
-    if (roll < 55) return 1;       // Inversion.
-    if (roll < 80) return 2;       // Sequence.
-    return 3;                      // Free episode.
+    if (roll < 35)
+      return 0;  // Soggetto statement.
+    if (roll < 55)
+      return 1;  // Inversion.
+    if (roll < 80)
+      return 2;  // Sequence.
+    return 3;    // Free episode.
   }
   if (bar_in_section < 12) {
     // Mid development: balanced.
-    if (roll < 25) return 0;
-    if (roll < 50) return 1;
-    if (roll < 75) return 2;
+    if (roll < 25)
+      return 0;
+    if (roll < 50)
+      return 1;
+    if (roll < 75)
+      return 2;
     return 3;
   }
   // Late development: more sequential and episodic.
-  if (roll < 15) return 0;
-  if (roll < 35) return 1;
-  if (roll < 65) return 2;
+  if (roll < 15)
+    return 0;
+  if (roll < 35)
+    return 1;
+  if (roll < 65)
+    return 2;
   return 3;
 }
 
@@ -191,11 +191,9 @@ int selectDevelopmentTechnique(std::mt19937& rng, int bar_in_section) {
 // Main generation pipeline
 // ---------------------------------------------------------------------------
 
-InventionResult InventionGenerator::generate(
-    const GoldbergStructuralGrid& grid,
-    const KeySignature& key,
-    const TimeSignature& time_sig,
-    uint32_t seed) const {
+InventionResult InventionGenerator::generate(const GoldbergStructuralGrid& grid,
+                                             const KeySignature& key, const TimeSignature& time_sig,
+                                             uint32_t seed) const {
   InventionResult result;
   std::mt19937 rng(seed);
   Tick ticks_per_bar = time_sig.ticksPerBar();
@@ -212,8 +210,7 @@ InventionResult InventionGenerator::generate(
   soggetto_params.path_candidates = 12;
 
   SoggettoGenerator soggetto_gen;
-  Subject soggetto = soggetto_gen.generate(
-      soggetto_params, key, time_sig, rng());
+  Subject soggetto = soggetto_gen.generate(soggetto_params, key, time_sig, rng());
   if (soggetto.notes.empty()) {
     result.success = false;
     return result;
@@ -234,8 +231,7 @@ InventionResult InventionGenerator::generate(
   // Voice 1 (soprano): soggetto at bars 0-1 (ticks 0 to soggetto_duration).
   {
     auto voice1_entry = soggetto_notes;
-    assignVoiceRegister(voice1_entry, kVoiceSoprano,
-                        kSopranoLow, kSopranoHigh);
+    assignVoiceRegister(voice1_entry, kVoiceSoprano, kSopranoLow, kSopranoHigh);
     all_notes.insert(all_notes.end(), voice1_entry.begin(), voice1_entry.end());
   }
 
@@ -243,8 +239,7 @@ InventionResult InventionGenerator::generate(
   // (stretto-like overlap with voice 1).
   {
     // Transpose to dominant: +4 scale degrees (tonic -> dominant).
-    auto voice2_entry = transposeMelodyDiatonic(
-        soggetto_notes, 4, key.tonic, scale);
+    auto voice2_entry = transposeMelodyDiatonic(soggetto_notes, 4, key.tonic, scale);
     Tick voice2_start = ticks_per_bar;
     // Shift ticks so the entry starts at bar 1.
     Tick original_start = voice2_entry.empty() ? 0 : voice2_entry[0].start_tick;
@@ -256,10 +251,8 @@ InventionResult InventionGenerator::generate(
     all_notes.insert(all_notes.end(), voice2_entry.begin(), voice2_entry.end());
 
     // Free counterpoint for voice 1 during voice 2 entry (bars 1-2).
-    auto voice1_fill = generateFreeCounterpoint(
-        grid, key, time_sig, kVoiceSoprano, 1, 3, rng());
-    assignVoiceRegister(voice1_fill, kVoiceSoprano,
-                        kSopranoLow, kSopranoHigh);
+    auto voice1_fill = generateFreeCounterpoint(grid, key, time_sig, kVoiceSoprano, 1, 3, rng());
+    assignVoiceRegister(voice1_fill, kVoiceSoprano, kSopranoLow, kSopranoHigh);
     all_notes.insert(all_notes.end(), voice1_fill.begin(), voice1_fill.end());
   }
 
@@ -276,13 +269,11 @@ InventionResult InventionGenerator::generate(
     all_notes.insert(all_notes.end(), voice3_entry.begin(), voice3_entry.end());
 
     // Free counterpoint for voices 1 and 2 during voice 3 entry (bars 2-3).
-    auto fill_v1 = generateFreeCounterpoint(
-        grid, key, time_sig, kVoiceSoprano, 2, 4, rng());
+    auto fill_v1 = generateFreeCounterpoint(grid, key, time_sig, kVoiceSoprano, 2, 4, rng());
     assignVoiceRegister(fill_v1, kVoiceSoprano, kSopranoLow, kSopranoHigh);
     all_notes.insert(all_notes.end(), fill_v1.begin(), fill_v1.end());
 
-    auto fill_v2 = generateFreeCounterpoint(
-        grid, key, time_sig, kVoiceAlto, 2, 4, rng());
+    auto fill_v2 = generateFreeCounterpoint(grid, key, time_sig, kVoiceAlto, 2, 4, rng());
     assignVoiceRegister(fill_v2, kVoiceAlto, kAltoLow, kAltoHigh);
     all_notes.insert(all_notes.end(), fill_v2.begin(), fill_v2.end());
   }
@@ -326,8 +317,7 @@ InventionResult InventionGenerator::generate(
 
         // Select register based on voice.
         if (voice == kVoiceSoprano) {
-          assignVoiceRegister(entry, kVoiceSoprano,
-                              kSopranoLow, kSopranoHigh);
+          assignVoiceRegister(entry, kVoiceSoprano, kSopranoLow, kSopranoHigh);
         } else if (voice == kVoiceAlto) {
           assignVoiceRegister(entry, kVoiceAlto, kAltoLow, kAltoHigh);
         } else {
@@ -337,13 +327,13 @@ InventionResult InventionGenerator::generate(
 
         // Fill other voices with free counterpoint.
         for (uint8_t other = 0; other < kNumVoices; ++other) {
-          if (other == voice) continue;
+          if (other == voice)
+            continue;
           int fill_end = std::min(dev_bar + 2, kDevEndBar);
-          auto fill = generateFreeCounterpoint(
-              grid, key, time_sig, other, dev_bar, fill_end, rng());
+          auto fill =
+              generateFreeCounterpoint(grid, key, time_sig, other, dev_bar, fill_end, rng());
           if (other == kVoiceSoprano) {
-            assignVoiceRegister(fill, kVoiceSoprano,
-                                kSopranoLow, kSopranoHigh);
+            assignVoiceRegister(fill, kVoiceSoprano, kSopranoLow, kSopranoHigh);
           } else if (other == kVoiceAlto) {
             assignVoiceRegister(fill, kVoiceAlto, kAltoLow, kAltoHigh);
           } else {
@@ -361,11 +351,8 @@ InventionResult InventionGenerator::generate(
           technique = 3;
           break;
         }
-        uint8_t pivot = soggetto_notes.empty()
-                            ? 67
-                            : soggetto_notes[0].pitch;
-        auto inverted = invertMelodyDiatonic(
-            soggetto_notes, pivot, key.tonic, scale);
+        uint8_t pivot = soggetto_notes.empty() ? 67 : soggetto_notes[0].pitch;
+        auto inverted = invertMelodyDiatonic(soggetto_notes, pivot, key.tonic, scale);
         Tick inv_start = static_cast<Tick>(dev_bar) * ticks_per_bar;
         Tick original_start = inverted.empty() ? 0 : inverted[0].start_tick;
         for (auto& note : inverted) {
@@ -375,8 +362,7 @@ InventionResult InventionGenerator::generate(
 
         uint8_t inv_voice = static_cast<uint8_t>(rng() % kNumVoices);
         if (inv_voice == kVoiceSoprano) {
-          assignVoiceRegister(inverted, kVoiceSoprano,
-                              kSopranoLow, kSopranoHigh);
+          assignVoiceRegister(inverted, kVoiceSoprano, kSopranoLow, kSopranoHigh);
         } else if (inv_voice == kVoiceAlto) {
           assignVoiceRegister(inverted, kVoiceAlto, kAltoLow, kAltoHigh);
         } else {
@@ -386,13 +372,13 @@ InventionResult InventionGenerator::generate(
 
         // Fill other voices.
         for (uint8_t other = 0; other < kNumVoices; ++other) {
-          if (other == inv_voice) continue;
+          if (other == inv_voice)
+            continue;
           int fill_end = std::min(dev_bar + 2, kDevEndBar);
-          auto fill = generateFreeCounterpoint(
-              grid, key, time_sig, other, dev_bar, fill_end, rng());
+          auto fill =
+              generateFreeCounterpoint(grid, key, time_sig, other, dev_bar, fill_end, rng());
           if (other == kVoiceSoprano) {
-            assignVoiceRegister(fill, kVoiceSoprano,
-                                kSopranoLow, kSopranoHigh);
+            assignVoiceRegister(fill, kVoiceSoprano, kSopranoLow, kSopranoHigh);
           } else if (other == kVoiceAlto) {
             assignVoiceRegister(fill, kVoiceAlto, kAltoLow, kAltoHigh);
           } else {
@@ -437,8 +423,7 @@ InventionResult InventionGenerator::generate(
         auto seq_motif = motif;
         tagSource(seq_motif, BachNoteSource::GoldbergInvention);
         if (seq_voice == kVoiceSoprano) {
-          assignVoiceRegister(seq_motif, kVoiceSoprano,
-                              kSopranoLow, kSopranoHigh);
+          assignVoiceRegister(seq_motif, kVoiceSoprano, kSopranoLow, kSopranoHigh);
         } else {
           assignVoiceRegister(seq_motif, kVoiceAlto, kAltoLow, kAltoHigh);
         }
@@ -448,12 +433,11 @@ InventionResult InventionGenerator::generate(
         int reps = seq_bars - 1;
         if (reps > 0) {
           Tick seq_start_tick = motif_start + motifDuration(motif);
-          auto seq_notes = generateDiatonicSequence(
-              motif, reps, -1, seq_start_tick, key.tonic, scale);
+          auto seq_notes =
+              generateDiatonicSequence(motif, reps, -1, seq_start_tick, key.tonic, scale);
           tagSource(seq_notes, BachNoteSource::GoldbergInvention);
           if (seq_voice == kVoiceSoprano) {
-            assignVoiceRegister(seq_notes, kVoiceSoprano,
-                                kSopranoLow, kSopranoHigh);
+            assignVoiceRegister(seq_notes, kVoiceSoprano, kSopranoLow, kSopranoHigh);
           } else {
             assignVoiceRegister(seq_notes, kVoiceAlto, kAltoLow, kAltoHigh);
           }
@@ -462,13 +446,13 @@ InventionResult InventionGenerator::generate(
 
         // Fill other voices.
         for (uint8_t other = 0; other < kNumVoices; ++other) {
-          if (other == seq_voice) continue;
+          if (other == seq_voice)
+            continue;
           int fill_end = std::min(dev_bar + seq_bars, kDevEndBar);
-          auto fill = generateFreeCounterpoint(
-              grid, key, time_sig, other, dev_bar, fill_end, rng());
+          auto fill =
+              generateFreeCounterpoint(grid, key, time_sig, other, dev_bar, fill_end, rng());
           if (other == kVoiceSoprano) {
-            assignVoiceRegister(fill, kVoiceSoprano,
-                                kSopranoLow, kSopranoHigh);
+            assignVoiceRegister(fill, kVoiceSoprano, kSopranoLow, kSopranoHigh);
           } else if (other == kVoiceAlto) {
             assignVoiceRegister(fill, kVoiceAlto, kAltoLow, kAltoHigh);
           } else {
@@ -489,11 +473,9 @@ InventionResult InventionGenerator::generate(
       int episode_bars = std::min(2, bars_remaining);
       for (uint8_t voice = 0; voice < kNumVoices; ++voice) {
         int fill_end = std::min(dev_bar + episode_bars, kDevEndBar);
-        auto fill = generateFreeCounterpoint(
-            grid, key, time_sig, voice, dev_bar, fill_end, rng());
+        auto fill = generateFreeCounterpoint(grid, key, time_sig, voice, dev_bar, fill_end, rng());
         if (voice == kVoiceSoprano) {
-          assignVoiceRegister(fill, kVoiceSoprano,
-                              kSopranoLow, kSopranoHigh);
+          assignVoiceRegister(fill, kVoiceSoprano, kSopranoLow, kSopranoHigh);
         } else if (voice == kVoiceAlto) {
           assignVoiceRegister(fill, kVoiceAlto, kAltoLow, kAltoHigh);
         } else {
@@ -520,15 +502,13 @@ InventionResult InventionGenerator::generate(
       note.start_tick = note.start_tick - original_start + final_start;
     }
     tagSource(final_entry, BachNoteSource::GoldbergSoggetto);
-    assignVoiceRegister(final_entry, kVoiceSoprano,
-                        kSopranoLow, kSopranoHigh);
+    assignVoiceRegister(final_entry, kVoiceSoprano, kSopranoLow, kSopranoHigh);
     all_notes.insert(all_notes.end(), final_entry.begin(), final_entry.end());
   }
 
   // Dominant soggetto in alto at bar 25-26 (stretto with soprano).
   {
-    auto alto_recap = transposeMelodyDiatonic(
-        soggetto_notes, 4, key.tonic, scale);
+    auto alto_recap = transposeMelodyDiatonic(soggetto_notes, 4, key.tonic, scale);
     Tick alto_start = static_cast<Tick>(kRecapStartBar + 1) * ticks_per_bar;
     Tick original_start = alto_recap.empty() ? 0 : alto_recap[0].start_tick;
     for (auto& note : alto_recap) {
@@ -543,11 +523,10 @@ InventionResult InventionGenerator::generate(
   {
     int fill_start = kRecapStartBar + 2;
     for (uint8_t voice = 0; voice < kNumVoices; ++voice) {
-      auto fill = generateFreeCounterpoint(
-          grid, key, time_sig, voice, fill_start, kRecapEndBar, rng());
+      auto fill =
+          generateFreeCounterpoint(grid, key, time_sig, voice, fill_start, kRecapEndBar, rng());
       if (voice == kVoiceSoprano) {
-        assignVoiceRegister(fill, kVoiceSoprano,
-                            kSopranoLow, kSopranoHigh);
+        assignVoiceRegister(fill, kVoiceSoprano, kSopranoLow, kSopranoHigh);
       } else if (voice == kVoiceAlto) {
         assignVoiceRegister(fill, kVoiceAlto, kAltoLow, kAltoHigh);
       } else {
@@ -559,8 +538,7 @@ InventionResult InventionGenerator::generate(
 
   // Bass structural support for recap.
   {
-    auto recap_bass = generateStructuralBass(
-        grid, time_sig, kRecapStartBar, kRecapEndBar);
+    auto recap_bass = generateStructuralBass(grid, time_sig, kRecapStartBar, kRecapEndBar);
     all_notes.insert(all_notes.end(), recap_bass.begin(), recap_bass.end());
   }
 
@@ -571,9 +549,7 @@ InventionResult InventionGenerator::generate(
   // Remove notes that extend beyond 32 bars.
   all_notes.erase(
       std::remove_if(all_notes.begin(), all_notes.end(),
-                     [max_tick](const NoteEvent& note) {
-                       return note.start_tick >= max_tick;
-                     }),
+                     [max_tick](const NoteEvent& note) { return note.start_tick >= max_tick; }),
       all_notes.end());
 
   // Trim durations that exceed the 32-bar boundary.
@@ -584,13 +560,12 @@ InventionResult InventionGenerator::generate(
   }
 
   // Sort by start_tick, then by voice.
-  std::sort(all_notes.begin(), all_notes.end(),
-            [](const NoteEvent& lhs, const NoteEvent& rhs) {
-              if (lhs.start_tick != rhs.start_tick) {
-                return lhs.start_tick < rhs.start_tick;
-              }
-              return lhs.voice < rhs.voice;
-            });
+  std::sort(all_notes.begin(), all_notes.end(), [](const NoteEvent& lhs, const NoteEvent& rhs) {
+    if (lhs.start_tick != rhs.start_tick) {
+      return lhs.start_tick < rhs.start_tick;
+    }
+    return lhs.voice < rhs.voice;
+  });
 
   result.notes = std::move(all_notes);
   result.success = !result.notes.empty();

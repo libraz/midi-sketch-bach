@@ -1,7 +1,5 @@
 // Tests for Perpetuus archetype toccata generation.
 
-#include "forms/toccata.h"
-
 #include <gtest/gtest.h>
 
 #include <algorithm>
@@ -9,6 +7,7 @@
 
 #include "core/basic_types.h"
 #include "core/pitch_utils.h"
+#include "forms/toccata.h"
 #include "test_helpers.h"
 
 namespace bach {
@@ -28,7 +27,8 @@ ToccataConfig makePerpetuusConfig(uint32_t seed = 42) {
 size_t countNotesInRange(const Track& track, Tick start, Tick end) {
   size_t count = 0;
   for (const auto& note : track.notes) {
-    if (note.start_tick >= start && note.start_tick < end) ++count;
+    if (note.start_tick >= start && note.start_tick < end)
+      ++count;
   }
   return count;
 }
@@ -157,7 +157,8 @@ TEST(ToccataPerpetuusTest, ContinuousTexture_Voice0HasNoLargeGaps) {
     if (notes[i].start_tick > prev_end) {
       Tick gap = notes[i].start_tick - prev_end;
       // Allow small gaps from overlap cleanup, but no bar-sized gaps.
-      if (gap > kTicksPerBar) ++large_gaps;
+      if (gap > kTicksPerBar)
+        ++large_gaps;
     }
   }
   EXPECT_LE(large_gaps, 1) << "Voice 0 should have continuous texture (moto perpetuo)";
@@ -173,8 +174,7 @@ TEST(ToccataPerpetuusTest, AscendingEnergy_NoteDensityIncreases) {
   auto countSection = [&](size_t si) -> size_t {
     size_t count = 0;
     for (const auto& track : result.tracks) {
-      count += countNotesInRange(track, result.sections[si].start,
-                                 result.sections[si].end);
+      count += countNotesInRange(track, result.sections[si].start, result.sections[si].end);
     }
     return count;
   };
@@ -185,16 +185,14 @@ TEST(ToccataPerpetuusTest, AscendingEnergy_NoteDensityIncreases) {
 
   // Normalize by section duration for density comparison.
   float ascent_density = static_cast<float>(ascent) /
-      static_cast<float>(result.sections[0].end - result.sections[0].start);
+                         static_cast<float>(result.sections[0].end - result.sections[0].start);
   float plateau_density = static_cast<float>(plateau) /
-      static_cast<float>(result.sections[1].end - result.sections[1].start);
+                          static_cast<float>(result.sections[1].end - result.sections[1].start);
   float climax_density = static_cast<float>(climax) /
-      static_cast<float>(result.sections[2].end - result.sections[2].start);
+                         static_cast<float>(result.sections[2].end - result.sections[2].start);
 
-  EXPECT_LE(ascent_density, climax_density)
-      << "Climax should have >= note density than Ascent";
-  EXPECT_LE(ascent_density, plateau_density)
-      << "Plateau should have >= note density than Ascent";
+  EXPECT_LE(ascent_density, climax_density) << "Climax should have >= note density than Ascent";
+  EXPECT_LE(ascent_density, plateau_density) << "Plateau should have >= note density than Ascent";
 }
 
 TEST(ToccataPerpetuusTest, PedalDelayedEntry) {
@@ -205,12 +203,10 @@ TEST(ToccataPerpetuusTest, PedalDelayedEntry) {
   ASSERT_GE(result.sections.size(), 1u);
 
   // Pedal should not appear in the first 60% of Ascent.
-  Tick ascent_60 = result.sections[0].start +
-      (result.sections[0].end - result.sections[0].start) * 60 / 100;
-  size_t early_pedal = countNotesInRange(result.tracks[2],
-                                          result.sections[0].start, ascent_60);
-  EXPECT_EQ(early_pedal, 0u)
-      << "Pedal should not have notes in first 60% of Ascent";
+  Tick ascent_60 =
+      result.sections[0].start + (result.sections[0].end - result.sections[0].start) * 60 / 100;
+  size_t early_pedal = countNotesInRange(result.tracks[2], result.sections[0].start, ascent_60);
+  EXPECT_EQ(early_pedal, 0u) << "Pedal should not have notes in first 60% of Ascent";
 }
 
 TEST(ToccataPerpetuusTest, VoiceThickening) {
@@ -223,8 +219,7 @@ TEST(ToccataPerpetuusTest, VoiceThickening) {
   auto activeVoices = [&](size_t si) -> int {
     int count = 0;
     for (const auto& track : result.tracks) {
-      if (countNotesInRange(track, result.sections[si].start,
-                            result.sections[si].end) > 0) {
+      if (countNotesInRange(track, result.sections[si].start, result.sections[si].end) > 0) {
         ++count;
       }
     }
@@ -262,8 +257,7 @@ TEST(ToccataPerpetuusTest, ArchetypeDiversityVsDramaticus) {
   // Section IDs must differ.
   ASSERT_FALSE(r_d.sections.empty());
   ASSERT_FALSE(r_p.sections.empty());
-  EXPECT_NE(static_cast<int>(r_d.sections[0].id),
-            static_cast<int>(r_p.sections[0].id));
+  EXPECT_NE(static_cast<int>(r_d.sections[0].id), static_cast<int>(r_p.sections[0].id));
 }
 
 }  // namespace

@@ -17,24 +17,26 @@ bool canInsertChromaticPassing(const NoteEvent& note1, const NoteEvent& note2,
                                const HarmonicTimeline& timeline) {
   // Pitch interval must be at least 2 semitones (whole tone or more).
   int pitch_diff = absoluteInterval(note1.pitch, note2.pitch);
-  if (pitch_diff < 2) return false;
+  if (pitch_diff < 2)
+    return false;
 
   // Both notes must be chord tones of their respective harmonic contexts.
   const auto& event1 = timeline.getAt(note1.start_tick);
   const auto& event2 = timeline.getAt(note2.start_tick);
 
-  if (!isChordTone(note1.pitch, event1)) return false;
-  if (!isChordTone(note2.pitch, event2)) return false;
+  if (!isChordTone(note1.pitch, event1))
+    return false;
+  if (!isChordTone(note2.pitch, event2))
+    return false;
 
   return true;
 }
 
-std::vector<NoteEvent> insertChromaticPassingTones(
-    const std::vector<NoteEvent>& notes,
-    const HarmonicTimeline& timeline,
-    float energy_level,
-    uint32_t seed) {
-  if (notes.empty()) return notes;
+std::vector<NoteEvent> insertChromaticPassingTones(const std::vector<NoteEvent>& notes,
+                                                   const HarmonicTimeline& timeline,
+                                                   float energy_level, uint32_t seed) {
+  if (notes.empty())
+    return notes;
 
   std::vector<NoteEvent> result;
   result.reserve(notes.size());

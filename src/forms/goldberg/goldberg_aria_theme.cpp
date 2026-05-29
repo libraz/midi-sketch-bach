@@ -23,11 +23,11 @@ namespace {
 // Constants
 // ---------------------------------------------------------------------------
 
-constexpr uint8_t kSopranoLow = 67;   // G4
-constexpr uint8_t kSopranoHigh = 81;  // A5
+constexpr uint8_t kSopranoLow = 67;     // G4
+constexpr uint8_t kSopranoHigh = 81;    // A5
 constexpr uint8_t kSopranoCenter = 74;  // D5
-constexpr int kMaxLeap = 7;  // Perfect 5th in semitones.
-constexpr int kMaxSamePitchRun = 2;  // Max consecutive same Beat 1 pitch.
+constexpr int kMaxLeap = 7;             // Perfect 5th in semitones.
+constexpr int kMaxSamePitchRun = 2;     // Max consecutive same Beat 1 pitch.
 constexpr float kSoftmaxTemp = 0.8f;
 constexpr float kMinConsonantRatio = 0.6f;  // 2/3 beats must be chord tones.
 
@@ -101,7 +101,8 @@ Chord chordFromBar(const StructuralBarInfo& bar, Key tonic) {
 
 bool isChordTone(uint8_t pitch, const std::vector<uint8_t>& chord_tones) {
   for (uint8_t ct : chord_tones) {
-    if (getPitchClass(pitch) == getPitchClass(ct)) return true;
+    if (getPitchClass(pitch) == getPitchClass(ct))
+      return true;
   }
   return false;
 }
@@ -114,8 +115,7 @@ struct RegisterTargets {
   std::array<uint8_t, 32> targets;
 };
 
-RegisterTargets computeRegisterTargets(const GoldbergStructuralGrid& grid,
-                                       std::mt19937& rng) {
+RegisterTargets computeRegisterTargets(const GoldbergStructuralGrid& grid, std::mt19937& rng) {
   RegisterTargets result{};
   std::uniform_int_distribution<int> jitter(-2, 2);
 
@@ -123,16 +123,23 @@ RegisterTargets computeRegisterTargets(const GoldbergStructuralGrid& grid,
     const auto& info = grid.getBar(bar);
     float arc = 0.0f;
     switch (info.phrase_pos) {
-      case PhrasePosition::Opening: arc = kArcOpening; break;
-      case PhrasePosition::Expansion: arc = kArcExpansion; break;
-      case PhrasePosition::Intensification: arc = kArcIntensification; break;
-      case PhrasePosition::Cadence: arc = kArcCadence; break;
+      case PhrasePosition::Opening:
+        arc = kArcOpening;
+        break;
+      case PhrasePosition::Expansion:
+        arc = kArcExpansion;
+        break;
+      case PhrasePosition::Intensification:
+        arc = kArcIntensification;
+        break;
+      case PhrasePosition::Cadence:
+        arc = kArcCadence;
+        break;
     }
 
     float melodic_tension = info.tension.melodic;
     float target_f = static_cast<float>(kSopranoCenter) +
-                     arc * melodic_tension *
-                         static_cast<float>(kSopranoHigh - kSopranoCenter);
+                     arc * melodic_tension * static_cast<float>(kSopranoHigh - kSopranoCenter);
 
     int target = static_cast<int>(target_f) + jitter(rng);
 
@@ -145,8 +152,7 @@ RegisterTargets computeRegisterTargets(const GoldbergStructuralGrid& grid,
       }
     }
 
-    result.targets[static_cast<size_t>(bar)] =
-        clampPitch(target, kSopranoLow, kSopranoHigh);
+    result.targets[static_cast<size_t>(bar)] = clampPitch(target, kSopranoLow, kSopranoHigh);
   }
   return result;
 }
@@ -170,43 +176,50 @@ struct KernScore {
 };
 
 float computeStepBonus(uint8_t candidate, uint8_t prev_pitch) {
-  if (prev_pitch == 0) return 0.5f;
+  if (prev_pitch == 0)
+    return 0.5f;
   int interval = absoluteInterval(candidate, prev_pitch);
-  if (interval <= 2) return 1.0f;   // 2nd
-  if (interval <= 4) return 0.5f;   // 3rd
-  if (interval <= 7) return -0.2f;  // 4th-5th
-  if (interval == 0) return -0.4f;  // unison
-  return -1.0f;                     // > 5th
+  if (interval <= 2)
+    return 1.0f;  // 2nd
+  if (interval <= 4)
+    return 0.5f;  // 3rd
+  if (interval <= 7)
+    return -0.2f;  // 4th-5th
+  if (interval == 0)
+    return -0.4f;  // unison
+  return -1.0f;    // > 5th
 }
 
-float computeDirectionBonus(uint8_t candidate, uint8_t prev_pitch,
-                            uint8_t target) {
-  if (prev_pitch == 0) return 0.0f;
+float computeDirectionBonus(uint8_t candidate, uint8_t prev_pitch, uint8_t target) {
+  if (prev_pitch == 0)
+    return 0.0f;
   int target_dir = (target > prev_pitch) ? 1 : ((target < prev_pitch) ? -1 : 0);
-  int actual_dir =
-      (candidate > prev_pitch) ? 1 : ((candidate < prev_pitch) ? -1 : 0);
+  int actual_dir = (candidate > prev_pitch) ? 1 : ((candidate < prev_pitch) ? -1 : 0);
   return (target_dir == actual_dir) ? 1.0f : -0.3f;
 }
 
 float computeRegisterBonus(uint8_t candidate, uint8_t target) {
   int dist = absoluteInterval(candidate, target);
-  if (dist <= 3) return 1.0f;
-  if (dist <= 6) return 0.5f;
-  if (dist <= 9) return 0.0f;
+  if (dist <= 3)
+    return 1.0f;
+  if (dist <= 6)
+    return 0.5f;
+  if (dist <= 9)
+    return 0.0f;
   return -0.5f;
 }
 
-float computeVarietyBonus(uint8_t candidate,
-                          const uint8_t* recent_downbeats, int count) {
+float computeVarietyBonus(uint8_t candidate, const uint8_t* recent_downbeats, int count) {
   for (int idx = 0; idx < count; ++idx) {
-    if (recent_downbeats[idx] == candidate) return -0.5f;
+    if (recent_downbeats[idx] == candidate)
+      return -0.5f;
   }
   return 0.2f;
 }
 
-float computeCadenceBonus(uint8_t candidate,
-                          const StructuralBarInfo& bar_info) {
-  if (!bar_info.cadence.has_value()) return 0.0f;
+float computeCadenceBonus(uint8_t candidate, const StructuralBarInfo& bar_info) {
+  if (!bar_info.cadence.has_value())
+    return 0.0f;
   int pc = getPitchClass(candidate);
   if (bar_info.cadence.value() == CadenceType::Perfect) {
     return (pc == kTonicPC) ? 1.0f : -0.3f;
@@ -215,24 +228,20 @@ float computeCadenceBonus(uint8_t candidate,
   return (pc == kDominantPC) ? 1.0f : -0.3f;
 }
 
-uint8_t selectKernPitch(const std::vector<uint8_t>& chord_tones,
-                        uint8_t prev_pitch, uint8_t register_target,
-                        const uint8_t* recent_downbeats, int recent_count,
-                        const StructuralBarInfo& bar_info,
-                        std::mt19937& rng) {
-  if (chord_tones.empty()) return kSopranoCenter;
+uint8_t selectKernPitch(const std::vector<uint8_t>& chord_tones, uint8_t prev_pitch,
+                        uint8_t register_target, const uint8_t* recent_downbeats, int recent_count,
+                        const StructuralBarInfo& bar_info, std::mt19937& rng) {
+  if (chord_tones.empty())
+    return kSopranoCenter;
 
   // Score each candidate.
   std::vector<float> scores(chord_tones.size());
   for (size_t idx = 0; idx < chord_tones.size(); ++idx) {
     KernScore ks;
     ks.step_bonus = computeStepBonus(chord_tones[idx], prev_pitch);
-    ks.direction_bonus =
-        computeDirectionBonus(chord_tones[idx], prev_pitch, register_target);
-    ks.register_bonus =
-        computeRegisterBonus(chord_tones[idx], register_target);
-    ks.variety_bonus =
-        computeVarietyBonus(chord_tones[idx], recent_downbeats, recent_count);
+    ks.direction_bonus = computeDirectionBonus(chord_tones[idx], prev_pitch, register_target);
+    ks.register_bonus = computeRegisterBonus(chord_tones[idx], register_target);
+    ks.variety_bonus = computeVarietyBonus(chord_tones[idx], recent_downbeats, recent_count);
     ks.cadence_bonus = computeCadenceBonus(chord_tones[idx], bar_info);
     scores[idx] = ks.total();
   }
@@ -251,7 +260,8 @@ uint8_t selectKernPitch(const std::vector<uint8_t>& chord_tones,
   float cumulative = 0.0f;
   for (size_t idx = 0; idx < weights.size(); ++idx) {
     cumulative += weights[idx];
-    if (pick <= cumulative) return chord_tones[idx];
+    if (pick <= cumulative)
+      return chord_tones[idx];
   }
   return chord_tones.back();
 }
@@ -267,8 +277,7 @@ struct BeatFuncProb {
   float hold;
 };
 
-BeatFuncProb getBeatFuncProb(PhrasePosition pos, bool is_cadence,
-                             CadenceType cad_type) {
+BeatFuncProb getBeatFuncProb(PhrasePosition pos, bool is_cadence, CadenceType cad_type) {
   if (is_cadence) {
     if (cad_type == CadenceType::Perfect) {
       return {0.25f, 0.55f, 0.15f, 0.05f};
@@ -290,24 +299,25 @@ BeatFuncProb getBeatFuncProb(PhrasePosition pos, bool is_cadence,
   return {0.40f, 0.25f, 0.20f, 0.15f};
 }
 
-BeatFunction selectBeatFunction(const BeatFuncProb& prob,
-                                std::mt19937& rng) {
+BeatFunction selectBeatFunction(const BeatFuncProb& prob, std::mt19937& rng) {
   std::uniform_real_distribution<float> dist(0.0f, 1.0f);
   float pick = dist(rng);
   float cum = prob.stable;
-  if (pick < cum) return BeatFunction::Stable;
+  if (pick < cum)
+    return BeatFunction::Stable;
   cum += prob.suspension43;
-  if (pick < cum) return BeatFunction::Suspension43;
+  if (pick < cum)
+    return BeatFunction::Suspension43;
   cum += prob.appoggiatura;
-  if (pick < cum) return BeatFunction::Appoggiatura;
+  if (pick < cum)
+    return BeatFunction::Appoggiatura;
   return BeatFunction::Hold;
 }
 
 /// Compute Beat 2 pitch based on function.
 /// Returns {pitch, func} where func may be downgraded to Stable on validation failure.
 AriaThemeBeat computeBeat2(BeatFunction func, uint8_t beat1_pitch,
-                           const std::vector<uint8_t>& chord_tones,
-                           const KeySignature& key,
+                           const std::vector<uint8_t>& chord_tones, const KeySignature& key,
                            std::mt19937& rng) {
   switch (func) {
     case BeatFunction::Suspension43: {
@@ -368,12 +378,9 @@ AriaThemeBeat computeBeat2(BeatFunction func, uint8_t beat1_pitch,
 // Phase D: Beat 3 (resolution / passing)
 // ---------------------------------------------------------------------------
 
-AriaThemeBeat computeBeat3(BeatFunction beat2_func, uint8_t beat2_pitch,
-                           uint8_t beat1_pitch,
-                           uint8_t next_bar_target,
-                           const std::vector<uint8_t>& chord_tones,
-                           const KeySignature& key,
-                           const StructuralBarInfo& bar_info,
+AriaThemeBeat computeBeat3(BeatFunction beat2_func, uint8_t beat2_pitch, uint8_t beat1_pitch,
+                           uint8_t next_bar_target, const std::vector<uint8_t>& chord_tones,
+                           const KeySignature& key, const StructuralBarInfo& bar_info,
                            std::mt19937& rng) {
   switch (beat2_func) {
     case BeatFunction::Suspension43:
@@ -406,14 +413,13 @@ AriaThemeBeat computeBeat3(BeatFunction beat2_func, uint8_t beat2_pitch,
         // Cadence bar Beat 3: pull toward tonic/dominant.
         if (bar_info.cadence.has_value()) {
           int pc = getPitchClass(passing);
-          bool is_good = (bar_info.cadence.value() == CadenceType::Perfect)
-                             ? (pc == kTonicPC)
-                             : (pc == kDominantPC);
+          bool is_good = (bar_info.cadence.value() == CadenceType::Perfect) ? (pc == kTonicPC)
+                                                                            : (pc == kDominantPC);
           if (!is_good) {
             // Add +0.5 register bias toward cadence target.
             uint8_t target = (bar_info.cadence.value() == CadenceType::Perfect)
-                                 ? static_cast<uint8_t>(79)  // G5
-                                 : static_cast<uint8_t>(74); // D5
+                                 ? static_cast<uint8_t>(79)   // G5
+                                 : static_cast<uint8_t>(74);  // D5
             int d = (target > beat2_pitch) ? 1 : -1;
             passing = scaleNeighbor(beat2_pitch, d, key);
           }
@@ -434,8 +440,7 @@ void validateAndClamp(AriaTheme& theme, const GoldbergStructuralGrid& grid,
   // 1. Clamp all pitches to soprano range.
   for (auto& beat : theme.beats) {
     if (beat.pitch > 0) {
-      beat.pitch = clampPitch(static_cast<int>(beat.pitch),
-                              kSopranoLow, kSopranoHigh);
+      beat.pitch = clampPitch(static_cast<int>(beat.pitch), kSopranoLow, kSopranoHigh);
     }
   }
 
@@ -444,14 +449,14 @@ void validateAndClamp(AriaTheme& theme, const GoldbergStructuralGrid& grid,
   uint8_t prev_sounding = 0;
   for (int idx = 0; idx < AriaTheme::kTotalBeats; ++idx) {
     auto& beat = theme.beats[static_cast<size_t>(idx)];
-    if (beat.pitch == 0) continue;
+    if (beat.pitch == 0)
+      continue;
 
     // Don't modify suspension/appoggiatura resolutions.
     bool is_protected = false;
     if (idx > 0) {
       auto prev_func = theme.beats[static_cast<size_t>(idx - 1)].func;
-      if (prev_func == BeatFunction::Suspension43 ||
-          prev_func == BeatFunction::Appoggiatura) {
+      if (prev_func == BeatFunction::Suspension43 || prev_func == BeatFunction::Appoggiatura) {
         is_protected = true;
       }
     }
@@ -460,8 +465,7 @@ void validateAndClamp(AriaTheme& theme, const GoldbergStructuralGrid& grid,
         absoluteInterval(beat.pitch, prev_sounding) > kMaxLeap) {
       int dir = (beat.pitch > prev_sounding) ? -1 : 1;
       beat.pitch = scaleNeighbor(prev_sounding, -dir, key);
-      beat.pitch = clampPitch(static_cast<int>(beat.pitch),
-                              kSopranoLow, kSopranoHigh);
+      beat.pitch = clampPitch(static_cast<int>(beat.pitch), kSopranoLow, kSopranoHigh);
     }
 
     prev_sounding = beat.pitch;
@@ -472,39 +476,41 @@ void validateAndClamp(AriaTheme& theme, const GoldbergStructuralGrid& grid,
     const auto& bar_info = grid.getBar(bar);
     Chord chord = chordFromBar(bar_info, key.tonic);
     auto chord_tones = collectChordTonesInRange(chord, kSopranoLow, kSopranoHigh);
-    if (chord_tones.empty()) continue;
+    if (chord_tones.empty())
+      continue;
 
     int ct_count = 0;
     int non_hold_count = 0;
     for (int beat = 0; beat < 3; ++beat) {
       auto& b = theme.beats[static_cast<size_t>(bar * 3 + beat)];
-      if (b.pitch == 0) continue;
+      if (b.pitch == 0)
+        continue;
       ++non_hold_count;
-      if (isChordTone(b.pitch, chord_tones)) ++ct_count;
+      if (isChordTone(b.pitch, chord_tones))
+        ++ct_count;
     }
 
     if (non_hold_count > 0 &&
-        static_cast<float>(ct_count) / static_cast<float>(non_hold_count) <
-            kMinConsonantRatio) {
+        static_cast<float>(ct_count) / static_cast<float>(non_hold_count) < kMinConsonantRatio) {
       // Snap the non-chord-tone beat furthest from any chord tone.
       // Skip beats that are suspension/appoggiatura or their resolutions.
       int worst_beat = -1;
       int worst_dist = 0;
       for (int beat = 0; beat < 3; ++beat) {
         auto& b = theme.beats[static_cast<size_t>(bar * 3 + beat)];
-        if (b.pitch == 0) continue;
+        if (b.pitch == 0)
+          continue;
         // Protect non-chord tones that serve as suspensions/appoggiaturas.
-        if (b.func == BeatFunction::Suspension43 ||
-            b.func == BeatFunction::Appoggiatura) continue;
+        if (b.func == BeatFunction::Suspension43 || b.func == BeatFunction::Appoggiatura)
+          continue;
         // Protect resolution beats (beat after suspension/appoggiatura).
         if (beat > 0) {
           auto prev_func = theme.beats[static_cast<size_t>(bar * 3 + beat - 1)].func;
-          if (prev_func == BeatFunction::Suspension43 ||
-              prev_func == BeatFunction::Appoggiatura) continue;
+          if (prev_func == BeatFunction::Suspension43 || prev_func == BeatFunction::Appoggiatura)
+            continue;
         }
         if (!isChordTone(b.pitch, chord_tones)) {
-          int dist = absoluteInterval(b.pitch,
-                                      nearestChordTone(b.pitch, chord_tones));
+          int dist = absoluteInterval(b.pitch, nearestChordTone(b.pitch, chord_tones));
           if (dist > worst_dist) {
             worst_dist = dist;
             worst_beat = beat;
@@ -533,13 +539,13 @@ void validateAndClamp(AriaTheme& theme, const GoldbergStructuralGrid& grid,
   prev_sounding = 0;
   for (int idx = 0; idx < AriaTheme::kTotalBeats; ++idx) {
     auto& beat = theme.beats[static_cast<size_t>(idx)];
-    if (beat.pitch == 0) continue;
+    if (beat.pitch == 0)
+      continue;
 
     bool is_protected = false;
     if (idx > 0) {
       auto prev_func = theme.beats[static_cast<size_t>(idx - 1)].func;
-      if (prev_func == BeatFunction::Suspension43 ||
-          prev_func == BeatFunction::Appoggiatura) {
+      if (prev_func == BeatFunction::Suspension43 || prev_func == BeatFunction::Appoggiatura) {
         is_protected = true;
       }
     }
@@ -548,8 +554,7 @@ void validateAndClamp(AriaTheme& theme, const GoldbergStructuralGrid& grid,
         absoluteInterval(beat.pitch, prev_sounding) > kMaxLeap) {
       int dir = (beat.pitch > prev_sounding) ? -1 : 1;
       beat.pitch = scaleNeighbor(prev_sounding, -dir, key);
-      beat.pitch = clampPitch(static_cast<int>(beat.pitch),
-                              kSopranoLow, kSopranoHigh);
+      beat.pitch = clampPitch(static_cast<int>(beat.pitch), kSopranoLow, kSopranoHigh);
     }
     prev_sounding = beat.pitch;
   }
@@ -569,8 +574,7 @@ void validateAndClamp(AriaTheme& theme, const GoldbergStructuralGrid& grid,
 // ---------------------------------------------------------------------------
 
 uint8_t AriaTheme::getPitch(int bar, int beat) const {
-  int idx = std::clamp(bar, 0, kBars - 1) * kBeatsPerBar +
-            std::clamp(beat, 0, kBeatsPerBar - 1);
+  int idx = std::clamp(bar, 0, kBars - 1) * kBeatsPerBar + std::clamp(beat, 0, kBeatsPerBar - 1);
 
   if (beats[static_cast<size_t>(idx)].pitch > 0) {
     return beats[static_cast<size_t>(idx)].pitch;
@@ -588,13 +592,11 @@ uint8_t AriaTheme::getPitch(int bar, int beat) const {
 }
 
 BeatFunction AriaTheme::getFunction(int bar, int beat) const {
-  int idx = std::clamp(bar, 0, kBars - 1) * kBeatsPerBar +
-            std::clamp(beat, 0, kBeatsPerBar - 1);
+  int idx = std::clamp(bar, 0, kBars - 1) * kBeatsPerBar + std::clamp(beat, 0, kBeatsPerBar - 1);
   return beats[static_cast<size_t>(idx)].func;
 }
 
-std::array<uint8_t, 4> AriaTheme::getDownbeatFragment(int start_bar,
-                                                        int length_bars) const {
+std::array<uint8_t, 4> AriaTheme::getDownbeatFragment(int start_bar, int length_bars) const {
   std::array<uint8_t, 4> result = {0, 0, 0, 0};
   int count = std::min(length_bars, 4);
   for (int idx = 0; idx < count; ++idx) {
@@ -610,8 +612,7 @@ std::array<uint8_t, 4> AriaTheme::getDownbeatFragment(int start_bar,
 // generateAriaMelody — 2-layer generative Sarabande melody
 // ---------------------------------------------------------------------------
 
-AriaTheme generateAriaMelody(const GoldbergStructuralGrid& grid,
-                             const KeySignature& key,
+AriaTheme generateAriaMelody(const GoldbergStructuralGrid& grid, const KeySignature& key,
                              uint32_t seed) {
   std::mt19937 rng(seed);
   AriaTheme theme{};
@@ -631,17 +632,16 @@ AriaTheme generateAriaMelody(const GoldbergStructuralGrid& grid,
 
     if (chord_tones.empty()) {
       // Fallback: use center pitch.
-      theme.beats[static_cast<size_t>(bar * 3)] = {kSopranoCenter,
-                                                    BeatFunction::Stable};
+      theme.beats[static_cast<size_t>(bar * 3)] = {kSopranoCenter, BeatFunction::Stable};
       prev_kern = kSopranoCenter;
       continue;
     }
 
     int recent_count = std::min(bar, 3);
 
-    uint8_t kern = selectKernPitch(
-        chord_tones, prev_kern, targets.targets[static_cast<size_t>(bar)],
-        recent_downbeats, recent_count, bar_info, rng);
+    uint8_t kern =
+        selectKernPitch(chord_tones, prev_kern, targets.targets[static_cast<size_t>(bar)],
+                        recent_downbeats, recent_count, bar_info, rng);
 
     // Safety valve S3: no triple same-pitch downbeat.
     if (kern == prev_kern) {
@@ -709,14 +709,12 @@ AriaTheme generateAriaMelody(const GoldbergStructuralGrid& grid,
     theme.beats[static_cast<size_t>(bar * 3 + 1)] = beat2;
 
     // Beat 3: resolution based on beat 2 function.
-    uint8_t next_bar_target = (bar < 31)
-        ? targets.targets[static_cast<size_t>(bar + 1)]
-        : static_cast<uint8_t>(79);  // Final bar → G5.
+    uint8_t next_bar_target = (bar < 31) ? targets.targets[static_cast<size_t>(bar + 1)]
+                                         : static_cast<uint8_t>(79);  // Final bar → G5.
 
     uint8_t beat2_sounding = (beat2.pitch > 0) ? beat2.pitch : beat1_pitch;
-    AriaThemeBeat beat3 = computeBeat3(
-        beat2.func, beat2_sounding, beat1_pitch, next_bar_target,
-        chord_tones, key, bar_info, rng);
+    AriaThemeBeat beat3 = computeBeat3(beat2.func, beat2_sounding, beat1_pitch, next_bar_target,
+                                       chord_tones, key, bar_info, rng);
     theme.beats[static_cast<size_t>(bar * 3 + 2)] = beat3;
   }
 

@@ -33,7 +33,7 @@ TEST(TurnTest, ProducesFourNotes) {
 
 TEST(TurnTest, PitchPattern_UpperMainLowerMain) {
   auto note = makeNote(0, 64, kTicksPerBeat);  // E4
-  auto result = generateTurn(note, 66, 62);      // Upper = F#4, Lower = D4
+  auto result = generateTurn(note, 66, 62);    // Upper = F#4, Lower = D4
 
   ASSERT_EQ(result.size(), 4u);
   EXPECT_EQ(result[0].pitch, 66);  // Upper

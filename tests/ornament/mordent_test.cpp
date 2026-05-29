@@ -33,7 +33,7 @@ TEST(MordentTest, ProducesThreeNotes) {
 
 TEST(MordentTest, PitchPattern_MainLowerMain) {
   auto note = makeNote(0, 64, kTicksPerBeat);  // E4
-  auto result = generateMordent(note, 62);       // Lower = D4
+  auto result = generateMordent(note, 62);     // Lower = D4
 
   ASSERT_EQ(result.size(), 3u);
   EXPECT_EQ(result[0].pitch, 64);  // Main

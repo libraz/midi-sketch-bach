@@ -159,12 +159,16 @@ TEST(BasicTypesTest, FormTypeFromStringUnknownDefaultsToFugue) {
 
 TEST(BasicTypesTest, FormTypeRoundTrip) {
   // Verify that toString -> fromString round-trips for all form types.
-  FormType forms[] = {
-      FormType::Fugue,         FormType::PreludeAndFugue,
-      FormType::TrioSonata,    FormType::ChoralePrelude,
-      FormType::ToccataAndFugue, FormType::Passacaglia,
-      FormType::FantasiaAndFugue, FormType::CelloPrelude,
-      FormType::Chaconne, FormType::GoldbergVariations};
+  FormType forms[] = {FormType::Fugue,
+                      FormType::PreludeAndFugue,
+                      FormType::TrioSonata,
+                      FormType::ChoralePrelude,
+                      FormType::ToccataAndFugue,
+                      FormType::Passacaglia,
+                      FormType::FantasiaAndFugue,
+                      FormType::CelloPrelude,
+                      FormType::Chaconne,
+                      FormType::GoldbergVariations};
 
   for (auto form : forms) {
     std::string name = formTypeToString(form);
@@ -276,16 +280,14 @@ TEST(MetricLevelTest, BeatStartIsBeat) {
 
 TEST(MetricLevelTest, OffbeatIsOffbeat) {
   EXPECT_EQ(metricLevel(1), MetricLevel::Offbeat);
-  EXPECT_EQ(metricLevel(240), MetricLevel::Offbeat);   // Eighth note.
-  EXPECT_EQ(metricLevel(120), MetricLevel::Offbeat);   // Sixteenth note.
+  EXPECT_EQ(metricLevel(240), MetricLevel::Offbeat);  // Eighth note.
+  EXPECT_EQ(metricLevel(120), MetricLevel::Offbeat);  // Sixteenth note.
   EXPECT_EQ(metricLevel(kTicksPerBeat + 240), MetricLevel::Offbeat);
 }
 
 TEST(MetricLevelTest, OrderingBarGreaterThanBeatGreaterThanOffbeat) {
-  EXPECT_GT(static_cast<uint8_t>(MetricLevel::Bar),
-            static_cast<uint8_t>(MetricLevel::Beat));
-  EXPECT_GT(static_cast<uint8_t>(MetricLevel::Beat),
-            static_cast<uint8_t>(MetricLevel::Offbeat));
+  EXPECT_GT(static_cast<uint8_t>(MetricLevel::Bar), static_cast<uint8_t>(MetricLevel::Beat));
+  EXPECT_GT(static_cast<uint8_t>(MetricLevel::Beat), static_cast<uint8_t>(MetricLevel::Offbeat));
 }
 
 TEST(NoteEventTest, ModifiedByAccumulatesFlags) {
@@ -365,21 +367,15 @@ TEST(TimeSignatureEventTest, DefaultValues) {
 // ---------------------------------------------------------------------------
 
 TEST(MetricalStrengthTest, StandardTriple_S_M_W) {
-  EXPECT_EQ(getMetricalStrength(0, MeterProfile::StandardTriple),
-            MetricalStrength::Strong);
-  EXPECT_EQ(getMetricalStrength(1, MeterProfile::StandardTriple),
-            MetricalStrength::Medium);
-  EXPECT_EQ(getMetricalStrength(2, MeterProfile::StandardTriple),
-            MetricalStrength::Weak);
+  EXPECT_EQ(getMetricalStrength(0, MeterProfile::StandardTriple), MetricalStrength::Strong);
+  EXPECT_EQ(getMetricalStrength(1, MeterProfile::StandardTriple), MetricalStrength::Medium);
+  EXPECT_EQ(getMetricalStrength(2, MeterProfile::StandardTriple), MetricalStrength::Weak);
 }
 
 TEST(MetricalStrengthTest, SarabandeTriple_S_S_W) {
-  EXPECT_EQ(getMetricalStrength(0, MeterProfile::SarabandeTriple),
-            MetricalStrength::Strong);
-  EXPECT_EQ(getMetricalStrength(1, MeterProfile::SarabandeTriple),
-            MetricalStrength::Strong);
-  EXPECT_EQ(getMetricalStrength(2, MeterProfile::SarabandeTriple),
-            MetricalStrength::Weak);
+  EXPECT_EQ(getMetricalStrength(0, MeterProfile::SarabandeTriple), MetricalStrength::Strong);
+  EXPECT_EQ(getMetricalStrength(1, MeterProfile::SarabandeTriple), MetricalStrength::Strong);
+  EXPECT_EQ(getMetricalStrength(2, MeterProfile::SarabandeTriple), MetricalStrength::Weak);
 }
 
 }  // namespace

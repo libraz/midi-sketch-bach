@@ -1,7 +1,6 @@
-#include "analysis/counterpoint_analyzer.h"
-
 #include <gtest/gtest.h>
 
+#include "analysis/counterpoint_analyzer.h"
 #include "core/basic_types.h"
 
 namespace bach {
@@ -59,7 +58,7 @@ TEST(CrossRelationTest, FarApart_NotDetected) {
   notes.push_back(v0);
 
   NoteEvent v1;
-  v1.pitch = 70;  // Bb
+  v1.pitch = 70;                       // Bb
   v1.start_tick = kTicksPerBeat * 10;  // Far away
   v1.duration = kTicksPerBeat;
   v1.voice = 1;

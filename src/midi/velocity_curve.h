@@ -32,7 +32,7 @@ namespace bach {
 /// @param phrase_start_tick Start tick of the current phrase.
 /// @return Velocity value in [50, 110].
 uint8_t computeVelocity(Tick tick, const std::vector<Tick>& cadence_ticks,
-                         Tick phrase_start_tick = 0);
+                        Tick phrase_start_tick = 0);
 
 /// @brief Apply velocity curves to all notes in a track.
 ///
@@ -41,8 +41,7 @@ uint8_t computeVelocity(Tick tick, const std::vector<Tick>& cadence_ticks,
 /// @param notes Notes to adjust (modified in place).
 /// @param instrument The instrument type.
 /// @param cadence_ticks Cadence positions for phrase shaping.
-void applyVelocityCurve(std::vector<NoteEvent>& notes,
-                        InstrumentType instrument,
+void applyVelocityCurve(std::vector<NoteEvent>& notes, InstrumentType instrument,
                         const std::vector<Tick>& cadence_ticks);
 
 }  // namespace bach

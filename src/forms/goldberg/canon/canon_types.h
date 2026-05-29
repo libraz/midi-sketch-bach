@@ -16,14 +16,14 @@ namespace bach {
 /// Regular = diatonic transposition only (Var 3, 6, 9, 18, 24, 27).
 /// Inverted = diatonic inversion + transposition (Var 15, possibly Var 12).
 enum class CanonTransform : uint8_t {
-  Regular,   ///< Diatonic transposition only.
-  Inverted   ///< Diatonic inversion + transposition.
+  Regular,  ///< Diatonic transposition only.
+  Inverted  ///< Diatonic inversion + transposition.
 };
 
 /// @brief Rhythmic imitation mode for canon.
 enum class CanonRhythmicMode : uint8_t {
-  StrictRhythm,    ///< Exact rhythmic match (BWV 988 standard).
-  Proportional     ///< Duration ratio transform (future: augmentation canon).
+  StrictRhythm,  ///< Exact rhythmic match (BWV 988 standard).
+  Proportional   ///< Duration ratio transform (future: augmentation canon).
 };
 
 /// @brief Full specification for a single canon variation.
@@ -31,7 +31,7 @@ enum class CanonRhythmicMode : uint8_t {
 /// Encodes the interval, transform, key, delay, and rhythmic mode needed
 /// to derive comes from dux. All 9 BWV 988 canons use delay_bars=1.
 struct CanonSpec {
-  int canon_interval;              ///< Diatonic degree: 0=unison, 1=2nd, ... 8=9th.
+  int canon_interval;  ///< Diatonic degree: 0=unison, 1=2nd, ... 8=9th.
   CanonTransform transform;
   KeySignature key;
   MinorModeProfile minor_profile;  ///< For minor key canons.

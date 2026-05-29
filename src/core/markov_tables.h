@@ -11,7 +11,7 @@ namespace bach {
 
 // --- Constants ---
 
-using DegreeStep = int8_t;           // [-8, +8] + LargeLeapUp(+9) / LargeLeapDown(-9)
+using DegreeStep = int8_t;            // [-8, +8] + LargeLeapUp(+9) / LargeLeapDown(-9)
 constexpr int kDegreeStepCount = 19;  // -9..+9
 constexpr int kDegreeOffset = 9;      // Index = step + 9
 
@@ -36,11 +36,11 @@ constexpr int kDegreeClassCount = 3;
 
 /// @brief Duration category for rhythm transitions.
 enum class DurCategory : uint8_t {
-  S16 = 0,       ///< Sixteenth note (~120 ticks, < 180 ticks).
-  S8 = 1,        ///< Eighth note (~240 ticks, 180-299 ticks).
-  Dot8 = 2,      ///< Dotted eighth (~360 ticks, 300-479 ticks).
-  Qtr = 3,       ///< Quarter note (~480 ticks, 480-959 ticks).
-  HalfPlus = 4   ///< Half note or longer (>= 960 ticks).
+  S16 = 0,      ///< Sixteenth note (~120 ticks, < 180 ticks).
+  S8 = 1,       ///< Eighth note (~240 ticks, 180-299 ticks).
+  Dot8 = 2,     ///< Dotted eighth (~360 ticks, 300-479 ticks).
+  Qtr = 3,      ///< Quarter note (~480 ticks, 480-959 ticks).
+  HalfPlus = 4  ///< Half note or longer (>= 960 ticks).
 };
 constexpr int kDurCatCount = 5;
 
@@ -61,8 +61,8 @@ constexpr int kBassDegreeCount = 7;
 constexpr int kVoiceBinCount = 3;
 constexpr int kHarmFuncCount = 3;
 constexpr int kPcOffsetCount = 12;
-constexpr int kVerticalRows = kBassDegreeCount * kBeatPosCount
-                            * kVoiceBinCount * kHarmFuncCount;  // 252
+constexpr int kVerticalRows =
+    kBassDegreeCount * kBeatPosCount * kVoiceBinCount * kHarmFuncCount;  // 252
 
 /// @brief Harmonic function classification.
 enum class HarmFunc : uint8_t {
@@ -92,8 +92,7 @@ struct OracleCandidate {
 /// Col: next_step(19).
 /// Values: probability x 10000 (uint16_t).
 struct PitchTransitionTable {
-  uint16_t prob[kDegreeStepCount * kDegreeClassCount * kBeatPosCount]
-               [kDegreeStepCount];
+  uint16_t prob[kDegreeStepCount * kDegreeClassCount * kBeatPosCount][kDegreeStepCount];
 };
 
 /// @brief Duration transition probability table.
@@ -127,8 +126,10 @@ extern const VerticalIntervalTable kFugueVerticalTable;
 /// @return Clamped index in [0, kDegreeStepCount - 1].
 inline constexpr int degreeStepToIndex(DegreeStep step) {
   int idx = static_cast<int>(step) + kDegreeOffset;
-  if (idx < 0) return 0;
-  if (idx >= kDegreeStepCount) return kDegreeStepCount - 1;
+  if (idx < 0)
+    return 0;
+  if (idx >= kDegreeStepCount)
+    return kDegreeStepCount - 1;
   return idx;
 }
 
@@ -138,9 +139,12 @@ inline constexpr int degreeStepToIndex(DegreeStep step) {
 /// @return BeatPos classification.
 inline BeatPos tickToBeatPos(Tick tick) {
   Tick in_bar = tick % kTicksPerBar;
-  if (in_bar == 0) return BeatPos::Bar;
-  if (in_bar % kTicksPerBeat == 0) return BeatPos::Beat;
-  if (in_bar % (kTicksPerBeat / 2) == 0) return BeatPos::Off8;
+  if (in_bar == 0)
+    return BeatPos::Bar;
+  if (in_bar % kTicksPerBeat == 0)
+    return BeatPos::Beat;
+  if (in_bar % (kTicksPerBeat / 2) == 0)
+    return BeatPos::Off8;
   return BeatPos::Off16;
 }
 
@@ -148,10 +152,14 @@ inline BeatPos tickToBeatPos(Tick tick) {
 /// @param dur Duration in ticks.
 /// @return DurCategory classification.
 inline DurCategory ticksToDurCategory(Tick dur) {
-  if (dur < kTicksPerBeat * 3 / 8) return DurCategory::S16;       // < 180 ticks
-  if (dur < kTicksPerBeat * 5 / 8) return DurCategory::S8;        // < 300 ticks
-  if (dur < kTicksPerBeat) return DurCategory::Dot8;               // < 480 ticks
-  if (dur < kTicksPerBeat * 2) return DurCategory::Qtr;            // < 960 ticks
+  if (dur < kTicksPerBeat * 3 / 8)
+    return DurCategory::S16;  // < 180 ticks
+  if (dur < kTicksPerBeat * 5 / 8)
+    return DurCategory::S8;  // < 300 ticks
+  if (dur < kTicksPerBeat)
+    return DurCategory::Dot8;  // < 480 ticks
+  if (dur < kTicksPerBeat * 2)
+    return DurCategory::Qtr;  // < 960 ticks
   return DurCategory::HalfPlus;
 }
 
@@ -160,8 +168,10 @@ inline DurCategory ticksToDurCategory(Tick dur) {
 /// @return DegreeClass classification.
 inline DegreeClass scaleDegreeToClass(int deg) {
   deg = ((deg % 7) + 7) % 7;  // Normalize to 0-6.
-  if (deg == 0 || deg == 2) return DegreeClass::Stable;
-  if (deg == 4 || deg == 6) return DegreeClass::Dominant;
+  if (deg == 0 || deg == 2)
+    return DegreeClass::Stable;
+  if (deg == 4 || deg == 6)
+    return DegreeClass::Dominant;
   return DegreeClass::Motion;
 }
 
@@ -172,12 +182,10 @@ inline constexpr int voiceCountToBin(int n) {
 }
 
 /// @brief Compute row index into the vertical interval table.
-inline constexpr int verticalRowIndex(int bass_deg, BeatPos bp,
-                                       int vbin, HarmFunc hf) {
-  return bass_deg * kBeatPosCount * kVoiceBinCount * kHarmFuncCount
-       + static_cast<int>(bp) * kVoiceBinCount * kHarmFuncCount
-       + vbin * kHarmFuncCount
-       + static_cast<int>(hf);
+inline constexpr int verticalRowIndex(int bass_deg, BeatPos bp, int vbin, HarmFunc hf) {
+  return bass_deg * kBeatPosCount * kVoiceBinCount * kHarmFuncCount +
+         static_cast<int>(bp) * kVoiceBinCount * kHarmFuncCount + vbin * kHarmFuncCount +
+         static_cast<int>(hf);
 }
 
 /// @brief Classify scale degree to harmonic function.
@@ -185,8 +193,10 @@ inline constexpr int verticalRowIndex(int bass_deg, BeatPos bp,
 /// @return HarmFunc classification.
 inline HarmFunc degreeToHarmFunc(int degree) {
   degree = ((degree % 7) + 7) % 7;
-  if (degree == 0 || degree == 5 || degree == 2) return HarmFunc::Tonic;
-  if (degree == 3 || degree == 1) return HarmFunc::Subdominant;
+  if (degree == 0 || degree == 5 || degree == 2)
+    return HarmFunc::Tonic;
+  if (degree == 3 || degree == 1)
+    return HarmFunc::Subdominant;
   return HarmFunc::Dominant;
 }
 
@@ -195,12 +205,18 @@ inline HarmFunc degreeToHarmFunc(int degree) {
 /// @return DirIntervalClass classification.
 inline DirIntervalClass toDirIvlClass(DegreeStep step) {
   int stp = static_cast<int>(step);
-  if (stp >= 1 && stp <= 2) return DirIntervalClass::StepUp;
-  if (stp >= -2 && stp <= -1) return DirIntervalClass::StepDown;
-  if (stp >= 3 && stp <= 4) return DirIntervalClass::SkipUp;
-  if (stp >= -4 && stp <= -3) return DirIntervalClass::SkipDown;
-  if (stp >= 5) return DirIntervalClass::LeapUp;
-  if (stp <= -5) return DirIntervalClass::LeapDown;
+  if (stp >= 1 && stp <= 2)
+    return DirIntervalClass::StepUp;
+  if (stp >= -2 && stp <= -1)
+    return DirIntervalClass::StepDown;
+  if (stp >= 3 && stp <= 4)
+    return DirIntervalClass::SkipUp;
+  if (stp >= -4 && stp <= -3)
+    return DirIntervalClass::SkipDown;
+  if (stp >= 5)
+    return DirIntervalClass::LeapUp;
+  if (stp <= -5)
+    return DirIntervalClass::LeapDown;
   // step == 0: treat as StepUp (unison, rare).
   return DirIntervalClass::StepUp;
 }
@@ -212,20 +228,19 @@ inline DirIntervalClass toDirIvlClass(DegreeStep step) {
 /// @param key Musical key (tonic pitch class).
 /// @param scale Scale type.
 /// @return Signed degree step in [-9, +9].
-DegreeStep computeDegreeStep(uint8_t from_pitch, uint8_t to_pitch,
-                              Key key, ScaleType scale);
+DegreeStep computeDegreeStep(uint8_t from_pitch, uint8_t to_pitch, Key key, ScaleType scale);
 
 // --- Scoring constants ---
 
 /// @brief Weight constants for Markov scoring.
-constexpr float kMarkovPitchWeight = 0.45f;         ///< Organ system pitch weight.
-constexpr float kMarkovPitchWeightSolo = 0.45f;      ///< Solo string system pitch weight.
-constexpr float kMarkovDurWeight = 0.20f;             ///< Duration weight (both systems).
-constexpr float kMarkovCadenceAttenuation = 0.5f;    ///< Cadence proximity weight reduction.
-constexpr float kMarkovPhraseStartBoost = 1.2f;      ///< Phrase start weight increase.
-constexpr float kVerticalAlpha = 0.65f;      ///< Vertical oracle weight in combined score.
-constexpr float kVerticalMinGate = 0.05f;     ///< Minimum vertical probability to pass gate.
-constexpr float kVerticalMinGateCadence = 0.10f;  ///< Stricter gate for cadence zone.
+constexpr float kMarkovPitchWeight = 0.45f;        ///< Organ system pitch weight.
+constexpr float kMarkovPitchWeightSolo = 0.45f;    ///< Solo string system pitch weight.
+constexpr float kMarkovDurWeight = 0.20f;          ///< Duration weight (both systems).
+constexpr float kMarkovCadenceAttenuation = 0.5f;  ///< Cadence proximity weight reduction.
+constexpr float kMarkovPhraseStartBoost = 1.2f;    ///< Phrase start weight increase.
+constexpr float kVerticalAlpha = 0.65f;            ///< Vertical oracle weight in combined score.
+constexpr float kVerticalMinGate = 0.05f;          ///< Minimum vertical probability to pass gate.
+constexpr float kVerticalMinGateCadence = 0.10f;   ///< Stricter gate for cadence zone.
 
 // --- Scoring functions ---
 
@@ -241,8 +256,7 @@ constexpr float kVerticalMinGateCadence = 0.10f;  ///< Stricter gate for cadence
 /// @param beat Beat position of the next note.
 /// @param next_step Degree step from prev note to candidate note.
 /// @return Score in approximately [-0.46, +0.46].
-float scoreMarkovPitch(const MarkovModel& model,
-                       DegreeStep prev_step, DegreeClass deg_class,
+float scoreMarkovPitch(const MarkovModel& model, DegreeStep prev_step, DegreeClass deg_class,
                        BeatPos beat, DegreeStep next_step);
 
 /// @brief Score a duration transition using the Markov model.
@@ -254,9 +268,8 @@ float scoreMarkovPitch(const MarkovModel& model,
 /// @param dir_class Directed interval class of the current interval.
 /// @param next_dur Duration category of the candidate note.
 /// @return Score in approximately [-0.46, +0.46].
-float scoreMarkovDuration(const MarkovModel& model,
-                          DurCategory prev_dur, DirIntervalClass dir_class,
-                          DurCategory next_dur);
+float scoreMarkovDuration(const MarkovModel& model, DurCategory prev_dur,
+                          DirIntervalClass dir_class, DurCategory next_dur);
 
 /// @brief Score a vertical interval using the vertical table.
 ///
@@ -270,8 +283,7 @@ float scoreMarkovDuration(const MarkovModel& model,
 /// @param hf Harmonic function classification.
 /// @param pc_offset Pitch class offset from bass (0-11).
 /// @return Score in approximately [-0.46, +0.46].
-float scoreVerticalInterval(const VerticalIntervalTable& table,
-                            int bass_degree, BeatPos beat,
+float scoreVerticalInterval(const VerticalIntervalTable& table, int bass_degree, BeatPos beat,
                             int voice_bin, HarmFunc hf, int pc_offset);
 
 /// @brief Get top-N melodic (horizontal) oracle candidates.
@@ -292,12 +304,10 @@ float scoreVerticalInterval(const VerticalIntervalTable& table,
 /// @param out Output array for candidates.
 /// @param max_count Maximum candidates to return.
 /// @return Number of candidates written to out.
-int getTopMelodicCandidates(
-    const MarkovModel& model,
-    DegreeStep prev_step, DegreeClass deg_class, BeatPos beat,
-    uint8_t from_pitch, Key key, ScaleType scale,
-    uint8_t range_lo, uint8_t range_hi,
-    OracleCandidate* out, int max_count);
+int getTopMelodicCandidates(const MarkovModel& model, DegreeStep prev_step, DegreeClass deg_class,
+                            BeatPos beat, uint8_t from_pitch, Key key, ScaleType scale,
+                            uint8_t range_lo, uint8_t range_hi, OracleCandidate* out,
+                            int max_count);
 
 /// @brief Get top-N vertical oracle candidates.
 ///
@@ -312,10 +322,8 @@ int getTopMelodicCandidates(
 /// @param out Output array for candidates.
 /// @param max_count Maximum candidates to return.
 /// @return Number of candidates written to out.
-int getTopVerticalCandidates(
-    const VerticalIntervalTable& table,
-    int bass_degree, BeatPos beat, int voice_bin, HarmFunc hf,
-    OracleCandidate* out, int max_count);
+int getTopVerticalCandidates(const VerticalIntervalTable& table, int bass_degree, BeatPos beat,
+                             int voice_bin, HarmFunc hf, OracleCandidate* out, int max_count);
 
 }  // namespace bach
 

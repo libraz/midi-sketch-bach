@@ -25,11 +25,8 @@ namespace bach {
 /// @param grid Structural grid providing per-bar harmonic weight.
 /// @param desc Variation descriptor (time_sig, meter_profile, tempo_character).
 /// @param seed Random seed for interpretation parameters (curvature, asymmetry).
-void applyHarmonicTimeWarp(
-    std::vector<NoteEvent>& notes,
-    const GoldbergStructuralGrid& grid,
-    const GoldbergVariationDescriptor& desc,
-    uint32_t seed);
+void applyHarmonicTimeWarp(std::vector<NoteEvent>& notes, const GoldbergStructuralGrid& grid,
+                           const GoldbergVariationDescriptor& desc, uint32_t seed);
 
 }  // namespace bach
 

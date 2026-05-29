@@ -51,8 +51,8 @@ TEST(TextureVocabularyTest, GenerateBariolageDoesNotCrash) {
   ctx.texture = TextureType::Bariolage;
   ctx.start_tick = 0;
   ctx.duration_ticks = kTicksPerBar;  // 1 bar
-  ctx.register_low = 55;             // Violin G3
-  ctx.register_high = 96;            // Violin C7
+  ctx.register_low = 55;              // Violin G3
+  ctx.register_high = 96;             // Violin C7
   ctx.seed = 42;
   ctx.rhythm_profile = RhythmProfile::Sixteenth;
   ctx.is_climax = false;
@@ -65,8 +65,8 @@ TEST(TextureVocabularyTest, StrongBeatResolution) {
   // When stopped_pitch == open_pitch, strong beats should resolve to
   // the original pitch (offset = 0).
   // Strong beat: tick_in_bar % kTicksPerBeat == 0.
-  EXPECT_EQ(0u % kTicksPerBeat, 0u);              // Beat 0 is strong.
-  EXPECT_EQ(kTicksPerBeat % kTicksPerBeat, 0u);   // Beat 1 is strong.
+  EXPECT_EQ(0u % kTicksPerBeat, 0u);             // Beat 0 is strong.
+  EXPECT_EQ(kTicksPerBeat % kTicksPerBeat, 0u);  // Beat 1 is strong.
 }
 
 TEST(TextureVocabularyTest, MultiSeedStability) {

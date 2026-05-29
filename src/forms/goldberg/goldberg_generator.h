@@ -37,35 +37,28 @@ class GoldbergGenerator {
   /// @param key Base key signature for the piece.
   /// @param seed Per-variation seed for deterministic generation.
   /// @return Vector of NoteEvents for the variation.
-  std::vector<NoteEvent> generateVariation(
-      const GoldbergVariationDescriptor& desc,
-      const GoldbergStructuralGrid& grid_major,
-      const GoldbergStructuralGrid& grid_minor,
-      const KeySignature& key,
-      uint32_t seed) const;
+  std::vector<NoteEvent> generateVariation(const GoldbergVariationDescriptor& desc,
+                                           const GoldbergStructuralGrid& grid_major,
+                                           const GoldbergStructuralGrid& grid_minor,
+                                           const KeySignature& key, uint32_t seed) const;
 
   /// @brief Select variation indices based on DurationScale.
   /// @param plan Complete 32-entry variation plan.
   /// @param scale Duration scale controlling how many variations are included.
   /// @return Vector of 0-based indices into the plan.
-  std::vector<size_t> selectVariations(
-      const std::vector<GoldbergVariationDescriptor>& plan,
-      DurationScale scale) const;
+  std::vector<size_t> selectVariations(const std::vector<GoldbergVariationDescriptor>& plan,
+                                       DurationScale scale) const;
 
   /// @brief Apply ArticulationProfile to notes by adjusting durations.
   /// @param notes Notes to modify (in place).
   /// @param profile Articulation profile governing gate ratios.
-  void applyArticulation(
-      std::vector<NoteEvent>& notes,
-      ArticulationProfile profile) const;
+  void applyArticulation(std::vector<NoteEvent>& notes, ArticulationProfile profile) const;
 
   /// @brief Calculate tempo BPM for a variation from its descriptor and base BPM.
   /// @param desc Variation descriptor with tempo_ratio and bpm_override.
   /// @param base_bpm Base Aria tempo in BPM.
   /// @return Effective BPM for this variation.
-  uint16_t calculateVariationBpm(
-      const GoldbergVariationDescriptor& desc,
-      uint16_t base_bpm) const;
+  uint16_t calculateVariationBpm(const GoldbergVariationDescriptor& desc, uint16_t base_bpm) const;
 };
 
 }  // namespace bach

@@ -37,20 +37,16 @@ class VirtuosoGenerator {
   /// @param seed Random seed for deterministic generation.
   /// @return VirtuosoResult with notes and success status.
   ///         Returns success=false for unsupported variation numbers.
-  VirtuosoResult generate(
-      int variation_number,
-      const GoldbergStructuralGrid& grid,
-      const KeySignature& key,
-      const TimeSignature& time_sig,
-      uint32_t seed) const;
+  VirtuosoResult generate(int variation_number, const GoldbergStructuralGrid& grid,
+                          const KeySignature& key, const TimeSignature& time_sig,
+                          uint32_t seed) const;
 
  private:
   /// @brief Build the FiguraProfile for a given variation number.
   /// @param variation_number The variation number (11, 23, or 29).
   /// @param[out] type Set to the GoldbergVariationType for this variation.
   /// @return FiguraProfile with variation-specific parameters.
-  static FiguraProfile buildProfile(int variation_number,
-                                    GoldbergVariationType& type);
+  static FiguraProfile buildProfile(int variation_number, GoldbergVariationType& type);
 
   /// @brief Check if a variation number is a supported virtuoso variation.
   /// @param variation_number The variation number to check.
@@ -67,10 +63,8 @@ class VirtuosoGenerator {
   /// @param time_sig Time signature for bar duration.
   /// @param bass_voice Voice index for the bass line.
   /// @return Vector of bass NoteEvents spanning 32 bars.
-  std::vector<NoteEvent> generateBassLine(
-      const GoldbergStructuralGrid& grid,
-      const TimeSignature& time_sig,
-      uint8_t bass_voice) const;
+  std::vector<NoteEvent> generateBassLine(const GoldbergStructuralGrid& grid,
+                                          const TimeSignature& time_sig, uint8_t bass_voice) const;
 
   /// @brief Apply climax intensification for Var 29 (BWV 988 climax).
   ///
@@ -80,10 +74,8 @@ class VirtuosoGenerator {
   /// @param notes Notes to intensify (modified in place).
   /// @param grid Structural grid for tension-aware scaling.
   /// @param time_sig Time signature for bar-boundary calculation.
-  void applyClimaxIntensification(
-      std::vector<NoteEvent>& notes,
-      const GoldbergStructuralGrid& grid,
-      const TimeSignature& time_sig) const;
+  void applyClimaxIntensification(std::vector<NoteEvent>& notes, const GoldbergStructuralGrid& grid,
+                                  const TimeSignature& time_sig) const;
 };
 
 }  // namespace bach

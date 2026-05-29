@@ -90,8 +90,8 @@ class DuxBuffer {
   CanonSpec spec_;
   int delay_beats_;
   std::vector<std::optional<NoteEvent>> dux_notes_;  ///< Indexed by beat.
-  uint8_t current_max_pitch_ = 0;  ///< Tracks melodic climax pitch.
-  int climax_beat_ = -1;           ///< Beat index of current climax.
+  uint8_t current_max_pitch_ = 0;                    ///< Tracks melodic climax pitch.
+  int climax_beat_ = -1;                             ///< Beat index of current climax.
 };
 
 }  // namespace bach

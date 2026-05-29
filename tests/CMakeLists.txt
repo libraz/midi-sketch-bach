@@ -98,6 +98,7 @@ set(BACH_TEST_SOURCES
   fugue/stretto_harmonic_test.cpp
   fugue/fugue_quality_gate_test.cpp
   fugue/motif_pool_test.cpp
+  fugue/thematic_plan_test.cpp
   fugue/fortspinnung_test.cpp
   fugue/motif_template_test.cpp
   fugue/subject_identity_test.cpp
@@ -239,3 +240,20 @@ target_include_directories(bach_tests
 )
 
 gtest_discover_tests(bach_tests)
+
+# ============================================================================
+# Composer rebuild test targets (isolated from bach_lib)
+# ============================================================================
+
+add_subdirectory(composer)
+add_subdirectory(eval_client)
+
+# ============================================================================
+# Composer isolation guard (registered as a CTest)
+# ============================================================================
+
+add_test(
+  NAME composer_isolation_guard
+  COMMAND ${CMAKE_SOURCE_DIR}/ci/check_composer_isolation.sh
+  WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+)

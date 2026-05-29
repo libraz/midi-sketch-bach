@@ -37,8 +37,7 @@ uint16_t adjustBpm(uint16_t base_bpm, float percent_change);
 /// @param structure Formal fugue structure with section boundaries.
 /// @param base_bpm Base tempo in beats per minute.
 /// @return Sorted vector of TempoEvent for the fugue.
-std::vector<TempoEvent> generateFugueTempoMap(const FugueStructure& structure,
-                                               uint16_t base_bpm);
+std::vector<TempoEvent> generateFugueTempoMap(const FugueStructure& structure, uint16_t base_bpm);
 
 /// @brief Generate a tempo map for a toccata free section (BWV 565 style).
 ///
@@ -59,9 +58,8 @@ std::vector<TempoEvent> generateFugueTempoMap(const FugueStructure& structure,
 /// @param base_bpm Base tempo in beats per minute.
 /// @return Sorted vector of TempoEvent for the toccata.
 std::vector<TempoEvent> generateToccataTempoMap(Tick opening_start, Tick opening_end,
-                                                 Tick recit_start, Tick recit_end,
-                                                 Tick drive_start, Tick drive_end,
-                                                 uint16_t base_bpm);
+                                                Tick recit_start, Tick recit_end, Tick drive_start,
+                                                Tick drive_end, uint16_t base_bpm);
 
 /// @brief Generate an archetype-aware tempo map for a toccata.
 ///
@@ -76,8 +74,8 @@ std::vector<TempoEvent> generateToccataTempoMap(Tick opening_start, Tick opening
 /// @param base_bpm Base tempo in beats per minute.
 /// @return Sorted vector of TempoEvent for the toccata.
 std::vector<TempoEvent> generateToccataTempoMap(ToccataArchetype archetype,
-                                                 const std::vector<ToccataSectionBoundary>& sections,
-                                                 uint16_t base_bpm);
+                                                const std::vector<ToccataSectionBoundary>& sections,
+                                                uint16_t base_bpm);
 
 /// @brief Generate a tempo map for a fantasia free section (BWV 537/542 style).
 ///
@@ -91,7 +89,7 @@ std::vector<TempoEvent> generateToccataTempoMap(ToccataArchetype archetype,
 /// @param base_bpm Base tempo in beats per minute.
 /// @return Sorted vector of TempoEvent for the fantasia.
 std::vector<TempoEvent> generateFantasiaTempoMap(Tick total_duration, int section_bars,
-                                                  uint16_t base_bpm);
+                                                 uint16_t base_bpm);
 
 /// @brief Generate a tempo map for a passacaglia (BWV 582 style).
 ///
@@ -103,9 +101,8 @@ std::vector<TempoEvent> generateFantasiaTempoMap(Tick total_duration, int sectio
 /// @param ground_bass_bars Bars per ground bass cycle.
 /// @param base_bpm Base tempo in beats per minute.
 /// @return Sorted vector of TempoEvent for the passacaglia.
-std::vector<TempoEvent> generatePassacagliaTempoMap(int num_variations,
-                                                     int ground_bass_bars,
-                                                     uint16_t base_bpm);
+std::vector<TempoEvent> generatePassacagliaTempoMap(int num_variations, int ground_bass_bars,
+                                                    uint16_t base_bpm);
 
 // ---------------------------------------------------------------------------
 // Cadence ritardando (Principle 4: fixed design values)
@@ -134,7 +131,7 @@ constexpr float kRitardandoFactorCadence = 0.88f;
 /// @param cadence_ticks Vector of cadence tick positions.
 /// @return Vector of TempoEvent pairs (deceleration + a tempo restoration), sorted by tick.
 std::vector<TempoEvent> generateCadenceRitardando(uint16_t base_bpm,
-                                                    const std::vector<Tick>& cadence_ticks);
+                                                  const std::vector<Tick>& cadence_ticks);
 
 }  // namespace bach
 

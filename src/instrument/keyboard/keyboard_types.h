@@ -11,25 +11,18 @@
 namespace bach {
 
 /// @brief Which hand plays a note or passage.
-enum class Hand : uint8_t {
-  Left,
-  Right
-};
+enum class Hand : uint8_t { Left, Right };
 
 /// @brief Pedal (sustain/sostenuto) state for piano.
-enum class PedalState : uint8_t {
-  Off,
-  SustainOn,
-  SostenutoOn
-};
+enum class PedalState : uint8_t { Off, SustainOn, SostenutoOn };
 
 /// @brief Physical span constraints for a keyboard player's hand.
 ///
 /// Use the static factory methods for predefined skill levels.
 struct KeyboardSpanConstraints {
-  uint8_t normal_span = 9;    // Comfortable reach in semitones (e.g. C4-A4)
-  uint8_t max_span = 12;      // Maximum stretch in semitones (e.g. octave)
-  uint8_t max_notes = 5;      // Maximum simultaneous notes per hand
+  uint8_t normal_span = 9;  // Comfortable reach in semitones (e.g. C4-A4)
+  uint8_t max_span = 12;    // Maximum stretch in semitones (e.g. octave)
+  uint8_t max_notes = 5;    // Maximum simultaneous notes per hand
 
   /// @brief Beginner: small hands, limited stretch.
   static KeyboardSpanConstraints beginner() { return {7, 9, 4}; }

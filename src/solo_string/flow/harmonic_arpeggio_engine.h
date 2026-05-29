@@ -19,12 +19,12 @@ namespace bach {
 /// (typically a single track for a monophonic instrument) along with
 /// duration metadata and error information.
 struct ArpeggioFlowResult {
-  std::vector<Track> tracks;       ///< Usually 1 track (solo instrument).
-  Tick total_duration_ticks = 0;   ///< Total piece duration in ticks.
-  bool success = false;            ///< True if generation completed without error.
-  std::string error_message;       ///< Describes the failure if success is false.
+  std::vector<Track> tracks;      ///< Usually 1 track (solo instrument).
+  Tick total_duration_ticks = 0;  ///< Total piece duration in ticks.
+  bool success = false;           ///< True if generation completed without error.
+  std::string error_message;      ///< Describes the failure if success is false.
   uint32_t seed_used = 0;         ///< The actual seed used (after auto-resolution).
-  HarmonicTimeline timeline;       ///< Harmonic context built during generation.
+  HarmonicTimeline timeline;      ///< Harmonic context built during generation.
 };
 
 /// @brief Generate a BWV1007-style harmonic arpeggio flow piece.

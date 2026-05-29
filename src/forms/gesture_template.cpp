@@ -28,8 +28,8 @@ void tagGestureNotes(std::vector<NoteEvent>& notes, uint16_t gesture_id) {
   }
 }
 
-std::vector<int> extractGestureCoreIntervals(
-    const std::vector<NoteEvent>& notes, uint16_t gesture_id) {
+std::vector<int> extractGestureCoreIntervals(const std::vector<NoteEvent>& notes,
+                                             uint16_t gesture_id) {
   // Collect Leader notes from this gesture, sorted by onset.
   struct LP {
     Tick tick;
@@ -37,15 +37,15 @@ std::vector<int> extractGestureCoreIntervals(
   };
   std::vector<LP> leaders;
   for (const auto& n : notes) {
-    if (n.gesture_id == gesture_id &&
-        n.gesture_role == GestureRole::Leader) {
+    if (n.gesture_id == gesture_id && n.gesture_role == GestureRole::Leader) {
       leaders.push_back({n.start_tick, n.pitch});
     }
   }
   std::sort(leaders.begin(), leaders.end(),
             [](const LP& a, const LP& b) { return a.tick < b.tick; });
 
-  if (leaders.size() < 2) return {};
+  if (leaders.size() < 2)
+    return {};
 
   // Compute all directed intervals.
   std::vector<int> all_intervals;
@@ -78,7 +78,8 @@ std::vector<int> extractGestureCoreIntervals(
         }
       }
       // Non-ornament ascending: descent run has ended.
-      if (!descent.empty()) break;
+      if (!descent.empty())
+        break;
     }
   }
 

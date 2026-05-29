@@ -8,6 +8,9 @@
 #include <vector>
 
 #include "analysis/analysis_runner.h"
+#include "composer/composer.h"
+#include "composer/harness_fixture.h"
+#include "composer/json_export.h"
 #include "core/basic_types.h"
 #include "generator.h"
 #include "harmony/key.h"
@@ -35,7 +38,32 @@ struct CliOptions {
   bool toccata_style_specified = false;
   uint16_t target_bars = 0;
   bool scale_specified = false;
+  // When set, bypass the legacy generator and run the new Composer
+  // engine against the harness fixture catalog. The phase governs the
+  // layout (voices / bars / subject / answer). Seed is reused.
+  bool composer_mode = false;
+  bach::composer::HarnessPhase composer_phase = bach::composer::HarnessPhase::Phase6;
 };
+
+bach::composer::HarnessPhase parseComposerPhase(const char* val) {
+  if (std::strcmp(val, "Phase3") == 0 || std::strcmp(val, "phase3") == 0 ||
+      std::strcmp(val, "3") == 0) {
+    return bach::composer::HarnessPhase::Phase3;
+  }
+  if (std::strcmp(val, "Phase35") == 0 || std::strcmp(val, "phase35") == 0 ||
+      std::strcmp(val, "3.5") == 0) {
+    return bach::composer::HarnessPhase::Phase35;
+  }
+  if (std::strcmp(val, "Phase4") == 0 || std::strcmp(val, "phase4") == 0 ||
+      std::strcmp(val, "4") == 0) {
+    return bach::composer::HarnessPhase::Phase4;
+  }
+  if (std::strcmp(val, "Phase5") == 0 || std::strcmp(val, "phase5") == 0 ||
+      std::strcmp(val, "5") == 0) {
+    return bach::composer::HarnessPhase::Phase5;
+  }
+  return bach::composer::HarnessPhase::Phase6;
+}
 
 /// @brief Print usage information to stdout.
 void printUsage() {
@@ -50,8 +78,13 @@ void printUsage() {
   std::printf("  --voices N       Number of voices (2-5)\n");
   std::printf("  --bpm N          BPM (40-200)\n");
   std::printf("  --scale SCALE    Duration scale: short, medium, long, full\n");
+  std::printf("                   Default: medium for fugue, short otherwise\n");
   std::printf("  --bars N         Target bar count (overrides --scale)\n");
-  std::printf("  --toccata-style  Toccata archetype: dramaticus, perpetuus, concertato, sectionalis\n");
+  std::printf(
+      "  --composer-phase P  Bypass legacy generator; run Composer with phase\n"
+      "                   {Phase3|Phase35|Phase4|Phase5|Phase6}. Seed reused.\n");
+  std::printf(
+      "  --toccata-style  Toccata archetype: dramaticus, perpetuus, concertato, sectionalis\n");
   std::printf("  --json           JSON output\n");
   std::printf("  --analyze        Generate + analysis\n");
   std::printf("  --strict         No retry\n");
@@ -71,8 +104,7 @@ void printUsage() {
 /// @return False if --help was requested (caller should exit cleanly).
 bool parseArgs(int argc, char* argv[], CliOptions& opts) {
   for (int idx = 1; idx < argc; ++idx) {
-    if (std::strcmp(argv[idx], "--help") == 0 ||
-        std::strcmp(argv[idx], "-h") == 0) {
+    if (std::strcmp(argv[idx], "--help") == 0 || std::strcmp(argv[idx], "-h") == 0) {
       printUsage();
       return false;
     }
@@ -119,6 +151,9 @@ bool parseArgs(int argc, char* argv[], CliOptions& opts) {
     } else if (std::strcmp(argv[idx], "--toccata-style") == 0 && idx + 1 < argc) {
       opts.toccata_archetype = bach::toccataArchetypeFromString(argv[++idx]);
       opts.toccata_style_specified = true;
+    } else if (std::strcmp(argv[idx], "--composer-phase") == 0 && idx + 1 < argc) {
+      opts.composer_mode = true;
+      opts.composer_phase = parseComposerPhase(argv[++idx]);
     }
   }
   return true;
@@ -147,11 +182,89 @@ bach::GeneratorConfig buildGeneratorConfig(const CliOptions& opts) {
   }
 
   config.scale = opts.scale;
+  if (!opts.scale_specified && opts.form == bach::FormType::Fugue) {
+    config.scale = bach::DurationScale::Medium;
+  }
   config.target_bars = opts.target_bars;
   config.toccata_archetype = opts.toccata_archetype;
   config.toccata_archetype_auto = !opts.toccata_style_specified;
 
   return config;
+}
+
+const char* harnessPhaseToString(bach::composer::HarnessPhase p) {
+  switch (p) {
+    case bach::composer::HarnessPhase::Phase3:
+      return "Phase3";
+    case bach::composer::HarnessPhase::Phase35:
+      return "Phase3.5";
+    case bach::composer::HarnessPhase::Phase4:
+      return "Phase4";
+    case bach::composer::HarnessPhase::Phase5:
+      return "Phase5";
+    case bach::composer::HarnessPhase::Phase6:
+      return "Phase6";
+  }
+  return "Phase?";
+}
+
+int runComposerMode(const CliOptions& opts) {
+  // Composer mode: harness fixture catalog drives Material / HarmonicPlan /
+  // VoicePlan. Output goes through the same MidiWriter as the legacy path so
+  // BPM / key transposition / file write are uniform.
+  const auto layout = bach::composer::phaseSpec(opts.composer_phase);
+  const char* phase_name = harnessPhaseToString(opts.composer_phase);
+  std::printf("bach_cli v0.2.0 (composer mode)\n");
+  std::printf("Phase:      %s (%uv / %u bar)\n", phase_name, layout.voices, layout.bars);
+  std::printf("Seed:       %u\n\n", opts.seed);
+
+  const bach::composer::HarnessFixture fx =
+      bach::composer::buildHarnessFixture(opts.composer_phase, static_cast<int>(opts.seed));
+  const auto result = bach::composer::Composer{}.run(fx.material, fx.harmony, fx.voice_plan);
+
+  if (result.validation.status != bach::composer::ValidationStatus::Ok) {
+    std::fprintf(stderr, "Composer validation failed: %zu rule violations\n",
+                 result.validation.failures.size());
+    for (const auto& f : result.validation.failures) {
+      std::fprintf(stderr, "  - %s (span %u)\n", f.rule_id.c_str(),
+                   static_cast<unsigned>(f.span_id));
+    }
+    return 1;
+  }
+
+  std::printf("Generated: Composer %s exposition\n", phase_name);
+  std::printf("Notes:     %zu  Tracks: %zu\n", result.notes.size(), result.tracks.size());
+
+  std::vector<bach::TempoEvent> tempo_events;
+  tempo_events.push_back({0, opts.bpm});
+
+  bach::MidiWriter writer;
+  writer.build(result.tracks, tempo_events, opts.key.tonic);
+  if (!writer.writeToFile(opts.output)) {
+    std::fprintf(stderr, "Error: failed to write %s\n", opts.output.c_str());
+    return 1;
+  }
+  std::printf("Output:    %s\n", opts.output.c_str());
+
+  if (opts.json_output) {
+    std::string json_path = opts.output;
+    auto dot_pos = json_path.rfind('.');
+    if (dot_pos != std::string::npos) {
+      json_path = json_path.substr(0, dot_pos) + ".json";
+    } else {
+      json_path += ".json";
+    }
+    const std::string generated = bach::composer::emitGeneratedJson(result.notes);
+    std::ofstream f(json_path);
+    if (f.is_open()) {
+      f << generated;
+      f.close();
+      std::printf("JSON:      %s\n", json_path.c_str());
+    } else {
+      std::fprintf(stderr, "Warning: failed to write %s\n", json_path.c_str());
+    }
+  }
+  return 0;
 }
 
 }  // namespace
@@ -160,6 +273,10 @@ int main(int argc, char* argv[]) {
   CliOptions opts;
   if (!parseArgs(argc, argv, opts)) {
     return 0;
+  }
+
+  if (opts.composer_mode) {
+    return runComposerMode(opts);
   }
 
   bach::GeneratorConfig config = buildGeneratorConfig(opts);
@@ -183,10 +300,9 @@ int main(int argc, char* argv[]) {
   if (result.success) {
     std::printf("Generated: %s\n", result.form_description.c_str());
     std::printf("Seed used: %u\n", result.seed_used);
-    std::printf("Duration:  %u ticks (%.1f bars)\n",
-                result.total_duration_ticks,
-                static_cast<float>(result.total_duration_ticks) /
-                    static_cast<float>(bach::kTicksPerBar));
+    std::printf(
+        "Duration:  %u ticks (%.1f bars)\n", result.total_duration_ticks,
+        static_cast<float>(result.total_duration_ticks) / static_cast<float>(bach::kTicksPerBar));
     std::printf("Tracks:    %zu\n", result.tracks.size());
 
     size_t total_notes = 0;
@@ -230,11 +346,9 @@ int main(int argc, char* argv[]) {
       const bach::HarmonicTimeline* gen_tl =
           result.generation_timeline.size() > 0 ? &result.generation_timeline : nullptr;
       bach::AnalysisReport analysis = bach::runAnalysis(
-          result.tracks, config.form, config.num_voices,
-          result.timeline, config.key, gen_tl);
+          result.tracks, config.form, config.num_voices, result.timeline, config.key, gen_tl);
 
-      std::printf("\n%s",
-                  analysis.toTextSummary(config.form, config.num_voices).c_str());
+      std::printf("\n%s", analysis.toTextSummary(config.form, config.num_voices).c_str());
 
       if (opts.json_output) {
         // Write analysis JSON alongside the MIDI output.

@@ -22,14 +22,8 @@ constexpr int kVar26 = 26;
 /// @param dance The dance profile to convert.
 /// @return FiguraProfile suitable for FigurenGenerator::generate().
 FiguraProfile buildFiguraProfile(const DanceProfile& dance) {
-  return {
-      dance.primary_figura,
-      dance.secondary_figura,
-      dance.notes_per_beat,
-      dance.direction,
-      dance.chord_tone_ratio,
-      dance.sequence_probability
-  };
+  return {dance.primary_figura, dance.secondary_figura, dance.notes_per_beat,
+          dance.direction,      dance.chord_tone_ratio, dance.sequence_probability};
 }
 
 /// @brief Build an alternate FiguraProfile for Var 26 second half (Tirata).
@@ -37,11 +31,11 @@ FiguraProfile buildFiguraProfile(const DanceProfile& dance) {
 /// @return FiguraProfile with Tirata as primary for rapid scale passages.
 FiguraProfile buildTirataProfile(const DanceProfile& dance) {
   return {
-      FiguraType::Tirata,       // Switch to rapid scale passages.
+      FiguraType::Tirata,  // Switch to rapid scale passages.
       dance.secondary_figura,
       static_cast<uint8_t>(dance.notes_per_beat * 2),  // Double density for Tirata.
       DirectionBias::Ascending,
-      dance.chord_tone_ratio - 0.1f,  // Slightly less chord-tone snapping.
+      dance.chord_tone_ratio - 0.1f,     // Slightly less chord-tone snapping.
       dance.sequence_probability + 0.1f  // More sequential repetition.
   };
 }
@@ -61,19 +55,14 @@ FiguraProfile buildTirataProfile(const DanceProfile& dance) {
 /// @param start_bar First bar to include (0-indexed).
 /// @param num_bars Number of bars to include.
 /// @return Filtered notes within the specified bar range.
-std::vector<NoteEvent> generateBarRange(
-    const FiguraProfile& profile,
-    const GoldbergStructuralGrid& grid,
-    const KeySignature& key,
-    const TimeSignature& time_sig,
-    uint8_t voice_index,
-    uint32_t seed,
-    int start_bar,
-    int num_bars,
-    float theme_strength = 0.0f) {
+std::vector<NoteEvent> generateBarRange(const FiguraProfile& profile,
+                                        const GoldbergStructuralGrid& grid, const KeySignature& key,
+                                        const TimeSignature& time_sig, uint8_t voice_index,
+                                        uint32_t seed, int start_bar, int num_bars,
+                                        float theme_strength = 0.0f) {
   FigurenGenerator figuren;
-  auto all_notes = figuren.generate(profile, grid, key, time_sig, voice_index,
-                                     seed, nullptr, theme_strength);
+  auto all_notes =
+      figuren.generate(profile, grid, key, time_sig, voice_index, seed, nullptr, theme_strength);
 
   Tick ticks_per_bar = time_sig.ticksPerBar();
   Tick range_start = static_cast<Tick>(start_bar) * ticks_per_bar;
@@ -101,64 +90,62 @@ DanceProfile getDanceProfile(int variation_number) {
   switch (variation_number) {
     case 4:
       return {
-          FiguraType::Passepied,    // primary_figura
-          FiguraType::Circulatio,   // secondary_figura
-          {3, 8},                   // time_sig: 3/8
-          2,                        // notes_per_beat
-          DirectionBias::Symmetric, // direction
-          0.6f,                     // chord_tone_ratio
-          0.3f,                     // sequence_probability
-          3                         // voice_count
+          FiguraType::Passepied,     // primary_figura
+          FiguraType::Circulatio,    // secondary_figura
+          {3, 8},                    // time_sig: 3/8
+          2,                         // notes_per_beat
+          DirectionBias::Symmetric,  // direction
+          0.6f,                      // chord_tone_ratio
+          0.3f,                      // sequence_probability
+          3                          // voice_count
       };
 
     case 7:
       return {
-          FiguraType::Gigue,        // primary_figura
-          FiguraType::Batterie,     // secondary_figura
-          {6, 8},                   // time_sig: 6/8
-          2,                        // notes_per_beat
-          DirectionBias::Ascending, // direction
-          0.5f,                     // chord_tone_ratio
-          0.4f,                     // sequence_probability
-          2                         // voice_count
+          FiguraType::Gigue,         // primary_figura
+          FiguraType::Batterie,      // secondary_figura
+          {6, 8},                    // time_sig: 6/8
+          2,                         // notes_per_beat
+          DirectionBias::Ascending,  // direction
+          0.5f,                      // chord_tone_ratio
+          0.4f,                      // sequence_probability
+          2                          // voice_count
       };
 
     case 19:
       return {
-          FiguraType::Passepied,    // primary_figura
-          FiguraType::Circulatio,   // secondary_figura
-          {3, 8},                   // time_sig: 3/8
-          2,                        // notes_per_beat
-          DirectionBias::Symmetric, // direction
-          0.6f,                     // chord_tone_ratio
-          0.3f,                     // sequence_probability
-          3                         // voice_count
+          FiguraType::Passepied,     // primary_figura
+          FiguraType::Circulatio,    // secondary_figura
+          {3, 8},                    // time_sig: 3/8
+          2,                         // notes_per_beat
+          DirectionBias::Symmetric,  // direction
+          0.6f,                      // chord_tone_ratio
+          0.3f,                      // sequence_probability
+          3                          // voice_count
       };
 
     case kVar26:
       return {
-          FiguraType::Sarabande,    // primary_figura
-          FiguraType::Suspirans,    // secondary_figura
-          {3, 4},                   // time_sig: 3/4
-          2,                        // notes_per_beat
-          DirectionBias::Symmetric, // direction
-          0.7f,                     // chord_tone_ratio
-          0.2f,                     // sequence_probability
-          2                         // voice_count
+          FiguraType::Sarabande,     // primary_figura
+          FiguraType::Suspirans,     // secondary_figura
+          {3, 4},                    // time_sig: 3/4
+          2,                         // notes_per_beat
+          DirectionBias::Symmetric,  // direction
+          0.7f,                      // chord_tone_ratio
+          0.2f,                      // sequence_probability
+          2                          // voice_count
       };
 
     default:
       // Default: Passepied profile for unsupported variation numbers.
-      return {
-          FiguraType::Passepied,
-          FiguraType::Circulatio,
-          {3, 8},
-          2,
-          DirectionBias::Symmetric,
-          0.6f,
-          0.3f,
-          3
-      };
+      return {FiguraType::Passepied,
+              FiguraType::Circulatio,
+              {3, 8},
+              2,
+              DirectionBias::Symmetric,
+              0.6f,
+              0.3f,
+              3};
   }
 }
 
@@ -166,11 +153,8 @@ DanceProfile getDanceProfile(int variation_number) {
 // DanceGenerator::generate
 // ---------------------------------------------------------------------------
 
-DanceResult DanceGenerator::generate(
-    int variation_number,
-    const GoldbergStructuralGrid& grid,
-    const KeySignature& key,
-    uint32_t seed) const {
+DanceResult DanceGenerator::generate(int variation_number, const GoldbergStructuralGrid& grid,
+                                     const KeySignature& key, uint32_t seed) const {
   DanceResult result;
   DanceProfile dance = getDanceProfile(variation_number);
 
@@ -187,18 +171,16 @@ DanceResult DanceGenerator::generate(
     // Generate voices for the first half (Sarabande).
     for (uint8_t voice_idx = 0; voice_idx < dance.voice_count; ++voice_idx) {
       uint32_t voice_seed = seed + voice_idx * 1000 + 1;
-      auto first_half = generateBarRange(
-          sarabande_profile, grid, key, dance.time_sig,
-          voice_idx, voice_seed, 0, kSectionBars);
+      auto first_half = generateBarRange(sarabande_profile, grid, key, dance.time_sig, voice_idx,
+                                         voice_seed, 0, kSectionBars);
       all_notes.insert(all_notes.end(), first_half.begin(), first_half.end());
     }
 
     // Generate voices for the second half (Tirata).
     for (uint8_t voice_idx = 0; voice_idx < dance.voice_count; ++voice_idx) {
       uint32_t voice_seed = seed + voice_idx * 1000 + 2;
-      auto second_half = generateBarRange(
-          tirata_profile, grid, key, dance.time_sig,
-          voice_idx, voice_seed, kSectionBars, kSectionBars);
+      auto second_half = generateBarRange(tirata_profile, grid, key, dance.time_sig, voice_idx,
+                                          voice_seed, kSectionBars, kSectionBars);
       all_notes.insert(all_notes.end(), second_half.begin(), second_half.end());
     }
   } else {
@@ -208,9 +190,8 @@ DanceResult DanceGenerator::generate(
     for (uint8_t voice_idx = 0; voice_idx < dance.voice_count; ++voice_idx) {
       uint32_t voice_seed = seed + voice_idx * 1000;
       float strength = (voice_idx == 0) ? 0.4f : 0.0f;
-      auto voice_notes = figuren.generate(
-          profile, grid, key, dance.time_sig, voice_idx, voice_seed,
-          nullptr, strength);
+      auto voice_notes = figuren.generate(profile, grid, key, dance.time_sig, voice_idx, voice_seed,
+                                          nullptr, strength);
 
       // Set the provenance source for dance notes.
       for (auto& note : voice_notes) {
@@ -227,10 +208,9 @@ DanceResult DanceGenerator::generate(
   }
 
   // Sort by start_tick for clean output.
-  std::sort(all_notes.begin(), all_notes.end(),
-            [](const NoteEvent& lhs, const NoteEvent& rhs) {
-              return lhs.start_tick < rhs.start_tick;
-            });
+  std::sort(all_notes.begin(), all_notes.end(), [](const NoteEvent& lhs, const NoteEvent& rhs) {
+    return lhs.start_tick < rhs.start_tick;
+  });
 
   // Apply binary repeats: ||: A :||: B :||
   Tick section_ticks = static_cast<Tick>(kSectionBars) * dance.time_sig.ticksPerBar();

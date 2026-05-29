@@ -37,16 +37,17 @@ bool isNaturalHarmonic(uint8_t pitch, InstrumentType instrument) {
   return std::binary_search(harmonics.begin(), harmonics.end(), pitch);
 }
 
-void markHarmonics(std::vector<NoteEvent>& notes, InstrumentType instrument,
-                   ArcPhase arc_phase) {
+void markHarmonics(std::vector<NoteEvent>& notes, InstrumentType instrument, ArcPhase arc_phase) {
   // Harmonics are only used at climactic moments.
-  if (arc_phase != ArcPhase::Peak) return;
+  if (arc_phase != ArcPhase::Peak)
+    return;
 
   auto harmonics = getNaturalHarmonicPitches(instrument);
 
   for (auto& note : notes) {
     // Minimum duration: note must be sustained long enough for the harmonic to ring.
-    if (note.duration < kTicksPerBeat) continue;
+    if (note.duration < kTicksPerBeat)
+      continue;
 
     // Check if the pitch is a natural harmonic.
     if (std::binary_search(harmonics.begin(), harmonics.end(), note.pitch)) {

@@ -1,10 +1,9 @@
 // Tests for extended chord types -- augmented 6th variants, borrowed chords,
 // and new ChordDegree/ChordQuality enum values.
 
-#include "harmony/chord_types.h"
-
 #include <gtest/gtest.h>
 
+#include "harmony/chord_types.h"
 #include "harmony/harmonic_event.h"
 
 namespace bach {
@@ -55,7 +54,7 @@ TEST(AugSixthChordToneTest, Italian_RootIsChordTone) {
   event.chord.root_pitch = 68;  // Ab4 (pitch class 8)
   event.chord.quality = ChordQuality::AugSixthItalian;
   // It+6: root(Ab), +4(C), +6(F#) -> semitones 0, 4, 6 from root
-  EXPECT_TRUE(isChordTone(68, event));   // Ab4 (root)
+  EXPECT_TRUE(isChordTone(68, event));  // Ab4 (root)
 }
 
 TEST(AugSixthChordToneTest, Italian_ThirdIsChordTone) {
@@ -63,8 +62,8 @@ TEST(AugSixthChordToneTest, Italian_ThirdIsChordTone) {
   event.chord.root_pitch = 68;  // Ab4
   event.chord.quality = ChordQuality::AugSixthItalian;
   // Ab + 4 = C (pitch class 0)
-  EXPECT_TRUE(isChordTone(60, event));   // C4 (third)
-  EXPECT_TRUE(isChordTone(72, event));   // C5 (third, octave above)
+  EXPECT_TRUE(isChordTone(60, event));  // C4 (third)
+  EXPECT_TRUE(isChordTone(72, event));  // C5 (third, octave above)
 }
 
 TEST(AugSixthChordToneTest, Italian_AugSixthIsChordTone) {
@@ -72,7 +71,7 @@ TEST(AugSixthChordToneTest, Italian_AugSixthIsChordTone) {
   event.chord.root_pitch = 68;  // Ab4
   event.chord.quality = ChordQuality::AugSixthItalian;
   // Ab + 6 = D (pitch class 2) -- this is the #4 / augmented 6th
-  EXPECT_TRUE(isChordTone(62, event));   // D4 (aug 6th interval)
+  EXPECT_TRUE(isChordTone(62, event));  // D4 (aug 6th interval)
 }
 
 TEST(AugSixthChordToneTest, Italian_NonChordToneRejected) {
@@ -92,10 +91,10 @@ TEST(AugSixthChordToneTest, French_AllTonesPresent) {
   event.chord.root_pitch = 68;  // Ab4
   event.chord.quality = ChordQuality::AugSixthFrench;
   // Fr+6: root(Ab), +4(C), +6(D), +8(E) -> semitones 0, 4, 6, 8
-  EXPECT_TRUE(isChordTone(68, event));   // Ab4 (root)
-  EXPECT_TRUE(isChordTone(60, event));   // C4 (+4 = third)
-  EXPECT_TRUE(isChordTone(62, event));   // D4 (+6 = fifth)
-  EXPECT_TRUE(isChordTone(64, event));   // E4 (+8 = seventh)
+  EXPECT_TRUE(isChordTone(68, event));  // Ab4 (root)
+  EXPECT_TRUE(isChordTone(60, event));  // C4 (+4 = third)
+  EXPECT_TRUE(isChordTone(62, event));  // D4 (+6 = fifth)
+  EXPECT_TRUE(isChordTone(64, event));  // E4 (+8 = seventh)
 }
 
 TEST(AugSixthChordToneTest, French_NonChordToneRejected) {
@@ -115,10 +114,10 @@ TEST(AugSixthChordToneTest, German_AllTonesPresent) {
   event.chord.root_pitch = 68;  // Ab4
   event.chord.quality = ChordQuality::AugSixthGerman;
   // Ger+6: root(Ab), +4(C), +5(Db/C#), +8(E) -> semitones 0, 4, 5, 8
-  EXPECT_TRUE(isChordTone(68, event));   // Ab4 (root, pc=8)
-  EXPECT_TRUE(isChordTone(60, event));   // C4 (+4 = third, pc=0)
-  EXPECT_TRUE(isChordTone(61, event));   // Db4/C#4 (+5 = fifth, pc=1)
-  EXPECT_TRUE(isChordTone(64, event));   // E4 (+8 = seventh, pc=4)
+  EXPECT_TRUE(isChordTone(68, event));  // Ab4 (root, pc=8)
+  EXPECT_TRUE(isChordTone(60, event));  // C4 (+4 = third, pc=0)
+  EXPECT_TRUE(isChordTone(61, event));  // Db4/C#4 (+5 = fifth, pc=1)
+  EXPECT_TRUE(isChordTone(64, event));  // E4 (+8 = seventh, pc=4)
 }
 
 TEST(AugSixthChordToneTest, German_NonChordToneRejected) {

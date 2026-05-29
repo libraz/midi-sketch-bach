@@ -12,12 +12,10 @@ namespace bach {
 KeyboardNoteFactory::KeyboardNoteFactory(const IKeyboardInstrument& instrument)
     : instrument_(instrument) {}
 
-NoteEvent KeyboardNoteFactory::createNote(uint8_t pitch, Tick start,
-                                          Tick duration, uint8_t velocity,
-                                          BachNoteSource source) const {
+NoteEvent KeyboardNoteFactory::createNote(uint8_t pitch, Tick start, Tick duration,
+                                          uint8_t velocity, BachNoteSource source) const {
   NoteEvent note;
-  note.pitch = clampPitch(pitch, instrument_.getLowestPitch(),
-                          instrument_.getHighestPitch());
+  note.pitch = clampPitch(pitch, instrument_.getLowestPitch(), instrument_.getHighestPitch());
   note.start_tick = start;
   note.duration = duration;
   note.velocity = std::min(velocity, static_cast<uint8_t>(127));

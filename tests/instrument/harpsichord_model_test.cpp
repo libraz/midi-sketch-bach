@@ -106,11 +106,11 @@ TEST(HarpsichordModelTest, PitchRangeInheritedFromPianoModel) {
   HarpsichordModel harpsichord;
 
   // PianoModel range: A0 (21) to C8 (108)
-  EXPECT_TRUE(harpsichord.isPitchInRange(21));   // A0
-  EXPECT_TRUE(harpsichord.isPitchInRange(60));   // C4
-  EXPECT_TRUE(harpsichord.isPitchInRange(108));  // C8
-  EXPECT_FALSE(harpsichord.isPitchInRange(20));  // Below A0
-  EXPECT_FALSE(harpsichord.isPitchInRange(109)); // Above C8
+  EXPECT_TRUE(harpsichord.isPitchInRange(21));    // A0
+  EXPECT_TRUE(harpsichord.isPitchInRange(60));    // C4
+  EXPECT_TRUE(harpsichord.isPitchInRange(108));   // C8
+  EXPECT_FALSE(harpsichord.isPitchInRange(20));   // Below A0
+  EXPECT_FALSE(harpsichord.isPitchInRange(109));  // Above C8
 }
 
 }  // namespace

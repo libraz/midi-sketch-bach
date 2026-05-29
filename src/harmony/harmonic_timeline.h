@@ -14,9 +14,9 @@ namespace bach {
 
 /// Resolution of harmonic events in the timeline.
 enum class HarmonicResolution : uint8_t {
-  Beat,     // One event per beat (Organ system -- dense)
-  Bar,      // One event per bar (Solo String Flow -- moderate)
-  Section   // One event per section (coarse)
+  Beat,    // One event per beat (Organ system -- dense)
+  Bar,     // One event per bar (Solo String Flow -- moderate)
+  Section  // One event per section (coarse)
 };
 
 /// Harmonic progression template type.
@@ -31,12 +31,12 @@ enum class ProgressionType : uint8_t {
 
 /// Cadence type for progression endings.
 enum class CadenceType : uint8_t {
-  Perfect,      // V7->I (authentic cadence)
-  Deceptive,    // V->vi (deceptive cadence)
-  Half,         // ->V (half cadence)
-  Phrygian,     // iv6->V (minor key slow section endings)
-  PicardyThird, // Minor key final chord raised to major
-  Plagal        // IV->I (plagal/amen cadence)
+  Perfect,       // V7->I (authentic cadence)
+  Deceptive,     // V->vi (deceptive cadence)
+  Half,          // ->V (half cadence)
+  Phrygian,      // iv6->V (minor key slow section endings)
+  PicardyThird,  // Minor key final chord raised to major
+  Plagal         // IV->I (plagal/amen cadence)
 };
 
 /// @brief A time-ordered sequence of harmonic events.

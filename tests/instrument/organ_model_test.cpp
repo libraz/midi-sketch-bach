@@ -115,15 +115,15 @@ TEST(OrganModelTest, GreatManualRangeC2ToC6) {
   OrganModel organ;
 
   // Within range
-  EXPECT_TRUE(organ.isInManualRange(36, OrganManual::Great));   // C2 (low boundary)
-  EXPECT_TRUE(organ.isInManualRange(60, OrganManual::Great));   // C4 (middle)
-  EXPECT_TRUE(organ.isInManualRange(96, OrganManual::Great));   // C6 (high boundary)
+  EXPECT_TRUE(organ.isInManualRange(36, OrganManual::Great));  // C2 (low boundary)
+  EXPECT_TRUE(organ.isInManualRange(60, OrganManual::Great));  // C4 (middle)
+  EXPECT_TRUE(organ.isInManualRange(96, OrganManual::Great));  // C6 (high boundary)
 
   // Out of range
-  EXPECT_FALSE(organ.isInManualRange(35, OrganManual::Great));  // B1 (below)
-  EXPECT_FALSE(organ.isInManualRange(97, OrganManual::Great));  // C#6 (above)
-  EXPECT_FALSE(organ.isInManualRange(0, OrganManual::Great));   // Far below
-  EXPECT_FALSE(organ.isInManualRange(127, OrganManual::Great)); // Far above
+  EXPECT_FALSE(organ.isInManualRange(35, OrganManual::Great));   // B1 (below)
+  EXPECT_FALSE(organ.isInManualRange(97, OrganManual::Great));   // C#6 (above)
+  EXPECT_FALSE(organ.isInManualRange(0, OrganManual::Great));    // Far below
+  EXPECT_FALSE(organ.isInManualRange(127, OrganManual::Great));  // Far above
 }
 
 TEST(OrganModelTest, SwellManualRangeC2ToC6) {
@@ -143,18 +143,18 @@ TEST(OrganModelTest, PositivManualRangeC3ToC6) {
   EXPECT_TRUE(organ.isInManualRange(96, OrganManual::Positiv));  // C6 (high boundary)
 
   // Out of range -- Positiv starts higher than Great/Swell
-  EXPECT_FALSE(organ.isInManualRange(47, OrganManual::Positiv)); // B2 (below)
-  EXPECT_FALSE(organ.isInManualRange(36, OrganManual::Positiv)); // C2 (Great range, not Positiv)
-  EXPECT_FALSE(organ.isInManualRange(97, OrganManual::Positiv)); // C#6 (above)
+  EXPECT_FALSE(organ.isInManualRange(47, OrganManual::Positiv));  // B2 (below)
+  EXPECT_FALSE(organ.isInManualRange(36, OrganManual::Positiv));  // C2 (Great range, not Positiv)
+  EXPECT_FALSE(organ.isInManualRange(97, OrganManual::Positiv));  // C#6 (above)
 }
 
 TEST(OrganModelTest, PedalRangeC1ToD3) {
   OrganModel organ;
 
   // Within range
-  EXPECT_TRUE(organ.isInManualRange(24, OrganManual::Pedal));   // C1 (low boundary)
-  EXPECT_TRUE(organ.isInManualRange(36, OrganManual::Pedal));   // C2 (middle)
-  EXPECT_TRUE(organ.isInManualRange(50, OrganManual::Pedal));   // D3 (high boundary)
+  EXPECT_TRUE(organ.isInManualRange(24, OrganManual::Pedal));  // C1 (low boundary)
+  EXPECT_TRUE(organ.isInManualRange(36, OrganManual::Pedal));  // C2 (middle)
+  EXPECT_TRUE(organ.isInManualRange(50, OrganManual::Pedal));  // D3 (high boundary)
 
   // Out of range
   EXPECT_FALSE(organ.isInManualRange(23, OrganManual::Pedal));  // B0 (below)

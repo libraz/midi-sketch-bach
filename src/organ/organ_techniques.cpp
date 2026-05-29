@@ -15,11 +15,12 @@ namespace bach {
 // Cadential pedal point
 // ---------------------------------------------------------------------------
 
-std::vector<NoteEvent> generateCadentialPedal(
-    const KeySignature& key_sig, Tick start_tick, Tick end_tick,
-    PedalPointType type, uint8_t voice_id) {
+std::vector<NoteEvent> generateCadentialPedal(const KeySignature& key_sig, Tick start_tick,
+                                              Tick end_tick, PedalPointType type,
+                                              uint8_t voice_id) {
   std::vector<NoteEvent> notes;
-  if (end_tick <= start_tick) return notes;
+  if (end_tick <= start_tick)
+    return notes;
 
   // Determine pedal pitch: tonic or dominant in pedal range.
   int tonic_pc = static_cast<int>(key_sig.tonic);
@@ -31,8 +32,8 @@ std::vector<NoteEvent> generateCadentialPedal(
   // Find the pitch in organ pedal range (C1-D3, MIDI 24-50), preferring
   // the instance closest to the center of the range (typical organ pedal
   // register is around C2-G2).
-  int range_mid = (static_cast<int>(organ_range::kPedalLow) +
-                   static_cast<int>(organ_range::kPedalHigh)) / 2;
+  int range_mid =
+      (static_cast<int>(organ_range::kPedalLow) + static_cast<int>(organ_range::kPedalHigh)) / 2;
   uint8_t pedal_pitch = 0;
   int best_dist = 128;
   for (int p = organ_range::kPedalLow; p <= organ_range::kPedalHigh; ++p) {
@@ -54,7 +55,8 @@ std::vector<NoteEvent> generateCadentialPedal(
     Tick bar_end = ((current / kTicksPerBar) + 1) * kTicksPerBar;
     Tick note_end = std::min(bar_end, end_tick);
     Tick dur = note_end - current;
-    if (dur == 0) break;
+    if (dur == 0)
+      break;
 
     NoteEvent note;
     note.start_tick = current;
@@ -75,10 +77,10 @@ std::vector<NoteEvent> generateCadentialPedal(
 // Picardy third
 // ---------------------------------------------------------------------------
 
-void applyPicardyToFinalChord(std::vector<NoteEvent>& notes,
-                              const KeySignature& key_sig,
+void applyPicardyToFinalChord(std::vector<NoteEvent>& notes, const KeySignature& key_sig,
                               Tick final_bar_tick) {
-  if (!key_sig.is_minor) return;
+  if (!key_sig.is_minor)
+    return;
 
   int tonic_pc = static_cast<int>(key_sig.tonic);
   // Minor third above tonic = tonic + 3 semitones.
@@ -89,10 +91,10 @@ void applyPicardyToFinalChord(std::vector<NoteEvent>& notes,
       int pc = getPitchClass(note.pitch);
       if (pc == minor_third_pc) {
         // Raise minor third to major third.
-        note.pitch = static_cast<uint8_t>(
-            static_cast<int>(note.pitch) + 1);
+        note.pitch = static_cast<uint8_t>(static_cast<int>(note.pitch) + 1);
         // Clamp to MIDI range.
-        if (note.pitch > 127) note.pitch = 127;
+        if (note.pitch > 127)
+          note.pitch = 127;
       }
       // Also ensure no natural minor 7th clashes with Picardy.
       // (The raised 7th from harmonic minor is already correct.)
@@ -105,8 +107,7 @@ void applyPicardyToFinalChord(std::vector<NoteEvent>& notes,
 // ---------------------------------------------------------------------------
 
 std::vector<NoteEvent> generateBlockChord(
-    const KeySignature& key_sig, Tick tick, Tick duration,
-    uint8_t num_voices,
+    const KeySignature& key_sig, Tick tick, Tick duration, uint8_t num_voices,
     const std::vector<std::pair<uint8_t, uint8_t>>& voice_ranges) {
   std::vector<NoteEvent> notes;
 
@@ -156,53 +157,53 @@ std::vector<NoteEvent> generateBlockChord(
 // ---------------------------------------------------------------------------
 
 Registration OrganRegistrationPresets::piano() {
-  return {GmProgram::kChurchOrgan, GmProgram::kReedOrgan,
-          GmProgram::kChurchOrgan, GmProgram::kChurchOrgan, 60};
+  return {GmProgram::kChurchOrgan, GmProgram::kReedOrgan, GmProgram::kChurchOrgan,
+          GmProgram::kChurchOrgan, 60};
 }
 
 Registration OrganRegistrationPresets::mezzo() {
-  return {GmProgram::kChurchOrgan, GmProgram::kReedOrgan,
-          GmProgram::kChurchOrgan, GmProgram::kChurchOrgan, 75};
+  return {GmProgram::kChurchOrgan, GmProgram::kReedOrgan, GmProgram::kChurchOrgan,
+          GmProgram::kChurchOrgan, 75};
 }
 
 Registration OrganRegistrationPresets::forte() {
-  return {GmProgram::kChurchOrgan, GmProgram::kChurchOrgan,
-          GmProgram::kChurchOrgan, GmProgram::kChurchOrgan, 90};
+  return {GmProgram::kChurchOrgan, GmProgram::kChurchOrgan, GmProgram::kChurchOrgan,
+          GmProgram::kChurchOrgan, 90};
 }
 
 Registration OrganRegistrationPresets::pleno() {
-  return {GmProgram::kChurchOrgan, GmProgram::kChurchOrgan,
-          GmProgram::kChurchOrgan, GmProgram::kChurchOrgan, 100};
+  return {GmProgram::kChurchOrgan, GmProgram::kChurchOrgan, GmProgram::kChurchOrgan,
+          GmProgram::kChurchOrgan, 100};
 }
 
 Registration OrganRegistrationPresets::tutti() {
-  return {GmProgram::kChurchOrgan, GmProgram::kChurchOrgan,
-          GmProgram::kChurchOrgan, GmProgram::kChurchOrgan, 110};
+  return {GmProgram::kChurchOrgan, GmProgram::kChurchOrgan, GmProgram::kChurchOrgan,
+          GmProgram::kChurchOrgan, 110};
 }
 
 // ---------------------------------------------------------------------------
 // Registration plans
 // ---------------------------------------------------------------------------
 
-ExtendedRegistrationPlan createSimpleRegistrationPlan(
-    Tick start_tick, Tick end_tick) {
+ExtendedRegistrationPlan createSimpleRegistrationPlan(Tick start_tick, Tick end_tick) {
   ExtendedRegistrationPlan plan;
-  if (end_tick <= start_tick) return plan;
+  if (end_tick <= start_tick)
+    return plan;
 
   Tick mid_tick = start_tick + (end_tick - start_tick) / 2;
 
   plan.addPoint(start_tick, OrganRegistrationPresets::mezzo(), "opening");
   plan.addPoint(mid_tick, OrganRegistrationPresets::forte(), "middle");
-  plan.addPoint(end_tick - kTicksPerBar, OrganRegistrationPresets::pleno(),
-                "closing");
+  plan.addPoint(end_tick - kTicksPerBar, OrganRegistrationPresets::pleno(), "closing");
 
   return plan;
 }
 
-ExtendedRegistrationPlan createVariationRegistrationPlan(
-    int num_variations, Tick variation_duration) {
+ExtendedRegistrationPlan createVariationRegistrationPlan(int num_variations,
+                                                         Tick variation_duration) {
   ExtendedRegistrationPlan plan;
-  if (num_variations <= 0) return plan;
+  if (num_variations <= 0)
+    return plan;
 
   for (int i = 0; i < num_variations; ++i) {
     Tick tick = static_cast<Tick>(i) * variation_duration;

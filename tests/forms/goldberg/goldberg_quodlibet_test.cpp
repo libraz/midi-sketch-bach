@@ -2,10 +2,10 @@
 
 #include "forms/goldberg/variations/goldberg_quodlibet.h"
 
+#include <gtest/gtest.h>
+
 #include <algorithm>
 #include <set>
-
-#include <gtest/gtest.h>
 
 #include "core/pitch_utils.h"
 #include "forms/goldberg/goldberg_structural_grid.h"
@@ -57,8 +57,7 @@ TEST(QuodlibetGeneratorTest, HasBothMelodies) {
   }
 
   // Should have at least 2 melody voices (0 and 1) plus bass voice (2).
-  EXPECT_GE(voices.size(), 2u)
-      << "Quodlibet should have notes in at least 2 voices";
+  EXPECT_GE(voices.size(), 2u) << "Quodlibet should have notes in at least 2 voices";
 
   // Verify both melody voices (0 and 1) are present.
   EXPECT_TRUE(voices.count(0) > 0) << "Voice 0 (upper melody) should be present";
@@ -86,7 +85,8 @@ TEST(QuodlibetGeneratorTest, NotesSpan32Bars) {
   Tick max_end = 0;
   for (const auto& note : result.notes) {
     Tick note_end = note.start_tick + note.duration;
-    if (note_end > max_end) max_end = note_end;
+    if (note_end > max_end)
+      max_end = note_end;
   }
 
   // The last note should end near the full repeated duration.
@@ -117,14 +117,11 @@ TEST(QuodlibetGeneratorTest, MelodyNotesHaveQuodlibetSource) {
     }
   }
 
-  EXPECT_GT(quodlibet_count, 0)
-      << "Melody notes should have QuodlibetMelody source";
-  EXPECT_GT(bass_count, 0)
-      << "Bass notes should have GoldbergBass source";
+  EXPECT_GT(quodlibet_count, 0) << "Melody notes should have QuodlibetMelody source";
+  EXPECT_GT(bass_count, 0) << "Bass notes should have GoldbergBass source";
 
   // Melody notes should be the majority.
-  EXPECT_GT(quodlibet_count, bass_count)
-      << "QuodlibetMelody notes should outnumber bass notes";
+  EXPECT_GT(quodlibet_count, bass_count) << "QuodlibetMelody notes should outnumber bass notes";
 }
 
 // ---------------------------------------------------------------------------
@@ -144,17 +141,20 @@ TEST(QuodlibetGeneratorTest, StrongBeatHarmonicAlignment) {
   int chord_tone_count = 0;
 
   for (const auto& note : result.notes) {
-    if (note.source != BachNoteSource::QuodlibetMelody) continue;
+    if (note.source != BachNoteSource::QuodlibetMelody)
+      continue;
 
     // Check only notes from the first 16 bars (A section, pre-repeat) to avoid
     // mismatches from binary repeat offsets where A-section notes are checked
     // against B-section grid harmony.
     Tick first_section = static_cast<Tick>(kSectionBars) * ticks_per_bar;
-    if (note.start_tick >= first_section) continue;
+    if (note.start_tick >= first_section)
+      continue;
 
     // Check if this note lands on a strong beat (beat 0 of any bar).
     Tick pos_in_bar = note.start_tick % ticks_per_bar;
-    if (pos_in_bar != 0) continue;
+    if (pos_in_bar != 0)
+      continue;
 
     ++strong_beat_total;
 
@@ -168,8 +168,7 @@ TEST(QuodlibetGeneratorTest, StrongBeatHarmonicAlignment) {
     uint8_t root_pc = (tonic_pc + degree_offset) % 12;
 
     ChordQuality quality = majorKeyQuality(bar_info.chord_degree);
-    int third = (quality == ChordQuality::Minor ||
-                 quality == ChordQuality::Diminished) ? 3 : 4;
+    int third = (quality == ChordQuality::Minor || quality == ChordQuality::Diminished) ? 3 : 4;
     int fifth = (quality == ChordQuality::Diminished) ? 6 : 7;
 
     int pitch_class = getPitchClass(note.pitch);
@@ -183,10 +182,9 @@ TEST(QuodlibetGeneratorTest, StrongBeatHarmonicAlignment) {
 
   if (strong_beat_total > 0) {
     float ratio = static_cast<float>(chord_tone_count) / strong_beat_total;
-    EXPECT_GE(ratio, 0.80f)
-        << "At least 80% of strong-beat melody notes should be chord tones"
-        << " (got " << chord_tone_count << "/" << strong_beat_total
-        << " = " << ratio * 100.0f << "%)";
+    EXPECT_GE(ratio, 0.80f) << "At least 80% of strong-beat melody notes should be chord tones"
+                            << " (got " << chord_tone_count << "/" << strong_beat_total << " = "
+                            << ratio * 100.0f << "%)";
   }
 }
 
@@ -210,10 +208,12 @@ TEST(QuodlibetGeneratorTest, DifferentSeedsDifferent) {
   std::set<uint8_t> pitches_a;
   std::set<uint8_t> pitches_b;
   for (const auto& note : result_a.notes) {
-    if (note.pitch > 0) pitches_a.insert(note.pitch);
+    if (note.pitch > 0)
+      pitches_a.insert(note.pitch);
   }
   for (const auto& note : result_b.notes) {
-    if (note.pitch > 0) pitches_b.insert(note.pitch);
+    if (note.pitch > 0)
+      pitches_b.insert(note.pitch);
   }
 
   // With different seeds, the pitch sets or note counts may differ.
@@ -224,8 +224,7 @@ TEST(QuodlibetGeneratorTest, DifferentSeedsDifferent) {
   // Quodlibet since the folk melodies are fixed design values.
   // We check at least that both produce valid output and share structural
   // characteristics (similar pitch vocabulary from the same folk melodies).
-  EXPECT_TRUE(result_a.success && result_b.success)
-      << "Both seeds should produce valid output";
+  EXPECT_TRUE(result_a.success && result_b.success) << "Both seeds should produce valid output";
   EXPECT_FALSE(pitches_a.empty());
   EXPECT_FALSE(pitches_b.empty());
 }
@@ -240,10 +239,8 @@ TEST(QuodlibetGeneratorTest, SuccessAcrossSeeds) {
 
   for (uint32_t seed = 1; seed <= 10; ++seed) {
     auto result = gen.generate(grid, kGMajor, kTimeSig34, seed);
-    EXPECT_TRUE(result.success)
-        << "Quodlibet should succeed for seed " << seed;
-    EXPECT_FALSE(result.notes.empty())
-        << "Quodlibet should produce notes for seed " << seed;
+    EXPECT_TRUE(result.success) << "Quodlibet should succeed for seed " << seed;
+    EXPECT_FALSE(result.notes.empty()) << "Quodlibet should produce notes for seed " << seed;
   }
 }
 
@@ -285,9 +282,7 @@ TEST(QuodlibetGeneratorTest, MelodyContoursPreserved) {
     }
   }
   std::sort(voice0_timed.begin(), voice0_timed.end(),
-            [](const TimedPitch& lhs, const TimedPitch& rhs) {
-              return lhs.tick < rhs.tick;
-            });
+            [](const TimedPitch& lhs, const TimedPitch& rhs) { return lhs.tick < rhs.tick; });
 
   if (voice0_timed.size() < 3) {
     // Not enough notes to check contour; skip.
@@ -298,10 +293,8 @@ TEST(QuodlibetGeneratorTest, MelodyContoursPreserved) {
   // "Ich bin so lang...": G A B C B A G F# G -> up up up down down down down up
   // Count how many direction changes in the output match the original.
   // We compare the original melody's direction sequence against the generated one.
-  static constexpr uint8_t kOriginal[] = {
-      67, 69, 71, 72, 71, 69, 67, 66, 67,
-      67, 69, 71, 72, 74, 72, 71, 69, 67
-  };
+  static constexpr uint8_t kOriginal[] = {67, 69, 71, 72, 71, 69, 67, 66, 67,
+                                          67, 69, 71, 72, 74, 72, 71, 69, 67};
   constexpr int kOrigLen = sizeof(kOriginal) / sizeof(kOriginal[0]);
 
   int matching_directions = 0;
@@ -310,14 +303,19 @@ TEST(QuodlibetGeneratorTest, MelodyContoursPreserved) {
   int check_len = std::min(static_cast<int>(voice0_timed.size()) - 1, kOrigLen - 1);
   for (int idx = 0; idx < check_len; ++idx) {
     int orig_dir = 0;
-    if (kOriginal[idx + 1] > kOriginal[idx]) orig_dir = 1;
-    else if (kOriginal[idx + 1] < kOriginal[idx]) orig_dir = -1;
+    if (kOriginal[idx + 1] > kOriginal[idx])
+      orig_dir = 1;
+    else if (kOriginal[idx + 1] < kOriginal[idx])
+      orig_dir = -1;
 
     int gen_dir = 0;
-    if (voice0_timed[idx + 1].pitch > voice0_timed[idx].pitch) gen_dir = 1;
-    else if (voice0_timed[idx + 1].pitch < voice0_timed[idx].pitch) gen_dir = -1;
+    if (voice0_timed[idx + 1].pitch > voice0_timed[idx].pitch)
+      gen_dir = 1;
+    else if (voice0_timed[idx + 1].pitch < voice0_timed[idx].pitch)
+      gen_dir = -1;
 
-    if (orig_dir == gen_dir) ++matching_directions;
+    if (orig_dir == gen_dir)
+      ++matching_directions;
     ++total_checked;
   }
 
@@ -325,10 +323,9 @@ TEST(QuodlibetGeneratorTest, MelodyContoursPreserved) {
     float contour_match = static_cast<float>(matching_directions) / total_checked;
     // At least 50% of contour directions should match (allowing for harmonic
     // adjustments that may alter some direction choices).
-    EXPECT_GE(contour_match, 0.50f)
-        << "Melody contour should be mostly preserved"
-        << " (got " << matching_directions << "/" << total_checked
-        << " = " << contour_match * 100.0f << "% match)";
+    EXPECT_GE(contour_match, 0.50f) << "Melody contour should be mostly preserved"
+                                    << " (got " << matching_directions << "/" << total_checked
+                                    << " = " << contour_match * 100.0f << "% match)";
   }
 }
 
@@ -377,10 +374,14 @@ TEST(QuodlibetGeneratorTest, BinaryRepeatsApplied) {
   bool has_section_4 = false;  // 3*section_ticks to 4*section_ticks
 
   for (const auto& note : result.notes) {
-    if (note.start_tick < section_ticks) has_section_1 = true;
-    else if (note.start_tick < 2 * section_ticks) has_section_2 = true;
-    else if (note.start_tick < 3 * section_ticks) has_section_3 = true;
-    else if (note.start_tick < 4 * section_ticks) has_section_4 = true;
+    if (note.start_tick < section_ticks)
+      has_section_1 = true;
+    else if (note.start_tick < 2 * section_ticks)
+      has_section_2 = true;
+    else if (note.start_tick < 3 * section_ticks)
+      has_section_3 = true;
+    else if (note.start_tick < 4 * section_ticks)
+      has_section_4 = true;
   }
 
   EXPECT_TRUE(has_section_1) << "Section 1 (A first play) should have notes";

@@ -26,8 +26,7 @@ class MidiWriter {
   ///        Must contain at least one event. First event should be at tick 0.
   /// @param key Output key for transposition (C = no transposition).
   /// @param metadata Optional JSON metadata string to embed as a text event.
-  void build(const std::vector<Track>& tracks,
-             const std::vector<TempoEvent>& tempo_events,
+  void build(const std::vector<Track>& tracks, const std::vector<TempoEvent>& tempo_events,
              Key key = Key::C, const std::string& metadata = "");
 
   /// @brief Build complete MIDI data from tracks with time signature support.
@@ -36,10 +35,9 @@ class MidiWriter {
   /// @param time_sig_events Time signature changes. Empty = default 4/4.
   /// @param key Output key for transposition.
   /// @param metadata Optional JSON metadata string.
-  void build(const std::vector<Track>& tracks,
-             const std::vector<TempoEvent>& tempo_events,
-             const std::vector<TimeSignatureEvent>& time_sig_events,
-             Key key = Key::C, const std::string& metadata = "");
+  void build(const std::vector<Track>& tracks, const std::vector<TempoEvent>& tempo_events,
+             const std::vector<TimeSignatureEvent>& time_sig_events, Key key = Key::C,
+             const std::string& metadata = "");
 
   /// @brief Get the binary MIDI data after build().
   /// @return Byte vector containing complete SMF Type 1 data.

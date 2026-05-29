@@ -206,8 +206,7 @@ TEST(PitchToAbsoluteDegreeTest, RoundTripCMajorDiatonic) {
   for (uint8_t pitch : diatonic_pitches) {
     int abs_deg = scale_util::pitchToAbsoluteDegree(pitch, Key::C, ScaleType::Major);
     uint8_t recovered = scale_util::absoluteDegreeToPitch(abs_deg, Key::C, ScaleType::Major);
-    EXPECT_EQ(recovered, pitch)
-        << "Round-trip failed for MIDI pitch " << static_cast<int>(pitch);
+    EXPECT_EQ(recovered, pitch) << "Round-trip failed for MIDI pitch " << static_cast<int>(pitch);
   }
 }
 
@@ -268,8 +267,8 @@ TEST(PitchToAbsoluteDegreeTest, GMajorAbsoluteDegree) {
   for (uint8_t pitch : same_octave_pitches) {
     int abs_deg = scale_util::pitchToAbsoluteDegree(pitch, Key::G, ScaleType::Major);
     uint8_t recovered = scale_util::absoluteDegreeToPitch(abs_deg, Key::G, ScaleType::Major);
-    EXPECT_EQ(recovered, pitch)
-        << "G major round-trip failed for MIDI pitch " << static_cast<int>(pitch);
+    EXPECT_EQ(recovered, pitch) << "G major round-trip failed for MIDI pitch "
+                                << static_cast<int>(pitch);
   }
 
   // Degree arithmetic: G4 + 7 degrees = G5 (one octave up).

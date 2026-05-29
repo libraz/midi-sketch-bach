@@ -2,11 +2,11 @@
 
 #include "forms/goldberg/goldberg_aria.h"
 
+#include <gtest/gtest.h>
+
 #include <algorithm>
 #include <cstdint>
 #include <numeric>
-
-#include <gtest/gtest.h>
 
 #include "core/basic_types.h"
 #include "core/pitch_utils.h"
@@ -37,7 +37,8 @@ class AriaGeneratorTest : public ::testing::Test {
   }
 
   static float averagePitch(const std::vector<NoteEvent>& notes) {
-    if (notes.empty()) return 0.0f;
+    if (notes.empty())
+      return 0.0f;
     float sum = 0.0f;
     int count = 0;
     for (const auto& note : notes) {
@@ -67,8 +68,7 @@ TEST_F(AriaGeneratorTest, GenerateProducesResult) {
 // ---------------------------------------------------------------------------
 
 TEST_F(AriaGeneratorTest, MelodyNotesNonEmpty) {
-  EXPECT_FALSE(result_.melody_notes.empty())
-      << "Aria melody notes should be non-empty";
+  EXPECT_FALSE(result_.melody_notes.empty()) << "Aria melody notes should be non-empty";
 }
 
 // ---------------------------------------------------------------------------
@@ -76,8 +76,7 @@ TEST_F(AriaGeneratorTest, MelodyNotesNonEmpty) {
 // ---------------------------------------------------------------------------
 
 TEST_F(AriaGeneratorTest, BassNotesNonEmpty) {
-  EXPECT_FALSE(result_.bass_notes.empty())
-      << "Aria bass notes should be non-empty";
+  EXPECT_FALSE(result_.bass_notes.empty()) << "Aria bass notes should be non-empty";
 }
 
 // ---------------------------------------------------------------------------
@@ -93,11 +92,11 @@ TEST_F(AriaGeneratorTest, MelodySpans32Bars) {
   Tick max_end = 0;
   for (const auto& note : result_.melody_notes) {
     Tick note_end = note.start_tick + note.duration;
-    if (note_end > max_end) max_end = note_end;
+    if (note_end > max_end)
+      max_end = note_end;
   }
 
-  EXPECT_GE(max_end, expected_total - ticks_per_bar)
-      << "Melody notes should span close to 32 bars";
+  EXPECT_GE(max_end, expected_total - ticks_per_bar) << "Melody notes should span close to 32 bars";
   EXPECT_LE(max_end, expected_total + ticks_per_bar)
       << "Melody notes should not extend far beyond 32 bars";
 }
@@ -115,11 +114,11 @@ TEST_F(AriaGeneratorTest, BassSpans32Bars) {
   Tick max_end = 0;
   for (const auto& note : result_.bass_notes) {
     Tick note_end = note.start_tick + note.duration;
-    if (note_end > max_end) max_end = note_end;
+    if (note_end > max_end)
+      max_end = note_end;
   }
 
-  EXPECT_GE(max_end, expected_total - ticks_per_bar)
-      << "Bass notes should span close to 32 bars";
+  EXPECT_GE(max_end, expected_total - ticks_per_bar) << "Bass notes should span close to 32 bars";
   EXPECT_LE(max_end, expected_total + ticks_per_bar)
       << "Bass notes should not extend far beyond 32 bars";
 }
@@ -132,12 +131,10 @@ TEST_F(AriaGeneratorTest, MelodyHasAriaSource) {
   ASSERT_FALSE(result_.melody_notes.empty());
 
   for (const auto& note : result_.melody_notes) {
-    bool valid_source = (note.source == BachNoteSource::GoldbergAria ||
-                         note.source == BachNoteSource::Ornament);
-    EXPECT_TRUE(valid_source)
-        << "Melody note at tick " << note.start_tick
-        << " has unexpected source: "
-        << static_cast<int>(note.source);
+    bool valid_source =
+        (note.source == BachNoteSource::GoldbergAria || note.source == BachNoteSource::Ornament);
+    EXPECT_TRUE(valid_source) << "Melody note at tick " << note.start_tick
+                              << " has unexpected source: " << static_cast<int>(note.source);
   }
 }
 
@@ -150,8 +147,7 @@ TEST_F(AriaGeneratorTest, BassHasGoldbergBassSource) {
 
   for (const auto& note : result_.bass_notes) {
     EXPECT_EQ(note.source, BachNoteSource::GoldbergBass)
-        << "Bass note at tick " << note.start_tick
-        << " should have GoldbergBass source";
+        << "Bass note at tick " << note.start_tick << " should have GoldbergBass source";
   }
 }
 
@@ -172,7 +168,8 @@ TEST_F(AriaGeneratorTest, BassUsesStructuralPitches) {
   int match_count = 0;
   int total_count = 0;
   for (const auto& note : result_.bass_notes) {
-    if (note.pitch == 0) continue;
+    if (note.pitch == 0)
+      continue;
     int note_pc = getPitchClass(note.pitch);
     for (int structural_pc : structural_pcs) {
       if (note_pc == structural_pc) {
@@ -184,8 +181,7 @@ TEST_F(AriaGeneratorTest, BassUsesStructuralPitches) {
   }
 
   if (total_count > 0) {
-    float match_ratio = static_cast<float>(match_count) /
-                        static_cast<float>(total_count);
+    float match_ratio = static_cast<float>(match_count) / static_cast<float>(total_count);
     EXPECT_GT(match_ratio, 0.7f)
         << "Bass pitches should predominantly match structural grid pitch classes";
   }
@@ -202,9 +198,9 @@ TEST_F(AriaGeneratorTest, MelodyInUpperRegister) {
   float melody_avg = averagePitch(result_.melody_notes);
   float bass_avg = averagePitch(result_.bass_notes);
 
-  EXPECT_GT(melody_avg, bass_avg)
-      << "Melody average pitch (" << melody_avg
-      << ") should be higher than bass average pitch (" << bass_avg << ")";
+  EXPECT_GT(melody_avg, bass_avg) << "Melody average pitch (" << melody_avg
+                                  << ") should be higher than bass average pitch (" << bass_avg
+                                  << ")";
 }
 
 // ---------------------------------------------------------------------------
@@ -220,14 +216,12 @@ TEST_F(AriaGeneratorTest, DaCapoOffsetsCorrectly) {
   ASSERT_EQ(da_capo.bass_notes.size(), result_.bass_notes.size());
 
   for (size_t idx = 0; idx < result_.melody_notes.size(); ++idx) {
-    EXPECT_EQ(da_capo.melody_notes[idx].start_tick,
-              result_.melody_notes[idx].start_tick + kOffset)
+    EXPECT_EQ(da_capo.melody_notes[idx].start_tick, result_.melody_notes[idx].start_tick + kOffset)
         << "Melody note " << idx << " should be offset by " << kOffset;
   }
 
   for (size_t idx = 0; idx < result_.bass_notes.size(); ++idx) {
-    EXPECT_EQ(da_capo.bass_notes[idx].start_tick,
-              result_.bass_notes[idx].start_tick + kOffset)
+    EXPECT_EQ(da_capo.bass_notes[idx].start_tick, result_.bass_notes[idx].start_tick + kOffset)
         << "Bass note " << idx << " should be offset by " << kOffset;
   }
 }
@@ -243,14 +237,12 @@ TEST_F(AriaGeneratorTest, DaCapoPreservesPitches) {
   ASSERT_EQ(da_capo.melody_notes.size(), result_.melody_notes.size());
 
   for (size_t idx = 0; idx < result_.melody_notes.size(); ++idx) {
-    EXPECT_EQ(da_capo.melody_notes[idx].pitch,
-              result_.melody_notes[idx].pitch)
+    EXPECT_EQ(da_capo.melody_notes[idx].pitch, result_.melody_notes[idx].pitch)
         << "Da capo melody note " << idx << " should preserve original pitch";
   }
 
   for (size_t idx = 0; idx < result_.bass_notes.size(); ++idx) {
-    EXPECT_EQ(da_capo.bass_notes[idx].pitch,
-              result_.bass_notes[idx].pitch)
+    EXPECT_EQ(da_capo.bass_notes[idx].pitch, result_.bass_notes[idx].pitch)
         << "Da capo bass note " << idx << " should preserve original pitch";
   }
 }
@@ -269,20 +261,17 @@ TEST_F(AriaGeneratorTest, DifferentSeedsDifferentMelody) {
   ASSERT_FALSE(result_seed2.melody_notes.empty());
 
   // With generative melody, different seeds should produce different notes.
-  bool different = (result_seed1.melody_notes.size() !=
-                    result_seed2.melody_notes.size());
+  bool different = (result_seed1.melody_notes.size() != result_seed2.melody_notes.size());
   if (!different) {
     for (size_t idx = 0; idx < result_seed1.melody_notes.size(); ++idx) {
-      if (result_seed1.melody_notes[idx].pitch !=
-          result_seed2.melody_notes[idx].pitch) {
+      if (result_seed1.melody_notes[idx].pitch != result_seed2.melody_notes[idx].pitch) {
         different = true;
         break;
       }
     }
   }
 
-  EXPECT_TRUE(different)
-      << "Different seeds should produce different melody";
+  EXPECT_TRUE(different) << "Different seeds should produce different melody";
 }
 
 // ===========================================================================
@@ -310,7 +299,8 @@ class AriaThemeTest : public ::testing::Test {
   /// Helper: check if pitch class matches any chord tone.
   static bool isChordTone(uint8_t pitch, const std::vector<uint8_t>& tones) {
     for (uint8_t ct : tones) {
-      if (getPitchClass(pitch) == getPitchClass(ct)) return true;
+      if (getPitchClass(pitch) == getPitchClass(ct))
+        return true;
     }
     return false;
   }
@@ -331,11 +321,9 @@ TEST_F(AriaThemeTest, GeneratedThemeValid) {
 
     if (beat.pitch > 0) {
       EXPECT_GE(beat.pitch, kSopranoLow)
-          << "Beat " << idx << " pitch " << static_cast<int>(beat.pitch)
-          << " below soprano range";
+          << "Beat " << idx << " pitch " << static_cast<int>(beat.pitch) << " below soprano range";
       EXPECT_LE(beat.pitch, kSopranoHigh)
-          << "Beat " << idx << " pitch " << static_cast<int>(beat.pitch)
-          << " above soprano range";
+          << "Beat " << idx << " pitch " << static_cast<int>(beat.pitch) << " above soprano range";
       ++non_zero_count;
     } else {
       EXPECT_EQ(beat.func, BeatFunction::Hold)
@@ -347,9 +335,8 @@ TEST_F(AriaThemeTest, GeneratedThemeValid) {
   }
 
   float non_zero_ratio = static_cast<float>(non_zero_count) / 96.0f;
-  EXPECT_GT(non_zero_ratio, 0.6f)
-      << "Theme should have at least 60% explicit pitches, got "
-      << non_zero_ratio;
+  EXPECT_GT(non_zero_ratio, 0.6f) << "Theme should have at least 60% explicit pitches, got "
+                                  << non_zero_ratio;
 
   // Each bar's beat 1 should have a non-zero pitch.
   for (int bar = 0; bar < 32; ++bar) {
@@ -366,8 +353,7 @@ TEST_F(AriaThemeTest, GeneratedThemeResolvesHold) {
   for (int bar = 0; bar < 32; ++bar) {
     for (int beat = 0; beat < 3; ++beat) {
       uint8_t pitch = theme_.getPitch(bar, beat);
-      EXPECT_GT(pitch, 0u)
-          << "getPitch(" << bar << ", " << beat << ") should resolve to non-zero";
+      EXPECT_GT(pitch, 0u) << "getPitch(" << bar << ", " << beat << ") should resolve to non-zero";
     }
   }
 }
@@ -389,8 +375,7 @@ TEST(AriaThemeGenTest, DifferentSeedsDifferentKern) {
   }
 
   EXPECT_GE(diff_count, 4)
-      << "Seeds 1 and 2 should produce at least 4 different Beat 1 pitches, got "
-      << diff_count;
+      << "Seeds 1 and 2 should produce at least 4 different Beat 1 pitches, got " << diff_count;
 }
 
 // ---------------------------------------------------------------------------
@@ -426,8 +411,7 @@ TEST_F(AriaThemeTest, AllBeat1AreChordTones) {
     auto chord_tones = collectChordTonesInRange(chord, kSopranoLow, kSopranoHigh);
 
     EXPECT_TRUE(isChordTone(pitch, chord_tones))
-        << "Bar " << bar << " beat 1 pitch " << static_cast<int>(pitch)
-        << " is not a chord tone";
+        << "Bar " << bar << " beat 1 pitch " << static_cast<int>(pitch) << " is not a chord tone";
   }
 }
 
@@ -439,14 +423,14 @@ TEST_F(AriaThemeTest, MaxLeapWithinBounds) {
   uint8_t prev = 0;
   for (int idx = 0; idx < AriaTheme::kTotalBeats; ++idx) {
     uint8_t pitch = theme_.beats[static_cast<size_t>(idx)].pitch;
-    if (pitch == 0) continue;
+    if (pitch == 0)
+      continue;
 
     if (prev > 0) {
       int interval = absoluteInterval(pitch, prev);
-      EXPECT_LE(interval, 7)
-          << "Leap from " << static_cast<int>(prev)
-          << " to " << static_cast<int>(pitch)
-          << " at beat " << idx << " exceeds P5 (7 semitones)";
+      EXPECT_LE(interval, 7) << "Leap from " << static_cast<int>(prev) << " to "
+                             << static_cast<int>(pitch) << " at beat " << idx
+                             << " exceeds P5 (7 semitones)";
     }
     prev = pitch;
   }
@@ -466,7 +450,8 @@ TEST_F(AriaThemeTest, CadenceBarsResolve) {
 
   for (int bar = 0; bar < 32; ++bar) {
     const auto& info = grid_.getBar(bar);
-    if (!info.cadence.has_value()) continue;
+    if (!info.cadence.has_value())
+      continue;
     ++cadence_count;
 
     uint8_t beat1 = theme_.getPitch(bar, 0);
@@ -480,8 +465,7 @@ TEST_F(AriaThemeTest, CadenceBarsResolve) {
   }
 
   EXPECT_GT(cadence_count, 0) << "Should have at least one cadence bar";
-  EXPECT_EQ(chord_tone_match, cadence_count)
-      << "All cadence bars should have Beat 1 as chord tone";
+  EXPECT_EQ(chord_tone_match, cadence_count) << "All cadence bars should have Beat 1 as chord tone";
 }
 
 // ---------------------------------------------------------------------------
@@ -491,7 +475,8 @@ TEST_F(AriaThemeTest, CadenceBarsResolve) {
 TEST_F(AriaThemeTest, SuspensionAlwaysResolves) {
   for (int bar = 0; bar < 32; ++bar) {
     for (int beat = 0; beat < 3; ++beat) {
-      if (theme_.getFunction(bar, beat) != BeatFunction::Suspension43) continue;
+      if (theme_.getFunction(bar, beat) != BeatFunction::Suspension43)
+        continue;
 
       // The next sounding beat should be stepwise resolution (downward).
       int next_beat = beat + 1;
@@ -500,16 +485,16 @@ TEST_F(AriaThemeTest, SuspensionAlwaysResolves) {
         next_beat = 0;
         next_bar = bar + 1;
       }
-      if (next_bar >= 32) continue;
+      if (next_bar >= 32)
+        continue;
 
       uint8_t susp_pitch = theme_.getPitch(bar, beat);
       uint8_t res_pitch = theme_.getPitch(next_bar, next_beat);
       int interval = absoluteInterval(susp_pitch, res_pitch);
 
-      EXPECT_LE(interval, 3)
-          << "Suspension at bar " << bar << " beat " << beat
-          << " (pitch " << static_cast<int>(susp_pitch)
-          << ") resolution interval=" << interval << " exceeds stepwise (3)";
+      EXPECT_LE(interval, 3) << "Suspension at bar " << bar << " beat " << beat << " (pitch "
+                             << static_cast<int>(susp_pitch) << ") resolution interval=" << interval
+                             << " exceeds stepwise (3)";
     }
   }
 }
@@ -521,7 +506,8 @@ TEST_F(AriaThemeTest, SuspensionAlwaysResolves) {
 TEST_F(AriaThemeTest, AppogiaturaAlwaysResolves) {
   for (int bar = 0; bar < 32; ++bar) {
     for (int beat = 0; beat < 3; ++beat) {
-      if (theme_.getFunction(bar, beat) != BeatFunction::Appoggiatura) continue;
+      if (theme_.getFunction(bar, beat) != BeatFunction::Appoggiatura)
+        continue;
 
       int next_beat = beat + 1;
       int next_bar = bar;
@@ -529,16 +515,16 @@ TEST_F(AriaThemeTest, AppogiaturaAlwaysResolves) {
         next_beat = 0;
         next_bar = bar + 1;
       }
-      if (next_bar >= 32) continue;
+      if (next_bar >= 32)
+        continue;
 
       uint8_t app_pitch = theme_.getPitch(bar, beat);
       uint8_t res_pitch = theme_.getPitch(next_bar, next_beat);
       int interval = absoluteInterval(app_pitch, res_pitch);
 
-      EXPECT_LE(interval, 3)
-          << "Appoggiatura at bar " << bar << " beat " << beat
-          << " (pitch " << static_cast<int>(app_pitch)
-          << ") resolution interval=" << interval << " exceeds stepwise (3)";
+      EXPECT_LE(interval, 3) << "Appoggiatura at bar " << bar << " beat " << beat << " (pitch "
+                             << static_cast<int>(app_pitch) << ") resolution interval=" << interval
+                             << " exceeds stepwise (3)";
     }
   }
 }
@@ -561,35 +547,38 @@ TEST_F(AriaThemeTest, ConsonantRatioPerBar) {
         break;
       }
     }
-    if (has_nct_function) continue;
+    if (has_nct_function)
+      continue;
 
     const auto& bar_info = grid_.getBar(bar);
     Chord chord = chordFromBar(bar_info);
     auto chord_tones = collectChordTonesInRange(chord, kSopranoLow, kSopranoHigh);
-    if (chord_tones.empty()) continue;
+    if (chord_tones.empty())
+      continue;
 
     int ct_count = 0;
     int sounding_count = 0;
     for (int beat = 0; beat < 3; ++beat) {
       uint8_t pitch = theme_.beats[static_cast<size_t>(bar * 3 + beat)].pitch;
-      if (pitch == 0) continue;
+      if (pitch == 0)
+        continue;
       ++sounding_count;
-      if (isChordTone(pitch, chord_tones)) ++ct_count;
+      if (isChordTone(pitch, chord_tones))
+        ++ct_count;
     }
 
     if (sounding_count >= 2) {
       ++bars_checked;
-      if (ct_count >= 2) ++bars_passing;
+      if (ct_count >= 2)
+        ++bars_passing;
     }
   }
 
   // At least 80% of checked bars should have consonant ratio >= 2/3.
   ASSERT_GT(bars_checked, 0);
-  float ratio = static_cast<float>(bars_passing) /
-                static_cast<float>(bars_checked);
-  EXPECT_GE(ratio, 0.8f)
-      << "At least 80% of bars (without suspension/appoggiatura) should have "
-      << ">= 2/3 chord tones, got " << bars_passing << "/" << bars_checked;
+  float ratio = static_cast<float>(bars_passing) / static_cast<float>(bars_checked);
+  EXPECT_GE(ratio, 0.8f) << "At least 80% of bars (without suspension/appoggiatura) should have "
+                         << ">= 2/3 chord tones, got " << bars_passing << "/" << bars_checked;
 }
 
 // ---------------------------------------------------------------------------
@@ -603,9 +592,8 @@ TEST_F(AriaThemeTest, NoTripleSamePitchDownbeat) {
     uint8_t p2 = theme_.getPitch(bar, 0);
 
     bool triple = (p0 == p1 && p1 == p2);
-    EXPECT_FALSE(triple)
-        << "Bars " << (bar - 2) << "-" << bar
-        << " have triple same downbeat pitch " << static_cast<int>(p0);
+    EXPECT_FALSE(triple) << "Bars " << (bar - 2) << "-" << bar
+                         << " have triple same downbeat pitch " << static_cast<int>(p0);
   }
 }
 

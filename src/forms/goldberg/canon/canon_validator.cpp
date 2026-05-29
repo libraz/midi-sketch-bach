@@ -81,15 +81,13 @@ uint8_t computeExpectedComesPitch(uint8_t dux_pitch, const CanonSpec& spec) {
 /// @param target_tick Target tick position.
 /// @param tolerance Maximum tick difference for a match.
 /// @return Index of the matching note, or -1.
-int findNoteAtTick(const std::vector<NoteEvent>& notes, Tick target_tick,
-                   Tick tolerance) {
+int findNoteAtTick(const std::vector<NoteEvent>& notes, Tick target_tick, Tick tolerance) {
   int best_idx = -1;
   Tick best_diff = tolerance + 1;
 
   for (int idx = 0; idx < static_cast<int>(notes.size()); ++idx) {
-    Tick diff = (notes[idx].start_tick >= target_tick)
-                    ? notes[idx].start_tick - target_tick
-                    : target_tick - notes[idx].start_tick;
+    Tick diff = (notes[idx].start_tick >= target_tick) ? notes[idx].start_tick - target_tick
+                                                       : target_tick - notes[idx].start_tick;
     if (diff <= tolerance && diff < best_diff) {
       best_diff = diff;
       best_idx = idx;
@@ -103,8 +101,7 @@ int findNoteAtTick(const std::vector<NoteEvent>& notes, Tick target_tick,
 /// @param notes Notes to search.
 /// @return Pair of (bar number, pitch) for the highest note. Bar is computed
 ///         using the given ticks_per_bar. Returns (-1, 0) for empty input.
-std::pair<int, uint8_t> findMelodicPeak(const std::vector<NoteEvent>& notes,
-                                        Tick ticks_per_bar) {
+std::pair<int, uint8_t> findMelodicPeak(const std::vector<NoteEvent>& notes, Tick ticks_per_bar) {
   if (notes.empty()) {
     return {-1, 0};
   }
@@ -119,9 +116,7 @@ std::pair<int, uint8_t> findMelodicPeak(const std::vector<NoteEvent>& notes,
     }
   }
 
-  int peak_bar = (ticks_per_bar > 0)
-                     ? static_cast<int>(peak_tick / ticks_per_bar)
-                     : 0;
+  int peak_bar = (ticks_per_bar > 0) ? static_cast<int>(peak_tick / ticks_per_bar) : 0;
   return {peak_bar, max_pitch};
 }
 
@@ -130,8 +125,7 @@ std::pair<int, uint8_t> findMelodicPeak(const std::vector<NoteEvent>& notes,
 /// @param grid Structural grid.
 /// @param max_distance Maximum bar distance for a match.
 /// @return True if bar is within max_distance of an Intensification bar.
-bool isNearIntensification(int bar, const GoldbergStructuralGrid& grid,
-                           int max_distance) {
+bool isNearIntensification(int bar, const GoldbergStructuralGrid& grid, int max_distance) {
   for (int idx = 0; idx < 32; ++idx) {
     if (grid.getPhrasePosition(idx) == PhrasePosition::Intensification) {
       if (std::abs(bar - idx) <= max_distance) {
@@ -144,11 +138,9 @@ bool isNearIntensification(int bar, const GoldbergStructuralGrid& grid,
 
 }  // namespace
 
-CanonValidationResult validateCanonIntegrity(
-    const std::vector<NoteEvent>& dux_notes,
-    const std::vector<NoteEvent>& comes_notes,
-    const CanonSpec& spec,
-    const TimeSignature& time_sig) {
+CanonValidationResult validateCanonIntegrity(const std::vector<NoteEvent>& dux_notes,
+                                             const std::vector<NoteEvent>& comes_notes,
+                                             const CanonSpec& spec, const TimeSignature& time_sig) {
   CanonValidationResult result;
 
   // Empty inputs: trivially pass with zero pairs.
@@ -164,22 +156,18 @@ CanonValidationResult validateCanonIntegrity(
 
   for (const auto& dux_note : dux_notes) {
     Tick expected_comes_tick = dux_note.start_tick + delay_ticks;
-    int comes_idx = findNoteAtTick(comes_notes, expected_comes_tick,
-                                   kTimingTolerance);
+    int comes_idx = findNoteAtTick(comes_notes, expected_comes_tick, kTimingTolerance);
 
     if (comes_idx < 0) {
       // No matching comes note found at the expected tick.
       // This could be due to the comes not having entered yet, so only
       // count as a violation if the expected tick is within the comes range.
-      if (!comes_notes.empty() &&
-          expected_comes_tick >= comes_notes.front().start_tick &&
+      if (!comes_notes.empty() && expected_comes_tick >= comes_notes.front().start_tick &&
           expected_comes_tick <= comes_notes.back().start_tick + kTicksPerBeat) {
         ++result.timing_violations;
-        result.messages.push_back(
-            "Timing: no comes note at tick " +
-            std::to_string(expected_comes_tick) +
-            " for dux note at tick " +
-            std::to_string(dux_note.start_tick));
+        result.messages.push_back("Timing: no comes note at tick " +
+                                  std::to_string(expected_comes_tick) + " for dux note at tick " +
+                                  std::to_string(dux_note.start_tick));
       }
       continue;
     }
@@ -193,11 +181,9 @@ CanonValidationResult validateCanonIntegrity(
                          : expected_comes_tick - comes_note.start_tick;
     if (tick_diff > kTimingTolerance) {
       ++result.timing_violations;
-      result.messages.push_back(
-          "Timing: comes at tick " +
-          std::to_string(comes_note.start_tick) +
-          " expected " + std::to_string(expected_comes_tick) +
-          " (diff=" + std::to_string(tick_diff) + ")");
+      result.messages.push_back("Timing: comes at tick " + std::to_string(comes_note.start_tick) +
+                                " expected " + std::to_string(expected_comes_tick) +
+                                " (diff=" + std::to_string(tick_diff) + ")");
     }
 
     // Check pitch transformation.
@@ -205,23 +191,20 @@ CanonValidationResult validateCanonIntegrity(
     if (comes_note.pitch != expected_pitch) {
       ++result.pitch_violations;
       result.messages.push_back(
-          "Pitch: dux=" + pitchToNoteName(dux_note.pitch) +
-          "(" + std::to_string(dux_note.pitch) + ")" +
-          " comes=" + pitchToNoteName(comes_note.pitch) +
-          "(" + std::to_string(comes_note.pitch) + ")" +
-          " expected=" + pitchToNoteName(expected_pitch) +
-          "(" + std::to_string(expected_pitch) + ")" +
-          " at tick " + std::to_string(dux_note.start_tick));
+          "Pitch: dux=" + pitchToNoteName(dux_note.pitch) + "(" + std::to_string(dux_note.pitch) +
+          ")" + " comes=" + pitchToNoteName(comes_note.pitch) + "(" +
+          std::to_string(comes_note.pitch) + ")" + " expected=" + pitchToNoteName(expected_pitch) +
+          "(" + std::to_string(expected_pitch) + ")" + " at tick " +
+          std::to_string(dux_note.start_tick));
     }
 
     // Check duration (for StrictRhythm mode).
     if (spec.rhythmic_mode == CanonRhythmicMode::StrictRhythm) {
       if (comes_note.duration != dux_note.duration) {
         ++result.duration_violations;
-        result.messages.push_back(
-            "Duration: dux=" + std::to_string(dux_note.duration) +
-            " comes=" + std::to_string(comes_note.duration) +
-            " at tick " + std::to_string(dux_note.start_tick));
+        result.messages.push_back("Duration: dux=" + std::to_string(dux_note.duration) +
+                                  " comes=" + std::to_string(comes_note.duration) + " at tick " +
+                                  std::to_string(dux_note.start_tick));
       }
     }
   }
@@ -236,18 +219,15 @@ CanonValidationResult validateCanonIntegrity(
   }
 
   // Pass if pitch accuracy >= 95% and no timing or duration violations.
-  result.passed = result.pitch_accuracy >= 0.95f &&
-                  result.timing_violations == 0 &&
+  result.passed = result.pitch_accuracy >= 0.95f && result.timing_violations == 0 &&
                   result.duration_violations == 0;
 
   return result;
 }
 
-bool validateClimaxAlignment(
-    const std::vector<NoteEvent>& dux_notes,
-    const std::vector<NoteEvent>& comes_notes,
-    const GoldbergStructuralGrid& grid,
-    const TimeSignature& time_sig) {
+bool validateClimaxAlignment(const std::vector<NoteEvent>& dux_notes,
+                             const std::vector<NoteEvent>& comes_notes,
+                             const GoldbergStructuralGrid& grid, const TimeSignature& time_sig) {
   Tick ticks_per_bar = time_sig.ticksPerBar();
 
   auto [dux_bar, dux_peak] = findMelodicPeak(dux_notes, ticks_per_bar);
@@ -265,10 +245,8 @@ bool validateClimaxAlignment(
   int clamped_dux_bar = std::max(0, std::min(dux_bar, kMaxBar));
   int clamped_comes_bar = std::max(0, std::min(comes_bar, kMaxBar));
 
-  bool dux_aligned = isNearIntensification(clamped_dux_bar, grid,
-                                           kAlignmentTolerance);
-  bool comes_aligned = isNearIntensification(clamped_comes_bar, grid,
-                                             kAlignmentTolerance);
+  bool dux_aligned = isNearIntensification(clamped_dux_bar, grid, kAlignmentTolerance);
+  bool comes_aligned = isNearIntensification(clamped_comes_bar, grid, kAlignmentTolerance);
 
   return dux_aligned && comes_aligned;
 }

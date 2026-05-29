@@ -8,23 +8,34 @@ namespace bach {
 
 const char* textureTypeToString(TextureType type) {
   switch (type) {
-    case TextureType::SingleLine:       return "SingleLine";
-    case TextureType::ImpliedPolyphony: return "ImpliedPolyphony";
-    case TextureType::FullChords:       return "FullChords";
-    case TextureType::Arpeggiated:      return "Arpeggiated";
-    case TextureType::ScalePassage:     return "ScalePassage";
-    case TextureType::Bariolage:        return "Bariolage";
+    case TextureType::SingleLine:
+      return "SingleLine";
+    case TextureType::ImpliedPolyphony:
+      return "ImpliedPolyphony";
+    case TextureType::FullChords:
+      return "FullChords";
+    case TextureType::Arpeggiated:
+      return "Arpeggiated";
+    case TextureType::ScalePassage:
+      return "ScalePassage";
+    case TextureType::Bariolage:
+      return "Bariolage";
   }
   return "Unknown";  // NOLINT(clang-diagnostic-covered-switch-default): future-proof
 }
 
 const char* variationTypeToString(VariationType type) {
   switch (type) {
-    case VariationType::Theme:     return "Theme";
-    case VariationType::Lyrical:   return "Lyrical";
-    case VariationType::Rhythmic:  return "Rhythmic";
-    case VariationType::Virtuosic: return "Virtuosic";
-    case VariationType::Chordal:   return "Chordal";
+    case VariationType::Theme:
+      return "Theme";
+    case VariationType::Lyrical:
+      return "Lyrical";
+    case VariationType::Rhythmic:
+      return "Rhythmic";
+    case VariationType::Virtuosic:
+      return "Virtuosic";
+    case VariationType::Chordal:
+      return "Chordal";
   }
   return "Unknown";  // NOLINT(clang-diagnostic-covered-switch-default): future-proof
 }

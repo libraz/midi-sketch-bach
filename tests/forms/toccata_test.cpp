@@ -196,10 +196,9 @@ TEST(ToccataTest, OpeningSectionHasFastNotes) {
 
   EXPECT_GT(gesture_note_count, 0) << "Gesture phase should have notes on voice 0";
   // The majority of gesture notes should be 16th notes.
-  float fast_ratio = static_cast<float>(fast_note_count) /
-                     static_cast<float>(gesture_note_count);
-  EXPECT_GE(fast_ratio, 0.55f)
-      << "Expected >= 55% 16th notes in Gesture, got " << (fast_ratio * 100.0f) << "%";
+  float fast_ratio = static_cast<float>(fast_note_count) / static_cast<float>(gesture_note_count);
+  EXPECT_GE(fast_ratio, 0.55f) << "Expected >= 55% 16th notes in Gesture, got "
+                               << (fast_ratio * 100.0f) << "%";
 }
 
 // ---------------------------------------------------------------------------
@@ -218,8 +217,7 @@ TEST(ToccataTest, DeterministicOutput) {
   for (size_t track_idx = 0; track_idx < result1.tracks.size(); ++track_idx) {
     const auto& notes1 = result1.tracks[track_idx].notes;
     const auto& notes2 = result2.tracks[track_idx].notes;
-    ASSERT_EQ(notes1.size(), notes2.size())
-        << "Track " << track_idx << " note count differs";
+    ASSERT_EQ(notes1.size(), notes2.size()) << "Track " << track_idx << " note count differs";
 
     for (size_t note_idx = 0; note_idx < notes1.size(); ++note_idx) {
       EXPECT_EQ(notes1[note_idx].start_tick, notes2[note_idx].start_tick)
@@ -304,10 +302,8 @@ TEST(ToccataTest, AllNotesInRange_FourVoices) {
 
   // Voice 3 (Positiv): 43-67.
   for (const auto& note : result.tracks[3].notes) {
-    EXPECT_GE(note.pitch, 43)
-        << "Positiv pitch below range: " << static_cast<int>(note.pitch);
-    EXPECT_LE(note.pitch, 67)
-        << "Positiv pitch above range: " << static_cast<int>(note.pitch);
+    EXPECT_GE(note.pitch, 43) << "Positiv pitch below range: " << static_cast<int>(note.pitch);
+    EXPECT_LE(note.pitch, 67) << "Positiv pitch above range: " << static_cast<int>(note.pitch);
   }
 }
 
@@ -332,8 +328,7 @@ TEST(ToccataTest, MultipleVoicesActive) {
   }
 
   // At least 2 voices should be active (opening on voice 0, recitative on voice 1).
-  EXPECT_GE(active_tracks, 2)
-      << "At least 2 voices should have notes in a toccata";
+  EXPECT_GE(active_tracks, 2) << "At least 2 voices should have notes in a toccata";
 }
 
 TEST(ToccataTest, AllVoicesActiveInDrive) {
@@ -369,8 +364,8 @@ TEST(ToccataTest, AllNotesVelocity80) {
   for (const auto& track : result.tracks) {
     for (const auto& note : track.notes) {
       EXPECT_EQ(note.velocity, 80u)
-          << "Organ velocity must be 80, found " << static_cast<int>(note.velocity)
-          << " in track " << track.name;
+          << "Organ velocity must be 80, found " << static_cast<int>(note.velocity) << " in track "
+          << track.name;
     }
   }
 }
@@ -404,8 +399,7 @@ TEST(ToccataTest, AllNotesHavePositiveDuration) {
   for (const auto& track : result.tracks) {
     for (const auto& note : track.notes) {
       EXPECT_GT(note.duration, 0u)
-          << "Note at tick " << note.start_tick << " has zero duration in track "
-          << track.name;
+          << "Note at tick " << note.start_tick << " has zero duration in track " << track.name;
     }
   }
 }
@@ -555,8 +549,7 @@ TEST(ToccataTest, EnergyCurve_TwoPeak) {
         }
       }
     }
-    return (count > 0) ? static_cast<float>(total_dur) / static_cast<float>(count)
-                       : 0.0f;
+    return (count > 0) ? static_cast<float>(total_dur) / static_cast<float>(count) : 0.0f;
   };
 
   float gesture_avg = avgDuration(result.phases[0].start, result.phases[0].end);
@@ -663,7 +656,8 @@ TEST(ToccataTest, OpeningHasGrandPause) {
 
   const auto& notes = result.tracks[0].notes;
   for (size_t i = 1; i < notes.size(); ++i) {
-    if (notes[i].start_tick >= gesture_end) break;
+    if (notes[i].start_tick >= gesture_end)
+      break;
     Tick prev_end = notes[i - 1].start_tick + notes[i - 1].duration;
     if (notes[i].start_tick > prev_end) {
       Tick gap = notes[i].start_tick - prev_end;
@@ -674,8 +668,7 @@ TEST(ToccataTest, OpeningHasGrandPause) {
     }
   }
 
-  EXPECT_TRUE(found_gap)
-      << "Gesture phase should have a grand pause (960+ tick gap)";
+  EXPECT_TRUE(found_gap) << "Gesture phase should have a grand pause (960+ tick gap)";
 }
 
 TEST(ToccataTest, OpeningHasOctaveDoubling) {
@@ -692,9 +685,11 @@ TEST(ToccataTest, OpeningHasOctaveDoubling) {
   bool found_octave = false;
 
   for (const auto& n0 : result.tracks[0].notes) {
-    if (n0.start_tick >= opening_end) break;
+    if (n0.start_tick >= opening_end)
+      break;
     for (const auto& n1 : result.tracks[1].notes) {
-      if (n1.start_tick > n0.start_tick) break;
+      if (n1.start_tick > n0.start_tick)
+        break;
       if (n1.start_tick == n0.start_tick) {
         int diff = absoluteInterval(n0.pitch, n1.pitch);
         if (diff == 12) {
@@ -703,11 +698,11 @@ TEST(ToccataTest, OpeningHasOctaveDoubling) {
         }
       }
     }
-    if (found_octave) break;
+    if (found_octave)
+      break;
   }
 
-  EXPECT_TRUE(found_octave)
-      << "Opening should have octave doubling between Manual I and Manual II";
+  EXPECT_TRUE(found_octave) << "Opening should have octave doubling between Manual I and Manual II";
 }
 
 TEST(ToccataTest, OpeningHasBlockChord) {
@@ -727,12 +722,15 @@ TEST(ToccataTest, OpeningHasBlockChord) {
   bool found_block = false;
 
   for (const auto& n0 : result.tracks[0].notes) {
-    if (n0.start_tick >= opening_end) break;
-    if (n0.duration < kMinBlockDuration) continue;
+    if (n0.start_tick >= opening_end)
+      break;
+    if (n0.duration < kMinBlockDuration)
+      continue;
     // Check if voice 1 also has a note at the same tick.
     bool v1_present = false;
     for (const auto& n1 : result.tracks[1].notes) {
-      if (n1.start_tick > n0.start_tick) break;
+      if (n1.start_tick > n0.start_tick)
+        break;
       if (n1.start_tick == n0.start_tick && n1.duration >= kMinBlockDuration) {
         v1_present = true;
         break;
@@ -741,7 +739,8 @@ TEST(ToccataTest, OpeningHasBlockChord) {
     // Check voice 2 (pedal).
     bool v2_present = false;
     for (const auto& n2 : result.tracks[2].notes) {
-      if (n2.start_tick > n0.start_tick) break;
+      if (n2.start_tick > n0.start_tick)
+        break;
       if (n2.start_tick == n0.start_tick) {
         v2_present = true;
         break;
@@ -753,8 +752,7 @@ TEST(ToccataTest, OpeningHasBlockChord) {
     }
   }
 
-  EXPECT_TRUE(found_block)
-      << "Opening should have a block chord across 3+ voices";
+  EXPECT_TRUE(found_block) << "Opening should have a block chord across 3+ voices";
 }
 
 TEST(ToccataTest, RecitativeHasRhythmicVariety) {
@@ -778,8 +776,7 @@ TEST(ToccataTest, RecitativeHasRhythmicVariety) {
   }
 
   EXPECT_GE(durations.size(), 4u)
-      << "Recitative should have at least 4 distinct note durations, found "
-      << durations.size();
+      << "Recitative should have at least 4 distinct note durations, found " << durations.size();
 }
 
 TEST(ToccataTest, RecitativeHasLeaps) {
@@ -801,19 +798,20 @@ TEST(ToccataTest, RecitativeHasLeaps) {
     for (size_t i = 1; i < notes.size(); ++i) {
       if (notes[i].start_tick < recit_start || notes[i].start_tick >= recit_end)
         continue;
-      if (notes[i - 1].start_tick < recit_start) continue;
+      if (notes[i - 1].start_tick < recit_start)
+        continue;
       ++pair_count;
       int interval = absoluteInterval(notes[i].pitch, notes[i - 1].pitch);
-      if (interval >= 5) ++leap_count;
+      if (interval >= 5)
+        ++leap_count;
     }
   }
 
   if (pair_count > 0) {
-    float leap_ratio = static_cast<float>(leap_count) /
-                       static_cast<float>(pair_count);
-    EXPECT_GE(leap_ratio, 0.10f)
-        << "Recitative should have >= 10% leaps (5+ semitones), got "
-        << (leap_ratio * 100.0f) << "% (" << leap_count << "/" << pair_count << ")";
+    float leap_ratio = static_cast<float>(leap_count) / static_cast<float>(pair_count);
+    EXPECT_GE(leap_ratio, 0.10f) << "Recitative should have >= 10% leaps (5+ semitones), got "
+                                 << (leap_ratio * 100.0f) << "% (" << leap_count << "/"
+                                 << pair_count << ")";
   }
 }
 
@@ -891,9 +889,8 @@ TEST(ToccataTest, PedalPhaseActivity) {
     }
   }
 
-  EXPECT_GE(phases_with_pedal, 6)
-      << "Pedal should be active in at least 6 of 8 phases, found "
-      << phases_with_pedal;
+  EXPECT_GE(phases_with_pedal, 6) << "Pedal should be active in at least 6 of 8 phases, found "
+                                  << phases_with_pedal;
 }
 
 // ---------------------------------------------------------------------------
@@ -972,8 +969,7 @@ TEST(ToccataTest, DramaticusDiscreteBarAllocation_24) {
   std::vector<Tick> expected_bars = {2, 2, 4, 3, 2, 4, 4, 3};
   for (size_t i = 0; i < 8; ++i) {
     Tick actual_bars = (result.phases[i].end - result.phases[i].start) / kTicksPerBar;
-    EXPECT_EQ(actual_bars, expected_bars[i])
-        << "Phase " << i << " bar count mismatch";
+    EXPECT_EQ(actual_bars, expected_bars[i]) << "Phase " << i << " bar count mismatch";
   }
 }
 
@@ -987,8 +983,7 @@ TEST(ToccataTest, DramaticusAllPhasesHaveNotes) {
   for (size_t pi = 0; pi < result.phases.size(); ++pi) {
     size_t total = 0;
     for (const auto& track : result.tracks) {
-      total += countNotesInRange(track, result.phases[pi].start,
-                                 result.phases[pi].end);
+      total += countNotesInRange(track, result.phases[pi].start, result.phases[pi].end);
     }
     EXPECT_GT(total, 0u) << "Phase " << pi << " should have notes";
   }
@@ -1017,22 +1012,24 @@ TEST(ToccataTest, FinalChordIsPicardy) {
 
     for (const auto& track : result.tracks) {
       for (auto iter = track.notes.rbegin(); iter != track.notes.rend(); ++iter) {
-        if (iter->start_tick < final_bar_start) break;
+        if (iter->start_tick < final_bar_start)
+          break;
         if (iter->pitch % 12 == major_third_pc) {
           found_picardy = true;
           break;
         }
       }
-      if (found_picardy) break;
+      if (found_picardy)
+        break;
     }
-    if (found_picardy) picardy_count++;
+    if (found_picardy)
+      picardy_count++;
   }
 
   // At least 3 out of 5 seeds should produce a Picardy third.
-  EXPECT_GE(picardy_count, 3)
-      << "Picardy third (F# for D minor, pc="
-      << static_cast<int>(major_third_pc) << ") found in "
-      << picardy_count << "/" << kNumSeeds << " seeds";
+  EXPECT_GE(picardy_count, 3) << "Picardy third (F# for D minor, pc="
+                              << static_cast<int>(major_third_pc) << ") found in " << picardy_count
+                              << "/" << kNumSeeds << " seeds";
 }
 
 // ---------------------------------------------------------------------------
@@ -1086,9 +1083,9 @@ TEST(ToccataTest, FigurePersistenceCreatesRepeats) {
   }
 
   // At least 3/5 seeds should produce long same-duration runs.
-  EXPECT_GE(seeds_with_runs, 3)
-      << "Expected >= 3/" << kNumSeeds << " seeds to produce duration runs of "
-      << kMinRunLength << "+, found " << seeds_with_runs;
+  EXPECT_GE(seeds_with_runs, 3) << "Expected >= 3/" << kNumSeeds
+                                << " seeds to produce duration runs of " << kMinRunLength
+                                << "+, found " << seeds_with_runs;
 }
 
 // ---------------------------------------------------------------------------
@@ -1120,9 +1117,8 @@ TEST(ToccataTest, ClimbMotifDurationsCapped) {
         }
       }
     }
-    EXPECT_EQ(held_count, 0)
-        << "Phase D voice 0 should have no held notes (>= 720 ticks), found "
-        << held_count << " out of " << total_v0;
+    EXPECT_EQ(held_count, 0) << "Phase D voice 0 should have no held notes (>= 720 ticks), found "
+                             << held_count << " out of " << total_v0;
   }
 
   // Phase F (idx 5) voice 0: no notes >= dotted quarter.
@@ -1139,9 +1135,8 @@ TEST(ToccataTest, ClimbMotifDurationsCapped) {
         }
       }
     }
-    EXPECT_EQ(held_count, 0)
-        << "Phase F voice 0 should have no held notes (>= 720 ticks), found "
-        << held_count << " out of " << total_v0;
+    EXPECT_EQ(held_count, 0) << "Phase F voice 0 should have no held notes (>= 720 ticks), found "
+                             << held_count << " out of " << total_v0;
   }
 }
 
@@ -1163,9 +1158,7 @@ TEST(ToccataTest, StrongBeatUnresolvedNCTRate) {
     v0_notes.push_back(note);
   }
   std::sort(v0_notes.begin(), v0_notes.end(),
-            [](const NoteEvent& a, const NoteEvent& b) {
-              return a.start_tick < b.start_tick;
-            });
+            [](const NoteEvent& a, const NoteEvent& b) { return a.start_tick < b.start_tick; });
 
   int strong_beat_count = 0;
   int unresolved_nct_count = 0;
@@ -1173,18 +1166,20 @@ TEST(ToccataTest, StrongBeatUnresolvedNCTRate) {
   for (size_t i = 0; i < v0_notes.size(); ++i) {
     Tick pos = positionInBar(v0_notes[i].start_tick);
     // Strong beats: beat 0 and beat 2.
-    if (pos != 0 && pos != kTicksPerBeat * 2) continue;
+    if (pos != 0 && pos != kTicksPerBeat * 2)
+      continue;
     strong_beat_count++;
 
     // Check if this note is a chord tone.
     const HarmonicEvent& harm = result.timeline.getAt(v0_notes[i].start_tick);
-    if (isChordTone(v0_notes[i].pitch, harm)) continue;
+    if (isChordTone(v0_notes[i].pitch, harm))
+      continue;
 
     // Non-chord-tone: check if next note resolves by step (1-2 semitones).
     bool resolved = false;
     if (i + 1 < v0_notes.size()) {
-      int step = std::abs(static_cast<int>(v0_notes[i + 1].pitch)
-                          - static_cast<int>(v0_notes[i].pitch));
+      int step =
+          std::abs(static_cast<int>(v0_notes[i + 1].pitch) - static_cast<int>(v0_notes[i].pitch));
       if (step <= 2) {
         resolved = true;
       }
@@ -1196,12 +1191,10 @@ TEST(ToccataTest, StrongBeatUnresolvedNCTRate) {
   }
 
   if (strong_beat_count > 0) {
-    float rate = static_cast<float>(unresolved_nct_count)
-                 / static_cast<float>(strong_beat_count);
-    EXPECT_LE(rate, 0.15f)
-        << "Unresolved strong-beat NCT rate should be <= 15%, got "
-        << (rate * 100.0f) << "% (" << unresolved_nct_count
-        << "/" << strong_beat_count << ")";
+    float rate = static_cast<float>(unresolved_nct_count) / static_cast<float>(strong_beat_count);
+    EXPECT_LE(rate, 0.15f) << "Unresolved strong-beat NCT rate should be <= 15%, got "
+                           << (rate * 100.0f) << "% (" << unresolved_nct_count << "/"
+                           << strong_beat_count << ")";
   }
 }
 

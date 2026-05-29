@@ -88,7 +88,8 @@ inline T selectWeighted(std::mt19937& rng, const std::vector<T>& options,
   float cumulative = 0.0f;
   for (size_t i = 0; i < options.size(); ++i) {
     cumulative += weights[i];
-    if (roll < cumulative) return options[i];
+    if (roll < cumulative)
+      return options[i];
   }
   return options.back();
 }
@@ -114,7 +115,8 @@ inline uint32_t splitmix32(uint32_t seed, uint32_t index) {
 inline uint32_t generateRandomSeed() {
   std::random_device device;
   uint32_t result = device();
-  if (result == 0) result = 1;
+  if (result == 0)
+    result = 1;
   return result;
 }
 

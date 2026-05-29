@@ -2,10 +2,10 @@
 
 #include "solo_string/flow/arpeggio_pattern.h"
 
+#include <gtest/gtest.h>
+
 #include <algorithm>
 #include <random>
-
-#include <gtest/gtest.h>
 
 namespace bach {
 namespace {
@@ -14,13 +14,12 @@ namespace {
 ///
 /// Uses a fixed seed for deterministic tests. is_section_start=true bypasses
 /// the 70% persistence branch so each call does a fresh weighted selection.
-ArpeggioPattern generatePatternForTest(const std::vector<int>& chord_degrees,
-                                       ArcPhase phase, PatternRole role,
-                                       bool use_open_strings,
+ArpeggioPattern generatePatternForTest(const std::vector<int>& chord_degrees, ArcPhase phase,
+                                       PatternRole role, bool use_open_strings,
                                        uint32_t seed = 42) {
   std::mt19937 rng(seed);
-  return generatePattern(chord_degrees, phase, role, use_open_strings,
-                         rng, ArpeggioPatternType::Rising,
+  return generatePattern(chord_degrees, phase, role, use_open_strings, rng,
+                         ArpeggioPatternType::Rising,
                          /*is_section_start=*/true);
 }
 
@@ -71,65 +70,40 @@ TEST(PatternRoleOrderTest, SingleRoleIsValid) {
 }
 
 TEST(PatternRoleOrderTest, FullOrderIsValid) {
-  std::vector<PatternRole> roles = {
-    PatternRole::Drive,
-    PatternRole::Expand,
-    PatternRole::Sustain,
-    PatternRole::Release
-  };
+  std::vector<PatternRole> roles = {PatternRole::Drive, PatternRole::Expand, PatternRole::Sustain,
+                                    PatternRole::Release};
   EXPECT_TRUE(isPatternRoleOrderValid(roles));
 }
 
 TEST(PatternRoleOrderTest, RepeatedRolesValid) {
-  std::vector<PatternRole> roles = {
-    PatternRole::Drive,
-    PatternRole::Drive,
-    PatternRole::Expand,
-    PatternRole::Sustain,
-    PatternRole::Sustain
-  };
+  std::vector<PatternRole> roles = {PatternRole::Drive, PatternRole::Drive, PatternRole::Expand,
+                                    PatternRole::Sustain, PatternRole::Sustain};
   EXPECT_TRUE(isPatternRoleOrderValid(roles));
 }
 
 TEST(PatternRoleOrderTest, SkippedRolesValid) {
   // Drive -> Release (skipping Expand and Sustain) is valid.
-  std::vector<PatternRole> roles = {
-    PatternRole::Drive,
-    PatternRole::Release
-  };
+  std::vector<PatternRole> roles = {PatternRole::Drive, PatternRole::Release};
   EXPECT_TRUE(isPatternRoleOrderValid(roles));
 }
 
 TEST(PatternRoleOrderTest, ReversedOrderInvalid) {
-  std::vector<PatternRole> roles = {
-    PatternRole::Release,
-    PatternRole::Drive
-  };
+  std::vector<PatternRole> roles = {PatternRole::Release, PatternRole::Drive};
   EXPECT_FALSE(isPatternRoleOrderValid(roles));
 }
 
 TEST(PatternRoleOrderTest, ExpandBeforeDriveInvalid) {
-  std::vector<PatternRole> roles = {
-    PatternRole::Expand,
-    PatternRole::Drive
-  };
+  std::vector<PatternRole> roles = {PatternRole::Expand, PatternRole::Drive};
   EXPECT_FALSE(isPatternRoleOrderValid(roles));
 }
 
 TEST(PatternRoleOrderTest, SustainBeforeExpandInvalid) {
-  std::vector<PatternRole> roles = {
-    PatternRole::Drive,
-    PatternRole::Sustain,
-    PatternRole::Expand
-  };
+  std::vector<PatternRole> roles = {PatternRole::Drive, PatternRole::Sustain, PatternRole::Expand};
   EXPECT_FALSE(isPatternRoleOrderValid(roles));
 }
 
 TEST(PatternRoleOrderTest, ReleaseBeforeSustainInvalid) {
-  std::vector<PatternRole> roles = {
-    PatternRole::Release,
-    PatternRole::Sustain
-  };
+  std::vector<PatternRole> roles = {PatternRole::Release, PatternRole::Sustain};
   EXPECT_FALSE(isPatternRoleOrderValid(roles));
 }
 
@@ -142,16 +116,14 @@ TEST(GetAllowedPatternsForPhaseTest, AscentPatternsNoFallingNoPedal) {
   EXPECT_FALSE(allowed.empty());
 
   // Rising, Oscillating, ScaleFragment should be present.
-  EXPECT_NE(std::find(allowed.begin(), allowed.end(), ArpeggioPatternType::Rising),
-            allowed.end());
+  EXPECT_NE(std::find(allowed.begin(), allowed.end(), ArpeggioPatternType::Rising), allowed.end());
   EXPECT_NE(std::find(allowed.begin(), allowed.end(), ArpeggioPatternType::Oscillating),
             allowed.end());
   EXPECT_NE(std::find(allowed.begin(), allowed.end(), ArpeggioPatternType::ScaleFragment),
             allowed.end());
 
   // Falling, PedalPoint should NOT be present.
-  EXPECT_EQ(std::find(allowed.begin(), allowed.end(), ArpeggioPatternType::Falling),
-            allowed.end());
+  EXPECT_EQ(std::find(allowed.begin(), allowed.end(), ArpeggioPatternType::Falling), allowed.end());
   EXPECT_EQ(std::find(allowed.begin(), allowed.end(), ArpeggioPatternType::PedalPoint),
             allowed.end());
 }
@@ -160,10 +132,8 @@ TEST(GetAllowedPatternsForPhaseTest, PeakAllTypesAllowed) {
   auto allowed = getAllowedPatternsForPhase(ArcPhase::Peak);
   EXPECT_EQ(allowed.size(), 5u);  // All 5 types
 
-  EXPECT_NE(std::find(allowed.begin(), allowed.end(), ArpeggioPatternType::Rising),
-            allowed.end());
-  EXPECT_NE(std::find(allowed.begin(), allowed.end(), ArpeggioPatternType::Falling),
-            allowed.end());
+  EXPECT_NE(std::find(allowed.begin(), allowed.end(), ArpeggioPatternType::Rising), allowed.end());
+  EXPECT_NE(std::find(allowed.begin(), allowed.end(), ArpeggioPatternType::Falling), allowed.end());
   EXPECT_NE(std::find(allowed.begin(), allowed.end(), ArpeggioPatternType::Oscillating),
             allowed.end());
   EXPECT_NE(std::find(allowed.begin(), allowed.end(), ArpeggioPatternType::PedalPoint),
@@ -177,16 +147,14 @@ TEST(GetAllowedPatternsForPhaseTest, DescentNoRisingNoScaleFragment) {
   EXPECT_FALSE(allowed.empty());
 
   // Falling, Oscillating, PedalPoint should be present.
-  EXPECT_NE(std::find(allowed.begin(), allowed.end(), ArpeggioPatternType::Falling),
-            allowed.end());
+  EXPECT_NE(std::find(allowed.begin(), allowed.end(), ArpeggioPatternType::Falling), allowed.end());
   EXPECT_NE(std::find(allowed.begin(), allowed.end(), ArpeggioPatternType::Oscillating),
             allowed.end());
   EXPECT_NE(std::find(allowed.begin(), allowed.end(), ArpeggioPatternType::PedalPoint),
             allowed.end());
 
   // Rising, ScaleFragment should NOT be present.
-  EXPECT_EQ(std::find(allowed.begin(), allowed.end(), ArpeggioPatternType::Rising),
-            allowed.end());
+  EXPECT_EQ(std::find(allowed.begin(), allowed.end(), ArpeggioPatternType::Rising), allowed.end());
   EXPECT_EQ(std::find(allowed.begin(), allowed.end(), ArpeggioPatternType::ScaleFragment),
             allowed.end());
 }
@@ -196,8 +164,7 @@ TEST(GetAllowedPatternsForPhaseTest, DescentNoRisingNoScaleFragment) {
 // ---------------------------------------------------------------------------
 
 TEST(GeneratePatternTest, DriveAscentProducesAllowedType) {
-  auto pattern = generatePatternForTest(
-      {0, 4, 7}, ArcPhase::Ascent, PatternRole::Drive, false);
+  auto pattern = generatePatternForTest({0, 4, 7}, ArcPhase::Ascent, PatternRole::Drive, false);
   auto allowed = getAllowedPatternsForPhase(ArcPhase::Ascent);
   EXPECT_NE(std::find(allowed.begin(), allowed.end(), pattern.type), allowed.end());
   EXPECT_EQ(pattern.role, PatternRole::Drive);
@@ -207,8 +174,7 @@ TEST(GeneratePatternTest, DriveAscentProducesAllowedType) {
 }
 
 TEST(GeneratePatternTest, ReleaseDescentProducesAllowedType) {
-  auto pattern = generatePatternForTest(
-      {0, 4, 7}, ArcPhase::Descent, PatternRole::Release, false);
+  auto pattern = generatePatternForTest({0, 4, 7}, ArcPhase::Descent, PatternRole::Release, false);
   auto allowed = getAllowedPatternsForPhase(ArcPhase::Descent);
   EXPECT_NE(std::find(allowed.begin(), allowed.end(), pattern.type), allowed.end());
   EXPECT_EQ(pattern.role, PatternRole::Release);
@@ -216,8 +182,7 @@ TEST(GeneratePatternTest, ReleaseDescentProducesAllowedType) {
 }
 
 TEST(GeneratePatternTest, ExpandPeakProducesAllowedType) {
-  auto pattern = generatePatternForTest(
-      {0, 4, 7}, ArcPhase::Peak, PatternRole::Expand, false);
+  auto pattern = generatePatternForTest({0, 4, 7}, ArcPhase::Peak, PatternRole::Expand, false);
   auto allowed = getAllowedPatternsForPhase(ArcPhase::Peak);
   EXPECT_NE(std::find(allowed.begin(), allowed.end(), pattern.type), allowed.end());
   EXPECT_EQ(pattern.role, PatternRole::Expand);
@@ -225,8 +190,7 @@ TEST(GeneratePatternTest, ExpandPeakProducesAllowedType) {
 }
 
 TEST(GeneratePatternTest, SustainPeakProducesAllowedType) {
-  auto pattern = generatePatternForTest(
-      {0, 4, 7}, ArcPhase::Peak, PatternRole::Sustain, false);
+  auto pattern = generatePatternForTest({0, 4, 7}, ArcPhase::Peak, PatternRole::Sustain, false);
   auto allowed = getAllowedPatternsForPhase(ArcPhase::Peak);
   EXPECT_NE(std::find(allowed.begin(), allowed.end(), pattern.type), allowed.end());
   EXPECT_EQ(pattern.role, PatternRole::Sustain);
@@ -234,14 +198,12 @@ TEST(GeneratePatternTest, SustainPeakProducesAllowedType) {
 }
 
 TEST(GeneratePatternTest, OpenStringFlagPropagated) {
-  auto pattern = generatePatternForTest(
-      {0, 4, 7}, ArcPhase::Ascent, PatternRole::Drive, true);
+  auto pattern = generatePatternForTest({0, 4, 7}, ArcPhase::Ascent, PatternRole::Drive, true);
   EXPECT_TRUE(pattern.use_open_string);
 }
 
 TEST(GeneratePatternTest, EmptyChordDegreesUsesDefault) {
-  auto pattern = generatePatternForTest(
-      {}, ArcPhase::Ascent, PatternRole::Drive, false);
+  auto pattern = generatePatternForTest({}, ArcPhase::Ascent, PatternRole::Drive, false);
   // Should use default triad {0, 2, 4}.
   EXPECT_FALSE(pattern.degrees.empty());
 }
@@ -252,8 +214,7 @@ TEST(GeneratePatternTest, EmptyChordDegreesUsesDefault) {
 
 TEST(GeneratePatternTest, DescentDriveSelectsAllowedType) {
   // In Descent phase, Drive should not use Rising (forbidden).
-  auto pattern = generatePatternForTest(
-      {0, 4, 7}, ArcPhase::Descent, PatternRole::Drive, false);
+  auto pattern = generatePatternForTest({0, 4, 7}, ArcPhase::Descent, PatternRole::Drive, false);
   EXPECT_NE(pattern.type, ArpeggioPatternType::Rising);
   auto allowed = getAllowedPatternsForPhase(ArcPhase::Descent);
   EXPECT_NE(std::find(allowed.begin(), allowed.end(), pattern.type), allowed.end());
@@ -261,16 +222,14 @@ TEST(GeneratePatternTest, DescentDriveSelectsAllowedType) {
 
 TEST(GeneratePatternTest, AscentReleaseSelectsAllowedType) {
   // In Ascent phase, Release role should select an allowed type (no Falling).
-  auto pattern = generatePatternForTest(
-      {0, 4, 7}, ArcPhase::Ascent, PatternRole::Release, false);
+  auto pattern = generatePatternForTest({0, 4, 7}, ArcPhase::Ascent, PatternRole::Release, false);
   EXPECT_NE(pattern.type, ArpeggioPatternType::Falling);
   auto allowed = getAllowedPatternsForPhase(ArcPhase::Ascent);
   EXPECT_NE(std::find(allowed.begin(), allowed.end(), pattern.type), allowed.end());
 }
 
 TEST(GeneratePatternTest, DescentSustainSelectsAllowedType) {
-  auto pattern = generatePatternForTest(
-      {0, 4, 7}, ArcPhase::Descent, PatternRole::Sustain, false);
+  auto pattern = generatePatternForTest({0, 4, 7}, ArcPhase::Descent, PatternRole::Sustain, false);
   auto allowed = getAllowedPatternsForPhase(ArcPhase::Descent);
   EXPECT_NE(std::find(allowed.begin(), allowed.end(), pattern.type), allowed.end());
 }
@@ -279,8 +238,8 @@ TEST(GeneratePatternTest, ResultTypeAlwaysAllowedForPhase) {
   // Exhaustively check that the generated pattern type is in the allowed set
   // across multiple seeds.
   ArcPhase phases[] = {ArcPhase::Ascent, ArcPhase::Peak, ArcPhase::Descent};
-  PatternRole roles[] = {PatternRole::Drive, PatternRole::Expand,
-                         PatternRole::Sustain, PatternRole::Release};
+  PatternRole roles[] = {PatternRole::Drive, PatternRole::Expand, PatternRole::Sustain,
+                         PatternRole::Release};
 
   for (uint32_t seed = 1; seed <= 10; ++seed) {
     for (auto phase : phases) {
@@ -290,8 +249,7 @@ TEST(GeneratePatternTest, ResultTypeAlwaysAllowedForPhase) {
         bool found = std::find(allowed.begin(), allowed.end(), pattern.type) != allowed.end();
         EXPECT_TRUE(found) << "Pattern type " << arpeggioPatternTypeToString(pattern.type)
                            << " not allowed for phase " << arcPhaseToString(phase)
-                           << " (role=" << patternRoleToString(role)
-                           << ", seed=" << seed << ")";
+                           << " (role=" << patternRoleToString(role) << ", seed=" << seed << ")";
       }
     }
   }
@@ -304,8 +262,8 @@ TEST(GeneratePatternTest, ResultTypeAlwaysAllowedForPhase) {
 TEST(GeneratePatternTest, RisingDegreesAreSorted) {
   // Try multiple seeds until we get a Rising pattern to test arrangement.
   for (uint32_t seed = 1; seed <= 100; ++seed) {
-    auto pattern = generatePatternForTest(
-        {7, 0, 4, 2}, ArcPhase::Ascent, PatternRole::Drive, false, seed);
+    auto pattern =
+        generatePatternForTest({7, 0, 4, 2}, ArcPhase::Ascent, PatternRole::Drive, false, seed);
     if (pattern.type == ArpeggioPatternType::Rising) {
       ASSERT_FALSE(pattern.degrees.empty());
       for (size_t idx = 1; idx < pattern.degrees.size(); ++idx) {
@@ -321,8 +279,8 @@ TEST(GeneratePatternTest, RisingDegreesAreSorted) {
 TEST(GeneratePatternTest, FallingDegreesAreSortedDescending) {
   // Try multiple seeds until we get a Falling pattern to test arrangement.
   for (uint32_t seed = 1; seed <= 100; ++seed) {
-    auto pattern = generatePatternForTest(
-        {0, 4, 7}, ArcPhase::Descent, PatternRole::Drive, false, seed);
+    auto pattern =
+        generatePatternForTest({0, 4, 7}, ArcPhase::Descent, PatternRole::Drive, false, seed);
     if (pattern.type == ArpeggioPatternType::Falling) {
       ASSERT_FALSE(pattern.degrees.empty());
       for (size_t idx = 1; idx < pattern.degrees.size(); ++idx) {
@@ -338,8 +296,8 @@ TEST(GeneratePatternTest, FallingDegreesAreSortedDescending) {
 TEST(GeneratePatternTest, PedalPointHasLowestRepeated) {
   // Try multiple seeds until we get a PedalPoint pattern.
   for (uint32_t seed = 1; seed <= 100; ++seed) {
-    auto pattern = generatePatternForTest(
-        {0, 4, 7}, ArcPhase::Peak, PatternRole::Sustain, false, seed);
+    auto pattern =
+        generatePatternForTest({0, 4, 7}, ArcPhase::Peak, PatternRole::Sustain, false, seed);
     if (pattern.type == ArpeggioPatternType::PedalPoint) {
       // In pedal point, the lowest degree (0) should appear at even indices.
       ASSERT_GE(pattern.degrees.size(), 4u);
@@ -354,8 +312,8 @@ TEST(GeneratePatternTest, PedalPointHasLowestRepeated) {
 TEST(GeneratePatternTest, ScaleFragmentHasConsecutiveDegrees) {
   // Try multiple seeds until we get a ScaleFragment pattern.
   for (uint32_t seed = 1; seed <= 100; ++seed) {
-    auto pattern = generatePatternForTest(
-        {0, 4, 7}, ArcPhase::Ascent, PatternRole::Release, false, seed);
+    auto pattern =
+        generatePatternForTest({0, 4, 7}, ArcPhase::Ascent, PatternRole::Release, false, seed);
     if (pattern.type == ArpeggioPatternType::ScaleFragment) {
       // ScaleFragment fills stepwise between min and max of input.
       ASSERT_FALSE(pattern.degrees.empty());
@@ -370,8 +328,7 @@ TEST(GeneratePatternTest, ScaleFragmentHasConsecutiveDegrees) {
 }
 
 TEST(GeneratePatternTest, SingleDegreeHandled) {
-  auto pattern = generatePatternForTest(
-      {5}, ArcPhase::Ascent, PatternRole::Drive, false);
+  auto pattern = generatePatternForTest({5}, ArcPhase::Ascent, PatternRole::Drive, false);
   ASSERT_FALSE(pattern.degrees.empty());
   EXPECT_EQ(pattern.degrees[0], 5);
 }

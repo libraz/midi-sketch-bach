@@ -36,7 +36,7 @@ typedef enum {
 /// @brief MIDI binary output.
 typedef struct {
   uint8_t* data;  ///< MIDI binary data
-  size_t size;     ///< Size in bytes
+  size_t size;    ///< Size in bytes
 } BachMidiData;
 
 /// @brief Event JSON output.

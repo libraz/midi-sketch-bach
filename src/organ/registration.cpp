@@ -32,17 +32,19 @@ constexpr uint8_t kMaxMidiValue = 127;
 /// @param energy Energy level in [0,1].
 /// @return CC#7 value (0-127).
 uint8_t energyToVolume(float energy) {
-  if (energy < 0.3f) return 64;
-  if (energy < 0.6f) return 80;
-  if (energy < 0.8f) return 100;
+  if (energy < 0.3f)
+    return 64;
+  if (energy < 0.6f)
+    return 80;
+  if (energy < 0.8f)
+    return 100;
   return 120;
 }
 
 /// @brief Insert registration CC events into matching tracks.
 /// @param tracks Track vector to search and modify.
 /// @param events CC events to insert (each has a channel in its status byte).
-void insertEventsIntoTracks(std::vector<Track>& tracks,
-                            const std::vector<MidiEvent>& events) {
+void insertEventsIntoTracks(std::vector<Track>& tracks, const std::vector<MidiEvent>& events) {
   for (const auto& evt : events) {
     uint8_t event_channel = evt.status & 0x0F;
     for (auto& track : tracks) {
@@ -64,10 +66,10 @@ RegistrationPlan createDefaultRegistrationPlan() {
   RegistrationPlan plan;
 
   // Exposition: standard organ tone, quieter
-  plan.exposition.manual1_program = 19;   // Church Organ
-  plan.exposition.manual2_program = 20;   // Reed Organ
-  plan.exposition.manual3_program = 19;   // Church Organ
-  plan.exposition.pedal_program = 19;     // Church Organ
+  plan.exposition.manual1_program = 19;  // Church Organ
+  plan.exposition.manual2_program = 20;  // Reed Organ
+  plan.exposition.manual3_program = 19;  // Church Organ
+  plan.exposition.pedal_program = 19;    // Church Organ
   plan.exposition.velocity_hint = 75;
 
   // Stretto: fuller registration, all Church Organ
@@ -87,8 +89,7 @@ RegistrationPlan createDefaultRegistrationPlan() {
   return plan;
 }
 
-const Registration& getRegistrationForPhase(const RegistrationPlan& plan,
-                                            FuguePhase phase,
+const Registration& getRegistrationForPhase(const RegistrationPlan& plan, FuguePhase phase,
                                             bool is_coda) {
   if (is_coda) {
     return plan.coda;
@@ -137,11 +138,8 @@ std::vector<MidiEvent> generateRegistrationEvents(const Registration& reg, Tick 
   return events;
 }
 
-void applyRegistrationPlan(std::vector<Track>& tracks,
-                           const RegistrationPlan& plan,
-                           Tick exposition_tick,
-                           Tick stretto_tick,
-                           Tick coda_tick) {
+void applyRegistrationPlan(std::vector<Track>& tracks, const RegistrationPlan& plan,
+                           Tick exposition_tick, Tick stretto_tick, Tick coda_tick) {
   // Always insert exposition registration
   auto expo_events = generateRegistrationEvents(plan.exposition, exposition_tick);
   insertEventsIntoTracks(tracks, expo_events);
@@ -184,12 +182,12 @@ std::vector<MidiEvent> generateEnergyRegistrationEvents(
 // ---------------------------------------------------------------------------
 
 void ExtendedRegistrationPlan::addPoint(Tick tick, const Registration& reg,
-                                         const std::string& label) {
+                                        const std::string& label) {
   points.push_back({tick, reg, label});
 }
 
-ExtendedRegistrationPlan createExtendedRegistrationPlan(
-    const std::vector<FugueSection>& sections, Tick total_duration) {
+ExtendedRegistrationPlan createExtendedRegistrationPlan(const std::vector<FugueSection>& sections,
+                                                        Tick total_duration) {
   ExtendedRegistrationPlan plan;
 
   for (const auto& section : sections) {
@@ -197,8 +195,8 @@ ExtendedRegistrationPlan createExtendedRegistrationPlan(
     // Design value table for velocity by section type (Principle 4).
     // These are fixed values, not searched.
     float energy = (total_duration > 0)
-        ? static_cast<float>(section.start_tick) / static_cast<float>(total_duration)
-        : 0.5f;
+                       ? static_cast<float>(section.start_tick) / static_cast<float>(total_duration)
+                       : 0.5f;
 
     switch (section.type) {
       case SectionType::Exposition:
@@ -232,7 +230,7 @@ ExtendedRegistrationPlan createExtendedRegistrationPlan(
 }
 
 void applyExtendedRegistrationPlan(std::vector<Track>& tracks,
-                                    const ExtendedRegistrationPlan& plan) {
+                                   const ExtendedRegistrationPlan& plan) {
   for (const auto& point : plan.points) {
     auto events = generateRegistrationEvents(point.registration, point.tick);
     insertEventsIntoTracks(tracks, events);

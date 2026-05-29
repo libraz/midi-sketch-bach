@@ -41,8 +41,7 @@ class HarpsichordModel : public PianoModel {
  public:
   /// @brief Construct a HarpsichordModel with the given configuration.
   /// @param config Harpsichord-specific range configuration.
-  explicit HarpsichordModel(
-      const HarpsichordConfig& config = HarpsichordConfig::standard());
+  explicit HarpsichordModel(const HarpsichordConfig& config = HarpsichordConfig::standard());
 
   /// @brief Harpsichords are not velocity sensitive.
   /// @return Always false.

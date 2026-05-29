@@ -152,8 +152,10 @@ std::vector<KeySignature> getCloselyRelatedKeys(const KeySignature& key_sig) {
 uint8_t tonicPitch(Key key, int octave) {
   // MIDI note = (octave + 1) * 12 + pitch_class
   int midi = (octave + 1) * 12 + static_cast<int>(key);
-  if (midi < 0) return 0;
-  if (midi > 127) return 127;
+  if (midi < 0)
+    return 0;
+  if (midi > 127)
+    return 127;
   return static_cast<uint8_t>(midi);
 }
 
@@ -161,18 +163,30 @@ uint8_t tonicPitch(Key key, int octave) {
 /// @param name Lowercase note name such as "c", "cs", "eb", "fs".
 /// @return Parsed Key, or Key::C on failure.
 static Key parseTonicFromName(const std::string& name) {
-  if (name == "c")  return Key::C;
-  if (name == "cs" || name == "c#") return Key::Cs;
-  if (name == "d")  return Key::D;
-  if (name == "eb" || name == "d#") return Key::Eb;
-  if (name == "e")  return Key::E;
-  if (name == "f")  return Key::F;
-  if (name == "fs" || name == "f#") return Key::Fs;
-  if (name == "g")  return Key::G;
-  if (name == "ab" || name == "g#") return Key::Ab;
-  if (name == "a")  return Key::A;
-  if (name == "bb" || name == "a#") return Key::Bb;
-  if (name == "b")  return Key::B;
+  if (name == "c")
+    return Key::C;
+  if (name == "cs" || name == "c#")
+    return Key::Cs;
+  if (name == "d")
+    return Key::D;
+  if (name == "eb" || name == "d#")
+    return Key::Eb;
+  if (name == "e")
+    return Key::E;
+  if (name == "f")
+    return Key::F;
+  if (name == "fs" || name == "f#")
+    return Key::Fs;
+  if (name == "g")
+    return Key::G;
+  if (name == "ab" || name == "g#")
+    return Key::Ab;
+  if (name == "a")
+    return Key::A;
+  if (name == "bb" || name == "a#")
+    return Key::Bb;
+  if (name == "b")
+    return Key::B;
   return Key::C;
 }
 

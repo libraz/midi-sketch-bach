@@ -2,10 +2,10 @@
 
 #include "forms/goldberg/variations/goldberg_crossing.h"
 
+#include <gtest/gtest.h>
+
 #include <algorithm>
 #include <numeric>
-
-#include <gtest/gtest.h>
 
 #include "core/pitch_utils.h"
 
@@ -99,9 +99,8 @@ TEST(CrossingGeneratorTest, RegisterSeparation) {
 
   // Upper voice should have a higher average pitch than lower voice,
   // even with crossing effects applied at some positions.
-  EXPECT_GT(upper_avg, lower_avg)
-      << "Upper voice average pitch (" << upper_avg
-      << ") should be higher than lower voice (" << lower_avg << ")";
+  EXPECT_GT(upper_avg, lower_avg) << "Upper voice average pitch (" << upper_avg
+                                  << ") should be higher than lower voice (" << lower_avg << ")";
 }
 
 // ---------------------------------------------------------------------------
@@ -131,8 +130,7 @@ TEST(CrossingGeneratorTest, BatterieHasLeaps) {
     }
   }
 
-  EXPECT_GT(leap_count, 0)
-      << "Batterie pattern should contain intervals > 5 semitones";
+  EXPECT_GT(leap_count, 0) << "Batterie pattern should contain intervals > 5 semitones";
 }
 
 // ---------------------------------------------------------------------------
@@ -156,14 +154,14 @@ TEST(CrossingGeneratorTest, NotesSpan32Bars) {
   Tick max_end = 0;
   for (const auto& note : result.notes) {
     Tick note_end = note.start_tick + note.duration;
-    if (note_end > max_end) max_end = note_end;
+    if (note_end > max_end)
+      max_end = note_end;
   }
 
   // The last note should end near the 64-bar boundary.
   EXPECT_GE(max_end, expected_span - 2 * ticks_per_bar)
       << "Notes should span close to 64 bars after binary repeats";
-  EXPECT_LE(max_end, expected_span + ticks_per_bar)
-      << "Notes should not extend far beyond 64 bars";
+  EXPECT_LE(max_end, expected_span + ticks_per_bar) << "Notes should not extend far beyond 64 bars";
 }
 
 // ---------------------------------------------------------------------------
@@ -208,8 +206,7 @@ TEST(CrossingGeneratorTest, DifferentSeedsDifferent) {
     }
   }
 
-  EXPECT_FALSE(all_same)
-      << "Different seeds should produce different pitch sequences";
+  EXPECT_FALSE(all_same) << "Different seeds should produce different pitch sequences";
 }
 
 // ---------------------------------------------------------------------------
@@ -222,18 +219,14 @@ TEST(CrossingGeneratorTest, AllVariationsSucceed) {
 
   for (int var_num : {8, 17, 20}) {
     auto result = gen.generate(var_num, grid, kGMajor, kThreeFour, kTestSeed);
-    EXPECT_TRUE(result.success)
-        << "Variation " << var_num << " should succeed";
-    EXPECT_FALSE(result.notes.empty())
-        << "Variation " << var_num << " should produce notes";
+    EXPECT_TRUE(result.success) << "Variation " << var_num << " should succeed";
+    EXPECT_FALSE(result.notes.empty()) << "Variation " << var_num << " should produce notes";
 
     // Verify both voices are present.
     int upper_count = noteCountForVoice(result.notes, 0);
     int lower_count = noteCountForVoice(result.notes, 1);
-    EXPECT_GT(upper_count, 0)
-        << "Variation " << var_num << " should have upper voice notes";
-    EXPECT_GT(lower_count, 0)
-        << "Variation " << var_num << " should have lower voice notes";
+    EXPECT_GT(upper_count, 0) << "Variation " << var_num << " should have upper voice notes";
+    EXPECT_GT(lower_count, 0) << "Variation " << var_num << " should have lower voice notes";
   }
 }
 
@@ -246,10 +239,8 @@ TEST(CrossingGeneratorTest, UnsupportedVariationFails) {
   auto grid = GoldbergStructuralGrid::createMajor();
 
   auto result = gen.generate(5, grid, kGMajor, kThreeFour, kTestSeed);
-  EXPECT_FALSE(result.success)
-      << "Unsupported variation number should return success=false";
-  EXPECT_TRUE(result.notes.empty())
-      << "Unsupported variation should produce no notes";
+  EXPECT_FALSE(result.success) << "Unsupported variation number should return success=false";
+  EXPECT_TRUE(result.notes.empty()) << "Unsupported variation should produce no notes";
 }
 
 }  // namespace

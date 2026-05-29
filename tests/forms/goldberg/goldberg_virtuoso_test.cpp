@@ -2,10 +2,10 @@
 
 #include "forms/goldberg/variations/goldberg_virtuoso.h"
 
+#include <gtest/gtest.h>
+
 #include <algorithm>
 #include <cstdint>
-
-#include <gtest/gtest.h>
 
 #include "core/basic_types.h"
 #include "core/pitch_utils.h"
@@ -22,9 +22,7 @@ constexpr uint32_t kTestSeed = 42;
 
 class VirtuosoGeneratorTest : public ::testing::Test {
  protected:
-  void SetUp() override {
-    grid_ = GoldbergStructuralGrid::createMajor();
-  }
+  void SetUp() override { grid_ = GoldbergStructuralGrid::createMajor(); }
 
   /// @brief Helper to generate a virtuoso variation.
   VirtuosoResult generateVariation(int var_num, uint32_t seed = kTestSeed) {
@@ -36,7 +34,8 @@ class VirtuosoGeneratorTest : public ::testing::Test {
     Tick max_end = 0;
     for (const auto& note : notes) {
       Tick note_end = note.start_tick + note.duration;
-      if (note_end > max_end) max_end = note_end;
+      if (note_end > max_end)
+        max_end = note_end;
     }
     return max_end;
   }
@@ -119,12 +118,11 @@ TEST_F(VirtuosoGeneratorTest, ScalePassageHasStepwiseMotion) {
   // Var 23 (Tirata/scale passage) should have predominantly stepwise motion.
   // At least 30% stepwise intervals (conservative threshold given chord tone
   // snapping and phrase boundaries).
-  float stepwise_ratio = static_cast<float>(stepwise_count) /
-                         static_cast<float>(total_intervals);
+  float stepwise_ratio = static_cast<float>(stepwise_count) / static_cast<float>(total_intervals);
   EXPECT_GE(stepwise_ratio, 0.30f)
       << "ScalePassage (Var 23) should have at least 30% stepwise intervals, "
-      << "got " << stepwise_ratio * 100.0f << "% (" << stepwise_count
-      << "/" << total_intervals << ")";
+      << "got " << stepwise_ratio * 100.0f << "% (" << stepwise_count << "/" << total_intervals
+      << ")";
 }
 
 // ---------------------------------------------------------------------------
@@ -143,8 +141,7 @@ TEST_F(VirtuosoGeneratorTest, BravuraHasHighDensity) {
   EXPECT_GT(result_var29.notes.size(), result_var11.notes.size())
       << "Var 29 (BravuraChordal, 4 voices) should have higher note density "
       << "than Var 11 (Toccata, 2 voices). "
-      << "Var 29: " << result_var29.notes.size()
-      << ", Var 11: " << result_var11.notes.size();
+      << "Var 29: " << result_var29.notes.size() << ", Var 11: " << result_var11.notes.size();
 }
 
 // ---------------------------------------------------------------------------
@@ -164,11 +161,9 @@ TEST_F(VirtuosoGeneratorTest, NotesSpan32Bars) {
     Tick max_end = maxEndTick(result.notes);
 
     EXPECT_GE(max_end, expected_span - 2 * ticks_per_bar)
-        << "Var " << var_num
-        << " notes should span close to 64 bars after binary repeats";
+        << "Var " << var_num << " notes should span close to 64 bars after binary repeats";
     EXPECT_LE(max_end, expected_span + ticks_per_bar)
-        << "Var " << var_num
-        << " notes should not extend far beyond 64 bars";
+        << "Var " << var_num << " notes should not extend far beyond 64 bars";
   }
 }
 
@@ -195,8 +190,7 @@ TEST_F(VirtuosoGeneratorTest, DifferentSeedsDifferent) {
     }
   }
 
-  EXPECT_GT(diff_count, 0)
-      << "Different seeds should produce different note pitches";
+  EXPECT_GT(diff_count, 0) << "Different seeds should produce different note pitches";
 }
 
 // ---------------------------------------------------------------------------
@@ -206,10 +200,8 @@ TEST_F(VirtuosoGeneratorTest, DifferentSeedsDifferent) {
 TEST_F(VirtuosoGeneratorTest, AllVariationsSucceed) {
   for (int var_num : {11, 23, 29}) {
     auto result = generateVariation(var_num);
-    EXPECT_TRUE(result.success)
-        << "Variation " << var_num << " should succeed";
-    EXPECT_FALSE(result.notes.empty())
-        << "Variation " << var_num << " should produce notes";
+    EXPECT_TRUE(result.success) << "Variation " << var_num << " should succeed";
+    EXPECT_FALSE(result.notes.empty()) << "Variation " << var_num << " should produce notes";
   }
 }
 
@@ -219,10 +211,8 @@ TEST_F(VirtuosoGeneratorTest, AllVariationsSucceed) {
 
 TEST_F(VirtuosoGeneratorTest, UnsupportedVariationFails) {
   auto result = generateVariation(99);
-  EXPECT_FALSE(result.success)
-      << "Unsupported variation number should return success=false";
-  EXPECT_TRUE(result.notes.empty())
-      << "Unsupported variation should produce no notes";
+  EXPECT_FALSE(result.success) << "Unsupported variation number should return success=false";
+  EXPECT_TRUE(result.notes.empty()) << "Unsupported variation should produce no notes";
 }
 
 // ---------------------------------------------------------------------------
@@ -238,12 +228,9 @@ TEST_F(VirtuosoGeneratorTest, BravuraHasMultipleVoices) {
   int voice1_count = noteCountForVoice(result.notes, 1);
   int voice2_count = noteCountForVoice(result.notes, 2);
 
-  EXPECT_GT(voice0_count, 0)
-      << "Var 29 should have voice 0 (upper melody) notes";
-  EXPECT_GT(voice1_count, 0)
-      << "Var 29 should have voice 1 (inner voice) notes";
-  EXPECT_GT(voice2_count, 0)
-      << "Var 29 should have voice 2 (inner voice) notes";
+  EXPECT_GT(voice0_count, 0) << "Var 29 should have voice 0 (upper melody) notes";
+  EXPECT_GT(voice1_count, 0) << "Var 29 should have voice 1 (inner voice) notes";
+  EXPECT_GT(voice2_count, 0) << "Var 29 should have voice 2 (inner voice) notes";
 }
 
 // ---------------------------------------------------------------------------
@@ -260,8 +247,7 @@ TEST_F(VirtuosoGeneratorTest, BassNotesHaveGoldbergBassSource) {
   for (const auto& note : result.notes) {
     if (note.voice == 1) {
       EXPECT_EQ(note.source, BachNoteSource::GoldbergBass)
-          << "Bass note at tick " << note.start_tick
-          << " should have GoldbergBass source";
+          << "Bass note at tick " << note.start_tick << " should have GoldbergBass source";
       ++bass_count;
     }
   }
@@ -296,9 +282,8 @@ TEST_F(VirtuosoGeneratorTest, ClimaxVelocityBoost) {
   float var29_avg = avgVelocity(result_var29.notes, 0);
 
   // Var 29 climax should have higher average velocity than Var 11.
-  EXPECT_GT(var29_avg, var11_avg)
-      << "Var 29 (climax) should have higher average velocity ("
-      << var29_avg << ") than Var 11 (" << var11_avg << ")";
+  EXPECT_GT(var29_avg, var11_avg) << "Var 29 (climax) should have higher average velocity ("
+                                  << var29_avg << ") than Var 11 (" << var11_avg << ")";
 }
 
 }  // namespace

@@ -48,15 +48,11 @@ class FigurenGenerator {
   /// @param seed Random seed for deterministic generation.
   /// @param instrument Optional keyboard instrument for range constraints.
   /// @return Vector of NoteEvents spanning 32 bars.
-  std::vector<NoteEvent> generate(
-      const FiguraProfile& profile,
-      const GoldbergStructuralGrid& grid,
-      const KeySignature& key,
-      const TimeSignature& time_sig,
-      uint8_t voice_index,
-      uint32_t seed,
-      const IKeyboardInstrument* instrument = nullptr,
-      float theme_strength = 0.0f) const;
+  std::vector<NoteEvent> generate(const FiguraProfile& profile, const GoldbergStructuralGrid& grid,
+                                  const KeySignature& key, const TimeSignature& time_sig,
+                                  uint8_t voice_index, uint32_t seed,
+                                  const IKeyboardInstrument* instrument = nullptr,
+                                  float theme_strength = 0.0f) const;
 
  private:
   /// @brief Generate one bar of Figura pattern.
@@ -69,18 +65,13 @@ class FigurenGenerator {
   /// @param shaping Phrase-level parameter adjustments.
   /// @param rng Random number generator.
   /// @return Vector of NoteEvents for one bar.
-  std::vector<NoteEvent> generateBarFigura(
-      const FiguraProfile& profile,
-      const StructuralBarInfo& bar_info,
-      const KeySignature& key,
-      const TimeSignature& time_sig,
-      uint8_t prev_pitch,
-      uint8_t register_center,
-      const PhraseShapingParams& shaping,
-      uint8_t range_low,
-      uint8_t range_high,
-      float theme_strength,
-      std::mt19937& rng) const;
+  std::vector<NoteEvent> generateBarFigura(const FiguraProfile& profile,
+                                           const StructuralBarInfo& bar_info,
+                                           const KeySignature& key, const TimeSignature& time_sig,
+                                           uint8_t prev_pitch, uint8_t register_center,
+                                           const PhraseShapingParams& shaping, uint8_t range_low,
+                                           uint8_t range_high, float theme_strength,
+                                           std::mt19937& rng) const;
 
   /// @brief Generate pitch pattern for a specific FiguraType from a harmonic pivot.
   /// @param type The Figura type to generate.
@@ -90,25 +81,18 @@ class FigurenGenerator {
   /// @param key Key signature for scale-aware generation.
   /// @param rng Random number generator.
   /// @return Vector of MIDI pitches forming the pattern.
-  std::vector<uint8_t> generateFiguraPattern(
-      FiguraType type,
-      uint8_t pivot_pitch,
-      uint8_t notes_per_beat,
-      DirectionBias direction,
-      const KeySignature& key,
-      int register_offset,
-      uint8_t range_low,
-      uint8_t range_high,
-      std::mt19937& rng) const;
+  std::vector<uint8_t> generateFiguraPattern(FiguraType type, uint8_t pivot_pitch,
+                                             uint8_t notes_per_beat, DirectionBias direction,
+                                             const KeySignature& key, int register_offset,
+                                             uint8_t range_low, uint8_t range_high,
+                                             std::mt19937& rng) const;
 
   /// @brief Apply phrase shaping adjustments to generated notes.
   /// @param notes Notes to adjust (modified in place).
   /// @param pos Current phrase position.
   /// @param tension Tension profile for the current bar.
-  void applyPhraseShaping(
-      std::vector<NoteEvent>& notes,
-      PhrasePosition pos,
-      const TensionProfile& tension) const;
+  void applyPhraseShaping(std::vector<NoteEvent>& notes, PhrasePosition pos,
+                          const TensionProfile& tension) const;
 
   /// @brief Apply sequential repetition (Zeugma) based on sequence_probability.
   /// @param motif Source melodic fragment.
@@ -116,11 +100,8 @@ class FigurenGenerator {
   /// @param repetitions Number of sequential repetitions.
   /// @param key Key signature for diatonic transposition.
   /// @return Sequenced notes (does not include original motif).
-  std::vector<NoteEvent> applySequence(
-      const std::vector<NoteEvent>& motif,
-      int degree_step,
-      int repetitions,
-      const KeySignature& key) const;
+  std::vector<NoteEvent> applySequence(const std::vector<NoteEvent>& motif, int degree_step,
+                                       int repetitions, const KeySignature& key) const;
 };
 
 }  // namespace bach

@@ -41,8 +41,7 @@ TEST(PianoModelTest, CustomConstraintsAreStored) {
   EXPECT_EQ(piano.getSpanConstraints().normal_span, span.normal_span);
   EXPECT_EQ(piano.getSpanConstraints().max_span, span.max_span);
   EXPECT_EQ(piano.getSpanConstraints().max_notes, span.max_notes);
-  EXPECT_FLOAT_EQ(piano.getHandPhysics().jump_cost_per_semitone,
-                   physics.jump_cost_per_semitone);
+  EXPECT_FLOAT_EQ(piano.getHandPhysics().jump_cost_per_semitone, physics.jump_cost_per_semitone);
 }
 
 TEST(PianoModelTest, ConstructWithAllSkillLevels) {
@@ -85,8 +84,8 @@ TEST(PianoModelTest, PitchInRangeBoundaries) {
   EXPECT_TRUE(piano.isPitchInRange(107));  // B7
 
   // Just outside the range.
-  EXPECT_FALSE(piano.isPitchInRange(20));  // Ab0 (below A0)
-  EXPECT_FALSE(piano.isPitchInRange(109)); // C#8 (above C8)
+  EXPECT_FALSE(piano.isPitchInRange(20));   // Ab0 (below A0)
+  EXPECT_FALSE(piano.isPitchInRange(109));  // C#8 (above C8)
 }
 
 TEST(PianoModelTest, PitchInRangeExtremes) {

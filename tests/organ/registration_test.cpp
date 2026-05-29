@@ -3,6 +3,7 @@
 #include "organ/registration.h"
 
 #include <gtest/gtest.h>
+
 #include <string>
 #include <utility>
 #include <vector>
@@ -22,7 +23,7 @@ TEST(RegistrationPlanTest, DefaultPlanExpositionHasCorrectPrograms) {
   EXPECT_EQ(plan.exposition.manual1_program, 19);  // Church Organ
   EXPECT_EQ(plan.exposition.manual2_program, 20);  // Reed Organ
   EXPECT_EQ(plan.exposition.manual3_program, 19);  // Church Organ
-  EXPECT_EQ(plan.exposition.pedal_program, 19);     // Church Organ
+  EXPECT_EQ(plan.exposition.pedal_program, 19);    // Church Organ
 }
 
 TEST(RegistrationPlanTest, DefaultPlanExpositionVelocityIs75) {
@@ -135,7 +136,7 @@ TEST(RegistrationPlanTest, GenerateEventsVolumeAndExpressionCCs) {
   auto events = generateRegistrationEvents(reg, 0);
 
   // Check first channel (Great, channel 0)
-  EXPECT_EQ(events[0].data1, 7u);   // CC#7 Main Volume
+  EXPECT_EQ(events[0].data1, 7u);  // CC#7 Main Volume
   EXPECT_EQ(events[0].data2, 85u);
   EXPECT_EQ(events[1].data1, 11u);  // CC#11 Expression
   EXPECT_EQ(events[1].data2, 85u);
@@ -347,19 +348,14 @@ TEST(RegistrationPlanTest, CustomPlanPreservesValues) {
 
 TEST(RegistrationTest, GenerateEnergyRegistrationEventsCorrectCount) {
   std::vector<std::pair<Tick, float>> energy_levels = {
-      {0, 0.2f},
-      {kTicksPerBar * 4, 0.5f},
-      {kTicksPerBar * 8, 0.9f}
-  };
+      {0, 0.2f}, {kTicksPerBar * 4, 0.5f}, {kTicksPerBar * 8, 0.9f}};
   auto events = generateEnergyRegistrationEvents(energy_levels, 4);
   // 3 time points x 4 channels = 12 events
   EXPECT_EQ(events.size(), 12u);
 }
 
 TEST(RegistrationTest, GenerateEnergyRegistrationEventsCorrectCC) {
-  std::vector<std::pair<Tick, float>> energy_levels = {
-      {0, 0.5f}
-  };
+  std::vector<std::pair<Tick, float>> energy_levels = {{0, 0.5f}};
   auto events = generateEnergyRegistrationEvents(energy_levels, 4);
   ASSERT_EQ(events.size(), 4u);
   for (const auto& evt : events) {
@@ -368,27 +364,21 @@ TEST(RegistrationTest, GenerateEnergyRegistrationEventsCorrectCC) {
 }
 
 TEST(RegistrationTest, GenerateEnergyRegistrationEventsLowEnergyVolume) {
-  std::vector<std::pair<Tick, float>> energy_levels = {
-      {0, 0.1f}
-  };
+  std::vector<std::pair<Tick, float>> energy_levels = {{0, 0.1f}};
   auto events = generateEnergyRegistrationEvents(energy_levels, 1);
   ASSERT_EQ(events.size(), 1u);
   EXPECT_EQ(events[0].data2, 64u);  // Low energy -> volume 64
 }
 
 TEST(RegistrationTest, GenerateEnergyRegistrationEventsMidEnergyVolume) {
-  std::vector<std::pair<Tick, float>> energy_levels = {
-      {0, 0.5f}
-  };
+  std::vector<std::pair<Tick, float>> energy_levels = {{0, 0.5f}};
   auto events = generateEnergyRegistrationEvents(energy_levels, 1);
   ASSERT_EQ(events.size(), 1u);
   EXPECT_EQ(events[0].data2, 80u);  // Mid energy -> volume 80
 }
 
 TEST(RegistrationTest, GenerateEnergyRegistrationEventsHighEnergyVolume) {
-  std::vector<std::pair<Tick, float>> energy_levels = {
-      {0, 0.9f}
-  };
+  std::vector<std::pair<Tick, float>> energy_levels = {{0, 0.9f}};
   auto events = generateEnergyRegistrationEvents(energy_levels, 1);
   ASSERT_EQ(events.size(), 1u);
   EXPECT_EQ(events[0].data2, 120u);  // High energy -> volume 120
@@ -396,9 +386,7 @@ TEST(RegistrationTest, GenerateEnergyRegistrationEventsHighEnergyVolume) {
 
 TEST(RegistrationTest, GenerateEnergyRegistrationEventsCorrectTicks) {
   Tick target_tick = kTicksPerBar * 5;
-  std::vector<std::pair<Tick, float>> energy_levels = {
-      {target_tick, 0.5f}
-  };
+  std::vector<std::pair<Tick, float>> energy_levels = {{target_tick, 0.5f}};
   auto events = generateEnergyRegistrationEvents(energy_levels, 2);
   ASSERT_EQ(events.size(), 2u);
   for (const auto& evt : events) {
@@ -407,9 +395,7 @@ TEST(RegistrationTest, GenerateEnergyRegistrationEventsCorrectTicks) {
 }
 
 TEST(RegistrationTest, GenerateEnergyRegistrationEventsCorrectChannels) {
-  std::vector<std::pair<Tick, float>> energy_levels = {
-      {0, 0.5f}
-  };
+  std::vector<std::pair<Tick, float>> energy_levels = {{0, 0.5f}};
   auto events = generateEnergyRegistrationEvents(energy_levels, 4);
   ASSERT_EQ(events.size(), 4u);
   for (uint8_t idx = 0; idx < 4; ++idx) {
@@ -426,9 +412,7 @@ TEST(RegistrationTest, GenerateEnergyRegistrationEventsEmptyInput) {
 }
 
 TEST(RegistrationTest, GenerateEnergyRegistrationEventsZeroChannels) {
-  std::vector<std::pair<Tick, float>> energy_levels = {
-      {0, 0.5f}
-  };
+  std::vector<std::pair<Tick, float>> energy_levels = {{0, 0.5f}};
   auto events = generateEnergyRegistrationEvents(energy_levels, 0);
   EXPECT_TRUE(events.empty());
 }
@@ -590,7 +574,7 @@ TEST(ExtendedRegistrationPlanTest, EpisodesHaveGradualDynamic) {
 
   FugueSection ep1;
   ep1.type = SectionType::Episode;
-  ep1.start_tick = kTicksPerBar * 4;   // 20%
+  ep1.start_tick = kTicksPerBar * 4;  // 20%
   ep1.end_tick = kTicksPerBar * 6;
   sections.push_back(ep1);
 
@@ -697,7 +681,7 @@ TEST(ExtendedRegistrationPlanTest, ApplyInsertsEventsIntoTracks) {
 
   // Verify first track's exposition events.
   EXPECT_EQ(tracks[0].events[0].tick, 0u);
-  EXPECT_EQ(tracks[0].events[0].data1, 7u);   // CC#7
+  EXPECT_EQ(tracks[0].events[0].data1, 7u);  // CC#7
   EXPECT_EQ(tracks[0].events[0].data2, 75u);
   EXPECT_EQ(tracks[0].events[1].tick, 0u);
   EXPECT_EQ(tracks[0].events[1].data1, 11u);  // CC#11

@@ -31,12 +31,9 @@ constexpr uint8_t kLowerVoice = 1;
 // CrossingGenerator::generate
 // ---------------------------------------------------------------------------
 
-CrossingResult CrossingGenerator::generate(
-    int variation_number,
-    const GoldbergStructuralGrid& grid,
-    const KeySignature& key,
-    const TimeSignature& time_sig,
-    uint32_t seed) const {
+CrossingResult CrossingGenerator::generate(int variation_number, const GoldbergStructuralGrid& grid,
+                                           const KeySignature& key, const TimeSignature& time_sig,
+                                           uint32_t seed) const {
   CrossingResult result;
 
   if (!isSupportedVariation(variation_number)) {
@@ -49,13 +46,13 @@ CrossingResult CrossingGenerator::generate(
   FigurenGenerator figuren;
 
   // Generate upper manual voice (voice_index 0 = upper register).
-  auto upper_notes = figuren.generate(
-      profile, grid, key, time_sig, kUpperVoice, seed, nullptr, 0.3f);
+  auto upper_notes =
+      figuren.generate(profile, grid, key, time_sig, kUpperVoice, seed, nullptr, 0.3f);
 
   // Generate lower manual voice (voice_index 1 = lower register).
   // Use a different seed derived from the base seed for voice independence.
-  auto lower_notes = figuren.generate(
-      profile, grid, key, time_sig, kLowerVoice, seed ^ 0x5A5A5A5Au);
+  auto lower_notes =
+      figuren.generate(profile, grid, key, time_sig, kLowerVoice, seed ^ 0x5A5A5A5Au);
 
   // Apply register protection: clamp each voice to its manual range.
   applyRegisterProtection(upper_notes, manual, true);
@@ -81,10 +78,9 @@ CrossingResult CrossingGenerator::generate(
   merged.insert(merged.end(), lower_notes.begin(), lower_notes.end());
 
   // Sort by start_tick for proper ordering.
-  std::sort(merged.begin(), merged.end(),
-            [](const NoteEvent& lhs, const NoteEvent& rhs) {
-              return lhs.start_tick < rhs.start_tick;
-            });
+  std::sort(merged.begin(), merged.end(), [](const NoteEvent& lhs, const NoteEvent& rhs) {
+    return lhs.start_tick < rhs.start_tick;
+  });
 
   // Apply binary repeats: ||: A :||: B :||
   Tick section_ticks = static_cast<Tick>(kBarsPerSection) * time_sig.ticksPerBar();
@@ -103,35 +99,35 @@ FiguraProfile CrossingGenerator::buildProfile(int variation_number) {
     case 8:
       // Var 8: Wide leaps, alternating registers. Moderate sequence probability.
       return {
-          FiguraType::Batterie,     // primary: rapid register alternation
-          FiguraType::Arpeggio,     // secondary: arpeggiated contrast
-          4,                        // notes_per_beat: sixteenth-note density
+          FiguraType::Batterie,  // primary: rapid register alternation
+          FiguraType::Arpeggio,  // secondary: arpeggiated contrast
+          4,                     // notes_per_beat: sixteenth-note density
           DirectionBias::Alternating,
-          0.7f,                     // chord_tone_ratio
-          0.2f                      // sequence_probability
+          0.7f,  // chord_tone_ratio
+          0.2f   // sequence_probability
       };
 
     case 17:
       // Var 17: Rapid register alternation. Higher chord tone ratio for clarity.
       return {
-          FiguraType::Batterie,     // primary: rapid register alternation
-          FiguraType::Bariolage,    // secondary: register alternation contrast
-          4,                        // notes_per_beat
+          FiguraType::Batterie,   // primary: rapid register alternation
+          FiguraType::Bariolage,  // secondary: register alternation contrast
+          4,                      // notes_per_beat
           DirectionBias::Alternating,
-          0.8f,                     // chord_tone_ratio: more consonant
-          0.15f                     // sequence_probability
+          0.8f,  // chord_tone_ratio: more consonant
+          0.15f  // sequence_probability
       };
 
     case 20:
       // Var 20: Virtuosic hand crossing. Wider leaps, lower chord tone ratio
       // for more passing-tone activity.
       return {
-          FiguraType::Batterie,     // primary: rapid register alternation
-          FiguraType::Tirata,       // secondary: scale runs for virtuosity
-          4,                        // notes_per_beat
+          FiguraType::Batterie,  // primary: rapid register alternation
+          FiguraType::Tirata,    // secondary: scale runs for virtuosity
+          4,                     // notes_per_beat
           DirectionBias::Alternating,
-          0.6f,                     // chord_tone_ratio: more passing tones
-          0.25f                     // sequence_probability
+          0.6f,  // chord_tone_ratio: more passing tones
+          0.25f  // sequence_probability
       };
 
     default:
@@ -203,15 +199,15 @@ bool CrossingGenerator::isCrossingAllowed(PhrasePosition pos) {
 // CrossingGenerator::applyRegisterProtection
 // ---------------------------------------------------------------------------
 
-void CrossingGenerator::applyRegisterProtection(
-    std::vector<NoteEvent>& notes,
-    const ManualAssignment& manual,
-    bool is_upper) const {
+void CrossingGenerator::applyRegisterProtection(std::vector<NoteEvent>& notes,
+                                                const ManualAssignment& manual,
+                                                bool is_upper) const {
   uint8_t range_low = is_upper ? manual.upper_manual_low : manual.lower_manual_low;
   uint8_t range_high = is_upper ? manual.upper_manual_high : manual.lower_manual_high;
 
   for (auto& note : notes) {
-    if (note.pitch == 0) continue;  // Skip rest markers.
+    if (note.pitch == 0)
+      continue;  // Skip rest markers.
     note.pitch = clampPitch(static_cast<int>(note.pitch), range_low, range_high);
   }
 }
@@ -220,11 +216,10 @@ void CrossingGenerator::applyRegisterProtection(
 // CrossingGenerator::applyCrossingLogic
 // ---------------------------------------------------------------------------
 
-void CrossingGenerator::applyCrossingLogic(
-    std::vector<NoteEvent>& upper_notes,
-    std::vector<NoteEvent>& lower_notes,
-    const GoldbergStructuralGrid& grid,
-    const TimeSignature& time_sig) const {
+void CrossingGenerator::applyCrossingLogic(std::vector<NoteEvent>& upper_notes,
+                                           std::vector<NoteEvent>& lower_notes,
+                                           const GoldbergStructuralGrid& grid,
+                                           const TimeSignature& time_sig) const {
   Tick ticks_per_bar = time_sig.ticksPerBar();
   Tick beat_duration = ticks_per_bar / time_sig.beatsPerBar();
 
@@ -235,7 +230,8 @@ void CrossingGenerator::applyCrossingLogic(
   for (int bar_idx = 0; bar_idx < kGridBars; ++bar_idx) {
     PhrasePosition pos = grid.getPhrasePosition(bar_idx);
 
-    if (!isCrossingAllowed(pos)) continue;
+    if (!isCrossingAllowed(pos))
+      continue;
 
     Tick bar_start = static_cast<Tick>(bar_idx) * ticks_per_bar;
     // Crossing window: beat 2 only (one beat's duration).

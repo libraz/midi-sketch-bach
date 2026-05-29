@@ -21,9 +21,12 @@ static constexpr uint8_t kBreathValue = 80;
 /// @param ratio Interpolation ratio (0.0 = val_a, 1.0 = val_b).
 /// @return Interpolated value, clamped to [0, 127].
 static uint8_t interpolateValue(uint8_t val_a, uint8_t val_b, float ratio) {
-  float result = static_cast<float>(val_a) + (static_cast<float>(val_b) - static_cast<float>(val_a)) * ratio;
-  if (result < 0.0f) result = 0.0f;
-  if (result > 127.0f) result = 127.0f;
+  float result =
+      static_cast<float>(val_a) + (static_cast<float>(val_b) - static_cast<float>(val_a)) * ratio;
+  if (result < 0.0f)
+    result = 0.0f;
+  if (result > 127.0f)
+    result = 127.0f;
   return static_cast<uint8_t>(result + 0.5f);
 }
 
@@ -79,8 +82,8 @@ static void emitPhraseEvents(std::vector<ExpressionEvent>& output, uint8_t chann
   }
 }
 
-std::vector<ExpressionEvent> generateExpressionCurve(
-    const std::vector<PhraseBoundary>& phrases, uint8_t channel, Tick total_duration) {
+std::vector<ExpressionEvent> generateExpressionCurve(const std::vector<PhraseBoundary>& phrases,
+                                                     uint8_t channel, Tick total_duration) {
   std::vector<ExpressionEvent> events;
 
   // Empty phrase list: emit a single default expression value.

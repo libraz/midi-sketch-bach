@@ -133,8 +133,7 @@ void applyArticulation(std::vector<NoteEvent>& notes, VoiceRole role,
           note.source == BachNoteSource::ChaconneBass) {
         effective_gate = 0.95f;  // Basso ostinato sustains through texture.
       }
-      Tick new_duration =
-          static_cast<Tick>(static_cast<float>(note.duration) * effective_gate);
+      Tick new_duration = static_cast<Tick>(static_cast<float>(note.duration) * effective_gate);
       if (new_duration < kMinArticulatedDuration) {
         new_duration = kMinArticulatedDuration;
       }
@@ -154,8 +153,10 @@ void applyArticulation(std::vector<NoteEvent>& notes, VoiceRole role,
         vel += 4;  // Secondary stress.
       }
       // Clamp to valid MIDI range.
-      if (vel > 127) vel = 127;
-      if (vel < 1) vel = 1;
+      if (vel > 127)
+        vel = 127;
+      if (vel < 1)
+        vel = 1;
       note.velocity = static_cast<uint8_t>(vel);
     }
   }

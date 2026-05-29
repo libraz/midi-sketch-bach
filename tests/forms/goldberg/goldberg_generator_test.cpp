@@ -3,8 +3,6 @@
 // and scale/duration ordering. Generation tests guard on result.success so they
 // degrade gracefully when the generator is still a stub.
 
-#include "forms/goldberg/goldberg_config.h"
-
 #include <gtest/gtest.h>
 
 #include <algorithm>
@@ -12,6 +10,7 @@
 
 #include "core/basic_types.h"
 #include "core/pitch_utils.h"
+#include "forms/goldberg/goldberg_config.h"
 #include "forms/goldberg/goldberg_plan.h"
 #include "forms/goldberg/goldberg_types.h"
 #include "test_helpers.h"
@@ -27,8 +26,7 @@ namespace {
 /// @param seed Random seed.
 /// @param scale Duration scale.
 /// @return GoldbergConfig with specified parameters.
-GoldbergConfig makeTestConfig(uint32_t seed = 42,
-                              DurationScale scale = DurationScale::Short) {
+GoldbergConfig makeTestConfig(uint32_t seed = 42, DurationScale scale = DurationScale::Short) {
   GoldbergConfig config;
   config.seed = seed;
   config.scale = scale;
@@ -42,7 +40,8 @@ GoldbergConfig makeTestConfig(uint32_t seed = 42,
 bool isInGMajor(int pitch_class) {
   static constexpr int kGMajorPitchClasses[] = {0, 2, 4, 6, 7, 9, 11};
   for (int pc_val : kGMajorPitchClasses) {
-    if (pitch_class == pc_val) return true;
+    if (pitch_class == pc_val)
+      return true;
   }
   return false;
 }
@@ -60,12 +59,10 @@ TEST(GoldbergGeneratorE2ETest, AriaIsFirstAndLast) {
   auto plan = createGoldbergPlan();
   ASSERT_EQ(plan.size(), 32u);
 
-  EXPECT_EQ(plan[0].type, GoldbergVariationType::Aria)
-      << "Entry 0 should be Aria";
+  EXPECT_EQ(plan[0].type, GoldbergVariationType::Aria) << "Entry 0 should be Aria";
   EXPECT_EQ(plan[0].variation_number, 0);
 
-  EXPECT_EQ(plan[31].type, GoldbergVariationType::Aria)
-      << "Entry 31 (da capo) should be Aria";
+  EXPECT_EQ(plan[31].type, GoldbergVariationType::Aria) << "Entry 31 (da capo) should be Aria";
   EXPECT_EQ(plan[31].variation_number, 31);
 }
 
@@ -75,8 +72,7 @@ TEST(GoldbergGeneratorE2ETest, CanonsAtEvery3rd) {
 
   constexpr int kCanonIndices[] = {3, 6, 9, 12, 15, 18, 21, 24, 27};
   for (int idx : kCanonIndices) {
-    EXPECT_EQ(plan[idx].type, GoldbergVariationType::Canon)
-        << "Var " << idx << " should be Canon";
+    EXPECT_EQ(plan[idx].type, GoldbergVariationType::Canon) << "Var " << idx << " should be Canon";
   }
 }
 
@@ -86,10 +82,8 @@ TEST(GoldbergGeneratorE2ETest, CanonsAtEvery3rd) {
 
 TEST(GoldbergGeneratorE2ETest, CLIIntegration_FormTypeParsing) {
   // Verify that "goldberg_variations" is recognized as a valid form type.
-  EXPECT_EQ(formTypeFromString("goldberg_variations"),
-            FormType::GoldbergVariations);
-  EXPECT_STREQ(formTypeToString(FormType::GoldbergVariations),
-               "goldberg_variations");
+  EXPECT_EQ(formTypeFromString("goldberg_variations"), FormType::GoldbergVariations);
+  EXPECT_STREQ(formTypeToString(FormType::GoldbergVariations), "goldberg_variations");
 }
 
 // ===========================================================================
@@ -199,7 +193,8 @@ TEST(GoldbergGeneratorE2ETest, DifferentSeedsProduceDifferentOutput) {
           break;
         }
       }
-      if (any_difference) break;
+      if (any_difference)
+        break;
     }
   }
   EXPECT_TRUE(any_difference) << "Seeds 42 and 43 produced identical output";
@@ -216,8 +211,8 @@ TEST(GoldbergGeneratorE2ETest, AllNotesHaveValidPitch) {
   for (const auto& track : result.tracks) {
     for (size_t note_idx = 0; note_idx < track.notes.size(); ++note_idx) {
       EXPECT_LE(track.notes[note_idx].pitch, 127u)
-          << "Track " << track.name << ", note " << note_idx
-          << " has invalid pitch " << static_cast<int>(track.notes[note_idx].pitch);
+          << "Track " << track.name << ", note " << note_idx << " has invalid pitch "
+          << static_cast<int>(track.notes[note_idx].pitch);
     }
   }
 }
@@ -233,8 +228,8 @@ TEST(GoldbergGeneratorE2ETest, AllNotesHavePositiveDuration) {
   for (const auto& track : result.tracks) {
     for (size_t note_idx = 0; note_idx < track.notes.size(); ++note_idx) {
       EXPECT_GT(track.notes[note_idx].duration, 0u)
-          << "Track " << track.name << ", note " << note_idx
-          << " has zero duration at tick " << track.notes[note_idx].start_tick;
+          << "Track " << track.name << ", note " << note_idx << " has zero duration at tick "
+          << track.notes[note_idx].start_tick;
     }
   }
 }
@@ -250,9 +245,8 @@ TEST(GoldbergGeneratorE2ETest, NotesAreChronological) {
   for (const auto& track : result.tracks) {
     for (size_t idx = 1; idx < track.notes.size(); ++idx) {
       EXPECT_LE(track.notes[idx - 1].start_tick, track.notes[idx].start_tick)
-          << "Track " << track.name << ": notes not sorted at index " << idx
-          << " (tick " << track.notes[idx - 1].start_tick << " > "
-          << track.notes[idx].start_tick << ")";
+          << "Track " << track.name << ": notes not sorted at index " << idx << " (tick "
+          << track.notes[idx - 1].start_tick << " > " << track.notes[idx].start_tick << ")";
     }
   }
 }
@@ -306,8 +300,7 @@ TEST(GoldbergGeneratorE2ETest, KeySignatureRespected) {
   // Expect at least 70% of notes in key. Some chromatic passing tones,
   // ornaments, and minor-key variations (Var 15, 21, 25) will use accidentals.
   double ratio = static_cast<double>(in_key_count) / static_cast<double>(total_count);
-  EXPECT_GE(ratio, 0.70)
-      << "Only " << (ratio * 100.0) << "% of notes in G major (expected >= 70%)";
+  EXPECT_GE(ratio, 0.70) << "Only " << (ratio * 100.0) << "% of notes in G major (expected >= 70%)";
 }
 
 TEST(GoldbergGeneratorE2ETest, ShortScaleSubsetOfFull) {

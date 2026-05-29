@@ -73,10 +73,10 @@ TEST(ViolinModelTest, MiddleOfRangePlayable) {
 
 TEST(ViolinModelTest, OpenStringPitchesIdentified) {
   ViolinModel violin;
-  EXPECT_TRUE(violin.isOpenString(55));   // G3
-  EXPECT_TRUE(violin.isOpenString(62));   // D4
-  EXPECT_TRUE(violin.isOpenString(69));   // A4
-  EXPECT_TRUE(violin.isOpenString(76));   // E5
+  EXPECT_TRUE(violin.isOpenString(55));  // G3
+  EXPECT_TRUE(violin.isOpenString(62));  // D4
+  EXPECT_TRUE(violin.isOpenString(69));  // A4
+  EXPECT_TRUE(violin.isOpenString(76));  // E5
 }
 
 TEST(ViolinModelTest, NonOpenStringPitchesRejected) {
@@ -171,7 +171,7 @@ TEST(ViolinModelTest, DoubleStopCostInfeasibleIsHigh) {
 
 TEST(ViolinModelTest, OpenStringDoubleStopCheaperThanFingered) {
   ViolinModel violin;
-  float open_cost = violin.doubleStopCost(55, 62);  // G3 + D4 (open)
+  float open_cost = violin.doubleStopCost(55, 62);      // G3 + D4 (open)
   float fingered_cost = violin.doubleStopCost(67, 74);  // G4 + D5 (fingered)
   EXPECT_LE(open_cost, fingered_cost);
 }
@@ -318,7 +318,7 @@ TEST(ViolinModelTest, ViolinShiftCostPerPositionCheaperThanCello) {
   auto violin_state = violin.createInitialState();
   violin.updateState(violin_state, 55);  // Start on open G string
   auto cello_state = cello.createInitialState();
-  cello.updateState(cello_state, 36);    // Start on open C string
+  cello.updateState(cello_state, 36);  // Start on open C string
 
   // Large shift on each instrument: shift cost should be lower on violin.
   // Violin: G3 (55) -> B4 (71), 16 semitones up on G string.

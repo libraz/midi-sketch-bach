@@ -111,11 +111,11 @@ TEST(RetrogradeMelodyTest, PreservesGaps) {
   auto result = retrogradeMelody(gapped, 0);
   ASSERT_EQ(result.size(), 3u);
   // Reversed: dur2=480, gap12=120, dur1=480, gap01=120, dur0=480
-  EXPECT_EQ(result[0].start_tick, 0u);    // G4
+  EXPECT_EQ(result[0].start_tick, 0u);  // G4
   EXPECT_EQ(result[0].duration, 480u);
   EXPECT_EQ(result[1].start_tick, 600u);  // E4 (480 + 120 gap)
   EXPECT_EQ(result[1].duration, 480u);
-  EXPECT_EQ(result[2].start_tick, 1200u); // C4 (600 + 480 + 120 gap)
+  EXPECT_EQ(result[2].start_tick, 1200u);  // C4 (600 + 480 + 120 gap)
   EXPECT_EQ(result[2].duration, 480u);
 }
 

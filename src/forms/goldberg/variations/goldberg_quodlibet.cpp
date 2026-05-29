@@ -50,8 +50,8 @@ constexpr uint8_t kMelodyVelocity = 80;
 // ---------------------------------------------------------------------------
 
 static constexpr uint8_t kMelody1Pitches[] = {
-    67, 69, 71, 72, 71, 69, 67, 66, 67,   // G4 A4 B4 C5 B4 A4 G4 F#4 G4
-    67, 69, 71, 72, 74, 72, 71, 69, 67     // G4 A4 B4 C5 D5 C5 B4 A4 G4
+    67, 69, 71, 72, 71, 69, 67, 66, 67,  // G4 A4 B4 C5 B4 A4 G4 F#4 G4
+    67, 69, 71, 72, 74, 72, 71, 69, 67   // G4 A4 B4 C5 D5 C5 B4 A4 G4
 };
 
 static constexpr Tick kMelody1Durations[] = {
@@ -69,8 +69,8 @@ static constexpr int kMelody1Length = sizeof(kMelody1Pitches) / sizeof(kMelody1P
 // ---------------------------------------------------------------------------
 
 static constexpr uint8_t kMelody2Pitches[] = {
-    72, 71, 69, 67, 69, 71, 72, 74, 72,   // C5 B4 A4 G4 A4 B4 C5 D5 C5
-    71, 69, 67, 66, 67, 69, 71, 69, 67     // B4 A4 G4 F#4 G4 A4 B4 A4 G4
+    72, 71, 69, 67, 69, 71, 72, 74, 72,  // C5 B4 A4 G4 A4 B4 C5 D5 C5
+    71, 69, 67, 66, 67, 69, 71, 69, 67   // B4 A4 G4 F#4 G4 A4 B4 A4 G4
 };
 
 static constexpr Tick kMelody2Durations[] = {
@@ -86,22 +86,17 @@ static constexpr int kMelody2Length = sizeof(kMelody2Pitches) / sizeof(kMelody2P
 /// @param low_pitch Lowest allowed pitch.
 /// @param high_pitch Highest allowed pitch.
 /// @return Vector of chord-tone MIDI pitches within the range.
-std::vector<uint8_t> getBarChordTones(
-    const StructuralBarInfo& bar_info,
-    const KeySignature& key,
-    uint8_t low_pitch,
-    uint8_t high_pitch) {
+std::vector<uint8_t> getBarChordTones(const StructuralBarInfo& bar_info, const KeySignature& key,
+                                      uint8_t low_pitch, uint8_t high_pitch) {
   // Get root pitch class from chord degree and key tonic.
   uint8_t tonic_pc = static_cast<uint8_t>(key.tonic);
-  uint8_t degree_offset = key.is_minor
-      ? degreeMinorSemitones(bar_info.chord_degree)
-      : degreeSemitones(bar_info.chord_degree);
+  uint8_t degree_offset = key.is_minor ? degreeMinorSemitones(bar_info.chord_degree)
+                                       : degreeSemitones(bar_info.chord_degree);
   uint8_t root_pc = (tonic_pc + degree_offset) % 12;
 
   // Get chord quality for this degree.
-  ChordQuality quality = key.is_minor
-      ? minorKeyQuality(bar_info.chord_degree)
-      : majorKeyQuality(bar_info.chord_degree);
+  ChordQuality quality = key.is_minor ? minorKeyQuality(bar_info.chord_degree)
+                                      : majorKeyQuality(bar_info.chord_degree);
 
   // Determine third and fifth intervals from quality.
   int third_interval = 4;  // Major third by default.
@@ -117,8 +112,7 @@ std::vector<uint8_t> getBarChordTones(
     default:
       break;
   }
-  if (quality == ChordQuality::Diminished ||
-      quality == ChordQuality::Diminished7 ||
+  if (quality == ChordQuality::Diminished || quality == ChordQuality::Diminished7 ||
       quality == ChordQuality::HalfDiminished7) {
     fifth_interval = 6;
   } else if (quality == ChordQuality::Augmented) {
@@ -146,8 +140,10 @@ std::vector<uint8_t> getBarChordTones(
 /// @param to_pitch Ending pitch.
 /// @return -1 for descending, 0 for same, +1 for ascending.
 int motionDirection(uint8_t from, uint8_t to_pitch) {
-  if (to_pitch > from) return 1;
-  if (to_pitch < from) return -1;
+  if (to_pitch > from)
+    return 1;
+  if (to_pitch < from)
+    return -1;
   return 0;
 }
 
@@ -157,11 +153,9 @@ int motionDirection(uint8_t from, uint8_t to_pitch) {
 // QuodlibetGenerator::generate
 // ---------------------------------------------------------------------------
 
-QuodlibetResult QuodlibetGenerator::generate(
-    const GoldbergStructuralGrid& grid,
-    const KeySignature& key,
-    const TimeSignature& time_sig,
-    uint32_t seed) const {
+QuodlibetResult QuodlibetGenerator::generate(const GoldbergStructuralGrid& grid,
+                                             const KeySignature& key, const TimeSignature& time_sig,
+                                             uint32_t seed) const {
   QuodlibetResult result;
   std::mt19937 rng(seed);
 
@@ -170,25 +164,21 @@ QuodlibetResult QuodlibetGenerator::generate(
   all_notes.reserve(256);
 
   // Part A (bars 0-15): Melody 1 in upper voice (0), Melody 2 in lower voice (1).
-  auto melody1_upper = placeMelodyOnGrid(
-      kMelody1Pitches, kMelody1Durations, kMelody1Length,
-      0, kSectionBars, grid, key, time_sig, 0, rng);
+  auto melody1_upper = placeMelodyOnGrid(kMelody1Pitches, kMelody1Durations, kMelody1Length, 0,
+                                         kSectionBars, grid, key, time_sig, 0, rng);
 
-  auto melody2_lower = placeMelodyOnGrid(
-      kMelody2Pitches, kMelody2Durations, kMelody2Length,
-      0, kSectionBars, grid, key, time_sig, 1, rng);
+  auto melody2_lower = placeMelodyOnGrid(kMelody2Pitches, kMelody2Durations, kMelody2Length, 0,
+                                         kSectionBars, grid, key, time_sig, 1, rng);
 
   // Part B (bars 16-31): Swap melodies for variety.
   // Melody 2 in upper voice, Melody 1 in lower voice.
   Tick part_b_offset = static_cast<Tick>(kSectionBars) * ticks_per_bar;
 
-  auto melody2_upper = placeMelodyOnGrid(
-      kMelody2Pitches, kMelody2Durations, kMelody2Length,
-      part_b_offset, kSectionBars, grid, key, time_sig, 0, rng);
+  auto melody2_upper = placeMelodyOnGrid(kMelody2Pitches, kMelody2Durations, kMelody2Length,
+                                         part_b_offset, kSectionBars, grid, key, time_sig, 0, rng);
 
-  auto melody1_lower = placeMelodyOnGrid(
-      kMelody1Pitches, kMelody1Durations, kMelody1Length,
-      part_b_offset, kSectionBars, grid, key, time_sig, 1, rng);
+  auto melody1_lower = placeMelodyOnGrid(kMelody1Pitches, kMelody1Durations, kMelody1Length,
+                                         part_b_offset, kSectionBars, grid, key, time_sig, 1, rng);
 
   // Merge melody notes.
   all_notes.insert(all_notes.end(), melody1_upper.begin(), melody1_upper.end());
@@ -201,10 +191,9 @@ QuodlibetResult QuodlibetGenerator::generate(
   all_notes.insert(all_notes.end(), bass.begin(), bass.end());
 
   // Sort by start tick.
-  std::sort(all_notes.begin(), all_notes.end(),
-            [](const NoteEvent& lhs, const NoteEvent& rhs) {
-              return lhs.start_tick < rhs.start_tick;
-            });
+  std::sort(all_notes.begin(), all_notes.end(), [](const NoteEvent& lhs, const NoteEvent& rhs) {
+    return lhs.start_tick < rhs.start_tick;
+  });
 
   // Apply binary repeats: ||: A :||: B :||
   Tick section_ticks = static_cast<Tick>(kSectionBars) * ticks_per_bar;
@@ -219,16 +208,9 @@ QuodlibetResult QuodlibetGenerator::generate(
 // ---------------------------------------------------------------------------
 
 std::vector<NoteEvent> QuodlibetGenerator::placeMelodyOnGrid(
-    const uint8_t* melody_pitches,
-    const Tick* melody_durations,
-    int melody_length,
-    Tick start_tick,
-    int bar_count,
-    const GoldbergStructuralGrid& grid,
-    const KeySignature& key,
-    const TimeSignature& time_sig,
-    uint8_t voice,
-    std::mt19937& /*rng*/) const {
+    const uint8_t* melody_pitches, const Tick* melody_durations, int melody_length, Tick start_tick,
+    int bar_count, const GoldbergStructuralGrid& grid, const KeySignature& key,
+    const TimeSignature& time_sig, uint8_t voice, std::mt19937& /*rng*/) const {
   std::vector<NoteEvent> notes;
   notes.reserve(static_cast<size_t>(bar_count) * 4);
 
@@ -262,8 +244,7 @@ std::vector<NoteEvent> QuodlibetGenerator::placeMelodyOnGrid(
     int target_center = (reg_low + reg_high) / 2;
     int diff = static_cast<int>(raw_pitch) - target_center;
     int shift = nearestOctaveShift(diff);
-    uint8_t register_pitch = clampPitch(
-        static_cast<int>(raw_pitch) - shift, reg_low, reg_high);
+    uint8_t register_pitch = clampPitch(static_cast<int>(raw_pitch) - shift, reg_low, reg_high);
 
     // Harmonic alignment: snap to chord tone on strong beats.
     uint8_t aligned_pitch = register_pitch;
@@ -290,7 +271,8 @@ std::vector<NoteEvent> QuodlibetGenerator::placeMelodyOnGrid(
         int min_distance = 127;
         for (auto ct_pitch : chord_tones) {
           int dist = absoluteInterval(register_pitch, ct_pitch);
-          if (dist < min_distance) min_distance = dist;
+          if (dist < min_distance)
+            min_distance = dist;
         }
         if (min_distance > QuodlibetClashPolicy::kWeakBeatMaxClash) {
           aligned_pitch = snapToChordTone(register_pitch, bar_info, key);
@@ -332,7 +314,8 @@ std::vector<NoteEvent> QuodlibetGenerator::placeMelodyOnGrid(
     if (current_tick + clamped_duration > section_end) {
       clamped_duration = section_end - current_tick;
     }
-    if (clamped_duration == 0) break;
+    if (clamped_duration == 0)
+      break;
 
     // Create note via createBachNote.
     BachNoteOptions opts{};
@@ -360,10 +343,9 @@ std::vector<NoteEvent> QuodlibetGenerator::placeMelodyOnGrid(
 // QuodlibetGenerator::generateBassLine
 // ---------------------------------------------------------------------------
 
-std::vector<NoteEvent> QuodlibetGenerator::generateBassLine(
-    const GoldbergStructuralGrid& grid,
-    const KeySignature& /*key*/,
-    const TimeSignature& time_sig) const {
+std::vector<NoteEvent> QuodlibetGenerator::generateBassLine(const GoldbergStructuralGrid& grid,
+                                                            const KeySignature& /*key*/,
+                                                            const TimeSignature& time_sig) const {
   std::vector<NoteEvent> bass_notes;
   bass_notes.reserve(kGridBars * 2);
 
@@ -377,8 +359,7 @@ std::vector<NoteEvent> QuodlibetGenerator::generateBassLine(
     int target_center = (kBassLow + kBassHigh) / 2;
     int diff = static_cast<int>(primary_pitch) - target_center;
     int shift = nearestOctaveShift(diff);
-    uint8_t bass_pitch = clampPitch(
-        static_cast<int>(primary_pitch) - shift, kBassLow, kBassHigh);
+    uint8_t bass_pitch = clampPitch(static_cast<int>(primary_pitch) - shift, kBassLow, kBassHigh);
 
     Tick bar_start = static_cast<Tick>(bar_idx) * ticks_per_bar;
 
@@ -404,8 +385,8 @@ std::vector<NoteEvent> QuodlibetGenerator::generateBassLine(
       uint8_t res_pitch_raw = bar_info.bass_motion.resolution_pitch.value();
       int res_diff = static_cast<int>(res_pitch_raw) - target_center;
       int res_shift = nearestOctaveShift(res_diff);
-      uint8_t res_pitch = clampPitch(
-          static_cast<int>(res_pitch_raw) - res_shift, kBassLow, kBassHigh);
+      uint8_t res_pitch =
+          clampPitch(static_cast<int>(res_pitch_raw) - res_shift, kBassLow, kBassHigh);
 
       BachNoteOptions res_opts{};
       res_opts.voice = kBassVoice;
@@ -442,16 +423,15 @@ std::vector<NoteEvent> QuodlibetGenerator::generateBassLine(
 // QuodlibetGenerator::snapToChordTone
 // ---------------------------------------------------------------------------
 
-uint8_t QuodlibetGenerator::snapToChordTone(
-    uint8_t pitch,
-    const StructuralBarInfo& bar_info,
-    const KeySignature& key) const {
+uint8_t QuodlibetGenerator::snapToChordTone(uint8_t pitch, const StructuralBarInfo& bar_info,
+                                            const KeySignature& key) const {
   // Get chord tones across a generous range around the target pitch.
   uint8_t search_low = (pitch >= 12) ? static_cast<uint8_t>(pitch - 12) : 0;
   uint8_t search_high = (pitch <= 115) ? static_cast<uint8_t>(pitch + 12) : 127;
 
   auto chord_tones = getBarChordTones(bar_info, key, search_low, search_high);
-  if (chord_tones.empty()) return pitch;  // Fallback: no chord tones found.
+  if (chord_tones.empty())
+    return pitch;  // Fallback: no chord tones found.
 
   // Find the nearest chord tone.
   uint8_t best = chord_tones[0];
@@ -471,18 +451,19 @@ uint8_t QuodlibetGenerator::snapToChordTone(
 // QuodlibetGenerator::validateCadenceAlignment
 // ---------------------------------------------------------------------------
 
-bool QuodlibetGenerator::validateCadenceAlignment(
-    const std::vector<NoteEvent>& notes,
-    const GoldbergStructuralGrid& grid,
-    const TimeSignature& time_sig) const {
-  if (notes.empty()) return false;
+bool QuodlibetGenerator::validateCadenceAlignment(const std::vector<NoteEvent>& notes,
+                                                  const GoldbergStructuralGrid& grid,
+                                                  const TimeSignature& time_sig) const {
+  if (notes.empty())
+    return false;
 
   Tick ticks_per_bar = time_sig.ticksPerBar();
   int aligned_count = 0;
   int cadence_count = 0;
 
   for (int bar_idx = 0; bar_idx < kGridBars; ++bar_idx) {
-    if (!grid.isCadenceBar(bar_idx)) continue;
+    if (!grid.isCadenceBar(bar_idx))
+      continue;
     ++cadence_count;
 
     Tick bar_end = static_cast<Tick>(bar_idx + 1) * ticks_per_bar;

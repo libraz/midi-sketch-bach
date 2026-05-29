@@ -2,9 +2,9 @@
 
 #include "solo_string/flow/flow_analyzer.h"
 
-#include <vector>
-
 #include <gtest/gtest.h>
+
+#include <vector>
 
 #include "core/basic_types.h"
 #include "harmony/harmonic_event.h"
@@ -72,8 +72,7 @@ HarmonicTimeline createTestTimeline(int num_bars, uint8_t root_pitch = 48) {
 /// @param config Config to generate notes for.
 /// @param timeline Timeline used for chord tone alignment.
 /// @return Single track with notes.
-Track createIdealTrack(const ArpeggioFlowConfig& config,
-                       const HarmonicTimeline& timeline) {
+Track createIdealTrack(const ArpeggioFlowConfig& config, const HarmonicTimeline& timeline) {
   Track track;
   track.channel = 0;
   track.program = 42;  // Cello
@@ -129,7 +128,8 @@ Track createIdealTrack(const ArpeggioFlowConfig& config,
       case ArcPhase::Descent: {
         // Contract gradually per bar from the start of descent.
         int bars_into_descent = bar - peak_bar_end;
-        if (bars_into_descent < 0) bars_into_descent = 0;
+        if (bars_into_descent < 0)
+          bars_into_descent = 0;
         base_low = static_cast<uint8_t>(38 + bars_into_descent);
         base_high = static_cast<uint8_t>(70 - bars_into_descent);
         break;
@@ -173,9 +173,12 @@ Track createIdealTrack(const ArpeggioFlowConfig& config,
         int pitch = root_pc + interval;
 
         // Place in register range.
-        while (pitch < static_cast<int>(base_low)) pitch += 12;
-        while (pitch > static_cast<int>(base_high)) pitch -= 12;
-        if (pitch < static_cast<int>(base_low)) pitch = base_low;
+        while (pitch < static_cast<int>(base_low))
+          pitch += 12;
+        while (pitch > static_cast<int>(base_high))
+          pitch -= 12;
+        if (pitch < static_cast<int>(base_low))
+          pitch = base_low;
 
         note.pitch = static_cast<uint8_t>(pitch);
       }
@@ -222,8 +225,10 @@ Track createTrackWithGoodCadence(const ArpeggioFlowConfig& config,
     int bar = static_cast<int>(note.start_tick / kTicksPerBar);
     if (bar >= cadence_start_bar) {
       // Move to lower register.
-      while (note.pitch > 55) note.pitch -= 12;
-      if (note.pitch < 36) note.pitch = 36;
+      while (note.pitch > 55)
+        note.pitch -= 12;
+      if (note.pitch < 36)
+        note.pitch = 36;
     }
   }
 
@@ -302,7 +307,8 @@ TEST(FlowAnalyzerTest, PeakUniquenessFailsWithTwoPeaks) {
       phase = ArcPhase::Peak;
       ++peak_set;
     }
-    if (peak_set >= 2) break;
+    if (peak_set >= 2)
+      break;
   }
 
   auto timeline = createTestTimeline(config.num_sections * config.bars_per_section);
@@ -325,10 +331,7 @@ TEST(FlowAnalyzerTest, DramaturgicOrderFailsWithReversedPhases) {
   auto config = createTestConfig(3, 4);
   // Reverse: Descent, Peak, Ascent
   config.arc.phase_assignment = {
-    {0, ArcPhase::Descent},
-    {1, ArcPhase::Peak},
-    {2, ArcPhase::Ascent}
-  };
+      {0, ArcPhase::Descent}, {1, ArcPhase::Peak}, {2, ArcPhase::Ascent}};
 
   auto timeline = createTestTimeline(12);
   auto track = createMinimalTrack(config);
@@ -526,8 +529,7 @@ TEST(FlowAnalyzerTest, ArcProhibitionDetectsRegisterShrinkInAscent) {
   for (int bar = 2; bar < 6; ++bar) {
     for (int idx = 0; idx < 16; ++idx) {
       NoteEvent note;
-      note.start_tick = static_cast<Tick>(bar) * kTicksPerBar +
-                         static_cast<Tick>(idx) * note_dur;
+      note.start_tick = static_cast<Tick>(bar) * kTicksPerBar + static_cast<Tick>(idx) * note_dur;
       note.duration = note_dur;
       note.pitch = 60;
       note.velocity = 80;
@@ -699,8 +701,7 @@ TEST(FlowAnalyzerTest, MultipleTracksAreMerged) {
   for (int bar = 0; bar < 6; ++bar) {
     for (int idx = 0; idx < 16; ++idx) {
       NoteEvent note;
-      note.start_tick = static_cast<Tick>(bar) * kTicksPerBar +
-                         static_cast<Tick>(idx) * note_dur;
+      note.start_tick = static_cast<Tick>(bar) * kTicksPerBar + static_cast<Tick>(idx) * note_dur;
       note.duration = note_dur;
       note.pitch = 60;
       note.velocity = 80;

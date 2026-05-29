@@ -24,28 +24,28 @@ class CollisionResolver;
 
 /// Options for creating a Bach note via createBachNote().
 struct BachNoteOptions {
-  VoiceId voice = 0;           // Target voice
-  uint8_t desired_pitch = 60;  // Desired MIDI pitch (may be adjusted)
-  Tick tick = 0;               // Start tick
-  Tick duration = kTicksPerBeat;  // Duration in ticks
-  uint8_t velocity = 80;       // MIDI velocity (organ default: 80)
+  VoiceId voice = 0;                                // Target voice
+  uint8_t desired_pitch = 60;                       // Desired MIDI pitch (may be adjusted)
+  Tick tick = 0;                                    // Start tick
+  Tick duration = kTicksPerBeat;                    // Duration in ticks
+  uint8_t velocity = 80;                            // MIDI velocity (organ default: 80)
   BachNoteSource source = BachNoteSource::Unknown;  // Provenance source
-  uint8_t entry_number = 0;    // Fugue entry number (0 = not applicable)
-  uint8_t prev_pitches[3] = {0, 0, 0};  // Melodic context: last 3 pitches (0=unknown)
-  uint8_t prev_count = 0;               // Number of valid previous pitches
-  int8_t prev_direction = 0;            // Previous motion direction (-1/0/1)
-  std::optional<uint8_t> next_pitch;    // Next pitch for NHT validation (nullopt = unknown)
+  uint8_t entry_number = 0;                         // Fugue entry number (0 = not applicable)
+  uint8_t prev_pitches[3] = {0, 0, 0};              // Melodic context: last 3 pitches (0=unknown)
+  uint8_t prev_count = 0;                           // Number of valid previous pitches
+  int8_t prev_direction = 0;                        // Previous motion direction (-1/0/1)
+  std::optional<uint8_t> next_pitch;        // Next pitch for NHT validation (nullopt = unknown)
   const PhraseGoal* phrase_goal = nullptr;  // Optional phrase goal for melodic scoring
   const IKeyboardInstrument* instrument = nullptr;  // Optional instrument for range check
 };
 
 /// Result of note creation via createBachNote().
 struct BachCreateNoteResult {
-  bool accepted = false;       // true if note was placed successfully
-  NoteEvent note;              // The created NoteEvent (valid only if accepted)
-  NoteProvenance provenance;   // Full provenance record
+  bool accepted = false;      // true if note was placed successfully
+  NoteEvent note;             // The created NoteEvent (valid only if accepted)
+  NoteProvenance provenance;  // Full provenance record
   uint8_t final_pitch = 0;    // Final pitch after any adjustments
-  bool was_adjusted = false;   // true if pitch was modified from desired_pitch
+  bool was_adjusted = false;  // true if pitch was modified from desired_pitch
 };
 
 /// @brief Create a note with counterpoint rules applied.
@@ -60,11 +60,8 @@ struct BachCreateNoteResult {
 /// @param resolver  Collision resolver (nullptr in Phase 0).
 /// @param opts      Note creation options.
 /// @return Result containing the note, provenance, and acceptance status.
-BachCreateNoteResult createBachNote(
-    CounterpointState* state,
-    IRuleEvaluator* rules,
-    CollisionResolver* resolver,
-    const BachNoteOptions& opts);
+BachCreateNoteResult createBachNote(CounterpointState* state, IRuleEvaluator* rules,
+                                    CollisionResolver* resolver, const BachNoteOptions& opts);
 
 /// Statistics from postValidateNotes().
 struct PostValidateStats {
@@ -73,14 +70,14 @@ struct PostValidateStats {
   uint32_t repaired = 0;
   uint32_t dropped = 0;
   // Detailed fix category tracking.
-  uint32_t parallel_fixes = 0;         ///< Parallel perfect consonance fixes.
-  uint32_t crossing_fixes = 0;         ///< Voice crossing fixes.
-  uint32_t dissonance_fixes = 0;       ///< Strong-beat dissonance fixes.
-  float avg_shift_semitones = 0.0f;    ///< Average pitch shift magnitude.
-  int max_shift_semitones = 0;         ///< Maximum pitch shift magnitude.
-  uint32_t subject_touches = 0;        ///< Subject material modifications (should be 0).
-  uint32_t countersubject_touches = 0; ///< Countersubject modifications (should be 0).
-  uint32_t stretto_section_touches = 0;///< Stretto section modifications (should be 0).
+  uint32_t parallel_fixes = 0;           ///< Parallel perfect consonance fixes.
+  uint32_t crossing_fixes = 0;           ///< Voice crossing fixes.
+  uint32_t dissonance_fixes = 0;         ///< Strong-beat dissonance fixes.
+  float avg_shift_semitones = 0.0f;      ///< Average pitch shift magnitude.
+  int max_shift_semitones = 0;           ///< Maximum pitch shift magnitude.
+  uint32_t subject_touches = 0;          ///< Subject material modifications (should be 0).
+  uint32_t countersubject_touches = 0;   ///< Countersubject modifications (should be 0).
+  uint32_t stretto_section_touches = 0;  ///< Stretto section modifications (should be 0).
   float drop_rate() const {
     return total_input > 0 ? static_cast<float>(dropped) / total_input : 0.0f;
   }
@@ -93,14 +90,14 @@ using ProtectionOverrides = std::vector<std::pair<uint8_t, ProtectionLevel>>;
 /// Default configuration is permissive (fixes everything). Fugue-specific
 /// policies restrict intervention to preserve rhetorical structure.
 struct PostValidatePolicy {
-  bool fix_parallel_perfect = true;       ///< Fix true parallel 5ths/8ves only.
-  bool fix_voice_crossing = true;         ///< Fix sustained crossings (>= 1 beat).
-  bool fix_strong_beat_dissonance = true; ///< Fix strong-beat dissonances.
-  bool fix_weak_beat_nct = false;         ///< Fix weak-beat NCTs (default: no).
-  bool fix_hidden_perfect = false;        ///< Fix hidden perfect intervals (default: no).
-  Tick cadence_protection_ticks = 0;      ///< Cadence protection range in ticks.
-  bool stylus_phantasticus = false;       ///< True for toccata/fantasia forms: widens
-                                          ///< large-leap thresholds (up to 12th = 19st).
+  bool fix_parallel_perfect = true;        ///< Fix true parallel 5ths/8ves only.
+  bool fix_voice_crossing = true;          ///< Fix sustained crossings (>= 1 beat).
+  bool fix_strong_beat_dissonance = true;  ///< Fix strong-beat dissonances.
+  bool fix_weak_beat_nct = false;          ///< Fix weak-beat NCTs (default: no).
+  bool fix_hidden_perfect = false;         ///< Fix hidden perfect intervals (default: no).
+  Tick cadence_protection_ticks = 0;       ///< Cadence protection range in ticks.
+  bool stylus_phantasticus = false;        ///< True for toccata/fantasia forms: widens
+                                           ///< large-leap thresholds (up to 12th = 19st).
 };
 
 /// @brief Post-validate raw notes through the counterpoint engine.
@@ -118,12 +115,9 @@ struct PostValidatePolicy {
 /// @param protection_overrides Per-voice protection level overrides.
 /// @return Validated notes with counterpoint rules enforced.
 std::vector<NoteEvent> postValidateNotes(
-    std::vector<NoteEvent> raw_notes,
-    uint8_t num_voices,
-    KeySignature key_sig,
+    std::vector<NoteEvent> raw_notes, uint8_t num_voices, KeySignature key_sig,
     const std::vector<std::pair<uint8_t, uint8_t>>& voice_ranges,
-    PostValidateStats* stats = nullptr,
-    const ProtectionOverrides& protection_overrides = {},
+    PostValidateStats* stats = nullptr, const ProtectionOverrides& protection_overrides = {},
     bool stylus_phantasticus = false);
 
 /// @brief Tick-aware overload: voice_range_fn(voice, tick) returns (low, high).
@@ -141,12 +135,9 @@ std::vector<NoteEvent> postValidateNotes(
 ///        toccata/fantasia (up to 12th = 19 semitones).
 /// @return Validated notes with counterpoint rules enforced.
 std::vector<NoteEvent> postValidateNotes(
-    std::vector<NoteEvent> raw_notes,
-    uint8_t num_voices,
-    KeySignature key_sig,
+    std::vector<NoteEvent> raw_notes, uint8_t num_voices, KeySignature key_sig,
     std::function<std::pair<uint8_t, uint8_t>(uint8_t voice, Tick tick)> voice_range_fn,
-    PostValidateStats* stats = nullptr,
-    const ProtectionOverrides& protection_overrides = {},
+    PostValidateStats* stats = nullptr, const ProtectionOverrides& protection_overrides = {},
     bool stylus_phantasticus = false);
 
 /// @brief Post-validate notes with policy control and cadence protection.
@@ -167,13 +158,9 @@ std::vector<NoteEvent> postValidateNotes(
 /// @param cadence_tick Cadence start tick for cadence protection zone.
 /// @return Validated notes with counterpoint rules enforced per policy.
 std::vector<NoteEvent> postValidateNotes(
-    std::vector<NoteEvent> raw_notes,
-    uint8_t num_voices,
-    KeySignature key_sig,
-    const std::vector<std::pair<uint8_t, uint8_t>>& voice_ranges,
-    PostValidateStats* stats,
-    const ProtectionOverrides& protection_overrides,
-    const PostValidatePolicy& policy,
+    std::vector<NoteEvent> raw_notes, uint8_t num_voices, KeySignature key_sig,
+    const std::vector<std::pair<uint8_t, uint8_t>>& voice_ranges, PostValidateStats* stats,
+    const ProtectionOverrides& protection_overrides, const PostValidatePolicy& policy,
     Tick cadence_tick = 0);
 
 /// @brief Tick-aware overload with policy control and cadence protection.
@@ -190,14 +177,10 @@ std::vector<NoteEvent> postValidateNotes(
 /// @param cadence_tick Cadence start tick for cadence protection zone.
 /// @return Validated notes with counterpoint rules enforced per policy.
 std::vector<NoteEvent> postValidateNotes(
-    std::vector<NoteEvent> raw_notes,
-    uint8_t num_voices,
-    KeySignature key_sig,
+    std::vector<NoteEvent> raw_notes, uint8_t num_voices, KeySignature key_sig,
     std::function<std::pair<uint8_t, uint8_t>(uint8_t voice, Tick tick)> voice_range_fn,
-    PostValidateStats* stats,
-    const ProtectionOverrides& protection_overrides,
-    const PostValidatePolicy& policy,
-    Tick cadence_tick = 0);
+    PostValidateStats* stats, const ProtectionOverrides& protection_overrides,
+    const PostValidatePolicy& policy, Tick cadence_tick = 0);
 
 /// @brief Build a MelodicContext from the counterpoint state for a given voice.
 /// @param state The counterpoint state to query.
@@ -218,8 +201,7 @@ MelodicContext buildMelodicContextFromState(const CounterpointState& state, Voic
 /// @param num_voices Total number of voices in the texture.
 /// @return true if the pitch forms only consonant intervals with all sounding notes.
 bool isVerticallyConsonant(uint8_t pitch, uint8_t voice, Tick tick,
-                           const std::vector<NoteEvent>& placed,
-                           uint8_t num_voices);
+                           const std::vector<NoteEvent>& placed, uint8_t num_voices);
 
 }  // namespace bach
 

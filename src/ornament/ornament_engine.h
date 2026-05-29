@@ -16,10 +16,10 @@ class HarmonicTimeline;
 /// Context for ornament application, combining config with voice role and RNG seed.
 struct OrnamentContext {
   OrnamentConfig config;
-  VoiceRole role = VoiceRole::Respond;  // Affects ornament eligibility and density
-  uint32_t seed = 0;                    // Deterministic RNG seed
+  VoiceRole role = VoiceRole::Respond;         // Affects ornament eligibility and density
+  uint32_t seed = 0;                           // Deterministic RNG seed
   const HarmonicTimeline* timeline = nullptr;  // Harmonic context (nullptr = legacy behavior)
-  std::vector<Tick> cadence_ticks;  // Cadence tick positions for trill obligation
+  std::vector<Tick> cadence_ticks;             // Cadence tick positions for trill obligation
 };
 
 /// @brief Apply ornaments to a sequence of notes as post-processing.

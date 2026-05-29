@@ -1,13 +1,12 @@
 // Tests for Sectionalis archetype toccata generation.
 
-#include "forms/toccata.h"
-
 #include <gtest/gtest.h>
 
 #include <algorithm>
 
 #include "core/basic_types.h"
 #include "core/pitch_utils.h"
+#include "forms/toccata.h"
 #include "test_helpers.h"
 
 namespace bach {
@@ -27,7 +26,8 @@ ToccataConfig makeSectionalisConfig(uint32_t seed = 42) {
 size_t countNotesInRange(const Track& track, Tick start, Tick end) {
   size_t count = 0;
   for (const auto& note : track.notes) {
-    if (note.start_tick >= start && note.start_tick < end) ++count;
+    if (note.start_tick >= start && note.start_tick < end)
+      ++count;
   }
   return count;
 }
@@ -128,12 +128,9 @@ TEST(ToccataSectionalisTest, CadenzaIsPedalSolo) {
   size_t v1_cadenza = countNotesInRange(result.tracks[1], cad_start, cad_end);
   size_t v2_cadenza = countNotesInRange(result.tracks[2], cad_start, cad_end);
 
-  EXPECT_EQ(v0_cadenza, 0u)
-      << "Voice 0 should have no notes during cadenza (pedal solo)";
-  EXPECT_EQ(v1_cadenza, 0u)
-      << "Voice 1 should have no notes during cadenza (pedal solo)";
-  EXPECT_GT(v2_cadenza, 0u)
-      << "Pedal (voice 2) should have notes during cadenza";
+  EXPECT_EQ(v0_cadenza, 0u) << "Voice 0 should have no notes during cadenza (pedal solo)";
+  EXPECT_EQ(v1_cadenza, 0u) << "Voice 1 should have no notes during cadenza (pedal solo)";
+  EXPECT_GT(v2_cadenza, 0u) << "Pedal (voice 2) should have notes during cadenza";
 }
 
 TEST(ToccataSectionalisTest, CadenzaHasFastNotes) {
@@ -151,15 +148,15 @@ TEST(ToccataSectionalisTest, CadenzaHasFastNotes) {
   for (const auto& note : result.tracks[2].notes) {
     if (note.start_tick >= cad_start && note.start_tick < cad_end) {
       ++total;
-      if (note.duration <= duration::kSixteenthNote) ++fast;
+      if (note.duration <= duration::kSixteenthNote)
+        ++fast;
     }
   }
 
   ASSERT_GT(total, 0) << "Cadenza should have pedal notes";
   float ratio = static_cast<float>(fast) / total;
-  EXPECT_GE(ratio, 0.50f)
-      << "At least 50% of cadenza notes should be 16th or shorter, got "
-      << (ratio * 100) << "%";
+  EXPECT_GE(ratio, 0.50f) << "At least 50% of cadenza notes should be 16th or shorter, got "
+                          << (ratio * 100) << "%";
 }
 
 TEST(ToccataSectionalisTest, WaveEnergy) {
@@ -172,8 +169,7 @@ TEST(ToccataSectionalisTest, WaveEnergy) {
   auto density = [&](size_t si) -> float {
     size_t count = 0;
     for (const auto& track : result.tracks) {
-      count += countNotesInRange(track, result.sections[si].start,
-                                 result.sections[si].end);
+      count += countNotesInRange(track, result.sections[si].start, result.sections[si].end);
     }
     Tick dur = result.sections[si].end - result.sections[si].start;
     return dur > 0 ? static_cast<float>(count) / dur : 0.0f;

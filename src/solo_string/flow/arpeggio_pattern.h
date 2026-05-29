@@ -41,9 +41,9 @@ enum class PatternRole : uint8_t {
 struct ArpeggioPattern {
   ArpeggioPatternType type = ArpeggioPatternType::Rising;
   PatternRole role = PatternRole::Drive;
-  int notes_per_beat = 4;         // Usually 4 (16th notes at given tempo)
-  std::vector<int> degrees;       // Scale degrees, e.g. {0, 2, 4, 7} = root, 3rd, 5th, 7th
-  bool use_open_string = false;   // Whether to prefer open-string resonance
+  int notes_per_beat = 4;        // Usually 4 (16th notes at given tempo)
+  std::vector<int> degrees;      // Scale degrees, e.g. {0, 2, 4, 7} = root, 3rd, 5th, 7th
+  bool use_open_string = false;  // Whether to prefer open-string resonance
 };
 
 /// @brief Convert ArpeggioPatternType to human-readable string.
@@ -95,12 +95,9 @@ std::vector<ArpeggioPatternType> getAllowedPatternsForPhase(ArcPhase phase);
 /// @param prev_pattern The pattern type used in the previous bar/beat.
 /// @param is_section_start True if this is the first bar/beat of a new section.
 /// @return A configured ArpeggioPattern with degrees arranged per the type.
-ArpeggioPattern generatePattern(const std::vector<int>& chord_degrees,
-                                ArcPhase phase, PatternRole role,
-                                bool use_open_strings,
-                                std::mt19937& rng,
-                                ArpeggioPatternType prev_pattern,
-                                bool is_section_start);
+ArpeggioPattern generatePattern(const std::vector<int>& chord_degrees, ArcPhase phase,
+                                PatternRole role, bool use_open_strings, std::mt19937& rng,
+                                ArpeggioPatternType prev_pattern, bool is_section_start);
 
 }  // namespace bach
 

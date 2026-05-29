@@ -234,10 +234,9 @@ TEST(JsonWriterTest, ProvenanceStyleOutput) {
 
   writer.endObject();
 
-  std::string expected =
-      R"({"pitch":62,"velocity":80,"start_ticks":1920,"provenance":)"
-      R"({"source":"fugue_answer","entry_number":2,"transform_steps":)"
-      R"(["tonal_answer","collision_avoid"]}})";
+  std::string expected = R"({"pitch":62,"velocity":80,"start_ticks":1920,"provenance":)"
+                         R"({"source":"fugue_answer","entry_number":2,"transform_steps":)"
+                         R"(["tonal_answer","collision_avoid"]}})";
   EXPECT_EQ(writer.toString(), expected);
 }
 

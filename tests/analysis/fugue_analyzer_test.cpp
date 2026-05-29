@@ -29,8 +29,8 @@ NoteEvent qn(Tick tick, uint8_t pitch, VoiceId voice) {
 /// @brief Create a subject: C4-D4-E4-F4 (stepwise ascending, 4 quarter notes).
 std::vector<NoteEvent> makeSubject() {
   return {
-      qn(0, 60, 0),              // C4
-      qn(kTicksPerBeat, 62, 0),  // D4
+      qn(0, 60, 0),                  // C4
+      qn(kTicksPerBeat, 62, 0),      // D4
       qn(kTicksPerBeat * 2, 64, 0),  // E4
       qn(kTicksPerBeat * 3, 65, 0),  // F4
   };
@@ -345,18 +345,15 @@ TEST(CadenceDetectionRateTest, AllDetected_ReturnsOne) {
   // Build a timeline with V7->I cadences at bar 2 and bar 6.
   HarmonicTimeline timeline;
   timeline.addEvent(makeHarmonicEvent(0, kTicksPerBar, ChordDegree::I));
-  timeline.addEvent(makeHarmonicEvent(kTicksPerBar, kTicksPerBar * 2,
-                                      ChordDegree::V, ChordQuality::Dominant7));
-  timeline.addEvent(makeHarmonicEvent(kTicksPerBar * 2, kTicksPerBar * 3,
-                                      ChordDegree::I));
-  timeline.addEvent(makeHarmonicEvent(kTicksPerBar * 3, kTicksPerBar * 4,
-                                      ChordDegree::IV));
-  timeline.addEvent(makeHarmonicEvent(kTicksPerBar * 4, kTicksPerBar * 5,
-                                      ChordDegree::ii, ChordQuality::Minor));
-  timeline.addEvent(makeHarmonicEvent(kTicksPerBar * 5, kTicksPerBar * 6,
-                                      ChordDegree::V, ChordQuality::Dominant7));
-  timeline.addEvent(makeHarmonicEvent(kTicksPerBar * 6, kTicksPerBar * 7,
-                                      ChordDegree::I));
+  timeline.addEvent(
+      makeHarmonicEvent(kTicksPerBar, kTicksPerBar * 2, ChordDegree::V, ChordQuality::Dominant7));
+  timeline.addEvent(makeHarmonicEvent(kTicksPerBar * 2, kTicksPerBar * 3, ChordDegree::I));
+  timeline.addEvent(makeHarmonicEvent(kTicksPerBar * 3, kTicksPerBar * 4, ChordDegree::IV));
+  timeline.addEvent(
+      makeHarmonicEvent(kTicksPerBar * 4, kTicksPerBar * 5, ChordDegree::ii, ChordQuality::Minor));
+  timeline.addEvent(makeHarmonicEvent(kTicksPerBar * 5, kTicksPerBar * 6, ChordDegree::V,
+                                      ChordQuality::Dominant7));
+  timeline.addEvent(makeHarmonicEvent(kTicksPerBar * 6, kTicksPerBar * 7, ChordDegree::I));
 
   // Planned cadences at the V7->I resolution ticks.
   std::vector<Tick> planned = {kTicksPerBar * 2, kTicksPerBar * 6};
@@ -369,10 +366,9 @@ TEST(CadenceDetectionRateTest, NoneDetected_ReturnsZero) {
   // Timeline with no cadential progressions (I -> IV -> ii only).
   HarmonicTimeline timeline;
   timeline.addEvent(makeHarmonicEvent(0, kTicksPerBar, ChordDegree::I));
-  timeline.addEvent(makeHarmonicEvent(kTicksPerBar, kTicksPerBar * 2,
-                                      ChordDegree::IV));
-  timeline.addEvent(makeHarmonicEvent(kTicksPerBar * 2, kTicksPerBar * 3,
-                                      ChordDegree::ii, ChordQuality::Minor));
+  timeline.addEvent(makeHarmonicEvent(kTicksPerBar, kTicksPerBar * 2, ChordDegree::IV));
+  timeline.addEvent(
+      makeHarmonicEvent(kTicksPerBar * 2, kTicksPerBar * 3, ChordDegree::ii, ChordQuality::Minor));
 
   std::vector<Tick> planned = {kTicksPerBar * 2};
 
@@ -382,10 +378,8 @@ TEST(CadenceDetectionRateTest, NoneDetected_ReturnsZero) {
 
 TEST(CadenceDetectionRateTest, EmptyPlanned_ReturnsZero) {
   HarmonicTimeline timeline;
-  timeline.addEvent(makeHarmonicEvent(0, kTicksPerBar, ChordDegree::V,
-                                      ChordQuality::Dominant7));
-  timeline.addEvent(makeHarmonicEvent(kTicksPerBar, kTicksPerBar * 2,
-                                      ChordDegree::I));
+  timeline.addEvent(makeHarmonicEvent(0, kTicksPerBar, ChordDegree::V, ChordQuality::Dominant7));
+  timeline.addEvent(makeHarmonicEvent(kTicksPerBar, kTicksPerBar * 2, ChordDegree::I));
 
   std::vector<Tick> planned;  // No planned cadences.
 
@@ -524,8 +518,8 @@ TEST(InvertibleCounterpointScoreTest, SimpleConsonance) {
   // The inverted intervals should remain mostly consonant (3rds/6ths).
   auto subject = makeSubject();
   std::vector<NoteEvent> counter = {
-      qn(0, 57, 1),              // A3
-      qn(kTicksPerBeat, 59, 1),  // B3
+      qn(0, 57, 1),                  // A3
+      qn(kTicksPerBeat, 59, 1),      // B3
       qn(kTicksPerBeat * 2, 60, 1),  // C4
       qn(kTicksPerBeat * 3, 62, 1),  // D4
   };

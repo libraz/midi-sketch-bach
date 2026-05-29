@@ -34,10 +34,10 @@ struct GlobalArcConfig {
 /// Controls how the piece winds down to its final cadence, including
 /// register constraints, rhythmic simplification, and open-string preference.
 struct CadenceConfig {
-  int cadence_bars = 8;               // Number of bars for cadential section
-  float open_string_bias = 0.7f;      // Preference for open strings [0.0, 1.0]
-  bool restrict_high_register = true; // Avoid high register in cadence
-  float rhythm_simplification = 0.3f; // Amount of rhythmic simplification [0.0, 1.0]
+  int cadence_bars = 8;                // Number of bars for cadential section
+  float open_string_bias = 0.7f;       // Preference for open strings [0.0, 1.0]
+  bool restrict_high_register = true;  // Avoid high register in cadence
+  float rhythm_simplification = 0.3f;  // Amount of rhythmic simplification [0.0, 1.0]
 };
 
 /// @brief Full configuration for the harmonic arpeggio engine (Flow system).
@@ -47,10 +47,10 @@ struct CadenceConfig {
 struct ArpeggioFlowConfig {
   KeySignature key = {Key::D, true};  // Default: D minor
   uint16_t bpm = 66;
-  uint32_t seed = 0;                  // 0 = auto (time-based)
+  uint32_t seed = 0;  // 0 = auto (time-based)
   InstrumentType instrument = InstrumentType::Cello;
-  int num_sections = 6;               // Typical: 6 sections
-  int bars_per_section = 4;           // Each section is 4 bars
+  int num_sections = 6;      // Typical: 6 sections
+  int bars_per_section = 4;  // Each section is 4 bars
   GlobalArcConfig arc;
   CadenceConfig cadence;
 };

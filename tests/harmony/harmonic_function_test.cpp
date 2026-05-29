@@ -138,8 +138,7 @@ TEST(FunctionalProgressionTest, DominantToSubdominant_IsInvalid) {
 }
 
 TEST(FunctionalProgressionTest, MediantToAnything_IsValid) {
-  EXPECT_TRUE(
-      isValidFunctionalProgression(HarmonicFunction::Mediant, HarmonicFunction::Dominant));
+  EXPECT_TRUE(isValidFunctionalProgression(HarmonicFunction::Mediant, HarmonicFunction::Dominant));
   EXPECT_TRUE(
       isValidFunctionalProgression(HarmonicFunction::Mediant, HarmonicFunction::Subdominant));
 }

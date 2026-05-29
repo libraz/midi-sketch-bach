@@ -17,18 +17,17 @@ namespace {
 /// @brief Texture complexity ordering for wave-pattern assignment within blocks.
 /// Order: SingleLine < Bariolage < Arpeggiated < ScalePassage < ImpliedPolyphony
 constexpr TextureType kTextureComplexityOrder[] = {
-    TextureType::SingleLine,
-    TextureType::Bariolage,
-    TextureType::Arpeggiated,
-    TextureType::ScalePassage,
-    TextureType::ImpliedPolyphony,
+    TextureType::SingleLine,   TextureType::Bariolage,        TextureType::Arpeggiated,
+    TextureType::ScalePassage, TextureType::ImpliedPolyphony,
 };
 constexpr int kTextureComplexityCount = 5;
 
 /// @brief Select a texture by complexity index (clamped).
 TextureType textureByComplexity(int index) {
-  if (index < 0) index = 0;
-  if (index >= kTextureComplexityCount) index = kTextureComplexityCount - 1;
+  if (index < 0)
+    index = 0;
+  if (index >= kTextureComplexityCount)
+    index = kTextureComplexityCount - 1;
   return kTextureComplexityOrder[index];
 }
 
@@ -42,17 +41,13 @@ VariationType selectTypeForRole(std::mt19937& rng, VariationRole role) {
   using VT = VariationType;
   switch (role) {
     case VariationRole::Develop:
-      return rng::selectWeighted(rng, std::vector<VT>{VT::Rhythmic, VT::Lyrical},
-                                 {0.60f, 0.40f});
+      return rng::selectWeighted(rng, std::vector<VT>{VT::Rhythmic, VT::Lyrical}, {0.60f, 0.40f});
     case VariationRole::Destabilize:
-      return rng::selectWeighted(rng, std::vector<VT>{VT::Virtuosic, VT::Rhythmic},
-                                 {0.70f, 0.30f});
+      return rng::selectWeighted(rng, std::vector<VT>{VT::Virtuosic, VT::Rhythmic}, {0.70f, 0.30f});
     case VariationRole::Illuminate:
-      return rng::selectWeighted(rng, std::vector<VT>{VT::Lyrical, VT::Chordal},
-                                 {0.55f, 0.45f});
+      return rng::selectWeighted(rng, std::vector<VT>{VT::Lyrical, VT::Chordal}, {0.55f, 0.45f});
     case VariationRole::Accumulate:
-      return rng::selectWeighted(rng, std::vector<VT>{VT::Virtuosic, VT::Chordal},
-                                 {0.50f, 0.50f});
+      return rng::selectWeighted(rng, std::vector<VT>{VT::Virtuosic, VT::Chordal}, {0.50f, 0.50f});
     default:
       return VT::Theme;
   }
@@ -80,13 +75,11 @@ TextureType selectTextureForRole(std::mt19937& rng, VariationRole role) {
     case VariationRole::Destabilize:
       return rng::selectWeighted(
           rng,
-          std::vector<TT>{TT::ScalePassage, TT::ImpliedPolyphony, TT::Bariolage,
-                          TT::Arpeggiated},
+          std::vector<TT>{TT::ScalePassage, TT::ImpliedPolyphony, TT::Bariolage, TT::Arpeggiated},
           {0.35f, 0.30f, 0.20f, 0.15f});
     case VariationRole::Illuminate:
       return rng::selectWeighted(
-          rng,
-          std::vector<TT>{TT::SingleLine, TT::Arpeggiated, TT::Bariolage, TT::ScalePassage},
+          rng, std::vector<TT>{TT::SingleLine, TT::Arpeggiated, TT::Bariolage, TT::ScalePassage},
           {0.30f, 0.30f, 0.25f, 0.15f});
     case VariationRole::Accumulate:
       // Accumulate texture is handled in buildTextureContext (Step 4).
@@ -97,7 +90,8 @@ TextureType selectTextureForRole(std::mt19937& rng, VariationRole role) {
 
 void assignBlockTextures(std::mt19937& rng, std::vector<ChaconneVariation>& block,
                          int base_complexity) {
-  if (block.empty()) return;
+  if (block.empty())
+    return;
   int n = static_cast<int>(block.size());
 
   // Sub-arc size: 2-4 variations (randomized).
@@ -131,11 +125,11 @@ void assignBlockTextures(std::mt19937& rng, std::vector<ChaconneVariation>& bloc
 std::vector<KeySignature> getIslandKeys(const KeySignature& key) {
   std::vector<KeySignature> keys;
   KeySignature relative = getRelative(key);
-  keys.push_back(relative);                          // e.g. F major
-  keys.push_back(getSubdominant(relative));           // e.g. Bb major
+  keys.push_back(relative);                  // e.g. F major
+  keys.push_back(getSubdominant(relative));  // e.g. Bb major
   KeySignature dom = getDominant(key);
   dom.is_minor = false;  // Force major for island contrast.
-  keys.push_back(dom);                                // e.g. A major
+  keys.push_back(dom);   // e.g. A major
   return keys;
 }
 
@@ -160,7 +154,7 @@ TextureArcTarget getTextureArcTarget(VariationRole role) {
 }
 
 std::vector<ChaconneVariation> createStandardVariationPlan(const KeySignature& key,
-                                                            std::mt19937& rng) {
+                                                           std::mt19937& rng) {
   // Standard chaconne variation plan (~10 variations).
   // Fixed order: Establish -> Develop -> Destabilize -> Illuminate
   //              -> Destabilize -> Accumulate(x3) -> Resolve
@@ -182,8 +176,7 @@ std::vector<ChaconneVariation> createStandardVariationPlan(const KeySignature& k
                   TextureType::SingleLine, key, false});
 
   // Variation 1: Develop -- builds energy
-  plan.push_back({var_num++, VariationRole::Develop,
-                  selectTypeForRole(rng, VariationRole::Develop),
+  plan.push_back({var_num++, VariationRole::Develop, selectTypeForRole(rng, VariationRole::Develop),
                   selectTextureForRole(rng, VariationRole::Develop), key, false});
 
   // Variation 2: Destabilize -- pre-major tension
@@ -219,15 +212,14 @@ std::vector<ChaconneVariation> createStandardVariationPlan(const KeySignature& k
                   selectTextureForRole(rng, VariationRole::Accumulate), key, false});
 
   // Variation 9: Resolve (Theme) -- return to opening, closure (fixed)
-  plan.push_back({var_num++, VariationRole::Resolve, VariationType::Theme,
-                  TextureType::SingleLine, key, false});
+  plan.push_back({var_num++, VariationRole::Resolve, VariationType::Theme, TextureType::SingleLine,
+                  key, false});
 
   return plan;
 }
 
 std::vector<ChaconneVariation> createScaledVariationPlan(const KeySignature& key,
-                                                          int target_variations,
-                                                          std::mt19937& rng) {
+                                                         int target_variations, std::mt19937& rng) {
   // For small counts, use the standard plan.
   if (target_variations <= 10) {
     return createStandardVariationPlan(key, rng);
@@ -246,7 +238,8 @@ std::vector<ChaconneVariation> createScaledVariationPlan(const KeySignature& key
   int destab_pre_count = std::max(1, static_cast<int>(scalable * 0.05 + 0.5));
   int illuminate_main_count = std::max(1, static_cast<int>(scalable * 0.22 + 0.5));
   int post_major_count = scalable - develop_count - destab_pre_count - illuminate_main_count;
-  if (post_major_count < 1) post_major_count = 1;
+  if (post_major_count < 1)
+    post_major_count = 1;
 
   std::vector<ChaconneVariation> plan;
   plan.reserve(target_variations);
@@ -261,11 +254,12 @@ std::vector<ChaconneVariation> createScaledVariationPlan(const KeySignature& key
     std::vector<ChaconneVariation> block;
     for (int idx = 0; idx < develop_count; ++idx) {
       block.push_back({var_num++, VariationRole::Develop,
-                       selectTypeForRole(rng, VariationRole::Develop),
-                       TextureType::SingleLine, key, false});
+                       selectTypeForRole(rng, VariationRole::Develop), TextureType::SingleLine, key,
+                       false});
     }
     assignBlockTextures(rng, block, 1);  // Start above SingleLine
-    for (auto& v : block) plan.push_back(v);
+    for (auto& v : block)
+      plan.push_back(v);
   }
 
   // --- Destabilize pre-major ---
@@ -273,11 +267,12 @@ std::vector<ChaconneVariation> createScaledVariationPlan(const KeySignature& key
     std::vector<ChaconneVariation> block;
     for (int idx = 0; idx < destab_pre_count; ++idx) {
       block.push_back({var_num++, VariationRole::Destabilize,
-                       selectTypeForRole(rng, VariationRole::Destabilize),
-                       TextureType::SingleLine, key, false});
+                       selectTypeForRole(rng, VariationRole::Destabilize), TextureType::SingleLine,
+                       key, false});
     }
     assignBlockTextures(rng, block, 2);
-    for (auto& v : block) plan.push_back(v);
+    for (auto& v : block)
+      plan.push_back(v);
   }
 
   // --- Illuminate main (major section) ---
@@ -285,11 +280,12 @@ std::vector<ChaconneVariation> createScaledVariationPlan(const KeySignature& key
     std::vector<ChaconneVariation> block;
     for (int idx = 0; idx < illuminate_main_count; ++idx) {
       block.push_back({var_num++, VariationRole::Illuminate,
-                       selectTypeForRole(rng, VariationRole::Illuminate),
-                       TextureType::SingleLine, major_key, true});
+                       selectTypeForRole(rng, VariationRole::Illuminate), TextureType::SingleLine,
+                       major_key, true});
     }
     assignBlockTextures(rng, block, 0);  // Major section: lighter textures
-    for (auto& v : block) plan.push_back(v);
+    for (auto& v : block)
+      plan.push_back(v);
   }
 
   // --- Post-major interleaved: Destabilize with Illuminate islands ---
@@ -326,12 +322,14 @@ std::vector<ChaconneVariation> createScaledVariationPlan(const KeySignature& key
                                   TextureType::SingleLine, key, false});
         }
         assignBlockTextures(rng, destab_block, 2);
-        for (auto& v : destab_block) plan.push_back(v);
+        for (auto& v : destab_block)
+          plan.push_back(v);
         remaining -= destab_seg;
 
         // Place Illuminate island (1-2 variations, is_major_section=false).
         int island_size = std::min(max_island_size, remaining - 1);  // Keep at least 1 for later
-        if (island_size < 1) island_size = 1;
+        if (island_size < 1)
+          island_size = 1;
 
         KeySignature isl_key = island_keys[island_key_idx % island_keys.size()];
         ++island_key_idx;
@@ -355,8 +353,8 @@ std::vector<ChaconneVariation> createScaledVariationPlan(const KeySignature& key
                   selectTextureForRole(rng, VariationRole::Accumulate), key, false});
 
   // --- Resolve (1) ---
-  plan.push_back({var_num++, VariationRole::Resolve, VariationType::Theme,
-                  TextureType::SingleLine, key, false});
+  plan.push_back({var_num++, VariationRole::Resolve, VariationType::Theme, TextureType::SingleLine,
+                  key, false});
 
   return plan;
 }
@@ -368,8 +366,7 @@ FailReport validateVariationPlanReport(const std::vector<ChaconneVariation>& pla
   if (plan.empty()) {
     report.addIssue({FailKind::ConfigFail, FailSeverity::Critical,
                      /*tick=*/0, /*bar=*/0, /*beat=*/0,
-                     /*voice_a=*/0, /*voice_b=*/0,
-                     "empty_plan", "Variation plan is empty"});
+                     /*voice_a=*/0, /*voice_b=*/0, "empty_plan", "Variation plan is empty"});
     return report;
   }
 
@@ -390,8 +387,7 @@ FailReport validateVariationPlanReport(const std::vector<ChaconneVariation>& pla
     if (!isTypeAllowedForRole(var.type, var.role)) {
       report.addIssue({FailKind::ConfigFail, FailSeverity::Critical,
                        /*tick=*/0, /*bar=*/0, /*beat=*/0,
-                       /*voice_a=*/0, /*voice_b=*/0,
-                       "invalid_type_for_role",
+                       /*voice_a=*/0, /*voice_b=*/0, "invalid_type_for_role",
                        "Variation " + std::to_string(var.variation_number) + ": type " +
                            variationTypeToString(var.type) + " not allowed for role " +
                            variationRoleToString(var.role)});
@@ -402,8 +398,7 @@ FailReport validateVariationPlanReport(const std::vector<ChaconneVariation>& pla
   if (accumulate_count != 3) {
     report.addIssue({FailKind::ConfigFail, FailSeverity::Critical,
                      /*tick=*/0, /*bar=*/0, /*beat=*/0,
-                     /*voice_a=*/0, /*voice_b=*/0,
-                     "accumulate_count",
+                     /*voice_a=*/0, /*voice_b=*/0, "accumulate_count",
                      "Expected 3 Accumulate, found " + std::to_string(accumulate_count)});
   }
 
@@ -412,8 +407,7 @@ FailReport validateVariationPlanReport(const std::vector<ChaconneVariation>& pla
   if (last.role != VariationRole::Resolve || last.type != VariationType::Theme) {
     report.addIssue({FailKind::ConfigFail, FailSeverity::Critical,
                      /*tick=*/0, /*bar=*/0, /*beat=*/0,
-                     /*voice_a=*/0, /*voice_b=*/0,
-                     "final_not_resolve",
+                     /*voice_a=*/0, /*voice_b=*/0, "final_not_resolve",
                      "Last variation must be Resolve with Theme type"});
   }
 
@@ -421,8 +415,7 @@ FailReport validateVariationPlanReport(const std::vector<ChaconneVariation>& pla
   if (!isRoleOrderValid(roles)) {
     report.addIssue({FailKind::ConfigFail, FailSeverity::Critical,
                      /*tick=*/0, /*bar=*/0, /*beat=*/0,
-                     /*voice_a=*/0, /*voice_b=*/0,
-                     "invalid_role_order",
+                     /*voice_a=*/0, /*voice_b=*/0, "invalid_role_order",
                      "Variation role sequence violates ordering constraints"});
   }
 

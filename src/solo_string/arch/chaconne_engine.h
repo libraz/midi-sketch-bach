@@ -19,12 +19,12 @@ namespace bach {
 /// texture voice (channel 1). Separating bass and texture avoids cross-voice
 /// overlap truncation that destroys bass note durations.
 struct ChaconneResult {
-  std::vector<Track> tracks;       ///< 2 tracks: [0] bass, [1] texture.
-  Tick total_duration_ticks = 0;   ///< Total piece duration in ticks.
-  bool success = false;            ///< True if generation completed without error.
-  std::string error_message;       ///< Describes the failure if success is false.
-  uint32_t seed_used = 0;          ///< The actual seed used (after auto-resolution).
-  HarmonicTimeline timeline;       ///< Concatenated harmonic context across variations.
+  std::vector<Track> tracks;      ///< 2 tracks: [0] bass, [1] texture.
+  Tick total_duration_ticks = 0;  ///< Total piece duration in ticks.
+  bool success = false;           ///< True if generation completed without error.
+  std::string error_message;      ///< Describes the failure if success is false.
+  uint32_t seed_used = 0;         ///< The actual seed used (after auto-resolution).
+  HarmonicTimeline timeline;      ///< Concatenated harmonic context across variations.
 };
 
 /// @brief Generate a BWV1004-style chaconne with scheme-based bass variations.
