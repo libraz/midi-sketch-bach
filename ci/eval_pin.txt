@@ -1,0 +1,10 @@
+# bach-mcp version pin.
+#
+# The standalone bach-mcp repository exists as a sibling working tree at
+# ../bach-mcp with package.json version 0.1.0. A GitHub Release tag will
+# replace this sibling-local pin once bach-mcp has its first commit and
+# release artifact published. Until then, eval_client tests resolve
+# bach-mcp dist/index.js via BACH_MCP_INDEX_JS or the sibling path.
+#
+# Single non-comment line: the pinned version.
+sibling-local-0.1.0
