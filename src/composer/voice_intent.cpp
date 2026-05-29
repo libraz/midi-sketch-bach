@@ -18,6 +18,12 @@ const char* voiceIntentToString(VoiceIntent intent) {
       return "FillerGap";
     case VoiceIntent::AnswerCarrier:
       return "AnswerCarrier";
+    case VoiceIntent::SuspensionCarrier:
+      return "SuspensionCarrier";
+    case VoiceIntent::Episode:
+      return "Episode";
+    case VoiceIntent::CountersubjectCarrier:
+      return "CountersubjectCarrier";
   }
   return "Unknown";
 }

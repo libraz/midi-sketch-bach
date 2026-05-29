@@ -29,8 +29,31 @@ const ChordEvent& activeChord(const HarmonicPlan& plan, Tick at) {
 }
 
 std::array<std::uint8_t, 3> triadPC(const ChordEvent& chord) {
-  const std::uint8_t third = (chord.quality == ChordQuality::Major) ? 4 : 3;
-  const std::uint8_t fifth = (chord.quality == ChordQuality::Diminished) ? 6 : 7;
+  std::uint8_t third = 4;
+  std::uint8_t fifth = 7;
+  switch (chord.quality) {
+    case ChordQuality::Major:
+    case ChordQuality::Major7:
+    case ChordQuality::Dominant7:
+      third = 4;
+      fifth = 7;
+      break;
+    case ChordQuality::Minor:
+    case ChordQuality::Minor7:
+      third = 3;
+      fifth = 7;
+      break;
+    case ChordQuality::Diminished:
+    case ChordQuality::HalfDiminished7:
+    case ChordQuality::Diminished7:
+      third = 3;
+      fifth = 6;
+      break;
+    case ChordQuality::Augmented:
+      third = 4;
+      fifth = 8;
+      break;
+  }
   return {
       static_cast<std::uint8_t>(chord.root_pc % 12),
       static_cast<std::uint8_t>((chord.root_pc + third) % 12),
@@ -85,7 +108,9 @@ VoiceCursor seedCursor(VoiceId voice, Tick span_start, const std::vector<NoteEve
 }
 
 bool isCarrierIntent(VoiceIntent intent) {
-  return intent == VoiceIntent::SubjectCarrier || intent == VoiceIntent::AnswerCarrier;
+  return intent == VoiceIntent::SubjectCarrier || intent == VoiceIntent::AnswerCarrier ||
+         intent == VoiceIntent::SuspensionCarrier || intent == VoiceIntent::Episode ||
+         intent == VoiceIntent::CountersubjectCarrier;
 }
 
 }  // namespace
@@ -112,6 +137,7 @@ ComposeResult Composer::run(const Material& material, const HarmonicPlan& harmon
     // Hand the search a view of every note committed so far so it can
     // run the vertical (parallel-perfect, voice-crossing) checks.
     ctx.placed_notes = &result.notes;
+    ctx.num_voices = voice_plan.num_voices;
 
     const auto candidates = search.enumerate(span, harmonic_plan, material, ctx);
 
@@ -181,7 +207,7 @@ ComposeResult Composer::run(const Material& material, const HarmonicPlan& harmon
   result.provenance = std::move(sorted_prov);
 
   Validator validator;
-  result.validation = validator.validate(result.notes, result.provenance, harmonic_plan);
+  result.validation = validator.validate(result.notes, result.provenance, harmonic_plan, material);
 
   Renderer renderer;
   result.tracks = renderer.render(result.notes);

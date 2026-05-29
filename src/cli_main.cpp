@@ -58,9 +58,25 @@ bach::composer::HarnessPhase parseComposerPhase(const char* val) {
       std::strcmp(val, "4") == 0) {
     return bach::composer::HarnessPhase::Phase4;
   }
+  if (std::strcmp(val, "Phase4Sus") == 0 || std::strcmp(val, "phase4sus") == 0 ||
+      std::strcmp(val, "4sus") == 0) {
+    return bach::composer::HarnessPhase::Phase4Sus;
+  }
   if (std::strcmp(val, "Phase5") == 0 || std::strcmp(val, "phase5") == 0 ||
       std::strcmp(val, "5") == 0) {
     return bach::composer::HarnessPhase::Phase5;
+  }
+  if (std::strcmp(val, "Phase6Episode") == 0 || std::strcmp(val, "phase6episode") == 0 ||
+      std::strcmp(val, "6ep") == 0 || std::strcmp(val, "6episode") == 0) {
+    return bach::composer::HarnessPhase::Phase6Episode;
+  }
+  if (std::strcmp(val, "Phase6Tonal") == 0 || std::strcmp(val, "phase6tonal") == 0 ||
+      std::strcmp(val, "6tonal") == 0 || std::strcmp(val, "p6tonal") == 0) {
+    return bach::composer::HarnessPhase::Phase6Tonal;
+  }
+  if (std::strcmp(val, "Phase7") == 0 || std::strcmp(val, "phase7") == 0 ||
+      std::strcmp(val, "7") == 0 || std::strcmp(val, "p7") == 0) {
+    return bach::composer::HarnessPhase::Phase7;
   }
   return bach::composer::HarnessPhase::Phase6;
 }
@@ -82,7 +98,8 @@ void printUsage() {
   std::printf("  --bars N         Target bar count (overrides --scale)\n");
   std::printf(
       "  --composer-phase P  Bypass legacy generator; run Composer with phase\n"
-      "                   {Phase3|Phase35|Phase4|Phase5|Phase6}. Seed reused.\n");
+      "                   {Phase3|Phase35|Phase4|Phase4Sus|Phase5|Phase6|Phase6Episode|\n"
+      "                    Phase6Tonal|Phase7}. Seed reused.\n");
   std::printf(
       "  --toccata-style  Toccata archetype: dramaticus, perpetuus, concertato, sectionalis\n");
   std::printf("  --json           JSON output\n");
@@ -200,10 +217,18 @@ const char* harnessPhaseToString(bach::composer::HarnessPhase p) {
       return "Phase3.5";
     case bach::composer::HarnessPhase::Phase4:
       return "Phase4";
+    case bach::composer::HarnessPhase::Phase4Sus:
+      return "Phase4Sus";
     case bach::composer::HarnessPhase::Phase5:
       return "Phase5";
     case bach::composer::HarnessPhase::Phase6:
       return "Phase6";
+    case bach::composer::HarnessPhase::Phase6Episode:
+      return "Phase6Episode";
+    case bach::composer::HarnessPhase::Phase6Tonal:
+      return "Phase6Tonal";
+    case bach::composer::HarnessPhase::Phase7:
+      return "Phase7";
   }
   return "Phase?";
 }
@@ -255,6 +280,7 @@ int runComposerMode(const CliOptions& opts) {
       json_path += ".json";
     }
     const std::string generated = bach::composer::emitGeneratedJson(result.notes);
+    const std::string provenance = bach::composer::emitProvenanceJson(result.provenance);
     std::ofstream f(json_path);
     if (f.is_open()) {
       f << generated;
@@ -262,6 +288,21 @@ int runComposerMode(const CliOptions& opts) {
       std::printf("JSON:      %s\n", json_path.c_str());
     } else {
       std::fprintf(stderr, "Warning: failed to write %s\n", json_path.c_str());
+    }
+    std::string provenance_path = json_path;
+    const auto provenance_dot_pos = provenance_path.rfind('.');
+    if (provenance_dot_pos != std::string::npos) {
+      provenance_path = provenance_path.substr(0, provenance_dot_pos) + ".provenance.json";
+    } else {
+      provenance_path += ".provenance.json";
+    }
+    std::ofstream pf(provenance_path);
+    if (pf.is_open()) {
+      pf << provenance;
+      pf.close();
+      std::printf("Provenance:%s\n", provenance_path.c_str());
+    } else {
+      std::fprintf(stderr, "Warning: failed to write %s\n", provenance_path.c_str());
     }
   }
   return 0;

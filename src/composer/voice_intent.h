@@ -45,7 +45,27 @@ enum class VoiceIntent : std::uint8_t {
   // sequence lives in `Material::answer` instead of `Material::subject`.
   // Used by Phase 4 to place a real or tonal answer in the second voice
   // of an exposition.
-  AnswerCarrier = 6
+  AnswerCarrier = 6,
+
+  // Voice carrying a SuspensionPattern (preparation / suspended dissonance /
+  // resolution triad). Source is `Material::suspension_patterns`. Phase 4
+  // adds this intent so the planner can pin strict-counterpoint dissonance
+  // handling without re-deriving prep-sus-res via the candidate cascade.
+  SuspensionCarrier = 7,
+
+  // Episode span derived from Material::subject via a motif transform
+  // (Original / Invert / Retrograde / Augment / Diminish). Source is
+  // `Material::episodes`; CandidateSearch replays the derived note
+  // sequence verbatim. Phase 5 adds this intent so episodes are
+  // restricted to motif-operation outputs rather than free counterpoint.
+  Episode = 8,
+
+  // Voice carrying the fixed countersubject material during the answer
+  // entry. Source is `Material::countersubject`; CandidateSearch
+  // replays verbatim. Phase 6 adds this intent so the original subject
+  // voice (post-subject statement) supplies an obbligato counterline
+  // against the AnswerCarrier instead of a free SequentialCounterline.
+  CountersubjectCarrier = 9
 };
 
 // Pure helper. No formatting library dependency.

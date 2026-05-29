@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "composer/span.h"
+#include "core/basic_types.h"
 
 namespace bach::composer {
 
@@ -24,10 +25,14 @@ enum class ValidationStatus : std::uint8_t {
 // One rule violation inside a span. `rule_id` is a stable string token
 // (e.g., "parallel_fifth", "voice_crossing", "strong_beat_dissonance") for
 // human reading and provenance.json emission. The same token is hashed
-// to a RuleIdMask bit at search time.
+// to a RuleIdMask bit at search time. `kind` classifies the violation
+// per the project FailKind taxonomy (see core/basic_types.h):
+// StructuralFail (missing voices, malformed cadence layout) vs
+// MusicalFail (counterpoint / harmony rule violation).
 struct ValidationFailure {
   SpanId span_id = kInvalidSpanId;
   std::string rule_id;
+  FailKind kind = FailKind::MusicalFail;
 };
 
 // Validator report for one pipeline pass over one piece.

@@ -11,8 +11,14 @@
 
 set(BACH_COMPOSER_SOURCES
   composer.cpp
+  material.cpp
   voice_intent.cpp
   candidate_search.cpp
+  rule_helpers.cpp
+  nct_detector.cpp
+  motif_ops.cpp
+  tonal_answer.cpp
+  chord_voicing.cpp
   validator.cpp
   renderer.cpp
   json_export.cpp

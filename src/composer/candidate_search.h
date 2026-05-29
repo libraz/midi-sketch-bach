@@ -34,6 +34,13 @@ struct CandidateContext {
   // subsequent voices receive the prefix-accumulated note list.
   const std::vector<NoteEvent>* placed_notes = nullptr;
 
+  // Total voice count in the texture (VoicePlan::num_voices). Used by
+  // P7 spacing rules to know which voice pair is the "bottom" pair
+  // (which the spacing rule excludes). Defaults to 2 so pre-P7
+  // callers get the original behavior — pairs outside the upper
+  // voices are not constrained.
+  std::uint8_t num_voices = 2;
+
   // True iff `prev_pitch` is a non-chord-tone of the chord active at
   // its onset (i.e. a passing tone). When true, the next pitch in this
   // voice must be within ±2 semis of `prev_pitch` so the Validator's

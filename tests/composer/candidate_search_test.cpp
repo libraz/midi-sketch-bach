@@ -7,6 +7,8 @@
 
 #include "composer/harmonic_plan.h"
 #include "composer/material.h"
+#include "composer/motif_ops.h"
+#include "composer/provenance.h"
 #include "composer/span.h"
 #include "composer/voice_intent.h"
 #include "core/basic_types.h"
@@ -43,6 +45,16 @@ Span makeComposeSpan(Tick start, Tick end, VoiceId voice) {
   s.end_tick = end;
   s.voice = voice;
   s.intent = VoiceIntent::SequentialCounterline;
+  return s;
+}
+
+Span makeCarrierSpan(Tick start, Tick end, VoiceId voice, VoiceIntent intent) {
+  Span s;
+  s.id = 1;
+  s.start_tick = start;
+  s.end_tick = end;
+  s.voice = voice;
+  s.intent = intent;
   return s;
 }
 
@@ -127,18 +139,18 @@ TEST(CandidateSearchTest, StationaryThisVoiceIsNotParallel) {
   // holds. Even though voice 0 moves 60->67 (P8 -> P5), voice 1 did
   // not move, so the parallel-perfect predicate must not fire.
   std::vector<NoteEvent> placed = {
-      makePlaced(0, kTicksPerBeat, 60, 0),
-      makePlaced(kTicksPerBeat, kTicksPerBeat, 67, 0),
+      makePlaced(3 * kTicksPerBeat, kTicksPerBeat, 60, 0),
+      makePlaced(kTicksPerBar, kTicksPerBeat, 67, 0),
   };
 
   CandidateContext ctx;
   ctx.voice_center = 60;
   ctx.prev_pitch = 60;
-  ctx.prev_end_tick = kTicksPerBeat;
+  ctx.prev_end_tick = kTicksPerBar;
   ctx.placed_notes = &placed;
 
   Material empty;
-  Span span = makeComposeSpan(kTicksPerBeat, 2 * kTicksPerBeat, 1);
+  Span span = makeComposeSpan(kTicksPerBar, kTicksPerBar + kTicksPerBeat, 1);
 
   CandidateSearch search;
   const auto cands = search.enumerate(span, singleCMajor(), empty, ctx);
@@ -527,6 +539,491 @@ TEST(CandidateSearchTest, WeakBeatPenaltyDoesNotHardReject) {
   // this test is that the soft penalty never wipes the candidate set
   // empty even when every pitch in range would be dissonant.
   ASSERT_EQ(cands.size(), 1u);
+}
+
+TEST(CandidateSearchTest, ResolvesLeadingToneUpwardToTonic) {
+  CandidateContext ctx;
+  ctx.voice_center = 67;
+  ctx.prev_pitch = 71;  // B4, leading tone in C.
+  ctx.prev_end_tick = kTicksPerBeat;
+  ctx.placed_notes = nullptr;
+
+  Material empty;
+  Span span = makeComposeSpan(kTicksPerBeat, 2 * kTicksPerBeat, 0);
+
+  CandidateSearch search;
+  const auto cands = search.enumerate(span, singleCMajor(), empty, ctx);
+  ASSERT_EQ(cands.size(), 1u);
+  EXPECT_EQ(cands.front().pitch, 72u);
+  EXPECT_NE(cands.front().satisfied_rules & (1ull << RuleBit::LeadingToneResolved), 0u);
+}
+
+TEST(CandidateSearchTest, MaterialResolutionCarriesLeadingToneBit) {
+  Material material;
+  MaterialNote leading;
+  leading.start_tick = 0;
+  leading.duration = kTicksPerBeat;
+  leading.pitch = 71;
+  MaterialNote tonic;
+  tonic.start_tick = kTicksPerBeat;
+  tonic.duration = kTicksPerBeat;
+  tonic.pitch = 72;
+  material.subject = {leading, tonic};
+  annotateLeadingToneMarkers(material, 0, false);
+
+  CandidateContext ctx;
+  Span span = makeCarrierSpan(0, 2 * kTicksPerBeat, 0, VoiceIntent::SubjectCarrier);
+
+  CandidateSearch search;
+  const auto cands = search.enumerate(span, singleCMajor(), material, ctx);
+  ASSERT_EQ(cands.size(), 2u);
+  EXPECT_EQ(cands[1].pitch, 72u);
+  EXPECT_NE(cands[1].satisfied_rules & (1ull << RuleBit::LeadingToneResolved), 0u);
+}
+
+TEST(CandidateSearchTest, ContraryMotionPreferenceCanBeatHeldTriadTone) {
+  std::vector<NoteEvent> placed = {
+      makePlaced(0, kTicksPerBeat, 74, 0),
+      makePlaced(kTicksPerBeat, kTicksPerBeat, 73, 0),
+  };
+
+  CandidateContext ctx;
+  ctx.voice_center = 64;
+  ctx.prev_pitch = 64;
+  ctx.prev_end_tick = kTicksPerBeat;
+  ctx.placed_notes = &placed;
+
+  Material empty;
+  Span span = makeComposeSpan(kTicksPerBeat, 2 * kTicksPerBeat, 1);
+
+  CandidateSearch search;
+  const auto cands = search.enumerate(span, singleCMajor(), empty, ctx);
+  ASSERT_EQ(cands.size(), 1u);
+  EXPECT_EQ(cands.front().pitch, 65u)
+      << "contrary +0.1 should lift the upward step over the otherwise-held E";
+  EXPECT_NE(cands.front().satisfied_rules & (1ull << RuleBit::HiddenParallelChecked), 0u);
+  EXPECT_NE(cands.front().satisfied_rules & (1ull << RuleBit::CrossRelationChecked), 0u);
+}
+
+TEST(CandidateSearchTest, CadenceCellForcesBassDominantToTonic) {
+  Material material;
+  HarmonicPlan plan = singleCMajor();
+  CadenceEvent cadence;
+  cadence.tick = kTicksPerBeat;
+  cadence.type = CadenceType::Perfect;
+  plan.cadences.push_back(cadence);
+  annotateCadenceCells(material, plan);
+
+  std::vector<NoteEvent> placed = {
+      makePlaced(0, kTicksPerBeat, 71, 0),
+      makePlaced(kTicksPerBeat, kTicksPerBeat, 72, 0),
+  };
+
+  CandidateContext ctx;
+  ctx.voice_center = 64;
+  ctx.placed_notes = &placed;
+
+  Span span = makeComposeSpan(0, 2 * kTicksPerBeat, 1);
+
+  CandidateSearch search;
+  const auto cands = search.enumerate(span, plan, material, ctx);
+  ASSERT_EQ(cands.size(), 2u);
+  EXPECT_EQ(cands[0].pitch % 12, 7u);
+  EXPECT_EQ(cands[1].pitch % 12, 0u);
+  EXPECT_NE(cands[0].satisfied_rules & (1ull << RuleBit::CadenceCellCommitted), 0u);
+  EXPECT_NE(cands[1].satisfied_rules & (1ull << RuleBit::CadenceCellCommitted), 0u);
+  EXPECT_NE(cands[1].satisfied_rules & (1ull << RuleBit::CadenceVoiceLeadingChecked), 0u);
+}
+
+// Provenance audit: every RuleBit written by enumerate() must be observable
+// from at least one positive test. Bits not covered by the targeted tests
+// above (ChordTone, StrongBeatConsonance, SmallStep, ParallelPerfectChecked,
+// VoiceCrossingChecked, LeapResolutionChecked, WeakBeatPassingChecked,
+// VerticalConsonanceChecked) get coverage via the three tests below.
+TEST(CandidateSearchTest, RuleBitsRecordChordToneStrongBeatAndSmallStep) {
+  CandidateSearch search;
+  CandidateContext ctx;
+  ctx.voice_center = 55;
+  ctx.prev_pitch = 53;  // F4 -> within whole step of triad-tone G4 (55)
+  ctx.placed_notes = nullptr;
+
+  Material empty;
+  Span span = makeComposeSpan(0, kTicksPerBeat, 1);
+  const auto cands = search.enumerate(span, singleCMajor(), empty, ctx);
+
+  ASSERT_EQ(cands.size(), 1u);
+  const RuleIdMask bits = cands.front().satisfied_rules;
+  EXPECT_NE(bits & (1ull << RuleBit::ChordTone), 0u);
+  EXPECT_NE(bits & (1ull << RuleBit::StrongBeatConsonance), 0u);
+  EXPECT_NE(bits & (1ull << RuleBit::SmallStep), 0u);
+}
+
+TEST(CandidateSearchTest, RuleBitsRecordPlacedNotesContextChecks) {
+  std::vector<NoteEvent> placed = {
+      makePlaced(0, kTicksPerBeat, 60, 0),  // V0 C5 at downbeat
+  };
+  CandidateSearch search;
+  CandidateContext ctx;
+  ctx.voice_center = 55;
+  ctx.prev_pitch = 53;
+  ctx.placed_notes = &placed;
+
+  Material empty;
+  Span span = makeComposeSpan(0, kTicksPerBeat, 1);
+  const auto cands = search.enumerate(span, singleCMajor(), empty, ctx);
+
+  ASSERT_EQ(cands.size(), 1u);
+  const RuleIdMask bits = cands.front().satisfied_rules;
+  EXPECT_NE(bits & (1ull << RuleBit::ParallelPerfectChecked), 0u);
+  EXPECT_NE(bits & (1ull << RuleBit::HiddenParallelChecked), 0u);
+  EXPECT_NE(bits & (1ull << RuleBit::VoiceCrossingChecked), 0u);
+  EXPECT_NE(bits & (1ull << RuleBit::CrossRelationChecked), 0u);
+  EXPECT_NE(bits & (1ull << RuleBit::VerticalConsonanceChecked), 0u);
+}
+
+TEST(CandidateSearchTest, RuleBitsRecordWeakBeatAndLeapResolutionAcrossStrides) {
+  CandidateSearch search;
+  CandidateContext ctx;
+  ctx.voice_center = 55;
+  ctx.prev_pitch = 53;
+  ctx.placed_notes = nullptr;
+
+  Material empty;
+  // 4-beat span so candidate at tick=480 is weak (WeakBeatPassingChecked)
+  // and tick=960 has both pre_prev and prev_pitch (LeapResolutionChecked).
+  Span span = makeComposeSpan(0, kTicksPerBar, 1);
+  const auto cands = search.enumerate(span, singleCMajor(), empty, ctx);
+
+  ASSERT_GE(cands.size(), 3u);
+  EXPECT_NE(cands[1].satisfied_rules & (1ull << RuleBit::WeakBeatPassingChecked), 0u);
+  EXPECT_NE(cands[2].satisfied_rules & (1ull << RuleBit::LeapResolutionChecked), 0u);
+}
+
+// Episode intent replays the derived motif transform verbatim and sets
+// EpisodeMotifSourced on every emitted candidate. The subject material
+// drives the source slice; the EpisodeFragment selects the transform and
+// the target start_tick.
+TEST(CandidateSearchTest, EpisodeIntentReplaysOriginalTransform) {
+  CandidateSearch search;
+  CandidateContext ctx;
+  ctx.voice_center = 60;
+  ctx.placed_notes = nullptr;
+
+  Material material;
+  MaterialNote a;
+  a.start_tick = 0;
+  a.duration = kTicksPerBeat;
+  a.pitch = 60;
+  MaterialNote b;
+  b.start_tick = kTicksPerBeat;
+  b.duration = kTicksPerBeat;
+  b.pitch = 62;
+  material.subject = {a, b};
+
+  EpisodeFragment frag;
+  frag.transform = static_cast<std::uint8_t>(motif_ops::EpisodeMotifTransform::Original);
+  frag.source_start_index = 0;
+  frag.source_count = 0;  // whole subject
+  frag.voice = 1;
+  frag.target_start_tick = 4 * kTicksPerBeat;
+  material.episodes.push_back(frag);
+
+  Span span;
+  span.id = 7;
+  span.start_tick = 4 * kTicksPerBeat;
+  span.end_tick = 8 * kTicksPerBeat;
+  span.voice = 1;
+  span.intent = VoiceIntent::Episode;
+
+  const auto cands = search.enumerate(span, singleCMajor(), material, ctx);
+  ASSERT_EQ(cands.size(), 2u);
+  EXPECT_EQ(cands[0].pitch, 60);
+  EXPECT_EQ(cands[1].pitch, 62);
+  EXPECT_EQ(cands[0].start_tick, 4u * kTicksPerBeat);
+  EXPECT_EQ(cands[1].start_tick, 5u * kTicksPerBeat);
+  EXPECT_NE(cands[0].satisfied_rules & (1ull << RuleBit::EpisodeMotifSourced), 0u);
+  EXPECT_NE(cands[1].satisfied_rules & (1ull << RuleBit::EpisodeMotifSourced), 0u);
+}
+
+TEST(CandidateSearchTest, EpisodeIntentInvertReflectsAroundPivot) {
+  CandidateSearch search;
+  CandidateContext ctx;
+  ctx.voice_center = 60;
+  ctx.placed_notes = nullptr;
+
+  Material material;
+  MaterialNote a;
+  a.start_tick = 0;
+  a.duration = kTicksPerBeat;
+  a.pitch = 64;  // E4
+  MaterialNote b;
+  b.start_tick = kTicksPerBeat;
+  b.duration = kTicksPerBeat;
+  b.pitch = 67;  // G4
+  material.subject = {a, b};
+
+  EpisodeFragment frag;
+  frag.transform = static_cast<std::uint8_t>(motif_ops::EpisodeMotifTransform::Invert);
+  frag.source_start_index = 0;
+  frag.source_count = 0;
+  frag.voice = 1;
+  frag.target_start_tick = 0;
+  frag.invert_pivot = 60;  // around C4
+  material.episodes.push_back(frag);
+
+  Span span;
+  span.id = 8;
+  span.start_tick = 0;
+  span.end_tick = 4 * kTicksPerBeat;
+  span.voice = 1;
+  span.intent = VoiceIntent::Episode;
+
+  const auto cands = search.enumerate(span, singleCMajor(), material, ctx);
+  ASSERT_EQ(cands.size(), 2u);
+  // Invert: 64 → 2*60-64 = 56 (Ab3), 67 → 2*60-67 = 53 (F3).
+  EXPECT_EQ(cands[0].pitch, 56);
+  EXPECT_EQ(cands[1].pitch, 53);
+  EXPECT_NE(cands[0].satisfied_rules & (1ull << RuleBit::EpisodeMotifSourced), 0u);
+}
+
+TEST(CandidateSearchTest, EpisodeIntentRetrogradeReversesPitchOrder) {
+  CandidateSearch search;
+  CandidateContext ctx;
+  ctx.voice_center = 60;
+  ctx.placed_notes = nullptr;
+
+  Material material;
+  MaterialNote a;
+  a.start_tick = 0;
+  a.duration = kTicksPerBeat;
+  a.pitch = 60;
+  MaterialNote b;
+  b.start_tick = kTicksPerBeat;
+  b.duration = kTicksPerBeat;
+  b.pitch = 62;
+  MaterialNote c;
+  c.start_tick = 2 * kTicksPerBeat;
+  c.duration = kTicksPerBeat;
+  c.pitch = 64;
+  material.subject = {a, b, c};
+
+  EpisodeFragment frag;
+  frag.transform = static_cast<std::uint8_t>(motif_ops::EpisodeMotifTransform::Retrograde);
+  frag.source_start_index = 0;
+  frag.source_count = 0;
+  frag.voice = 1;
+  frag.target_start_tick = 0;
+  material.episodes.push_back(frag);
+
+  Span span;
+  span.id = 9;
+  span.start_tick = 0;
+  span.end_tick = 4 * kTicksPerBeat;
+  span.voice = 1;
+  span.intent = VoiceIntent::Episode;
+
+  const auto cands = search.enumerate(span, singleCMajor(), material, ctx);
+  ASSERT_EQ(cands.size(), 3u);
+  EXPECT_EQ(cands[0].pitch, 64);
+  EXPECT_EQ(cands[1].pitch, 62);
+  EXPECT_EQ(cands[2].pitch, 60);
+}
+
+TEST(CandidateSearchTest, EpisodeIntentAugmentExpandsDurations) {
+  CandidateSearch search;
+  CandidateContext ctx;
+  ctx.voice_center = 60;
+  ctx.placed_notes = nullptr;
+
+  Material material;
+  MaterialNote a;
+  a.start_tick = 0;
+  a.duration = kTicksPerBeat;
+  a.pitch = 60;
+  MaterialNote b;
+  b.start_tick = kTicksPerBeat;
+  b.duration = kTicksPerBeat;
+  b.pitch = 64;
+  material.subject = {a, b};
+
+  EpisodeFragment frag;
+  frag.transform = static_cast<std::uint8_t>(motif_ops::EpisodeMotifTransform::Augment);
+  frag.source_start_index = 0;
+  frag.source_count = 0;
+  frag.voice = 1;
+  frag.target_start_tick = 0;
+  frag.augment_factor = 2;
+  material.episodes.push_back(frag);
+
+  Span span;
+  span.id = 10;
+  span.start_tick = 0;
+  span.end_tick = 4 * kTicksPerBeat;
+  span.voice = 1;
+  span.intent = VoiceIntent::Episode;
+
+  const auto cands = search.enumerate(span, singleCMajor(), material, ctx);
+  ASSERT_EQ(cands.size(), 2u);
+  EXPECT_EQ(cands[0].duration, 2u * kTicksPerBeat);
+  EXPECT_EQ(cands[1].start_tick, 2u * kTicksPerBeat);
+  EXPECT_EQ(cands[1].duration, 2u * kTicksPerBeat);
+}
+
+TEST(CandidateSearchTest, EpisodeIntentDiminishCompressesDurations) {
+  CandidateSearch search;
+  CandidateContext ctx;
+  ctx.voice_center = 60;
+  ctx.placed_notes = nullptr;
+
+  Material material;
+  MaterialNote a;
+  a.start_tick = 0;
+  a.duration = 2 * kTicksPerBeat;
+  a.pitch = 60;
+  MaterialNote b;
+  b.start_tick = 2 * kTicksPerBeat;
+  b.duration = 2 * kTicksPerBeat;
+  b.pitch = 64;
+  material.subject = {a, b};
+
+  EpisodeFragment frag;
+  frag.transform = static_cast<std::uint8_t>(motif_ops::EpisodeMotifTransform::Diminish);
+  frag.source_start_index = 0;
+  frag.source_count = 0;
+  frag.voice = 1;
+  frag.target_start_tick = 0;
+  frag.diminish_factor = 2;
+  material.episodes.push_back(frag);
+
+  Span span;
+  span.id = 11;
+  span.start_tick = 0;
+  span.end_tick = 4 * kTicksPerBeat;
+  span.voice = 1;
+  span.intent = VoiceIntent::Episode;
+
+  const auto cands = search.enumerate(span, singleCMajor(), material, ctx);
+  ASSERT_EQ(cands.size(), 2u);
+  EXPECT_EQ(cands[0].duration, kTicksPerBeat);
+  EXPECT_EQ(cands[1].start_tick, kTicksPerBeat);
+}
+
+TEST(CandidateSearchTest, AnswerCarrierUsesTonalAnswerWhenFlagSet) {
+  // material.use_tonal_answer = true + non-empty tonal_answer → AnswerCarrier
+  // emits tonal_answer pitches with TonalAnswerMapped bit set.
+  CandidateSearch search;
+  CandidateContext ctx;
+  ctx.voice_center = 60;
+  ctx.placed_notes = nullptr;
+
+  Material material;
+  MaterialNote s0;
+  s0.start_tick = 0;
+  s0.duration = kTicksPerBeat;
+  s0.pitch = 60;
+  material.subject = {s0};
+  // Real answer would be 60 - 5 = 55; tonal answer mutates to 67 (G).
+  MaterialNote ta;
+  ta.start_tick = 4 * kTicksPerBeat;
+  ta.duration = kTicksPerBeat;
+  ta.pitch = 67;
+  material.tonal_answer = {ta};
+  material.use_tonal_answer = true;
+  // Real answer present but should be ignored.
+  MaterialNote ra = ta;
+  ra.pitch = 55;
+  material.answer = {ra};
+
+  Span span = makeCarrierSpan(4 * kTicksPerBeat, 5 * kTicksPerBeat, 1, VoiceIntent::AnswerCarrier);
+  const auto cands = search.enumerate(span, singleCMajor(), material, ctx);
+  ASSERT_EQ(cands.size(), 1u);
+  EXPECT_EQ(cands[0].pitch, 67);
+  EXPECT_NE(cands[0].satisfied_rules & (1ull << RuleBit::TonalAnswerMapped), 0u);
+}
+
+TEST(CandidateSearchTest, AnswerCarrierFallsBackToRealAnswerWhenFlagUnset) {
+  CandidateSearch search;
+  CandidateContext ctx;
+  ctx.voice_center = 60;
+  ctx.placed_notes = nullptr;
+
+  Material material;
+  MaterialNote ra;
+  ra.start_tick = 4 * kTicksPerBeat;
+  ra.duration = kTicksPerBeat;
+  ra.pitch = 55;
+  material.answer = {ra};
+  // tonal_answer also populated but flag not set.
+  MaterialNote ta = ra;
+  ta.pitch = 67;
+  material.tonal_answer = {ta};
+  material.use_tonal_answer = false;
+
+  Span span = makeCarrierSpan(4 * kTicksPerBeat, 5 * kTicksPerBeat, 1, VoiceIntent::AnswerCarrier);
+  const auto cands = search.enumerate(span, singleCMajor(), material, ctx);
+  ASSERT_EQ(cands.size(), 1u);
+  EXPECT_EQ(cands[0].pitch, 55);
+  EXPECT_EQ(cands[0].satisfied_rules & (1ull << RuleBit::TonalAnswerMapped), 0u);
+}
+
+TEST(CandidateSearchTest, CountersubjectCarrierReplaysMaterial) {
+  CandidateSearch search;
+  CandidateContext ctx;
+  ctx.voice_center = 60;
+  ctx.placed_notes = nullptr;
+
+  Material material;
+  // CS material: two notes at bar 4 (during the answer entry).
+  MaterialNote cs0;
+  cs0.start_tick = 4 * kTicksPerBeat;
+  cs0.duration = kTicksPerBeat;
+  cs0.pitch = 71;
+  MaterialNote cs1;
+  cs1.start_tick = 5 * kTicksPerBeat;
+  cs1.duration = kTicksPerBeat;
+  cs1.pitch = 72;
+  material.countersubject = {cs0, cs1};
+
+  Span span =
+      makeCarrierSpan(4 * kTicksPerBeat, 6 * kTicksPerBeat, 0, VoiceIntent::CountersubjectCarrier);
+  const auto cands = search.enumerate(span, singleCMajor(), material, ctx);
+  ASSERT_EQ(cands.size(), 2u);
+  EXPECT_EQ(cands[0].pitch, 71);
+  EXPECT_EQ(cands[1].pitch, 72);
+  EXPECT_NE(cands[0].satisfied_rules & (1ull << RuleBit::CountersubjectActive), 0u);
+  EXPECT_NE(cands[1].satisfied_rules & (1ull << RuleBit::CountersubjectActive), 0u);
+}
+
+TEST(CandidateSearchTest, EpisodeIntentSkipsFragmentForWrongVoice) {
+  CandidateSearch search;
+  CandidateContext ctx;
+  ctx.voice_center = 60;
+  ctx.placed_notes = nullptr;
+
+  Material material;
+  MaterialNote a;
+  a.start_tick = 0;
+  a.duration = kTicksPerBeat;
+  a.pitch = 60;
+  material.subject = {a};
+
+  EpisodeFragment frag;
+  frag.transform = static_cast<std::uint8_t>(motif_ops::EpisodeMotifTransform::Original);
+  frag.source_start_index = 0;
+  frag.source_count = 0;
+  frag.voice = 2;  // wrong voice
+  frag.target_start_tick = 0;
+  material.episodes.push_back(frag);
+
+  Span span;
+  span.id = 12;
+  span.start_tick = 0;
+  span.end_tick = 4 * kTicksPerBeat;
+  span.voice = 1;  // different voice
+  span.intent = VoiceIntent::Episode;
+
+  const auto cands = search.enumerate(span, singleCMajor(), material, ctx);
+  EXPECT_TRUE(cands.empty());
 }
 
 }  // namespace bach::composer

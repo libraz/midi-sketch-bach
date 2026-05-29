@@ -30,13 +30,18 @@ enum class ProgressionType : uint8_t {
 };
 
 /// Cadence type for progression endings.
+///
+/// `Perfect` (PAC) and `ImperfectAuthentic` (IAC) are distinguished by the
+/// composer pipeline (different soprano/bass formulae); `Perfect` retains
+/// its legacy meaning so existing analysis/fugue/forms code keeps compiling.
 enum class CadenceType : uint8_t {
-  Perfect,       // V7->I (authentic cadence)
-  Deceptive,     // V->vi (deceptive cadence)
-  Half,          // ->V (half cadence)
-  Phrygian,      // iv6->V (minor key slow section endings)
-  PicardyThird,  // Minor key final chord raised to major
-  Plagal         // IV->I (plagal/amen cadence)
+  Perfect,             // PAC: V7->I with leading-tone resolution + tonic soprano
+  ImperfectAuthentic,  // IAC: V->I variants (soprano on 3rd/5th, or inverted)
+  Deceptive,           // V->vi (deceptive cadence)
+  Half,                // ->V (half cadence)
+  Phrygian,            // iv6->V (minor key slow section endings)
+  PicardyThird,        // Minor key final chord raised to major
+  Plagal               // IV->I (plagal/amen cadence)
 };
 
 /// @brief A time-ordered sequence of harmonic events.

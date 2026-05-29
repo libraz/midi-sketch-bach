@@ -246,7 +246,6 @@ gtest_discover_tests(bach_tests)
 # ============================================================================
 
 add_subdirectory(composer)
-add_subdirectory(eval_client)
 
 # ============================================================================
 # Composer isolation guard (registered as a CTest)

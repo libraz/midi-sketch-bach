@@ -3,7 +3,9 @@
 #include <array>
 #include <cstdint>
 
+#include "composer/motif_ops.h"
 #include "composer/span.h"
+#include "composer/tonal_answer.h"
 #include "composer/voice_intent.h"
 #include "core/basic_types.h"
 
@@ -17,15 +19,15 @@ namespace {
 // path stay byte-identical.
 constexpr std::array<std::array<std::uint8_t, 16>, 5> kSubjectPatterns = {{
     // 0: original Phase 3 arch
-    {72, 74, 76, 77, 79, 81, 79, 77, 76, 74, 76, 77, 79, 77, 76, 72},
+    {72, 74, 76, 77, 79, 81, 79, 77, 76, 74, 76, 77, 79, 77, 71, 72},
     // 1: descent then ascent (start high)
-    {84, 83, 81, 79, 77, 76, 77, 79, 81, 79, 77, 76, 74, 76, 77, 79},
+    {84, 83, 84, 79, 77, 76, 77, 79, 81, 79, 77, 76, 74, 76, 71, 72},
     // 2: broken triad outline
-    {79, 76, 79, 84, 76, 79, 76, 72, 74, 77, 74, 71, 72, 76, 79, 84},
+    {79, 76, 79, 84, 76, 79, 76, 72, 74, 77, 74, 71, 72, 76, 71, 72},
     // 3: stepwise sequence
-    {72, 74, 76, 77, 74, 76, 77, 79, 76, 77, 79, 81, 77, 79, 81, 79},
+    {71, 72, 76, 77, 74, 76, 77, 79, 76, 77, 79, 81, 77, 79, 71, 72},
     // 4: upper-arch
-    {76, 77, 79, 81, 79, 77, 76, 74, 72, 74, 76, 77, 79, 77, 76, 72},
+    {76, 77, 79, 81, 79, 77, 76, 74, 72, 74, 76, 77, 79, 77, 71, 72},
 }};
 
 struct ChordSpec {
@@ -59,17 +61,34 @@ void pushCounterlineBar(VoicePlan& vp, SpanId& next_id, std::uint8_t voice, int 
 HarnessPhaseSpec phaseSpec(HarnessPhase phase) {
   switch (phase) {
     case HarnessPhase::Phase3:
-      return {phase, /*voices=*/2, /*bars=*/8, /*subject_bars=*/8, false, false};
+      return {phase, /*voices=*/2, /*bars=*/8, /*subject_bars=*/8, false, false, false,
+              false, false,        false};
     case HarnessPhase::Phase35:
-      return {phase, /*voices=*/2, /*bars=*/4, /*subject_bars=*/4, false, false};
+      return {phase, /*voices=*/2, /*bars=*/4, /*subject_bars=*/4, false, false, false,
+              false, false,        false};
     case HarnessPhase::Phase4:
-      return {phase, /*voices=*/2, /*bars=*/8, /*subject_bars=*/4, true, false};
+      return {phase, /*voices=*/2, /*bars=*/8, /*subject_bars=*/4, true, false, false,
+              false, false,        false};
     case HarnessPhase::Phase5:
-      return {phase, /*voices=*/3, /*bars=*/12, /*subject_bars=*/12, false, false};
+      return {phase, /*voices=*/3, /*bars=*/12, /*subject_bars=*/12, false, false, false,
+              false, false,        false};
     case HarnessPhase::Phase6:
-      return {phase, /*voices=*/3, /*bars=*/16, /*subject_bars=*/4, true, true};
+      return {phase, /*voices=*/3, /*bars=*/16, /*subject_bars=*/4, true, true, false,
+              false, false,        false};
+    case HarnessPhase::Phase4Sus:
+      return {phase, /*voices=*/2, /*bars=*/8, /*subject_bars=*/4, true, false, true,
+              false, false,        false};
+    case HarnessPhase::Phase6Episode:
+      return {phase, /*voices=*/3, /*bars=*/16, /*subject_bars=*/4, true, true, false,
+              true,  false,        false};
+    case HarnessPhase::Phase6Tonal:
+      return {phase, /*voices=*/3, /*bars=*/16, /*subject_bars=*/4, true, true, false,
+              false, true,         false};
+    case HarnessPhase::Phase7:
+      return {phase, /*voices=*/3, /*bars=*/16, /*subject_bars=*/4, true, true, false,
+              false, false,        true};
   }
-  return {phase, 2, 8, 8, false, false};
+  return {phase, 2, 8, 8, false, false, false, false, false, false};
 }
 
 HarnessFixture buildHarnessFixture(HarnessPhase phase, int seed) {
@@ -145,6 +164,33 @@ HarnessFixture buildHarnessFixture(HarnessPhase phase, int seed) {
       c.start_tick = static_cast<Tick>(blk * 4 + b) * kTicksPerBar;
       c.root_pc = pattern[b].root_pc;
       c.quality = pattern[b].minor ? ChordQuality::Minor : ChordQuality::Major;
+      if (spec.with_degree_tagging) {
+        // Phase7 enriches every ChordEvent with degree/inversion/function
+        // so the Validator's P7 rules (doubling, spacing) fire and the
+        // candidate provenance picks up ChordToneRoman / InversionLabel /
+        // DoublingChecked / SpacingChecked bits. Mapping is fixed for the
+        // C-major harness vocabulary:
+        //   (root=0, !minor) → I (Tonic)
+        //   (root=5, !minor) → IV (Subdominant)
+        //   (root=7, !minor) → V (Dominant)
+        //   (root=9, minor)  → vi (Predominant)
+        // All Phase7 chords are emitted in root position.
+        if (pattern[b].root_pc == 0) {
+          c.degree = RomanNumeral::I;
+          c.function = HarmonicFunction::T;
+        } else if (pattern[b].root_pc == 5) {
+          c.degree = RomanNumeral::IV;
+          c.function = HarmonicFunction::S;
+        } else if (pattern[b].root_pc == 7) {
+          c.degree = RomanNumeral::V;
+          c.function = HarmonicFunction::D;
+        } else if (pattern[b].root_pc == 9 && pattern[b].minor) {
+          c.degree = RomanNumeral::VI;
+          c.function = HarmonicFunction::Pred;
+        }
+        c.inversion = ChordInversion::Root;
+        c.has_degree = true;
+      }
       out.harmony.chords.push_back(c);
     }
   }
@@ -161,8 +207,41 @@ HarnessFixture buildHarnessFixture(HarnessPhase phase, int seed) {
   out.voice_plan.spans.push_back(subject_span);
 
   if (spec.with_third_entry) {
+    // Phase6Episode replaces V0 counterline bars [bars - subject_bars, bars)
+    // with one Episode span (Original transform of the V0 subject, re-anchored
+    // at that bar). Phase6Tonal replaces V0 counterline bars [subject_bars,
+    // 2*subject_bars) with one CountersubjectCarrier span that runs against
+    // the V1 AnswerCarrier (tonal_answer). Phase6 keeps all V0 counterline
+    // bars contiguous.
+    const int episode_first_bar = spec.with_episode ? (spec.bars - subject_bars) : -1;
+    const int cs_first_bar = spec.with_tonal_answer ? subject_bars : -1;
+    const int cs_last_bar = spec.with_tonal_answer ? (2 * subject_bars - 1) : -1;
     for (int b = subject_bars; b < spec.bars; ++b) {
+      if (spec.with_episode && b >= episode_first_bar)
+        continue;
+      if (spec.with_tonal_answer && b >= cs_first_bar && b <= cs_last_bar)
+        continue;
       pushCounterlineBar(out.voice_plan, next_id, 0, b, subdivision);
+    }
+    if (spec.with_episode) {
+      Span ep;
+      ep.id = next_id++;
+      ep.start_tick = static_cast<Tick>(episode_first_bar) * kTicksPerBar;
+      ep.end_tick = static_cast<Tick>(spec.bars) * kTicksPerBar;
+      ep.voice = 0;
+      ep.intent = VoiceIntent::Episode;
+      ep.subdivision = subdivision;
+      out.voice_plan.spans.push_back(ep);
+    }
+    if (spec.with_tonal_answer) {
+      Span cs;
+      cs.id = next_id++;
+      cs.start_tick = static_cast<Tick>(cs_first_bar) * kTicksPerBar;
+      cs.end_tick = static_cast<Tick>(cs_last_bar + 1) * kTicksPerBar;
+      cs.voice = 0;
+      cs.intent = VoiceIntent::CountersubjectCarrier;
+      cs.subdivision = subdivision;
+      out.voice_plan.spans.push_back(cs);
     }
     for (int b = 0; b < subject_bars; ++b) {
       pushCounterlineBar(out.voice_plan, next_id, 1, b, subdivision);
@@ -188,8 +267,25 @@ HarnessFixture buildHarnessFixture(HarnessPhase phase, int seed) {
       pushCounterlineBar(out.voice_plan, next_id, 2, b, subdivision);
     }
   } else if (spec.with_answer) {
+    // Phase4Sus carves a 2-bar SuspensionCarrier span out of V0
+    // counterline bars [subject_bars, subject_bars + 2). The remaining
+    // V0 counterline bars run normally on either side. Phase4 (no
+    // suspension) keeps all V0 counterline bars contiguous.
+    const int sus_first_bar = spec.with_suspension ? subject_bars : -1;
+    const int sus_last_bar = spec.with_suspension ? subject_bars + 1 : -1;
     for (int b = subject_bars; b < spec.bars; ++b) {
+      if (spec.with_suspension && b >= sus_first_bar && b <= sus_last_bar)
+        continue;
       pushCounterlineBar(out.voice_plan, next_id, 0, b, subdivision);
+    }
+    if (spec.with_suspension) {
+      Span sus_span;
+      sus_span.id = next_id++;
+      sus_span.start_tick = static_cast<Tick>(sus_first_bar) * kTicksPerBar;
+      sus_span.end_tick = static_cast<Tick>(sus_last_bar + 1) * kTicksPerBar;
+      sus_span.voice = 0;
+      sus_span.intent = VoiceIntent::SuspensionCarrier;
+      out.voice_plan.spans.push_back(sus_span);
     }
     for (int b = 0; b < subject_bars; ++b) {
       pushCounterlineBar(out.voice_plan, next_id, 1, b, subdivision);
@@ -207,6 +303,100 @@ HarnessFixture buildHarnessFixture(HarnessPhase phase, int seed) {
         pushCounterlineBar(out.voice_plan, next_id, v, b, subdivision);
       }
     }
+  }
+
+  annotateLeadingToneMarkers(out.material, out.harmony.tonic_pc, out.harmony.is_minor);
+  const Tick subject_cadence_tick = static_cast<Tick>(subject_bars) * kTicksPerBar - kTicksPerBeat;
+  for (const auto& marker : out.material.leading_tone_markers) {
+    if (marker.fragment != MaterialFragment::Subject)
+      continue;
+    if (marker.resolution_tick != subject_cadence_tick)
+      continue;
+    CadenceEvent cadence;
+    cadence.tick = marker.resolution_tick;
+    cadence.type = CadenceType::Perfect;
+    out.harmony.cadences.push_back(cadence);
+    if (marker.leading_tick >= kTicksPerBeat) {
+      CadentialSixFour six_four;
+      six_four.tick = marker.leading_tick - kTicksPerBeat;
+      six_four.resolution_tick = marker.leading_tick;
+      out.harmony.cadential_six_fours.push_back(six_four);
+    }
+  }
+  annotateCadenceCells(out.material, out.harmony);
+
+  if (spec.with_tonal_answer) {
+    // Phase6Tonal: derive tonal_answer from the V0 subject (first 16 notes)
+    // with a 4-note head mutation, anchor at bar `subject_bars`, and set
+    // the dispatch flag so AnswerCarrier reads from tonal_answer instead
+    // of `answer`. Bach's tonal-answer convention maps the subject's
+    // tonic-degree head pitches to the dominant and vice versa.
+    std::vector<MaterialNote> subj_head(out.material.subject.begin(),
+                                        out.material.subject.begin() + 16);
+    out.material.tonal_answer = tonal_answer::deriveTonalAnswer(
+        subj_head, out.harmony.tonic_pc, static_cast<Tick>(subject_bars) * kTicksPerBar,
+        /*head_length=*/4);
+    out.material.use_tonal_answer = true;
+    // Phase6Tonal CS material: stationary G5 (pitch 79) for 16 quarter
+    // notes so V0 has a sounding note at every beat of the answer
+    // window. The Validator's vertical/parallel rules skip both-Material
+    // pairs (V0 CS vs V1 tonal_answer are both Material), so a pedal
+    // pitch is safe regardless of the seed's tonal_answer head.
+    for (int n = 0; n < 16; ++n) {
+      MaterialNote cs;
+      const int bar_in_block = n / 4;
+      const int beat_in_bar = n % 4;
+      cs.start_tick = static_cast<Tick>(subject_bars + bar_in_block) * kTicksPerBar +
+                      static_cast<Tick>(beat_in_bar) * kTicksPerBeat;
+      cs.duration = kTicksPerBeat;
+      cs.pitch = 79;
+      out.material.countersubject.push_back(cs);
+    }
+  }
+
+  if (spec.with_episode) {
+    // Phase6Episode injects one Episode fragment in V0 covering bars
+    // [bars - subject_bars, bars). Transform = Original; source = the
+    // first `subject_bars` of V0 SubjectCarrier material (indices
+    // [0, 16)). Result re-anchors the subject pitches at the target
+    // bar so the V0 line restates the subject in the closing bars —
+    // a textbook Bach "subject-reentry-as-episode" recap.
+    //
+    // EpisodeMotifSourced bit on the emitted notes lets the closure
+    // gate (4) confirm Episode derivation actually fired.
+    EpisodeFragment ef;
+    ef.transform = static_cast<std::uint8_t>(motif_ops::EpisodeMotifTransform::Original);
+    ef.source_start_index = 0;
+    ef.source_count = 16;  // first 4 bars × 4 beats
+    ef.voice = 0;
+    ef.target_start_tick = static_cast<Tick>(spec.bars - subject_bars) * kTicksPerBar;
+    ef.invert_pivot = 72;
+    ef.augment_factor = 2;
+    ef.diminish_factor = 2;
+    out.material.episodes.push_back(ef);
+  }
+
+  if (spec.with_suspension) {
+    // One deterministic Sus7_6 in V0 spanning bars [subject_bars,
+    // subject_bars + 1). Prep tied across the bar line so the
+    // suspension lands on the bar-5 downbeat (strong beat = required
+    // by the validator's isStrongBeat semantics). The prep/sus pitch
+    // B5 (83) is pc 11, which lies in the consonant intersection of
+    // every kSubjectPatterns' answer-V1 column at this tick (the
+    // intersection of consonant pcs against V1 pitches across the
+    // 5 patterns reduces to {pc 2, pc 11}; B5 is the higher of the two
+    // and keeps V0 safely above V1's catalog maximum of 79). Step-down
+    // resolution to A5 (81) on beat 2.
+    SuspensionPattern sp;
+    sp.type = SuspensionType::Sus7_6;
+    sp.preparation_tick = static_cast<Tick>(subject_bars) * kTicksPerBar;
+    sp.suspension_tick = static_cast<Tick>(subject_bars + 1) * kTicksPerBar;
+    sp.resolution_tick = sp.suspension_tick + kTicksPerBeat;
+    sp.preparation_pitch = 83;
+    sp.suspension_pitch = 83;
+    sp.resolution_pitch = 81;
+    sp.voice = 0;
+    out.material.suspension_patterns.push_back(sp);
   }
 
   return out;

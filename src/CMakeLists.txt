@@ -227,7 +227,6 @@ target_compile_features(bach_lib PUBLIC cxx_std_17)
 # in tests/CMakeLists.txt) and by per-target CMakeLists.txt guards.
 
 add_subdirectory(composer)
-add_subdirectory(eval_client)
 
 # ============================================================================
 # WASM executable

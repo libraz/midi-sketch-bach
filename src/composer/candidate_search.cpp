@@ -6,6 +6,11 @@
 #include <cstdlib>
 #include <vector>
 
+#include "composer/chord_voicing.h"
+#include "composer/motif_ops.h"
+#include "composer/rule_helpers.h"
+#include "harmony/cadence_vocabulary.h"
+
 namespace bach::composer {
 
 namespace {
@@ -18,16 +23,25 @@ std::array<std::uint8_t, 3> triadPitchClasses(const ChordEvent& chord) {
   std::uint8_t fifth_offset = 7;
   switch (chord.quality) {
     case ChordQuality::Major:
+    case ChordQuality::Major7:
+    case ChordQuality::Dominant7:
       third_offset = 4;
       fifth_offset = 7;
       break;
     case ChordQuality::Minor:
+    case ChordQuality::Minor7:
       third_offset = 3;
       fifth_offset = 7;
       break;
     case ChordQuality::Diminished:
+    case ChordQuality::HalfDiminished7:
+    case ChordQuality::Diminished7:
       third_offset = 3;
       fifth_offset = 6;
+      break;
+    case ChordQuality::Augmented:
+      third_offset = 4;
+      fifth_offset = 8;
       break;
   }
   return {
@@ -50,125 +64,73 @@ const ChordEvent& activeChord(const HarmonicPlan& plan, Tick at) {
   return *current;
 }
 
-bool isStrongBeat(Tick tick) {
-  return (tick % kTicksPerBar) == 0;
-}
-
-bool isPerfectInterval(int semitones) {
-  int abs_semi = std::abs(semitones) % 12;
-  return abs_semi == 0 || abs_semi == 7;
-}
-
-// Returns the pitch sounding in `voice` at `tick`, or 0 if none.
-// Mirrors the validator's voicePitchAt so that search-time rejection
-// agrees with post-hoc validation. `notes` is the composer's incremental
-// commit log: spans for one voice are contiguous, but voices are not
-// interleaved by start_tick, so we cannot break early on a higher
-// start_tick — a later entry from a different voice may still match.
-std::uint8_t voicePitchAt(const std::vector<NoteEvent>& notes, VoiceId voice, Tick tick) {
-  std::uint8_t pitch = 0;
-  for (const auto& note : notes) {
-    if (note.voice != voice)
-      continue;
-    if (note.start_tick > tick)
-      continue;
-    if (note.start_tick <= tick && tick < note.start_tick + note.duration) {
-      pitch = note.pitch;
-    }
-  }
-  return pitch;
-}
-
-// Returns true iff `semis` is a consonant interval. Consonant set
-// (mod 12): unison/octave (0), m3 (3), M3 (4), P4 (5), P5 (7),
-// m6 (8), M6 (9). All others are dissonant. Matches the validator's
-// vertical_dissonance rule so search-time rejection agrees with
-// post-hoc validation.
-bool isConsonantInterval(int semis) {
-  const int pc = std::abs(semis) % 12;
-  return pc == 0 || pc == 3 || pc == 4 || pc == 5 || pc == 7 || pc == 8 || pc == 9;
-}
-
-// Returns the pitch of a note that starts at exactly `tick` in `voice`,
-// or 0 if no such note exists. Used by the cross-span leave-side
-// lookahead: when a Carrier (SubjectCarrier or AnswerCarrier) span has
-// already been placed at the next tick, the current weak non-chord-tone
-// pick must remain within ±2 semitones of that fixed pitch or the
-// Validator's `unprepared_dissonance` rule will fire on the last weak
-// position of the preceding Compose span.
-std::uint8_t sameVoiceStartingAt(const std::vector<NoteEvent>& placed, VoiceId voice, Tick tick) {
-  for (const auto& note : placed) {
-    if (note.voice != voice)
-      continue;
-    if (note.start_tick == tick)
-      return note.pitch;
-  }
-  return 0;
-}
-
-// Returns true iff committing `candidate_pitch` in `candidate_voice` at
-// the strong beat `cur_tick` forms a dissonant vertical with any
-// already-placed voice that is sounding at that tick.
-bool createsVerticalDissonance(const std::vector<NoteEvent>& placed, VoiceId candidate_voice,
-                               std::uint8_t candidate_pitch, Tick cur_tick) {
-  // `placed` is voice-grouped (one voice's spans are appended together),
-  // not globally sorted by start_tick — see voicePitchAt() for the same
-  // pattern. Skip rather than break so later voices are not missed.
-  for (const auto& note : placed) {
-    if (note.voice == candidate_voice)
-      continue;
-    if (note.start_tick > cur_tick)
-      continue;
-    const bool sounding = note.start_tick <= cur_tick && cur_tick < note.start_tick + note.duration;
-    if (!sounding)
-      continue;
-    const int interval = static_cast<int>(candidate_pitch) - static_cast<int>(note.pitch);
-    if (!isConsonantInterval(interval)) {
-      return true;
-    }
-  }
-  return false;
-}
-
-// Returns true iff committing `candidate_pitch` in `candidate_voice` at
-// `cur_tick` would cross any already-placed voice. Convention: lower
-// voice index = higher pitch (voice 0 = soprano). A candidate in voice
-// V must be >= every placed voice with index > V and <= every placed
-// voice with index < V at the same tick.
-bool createsVoiceCrossing(const std::vector<NoteEvent>& placed, VoiceId candidate_voice,
-                          std::uint8_t candidate_pitch, Tick cur_tick) {
-  // See voicePitchAt() for why this loop cannot break on a higher
-  // start_tick: `placed` is voice-grouped, not globally sorted.
-  for (const auto& note : placed) {
-    if (note.voice == candidate_voice)
-      continue;
-    if (note.start_tick > cur_tick)
-      continue;
-    const bool sounding = note.start_tick <= cur_tick && cur_tick < note.start_tick + note.duration;
-    if (!sounding)
-      continue;
-    if (candidate_voice < note.voice && candidate_pitch < note.pitch) {
-      return true;  // candidate should be above note.voice, but isn't.
-    }
-    if (candidate_voice > note.voice && candidate_pitch > note.pitch) {
-      return true;  // candidate should be below note.voice, but isn't.
-    }
-  }
-  return false;
-}
-
-// Returns true iff committing `candidate_pitch` in `candidate_voice` at
-// `cur_tick`, given that the same voice held `prev_pitch` at `prev_tick`,
-// would form parallel perfect motion against any already-placed voice.
+// P7 helper: set the four P7 provenance bits on `rules` when the
+// active chord opts into the strict regime (has_degree=true). Caller
+// passes `pc` (candidate pitch class) and `is_chord_tone` so the
+// helper doesn't recompute triad arithmetic.
 //
-// Convention follows Validator: interval = lower_voice_index_pitch -
-// higher_voice_index_pitch. Both voices must move and the perfect
-// interval must remain identical and non-zero.
-bool createsParallelPerfect(const std::vector<NoteEvent>& placed, VoiceId candidate_voice,
-                            std::uint8_t candidate_pitch, Tick cur_tick, std::uint8_t prev_pitch,
-                            Tick prev_tick) {
+//   ChordToneRoman  — set when the candidate is a chord tone of a
+//                     degree-tagged chord. Stricter sibling of
+//                     RuleBit::ChordTone (which fires regardless of
+//                     has_degree).
+//   InversionLabel  — set when the candidate's pitch class matches the
+//                     chord's declared bass pc (i.e. the candidate
+//                     could serve as the bass for the inversion). The
+//                     bit fires per-voice; whichever voice carries the
+//                     bass note will be the one that lights the bit.
+//   DoublingChecked — set unconditionally inside a has_degree chord
+//                     region: the doubling rules in the Validator (no
+//                     leading-tone double, no 7th double) sweep the
+//                     tick.
+//   SpacingChecked  — set unconditionally inside a has_degree chord
+//                     region: spacing rule sweeps the tick.
+void applyP7Bits(RuleIdMask& rules, const ChordEvent& chord, std::uint8_t pc, bool is_chord_tone) {
+  if (!chord.has_degree)
+    return;
+  rules |= 1ull << RuleBit::DoublingChecked;
+  rules |= 1ull << RuleBit::SpacingChecked;
+  if (is_chord_tone)
+    rules |= 1ull << RuleBit::ChordToneRoman;
+  if (pc == bassPitchClassFor(chord))
+    rules |= 1ull << RuleBit::InversionLabel;
+}
+
+// Imports of shared rule primitives (defined in composer/rule_helpers.cpp).
+// Local re-exports keep the existing call sites unchanged while routing
+// all rule semantics through the single shared implementation.
+using rule_helpers::createsCrossRelation;
+using rule_helpers::createsHiddenParallelPerfect;
+using rule_helpers::createsParallelPerfect;
+using rule_helpers::createsVerticalDissonance;
+using rule_helpers::createsVoiceCrossing;
+using rule_helpers::isLeadingTone;
+using rule_helpers::isStrongBeat;
+using rule_helpers::sameVoiceStartingAt;
+using rule_helpers::voicePitchAt;
+
+// Guard form: returns true if `previous` is not a leading tone OR
+// `candidate` is a valid stepwise upward resolution. Used by the
+// candidate enumerator's "may I pick this next pitch?" gate.
+bool resolvesLeadingTone(std::uint8_t previous, int candidate, const HarmonicPlan& plan) {
+  if (!isLeadingTone(previous, plan))
+    return true;
+  return rule_helpers::isLeadingToneResolution(previous, candidate, plan);
+}
+
+// Cross-span lookahead context for sameVoiceStartingAt: when a Carrier
+// (SubjectCarrier or AnswerCarrier) span has already been placed at the
+// next tick, the current weak non-chord-tone pick must remain within ±2
+// semitones of that fixed pitch or the Validator's `unprepared_dissonance`
+// rule will fire on the last weak position of the preceding Compose span.
+
+bool hasContraryMotion(const std::vector<NoteEvent>& placed, VoiceId candidate_voice,
+                       std::uint8_t candidate_pitch, Tick cur_tick, std::uint8_t prev_pitch,
+                       Tick prev_tick) {
   if (prev_pitch == 0)
-    return false;  // no prev anchor in this voice yet
+    return false;
+  const int this_motion = static_cast<int>(candidate_pitch) - static_cast<int>(prev_pitch);
+  if (this_motion == 0)
+    return false;
 
   std::vector<VoiceId> other_voices;
   for (const auto& n : placed) {
@@ -178,30 +140,27 @@ bool createsParallelPerfect(const std::vector<NoteEvent>& placed, VoiceId candid
       other_voices.push_back(n.voice);
     }
   }
-
   for (VoiceId ov : other_voices) {
     const std::uint8_t op_now = voicePitchAt(placed, ov, cur_tick);
     const std::uint8_t op_prev = voicePitchAt(placed, ov, prev_tick);
     if (op_now == 0 || op_prev == 0)
       continue;
-    const bool both_moved = (candidate_pitch != prev_pitch) && (op_now != op_prev);
-    if (!both_moved)
+    const int other_motion = static_cast<int>(op_now) - static_cast<int>(op_prev);
+    if (other_motion == 0)
       continue;
-    int interval_now;
-    int interval_prev;
-    if (candidate_voice < ov) {
-      interval_now = static_cast<int>(candidate_pitch) - static_cast<int>(op_now);
-      interval_prev = static_cast<int>(prev_pitch) - static_cast<int>(op_prev);
-    } else {
-      interval_now = static_cast<int>(op_now) - static_cast<int>(candidate_pitch);
-      interval_prev = static_cast<int>(op_prev) - static_cast<int>(prev_pitch);
-    }
-    if (isPerfectInterval(interval_now) && isPerfectInterval(interval_prev) &&
-        interval_now == interval_prev && interval_now != 0) {
+    if ((this_motion > 0 && other_motion < 0) || (this_motion < 0 && other_motion > 0)) {
       return true;
     }
   }
   return false;
+}
+
+const CadenceCell* cadenceCellAt(const Material& material, Tick tick) {
+  for (const auto& cell : material.cadence_cells) {
+    if (cell.approach_tick == tick || cell.cadence_tick == tick)
+      return &cell;
+  }
+  return nullptr;
 }
 
 }  // namespace
@@ -228,19 +187,42 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
     }
   }
 
-  if (span.intent == VoiceIntent::SubjectCarrier || span.intent == VoiceIntent::AnswerCarrier) {
+  if (span.intent == VoiceIntent::SubjectCarrier || span.intent == VoiceIntent::AnswerCarrier ||
+      span.intent == VoiceIntent::CountersubjectCarrier) {
     // Replay material verbatim. One Candidate per MaterialNote that falls
     // inside the span window. Score = 1.0. Sets bit 0 of satisfied_rules
     // (ChordTone) when the material pitch matches the triad of the chord
     // active at its onset, so the Composer's leave-side passing-tone
     // flag stays accurate across a Carrier→Compose span boundary.
     //
-    // Source list is the subject fragment for SubjectCarrier and the
-    // answer fragment for AnswerCarrier; both carry the same verbatim
-    // semantics (no candidate search, score = 1.0).
-    const auto& source =
-        (span.intent == VoiceIntent::SubjectCarrier) ? material.subject : material.answer;
-    for (const auto& mnote : source) {
+    // Source list:
+    //   SubjectCarrier         → material.subject
+    //   AnswerCarrier          → material.tonal_answer (if use_tonal_answer)
+    //                            otherwise material.answer (real answer)
+    //   CountersubjectCarrier  → material.countersubject
+    // All three carry the same verbatim semantics (no candidate search,
+    // score = 1.0).
+    const std::vector<MaterialNote>* source_ptr = &material.subject;
+    MaterialFragment fragment = MaterialFragment::Subject;
+    bool emit_tonal_answer_bit = false;
+    bool emit_countersubject_bit = false;
+    if (span.intent == VoiceIntent::AnswerCarrier) {
+      if (material.use_tonal_answer && !material.tonal_answer.empty()) {
+        source_ptr = &material.tonal_answer;
+        fragment = MaterialFragment::TonalAnswer;
+        emit_tonal_answer_bit = true;
+      } else {
+        source_ptr = &material.answer;
+        fragment = MaterialFragment::Answer;
+      }
+    } else if (span.intent == VoiceIntent::CountersubjectCarrier) {
+      source_ptr = &material.countersubject;
+      fragment = MaterialFragment::Countersubject;
+      emit_countersubject_bit = true;
+    }
+    const auto& source = *source_ptr;
+    for (std::size_t idx = 0; idx < source.size(); ++idx) {
+      const auto& mnote = source[idx];
       if (mnote.start_tick < span.start_tick)
         continue;
       if (mnote.start_tick >= span.end_tick)
@@ -254,10 +236,143 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
       const ChordEvent& chord_here = activeChord(harmonic_plan, mnote.start_tick);
       const auto triad_here = triadPitchClasses(chord_here);
       const std::uint8_t pc_m = static_cast<std::uint8_t>(mnote.pitch % 12);
-      if (pc_m == triad_here[0] || pc_m == triad_here[1] || pc_m == triad_here[2]) {
-        c.satisfied_rules |= 1ull << 0;
+      const bool is_triad_m =
+          (pc_m == triad_here[0] || pc_m == triad_here[1] || pc_m == triad_here[2]);
+      if (is_triad_m) {
+        c.satisfied_rules |= 1ull << RuleBit::ChordTone;
+      }
+      applyP7Bits(c.satisfied_rules, chord_here, pc_m, is_triad_m);
+      if (const CadenceCell* cadence_cell = cadenceCellAt(material, mnote.start_tick);
+          cadence_cell != nullptr) {
+        c.satisfied_rules |= 1ull << RuleBit::CadenceCellCommitted;
+        if (mnote.start_tick == cadence_cell->cadence_tick) {
+          c.satisfied_rules |= 1ull << RuleBit::CadenceVoiceLeadingChecked;
+        }
+      }
+      for (const auto& marker : material.leading_tone_markers) {
+        if (marker.fragment == fragment && marker.resolution_index == idx) {
+          c.satisfied_rules |= 1ull << RuleBit::LeadingToneResolved;
+          break;
+        }
+      }
+      if (emit_tonal_answer_bit) {
+        c.satisfied_rules |= 1ull << RuleBit::TonalAnswerMapped;
+      }
+      if (emit_countersubject_bit) {
+        c.satisfied_rules |= 1ull << RuleBit::CountersubjectActive;
       }
       out.push_back(c);
+    }
+    return out;
+  }
+
+  if (span.intent == VoiceIntent::Episode) {
+    // Replay each EpisodeFragment that targets this span's voice and
+    // whose derived note window falls inside this span. Emits the full
+    // transformed subject motif verbatim with EpisodeMotifSourced bit
+    // set on every note so the Validator (and downstream provenance
+    // analysis) can assert the span really came from a motif derivation.
+    //
+    // Multiple fragments per span are allowed; each is independently
+    // anchored at fragment.target_start_tick. Fragments whose derived
+    // notes spill past span.end_tick are skipped so the search never
+    // emits notes outside the span window (the Composer assumes Span
+    // bounds are authoritative).
+    for (const auto& frag : material.episodes) {
+      if (frag.voice != span.voice)
+        continue;
+      if (material.subject.empty())
+        continue;
+      const std::size_t src_begin = frag.source_start_index;
+      if (src_begin >= material.subject.size())
+        continue;
+      const std::size_t src_count =
+          (frag.source_count == 0) ? (material.subject.size() - src_begin) : frag.source_count;
+      const std::size_t src_end = std::min(src_begin + src_count, material.subject.size());
+      std::vector<MaterialNote> source_slice;
+      source_slice.reserve(src_end - src_begin);
+      for (std::size_t k = src_begin; k < src_end; ++k) {
+        source_slice.push_back(material.subject[k]);
+      }
+      auto derived = motif_ops::applyTransform(
+          source_slice, static_cast<motif_ops::EpisodeMotifTransform>(frag.transform),
+          frag.target_start_tick, frag.invert_pivot,
+          (static_cast<motif_ops::EpisodeMotifTransform>(frag.transform) ==
+           motif_ops::EpisodeMotifTransform::Augment)
+              ? frag.augment_factor
+              : frag.diminish_factor);
+      for (const auto& n : derived) {
+        if (n.start_tick < span.start_tick)
+          continue;
+        if (n.start_tick >= span.end_tick)
+          break;
+        Candidate c;
+        c.start_tick = n.start_tick;
+        c.duration = n.duration;
+        c.pitch = n.pitch;
+        c.score = 1.0f;
+        c.satisfied_rules = 1ull << RuleBit::EpisodeMotifSourced;
+        // Chord-tone bit so passing-tone tracking on the next Compose
+        // span (if any) reads correctly.
+        const ChordEvent& chord_here = activeChord(harmonic_plan, n.start_tick);
+        const auto triad_here = triadPitchClasses(chord_here);
+        const std::uint8_t pc_m = static_cast<std::uint8_t>(n.pitch % 12);
+        const bool is_triad_m =
+            (pc_m == triad_here[0] || pc_m == triad_here[1] || pc_m == triad_here[2]);
+        if (is_triad_m) {
+          c.satisfied_rules |= 1ull << RuleBit::ChordTone;
+        }
+        applyP7Bits(c.satisfied_rules, chord_here, pc_m, is_triad_m);
+        out.push_back(c);
+      }
+    }
+    return out;
+  }
+
+  if (span.intent == VoiceIntent::SuspensionCarrier) {
+    // Replay each SuspensionPattern that targets this span's voice and
+    // falls inside the span window. Emits exactly three notes
+    // (preparation, suspension, resolution) per pattern. Score = 1.0.
+    // Provenance bits SuspensionPrepared and SuspensionResolved are set
+    // on the resolution note so the Validator and downstream gates can
+    // assert that prep/sus/res actually shipped (not just intended).
+    Tick prep_duration = kQuarter;
+    Tick sus_duration = kQuarter;
+    for (const auto& pattern : material.suspension_patterns) {
+      if (pattern.voice != span.voice)
+        continue;
+      if (pattern.preparation_tick < span.start_tick)
+        continue;
+      if (pattern.resolution_tick >= span.end_tick)
+        continue;
+      // Note durations follow tick distances exactly so the held-over
+      // dissonance reads as a tied/sustained event under the validator's
+      // sounding-pitch lookup. Resolution duration falls back to one beat
+      // unless the next pattern occupies that slot (left to Material to
+      // arrange — Composer does not infer beyond the explicit ticks).
+      prep_duration = pattern.suspension_tick - pattern.preparation_tick;
+      sus_duration = pattern.resolution_tick - pattern.suspension_tick;
+      Candidate prep;
+      prep.start_tick = pattern.preparation_tick;
+      prep.duration = prep_duration;
+      prep.pitch = pattern.preparation_pitch;
+      prep.score = 1.0f;
+      prep.satisfied_rules = 1ull << RuleBit::SuspensionPrepared;
+      out.push_back(prep);
+      Candidate sus;
+      sus.start_tick = pattern.suspension_tick;
+      sus.duration = sus_duration;
+      sus.pitch = pattern.suspension_pitch;
+      sus.score = 1.0f;
+      sus.satisfied_rules = 0;
+      out.push_back(sus);
+      Candidate res;
+      res.start_tick = pattern.resolution_tick;
+      res.duration = kQuarter;
+      res.pitch = pattern.resolution_pitch;
+      res.score = 1.0f;
+      res.satisfied_rules = 1ull << RuleBit::SuspensionResolved;
+      out.push_back(res);
     }
     return out;
   }
@@ -298,6 +413,12 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
   for (Tick t = span.start_tick; t < span.end_tick; t += stride) {
     const ChordEvent& chord = activeChord(harmonic_plan, t);
     const auto triad = triadPitchClasses(chord);
+    const CadenceCell* cadence_cell = cadenceCellAt(material, t);
+    const bool force_bass_cadence_pc = cadence_cell != nullptr && span.voice > 0;
+    const std::uint8_t forced_cadence_pc =
+        (cadence_cell != nullptr && t == cadence_cell->approach_tick)
+            ? cadence_cell->bass_approach_pc
+            : ((cadence_cell != nullptr) ? cadence_cell->bass_cadence_pc : 0);
 
     // Enumerate triad-tone pitches in [voice_center - 7, voice_center + 12].
     int best_pitch = -1;
@@ -307,8 +428,13 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
       if (p < 0 || p > 127)
         continue;
       const std::uint8_t pc = static_cast<std::uint8_t>(p % 12);
+      if (force_bass_cadence_pc && pc != forced_cadence_pc)
+        continue;
       const bool is_triad = (pc == triad[0]) || (pc == triad[1]) || (pc == triad[2]);
       const bool strong = isStrongBeat(t);
+      if (prev_pitch_local != 0 && !resolvesLeadingTone(prev_pitch_local, p, harmonic_plan)) {
+        continue;
+      }
       if (strong && !is_triad)
         continue;  // strong-beat consonance rule
 
@@ -318,6 +444,82 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
           createsVoiceCrossing(*context.placed_notes, span.voice, static_cast<std::uint8_t>(p),
                                t)) {
         continue;
+      }
+
+      // P7 spacing pre-filter. When the active chord declares
+      // has_degree=true, reject any candidate that would push an
+      // upper-voice adjacent pair past an octave. We check only the
+      // pairs the Validator's spacing rule covers (top N-2 pairs in
+      // an N-voice texture). Without this filter the Composer can
+      // pick a candidate pitch that drops too low (a textbook
+      // "open" spacing) which the Validator rejects after the fact
+      // and forces a seed-level fail.
+      if (chord.has_degree && context.placed_notes != nullptr) {
+        bool spacing_violation = false;
+        for (const auto& placed : *context.placed_notes) {
+          if (placed.voice == span.voice)
+            continue;
+          if (placed.start_tick > t)
+            continue;
+          if (t >= placed.start_tick + placed.duration)
+            continue;
+          // Spacing check only applies to upper-voice pairs: skip
+          // when the lower-indexed voice of the pair (this voice or
+          // the placed voice) is the bottom voice of the texture.
+          // Voice id convention: V0 = top, V_{N-1} = bottom.
+          const VoiceId hi_voice = std::min(placed.voice, span.voice);
+          const VoiceId lo_voice = std::max(placed.voice, span.voice);
+          // Only adjacent voice pairs constrained.
+          if (lo_voice != hi_voice + 1)
+            continue;
+          // Skip the bottom-of-texture pair: spacing rule excludes
+          // the lowest pair (V_{N-2} — V_{N-1}). The pair to exclude
+          // has lo_voice == N - 1 (i.e. the bottom voice is in the
+          // pair). For N = 3 only (V0, V1) is checked; (V1, V2) is
+          // skipped because lo_voice = 2 = N - 1.
+          if (context.num_voices >= 2 && lo_voice == context.num_voices - 1)
+            continue;
+          const int gap = std::abs(static_cast<int>(p) - static_cast<int>(placed.pitch));
+          if (gap > 12) {
+            spacing_violation = true;
+            break;
+          }
+        }
+        if (spacing_violation)
+          continue;
+      }
+
+      // P7 doubling pre-filter. When the active chord declares
+      // has_degree=true AND owns the leading tone (chord triad
+      // contains tonic+11), reject any candidate whose pc matches
+      // the leading tone if a previously-placed voice is already
+      // sounding the leading tone at this tick. This keeps the
+      // Composer from picking a doubled leading tone that the
+      // Validator's `doubling_no_leading_tone` rule would later
+      // reject. Without this, Phase7 carriers (whose pitches are
+      // fixed Material) can coincide with a Compose voice landing on
+      // B, fail validation, and bounce the seed.
+      if (chord.has_degree && context.placed_notes != nullptr) {
+        const std::uint8_t lt_pc = leadingTonePitchClass(harmonic_plan.tonic_pc);
+        const bool chord_owns_lt =
+            (triad[0] == lt_pc) || (triad[1] == lt_pc) || (triad[2] == lt_pc);
+        if (chord_owns_lt && pc == lt_pc) {
+          bool other_voice_has_lt = false;
+          for (const auto& placed : *context.placed_notes) {
+            if (placed.voice == span.voice)
+              continue;
+            if (placed.start_tick > t)
+              continue;
+            if (t >= placed.start_tick + placed.duration)
+              continue;
+            if (static_cast<std::uint8_t>(placed.pitch % 12) == lt_pc) {
+              other_voice_has_lt = true;
+              break;
+            }
+          }
+          if (other_voice_has_lt)
+            continue;
+        }
       }
 
       // Vertical rule: on strong beats, candidate must form a
@@ -336,16 +538,39 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
       // motion against any already-placed voice. Only attempted when
       // an other-voice context is supplied AND we have a valid prev
       // anchor in this voice.
-      if (context.placed_notes != nullptr && have_parallel_anchor &&
+      //
+      // Cadence cells bypass the general parallel-perfect rule because
+      // their bass pitch class is forced — accepting an occasional
+      // parallel fifth into the cadence is preferred over failing the
+      // span. Parallel octaves remain prohibited even under a cadence
+      // cell (see createsParallelOctave below).
+      if (!force_bass_cadence_pc && context.placed_notes != nullptr && have_parallel_anchor &&
           createsParallelPerfect(*context.placed_notes, span.voice, static_cast<std::uint8_t>(p), t,
                                  parallel_prev_pitch, parallel_prev_tick)) {
+        continue;
+      }
+      if (context.placed_notes != nullptr && have_parallel_anchor &&
+          rule_helpers::createsParallelOctave(*context.placed_notes, span.voice,
+                                              static_cast<std::uint8_t>(p), t, parallel_prev_pitch,
+                                              parallel_prev_tick)) {
+        continue;
+      }
+      if (!force_bass_cadence_pc && context.placed_notes != nullptr && have_parallel_anchor &&
+          createsHiddenParallelPerfect(*context.placed_notes, span.voice,
+                                       static_cast<std::uint8_t>(p), t, parallel_prev_pitch,
+                                       parallel_prev_tick)) {
+        continue;
+      }
+      if (!force_bass_cadence_pc && context.placed_notes != nullptr &&
+          createsCrossRelation(*context.placed_notes, span.voice, static_cast<std::uint8_t>(p),
+                               t)) {
         continue;
       }
 
       // Melodic rule: if the previous motion (pre_prev -> prev) was
       // a wide leap (>= P5), forbid a second wide leap from prev to
       // this candidate. The single-leap case stays unconstrained.
-      if (pre_prev_pitch_local != 0 && prev_pitch_local != 0) {
+      if (!force_bass_cadence_pc && pre_prev_pitch_local != 0 && prev_pitch_local != 0) {
         const int delta_pre =
             static_cast<int>(prev_pitch_local) - static_cast<int>(pre_prev_pitch_local);
         const int delta_cur = p - static_cast<int>(prev_pitch_local);
@@ -356,7 +581,7 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
 
       // Passing-tone rule (approach side): a weak-beat non-chord tone
       // must be approached by step (<= 2 semis).
-      if (!strong && !is_triad && prev_pitch_local != 0) {
+      if (!force_bass_cadence_pc && !strong && !is_triad && prev_pitch_local != 0) {
         if (std::abs(p - static_cast<int>(prev_pitch_local)) > 2) {
           continue;
         }
@@ -371,8 +596,71 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
       // the search could pick a non-triad p at position k, then at
       // position k+1 pick a triad-tone 3+ semis away (because the
       // triad bonus dominates), violating the rule.
-      if (prev_was_pt_local && prev_pitch_local != 0) {
+      if (!force_bass_cadence_pc && prev_was_pt_local && prev_pitch_local != 0) {
         if (std::abs(p - static_cast<int>(prev_pitch_local)) > 2) {
+          continue;
+        }
+      }
+
+      if (!force_bass_cadence_pc && isLeadingTone(static_cast<std::uint8_t>(p), harmonic_plan)) {
+        const Tick t_next = t + stride;
+        bool has_resolution = false;
+        if (context.placed_notes != nullptr) {
+          const std::uint8_t fixed_next =
+              sameVoiceStartingAt(*context.placed_notes, span.voice, t_next);
+          if (fixed_next != 0) {
+            has_resolution =
+                resolvesLeadingTone(static_cast<std::uint8_t>(p), fixed_next, harmonic_plan);
+          }
+        }
+        if (!has_resolution && t_next < span.end_tick) {
+          for (int q = p + 1; q <= p + 2; ++q) {
+            if (!resolvesLeadingTone(static_cast<std::uint8_t>(p), q, harmonic_plan))
+              continue;
+            if (context.placed_notes != nullptr &&
+                createsVoiceCrossing(*context.placed_notes, span.voice,
+                                     static_cast<std::uint8_t>(q), t_next)) {
+              continue;
+            }
+            if (context.placed_notes != nullptr &&
+                createsVerticalDissonance(*context.placed_notes, span.voice,
+                                          static_cast<std::uint8_t>(q), t_next)) {
+              continue;
+            }
+            if (context.placed_notes != nullptr &&
+                createsParallelPerfect(*context.placed_notes, span.voice,
+                                       static_cast<std::uint8_t>(q), t_next,
+                                       static_cast<std::uint8_t>(p), t)) {
+              continue;
+            }
+            if (context.placed_notes != nullptr &&
+                createsHiddenParallelPerfect(*context.placed_notes, span.voice,
+                                             static_cast<std::uint8_t>(q), t_next,
+                                             static_cast<std::uint8_t>(p), t)) {
+              continue;
+            }
+            if (context.placed_notes != nullptr &&
+                createsCrossRelation(*context.placed_notes, span.voice,
+                                     static_cast<std::uint8_t>(q), t_next)) {
+              continue;
+            }
+            const ChordEvent& q_chord = activeChord(harmonic_plan, t_next);
+            const auto q_triad = triadPitchClasses(q_chord);
+            const std::uint8_t q_pc = static_cast<std::uint8_t>(q % 12);
+            const bool q_is_triad = q_pc == q_triad[0] || q_pc == q_triad[1] || q_pc == q_triad[2];
+            if (!isStrongBeat(t_next) && !q_is_triad && context.placed_notes != nullptr) {
+              const Tick q_next_tick = t_next + stride;
+              const std::uint8_t fixed_after_q =
+                  sameVoiceStartingAt(*context.placed_notes, span.voice, q_next_tick);
+              if (fixed_after_q != 0 && std::abs(q - static_cast<int>(fixed_after_q)) > 2) {
+                continue;
+              }
+            }
+            has_resolution = true;
+            break;
+          }
+        }
+        if (!has_resolution) {
           continue;
         }
       }
@@ -392,7 +680,7 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
       // weak beat). Leave-side enforcement is already span-crossing
       // via CandidateContext::prev_was_passing_tone, so the lookahead
       // must agree.
-      if (!strong && !is_triad) {
+      if (!force_bass_cadence_pc && !strong && !is_triad) {
         const Tick t_next = t + stride;
         // Cross-span fixed-next leave-side check: when a Carrier span
         // (SubjectCarrier or AnswerCarrier) has already placed a note
@@ -477,6 +765,14 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
       // unreachable consonant set still lets a dissonant pick through.
       if (!strong && vertically_dissonant) {
         score -= 0.15f;
+      }
+      if (context.placed_notes != nullptr && have_parallel_anchor &&
+          hasContraryMotion(*context.placed_notes, span.voice, static_cast<std::uint8_t>(p), t,
+                            parallel_prev_pitch, parallel_prev_tick)) {
+        score += 0.10f;
+      }
+      if (force_bass_cadence_pc) {
+        score += 0.50f;
       }
 
       // Quarter-mode unison-run penalty. When pre_prev and prev are
@@ -582,15 +878,18 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
 
       RuleIdMask rules = 0;
       if (is_triad)
-        rules |= 1ull << 0;  // rule[0] = ChordTone
+        rules |= 1ull << RuleBit::ChordTone;
+      applyP7Bits(rules, chord, static_cast<std::uint8_t>(pc), is_triad);
       if (strong && is_triad)
-        rules |= 1ull << 1;  // rule[1] = StrongBeatConsonance
+        rules |= 1ull << RuleBit::StrongBeatConsonance;
       if (context.prev_pitch > 0 && std::abs(p - context.prev_pitch) <= 4) {
-        rules |= 1ull << 2;  // rule[2] = SmallStep
+        rules |= 1ull << RuleBit::SmallStep;
       }
       if (context.placed_notes != nullptr) {
-        rules |= 1ull << 3;  // rule[3] = ParallelPerfectChecked
-        rules |= 1ull << 4;  // rule[4] = VoiceCrossingChecked
+        rules |= 1ull << RuleBit::ParallelPerfectChecked;
+        rules |= 1ull << RuleBit::HiddenParallelChecked;
+        rules |= 1ull << RuleBit::VoiceCrossingChecked;
+        rules |= 1ull << RuleBit::CrossRelationChecked;
         // rule[7] = VerticalConsonanceChecked. Marks the candidate as
         // consonant against all currently-placed voices at this tick.
         // Strong beats are guaranteed (the rejection above would have
@@ -598,14 +897,23 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
         // they happen to avoid dissonance (i.e. the soft penalty did
         // not have to apply).
         if (!vertically_dissonant) {
-          rules |= 1ull << 7;
+          rules |= 1ull << RuleBit::VerticalConsonanceChecked;
         }
       }
       if (pre_prev_pitch_local != 0 && prev_pitch_local != 0) {
-        rules |= 1ull << 5;  // rule[5] = LeapResolutionChecked
+        rules |= 1ull << RuleBit::LeapResolutionChecked;
       }
       if (!strong && prev_pitch_local != 0) {
-        rules |= 1ull << 6;  // rule[6] = WeakBeatPassingChecked
+        rules |= 1ull << RuleBit::WeakBeatPassingChecked;
+      }
+      if (prev_pitch_local != 0 && isLeadingTone(prev_pitch_local, harmonic_plan)) {
+        rules |= 1ull << RuleBit::LeadingToneResolved;
+      }
+      if (cadence_cell != nullptr) {
+        rules |= 1ull << RuleBit::CadenceCellCommitted;
+        if (t == cadence_cell->cadence_tick) {
+          rules |= 1ull << RuleBit::CadenceVoiceLeadingChecked;
+        }
       }
 
       if (score > best_score) {
@@ -635,7 +943,7 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
     // is set (rule[0] = ChordTone). Use that to update the leave-side
     // tracker — non-triad commits require the next position to be
     // within ±2.
-    prev_was_pt_local = ((best_rules & (1ull << 0)) == 0);
+    prev_was_pt_local = ((best_rules & (1ull << RuleBit::ChordTone)) == 0);
   }
   return out;
 }

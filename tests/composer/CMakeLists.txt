@@ -9,8 +9,14 @@ set(BACH_COMPOSER_TEST_SOURCES
   composer_skeleton_test.cpp
   voice_intent_test.cpp
   composer_two_voice_test.cpp
+  material_test.cpp
   json_export_test.cpp
   schema_validation_test.cpp
+  rule_helpers_test.cpp
+  nct_detector_test.cpp
+  motif_ops_test.cpp
+  tonal_answer_test.cpp
+  chord_voicing_test.cpp
   validator_test.cpp
   candidate_search_test.cpp
 )

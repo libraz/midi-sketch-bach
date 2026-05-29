@@ -35,6 +35,49 @@ enum class NoteSource : std::uint8_t {
 // JSON schema.
 using RuleIdMask = std::uint64_t;
 
+enum RuleBit : std::uint8_t {
+  ChordTone = 0,
+  StrongBeatConsonance = 1,
+  SmallStep = 2,
+  ParallelPerfectChecked = 3,
+  VoiceCrossingChecked = 4,
+  LeapResolutionChecked = 5,
+  WeakBeatPassingChecked = 6,
+  VerticalConsonanceChecked = 7,
+  LeadingToneResolved = 8,
+  HiddenParallelChecked = 9,
+  CrossRelationChecked = 10,
+  CadenceCellCommitted = 11,
+  CadenceVoiceLeadingChecked = 12,
+  // P4 (Suspension + non-chord-tone recognition).
+  SuspensionPrepared = 13,
+  SuspensionResolved = 14,
+  CambiataDetected = 15,
+  EchappeeDetected = 16,
+  AnticipationDetected = 17,
+  NotaCambiataDetected = 18,
+  // P5 (Episode = motif transform derived).
+  EpisodeMotifSourced = 19,
+  // P6 (Tonal answer + Countersubject).
+  TonalAnswerMapped = 20,
+  CountersubjectActive = 21,
+  // P7 (Functional harmony: degree/inversion/doubling/spacing).
+  // ChordToneRoman: the candidate's pitch class belongs to the
+  //   triad/seventh chord declared by ChordEvent.degree+quality.
+  // InversionLabel: the active ChordEvent has has_degree=true and
+  //   the bass voice's pitch class matches ChordEvent.inversion's
+  //   chord factor (root/third/fifth/seventh).
+  // DoublingChecked: the candidate participated in a doubling
+  //   verification at its tick (no leading-tone double, no 7th
+  //   double).
+  // SpacingChecked: the candidate participated in spacing
+  //   verification (upper-voice intervals stayed within one octave).
+  ChordToneRoman = 22,
+  InversionLabel = 23,
+  DoublingChecked = 24,
+  SpacingChecked = 25,
+};
+
 // Per-note provenance record.
 //
 // Invariant: every NoteEvent emitted by Renderer carries one
