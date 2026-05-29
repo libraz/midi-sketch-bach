@@ -23,9 +23,18 @@ enum class HarnessPhase : std::uint8_t {
   Phase7 = 8,         // Phase6 layout + ChordEvent degree/inversion/function tagging
   Phase8 = 9,         // Phase7 layout + ModulationEvent at midpoint + secondary dominant
   Phase9 = 10,        // Phase8 layout + FortspinnungSpan + ImitationEntry declarations
-  Phase10 = 11        // Phase8 layout (3v/16bar/subject+answer+third-entry +
+  Phase10 = 11,       // Phase8 layout (3v/16bar/subject+answer+third-entry +
                       // modulation); distinguished only so closure can
                       // target it for the InvertibleAt8va bit.
+  Phase11 = 12,       // 3 voice, 28 bar. Exposition (bars 0-11, subject +
+                      // answer + V2 re-entry) followed by an all-Material
+                      // development (bars 12-27): middle entry, pedal,
+                      // subject variant, stretto, coda.
+  Phase12 = 13        // 3 voice, 28 bar. Phase11-style exposition (bars
+                      // 0-11) followed by an all-Material rhythm section
+                      // (bars 12-27): dotted figure, anacrusis, syncopated
+                      // consequent, hemiola, rhythmic-motif recurrence on a
+                      // 4-bar phrase grid.
 };
 
 // Static layout for one harness phase. Catalogs and seed-to-fixture
@@ -45,6 +54,8 @@ struct HarnessPhaseSpec {
   bool with_modulation;       // Phase8: ModulationEvent + V/V + borrowed iv + Picardy 3rd
   bool with_fortspinnung;     // Phase9: V0 FortspinnungSpan + SequenceTemplate
   bool with_imitation_entry;  // Phase9: ImitationEntry declaration (subject→answer)
+  bool with_development;      // Phase11: 28-bar layout + development carriers
+  bool with_rhythm;           // Phase12: 28-bar layout + rhythm/phrase carriers
 };
 
 // Resolve the static layout for a phase. Returns the same struct on

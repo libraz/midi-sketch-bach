@@ -1116,4 +1116,238 @@ TEST(CandidateSearchTest, FortspinnungSpanSkipsTemplateForWrongVoice) {
   EXPECT_TRUE(cands.empty());
 }
 
+// P11 development carriers: each replays verbatim Material and stamps one
+// provenance bit. Register/voice-crossing safety is the fixture's job, so
+// these tests only assert replay fidelity and the bit.
+
+namespace {
+
+bool candHasBit(const Candidate& c, RuleBit bit) {
+  return (c.satisfied_rules & (1ull << bit)) != 0;
+}
+
+}  // namespace
+
+TEST(CandidateSearchTest, MiddleEntryCarrierReplaysWithBit) {
+  CandidateSearch search;
+  CandidateContext ctx;
+  ctx.voice_center = 72;
+  ctx.placed_notes = nullptr;
+
+  Material material;
+  MiddleEntryDecl entry;
+  entry.voice = 0;
+  entry.related_key_pc = 7;
+  entry.notes = {{0, kTicksPerBeat, 67}, {kTicksPerBeat, kTicksPerBeat, 69}};
+  material.middle_entries.push_back(entry);
+
+  Span span = makeCarrierSpan(0, 2 * kTicksPerBeat, 0, VoiceIntent::MiddleEntryCarrier);
+  const auto cands = search.enumerate(span, singleCMajor(), material, ctx);
+  ASSERT_EQ(cands.size(), 2u);
+  EXPECT_EQ(cands[0].pitch, 67);
+  EXPECT_EQ(cands[1].pitch, 69);
+  EXPECT_TRUE(candHasBit(cands[0], RuleBit::MiddleEntryCommitted));
+  EXPECT_TRUE(candHasBit(cands[1], RuleBit::MiddleEntryCommitted));
+}
+
+TEST(CandidateSearchTest, StrettoCarrierReplaysFollowerWithBit) {
+  CandidateSearch search;
+  CandidateContext ctx;
+  ctx.voice_center = 48;
+  ctx.placed_notes = nullptr;
+
+  Material material;
+  StrettoDecl s;
+  s.leader_voice = 0;
+  s.follower_voice = 2;
+  s.follower_notes = {{0, kTicksPerBeat, 48}, {kTicksPerBeat, kTicksPerBeat, 50}};
+  material.stretto_entries.push_back(s);
+
+  Span span = makeCarrierSpan(0, 2 * kTicksPerBeat, 2, VoiceIntent::StrettoCarrier);
+  const auto cands = search.enumerate(span, singleCMajor(), material, ctx);
+  ASSERT_EQ(cands.size(), 2u);
+  EXPECT_EQ(cands[0].pitch, 48);
+  EXPECT_TRUE(candHasBit(cands[0], RuleBit::StrettoCommitted));
+  EXPECT_TRUE(candHasBit(cands[1], RuleBit::StrettoCommitted));
+}
+
+TEST(CandidateSearchTest, PedalCarrierEmitsSustainedNoteWithBit) {
+  CandidateSearch search;
+  CandidateContext ctx;
+  ctx.voice_center = 48;
+  ctx.placed_notes = nullptr;
+
+  Material material;
+  PedalPointDecl pedal;
+  pedal.voice = 2;
+  pedal.start_tick = 0;
+  pedal.duration = 4 * kTicksPerBar;
+  pedal.pitch = 55;
+  pedal.is_dominant = true;
+  material.pedal_points.push_back(pedal);
+
+  Span span = makeCarrierSpan(0, 4 * kTicksPerBar, 2, VoiceIntent::PedalCarrier);
+  const auto cands = search.enumerate(span, singleCMajor(), material, ctx);
+  ASSERT_EQ(cands.size(), 1u);
+  EXPECT_EQ(cands[0].pitch, 55);
+  EXPECT_EQ(cands[0].duration, 4 * kTicksPerBar);
+  EXPECT_TRUE(candHasBit(cands[0], RuleBit::PedalCommitted));
+}
+
+TEST(CandidateSearchTest, CodaCarrierReplaysWithBit) {
+  CandidateSearch search;
+  CandidateContext ctx;
+  ctx.voice_center = 72;
+  ctx.placed_notes = nullptr;
+
+  Material material;
+  CodaDecl coda;
+  coda.voice = 0;
+  coda.notes = {{0, kTicksPerBeat, 72}, {kTicksPerBeat, kTicksPerBeat, 76}};
+  material.coda_extensions.push_back(coda);
+
+  Span span = makeCarrierSpan(0, 2 * kTicksPerBeat, 0, VoiceIntent::CodaCarrier);
+  const auto cands = search.enumerate(span, singleCMajor(), material, ctx);
+  ASSERT_EQ(cands.size(), 2u);
+  EXPECT_TRUE(candHasBit(cands[0], RuleBit::CodaCommitted));
+  EXPECT_TRUE(candHasBit(cands[1], RuleBit::CodaCommitted));
+}
+
+TEST(CandidateSearchTest, SubjectVariantCarrierReplaysWithBit) {
+  CandidateSearch search;
+  CandidateContext ctx;
+  ctx.voice_center = 60;
+  ctx.placed_notes = nullptr;
+
+  Material material;
+  SubjectVariantDecl variant;
+  variant.voice = 0;
+  variant.transform = static_cast<std::uint8_t>(motif_ops::EpisodeMotifTransform::Invert);
+  variant.notes = {{0, kTicksPerBeat, 73}, {kTicksPerBeat, kTicksPerBeat, 71}};
+  material.subject_variants.push_back(variant);
+
+  Span span = makeCarrierSpan(0, 2 * kTicksPerBeat, 0, VoiceIntent::SubjectCarrierInverted);
+  const auto cands = search.enumerate(span, singleCMajor(), material, ctx);
+  ASSERT_EQ(cands.size(), 2u);
+  EXPECT_EQ(cands[0].pitch, 73);
+  EXPECT_TRUE(candHasBit(cands[0], RuleBit::SubjectVariantApplied));
+  EXPECT_TRUE(candHasBit(cands[1], RuleBit::SubjectVariantApplied));
+}
+
+TEST(CandidateSearchTest, DevelopmentCarrierSkipsWrongVoice) {
+  CandidateSearch search;
+  CandidateContext ctx;
+  ctx.voice_center = 72;
+  ctx.placed_notes = nullptr;
+
+  Material material;
+  MiddleEntryDecl entry;
+  entry.voice = 1;  // wrong voice
+  entry.notes = {{0, kTicksPerBeat, 67}};
+  material.middle_entries.push_back(entry);
+
+  Span span = makeCarrierSpan(0, 2 * kTicksPerBeat, 0, VoiceIntent::MiddleEntryCarrier);
+  const auto cands = search.enumerate(span, singleCMajor(), material, ctx);
+  EXPECT_TRUE(cands.empty());
+}
+
+// P12 RhythmCarrier: replays rhythm fragments verbatim, stamping a bit per
+// feature, plus PhrasePeriodicityKept on notes landing on a phrase start.
+
+namespace {
+
+Material makeRhythmMaterial(RhythmFragment::Feature feature, VoiceId voice = 0) {
+  Material m;
+  RhythmFragment frag;
+  frag.feature = feature;
+  frag.voice = voice;
+  frag.notes.push_back({0, kTicksPerBeat, 72});
+  frag.notes.push_back({kTicksPerBeat, kTicksPerBeat, 74});
+  m.rhythm_fragments.push_back(frag);
+  return m;
+}
+
+}  // namespace
+
+TEST(CandidateSearchTest, RhythmCarrierAnacrusisStampsBit) {
+  CandidateSearch search;
+  CandidateContext ctx;
+  ctx.voice_center = 72;
+  ctx.placed_notes = nullptr;
+  Material material = makeRhythmMaterial(RhythmFragment::Feature::Anacrusis);
+  Span span = makeCarrierSpan(0, 2 * kTicksPerBeat, 0, VoiceIntent::RhythmCarrier);
+  const auto cands = search.enumerate(span, singleCMajor(), material, ctx);
+  ASSERT_EQ(cands.size(), 2u);
+  EXPECT_TRUE(candHasBit(cands[0], RuleBit::AnacrusisActive));
+}
+
+TEST(CandidateSearchTest, RhythmCarrierHemiolaStampsBit) {
+  CandidateSearch search;
+  CandidateContext ctx;
+  ctx.voice_center = 72;
+  ctx.placed_notes = nullptr;
+  Material material = makeRhythmMaterial(RhythmFragment::Feature::Hemiola);
+  Span span = makeCarrierSpan(0, 2 * kTicksPerBeat, 0, VoiceIntent::RhythmCarrier);
+  const auto cands = search.enumerate(span, singleCMajor(), material, ctx);
+  ASSERT_EQ(cands.size(), 2u);
+  EXPECT_TRUE(candHasBit(cands[0], RuleBit::HemiolaInserted));
+}
+
+TEST(CandidateSearchTest, RhythmCarrierRecurrenceStampsBit) {
+  CandidateSearch search;
+  CandidateContext ctx;
+  ctx.voice_center = 60;
+  ctx.placed_notes = nullptr;
+  Material material = makeRhythmMaterial(RhythmFragment::Feature::Recurrence, /*voice=*/2);
+  Span span = makeCarrierSpan(0, 2 * kTicksPerBeat, 2, VoiceIntent::RhythmCarrier);
+  const auto cands = search.enumerate(span, singleCMajor(), material, ctx);
+  ASSERT_EQ(cands.size(), 2u);
+  EXPECT_TRUE(candHasBit(cands[0], RuleBit::RhythmicMotifRecurrence));
+}
+
+TEST(CandidateSearchTest, RhythmCarrierDottedAndSyncopationCarryNoFeatureBit) {
+  CandidateSearch search;
+  CandidateContext ctx;
+  ctx.voice_center = 72;
+  ctx.placed_notes = nullptr;
+  for (auto feat : {RhythmFragment::Feature::Dotted, RhythmFragment::Feature::Syncopation}) {
+    Material material = makeRhythmMaterial(feat);
+    Span span = makeCarrierSpan(0, 2 * kTicksPerBeat, 0, VoiceIntent::RhythmCarrier);
+    const auto cands = search.enumerate(span, singleCMajor(), material, ctx);
+    ASSERT_EQ(cands.size(), 2u);
+    EXPECT_FALSE(candHasBit(cands[0], RuleBit::AnacrusisActive));
+    EXPECT_FALSE(candHasBit(cands[0], RuleBit::HemiolaInserted));
+    EXPECT_FALSE(candHasBit(cands[0], RuleBit::RhythmicMotifRecurrence));
+    // Verbatim rhythm preserved.
+    EXPECT_EQ(cands[0].pitch, 72);
+    EXPECT_EQ(cands[1].pitch, 74);
+  }
+}
+
+TEST(CandidateSearchTest, RhythmCarrierStampsPhrasePeriodicityOnPhraseStart) {
+  CandidateSearch search;
+  CandidateContext ctx;
+  ctx.voice_center = 72;
+  ctx.placed_notes = nullptr;
+  Material material = makeRhythmMaterial(RhythmFragment::Feature::Dotted);
+  // Phrase starts at tick 0 (note 0) but not at kTicksPerBeat (note 1).
+  material.phrase_structure.phrase_start_ticks = {0, 4 * kTicksPerBar};
+  Span span = makeCarrierSpan(0, 2 * kTicksPerBeat, 0, VoiceIntent::RhythmCarrier);
+  const auto cands = search.enumerate(span, singleCMajor(), material, ctx);
+  ASSERT_EQ(cands.size(), 2u);
+  EXPECT_TRUE(candHasBit(cands[0], RuleBit::PhrasePeriodicityKept));
+  EXPECT_FALSE(candHasBit(cands[1], RuleBit::PhrasePeriodicityKept));
+}
+
+TEST(CandidateSearchTest, RhythmCarrierSkipsWrongVoice) {
+  CandidateSearch search;
+  CandidateContext ctx;
+  ctx.voice_center = 72;
+  ctx.placed_notes = nullptr;
+  Material material = makeRhythmMaterial(RhythmFragment::Feature::Dotted, /*voice=*/1);
+  Span span = makeCarrierSpan(0, 2 * kTicksPerBeat, 0, VoiceIntent::RhythmCarrier);
+  const auto cands = search.enumerate(span, singleCMajor(), material, ctx);
+  EXPECT_TRUE(cands.empty());
+}
+
 }  // namespace bach::composer

@@ -74,7 +74,51 @@ enum class VoiceIntent : std::uint8_t {
   // expanded note list verbatim. Phase 9 adds this intent so episodic
   // continuations can be planned as deterministic sequences instead
   // of free counterpoint.
-  FortspinnungSpan = 10
+  FortspinnungSpan = 10,
+
+  // P11 (Fugue development section: middle entry / stretto / pedal /
+  // coda / subject variants). All seven intents below carry their
+  // pitch material verbatim from a dedicated Material vector (see
+  // material.h), so they are NoteSource::Material like the other
+  // carriers. CandidateSearch replays the source notes (score = 1.0)
+  // and stamps the matching provenance bit.
+
+  // Subject restated in a related key (V / vi / IV / ii). Source is
+  // `Material::middle_entries[i].notes` (the i whose voice matches the
+  // span's voice). Stamps RuleBit::MiddleEntryCommitted.
+  MiddleEntryCarrier = 11,
+
+  // Follower entry of a stretto: a subject restatement that begins
+  // before the leader's statement ends. Source is
+  // `Material::stretto_entries[i].follower_notes` (matched by
+  // follower_voice). Stamps RuleBit::StrettoCommitted.
+  StrettoCarrier = 12,
+
+  // Sustained tonic or dominant pedal point in the bass. Source is
+  // `Material::pedal_points[i]` (matched by voice); emits one held
+  // note. Stamps RuleBit::PedalCommitted.
+  PedalCarrier = 13,
+
+  // Closing extension after the final cadence. Source is
+  // `Material::coda_extensions[i].notes` (matched by voice). Stamps
+  // RuleBit::CodaCommitted.
+  CodaCarrier = 14,
+
+  // Subject restated under a motif transform. The three variants share
+  // one replay path and one provenance bit (SubjectVariantApplied);
+  // the distinct names document the applied transform. Source is
+  // `Material::subject_variants[i].notes` (matched by voice).
+  SubjectCarrierAugmented = 15,
+  SubjectCarrierDiminished = 16,
+  SubjectCarrierInverted = 17,
+
+  // P12 (Rhythm / meter / phrase). A carrier that replays a verbatim
+  // rhythm fragment (anacrusis pickup, hemiola regrouping, dotted figure,
+  // syncopation, or a rhythmic-motif recurrence). Source is
+  // `Material::rhythm_fragments` (matched by voice); each fragment's
+  // feature tag selects the provenance bit. Notes whose onset lands on a
+  // declared phrase start additionally carry PhrasePeriodicityKept.
+  RhythmCarrier = 18
 };
 
 // Pure helper. No formatting library dependency.

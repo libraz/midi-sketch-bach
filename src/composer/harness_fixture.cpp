@@ -64,64 +64,89 @@ HarnessPhaseSpec phaseSpec(HarnessPhase phase) {
       return {phase, /*voices=*/2, /*bars=*/8, /*subject_bars=*/8,
               false, false,        false,      false,
               false, false,        false,      false,
-              false};
+              false, false,        false};
     case HarnessPhase::Phase35:
       return {phase, /*voices=*/2, /*bars=*/4, /*subject_bars=*/4,
               false, false,        false,      false,
               false, false,        false,      false,
-              false};
+              false, false,        false};
     case HarnessPhase::Phase4:
       return {phase, /*voices=*/2, /*bars=*/8, /*subject_bars=*/4,
               true,  false,        false,      false,
               false, false,        false,      false,
-              false};
+              false, false,        false};
     case HarnessPhase::Phase5:
       return {phase, /*voices=*/3, /*bars=*/12, /*subject_bars=*/12,
               false, false,        false,       false,
               false, false,        false,       false,
-              false};
+              false, false,        false};
     case HarnessPhase::Phase6:
       return {phase, /*voices=*/3, /*bars=*/16, /*subject_bars=*/4,
               true,  true,         false,       false,
               false, false,        false,       false,
-              false};
+              false, false,        false};
     case HarnessPhase::Phase4Sus:
       return {phase, /*voices=*/2, /*bars=*/8, /*subject_bars=*/4,
               true,  false,        true,       false,
               false, false,        false,      false,
-              false};
+              false, false,        false};
     case HarnessPhase::Phase6Episode:
       return {phase, /*voices=*/3, /*bars=*/16, /*subject_bars=*/4,
               true,  true,         false,       true,
               false, false,        false,       false,
-              false};
+              false, false,        false};
     case HarnessPhase::Phase6Tonal:
       return {phase, /*voices=*/3, /*bars=*/16, /*subject_bars=*/4,
               true,  true,         false,       false,
               true,  false,        false,       false,
-              false};
+              false, false,        false};
     case HarnessPhase::Phase7:
       return {phase, /*voices=*/3, /*bars=*/16, /*subject_bars=*/4,
               true,  true,         false,       false,
               false, true,         false,       false,
-              false};
+              false, false,        false};
     case HarnessPhase::Phase8:
       return {phase, /*voices=*/3, /*bars=*/16, /*subject_bars=*/4,
               true,  true,         false,       false,
               false, true,         true,        false,
-              false};
+              false, false,        false};
     case HarnessPhase::Phase9:
       return {phase, /*voices=*/3, /*bars=*/16, /*subject_bars=*/4,
               true,  true,         false,       false,
               false, true,         true,        true,
-              true};
+              true,  false,        false};
     case HarnessPhase::Phase10:
       return {phase, /*voices=*/3, /*bars=*/16, /*subject_bars=*/4,
               true,  true,         false,       false,
               false, true,         true,        false,
-              false};
+              false, false,        false};
+    case HarnessPhase::Phase11:
+      // 28 bar / 3 voice. Material assembly reuses with_answer +
+      // with_third_entry (subject 0-3, answer 4-7, V2 re-entry 8-11);
+      // with_development drives the bars 12-27 carriers and its own
+      // voice plan. Degree tagging is on (like Phase7) so the P10
+      // strong-4th candidate pre-filter — gated on chord.has_degree —
+      // stays active for the exposition's Compose counterlines; without
+      // it the composer would pick a strong-beat perfect 4th in the
+      // (V0, V1) upper pair and trip fourth_only_on_weak_beat. Modulation
+      // stays off (no chromatic idioms); the all-Material development
+      // needs no P7/P8 help and gate (4) only needs the P11 bits.
+      return {phase, /*voices=*/3, /*bars=*/28, /*subject_bars=*/4,
+              true,  true,         false,       false,
+              false, true,         false,       false,
+              false, true,         false};
+    case HarnessPhase::Phase12:
+      // 28 bar / 3 voice. Same exposition assembly as Phase11 (with_answer
+      // + with_third_entry + degree tagging for the P10 strong-4th
+      // pre-filter), but with_rhythm drives the bars 12-27 rhythm section
+      // and its own voice plan instead of with_development.
+      return {phase, /*voices=*/3, /*bars=*/28, /*subject_bars=*/4,
+              true,  true,         false,       false,
+              false, true,         false,       false,
+              false, false,        true};
   }
-  return {phase, 2, 8, 8, false, false, false, false, false, false, false, false, false};
+  return {phase, 2,     8,     8,     false, false, false, false,
+          false, false, false, false, false, false, false};
 }
 
 HarnessFixture buildHarnessFixture(HarnessPhase phase, int seed) {
@@ -314,7 +339,84 @@ HarnessFixture buildHarnessFixture(HarnessPhase phase, int seed) {
   subject_span.intent = VoiceIntent::SubjectCarrier;
   out.voice_plan.spans.push_back(subject_span);
 
-  if (spec.with_third_entry) {
+  if (spec.with_rhythm) {
+    // Phase12 fixed layout (28 bars). Exposition bars 0-11 mirror Phase11.
+    // The rhythm section (bars 12-27) is entirely Material: one V0
+    // RhythmCarrier per 4-bar phrase (each replays whichever rhythm
+    // fragments fall in its window) plus a V2 rhythmic-motif recurrence at
+    // bars 16-19. V1 rests after the exposition. Register keeps V0 above
+    // V2 at the only shared window (bars 16-19).
+    //   V0: subject 0-3 | counterline 4-11 | rhythm phrases 12-15 / 16-19 /
+    //       20-23 / 24-27
+    //   V1: counterline 0-3 | answer 4-7 | counterline 8-11 | (rest)
+    //   V2: (rest) | subject 8-11 | (rest) | recurrence 16-19 | (rest)
+    auto pushSpan = [&](VoiceId voice, int first_bar, int last_bar, VoiceIntent intent) {
+      Span s;
+      s.id = next_id++;
+      s.start_tick = static_cast<Tick>(first_bar) * kTicksPerBar;
+      s.end_tick = static_cast<Tick>(last_bar + 1) * kTicksPerBar;
+      s.voice = voice;
+      s.intent = intent;
+      s.subdivision = subdivision;
+      out.voice_plan.spans.push_back(s);
+    };
+    for (int b = 4; b <= 11; ++b)
+      pushCounterlineBar(out.voice_plan, next_id, 0, b, subdivision);
+    pushSpan(0, 12, 15, VoiceIntent::RhythmCarrier);
+    pushSpan(0, 16, 19, VoiceIntent::RhythmCarrier);
+    pushSpan(0, 20, 23, VoiceIntent::RhythmCarrier);
+    pushSpan(0, 24, 27, VoiceIntent::RhythmCarrier);
+    for (int b = 0; b <= 3; ++b)
+      pushCounterlineBar(out.voice_plan, next_id, 1, b, subdivision);
+    pushSpan(1, 4, 7, VoiceIntent::AnswerCarrier);
+    for (int b = 8; b <= 11; ++b)
+      pushCounterlineBar(out.voice_plan, next_id, 1, b, subdivision);
+    pushSpan(2, 8, 11, VoiceIntent::SubjectCarrier);
+    pushSpan(2, 16, 19, VoiceIntent::RhythmCarrier);
+  } else if (spec.with_development) {
+    // Phase11 fixed layout (28 bars). The subject_span (V0 bars 0-3) is
+    // already pushed above. Exposition bars 0-11 mirror Phase8 (V0 subject
+    // + free counterline, V1 free counterline + answer, V2 subject
+    // re-entry). The development bars 12-27 is entirely Material: each
+    // development carrier sits directly after that voice's previous
+    // Material (or is the voice's final span) so no Compose note is ever
+    // immediately followed by a Material note in the same voice — this
+    // dodges the unprepared_dissonance boundary failure mode (the rule
+    // checks a Compose note's next same-voice note). Register layout
+    // keeps V0 highest at every shared tick (no voice crossing):
+    //   V0: subject 0-3 | counterline 4-11 | middle entry 12-15 (G/V) |
+    //       inverted variant 16-19 | subject leader 20-23 | coda 24-27
+    //   V1: counterline 0-3 | answer 4-7 | counterline 8-11 | (rest)
+    //   V2: (rest) | subject 8-11 | dominant pedal 12-15 | (rest) |
+    //       stretto follower 22-25 | (rest)
+    auto pushSpan = [&](VoiceId voice, int first_bar, int last_bar, VoiceIntent intent) {
+      Span s;
+      s.id = next_id++;
+      s.start_tick = static_cast<Tick>(first_bar) * kTicksPerBar;
+      s.end_tick = static_cast<Tick>(last_bar + 1) * kTicksPerBar;
+      s.voice = voice;
+      s.intent = intent;
+      s.subdivision = subdivision;
+      out.voice_plan.spans.push_back(s);
+    };
+    // V0 free counterline bars 4-11.
+    for (int b = 4; b <= 11; ++b)
+      pushCounterlineBar(out.voice_plan, next_id, 0, b, subdivision);
+    pushSpan(0, 12, 15, VoiceIntent::MiddleEntryCarrier);
+    pushSpan(0, 16, 19, VoiceIntent::SubjectCarrierDiminished);
+    pushSpan(0, 20, 23, VoiceIntent::SubjectCarrier);
+    pushSpan(0, 24, 27, VoiceIntent::CodaCarrier);
+    // V1 counterline 0-3, answer 4-7, counterline 8-11, then rests.
+    for (int b = 0; b <= 3; ++b)
+      pushCounterlineBar(out.voice_plan, next_id, 1, b, subdivision);
+    pushSpan(1, 4, 7, VoiceIntent::AnswerCarrier);
+    for (int b = 8; b <= 11; ++b)
+      pushCounterlineBar(out.voice_plan, next_id, 1, b, subdivision);
+    // V2 subject re-entry 8-11, dominant pedal 12-15, stretto follower 22-25.
+    pushSpan(2, 8, 11, VoiceIntent::SubjectCarrier);
+    pushSpan(2, 12, 15, VoiceIntent::PedalCarrier);
+    pushSpan(2, 22, 25, VoiceIntent::StrettoCarrier);
+  } else if (spec.with_third_entry) {
     // Phase6Episode replaces V0 counterline bars [bars - subject_bars, bars)
     // with one Episode span (Original transform of the V0 subject, re-anchored
     // at that bar). Phase6Tonal replaces V0 counterline bars [subject_bars,
@@ -584,6 +686,260 @@ HarnessFixture buildHarnessFixture(HarnessPhase phase, int seed) {
     entry.distance_ticks = static_cast<Tick>(subject_bars) * kTicksPerBar;
     entry.interval_semis = -5;
     out.material.imitation_entries.push_back(entry);
+  }
+
+  if (spec.with_development) {
+    // Phase11 development material (bars 12-27). Every fragment is the
+    // seed's V0 subject pattern (kSubjectPatterns[subj_a]) under a fixed
+    // pitch transform, so each device tracks the seed's exposition
+    // subject. Anchored 4-bar (16 quarter-note) fragments; registers are
+    // chosen so V0 stays above V2 at every shared tick (see voice plan).
+    const auto& pat = kSubjectPatterns[subj_a];
+    auto buildFragment = [&](int base_bar, auto transform) {
+      std::vector<MaterialNote> v;
+      v.reserve(16);
+      for (int n = 0; n < 16; ++n) {
+        MaterialNote mn;
+        const int bar_in_block = n / 4;
+        const int beat_in_bar = n % 4;
+        mn.start_tick = static_cast<Tick>(base_bar + bar_in_block) * kTicksPerBar +
+                        static_cast<Tick>(beat_in_bar) * kTicksPerBeat;
+        mn.duration = kTicksPerBeat;
+        mn.pitch = static_cast<std::uint8_t>(transform(static_cast<int>(pat[n])));
+        v.push_back(mn);
+      }
+      return v;
+    };
+
+    // Middle entry: subject down a perfect fourth (-5) → the dominant key
+    // (C major - P4 = G major). related_key_pc = 7 (= V of C). Range
+    // 66-79 stays above the dominant pedal (G3 = 55). Bars 12-15, V0.
+    MiddleEntryDecl middle;
+    middle.voice = 0;
+    middle.related_key_pc = 7;
+    middle.notes = buildFragment(12, [](int p) { return p - 5; });
+    out.material.middle_entries.push_back(middle);
+
+    // Dominant pedal point: a single G3 (pc 7) held across bars 12-15 in
+    // V2 (the bottom voice), under the middle entry.
+    PedalPointDecl pedal;
+    pedal.voice = 2;
+    pedal.start_tick = static_cast<Tick>(12) * kTicksPerBar;
+    pedal.duration = static_cast<Tick>(4) * kTicksPerBar;
+    pedal.pitch = 55;
+    pedal.is_dominant = true;
+    out.material.pedal_points.push_back(pedal);
+
+    // Subject variant: diminution — the subject at half duration (eighth
+    // notes), so its 16 notes span 2 bars; played twice to fill bars
+    // 16-19. Diminution preserves the subject's pitch sequence (and
+    // register, 71-84), so it adds no awkward leaps the way inversion
+    // would, and it connects smoothly to the verbatim subject leader at
+    // bars 20-23. V0 is the sole sounding voice in this window.
+    SubjectVariantDecl variant;
+    variant.voice = 0;
+    variant.transform = static_cast<std::uint8_t>(motif_ops::EpisodeMotifTransform::Diminish);
+    for (int rep = 0; rep < 2; ++rep) {
+      const Tick rep_start = static_cast<Tick>(16 + 2 * rep) * kTicksPerBar;
+      for (int n = 0; n < 16; ++n) {
+        MaterialNote mn;
+        mn.start_tick = rep_start + static_cast<Tick>(n) * (kTicksPerBeat / 2);
+        mn.duration = kTicksPerBeat / 2;
+        mn.pitch = pat[n];
+        variant.notes.push_back(mn);
+      }
+    }
+    out.material.subject_variants.push_back(variant);
+
+    // Stretto leader: the subject restated verbatim in V0 at bars 20-23.
+    // Appended to material.subject so the V0 SubjectCarrier span at those
+    // bars replays it (added after leading-tone / cadence annotation so it
+    // gets no spurious cadence markers).
+    {
+      const auto leader = buildFragment(20, [](int p) { return p; });
+      for (const auto& mn : leader)
+        out.material.subject.push_back(mn);
+    }
+
+    // Stretto follower: subject down two octaves (-24). A 12-multiple
+    // transpose preserves the subject's C-major pitch classes, so no Bb
+    // is introduced to clash with the leader's B-natural (a -19 "twelfth"
+    // would land the follower in F major and trip cross_relation). Range
+    // 47-60 stays a clear margin below the leader (71-84), so the bars
+    // 22-23 overlap never crosses voices for any subject pattern (the
+    // worst early-high / late-low gap across the catalog is 13 < 24).
+    // V2, bars 22-25; enters at bar 22 (strictly inside leader bars
+    // 20-23).
+    StrettoDecl stretto;
+    stretto.leader_voice = 0;
+    stretto.follower_voice = 2;
+    stretto.leader_entry_tick = static_cast<Tick>(20) * kTicksPerBar;
+    stretto.leader_length_ticks = static_cast<Tick>(4) * kTicksPerBar;
+    stretto.follower_entry_tick = static_cast<Tick>(22) * kTicksPerBar;
+    stretto.interval_semis = -24;
+    stretto.follower_notes = buildFragment(22, [](int p) { return p - 24; });
+    out.material.stretto_entries.push_back(stretto);
+
+    // Coda: a stepwise C-major closing line (range 71-79) settling onto
+    // the tonic, bars 24-27 in V0, above the stretto follower's tail.
+    // Stepwise motion (no leap > 2 semitones) keeps the model's
+    // unresolved-large-leap penalty off the closing phrase.
+    CodaDecl coda;
+    coda.voice = 0;
+    static constexpr std::array<std::uint8_t, 16> kCoda = {79, 77, 76, 74, 72, 74, 76, 77,
+                                                           76, 74, 72, 71, 72, 74, 72, 72};
+    for (int n = 0; n < 16; ++n) {
+      MaterialNote mn;
+      const int bar_in_block = n / 4;
+      const int beat_in_bar = n % 4;
+      mn.start_tick = static_cast<Tick>(24 + bar_in_block) * kTicksPerBar +
+                      static_cast<Tick>(beat_in_bar) * kTicksPerBeat;
+      mn.duration = kTicksPerBeat;
+      mn.pitch = kCoda[n];
+      coda.notes.push_back(mn);
+    }
+    out.material.coda_extensions.push_back(coda);
+  }
+
+  if (spec.with_rhythm) {
+    // Phase12 rhythm material (bars 12-27). Seed-independent, C-major,
+    // register-safe (V0 stays above the V2 recurrence at bars 16-19). The
+    // phrase grid is a regular 4-bar period (downbeats every 4 bars), with
+    // a quarter-note anacrusis leading into bar 16.
+    PhraseStructure& ps = out.material.phrase_structure;
+    ps.has_anacrusis = true;
+    ps.anacrusis_ticks = kTicksPerBeat;  // quarter-note upbeat
+    for (int bar = 0; bar <= 24; bar += 4)
+      ps.phrase_start_ticks.push_back(static_cast<Tick>(bar) * kTicksPerBar);
+
+    auto addNote = [](std::vector<MaterialNote>& v, Tick t, Tick d, std::uint8_t p) {
+      MaterialNote mn;
+      mn.start_tick = t;
+      mn.duration = d;
+      mn.pitch = p;
+      v.push_back(mn);
+    };
+    const Tick d8 = kTicksPerBeat / 2;   // eighth
+    const Tick dq = kTicksPerBeat;       // quarter
+    const Tick dd = kTicksPerBeat + d8;  // dotted quarter (720)
+    const Tick dh = 2 * kTicksPerBeat;   // half
+    const Tick ddh = 3 * kTicksPerBeat;  // dotted half (1440)
+    auto bar = [](int b) { return static_cast<Tick>(b) * kTicksPerBar; };
+
+    // Dotted figure (V0, bars 12-15): dotted-quarter + eighth + two
+    // quarters per bar; bar 15 stops a beat early to leave room for the
+    // anacrusis. First note is a phrase downbeat (PhrasePeriodicityKept).
+    RhythmFragment dotted;
+    dotted.feature = RhythmFragment::Feature::Dotted;
+    dotted.voice = 0;
+    {
+      const std::array<std::uint8_t, 15> p = {72, 74, 76, 77, 79, 77, 76, 74,
+                                              76, 77, 79, 77, 76, 74, 72};
+      const std::array<Tick, 15> d = {dd, d8, dq, dq, dd, d8, dq, dq, dd, d8, dq, dq, dd, d8, dq};
+      Tick t = bar(12);
+      for (std::size_t i = 0; i < p.size(); ++i) {
+        addNote(dotted.notes, t, d[i], p[i]);
+        t += d[i];
+      }
+    }
+    out.material.rhythm_fragments.push_back(dotted);
+
+    // Anacrusis (V0): a quarter-note pickup (B4 = leading tone) on bar 15
+    // beat 4, resolving up into the bar-16 downbeat. Starts exactly
+    // anacrusis_ticks before the bar-16 phrase start.
+    RhythmFragment anac;
+    anac.feature = RhythmFragment::Feature::Anacrusis;
+    anac.voice = 0;
+    addNote(anac.notes, bar(16) - dq, dq, 71);
+    out.material.rhythm_fragments.push_back(anac);
+
+    // Syncopation (V0, bars 16-19, consequent phrase): off-beat onsets
+    // (eighth, quarter, quarter, quarter, eighth per bar = onsets on the
+    // 1.5 / 2.5 / 3.5 beats). First note is a phrase downbeat.
+    RhythmFragment sync;
+    sync.feature = RhythmFragment::Feature::Syncopation;
+    sync.voice = 0;
+    {
+      const std::array<std::array<std::uint8_t, 5>, 4> rows = {
+          {{72, 74, 76, 74, 72}, {74, 76, 77, 76, 74}, {76, 77, 79, 77, 76}, {74, 76, 74, 72, 71}}};
+      const std::array<Tick, 5> d = {d8, dq, dq, dq, d8};
+      for (int b = 0; b < 4; ++b) {
+        Tick t = bar(16 + b);
+        for (int i = 0; i < 5; ++i) {
+          addNote(sync.notes, t, d[i],
+                  rows[static_cast<std::size_t>(b)][static_cast<std::size_t>(i)]);
+          t += d[i];
+        }
+      }
+    }
+    out.material.rhythm_fragments.push_back(sync);
+
+    // Antecedent of the 20-23 phrase (V0, bars 20-21): plain quarters; the
+    // first note is the bar-20 phrase downbeat (PhrasePeriodicityKept).
+    RhythmFragment phrase20;
+    phrase20.feature = RhythmFragment::Feature::Dotted;
+    phrase20.voice = 0;
+    {
+      const std::array<std::uint8_t, 8> p = {72, 74, 76, 77, 76, 74, 72, 74};
+      Tick t = bar(20);
+      for (auto pitch : p) {
+        addNote(phrase20.notes, t, dq, pitch);
+        t += dq;
+      }
+    }
+    out.material.rhythm_fragments.push_back(phrase20);
+
+    // Hemiola (V0, bars 22-23, cadence approach): two dotted-half notes
+    // plus a half note (3 + 3 + 2 beats) cut across the 4+4 barline grid,
+    // a 3-against-2 regrouping. All notes carry HemiolaInserted.
+    RhythmFragment hemiola;
+    hemiola.feature = RhythmFragment::Feature::Hemiola;
+    hemiola.voice = 0;
+    {
+      Tick t = bar(22);
+      addNote(hemiola.notes, t, ddh, 76);
+      t += ddh;
+      addNote(hemiola.notes, t, ddh, 74);
+      t += ddh;
+      addNote(hemiola.notes, t, dh, 72);
+    }
+    out.material.rhythm_fragments.push_back(hemiola);
+
+    // Closing phrase (V0, bars 24-27): stepwise descent broadening to the
+    // final tonic. First note is the bar-24 phrase downbeat.
+    RhythmFragment closing;
+    closing.feature = RhythmFragment::Feature::Dotted;
+    closing.voice = 0;
+    {
+      Tick t = bar(24);
+      const std::array<std::uint8_t, 8> q = {77, 76, 74, 72, 74, 72, 71, 72};
+      for (auto pitch : q) {
+        addNote(closing.notes, t, dq, pitch);
+        t += dq;
+      }
+      addNote(closing.notes, bar(26), dh, 71);
+      addNote(closing.notes, bar(26) + dh, dh, 72);
+      addNote(closing.notes, bar(27), 2 * dh, 72);  // whole-note final tonic
+    }
+    out.material.rhythm_fragments.push_back(closing);
+
+    // Rhythmic-motif recurrence (V2, bars 16-19): the dotted figure's
+    // rhythm restated an octave-and-a-bit lower (range 60-67), under the
+    // syncopated consequent. RhythmicMotifRecurrence bit.
+    RhythmFragment recur;
+    recur.feature = RhythmFragment::Feature::Recurrence;
+    recur.voice = 2;
+    {
+      const std::array<std::uint8_t, 15> p = {60, 62, 64, 65, 67, 65, 64, 62,
+                                              64, 65, 67, 65, 64, 62, 60};
+      const std::array<Tick, 15> d = {dd, d8, dq, dq, dd, d8, dq, dq, dd, d8, dq, dq, dd, d8, dq};
+      Tick t = bar(16);
+      for (std::size_t i = 0; i < p.size(); ++i) {
+        addNote(recur.notes, t, d[i], p[i]);
+        t += d[i];
+      }
+    }
+    out.material.rhythm_fragments.push_back(recur);
   }
 
   return out;

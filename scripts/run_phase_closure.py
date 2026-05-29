@@ -34,6 +34,8 @@ PHASE_DEFAULTS = {
     "Phase8": {"tag": "p8", "threshold": 0.78, "min_pass": 10},
     "Phase9": {"tag": "p9", "threshold": 0.80, "min_pass": 10},
     "Phase10": {"tag": "p10", "threshold": 0.80, "min_pass": 10},
+    "Phase11": {"tag": "p11", "threshold": 0.82, "min_pass": 10},
+    "Phase12": {"tag": "p12", "threshold": 0.82, "min_pass": 10},
 }
 
 # Phase layout: subject_bars / with_answer / with_third_entry.
@@ -51,6 +53,8 @@ PHASE_LAYOUT = {
     "Phase8": {"voices": 3, "bars": 16, "subject_bars": 4, "with_answer": True, "with_third_entry": True},
     "Phase9": {"voices": 3, "bars": 16, "subject_bars": 4, "with_answer": True, "with_third_entry": True},
     "Phase10": {"voices": 3, "bars": 16, "subject_bars": 4, "with_answer": True, "with_third_entry": True},
+    "Phase11": {"voices": 3, "bars": 28, "subject_bars": 4, "with_answer": True, "with_third_entry": True, "development": True},
+    "Phase12": {"voices": 3, "bars": 28, "subject_bars": 4, "with_answer": True, "with_third_entry": True},
 }
 
 # 5 subject patterns × 16 quarter-note pitches. Mirrors kSubjectPatterns in
@@ -105,6 +109,12 @@ def normalize_phase(value: str) -> str:
         "10": "Phase10",
         "p10": "Phase10",
         "phase10": "Phase10",
+        "11": "Phase11",
+        "p11": "Phase11",
+        "phase11": "Phase11",
+        "12": "Phase12",
+        "p12": "Phase12",
+        "phase12": "Phase12",
     }
     return aliases.get(value, aliases.get(value.lower(), value))
 
@@ -200,6 +210,15 @@ def expected_carrier_sequences(
         pattern = SUBJECT_PATTERNS[(subj_a + blk) % 5]
         for n in range(16):
             tick = (blk * 4 + n // 4) * ticks_per_bar + (n % 4) * ticks_per_beat
+            v0_seq.append((tick, pattern[n]))
+    if layout.get("development", False):
+        # Phase11 restates the subject verbatim in V0 (the stretto leader)
+        # at bars 20-23; that span carries intent SubjectCarrier, so it
+        # joins the (0, SubjectCarrier) group in extract_carrier_sequences.
+        leader_base_bar = 20
+        pattern = SUBJECT_PATTERNS[subj_a]
+        for n in range(16):
+            tick = (leader_base_bar + n // 4) * ticks_per_bar + (n % 4) * ticks_per_beat
             v0_seq.append((tick, pattern[n]))
     out[(0, "SubjectCarrier")] = v0_seq
 

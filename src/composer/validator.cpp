@@ -1227,6 +1227,154 @@ ValidationReport Validator::validate(const std::vector<NoteEvent>& notes,
     }
   }
 
+  // P11 development-section rules.
+  //
+  // middle_entry_in_related_key: every MiddleEntryDecl must declare a
+  //   related key (V / vi / IV / ii of the home tonic) AND every note
+  //   pitch class must be diatonic to the major scale on that related
+  //   key — i.e. the entry genuinely sits in the declared key, not just
+  //   carries the label.
+  // stretto_overlap_valid: the follower must enter strictly inside the
+  //   leader's window (real time overlap) AND follower_notes[i].pitch
+  //   must equal subject[i].pitch + interval_semis (the follower is the
+  //   subject transposed by the declared interval).
+  // pedal_point_tonic_or_dominant: every pedal pitch class must be the
+  //   home tonic or dominant.
+  const std::uint8_t home_tonic_pc = static_cast<std::uint8_t>(harmonic_plan.tonic_pc % 12);
+  const std::uint8_t dominant_pc = static_cast<std::uint8_t>((home_tonic_pc + 7) % 12);
+  const std::array<std::uint8_t, 4> related_key_pcs = {
+      dominant_pc,                                          // V
+      static_cast<std::uint8_t>((home_tonic_pc + 9) % 12),  // vi
+      static_cast<std::uint8_t>((home_tonic_pc + 5) % 12),  // IV
+      static_cast<std::uint8_t>((home_tonic_pc + 2) % 12),  // ii
+  };
+  for (const auto& entry : material.middle_entries) {
+    const std::uint8_t key_pc = static_cast<std::uint8_t>(entry.related_key_pc % 12);
+    bool key_ok = false;
+    for (auto r : related_key_pcs) {
+      if (key_pc == r)
+        key_ok = true;
+    }
+    bool notes_ok = true;
+    for (const auto& n : entry.notes) {
+      if (!isDiatonicInKey(static_cast<std::uint8_t>(n.pitch % 12), key_pc, /*is_minor=*/false)) {
+        notes_ok = false;
+        break;
+      }
+    }
+    if (!key_ok || !notes_ok) {
+      ValidationFailure failure;
+      failure.rule_id = "middle_entry_in_related_key";
+      failure.kind = FailKind::MusicalFail;
+      report.failures.push_back(failure);
+    }
+  }
+
+  for (const auto& stretto : material.stretto_entries) {
+    const bool overlap_ok =
+        stretto.follower_entry_tick > stretto.leader_entry_tick &&
+        stretto.follower_entry_tick < stretto.leader_entry_tick + stretto.leader_length_ticks;
+    bool pitch_ok =
+        !stretto.follower_notes.empty() && stretto.follower_notes.size() <= material.subject.size();
+    if (pitch_ok) {
+      for (std::size_t i = 0; i < stretto.follower_notes.size(); ++i) {
+        const int expected = static_cast<int>(material.subject[i].pitch) + stretto.interval_semis;
+        if (expected < 0 || expected > 127 ||
+            stretto.follower_notes[i].pitch != static_cast<std::uint8_t>(expected)) {
+          pitch_ok = false;
+          break;
+        }
+      }
+    }
+    if (!overlap_ok || !pitch_ok) {
+      ValidationFailure failure;
+      failure.rule_id = "stretto_overlap_valid";
+      failure.kind = FailKind::MusicalFail;
+      report.failures.push_back(failure);
+    }
+  }
+
+  for (const auto& pedal : material.pedal_points) {
+    const std::uint8_t pc = static_cast<std::uint8_t>(pedal.pitch % 12);
+    if (pc != home_tonic_pc && pc != dominant_pc) {
+      ValidationFailure failure;
+      failure.rule_id = "pedal_point_tonic_or_dominant";
+      failure.kind = FailKind::MusicalFail;
+      report.failures.push_back(failure);
+    }
+  }
+
+  // P12 rhythm / meter / phrase rules.
+  //
+  // phrase_periodicity_4_or_8_bar: consecutive declared phrase starts must
+  //   differ by exactly 4 or 8 bars (regular Baroque phrase grid). Skipped
+  //   when fewer than two phrase starts are declared.
+  // anacrusis_consistent: if the piece declares an anacrusis, the upbeat
+  //   length must be a valid sub-bar value and every declared Anacrusis
+  //   rhythm fragment must begin exactly anacrusis_ticks before some phrase
+  //   start (the upbeat leads into a downbeat). If no anacrusis is declared
+  //   there must be neither an anacrusis length nor an Anacrusis fragment.
+  {
+    const PhraseStructure& ps = material.phrase_structure;
+    if (ps.phrase_start_ticks.size() >= 2) {
+      const Tick four_bars = static_cast<Tick>(4) * kTicksPerBar;
+      const Tick eight_bars = static_cast<Tick>(8) * kTicksPerBar;
+      bool periodic = true;
+      for (std::size_t i = 1; i < ps.phrase_start_ticks.size(); ++i) {
+        const Tick len = ps.phrase_start_ticks[i] - ps.phrase_start_ticks[i - 1];
+        if (len != four_bars && len != eight_bars) {
+          periodic = false;
+          break;
+        }
+      }
+      if (!periodic) {
+        ValidationFailure failure;
+        failure.rule_id = "phrase_periodicity_4_or_8_bar";
+        failure.kind = FailKind::MusicalFail;
+        report.failures.push_back(failure);
+      }
+    }
+
+    bool anacrusis_ok = true;
+    if (ps.has_anacrusis) {
+      anacrusis_ok = ps.anacrusis_ticks > 0 && ps.anacrusis_ticks < kTicksPerBar;
+      if (anacrusis_ok) {
+        for (const auto& frag : material.rhythm_fragments) {
+          if (frag.feature != RhythmFragment::Feature::Anacrusis || frag.notes.empty())
+            continue;
+          const Tick pickup_start = frag.notes.front().start_tick;
+          bool aligned = false;
+          for (Tick s : ps.phrase_start_ticks) {
+            if (s >= ps.anacrusis_ticks && s - ps.anacrusis_ticks == pickup_start) {
+              aligned = true;
+              break;
+            }
+          }
+          if (!aligned) {
+            anacrusis_ok = false;
+            break;
+          }
+        }
+      }
+    } else {
+      if (ps.anacrusis_ticks != 0) {
+        anacrusis_ok = false;
+      }
+      for (const auto& frag : material.rhythm_fragments) {
+        if (frag.feature == RhythmFragment::Feature::Anacrusis) {
+          anacrusis_ok = false;
+          break;
+        }
+      }
+    }
+    if (!anacrusis_ok) {
+      ValidationFailure failure;
+      failure.rule_id = "anacrusis_consistent";
+      failure.kind = FailKind::MusicalFail;
+      report.failures.push_back(failure);
+    }
+  }
+
   if (!report.failures.empty()) {
     report.status = ValidationStatus::FailedSpan;
   }

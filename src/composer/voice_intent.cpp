@@ -26,6 +26,22 @@ const char* voiceIntentToString(VoiceIntent intent) {
       return "CountersubjectCarrier";
     case VoiceIntent::FortspinnungSpan:
       return "FortspinnungSpan";
+    case VoiceIntent::MiddleEntryCarrier:
+      return "MiddleEntryCarrier";
+    case VoiceIntent::StrettoCarrier:
+      return "StrettoCarrier";
+    case VoiceIntent::PedalCarrier:
+      return "PedalCarrier";
+    case VoiceIntent::CodaCarrier:
+      return "CodaCarrier";
+    case VoiceIntent::SubjectCarrierAugmented:
+      return "SubjectCarrierAugmented";
+    case VoiceIntent::SubjectCarrierDiminished:
+      return "SubjectCarrierDiminished";
+    case VoiceIntent::SubjectCarrierInverted:
+      return "SubjectCarrierInverted";
+    case VoiceIntent::RhythmCarrier:
+      return "RhythmCarrier";
   }
   return "Unknown";
 }

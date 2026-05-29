@@ -151,6 +151,99 @@ struct ImitationEntry {
   int interval_semis = 0;
 };
 
+// P11 development-section declarations. Each holds (a) the carrier's
+// verbatim note material (so CandidateSearch can replay it) and (b) the
+// metadata the Validator's P11 rules check. All ticks are absolute.
+
+// One middle entry: the subject restated in a related key. `notes` is
+// the subject transposed into that key (built by the planner); the
+// Validator's `middle_entry_in_related_key` rule checks that
+// `related_key_pc` is a related key of the home tonic (V/vi/IV/ii) and
+// that every note pitch class is diatonic to the major scale on
+// `related_key_pc`.
+struct MiddleEntryDecl {
+  VoiceId voice = 0;
+  std::uint8_t related_key_pc = 7;  // tonal center; must be V/vi/IV/ii.
+  std::vector<MaterialNote> notes;
+};
+
+// One stretto: a follower restatement that overlaps the leader's
+// statement in time. The leader is an ordinary SubjectCarrier; this
+// struct documents the follower. The Validator's `stretto_overlap_valid`
+// rule checks that (a) the follower enters strictly inside the leader's
+// window (genuine overlap) and (b) follower_notes[i].pitch ==
+// material.subject[i].pitch + interval_semis (the follower is the
+// subject transposed by the declared interval).
+struct StrettoDecl {
+  VoiceId leader_voice = 0;
+  VoiceId follower_voice = 1;
+  Tick leader_entry_tick = 0;
+  Tick leader_length_ticks = 0;  // leader fragment duration.
+  Tick follower_entry_tick = 0;
+  int interval_semis = 0;  // follower = subject + interval_semis.
+  std::vector<MaterialNote> follower_notes;
+};
+
+// One pedal point: a single sustained note. The Validator's
+// `pedal_point_tonic_or_dominant` rule checks that `pitch % 12` is the
+// tonic or dominant pitch class of the home key.
+struct PedalPointDecl {
+  VoiceId voice = 0;
+  Tick start_tick = 0;
+  Tick duration = 0;
+  std::uint8_t pitch = 0;
+  bool is_dominant = false;  // false => tonic pedal (documentary).
+};
+
+// One subject variant: the subject restated under a motif transform
+// (augmentation / diminution / inversion). `transform` mirrors
+// motif_ops::EpisodeMotifTransform (cast at use). `notes` is the
+// pre-derived result the carrier replays; no Validator rule constrains
+// it (the closure gate only confirms the SubjectVariantApplied bit).
+struct SubjectVariantDecl {
+  VoiceId voice = 0;
+  std::uint8_t transform = 0;
+  std::vector<MaterialNote> notes;
+};
+
+// One coda extension: a closing phrase after the final cadence. `notes`
+// is replayed verbatim; no Validator rule constrains it (the closure
+// gate only confirms the CodaCommitted bit).
+struct CodaDecl {
+  VoiceId voice = 0;
+  std::vector<MaterialNote> notes;
+};
+
+// P12 rhythm / meter / phrase declarations.
+
+// Phrase grid for the piece. `phrase_start_ticks` lists the downbeat tick
+// of every phrase (including the first at 0, or at anacrusis_ticks when
+// the piece opens with an upbeat). The Validator's
+// phrase_periodicity_4_or_8_bar rule checks that consecutive starts differ
+// by 4 or 8 bars; anacrusis_consistent checks the upbeat declaration.
+struct PhraseStructure {
+  bool has_anacrusis = false;
+  Tick anacrusis_ticks = 0;  // upbeat length before the first downbeat.
+  std::vector<Tick> phrase_start_ticks;
+};
+
+// One rhythm fragment: verbatim notes (pitch + tick + duration) plus a
+// feature tag that selects the provenance bit when a RhythmCarrier span
+// replays it. The rhythm itself (dotted, syncopated, hemiola regrouping,
+// upbeat) lives in the note durations/onsets; the planner builds them.
+struct RhythmFragment {
+  enum class Feature : std::uint8_t {
+    Anacrusis,    // upbeat pickup → AnacrusisActive
+    Hemiola,      // 3-against-2 regrouping at a cadence → HemiolaInserted
+    Dotted,       // dotted figure (no dedicated bit; rhythm is the feature)
+    Syncopation,  // off-beat onset + tie (no dedicated bit)
+    Recurrence,   // rhythmic-motif restatement → RhythmicMotifRecurrence
+  };
+  Feature feature = Feature::Dotted;
+  VoiceId voice = 0;
+  std::vector<MaterialNote> notes;
+};
+
 // Bundle of pre-determined material fragments available to the planner.
 //
 // `subject` feeds SubjectCarrier spans; `answer` feeds AnswerCarrier
@@ -180,6 +273,15 @@ struct Material {
   // P9 (Fortspinnung + Imitation). Empty in Phase 3-8 fixtures.
   std::vector<SequenceTemplate> sequence_templates;
   std::vector<ImitationEntry> imitation_entries;
+  // P11 (development section). Empty in Phase 3-10 fixtures.
+  std::vector<MiddleEntryDecl> middle_entries;
+  std::vector<StrettoDecl> stretto_entries;
+  std::vector<PedalPointDecl> pedal_points;
+  std::vector<SubjectVariantDecl> subject_variants;
+  std::vector<CodaDecl> coda_extensions;
+  // P12 (rhythm / meter / phrase). Empty in Phase 3-11 fixtures.
+  PhraseStructure phrase_structure;
+  std::vector<RhythmFragment> rhythm_fragments;
 };
 
 void annotateLeadingToneMarkers(Material& material, std::uint8_t tonic_pc, bool is_minor);

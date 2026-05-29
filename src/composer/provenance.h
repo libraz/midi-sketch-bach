@@ -113,6 +113,37 @@ enum RuleBit : std::uint8_t {
   //   i.e. the candidate passed the invertibility check. Only set when
   //   placed_notes is available and the pair is an upper-adjacent pair.
   InvertibleAt8va = 33,
+  // P11 (Fugue development section). Each bit is stamped by
+  // CandidateSearch on the verbatim-replayed notes of the matching P11
+  // carrier intent, so the closure gate can confirm the development
+  // device actually shipped (not just that the intent was planned).
+  // MiddleEntryCommitted: notes of a MiddleEntryCarrier span (subject
+  //   restated in a related key V/vi/IV/ii).
+  // StrettoCommitted: notes of a StrettoCarrier span (overlapping
+  //   follower entry).
+  // PedalCommitted: the held note of a PedalCarrier span (tonic or
+  //   dominant pedal point).
+  // CodaCommitted: notes of a CodaCarrier span (post-cadence closing
+  //   extension).
+  // SubjectVariantApplied: notes of a SubjectCarrier{Augmented,
+  //   Diminished,Inverted} span (subject under a motif transform).
+  MiddleEntryCommitted = 34,
+  StrettoCommitted = 35,
+  PedalCommitted = 36,
+  CodaCommitted = 37,
+  SubjectVariantApplied = 38,
+  // P12 (Rhythm / meter / phrase). Stamped by CandidateSearch on the
+  // verbatim-replayed notes of a RhythmCarrier span.
+  // AnacrusisActive: notes of an anacrusis (upbeat) rhythm fragment.
+  // HemiolaInserted: notes of a hemiola regrouping at a cadence approach.
+  // PhrasePeriodicityKept: a carrier note whose onset lands on a declared
+  //   phrase start (confirms the 4/8-bar phrase grid).
+  // RhythmicMotifRecurrence: notes of a fragment that restates a rhythmic
+  //   motif in another voice.
+  AnacrusisActive = 39,
+  HemiolaInserted = 40,
+  PhrasePeriodicityKept = 41,
+  RhythmicMotifRecurrence = 42,
 };
 
 // Per-note provenance record.

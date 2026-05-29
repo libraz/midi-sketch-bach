@@ -1812,4 +1812,227 @@ TEST(ValidatorTest, FourthOnlyOnWeakBeatPassesNonFourth) {
   EXPECT_FALSE(hasRule(r, "fourth_only_on_weak_beat"));
 }
 
+// P11 middle_entry_in_related_key tests. Home key is C major
+// (cMajorWhole), so related keys are V=G(7), vi=A(9), IV=F(5), ii=D(2).
+
+TEST(ValidatorTest, MiddleEntryInRelatedKeyPassesForDominant) {
+  Material m;
+  MiddleEntryDecl entry;
+  entry.voice = 0;
+  entry.related_key_pc = 7;  // V (G major)
+  // All G-major diatonic: G(67) A(69) B(71) D(74).
+  entry.notes = {{0, kTicksPerBeat, 67},
+                 {kTicksPerBeat, kTicksPerBeat, 69},
+                 {2 * kTicksPerBeat, kTicksPerBeat, 71},
+                 {3 * kTicksPerBeat, kTicksPerBeat, 74}};
+  m.middle_entries.push_back(entry);
+  ValidationReport r = Validator{}.validate({}, {}, cMajorWhole(), m);
+  EXPECT_FALSE(hasRule(r, "middle_entry_in_related_key"));
+}
+
+TEST(ValidatorTest, MiddleEntryInRelatedKeyFailsForUnrelatedKey) {
+  Material m;
+  MiddleEntryDecl entry;
+  entry.voice = 0;
+  entry.related_key_pc = 1;  // C# — not V/vi/IV/ii of C
+  entry.notes = {{0, kTicksPerBeat, 61}};
+  m.middle_entries.push_back(entry);
+  ValidationReport r = Validator{}.validate({}, {}, cMajorWhole(), m);
+  EXPECT_TRUE(hasRule(r, "middle_entry_in_related_key"));
+}
+
+TEST(ValidatorTest, MiddleEntryInRelatedKeyFailsForNonDiatonicNote) {
+  Material m;
+  MiddleEntryDecl entry;
+  entry.voice = 0;
+  entry.related_key_pc = 7;  // declared G major...
+  // ...but F-natural (65, pc 5) is not in G major (which has F#=6).
+  entry.notes = {{0, kTicksPerBeat, 67}, {kTicksPerBeat, kTicksPerBeat, 65}};
+  m.middle_entries.push_back(entry);
+  ValidationReport r = Validator{}.validate({}, {}, cMajorWhole(), m);
+  EXPECT_TRUE(hasRule(r, "middle_entry_in_related_key"));
+}
+
+TEST(ValidatorTest, MiddleEntryInRelatedKeySkippedWhenEmpty) {
+  Material m;
+  ValidationReport r = Validator{}.validate({}, {}, cMajorWhole(), m);
+  EXPECT_FALSE(hasRule(r, "middle_entry_in_related_key"));
+}
+
+// P11 stretto_overlap_valid tests. The follower must enter strictly
+// inside the leader's window and be the subject transposed by
+// interval_semis.
+
+namespace {
+
+Material makeStrettoMaterial(Tick leader_entry, Tick leader_len, Tick follower_entry, int interval,
+                             bool corrupt_pitch = false) {
+  Material m;
+  m.subject = {{0, kTicksPerBeat, 72}, {kTicksPerBeat, kTicksPerBeat, 74}};
+  StrettoDecl s;
+  s.leader_voice = 0;
+  s.follower_voice = 2;
+  s.leader_entry_tick = leader_entry;
+  s.leader_length_ticks = leader_len;
+  s.follower_entry_tick = follower_entry;
+  s.interval_semis = interval;
+  for (const auto& n : m.subject) {
+    int p = static_cast<int>(n.pitch) + interval;
+    if (corrupt_pitch)
+      p += 1;
+    s.follower_notes.push_back(
+        {n.start_tick + follower_entry, n.duration, static_cast<std::uint8_t>(p)});
+  }
+  m.stretto_entries.push_back(s);
+  return m;
+}
+
+}  // namespace
+
+TEST(ValidatorTest, StrettoOverlapValidPassesForOverlappingOctave) {
+  Material m = makeStrettoMaterial(0, 4 * kTicksPerBeat, 2 * kTicksPerBeat, -12);
+  ValidationReport r = Validator{}.validate({}, {}, cMajorWhole(), m);
+  EXPECT_FALSE(hasRule(r, "stretto_overlap_valid"));
+}
+
+TEST(ValidatorTest, StrettoOverlapValidFailsWhenNoOverlap) {
+  // Follower enters exactly when the leader ends — no overlap.
+  Material m = makeStrettoMaterial(0, 4 * kTicksPerBeat, 4 * kTicksPerBeat, -12);
+  ValidationReport r = Validator{}.validate({}, {}, cMajorWhole(), m);
+  EXPECT_TRUE(hasRule(r, "stretto_overlap_valid"));
+}
+
+TEST(ValidatorTest, StrettoOverlapValidFailsForWrongTransposition) {
+  Material m = makeStrettoMaterial(0, 4 * kTicksPerBeat, 2 * kTicksPerBeat, -12,
+                                   /*corrupt_pitch=*/true);
+  ValidationReport r = Validator{}.validate({}, {}, cMajorWhole(), m);
+  EXPECT_TRUE(hasRule(r, "stretto_overlap_valid"));
+}
+
+TEST(ValidatorTest, StrettoOverlapValidSkippedWhenEmpty) {
+  Material m;
+  ValidationReport r = Validator{}.validate({}, {}, cMajorWhole(), m);
+  EXPECT_FALSE(hasRule(r, "stretto_overlap_valid"));
+}
+
+// P11 pedal_point_tonic_or_dominant tests. Home key C: tonic pc 0,
+// dominant pc 7.
+
+TEST(ValidatorTest, PedalPointTonicPasses) {
+  Material m;
+  m.pedal_points.push_back({2, 0, 4 * kTicksPerBar, 60, false});  // C, pc 0
+  ValidationReport r = Validator{}.validate({}, {}, cMajorWhole(), m);
+  EXPECT_FALSE(hasRule(r, "pedal_point_tonic_or_dominant"));
+}
+
+TEST(ValidatorTest, PedalPointDominantPasses) {
+  Material m;
+  m.pedal_points.push_back({2, 0, 4 * kTicksPerBar, 55, true});  // G, pc 7
+  ValidationReport r = Validator{}.validate({}, {}, cMajorWhole(), m);
+  EXPECT_FALSE(hasRule(r, "pedal_point_tonic_or_dominant"));
+}
+
+TEST(ValidatorTest, PedalPointSubdominantFails) {
+  Material m;
+  m.pedal_points.push_back({2, 0, 4 * kTicksPerBar, 65, false});  // F, pc 5
+  ValidationReport r = Validator{}.validate({}, {}, cMajorWhole(), m);
+  EXPECT_TRUE(hasRule(r, "pedal_point_tonic_or_dominant"));
+}
+
+TEST(ValidatorTest, PedalPointSkippedWhenEmpty) {
+  Material m;
+  ValidationReport r = Validator{}.validate({}, {}, cMajorWhole(), m);
+  EXPECT_FALSE(hasRule(r, "pedal_point_tonic_or_dominant"));
+}
+
+// P12 phrase_periodicity_4_or_8_bar tests.
+
+TEST(ValidatorTest, PhrasePeriodicityPassesForFourBarGrid) {
+  Material m;
+  for (int b = 0; b <= 12; b += 4)
+    m.phrase_structure.phrase_start_ticks.push_back(static_cast<Tick>(b) * kTicksPerBar);
+  ValidationReport r = Validator{}.validate({}, {}, cMajorWhole(), m);
+  EXPECT_FALSE(hasRule(r, "phrase_periodicity_4_or_8_bar"));
+}
+
+TEST(ValidatorTest, PhrasePeriodicityPassesForEightBarSpan) {
+  Material m;
+  m.phrase_structure.phrase_start_ticks = {0, 8 * kTicksPerBar, 16 * kTicksPerBar};
+  ValidationReport r = Validator{}.validate({}, {}, cMajorWhole(), m);
+  EXPECT_FALSE(hasRule(r, "phrase_periodicity_4_or_8_bar"));
+}
+
+TEST(ValidatorTest, PhrasePeriodicityFailsForThreeBarPhrase) {
+  Material m;
+  m.phrase_structure.phrase_start_ticks = {0, 3 * kTicksPerBar, 7 * kTicksPerBar};
+  ValidationReport r = Validator{}.validate({}, {}, cMajorWhole(), m);
+  EXPECT_TRUE(hasRule(r, "phrase_periodicity_4_or_8_bar"));
+}
+
+TEST(ValidatorTest, PhrasePeriodicitySkippedWhenSinglePhrase) {
+  Material m;
+  m.phrase_structure.phrase_start_ticks = {0};
+  ValidationReport r = Validator{}.validate({}, {}, cMajorWhole(), m);
+  EXPECT_FALSE(hasRule(r, "phrase_periodicity_4_or_8_bar"));
+}
+
+// P12 anacrusis_consistent tests. The pickup must begin exactly
+// anacrusis_ticks before some declared phrase start.
+
+TEST(ValidatorTest, AnacrusisConsistentPassesForAlignedPickup) {
+  Material m;
+  m.phrase_structure.has_anacrusis = true;
+  m.phrase_structure.anacrusis_ticks = kTicksPerBeat;
+  m.phrase_structure.phrase_start_ticks = {0, 4 * kTicksPerBar};
+  RhythmFragment frag;
+  frag.feature = RhythmFragment::Feature::Anacrusis;
+  frag.voice = 0;
+  frag.notes.push_back({4 * kTicksPerBar - kTicksPerBeat, kTicksPerBeat, 71});
+  m.rhythm_fragments.push_back(frag);
+  ValidationReport r = Validator{}.validate({}, {}, cMajorWhole(), m);
+  EXPECT_FALSE(hasRule(r, "anacrusis_consistent"));
+}
+
+TEST(ValidatorTest, AnacrusisConsistentFailsForMisalignedPickup) {
+  Material m;
+  m.phrase_structure.has_anacrusis = true;
+  m.phrase_structure.anacrusis_ticks = kTicksPerBeat;
+  m.phrase_structure.phrase_start_ticks = {0, 4 * kTicksPerBar};
+  RhythmFragment frag;
+  frag.feature = RhythmFragment::Feature::Anacrusis;
+  frag.voice = 0;
+  // Pickup not anacrusis_ticks before any phrase start.
+  frag.notes.push_back({4 * kTicksPerBar - 2 * kTicksPerBeat, kTicksPerBeat, 71});
+  m.rhythm_fragments.push_back(frag);
+  ValidationReport r = Validator{}.validate({}, {}, cMajorWhole(), m);
+  EXPECT_TRUE(hasRule(r, "anacrusis_consistent"));
+}
+
+TEST(ValidatorTest, AnacrusisConsistentFailsWhenDeclaredButZeroLength) {
+  Material m;
+  m.phrase_structure.has_anacrusis = true;
+  m.phrase_structure.anacrusis_ticks = 0;
+  m.phrase_structure.phrase_start_ticks = {0, 4 * kTicksPerBar};
+  ValidationReport r = Validator{}.validate({}, {}, cMajorWhole(), m);
+  EXPECT_TRUE(hasRule(r, "anacrusis_consistent"));
+}
+
+TEST(ValidatorTest, AnacrusisConsistentFailsWhenFragmentWithoutDeclaration) {
+  Material m;
+  m.phrase_structure.has_anacrusis = false;
+  RhythmFragment frag;
+  frag.feature = RhythmFragment::Feature::Anacrusis;
+  frag.voice = 0;
+  frag.notes.push_back({0, kTicksPerBeat, 71});
+  m.rhythm_fragments.push_back(frag);
+  ValidationReport r = Validator{}.validate({}, {}, cMajorWhole(), m);
+  EXPECT_TRUE(hasRule(r, "anacrusis_consistent"));
+}
+
+TEST(ValidatorTest, AnacrusisConsistentPassesWhenNoAnacrusis) {
+  Material m;  // default: no anacrusis, no fragments
+  ValidationReport r = Validator{}.validate({}, {}, cMajorWhole(), m);
+  EXPECT_FALSE(hasRule(r, "anacrusis_consistent"));
+}
+
 }  // namespace bach::composer

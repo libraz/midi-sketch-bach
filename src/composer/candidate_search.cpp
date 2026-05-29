@@ -517,6 +517,170 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
     return out;
   }
 
+  if (span.intent == VoiceIntent::PedalCarrier) {
+    // Replay each PedalPointDecl that targets this span's voice and whose
+    // held note falls inside the span window. Emits exactly one sustained
+    // note carrying PedalCommitted (plus ChordTone/P7/P8 bits so any
+    // adjacent Compose span reads the boundary correctly).
+    for (const auto& pedal : material.pedal_points) {
+      if (pedal.voice != span.voice)
+        continue;
+      if (pedal.start_tick < span.start_tick)
+        continue;
+      if (pedal.start_tick >= span.end_tick)
+        continue;
+      Candidate c;
+      c.start_tick = pedal.start_tick;
+      c.duration = pedal.duration;
+      c.pitch = pedal.pitch;
+      c.score = 1.0f;
+      c.satisfied_rules = 1ull << RuleBit::PedalCommitted;
+      const ChordEvent& chord_here = activeChord(harmonic_plan, pedal.start_tick);
+      const auto triad_here = triadPitchClasses(chord_here);
+      const std::uint8_t pc_p = static_cast<std::uint8_t>(c.pitch % 12);
+      const bool is_triad_p =
+          (pc_p == triad_here[0] || pc_p == triad_here[1] || pc_p == triad_here[2]);
+      if (is_triad_p) {
+        c.satisfied_rules |= 1ull << RuleBit::ChordTone;
+      }
+      applyP7Bits(c.satisfied_rules, chord_here, pc_p, is_triad_p);
+      applyP8Bits(c.satisfied_rules, harmonic_plan, chord_here, pc_p, is_triad_p);
+      out.push_back(c);
+    }
+    return out;
+  }
+
+  if (span.intent == VoiceIntent::MiddleEntryCarrier ||
+      span.intent == VoiceIntent::StrettoCarrier || span.intent == VoiceIntent::CodaCarrier ||
+      span.intent == VoiceIntent::SubjectCarrierAugmented ||
+      span.intent == VoiceIntent::SubjectCarrierDiminished ||
+      span.intent == VoiceIntent::SubjectCarrierInverted) {
+    // P11 development carriers: verbatim Material replay from a per-intent
+    // source vector, stamping one provenance bit. Register safety (no
+    // voice crossing) is the fixture's responsibility; because every P11
+    // carrier is NoteSource::Material, the Validator's vertical/parallel
+    // rules skip pairs where both notes are Material.
+    const std::vector<MaterialNote>* source = nullptr;
+    RuleBit bit = RuleBit::MiddleEntryCommitted;
+    if (span.intent == VoiceIntent::MiddleEntryCarrier) {
+      for (const auto& decl : material.middle_entries) {
+        if (decl.voice == span.voice) {
+          source = &decl.notes;
+          break;
+        }
+      }
+      bit = RuleBit::MiddleEntryCommitted;
+    } else if (span.intent == VoiceIntent::StrettoCarrier) {
+      for (const auto& decl : material.stretto_entries) {
+        if (decl.follower_voice == span.voice) {
+          source = &decl.follower_notes;
+          break;
+        }
+      }
+      bit = RuleBit::StrettoCommitted;
+    } else if (span.intent == VoiceIntent::CodaCarrier) {
+      for (const auto& decl : material.coda_extensions) {
+        if (decl.voice == span.voice) {
+          source = &decl.notes;
+          break;
+        }
+      }
+      bit = RuleBit::CodaCommitted;
+    } else {
+      // One of the three subject-variant intents.
+      for (const auto& decl : material.subject_variants) {
+        if (decl.voice == span.voice) {
+          source = &decl.notes;
+          break;
+        }
+      }
+      bit = RuleBit::SubjectVariantApplied;
+    }
+    if (source == nullptr)
+      return out;
+    for (const auto& mnote : *source) {
+      if (mnote.start_tick < span.start_tick)
+        continue;
+      if (mnote.start_tick >= span.end_tick)
+        break;
+      Candidate c;
+      c.start_tick = mnote.start_tick;
+      c.duration = mnote.duration;
+      c.pitch = mnote.pitch;
+      c.score = 1.0f;
+      c.satisfied_rules = 1ull << bit;
+      const ChordEvent& chord_here = activeChord(harmonic_plan, mnote.start_tick);
+      const auto triad_here = triadPitchClasses(chord_here);
+      const std::uint8_t pc_m = static_cast<std::uint8_t>(mnote.pitch % 12);
+      const bool is_triad_m =
+          (pc_m == triad_here[0] || pc_m == triad_here[1] || pc_m == triad_here[2]);
+      if (is_triad_m) {
+        c.satisfied_rules |= 1ull << RuleBit::ChordTone;
+      }
+      applyP7Bits(c.satisfied_rules, chord_here, pc_m, is_triad_m);
+      applyP8Bits(c.satisfied_rules, harmonic_plan, chord_here, pc_m, is_triad_m);
+      out.push_back(c);
+    }
+    return out;
+  }
+
+  if (span.intent == VoiceIntent::RhythmCarrier) {
+    // P12 rhythm carrier: verbatim replay of every RhythmFragment that
+    // targets this span's voice and whose notes fall inside the span
+    // window. Each fragment's feature tag selects a provenance bit; a note
+    // whose onset lands on a declared phrase start additionally carries
+    // PhrasePeriodicityKept. The rhythm (dotted / syncopated / hemiola /
+    // upbeat) lives in the fragment's note durations and onsets.
+    for (const auto& frag : material.rhythm_fragments) {
+      if (frag.voice != span.voice)
+        continue;
+      for (const auto& mnote : frag.notes) {
+        if (mnote.start_tick < span.start_tick)
+          continue;
+        if (mnote.start_tick >= span.end_tick)
+          continue;
+        Candidate c;
+        c.start_tick = mnote.start_tick;
+        c.duration = mnote.duration;
+        c.pitch = mnote.pitch;
+        c.score = 1.0f;
+        c.satisfied_rules = 0;
+        switch (frag.feature) {
+          case RhythmFragment::Feature::Anacrusis:
+            c.satisfied_rules |= 1ull << RuleBit::AnacrusisActive;
+            break;
+          case RhythmFragment::Feature::Hemiola:
+            c.satisfied_rules |= 1ull << RuleBit::HemiolaInserted;
+            break;
+          case RhythmFragment::Feature::Recurrence:
+            c.satisfied_rules |= 1ull << RuleBit::RhythmicMotifRecurrence;
+            break;
+          case RhythmFragment::Feature::Dotted:
+          case RhythmFragment::Feature::Syncopation:
+            break;  // rhythm is the feature; no dedicated bit.
+        }
+        for (Tick start : material.phrase_structure.phrase_start_ticks) {
+          if (start == mnote.start_tick) {
+            c.satisfied_rules |= 1ull << RuleBit::PhrasePeriodicityKept;
+            break;
+          }
+        }
+        const ChordEvent& chord_here = activeChord(harmonic_plan, mnote.start_tick);
+        const auto triad_here = triadPitchClasses(chord_here);
+        const std::uint8_t pc_r = static_cast<std::uint8_t>(c.pitch % 12);
+        const bool is_triad_r =
+            (pc_r == triad_here[0] || pc_r == triad_here[1] || pc_r == triad_here[2]);
+        if (is_triad_r) {
+          c.satisfied_rules |= 1ull << RuleBit::ChordTone;
+        }
+        applyP7Bits(c.satisfied_rules, chord_here, pc_r, is_triad_r);
+        applyP8Bits(c.satisfied_rules, harmonic_plan, chord_here, pc_r, is_triad_r);
+        out.push_back(c);
+      }
+    }
+    return out;
+  }
+
   // Compose spans: lay down one note per beat aligned to span.start_tick.
   // Pitch picked from current chord tones near voice_center. Spans with
   // Subdivision::Eighth produce two notes per beat instead — the rest

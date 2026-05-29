@@ -28,6 +28,8 @@ _deps/
 output.json
 output.mid
 output_analysis.json
+output.provenance.json
+*.provenance.json
 analysis.json
 analysis_results/
 regenerated.mid
