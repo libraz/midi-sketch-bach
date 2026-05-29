@@ -24,6 +24,8 @@ const char* voiceIntentToString(VoiceIntent intent) {
       return "Episode";
     case VoiceIntent::CountersubjectCarrier:
       return "CountersubjectCarrier";
+    case VoiceIntent::FortspinnungSpan:
+      return "FortspinnungSpan";
   }
   return "Unknown";
 }

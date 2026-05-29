@@ -110,7 +110,7 @@ VoiceCursor seedCursor(VoiceId voice, Tick span_start, const std::vector<NoteEve
 bool isCarrierIntent(VoiceIntent intent) {
   return intent == VoiceIntent::SubjectCarrier || intent == VoiceIntent::AnswerCarrier ||
          intent == VoiceIntent::SuspensionCarrier || intent == VoiceIntent::Episode ||
-         intent == VoiceIntent::CountersubjectCarrier;
+         intent == VoiceIntent::CountersubjectCarrier || intent == VoiceIntent::FortspinnungSpan;
 }
 
 }  // namespace

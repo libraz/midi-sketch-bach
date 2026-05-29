@@ -20,7 +20,12 @@ enum class HarnessPhase : std::uint8_t {
   Phase4Sus = 5,      // Phase4 layout + one Sus7_6 carrier span in V0
   Phase6Episode = 6,  // Phase6 layout + V0 Episode span (Original transform)
   Phase6Tonal = 7,    // Phase6 layout + tonal_answer + V0 CountersubjectCarrier
-  Phase7 = 8          // Phase6 layout + ChordEvent degree/inversion/function tagging
+  Phase7 = 8,         // Phase6 layout + ChordEvent degree/inversion/function tagging
+  Phase8 = 9,         // Phase7 layout + ModulationEvent at midpoint + secondary dominant
+  Phase9 = 10,        // Phase8 layout + FortspinnungSpan + ImitationEntry declarations
+  Phase10 = 11        // Phase8 layout (3v/16bar/subject+answer+third-entry +
+                      // modulation); distinguished only so closure can
+                      // target it for the InvertibleAt8va bit.
 };
 
 // Static layout for one harness phase. Catalogs and seed-to-fixture
@@ -37,6 +42,9 @@ struct HarnessPhaseSpec {
   bool with_episode;          // Phase6Episode: V0 Episode span at bars [bars-4, bars)
   bool with_tonal_answer;     // Phase6Tonal: AnswerCarrier reads from tonal_answer + V0 CS
   bool with_degree_tagging;   // Phase7: ChordEvent degree/inversion/function populated
+  bool with_modulation;       // Phase8: ModulationEvent + V/V + borrowed iv + Picardy 3rd
+  bool with_fortspinnung;     // Phase9: V0 FortspinnungSpan + SequenceTemplate
+  bool with_imitation_entry;  // Phase9: ImitationEntry declaration (subject→answer)
 };
 
 // Resolve the static layout for a phase. Returns the same struct on

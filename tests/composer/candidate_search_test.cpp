@@ -1026,4 +1026,94 @@ TEST(CandidateSearchTest, EpisodeIntentSkipsFragmentForWrongVoice) {
   EXPECT_TRUE(cands.empty());
 }
 
+// P9 FortspinnungSpan replay: a SequenceTemplate emits one step's notes
+// transposed by step_offset semitones. DescendingFifths = -7 per step;
+// 2-pitch seed {72, 74}, 3 steps → flat output length = 6 notes.
+TEST(CandidateSearchTest, FortspinnungSpanReplaysDescendingFifths) {
+  CandidateSearch search;
+  CandidateContext ctx;
+  ctx.voice_center = 60;
+  ctx.placed_notes = nullptr;
+
+  Material material;
+  SequenceTemplate tmpl;
+  tmpl.pattern = SequencePattern::DescendingFifths;
+  tmpl.target_start_tick = 0;
+  tmpl.step_length_ticks = 2 * kTicksPerBeat;
+  tmpl.num_steps = 3;
+  tmpl.voice = 0;
+  tmpl.seed_pitches = {72, 74};
+  tmpl.seed_durations = {kTicksPerBeat, kTicksPerBeat};
+  material.sequence_templates.push_back(tmpl);
+
+  Span span = makeCarrierSpan(0, 6 * kTicksPerBeat, 0, VoiceIntent::FortspinnungSpan);
+  const auto cands = search.enumerate(span, singleCMajor(), material, ctx);
+  ASSERT_EQ(cands.size(), 6u);
+  EXPECT_EQ(cands[0].pitch, 72);
+  EXPECT_EQ(cands[1].pitch, 74);
+  EXPECT_EQ(cands[2].pitch, 65);  // 72 - 7
+  EXPECT_EQ(cands[3].pitch, 67);  // 74 - 7
+  EXPECT_EQ(cands[4].pitch, 58);  // 72 - 14
+  EXPECT_EQ(cands[5].pitch, 60);  // 74 - 14
+  // FortspinnungSourced on all 6 notes; SequenceStep on steps 1-2 only.
+  for (std::size_t i = 0; i < cands.size(); ++i) {
+    EXPECT_NE(cands[i].satisfied_rules & (1ull << RuleBit::FortspinnungSourced), 0u)
+        << "note index " << i;
+  }
+  EXPECT_EQ(cands[0].satisfied_rules & (1ull << RuleBit::SequenceStep), 0u);
+  EXPECT_EQ(cands[1].satisfied_rules & (1ull << RuleBit::SequenceStep), 0u);
+  EXPECT_NE(cands[2].satisfied_rules & (1ull << RuleBit::SequenceStep), 0u);
+  EXPECT_NE(cands[3].satisfied_rules & (1ull << RuleBit::SequenceStep), 0u);
+  EXPECT_NE(cands[4].satisfied_rules & (1ull << RuleBit::SequenceStep), 0u);
+  EXPECT_NE(cands[5].satisfied_rules & (1ull << RuleBit::SequenceStep), 0u);
+}
+
+TEST(CandidateSearchTest, FortspinnungSpanReplaysAscendingStep) {
+  CandidateSearch search;
+  CandidateContext ctx;
+  ctx.voice_center = 60;
+  ctx.placed_notes = nullptr;
+
+  Material material;
+  SequenceTemplate tmpl;
+  tmpl.pattern = SequencePattern::AscendingStep;
+  tmpl.target_start_tick = 0;
+  tmpl.step_length_ticks = 2 * kTicksPerBeat;
+  tmpl.num_steps = 2;
+  tmpl.voice = 0;
+  tmpl.seed_pitches = {72, 74};
+  tmpl.seed_durations = {kTicksPerBeat, kTicksPerBeat};
+  material.sequence_templates.push_back(tmpl);
+
+  Span span = makeCarrierSpan(0, 4 * kTicksPerBeat, 0, VoiceIntent::FortspinnungSpan);
+  const auto cands = search.enumerate(span, singleCMajor(), material, ctx);
+  ASSERT_EQ(cands.size(), 4u);
+  EXPECT_EQ(cands[0].pitch, 72);
+  EXPECT_EQ(cands[1].pitch, 74);
+  EXPECT_EQ(cands[2].pitch, 74);  // 72 + 2
+  EXPECT_EQ(cands[3].pitch, 76);  // 74 + 2
+}
+
+TEST(CandidateSearchTest, FortspinnungSpanSkipsTemplateForWrongVoice) {
+  CandidateSearch search;
+  CandidateContext ctx;
+  ctx.voice_center = 60;
+  ctx.placed_notes = nullptr;
+
+  Material material;
+  SequenceTemplate tmpl;
+  tmpl.pattern = SequencePattern::DescendingFifths;
+  tmpl.target_start_tick = 0;
+  tmpl.step_length_ticks = 2 * kTicksPerBeat;
+  tmpl.num_steps = 2;
+  tmpl.voice = 2;  // wrong voice
+  tmpl.seed_pitches = {72};
+  tmpl.seed_durations = {kTicksPerBeat};
+  material.sequence_templates.push_back(tmpl);
+
+  Span span = makeCarrierSpan(0, 4 * kTicksPerBeat, 0, VoiceIntent::FortspinnungSpan);
+  const auto cands = search.enumerate(span, singleCMajor(), material, ctx);
+  EXPECT_TRUE(cands.empty());
+}
+
 }  // namespace bach::composer

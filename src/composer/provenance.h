@@ -76,6 +76,43 @@ enum RuleBit : std::uint8_t {
   InversionLabel = 23,
   DoublingChecked = 24,
   SpacingChecked = 25,
+  // P8 (Modulation / Tonicization / Borrowed chords).
+  // ModulationCommitted: the candidate sits at-or-after a
+  //   HarmonicPlan::ModulationEvent tick and its pitch class is
+  //   diatonic in the new key area.
+  // SecondaryDominantResolved: the candidate's chord follows a
+  //   has_secondary_of=true chord and its degree matches the
+  //   secondary_of value (i.e. the secondary dominant resolved as
+  //   declared).
+  // PicardyThird: the candidate is the major third of a final tonic
+  //   chord in a minor-mode piece (is_picardy=true on the chord).
+  // ModalMixture: the candidate's chord carries is_borrowed=true
+  //   (loan from the parallel mode).
+  ModulationCommitted = 26,
+  SecondaryDominantResolved = 27,
+  PicardyThird = 28,
+  ModalMixture = 29,
+  // P9 (Fortspinnung + Sequence + Imitation).
+  // FortspinnungSourced: the candidate's pitch and tick came from a
+  //   SequenceTemplate replay (not free-search and not Episode replay).
+  //   Set by CandidateSearch on every note of a FortspinnungSpan.
+  // SequenceStep: the candidate sits at-or-after a SequenceTemplate
+  //   step boundary AND its pitch matches the seed motif transposed by
+  //   the pattern's step semitone offset.
+  // ImitationEntryMatched: the candidate participates in a declared
+  //   ImitationEntry (leader voice's first note tick, or follower
+  //   voice's first note tick at leader.tick + distance with the
+  //   declared interval offset).
+  FortspinnungSourced = 30,
+  SequenceStep = 31,
+  ImitationEntryMatched = 32,
+  // P10 (Invertible counterpoint at the octave).
+  // InvertibleAt8va: the Compose candidate, against the sounding
+  //   upper-adjacent voice at this tick, does NOT form a perfect 4th
+  //   on a strong beat (a 4th inverts to a 5th under octave inversion),
+  //   i.e. the candidate passed the invertibility check. Only set when
+  //   placed_notes is available and the pair is an upper-adjacent pair.
+  InvertibleAt8va = 33,
 };
 
 // Per-note provenance record.

@@ -31,6 +31,9 @@ PHASE_DEFAULTS = {
     "Phase6Episode": {"tag": "p6ep", "threshold": 0.65, "min_pass": 6},
     "Phase6Tonal": {"tag": "p6tonal", "threshold": 0.65, "min_pass": 6},
     "Phase7": {"tag": "p7", "threshold": 0.78, "min_pass": 10},
+    "Phase8": {"tag": "p8", "threshold": 0.78, "min_pass": 10},
+    "Phase9": {"tag": "p9", "threshold": 0.80, "min_pass": 10},
+    "Phase10": {"tag": "p10", "threshold": 0.80, "min_pass": 10},
 }
 
 # Phase layout: subject_bars / with_answer / with_third_entry.
@@ -45,6 +48,9 @@ PHASE_LAYOUT = {
     "Phase6Episode": {"voices": 3, "bars": 16, "subject_bars": 4, "with_answer": True, "with_third_entry": True},
     "Phase6Tonal": {"voices": 3, "bars": 16, "subject_bars": 4, "with_answer": True, "with_third_entry": True, "tonal_answer": True},
     "Phase7": {"voices": 3, "bars": 16, "subject_bars": 4, "with_answer": True, "with_third_entry": True},
+    "Phase8": {"voices": 3, "bars": 16, "subject_bars": 4, "with_answer": True, "with_third_entry": True},
+    "Phase9": {"voices": 3, "bars": 16, "subject_bars": 4, "with_answer": True, "with_third_entry": True},
+    "Phase10": {"voices": 3, "bars": 16, "subject_bars": 4, "with_answer": True, "with_third_entry": True},
 }
 
 # 5 subject patterns × 16 quarter-note pitches. Mirrors kSubjectPatterns in
@@ -90,6 +96,15 @@ def normalize_phase(value: str) -> str:
         "7": "Phase7",
         "p7": "Phase7",
         "phase7": "Phase7",
+        "8": "Phase8",
+        "p8": "Phase8",
+        "phase8": "Phase8",
+        "9": "Phase9",
+        "p9": "Phase9",
+        "phase9": "Phase9",
+        "10": "Phase10",
+        "p10": "Phase10",
+        "phase10": "Phase10",
     }
     return aliases.get(value, aliases.get(value.lower(), value))
 

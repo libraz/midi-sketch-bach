@@ -61,34 +61,67 @@ void pushCounterlineBar(VoicePlan& vp, SpanId& next_id, std::uint8_t voice, int 
 HarnessPhaseSpec phaseSpec(HarnessPhase phase) {
   switch (phase) {
     case HarnessPhase::Phase3:
-      return {phase, /*voices=*/2, /*bars=*/8, /*subject_bars=*/8, false, false, false,
-              false, false,        false};
+      return {phase, /*voices=*/2, /*bars=*/8, /*subject_bars=*/8,
+              false, false,        false,      false,
+              false, false,        false,      false,
+              false};
     case HarnessPhase::Phase35:
-      return {phase, /*voices=*/2, /*bars=*/4, /*subject_bars=*/4, false, false, false,
-              false, false,        false};
+      return {phase, /*voices=*/2, /*bars=*/4, /*subject_bars=*/4,
+              false, false,        false,      false,
+              false, false,        false,      false,
+              false};
     case HarnessPhase::Phase4:
-      return {phase, /*voices=*/2, /*bars=*/8, /*subject_bars=*/4, true, false, false,
-              false, false,        false};
+      return {phase, /*voices=*/2, /*bars=*/8, /*subject_bars=*/4,
+              true,  false,        false,      false,
+              false, false,        false,      false,
+              false};
     case HarnessPhase::Phase5:
-      return {phase, /*voices=*/3, /*bars=*/12, /*subject_bars=*/12, false, false, false,
-              false, false,        false};
+      return {phase, /*voices=*/3, /*bars=*/12, /*subject_bars=*/12,
+              false, false,        false,       false,
+              false, false,        false,       false,
+              false};
     case HarnessPhase::Phase6:
-      return {phase, /*voices=*/3, /*bars=*/16, /*subject_bars=*/4, true, true, false,
-              false, false,        false};
+      return {phase, /*voices=*/3, /*bars=*/16, /*subject_bars=*/4,
+              true,  true,         false,       false,
+              false, false,        false,       false,
+              false};
     case HarnessPhase::Phase4Sus:
-      return {phase, /*voices=*/2, /*bars=*/8, /*subject_bars=*/4, true, false, true,
-              false, false,        false};
+      return {phase, /*voices=*/2, /*bars=*/8, /*subject_bars=*/4,
+              true,  false,        true,       false,
+              false, false,        false,      false,
+              false};
     case HarnessPhase::Phase6Episode:
-      return {phase, /*voices=*/3, /*bars=*/16, /*subject_bars=*/4, true, true, false,
-              true,  false,        false};
+      return {phase, /*voices=*/3, /*bars=*/16, /*subject_bars=*/4,
+              true,  true,         false,       true,
+              false, false,        false,       false,
+              false};
     case HarnessPhase::Phase6Tonal:
-      return {phase, /*voices=*/3, /*bars=*/16, /*subject_bars=*/4, true, true, false,
-              false, true,         false};
+      return {phase, /*voices=*/3, /*bars=*/16, /*subject_bars=*/4,
+              true,  true,         false,       false,
+              true,  false,        false,       false,
+              false};
     case HarnessPhase::Phase7:
-      return {phase, /*voices=*/3, /*bars=*/16, /*subject_bars=*/4, true, true, false,
-              false, false,        true};
+      return {phase, /*voices=*/3, /*bars=*/16, /*subject_bars=*/4,
+              true,  true,         false,       false,
+              false, true,         false,       false,
+              false};
+    case HarnessPhase::Phase8:
+      return {phase, /*voices=*/3, /*bars=*/16, /*subject_bars=*/4,
+              true,  true,         false,       false,
+              false, true,         true,        false,
+              false};
+    case HarnessPhase::Phase9:
+      return {phase, /*voices=*/3, /*bars=*/16, /*subject_bars=*/4,
+              true,  true,         false,       false,
+              false, true,         true,        true,
+              true};
+    case HarnessPhase::Phase10:
+      return {phase, /*voices=*/3, /*bars=*/16, /*subject_bars=*/4,
+              true,  true,         false,       false,
+              false, true,         true,        false,
+              false};
   }
-  return {phase, 2, 8, 8, false, false, false, false, false, false};
+  return {phase, 2, 8, 8, false, false, false, false, false, false, false, false, false};
 }
 
 HarnessFixture buildHarnessFixture(HarnessPhase phase, int seed) {
@@ -195,6 +228,81 @@ HarnessFixture buildHarnessFixture(HarnessPhase phase, int seed) {
     }
   }
 
+  // Phase8 modulation injection. Augments the Phase7 layout with:
+  //   - a ModulationEvent at bar 8 (the boundary is the implicit
+  //     I-of-C = IV-of-G pivot already at that tick),
+  //   - a V/V → V secondary-dominant pair at bars 12-13,
+  //   - a borrowed iv (parallel minor mixture) at bar 14,
+  //   - a Picardy 3rd marker on the final I chord at bar 15.
+  // The pre-bar-12 chord vocabulary is untouched so existing Phase7
+  // counterpoint behavior carries forward; only the last 4 bars host
+  // the P8 idioms. Bars 12-15 sit entirely outside the V2
+  // SubjectCarrier window (bars 8-11) so the chromatic chord tones
+  // (F# from V/V, Ab from borrowed iv) do not clash with Material
+  // pitches.
+  if (spec.with_modulation) {
+    ModulationEvent mod;
+    mod.tick = static_cast<Tick>(8) * kTicksPerBar;
+    mod.from_tonic_pc = 0;
+    mod.from_is_minor = false;
+    mod.to_tonic_pc = 7;
+    mod.to_is_minor = false;
+    mod.type = ModulationType::Pivot;
+    out.harmony.modulations.push_back(mod);
+    for (auto& chord : out.harmony.chords) {
+      const int b = static_cast<int>(chord.start_tick / kTicksPerBar);
+      if (b == 12) {
+        // V/V — D-major secondary dominant of V (G major). secondary_of
+        // is the home-key degree being tonicized.
+        chord.root_pc = 2;
+        chord.quality = ChordQuality::Major;
+        chord.degree = RomanNumeral::V;
+        chord.function = HarmonicFunction::Pred;
+        chord.has_degree = true;
+        chord.has_secondary_of = true;
+        chord.secondary_of = RomanNumeral::V;
+        chord.is_borrowed = false;
+        chord.is_picardy = false;
+        chord.inversion = ChordInversion::Root;
+      } else if (b == 13) {
+        // V — G-major resolves the secondary dominant.
+        chord.root_pc = 7;
+        chord.quality = ChordQuality::Major;
+        chord.degree = RomanNumeral::V;
+        chord.function = HarmonicFunction::D;
+        chord.has_degree = true;
+        chord.has_secondary_of = false;
+        chord.is_borrowed = false;
+        chord.is_picardy = false;
+        chord.inversion = ChordInversion::Root;
+      } else if (b == 14) {
+        // Borrowed iv — F-minor loan from C parallel-minor.
+        chord.root_pc = 5;
+        chord.quality = ChordQuality::Minor;
+        chord.degree = RomanNumeral::IV;
+        chord.function = HarmonicFunction::S;
+        chord.has_degree = true;
+        chord.has_secondary_of = false;
+        chord.is_borrowed = true;
+        chord.is_picardy = false;
+        chord.inversion = ChordInversion::Root;
+      } else if (b == 15) {
+        // Picardy 3rd — final I (C major). is_picardy=true lets the
+        // PicardyThird bit fire on any voice landing on the major
+        // third (E natural, pc=4).
+        chord.root_pc = 0;
+        chord.quality = ChordQuality::Major;
+        chord.degree = RomanNumeral::I;
+        chord.function = HarmonicFunction::T;
+        chord.has_degree = true;
+        chord.has_secondary_of = false;
+        chord.is_borrowed = false;
+        chord.is_picardy = true;
+        chord.inversion = ChordInversion::Root;
+      }
+    }
+  }
+
   // VoicePlan.
   out.voice_plan.num_voices = spec.voices;
   SpanId next_id = 0;
@@ -211,15 +319,25 @@ HarnessFixture buildHarnessFixture(HarnessPhase phase, int seed) {
     // with one Episode span (Original transform of the V0 subject, re-anchored
     // at that bar). Phase6Tonal replaces V0 counterline bars [subject_bars,
     // 2*subject_bars) with one CountersubjectCarrier span that runs against
-    // the V1 AnswerCarrier (tonal_answer). Phase6 keeps all V0 counterline
-    // bars contiguous.
+    // the V1 AnswerCarrier (tonal_answer). Phase9 replaces V0 counterline
+    // bars [subject_bars, 2*subject_bars) (the V1 AnswerCarrier window) with
+    // one FortspinnungSpan carrying a 2-step ascending sequence. Placing
+    // the fortspinnung directly after V0 SubjectCarrier (Material→Material)
+    // avoids the Compose→Material boundary issue where the composer cannot
+    // see the carrier's first pitch in its lookahead, and keeps V0 still
+    // active against the AnswerCarrier in V1. Phase6 keeps all V0
+    // counterline bars contiguous.
     const int episode_first_bar = spec.with_episode ? (spec.bars - subject_bars) : -1;
     const int cs_first_bar = spec.with_tonal_answer ? subject_bars : -1;
     const int cs_last_bar = spec.with_tonal_answer ? (2 * subject_bars - 1) : -1;
+    const int fs_first_bar = spec.with_fortspinnung ? subject_bars : -1;
+    const int fs_last_bar = spec.with_fortspinnung ? (2 * subject_bars - 1) : -1;
     for (int b = subject_bars; b < spec.bars; ++b) {
       if (spec.with_episode && b >= episode_first_bar)
         continue;
       if (spec.with_tonal_answer && b >= cs_first_bar && b <= cs_last_bar)
+        continue;
+      if (spec.with_fortspinnung && b >= fs_first_bar && b <= fs_last_bar)
         continue;
       pushCounterlineBar(out.voice_plan, next_id, 0, b, subdivision);
     }
@@ -242,6 +360,16 @@ HarnessFixture buildHarnessFixture(HarnessPhase phase, int seed) {
       cs.intent = VoiceIntent::CountersubjectCarrier;
       cs.subdivision = subdivision;
       out.voice_plan.spans.push_back(cs);
+    }
+    if (spec.with_fortspinnung) {
+      Span fs;
+      fs.id = next_id++;
+      fs.start_tick = static_cast<Tick>(fs_first_bar) * kTicksPerBar;
+      fs.end_tick = static_cast<Tick>(fs_last_bar + 1) * kTicksPerBar;
+      fs.voice = 0;
+      fs.intent = VoiceIntent::FortspinnungSpan;
+      fs.subdivision = subdivision;
+      out.voice_plan.spans.push_back(fs);
     }
     for (int b = 0; b < subject_bars; ++b) {
       pushCounterlineBar(out.voice_plan, next_id, 1, b, subdivision);
@@ -397,6 +525,65 @@ HarnessFixture buildHarnessFixture(HarnessPhase phase, int seed) {
     sp.resolution_pitch = 81;
     sp.voice = 0;
     out.material.suspension_patterns.push_back(sp);
+  }
+
+  if (spec.with_fortspinnung) {
+    // Phase9 SequenceTemplate. Seed = 8-note motif over 2 bars (bars
+    // 4-5) in V0. Pattern = AscendingStep (+2 semis per step).
+    //
+    // Pcs restricted to {0, 2, 7} (C, D, G) so the +2 transpose lands
+    // inside C-major diatonic at step 1 (pcs {2, 4, 9}). A further
+    // step would produce pc 6 (F#) → cross-relation, hence num_steps
+    // is capped at 2. The 2-step pattern fills the full 4-bar V0
+    // span (bars 4-7).
+    //
+    // Excluding pc 11 (B = leading tone in C major) from both step 0
+    // and step 1 prevents `doubling_no_leading_tone` clashes with V1
+    // AnswerCarrier idx 8 (= subject pattern idx 8 - P4), which for
+    // catalog patterns 0 and 3 lands on B (pc 11) — and on harm
+    // pattern (harm_a + 1) % 4 = 0, bar 6 chord = V which OWNS the
+    // leading tone.
+    //
+    // Register: V0 must stay above V1 AnswerCarrier across all 5
+    // subject patterns. V1 AnswerCarrier = subject pattern - 5
+    // semitones; its max value at bars 4-7 is 79 (patterns 1 and 2
+    // climb to 84 in idx 3 or idx 8 → 79 after -P4). Seed min = 79
+    // (= unison with V1 max for pattern 1 idx 0 = 79); step 1 min =
+    // 81. Unisons are not voice_crossing (interval ≥ 0).
+    //
+    // FortspinnungSpan placement = bars 4-7 sits directly after V0
+    // SubjectCarrier (bars 0-3). Both spans are Material, so the
+    // SubjectCarrier→FortspinnungSpan boundary has no Compose
+    // mediation. The pitch jump 72 → 81 (subject_last → seed[0])
+    // is a M6 leap inside Material, which the validator does not
+    // analyze for melodic intervals (Material is verbatim).
+    SequenceTemplate tmpl;
+    tmpl.pattern = SequencePattern::AscendingStep;
+    tmpl.target_start_tick = static_cast<Tick>(subject_bars) * kTicksPerBar;
+    tmpl.step_length_ticks = 2 * kTicksPerBar;
+    tmpl.num_steps = 2;
+    tmpl.voice = 0;
+    // Seed: G5 C6 D6 C6 G5 C6 D6 C6 — two-bar arpeggiated triad-tone
+    // motif on the G-C-D pivot. Step 1 (+2): A5 D6 E6 D6 A5 D6 E6 D6.
+    tmpl.seed_pitches = {79, 84, 86, 84, 79, 84, 86, 84};
+    tmpl.seed_durations = {kTicksPerBeat, kTicksPerBeat, kTicksPerBeat, kTicksPerBeat,
+                           kTicksPerBeat, kTicksPerBeat, kTicksPerBeat, kTicksPerBeat};
+    out.material.sequence_templates.push_back(tmpl);
+  }
+
+  if (spec.with_imitation_entry) {
+    // Phase9 ImitationEntry. Subject (V0) enters at bar 0; real answer
+    // (V1) enters at bar `subject_bars` (= 4) with interval -5 semis
+    // (real answer = P5 down = subject - 5). This matches the existing
+    // Phase4+ harness convention; the declaration is purely documentary
+    // so the Validator's imitation_entry_match rule fires the
+    // ImitationEntryMatched bit on the entry note of both fragments.
+    ImitationEntry entry;
+    entry.leader_fragment = MaterialFragment::Subject;
+    entry.follower_fragment = MaterialFragment::Answer;
+    entry.distance_ticks = static_cast<Tick>(subject_bars) * kTicksPerBar;
+    entry.interval_semis = -5;
+    out.material.imitation_entries.push_back(entry);
   }
 
   return out;

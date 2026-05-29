@@ -95,6 +95,56 @@ void applyP7Bits(RuleIdMask& rules, const ChordEvent& chord, std::uint8_t pc, bo
     rules |= 1ull << RuleBit::InversionLabel;
 }
 
+// P8 helper: set the four P8 provenance bits when the surrounding
+// context matches each idiom.
+//
+//   ModulationCommitted        — the active chord sits at or after a
+//                                ModulationEvent boundary (the plan has
+//                                committed to a new key area, and this
+//                                candidate's pitch is participating in
+//                                that area).
+//   SecondaryDominantResolved  — the active chord is the resolution of
+//                                a previous secondary dominant: the
+//                                most recent chord with has_secondary_of=
+//                                true (strictly before the active chord)
+//                                declares secondary_of equal to the
+//                                active chord's degree.
+//   PicardyThird               — the active chord is the final tonic
+//                                with is_picardy=true and the candidate
+//                                lands on the major third (root + 4).
+//   ModalMixture               — the active chord declares is_borrowed=
+//                                true (a parallel-mode loan) and the
+//                                candidate is a chord tone of that
+//                                chord.
+void applyP8Bits(RuleIdMask& rules, const HarmonicPlan& plan, const ChordEvent& chord,
+                 std::uint8_t pc, bool is_chord_tone) {
+  for (const auto& mod : plan.modulations) {
+    if (mod.tick <= chord.start_tick) {
+      rules |= 1ull << RuleBit::ModulationCommitted;
+      break;
+    }
+  }
+  const ChordEvent* prev = nullptr;
+  for (const auto& c : plan.chords) {
+    if (c.start_tick >= chord.start_tick)
+      break;
+    if (c.has_secondary_of)
+      prev = &c;
+  }
+  if (prev != nullptr && chord.has_degree && prev->secondary_of == chord.degree) {
+    rules |= 1ull << RuleBit::SecondaryDominantResolved;
+  }
+  if (chord.is_picardy) {
+    const std::uint8_t major_third_pc = static_cast<std::uint8_t>((chord.root_pc + 4) % 12);
+    if (pc == major_third_pc) {
+      rules |= 1ull << RuleBit::PicardyThird;
+    }
+  }
+  if (chord.is_borrowed && is_chord_tone) {
+    rules |= 1ull << RuleBit::ModalMixture;
+  }
+}
+
 // Imports of shared rule primitives (defined in composer/rule_helpers.cpp).
 // Local re-exports keep the existing call sites unchanged while routing
 // all rule semantics through the single shared implementation.
@@ -242,6 +292,7 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
         c.satisfied_rules |= 1ull << RuleBit::ChordTone;
       }
       applyP7Bits(c.satisfied_rules, chord_here, pc_m, is_triad_m);
+      applyP8Bits(c.satisfied_rules, harmonic_plan, chord_here, pc_m, is_triad_m);
       if (const CadenceCell* cadence_cell = cadenceCellAt(material, mnote.start_tick);
           cadence_cell != nullptr) {
         c.satisfied_rules |= 1ull << RuleBit::CadenceCellCommitted;
@@ -260,6 +311,18 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
       }
       if (emit_countersubject_bit) {
         c.satisfied_rules |= 1ull << RuleBit::CountersubjectActive;
+      }
+      // P9 ImitationEntryMatched: set on idx==0 (the entry note) when
+      // any declared ImitationEntry names this fragment as leader or
+      // follower. The Validator's imitation_entry_match rule checks
+      // the actual distance and interval against the declaration.
+      if (idx == 0) {
+        for (const auto& entry : material.imitation_entries) {
+          if (entry.leader_fragment == fragment || entry.follower_fragment == fragment) {
+            c.satisfied_rules |= 1ull << RuleBit::ImitationEntryMatched;
+            break;
+          }
+        }
       }
       out.push_back(c);
     }
@@ -323,6 +386,7 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
           c.satisfied_rules |= 1ull << RuleBit::ChordTone;
         }
         applyP7Bits(c.satisfied_rules, chord_here, pc_m, is_triad_m);
+        applyP8Bits(c.satisfied_rules, harmonic_plan, chord_here, pc_m, is_triad_m);
         out.push_back(c);
       }
     }
@@ -373,6 +437,82 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
       res.score = 1.0f;
       res.satisfied_rules = 1ull << RuleBit::SuspensionResolved;
       out.push_back(res);
+    }
+    return out;
+  }
+
+  if (span.intent == VoiceIntent::FortspinnungSpan) {
+    // Replay each SequenceTemplate that targets this span's voice and
+    // whose expanded note window falls inside this span. Emits the
+    // seed motif followed by num_steps-1 transposed copies (each
+    // shifted by step_length_ticks*k and step_offset_semis*k). All
+    // notes carry FortspinnungSourced; steps 1..N-1 additionally carry
+    // SequenceStep. P9 sequence patterns:
+    //   DescendingFifths → -7 semis per step.
+    //   DescendingStep   → -2 semis per step.
+    //   AscendingStep    → +2 semis per step.
+    auto step_semis = [](SequencePattern pattern) -> int {
+      switch (pattern) {
+        case SequencePattern::DescendingFifths:
+          return -7;
+        case SequencePattern::DescendingStep:
+          return -2;
+        case SequencePattern::AscendingStep:
+          return 2;
+      }
+      return 0;
+    };
+    for (const auto& tmpl : material.sequence_templates) {
+      if (tmpl.voice != span.voice)
+        continue;
+      if (tmpl.seed_pitches.empty())
+        continue;
+      if (tmpl.seed_durations.size() != tmpl.seed_pitches.size())
+        continue;
+      const int offset = step_semis(tmpl.pattern);
+      Tick local_offset = 0;
+      for (std::size_t i = 0; i < tmpl.seed_pitches.size(); ++i) {
+        local_offset += tmpl.seed_durations[i];
+      }
+      const Tick step_stride = tmpl.step_length_ticks > 0 ? tmpl.step_length_ticks : local_offset;
+      for (std::uint8_t k = 0; k < tmpl.num_steps; ++k) {
+        Tick beat_cursor = tmpl.target_start_tick + static_cast<Tick>(k) * step_stride;
+        for (std::size_t i = 0; i < tmpl.seed_pitches.size(); ++i) {
+          if (beat_cursor < span.start_tick) {
+            beat_cursor += tmpl.seed_durations[i];
+            continue;
+          }
+          if (beat_cursor >= span.end_tick)
+            break;
+          const int transposed =
+              static_cast<int>(tmpl.seed_pitches[i]) + offset * static_cast<int>(k);
+          if (transposed < 0 || transposed > 127) {
+            beat_cursor += tmpl.seed_durations[i];
+            continue;
+          }
+          Candidate c;
+          c.start_tick = beat_cursor;
+          c.duration = tmpl.seed_durations[i];
+          c.pitch = static_cast<std::uint8_t>(transposed);
+          c.score = 1.0f;
+          c.satisfied_rules = 1ull << RuleBit::FortspinnungSourced;
+          if (k > 0) {
+            c.satisfied_rules |= 1ull << RuleBit::SequenceStep;
+          }
+          const ChordEvent& chord_here = activeChord(harmonic_plan, beat_cursor);
+          const auto triad_here = triadPitchClasses(chord_here);
+          const std::uint8_t pc_f = static_cast<std::uint8_t>(c.pitch % 12);
+          const bool is_triad_f =
+              (pc_f == triad_here[0] || pc_f == triad_here[1] || pc_f == triad_here[2]);
+          if (is_triad_f) {
+            c.satisfied_rules |= 1ull << RuleBit::ChordTone;
+          }
+          applyP7Bits(c.satisfied_rules, chord_here, pc_f, is_triad_f);
+          applyP8Bits(c.satisfied_rules, harmonic_plan, chord_here, pc_f, is_triad_f);
+          out.push_back(c);
+          beat_cursor += tmpl.seed_durations[i];
+        }
+      }
     }
     return out;
   }
@@ -554,6 +694,45 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
                                               static_cast<std::uint8_t>(p), t, parallel_prev_pitch,
                                               parallel_prev_tick)) {
         continue;
+      }
+
+      // P10 strong-beat perfect-4th pre-filter. Converts the Validator's
+      // fourth_only_on_weak_beat rule into a confirming check: reject any
+      // candidate that would form a perfect 4th (interval class 5) on a
+      // strong beat with the sounding voice of an adjacent UPPER pair,
+      // matching the Validator scoping (adjacent pair, bottom-of-texture
+      // pair excluded). Without this filter the Composer can land an
+      // upper-pair 4th on a downbeat that the Validator then rejects,
+      // failing the whole span. A 4th inverts to a 5th under octave
+      // inversion, so avoiding it preserves invertibility. Gated on
+      // chord.has_degree to match the P7 spacing pre-filter scoping
+      // (degree-tagged layouts carry a correct context.num_voices, which
+      // the bottom-of-texture exclusion relies on).
+      if (strong && chord.has_degree && context.placed_notes != nullptr) {
+        bool forms_upper_pair_fourth = false;
+        for (const auto& placed : *context.placed_notes) {
+          if (placed.voice == span.voice)
+            continue;
+          if (placed.start_tick > t)
+            continue;
+          if (t >= placed.start_tick + placed.duration)
+            continue;
+          // Adjacent-pair scoping (V0 = top, V_{N-1} = bottom).
+          const VoiceId hi_voice = std::min(placed.voice, span.voice);
+          const VoiceId lo_voice = std::max(placed.voice, span.voice);
+          if (lo_voice != hi_voice + 1)
+            continue;
+          // Exclude the bottom-of-texture pair (mirrors the Validator).
+          if (context.num_voices >= 2 && lo_voice == context.num_voices - 1)
+            continue;
+          const int cls = std::abs(static_cast<int>(placed.pitch) - p) % 12;
+          if (cls == 5) {
+            forms_upper_pair_fourth = true;
+            break;
+          }
+        }
+        if (forms_upper_pair_fourth)
+          continue;
       }
       if (!force_bass_cadence_pc && context.placed_notes != nullptr && have_parallel_anchor &&
           createsHiddenParallelPerfect(*context.placed_notes, span.voice,
@@ -775,6 +954,21 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
         score += 0.50f;
       }
 
+      // P8 Picardy 3rd bias. The final picardy chord's identity is
+      // carried by its major third (E natural in C major). Without
+      // this bias the per-voice prev-distance heuristic pins every
+      // voice on the chord root and the major third never sounds.
+      // The bonus is small enough (0.05) to lose to a voice already
+      // sitting on a chord tone close to its prev pitch, but large
+      // enough to flip the choice when two chord tones tie on
+      // prev-distance.
+      if (chord.is_picardy) {
+        const std::uint8_t major_third_pc = static_cast<std::uint8_t>((chord.root_pc + 4) % 12);
+        if (static_cast<std::uint8_t>(pc) == major_third_pc) {
+          score += 0.05f;
+        }
+      }
+
       // Quarter-mode unison-run penalty. When pre_prev and prev are
       // the same pitch (two consecutive unisons), a 3rd consecutive
       // unison candidate gets a 0.15 deduction so the broad step
@@ -880,6 +1074,46 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
       if (is_triad)
         rules |= 1ull << RuleBit::ChordTone;
       applyP7Bits(rules, chord, static_cast<std::uint8_t>(pc), is_triad);
+      applyP8Bits(rules, harmonic_plan, chord, static_cast<std::uint8_t>(pc), is_triad);
+      // P10 invertibility confirmation. Set InvertibleAt8va when we have
+      // placed context AND this candidate does NOT form a perfect 4th
+      // (class 5) on a strong beat with the sounding upper-ADJACENT
+      // voice (V_{span.voice-1}). A strong-beat 4th in the upper pair
+      // inverts to a 5th, so a clean candidate is one that avoids it.
+      // The bit is a confirming check: the Composer already prefers
+      // consonant strong-beat verticals, so this accrues on most
+      // candidates rather than constraining selection.
+      //
+      // Scope: only the upper-adjacent pairs the P7 spacing / P10
+      // validator rules cover (top N-2 pairs). The bottom pair
+      // (V_{N-2}, V_{N-1}) is excluded, so the bass voice (the last
+      // voice index) never lights the bit against its lower-adjacent
+      // neighbor.
+      const bool is_bottom_voice = context.num_voices > 0 && span.voice + 1 >= context.num_voices;
+      if (context.placed_notes != nullptr && span.voice > 0 && !is_bottom_voice) {
+        bool forms_strong_fourth = false;
+        if (strong) {
+          // Sounding pitch of the immediately-higher voice (V-1).
+          const VoiceId upper_adjacent = static_cast<VoiceId>(span.voice - 1);
+          std::uint8_t upper_pitch = 0;
+          for (const auto& placed : *context.placed_notes) {
+            if (placed.voice != upper_adjacent)
+              continue;
+            if (placed.start_tick > t)
+              continue;
+            if (t >= placed.start_tick + placed.duration)
+              continue;
+            upper_pitch = placed.pitch;
+          }
+          if (upper_pitch != 0) {
+            const int cls = std::abs(static_cast<int>(upper_pitch) - p) % 12;
+            forms_strong_fourth = (cls == 5);
+          }
+        }
+        if (!forms_strong_fourth) {
+          rules |= 1ull << RuleBit::InvertibleAt8va;
+        }
+      }
       if (strong && is_triad)
         rules |= 1ull << RuleBit::StrongBeatConsonance;
       if (context.prev_pitch > 0 && std::abs(p - context.prev_pitch) <= 4) {

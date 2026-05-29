@@ -67,6 +67,25 @@ enum class SixFourType : std::uint8_t {
   Neighboring = 2,  // Upper voices neighbor against a stationary bass.
 };
 
+// Modulation taxonomy. P8 surfaces three Bach idioms for moving from
+// one key area to another:
+//
+//   Pivot     — a single chord belongs to both keys (e.g. ii in C =
+//               vi in F); the listener re-hears it in the new key
+//               retrospectively. Pivot chords are diatonic in both
+//               from_key and to_key.
+//   Phrase    — the new key arrives at the start of a fresh phrase
+//               (cadence + restart). No pivot is needed because the
+//               break in continuity carries the modulation.
+//   CommonTone — a single pitch class held across the boundary
+//               provides the perceptual bridge. Used for distant
+//               modulations.
+enum class ModulationType : std::uint8_t {
+  Pivot = 0,
+  Phrase = 1,
+  CommonTone = 2,
+};
+
 // Single source of truth for cadence taxonomy: harmony::CadenceType.
 // Re-exported here so composer code keeps the bach::composer::CadenceType
 // spelling without maintaining a parallel enum (see plan §12 H1).
@@ -90,6 +109,29 @@ struct ChordEvent {
   ChordInversion inversion = ChordInversion::Root;
   HarmonicFunction function = HarmonicFunction::T;
   bool has_degree = false;
+
+  // P8 (Modulation / Tonicization / Borrowed chords). All P8 fields
+  // default to "not in effect" so existing fixtures keep behaving
+  // exactly as in P3-P7.
+  //
+  // secondary_of:    the secondary key this chord tonicizes. For V/V
+  //                  in C major, root_pc=2 (D), quality=Major (or
+  //                  Dominant7), degree=V (relative to the secondary
+  //                  key), and secondary_of=V (the secondary key
+  //                  itself, also V relative to the home key). Set
+  //                  has_secondary_of=true to mark the chord as a
+  //                  secondary dominant.
+  // is_borrowed:     this chord is borrowed from the parallel mode
+  //                  (modal mixture). Used for borrowed iv in major
+  //                  keys and other parallel-mode loans.
+  // is_picardy:      this chord is the final tonic of a minor-key
+  //                  piece with the third raised to major (the
+  //                  Picardy third). The Validator uses this to
+  //                  verify the third is indeed major.
+  RomanNumeral secondary_of = RomanNumeral::I;
+  bool has_secondary_of = false;
+  bool is_borrowed = false;
+  bool is_picardy = false;
 };
 
 struct CadenceEvent {
@@ -107,6 +149,19 @@ struct CadentialSixFour {
   SixFourType type = SixFourType::Cadential;
 };
 
+// One modulation in the plan. `tick` is the boundary where the new
+// key takes effect (Pivot type: the pivot chord's tick; Phrase type:
+// the first chord of the new phrase; CommonTone type: the chord
+// where the common pc bridges over).
+struct ModulationEvent {
+  Tick tick = 0;
+  std::uint8_t from_tonic_pc = 0;
+  std::uint8_t to_tonic_pc = 0;
+  bool from_is_minor = false;
+  bool to_is_minor = false;
+  ModulationType type = ModulationType::Pivot;
+};
+
 // Harmonic plan: piece-wide chord progression and tonic anchor.
 //
 // HarmonicPlan is produced before CandidateSearch and is immutable for the
@@ -121,6 +176,9 @@ struct HarmonicPlan {
   std::vector<ChordEvent> chords;
   std::vector<CadenceEvent> cadences;
   std::vector<CadentialSixFour> cadential_six_fours;
+  // P8: piece-wide modulation boundaries. Empty when the piece stays
+  // in the home key (Phase 2-7 behavior).
+  std::vector<ModulationEvent> modulations;
 };
 
 }  // namespace bach::composer

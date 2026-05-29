@@ -65,7 +65,16 @@ enum class VoiceIntent : std::uint8_t {
   // replays verbatim. Phase 6 adds this intent so the original subject
   // voice (post-subject statement) supplies an obbligato counterline
   // against the AnswerCarrier instead of a free SequentialCounterline.
-  CountersubjectCarrier = 9
+  CountersubjectCarrier = 9,
+
+  // Voice carrying a Fortspinnung sequence: one seed motif transposed
+  // by a fixed pattern (descending 5ths / descending step / ascending
+  // step) over N successive steps. Source is
+  // `Material::sequence_templates`; CandidateSearch replays the
+  // expanded note list verbatim. Phase 9 adds this intent so episodic
+  // continuations can be planned as deterministic sequences instead
+  // of free counterpoint.
+  FortspinnungSpan = 10
 };
 
 // Pure helper. No formatting library dependency.

@@ -1270,4 +1270,546 @@ TEST(ValidatorTest, SpacingSkippedForTwoVoiceTexture) {
   EXPECT_FALSE(hasRule(r, "spacing_adjacent_voices_within_octave"));
 }
 
+// P8 modulation_pivot_chord_required tests.
+//
+// Plan layout: a single-chord pivot at the modulation tick. A valid
+// pivot must be diatonic in both keys. The unit tests below isolate
+// the rule by giving the plan exactly one chord at the pivot tick;
+// real fixtures interleave pre- and post-pivot chords.
+
+namespace {
+
+// Helper plan with a single ChordEvent at the pivot tick + a
+// ModulationEvent declaring C major → G major Pivot at the same tick.
+HarmonicPlan cToGPivotPlan(std::uint8_t pivot_root_pc, ChordQuality pivot_quality,
+                           RomanNumeral pivot_degree) {
+  HarmonicPlan plan;
+  plan.tonic_pc = 0;
+  plan.is_minor = false;
+  ChordEvent pivot;
+  pivot.start_tick = 0;
+  pivot.root_pc = pivot_root_pc;
+  pivot.quality = pivot_quality;
+  pivot.degree = pivot_degree;
+  pivot.function = HarmonicFunction::Pred;
+  pivot.has_degree = true;
+  plan.chords.push_back(pivot);
+  ModulationEvent mod;
+  mod.tick = 0;
+  mod.from_tonic_pc = 0;
+  mod.to_tonic_pc = 7;
+  mod.type = ModulationType::Pivot;
+  plan.modulations.push_back(mod);
+  return plan;
+}
+
+}  // namespace
+
+TEST(ValidatorTest, ModulationPivotChordRequiredPassesForValidPivot) {
+  // ii in C (D-F-A minor) = vi in G (D-F#-A) — but wait, F natural is
+  // diatonic in C but not in G. A truly shared chord is IV in C = bVII
+  // in G or… use vi in C (A-C-E) = ii in G (A-C-E minor): all three
+  // pcs A=9, C=0, E=4 belong to both C major {0,2,4,5,7,9,11} and G
+  // major {7,9,11,0,2,4,6}? E=4 is in C but G major has 6 (F#), not 4
+  // (E). Wait — E IS in G major scale (G A B C D E F#). Yes, 4 is in
+  // G's scale. So A-C-E is diatonic in both. Use it as the pivot
+  // (vi in C / ii in G).
+  HarmonicPlan plan = cToGPivotPlan(9, ChordQuality::Minor, RomanNumeral::VI);
+  ValidationReport r = Validator{}.validate({}, {}, plan, Material{});
+  EXPECT_FALSE(hasRule(r, "modulation_pivot_chord_required"));
+}
+
+TEST(ValidatorTest, ModulationPivotChordRequiredFailsForNonPivot) {
+  // V7 in C (G-B-D-F) — F is not in G major scale (G A B C D E F#),
+  // so the chord is not diatonic in the target key. Rule fires.
+  HarmonicPlan plan = cToGPivotPlan(7, ChordQuality::Dominant7, RomanNumeral::V);
+  ValidationReport r = Validator{}.validate({}, {}, plan, Material{});
+  EXPECT_TRUE(hasRule(r, "modulation_pivot_chord_required"));
+}
+
+TEST(ValidatorTest, ModulationPivotChordRequiredSkippedForPhraseType) {
+  // Phrase modulation is exempt — no pivot needed.
+  HarmonicPlan plan = cToGPivotPlan(7, ChordQuality::Dominant7, RomanNumeral::V);
+  plan.modulations.front().type = ModulationType::Phrase;
+  ValidationReport r = Validator{}.validate({}, {}, plan, Material{});
+  EXPECT_FALSE(hasRule(r, "modulation_pivot_chord_required"));
+}
+
+TEST(ValidatorTest, ModulationPivotChordRequiredSkippedWhenNoModulations) {
+  HarmonicPlan plan = cMajorWhole();
+  ValidationReport r = Validator{}.validate({}, {}, plan, Material{});
+  EXPECT_FALSE(hasRule(r, "modulation_pivot_chord_required"));
+}
+
+// P8 secondary_dominant_resolution tests.
+//
+// Plan: chord 0 = V/V (D-major) with has_secondary_of=true and
+// secondary_of=V. Chord 1 = V (G-major) at the next tick. The
+// secondary leading tone is F# (pc=6), which should rise to G (pc=7)
+// in some voice.
+
+namespace {
+
+HarmonicPlan secondaryDominantPlan(bool include_resolution, bool wrong_degree = false) {
+  HarmonicPlan plan;
+  plan.tonic_pc = 0;
+  plan.is_minor = false;
+  ChordEvent v_of_v;
+  v_of_v.start_tick = 0;
+  v_of_v.root_pc = 2;  // D
+  v_of_v.quality = ChordQuality::Major;
+  v_of_v.degree = RomanNumeral::V;
+  v_of_v.function = HarmonicFunction::Pred;
+  v_of_v.has_degree = true;
+  v_of_v.has_secondary_of = true;
+  v_of_v.secondary_of = RomanNumeral::V;
+  plan.chords.push_back(v_of_v);
+  if (include_resolution) {
+    ChordEvent resolution;
+    resolution.start_tick = kTicksPerBeat;
+    resolution.root_pc = 7;
+    resolution.quality = ChordQuality::Major;
+    resolution.degree = wrong_degree ? RomanNumeral::I : RomanNumeral::V;
+    resolution.function = HarmonicFunction::D;
+    resolution.has_degree = true;
+    plan.chords.push_back(resolution);
+  }
+  return plan;
+}
+
+}  // namespace
+
+TEST(ValidatorTest, SecondaryDominantResolutionPassesForCleanResolution) {
+  // V/V → V with F#5 (66) → G5 (67) in voice 0 (the LT resolves up).
+  const Tick beat = kTicksPerBeat;
+  std::vector<NoteEvent> notes = {
+      makeNote(0, beat, 66, 0),     // F#5
+      makeNote(0, beat, 62, 1),     // D5 (root)
+      makeNote(beat, beat, 67, 0),  // G5
+      makeNote(beat, beat, 59, 1),  // B4
+  };
+  std::vector<NoteProvenance> prov(notes.size(), makeProv(0, NoteSource::Compose));
+  ValidationReport r = Validator{}.validate(
+      notes, prov, secondaryDominantPlan(/*include_resolution=*/true), Material{});
+  EXPECT_FALSE(hasRule(r, "secondary_dominant_resolution"));
+}
+
+TEST(ValidatorTest, SecondaryDominantResolutionAllowsFreeVoiceLeading) {
+  // V/V → V where F# does not rise by step. Plan §5 P8 defines the
+  // rule as degree-pairing only; voice-leading details (LT rise) are
+  // not part of the failure condition. The rule should pass when the
+  // resolution chord is correctly identified as V.
+  const Tick beat = kTicksPerBeat;
+  std::vector<NoteEvent> notes = {
+      makeNote(0, beat, 66, 0),
+      makeNote(0, beat, 62, 1),
+      makeNote(beat, beat, 62, 0),
+      makeNote(beat, beat, 59, 1),
+  };
+  std::vector<NoteProvenance> prov(notes.size(), makeProv(0, NoteSource::Compose));
+  ValidationReport r = Validator{}.validate(
+      notes, prov, secondaryDominantPlan(/*include_resolution=*/true), Material{});
+  EXPECT_FALSE(hasRule(r, "secondary_dominant_resolution"));
+}
+
+TEST(ValidatorTest, SecondaryDominantResolutionFailsForWrongDegreeNext) {
+  // V/V followed by I (instead of V) — degree mismatch.
+  const Tick beat = kTicksPerBeat;
+  std::vector<NoteEvent> notes = {
+      makeNote(0, beat, 66, 0),
+      makeNote(0, beat, 62, 1),
+      makeNote(beat, beat, 67, 0),
+      makeNote(beat, beat, 60, 1),
+  };
+  std::vector<NoteProvenance> prov(notes.size(), makeProv(0, NoteSource::Compose));
+  ValidationReport r = Validator{}.validate(
+      notes, prov, secondaryDominantPlan(/*include_resolution=*/true, /*wrong_degree=*/true),
+      Material{});
+  EXPECT_TRUE(hasRule(r, "secondary_dominant_resolution"));
+}
+
+// P9 sequence_pattern_consistency tests.
+//
+// Seed motif: 2 notes (C5=72, D5=74) each 1 quarter long. Three steps.
+// Each pattern transposes by its declared semitones per step:
+//   DescendingFifths: -7 → step0={72,74}, step1={65,67}, step2={58,60}
+//   DescendingStep:   -2 → step0={72,74}, step1={70,72}, step2={68,70}
+//   AscendingStep:    +2 → step0={72,74}, step1={74,76}, step2={76,78}
+
+namespace {
+
+SequenceTemplate makeSeqTemplate(SequencePattern pattern, std::uint8_t num_steps) {
+  SequenceTemplate t;
+  t.pattern = pattern;
+  t.target_start_tick = 0;
+  t.step_length_ticks = 2 * kTicksPerBeat;
+  t.num_steps = num_steps;
+  t.voice = 0;
+  t.seed_pitches = {72, 74};
+  t.seed_durations = {kTicksPerBeat, kTicksPerBeat};
+  return t;
+}
+
+std::vector<NoteEvent> renderSequence(SequencePattern pattern, std::uint8_t num_steps,
+                                      bool tamper_step1_pitch = false) {
+  auto step_semis = [&]() {
+    switch (pattern) {
+      case SequencePattern::DescendingFifths:
+        return -7;
+      case SequencePattern::DescendingStep:
+        return -2;
+      case SequencePattern::AscendingStep:
+        return 2;
+    }
+    return 0;
+  }();
+  std::vector<NoteEvent> notes;
+  for (std::uint8_t k = 0; k < num_steps; ++k) {
+    Tick base_tick = static_cast<Tick>(k) * 2 * kTicksPerBeat;
+    int p0 = 72 + step_semis * k;
+    int p1 = 74 + step_semis * k;
+    if (tamper_step1_pitch && k == 1) {
+      p0 += 1;  // intentionally off-pattern
+    }
+    notes.push_back(makeNote(base_tick, kTicksPerBeat, static_cast<std::uint8_t>(p0), 0));
+    notes.push_back(
+        makeNote(base_tick + kTicksPerBeat, kTicksPerBeat, static_cast<std::uint8_t>(p1), 0));
+  }
+  return notes;
+}
+
+}  // namespace
+
+TEST(ValidatorTest, SequencePatternConsistencyPassesForDescendingFifths) {
+  Material m;
+  m.sequence_templates.push_back(makeSeqTemplate(SequencePattern::DescendingFifths, 3));
+  auto notes = renderSequence(SequencePattern::DescendingFifths, 3);
+  std::vector<NoteProvenance> prov(notes.size(), makeProv(0, NoteSource::Material));
+  ValidationReport r = Validator{}.validate(notes, prov, cMajorWhole(), m);
+  EXPECT_FALSE(hasRule(r, "sequence_pattern_consistency"));
+}
+
+TEST(ValidatorTest, SequencePatternConsistencyPassesForDescendingStep) {
+  Material m;
+  m.sequence_templates.push_back(makeSeqTemplate(SequencePattern::DescendingStep, 3));
+  auto notes = renderSequence(SequencePattern::DescendingStep, 3);
+  std::vector<NoteProvenance> prov(notes.size(), makeProv(0, NoteSource::Material));
+  ValidationReport r = Validator{}.validate(notes, prov, cMajorWhole(), m);
+  EXPECT_FALSE(hasRule(r, "sequence_pattern_consistency"));
+}
+
+TEST(ValidatorTest, SequencePatternConsistencyPassesForAscendingStep) {
+  Material m;
+  m.sequence_templates.push_back(makeSeqTemplate(SequencePattern::AscendingStep, 3));
+  auto notes = renderSequence(SequencePattern::AscendingStep, 3);
+  std::vector<NoteProvenance> prov(notes.size(), makeProv(0, NoteSource::Material));
+  ValidationReport r = Validator{}.validate(notes, prov, cMajorWhole(), m);
+  EXPECT_FALSE(hasRule(r, "sequence_pattern_consistency"));
+}
+
+TEST(ValidatorTest, SequencePatternConsistencyFailsForWrongPitch) {
+  Material m;
+  m.sequence_templates.push_back(makeSeqTemplate(SequencePattern::DescendingFifths, 3));
+  auto notes = renderSequence(SequencePattern::DescendingFifths, 3, /*tamper_step1_pitch=*/true);
+  std::vector<NoteProvenance> prov(notes.size(), makeProv(0, NoteSource::Material));
+  ValidationReport r = Validator{}.validate(notes, prov, cMajorWhole(), m);
+  EXPECT_TRUE(hasRule(r, "sequence_pattern_consistency"));
+}
+
+TEST(ValidatorTest, SequencePatternConsistencyFailsForMissingStep) {
+  Material m;
+  m.sequence_templates.push_back(makeSeqTemplate(SequencePattern::AscendingStep, 3));
+  auto notes = renderSequence(SequencePattern::AscendingStep, 2);  // drop step 2
+  std::vector<NoteProvenance> prov(notes.size(), makeProv(0, NoteSource::Material));
+  ValidationReport r = Validator{}.validate(notes, prov, cMajorWhole(), m);
+  EXPECT_TRUE(hasRule(r, "sequence_pattern_consistency"));
+}
+
+TEST(ValidatorTest, SequencePatternConsistencySkippedWhenNoTemplate) {
+  Material m;
+  auto notes = renderSequence(SequencePattern::DescendingFifths, 3);
+  std::vector<NoteProvenance> prov(notes.size(), makeProv(0, NoteSource::Material));
+  ValidationReport r = Validator{}.validate(notes, prov, cMajorWhole(), m);
+  EXPECT_FALSE(hasRule(r, "sequence_pattern_consistency"));
+}
+
+// P9 imitation_entry_match tests.
+//
+// Subject opens at tick 0 with C5 (72). Real answer enters 4 beats
+// later at G4 (67), which equals 72 + (-5) semitones (real answer).
+
+namespace {
+
+Material makeImitationMaterial(Tick distance, int interval,
+                               std::uint8_t follower_pitch_override = 0,
+                               Tick follower_tick_override = static_cast<Tick>(-1)) {
+  Material m;
+  MaterialNote subj_head;
+  subj_head.start_tick = 0;
+  subj_head.duration = kTicksPerBeat;
+  subj_head.pitch = 72;
+  m.subject.push_back(subj_head);
+  MaterialNote ans_head;
+  ans_head.start_tick =
+      (follower_tick_override == static_cast<Tick>(-1)) ? distance : follower_tick_override;
+  ans_head.duration = kTicksPerBeat;
+  ans_head.pitch = follower_pitch_override > 0
+                       ? follower_pitch_override
+                       : static_cast<std::uint8_t>(static_cast<int>(72) + interval);
+  m.answer.push_back(ans_head);
+  ImitationEntry entry;
+  entry.leader_fragment = MaterialFragment::Subject;
+  entry.follower_fragment = MaterialFragment::Answer;
+  entry.distance_ticks = distance;
+  entry.interval_semis = interval;
+  m.imitation_entries.push_back(entry);
+  return m;
+}
+
+}  // namespace
+
+TEST(ValidatorTest, ImitationEntryMatchPassesForRealAnswerP5Down) {
+  Material m = makeImitationMaterial(4 * kTicksPerBeat, -5);
+  ValidationReport r = Validator{}.validate({}, {}, cMajorWhole(), m);
+  EXPECT_FALSE(hasRule(r, "imitation_entry_match"));
+}
+
+TEST(ValidatorTest, ImitationEntryMatchPassesForP8Up) {
+  Material m = makeImitationMaterial(4 * kTicksPerBeat, 12);
+  ValidationReport r = Validator{}.validate({}, {}, cMajorWhole(), m);
+  EXPECT_FALSE(hasRule(r, "imitation_entry_match"));
+}
+
+TEST(ValidatorTest, ImitationEntryMatchFailsForWrongInterval) {
+  Material m = makeImitationMaterial(4 * kTicksPerBeat, -5, /*follower_pitch_override=*/65);
+  ValidationReport r = Validator{}.validate({}, {}, cMajorWhole(), m);
+  EXPECT_TRUE(hasRule(r, "imitation_entry_match"));
+}
+
+TEST(ValidatorTest, ImitationEntryMatchFailsForWrongDistance) {
+  Material m = makeImitationMaterial(4 * kTicksPerBeat, -5, /*follower_pitch_override=*/0,
+                                     /*follower_tick_override=*/3 * kTicksPerBeat);
+  ValidationReport r = Validator{}.validate({}, {}, cMajorWhole(), m);
+  EXPECT_TRUE(hasRule(r, "imitation_entry_match"));
+}
+
+TEST(ValidatorTest, ImitationEntryMatchSkippedWhenNoEntry) {
+  Material m;
+  m.subject.push_back({0, kTicksPerBeat, 72});
+  m.answer.push_back({4 * kTicksPerBeat, kTicksPerBeat, 67});
+  ValidationReport r = Validator{}.validate({}, {}, cMajorWhole(), m);
+  EXPECT_FALSE(hasRule(r, "imitation_entry_match"));
+}
+
+TEST(ValidatorTest, SecondaryDominantResolutionVacuousWhenLeadingToneAbsent) {
+  // V/V with no F# voiced — the LT-rise test is vacuously satisfied,
+  // but degree-mismatch can still fire. Here we provide a correct V
+  // next chord and no F# anywhere, so the rule passes.
+  const Tick beat = kTicksPerBeat;
+  std::vector<NoteEvent> notes = {
+      makeNote(0, beat, 62, 0),     // D5 (root only)
+      makeNote(0, beat, 50, 1),     // D4
+      makeNote(beat, beat, 67, 0),  // G5
+      makeNote(beat, beat, 55, 1),  // G4
+  };
+  std::vector<NoteProvenance> prov(notes.size(), makeProv(0, NoteSource::Compose));
+  ValidationReport r = Validator{}.validate(
+      notes, prov, secondaryDominantPlan(/*include_resolution=*/true), Material{});
+  EXPECT_FALSE(hasRule(r, "secondary_dominant_resolution"));
+}
+
+// === P10: invertible counterpoint at the octave ===
+//
+// All P10 tests use a 3-voice texture (V0=soprano, V1=alto, V2=inert
+// bass). The Validator checks only the adjacent UPPER pair (V0, V1);
+// the bottom pair (V1, V2) is excluded, so the tested interval lives
+// in V0-V1 and V2 is kept well below to avoid voice-crossing noise.
+
+TEST(ValidatorTest, InvertibleAt8vaFailsParallelOctavesUpperPair) {
+  // V0/V1 form an octave at bar0 beat1 and bar1 beat1; both voices move.
+  std::vector<NoteEvent> notes = {
+      makeNote(0, kTicksPerBar, 72, 0),             // C5  V0
+      makeNote(0, kTicksPerBar, 60, 1),             // C4  V1 -> octave
+      makeNote(0, kTicksPerBar, 36, 2),             // C2  V2 (inert)
+      makeNote(kTicksPerBar, kTicksPerBar, 74, 0),  // D5  V0
+      makeNote(kTicksPerBar, kTicksPerBar, 62, 1),  // D4  V1 -> octave
+      makeNote(kTicksPerBar, kTicksPerBar, 36, 2),  // C2  V2
+  };
+  std::vector<NoteProvenance> prov = {
+      makeProv(0, NoteSource::Compose),  makeProv(1, NoteSource::Compose),
+      makeProv(2, NoteSource::Material), makeProv(3, NoteSource::Compose),
+      makeProv(4, NoteSource::Compose),  makeProv(5, NoteSource::Material),
+  };
+  ValidationReport r = Validator{}.validate(notes, prov, cMajorWhole(), Material{});
+  EXPECT_TRUE(hasRule(r, "invertible_at_octave"));
+}
+
+TEST(ValidatorTest, InvertibleAt8vaPassesParallelFifthsUpperPair) {
+  // V0/V1 form a perfect 5th at both strong ticks; both move. 5ths are
+  // tolerated (they invert to 4ths).
+  std::vector<NoteEvent> notes = {
+      makeNote(0, kTicksPerBar, 67, 0),             // G4  V0
+      makeNote(0, kTicksPerBar, 60, 1),             // C4  V1 -> 5th
+      makeNote(0, kTicksPerBar, 36, 2),             // C2  V2
+      makeNote(kTicksPerBar, kTicksPerBar, 69, 0),  // A4  V0
+      makeNote(kTicksPerBar, kTicksPerBar, 62, 1),  // D4  V1 -> 5th
+      makeNote(kTicksPerBar, kTicksPerBar, 36, 2),  // C2  V2
+  };
+  std::vector<NoteProvenance> prov(notes.size(), makeProv(0, NoteSource::Compose));
+  ValidationReport r = Validator{}.validate(notes, prov, cMajorWhole(), Material{});
+  EXPECT_FALSE(hasRule(r, "invertible_at_octave"));
+}
+
+TEST(ValidatorTest, InvertibleAt8vaPassesObliqueOctave) {
+  // Octave at both ticks but only V0 moves; V1 stays static -> not a
+  // parallel (both_moved false).
+  std::vector<NoteEvent> notes = {
+      makeNote(0, kTicksPerBar, 72, 0),             // C5  V0
+      makeNote(0, kTicksPerBar, 60, 1),             // C4  V1
+      makeNote(0, kTicksPerBar, 36, 2),             // C2  V2
+      makeNote(kTicksPerBar, kTicksPerBar, 72, 0),  // C5  V0 (repeats)
+      makeNote(kTicksPerBar, kTicksPerBar, 60, 1),  // C4  V1 (static)
+      makeNote(kTicksPerBar, kTicksPerBar, 36, 2),  // C2  V2
+  };
+  std::vector<NoteProvenance> prov(notes.size(), makeProv(0, NoteSource::Compose));
+  ValidationReport r = Validator{}.validate(notes, prov, cMajorWhole(), Material{});
+  EXPECT_FALSE(hasRule(r, "invertible_at_octave"));
+}
+
+TEST(ValidatorTest, InvertibleAt8vaSkippedWhenBothMaterial) {
+  // Parallel octaves in V0/V1 but both notes are Material at each tick.
+  std::vector<NoteEvent> notes = {
+      makeNote(0, kTicksPerBar, 72, 0),             // C5  V0
+      makeNote(0, kTicksPerBar, 60, 1),             // C4  V1
+      makeNote(0, kTicksPerBar, 36, 2),             // C2  V2
+      makeNote(kTicksPerBar, kTicksPerBar, 74, 0),  // D5  V0
+      makeNote(kTicksPerBar, kTicksPerBar, 62, 1),  // D4  V1
+      makeNote(kTicksPerBar, kTicksPerBar, 36, 2),  // C2  V2
+  };
+  std::vector<NoteProvenance> prov = {
+      makeProv(0, NoteSource::Material), makeProv(1, NoteSource::Material),
+      makeProv(2, NoteSource::Material), makeProv(3, NoteSource::Material),
+      makeProv(4, NoteSource::Material), makeProv(5, NoteSource::Material),
+  };
+  ValidationReport r = Validator{}.validate(notes, prov, cMajorWhole(), Material{});
+  EXPECT_FALSE(hasRule(r, "invertible_at_octave"));
+}
+
+TEST(ValidatorTest, InvertibleAt8vaFiresWhenOneSideCompose) {
+  // Parallel octaves with V0 Material, V1 Compose -> at-least-one
+  // non-Material satisfied, rule fires.
+  std::vector<NoteEvent> notes = {
+      makeNote(0, kTicksPerBar, 72, 0),             // C5  V0
+      makeNote(0, kTicksPerBar, 60, 1),             // C4  V1
+      makeNote(0, kTicksPerBar, 36, 2),             // C2  V2
+      makeNote(kTicksPerBar, kTicksPerBar, 74, 0),  // D5  V0
+      makeNote(kTicksPerBar, kTicksPerBar, 62, 1),  // D4  V1
+      makeNote(kTicksPerBar, kTicksPerBar, 36, 2),  // C2  V2
+  };
+  std::vector<NoteProvenance> prov = {
+      makeProv(0, NoteSource::Material), makeProv(1, NoteSource::Compose),
+      makeProv(2, NoteSource::Material), makeProv(3, NoteSource::Material),
+      makeProv(4, NoteSource::Compose),  makeProv(5, NoteSource::Material),
+  };
+  ValidationReport r = Validator{}.validate(notes, prov, cMajorWhole(), Material{});
+  EXPECT_TRUE(hasRule(r, "invertible_at_octave"));
+}
+
+TEST(ValidatorTest, InvertibleAt8vaIgnoresWeakBeatOctaves) {
+  // Parallel octaves placed on weak-beat ticks only (beat 2 of bars);
+  // strong-beat scope means no failure.
+  const Tick weak0 = kTicksPerBeat;
+  const Tick weak1 = kTicksPerBar + kTicksPerBeat;
+  std::vector<NoteEvent> notes = {
+      makeNote(weak0, kTicksPerBeat, 72, 0),  // C5  V0
+      makeNote(weak0, kTicksPerBeat, 60, 1),  // C4  V1
+      makeNote(weak0, kTicksPerBeat, 36, 2),  // C2  V2
+      makeNote(weak1, kTicksPerBeat, 74, 0),  // D5  V0
+      makeNote(weak1, kTicksPerBeat, 62, 1),  // D4  V1
+      makeNote(weak1, kTicksPerBeat, 36, 2),  // C2  V2
+  };
+  std::vector<NoteProvenance> prov(notes.size(), makeProv(0, NoteSource::Compose));
+  ValidationReport r = Validator{}.validate(notes, prov, cMajorWhole(), Material{});
+  EXPECT_FALSE(hasRule(r, "invertible_at_octave"));
+}
+
+TEST(ValidatorTest, InvertibleAt8vaSkipsBottomPairIn3Voices) {
+  // Parallel octaves in the bottom pair (V1/V2); V0/V1 consonant.
+  // Bottom pair is excluded from P10, so no failure.
+  std::vector<NoteEvent> notes = {
+      makeNote(0, kTicksPerBar, 76, 0),             // E5  V0
+      makeNote(0, kTicksPerBar, 60, 1),             // C4  V1
+      makeNote(0, kTicksPerBar, 48, 2),             // C3  V2 -> octave w/ V1
+      makeNote(kTicksPerBar, kTicksPerBar, 77, 0),  // F5  V0
+      makeNote(kTicksPerBar, kTicksPerBar, 62, 1),  // D4  V1
+      makeNote(kTicksPerBar, kTicksPerBar, 50, 2),  // D3  V2 -> octave w/ V1
+  };
+  std::vector<NoteProvenance> prov(notes.size(), makeProv(0, NoteSource::Compose));
+  ValidationReport r = Validator{}.validate(notes, prov, cMajorWhole(), Material{});
+  EXPECT_FALSE(hasRule(r, "invertible_at_octave"));
+}
+
+TEST(ValidatorTest, FourthOnlyOnWeakBeatFailsStrongBeatFourth) {
+  std::vector<NoteEvent> notes = {
+      makeNote(0, kTicksPerBar, 65, 0),  // F5  V0 (top)
+      makeNote(0, kTicksPerBar, 60, 1),  // C5  V1  -> 5 semis = P4
+      makeNote(0, kTicksPerBar, 48, 2),  // C4  V2 (inert bottom)
+  };
+  std::vector<NoteProvenance> prov = {
+      makeProv(0, NoteSource::Compose),
+      makeProv(1, NoteSource::Compose),
+      makeProv(2, NoteSource::Material),
+  };
+  ValidationReport r = Validator{}.validate(notes, prov, cMajorWhole(), Material{});
+  EXPECT_TRUE(hasRule(r, "fourth_only_on_weak_beat"));
+}
+
+TEST(ValidatorTest, FourthOnlyOnWeakBeatPassesWeakBeatFourth) {
+  // V0/V1 form a 4th on a weak beat (beat 2); allowed.
+  const Tick weak = kTicksPerBeat;
+  std::vector<NoteEvent> notes = {
+      makeNote(weak, kTicksPerBeat, 65, 0),  // F5  V0
+      makeNote(weak, kTicksPerBeat, 60, 1),  // C5  V1 -> P4
+      makeNote(weak, kTicksPerBeat, 48, 2),  // C4  V2
+  };
+  std::vector<NoteProvenance> prov = {
+      makeProv(0, NoteSource::Compose),
+      makeProv(1, NoteSource::Compose),
+      makeProv(2, NoteSource::Material),
+  };
+  ValidationReport r = Validator{}.validate(notes, prov, cMajorWhole(), Material{});
+  EXPECT_FALSE(hasRule(r, "fourth_only_on_weak_beat"));
+}
+
+TEST(ValidatorTest, FourthOnlyOnWeakBeatSkippedBothMaterial) {
+  std::vector<NoteEvent> notes = {
+      makeNote(0, kTicksPerBar, 65, 0),  // F5  V0
+      makeNote(0, kTicksPerBar, 60, 1),  // C5  V1 -> P4
+      makeNote(0, kTicksPerBar, 48, 2),  // C4  V2
+  };
+  std::vector<NoteProvenance> prov = {
+      makeProv(0, NoteSource::Material),
+      makeProv(1, NoteSource::Material),
+      makeProv(2, NoteSource::Material),
+  };
+  ValidationReport r = Validator{}.validate(notes, prov, cMajorWhole(), Material{});
+  EXPECT_FALSE(hasRule(r, "fourth_only_on_weak_beat"));
+}
+
+TEST(ValidatorTest, FourthOnlyOnWeakBeatPassesNonFourth) {
+  // V0/V1 form a perfect 5th on a strong beat (consonant non-4th).
+  std::vector<NoteEvent> notes = {
+      makeNote(0, kTicksPerBar, 67, 0),  // G4  V0
+      makeNote(0, kTicksPerBar, 60, 1),  // C4  V1 -> 7 semis = P5
+      makeNote(0, kTicksPerBar, 48, 2),  // C3  V2
+  };
+  std::vector<NoteProvenance> prov = {
+      makeProv(0, NoteSource::Compose),
+      makeProv(1, NoteSource::Compose),
+      makeProv(2, NoteSource::Material),
+  };
+  ValidationReport r = Validator{}.validate(notes, prov, cMajorWhole(), Material{});
+  EXPECT_FALSE(hasRule(r, "fourth_only_on_weak_beat"));
+}
+
 }  // namespace bach::composer

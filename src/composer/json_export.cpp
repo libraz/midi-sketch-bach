@@ -85,8 +85,11 @@ std::string emitProvenanceJson(const std::vector<NoteProvenance>& provenance) {
     w.key("candidate_score");
     w.value(static_cast<double>(p.candidate_score));
     w.key("satisfied_rules");
-    // Emit as integer; bach-mcp parses it as a bitset on its side.
-    w.value(static_cast<int>(p.satisfied_rules));
+    // Emit as a full 64-bit unsigned integer; bach-mcp parses it as a
+    // bitset. A 32-bit cast would truncate rule bits >= 32 (P9/P10) and,
+    // worse, make bit 31 the sign bit so downstream masking of high bits
+    // sign-extends — so the wide RuleIdMask must be written verbatim.
+    w.value(static_cast<std::uint64_t>(p.satisfied_rules));
     w.key("rejected_alternatives");
     w.value(static_cast<int>(p.rejected_alternatives));
     w.endObject();

@@ -97,6 +97,60 @@ struct EpisodeFragment {
   int diminish_factor = 2;
 };
 
+// One Fortspinnung sequence: a short seed motif transposed by a fixed
+// pattern over N successive steps. Bach's three canonical sequence
+// patterns (descending 5ths / descending step / ascending step) are
+// represented as semitone offsets applied per step.
+//
+//   DescendingFifths: each step transposes -7 semitones (P5 down) from
+//                     the previous step. Standard "circle of fifths"
+//                     fortspinnung (e.g. WTC I C minor BWV 847 b. 9-10).
+//   DescendingStep:   each step transposes -2 semitones (whole step
+//                     down). "Sequenza ad gradum".
+//   AscendingStep:    each step transposes +2 semitones (whole step
+//                     up). Climbing fortspinnung.
+//
+// The seed motif (`seed_pitches` + `seed_durations`) is the first step
+// played at `target_start_tick`. Steps 1..num_steps-1 are the seed
+// transposed by step_offset*step_index semitones and time-shifted by
+// step_length_ticks*step_index. CandidateSearch replays all steps as a
+// flat note list when the span's intent is FortspinnungSpan.
+enum class SequencePattern : std::uint8_t {
+  DescendingFifths = 0,
+  DescendingStep = 1,
+  AscendingStep = 2,
+};
+
+struct SequenceTemplate {
+  SequencePattern pattern = SequencePattern::DescendingFifths;
+  Tick target_start_tick = 0;  // Where step 0 (the seed) begins.
+  Tick step_length_ticks = 0;  // Time offset between successive steps.
+  std::uint8_t num_steps = 1;  // Total steps (including the seed).
+  VoiceId voice = 0;
+  std::vector<std::uint8_t> seed_pitches;
+  std::vector<Tick> seed_durations;
+};
+
+// One imitation entry declaration: a follower voice restates a fixed
+// material fragment (subject / answer) at a declared rhythmic distance
+// and pitch-class interval relative to the leader voice. Used to
+// document expected stretto / canonic entries; the Validator checks
+// that the actual Material notes match the declaration.
+//
+//   leader_fragment   — which Material fragment is being imitated.
+//   follower_fragment — the follower's Material fragment.
+//   distance_ticks    — how many ticks the follower trails the leader.
+//   interval_semis    — pitch offset (follower = leader + interval).
+//                        +7  = P5 up, -5 = P5 down, +12 = P8 up,
+//                        -12 = P8 down, -5/-7 are the canonical
+//                        Bach answer intervals (real answer = -5).
+struct ImitationEntry {
+  MaterialFragment leader_fragment = MaterialFragment::Subject;
+  MaterialFragment follower_fragment = MaterialFragment::Answer;
+  Tick distance_ticks = 0;
+  int interval_semis = 0;
+};
+
 // Bundle of pre-determined material fragments available to the planner.
 //
 // `subject` feeds SubjectCarrier spans; `answer` feeds AnswerCarrier
@@ -123,6 +177,9 @@ struct Material {
   std::vector<CadenceCell> cadence_cells;
   std::vector<SuspensionPattern> suspension_patterns;
   std::vector<EpisodeFragment> episodes;
+  // P9 (Fortspinnung + Imitation). Empty in Phase 3-8 fixtures.
+  std::vector<SequenceTemplate> sequence_templates;
+  std::vector<ImitationEntry> imitation_entries;
 };
 
 void annotateLeadingToneMarkers(Material& material, std::uint8_t tonic_pc, bool is_minor);

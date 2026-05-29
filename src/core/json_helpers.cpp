@@ -78,6 +78,14 @@ void JsonWriter::value(uint32_t val) {
   }
 }
 
+void JsonWriter::value(std::uint64_t val) {
+  maybeComma();
+  buffer_ += std::to_string(val);
+  if (!needs_comma_.empty()) {
+    needs_comma_.back() = true;
+  }
+}
+
 void JsonWriter::value(double val) {
   maybeComma();
   // Handle special floating-point values.

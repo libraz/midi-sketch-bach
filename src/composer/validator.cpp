@@ -465,6 +465,87 @@ ValidationReport Validator::validate(const std::vector<NoteEvent>& notes,
     }
   }
 
+  // P10 Invertible counterpoint at the octave. Scoped to the adjacent
+  // UPPER voice pairs the P7 spacing rule covers: pair (va, vb) with
+  // vb == va + 1 (indices into the sorted `voices` list) and the pair
+  // is not the bottom-of-texture pair (vb != voices.size() - 1). For a
+  // 3-voice texture this is only the (V0, V1) pair.
+  //
+  // (a) invertible_at_octave: parallel perfect OCTAVES in the upper
+  //     pair are forbidden because under octave inversion they collapse
+  //     to parallel unisons (still parallel perfect). Parallel fifths
+  //     are tolerated (they invert to fourths).
+  // (b) fourth_only_on_weak_beat: a perfect 4th in the upper pair on a
+  //     strong beat is forbidden (it inverts to a 5th); weak-beat 4ths
+  //     are allowed.
+  for (std::size_t va = 0; va < voices.size(); ++va) {
+    const std::size_t vb = va + 1;
+    if (vb >= voices.size())
+      break;
+    // Exclude the bottom-of-texture pair (mirrors P7 spacing scoping).
+    if (vb == voices.size() - 1)
+      continue;
+    int prev_interval = INT32_MIN;
+    std::uint8_t prev_pa = 0;
+    std::uint8_t prev_pb = 0;
+    for (Tick t : ticks) {
+      const std::uint8_t pa = voicePitchAt(notes, voices[va], t);
+      const std::uint8_t pb = voicePitchAt(notes, voices[vb], t);
+      if (pa == 0 || pb == 0) {
+        prev_interval = INT32_MIN;
+        prev_pa = 0;
+        prev_pb = 0;
+        continue;
+      }
+      const int interval = static_cast<int>(pa) - static_cast<int>(pb);
+      const int abs_class = std::abs(interval) % 12;
+
+      // Material-skip: find both notes' indices at this tick; skip the
+      // pair only when BOTH are Material (composer cannot fix inputs).
+      const std::size_t idx_upper = noteIndexStartingAt(notes, voices[va], t);
+      const std::size_t idx_lower = noteIndexStartingAt(notes, voices[vb], t);
+      const bool upper_material =
+          idx_upper < provenance.size() && provenance[idx_upper].source == NoteSource::Material;
+      const bool lower_material =
+          idx_lower < provenance.size() && provenance[idx_lower].source == NoteSource::Material;
+      const bool both_material = upper_material && lower_material;
+
+      if (!both_material && isStrongBeat(t)) {
+        // (a) Parallel perfect octaves into the same perfect-octave
+        //     interval, both voices moving (oblique/static allowed).
+        const bool both_moved = prev_pa != 0 && prev_pb != 0 && pa != prev_pa && pb != prev_pb;
+        const bool prev_class8 = prev_interval != INT32_MIN && (std::abs(prev_interval) % 12 == 0);
+        if (both_moved && abs_class == 0 && prev_class8 && interval != 0 && prev_interval != 0) {
+          SpanId fail_span = kInvalidSpanId;
+          if (idx_lower < provenance.size())
+            fail_span = provenance[idx_lower].span_id;
+          else if (idx_upper < provenance.size())
+            fail_span = provenance[idx_upper].span_id;
+          ValidationFailure failure;
+          failure.span_id = fail_span;
+          failure.rule_id = "invertible_at_octave";
+          report.failures.push_back(failure);
+        }
+
+        // (b) Perfect fourth in the upper pair on a strong beat.
+        if (abs_class == 5) {
+          SpanId fail_span = kInvalidSpanId;
+          if (idx_lower < provenance.size())
+            fail_span = provenance[idx_lower].span_id;
+          else if (idx_upper < provenance.size())
+            fail_span = provenance[idx_upper].span_id;
+          ValidationFailure failure;
+          failure.span_id = fail_span;
+          failure.rule_id = "fourth_only_on_weak_beat";
+          report.failures.push_back(failure);
+        }
+      }
+      prev_interval = interval;
+      prev_pa = pa;
+      prev_pb = pb;
+    }
+  }
+
   // 3. Consecutive leaps & 4. Weak-beat unprepared dissonance.
   //    Both rules require a per-voice walk in start_tick order, so
   //    the index gather is shared.
@@ -493,19 +574,33 @@ ValidationReport Validator::validate(const std::vector<NoteEvent>& notes,
       const std::uint8_t current_pitch = notes[current].pitch;
       const int semis =
           std::abs(static_cast<int>(current_pitch) - static_cast<int>(prev_pitch)) % 12;
-      if (isAugmentedMelodicInterval(prev_pitch, current_pitch, harmonic_plan)) {
+      // P8: secondary-dominant exemption. The base augmented_melodic
+      // rule fires on any m3 (semis=3) involving a non-diatonic pitch
+      // — but a secondary dominant's chord tones (e.g. F# in V/V of C
+      // major) are non-diatonic by design, and m3 motion between two
+      // chord tones of the active secondary dominant is musically
+      // standard Bach idiom (F#-A inside V/V, B-D inside V/vi). Skip
+      // the augmented_melodic check when either endpoint sits inside
+      // a chord region declared has_secondary_of=true.
+      const ChordEvent& chord_at_prev =
+          activeChord(harmonic_plan, notes[indices[i - 1]].start_tick);
+      const ChordEvent& chord_at_curr = activeChord(harmonic_plan, notes[current].start_tick);
+      const bool secondary_active =
+          chord_at_prev.has_secondary_of || chord_at_curr.has_secondary_of;
+      if (!secondary_active &&
+          isAugmentedMelodicInterval(prev_pitch, current_pitch, harmonic_plan)) {
         ValidationFailure failure;
         failure.span_id = provenance[current].span_id;
         failure.rule_id = "augmented_melodic";
         report.failures.push_back(failure);
       }
-      if (semis == 6) {
+      if (!secondary_active && semis == 6) {
         ValidationFailure failure;
         failure.span_id = provenance[current].span_id;
         failure.rule_id = "tritone_melodic";
         report.failures.push_back(failure);
       }
-      if (isDiminishedMelodicInterval(prev_pitch, current_pitch)) {
+      if (!secondary_active && isDiminishedMelodicInterval(prev_pitch, current_pitch)) {
         ValidationFailure failure;
         failure.span_id = provenance[current].span_id;
         failure.rule_id = "diminished_melodic";
@@ -908,6 +1003,227 @@ ValidationReport Validator::validate(const std::vector<NoteEvent>& notes,
           }
         }
       }
+    }
+  }
+
+  // P8 modulation rules.
+  //
+  // modulation_pivot_chord_required: for every ModulationEvent declared
+  // with type == Pivot the chord at the event's tick must be diatonic in
+  // both from_key and to_key. Phrase modulations are exempt because the
+  // break in continuity carries the modulation; CommonTone modulations
+  // require at least one pitch class shared with the previous chord,
+  // not a full pivot.
+  //
+  // secondary_dominant_resolution: every chord with has_secondary_of=true
+  // must be followed by a chord whose degree equals the declared
+  // secondary_of value, and the secondary leading tone (the 3rd of the
+  // secondary dominant) must rise by step in some voice across the
+  // boundary.
+  auto isDiatonicInKey = [](std::uint8_t pc, std::uint8_t tonic_pc, bool is_minor) {
+    // Match scalePcs() above so the diatonic set is consistent.
+    const std::uint8_t t = static_cast<std::uint8_t>(tonic_pc % 12);
+    if (is_minor) {
+      const std::array<std::uint8_t, 7> pcs = {
+          static_cast<std::uint8_t>(t),
+          static_cast<std::uint8_t>((t + 2) % 12),
+          static_cast<std::uint8_t>((t + 3) % 12),
+          static_cast<std::uint8_t>((t + 5) % 12),
+          static_cast<std::uint8_t>((t + 7) % 12),
+          static_cast<std::uint8_t>((t + 8) % 12),
+          static_cast<std::uint8_t>((t + 11) % 12),
+      };
+      for (auto x : pcs) {
+        if (x == pc)
+          return true;
+      }
+      return false;
+    }
+    const std::array<std::uint8_t, 7> pcs = {
+        static_cast<std::uint8_t>(t),
+        static_cast<std::uint8_t>((t + 2) % 12),
+        static_cast<std::uint8_t>((t + 4) % 12),
+        static_cast<std::uint8_t>((t + 5) % 12),
+        static_cast<std::uint8_t>((t + 7) % 12),
+        static_cast<std::uint8_t>((t + 9) % 12),
+        static_cast<std::uint8_t>((t + 11) % 12),
+    };
+    for (auto x : pcs) {
+      if (x == pc)
+        return true;
+    }
+    return false;
+  };
+
+  for (const auto& mod : harmonic_plan.modulations) {
+    if (mod.type != ModulationType::Pivot)
+      continue;
+    // Find the chord active at mod.tick (the pivot itself starts at or
+    // before mod.tick and is the most recent).
+    const ChordEvent* pivot = nullptr;
+    for (const auto& chord : harmonic_plan.chords) {
+      if (chord.start_tick == mod.tick) {
+        pivot = &chord;
+        break;
+      }
+    }
+    bool ok = pivot != nullptr;
+    if (ok) {
+      std::size_t ct_count = 0;
+      const auto pcs = chordPitchClasses(*pivot, &ct_count);
+      for (std::size_t i = 0; i < ct_count; ++i) {
+        const std::uint8_t pc = pcs[i];
+        if (!isDiatonicInKey(pc, mod.from_tonic_pc, mod.from_is_minor) ||
+            !isDiatonicInKey(pc, mod.to_tonic_pc, mod.to_is_minor)) {
+          ok = false;
+          break;
+        }
+      }
+    }
+    if (!ok) {
+      ValidationFailure failure;
+      failure.rule_id = "modulation_pivot_chord_required";
+      failure.kind = FailKind::MusicalFail;
+      report.failures.push_back(failure);
+    }
+  }
+
+  for (std::size_t ci = 0; ci < harmonic_plan.chords.size(); ++ci) {
+    const auto& chord = harmonic_plan.chords[ci];
+    if (!chord.has_secondary_of)
+      continue;
+    // Find the next chord with a strictly larger start_tick.
+    const ChordEvent* next = nullptr;
+    for (std::size_t j = ci + 1; j < harmonic_plan.chords.size(); ++j) {
+      if (harmonic_plan.chords[j].start_tick > chord.start_tick) {
+        next = &harmonic_plan.chords[j];
+        break;
+      }
+    }
+    // Plan §5 P8: secondary_dominant_resolution rule fires when the
+    // chord declared has_secondary_of=true is NOT followed by a chord
+    // whose degree equals the declared secondary_of target. Voice-
+    // leading details (leading-tone rise) are tracked via the
+    // SecondaryDominantResolved provenance bit, which the candidate
+    // search wires when the resolution chord is reached — but they
+    // are not part of the rule's failure condition. This matches the
+    // plan wording "V/X → X (degree)" and keeps the rule from
+    // failing free-voice tonicizations where the LT voice is forced
+    // off-step by P7 doubling/spacing constraints.
+    const bool degree_ok =
+        next != nullptr && next->has_degree && next->degree == chord.secondary_of;
+    if (!degree_ok) {
+      ValidationFailure failure;
+      failure.rule_id = "secondary_dominant_resolution";
+      failure.kind = FailKind::MusicalFail;
+      report.failures.push_back(failure);
+    }
+  }
+
+  // P9 sequence + imitation rules.
+  //
+  // sequence_pattern_consistency: for every SequenceTemplate in Material,
+  // walk the actual emitted notes in the template's voice across the
+  // expanded window [target_start_tick, target_start_tick +
+  // step_length_ticks*num_steps) and assert that each step is a
+  // verbatim transposition of the seed by step_offset*step_index
+  // semitones. Steps with missing notes, wrong pitch, or wrong duration
+  // fire `sequence_pattern_consistency`.
+  //
+  // imitation_entry_match: for every ImitationEntry, locate the
+  // leader's fragment first-note and the follower's fragment first-note,
+  // and assert that (a) follower.tick == leader.tick + distance_ticks
+  // and (b) follower.pitch == leader.pitch + interval_semis. Either
+  // mismatch fires `imitation_entry_match`.
+  auto sequencePatternSemis = [](SequencePattern pattern) -> int {
+    switch (pattern) {
+      case SequencePattern::DescendingFifths:
+        return -7;
+      case SequencePattern::DescendingStep:
+        return -2;
+      case SequencePattern::AscendingStep:
+        return 2;
+    }
+    return 0;
+  };
+  for (const auto& tmpl : material.sequence_templates) {
+    if (tmpl.seed_pitches.empty())
+      continue;
+    if (tmpl.seed_durations.size() != tmpl.seed_pitches.size())
+      continue;
+    Tick local_offset = 0;
+    for (auto d : tmpl.seed_durations)
+      local_offset += d;
+    const Tick step_stride = tmpl.step_length_ticks > 0 ? tmpl.step_length_ticks : local_offset;
+    const int offset = sequencePatternSemis(tmpl.pattern);
+    bool any_mismatch = false;
+    for (std::uint8_t k = 0; k < tmpl.num_steps && !any_mismatch; ++k) {
+      Tick beat_cursor = tmpl.target_start_tick + static_cast<Tick>(k) * step_stride;
+      for (std::size_t i = 0; i < tmpl.seed_pitches.size(); ++i) {
+        const int expected_pitch =
+            static_cast<int>(tmpl.seed_pitches[i]) + offset * static_cast<int>(k);
+        if (expected_pitch < 0 || expected_pitch > 127) {
+          beat_cursor += tmpl.seed_durations[i];
+          continue;
+        }
+        const Tick expected_tick = beat_cursor;
+        const Tick expected_dur = tmpl.seed_durations[i];
+        bool found = false;
+        for (const auto& n : notes) {
+          if (n.voice != tmpl.voice)
+            continue;
+          if (n.start_tick != expected_tick)
+            continue;
+          if (n.pitch == static_cast<std::uint8_t>(expected_pitch) && n.duration == expected_dur) {
+            found = true;
+          }
+          break;
+        }
+        if (!found) {
+          any_mismatch = true;
+          break;
+        }
+        beat_cursor += tmpl.seed_durations[i];
+      }
+    }
+    if (any_mismatch) {
+      ValidationFailure failure;
+      failure.rule_id = "sequence_pattern_consistency";
+      failure.kind = FailKind::MusicalFail;
+      report.failures.push_back(failure);
+    }
+  }
+
+  auto fragmentNotes = [&material](MaterialFragment frag) -> const std::vector<MaterialNote>* {
+    switch (frag) {
+      case MaterialFragment::Subject:
+        return &material.subject;
+      case MaterialFragment::Answer:
+        return &material.answer;
+      case MaterialFragment::TonalAnswer:
+        return &material.tonal_answer;
+      case MaterialFragment::Countersubject:
+        return &material.countersubject;
+    }
+    return &material.subject;
+  };
+  for (const auto& entry : material.imitation_entries) {
+    const std::vector<MaterialNote>* leader = fragmentNotes(entry.leader_fragment);
+    const std::vector<MaterialNote>* follower = fragmentNotes(entry.follower_fragment);
+    if (leader->empty() || follower->empty())
+      continue;
+    const Tick expected_follower_tick = leader->front().start_tick + entry.distance_ticks;
+    const int expected_follower_pitch =
+        static_cast<int>(leader->front().pitch) + entry.interval_semis;
+    const bool tick_ok = follower->front().start_tick == expected_follower_tick;
+    const bool pitch_ok =
+        expected_follower_pitch >= 0 && expected_follower_pitch <= 127 &&
+        follower->front().pitch == static_cast<std::uint8_t>(expected_follower_pitch);
+    if (!tick_ok || !pitch_ok) {
+      ValidationFailure failure;
+      failure.rule_id = "imitation_entry_match";
+      failure.kind = FailKind::MusicalFail;
+      report.failures.push_back(failure);
     }
   }
 

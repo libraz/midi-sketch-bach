@@ -105,6 +105,25 @@ TEST_F(JsonExportTest, ProvenanceJsonCarriesAuditFields) {
   EXPECT_TRUE(contains(provenance_, "span_id"));
 }
 
+TEST(JsonExportHighBitTest, SatisfiedRulesAboveBit31SurviveSerialization) {
+  // Regression: satisfied_rules is a 64-bit RuleIdMask. P9/P10 use rule
+  // bits >= 32 (ImitationEntryMatched=32, InvertibleAt8va=33). A 32-bit
+  // cast on export would truncate those bits AND, because bit 31 is the
+  // sign bit, make downstream bitset masking sign-extend. The exporter
+  // must emit the full unsigned 64-bit integer verbatim.
+  std::vector<NoteProvenance> prov(1);
+  prov[0].span_id = 0;
+  prov[0].voice_intent = VoiceIntent::SubjectCarrier;
+  prov[0].source = NoteSource::Compose;
+  // Set bit 33 (InvertibleAt8va) plus bit 0 (ChordTone). The decimal
+  // value is (1<<33)|1 = 8589934593, which a 32-bit cast would collapse
+  // to 1 (losing bit 33) — so we assert the full value is present.
+  prov[0].satisfied_rules = (1ull << 33) | 1ull;
+  const std::string json = emitProvenanceJson(prov);
+  EXPECT_NE(json.find("\"satisfied_rules\":8589934593"), std::string::npos)
+      << "high bit (>=32) truncated in export: " << json;
+}
+
 TEST_F(JsonExportTest, ParallelIndicesAlignBetweenFiles) {
   // generated.json.notes[i].index == provenance.json.notes[i].index for
   // all i. Implemented by counting "index":N occurrences in lockstep.

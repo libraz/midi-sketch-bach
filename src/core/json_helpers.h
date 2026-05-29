@@ -62,6 +62,10 @@ class JsonWriter {
   /// @param val Unsigned integer value.
   void value(uint32_t val);
 
+  /// @brief Write a 64-bit unsigned integer value (e.g. a wide bitset).
+  /// @param val Unsigned 64-bit value.
+  void value(std::uint64_t val);
+
   /// @brief Write a floating-point value.
   /// @param val Double value.
   void value(double val);
