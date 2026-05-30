@@ -244,6 +244,58 @@ struct RhythmFragment {
   std::vector<MaterialNote> notes;
 };
 
+// P13 texture / instrument / expression plan. Unlike the P11/P12 carrier
+// declarations (which feed CandidateSearch verbatim-replay spans), these
+// are render-time attributes the Composer's texture-expression post-pass
+// reads after candidate placement: per-voice MIDI ranges, organ-manual
+// routing, articulation regions, and an Affekt-driven velocity curve.
+// Default-constructed (all vectors empty, affekt_curve_active=false) the
+// post-pass is a no-op, so Phase 3-12 fixtures behave exactly as before.
+
+// Inclusive MIDI pitch bounds for one voice. The Validator's
+// `voice_range_integrity` rule fails any note in `voice` outside [lo, hi];
+// the post-pass stamps VoiceRangeKept on every in-range note.
+struct VoiceRangeDecl {
+  VoiceId voice = 0;
+  std::uint8_t lo = 0;
+  std::uint8_t hi = 127;
+};
+
+// Organ-manual routing for one voice (documentary id: 0=Great, 1=Swell,
+// 2=Choir, 3=Pedal). The post-pass stamps ManualAssigned on every note
+// whose voice has a routing entry.
+struct ManualRouting {
+  VoiceId voice = 0;
+  std::uint8_t manual = 0;
+};
+
+// Articulation applied to a voice over a tick window (documentary kind:
+// 0=legato, 1=detache, 2=staccato). The post-pass stamps
+// ArticulationApplied on notes whose voice + onset fall in the window.
+// Articulation does not mutate pitch or onset; only note-off timing would
+// change at render time, so the scored note content is unaffected.
+struct ArticulationSpan {
+  VoiceId voice = 0;
+  Tick start_tick = 0;
+  Tick end_tick = 0;
+  std::uint8_t kind = 0;
+};
+
+// Render-time texture / expression bundle (P13). See per-field structs.
+struct TexturePlan {
+  std::vector<VoiceRangeDecl> voice_ranges;
+  std::vector<ManualRouting> manual_assignments;
+  std::vector<ArticulationSpan> articulations;
+  // Affekt velocity curve. When active, the post-pass replaces each note's
+  // velocity with a phrase-arch value scaled by `affekt_character`
+  // (a SubjectCharacter cast, documentary) and stamps AffektCurveApplied.
+  bool affekt_curve_active = false;
+  std::uint8_t affekt_character = 0;
+  // Voice subject to the pedal-range soft penalty (C1-D3). 0xFF = none.
+  // The Validator's `pedal_range_soft_penalty` rule guards this voice.
+  VoiceId pedal_voice = 0xFF;
+};
+
 // Bundle of pre-determined material fragments available to the planner.
 //
 // `subject` feeds SubjectCarrier spans; `answer` feeds AnswerCarrier
@@ -251,6 +303,16 @@ struct RhythmFragment {
 // per-character episode fragments. Each fragment is a flat note list;
 // structure (phrase boundaries, repeat units) is the planner's
 // responsibility.
+//
+// DESIGN DEBT (god-struct): this struct has grown one flat carrier-payload
+// field per phase (subject / answer / tonal_answer / countersubject /
+// nct_figures, plus the per-decl vectors below). The CandidateSearch replay
+// dispatch must hand-map each VoiceIntent to its field. The intended future
+// shape is to group the verbatim flat-vector payloads behind an
+// intent-keyed accessor (see carrierPayload below / the IntentDescriptor
+// table in voice_intent.h) so the dispatch becomes a single lookup. The
+// regrouping is deferred because it would ripple into the harness fixture's
+// aggregate initialisers; the fields are intentionally left flat for now.
 struct Material {
   std::vector<MaterialNote> subject;
   std::vector<MaterialNote> answer;
@@ -282,6 +344,13 @@ struct Material {
   // P12 (rhythm / meter / phrase). Empty in Phase 3-11 fixtures.
   PhraseStructure phrase_structure;
   std::vector<RhythmFragment> rhythm_fragments;
+  // P14 (non-chord-tone figures). Verbatim single-voice NCT figures
+  // (cambiata / echappee / anticipation / nota cambiata) replayed by a
+  // NctCarrier span. Empty in Phase 3-13 fixtures.
+  std::vector<MaterialNote> nct_figures;
+  // P13 (texture / instrument / expression). Default-constructed (no-op
+  // post-pass) in Phase 3-12 fixtures.
+  TexturePlan texture_plan;
 };
 
 void annotateLeadingToneMarkers(Material& material, std::uint8_t tonic_pc, bool is_minor);

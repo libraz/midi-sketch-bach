@@ -30,11 +30,30 @@ enum class HarnessPhase : std::uint8_t {
                       // answer + V2 re-entry) followed by an all-Material
                       // development (bars 12-27): middle entry, pedal,
                       // subject variant, stretto, coda.
-  Phase12 = 13        // 3 voice, 28 bar. Phase11-style exposition (bars
+  Phase12 = 13,       // 3 voice, 28 bar. Phase11-style exposition (bars
                       // 0-11) followed by an all-Material rhythm section
                       // (bars 12-27): dotted figure, anacrusis, syncopated
                       // consequent, hemiola, rhythmic-motif recurrence on a
                       // 4-bar phrase grid.
+  Phase13 = 14,       // 3 voice, 16 bar. Phase7-style exposition (subject +
+                      // answer + V2 re-entry + degree tagging) overlaid with
+                      // a texture/expression plan: per-voice MIDI ranges, an
+                      // organ-manual routing, a per-voice articulation span,
+                      // an Affekt velocity curve, and a pedal voice. Voice
+                      // density already varies (V2 enters at bar 8); the
+                      // post-pass stamps the four P13 bits.
+  Phase14 = 15        // 3 voice, 42 bar. A single all-technique fugue that
+                      // exercises every device P3-P14 in one continuous
+                      // layout: exposition (subject + real answer + V2
+                      // re-entry), fortspinnung, countersubject, modulation
+                      // with secondary dominant / borrowed iv / Picardy
+                      // third, non-chord-tone figures, suspension, middle
+                      // entry, dominant pedal, diminution, stretto, episode,
+                      // a rhythm section (dotted / anacrusis / syncopation /
+                      // hemiola / recurrence), a texture/expression plan,
+                      // and a coda. Built by a dedicated self-contained
+                      // builder (buildPhase14Fixture) so the P3-P13 layouts
+                      // stay byte-identical.
 };
 
 // Static layout for one harness phase. Catalogs and seed-to-fixture
@@ -56,6 +75,8 @@ struct HarnessPhaseSpec {
   bool with_imitation_entry;  // Phase9: ImitationEntry declaration (subject→answer)
   bool with_development;      // Phase11: 28-bar layout + development carriers
   bool with_rhythm;           // Phase12: 28-bar layout + rhythm/phrase carriers
+  bool with_texture;          // Phase13: texture/expression plan + post-pass
+  bool with_nct;              // Phase14: dedicated 42-bar all-technique fugue
 };
 
 // Resolve the static layout for a phase. Returns the same struct on

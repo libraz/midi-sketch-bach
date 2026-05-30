@@ -31,6 +31,77 @@ MaterialNote mn(Tick start, std::uint8_t pitch) {
   return n;
 }
 
+// One eighth-note material figure note at an absolute tick.
+MaterialNote fig(Tick start, std::uint8_t pitch) {
+  MaterialNote n;
+  n.start_tick = start;
+  n.duration = kTicksPerBeat / 2;
+  n.pitch = pitch;
+  return n;
+}
+
+ChordEvent chordAt(Tick tick, std::uint8_t root_pc, ChordQuality quality) {
+  ChordEvent c;
+  c.start_tick = tick;
+  c.root_pc = root_pc;
+  c.quality = quality;
+  return c;
+}
+
+// The exact bar-12..15 modulation context the Phase14 fixture authors the
+// four NCT figures against: V/V (D major) -> V (G major) -> borrowed iv
+// (F minor) -> Picardy I (C major), one chord per bar.
+HarmonicPlan modulationBars12To15() {
+  HarmonicPlan plan;
+  plan.tonic_pc = 0;
+  plan.is_minor = false;
+  plan.chords.push_back(chordAt(12 * kTicksPerBar, 2, ChordQuality::Major));  // V/V
+  plan.chords.push_back(chordAt(13 * kTicksPerBar, 7, ChordQuality::Major));  // V
+  plan.chords.push_back(chordAt(14 * kTicksPerBar, 5, ChordQuality::Minor));  // iv
+  plan.chords.push_back(chordAt(15 * kTicksPerBar, 0, ChordQuality::Major));  // I
+  return plan;
+}
+
+// The 15 authored Phase14 NCT-figure notes (V2, bars 12-15) as one
+// time-ordered single-voice list — exactly what the Composer's NCT
+// post-pass sees for voice 2. Pitches mirror harness_fixture.cpp.
+std::vector<MaterialNote> authoredPhase14Figures() {
+  const Tick b12 = 12 * kTicksPerBar;
+  const Tick b13 = 13 * kTicksPerBar;
+  const Tick b14 = 14 * kTicksPerBar;
+  const Tick b15 = 15 * kTicksPerBar;
+  return {
+      // Cambiata, bar 12 (V/V = D F# A): A4 G4 D4 E4 F#4.
+      fig(b12 + 0, 69),
+      fig(b12 + 240, 67),
+      fig(b12 + 480, 62),
+      fig(b12 + 720, 64),
+      fig(b12 + 960, 66),
+      // Nota cambiata, bar 13 (V = G B D): D4 C4 A3 B3.
+      fig(b13 + 0, 62),
+      fig(b13 + 240, 60),
+      fig(b13 + 480, 57),
+      fig(b13 + 720, 59),
+      // Echappee, bar 14 first half (iv = F Ab C): C4 D4 Ab3.
+      fig(b14 + 0, 60),
+      fig(b14 + 240, 62),
+      fig(b14 + 480, 56),
+      // Anticipation, bar 14 beat 3 -> bar 15 (I = C E G): F4 E4 ... E4.
+      fig(b14 + 960, 65),
+      fig(b14 + 1440, 64),
+      mn(b15 + 0, 64),
+  };
+}
+
+// Index of the first note whose pitch equals `pitch` in `notes`.
+std::size_t indexOfPitch(const std::vector<MaterialNote>& notes, std::uint8_t pitch) {
+  for (std::size_t i = 0; i < notes.size(); ++i) {
+    if (notes[i].pitch == pitch)
+      return i;
+  }
+  return notes.size();
+}
+
 }  // namespace
 
 TEST(NctDetectorTest, CambiataDetectsClassicBachShape) {
@@ -163,6 +234,162 @@ TEST(NctDetectorTest, EmptyHarmonicPlanReturnsNoHits) {
   EXPECT_TRUE(detectEchappee(notes, empty_plan).empty());
   EXPECT_TRUE(detectAnticipation(notes, empty_plan).empty());
   EXPECT_TRUE(detectNotaCambiata(notes, empty_plan).empty());
+}
+
+// --- Authored Phase14 figures (the exact bar 12-15 V2 context). Each test
+// drives the standalone detector with the real fixture notes + modulation
+// chords and asserts the figure is detected at the correct NCT note. ---
+
+TEST(NctDetectorTest, CambiataDetectedOnAuthoredG4) {
+  const auto notes = authoredPhase14Figures();
+  const auto hits = detectCambiata(notes, modulationBars12To15());
+  ASSERT_GE(hits.size(), 1u);
+  // The authored cambiata's NCT is G4 (67) at figure index 1.
+  const std::size_t want = indexOfPitch(notes, 67);
+  bool found = false;
+  for (const auto& h : hits) {
+    if (h.nct_index == want) {
+      found = true;
+      break;
+    }
+  }
+  EXPECT_TRUE(found) << "no cambiata hit landed on the authored G4 (index " << want << ")";
+}
+
+TEST(NctDetectorTest, NotaCambiataDetectedOnAuthoredC4) {
+  const auto notes = authoredPhase14Figures();
+  const auto hits = detectNotaCambiata(notes, modulationBars12To15());
+  ASSERT_EQ(hits.size(), 1u);
+  // The authored nota cambiata's NCT is C4 (60) — the first C4 in the list.
+  EXPECT_EQ(hits[0].nct_index, indexOfPitch(notes, 60));
+  EXPECT_EQ(notes[hits[0].nct_index].pitch, 60u);
+}
+
+TEST(NctDetectorTest, EchappeeDetectedOnAuthoredD4) {
+  const auto notes = authoredPhase14Figures();
+  const auto hits = detectEchappee(notes, modulationBars12To15());
+  ASSERT_EQ(hits.size(), 1u);
+  // The authored echappee's NCT is the bar-14 D4 (62) — the second D4 in
+  // the list (the first D4 opens the nota cambiata). Assert by pitch+window.
+  EXPECT_EQ(notes[hits[0].nct_index].pitch, 62u);
+  EXPECT_GE(hits[0].nct_index, 10u) << "echappee NCT must be the bar-14 D4, not the bar-13 D4";
+}
+
+TEST(NctDetectorTest, AnticipationDetectedOnAuthoredE4) {
+  const auto notes = authoredPhase14Figures();
+  const auto hits = detectAnticipation(notes, modulationBars12To15());
+  ASSERT_EQ(hits.size(), 1u);
+  // The authored anticipation's NCT is E4 (64) at bar 14 beat 3, whose
+  // pitch equals the bar-15 Picardy-I chord tone E4 it anticipates.
+  EXPECT_EQ(notes[hits[0].nct_index].pitch, 64u);
+  // The anticipation E4 is the LAST eighth in the list (index 13), not the
+  // earlier bar-12 cambiata E4 (index 3); pin it by window position.
+  EXPECT_GE(hits[0].nct_index, 12u) << "anticipation NCT must be the bar-14 E4, not the bar-12 E4";
+}
+
+// --- M4: temporal-contiguity guard. A rest/gap mid-window must suppress
+// the figure even when the pitch shape is otherwise a valid figure. ---
+
+TEST(NctDetectorTest, CambiataRejectsGapMidWindow) {
+  // Same pitch shape as CambiataDetectsClassicBachShape, but n2 (A4) starts
+  // one beat late, opening a rest between n1 and n2. The window is no longer
+  // melodically contiguous, so no figure may fire.
+  std::vector<MaterialNote> notes = {
+      mn(0, 64),                  // E5 chord (ends at 480)
+      mn(kTicksPerBeat, 62),      // D5 NCT step-down (ends at 960)
+      mn(kTicksPerBeat * 3, 57),  // A4 leap-down — starts late (gap at 960)
+      mn(kTicksPerBeat * 4, 59),  // B4 step-up
+      mn(kTicksPerBeat * 5, 60),  // C5 chord step-up
+  };
+  auto hits = detectCambiata(notes, cMajorWhole());
+  EXPECT_TRUE(hits.empty()) << "cambiata must not fire across a mid-window rest";
+}
+
+TEST(NctDetectorTest, EchappeeRejectsGapMidWindow) {
+  // C5 -> D5 NCT -> G4 chord, but the D5 ends before G4 begins (rest).
+  std::vector<MaterialNote> notes = {
+      mn(0, 60),                  // C5 chord (ends 480)
+      mn(kTicksPerBeat, 62),      // D5 NCT step-up (ends 960)
+      mn(kTicksPerBeat * 3, 55),  // G4 chord leap-down — starts late
+  };
+  auto hits = detectEchappee(notes, cMajorWhole());
+  EXPECT_TRUE(hits.empty()) << "echappee must not fire across a mid-window rest";
+}
+
+TEST(NctDetectorTest, NotaCambiataRejectsGapMidWindow) {
+  // G5 -> F5 -> B4 -> C5 compressed shape, but B4 starts a beat late.
+  std::vector<MaterialNote> notes = {
+      mn(0, 67),                  // G5 chord (ends 480)
+      mn(kTicksPerBeat, 65),      // F5 NCT (ends 960)
+      mn(kTicksPerBeat * 3, 59),  // B4 NCT — starts late (gap at 960)
+      mn(kTicksPerBeat * 4, 60),  // C5 chord step-up
+  };
+  auto hits = detectNotaCambiata(notes, cMajorWhole());
+  EXPECT_TRUE(hits.empty()) << "nota cambiata must not fire across a mid-window rest";
+}
+
+// --- M5: a figure straddling a chord boundary is classified against the
+// chord active at its FIRST note, not a per-note re-query. ---
+
+TEST(NctDetectorTest, EchappeeAnchorsToFirstNoteChordAcrossBoundary) {
+  // C major active at t=0, then a spurious chord change to D major at t=2.
+  // The echappee window (C5 -> D5 NCT -> G4) must be classified entirely
+  // against the anchor C-major chord. Under per-note re-query the closing
+  // G4 (pc 7) would be measured against D major (D F# A) where it is NOT a
+  // chord tone, suppressing the figure. Anchoring fixes it.
+  HarmonicPlan plan = cMajorWhole();
+  ChordEvent d_maj;
+  d_maj.start_tick = kTicksPerBeat * 2;  // boundary lands on the closing note
+  d_maj.root_pc = 2;
+  d_maj.quality = ChordQuality::Major;
+  plan.chords.push_back(d_maj);
+
+  std::vector<MaterialNote> notes = {
+      mn(0, 60),                  // C5 chord (C major)
+      mn(kTicksPerBeat, 62),      // D5 NCT step-up vs C major
+      mn(kTicksPerBeat * 2, 55),  // G4 leap-down — chord tone of the ANCHOR
+  };
+  auto hits = detectEchappee(notes, plan);
+  ASSERT_EQ(hits.size(), 1u) << "echappee must anchor classification to the first note's chord";
+  EXPECT_EQ(hits[0].nct_index, 1u);
+}
+
+// --- M6: an anticipation requires a real chord change between the NCT and
+// its resolution. Identical pitch under the SAME chord is not an
+// anticipation; under a CHANGED chord it is. ---
+
+TEST(NctDetectorTest, AnticipationRejectsNoChordChange) {
+  // Exact pitch shape of AnticipationFiresWithChordChange (C5 -> B4 -> B4),
+  // but the plan has a SINGLE C-major chord spanning the whole window: n1 and
+  // n2 fall under the same chord event, so there is no next chord to
+  // anticipate and the figure must not fire.
+  std::vector<MaterialNote> notes = {
+      mn(0, 60),                  // C5 chord-tone of C major
+      mn(kTicksPerBeat, 59),      // B4 step-down NCT vs C major
+      mn(kTicksPerBeat * 2, 59),  // B4 again — still under the same C major
+  };
+  auto hits = detectAnticipation(notes, cMajorWhole());
+  EXPECT_TRUE(hits.empty()) << "anticipation must not fire without a real chord change";
+}
+
+TEST(NctDetectorTest, AnticipationFiresWithChordChange) {
+  // Same melodic shape, but a G-major chord begins at t=2 so the held B4
+  // anticipates the next chord's third. A genuine chord change is present.
+  HarmonicPlan plan = cMajorWhole();
+  ChordEvent g_maj;
+  g_maj.start_tick = kTicksPerBeat * 2;
+  g_maj.root_pc = 7;
+  g_maj.quality = ChordQuality::Major;
+  plan.chords.push_back(g_maj);
+
+  std::vector<MaterialNote> notes = {
+      mn(0, 60),                  // C5 chord-tone of C major
+      mn(kTicksPerBeat, 59),      // B4 step-down NCT vs C major
+      mn(kTicksPerBeat * 2, 59),  // B4 — chord tone of the NEW G major chord
+  };
+  auto hits = detectAnticipation(notes, plan);
+  ASSERT_EQ(hits.size(), 1u) << "anticipation must fire across a real chord change";
+  EXPECT_EQ(hits[0].nct_index, 1u);
 }
 
 }  // namespace bach::composer::nct_detector

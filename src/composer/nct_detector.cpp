@@ -67,6 +67,16 @@ bool isLeap(std::uint8_t a, std::uint8_t b) {
   return std::abs(static_cast<int>(a) - static_cast<int>(b)) >= 3;
 }
 
+// Temporal contiguity guard (M4). Two notes adjacent in the voice vector
+// are only melodically contiguous when the earlier note ends exactly where
+// the later note begins. A rest/gap (or an overlap, or a backwards/
+// disordered pair) breaks the melodic window, so the figure must be
+// rejected. Used for the purely melodic figures (cambiata / echappee /
+// nota cambiata) whose neighbourhood notes run back-to-back.
+bool isAdjacent(const MaterialNote& earlier, const MaterialNote& later) {
+  return earlier.start_tick + earlier.duration == later.start_tick;
+}
+
 }  // namespace
 
 std::vector<NctHit> detectCambiata(const std::vector<MaterialNote>& notes,
@@ -80,15 +90,21 @@ std::vector<NctHit> detectCambiata(const std::vector<MaterialNote>& notes,
     const auto& n2 = notes[i + 2];
     const auto& n3 = notes[i + 3];
     const auto& n4 = notes[i + 4];
-    if (!isChordTone(n0.pitch, activeChord(harmonic_plan, n0.start_tick)))
+    // M4: the five notes must be melodically back-to-back (no rest/gap).
+    if (!isAdjacent(n0, n1) || !isAdjacent(n1, n2) || !isAdjacent(n2, n3) || !isAdjacent(n3, n4))
       continue;
-    if (!isChordTone(n4.pitch, activeChord(harmonic_plan, n4.start_tick)))
+    // M5: anchor the whole figure's chord-tone / NCT classification to the
+    // chord active at the figure's first note.
+    const ChordEvent& anchor = activeChord(harmonic_plan, n0.start_tick);
+    if (!isChordTone(n0.pitch, anchor))
+      continue;
+    if (!isChordTone(n4.pitch, anchor))
       continue;
     // n1: step-down NCT (must be lower than n0 by 1-2 semis and NOT a
-    // chord tone of its own chord).
+    // chord tone of the anchor chord).
     if (n1.pitch >= n0.pitch || !isStep(n0.pitch, n1.pitch))
       continue;
-    if (isChordTone(n1.pitch, activeChord(harmonic_plan, n1.start_tick)))
+    if (isChordTone(n1.pitch, anchor))
       continue;
     // n2: leap-down from n1.
     if (n2.pitch >= n1.pitch || !isLeap(n1.pitch, n2.pitch))
@@ -118,14 +134,19 @@ std::vector<NctHit> detectEchappee(const std::vector<MaterialNote>& notes,
     const auto& n0 = notes[i];
     const auto& n1 = notes[i + 1];
     const auto& n2 = notes[i + 2];
-    if (!isChordTone(n0.pitch, activeChord(harmonic_plan, n0.start_tick)))
+    // M4: the three notes must be melodically back-to-back (no rest/gap).
+    if (!isAdjacent(n0, n1) || !isAdjacent(n1, n2))
       continue;
-    if (!isChordTone(n2.pitch, activeChord(harmonic_plan, n2.start_tick)))
+    // M5: anchor the whole figure's classification to the first note's chord.
+    const ChordEvent& anchor = activeChord(harmonic_plan, n0.start_tick);
+    if (!isChordTone(n0.pitch, anchor))
+      continue;
+    if (!isChordTone(n2.pitch, anchor))
       continue;
     // n1: step-up NCT from n0.
     if (n1.pitch <= n0.pitch || !isStep(n0.pitch, n1.pitch))
       continue;
-    if (isChordTone(n1.pitch, activeChord(harmonic_plan, n1.start_tick)))
+    if (isChordTone(n1.pitch, anchor))
       continue;
     // n2: leap-down from n1.
     if (n2.pitch >= n1.pitch || !isLeap(n1.pitch, n2.pitch))
@@ -148,12 +169,20 @@ std::vector<NctHit> detectAnticipation(const std::vector<MaterialNote>& notes,
   for (std::size_t i = 0; i + 1 < notes.size(); ++i) {
     const auto& n0 = notes[i];
     const auto& n1 = notes[i + 1];
-    if (!isChordTone(n0.pitch, activeChord(harmonic_plan, n0.start_tick)))
+    // M4: n0 and n1 are the melodic approach; they must run forward in time
+    // without overlap. (Unlike the purely melodic figures, an anticipation
+    // is, by definition, temporally separated from its resolution, so the
+    // n1 -> resolution leg is not required to be back-to-back.)
+    if (n0.start_tick + n0.duration > n1.start_tick)
       continue;
-    // n1: step-down NCT relative to its own chord.
+    // M5: anchor n0 / n1 classification to the chord active at n0.
+    const ChordEvent& anchor = activeChord(harmonic_plan, n0.start_tick);
+    if (!isChordTone(n0.pitch, anchor))
+      continue;
+    // n1: step-down NCT relative to the anchor chord.
     if (n1.pitch >= n0.pitch || !isStep(n0.pitch, n1.pitch))
       continue;
-    if (isChordTone(n1.pitch, activeChord(harmonic_plan, n1.start_tick)))
+    if (isChordTone(n1.pitch, anchor))
       continue;
     // Anticipation: n1's pitch identically equals a chord-tone of the
     // chord active at i+2 (the next strong-beat chord). Requires
@@ -163,7 +192,13 @@ std::vector<NctHit> detectAnticipation(const std::vector<MaterialNote>& notes,
     const auto& n2 = notes[i + 2];
     if (n1.pitch != n2.pitch)
       continue;
-    if (!isChordTone(n2.pitch, activeChord(harmonic_plan, n2.start_tick)))
+    const ChordEvent& resolution_chord = activeChord(harmonic_plan, n2.start_tick);
+    if (!isChordTone(n2.pitch, resolution_chord))
+      continue;
+    // M6: the figure must anticipate the NEXT chord, so a real chord change
+    // must separate the anticipation note from its resolution. Reject when
+    // n1 and n2 fall under the same chord event.
+    if (activeChord(harmonic_plan, n1.start_tick).start_tick == resolution_chord.start_tick)
       continue;
     NctHit hit;
     hit.figure = NctFigure::Anticipation;
@@ -185,19 +220,24 @@ std::vector<NctHit> detectNotaCambiata(const std::vector<MaterialNote>& notes,
     const auto& n1 = notes[i + 1];
     const auto& n2 = notes[i + 2];
     const auto& n3 = notes[i + 3];
-    if (!isChordTone(n0.pitch, activeChord(harmonic_plan, n0.start_tick)))
+    // M4: the four notes must be melodically back-to-back (no rest/gap).
+    if (!isAdjacent(n0, n1) || !isAdjacent(n1, n2) || !isAdjacent(n2, n3))
       continue;
-    if (!isChordTone(n3.pitch, activeChord(harmonic_plan, n3.start_tick)))
+    // M5: anchor the whole figure's classification to the first note's chord.
+    const ChordEvent& anchor = activeChord(harmonic_plan, n0.start_tick);
+    if (!isChordTone(n0.pitch, anchor))
+      continue;
+    if (!isChordTone(n3.pitch, anchor))
       continue;
     // n1: step-down NCT from n0.
     if (n1.pitch >= n0.pitch || !isStep(n0.pitch, n1.pitch))
       continue;
-    if (isChordTone(n1.pitch, activeChord(harmonic_plan, n1.start_tick)))
+    if (isChordTone(n1.pitch, anchor))
       continue;
-    // n2: leap-down NCT from n1 (and not a chord tone).
+    // n2: leap-down NCT from n1 (and not a chord tone of the anchor).
     if (n2.pitch >= n1.pitch || !isLeap(n1.pitch, n2.pitch))
       continue;
-    if (isChordTone(n2.pitch, activeChord(harmonic_plan, n2.start_tick)))
+    if (isChordTone(n2.pitch, anchor))
       continue;
     // n3: step-up chord-tone closing.
     if (n3.pitch <= n2.pitch || !isStep(n2.pitch, n3.pitch))

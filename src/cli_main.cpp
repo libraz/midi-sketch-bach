@@ -98,6 +98,14 @@ bach::composer::HarnessPhase parseComposerPhase(const char* val) {
       std::strcmp(val, "12") == 0 || std::strcmp(val, "p12") == 0) {
     return bach::composer::HarnessPhase::Phase12;
   }
+  if (std::strcmp(val, "Phase13") == 0 || std::strcmp(val, "phase13") == 0 ||
+      std::strcmp(val, "13") == 0 || std::strcmp(val, "p13") == 0) {
+    return bach::composer::HarnessPhase::Phase13;
+  }
+  if (std::strcmp(val, "Phase14") == 0 || std::strcmp(val, "phase14") == 0 ||
+      std::strcmp(val, "14") == 0 || std::strcmp(val, "p14") == 0) {
+    return bach::composer::HarnessPhase::Phase14;
+  }
   return bach::composer::HarnessPhase::Phase6;
 }
 
@@ -119,7 +127,8 @@ void printUsage() {
   std::printf(
       "  --composer-phase P  Bypass legacy generator; run Composer with phase\n"
       "                   {Phase3|Phase35|Phase4|Phase4Sus|Phase5|Phase6|Phase6Episode|\n"
-      "                    Phase6Tonal|Phase7|Phase8|Phase9|Phase10|Phase11}. Seed reused.\n");
+      "                    Phase6Tonal|Phase7|Phase8|Phase9|Phase10|Phase11|Phase12|\n"
+      "                    Phase13|Phase14}. Seed reused.\n");
   std::printf(
       "  --toccata-style  Toccata archetype: dramaticus, perpetuus, concertato, sectionalis\n");
   std::printf("  --json           JSON output\n");
@@ -259,6 +268,10 @@ const char* harnessPhaseToString(bach::composer::HarnessPhase p) {
       return "Phase11";
     case bach::composer::HarnessPhase::Phase12:
       return "Phase12";
+    case bach::composer::HarnessPhase::Phase13:
+      return "Phase13";
+    case bach::composer::HarnessPhase::Phase14:
+      return "Phase14";
   }
   return "Phase?";
 }

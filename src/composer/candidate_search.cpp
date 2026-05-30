@@ -9,7 +9,6 @@
 #include "composer/chord_voicing.h"
 #include "composer/motif_ops.h"
 #include "composer/rule_helpers.h"
-#include "harmony/cadence_vocabulary.h"
 
 namespace bach::composer {
 
@@ -17,52 +16,11 @@ namespace {
 
 constexpr Tick kQuarter = kTicksPerBeat;
 
-// Returns the chord triad pitch classes (0..11) for a ChordEvent.
-std::array<std::uint8_t, 3> triadPitchClasses(const ChordEvent& chord) {
-  std::uint8_t third_offset = 4;  // Major
-  std::uint8_t fifth_offset = 7;
-  switch (chord.quality) {
-    case ChordQuality::Major:
-    case ChordQuality::Major7:
-    case ChordQuality::Dominant7:
-      third_offset = 4;
-      fifth_offset = 7;
-      break;
-    case ChordQuality::Minor:
-    case ChordQuality::Minor7:
-      third_offset = 3;
-      fifth_offset = 7;
-      break;
-    case ChordQuality::Diminished:
-    case ChordQuality::HalfDiminished7:
-    case ChordQuality::Diminished7:
-      third_offset = 3;
-      fifth_offset = 6;
-      break;
-    case ChordQuality::Augmented:
-      third_offset = 4;
-      fifth_offset = 8;
-      break;
-  }
-  return {
-      static_cast<std::uint8_t>(chord.root_pc % 12),
-      static_cast<std::uint8_t>((chord.root_pc + third_offset) % 12),
-      static_cast<std::uint8_t>((chord.root_pc + fifth_offset) % 12),
-  };
-}
-
-const ChordEvent& activeChord(const HarmonicPlan& plan, Tick at) {
-  // chords assumed non-empty and sorted by start_tick.
-  const ChordEvent* current = &plan.chords.front();
-  for (const auto& chord : plan.chords) {
-    if (chord.start_tick <= at) {
-      current = &chord;
-    } else {
-      break;
-    }
-  }
-  return *current;
-}
+// Harmonic primitives are shared with composer.cpp via rule_helpers; the
+// local aliases keep the existing call sites (triadPitchClasses, activeChord)
+// unchanged while routing through the single shared implementation.
+using rule_helpers::activeChord;
+using rule_helpers::triadPitchClasses;
 
 // P7 helper: set the four P7 provenance bits on `rules` when the
 // active chord opts into the strict regime (has_degree=true). Caller
@@ -213,6 +171,35 @@ const CadenceCell* cadenceCellAt(const Material& material, Tick tick) {
   return nullptr;
 }
 
+// Builds one verbatim Candidate from a MaterialNote (pitch / tick / duration
+// copied as-is, score = 1.0) with the standard baseline provenance bits:
+// ChordTone (when the pitch is a triad tone of the chord active at its onset)
+// plus the P7 and P8 bit sets. `extra_bits` are OR-ed in first so the
+// branch-specific provenance bit(s) (EpisodeMotifSourced, PedalCommitted,
+// per-fragment rhythm bits, etc.) survive; baseline OR-ing is
+// order-independent so the resulting mask is identical to the inlined clones
+// this helper replaces. The Suspension branch deliberately omits the baseline
+// bits and therefore does NOT route through this helper.
+Candidate emitMaterialNote(const MaterialNote& mnote, const HarmonicPlan& plan,
+                           RuleIdMask extra_bits) {
+  Candidate c;
+  c.start_tick = mnote.start_tick;
+  c.duration = mnote.duration;
+  c.pitch = mnote.pitch;
+  c.score = 1.0f;
+  c.satisfied_rules = extra_bits;
+  const ChordEvent& chord_here = activeChord(plan, mnote.start_tick);
+  const auto triad_here = triadPitchClasses(chord_here);
+  const std::uint8_t pc_m = static_cast<std::uint8_t>(mnote.pitch % 12);
+  const bool is_triad_m = (pc_m == triad_here[0] || pc_m == triad_here[1] || pc_m == triad_here[2]);
+  if (is_triad_m) {
+    c.satisfied_rules |= 1ull << RuleBit::ChordTone;
+  }
+  applyP7Bits(c.satisfied_rules, chord_here, pc_m, is_triad_m);
+  applyP8Bits(c.satisfied_rules, plan, chord_here, pc_m, is_triad_m);
+  return c;
+}
+
 }  // namespace
 
 std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
@@ -277,40 +264,28 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
         continue;
       if (mnote.start_tick >= span.end_tick)
         break;
-      Candidate c;
-      c.start_tick = mnote.start_tick;
-      c.duration = mnote.duration;
-      c.pitch = mnote.pitch;
-      c.score = 1.0f;
-      c.satisfied_rules = 0;
-      const ChordEvent& chord_here = activeChord(harmonic_plan, mnote.start_tick);
-      const auto triad_here = triadPitchClasses(chord_here);
-      const std::uint8_t pc_m = static_cast<std::uint8_t>(mnote.pitch % 12);
-      const bool is_triad_m =
-          (pc_m == triad_here[0] || pc_m == triad_here[1] || pc_m == triad_here[2]);
-      if (is_triad_m) {
-        c.satisfied_rules |= 1ull << RuleBit::ChordTone;
-      }
-      applyP7Bits(c.satisfied_rules, chord_here, pc_m, is_triad_m);
-      applyP8Bits(c.satisfied_rules, harmonic_plan, chord_here, pc_m, is_triad_m);
+      // Branch-specific bits (cadence / leading-tone marker / tonal-answer /
+      // countersubject / imitation-entry); the baseline ChordTone/P7/P8 bits
+      // are added by emitMaterialNote. OR order is irrelevant.
+      RuleIdMask extra_bits = 0;
       if (const CadenceCell* cadence_cell = cadenceCellAt(material, mnote.start_tick);
           cadence_cell != nullptr) {
-        c.satisfied_rules |= 1ull << RuleBit::CadenceCellCommitted;
+        extra_bits |= 1ull << RuleBit::CadenceCellCommitted;
         if (mnote.start_tick == cadence_cell->cadence_tick) {
-          c.satisfied_rules |= 1ull << RuleBit::CadenceVoiceLeadingChecked;
+          extra_bits |= 1ull << RuleBit::CadenceVoiceLeadingChecked;
         }
       }
       for (const auto& marker : material.leading_tone_markers) {
         if (marker.fragment == fragment && marker.resolution_index == idx) {
-          c.satisfied_rules |= 1ull << RuleBit::LeadingToneResolved;
+          extra_bits |= 1ull << RuleBit::LeadingToneResolved;
           break;
         }
       }
       if (emit_tonal_answer_bit) {
-        c.satisfied_rules |= 1ull << RuleBit::TonalAnswerMapped;
+        extra_bits |= 1ull << RuleBit::TonalAnswerMapped;
       }
       if (emit_countersubject_bit) {
-        c.satisfied_rules |= 1ull << RuleBit::CountersubjectActive;
+        extra_bits |= 1ull << RuleBit::CountersubjectActive;
       }
       // P9 ImitationEntryMatched: set on idx==0 (the entry note) when
       // any declared ImitationEntry names this fragment as leader or
@@ -319,12 +294,12 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
       if (idx == 0) {
         for (const auto& entry : material.imitation_entries) {
           if (entry.leader_fragment == fragment || entry.follower_fragment == fragment) {
-            c.satisfied_rules |= 1ull << RuleBit::ImitationEntryMatched;
+            extra_bits |= 1ull << RuleBit::ImitationEntryMatched;
             break;
           }
         }
       }
-      out.push_back(c);
+      out.push_back(emitMaterialNote(mnote, harmonic_plan, extra_bits));
     }
     return out;
   }
@@ -369,25 +344,10 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
           continue;
         if (n.start_tick >= span.end_tick)
           break;
-        Candidate c;
-        c.start_tick = n.start_tick;
-        c.duration = n.duration;
-        c.pitch = n.pitch;
-        c.score = 1.0f;
-        c.satisfied_rules = 1ull << RuleBit::EpisodeMotifSourced;
-        // Chord-tone bit so passing-tone tracking on the next Compose
-        // span (if any) reads correctly.
-        const ChordEvent& chord_here = activeChord(harmonic_plan, n.start_tick);
-        const auto triad_here = triadPitchClasses(chord_here);
-        const std::uint8_t pc_m = static_cast<std::uint8_t>(n.pitch % 12);
-        const bool is_triad_m =
-            (pc_m == triad_here[0] || pc_m == triad_here[1] || pc_m == triad_here[2]);
-        if (is_triad_m) {
-          c.satisfied_rules |= 1ull << RuleBit::ChordTone;
-        }
-        applyP7Bits(c.satisfied_rules, chord_here, pc_m, is_triad_m);
-        applyP8Bits(c.satisfied_rules, harmonic_plan, chord_here, pc_m, is_triad_m);
-        out.push_back(c);
+        // EpisodeMotifSourced plus the baseline ChordTone/P7/P8 bits (the
+        // ChordTone bit keeps passing-tone tracking on the next Compose span
+        // accurate).
+        out.push_back(emitMaterialNote(n, harmonic_plan, 1ull << RuleBit::EpisodeMotifSourced));
       }
     }
     return out;
@@ -490,26 +450,15 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
             beat_cursor += tmpl.seed_durations[i];
             continue;
           }
-          Candidate c;
-          c.start_tick = beat_cursor;
-          c.duration = tmpl.seed_durations[i];
-          c.pitch = static_cast<std::uint8_t>(transposed);
-          c.score = 1.0f;
-          c.satisfied_rules = 1ull << RuleBit::FortspinnungSourced;
+          MaterialNote step_note;
+          step_note.start_tick = beat_cursor;
+          step_note.duration = tmpl.seed_durations[i];
+          step_note.pitch = static_cast<std::uint8_t>(transposed);
+          RuleIdMask extra_bits = 1ull << RuleBit::FortspinnungSourced;
           if (k > 0) {
-            c.satisfied_rules |= 1ull << RuleBit::SequenceStep;
+            extra_bits |= 1ull << RuleBit::SequenceStep;
           }
-          const ChordEvent& chord_here = activeChord(harmonic_plan, beat_cursor);
-          const auto triad_here = triadPitchClasses(chord_here);
-          const std::uint8_t pc_f = static_cast<std::uint8_t>(c.pitch % 12);
-          const bool is_triad_f =
-              (pc_f == triad_here[0] || pc_f == triad_here[1] || pc_f == triad_here[2]);
-          if (is_triad_f) {
-            c.satisfied_rules |= 1ull << RuleBit::ChordTone;
-          }
-          applyP7Bits(c.satisfied_rules, chord_here, pc_f, is_triad_f);
-          applyP8Bits(c.satisfied_rules, harmonic_plan, chord_here, pc_f, is_triad_f);
-          out.push_back(c);
+          out.push_back(emitMaterialNote(step_note, harmonic_plan, extra_bits));
           beat_cursor += tmpl.seed_durations[i];
         }
       }
@@ -529,23 +478,11 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
         continue;
       if (pedal.start_tick >= span.end_tick)
         continue;
-      Candidate c;
-      c.start_tick = pedal.start_tick;
-      c.duration = pedal.duration;
-      c.pitch = pedal.pitch;
-      c.score = 1.0f;
-      c.satisfied_rules = 1ull << RuleBit::PedalCommitted;
-      const ChordEvent& chord_here = activeChord(harmonic_plan, pedal.start_tick);
-      const auto triad_here = triadPitchClasses(chord_here);
-      const std::uint8_t pc_p = static_cast<std::uint8_t>(c.pitch % 12);
-      const bool is_triad_p =
-          (pc_p == triad_here[0] || pc_p == triad_here[1] || pc_p == triad_here[2]);
-      if (is_triad_p) {
-        c.satisfied_rules |= 1ull << RuleBit::ChordTone;
-      }
-      applyP7Bits(c.satisfied_rules, chord_here, pc_p, is_triad_p);
-      applyP8Bits(c.satisfied_rules, harmonic_plan, chord_here, pc_p, is_triad_p);
-      out.push_back(c);
+      MaterialNote pedal_note;
+      pedal_note.start_tick = pedal.start_tick;
+      pedal_note.duration = pedal.duration;
+      pedal_note.pitch = pedal.pitch;
+      out.push_back(emitMaterialNote(pedal_note, harmonic_plan, 1ull << RuleBit::PedalCommitted));
     }
     return out;
   }
@@ -603,23 +540,7 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
         continue;
       if (mnote.start_tick >= span.end_tick)
         break;
-      Candidate c;
-      c.start_tick = mnote.start_tick;
-      c.duration = mnote.duration;
-      c.pitch = mnote.pitch;
-      c.score = 1.0f;
-      c.satisfied_rules = 1ull << bit;
-      const ChordEvent& chord_here = activeChord(harmonic_plan, mnote.start_tick);
-      const auto triad_here = triadPitchClasses(chord_here);
-      const std::uint8_t pc_m = static_cast<std::uint8_t>(mnote.pitch % 12);
-      const bool is_triad_m =
-          (pc_m == triad_here[0] || pc_m == triad_here[1] || pc_m == triad_here[2]);
-      if (is_triad_m) {
-        c.satisfied_rules |= 1ull << RuleBit::ChordTone;
-      }
-      applyP7Bits(c.satisfied_rules, chord_here, pc_m, is_triad_m);
-      applyP8Bits(c.satisfied_rules, harmonic_plan, chord_here, pc_m, is_triad_m);
-      out.push_back(c);
+      out.push_back(emitMaterialNote(mnote, harmonic_plan, 1ull << bit));
     }
     return out;
   }
@@ -639,21 +560,16 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
           continue;
         if (mnote.start_tick >= span.end_tick)
           continue;
-        Candidate c;
-        c.start_tick = mnote.start_tick;
-        c.duration = mnote.duration;
-        c.pitch = mnote.pitch;
-        c.score = 1.0f;
-        c.satisfied_rules = 0;
+        RuleIdMask extra_bits = 0;
         switch (frag.feature) {
           case RhythmFragment::Feature::Anacrusis:
-            c.satisfied_rules |= 1ull << RuleBit::AnacrusisActive;
+            extra_bits |= 1ull << RuleBit::AnacrusisActive;
             break;
           case RhythmFragment::Feature::Hemiola:
-            c.satisfied_rules |= 1ull << RuleBit::HemiolaInserted;
+            extra_bits |= 1ull << RuleBit::HemiolaInserted;
             break;
           case RhythmFragment::Feature::Recurrence:
-            c.satisfied_rules |= 1ull << RuleBit::RhythmicMotifRecurrence;
+            extra_bits |= 1ull << RuleBit::RhythmicMotifRecurrence;
             break;
           case RhythmFragment::Feature::Dotted:
           case RhythmFragment::Feature::Syncopation:
@@ -661,22 +577,32 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
         }
         for (Tick start : material.phrase_structure.phrase_start_ticks) {
           if (start == mnote.start_tick) {
-            c.satisfied_rules |= 1ull << RuleBit::PhrasePeriodicityKept;
+            extra_bits |= 1ull << RuleBit::PhrasePeriodicityKept;
             break;
           }
         }
-        const ChordEvent& chord_here = activeChord(harmonic_plan, mnote.start_tick);
-        const auto triad_here = triadPitchClasses(chord_here);
-        const std::uint8_t pc_r = static_cast<std::uint8_t>(c.pitch % 12);
-        const bool is_triad_r =
-            (pc_r == triad_here[0] || pc_r == triad_here[1] || pc_r == triad_here[2]);
-        if (is_triad_r) {
-          c.satisfied_rules |= 1ull << RuleBit::ChordTone;
-        }
-        applyP7Bits(c.satisfied_rules, chord_here, pc_r, is_triad_r);
-        applyP8Bits(c.satisfied_rules, harmonic_plan, chord_here, pc_r, is_triad_r);
-        out.push_back(c);
+        out.push_back(emitMaterialNote(mnote, harmonic_plan, extra_bits));
       }
+    }
+    return out;
+  }
+
+  if (span.intent == VoiceIntent::NctCarrier) {
+    // P14 non-chord-tone carrier: verbatim replay of material.nct_figures
+    // that fall inside the span window, mirroring the SubjectCarrier
+    // branch (source = Material, score = 1.0, standard ChordTone/P7/P8
+    // bit-OR set). The figure provenance bits (CambiataDetected etc.) are
+    // NOT stamped here: the nct_detector figures need the full sorted
+    // single-voice note list, which only exists after the Composer's
+    // post-sort, so the Composer's NCT post-pass stamps them instead.
+    for (const auto& mnote : material.nct_figures) {
+      if (mnote.start_tick < span.start_tick)
+        continue;
+      if (mnote.start_tick >= span.end_tick)
+        break;
+      // NCT figure bits (CambiataDetected etc.) are stamped later by the
+      // Composer's NCT post-pass, so only the baseline bits are set here.
+      out.push_back(emitMaterialNote(mnote, harmonic_plan, 0));
     }
     return out;
   }

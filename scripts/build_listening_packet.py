@@ -12,6 +12,8 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from closure_common import fixture_for_seed, normalize_phase
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_CLI = REPO_ROOT / "build" / "bin" / "bach_cli"
 DEFAULT_INDEX_JS = REPO_ROOT.parent / "bach-mcp" / "dist" / "index.js"
@@ -23,37 +25,9 @@ PHASE_TAGS = {
     "Phase4": "p4",
     "Phase5": "p5",
     "Phase6": "p6",
+    # P14 milestone: first listening packet for the all-technique fugue.
+    "Phase14": "p14",
 }
-
-
-def normalize_phase(value: str) -> str:
-    aliases = {
-        "3": "Phase3",
-        "p3": "Phase3",
-        "phase3": "Phase3",
-        "3.5": "Phase35",
-        "p3.5": "Phase35",
-        "p35": "Phase35",
-        "phase35": "Phase35",
-        "4": "Phase4",
-        "p4": "Phase4",
-        "phase4": "Phase4",
-        "5": "Phase5",
-        "p5": "Phase5",
-        "phase5": "Phase5",
-        "6": "Phase6",
-        "p6": "Phase6",
-        "phase6": "Phase6",
-    }
-    return aliases.get(value, aliases.get(value.lower(), value))
-
-
-def fixture_for_seed(seed: int) -> dict[str, Any]:
-    return {
-        "subj_idx": (seed // 4) % 5,
-        "harm_idx": seed % 4,
-        "subdivision": "eighth" if (seed % 2) == 1 else "quarter",
-    }
 
 
 def model_probability(score: dict[str, Any]) -> float:

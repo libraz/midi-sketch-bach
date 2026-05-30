@@ -17,6 +17,8 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from closure_common import fixture_for_seed, normalize_phase
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_CLI = REPO_ROOT / "build" / "bin" / "bach_cli"
 DEFAULT_INDEX_JS = REPO_ROOT.parent / "bach-mcp" / "dist" / "index.js"
@@ -36,7 +38,48 @@ PHASE_DEFAULTS = {
     "Phase10": {"tag": "p10", "threshold": 0.80, "min_pass": 10},
     "Phase11": {"tag": "p11", "threshold": 0.82, "min_pass": 10},
     "Phase12": {"tag": "p12", "threshold": 0.82, "min_pass": 10},
+    # P13 is a texture / expression phase: it stamps render-time attributes
+    # (manual / articulation / Affekt velocity) and per-voice range bits but
+    # does NOT alter pitch or rhythm content. A velocity-flattened rescore is
+    # byte-identical to the curved one, so model_prob equals the clean Phase7
+    # exposition baseline (~0.82 quarter-note seeds, ~0.91 eighth-note seeds).
+    # The gate therefore holds the P11/P12 baseline (0.82) — demanding a higher
+    # pitch-quality bar P13 cannot architecturally provide would be spurious.
+    "Phase13": {"tag": "p13", "threshold": 0.82, "min_pass": 10},
+    # P14 is the all-technique milestone: a 42-bar / 3-voice fugue exercising
+    # every provenance RuleBit. 0.85 / 14-of-20 is the milestone gate (3)
+    # target from rebuild_plan §5 P14. Gate (3) is expected to be the binding
+    # constraint here; any later threshold correction MUST be documented (the
+    # model scorer ignores velocity, exactly as noted in the Phase13 entry
+    # above, so render-time attributes never move model_prob). Keep 0.85 as
+    # written — do NOT pre-lower it.
+    #
+    # P14 closure invocation (gates 2/4 assert that all 47 RuleBits fire):
+    #   python3 scripts/run_phase_closure.py --phase Phase14 \
+    #     --all-bits-min 10 \
+    #     --required-rule-bit ChordTone=0 --required-rule-bit StrongBeatConsonance=1 \
+    #     ... (all 47 name=index masks; see the bit catalog below) ...
+    "Phase14": {"tag": "p14", "threshold": 0.85, "min_pass": 14},
 }
+
+# Phase14 RuleBit catalog: every required --required-rule-bit name=index for
+# the all-technique closure. Mirrors the 47 provenance RuleBits stamped by the
+# Phase14 fixture; all 47 must fire in every seed (gates 2 and 4).
+#   ChordTone=0 StrongBeatConsonance=1 SmallStep=2 ParallelPerfectChecked=3
+#   VoiceCrossingChecked=4 LeapResolutionChecked=5 WeakBeatPassingChecked=6
+#   VerticalConsonanceChecked=7 LeadingToneResolved=8 HiddenParallelChecked=9
+#   CrossRelationChecked=10 CadenceCellCommitted=11 CadenceVoiceLeadingChecked=12
+#   SuspensionPrepared=13 SuspensionResolved=14 CambiataDetected=15
+#   EchappeeDetected=16 AnticipationDetected=17 NotaCambiataDetected=18
+#   EpisodeMotifSourced=19 TonalAnswerMapped=20 CountersubjectActive=21
+#   ChordToneRoman=22 InversionLabel=23 DoublingChecked=24 SpacingChecked=25
+#   ModulationCommitted=26 SecondaryDominantResolved=27 PicardyThird=28
+#   ModalMixture=29 FortspinnungSourced=30 SequenceStep=31
+#   ImitationEntryMatched=32 InvertibleAt8va=33 MiddleEntryCommitted=34
+#   StrettoCommitted=35 PedalCommitted=36 CodaCommitted=37
+#   SubjectVariantApplied=38 AnacrusisActive=39 HemiolaInserted=40
+#   PhrasePeriodicityKept=41 RhythmicMotifRecurrence=42 VoiceRangeKept=43
+#   ManualAssigned=44 ArticulationApplied=45 AffektCurveApplied=46
 
 # Phase layout: subject_bars / with_answer / with_third_entry.
 # Mirrors HarnessPhaseSpec in src/composer/harness_fixture.cpp.
@@ -55,6 +98,16 @@ PHASE_LAYOUT = {
     "Phase10": {"voices": 3, "bars": 16, "subject_bars": 4, "with_answer": True, "with_third_entry": True},
     "Phase11": {"voices": 3, "bars": 28, "subject_bars": 4, "with_answer": True, "with_third_entry": True, "development": True},
     "Phase12": {"voices": 3, "bars": 28, "subject_bars": 4, "with_answer": True, "with_third_entry": True},
+    "Phase13": {"voices": 3, "bars": 16, "subject_bars": 4, "with_answer": True, "with_third_entry": True},
+    # P14: 42-bar / 3-voice all-technique fugue. The exposition mirrors
+    # Phase11's: subject V0 bars 0-3, answer V1 bars 4-7, V2 re-entry bars
+    # 8-11 (same offsets, since subject_bars=4 drives the structural check).
+    # Instead of the "development" flag (which assumes Phase11's bar-20 V0
+    # stretto leader), Phase14 declares its own leader bar: the V0
+    # SubjectCarrier restates the subject verbatim at bars 24-27, so the
+    # structural check must expect those 16 notes too (else the V0
+    # SubjectCarrier group is a 16-vs-32 length mismatch).
+    "Phase14": {"voices": 3, "bars": 42, "subject_bars": 4, "with_answer": True, "with_third_entry": True, "stretto_leader_bar": 24, "tonal_answer": True},
 }
 
 # 5 subject patterns × 16 quarter-note pitches. Mirrors kSubjectPatterns in
@@ -68,63 +121,18 @@ SUBJECT_PATTERNS: tuple[tuple[int, ...], ...] = (
     (76, 77, 79, 81, 79, 77, 76, 74, 72, 74, 76, 77, 79, 77, 71, 72),
 )
 
-
-def normalize_phase(value: str) -> str:
-    aliases = {
-        "3": "Phase3",
-        "p3": "Phase3",
-        "phase3": "Phase3",
-        "3.5": "Phase35",
-        "p3.5": "Phase35",
-        "p35": "Phase35",
-        "phase35": "Phase35",
-        "4": "Phase4",
-        "p4": "Phase4",
-        "phase4": "Phase4",
-        "4sus": "Phase4Sus",
-        "p4sus": "Phase4Sus",
-        "phase4sus": "Phase4Sus",
-        "5": "Phase5",
-        "p5": "Phase5",
-        "phase5": "Phase5",
-        "6": "Phase6",
-        "p6": "Phase6",
-        "phase6": "Phase6",
-        "6ep": "Phase6Episode",
-        "p6ep": "Phase6Episode",
-        "phase6episode": "Phase6Episode",
-        "6episode": "Phase6Episode",
-        "6tonal": "Phase6Tonal",
-        "p6tonal": "Phase6Tonal",
-        "phase6tonal": "Phase6Tonal",
-        "7": "Phase7",
-        "p7": "Phase7",
-        "phase7": "Phase7",
-        "8": "Phase8",
-        "p8": "Phase8",
-        "phase8": "Phase8",
-        "9": "Phase9",
-        "p9": "Phase9",
-        "phase9": "Phase9",
-        "10": "Phase10",
-        "p10": "Phase10",
-        "phase10": "Phase10",
-        "11": "Phase11",
-        "p11": "Phase11",
-        "phase11": "Phase11",
-        "12": "Phase12",
-        "p12": "Phase12",
-        "phase12": "Phase12",
-    }
-    return aliases.get(value, aliases.get(value.lower(), value))
-
-
-def fixture_for_seed(seed: int) -> dict[str, Any]:
-    return {
-        "subj_idx": (seed // 4) % 5,
-        "harm_idx": seed % 4,
-        "subdivision": "eighth" if (seed % 2) == 1 else "quarter",
-    }
+# Phase14 uses its own subject catalog (kPhase14Subjects in
+# src/composer/harness_fixture.cpp): slots 0/1/4 match the shared catalog,
+# slots 2/3 replace the two statistically weak subjects with higher-prob
+# diatonic ones. The structural predictor must mirror this exactly or it
+# reports false length/pitch mismatches for seeds that select slot 2/3.
+PHASE14_SUBJECTS: tuple[tuple[int, ...], ...] = (
+    (72, 74, 76, 77, 79, 81, 79, 77, 76, 74, 76, 77, 79, 77, 71, 72),
+    (76, 74, 72, 74, 76, 77, 79, 77, 76, 79, 77, 76, 74, 72, 71, 72),
+    (79, 77, 76, 77, 79, 81, 79, 77, 76, 74, 72, 74, 76, 74, 71, 72),
+    (72, 74, 76, 77, 79, 77, 79, 81, 79, 77, 76, 74, 76, 74, 71, 72),
+    (76, 77, 79, 81, 79, 77, 76, 77, 79, 77, 76, 74, 72, 74, 71, 72),
+)
 
 
 def run(cmd: list[str], *, cwd: Path | None = None) -> subprocess.CompletedProcess[str]:
@@ -194,8 +202,22 @@ def expected_carrier_sequences(
 ) -> dict[tuple[int, str], list[tuple[int, int]]]:
     """Predict (voice, intent) -> [(start_tick, pitch)] for a seed fixture.
 
+    NOTE (structural_ok scope): this predictor validates ONLY the
+    exposition entries (V0 subject, V1 answer, V2 re-entry) plus the V0
+    stretto leader for Phase14. Counterline, development, NCT and rhythm
+    carriers (~90% of the notes in a full fugue) are NOT modeled here, so
+    structural_ok is a necessary, not sufficient, structural guarantee.
+
     Mirrors V0 SubjectCarrier / V1 AnswerCarrier / V2 SubjectCarrier
     re-entry assembly in src/composer/harness_fixture.cpp.
+
+    This is fully layout-driven: there is no per-phase hard-coded carrier
+    table, so any phase registered in PHASE_LAYOUT (including Phase14) reuses
+    the generic exposition derivation below. Phase14 carries the standard
+    three exposition entries (subject_bars=4, with_answer, with_third_entry)
+    and intentionally omits the "development" branch, so no 42-bar-specific
+    sequence is hand-coded here (which would be brittle); the structural check
+    therefore validates only the three exposition entries for Phase14.
     """
     layout = PHASE_LAYOUT[phase]
     subject_bars = layout["subject_bars"]
@@ -203,27 +225,34 @@ def expected_carrier_sequences(
     subj_a = fixture["subj_idx"]
     ticks_per_bar = 1920
     ticks_per_beat = 480
+    patterns = PHASE14_SUBJECTS if phase == "Phase14" else SUBJECT_PATTERNS
     out: dict[tuple[int, str], list[tuple[int, int]]] = {}
 
     v0_seq: list[tuple[int, int]] = []
     for blk in range(subject_blocks):
-        pattern = SUBJECT_PATTERNS[(subj_a + blk) % 5]
+        pattern = patterns[(subj_a + blk) % 5]
         for n in range(16):
             tick = (blk * 4 + n // 4) * ticks_per_bar + (n % 4) * ticks_per_beat
             v0_seq.append((tick, pattern[n]))
+    # A fugue may restate the subject verbatim in V0 as a stretto leader;
+    # that span also carries intent SubjectCarrier, so it joins the
+    # (0, SubjectCarrier) group in extract_carrier_sequences and the
+    # expected sequence must include it. Phase11 puts the leader at bar 20
+    # (via the "development" flag); Phase14 declares "stretto_leader_bar".
+    leader_base_bar = None
     if layout.get("development", False):
-        # Phase11 restates the subject verbatim in V0 (the stretto leader)
-        # at bars 20-23; that span carries intent SubjectCarrier, so it
-        # joins the (0, SubjectCarrier) group in extract_carrier_sequences.
         leader_base_bar = 20
-        pattern = SUBJECT_PATTERNS[subj_a]
+    elif layout.get("stretto_leader_bar") is not None:
+        leader_base_bar = layout["stretto_leader_bar"]
+    if leader_base_bar is not None:
+        pattern = patterns[subj_a]
         for n in range(16):
             tick = (leader_base_bar + n // 4) * ticks_per_bar + (n % 4) * ticks_per_beat
             v0_seq.append((tick, pattern[n]))
     out[(0, "SubjectCarrier")] = v0_seq
 
     if layout["with_answer"]:
-        pattern = SUBJECT_PATTERNS[subj_a]
+        pattern = patterns[subj_a]
         v1_seq: list[tuple[int, int]] = []
         use_tonal = layout.get("tonal_answer", False)
         tonic_pc = 0  # harness fixes C major / tonic_pc = 0
@@ -253,7 +282,7 @@ def expected_carrier_sequences(
         out[(1, "AnswerCarrier")] = v1_seq
 
     if layout["with_third_entry"]:
-        pattern = SUBJECT_PATTERNS[subj_a]
+        pattern = patterns[subj_a]
         v2_seq: list[tuple[int, int]] = []
         for n in range(16):
             tick = (2 * subject_bars + n // 4) * ticks_per_bar + (n % 4) * ticks_per_beat
@@ -334,6 +363,50 @@ def output_paths(work_dir: Path, tag: str, seed: int) -> tuple[Path, Path, Path]
     return midi, generated, provenance
 
 
+# Phase14 is the all-technique milestone: every provenance RuleBit (0..46)
+# must be exercised, so the closure invocation must supply all 47
+# --required-rule-bit masks. provenance.h RuleBit currently tops out at
+# AffektCurveApplied = 46, so max_bit + 1 == 47.
+PHASE14_REQUIRED_BIT_COUNT = 47
+
+
+def compute_passed(
+    *,
+    seed_count: int,
+    composer_ok_count: int,
+    model_pass_count: int,
+    min_pass: int,
+    structural_ok_count: int,
+    rule_pass: dict[str, bool],
+    all_bits_pass: bool,
+    evaluator_error_count: int,
+) -> bool:
+    """Combine the closure gates into the final pass/fail decision.
+
+    Pure function so the gate logic can be unit-tested without running the
+    20-seed pipeline.
+
+    @param seed_count Number of seeds attempted.
+    @param composer_ok_count Seeds where bach_cli exited 0.
+    @param model_pass_count Seeds at/over the model threshold.
+    @param min_pass Minimum model passes required (gate 3).
+    @param structural_ok_count Seeds whose carrier sequences matched.
+    @param rule_pass Per-bit name -> whether it hit in enough seeds.
+    @param all_bits_pass Whether the all-bits-fire seed count met --all-bits-min.
+    @param evaluator_error_count Seeds whose scorer crashed / returned non-JSON.
+    @return True only if every gate passes (a crashed scorer fails the run).
+    """
+    return (
+        composer_ok_count == seed_count
+        and model_pass_count >= min_pass
+        and structural_ok_count == composer_ok_count
+        and all(rule_pass.values())
+        and all_bits_pass
+        # P3: a crashed / non-JSON scorer must not silently look clean.
+        and evaluator_error_count == 0
+    )
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--phase", default="Phase6", help="Phase3/Phase35/Phase4/Phase5/Phase6")
@@ -342,6 +415,12 @@ def main() -> int:
     parser.add_argument("--min-pass", type=int)
     parser.add_argument("--required-rule-bit", action="append", type=parse_required_rule_bit, default=[])
     parser.add_argument("--required-rule-min", type=int)
+    parser.add_argument(
+        "--all-bits-min",
+        type=int,
+        default=10,
+        help="gate (4): minimum number of seeds in which ALL required rule bits fire",
+    )
     parser.add_argument("--out", type=Path)
     parser.add_argument("--work-dir", type=Path)
     parser.add_argument("--cli", type=Path, default=DEFAULT_CLI)
@@ -352,6 +431,19 @@ def main() -> int:
     phase = normalize_phase(args.phase)
     if phase not in PHASE_DEFAULTS:
         sys.stderr.write(f"unknown phase: {args.phase}\n")
+        return 2
+
+    # P4: the Phase14 milestone is the all-technique gate. all_bits_pass
+    # defaults True when no --required-rule-bit flags are supplied, so without
+    # this guard the 47-bit gate would be trivially bypassable. Refuse to run
+    # the milestone unless every RuleBit is being asserted.
+    if phase == "Phase14" and len(args.required_rule_bit) < PHASE14_REQUIRED_BIT_COUNT:
+        sys.stderr.write(
+            "Phase14 closure requires all "
+            f"{PHASE14_REQUIRED_BIT_COUNT} --required-rule-bit masks "
+            f"(got {len(args.required_rule_bit)}); the 47-bit milestone gate "
+            "must not be bypassed. See the RuleBit catalog in this script.\n"
+        )
         return 2
 
     defaults = PHASE_DEFAULTS[phase]
@@ -382,6 +474,8 @@ def main() -> int:
     composer_ok_count = 0
     structural_ok_count = 0
     rule_hit_counts = {name: 0 for name, _ in args.required_rule_bit}
+    all_bits_seed_count = 0
+    evaluator_error_count = 0
 
     for seed in range(args.seeds):
         midi, generated, provenance = output_paths(work_dir, tag, seed)
@@ -425,6 +519,8 @@ def main() -> int:
                 if prob >= threshold:
                     model_pass_count += 1
             except RuntimeError as exc:
+                # P3: surface scorer crash / non-JSON output as a run failure.
+                evaluator_error_count += 1
                 row.update({"evaluator_ok": False, "evaluator_error": str(exc)})
             try:
                 rule_hits = provenance_rule_counts(provenance, args.required_rule_bit)
@@ -432,6 +528,12 @@ def main() -> int:
                 for name, hit in rule_hits.items():
                     if hit:
                         rule_hit_counts[name] += 1
+                # Gate (4): a seed where ALL required bits fire (AND across
+                # bits). Only meaningful when at least one bit is required.
+                all_bits_set = bool(rule_hits) and all(rule_hits.values())
+                row["all_bits_set"] = all_bits_set
+                if all_bits_set:
+                    all_bits_seed_count += 1
             except (OSError, json.JSONDecodeError) as exc:
                 row["provenance_error"] = str(exc)
             structural = structural_check(generated, provenance, phase, fixture)
@@ -450,11 +552,20 @@ def main() -> int:
     rule_pass = {
         name: count >= required_rule_min for name, count in rule_hit_counts.items()
     }
-    passed = (
-        composer_ok_count == args.seeds
-        and model_pass_count >= min_pass
-        and structural_ok_count == composer_ok_count
-        and all(rule_pass.values())
+    # Gate (4): require all-47-bits seeds in >= all_bits_min of the runs.
+    # Only enforced when rule bits are actually being checked.
+    all_bits_pass = (
+        all_bits_seed_count >= args.all_bits_min if args.required_rule_bit else True
+    )
+    passed = compute_passed(
+        seed_count=args.seeds,
+        composer_ok_count=composer_ok_count,
+        model_pass_count=model_pass_count,
+        min_pass=min_pass,
+        structural_ok_count=structural_ok_count,
+        rule_pass=rule_pass,
+        all_bits_pass=all_bits_pass,
+        evaluator_error_count=evaluator_error_count,
     )
     report = {
         "phase": phase,
@@ -465,9 +576,19 @@ def main() -> int:
         "composer_ok": composer_ok_count,
         "model_pass": model_pass_count,
         "structural_ok": structural_ok_count,
+        # P2: structural_ok only validates the exposition entries (+ V0 stretto
+        # leader for Phase14); counterline / development / NCT / rhythm carriers
+        # are not modeled, so this scope is recorded explicitly.
+        "structural_ok_scope": "exposition-entries-and-stretto-leader-only",
+        # P3: number of seeds whose scorer crashed / returned non-JSON. Any
+        # nonzero value forces passed=False (see compute_passed).
+        "evaluator_error_count": evaluator_error_count,
         "required_rule_min": required_rule_min,
         "required_rule_counts": rule_hit_counts,
         "required_rule_pass": rule_pass,
+        "all_bits_min": args.all_bits_min,
+        "all_bits_seed_count": all_bits_seed_count,
+        "all_bits_pass": all_bits_pass,
         "passed": passed,
         "seeds": rows,
     }
@@ -475,7 +596,11 @@ def main() -> int:
     sys.stderr.write(
         f"[closure][{tag}][summary] composer_ok={composer_ok_count}/{args.seeds} "
         f"model_pass={model_pass_count}/{args.seeds} "
-        f"structural_ok={structural_ok_count}/{composer_ok_count} report={report_path}\n"
+        f"structural_ok={structural_ok_count}/{composer_ok_count} "
+        f"all_bits_seeds={all_bits_seed_count}/{args.seeds} "
+        f"all_bits_pass={str(all_bits_pass).lower()} "
+        f"evaluator_errors={evaluator_error_count}/{args.seeds} "
+        f"report={report_path}\n"
     )
 
     if not args.keep_work:

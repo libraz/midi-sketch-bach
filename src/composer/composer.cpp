@@ -2,10 +2,13 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstdint>
 
 #include "composer/candidate_search.h"
+#include "composer/nct_detector.h"
 #include "composer/renderer.h"
+#include "composer/rule_helpers.h"
 #include "composer/validator.h"
 
 namespace bach::composer {
@@ -16,50 +19,26 @@ bool isComposerLibLinked() {
 
 namespace {
 
-const ChordEvent& activeChord(const HarmonicPlan& plan, Tick at) {
-  const ChordEvent* current = &plan.chords.front();
-  for (const auto& chord : plan.chords) {
-    if (chord.start_tick <= at) {
-      current = &chord;
-    } else {
-      break;
-    }
-  }
-  return *current;
-}
+// Harmonic primitives are shared with candidate_search.cpp via rule_helpers.
+using rule_helpers::activeChord;
+using rule_helpers::triadPitchClasses;
 
-std::array<std::uint8_t, 3> triadPC(const ChordEvent& chord) {
-  std::uint8_t third = 4;
-  std::uint8_t fifth = 7;
-  switch (chord.quality) {
-    case ChordQuality::Major:
-    case ChordQuality::Major7:
-    case ChordQuality::Dominant7:
-      third = 4;
-      fifth = 7;
-      break;
-    case ChordQuality::Minor:
-    case ChordQuality::Minor7:
-      third = 3;
-      fifth = 7;
-      break;
-    case ChordQuality::Diminished:
-    case ChordQuality::HalfDiminished7:
-    case ChordQuality::Diminished7:
-      third = 3;
-      fifth = 6;
-      break;
-    case ChordQuality::Augmented:
-      third = 4;
-      fifth = 8;
-      break;
-  }
-  return {
-      static_cast<std::uint8_t>(chord.root_pc % 12),
-      static_cast<std::uint8_t>((chord.root_pc + third) % 12),
-      static_cast<std::uint8_t>((chord.root_pc + fifth) % 12),
-  };
-}
+// Read-only inputs a post-pass may consult. Bundled so every pass shares one
+// signature and the ordered list below documents the pipeline at one site.
+struct PostPassContext {
+  const Material& material;
+  const HarmonicPlan& harmonic_plan;
+};
+
+// A note-list post-pass run after candidate placement + sorting and before
+// validation.
+//
+// Contract (relied on by provenance index alignment): a PostPass MUST NOT
+// change the count, order, pitch, or onset of `notes`; it may set note
+// velocity and OR provenance bits only. `notes` and `provenance` are index-
+// aligned and must stay so.
+using PostPass = void (*)(std::vector<NoteEvent>& notes, std::vector<NoteProvenance>& provenance,
+                          const PostPassContext& ctx);
 
 struct VoiceCursor {
   std::uint8_t prev_pitch = 0;
@@ -96,7 +75,7 @@ VoiceCursor seedCursor(VoiceId voice, Tick span_start, const std::vector<NoteEve
     c.prev_pitch = last->pitch;
     c.prev_end_tick = last->start_tick + last->duration;
     const ChordEvent& chord = activeChord(harmonic_plan, last->start_tick);
-    const auto triad = triadPC(chord);
+    const auto triad = triadPitchClasses(chord);
     const auto pc = static_cast<std::uint8_t>(last->pitch % 12);
     const bool is_chord_tone = (pc == triad[0] || pc == triad[1] || pc == triad[2]);
     c.prev_was_passing_tone = !is_chord_tone;
@@ -107,15 +86,146 @@ VoiceCursor seedCursor(VoiceId voice, Tick span_start, const std::vector<NoteEve
   return c;
 }
 
-bool isCarrierIntent(VoiceIntent intent) {
-  return intent == VoiceIntent::SubjectCarrier || intent == VoiceIntent::AnswerCarrier ||
-         intent == VoiceIntent::SuspensionCarrier || intent == VoiceIntent::Episode ||
-         intent == VoiceIntent::CountersubjectCarrier || intent == VoiceIntent::FortspinnungSpan ||
-         intent == VoiceIntent::MiddleEntryCarrier || intent == VoiceIntent::StrettoCarrier ||
-         intent == VoiceIntent::PedalCarrier || intent == VoiceIntent::CodaCarrier ||
-         intent == VoiceIntent::SubjectCarrierAugmented ||
-         intent == VoiceIntent::SubjectCarrierDiminished ||
-         intent == VoiceIntent::SubjectCarrierInverted || intent == VoiceIntent::RhythmCarrier;
+// P13 texture / instrument / expression post-pass.
+//
+// Runs after candidate placement and sorting, before validation. It reads
+// the render-time attributes in Material::texture_plan and (a) replaces
+// each note's velocity with an Affekt-driven phrase-arch value and (b) ORs
+// the four P13 provenance bits onto the matching notes. It never changes a
+// note's pitch or onset, so carrier replay and scored content are
+// unaffected; a default-constructed TexturePlan makes the whole pass a
+// no-op (Phase 3-12 fixtures are untouched).
+void applyTextureExpression(std::vector<NoteEvent>& notes, std::vector<NoteProvenance>& provenance,
+                            const PostPassContext& ctx) {
+  const TexturePlan& plan = ctx.material.texture_plan;
+  const bool any_attribute = !plan.voice_ranges.empty() || !plan.manual_assignments.empty() ||
+                             !plan.articulations.empty() || plan.affekt_curve_active;
+  if (!any_attribute)
+    return;
+
+  // Piece extent for the velocity arch (peak at the temporal center,
+  // tapering toward the opening and the final cadence).
+  Tick total = 1;
+  for (const auto& n : notes) {
+    total = std::max(total, n.start_tick + n.duration);
+  }
+  // Character-dependent base velocity (documentary SubjectCharacter cast).
+  // Kept near the organ default 80 so even a velocity-sensitive scorer
+  // sees an organ-plausible dynamic.
+  const int base = 76 + (plan.affekt_character % 4) * 2;  // 76..82
+  constexpr int kArchAmplitude = 10;
+
+  for (std::size_t i = 0; i < notes.size(); ++i) {
+    NoteEvent& note = notes[i];
+    RuleIdMask& rules = provenance[i].satisfied_rules;
+
+    for (const auto& range : plan.voice_ranges) {
+      if (range.voice == note.voice) {
+        if (note.pitch >= range.lo && note.pitch <= range.hi) {
+          rules |= 1ull << RuleBit::VoiceRangeKept;
+        }
+        break;
+      }
+    }
+    for (const auto& routing : plan.manual_assignments) {
+      if (routing.voice == note.voice) {
+        rules |= 1ull << RuleBit::ManualAssigned;
+        break;
+      }
+    }
+    for (const auto& art : plan.articulations) {
+      if (art.voice == note.voice && note.start_tick >= art.start_tick &&
+          note.start_tick < art.end_tick) {
+        rules |= 1ull << RuleBit::ArticulationApplied;
+        break;
+      }
+    }
+    if (plan.affekt_curve_active) {
+      // Triangular arch in [0, 1]: 1.0 at the center, 0.0 at the edges.
+      const double center = static_cast<double>(total) / 2.0;
+      const double dist =
+          center > 0.0 ? std::abs(static_cast<double>(note.start_tick) - center) / center : 0.0;
+      const double arch = 1.0 - dist;  // peak at center
+      int velocity = base + static_cast<int>(arch * kArchAmplitude);
+      velocity = std::max(1, std::min(127, velocity));
+      note.velocity = static_cast<std::uint8_t>(velocity);
+      rules |= 1ull << RuleBit::AffektCurveApplied;
+    }
+  }
+}
+
+// P14: non-chord-tone figure detection post-pass. Groups the final
+// sorted notes by voice, runs the four nct_detector figures on each
+// voice's time-ordered list, and ORs the matching RuleBit onto the
+// NCT note via an index map back to the global note array. Pure: never
+// changes pitch or onset (same no-op safety as applyTextureExpression).
+void applyNctDetection(std::vector<NoteEvent>& notes, std::vector<NoteProvenance>& provenance,
+                       const PostPassContext& ctx) {
+  const HarmonicPlan& harmonic_plan = ctx.harmonic_plan;
+  if (notes.empty() || harmonic_plan.chords.empty())
+    return;
+
+  // Distinct voices present in the (already sorted) note list.
+  std::vector<VoiceId> voices;
+  for (const auto& note : notes) {
+    if (std::find(voices.begin(), voices.end(), note.voice) == voices.end()) {
+      voices.push_back(note.voice);
+    }
+  }
+
+  for (VoiceId voice : voices) {
+    // Build this voice's time-ordered single-voice list plus a parallel
+    // map back to the index in `notes`. `notes` is already sorted by
+    // (start_tick, voice), so collecting in order preserves time order.
+    std::vector<MaterialNote> voice_notes;
+    std::vector<std::size_t> index_map;
+    for (std::size_t idx = 0; idx < notes.size(); ++idx) {
+      if (notes[idx].voice != voice)
+        continue;
+      MaterialNote mnote;
+      mnote.start_tick = notes[idx].start_tick;
+      mnote.duration = notes[idx].duration;
+      mnote.pitch = notes[idx].pitch;
+      voice_notes.push_back(mnote);
+      index_map.push_back(idx);
+    }
+
+    const auto stamp = [&](const std::vector<nct_detector::NctHit>& hits) {
+      for (const auto& hit : hits) {
+        if (hit.nct_index >= index_map.size())
+          continue;
+        RuleBit bit = RuleBit::CambiataDetected;
+        switch (hit.figure) {
+          case nct_detector::NctFigure::Cambiata:
+            bit = RuleBit::CambiataDetected;
+            break;
+          case nct_detector::NctFigure::Echappee:
+            bit = RuleBit::EchappeeDetected;
+            break;
+          case nct_detector::NctFigure::Anticipation:
+            bit = RuleBit::AnticipationDetected;
+            break;
+          case nct_detector::NctFigure::NotaCambiata:
+            bit = RuleBit::NotaCambiataDetected;
+            break;
+        }
+        // The NCT bits document authored NctCarrier figures, not incidental
+        // melodic shapes in free counterpoint. Restrict the stamp to notes the
+        // planner declared as NCT carriers so the post-pass is a no-op on
+        // phases without NCT figures (surrounding non-carrier notes still
+        // supply the melodic window the detectors need).
+        const std::size_t gidx = index_map[hit.nct_index];
+        if (provenance[gidx].voice_intent != VoiceIntent::NctCarrier)
+          continue;
+        provenance[gidx].satisfied_rules |= 1ull << bit;
+      }
+    };
+
+    stamp(nct_detector::detectCambiata(voice_notes, harmonic_plan));
+    stamp(nct_detector::detectEchappee(voice_notes, harmonic_plan));
+    stamp(nct_detector::detectAnticipation(voice_notes, harmonic_plan));
+    stamp(nct_detector::detectNotaCambiata(voice_notes, harmonic_plan));
+  }
 }
 
 }  // namespace
@@ -210,6 +320,18 @@ ComposeResult Composer::run(const Material& material, const HarmonicPlan& harmon
   }
   result.notes = std::move(sorted_notes);
   result.provenance = std::move(sorted_prov);
+
+  // Post-passes run after sort and before validation, in this fixed order.
+  // Each obeys the PostPass contract (no count/order/pitch/onset change;
+  // velocity + provenance bits only), so provenance stays index-aligned with
+  // notes. Adding a future pass is one array entry.
+  //   [0] P13: texture / instrument / expression (velocity curve + bits).
+  //   [1] P14: non-chord-tone figure bit stamping on the sorted note list.
+  static constexpr PostPass kPostPasses[] = {applyTextureExpression, applyNctDetection};
+  const PostPassContext post_ctx{material, harmonic_plan};
+  for (PostPass pass : kPostPasses) {
+    pass(result.notes, result.provenance, post_ctx);
+  }
 
   Validator validator;
   result.validation = validator.validate(result.notes, result.provenance, harmonic_plan, material);

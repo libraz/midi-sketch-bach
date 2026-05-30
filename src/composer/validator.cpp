@@ -332,14 +332,24 @@ ValidationReport Validator::validate(const std::vector<NoteEvent>& notes,
         // identical AND non-zero.
         const bool both_moved = prev_pa != 0 && prev_pb != 0 && pa != prev_pa && pb != prev_pb;
         const std::size_t current_lower_index = noteIndexStartingAt(notes, voices[vb], t);
+        const std::size_t current_upper_index = noteIndexStartingAt(notes, voices[va], t);
         const bool current_is_cadence =
             hasRuleBit(provenance, current_lower_index, RuleBit::CadenceCellCommitted);
         const bool current_is_material =
             current_lower_index < provenance.size() &&
             provenance[current_lower_index].source == NoteSource::Material;
+        const bool upper_is_material =
+            current_upper_index < provenance.size() &&
+            provenance[current_upper_index].source == NoteSource::Material;
+        // Suppress the parallel only when BOTH voices are Material: the
+        // composer cannot edit fixed inputs (mirrors the P10 invertible and
+        // vertical-dissonance both_material gates). When a Compose upper
+        // voice runs parallels against a Material lower voice (or vice
+        // versa) the violation is real and composer-fixable, so it fires.
+        const bool both_material = upper_is_material && current_is_material;
         if (prev_interval != INT32_MIN && both_moved && isPerfectInterval(interval) &&
             isPerfectInterval(prev_interval) && interval == prev_interval && interval != 0 &&
-            !current_is_cadence && !current_is_material) {
+            !current_is_cadence && !both_material) {
           // Find the span id of voices[vb]'s note starting at t (failing
           // span is the lower voice by convention).
           SpanId fail_span = kInvalidSpanId;
@@ -360,7 +370,7 @@ ValidationReport Validator::validate(const std::vector<NoteEvent>& notes,
         const bool similar_motion = prev_pa != 0 && prev_pb != 0 && motion_a != 0 &&
                                     motion_b != 0 && ((motion_a > 0) == (motion_b > 0));
         if (prev_interval != INT32_MIN && similar_motion && isPerfectInterval(interval) &&
-            !isPerfectInterval(prev_interval) && !current_is_cadence && !current_is_material) {
+            !isPerfectInterval(prev_interval) && !current_is_cadence && !both_material) {
           SpanId fail_span = kInvalidSpanId;
           for (std::size_t k = 0; k < notes.size(); ++k) {
             if (notes[k].voice == voices[vb] && notes[k].start_tick == t) {
@@ -750,6 +760,59 @@ ValidationReport Validator::validate(const std::vector<NoteEvent>& notes,
       failure.rule_id = "suspension_resolution_step_down";
       failure.kind = FailKind::MusicalFail;
       report.failures.push_back(failure);
+    }
+
+    // suspension_seventh_sixth: a 7-6 SuspensionCarrier must form a genuine
+    // SEVENTH above the lowest sounding voice on the dissonance beat, then
+    // resolve down by step to a SIXTH above the lowest sounding voice at the
+    // resolution tick. Scoped two ways so it is a no-op outside real 7-6
+    // figures: (a) only Sus7_6 patterns are evaluated (other suspension
+    // types form 4ths/9ths/2nds by definition); (b) only when the emitted
+    // suspension and resolution notes actually carry the SuspensionPrepared
+    // / SuspensionResolved provenance bits — i.e. a SuspensionCarrier span
+    // really shipped. Phases with no suspension carry neither bit, so the
+    // check never runs there.
+    if (sp.type == SuspensionType::Sus7_6) {
+      const std::size_t prep_index = noteIndexStartingAt(notes, sp.voice, sp.preparation_tick);
+      const std::size_t res_index = noteIndexStartingAt(notes, sp.voice, sp.resolution_tick);
+      const bool prepared = hasRuleBit(provenance, prep_index, RuleBit::SuspensionPrepared);
+      const bool resolved = hasRuleBit(provenance, res_index, RuleBit::SuspensionResolved);
+      if (prepared && resolved && sus_actual != 0 && res_actual != 0) {
+        // Lowest sounding voice = minimum pitch among all voices other than
+        // the suspended voice sounding at the given tick.
+        const auto lowestSoundingPitch = [&](Tick at) -> std::uint8_t {
+          std::uint8_t lowest = 0;
+          for (VoiceId other : voices) {
+            if (other == sp.voice)
+              continue;
+            const std::uint8_t bp = voicePitchAt(notes, other, at);
+            if (bp == 0)
+              continue;
+            if (lowest == 0 || bp < lowest)
+              lowest = bp;
+          }
+          return lowest;
+        };
+        const std::uint8_t bass_at_sus = lowestSoundingPitch(sp.suspension_tick);
+        const std::uint8_t bass_at_res = lowestSoundingPitch(sp.resolution_tick);
+        // Only evaluate when a lower voice actually sounds at both ticks;
+        // a lone suspended voice has no interval to measure.
+        if (bass_at_sus != 0 && bass_at_res != 0) {
+          const int sus_ic =
+              ((static_cast<int>(sus_actual) - static_cast<int>(bass_at_sus)) % 12 + 12) % 12;
+          const int res_ic =
+              ((static_cast<int>(res_actual) - static_cast<int>(bass_at_res)) % 12 + 12) % 12;
+          const bool seventh = sus_ic == 10 || sus_ic == 11;
+          const bool sixth = res_ic == 8 || res_ic == 9;
+          if (!seventh || !sixth) {
+            ValidationFailure failure;
+            failure.span_id = fail_span;
+            failure.rule_id = "suspension_seventh_sixth";
+            failure.kind = FailKind::MusicalFail;
+            report.failures.push_back(failure);
+          }
+        }
+      }
     }
   }
 
@@ -1372,6 +1435,64 @@ ValidationReport Validator::validate(const std::vector<NoteEvent>& notes,
       failure.rule_id = "anacrusis_consistent";
       failure.kind = FailKind::MusicalFail;
       report.failures.push_back(failure);
+    }
+  }
+
+  // P13 texture / instrument / expression rules.
+  //
+  // voice_range_integrity: every note whose voice has a declared MIDI range
+  //   (Material::texture_plan.voice_ranges) must lie inside [lo, hi]. A note
+  //   outside its voice's range fires the rule. Skipped when no ranges are
+  //   declared (Phase 3-12 fixtures), so prior behavior is unchanged.
+  // pedal_range_soft_penalty: the C1-D3 pedal compass (MIDI 24-50) is a soft
+  //   target — notes inside it incur no penalty, notes just outside it incur
+  //   a gradual penalty at scoring time (NOT a hard rejection, per the design
+  //   invariant). This Validator guard only fires when a note in the declared
+  //   pedal voice leaves the physically playable band [C0, D4] (MIDI 12-62),
+  //   i.e. a pitch no pedalboard can sound. Skipped when no pedal voice is
+  //   declared (pedal_voice == 0xFF).
+  {
+    const TexturePlan& tp = material.texture_plan;
+    if (!tp.voice_ranges.empty()) {
+      bool range_ok = true;
+      for (const auto& note : notes) {
+        for (const auto& range : tp.voice_ranges) {
+          if (range.voice != note.voice)
+            continue;
+          if (note.pitch < range.lo || note.pitch > range.hi) {
+            range_ok = false;
+          }
+          break;
+        }
+        if (!range_ok)
+          break;
+      }
+      if (!range_ok) {
+        ValidationFailure failure;
+        failure.rule_id = "voice_range_integrity";
+        failure.kind = FailKind::MusicalFail;
+        report.failures.push_back(failure);
+      }
+    }
+
+    if (tp.pedal_voice != 0xFF) {
+      constexpr std::uint8_t kPedalHardLo = 12;  // C0: below this no pedalboard sounds.
+      constexpr std::uint8_t kPedalHardHi = 62;  // D4: one octave above the D3 soft ceiling.
+      bool pedal_ok = true;
+      for (const auto& note : notes) {
+        if (note.voice != tp.pedal_voice)
+          continue;
+        if (note.pitch < kPedalHardLo || note.pitch > kPedalHardHi) {
+          pedal_ok = false;
+          break;
+        }
+      }
+      if (!pedal_ok) {
+        ValidationFailure failure;
+        failure.rule_id = "pedal_range_soft_penalty";
+        failure.kind = FailKind::MusicalFail;
+        report.failures.push_back(failure);
+      }
     }
   }
 

@@ -1,6 +1,7 @@
 #ifndef BACH_COMPOSER_RULE_HELPERS_H
 #define BACH_COMPOSER_RULE_HELPERS_H
 
+#include <array>
 #include <cstdint>
 #include <vector>
 
@@ -12,6 +13,18 @@ namespace bach::composer {
 using bach::NoteEvent;
 
 namespace rule_helpers {
+
+// Harmonic primitives.
+
+// Returns the three triad pitch classes (root, third, fifth) for a chord,
+// reduced mod 12. Seventh-chord qualities collapse to their underlying
+// triad (the seventh is not part of the returned triad).
+std::array<std::uint8_t, 3> triadPitchClasses(const ChordEvent& chord);
+
+// Returns the chord active at `at`: the last ChordEvent whose start_tick
+// is <= at. The plan's chord list is assumed non-empty and sorted by
+// start_tick.
+const ChordEvent& activeChord(const HarmonicPlan& plan, Tick at);
 
 // Beat / pitch primitives.
 

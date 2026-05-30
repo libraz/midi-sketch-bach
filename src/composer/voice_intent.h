@@ -5,6 +5,13 @@
 
 namespace bach::composer {
 
+// Forward declaration of the provenance rule-bit enum. The full definition
+// lives in provenance.h, which (transitively, via span.h) includes this
+// header — so this header must not include provenance.h. Forward-declaring
+// the fixed-underlying-type enum lets IntentDescriptor name the primary bit
+// without reintroducing a circular include.
+enum RuleBit : std::uint8_t;
+
 // Musical role assigned to a voice over a time span.
 //
 // Values mirror the legacy bach::VoiceIntent enum (src/fugue/thematic_plan.h),
@@ -118,11 +125,71 @@ enum class VoiceIntent : std::uint8_t {
   // `Material::rhythm_fragments` (matched by voice); each fragment's
   // feature tag selects the provenance bit. Notes whose onset lands on a
   // declared phrase start additionally carry PhrasePeriodicityKept.
-  RhythmCarrier = 18
+  RhythmCarrier = 18,
+
+  // P14. A carrier that replays a verbatim single-voice non-chord-tone
+  // (NCT) figure (cambiata / echappee / anticipation / nota cambiata).
+  // Source is `Material::nct_figures` (matched by voice); CandidateSearch
+  // replays each note verbatim (score = 1.0) like the other Material
+  // carriers but does NOT stamp the NCT provenance bits. The figure bits
+  // (CambiataDetected / EchappeeDetected / AnticipationDetected /
+  // NotaCambiataDetected) are stamped later by the Composer's NCT
+  // post-pass, which re-runs the standalone nct_detector figures on the
+  // final sorted single-voice note list (the only place the full melodic
+  // neighbourhood needed by the detectors exists).
+  NctCarrier = 19
 };
 
-// Pure helper. No formatting library dependency.
+// How CandidateSearch turns a span of this intent into Candidates.
+//
+//   kCompose        — free candidate search (the non-carrier intents).
+//   kVerbatimVector — replay a flat vector of MaterialNotes verbatim
+//                     (subject / answer / countersubject / development
+//                     carriers / rhythm / nct).
+//   kTransform      — replay subject fragments through a motif transform
+//                     (Episode).
+//   kSequence       — replay a Fortspinnung sequence template.
+//   kTriple         — replay a three-note suspension (prep / sus / res).
+enum class ReplayKind : std::uint8_t {
+  kCompose = 0,
+  kVerbatimVector = 1,
+  kTransform = 2,
+  kSequence = 3,
+  kTriple = 4,
+};
+
+// Single source of truth for the per-intent metadata that was previously
+// dual-encoded across voice_intent.cpp (voiceIntentToString), composer.cpp
+// (isCarrierIntent), and candidate_search.cpp (per-intent replay branches).
+//
+//   name           — display string (source of truth for voiceIntentToString).
+//   is_carrier     — true iff the intent replays Material verbatim and is
+//                    therefore NoteSource::Material (source of truth for
+//                    isCarrierIntent).
+//   replay         — how CandidateSearch dispatches the span.
+//   provenance_bit — the primary provenance bit this intent stamps, where
+//                    one applies. `has_provenance_bit` gates its validity
+//                    (some carriers stamp a bit chosen at the call site, and
+//                    Compose / Suspension stamp no single primary bit).
+struct IntentDescriptor {
+  const char* name;
+  bool is_carrier;
+  ReplayKind replay;
+  RuleBit provenance_bit;
+  bool has_provenance_bit;
+};
+
+// Table lookup keyed by VoiceIntent. Defined for every enumerator value
+// 0..NctCarrier(19); a static_assert in voice_intent.cpp guards completeness.
+const IntentDescriptor& describeIntent(VoiceIntent intent);
+
+// Pure helper. No formatting library dependency. Delegates to
+// describeIntent(intent).name.
 const char* voiceIntentToString(VoiceIntent intent);
+
+// True iff the intent replays Material verbatim (NoteSource::Material).
+// Delegates to describeIntent(intent).is_carrier.
+bool isCarrierIntent(VoiceIntent intent);
 
 }  // namespace bach::composer
 

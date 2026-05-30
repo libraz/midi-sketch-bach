@@ -5,6 +5,52 @@
 
 namespace bach::composer::rule_helpers {
 
+std::array<std::uint8_t, 3> triadPitchClasses(const ChordEvent& chord) {
+  std::uint8_t third_offset = 4;  // Major
+  std::uint8_t fifth_offset = 7;
+  switch (chord.quality) {
+    case ChordQuality::Major:
+    case ChordQuality::Major7:
+    case ChordQuality::Dominant7:
+      third_offset = 4;
+      fifth_offset = 7;
+      break;
+    case ChordQuality::Minor:
+    case ChordQuality::Minor7:
+      third_offset = 3;
+      fifth_offset = 7;
+      break;
+    case ChordQuality::Diminished:
+    case ChordQuality::HalfDiminished7:
+    case ChordQuality::Diminished7:
+      third_offset = 3;
+      fifth_offset = 6;
+      break;
+    case ChordQuality::Augmented:
+      third_offset = 4;
+      fifth_offset = 8;
+      break;
+  }
+  return {
+      static_cast<std::uint8_t>(chord.root_pc % 12),
+      static_cast<std::uint8_t>((chord.root_pc + third_offset) % 12),
+      static_cast<std::uint8_t>((chord.root_pc + fifth_offset) % 12),
+  };
+}
+
+const ChordEvent& activeChord(const HarmonicPlan& plan, Tick at) {
+  // chords assumed non-empty and sorted by start_tick.
+  const ChordEvent* current = &plan.chords.front();
+  for (const auto& chord : plan.chords) {
+    if (chord.start_tick <= at) {
+      current = &chord;
+    } else {
+      break;
+    }
+  }
+  return *current;
+}
+
 bool isStrongBeat(Tick tick) {
   return (tick % kTicksPerBar) == 0;
 }

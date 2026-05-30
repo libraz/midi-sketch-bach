@@ -8,6 +8,7 @@
 set(BACH_COMPOSER_TEST_SOURCES
   composer_skeleton_test.cpp
   voice_intent_test.cpp
+  intent_descriptor_test.cpp
   composer_two_voice_test.cpp
   material_test.cpp
   json_export_test.cpp
@@ -19,6 +20,8 @@ set(BACH_COMPOSER_TEST_SOURCES
   chord_voicing_test.cpp
   validator_test.cpp
   candidate_search_test.cpp
+  texture_expression_test.cpp
+  composer_nct_test.cpp
 )
 
 add_executable(bach_composer_tests ${BACH_COMPOSER_TEST_SOURCES})

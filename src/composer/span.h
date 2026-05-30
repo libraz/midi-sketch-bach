@@ -40,6 +40,10 @@ struct Span {
   Tick start_tick = 0;
   Tick end_tick = 0;
   VoiceId voice = 0;
+  // Invariant ("roles are const"): set at construction (planner) and never
+  // mutated downstream. The field is non-const only so Span stays an
+  // aggregate for the harness fixture's aggregate initialisers; enforcing
+  // const here would ripple into those inits and is therefore out of scope.
   VoiceIntent intent = VoiceIntent::FillerGap;
   Subdivision subdivision = Subdivision::Quarter;
 };

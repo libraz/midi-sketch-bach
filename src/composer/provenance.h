@@ -144,6 +144,25 @@ enum RuleBit : std::uint8_t {
   HemiolaInserted = 40,
   PhrasePeriodicityKept = 41,
   RhythmicMotifRecurrence = 42,
+  // P13 (Texture / instrument / expression). Stamped by the Composer's
+  // texture-expression post-pass (composer.cpp), not by CandidateSearch:
+  // these are render-time attributes derived from Material::texture_plan,
+  // applied to every emitted note after candidate placement and before
+  // validation. Each bit confirms the corresponding device actually
+  // shipped so the closure gate can assert it.
+  // VoiceRangeKept: the note's pitch lies inside the declared MIDI range
+  //   for its voice (Material::texture_plan.voice_ranges). The negative
+  //   counterpart is the Validator's voice_range_integrity rule.
+  // ManualAssigned: the note's voice has an OrganManual routing
+  //   (Material::texture_plan.manual_assignments).
+  // ArticulationApplied: an articulation span covers the note's voice and
+  //   onset (Material::texture_plan.articulations).
+  // AffektCurveApplied: the note received an Affekt-driven velocity from
+  //   the active velocity curve (Material::texture_plan.affekt_curve_active).
+  VoiceRangeKept = 43,
+  ManualAssigned = 44,
+  ArticulationApplied = 45,
+  AffektCurveApplied = 46,
 };
 
 // Per-note provenance record.
@@ -153,6 +172,10 @@ enum RuleBit : std::uint8_t {
 // generated.json (the evaluation export) excludes these fields.
 struct NoteProvenance {
   SpanId span_id = kInvalidSpanId;
+  // Invariant ("roles are const"): copied from the owning Span::intent at
+  // note emission and never mutated downstream. Non-const only so
+  // NoteProvenance stays an aggregate; enforcing const would ripple into
+  // aggregate initialisers and is out of scope.
   VoiceIntent voice_intent = VoiceIntent::FillerGap;
   float candidate_score = 0.0f;
   NoteSource source = NoteSource::Compose;

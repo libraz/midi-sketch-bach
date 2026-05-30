@@ -2035,4 +2035,244 @@ TEST(ValidatorTest, AnacrusisConsistentPassesWhenNoAnacrusis) {
   EXPECT_FALSE(hasRule(r, "anacrusis_consistent"));
 }
 
+// --- P13 texture / instrument / expression rules ---
+
+TEST(ValidatorTest, VoiceRangeIntegrityPassesWhenInRange) {
+  Material m;
+  m.texture_plan.voice_ranges.push_back({/*voice=*/0, /*lo=*/60, /*hi=*/72});
+  std::vector<NoteEvent> notes = {makeNote(0, kTicksPerBeat, 67, 0)};
+  std::vector<NoteProvenance> prov = {makeProv(0, NoteSource::Compose)};
+  ValidationReport r = Validator{}.validate(notes, prov, cMajorWhole(), m);
+  EXPECT_FALSE(hasRule(r, "voice_range_integrity"));
+}
+
+TEST(ValidatorTest, VoiceRangeIntegrityFailsAboveCeiling) {
+  Material m;
+  m.texture_plan.voice_ranges.push_back({/*voice=*/0, /*lo=*/60, /*hi=*/72});
+  std::vector<NoteEvent> notes = {makeNote(0, kTicksPerBeat, 84, 0)};
+  std::vector<NoteProvenance> prov = {makeProv(0, NoteSource::Material)};
+  ValidationReport r = Validator{}.validate(notes, prov, cMajorWhole(), m);
+  EXPECT_TRUE(hasRule(r, "voice_range_integrity"));
+}
+
+TEST(ValidatorTest, VoiceRangeIntegrityFailsBelowFloor) {
+  Material m;
+  m.texture_plan.voice_ranges.push_back({/*voice=*/1, /*lo=*/48, /*hi=*/72});
+  std::vector<NoteEvent> notes = {makeNote(0, kTicksPerBeat, 36, 1)};
+  std::vector<NoteProvenance> prov = {makeProv(0, NoteSource::Material)};
+  ValidationReport r = Validator{}.validate(notes, prov, cMajorWhole(), m);
+  EXPECT_TRUE(hasRule(r, "voice_range_integrity"));
+}
+
+TEST(ValidatorTest, VoiceRangeIntegritySkippedForUndeclaredVoice) {
+  Material m;
+  // Only voice 0 has a declared range; voice 1's wild pitch is ignored.
+  m.texture_plan.voice_ranges.push_back({/*voice=*/0, /*lo=*/60, /*hi=*/72});
+  std::vector<NoteEvent> notes = {makeNote(0, kTicksPerBeat, 120, 1)};
+  std::vector<NoteProvenance> prov = {makeProv(0, NoteSource::Compose)};
+  ValidationReport r = Validator{}.validate(notes, prov, cMajorWhole(), m);
+  EXPECT_FALSE(hasRule(r, "voice_range_integrity"));
+}
+
+TEST(ValidatorTest, VoiceRangeIntegritySkippedWhenNoRangesDeclared) {
+  Material m;  // default: empty texture_plan
+  std::vector<NoteEvent> notes = {makeNote(0, kTicksPerBeat, 127, 0)};
+  std::vector<NoteProvenance> prov = {makeProv(0, NoteSource::Compose)};
+  ValidationReport r = Validator{}.validate(notes, prov, cMajorWhole(), m);
+  EXPECT_FALSE(hasRule(r, "voice_range_integrity"));
+}
+
+TEST(ValidatorTest, PedalRangeSoftPenaltyPassesInsideCompass) {
+  Material m;
+  m.texture_plan.pedal_voice = 2;
+  // C1 (24) .. D3 (50): squarely inside the ideal pedal compass.
+  std::vector<NoteEvent> notes = {makeNote(0, kTicksPerBeat, 36, 2)};
+  std::vector<NoteProvenance> prov = {makeProv(0, NoteSource::Material)};
+  ValidationReport r = Validator{}.validate(notes, prov, cMajorWhole(), m);
+  EXPECT_FALSE(hasRule(r, "pedal_range_soft_penalty"));
+}
+
+TEST(ValidatorTest, PedalRangeSoftPenaltyPassesInSoftMargin) {
+  Material m;
+  m.texture_plan.pedal_voice = 2;
+  // 55 sits just above the D3 (50) soft ceiling but inside the playable
+  // band [12, 62]: a gradual penalty applies at scoring time, NOT a
+  // hard rejection, so the guard must not fire.
+  std::vector<NoteEvent> notes = {makeNote(0, kTicksPerBeat, 55, 2)};
+  std::vector<NoteProvenance> prov = {makeProv(0, NoteSource::Material)};
+  ValidationReport r = Validator{}.validate(notes, prov, cMajorWhole(), m);
+  EXPECT_FALSE(hasRule(r, "pedal_range_soft_penalty"));
+}
+
+TEST(ValidatorTest, PedalRangeSoftPenaltyFailsBeyondPlayableBand) {
+  Material m;
+  m.texture_plan.pedal_voice = 2;
+  // 80 is far above the playable pedal band: physically impossible.
+  std::vector<NoteEvent> notes = {makeNote(0, kTicksPerBeat, 80, 2)};
+  std::vector<NoteProvenance> prov = {makeProv(0, NoteSource::Material)};
+  ValidationReport r = Validator{}.validate(notes, prov, cMajorWhole(), m);
+  EXPECT_TRUE(hasRule(r, "pedal_range_soft_penalty"));
+}
+
+TEST(ValidatorTest, PedalRangeSoftPenaltyIgnoresNonPedalVoices) {
+  Material m;
+  m.texture_plan.pedal_voice = 2;
+  // Out-of-band pitch in voice 0 (not the pedal voice) is ignored.
+  std::vector<NoteEvent> notes = {makeNote(0, kTicksPerBeat, 96, 0)};
+  std::vector<NoteProvenance> prov = {makeProv(0, NoteSource::Compose)};
+  ValidationReport r = Validator{}.validate(notes, prov, cMajorWhole(), m);
+  EXPECT_FALSE(hasRule(r, "pedal_range_soft_penalty"));
+}
+
+TEST(ValidatorTest, PedalRangeSoftPenaltySkippedWhenNoPedalVoice) {
+  Material m;  // default: pedal_voice == 0xFF
+  std::vector<NoteEvent> notes = {makeNote(0, kTicksPerBeat, 96, 0)};
+  std::vector<NoteProvenance> prov = {makeProv(0, NoteSource::Compose)};
+  ValidationReport r = Validator{}.validate(notes, prov, cMajorWhole(), m);
+  EXPECT_FALSE(hasRule(r, "pedal_range_soft_penalty"));
+}
+
+// B1 regression: the parallel-perfect (and hidden-parallel) Material skip
+// must gate on BOTH voices being Material, not just the lower (blamed)
+// voice. A Compose upper voice running parallels against a Material lower
+// voice is real and composer-fixable, so the rule MUST fire.
+
+TEST(ValidatorTest, ParallelFifthFiresWhenUpperComposeLowerMaterial) {
+  // Voice 0 (upper, Compose): C5 (60) -> D5 (62). Voice 1 (lower, Material):
+  // F4 (53) -> G4 (55). Intervals 7, 7 (parallel P5), both voices moved.
+  std::vector<NoteEvent> notes = {
+      makeNote(0, kTicksPerBeat, 60, 0),
+      makeNote(0, kTicksPerBeat, 53, 1),
+      makeNote(kTicksPerBeat, kTicksPerBeat, 62, 0),
+      makeNote(kTicksPerBeat, kTicksPerBeat, 55, 1),
+  };
+  std::vector<NoteProvenance> prov = {
+      makeProv(0, NoteSource::Compose),
+      makeProv(1, NoteSource::Material),
+      makeProv(2, NoteSource::Compose),
+      makeProv(3, NoteSource::Material),
+  };
+  ValidationReport r = Validator{}.validate(notes, prov, cMajorWhole());
+  EXPECT_EQ(r.status, ValidationStatus::FailedSpan);
+  EXPECT_TRUE(hasRule(r, "parallel_fifth"));
+}
+
+TEST(ValidatorTest, ParallelFifthStaysSkippedWhenBothMaterial) {
+  // Same parallel fifths but BOTH voices are Material: the conflict-immune
+  // zone is preserved (the composer cannot edit fixed inputs).
+  std::vector<NoteEvent> notes = {
+      makeNote(0, kTicksPerBeat, 60, 0),
+      makeNote(0, kTicksPerBeat, 53, 1),
+      makeNote(kTicksPerBeat, kTicksPerBeat, 62, 0),
+      makeNote(kTicksPerBeat, kTicksPerBeat, 55, 1),
+  };
+  std::vector<NoteProvenance> prov(notes.size(), makeProv(0, NoteSource::Material));
+  ValidationReport r = Validator{}.validate(notes, prov, cMajorWhole());
+  EXPECT_FALSE(hasRule(r, "parallel_fifth"));
+}
+
+TEST(ValidatorTest, HiddenParallelFifthFiresWhenUpperComposeLowerMaterial) {
+  // Similar motion into a perfect fifth: V0 (upper, Compose) C5 (60) -> D5
+  // (62); V1 (lower, Material) E4 (52) -> G4 (55). Prev interval 8 (m6, not
+  // perfect), current interval 7 (P5), both rise -> hidden parallel fifth.
+  std::vector<NoteEvent> notes = {
+      makeNote(0, kTicksPerBeat, 60, 0),
+      makeNote(0, kTicksPerBeat, 52, 1),
+      makeNote(kTicksPerBeat, kTicksPerBeat, 62, 0),
+      makeNote(kTicksPerBeat, kTicksPerBeat, 55, 1),
+  };
+  std::vector<NoteProvenance> prov = {
+      makeProv(0, NoteSource::Compose),
+      makeProv(1, NoteSource::Material),
+      makeProv(2, NoteSource::Compose),
+      makeProv(3, NoteSource::Material),
+  };
+  ValidationReport r = Validator{}.validate(notes, prov, cMajorWhole());
+  EXPECT_TRUE(hasRule(r, "hidden_parallel_fifth"));
+}
+
+TEST(ValidatorTest, HiddenParallelFifthStaysSkippedWhenBothMaterial) {
+  std::vector<NoteEvent> notes = {
+      makeNote(0, kTicksPerBeat, 60, 0),
+      makeNote(0, kTicksPerBeat, 52, 1),
+      makeNote(kTicksPerBeat, kTicksPerBeat, 62, 0),
+      makeNote(kTicksPerBeat, kTicksPerBeat, 55, 1),
+  };
+  std::vector<NoteProvenance> prov(notes.size(), makeProv(0, NoteSource::Material));
+  ValidationReport r = Validator{}.validate(notes, prov, cMajorWhole());
+  EXPECT_FALSE(hasRule(r, "hidden_parallel_fifth"));
+}
+
+// B3: suspension_seventh_sixth verifies a Sus7_6 carrier forms a genuine
+// 7th over the lowest sounding voice on the dissonance beat and resolves to
+// a 6th. Gated on the SuspensionPrepared / SuspensionResolved provenance
+// bits so it is a no-op outside real SuspensionCarrier spans.
+
+namespace {
+
+// Build a Sus7_6 fixture in V0 over a V1 bass, with the prep/res notes
+// carrying the SuspensionPrepared / SuspensionResolved provenance bits.
+// `sus_pitch` / `res_pitch` parameterize the suspended and resolution
+// pitches so a test can make either a genuine 7-6 or a wrong interval.
+struct Sus76Fixture {
+  std::vector<NoteEvent> notes;
+  std::vector<NoteProvenance> prov;
+  Material material;
+};
+
+Sus76Fixture makeSus76(std::uint8_t prep_pitch, std::uint8_t sus_pitch, std::uint8_t res_pitch,
+                       std::uint8_t bass_pitch) {
+  Sus76Fixture fix;
+  fix.notes = {
+      makeNote(0, kTicksPerBeat, prep_pitch, 0),                 // V0 prep
+      makeNote(kTicksPerBeat, kTicksPerBeat, sus_pitch, 0),      // V0 suspension
+      makeNote(kTicksPerBeat * 2, kTicksPerBeat, res_pitch, 0),  // V0 resolution
+      makeNote(0, kTicksPerBeat * 3, bass_pitch, 1),             // V1 bass (held)
+  };
+  fix.prov = std::vector<NoteProvenance>(fix.notes.size(), makeProv(0, NoteSource::Material));
+  fix.prov[0].satisfied_rules = 1ull << RuleBit::SuspensionPrepared;
+  fix.prov[2].satisfied_rules = 1ull << RuleBit::SuspensionResolved;
+  SuspensionPattern sp;
+  sp.type = SuspensionType::Sus7_6;
+  sp.preparation_tick = 0;
+  sp.suspension_tick = kTicksPerBeat;
+  sp.resolution_tick = kTicksPerBeat * 2;
+  sp.preparation_pitch = prep_pitch;
+  sp.suspension_pitch = sus_pitch;
+  sp.resolution_pitch = res_pitch;
+  sp.voice = 0;
+  fix.material.suspension_patterns.push_back(sp);
+  return fix;
+}
+
+}  // namespace
+
+TEST(ValidatorTest, SuspensionSeventhSixthPassesOnRealSeventh) {
+  // Bass C3 (48). Suspension Bb4 (70): 70-48=22, ic 10 (m7). Resolution
+  // A4 (69): 69-48=21, ic 9 (M6). Genuine 7-6 -> rule passes.
+  Sus76Fixture fix = makeSus76(/*prep=*/70, /*sus=*/70, /*res=*/69, /*bass=*/48);
+  ValidationReport r = Validator{}.validate(fix.notes, fix.prov, cMajorTwoBars(), fix.material);
+  EXPECT_FALSE(hasRule(r, "suspension_seventh_sixth"));
+}
+
+TEST(ValidatorTest, SuspensionSeventhSixthFiresOnWrongInterval) {
+  // Bass C3 (48). Suspension C5 (72): 72-48=24, ic 0 (octave, NOT a 7th).
+  // Resolution B4 (71): 71-48=23, ic 11 (maj 7th, NOT a 6th). Rule fires.
+  Sus76Fixture fix = makeSus76(/*prep=*/72, /*sus=*/72, /*res=*/71, /*bass=*/48);
+  ValidationReport r = Validator{}.validate(fix.notes, fix.prov, cMajorTwoBars(), fix.material);
+  EXPECT_EQ(r.status, ValidationStatus::FailedSpan);
+  EXPECT_TRUE(hasRule(r, "suspension_seventh_sixth"));
+}
+
+TEST(ValidatorTest, SuspensionSeventhSixthSkippedWithoutProvenanceBits) {
+  // Same wrong interval as above but the prep/res notes carry no suspension
+  // provenance bits (Material with satisfied_rules == 0). The rule must be a
+  // no-op so phases with no shipped SuspensionCarrier are never penalized.
+  Sus76Fixture fix = makeSus76(/*prep=*/72, /*sus=*/72, /*res=*/71, /*bass=*/48);
+  fix.prov[0].satisfied_rules = 0;
+  fix.prov[2].satisfied_rules = 0;
+  ValidationReport r = Validator{}.validate(fix.notes, fix.prov, cMajorTwoBars(), fix.material);
+  EXPECT_FALSE(hasRule(r, "suspension_seventh_sixth"));
+}
+
 }  // namespace bach::composer
