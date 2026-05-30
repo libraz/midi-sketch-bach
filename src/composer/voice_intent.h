@@ -137,7 +137,16 @@ enum class VoiceIntent : std::uint8_t {
   // post-pass, which re-runs the standalone nct_detector figures on the
   // final sorted single-voice note list (the only place the full melodic
   // neighbourhood needed by the detectors exists).
-  NctCarrier = 19
+  NctCarrier = 19,
+
+  // P15 (Solo String Flow / BWV1007). A single voice that arpeggiates the
+  // underlying harmony as a continuous broken-chord line. Source is
+  // `Material::arpeggio_template.notes`; CandidateSearch replays each note
+  // verbatim (score = 1.0) like the other Material carriers and stamps
+  // ArpeggioFlowActive + ImplicitVoiceTracked. The implicit-voice streams
+  // the line projects are checked by the Validator's implicit_voice_*
+  // rules, not re-derived here.
+  ArpeggioFlow = 20
 };
 
 // How CandidateSearch turns a span of this intent into Candidates.
@@ -180,7 +189,7 @@ struct IntentDescriptor {
 };
 
 // Table lookup keyed by VoiceIntent. Defined for every enumerator value
-// 0..NctCarrier(19); a static_assert in voice_intent.cpp guards completeness.
+// 0..ArpeggioFlow(20); a static_assert in voice_intent.cpp guards completeness.
 const IntentDescriptor& describeIntent(VoiceIntent intent);
 
 // Pure helper. No formatting library dependency. Delegates to

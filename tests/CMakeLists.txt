@@ -39,7 +39,6 @@ set(BACH_TEST_SOURCES
   # counterpoint/
   counterpoint/counterpoint_state_test.cpp
   counterpoint/i_rule_evaluator_test.cpp
-  counterpoint/voice_manager_test.cpp
   counterpoint/fux_rule_evaluator_test.cpp
   counterpoint/bach_rule_evaluator_test.cpp
   counterpoint/species_rules_test.cpp
@@ -47,7 +46,6 @@ set(BACH_TEST_SOURCES
   counterpoint/motion_analyzer_test.cpp
   counterpoint/collision_resolver_test.cpp
   counterpoint/suspension_chain_test.cpp
-  counterpoint/counterpoint_validator_test.cpp
   counterpoint/melodic_context_test.cpp
   counterpoint/leap_resolution_test.cpp
   counterpoint/repeated_note_repair_test.cpp

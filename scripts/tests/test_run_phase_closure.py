@@ -37,6 +37,27 @@ def _parse_cpp_int_array(name: str) -> tuple[tuple[int, ...], ...]:
     )
 
 
+def _parse_cpp_brace_array(name: str) -> tuple[tuple[int, ...], ...]:
+    """Parse a single-brace ``... kName[...] = { {...}, {...} };`` int array.
+
+    Handles the ``kFigures`` / ``kBarPlan`` declarations (single outer brace,
+    unlike the ``{{ ... }}`` form ``_parse_cpp_int_array`` expects). Trailing
+    ``// ...`` comments after each row are ignored (they sit outside braces).
+
+    @param name C++ array identifier (e.g. "kFigures").
+    @return Tuple of row tuples of ints, in source order.
+    """
+    src = FIXTURE_CPP.read_text(encoding="utf-8")
+    match = re.search(name + r"\b[^=]*=\s*\{(.*?)\};", src, re.S)
+    if match is None:
+        raise AssertionError(f"could not locate {name} in {FIXTURE_CPP}")
+    rows = re.findall(r"\{([0-9,\s]+)\}", match.group(1))
+    return tuple(
+        tuple(int(tok) for tok in row.replace(" ", "").split(",") if tok != "")
+        for row in rows
+    )
+
+
 class CppDriftGuardTest(unittest.TestCase):
     """Highest-value guard: the Python catalogs must equal the C++ source."""
 
@@ -61,6 +82,24 @@ class CppDriftGuardTest(unittest.TestCase):
             self.assertEqual(len(catalog), 5)
             for row in catalog:
                 self.assertEqual(len(row), 16)
+
+    def test_phase15_figures_match_cpp(self) -> None:
+        cpp = _parse_cpp_brace_array("kFigures")
+        self.assertEqual(
+            cpp,
+            rpc.PHASE15_FIGURES,
+            "PHASE15_FIGURES drifted from kFigures in harness_fixture.cpp",
+        )
+
+    def test_phase15_barplan_match_cpp(self) -> None:
+        # kBarPlan rows are (root_pc, bass, mid, top); the Python mirror keeps
+        # only the (bass, mid, top) triple the structural predictor replays.
+        cpp = _parse_cpp_brace_array("kBarPlan")
+        self.assertEqual(
+            tuple(row[1:] for row in cpp),
+            rpc.PHASE15_BARPLAN,
+            "PHASE15_BARPLAN drifted from kBarPlan in harness_fixture.cpp",
+        )
 
 
 class ExpectedCarrierSequencesTest(unittest.TestCase):
@@ -113,6 +152,41 @@ class ExpectedCarrierSequencesTest(unittest.TestCase):
         self.assertEqual(ans[1], (8160, 69))
         self.assertEqual(ans[2], (8640, 67))
         self.assertEqual(ans[3], (9120, 69))
+
+
+class ExpectedArpeggioSequenceTest(unittest.TestCase):
+    """Golden Phase15 arpeggio prediction (verbatim broken-chord replay)."""
+
+    def test_seed0_arpeggio_head(self) -> None:
+        # seed 0 -> harm_idx 0 -> figure (1,0,1,2) = mid-bass-mid-top.
+        # Bar 0 tones = (bass 48, mid 55, top 64); first beat replays
+        # mid,bass,mid,top at sixteenth (120-tick) spacing.
+        seq = rpc.expected_carrier_sequences("Phase15", fixture_for_seed(0))
+        arp = seq[(0, "ArpeggioFlow")]
+        self.assertEqual(len(arp), 128)  # 8 bars * 4 beats * 4 sixteenths.
+        self.assertEqual(arp[0], (0, 55))
+        self.assertEqual(arp[1], (120, 48))
+        self.assertEqual(arp[2], (240, 55))
+        self.assertEqual(arp[3], (360, 64))
+
+    def test_seed3_uses_figure3(self) -> None:
+        # seed 3 -> harm_idx 3 -> figure (2,1,0,1) = top-mid-bass-mid.
+        seq = rpc.expected_carrier_sequences("Phase15", fixture_for_seed(3))
+        arp = seq[(0, "ArpeggioFlow")]
+        self.assertEqual(arp[0], (0, 64))  # top.
+        self.assertEqual(arp[1], (120, 55))  # mid.
+        self.assertEqual(arp[2], (240, 48))  # bass.
+
+    def test_implicit_streams_are_figure_invariant(self) -> None:
+        # The per-cell min (bass) / max (top) — the implicit voices the
+        # Validator checks — must not depend on the figure ordering.
+        for seed in (0, 1, 2, 3):
+            arp = rpc.expected_carrier_sequences(
+                "Phase15", fixture_for_seed(seed)
+            )[(0, "ArpeggioFlow")]
+            first_cell = [p for _, p in arp[:4]]
+            self.assertEqual(min(first_cell), 48)  # bar 0 bass.
+            self.assertEqual(max(first_cell), 64)  # bar 0 top.
 
 
 class ComputePassedTest(unittest.TestCase):
@@ -169,14 +243,24 @@ class Phase14BitCountTest(unittest.TestCase):
     def test_required_bit_count_is_47(self) -> None:
         self.assertEqual(rpc.PHASE14_REQUIRED_BIT_COUNT, 47)
 
-    def test_matches_provenance_max_bit(self) -> None:
+    def test_matches_organ_fugue_bit_boundary(self) -> None:
+        # Phase14 is the Organ-fugue all-technique milestone: it covers RuleBits
+        # 0..AffektCurveApplied. The Solo String Flow bits (ArpeggioFlowActive,
+        # ImplicitVoiceTracked) added in P15 are a SEPARATE system and sit ABOVE
+        # that boundary, so the milestone count tracks AffektCurveApplied+1, NOT
+        # the absolute RuleBit max.
         prov = (REPO_ROOT / "src" / "composer" / "provenance.h").read_text(
             encoding="utf-8"
         )
-        # Collect "Name = N," entries inside the RuleBit enum block.
         enum_body = prov.split("enum RuleBit", 1)[1].split("};", 1)[0]
-        indices = [int(m) for m in re.findall(r"=\s*(\d+)", enum_body)]
-        self.assertEqual(max(indices) + 1, rpc.PHASE14_REQUIRED_BIT_COUNT)
+        names = dict(re.findall(r"(\w+)\s*=\s*(\d+)", enum_body))
+        self.assertEqual(
+            int(names["AffektCurveApplied"]) + 1, rpc.PHASE14_REQUIRED_BIT_COUNT
+        )
+        # The two Flow bits are exactly the indices just past the milestone.
+        self.assertEqual(int(names["ArpeggioFlowActive"]), 47)
+        self.assertEqual(int(names["ImplicitVoiceTracked"]), 48)
+        self.assertEqual(rpc.PHASE15_REQUIRED_BITS, (47, 48))
 
 
 if __name__ == "__main__":

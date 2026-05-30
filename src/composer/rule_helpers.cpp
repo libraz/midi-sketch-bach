@@ -90,6 +90,69 @@ bool isCrossRelationPc(std::uint8_t a, std::uint8_t b) {
          (lo == 7 && hi == 8) || (lo == 9 && hi == 10);
 }
 
+namespace {
+
+// Seven diatonic pitch classes for the plan's key. Mirrors the local
+// scalePcs() previously duplicated in validator.cpp.
+std::array<std::uint8_t, 7> scalePcs(const HarmonicPlan& plan) {
+  if (plan.is_minor) {
+    return {
+        static_cast<std::uint8_t>(plan.tonic_pc % 12),
+        static_cast<std::uint8_t>((plan.tonic_pc + 2) % 12),
+        static_cast<std::uint8_t>((plan.tonic_pc + 3) % 12),
+        static_cast<std::uint8_t>((plan.tonic_pc + 5) % 12),
+        static_cast<std::uint8_t>((plan.tonic_pc + 7) % 12),
+        static_cast<std::uint8_t>((plan.tonic_pc + 8) % 12),
+        static_cast<std::uint8_t>((plan.tonic_pc + 11) % 12),
+    };
+  }
+  return {
+      static_cast<std::uint8_t>(plan.tonic_pc % 12),
+      static_cast<std::uint8_t>((plan.tonic_pc + 2) % 12),
+      static_cast<std::uint8_t>((plan.tonic_pc + 4) % 12),
+      static_cast<std::uint8_t>((plan.tonic_pc + 5) % 12),
+      static_cast<std::uint8_t>((plan.tonic_pc + 7) % 12),
+      static_cast<std::uint8_t>((plan.tonic_pc + 9) % 12),
+      static_cast<std::uint8_t>((plan.tonic_pc + 11) % 12),
+  };
+}
+
+int scaleIndex(std::uint8_t pc, const HarmonicPlan& plan) {
+  const auto pcs = scalePcs(plan);
+  for (int i = 0; i < static_cast<int>(pcs.size()); ++i) {
+    if (pcs[static_cast<std::size_t>(i)] == pc)
+      return i;
+  }
+  return -1;
+}
+
+}  // namespace
+
+bool isAugmentedMelodicInterval(std::uint8_t from, std::uint8_t to, const HarmonicPlan& plan) {
+  const int semis = std::abs(static_cast<int>(to) - static_cast<int>(from)) % 12;
+  if (semis == 6)
+    return true;  // augmented fourth spelling is indistinguishable from tritone in MIDI.
+  if (semis != 3)
+    return false;
+  const int a = scaleIndex(pitchClass(from), plan);
+  const int b = scaleIndex(pitchClass(to), plan);
+  if (a < 0 || b < 0)
+    return true;
+  const int degree_distance = std::abs(a - b);
+  return degree_distance == 1 || degree_distance == 6;
+}
+
+bool isDiminishedMelodicInterval(std::uint8_t from, std::uint8_t to) {
+  const int semis = std::abs(static_cast<int>(to) - static_cast<int>(from)) % 12;
+  return semis == 6 || semis == 11;
+}
+
+bool isForbiddenMelodicLeap(std::uint8_t from, std::uint8_t to, const HarmonicPlan& plan) {
+  const int semis = std::abs(static_cast<int>(to) - static_cast<int>(from)) % 12;
+  return semis == 6 || isAugmentedMelodicInterval(from, to, plan) ||
+         isDiminishedMelodicInterval(from, to);
+}
+
 std::uint8_t voicePitchAt(const std::vector<NoteEvent>& notes, VoiceId voice, Tick tick) {
   std::uint8_t pitch = 0;
   for (const auto& note : notes) {

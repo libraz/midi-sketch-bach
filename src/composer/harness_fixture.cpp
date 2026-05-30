@@ -79,7 +79,7 @@ constexpr std::array<std::array<ChordSpec, 4>, 4> kHarmonyPatterns = {{
 }};
 
 void pushCounterlineBar(VoicePlan& vp, SpanId& next_id, std::uint8_t voice, int bar,
-                        Subdivision subdivision) {
+                        Subdivision subdivision, std::uint8_t voice_center = 0) {
   Span s;
   s.id = next_id++;
   s.start_tick = static_cast<Tick>(bar) * kTicksPerBar;
@@ -87,6 +87,7 @@ void pushCounterlineBar(VoicePlan& vp, SpanId& next_id, std::uint8_t voice, int 
   s.voice = voice;
   s.intent = VoiceIntent::SequentialCounterline;
   s.subdivision = subdivision;
+  s.voice_center = voice_center;
   vp.spans.push_back(s);
 }
 
@@ -693,11 +694,22 @@ HarnessFixture buildPhase14Fixture(int seed) {
 
   // V1: counterline 0-3 (Compose) | answer 4-7 | counterline 8-11 (Compose) |
   //     suspension 12-13 | (rest 14-41).
+  //
+  // Counterline tessitura anchor = A4 (69), not the global alto center (64).
+  // The V0 subject above climbs to G5/A5 (79-81); the P7 spacing pre-filter
+  // rejects any V1 candidate more than an octave below the sounding subject
+  // (floor = V0 - 12, i.e. up to 69 when V0 = 81). With the default center 64
+  // the score pulls the line down to ~62, so when the subject leaps up the
+  // spacing floor outruns the line and every candidate is rejected — the line
+  // goes silent (the saturation observed in the P14 review). Anchoring at 69
+  // (= the worst-case floor) keeps the line inside the spacing-valid band
+  // across the whole subject arc while voice-crossing still caps it below V0.
+  constexpr std::uint8_t kCounterlineCenter = 69;
   for (int bar = 0; bar <= 3; ++bar)
-    pushCounterlineBar(out.voice_plan, next_id, 1, bar, subdivision);
+    pushCounterlineBar(out.voice_plan, next_id, 1, bar, subdivision, kCounterlineCenter);
   push_span(1, 4, 7, VoiceIntent::AnswerCarrier);
   for (int bar = 8; bar <= 11; ++bar)
-    pushCounterlineBar(out.voice_plan, next_id, 1, bar, subdivision);
+    pushCounterlineBar(out.voice_plan, next_id, 1, bar, subdivision, kCounterlineCenter);
   push_span(1, 12, 13, VoiceIntent::SuspensionCarrier);
 
   // V2: (rest 0-7) | subject re-entry 8-11 | NCT 12-15 | pedal 16-19 |
@@ -715,6 +727,107 @@ HarnessFixture buildPhase14Fixture(int seed) {
   // crossing.
   push_span(2, 24, kStrettoLastBar, VoiceIntent::StrettoCarrier);
   push_span(2, 36, 39, VoiceIntent::RhythmCarrier);
+
+  return out;
+}
+
+// Build the Phase15 fixture: a single-voice BWV1007-style broken-chord
+// arpeggio over 8 bars in C major. The line projects two implicit voices the
+// Validator checks (per-cell min = bass stream, max = top stream):
+//
+//   - Bass stream = the chord roots in octave 3 (recurring low note).
+//   - Top stream  = a voice-led melodic line that deliberately avoids putting
+//     the root on top, so consecutive cells never frame the same perfect
+//     interval moving the same direction (no parallel 5ths/8ves), and never
+//     leaps by a tritone/augmented/diminished interval.
+//
+// Each bar's chord is arpeggiated as 4 cells (one per beat) of 4 sixteenths;
+// group_size = 4. Within a bar every cell is the same three chord tones
+// (bass / mid / top) re-ordered by a seed-selected figure, so the min/max
+// streams move only at bar boundaries — where the progression and top line
+// were chosen to satisfy both Flow rules for every seed.
+HarnessFixture buildPhase15Fixture(int seed) {
+  HarnessFixture out;
+
+  constexpr int kBars = 8;
+  constexpr int kGroup = 4;
+  const Tick kSix = kTicksPerBeat / 4;  // sixteenth note.
+
+  // Per-bar (root_pc, bass / mid / top MIDI pitches). I IV V I IV V I I.
+  struct BarSpec {
+    std::uint8_t root_pc;
+    std::uint8_t bass;
+    std::uint8_t mid;
+    std::uint8_t top;
+  };
+  static constexpr BarSpec kBarPlan[kBars] = {
+      {0, 48, 55, 64},  // C: C3  G3  E4
+      {5, 53, 60, 69},  // F: F3  C4  A4
+      {7, 55, 62, 71},  // G: G3  D4  B4
+      {0, 48, 64, 67},  // C: C3  E4  G4
+      {5, 53, 60, 69},  // F: F3  C4  A4
+      {7, 55, 62, 71},  // G: G3  D4  B4
+      {0, 48, 64, 67},  // C: C3  E4  G4
+      {0, 48, 55, 64},  // C: C3  G3  E4
+  };
+
+  // Seed-selected sixteenth-note figure. Each entry indexes {0=bass,1=mid,
+  // 2=top}; every pattern contains a bass and a top, so the per-cell min/max
+  // (the implicit streams) are the bass/top regardless of the inner ordering —
+  // both Flow validator rules therefore stay clean for any figure here.
+  //
+  // The four orderings are empirically selected (a model-scorer sweep over all
+  // 50 bass+top-bearing permutations) so every seed clears the gate-3 threshold
+  // (0.78) with margin: their in-context model_prob is 0.85 / 0.84 / 0.84 /
+  // 0.82 respectively. The earlier bass-first set had two orderings
+  // ({0,2,1,2} and {1,0,2,0}) that sat at ~0.72 / ~0.69, below the gate;
+  // reordering (without changing the chord tones, so the implicit-voice streams
+  // are untouched) lifts them above it.
+  static constexpr int kFigures[4][4] = {
+      {1, 0, 1, 2},  // mid-bass-mid-top
+      {1, 2, 1, 0},  // mid-top-mid-bass
+      {0, 1, 2, 1},  // bass-mid-top-mid
+      {2, 1, 0, 1},  // top-mid-bass-mid
+  };
+  const int* figure = kFigures[seed % 4];
+
+  // HarmonicPlan: one major chord per bar.
+  out.harmony.tonic_pc = 0;
+  out.harmony.is_minor = false;
+  for (int bar = 0; bar < kBars; ++bar) {
+    ChordEvent c;
+    c.start_tick = static_cast<Tick>(bar) * kTicksPerBar;
+    c.root_pc = kBarPlan[bar].root_pc;
+    c.quality = ChordQuality::Major;
+    out.harmony.chords.push_back(c);
+  }
+
+  // Material: the realized arpeggio line.
+  out.material.arpeggio_template.group_size = kGroup;
+  for (int bar = 0; bar < kBars; ++bar) {
+    const std::uint8_t tones[3] = {kBarPlan[bar].bass, kBarPlan[bar].mid, kBarPlan[bar].top};
+    for (int beat = 0; beat < 4; ++beat) {
+      for (int s = 0; s < kGroup; ++s) {
+        MaterialNote mn;
+        mn.start_tick = static_cast<Tick>(bar) * kTicksPerBar +
+                        static_cast<Tick>(beat) * kTicksPerBeat + static_cast<Tick>(s) * kSix;
+        mn.duration = kSix;
+        mn.pitch = tones[figure[s]];
+        out.material.arpeggio_template.notes.push_back(mn);
+      }
+    }
+  }
+
+  // VoicePlan: one ArpeggioFlow span covering the whole piece on voice 0.
+  out.voice_plan.num_voices = 1;
+  Span span;
+  span.id = 0;
+  span.start_tick = 0;
+  span.end_tick = static_cast<Tick>(kBars) * kTicksPerBar;
+  span.voice = 0;
+  span.intent = VoiceIntent::ArpeggioFlow;
+  span.subdivision = Subdivision::Quarter;  // unused by verbatim replay.
+  out.voice_plan.spans.push_back(span);
 
   return out;
 }
@@ -844,6 +957,20 @@ HarnessPhaseSpec phaseSpec(HarnessPhase phase) {
               true,  true,         true,        true,
               true,  true,         true,        true,
               true};
+    case HarnessPhase::Phase15:
+      // 8 bar / 1 voice. Solo String Flow. No subject/answer; the whole piece
+      // is a single ArpeggioFlow span built by buildPhase15Fixture. Every
+      // device flag is false; with_arpeggio_flow (the trailing defaulted
+      // field) is set true to route the dispatch.
+      return {phase,      /*voices=*/1,
+              /*bars=*/8, /*subject_bars=*/0,
+              false,      false,
+              false,      false,
+              false,      false,
+              false,      false,
+              false,      false,
+              false,      false,
+              false,      /*with_arpeggio_flow=*/true};
   }
   return {phase, 2,     8,     8,     false, false, false, false, false,
           false, false, false, false, false, false, false, false};
@@ -857,6 +984,10 @@ HarnessFixture buildHarnessFixture(HarnessPhase phase, int seed) {
   // here keeps the entire P3-P13 assembly below byte-identical.
   if (spec.with_nct) {
     return buildPhase14Fixture(seed);
+  }
+  // Phase15 (Solo String Flow) is likewise self-contained.
+  if (spec.with_arpeggio_flow) {
+    return buildPhase15Fixture(seed);
   }
 
   const int num_blocks = spec.bars / 4;

@@ -66,12 +66,15 @@ constexpr IntentDescriptor kIntentTable[] = {
     // NctCarrier (19): figure bits stamped later by the NCT post-pass, none
     // here.
     {"NctCarrier", true, ReplayKind::kVerbatimVector, ChordTone, false},
+    // ArpeggioFlow (20): every note carries ArpeggioFlowActive (and
+    // ImplicitVoiceTracked, stamped alongside in the replay branch).
+    {"ArpeggioFlow", true, ReplayKind::kVerbatimVector, ArpeggioFlowActive, true},
 };
 
-constexpr std::size_t kIntentCount = static_cast<std::size_t>(VoiceIntent::NctCarrier) + 1;
+constexpr std::size_t kIntentCount = static_cast<std::size_t>(VoiceIntent::ArpeggioFlow) + 1;
 
 static_assert(sizeof(kIntentTable) / sizeof(kIntentTable[0]) == kIntentCount,
-              "kIntentTable must have one entry per VoiceIntent enumerator (0..NctCarrier)");
+              "kIntentTable must have one entry per VoiceIntent enumerator (0..ArpeggioFlow)");
 
 const IntentDescriptor kUnknownDescriptor = {"Unknown", false, ReplayKind::kCompose, ChordTone,
                                              false};

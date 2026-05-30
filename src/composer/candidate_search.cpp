@@ -205,7 +205,8 @@ Candidate emitMaterialNote(const MaterialNote& mnote, const HarmonicPlan& plan,
 std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
                                                   const HarmonicPlan& harmonic_plan,
                                                   const Material& material,
-                                                  const CandidateContext& context) const {
+                                                  const CandidateContext& context,
+                                                  std::size_t* saturated_positions) const {
   std::vector<Candidate> out;
 
   // Diatonic pitch-class mask for the key declared by the HarmonicPlan.
@@ -607,6 +608,28 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
     return out;
   }
 
+  if (span.intent == VoiceIntent::ArpeggioFlow) {
+    // P15 Solo String Flow carrier: verbatim replay of the single-voice
+    // broken-chord line in material.arpeggio_template that falls inside the
+    // span window, mirroring the other Material carriers (source = Material,
+    // score = 1.0, baseline ChordTone/P7/P8 bit set via emitMaterialNote).
+    // Every note additionally carries ArpeggioFlowActive + ImplicitVoiceTracked
+    // so the closure gate can assert the Flow device shipped and the
+    // Validator's implicit-voice rules cover the line. Implicit-voice
+    // membership is positional (group_size) and is reconstructed by the
+    // Validator from the emitted note order, not encoded per note here.
+    const RuleIdMask flow_bits =
+        (1ull << RuleBit::ArpeggioFlowActive) | (1ull << RuleBit::ImplicitVoiceTracked);
+    for (const auto& mnote : material.arpeggio_template.notes) {
+      if (mnote.start_tick < span.start_tick)
+        continue;
+      if (mnote.start_tick >= span.end_tick)
+        break;
+      out.push_back(emitMaterialNote(mnote, harmonic_plan, flow_bits));
+    }
+    return out;
+  }
+
   // Compose spans: lay down one note per beat aligned to span.start_tick.
   // Pitch picked from current chord tones near voice_center. Spans with
   // Subdivision::Eighth produce two notes per beat instead — the rest
@@ -834,6 +857,25 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
           createsCrossRelation(*context.placed_notes, span.voice, static_cast<std::uint8_t>(p),
                                t)) {
         continue;
+      }
+
+      // Melodic rule (mirrors Validator Rule P1): reject a forbidden
+      // melodic leap — tritone, augmented 2nd/4th, or diminished 5th/octave
+      // — from the previous pitch to this candidate. Without this pre-filter
+      // the search can pick a best-scoring triad tone that forms such a leap;
+      // the Validator then rejects it after the fact and bounces the whole
+      // seed (observed once the Phase14 counterline was raised toward the high
+      // subject). Scoped exactly like the Validator: skipped under a cadence
+      // cell (force_bass_cadence_pc) and when a secondary-dominant chord is
+      // active at either endpoint (its non-diatonic chord tones are idiomatic).
+      if (!force_bass_cadence_pc && prev_pitch_local != 0) {
+        const ChordEvent& chord_at_prev = activeChord(harmonic_plan, parallel_prev_tick);
+        const bool secondary_active = chord.has_secondary_of || chord_at_prev.has_secondary_of;
+        if (!secondary_active &&
+            rule_helpers::isForbiddenMelodicLeap(prev_pitch_local, static_cast<std::uint8_t>(p),
+                                                 harmonic_plan)) {
+          continue;
+        }
       }
 
       // Melodic rule: if the previous motion (pre_prev -> prev) was
@@ -1247,8 +1289,15 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
       }
     }
 
-    if (best_pitch < 0)
-      continue;  // span saturated; caller handles
+    if (best_pitch < 0) {
+      // No admissible candidate at this position: a silent hole. Per the
+      // no-fallback principle we emit nothing here; report the saturation
+      // so the caller can escalate it to ValidationStatus::FailedSeed
+      // instead of letting the hole pass silently as success.
+      if (saturated_positions != nullptr)
+        ++*saturated_positions;
+      continue;
+    }
 
     Candidate c;
     c.start_tick = t;

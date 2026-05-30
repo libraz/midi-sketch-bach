@@ -64,6 +64,9 @@ _PHASE_ALIASES: dict[str, str] = {
     "14": "Phase14",
     "p14": "Phase14",
     "phase14": "Phase14",
+    "15": "Phase15",
+    "p15": "Phase15",
+    "phase15": "Phase15",
 }
 
 

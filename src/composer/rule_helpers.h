@@ -52,6 +52,28 @@ bool isConsonantInterval(int semitones);
 
 bool isCrossRelationPc(std::uint8_t a, std::uint8_t b);
 
+// Melodic-interval rules (mirror Validator Rule P1: forbidden melodic
+// leaps for Compose voices). Shared so the CandidateSearch pre-filter
+// rejects exactly the leaps the Validator would later reject — keeping
+// the two in lockstep instead of letting the search emit a note that
+// fails validation and bounces the seed.
+//
+// isAugmentedMelodicInterval: tritone (6 semis, indistinguishable from an
+//   augmented 4th in MIDI) or an augmented 2nd/7th (3 semis between scale
+//   degrees one step or a seventh apart). `plan` supplies the diatonic set.
+// isDiminishedMelodicInterval: tritone (6) or major 7th (11, the diminished
+//   octave spelling).
+bool isAugmentedMelodicInterval(std::uint8_t from, std::uint8_t to, const HarmonicPlan& plan);
+
+bool isDiminishedMelodicInterval(std::uint8_t from, std::uint8_t to);
+
+// Union of the two rules above plus the bare tritone: true iff a melodic
+// leap from `from` to `to` is one the Validator forbids for Compose notes.
+// Callers that need the secondary-dominant exemption must apply it before
+// calling (the Validator skips the rule when a has_secondary_of chord is
+// active at either endpoint).
+bool isForbiddenMelodicLeap(std::uint8_t from, std::uint8_t to, const HarmonicPlan& plan);
+
 // Pitch-at-time queries over the composer's incremental commit log.
 // `notes` is voice-grouped: spans for one voice are contiguous, but
 // voices are not interleaved by start_tick, so loops must `continue`

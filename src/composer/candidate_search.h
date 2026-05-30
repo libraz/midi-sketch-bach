@@ -1,6 +1,7 @@
 #ifndef BACH_COMPOSER_CANDIDATE_SEARCH_H
 #define BACH_COMPOSER_CANDIDATE_SEARCH_H
 
+#include <cstddef>
 #include <vector>
 
 #include "composer/candidate.h"
@@ -65,8 +66,15 @@ class CandidateSearch {
   // descending. Empty result means the search exhausted with no
   // admissible candidate; caller must trigger span re-generation or
   // back-jump.
+  //
+  // @param saturated_positions If non-null, incremented once per
+  //   enumerated Compose position that exhausted with no admissible
+  //   candidate (a silent hole). The caller escalates a non-zero count
+  //   to ValidationStatus::FailedSeed. Default nullptr preserves the
+  //   behavior of every existing caller.
   std::vector<Candidate> enumerate(const Span& span, const HarmonicPlan& harmonic_plan,
-                                   const Material& material, const CandidateContext& context) const;
+                                   const Material& material, const CandidateContext& context,
+                                   std::size_t* saturated_positions = nullptr) const;
 };
 
 }  // namespace bach::composer

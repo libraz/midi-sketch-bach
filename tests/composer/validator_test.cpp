@@ -47,6 +47,12 @@ NoteProvenance makeProv(SpanId sid, NoteSource src) {
   return p;
 }
 
+NoteProvenance makeProvIntent(SpanId sid, NoteSource src, VoiceIntent intent) {
+  NoteProvenance p = makeProv(sid, src);
+  p.voice_intent = intent;
+  return p;
+}
+
 bool hasRule(const ValidationReport& r, const std::string& rule_id) {
   for (const auto& f : r.failures) {
     if (f.rule_id == rule_id)
@@ -993,13 +999,15 @@ TEST(ValidatorTest, CountersubjectContinuousPassesForFullCoverage) {
         subjectNote(4 * kTicksPerBar + i * kTicksPerBeat, kTicksPerBeat, 71));
   }
   std::vector<NoteEvent> notes;
+  std::vector<NoteProvenance> prov;
   for (const auto& m : material.countersubject) {
     notes.push_back(makeNote(m.start_tick, m.duration, m.pitch, 0));
+    prov.push_back(makeProvIntent(0, NoteSource::Material, VoiceIntent::CountersubjectCarrier));
   }
   for (const auto& m : material.answer) {
     notes.push_back(makeNote(m.start_tick, m.duration, m.pitch, 1));
+    prov.push_back(makeProvIntent(0, NoteSource::Material, VoiceIntent::AnswerCarrier));
   }
-  std::vector<NoteProvenance> prov(notes.size(), makeProv(0, NoteSource::Material));
   ValidationReport r = Validator{}.validate(notes, prov, cMajorWhole(), material);
   EXPECT_FALSE(hasRule(r, "countersubject_continuous"));
 }
@@ -1016,13 +1024,15 @@ TEST(ValidatorTest, CountersubjectContinuousFailsForGap) {
         subjectNote(4 * kTicksPerBar + i * kTicksPerBeat, kTicksPerBeat, 71));
   }
   std::vector<NoteEvent> notes;
+  std::vector<NoteProvenance> prov;
   for (int i = 0; i < 8; ++i) {
     notes.push_back(makeNote(4 * kTicksPerBar + i * kTicksPerBeat, kTicksPerBeat, 71, 0));
+    prov.push_back(makeProvIntent(0, NoteSource::Material, VoiceIntent::CountersubjectCarrier));
   }
   for (const auto& m : material.answer) {
     notes.push_back(makeNote(m.start_tick, m.duration, m.pitch, 1));
+    prov.push_back(makeProvIntent(0, NoteSource::Material, VoiceIntent::AnswerCarrier));
   }
-  std::vector<NoteProvenance> prov(notes.size(), makeProv(0, NoteSource::Material));
   ValidationReport r = Validator{}.validate(notes, prov, cMajorWhole(), material);
   EXPECT_EQ(r.status, ValidationStatus::FailedSpan);
   EXPECT_TRUE(hasRule(r, "countersubject_continuous"));
@@ -1038,6 +1048,96 @@ TEST(ValidatorTest, CountersubjectContinuousSkippedWhenCSEmpty) {
   std::vector<NoteProvenance> prov;
   ValidationReport r = Validator{}.validate(notes, prov, cMajorWhole(), material);
   EXPECT_FALSE(hasRule(r, "countersubject_continuous"));
+}
+
+TEST(ValidatorTest, CountersubjectContinuousChecksDeclaredVoiceNotAlwaysV0) {
+  // The CS is carried in V1 (NOT V0). V1 has a continuity gap (only the
+  // first half of the answer window is covered), while V0 sounds across
+  // the whole window. The rule must sample V1 (derived from the
+  // CountersubjectCarrier provenance), so it FIRES on the V1 gap rather
+  // than passing on V0's full coverage.
+  Material material;
+  material.subject = {subjectNote(0, kTicksPerBeat, 60)};
+  for (int idx = 0; idx < 16; ++idx) {
+    material.answer.push_back(
+        subjectNote(4 * kTicksPerBar + idx * kTicksPerBeat, kTicksPerBeat, 60));
+  }
+  for (int idx = 0; idx < 16; ++idx) {
+    material.countersubject.push_back(
+        subjectNote(4 * kTicksPerBar + idx * kTicksPerBeat, kTicksPerBeat, 71));
+  }
+  std::vector<NoteEvent> notes;
+  std::vector<NoteProvenance> prov;
+  // V0 fully covers the window but is NOT the countersubject voice.
+  for (int idx = 0; idx < 16; ++idx) {
+    notes.push_back(makeNote(4 * kTicksPerBar + idx * kTicksPerBeat, kTicksPerBeat, 60, 0));
+    prov.push_back(makeProvIntent(0, NoteSource::Material, VoiceIntent::AnswerCarrier));
+  }
+  // V1 carries the CS but only covers the first 8 beats → gap from beat 9.
+  for (int idx = 0; idx < 8; ++idx) {
+    notes.push_back(makeNote(4 * kTicksPerBar + idx * kTicksPerBeat, kTicksPerBeat, 71, 1));
+    prov.push_back(makeProvIntent(0, NoteSource::Material, VoiceIntent::CountersubjectCarrier));
+  }
+  ValidationReport r = Validator{}.validate(notes, prov, cMajorWhole(), material);
+  EXPECT_TRUE(hasRule(r, "countersubject_continuous"));
+}
+
+TEST(ValidatorTest, CountersubjectContinuousPassesForContinuousNonZeroVoice) {
+  // Converse of the above: the CS in V1 fully covers the window, while V0
+  // has a gap. The rule samples V1 (the declared CS voice), so V0's gap is
+  // irrelevant and the rule does NOT fire.
+  Material material;
+  material.subject = {subjectNote(0, kTicksPerBeat, 60)};
+  for (int idx = 0; idx < 16; ++idx) {
+    material.answer.push_back(
+        subjectNote(4 * kTicksPerBar + idx * kTicksPerBeat, kTicksPerBeat, 60));
+  }
+  for (int idx = 0; idx < 16; ++idx) {
+    material.countersubject.push_back(
+        subjectNote(4 * kTicksPerBar + idx * kTicksPerBeat, kTicksPerBeat, 71));
+  }
+  std::vector<NoteEvent> notes;
+  std::vector<NoteProvenance> prov;
+  // V0 has a gap (only 8 beats) but is NOT the countersubject voice.
+  for (int idx = 0; idx < 8; ++idx) {
+    notes.push_back(makeNote(4 * kTicksPerBar + idx * kTicksPerBeat, kTicksPerBeat, 60, 0));
+    prov.push_back(makeProvIntent(0, NoteSource::Material, VoiceIntent::AnswerCarrier));
+  }
+  // V1 carries the CS and fully covers the window.
+  for (int idx = 0; idx < 16; ++idx) {
+    notes.push_back(makeNote(4 * kTicksPerBar + idx * kTicksPerBeat, kTicksPerBeat, 71, 1));
+    prov.push_back(makeProvIntent(0, NoteSource::Material, VoiceIntent::CountersubjectCarrier));
+  }
+  ValidationReport r = Validator{}.validate(notes, prov, cMajorWhole(), material);
+  EXPECT_FALSE(hasRule(r, "countersubject_continuous"));
+}
+
+TEST(ValidatorTest, CrossRelationSkippedWhenBothMaterial) {
+  // F natural (pc 5) vs F# (pc 6) in different voices form a cross
+  // relation, but both notes are NoteSource::Material — the composer
+  // cannot edit fixed inputs, so the rule must NOT fire.
+  std::vector<NoteEvent> notes = {
+      makeNote(0, kTicksPerBeat, 65, 0),  // F
+      makeNote(0, kTicksPerBeat, 66, 1),  // F#
+  };
+  std::vector<NoteProvenance> prov(notes.size(), makeProv(0, NoteSource::Material));
+  ValidationReport r = Validator{}.validate(notes, prov, cMajorWhole());
+  EXPECT_FALSE(hasRule(r, "cross_relation"));
+}
+
+TEST(ValidatorTest, CrossRelationFiresWhenOneIsCompose) {
+  // Same cross-relation pair, but one note is Compose-sourced. The
+  // composer can fix it, so the rule FIRES.
+  std::vector<NoteEvent> notes = {
+      makeNote(0, kTicksPerBeat, 65, 0),  // F (Material)
+      makeNote(0, kTicksPerBeat, 66, 1),  // F# (Compose)
+  };
+  std::vector<NoteProvenance> prov = {
+      makeProv(0, NoteSource::Material),
+      makeProv(0, NoteSource::Compose),
+  };
+  ValidationReport r = Validator{}.validate(notes, prov, cMajorWhole());
+  EXPECT_TRUE(hasRule(r, "cross_relation"));
 }
 
 TEST(ValidatorTest, EpisodeMotifDerivedEmptyEpisodesListsPasses) {

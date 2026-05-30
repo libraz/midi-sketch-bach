@@ -46,6 +46,14 @@ struct Span {
   // const here would ripple into those inits and is therefore out of scope.
   VoiceIntent intent = VoiceIntent::FillerGap;
   Subdivision subdivision = Subdivision::Quarter;
+  // Optional per-span tessitura anchor for Compose candidate search. 0 means
+  // "use the global per-voice default" (Composer::kVoiceCenter); any non-zero
+  // value overrides it for this span only. Used where a voice's default alto/
+  // tenor center sits too far below a high subject for the P7 spacing
+  // pre-filter (gap <= octave) to admit any candidate — e.g. the Phase14
+  // exposition counterline beneath a subject that climbs to G5/A5. Carrier
+  // spans ignore this field (they replay Material verbatim).
+  std::uint8_t voice_center = 0;
 };
 
 }  // namespace bach::composer

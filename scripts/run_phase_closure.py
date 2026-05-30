@@ -60,6 +60,18 @@ PHASE_DEFAULTS = {
     #     --required-rule-bit ChordTone=0 --required-rule-bit StrongBeatConsonance=1 \
     #     ... (all 47 name=index masks; see the bit catalog below) ...
     "Phase14": {"tag": "p14", "threshold": 0.85, "min_pass": 14},
+    # P15 is the first Solo String (BWV1007) phase: a single-voice broken-chord
+    # arpeggio, NOT a fugue. There are no exposition entries; the whole piece is
+    # one ArpeggioFlow span replaying the material arpeggio template verbatim.
+    # Gate (3) holds the standard solo-phase bar (0.78 / 10-of-20, matching
+    # Phase7/8). The four seed-selected figure orderings (seed%4) were swept
+    # against the model scorer so each clears 0.78 with margin (~0.82-0.85), so
+    # 0.78 is a faithful gate the content actually meets — not a lowered one.
+    # P15 closure asserts the two Flow RuleBits fire on every note (gates 2/4):
+    #   python3 scripts/run_phase_closure.py --phase Phase15 \
+    #     --required-rule-bit ArpeggioFlowActive=47 \
+    #     --required-rule-bit ImplicitVoiceTracked=48
+    "Phase15": {"tag": "p15", "threshold": 0.78, "min_pass": 10},
 }
 
 # Phase14 RuleBit catalog: every required --required-rule-bit name=index for
@@ -108,7 +120,34 @@ PHASE_LAYOUT = {
     # structural check must expect those 16 notes too (else the V0
     # SubjectCarrier group is a 16-vs-32 length mismatch).
     "Phase14": {"voices": 3, "bars": 42, "subject_bars": 4, "with_answer": True, "with_third_entry": True, "stretto_leader_bar": 24, "tonal_answer": True},
+    # P15: single-voice BWV1007 arpeggio. No exposition entries — the structural
+    # check validates the verbatim arpeggio replay instead (see
+    # expected_arpeggio_sequence). subject_bars=0 / with_answer=False so the
+    # generic exposition predictor produces nothing for this phase.
+    "Phase15": {"voices": 1, "bars": 8, "subject_bars": 0, "with_answer": False, "with_third_entry": False, "arpeggio_flow": True},
 }
+
+# Phase15 arpeggio fixture mirror. Keep byte-identical with kBarPlan / kFigures
+# in buildPhase15Fixture (src/composer/harness_fixture.cpp) or the structural
+# predictor reports false mismatches.
+#   kBarPlan[bar] = (root_pc unused here, bass, mid, top); I IV V I IV V I I.
+PHASE15_BARPLAN: tuple[tuple[int, int, int], ...] = (
+    (48, 55, 64),  # C: C3  G3  E4
+    (53, 60, 69),  # F: F3  C4  A4
+    (55, 62, 71),  # G: G3  D4  B4
+    (48, 64, 67),  # C: C3  E4  G4
+    (53, 60, 69),  # F: F3  C4  A4
+    (55, 62, 71),  # G: G3  D4  B4
+    (48, 64, 67),  # C: C3  E4  G4
+    (48, 55, 64),  # C: C3  G3  E4
+)
+# kFigures[seed % 4]; each slot indexes {0=bass, 1=mid, 2=top}.
+PHASE15_FIGURES: tuple[tuple[int, int, int, int], ...] = (
+    (1, 0, 1, 2),  # mid-bass-mid-top
+    (1, 2, 1, 0),  # mid-top-mid-bass
+    (0, 1, 2, 1),  # bass-mid-top-mid
+    (2, 1, 0, 1),  # top-mid-bass-mid
+)
 
 # 5 subject patterns × 16 quarter-note pitches. Mirrors kSubjectPatterns in
 # src/composer/harness_fixture.cpp; keep byte-identical with the C++ catalog
@@ -197,6 +236,34 @@ def provenance_rule_counts(
     return out
 
 
+def expected_arpeggio_sequence(
+    fixture: dict[str, Any],
+) -> dict[tuple[int, str], list[tuple[int, int]]]:
+    """Predict the Phase15 ArpeggioFlow note stream for a seed fixture.
+
+    Mirrors buildPhase15Fixture in src/composer/harness_fixture.cpp: 8 bars,
+    one chord per bar (PHASE15_BARPLAN), each beat arpeggiated as 4 sixteenths
+    re-ordered by the seed-selected figure (PHASE15_FIGURES[seed % 4]). The
+    figure index is seed % 4, which equals fixture["harm_idx"].
+
+    @param fixture fixture_for_seed() output for the seed under test.
+    @return {(0, "ArpeggioFlow"): sorted [(start_tick, pitch)]} (128 notes).
+    """
+    ticks_per_bar = 1920
+    ticks_per_beat = 480
+    sixteenth = ticks_per_beat // 4
+    figure = PHASE15_FIGURES[fixture["harm_idx"] % 4]
+    seq: list[tuple[int, int]] = []
+    for bar in range(8):
+        tones = PHASE15_BARPLAN[bar]  # (bass, mid, top)
+        for beat in range(4):
+            for s in range(4):
+                tick = bar * ticks_per_bar + beat * ticks_per_beat + s * sixteenth
+                seq.append((tick, tones[figure[s]]))
+    seq.sort()
+    return {(0, "ArpeggioFlow"): seq}
+
+
 def expected_carrier_sequences(
     phase: str, fixture: dict[str, Any]
 ) -> dict[tuple[int, str], list[tuple[int, int]]]:
@@ -218,7 +285,11 @@ def expected_carrier_sequences(
     and intentionally omits the "development" branch, so no 42-bar-specific
     sequence is hand-coded here (which would be brittle); the structural check
     therefore validates only the three exposition entries for Phase14.
+
+    Phase15 has no exposition; it dispatches to the verbatim-arpeggio predictor.
     """
+    if phase == "Phase15":
+        return expected_arpeggio_sequence(fixture)
     layout = PHASE_LAYOUT[phase]
     subject_bars = layout["subject_bars"]
     subject_blocks = subject_bars // 4
@@ -305,7 +376,7 @@ def extract_carrier_sequences(
     by_key: dict[tuple[int, str], list[tuple[int, int]]] = {}
     for g, p in zip(gen_notes, prov_notes):
         intent = p.get("voice_intent")
-        if intent not in ("SubjectCarrier", "AnswerCarrier"):
+        if intent not in ("SubjectCarrier", "AnswerCarrier", "ArpeggioFlow"):
             continue
         voice = int(g.get("voice", -1))
         by_key.setdefault((voice, intent), []).append(
@@ -336,11 +407,14 @@ def structural_check(generated_json: Path, provenance_json: Path,
         return {"ok": False, "error": str(exc)}
 
     result: dict[str, Any] = {}
-    keys = [
-        ((0, "SubjectCarrier"), "subject_ok", "subject_diff"),
-        ((1, "AnswerCarrier"), "answer_ok", "answer_diff"),
-        ((2, "SubjectCarrier"), "v2_subject_ok", "v2_subject_diff"),
-    ]
+    if phase == "Phase15":
+        keys = [((0, "ArpeggioFlow"), "arpeggio_ok", "arpeggio_diff")]
+    else:
+        keys = [
+            ((0, "SubjectCarrier"), "subject_ok", "subject_diff"),
+            ((1, "AnswerCarrier"), "answer_ok", "answer_diff"),
+            ((2, "SubjectCarrier"), "v2_subject_ok", "v2_subject_diff"),
+        ]
     all_ok = True
     for key, ok_field, diff_field in keys:
         if key not in expected:
@@ -368,6 +442,11 @@ def output_paths(work_dir: Path, tag: str, seed: int) -> tuple[Path, Path, Path]
 # --required-rule-bit masks. provenance.h RuleBit currently tops out at
 # AffektCurveApplied = 46, so max_bit + 1 == 47.
 PHASE14_REQUIRED_BIT_COUNT = 47
+
+# Phase15 (Solo String Flow) stamps exactly two RuleBits on every note:
+# ArpeggioFlowActive = 47 and ImplicitVoiceTracked = 48 (provenance.h). Both
+# must be asserted or the gate-2/gate-4 bit checks are trivially bypassed.
+PHASE15_REQUIRED_BITS: tuple[int, ...] = (47, 48)
 
 
 def compute_passed(
@@ -445,6 +524,20 @@ def main() -> int:
             "must not be bypassed. See the RuleBit catalog in this script.\n"
         )
         return 2
+
+    # P15 (Solo String Flow): every note carries ArpeggioFlowActive (47) and
+    # ImplicitVoiceTracked (48). Like Phase14, refuse to run unless both are
+    # asserted, so the bit gate cannot be silently bypassed.
+    if phase == "Phase15":
+        supplied = {bit for _, bit in args.required_rule_bit}
+        missing = [b for b in PHASE15_REQUIRED_BITS if b not in supplied]
+        if missing:
+            sys.stderr.write(
+                "Phase15 closure requires --required-rule-bit masks for both "
+                f"Flow bits {list(PHASE15_REQUIRED_BITS)} "
+                f"(ArpeggioFlowActive=47, ImplicitVoiceTracked=48); missing {missing}.\n"
+            )
+            return 2
 
     defaults = PHASE_DEFAULTS[phase]
     tag = defaults["tag"]

@@ -154,6 +154,43 @@ TEST(ComposerNctTest, Phase14HasNoValidatorFailuresSeed1) {
       << (r.validation.failures.empty() ? "" : r.validation.failures.front().rule_id);
 }
 
+// Regression (counterline saturation, P14 review #174): the V1 exposition
+// counterline (Compose, bars 0-3 and 8-11) sits beneath a subject that climbs
+// to G5/A5. Before the per-span voice_center override the default alto center
+// (64) let the line drift below the P7 spacing floor (subject - octave), so
+// when the subject leapt up every candidate was rejected and whole bars went
+// silent. With the line anchored at A4 (69) no exposition counterline bar may
+// be empty. Sweep both the quarter (even) and eighth (odd) seed families.
+TEST(ComposerNctTest, Phase14ExpositionCounterlineHasNoSilentBars) {
+  for (int seed : {0, 1, 2, 3, 5, 7}) {
+    const ComposeResult r = runPhase(HarnessPhase::Phase14, seed);
+    for (int bar : {0, 1, 2, 3, 8, 9, 10, 11}) {
+      const Tick lo = static_cast<Tick>(bar) * kTicksPerBar;
+      const Tick hi = lo + kTicksPerBar;
+      int v1_notes = 0;
+      for (const auto& note : r.notes) {
+        if (note.voice == 1 && note.start_tick >= lo && note.start_tick < hi)
+          ++v1_notes;
+      }
+      EXPECT_GT(v1_notes, 0) << "seed " << seed << " bar " << bar
+                             << ": V1 counterline bar is silent (saturated)";
+    }
+  }
+}
+
+// Regression (P14 review #174): seeds 11 and 16 produced augmented/tritone/
+// diminished melodic failures in the counterline once it was raised toward the
+// high subject. The CandidateSearch melodic pre-filter (mirroring Validator
+// Rule P1) must now keep these seeds clean.
+TEST(ComposerNctTest, Phase14PreviouslySaturatedSeedsValidateClean) {
+  for (int seed : {11, 16}) {
+    const ComposeResult r = runPhase(HarnessPhase::Phase14, seed);
+    EXPECT_TRUE(r.validation.failures.empty())
+        << "seed " << seed << " produced " << r.validation.failures.size() << " failure(s); first="
+        << (r.validation.failures.empty() ? "" : r.validation.failures.front().rule_id);
+  }
+}
+
 // Regression: the NCT post-pass must be a pure no-op when no NCT figures
 // exist. Phase11 (development section, no nct_figures) must therefore carry
 // none of the four NCT bits on any note.

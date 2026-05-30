@@ -77,56 +77,9 @@ bool resolvesLeadingTone(std::uint8_t leading_pitch, std::uint8_t resolution_pit
                                                plan);
 }
 
-std::array<std::uint8_t, 7> scalePcs(const HarmonicPlan& plan) {
-  if (plan.is_minor) {
-    return {
-        static_cast<std::uint8_t>(plan.tonic_pc % 12),
-        static_cast<std::uint8_t>((plan.tonic_pc + 2) % 12),
-        static_cast<std::uint8_t>((plan.tonic_pc + 3) % 12),
-        static_cast<std::uint8_t>((plan.tonic_pc + 5) % 12),
-        static_cast<std::uint8_t>((plan.tonic_pc + 7) % 12),
-        static_cast<std::uint8_t>((plan.tonic_pc + 8) % 12),
-        static_cast<std::uint8_t>((plan.tonic_pc + 11) % 12),
-    };
-  }
-  return {
-      static_cast<std::uint8_t>(plan.tonic_pc % 12),
-      static_cast<std::uint8_t>((plan.tonic_pc + 2) % 12),
-      static_cast<std::uint8_t>((plan.tonic_pc + 4) % 12),
-      static_cast<std::uint8_t>((plan.tonic_pc + 5) % 12),
-      static_cast<std::uint8_t>((plan.tonic_pc + 7) % 12),
-      static_cast<std::uint8_t>((plan.tonic_pc + 9) % 12),
-      static_cast<std::uint8_t>((plan.tonic_pc + 11) % 12),
-  };
-}
-
-int scaleIndex(std::uint8_t pc, const HarmonicPlan& plan) {
-  const auto pcs = scalePcs(plan);
-  for (int i = 0; i < static_cast<int>(pcs.size()); ++i) {
-    if (pcs[static_cast<std::size_t>(i)] == pc)
-      return i;
-  }
-  return -1;
-}
-
-bool isAugmentedMelodicInterval(std::uint8_t from, std::uint8_t to, const HarmonicPlan& plan) {
-  const int semis = std::abs(static_cast<int>(to) - static_cast<int>(from)) % 12;
-  if (semis == 6)
-    return true;  // augmented fourth spelling is indistinguishable from tritone in MIDI.
-  if (semis != 3)
-    return false;
-  const int a = scaleIndex(pitchClass(from), plan);
-  const int b = scaleIndex(pitchClass(to), plan);
-  if (a < 0 || b < 0)
-    return true;
-  const int degree_distance = std::abs(a - b);
-  return degree_distance == 1 || degree_distance == 6;
-}
-
-bool isDiminishedMelodicInterval(std::uint8_t from, std::uint8_t to) {
-  const int semis = std::abs(static_cast<int>(to) - static_cast<int>(from)) % 12;
-  return semis == 6 || semis == 11;
-}
+// scalePcs / scaleIndex / isAugmentedMelodicInterval / isDiminishedMelodicInterval
+// now live in rule_helpers (shared with the CandidateSearch melodic pre-filter so
+// the two stay in lockstep). The call sites below use the rule_helpers:: versions.
 
 bool isPerfectFifth(int semitones) {
   return std::abs(semitones) % 12 == 7;
@@ -411,6 +364,16 @@ ValidationReport Validator::validate(const std::vector<NoteEvent>& notes,
         continue;
       if (!isCrossRelationPc(pitchClass(notes[i].pitch), pitchClass(notes[j].pitch)))
         continue;
+      // Both Material; nothing the composer can do (mirrors the
+      // parallel/hidden-parallel/vertical-dissonance both_material gate).
+      // notes and provenance are index-aligned, so i,j index provenance.
+      // A Compose-vs-Material or Compose-vs-Compose cross relation still
+      // fires; only the uncontrollable fixed-vs-fixed pair is skipped.
+      if (i < provenance.size() && j < provenance.size() &&
+          provenance[i].source == NoteSource::Material &&
+          provenance[j].source == NoteSource::Material) {
+        continue;
+      }
       SpanId fail_span = kInvalidSpanId;
       if (j < provenance.size()) {
         fail_span = provenance[j].span_id;
@@ -598,7 +561,7 @@ ValidationReport Validator::validate(const std::vector<NoteEvent>& notes,
       const bool secondary_active =
           chord_at_prev.has_secondary_of || chord_at_curr.has_secondary_of;
       if (!secondary_active &&
-          isAugmentedMelodicInterval(prev_pitch, current_pitch, harmonic_plan)) {
+          rule_helpers::isAugmentedMelodicInterval(prev_pitch, current_pitch, harmonic_plan)) {
         ValidationFailure failure;
         failure.span_id = provenance[current].span_id;
         failure.rule_id = "augmented_melodic";
@@ -610,7 +573,8 @@ ValidationReport Validator::validate(const std::vector<NoteEvent>& notes,
         failure.rule_id = "tritone_melodic";
         report.failures.push_back(failure);
       }
-      if (!secondary_active && isDiminishedMelodicInterval(prev_pitch, current_pitch)) {
+      if (!secondary_active &&
+          rule_helpers::isDiminishedMelodicInterval(prev_pitch, current_pitch)) {
         ValidationFailure failure;
         failure.span_id = provenance[current].span_id;
         failure.rule_id = "diminished_melodic";
@@ -858,21 +822,33 @@ ValidationReport Validator::validate(const std::vector<NoteEvent>& notes,
   // sounding note from the CS, allowing for tied notes that span
   // multiple beats). Any gap fires `countersubject_continuous`.
   //
-  // The CS voice is identified by the first note's voice field of
-  // material.countersubject. The answer window is the [first, last]
-  // tick range of material.tonal_answer if used, else material.answer.
+  // The CS voice is derived from provenance, not hardcoded: MaterialNote
+  // carries no voice field, so we read it from the emitted notes. The CS
+  // voice is the voice of the first note whose provenance voice_intent is
+  // VoiceIntent::CountersubjectCarrier (notes and provenance are
+  // index-aligned). When no CountersubjectCarrier note was placed, a
+  // declared-but-unplaced CS cannot be checked, so the continuity check is
+  // skipped entirely rather than sampling an arbitrary voice. The answer
+  // window is the [first, last] tick range of material.tonal_answer if
+  // used, else material.answer.
   if (!material.countersubject.empty()) {
     const std::vector<MaterialNote>& answer_src =
         (material.use_tonal_answer && !material.tonal_answer.empty()) ? material.tonal_answer
                                                                       : material.answer;
-    if (!answer_src.empty()) {
+    bool cs_placed = false;
+    VoiceId cs_voice = 0;
+    for (std::size_t k = 0; k < notes.size() && k < provenance.size(); ++k) {
+      if (provenance[k].voice_intent == VoiceIntent::CountersubjectCarrier) {
+        cs_voice = notes[k].voice;
+        cs_placed = true;
+        break;
+      }
+    }
+    if (!answer_src.empty() && cs_placed) {
       const Tick window_start = answer_src.front().start_tick;
       const Tick window_end = answer_src.back().start_tick + answer_src.back().duration;
       // Walk window in quarter-beat increments; require a CS-voice note
-      // sounding at every step. CS voice id is taken from the first CS
-      // material note; if the CS material is multi-voice we'd need
-      // explicit voice tagging, but Phase 6 uses single-voice CS only.
-      const VoiceId cs_voice = 0;  // Phase 6 convention: CS is in V0
+      // sounding at every step.
       bool gap_found = false;
       for (Tick t = window_start; t < window_end; t += kTicksPerBeat) {
         if (voicePitchAt(notes, cs_voice, t) == 0) {
@@ -1165,14 +1141,20 @@ ValidationReport Validator::validate(const std::vector<NoteEvent>& notes,
     }
     // Plan §5 P8: secondary_dominant_resolution rule fires when the
     // chord declared has_secondary_of=true is NOT followed by a chord
-    // whose degree equals the declared secondary_of target. Voice-
-    // leading details (leading-tone rise) are tracked via the
-    // SecondaryDominantResolved provenance bit, which the candidate
-    // search wires when the resolution chord is reached — but they
-    // are not part of the rule's failure condition. This matches the
-    // plan wording "V/X → X (degree)" and keeps the rule from
-    // failing free-voice tonicizations where the LT voice is forced
-    // off-step by P7 doubling/spacing constraints.
+    // whose degree equals the declared secondary_of target.
+    //
+    // DESIGN NOTE (name overstates behavior): despite "resolution" in
+    // the name, this rule is intentionally DEGREE-ONLY. It checks only
+    // that the next chord's degree == chord.secondary_of (the harmonic
+    // "V/X → X" succession). The secondary leading-tone voice-leading
+    // (the actual chromatic LT rising by step into the target) is NOT a
+    // failure condition here; it is tracked descriptively via the
+    // RuleBit::SecondaryDominantResolved provenance bit, which the
+    // candidate search wires when the resolution chord is reached. This
+    // keeps the rule from failing free-voice tonicizations where the LT
+    // voice is legitimately forced off-step by P7 doubling/spacing
+    // constraints, while the provenance bit still records whether the
+    // ideal voice-leading shipped.
     const bool degree_ok =
         next != nullptr && next->has_degree && next->degree == chord.secondary_of;
     if (!degree_ok) {
@@ -1490,6 +1472,101 @@ ValidationReport Validator::validate(const std::vector<NoteEvent>& notes,
       if (!pedal_ok) {
         ValidationFailure failure;
         failure.rule_id = "pedal_range_soft_penalty";
+        failure.kind = FailKind::MusicalFail;
+        report.failures.push_back(failure);
+      }
+    }
+  }
+
+  // P15 (Solo String Flow / BWV1007): implicit-voice rules over the
+  // ArpeggioFlow line. The figure is regular, so collecting every
+  // ArpeggioFlowActive note in onset order and partitioning into contiguous
+  // cells of arpeggio_template.group_size reconstructs the implicit voices a
+  // listener tracks. The two principal implicit voices are register-defined:
+  // the bass stream is the lowest pitch of each cell, the top stream the
+  // highest. (Register, not slot position, is what the ear segregates —
+  // BWV1007's oscillating figures put the perceived top in the middle of the
+  // written cell.)
+  {
+    const int group_size = material.arpeggio_template.group_size;
+    std::vector<std::size_t> flow_indices;
+    for (std::size_t i = 0; i < notes.size(); ++i) {
+      if (i < provenance.size() && hasRuleBit(provenance, i, RuleBit::ArpeggioFlowActive))
+        flow_indices.push_back(i);
+    }
+    std::sort(flow_indices.begin(), flow_indices.end(), [&](std::size_t a, std::size_t b) {
+      return notes[a].start_tick < notes[b].start_tick;
+    });
+
+    const std::size_t g = (group_size >= 2) ? static_cast<std::size_t>(group_size) : 0;
+    const std::size_t cell_count = (g >= 2) ? flow_indices.size() / g : 0;
+
+    if (cell_count >= 2) {
+      // Per-cell bass (min pitch) and top (max pitch) streams.
+      std::vector<std::uint8_t> bass_stream;
+      std::vector<std::uint8_t> top_stream;
+      bass_stream.reserve(cell_count);
+      top_stream.reserve(cell_count);
+      for (std::size_t cell = 0; cell < cell_count; ++cell) {
+        std::uint8_t lo = 255;
+        std::uint8_t hi = 0;
+        for (std::size_t k = 0; k < g; ++k) {
+          const std::uint8_t p = notes[flow_indices[cell * g + k]].pitch;
+          lo = std::min(lo, p);
+          hi = std::max(hi, p);
+        }
+        bass_stream.push_back(lo);
+        top_stream.push_back(hi);
+      }
+
+      // implicit_voice_counterpoint: the bass and top implicit streams must
+      // each be melodically valid — no forbidden augmented / tritone /
+      // diminished leap between consecutive cells. Reuses the shared
+      // rule_helpers predicate so the implicit lines of the solo arpeggio are
+      // held to the same melodic standard as the Organ Compose voices.
+      bool implicit_ok = true;
+      for (const std::vector<std::uint8_t>* stream : {&bass_stream, &top_stream}) {
+        for (std::size_t cell = 1; cell < cell_count; ++cell) {
+          if (rule_helpers::isForbiddenMelodicLeap((*stream)[cell - 1], (*stream)[cell],
+                                                   harmonic_plan)) {
+            implicit_ok = false;
+            break;
+          }
+        }
+        if (!implicit_ok)
+          break;
+      }
+      if (!implicit_ok) {
+        ValidationFailure failure;
+        failure.rule_id = "implicit_voice_counterpoint";
+        failure.kind = FailKind::MusicalFail;
+        report.failures.push_back(failure);
+      }
+
+      // arpeggio_no_parallel_perfect: the bass and top implicit streams must
+      // not move in parallel perfect 5ths/8ves across consecutive cells — the
+      // broken-chord equivalent of consecutive parallel perfects between two
+      // real voices. Flagged only when both cells frame the same perfect
+      // interval class AND both streams move in the same (nonzero) direction;
+      // oblique / contrary / static motion is permitted.
+      bool parallel_ok = true;
+      for (std::size_t cell = 1; cell < cell_count && parallel_ok; ++cell) {
+        const int prev_ic = std::abs(top_stream[cell - 1] - bass_stream[cell - 1]) % 12;
+        const int cur_ic = std::abs(top_stream[cell] - bass_stream[cell]) % 12;
+        const bool both_perfect = (prev_ic == cur_ic) && (prev_ic == 7 || prev_ic == 0);
+        if (both_perfect) {
+          const int bass_motion =
+              static_cast<int>(bass_stream[cell]) - static_cast<int>(bass_stream[cell - 1]);
+          const int top_motion =
+              static_cast<int>(top_stream[cell]) - static_cast<int>(top_stream[cell - 1]);
+          if (bass_motion != 0 && top_motion != 0 && (bass_motion > 0) == (top_motion > 0)) {
+            parallel_ok = false;
+          }
+        }
+      }
+      if (!parallel_ok) {
+        ValidationFailure failure;
+        failure.rule_id = "arpeggio_no_parallel_perfect";
         failure.kind = FailKind::MusicalFail;
         report.failures.push_back(failure);
       }

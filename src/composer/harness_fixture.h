@@ -54,6 +54,12 @@ enum class HarnessPhase : std::uint8_t {
                       // and a coda. Built by a dedicated self-contained
                       // builder (buildPhase14Fixture) so the P3-P13 layouts
                       // stay byte-identical.
+  ,
+  Phase15 = 16  // 1 voice, 8 bar. Solo String Flow (BWV1007 Cello Suite
+                // Prelude style): a single monophonic broken-chord arpeggio
+                // that projects two implicit voices (a recurring low bass
+                // stream and a melodic top stream). Built by a dedicated
+                // self-contained builder (buildPhase15Fixture).
 };
 
 // Static layout for one harness phase. Catalogs and seed-to-fixture
@@ -77,6 +83,10 @@ struct HarnessPhaseSpec {
   bool with_rhythm;           // Phase12: 28-bar layout + rhythm/phrase carriers
   bool with_texture;          // Phase13: texture/expression plan + post-pass
   bool with_nct;              // Phase14: dedicated 42-bar all-technique fugue
+  // Phase15: dedicated single-voice BWV1007 arpeggio-flow builder. Defaulted
+  // so the 17-field positional aggregate initialisers for Phase3-14 above stay
+  // valid (this field value-initialises to false for them).
+  bool with_arpeggio_flow = false;
 };
 
 // Resolve the static layout for a phase. Returns the same struct on

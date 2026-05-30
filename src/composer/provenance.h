@@ -163,6 +163,16 @@ enum RuleBit : std::uint8_t {
   ManualAssigned = 44,
   ArticulationApplied = 45,
   AffektCurveApplied = 46,
+  // P15 (Solo String Flow / BWV1007). Stamped by CandidateSearch on every
+  // ArpeggioFlow carrier note.
+  // ArpeggioFlowActive: the note belongs to a broken-chord arpeggio replayed
+  //   from Material::arpeggio_template (the negative counterpart is the
+  //   Validator's arpeggio_no_parallel_perfect rule).
+  // ImplicitVoiceTracked: the note's positional implicit-voice membership
+  //   (bass / inner / top stream within its arpeggio cell) is established, so
+  //   the Validator's implicit_voice_counterpoint rule covers it.
+  ArpeggioFlowActive = 47,
+  ImplicitVoiceTracked = 48,
 };
 
 // Per-note provenance record.

@@ -235,6 +235,9 @@ ComposeResult Composer::run(const Material& material, const HarmonicPlan& harmon
   ComposeResult result;
 
   CandidateSearch search;
+  // Count of Compose positions that exhausted with no admissible candidate
+  // (silent holes) across every span pass. Escalated to FailedSeed below.
+  std::size_t saturated_total = 0;
   // Voice center heuristic: voice 0 = soprano area, voice 1 = alto, etc.
   // 4-voice Bach ranges cluster roughly at 72 / 64 / 57 / 48 MIDI.
   static constexpr std::uint8_t kVoiceCenter[] = {72, 64, 57, 48};
@@ -249,12 +252,18 @@ ComposeResult Composer::run(const Material& material, const HarmonicPlan& harmon
     if (span.voice < sizeof(kVoiceCenter) / sizeof(kVoiceCenter[0])) {
       ctx.voice_center = kVoiceCenter[span.voice];
     }
+    // A non-zero per-span override wins over the global per-voice default.
+    // Lets a planner raise the tessitura anchor where a voice's default
+    // center sits below the active spacing-valid band (see Span::voice_center).
+    if (span.voice_center != 0) {
+      ctx.voice_center = span.voice_center;
+    }
     // Hand the search a view of every note committed so far so it can
     // run the vertical (parallel-perfect, voice-crossing) checks.
     ctx.placed_notes = &result.notes;
     ctx.num_voices = voice_plan.num_voices;
 
-    const auto candidates = search.enumerate(span, harmonic_plan, material, ctx);
+    const auto candidates = search.enumerate(span, harmonic_plan, material, ctx, &saturated_total);
 
     // Phase 2 commit policy: take all candidates in order. Each is a
     // separate emitted note (search enumerates note positions inside a
@@ -335,6 +344,15 @@ ComposeResult Composer::run(const Material& material, const HarmonicPlan& harmon
 
   Validator validator;
   result.validation = validator.validate(result.notes, result.provenance, harmonic_plan, material);
+
+  // Visibility surface for the no-fallback principle. A Compose position that
+  // exhausted all candidates emitted no note (a rest) instead of a default
+  // pitch. Record the count so the hole is no longer invisible; resting is the
+  // correct response to "no consonant candidate" (better a rest than a wrong
+  // note), so this is NOT escalated to a validation failure. FailedSeed stays
+  // reserved for the future re-generation / back-jump loop (see validation.h).
+  // Callers that want exhaustion to be fatal can gate on this count explicitly.
+  result.saturated_positions = saturated_total;
 
   Renderer renderer;
   result.tracks = renderer.render(result.notes);

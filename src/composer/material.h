@@ -296,6 +296,25 @@ struct TexturePlan {
   VoiceId pedal_voice = 0xFF;
 };
 
+// P15 (Solo String Flow / BWV1007). A single-voice broken-chord arpeggio.
+// `notes` is the realized monophonic line, replayed verbatim by an
+// ArpeggioFlow span (NoteSource::Material) exactly like the other carriers.
+//
+// Implicit voice tracking. A solo-string arpeggio projects more than one
+// melodic line out of one sounding voice: the listener tracks the recurring
+// low note as a "bass" line and the recurring high note as an upper line.
+// The figure is regular — every `group_size` consecutive notes form one
+// arpeggio cell — so implicit-voice membership is positional: within each
+// group, slot 0 is the bass implicit voice and slot (group_size - 1) is the
+// top implicit voice. The Validator reconstructs these two streams to check
+// implicit_voice_counterpoint (each stream is a melodically valid line) and
+// arpeggio_no_parallel_perfect (the bass and top streams do not move in
+// parallel perfect 5ths/8ves across successive cells).
+struct ArpeggioTemplate {
+  std::vector<MaterialNote> notes;
+  int group_size = 4;  // notes per arpeggio cell (e.g. 4 = sixteenth figure).
+};
+
 // Bundle of pre-determined material fragments available to the planner.
 //
 // `subject` feeds SubjectCarrier spans; `answer` feeds AnswerCarrier
@@ -351,6 +370,10 @@ struct Material {
   // P13 (texture / instrument / expression). Default-constructed (no-op
   // post-pass) in Phase 3-12 fixtures.
   TexturePlan texture_plan;
+  // P15 (Solo String Flow). Empty in Phase 3-14 fixtures; populated only by
+  // the Phase15 BWV1007-style arpeggio fixture. Replayed by an ArpeggioFlow
+  // span on a single voice.
+  ArpeggioTemplate arpeggio_template;
 };
 
 void annotateLeadingToneMarkers(Material& material, std::uint8_t tonic_pc, bool is_minor);

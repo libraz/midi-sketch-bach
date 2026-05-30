@@ -184,4 +184,31 @@ TEST(RuleHelpersTest, CreatesCrossRelationDetectsChromaticConflictInOtherVoice) 
   EXPECT_FALSE(createsCrossRelation(placed_ef, 1, 65, 0));
 }
 
+// Melodic-interval rules (shared with the CandidateSearch pre-filter and the
+// Validator). The union helper must flag exactly the leaps the Validator
+// forbids for Compose notes.
+TEST(RuleHelpersTest, ForbiddenMelodicLeapFlagsTritoneAugmentedDiminished) {
+  const HarmonicPlan plan = cMajor();
+  // Tritone F4(65) -> B4(71): 6 semis. Forbidden (aug 4th / dim 5th).
+  EXPECT_TRUE(isForbiddenMelodicLeap(65, 71, plan));
+  EXPECT_TRUE(isAugmentedMelodicInterval(65, 71, plan));
+  EXPECT_TRUE(isDiminishedMelodicInterval(65, 71));
+  // Major 7th C4(60) -> B4(71): 11 semis. Diminished-octave spelling, forbidden.
+  EXPECT_TRUE(isForbiddenMelodicLeap(60, 71, plan));
+  EXPECT_TRUE(isDiminishedMelodicInterval(60, 71));
+  // Augmented 2nd Ab4(68) -> B4(71) in C major: 3 semis with a non-diatonic
+  // endpoint (Ab -> scaleIndex == -1), which the rule treats as forbidden.
+  EXPECT_TRUE(isAugmentedMelodicInterval(68, 71, plan));
+  EXPECT_TRUE(isForbiddenMelodicLeap(68, 71, plan));
+}
+
+TEST(RuleHelpersTest, ForbiddenMelodicLeapAllowsConsonantSteps) {
+  const HarmonicPlan plan = cMajor();
+  EXPECT_FALSE(isForbiddenMelodicLeap(60, 62, plan));  // whole step C->D
+  EXPECT_FALSE(isForbiddenMelodicLeap(69, 72, plan));  // diatonic m3 A->C
+  EXPECT_FALSE(isForbiddenMelodicLeap(67, 72, plan));  // P4 G->C
+  EXPECT_FALSE(isForbiddenMelodicLeap(60, 67, plan));  // P5 C->G
+  EXPECT_FALSE(isForbiddenMelodicLeap(60, 72, plan));  // octave
+}
+
 }  // namespace bach::composer::rule_helpers

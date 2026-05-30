@@ -1350,4 +1350,54 @@ TEST(CandidateSearchTest, RhythmCarrierSkipsWrongVoice) {
   EXPECT_TRUE(cands.empty());
 }
 
+// A normal Compose span over four beats produces candidates and reports
+// zero saturated positions. Proves the out-param is wired through and
+// stays at its initial value on the happy path (no silent holes).
+TEST(CandidateSearchTest, EnumerateReportsZeroSaturationOnNormalSpan) {
+  CandidateSearch search;
+  CandidateContext ctx;
+  ctx.voice_center = 55;
+  ctx.prev_pitch = 0;
+  ctx.placed_notes = nullptr;
+
+  Material empty;
+  Span span = makeComposeSpan(0, kTicksPerBar, 1);
+
+  std::size_t saturated = 0;
+  const auto cands = search.enumerate(span, singleCMajor(), empty, ctx, &saturated);
+
+  EXPECT_FALSE(cands.empty());
+  EXPECT_EQ(saturated, 0u) << "a fully fillable span must report no silent holes";
+}
+
+// Forces a real saturated position. Voice 1's previous pitch is the
+// leading tone B4 (71) in C major, so the leading-tone resolution filter
+// admits only the tonic C5 (72) as the next pitch. Placed voice 0 sits at
+// B4 (71); committing 72 in the lower-indexed-below voice 1 against voice
+// 0 at 71 is a voice crossing (voice 1 > voice 0 yet 72 > 71), which the
+// vertical rule rejects. With the sole leading-tone resolution eliminated
+// by voice crossing, the strong-beat position exhausts: best_pitch stays
+// negative, no note is emitted, and the saturation counter increments.
+TEST(CandidateSearchTest, EnumerateCountsSaturatedPositions) {
+  std::vector<NoteEvent> placed = {
+      makePlaced(0, kTicksPerBeat, 71, 0),  // V0 B4 sounding at the downbeat
+  };
+
+  CandidateContext ctx;
+  ctx.voice_center = 72;  // search range [65, 84] includes the tonic C5 (72)
+  ctx.prev_pitch = 71;    // B4 leading tone: only C5 (72) resolves it
+  ctx.prev_end_tick = kTicksPerBeat;
+  ctx.placed_notes = &placed;
+
+  Material empty;
+  Span span = makeComposeSpan(0, kTicksPerBeat, 1);
+
+  CandidateSearch search;
+  std::size_t saturated = 0;
+  const auto cands = search.enumerate(span, singleCMajor(), empty, ctx, &saturated);
+
+  EXPECT_TRUE(cands.empty()) << "no candidate survives the leading-tone + voice-crossing cascade";
+  EXPECT_EQ(saturated, 1u) << "the single exhausted position must be reported as a silent hole";
+}
+
 }  // namespace bach::composer
