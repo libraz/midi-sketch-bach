@@ -110,6 +110,46 @@ bach::composer::HarnessPhase parseComposerPhase(const char* val) {
       std::strcmp(val, "15") == 0 || std::strcmp(val, "p15") == 0) {
     return bach::composer::HarnessPhase::Phase15;
   }
+  if (std::strcmp(val, "Phase16") == 0 || std::strcmp(val, "phase16") == 0 ||
+      std::strcmp(val, "16") == 0 || std::strcmp(val, "p16") == 0) {
+    return bach::composer::HarnessPhase::Phase16;
+  }
+  if (std::strcmp(val, "Phase17") == 0 || std::strcmp(val, "phase17") == 0 ||
+      std::strcmp(val, "17") == 0 || std::strcmp(val, "p17") == 0) {
+    return bach::composer::HarnessPhase::Phase17;
+  }
+  if (std::strcmp(val, "Phase18") == 0 || std::strcmp(val, "phase18") == 0 ||
+      std::strcmp(val, "18") == 0 || std::strcmp(val, "p18") == 0) {
+    return bach::composer::HarnessPhase::Phase18;
+  }
+  if (std::strcmp(val, "Phase19") == 0 || std::strcmp(val, "phase19") == 0 ||
+      std::strcmp(val, "19") == 0 || std::strcmp(val, "p19") == 0) {
+    return bach::composer::HarnessPhase::Phase19;
+  }
+  if (std::strcmp(val, "Phase20") == 0 || std::strcmp(val, "phase20") == 0 ||
+      std::strcmp(val, "20") == 0 || std::strcmp(val, "p20") == 0) {
+    return bach::composer::HarnessPhase::Phase20;
+  }
+  if (std::strcmp(val, "Phase21") == 0 || std::strcmp(val, "phase21") == 0 ||
+      std::strcmp(val, "21") == 0 || std::strcmp(val, "p21") == 0) {
+    return bach::composer::HarnessPhase::Phase21;
+  }
+  if (std::strcmp(val, "Phase22") == 0 || std::strcmp(val, "phase22") == 0 ||
+      std::strcmp(val, "22") == 0 || std::strcmp(val, "p22") == 0) {
+    return bach::composer::HarnessPhase::Phase22;
+  }
+  if (std::strcmp(val, "Phase23") == 0 || std::strcmp(val, "phase23") == 0 ||
+      std::strcmp(val, "23") == 0 || std::strcmp(val, "p23") == 0) {
+    return bach::composer::HarnessPhase::Phase23;
+  }
+  if (std::strcmp(val, "Phase24") == 0 || std::strcmp(val, "phase24") == 0 ||
+      std::strcmp(val, "24") == 0 || std::strcmp(val, "p24") == 0) {
+    return bach::composer::HarnessPhase::Phase24;
+  }
+  if (std::strcmp(val, "Phase25") == 0 || std::strcmp(val, "phase25") == 0 ||
+      std::strcmp(val, "25") == 0 || std::strcmp(val, "p25") == 0) {
+    return bach::composer::HarnessPhase::Phase25;
+  }
   return bach::composer::HarnessPhase::Phase6;
 }
 
@@ -132,7 +172,8 @@ void printUsage() {
       "  --composer-phase P  Bypass legacy generator; run Composer with phase\n"
       "                   {Phase3|Phase35|Phase4|Phase4Sus|Phase5|Phase6|Phase6Episode|\n"
       "                    Phase6Tonal|Phase7|Phase8|Phase9|Phase10|Phase11|Phase12|\n"
-      "                    Phase13|Phase14|Phase15}. Seed reused.\n");
+      "                    Phase13|Phase14|Phase15|Phase16|Phase17|Phase18|Phase19|\n"
+      "                    Phase20|Phase21|Phase22|Phase23|Phase24|Phase25}. Seed reused.\n");
   std::printf(
       "  --toccata-style  Toccata archetype: dramaticus, perpetuus, concertato, sectionalis\n");
   std::printf("  --json           JSON output\n");
@@ -278,6 +319,26 @@ const char* harnessPhaseToString(bach::composer::HarnessPhase p) {
       return "Phase14";
     case bach::composer::HarnessPhase::Phase15:
       return "Phase15";
+    case bach::composer::HarnessPhase::Phase16:
+      return "Phase16";
+    case bach::composer::HarnessPhase::Phase17:
+      return "Phase17";
+    case bach::composer::HarnessPhase::Phase18:
+      return "Phase18";
+    case bach::composer::HarnessPhase::Phase19:
+      return "Phase19";
+    case bach::composer::HarnessPhase::Phase20:
+      return "Phase20";
+    case bach::composer::HarnessPhase::Phase21:
+      return "Phase21";
+    case bach::composer::HarnessPhase::Phase22:
+      return "Phase22";
+    case bach::composer::HarnessPhase::Phase23:
+      return "Phase23";
+    case bach::composer::HarnessPhase::Phase24:
+      return "Phase24";
+    case bach::composer::HarnessPhase::Phase25:
+      return "Phase25";
   }
   return "Phase?";
 }

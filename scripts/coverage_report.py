@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
 """Compute Bach-technique coverage from the machine-checkable catalog.
 
-Replaces the prose-only '7 domains x ~104 items' estimate (deprecated
-rebuild_plan_2026-05-28.md) with a computed, drift-guarded metric. Loads
-scripts/technique_catalog.json and cross-checks every cited evidence token
-against the live source of truth:
+Produces a computed, drift-guarded coverage metric instead of a prose-only
+estimate. Loads scripts/technique_catalog.json and cross-checks every cited
+evidence token against the live source of truth:
 
   rule_bits       -> RuleBit enum         (src/composer/provenance.h)
   validator_rules -> failure.rule_id lits  (src/composer/validator.cpp)

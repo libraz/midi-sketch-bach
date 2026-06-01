@@ -73,8 +73,8 @@ std::string tempDir() {
 
 }  // namespace
 
-// Phase 1a completion criterion (rebuild_plan §293):
-// "本リポジトリ JSON 出力テストがこの schema で validate される"
+// Schema-conformance criterion: this repository's JSON output must validate
+// against the bach-mcp generated.v1.json schema.
 //
 // This test writes Composer's generated.json to disk and invokes a Python
 // validator that checks it against bach-mcp/schema/generated.v1.json. If

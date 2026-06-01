@@ -151,9 +151,10 @@ struct ImitationEntry {
   int interval_semis = 0;
 };
 
-// P11 development-section declarations. Each holds (a) the carrier's
+// Development-section declarations. Each holds (a) the carrier's
 // verbatim note material (so CandidateSearch can replay it) and (b) the
-// metadata the Validator's P11 rules check. All ticks are absolute.
+// metadata the Validator's development-section rules check. All ticks are
+// absolute.
 
 // One middle entry: the subject restated in a related key. `notes` is
 // the subject transposed into that key (built by the planner); the
@@ -199,7 +200,7 @@ struct PedalPointDecl {
 // (augmentation / diminution / inversion). `transform` mirrors
 // motif_ops::EpisodeMotifTransform (cast at use). `notes` is the
 // pre-derived result the carrier replays; no Validator rule constrains
-// it (the closure gate only confirms the SubjectVariantApplied bit).
+// it (the provenance only carries the SubjectVariantApplied bit).
 struct SubjectVariantDecl {
   VoiceId voice = 0;
   std::uint8_t transform = 0;
@@ -207,14 +208,131 @@ struct SubjectVariantDecl {
 };
 
 // One coda extension: a closing phrase after the final cadence. `notes`
-// is replayed verbatim; no Validator rule constrains it (the closure
-// gate only confirms the CodaCommitted bit).
+// is replayed verbatim; no Validator rule constrains it (the provenance
+// only carries the CodaCommitted bit).
 struct CodaDecl {
   VoiceId voice = 0;
   std::vector<MaterialNote> notes;
 };
 
-// P12 rhythm / meter / phrase declarations.
+// Solo String Arch (BWV1004 Chaconne). VariationRole is the
+// per-variation function over the repeating ground bass (CLAUDE.md taxonomy):
+//   Ground  = plain statement, no ornamental subdivision (must stay un-embellished).
+//   Respond = answers the ground with light activity.
+//   Propel  = drives forward with increased rhythmic density.
+//   Assert  = climactic, densest figuration.
+enum class VariationRole : std::uint8_t {
+  Ground = 0,
+  Respond = 1,
+  Propel = 2,
+  Assert = 3,
+};
+
+// One variation block over the (repeating) ground bass: its function role,
+// a density tier (notes-per-bar class, monotone-ish across the set), and the
+// realized upper-voice line. A VariationCarrier span replays `notes` verbatim.
+// The Validator's variation_role_ornament_constraint checks that a Ground-role
+// variation contains no note shorter than a quarter (no ornaments).
+struct VariationDecl {
+  VariationRole role = VariationRole::Ground;
+  VoiceId voice = 0;
+  Tick start_tick = 0;
+  Tick end_tick = 0;
+  int density_level = 0;
+  std::vector<MaterialNote> notes;
+};
+
+// Organ Prelude. One figuration section of a free-form prelude: a window
+// of fast figuration on one voice. `is_cadenza` marks the free run before the
+// final cadence; `is_pedal_prep` marks a sustained dominant pedal preparing the
+// next fugue. A FigurationCarrier span replays `notes` verbatim. The Validator's
+// figuration_harmonic_consistency rule checks the on-beat notes are chord tones.
+struct FigurationSection {
+  VoiceId voice = 0;
+  Tick start_tick = 0;
+  Tick end_tick = 0;
+  bool is_cadenza = false;
+  bool is_pedal_prep = false;
+  std::vector<MaterialNote> notes;
+};
+
+// Organ Toccata. The four Bach toccata archetypes (CLAUDE.md / legacy
+// forms/toccata*): Dramaticus (BWV565 dramatic opening + free figuration),
+// Perpetuus (BWV538 continuous sixteenths), Concertato (BWV564 forte/piano
+// contrast), Sectionalis (BWV540 clear section breaks).
+enum class ToccataArchetype : std::uint8_t {
+  Dramaticus = 0,
+  Perpetuus = 1,
+  Concertato = 2,
+  Sectionalis = 3,
+};
+
+// One section of a toccata. `archetype` + `character` document the piece-level
+// design (the Validator's toccata_archetype_compatible rule checks the pair).
+// `is_section_head` marks the first section of a new sectional block (stamps
+// SectionTransition). A ToccataCarrier span replays `notes` verbatim.
+struct ToccataSection {
+  ToccataArchetype archetype = ToccataArchetype::Dramaticus;
+  SubjectCharacter character = SubjectCharacter::Severe;
+  VoiceId voice = 0;
+  Tick start_tick = 0;
+  Tick end_tick = 0;
+  bool is_section_head = false;
+  std::vector<MaterialNote> notes;
+};
+
+// Organ Passacaglia. An 8-bar immutable ground bass (CLAUDE.md "Ground
+// bass is immutable") repeated under variations of rising density; one or more
+// variation blocks are flagged is_climax (the registral peak). Like the
+// chaconne arch but with an 8-bar period and a climax marker.
+struct PassacagliaVariation {
+  VoiceId voice = 0;
+  Tick start_tick = 0;
+  Tick end_tick = 0;
+  int density_level = 0;
+  bool is_climax = false;
+  std::vector<MaterialNote> notes;
+};
+
+// Organ Trio Sonata. One independent voice line of an organ trio sonata
+// (RH = Great / LH = Swell / Pedal). `notes` is the realized monophonic line for
+// `voice`, replayed verbatim by a TrioVoiceCarrier span (NoteSource::Material)
+// exactly like the other carriers. `manual` is the documentary organ-manual id
+// (0=Great, 1=Swell, 3=Pedal). The three lines' pairwise voice independence is
+// measured by the Validator's voice_independence_threshold rule from the notes
+// carrying the TrioVoiceIndependent bit, not from this struct directly.
+struct TrioVoiceLine {
+  VoiceId voice = 0;
+  std::uint8_t manual = 0;  // documentary: 0=Great, 1=Swell, 3=Pedal.
+  std::vector<MaterialNote> notes;
+};
+
+// Organ Fantasia (free sectional, multi-style). A fantasia organizes a
+// single voice into CONTRASTING sections. `style` documents the section's
+// rhetorical character (Free / Fugal / Toccata / Chordal); `density_level` is
+// the notes-per-bar tier (the concrete, self-contained contrast measure). A
+// FantasiaCarrier span replays `notes` verbatim (window-matched). The Validator's
+// section_contrast_required rule checks that ADJACENT sections differ in
+// density_level OR mean register, so the defining technique (section contrast)
+// is enforced.
+enum class FantasiaStyle : std::uint8_t {
+  Free = 0,     // improvisatory opening (sparse, free figuration).
+  Fugal = 1,    // imitative middle (moderate density).
+  Toccata = 2,  // virtuosic running figuration (dense).
+  Chordal = 3,  // declamatory chordal / homophonic close.
+};
+
+struct FantasiaSection {
+  VoiceId voice = 0;
+  Tick start_tick = 0;
+  Tick end_tick = 0;
+  bool is_section_head = false;
+  FantasiaStyle style = FantasiaStyle::Free;
+  int density_level = 0;  // notes-per-bar tier; distinguishing contrast trait.
+  std::vector<MaterialNote> notes;
+};
+
+// Rhythm / meter / phrase declarations.
 
 // Phrase grid for the piece. `phrase_start_ticks` lists the downbeat tick
 // of every phrase (including the first at 0, or at anacrusis_ticks when
@@ -244,13 +362,13 @@ struct RhythmFragment {
   std::vector<MaterialNote> notes;
 };
 
-// P13 texture / instrument / expression plan. Unlike the P11/P12 carrier
-// declarations (which feed CandidateSearch verbatim-replay spans), these
+// Texture / instrument / expression plan. Unlike the carrier declarations
+// above (which feed CandidateSearch verbatim-replay spans), these
 // are render-time attributes the Composer's texture-expression post-pass
 // reads after candidate placement: per-voice MIDI ranges, organ-manual
 // routing, articulation regions, and an Affekt-driven velocity curve.
 // Default-constructed (all vectors empty, affekt_curve_active=false) the
-// post-pass is a no-op, so Phase 3-12 fixtures behave exactly as before.
+// post-pass is a no-op, so fixtures without a texture plan are unaffected.
 
 // Inclusive MIDI pitch bounds for one voice. The Validator's
 // `voice_range_integrity` rule fails any note in `voice` outside [lo, hi];
@@ -281,7 +399,7 @@ struct ArticulationSpan {
   std::uint8_t kind = 0;
 };
 
-// Render-time texture / expression bundle (P13). See per-field structs.
+// Render-time texture / expression bundle. See per-field structs.
 struct TexturePlan {
   std::vector<VoiceRangeDecl> voice_ranges;
   std::vector<ManualRouting> manual_assignments;
@@ -296,7 +414,7 @@ struct TexturePlan {
   VoiceId pedal_voice = 0xFF;
 };
 
-// P15 (Solo String Flow / BWV1007). A single-voice broken-chord arpeggio.
+// Solo String Flow (BWV1007). A single-voice broken-chord arpeggio.
 // `notes` is the realized monophonic line, replayed verbatim by an
 // ArpeggioFlow span (NoteSource::Material) exactly like the other carriers.
 //
@@ -318,13 +436,12 @@ struct ArpeggioTemplate {
 // Bundle of pre-determined material fragments available to the planner.
 //
 // `subject` feeds SubjectCarrier spans; `answer` feeds AnswerCarrier
-// spans introduced in Phase 4. Later phases add `countersubject` and
-// per-character episode fragments. Each fragment is a flat note list;
-// structure (phrase boundaries, repeat units) is the planner's
-// responsibility.
+// spans. Additional fields supply `countersubject` and per-character
+// episode fragments. Each fragment is a flat note list; structure
+// (phrase boundaries, repeat units) is the planner's responsibility.
 //
-// DESIGN DEBT (god-struct): this struct has grown one flat carrier-payload
-// field per phase (subject / answer / tonal_answer / countersubject /
+// DESIGN DEBT (god-struct): this struct carries one flat carrier-payload
+// field per device (subject / answer / tonal_answer / countersubject /
 // nct_figures, plus the per-decl vectors below). The CandidateSearch replay
 // dispatch must hand-map each VoiceIntent to its field. The intended future
 // shape is to group the verbatim flat-vector payloads behind an
@@ -351,29 +468,75 @@ struct Material {
   std::vector<CadenceCell> cadence_cells;
   std::vector<SuspensionPattern> suspension_patterns;
   std::vector<EpisodeFragment> episodes;
-  // P9 (Fortspinnung + Imitation). Empty in Phase 3-8 fixtures.
+  // Fortspinnung + Imitation.
   std::vector<SequenceTemplate> sequence_templates;
   std::vector<ImitationEntry> imitation_entries;
-  // P11 (development section). Empty in Phase 3-10 fixtures.
+  // Development section.
   std::vector<MiddleEntryDecl> middle_entries;
   std::vector<StrettoDecl> stretto_entries;
   std::vector<PedalPointDecl> pedal_points;
   std::vector<SubjectVariantDecl> subject_variants;
   std::vector<CodaDecl> coda_extensions;
-  // P12 (rhythm / meter / phrase). Empty in Phase 3-11 fixtures.
+  // Rhythm / meter / phrase.
   PhraseStructure phrase_structure;
   std::vector<RhythmFragment> rhythm_fragments;
-  // P14 (non-chord-tone figures). Verbatim single-voice NCT figures
+  // Non-chord-tone figures. Verbatim single-voice NCT figures
   // (cambiata / echappee / anticipation / nota cambiata) replayed by a
-  // NctCarrier span. Empty in Phase 3-13 fixtures.
+  // NctCarrier span.
   std::vector<MaterialNote> nct_figures;
-  // P13 (texture / instrument / expression). Default-constructed (no-op
-  // post-pass) in Phase 3-12 fixtures.
+  // Texture / instrument / expression. Default-constructed it is a no-op
+  // post-pass.
   TexturePlan texture_plan;
-  // P15 (Solo String Flow). Empty in Phase 3-14 fixtures; populated only by
-  // the Phase15 BWV1007-style arpeggio fixture. Replayed by an ArpeggioFlow
-  // span on a single voice.
+  // Solo String Flow. Populated only by the Phase15 BWV1007-style arpeggio
+  // fixture. Replayed by an ArpeggioFlow span on a single voice.
   ArpeggioTemplate arpeggio_template;
+  // Solo String Arch. The ground bass is immutable (CLAUDE.md "Ground bass
+  // is immutable"): GroundCarrier replays it tiled every `ground_bass_period`
+  // ticks. `variations` feed VariationCarrier.
+  std::vector<MaterialNote> ground_bass;
+  Tick ground_bass_period = 0;
+  std::vector<VariationDecl> variations;
+  // Organ Prelude (free sectional form). Populated only by the Phase17
+  // organ-prelude fixture. Each section is replayed verbatim by a
+  // FigurationCarrier span whose window matches it.
+  std::vector<FigurationSection> figuration_sections;
+  // Organ Toccata (4 archetypes). Populated only by the Phase18 organ-toccata
+  // fixture. Each section is replayed verbatim by a ToccataCarrier span whose
+  // window matches it; the Validator's
+  // toccata_archetype_compatible rule checks each section's (character,
+  // archetype) pair.
+  std::vector<ToccataSection> toccata_sections;
+  // Organ Chorale Prelude. The cantus firmus is a fixed chorale tune
+  // (one structural tone per bar) and is immutable (CLAUDE.md). A
+  // CantusFirmusCarrier span replays either the plain skeleton (`cantus_firmus`)
+  // or an embellished line (`cf_embellished`) whose bar-downbeat tones still equal
+  // the skeleton — the Validator's cantus_firmus_immutable rule checks exactly
+  // that the bar-downbeat replayed tones match `cantus_firmus`.
+  //   cf_placement: documentary CF voice placement (0=Soprano,1=Tenor,2=Bass).
+  //   cf_is_embellished: when true the carrier replays `cf_embellished` and
+  //     stamps CFEmbellishmentApplied.
+  std::vector<MaterialNote> cantus_firmus;   // skeleton, one tone per bar.
+  std::vector<MaterialNote> cf_embellished;  // ornamented CF (downbeats == skeleton).
+  bool cf_is_embellished = false;
+  std::uint8_t cf_placement = 0;  // documentary.
+  // Organ Passacaglia. The ground bass is immutable (CLAUDE.md "Ground bass
+  // is immutable"): PassacagliaGround replays it tiled every
+  // `passacaglia_ground_period` ticks; `passacaglia_variations`
+  // feed PassacagliaVariation spans (one per ground cycle, rising density, the
+  // last and optionally a mid cycle flagged is_climax).
+  std::vector<MaterialNote> passacaglia_ground;  // immutable 8-bar bass, cycle-relative ticks.
+  Tick passacaglia_ground_period = 0;
+  std::vector<PassacagliaVariation> passacaglia_variations;
+  // Organ Trio Sonata. The (up to three) independent voice lines of a trio
+  // sonata; each is replayed verbatim by a TrioVoiceCarrier span matched by
+  // voice. The Validator's voice_independence_threshold rule measures their
+  // pairwise independence.
+  std::vector<TrioVoiceLine> trio_voices;
+  // Organ Fantasia. The contrasting sections of a free sectional fantasia;
+  // each is replayed verbatim by a FantasiaCarrier span matched by window.
+  // The Validator's section_contrast_required rule
+  // measures the contrast (density / register) between adjacent sections.
+  std::vector<FantasiaSection> fantasia_sections;
 };
 
 void annotateLeadingToneMarkers(Material& material, std::uint8_t tonic_pc, bool is_minor);

@@ -10,15 +10,14 @@ namespace bach::composer {
 
 // Renderer assembles tracks for MIDI output.
 //
-// Strict contract (rebuild plan §禁止事項):
+// Strict contract:
 //   * Renderer does NOT change any note's pitch.
 //   * Renderer does NOT change any note's start_tick.
 //   * Renderer MAY shorten note duration to prevent same-voice overlap.
 //   * Renderer MAY group notes into Track structures by voice id.
 //
 // Anything beyond the above (snap, smooth, repair, recompose) is
-// explicitly forbidden and indicates the failure mode the rebuild is
-// escaping.
+// explicitly forbidden.
 class Renderer {
  public:
   // Returns one Track per distinct voice in `notes`, sorted by voice id.

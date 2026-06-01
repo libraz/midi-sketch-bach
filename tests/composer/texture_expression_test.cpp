@@ -1,8 +1,9 @@
-// P13 texture / instrument / expression integration tests.
+// Texture / instrument / expression integration tests.
 //
 // Exercises the Composer's texture-expression post-pass end to end via the
-// Phase13 harness fixture: every emitted note must carry the four P13
-// provenance bits, the Affekt velocity curve must produce a non-flat
+// Phase13 harness fixture: every emitted note must carry the four
+// texture-expression provenance bits, the Affekt velocity curve must produce a
+// non-flat
 // dynamic arch, and voice density must vary over time (the lowest voice
 // enters only at bar 8). The default-constructed TexturePlan no-op
 // behavior is covered against a non-texture phase.
@@ -78,8 +79,8 @@ TEST(TextureExpressionTest, VoiceDensityVariesOverTime) {
 
 TEST(TextureExpressionTest, NoP13BitsWithoutTexturePlan) {
   // Phase7 shares Phase13's exposition layout but declares no TexturePlan,
-  // so the post-pass is a no-op: none of the four P13 bits appear, and the
-  // velocity stays at the renderer default.
+  // so the post-pass is a no-op: none of the four texture-expression bits
+  // appear, and the velocity stays at the renderer default.
   const ComposeResult r = runPhase(HarnessPhase::Phase7, /*seed=*/0);
   ASSERT_FALSE(r.provenance.empty());
   for (const auto& p : r.provenance) {

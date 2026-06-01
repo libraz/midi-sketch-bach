@@ -23,6 +23,16 @@ set(BACH_COMPOSER_TEST_SOURCES
   texture_expression_test.cpp
   composer_nct_test.cpp
   arpeggio_flow_test.cpp
+  chaconne_arch_test.cpp
+  organ_prelude_test.cpp
+  organ_toccata_test.cpp
+  chorale_prelude_test.cpp
+  passacaglia_test.cpp
+  trio_sonata_test.cpp
+  fantasia_test.cpp
+  suite_test.cpp
+  wtc_pair_test.cpp
+  goldberg_test.cpp
 )
 
 add_executable(bach_composer_tests ${BACH_COMPOSER_TEST_SOURCES})

@@ -238,17 +238,17 @@ class ComputePassedTest(unittest.TestCase):
 
 
 class Phase14BitCountTest(unittest.TestCase):
-    """The 47-bit milestone constant must track provenance.h RuleBit max+1."""
+    """The 47-bit required count must track provenance.h RuleBit max+1."""
 
     def test_required_bit_count_is_47(self) -> None:
         self.assertEqual(rpc.PHASE14_REQUIRED_BIT_COUNT, 47)
 
     def test_matches_organ_fugue_bit_boundary(self) -> None:
-        # Phase14 is the Organ-fugue all-technique milestone: it covers RuleBits
-        # 0..AffektCurveApplied. The Solo String Flow bits (ArpeggioFlowActive,
-        # ImplicitVoiceTracked) added in P15 are a SEPARATE system and sit ABOVE
-        # that boundary, so the milestone count tracks AffektCurveApplied+1, NOT
-        # the absolute RuleBit max.
+        # Phase14 covers the Organ-fugue technique RuleBits 0..AffektCurveApplied.
+        # The Solo String Flow bits (ArpeggioFlowActive, ImplicitVoiceTracked)
+        # added in Phase15 are a SEPARATE system and sit ABOVE that boundary, so
+        # the required count tracks AffektCurveApplied+1, NOT the absolute RuleBit
+        # max.
         prov = (REPO_ROOT / "src" / "composer" / "provenance.h").read_text(
             encoding="utf-8"
         )
@@ -257,7 +257,7 @@ class Phase14BitCountTest(unittest.TestCase):
         self.assertEqual(
             int(names["AffektCurveApplied"]) + 1, rpc.PHASE14_REQUIRED_BIT_COUNT
         )
-        # The two Flow bits are exactly the indices just past the milestone.
+        # The two Flow bits are exactly the indices just past that boundary.
         self.assertEqual(int(names["ArpeggioFlowActive"]), 47)
         self.assertEqual(int(names["ImplicitVoiceTracked"]), 48)
         self.assertEqual(rpc.PHASE15_REQUIRED_BITS, (47, 48))

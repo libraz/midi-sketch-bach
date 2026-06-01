@@ -17,8 +17,8 @@ enum RuleBit : std::uint8_t;
 // Values mirror the legacy bach::VoiceIntent enum (src/fugue/thematic_plan.h),
 // but this header is declared independently so the composer subsystem does
 // NOT include the legacy thematic_plan header. The legacy header also
-// declares ThematicProtectionLevel and ViolationBudget, both forbidden by
-// the rebuild plan's "移植しない概念" section. Pulling thematic_plan.h would
+// declares ThematicProtectionLevel and ViolationBudget, concepts the composer
+// subsystem intentionally does not adopt. Pulling thematic_plan.h would
 // reintroduce that vocabulary into the composer's translation units.
 //
 // Boundary enforced by ci/check_composer_isolation.sh (forbidden include
@@ -83,8 +83,8 @@ enum class VoiceIntent : std::uint8_t {
   // of free counterpoint.
   FortspinnungSpan = 10,
 
-  // P11 (Fugue development section: middle entry / stretto / pedal /
-  // coda / subject variants). All seven intents below carry their
+  // Fugue development section: middle entry / stretto / pedal /
+  // coda / subject variants. All seven intents below carry their
   // pitch material verbatim from a dedicated Material vector (see
   // material.h), so they are NoteSource::Material like the other
   // carriers. CandidateSearch replays the source notes (score = 1.0)
@@ -119,7 +119,7 @@ enum class VoiceIntent : std::uint8_t {
   SubjectCarrierDiminished = 16,
   SubjectCarrierInverted = 17,
 
-  // P12 (Rhythm / meter / phrase). A carrier that replays a verbatim
+  // Rhythm / meter / phrase. A carrier that replays a verbatim
   // rhythm fragment (anacrusis pickup, hemiola regrouping, dotted figure,
   // syncopation, or a rhythmic-motif recurrence). Source is
   // `Material::rhythm_fragments` (matched by voice); each fragment's
@@ -127,7 +127,7 @@ enum class VoiceIntent : std::uint8_t {
   // declared phrase start additionally carry PhrasePeriodicityKept.
   RhythmCarrier = 18,
 
-  // P14. A carrier that replays a verbatim single-voice non-chord-tone
+  // A carrier that replays a verbatim single-voice non-chord-tone
   // (NCT) figure (cambiata / echappee / anticipation / nota cambiata).
   // Source is `Material::nct_figures` (matched by voice); CandidateSearch
   // replays each note verbatim (score = 1.0) like the other Material
@@ -139,14 +139,91 @@ enum class VoiceIntent : std::uint8_t {
   // neighbourhood needed by the detectors exists).
   NctCarrier = 19,
 
-  // P15 (Solo String Flow / BWV1007). A single voice that arpeggiates the
+  // Solo String Flow (BWV1007). A single voice that arpeggiates the
   // underlying harmony as a continuous broken-chord line. Source is
   // `Material::arpeggio_template.notes`; CandidateSearch replays each note
   // verbatim (score = 1.0) like the other Material carriers and stamps
   // ArpeggioFlowActive + ImplicitVoiceTracked. The implicit-voice streams
   // the line projects are checked by the Validator's implicit_voice_*
   // rules, not re-derived here.
-  ArpeggioFlow = 20
+  ArpeggioFlow = 20,
+
+  // Solo String Arch (BWV1004 Chaconne). Both are Material verbatim
+  // carriers. GroundCarrier replays the immutable ground bass (period-tiled
+  // across the whole piece); VariationCarrier replays one upper-voice
+  // variation line. CandidateSearch stamps the arch bits on their notes.
+  GroundCarrier = 21,
+  VariationCarrier = 22,
+
+  // Organ Prelude (free sectional form). A single voice that carries one
+  // figuration section of a free-form prelude: a window of fast figuration
+  // (broken-chord / scale run). Source is `Material::figuration_sections`
+  // (matched by window); CandidateSearch replays each note verbatim (score =
+  // 1.0) and stamps FigurationCommitted (plus CadenzaApplied / PedalPreparation
+  // when the section is flagged is_cadenza / is_pedal_prep). The on-beat notes'
+  // chord-tone membership is checked by the Validator's
+  // figuration_harmonic_consistency rule, not re-derived here.
+  FigurationCarrier = 23,
+
+  // Organ Toccata (4 archetypes). A single voice that carries one
+  // section of a virtuosic toccata: a window of fast scalar-wave figuration.
+  // Source is `Material::toccata_sections` (matched by window); CandidateSearch
+  // replays each note verbatim (score = 1.0) and stamps ToccataArchetypeApplied
+  // on every note (plus SectionTransition on the first note when the section is
+  // flagged is_section_head). The (character, archetype) compatibility is
+  // checked by the Validator's toccata_archetype_compatible rule, not here.
+  ToccataCarrier = 24,
+
+  // Organ Chorale Prelude. A single voice that carries the fixed chorale
+  // tune (cantus firmus): one structural tone per bar, optionally embellished
+  // with stepwise passing notes whose bar-downbeat tones still equal the
+  // skeleton. Source is `Material::cf_embellished` when
+  // `Material::cf_is_embellished` is set, otherwise `Material::cantus_firmus`;
+  // CandidateSearch replays each note verbatim (score = 1.0) and stamps
+  // CantusFirmusReplayed (plus CFEmbellishmentApplied on every note when the
+  // embellished line is replayed). The cantus firmus is immutable (CLAUDE.md):
+  // its bar-downbeat tones are checked by the Validator's cantus_firmus_immutable
+  // rule, not re-derived here.
+  CantusFirmusCarrier = 25,
+
+  // Organ Passacaglia (ground bass + variations + climax). Both are
+  // Material verbatim carriers, like the GroundCarrier / VariationCarrier pair.
+  // PassacagliaGround replays the immutable 8-bar passacaglia ground bass
+  // (period-tiled across the whole piece, like the GroundCarrier);
+  // PassacagliaVariation replays one upper-voice variation block over one ground
+  // cycle. CandidateSearch stamps PassacagliaGroundReplayed on the ground notes
+  // and VariationApplied on every variation note (OR ClimaxPlaced when the
+  // variation block is flagged is_climax — the dynamic / registral peak placed
+  // mid- and end-piece). The ground is immutable (CLAUDE.md): its cycle-folded
+  // pitches are checked by the Validator's passacaglia_ground_immutable rule.
+  PassacagliaGround = 26,
+  PassacagliaVariation = 27,
+
+  // Organ Trio Sonata (three independent voices). A Material verbatim
+  // carrier that replays one of the (up to three) independent voice lines of an
+  // organ trio sonata: RH (Great), LH (Swell), Pedal. Source is the matching
+  // entry in `Material::trio_voices` (matched by voice); CandidateSearch replays
+  // each note verbatim (score = 1.0) and stamps TrioVoiceIndependent on every
+  // note. The defining technique is voice independence: the three lines must
+  // move with enough non-parallel / rhythmically-distinct motion that the
+  // Validator's voice_independence_threshold rule (a soft MusicalFail below
+  // 0.6) passes. The lines carry that bit so the rule can collect exactly the
+  // trio voices and measure their pairwise independence; the per-voice register
+  // and rhythm separation is the fixture's responsibility.
+  TrioVoiceCarrier = 28,
+
+  // Organ Fantasia (free sectional, multi-style). A Material verbatim
+  // carrier that replays one CONTRASTING section of a free fantasia (e.g. a
+  // free/improvisatory opening, a fugal-ish middle, a toccata-like run, a
+  // chordal close). Source is the matching entry in `Material::fantasia_sections`
+  // (matched by window); CandidateSearch replays each note verbatim (score =
+  // 1.0) and stamps FantasiaSectionContrast on every note. The defining
+  // technique is SECTION CONTRAST: adjacent sections must differ in their
+  // distinguishing trait (note density level OR mean register), which the
+  // Validator's section_contrast_required rule (a soft MusicalFail) measures
+  // from the notes carrying this bit. The per-section density / register
+  // separation is the fixture's responsibility.
+  FantasiaCarrier = 29
 };
 
 // How CandidateSearch turns a span of this intent into Candidates.
@@ -189,7 +266,8 @@ struct IntentDescriptor {
 };
 
 // Table lookup keyed by VoiceIntent. Defined for every enumerator value
-// 0..ArpeggioFlow(20); a static_assert in voice_intent.cpp guards completeness.
+// 0..FantasiaCarrier(29); a static_assert in voice_intent.cpp guards
+// completeness.
 const IntentDescriptor& describeIntent(VoiceIntent intent);
 
 // Pure helper. No formatting library dependency. Delegates to

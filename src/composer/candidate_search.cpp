@@ -22,10 +22,10 @@ constexpr Tick kQuarter = kTicksPerBeat;
 using rule_helpers::activeChord;
 using rule_helpers::triadPitchClasses;
 
-// P7 helper: set the four P7 provenance bits on `rules` when the
-// active chord opts into the strict regime (has_degree=true). Caller
-// passes `pc` (candidate pitch class) and `is_chord_tone` so the
-// helper doesn't recompute triad arithmetic.
+// Functional-harmony helper: set the four functional-harmony provenance
+// bits on `rules` when the active chord opts into the strict regime
+// (has_degree=true). Caller passes `pc` (candidate pitch class) and
+// `is_chord_tone` so the helper doesn't recompute triad arithmetic.
 //
 //   ChordToneRoman  — set when the candidate is a chord tone of a
 //                     degree-tagged chord. Stricter sibling of
@@ -53,8 +53,8 @@ void applyP7Bits(RuleIdMask& rules, const ChordEvent& chord, std::uint8_t pc, bo
     rules |= 1ull << RuleBit::InversionLabel;
 }
 
-// P8 helper: set the four P8 provenance bits when the surrounding
-// context matches each idiom.
+// Modulation/tonicization helper: set the four corresponding provenance
+// bits when the surrounding context matches each idiom.
 //
 //   ModulationCommitted        — the active chord sits at or after a
 //                                ModulationEvent boundary (the plan has
@@ -493,11 +493,11 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
       span.intent == VoiceIntent::SubjectCarrierAugmented ||
       span.intent == VoiceIntent::SubjectCarrierDiminished ||
       span.intent == VoiceIntent::SubjectCarrierInverted) {
-    // P11 development carriers: verbatim Material replay from a per-intent
+    // Development carriers: verbatim Material replay from a per-intent
     // source vector, stamping one provenance bit. Register safety (no
-    // voice crossing) is the fixture's responsibility; because every P11
-    // carrier is NoteSource::Material, the Validator's vertical/parallel
-    // rules skip pairs where both notes are Material.
+    // voice crossing) is the fixture's responsibility; because every
+    // development carrier is NoteSource::Material, the Validator's
+    // vertical/parallel rules skip pairs where both notes are Material.
     const std::vector<MaterialNote>* source = nullptr;
     RuleBit bit = RuleBit::MiddleEntryCommitted;
     if (span.intent == VoiceIntent::MiddleEntryCarrier) {
@@ -547,7 +547,7 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
   }
 
   if (span.intent == VoiceIntent::RhythmCarrier) {
-    // P12 rhythm carrier: verbatim replay of every RhythmFragment that
+    // Rhythm carrier: verbatim replay of every RhythmFragment that
     // targets this span's voice and whose notes fall inside the span
     // window. Each fragment's feature tag selects a provenance bit; a note
     // whose onset lands on a declared phrase start additionally carries
@@ -589,7 +589,7 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
   }
 
   if (span.intent == VoiceIntent::NctCarrier) {
-    // P14 non-chord-tone carrier: verbatim replay of material.nct_figures
+    // Non-chord-tone carrier: verbatim replay of material.nct_figures
     // that fall inside the span window, mirroring the SubjectCarrier
     // branch (source = Material, score = 1.0, standard ChordTone/P7/P8
     // bit-OR set). The figure provenance bits (CambiataDetected etc.) are
@@ -609,12 +609,12 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
   }
 
   if (span.intent == VoiceIntent::ArpeggioFlow) {
-    // P15 Solo String Flow carrier: verbatim replay of the single-voice
+    // Solo String Flow carrier: verbatim replay of the single-voice
     // broken-chord line in material.arpeggio_template that falls inside the
-    // span window, mirroring the other Material carriers (source = Material,
+    // span window, like the other Material carriers (source = Material,
     // score = 1.0, baseline ChordTone/P7/P8 bit set via emitMaterialNote).
     // Every note additionally carries ArpeggioFlowActive + ImplicitVoiceTracked
-    // so the closure gate can assert the Flow device shipped and the
+    // so the provenance records the Flow device shipped and the
     // Validator's implicit-voice rules cover the line. Implicit-voice
     // membership is positional (group_size) and is reconstructed by the
     // Validator from the emitted note order, not encoded per note here.
@@ -626,6 +626,233 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
       if (mnote.start_tick >= span.end_tick)
         break;
       out.push_back(emitMaterialNote(mnote, harmonic_plan, flow_bits));
+    }
+    return out;
+  }
+
+  if (span.intent == VoiceIntent::GroundCarrier) {
+    // Solo String Arch ground carrier: period-tiled verbatim replay of the
+    // immutable ground bass (material.ground_bass is one cycle of length
+    // material.ground_bass_period ticks). The cycle is laid down repeatedly to
+    // fill [span.start_tick, span.end_tick); each note is source = Material,
+    // score = 1.0 (baseline ChordTone/P7/P8 bits via emitMaterialNote) plus
+    // GroundBassReplayed so the provenance records the ground shipped.
+    // The ground is immutable (CLAUDE.md): notes are replayed verbatim, only
+    // time-shifted by whole cycles.
+    const RuleIdMask ground_bits = (1ull << RuleBit::GroundBassReplayed);
+    const Tick period = material.ground_bass_period;
+    if (period > 0 && !material.ground_bass.empty()) {
+      for (Tick base = span.start_tick; base < span.end_tick; base += period) {
+        for (const auto& mnote : material.ground_bass) {
+          const Tick t = base + mnote.start_tick;
+          if (t < span.start_tick)
+            continue;
+          if (t >= span.end_tick)
+            break;
+          MaterialNote shifted = mnote;
+          shifted.start_tick = t;
+          out.push_back(emitMaterialNote(shifted, harmonic_plan, ground_bits));
+        }
+      }
+    }
+    return out;
+  }
+
+  if (span.intent == VoiceIntent::VariationCarrier) {
+    // Solo String Arch variation carrier: verbatim replay of the single
+    // VariationDecl whose window matches this span (the fixture sets
+    // span.start_tick/end_tick to the variation's window). Each note is
+    // source = Material, score = 1.0 (baseline bits via emitMaterialNote) plus
+    // VariationRoleApplied. The first note of a variation whose density tier
+    // differs from the immediately preceding variation (material.variations
+    // order) additionally carries TextureDensityShift so the provenance records
+    // the texture-density progression shipped.
+    const RuleIdMask var_bits = (1ull << RuleBit::VariationRoleApplied);
+    for (std::size_t var_idx = 0; var_idx < material.variations.size(); ++var_idx) {
+      const auto& var = material.variations[var_idx];
+      if (var.start_tick != span.start_tick || var.end_tick != span.end_tick)
+        continue;
+      const bool density_shift =
+          (var_idx == 0) || (material.variations[var_idx - 1].density_level != var.density_level);
+      bool first = true;
+      for (const auto& mnote : var.notes) {
+        RuleIdMask bits = var_bits;
+        if (first && density_shift)
+          bits |= (1ull << RuleBit::TextureDensityShift);
+        first = false;
+        out.push_back(emitMaterialNote(mnote, harmonic_plan, bits));
+      }
+    }
+    return out;
+  }
+
+  if (span.intent == VoiceIntent::FigurationCarrier) {
+    // Organ Prelude figuration carrier: verbatim replay of the single
+    // FigurationSection whose window matches this span (the fixture sets
+    // span.start_tick/end_tick to the section's window). Each note is source =
+    // Material, score = 1.0 (baseline ChordTone/P7/P8 bits via emitMaterialNote)
+    // plus FigurationCommitted. A section flagged is_cadenza OR-s CadenzaApplied
+    // onto every note; is_pedal_prep OR-s PedalPreparation. These bits let the
+    // provenance record the prelude's free figuration / cadenza / dominant
+    // pedal-preparation devices shipped. The on-beat chord-tone check is the
+    // Validator's figuration_harmonic_consistency rule, not re-derived here.
+    for (const auto& section : material.figuration_sections) {
+      if (section.start_tick != span.start_tick || section.end_tick != span.end_tick)
+        continue;
+      RuleIdMask fig_bits = (1ull << RuleBit::FigurationCommitted);
+      if (section.is_cadenza)
+        fig_bits |= (1ull << RuleBit::CadenzaApplied);
+      if (section.is_pedal_prep)
+        fig_bits |= (1ull << RuleBit::PedalPreparation);
+      for (const auto& mnote : section.notes) {
+        out.push_back(emitMaterialNote(mnote, harmonic_plan, fig_bits));
+      }
+    }
+    return out;
+  }
+
+  if (span.intent == VoiceIntent::ToccataCarrier) {
+    // Organ Toccata carrier: verbatim replay of the single ToccataSection
+    // whose window matches this span (the fixture sets span.start_tick/end_tick
+    // to the section's window). Each note is source = Material, score = 1.0
+    // (baseline ChordTone/P7/P8 bits via emitMaterialNote) plus
+    // ToccataArchetypeApplied. When the section is flagged is_section_head, its
+    // FIRST note additionally carries SectionTransition (confirming the
+    // sectional layout shipped). The (character, archetype) compatibility is the
+    // Validator's toccata_archetype_compatible rule, not re-derived here.
+    for (const auto& section : material.toccata_sections) {
+      if (section.start_tick != span.start_tick || section.end_tick != span.end_tick)
+        continue;
+      const RuleIdMask toc_bits = (1ull << RuleBit::ToccataArchetypeApplied);
+      bool first = true;
+      for (const auto& mnote : section.notes) {
+        RuleIdMask bits = toc_bits;
+        if (first && section.is_section_head)
+          bits |= (1ull << RuleBit::SectionTransition);
+        first = false;
+        out.push_back(emitMaterialNote(mnote, harmonic_plan, bits));
+      }
+    }
+    return out;
+  }
+
+  if (span.intent == VoiceIntent::CantusFirmusCarrier) {
+    // Organ Chorale Prelude cantus firmus carrier: verbatim replay of the
+    // fixed chorale tune that falls inside the span window. Source = the
+    // embellished line (material.cf_embellished) when material.cf_is_embellished
+    // is set, otherwise the plain skeleton (material.cantus_firmus). Each note is
+    // source = Material, score = 1.0 (baseline ChordTone/P7/P8 bits via
+    // emitMaterialNote) plus CantusFirmusReplayed. When the embellished line is
+    // replayed, every note additionally carries CFEmbellishmentApplied. The
+    // cantus firmus is immutable (CLAUDE.md): its bar-downbeat tones are checked
+    // by the Validator's cantus_firmus_immutable rule, not re-derived here.
+    const std::vector<MaterialNote>& source =
+        material.cf_is_embellished ? material.cf_embellished : material.cantus_firmus;
+    RuleIdMask cf_bits = (1ull << RuleBit::CantusFirmusReplayed);
+    if (material.cf_is_embellished)
+      cf_bits |= (1ull << RuleBit::CFEmbellishmentApplied);
+    for (const auto& mnote : source) {
+      if (mnote.start_tick < span.start_tick)
+        continue;
+      if (mnote.start_tick >= span.end_tick)
+        break;
+      out.push_back(emitMaterialNote(mnote, harmonic_plan, cf_bits));
+    }
+    return out;
+  }
+
+  if (span.intent == VoiceIntent::PassacagliaGround) {
+    // Organ Passacaglia ground carrier: period-tiled verbatim replay of the
+    // immutable 8-bar passacaglia ground bass (material.passacaglia_ground is one
+    // cycle of length material.passacaglia_ground_period ticks). The cycle is
+    // laid down repeatedly to fill [span.start_tick, span.end_tick); each note is
+    // source = Material, score = 1.0 (baseline ChordTone/P7/P8 bits via
+    // emitMaterialNote) plus PassacagliaGroundReplayed so the provenance records
+    // the ground shipped. The ground is immutable (CLAUDE.md): notes are
+    // replayed verbatim, only time-shifted by whole cycles. Same shape as the
+    // GroundCarrier branch with the renamed source vector / bit.
+    const RuleIdMask ground_bits = (1ull << RuleBit::PassacagliaGroundReplayed);
+    const Tick period = material.passacaglia_ground_period;
+    if (period > 0 && !material.passacaglia_ground.empty()) {
+      for (Tick base = span.start_tick; base < span.end_tick; base += period) {
+        for (const auto& mnote : material.passacaglia_ground) {
+          const Tick t = base + mnote.start_tick;
+          if (t < span.start_tick)
+            continue;
+          if (t >= span.end_tick)
+            break;
+          MaterialNote shifted = mnote;
+          shifted.start_tick = t;
+          out.push_back(emitMaterialNote(shifted, harmonic_plan, ground_bits));
+        }
+      }
+    }
+    return out;
+  }
+
+  if (span.intent == VoiceIntent::PassacagliaVariation) {
+    // Organ Passacaglia variation carrier: verbatim replay of the single
+    // PassacagliaVariation whose window matches this span (the fixture sets
+    // span.start_tick/end_tick to the variation's window). Each note is source =
+    // Material, score = 1.0 (baseline bits via emitMaterialNote) plus
+    // VariationApplied. When the variation block is flagged is_climax (the
+    // dynamic / registral peak), every note additionally carries ClimaxPlaced so
+    // the provenance records the climax shipped. Same shape as the
+    // VariationCarrier branch with the climax flag replacing the density-shift
+    // logic.
+    const RuleIdMask var_bits = (1ull << RuleBit::VariationApplied);
+    for (const auto& var : material.passacaglia_variations) {
+      if (var.start_tick != span.start_tick || var.end_tick != span.end_tick)
+        continue;
+      RuleIdMask bits = var_bits;
+      if (var.is_climax)
+        bits |= (1ull << RuleBit::ClimaxPlaced);
+      for (const auto& mnote : var.notes) {
+        out.push_back(emitMaterialNote(mnote, harmonic_plan, bits));
+      }
+    }
+    return out;
+  }
+
+  if (span.intent == VoiceIntent::TrioVoiceCarrier) {
+    // Organ Trio Sonata carrier: verbatim replay of the single TrioVoiceLine
+    // whose voice matches this span (material.trio_voices). Each note that falls
+    // inside the span window is source = Material, score = 1.0 (baseline
+    // ChordTone/P7/P8 bits via emitMaterialNote) plus TrioVoiceIndependent so the
+    // Validator's voice_independence_threshold rule can collect the trio voices
+    // and measure their pairwise independence. Inert when trio_voices is empty.
+    // Clone of the PassacagliaVariation branch, matched by voice (not window).
+    const RuleIdMask trio_bits = (1ull << RuleBit::TrioVoiceIndependent);
+    for (const auto& line : material.trio_voices) {
+      if (line.voice != span.voice)
+        continue;
+      for (const auto& mnote : line.notes) {
+        if (mnote.start_tick < span.start_tick)
+          continue;
+        if (mnote.start_tick >= span.end_tick)
+          break;
+        out.push_back(emitMaterialNote(mnote, harmonic_plan, trio_bits));
+      }
+    }
+    return out;
+  }
+
+  if (span.intent == VoiceIntent::FantasiaCarrier) {
+    // Organ Fantasia carrier: verbatim replay of the single FantasiaSection
+    // whose window matches this span (the fixture sets span.start_tick/end_tick
+    // to the section's window). Each note is source = Material, score = 1.0
+    // (baseline ChordTone/P7/P8 bits via emitMaterialNote) plus
+    // FantasiaSectionContrast so the Validator's section_contrast_required rule
+    // can collect the sections (by window) and measure the density / register
+    // contrast between adjacent sections. Inert when fantasia_sections is empty.
+    // Clone of the ToccataCarrier branch (window-matched verbatim replay).
+    const RuleIdMask fan_bits = (1ull << RuleBit::FantasiaSectionContrast);
+    for (const auto& section : material.fantasia_sections) {
+      if (section.start_tick != span.start_tick || section.end_tick != span.end_tick)
+        continue;
+      for (const auto& mnote : section.notes) {
+        out.push_back(emitMaterialNote(mnote, harmonic_plan, fan_bits));
+      }
     }
     return out;
   }

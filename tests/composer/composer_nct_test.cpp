@@ -1,8 +1,9 @@
-// P14 NCT pipeline integration tests.
+// NCT pipeline integration tests.
 //
 // Drives the Phase14 all-technique fugue fixture through the Composer and
-// inspects the resulting provenance: every P3-P14 RuleBit must fire, the
-// four NCT post-pass bits must land on notes inside the authored bar-12..15
+// inspects the resulting provenance: every fugue-device RuleBit (bits 0..46)
+// must fire, the four NCT post-pass bits must land on notes inside the
+// authored bar-12..15
 // voice-2 window, and a valid seed must produce no validator failures. A
 // regression test confirms the NCT post-pass is a pure no-op on a phase
 // (Phase11) that authors no NCT figures.
@@ -91,7 +92,7 @@ RuleIdMask satisfiedUnion(const ComposeResult& r) {
 
 }  // namespace
 
-// The Phase14 layout exercises every device P3-P14 in one fugue, so the
+// The Phase14 layout exercises every fugue device in one fugue, so the
 // union of satisfied rule bits across all notes must cover bits 0..46.
 TEST(ComposerNctTest, AllFortySevenBitsFireForPhase14) {
   const ComposeResult r = runPhase(HarnessPhase::Phase14, /*seed=*/0);
@@ -154,7 +155,7 @@ TEST(ComposerNctTest, Phase14HasNoValidatorFailuresSeed1) {
       << (r.validation.failures.empty() ? "" : r.validation.failures.front().rule_id);
 }
 
-// Regression (counterline saturation, P14 review #174): the V1 exposition
+// Regression guard (counterline saturation): the V1 exposition
 // counterline (Compose, bars 0-3 and 8-11) sits beneath a subject that climbs
 // to G5/A5. Before the per-span voice_center override the default alto center
 // (64) let the line drift below the P7 spacing floor (subject - octave), so
@@ -178,7 +179,7 @@ TEST(ComposerNctTest, Phase14ExpositionCounterlineHasNoSilentBars) {
   }
 }
 
-// Regression (P14 review #174): seeds 11 and 16 produced augmented/tritone/
+// Regression guard: seeds 11 and 16 produced augmented/tritone/
 // diminished melodic failures in the counterline once it was raised toward the
 // high subject. The CandidateSearch melodic pre-filter (mirroring Validator
 // Rule P1) must now keep these seeds clean.

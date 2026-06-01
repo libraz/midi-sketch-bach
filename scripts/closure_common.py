@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Shared helpers for Composer phase closure / listening-packet scripts.
+"""Shared helpers for the Composer closure / listening-packet scripts.
 
 This module is the single source of truth for the per-seed fixture mapping
 and the phase-name alias table. Both ``run_phase_closure.py`` and
@@ -10,9 +10,9 @@ from __future__ import annotations
 
 from typing import Any
 
-# Phase-name alias table. Superset of the maps that previously lived inline in
-# both run_phase_closure.py and build_listening_packet.py: it covers every key
-# from both scripts so importers stay byte-compatible with their old behavior.
+# Phase-name alias table. Covers every key used by both run_phase_closure.py
+# and build_listening_packet.py so the two scripts resolve phase tokens
+# identically.
 _PHASE_ALIASES: dict[str, str] = {
     "3": "Phase3",
     "p3": "Phase3",
@@ -67,6 +67,39 @@ _PHASE_ALIASES: dict[str, str] = {
     "15": "Phase15",
     "p15": "Phase15",
     "phase15": "Phase15",
+    "16": "Phase16",
+    "p16": "Phase16",
+    "phase16": "Phase16",
+    "17": "Phase17",
+    "p17": "Phase17",
+    "phase17": "Phase17",
+    "18": "Phase18",
+    "p18": "Phase18",
+    "phase18": "Phase18",
+    "19": "Phase19",
+    "p19": "Phase19",
+    "phase19": "Phase19",
+    "20": "Phase20",
+    "p20": "Phase20",
+    "phase20": "Phase20",
+    "21": "Phase21",
+    "p21": "Phase21",
+    "phase21": "Phase21",
+    "22": "Phase22",
+    "p22": "Phase22",
+    "phase22": "Phase22",
+    "23": "Phase23",
+    "p23": "Phase23",
+    "phase23": "Phase23",
+    "Phase23": "Phase23",
+    "24": "Phase24",
+    "p24": "Phase24",
+    "phase24": "Phase24",
+    "Phase24": "Phase24",
+    "25": "Phase25",
+    "p25": "Phase25",
+    "phase25": "Phase25",
+    "Phase25": "Phase25",
 }
 
 

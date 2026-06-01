@@ -14,7 +14,7 @@ namespace bach::composer {
 // validation failure. When the Validator rejects a candidate, the search
 // retries within the same span; when retries exhaust, the engine
 // back-jumps to the span that introduced the constraint (PWMC-style
-// intelligent backtracking, see backup/rebuild_plan_2026-05-28.md).
+// intelligent backtracking).
 using SpanId = std::uint32_t;
 
 inline constexpr SpanId kInvalidSpanId = static_cast<SpanId>(-1);

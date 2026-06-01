@@ -13,9 +13,9 @@ namespace {
 // isCarrierIntent, and (later) the CandidateSearch replay dispatch all read,
 // replacing the previously dual-encoded scattered switch / `||` chains.
 //
-// Order MUST match the VoiceIntent enumerator order (0..NctCarrier=19); the
-// static_assert below guards the size so a future intent cannot silently
-// miss an entry.
+// Order MUST match the VoiceIntent enumerator order
+// (0..FantasiaCarrier=29); the static_assert below guards the size so a
+// future intent cannot silently miss an entry.
 //
 // provenance_bit is only meaningful when has_provenance_bit is true. A
 // placeholder of ChordTone is used otherwise (never read).
@@ -69,12 +69,45 @@ constexpr IntentDescriptor kIntentTable[] = {
     // ArpeggioFlow (20): every note carries ArpeggioFlowActive (and
     // ImplicitVoiceTracked, stamped alongside in the replay branch).
     {"ArpeggioFlow", true, ReplayKind::kVerbatimVector, ArpeggioFlowActive, true},
+    // GroundCarrier (21): every note carries GroundBassReplayed.
+    {"GroundCarrier", true, ReplayKind::kVerbatimVector, GroundBassReplayed, true},
+    // VariationCarrier (22): every note carries VariationRoleApplied (the
+    // TextureDensityShift bit is stamped on a variation's first note in the
+    // replay branch, not encoded here).
+    {"VariationCarrier", true, ReplayKind::kVerbatimVector, VariationRoleApplied, true},
+    // FigurationCarrier (23): every note carries FigurationCommitted (the
+    // CadenzaApplied / PedalPreparation bits are OR-ed per-section in the
+    // replay branch, not encoded here).
+    {"FigurationCarrier", true, ReplayKind::kVerbatimVector, FigurationCommitted, true},
+    // ToccataCarrier (24): every note carries ToccataArchetypeApplied (the
+    // SectionTransition bit is OR-ed onto a section head's first note in the
+    // replay branch, not encoded here).
+    {"ToccataCarrier", true, ReplayKind::kVerbatimVector, ToccataArchetypeApplied, true},
+    // CantusFirmusCarrier (25): every note carries CantusFirmusReplayed (the
+    // CFEmbellishmentApplied bit is OR-ed onto every note when the embellished
+    // line is replayed, not encoded here).
+    {"CantusFirmusCarrier", true, ReplayKind::kVerbatimVector, CantusFirmusReplayed, true},
+    // PassacagliaGround (26): every note carries PassacagliaGroundReplayed (the
+    // period-tiled immutable 8-bar ground bass).
+    {"PassacagliaGround", true, ReplayKind::kVerbatimVector, PassacagliaGroundReplayed, true},
+    // PassacagliaVariation (27): every note carries VariationApplied (the
+    // ClimaxPlaced bit is OR-ed onto every note of an is_climax variation block in
+    // the replay branch, not encoded here).
+    {"PassacagliaVariation", true, ReplayKind::kVerbatimVector, VariationApplied, true},
+    // TrioVoiceCarrier (28): every note carries TrioVoiceIndependent (the
+    // independence of the three replayed voices is measured by the Validator's
+    // voice_independence_threshold rule from notes carrying this bit).
+    {"TrioVoiceCarrier", true, ReplayKind::kVerbatimVector, TrioVoiceIndependent, true},
+    // FantasiaCarrier (29): every note carries FantasiaSectionContrast (the
+    // adjacent-section contrast in density / register is measured by the
+    // Validator's section_contrast_required rule from notes carrying this bit).
+    {"FantasiaCarrier", true, ReplayKind::kVerbatimVector, FantasiaSectionContrast, true},
 };
 
-constexpr std::size_t kIntentCount = static_cast<std::size_t>(VoiceIntent::ArpeggioFlow) + 1;
+constexpr std::size_t kIntentCount = static_cast<std::size_t>(VoiceIntent::FantasiaCarrier) + 1;
 
 static_assert(sizeof(kIntentTable) / sizeof(kIntentTable[0]) == kIntentCount,
-              "kIntentTable must have one entry per VoiceIntent enumerator (0..ArpeggioFlow)");
+              "kIntentTable must have one entry per VoiceIntent enumerator (0..FantasiaCarrier)");
 
 const IntentDescriptor kUnknownDescriptor = {"Unknown", false, ReplayKind::kCompose, ChordTone,
                                              false};

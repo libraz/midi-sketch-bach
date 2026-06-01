@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build a listening packet from bach_cli Composer phase output."""
+"""Build a listening packet from bach_cli Composer fixture output."""
 
 from __future__ import annotations
 
@@ -25,8 +25,14 @@ PHASE_TAGS = {
     "Phase4": "p4",
     "Phase5": "p5",
     "Phase6": "p6",
-    # P14 milestone: first listening packet for the all-technique fugue.
+    # Phase14: listening packet for the all-technique fugue fixture.
     "Phase14": "p14",
+    # Phase23: keyboard-suite listening packet.
+    "Phase23": "p23",
+    # Phase24: WTC Prelude+Fugue pair listening packet.
+    "Phase24": "p24",
+    # Phase25: Goldberg-style immutable-bass variation listening packet.
+    "Phase25": "p25",
 }
 
 

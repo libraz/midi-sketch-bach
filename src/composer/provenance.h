@@ -19,7 +19,7 @@ namespace bach::composer {
 //
 // No other values are permitted. In particular there is no "Repair" or
 // "Snap" source; the composer pipeline does not run post-generation
-// pitch-modifying passes (see rebuild plan §禁止事項).
+// pitch-modifying passes.
 enum class NoteSource : std::uint8_t {
   Material = 0,
   Compose = 1,
@@ -30,9 +30,8 @@ enum class NoteSource : std::uint8_t {
 // rule traces: a downstream analyzer can read this back to explain why
 // the candidate was admitted.
 //
-// 64 bits is a soft cap on rule count for Phase 3-6. If the rule set
-// outgrows that, widen to std::array<uint64_t, N> before changing the
-// JSON schema.
+// 64 bits is a soft cap on rule count. If the rule set outgrows that,
+// widen to std::array<uint64_t, N> before changing the JSON schema.
 using RuleIdMask = std::uint64_t;
 
 enum RuleBit : std::uint8_t {
@@ -49,19 +48,19 @@ enum RuleBit : std::uint8_t {
   CrossRelationChecked = 10,
   CadenceCellCommitted = 11,
   CadenceVoiceLeadingChecked = 12,
-  // P4 (Suspension + non-chord-tone recognition).
+  // Suspension + non-chord-tone recognition.
   SuspensionPrepared = 13,
   SuspensionResolved = 14,
   CambiataDetected = 15,
   EchappeeDetected = 16,
   AnticipationDetected = 17,
   NotaCambiataDetected = 18,
-  // P5 (Episode = motif transform derived).
+  // Episode = motif transform derived.
   EpisodeMotifSourced = 19,
-  // P6 (Tonal answer + Countersubject).
+  // Tonal answer + Countersubject.
   TonalAnswerMapped = 20,
   CountersubjectActive = 21,
-  // P7 (Functional harmony: degree/inversion/doubling/spacing).
+  // Functional harmony: degree/inversion/doubling/spacing.
   // ChordToneRoman: the candidate's pitch class belongs to the
   //   triad/seventh chord declared by ChordEvent.degree+quality.
   // InversionLabel: the active ChordEvent has has_degree=true and
@@ -76,7 +75,7 @@ enum RuleBit : std::uint8_t {
   InversionLabel = 23,
   DoublingChecked = 24,
   SpacingChecked = 25,
-  // P8 (Modulation / Tonicization / Borrowed chords).
+  // Modulation / Tonicization / Borrowed chords.
   // ModulationCommitted: the candidate sits at-or-after a
   //   HarmonicPlan::ModulationEvent tick and its pitch class is
   //   diatonic in the new key area.
@@ -92,7 +91,7 @@ enum RuleBit : std::uint8_t {
   SecondaryDominantResolved = 27,
   PicardyThird = 28,
   ModalMixture = 29,
-  // P9 (Fortspinnung + Sequence + Imitation).
+  // Fortspinnung + Sequence + Imitation.
   // FortspinnungSourced: the candidate's pitch and tick came from a
   //   SequenceTemplate replay (not free-search and not Episode replay).
   //   Set by CandidateSearch on every note of a FortspinnungSpan.
@@ -106,17 +105,17 @@ enum RuleBit : std::uint8_t {
   FortspinnungSourced = 30,
   SequenceStep = 31,
   ImitationEntryMatched = 32,
-  // P10 (Invertible counterpoint at the octave).
+  // Invertible counterpoint at the octave.
   // InvertibleAt8va: the Compose candidate, against the sounding
   //   upper-adjacent voice at this tick, does NOT form a perfect 4th
   //   on a strong beat (a 4th inverts to a 5th under octave inversion),
   //   i.e. the candidate passed the invertibility check. Only set when
   //   placed_notes is available and the pair is an upper-adjacent pair.
   InvertibleAt8va = 33,
-  // P11 (Fugue development section). Each bit is stamped by
-  // CandidateSearch on the verbatim-replayed notes of the matching P11
-  // carrier intent, so the closure gate can confirm the development
-  // device actually shipped (not just that the intent was planned).
+  // Fugue development section. Each bit is stamped by CandidateSearch on
+  // the verbatim-replayed notes of the matching development carrier intent,
+  // so the provenance records that the development device actually shipped
+  // (not just that the intent was planned).
   // MiddleEntryCommitted: notes of a MiddleEntryCarrier span (subject
   //   restated in a related key V/vi/IV/ii).
   // StrettoCommitted: notes of a StrettoCarrier span (overlapping
@@ -132,7 +131,7 @@ enum RuleBit : std::uint8_t {
   PedalCommitted = 36,
   CodaCommitted = 37,
   SubjectVariantApplied = 38,
-  // P12 (Rhythm / meter / phrase). Stamped by CandidateSearch on the
+  // Rhythm / meter / phrase. Stamped by CandidateSearch on the
   // verbatim-replayed notes of a RhythmCarrier span.
   // AnacrusisActive: notes of an anacrusis (upbeat) rhythm fragment.
   // HemiolaInserted: notes of a hemiola regrouping at a cadence approach.
@@ -144,12 +143,12 @@ enum RuleBit : std::uint8_t {
   HemiolaInserted = 40,
   PhrasePeriodicityKept = 41,
   RhythmicMotifRecurrence = 42,
-  // P13 (Texture / instrument / expression). Stamped by the Composer's
+  // Texture / instrument / expression. Stamped by the Composer's
   // texture-expression post-pass (composer.cpp), not by CandidateSearch:
   // these are render-time attributes derived from Material::texture_plan,
   // applied to every emitted note after candidate placement and before
-  // validation. Each bit confirms the corresponding device actually
-  // shipped so the closure gate can assert it.
+  // validation. Each bit records that the corresponding device actually
+  // shipped.
   // VoiceRangeKept: the note's pitch lies inside the declared MIDI range
   //   for its voice (Material::texture_plan.voice_ranges). The negative
   //   counterpart is the Validator's voice_range_integrity rule.
@@ -163,7 +162,7 @@ enum RuleBit : std::uint8_t {
   ManualAssigned = 44,
   ArticulationApplied = 45,
   AffektCurveApplied = 46,
-  // P15 (Solo String Flow / BWV1007). Stamped by CandidateSearch on every
+  // Solo String Flow (BWV1007). Stamped by CandidateSearch on every
   // ArpeggioFlow carrier note.
   // ArpeggioFlowActive: the note belongs to a broken-chord arpeggio replayed
   //   from Material::arpeggio_template (the negative counterpart is the
@@ -173,6 +172,72 @@ enum RuleBit : std::uint8_t {
   //   the Validator's implicit_voice_counterpoint rule covers it.
   ArpeggioFlowActive = 47,
   ImplicitVoiceTracked = 48,
+  // Solo String Arch (BWV1004 Chaconne). Stamped by CandidateSearch on
+  // the verbatim-replayed carrier notes.
+  // GroundBassReplayed: a note of a GroundCarrier span (one statement of the
+  //   immutable ground bass; the negative counterpart is the Validator's
+  //   ground_bass_immutable rule).
+  // VariationRoleApplied: a note of a VariationCarrier span (it belongs to a
+  //   variation that carries a VariationRole).
+  // TextureDensityShift: the first note of a variation whose density tier
+  //   differs from the immediately preceding variation (confirms the
+  //   texture-density progression across variations actually shipped).
+  GroundBassReplayed = 49,
+  VariationRoleApplied = 50,
+  TextureDensityShift = 51,
+  // Organ Prelude (free sectional form). Stamped by CandidateSearch on
+  // FigurationCarrier notes.
+  // FigurationCommitted: a note of a figuration section (fast broken-chord /
+  //   scale run); negative counterpart is the Validator's
+  //   figuration_harmonic_consistency rule.
+  // CadenzaApplied: a note of a section flagged is_cadenza (free figuration
+  //   before the final cadence).
+  // PedalPreparation: a note of a section flagged is_pedal_prep (a sustained
+  //   dominant pedal preparing the following fugue).
+  FigurationCommitted = 52,
+  CadenzaApplied = 53,
+  PedalPreparation = 54,
+  // Organ Toccata (4 archetypes). Stamped by CandidateSearch on
+  // ToccataCarrier notes.
+  // ToccataArchetypeApplied: a note of a toccata section (one of the 4
+  //   archetypes Dramaticus/Perpetuus/Concertato/Sectionalis).
+  // SectionTransition: the first note of a section whose archetype-driven
+  //   section block changes (confirms the sectional layout shipped); negative
+  //   counterpart context is the Validator's toccata_archetype_compatible rule.
+  ToccataArchetypeApplied = 55,
+  SectionTransition = 56,
+  // Organ Chorale Prelude. Stamped by CandidateSearch on
+  // CantusFirmusCarrier notes.
+  // CantusFirmusReplayed: a note of the cantus firmus carrier (the fixed
+  //   chorale tune); negative counterpart is cantus_firmus_immutable.
+  // CFEmbellishmentApplied: the CF carrier replayed an embellished (ornamented)
+  //   cantus firmus rather than the plain skeleton.
+  CantusFirmusReplayed = 57,
+  CFEmbellishmentApplied = 58,
+  // Organ Passacaglia. Stamped by CandidateSearch.
+  // PassacagliaGroundReplayed: a note of the immutable 8-bar passacaglia ground
+  //   (negative counterpart: passacaglia_ground_immutable).
+  // VariationApplied: a note of a passacaglia variation block.
+  // ClimaxPlaced: a note of a variation block flagged is_climax (the dynamic /
+  //   registral peak placed mid- and end-piece).
+  PassacagliaGroundReplayed = 59,
+  VariationApplied = 60,
+  ClimaxPlaced = 61,
+  // Organ Trio Sonata. Stamped by CandidateSearch on every note of a
+  // TrioVoiceCarrier span.
+  // TrioVoiceIndependent: a note of one of the (up to three) independent trio
+  //   voices. The Validator's voice_independence_threshold rule collects every
+  //   note carrying this bit, groups them by voice, and soft-fails (MusicalFail)
+  //   when the pairwise voice-independence score falls below 0.6.
+  TrioVoiceIndependent = 62,
+  // Organ Fantasia. Stamped by CandidateSearch on every note of a
+  // FantasiaCarrier span.
+  // FantasiaSectionContrast: a note of one of the (>= 2) contrasting fantasia
+  //   sections. The Validator's section_contrast_required rule collects every
+  //   note carrying this bit, groups them into sections by window, and soft-fails
+  //   (MusicalFail) when any pair of ADJACENT sections is not sufficiently
+  //   contrasting (near-identical note density AND mean register).
+  FantasiaSectionContrast = 63,
 };
 
 // Per-note provenance record.

@@ -1,9 +1,9 @@
-// P15 (Solo String Flow / BWV1007) tests.
+// Solo String Flow (BWV1007) tests.
 //
 // Covers the two halves of the Flow foundation:
 //   1. CandidateSearch replays Material::arpeggio_template verbatim under an
 //      ArpeggioFlow span, stamping ArpeggioFlowActive + ImplicitVoiceTracked
-//      on every note (the closure-gate bits).
+//      on every note.
 //   2. The Validator's two Flow rules — implicit_voice_counterpoint (each
 //      register-defined implicit-voice stream, per-cell min/max, is
 //      melodically valid) and arpeggio_no_parallel_perfect (bass / top
@@ -220,8 +220,7 @@ TEST(ArpeggioFlowTest, ParallelPerfectSilentWhenFramedIntervalChanges) {
 
 // The BWV1007 arpeggio fixture must run through the full Composer cleanly for
 // every seed family (seed%4 selects the figure ordering): no validator
-// failure, single voice, and both P15 bits stamped on every note (the gate-2
-// / gate-4 closure conditions).
+// failure, single voice, and both Flow bits stamped on every note.
 TEST(ArpeggioFlowTest, Phase15FixtureValidatesCleanAndStampsFlowBits) {
   for (int seed : {0, 1, 2, 3, 4, 5}) {
     const HarnessFixture fx = buildHarnessFixture(HarnessPhase::Phase15, seed);

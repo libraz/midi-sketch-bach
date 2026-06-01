@@ -86,15 +86,15 @@ VoiceCursor seedCursor(VoiceId voice, Tick span_start, const std::vector<NoteEve
   return c;
 }
 
-// P13 texture / instrument / expression post-pass.
+// Texture / instrument / expression post-pass.
 //
 // Runs after candidate placement and sorting, before validation. It reads
 // the render-time attributes in Material::texture_plan and (a) replaces
 // each note's velocity with an Affekt-driven phrase-arch value and (b) ORs
-// the four P13 provenance bits onto the matching notes. It never changes a
-// note's pitch or onset, so carrier replay and scored content are
-// unaffected; a default-constructed TexturePlan makes the whole pass a
-// no-op (Phase 3-12 fixtures are untouched).
+// the four texture/expression provenance bits onto the matching notes. It
+// never changes a note's pitch or onset, so carrier replay and scored content
+// are unaffected; a default-constructed TexturePlan makes the whole pass a
+// no-op (fixtures without a texture plan are untouched).
 void applyTextureExpression(std::vector<NoteEvent>& notes, std::vector<NoteProvenance>& provenance,
                             const PostPassContext& ctx) {
   const TexturePlan& plan = ctx.material.texture_plan;
@@ -154,7 +154,7 @@ void applyTextureExpression(std::vector<NoteEvent>& notes, std::vector<NoteProve
   }
 }
 
-// P14: non-chord-tone figure detection post-pass. Groups the final
+// Non-chord-tone figure detection post-pass. Groups the final
 // sorted notes by voice, runs the four nct_detector figures on each
 // voice's time-ordered list, and ORs the matching RuleBit onto the
 // NCT note via an index map back to the global note array. Pure: never
@@ -334,8 +334,8 @@ ComposeResult Composer::run(const Material& material, const HarmonicPlan& harmon
   // Each obeys the PostPass contract (no count/order/pitch/onset change;
   // velocity + provenance bits only), so provenance stays index-aligned with
   // notes. Adding a future pass is one array entry.
-  //   [0] P13: texture / instrument / expression (velocity curve + bits).
-  //   [1] P14: non-chord-tone figure bit stamping on the sorted note list.
+  //   [0] texture / instrument / expression (velocity curve + bits).
+  //   [1] non-chord-tone figure bit stamping on the sorted note list.
   static constexpr PostPass kPostPasses[] = {applyTextureExpression, applyNctDetection};
   const PostPassContext post_ctx{material, harmonic_plan};
   for (PostPass pass : kPostPasses) {

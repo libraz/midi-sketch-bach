@@ -11,8 +11,7 @@
 namespace bach::composer {
 
 // Validator outcome enum. Three flat states; no "warn" or "accepted with
-// repair" middle case (the rebuild plan explicitly forbids repair-flag
-// acceptance).
+// repair" middle case (repair-flag acceptance is not a permitted outcome).
 enum class ValidationStatus : std::uint8_t {
   Ok = 0,
   // Span failed; CandidateSearch must re-generate within the span.

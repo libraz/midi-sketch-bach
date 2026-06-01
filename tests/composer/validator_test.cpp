@@ -734,7 +734,7 @@ TEST(ValidatorTest, Sus2_3RequiresUpwardStep) {
   EXPECT_FALSE(hasRule(r, "suspension_resolution_step_down"));
 }
 
-// P5 Episode motif-derivation tests. Subject = C4-D4-E4-F4 in voice 0;
+// Episode motif-derivation tests. Subject = C4-D4-E4-F4 in voice 0;
 // Episode span in voice 1 is expected to replay one of the five
 // transforms. Validator must accept byte-matching notes and fail on
 // any mismatch.
@@ -924,7 +924,7 @@ TEST(ValidatorTest, EpisodeMotifDerivedMissingNoteFails) {
   EXPECT_TRUE(hasRule(r, "episode_motif_derived"));
 }
 
-// P6 Tonal answer + Countersubject Validator tests.
+// Tonal answer + Countersubject Validator tests.
 
 TEST(ValidatorTest, TonalAnswerDominantMappingPassesForTonicHeadToDominantPc) {
   Material material;
@@ -1495,8 +1495,8 @@ TEST(ValidatorTest, SecondaryDominantResolutionPassesForCleanResolution) {
 }
 
 TEST(ValidatorTest, SecondaryDominantResolutionAllowsFreeVoiceLeading) {
-  // V/V → V where F# does not rise by step. Plan §5 P8 defines the
-  // rule as degree-pairing only; voice-leading details (LT rise) are
+  // V/V → V where F# does not rise by step. The
+  // rule is degree-pairing only; voice-leading details (LT rise) are
   // not part of the failure condition. The rule should pass when the
   // resolution chord is correctly identified as V.
   const Tick beat = kTicksPerBeat;

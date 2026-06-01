@@ -52,6 +52,20 @@ std::array<std::uint8_t, 3> triadFor(const ChordEvent& chord) {
   };
 }
 
+// P18 (Organ Toccata). Self-contained (character, archetype) compatibility
+// predicate for the toccata_archetype_compatible rule. This does NOT reuse the
+// legacy isCharacterFormCompatible (which keys off the legacy FormType). The
+// only forbidden pair is Noble x Dramaticus: the Dramaticus archetype is the
+// prototypical dramatic toccata (BWV565-style free, virtuosic opening),
+// antithetical to the dignified Noble affect (CLAUDE.md "Noble x Toccata
+// forbidden"). The switch is exhaustive and extensible: add cases to forbid
+// further pairs.
+bool isToccataPairCompatible(SubjectCharacter character, ToccataArchetype archetype) {
+  if (character == SubjectCharacter::Noble && archetype == ToccataArchetype::Dramaticus)
+    return false;
+  return true;
+}
+
 // 7th-chord arithmetic lives in composer/chord_voicing.h so spacing,
 // voicing helpers, and downstream P8 modulation code share one source
 // of truth. We import the names below into this translation unit so
@@ -1272,7 +1286,7 @@ ValidationReport Validator::validate(const std::vector<NoteEvent>& notes,
     }
   }
 
-  // P11 development-section rules.
+  // Development-section rules.
   //
   // middle_entry_in_related_key: every MiddleEntryDecl must declare a
   //   related key (V / vi / IV / ii of the home tonic) AND every note
@@ -1349,7 +1363,7 @@ ValidationReport Validator::validate(const std::vector<NoteEvent>& notes,
     }
   }
 
-  // P12 rhythm / meter / phrase rules.
+  // Rhythm / meter / phrase rules.
   //
   // phrase_periodicity_4_or_8_bar: consecutive declared phrase starts must
   //   differ by exactly 4 or 8 bars (regular Baroque phrase grid). Skipped
@@ -1420,7 +1434,7 @@ ValidationReport Validator::validate(const std::vector<NoteEvent>& notes,
     }
   }
 
-  // P13 texture / instrument / expression rules.
+  // Texture / instrument / expression rules.
   //
   // voice_range_integrity: every note whose voice has a declared MIDI range
   //   (Material::texture_plan.voice_ranges) must lie inside [lo, hi]. A note
@@ -1478,7 +1492,7 @@ ValidationReport Validator::validate(const std::vector<NoteEvent>& notes,
     }
   }
 
-  // P15 (Solo String Flow / BWV1007): implicit-voice rules over the
+  // Solo String Flow (BWV1007): implicit-voice rules over the
   // ArpeggioFlow line. The figure is regular, so collecting every
   // ArpeggioFlowActive note in onset order and partitioning into contiguous
   // cells of arpeggio_template.group_size reconstructs the implicit voices a
@@ -1567,6 +1581,455 @@ ValidationReport Validator::validate(const std::vector<NoteEvent>& notes,
       if (!parallel_ok) {
         ValidationFailure failure;
         failure.rule_id = "arpeggio_no_parallel_perfect";
+        failure.kind = FailKind::MusicalFail;
+        report.failures.push_back(failure);
+      }
+    }
+  }
+
+  // Solo String Arch (BWV1004 Chaconne): ground-bass and variation-role
+  // structural rules.
+  //
+  // ground_bass_immutable: the immutable ground bass (material.ground_bass) is
+  // the harmonic skeleton of the Chaconne and must be replayed unchanged on
+  // every cycle. Every note stamped GroundBassReplayed belongs to one
+  // statement of the ground; collected in onset order they form a flat run of
+  // whole cycles. Partitioning that run into contiguous cycles of n =
+  // ground_bass.size() and comparing each slot's pitch against the canonical
+  // ground catches any altered, transposed, or reordered restatement. The rule
+  // is inert when either the canonical ground or the stamped run is empty
+  // (Phase 3-15 fixtures carry no ground bass).
+  {
+    std::vector<std::size_t> ground_indices;
+    for (std::size_t i = 0; i < notes.size(); ++i) {
+      if (i < provenance.size() && hasRuleBit(provenance, i, RuleBit::GroundBassReplayed))
+        ground_indices.push_back(i);
+    }
+    std::sort(ground_indices.begin(), ground_indices.end(), [&](std::size_t a, std::size_t b) {
+      return notes[a].start_tick < notes[b].start_tick;
+    });
+
+    const std::size_t n = material.ground_bass.size();
+    if (n > 0 && !ground_indices.empty()) {
+      // The replayed run must be a positive whole number of cycles of length n.
+      bool ground_ok = (ground_indices.size() % n == 0);
+      if (ground_ok) {
+        const std::size_t cycles = ground_indices.size() / n;
+        for (std::size_t c = 0; c < cycles && ground_ok; ++c) {
+          for (std::size_t k = 0; k < n; ++k) {
+            if (notes[ground_indices[c * n + k]].pitch != material.ground_bass[k].pitch) {
+              ground_ok = false;
+              break;
+            }
+          }
+        }
+      }
+      if (!ground_ok) {
+        ValidationFailure failure;
+        failure.rule_id = "ground_bass_immutable";
+        failure.kind = FailKind::StructuralFail;
+        report.failures.push_back(failure);
+      }
+    }
+  }
+
+  // Organ Passacaglia: passacaglia_ground_immutable. Same shape as
+  // ground_bass_immutable above, keyed on the passacaglia ground + bit. The
+  // immutable
+  // 8-bar passacaglia ground (material.passacaglia_ground) must be replayed
+  // unchanged on every cycle. Every note stamped PassacagliaGroundReplayed
+  // belongs to one statement of the ground; collected in onset order they form a
+  // flat run of whole cycles. Partitioning that run into contiguous cycles of n =
+  // passacaglia_ground.size() and comparing each slot's pitch against the
+  // canonical ground catches any altered, transposed, or reordered restatement.
+  // The rule is inert when either the canonical ground or the stamped run is
+  // empty (Phase 3-19 fixtures carry no passacaglia ground).
+  {
+    std::vector<std::size_t> ground_indices;
+    for (std::size_t i = 0; i < notes.size(); ++i) {
+      if (i < provenance.size() && hasRuleBit(provenance, i, RuleBit::PassacagliaGroundReplayed))
+        ground_indices.push_back(i);
+    }
+    std::sort(ground_indices.begin(), ground_indices.end(), [&](std::size_t a, std::size_t b) {
+      return notes[a].start_tick < notes[b].start_tick;
+    });
+
+    const std::size_t n = material.passacaglia_ground.size();
+    if (n > 0 && !ground_indices.empty()) {
+      // The replayed run must be a positive whole number of cycles of length n.
+      bool ground_ok = (ground_indices.size() % n == 0);
+      if (ground_ok) {
+        const std::size_t cycles = ground_indices.size() / n;
+        for (std::size_t c = 0; c < cycles && ground_ok; ++c) {
+          for (std::size_t k = 0; k < n; ++k) {
+            if (notes[ground_indices[c * n + k]].pitch != material.passacaglia_ground[k].pitch) {
+              ground_ok = false;
+              break;
+            }
+          }
+        }
+      }
+      if (!ground_ok) {
+        ValidationFailure failure;
+        failure.rule_id = "passacaglia_ground_immutable";
+        failure.kind = FailKind::StructuralFail;
+        report.failures.push_back(failure);
+      }
+    }
+  }
+
+  // variation_role_ornament_constraint: a Ground-role variation states the
+  // ground bass plainly and must stay un-ornamented — no note may subdivide
+  // below the beat. Any note shorter than a quarter (kTicksPerBeat) inside a
+  // Ground-role VariationDecl is an illegal ornamental subdivision. Read from
+  // the material decls directly (mirroring the other Material-decl rules); one
+  // flagged note is enough to fail the span. Inert when material.variations is
+  // empty (Phase 3-15 fixtures declare no variations).
+  for (const VariationDecl& var : material.variations) {
+    if (var.role != VariationRole::Ground)
+      continue;
+    bool ornamented = false;
+    for (const MaterialNote& note : var.notes) {
+      if (note.duration < kTicksPerBeat) {
+        ornamented = true;
+        break;
+      }
+    }
+    if (ornamented) {
+      ValidationFailure failure;
+      failure.rule_id = "variation_role_ornament_constraint";
+      failure.kind = FailKind::MusicalFail;
+      report.failures.push_back(failure);
+      break;
+    }
+  }
+
+  // figuration_harmonic_consistency: a free-form organ-prelude figuration line
+  // (FigurationCarrier) outlines the underlying harmony. The figuration is
+  // anchored to the harmony at each bar downbeat: the note that opens a bar must
+  // be a chord tone of that bar's chord. Within the bar the line is free to run
+  // scalewise (passing / neighbour tones are idiomatic), so only the bar
+  // downbeat is constrained. Pedal-point notes (PedalPreparation) are exempt: a
+  // pedal is by definition a single sustained pitch held against changing
+  // harmony. For each note stamped FigurationCommitted (and not PedalPreparation)
+  // whose onset lands on a bar downbeat (start_tick % kTicksPerBar == 0), resolve
+  // the active ChordEvent (latest plan.chords entry with start_tick <= the note's
+  // onset) and reuse the same chord-tone arithmetic the P7 rules use: triadFor
+  // for the root/third/fifth and hasSeventh/seventhOffset for the seventh. If any
+  // bar-downbeat figuration note's pitch class is not a chord tone, push ONE
+  // MusicalFail. The rule is inert when no FigurationCommitted note exists
+  // (Phase 3-16 fixtures declare no figuration sections).
+  {
+    bool figuration_inconsistent = false;
+    for (std::size_t i = 0; i < notes.size() && !figuration_inconsistent; ++i) {
+      if (!hasRuleBit(provenance, i, RuleBit::FigurationCommitted))
+        continue;
+      if (hasRuleBit(provenance, i, RuleBit::PedalPreparation))
+        continue;  // pedal points are held against changing harmony.
+      const auto& note = notes[i];
+      if (note.start_tick % kTicksPerBar != 0)
+        continue;  // only the bar downbeat is harmonically anchored.
+      const auto& chord = activeChord(harmonic_plan, note.start_tick);
+      const auto triad = triadFor(chord);
+      const std::uint8_t pc = static_cast<std::uint8_t>(note.pitch % 12);
+      bool is_chord_tone = (pc == triad[0] || pc == triad[1] || pc == triad[2]);
+      if (!is_chord_tone && hasSeventh(chord.quality)) {
+        const std::uint8_t seventh_pc =
+            static_cast<std::uint8_t>((chord.root_pc + seventhOffset(chord.quality)) % 12);
+        is_chord_tone = (pc == seventh_pc);
+      }
+      if (!is_chord_tone)
+        figuration_inconsistent = true;
+    }
+    if (figuration_inconsistent) {
+      ValidationFailure failure;
+      failure.rule_id = "figuration_harmonic_consistency";
+      failure.kind = FailKind::MusicalFail;
+      report.failures.push_back(failure);
+    }
+  }
+
+  // toccata_archetype_compatible: an organ toccata's piece-level design pairs a
+  // SubjectCharacter affect with one of the four ToccataArchetypes. Some pairs
+  // are musically antithetical (see isToccataPairCompatible: Noble x Dramaticus
+  // is forbidden). For each ToccataSection in material.toccata_sections, the
+  // (character, archetype) pair must be compatible. If any section is an
+  // incompatible pair, push ONE MusicalFail. The rule is inert when
+  // material.toccata_sections is empty (Phase 3-17 fixtures declare none).
+  {
+    bool toccata_incompatible = false;
+    for (const auto& section : material.toccata_sections) {
+      if (!isToccataPairCompatible(section.character, section.archetype)) {
+        toccata_incompatible = true;
+        break;
+      }
+    }
+    if (toccata_incompatible) {
+      ValidationFailure failure;
+      failure.rule_id = "toccata_archetype_compatible";
+      failure.kind = FailKind::MusicalFail;
+      report.failures.push_back(failure);
+    }
+  }
+
+  // cantus_firmus_immutable: the cantus firmus skeleton (the fixed chorale tune,
+  // material.cantus_firmus) is the structural backbone of the chorale prelude and
+  // is immutable (CLAUDE.md). A CantusFirmusCarrier may replay an embellished
+  // line, but each bar's DOWNBEAT tone must still equal the skeleton tone for
+  // that bar. Gather every note stamped CantusFirmusReplayed in onset order; for
+  // each whose onset lands on a bar downbeat (start_tick % kTicksPerBar == 0),
+  // look up the expected skeleton tone material.cantus_firmus[bar_index] where
+  // bar_index = start_tick / kTicksPerBar (bounds-guarded). If the replayed
+  // downbeat pitch differs from the skeleton pitch, push ONE StructuralFail.
+  // Off-downbeat embellishment notes are unconstrained. The rule is inert when
+  // material.cantus_firmus is empty or no CantusFirmusReplayed note exists
+  // (Phase 3-18 fixtures declare no cantus firmus).
+  {
+    std::vector<std::size_t> cf_indices;
+    for (std::size_t i = 0; i < notes.size(); ++i) {
+      if (i < provenance.size() && hasRuleBit(provenance, i, RuleBit::CantusFirmusReplayed))
+        cf_indices.push_back(i);
+    }
+    std::sort(cf_indices.begin(), cf_indices.end(), [&](std::size_t a, std::size_t b) {
+      return notes[a].start_tick < notes[b].start_tick;
+    });
+
+    if (!material.cantus_firmus.empty() && !cf_indices.empty()) {
+      bool cf_altered = false;
+      for (std::size_t idx : cf_indices) {
+        const auto& note = notes[idx];
+        if (note.start_tick % kTicksPerBar != 0)
+          continue;  // only bar downbeats are constrained.
+        const std::size_t bar_index = static_cast<std::size_t>(note.start_tick / kTicksPerBar);
+        if (bar_index >= material.cantus_firmus.size())
+          continue;  // out of skeleton range; unconstrained.
+        if (note.pitch != material.cantus_firmus[bar_index].pitch) {
+          cf_altered = true;
+          break;
+        }
+      }
+      if (cf_altered) {
+        ValidationFailure failure;
+        failure.rule_id = "cantus_firmus_immutable";
+        failure.kind = FailKind::StructuralFail;
+        report.failures.push_back(failure);
+      }
+    }
+  }
+
+  // Organ Trio Sonata: voice_independence_threshold. A trio sonata's
+  // defining technique is THREE independent voices (RH = Great, LH = Swell,
+  // Pedal). This rule operates ONLY on notes carrying the TrioVoiceIndependent
+  // bit; it groups them by voice and measures the pairwise voice independence of
+  // the (up to three) trio voices, soft-failing (MusicalFail, per the CLAUDE.md
+  // "voice independence >= 0.6" / soft-penalty convention) below 0.6.
+  //
+  // Self-contained independence metric (does NOT call into src/analysis/):
+  // Build the sorted set of all distinct onset ticks across both voices of a
+  // pair. Walk adjacent onset boundaries; at each boundary t (after the first),
+  // each voice is in one of three motion states relative to the previous
+  // boundary: it has a NEW onset at t (it moved/re-articulated) or it does NOT
+  // (it is sustaining / silent). A boundary is counted as INDEPENDENT when the
+  // two voices differ in motion direction or rhythm:
+  //   (a) rhythmic independence — exactly one voice has a new onset at t (the
+  //       other sustains): oblique motion / differing rhythm; OR
+  //   (b) both voices have a new onset at t but their pitch motions (sign of the
+  //       interval from each voice's previous sounding pitch) are NOT the same
+  //       non-zero direction — i.e. contrary, oblique (one static), or one moves
+  //       while the other repeats. Only genuine PARALLEL/SIMILAR motion (both
+  //       move the same non-zero direction) counts as dependent.
+  // The pair's independence score = independent_boundaries / total_boundaries;
+  // the rule's score is the mean across all voice pairs. Inert when fewer than
+  // two trio voices are present. Deterministic and pure.
+  {
+    std::vector<VoiceId> trio_voice_ids;
+    for (std::size_t i = 0; i < notes.size(); ++i) {
+      if (!hasRuleBit(provenance, i, RuleBit::TrioVoiceIndependent))
+        continue;
+      if (std::find(trio_voice_ids.begin(), trio_voice_ids.end(), notes[i].voice) ==
+          trio_voice_ids.end()) {
+        trio_voice_ids.push_back(notes[i].voice);
+      }
+    }
+    if (trio_voice_ids.size() >= 2) {
+      std::sort(trio_voice_ids.begin(), trio_voice_ids.end());
+      // Per-voice onset->pitch maps, restricted to TrioVoiceIndependent notes.
+      // Returns true and writes the sounding pitch (latest trio onset <= `at`)
+      // into `out_pitch`, or false when `voice` has no trio note sounding at
+      // `at`. A `bool found` flag is used instead of a sentinel because `Tick`
+      // is unsigned: a `-1` seed would wrap to 0xFFFFFFFF and never be exceeded
+      // by a real start_tick, defeating the "latest onset" comparison.
+      auto onsetPitch = [&](VoiceId voice, Tick at, int* out_pitch) -> bool {
+        bool found = false;
+        Tick best = 0;
+        int pitch = -1;
+        for (std::size_t i = 0; i < notes.size(); ++i) {
+          if (notes[i].voice != voice)
+            continue;
+          if (!hasRuleBit(provenance, i, RuleBit::TrioVoiceIndependent))
+            continue;
+          if (notes[i].start_tick <= at && (!found || notes[i].start_tick > best)) {
+            found = true;
+            best = notes[i].start_tick;
+            pitch = static_cast<int>(notes[i].pitch);
+          }
+        }
+        if (found && out_pitch != nullptr)
+          *out_pitch = pitch;
+        return found;
+      };
+      auto hasOnsetAt = [&](VoiceId voice, Tick at) -> bool {
+        for (std::size_t i = 0; i < notes.size(); ++i) {
+          if (notes[i].voice != voice)
+            continue;
+          if (!hasRuleBit(provenance, i, RuleBit::TrioVoiceIndependent))
+            continue;
+          if (notes[i].start_tick == at)
+            return true;
+        }
+        return false;
+      };
+
+      double independence_sum = 0.0;
+      int pair_count = 0;
+      for (std::size_t a = 0; a < trio_voice_ids.size(); ++a) {
+        for (std::size_t b = a + 1; b < trio_voice_ids.size(); ++b) {
+          const VoiceId va = trio_voice_ids[a];
+          const VoiceId vb = trio_voice_ids[b];
+          // Distinct onset ticks across both voices, sorted ascending.
+          std::vector<Tick> boundaries;
+          for (std::size_t i = 0; i < notes.size(); ++i) {
+            if (!hasRuleBit(provenance, i, RuleBit::TrioVoiceIndependent))
+              continue;
+            if (notes[i].voice != va && notes[i].voice != vb)
+              continue;
+            if (std::find(boundaries.begin(), boundaries.end(), notes[i].start_tick) ==
+                boundaries.end()) {
+              boundaries.push_back(notes[i].start_tick);
+            }
+          }
+          std::sort(boundaries.begin(), boundaries.end());
+          if (boundaries.size() < 2) {
+            // Not enough motion to assess; treat as fully independent (no drag).
+            independence_sum += 1.0;
+            ++pair_count;
+            continue;
+          }
+          int independent = 0;
+          int total = 0;
+          for (std::size_t k = 1; k < boundaries.size(); ++k) {
+            const Tick t = boundaries[k];
+            const Tick prev = boundaries[k - 1];
+            const bool a_onset = hasOnsetAt(va, t);
+            const bool b_onset = hasOnsetAt(vb, t);
+            ++total;
+            if (a_onset != b_onset) {
+              // Exactly one voice re-articulated: rhythmic independence.
+              ++independent;
+              continue;
+            }
+            // Both re-articulated: compare pitch-motion directions.
+            int a_now = 0, a_prev = 0, b_now = 0, b_prev = 0;
+            const bool a_known = onsetPitch(va, t, &a_now) && onsetPitch(va, prev, &a_prev);
+            const bool b_known = onsetPitch(vb, t, &b_now) && onsetPitch(vb, prev, &b_prev);
+            if (!a_known || !b_known) {
+              // No prior sounding pitch for one voice: cannot establish genuine
+              // same-direction motion, so this boundary is not dependent.
+              ++independent;
+              continue;
+            }
+            const int a_dir = (a_now > a_prev) ? 1 : (a_now < a_prev ? -1 : 0);
+            const int b_dir = (b_now > b_prev) ? 1 : (b_now < b_prev ? -1 : 0);
+            // Dependent only when both move the SAME non-zero direction
+            // (parallel / similar motion). Otherwise independent.
+            if (!(a_dir != 0 && a_dir == b_dir)) {
+              ++independent;
+            }
+          }
+          const double score =
+              (total > 0) ? static_cast<double>(independent) / static_cast<double>(total) : 1.0;
+          independence_sum += score;
+          ++pair_count;
+        }
+      }
+      const double mean_independence =
+          (pair_count > 0) ? independence_sum / static_cast<double>(pair_count) : 1.0;
+      if (mean_independence < 0.6) {
+        ValidationFailure failure;
+        failure.rule_id = "voice_independence_threshold";
+        failure.kind = FailKind::MusicalFail;
+        report.failures.push_back(failure);
+      }
+    }
+  }
+
+  // Organ Fantasia: section_contrast_required. A fantasia's defining
+  // technique is CONTRASTING sections (free / fugal / toccata-like / chordal).
+  // This rule operates ONLY on notes carrying the FantasiaSectionContrast bit.
+  // It walks adjacent FantasiaSection windows (material.fantasia_sections, in
+  // declaration order) and, for each section, measures two self-contained
+  // traits from the emitted FantasiaSectionContrast notes whose onset falls in
+  // [start_tick, end_tick):
+  //   - density: notes per bar = note_count * kTicksPerBar / window_ticks,
+  //              rounded down (the realized notes-per-bar tier).
+  //   - mean register: integer mean MIDI pitch of the section's notes.
+  // CRITERION: each ADJACENT pair of sections must differ in EITHER density
+  // (|density_a - density_b| >= kMinDensityMargin = 2 notes/bar) OR mean
+  // register (|register_a - register_b| >= kMinRegisterMargin = 5 semitones,
+  // a perfect fourth). A pair that is near-identical in BOTH (density within 1
+  // AND register within 4) is NOT contrasting and pushes ONE MusicalFail (SOFT).
+  // Inert when fewer than 2 sections carry the bit. Deterministic and pure;
+  // no src/analysis/ calls. Heeds the sentinel lesson: running maxima are not
+  // seeded with -1 on unsigned types (note counts / ticks accumulate from 0).
+  {
+    constexpr int kMinDensityMargin = 2;   // notes/bar difference for contrast.
+    constexpr int kMinRegisterMargin = 5;  // semitone difference for contrast.
+    struct SectionStat {
+      int density = 0;        // notes per bar (realized).
+      int mean_register = 0;  // mean MIDI pitch.
+      int note_count = 0;
+    };
+    std::vector<SectionStat> stats;
+    stats.reserve(material.fantasia_sections.size());
+    for (const auto& section : material.fantasia_sections) {
+      int note_count = 0;
+      long pitch_sum = 0;
+      for (std::size_t i = 0; i < notes.size(); ++i) {
+        if (!hasRuleBit(provenance, i, RuleBit::FantasiaSectionContrast))
+          continue;
+        if (notes[i].start_tick < section.start_tick || notes[i].start_tick >= section.end_tick)
+          continue;
+        ++note_count;
+        pitch_sum += static_cast<long>(notes[i].pitch);
+      }
+      if (note_count == 0)
+        continue;  // no realized notes for this section window.
+      const Tick window_ticks =
+          (section.end_tick > section.start_tick) ? (section.end_tick - section.start_tick) : 0;
+      SectionStat stat;
+      stat.note_count = note_count;
+      stat.density = (window_ticks > 0)
+                         ? static_cast<int>(static_cast<long>(note_count) * kTicksPerBar /
+                                            static_cast<long>(window_ticks))
+                         : 0;
+      stat.mean_register = static_cast<int>(pitch_sum / note_count);
+      stats.push_back(stat);
+    }
+    if (stats.size() >= 2) {
+      bool uncontrasting_pair = false;
+      for (std::size_t i = 1; i < stats.size(); ++i) {
+        const int density_diff = std::abs(stats[i].density - stats[i - 1].density);
+        const int register_diff = std::abs(stats[i].mean_register - stats[i - 1].mean_register);
+        const bool contrasts =
+            (density_diff >= kMinDensityMargin) || (register_diff >= kMinRegisterMargin);
+        if (!contrasts) {
+          uncontrasting_pair = true;
+          break;
+        }
+      }
+      if (uncontrasting_pair) {
+        ValidationFailure failure;
+        failure.rule_id = "section_contrast_required";
         failure.kind = FailKind::MusicalFail;
         report.failures.push_back(failure);
       }
