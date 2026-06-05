@@ -67,16 +67,6 @@ std::string buildEventsJson(const GeneratorResult& result, const GeneratorConfig
 
 GeneratorResult generate(const GeneratorConfig& config);
 
-/// @brief Auto-detect the default instrument for a given form type.
-/// @param form The form type.
-/// @return Default instrument appropriate for the form.
-InstrumentType defaultInstrumentForForm(FormType form);
-
-/// @brief Parse an InstrumentType from a string.
-/// @param str String such as "organ", "harpsichord", "piano", "violin", "cello", "guitar".
-/// @return Parsed InstrumentType. Defaults to InstrumentType::Organ on unrecognized input.
-InstrumentType instrumentTypeFromString(const std::string& str);
-
 }  // namespace bach
 
 #endif  // BACH_GENERATOR_H

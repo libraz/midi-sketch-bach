@@ -357,6 +357,16 @@ enum class InstrumentType : uint8_t { Organ, Harpsichord, Piano, Violin, Cello, 
 /// @brief Convert InstrumentType to human-readable string.
 const char* instrumentTypeToString(InstrumentType inst);
 
+/// @brief Auto-detect the default instrument for a given form type.
+/// @param form The form type.
+/// @return Default instrument appropriate for the form.
+InstrumentType defaultInstrumentForForm(FormType form);
+
+/// @brief Parse an InstrumentType from a string.
+/// @param str String such as "organ", "harpsichord", "piano", "violin", "cello", "guitar".
+/// @return Parsed InstrumentType. Defaults to InstrumentType::Organ on unrecognized input.
+InstrumentType instrumentTypeFromString(const std::string& str);
+
 /// Scale type for pitch generation.
 enum class ScaleType : uint8_t {
   Major,
@@ -446,7 +456,7 @@ struct NoteEvent {
 /// channel-agnostic counterpart to MidiEvent: the channel is taken from the
 /// owning Track at write time, so the same plan can be cloned across voices.
 struct CcEvent {
-  Tick tick = 0;            ///< Absolute tick position of the controller change.
+  Tick tick = 0;                ///< Absolute tick position of the controller change.
   std::uint8_t controller = 0;  ///< MIDI controller number (e.g. 7 = volume, 11 = expression).
   std::uint8_t value = 0;       ///< Controller value (0-127).
 };

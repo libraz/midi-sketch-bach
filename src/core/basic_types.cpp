@@ -226,6 +226,46 @@ const char* instrumentTypeToString(InstrumentType inst) {
   return "unknown";
 }
 
+InstrumentType defaultInstrumentForForm(FormType form) {
+  switch (form) {
+    case FormType::Fugue:
+    case FormType::PreludeAndFugue:
+    case FormType::TrioSonata:
+    case FormType::ChoralePrelude:
+    case FormType::ToccataAndFugue:
+    case FormType::Passacaglia:
+    case FormType::FantasiaAndFugue:
+      return InstrumentType::Organ;
+
+    case FormType::CelloPrelude:
+      return InstrumentType::Cello;
+
+    case FormType::Chaconne:
+      return InstrumentType::Violin;
+
+    case FormType::GoldbergVariations:
+      return InstrumentType::Harpsichord;
+  }
+
+  return InstrumentType::Organ;
+}
+
+InstrumentType instrumentTypeFromString(const std::string& str) {
+  if (str == "organ")
+    return InstrumentType::Organ;
+  if (str == "harpsichord")
+    return InstrumentType::Harpsichord;
+  if (str == "piano")
+    return InstrumentType::Piano;
+  if (str == "violin")
+    return InstrumentType::Violin;
+  if (str == "cello")
+    return InstrumentType::Cello;
+  if (str == "guitar")
+    return InstrumentType::Guitar;
+  return InstrumentType::Organ;
+}
+
 const char* durationScaleToString(DurationScale scale) {
   switch (scale) {
     case DurationScale::Short:
