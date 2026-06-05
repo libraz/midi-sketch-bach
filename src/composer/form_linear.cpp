@@ -514,7 +514,7 @@ HarnessFixture buildTrioSonataForm(const ResolvedRequest& req) {
   // interval.
   TrioVoiceLine v2;
   v2.voice = 2;
-  v2.manual = 3;  // Pedal (low register).
+  v2.manual = 3;                   // Pedal (low register).
   constexpr int kPedalFloor = 41;  // F2: roots live in [F2, F3), fifths a 4th below.
   constexpr int kPedalCeil = 53;   // F3.
   int prev_root = 48;              // seed near C3.

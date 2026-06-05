@@ -243,8 +243,10 @@ void appendVariationCycle(std::vector<MaterialNote>& notes, Tick block_start,
       // whole octaves keeps it a chord tone (consonance preserved) while
       // pinning the tessitura to the variation band -- and keeps the realized
       // pitch inside the MIDI range.
-      while (fit > center + 12) fit -= 12;
-      while (fit < center - 12) fit += 12;
+      while (fit > center + 12)
+        fit -= 12;
+      while (fit < center - 12)
+        fit += 12;
       anchor_deg.push_back(midiToDegree(fit, mode));
       running = fit;
     }

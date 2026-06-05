@@ -353,7 +353,8 @@ void appendConsonantBar(std::vector<MaterialNote>& dst, int bar, const ChordSpec
         for (int dir = (radius == 0 ? 0 : -1); dir <= 1; dir += 2) {
           const int cand = target + dir * radius;
           if (cand < base_midi || cand > ceil_midi || !is_triad(cand)) {
-            if (radius == 0) break;
+            if (radius == 0)
+              break;
             continue;
           }
           if (nearest_triad < 0) {
@@ -363,13 +364,14 @@ void appendConsonantBar(std::vector<MaterialNote>& dst, int bar, const ChordSpec
             consonant_triad = cand;
             break;
           }
-          if (radius == 0) break;
+          if (radius == 0)
+            break;
         }
       }
-      beat_pitch[0] = consonant_triad >= 0
-                          ? consonant_triad
-                          : (nearest_triad >= 0 ? nearest_triad
-                                                : std::clamp(target, base_midi, ceil_midi));
+      beat_pitch[0] =
+          consonant_triad >= 0
+              ? consonant_triad
+              : (nearest_triad >= 0 ? nearest_triad : std::clamp(target, base_midi, ceil_midi));
     } else {
       beat_pitch[static_cast<std::size_t>(beat)] =
           snapConsonant(target, mode, base_midi, ceil_midi, concurrent);

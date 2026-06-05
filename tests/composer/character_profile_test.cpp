@@ -83,7 +83,8 @@ TEST(CharacterProfileTest, SubjectSlotForDeterministicAndSelectsBoth) {
   EXPECT_EQ(subjectSlotFor(SubjectCharacter::Severe, 4), 2);
   EXPECT_EQ(subjectSlotFor(SubjectCharacter::Severe, 7), 2);
   // Determinism: repeated calls agree.
-  EXPECT_EQ(subjectSlotFor(SubjectCharacter::Noble, 99), subjectSlotFor(SubjectCharacter::Noble, 99));
+  EXPECT_EQ(subjectSlotFor(SubjectCharacter::Noble, 99),
+            subjectSlotFor(SubjectCharacter::Noble, 99));
 }
 
 }  // namespace

@@ -10,6 +10,8 @@
 //   5. buildFormFixture end-to-end for all 10 forms x seed 1 (the placeholder
 //      builders replay proven phase fixtures, so the full Composer must pass).
 
+#include "composer/form_director.h"
+
 #include <gtest/gtest.h>
 
 #include <array>
@@ -17,7 +19,6 @@
 
 #include "composer/arc.h"
 #include "composer/composer.h"
-#include "composer/form_director.h"
 #include "core/basic_types.h"
 
 namespace bach::composer {
@@ -226,8 +227,7 @@ TEST(FormDirectorBuild, AllFormsRunThroughComposerCleanly) {
 
     const ComposeResult result =
         Composer{}.run(fixture.material, fixture.harmony, fixture.voice_plan);
-    EXPECT_EQ(result.validation.status, ValidationStatus::Ok)
-        << "form " << static_cast<int>(form);
+    EXPECT_EQ(result.validation.status, ValidationStatus::Ok) << "form " << static_cast<int>(form);
     EXPECT_TRUE(result.validation.failures.empty()) << "form " << static_cast<int>(form);
     EXPECT_FALSE(result.notes.empty()) << "form " << static_cast<int>(form);
   }

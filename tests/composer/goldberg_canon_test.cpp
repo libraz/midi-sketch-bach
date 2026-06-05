@@ -53,7 +53,9 @@ int transposeUp(int pitch, int degrees, detail::Mode mode) {
 
 // Block index of the b-th 4-bar block (0 = aria).
 constexpr int kCycleBars = 4;
-Tick blockStart(int blk) { return static_cast<Tick>(blk * kCycleBars) * kTicksPerBar; }
+Tick blockStart(int blk) {
+  return static_cast<Tick>(blk * kCycleBars) * kTicksPerBar;
+}
 
 // --- Full-set structure -----------------------------------------------------
 
@@ -181,8 +183,8 @@ TEST(GoldbergCanon, FollowerIsDiatonicTransposeDelayedAndTruncated) {
         const int transposed = transposeUp(static_cast<int>(ld.pitch), imitation_degrees, mode);
         EXPECT_EQ(fo.pitch % 12, transposed % 12)
             << "variation " << v << " note " << k << " follower pitch class";
-        EXPECT_LT(fo.pitch, ld.pitch) << "variation " << v << " note " << k
-                                      << " follower must be below the leader";
+        EXPECT_LT(fo.pitch, ld.pitch)
+            << "variation " << v << " note " << k << " follower must be below the leader";
       }
     }
   }
@@ -208,8 +210,8 @@ TEST(GoldbergCanon, V1SilentOutsideCanonBlocks) {
     if (n.voice != 1)
       continue;
     ++v1_notes;
-    EXPECT_TRUE(inCanonBlock(n.start_tick)) << "V1 note outside a canon block at tick "
-                                            << n.start_tick;
+    EXPECT_TRUE(inCanonBlock(n.start_tick))
+        << "V1 note outside a canon block at tick " << n.start_tick;
   }
   EXPECT_GT(v1_notes, 0) << "the full set must contain canon-follower notes on V1";
 }
@@ -288,9 +290,9 @@ TEST(GoldbergCanon, MidSizeKindsAndDaCapo) {
   // Variations 1..14 (blocks 1..14); da capo block is block 15.
   for (int v = 1; v <= 14; ++v) {
     const bool expect_canon = (v % 3 == 0 && v < 30);
-    EXPECT_EQ(goldbergVariationKind(static_cast<std::size_t>(v - 1)) ==
-                  GoldbergVariationKind::Canon,
-              expect_canon)
+    EXPECT_EQ(
+        goldbergVariationKind(static_cast<std::size_t>(v - 1)) == GoldbergVariationKind::Canon,
+        expect_canon)
         << "variation " << v;
   }
   // The realized canon follower exists (variations 3,6,9,12 are canons).

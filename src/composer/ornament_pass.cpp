@@ -246,10 +246,11 @@ void applyOrnamentPass(ComposeResult& result, const OrnamentParams& params) {
     const NoteProvenance& prov = result.provenance[idx];
 
     Expansion exp;
-    const bool already_ornament = note.source == BachNoteSource::Ornament ||
-                                  prov.source == NoteSource::Ornament;
+    const bool already_ornament =
+        note.source == BachNoteSource::Ornament || prov.source == NoteSource::Ornament;
 
-    if (!already_ornament && note.duration >= kQuarter && !isExempt(params.exempt_voices, note.voice)) {
+    if (!already_ornament && note.duration >= kQuarter &&
+        !isExempt(params.exempt_voices, note.voice)) {
       const int bar = static_cast<int>(note.start_tick / tpb);
       const Tick pos_in_bar = note.start_tick % tpb;
       const bool is_downbeat = pos_in_bar == 0;
@@ -273,8 +274,8 @@ void applyOrnamentPass(ComposeResult& result, const OrnamentParams& params) {
 
       // Ceiling guard: the upper neighbour must not cross above the next-higher
       // voice's concurrent pitch.
-      const int ceiling = nextHigherVoiceCeiling(result.notes, note.voice, note.pitch,
-                                                 note.start_tick);
+      const int ceiling =
+          nextHigherVoiceCeiling(result.notes, note.voice, note.pitch, note.start_tick);
       const bool upper_clears_ceiling = upper >= 0 && upper < ceiling;
 
       if (!is_bass && neighbours_ok && upper_clears_ceiling) {

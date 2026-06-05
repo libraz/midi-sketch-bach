@@ -157,16 +157,17 @@ TEST(FormLinearCello, IsStepwiseDominantWithNoRemoteLeaps) {
         int leaps = 0;
         int remote = 0;
         for (std::size_t idx = 1; idx < notes.size(); ++idx) {
-          const int interval = static_cast<int>(notes[idx].pitch) - static_cast<int>(notes[idx - 1].pitch);
+          const int interval =
+              static_cast<int>(notes[idx].pitch) - static_cast<int>(notes[idx - 1].pitch);
           if (std::abs(interval) > 7)
             ++leaps;
           if (std::abs(interval) > 12)
             ++remote;
         }
         const double leap_ratio =
-            notes.size() > 1 ? static_cast<double>(leaps) / static_cast<double>(notes.size() - 1) : 0.0;
-        EXPECT_LE(leap_ratio, 0.08)
-            << "seed=" << seed << " minor=" << minor << " bars=" << bars;
+            notes.size() > 1 ? static_cast<double>(leaps) / static_cast<double>(notes.size() - 1)
+                             : 0.0;
+        EXPECT_LE(leap_ratio, 0.08) << "seed=" << seed << " minor=" << minor << " bars=" << bars;
         EXPECT_EQ(remote, 0) << "seed=" << seed << " minor=" << minor << " bars=" << bars;
       }
     }
@@ -385,10 +386,9 @@ TEST(FormLinearTrio, VoicesAreStepwiseWithNoRemoteLeaps) {
         int remote = 0;
         int intervals = 0;
         for (auto& voice_notes : by_voice) {
-          std::sort(voice_notes.begin(), voice_notes.end(),
-                    [](const NoteEvent& x, const NoteEvent& y) {
-                      return x.start_tick < y.start_tick;
-                    });
+          std::sort(
+              voice_notes.begin(), voice_notes.end(),
+              [](const NoteEvent& x, const NoteEvent& y) { return x.start_tick < y.start_tick; });
           for (std::size_t idx = 1; idx < voice_notes.size(); ++idx) {
             const int interval = static_cast<int>(voice_notes[idx].pitch) -
                                  static_cast<int>(voice_notes[idx - 1].pitch);
@@ -401,8 +401,7 @@ TEST(FormLinearTrio, VoicesAreStepwiseWithNoRemoteLeaps) {
         }
         const double leap_ratio =
             intervals > 0 ? static_cast<double>(leaps) / static_cast<double>(intervals) : 0.0;
-        EXPECT_LE(leap_ratio, 0.08)
-            << "seed=" << seed << " minor=" << minor << " bars=" << bars;
+        EXPECT_LE(leap_ratio, 0.08) << "seed=" << seed << " minor=" << minor << " bars=" << bars;
         EXPECT_EQ(remote, 0) << "seed=" << seed << " minor=" << minor << " bars=" << bars;
       }
     }

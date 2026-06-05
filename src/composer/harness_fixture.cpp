@@ -23,8 +23,8 @@ namespace {
 // live in composer/figuration.h so they can be reused without disturbing the
 // byte-identical fixture layouts below.
 using namespace bach::composer::detail;  // NOLINT(build/namespaces): bring the
-                                          // shared figuration helpers into the
-                                          // fixture builders unqualified.
+                                         // shared figuration helpers into the
+                                         // fixture builders unqualified.
 
 // Build the Phase14 fixture: a single self-contained 42-bar, 3-voice
 // all-technique fugue (C major). Every contrapuntal device is exercised in one

@@ -25,16 +25,16 @@ constexpr std::array<std::uint16_t, 4> kScaleMultiplier = {{1, 2, 3, 4}};
 // HarnessFixture time-signature field.
 constexpr std::array<FormSpec, 10> kFormSpecs = {{
     // num_voices, natural, min, max, snap, ts_num, ts_den
-    {3, 42, 16, 128, 4, 4, 4},   // Fugue
-    {3, 24, 16, 128, 4, 4, 4},   // PreludeAndFugue
-    {3, 16, 8, 128, 4, 4, 4},    // TrioSonata
-    {2, 16, 8, 128, 4, 4, 4},    // ChoralePrelude
-    {3, 32, 16, 128, 4, 4, 4},   // ToccataAndFugue
-    {2, 24, 16, 128, 8, 3, 4},   // Passacaglia
-    {3, 32, 16, 128, 4, 4, 4},   // FantasiaAndFugue
-    {1, 8, 8, 128, 4, 4, 4},     // CelloPrelude
-    {2, 16, 8, 128, 4, 3, 4},    // Chaconne
-    {3, 20, 12, 128, 4, 4, 4},   // GoldbergVariations
+    {3, 42, 16, 128, 4, 4, 4},  // Fugue
+    {3, 24, 16, 128, 4, 4, 4},  // PreludeAndFugue
+    {3, 16, 8, 128, 4, 4, 4},   // TrioSonata
+    {2, 16, 8, 128, 4, 4, 4},   // ChoralePrelude
+    {3, 32, 16, 128, 4, 4, 4},  // ToccataAndFugue
+    {2, 24, 16, 128, 8, 3, 4},  // Passacaglia
+    {3, 32, 16, 128, 4, 4, 4},  // FantasiaAndFugue
+    {1, 8, 8, 128, 4, 4, 4},    // CelloPrelude
+    {2, 16, 8, 128, 4, 3, 4},   // Chaconne
+    {3, 20, 12, 128, 4, 4, 4},  // GoldbergVariations
 }};
 
 // Snap `value` to the nearest multiple of `snap` (round-to-nearest, ties up).
@@ -192,12 +192,8 @@ FormDirectorStatus buildFormFixture(const ComposeRequest& req, HarnessFixture* o
   }
 
   ResolvedRequest resolved{
-      bars,
-      req.seed,
-      req.is_minor ? detail::Mode::Minor : detail::Mode::Major,
-      req.character,
-      spec,
-      cycle_count,
+      bars,          req.seed, req.is_minor ? detail::Mode::Minor : detail::Mode::Major,
+      req.character, spec,     cycle_count,
   };
 
   HarnessFixture fixture;

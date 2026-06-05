@@ -130,9 +130,9 @@ TEST(MinorMaterialTest, GroundDescendingContourAndRegister) {
 TEST(MinorMaterialTest, MinorScaleUpHarmonicContextRaisesSixSeven) {
   // Ascending from G (67) over a V chord must yield A natural (69) then B
   // natural (71): the melodic-minor upper tetrachord, NO Ab->B aug-2nd.
-  EXPECT_EQ(minorScaleUp(67, 1, /*harmonic_context=*/true), 69);   // G -> A natural
-  EXPECT_EQ(minorScaleUp(67, 2, /*harmonic_context=*/true), 71);   // G -> A -> B natural
-  EXPECT_EQ(minorScaleUp(67, 3, /*harmonic_context=*/true), 72);   // -> C
+  EXPECT_EQ(minorScaleUp(67, 1, /*harmonic_context=*/true), 69);  // G -> A natural
+  EXPECT_EQ(minorScaleUp(67, 2, /*harmonic_context=*/true), 71);  // G -> A -> B natural
+  EXPECT_EQ(minorScaleUp(67, 3, /*harmonic_context=*/true), 72);  // -> C
   // The 6->7 hop itself is A natural -> B natural (interval 2), never Ab->B (3).
   EXPECT_EQ(minorScaleUp(69, 1, /*harmonic_context=*/true), 71);
 }
