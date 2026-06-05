@@ -23,6 +23,7 @@ set(BACH_TEST_SOURCES
   # midi/
   midi/midi_writer_test.cpp
   midi/midi_reader_test.cpp
+  midi/midi_cc_write_test.cpp
   midi/velocity_curve_test.cpp
 
   # instrument/

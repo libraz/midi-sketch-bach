@@ -159,6 +159,23 @@ void MidiWriter::writeTrack(const Track& track, Key key) {
     events.push_back(raw_event);
   }
 
+  // Include arc-driven Control-Change events from the track. The channel comes
+  // from the track itself (CcEvent is channel-agnostic). CC events sort first
+  // among events sharing a tick (priority -1) so an expression change takes
+  // effect before any note-on at the same position. When cc_events is empty,
+  // no events are added here and the output is byte-identical to the pre-CC
+  // writer.
+  events.reserve(events.size() + track.cc_events.size());
+  for (const auto& cc : track.cc_events) {
+    WriteEvent cc_event;
+    cc_event.tick = cc.tick;
+    cc_event.status = static_cast<uint8_t>(0xB0 | (track.channel & 0x0F));
+    cc_event.data1 = cc.controller;
+    cc_event.data2 = cc.value;
+    cc_event.priority = -1;  // Control change before note-off/on at same tick
+    events.push_back(cc_event);
+  }
+
   // Sort by tick, then by priority (note-off before note-on).
   std::sort(events.begin(), events.end(), [](const WriteEvent& lhs, const WriteEvent& rhs) {
     if (lhs.tick != rhs.tick)

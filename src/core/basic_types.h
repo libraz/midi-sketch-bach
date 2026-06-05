@@ -438,6 +438,19 @@ struct NoteEvent {
   GestureRole gesture_role = GestureRole::None;  ///< Role within the gesture group.
 };
 
+/// @brief Control-Change event for arc-driven expression (CC#7 volume, CC#11
+/// expression, etc.).
+///
+/// Stored on a Track and emitted by MidiWriter as a status 0xB0|channel message
+/// merged into the track's event stream in tick order. This is a higher-level,
+/// channel-agnostic counterpart to MidiEvent: the channel is taken from the
+/// owning Track at write time, so the same plan can be cloned across voices.
+struct CcEvent {
+  Tick tick = 0;            ///< Absolute tick position of the controller change.
+  std::uint8_t controller = 0;  ///< MIDI controller number (e.g. 7 = volume, 11 = expression).
+  std::uint8_t value = 0;       ///< Controller value (0-127).
+};
+
 /// Track: a collection of note events on a single MIDI channel.
 struct Track {
   uint8_t channel = 0;
@@ -445,6 +458,9 @@ struct Track {
   std::string name;
   std::vector<NoteEvent> notes;
   std::vector<MidiEvent> events;  // Raw MIDI events (CC, pitch bend, etc.)
+  /// Arc-driven control-change events. Empty by default: tracks without
+  /// expression events produce byte-identical MIDI to the pre-CC writer.
+  std::vector<CcEvent> cc_events;
 };
 
 /// Tempo change event.
