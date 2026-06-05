@@ -43,6 +43,7 @@ set(BACH_COMPOSER_TEST_SOURCES
   minor_material_test.cpp
   character_profile_test.cpp
   meter_test.cpp
+  ornament_pass_test.cpp
 )
 
 add_executable(bach_composer_tests ${BACH_COMPOSER_TEST_SOURCES})

@@ -17,12 +17,27 @@ namespace bach::composer {
 //             Compose note is reproducible from (span_id, candidate_score,
 //             satisfied_rules).
 //
+// Ornament  = produced by the opt-in OrnamentPass (composer/ornament_pass.h),
+//             a post-Composer pass that subdivides an already-placed note's
+//             sustain into a trill / mordent figure. Ornament notes are NOT
+//             candidate-search outputs and NOT Material inputs: they are a
+//             deterministic decoration of an existing note, so they get their
+//             own source rather than being mislabeled Compose (which would
+//             subject them to the Compose-only strong-beat-dissonance rule even
+//             though their pitches are mode-constrained neighbour tones, not
+//             search choices) or Material (which implies a pre-declared input
+//             motif). The pass is applied by callers AFTER Composer::run; the
+//             core pipeline never emits this source.
+//
 // No other values are permitted. In particular there is no "Repair" or
 // "Snap" source; the composer pipeline does not run post-generation
-// pitch-modifying passes.
+// pitch-modifying passes. The OrnamentPass is the single sanctioned
+// post-generation pass and it only subdivides time, never moves pitch off
+// the original note's diatonic neighbourhood.
 enum class NoteSource : std::uint8_t {
   Material = 0,
   Compose = 1,
+  Ornament = 2,
 };
 
 // Bitset over rule IDs. Each bit position is a CandidateSearch rule that

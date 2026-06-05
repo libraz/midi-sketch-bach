@@ -81,7 +81,12 @@ std::string emitProvenanceJson(const std::vector<NoteProvenance>& provenance) {
     w.key("voice_intent");
     writeStr(w, voiceIntentToString(p.voice_intent));
     w.key("source");
-    writeStr(w, p.source == NoteSource::Material ? "Material" : "Compose");
+    const char* source_str = "Compose";
+    if (p.source == NoteSource::Material)
+      source_str = "Material";
+    else if (p.source == NoteSource::Ornament)
+      source_str = "Ornament";
+    writeStr(w, source_str);
     w.key("candidate_score");
     w.value(static_cast<double>(p.candidate_score));
     w.key("satisfied_rules");
