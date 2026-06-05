@@ -1,6 +1,10 @@
 #include "composer/json_export.h"
 
+#include <cstddef>
+#include <map>
+#include <queue>
 #include <string_view>
+#include <tuple>
 
 #include "core/json_helpers.h"
 
@@ -97,6 +101,98 @@ std::string emitProvenanceJson(const std::vector<NoteProvenance>& provenance) {
     w.value(static_cast<std::uint64_t>(p.satisfied_rules));
     w.key("rejected_alternatives");
     w.value(static_cast<int>(p.rejected_alternatives));
+    w.endObject();
+  }
+  w.endArray();
+  w.endObject();
+  return w.toString();
+}
+
+std::string_view noteSourceToWire(NoteSource source) {
+  switch (source) {
+    case NoteSource::Material:
+      return "material";
+    case NoteSource::Ornament:
+      return "ornament";
+    case NoteSource::Compose:
+      return "compose";
+  }
+  // Defensive default; the enum is exhaustively handled above.
+  return "compose";
+}
+
+std::string buildHomepageEventsJson(const ComposeResult& result, const HomepageMeta& meta) {
+  // Build a lookup from (voice, start_tick, pitch, duration) to a queue of
+  // indices into result.notes (parallel to result.provenance). Tracks
+  // partition the same notes by voice preserving order, so identical tuples
+  // are consumed first-in first-out as track notes are visited in order.
+  using NoteKey = std::tuple<int, Tick, std::uint8_t, Tick>;
+  std::map<NoteKey, std::queue<std::size_t>> index_by_key;
+  for (std::size_t idx = 0; idx < result.notes.size(); ++idx) {
+    const NoteEvent& note = result.notes[idx];
+    const NoteKey key{static_cast<int>(note.voice), note.start_tick, note.pitch, note.duration};
+    index_by_key[key].push(idx);
+  }
+
+  JsonWriter w;
+  w.beginObject();
+  w.key("form");
+  writeStr(w, meta.form_name);
+  w.key("key");
+  writeStr(w, meta.key_name);
+  w.key("bpm");
+  w.value(static_cast<int>(meta.bpm));
+  w.key("seed");
+  w.value(static_cast<std::uint32_t>(meta.seed));
+  w.key("total_ticks");
+  w.value(static_cast<std::uint32_t>(meta.total_ticks));
+  w.key("total_bars");
+  w.value(static_cast<int>(meta.total_bars));
+  w.key("description");
+  writeStr(w, meta.description);
+
+  w.key("tracks");
+  w.beginArray();
+  for (const Track& track : result.tracks) {
+    w.beginObject();
+    w.key("name");
+    writeStr(w, track.name);
+    w.key("channel");
+    w.value(static_cast<int>(track.channel));
+    w.key("program");
+    w.value(static_cast<int>(track.program));
+    w.key("note_count");
+    w.value(static_cast<int>(track.notes.size()));
+    w.key("notes");
+    w.beginArray();
+    for (const NoteEvent& note : track.notes) {
+      // Resolve provenance source by consuming the matching index queue.
+      NoteSource source = NoteSource::Compose;
+      const NoteKey key{static_cast<int>(note.voice), note.start_tick, note.pitch, note.duration};
+      auto found = index_by_key.find(key);
+      if (found != index_by_key.end() && !found->second.empty()) {
+        const std::size_t note_idx = found->second.front();
+        found->second.pop();
+        if (note_idx < result.provenance.size())
+          source = result.provenance[note_idx].source;
+      }
+
+      w.beginObject();
+      w.key("pitch");
+      w.value(static_cast<int>(note.pitch));
+      w.key("velocity");
+      w.value(static_cast<int>(note.velocity));
+      w.key("start_tick");
+      w.value(static_cast<int>(note.start_tick));
+      w.key("duration");
+      w.value(static_cast<int>(note.duration));
+      w.key("voice");
+      w.value(static_cast<int>(note.voice));
+      w.key("source");
+      writeStr(w, noteSourceToWire(source));
+      w.endObject();
+    }
+    w.endArray();
     w.endObject();
   }
   w.endArray();

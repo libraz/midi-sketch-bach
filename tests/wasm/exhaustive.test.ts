@@ -1,6 +1,6 @@
 import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { BachGenerator, init } from '../../js/src/index';
-import type { EventData } from '../../js/src/types';
+import type { BachConfig, EventData } from '../../js/src/types';
 
 beforeAll(async () => {
   await init();
@@ -62,10 +62,13 @@ describe('Exhaustive Parameter Tests', () => {
     });
   });
 
-  describe('Voice count sweep', () => {
-    it.each([2, 3, 4, 5])('voices=%i', (numVoices) => {
+  describe('numVoices is accepted but ignored', () => {
+    // The form decides the voice/track count; numVoices is kept only for
+    // backward compatibility and must not affect generation success.
+    it.each([2, 3, 4, 5])('numVoices=%i still generates', (numVoices) => {
       bach = new BachGenerator();
-      bach.generate({ form: 'fugue', numVoices, seed: 42 });
+      // numVoices is no longer part of BachConfig; pass it through anyway.
+      bach.generate({ form: 'fugue', seed: 42, numVoices } as unknown as BachConfig);
       const midi = bach.getMidi();
       expect(midi.length).toBeGreaterThan(0);
     });
@@ -172,6 +175,10 @@ describe('Data Integrity Validation', () => {
         expect(note.duration).toBeLessThan(0x80000000);
         // Sanity: reasonable max duration (~50 bars at 480 tpb)
         expect(note.duration).toBeLessThan(100000);
+
+        // Provenance: every note carries a non-empty source tag.
+        expect(typeof note.source).toBe('string');
+        expect((note.source ?? '').length).toBeGreaterThan(0);
       }
     }
   }

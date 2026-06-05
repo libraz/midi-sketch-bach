@@ -104,6 +104,97 @@ describe('BachGenerator - Goldberg Variations', () => {
   });
 });
 
+describe('BachGenerator - Form-decided track count', () => {
+  let bach: BachGenerator | undefined;
+
+  afterEach(() => {
+    bach?.destroy();
+  });
+
+  // The form, not the config, decides how many tracks are emitted (1-3).
+  it.each([
+    ['cello_prelude', 1],
+    ['chaconne', 2],
+    ['passacaglia', 2],
+    ['fugue', 3],
+    ['trio_sonata', 3],
+    ['prelude_and_fugue', 3],
+    ['goldberg_variations', 3],
+  ] as const)('%s should emit %i track(s)', (form, expected) => {
+    bach = new BachGenerator();
+    bach.generate({ form, seed: 42 });
+    const info = bach.getInfo();
+    expect(info.trackCount).toBe(expected);
+  });
+});
+
+describe('BachGenerator - Variable length', () => {
+  let bach: BachGenerator | undefined;
+  const allForms = [
+    'fugue',
+    'prelude_and_fugue',
+    'trio_sonata',
+    'chorale_prelude',
+    'toccata_and_fugue',
+    'passacaglia',
+    'fantasia_and_fugue',
+    'cello_prelude',
+    'chaconne',
+    'goldberg_variations',
+  ];
+
+  afterEach(() => {
+    bach?.destroy();
+  });
+
+  // Variable length is now real: 'full' must yield more bars than 'short'
+  // for the same form and seed. total_bars is meter-aware (passacaglia and
+  // chaconne are 3/4), so we compare bar counts, not raw tick math.
+  it.each(allForms)('%s full scale yields more bars than short', (form) => {
+    bach = new BachGenerator();
+    bach.generate({ form, seed: 42, scale: 'short' });
+    const shortBars = bach.getInfo().totalBars;
+    bach.destroy();
+
+    bach = new BachGenerator();
+    bach.generate({ form, seed: 42, scale: 'full' });
+    const fullBars = bach.getInfo().totalBars;
+
+    expect(shortBars).toBeGreaterThan(0);
+    expect(fullBars).toBeGreaterThan(shortBars);
+  });
+});
+
+describe('BachGenerator - All forms, major and minor', () => {
+  let bach: BachGenerator | undefined;
+  const allForms = [
+    'fugue',
+    'prelude_and_fugue',
+    'trio_sonata',
+    'chorale_prelude',
+    'toccata_and_fugue',
+    'passacaglia',
+    'fantasia_and_fugue',
+    'cello_prelude',
+    'chaconne',
+    'goldberg_variations',
+  ];
+
+  afterEach(() => {
+    bach?.destroy();
+  });
+
+  it.each(
+    allForms.flatMap((form) => [[form, false] as const, [form, true] as const]),
+  )('should generate %s (minor=%s)', (form, isMinor) => {
+    bach = new BachGenerator();
+    bach.generate({ form, isMinor, seed: 42 });
+    const midi = bach.getMidi();
+    expect(midi.length).toBeGreaterThan(0);
+    expect([...midi.slice(0, 4)]).toEqual(MIDI_HEADER);
+  });
+});
+
 describe('BachGenerator - Key and Character', () => {
   let bach: BachGenerator | undefined;
 
@@ -140,9 +231,17 @@ describe('BachGenerator - Key and Character', () => {
 
   it('should throw on invalid character-form combo', () => {
     const generator = new BachGenerator();
-    // Restless character is not compatible with ChoralePrelude
+    // Restless character is not compatible with ChoralePrelude.
     expect(() => {
       generator.generate({ form: 'chorale_prelude', character: 'restless', seed: 42 });
+    }).toThrow();
+    // Playful character is also incompatible with ChoralePrelude.
+    expect(() => {
+      generator.generate({ form: 'chorale_prelude', character: 'playful', seed: 42 });
+    }).toThrow();
+    // Noble character is not compatible with Toccata and Fugue.
+    expect(() => {
+      generator.generate({ form: 'toccata_and_fugue', character: 'noble', seed: 42 });
     }).toThrow();
     generator.destroy();
   });

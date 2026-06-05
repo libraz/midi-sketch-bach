@@ -1,18 +1,25 @@
 /// @file
 /// @brief CLI entry point for the Bach MIDI generator.
 
+#include <algorithm>
+#include <cctype>
+#include <cstddef>
 #include <cstdio>
 #include <cstring>
 #include <fstream>
 #include <string>
 #include <vector>
 
-#include "analysis/analysis_runner.h"
 #include "composer/composer.h"
+#include "composer/expression_events.h"
+#include "composer/figuration.h"
+#include "composer/form_director.h"
 #include "composer/harness_fixture.h"
 #include "composer/json_export.h"
+#include "composer/ornament_pass.h"
 #include "core/basic_types.h"
-#include "generator.h"
+#include "core/instrument_program.h"
+#include "core/rng_util.h"
 #include "harmony/key.h"
 #include "midi/midi_writer.h"
 
@@ -25,25 +32,39 @@ struct CliOptions {
   bach::FormType form = bach::FormType::PreludeAndFugue;
   bach::SubjectCharacter character = bach::SubjectCharacter::Severe;
   bach::InstrumentType instrument = bach::InstrumentType::Organ;
-  uint8_t voices = 3;
   uint16_t bpm = 72;
   std::string output = "output.mid";
   bool json_output = false;
-  bool analyze = false;
-  bool strict = false;
-  bool verbose = false;
   bool instrument_specified = false;
   bach::DurationScale scale = bach::DurationScale::Short;
-  bach::ToccataArchetype toccata_archetype = bach::ToccataArchetype::Dramaticus;
-  bool toccata_style_specified = false;
   uint16_t target_bars = 0;
   bool scale_specified = false;
-  // When set, bypass the legacy generator and run the new Composer
-  // engine against the harness fixture catalog. The phase governs the
-  // layout (voices / bars / subject / answer). Seed is reused.
+  // When set, bypass the default composer path and run the new Composer engine
+  // against the harness fixture catalog. The phase governs the layout (voices /
+  // bars / subject / answer). Seed is reused. This mode is a pinned
+  // byte-stability contract with scripts/run_phase_closure.py.
   bool composer_mode = false;
   bach::composer::HarnessPhase composer_phase = bach::composer::HarnessPhase::Phase6;
 };
+
+/// @brief Case-insensitive ASCII string equality.
+/// @param lhs Left-hand string.
+/// @param rhs Right-hand C string.
+/// @return True if the two strings are equal ignoring ASCII letter case.
+bool equalsIgnoreCase(const std::string& lhs, const char* rhs) {
+  const std::size_t rhs_len = std::strlen(rhs);
+  if (lhs.size() != rhs_len) {
+    return false;
+  }
+  for (std::size_t idx = 0; idx < rhs_len; ++idx) {
+    const unsigned char left = static_cast<unsigned char>(lhs[idx]);
+    const unsigned char right = static_cast<unsigned char>(rhs[idx]);
+    if (std::tolower(left) != std::tolower(right)) {
+      return false;
+    }
+  }
+  return true;
+}
 
 bach::composer::HarnessPhase parseComposerPhase(const char* val) {
   if (std::strcmp(val, "Phase3") == 0 || std::strcmp(val, "phase3") == 0 ||
@@ -163,23 +184,17 @@ void printUsage() {
   std::printf("  --form FORM      Form type\n");
   std::printf("  --character CH   Subject character: severe, playful, noble, restless\n");
   std::printf("  --instrument INS Instrument: organ, harpsichord, piano, violin, cello, guitar\n");
-  std::printf("  --voices N       Number of voices (2-5)\n");
-  std::printf("  --bpm N          BPM (40-200)\n");
+  std::printf("  --bpm N          BPM (40-200, default 72)\n");
   std::printf("  --scale SCALE    Duration scale: short, medium, long, full\n");
   std::printf("                   Default: medium for fugue, short otherwise\n");
   std::printf("  --bars N         Target bar count (overrides --scale)\n");
   std::printf(
-      "  --composer-phase P  Bypass legacy generator; run Composer with phase\n"
+      "  --composer-phase P  Run the closure harness layout with phase\n"
       "                   {Phase3|Phase35|Phase4|Phase4Sus|Phase5|Phase6|Phase6Episode|\n"
       "                    Phase6Tonal|Phase7|Phase8|Phase9|Phase10|Phase11|Phase12|\n"
       "                    Phase13|Phase14|Phase15|Phase16|Phase17|Phase18|Phase19|\n"
       "                    Phase20|Phase21|Phase22|Phase23|Phase24|Phase25}. Seed reused.\n");
-  std::printf(
-      "  --toccata-style  Toccata archetype: dramaticus, perpetuus, concertato, sectionalis\n");
   std::printf("  --json           JSON output\n");
-  std::printf("  --analyze        Generate + analysis\n");
-  std::printf("  --strict         No retry\n");
-  std::printf("  --verbose-retry  Log retry process\n");
   std::printf("  -o FILE          Output file path\n");
   std::printf("  --help           Show this help\n");
   std::printf("\nForms:\n");
@@ -192,8 +207,10 @@ void printUsage() {
 /// @param argc Argument count from main().
 /// @param argv Argument vector from main().
 /// @param opts Output structure populated with parsed values.
-/// @return False if --help was requested (caller should exit cleanly).
-bool parseArgs(int argc, char* argv[], CliOptions& opts) {
+/// @param ok Set to false when a parse error occurs (caller exits non-zero).
+/// @return False if parsing stopped early (--help requested or a hard error).
+bool parseArgs(int argc, char* argv[], CliOptions& opts, bool& ok) {
+  ok = true;
   for (int idx = 1; idx < argc; ++idx) {
     if (std::strcmp(argv[idx], "--help") == 0 || std::strcmp(argv[idx], "-h") == 0) {
       printUsage();
@@ -202,24 +219,29 @@ bool parseArgs(int argc, char* argv[], CliOptions& opts) {
     if (std::strcmp(argv[idx], "--seed") == 0 && idx + 1 < argc) {
       opts.seed = static_cast<uint32_t>(std::atoi(argv[++idx]));
     } else if (std::strcmp(argv[idx], "--bpm") == 0 && idx + 1 < argc) {
-      opts.bpm = static_cast<uint16_t>(std::atoi(argv[++idx]));
-    } else if (std::strcmp(argv[idx], "--voices") == 0 && idx + 1 < argc) {
-      opts.voices = static_cast<uint8_t>(std::atoi(argv[++idx]));
+      const int bpm = std::atoi(argv[++idx]);
+      if (bpm < 40 || bpm > 200) {
+        std::fprintf(stderr, "Error: --bpm must be in [40, 200] (got %d)\n", bpm);
+        ok = false;
+        return false;
+      }
+      opts.bpm = static_cast<uint16_t>(bpm);
     } else if (std::strcmp(argv[idx], "-o") == 0 && idx + 1 < argc) {
       opts.output = argv[++idx];
     } else if (std::strcmp(argv[idx], "--json") == 0) {
       opts.json_output = true;
-    } else if (std::strcmp(argv[idx], "--analyze") == 0) {
-      opts.analyze = true;
-    } else if (std::strcmp(argv[idx], "--strict") == 0) {
-      opts.strict = true;
-    } else if (std::strcmp(argv[idx], "--verbose-retry") == 0) {
-      opts.verbose = true;
     } else if (std::strcmp(argv[idx], "--form") == 0 && idx + 1 < argc) {
-      opts.form = bach::formTypeFromString(argv[++idx]);
+      const char* val = argv[++idx];
+      opts.form = bach::formTypeFromString(val);
+      // formTypeFromString silently defaults to Fugue on unknown input; reject
+      // any string that does not round-trip back to its canonical form name.
+      if (std::strcmp(bach::formTypeToString(opts.form), val) != 0) {
+        std::fprintf(stderr, "Error: unknown --form '%s'\n", val);
+        ok = false;
+        return false;
+      }
     } else if (std::strcmp(argv[idx], "--character") == 0 && idx + 1 < argc) {
-      ++idx;
-      const char* val = argv[idx];
+      const char* val = argv[++idx];
       if (std::strcmp(val, "severe") == 0) {
         opts.character = bach::SubjectCharacter::Severe;
       } else if (std::strcmp(val, "playful") == 0) {
@@ -228,59 +250,54 @@ bool parseArgs(int argc, char* argv[], CliOptions& opts) {
         opts.character = bach::SubjectCharacter::Noble;
       } else if (std::strcmp(val, "restless") == 0) {
         opts.character = bach::SubjectCharacter::Restless;
+      } else {
+        std::fprintf(stderr, "Error: unknown --character '%s'\n", val);
+        ok = false;
+        return false;
       }
     } else if (std::strcmp(argv[idx], "--key") == 0 && idx + 1 < argc) {
-      opts.key = bach::keySignatureFromString(argv[++idx]);
+      const char* val = argv[++idx];
+      opts.key = bach::keySignatureFromString(val);
+      // keySignatureFromString silently defaults to C major on an unrecognized
+      // tonic name (the only detectable failure mode: the mode suffix simply
+      // selects minor when it reads "minor", major otherwise). Reject input that
+      // does not round-trip back to a canonical name, compared case-insensitively
+      // so "g_minor" and "C_major" are both accepted.
+      if (!equalsIgnoreCase(bach::keySignatureToString(opts.key), val)) {
+        std::fprintf(stderr, "Error: unknown --key '%s' (expected e.g. c_major, g_minor)\n", val);
+        ok = false;
+        return false;
+      }
     } else if (std::strcmp(argv[idx], "--instrument") == 0 && idx + 1 < argc) {
-      opts.instrument = bach::instrumentTypeFromString(argv[++idx]);
+      const char* val = argv[++idx];
+      opts.instrument = bach::instrumentTypeFromString(val);
+      // instrumentTypeFromString silently defaults to Organ on unknown input;
+      // reject any string that does not round-trip back to its canonical name.
+      if (std::strcmp(bach::instrumentTypeToString(opts.instrument), val) != 0) {
+        std::fprintf(stderr, "Error: unknown --instrument '%s'\n", val);
+        ok = false;
+        return false;
+      }
       opts.instrument_specified = true;
     } else if (std::strcmp(argv[idx], "--scale") == 0 && idx + 1 < argc) {
-      opts.scale = bach::durationScaleFromString(argv[++idx]);
+      const char* val = argv[++idx];
+      opts.scale = bach::durationScaleFromString(val);
+      // durationScaleFromString silently defaults to Short on unknown input;
+      // reject any string that does not round-trip back to its canonical name.
+      if (std::strcmp(bach::durationScaleToString(opts.scale), val) != 0) {
+        std::fprintf(stderr, "Error: unknown --scale '%s'\n", val);
+        ok = false;
+        return false;
+      }
       opts.scale_specified = true;
     } else if (std::strcmp(argv[idx], "--bars") == 0 && idx + 1 < argc) {
       opts.target_bars = static_cast<uint16_t>(std::atoi(argv[++idx]));
-    } else if (std::strcmp(argv[idx], "--toccata-style") == 0 && idx + 1 < argc) {
-      opts.toccata_archetype = bach::toccataArchetypeFromString(argv[++idx]);
-      opts.toccata_style_specified = true;
     } else if (std::strcmp(argv[idx], "--composer-phase") == 0 && idx + 1 < argc) {
       opts.composer_mode = true;
       opts.composer_phase = parseComposerPhase(argv[++idx]);
     }
   }
   return true;
-}
-
-/// @brief Build a GeneratorConfig from parsed CLI options.
-/// @param opts Parsed command-line options.
-/// @return GeneratorConfig ready for generation.
-bach::GeneratorConfig buildGeneratorConfig(const CliOptions& opts) {
-  bach::GeneratorConfig config;
-  config.form = opts.form;
-  config.key = opts.key;
-  config.num_voices = opts.voices;
-  config.bpm = opts.bpm;
-  config.seed = opts.seed;
-  config.character = opts.character;
-  config.json_output = opts.json_output;
-  config.analyze = opts.analyze;
-  config.strict = opts.strict;
-
-  // Auto-detect instrument from form if not explicitly specified.
-  if (opts.instrument_specified) {
-    config.instrument = opts.instrument;
-  } else {
-    config.instrument = bach::defaultInstrumentForForm(opts.form);
-  }
-
-  config.scale = opts.scale;
-  if (!opts.scale_specified && opts.form == bach::FormType::Fugue) {
-    config.scale = bach::DurationScale::Medium;
-  }
-  config.target_bars = opts.target_bars;
-  config.toccata_archetype = opts.toccata_archetype;
-  config.toccata_archetype_auto = !opts.toccata_style_specified;
-
-  return config;
 }
 
 const char* harnessPhaseToString(bach::composer::HarnessPhase p) {
@@ -418,113 +435,255 @@ int runComposerMode(const CliOptions& opts) {
   return 0;
 }
 
+/// @brief Friendly display name for a form, used in the JSON description.
+/// @param form The form type.
+/// @return A human-readable phrase such as "Toccata and Fugue".
+const char* formDisplayName(bach::FormType form) {
+  switch (form) {
+    case bach::FormType::Fugue:
+      return "Fugue";
+    case bach::FormType::PreludeAndFugue:
+      return "Prelude and Fugue";
+    case bach::FormType::TrioSonata:
+      return "Trio Sonata";
+    case bach::FormType::ChoralePrelude:
+      return "Chorale Prelude";
+    case bach::FormType::ToccataAndFugue:
+      return "Toccata and Fugue";
+    case bach::FormType::Passacaglia:
+      return "Passacaglia";
+    case bach::FormType::FantasiaAndFugue:
+      return "Fantasia and Fugue";
+    case bach::FormType::CelloPrelude:
+      return "Cello Prelude";
+    case bach::FormType::Chaconne:
+      return "Chaconne";
+    case bach::FormType::GoldbergVariations:
+      return "Goldberg Variations";
+  }
+  return "Work";
+}
+
+/// @brief Collect voices carrying immutable ground / cantus-firmus material.
+///
+/// Scans the resolved VoicePlan for spans whose intent replays an immutable
+/// foundation line (ground bass, passacaglia ground, cantus firmus). Those
+/// voices are exempt from the ornament pass so the immutable material stays
+/// un-decorated. The scan is intent-based (no per-form hardcode), so it covers
+/// every form whose builder declares one of those carriers.
+///
+/// @param plan The resolved voice plan.
+/// @return Sorted, de-duplicated list of exempt voice ids.
+std::vector<bach::VoiceId> collectExemptVoices(const bach::composer::VoicePlan& plan) {
+  std::vector<bach::VoiceId> exempt;
+  for (const auto& span : plan.spans) {
+    const bool is_foundation = span.intent == bach::composer::VoiceIntent::GroundCarrier ||
+                               span.intent == bach::composer::VoiceIntent::PassacagliaGround ||
+                               span.intent == bach::composer::VoiceIntent::CantusFirmusCarrier;
+    if (is_foundation) {
+      exempt.push_back(span.voice);
+    }
+  }
+  std::sort(exempt.begin(), exempt.end());
+  exempt.erase(std::unique(exempt.begin(), exempt.end()), exempt.end());
+  return exempt;
+}
+
+/// @brief Derive the output JSON path from the MIDI output path.
+/// @param output The MIDI output path (e.g. "song.mid").
+/// @return The sibling JSON path (e.g. "song.json").
+std::string deriveJsonPath(const std::string& output) {
+  std::string json_path = output;
+  const auto dot_pos = json_path.rfind('.');
+  if (dot_pos != std::string::npos) {
+    json_path = json_path.substr(0, dot_pos) + ".json";
+  } else {
+    json_path += ".json";
+  }
+  return json_path;
+}
+
+/// @brief Run the default composer pipeline (form director) and emit output.
+/// @param opts Parsed command-line options.
+/// @return 0 on success, 1 on any failure.
+int runDefaultMode(const CliOptions& opts) {
+  // Resolve the seed: 0 means "auto", drawn from the system entropy source.
+  const uint32_t seed_resolved = opts.seed == 0 ? bach::rng::generateRandomSeed() : opts.seed;
+
+  // Resolve the instrument: form-default unless the user pinned one.
+  const bach::InstrumentType instrument =
+      opts.instrument_specified ? opts.instrument : bach::defaultInstrumentForForm(opts.form);
+
+  // Character / form compatibility is a CONFIG_FAIL: reject before composing.
+  if (!bach::composer::isFormCharacterCompatible(opts.form, opts.character)) {
+    std::fprintf(stderr, "Error: character '%s' is incompatible with form '%s'\n",
+                 bach::subjectCharacterToString(opts.character), bach::formTypeToString(opts.form));
+    return 1;
+  }
+
+  // Resolve the bar count. CLI nicety: fugue defaults to Medium scale when no
+  // explicit --scale is given (mirrors the historical generator behavior).
+  bach::DurationScale scale = opts.scale;
+  if (!opts.scale_specified && opts.form == bach::FormType::Fugue) {
+    scale = bach::DurationScale::Medium;
+  }
+  const uint16_t bars = bach::composer::resolveBars(opts.form, scale, opts.target_bars);
+
+  // Build the fixture for the resolved request, then run the composer.
+  bach::composer::ComposeRequest request;
+  request.form = opts.form;
+  request.is_minor = opts.key.is_minor;
+  request.character = opts.character;
+  request.target_bars = bars;
+  request.seed = seed_resolved;
+
+  bach::composer::HarnessFixture fixture;
+  const auto status = bach::composer::buildFormFixture(request, &fixture);
+  if (status != bach::composer::FormDirectorStatus::Ok) {
+    std::fprintf(stderr, "Error: form director rejected the request (status %u)\n",
+                 static_cast<unsigned>(status));
+    return 1;
+  }
+
+  auto result =
+      bach::composer::Composer{}.run(fixture.material, fixture.harmony, fixture.voice_plan);
+
+  if (result.validation.status != bach::composer::ValidationStatus::Ok) {
+    std::fprintf(stderr, "Error: composer validation failed: %zu rule violations\n",
+                 result.validation.failures.size());
+    for (const auto& f : result.validation.failures) {
+      std::fprintf(stderr, "  - %s (span %u)\n", f.rule_id.c_str(),
+                   static_cast<unsigned>(f.span_id));
+    }
+    return 1;
+  }
+
+  const bach::Tick ticks_per_bar = fixture.harmony.ticksPerBar();
+
+  // Ornament post-pass. Ground / cantus-firmus voices are exempt so immutable
+  // material stays un-decorated.
+  bach::composer::OrnamentParams ornament_params;
+  ornament_params.character = opts.character;
+  ornament_params.instrument = instrument;
+  ornament_params.mode =
+      opts.key.is_minor ? bach::composer::detail::Mode::Minor : bach::composer::detail::Mode::Major;
+  ornament_params.seed = seed_resolved;
+  ornament_params.ticks_per_bar = ticks_per_bar;
+  ornament_params.exempt_voices = collectExemptVoices(fixture.voice_plan);
+  bach::composer::applyOrnamentPass(result, ornament_params);
+
+  // Apply the instrument to every track (GM program + default names).
+  bach::applyInstrument(result.tracks, instrument);
+
+  // Total length in ticks = the last note-off across the whole result.
+  bach::Tick total_ticks = 0;
+  for (const auto& note : result.notes) {
+    total_ticks = std::max(total_ticks, note.start_tick + note.duration);
+  }
+
+  // Arc cycle count drives the registration plan's number of points.
+  const auto& spec = bach::composer::formSpec(opts.form);
+  const uint16_t snap = spec.snap_bars == 0 ? 1 : spec.snap_bars;
+  std::size_t cycle_count = bars / snap;
+  if (cycle_count == 0) {
+    cycle_count = 1;
+  }
+
+  // Organ registration: clone the arc-driven CC plan onto every voice channel.
+  if (instrument == bach::InstrumentType::Organ) {
+    const std::vector<bach::CcEvent> plan =
+        bach::composer::buildRegistrationPlan(bars, cycle_count, ticks_per_bar, total_ticks);
+    for (auto& track : result.tracks) {
+      track.cc_events.insert(track.cc_events.end(), plan.begin(), plan.end());
+    }
+  }
+
+  // Tempo map: base tempo at tick 0 plus the closing ritardando.
+  std::vector<bach::TempoEvent> tempo_events;
+  tempo_events.push_back({0, opts.bpm});
+  const std::vector<bach::TempoEvent> ritard =
+      bach::composer::buildFinalRitardando(opts.bpm, total_ticks, ticks_per_bar);
+  tempo_events.insert(tempo_events.end(), ritard.begin(), ritard.end());
+
+  // Time signature at tick 0 from the form's meter.
+  std::vector<bach::TimeSignatureEvent> time_sig_events;
+  bach::TimeSignatureEvent ts_event;
+  ts_event.tick = 0;
+  ts_event.time_sig = {spec.ts_numerator, spec.ts_denominator};
+  time_sig_events.push_back(ts_event);
+
+  // Console summary.
+  const uint16_t total_bars =
+      ticks_per_bar > 0 ? static_cast<uint16_t>((total_ticks + ticks_per_bar - 1) / ticks_per_bar)
+                        : 0;
+  std::printf("bach_cli v0.2.0\n");
+  std::printf("Form:       %s\n", bach::formTypeToString(opts.form));
+  std::printf("Key:        %s\n", bach::keySignatureToString(opts.key).c_str());
+  std::printf("Voices:     %u\n", spec.num_voices);
+  std::printf("BPM:        %u\n", opts.bpm);
+  std::printf("Character:  %s\n", bach::subjectCharacterToString(opts.character));
+  std::printf("Instrument: %s\n", bach::instrumentTypeToString(instrument));
+  if (opts.target_bars > 0) {
+    std::printf("Bars:       %u (override)\n", bars);
+  } else {
+    std::printf("Scale:      %s (%u bars)\n", bach::durationScaleToString(scale), bars);
+  }
+  std::printf("Seed:       %u%s\n", seed_resolved, opts.seed == 0 ? " (auto)" : "");
+  std::printf("\n");
+  std::printf("Generated: %s in %s\n", formDisplayName(opts.form),
+              bach::keySignatureToString(opts.key).c_str());
+  std::printf("Notes:     %zu\n", result.notes.size());
+  std::printf("Tracks:    %zu\n", result.tracks.size());
+  std::printf("Duration:  %u ticks (%u bars)\n", total_ticks, total_bars);
+
+  // Write the MIDI file.
+  bach::MidiWriter writer;
+  writer.build(result.tracks, tempo_events, time_sig_events, opts.key.tonic);
+  if (!writer.writeToFile(opts.output)) {
+    std::fprintf(stderr, "Error: failed to write %s\n", opts.output.c_str());
+    return 1;
+  }
+  std::printf("\nOutput:    %s\n", opts.output.c_str());
+
+  // Write the homepage events JSON if requested.
+  if (opts.json_output) {
+    bach::composer::HomepageMeta meta;
+    meta.form_name = bach::formTypeToString(opts.form);
+    meta.key_name = bach::keySignatureToString(opts.key);
+    meta.bpm = opts.bpm;
+    meta.seed = seed_resolved;
+    meta.total_ticks = total_ticks;
+    meta.total_bars = total_bars;
+    meta.description =
+        std::string(formDisplayName(opts.form)) + " in " + bach::keySignatureToString(opts.key);
+
+    const std::string json_path = deriveJsonPath(opts.output);
+    const std::string json_str = bach::composer::buildHomepageEventsJson(result, meta);
+    std::ofstream json_file(json_path);
+    if (json_file.is_open()) {
+      json_file << json_str;
+      json_file.close();
+      std::printf("JSON:      %s\n", json_path.c_str());
+    } else {
+      std::fprintf(stderr, "Warning: failed to write %s\n", json_path.c_str());
+    }
+  }
+
+  return 0;
+}
+
 }  // namespace
 
 int main(int argc, char* argv[]) {
   CliOptions opts;
-  if (!parseArgs(argc, argv, opts)) {
-    return 0;
+  bool ok = true;
+  if (!parseArgs(argc, argv, opts, ok)) {
+    return ok ? 0 : 1;
   }
 
   if (opts.composer_mode) {
     return runComposerMode(opts);
   }
 
-  bach::GeneratorConfig config = buildGeneratorConfig(opts);
-
-  std::printf("bach_cli v0.2.0\n");
-  std::printf("Form:       %s\n", bach::formTypeToString(config.form));
-  std::printf("Key:        %s\n", bach::keySignatureToString(config.key).c_str());
-  std::printf("Voices:     %d\n", config.num_voices);
-  std::printf("BPM:        %d\n", config.bpm);
-  std::printf("Character:  %s\n", bach::subjectCharacterToString(config.character));
-  std::printf("Instrument: %s\n", bach::instrumentTypeToString(config.instrument));
-  std::printf("Scale:      %s\n", bach::durationScaleToString(config.scale));
-  if (config.target_bars > 0) {
-    std::printf("Bars:       %u (override)\n", config.target_bars);
-  }
-  std::printf("Seed:       %u%s\n", config.seed, config.seed == 0 ? " (auto)" : "");
-  std::printf("\n");
-
-  bach::GeneratorResult result = bach::generate(config);
-
-  if (result.success) {
-    std::printf("Generated: %s\n", result.form_description.c_str());
-    std::printf("Seed used: %u\n", result.seed_used);
-    std::printf(
-        "Duration:  %u ticks (%.1f bars)\n", result.total_duration_ticks,
-        static_cast<float>(result.total_duration_ticks) / static_cast<float>(bach::kTicksPerBar));
-    std::printf("Tracks:    %zu\n", result.tracks.size());
-
-    size_t total_notes = 0;
-    for (const auto& track : result.tracks) {
-      total_notes += track.notes.size();
-    }
-    std::printf("Notes:     %zu\n", total_notes);
-
-    bach::MidiWriter writer;
-    writer.build(result.tracks, result.tempo_events, config.key.tonic);
-    if (writer.writeToFile(opts.output)) {
-      std::printf("\nOutput:    %s\n", opts.output.c_str());
-    } else {
-      std::fprintf(stderr, "Error: failed to write %s\n", opts.output.c_str());
-      return 1;
-    }
-
-    // Write events JSON if requested.
-    if (opts.json_output) {
-      std::string json_path = opts.output;
-      auto dot_pos = json_path.rfind('.');
-      if (dot_pos != std::string::npos) {
-        json_path = json_path.substr(0, dot_pos) + ".json";
-      } else {
-        json_path += ".json";
-      }
-
-      std::string json_str = bach::buildEventsJson(result, config);
-      std::ofstream json_file(json_path);
-      if (json_file.is_open()) {
-        json_file << json_str;
-        json_file.close();
-        std::printf("JSON:      %s\n", json_path.c_str());
-      } else {
-        std::fprintf(stderr, "Warning: failed to write %s\n", json_path.c_str());
-      }
-    }
-
-    // Run analysis if requested.
-    if (opts.analyze) {
-      const bach::HarmonicTimeline* gen_tl =
-          result.generation_timeline.size() > 0 ? &result.generation_timeline : nullptr;
-      bach::AnalysisReport analysis = bach::runAnalysis(
-          result.tracks, config.form, config.num_voices, result.timeline, config.key, gen_tl);
-
-      std::printf("\n%s", analysis.toTextSummary(config.form, config.num_voices).c_str());
-
-      if (opts.json_output) {
-        // Write analysis JSON alongside the MIDI output.
-        std::string json_path = opts.output;
-        auto dot_pos = json_path.rfind('.');
-        if (dot_pos != std::string::npos) {
-          json_path = json_path.substr(0, dot_pos) + "_analysis.json";
-        } else {
-          json_path += "_analysis.json";
-        }
-
-        std::ofstream json_file(json_path);
-        if (json_file.is_open()) {
-          json_file << analysis.toJson(config.form, config.num_voices);
-          json_file.close();
-          std::printf("Analysis:  %s\n", json_path.c_str());
-        } else {
-          std::fprintf(stderr, "Warning: failed to write %s\n", json_path.c_str());
-        }
-      }
-    }
-  } else {
-    std::fprintf(stderr, "Error: %s\n", result.error_message.c_str());
-    return 1;
-  }
-
-  return 0;
+  return runDefaultMode(opts);
 }

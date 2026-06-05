@@ -1,5 +1,6 @@
 import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { BachGenerator, init } from '../../js/src/index';
+import type { BachConfig } from '../../js/src/types';
 
 // MIDI header magic bytes: "MThd"
 const MIDI_HEADER = [0x4d, 0x54, 0x68, 0x64];
@@ -110,6 +111,62 @@ describe('BachGenerator - Generation', () => {
     expect(info.totalBars).toBeGreaterThan(40);
   });
 
+  it('targetBars should override scale and resolve near the requested length', () => {
+    // targetBars snaps to the form's bar granularity and clamps to the
+    // supported range, but for these forms 32 lands exactly on a boundary.
+    for (const form of ['fugue', 'chaconne', 'passacaglia']) {
+      bach = new BachGenerator();
+      // scale 'short' would normally produce far fewer bars; targetBars wins.
+      bach.generate({ form, seed: 42, scale: 'short', targetBars: 32 });
+      const info = bach.getInfo();
+      expect(info.totalBars).toBe(32);
+      bach.destroy();
+    }
+    bach = undefined;
+  });
+
+  it('seed 0 should resolve to a nonzero seed', () => {
+    bach = new BachGenerator();
+    bach.generate({ form: 'fugue', seed: 0 });
+    const info = bach.getInfo();
+    expect(info.seedUsed).not.toBe(0);
+  });
+
+  it('should throw on an invalid form string', () => {
+    const generator = new BachGenerator();
+    // Invalid form is now a hard error rather than a silent fallback.
+    expect(() => {
+      generator.generate({ form: 'not_a_real_form' });
+    }).toThrow();
+    generator.destroy();
+  });
+
+  it('should throw on out-of-range bpm', () => {
+    const generator = new BachGenerator();
+    expect(() => {
+      generator.generate({ form: 'fugue', bpm: 300, seed: 42 });
+    }).toThrow();
+    expect(() => {
+      generator.generate({ form: 'fugue', bpm: 20, seed: 42 });
+    }).toThrow();
+    generator.destroy();
+  });
+
+  it('bpm 0 should be accepted as the default', () => {
+    bach = new BachGenerator();
+    bach.generate({ form: 'fugue', bpm: 0, seed: 42 });
+    const midi = bach.getMidi();
+    expect(midi.length).toBeGreaterThan(0);
+  });
+
+  it('numVoices is accepted but ignored (backward compatibility)', () => {
+    bach = new BachGenerator();
+    // numVoices is no longer a config field; the form decides track count.
+    bach.generate({ form: 'fugue', seed: 42, numVoices: 5 } as unknown as BachConfig);
+    const midi = bach.getMidi();
+    expect(midi.length).toBeGreaterThan(0);
+  });
+
   it('should produce longer output with full scale', () => {
     bach = new BachGenerator();
     bach.generate({ form: 'fugue', seed: 42, scale: 'short' });
@@ -149,6 +206,7 @@ describe('BachGenerator - Generation', () => {
     expect(note).toHaveProperty('velocity');
     expect(note).toHaveProperty('start_tick');
     expect(note).toHaveProperty('duration');
+    expect(note).toHaveProperty('source');
 
     expect(note.pitch).toBeGreaterThanOrEqual(0);
     expect(note.pitch).toBeLessThanOrEqual(127);
@@ -156,5 +214,19 @@ describe('BachGenerator - Generation', () => {
     expect(note.velocity).toBeLessThanOrEqual(127);
     expect(note.start_tick).toBeGreaterThanOrEqual(0);
     expect(note.duration).toBeGreaterThan(0);
+    expect(typeof note.source).toBe('string');
+    expect((note.source ?? '').length).toBeGreaterThan(0);
+  });
+
+  it('events JSON should expose a non-empty source on every note', () => {
+    bach = new BachGenerator();
+    bach.generate({ form: 'fugue', seed: 42 });
+    const events = bach.getEvents();
+    for (const track of events.tracks) {
+      for (const note of track.notes) {
+        expect(typeof note.source).toBe('string');
+        expect((note.source ?? '').length).toBeGreaterThan(0);
+      }
+    }
   });
 });

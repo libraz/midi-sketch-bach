@@ -27,6 +27,7 @@ typedef enum {
   BACH_ERROR_INVALID_CHARACTER = 5,
   BACH_ERROR_INVALID_INSTRUMENT = 6,
   BACH_ERROR_INCOMPATIBLE_CHARACTER_FORM = 7,
+  BACH_ERROR_INVALID_CONFIG = 8,
 } BachError;
 
 // ============================================================================
@@ -72,17 +73,30 @@ void bach_destroy(BachHandle handle);
 
 /// @brief Generate a Bach composition from a JSON config string.
 ///
-/// JSON fields (all optional, defaults applied):
-///   form: string ("fugue", "prelude_and_fugue", etc.)
-///   key: number (0-11, pitch class)
-///   is_minor: boolean
-///   num_voices: number (2-5)
-///   bpm: number (40-200, 0 = default 100)
-///   seed: number (0 = random)
-///   character: string ("severe", "playful", "noble", "restless")
-///   instrument: string ("organ", "violin", "cello", etc.)
-///   scale: string ("short", "medium", "long", "full")
-///   target_bars: number (0 = use scale, >0 = override)
+/// Drives the composer subsystem (the WASM product path). Internal generation
+/// runs in C; transposition to the requested key happens only at MIDI output.
+///
+/// JSON fields:
+///   form: string ("fugue", "prelude_and_fugue", ...) or number (0-9).
+///         Strict: an unknown name or out-of-range number is rejected with
+///         BACH_ERROR_INVALID_FORM.
+///   key: number (0-11, pitch class). Out of range => BACH_ERROR_INVALID_KEY.
+///   is_minor: boolean (default false).
+///   num_voices: number. ACCEPTED AND IGNORED for backward compatibility; the
+///         form now decides the voice count. Never an error.
+///   bpm: number. 0 or absent => default 100. Otherwise must be in [40, 200],
+///         else BACH_ERROR_INVALID_CONFIG.
+///   seed: number. 0 or absent => a random non-zero seed is generated; the
+///         resolved value is reported via BachInfo::seed_used.
+///   character: string ("severe", "playful", "noble", "restless") or number
+///         (0-3). Strict: unknown name / out-of-range number =>
+///         BACH_ERROR_INVALID_CHARACTER.
+///   instrument: string ("organ", "violin", "cello", ...) or number (0-5).
+///         Absent => default for the form. Strict: unknown name /
+///         out-of-range number => BACH_ERROR_INVALID_INSTRUMENT.
+///   scale: string ("short", "medium", "long", "full") or number (0-3).
+///         Strict: unknown => BACH_ERROR_INVALID_CONFIG. Default "short".
+///   target_bars: number (0 = use scale, >0 = override scale).
 ///
 /// @param handle Bach handle
 /// @param json JSON config string

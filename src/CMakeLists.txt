@@ -240,6 +240,9 @@ if(BUILD_WASM)
   target_compile_definitions(bach PRIVATE BACH_WASM)
   target_compile_features(bach PUBLIC cxx_std_17)
 
+  # bach_c.cpp drives the composer subsystem; link the composer library.
+  target_link_libraries(bach PRIVATE bach_composer_lib)
+
   # Copy to dist directory
   add_custom_command(TARGET bach POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_SOURCE_DIR}/dist

@@ -157,4 +157,121 @@ TEST_F(JsonExportTest, BothFilesShareNoteCount) {
   EXPECT_EQ(gen_indices, expected);
 }
 
+namespace {
+
+// Build a tiny hand-rolled ComposeResult: 2 voices, 4 notes total, with
+// provenance index-parallel to the flat notes vector and tracks partitioning
+// the same notes by voice in order.
+ComposeResult buildHomepageFixture() {
+  ComposeResult res;
+
+  auto make_note = [](VoiceId voice, Tick start, std::uint8_t pitch,
+                      std::uint8_t velocity) {
+    NoteEvent n;
+    n.voice = voice;
+    n.start_tick = start;
+    n.duration = kTicksPerBeat;
+    n.pitch = pitch;
+    n.velocity = velocity;
+    return n;
+  };
+  auto make_prov = [](NoteSource source) {
+    NoteProvenance p;
+    p.source = source;
+    return p;
+  };
+
+  // Flat notes + parallel provenance (voice 0 then voice 1).
+  res.notes.push_back(make_note(0, 0, 60, 90));
+  res.provenance.push_back(make_prov(NoteSource::Material));
+  res.notes.push_back(make_note(0, kTicksPerBeat, 64, 91));
+  res.provenance.push_back(make_prov(NoteSource::Compose));
+  res.notes.push_back(make_note(1, 0, 48, 70));
+  res.provenance.push_back(make_prov(NoteSource::Compose));
+  res.notes.push_back(make_note(1, kTicksPerBeat, 50, 71));
+  res.provenance.push_back(make_prov(NoteSource::Ornament));
+
+  Track t0;
+  t0.name = "Voice 1";
+  t0.channel = 0;
+  t0.program = 6;
+  t0.notes.push_back(res.notes[0]);
+  t0.notes.push_back(res.notes[1]);
+  res.tracks.push_back(t0);
+
+  Track t1;
+  t1.name = "Voice 2";
+  t1.channel = 1;
+  t1.program = 42;
+  t1.notes.push_back(res.notes[2]);
+  t1.notes.push_back(res.notes[3]);
+  res.tracks.push_back(t1);
+
+  return res;
+}
+
+HomepageMeta buildHomepageMeta() {
+  HomepageMeta meta;
+  meta.form_name = "fugue";
+  meta.key_name = "G minor";
+  meta.bpm = 96;
+  meta.seed = 12345;
+  meta.total_ticks = 2 * kTicksPerBeat;
+  meta.total_bars = 1;
+  meta.description = "Fugue in G minor";
+  return meta;
+}
+
+}  // namespace
+
+TEST(HomepageEventsJsonTest, EmitsContractFieldsAndValues) {
+  const ComposeResult res = buildHomepageFixture();
+  const HomepageMeta meta = buildHomepageMeta();
+  const std::string json = buildHomepageEventsJson(res, meta);
+
+  // Top-level metadata.
+  EXPECT_TRUE(contains(json, "\"form\":\"fugue\""));
+  EXPECT_TRUE(contains(json, "\"key\":\"G minor\""));
+  EXPECT_TRUE(contains(json, "\"bpm\":96"));
+  EXPECT_TRUE(contains(json, "\"seed\":12345"));
+  EXPECT_TRUE(contains(json, "\"total_ticks\":960"));
+  EXPECT_TRUE(contains(json, "\"total_bars\":1"));
+  EXPECT_TRUE(contains(json, "\"description\":\"Fugue in G minor\""));
+
+  // Tracks block.
+  EXPECT_TRUE(contains(json, "\"tracks\":"));
+  EXPECT_TRUE(contains(json, "\"name\":\"Voice 1\""));
+  EXPECT_TRUE(contains(json, "\"name\":\"Voice 2\""));
+  EXPECT_TRUE(contains(json, "\"channel\":1"));
+  EXPECT_TRUE(contains(json, "\"program\":6"));
+  EXPECT_TRUE(contains(json, "\"program\":42"));
+  EXPECT_TRUE(contains(json, "\"note_count\":2"));
+
+  // Per-note fields.
+  EXPECT_TRUE(contains(json, "\"pitch\":60"));
+  EXPECT_TRUE(contains(json, "\"velocity\":90"));
+  EXPECT_TRUE(contains(json, "\"start_tick\":0"));
+  EXPECT_TRUE(contains(json, "\"duration\":480"));
+  EXPECT_TRUE(contains(json, "\"voice\":1"));
+  EXPECT_TRUE(contains(json, "\"source\":\"material\""));
+  EXPECT_TRUE(contains(json, "\"source\":\"compose\""));
+}
+
+TEST(HomepageEventsJsonTest, OrnamentSourceMapsToLowercaseString) {
+  const ComposeResult res = buildHomepageFixture();
+  const HomepageMeta meta = buildHomepageMeta();
+  const std::string json = buildHomepageEventsJson(res, meta);
+
+  // The voice-1 second note carries NoteSource::Ornament.
+  EXPECT_TRUE(contains(json, "\"source\":\"ornament\""));
+}
+
+TEST(HomepageEventsJsonTest, DeterministicAcrossCalls) {
+  const ComposeResult res = buildHomepageFixture();
+  const HomepageMeta meta = buildHomepageMeta();
+  const std::string first = buildHomepageEventsJson(res, meta);
+  const std::string second = buildHomepageEventsJson(res, meta);
+  EXPECT_EQ(first, second);
+}
+
 }  // namespace bach::composer

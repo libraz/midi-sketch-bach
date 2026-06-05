@@ -18,9 +18,6 @@ function configToJson(config: BachConfig): string {
   if (config.isMinor !== undefined) {
     obj.is_minor = config.isMinor;
   }
-  if (config.numVoices !== undefined) {
-    obj.num_voices = config.numVoices;
-  }
   if (config.bpm !== undefined) {
     obj.bpm = config.bpm;
   }
