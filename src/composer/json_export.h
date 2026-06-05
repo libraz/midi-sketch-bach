@@ -30,10 +30,12 @@ namespace bach::composer {
 
 constexpr std::uint32_t kTicksPerBeatExport = kTicksPerBeat;
 
-// Emit the evaluator-facing JSON. Contains only the polyphonic note
-// stream and the minimum metadata an external evaluator needs to
-// interpret tick units.
+// Emit the evaluator-facing JSON. Contains the polyphonic note stream, the
+// minimum metadata an external evaluator needs to interpret tick units, and
+// optional info-level validation metrics.
 std::string emitGeneratedJson(const std::vector<NoteEvent>& notes);
+std::string emitGeneratedJson(const std::vector<NoteEvent>& notes,
+                              const ValidationReport& validation);
 
 // Emit the developer-facing audit JSON. One entry per note, parallel to
 // generated.json.notes by index, carrying the full NoteProvenance.

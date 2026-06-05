@@ -2,6 +2,7 @@
 #define BACH_COMPOSER_CANDIDATE_SEARCH_H
 
 #include <cstddef>
+#include <cstdint>
 #include <vector>
 
 #include "composer/candidate.h"
@@ -11,6 +12,12 @@
 #include "core/basic_types.h"
 
 namespace bach::composer {
+
+enum class MelodicCorpusCategory : std::uint8_t {
+  Organ = 0,
+  SoloString = 1,
+  Chorale = 2,
+};
 
 // Context handed to candidate enumeration. Only the values the search
 // rules need to score a single span are exposed; nothing legacy.
@@ -41,6 +48,11 @@ struct CandidateContext {
   // callers get the original behavior — pairs outside the upper
   // voices are not constrained.
   std::uint8_t num_voices = 2;
+
+  // Category bucket for corpus-statistics melodic scoring. The default weight
+  // configuration uses this to choose the corpus Gaussian fit for candidate
+  // selection.
+  MelodicCorpusCategory melodic_category = MelodicCorpusCategory::Organ;
 
   // True iff `prev_pitch` is a non-chord-tone of the chord active at
   // its onset (i.e. a passing tone). When true, the next pitch in this

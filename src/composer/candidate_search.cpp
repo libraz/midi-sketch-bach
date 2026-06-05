@@ -2,11 +2,14 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstdint>
 #include <cstdlib>
+#include <string_view>
 #include <vector>
 
 #include "composer/chord_voicing.h"
+#include "composer/melodic_tables.h"
 #include "composer/motif_ops.h"
 #include "composer/rule_helpers.h"
 
@@ -15,6 +18,46 @@ namespace bach::composer {
 namespace {
 
 constexpr Tick kQuarter = kTicksPerBeat;
+
+struct MelodicScoringConfig {
+  bool use_shadow_selection = true;
+  bool step_bonus_enabled = true;
+  float proximity_weight = 2.0f;
+  float range_weight = 1.0f;
+  float scale_degree_weight = 0.0f;
+  float markov_weight = 0.0f;
+  float local_rule_adjustment_weight = 4.0f;
+};
+
+bool envEquals(const char* name, std::string_view value) {
+  const char* raw = std::getenv(name);
+  return raw != nullptr && value == raw;
+}
+
+float envFloat(const char* name, float fallback) {
+  const char* raw = std::getenv(name);
+  if (raw == nullptr || raw[0] == '\0') {
+    return fallback;
+  }
+  char* end = nullptr;
+  const float parsed = std::strtof(raw, &end);
+  return end != raw ? parsed : fallback;
+}
+
+MelodicScoringConfig melodicScoringConfig() {
+  MelodicScoringConfig config;
+  if (envEquals("BACH_MELODIC_SELECTION", "current")) {
+    config.use_shadow_selection = false;
+  } else if (envEquals("BACH_MELODIC_SELECTION", "shadow")) {
+    config.use_shadow_selection = true;
+  }
+  config.step_bonus_enabled = !envEquals("BACH_MELODIC_STEP_BONUS", "0");
+  config.proximity_weight = envFloat("BACH_MELODIC_WP", 2.0f);
+  config.range_weight = envFloat("BACH_MELODIC_WR", 1.0f);
+  config.scale_degree_weight = envFloat("BACH_MELODIC_WSD", 0.0f);
+  config.markov_weight = envFloat("BACH_MELODIC_WM", 0.0f);
+  return config;
+}
 
 // Harmonic primitives are shared with composer.cpp via rule_helpers; the
 // local aliases keep the existing call sites (triadPitchClasses, activeChord)
@@ -103,6 +146,58 @@ void applyP8Bits(RuleIdMask& rules, const HarmonicPlan& plan, const ChordEvent& 
   }
 }
 
+tables::GaussianFit gaussianFitFor(MelodicCorpusCategory category) {
+  switch (category) {
+    case MelodicCorpusCategory::SoloString:
+      return tables::kGaussianFitSoloString;
+    case MelodicCorpusCategory::Chorale:
+      return tables::kGaussianFitChorale;
+    case MelodicCorpusCategory::Organ:
+      return tables::kGaussianFitOrgan;
+  }
+  return tables::kGaussianFitOrgan;
+}
+
+float computeShadowScore(int pitch, bool is_triad, const CandidateContext& context,
+                         const std::vector<std::uint8_t>& recent_pitches,
+                         std::uint8_t pre_prev_pitch_local, std::uint8_t prev_pitch_local,
+                         bool is_minor_mode, bool include_markov,
+                         const MelodicScoringConfig& config) {
+  const tables::GaussianFit fit = gaussianFitFor(context.melodic_category);
+  const float chord_term = is_triad ? 0.8f : 0.4f;
+  const int mode_index = is_minor_mode ? 1 : 0;
+  const float scale_degree = tables::kScaleDegreeLogP[mode_index][pitch % 12];
+
+  float proximity = 0.0f;
+  if (prev_pitch_local != 0) {
+    const float delta = static_cast<float>(pitch) - static_cast<float>(prev_pitch_local);
+    proximity = -(delta * delta) / (2.0f * fit.vp);
+  }
+
+  float range_center = static_cast<float>(context.voice_center);
+  if (!recent_pitches.empty()) {
+    int sum = 0;
+    const std::size_t begin = recent_pitches.size() > 8 ? recent_pitches.size() - 8 : 0;
+    for (std::size_t i = begin; i < recent_pitches.size(); ++i) {
+      sum += static_cast<int>(recent_pitches[i]);
+    }
+    range_center = static_cast<float>(sum) / static_cast<float>(recent_pitches.size() - begin);
+  }
+  const float range_delta = static_cast<float>(pitch) - range_center;
+  const float range = -(range_delta * range_delta) / (2.0f * fit.vr);
+
+  float markov = 0.0f;
+  if (include_markov && pre_prev_pitch_local != 0 && prev_pitch_local != 0) {
+    const int prev_int = std::max(-12, std::min(12, static_cast<int>(prev_pitch_local) -
+                                                        static_cast<int>(pre_prev_pitch_local)));
+    const int cur_int = std::max(-12, std::min(12, pitch - static_cast<int>(prev_pitch_local)));
+    markov = tables::kIntervalLogP[prev_int + 12][cur_int + 12];
+  }
+
+  return chord_term + (config.proximity_weight * proximity) + (config.range_weight * range) +
+         (config.scale_degree_weight * scale_degree) + (config.markov_weight * markov);
+}
+
 // Imports of shared rule primitives (defined in composer/rule_helpers.cpp).
 // Local re-exports keep the existing call sites unchanged while routing
 // all rule semantics through the single shared implementation.
@@ -161,6 +256,23 @@ bool hasContraryMotion(const std::vector<NoteEvent>& placed, VoiceId candidate_v
     }
   }
   return false;
+}
+
+std::uint8_t nextSameVoiceStartingAfter(const std::vector<NoteEvent>& placed, VoiceId voice,
+                                        Tick tick) {
+  Tick best_tick = 0;
+  std::uint8_t best_pitch = 0;
+  for (const auto& note : placed) {
+    if (note.voice != voice)
+      continue;
+    if (note.start_tick <= tick)
+      continue;
+    if (best_pitch == 0 || note.start_tick < best_tick) {
+      best_tick = note.start_tick;
+      best_pitch = note.pitch;
+    }
+  }
+  return best_pitch;
 }
 
 const CadenceCell* cadenceCellAt(const Material& material, Tick tick) {
@@ -863,6 +975,7 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
   // of the rule cascade (vertical, leap, passing-tone) operates per
   // note position and is stride-agnostic.
   const Tick stride = (span.subdivision == Subdivision::Eighth) ? kQuarter / 2 : kQuarter;
+  const MelodicScoringConfig scoring_config = melodicScoringConfig();
 
   // Local cursor used for vertical (other-voice) parallel checks.
   // Holds the candidate this enumerate() call just committed, or the
@@ -880,6 +993,13 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
   // rule applies across span boundaries, then update on each commit.
   std::uint8_t pre_prev_pitch_local = context.pre_prev_pitch;
   std::uint8_t prev_pitch_local = context.prev_pitch;
+  std::vector<std::uint8_t> recent_pitches;
+  if (context.pre_prev_pitch != 0) {
+    recent_pitches.push_back(context.pre_prev_pitch);
+  }
+  if (context.prev_pitch != 0) {
+    recent_pitches.push_back(context.prev_pitch);
+  }
 
   // Leave-side passing-tone tracker. True iff the most recent commit
   // (in this span, or carried from the previous span via context)
@@ -894,21 +1014,31 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
     const ChordEvent& chord = activeChord(harmonic_plan, t);
     const auto triad = triadPitchClasses(chord);
     const CadenceCell* cadence_cell = cadenceCellAt(material, t);
+    const bool force_cadence_pc = cadence_cell != nullptr;
     const bool force_bass_cadence_pc = cadence_cell != nullptr && span.voice > 0;
     const std::uint8_t forced_cadence_pc =
-        (cadence_cell != nullptr && t == cadence_cell->approach_tick)
-            ? cadence_cell->bass_approach_pc
-            : ((cadence_cell != nullptr) ? cadence_cell->bass_cadence_pc : 0);
+        (cadence_cell != nullptr && span.voice == 0)
+            ? ((t == cadence_cell->approach_tick) ? cadence_cell->soprano_approach_pc
+                                                  : cadence_cell->soprano_cadence_pc)
+            : ((cadence_cell != nullptr && t == cadence_cell->approach_tick)
+                   ? cadence_cell->bass_approach_pc
+                   : ((cadence_cell != nullptr) ? cadence_cell->bass_cadence_pc : 0));
 
     // Enumerate triad-tone pitches in [voice_center - 7, voice_center + 12].
     int best_pitch = -1;
     float best_score = -1.0f;
+    float best_selection_score = -1.0e9f;
+    float best_shadow_score = 0.0f;
+    int best_shadow_pitch = -1;
+    float best_shadow_winner_score = -1.0e9f;
+    int best_shadow_pitch_without_markov = -1;
+    float best_shadow_winner_score_without_markov = -1.0e9f;
     RuleIdMask best_rules = 0;
     for (int p = context.voice_center - 7; p <= context.voice_center + 12; ++p) {
       if (p < 0 || p > 127)
         continue;
       const std::uint8_t pc = static_cast<std::uint8_t>(p % 12);
-      if (force_bass_cadence_pc && pc != forced_cadence_pc)
+      if (force_cadence_pc && pc != forced_cadence_pc)
         continue;
       const bool is_triad = (pc == triad[0]) || (pc == triad[1]) || (pc == triad[2]);
       const bool strong = isStrongBeat(t, harmonic_plan.ticksPerBar());
@@ -1140,7 +1270,7 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
         }
       }
 
-      if (!force_bass_cadence_pc && isLeadingTone(static_cast<std::uint8_t>(p), harmonic_plan)) {
+      if (isLeadingTone(static_cast<std::uint8_t>(p), harmonic_plan)) {
         const Tick t_next = t + stride;
         bool has_resolution = false;
         if (context.placed_notes != nullptr) {
@@ -1149,10 +1279,56 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
           if (fixed_next != 0) {
             has_resolution =
                 resolvesLeadingTone(static_cast<std::uint8_t>(p), fixed_next, harmonic_plan);
+          } else {
+            const std::uint8_t future_fixed =
+                nextSameVoiceStartingAfter(*context.placed_notes, span.voice, t_next);
+            if (future_fixed != 0) {
+              has_resolution =
+                  resolvesLeadingTone(static_cast<std::uint8_t>(p), future_fixed, harmonic_plan);
+            }
           }
         }
-        if (!has_resolution && t_next < span.end_tick) {
+        const CadenceCell* immediate_cadence_cell = cadenceCellAt(material, t_next);
+        if (immediate_cadence_cell != nullptr) {
+          const std::uint8_t immediate_forced_pc =
+              (span.voice == 0) ? ((t_next == immediate_cadence_cell->approach_tick)
+                                       ? immediate_cadence_cell->soprano_approach_pc
+                                       : immediate_cadence_cell->soprano_cadence_pc)
+                                : ((t_next == immediate_cadence_cell->approach_tick)
+                                       ? immediate_cadence_cell->bass_approach_pc
+                                       : immediate_cadence_cell->bass_cadence_pc);
+          bool cadence_can_resolve = false;
+          for (int q = static_cast<int>(p) + 1; q <= static_cast<int>(p) + 2; ++q) {
+            if (q < 0 || q > 127)
+              continue;
+            if (static_cast<std::uint8_t>(q % 12) != immediate_forced_pc)
+              continue;
+            if (resolvesLeadingTone(static_cast<std::uint8_t>(p), q, harmonic_plan)) {
+              cadence_can_resolve = true;
+              break;
+            }
+          }
+          if (!cadence_can_resolve)
+            continue;
+        }
+        if (!has_resolution && t_next + stride < span.end_tick) {
+          const CadenceCell* next_cadence_cell = cadenceCellAt(material, t_next);
+          const bool next_force_cadence_pc = next_cadence_cell != nullptr;
+          const std::uint8_t next_forced_cadence_pc =
+              (next_cadence_cell != nullptr && span.voice == 0)
+                  ? ((t_next == next_cadence_cell->approach_tick)
+                         ? next_cadence_cell->soprano_approach_pc
+                         : next_cadence_cell->soprano_cadence_pc)
+                  : ((next_cadence_cell != nullptr && t_next == next_cadence_cell->approach_tick)
+                         ? next_cadence_cell->bass_approach_pc
+                         : ((next_cadence_cell != nullptr) ? next_cadence_cell->bass_cadence_pc
+                                                           : 0));
           for (int q = p + 1; q <= p + 2; ++q) {
+            if (q < context.voice_center - 7 || q > context.voice_center + 12)
+              continue;
+            const std::uint8_t q_pc_for_cadence = static_cast<std::uint8_t>(q % 12);
+            if (next_force_cadence_pc && q_pc_for_cadence != next_forced_cadence_pc)
+              continue;
             if (!resolvesLeadingTone(static_cast<std::uint8_t>(p), q, harmonic_plan))
               continue;
             if (context.placed_notes != nullptr &&
@@ -1186,11 +1362,14 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
             const auto q_triad = triadPitchClasses(q_chord);
             const std::uint8_t q_pc = static_cast<std::uint8_t>(q % 12);
             const bool q_is_triad = q_pc == q_triad[0] || q_pc == q_triad[1] || q_pc == q_triad[2];
+            if (isStrongBeat(t_next, harmonic_plan.ticksPerBar()) && !q_is_triad) {
+              continue;
+            }
             if (!isStrongBeat(t_next) && !q_is_triad && context.placed_notes != nullptr) {
               const Tick q_next_tick = t_next + stride;
               const std::uint8_t fixed_after_q =
                   sameVoiceStartingAt(*context.placed_notes, span.voice, q_next_tick);
-              if (fixed_after_q != 0 && std::abs(q - static_cast<int>(fixed_after_q)) > 2) {
+              if (fixed_after_q == 0 || std::abs(q - static_cast<int>(fixed_after_q)) > 2) {
                 continue;
               }
             }
@@ -1231,9 +1410,75 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
         if (context.placed_notes != nullptr) {
           const std::uint8_t fixed_next =
               sameVoiceStartingAt(*context.placed_notes, span.voice, t_next);
+          bool has_known_followup = fixed_next != 0;
           if (fixed_next != 0 && std::abs(p - static_cast<int>(fixed_next)) > 2) {
             continue;
           }
+          if (fixed_next == 0) {
+            const std::uint8_t future_fixed =
+                nextSameVoiceStartingAfter(*context.placed_notes, span.voice, t_next);
+            has_known_followup = future_fixed != 0;
+            if (future_fixed != 0 && std::abs(p - static_cast<int>(future_fixed)) > 2) {
+              continue;
+            }
+          }
+          if (!has_known_followup && t_next >= span.end_tick) {
+            continue;
+          }
+        }
+        if (t_next < span.end_tick) {
+          const ChordEvent& chord_next_lh = activeChord(harmonic_plan, t_next);
+          const auto triad_next = triadPitchClasses(chord_next_lh);
+          const bool next_strong = isStrongBeat(t_next, harmonic_plan.ticksPerBar());
+          bool has_step_followup = false;
+          for (int q = p - 2; q <= p + 2; ++q) {
+            if (q < context.voice_center - 7 || q > context.voice_center + 12)
+              continue;
+            if (q < 0 || q > 127)
+              continue;
+            const std::uint8_t q_pc = static_cast<std::uint8_t>(q % 12);
+            const bool q_is_triad =
+                (q_pc == triad_next[0]) || (q_pc == triad_next[1]) || (q_pc == triad_next[2]);
+            if (next_strong && !q_is_triad)
+              continue;
+            if (context.placed_notes != nullptr &&
+                createsVoiceCrossing(*context.placed_notes, span.voice,
+                                     static_cast<std::uint8_t>(q), t_next)) {
+              continue;
+            }
+            if (context.placed_notes != nullptr && next_strong &&
+                createsVerticalDissonance(*context.placed_notes, span.voice,
+                                          static_cast<std::uint8_t>(q), t_next)) {
+              continue;
+            }
+            if (context.placed_notes != nullptr &&
+                createsParallelPerfect(*context.placed_notes, span.voice,
+                                       static_cast<std::uint8_t>(q), t_next,
+                                       static_cast<std::uint8_t>(p), t)) {
+              continue;
+            }
+            if (context.placed_notes != nullptr &&
+                rule_helpers::createsParallelOctave(*context.placed_notes, span.voice,
+                                                    static_cast<std::uint8_t>(q), t_next,
+                                                    static_cast<std::uint8_t>(p), t)) {
+              continue;
+            }
+            if (context.placed_notes != nullptr &&
+                createsHiddenParallelPerfect(*context.placed_notes, span.voice,
+                                             static_cast<std::uint8_t>(q), t_next,
+                                             static_cast<std::uint8_t>(p), t)) {
+              continue;
+            }
+            if (context.placed_notes != nullptr &&
+                createsCrossRelation(*context.placed_notes, span.voice,
+                                     static_cast<std::uint8_t>(q), t_next)) {
+              continue;
+            }
+            has_step_followup = true;
+            break;
+          }
+          if (!has_step_followup)
+            continue;
         }
         if (isStrongBeat(t_next, harmonic_plan.ticksPerBar())) {
           const ChordEvent& chord_next_lh = activeChord(harmonic_plan, t_next);
@@ -1273,6 +1518,7 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
       }
 
       float score = is_triad ? 0.8f : 0.4f;
+      float independent_adjustment = 0.0f;
       // Prefer pitches close to the voice center. Quarter mode uses
       // the original 0.01 weight; Eighth mode uses 0.025 so the
       // tessitura anchor outweighs the per-position prev_pitch_local
@@ -1303,14 +1549,17 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
       // unreachable consonant set still lets a dissonant pick through.
       if (!strong && vertically_dissonant) {
         score -= 0.15f;
+        independent_adjustment -= 0.15f;
       }
       if (context.placed_notes != nullptr && have_parallel_anchor &&
           hasContraryMotion(*context.placed_notes, span.voice, static_cast<std::uint8_t>(p), t,
                             parallel_prev_pitch, parallel_prev_tick)) {
         score += 0.10f;
+        independent_adjustment += 0.10f;
       }
       if (force_bass_cadence_pc) {
         score += 0.50f;
+        independent_adjustment += 0.50f;
       }
 
       // P8 Picardy 3rd bias. The final picardy chord's identity is
@@ -1325,6 +1574,7 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
         const std::uint8_t major_third_pc = static_cast<std::uint8_t>((chord.root_pc + 4) % 12);
         if (static_cast<std::uint8_t>(pc) == major_third_pc) {
           score += 0.05f;
+          independent_adjustment += 0.05f;
         }
       }
 
@@ -1338,6 +1588,7 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
       if (span.subdivision == Subdivision::Quarter && !strong && pre_prev_pitch_local != 0 &&
           pre_prev_pitch_local == prev_pitch_local && p == static_cast<int>(prev_pitch_local)) {
         score -= 0.15f;
+        independent_adjustment -= 0.15f;
       }
 
       // Quarter-mode broad step bonus. Applies on every weak position
@@ -1363,11 +1614,12 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
       // alternative (holding a chord tone that becomes dissonant
       // when V0 moves) carries weak-beat soft penalty anyway, so a
       // diatonic step neighbor often outranks the dissonant unison.
-      if (span.subdivision == Subdivision::Quarter && !strong && !is_triad &&
-          prev_pitch_local != 0) {
+      if (scoring_config.step_bonus_enabled && span.subdivision == Subdivision::Quarter &&
+          !strong && !is_triad && prev_pitch_local != 0) {
         const int delta = std::abs(p - static_cast<int>(prev_pitch_local));
         if (delta == 1 || delta == 2) {
           score += 0.42f;
+          independent_adjustment += 0.42f;
         }
       }
 
@@ -1379,6 +1631,7 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
       // but lets the diatonic neighbor win every tie.
       if (span.subdivision == Subdivision::Quarter && !strong && !is_triad && !diatonic_pc[pc]) {
         score -= 0.05f;
+        independent_adjustment -= 0.05f;
       }
 
       // Eighth-note motion bias (two parts, only at Subdivision::Eighth):
@@ -1408,12 +1661,15 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
       // Quarter subdivision keeps the original scoring: held pitches
       // at quarter resolution are musically valid (suspensions, pedal
       // tones, etc.), and quarter-level triad oscillation is fine.
-      if (span.subdivision == Subdivision::Eighth && !strong && prev_pitch_local != 0) {
+      if (scoring_config.step_bonus_enabled && span.subdivision == Subdivision::Eighth && !strong &&
+          prev_pitch_local != 0) {
         const int delta = std::abs(p - static_cast<int>(prev_pitch_local));
         if (delta == 0) {
           score -= 0.15f;
+          independent_adjustment -= 0.15f;
         } else if (!is_triad && (delta == 1 || delta == 2)) {
           score += 0.40f;
+          independent_adjustment += 0.40f;
         }
       }
 
@@ -1427,6 +1683,7 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
       // tie.
       if (span.subdivision == Subdivision::Eighth && !strong && !is_triad && !diatonic_pc[pc]) {
         score -= 0.05f;
+        independent_adjustment -= 0.05f;
       }
 
       RuleIdMask rules = 0;
@@ -1509,10 +1766,140 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
         }
       }
 
-      if (score > best_score) {
-        best_score = score;
+      const float shadow_score =
+          computeShadowScore(p, is_triad, context, recent_pitches, pre_prev_pitch_local,
+                             prev_pitch_local, harmonic_plan.is_minor, true, scoring_config);
+      const float shadow_score_without_markov =
+          computeShadowScore(p, is_triad, context, recent_pitches, pre_prev_pitch_local,
+                             prev_pitch_local, harmonic_plan.is_minor, false, scoring_config);
+
+      if (shadow_score > best_shadow_winner_score) {
+        best_shadow_winner_score = shadow_score;
+        best_shadow_pitch = p;
+      }
+      if (shadow_score_without_markov > best_shadow_winner_score_without_markov) {
+        best_shadow_winner_score_without_markov = shadow_score_without_markov;
+        best_shadow_pitch_without_markov = p;
+      }
+
+      const float local_adjustment_weight =
+          context.placed_notes != nullptr ? scoring_config.local_rule_adjustment_weight : 1.0f;
+      const float selection_score =
+          scoring_config.use_shadow_selection
+              ? shadow_score + (local_adjustment_weight * independent_adjustment)
+              : score;
+      if (selection_score > best_selection_score) {
+        best_selection_score = selection_score;
+        best_score = selection_score;
+        best_shadow_score = shadow_score;
         best_pitch = p;
         best_rules = rules;
+      }
+    }
+
+    if (best_pitch < 0) {
+      if (force_cadence_pc) {
+        int fallback_pitch = -1;
+        int fallback_distance = 10000;
+        const int fallback_lo =
+            force_bass_cadence_pc ? (context.voice_center - 19) : (context.voice_center - 7);
+        const int fallback_hi = context.voice_center + 12;
+        for (int p = fallback_lo; p <= fallback_hi; ++p) {
+          if (p < 0 || p > 127)
+            continue;
+          if (static_cast<std::uint8_t>(p % 12) != forced_cadence_pc)
+            continue;
+          const int cadence_center =
+              force_bass_cadence_pc ? (context.voice_center - 12) : context.voice_center;
+          const int distance = std::abs(p - cadence_center);
+          if (distance < fallback_distance) {
+            fallback_distance = distance;
+            fallback_pitch = p;
+          }
+        }
+        if (fallback_pitch >= 0) {
+          best_pitch = fallback_pitch;
+          best_score = 0.0f;
+          best_selection_score = 0.0f;
+          best_shadow_score = 0.0f;
+          best_rules = 1ull << RuleBit::CadenceCellCommitted;
+          if (t == cadence_cell->cadence_tick) {
+            best_rules |= 1ull << RuleBit::CadenceVoiceLeadingChecked;
+          }
+          const std::uint8_t pc = static_cast<std::uint8_t>(best_pitch % 12);
+          if (pc == triad[0] || pc == triad[1] || pc == triad[2]) {
+            best_rules |= 1ull << RuleBit::ChordTone;
+          }
+        }
+      }
+    }
+
+    if (best_pitch < 0 && prev_pitch_local != 0 && isLeadingTone(prev_pitch_local, harmonic_plan)) {
+      for (int p = static_cast<int>(prev_pitch_local) + 1;
+           p <= static_cast<int>(prev_pitch_local) + 2; ++p) {
+        if (p < 0 || p > 127)
+          continue;
+        if (!resolvesLeadingTone(prev_pitch_local, p, harmonic_plan))
+          continue;
+        const std::uint8_t pc = static_cast<std::uint8_t>(p % 12);
+        const bool is_triad_fallback = (pc == triad[0]) || (pc == triad[1]) || (pc == triad[2]);
+        const bool fallback_strong = isStrongBeat(t, harmonic_plan.ticksPerBar());
+        if (fallback_strong && !is_triad_fallback)
+          continue;
+        if (!fallback_strong && !is_triad_fallback) {
+          const Tick t_next = t + stride;
+          bool leaves_by_step = false;
+          if (context.placed_notes != nullptr) {
+            const std::uint8_t fixed_next =
+                sameVoiceStartingAt(*context.placed_notes, span.voice, t_next);
+            if (fixed_next != 0 && std::abs(p - static_cast<int>(fixed_next)) <= 2) {
+              leaves_by_step = true;
+            }
+          }
+          if (!leaves_by_step)
+            continue;
+        }
+        if (context.placed_notes != nullptr &&
+            createsVoiceCrossing(*context.placed_notes, span.voice, static_cast<std::uint8_t>(p),
+                                 t)) {
+          continue;
+        }
+        if (context.placed_notes != nullptr &&
+            createsVerticalDissonance(*context.placed_notes, span.voice,
+                                      static_cast<std::uint8_t>(p), t)) {
+          continue;
+        }
+        if (context.placed_notes != nullptr && have_parallel_anchor &&
+            createsParallelPerfect(*context.placed_notes, span.voice, static_cast<std::uint8_t>(p),
+                                   t, parallel_prev_pitch, parallel_prev_tick)) {
+          continue;
+        }
+        if (context.placed_notes != nullptr && have_parallel_anchor &&
+            rule_helpers::createsParallelOctave(*context.placed_notes, span.voice,
+                                                static_cast<std::uint8_t>(p), t,
+                                                parallel_prev_pitch, parallel_prev_tick)) {
+          continue;
+        }
+        if (context.placed_notes != nullptr && have_parallel_anchor &&
+            createsHiddenParallelPerfect(*context.placed_notes, span.voice,
+                                         static_cast<std::uint8_t>(p), t, parallel_prev_pitch,
+                                         parallel_prev_tick)) {
+          continue;
+        }
+        if (context.placed_notes != nullptr &&
+            createsCrossRelation(*context.placed_notes, span.voice, static_cast<std::uint8_t>(p),
+                                 t)) {
+          continue;
+        }
+        best_pitch = p;
+        best_score = 0.0f;
+        best_selection_score = 0.0f;
+        best_shadow_score = 0.0f;
+        best_rules = (1ull << RuleBit::LeadingToneResolved);
+        if (is_triad_fallback) {
+          best_rules |= 1ull << RuleBit::ChordTone;
+        }
+        break;
       }
     }
 
@@ -1531,6 +1918,11 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
     c.duration = stride;
     c.pitch = static_cast<std::uint8_t>(best_pitch);
     c.score = best_score;
+    c.shadow_score = best_shadow_score;
+    c.shadow_winning_pitch =
+        static_cast<std::uint8_t>(best_shadow_pitch >= 0 ? best_shadow_pitch : best_pitch);
+    c.shadow_winning_pitch_without_markov = static_cast<std::uint8_t>(
+        best_shadow_pitch_without_markov >= 0 ? best_shadow_pitch_without_markov : best_pitch);
     c.satisfied_rules = best_rules;
     out.push_back(c);
 
@@ -1539,6 +1931,7 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
     have_parallel_anchor = true;
     pre_prev_pitch_local = prev_pitch_local;
     prev_pitch_local = c.pitch;
+    recent_pitches.push_back(c.pitch);
     // The picked candidate is a triad-tone iff bit 0 of satisfied_rules
     // is set (rule[0] = ChordTone). Use that to update the leave-side
     // tracker — non-triad commits require the next position to be

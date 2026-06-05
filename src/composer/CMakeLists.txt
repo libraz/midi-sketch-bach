@@ -15,6 +15,7 @@ set(BACH_COMPOSER_SOURCES
   voice_intent.cpp
   candidate_search.cpp
   rule_helpers.cpp
+  stream_segregation.cpp
   nct_detector.cpp
   motif_ops.cpp
   tonal_answer.cpp

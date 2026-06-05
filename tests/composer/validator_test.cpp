@@ -3,6 +3,7 @@
 #include <gtest/gtest.h>
 
 #include <cstdint>
+#include <iterator>
 #include <string>
 #include <vector>
 
@@ -77,6 +78,49 @@ TEST(ValidatorTest, EmptyInputPasses) {
   ValidationReport r = v.validate({}, {}, cMajorWhole());
   EXPECT_EQ(r.status, ValidationStatus::Ok);
   EXPECT_TRUE(r.failures.empty());
+}
+
+TEST(ValidatorTest, ReportsSubjectFeaturesAsInfoMetrics) {
+  Material material;
+  const std::uint8_t pitches[] = {60, 62, 64, 65, 67, 69, 71, 72};
+  for (std::size_t i = 0; i < std::size(pitches); ++i) {
+    MaterialNote note;
+    note.start_tick = static_cast<Tick>(i) * kTicksPerBeat;
+    note.duration = kTicksPerBeat;
+    note.pitch = pitches[i];
+    material.subject.push_back(note);
+  }
+
+  ValidationReport r = Validator{}.validate({}, {}, cMajorWhole(), material);
+  EXPECT_EQ(r.status, ValidationStatus::Ok);
+  ASSERT_EQ(r.subject_features.size(), 1u);
+  EXPECT_EQ(r.subject_features[0].length, 8);
+  EXPECT_EQ(r.subject_features[0].range_semitones, 12);
+  EXPECT_EQ(r.subject_features[0].unique_pitch_classes, 7);
+  EXPECT_EQ(r.subject_features[0].opening_interval, 2);
+  EXPECT_EQ(r.subject_features[0].unique_intervals, 2);
+  EXPECT_EQ(r.subject_features[0].max_leap, 2);
+}
+
+TEST(ValidatorTest, ReportsStreamSegregationCellDivergenceAsInfoMetrics) {
+  Material material;
+  const std::uint8_t pitches[] = {60, 65, 70, 75, 80, 85, 90, 95};
+  for (std::size_t i = 0; i < std::size(pitches); ++i) {
+    MaterialNote note;
+    note.start_tick = static_cast<Tick>(i) * (kTicksPerBeat / 4);
+    note.duration = kTicksPerBeat / 4;
+    note.pitch = pitches[i];
+    material.arpeggio_template.notes.push_back(note);
+  }
+  material.arpeggio_template.group_size = 4;
+
+  ValidationReport r = Validator{}.validate({}, {}, cMajorWhole(), material);
+  EXPECT_EQ(r.status, ValidationStatus::Ok);
+  ASSERT_EQ(r.stream_segregation.size(), 1u);
+  EXPECT_EQ(r.stream_segregation[0].detected_stream_count, 1);
+  EXPECT_EQ(r.stream_segregation[0].cell_based_stream_count, 2);
+  EXPECT_EQ(r.stream_segregation[0].cell_count, 2);
+  EXPECT_TRUE(r.stream_segregation[0].disagrees_with_cell_counterpoint);
 }
 
 TEST(ValidatorTest, StrongBeatConsonancePasses) {

@@ -3,10 +3,12 @@
 #include <algorithm>
 #include <array>
 #include <cstdint>
+#include <limits>
 
 #include "composer/chord_voicing.h"
 #include "composer/motif_ops.h"
 #include "composer/rule_helpers.h"
+#include "composer/stream_segregation.h"
 
 namespace bach::composer {
 
@@ -120,6 +122,38 @@ bool hasRuleBit(const std::vector<NoteProvenance>& provenance, std::size_t index
   return (provenance[index].satisfied_rules & (1ull << bit)) != 0;
 }
 
+SubjectFeatures computeSubjectFeatures(const std::vector<MaterialNote>& subject) {
+  SubjectFeatures features;
+  features.length = static_cast<int>(subject.size());
+  if (subject.empty())
+    return features;
+
+  int lo = std::numeric_limits<int>::max();
+  int hi = std::numeric_limits<int>::min();
+  std::array<bool, 12> pcs{};
+  std::array<bool, 25> intervals{};  // absolute semitones, clamped to 24.
+  for (const auto& note : subject) {
+    const int pitch = static_cast<int>(note.pitch);
+    lo = std::min(lo, pitch);
+    hi = std::max(hi, pitch);
+    pcs[static_cast<std::size_t>(pitch % 12)] = true;
+  }
+  features.range_semitones = hi - lo;
+  features.unique_pitch_classes = static_cast<int>(std::count(pcs.begin(), pcs.end(), true));
+
+  for (std::size_t i = 1; i < subject.size(); ++i) {
+    const int interval =
+        std::abs(static_cast<int>(subject[i].pitch) - static_cast<int>(subject[i - 1].pitch));
+    if (i == 1)
+      features.opening_interval = interval;
+    features.max_leap = std::max(features.max_leap, interval);
+    intervals[static_cast<std::size_t>(std::min(interval, 24))] = true;
+  }
+  features.unique_intervals =
+      static_cast<int>(std::count(intervals.begin(), intervals.end(), true));
+  return features;
+}
+
 }  // namespace
 
 ValidationReport Validator::validate(const std::vector<NoteEvent>& notes,
@@ -127,6 +161,22 @@ ValidationReport Validator::validate(const std::vector<NoteEvent>& notes,
                                      const HarmonicPlan& harmonic_plan,
                                      const Material& material) const {
   ValidationReport report;
+  if (!material.subject.empty()) {
+    report.subject_features.push_back(computeSubjectFeatures(material.subject));
+  }
+  if (!material.arpeggio_template.notes.empty()) {
+    StreamSegregationSpan stream_info =
+        stream_segregation::analyzeSpan(material.arpeggio_template.notes, kInvalidSpanId);
+    const int group_size = material.arpeggio_template.group_size;
+    if (group_size >= 2) {
+      stream_info.cell_count = static_cast<int>(material.arpeggio_template.notes.size() /
+                                                static_cast<std::size_t>(group_size));
+      stream_info.cell_based_stream_count = stream_info.cell_count >= 2 ? 2 : 1;
+    }
+    stream_info.disagrees_with_cell_counterpoint =
+        stream_info.detected_stream_count != stream_info.cell_based_stream_count;
+    report.stream_segregation.push_back(stream_info);
+  }
 
   // Meter-derived bar length for every bar-position / bar-index rule below.
   // Defaults to 1920 (4/4) when the plan carries the default time signature,

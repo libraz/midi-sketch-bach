@@ -68,7 +68,7 @@ class JsonExportTest : public ::testing::Test {
  protected:
   void SetUp() override {
     result_ = Composer{}.run(trivialMaterial(), trivialHarmony(), trivialVoicePlan());
-    generated_ = emitGeneratedJson(result_.notes);
+    generated_ = emitGeneratedJson(result_.notes, result_.validation);
     provenance_ = emitProvenanceJson(result_.provenance);
   }
 
@@ -83,10 +83,38 @@ TEST_F(JsonExportTest, GeneratedJsonHasMinimalShape) {
   EXPECT_TRUE(contains(generated_, "\"notes\":"));
 }
 
+TEST_F(JsonExportTest, GeneratedJsonCarriesInfoMetricsWhenAvailable) {
+  EXPECT_TRUE(contains(generated_, "\"info\":"));
+  EXPECT_TRUE(contains(generated_, "\"subject_features\":"));
+  EXPECT_TRUE(contains(generated_, "\"length\":4"));
+  EXPECT_TRUE(contains(generated_, "\"range_semitones\":6"));
+}
+
+TEST(JsonExportInfoTest, GeneratedJsonCarriesStreamCellDivergenceMetrics) {
+  ValidationReport report;
+  StreamSegregationSpan span;
+  span.detected_stream_count = 1;
+  span.cell_based_stream_count = 2;
+  span.cell_count = 4;
+  span.disagrees_with_cell_counterpoint = true;
+  span.transition_note_indices = {2, 5};
+  report.stream_segregation.push_back(span);
+
+  const std::string json = emitGeneratedJson({}, report);
+  EXPECT_TRUE(contains(json, "\"stream_segregation\":"));
+  EXPECT_TRUE(contains(json, "\"cell_based_stream_count\":2"));
+  EXPECT_TRUE(contains(json, "\"cell_count\":4"));
+  EXPECT_TRUE(contains(json, "\"disagrees_with_cell_counterpoint\":true"));
+  EXPECT_TRUE(contains(json, "\"transition_note_indices\":[2,5]"));
+}
+
 TEST_F(JsonExportTest, GeneratedJsonOmitsInternalFields) {
   // generated.json must not carry composer-internal metadata.
   EXPECT_FALSE(contains(generated_, "voice_intent"));
   EXPECT_FALSE(contains(generated_, "candidate_score"));
+  EXPECT_FALSE(contains(generated_, "shadow_score"));
+  EXPECT_FALSE(contains(generated_, "shadow_winning_pitch"));
+  EXPECT_FALSE(contains(generated_, "shadow_winning_pitch_without_markov"));
   EXPECT_FALSE(contains(generated_, "satisfied_rules"));
   EXPECT_FALSE(contains(generated_, "span_id"));
   EXPECT_FALSE(contains(generated_, "source"));
@@ -100,6 +128,9 @@ TEST_F(JsonExportTest, ProvenanceJsonCarriesAuditFields) {
   EXPECT_TRUE(contains(provenance_, "\"schema_version\":\"provenance.v1\""));
   EXPECT_TRUE(contains(provenance_, "voice_intent"));
   EXPECT_TRUE(contains(provenance_, "candidate_score"));
+  EXPECT_TRUE(contains(provenance_, "shadow_score"));
+  EXPECT_TRUE(contains(provenance_, "shadow_winning_pitch"));
+  EXPECT_TRUE(contains(provenance_, "shadow_winning_pitch_without_markov"));
   EXPECT_TRUE(contains(provenance_, "satisfied_rules"));
   EXPECT_TRUE(contains(provenance_, "source"));
   EXPECT_TRUE(contains(provenance_, "span_id"));
@@ -165,8 +196,7 @@ namespace {
 ComposeResult buildHomepageFixture() {
   ComposeResult res;
 
-  auto make_note = [](VoiceId voice, Tick start, std::uint8_t pitch,
-                      std::uint8_t velocity) {
+  auto make_note = [](VoiceId voice, Tick start, std::uint8_t pitch, std::uint8_t velocity) {
     NoteEvent n;
     n.voice = voice;
     n.start_tick = start;

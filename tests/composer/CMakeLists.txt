@@ -14,6 +14,7 @@ set(BACH_COMPOSER_TEST_SOURCES
   json_export_test.cpp
   schema_validation_test.cpp
   rule_helpers_test.cpp
+  stream_segregation_test.cpp
   nct_detector_test.cpp
   motif_ops_test.cpp
   tonal_answer_test.cpp

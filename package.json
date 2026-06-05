@@ -29,6 +29,7 @@
     "lint:fix": "biome check --write js/ tests/wasm/",
     "format": "biome format --write js/ tests/wasm/",
     "test": "vitest run",
+    "test:demo": "node scripts/test-demo-generation.mjs",
     "test:watch": "vitest",
     "prepublishOnly": "yarn lint && yarn build"
   },

@@ -268,6 +268,16 @@ struct NoteProvenance {
   // aggregate initialisers and is out of scope.
   VoiceIntent voice_intent = VoiceIntent::FillerGap;
   float candidate_score = 0.0f;
+  // Corpus-probability melodic score used by the corpus-statistics scorer.
+  // Retained as "shadow" in JSON/provenance so downstream analyzers can audit
+  // the scorer without affecting committed pitches.
+  float shadow_score = 0.0f;
+  // Pitch that the corpus-statistics scorer would choose from the admissible
+  // candidate set. Under normal generation this should match the emitted pitch.
+  std::uint8_t shadow_winning_pitch = 0;
+  // Same shadow winner with the interval-Markov term disabled, used to isolate
+  // the interval-Markov term's effect on selection.
+  std::uint8_t shadow_winning_pitch_without_markov = 0;
   NoteSource source = NoteSource::Compose;
   RuleIdMask satisfied_rules = 0;
   std::uint16_t rejected_alternatives = 0;

@@ -86,6 +86,17 @@ VoiceCursor seedCursor(VoiceId voice, Tick span_start, const std::vector<NoteEve
   return c;
 }
 
+MelodicCorpusCategory inferMelodicCategory(const Material& material) {
+  if (!material.arpeggio_template.notes.empty() || !material.variations.empty() ||
+      !material.ground_bass.empty()) {
+    return MelodicCorpusCategory::SoloString;
+  }
+  if (!material.cantus_firmus.empty() || !material.cf_embellished.empty()) {
+    return MelodicCorpusCategory::Chorale;
+  }
+  return MelodicCorpusCategory::Organ;
+}
+
 // Texture / instrument / expression post-pass.
 //
 // Runs after candidate placement and sorting, before validation. It reads
@@ -262,6 +273,7 @@ ComposeResult Composer::run(const Material& material, const HarmonicPlan& harmon
     // run the vertical (parallel-perfect, voice-crossing) checks.
     ctx.placed_notes = &result.notes;
     ctx.num_voices = voice_plan.num_voices;
+    ctx.melodic_category = inferMelodicCategory(material);
 
     const auto candidates = search.enumerate(span, harmonic_plan, material, ctx, &saturated_total);
 
@@ -281,9 +293,12 @@ ComposeResult Composer::run(const Material& material, const HarmonicPlan& harmon
       prov.span_id = span.id;
       prov.voice_intent = span.intent;
       prov.candidate_score = cand.score;
+      prov.shadow_score = cand.shadow_score;
+      prov.shadow_winning_pitch = cand.shadow_winning_pitch;
+      prov.shadow_winning_pitch_without_markov = cand.shadow_winning_pitch_without_markov;
       prov.source = isCarrierIntent(span.intent) ? NoteSource::Material : NoteSource::Compose;
       prov.satisfied_rules = cand.satisfied_rules;
-      prov.rejected_alternatives = 0;  // Phase 2 has no alternative ranking
+      prov.rejected_alternatives = 0;  // commit policy does not rank alternatives
       result.provenance.push_back(prov);
     }
   };

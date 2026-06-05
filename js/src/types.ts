@@ -4,7 +4,7 @@
 
 /** Configuration for Bach generation. */
 export interface BachConfig {
-  /** Form type ID (0-8) or form name string. */
+  /** Form type ID (0-9) or form name string. */
   form?: number | string;
   /** Key pitch class (0-11: C, C#, D, Eb, E, F, F#, G, Ab, A, Bb, B). */
   key?: number;

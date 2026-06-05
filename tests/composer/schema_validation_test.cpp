@@ -83,7 +83,7 @@ std::string tempDir() {
 // is SKIPPED — failing the test would be a false alarm in those cases.
 TEST(SchemaValidation, GeneratedJsonConformsToBachMcpSchema) {
   ComposeResult result = Composer{}.run(trivialMaterial(), trivialHarmony(), trivialVoicePlan());
-  const std::string generated = emitGeneratedJson(result.notes);
+  const std::string generated = emitGeneratedJson(result.notes, result.validation);
 
   const std::string out_path = tempDir() + "/bach_generated_validation.json";
   {

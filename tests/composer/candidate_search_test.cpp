@@ -79,6 +79,26 @@ TEST(CandidateSearchTest, BaselinePicksTriadToneAtCenter) {
   EXPECT_EQ(cands.front().pitch, 55u);
 }
 
+TEST(CandidateSearchTest, ComposeCandidateUsesSelectedMelodicScore) {
+  CandidateSearch search;
+  CandidateContext ctx;
+  ctx.voice_center = 55;
+  ctx.prev_pitch = 53;
+  ctx.pre_prev_pitch = 52;
+  ctx.placed_notes = nullptr;
+
+  Material empty;
+  Span span = makeComposeSpan(kTicksPerBeat, 2 * kTicksPerBeat, 1);
+  const auto cands = search.enumerate(span, singleCMajor(), empty, ctx);
+
+  ASSERT_EQ(cands.size(), 1u);
+  EXPECT_NE(cands.front().shadow_score, 0.0f);
+  EXPECT_NE(cands.front().shadow_winning_pitch, 0);
+  EXPECT_NE(cands.front().shadow_winning_pitch_without_markov, 0);
+  EXPECT_EQ(cands.front().pitch, 52u);
+  EXPECT_EQ(cands.front().pitch, cands.front().shadow_winning_pitch);
+}
+
 // Direct test of the vertical rule. Set up a placed voice 0 that moves
 // C5 -> D5 across a beat. Run the search on voice 1 at the weak beat
 // (tick = one beat) with prev_pitch = F4. Without the vertical check
@@ -110,8 +130,9 @@ TEST(CandidateSearchTest, RejectsParallelFifthAgainstPlacedVoice) {
 }
 
 // Same fixture as above but with placed_notes left null — the vertical
-// rule is skipped and the score-winning candidate (G4) is committed.
-// This pins down the "no placed view, no rejection" branch.
+// rule is skipped and the selected melodic scorer commits its winner.
+// This pins down the "no placed view, no rejection" branch without relying
+// on the legacy current-score winner.
 TEST(CandidateSearchTest, NoPlacedNotesSkipsVerticalCheck) {
   CandidateContext ctx;
   ctx.voice_center = 55;
@@ -125,7 +146,8 @@ TEST(CandidateSearchTest, NoPlacedNotesSkipsVerticalCheck) {
   CandidateSearch search;
   const auto cands = search.enumerate(span, singleCMajor(), empty, ctx);
   ASSERT_EQ(cands.size(), 1u);
-  EXPECT_EQ(cands.front().pitch, 55u);
+  EXPECT_EQ(cands.front().pitch, 52u);
+  EXPECT_EQ(cands.front().pitch, cands.front().shadow_winning_pitch);
 }
 
 // Holding the prev pitch is not parallel motion, even when the placed
@@ -541,6 +563,27 @@ TEST(CandidateSearchTest, WeakBeatPenaltyDoesNotHardReject) {
   ASSERT_EQ(cands.size(), 1u);
 }
 
+TEST(CandidateSearchTest, RejectsWeakNonTriadWhenFutureFixedLeaveIsTooFar) {
+  std::vector<NoteEvent> placed = {
+      makePlaced(3 * kTicksPerBeat, kTicksPerBeat, 72, 0),
+  };
+
+  CandidateContext ctx;
+  ctx.voice_center = 82;
+  ctx.prev_pitch = 81;
+  ctx.prev_end_tick = kTicksPerBeat;
+  ctx.placed_notes = &placed;
+
+  Material empty;
+  Span span = makeComposeSpan(kTicksPerBeat, 3 * kTicksPerBeat, 0);
+
+  CandidateSearch search;
+  const auto cands = search.enumerate(span, singleCMajor(), empty, ctx);
+  ASSERT_FALSE(cands.empty());
+  EXPECT_NE(cands.front().pitch, 82u)
+      << "Bb5 is a weak non-triad and cannot leave by step to the next fixed C5";
+}
+
 TEST(CandidateSearchTest, ResolvesLeadingToneUpwardToTonic) {
   CandidateContext ctx;
   ctx.voice_center = 67;
@@ -556,6 +599,25 @@ TEST(CandidateSearchTest, ResolvesLeadingToneUpwardToTonic) {
   ASSERT_EQ(cands.size(), 1u);
   EXPECT_EQ(cands.front().pitch, 72u);
   EXPECT_NE(cands.front().satisfied_rules & (1ull << RuleBit::LeadingToneResolved), 0u);
+}
+
+TEST(CandidateSearchTest, RejectsLeadingToneWhenResolutionIsOutsideSearchRange) {
+  CandidateContext ctx;
+  // Search range is [52, 71]. B4 is reachable, but its required C5 resolution
+  // is not, so B4 must not be admitted on the speculative lookahead.
+  ctx.voice_center = 59;
+  ctx.prev_pitch = 70;
+  ctx.pre_prev_pitch = 69;
+  ctx.placed_notes = nullptr;
+
+  Material empty;
+  Span span = makeComposeSpan(kTicksPerBeat / 2, kTicksPerBeat, 0);
+  span.subdivision = Subdivision::Eighth;
+
+  CandidateSearch search;
+  const auto cands = search.enumerate(span, singleCMajor(), empty, ctx);
+  ASSERT_EQ(cands.size(), 1u);
+  EXPECT_NE(cands.front().pitch, 71u);
 }
 
 TEST(CandidateSearchTest, MaterialResolutionCarriesLeadingToneBit) {
@@ -585,6 +647,7 @@ TEST(CandidateSearchTest, ContraryMotionPreferenceCanBeatHeldTriadTone) {
   std::vector<NoteEvent> placed = {
       makePlaced(0, kTicksPerBeat, 74, 0),
       makePlaced(kTicksPerBeat, kTicksPerBeat, 73, 0),
+      makePlaced(2 * kTicksPerBeat, kTicksPerBeat, 67, 1),
   };
 
   CandidateContext ctx;

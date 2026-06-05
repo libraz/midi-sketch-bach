@@ -33,6 +33,12 @@ Tick computeDuration(const std::vector<NoteEvent>& notes) {
 }  // namespace
 
 std::string emitGeneratedJson(const std::vector<NoteEvent>& notes) {
+  ValidationReport empty_report;
+  return emitGeneratedJson(notes, empty_report);
+}
+
+std::string emitGeneratedJson(const std::vector<NoteEvent>& notes,
+                              const ValidationReport& validation) {
   JsonWriter w;
   w.beginObject();
   w.key("schema_version");
@@ -60,6 +66,63 @@ std::string emitGeneratedJson(const std::vector<NoteEvent>& notes) {
     w.endObject();
   }
   w.endArray();
+  if (!validation.subject_features.empty() || !validation.stream_segregation.empty()) {
+    w.key("info");
+    w.beginObject();
+    if (!validation.subject_features.empty()) {
+      w.key("subject_features");
+      w.beginArray();
+      for (const auto& features : validation.subject_features) {
+        w.beginObject();
+        w.key("length");
+        w.value(features.length);
+        w.key("range_semitones");
+        w.value(features.range_semitones);
+        w.key("unique_pitch_classes");
+        w.value(features.unique_pitch_classes);
+        w.key("opening_interval");
+        w.value(features.opening_interval);
+        w.key("unique_intervals");
+        w.value(features.unique_intervals);
+        w.key("max_leap");
+        w.value(features.max_leap);
+        w.endObject();
+      }
+      w.endArray();
+    }
+    if (!validation.stream_segregation.empty()) {
+      w.key("stream_segregation");
+      w.beginArray();
+      for (const auto& span : validation.stream_segregation) {
+        w.beginObject();
+        w.key("span_id");
+        if (span.span_id == kInvalidSpanId) {
+          w.valueNull();
+        } else {
+          w.value(static_cast<int>(span.span_id));
+        }
+        w.key("detected_stream_count");
+        w.value(span.detected_stream_count);
+        w.key("cell_based_stream_count");
+        w.value(span.cell_based_stream_count);
+        w.key("cell_count");
+        w.value(span.cell_count);
+        w.key("disagrees_with_cell_counterpoint");
+        w.value(span.disagrees_with_cell_counterpoint);
+        w.key("stream_separation_semitones");
+        w.value(span.stream_separation_semitones);
+        w.key("transition_note_indices");
+        w.beginArray();
+        for (int index : span.transition_note_indices) {
+          w.value(index);
+        }
+        w.endArray();
+        w.endObject();
+      }
+      w.endArray();
+    }
+    w.endObject();
+  }
   w.endObject();
   return w.toString();
 }
@@ -93,6 +156,12 @@ std::string emitProvenanceJson(const std::vector<NoteProvenance>& provenance) {
     writeStr(w, source_str);
     w.key("candidate_score");
     w.value(static_cast<double>(p.candidate_score));
+    w.key("shadow_score");
+    w.value(static_cast<double>(p.shadow_score));
+    w.key("shadow_winning_pitch");
+    w.value(static_cast<int>(p.shadow_winning_pitch));
+    w.key("shadow_winning_pitch_without_markov");
+    w.value(static_cast<int>(p.shadow_winning_pitch_without_markov));
     w.key("satisfied_rules");
     // Emit as a full 64-bit unsigned integer; bach-mcp parses it as a
     // bitset. A 32-bit cast would truncate rule bits >= 32 (P9/P10) and,

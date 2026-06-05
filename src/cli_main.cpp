@@ -35,6 +35,7 @@ struct CliOptions {
   uint16_t bpm = 72;
   std::string output = "output.mid";
   bool json_output = false;
+  bool generated_json_output = false;
   bool instrument_specified = false;
   bach::DurationScale scale = bach::DurationScale::Short;
   uint16_t target_bars = 0;
@@ -195,6 +196,7 @@ void printUsage() {
       "                    Phase13|Phase14|Phase15|Phase16|Phase17|Phase18|Phase19|\n"
       "                    Phase20|Phase21|Phase22|Phase23|Phase24|Phase25}. Seed reused.\n");
   std::printf("  --json           JSON output\n");
+  std::printf("  --generated-json Emit generated.v1 + provenance.v1 JSON for scoring\n");
   std::printf("  -o FILE          Output file path\n");
   std::printf("  --help           Show this help\n");
   std::printf("\nForms:\n");
@@ -230,6 +232,8 @@ bool parseArgs(int argc, char* argv[], CliOptions& opts, bool& ok) {
       opts.output = argv[++idx];
     } else if (std::strcmp(argv[idx], "--json") == 0) {
       opts.json_output = true;
+    } else if (std::strcmp(argv[idx], "--generated-json") == 0) {
+      opts.generated_json_output = true;
     } else if (std::strcmp(argv[idx], "--form") == 0 && idx + 1 < argc) {
       const char* val = argv[++idx];
       opts.form = bach::formTypeFromString(val);
@@ -406,7 +410,8 @@ int runComposerMode(const CliOptions& opts) {
     } else {
       json_path += ".json";
     }
-    const std::string generated = bach::composer::emitGeneratedJson(result.notes);
+    const std::string generated =
+        bach::composer::emitGeneratedJson(result.notes, result.validation);
     const std::string provenance = bach::composer::emitProvenanceJson(result.provenance);
     std::ofstream f(json_path);
     if (f.is_open()) {
@@ -499,6 +504,17 @@ std::string deriveJsonPath(const std::string& output) {
     json_path = json_path.substr(0, dot_pos) + ".json";
   } else {
     json_path += ".json";
+  }
+  return json_path;
+}
+
+std::string deriveSuffixedJsonPath(const std::string& output, const char* suffix) {
+  std::string json_path = output;
+  const auto dot_pos = json_path.rfind('.');
+  if (dot_pos != std::string::npos) {
+    json_path = json_path.substr(0, dot_pos) + suffix;
+  } else {
+    json_path += suffix;
   }
   return json_path;
 }
@@ -666,6 +682,30 @@ int runDefaultMode(const CliOptions& opts) {
       std::printf("JSON:      %s\n", json_path.c_str());
     } else {
       std::fprintf(stderr, "Warning: failed to write %s\n", json_path.c_str());
+    }
+  }
+
+  // Write scorer-facing generated.v1 and provenance.v1 JSON if requested.
+  if (opts.generated_json_output) {
+    const std::string generated_path = deriveSuffixedJsonPath(opts.output, ".generated.json");
+    const std::string provenance_path = deriveSuffixedJsonPath(opts.output, ".provenance.json");
+
+    std::ofstream generated_file(generated_path);
+    if (generated_file.is_open()) {
+      generated_file << bach::composer::emitGeneratedJson(result.notes, result.validation);
+      generated_file.close();
+      std::printf("Generated JSON:%s\n", generated_path.c_str());
+    } else {
+      std::fprintf(stderr, "Warning: failed to write %s\n", generated_path.c_str());
+    }
+
+    std::ofstream provenance_file(provenance_path);
+    if (provenance_file.is_open()) {
+      provenance_file << bach::composer::emitProvenanceJson(result.provenance);
+      provenance_file.close();
+      std::printf("Provenance:%s\n", provenance_path.c_str());
+    } else {
+      std::fprintf(stderr, "Warning: failed to write %s\n", provenance_path.c_str());
     }
   }
 

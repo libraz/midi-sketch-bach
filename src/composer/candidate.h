@@ -21,6 +21,9 @@ struct Candidate {
   Tick duration = 0;
   std::uint8_t pitch = 0;
   float score = 0.0f;
+  float shadow_score = 0.0f;
+  std::uint8_t shadow_winning_pitch = 0;
+  std::uint8_t shadow_winning_pitch_without_markov = 0;
   RuleIdMask satisfied_rules = 0;
 };
 

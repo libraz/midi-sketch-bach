@@ -34,6 +34,25 @@ struct ValidationFailure {
   FailKind kind = FailKind::MusicalFail;
 };
 
+struct SubjectFeatures {
+  int length = 0;
+  int range_semitones = 0;
+  int unique_pitch_classes = 0;
+  int opening_interval = 0;
+  int unique_intervals = 0;
+  int max_leap = 0;
+};
+
+struct StreamSegregationSpan {
+  SpanId span_id = kInvalidSpanId;
+  int detected_stream_count = 1;
+  int cell_based_stream_count = 1;
+  int cell_count = 0;
+  bool disagrees_with_cell_counterpoint = false;
+  int stream_separation_semitones = 0;
+  std::vector<int> transition_note_indices;
+};
+
 // Validator report for one pipeline pass over one piece.
 //
 // `status == Ok` && `failures.empty()` is the only valid success shape.
@@ -41,6 +60,8 @@ struct ValidationFailure {
 struct ValidationReport {
   ValidationStatus status = ValidationStatus::Ok;
   std::vector<ValidationFailure> failures;
+  std::vector<SubjectFeatures> subject_features;
+  std::vector<StreamSegregationSpan> stream_segregation;
 };
 
 }  // namespace bach::composer

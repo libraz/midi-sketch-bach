@@ -222,7 +222,7 @@
         <div class="form-group">
           <label>Character</label>
           <select v-model.number="config.characterId" :disabled="!ready || !isOrganForm">
-            <option v-for="c in characters" :value="c.id">{{ c.name }}</option>
+            <option v-for="c in compatibleCharacters" :value="c.id">{{ c.name }}</option>
           </select>
           <div v-if="isKeyboardForm" class="hint">Character set per variation</div>
           <div v-else-if="!isOrganForm" class="hint">Organ forms only</div>
@@ -361,6 +361,11 @@
       'goldberg_variations',
     ]);
 
+    const INCOMPATIBLE_CHARACTERS_BY_FORM = {
+      'chorale_prelude': new Set(['playful', 'restless']),
+      'toccata_and_fugue': new Set(['noble']),
+    };
+
     // Instrument name to GM SoundFont mapping
     const INSTRUMENT_SOUNDFONT = {
       organ: 'church_organ',
@@ -467,6 +472,13 @@
       get currentForm() {
         return this.forms.find(f => f.id === this.config.formId);
       },
+      get compatibleCharacters() {
+        const f = this.currentForm;
+        if (!f) return this.characters;
+        const incompatible = INCOMPATIBLE_CHARACTERS_BY_FORM[f.name];
+        if (!incompatible) return this.characters;
+        return this.characters.filter(c => !incompatible.has(c.name));
+      },
       get isOrganForm() {
         const f = this.currentForm;
         return f ? ORGAN_FORM_NAMES.has(f.name) : true;
@@ -500,6 +512,15 @@
         const defaultInst = bach.getDefaultInstrumentForForm(this.config.formId);
         this.config.instrumentId = defaultInst;
         this.instrumentAutoDetected = true;
+        this.ensureCompatibleCharacter();
+      },
+
+      ensureCompatibleCharacter() {
+        if (!this.isOrganForm || this.compatibleCharacters.length === 0) return;
+        const current = this.characters.find(c => c.id === this.config.characterId);
+        if (!current || !this.compatibleCharacters.some(c => c.id === current.id)) {
+          this.config.characterId = this.compatibleCharacters[0].id;
+        }
       },
 
       generate() {
@@ -528,6 +549,7 @@
 
           // Only include organ-specific options for organ forms
           if (this.isOrganForm) {
+            this.ensureCompatibleCharacter();
             cfg.numVoices = this.config.numVoices;
             cfg.character = this.config.characterId;
           }
