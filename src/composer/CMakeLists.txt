@@ -33,6 +33,7 @@ set(BACH_COMPOSER_SOURCES
   form_sectional.cpp
   minor_material.cpp
   character_profile.cpp
+  expression_events.cpp
 )
 
 # CMake-time isolation guard: refuse any forbidden legacy source.
