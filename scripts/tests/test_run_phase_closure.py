@@ -17,6 +17,14 @@ import run_phase_closure as rpc  # noqa: E402
 from closure_common import fixture_for_seed  # noqa: E402
 
 FIXTURE_CPP = REPO_ROOT / "src" / "composer" / "harness_fixture.cpp"
+# Shared catalogs (kSubjectPatterns / kPhase14Subjects) were promoted out of
+# harness_fixture.cpp into figuration.h; the drift guards search both sources.
+FIGURATION_H = REPO_ROOT / "src" / "composer" / "figuration.h"
+
+
+def _composer_source() -> str:
+    """Concatenated C++ source text searched by the drift-guard parsers."""
+    return FIXTURE_CPP.read_text(encoding="utf-8") + FIGURATION_H.read_text(encoding="utf-8")
 
 
 def _parse_cpp_int_array(name: str) -> tuple[tuple[int, ...], ...]:
@@ -25,10 +33,10 @@ def _parse_cpp_int_array(name: str) -> tuple[tuple[int, ...], ...]:
     @param name C++ array identifier (e.g. "kSubjectPatterns").
     @return Tuple of row tuples of ints, in source order.
     """
-    src = FIXTURE_CPP.read_text(encoding="utf-8")
+    src = _composer_source()
     match = re.search(name + r"\s*=\s*\{\{(.*?)\}\};", src, re.S)
     if match is None:
-        raise AssertionError(f"could not locate {name} in {FIXTURE_CPP}")
+        raise AssertionError(f"could not locate {name} in {FIXTURE_CPP} / {FIGURATION_H}")
     body = match.group(1)
     rows = re.findall(r"\{([0-9,\s]+)\}", body)
     return tuple(
@@ -47,10 +55,10 @@ def _parse_cpp_brace_array(name: str) -> tuple[tuple[int, ...], ...]:
     @param name C++ array identifier (e.g. "kFigures").
     @return Tuple of row tuples of ints, in source order.
     """
-    src = FIXTURE_CPP.read_text(encoding="utf-8")
+    src = _composer_source()
     match = re.search(name + r"\b[^=]*=\s*\{(.*?)\};", src, re.S)
     if match is None:
-        raise AssertionError(f"could not locate {name} in {FIXTURE_CPP}")
+        raise AssertionError(f"could not locate {name} in {FIXTURE_CPP} / {FIGURATION_H}")
     rows = re.findall(r"\{([0-9,\s]+)\}", match.group(1))
     return tuple(
         tuple(int(tok) for tok in row.replace(" ", "").split(",") if tok != "")

@@ -1,6 +1,6 @@
 // Minimal flat-object JSON parser for config input (no external dependencies).
 //
-// Handles only the subset needed for GeneratorConfig: flat object with
+// Handles only the subset needed for config input: flat object with
 // string, number, and boolean values. Does not support nested objects or arrays.
 
 #ifndef BACH_CORE_JSON_PARSER_H

@@ -22,6 +22,14 @@ if str(SCRIPTS_DIR) not in sys.path:
 import run_phase_closure as rpc  # noqa: E402
 
 FIXTURE_CPP = REPO_ROOT / "src" / "composer" / "harness_fixture.cpp"
+# Shared scale helpers (phase16InScale / phase17InScale) were promoted out of
+# harness_fixture.cpp into figuration.h; the drift guards search both sources.
+FIGURATION_H = REPO_ROOT / "src" / "composer" / "figuration.h"
+
+
+def _composer_source() -> str:
+    """Concatenated C++ source text searched by the drift-guard parsers."""
+    return FIXTURE_CPP.read_text(encoding="utf-8") + FIGURATION_H.read_text(encoding="utf-8")
 
 
 def _parse_cpp_int_list(name: str) -> tuple[int, ...]:
@@ -30,12 +38,12 @@ def _parse_cpp_int_list(name: str) -> tuple[int, ...]:
     @param name C++ array identifier (e.g. "kBarRoot").
     @return Tuple of the integer initialisers, in source order.
     """
-    src = FIXTURE_CPP.read_text(encoding="utf-8")
+    src = _composer_source()
     # Anchor on the array-declaration form ``name[...] = { ... }`` so an earlier
     # mention of the identifier in a comment does not capture a neighbour array.
     match = re.search(name + r"\s*\[[^\]]*\]\s*=\s*\{([^{}]*?)\}", src, re.S)
     if match is None:
-        raise AssertionError(f"could not locate {name} in {FIXTURE_CPP}")
+        raise AssertionError(f"could not locate {name} in {FIXTURE_CPP} / {FIGURATION_H}")
     return tuple(int(tok) for tok in re.split(r"[,\s]+", match.group(1)) if tok)
 
 
@@ -45,10 +53,10 @@ def _parse_cpp_bool_list(name: str) -> tuple[bool, ...]:
     @param name C++ array identifier (e.g. "kBarMinor").
     @return Tuple of the bool initialisers, in source order.
     """
-    src = FIXTURE_CPP.read_text(encoding="utf-8")
+    src = _composer_source()
     match = re.search(name + r"\s*\[[^\]]*\]\s*=\s*\{([^{}]*?)\}", src, re.S)
     if match is None:
-        raise AssertionError(f"could not locate {name} in {FIXTURE_CPP}")
+        raise AssertionError(f"could not locate {name} in {FIXTURE_CPP} / {FIGURATION_H}")
     return tuple(tok == "true" for tok in re.split(r"[,\s]+", match.group(1)) if tok)
 
 
@@ -58,10 +66,10 @@ def _parse_phase17_scale_pcs() -> tuple[int, ...]:
     The C++ helper enumerates the membership as ``p == 0 || p == 2 || ...``;
     parse those literals so a change to the scale set is caught here.
     """
-    src = FIXTURE_CPP.read_text(encoding="utf-8")
+    src = _composer_source()
     match = re.search(r"phase17InScale\(int pc\)\s*\{(.*?)\}", src, re.S)
     if match is None:
-        raise AssertionError("could not locate phase17InScale in harness_fixture.cpp")
+        raise AssertionError("could not locate phase17InScale in the composer sources")
     pcs = re.findall(r"p\s*==\s*(\d+)", match.group(1))
     return tuple(sorted(int(p) for p in pcs))
 

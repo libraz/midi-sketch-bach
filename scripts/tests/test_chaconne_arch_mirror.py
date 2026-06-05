@@ -22,6 +22,14 @@ if str(SCRIPTS_DIR) not in sys.path:
 import run_phase_closure as rpc  # noqa: E402
 
 FIXTURE_CPP = REPO_ROOT / "src" / "composer" / "harness_fixture.cpp"
+# Shared scale helpers (phase16InScale / phase17InScale) were promoted out of
+# harness_fixture.cpp into figuration.h; the drift guards search both sources.
+FIGURATION_H = REPO_ROOT / "src" / "composer" / "figuration.h"
+
+
+def _composer_source() -> str:
+    """Concatenated C++ source text searched by the drift-guard parsers."""
+    return FIXTURE_CPP.read_text(encoding="utf-8") + FIGURATION_H.read_text(encoding="utf-8")
 
 
 def _parse_cpp_int_list(name: str) -> tuple[int, ...]:
@@ -30,10 +38,10 @@ def _parse_cpp_int_list(name: str) -> tuple[int, ...]:
     @param name C++ array identifier (e.g. "kGroundPitch" / "kVarT0").
     @return Tuple of the integer initialisers, in source order.
     """
-    src = FIXTURE_CPP.read_text(encoding="utf-8")
+    src = _composer_source()
     match = re.search(name + r"\b[^=]*=\s*\{([^{}]*?)\}", src, re.S)
     if match is None:
-        raise AssertionError(f"could not locate {name} in {FIXTURE_CPP}")
+        raise AssertionError(f"could not locate {name} in {FIXTURE_CPP} / {FIGURATION_H}")
     return tuple(
         int(tok)
         for tok in match.group(1).replace(" ", "").split(",")
@@ -47,10 +55,10 @@ def _parse_phase16_scale_pcs() -> tuple[int, ...]:
     The C++ helper enumerates the membership as ``p == 0 || p == 2 || ...``;
     parse those literals so a change to the scale set is caught here.
     """
-    src = FIXTURE_CPP.read_text(encoding="utf-8")
+    src = _composer_source()
     match = re.search(r"phase16InScale\(int pc\)\s*\{(.*?)\}", src, re.S)
     if match is None:
-        raise AssertionError("could not locate phase16InScale in harness_fixture.cpp")
+        raise AssertionError("could not locate phase16InScale in the composer sources")
     pcs = re.findall(r"p\s*==\s*(\d+)", match.group(1))
     return tuple(sorted(int(p) for p in pcs))
 
