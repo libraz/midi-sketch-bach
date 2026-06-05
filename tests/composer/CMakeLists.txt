@@ -33,6 +33,16 @@ set(BACH_COMPOSER_TEST_SOURCES
   suite_test.cpp
   wtc_pair_test.cpp
   goldberg_test.cpp
+  form_director_test.cpp
+  form_fugue_test.cpp
+  form_sectional_test.cpp
+  form_ground_variations_test.cpp
+  form_linear_test.cpp
+  form_cantus_test.cpp
+  goldberg_canon_test.cpp
+  minor_material_test.cpp
+  character_profile_test.cpp
+  meter_test.cpp
 )
 
 add_executable(bach_composer_tests ${BACH_COMPOSER_TEST_SOURCES})

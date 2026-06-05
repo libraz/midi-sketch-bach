@@ -1,0 +1,413 @@
+// Linear per-bar form builder tests: cello prelude (BWV1007 monophonic
+// arpeggio flow) and trio sonata (three independent voices).
+//
+// Covers the full design matrix for both real builders:
+//   seeds {1, 5, 42, 99} x {Major, Minor} x bars {natural, 2x natural, 128}.
+// Asserts, per cell:
+//   - the full Composer validates Ok (no failures);
+//   - the build is deterministic (identical notes for identical inputs);
+//   - the note span ends at bars * kTicksPerBar;
+//   - cello stays monophonic (no overlapping onsets / single voice);
+//   - trio carries three distinct voices, the pedal voice is all-quarters in
+//     the low register, density rises toward the climax cycle;
+//   - the final bar's harmony is the tonic.
+
+#include <gtest/gtest.h>
+
+#include <algorithm>
+#include <array>
+#include <cstdint>
+#include <vector>
+
+#include "composer/arc.h"
+#include "composer/composer.h"
+#include "composer/form_director.h"
+#include "core/basic_types.h"
+
+namespace bach::composer {
+namespace {
+
+constexpr std::array<std::uint32_t, 4> kSeeds = {{1, 5, 42, 99}};
+constexpr std::array<bool, 2> kMinorFlags = {{false, true}};
+
+// Resolve the three test lengths for a form: natural, 2x natural, and 128
+// (each still passes through resolveBars snap/clamp inside the director).
+std::array<std::uint16_t, 3> testLengths(FormType form) {
+  const FormSpec& spec = formSpec(form);
+  return {{spec.natural_bars, static_cast<std::uint16_t>(spec.natural_bars * 2), 128}};
+}
+
+ComposeResult build(FormType form, std::uint32_t seed, bool is_minor, std::uint16_t bars,
+                    HarnessFixture* fixture_out) {
+  ComposeRequest req;
+  req.form = form;
+  req.seed = seed;
+  req.is_minor = is_minor;
+  req.target_bars = bars;
+  HarnessFixture fixture;
+  EXPECT_EQ(buildFormFixture(req, &fixture), FormDirectorStatus::Ok);
+  if (fixture_out != nullptr)
+    *fixture_out = fixture;
+  return Composer{}.run(fixture.material, fixture.harmony, fixture.voice_plan);
+}
+
+std::string firstFailure(const ComposeResult& r) {
+  return r.validation.failures.empty() ? std::string{} : r.validation.failures.front().rule_id;
+}
+
+// Resolve the realized bar count the director snapped a target to (the
+// HarmonicPlan carries one chord per bar).
+int realizedBars(const HarnessFixture& fx) {
+  return static_cast<int>(fx.harmony.chords.size());
+}
+
+// --- CelloPrelude -----------------------------------------------------------
+
+TEST(FormLinearCello, ValidatesCleanAcrossMatrix) {
+  for (std::uint32_t seed : kSeeds) {
+    for (bool minor : kMinorFlags) {
+      for (std::uint16_t bars : testLengths(FormType::CelloPrelude)) {
+        HarnessFixture fx;
+        const ComposeResult r = build(FormType::CelloPrelude, seed, minor, bars, &fx);
+        EXPECT_EQ(r.validation.status, ValidationStatus::Ok)
+            << "seed=" << seed << " minor=" << minor << " bars=" << bars
+            << " first=" << firstFailure(r);
+        EXPECT_TRUE(r.validation.failures.empty())
+            << "seed=" << seed << " minor=" << minor << " bars=" << bars
+            << " first=" << firstFailure(r);
+        EXPECT_FALSE(r.notes.empty());
+      }
+    }
+  }
+}
+
+TEST(FormLinearCello, IsDeterministic) {
+  for (std::uint32_t seed : kSeeds) {
+    for (bool minor : kMinorFlags) {
+      const std::uint16_t bars = testLengths(FormType::CelloPrelude)[1];
+      const ComposeResult a = build(FormType::CelloPrelude, seed, minor, bars, nullptr);
+      const ComposeResult b = build(FormType::CelloPrelude, seed, minor, bars, nullptr);
+      ASSERT_EQ(a.notes.size(), b.notes.size()) << "seed=" << seed << " minor=" << minor;
+      for (std::size_t i = 0; i < a.notes.size(); ++i) {
+        EXPECT_EQ(a.notes[i].start_tick, b.notes[i].start_tick);
+        EXPECT_EQ(a.notes[i].pitch, b.notes[i].pitch);
+        EXPECT_EQ(a.notes[i].voice, b.notes[i].voice);
+      }
+    }
+  }
+}
+
+TEST(FormLinearCello, SpanEndsAtBarBoundaryAndIsMonophonic) {
+  for (std::uint32_t seed : kSeeds) {
+    for (bool minor : kMinorFlags) {
+      for (std::uint16_t bars : testLengths(FormType::CelloPrelude)) {
+        HarnessFixture fx;
+        const ComposeResult r = build(FormType::CelloPrelude, seed, minor, bars, &fx);
+        ASSERT_FALSE(r.notes.empty());
+        const int actual_bars = realizedBars(fx);
+        const Tick piece_end = static_cast<Tick>(actual_bars) * kTicksPerBar;
+
+        // Notes sorted by onset; last note must end at the final bar boundary,
+        // and no two notes may overlap (monophonic single voice).
+        std::vector<NoteEvent> notes = r.notes;
+        std::sort(notes.begin(), notes.end(), [](const NoteEvent& x, const NoteEvent& y) {
+          return x.start_tick < y.start_tick;
+        });
+        const NoteEvent& last = notes.back();
+        EXPECT_EQ(last.start_tick + last.duration, piece_end)
+            << "seed=" << seed << " minor=" << minor << " bars=" << bars;
+        for (std::size_t i = 0; i + 1 < notes.size(); ++i) {
+          EXPECT_EQ(notes[i].voice, 0) << "Flow is monophonic";
+          EXPECT_LE(notes[i].start_tick + notes[i].duration, notes[i + 1].start_tick)
+              << "overlap at i=" << i << " seed=" << seed;
+        }
+      }
+    }
+  }
+}
+
+TEST(FormLinearCello, FinalBarHarmonyIsTonic) {
+  for (std::uint32_t seed : kSeeds) {
+    for (bool minor : kMinorFlags) {
+      for (std::uint16_t bars : testLengths(FormType::CelloPrelude)) {
+        HarnessFixture fx;
+        build(FormType::CelloPrelude, seed, minor, bars, &fx);
+        ASSERT_FALSE(fx.harmony.chords.empty());
+        EXPECT_EQ(fx.harmony.chords.back().root_pc, 0)
+            << "seed=" << seed << " minor=" << minor << " bars=" << bars;
+      }
+    }
+  }
+}
+
+// The cello line is a compact, stepwise-dominant running figuration (the
+// BWV1007 note language): adjacent sixteenths move by a step or small skip, so
+// the fraction of large leaps (> a perfect fifth) is tiny and there are no
+// remote (> octave) leaps. This guards the catastrophic broken-chord regression
+// (constant 7-16 semitone root-fifth-third jumps) the wave layout replaced.
+TEST(FormLinearCello, IsStepwiseDominantWithNoRemoteLeaps) {
+  for (std::uint32_t seed : kSeeds) {
+    for (bool minor : kMinorFlags) {
+      for (std::uint16_t bars : testLengths(FormType::CelloPrelude)) {
+        const ComposeResult r = build(FormType::CelloPrelude, seed, minor, bars, nullptr);
+        std::vector<NoteEvent> notes = r.notes;
+        std::sort(notes.begin(), notes.end(), [](const NoteEvent& x, const NoteEvent& y) {
+          return x.start_tick < y.start_tick;
+        });
+        int leaps = 0;
+        int remote = 0;
+        for (std::size_t idx = 1; idx < notes.size(); ++idx) {
+          const int interval = static_cast<int>(notes[idx].pitch) - static_cast<int>(notes[idx - 1].pitch);
+          if (std::abs(interval) > 7)
+            ++leaps;
+          if (std::abs(interval) > 12)
+            ++remote;
+        }
+        const double leap_ratio =
+            notes.size() > 1 ? static_cast<double>(leaps) / static_cast<double>(notes.size() - 1) : 0.0;
+        EXPECT_LE(leap_ratio, 0.08)
+            << "seed=" << seed << " minor=" << minor << " bars=" << bars;
+        EXPECT_EQ(remote, 0) << "seed=" << seed << " minor=" << minor << " bars=" << bars;
+      }
+    }
+  }
+}
+
+// --- TrioSonata -------------------------------------------------------------
+
+TEST(FormLinearTrio, ValidatesCleanAcrossMatrix) {
+  for (std::uint32_t seed : kSeeds) {
+    for (bool minor : kMinorFlags) {
+      for (std::uint16_t bars : testLengths(FormType::TrioSonata)) {
+        HarnessFixture fx;
+        const ComposeResult r = build(FormType::TrioSonata, seed, minor, bars, &fx);
+        EXPECT_EQ(r.validation.status, ValidationStatus::Ok)
+            << "seed=" << seed << " minor=" << minor << " bars=" << bars
+            << " first=" << firstFailure(r);
+        EXPECT_TRUE(r.validation.failures.empty())
+            << "seed=" << seed << " minor=" << minor << " bars=" << bars
+            << " first=" << firstFailure(r);
+        EXPECT_FALSE(r.notes.empty());
+      }
+    }
+  }
+}
+
+TEST(FormLinearTrio, IsDeterministic) {
+  for (std::uint32_t seed : kSeeds) {
+    for (bool minor : kMinorFlags) {
+      const std::uint16_t bars = testLengths(FormType::TrioSonata)[1];
+      const ComposeResult a = build(FormType::TrioSonata, seed, minor, bars, nullptr);
+      const ComposeResult b = build(FormType::TrioSonata, seed, minor, bars, nullptr);
+      ASSERT_EQ(a.notes.size(), b.notes.size()) << "seed=" << seed << " minor=" << minor;
+      for (std::size_t i = 0; i < a.notes.size(); ++i) {
+        EXPECT_EQ(a.notes[i].start_tick, b.notes[i].start_tick);
+        EXPECT_EQ(a.notes[i].pitch, b.notes[i].pitch);
+        EXPECT_EQ(a.notes[i].voice, b.notes[i].voice);
+      }
+    }
+  }
+}
+
+TEST(FormLinearTrio, ThreeDistinctVoicesAndPedalIsLowQuarters) {
+  for (std::uint32_t seed : kSeeds) {
+    for (bool minor : kMinorFlags) {
+      for (std::uint16_t bars : testLengths(FormType::TrioSonata)) {
+        HarnessFixture fx;
+        const ComposeResult r = build(FormType::TrioSonata, seed, minor, bars, &fx);
+        ASSERT_FALSE(r.notes.empty());
+
+        // Three distinct voices present.
+        bool seen[3] = {false, false, false};
+        for (const NoteEvent& note : r.notes) {
+          ASSERT_LT(note.voice, 3) << "unexpected voice " << static_cast<int>(note.voice);
+          seen[note.voice] = true;
+        }
+        EXPECT_TRUE(seen[0] && seen[1] && seen[2])
+            << "seed=" << seed << " minor=" << minor << " bars=" << bars;
+
+        // Pedal voice (V2): every note is a quarter note (kTicksPerBeat) in the
+        // low register (<= G3 = 55).
+        int pedal_notes = 0;
+        for (const NoteEvent& note : r.notes) {
+          if (note.voice != 2)
+            continue;
+          ++pedal_notes;
+          EXPECT_EQ(note.duration, static_cast<Tick>(kTicksPerBeat))
+              << "pedal not a quarter; seed=" << seed;
+          EXPECT_LE(note.pitch, 55) << "pedal out of low register; seed=" << seed;
+        }
+        // One quarter per beat => 4 * realizedBars pedal notes.
+        EXPECT_EQ(pedal_notes, 4 * realizedBars(fx))
+            << "seed=" << seed << " minor=" << minor << " bars=" << bars;
+      }
+    }
+  }
+}
+
+TEST(FormLinearTrio, UpperVoicesStayAbovePedal) {
+  // The three voices keep their register bands (V0 high, V1 mid, V2 low) so no
+  // voice crossing occurs: the pedal's highest note is below the mid voice's
+  // lowest, which is below the top voice's lowest.
+  for (std::uint32_t seed : kSeeds) {
+    for (bool minor : kMinorFlags) {
+      const std::uint16_t bars = testLengths(FormType::TrioSonata)[0];
+      const ComposeResult r = build(FormType::TrioSonata, seed, minor, bars, nullptr);
+      std::uint8_t v2_max = 0;
+      std::uint8_t v1_min = 255;
+      std::uint8_t v0_min = 255;
+      for (const NoteEvent& note : r.notes) {
+        if (note.voice == 2)
+          v2_max = std::max(v2_max, note.pitch);
+        else if (note.voice == 1)
+          v1_min = std::min(v1_min, note.pitch);
+        else if (note.voice == 0)
+          v0_min = std::min(v0_min, note.pitch);
+      }
+      EXPECT_LT(v2_max, v1_min) << "pedal crosses mid; seed=" << seed << " minor=" << minor;
+      EXPECT_LT(v1_min, v0_min) << "mid floor below top floor; seed=" << seed;
+    }
+  }
+}
+
+TEST(FormLinearTrio, DensityRisesTowardClimaxCycle) {
+  // The upper-voice note count in the climax 4-bar cycle exceeds the count in
+  // the opening (Establish) cycle: the arc density curve genuinely shapes the
+  // texture. Use a long piece so the curve has room.
+  for (std::uint32_t seed : kSeeds) {
+    const std::uint16_t bars = 128;
+    const ComposeResult r = build(FormType::TrioSonata, seed, /*is_minor=*/false, bars, nullptr);
+
+    // Locate the climax cycle.
+    const std::size_t cycle_count = static_cast<std::size_t>(bars) / 4;
+    std::size_t climax_cycle = 0;
+    for (std::size_t c = 0; c < cycle_count; ++c) {
+      if (arcPoint(c, cycle_count).is_climax) {
+        climax_cycle = c;
+        break;
+      }
+    }
+    ASSERT_GT(climax_cycle, 0u);
+
+    auto upperNotesInCycle = [&](std::size_t cycle) {
+      const Tick lo = static_cast<Tick>(cycle * 4) * kTicksPerBar;
+      const Tick hi = lo + static_cast<Tick>(4) * kTicksPerBar;
+      int count = 0;
+      for (const NoteEvent& note : r.notes) {
+        if (note.voice == 2)
+          continue;  // pedal density is constant.
+        if (note.start_tick >= lo && note.start_tick < hi)
+          ++count;
+      }
+      return count;
+    };
+
+    EXPECT_GT(upperNotesInCycle(climax_cycle), upperNotesInCycle(0))
+        << "seed=" << seed << " climax_cycle=" << climax_cycle;
+  }
+}
+
+TEST(FormLinearTrio, FinalBarHarmonyIsTonic) {
+  for (std::uint32_t seed : kSeeds) {
+    for (bool minor : kMinorFlags) {
+      for (std::uint16_t bars : testLengths(FormType::TrioSonata)) {
+        HarnessFixture fx;
+        build(FormType::TrioSonata, seed, minor, bars, &fx);
+        ASSERT_FALSE(fx.harmony.chords.empty());
+        EXPECT_EQ(fx.harmony.chords.back().root_pc, 0)
+            << "seed=" << seed << " minor=" << minor << " bars=" << bars;
+      }
+    }
+  }
+}
+
+// Every beat onset of every trio voice lands on a chord tone, so the per-beat
+// vertical sample (the scorer's vertical_dissonance_ratio) is consonant: at
+// each beat the sounding pitches form only consonant interval classes. This
+// guards the per-beat chord-tone anchoring of the two manual voices that drives
+// the dissonance ratio to ~0.
+TEST(FormLinearTrio, BeatOnsetsAreVerticallyConsonant) {
+  // Dissonant interval classes (mod 12): m2 M2 TT m7 M7.
+  auto isDissonant = [](int interval_class) {
+    const int ic = ((interval_class % 12) + 12) % 12;
+    return ic == 1 || ic == 2 || ic == 6 || ic == 10 || ic == 11;
+  };
+  for (std::uint32_t seed : kSeeds) {
+    for (bool minor : kMinorFlags) {
+      for (std::uint16_t bars : testLengths(FormType::TrioSonata)) {
+        HarnessFixture fx;
+        const ComposeResult r = build(FormType::TrioSonata, seed, minor, bars, &fx);
+        ASSERT_FALSE(r.notes.empty());
+        const Tick piece_end = static_cast<Tick>(realizedBars(fx)) * kTicksPerBar;
+
+        int samples = 0;
+        int dissonant = 0;
+        for (Tick tick = 0; tick < piece_end; tick += kTicksPerBeat) {
+          std::vector<std::uint8_t> sounding;
+          for (const NoteEvent& note : r.notes) {
+            if (note.start_tick <= tick && tick < note.start_tick + note.duration)
+              sounding.push_back(note.pitch);
+          }
+          if (sounding.size() < 2)
+            continue;
+          ++samples;
+          bool bad = false;
+          for (std::size_t lhs = 0; lhs < sounding.size(); ++lhs)
+            for (std::size_t rhs = lhs + 1; rhs < sounding.size(); ++rhs)
+              if (isDissonant(static_cast<int>(sounding[lhs]) - static_cast<int>(sounding[rhs])))
+                bad = true;
+          if (bad)
+            ++dissonant;
+        }
+        const double vdr =
+            samples > 0 ? static_cast<double>(dissonant) / static_cast<double>(samples) : 0.0;
+        EXPECT_LE(vdr, 0.12) << "seed=" << seed << " minor=" << minor << " bars=" << bars;
+      }
+    }
+  }
+}
+
+// Each trio voice moves predominantly by step or small skip with no remote
+// (> octave) leaps: the per-voice large-leap fraction stays small. This guards
+// the across-bar voice-leading of the manual voices and the compact pedal
+// voicing that removed the cycle-boundary register jumps.
+TEST(FormLinearTrio, VoicesAreStepwiseWithNoRemoteLeaps) {
+  for (std::uint32_t seed : kSeeds) {
+    for (bool minor : kMinorFlags) {
+      for (std::uint16_t bars : testLengths(FormType::TrioSonata)) {
+        const ComposeResult r = build(FormType::TrioSonata, seed, minor, bars, nullptr);
+        std::array<std::vector<NoteEvent>, 3> by_voice;
+        for (const NoteEvent& note : r.notes) {
+          ASSERT_LT(note.voice, 3);
+          by_voice[note.voice].push_back(note);
+        }
+        int leaps = 0;
+        int remote = 0;
+        int intervals = 0;
+        for (auto& voice_notes : by_voice) {
+          std::sort(voice_notes.begin(), voice_notes.end(),
+                    [](const NoteEvent& x, const NoteEvent& y) {
+                      return x.start_tick < y.start_tick;
+                    });
+          for (std::size_t idx = 1; idx < voice_notes.size(); ++idx) {
+            const int interval = static_cast<int>(voice_notes[idx].pitch) -
+                                 static_cast<int>(voice_notes[idx - 1].pitch);
+            ++intervals;
+            if (std::abs(interval) > 7)
+              ++leaps;
+            if (std::abs(interval) > 12)
+              ++remote;
+          }
+        }
+        const double leap_ratio =
+            intervals > 0 ? static_cast<double>(leaps) / static_cast<double>(intervals) : 0.0;
+        EXPECT_LE(leap_ratio, 0.08)
+            << "seed=" << seed << " minor=" << minor << " bars=" << bars;
+        EXPECT_EQ(remote, 0) << "seed=" << seed << " minor=" << minor << " bars=" << bars;
+      }
+    }
+  }
+}
+
+}  // namespace
+}  // namespace bach::composer

@@ -911,7 +911,7 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
       if (force_bass_cadence_pc && pc != forced_cadence_pc)
         continue;
       const bool is_triad = (pc == triad[0]) || (pc == triad[1]) || (pc == triad[2]);
-      const bool strong = isStrongBeat(t);
+      const bool strong = isStrongBeat(t, harmonic_plan.ticksPerBar());
       if (prev_pitch_local != 0 && !resolvesLeadingTone(prev_pitch_local, p, harmonic_plan)) {
         continue;
       }
@@ -1235,7 +1235,7 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
             continue;
           }
         }
-        if (isStrongBeat(t_next)) {
+        if (isStrongBeat(t_next, harmonic_plan.ticksPerBar())) {
           const ChordEvent& chord_next_lh = activeChord(harmonic_plan, t_next);
           const auto triad_next = triadPitchClasses(chord_next_lh);
           bool has_strong_followup = false;

@@ -6,6 +6,7 @@
 #include <utility>
 #include <vector>
 
+#include "composer/figuration.h"
 #include "composer/motif_ops.h"
 #include "composer/span.h"
 #include "composer/tonal_answer.h"
@@ -16,83 +17,14 @@ namespace bach::composer {
 
 namespace {
 
-// 5 subject patterns × 16 quarter-note pitches each. Diatonic to C
-// major / A natural-minor. Same catalog the gtest harness uses; the
-// canonical copy lives here so the harness test and the CLI dispatch
-// path stay byte-identical.
-constexpr std::array<std::array<std::uint8_t, 16>, 5> kSubjectPatterns = {{
-    // 0: original arch
-    {72, 74, 76, 77, 79, 81, 79, 77, 76, 74, 76, 77, 79, 77, 71, 72},
-    // 1: descent then ascent (start high)
-    {84, 83, 84, 79, 77, 76, 77, 79, 81, 79, 77, 76, 74, 76, 71, 72},
-    // 2: broken triad outline
-    {79, 76, 79, 84, 76, 79, 76, 72, 74, 77, 74, 71, 72, 76, 71, 72},
-    // 3: stepwise sequence
-    {71, 72, 76, 77, 74, 76, 77, 79, 76, 77, 79, 81, 77, 79, 71, 72},
-    // 4: upper-arch
-    {76, 77, 79, 81, 79, 77, 76, 74, 72, 74, 76, 77, 79, 77, 71, 72},
-}};
-
-// Phase14-only subject catalog. The all-technique fugue permeates every bar
-// with the subject (exposition, answer, V2 re-entry, middle entry, diminution,
-// stretto, episode), so a statistically weak subject drags the whole piece's
-// model_prob. Slots 0/1/4 keep the kSubjectPatterns melodies; slots 2/3 replace
-// the two lowest-scoring patterns (the "broken triad" and "stepwise sequence"
-// melodies scored ~0.86 / ~0.91 in isolation vs ~0.95 for the others) with
-// higher-probability diatonic subjects. Both replacements keep the same
-// register envelope (71-81) and the mandatory B->C (71,72) leading-tone tail
-// so the cadence / leading-tone provenance bits still fire and the
-// answer(-5) / V2(-12) / stretto(-24) transposes stay voice-crossing-safe.
-// This catalog is referenced ONLY by buildPhase14Fixture, so the other fugue
-// layouts stay byte-identical.
-constexpr std::array<std::array<std::uint8_t, 16>, 5> kPhase14Subjects = {{
-    // 0: original arch (unchanged)
-    {72, 74, 76, 77, 79, 81, 79, 77, 76, 74, 76, 77, 79, 77, 71, 72},
-    // 1: gentle wave (replaces the original high 84-83-84 head, which scored
-    // lowest in-context of the kept subjects; this diatonic wave keeps the
-    // 71,72 leading-tone tail and a 72-79 register that stays voice-safe)
-    {76, 74, 72, 74, 76, 77, 79, 77, 76, 79, 77, 76, 74, 72, 71, 72},
-    // 2: neighbour-rich arch (replaces the weak broken-triad subject)
-    {79, 77, 76, 77, 79, 81, 79, 77, 76, 74, 72, 74, 76, 74, 71, 72},
-    // 3: varied scalar arch. Opens on the same 72,74,76,77 head as slot 0 so
-    // the V1 counterline search space over bars 0-3 stays in the validated,
-    // diminished-melodic-free region. The body climbs to 81 and then descends
-    // with a varied conjunct contour instead of restating the opening 72-77
-    // cell verbatim; that de-repetition lifts the model_prob of the seeds that
-    // select this slot. Keeps the mandatory 71,72 leading-tone tail.
-    {72, 74, 76, 77, 79, 77, 79, 81, 79, 77, 76, 74, 76, 74, 71, 72},
-    // 4: varied upper-arch. Same idea as slot 3: the body folds back through
-    // 77-79 rather than running a single long descent, so the contour is less
-    // predictable. Register 72-81 and the 71,72 leading-tone tail are kept.
-    {76, 77, 79, 81, 79, 77, 76, 77, 79, 77, 76, 74, 72, 74, 71, 72},
-}};
-
-struct ChordSpec {
-  std::uint8_t root_pc;
-  bool minor;
-};
-
-// 4 harmony patterns × 4 chords each. Roman numerals for reference:
-// 0=I-IV-V-I, 1=I-vi-IV-V, 2=I-IV-I-V, 3=I-V-vi-I (deceptive resolved).
-constexpr std::array<std::array<ChordSpec, 4>, 4> kHarmonyPatterns = {{
-    {{{0, false}, {5, false}, {7, false}, {0, false}}},
-    {{{0, false}, {9, true}, {5, false}, {7, false}}},
-    {{{0, false}, {5, false}, {0, false}, {7, false}}},
-    {{{0, false}, {7, false}, {9, true}, {0, false}}},
-}};
-
-void pushCounterlineBar(VoicePlan& vp, SpanId& next_id, std::uint8_t voice, int bar,
-                        Subdivision subdivision, std::uint8_t voice_center = 0) {
-  Span s;
-  s.id = next_id++;
-  s.start_tick = static_cast<Tick>(bar) * kTicksPerBar;
-  s.end_tick = s.start_tick + kTicksPerBar;
-  s.voice = voice;
-  s.intent = VoiceIntent::SequentialCounterline;
-  s.subdivision = subdivision;
-  s.voice_center = voice_center;
-  vp.spans.push_back(s);
-}
+// Shared figuration catalogs and scale helpers. The catalogs
+// (kSubjectPatterns, kPhase14Subjects, kHarmonyPatterns, ChordSpec) and the
+// scale walkers (phase16/phase17 InScale/ScaleUp) plus pushCounterlineBar now
+// live in composer/figuration.h so they can be reused without disturbing the
+// byte-identical fixture layouts below.
+using namespace bach::composer::detail;  // NOLINT(build/namespaces): bring the
+                                          // shared figuration helpers into the
+                                          // fixture builders unqualified.
 
 // Build the Phase14 fixture: a single self-contained 42-bar, 3-voice
 // all-technique fugue (C major). Every contrapuntal device is exercised in one
@@ -833,48 +765,6 @@ HarnessFixture buildPhase15Fixture(int seed) {
   out.voice_plan.spans.push_back(span);
 
   return out;
-}
-
-// C natural-minor scale membership (pitch class), used to build the Phase16
-// chaconne variations' stepwise figuration.
-constexpr bool phase16InScale(int pc) {
-  const int p = ((pc % 12) + 12) % 12;
-  return p == 0 || p == 2 || p == 3 || p == 5 || p == 7 || p == 8 || p == 10;
-}
-
-// Walk `steps` scale degrees upward from `midi` within C natural minor.
-inline int phase16ScaleUp(int midi, int steps) {
-  int cur = midi;
-  for (int s = 0; s < steps; ++s) {
-    for (int add = 1; add <= 12; ++add) {
-      if (phase16InScale(cur + add)) {
-        cur += add;
-        break;
-      }
-    }
-  }
-  return cur;
-}
-
-// C major scale membership (pitch class), used to build the Phase17 organ-
-// prelude figuration's stepwise runs.
-constexpr bool phase17InScale(int pc) {
-  const int p = ((pc % 12) + 12) % 12;
-  return p == 0 || p == 2 || p == 4 || p == 5 || p == 7 || p == 9 || p == 11;
-}
-
-// Walk `steps` scale degrees upward from `midi` within C major.
-inline int phase17ScaleUp(int midi, int steps) {
-  int cur = midi;
-  for (int s = 0; s < steps; ++s) {
-    for (int add = 1; add <= 12; ++add) {
-      if (phase17InScale(cur + add)) {
-        cur += add;
-        break;
-      }
-    }
-  }
-  return cur;
 }
 
 // Build the Phase16 fixture: a BWV1004-style chaconne arch over 16 bars in C

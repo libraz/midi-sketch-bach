@@ -128,6 +128,11 @@ ValidationReport Validator::validate(const std::vector<NoteEvent>& notes,
                                      const Material& material) const {
   ValidationReport report;
 
+  // Meter-derived bar length for every bar-position / bar-index rule below.
+  // Defaults to 1920 (4/4) when the plan carries the default time signature,
+  // so existing 4/4 fixtures validate byte-identically; a 3/4 plan yields 1440.
+  const Tick ticks_per_bar = harmonic_plan.ticksPerBar();
+
   // 1. Strong-beat dissonance — only check Compose-source notes. Material
   //    notes are inputs and not subject to candidate-search rules.
   for (std::size_t i = 0; i < notes.size(); ++i) {
@@ -136,7 +141,7 @@ ValidationReport Validator::validate(const std::vector<NoteEvent>& notes,
       continue;
     if (provenance[i].source != NoteSource::Compose)
       continue;
-    if (!isStrongBeat(note.start_tick))
+    if (!isStrongBeat(note.start_tick, ticks_per_bar))
       continue;
 
     const auto& chord = activeChord(harmonic_plan, note.start_tick);
@@ -412,7 +417,7 @@ ValidationReport Validator::validate(const std::vector<NoteEvent>& notes,
   for (std::size_t va = 0; va < voices.size(); ++va) {
     for (std::size_t vb = va + 1; vb < voices.size(); ++vb) {
       for (Tick t : ticks) {
-        if (!isStrongBeat(t))
+        if (!isStrongBeat(t, ticks_per_bar))
           continue;
         const std::uint8_t pa = voicePitchAt(notes, voices[va], t);
         const std::uint8_t pb = voicePitchAt(notes, voices[vb], t);
@@ -497,7 +502,7 @@ ValidationReport Validator::validate(const std::vector<NoteEvent>& notes,
           idx_lower < provenance.size() && provenance[idx_lower].source == NoteSource::Material;
       const bool both_material = upper_material && lower_material;
 
-      if (!both_material && isStrongBeat(t)) {
+      if (!both_material && isStrongBeat(t, ticks_per_bar)) {
         // (a) Parallel perfect octaves into the same perfect-octave
         //     interval, both voices moving (oblique/static allowed).
         const bool both_moved = prev_pa != 0 && prev_pb != 0 && pa != prev_pa && pb != prev_pb;
@@ -650,7 +655,7 @@ ValidationReport Validator::validate(const std::vector<NoteEvent>& notes,
       if (i + 1 < indices.size() &&
           hasRuleBit(provenance, indices[i + 1], RuleBit::CadenceCellCommitted))
         continue;
-      if (isStrongBeat(notes[k].start_tick))
+      if (isStrongBeat(notes[k].start_tick, ticks_per_bar))
         continue;  // covered by rule 1
 
       const auto& chord = activeChord(harmonic_plan, notes[k].start_tick);
@@ -1376,8 +1381,8 @@ ValidationReport Validator::validate(const std::vector<NoteEvent>& notes,
   {
     const PhraseStructure& ps = material.phrase_structure;
     if (ps.phrase_start_ticks.size() >= 2) {
-      const Tick four_bars = static_cast<Tick>(4) * kTicksPerBar;
-      const Tick eight_bars = static_cast<Tick>(8) * kTicksPerBar;
+      const Tick four_bars = static_cast<Tick>(4) * ticks_per_bar;
+      const Tick eight_bars = static_cast<Tick>(8) * ticks_per_bar;
       bool periodic = true;
       for (std::size_t i = 1; i < ps.phrase_start_ticks.size(); ++i) {
         const Tick len = ps.phrase_start_ticks[i] - ps.phrase_start_ticks[i - 1];
@@ -1396,7 +1401,7 @@ ValidationReport Validator::validate(const std::vector<NoteEvent>& notes,
 
     bool anacrusis_ok = true;
     if (ps.has_anacrusis) {
-      anacrusis_ok = ps.anacrusis_ticks > 0 && ps.anacrusis_ticks < kTicksPerBar;
+      anacrusis_ok = ps.anacrusis_ticks > 0 && ps.anacrusis_ticks < ticks_per_bar;
       if (anacrusis_ok) {
         for (const auto& frag : material.rhythm_fragments) {
           if (frag.feature != RhythmFragment::Feature::Anacrusis || frag.notes.empty())
@@ -1712,7 +1717,7 @@ ValidationReport Validator::validate(const std::vector<NoteEvent>& notes,
   // downbeat is constrained. Pedal-point notes (PedalPreparation) are exempt: a
   // pedal is by definition a single sustained pitch held against changing
   // harmony. For each note stamped FigurationCommitted (and not PedalPreparation)
-  // whose onset lands on a bar downbeat (start_tick % kTicksPerBar == 0), resolve
+  // whose onset lands on a bar downbeat (start_tick % ticks_per_bar == 0), resolve
   // the active ChordEvent (latest plan.chords entry with start_tick <= the note's
   // onset) and reuse the same chord-tone arithmetic the P7 rules use: triadFor
   // for the root/third/fifth and hasSeventh/seventhOffset for the seventh. If any
@@ -1727,7 +1732,7 @@ ValidationReport Validator::validate(const std::vector<NoteEvent>& notes,
       if (hasRuleBit(provenance, i, RuleBit::PedalPreparation))
         continue;  // pedal points are held against changing harmony.
       const auto& note = notes[i];
-      if (note.start_tick % kTicksPerBar != 0)
+      if (note.start_tick % ticks_per_bar != 0)
         continue;  // only the bar downbeat is harmonically anchored.
       const auto& chord = activeChord(harmonic_plan, note.start_tick);
       const auto triad = triadFor(chord);
@@ -1777,9 +1782,9 @@ ValidationReport Validator::validate(const std::vector<NoteEvent>& notes,
   // is immutable (CLAUDE.md). A CantusFirmusCarrier may replay an embellished
   // line, but each bar's DOWNBEAT tone must still equal the skeleton tone for
   // that bar. Gather every note stamped CantusFirmusReplayed in onset order; for
-  // each whose onset lands on a bar downbeat (start_tick % kTicksPerBar == 0),
+  // each whose onset lands on a bar downbeat (start_tick % ticks_per_bar == 0),
   // look up the expected skeleton tone material.cantus_firmus[bar_index] where
-  // bar_index = start_tick / kTicksPerBar (bounds-guarded). If the replayed
+  // bar_index = start_tick / ticks_per_bar (bounds-guarded). If the replayed
   // downbeat pitch differs from the skeleton pitch, push ONE StructuralFail.
   // Off-downbeat embellishment notes are unconstrained. The rule is inert when
   // material.cantus_firmus is empty or no CantusFirmusReplayed note exists
@@ -1798,9 +1803,9 @@ ValidationReport Validator::validate(const std::vector<NoteEvent>& notes,
       bool cf_altered = false;
       for (std::size_t idx : cf_indices) {
         const auto& note = notes[idx];
-        if (note.start_tick % kTicksPerBar != 0)
+        if (note.start_tick % ticks_per_bar != 0)
           continue;  // only bar downbeats are constrained.
-        const std::size_t bar_index = static_cast<std::size_t>(note.start_tick / kTicksPerBar);
+        const std::size_t bar_index = static_cast<std::size_t>(note.start_tick / ticks_per_bar);
         if (bar_index >= material.cantus_firmus.size())
           continue;  // out of skeleton range; unconstrained.
         if (note.pitch != material.cantus_firmus[bar_index].pitch) {
@@ -1970,7 +1975,7 @@ ValidationReport Validator::validate(const std::vector<NoteEvent>& notes,
   // declaration order) and, for each section, measures two self-contained
   // traits from the emitted FantasiaSectionContrast notes whose onset falls in
   // [start_tick, end_tick):
-  //   - density: notes per bar = note_count * kTicksPerBar / window_ticks,
+  //   - density: notes per bar = note_count * ticks_per_bar / window_ticks,
   //              rounded down (the realized notes-per-bar tier).
   //   - mean register: integer mean MIDI pitch of the section's notes.
   // CRITERION: each ADJACENT pair of sections must differ in EITHER density
@@ -2009,7 +2014,7 @@ ValidationReport Validator::validate(const std::vector<NoteEvent>& notes,
       SectionStat stat;
       stat.note_count = note_count;
       stat.density = (window_ticks > 0)
-                         ? static_cast<int>(static_cast<long>(note_count) * kTicksPerBar /
+                         ? static_cast<int>(static_cast<long>(note_count) * ticks_per_bar /
                                             static_cast<long>(window_ticks))
                          : 0;
       stat.mean_register = static_cast<int>(pitch_sum / note_count);

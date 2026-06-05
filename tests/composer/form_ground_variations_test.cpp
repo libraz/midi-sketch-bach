@@ -1,0 +1,350 @@
+// Ground-bass variation form-builder tests (chaconne + passacaglia).
+//
+// These cover the real form builders in src/composer/form_ground_variations.cpp
+// (which replace the placeholder phase-fixture replay). Both forms are 3/4
+// ground-bass variations: an immutable ground bass (V1) period-tiled under one
+// arc-driven scalar-wave variation block per cycle (V0).
+//
+// For both forms, across seeds {1,5,42,99} x modes {Major,Minor} x
+// bars {natural, 2x natural, 128}:
+//   1. buildFormFixture -> Composer::run validates Ok (no failures).
+//   2. Determinism: identical request -> byte-identical notes.
+//   3. Ground immutability: V1 notes repeat exactly every ground period.
+//   4. Bar math is 1440 ticks (last note end ~= bars * 1440).
+//   5. Climax block lands at the arc climax (~80%) and stamps ClimaxPlaced.
+//   6. Density rises toward the climax (V0 note count per cycle).
+//   7. Minor: no Ab->B (pc 8 -> pc 11) adjacency in any V0 line.
+//   8. Picardy: minor + even seed final chord carries a major third.
+
+#include <gtest/gtest.h>
+
+#include <cstdint>
+#include <vector>
+
+#include "composer/composer.h"
+#include "composer/form_director.h"
+#include "composer/harmonic_plan.h"
+#include "composer/harness_fixture.h"
+#include "composer/provenance.h"
+#include "core/basic_types.h"
+
+namespace bach::composer {
+namespace {
+
+constexpr Tick kTicksPerBar34 = 3 * kTicksPerBeat;  // 1440.
+
+constexpr RuleIdMask bit(RuleBit b) {
+  return RuleIdMask{1} << b;
+}
+
+// Build a fixture for a ground-variation form, asserting the director succeeds.
+HarnessFixture build(FormType form, std::uint32_t seed, bool is_minor, std::uint16_t target_bars) {
+  ComposeRequest req;
+  req.form = form;
+  req.is_minor = is_minor;
+  req.character = SubjectCharacter::Severe;
+  req.target_bars = target_bars;
+  req.seed = seed;
+  HarnessFixture fx;
+  const FormDirectorStatus status = buildFormFixture(req, &fx);
+  EXPECT_EQ(status, FormDirectorStatus::Ok);
+  return fx;
+}
+
+struct Case {
+  FormType form;
+  std::uint32_t seed;
+  bool is_minor;
+  std::uint16_t target_bars;
+};
+
+// All seed x mode x length combinations for one form. target_bars values:
+//   0      -> natural length (resolved by the director).
+//   2*nat  -> double natural (computed from the FormSpec natural_bars).
+//   128    -> global cap.
+std::vector<Case> casesFor(FormType form) {
+  const std::uint16_t natural = formSpec(form).natural_bars;
+  std::vector<Case> cases;
+  for (std::uint32_t seed : {1u, 5u, 42u, 99u}) {
+    for (bool minor : {false, true}) {
+      cases.push_back({form, seed, minor, 0});
+      cases.push_back({form, seed, minor, static_cast<std::uint16_t>(2 * natural)});
+      cases.push_back({form, seed, minor, 128});
+    }
+  }
+  return cases;
+}
+
+// Resolved bar count for a request (mirrors the director's snap/clamp).
+std::uint16_t resolvedBars(FormType form, std::uint16_t target_bars) {
+  return resolveBars(form, DurationScale::Short, target_bars);
+}
+
+// Collect the V1 (ground) note pitches in onset order.
+std::vector<std::uint8_t> groundPitches(const ComposeResult& r) {
+  std::vector<std::pair<Tick, std::uint8_t>> ground;
+  for (const auto& n : r.notes) {
+    if (n.voice == 1)
+      ground.push_back({n.start_tick, n.pitch});
+  }
+  std::sort(ground.begin(), ground.end());
+  std::vector<std::uint8_t> out;
+  for (const auto& g : ground)
+    out.push_back(g.second);
+  return out;
+}
+
+// --- 1. Validation Ok for every case ---------------------------------------
+
+void expectValidatesOk(FormType form) {
+  for (const Case& c : casesFor(form)) {
+    const HarnessFixture fx = build(c.form, c.seed, c.is_minor, c.target_bars);
+    const ComposeResult r = Composer{}.run(fx.material, fx.harmony, fx.voice_plan);
+    EXPECT_TRUE(r.validation.failures.empty())
+        << "form " << static_cast<int>(form) << " seed " << c.seed << " minor " << c.is_minor
+        << " bars " << c.target_bars << " first failure="
+        << (r.validation.failures.empty() ? "" : r.validation.failures.front().rule_id);
+    EXPECT_EQ(r.validation.status, ValidationStatus::Ok);
+    EXPECT_EQ(fx.voice_plan.num_voices, 2);
+    ASSERT_FALSE(r.notes.empty());
+  }
+}
+
+TEST(GroundVariationChaconne, ValidatesOkAcrossSeedsModesLengths) {
+  expectValidatesOk(FormType::Chaconne);
+}
+
+TEST(GroundVariationPassacaglia, ValidatesOkAcrossSeedsModesLengths) {
+  expectValidatesOk(FormType::Passacaglia);
+}
+
+// --- 2. Determinism ---------------------------------------------------------
+
+void expectDeterministic(FormType form) {
+  for (const Case& c : casesFor(form)) {
+    const HarnessFixture a = build(c.form, c.seed, c.is_minor, c.target_bars);
+    const HarnessFixture b = build(c.form, c.seed, c.is_minor, c.target_bars);
+    const ComposeResult ra = Composer{}.run(a.material, a.harmony, a.voice_plan);
+    const ComposeResult rb = Composer{}.run(b.material, b.harmony, b.voice_plan);
+    ASSERT_EQ(ra.notes.size(), rb.notes.size());
+    for (std::size_t i = 0; i < ra.notes.size(); ++i) {
+      EXPECT_EQ(ra.notes[i].start_tick, rb.notes[i].start_tick);
+      EXPECT_EQ(ra.notes[i].duration, rb.notes[i].duration);
+      EXPECT_EQ(ra.notes[i].pitch, rb.notes[i].pitch);
+      EXPECT_EQ(ra.notes[i].voice, rb.notes[i].voice);
+    }
+  }
+}
+
+TEST(GroundVariationChaconne, IsDeterministic) {
+  expectDeterministic(FormType::Chaconne);
+}
+
+TEST(GroundVariationPassacaglia, IsDeterministic) {
+  expectDeterministic(FormType::Passacaglia);
+}
+
+// --- 3. Ground immutability -------------------------------------------------
+
+void expectGroundImmutable(FormType form, int cycle_bars) {
+  for (const Case& c : casesFor(form)) {
+    const HarnessFixture fx = build(c.form, c.seed, c.is_minor, c.target_bars);
+    const ComposeResult r = Composer{}.run(fx.material, fx.harmony, fx.voice_plan);
+    const std::vector<std::uint8_t> ground = groundPitches(r);
+    const std::size_t period = static_cast<std::size_t>(cycle_bars);
+    ASSERT_GE(ground.size(), period);
+    EXPECT_EQ(ground.size() % period, 0u) << "ground note count must be a whole number of cycles";
+    for (std::size_t i = period; i < ground.size(); ++i) {
+      EXPECT_EQ(ground[i], ground[i % period])
+          << "ground note " << i << " differs from cycle-0 slot " << (i % period);
+    }
+  }
+}
+
+TEST(GroundVariationChaconne, GroundRepeatsEveryPeriod) {
+  expectGroundImmutable(FormType::Chaconne, 4);
+}
+
+TEST(GroundVariationPassacaglia, GroundRepeatsEveryPeriod) {
+  expectGroundImmutable(FormType::Passacaglia, 8);
+}
+
+// --- 4. Bar math (1440 ticks) -----------------------------------------------
+
+void expectBarMath(FormType form) {
+  for (const Case& c : casesFor(form)) {
+    const HarnessFixture fx = build(c.form, c.seed, c.is_minor, c.target_bars);
+    EXPECT_EQ(fx.harmony.ticksPerBar(), kTicksPerBar34)
+        << "form " << static_cast<int>(form) << " must derive 1440-tick bars";
+    const ComposeResult r = Composer{}.run(fx.material, fx.harmony, fx.voice_plan);
+    const std::uint16_t bars = resolvedBars(form, c.target_bars);
+    const Tick piece_end = static_cast<Tick>(bars) * kTicksPerBar34;
+    Tick last_end = 0;
+    for (const auto& n : r.notes)
+      last_end = std::max(last_end, n.start_tick + n.duration);
+    EXPECT_EQ(last_end, piece_end)
+        << "form " << static_cast<int>(form) << " bars " << bars << " last note end mismatch";
+  }
+}
+
+TEST(GroundVariationChaconne, BarMathIs1440) {
+  expectBarMath(FormType::Chaconne);
+}
+
+TEST(GroundVariationPassacaglia, BarMathIs1440) {
+  expectBarMath(FormType::Passacaglia);
+}
+
+// --- 5. Climax position + ClimaxPlaced --------------------------------------
+
+void expectClimaxAtArc(FormType form, int cycle_bars) {
+  for (const Case& c : casesFor(form)) {
+    const HarnessFixture fx = build(c.form, c.seed, c.is_minor, c.target_bars);
+    const ComposeResult r = Composer{}.run(fx.material, fx.harmony, fx.voice_plan);
+
+    const std::uint16_t bars = resolvedBars(form, c.target_bars);
+    const std::size_t cycle_count = static_cast<std::size_t>(bars) / cycle_bars;
+    // The arc places the single climax at ~80% (climax_idx = cycle_count*4/5,
+    // clamped to the last cycle).
+    std::size_t climax_idx = (cycle_count * 4) / 5;
+    if (climax_idx > cycle_count - 1)
+      climax_idx = cycle_count - 1;
+    const Tick climax_start =
+        static_cast<Tick>(climax_idx) * static_cast<Tick>(cycle_bars) * kTicksPerBar34;
+    const Tick climax_end = climax_start + static_cast<Tick>(cycle_bars) * kTicksPerBar34;
+
+    bool saw_climax = false;
+    bool climax_in_window = true;
+    for (std::size_t i = 0; i < r.notes.size(); ++i) {
+      if (i >= r.provenance.size())
+        break;
+      if (r.provenance[i].satisfied_rules & bit(RuleBit::ClimaxPlaced)) {
+        saw_climax = true;
+        if (r.notes[i].start_tick < climax_start || r.notes[i].start_tick >= climax_end)
+          climax_in_window = false;
+      }
+    }
+    EXPECT_TRUE(saw_climax) << "form " << static_cast<int>(form) << " seed " << c.seed
+                            << " missing ClimaxPlaced";
+    EXPECT_TRUE(climax_in_window) << "form " << static_cast<int>(form)
+                                  << " climax notes outside cycle " << climax_idx;
+  }
+}
+
+// The chaconne carriers (VariationCarrier) do not stamp ClimaxPlaced (that bit
+// is a passacaglia-carrier feature), so only the passacaglia asserts the bit
+// here; the chaconne climax placement is covered structurally below by the
+// density-rise test (the densest block sits at the climax cycle).
+TEST(GroundVariationPassacaglia, ClimaxStampedAtArcPosition) {
+  expectClimaxAtArc(FormType::Passacaglia, 8);
+}
+
+// --- 6. Density rises toward the climax -------------------------------------
+
+void expectDensityRises(FormType form, int cycle_bars) {
+  for (const Case& c : casesFor(form)) {
+    const HarnessFixture fx = build(c.form, c.seed, c.is_minor, c.target_bars);
+    const ComposeResult r = Composer{}.run(fx.material, fx.harmony, fx.voice_plan);
+
+    const std::uint16_t bars = resolvedBars(form, c.target_bars);
+    const std::size_t cycle_count = static_cast<std::size_t>(bars) / cycle_bars;
+    const Tick cycle_ticks = static_cast<Tick>(cycle_bars) * kTicksPerBar34;
+    std::size_t climax_idx = (cycle_count * 4) / 5;
+    if (climax_idx > cycle_count - 1)
+      climax_idx = cycle_count - 1;
+
+    // Count V0 notes per cycle.
+    std::vector<std::size_t> per_cycle(cycle_count, 0);
+    for (const auto& n : r.notes) {
+      if (n.voice != 0)
+        continue;
+      const std::size_t cyc = static_cast<std::size_t>(n.start_tick / cycle_ticks);
+      if (cyc < cycle_count)
+        ++per_cycle[cyc];
+    }
+    // The climax cycle is at least as dense as the establishing cycle 0.
+    EXPECT_GE(per_cycle[climax_idx], per_cycle[0])
+        << "form " << static_cast<int>(form) << " seed " << c.seed
+        << " climax cycle not denser than the establishing cycle";
+    // The climax cycle is the (joint) densest block in the piece.
+    for (std::size_t cyc = 0; cyc < cycle_count; ++cyc) {
+      EXPECT_LE(per_cycle[cyc], per_cycle[climax_idx])
+          << "form " << static_cast<int>(form) << " cycle " << cyc << " denser than climax";
+    }
+  }
+}
+
+TEST(GroundVariationChaconne, DensityRisesTowardClimax) {
+  expectDensityRises(FormType::Chaconne, 4);
+}
+
+TEST(GroundVariationPassacaglia, DensityRisesTowardClimax) {
+  expectDensityRises(FormType::Passacaglia, 8);
+}
+
+// --- 7. Minor: no Ab->B augmented 2nd in V0 ---------------------------------
+
+void expectNoAugmentedSecond(FormType form) {
+  for (const Case& c : casesFor(form)) {
+    if (!c.is_minor)
+      continue;
+    const HarnessFixture fx = build(c.form, c.seed, c.is_minor, c.target_bars);
+    const ComposeResult r = Composer{}.run(fx.material, fx.harmony, fx.voice_plan);
+    // Collect the V0 line in onset order.
+    std::vector<std::pair<Tick, std::uint8_t>> line;
+    for (const auto& n : r.notes) {
+      if (n.voice == 0)
+        line.push_back({n.start_tick, n.pitch});
+    }
+    std::sort(line.begin(), line.end());
+    for (std::size_t i = 1; i < line.size(); ++i) {
+      const int prev_pc = line[i - 1].second % 12;
+      const int cur_pc = line[i].second % 12;
+      const bool ab_to_b = (prev_pc == 8 && cur_pc == 11) || (prev_pc == 11 && cur_pc == 8);
+      EXPECT_FALSE(ab_to_b) << "form " << static_cast<int>(form) << " seed " << c.seed
+                            << " Ab->B augmented 2nd at V0 index " << i;
+    }
+  }
+}
+
+TEST(GroundVariationChaconne, MinorHasNoAugmentedSecond) {
+  expectNoAugmentedSecond(FormType::Chaconne);
+}
+
+TEST(GroundVariationPassacaglia, MinorHasNoAugmentedSecond) {
+  expectNoAugmentedSecond(FormType::Passacaglia);
+}
+
+// --- 8. Picardy: minor + even seed final chord major ------------------------
+
+void expectPicardyFinalChord(FormType form) {
+  for (const Case& c : casesFor(form)) {
+    if (!c.is_minor)
+      continue;
+    const HarnessFixture fx = build(c.form, c.seed, c.is_minor, c.target_bars);
+    ASSERT_FALSE(fx.harmony.chords.empty());
+    const ChordEvent& last = fx.harmony.chords.back();
+    if ((c.seed & 1u) == 0u) {
+      // Even seed: usePicardy -> the closing tonic chord is C major.
+      EXPECT_EQ(last.root_pc, 0u) << "form " << static_cast<int>(form) << " seed " << c.seed
+                                  << " Picardy root";
+      EXPECT_EQ(last.quality, ChordQuality::Major)
+          << "form " << static_cast<int>(form) << " seed " << c.seed << " Picardy quality";
+    } else {
+      // Odd seed: no Picardy, the closing chord stays the diatonic minor tonic.
+      EXPECT_EQ(last.quality, ChordQuality::Minor)
+          << "form " << static_cast<int>(form) << " seed " << c.seed << " non-Picardy quality";
+    }
+  }
+}
+
+TEST(GroundVariationChaconne, PicardyFinalChordOnEvenSeed) {
+  expectPicardyFinalChord(FormType::Chaconne);
+}
+
+TEST(GroundVariationPassacaglia, PicardyFinalChordOnEvenSeed) {
+  expectPicardyFinalChord(FormType::Passacaglia);
+}
+
+}  // namespace
+}  // namespace bach::composer

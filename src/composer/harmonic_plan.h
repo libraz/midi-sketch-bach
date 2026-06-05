@@ -179,6 +179,29 @@ struct HarmonicPlan {
   // P8: piece-wide modulation boundaries. Empty when the piece stays
   // in the home key (Phase 2-7 behavior).
   std::vector<ModulationEvent> modulations;
+
+  // Time signature carried alongside the harmony so every meter-sensitive
+  // validator / candidate-search site can derive the bar length from the
+  // plan rather than the global kTicksPerBar (which is fixed at 4/4 = 1920).
+  // The form-director copies these from the per-form FormSpec; all phase
+  // fixtures leave them at the 4/4 default, so existing outputs stay
+  // byte-identical (ticksPerBar() == kTicksPerBar == 1920).
+  std::uint8_t ts_numerator = 4;
+  std::uint8_t ts_denominator = 4;
+
+  /**
+   * @brief Ticks per bar implied by the plan's time signature.
+   * @return numerator * (4 * kTicksPerBeat / denominator). For 4/4 this is
+   *         the global kTicksPerBar (1920); for 3/4 at 480 tpq it is 1440.
+   * @note Single canonical bar-length accessor for the composer pipeline.
+   *       Defaults to 1920 so any plan that does not set ts_* explicitly
+   *       reproduces the pre-meter behavior exactly.
+   */
+  Tick ticksPerBar() const {
+    const Tick quarter = kTicksPerBeat;              // ticks per quarter note.
+    const Tick beat = quarter * 4 / ts_denominator;  // ticks per one beat.
+    return beat * ts_numerator;
+  }
 };
 
 }  // namespace bach::composer

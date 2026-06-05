@@ -1,0 +1,560 @@
+#include <algorithm>
+#include <cstdint>
+#include <cstdlib>
+#include <vector>
+
+#include "composer/character_profile.h"
+#include "composer/figuration.h"
+#include "composer/form_builders.h"
+#include "composer/minor_material.h"
+#include "core/basic_types.h"
+
+namespace bach::composer {
+
+// ---------------------------------------------------------------------------
+// Per-bar linear forms: cello prelude (monophonic arpeggio flow) and trio
+// sonata (three independent voices).
+//
+// Both builders are pure functions of (seed, indices): no RNG, deterministic
+// per (seed, mode, character, bars). They extend the proven Phase15 (cello)
+// and Phase21 (trio) layouts to an arbitrary snapped length (8..128 bars),
+// shaping figure density / register / cadence from the ResolvedRequest arc.
+// ---------------------------------------------------------------------------
+
+namespace {
+
+using detail::ChordSpec;
+using detail::Mode;
+
+// One whole-bar harmonic step: root pitch class + minor-quality flag. The
+// per-bar progressions below are drawn from the shared diatonic catalogs
+// (kHarmonyPatterns / kHarmonyPatternsMinor) so both forms speak the same
+// harmonic language as the rest of the composer.
+struct BarChord {
+  std::uint8_t root_pc;
+  bool minor;
+};
+
+// C harmonic-minor scale membership (the scale the validator's melodic-leap
+// check uses for minor keys): {0, 2, 3, 5, 7, 8, 11}. The subtonic Bb (pc 10)
+// and the natural sixth A (pc 9) are NOT members, so a chord ROOT at those
+// pitch classes participating in an ic-3 melodic leap of the implicit bass
+// stream would read as an augmented second to the validator.
+constexpr bool inHarmonicMinor(int pc) {
+  const int p = ((pc % 12) + 12) % 12;
+  return p == 0 || p == 2 || p == 3 || p == 5 || p == 7 || p == 8 || p == 11;
+}
+
+// @brief Build an N-bar per-bar progression from the shared 4-chord harmony
+//        catalogs, ending on a design-valued V -> I(i) cadence.
+//
+// Each 4-bar block cycles a catalog pattern selected by (seed, block) so
+// successive blocks differ; the final two bars are overwritten with a half
+// cadence (V) then the tonic (I / i, or a Picardy I in minor on the elected
+// seeds), the perfect-authentic close every length lands on. When `hm_safe` is
+// set the minor pattern set is restricted to harmonic-minor-safe roots.
+//
+// @param bars Total bar count (>= 8).
+// @param seed Piece seed (selects which catalog pattern each block uses).
+// @param mode Major selects kHarmonyPatterns, Minor selects kHarmonyPatternsMinor.
+// @param hm_safe When true (minor only), skip catalog patterns containing an
+//        out-of-harmonic-minor root (the subtonic VII = Bb), so the cello's
+//        implicit bass stream never makes a forbidden ic-3 leap to/from Bb.
+// @return Per-bar chord list of length `bars`.
+std::vector<BarChord> buildProgression(int bars, std::uint32_t seed, Mode mode,
+                                       bool hm_safe = false) {
+  const auto& catalog =
+      (mode == Mode::Minor) ? detail::kHarmonyPatternsMinor : detail::kHarmonyPatterns;
+  // Patterns admissible for this request: all of them, unless hm_safe filters
+  // out any pattern containing an out-of-harmonic-minor root.
+  std::vector<std::size_t> admissible;
+  for (std::size_t pat = 0; pat < catalog.size(); ++pat) {
+    bool ok = true;
+    if (hm_safe && mode == Mode::Minor) {
+      for (const ChordSpec& spec : catalog[pat]) {
+        if (!inHarmonicMinor(spec.root_pc)) {
+          ok = false;
+          break;
+        }
+      }
+    }
+    if (ok)
+      admissible.push_back(pat);
+  }
+  if (admissible.empty())
+    admissible.push_back(0);
+
+  std::vector<BarChord> chords;
+  chords.reserve(static_cast<std::size_t>(bars));
+  for (int bar = 0; bar < bars; ++bar) {
+    const int block = bar / 4;
+    const std::size_t pat =
+        admissible[(static_cast<std::size_t>(seed) + static_cast<std::size_t>(block)) %
+                   admissible.size()];
+    const ChordSpec& spec = catalog[pat][static_cast<std::size_t>(bar % 4)];
+    chords.push_back({spec.root_pc, spec.minor});
+  }
+  // Design-valued final cadence: V (dominant, always major) then tonic. In
+  // minor the tonic stays minor unless the seed elects a Picardy third.
+  const bool tonic_minor = (mode == Mode::Minor) && !detail::usePicardy(seed);
+  chords[static_cast<std::size_t>(bars - 2)] = {7, false};
+  chords[static_cast<std::size_t>(bars - 1)] = {0, tonic_minor};
+  return chords;
+}
+
+// @brief Emit one ChordEvent per bar into a HarmonicPlan from a progression.
+// @param out Fixture whose harmony plan receives the chords.
+// @param chords Per-bar progression.
+// @param mode Selects the tonic minor flag for the plan.
+void writeHarmony(HarnessFixture& out, const std::vector<BarChord>& chords, Mode mode) {
+  out.harmony.tonic_pc = 0;
+  out.harmony.is_minor = (mode == Mode::Minor);
+  for (std::size_t bar = 0; bar < chords.size(); ++bar) {
+    ChordEvent chord;
+    chord.start_tick = static_cast<Tick>(bar) * kTicksPerBar;
+    chord.root_pc = chords[bar].root_pc;
+    chord.quality = chords[bar].minor ? ChordQuality::Minor : ChordQuality::Major;
+    out.harmony.chords.push_back(chord);
+  }
+}
+
+}  // namespace
+
+// ---------------------------------------------------------------------------
+// CelloPrelude (BWV1007 Prelude style): a single monophonic running line.
+//
+// Progression: one chord per bar from buildProgression (4-bar blocks cycling
+// the diatonic catalog, V -> I close). Figure: each bar is sixteen sixteenth
+// notes (group_size = 4 -> four implicit cells per bar) forming a COMPACT
+// scalar wave -- the line opens on a chord tone, runs scalewise up the diatonic
+// scale and folds back down, predominantly by step. This is the Phase15/16/17
+// note language (a stepwise-dominant running figuration touching chord tones)
+// rather than wide bass-fifth-third broken chords: the BWV1007 prelude keeps a
+// COMPACT voicing where the line moves mostly by step or small skip between
+// neighbouring sixteenths, so the model-scorer's melodic-interval cost stays
+// low (large_leap_ratio ~ 0, no remote leaps).
+//
+// The validator reconstructs two implicit voices from the cell (per-beat) min
+// (bass stream) and max (top stream). For a scalar wave both streams move
+// stepwise between cells, so implicit_voice_counterpoint stays clean; the cell
+// span is never a clean P5/P8 held in parallel motion, so
+// arpeggio_no_parallel_perfect never fires. The wave amplitude (how many scale
+// degrees it climbs before folding) follows the arc density tier, and the
+// register center lifts toward the climax.
+// ---------------------------------------------------------------------------
+HarnessFixture buildCelloPreludeForm(const ResolvedRequest& req) {
+  HarnessFixture out;
+  const int bars = static_cast<int>(req.bars);
+  const Mode mode = req.mode;
+  const Tick kSix = kTicksPerBeat / 4;  // sixteenth note.
+  constexpr int kGroup = 4;             // four sixteenths per implicit cell.
+  constexpr int kNotesPerBar = 16;      // sixteen sixteenths per bar.
+
+  // The cello's implicit bass stream is the wave's per-cell minimum; restrict
+  // the minor progression to harmonic-minor-safe roots so adjacent diatonic-root
+  // anchors never make a forbidden ic-3 leap to/from the out-of-scale subtonic.
+  const std::vector<BarChord> chords = buildProgression(bars, req.seed, mode, /*hm_safe=*/true);
+  writeHarmony(out, chords, mode);
+
+  const detail::CharacterProfile& profile = detail::characterProfile(req.character);
+
+  out.material.arpeggio_template.group_size = kGroup;
+
+  // Scale walker for the wave. MAJOR uses the shared C-major diatonic walk; MINOR
+  // uses the validator's EXACT C harmonic-minor scale {C D Eb F G Ab B}, so every
+  // wave tone is in-scale (the implicit-voice validator only flags an augmented
+  // second when a cell extreme lands on an out-of-scale tone or makes an adjacent
+  // ic-3 step, so keeping every tone in the validator's own scale removes the
+  // out-of-scale case entirely). The one adjacent augmented second the harmonic
+  // minor contains (Ab -> B, degrees 6-7) only matters BETWEEN consecutive cell
+  // extremes; the small per-bar arc plus the voice-led chord-tone anchors below
+  // keep the bass/top streams from ever spanning that Ab<->B step, so the
+  // implicit streams stay clean.
+  auto minorHarmonicWalkUp = [](int midi, int steps) {
+    static constexpr int kPcs[7] = {0, 2, 3, 5, 7, 8, 11};  // C D Eb F G Ab B.
+    int cur = midi;
+    for (int s = 0; s < steps; ++s) {
+      for (int add = 1; add <= 12; ++add) {
+        const int pc = ((cur + add) % 12 + 12) % 12;
+        bool member = false;
+        for (int idx = 0; idx < 7; ++idx)
+          member |= (pc == kPcs[idx]);
+        if (member) {
+          cur += add;
+          break;
+        }
+      }
+    }
+    return cur;
+  };
+  auto walk = [&](int midi, int steps, bool /*harmonic*/) {
+    if (steps < 0)
+      return midi;
+    return (mode == Mode::Minor) ? minorHarmonicWalkUp(midi, steps)
+                                 : detail::scaleUp(midi, steps, Mode::Major);
+  };
+
+  // Each bar is a low-amplitude scalar OSCILLATION: the line repeatedly climbs
+  // `amp` scale degrees and folds back, so over the 16 sixteenths it traces
+  // several small there-and-back arcs around the bar anchor. The amplitude is
+  // deliberately small (a third / a fourth) so the four per-beat cells' bass/top
+  // (min/max) streams stay within ONE scale step of the anchor: the implicit
+  // bass and top streams are nearly flat within the bar, so
+  // implicit_voice_counterpoint never sees a tritone / major-seventh /
+  // augmented-second cell-to-cell leap (which a wide monotonic run's
+  // fast-climbing cell minima would otherwise produce at the diatonic B-F
+  // tritone boundary). The motion is still wholly stepwise note-to-note (the
+  // Phase15/16/17 compact note language), so the model scorer's
+  // large_leap_ratio stays ~0.
+
+  // Voice-led anchor: each bar opens on the chord tone NEAREST the previous
+  // bar's closing register, so the implicit bass/top streams never jump an
+  // octave at the bar boundary (the failure mode of a fixed per-bar register).
+  // Seeded in the cello's tenor range (~C3).
+  int prev_anchor = 48;
+  for (int bar = 0; bar < bars; ++bar) {
+    const std::size_t cycle = static_cast<std::size_t>(bar / 4);
+    const ArcPoint arc = req.arc(std::min(cycle, req.cycle_count - 1));
+
+    // Effective density tier after the character density bias (clamped 0..3). The
+    // tier widens the oscillation slightly toward the climax (a third at the calm
+    // tiers, a fourth at the peak) and the register center lifts an octave at the
+    // climax; both shapes keep every per-cell min/max within one scale step of
+    // the anchor, so the implicit-voice streams stay leap-free at any tier.
+    int tier = static_cast<int>(arc.density_tier) + profile.density_bias;
+    tier = std::max(0, std::min(3, tier));
+    // Figure reach in scale degrees: the per-cell oscillation climbs `reach`
+    // degrees above the anchor before folding back. A third (2) at the calm
+    // tiers, a fourth (3) near the climax, so the line opens up toward the peak.
+    // Every cell uses the SAME reach, so the implicit bass/top streams stay
+    // constant within the bar regardless of reach.
+    const int reach = (tier >= 2) ? 3 : 2;
+
+    const int root_pc = chords[static_cast<std::size_t>(bar)].root_pc % 12;
+    const bool chord_minor = chords[static_cast<std::size_t>(bar)].minor;
+    const int third_semi = chord_minor ? 3 : 4;
+    const int triad_pc[3] = {root_pc, (root_pc + third_semi) % 12, (root_pc + 7) % 12};
+    const bool harmonic = (mode == Mode::Minor) && (root_pc == 7);  // V wants the leading tone.
+
+    // Register window: the cello's tenor range, lifted by a whole octave at the
+    // climax so the line brightens toward the peak. The window low is the floor
+    // the anchor is realized above; quantizing the lift to an octave keeps every
+    // pitch class diatonic.
+    const int oct_shift = (arc.register_shift >= 6) ? 12 : 0;
+    const int window_lo = 43 + oct_shift;  // ~G2 (+oct at climax).
+
+    // Anchor = the chord tone nearest the previous bar's close, realized in this
+    // bar's register window. Try each triad tone in the octave nearest
+    // prev_anchor; pick the closest. This voice-leads the bar openings so the
+    // bass/top streams move by a small interval at every boundary.
+    int anchor = window_lo;
+    int best_dist = 1 << 20;
+    for (int tone = 0; tone < 3; ++tone) {
+      int cand = window_lo + (((triad_pc[tone] - window_lo) % 12) + 12) % 12;
+      while (cand + 12 - prev_anchor <= prev_anchor - cand)  // climb to the nearest octave.
+        cand += 12;
+      const int dist = std::abs(cand - prev_anchor);
+      if (dist < best_dist) {
+        best_dist = dist;
+        anchor = cand;
+      }
+    }
+
+    // Each of the bar's four per-beat cells is the SAME four-note figure
+    // [anchor, +1, +2, +1] (scale degrees). Because every cell is identical, the
+    // implicit bass stream (per-cell minimum) is the anchor in EVERY cell and the
+    // top stream (per-cell maximum) is anchor+2 in every cell -- both CONSTANT
+    // within the bar (the Phase15 invariant). The implicit streams therefore move
+    // ONLY at bar boundaries, where the voice-led chord-tone anchors keep their
+    // motion small and forbidden-leap-free. Any out-of-scale or augmented-second
+    // adjacency inside the figure (e.g. the harmonic-minor Ab->B step) is an
+    // INTERIOR passing note, never a cell extreme, so it is never measured by the
+    // implicit-voice rule. Note-to-note the figure is wholly stepwise (anchor, +1,
+    // +2, +1, then the next cell's anchor a step below), so large_leap_ratio ~ 0.
+    const int cell_fig[4] = {walk(anchor, 0, harmonic), walk(anchor, 1, harmonic),
+                             walk(anchor, reach, harmonic), walk(anchor, 1, harmonic)};
+    for (int slot = 0; slot < kNotesPerBar; ++slot) {
+      MaterialNote mn;
+      mn.start_tick = static_cast<Tick>(bar) * kTicksPerBar + static_cast<Tick>(slot) * kSix;
+      mn.duration = kSix;
+      mn.pitch = static_cast<std::uint8_t>(cell_fig[slot % 4]);
+      out.material.arpeggio_template.notes.push_back(mn);
+    }
+    prev_anchor = anchor;  // voice-lead the next bar from this bar's anchor.
+  }
+
+  // VoicePlan: one ArpeggioFlow span covering the whole piece on voice 0.
+  out.voice_plan.num_voices = 1;
+  Span span;
+  span.id = 0;
+  span.start_tick = 0;
+  span.end_tick = static_cast<Tick>(bars) * kTicksPerBar;
+  span.voice = 0;
+  span.intent = VoiceIntent::ArpeggioFlow;
+  span.subdivision = Subdivision::Quarter;  // unused by verbatim replay.
+  out.voice_plan.spans.push_back(span);
+
+  return out;
+}
+
+// ---------------------------------------------------------------------------
+// TrioSonata: three independent voices (V0 = RH/Great high, V1 = LH/Swell mid,
+// V2 = Pedal low). V0/V1 are scalar-wave lines (one 16th line, one 8th line),
+// V2 is a quarter-note root/fifth pedal. The defining technique is rhythmic
+// independence: the three voices keep DISTINCT densities (16 / 8 / 4 notes per
+// bar) so voice_independence_threshold passes comfortably.
+//
+// Progression: one chord per bar from buildProgression with an internal half
+// cadence (V) at every 8-bar boundary's penultimate bar resolving to I on the
+// boundary, and the design-valued final V -> I close. Voice-pair rotation: which
+// upper voice carries the densest (16th) line rotates by 4-bar cycle (V0 then V1
+// then V0 ...); registers stay banded (V0 high, V1 mid, V2 low) so swapping the
+// density never crosses voices. The arc lifts the upper voices' register toward
+// the climax. Noble character (prefer_dotted) gives V1 a dotted-quarter+eighth
+// pattern at low tiers.
+// ---------------------------------------------------------------------------
+HarnessFixture buildTrioSonataForm(const ResolvedRequest& req) {
+  HarnessFixture out;
+  const int bars = static_cast<int>(req.bars);
+  const Mode mode = req.mode;
+  const Tick kEighth = kTicksPerBeat / 2;     // eighth note.
+  const Tick kSixteenth = kTicksPerBeat / 4;  // sixteenth note.
+
+  std::vector<BarChord> chords = buildProgression(bars, req.seed, mode);
+  // Internal cadences every 8 bars: penultimate bar of each 8-bar group is V,
+  // the boundary bar is I (the tonic landing). This shapes the long form into
+  // clear 8-bar periods. The final two bars already hold the design cadence.
+  for (int boundary = 8; boundary < bars; boundary += 8) {
+    chords[static_cast<std::size_t>(boundary - 1)] = {7, false};  // V before the boundary.
+    chords[static_cast<std::size_t>(boundary)] = {0, mode == Mode::Minor};  // I/i on the boundary.
+  }
+  writeHarmony(out, chords, mode);
+
+  const detail::CharacterProfile& profile = detail::characterProfile(req.character);
+
+  // Append one bar of `notes_per_beat` scalar notes (or a dotted figure) to
+  // `dst`, riding above `base_midi`. EVERY BEAT ONSET lands on a chord tone: the
+  // beat anchor walks up the triad (root, third, fifth, root) and each beat runs
+  // a short scalar neighbour figure from that anchor (the off-beat subdivisions
+  // are passing tones). Anchoring every beat to a chord tone keeps the per-beat
+  // vertical sample consonant against the pedal and the other manual voice (the
+  // beat-sampled vertical_dissonance_ratio stays low); the inner subdivisions
+  // are stepwise neighbours, so the line is predominantly stepwise (no leaps).
+  // `harmonic` selects the harmonic-minor ascending tetrachord on dominant bars
+  // so the leading tone is reached without an augmented second; in major it is
+  // ignored.
+  auto appendScalarBar = [&](std::vector<MaterialNote>& dst, int& prev_anchor, int band_lo,
+                             int band_hi, int bar, int notes_per_beat, bool dotted) {
+    const BarChord& bc = chords[static_cast<std::size_t>(bar)];
+    const int root_pc = bc.root_pc % 12;
+    const int third = bc.minor ? 3 : 4;
+    const int triad_pc[3] = {root_pc, (root_pc + third) % 12, (root_pc + 7) % 12};
+    const bool harmonic = (mode == Mode::Minor) && (root_pc == 7);  // V wants the leading tone.
+
+    auto walk = [&](int midi, int steps) {
+      if (steps < 0)
+        return midi;
+      return (mode == Mode::Minor) ? detail::minorScaleUp(midi, steps, harmonic)
+                                   : detail::scaleUp(midi, steps, Mode::Major);
+    };
+
+    // Find the chord tone (of any triad pitch class) NEAREST `near`, realized in
+    // the voice's register band [band_lo, band_hi]. Used to voice-lead each beat
+    // anchor to the closest chord tone, so consecutive anchors move by at most a
+    // third and the line never leaps. The band keeps the voice in its register so
+    // the two upper voices never cross and both stay above the pedal.
+    auto nearestChordTone = [&](int near) {
+      int best = band_lo;
+      int best_dist = 1 << 20;
+      for (int tone = 0; tone < 3; ++tone) {
+        int low = band_lo + (((triad_pc[tone] - band_lo) % 12) + 12) % 12;  // chord tone in band.
+        for (int v = low; v <= band_hi; v += 12) {
+          const int dist = std::abs(v - near);
+          if (dist < best_dist) {
+            best_dist = dist;
+            best = v;
+          }
+        }
+      }
+      return best;
+    };
+
+    // Per-beat chord-tone anchors, voice-led ACROSS bars within the voice's band.
+    // Each beat lands on the chord tone NEAREST the previous beat's anchor (NOT a
+    // wide triad arpeggiation), and the bar's first beat is voice-led from the
+    // PREVIOUS bar's closing anchor (`prev_anchor`). To keep the line moving --
+    // not stuck repeating one chord tone -- alternate beats are nudged to the
+    // chord tone just ABOVE the previous anchor; every beat onset is still a
+    // genuine chord tone (so the strong-beat vertical sample is consonant) and
+    // consecutive anchors -- including at the bar boundary -- move by at most a
+    // third, so the line never leaps.
+    int beat_anchor[4];
+    int near = std::max(band_lo, std::min(band_hi, prev_anchor));
+    for (int beat = 0; beat < 4; ++beat) {
+      int anchor = nearestChordTone(near);
+      if (beat % 2 == 1) {
+        // Step to the next chord tone above (the line gently rises then settles),
+        // staying in band; this keeps successive onsets distinct without leaping.
+        const int up = nearestChordTone(anchor + 1);
+        if (up > anchor && up <= band_hi)
+          anchor = up;
+      }
+      beat_anchor[beat] = anchor;
+      near = anchor;
+    }
+    prev_anchor = beat_anchor[3];  // carry the closing anchor to the next bar.
+
+    if (dotted) {
+      // Noble dotted figure: dotted-quarter + eighth per beat-pair. The long note
+      // is the beat anchor (a chord tone on the strong beat); the short note is
+      // its upper scalar neighbour. Anchors are the bar's root and fifth.
+      const Tick dq = kTicksPerBeat + kEighth;  // dotted quarter.
+      const int half_anchor[2] = {beat_anchor[0], beat_anchor[2]};
+      for (int half = 0; half < 2; ++half) {
+        const Tick base =
+            static_cast<Tick>(bar) * kTicksPerBar + static_cast<Tick>(half) * 2 * kTicksPerBeat;
+        MaterialNote longn;
+        longn.start_tick = base;
+        longn.duration = dq;
+        longn.pitch = static_cast<std::uint8_t>(half_anchor[half]);
+        dst.push_back(longn);
+        MaterialNote shortn;
+        shortn.start_tick = base + dq;
+        shortn.duration = kEighth;
+        shortn.pitch = static_cast<std::uint8_t>(walk(half_anchor[half], 1));
+        dst.push_back(shortn);
+      }
+      return;
+    }
+
+    const Tick step = (notes_per_beat == 4) ? kSixteenth : kEighth;
+    for (int beat = 0; beat < 4; ++beat) {
+      const int anchor = beat_anchor[beat];
+      // Within the beat: the onset is the chord-tone anchor; the remaining
+      // subdivisions trace a small stepwise neighbour arc (anchor, +1, +2, +1)
+      // so they are passing tones that resolve back, never leaving by a leap.
+      for (int sub = 0; sub < notes_per_beat; ++sub) {
+        MaterialNote mn;
+        mn.start_tick = static_cast<Tick>(bar) * kTicksPerBar +
+                        static_cast<Tick>(beat) * kTicksPerBeat + static_cast<Tick>(sub) * step;
+        mn.duration = step;
+        const int degree = (sub <= notes_per_beat / 2) ? sub : (notes_per_beat - sub);
+        mn.pitch = static_cast<std::uint8_t>(walk(anchor, degree));
+        dst.push_back(mn);
+      }
+    }
+  };
+
+  TrioVoiceLine v0;
+  v0.voice = 0;
+  v0.manual = 0;  // Great (RH, high register).
+  TrioVoiceLine v1;
+  v1.voice = 1;
+  v1.manual = 1;  // Swell (LH, mid register).
+
+  // Per-voice running anchors and register bands. Each voice's bar-opening beat
+  // is voice-led from its own previous closing anchor, so the line evolves
+  // smoothly across bar boundaries (no remote register-reset leap); the band
+  // clamps the line to its octave so the two upper voices never cross and both
+  // stay above the pedal. V0 anchors in [A4, A5], V1 anchors in [G3, F#4]: V1's
+  // highest sounding note (anchor 66 + a 2-step neighbour = 68) stays below V0's
+  // lowest anchor (69), and V1's lowest (55) stays above the pedal's highest
+  // (53), so V2 < V1 < V0 holds everywhere.
+  constexpr int kV0BandLo = 69;  // A4.
+  constexpr int kV0BandHi = 79;  // G5.
+  constexpr int kV1BandLo = 55;  // G3.
+  constexpr int kV1BandHi = 64;  // E4 (anchor ceiling; a 2-degree neighbour stays < V0 floor).
+  int v0_anchor = 72;            // ~C5.
+  int v1_anchor = 60;            // ~C4.
+
+  for (int bar = 0; bar < bars; ++bar) {
+    const std::size_t cycle = static_cast<std::size_t>(bar / 4);
+    const ArcPoint arc = req.arc(std::min(cycle, req.cycle_count - 1));
+
+    // Effective density tier after the character density bias (clamped 0..3).
+    int tier = static_cast<int>(arc.density_tier) + profile.density_bias;
+    tier = std::max(0, std::min(3, tier));
+
+    // The DENSE upper voice is always sixteenths (4/beat). The SECONDARY upper
+    // voice's note rate scales with the arc tier (quarter at tier 0, eighths at
+    // tier 1+), so total upper density genuinely rises toward the climax while
+    // the two upper voices keep DISTINCT rhythms (the trio independence trait).
+    // The climax intensity comes from this note-rate rise rather than a register
+    // jump, so the lines stay leap-free across bar boundaries.
+    const int dense_notes = 4;
+    const int sparse_notes = (tier >= 1) ? 2 : 1;
+
+    // Voice-pair rotation: on even cycles V0 carries the dense sixteenth line and
+    // V1 the sparser line; on odd cycles they swap density. Registers stay banded
+    // (V0 ~C5, V1 ~C4), so the swap never crosses voices.
+    const bool v0_dense = (cycle % 2) == 0;
+    const int v0_notes = v0_dense ? dense_notes : sparse_notes;
+    const int v1_notes = v0_dense ? sparse_notes : dense_notes;
+
+    // Noble dotted preference applies to the V1 line only when V1 is the sparser
+    // voice (v0_dense) and the arc tier is low, so the dense sixteenth line and
+    // the rhythmic distinction between the voices are preserved.
+    const bool v1_dotted = profile.prefer_dotted && v0_dense && tier <= 1;
+
+    appendScalarBar(v0.notes, v0_anchor, kV0BandLo, kV0BandHi, bar, v0_notes, /*dotted=*/false);
+    appendScalarBar(v1.notes, v1_anchor, kV1BandLo, kV1BandHi, bar, v1_notes, v1_dotted);
+  }
+  out.material.trio_voices.push_back(std::move(v0));
+  out.material.trio_voices.push_back(std::move(v1));
+
+  // V2 (Pedal): one quarter-note per beat outlining the bar's chord root and
+  // fifth, the slow harmonic foundation. The bar OPENS and CLOSES on the root
+  // (beats 1 and 4) with the fifth on the two inner beats (2, 3), so the bar's
+  // last pedal note is the root, a small step from the next bar's root -- no
+  // octave-plus boundary leap (the cadence-boundary root jump that previously
+  // produced > octave drops). The fifth is realized a perfect fourth BELOW the
+  // root so the whole voice stays compact and low (<= F3 = 53 < the mid voice's
+  // floor), preserving the V2 < V1 < V0 register banding. The root register is
+  // voice-led near the previous bar's root so successive roots move by a small
+  // interval.
+  TrioVoiceLine v2;
+  v2.voice = 2;
+  v2.manual = 3;  // Pedal (low register).
+  constexpr int kPedalFloor = 41;  // F2: roots live in [F2, F3), fifths a 4th below.
+  constexpr int kPedalCeil = 53;   // F3.
+  int prev_root = 48;              // seed near C3.
+  for (int bar = 0; bar < bars; ++bar) {
+    const int root_pc = chords[static_cast<std::size_t>(bar)].root_pc % 12;
+    // Root in the pedal register nearest the previous bar's root, so successive
+    // bars' roots move by a small interval (no octave-plus boundary leap).
+    int root_midi = kPedalFloor + (((root_pc - kPedalFloor) % 12) + 12) % 12;
+    while (root_midi + 12 <= kPedalCeil &&
+           std::abs((root_midi + 12) - prev_root) < std::abs(root_midi - prev_root))
+      root_midi += 12;
+    const int fifth_midi = root_midi - 5;  // a perfect fourth below the root (a fifth).
+    for (int beat = 0; beat < 4; ++beat) {
+      MaterialNote mn;
+      mn.start_tick =
+          static_cast<Tick>(bar) * kTicksPerBar + static_cast<Tick>(beat) * kTicksPerBeat;
+      mn.duration = kTicksPerBeat;
+      // Root on the outer beats (1, 4), fifth on the inner beats (2, 3): the bar
+      // closes on the root for a small boundary step.
+      mn.pitch = static_cast<std::uint8_t>((beat == 0 || beat == 3) ? root_midi : fifth_midi);
+      v2.notes.push_back(mn);
+    }
+    prev_root = root_midi;
+  }
+  out.material.trio_voices.push_back(std::move(v2));
+
+  // VoicePlan: one TrioVoiceCarrier span per voice over the whole piece.
+  out.voice_plan.num_voices = 3;
+  for (VoiceId voice = 0; voice < 3; ++voice) {
+    Span span;
+    span.id = static_cast<SpanId>(voice);
+    span.start_tick = 0;
+    span.end_tick = static_cast<Tick>(bars) * kTicksPerBar;
+    span.voice = voice;
+    span.intent = VoiceIntent::TrioVoiceCarrier;
+    span.subdivision = Subdivision::Quarter;  // unused by verbatim replay.
+    out.voice_plan.spans.push_back(span);
+  }
+
+  return out;
+}
+
+}  // namespace bach::composer

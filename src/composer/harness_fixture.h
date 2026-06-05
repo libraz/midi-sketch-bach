@@ -234,6 +234,13 @@ struct HarnessFixture {
   Material material;
   HarmonicPlan harmony;
   VoicePlan voice_plan;
+  // Time signature carried alongside the layout. Defaulted to 4/4 so every
+  // existing phase builder (which value-initialises a HarnessFixture and then
+  // mutates only material/harmony/voice_plan) stays byte-identical. The
+  // form-director entry point overrides these from the per-form FormSpec; the
+  // validator does not yet consume them (meter-awareness is separate work).
+  std::uint8_t ts_numerator = 4;
+  std::uint8_t ts_denominator = 4;
 };
 
 HarnessFixture buildHarnessFixture(HarnessPhase phase, int seed);

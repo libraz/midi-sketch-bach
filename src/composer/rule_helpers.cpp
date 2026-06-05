@@ -51,8 +51,10 @@ const ChordEvent& activeChord(const HarmonicPlan& plan, Tick at) {
   return *current;
 }
 
-bool isStrongBeat(Tick tick) {
-  return (tick % kTicksPerBar) == 0;
+bool isStrongBeat(Tick tick, Tick ticks_per_bar) {
+  if (ticks_per_bar == 0)
+    ticks_per_bar = kTicksPerBar;  // defensive: never modulo by zero.
+  return (tick % ticks_per_bar) == 0;
 }
 
 std::uint8_t pitchClass(std::uint8_t pitch) {

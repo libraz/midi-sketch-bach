@@ -22,7 +22,16 @@ set(BACH_COMPOSER_SOURCES
   validator.cpp
   renderer.cpp
   json_export.cpp
+  figuration.cpp
   harness_fixture.cpp
+  form_director.cpp
+  form_ground_variations.cpp
+  form_linear.cpp
+  form_cantus.cpp
+  form_fugue.cpp
+  form_sectional.cpp
+  minor_material.cpp
+  character_profile.cpp
 )
 
 # CMake-time isolation guard: refuse any forbidden legacy source.

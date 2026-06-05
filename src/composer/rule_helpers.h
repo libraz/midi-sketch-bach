@@ -28,7 +28,10 @@ const ChordEvent& activeChord(const HarmonicPlan& plan, Tick at);
 
 // Beat / pitch primitives.
 
-bool isStrongBeat(Tick tick);
+// Returns true iff `tick` lands on a bar downbeat. `ticks_per_bar` is the
+// meter-derived bar length (HarmonicPlan::ticksPerBar()); it defaults to the
+// global kTicksPerBar (4/4 = 1920) so pre-meter callers stay byte-identical.
+bool isStrongBeat(Tick tick, Tick ticks_per_bar = kTicksPerBar);
 
 std::uint8_t pitchClass(std::uint8_t pitch);
 
