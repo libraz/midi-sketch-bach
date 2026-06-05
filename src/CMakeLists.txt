@@ -11,6 +11,7 @@ set(BACH_LIB_SOURCES
   core/json_helpers.cpp
   core/json_parser.cpp
   core/note_source.cpp
+  core/instrument_program.cpp
   core/note_creator.cpp
   core/figure_match.cpp
   core/markov_tables.cpp

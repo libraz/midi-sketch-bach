@@ -13,6 +13,7 @@ set(BACH_TEST_SOURCES
   core/scale_test.cpp
   core/json_helpers_test.cpp
   core/note_source_test.cpp
+  core/instrument_program_test.cpp
   core/note_creator_test.cpp
   core/rng_util_test.cpp
   core/figure_match_test.cpp
