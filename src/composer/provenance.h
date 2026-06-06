@@ -1,6 +1,7 @@
 #ifndef BACH_COMPOSER_PROVENANCE_H
 #define BACH_COMPOSER_PROVENANCE_H
 
+#include <array>
 #include <cstdint>
 
 #include "composer/span.h"
@@ -45,9 +46,61 @@ enum class NoteSource : std::uint8_t {
 // rule traces: a downstream analyzer can read this back to explain why
 // the candidate was admitted.
 //
-// 64 bits is a soft cap on rule count. If the rule set outgrows that,
-// widen to std::array<uint64_t, N> before changing the JSON schema.
-using RuleIdMask = std::uint64_t;
+// Internal mask is already widened to two 64-bit lanes so future rules can use
+// bits 64..127 without another representation migration. provenance.json keeps
+// the legacy low-64 `satisfied_rules` field until a high bit is actually used.
+struct RuleIdMask {
+  std::array<std::uint64_t, 2> lanes{};
+
+  constexpr RuleIdMask() = default;
+  constexpr RuleIdMask(std::uint64_t low) : lanes{low, 0} {}
+  constexpr RuleIdMask(std::uint64_t low, std::uint64_t high) : lanes{low, high} {}
+
+  [[nodiscard]] constexpr std::uint64_t low64() const { return lanes[0]; }
+  [[nodiscard]] constexpr std::uint64_t high64() const { return lanes[1]; }
+  [[nodiscard]] constexpr bool any() const { return lanes[0] != 0 || lanes[1] != 0; }
+
+  explicit constexpr operator bool() const { return any(); }
+  explicit constexpr operator std::uint64_t() const { return low64(); }
+};
+
+constexpr RuleIdMask operator|(RuleIdMask lhs, RuleIdMask rhs) {
+  return RuleIdMask{lhs.lanes[0] | rhs.lanes[0], lhs.lanes[1] | rhs.lanes[1]};
+}
+
+constexpr RuleIdMask operator&(RuleIdMask lhs, RuleIdMask rhs) {
+  return RuleIdMask{lhs.lanes[0] & rhs.lanes[0], lhs.lanes[1] & rhs.lanes[1]};
+}
+
+constexpr RuleIdMask& operator|=(RuleIdMask& lhs, RuleIdMask rhs) {
+  lhs.lanes[0] |= rhs.lanes[0];
+  lhs.lanes[1] |= rhs.lanes[1];
+  return lhs;
+}
+
+constexpr bool operator==(RuleIdMask lhs, RuleIdMask rhs) {
+  return lhs.lanes[0] == rhs.lanes[0] && lhs.lanes[1] == rhs.lanes[1];
+}
+
+constexpr bool operator!=(RuleIdMask lhs, RuleIdMask rhs) {
+  return !(lhs == rhs);
+}
+
+constexpr bool operator==(RuleIdMask lhs, std::uint64_t rhs) {
+  return lhs == RuleIdMask{rhs};
+}
+
+constexpr bool operator==(std::uint64_t lhs, RuleIdMask rhs) {
+  return RuleIdMask{lhs} == rhs;
+}
+
+constexpr bool operator!=(RuleIdMask lhs, std::uint64_t rhs) {
+  return !(lhs == rhs);
+}
+
+constexpr bool operator!=(std::uint64_t lhs, RuleIdMask rhs) {
+  return !(lhs == rhs);
+}
 
 enum RuleBit : std::uint8_t {
   ChordTone = 0,
@@ -253,7 +306,29 @@ enum RuleBit : std::uint8_t {
   //   (MusicalFail) when any pair of ADJACENT sections is not sufficiently
   //   contrasting (near-identical note density AND mean register).
   FantasiaSectionContrast = 63,
+  // First high-lane bit (lives in RuleIdMask lane 1, exported through the
+  // optional satisfied_rules_high JSON field). Stamped by CandidateSearch on
+  // every CountersubjectCarrier note (an identity bit, mirroring the
+  // CountersubjectActive marker).
+  // CountersubjectInvertible: the note belongs to a countersubject line designed
+  //   to sound against the subject/answer in invertible (double) counterpoint at
+  //   the octave. The Validator's countersubject_invertible rule collects every
+  //   note carrying this bit, pairs the countersubject voice against any
+  //   overlapping SubjectCarrier / AnswerCarrier voice, and soft-fails
+  //   (MusicalFail) when a strong-beat vertical interval between the pair would
+  //   become a forbidden dissonance under octave inversion (a perfect fifth
+  //   inverts to a fourth).
+  CountersubjectInvertible = 64,
 };
+
+constexpr RuleIdMask ruleBitMask(int bit) {
+  return bit < 64 ? RuleIdMask{std::uint64_t{1} << bit, 0}
+                  : RuleIdMask{0, std::uint64_t{1} << (bit - 64)};
+}
+
+constexpr RuleIdMask ruleBitMask(RuleBit bit) {
+  return ruleBitMask(static_cast<int>(bit));
+}
 
 // Per-note provenance record.
 //
@@ -271,9 +346,15 @@ struct NoteProvenance {
   // Corpus-probability melodic score used by the corpus-statistics scorer.
   // Retained as "shadow" in JSON/provenance so downstream analyzers can audit
   // the scorer without affecting committed pitches.
+  //
+  // Meaningful only for source == Compose: Material/Ornament notes never run
+  // the candidate scorer, so these three fields stay at their defaults for them
+  // and emitProvenanceJson() omits the JSON keys entirely (a present shadow_*
+  // field therefore means "this note was scored").
   float shadow_score = 0.0f;
-  // Pitch that the corpus-statistics scorer would choose from the admissible
-  // candidate set. Under normal generation this should match the emitted pitch.
+  // Pitch the corpus-statistics scorer would choose from the admissible
+  // candidate set. For a Compose note under normal generation this should match
+  // the emitted pitch (a mismatch is the scorer-disagreed diagnostic).
   std::uint8_t shadow_winning_pitch = 0;
   // Same shadow winner with the interval-Markov term disabled, used to isolate
   // the interval-Markov term's effect on selection.

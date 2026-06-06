@@ -74,7 +74,7 @@ bool hasRuleKind(const ValidationReport& r, const std::string& rule_id, FailKind
 }
 
 constexpr RuleIdMask bit(RuleBit b) {
-  return RuleIdMask{1} << b;
+  return ruleBitMask(b);
 }
 
 // Build a ToccataSection at [start_bar, end_bar) with `count` quarter-note

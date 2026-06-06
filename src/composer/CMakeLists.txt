@@ -7,7 +7,8 @@
 # or src/generator.cpp. The boundary is enforced both at CMake-configure time
 # below and at CTest time via ci/check_composer_isolation.sh.
 #
-# Header allowlist documented in backup/reuse_contract.md.
+# Cross-tree reuse is limited to core/ helpers (see the json_helpers
+# note at the bottom of this file).
 
 set(BACH_COMPOSER_SOURCES
   composer.cpp
@@ -41,7 +42,7 @@ set(BACH_COMPOSER_SOURCES
 foreach(_src ${BACH_COMPOSER_SOURCES})
   if(_src MATCHES "(^|/)(fugue|constraint|forms|organ|ornament|solo_string)/.*\\.cpp$")
     message(FATAL_ERROR
-      "bach_composer_lib forbidden legacy source: ${_src} (see backup/reuse_contract.md)")
+      "bach_composer_lib forbidden legacy source: ${_src}")
   endif()
   if(_src MATCHES "^generator\\.cpp$" OR _src MATCHES "^bach_c\\.cpp$")
     message(FATAL_ERROR
@@ -60,9 +61,9 @@ target_include_directories(bach_composer_lib
 target_compile_features(bach_composer_lib PUBLIC cxx_std_17)
 
 # bach_composer_lib emits its own JSON via core/json_helpers.h. The helper
-# is permitted by backup/reuse_contract.md, but linking against bach_lib
-# would drag in the legacy fugue/constraint trees. Compile the helper
-# directly into bach_composer_lib so the legacy lib stays out.
+# is deliberately shared, but linking against bach_lib would drag in the
+# legacy fugue/constraint trees. Compile the helper directly into
+# bach_composer_lib so the legacy lib stays out.
 target_sources(bach_composer_lib PRIVATE
   ${CMAKE_SOURCE_DIR}/src/core/json_helpers.cpp
 )

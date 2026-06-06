@@ -60,6 +60,31 @@ inline constexpr std::array<std::array<std::uint8_t, 16>, 5> kPhase14Subjects = 
     {76, 77, 79, 81, 79, 77, 76, 77, 79, 77, 76, 74, 72, 74, 71, 72},
 }};
 
+// Fugue subject rhythm profiles. Each row has the same 16 pitch positions as
+// kPhase14Subjects, but durations now define the 4-bar subject span. The rows
+// deliberately mix eighths, quarters, dotted quarters, halves, and one
+// sixteenth figure while summing to exactly four 4/4 bars.
+inline constexpr std::array<std::array<Tick, 16>, 5> kPhase14SubjectRhythms = {{
+    {kTicksPerBeat, kTicksPerBeat / 2, kTicksPerBeat / 2, kTicksPerBeat, kTicksPerBeat,
+     kTicksPerBeat / 2, kTicksPerBeat / 2, kTicksPerBeat, kTicksPerBeat, kTicksPerBeat,
+     kTicksPerBeat / 2, kTicksPerBeat / 2, kTicksPerBeat, kTicksPerBeat, kTicksPerBeat,
+     4 * kTicksPerBeat},
+    {kTicksPerBeat / 2, kTicksPerBeat / 2, kTicksPerBeat, 2 * kTicksPerBeat, kTicksPerBeat,
+     kTicksPerBeat / 2, kTicksPerBeat / 2, kTicksPerBeat, kTicksPerBeat, kTicksPerBeat,
+     kTicksPerBeat / 2, kTicksPerBeat / 2, kTicksPerBeat, kTicksPerBeat, kTicksPerBeat,
+     4 * kTicksPerBeat},
+    {kTicksPerBeat, kTicksPerBeat, kTicksPerBeat, kTicksPerBeat, kTicksPerBeat, kTicksPerBeat,
+     kTicksPerBeat, kTicksPerBeat, kTicksPerBeat, kTicksPerBeat, kTicksPerBeat / 2,
+     kTicksPerBeat / 2, kTicksPerBeat, kTicksPerBeat, kTicksPerBeat, 2 * kTicksPerBeat},
+    {kTicksPerBeat, kTicksPerBeat / 2, kTicksPerBeat / 4, kTicksPerBeat / 4, kTicksPerBeat,
+     kTicksPerBeat, kTicksPerBeat / 2, kTicksPerBeat / 2, kTicksPerBeat, kTicksPerBeat / 2,
+     kTicksPerBeat / 2, kTicksPerBeat, kTicksPerBeat, kTicksPerBeat, kTicksPerBeat,
+     4 * kTicksPerBeat},
+    {3 * kTicksPerBeat / 2, kTicksPerBeat / 2, kTicksPerBeat, kTicksPerBeat / 2, kTicksPerBeat / 2,
+     kTicksPerBeat, kTicksPerBeat, kTicksPerBeat, kTicksPerBeat / 2, kTicksPerBeat / 2,
+     kTicksPerBeat, kTicksPerBeat, kTicksPerBeat, kTicksPerBeat, kTicksPerBeat, 4 * kTicksPerBeat},
+}};
+
 struct ChordSpec {
   std::uint8_t root_pc;
   bool minor;

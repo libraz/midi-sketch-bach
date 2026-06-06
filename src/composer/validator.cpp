@@ -68,13 +68,6 @@ bool isToccataPairCompatible(SubjectCharacter character, ToccataArchetype archet
   return true;
 }
 
-// 7th-chord arithmetic lives in composer/chord_voicing.h so spacing,
-// voicing helpers, and downstream P8 modulation code share one source
-// of truth. We import the names below into this translation unit so
-// existing rule bodies don't have to qualify them.
-using ::bach::composer::hasSeventh;
-using ::bach::composer::seventhOffset;
-
 const ChordEvent& activeChord(const HarmonicPlan& plan, Tick at) {
   const ChordEvent* current = &plan.chords.front();
   for (const auto& chord : plan.chords) {
@@ -109,6 +102,23 @@ std::size_t noteIndexStartingAt(const std::vector<NoteEvent>& notes, VoiceId voi
   return notes.size();
 }
 
+std::size_t noteIndexSoundingAt(const std::vector<NoteEvent>& notes, VoiceId voice, Tick tick) {
+  std::size_t best = notes.size();
+  Tick best_start = std::numeric_limits<Tick>::min();
+  for (std::size_t i = 0; i < notes.size(); ++i) {
+    const auto& note = notes[i];
+    if (note.voice != voice)
+      continue;
+    if (tick < note.start_tick || tick >= note.start_tick + note.duration)
+      continue;
+    if (best == notes.size() || note.start_tick >= best_start) {
+      best = i;
+      best_start = note.start_tick;
+    }
+  }
+  return best;
+}
+
 bool isTonicTriadPc(std::uint8_t pc, const HarmonicPlan& plan) {
   const std::uint8_t tonic = static_cast<std::uint8_t>(plan.tonic_pc % 12);
   const std::uint8_t third = static_cast<std::uint8_t>((tonic + (plan.is_minor ? 3 : 4)) % 12);
@@ -119,7 +129,7 @@ bool isTonicTriadPc(std::uint8_t pc, const HarmonicPlan& plan) {
 bool hasRuleBit(const std::vector<NoteProvenance>& provenance, std::size_t index, RuleBit bit) {
   if (index >= provenance.size())
     return false;
-  return (provenance[index].satisfied_rules & (1ull << bit)) != 0;
+  return (provenance[index].satisfied_rules & (ruleBitMask(bit))) != 0;
 }
 
 SubjectFeatures computeSubjectFeatures(const std::vector<MaterialNote>& subject) {
@@ -154,6 +164,128 @@ SubjectFeatures computeSubjectFeatures(const std::vector<MaterialNote>& subject)
   return features;
 }
 
+TextureMetrics computeTextureMetrics(const std::vector<NoteEvent>& notes) {
+  TextureMetrics metrics;
+  if (notes.empty()) {
+    return metrics;
+  }
+
+  std::vector<Tick> boundaries;
+  boundaries.reserve(notes.size() * 2);
+  std::vector<VoiceId> voices;
+  for (const auto& note : notes) {
+    boundaries.push_back(note.start_tick);
+    boundaries.push_back(note.start_tick + note.duration);
+    if (std::find(voices.begin(), voices.end(), note.voice) == voices.end()) {
+      voices.push_back(note.voice);
+    }
+    // Broad organ compass for fugue-family diagnostics: pedal C1 through
+    // manual C6. This catches D7-style escapes without classifying playable
+    // bass-register material as a violation.
+    if (note.pitch < 24 || note.pitch > 84) {
+      ++metrics.compass_violation_count;
+    }
+  }
+  std::sort(voices.begin(), voices.end());
+  std::sort(boundaries.begin(), boundaries.end());
+  boundaries.erase(std::unique(boundaries.begin(), boundaries.end()), boundaries.end());
+
+  long active_voice_ticks = 0;
+  long total_ticks = 0;
+  for (std::size_t i = 0; i + 1 < boundaries.size(); ++i) {
+    const Tick begin = boundaries[i];
+    const Tick end = boundaries[i + 1];
+    if (end <= begin) {
+      continue;
+    }
+    int active = 0;
+    for (VoiceId voice : voices) {
+      const bool sounding = std::any_of(notes.begin(), notes.end(), [&](const NoteEvent& note) {
+        return note.voice == voice && note.start_tick < end &&
+               begin < note.start_tick + note.duration;
+      });
+      if (sounding) {
+        ++active;
+      }
+    }
+    metrics.max_active_voices = std::max(metrics.max_active_voices, active);
+    const Tick span = end - begin;
+    active_voice_ticks += static_cast<long>(active) * static_cast<long>(span);
+    total_ticks += static_cast<long>(span);
+  }
+  metrics.avg_active_voices =
+      total_ticks > 0 ? static_cast<double>(active_voice_ticks) / static_cast<double>(total_ticks)
+                      : 0.0;
+
+  metrics.voices.reserve(voices.size());
+  for (VoiceId voice : voices) {
+    std::vector<NoteEvent> voice_notes;
+    for (const auto& note : notes) {
+      if (note.voice == voice) {
+        voice_notes.push_back(note);
+      }
+    }
+    std::sort(voice_notes.begin(), voice_notes.end(), [](const NoteEvent& a, const NoteEvent& b) {
+      if (a.start_tick != b.start_tick) {
+        return a.start_tick < b.start_tick;
+      }
+      return a.pitch < b.pitch;
+    });
+
+    VoiceTextureMetrics vm;
+    vm.voice = voice;
+    vm.max_repeated_run = voice_notes.empty() ? 0 : 1;
+    vm.min_pitch = std::numeric_limits<int>::max();
+    vm.max_pitch = std::numeric_limits<int>::min();
+    Tick voice_first = std::numeric_limits<Tick>::max();
+    Tick voice_last = 0;
+    long sounding_ticks = 0;
+    int current_run = 0;
+    int previous_pitch = -1;
+    for (const auto& note : voice_notes) {
+      const int pitch = static_cast<int>(note.pitch);
+      vm.min_pitch = std::min(vm.min_pitch, pitch);
+      vm.max_pitch = std::max(vm.max_pitch, pitch);
+      voice_first = std::min(voice_first, note.start_tick);
+      voice_last = std::max(voice_last, note.start_tick + note.duration);
+      sounding_ticks += static_cast<long>(note.duration);
+      current_run = (pitch == previous_pitch) ? current_run + 1 : 1;
+      vm.max_repeated_run = std::max(vm.max_repeated_run, current_run);
+      previous_pitch = pitch;
+    }
+    const long activity_window =
+        voice_last > voice_first ? static_cast<long>(voice_last - voice_first) : 0;
+    vm.silence_ratio = activity_window > 0
+                           ? std::clamp(1.0 - (static_cast<double>(sounding_ticks) /
+                                               static_cast<double>(activity_window)),
+                                        0.0, 1.0)
+                           : 0.0;
+    if (voice_notes.empty()) {
+      vm.min_pitch = 0;
+      vm.max_pitch = 0;
+    }
+    metrics.voices.push_back(vm);
+  }
+
+  double overlap_sum = 0.0;
+  int pair_count = 0;
+  for (std::size_t i = 0; i < metrics.voices.size(); ++i) {
+    for (std::size_t j = i + 1; j < metrics.voices.size(); ++j) {
+      const int overlap_lo = std::max(metrics.voices[i].min_pitch, metrics.voices[j].min_pitch);
+      const int overlap_hi = std::min(metrics.voices[i].max_pitch, metrics.voices[j].max_pitch);
+      const int union_lo = std::min(metrics.voices[i].min_pitch, metrics.voices[j].min_pitch);
+      const int union_hi = std::max(metrics.voices[i].max_pitch, metrics.voices[j].max_pitch);
+      const int overlap = std::max(0, overlap_hi - overlap_lo + 1);
+      const int range_union = std::max(1, union_hi - union_lo + 1);
+      overlap_sum += static_cast<double>(overlap) / static_cast<double>(range_union);
+      ++pair_count;
+    }
+  }
+  metrics.register_overlap_ratio =
+      pair_count > 0 ? overlap_sum / static_cast<double>(pair_count) : 0.0;
+  return metrics;
+}
+
 }  // namespace
 
 ValidationReport Validator::validate(const std::vector<NoteEvent>& notes,
@@ -161,6 +293,9 @@ ValidationReport Validator::validate(const std::vector<NoteEvent>& notes,
                                      const HarmonicPlan& harmonic_plan,
                                      const Material& material) const {
   ValidationReport report;
+  if (!notes.empty()) {
+    report.texture_metrics.push_back(computeTextureMetrics(notes));
+  }
   if (!material.subject.empty()) {
     report.subject_features.push_back(computeSubjectFeatures(material.subject));
   }
@@ -313,6 +448,11 @@ ValidationReport Validator::validate(const std::vector<NoteEvent>& notes,
       ValidationFailure failure;
       failure.span_id = fail_span;
       failure.rule_id = "cadence_voice_leading";
+      // A reachable cadence whose voices move against the formula is a
+      // harmony-rule violation (MusicalFail); only the malformed-layout
+      // paths above are StructuralFail. Set explicitly for consistency
+      // with every other musical rule instead of relying on the default.
+      failure.kind = FailKind::MusicalFail;
       report.failures.push_back(failure);
     }
   }
@@ -544,8 +684,8 @@ ValidationReport Validator::validate(const std::vector<NoteEvent>& notes,
 
       // Material-skip: find both notes' indices at this tick; skip the
       // pair only when BOTH are Material (composer cannot fix inputs).
-      const std::size_t idx_upper = noteIndexStartingAt(notes, voices[va], t);
-      const std::size_t idx_lower = noteIndexStartingAt(notes, voices[vb], t);
+      const std::size_t idx_upper = noteIndexSoundingAt(notes, voices[va], t);
+      const std::size_t idx_lower = noteIndexSoundingAt(notes, voices[vb], t);
       const bool upper_material =
           idx_upper < provenance.size() && provenance[idx_upper].source == NoteSource::Material;
       const bool lower_material =
@@ -2087,6 +2227,100 @@ ValidationReport Validator::validate(const std::vector<NoteEvent>& notes,
         failure.rule_id = "section_contrast_required";
         failure.kind = FailKind::MusicalFail;
         report.failures.push_back(failure);
+      }
+    }
+  }
+
+  // Fugue countersubject: countersubject_invertible. A fugue's countersubject
+  // is conceived in invertible (double) counterpoint at the octave: it must work
+  // both above and below the subject. Under octave inversion a perfect fifth
+  // becomes a perfect fourth (a dissonance against the bass), so a perfect fifth
+  // on a strong beat between the countersubject and the subject/answer it sounds
+  // against is not strictly invertible at the octave. This rule operates ONLY on
+  // notes carrying the CountersubjectInvertible bit (the first high-lane RuleBit).
+  // It identifies the countersubject voice(s) from those notes and the
+  // subject/answer voice(s) from notes whose provenance voice_intent is
+  // SubjectCarrier or AnswerCarrier, then walks every strong-beat tick where a
+  // countersubject voice and a subject/answer voice both sound. If the vertical
+  // interval reduces to a perfect fifth (|interval| % 12 == 7) at any such tick,
+  // the pair is not invertible at the octave.
+  //
+  // This is reported INFORMATIONALLY (report.informational), not as a gating
+  // failure: free-style fugue countersubjects in the existing corpus routinely
+  // place consonant fifths against the subject on strong beats (strict
+  // invertibility is a design constraint of double-counterpoint countersubjects,
+  // not of every countersubject), so a hard or soft FAILURE here would penalize
+  // established pieces. The observation is recorded for provenance/audit; it
+  // never sets status or empties-failures. Inert when no CountersubjectInvertible
+  // note or no overlapping subject/answer voice exists (most fixtures declare no
+  // countersubject). Deterministic and pure; reuses the same isStrongBeat /
+  // voicePitchAt helpers the invertible_at_octave rule uses.
+  {
+    std::vector<VoiceId> cs_voices;
+    std::vector<VoiceId> sa_voices;
+    Tick cs_first = std::numeric_limits<Tick>::max();
+    Tick cs_last = 0;
+    bool has_cs = false;
+    for (std::size_t i = 0; i < notes.size(); ++i) {
+      if (i >= provenance.size())
+        continue;
+      if (hasRuleBit(provenance, i, RuleBit::CountersubjectInvertible)) {
+        if (std::find(cs_voices.begin(), cs_voices.end(), notes[i].voice) == cs_voices.end())
+          cs_voices.push_back(notes[i].voice);
+        cs_first = std::min(cs_first, notes[i].start_tick);
+        cs_last = std::max(cs_last, notes[i].start_tick + notes[i].duration);
+        has_cs = true;
+      } else if (provenance[i].voice_intent == VoiceIntent::SubjectCarrier ||
+                 provenance[i].voice_intent == VoiceIntent::AnswerCarrier) {
+        if (std::find(sa_voices.begin(), sa_voices.end(), notes[i].voice) == sa_voices.end())
+          sa_voices.push_back(notes[i].voice);
+      }
+    }
+    if (has_cs && !cs_voices.empty() && !sa_voices.empty()) {
+      // Distinct strong-beat onset ticks inside the countersubject's span; the
+      // pair only needs checking where the countersubject actually sounds.
+      std::vector<Tick> ticks;
+      for (std::size_t i = 0; i < notes.size(); ++i) {
+        const Tick t = notes[i].start_tick;
+        if (t < cs_first || t >= cs_last)
+          continue;
+        if (!isStrongBeat(t, ticks_per_bar))
+          continue;
+        if (std::find(ticks.begin(), ticks.end(), t) == ticks.end())
+          ticks.push_back(t);
+      }
+      std::sort(ticks.begin(), ticks.end());
+
+      bool non_invertible = false;
+      for (Tick t : ticks) {
+        if (non_invertible)
+          break;
+        for (VoiceId cs : cs_voices) {
+          const std::uint8_t cs_pitch = voicePitchAt(notes, cs, t);
+          if (cs_pitch == 0)
+            continue;
+          for (VoiceId sa : sa_voices) {
+            if (sa == cs)
+              continue;
+            const std::uint8_t sa_pitch = voicePitchAt(notes, sa, t);
+            if (sa_pitch == 0)
+              continue;
+            const int interval = static_cast<int>(cs_pitch) - static_cast<int>(sa_pitch);
+            // A perfect fifth (and its compound forms) inverts to a fourth.
+            if (isPerfectFifth(interval)) {
+              non_invertible = true;
+              break;
+            }
+          }
+          if (non_invertible)
+            break;
+        }
+      }
+      if (non_invertible) {
+        ValidationFailure observation;
+        observation.rule_id = "countersubject_invertible";
+        observation.kind = FailKind::MusicalFail;
+        report.informational.push_back(observation);
       }
     }
   }

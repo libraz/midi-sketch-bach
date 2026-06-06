@@ -23,7 +23,7 @@ namespace bach::composer {
 namespace {
 
 bool hasBit(const NoteProvenance& p, RuleBit bit) {
-  return (p.satisfied_rules & (RuleIdMask{1} << bit)) != 0;
+  return (p.satisfied_rules & (ruleBitMask(bit))) != 0;
 }
 
 ComposeResult runPhase(HarnessPhase phase, int seed) {

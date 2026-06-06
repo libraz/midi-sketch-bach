@@ -62,6 +62,14 @@ bool hasRule(const ValidationReport& r, const std::string& rule_id) {
   return false;
 }
 
+bool hasInformational(const ValidationReport& r, const std::string& rule_id) {
+  for (const auto& f : r.informational) {
+    if (f.rule_id == rule_id)
+      return true;
+  }
+  return false;
+}
+
 HarmonicPlan cMajorWithCadence(CadenceType type) {
   HarmonicPlan plan = cMajorWhole();
   CadenceEvent cadence;
@@ -121,6 +129,36 @@ TEST(ValidatorTest, ReportsStreamSegregationCellDivergenceAsInfoMetrics) {
   EXPECT_EQ(r.stream_segregation[0].cell_based_stream_count, 2);
   EXPECT_EQ(r.stream_segregation[0].cell_count, 2);
   EXPECT_TRUE(r.stream_segregation[0].disagrees_with_cell_counterpoint);
+}
+
+TEST(ValidatorTest, ReportsTextureMetricsAsInfoMetrics) {
+  std::vector<NoteEvent> notes = {
+      makeNote(0, kTicksPerBeat, 60, 0),
+      makeNote(kTicksPerBeat, kTicksPerBeat, 60, 0),
+      makeNote(kTicksPerBeat * 2, kTicksPerBeat, 62, 0),
+      makeNote(kTicksPerBeat * 4, kTicksPerBeat, 97, 0),
+      makeNote(0, kTicksPerBeat * 2, 48, 1),
+      makeNote(kTicksPerBeat * 2, kTicksPerBeat * 2, 50, 1),
+      makeNote(kTicksPerBeat * 4, kTicksPerBeat, 52, 1),
+  };
+  std::vector<NoteProvenance> prov(notes.size(), makeProv(0, NoteSource::Material));
+
+  ValidationReport r = Validator{}.validate(notes, prov, cMajorWhole());
+  ASSERT_EQ(r.texture_metrics.size(), 1u);
+  const TextureMetrics& metrics = r.texture_metrics[0];
+  EXPECT_EQ(metrics.max_active_voices, 2);
+  EXPECT_NEAR(metrics.avg_active_voices, 1.8, 0.0001);
+  EXPECT_EQ(metrics.compass_violation_count, 1);
+  EXPECT_NEAR(metrics.register_overlap_ratio, 0.0, 0.0001);
+  ASSERT_EQ(metrics.voices.size(), 2u);
+  EXPECT_EQ(metrics.voices[0].voice, 0);
+  EXPECT_NEAR(metrics.voices[0].silence_ratio, 0.2, 0.0001);
+  EXPECT_EQ(metrics.voices[0].max_repeated_run, 2);
+  EXPECT_EQ(metrics.voices[0].min_pitch, 60);
+  EXPECT_EQ(metrics.voices[0].max_pitch, 97);
+  EXPECT_EQ(metrics.voices[1].voice, 1);
+  EXPECT_NEAR(metrics.voices[1].silence_ratio, 0.0, 0.0001);
+  EXPECT_EQ(metrics.voices[1].max_repeated_run, 1);
 }
 
 TEST(ValidatorTest, StrongBeatConsonancePasses) {
@@ -1940,6 +1978,24 @@ TEST(ValidatorTest, FourthOnlyOnWeakBeatSkippedBothMaterial) {
   EXPECT_FALSE(hasRule(r, "fourth_only_on_weak_beat"));
 }
 
+TEST(ValidatorTest, FourthOnlyOnWeakBeatSkippedForHeldMaterialAtStrongBeat) {
+  const Tick weak = kTicksPerBeat;
+  std::vector<NoteEvent> notes = {
+      makeNote(weak, 2 * kTicksPerBar, 65, 0),     // F5 held across barline.
+      makeNote(weak, 2 * kTicksPerBar, 60, 1),     // C5 held across barline.
+      makeNote(0, kTicksPerBar, 48, 2),            // C4 creates the first tick.
+      makeNote(kTicksPerBar, kTicksPerBar, 48, 2)  // C4 creates the strong tick.
+  };
+  std::vector<NoteProvenance> prov = {
+      makeProv(0, NoteSource::Material),
+      makeProv(1, NoteSource::Material),
+      makeProv(2, NoteSource::Material),
+      makeProv(3, NoteSource::Material),
+  };
+  ValidationReport r = Validator{}.validate(notes, prov, cMajorWhole(), Material{});
+  EXPECT_FALSE(hasRule(r, "fourth_only_on_weak_beat"));
+}
+
 TEST(ValidatorTest, FourthOnlyOnWeakBeatPassesNonFourth) {
   // V0/V1 form a perfect 5th on a strong beat (consonant non-4th).
   std::vector<NoteEvent> notes = {
@@ -2374,8 +2430,8 @@ Sus76Fixture makeSus76(std::uint8_t prep_pitch, std::uint8_t sus_pitch, std::uin
       makeNote(0, kTicksPerBeat * 3, bass_pitch, 1),             // V1 bass (held)
   };
   fix.prov = std::vector<NoteProvenance>(fix.notes.size(), makeProv(0, NoteSource::Material));
-  fix.prov[0].satisfied_rules = 1ull << RuleBit::SuspensionPrepared;
-  fix.prov[2].satisfied_rules = 1ull << RuleBit::SuspensionResolved;
+  fix.prov[0].satisfied_rules = ruleBitMask(RuleBit::SuspensionPrepared);
+  fix.prov[2].satisfied_rules = ruleBitMask(RuleBit::SuspensionResolved);
   SuspensionPattern sp;
   sp.type = SuspensionType::Sus7_6;
   sp.preparation_tick = 0;
@@ -2417,6 +2473,79 @@ TEST(ValidatorTest, SuspensionSeventhSixthSkippedWithoutProvenanceBits) {
   fix.prov[2].satisfied_rules = 0;
   ValidationReport r = Validator{}.validate(fix.notes, fix.prov, cMajorTwoBars(), fix.material);
   EXPECT_FALSE(hasRule(r, "suspension_seventh_sixth"));
+}
+
+// countersubject_invertible: a countersubject (voice 0, CountersubjectInvertible
+// bit) sounding against a subject (voice 1, SubjectCarrier intent). Two bar
+// downbeats (strong beats). The upper countersubject stays above the lower
+// subject so no voice-crossing fires.
+TEST(ValidatorTest, CountersubjectInvertiblePassesOnConsonantStrongBeats) {
+  // Bar 0 downbeat: cs E4 (64) over subject C4 (60) -> major third (interval 4).
+  // Bar 1 downbeat: cs F4 (65) over subject A3 (57) -> minor sixth (interval 8).
+  // Neither reduces to a perfect fifth, so the pair is invertible at the octave.
+  std::vector<NoteEvent> notes = {
+      makeNote(0, kTicksPerBar, 64, 0),
+      makeNote(kTicksPerBar, kTicksPerBar, 65, 0),
+      makeNote(0, kTicksPerBar, 60, 1),
+      makeNote(kTicksPerBar, kTicksPerBar, 57, 1),
+  };
+  std::vector<NoteProvenance> prov = {
+      makeProvIntent(0, NoteSource::Material, VoiceIntent::CountersubjectCarrier),
+      makeProvIntent(0, NoteSource::Material, VoiceIntent::CountersubjectCarrier),
+      makeProvIntent(1, NoteSource::Material, VoiceIntent::SubjectCarrier),
+      makeProvIntent(1, NoteSource::Material, VoiceIntent::SubjectCarrier),
+  };
+  prov[0].satisfied_rules |= ruleBitMask(RuleBit::CountersubjectInvertible);
+  prov[1].satisfied_rules |= ruleBitMask(RuleBit::CountersubjectInvertible);
+
+  ValidationReport r = Validator{}.validate(notes, prov, cMajorWhole());
+  EXPECT_FALSE(hasInformational(r, "countersubject_invertible"));
+  EXPECT_FALSE(hasRule(r, "countersubject_invertible"));
+}
+
+TEST(ValidatorTest, CountersubjectInvertibleReportsStrongBeatPerfectFifth) {
+  // Bar 1 downbeat: cs G4 (67) over subject C4 (60) -> perfect fifth (interval
+  // 7), which inverts to a fourth. The rule records ONE informational
+  // observation (MusicalFail kind) but does NOT gate: status stays Ok and the
+  // gating failures list stays empty.
+  std::vector<NoteEvent> notes = {
+      makeNote(0, kTicksPerBar, 64, 0),
+      makeNote(kTicksPerBar, kTicksPerBar, 67, 0),
+      makeNote(0, kTicksPerBar, 60, 1),
+      makeNote(kTicksPerBar, kTicksPerBar, 60, 1),
+  };
+  std::vector<NoteProvenance> prov = {
+      makeProvIntent(0, NoteSource::Material, VoiceIntent::CountersubjectCarrier),
+      makeProvIntent(0, NoteSource::Material, VoiceIntent::CountersubjectCarrier),
+      makeProvIntent(1, NoteSource::Material, VoiceIntent::SubjectCarrier),
+      makeProvIntent(1, NoteSource::Material, VoiceIntent::SubjectCarrier),
+  };
+  prov[0].satisfied_rules |= ruleBitMask(RuleBit::CountersubjectInvertible);
+  prov[1].satisfied_rules |= ruleBitMask(RuleBit::CountersubjectInvertible);
+
+  ValidationReport r = Validator{}.validate(notes, prov, cMajorWhole());
+  EXPECT_TRUE(hasInformational(r, "countersubject_invertible"));
+  EXPECT_FALSE(hasRule(r, "countersubject_invertible"));
+  for (const auto& f : r.informational) {
+    if (f.rule_id == "countersubject_invertible")
+      EXPECT_EQ(f.kind, FailKind::MusicalFail);
+  }
+}
+
+TEST(ValidatorTest, CountersubjectInvertibleInertWithoutBit) {
+  // Same perfect fifth on the strong beat, but no CountersubjectInvertible bit:
+  // the rule is inert (no countersubject declared in this fixture).
+  std::vector<NoteEvent> notes = {
+      makeNote(kTicksPerBar, kTicksPerBar, 67, 0),
+      makeNote(kTicksPerBar, kTicksPerBar, 60, 1),
+  };
+  std::vector<NoteProvenance> prov = {
+      makeProvIntent(0, NoteSource::Material, VoiceIntent::SequentialCounterline),
+      makeProvIntent(1, NoteSource::Material, VoiceIntent::SubjectCarrier),
+  };
+  ValidationReport r = Validator{}.validate(notes, prov, cMajorWhole());
+  EXPECT_FALSE(hasInformational(r, "countersubject_invertible"));
+  EXPECT_FALSE(hasRule(r, "countersubject_invertible"));
 }
 
 }  // namespace bach::composer

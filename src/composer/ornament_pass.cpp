@@ -224,6 +224,7 @@ void applyOrnamentPass(ComposeResult& result, const OrnamentParams& params) {
 
   const Tick tpb = params.ticks_per_bar > 0 ? params.ticks_per_bar : kTicksPerBar;
   const std::uint8_t density = effectiveOrnamentDensity(params.character, params.instrument);
+  const int ornament_pitch_ceiling = (params.instrument == InstrumentType::Organ) ? 84 : kMidiMax;
   const int total_bars = static_cast<int>((longestEnd(result.notes) + tpb - 1) / tpb);
 
   // The cadence window is the last two bars; the penultimate strong beat
@@ -270,7 +271,7 @@ void applyOrnamentPass(ComposeResult& result, const OrnamentParams& params) {
       const int upper = upperNeighbour(note.pitch, params.mode);
       const int lower = lowerNeighbour(note.pitch, params.mode, in_cadence_window);
 
-      const bool neighbours_ok = upper >= 0 && lower >= 0;
+      const bool neighbours_ok = upper >= 0 && upper <= ornament_pitch_ceiling && lower >= 0;
 
       // Ceiling guard: the upper neighbour must not cross above the next-higher
       // voice's concurrent pitch.

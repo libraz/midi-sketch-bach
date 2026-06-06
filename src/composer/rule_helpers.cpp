@@ -264,6 +264,61 @@ bool createsParallelPerfect(const std::vector<NoteEvent>& placed, VoiceId candid
   return false;
 }
 
+bool createsParallelPerfectAcrossOnset(const std::vector<NoteEvent>& placed,
+                                       VoiceId candidate_voice, std::uint8_t candidate_pitch,
+                                       Tick cur_tick, std::uint8_t prev_pitch, Tick prev_tick) {
+  if (prev_pitch == 0)
+    return false;
+  for (VoiceId ov : collectOtherVoices(placed, candidate_voice)) {
+    // Closing the faster-voice blind spot: the candidate voice's own previous
+    // onset (prev_tick) may be older than the other voice's most recent onset.
+    // The validator samples the union of onsets, so it compares the candidate's
+    // move against the other voice's pitch at the LAST union tick before
+    // cur_tick. Find that tick: the other voice's latest onset strictly inside
+    // (prev_tick, cur_tick). When present, the other voice has already moved by
+    // cur_tick relative to that union tick, and a parallel can form even though
+    // it did not move between prev_tick and cur_tick.
+    Tick mid_tick = prev_tick;
+    bool have_mid = false;
+    for (const auto& note : placed) {
+      if (note.voice != ov)
+        continue;
+      if (note.start_tick > prev_tick && note.start_tick < cur_tick) {
+        if (!have_mid || note.start_tick > mid_tick) {
+          mid_tick = note.start_tick;
+          have_mid = true;
+        }
+      }
+    }
+    if (!have_mid)
+      continue;  // no intermediate onset; createsParallelPerfect covers this.
+    const std::uint8_t op_now = voicePitchAt(placed, ov, cur_tick);
+    const std::uint8_t op_mid = voicePitchAt(placed, ov, mid_tick);
+    if (op_now == 0 || op_mid == 0)
+      continue;
+    // The candidate sustains prev_pitch across mid_tick (it has no onset there),
+    // so its motion into cur_tick is prev_pitch -> candidate_pitch. The other
+    // voice moves op_mid -> op_now. Both must move to form a parallel.
+    const bool both_moved = (candidate_pitch != prev_pitch) && (op_now != op_mid);
+    if (!both_moved)
+      continue;
+    int interval_now;
+    int interval_mid;
+    if (candidate_voice < ov) {
+      interval_now = static_cast<int>(candidate_pitch) - static_cast<int>(op_now);
+      interval_mid = static_cast<int>(prev_pitch) - static_cast<int>(op_mid);
+    } else {
+      interval_now = static_cast<int>(op_now) - static_cast<int>(candidate_pitch);
+      interval_mid = static_cast<int>(op_mid) - static_cast<int>(prev_pitch);
+    }
+    if (isPerfectInterval(interval_now) && isPerfectInterval(interval_mid) &&
+        interval_now == interval_mid && interval_now != 0) {
+      return true;
+    }
+  }
+  return false;
+}
+
 bool createsParallelOctave(const std::vector<NoteEvent>& placed, VoiceId candidate_voice,
                            std::uint8_t candidate_pitch, Tick cur_tick, std::uint8_t prev_pitch,
                            Tick prev_tick) {
@@ -325,6 +380,56 @@ bool createsHiddenParallelPerfect(const std::vector<NoteEvent>& placed, VoiceId 
       interval_prev = static_cast<int>(op_prev) - static_cast<int>(prev_pitch);
     }
     if (isPerfectInterval(interval_now) && !isPerfectInterval(interval_prev)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+bool createsHiddenParallelPerfectAcrossOnset(const std::vector<NoteEvent>& placed,
+                                             VoiceId candidate_voice, std::uint8_t candidate_pitch,
+                                             Tick cur_tick, std::uint8_t prev_pitch,
+                                             Tick prev_tick) {
+  if (prev_pitch == 0)
+    return false;
+  for (VoiceId ov : collectOtherVoices(placed, candidate_voice)) {
+    // Same faster-voice blind spot as createsParallelPerfectAcrossOnset: the
+    // validator compares against the union tick immediately before cur_tick,
+    // which may be an intermediate onset of the faster other voice.
+    Tick mid_tick = prev_tick;
+    bool have_mid = false;
+    for (const auto& note : placed) {
+      if (note.voice != ov)
+        continue;
+      if (note.start_tick > prev_tick && note.start_tick < cur_tick) {
+        if (!have_mid || note.start_tick > mid_tick) {
+          mid_tick = note.start_tick;
+          have_mid = true;
+        }
+      }
+    }
+    if (!have_mid)
+      continue;
+    const std::uint8_t op_now = voicePitchAt(placed, ov, cur_tick);
+    const std::uint8_t op_mid = voicePitchAt(placed, ov, mid_tick);
+    if (op_now == 0 || op_mid == 0)
+      continue;
+    const int this_motion = static_cast<int>(candidate_pitch) - static_cast<int>(prev_pitch);
+    const int other_motion = static_cast<int>(op_now) - static_cast<int>(op_mid);
+    if (this_motion == 0 || other_motion == 0)
+      continue;
+    if ((this_motion > 0) != (other_motion > 0))
+      continue;
+    int interval_now;
+    int interval_mid;
+    if (candidate_voice < ov) {
+      interval_now = static_cast<int>(candidate_pitch) - static_cast<int>(op_now);
+      interval_mid = static_cast<int>(prev_pitch) - static_cast<int>(op_mid);
+    } else {
+      interval_now = static_cast<int>(op_now) - static_cast<int>(candidate_pitch);
+      interval_mid = static_cast<int>(op_mid) - static_cast<int>(prev_pitch);
+    }
+    if (isPerfectInterval(interval_now) && !isPerfectInterval(interval_mid)) {
       return true;
     }
   }

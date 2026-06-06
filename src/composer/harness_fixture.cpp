@@ -787,8 +787,9 @@ HarnessFixture buildPhase15Fixture(int seed) {
 // BWV1004-style figuration is predominantly stepwise (low melodic-interval
 // cost), which the reference-corpus scorer rewards; all four seed offsets clear
 // the gate-3 threshold (model_prob ~0.88-0.90). The structural predictor in
-// run_phase_closure.py mirrors this construction byte-for-byte (PHASE16_VAR_T0
-// + the C-minor scale walk), keeping structural_ok deterministic per seed.
+// scripts/bachlib/predictors.py mirrors this construction byte-for-byte
+// (mirror.py PHASE16_VAR_T0 + the C-minor scale walk), keeping structural_ok
+// deterministic per seed.
 //
 // @param seed Closure seed; selects the scalar-wave start offset (seed % 4).
 // @return The (Material, HarmonicPlan, VoicePlan) triple for Phase16.
@@ -1506,8 +1507,8 @@ HarnessFixture buildPhase19Fixture(int seed) {
 //   6  ii0 (D dim)   : D3  (50)
 //   7  V   (G major) : G3  (55)
 //
-// The structural predictor in run_phase_closure.py mirrors this construction
-// byte-for-byte, keeping structural_ok deterministic per seed.
+// The structural predictor in scripts/bachlib/predictors.py mirrors this
+// construction byte-for-byte, keeping structural_ok deterministic per seed.
 //
 // @param seed Closure seed; selects the scalar-wave start offset (seed % 4).
 // @return The (Material, HarmonicPlan, VoicePlan) triple for Phase20.
@@ -2513,8 +2514,9 @@ HarnessFixture buildPhase24Fixture(int seed) {
 // ground design mirrors the passacaglia fixture (which scored 0.897-0.908 at threshold 0.80). All
 // four seeds also pass the Composer validator (no passacaglia_ground_immutable
 // or variation failures); V0 (>= 72) stays strictly above V1 ground (<= 45), so
-// no voice crossing. The structural predictor in run_phase_closure.py mirrors
-// this construction byte-for-byte, keeping structural_ok deterministic per seed.
+// no voice crossing. The structural predictor in scripts/bachlib/predictors.py
+// mirrors this construction byte-for-byte, keeping structural_ok deterministic
+// per seed.
 //
 // @param seed Closure seed; selects the scalar-wave start offset (seed % 4).
 // @return The (Material, HarmonicPlan, VoicePlan) triple for Phase25.

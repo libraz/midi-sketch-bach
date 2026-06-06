@@ -66,7 +66,8 @@ std::string emitGeneratedJson(const std::vector<NoteEvent>& notes,
     w.endObject();
   }
   w.endArray();
-  if (!validation.subject_features.empty() || !validation.stream_segregation.empty()) {
+  if (!validation.subject_features.empty() || !validation.stream_segregation.empty() ||
+      !validation.texture_metrics.empty()) {
     w.key("info");
     w.beginObject();
     if (!validation.subject_features.empty()) {
@@ -121,6 +122,40 @@ std::string emitGeneratedJson(const std::vector<NoteEvent>& notes,
       }
       w.endArray();
     }
+    if (!validation.texture_metrics.empty()) {
+      w.key("texture_metrics");
+      w.beginArray();
+      for (const auto& metrics : validation.texture_metrics) {
+        w.beginObject();
+        w.key("max_active_voices");
+        w.value(metrics.max_active_voices);
+        w.key("avg_active_voices");
+        w.value(metrics.avg_active_voices);
+        w.key("compass_violation_count");
+        w.value(metrics.compass_violation_count);
+        w.key("register_overlap_ratio");
+        w.value(metrics.register_overlap_ratio);
+        w.key("voices");
+        w.beginArray();
+        for (const auto& voice : metrics.voices) {
+          w.beginObject();
+          w.key("voice");
+          w.value(static_cast<int>(voice.voice));
+          w.key("silence_ratio");
+          w.value(voice.silence_ratio);
+          w.key("max_repeated_run");
+          w.value(voice.max_repeated_run);
+          w.key("min_pitch");
+          w.value(voice.min_pitch);
+          w.key("max_pitch");
+          w.value(voice.max_pitch);
+          w.endObject();
+        }
+        w.endArray();
+        w.endObject();
+      }
+      w.endArray();
+    }
     w.endObject();
   }
   w.endObject();
@@ -156,18 +191,33 @@ std::string emitProvenanceJson(const std::vector<NoteProvenance>& provenance) {
     writeStr(w, source_str);
     w.key("candidate_score");
     w.value(static_cast<double>(p.candidate_score));
-    w.key("shadow_score");
-    w.value(static_cast<double>(p.shadow_score));
-    w.key("shadow_winning_pitch");
-    w.value(static_cast<int>(p.shadow_winning_pitch));
-    w.key("shadow_winning_pitch_without_markov");
-    w.value(static_cast<int>(p.shadow_winning_pitch_without_markov));
+    // Shadow (corpus-scorer audit) fields are emitted ONLY for Compose notes.
+    // Material and Ornament notes never run the candidate scorer, so their
+    // shadow fields carry no decision — emitting the default zeros would read
+    // as "the scorer chose pitch 0 with probability 0" and pollute the natural
+    // `shadow_winning_pitch != pitch` (scorer-disagreed) diagnostic with one
+    // false hit per verbatim note. Omitting the keys (same pattern as the
+    // optional satisfied_rules_high lane below) keeps a provenance trace
+    // unambiguous: shadow_* present ⟺ this note was scored.
+    if (p.source == NoteSource::Compose) {
+      w.key("shadow_score");
+      w.value(static_cast<double>(p.shadow_score));
+      w.key("shadow_winning_pitch");
+      w.value(static_cast<int>(p.shadow_winning_pitch));
+      w.key("shadow_winning_pitch_without_markov");
+      w.value(static_cast<int>(p.shadow_winning_pitch_without_markov));
+    }
     w.key("satisfied_rules");
-    // Emit as a full 64-bit unsigned integer; bach-mcp parses it as a
-    // bitset. A 32-bit cast would truncate rule bits >= 32 (P9/P10) and,
-    // worse, make bit 31 the sign bit so downstream masking of high bits
-    // sign-extends — so the wide RuleIdMask must be written verbatim.
-    w.value(static_cast<std::uint64_t>(p.satisfied_rules));
+    // The low 64 rule bits always emit as one integer. The high lane (bits
+    // 64..127) emits as a separate optional `satisfied_rules_high` integer ONLY
+    // when nonzero, so every note that uses no high-lane bit stays byte-identical
+    // to the pre-high-lane output. The first high-lane bit in use is
+    // CountersubjectInvertible (bit 64); notes without it omit the field.
+    w.value(p.satisfied_rules.low64());
+    if (p.satisfied_rules.high64() != 0) {
+      w.key("satisfied_rules_high");
+      w.value(p.satisfied_rules.high64());
+    }
     w.key("rejected_alternatives");
     w.value(static_cast<int>(p.rejected_alternatives));
     w.endObject();

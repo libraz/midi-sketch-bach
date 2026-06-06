@@ -77,7 +77,7 @@ NoteProvenance fantasiaProv() {
   NoteProvenance p;
   p.voice_intent = VoiceIntent::FantasiaCarrier;
   p.source = NoteSource::Material;
-  p.satisfied_rules = (RuleIdMask{1} << RuleBit::FantasiaSectionContrast);
+  p.satisfied_rules = (ruleBitMask(RuleBit::FantasiaSectionContrast));
   return p;
 }
 
@@ -98,7 +98,7 @@ bool hasRuleKind(const ValidationReport& r, const std::string& rule_id, FailKind
 }
 
 constexpr RuleIdMask bit(RuleBit b) {
-  return RuleIdMask{1} << b;
+  return ruleBitMask(b);
 }
 
 }  // namespace

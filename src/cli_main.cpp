@@ -43,7 +43,9 @@ struct CliOptions {
   // When set, bypass the default composer path and run the new Composer engine
   // against the harness fixture catalog. The phase governs the layout (voices /
   // bars / subject / answer). Seed is reused. This mode is a pinned
-  // byte-stability contract with scripts/run_phase_closure.py.
+  // byte-stability contract with the Python closure harness
+  // (scripts/bachlib/mirror.py + predictors.py, driven by
+  // `python3 scripts/bach_tools.py closure`).
   bool composer_mode = false;
   bach::composer::HarnessPhase composer_phase = bach::composer::HarnessPhase::Phase6;
 };

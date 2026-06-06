@@ -34,7 +34,7 @@ namespace bach::composer {
 namespace {
 
 constexpr RuleIdMask bit(RuleBit b) {
-  return RuleIdMask{1} << b;
+  return ruleBitMask(b);
 }
 
 // Build a fixture for a (form, minor, character, target_bars, seed) request.

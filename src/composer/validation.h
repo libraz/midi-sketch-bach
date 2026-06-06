@@ -53,6 +53,22 @@ struct StreamSegregationSpan {
   std::vector<int> transition_note_indices;
 };
 
+struct VoiceTextureMetrics {
+  VoiceId voice = 0;
+  double silence_ratio = 0.0;
+  int max_repeated_run = 0;
+  int min_pitch = 0;
+  int max_pitch = 0;
+};
+
+struct TextureMetrics {
+  int max_active_voices = 0;
+  double avg_active_voices = 0.0;
+  int compass_violation_count = 0;
+  double register_overlap_ratio = 0.0;
+  std::vector<VoiceTextureMetrics> voices;
+};
+
 // Validator report for one pipeline pass over one piece.
 //
 // `status == Ok` && `failures.empty()` is the only valid success shape.
@@ -60,8 +76,16 @@ struct StreamSegregationSpan {
 struct ValidationReport {
   ValidationStatus status = ValidationStatus::Ok;
   std::vector<ValidationFailure> failures;
+  // Soft observations that are recorded but never gate generation. Unlike
+  // `failures`, an entry here does NOT set `status` to FailedSpan and does NOT
+  // break the "failures empty" success contract. Used by rules that describe a
+  // stylistic property the existing corpus does not uniformly satisfy (e.g.
+  // strict octave-invertibility of a countersubject), so they can be reported
+  // for provenance/audit without spuriously failing established pieces.
+  std::vector<ValidationFailure> informational;
   std::vector<SubjectFeatures> subject_features;
   std::vector<StreamSegregationSpan> stream_segregation;
+  std::vector<TextureMetrics> texture_metrics;
 };
 
 }  // namespace bach::composer

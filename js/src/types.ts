@@ -70,6 +70,40 @@ export interface EventData {
   tracks: TrackData[];
 }
 
+/**
+ * One note's provenance record from the provenance.v1 export
+ * (emitProvenanceJson in src/composer/json_export.cpp). Index-parallel with the
+ * generated.v1 notes array.
+ */
+export interface ProvenanceNote {
+  index: number;
+  /** Owning span id, or null when it equals the invalid-span sentinel. */
+  span_id: number | null;
+  voice_intent: string;
+  /** PascalCase note source: "Material" | "Compose" | "Ornament". */
+  source: string;
+  candidate_score: number;
+  /**
+   * Corpus-scorer audit fields. Emitted ONLY for `source === "Compose"` notes;
+   * Material and Ornament notes never run the scorer, so these keys are absent
+   * for them. A present `shadow_winning_pitch` that differs from the emitted
+   * pitch is the "scorer disagreed with the commit" diagnostic.
+   */
+  shadow_score?: number;
+  shadow_winning_pitch?: number;
+  shadow_winning_pitch_without_markov?: number;
+  /** Low 64 RuleId bits (bits 0-63) as an unsigned integer. */
+  satisfied_rules: number;
+  /**
+   * High RuleId lane (bits 64-127) as an unsigned integer. Emitted ONLY when
+   * the high lane is nonzero, so notes using no high-lane bit omit the field
+   * entirely (byte-identical to the pre-high-lane output). The first high-lane
+   * bit is CountersubjectInvertible (bit 64).
+   */
+  satisfied_rules_high?: number;
+  rejected_alternatives: number;
+}
+
 /** Preset info for enumerable options. */
 export interface PresetInfo {
   /** Unique ID. */

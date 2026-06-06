@@ -88,12 +88,12 @@ using rule_helpers::triadPitchClasses;
 void applyP7Bits(RuleIdMask& rules, const ChordEvent& chord, std::uint8_t pc, bool is_chord_tone) {
   if (!chord.has_degree)
     return;
-  rules |= 1ull << RuleBit::DoublingChecked;
-  rules |= 1ull << RuleBit::SpacingChecked;
+  rules |= ruleBitMask(RuleBit::DoublingChecked);
+  rules |= ruleBitMask(RuleBit::SpacingChecked);
   if (is_chord_tone)
-    rules |= 1ull << RuleBit::ChordToneRoman;
+    rules |= ruleBitMask(RuleBit::ChordToneRoman);
   if (pc == bassPitchClassFor(chord))
-    rules |= 1ull << RuleBit::InversionLabel;
+    rules |= ruleBitMask(RuleBit::InversionLabel);
 }
 
 // Modulation/tonicization helper: set the four corresponding provenance
@@ -121,7 +121,7 @@ void applyP8Bits(RuleIdMask& rules, const HarmonicPlan& plan, const ChordEvent& 
                  std::uint8_t pc, bool is_chord_tone) {
   for (const auto& mod : plan.modulations) {
     if (mod.tick <= chord.start_tick) {
-      rules |= 1ull << RuleBit::ModulationCommitted;
+      rules |= ruleBitMask(RuleBit::ModulationCommitted);
       break;
     }
   }
@@ -133,16 +133,16 @@ void applyP8Bits(RuleIdMask& rules, const HarmonicPlan& plan, const ChordEvent& 
       prev = &c;
   }
   if (prev != nullptr && chord.has_degree && prev->secondary_of == chord.degree) {
-    rules |= 1ull << RuleBit::SecondaryDominantResolved;
+    rules |= ruleBitMask(RuleBit::SecondaryDominantResolved);
   }
   if (chord.is_picardy) {
     const std::uint8_t major_third_pc = static_cast<std::uint8_t>((chord.root_pc + 4) % 12);
     if (pc == major_third_pc) {
-      rules |= 1ull << RuleBit::PicardyThird;
+      rules |= ruleBitMask(RuleBit::PicardyThird);
     }
   }
   if (chord.is_borrowed && is_chord_tone) {
-    rules |= 1ull << RuleBit::ModalMixture;
+    rules |= ruleBitMask(RuleBit::ModalMixture);
   }
 }
 
@@ -203,7 +203,9 @@ float computeShadowScore(int pitch, bool is_triad, const CandidateContext& conte
 // all rule semantics through the single shared implementation.
 using rule_helpers::createsCrossRelation;
 using rule_helpers::createsHiddenParallelPerfect;
+using rule_helpers::createsHiddenParallelPerfectAcrossOnset;
 using rule_helpers::createsParallelPerfect;
+using rule_helpers::createsParallelPerfectAcrossOnset;
 using rule_helpers::createsVerticalDissonance;
 using rule_helpers::createsVoiceCrossing;
 using rule_helpers::isLeadingTone;
@@ -258,6 +260,49 @@ bool hasContraryMotion(const std::vector<NoteEvent>& placed, VoiceId candidate_v
   return false;
 }
 
+bool createsVoiceCrossingDuring(const std::vector<NoteEvent>& placed, VoiceId candidate_voice,
+                                std::uint8_t candidate_pitch, Tick start, Tick duration) {
+  const Tick end = start + duration;
+  for (const auto& note : placed) {
+    if (note.voice == candidate_voice)
+      continue;
+    if (note.start_tick >= end || note.start_tick + note.duration <= start)
+      continue;
+    if (candidate_voice < note.voice && candidate_pitch < note.pitch)
+      return true;
+    if (candidate_voice > note.voice && candidate_pitch > note.pitch)
+      return true;
+  }
+  return false;
+}
+
+bool createsVerticalDissonanceDuring(const std::vector<NoteEvent>& placed, VoiceId candidate_voice,
+                                     std::uint8_t candidate_pitch, Tick start, Tick duration) {
+  const Tick end = start + duration;
+  for (const auto& note : placed) {
+    if (note.voice == candidate_voice)
+      continue;
+    if (note.start_tick >= end || note.start_tick + note.duration <= start)
+      continue;
+    if (!rule_helpers::isConsonantInterval(static_cast<int>(candidate_pitch) -
+                                           static_cast<int>(note.pitch))) {
+      return true;
+    }
+  }
+  return false;
+}
+
+int trailingPitchRunLength(const std::vector<std::uint8_t>& pitches, std::uint8_t pitch) {
+  int run = 0;
+  for (auto it = pitches.rbegin(); it != pitches.rend(); ++it) {
+    if (*it != pitch) {
+      break;
+    }
+    ++run;
+  }
+  return run;
+}
+
 std::uint8_t nextSameVoiceStartingAfter(const std::vector<NoteEvent>& placed, VoiceId voice,
                                         Tick tick) {
   Tick best_tick = 0;
@@ -305,7 +350,7 @@ Candidate emitMaterialNote(const MaterialNote& mnote, const HarmonicPlan& plan,
   const std::uint8_t pc_m = static_cast<std::uint8_t>(mnote.pitch % 12);
   const bool is_triad_m = (pc_m == triad_here[0] || pc_m == triad_here[1] || pc_m == triad_here[2]);
   if (is_triad_m) {
-    c.satisfied_rules |= 1ull << RuleBit::ChordTone;
+    c.satisfied_rules |= ruleBitMask(RuleBit::ChordTone);
   }
   applyP7Bits(c.satisfied_rules, chord_here, pc_m, is_triad_m);
   applyP8Bits(c.satisfied_rules, plan, chord_here, pc_m, is_triad_m);
@@ -383,22 +428,27 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
       RuleIdMask extra_bits = 0;
       if (const CadenceCell* cadence_cell = cadenceCellAt(material, mnote.start_tick);
           cadence_cell != nullptr) {
-        extra_bits |= 1ull << RuleBit::CadenceCellCommitted;
+        extra_bits |= ruleBitMask(RuleBit::CadenceCellCommitted);
         if (mnote.start_tick == cadence_cell->cadence_tick) {
-          extra_bits |= 1ull << RuleBit::CadenceVoiceLeadingChecked;
+          extra_bits |= ruleBitMask(RuleBit::CadenceVoiceLeadingChecked);
         }
       }
       for (const auto& marker : material.leading_tone_markers) {
         if (marker.fragment == fragment && marker.resolution_index == idx) {
-          extra_bits |= 1ull << RuleBit::LeadingToneResolved;
+          extra_bits |= ruleBitMask(RuleBit::LeadingToneResolved);
           break;
         }
       }
       if (emit_tonal_answer_bit) {
-        extra_bits |= 1ull << RuleBit::TonalAnswerMapped;
+        extra_bits |= ruleBitMask(RuleBit::TonalAnswerMapped);
       }
       if (emit_countersubject_bit) {
-        extra_bits |= 1ull << RuleBit::CountersubjectActive;
+        extra_bits |= ruleBitMask(RuleBit::CountersubjectActive);
+        // Identity bit for the countersubject_invertible rule: every
+        // countersubject note is a candidate for the invertibility pairing the
+        // Validator checks against the overlapping subject/answer voice. This is
+        // the first high-lane (bit >= 64) RuleBit to ship.
+        extra_bits |= ruleBitMask(RuleBit::CountersubjectInvertible);
       }
       // P9 ImitationEntryMatched: set on idx==0 (the entry note) when
       // any declared ImitationEntry names this fragment as leader or
@@ -407,7 +457,7 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
       if (idx == 0) {
         for (const auto& entry : material.imitation_entries) {
           if (entry.leader_fragment == fragment || entry.follower_fragment == fragment) {
-            extra_bits |= 1ull << RuleBit::ImitationEntryMatched;
+            extra_bits |= ruleBitMask(RuleBit::ImitationEntryMatched);
             break;
           }
         }
@@ -460,7 +510,8 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
         // EpisodeMotifSourced plus the baseline ChordTone/P7/P8 bits (the
         // ChordTone bit keeps passing-tone tracking on the next Compose span
         // accurate).
-        out.push_back(emitMaterialNote(n, harmonic_plan, 1ull << RuleBit::EpisodeMotifSourced));
+        out.push_back(
+            emitMaterialNote(n, harmonic_plan, ruleBitMask(RuleBit::EpisodeMotifSourced)));
       }
     }
     return out;
@@ -494,7 +545,7 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
       prep.duration = prep_duration;
       prep.pitch = pattern.preparation_pitch;
       prep.score = 1.0f;
-      prep.satisfied_rules = 1ull << RuleBit::SuspensionPrepared;
+      prep.satisfied_rules = ruleBitMask(RuleBit::SuspensionPrepared);
       out.push_back(prep);
       Candidate sus;
       sus.start_tick = pattern.suspension_tick;
@@ -508,7 +559,7 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
       res.duration = kQuarter;
       res.pitch = pattern.resolution_pitch;
       res.score = 1.0f;
-      res.satisfied_rules = 1ull << RuleBit::SuspensionResolved;
+      res.satisfied_rules = ruleBitMask(RuleBit::SuspensionResolved);
       out.push_back(res);
     }
     return out;
@@ -567,9 +618,9 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
           step_note.start_tick = beat_cursor;
           step_note.duration = tmpl.seed_durations[i];
           step_note.pitch = static_cast<std::uint8_t>(transposed);
-          RuleIdMask extra_bits = 1ull << RuleBit::FortspinnungSourced;
+          RuleIdMask extra_bits = ruleBitMask(RuleBit::FortspinnungSourced);
           if (k > 0) {
-            extra_bits |= 1ull << RuleBit::SequenceStep;
+            extra_bits |= ruleBitMask(RuleBit::SequenceStep);
           }
           out.push_back(emitMaterialNote(step_note, harmonic_plan, extra_bits));
           beat_cursor += tmpl.seed_durations[i];
@@ -595,7 +646,8 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
       pedal_note.start_tick = pedal.start_tick;
       pedal_note.duration = pedal.duration;
       pedal_note.pitch = pedal.pitch;
-      out.push_back(emitMaterialNote(pedal_note, harmonic_plan, 1ull << RuleBit::PedalCommitted));
+      out.push_back(
+          emitMaterialNote(pedal_note, harmonic_plan, ruleBitMask(RuleBit::PedalCommitted)));
     }
     return out;
   }
@@ -653,7 +705,7 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
         continue;
       if (mnote.start_tick >= span.end_tick)
         break;
-      out.push_back(emitMaterialNote(mnote, harmonic_plan, 1ull << bit));
+      out.push_back(emitMaterialNote(mnote, harmonic_plan, ruleBitMask(bit)));
     }
     return out;
   }
@@ -676,13 +728,13 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
         RuleIdMask extra_bits = 0;
         switch (frag.feature) {
           case RhythmFragment::Feature::Anacrusis:
-            extra_bits |= 1ull << RuleBit::AnacrusisActive;
+            extra_bits |= ruleBitMask(RuleBit::AnacrusisActive);
             break;
           case RhythmFragment::Feature::Hemiola:
-            extra_bits |= 1ull << RuleBit::HemiolaInserted;
+            extra_bits |= ruleBitMask(RuleBit::HemiolaInserted);
             break;
           case RhythmFragment::Feature::Recurrence:
-            extra_bits |= 1ull << RuleBit::RhythmicMotifRecurrence;
+            extra_bits |= ruleBitMask(RuleBit::RhythmicMotifRecurrence);
             break;
           case RhythmFragment::Feature::Dotted:
           case RhythmFragment::Feature::Syncopation:
@@ -690,7 +742,7 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
         }
         for (Tick start : material.phrase_structure.phrase_start_ticks) {
           if (start == mnote.start_tick) {
-            extra_bits |= 1ull << RuleBit::PhrasePeriodicityKept;
+            extra_bits |= ruleBitMask(RuleBit::PhrasePeriodicityKept);
             break;
           }
         }
@@ -731,7 +783,7 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
     // membership is positional (group_size) and is reconstructed by the
     // Validator from the emitted note order, not encoded per note here.
     const RuleIdMask flow_bits =
-        (1ull << RuleBit::ArpeggioFlowActive) | (1ull << RuleBit::ImplicitVoiceTracked);
+        (ruleBitMask(RuleBit::ArpeggioFlowActive)) | (ruleBitMask(RuleBit::ImplicitVoiceTracked));
     for (const auto& mnote : material.arpeggio_template.notes) {
       if (mnote.start_tick < span.start_tick)
         continue;
@@ -751,7 +803,7 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
     // GroundBassReplayed so the provenance records the ground shipped.
     // The ground is immutable (CLAUDE.md): notes are replayed verbatim, only
     // time-shifted by whole cycles.
-    const RuleIdMask ground_bits = (1ull << RuleBit::GroundBassReplayed);
+    const RuleIdMask ground_bits = (ruleBitMask(RuleBit::GroundBassReplayed));
     const Tick period = material.ground_bass_period;
     if (period > 0 && !material.ground_bass.empty()) {
       for (Tick base = span.start_tick; base < span.end_tick; base += period) {
@@ -779,7 +831,7 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
     // differs from the immediately preceding variation (material.variations
     // order) additionally carries TextureDensityShift so the provenance records
     // the texture-density progression shipped.
-    const RuleIdMask var_bits = (1ull << RuleBit::VariationRoleApplied);
+    const RuleIdMask var_bits = (ruleBitMask(RuleBit::VariationRoleApplied));
     for (std::size_t var_idx = 0; var_idx < material.variations.size(); ++var_idx) {
       const auto& var = material.variations[var_idx];
       if (var.start_tick != span.start_tick || var.end_tick != span.end_tick)
@@ -790,7 +842,7 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
       for (const auto& mnote : var.notes) {
         RuleIdMask bits = var_bits;
         if (first && density_shift)
-          bits |= (1ull << RuleBit::TextureDensityShift);
+          bits |= (ruleBitMask(RuleBit::TextureDensityShift));
         first = false;
         out.push_back(emitMaterialNote(mnote, harmonic_plan, bits));
       }
@@ -811,11 +863,17 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
     for (const auto& section : material.figuration_sections) {
       if (section.start_tick != span.start_tick || section.end_tick != span.end_tick)
         continue;
-      RuleIdMask fig_bits = (1ull << RuleBit::FigurationCommitted);
+      // Match the section's voice too, so two voices may carry distinct
+      // figuration over the same bar window (e.g. a fugue middle entry whose V0
+      // and V1 figuration share a 4-bar window). Without the voice match the
+      // span would replay every section in that window into one voice.
+      if (section.voice != span.voice)
+        continue;
+      RuleIdMask fig_bits = (ruleBitMask(RuleBit::FigurationCommitted));
       if (section.is_cadenza)
-        fig_bits |= (1ull << RuleBit::CadenzaApplied);
+        fig_bits |= (ruleBitMask(RuleBit::CadenzaApplied));
       if (section.is_pedal_prep)
-        fig_bits |= (1ull << RuleBit::PedalPreparation);
+        fig_bits |= (ruleBitMask(RuleBit::PedalPreparation));
       for (const auto& mnote : section.notes) {
         out.push_back(emitMaterialNote(mnote, harmonic_plan, fig_bits));
       }
@@ -835,12 +893,12 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
     for (const auto& section : material.toccata_sections) {
       if (section.start_tick != span.start_tick || section.end_tick != span.end_tick)
         continue;
-      const RuleIdMask toc_bits = (1ull << RuleBit::ToccataArchetypeApplied);
+      const RuleIdMask toc_bits = (ruleBitMask(RuleBit::ToccataArchetypeApplied));
       bool first = true;
       for (const auto& mnote : section.notes) {
         RuleIdMask bits = toc_bits;
         if (first && section.is_section_head)
-          bits |= (1ull << RuleBit::SectionTransition);
+          bits |= (ruleBitMask(RuleBit::SectionTransition));
         first = false;
         out.push_back(emitMaterialNote(mnote, harmonic_plan, bits));
       }
@@ -860,9 +918,9 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
     // by the Validator's cantus_firmus_immutable rule, not re-derived here.
     const std::vector<MaterialNote>& source =
         material.cf_is_embellished ? material.cf_embellished : material.cantus_firmus;
-    RuleIdMask cf_bits = (1ull << RuleBit::CantusFirmusReplayed);
+    RuleIdMask cf_bits = (ruleBitMask(RuleBit::CantusFirmusReplayed));
     if (material.cf_is_embellished)
-      cf_bits |= (1ull << RuleBit::CFEmbellishmentApplied);
+      cf_bits |= (ruleBitMask(RuleBit::CFEmbellishmentApplied));
     for (const auto& mnote : source) {
       if (mnote.start_tick < span.start_tick)
         continue;
@@ -883,7 +941,7 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
     // the ground shipped. The ground is immutable (CLAUDE.md): notes are
     // replayed verbatim, only time-shifted by whole cycles. Same shape as the
     // GroundCarrier branch with the renamed source vector / bit.
-    const RuleIdMask ground_bits = (1ull << RuleBit::PassacagliaGroundReplayed);
+    const RuleIdMask ground_bits = (ruleBitMask(RuleBit::PassacagliaGroundReplayed));
     const Tick period = material.passacaglia_ground_period;
     if (period > 0 && !material.passacaglia_ground.empty()) {
       for (Tick base = span.start_tick; base < span.end_tick; base += period) {
@@ -912,13 +970,13 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
     // the provenance records the climax shipped. Same shape as the
     // VariationCarrier branch with the climax flag replacing the density-shift
     // logic.
-    const RuleIdMask var_bits = (1ull << RuleBit::VariationApplied);
+    const RuleIdMask var_bits = (ruleBitMask(RuleBit::VariationApplied));
     for (const auto& var : material.passacaglia_variations) {
       if (var.start_tick != span.start_tick || var.end_tick != span.end_tick)
         continue;
       RuleIdMask bits = var_bits;
       if (var.is_climax)
-        bits |= (1ull << RuleBit::ClimaxPlaced);
+        bits |= (ruleBitMask(RuleBit::ClimaxPlaced));
       for (const auto& mnote : var.notes) {
         out.push_back(emitMaterialNote(mnote, harmonic_plan, bits));
       }
@@ -934,7 +992,7 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
     // Validator's voice_independence_threshold rule can collect the trio voices
     // and measure their pairwise independence. Inert when trio_voices is empty.
     // Clone of the PassacagliaVariation branch, matched by voice (not window).
-    const RuleIdMask trio_bits = (1ull << RuleBit::TrioVoiceIndependent);
+    const RuleIdMask trio_bits = (ruleBitMask(RuleBit::TrioVoiceIndependent));
     for (const auto& line : material.trio_voices) {
       if (line.voice != span.voice)
         continue;
@@ -958,7 +1016,7 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
     // can collect the sections (by window) and measure the density / register
     // contrast between adjacent sections. Inert when fantasia_sections is empty.
     // Clone of the ToccataCarrier branch (window-matched verbatim replay).
-    const RuleIdMask fan_bits = (1ull << RuleBit::FantasiaSectionContrast);
+    const RuleIdMask fan_bits = (ruleBitMask(RuleBit::FantasiaSectionContrast));
     for (const auto& section : material.fantasia_sections) {
       if (section.start_tick != span.start_tick || section.end_tick != span.end_tick)
         continue;
@@ -1042,17 +1100,29 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
         continue;
       const bool is_triad = (pc == triad[0]) || (pc == triad[1]) || (pc == triad[2]);
       const bool strong = isStrongBeat(t, harmonic_plan.ticksPerBar());
+      const bool strict_harmonic_support = span.intent == VoiceIntent::HarmonicSupport;
       if (prev_pitch_local != 0 && !resolvesLeadingTone(prev_pitch_local, p, harmonic_plan)) {
         continue;
       }
       if (strong && !is_triad)
         continue;  // strong-beat consonance rule
+      if (strict_harmonic_support && !is_triad)
+        continue;
+      if (strict_harmonic_support &&
+          trailingPitchRunLength(recent_pitches, static_cast<std::uint8_t>(p)) >= 4) {
+        continue;
+      }
 
       // Vertical rule: reject candidate that crosses any already-placed
       // voice (lower voice index must stay above higher voice index).
       if (context.placed_notes != nullptr &&
           createsVoiceCrossing(*context.placed_notes, span.voice, static_cast<std::uint8_t>(p),
                                t)) {
+        continue;
+      }
+      if (strict_harmonic_support && context.placed_notes != nullptr &&
+          createsVoiceCrossingDuring(*context.placed_notes, span.voice,
+                                     static_cast<std::uint8_t>(p), t, stride)) {
         continue;
       }
 
@@ -1140,7 +1210,12 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
       const bool vertically_dissonant = context.placed_notes != nullptr &&
                                         createsVerticalDissonance(*context.placed_notes, span.voice,
                                                                   static_cast<std::uint8_t>(p), t);
-      if (strong && vertically_dissonant) {
+      if ((strong || strict_harmonic_support) && vertically_dissonant) {
+        continue;
+      }
+      if (strict_harmonic_support && context.placed_notes != nullptr &&
+          createsVerticalDissonanceDuring(*context.placed_notes, span.voice,
+                                          static_cast<std::uint8_t>(p), t, stride)) {
         continue;
       }
 
@@ -1157,6 +1232,15 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
       if (!force_bass_cadence_pc && context.placed_notes != nullptr && have_parallel_anchor &&
           createsParallelPerfect(*context.placed_notes, span.voice, static_cast<std::uint8_t>(p), t,
                                  parallel_prev_pitch, parallel_prev_tick)) {
+        continue;
+      }
+      // Faster-voice parallel: a Material figuration voice may move between this
+      // (slower) Compose voice's onsets, so a parallel can form at the
+      // intermediate union tick that the onset-to-onset check above misses.
+      if (!force_bass_cadence_pc && context.placed_notes != nullptr && have_parallel_anchor &&
+          createsParallelPerfectAcrossOnset(*context.placed_notes, span.voice,
+                                            static_cast<std::uint8_t>(p), t, parallel_prev_pitch,
+                                            parallel_prev_tick)) {
         continue;
       }
       if (context.placed_notes != nullptr && have_parallel_anchor &&
@@ -1178,7 +1262,8 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
       // chord.has_degree to match the P7 spacing pre-filter scoping
       // (degree-tagged layouts carry a correct context.num_voices, which
       // the bottom-of-texture exclusion relies on).
-      if (strong && chord.has_degree && context.placed_notes != nullptr) {
+      if (strong && (chord.has_degree || strict_harmonic_support) &&
+          context.placed_notes != nullptr) {
         bool forms_upper_pair_fourth = false;
         for (const auto& placed : *context.placed_notes) {
           if (placed.voice == span.voice)
@@ -1208,6 +1293,12 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
           createsHiddenParallelPerfect(*context.placed_notes, span.voice,
                                        static_cast<std::uint8_t>(p), t, parallel_prev_pitch,
                                        parallel_prev_tick)) {
+        continue;
+      }
+      if (!force_bass_cadence_pc && context.placed_notes != nullptr && have_parallel_anchor &&
+          createsHiddenParallelPerfectAcrossOnset(*context.placed_notes, span.voice,
+                                                  static_cast<std::uint8_t>(p), t,
+                                                  parallel_prev_pitch, parallel_prev_tick)) {
         continue;
       }
       if (!force_bass_cadence_pc && context.placed_notes != nullptr &&
@@ -1634,6 +1725,12 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
         independent_adjustment -= 0.05f;
       }
 
+      if (strict_harmonic_support &&
+          trailingPitchRunLength(recent_pitches, static_cast<std::uint8_t>(p)) >= 3) {
+        score -= 0.60f;
+        independent_adjustment -= 0.60f;
+      }
+
       // Eighth-note motion bias (two parts, only at Subdivision::Eighth):
       //
       // (a) Penalize weak-position unison. Without this, the score
@@ -1688,7 +1785,7 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
 
       RuleIdMask rules = 0;
       if (is_triad)
-        rules |= 1ull << RuleBit::ChordTone;
+        rules |= ruleBitMask(RuleBit::ChordTone);
       applyP7Bits(rules, chord, static_cast<std::uint8_t>(pc), is_triad);
       applyP8Bits(rules, harmonic_plan, chord, static_cast<std::uint8_t>(pc), is_triad);
       // P10 invertibility confirmation. Set InvertibleAt8va when we have
@@ -1727,19 +1824,19 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
           }
         }
         if (!forms_strong_fourth) {
-          rules |= 1ull << RuleBit::InvertibleAt8va;
+          rules |= ruleBitMask(RuleBit::InvertibleAt8va);
         }
       }
       if (strong && is_triad)
-        rules |= 1ull << RuleBit::StrongBeatConsonance;
+        rules |= ruleBitMask(RuleBit::StrongBeatConsonance);
       if (context.prev_pitch > 0 && std::abs(p - context.prev_pitch) <= 4) {
-        rules |= 1ull << RuleBit::SmallStep;
+        rules |= ruleBitMask(RuleBit::SmallStep);
       }
       if (context.placed_notes != nullptr) {
-        rules |= 1ull << RuleBit::ParallelPerfectChecked;
-        rules |= 1ull << RuleBit::HiddenParallelChecked;
-        rules |= 1ull << RuleBit::VoiceCrossingChecked;
-        rules |= 1ull << RuleBit::CrossRelationChecked;
+        rules |= ruleBitMask(RuleBit::ParallelPerfectChecked);
+        rules |= ruleBitMask(RuleBit::HiddenParallelChecked);
+        rules |= ruleBitMask(RuleBit::VoiceCrossingChecked);
+        rules |= ruleBitMask(RuleBit::CrossRelationChecked);
         // rule[7] = VerticalConsonanceChecked. Marks the candidate as
         // consonant against all currently-placed voices at this tick.
         // Strong beats are guaranteed (the rejection above would have
@@ -1747,22 +1844,22 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
         // they happen to avoid dissonance (i.e. the soft penalty did
         // not have to apply).
         if (!vertically_dissonant) {
-          rules |= 1ull << RuleBit::VerticalConsonanceChecked;
+          rules |= ruleBitMask(RuleBit::VerticalConsonanceChecked);
         }
       }
       if (pre_prev_pitch_local != 0 && prev_pitch_local != 0) {
-        rules |= 1ull << RuleBit::LeapResolutionChecked;
+        rules |= ruleBitMask(RuleBit::LeapResolutionChecked);
       }
       if (!strong && prev_pitch_local != 0) {
-        rules |= 1ull << RuleBit::WeakBeatPassingChecked;
+        rules |= ruleBitMask(RuleBit::WeakBeatPassingChecked);
       }
       if (prev_pitch_local != 0 && isLeadingTone(prev_pitch_local, harmonic_plan)) {
-        rules |= 1ull << RuleBit::LeadingToneResolved;
+        rules |= ruleBitMask(RuleBit::LeadingToneResolved);
       }
       if (cadence_cell != nullptr) {
-        rules |= 1ull << RuleBit::CadenceCellCommitted;
+        rules |= ruleBitMask(RuleBit::CadenceCellCommitted);
         if (t == cadence_cell->cadence_tick) {
-          rules |= 1ull << RuleBit::CadenceVoiceLeadingChecked;
+          rules |= ruleBitMask(RuleBit::CadenceVoiceLeadingChecked);
         }
       }
 
@@ -1822,13 +1919,13 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
           best_score = 0.0f;
           best_selection_score = 0.0f;
           best_shadow_score = 0.0f;
-          best_rules = 1ull << RuleBit::CadenceCellCommitted;
+          best_rules = ruleBitMask(RuleBit::CadenceCellCommitted);
           if (t == cadence_cell->cadence_tick) {
-            best_rules |= 1ull << RuleBit::CadenceVoiceLeadingChecked;
+            best_rules |= ruleBitMask(RuleBit::CadenceVoiceLeadingChecked);
           }
           const std::uint8_t pc = static_cast<std::uint8_t>(best_pitch % 12);
           if (pc == triad[0] || pc == triad[1] || pc == triad[2]) {
-            best_rules |= 1ull << RuleBit::ChordTone;
+            best_rules |= ruleBitMask(RuleBit::ChordTone);
           }
         }
       }
@@ -1895,9 +1992,9 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
         best_score = 0.0f;
         best_selection_score = 0.0f;
         best_shadow_score = 0.0f;
-        best_rules = (1ull << RuleBit::LeadingToneResolved);
+        best_rules = (ruleBitMask(RuleBit::LeadingToneResolved));
         if (is_triad_fallback) {
-          best_rules |= 1ull << RuleBit::ChordTone;
+          best_rules |= ruleBitMask(RuleBit::ChordTone);
         }
         break;
       }
@@ -1936,7 +2033,7 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
     // is set (rule[0] = ChordTone). Use that to update the leave-side
     // tracker — non-triad commits require the next position to be
     // within ±2.
-    prev_was_pt_local = ((best_rules & (1ull << RuleBit::ChordTone)) == 0);
+    prev_was_pt_local = ((best_rules & (ruleBitMask(RuleBit::ChordTone))) == 0);
   }
   return out;
 }

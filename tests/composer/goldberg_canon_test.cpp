@@ -29,7 +29,7 @@ namespace bach::composer {
 namespace {
 
 constexpr RuleIdMask bit(RuleBit b) {
-  return RuleIdMask{1} << b;
+  return ruleBitMask(b);
 }
 
 HarnessFixture build(bool minor, std::uint16_t target_bars, std::uint32_t seed) {

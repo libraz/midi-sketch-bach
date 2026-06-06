@@ -232,6 +232,24 @@ TEST(OrnamentPassTest, CadenceTrillPresentInLastTwoBarsAtDensityZero) {
   }
 }
 
+TEST(OrnamentPassTest, OrganOrnamentsDoNotExceedManualCompass) {
+  ComposeResult r;
+  r.notes.push_back(makeNote(0, kTicksPerBar, 36, 1));
+  r.provenance.push_back(composeProv(1));
+  r.notes.push_back(makeNote(0, kTicksPerBar, 84, 0));
+  r.provenance.push_back(composeProv(0));
+  r.tracks = Renderer{}.render(r.notes);
+
+  OrnamentParams p = baseParams();
+  p.character = SubjectCharacter::Severe;  // mandatory cadence trill if eligible.
+  p.instrument = InstrumentType::Organ;
+  applyOrnamentPass(r, p);
+
+  for (const auto& note : r.notes) {
+    EXPECT_LE(note.pitch, 84) << "organ ornament exceeded manual compass";
+  }
+}
+
 // --- Density matrix --------------------------------------------------------
 
 TEST(OrnamentPassTest, DensityMatrixCharacterAndInstrument) {
@@ -364,7 +382,7 @@ TEST(OrnamentPassTest, ChoralePreludePipelineValidatesCleanAfterOrnament) {
   // carries the CantusFirmusReplayed bit.
   std::vector<VoiceId> exempt;
   for (std::size_t i = 0; i < r.notes.size(); ++i) {
-    const RuleIdMask cf = RuleIdMask{1} << RuleBit::CantusFirmusReplayed;
+    const RuleIdMask cf = ruleBitMask(RuleBit::CantusFirmusReplayed);
     if (r.provenance[i].satisfied_rules & cf) {
       const VoiceId v = r.notes[i].voice;
       if (std::find(exempt.begin(), exempt.end(), v) == exempt.end())

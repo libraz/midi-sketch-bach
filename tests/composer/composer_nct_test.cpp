@@ -31,7 +31,7 @@ namespace bach::composer {
 namespace {
 
 bool hasBit(const NoteProvenance& p, RuleBit bit) {
-  return (p.satisfied_rules & (RuleIdMask{1} << bit)) != 0;
+  return (p.satisfied_rules & (ruleBitMask(bit))) != 0;
 }
 
 bool hasAnyNctBit(const NoteProvenance& p) {
@@ -99,7 +99,7 @@ TEST(ComposerNctTest, AllFortySevenBitsFireForPhase14) {
   ASSERT_FALSE(r.provenance.empty());
   const RuleIdMask u = satisfiedUnion(r);
   for (int b = 0; b < 47; ++b) {
-    EXPECT_TRUE((u & (RuleIdMask{1} << b)) != 0) << "rule bit " << b << " never fired in Phase14";
+    EXPECT_TRUE((u & (ruleBitMask(b))) != 0) << "rule bit " << b << " never fired in Phase14";
   }
 }
 

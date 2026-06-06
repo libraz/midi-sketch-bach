@@ -489,6 +489,26 @@ TEST(CandidateSearchTest, QuarterSubdivisionKeepsHeldPitch) {
       << "Quarter subdivision must keep the original held-pitch behavior";
 }
 
+TEST(CandidateSearchTest, QuarterSubdivisionBreaksThirdUnisonOnWeakBeat) {
+  CandidateContext ctx;
+  ctx.voice_center = 64;
+  ctx.pre_prev_pitch = 64;
+  ctx.prev_pitch = 64;
+  ctx.prev_end_tick = kTicksPerBeat;
+  ctx.placed_notes = nullptr;
+
+  Material empty;
+  Span span = makeComposeSpan(kTicksPerBeat, 2 * kTicksPerBeat, 1);
+
+  CandidateSearch search;
+  const auto cands = search.enumerate(span, singleCMajor(), empty, ctx);
+  ASSERT_EQ(cands.size(), 1u);
+  EXPECT_NE(cands.front().pitch, 64u)
+      << "third consecutive quarter unison should yield to a weak-beat step";
+  EXPECT_LE(std::abs(static_cast<int>(cands.front().pitch) - 64), 2)
+      << "the unison break should stay conjunct";
+}
+
 // Soft-penalty fallback. If no consonant candidate is reachable (the
 // search range only contains pitches that form dissonance against the
 // placed voice), the penalty does not turn into a hard reject — the
@@ -598,7 +618,7 @@ TEST(CandidateSearchTest, ResolvesLeadingToneUpwardToTonic) {
   const auto cands = search.enumerate(span, singleCMajor(), empty, ctx);
   ASSERT_EQ(cands.size(), 1u);
   EXPECT_EQ(cands.front().pitch, 72u);
-  EXPECT_NE(cands.front().satisfied_rules & (1ull << RuleBit::LeadingToneResolved), 0u);
+  EXPECT_NE(cands.front().satisfied_rules & (ruleBitMask(RuleBit::LeadingToneResolved)), 0u);
 }
 
 TEST(CandidateSearchTest, RejectsLeadingToneWhenResolutionIsOutsideSearchRange) {
@@ -640,7 +660,7 @@ TEST(CandidateSearchTest, MaterialResolutionCarriesLeadingToneBit) {
   const auto cands = search.enumerate(span, singleCMajor(), material, ctx);
   ASSERT_EQ(cands.size(), 2u);
   EXPECT_EQ(cands[1].pitch, 72u);
-  EXPECT_NE(cands[1].satisfied_rules & (1ull << RuleBit::LeadingToneResolved), 0u);
+  EXPECT_NE(cands[1].satisfied_rules & (ruleBitMask(RuleBit::LeadingToneResolved)), 0u);
 }
 
 TEST(CandidateSearchTest, ContraryMotionPreferenceCanBeatHeldTriadTone) {
@@ -664,8 +684,8 @@ TEST(CandidateSearchTest, ContraryMotionPreferenceCanBeatHeldTriadTone) {
   ASSERT_EQ(cands.size(), 1u);
   EXPECT_EQ(cands.front().pitch, 65u)
       << "contrary +0.1 should lift the upward step over the otherwise-held E";
-  EXPECT_NE(cands.front().satisfied_rules & (1ull << RuleBit::HiddenParallelChecked), 0u);
-  EXPECT_NE(cands.front().satisfied_rules & (1ull << RuleBit::CrossRelationChecked), 0u);
+  EXPECT_NE(cands.front().satisfied_rules & (ruleBitMask(RuleBit::HiddenParallelChecked)), 0u);
+  EXPECT_NE(cands.front().satisfied_rules & (ruleBitMask(RuleBit::CrossRelationChecked)), 0u);
 }
 
 TEST(CandidateSearchTest, CadenceCellForcesBassDominantToTonic) {
@@ -693,9 +713,9 @@ TEST(CandidateSearchTest, CadenceCellForcesBassDominantToTonic) {
   ASSERT_EQ(cands.size(), 2u);
   EXPECT_EQ(cands[0].pitch % 12, 7u);
   EXPECT_EQ(cands[1].pitch % 12, 0u);
-  EXPECT_NE(cands[0].satisfied_rules & (1ull << RuleBit::CadenceCellCommitted), 0u);
-  EXPECT_NE(cands[1].satisfied_rules & (1ull << RuleBit::CadenceCellCommitted), 0u);
-  EXPECT_NE(cands[1].satisfied_rules & (1ull << RuleBit::CadenceVoiceLeadingChecked), 0u);
+  EXPECT_NE(cands[0].satisfied_rules & (ruleBitMask(RuleBit::CadenceCellCommitted)), 0u);
+  EXPECT_NE(cands[1].satisfied_rules & (ruleBitMask(RuleBit::CadenceCellCommitted)), 0u);
+  EXPECT_NE(cands[1].satisfied_rules & (ruleBitMask(RuleBit::CadenceVoiceLeadingChecked)), 0u);
 }
 
 // Provenance audit: every RuleBit written by enumerate() must be observable
@@ -716,9 +736,9 @@ TEST(CandidateSearchTest, RuleBitsRecordChordToneStrongBeatAndSmallStep) {
 
   ASSERT_EQ(cands.size(), 1u);
   const RuleIdMask bits = cands.front().satisfied_rules;
-  EXPECT_NE(bits & (1ull << RuleBit::ChordTone), 0u);
-  EXPECT_NE(bits & (1ull << RuleBit::StrongBeatConsonance), 0u);
-  EXPECT_NE(bits & (1ull << RuleBit::SmallStep), 0u);
+  EXPECT_NE(bits & (ruleBitMask(RuleBit::ChordTone)), 0u);
+  EXPECT_NE(bits & (ruleBitMask(RuleBit::StrongBeatConsonance)), 0u);
+  EXPECT_NE(bits & (ruleBitMask(RuleBit::SmallStep)), 0u);
 }
 
 TEST(CandidateSearchTest, RuleBitsRecordPlacedNotesContextChecks) {
@@ -737,11 +757,11 @@ TEST(CandidateSearchTest, RuleBitsRecordPlacedNotesContextChecks) {
 
   ASSERT_EQ(cands.size(), 1u);
   const RuleIdMask bits = cands.front().satisfied_rules;
-  EXPECT_NE(bits & (1ull << RuleBit::ParallelPerfectChecked), 0u);
-  EXPECT_NE(bits & (1ull << RuleBit::HiddenParallelChecked), 0u);
-  EXPECT_NE(bits & (1ull << RuleBit::VoiceCrossingChecked), 0u);
-  EXPECT_NE(bits & (1ull << RuleBit::CrossRelationChecked), 0u);
-  EXPECT_NE(bits & (1ull << RuleBit::VerticalConsonanceChecked), 0u);
+  EXPECT_NE(bits & (ruleBitMask(RuleBit::ParallelPerfectChecked)), 0u);
+  EXPECT_NE(bits & (ruleBitMask(RuleBit::HiddenParallelChecked)), 0u);
+  EXPECT_NE(bits & (ruleBitMask(RuleBit::VoiceCrossingChecked)), 0u);
+  EXPECT_NE(bits & (ruleBitMask(RuleBit::CrossRelationChecked)), 0u);
+  EXPECT_NE(bits & (ruleBitMask(RuleBit::VerticalConsonanceChecked)), 0u);
 }
 
 TEST(CandidateSearchTest, RuleBitsRecordWeakBeatAndLeapResolutionAcrossStrides) {
@@ -758,8 +778,8 @@ TEST(CandidateSearchTest, RuleBitsRecordWeakBeatAndLeapResolutionAcrossStrides) 
   const auto cands = search.enumerate(span, singleCMajor(), empty, ctx);
 
   ASSERT_GE(cands.size(), 3u);
-  EXPECT_NE(cands[1].satisfied_rules & (1ull << RuleBit::WeakBeatPassingChecked), 0u);
-  EXPECT_NE(cands[2].satisfied_rules & (1ull << RuleBit::LeapResolutionChecked), 0u);
+  EXPECT_NE(cands[1].satisfied_rules & (ruleBitMask(RuleBit::WeakBeatPassingChecked)), 0u);
+  EXPECT_NE(cands[2].satisfied_rules & (ruleBitMask(RuleBit::LeapResolutionChecked)), 0u);
 }
 
 // Episode intent replays the derived motif transform verbatim and sets
@@ -804,8 +824,8 @@ TEST(CandidateSearchTest, EpisodeIntentReplaysOriginalTransform) {
   EXPECT_EQ(cands[1].pitch, 62);
   EXPECT_EQ(cands[0].start_tick, 4u * kTicksPerBeat);
   EXPECT_EQ(cands[1].start_tick, 5u * kTicksPerBeat);
-  EXPECT_NE(cands[0].satisfied_rules & (1ull << RuleBit::EpisodeMotifSourced), 0u);
-  EXPECT_NE(cands[1].satisfied_rules & (1ull << RuleBit::EpisodeMotifSourced), 0u);
+  EXPECT_NE(cands[0].satisfied_rules & (ruleBitMask(RuleBit::EpisodeMotifSourced)), 0u);
+  EXPECT_NE(cands[1].satisfied_rules & (ruleBitMask(RuleBit::EpisodeMotifSourced)), 0u);
 }
 
 TEST(CandidateSearchTest, EpisodeIntentInvertReflectsAroundPivot) {
@@ -846,7 +866,7 @@ TEST(CandidateSearchTest, EpisodeIntentInvertReflectsAroundPivot) {
   // Invert: 64 → 2*60-64 = 56 (Ab3), 67 → 2*60-67 = 53 (F3).
   EXPECT_EQ(cands[0].pitch, 56);
   EXPECT_EQ(cands[1].pitch, 53);
-  EXPECT_NE(cands[0].satisfied_rules & (1ull << RuleBit::EpisodeMotifSourced), 0u);
+  EXPECT_NE(cands[0].satisfied_rules & (ruleBitMask(RuleBit::EpisodeMotifSourced)), 0u);
 }
 
 TEST(CandidateSearchTest, EpisodeIntentRetrogradeReversesPitchOrder) {
@@ -1001,7 +1021,7 @@ TEST(CandidateSearchTest, AnswerCarrierUsesTonalAnswerWhenFlagSet) {
   const auto cands = search.enumerate(span, singleCMajor(), material, ctx);
   ASSERT_EQ(cands.size(), 1u);
   EXPECT_EQ(cands[0].pitch, 67);
-  EXPECT_NE(cands[0].satisfied_rules & (1ull << RuleBit::TonalAnswerMapped), 0u);
+  EXPECT_NE(cands[0].satisfied_rules & (ruleBitMask(RuleBit::TonalAnswerMapped)), 0u);
 }
 
 TEST(CandidateSearchTest, AnswerCarrierFallsBackToRealAnswerWhenFlagUnset) {
@@ -1026,7 +1046,7 @@ TEST(CandidateSearchTest, AnswerCarrierFallsBackToRealAnswerWhenFlagUnset) {
   const auto cands = search.enumerate(span, singleCMajor(), material, ctx);
   ASSERT_EQ(cands.size(), 1u);
   EXPECT_EQ(cands[0].pitch, 55);
-  EXPECT_EQ(cands[0].satisfied_rules & (1ull << RuleBit::TonalAnswerMapped), 0u);
+  EXPECT_EQ(cands[0].satisfied_rules & (ruleBitMask(RuleBit::TonalAnswerMapped)), 0u);
 }
 
 TEST(CandidateSearchTest, CountersubjectCarrierReplaysMaterial) {
@@ -1053,8 +1073,8 @@ TEST(CandidateSearchTest, CountersubjectCarrierReplaysMaterial) {
   ASSERT_EQ(cands.size(), 2u);
   EXPECT_EQ(cands[0].pitch, 71);
   EXPECT_EQ(cands[1].pitch, 72);
-  EXPECT_NE(cands[0].satisfied_rules & (1ull << RuleBit::CountersubjectActive), 0u);
-  EXPECT_NE(cands[1].satisfied_rules & (1ull << RuleBit::CountersubjectActive), 0u);
+  EXPECT_NE(cands[0].satisfied_rules & (ruleBitMask(RuleBit::CountersubjectActive)), 0u);
+  EXPECT_NE(cands[1].satisfied_rules & (ruleBitMask(RuleBit::CountersubjectActive)), 0u);
 }
 
 TEST(CandidateSearchTest, EpisodeIntentSkipsFragmentForWrongVoice) {
@@ -1120,15 +1140,15 @@ TEST(CandidateSearchTest, FortspinnungSpanReplaysDescendingFifths) {
   EXPECT_EQ(cands[5].pitch, 60);  // 74 - 14
   // FortspinnungSourced on all 6 notes; SequenceStep on steps 1-2 only.
   for (std::size_t i = 0; i < cands.size(); ++i) {
-    EXPECT_NE(cands[i].satisfied_rules & (1ull << RuleBit::FortspinnungSourced), 0u)
+    EXPECT_NE(cands[i].satisfied_rules & (ruleBitMask(RuleBit::FortspinnungSourced)), 0u)
         << "note index " << i;
   }
-  EXPECT_EQ(cands[0].satisfied_rules & (1ull << RuleBit::SequenceStep), 0u);
-  EXPECT_EQ(cands[1].satisfied_rules & (1ull << RuleBit::SequenceStep), 0u);
-  EXPECT_NE(cands[2].satisfied_rules & (1ull << RuleBit::SequenceStep), 0u);
-  EXPECT_NE(cands[3].satisfied_rules & (1ull << RuleBit::SequenceStep), 0u);
-  EXPECT_NE(cands[4].satisfied_rules & (1ull << RuleBit::SequenceStep), 0u);
-  EXPECT_NE(cands[5].satisfied_rules & (1ull << RuleBit::SequenceStep), 0u);
+  EXPECT_EQ(cands[0].satisfied_rules & (ruleBitMask(RuleBit::SequenceStep)), 0u);
+  EXPECT_EQ(cands[1].satisfied_rules & (ruleBitMask(RuleBit::SequenceStep)), 0u);
+  EXPECT_NE(cands[2].satisfied_rules & (ruleBitMask(RuleBit::SequenceStep)), 0u);
+  EXPECT_NE(cands[3].satisfied_rules & (ruleBitMask(RuleBit::SequenceStep)), 0u);
+  EXPECT_NE(cands[4].satisfied_rules & (ruleBitMask(RuleBit::SequenceStep)), 0u);
+  EXPECT_NE(cands[5].satisfied_rules & (ruleBitMask(RuleBit::SequenceStep)), 0u);
 }
 
 TEST(CandidateSearchTest, FortspinnungSpanReplaysAscendingStep) {
@@ -1186,7 +1206,7 @@ TEST(CandidateSearchTest, FortspinnungSpanSkipsTemplateForWrongVoice) {
 namespace {
 
 bool candHasBit(const Candidate& c, RuleBit bit) {
-  return (c.satisfied_rules & (1ull << bit)) != 0;
+  return (c.satisfied_rules & (ruleBitMask(bit))) != 0;
 }
 
 }  // namespace

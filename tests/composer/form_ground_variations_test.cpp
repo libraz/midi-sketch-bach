@@ -34,7 +34,7 @@ namespace {
 constexpr Tick kTicksPerBar34 = 3 * kTicksPerBeat;  // 1440.
 
 constexpr RuleIdMask bit(RuleBit b) {
-  return RuleIdMask{1} << b;
+  return ruleBitMask(b);
 }
 
 // Build a fixture for a ground-variation form, asserting the director succeeds.

@@ -108,6 +108,33 @@ TEST(JsonExportInfoTest, GeneratedJsonCarriesStreamCellDivergenceMetrics) {
   EXPECT_TRUE(contains(json, "\"transition_note_indices\":[2,5]"));
 }
 
+TEST(JsonExportInfoTest, GeneratedJsonCarriesTextureMetrics) {
+  ValidationReport report;
+  TextureMetrics metrics;
+  metrics.max_active_voices = 3;
+  metrics.avg_active_voices = 2.25;
+  metrics.compass_violation_count = 1;
+  metrics.register_overlap_ratio = 0.5;
+  VoiceTextureMetrics voice;
+  voice.voice = 2;
+  voice.silence_ratio = 0.125;
+  voice.max_repeated_run = 4;
+  voice.min_pitch = 36;
+  voice.max_pitch = 60;
+  metrics.voices.push_back(voice);
+  report.texture_metrics.push_back(metrics);
+
+  const std::string json = emitGeneratedJson({}, report);
+  EXPECT_TRUE(contains(json, "\"texture_metrics\":"));
+  EXPECT_TRUE(contains(json, "\"max_active_voices\":3"));
+  EXPECT_TRUE(contains(json, "\"avg_active_voices\":2.25"));
+  EXPECT_TRUE(contains(json, "\"compass_violation_count\":1"));
+  EXPECT_TRUE(contains(json, "\"register_overlap_ratio\":0.5"));
+  EXPECT_TRUE(contains(json, "\"voice\":2"));
+  EXPECT_TRUE(contains(json, "\"silence_ratio\":0.125"));
+  EXPECT_TRUE(contains(json, "\"max_repeated_run\":4"));
+}
+
 TEST_F(JsonExportTest, GeneratedJsonOmitsInternalFields) {
   // generated.json must not carry composer-internal metadata.
   EXPECT_FALSE(contains(generated_, "voice_intent"));
@@ -136,6 +163,32 @@ TEST_F(JsonExportTest, ProvenanceJsonCarriesAuditFields) {
   EXPECT_TRUE(contains(provenance_, "span_id"));
 }
 
+TEST(JsonExportShadowFieldTest, ShadowFieldsEmittedOnlyForComposeNotes) {
+  // The corpus-scorer shadow fields are an audit surface for the candidate
+  // scorer, which runs only on Compose notes. Material and Ornament notes
+  // replay verbatim (no scorer decision), so emitting their default-zero
+  // shadow fields would falsely read as "scorer chose pitch 0" and pollute the
+  // shadow_winning_pitch-vs-pitch disagreement diagnostic. Each note kind is
+  // checked in isolation so a present/absent key is unambiguous.
+  std::vector<NoteProvenance> compose(1);
+  compose[0].source = NoteSource::Compose;
+  compose[0].shadow_winning_pitch = 67;
+  const std::string compose_json = emitProvenanceJson(compose);
+  EXPECT_NE(compose_json.find("shadow_score"), std::string::npos);
+  EXPECT_NE(compose_json.find("shadow_winning_pitch"), std::string::npos);
+  EXPECT_NE(compose_json.find("shadow_winning_pitch_without_markov"), std::string::npos);
+
+  for (NoteSource source : {NoteSource::Material, NoteSource::Ornament}) {
+    std::vector<NoteProvenance> prov(1);
+    prov[0].source = source;
+    const std::string json = emitProvenanceJson(prov);
+    EXPECT_EQ(json.find("shadow_score"), std::string::npos)
+        << "shadow_score leaked for non-Compose source";
+    EXPECT_EQ(json.find("shadow_winning_pitch"), std::string::npos)
+        << "shadow_winning_pitch leaked for non-Compose source";
+  }
+}
+
 TEST(JsonExportHighBitTest, SatisfiedRulesAboveBit31SurviveSerialization) {
   // Regression: satisfied_rules is a 64-bit RuleIdMask. P9/P10 use rule
   // bits >= 32 (ImitationEntryMatched=32, InvertibleAt8va=33). A 32-bit
@@ -149,10 +202,37 @@ TEST(JsonExportHighBitTest, SatisfiedRulesAboveBit31SurviveSerialization) {
   // Set bit 33 (InvertibleAt8va) plus bit 0 (ChordTone). The decimal
   // value is (1<<33)|1 = 8589934593, which a 32-bit cast would collapse
   // to 1 (losing bit 33) — so we assert the full value is present.
-  prov[0].satisfied_rules = (1ull << 33) | 1ull;
+  prov[0].satisfied_rules = ruleBitMask(33) | ruleBitMask(0);
   const std::string json = emitProvenanceJson(prov);
   EXPECT_NE(json.find("\"satisfied_rules\":8589934593"), std::string::npos)
       << "high bit (>=32) truncated in export: " << json;
+}
+
+TEST(JsonExportHighBitTest, HighLaneBitEmitsSeparateSatisfiedRulesHighField) {
+  // The low lane carries bit 2 (decimal 4); the high lane carries bit 64
+  // (CountersubjectInvertible), which is bit 0 of lane 1 (decimal 1). The
+  // exporter emits the low lane verbatim and a separate satisfied_rules_high
+  // field for the nonzero high lane.
+  RuleIdMask mask = ruleBitMask(64) | ruleBitMask(2);
+  EXPECT_EQ(mask.low64(), 4u);
+  EXPECT_EQ(mask.high64(), 1u);
+
+  std::vector<NoteProvenance> prov(1);
+  prov[0].satisfied_rules = mask;
+  const std::string json = emitProvenanceJson(prov);
+  EXPECT_NE(json.find("\"satisfied_rules\":4"), std::string::npos);
+  EXPECT_NE(json.find("\"satisfied_rules_high\":1"), std::string::npos);
+}
+
+TEST(JsonExportHighBitTest, SatisfiedRulesHighOmittedWhenHighLaneZero) {
+  // A note using only low-lane bits must stay byte-identical to the
+  // pre-high-lane output: no satisfied_rules_high key at all.
+  std::vector<NoteProvenance> prov(1);
+  prov[0].satisfied_rules = ruleBitMask(0) | ruleBitMask(33);
+  EXPECT_EQ(prov[0].satisfied_rules.high64(), 0u);
+  const std::string json = emitProvenanceJson(prov);
+  EXPECT_NE(json.find("\"satisfied_rules\":"), std::string::npos);
+  EXPECT_EQ(json.find("satisfied_rules_high"), std::string::npos);
 }
 
 TEST_F(JsonExportTest, ParallelIndicesAlignBetweenFiles) {

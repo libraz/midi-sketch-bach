@@ -42,7 +42,7 @@ namespace bach::composer {
 namespace {
 
 constexpr RuleIdMask bit(RuleBit b) {
-  return RuleIdMask{1} << b;
+  return ruleBitMask(b);
 }
 
 bool hasRule(const ValidationReport& r, const std::string& rule_id) {

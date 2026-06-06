@@ -90,9 +90,9 @@ NoteProvenance figProv(bool pedal = false) {
   NoteProvenance p;
   p.voice_intent = VoiceIntent::FigurationCarrier;
   p.source = NoteSource::Material;
-  p.satisfied_rules = (RuleIdMask{1} << RuleBit::FigurationCommitted);
+  p.satisfied_rules = (ruleBitMask(RuleBit::FigurationCommitted));
   if (pedal)
-    p.satisfied_rules |= (RuleIdMask{1} << RuleBit::PedalPreparation);
+    p.satisfied_rules |= (ruleBitMask(RuleBit::PedalPreparation));
   return p;
 }
 
@@ -113,7 +113,7 @@ bool hasRuleKind(const ValidationReport& r, const std::string& rule_id, FailKind
 }
 
 constexpr RuleIdMask bit(RuleBit b) {
-  return RuleIdMask{1} << b;
+  return ruleBitMask(b);
 }
 
 }  // namespace

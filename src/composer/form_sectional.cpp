@@ -11,6 +11,7 @@
 #include "composer/material.h"
 #include "composer/minor_material.h"
 #include "composer/span.h"
+#include "composer/tonal_answer.h"
 #include "composer/voice_intent.h"
 #include "core/basic_types.h"
 
@@ -42,20 +43,22 @@ namespace bach::composer {
 
 namespace {
 
-using detail::ChordSpec;              // NOLINT(build/namespaces)
-using detail::kHarmonyPatterns;       // NOLINT(build/namespaces)
-using detail::kHarmonyPatternsMinor;  // NOLINT(build/namespaces)
-using detail::kPhase14Subjects;       // NOLINT(build/namespaces)
-using detail::kSubjectsMinor;         // NOLINT(build/namespaces)
-using detail::Mode;                   // NOLINT(build/namespaces)
-using detail::scaleUp;                // NOLINT(build/namespaces)
-using detail::subjectSlotFor;         // NOLINT(build/namespaces)
+using detail::ChordSpec;               // NOLINT(build/namespaces)
+using detail::kHarmonyPatterns;        // NOLINT(build/namespaces)
+using detail::kHarmonyPatternsMinor;   // NOLINT(build/namespaces)
+using detail::kPhase14SubjectRhythms;  // NOLINT(build/namespaces)
+using detail::kPhase14Subjects;        // NOLINT(build/namespaces)
+using detail::kSubjectsMinor;          // NOLINT(build/namespaces)
+using detail::Mode;                    // NOLINT(build/namespaces)
+using detail::scaleUp;                 // NOLINT(build/namespaces)
+using detail::subjectSlotFor;          // NOLINT(build/namespaces)
 
 constexpr Tick kQuarter = kTicksPerBeat;
 constexpr Tick kEighth = kTicksPerBeat / 2;
 constexpr Tick kSixteenth = kTicksPerBeat / 4;
 
-// One subject statement is 16 quarter notes spanning 4 bars.
+// One subject statement is 16 catalog notes spanning 4 bars. Durations come
+// from kPhase14SubjectRhythms rather than being fixed quarters.
 constexpr int kSubjectNotes = 16;
 constexpr int kSubjectBars = 4;
 
@@ -103,6 +106,24 @@ int octaveOffsetForBand(const std::array<std::uint8_t, 16>& subject, int voice) 
     offset += 12;
   }
   return offset;
+}
+
+bool shouldUseTonalAnswer(const std::array<std::uint8_t, 16>& subject, std::uint8_t tonic_pc) {
+  const std::uint8_t tonic = static_cast<std::uint8_t>(tonic_pc % 12);
+  const std::uint8_t dominant = static_cast<std::uint8_t>((tonic + 7) % 12);
+  const std::uint8_t first = static_cast<std::uint8_t>(subject[0] % 12);
+  if (first == dominant) {
+    return true;
+  }
+  if (first != tonic) {
+    return false;
+  }
+  for (int i = 1; i < 4; ++i) {
+    if (subject[static_cast<std::size_t>(i)] % 12 == dominant) {
+      return true;
+    }
+  }
+  return false;
 }
 
 // ---------------------------------------------------------------------------
@@ -467,6 +488,7 @@ void appendFugueTail(SectionalAssembly& asm_ctx, int first_bar, int bars,
   const std::uint8_t slot = subjectSlotFor(req.character, req.seed);
   const std::array<std::uint8_t, 16>& subj_pat =
       (mode == Mode::Minor) ? kSubjectsMinor[slot] : kPhase14Subjects[slot];
+  const std::array<Tick, 16>& subj_rhythm = kPhase14SubjectRhythms[slot];
 
   // The cadence reserves the final 2 bars; nothing else extends into them.
   const int cadence_start = first_bar + bars - 2;  // first of the 2 cadence bars.
@@ -500,13 +522,14 @@ void appendFugueTail(SectionalAssembly& asm_ctx, int first_bar, int bars,
 
   // --- Stamp a 16-note subject statement transposed by `semis`. ---
   auto stamp_subject = [&](int base_bar, int semis) {
+    Tick cursor = barTick(base_bar);
     for (int note = 0; note < kSubjectNotes; ++note) {
-      const int bar = base_bar + note / 4;
-      const int beat = note % 4;
       const int pitch = static_cast<int>(subj_pat[static_cast<std::size_t>(note)]) + semis;
-      addNote(out.material.subject, barTick(bar) + static_cast<Tick>(beat) * kTicksPerBeat,
-              kQuarter, pitch);
+      addNote(out.material.subject, cursor, subj_rhythm[static_cast<std::size_t>(note)], pitch);
+      const int bar = static_cast<int>(cursor / kTicksPerBar);
+      const int beat = static_cast<int>((cursor % kTicksPerBar) / kTicksPerBeat);
       record_beat(bar, beat, pitch);
+      cursor += subj_rhythm[static_cast<std::size_t>(note)];
     }
   };
 
@@ -531,6 +554,28 @@ void appendFugueTail(SectionalAssembly& asm_ctx, int first_bar, int bars,
 
   // === EXPOSITION ===========================================================
   const int v0_off = octaveOffsetForBand(subj_pat, 0);
+  auto countersubject_pitch = [](int anchor_pitch, int voice) {
+    int pitch = anchor_pitch + 24;
+    while (pitch > kBandHi[voice]) {
+      pitch -= 12;
+    }
+    while (pitch < kBandLo[voice] && pitch + 12 <= kBandHi[voice]) {
+      pitch += 12;
+    }
+    return pitch;
+  };
+  auto append_countersubject_from = [&](const std::vector<MaterialNote>& source, int voice,
+                                        Tick start, Tick end) {
+    for (const auto& note : source) {
+      if (note.start_tick < start || note.start_tick >= end)
+        continue;
+      const int pitch = countersubject_pitch(static_cast<int>(note.pitch), voice);
+      addNote(out.material.countersubject, note.start_tick, note.duration, pitch);
+      const int bar = static_cast<int>(note.start_tick / kTicksPerBar);
+      const int beat = static_cast<int>((note.start_tick % kTicksPerBar) / kTicksPerBeat);
+      record_beat(bar, beat, pitch);
+    }
+  };
   stamp_subject(first_bar + 0, v0_off);
   pushSpan(asm_ctx, 0, first_bar + 0, first_bar + 3, VoiceIntent::SubjectCarrier);
 
@@ -541,18 +586,46 @@ void appendFugueTail(SectionalAssembly& asm_ctx, int first_bar, int bars,
   const int answer_off = octaveOffsetForBand(subj_pat, 1);
   const int answer_first = first_bar + 4;
   const int answer_last = std::min(first_bar + 7, cadence_start - 1);
-  const int answer_notes = (answer_last - answer_first + 1) * 4;
-  for (int note = 0; note < answer_notes; ++note) {
-    const int bar = answer_first + note / 4;
-    const int beat = note % 4;
+  const Tick answer_end = barTick(answer_last + 1);
+  const bool use_tonal_answer = shouldUseTonalAnswer(subj_pat, out.harmony.tonic_pc);
+  std::vector<MaterialNote> tonal_answer_seed;
+  tonal_answer_seed.reserve(kSubjectNotes);
+  Tick answer_cursor = barTick(answer_first);
+  for (int note = 0; note < kSubjectNotes && answer_cursor < answer_end; ++note) {
+    const Tick dur =
+        std::min(subj_rhythm[static_cast<std::size_t>(note)], answer_end - answer_cursor);
     const int pitch = static_cast<int>(subj_pat[static_cast<std::size_t>(note)]) - 5 + answer_off;
-    addNote(out.material.answer, barTick(bar) + static_cast<Tick>(beat) * kTicksPerBeat, kQuarter,
-            pitch);
-    record_beat(bar, beat, pitch);
+    const Tick tick = answer_cursor;
+    addNote(out.material.answer, tick, dur, pitch);
+    MaterialNote seed_note;
+    seed_note.start_tick = tick;
+    seed_note.duration = dur;
+    seed_note.pitch = static_cast<std::uint8_t>(std::clamp(
+        static_cast<int>(subj_pat[static_cast<std::size_t>(note)]) + answer_off, 0, 127));
+    tonal_answer_seed.push_back(seed_note);
+    if (!use_tonal_answer) {
+      const int bar = static_cast<int>(tick / kTicksPerBar);
+      const int beat = static_cast<int>((tick % kTicksPerBar) / kTicksPerBeat);
+      record_beat(bar, beat, pitch);
+    }
+    answer_cursor += subj_rhythm[static_cast<std::size_t>(note)];
+  }
+  if (use_tonal_answer) {
+    out.material.tonal_answer = tonal_answer::deriveTonalAnswer(
+        tonal_answer_seed, out.harmony.tonic_pc, barTick(answer_first), 4);
+    out.material.use_tonal_answer = true;
+    for (const auto& note : out.material.tonal_answer) {
+      const int bar = static_cast<int>(note.start_tick / kTicksPerBar);
+      const int beat = static_cast<int>((note.start_tick % kTicksPerBar) / kTicksPerBeat);
+      record_beat(bar, beat, static_cast<int>(note.pitch));
+    }
   }
   pushSpan(asm_ctx, 1, answer_first, answer_last, VoiceIntent::AnswerCarrier);
-  // V0 figuration counterline over the answer (kept in the V0 band, above V1).
-  add_counterline(0, answer_first, answer_last, 2);
+  // V0 countersubject over the answer: fixed recurring counterline instead of
+  // free figuration for the comes entry.
+  append_countersubject_from(use_tonal_answer ? out.material.tonal_answer : out.material.answer, 0,
+                             barTick(answer_first), answer_end);
+  pushSpan(asm_ctx, 0, answer_first, answer_last, VoiceIntent::CountersubjectCarrier);
 
   // Imitation entry declaration (subject leads, answer follows at one entry
   // window). The validator compares the actual first-note pitches, so the
@@ -574,7 +647,21 @@ void appendFugueTail(SectionalAssembly& asm_ctx, int first_bar, int bars,
     const int third_off = octaveOffsetForBand(subj_pat, 2);
     stamp_subject(first_bar + 8, third_off);
     pushSpan(asm_ctx, 2, first_bar + 8, first_bar + 11, VoiceIntent::SubjectCarrier);
-    // A single V0 figuration counterline rides above the V2 re-entry (V1 rests).
+    std::vector<MaterialNote> third_entry_seed;
+    Tick third_cursor = barTick(first_bar + 8);
+    for (int note = 0; note < kSubjectNotes; ++note) {
+      MaterialNote mn;
+      mn.start_tick = third_cursor;
+      mn.duration = subj_rhythm[static_cast<std::size_t>(note)];
+      mn.pitch = static_cast<std::uint8_t>(std::clamp(
+          static_cast<int>(subj_pat[static_cast<std::size_t>(note)]) + third_off, 0, 127));
+      third_entry_seed.push_back(mn);
+      third_cursor += mn.duration;
+    }
+    append_countersubject_from(third_entry_seed, 1, barTick(first_bar + 8),
+                               barTick(first_bar + 12));
+    pushSpan(asm_ctx, 1, first_bar + 8, first_bar + 11, VoiceIntent::CountersubjectCarrier);
+    // A single V0 figuration counterline rides above the V2 re-entry and V1 CS.
     // Only one figuration voice per window is created across the whole tail: the
     // FigurationCarrier dispatch matches a section to a span by window alone
     // (not voice), so two figuration sections sharing a window would cross-
@@ -626,16 +713,20 @@ void appendFugueTail(SectionalAssembly& asm_ctx, int first_bar, int bars,
     // interval is the band-octave difference; the follower pitch is computed from
     // the raw pattern + follower_off, which equals subject[i] + interval_semis.
     stretto.interval_semis = follower_off - v0_off;
-    for (int note = 0; note < kSubjectNotes - 4; ++note) {
-      const int bar = (leader_bar + 1) + note / 4;
-      const int beat = note % 4;
+    Tick follower_cursor = barTick(leader_bar + 1);
+    const Tick follower_end = barTick(leader_bar + kSubjectBars);
+    for (int note = 0; note < kSubjectNotes && follower_cursor < follower_end; ++note) {
       const int pitch = static_cast<int>(subj_pat[static_cast<std::size_t>(note)]) + follower_off;
       MaterialNote mn;
-      mn.start_tick = barTick(bar) + static_cast<Tick>(beat) * kTicksPerBeat;
-      mn.duration = kQuarter;
+      mn.start_tick = follower_cursor;
+      mn.duration =
+          std::min(subj_rhythm[static_cast<std::size_t>(note)], follower_end - follower_cursor);
       mn.pitch = static_cast<std::uint8_t>(pitch);
       stretto.follower_notes.push_back(mn);
+      const int bar = static_cast<int>(mn.start_tick / kTicksPerBar);
+      const int beat = static_cast<int>((mn.start_tick % kTicksPerBar) / kTicksPerBeat);
       record_beat(bar, beat, pitch);
+      follower_cursor += subj_rhythm[static_cast<std::size_t>(note)];
     }
     out.material.stretto_entries.push_back(stretto);
     pushSpan(asm_ctx, 1, leader_bar + 1, leader_bar + 3, VoiceIntent::StrettoCarrier);

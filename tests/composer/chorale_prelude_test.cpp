@@ -71,9 +71,9 @@ NoteProvenance cfProv(bool embellished = false) {
   NoteProvenance p;
   p.voice_intent = VoiceIntent::CantusFirmusCarrier;
   p.source = NoteSource::Material;
-  p.satisfied_rules = (RuleIdMask{1} << RuleBit::CantusFirmusReplayed);
+  p.satisfied_rules = (ruleBitMask(RuleBit::CantusFirmusReplayed));
   if (embellished)
-    p.satisfied_rules |= (RuleIdMask{1} << RuleBit::CFEmbellishmentApplied);
+    p.satisfied_rules |= (ruleBitMask(RuleBit::CFEmbellishmentApplied));
   return p;
 }
 
@@ -94,7 +94,7 @@ bool hasRuleKind(const ValidationReport& r, const std::string& rule_id, FailKind
 }
 
 constexpr RuleIdMask bit(RuleBit b) {
-  return RuleIdMask{1} << b;
+  return ruleBitMask(b);
 }
 
 // A two-bar skeleton cantus firmus: C3 (48) at bar 0, D3 (50) at bar 1.

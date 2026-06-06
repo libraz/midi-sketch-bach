@@ -63,8 +63,8 @@ NoteProvenance flowProv() {
   NoteProvenance p;
   p.voice_intent = VoiceIntent::ArpeggioFlow;
   p.source = NoteSource::Material;
-  p.satisfied_rules = (RuleIdMask{1} << RuleBit::ArpeggioFlowActive) |
-                      (RuleIdMask{1} << RuleBit::ImplicitVoiceTracked);
+  p.satisfied_rules =
+      (ruleBitMask(RuleBit::ArpeggioFlowActive)) | (ruleBitMask(RuleBit::ImplicitVoiceTracked));
   return p;
 }
 
@@ -104,9 +104,9 @@ TEST(ArpeggioFlowTest, ReplaysTemplateVerbatimWithFlowBits) {
   for (int i = 0; i < 4; ++i) {
     EXPECT_EQ(cands[i].pitch, pitches[i]);
     EXPECT_EQ(cands[i].start_tick, static_cast<Tick>(i * kSix));
-    EXPECT_NE(cands[i].satisfied_rules & (RuleIdMask{1} << RuleBit::ArpeggioFlowActive), 0u)
+    EXPECT_NE(cands[i].satisfied_rules & (ruleBitMask(RuleBit::ArpeggioFlowActive)), 0u)
         << "note " << i << " missing ArpeggioFlowActive";
-    EXPECT_NE(cands[i].satisfied_rules & (RuleIdMask{1} << RuleBit::ImplicitVoiceTracked), 0u)
+    EXPECT_NE(cands[i].satisfied_rules & (ruleBitMask(RuleBit::ImplicitVoiceTracked)), 0u)
         << "note " << i << " missing ImplicitVoiceTracked";
   }
 }
@@ -233,10 +233,8 @@ TEST(ArpeggioFlowTest, Phase15FixtureValidatesCleanAndStampsFlowBits) {
     ASSERT_EQ(r.notes.size(), r.provenance.size());
     for (std::size_t i = 0; i < r.notes.size(); ++i) {
       EXPECT_EQ(r.notes[i].voice, 0) << "Flow is monophonic";
-      EXPECT_NE(r.provenance[i].satisfied_rules & (RuleIdMask{1} << RuleBit::ArpeggioFlowActive),
-                0u);
-      EXPECT_NE(r.provenance[i].satisfied_rules & (RuleIdMask{1} << RuleBit::ImplicitVoiceTracked),
-                0u);
+      EXPECT_NE(r.provenance[i].satisfied_rules & (ruleBitMask(RuleBit::ArpeggioFlowActive)), 0u);
+      EXPECT_NE(r.provenance[i].satisfied_rules & (ruleBitMask(RuleBit::ImplicitVoiceTracked)), 0u);
     }
   }
 }

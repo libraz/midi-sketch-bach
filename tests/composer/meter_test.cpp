@@ -63,7 +63,7 @@ NoteProvenance cfProv() {
   NoteProvenance p;
   p.voice_intent = VoiceIntent::CantusFirmusCarrier;
   p.source = NoteSource::Material;
-  p.satisfied_rules = (RuleIdMask{1} << RuleBit::CantusFirmusReplayed);
+  p.satisfied_rules = (ruleBitMask(RuleBit::CantusFirmusReplayed));
   return p;
 }
 
@@ -270,7 +270,7 @@ TEST(MeterTest, FigurationDownbeatHonoursThreeFour) {
     NoteProvenance p;
     p.voice_intent = VoiceIntent::FigurationCarrier;
     p.source = NoteSource::Material;
-    p.satisfied_rules = (RuleIdMask{1} << RuleBit::FigurationCommitted);
+    p.satisfied_rules = (ruleBitMask(RuleBit::FigurationCommitted));
     prov.push_back(p);
   }
 
@@ -296,7 +296,7 @@ TEST(MeterTest, FigurationDownbeatCatchesDissonanceAt1440Boundary) {
     NoteProvenance p;
     p.voice_intent = VoiceIntent::FigurationCarrier;
     p.source = NoteSource::Material;
-    p.satisfied_rules = (RuleIdMask{1} << RuleBit::FigurationCommitted);
+    p.satisfied_rules = (ruleBitMask(RuleBit::FigurationCommitted));
     prov.push_back(p);
   }
 

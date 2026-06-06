@@ -10,9 +10,9 @@
 namespace bach::composer {
 
 // Composer-local chord-tone arithmetic. Mirrors the contract previously
-// owned by `harmony::ChordVoicer` (see backup/reuse_contract.md) but
-// stays inside the composer namespace so the engine has no link-time
-// dependency on the legacy harmony tree.
+// owned by `harmony::ChordVoicer` but stays inside the composer
+// namespace so the engine has no link-time dependency on the legacy
+// harmony tree.
 //
 // P7 needs three primitives that Phase 2-6 didn't surface:
 //   * chord tone pitch classes for both triads and 7th chords,

@@ -133,21 +133,21 @@ void applyTextureExpression(std::vector<NoteEvent>& notes, std::vector<NoteProve
     for (const auto& range : plan.voice_ranges) {
       if (range.voice == note.voice) {
         if (note.pitch >= range.lo && note.pitch <= range.hi) {
-          rules |= 1ull << RuleBit::VoiceRangeKept;
+          rules |= ruleBitMask(RuleBit::VoiceRangeKept);
         }
         break;
       }
     }
     for (const auto& routing : plan.manual_assignments) {
       if (routing.voice == note.voice) {
-        rules |= 1ull << RuleBit::ManualAssigned;
+        rules |= ruleBitMask(RuleBit::ManualAssigned);
         break;
       }
     }
     for (const auto& art : plan.articulations) {
       if (art.voice == note.voice && note.start_tick >= art.start_tick &&
           note.start_tick < art.end_tick) {
-        rules |= 1ull << RuleBit::ArticulationApplied;
+        rules |= ruleBitMask(RuleBit::ArticulationApplied);
         break;
       }
     }
@@ -160,7 +160,7 @@ void applyTextureExpression(std::vector<NoteEvent>& notes, std::vector<NoteProve
       int velocity = base + static_cast<int>(arch * kArchAmplitude);
       velocity = std::max(1, std::min(127, velocity));
       note.velocity = static_cast<std::uint8_t>(velocity);
-      rules |= 1ull << RuleBit::AffektCurveApplied;
+      rules |= ruleBitMask(RuleBit::AffektCurveApplied);
     }
   }
 }
@@ -228,7 +228,7 @@ void applyNctDetection(std::vector<NoteEvent>& notes, std::vector<NoteProvenance
         const std::size_t gidx = index_map[hit.nct_index];
         if (provenance[gidx].voice_intent != VoiceIntent::NctCarrier)
           continue;
-        provenance[gidx].satisfied_rules |= 1ull << bit;
+        provenance[gidx].satisfied_rules |= ruleBitMask(bit);
       }
     };
 

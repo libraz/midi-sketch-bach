@@ -239,6 +239,80 @@ TEST(FormSectionalTest, SubjectMelodyMatchesCatalogSlot) {
   }
 }
 
+TEST(FormSectionalTest, SubjectRhythmProfileIsAppliedInFugueTail) {
+  for (FormType form : kForms) {
+    const HarnessFixture fx = buildFixture(form, 42, false, 64);
+    const std::uint8_t slot = detail::subjectSlotFor(SubjectCharacter::Severe, 42);
+    const auto& expected = detail::kPhase14SubjectRhythms[slot];
+
+    ASSERT_GE(fx.material.subject.size(), expected.size());
+    Tick cursor = fx.material.subject.front().start_tick;
+    const Tick subject_start = cursor;
+    bool has_non_quarter = false;
+    for (std::size_t i = 0; i < expected.size(); ++i) {
+      EXPECT_EQ(fx.material.subject[i].start_tick, cursor) << formName(form) << " index " << i;
+      EXPECT_EQ(fx.material.subject[i].duration, expected[i]) << formName(form) << " index " << i;
+      has_non_quarter = has_non_quarter || expected[i] != kTicksPerBeat;
+      cursor += expected[i];
+    }
+    EXPECT_TRUE(has_non_quarter) << formName(form);
+    EXPECT_EQ(cursor - subject_start, 4 * kTicksPerBar) << formName(form);
+  }
+}
+
+TEST(FormSectionalTest, DominantHeadSubjectUsesTonalAnswerInRealization) {
+  for (FormType form : kForms) {
+    const HarnessFixture fx = buildFixture(form, 5, false, 64);
+    EXPECT_TRUE(fx.material.use_tonal_answer) << formName(form);
+    ASSERT_FALSE(fx.material.tonal_answer.empty()) << formName(form);
+
+    const ComposeResult r = Composer{}.run(fx.material, fx.harmony, fx.voice_plan);
+    bool tonal_answer_bit = false;
+    for (const auto& prov : r.provenance) {
+      if (prov.voice_intent == VoiceIntent::AnswerCarrier &&
+          (prov.satisfied_rules & ruleBitMask(RuleBit::TonalAnswerMapped)) != 0u) {
+        tonal_answer_bit = true;
+        break;
+      }
+    }
+    EXPECT_TRUE(tonal_answer_bit) << formName(form);
+  }
+}
+
+TEST(FormSectionalTest, CountersubjectAccompaniesAnswerAndThirdEntry) {
+  for (FormType form : kForms) {
+    const HarnessFixture fx = buildFixture(form, 42, false, 64);
+    ASSERT_FALSE(fx.material.countersubject.empty()) << formName(form);
+
+    bool answer_cs_span = false;
+    bool third_entry_cs_span = false;
+    for (const auto& span : fx.voice_plan.spans) {
+      const int start_bar = static_cast<int>(span.start_tick / kTicksPerBar);
+      if (span.intent == VoiceIntent::CountersubjectCarrier && span.voice == 0 && start_bar >= 4) {
+        answer_cs_span = true;
+      }
+      if (span.intent == VoiceIntent::CountersubjectCarrier && span.voice == 1 && start_bar >= 8) {
+        third_entry_cs_span = true;
+      }
+    }
+    EXPECT_TRUE(answer_cs_span) << formName(form);
+    EXPECT_TRUE(third_entry_cs_span) << formName(form);
+
+    const ComposeResult r = Composer{}.run(fx.material, fx.harmony, fx.voice_plan);
+    bool countersubject_bit = false;
+    for (const auto& prov : r.provenance) {
+      if (prov.voice_intent == VoiceIntent::CountersubjectCarrier &&
+          (prov.satisfied_rules & ruleBitMask(RuleBit::CountersubjectActive)) != 0u) {
+        countersubject_bit = true;
+        break;
+      }
+    }
+    EXPECT_TRUE(countersubject_bit) << formName(form);
+    ASSERT_FALSE(r.validation.texture_metrics.empty()) << formName(form);
+    EXPECT_EQ(r.validation.texture_metrics[0].max_active_voices, 3) << formName(form);
+  }
+}
+
 // --- 5. Stretto present when fugue_bars >= 12 --------------------------------
 
 TEST(FormSectionalTest, StrettoPresentWhenFugueIsLongEnough) {

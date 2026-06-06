@@ -100,6 +100,18 @@ bool createsParallelPerfect(const std::vector<NoteEvent>& placed, VoiceId candid
                             std::uint8_t candidate_pitch, Tick cur_tick, std::uint8_t prev_pitch,
                             Tick prev_tick);
 
+// Like createsParallelPerfect, but for the case where a faster other voice has
+// an onset between the candidate voice's previous onset (prev_tick) and
+// cur_tick. createsParallelPerfect compares against the other voice's pitch at
+// prev_tick, which can miss a parallel the validator (sampling the union of
+// onsets) catches at the intermediate union tick. This complements that check
+// by comparing the candidate's move against the other voice's latest
+// intermediate onset. Used where a slow Compose voice accompanies a fast
+// Material figuration voice.
+bool createsParallelPerfectAcrossOnset(const std::vector<NoteEvent>& placed,
+                                       VoiceId candidate_voice, std::uint8_t candidate_pitch,
+                                       Tick cur_tick, std::uint8_t prev_pitch, Tick prev_tick);
+
 // Like createsParallelPerfect but restricted to parallel OCTAVES (unison
 // reduced mod 12 == 0). Parallel fifths are NOT checked. Cadence cells
 // are allowed to bypass the general parallel-perfect rule because they
@@ -113,6 +125,13 @@ bool createsParallelOctave(const std::vector<NoteEvent>& placed, VoiceId candida
 bool createsHiddenParallelPerfect(const std::vector<NoteEvent>& placed, VoiceId candidate_voice,
                                   std::uint8_t candidate_pitch, Tick cur_tick,
                                   std::uint8_t prev_pitch, Tick prev_tick);
+
+// Faster-voice complement of createsHiddenParallelPerfect (see
+// createsParallelPerfectAcrossOnset for the blind-spot rationale).
+bool createsHiddenParallelPerfectAcrossOnset(const std::vector<NoteEvent>& placed,
+                                             VoiceId candidate_voice, std::uint8_t candidate_pitch,
+                                             Tick cur_tick, std::uint8_t prev_pitch,
+                                             Tick prev_tick);
 
 bool createsCrossRelation(const std::vector<NoteEvent>& placed, VoiceId candidate_voice,
                           std::uint8_t candidate_pitch, Tick cur_tick);

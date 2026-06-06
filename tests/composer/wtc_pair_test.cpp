@@ -50,7 +50,7 @@ bool hasRule(const ValidationReport& r, const std::string& rule_id) {
 }
 
 constexpr RuleIdMask bit(RuleBit b) {
-  return RuleIdMask{1} << b;
+  return ruleBitMask(b);
 }
 
 constexpr Tick kBar = static_cast<Tick>(1920);
