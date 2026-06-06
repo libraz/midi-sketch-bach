@@ -14,8 +14,8 @@ longer exists (renamed, removed, typo'd) is reported as an unresolved-evidence
 drift and makes the run fail. Coverage is then computed per domain and overall.
 
 Usage:
-  python3 scripts/coverage_report.py            # human report, exit 1 on drift
-  python3 scripts/coverage_report.py --json -o backup/coverage_report.json
+  bach-tools coverage              # human report, exit 1 on drift
+  bach-tools coverage --json -o build/coverage_report.json
 """
 
 from __future__ import annotations
@@ -27,7 +27,8 @@ import sys
 from pathlib import Path
 from typing import Any
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
+from bachlib.common import REPO_ROOT
+
 CATALOG_PATH = REPO_ROOT / "scripts" / "technique_catalog.json"
 PROVENANCE_H = REPO_ROOT / "src" / "composer" / "provenance.h"
 VOICE_INTENT_H = REPO_ROOT / "src" / "composer" / "voice_intent.h"
@@ -146,16 +147,16 @@ def compute_coverage(catalog: dict[str, Any]) -> dict[str, Any]:
         for item in domain["items"]:
             tally[item["status"]] += 1
         count = len(domain["items"])
-        weighted = sum(STATUS_WEIGHT[s] * n for s, n in tally.items())
+        weighted = sum(STATUS_WEIGHT[status] * num for status, num in tally.items())
         per_domain[domain_key] = {
             **tally,
             "count": count,
             "weighted_coverage": round(weighted / count, 4) if count else 0.0,
         }
-        for s in tally:
-            totals[s] += tally[s]
+        for status in tally:
+            totals[status] += tally[status]
         totals["count"] += count
-    weighted_total = sum(STATUS_WEIGHT[s] * totals[s] for s in STATUS_WEIGHT)
+    weighted_total = sum(STATUS_WEIGHT[status] * totals[status] for status in STATUS_WEIGHT)
     totals["weighted_coverage"] = (
         round(weighted_total / totals["count"], 4) if totals["count"] else 0.0
     )
@@ -163,7 +164,7 @@ def compute_coverage(catalog: dict[str, Any]) -> dict[str, Any]:
 
 
 def has_problems(problems: dict[str, Any]) -> bool:
-    return any(problems[k] for k in problems)
+    return any(problems[key] for key in problems)
 
 
 def build_report() -> dict[str, Any]:
@@ -179,12 +180,24 @@ def build_report() -> dict[str, Any]:
     }
 
 
-def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
+def _add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--json", action="store_true", help="emit JSON instead of text")
     parser.add_argument("--out", type=Path, help="write the JSON report to this path")
-    args = parser.parse_args()
 
+
+def register(subparsers) -> None:
+    """Register the ``coverage`` subcommand on a subparser action."""
+    parser = subparsers.add_parser(
+        "coverage",
+        help="compute Bach-technique coverage from the catalog",
+        description=__doc__,
+    )
+    _add_arguments(parser)
+    parser.set_defaults(func=run)
+
+
+def run(args) -> int:
+    """Execute the coverage report from parsed CLI args."""
     report = build_report()
 
     if args.out:
@@ -195,17 +208,19 @@ def main() -> int:
         sys.stdout.write(json.dumps(report, indent=2, sort_keys=False) + "\n")
     else:
         cov = report["coverage"]
-        t = cov["totals"]
+        totals = cov["totals"]
         sys.stdout.write("Bach-technique coverage (machine-computed)\n")
         sys.stdout.write(f"{'domain':<22} impl part unimpl  /count  weighted\n")
-        for dk, d in cov["per_domain"].items():
+        for domain_key, domain in cov["per_domain"].items():
             sys.stdout.write(
-                f"{dk:<22} {d['implemented']:>4} {d['partial']:>4} "
-                f"{d['unimplemented']:>6}  /{d['count']:<5} {d['weighted_coverage']:.1%}\n"
+                f"{domain_key:<22} {domain['implemented']:>4} {domain['partial']:>4} "
+                f"{domain['unimplemented']:>6}  /{domain['count']:<5} "
+                f"{domain['weighted_coverage']:.1%}\n"
             )
         sys.stdout.write(
-            f"{'TOTAL':<22} {t['implemented']:>4} {t['partial']:>4} "
-            f"{t['unimplemented']:>6}  /{t['count']:<5} {t['weighted_coverage']:.1%}\n"
+            f"{'TOTAL':<22} {totals['implemented']:>4} {totals['partial']:>4} "
+            f"{totals['unimplemented']:>6}  /{totals['count']:<5} "
+            f"{totals['weighted_coverage']:.1%}\n"
         )
         if not report["ok"]:
             sys.stdout.write("\nPROBLEMS:\n")
@@ -214,6 +229,12 @@ def main() -> int:
                     sys.stdout.write(f"  {kind}: {entries}\n")
 
     return 0 if report["ok"] else 1
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    _add_arguments(parser)
+    return run(parser.parse_args())
 
 
 if __name__ == "__main__":

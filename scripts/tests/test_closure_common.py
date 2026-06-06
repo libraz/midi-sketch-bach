@@ -10,7 +10,7 @@ SCRIPTS_DIR = Path(__file__).resolve().parent.parent
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
-import closure_common  # noqa: E402
+from bachlib import phases as closure_common  # noqa: E402
 
 
 class FixtureForSeedTest(unittest.TestCase):
@@ -61,7 +61,7 @@ class NormalizePhaseTest(unittest.TestCase):
         self.assertEqual(closure_common.normalize_phase("nonsense"), "nonsense")
 
     def test_listening_packet_aliases(self) -> None:
-        # Keys that build_listening_packet.py historically supported.
+        # Keys that the listening-packet builder historically supported.
         for token, expected in [
             ("3", "Phase3"),
             ("p3", "Phase3"),
@@ -76,7 +76,7 @@ class NormalizePhaseTest(unittest.TestCase):
             self.assertEqual(closure_common.normalize_phase(token), expected, token)
 
     def test_closure_only_aliases(self) -> None:
-        # Keys that only run_phase_closure.py historically supported.
+        # Keys that only the closure harness historically supported.
         for token, expected in [
             ("4sus", "Phase4Sus"),
             ("p4sus", "Phase4Sus"),

@@ -1,0 +1,498 @@
+#!/usr/bin/env python3
+"""Closure engine: gate combination, per-seed driver, and the CLI.
+
+This module owns the closure run: it resolves per-phase defaults, enforces the
+per-phase required-rule-bit guards, drives ``bach_cli`` across seeds (optionally
+in parallel), scores each seed, runs the structural carrier check, aggregates
+the gate counters, and writes the closure report. It imports the seed/phase
+tables from :mod:`bachlib.phases`, the mirror constants from
+:mod:`bachlib.mirror`, the structural predictors from :mod:`bachlib.predictors`,
+and the scoring / subprocess helpers from :mod:`bachlib.common`.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import shutil
+import sys
+from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
+from typing import Any
+
+from bachlib.common import (
+    DEFAULT_CLI,
+    DEFAULT_INDEX_JS,
+    REPO_ROOT,
+    heuristic_score,
+    model_probability,
+    parse_required_rule_bit,
+    provenance_rule_counts,
+    run as run_command,
+    score_generated,
+)
+from bachlib.mirror import (
+    PHASE14_REQUIRED_BIT_COUNT,
+    PHASE15_REQUIRED_BITS,
+    PHASE16_REQUIRED_BITS,
+    PHASE17_REQUIRED_BITS,
+    PHASE18_REQUIRED_BITS,
+    PHASE19_REQUIRED_BITS,
+    PHASE20_REQUIRED_BITS,
+    PHASE21_REQUIRED_BITS,
+    PHASE22_REQUIRED_BITS,
+    PHASE23_REQUIRED_BITS,
+    PHASE24_REQUIRED_BITS,
+    PHASE25_REQUIRED_BITS,
+)
+from bachlib.phases import (
+    PHASE_DEFAULTS,
+    PHASE_LAYOUT,
+    fixture_for_seed,
+    normalize_phase,
+)
+from bachlib.predictors import structural_check
+
+
+def output_paths(work_dir: Path, tag: str, seed: int) -> tuple[Path, Path, Path]:
+    midi = work_dir / f"bach_harness_{tag}_seed{seed}.mid"
+    generated = midi.with_suffix(".json")
+    provenance = midi.with_suffix(".provenance.json")
+    return midi, generated, provenance
+
+
+def compute_passed(
+    *,
+    seed_count: int,
+    composer_ok_count: int,
+    model_pass_count: int,
+    min_pass: int,
+    structural_ok_count: int,
+    rule_pass: dict[str, bool],
+    all_bits_pass: bool,
+    evaluator_error_count: int,
+) -> bool:
+    """Combine the closure gates into the final pass/fail decision.
+
+    Pure function so the gate logic can be unit-tested without running the
+    20-seed pipeline.
+
+    @param seed_count Number of seeds attempted.
+    @param composer_ok_count Seeds where bach_cli exited 0.
+    @param model_pass_count Seeds at/over the model threshold.
+    @param min_pass Minimum number of seeds that must reach the model threshold.
+    @param structural_ok_count Seeds whose carrier sequences matched.
+    @param rule_pass Per-bit name -> whether it hit in enough seeds.
+    @param all_bits_pass Whether the all-bits-fire seed count met --all-bits-min.
+    @param evaluator_error_count Seeds whose scorer crashed / returned non-JSON.
+    @return True only if every gate passes (a crashed scorer fails the run).
+    """
+    return (
+        composer_ok_count == seed_count
+        and model_pass_count >= min_pass
+        and structural_ok_count == composer_ok_count
+        and all(rule_pass.values())
+        and all_bits_pass
+        # A crashed / non-JSON scorer must not silently look clean.
+        and evaluator_error_count == 0
+    )
+
+
+def _check_required_bits(phase: str, required_rule_bit: list[tuple[str, int]]) -> int | None:
+    """Enforce the per-phase required-rule-bit guards.
+
+    Each milestone phase declares a fixed set of RuleBits that must be asserted,
+    otherwise the bit checks would be trivially bypassable. Refuses to run unless
+    the masks are supplied.
+
+    @param phase Canonical phase name.
+    @param required_rule_bit Parsed (name, bit) pairs supplied on the CLI.
+    @return An exit code (2) to abort with, or None when the guard passes.
+    """
+    if phase == "Phase14" and len(required_rule_bit) < PHASE14_REQUIRED_BIT_COUNT:
+        sys.stderr.write(
+            "Phase14 closure requires all "
+            f"{PHASE14_REQUIRED_BIT_COUNT} --required-rule-bit masks "
+            f"(got {len(required_rule_bit)}); the 47-bit milestone gate "
+            "must not be bypassed. See the RuleBit catalog in this script.\n"
+        )
+        return 2
+
+    supplied = {bit for _, bit in required_rule_bit}
+
+    def missing(bits: tuple[int, ...]) -> list[int]:
+        return [b for b in bits if b not in supplied]
+
+    if phase == "Phase15":
+        miss = missing(PHASE15_REQUIRED_BITS)
+        if miss:
+            sys.stderr.write(
+                "Phase15 closure requires --required-rule-bit masks for both "
+                f"Flow bits {list(PHASE15_REQUIRED_BITS)} "
+                f"(ArpeggioFlowActive=47, ImplicitVoiceTracked=48); missing {miss}.\n"
+            )
+            return 2
+    if phase == "Phase16":
+        miss = missing(PHASE16_REQUIRED_BITS)
+        if miss:
+            sys.stderr.write(
+                "Phase16 closure requires --required-rule-bit masks for all three "
+                f"Arch bits {list(PHASE16_REQUIRED_BITS)} "
+                "(GroundBassReplayed=49, VariationRoleApplied=50, "
+                f"TextureDensityShift=51); missing {miss}.\n"
+            )
+            return 2
+    if phase == "Phase17":
+        miss = missing(PHASE17_REQUIRED_BITS)
+        if miss:
+            sys.stderr.write(
+                "Phase17 closure requires --required-rule-bit masks for all three "
+                f"Prelude bits {list(PHASE17_REQUIRED_BITS)} "
+                "(FigurationCommitted=52, CadenzaApplied=53, "
+                f"PedalPreparation=54); missing {miss}.\n"
+            )
+            return 2
+    if phase == "Phase18":
+        miss = missing(PHASE18_REQUIRED_BITS)
+        if miss:
+            sys.stderr.write(
+                "Phase18 closure requires --required-rule-bit masks for both "
+                f"Toccata bits {list(PHASE18_REQUIRED_BITS)} "
+                "(ToccataArchetypeApplied=55, SectionTransition=56); "
+                f"missing {miss}.\n"
+            )
+            return 2
+    if phase == "Phase19":
+        miss = missing(PHASE19_REQUIRED_BITS)
+        if miss:
+            sys.stderr.write(
+                "Phase19 closure requires --required-rule-bit masks for both "
+                f"Chorale-Prelude bits {list(PHASE19_REQUIRED_BITS)} "
+                "(CantusFirmusReplayed=57, CFEmbellishmentApplied=58); "
+                f"missing {miss}.\n"
+            )
+            return 2
+    if phase == "Phase20":
+        miss = missing(PHASE20_REQUIRED_BITS)
+        if miss:
+            sys.stderr.write(
+                "Phase20 closure requires --required-rule-bit masks for all three "
+                f"Passacaglia bits {list(PHASE20_REQUIRED_BITS)} "
+                "(PassacagliaGroundReplayed=59, VariationApplied=60, "
+                f"ClimaxPlaced=61); missing {miss}.\n"
+            )
+            return 2
+    if phase == "Phase21":
+        miss = missing(PHASE21_REQUIRED_BITS)
+        if miss:
+            sys.stderr.write(
+                "Phase21 closure requires the --required-rule-bit mask for the "
+                f"Trio bit {list(PHASE21_REQUIRED_BITS)} "
+                f"(TrioVoiceIndependent=62); missing {miss}.\n"
+            )
+            return 2
+    if phase == "Phase22":
+        miss = missing(PHASE22_REQUIRED_BITS)
+        if miss:
+            sys.stderr.write(
+                "Phase22 closure requires the --required-rule-bit mask for the "
+                f"Fantasia bit {list(PHASE22_REQUIRED_BITS)} "
+                f"(FantasiaSectionContrast=63); missing {miss}.\n"
+            )
+            return 2
+    if phase == "Phase23":
+        miss = missing(PHASE23_REQUIRED_BITS)
+        if miss:
+            sys.stderr.write(
+                "Phase23 closure requires --required-rule-bit masks for all three "
+                f"reused suite bits {list(PHASE23_REQUIRED_BITS)} "
+                "(FigurationCommitted=52, FantasiaSectionContrast=63, "
+                f"GroundBassReplayed=49); missing {miss}.\n"
+            )
+            return 2
+    if phase == "Phase24":
+        miss = missing(PHASE24_REQUIRED_BITS)
+        if miss:
+            sys.stderr.write(
+                "Phase24 closure requires --required-rule-bit masks for both "
+                f"reused prelude bits {list(PHASE24_REQUIRED_BITS)} "
+                "(FigurationCommitted=52, PedalPreparation=54); "
+                f"missing {miss}.\n"
+            )
+            return 2
+    if phase == "Phase25":
+        miss = missing(PHASE25_REQUIRED_BITS)
+        if miss:
+            sys.stderr.write(
+                "Phase25 closure requires --required-rule-bit masks for all three "
+                f"reused Passacaglia bits {list(PHASE25_REQUIRED_BITS)} "
+                "(PassacagliaGroundReplayed=59, VariationApplied=60, "
+                f"ClimaxPlaced=61); missing {miss}.\n"
+            )
+            return 2
+    return None
+
+
+def _add_arguments(parser: argparse.ArgumentParser) -> None:
+    """Attach the closure-harness CLI arguments to `parser`."""
+    parser.add_argument("--phase", default="Phase6", help="Phase3/Phase35/Phase4/Phase5/Phase6")
+    parser.add_argument("--seeds", type=int, default=20)
+    parser.add_argument("--threshold", type=float)
+    parser.add_argument("--min-pass", type=int)
+    parser.add_argument("--required-rule-bit", action="append", type=parse_required_rule_bit, default=[])
+    parser.add_argument("--required-rule-min", type=int)
+    parser.add_argument(
+        "--all-bits-min",
+        type=int,
+        default=10,
+        help="gate (4): minimum number of seeds in which ALL required rule bits fire",
+    )
+    parser.add_argument(
+        "--jobs",
+        type=int,
+        default=1,
+        help="number of seeds to generate/score in parallel (default 1 = sequential)",
+    )
+    parser.add_argument("--out", type=Path)
+    parser.add_argument("--work-dir", type=Path)
+    parser.add_argument("--cli", type=Path, default=DEFAULT_CLI)
+    parser.add_argument("--bach-mcp-index", type=Path)
+    parser.add_argument("--keep-work", action="store_true")
+
+
+def register(subparsers) -> None:
+    """Register the `closure` subcommand on a bach_tools subparser set."""
+    parser = subparsers.add_parser(
+        "closure",
+        help="phase closure harness: generate seeds, score, check gates",
+        description=(
+            "Drives bach_cli --composer-phase <PhaseN> across seeds, scores the "
+            "output with bach-mcp, and checks score thresholds, required rule "
+            "bits, and byte-stable layout. The primary gate for composer changes."
+        ),
+    )
+    _add_arguments(parser)
+    parser.set_defaults(func=run)
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    _add_arguments(parser)
+    return run(parser.parse_args())
+
+
+def run(args: argparse.Namespace) -> int:
+    phase = normalize_phase(args.phase)
+    if phase not in PHASE_DEFAULTS:
+        sys.stderr.write(f"unknown phase: {args.phase}\n")
+        return 2
+
+    guard = _check_required_bits(phase, args.required_rule_bit)
+    if guard is not None:
+        return guard
+
+    defaults = PHASE_DEFAULTS[phase]
+    tag = defaults["tag"]
+    threshold = args.threshold if args.threshold is not None else defaults["threshold"]
+    min_pass = args.min_pass if args.min_pass is not None else defaults["min_pass"]
+    required_rule_min = (
+        args.required_rule_min if args.required_rule_min is not None else args.seeds
+    )
+    report_path = args.out or (REPO_ROOT / "build" / f"closure_report_{tag}.json")
+    work_dir = args.work_dir or (report_path.parent / f"closure_work_{tag}")
+    index_js = args.bach_mcp_index or Path(os.environ.get("BACH_MCP_INDEX_JS", DEFAULT_INDEX_JS))
+
+    if not args.cli.exists():
+        sys.stderr.write(f"bach_cli missing: {args.cli}\n")
+        return 2
+    if not index_js.exists():
+        sys.stderr.write(f"bach-mcp index.js missing: {index_js}\n")
+        return 2
+
+    if work_dir.exists():
+        shutil.rmtree(work_dir)
+    work_dir.mkdir(parents=True)
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+
+    def run_seed(seed: int) -> dict[str, Any]:
+        """Generate, score, and structurally check a single closure seed.
+
+        Returns a self-contained per-seed row; all aggregate counters are
+        derived later in a single pass over the sorted rows, so this is safe to
+        run concurrently (distinct output_paths per seed, no shared state).
+
+        @param seed Closure seed (0-based).
+        @return The per-seed row dict.
+        """
+        midi, generated, provenance = output_paths(work_dir, tag, seed)
+        fixture = fixture_for_seed(seed)
+        # Phase18's offset = (seed // 4) % 4 cannot be recovered from the
+        # harm_idx / subj_idx fields alone, so expose the raw seed for the
+        # toccata structural predictor (harmless for every other phase).
+        fixture["seed"] = seed
+        proc = run_command(
+            [
+                str(args.cli),
+                "--composer-phase",
+                phase,
+                "--seed",
+                str(seed),
+                "--json",
+                "-o",
+                str(midi),
+            ],
+            cwd=REPO_ROOT,
+        )
+        row: dict[str, Any] = {
+            "phase": tag,
+            "seed": seed,
+            "fixture": fixture,
+            "composer_ok": proc.returncode == 0,
+            "stdout": proc.stdout,
+            "stderr": proc.stderr,
+            "generated_json": str(generated),
+            "provenance_json": str(provenance),
+        }
+        if proc.returncode == 0:
+            try:
+                score = score_generated(index_js, generated)
+                prob = model_probability(score)
+                row.update(
+                    {
+                        "evaluator_ok": True,
+                        "heuristic": heuristic_score(score),
+                        "model_prob": prob,
+                        "model_pass": prob >= threshold,
+                    }
+                )
+            except RuntimeError as exc:
+                # Surface scorer crash / non-JSON output as a run failure.
+                row.update({"evaluator_ok": False, "evaluator_error": str(exc)})
+            try:
+                rule_hits = provenance_rule_counts(provenance, args.required_rule_bit)
+                row["required_rule_hits"] = rule_hits
+                # A seed where ALL required bits fire (AND across bits). Only
+                # meaningful when at least one bit is required.
+                all_bits_set = bool(rule_hits) and all(rule_hits.values())
+                row["all_bits_set"] = all_bits_set
+            except (OSError, json.JSONDecodeError) as exc:
+                row["provenance_error"] = str(exc)
+            structural = structural_check(generated, provenance, phase, fixture)
+            row["structural"] = structural
+        sys.stderr.write(
+            f"[closure][{tag}][seed={seed}] "
+            f"composer_ok={str(row['composer_ok']).lower()} "
+            f"model_prob={row.get('model_prob', 0.0):.6f} "
+            f"model_pass={str(row.get('model_pass', False)).lower()} "
+            f"structural_ok={str(row.get('structural', {}).get('ok', False)).lower()}\n"
+        )
+        return row
+
+    if args.jobs <= 1:
+        rows = [run_seed(seed) for seed in range(args.seeds)]
+    else:
+        with ThreadPoolExecutor(max_workers=args.jobs) as pool:
+            rows = list(pool.map(run_seed, range(args.seeds)))
+    # Deterministic order regardless of completion order; all aggregate
+    # counters are computed in a single pass over the sorted rows below.
+    rows.sort(key=lambda r: r["seed"])
+
+    model_pass_count = 0
+    composer_ok_count = 0
+    structural_ok_count = 0
+    rule_hit_counts = {name: 0 for name, _ in args.required_rule_bit}
+    all_bits_seed_count = 0
+    evaluator_error_count = 0
+    for row in rows:
+        if not row["composer_ok"]:
+            continue
+        composer_ok_count += 1
+        if row.get("model_pass"):
+            model_pass_count += 1
+        if row.get("evaluator_ok") is False:
+            evaluator_error_count += 1
+        for name, hit in row.get("required_rule_hits", {}).items():
+            if hit:
+                rule_hit_counts[name] += 1
+        if row.get("all_bits_set"):
+            all_bits_seed_count += 1
+        if row.get("structural", {}).get("ok"):
+            structural_ok_count += 1
+
+    rule_pass = {
+        name: count >= required_rule_min for name, count in rule_hit_counts.items()
+    }
+    # Require all-bits-fire seeds in >= all_bits_min of the runs.
+    # Only enforced when rule bits are actually being checked.
+    all_bits_pass = (
+        all_bits_seed_count >= args.all_bits_min if args.required_rule_bit else True
+    )
+    passed = compute_passed(
+        seed_count=args.seeds,
+        composer_ok_count=composer_ok_count,
+        model_pass_count=model_pass_count,
+        min_pass=min_pass,
+        structural_ok_count=structural_ok_count,
+        rule_pass=rule_pass,
+        all_bits_pass=all_bits_pass,
+        evaluator_error_count=evaluator_error_count,
+    )
+    report = {
+        "phase": phase,
+        "phase_tag": tag,
+        "seed_count": args.seeds,
+        "threshold": threshold,
+        "min_pass": min_pass,
+        "composer_ok": composer_ok_count,
+        "model_pass": model_pass_count,
+        "structural_ok": structural_ok_count,
+        # structural_ok only validates the exposition entries (+ V0 stretto
+        # leader for Phase14); counterline / development / NCT / rhythm carriers
+        # are not modeled, so this scope is recorded explicitly.
+        "structural_ok_scope": "exposition-entries-and-stretto-leader-only",
+        # Number of seeds whose scorer crashed / returned non-JSON. Any
+        # nonzero value forces passed=False (see compute_passed).
+        "evaluator_error_count": evaluator_error_count,
+        "required_rule_min": required_rule_min,
+        "required_rule_counts": rule_hit_counts,
+        "required_rule_pass": rule_pass,
+        "all_bits_min": args.all_bits_min,
+        "all_bits_seed_count": all_bits_seed_count,
+        "all_bits_pass": all_bits_pass,
+        "passed": passed,
+        "seeds": rows,
+    }
+    report_path.write_text(json.dumps(report, indent=2, sort_keys=False) + "\n", encoding="utf-8")
+    sys.stderr.write(
+        f"[closure][{tag}][summary] composer_ok={composer_ok_count}/{args.seeds} "
+        f"model_pass={model_pass_count}/{args.seeds} "
+        f"structural_ok={structural_ok_count}/{composer_ok_count} "
+        f"all_bits_seeds={all_bits_seed_count}/{args.seeds} "
+        f"all_bits_pass={str(all_bits_pass).lower()} "
+        f"evaluator_errors={evaluator_error_count}/{args.seeds} "
+        f"report={report_path}\n"
+    )
+    # Compact one-line JSON summary to stdout for machine consumption.
+    print(
+        json.dumps(
+            {
+                "phase": phase,
+                "passed": passed,
+                "model_pass_count": model_pass_count,
+                "structural_ok_count": structural_ok_count,
+                "min_pass": min_pass,
+                "threshold": threshold,
+                "report": str(report_path),
+            }
+        )
+    )
+
+    if not args.keep_work:
+        for path in work_dir.glob("*.mid"):
+            path.unlink()
+    return 0 if passed else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

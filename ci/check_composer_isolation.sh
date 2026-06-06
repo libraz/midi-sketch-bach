@@ -3,7 +3,7 @@
 # Composer isolation guard
 # ============================================================================
 #
-# Asserts the boundaries declared in backup/reuse_contract.md:
+# Asserts the composer/legacy isolation boundaries:
 #
 #   1. src/composer/ MUST NOT #include from legacy trees
 #      (fugue, constraint, forms, organ, ornament, solo_string,

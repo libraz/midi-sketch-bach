@@ -1,6 +1,6 @@
 """Organ Prelude (BWV846) Phase17 C++/Python drift guard.
 
-The load-bearing guard: the run_phase_closure.py PHASE17 mirror constants and
+The load-bearing guard: the bachlib.mirror PHASE17 mirror constants and
 the phase17_scale_up walk must match the C++ Phase17 fixture source
 (buildPhase17Fixture in src/composer/harness_fixture.cpp). A renamed constant or
 an altered progression / scale that the Python predictor still claims would make
@@ -19,7 +19,7 @@ REPO_ROOT = SCRIPTS_DIR.parent
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
-import run_phase_closure as rpc  # noqa: E402
+import bachlib as rpc  # noqa: E402
 
 FIXTURE_CPP = REPO_ROOT / "src" / "composer" / "harness_fixture.cpp"
 # Shared scale helpers (phase16InScale / phase17InScale) were promoted out of

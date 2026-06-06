@@ -16,7 +16,7 @@ SCRIPTS_DIR = Path(__file__).resolve().parent.parent
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
-import coverage_report as cov  # noqa: E402
+from bachlib import coverage as cov  # noqa: E402
 
 
 class CatalogStructureTest(unittest.TestCase):

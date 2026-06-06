@@ -1,6 +1,6 @@
 """Organ Fantasia Phase22 C++/Python drift guard.
 
-The load-bearing guard: the run_phase_closure.py PHASE22 mirror constants
+The load-bearing guard: the bachlib.mirror PHASE22 mirror constants
 (PHASE22_BAR_ROOT, PHASE22_BAR_MINOR, the four-section kSpecs windows /
 densities / register bases) must match the C++ Phase22 fixture source (the
 kBarRoot[4] / kBarMinor[4] initialisers and the kSpecs[4] section table in
@@ -26,7 +26,7 @@ REPO_ROOT = SCRIPTS_DIR.parent
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
-import run_phase_closure as rpc  # noqa: E402
+import bachlib as rpc  # noqa: E402
 
 FIXTURE_CPP = REPO_ROOT / "src" / "composer" / "harness_fixture.cpp"
 VALIDATOR_CPP = REPO_ROOT / "src" / "composer" / "validator.cpp"

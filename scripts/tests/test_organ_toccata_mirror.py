@@ -1,6 +1,6 @@
 """Organ Toccata Phase18 C++/Python drift guard.
 
-The load-bearing guard: the run_phase_closure.py PHASE18 mirror constant
+The load-bearing guard: the bachlib.mirror PHASE18 mirror constant
 (PHASE18_BAR_ROOT) must match the C++ Phase18 fixture source (the kBarRoot[4]
 initialiser in buildPhase18Fixture, src/composer/harness_fixture.cpp). A renamed
 constant or an altered progression that the Python predictor still claims would
@@ -21,7 +21,7 @@ REPO_ROOT = SCRIPTS_DIR.parent
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
-import run_phase_closure as rpc  # noqa: E402
+import bachlib as rpc  # noqa: E402
 
 FIXTURE_CPP = REPO_ROOT / "src" / "composer" / "harness_fixture.cpp"
 

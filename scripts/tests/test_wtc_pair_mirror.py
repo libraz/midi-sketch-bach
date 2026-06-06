@@ -1,6 +1,6 @@
 """WTC Prelude+Fugue pair Phase24 C++/Python drift guard.
 
-The load-bearing guard: the run_phase_closure.py PHASE24 mirror constants
+The load-bearing guard: the bachlib.mirror PHASE24 mirror constants
 (PHASE24_BAR_ROOT, PHASE24_BAR_MINOR, the PHASE24_PRELUDE_SECTIONS section table
 -- including is_pedal_prep on the SECOND V0 section -- and the
 PHASE24_FUGUE_ENTRIES add_subject window / transposition scheme, leader bar 20)
@@ -30,7 +30,7 @@ REPO_ROOT = SCRIPTS_DIR.parent
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
-import run_phase_closure as rpc  # noqa: E402
+import bachlib as rpc  # noqa: E402
 
 FIXTURE_CPP = REPO_ROOT / "src" / "composer" / "harness_fixture.cpp"
 PROVENANCE_H = REPO_ROOT / "src" / "composer" / "provenance.h"

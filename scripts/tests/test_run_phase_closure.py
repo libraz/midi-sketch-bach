@@ -1,4 +1,4 @@
-"""Tests for run_phase_closure.py: C++/Python drift guard, carrier prediction,
+"""Tests for the bachlib closure harness: C++/Python drift guard, carrier prediction,
 and the pure gate-combination decision."""
 
 from __future__ import annotations
@@ -13,8 +13,8 @@ REPO_ROOT = SCRIPTS_DIR.parent
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
-import run_phase_closure as rpc  # noqa: E402
-from closure_common import fixture_for_seed  # noqa: E402
+import bachlib as rpc  # noqa: E402
+from bachlib.phases import fixture_for_seed  # noqa: E402
 
 FIXTURE_CPP = REPO_ROOT / "src" / "composer" / "harness_fixture.cpp"
 # Shared catalogs (kSubjectPatterns / kPhase14Subjects) were promoted out of

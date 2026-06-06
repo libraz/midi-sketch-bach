@@ -1,6 +1,6 @@
 """Goldberg-style immutable-bass variation Phase25 C++/Python drift guard.
 
-The load-bearing guard: the run_phase_closure.py PHASE25 mirror constants
+The load-bearing guard: the bachlib.mirror PHASE25 mirror constants
 (PHASE25_GROUND, PHASE25_BAR_ROOT, PHASE25_BAR_MINOR, the PHASE25_BLOCK_SPEC
 table -- including is_climax on block 4 -- and PHASE25_GROUND_PERIOD) must match
 the C++ Phase25 fixture source (the kGroundPitch[kCycleBars] / kBarRoot[kCycleBars]
@@ -29,7 +29,7 @@ REPO_ROOT = SCRIPTS_DIR.parent
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
-import run_phase_closure as rpc  # noqa: E402
+import bachlib as rpc  # noqa: E402
 
 FIXTURE_CPP = REPO_ROOT / "src" / "composer" / "harness_fixture.cpp"
 PROVENANCE_H = REPO_ROOT / "src" / "composer" / "provenance.h"

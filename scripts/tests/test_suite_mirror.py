@@ -1,6 +1,6 @@
 """Keyboard suite Phase23 C++/Python drift guard.
 
-The load-bearing guard: the run_phase_closure.py PHASE23 mirror constants
+The load-bearing guard: the bachlib.mirror PHASE23 mirror constants
 (PHASE23_BAR_ROOT, PHASE23_BAR_MINOR, PHASE23_GROUND, PHASE23_GROUND_PERIOD, and
 the kMovements[5] window / carrier / kind / base_midi table) must match the C++
 Phase23 fixture source (the kBarRoot[4] / kBarMinor[4] / kGroundPitch[4]
@@ -28,7 +28,7 @@ REPO_ROOT = SCRIPTS_DIR.parent
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
-import run_phase_closure as rpc  # noqa: E402
+import bachlib as rpc  # noqa: E402
 
 FIXTURE_CPP = REPO_ROOT / "src" / "composer" / "harness_fixture.cpp"
 PROVENANCE_H = REPO_ROOT / "src" / "composer" / "provenance.h"

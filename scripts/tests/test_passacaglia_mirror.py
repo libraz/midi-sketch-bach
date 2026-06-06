@@ -1,6 +1,6 @@
 """Organ Passacaglia Phase20 C++/Python drift guard.
 
-The load-bearing guard: the run_phase_closure.py PHASE20 mirror constants
+The load-bearing guard: the bachlib.mirror PHASE20 mirror constants
 (PHASE20_GROUND, PHASE20_VAR_T0, PHASE20_BAR_ROOT) must match the C++ Phase20
 fixture source (the kGroundPitch[kCycleBars], kVarT0[kCycleBars] and
 kRootPc[kCycleBars] initialisers in buildPhase20Fixture,
@@ -23,7 +23,7 @@ REPO_ROOT = SCRIPTS_DIR.parent
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
-import run_phase_closure as rpc  # noqa: E402
+import bachlib as rpc  # noqa: E402
 
 FIXTURE_CPP = REPO_ROOT / "src" / "composer" / "harness_fixture.cpp"
 

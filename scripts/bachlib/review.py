@@ -8,6 +8,8 @@ import json
 import statistics
 from pathlib import Path
 
+from bachlib.common import REPO_ROOT
+
 TICKS_PER_BEAT = 480
 MIN_TRANSITION_INTERVAL = 6
 NEIGHBORHOOD_RADIUS = 4
@@ -78,16 +80,32 @@ def iter_track_notes(doc: dict) -> list[tuple[str, list[dict]]]:
     return out
 
 
-def main() -> int:
-    parser = argparse.ArgumentParser()
+def _add_arguments(parser: argparse.ArgumentParser) -> None:
+    """Register review CLI arguments on `parser`.
+
+    Shared by register() and main() so the argument surface stays identical.
+    """
     parser.add_argument(
         "--corpus-dir",
         type=Path,
-        default=Path("~/Projects/bach-mcp/data/reference").expanduser(),
+        default=REPO_ROOT.parent / "bach-mcp" / "data" / "reference",
     )
     parser.add_argument("bwv", nargs="*", default=["BWV1007_1", "BWV1004_5"])
-    args = parser.parse_args()
 
+
+def register(subparsers) -> None:
+    """Attach the `review` subcommand to `subparsers`."""
+    parser = subparsers.add_parser(
+        "review",
+        help="review stream-segregation cues on bach-mcp reference JSON",
+        description=__doc__,
+    )
+    _add_arguments(parser)
+    parser.set_defaults(func=run)
+
+
+def run(args) -> int:
+    """Print stream-segregation diagnostics for the requested BWV files."""
     for bwv in args.bwv:
         path = args.corpus_dir / f"{bwv}.json"
         with path.open() as handle:
@@ -102,6 +120,14 @@ def main() -> int:
                 f"first={result['transition_note_indices'][:8]}"
             )
     return 0
+
+
+def main() -> int:
+    """Standalone entry point reusing the shared argument surface."""
+    parser = argparse.ArgumentParser(description=__doc__)
+    _add_arguments(parser)
+    args = parser.parse_args()
+    return run(args)
 
 
 if __name__ == "__main__":

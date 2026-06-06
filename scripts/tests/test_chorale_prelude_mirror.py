@@ -1,6 +1,6 @@
 """Organ Chorale Prelude Phase19 C++/Python drift guard.
 
-The load-bearing guard: the run_phase_closure.py PHASE19 mirror constants
+The load-bearing guard: the bachlib.mirror PHASE19 mirror constants
 (PHASE19_CF_SKELETON, PHASE19_BAR_ROOT) must match the C++ Phase19 fixture
 source (the kCfSkeleton[kBars] and kBarRoot[kBars] initialisers in
 buildPhase19Fixture, src/composer/harness_fixture.cpp). A renamed constant or an
@@ -23,7 +23,7 @@ REPO_ROOT = SCRIPTS_DIR.parent
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
-import run_phase_closure as rpc  # noqa: E402
+import bachlib as rpc  # noqa: E402
 
 FIXTURE_CPP = REPO_ROOT / "src" / "composer" / "harness_fixture.cpp"
 
