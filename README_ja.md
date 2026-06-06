@@ -1,6 +1,13 @@
 # midi-sketch-bach
 
-> **アルファ版** ── 開発中のプロジェクトです。機能やAPIは変更される可能性があります。デモおよびビルド済みバイナリは準備中です。
+[![CI](https://github.com/libraz/midi-sketch-bach/actions/workflows/ci.yml/badge.svg)](https://github.com/libraz/midi-sketch-bach/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/libraz/midi-sketch-bach/branch/main/graph/badge.svg)](https://codecov.io/gh/libraz/midi-sketch-bach)
+[![Live Demo](https://img.shields.io/badge/demo-bach.midi--sketch.libraz.net-6b21a8)](https://bach.midi-sketch.libraz.net/ja/)
+[![License](https://img.shields.io/badge/license-AGPL--3.0%20%2F%20Commercial-green)](LICENSE)
+
+> **アルファ版** ── 開発中のプロジェクトです。機能やAPIは変更される可能性があります。ビルド済みバイナリは準備中です。
+
+**🎹 今すぐ試す: [bach.midi-sketch.libraz.net](https://bach.midi-sketch.libraz.net/ja/)** ── ブラウザ上でバッハ様式の楽曲を生成・再生できます（WebAssembly）。[ドキュメント](https://bach.midi-sketch.libraz.net/ja/docs/getting-started)と[対位法講座](https://bach.midi-sketch.libraz.net/ja/docs/counterpoint/intervals)も同サイトにあります。
 
 J.S.バッハの器楽作品に特化したMIDIジェネレーター。
 
@@ -66,6 +73,8 @@ bach.destroy();
 ```
 
 ### Webデモ
+
+ホスト版: **[bach.midi-sketch.libraz.net](https://bach.midi-sketch.libraz.net/ja/)** ── ローカルで動かす場合:
 
 ```bash
 make demo   # http://localhost:8080/demo/

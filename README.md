@@ -1,6 +1,13 @@
 # midi-sketch-bach
 
-> **Alpha** — This project is under active development. Features and APIs may change. Demo and pre-built binaries are coming soon.
+[![CI](https://github.com/libraz/midi-sketch-bach/actions/workflows/ci.yml/badge.svg)](https://github.com/libraz/midi-sketch-bach/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/libraz/midi-sketch-bach/branch/main/graph/badge.svg)](https://codecov.io/gh/libraz/midi-sketch-bach)
+[![Live Demo](https://img.shields.io/badge/demo-bach.midi--sketch.libraz.net-6b21a8)](https://bach.midi-sketch.libraz.net/)
+[![License](https://img.shields.io/badge/license-AGPL--3.0%20%2F%20Commercial-green)](LICENSE)
+
+> **Alpha** — This project is under active development. Features and APIs may change. Pre-built binaries are coming soon.
+
+**🎹 Try it now: [bach.midi-sketch.libraz.net](https://bach.midi-sketch.libraz.net/)** — generate and play Bach-style pieces right in your browser (WebAssembly). Full [documentation](https://bach.midi-sketch.libraz.net/docs/getting-started) and a [counterpoint course](https://bach.midi-sketch.libraz.net/docs/counterpoint/intervals) live on the same site.
 
 A MIDI generator dedicated to the instrumental works of Johann Sebastian Bach.
 
@@ -66,6 +73,8 @@ bach.destroy();
 ```
 
 ### Web Demo
+
+Hosted: **[bach.midi-sketch.libraz.net](https://bach.midi-sketch.libraz.net/)** — or run locally:
 
 ```bash
 make demo   # http://localhost:8080/demo/
