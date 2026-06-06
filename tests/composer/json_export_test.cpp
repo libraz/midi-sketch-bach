@@ -113,6 +113,7 @@ TEST(JsonExportInfoTest, GeneratedJsonCarriesTextureMetrics) {
   TextureMetrics metrics;
   metrics.max_active_voices = 3;
   metrics.avg_active_voices = 2.25;
+  metrics.mono_ratio = 0.375;
   metrics.compass_violation_count = 1;
   metrics.register_overlap_ratio = 0.5;
   VoiceTextureMetrics voice;
@@ -128,6 +129,7 @@ TEST(JsonExportInfoTest, GeneratedJsonCarriesTextureMetrics) {
   EXPECT_TRUE(contains(json, "\"texture_metrics\":"));
   EXPECT_TRUE(contains(json, "\"max_active_voices\":3"));
   EXPECT_TRUE(contains(json, "\"avg_active_voices\":2.25"));
+  EXPECT_TRUE(contains(json, "\"mono_ratio\":0.375"));
   EXPECT_TRUE(contains(json, "\"compass_violation_count\":1"));
   EXPECT_TRUE(contains(json, "\"register_overlap_ratio\":0.5"));
   EXPECT_TRUE(contains(json, "\"voice\":2"));

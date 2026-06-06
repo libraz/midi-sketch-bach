@@ -64,6 +64,12 @@ struct VoiceTextureMetrics {
 struct TextureMetrics {
   int max_active_voices = 0;
   double avg_active_voices = 0.0;
+  // Tick-weighted fraction of the piece span where EXACTLY ONE voice is
+  // sounding. Shares the same half-open segment decomposition as
+  // `avg_active_voices` (sorted union of note onsets/offsets, span
+  // [first onset, last offset]); meter-independent (tick-weighted only).
+  // 0.0 for empty input.
+  double mono_ratio = 0.0;
   int compass_violation_count = 0;
   double register_overlap_ratio = 0.0;
   std::vector<VoiceTextureMetrics> voices;

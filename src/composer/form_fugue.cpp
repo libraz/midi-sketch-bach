@@ -11,6 +11,7 @@
 #include "composer/minor_material.h"
 #include "composer/motif_ops.h"
 #include "composer/span.h"
+#include "composer/texture_helpers.h"
 #include "composer/tonal_answer.h"
 #include "composer/voice_intent.h"
 #include "core/basic_types.h"
@@ -233,13 +234,6 @@ std::vector<DevelopmentWindow> buildDevelopmentWindows(int dev_start, int fugue_
 // fugue half of a prelude+fugue pair (first_bar = prelude length). Span ids and
 // the next-id counter are shared so concatenated sections stay unique.
 // ---------------------------------------------------------------------------
-struct ThemeTone {
-  Tick tick = 0;
-  Tick duration = 0;
-  VoiceId voice = 0;
-  int pitch = 0;
-};
-
 struct FugueAssembly {
   HarnessFixture* out = nullptr;
   SpanId* next_id = nullptr;
@@ -250,137 +244,11 @@ struct FugueAssembly {
   // is consonant with the concurrent theme tone, and (2) the parallel-aware
   // anchor avoids same-direction arrivals on interval class 0/7 against any
   // earlier voice (the cardinal Bach prohibition on parallel 5ths/8ths).
-  std::vector<ThemeTone> theme_tones;
+  ThemeToneRegistry theme_tones;
 };
 
-/// @brief Record a placed note (theme or figuration) for the inter-voice lookup.
-///
-/// Quarter-note thematic onsets pass `duration = kQuarter`; figuration notes
-/// pass their actual sub-beat duration so the concurrent-pitch lookup resolves
-/// the right sounding pitch at any onset, not only beat onsets.
-void recordTheme(FugueAssembly& asm_ctx, Tick tick, VoiceId voice, int pitch,
-                 Tick duration = kQuarter) {
-  asm_ctx.theme_tones.push_back(ThemeTone{tick, duration, voice, pitch});
-}
-
-/// @brief Pitch sounding in `voice` at `tick`, or -1 when the voice is silent.
-///
-/// Returns the latest-onset note of `voice` whose [start, start+duration)
-/// window contains `tick`. Used to read what an earlier-placed voice sounds at
-/// a beat onset so the line under construction can avoid a parallel against it.
-int soundingPitchInVoice(const FugueAssembly& asm_ctx, VoiceId voice, Tick tick) {
-  int pitch = -1;
-  // Signed sentinel: Tick is unsigned, so a Tick(-1) start would wrap to the
-  // maximum value and never lose the "latest onset wins" comparison.
-  long long best_start = -1;
-  for (const ThemeTone& tone : asm_ctx.theme_tones) {
-    if (tone.voice != voice) {
-      continue;
-    }
-    if (tick >= tone.tick &&
-        tick<tone.tick + tone.duration&& static_cast<long long>(tone.tick)> best_start) {
-      best_start = static_cast<long long>(tone.tick);
-      pitch = tone.pitch;
-    }
-  }
-  return pitch;
-}
-
-/// @brief Interval class (0..6) folded to consonance, true when consonant.
-///
-/// Consonant interval classes are the unison/3rd/4th/5th/6th families
-/// (IC 0,3,4,5,7,8,9 mod 12); the dissonant set the scorer penalises is
-/// {1,2,6,10,11} (m2/M2/TT/m7/M7). A perfect fourth (IC 5) is treated as
-/// consonant here because it sits between upper voices over a chord-tone bass.
-bool isConsonantIc(int semis) {
-  const int ic = ((std::abs(semis) % 12) + 12) % 12;
-  return ic != 1 && ic != 2 && ic != 6 && ic != 10 && ic != 11;
-}
-
-/// @brief Collect concurrent theme-tone pitches at `tick` excluding `voice`.
-///
-/// The figuration on `voice` must not clash with any statement sounding at the
-/// same beat. An onset match against each registered note's [start, start+dur)
-/// window captures the concurrent tone (theme tones span a quarter; figuration
-/// tones span their own sub-beat duration).
-void concurrentThemePitches(const FugueAssembly& asm_ctx, Tick tick, VoiceId voice,
-                            std::vector<int>& out_pitches) {
-  out_pitches.clear();
-  for (const ThemeTone& tone : asm_ctx.theme_tones) {
-    if (tone.voice == voice) {
-      continue;
-    }
-    if (tick >= tone.tick && tick < tone.tick + tone.duration) {
-      out_pitches.push_back(tone.pitch);
-    }
-  }
-}
-
-/// @brief Motion of one already-placed voice across two consecutive onsets.
-struct ConcurrentMotion {
-  VoiceId voice = 0;  // the already-placed voice this motion belongs to.
-  int prev = -1;      // sounding pitch at the previous onset (-1 = silent).
-  int curr = -1;      // sounding pitch at the current onset (-1 = silent).
-};
-
-/// @brief Gather each earlier voice's (prev, curr) motion around a beat onset.
-///
-/// For every voice other than `voice`, reads the pitch it sounds at `tick` and
-/// at `prev_tick`. The line under construction consults these so its own beat
-/// anchor never forms a parallel (same-direction arrival on interval class 0/7)
-/// with a voice already placed. Only voices sounding at the current onset are
-/// returned; a voice silent at `tick` cannot be in a parallel here.
-void concurrentMotions(const FugueAssembly& asm_ctx, Tick prev_tick, Tick tick, VoiceId voice,
-                       std::vector<ConcurrentMotion>& out_motions) {
-  out_motions.clear();
-  for (VoiceId other = 0; other < 3; ++other) {
-    if (other == voice) {
-      continue;
-    }
-    const int curr = soundingPitchInVoice(asm_ctx, other, tick);
-    if (curr < 0) {
-      continue;
-    }
-    const int prev = (prev_tick >= 0) ? soundingPitchInVoice(asm_ctx, other, prev_tick) : -1;
-    out_motions.push_back(ConcurrentMotion{other, prev, curr});
-  }
-}
-
-/// @brief True when moving from (line_prev, other_prev) to (cand, other_curr)
-///        forms a forbidden parallel or hidden perfect fifth/octave.
-///
-/// A parallel perfect = both voices change pitch in the same direction and the
-/// interval class is 0 (octave/unison) or 7 (fifth) at both the previous and the
-/// current onset. A hidden perfect = the same-direction arrival lands on IC 0/7
-/// from a different interval with the upper-moving voice leaping (> 2 semitones).
-/// Both are the cardinal Bach prohibition between independent voices.
-bool formsPerfectParallel(int line_prev, int cand, int other_prev, int other_curr) {
-  if (line_prev < 0 || other_prev < 0 || other_curr < 0) {
-    return false;  // need both voices' two onsets to judge motion.
-  }
-  const int line_motion = cand - line_prev;
-  const int other_motion = other_curr - other_prev;
-  if (line_motion == 0 || other_motion == 0) {
-    return false;  // oblique motion is always allowed.
-  }
-  const bool same_dir =
-      (line_motion > 0 && other_motion > 0) || (line_motion < 0 && other_motion < 0);
-  if (!same_dir) {
-    return false;  // contrary motion is always allowed.
-  }
-  const int curr_ic = ((std::abs(cand - other_curr) % 12) + 12) % 12;
-  if (curr_ic != 0 && curr_ic != 7) {
-    return false;  // arrival is not a perfect fifth/octave.
-  }
-  const int prev_ic = ((std::abs(line_prev - other_prev) % 12) + 12) % 12;
-  if (prev_ic == curr_ic) {
-    return true;  // same perfect interval at both onsets: parallel.
-  }
-  // Hidden perfect: same-direction arrival on a perfect from another interval,
-  // judged forbidden when the upper of the two voices leaps (> 2 semitones).
-  const int upper_motion = (cand >= other_curr) ? line_motion : other_motion;
-  return std::abs(upper_motion) > 2;
-}
+// The fugue family is built as a strict three-voice texture.
+constexpr VoiceId kFugueVoices = 3;
 
 /// @brief Append a window-sliced verbatim carrier span.
 void pushSpan(FugueAssembly& asm_ctx, VoiceId voice, int first_bar, int last_bar,
@@ -393,133 +261,6 @@ void pushSpan(FugueAssembly& asm_ctx, VoiceId voice, int first_bar, int last_bar
   span.intent = intent;
   span.subdivision = Subdivision::Quarter;  // unused by verbatim replay.
   asm_ctx.out->voice_plan.spans.push_back(span);
-}
-
-/// @brief Pick the band chord tone that is consonant and parallel-free.
-///
-/// Enumerates the chord tones of `chord` inside `voice`'s band and returns the
-/// one nearest `target` that is (1) consonant against every concurrent theme
-/// pitch and (2) does not form a parallel / hidden perfect fifth or octave with
-/// any earlier-placed voice, given this line's own previous beat anchor
-/// (`line_prev`). The downbeat anchor must always be a genuine chord tone
-/// (figuration_harmonic_consistency checks the bar downbeat), so this only ever
-/// returns chord tones. The selection is a strict deterministic priority: a
-/// consonant, parallel-free chord tone first; then a consonant one (parallel
-/// avoidance relaxed only when every chord tone is parallel-tied); then the
-/// least-dissonant chord tone. Parallels take priority over a marginally nearer
-/// anchor, which is what eliminates the same-direction perfect arrivals two
-/// independently anchored wave lines would otherwise produce over one harmony.
-///
-/// `target` is the previous beat's anchor, so consecutive anchors chain to the
-/// nearest admissible chord tone of each other -- the per-beat anchor chain
-/// therefore stays conjunct rather than leaping between register extremes.
-///
-/// @param chord The bar's chord (supplies the triad pitch classes).
-/// @param voice Voice index selecting the band.
-/// @param target Preferred register centre (the wave is built around it).
-/// @param theme_pitches Concurrent thematic pitches to stay consonant against.
-/// @param line_prev This line's previous beat anchor (-1 = none yet).
-/// @param motions Earlier voices' (prev, curr) motion around this onset.
-/// @param mode Diatonic mode selecting the in-scale test for non-downbeat tones.
-/// @param downbeat True only on the bar downbeat, which must be a genuine chord
-///        tone (figuration_harmonic_consistency); off-downbeat beats may anchor
-///        on any consonant diatonic tone, widening the parallel-free options so
-///        two figuration voices over one triad are not forced into a parallel.
-/// @return A chord-tone (downbeat) or diatonic (off-beat) MIDI pitch in band.
-int consonantChordTone(const ChordSpec& chord, int voice, int target,
-                       const std::vector<int>& theme_pitches, int line_prev,
-                       const std::vector<ConcurrentMotion>& motions, Mode mode, bool downbeat) {
-  const int third = chord.minor ? 3 : 4;
-  const int triad_pc[3] = {chord.root_pc % 12, (chord.root_pc + third) % 12,
-                           (chord.root_pc + 7) % 12};
-  auto is_triad = [&](int midi) {
-    const int pcl = ((midi % 12) + 12) % 12;
-    return pcl == triad_pc[0] || pcl == triad_pc[1] || pcl == triad_pc[2];
-  };
-  auto is_anchor_tone = [&](int midi) {
-    return downbeat ? is_triad(midi) : (is_triad(midi) || inScale(midi, mode));
-  };
-  auto is_parallel = [&](int cand) {
-    for (const ConcurrentMotion& motion : motions) {
-      if (formsPerfectParallel(line_prev, cand, motion.prev, motion.curr)) {
-        return true;
-      }
-    }
-    return false;
-  };
-  // Voice-ordering window: a lower-indexed voice sounds higher (V0 highest).
-  // The anchor must stay at or below every concurrent lower-index voice and at
-  // or above every concurrent higher-index voice, so the per-tick order
-  // V0 >= V1 >= V2 holds even when a verbatim entry briefly leaves its own band
-  // (e.g. a wide stretto follower) -- the band filter alone cannot guarantee it.
-  int order_ceiling = kBandHi[voice];
-  int order_floor = kBandLo[voice];
-  for (const ConcurrentMotion& motion : motions) {
-    if (motion.curr < 0) {
-      continue;
-    }
-    if (motion.voice < voice) {
-      order_ceiling = std::min(order_ceiling, motion.curr);  // stay below it.
-    } else if (motion.voice > voice) {
-      order_floor = std::max(order_floor, motion.curr);  // stay above it.
-    }
-  }
-  // Three nested preferences, each "nearest target wins" within its tier.
-  int consonant_free = -1;  // consonant AND parallel-free (best).
-  int consonant_free_dist = 1 << 20;
-  int consonant_any = -1;  // consonant, parallel allowed (second).
-  int consonant_any_dist = 1 << 20;
-  int fallback = -1;  // least dissonant (last resort).
-  int fallback_score = 1 << 20;
-  // Only apply the ordering window when it leaves a non-empty range; a degenerate
-  // window (a concurrent voice already outside this band's order) falls back to
-  // the band so a candidate always exists.
-  const bool order_window_usable = order_floor <= order_ceiling;
-  for (int pitch = kBandLo[voice]; pitch <= kBandHi[voice]; ++pitch) {
-    if (!is_anchor_tone(pitch)) {
-      continue;
-    }
-    if (order_window_usable && (pitch < order_floor || pitch > order_ceiling)) {
-      continue;  // would cross a concurrent voice; never admissible.
-    }
-    int clashes = 0;
-    for (int theme : theme_pitches) {
-      if (!isConsonantIc(pitch - theme)) {
-        ++clashes;
-      }
-    }
-    // Also stay consonant against every earlier voice sounding at this onset
-    // (not just the theme): an off-downbeat diatonic anchor would otherwise be
-    // free to clash with another figuration voice on the beat grid.
-    for (const ConcurrentMotion& motion : motions) {
-      if (motion.curr >= 0 && !isConsonantIc(pitch - motion.curr)) {
-        ++clashes;
-      }
-    }
-    const int dist = std::abs(pitch - target);
-    if (clashes == 0) {
-      if (dist < consonant_any_dist) {
-        consonant_any_dist = dist;
-        consonant_any = pitch;
-      }
-      if (!is_parallel(pitch) && dist < consonant_free_dist) {
-        consonant_free_dist = dist;
-        consonant_free = pitch;
-      }
-    }
-    const int score = clashes * 1000 + dist;
-    if (score < fallback_score) {
-      fallback_score = score;
-      fallback = pitch;
-    }
-  }
-  if (consonant_free >= 0) {
-    return consonant_free;
-  }
-  if (consonant_any >= 0) {
-    return consonant_any;
-  }
-  return fallback >= 0 ? fallback : std::clamp(target, kBandLo[voice], kBandHi[voice]);
 }
 
 /// @brief Append one bar of theme-consonant scalar-wave chord-tone figuration.
@@ -590,12 +331,15 @@ void appendFigurationBar(FugueAssembly& asm_ctx, FigurationSection& section, int
   for (int beat = 0; beat < 4; ++beat) {
     const Tick beat_tick = barTick(bar) + static_cast<Tick>(beat) * kTicksPerBeat;
     const Tick prev_beat_tick = beat_tick - kTicksPerBeat;
-    concurrentThemePitches(asm_ctx, beat_tick, static_cast<VoiceId>(voice), theme_pitches);
-    concurrentMotions(asm_ctx, prev_beat_tick, beat_tick, static_cast<VoiceId>(voice), motions);
+    asm_ctx.theme_tones.concurrentThemePitches(beat_tick, static_cast<VoiceId>(voice),
+                                               theme_pitches);
+    asm_ctx.theme_tones.concurrentMotions(prev_beat_tick, beat_tick, static_cast<VoiceId>(voice),
+                                          kFugueVoices, motions);
     // Snap the beat onset to the nearest consonant, parallel-free anchor tone
     // (a chord tone on the downbeat, any diatonic tone off the downbeat).
-    const int anchor = consonantChordTone(chord, voice, cursor, theme_pitches, line_prev_anchor,
-                                          motions, mode, beat == 0);
+    const int anchor =
+        consonantChordTone(chord, voice, kBandLo[voice], kBandHi[voice], cursor, theme_pitches,
+                           line_prev_anchor, motions, mode, beat == 0);
     cursor = std::clamp(anchor, kBandLo[voice], kBandHi[voice]);
     line_prev_anchor = cursor;
     for (int sub = 0; sub < notes_per_beat; ++sub) {
@@ -623,7 +367,8 @@ void appendFigurationBar(FugueAssembly& asm_ctx, FigurationSection& section, int
         // against an earlier voice's concurrent motion, reverse direction (still a
         // single scale step, so the line stays conjunct). Sampled at this sub-tick
         // and the previous one so the inter-note motion is judged, not only beats.
-        concurrentMotions(asm_ctx, prev_tick, tick, static_cast<VoiceId>(voice), motions);
+        asm_ctx.theme_tones.concurrentMotions(prev_tick, tick, static_cast<VoiceId>(voice),
+                                              kFugueVoices, motions);
         auto wave_is_parallel = [&](int cand) {
           for (const ConcurrentMotion& motion : motions) {
             if (formsPerfectParallel(from, cand, motion.prev, motion.curr)) {
@@ -682,7 +427,7 @@ void appendFigurationBar(FugueAssembly& asm_ctx, FigurationSection& section, int
       addNote(section.notes, tick, step, pitch);
       // Register this figuration note so a voice placed later in the same window
       // can read what this line sounds and avoid a parallel against it.
-      recordTheme(asm_ctx, tick, static_cast<VoiceId>(voice), pitch, step);
+      asm_ctx.theme_tones.record(tick, static_cast<VoiceId>(voice), pitch, step);
     }
   }
   prev_anchor = last_pitch;
@@ -905,7 +650,8 @@ void appendFugueSection(FugueAssembly& asm_ctx, int first_bar, int bars,
       const int pitch = (best >= 0) ? best : std::clamp(target, kBandLo[voice], kBandHi[voice]);
       repeat_run = (pitch == prev_cs) ? repeat_run + 1 : 1;
       addNote(out.material.countersubject, note.start_tick, note.duration, pitch);
-      recordTheme(asm_ctx, note.start_tick, static_cast<VoiceId>(voice), pitch, note.duration);
+      asm_ctx.theme_tones.record(note.start_tick, static_cast<VoiceId>(voice), pitch,
+                                 note.duration);
       prev_cs = pitch;
       prev_src = src;
     }
@@ -915,8 +661,8 @@ void appendFugueSection(FugueAssembly& asm_ctx, int first_bar, int bars,
     for (int note = 0; note < kSubjectNotes; ++note) {
       const int pitch = static_cast<int>(subj_pat[static_cast<std::size_t>(note)]) + semis;
       addNote(out.material.subject, cursor, subj_rhythm[static_cast<std::size_t>(note)], pitch);
-      recordTheme(asm_ctx, cursor, static_cast<VoiceId>(theme_voice), pitch,
-                  subj_rhythm[static_cast<std::size_t>(note)]);
+      asm_ctx.theme_tones.record(cursor, static_cast<VoiceId>(theme_voice), pitch,
+                                 subj_rhythm[static_cast<std::size_t>(note)]);
       cursor += subj_rhythm[static_cast<std::size_t>(note)];
     }
   };
@@ -942,7 +688,7 @@ void appendFugueSection(FugueAssembly& asm_ctx, int first_bar, int bars,
         static_cast<int>(subj_pat[static_cast<std::size_t>(note)]) + answer_off, 0, 127));
     tonal_answer_seed.push_back(seed_note);
     if (!use_tonal_answer) {
-      recordTheme(asm_ctx, tick, 1, pitch, dur);
+      asm_ctx.theme_tones.record(tick, 1, pitch, dur);
     }
     answer_cursor += dur;
   }
@@ -951,7 +697,7 @@ void appendFugueSection(FugueAssembly& asm_ctx, int first_bar, int bars,
         tonal_answer_seed, out.harmony.tonic_pc, barTick(first_bar + 4), 4);
     out.material.use_tonal_answer = true;
     for (const auto& note : out.material.tonal_answer) {
-      recordTheme(asm_ctx, note.start_tick, 1, static_cast<int>(note.pitch), note.duration);
+      asm_ctx.theme_tones.record(note.start_tick, 1, static_cast<int>(note.pitch), note.duration);
     }
   }
   pushSpan(asm_ctx, 1, first_bar + 4, first_bar + 7, VoiceIntent::AnswerCarrier);
@@ -1046,8 +792,8 @@ void appendFugueSection(FugueAssembly& asm_ctx, int first_bar, int bars,
         mn.pitch = static_cast<std::uint8_t>(std::clamp(
             static_cast<int>(me_pat[static_cast<std::size_t>(note)]) + me_total, 0, 127));
         decl.notes.push_back(mn);
-        recordTheme(asm_ctx, mn.start_tick, static_cast<VoiceId>(carry_voice),
-                    static_cast<int>(mn.pitch), mn.duration);
+        asm_ctx.theme_tones.record(mn.start_tick, static_cast<VoiceId>(carry_voice),
+                                   static_cast<int>(mn.pitch), mn.duration);
         me_cursor += mn.duration;
       }
       middle_used[static_cast<std::size_t>(carry_voice)] = true;
@@ -1084,8 +830,8 @@ void appendFugueSection(FugueAssembly& asm_ctx, int first_bar, int bars,
           mn.pitch = static_cast<std::uint8_t>(std::clamp(
               static_cast<int>(subj_pat[static_cast<std::size_t>(note)]) + follower_off, 0, 127));
           stretto.follower_notes.push_back(mn);
-          recordTheme(asm_ctx, mn.start_tick, static_cast<VoiceId>(follower_voice),
-                      static_cast<int>(mn.pitch), mn.duration);
+          asm_ctx.theme_tones.record(mn.start_tick, static_cast<VoiceId>(follower_voice),
+                                     static_cast<int>(mn.pitch), mn.duration);
           follower_cursor += subj_rhythm[static_cast<std::size_t>(note)];
         }
         out.material.stretto_entries.push_back(stretto);
@@ -1186,7 +932,7 @@ void appendFugueSection(FugueAssembly& asm_ctx, int first_bar, int bars,
             const Tick dur = tmpl.seed_durations[idx];
             if (cursor >= span_lo && cursor < span_hi) {
               const int pitch = static_cast<int>(tmpl.seed_pitches[idx]) + step_offset * kstep;
-              recordTheme(asm_ctx, cursor, 0, std::clamp(pitch, 0, 127), dur);
+              asm_ctx.theme_tones.record(cursor, 0, std::clamp(pitch, 0, 127), dur);
             }
             cursor += dur;
           }

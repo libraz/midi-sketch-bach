@@ -11,6 +11,7 @@
 #include "composer/material.h"
 #include "composer/minor_material.h"
 #include "composer/span.h"
+#include "composer/texture_helpers.h"
 #include "composer/voice_intent.h"
 #include "core/basic_types.h"
 
@@ -101,14 +102,6 @@ struct CycleBar {
   int low_tone;            // lowest variation tone (C4-C5 region) for this bar.
   std::uint8_t ground_pc;  // pitch class of the sustained ground note this bar.
 };
-
-// Consonant interval-class set (mod 12): unison/octave, m3/M3, P4, P5, m6/M6.
-// The complement {1,2,6,10,11} (m2/M2/TT/m7/M7) is what the audio scorer counts
-// as a vertical dissonance when sampled beat-by-beat against the held ground.
-constexpr bool isConsonantIc(int interval_class) {
-  const int ivc = ((interval_class % 12) + 12) % 12;
-  return ivc == 0 || ivc == 3 || ivc == 4 || ivc == 5 || ivc == 7 || ivc == 8 || ivc == 9;
-}
 
 /**
  * @brief Octave-fit a pitch class to the MIDI pitch nearest a target center.
@@ -287,6 +280,415 @@ void appendVariationCycle(std::vector<MaterialNote>& notes, Tick block_start,
       notes.push_back(mnote);
     }
   }
+}
+
+// ---------------------------------------------------------------------------
+// Passacaglia-only 3-voice machinery (BWV582 model). The chaconne path is left
+// byte-for-byte unchanged; everything below this banner is reached ONLY from the
+// passacaglia branch of buildGroundVariationForm.
+// ---------------------------------------------------------------------------
+
+// Register band for the passacaglia principal variation (V0): C4-C5 region, well
+// above the middle counter-figuration (V1) and the ground (V2). The wave folds
+// inside this band so the line never crosses below V1.
+constexpr int kPassV0BandLo = 60;  // C4.
+constexpr int kPassV0BandHi = 79;  // G5.
+
+// Register band for the passacaglia counter-figuration (V1): C3-B3 region, kept
+// strictly between V0 (>= C4) and the ground (<= C3) so voice_crossing never
+// fires (lower voice index sounds higher).
+constexpr int kPassV1BandLo = 48;  // C3.
+constexpr int kPassV1BandHi = 59;  // B3.
+
+/**
+ * @brief Build one principal-variation cycle's V0 line as a continuous diatonic
+ *        scalar wave (stepwise-dominant, no repeated pitches, no leaps).
+ *
+ * Unlike the shared per-beat chord-tone sawtooth (appendVariationCycle, kept for
+ * the chaconne), this walks one diatonic scale degree per emitted note and folds
+ * its direction at the band edges. Single-step motion is the corpus's dominant
+ * melodic interval, so the realized line's melodic-interval distribution matches
+ * the reference far better (the dominant scorer feature). The bar downbeat is
+ * re-anchored to the nearest chord tone of the bar's chord so beat-onset
+ * vertical consonance against the held ground stays high, but the re-anchor is
+ * itself reached by a single step (it never introduces a leap), so the surface
+ * remains conjunct.
+ *
+ * Variation differentiation (no RNG): `phase_rotation` shifts the wave's start
+ * degree and `descending_start` flips the opening direction, so consecutive
+ * cycles trace distinct contours without reintroducing leaps.
+ *
+ * @param notes Destination note vector (the variation's realized line).
+ * @param block_start Absolute start tick of the variation block.
+ * @param cycle_bar_plan Per-bar harmony + register data for the ground cycle.
+ * @param register_shift Semitone register lift from the arc (raises the band).
+ * @param phase_rotation Cycle-driven shift of the wave's start degree.
+ * @param descending_start When true, the wave opens descending.
+ * @param notes_per_beat Subdivision: 1 / 2 / 4 notes per beat.
+ * @param mode Diatonic mode (Major / Minor) selecting the scale.
+ */
+void appendScalarWaveCycle(std::vector<MaterialNote>& notes, Tick block_start,
+                           const std::vector<CycleBar>& cycle_bar_plan, int register_shift,
+                           int phase_rotation, bool descending_start, int notes_per_beat,
+                           detail::Mode mode) {
+  const int cycle_bars = static_cast<int>(cycle_bar_plan.size());
+  const int band_lo = kPassV0BandLo + register_shift;
+  const int band_hi = kPassV0BandHi + register_shift;
+  const int lo_deg = midiToDegree(band_lo, mode);
+  const int hi_deg = midiToDegree(band_hi, mode);
+
+  // Start degree: the bottom of the band lifted by the cycle's phase rotation,
+  // clamped into the band so a large rotation cannot escape it.
+  int degree = lo_deg + (phase_rotation % std::max(1, hi_deg - lo_deg));
+  if (degree > hi_deg)
+    degree = hi_deg;
+  int dir = descending_start ? -1 : 1;
+
+  const Tick step = kTicksPerBeat / static_cast<Tick>(notes_per_beat);
+  for (int bar = 0; bar < cycle_bars; ++bar) {
+    const CycleBar& plan = cycle_bar_plan[static_cast<std::size_t>(bar)];
+    for (int beat = 0; beat < 3; ++beat) {
+      const Tick beat_tick = block_start + static_cast<Tick>(bar) * kTicksPerBar34 +
+                             static_cast<Tick>(beat) * kTicksPerBeat;
+      for (int sub = 0; sub < notes_per_beat; ++sub) {
+        // Bar downbeat (beat 0, sub 0): re-anchor to the nearest chord tone of
+        // this bar so the sampled beat onset stays consonant with the held
+        // ground -- but only by stepping the wave toward it, so the conjunct
+        // surface is preserved and no leap is introduced.
+        if (beat == 0 && sub == 0 && bar > 0) {
+          const std::vector<int> pcs = barAnchorPitchClasses(plan, mode);
+          const int cur_midi = degreeToMidi(degree, mode);
+          int best_midi = cur_midi;
+          int best_dist = 128;
+          for (int pitch_class : pcs) {
+            const int fit = fitPitchClass(pitch_class, cur_midi);
+            for (int oct : {fit - 12, fit, fit + 12}) {
+              if (oct < band_lo || oct > band_hi)
+                continue;
+              const int dist = std::abs(oct - cur_midi);
+              if (dist < best_dist) {
+                best_dist = dist;
+                best_midi = oct;
+              }
+            }
+          }
+          // Step toward the chosen chord tone by a single scale degree (never a
+          // leap); if already there, hold the degree.
+          const int target_deg = midiToDegree(best_midi, mode);
+          if (target_deg > degree)
+            ++degree;
+          else if (target_deg < degree)
+            --degree;
+        }
+        MaterialNote mnote;
+        mnote.start_tick = beat_tick + static_cast<Tick>(sub) * step;
+        mnote.duration = step;
+        mnote.pitch = static_cast<std::uint8_t>(degreeToMidi(degree, mode));
+        notes.push_back(mnote);
+        // Advance one diatonic step, folding direction at the band edges so the
+        // line oscillates within the fixed register band.
+        degree += dir;
+        if (degree >= hi_deg) {
+          degree = hi_deg;
+          dir = -1;
+        } else if (degree <= lo_deg) {
+          degree = lo_deg;
+          dir = 1;
+        }
+      }
+    }
+  }
+}
+
+/**
+ * @brief Build one cycle's V1 counter-figuration: a per-beat consonant,
+ *        parallel-free middle line read back against V0 and the ground (V2).
+ *
+ * V1 is built AFTER V0 and the ground are recorded in `registry`, so each beat
+ * anchor is selected via the shared tier-scored consonantChordTone: a chord tone
+ * inside the middle band that is consonant with the concurrent V0 / ground tones
+ * and forms no parallel/hidden perfect against them. Off-beats fill stepwise
+ * toward the next anchor (conjunct, no leaps), and every pick is registered so
+ * the next beat's parallel check sees it.
+ *
+ * @param notes Destination note vector (the V1 counter-line).
+ * @param registry Inter-voice read-back (already holds V0 + ground tones).
+ * @param block_start Absolute start tick of the cycle.
+ * @param cycle_bar_plan Per-bar harmony for the ground cycle.
+ * @param register_shift Semitone register lift from the arc.
+ * @param notes_per_beat Subdivision: 1 / 2 / 4 notes per beat.
+ * @param mode Diatonic mode (Major / Minor) selecting the scale.
+ */
+void appendCounterFiguration(std::vector<MaterialNote>& notes, ThemeToneRegistry& registry,
+                             Tick block_start, const std::vector<CycleBar>& cycle_bar_plan,
+                             int register_shift, int notes_per_beat, detail::Mode mode) {
+  const int cycle_bars = static_cast<int>(cycle_bar_plan.size());
+  const int band_lo = kPassV1BandLo + register_shift;
+  const int band_hi = kPassV1BandHi + register_shift;
+  const Tick step = kTicksPerBeat / static_cast<Tick>(notes_per_beat);
+
+  int line_prev = -1;
+  int cursor = (band_lo + band_hi) / 2;
+  std::vector<int> theme_pitches;
+  std::vector<ConcurrentMotion> motions;
+
+  for (int bar = 0; bar < cycle_bars; ++bar) {
+    const CycleBar& plan = cycle_bar_plan[static_cast<std::size_t>(bar)];
+    detail::ChordSpec chord;
+    chord.root_pc = plan.root_pc;
+    chord.minor = plan.minor;
+    for (int beat = 0; beat < 3; ++beat) {
+      const Tick beat_tick = block_start + static_cast<Tick>(bar) * kTicksPerBar34 +
+                             static_cast<Tick>(beat) * kTicksPerBeat;
+      const Tick prev_tick = beat_tick - kTicksPerBeat;
+      theme_pitches.clear();
+      motions.clear();
+      registry.concurrentThemePitches(beat_tick, /*voice=*/1, theme_pitches);
+      registry.concurrentMotions(prev_tick, beat_tick, /*voice=*/1, /*num_voices=*/3, motions);
+      const int anchor =
+          consonantChordTone(chord, /*voice=*/1, band_lo, band_hi, cursor, theme_pitches, line_prev,
+                             motions, mode, /*downbeat=*/beat == 0);
+      // Stepwise fill toward the NEXT beat's eventual anchor is unknown here, so
+      // fills oscillate around the anchor by single scale steps (conjunct, no
+      // leaps); the anchor itself is the consonant beat onset.
+      int anchor_deg = midiToDegree(anchor, mode);
+      for (int sub = 0; sub < notes_per_beat; ++sub) {
+        MaterialNote mnote;
+        mnote.start_tick = beat_tick + static_cast<Tick>(sub) * step;
+        mnote.duration = step;
+        int deg = anchor_deg;
+        if (sub > 0)
+          deg = anchor_deg + ((sub % 2 == 1) ? 1 : 0);  // neighbour-tone oscillation.
+        const int pitch = degreeToMidi(deg, mode);
+        mnote.pitch = static_cast<std::uint8_t>(pitch);
+        notes.push_back(mnote);
+        registry.record(mnote.start_tick, /*voice=*/1, pitch, step);
+      }
+      line_prev = anchor;
+      cursor = anchor;
+    }
+  }
+}
+
+/**
+ * @brief Resolve the per-cycle voice-presence schedule for a passacaglia.
+ *
+ * BWV582-style terraced growth derived purely from the period (cycle) count:
+ *   - periods >= 4: cycle 0 is a ground-solo intro (V0 and V1 rest); the middle
+ *     cycles add V0 over the ground with ONE receding cycle where V1 rests; the
+ *     climax cycle sounds all three voices.
+ *   - periods == 3 (the default 24-bar / 3-period piece): NO intro -- cycle 0 is
+ *     V0 + ground, cycle 1 adds V1, the climax cycle is the full texture.
+ *   - periods <= 2: degenerate -- the first cycle is V0 + ground and every later
+ *     cycle is the full texture (no room for an intro terrace).
+ *
+ * @param cycle_count Number of ground statements in the piece (>= 1).
+ * @param climax_idx The arc climax cycle index.
+ * @param out_v0 Receives, per cycle, whether V0 (principal variation) sounds.
+ * @param out_v1 Receives, per cycle, whether V1 (counter-figuration) sounds.
+ */
+void resolveVoiceSchedule(std::size_t cycle_count, std::size_t climax_idx,
+                          std::vector<bool>& out_v0, std::vector<bool>& out_v1) {
+  out_v0.assign(cycle_count, true);
+  out_v1.assign(cycle_count, false);
+  if (cycle_count == 0)
+    return;
+
+  if (cycle_count >= 4) {
+    // Cycle 0: ground-solo intro (V0 and V1 silent).
+    out_v0[0] = false;
+    out_v1[0] = false;
+    // The single receding cycle: the cycle just before the climax keeps V0 but
+    // rests V1 (a momentary thinning before the climax restores all three).
+    std::size_t receding = (climax_idx > 1) ? climax_idx - 1 : 1;
+    for (std::size_t cyc = 1; cyc < cycle_count; ++cyc) {
+      out_v0[cyc] = true;
+      out_v1[cyc] = (cyc != receding);
+    }
+    out_v1[climax_idx] = true;  // climax always sounds all three.
+    out_v0[climax_idx] = true;
+  } else if (cycle_count == 3) {
+    // No intro: cycle 0 = V0 + ground, cycle 1 adds V1, climax = full.
+    out_v1[0] = false;
+    out_v1[1] = true;
+    out_v1[2] = true;
+  } else {
+    // periods <= 2: first cycle V0 + ground, later cycles full.
+    for (std::size_t cyc = 1; cyc < cycle_count; ++cyc)
+      out_v1[cyc] = true;
+  }
+}
+
+/**
+ * @brief Build the 3-voice passacaglia (Material, HarmonicPlan, VoicePlan).
+ *
+ * V0 = principal scalar-wave variation (PassacagliaVariation, C4-C5), V1 = a
+ * consonant parallel-free counter-figuration (TrioVoiceCarrier, C3-B3, exactly
+ * the Goldberg builder's middle-voice pattern), V2 = the immutable ground
+ * (PassacagliaGround, C2-C3 -- the SAME pitches as the 2-voice form, only the
+ * voice id moves to 2 so register order V0 > V1 > V2 holds). Terraced growth is
+ * derived from the period count (resolveVoiceSchedule).
+ *
+ * @param req The resolved request.
+ * @param cycle_bars Bars per ground cycle (8 for passacaglia).
+ * @param ground_pitch The cycle-relative ground bass pitches, one per bar.
+ * @param cycle_bar_plan Per-bar harmony + variation start tone for one cycle.
+ * @return The assembled fixture (meter is stamped later by the form-director).
+ */
+HarnessFixture buildPassacagliaThreeVoice(const ResolvedRequest& req, int cycle_bars,
+                                          const std::vector<std::uint8_t>& ground_pitch,
+                                          const std::vector<CycleBar>& cycle_bar_plan) {
+  HarnessFixture out;
+
+  const int total_bars = static_cast<int>(req.bars);
+  const int cycles = total_bars / cycle_bars;
+  const Tick period = static_cast<Tick>(cycle_bars) * kTicksPerBar34;
+  const detail::Mode mode = req.mode;
+  const bool minor = mode == detail::Mode::Minor;
+  const bool picardy = minor && detail::usePicardy(req.seed);
+
+  auto bar_tick = [](int bar) { return static_cast<Tick>(bar) * kTicksPerBar34; };
+
+  // --- V2 ground bass: identical pitches / rhythm to the 2-voice form; only the
+  // voice assignment (set on the span below) moves to V2. ---
+  std::vector<MaterialNote>& ground = out.material.passacaglia_ground;
+  for (int bar = 0; bar < cycle_bars; ++bar) {
+    MaterialNote gnote;
+    gnote.start_tick = bar_tick(bar);
+    gnote.duration = kTicksPerBar34;
+    gnote.pitch = ground_pitch[static_cast<std::size_t>(bar)];
+    ground.push_back(gnote);
+  }
+  out.material.passacaglia_ground_period = period;
+
+  // --- HarmonicPlan: one chord per bar; the final bar resolves to the tonic. ---
+  out.harmony.tonic_pc = 0;
+  out.harmony.is_minor = minor;
+  for (int bar = 0; bar < total_bars; ++bar) {
+    const int cyc_bar = bar % cycle_bars;
+    const CycleBar& plan = cycle_bar_plan[static_cast<std::size_t>(cyc_bar)];
+    ChordEvent chord;
+    chord.start_tick = bar_tick(bar);
+    if (bar == total_bars - 1) {
+      chord.root_pc = 0;
+      chord.quality = (picardy || !minor) ? ChordQuality::Major : ChordQuality::Minor;
+    } else {
+      chord.root_pc = plan.root_pc;
+      chord.quality = plan.minor ? ChordQuality::Minor : ChordQuality::Major;
+    }
+    out.harmony.chords.push_back(chord);
+  }
+
+  // --- Terraced growth schedule (period-count derived). ---
+  std::size_t climax_idx = (static_cast<std::size_t>(cycles) * 4) / 5;
+  if (cycles > 0 && climax_idx > static_cast<std::size_t>(cycles) - 1)
+    climax_idx = static_cast<std::size_t>(cycles) - 1;
+  std::vector<bool> v0_present;
+  std::vector<bool> v1_present;
+  resolveVoiceSchedule(static_cast<std::size_t>(cycles), climax_idx, v0_present, v1_present);
+
+  // V1 counter-figuration accumulates into a single TrioVoiceLine (voice 1),
+  // gated per cycle by the schedule; V0 variation blocks accumulate per cycle.
+  std::vector<MaterialNote> counter_notes;
+
+  for (int cycle = 0; cycle < cycles; ++cycle) {
+    const ArcPoint point = req.arc(static_cast<std::size_t>(cycle));
+    const Tick block_start = static_cast<Tick>(cycle * cycle_bars) * kTicksPerBar34;
+    const Tick block_end = block_start + period;
+    const bool is_climax = point.is_climax;
+
+    // V0 principal variation (when present this cycle). Cycle 0 (when it carries
+    // V0) is a plain quarter-note establishing statement; later cycles ride the
+    // arc density tier.
+    std::vector<MaterialNote> v0_notes;
+    if (v0_present[static_cast<std::size_t>(cycle)]) {
+      const bool establishing = (cycle == 0);
+      const int tier = establishing ? 0 : densityTierFor(req, static_cast<std::size_t>(cycle));
+      const int notes_per_beat = establishing ? 1 : notesPerBeatForTier(tier);
+      const int phase_rotation =
+          static_cast<int>((req.seed + static_cast<std::uint32_t>(cycle)) % 5);
+      const bool descending_start = ((req.seed + static_cast<std::uint32_t>(cycle)) % 2) == 1;
+      appendScalarWaveCycle(v0_notes, block_start, cycle_bar_plan, point.register_shift,
+                            phase_rotation, descending_start, notes_per_beat, mode);
+
+      PassacagliaVariation var;
+      var.voice = 0;
+      var.start_tick = block_start;
+      var.end_tick = block_end;
+      var.density_level = tier;
+      var.is_climax = is_climax;
+      var.notes = v0_notes;
+      out.material.passacaglia_variations.push_back(std::move(var));
+    }
+
+    // V1 counter-figuration (when present this cycle). Read back V0 (this cycle)
+    // and the ground (period-tiled) so the counter-line stays consonant and
+    // parallel-free; the counter-line is one density tier below V0.
+    if (v1_present[static_cast<std::size_t>(cycle)]) {
+      ThemeToneRegistry registry;
+      for (const MaterialNote& note : v0_notes)
+        registry.record(note.start_tick, /*voice=*/0, static_cast<int>(note.pitch), note.duration);
+      for (int bar = 0; bar < cycle_bars; ++bar) {
+        const std::size_t gi = static_cast<std::size_t>(bar);
+        registry.record(block_start + bar_tick(bar), /*voice=*/2,
+                        static_cast<int>(ground_pitch[gi]), kTicksPerBar34);
+      }
+      const int tier = densityTierFor(req, static_cast<std::size_t>(cycle));
+      const int v1_tier = (tier > 0) ? tier - 1 : 0;
+      const int notes_per_beat = notesPerBeatForTier(v1_tier);
+      appendCounterFiguration(counter_notes, registry, block_start, cycle_bar_plan,
+                              point.register_shift, notes_per_beat, mode);
+    }
+  }
+
+  if (!counter_notes.empty()) {
+    TrioVoiceLine counter_line;
+    counter_line.voice = 1;
+    counter_line.manual = 1;  // documentary (Swell): V1 = middle counter-line.
+    counter_line.notes = std::move(counter_notes);
+    out.material.trio_voices.push_back(std::move(counter_line));
+  }
+
+  // --- VoicePlan: 3 voices, register order V0 > V1 > V2. ---
+  out.voice_plan.num_voices = 3;
+  SpanId next_span_id = 0;
+
+  Span ground_span;
+  ground_span.id = next_span_id++;
+  ground_span.start_tick = 0;
+  ground_span.end_tick = static_cast<Tick>(total_bars) * kTicksPerBar34;
+  ground_span.voice = 2;
+  ground_span.intent = VoiceIntent::PassacagliaGround;
+  ground_span.subdivision = Subdivision::Quarter;
+  out.voice_plan.spans.push_back(ground_span);
+
+  for (int cycle = 0; cycle < cycles; ++cycle) {
+    if (!v0_present[static_cast<std::size_t>(cycle)])
+      continue;
+    Span var_span;
+    var_span.id = next_span_id++;
+    var_span.start_tick = static_cast<Tick>(cycle * cycle_bars) * kTicksPerBar34;
+    var_span.end_tick = var_span.start_tick + period;
+    var_span.voice = 0;
+    var_span.intent = VoiceIntent::PassacagliaVariation;
+    var_span.subdivision = Subdivision::Quarter;
+    out.voice_plan.spans.push_back(var_span);
+  }
+
+  for (int cycle = 0; cycle < cycles; ++cycle) {
+    if (!v1_present[static_cast<std::size_t>(cycle)])
+      continue;
+    Span counter_span;
+    counter_span.id = next_span_id++;
+    counter_span.start_tick = static_cast<Tick>(cycle * cycle_bars) * kTicksPerBar34;
+    counter_span.end_tick = counter_span.start_tick + period;
+    counter_span.voice = 1;
+    counter_span.intent = VoiceIntent::TrioVoiceCarrier;
+    counter_span.subdivision = Subdivision::Quarter;
+    out.voice_plan.spans.push_back(counter_span);
+  }
+
+  return out;
 }
 
 /**
@@ -552,8 +954,7 @@ HarnessFixture buildPassacagliaForm(const ResolvedRequest& req) {
     };
   }
 
-  return buildGroundVariationForm(req, kPassacagliaCycleBars, ground_pitch, plan,
-                                  /*passacaglia=*/true);
+  return buildPassacagliaThreeVoice(req, kPassacagliaCycleBars, ground_pitch, plan);
 }
 
 }  // namespace bach::composer

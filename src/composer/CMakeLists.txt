@@ -15,6 +15,7 @@ set(BACH_COMPOSER_SOURCES
   material.cpp
   voice_intent.cpp
   candidate_search.cpp
+  texture_helpers.cpp
   rule_helpers.cpp
   stream_segregation.cpp
   nct_detector.cpp

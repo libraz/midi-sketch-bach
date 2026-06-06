@@ -191,6 +191,7 @@ TextureMetrics computeTextureMetrics(const std::vector<NoteEvent>& notes) {
   boundaries.erase(std::unique(boundaries.begin(), boundaries.end()), boundaries.end());
 
   long active_voice_ticks = 0;
+  long mono_ticks = 0;
   long total_ticks = 0;
   for (std::size_t i = 0; i + 1 < boundaries.size(); ++i) {
     const Tick begin = boundaries[i];
@@ -211,11 +212,16 @@ TextureMetrics computeTextureMetrics(const std::vector<NoteEvent>& notes) {
     metrics.max_active_voices = std::max(metrics.max_active_voices, active);
     const Tick span = end - begin;
     active_voice_ticks += static_cast<long>(active) * static_cast<long>(span);
+    if (active == 1) {
+      mono_ticks += static_cast<long>(span);
+    }
     total_ticks += static_cast<long>(span);
   }
   metrics.avg_active_voices =
       total_ticks > 0 ? static_cast<double>(active_voice_ticks) / static_cast<double>(total_ticks)
                       : 0.0;
+  metrics.mono_ratio =
+      total_ticks > 0 ? static_cast<double>(mono_ticks) / static_cast<double>(total_ticks) : 0.0;
 
   metrics.voices.reserve(voices.size());
   for (VoiceId voice : voices) {

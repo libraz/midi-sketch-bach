@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -10,6 +11,7 @@
 #include "composer/form_builders.h"
 #include "composer/material.h"
 #include "composer/span.h"
+#include "composer/texture_helpers.h"
 #include "composer/voice_intent.h"
 #include "core/basic_types.h"
 
@@ -291,6 +293,129 @@ void appendFigurationBar(FigurationSection& section, int bar, const BarChord& ch
   });
 }
 
+// ----- Chorale prelude walking-bass (Schubler BWV645 model) ----------------
+//
+// The Schubler "Wachet auf" texture is a three-layer fabric: a running upper
+// figuration (V0), the chorale tune in the middle (V1, the immutable cantus
+// firmus), and a quarter-note walking bass below (V2) that connects the chord
+// roots stepwise. This is the third layer: a continuous quarter-note line whose
+// bar downbeat is the bar chord's root and whose intermediate beats step
+// diatonically toward the next bar's root, kept consonant and parallel-free
+// against both upper voices via the shared texture machinery.
+
+// Walking-bass register band: C2-B2, strictly below the C3-region cantus firmus
+// (whose lowest tone is C3 = 48), so the bass never crosses V1 and voice order
+// V0 (C4+) > V1 (C3-region) > V2 (C2) holds at every tick.
+constexpr int kBassBandLo = 36;  // C2.
+constexpr int kBassBandHi = 47;  // B2.
+
+// Fit a pitch class to the MIDI pitch inside [lo, hi] nearest a center.
+int fitPcToBand(int pitch_class, int center, int lo, int hi) {
+  const int base = ((pitch_class % 12) + 12) % 12;
+  int best = -1;
+  int best_dist = 1 << 20;
+  for (int oct = lo - 12; oct <= hi + 12; oct += 12) {
+    const int cand = base + oct;
+    if (cand < lo || cand > hi)
+      continue;
+    const int dist = std::abs(cand - center);
+    if (dist < best_dist) {
+      best_dist = dist;
+      best = cand;
+    }
+  }
+  if (best < 0)
+    best = std::min(std::max(base + 12 * ((center - base) / 12), lo), hi);
+  return best;
+}
+
+// Build the V2 walking bass over all `bars` bars and append it to `out_notes`.
+// Each bar opens on the bar chord's root (a quarter note on the downbeat),
+// fitted into the bass band nearest the running cursor. The remaining three
+// beats of the bar step diatonically toward the NEXT bar's root, each anchor
+// chosen with the shared tier-scored consonantChordTone so it stays consonant
+// with the concurrent V0 / V1 tones and forms no parallel/hidden perfect against
+// them. The registry already holds V0 (figuration) and V1 (embellished cantus
+// firmus). Repeated-pitch runs are bounded by a run-aware nudge: a static
+// harmony that would otherwise sustain the root is broken by a single diatonic
+// neighbour so no quarter-note run exceeds the corpus ceiling.
+void appendWalkingBass(std::vector<MaterialNote>& out_notes, ThemeToneRegistry& registry,
+                       const std::vector<BarChord>& bar_chords, Mode mode) {
+  const int bars = static_cast<int>(bar_chords.size());
+  int cursor = (kBassBandLo + kBassBandHi) / 2;
+  int line_prev = -1;
+  int prev_pitch = -1;
+  int run_len = 0;
+  std::vector<int> theme_pitches;
+  std::vector<ConcurrentMotion> motions;
+
+  for (int bar = 0; bar < bars; ++bar) {
+    const BarChord& chord = bar_chords[static_cast<std::size_t>(bar)];
+    detail::ChordSpec spec;
+    spec.root_pc = chord.root_pc;
+    spec.minor = chord.minor;
+    // Target the next bar's root (its band-fit pitch) so the intermediate beats
+    // walk stepwise toward it; the final bar holds toward its own root.
+    const BarChord& next_chord =
+        bar_chords[static_cast<std::size_t>(bar + 1 < bars ? bar + 1 : bar)];
+    const int next_root = fitPcToBand(next_chord.root_pc, cursor, kBassBandLo, kBassBandHi);
+
+    for (int beat = 0; beat < 4; ++beat) {
+      const Tick beat_tick = barTick(bar) + static_cast<Tick>(beat) * kTicksPerBeat;
+      const Tick prev_tick = beat_tick - kTicksPerBeat;
+      theme_pitches.clear();
+      motions.clear();
+      registry.concurrentThemePitches(beat_tick, /*voice=*/2, theme_pitches);
+      registry.concurrentMotions(prev_tick, beat_tick, /*voice=*/2, /*num_voices=*/3, motions);
+
+      int pitch;
+      if (beat == 0) {
+        // Downbeat: the bar chord's root in the bass band. A walking bass states
+        // the harmony's root on each downbeat (the BWV645 foundation); the root
+        // is consonant with the upper chord-tone voices by construction, so it is
+        // emitted directly rather than allowing a chord-tone substitution that
+        // would weaken the harmonic anchor.
+        pitch = fitPcToBand(chord.root_pc, cursor, kBassBandLo, kBassBandHi);
+      } else {
+        // Intermediate beat: step one diatonic degree from the cursor toward the
+        // next bar's root (a passing tone), then pick the nearest consonant,
+        // parallel-free diatonic tone to that step target.
+        int step_target = cursor;
+        if (next_root > cursor)
+          step_target = detail::inScale(cursor + 1, mode) ? cursor + 1 : cursor + 2;
+        else if (next_root < cursor)
+          step_target = detail::inScale(cursor - 1, mode) ? cursor - 1 : cursor - 2;
+        step_target = std::min(std::max(step_target, kBassBandLo), kBassBandHi);
+        pitch = consonantChordTone(spec, /*voice=*/2, kBassBandLo, kBassBandHi, step_target,
+                                   theme_pitches, line_prev, motions, mode, /*downbeat=*/false);
+      }
+
+      // Run-aware nudge: a static harmony (repeated root) or a held passing tone
+      // can repeat the previous pitch. Cap any quarter-note run at three by
+      // displacing a fourth identical OFF-BEAT pitch to a consonant diatonic
+      // neighbour. Downbeats are exempt (the root statement is the bar's harmonic
+      // anchor and must not be displaced); the off-beat fills carry the variety.
+      const bool repeats = (pitch == prev_pitch);
+      if (repeats && beat != 0 && run_len >= 2) {
+        const int up =
+            (pitch + 2 <= kBassBandHi && detail::inScale(pitch + 2, mode)) ? pitch + 2 : -1;
+        const int down =
+            (pitch - 2 >= kBassBandLo && detail::inScale(pitch - 2, mode)) ? pitch - 2 : -1;
+        const int nudged = (up >= 0) ? up : down;
+        if (nudged >= 0)
+          pitch = nudged;
+      }
+      run_len = (pitch == prev_pitch) ? run_len + 1 : 0;
+
+      out_notes.push_back(materialNote(beat_tick, kQuarterDur, pitch));
+      registry.record(beat_tick, /*voice=*/2, pitch, kQuarterDur);
+      line_prev = pitch;
+      prev_pitch = pitch;
+      cursor = pitch;
+    }
+  }
+}
+
 }  // namespace
 
 HarnessFixture buildChoralePreludeForm(const ResolvedRequest& req) {
@@ -352,7 +477,87 @@ HarnessFixture buildChoralePreludeForm(const ResolvedRequest& req) {
       return detail::inScale(from - 1, mode) ? from - 1 : from - 2;
     return from;
   };
+
+  // V0 figuration: one FigurationSection covering all `bars` bars, a
+  // predominantly-stepwise scalar wave riding ABOVE the CF. Density follows the
+  // arc (eighths in calm cycles, sixteenths into the climax) and the register
+  // lifts with the arc register shift; Noble figuration prefers a denser dotted
+  // feel realized as the sixteenth subdivision. Each bar's downbeat snaps to a
+  // chord tone, so figuration_harmonic_consistency stays clean. Built BEFORE the
+  // CF embellishment so a run-breaking CF substitution can be checked consonant
+  // and parallel-free against the concurrently sounding figuration.
   const int cycle_count = static_cast<int>(req.cycle_count);
+  FigurationSection fig;
+  fig.voice = 0;
+  fig.start_tick = 0;
+  fig.end_tick = barTick(bars);
+  for (int bar = 0; bar < bars; ++bar) {
+    const int cycle = cycle_count > 0 ? (bar * cycle_count) / bars : 0;
+    const ArcPoint point = req.arc(static_cast<std::size_t>(cycle));
+    int notes_per_beat = notesPerBeatFor(point, profile.density_bias);
+    if (profile.prefer_dotted)
+      notes_per_beat = 4;  // Noble: a busier, dotted-feel running figuration.
+    // Register base stays at C4 (60) plus the arc register lift, comfortably
+    // above the C3-region cantus firmus.
+    const int register_base = 60 + static_cast<int>(point.register_shift);
+    appendFigurationBar(fig, bar, bar_chords[static_cast<std::size_t>(bar)], mode, notes_per_beat,
+                        register_base, offset);
+  }
+
+  // V0 figuration registry for the embellishment loop's run-break consonance
+  // check. (V2 is selected AFTER this loop against a registry pre-loaded with
+  // V0+V1, so the bass adapts to whatever the CF substitutes settle on.)
+  ThemeToneRegistry fig_registry;
+  for (const MaterialNote& note : fig.notes)
+    fig_registry.record(note.start_tick, /*voice=*/0, static_cast<int>(note.pitch), note.duration);
+
+  // The maximum allowed run of identical V1 pitches. The texture gate caps
+  // repeated runs at four, so a fourth consecutive identical pitch is displaced
+  // to a consonant diatonic neighbour. Tracked across the whole V1 line (the
+  // half-note skeleton tone plus the beat-2/beat-3 chord tones), so same-degree
+  // adjacent bars no longer chain a plain `tone,tone,tone` figure into a long run.
+  constexpr int kMaxV1Run = 4;
+  int v1_prev = -1;  // previous sounding V1 pitch.
+  int v1_run = 0;    // length of the current identical-pitch run (1-based).
+
+  // Track a V1 pitch as it is emitted, returning a (possibly substituted) pitch
+  // whose addition does not extend an identical-pitch run past kMaxV1Run. When
+  // the candidate would be the kMaxV1Run-th identical pitch, it is displaced to
+  // the nearest consonant, parallel-free diatonic NEIGHBOUR (upper preferred,
+  // then lower) of the candidate. The substitute is a step away from the
+  // structural tone and resolves back on the following beat, the standard chorale
+  // embellishment vocabulary. The downbeat skeleton tone is never passed here, so
+  // the immutable bar-head pitch is preserved.
+  auto breakRun = [&](int cand, const BarChord& chord, Tick onset) -> int {
+    const bool repeats = (cand == v1_prev);
+    int chosen = cand;
+    if (repeats && v1_run + 1 >= kMaxV1Run) {
+      // Concurrent V0 figuration pitch at this onset (for consonance / parallels).
+      const int fig_now = fig_registry.soundingPitchInVoice(/*voice=*/0, onset);
+      const int fig_prev = fig_registry.soundingPitchInVoice(/*voice=*/0, onset - kQuarterDur);
+      // Candidate neighbours: a whole/half step up, then down, staying diatonic.
+      const int up = detail::inScale(cand + 1, mode) ? cand + 1 : cand + 2;
+      const int down = detail::inScale(cand - 1, mode) ? cand - 1 : cand - 2;
+      for (int neighbour : {up, down}) {
+        if (neighbour == cand)
+          continue;
+        if (fig_now >= 0 && !isConsonantPair(neighbour, fig_now))
+          continue;
+        if (fig_now >= 0 && formsPerfectParallel(v1_prev, neighbour, fig_prev, fig_now))
+          continue;
+        chosen = neighbour;
+        break;
+      }
+      // Keep the substitute a real chord-bracketed neighbour: if neither neighbour
+      // is admissible, fall back to a chord tone above so the beat stays consonant.
+      if (chosen == cand)
+        chosen = chordToneAbove(cand, chord.root_pc, chord.minor);
+    }
+    v1_run = (chosen == v1_prev) ? v1_run + 1 : 1;
+    v1_prev = chosen;
+    return chosen;
+  };
+
   for (int bar = 0; bar < bars; ++bar) {
     const int tone = skeleton[static_cast<std::size_t>(bar)].pitch;
     const BarChord& chord = bar_chords[static_cast<std::size_t>(bar)];
@@ -370,56 +575,75 @@ HarnessFixture buildChoralePreludeForm(const ResolvedRequest& req) {
     const int beat2 = nearestChordTone(tone + 1, chord);
     const int beat3 = nearestChordTone(tone, chord);
 
-    // Downbeat skeleton tone, held as a half note (beats 0-1).
+    // Downbeat skeleton tone, held as a half note (beats 0-1). The skeleton tone
+    // is immutable, so it is never substituted; it still advances the run tracker
+    // so a chain that continues through the bar head is counted.
     out.material.cf_embellished.push_back(materialNote(base, kHalf, tone));
+    v1_run = (tone == v1_prev) ? v1_run + 1 : 1;
+    v1_prev = tone;
     if (activity >= 3) {
       // Dense: chord-tone beats with a stepwise passing eighth on each off-beat.
-      const int off2 = stepToward(beat2, beat3);
-      const int off3 = stepToward(beat3, tone);
-      out.material.cf_embellished.push_back(materialNote(base + kHalf, kEighth, beat2));
+      // The stepwise off-beats already break repetition; the run-break guard on
+      // the two chord-tone beats keeps a long static figure from chaining.
+      const int b2 = breakRun(beat2, chord, base + kHalf);
+      const int off2 = stepToward(b2, beat3);
+      out.material.cf_embellished.push_back(materialNote(base + kHalf, kEighth, b2));
       out.material.cf_embellished.push_back(materialNote(base + kHalf + kEighth, kEighth, off2));
-      out.material.cf_embellished.push_back(
-          materialNote(base + kHalf + 2 * kEighth, kEighth, beat3));
+      // The passing eighth advances the run tracker so the next beat sees it.
+      v1_run = (off2 == v1_prev) ? v1_run + 1 : 1;
+      v1_prev = off2;
+      const int b3 = breakRun(beat3, chord, base + kHalf + 2 * kEighth);
+      const int off3 = stepToward(b3, tone);
+      out.material.cf_embellished.push_back(materialNote(base + kHalf + 2 * kEighth, kEighth, b3));
       out.material.cf_embellished.push_back(
           materialNote(base + kHalf + 3 * kEighth, kEighth, off3));
+      v1_run = (off3 == v1_prev) ? v1_run + 1 : 1;
+      v1_prev = off3;
     } else {
-      // Plain: two quarter chord tones on beats 2 and 3.
-      out.material.cf_embellished.push_back(materialNote(base + kHalf, kQuarterDur, beat2));
+      // Plain: two quarter chord tones on beats 2 and 3, each run-break guarded so
+      // a same-degree run never exceeds four identical pitches.
+      const int b2 = breakRun(beat2, chord, base + kHalf);
+      out.material.cf_embellished.push_back(materialNote(base + kHalf, kQuarterDur, b2));
+      const int b3 = breakRun(beat3, chord, base + kHalf + kQuarterDur);
       out.material.cf_embellished.push_back(
-          materialNote(base + kHalf + kQuarterDur, kQuarterDur, beat3));
+          materialNote(base + kHalf + kQuarterDur, kQuarterDur, b3));
     }
   }
   out.material.cf_is_embellished = true;
   out.material.cf_placement = 1;  // Tenor (documentary).
 
-  // V0 figuration: one FigurationSection covering all `bars` bars, a
-  // predominantly-stepwise scalar wave riding ABOVE the CF. Density follows the
-  // arc (eighths in calm cycles, sixteenths into the climax) and the register
-  // lifts with the arc register shift; Noble figuration prefers a denser dotted
-  // feel realized as the sixteenth subdivision. Each bar's downbeat snaps to a
-  // chord tone, so figuration_harmonic_consistency stays clean.
-  FigurationSection fig;
-  fig.voice = 0;
-  fig.start_tick = 0;
-  fig.end_tick = barTick(bars);
-  for (int bar = 0; bar < bars; ++bar) {
-    const int cycle = cycle_count > 0 ? (bar * cycle_count) / bars : 0;
-    const ArcPoint point = req.arc(static_cast<std::size_t>(cycle));
-    int notes_per_beat = notesPerBeatFor(point, profile.density_bias);
-    if (profile.prefer_dotted)
-      notes_per_beat = 4;  // Noble: a busier, dotted-feel running figuration.
-    // Register base stays at C4 (60) plus the arc register lift, comfortably
-    // above the C3-region cantus firmus.
-    const int register_base = 60 + static_cast<int>(point.register_shift);
-    appendFigurationBar(fig, bar, bar_chords[static_cast<std::size_t>(bar)], mode, notes_per_beat,
-                        register_base, offset);
-  }
+  // Publish the figuration section built above (before the embellishment loop).
   out.material.figuration_sections.push_back(fig);
 
+  // V2 walking bass (Schubler BWV645 third layer): a quarter-note bass line
+  // connecting the chord roots stepwise, sitting in the C2 band well below the
+  // cantus firmus. Built AFTER V0 (figuration) and V1 (embellished cantus
+  // firmus) are recorded in the registry, so each anchor is selected consonant
+  // and parallel-free against both upper voices. The bass carries the
+  // TrioVoiceCarrier intent (verbatim replay, stamping TrioVoiceIndependent),
+  // matching the Goldberg / passacaglia middle-voice precedent in this tree:
+  // because it is the ONLY voice carrying that bit, voice_independence_threshold
+  // (which needs >= 2 such voices) stays inert -- no soft-fail is introduced.
+  ThemeToneRegistry bass_registry;
+  for (const MaterialNote& note : fig.notes)
+    bass_registry.record(note.start_tick, /*voice=*/0, static_cast<int>(note.pitch), note.duration);
+  for (const MaterialNote& note : out.material.cf_embellished)
+    bass_registry.record(note.start_tick, /*voice=*/1, static_cast<int>(note.pitch), note.duration);
+  std::vector<MaterialNote> bass_notes;
+  bass_notes.reserve(static_cast<std::size_t>(bars) * 4);
+  appendWalkingBass(bass_notes, bass_registry, bar_chords, mode);
+  TrioVoiceLine bass_line;
+  bass_line.voice = 2;
+  bass_line.manual = 3;  // documentary (Pedal): V2 = lowest line.
+  bass_line.notes = std::move(bass_notes);
+  out.material.trio_voices.push_back(std::move(bass_line));
+
   // VoicePlan: V0 one FigurationCarrier span over all bars; V1 one
-  // CantusFirmusCarrier span over all bars. V0 (figuration, C4+) stays above V1
-  // (cantus firmus, C3-region), so no voice crossing occurs.
-  out.voice_plan.num_voices = 2;
+  // CantusFirmusCarrier span over all bars; V2 one TrioVoiceCarrier span (the
+  // walking bass) over all bars. Register order V0 (figuration, C4+) >
+  // V1 (cantus firmus, C3-region) > V2 (walking bass, C2) holds at every tick,
+  // so no voice crossing occurs.
+  out.voice_plan.num_voices = 3;
   Span fig_span;
   fig_span.id = 0;
   fig_span.start_tick = 0;
@@ -437,6 +661,15 @@ HarnessFixture buildChoralePreludeForm(const ResolvedRequest& req) {
   cf_span.intent = VoiceIntent::CantusFirmusCarrier;
   cf_span.subdivision = Subdivision::Quarter;
   out.voice_plan.spans.push_back(cf_span);
+
+  Span bass_span;
+  bass_span.id = 2;
+  bass_span.start_tick = 0;
+  bass_span.end_tick = barTick(bars);
+  bass_span.voice = 2;
+  bass_span.intent = VoiceIntent::TrioVoiceCarrier;
+  bass_span.subdivision = Subdivision::Quarter;
+  out.voice_plan.spans.push_back(bass_span);
 
   return out;
 }

@@ -21,6 +21,7 @@ set(BACH_COMPOSER_TEST_SOURCES
   chord_voicing_test.cpp
   validator_test.cpp
   candidate_search_test.cpp
+  texture_helpers_test.cpp
   texture_expression_test.cpp
   composer_nct_test.cpp
   arpeggio_flow_test.cpp

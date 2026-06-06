@@ -28,6 +28,11 @@ class TextureMetricsTest(unittest.TestCase):
         metrics = texture_metrics.compute_texture_metrics(notes)
         self.assertEqual(metrics.max_active_voices, 2)
         self.assertAlmostEqual(metrics.avg_active_voices, 1.8)
+        # The span is [0, 2400] (480 ticks short of bar 2 onset at 1920+480).
+        # Voice 0 has a gap over [1440, 1920] where only voice 1 sounds, so that
+        # single 480-tick segment is monophonic; every other segment has both
+        # voices. mono_ratio = 480 / 2400 = 0.2.
+        self.assertAlmostEqual(metrics.mono_ratio, 0.2)
         self.assertEqual(metrics.compass_violation_count, 1)
         self.assertAlmostEqual(metrics.register_overlap_ratio, 0.0)
         self.assertEqual(len(metrics.voices), 2)
@@ -45,6 +50,7 @@ class TextureMetricsTest(unittest.TestCase):
         self.assertEqual(metrics.to_dict(), {
             "max_active_voices": 0,
             "avg_active_voices": 0.0,
+            "mono_ratio": 0.0,
             "compass_violation_count": 0,
             "register_overlap_ratio": 0.0,
             "voices": [],

@@ -148,6 +148,9 @@ TEST(ValidatorTest, ReportsTextureMetricsAsInfoMetrics) {
   const TextureMetrics& metrics = r.texture_metrics[0];
   EXPECT_EQ(metrics.max_active_voices, 2);
   EXPECT_NEAR(metrics.avg_active_voices, 1.8, 0.0001);
+  // One segment [1440,1920) of width 480 over total span 2400 has exactly one
+  // active voice (voice 1 sustains while voice 0 rests): 480 / 2400 = 0.2.
+  EXPECT_NEAR(metrics.mono_ratio, 0.2, 0.0001);
   EXPECT_EQ(metrics.compass_violation_count, 1);
   EXPECT_NEAR(metrics.register_overlap_ratio, 0.0, 0.0001);
   ASSERT_EQ(metrics.voices.size(), 2u);
@@ -159,6 +162,63 @@ TEST(ValidatorTest, ReportsTextureMetricsAsInfoMetrics) {
   EXPECT_EQ(metrics.voices[1].voice, 1);
   EXPECT_NEAR(metrics.voices[1].silence_ratio, 0.0, 0.0001);
   EXPECT_EQ(metrics.voices[1].max_repeated_run, 1);
+}
+
+TEST(ValidatorTest, MonoRatioIsOneForSingleVoicePiece) {
+  // A purely monophonic line: exactly one voice sounds across the whole span.
+  std::vector<NoteEvent> notes = {
+      makeNote(0, kTicksPerBeat, 60, 0),
+      makeNote(kTicksPerBeat, kTicksPerBeat, 62, 0),
+      makeNote(kTicksPerBeat * 2, kTicksPerBeat, 64, 0),
+  };
+  std::vector<NoteProvenance> prov(notes.size(), makeProv(0, NoteSource::Material));
+
+  ValidationReport r = Validator{}.validate(notes, prov, cMajorWhole());
+  ASSERT_EQ(r.texture_metrics.size(), 1u);
+  EXPECT_NEAR(r.texture_metrics[0].mono_ratio, 1.0, 0.0001);
+}
+
+TEST(ValidatorTest, MonoRatioIsZeroForConstantTwoVoiceTexture) {
+  // Two voices sound together for the entire span: never exactly one active.
+  std::vector<NoteEvent> notes = {
+      makeNote(0, kTicksPerBeat * 2, 60, 0),
+      makeNote(kTicksPerBeat * 2, kTicksPerBeat * 2, 62, 0),
+      makeNote(0, kTicksPerBeat * 2, 48, 1),
+      makeNote(kTicksPerBeat * 2, kTicksPerBeat * 2, 50, 1),
+  };
+  std::vector<NoteProvenance> prov(notes.size(), makeProv(0, NoteSource::Material));
+
+  ValidationReport r = Validator{}.validate(notes, prov, cMajorWhole());
+  ASSERT_EQ(r.texture_metrics.size(), 1u);
+  EXPECT_NEAR(r.texture_metrics[0].mono_ratio, 0.0, 0.0001);
+}
+
+TEST(ValidatorTest, MonoRatioIsHalfForHalfMonoHalfDuo) {
+  // First half: two voices sound together (active = 2). Second half: only
+  // voice 0 sounds (active = 1). Equal tick widths -> mono_ratio = 0.5.
+  std::vector<NoteEvent> notes = {
+      makeNote(0, kTicksPerBeat * 2, 60, 0),
+      makeNote(kTicksPerBeat * 2, kTicksPerBeat * 2, 62, 0),
+      makeNote(0, kTicksPerBeat * 2, 48, 1),
+  };
+  std::vector<NoteProvenance> prov(notes.size(), makeProv(0, NoteSource::Material));
+
+  ValidationReport r = Validator{}.validate(notes, prov, cMajorWhole());
+  ASSERT_EQ(r.texture_metrics.size(), 1u);
+  EXPECT_NEAR(r.texture_metrics[0].mono_ratio, 0.5, 0.0001);
+}
+
+TEST(ValidatorTest, MonoRatioDefaultsToZero) {
+  // The validator emits no texture metrics for empty input; the metric's
+  // empty-input contract is the default-constructed value of 0.0.
+  std::vector<NoteEvent> notes;
+  std::vector<NoteProvenance> prov;
+
+  ValidationReport r = Validator{}.validate(notes, prov, cMajorWhole());
+  EXPECT_TRUE(r.texture_metrics.empty());
+
+  const TextureMetrics empty_metrics;
+  EXPECT_NEAR(empty_metrics.mono_ratio, 0.0, 0.0001);
 }
 
 TEST(ValidatorTest, StrongBeatConsonancePasses) {

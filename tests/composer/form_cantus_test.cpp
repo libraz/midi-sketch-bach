@@ -18,6 +18,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <map>
@@ -223,6 +224,141 @@ TEST(FormCantusChorale, FigurationStaysAboveCantusFirmus) {
   }
 }
 
+// --- Schubler BWV645 three-layer chorale prelude (V2 walking bass) ----------
+
+// The chorale prelude is now a three-layer Schubler texture: V0 figuration,
+// V1 cantus firmus, and a V2 walking bass. The fixture builds three voices and
+// every note carrying a voice-2 onset must exist (the bass is continuous), even
+// though the FormSpec voice count stays 2 (the declared, immutable per-form
+// value -- the passacaglia precedent builds 3 voices from a 2-voice FormSpec).
+TEST(FormCantusChorale, ThreeVoiceWalkingBassPresentAndValidatesClean) {
+  for (bool minor : {false, true}) {
+    for (std::uint32_t seed : kSeeds) {
+      const HarnessFixture fx =
+          build(FormType::ChoralePrelude, minor, choraleCharacter(minor), 16, seed);
+      EXPECT_EQ(fx.voice_plan.num_voices, 3) << "minor=" << minor << " seed=" << seed;
+      const ComposeResult r = Composer{}.run(fx.material, fx.harmony, fx.voice_plan);
+      EXPECT_EQ(r.validation.status, ValidationStatus::Ok)
+          << "minor=" << minor << " seed=" << seed << " first="
+          << (r.validation.failures.empty() ? "" : r.validation.failures.front().rule_id);
+      bool saw_v2 = false;
+      for (const auto& n : r.notes) {
+        if (n.voice == 2) {
+          saw_v2 = true;
+          break;
+        }
+      }
+      EXPECT_TRUE(saw_v2) << "minor=" << minor << " seed=" << seed << " missing walking bass (V2)";
+    }
+  }
+}
+
+// The cantus firmus (V1) is immutable: adding the V2 walking bass must not
+// perturb any V1 note. Cross-check that every V1 downbeat still equals the
+// skeleton tone (the 2-voice-era contract) AND that the full V1 line is
+// produced -- the bass is an additive layer, never a CF edit.
+TEST(FormCantusChorale, WalkingBassLeavesCantusFirmusUnchanged) {
+  for (bool minor : {false, true}) {
+    for (std::uint32_t seed : kSeeds) {
+      const HarnessFixture fx =
+          build(FormType::ChoralePrelude, minor, choraleCharacter(minor), 16, seed);
+      const ComposeResult r = Composer{}.run(fx.material, fx.harmony, fx.voice_plan);
+      const int bars = static_cast<int>(fx.material.cantus_firmus.size());
+      ASSERT_GT(bars, 0);
+      // The replayed V1 line must be exactly the embellished CF material
+      // (pitch, tick, duration) -- the walking bass adds V2 only.
+      std::vector<NoteEvent> v1;
+      for (const auto& n : r.notes)
+        if (n.voice == 1)
+          v1.push_back(n);
+      ASSERT_EQ(v1.size(), fx.material.cf_embellished.size())
+          << "minor=" << minor << " seed=" << seed;
+      std::sort(v1.begin(), v1.end(),
+                [](const NoteEvent& a, const NoteEvent& b) { return a.start_tick < b.start_tick; });
+      for (std::size_t i = 0; i < v1.size(); ++i) {
+        EXPECT_EQ(v1[i].pitch, fx.material.cf_embellished[i].pitch) << "i=" << i;
+        EXPECT_EQ(v1[i].start_tick, fx.material.cf_embellished[i].start_tick) << "i=" << i;
+        EXPECT_EQ(v1[i].duration, fx.material.cf_embellished[i].duration) << "i=" << i;
+      }
+      // Every CF bar downbeat still equals the immutable skeleton tone.
+      for (int bar = 0; bar < bars; ++bar) {
+        const Tick db = static_cast<Tick>(bar) * kTicksPerBar;
+        for (const auto& n : v1) {
+          if (n.start_tick == db) {
+            EXPECT_EQ(n.pitch, fx.material.cantus_firmus[static_cast<std::size_t>(bar)].pitch)
+                << "minor=" << minor << " seed=" << seed << " bar " << bar;
+            break;
+          }
+        }
+      }
+    }
+  }
+}
+
+// The walking bass anchors each bar on the chord root: at every bar downbeat the
+// V2 onset's pitch class equals the bar chord's root pitch class.
+TEST(FormCantusChorale, WalkingBassDownbeatIsChordRoot) {
+  for (bool minor : {false, true}) {
+    for (std::uint32_t seed : kSeeds) {
+      const HarnessFixture fx =
+          build(FormType::ChoralePrelude, minor, choraleCharacter(minor), 16, seed);
+      const ComposeResult r = Composer{}.run(fx.material, fx.harmony, fx.voice_plan);
+      // Bar-downbeat chord root pitch classes from the harmonic plan.
+      std::map<Tick, std::uint8_t> root_at;
+      for (const auto& ch : fx.harmony.chords)
+        root_at[ch.start_tick] = static_cast<std::uint8_t>(ch.root_pc % 12);
+      for (const auto& n : r.notes) {
+        if (n.voice != 2 || n.start_tick % kTicksPerBar != 0)
+          continue;
+        const auto it = root_at.find(n.start_tick);
+        ASSERT_NE(it, root_at.end()) << "no chord at downbeat tick " << n.start_tick;
+        EXPECT_EQ(n.pitch % 12, it->second)
+            << "minor=" << minor << " seed=" << seed << " bass downbeat not chord root at tick "
+            << n.start_tick;
+      }
+    }
+  }
+}
+
+// The walking bass never crosses the cantus firmus: at every shared onset the V2
+// bass pitch is strictly below the concurrently sounding V1 cantus-firmus pitch,
+// so register order V1 > V2 holds (no voice crossing).
+TEST(FormCantusChorale, WalkingBassNeverCrossesCantusFirmus) {
+  for (bool minor : {false, true}) {
+    for (std::uint32_t seed : kSeeds) {
+      const HarnessFixture fx =
+          build(FormType::ChoralePrelude, minor, choraleCharacter(minor), 16, seed);
+      const ComposeResult r = Composer{}.run(fx.material, fx.harmony, fx.voice_plan);
+      // Sounding V1 pitch at a tick: the latest V1 onset whose window covers it.
+      auto v1_sounding = [&](Tick at) -> int {
+        int pitch = -1;
+        Tick best = 0;
+        bool found = false;
+        for (const auto& n : r.notes) {
+          if (n.voice != 1)
+            continue;
+          if (n.start_tick <= at && at < n.start_tick + n.duration &&
+              (!found || n.start_tick > best)) {
+            found = true;
+            best = n.start_tick;
+            pitch = n.pitch;
+          }
+        }
+        return pitch;
+      };
+      for (const auto& n : r.notes) {
+        if (n.voice != 2)
+          continue;
+        const int cf = v1_sounding(n.start_tick);
+        if (cf < 0)
+          continue;  // no CF sounding here.
+        EXPECT_LT(n.pitch, cf) << "minor=" << minor << " seed=" << seed
+                               << " bass crosses cantus firmus at tick " << n.start_tick;
+      }
+    }
+  }
+}
+
 // Embellishment density rises with the arc: a CF bar in a high-arc-density cycle
 // carries strictly more embellishment notes than a bar in a low-density cycle.
 // Use a long piece so the arc spans the full Establish -> Climax range.
@@ -251,6 +387,35 @@ TEST(FormCantusChorale, EmbellishmentDensityRisesWithArc) {
   }
   EXPECT_GT(max_density, min_density) << "embellishment density is flat across the arc";
   (void)cycle_count;
+}
+
+// The embellished cantus firmus (V1) never sustains a long static run: across a
+// seed sweep x both modes, the longest run of identical adjacent V1 pitches stays
+// at or below four. A same-degree adjacent bar that would chain a plain
+// `tone,tone,tone` figure into a longer run is broken by a consonant diatonic
+// neighbour, satisfying the texture gate's max_repeated_run <= 4 axis.
+TEST(FormCantusChorale, EmbellishedCantusFirmusRepeatedRunBounded) {
+  for (bool minor : {false, true}) {
+    for (std::uint32_t seed : {1u, 5u, 7u, 13u, 42u, 99u}) {
+      const HarnessFixture fx =
+          build(FormType::ChoralePrelude, minor, choraleCharacter(minor), 16, seed);
+      const ComposeResult r = Composer{}.run(fx.material, fx.harmony, fx.voice_plan);
+      std::vector<NoteEvent> v1;
+      for (const auto& n : r.notes)
+        if (n.voice == 1)
+          v1.push_back(n);
+      std::sort(v1.begin(), v1.end(),
+                [](const NoteEvent& a, const NoteEvent& b) { return a.start_tick < b.start_tick; });
+      int longest = v1.empty() ? 0 : 1;
+      int run = v1.empty() ? 0 : 1;
+      for (std::size_t i = 1; i < v1.size(); ++i) {
+        run = (v1[i].pitch == v1[i - 1].pitch) ? run + 1 : 1;
+        longest = run > longest ? run : longest;
+      }
+      EXPECT_LE(longest, 4) << "minor=" << minor << " seed=" << seed
+                            << " V1 repeated-pitch run exceeds 4";
+    }
+  }
 }
 
 // --- Goldberg structural contracts ------------------------------------------

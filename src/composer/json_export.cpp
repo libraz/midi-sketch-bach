@@ -131,6 +131,8 @@ std::string emitGeneratedJson(const std::vector<NoteEvent>& notes,
         w.value(metrics.max_active_voices);
         w.key("avg_active_voices");
         w.value(metrics.avg_active_voices);
+        w.key("mono_ratio");
+        w.value(metrics.mono_ratio);
         w.key("compass_violation_count");
         w.value(metrics.compass_violation_count);
         w.key("register_overlap_ratio");

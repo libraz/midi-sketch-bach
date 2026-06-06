@@ -24,6 +24,7 @@ class VoiceTextureMetrics:
 class TextureMetrics:
     max_active_voices: int
     avg_active_voices: float
+    mono_ratio: float
     compass_violation_count: int
     register_overlap_ratio: float
     voices: list[VoiceTextureMetrics]
@@ -42,8 +43,28 @@ def _active_at(note: dict[str, int], begin: int, end: int, voice: int) -> bool:
 
 
 def compute_texture_metrics(notes: list[dict[str, int]]) -> TextureMetrics:
+    """Compute piece-level texture metrics from a generated.v1 note array.
+
+    The active-voice analysis decomposes the piece into half-open segments
+    ``[begin, end)`` cut at every note onset and offset boundary (the sorted
+    union of ``start_tick`` and ``start_tick + duration`` over all notes). The
+    measured span is therefore ``[first onset, last offset]``; any silence
+    before the first onset or after the last offset is not part of the piece
+    span. A voice is active in a segment when one of its notes overlaps that
+    segment (``start < end`` and ``begin < start + duration``); a note that
+    only touches a boundary contributes no width. Each segment is weighted by
+    its tick width.
+
+    ``avg_active_voices`` is the tick-weighted mean active-voice count over
+    those segments. ``mono_ratio`` is the tick-weighted fraction of that same
+    span where EXACTLY ONE voice is sounding (segments whose active count is
+    1). Both share the identical segmentation, so they are meter-independent:
+    the result depends only on tick widths, not on ticks-per-bar, so a 3/4
+    passacaglia at 1440 ticks/bar and a 4/4 piece at 1920 ticks/bar are scored
+    on the same basis. With an empty note array both are ``0.0``.
+    """
     if not notes:
-        return TextureMetrics(0, 0.0, 0, 0.0, [])
+        return TextureMetrics(0, 0.0, 0.0, 0, 0.0, [])
 
     voices = sorted({int(note["voice"]) for note in notes})
     boundaries = sorted(
@@ -59,6 +80,7 @@ def compute_texture_metrics(notes: list[dict[str, int]]) -> TextureMetrics:
 
     max_active = 0
     active_voice_ticks = 0
+    mono_ticks = 0
     total_ticks = 0
     for begin, end in zip(boundaries, boundaries[1:]):
         if end <= begin:
@@ -69,6 +91,8 @@ def compute_texture_metrics(notes: list[dict[str, int]]) -> TextureMetrics:
         max_active = max(max_active, active)
         span = end - begin
         active_voice_ticks += active * span
+        if active == 1:
+            mono_ticks += span
         total_ticks += span
 
     voice_metrics: list[VoiceTextureMetrics] = []
@@ -125,6 +149,7 @@ def compute_texture_metrics(notes: list[dict[str, int]]) -> TextureMetrics:
     return TextureMetrics(
         max_active_voices=max_active,
         avg_active_voices=active_voice_ticks / total_ticks if total_ticks > 0 else 0.0,
+        mono_ratio=mono_ticks / total_ticks if total_ticks > 0 else 0.0,
         compass_violation_count=sum(
             1 for note in notes if int(note["pitch"]) < 24 or int(note["pitch"]) > 84
         ),

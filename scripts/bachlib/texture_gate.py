@@ -59,6 +59,92 @@ MIN_PIECE_VOICE_OCCUPANCY = 0.34
 MAX_PARALLEL_PERFECT_COUNT = 12
 
 
+# Fraction of num_voices that the tick-weighted average active-voice count must
+# reach when a form has no explicit min_avg_active. Shared with the fugue gate:
+# 0.66 x 3 = 1.98, close to the historical MIN_AVG_ACTIVE_VOICES floor.
+AVG_ACTIVE_VOICE_FRACTION = 0.66
+
+
+@dataclass(frozen=True)
+class FormThresholds:
+    """Per-form texture targets and whether they gate the exit code.
+
+    A form is enforced when a failure on any of its axes flips the exit code.
+    The fugue forms and the four texture-uplift forms (toccata_and_fugue,
+    fantasia_and_fugue, passacaglia, chorale_prelude) are enforced; an unknown
+    or synthetic form can be left informational so its axes are measured and
+    reported but never cause a FAIL verdict or a nonzero exit. Common floors
+    (avg-active vs voice count, all-voice piece occupancy, repeated-run,
+    parallel, model score) are derived per form in GateCase, so only the
+    form-specific axes live here.
+
+    @field min_avg_active Form-specific floor on the tick-weighted average of
+        simultaneously sounding voices. None falls back to the voice-count
+        floor (0.66 x num_voices) shared with the fugue gate.
+    @field max_mono_ratio Ceiling on the duration-weighted fraction of the
+        piece that is monophonic. None disables the mono axis.
+    @field require_v1_v2_occupancy When True, V1 and V2 piece occupancy must
+        each be at least 0.5 (toccata's dramatic-but-not-thin requirement).
+    @field min_final_quarter_avg_active When set, the final quarter of the
+        piece (by tick span) must average at least this many active voices.
+    @field enforced When True, failures flip the exit code; otherwise the form
+        is informational only.
+    """
+
+    min_avg_active: float | None = None
+    max_mono_ratio: float | None = None
+    require_v1_v2_occupancy: bool = False
+    min_final_quarter_avg_active: float | None = None
+    enforced: bool = True
+
+
+# Texture targets per form. Fugue forms use the historical enforced gate
+# (min_avg_active falls back to the voice-count floor, no mono ceiling). The
+# four non-fugue forms carry the texture-uplift targets; their builders now
+# clear every axis on seeds 1-20, so they are enforced alongside the fugue
+# forms (their threshold values are unchanged from the informational baseline).
+FORM_THRESHOLDS: dict[str, FormThresholds] = {
+    # Fugue forms keep the historical enforced floor (1.95) exactly; the
+    # voice-count floor is not applied to them so their enforcement is
+    # byte-identical to the original gate.
+    "fugue": FormThresholds(min_avg_active=MIN_AVG_ACTIVE_VOICES, enforced=True),
+    "prelude_and_fugue": FormThresholds(
+        min_avg_active=MIN_AVG_ACTIVE_VOICES, enforced=True
+    ),
+    "toccata_and_fugue": FormThresholds(
+        min_avg_active=2.1,
+        max_mono_ratio=0.25,
+        require_v1_v2_occupancy=True,
+        enforced=True,
+    ),
+    "fantasia_and_fugue": FormThresholds(
+        min_avg_active=2.3,
+        max_mono_ratio=0.10,
+        enforced=True,
+    ),
+    "passacaglia": FormThresholds(
+        min_avg_active=2.2,
+        max_mono_ratio=0.15,
+        min_final_quarter_avg_active=2.5,
+        enforced=True,
+    ),
+    "chorale_prelude": FormThresholds(
+        min_avg_active=2.5,
+        max_mono_ratio=0.05,
+        enforced=True,
+    ),
+}
+
+
+def thresholds_for(form: str) -> FormThresholds:
+    """Return the texture targets for `form`.
+
+    Unknown forms default to the enforced fugue-style gate (voice-count floor,
+    no mono ceiling) so a new form is never silently treated as informational.
+    """
+    return FORM_THRESHOLDS.get(form, FormThresholds(enforced=True))
+
+
 @dataclass
 class GateCase:
     form: str
@@ -66,6 +152,10 @@ class GateCase:
     generated: bool
     max_active_voices: int = 0
     avg_active_voices: float = 0.0
+    mono_ratio: float = 0.0
+    # Number of distinct voices in the generated output. Read from the notes,
+    # not hardcoded, so the voice-count floors track 2- vs 3-voice forms.
+    num_voices: int = 0
     max_silence_ratio: float = 0.0
     v2_silence_ratio: float = 1.0
     max_repeated_run: int = 0
@@ -76,6 +166,8 @@ class GateCase:
     # distinct from the window-relative silence_ratio in texture_metrics.
     piece_voice_occupancy: dict[int, float] | None = None
     min_piece_voice_occupancy: float = 0.0
+    # Tick-weighted average active voices over the final quarter of the span.
+    final_quarter_avg_active: float = 0.0
     middle_entry_bars: list[int] | None = None
     entry_intervals: list[int] | None = None
     entry_plan_nonperiodic: bool = False
@@ -91,6 +183,32 @@ class GateCase:
     # not gate on the model score so an absent scorer cannot mask a texture fail.
     model_score: float = -1.0
     error: str = ""
+
+    @property
+    def thresholds(self) -> FormThresholds:
+        return thresholds_for(self.form)
+
+    @property
+    def enforced(self) -> bool:
+        """Whether this form's verdict participates in the exit code."""
+        return self.thresholds.enforced
+
+    @property
+    def min_avg_active(self) -> float:
+        """Effective average-active floor.
+
+        The voice-count floor (0.66 x num_voices) is a common floor for every
+        form. A form-specific target raises it further; the fugue forms pin the
+        explicit value at the historical 1.95 and the voice-count floor is not
+        applied to them so their enforcement is unchanged.
+        """
+        explicit = self.thresholds.min_avg_active
+        if self.form in ("fugue", "prelude_and_fugue"):
+            return explicit if explicit is not None else MIN_AVG_ACTIVE_VOICES
+        floor = AVG_ACTIVE_VOICE_FRACTION * self.num_voices
+        if explicit is None:
+            return floor
+        return max(explicit, floor)
 
     @property
     def model_scored(self) -> bool:
@@ -115,25 +233,73 @@ class GateCase:
         """Whether the parallel perfect-5th/8th count is within the corpus ceiling."""
         return self.parallel_perfect_count <= MAX_PARALLEL_PERFECT_COUNT
 
+    def axis_results(self) -> dict[str, bool]:
+        """Per-axis pass/fail map for this case, keyed by axis name.
+
+        Every axis is evaluated for every form regardless of enforcement; the
+        report shows the full map for both enforced and informational forms.
+        Axes that do not apply to a form (no mono ceiling, no final-quarter
+        floor, etc.) are omitted rather than reported as a pass.
+        """
+        thresholds = self.thresholds
+        results: dict[str, bool] = {
+            "generated": self.generated,
+            "max_active_voices": self.max_active_voices == self.num_voices,
+            "max_repeated_run": self.max_repeated_run <= 4,
+            "avg_active_voices": self.avg_active_voices >= self.min_avg_active,
+            "min_piece_voice_occupancy": (
+                self.min_piece_voice_occupancy >= MIN_PIECE_VOICE_OCCUPANCY
+            ),
+            "parallel_perfect": self.passes_parallel,
+            "model_score": self.passes_model_score,
+        }
+        # The v2 silence axis only applies to the 3-voice fugue gate; the
+        # mono-ratio ceiling supersedes it for the uplift forms.
+        if thresholds.max_mono_ratio is None:
+            results["v2_silence_ratio"] = self.v2_silence_ratio <= 0.25
+        else:
+            results["mono_ratio"] = self.mono_ratio <= thresholds.max_mono_ratio
+        if thresholds.require_v1_v2_occupancy:
+            occupancy = self.piece_voice_occupancy or {}
+            results["v1_v2_occupancy"] = (
+                occupancy.get(1, 0.0) >= 0.5 and occupancy.get(2, 0.0) >= 0.5
+            )
+        if thresholds.min_final_quarter_avg_active is not None:
+            results["final_quarter_avg_active"] = (
+                self.final_quarter_avg_active >= thresholds.min_final_quarter_avg_active
+            )
+        return results
+
+    @property
+    def passes_all_axes(self) -> bool:
+        """Whether every applicable axis passes (regardless of enforcement)."""
+        return self.generated and all(self.axis_results().values())
+
     @property
     def passes_texture_gate(self) -> bool:
-        return (
-            self.generated
-            and self.max_active_voices == 3
-            and self.v2_silence_ratio <= 0.25
-            and self.max_repeated_run <= 4
-            and self.avg_active_voices >= MIN_AVG_ACTIVE_VOICES
-            and self.min_piece_voice_occupancy >= MIN_PIECE_VOICE_OCCUPANCY
-            and self.passes_parallel
-            and self.passes_model_score
-        )
+        """Exit-code verdict: True unless an enforced form fails an axis.
+
+        Informational forms always return True here so they cannot flip the
+        exit code; their per-axis detail is still recorded via axis_results.
+        """
+        if not self.enforced:
+            return True
+        return self.passes_all_axes
 
     def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
+        data["num_voices"] = self.num_voices
+        data["enforced"] = self.enforced
+        data["min_avg_active"] = self.min_avg_active
+        data["axis_results"] = self.axis_results()
+        data["passes_all_axes"] = self.passes_all_axes
         data["passes_texture_gate"] = self.passes_texture_gate
         data["passes_parallel"] = self.passes_parallel
         data["model_scored"] = self.model_scored
         data["passes_model_score"] = self.passes_model_score
+        data["verdict"] = (
+            "enforced" if self.enforced else "informational"
+        )
         return data
 
 
@@ -274,6 +440,67 @@ def compute_piece_voice_occupancy(notes: list[dict[str, int]]) -> dict[int, floa
     return {voice: ticks / piece_total for voice, ticks in sounding.items()}
 
 
+def count_num_voices(notes: list[dict[str, int]]) -> int:
+    """Number of distinct voice ids present in a generated.v1 note array.
+
+    Read from the output rather than hardcoded: passacaglia and chorale_prelude
+    are currently 2-voice and will move to 3 later, and the voice-count floors
+    must track whatever the builder actually emits.
+    """
+    return len({int(note["voice"]) for note in notes})
+
+
+def compute_final_quarter_avg_active(notes: list[dict[str, int]]) -> float:
+    """Tick-weighted average active voices over the final quarter of the span.
+
+    The piece span is [first onset, last offset] (the same span used by
+    compute_texture_metrics). The final quarter is the last 1/4 of that span by
+    ticks, so it is meter-independent. Notes are clipped to the window before
+    the active-voice decomposition. Returns 0.0 for empty or degenerate input.
+    """
+    if not notes:
+        return 0.0
+    first = min(int(note["start_tick"]) for note in notes)
+    last = max(int(note["start_tick"]) + int(note["duration"]) for note in notes)
+    span = last - first
+    if span <= 0:
+        return 0.0
+    window_begin = last - span // 4
+    voices = sorted({int(note["voice"]) for note in notes})
+    boundaries = sorted(
+        {
+            tick
+            for note in notes
+            for tick in (
+                int(note["start_tick"]),
+                int(note["start_tick"]) + int(note["duration"]),
+            )
+            if window_begin <= tick <= last
+        }
+        | {window_begin, last}
+    )
+    active_voice_ticks = 0
+    total_ticks = 0
+    for begin, end in zip(boundaries, boundaries[1:]):
+        if end <= begin:
+            continue
+        active = sum(
+            1 for voice in voices if any(_active_at(note, begin, end, voice) for note in notes)
+        )
+        span_width = end - begin
+        active_voice_ticks += active * span_width
+        total_ticks += span_width
+    return active_voice_ticks / total_ticks if total_ticks > 0 else 0.0
+
+
+def _active_at(note: dict[str, int], begin: int, end: int, voice: int) -> bool:
+    return (
+        int(note["voice"]) == voice
+        and int(note["start_tick"]) < end
+        and begin < int(note["start_tick"]) + int(note["duration"])
+    )
+
+
 def count_intent_spans(provenance: list[dict[str, Any]], voice_intent: str) -> int:
     return len(
         {
@@ -301,6 +528,8 @@ def evaluate_generated_json(form: str, seed: int, generated_json: Path) -> GateC
         generated=True,
         max_active_voices=metrics.max_active_voices,
         avg_active_voices=metrics.avg_active_voices,
+        mono_ratio=metrics.mono_ratio,
+        num_voices=count_num_voices(notes),
         max_silence_ratio=max(silence_by_voice.values(), default=0.0),
         v2_silence_ratio=silence_by_voice.get(2, 1.0),
         max_repeated_run=max((voice.max_repeated_run for voice in metrics.voices), default=0),
@@ -308,6 +537,7 @@ def evaluate_generated_json(form: str, seed: int, generated_json: Path) -> GateC
         register_overlap_ratio=metrics.register_overlap_ratio,
         piece_voice_occupancy=piece_voice_occupancy,
         min_piece_voice_occupancy=min_piece_voice_occupancy,
+        final_quarter_avg_active=compute_final_quarter_avg_active(notes),
         middle_entry_bars=entry_bars,
         entry_intervals=entry_intervals,
         entry_plan_nonperiodic=entry_nonperiodic,
@@ -378,9 +608,79 @@ def run_case(
     return case
 
 
+def _median(values: list[float]) -> float:
+    """Median of a value list (0.0 for empty), order-independent."""
+    if not values:
+        return 0.0
+    ordered = sorted(values)
+    mid = len(ordered) // 2
+    if len(ordered) % 2:
+        return ordered[mid]
+    return (ordered[mid - 1] + ordered[mid]) / 2.0
+
+
+def summarize_form(form: str, cases: list[GateCase]) -> dict[str, Any]:
+    """Per-form breakdown labelled enforced vs informational.
+
+    Reports each axis's pass count over the form's generated cases plus the
+    metric ranges (avg-active min/median, mono-ratio range, occupancy floor,
+    parallel ceiling, model-score range). The verdict label is `enforced` when
+    the form's failures flip the exit code, else `informational`.
+    """
+    generated = [case for case in cases if case.generated]
+    scored = [case.model_score for case in generated if case.model_scored]
+    thresholds = thresholds_for(form)
+    axis_pass_counts: dict[str, int] = {}
+    axis_total: dict[str, int] = {}
+    for case in generated:
+        for axis, passed in case.axis_results().items():
+            axis_total[axis] = axis_total.get(axis, 0) + 1
+            axis_pass_counts[axis] = axis_pass_counts.get(axis, 0) + (1 if passed else 0)
+    occupancy_floor = min(
+        (case.min_piece_voice_occupancy for case in generated), default=0.0
+    )
+    return {
+        "verdict": "enforced" if thresholds.enforced else "informational",
+        "enforced": thresholds.enforced,
+        "total": len(cases),
+        "generated": len(generated),
+        "num_voices": generated[0].num_voices if generated else 0,
+        "all_axes_passed": all(case.passes_all_axes for case in generated) and bool(generated),
+        "axis_pass_counts": {
+            axis: {"passed": axis_pass_counts[axis], "total": axis_total[axis]}
+            for axis in sorted(axis_total)
+        },
+        "min_avg_active_voices": min(
+            (case.avg_active_voices for case in generated), default=0.0
+        ),
+        "median_avg_active_voices": _median(
+            [case.avg_active_voices for case in generated]
+        ),
+        "target_min_avg_active": generated[0].min_avg_active if generated else None,
+        "min_mono_ratio": min((case.mono_ratio for case in generated), default=0.0),
+        "max_mono_ratio": max((case.mono_ratio for case in generated), default=0.0),
+        "target_max_mono_ratio": thresholds.max_mono_ratio,
+        "min_piece_voice_occupancy": occupancy_floor,
+        "min_final_quarter_avg_active": min(
+            (case.final_quarter_avg_active for case in generated), default=0.0
+        ),
+        "target_min_final_quarter_avg_active": thresholds.min_final_quarter_avg_active,
+        "max_parallel_perfect_count": max(
+            (case.parallel_perfect_count for case in generated), default=0
+        ),
+        "min_model_score": min(scored, default=0.0),
+        "max_model_score": max(scored, default=0.0),
+        "model_scored_cases": len(scored),
+    }
+
+
 def summarize(cases: list[GateCase]) -> dict[str, Any]:
+    # Only enforced-form failures appear in `failing`: informational forms
+    # always return passes_texture_gate == True, so all_passed (and the exit
+    # code derived from it) reflects enforced failures alone.
     failing = [case for case in cases if not case.passes_texture_gate]
     scored = [case.model_score for case in cases if case.model_scored]
+    forms = sorted({case.form for case in cases})
     return {
         "total": len(cases),
         "passed": len(cases) - len(failing),
@@ -403,6 +703,7 @@ def summarize(cases: list[GateCase]) -> dict[str, Any]:
             (case.hidden_perfect_count for case in cases if case.generated), default=0
         ),
         "parallel_perfect_threshold": MAX_PARALLEL_PERFECT_COUNT,
+        "forms": {form: summarize_form(form, [c for c in cases if c.form == form]) for form in forms},
         "failures": [case.to_dict() for case in failing],
     }
 

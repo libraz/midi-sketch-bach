@@ -18,6 +18,7 @@
 
 #include <gtest/gtest.h>
 
+#include <array>
 #include <cstdint>
 #include <vector>
 
@@ -80,11 +81,18 @@ std::uint16_t resolvedBars(FormType form, std::uint16_t target_bars) {
   return resolveBars(form, DurationScale::Short, target_bars);
 }
 
-// Collect the V1 (ground) note pitches in onset order.
-std::vector<std::uint8_t> groundPitches(const ComposeResult& r) {
+// The ground bass lives on a different voice per form: the chaconne keeps the
+// 2-voice layout (ground = V1), the passacaglia is the 3-voice uplift (V0
+// principal variation, V1 counter-figuration, V2 = ground).
+VoiceId groundVoice(FormType form) {
+  return form == FormType::Passacaglia ? 2 : 1;
+}
+
+// Collect the ground note pitches (on `ground_voice`) in onset order.
+std::vector<std::uint8_t> groundPitches(const ComposeResult& r, VoiceId ground_voice) {
   std::vector<std::pair<Tick, std::uint8_t>> ground;
   for (const auto& n : r.notes) {
-    if (n.voice == 1)
+    if (n.voice == ground_voice)
       ground.push_back({n.start_tick, n.pitch});
   }
   std::sort(ground.begin(), ground.end());
@@ -105,7 +113,8 @@ void expectValidatesOk(FormType form) {
         << " bars " << c.target_bars << " first failure="
         << (r.validation.failures.empty() ? "" : r.validation.failures.front().rule_id);
     EXPECT_EQ(r.validation.status, ValidationStatus::Ok);
-    EXPECT_EQ(fx.voice_plan.num_voices, 2);
+    // Chaconne keeps the 2-voice layout; the passacaglia is the 3-voice uplift.
+    EXPECT_EQ(fx.voice_plan.num_voices, form == FormType::Passacaglia ? 3 : 2);
     ASSERT_FALSE(r.notes.empty());
   }
 }
@@ -150,7 +159,7 @@ void expectGroundImmutable(FormType form, int cycle_bars) {
   for (const Case& c : casesFor(form)) {
     const HarnessFixture fx = build(c.form, c.seed, c.is_minor, c.target_bars);
     const ComposeResult r = Composer{}.run(fx.material, fx.harmony, fx.voice_plan);
-    const std::vector<std::uint8_t> ground = groundPitches(r);
+    const std::vector<std::uint8_t> ground = groundPitches(r, groundVoice(c.form));
     const std::size_t period = static_cast<std::size_t>(cycle_bars);
     ASSERT_GE(ground.size(), period);
     EXPECT_EQ(ground.size() % period, 0u) << "ground note count must be a whole number of cycles";
@@ -344,6 +353,103 @@ TEST(GroundVariationChaconne, PicardyFinalChordOnEvenSeed) {
 
 TEST(GroundVariationPassacaglia, PicardyFinalChordOnEvenSeed) {
   expectPicardyFinalChord(FormType::Passacaglia);
+}
+
+// The 3-voice passacaglia uplift must NOT bleed into the chaconne: the chaconne
+// keeps its 2-voice layout (V0 variation over V1 ground) on every seed/mode/
+// length, so its output stays byte-stable against the passacaglia change.
+TEST(GroundVariationChaconne, StaysTwoVoiceWithGroundOnVoiceOne) {
+  for (const Case& c : casesFor(FormType::Chaconne)) {
+    const HarnessFixture fx = build(c.form, c.seed, c.is_minor, c.target_bars);
+    EXPECT_EQ(fx.voice_plan.num_voices, 2);
+    const ComposeResult r = Composer{}.run(fx.material, fx.harmony, fx.voice_plan);
+    bool saw_voice_two = false;
+    bool saw_ground_v1 = false;
+    for (const auto& n : r.notes) {
+      if (n.voice >= 2)
+        saw_voice_two = true;
+      if (n.voice == 1)
+        saw_ground_v1 = true;
+    }
+    EXPECT_FALSE(saw_voice_two) << "chaconne must not introduce a third voice";
+    EXPECT_TRUE(saw_ground_v1) << "chaconne ground must stay on voice 1";
+  }
+}
+
+// --- 9. Passacaglia terraced growth schedule (period-derived) ---------------
+//
+// The 3-voice passacaglia derives its per-cycle voice-presence schedule purely
+// from the period (cycle) count:
+//   periods == 3: cycle 0 = V0 + ground (no intro), cycle 1 adds V1, the climax
+//                 cycle 2 is the full texture.
+//   periods >= 4: cycle 0 = ground-solo intro (V0 and V1 rest), one receding
+//                 cycle rests V1, the climax cycle sounds all three.
+// The ground (V2) sounds in every cycle. This locks the design table directly
+// from the composed output (which 8-bar period each voice sounds in).
+
+// Per-cycle voice presence for a 3-voice passacaglia: presence[cycle][voice].
+std::vector<std::array<bool, 3>> passacagliaPresence(std::uint32_t seed, std::uint16_t target_bars,
+                                                     std::size_t& out_cycles) {
+  const HarnessFixture fx = build(FormType::Passacaglia, seed, /*minor=*/false, target_bars);
+  const ComposeResult r = Composer{}.run(fx.material, fx.harmony, fx.voice_plan);
+  const Tick period = 8 * kTicksPerBar34;  // passacaglia ground = 8 bars.
+  const std::uint16_t bars = resolvedBars(FormType::Passacaglia, target_bars);
+  const std::size_t cycles = static_cast<std::size_t>(bars) / 8;
+  out_cycles = cycles;
+  std::vector<std::array<bool, 3>> presence(cycles, {false, false, false});
+  for (const auto& n : r.notes) {
+    const std::size_t cyc = static_cast<std::size_t>(n.start_tick / period);
+    if (cyc < cycles && n.voice < 3)
+      presence[cyc][n.voice] = true;
+  }
+  return presence;
+}
+
+TEST(GroundVariationPassacaglia, ThreePeriodScheduleHasNoIntroAndTerracesV1) {
+  // Default 24-bar passacaglia = exactly 3 periods.
+  std::size_t cycles = 0;
+  const auto presence = passacagliaPresence(/*seed=*/3, /*bars=*/0, cycles);
+  ASSERT_EQ(cycles, 3u);
+  // Cycle 0: V0 + ground, V1 rests (no intro terrace at 3 periods).
+  EXPECT_TRUE(presence[0][0]) << "3-period cycle 0 must carry V0";
+  EXPECT_FALSE(presence[0][1]) << "3-period cycle 0 must rest V1";
+  EXPECT_TRUE(presence[0][2]) << "ground must sound in cycle 0";
+  // Cycle 1 adds V1.
+  EXPECT_TRUE(presence[1][0]);
+  EXPECT_TRUE(presence[1][1]) << "3-period cycle 1 must add V1";
+  EXPECT_TRUE(presence[1][2]);
+  // Climax cycle 2: full texture.
+  EXPECT_TRUE(presence[2][0]);
+  EXPECT_TRUE(presence[2][1]) << "3-period climax must sound all three voices";
+  EXPECT_TRUE(presence[2][2]);
+}
+
+TEST(GroundVariationPassacaglia, LongScheduleHasGroundSoloIntroAndRecedingCycle) {
+  // 40-bar passacaglia = 5 periods (exercises the intro + receding-V1 path).
+  std::size_t cycles = 0;
+  const auto presence = passacagliaPresence(/*seed=*/1, /*bars=*/40, cycles);
+  ASSERT_EQ(cycles, 5u);
+  // Cycle 0 is a ground-solo intro: only V2 (ground) sounds.
+  EXPECT_FALSE(presence[0][0]) << "intro cycle must rest V0";
+  EXPECT_FALSE(presence[0][1]) << "intro cycle must rest V1";
+  EXPECT_TRUE(presence[0][2]) << "intro cycle must carry the ground";
+  // The ground sounds in every cycle.
+  for (std::size_t cyc = 0; cyc < cycles; ++cyc)
+    EXPECT_TRUE(presence[cyc][2]) << "ground missing in cycle " << cyc;
+  // The climax cycle (~80% -> cycle 4) sounds all three voices.
+  const std::size_t climax_idx = 4;
+  EXPECT_TRUE(presence[climax_idx][0]);
+  EXPECT_TRUE(presence[climax_idx][1]) << "climax must sound all three voices";
+  EXPECT_TRUE(presence[climax_idx][2]);
+  // Exactly one middle cycle (1..climax-1) recedes (rests V1) -- the receding
+  // terrace before the climax restores the full texture.
+  int receding = 0;
+  for (std::size_t cyc = 1; cyc < climax_idx; ++cyc) {
+    EXPECT_TRUE(presence[cyc][0]) << "post-intro cycle " << cyc << " must carry V0";
+    if (!presence[cyc][1])
+      ++receding;
+  }
+  EXPECT_EQ(receding, 1) << "exactly one middle cycle must rest V1 (receding terrace)";
 }
 
 }  // namespace
