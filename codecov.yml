@@ -1,0 +1,30 @@
+coverage:
+  status:
+    project:
+      default:
+        target: auto
+        threshold: 1%
+    patch:
+      default:
+        informational: true
+
+flags:
+  cpp:
+    paths:
+      - src/
+    carryforward: true
+  python:
+    paths:
+      - scripts/
+    carryforward: true
+  js:
+    paths:
+      - js/
+    carryforward: true
+
+ignore:
+  - tests
+  - scripts/tests
+  - build
+  - build-wasm
+  - dist

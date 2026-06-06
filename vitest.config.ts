@@ -13,7 +13,7 @@ export default defineConfig({
     include: ['tests/wasm/**/*.test.ts'],
     coverage: {
       provider: 'v8',
-      reporter: ['text', 'json', 'html'],
+      reporter: ['text', 'json', 'html', 'lcov'],
       include: ['js/src/**/*.ts'],
       exclude: ['js/**/*.test.ts', 'js/**/*.d.ts'],
     },
