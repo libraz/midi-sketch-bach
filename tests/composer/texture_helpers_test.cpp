@@ -237,5 +237,45 @@ TEST(TextureHelpersTest, ConsonantChordToneReturnsChordToneOnDownbeat) {
   EXPECT_LE(anchor, 84);
 }
 
+TEST(TextureHelpersTest, ConsonantChordToneWindowEmptyKeepsNearestConsonant) {
+  // With an empty window the tie-breaker is inert: the selector returns the
+  // nearest onset-consonant chord tone to the target, exactly as before the
+  // window_pitches parameter was added. C major triad, target G5 (67): G is a
+  // chord tone in band and nearest, so it is chosen.
+  detail::ChordSpec chord{0, false};
+  const std::vector<int> theme_pitches;
+  const std::vector<ConcurrentMotion> motions;
+  const std::vector<int> empty_window;
+  const int anchor = consonantChordTone(chord, /*voice=*/0, /*band_lo=*/60, /*band_hi=*/84,
+                                        /*target=*/67, theme_pitches, /*line_prev=*/-1, motions,
+                                        detail::Mode::Major, /*downbeat=*/true, empty_window);
+  EXPECT_EQ(anchor, 67);
+}
+
+TEST(TextureHelpersTest, ConsonantChordToneWindowAvoidsMidBeatClash) {
+  // Same chord/target, but a sustained-window pitch (F5 = 65) is dissonant with
+  // the nearest chord tone G5 (67, a M2) yet consonant with C6 (72, a P5).
+  // Among equally onset-consonant chord tones the window tie-breaker prefers the
+  // one with no mid-window clash, so the anchor moves off G to C.
+  detail::ChordSpec chord{0, false};
+  const std::vector<int> theme_pitches;
+  const std::vector<ConcurrentMotion> motions;
+
+  // Confirm the premise: the empty-window choice (67) clashes with the window
+  // pitch while the alternative chord tone (72) does not.
+  EXPECT_FALSE(isConsonantPair(67, 65));  // G vs F -> M2, dissonant.
+  EXPECT_TRUE(isConsonantPair(72, 65));   // C vs F -> P5, consonant.
+
+  const std::vector<int> window = {65};
+  const int anchor = consonantChordTone(chord, /*voice=*/0, /*band_lo=*/60, /*band_hi=*/84,
+                                        /*target=*/67, theme_pitches, /*line_prev=*/-1, motions,
+                                        detail::Mode::Major, /*downbeat=*/true, window);
+  // Still a genuine chord tone, but the window-consonant one rather than 67.
+  const int pc = anchor % 12;
+  EXPECT_TRUE(pc == 0 || pc == 4 || pc == 7) << "anchor " << anchor;
+  EXPECT_NE(anchor, 67) << "window clash with G5 not avoided";
+  EXPECT_TRUE(isConsonantPair(anchor, 65)) << "chosen anchor still clashes with the window pitch";
+}
+
 }  // namespace
 }  // namespace bach::composer

@@ -172,11 +172,18 @@ class ThemeToneRegistry {
 ///        tone (figuration_harmonic_consistency); off-downbeat beats may anchor
 ///        on any consonant diatonic tone, widening the parallel-free options so
 ///        two figuration voices over one triad are not forced into a parallel.
+/// @param window_pitches Pitches other voices sound INSIDE this anchor's sustain
+///        window (after the onset). A sustained anchor (e.g. a quarter-note bass
+///        under an eighth-note line placed earlier) can be onset-consonant yet
+///        clash with a mid-beat attack above it; among equally onset-consonant
+///        candidates the one with fewer window clashes wins. Tie-breaker only:
+///        onset consonance always dominates, so an empty vector (the default)
+///        reproduces the previous behaviour exactly.
 /// @return A chord-tone (downbeat) or diatonic (off-beat) MIDI pitch in band.
 int consonantChordTone(const detail::ChordSpec& chord, int voice, int band_lo, int band_hi,
                        int target, const std::vector<int>& theme_pitches, int line_prev,
                        const std::vector<ConcurrentMotion>& motions, detail::Mode mode,
-                       bool downbeat);
+                       bool downbeat, const std::vector<int>& window_pitches = {});
 
 }  // namespace bach::composer
 

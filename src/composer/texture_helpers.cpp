@@ -87,7 +87,7 @@ bool formsPerfectParallel(int line_prev, int cand, int other_prev, int other_cur
 int consonantChordTone(const detail::ChordSpec& chord, int voice, int band_lo, int band_hi,
                        int target, const std::vector<int>& theme_pitches, int line_prev,
                        const std::vector<ConcurrentMotion>& motions, detail::Mode mode,
-                       bool downbeat) {
+                       bool downbeat, const std::vector<int>& window_pitches) {
   const int third = chord.minor ? 3 : 4;
   const int triad_pc[3] = {chord.root_pc % 12, (chord.root_pc + third) % 12,
                            (chord.root_pc + 7) % 12};
@@ -123,11 +123,15 @@ int consonantChordTone(const detail::ChordSpec& chord, int voice, int band_lo, i
       order_floor = std::max(order_floor, motion.curr);  // stay above it.
     }
   }
-  // Three nested preferences, each "nearest target wins" within its tier.
+  // Three nested preferences. Within each tier, fewer mid-window clashes win
+  // first (a sustained anchor should not be struck against by a mid-beat
+  // dissonance from an already-placed faster line), then "nearest target".
+  // The tier key packs (window clashes, distance) so onset consonance still
+  // dominates and an empty window reproduces the previous nearest-wins order.
   int consonant_free = -1;  // consonant AND parallel-free (best).
-  int consonant_free_dist = 1 << 20;
+  int consonant_free_key = 1 << 20;
   int consonant_any = -1;  // consonant, parallel allowed (second).
-  int consonant_any_dist = 1 << 20;
+  int consonant_any_key = 1 << 20;
   int fallback = -1;  // least dissonant (last resort).
   int fallback_score = 1 << 20;
   // Only apply the ordering window when it leaves a non-empty range; a degenerate
@@ -155,18 +159,27 @@ int consonantChordTone(const detail::ChordSpec& chord, int voice, int band_lo, i
         ++clashes;
       }
     }
+    int window_clashes = 0;
+    for (int sounding : window_pitches) {
+      if (!isConsonantIc(pitch - sounding)) {
+        ++window_clashes;
+      }
+    }
     const int dist = std::abs(pitch - target);
+    // Distance stays below 128 (one MIDI band), so a 128 stride keeps the
+    // (window clashes, distance) order strictly lexicographic.
+    const int key = window_clashes * 128 + dist;
     if (clashes == 0) {
-      if (dist < consonant_any_dist) {
-        consonant_any_dist = dist;
+      if (key < consonant_any_key) {
+        consonant_any_key = key;
         consonant_any = pitch;
       }
-      if (!is_parallel(pitch) && dist < consonant_free_dist) {
-        consonant_free_dist = dist;
+      if (!is_parallel(pitch) && key < consonant_free_key) {
+        consonant_free_key = key;
         consonant_free = pitch;
       }
     }
-    const int score = clashes * 1000 + dist;
+    const int score = clashes * 1000 + key;
     if (score < fallback_score) {
       fallback_score = score;
       fallback = pitch;

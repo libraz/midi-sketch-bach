@@ -716,6 +716,27 @@ bool consonantInterval(int semis) {
   return ic != 1 && ic != 2 && ic != 6 && ic != 10 && ic != 11;
 }
 
+// Latest-onset pitch of `voice` sounding at `tick`, or -1 when silent. Mirrors
+// ThemeToneRegistry::soundingPitchInVoice over the composed NoteEvent stream so
+// the consonance probes read exactly what plays at a beat.
+int latestSoundingPitch(const std::vector<NoteEvent>& notes, VoiceId voice, Tick tick) {
+  int pitch = -1;
+  Tick best_start = 0;
+  bool found = false;
+  for (const auto& note : notes) {
+    if (note.voice != voice) {
+      continue;
+    }
+    if (note.start_tick <= tick && tick < note.start_tick + note.duration &&
+        (!found || note.start_tick >= best_start)) {
+      best_start = note.start_tick;
+      pitch = note.pitch;
+      found = true;
+    }
+  }
+  return pitch;
+}
+
 // Sample every beat and count the fraction that contain a dissonant pair,
 // replicating the external scorer's vertical_dissonance_ratio.
 double verticalDissonanceRatio(const std::vector<NoteEvent>& notes) {
@@ -863,6 +884,138 @@ TEST(FormFuguePreludeAndFugueTest, FigurationStaysDiatonic) {
       }
     }
   }
+}
+
+// --- 9. Dissonance-fix regressions ------------------------------------------
+// These lock in three fixes to the figuration/canon machinery:
+//   1. the climax stretto follower is transposed into the leader's related key
+//      so the overlap is a single-key octave canon (form_fugue.cpp);
+//   2. the coda replays the V0 subject head into theme_tones, adds a V1 alto
+//      figuration, and anchors the V2 bass consonantly under both;
+//   3. consonantChordTone's window_pitches tie-breaker keeps a sustained anchor
+//      consonant against mid-beat attacks of faster lines already placed
+//      (texture_helpers.cpp).
+
+// The climax-cycle stretto follower restates the subject transposed by exactly
+// interval_semis (the validated verbatim relation), and because the follower
+// now sits in the leader's related key the leader/follower form a single-key
+// octave canon: strong-beat (downbeat) overlaps are consonant apart from the
+// couple of passing seconds a 1-bar self-canon legitimately produces.
+TEST(FormFugueTest, StrettoFollowerSharesLeaderKey) {
+  const HarnessFixture fx = buildFixture(FormType::Fugue, 42, false, 84);
+  ASSERT_FALSE(fx.material.stretto_entries.empty()) << "no stretto declared";
+  const StrettoDecl& stretto = fx.material.stretto_entries.front();
+
+  // (a) Every follower note is the subject transposed by interval_semis exactly
+  //     (the relation the validator's stretto_overlap_valid rule enforces).
+  ASSERT_GE(fx.material.subject.size(), stretto.follower_notes.size());
+  for (std::size_t i = 0; i < stretto.follower_notes.size(); ++i) {
+    EXPECT_EQ(static_cast<int>(stretto.follower_notes[i].pitch),
+              static_cast<int>(fx.material.subject[i].pitch) + stretto.interval_semis)
+        << "follower note " << i << " is not the subject transposed by interval_semis";
+  }
+
+  // (b) On strong beats where leader and follower both sound, the vertical
+  //     interval class is consonant. The 1-bar self-canon legitimately yields a
+  //     couple of passing seconds, so allow at most two dissonant overlaps
+  //     (observed: 2 of 6 on this seed) rather than demanding 100%.
+  const ComposeResult r = Composer{}.run(fx.material, fx.harmony, fx.voice_plan);
+  const Tick overlap_end = stretto.leader_entry_tick + stretto.leader_length_ticks;
+  int overlaps = 0;
+  int dissonant = 0;
+  for (Tick tick = (stretto.follower_entry_tick / kBar) * kBar; tick < overlap_end; tick += kBar) {
+    if (tick < stretto.follower_entry_tick) {
+      continue;  // before the follower enters there is no overlap.
+    }
+    const int leader = latestSoundingPitch(r.notes, stretto.leader_voice, tick);
+    const int follower = latestSoundingPitch(r.notes, stretto.follower_voice, tick);
+    if (leader < 0 || follower < 0) {
+      continue;
+    }
+    ++overlaps;
+    if (!consonantInterval(leader - follower)) {
+      ++dissonant;
+    }
+  }
+  EXPECT_GT(overlaps, 0) << "no strong-beat leader/follower overlaps in the stretto";
+  EXPECT_LE(dissonant, 2) << "stretto has " << dissonant << " dissonant strong-beat overlaps of "
+                          << overlaps << " (follower not in the leader's key?)";
+}
+
+// The coda keeps a full three-voice texture under the final V0 subject head: a
+// V1 alto figuration sounds over the first two coda bars, and the V2 bass stays
+// consonant with V0 -- never the sustained minor-ninth / major-seventh (ic 1/11)
+// that the pre-fix coda produced when the bass ignored the subject head.
+TEST(FormFugueTest, CodaKeepsThreeVoiceTextureAndConsonantBass) {
+  // Seed 42 carries a V1 alto across the whole 2-bar coda-subject window; the
+  // consonant-bass assertion below holds for every seed regardless.
+  const std::uint16_t bars = 84;
+  const HarnessFixture fx = buildFixture(FormType::Fugue, 42, false, bars);
+  const ComposeResult r = Composer{}.run(fx.material, fx.harmony, fx.voice_plan);
+
+  const int coda_bars = 4;
+  const int coda_start_bar = bars - coda_bars;
+  const Tick window_lo = static_cast<Tick>(coda_start_bar) * kBar;
+  const Tick window_hi = static_cast<Tick>(coda_start_bar + 2) * kBar;
+
+  // (a) The new V1 alto emits at least four notes over the two coda-subject bars.
+  int v1_notes = 0;
+  for (const auto& note : r.notes) {
+    if (note.voice == 1 && note.start_tick >= window_lo && note.start_tick < window_hi) {
+      ++v1_notes;
+    }
+  }
+  EXPECT_GE(v1_notes, 4) << "coda subject window lacks the V1 alto figuration";
+
+  // (b) Every strong beat where V0 and V2 both sound is consonant, and in
+  //     particular never the old sustained m9/M7 (interval class 1 or 11).
+  int strong_beats = 0;
+  for (Tick tick = window_lo; tick < window_hi; tick += kBar) {
+    const int upper = latestSoundingPitch(r.notes, 0, tick);
+    const int bass = latestSoundingPitch(r.notes, 2, tick);
+    if (upper < 0 || bass < 0) {
+      continue;
+    }
+    ++strong_beats;
+    const int ic = ((std::abs(upper - bass) % 12) + 12) % 12;
+    EXPECT_NE(ic, 1) << "coda V0xV2 minor ninth at tick " << tick;
+    EXPECT_NE(ic, 11) << "coda V0xV2 major seventh at tick " << tick;
+  }
+  EXPECT_GT(strong_beats, 0) << "no V0/V2 overlap in the coda subject window";
+}
+
+// The window-aware anchor (consonantChordTone's window_pitches tie-breaker)
+// keeps a sustained per-beat bass consonant against the mid-beat attacks of the
+// faster figuration placed above it, so the development never accumulates a run
+// of consecutive dissonant V1xV2 slots on the eighth-note grid. The pre-fix
+// build produced 4-slot dissonant chains; the bound below is tight enough to
+// have caught that (observed max on this seed is 1).
+TEST(FormFugueTest, DevelopmentAvoidsParallelDissonanceChains) {
+  const HarnessFixture fx = buildFixture(FormType::Fugue, 42, false, 84);
+  const ComposeResult r = Composer{}.run(fx.material, fx.harmony, fx.voice_plan);
+
+  Tick total = 0;
+  for (const auto& note : r.notes) {
+    total = std::max(total, note.start_tick + note.duration);
+  }
+
+  constexpr Tick kEighth = kTicksPerBeat / 2;  // eighth-note sampling grid.
+  int run = 0;
+  int max_run = 0;
+  for (Tick tick = 0; tick < total; tick += kEighth) {
+    const int alto = latestSoundingPitch(r.notes, 1, tick);
+    const int bass = latestSoundingPitch(r.notes, 2, tick);
+    if (alto >= 0 && bass >= 0 && !consonantInterval(alto - bass)) {
+      ++run;
+      max_run = std::max(max_run, run);
+    } else {
+      run = 0;
+    }
+  }
+  // Bound is observed_max (1) + 1; well below the pre-fix 4-slot chains, so a
+  // regression that restores them fails here.
+  EXPECT_LE(max_run, 2) << "V1xV2 dissonant chain of length " << max_run
+                        << " (window-aware anchor regressed?)";
 }
 
 }  // namespace bach::composer

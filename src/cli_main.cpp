@@ -301,6 +301,13 @@ bool parseArgs(int argc, char* argv[], CliOptions& opts, bool& ok) {
     } else if (std::strcmp(argv[idx], "--composer-phase") == 0 && idx + 1 < argc) {
       opts.composer_mode = true;
       opts.composer_phase = parseComposerPhase(argv[++idx]);
+    } else {
+      // No recognized flag matched (unknown option, or a known flag missing its
+      // required value). Reject rather than silently falling through to
+      // generation. There is no positional-argument syntax to preserve.
+      std::fprintf(stderr, "Error: unknown argument '%s'\n", argv[idx]);
+      ok = false;
+      return false;
     }
   }
   return true;
