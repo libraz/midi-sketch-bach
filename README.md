@@ -101,4 +101,4 @@ Requires: C++17 compiler, CMake 3.15+. WASM build requires Emscripten.
 
 ## License
 
-[Apache-2.0](LICENSE) / [Commercial](LICENSE-COMMERCIAL) dual license. For commercial inquiries: libraz@libraz.net
+[AGPL-3.0](LICENSE) / [Commercial](LICENSE-COMMERCIAL) dual license. Free to use, modify, and redistribute under AGPL-3.0; embedding in closed-source products or proprietary SaaS requires a commercial license. For commercial inquiries: libraz@libraz.net

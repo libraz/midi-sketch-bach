@@ -101,4 +101,4 @@ make wasm           # WASM + JSバインディング
 
 ## ライセンス
 
-[Apache-2.0](LICENSE) / [商用](LICENSE-COMMERCIAL) デュアルライセンス。商用利用のお問い合わせ: libraz@libraz.net
+[AGPL-3.0](LICENSE) / [商用](LICENSE-COMMERCIAL) デュアルライセンス。AGPL-3.0 の条件下では自由に利用・改変・再配布できます。クローズドソース製品やプロプライエタリな SaaS への組み込みには商用ライセンスが必要です。商用利用のお問い合わせ: libraz@libraz.net

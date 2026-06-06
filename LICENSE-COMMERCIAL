@@ -2,15 +2,27 @@
 
 midi-sketch-bach is provided under a dual licensing model.
 
-For evaluation, research, and non-commercial use,
-midi-sketch-bach is available under the Apache-2.0 License.
+## Open Source License (AGPL-3.0)
 
-Commercial use in closed-source, proprietary products,
-or commercial SaaS offerings requires a separate
-commercial license agreement.
+midi-sketch-bach is available under the GNU Affero General Public
+License v3.0 (see [LICENSE](LICENSE)). You may use, modify, and
+redistribute it freely — including commercially — as long as you
+comply with the AGPL-3.0 terms, in particular:
 
-If you are unsure whether your use case requires
-a commercial license, please contact us.
+- Derivative works must be licensed under AGPL-3.0.
+- If you run a modified version as a network service, you must
+  offer the complete corresponding source to its users.
+
+## Commercial License
+
+If the AGPL-3.0 terms do not fit your use case — for example,
+embedding midi-sketch-bach (including its WASM build) in a
+closed-source product, or offering it as part of a proprietary
+SaaS without releasing your source — a separate commercial
+license is available.
+
+If you are unsure whether your use case requires a commercial
+license, please contact us.
 
 ## Contact
 
@@ -18,7 +30,3 @@ For commercial licensing inquiries:
 
 - Email: libraz@libraz.net
 - GitHub: https://github.com/libraz/midi-sketch-bach
-
-## Open Source License
-
-See [LICENSE](LICENSE) for the Apache-2.0 license text.
