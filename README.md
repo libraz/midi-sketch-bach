@@ -16,13 +16,13 @@ Built on the development insights from [midi-sketch](https://github.com/libraz/m
 
 | Form | After the manner of | Voices |
 |------|---------------------|--------|
-| Prelude and Fugue | BWV 532, 548 | 2-5 |
-| Fugue | Strict 3-voice fugue | 2-5 |
+| Prelude and Fugue | BWV 532, 548 | 3 |
+| Fugue | Strict 3-voice fugue | 3 |
 | Trio Sonata | BWV 525-530 | 3 |
-| Chorale Prelude | BWV 599-650 (Orgelbüchlein) | 3-4 |
-| Toccata and Fugue | BWV 565 | 3-4 |
-| Passacaglia | BWV 582 | 3-4 |
-| Fantasia and Fugue | BWV 537, 542 | 3-4 |
+| Chorale Prelude | BWV 599-650 (Orgelbüchlein) | 3 |
+| Toccata and Fugue | BWV 565 | 3 |
+| Passacaglia | BWV 582 | 3 |
+| Fantasia and Fugue | BWV 537, 542 | 3 |
 
 **Solo String Works** — harmony-driven, single line:
 
@@ -35,7 +35,7 @@ Built on the development insights from [midi-sketch](https://github.com/libraz/m
 
 | Form | After the manner of | Voices |
 |------|---------------------|--------|
-| Goldberg Variations | BWV 988 | 2-3 |
+| Goldberg Variations | BWV 988 | 3 |
 
 Every fugue enforces proper exposition, real/tonal answer, countersubject, episodes, and stretto. Parallel fifths and octaves are forbidden. Voice crossing is resolved.
 
@@ -77,22 +77,22 @@ make demo   # http://localhost:8080/demo/
 |--------|-------------|---------|
 | `--form FORM` | Composition form | `prelude_and_fugue` |
 | `--key KEY` | Key (e.g. `g_minor`, `D_major`) | `C_major` |
-| `--voices N` | Number of voices (2-5, organ only) | `3` |
 | `--character CH` | `severe`, `playful`, `noble`, `restless` | auto |
 | `--instrument INST` | `organ`, `harpsichord`, `piano`, `violin`, `cello`, `guitar` | auto |
-| `--scale SCALE` | `short`, `medium`, `long`, `full` | `short` |
+| `--scale SCALE` | `short`, `medium`, `long`, `full` | `short` (`medium` for fugue) |
 | `--bars N` | Target bar count (overrides `--scale`) | - |
 | `--bpm N` | Tempo (40-200) | `72` |
 | `--seed N` | Random seed (0 = random) | `0` |
 | `--json` | Output JSON event data | - |
-| `--analyze` | Include analysis metadata | - |
+| `--generated-json` | Output generated.v1 + provenance.v1 JSON | - |
 | `-o FILE` | Output path | `output.mid` |
 
 ## Build
 
 ```bash
 make build          # C++ CLI
-make test           # Run tests (1100+ C++ / 18 JS)
+make test           # Run C++ tests (980+ via ctest)
+yarn test           # Run JS/WASM tests (210+ via vitest)
 make quality-gate   # Format + build + test
 make wasm           # WASM + JS bindings
 ```

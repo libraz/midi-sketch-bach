@@ -115,7 +115,7 @@ describe('BachGenerator - Form-decided track count', () => {
   it.each([
     ['cello_prelude', 1],
     ['chaconne', 2],
-    ['passacaglia', 2],
+    ['passacaglia', 3],
     ['fugue', 3],
     ['trio_sonata', 3],
     ['prelude_and_fugue', 3],

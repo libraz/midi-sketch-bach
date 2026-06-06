@@ -838,4 +838,31 @@ TEST(FormFuguePreludeAndFugueTest, PreludeBeatsAreChordToneAnchored) {
   }
 }
 
+TEST(FormFuguePreludeAndFugueTest, FigurationStaysDiatonic) {
+  // The scalar-wave figuration walks scaleUp / scaleDown, so every figuration
+  // note must stay inside the diatonic set. A descending walk expressed as the
+  // negation trick -scaleUp(-pitch) walked the inverted (non-diatonic) pitch
+  // class set and emitted chromatic runs (D#/C#/A#/G# in C major); this pins
+  // the diatonic contract across seeds and modes. In minor the bar chords come
+  // from kHarmonyPatternsMinor whose major dominant contributes the harmonic
+  // leading tone (pc 11), so that single chromatic degree is admitted.
+  for (std::uint32_t seed : kSeeds) {
+    for (bool minor : {false, true}) {
+      const HarnessFixture fx = buildFixture(FormType::PreludeAndFugue, seed, minor,
+                                             naturalBars(FormType::PreludeAndFugue));
+      const detail::Mode mode = minor ? detail::Mode::Minor : detail::Mode::Major;
+      for (const auto& section : fx.material.figuration_sections) {
+        for (const auto& note : section.notes) {
+          const bool diatonic =
+              detail::inScale(note.pitch, mode) || (minor && note.pitch % 12 == 11);
+          EXPECT_TRUE(diatonic) << "seed " << seed << (minor ? " minor" : " major")
+                                << " figuration note pitch " << note.pitch << " (pc "
+                                << note.pitch % 12 << ") at tick " << note.start_tick
+                                << " is outside the diatonic set";
+        }
+      }
+    }
+  }
+}
+
 }  // namespace bach::composer

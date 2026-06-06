@@ -28,9 +28,9 @@ constexpr std::array<FormSpec, 10> kFormSpecs = {{
     {3, 42, 16, 128, 4, 4, 4},  // Fugue
     {3, 24, 16, 128, 4, 4, 4},  // PreludeAndFugue
     {3, 16, 8, 128, 4, 4, 4},   // TrioSonata
-    {2, 16, 8, 128, 4, 4, 4},   // ChoralePrelude
+    {3, 16, 8, 128, 4, 4, 4},   // ChoralePrelude
     {3, 32, 16, 128, 4, 4, 4},  // ToccataAndFugue
-    {2, 24, 16, 128, 8, 3, 4},  // Passacaglia
+    {3, 24, 16, 128, 8, 3, 4},  // Passacaglia
     {3, 32, 16, 128, 4, 4, 4},  // FantasiaAndFugue
     {1, 8, 8, 128, 4, 4, 4},    // CelloPrelude
     {2, 16, 8, 128, 4, 3, 4},   // Chaconne

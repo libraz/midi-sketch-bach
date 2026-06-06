@@ -179,6 +179,33 @@ inline bool inScale(int midi, Mode mode) {
   return mode == Mode::Major ? phase17InScale(midi) : phase16InScale(midi);
 }
 
+/**
+ * @brief Walk `steps` diatonic scale degrees downward from `midi`.
+ *
+ * Note this cannot be expressed as `-scaleUp(-midi, steps, mode)`: pitch-class
+ * negation maps p to (12 - p) % 12, and the diatonic sets are not symmetric
+ * under that inversion, so the negation trick walks a different (non-diatonic)
+ * scale and lands on chromatic pitches.
+ *
+ * @param midi Starting MIDI pitch.
+ * @param steps Number of scale degrees to descend.
+ * @param mode Diatonic mode selecting the scale (Major = C major, Minor = C
+ *             natural minor).
+ * @return The MIDI pitch `steps` scale degrees below `midi`.
+ */
+inline int scaleDown(int midi, int steps, Mode mode) {
+  int cur = midi;
+  for (int s = 0; s < steps; ++s) {
+    for (int sub = 1; sub <= 12; ++sub) {
+      if (inScale(cur - sub, mode)) {
+        cur -= sub;
+        break;
+      }
+    }
+  }
+  return cur;
+}
+
 }  // namespace bach::composer::detail
 
 #endif  // BACH_COMPOSER_FIGURATION_H

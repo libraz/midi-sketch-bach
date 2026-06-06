@@ -16,13 +16,13 @@ J.S.バッハの器楽作品に特化したMIDIジェネレーター。
 
 | 形式 | 範とする作品 | 声部数 |
 |------|-------------|--------|
-| 前奏曲とフーガ | BWV 532, 548 | 2-5 |
-| フーガ | 厳格な3声フーガ | 2-5 |
+| 前奏曲とフーガ | BWV 532, 548 | 3 |
+| フーガ | 厳格な3声フーガ | 3 |
 | トリオ・ソナタ | BWV 525-530 | 3 |
-| コラール前奏曲 | BWV 599-650（オルゲルビュッヒライン） | 3-4 |
-| トッカータとフーガ | BWV 565 | 3-4 |
-| パッサカリア | BWV 582 | 3-4 |
-| 幻想曲とフーガ | BWV 537, 542 | 3-4 |
+| コラール前奏曲 | BWV 599-650（オルゲルビュッヒライン） | 3 |
+| トッカータとフーガ | BWV 565 | 3 |
+| パッサカリア | BWV 582 | 3 |
+| 幻想曲とフーガ | BWV 537, 542 | 3 |
 
 **無伴奏弦楽作品** ── 和声駆動・単旋律：
 
@@ -35,7 +35,7 @@ J.S.バッハの器楽作品に特化したMIDIジェネレーター。
 
 | 形式 | 範とする作品 | 声部数 |
 |------|-------------|--------|
-| ゴルトベルク変奏曲 | BWV 988 | 2-3 |
+| ゴルトベルク変奏曲 | BWV 988 | 3 |
 
 フーガでは提示部・真正/変格応答・対主題・嬉遊部・ストレッタを正しく構成し、平行5度・平行8度は禁則として排除、声部交差も解決します。
 
@@ -77,22 +77,22 @@ make demo   # http://localhost:8080/demo/
 |-----------|------|-----------|
 | `--form FORM` | 楽曲形式 | `prelude_and_fugue` |
 | `--key KEY` | 調（例: `g_minor`, `D_major`） | `C_major` |
-| `--voices N` | 声部数（2-5、オルガンのみ） | `3` |
 | `--character CH` | `severe`, `playful`, `noble`, `restless` | 自動 |
 | `--instrument INST` | `organ`, `harpsichord`, `piano`, `violin`, `cello`, `guitar` | 自動 |
-| `--scale SCALE` | `short`, `medium`, `long`, `full` | `short` |
+| `--scale SCALE` | `short`, `medium`, `long`, `full` | `short`（フーガは `medium`） |
 | `--bars N` | 目標小節数（`--scale`を上書き） | - |
 | `--bpm N` | テンポ（40-200） | `72` |
 | `--seed N` | 乱数シード（0 = ランダム） | `0` |
 | `--json` | JSONイベントデータ出力 | - |
-| `--analyze` | 分析メタデータを含める | - |
+| `--generated-json` | generated.v1 + provenance.v1 JSON出力 | - |
 | `-o FILE` | 出力ファイルパス | `output.mid` |
 
 ## ビルド
 
 ```bash
 make build          # C++ CLI
-make test           # テスト実行（C++ 1100件以上 / JS 18件）
+make test           # C++テスト実行（ctest 980件以上）
+yarn test           # JS/WASMテスト実行（vitest 210件以上）
 make quality-gate   # フォーマット + ビルド + テスト
 make wasm           # WASM + JSバインディング
 ```

@@ -63,8 +63,8 @@ TEST(FormDirectorSpec, TripleMeterFormsAreChaconneAndPassacaglia) {
 
 TEST(FormDirectorSpec, VoiceCountsMatchDesign) {
   EXPECT_EQ(formSpec(FormType::CelloPrelude).num_voices, 1);
-  EXPECT_EQ(formSpec(FormType::ChoralePrelude).num_voices, 2);
-  EXPECT_EQ(formSpec(FormType::Passacaglia).num_voices, 2);
+  EXPECT_EQ(formSpec(FormType::ChoralePrelude).num_voices, 3);
+  EXPECT_EQ(formSpec(FormType::Passacaglia).num_voices, 3);
   EXPECT_EQ(formSpec(FormType::Fugue).num_voices, 3);
   EXPECT_EQ(formSpec(FormType::ToccataAndFugue).num_voices, 3);
   EXPECT_EQ(formSpec(FormType::Passacaglia).snap_bars, 8);

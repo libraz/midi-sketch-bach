@@ -320,7 +320,7 @@ void appendFigurationBar(FugueAssembly& asm_ctx, FigurationSection& section, int
   int cursor = std::clamp(prev_anchor, wave_lo, wave_hi);
   int dir = (cursor <= center) ? 1 : -1;
   auto stepScale = [&](int from, int direction) {
-    return direction > 0 ? scaleUp(from, 1, mode) : -scaleUp(-from, 1, mode);
+    return direction > 0 ? scaleUp(from, 1, mode) : scaleDown(from, 1, mode);
   };
   int last_pitch = cursor;
   // This line's previous beat anchor, used to judge whether the next anchor
@@ -384,6 +384,55 @@ void appendFigurationBar(FugueAssembly& asm_ctx, FigurationSection& section, int
             next = reversed;
           }
         }
+        // Harshness-aware wave: a passing tone that lands a minor 2nd, tritone,
+        // or major 7th against a concurrently sounding earlier voice is the
+        // sharpest off-beat clash two independent wave lines can produce. Every
+        // sixteenth slot the candidate sounds through is scanned, so a slower
+        // line cannot sustain into a clash an already-placed faster line lands
+        // mid-duration. Reverse direction (still a single scale step) when the
+        // reversed step is both parallel-free and clash-free; milder seconds /
+        // sevenths are left alone so ordinary passing motion over a sustained
+        // tone survives.
+        auto wave_is_harsh = [&](int cand) {
+          for (VoiceId other = 0; other < kFugueVoices; ++other) {
+            if (other == static_cast<VoiceId>(voice)) {
+              continue;
+            }
+            for (Tick slot = tick; slot < tick + step; slot += kSixteenth) {
+              const int sounding = asm_ctx.theme_tones.soundingPitchInVoice(other, slot);
+              if (sounding < 0) {
+                continue;
+              }
+              const int ic = std::abs(cand - sounding) % 12;
+              if (ic == 1 || ic == 6 || ic == 11) {
+                return true;
+              }
+            }
+          }
+          return false;
+        };
+        if (!wave_is_parallel(next) && wave_is_harsh(next)) {
+          const int reversed = step_from(-dir);
+          if (!wave_is_parallel(reversed) && !wave_is_harsh(reversed)) {
+            dir = -dir;
+            next = reversed;
+          } else {
+            // Both single steps clash (or the reversed step lands a parallel):
+            // try a third-skip in either direction before accepting the clash.
+            // A scale-third skip is the smallest non-step move and reads as an
+            // ordinary chord-tone skip inside figuration.
+            for (const int skip_dir : {dir, -dir}) {
+              const int skip = (skip_dir > 0) ? scaleUp(from, 2, mode) : scaleDown(from, 2, mode);
+              if (skip < wave_lo || skip > wave_hi) {
+                continue;
+              }
+              if (!wave_is_parallel(skip) && !wave_is_harsh(skip)) {
+                next = skip;
+                break;
+              }
+            }
+          }
+        }
         // Keep the per-tick voice order V0 >= V1 >= V2: clamp the wave note below
         // every concurrent lower-index voice and above every concurrent
         // higher-index voice so a wide verbatim entry cannot be crossed.
@@ -406,7 +455,7 @@ void appendFigurationBar(FugueAssembly& asm_ctx, FigurationSection& section, int
           // diatonic tone inside it so the line never stalls into a long run.
           if (next == from && order_floor < order_ceiling) {
             int up = stepScale(from, 1);
-            int down = -scaleUp(-from, 1, mode);
+            int down = scaleDown(from, 1, mode);
             if (up <= order_ceiling && up != from) {
               next = up;
             } else if (down >= order_floor && down != from) {

@@ -42,6 +42,42 @@ TEST(TextureHelpersTest, IsConsonantIcFoldsLargeAndNegativeIntervals) {
   }
 }
 
+TEST(TextureHelpersTest, ScaleDownWalksDiatonicDegrees) {
+  // C major descent from C5: C-B-A-G-F-E-D-C, one degree per step.
+  const int expected_major[] = {72, 71, 69, 67, 65, 64, 62, 60};
+  for (int i = 0; i + 1 < 8; ++i) {
+    EXPECT_EQ(detail::scaleDown(expected_major[i], 1, detail::Mode::Major), expected_major[i + 1]);
+  }
+  // Multi-step walk matches repeated single steps.
+  EXPECT_EQ(detail::scaleDown(72, 7, detail::Mode::Major), 60);
+  // C natural-minor descent from C5: C-Bb-Ab-G-F-Eb-D-C.
+  const int expected_minor[] = {72, 70, 68, 67, 65, 63, 62, 60};
+  for (int i = 0; i + 1 < 8; ++i) {
+    EXPECT_EQ(detail::scaleDown(expected_minor[i], 1, detail::Mode::Minor), expected_minor[i + 1]);
+  }
+}
+
+TEST(TextureHelpersTest, ScaleDownIsNotNegatedScaleUp) {
+  // The diatonic sets are not symmetric under pitch-class negation, so the
+  // -scaleUp(-midi) trick walks a different (chromatic-producing) set. F5 down
+  // one C-major degree is E5; the negation trick lands D#5.
+  EXPECT_EQ(detail::scaleDown(77, 1, detail::Mode::Major), 76);
+  EXPECT_EQ(-detail::scaleUp(-77, 1, detail::Mode::Major), 75);
+}
+
+TEST(TextureHelpersTest, ScaleDownInvertsScaleUp) {
+  // Down-then-up returns to the start from any in-scale pitch.
+  for (int midi = 48; midi <= 84; ++midi) {
+    for (detail::Mode mode : {detail::Mode::Major, detail::Mode::Minor}) {
+      if (!detail::inScale(midi, mode)) {
+        continue;
+      }
+      EXPECT_EQ(detail::scaleUp(detail::scaleDown(midi, 1, mode), 1, mode), midi)
+          << "midi " << midi << " mode " << static_cast<int>(mode);
+    }
+  }
+}
+
 TEST(TextureHelpersTest, IsConsonantPairMatchesIc) {
   // A perfect fifth (7 semitones) is consonant; a tritone (6) is not. The pair
   // form is order-independent.
