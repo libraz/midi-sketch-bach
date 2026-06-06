@@ -1016,10 +1016,9 @@ void appendFugueSection(FugueAssembly& asm_ctx, int first_bar, int bars,
         const int rel = static_cast<int>(subj_pat[static_cast<std::size_t>(note)]) -
                         static_cast<int>(subj_pat[0]);
         const int degrees = kSemisToDegrees[static_cast<std::size_t>(std::min(std::abs(rel), 12))];
-        const int diatonic = (rel >= 0) ? scaleUp(seed_base, degrees, mode)
-                                        : scaleDown(seed_base, degrees, mode);
-        seed_pitch[static_cast<std::size_t>(note)] =
-            std::clamp(diatonic, kBandLo[0], kBandHi[0]);
+        const int diatonic =
+            (rel >= 0) ? scaleUp(seed_base, degrees, mode) : scaleDown(seed_base, degrees, mode);
+        seed_pitch[static_cast<std::size_t>(note)] = std::clamp(diatonic, kBandLo[0], kBandHi[0]);
       }
       // One SequenceTemplate per step (num_steps = 1 each), every step's seed
       // transposed by one scale DEGREE per step (direction alternates by
@@ -1034,9 +1033,8 @@ void appendFugueSection(FugueAssembly& asm_ctx, int first_bar, int bars,
       // into a repeated-pitch plateau (a clamped descending walk otherwise
       // flattens to the band floor, e.g. G-G-G-G).
       {
-        const int extreme = ascending
-                                ? *std::max_element(seed_pitch.begin(), seed_pitch.end())
-                                : *std::min_element(seed_pitch.begin(), seed_pitch.end());
+        const int extreme = ascending ? *std::max_element(seed_pitch.begin(), seed_pitch.end())
+                                      : *std::min_element(seed_pitch.begin(), seed_pitch.end());
         int walked = extreme;
         for (int k = 0; k < steps - 1; ++k) {
           walked = ascending ? scaleUp(walked, 1, mode) : scaleDown(walked, 1, mode);
@@ -1053,8 +1051,7 @@ void appendFugueSection(FugueAssembly& asm_ctx, int first_bar, int bars,
       const Tick span_hi = barTick(ep_start + ep_len);
       for (int kstep = 0; kstep < steps; ++kstep) {
         SequenceTemplate tmpl;
-        tmpl.pattern =
-            ascending ? SequencePattern::AscendingStep : SequencePattern::DescendingStep;
+        tmpl.pattern = ascending ? SequencePattern::AscendingStep : SequencePattern::DescendingStep;
         tmpl.target_start_tick = barTick(ep_start) + static_cast<Tick>(kstep) * stride;
         tmpl.step_length_ticks = stride;
         tmpl.num_steps = 1;

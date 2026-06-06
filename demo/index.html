@@ -784,7 +784,7 @@
       async init() {
         try {
           await bach.init({ wasmPath: '../dist/bach.wasm' });
-          this.version = bach.getVersion ? bach.getVersion() : '0.2.0';
+          this.version = bach.getVersion ? bach.getVersion() : '0.2.1';
 
           this.forms = bach.getForms();
           this.instruments = bach.getInstruments();
