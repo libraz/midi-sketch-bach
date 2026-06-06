@@ -31,7 +31,11 @@ jobs:
       - name: Generate coverage report
         run: |
           pipx install gcovr
-          gcovr --root . --filter 'src/' --xml -o coverage-cpp.xml
+          # suspicious_hits.warn: gcov sometimes emits garbage hit counts
+          # (gcovr SuspiciousHits); downgrade to a warning instead of failing.
+          gcovr --root . --filter 'src/' \
+            --gcov-ignore-parse-errors suspicious_hits.warn \
+            --xml -o coverage-cpp.xml
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v5
@@ -88,8 +92,15 @@ jobs:
       - name: Lint
         run: yarn lint
 
+      # Not `make wasm`: emsdk puts upstream/emscripten/ (which contains a
+      # cmake/ directory) on PATH, and make's direct exec of `cmake` hits it
+      # with EACCES. Bash PATH lookup skips directories, so run the same
+      # commands directly.
       - name: Build WASM + JS bindings
-        run: make wasm
+        run: |
+          emcmake cmake -B build-wasm -DBUILD_WASM=ON -DCMAKE_BUILD_TYPE=Release
+          cmake --build build-wasm --parallel "$(nproc)"
+          yarn build:js
 
       - name: Run JS/WASM tests with coverage
         run: yarn test --coverage
