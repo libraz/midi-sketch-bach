@@ -502,8 +502,27 @@ HarnessFixture buildChoralePreludeForm(const ResolvedRequest& req) {
     // Register base stays at C4 (60) plus the arc register lift, comfortably
     // above the C3-region cantus firmus.
     const int register_base = 60 + static_cast<int>(point.register_shift);
-    appendFigurationBar(fig, bar, bar_chords[static_cast<std::size_t>(bar)], mode, notes_per_beat,
-                        register_base, offset);
+    const BarChord& chord = bar_chords[static_cast<std::size_t>(bar)];
+    // Pattern rotation per 4-bar cycle: the anchored scalar wave alternates
+    // with the figura corta cell (eighth + two sixteenths per beat -- the
+    // dotted-feel chorale figuration idiom), so consecutive cycles trace
+    // distinct accompaniment figures over the unchanged cantus firmus. The
+    // climax cycle is a design value and keeps the densest wave; the cycle
+    // holding the piece's mid-boundary bar always takes the corta figure so
+    // the mid sub-cadence carries ornament-eligible long notes regardless of
+    // the seed's rotation parity.
+    const int mid_boundary_bar = bars >= 8 ? ((bars / 2) / 4) * 4 - 1 : -1;
+    const bool mid_cycle = mid_boundary_bar >= 0 && (bar / 4) == (mid_boundary_bar / 4);
+    const bool corta = !point.is_climax &&
+                       ((((req.seed + static_cast<std::uint32_t>(bar / 4)) % 2) == 1) || mid_cycle);
+    if (corta) {
+      appendFiguraCortaBar(fig.notes, bar,
+                           snapUpToChordTone(detail::scaleUp(register_base, offset, mode),
+                                             chord.root_pc, chord.minor),
+                           detail::ChordSpec{chord.root_pc, chord.minor}, mode);
+    } else {
+      appendFigurationBar(fig, bar, chord, mode, notes_per_beat, register_base, offset);
+    }
   }
 
   // V0 figuration registry for the embellishment loop's run-break consonance

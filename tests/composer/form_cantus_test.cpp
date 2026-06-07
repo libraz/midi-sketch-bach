@@ -608,6 +608,71 @@ TEST(FormCantusGoldberg, VariationKindDispatchFollowsBwv988Scheme) {
     EXPECT_EQ(goldbergVariationKind(idx), goldbergVariationKind(idx)) << "index " << idx;
 }
 
+// The chorale accompaniment (V0 figuration) rotates its vocabulary per 4-bar
+// cycle: anchored-wave cycles run uniform subdivisions, figura corta cycles
+// carry the mixed eighth+sixteenth cell. The cycle holding the piece's
+// mid-boundary bar is always a corta cycle (its long notes are what the
+// ornament pass needs at the mid sub-cadence). The cantus firmus is untouched
+// (the V1 downbeat skeleton still matches material.cantus_firmus bar by bar).
+TEST(FormCantusChorale, AccompanimentRotatesVocabularyOverUnchangedCantus) {
+  for (std::uint32_t seed : kSeeds) {
+    for (bool minor : {false, true}) {
+      const HarnessFixture fx =
+          build(FormType::ChoralePrelude, minor, choraleCharacter(minor), /*bars=*/32, seed);
+      const ComposeResult r = Composer{}.run(fx.material, fx.harmony, fx.voice_plan);
+      EXPECT_EQ(r.validation.status, ValidationStatus::Ok) << "seed " << seed;
+
+      // V0 figuration section (voice 0 in figuration_sections).
+      const FigurationSection* fig = nullptr;
+      for (const auto& section : fx.material.figuration_sections) {
+        if (section.voice == 0)
+          fig = &section;
+      }
+      ASSERT_NE(fig, nullptr);
+      const int bars = static_cast<int>(fx.harmony.chords.size());
+      bool saw_corta = false;
+      bool saw_uniform = false;
+      bool mid_cycle_is_corta = false;
+      const int mid_bar = ((bars / 2) / 4) * 4 - 1;
+      for (int cycle = 0; cycle * 4 < bars; ++cycle) {
+        const Tick lo = static_cast<Tick>(cycle) * 4 * kTicksPerBar;
+        const Tick hi = lo + kTicksPerBar;  // the cycle's first bar.
+        Tick first_dur = 0;
+        bool mixed = false;
+        for (const auto& n : fig->notes) {
+          if (n.start_tick < lo || n.start_tick >= hi)
+            continue;
+          if (first_dur == 0)
+            first_dur = n.duration;
+          else if (n.duration != first_dur)
+            mixed = true;
+        }
+        if (mixed) {
+          saw_corta = true;
+          if (mid_bar >= 0 && cycle == mid_bar / 4)
+            mid_cycle_is_corta = true;
+        } else {
+          saw_uniform = true;
+        }
+      }
+      EXPECT_TRUE(saw_corta) << "seed " << seed << " minor " << minor;
+      EXPECT_TRUE(saw_uniform) << "seed " << seed << " minor " << minor;
+      EXPECT_TRUE(mid_cycle_is_corta) << "seed " << seed << " minor " << minor
+                                      << ": the mid-boundary cycle must carry the corta figure";
+
+      // Cantus firmus untouched: every V1 bar-head pitch equals the skeleton.
+      for (const auto& n : r.notes) {
+        if (n.voice != 1 || n.start_tick % kTicksPerBar != 0)
+          continue;
+        const std::size_t bar = static_cast<std::size_t>(n.start_tick / kTicksPerBar);
+        if (bar < fx.material.cantus_firmus.size())
+          EXPECT_EQ(n.pitch, fx.material.cantus_firmus[bar].pitch)
+              << "seed " << seed << " bar " << bar << ": CF skeleton altered";
+      }
+    }
+  }
+}
+
 TEST(FormCantusGoldberg, FigurationBlocksAlternatePatterns) {
   // Non-climax figuration blocks rotate the goldberg pattern palette, so the
   // set of figuration-block duration histograms is not uniform: the figura
