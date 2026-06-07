@@ -689,4 +689,78 @@ TEST(FormSectionalTest, FugueTailIsAtLeastTwoVoicesExceptOpeningEntry) {
   }
 }
 
+// --- Dramaticus material plan ------------------------------------------------
+
+// The Dramaticus toccata's free section carries the designed materials, locked
+// per bar from the composed output: bars 0-1 = the V0 solo opening gesture
+// (sixteenths, the bar tail silent, no other voice), bar 2 and the final free
+// bar = declamatory chord blocks (half-note strikes in all three voices), the
+// two bars before the closing block = the V2 walking-pedal solo (quarters, V0
+// and V1 silent), and every other free bar = the running figuration over the
+// pedal + punctuation layers.
+TEST(FormSectionalTest, DramaticusFreeSectionCarriesDesignedMaterials) {
+  for (std::uint32_t seed : {4u, 8u, 12u}) {  // seed % 4 == 0 -> Dramaticus.
+    for (std::uint16_t total : {16, 32, 64}) {
+      const HarnessFixture fx = buildFixture(FormType::ToccataAndFugue, seed, false, total);
+      const ComposeResult r = Composer{}.run(fx.material, fx.harmony, fx.voice_plan);
+      ASSERT_EQ(r.validation.status, ValidationStatus::Ok) << "seed " << seed;
+
+      const int free_bars = freeBarsFor(total);
+      const int pedal_solo = free_bars - 5;
+      // Per-bar, per-voice notes of the free section.
+      std::vector<std::array<std::vector<const NoteEvent*>, 3>> bars(
+          static_cast<std::size_t>(free_bars));
+      for (const auto& n : r.notes) {
+        const int bar = static_cast<int>(n.start_tick / kBar);
+        if (bar < free_bars && n.voice < 3)
+          bars[static_cast<std::size_t>(bar)][n.voice].push_back(&n);
+      }
+
+      for (int bar = 0; bar < free_bars; ++bar) {
+        const auto& by_voice = bars[static_cast<std::size_t>(bar)];
+        const std::string ctx = "seed " + std::to_string(seed) + " total " + std::to_string(total) +
+                                " bar " + std::to_string(bar);
+        if (bar <= 1) {
+          // Opening gesture: V0 solo sixteenths, the bar tail silent.
+          EXPECT_FALSE(by_voice[0].empty()) << ctx;
+          EXPECT_TRUE(by_voice[1].empty()) << ctx;
+          EXPECT_TRUE(by_voice[2].empty()) << ctx;
+          Tick last_end = 0;
+          for (const NoteEvent* n : by_voice[0]) {
+            EXPECT_EQ(n->duration, kTicksPerBeat / 4) << ctx;
+            last_end = std::max(last_end, n->start_tick + n->duration);
+          }
+          EXPECT_LE(last_end, static_cast<Tick>(bar) * kBar + 2 * kTicksPerBeat)
+              << ctx << ": gesture must leave the bar tail silent";
+        } else if (bar == 2 || bar == free_bars - 1) {
+          // Declamatory chord block: half-note strikes in all three voices,
+          // articulated together at the bar head.
+          for (int voice = 0; voice < 3; ++voice) {
+            ASSERT_FALSE(by_voice[static_cast<std::size_t>(voice)].empty()) << ctx;
+            EXPECT_EQ(by_voice[static_cast<std::size_t>(voice)].front()->start_tick,
+                      static_cast<Tick>(bar) * kBar)
+                << ctx << " voice " << voice;
+            for (const NoteEvent* n : by_voice[static_cast<std::size_t>(voice)])
+              EXPECT_EQ(n->duration, 2 * kTicksPerBeat) << ctx << " voice " << voice;
+          }
+        } else if (bar == pedal_solo || bar == pedal_solo + 1) {
+          // Pedal solo: V2 walking quarters alone.
+          EXPECT_TRUE(by_voice[0].empty()) << ctx;
+          EXPECT_TRUE(by_voice[1].empty()) << ctx;
+          ASSERT_EQ(by_voice[2].size(), 4u) << ctx;
+          for (const NoteEvent* n : by_voice[2])
+            EXPECT_EQ(n->duration, kTicksPerBeat) << ctx;
+        } else {
+          // Wave bar: running V0 figuration over both accompaniment layers.
+          EXPECT_FALSE(by_voice[0].empty()) << ctx;
+          EXPECT_FALSE(by_voice[1].empty()) << ctx;
+          EXPECT_FALSE(by_voice[2].empty()) << ctx;
+          for (const NoteEvent* n : by_voice[0])
+            EXPECT_LE(n->duration, kTicksPerBeat / 2) << ctx << ": wave runs eighths/sixteenths";
+        }
+      }
+    }
+  }
+}
+
 }  // namespace bach::composer

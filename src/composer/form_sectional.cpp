@@ -1236,6 +1236,26 @@ HarnessFixture buildToccataAndFugueForm(const ResolvedRequest& req) {
     }
   }
 
+  // Dramaticus material plan (design values): the archetype decides the bar
+  // MATERIAL, not only the section structure. Bars 0-1 carry the opening
+  // gesture (V0 solo: written-out mordent + descending run, the rest of the
+  // bar silent -- the BWV565 dramatic-opening rhetoric); bar 2 and the final
+  // free bar are declamatory chord blocks (V0 block tones over the homophonic
+  // V1+V2 strike); the two bars before the closing block are a pedal solo (V2
+  // walking pedal alone); every other bar runs the scalar-wave figuration.
+  enum class DramBar : std::uint8_t { kWave, kGesture, kChordBlock, kPedalSolo };
+  std::vector<DramBar> dram_plan;
+  if (archetype == ToccataArchetype::Dramaticus) {
+    dram_plan.assign(static_cast<std::size_t>(free_bars), DramBar::kWave);
+    dram_plan[0] = DramBar::kGesture;
+    dram_plan[1] = DramBar::kGesture;
+    dram_plan[2] = DramBar::kChordBlock;
+    dram_plan[static_cast<std::size_t>(free_bars - 1)] = DramBar::kChordBlock;
+    const int pedal_solo = free_bars - 5;  // two bars, ending before the close.
+    dram_plan[static_cast<std::size_t>(pedal_solo)] = DramBar::kPedalSolo;
+    dram_plan[static_cast<std::size_t>(pedal_solo + 1)] = DramBar::kPedalSolo;
+  }
+
   // Emit one ToccataSection per window (V0). Every section carries the piece's
   // archetype + character; the (character, archetype) pair is checked by the
   // validator's toccata_archetype_compatible rule (Noble x Dramaticus is the
@@ -1243,13 +1263,11 @@ HarnessFixture buildToccataAndFugueForm(const ResolvedRequest& req) {
   // The first bar of each section is is_section_head so SectionTransition fires
   // once per section.
   //
-  // Accompaniment layout: every free bar carries a V2 pedal and a V1 head
-  // punctuation, EXCEPT the first two bars of a Dramaticus opening flourish,
-  // which stay solo (the dramatic-opening rhetoric of BWV565 is a deliberate
-  // single-voice gesture; this is why the toccata mono ceiling is 0.25, not 0).
-  // Only the opening gesture is solo: the pedal / punctuation enter for the rest
-  // of the flourish window so the piece mono ratio stays inside the ceiling.
-  constexpr int kDramaticusSoloBars = 2;
+  // Accompaniment layout: every wave bar carries a V2 pedal and a V1 head
+  // punctuation. The Dramaticus gesture and pedal-solo bars stay solo (the
+  // dramatic rhetoric is a deliberate single-voice gesture; this is why the
+  // toccata mono ceiling is not 0), and its chord-block bars take the
+  // homophonic V1+V2 strike instead of the running layers.
   std::vector<FreeLayerPlan> layout(static_cast<std::size_t>(free_bars));
   std::vector<MaterialNote> v0_free_notes;
   for (const BarWindow& win : windows) {
@@ -1266,6 +1284,34 @@ HarnessFixture buildToccataAndFugueForm(const ResolvedRequest& req) {
     // section head so each section keeps its own register identity).
     int prev_pitch = -1;
     for (int bar = win.first_bar; bar <= win.last_bar; ++bar) {
+      FreeLayerPlan& lp = layout[static_cast<std::size_t>(bar)];
+      const DramBar kind =
+          dram_plan.empty() ? DramBar::kWave : dram_plan[static_cast<std::size_t>(bar)];
+      if (kind == DramBar::kGesture) {
+        // V0 solo opening gesture; the bar's tail is silent and no layer enters.
+        appendGestureBar(section.notes, bar, plan[static_cast<std::size_t>(bar)], mode, kBandLo[0],
+                         kBandHi[0]);
+        prev_pitch = -1;
+        continue;
+      }
+      if (kind == DramBar::kChordBlock) {
+        // V0 chord-block tones (two half-note top triad tones) over the
+        // homophonic V1+V2 half-note strike (declamatory full texture).
+        std::vector<std::vector<MaterialNote>> block(1);
+        appendChordBlockBar(block, bar, plan[static_cast<std::size_t>(bar)], mode, kBandHi[0] - 4,
+                            kTicksPerBeat * 2);
+        for (const auto& note : block[0])
+          section.notes.push_back(note);
+        lp.pedal = true;
+        lp.homophonic = true;
+        prev_pitch = -1;
+        continue;
+      }
+      if (kind == DramBar::kPedalSolo) {
+        // V2 walking pedal alone (emitted below); V0 and V1 rest.
+        prev_pitch = -1;
+        continue;
+      }
       const ArcPoint arc = arcForBar(req, bar);
       // Density tier from the arc (1 = eighth, >=2 = sixteenth). A Dramaticus
       // opening flourish (its first window, starting at bar 0) stays at eighths
@@ -1277,18 +1323,39 @@ HarnessFixture buildToccataAndFugueForm(const ResolvedRequest& req) {
                                   kBandHi[0] - 12);
       appendScalarWaveBar(section.notes, bar, plan[static_cast<std::size_t>(bar)], mode,
                           notes_per_beat, base, kBandHi[0], fig_offset, prev_pitch);
-      // Only the first two flourish bars stay solo; every other bar (including
-      // the rest of the flourish window) carries both accompaniment layers.
-      const bool solo = is_flourish_window && bar < kDramaticusSoloBars;
-      FreeLayerPlan& lp = layout[static_cast<std::size_t>(bar)];
-      lp.pedal = !solo;
-      lp.punctuate = !solo;
+      lp.pedal = true;
+      lp.punctuate = true;
     }
     for (const auto& note : section.notes) {
       v0_free_notes.push_back(note);
     }
     out.material.toccata_sections.push_back(std::move(section));
     pushSpan(asm_ctx, 0, win.first_bar, win.last_bar, VoiceIntent::ToccataCarrier);
+  }
+
+  // --- Dramaticus pedal solo (V2 walking pedal alone, root-fifth quarters). ---
+  if (!dram_plan.empty()) {
+    FigurationSection pedal_solo_section;
+    pedal_solo_section.voice = 2;
+    pedal_solo_section.is_pedal_prep = true;
+    int first = -1;
+    int last = -1;
+    int walk_prev = -1;
+    for (int bar = 0; bar < free_bars; ++bar) {
+      if (dram_plan[static_cast<std::size_t>(bar)] != DramBar::kPedalSolo)
+        continue;
+      if (first < 0)
+        first = bar;
+      last = bar;
+      appendPedalWalkBar(pedal_solo_section.notes, bar, plan[static_cast<std::size_t>(bar)], mode,
+                         kFreeV2Lo, kFreeV2Hi, walk_prev);
+    }
+    if (!pedal_solo_section.notes.empty()) {
+      pedal_solo_section.start_tick = barTick(first);
+      pedal_solo_section.end_tick = barTick(last + 1);
+      out.material.figuration_sections.push_back(std::move(pedal_solo_section));
+      pushSpan(asm_ctx, 2, first, last, VoiceIntent::FigurationCarrier);
+    }
   }
 
   // --- ACCOMPANIMENT LAYERS (V2 pedal + V1 punctuation) over the free section.
