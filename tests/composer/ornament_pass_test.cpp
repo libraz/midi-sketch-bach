@@ -341,51 +341,58 @@ TEST(OrnamentPassTest, LongCadenceTrillMixesAppuyAndVonUntenOpenings) {
 
 // A long note outside the cadence window always opens with the appuy: a single
 // held upper-neighbour note of max(span/4, eighth) capped at a half note,
-// followed by the alternation. The 2-bar note sits on the designed mid-piece
-// boundary so the placement gate cannot suppress it.
+// followed by the alternation. Playful's interior inner trill carries the
+// shape; the 2-bar note sits on an even non-boundary bar and the seed family
+// guarantees at least one open gate.
 TEST(OrnamentPassTest, LongNoteOpensWithHeldUpperAppoggiatura) {
-  ComposeResult r;
-  const int bars = 12;  // mid boundary bar = 3.
-  for (int bar = 0; bar < bars; ++bar) {
-    r.notes.push_back(makeNote(barToTick(bar), kTicksPerBar, 36, 1));
-    r.provenance.push_back(composeProv(1));
-  }
-  for (int bar = 0; bar < bars; ++bar) {
-    if (bar == 3) {
-      // Two-bar held note (bars 3-4) on the mid-piece boundary downbeat.
-      r.notes.push_back(makeNote(barToTick(3), kTicksPerBar * 2, 76, 0));
-      r.provenance.push_back(composeProv(0));
-      continue;
+  bool found = false;
+  for (std::uint32_t seed = 1; seed <= 8 && !found; ++seed) {
+    ComposeResult r;
+    const int bars = 12;
+    for (int bar = 0; bar < bars; ++bar) {
+      r.notes.push_back(makeNote(barToTick(bar), kTicksPerBar, 36, 1));
+      r.provenance.push_back(composeProv(1));
     }
-    if (bar == 4)
-      continue;  // covered by the held note.
-    r.notes.push_back(makeNote(barToTick(bar), kTicksPerBeat * 2, 72, 0));
-    r.provenance.push_back(composeProv(0));
-    r.notes.push_back(makeNote(barToTick(bar) + kTicksPerBeat * 2, kTicksPerBeat * 2, 74, 0));
-    r.provenance.push_back(composeProv(0));
+    for (int bar = 0; bar < bars; ++bar) {
+      if (bar == 4) {
+        // Two-bar held note (bars 4-5) on an even, non-boundary downbeat.
+        r.notes.push_back(makeNote(barToTick(4), kTicksPerBar * 2, 76, 0));
+        r.provenance.push_back(composeProv(0));
+        continue;
+      }
+      if (bar == 5)
+        continue;  // covered by the held note.
+      r.notes.push_back(makeNote(barToTick(bar), kTicksPerBeat * 2, 72, 0));
+      r.provenance.push_back(composeProv(0));
+      r.notes.push_back(makeNote(barToTick(bar) + kTicksPerBeat * 2, kTicksPerBeat * 2, 74, 0));
+      r.provenance.push_back(composeProv(0));
+    }
+    r.tracks = Renderer{}.render(r.notes);
+
+    OrnamentParams p = baseParams();  // Playful: density 2, interior inner trills.
+    p.seed = seed;
+    applyOrnamentPass(r, p);
+
+    std::vector<NoteEvent> run;
+    for (const auto& n : r.notes) {
+      if (n.voice == 0 && n.source == BachNoteSource::Ornament && n.start_tick >= barToTick(4) &&
+          n.start_tick < barToTick(6))
+        run.push_back(n);
+    }
+    if (run.size() < 4)
+      continue;  // the generic gate was closed for this seed; try the next.
+    found = true;
+
+    // Appuy head: held upper neighbour, span/4 capped at a half note.
+    const auto& head = run.front();
+    EXPECT_EQ(head.pitch, 77) << "appuy must hold the upper neighbour";
+    EXPECT_EQ(head.duration, duration::kHalfNote) << "appuy length = max(span/4, eighth) cap half";
+    // The alternation resumes on the main tone and ends lower -> main.
+    EXPECT_EQ(run[1].pitch, 76);
+    EXPECT_LT(run[run.size() - 2].pitch, 76);
+    EXPECT_EQ(run.back().pitch, 76);
   }
-  r.tracks = Renderer{}.render(r.notes);
-
-  OrnamentParams p = baseParams();
-  p.character = SubjectCharacter::Noble;  // density 1: phrase-boundary trill on the long note.
-  applyOrnamentPass(r, p);
-
-  std::vector<NoteEvent> run;
-  for (const auto& n : r.notes) {
-    if (n.voice == 0 && n.source == BachNoteSource::Ornament && n.start_tick >= barToTick(3) &&
-        n.start_tick < barToTick(5))
-      run.push_back(n);
-  }
-  ASSERT_GE(run.size(), 4u) << "mid-boundary long-note trill missing";
-
-  // Appuy head: held upper neighbour, span/4 capped at a half note.
-  const auto& head = run.front();
-  EXPECT_EQ(head.pitch, 77) << "appuy must hold the upper neighbour";
-  EXPECT_EQ(head.duration, duration::kHalfNote) << "appuy length = max(span/4, eighth) cap half";
-  // The alternation resumes on the main tone and ends lower -> main.
-  EXPECT_EQ(run[1].pitch, 76);
-  EXPECT_LT(run[run.size() - 2].pitch, 76);
-  EXPECT_EQ(run.back().pitch, 76);
+  EXPECT_TRUE(found) << "no inner-trill appuy opening fired across the seed family";
 }
 
 // --- Trill pacing follows tempo ----------------------------------------------
@@ -594,8 +601,7 @@ TEST(OrnamentPassTest, SlideFillsRisingLeapArrival) {
     }
     r.tracks = Renderer{}.render(r.notes);
 
-    OrnamentParams p = baseParams();
-    p.character = SubjectCharacter::Noble;  // density 1.
+    OrnamentParams p = baseParams();  // Playful: the slide belongs to its vocabulary.
     p.seed = seed;
     applyOrnamentPass(r, p);
 
@@ -623,6 +629,52 @@ TEST(OrnamentPassTest, SlideFillsRisingLeapArrival) {
     }
   }
   EXPECT_TRUE(found) << "no slide fired across the seed family";
+}
+
+// The character x vocabulary design table, observed at phrase-boundary sites
+// across a seed family. Group sizes identify the figure: 2 = appoggiatura,
+// 3 = mordent (or slide -- distinguished by motion), 4+ = turn or trill.
+//   Severe   : appoggiatura only (and only on its sparse 8-bar sites).
+//   Noble    : appoggiatura or turn -- never a mordent.
+//   Restless : mordent (quarters) -- never a lean.
+//   Playful  : mordent on the unmatched quarter approach.
+TEST(OrnamentPassTest, CharacterVocabularyGrammarAtBoundaries) {
+  struct Row {
+    SubjectCharacter character;
+    bool allow2;  // appoggiatura
+    bool allow3;  // mordent
+    bool allow4;  // turn
+  };
+  const Row rows[] = {
+      {SubjectCharacter::Severe, true, false, false},
+      {SubjectCharacter::Noble, true, false, true},
+      {SubjectCharacter::Restless, false, true, false},
+      {SubjectCharacter::Playful, false, true, false},
+  };
+  for (const Row& row : rows) {
+    for (std::uint32_t seed = 1; seed <= 8; ++seed) {
+      ComposeResult r = fallingThirdBoundaryFixture(kTicksPerBeat);
+      OrnamentParams p = baseParams();
+      p.character = row.character;
+      p.seed = seed;
+      applyOrnamentPass(r, p);
+      for (int bar : {3, 7, 11}) {
+        std::size_t group = 0;
+        for (const auto& n : r.notes) {
+          if (n.voice == 0 && n.source == BachNoteSource::Ornament &&
+              n.start_tick >= barToTick(bar) && n.start_tick < barToTick(bar) + kTicksPerBeat)
+            ++group;
+        }
+        if (group == 0)
+          continue;  // gate closed (or off this character's sites).
+        const bool allowed =
+            (group == 2 && row.allow2) || (group == 3 && row.allow3) || (group == 4 && row.allow4);
+        EXPECT_TRUE(allowed) << "character " << static_cast<int>(row.character) << " seed " << seed
+                             << " bar " << bar << " produced a foreign figure of " << group
+                             << " sub-notes";
+      }
+    }
+  }
 }
 
 // The new vocabulary is self-gated, never mandatory: across a seed family at
@@ -698,12 +750,12 @@ TEST(OrnamentPassTest, OrganOrnamentsDoNotExceedManualCompass) {
 // --- Mid-piece distribution -------------------------------------------------
 
 // A density-0 character is no longer bare until the final cadence: every other
-// phrase boundary (bar % 8 == 7) outside the cadence window is a gated mordent
-// candidate, and the designed mid-piece boundary (the phrase boundary nearest
-// the midpoint -- bar 11 in a 24-bar piece) bypasses the gate entirely, so a
-// mid-piece ornament fires for EVERY seed; all mid-piece ornaments must sit on
-// such boundaries.
-TEST(OrnamentPassTest, SparseCharacterGetsPhraseBoundaryMordentsMidPiece) {
+// phrase boundary (bar % 8 == 7) outside the cadence window is a boundary-
+// figure site, and the designed mid-piece boundary (the phrase boundary
+// nearest the midpoint -- bar 11 in a 24-bar piece) fires for EVERY seed; all
+// mid-piece ornaments must sit on such boundaries. The suspension-leaning
+// Severe takes the appoggiatura there (a two-note lean resolving down).
+TEST(OrnamentPassTest, SparseCharacterGetsPhraseBoundaryAppoggiaturasMidPiece) {
   for (std::uint32_t seed = 1; seed <= 8; ++seed) {
     ComposeResult r = twoVoiceFixture(24);  // cadence window = bars 22-23.
     OrnamentParams p = baseParams();
@@ -711,6 +763,7 @@ TEST(OrnamentPassTest, SparseCharacterGetsPhraseBoundaryMordentsMidPiece) {
     p.seed = seed;
     applyOrnamentPass(r, p);
     bool mid_boundary_fired = false;
+    std::vector<const NoteEvent*> mid_group;
     for (const auto& n : r.notes) {
       if (n.source != BachNoteSource::Ornament)
         continue;
@@ -719,11 +772,16 @@ TEST(OrnamentPassTest, SparseCharacterGetsPhraseBoundaryMordentsMidPiece) {
         continue;  // cadence trill, covered elsewhere.
       EXPECT_TRUE(bar % 8 == 7 || bar == 11)
           << "density-0 mid-piece ornament off the phrase boundary, bar " << bar;
-      if (bar == 11)
+      if (bar == 11) {
         mid_boundary_fired = true;
+        mid_group.push_back(&n);
+      }
     }
-    EXPECT_TRUE(mid_boundary_fired)
-        << "seed " << seed << " missed the designed mid-piece boundary mordent";
+    ASSERT_TRUE(mid_boundary_fired)
+        << "seed " << seed << " missed the designed mid-piece boundary appoggiatura";
+    // Appoggiatura shape: lean on the upper neighbour, resolve to the main.
+    ASSERT_EQ(mid_group.size(), 2u);
+    EXPECT_EQ(mid_group[0]->pitch, mid_group[1]->pitch + 2) << "lean must be the upper neighbour";
   }
 }
 
@@ -754,12 +812,12 @@ TEST(OrnamentPassTest, PhraseBoundaryOrnamentsAreNotMandatory) {
   EXPECT_TRUE(found_plain_boundary) << "every phrase boundary was ornamented for every seed";
 }
 
-// Density 1 now admits downbeat mordents on HALF notes too (every 2 bars). The
-// mordent shape is main -> lower -> main (exactly three sub-notes covering the
-// original half-note span).
-TEST(OrnamentPassTest, DensityOneHalfNoteDownbeatMordent) {
-  bool found_half_mordent = false;
-  for (std::uint32_t seed = 1; seed <= 8 && !found_half_mordent; ++seed) {
+// Noble's interior vocabulary is the turn on half-or-longer tones: an even-bar
+// downbeat half note expands to the four-tone gruppetto (upper - main - lower
+// - held main) covering the original span exactly.
+TEST(OrnamentPassTest, NobleHalfNoteDownbeatTakesTurn) {
+  bool found_turn = false;
+  for (std::uint32_t seed = 1; seed <= 8 && !found_turn; ++seed) {
     // V0: two half notes per bar; V1 whole-note bass below.
     ComposeResult r;
     const int bars = 12;
@@ -778,9 +836,9 @@ TEST(OrnamentPassTest, DensityOneHalfNoteDownbeatMordent) {
     p.seed = seed;
     applyOrnamentPass(r, p);
 
-    // Look for a 3-note ornament group on an even-bar downbeat half note
-    // outside both the phrase boundaries (bar % 4 == 3) and the cadence
-    // window (bars 10-11).
+    // Look for the 4-note turn on an even-bar downbeat half note outside both
+    // the phrase boundaries (bar % 4 == 3) and the cadence window (bars
+    // 10-11).
     for (int bar = 0; bar < 10; bar += 2) {
       if (bar % 4 == 3)
         continue;
@@ -790,21 +848,22 @@ TEST(OrnamentPassTest, DensityOneHalfNoteDownbeatMordent) {
             n.start_tick < barToTick(bar) + kTicksPerBeat * 2)
           group.push_back(&n);
       }
-      if (group.size() == 3) {
-        // main -> lower neighbour -> main, covering the half note exactly.
-        EXPECT_EQ(group[0]->pitch, 72);
-        EXPECT_LT(group[1]->pitch, 72);
-        EXPECT_EQ(group[2]->pitch, 72);
+      if (group.size() == 4) {
+        // upper - main - lower - held main, covering the half note exactly.
+        EXPECT_EQ(group[0]->pitch, 74);
+        EXPECT_EQ(group[1]->pitch, 72);
+        EXPECT_EQ(group[2]->pitch, 71);
+        EXPECT_EQ(group[3]->pitch, 72);
         Tick covered = 0;
         for (const auto* n : group)
           covered += n->duration;
         EXPECT_EQ(covered, kTicksPerBeat * 2);
-        found_half_mordent = true;
+        found_turn = true;
         break;
       }
     }
   }
-  EXPECT_TRUE(found_half_mordent) << "no density-1 half-note downbeat mordent fired";
+  EXPECT_TRUE(found_turn) << "no Noble half-note downbeat turn fired";
 }
 
 // Density 2 keeps its inner trills on long notes: a half-note downbeat on an

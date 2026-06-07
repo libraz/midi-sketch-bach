@@ -42,23 +42,26 @@ namespace bach::composer {
 //   * Trill pacing follows tempo: 32nd-note alternation at bpm <= 100,
 //     16th-note alternation above. Long trills (longer than a quarter) always
 //     pace at sixteenths -- a stately alternation, not a buzz.
-//   * A mordent (single main-lower-main) may decorate a quarter note on a bar
-//     downbeat (phrase start) instead of a trill.
-//   * Beyond trill and mordent the pass carries the Explication vocabulary,
-//     each placed by the same-voice melodic approach and gated by its own
-//     placement-hash quantile (density >= 1 only):
-//       - appoggiatura: the upper neighbour leans for half the note's value
-//         (two thirds when dotted), then resolves. Primary site = a tone
-//         entered by a falling third (the lean fills the gap and suspends);
-//         secondary = a stepwise descent (port de voix). Phrase-boundary
-//         strong beats only.
-//       - turn (gruppetto): upper-main-lower in 32nds, then the held main
-//         tone. Site = an isolated mid-phrase tone longer than its
-//         predecessor.
-//       - slide (Schleifer): two rising 32nds from the diatonic third below.
-//         Site = a tone entered by a rising leap of a fourth or more.
-//     Placement priority: cadential trill > appoggiatura > turn > slide >
-//     mordent.
+//   * Beyond the trill the pass carries the Explication vocabulary --
+//     mordent (main-lower-main), appoggiatura (the upper neighbour leans for
+//     half the note's value, two thirds when dotted, then resolves), turn
+//     (upper-main-lower in 32nds, then the held main tone), and slide (two
+//     rising 32nds from the diatonic third below). Which figure decorates
+//     which site class is the character's design table:
+//       Severe   : boundary -> appoggiatura; interior -> nothing.
+//       Noble    : boundary -> appoggiatura on a matched approach (falling-
+//                  third gap / stepwise descent), turn otherwise; interior ->
+//                  turn on half-or-longer tones.
+//       Restless : boundary -> short trill (long tones) / mordent; interior
+//                  -> downbeat mordent.
+//       Playful  : boundary -> slide under a rising-leap approach / turn
+//                  (long tones) / mordent (quarters); interior -> inner trill
+//                  on long tones, slide under leap arrivals, downbeat quarter
+//                  mordent.
+//     Approach-matched figures carry their own placement-hash quantile gate;
+//     design-value figures run through the generic deterministic gate.
+//     Placement priority on a contested note: cadential trill > appoggiatura
+//     > turn > slide > mordent.
 //   * The ornament subdivides ONLY the original note's [start, start+dur)
 //     span: total piece duration never changes, and no ornament tone leaves
 //     the original note's diatonic neighbourhood or crosses above the
@@ -66,9 +69,9 @@ namespace bach::composer {
 //
 // Density (number of ornaments placed) is driven by the character's
 // ornament_density (CharacterProfile) scaled by instrument:
-//   density 0 -> cadence trills only (last two bars).
-//   density 1 -> + a downbeat mordent every 4 bars.
-//   density 2 -> + an inner trill on long notes (>= half) every 2 bars.
+//   density 0 -> the mandatory cadence trill plus one boundary figure per
+//                8 bars (appoggiatura; mordent for Restless).
+//   density 1+ -> + the character's boundary and interior vocabulary above.
 // Instrument scaling: Harpsichord +1 (cap 2); Violin/Cello/Guitar -1 (min 0);
 // Organ/Piano unchanged.
 struct OrnamentParams {

@@ -519,79 +519,124 @@ void applyOrnamentPass(ComposeResult& result, const OrnamentParams& params) {
         const bool rising_leap = prev_pitch >= 0 && static_cast<int>(note.pitch) - prev_pitch >= 5;
         const bool isolated_long = prev_pitch >= 0 && prev_dur > 0 && prev_dur < note.duration;
 
-        // Decision priority: cadential trill > appoggiatura > turn > slide >
-        // mordent. Cadence trills first (always, every density); the new
-        // vocabulary carries its own placement-hash quantile gates and only
-        // engages above density 0 (the sparse character keeps its designed
-        // boundary mordents).
+        // Character x vocabulary grammar (design table, Reduce Generation:
+        // the figure each character places at each site class is a design
+        // value, not a search). The cadence row is shared and mandatory --
+        // every character closes with the long cadential trill.
+        //   Severe   : boundary -> appoggiatura (the linear stile antico
+        //              suspends rather than strikes); interior -> nothing.
+        //   Noble    : boundary -> appoggiatura on a matched approach, turn
+        //              otherwise; interior -> turn on half-or-longer tones.
+        //   Restless : boundary -> short trill (long tones) / mordent;
+        //              interior -> downbeat mordent (the percussive idiom).
+        //   Playful  : boundary -> slide under a leap approach / turn (long
+        //              tones) / mordent (quarters); interior -> inner trill
+        //              on long tones, slide under leap arrivals, downbeat
+        //              mordent on quarters.
+        // Approach-matched figures (appoggiatura, slide, isolated turn) carry
+        // their own placement-hash quantile gate; design-value figures run
+        // through the generic gate below. Priority on a contested note:
+        // cadential trill > appoggiatura > turn > slide > mordent.
         bool want_trill = false;
         bool want_mordent = false;
         bool want_appoggiatura = false;
         bool want_turn = false;
         bool want_slide = false;
+        bool self_gated = false;  // the site already consumed its own quantile gate.
 
         if (in_cadence_window && is_strong_beat && note.duration >= kQuarter) {
           // Priority cadence trill: the strong beat in the last two bars.
           want_trill = true;
-        } else if (density >= 1 && is_phrase_boundary && is_strong_beat &&
-                   note.duration >= kQuarter && (falling_third_gap || stepwise_descent) &&
-                   ((roll >> 2) & 1ull) == 0ull) {
-          // Appoggiatura on phrase-boundary strong beats whose melodic
-          // approach matches: the primary site is the falling-third gap (the
-          // upper neighbour fills it and suspends), the secondary the
-          // stepwise descent (the lean repeats the previous tone, port de
-          // voix). Kept to phrase boundaries so the galant half-value rule
-          // never saturates the texture.
-          want_appoggiatura = true;
-        } else if (density >= 1 && !in_cadence_window && !is_phrase_boundary &&
-                   note.duration >= kQuarter && isolated_long && ((roll >> 3) & 3ull) == 0ull) {
-          // Turn on an isolated mid-phrase long tone (longer than its
-          // predecessor, so the gruppetto animates a note that stands out of
-          // the surrounding motion).
-          want_turn = true;
-        } else if (density >= 1 && !in_cadence_window && note.duration >= kQuarter && rising_leap &&
-                   ((roll >> 5) & 1ull) == 0ull) {
-          // Slide underneath a tone entered by a rising leap of a fourth or
-          // more: the two-note Schleifer fills the gap the leap left open.
-          want_slide = true;
-        } else if (density >= 1 && is_phrase_boundary && is_strong_beat) {
-          // Sub-cadence ornament on phrase-boundary strong beats: long notes
-          // take a trill, quarters and eighths a mordent.
-          if (note.duration >= kHalf)
-            want_trill = true;
-          else
-            want_mordent = true;
-        } else if (density == 0 && (bar % 8 == 7 || bar == mid_boundary_bar) &&
-                   !in_cadence_window && is_downbeat) {
-          // Sparse-character uplift: a density-0 character marks every other
-          // phrase boundary (and the designed mid-piece boundary) with a
-          // mordent, so the piece is not bare until the final cadence. These
-          // are design values (one mordent per 8 bars), not gated sites.
-          want_mordent = true;
-        } else if (density >= 1 && is_downbeat && (bar % 2 == 0) && note.duration >= kQuarter) {
-          // Downbeat mordent every 2 bars (quarters always; halves only below
-          // the inner-trill density so density 2 keeps its long-note trills).
-          if (note.duration == kQuarter)
-            want_mordent = true;
-          else if (note.duration == kHalf && density == 1)
-            want_mordent = true;
-        }
-
-        if (!want_trill && !want_mordent && !want_appoggiatura && !want_turn && !want_slide &&
-            density >= 2 && note.duration >= kHalf && (bar % 2 == 0)) {
-          // Inner trills on long notes every 2 bars.
-          want_trill = true;
+        } else if (density == 0) {
+          // Sparse uplift: a density-0 character marks every other phrase
+          // boundary (and the designed mid-piece boundary) with its boundary
+          // figure, so the piece is not bare until the final cadence. These
+          // are design values (one site per 8 bars), not gated sites. The
+          // suspension-leaning characters take the appoggiatura; Restless
+          // keeps its percussive mordent.
+          if ((bar % 8 == 7 || bar == mid_boundary_bar) && !in_cadence_window && is_downbeat) {
+            if (params.character == SubjectCharacter::Restless)
+              want_mordent = true;
+            else
+              want_appoggiatura = true;
+          }
+        } else if (!in_cadence_window) {
+          switch (params.character) {
+            case SubjectCharacter::Severe:
+              // Density above 0 only via instrument scaling (harpsichord):
+              // the old-style character still confines itself to boundary
+              // suspensions.
+              if (is_phrase_boundary && is_strong_beat && note.duration >= kQuarter)
+                want_appoggiatura = true;
+              break;
+            case SubjectCharacter::Noble:
+              if (is_phrase_boundary && is_strong_beat && note.duration >= kQuarter) {
+                if ((falling_third_gap || stepwise_descent) && ((roll >> 2) & 1ull) == 0ull) {
+                  // Matched approach: the lean fills the falling-third gap
+                  // (primary) or repeats the previous tone (port de voix).
+                  want_appoggiatura = true;
+                  self_gated = true;
+                } else {
+                  want_turn = true;
+                }
+              } else if (note.duration >= kHalf) {
+                // Interior turns animate the long tones only.
+                if (is_downbeat && (bar % 2 == 0)) {
+                  want_turn = true;
+                } else if (isolated_long && ((roll >> 3) & 3ull) == 0ull) {
+                  want_turn = true;
+                  self_gated = true;
+                }
+              }
+              break;
+            case SubjectCharacter::Restless:
+              if (is_phrase_boundary && is_strong_beat) {
+                // Long boundary tones take a short trill, the rest a mordent.
+                if (note.duration >= kHalf)
+                  want_trill = true;
+                else
+                  want_mordent = true;
+              } else if (is_downbeat && (bar % 2 == 0) &&
+                         (note.duration == kQuarter || note.duration == kHalf)) {
+                want_mordent = true;
+              }
+              break;
+            case SubjectCharacter::Playful:
+              if (is_phrase_boundary && is_strong_beat && note.duration >= kQuarter) {
+                if (rising_leap && ((roll >> 5) & 1ull) == 0ull) {
+                  want_slide = true;
+                  self_gated = true;
+                } else if (note.duration >= kHalf) {
+                  want_turn = true;
+                } else {
+                  want_mordent = true;
+                }
+              } else if (rising_leap && note.duration >= kQuarter && ((roll >> 5) & 1ull) == 0ull) {
+                // Slide underneath a tone entered by a rising leap of a
+                // fourth or more: the Schleifer fills the gap the leap left.
+                want_slide = true;
+                self_gated = true;
+              } else if (note.duration >= kHalf && (bar % 2 == 0)) {
+                // Inner trills on long notes every 2 bars.
+                want_trill = true;
+              } else if (is_downbeat && (bar % 2 == 0) && note.duration == kQuarter) {
+                // Downbeat quarter mordents keep the densest character at
+                // least as active as the sparser ones on plain textures.
+                want_mordent = true;
+              }
+              break;
+          }
         }
 
         // A small deterministic gate so not literally every eligible note in a
         // dense passage is ornamented (keeps the texture musical). Cadence
         // trills, the designed mid-piece boundary, the density-0 boundary
-        // mordents (already one-per-8-bars sparse), and the new vocabulary
-        // (each site carries its own quantile gate above) bypass the gate.
+        // figures (already one-per-8-bars sparse), and the approach-matched
+        // figures (each carries its own quantile gate above) bypass the gate.
         const bool mandatory = in_cadence_window && is_strong_beat;
         const bool gate_open = mandatory || bar == mid_boundary_bar ||
-                               (density == 0 && want_mordent) || want_appoggiatura || want_turn ||
-                               want_slide || (roll & 1ull) == 0ull;
+                               (density == 0 && (want_mordent || want_appoggiatura)) ||
+                               self_gated || (roll & 1ull) == 0ull;
 
         if (gate_open) {
           if (want_appoggiatura) {
