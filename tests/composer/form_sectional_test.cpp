@@ -689,6 +689,153 @@ TEST(FormSectionalTest, FugueTailIsAtLeastTwoVoicesExceptOpeningEntry) {
   }
 }
 
+// --- Archetype material plans --------------------------------------------------
+
+// Per-bar, per-voice notes of the free section.
+std::vector<std::array<std::vector<const NoteEvent*>, 3>> freeBarsByVoice(const ComposeResult& r,
+                                                                          int free_bars) {
+  std::vector<std::array<std::vector<const NoteEvent*>, 3>> bars(
+      static_cast<std::size_t>(free_bars));
+  for (const auto& n : r.notes) {
+    const int bar = static_cast<int>(n.start_tick / kBar);
+    if (bar < free_bars && n.voice < 3)
+      bars[static_cast<std::size_t>(bar)][n.voice].push_back(&n);
+  }
+  return bars;
+}
+
+bool allDurationsAre(const std::vector<const NoteEvent*>& notes, Tick dur) {
+  for (const NoteEvent* n : notes) {
+    if (n->duration != dur)
+      return false;
+  }
+  return true;
+}
+
+// Concertato: forte 4-bar windows run sixteenths over the full pedal +
+// punctuation texture; the odd (piano) windows answer in eighths with the V1
+// punctuation only (no V2 pedal).
+TEST(FormSectionalTest, ConcertatoAlternatesForteAndPianoWindows) {
+  for (std::uint32_t seed : {2u, 6u, 10u}) {  // seed % 4 == 2 -> Concertato.
+    const HarnessFixture fx = buildFixture(FormType::ToccataAndFugue, seed, false, 32);
+    const ComposeResult r = Composer{}.run(fx.material, fx.harmony, fx.voice_plan);
+    ASSERT_EQ(r.validation.status, ValidationStatus::Ok) << "seed " << seed;
+    const int free_bars = freeBarsFor(32);
+    const auto bars = freeBarsByVoice(r, free_bars);
+    for (int bar = 0; bar < free_bars; ++bar) {
+      const auto& by_voice = bars[static_cast<std::size_t>(bar)];
+      const bool piano = (bar / 4) % 2 == 1;
+      const std::string ctx = "seed " + std::to_string(seed) + " bar " + std::to_string(bar);
+      ASSERT_FALSE(by_voice[0].empty()) << ctx;
+      if (piano) {
+        EXPECT_TRUE(allDurationsAre(by_voice[0], kTicksPerBeat / 2))
+            << ctx << ": piano echo must run eighths";
+        EXPECT_TRUE(by_voice[2].empty()) << ctx << ": piano echo must rest the pedal";
+      } else {
+        EXPECT_TRUE(allDurationsAre(by_voice[0], kTicksPerBeat / 4))
+            << ctx << ": forte window must run sixteenths";
+        EXPECT_FALSE(by_voice[2].empty()) << ctx << ": forte window carries the pedal";
+      }
+    }
+  }
+}
+
+// Sectionalis: the first half runs the wave; the second half alternates
+// declamatory chord blocks (three-voice half-note strikes) with running bars.
+TEST(FormSectionalTest, SectionalisSecondHalfAlternatesChordBlocks) {
+  for (std::uint32_t seed : {3u, 7u, 11u}) {  // seed % 4 == 3 -> Sectionalis.
+    const HarnessFixture fx = buildFixture(FormType::ToccataAndFugue, seed, false, 32);
+    const ComposeResult r = Composer{}.run(fx.material, fx.harmony, fx.voice_plan);
+    ASSERT_EQ(r.validation.status, ValidationStatus::Ok) << "seed " << seed;
+    const int free_bars = freeBarsFor(32);
+    // Mirror the builder's split point (half on a 4-bar grid, clamped).
+    const int split_bar = std::clamp(((free_bars / 2 + 3) / 4) * 4, 4, free_bars - 4);
+    const auto bars = freeBarsByVoice(r, free_bars);
+    int block_bars = 0;
+    for (int bar = 0; bar < free_bars; ++bar) {
+      const auto& by_voice = bars[static_cast<std::size_t>(bar)];
+      const std::string ctx = "seed " + std::to_string(seed) + " bar " + std::to_string(bar);
+      if (bar < split_bar) {
+        EXPECT_FALSE(by_voice[0].empty()) << ctx;
+        for (const NoteEvent* n : by_voice[0])
+          EXPECT_LE(n->duration, kTicksPerBeat / 2) << ctx << ": first half runs the wave";
+      } else if ((bar - split_bar) % 2 == 0) {
+        ++block_bars;
+        for (int voice = 0; voice < 3; ++voice) {
+          ASSERT_FALSE(by_voice[static_cast<std::size_t>(voice)].empty()) << ctx;
+          EXPECT_TRUE(allDurationsAre(by_voice[static_cast<std::size_t>(voice)], 2 * kTicksPerBeat))
+              << ctx << " voice " << voice << ": chord-block bar must strike half notes";
+        }
+      }
+    }
+    EXPECT_GT(block_bars, 1) << "seed " << seed;
+  }
+}
+
+// Perpetuus: continuous figuration closed by a single chord-block bar.
+TEST(FormSectionalTest, PerpetuusClosesWithOneChordBlock) {
+  for (std::uint32_t seed : {1u, 5u, 9u}) {  // seed % 4 == 1 -> Perpetuus.
+    const HarnessFixture fx = buildFixture(FormType::ToccataAndFugue, seed, false, 32);
+    const ComposeResult r = Composer{}.run(fx.material, fx.harmony, fx.voice_plan);
+    ASSERT_EQ(r.validation.status, ValidationStatus::Ok) << "seed " << seed;
+    const int free_bars = freeBarsFor(32);
+    const auto bars = freeBarsByVoice(r, free_bars);
+    for (int bar = 0; bar < free_bars; ++bar) {
+      const auto& by_voice = bars[static_cast<std::size_t>(bar)];
+      const std::string ctx = "seed " + std::to_string(seed) + " bar " + std::to_string(bar);
+      ASSERT_FALSE(by_voice[0].empty()) << ctx;
+      if (bar == free_bars - 1) {
+        EXPECT_TRUE(allDurationsAre(by_voice[0], 2 * kTicksPerBeat))
+            << ctx << ": the closing bar is a chord block";
+      } else {
+        for (const NoteEvent* n : by_voice[0])
+          EXPECT_LE(n->duration, kTicksPerBeat / 2) << ctx << ": running figuration";
+      }
+    }
+  }
+}
+
+// Fantasia: a Chordal section alternates half-note chord blocks with running
+// bars, and a Free section opens with the rhetorical gesture (sixteenths, the
+// bar tail silent).
+TEST(FormSectionalTest, FantasiaChordalBlocksAndFreeGesture) {
+  for (std::uint32_t seed : {1u, 2u, 3u, 4u, 5u}) {
+    // 64 bars -> a 24-bar free section (six 4-bar sections), so every style of
+    // the rotation appears regardless of the seed.
+    const HarnessFixture fx = buildFixture(FormType::FantasiaAndFugue, seed, false, 64);
+    const ComposeResult r = Composer{}.run(fx.material, fx.harmony, fx.voice_plan);
+    ASSERT_EQ(r.validation.status, ValidationStatus::Ok) << "seed " << seed;
+    const int free_bars = freeBarsFor(64);
+    const auto bars = freeBarsByVoice(r, free_bars);
+    bool saw_chordal_block = false;
+    bool saw_gesture = false;
+    for (const auto& section : fx.material.fantasia_sections) {
+      const int sec_start = static_cast<int>(section.start_tick / kBar);
+      if (sec_start >= free_bars)
+        continue;
+      const auto& head = bars[static_cast<std::size_t>(sec_start)];
+      if (section.style == FantasiaStyle::Chordal && !head[0].empty()) {
+        saw_chordal_block = true;
+        EXPECT_TRUE(allDurationsAre(head[0], 2 * kTicksPerBeat))
+            << "seed " << seed << ": Chordal section head must strike half-note blocks";
+      }
+      if (section.style == FantasiaStyle::Free && !head[0].empty()) {
+        saw_gesture = true;
+        Tick last_end = 0;
+        for (const NoteEvent* n : head[0]) {
+          EXPECT_EQ(n->duration, kTicksPerBeat / 4)
+              << "seed " << seed << ": Free section opens with the sixteenth gesture";
+          last_end = std::max(last_end, n->start_tick + n->duration);
+        }
+        EXPECT_LE(last_end, static_cast<Tick>(sec_start) * kBar + 2 * kTicksPerBeat)
+            << "seed " << seed << ": the gesture leaves the bar tail silent";
+      }
+    }
+    EXPECT_TRUE(saw_chordal_block) << "seed " << seed;
+    EXPECT_TRUE(saw_gesture) << "seed " << seed;
+  }
+}
+
 // --- Dramaticus material plan ------------------------------------------------
 
 // The Dramaticus toccata's free section carries the designed materials, locked
