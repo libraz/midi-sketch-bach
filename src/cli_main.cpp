@@ -478,11 +478,11 @@ const char* formDisplayName(bach::FormType form) {
   return "Work";
 }
 
-/// @brief Collect voices carrying immutable ground / cantus-firmus material.
+/// @brief Collect voices carrying immutable ground material (hard exempt).
 ///
 /// Scans the resolved VoicePlan for spans whose intent replays an immutable
-/// foundation line (ground bass, passacaglia ground, cantus firmus). Those
-/// voices are exempt from the ornament pass so the immutable material stays
+/// ground line (ground bass, passacaglia ground). Those voices are fully
+/// exempt from the ornament pass so the immutable material stays
 /// un-decorated. The scan is intent-based (no per-form hardcode), so it covers
 /// every form whose builder declares one of those carriers.
 ///
@@ -492,8 +492,7 @@ std::vector<bach::VoiceId> collectExemptVoices(const bach::composer::VoicePlan& 
   std::vector<bach::VoiceId> exempt;
   for (const auto& span : plan.spans) {
     const bool is_foundation = span.intent == bach::composer::VoiceIntent::GroundCarrier ||
-                               span.intent == bach::composer::VoiceIntent::PassacagliaGround ||
-                               span.intent == bach::composer::VoiceIntent::CantusFirmusCarrier;
+                               span.intent == bach::composer::VoiceIntent::PassacagliaGround;
     if (is_foundation) {
       exempt.push_back(span.voice);
     }
@@ -501,6 +500,26 @@ std::vector<bach::VoiceId> collectExemptVoices(const bach::composer::VoicePlan& 
   std::sort(exempt.begin(), exempt.end());
   exempt.erase(std::unique(exempt.begin(), exempt.end()), exempt.end());
   return exempt;
+}
+
+/// @brief Collect cantus-firmus voices (skeleton exempt).
+///
+/// CF voices keep their bar-head onsets immutable (the validator matches the
+/// skeleton verbatim) but may carry within-bar embellishment, so they go to
+/// the ornament pass's skeleton list instead of the hard-exempt list.
+///
+/// @param plan The resolved voice plan.
+/// @return Sorted, de-duplicated list of skeleton-exempt voice ids.
+std::vector<bach::VoiceId> collectSkeletonVoices(const bach::composer::VoicePlan& plan) {
+  std::vector<bach::VoiceId> skeleton;
+  for (const auto& span : plan.spans) {
+    if (span.intent == bach::composer::VoiceIntent::CantusFirmusCarrier) {
+      skeleton.push_back(span.voice);
+    }
+  }
+  std::sort(skeleton.begin(), skeleton.end());
+  skeleton.erase(std::unique(skeleton.begin(), skeleton.end()), skeleton.end());
+  return skeleton;
 }
 
 /// @brief Derive the output JSON path from the MIDI output path.
@@ -585,8 +604,11 @@ int runDefaultMode(const CliOptions& opts) {
 
   const bach::Tick ticks_per_bar = fixture.harmony.ticksPerBar();
 
-  // Ornament post-pass. Ground / cantus-firmus voices are exempt so immutable
-  // material stays un-decorated.
+  // Ornament post-pass. Ground voices are hard exempt so immutable material
+  // stays un-decorated; cantus-firmus voices keep their bar-head skeleton but
+  // may carry within-bar embellishment (character-gated inside the pass). The
+  // Goldberg opening aria (block 0, the first four bars) is the designed
+  // ornament showcase.
   bach::composer::OrnamentParams ornament_params;
   ornament_params.character = opts.character;
   ornament_params.instrument = instrument;
@@ -596,6 +618,10 @@ int runDefaultMode(const CliOptions& opts) {
   ornament_params.ticks_per_bar = ticks_per_bar;
   ornament_params.bpm = opts.bpm;
   ornament_params.exempt_voices = collectExemptVoices(fixture.voice_plan);
+  ornament_params.skeleton_exempt_voices = collectSkeletonVoices(fixture.voice_plan);
+  if (opts.form == bach::FormType::GoldbergVariations) {
+    ornament_params.aria_end_tick = 4 * ticks_per_bar;
+  }
   bach::composer::applyOrnamentPass(result, ornament_params);
 
   // Apply the instrument to every track (GM program + default names).

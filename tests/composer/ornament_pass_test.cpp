@@ -1080,16 +1080,16 @@ TEST(OrnamentPassTest, ChoralePreludePipelineValidatesCleanAfterOrnament) {
   ComposeResult r = Composer{}.run(fx.material, fx.harmony, fx.voice_plan);
   ASSERT_TRUE(r.validation.failures.empty());
 
-  // The cantus-firmus voice (the highest-indexed voice in the chorale fixture)
-  // is exempt: its bar-downbeat tones are immutable. Exempt every voice that
-  // carries the CantusFirmusReplayed bit.
-  std::vector<VoiceId> exempt;
+  // The cantus-firmus voice keeps its bar-downbeat skeleton immutable but may
+  // carry within-bar embellishment (Noble = the embellished subtype): wire
+  // every voice carrying the CantusFirmusReplayed bit to the skeleton list.
+  std::vector<VoiceId> skeleton;
   for (std::size_t i = 0; i < r.notes.size(); ++i) {
     const RuleIdMask cf = ruleBitMask(RuleBit::CantusFirmusReplayed);
     if (r.provenance[i].satisfied_rules & cf) {
       const VoiceId v = r.notes[i].voice;
-      if (std::find(exempt.begin(), exempt.end(), v) == exempt.end())
-        exempt.push_back(v);
+      if (std::find(skeleton.begin(), skeleton.end(), v) == skeleton.end())
+        skeleton.push_back(v);
     }
   }
 
@@ -1099,7 +1099,7 @@ TEST(OrnamentPassTest, ChoralePreludePipelineValidatesCleanAfterOrnament) {
   p.mode = detail::Mode::Major;
   p.seed = req.seed;
   p.ticks_per_bar = fx.harmony.ticksPerBar();
-  p.exempt_voices = exempt;
+  p.skeleton_exempt_voices = skeleton;
   applyOrnamentPass(r, p);
 
   // Re-run the Validator on the ornamented notes; it must still pass.
@@ -1135,6 +1135,203 @@ TEST(OrnamentPassTest, TrioSonataPipelineValidatesCleanAfterOrnament) {
   EXPECT_TRUE(rerun.failures.empty())
       << "ornamented trio sonata failed validation; first="
       << (rerun.failures.empty() ? "" : rerun.failures.front().rule_id);
+}
+
+// --- Per-form exceptions ------------------------------------------------------
+
+namespace {
+
+// 12-bar fixture for the embellished cantus firmus: V0 is the CF (a bar-head
+// half note -- the immutable skeleton onset -- plus a within-bar half note),
+// V1 a whole-note bass below.
+ComposeResult cantusFirmusFixture() {
+  ComposeResult r;
+  const int bars = 12;
+  for (int bar = 0; bar < bars; ++bar) {
+    r.notes.push_back(makeNote(barToTick(bar), kTicksPerBar, 36, 1));
+    r.provenance.push_back(composeProv(1));
+    r.notes.push_back(makeNote(barToTick(bar), kTicksPerBeat * 2, 72, 0));
+    r.provenance.push_back(composeProv(0));
+    r.notes.push_back(makeNote(barToTick(bar) + kTicksPerBeat * 2, kTicksPerBeat * 2, 74, 0));
+    r.provenance.push_back(composeProv(0));
+  }
+  r.tracks = Renderer{}.render(r.notes);
+  return r;
+}
+
+}  // namespace
+
+// An embellished cantus firmus keeps every bar-head onset plain (the
+// validator's skeleton) while its within-bar long tones may take a turn.
+TEST(OrnamentPassTest, EmbellishedCantusFirmusKeepsBarHeadSkeleton) {
+  bool found_embellishment = false;
+  for (std::uint32_t seed = 1; seed <= 8; ++seed) {
+    ComposeResult r = cantusFirmusFixture();
+    OrnamentParams p = baseParams();
+    p.character = SubjectCharacter::Noble;  // the embellished subtype.
+    p.seed = seed;
+    p.skeleton_exempt_voices = {0};
+    applyOrnamentPass(r, p);
+
+    for (const auto& n : r.notes) {
+      if (n.voice != 0)
+        continue;
+      if (n.start_tick % kTicksPerBar == 0) {
+        // Bar-head skeleton: the original attack, never an ornament sub-note.
+        EXPECT_NE(n.source, BachNoteSource::Ornament)
+            << "bar-head CF onset ornamented at tick " << n.start_tick;
+      } else if (n.source == BachNoteSource::Ornament) {
+        found_embellishment = true;
+      }
+    }
+  }
+  EXPECT_TRUE(found_embellishment) << "no within-bar CF embellishment fired";
+}
+
+// Severe keeps the WHOLE cantus firmus plain (the plain-CF chorale subtype).
+TEST(OrnamentPassTest, SevereKeepsCantusFirmusPlain) {
+  for (std::uint32_t seed = 1; seed <= 8; ++seed) {
+    ComposeResult r = cantusFirmusFixture();
+    OrnamentParams p = baseParams();
+    p.character = SubjectCharacter::Severe;
+    p.seed = seed;
+    p.skeleton_exempt_voices = {0};
+    applyOrnamentPass(r, p);
+    for (const auto& n : r.notes) {
+      if (n.voice == 0)
+        EXPECT_NE(n.source, BachNoteSource::Ornament) << "Severe CF ornamented, seed " << seed;
+    }
+  }
+}
+
+// The Goldberg opening aria is the ornament showcase: with the aria uplift
+// active, the aria bars carry more ornament notes than the same material in
+// the variation region, summed across a seed family.
+TEST(OrnamentPassTest, GoldbergAriaUpliftOutpacesVariations) {
+  std::size_t aria_total = 0;
+  std::size_t variation_total = 0;
+  for (std::uint32_t seed = 1; seed <= 8; ++seed) {
+    // V0: two half notes per bar throughout, so bars 0-3 (aria) and bars 4-7
+    // (variation region) carry identical material.
+    ComposeResult r;
+    const int bars = 16;
+    for (int bar = 0; bar < bars; ++bar) {
+      r.notes.push_back(makeNote(barToTick(bar), kTicksPerBar, 36, 1));
+      r.provenance.push_back(composeProv(1));
+      r.notes.push_back(makeNote(barToTick(bar), kTicksPerBeat * 2, 72, 0));
+      r.provenance.push_back(composeProv(0));
+      r.notes.push_back(makeNote(barToTick(bar) + kTicksPerBeat * 2, kTicksPerBeat * 2, 74, 0));
+      r.provenance.push_back(composeProv(0));
+    }
+    r.tracks = Renderer{}.render(r.notes);
+
+    OrnamentParams p = baseParams();
+    p.character = SubjectCharacter::Severe;  // sparsest grammar: the uplift dominates.
+    p.seed = seed;
+    p.aria_end_tick = barToTick(4);
+    applyOrnamentPass(r, p);
+
+    for (const auto& n : r.notes) {
+      if (n.voice != 0 || n.source != BachNoteSource::Ornament)
+        continue;
+      if (n.start_tick < barToTick(4))
+        ++aria_total;
+      else if (n.start_tick < barToTick(8))
+        ++variation_total;
+    }
+  }
+  EXPECT_GT(aria_total, variation_total) << "the aria uplift did not outpace the variation region";
+}
+
+// A solo pedal entry (no other voice sounding at the onset) may take a
+// downbeat mordent; the same bass under ensemble texture stays plain.
+TEST(OrnamentPassTest, PedalSoloEntryTakesMordentEnsembleBassStaysPlain) {
+  bool solo_mordent_fired = false;
+  for (std::uint32_t seed = 1; seed <= 8; ++seed) {
+    ComposeResult r;
+    const int bars = 10;
+    // V1 pedal: a half + two quarters per bar across the whole piece.
+    for (int bar = 0; bar < bars; ++bar) {
+      r.notes.push_back(makeNote(barToTick(bar), kTicksPerBeat * 2, 36, 1));
+      r.provenance.push_back(composeProv(1));
+      r.notes.push_back(makeNote(barToTick(bar) + kTicksPerBeat * 2, kTicksPerBeat, 38, 1));
+      r.provenance.push_back(composeProv(1));
+      r.notes.push_back(makeNote(barToTick(bar) + kTicksPerBeat * 3, kTicksPerBeat, 40, 1));
+      r.provenance.push_back(composeProv(1));
+    }
+    // V0 melody sounds only from bar 4 on: bars 0-3 are the pedal solo.
+    const std::uint8_t scale[4] = {72, 74, 76, 77};
+    for (int bar = 4; bar < bars; ++bar) {
+      for (int beat = 0; beat < 4; ++beat) {
+        r.notes.push_back(
+            makeNote(barToTick(bar) + beat * kTicksPerBeat, kTicksPerBeat, scale[beat], 0));
+        r.provenance.push_back(composeProv(0));
+      }
+    }
+    r.tracks = Renderer{}.render(r.notes);
+
+    OrnamentParams p = baseParams();
+    p.seed = seed;
+    applyOrnamentPass(r, p);
+
+    for (const auto& n : r.notes) {
+      if (n.voice != 1 || n.source != BachNoteSource::Ornament)
+        continue;
+      // Every pedal ornament must sit inside the solo region (bars 0-3).
+      EXPECT_LT(n.start_tick, barToTick(4))
+          << "ensemble bass ornamented at tick " << n.start_tick << ", seed " << seed;
+      solo_mordent_fired = true;
+    }
+  }
+  EXPECT_TRUE(solo_mordent_fired) << "no pedal-solo mordent fired across the seed family";
+}
+
+// The solo cello prelude stays sparse: its only ornament is the cadential
+// trill (the unaccompanied-string sources carry almost no ornament signs).
+TEST(OrnamentPassTest, CelloPreludeOrnamentsAreCadenceTrillOnly) {
+  for (std::uint32_t seed = 1; seed <= 5; ++seed) {
+    ComposeRequest req;
+    req.form = FormType::CelloPrelude;
+    req.is_minor = false;
+    req.character = SubjectCharacter::Noble;
+    req.seed = seed;
+    HarnessFixture fx;
+    ASSERT_EQ(buildFormFixture(req, &fx), FormDirectorStatus::Ok);
+
+    ComposeResult r = Composer{}.run(fx.material, fx.harmony, fx.voice_plan);
+    ASSERT_TRUE(r.validation.failures.empty());
+
+    OrnamentParams p;
+    p.character = req.character;
+    p.instrument = InstrumentType::Cello;  // density scales down to 0.
+    p.mode = detail::Mode::Major;
+    p.seed = req.seed;
+    p.ticks_per_bar = fx.harmony.ticksPerBar();
+    applyOrnamentPass(r, p);
+
+    const Tick piece_end = [&] {
+      Tick end = 0;
+      for (const auto& n : r.notes)
+        end = std::max(end, n.start_tick + n.duration);
+      return end;
+    }();
+    const Tick cadence_start = piece_end - 2 * fx.harmony.ticksPerBar();
+
+    std::size_t runs = 0;
+    bool in_run = false;
+    for (const auto& n : r.notes) {
+      if (n.source == BachNoteSource::Ornament) {
+        EXPECT_GE(n.start_tick, cadence_start)
+            << "cello ornament outside the cadence window, seed " << seed;
+        if (!in_run)
+          ++runs;
+        in_run = true;
+      } else {
+        in_run = false;
+      }
+    }
+    EXPECT_LE(runs, 1u) << "more than the single cadence trill, seed " << seed;
+  }
 }
 
 // --- Untouched core pipeline (opt-in guarantee) ----------------------------

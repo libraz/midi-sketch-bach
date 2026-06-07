@@ -458,11 +458,19 @@ void applyOrnamentPass(ComposeResult& result, const OrnamentParams& params) {
     const bool already_ornament =
         note.source == BachNoteSource::Ornament || prov.source == NoteSource::Ornament;
 
+    // Voice-level exemptions. Hard-exempt voices (ground carriers) never take
+    // an ornament. Skeleton-exempt voices (cantus firmus) keep their bar-head
+    // onsets immutable but may decorate within-bar tones -- EXCEPT under
+    // Severe, whose plain-CF subtype keeps the whole line bare.
+    const bool skeleton_voice = isExempt(params.skeleton_exempt_voices, note.voice);
+    const bool skeleton_plain = skeleton_voice && params.character == SubjectCharacter::Severe;
+
     // Eighth notes are admitted as mordent candidates at the phrase-boundary
     // sites only (the per-rule conditions below re-narrow longer figures to
     // quarter+); sixteenths and shorter are never ornamented.
     if (!already_ornament && note.duration >= kEighth &&
-        !isExempt(params.exempt_voices, note.voice) && note.start_tick != last_onset[note.voice]) {
+        !isExempt(params.exempt_voices, note.voice) && !skeleton_plain &&
+        note.start_tick != last_onset[note.voice]) {
       const int bar = static_cast<int>(note.start_tick / tpb);
       const Tick pos_in_bar = note.start_tick % tpb;
       const bool is_downbeat = pos_in_bar == 0;
@@ -483,9 +491,12 @@ void applyOrnamentPass(ComposeResult& result, const OrnamentParams& params) {
       // Cadence ornaments belong to the TOP sounding line only: simultaneous
       // trills in two voices clash at the alternation level, so a note with a
       // higher voice sounding above it takes no ornament inside the cadence
-      // window.
-      const bool is_top =
-          highestOtherSoundingPitch(result.notes, note.voice, note.start_tick) <= note.pitch;
+      // window. A note with NO other voice sounding is a solo entry -- the one
+      // context where the clean-bass guard lifts (pedal-solo mordent).
+      const int highest_other =
+          highestOtherSoundingPitch(result.notes, note.voice, note.start_tick);
+      const bool is_top = highest_other <= static_cast<int>(note.pitch);
+      const bool solo_now = highest_other < 0;
 
       // Neighbour availability.
       const int upper = upperNeighbour(note.pitch, params.mode);
@@ -499,7 +510,7 @@ void applyOrnamentPass(ComposeResult& result, const OrnamentParams& params) {
           nextHigherVoiceCeiling(result.notes, note.voice, note.pitch, note.start_tick);
       const bool upper_clears_ceiling = upper >= 0 && upper < ceiling;
 
-      if (!is_bass && neighbours_ok && upper_clears_ceiling && (is_top || !in_cadence_window)) {
+      if (neighbours_ok && upper_clears_ceiling && (is_top || !in_cadence_window)) {
         const std::uint64_t roll = placementHash(params.seed, bar, note.voice);
 
         // Phrase boundaries: the last bar of each 4-bar phrase (outside the
@@ -544,9 +555,38 @@ void applyOrnamentPass(ComposeResult& result, const OrnamentParams& params) {
         bool want_slide = false;
         bool self_gated = false;  // the site already consumed its own quantile gate.
 
-        if (in_cadence_window && is_strong_beat && note.duration >= kQuarter) {
+        if (is_bass) {
+          // Pedal-solo mordent (the organ-toccata idiom): the clean-bass
+          // guard lifts ONLY while no other voice sounds at the onset, so a
+          // solo pedal entry may strike a downbeat mordent; the bass under
+          // ensemble texture stays plain.
+          if (solo_now && is_downbeat && note.duration >= kQuarter && !in_cadence_window)
+            want_mordent = true;
+        } else if (skeleton_voice) {
+          // Embellished cantus firmus: the bar-head onsets are the immutable
+          // skeleton (the validator matches them verbatim) and always stay
+          // plain; within-bar tones of a quarter or longer may carry a turn
+          // (a short trill for the percussive Restless) -- the chorale CF
+          // moves in quarters, so the embellishment lives on its passing
+          // tones. The window keeps off the cadence so the closing CF phrase
+          // stays chorale-plain.
+          if (!is_downbeat && note.duration >= kQuarter && !in_cadence_window) {
+            if (params.character == SubjectCharacter::Restless)
+              want_trill = true;
+            else
+              want_turn = true;
+          }
+        } else if (in_cadence_window && is_strong_beat && note.duration >= kQuarter) {
           // Priority cadence trill: the strong beat in the last two bars.
           want_trill = true;
+        } else if (note.start_tick < params.aria_end_tick && note.duration >= kHalf) {
+          // Goldberg aria showcase: the opening aria decorates its long tones
+          // for every character (one density tier above the normal grammar),
+          // alternating the lean and the gruppetto by placement hash.
+          if (((roll >> 2) & 1ull) == 0ull)
+            want_appoggiatura = true;
+          else
+            want_turn = true;
         } else if (density == 0) {
           // Sparse uplift: a density-0 character marks every other phrase
           // boundary (and the designed mid-piece boundary) with its boundary

@@ -74,6 +74,19 @@ namespace bach::composer {
 //   density 1+ -> + the character's boundary and interior vocabulary above.
 // Instrument scaling: Harpsichord +1 (cap 2); Violin/Cello/Guitar -1 (min 0);
 // Organ/Piano unchanged.
+// Per-form exceptions (wired by the product callers):
+//   * skeleton_exempt_voices -- the embellished cantus firmus (BWV 659 type).
+//     Bar-head onsets are the immutable skeleton and always stay plain; only
+//     within-bar tones of a quarter or longer may carry a turn (short trill
+//     for Restless). Severe keeps the WHOLE line plain (the Orgelbuechlein
+//     subtype), so both chorale subtypes are selected by character.
+//   * aria_end_tick -- the Goldberg opening aria is an ornament showcase:
+//     long tones starting before this tick take an appoggiatura or turn for
+//     every character, one density tier above their normal grammar.
+//   * Pedal-solo mordent -- the clean-bass guard is lifted ONLY while no
+//     other voice sounds at the onset: a solo pedal entry may take a downbeat
+//     mordent (the organ-toccata idiom); the bass under ensemble texture
+//     stays plain as before.
 struct OrnamentParams {
   SubjectCharacter character = SubjectCharacter::Severe;  // density via CharacterProfile.
   InstrumentType instrument = InstrumentType::Organ;      // density scaling.
@@ -81,7 +94,9 @@ struct OrnamentParams {
   std::uint32_t seed = 0;                                 // deterministic placement.
   Tick ticks_per_bar = kTicksPerBar;                      // meter (3/4 forms pass 1440).
   std::uint16_t bpm = 72;                                 // trill pacing (32nds <= 100 < 16ths).
-  std::vector<VoiceId> exempt_voices;                     // ground / CF carriers: never ornamented.
+  std::vector<VoiceId> exempt_voices;                     // ground carriers: never ornamented.
+  std::vector<VoiceId> skeleton_exempt_voices;            // CF: bar heads immutable, body free.
+  Tick aria_end_tick = 0;                                 // Goldberg aria uplift (0 = none).
 };
 
 /**
