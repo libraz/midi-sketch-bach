@@ -410,6 +410,245 @@ TEST(OrnamentPassTest, TrillPacingFollowsBpm) {
   }
 }
 
+// --- New vocabulary: appoggiatura / turn / slide ------------------------------
+
+namespace {
+
+// 16-bar two-voice fixture whose phrase-boundary bars (3, 7, 11) open with a
+// falling third (E -> C on the boundary downbeat): the appoggiatura's primary
+// gap-fill site. Other bars walk quarters stepwise.
+ComposeResult fallingThirdBoundaryFixture(Tick boundary_dur) {
+  ComposeResult r;
+  const int bars = 16;
+  for (int bar = 0; bar < bars; ++bar) {
+    r.notes.push_back(makeNote(barToTick(bar), kTicksPerBar, 36, 1));
+    r.provenance.push_back(composeProv(1));
+  }
+  for (int bar = 0; bar < bars; ++bar) {
+    if (bar % 4 == 3 && bar != bars - 1) {
+      // Approach tone E ends the previous beat; boundary downbeat C takes the
+      // configured duration, the rest of the bar holds another tone.
+      r.notes.push_back(makeNote(barToTick(bar), boundary_dur, 72, 0));
+      r.provenance.push_back(composeProv(0));
+      if (boundary_dur < kTicksPerBar) {
+        r.notes.push_back(
+            makeNote(barToTick(bar) + boundary_dur, kTicksPerBar - boundary_dur, 74, 0));
+        r.provenance.push_back(composeProv(0));
+      }
+      continue;
+    }
+    // Each plain bar ends on E (76), so a following boundary C is always
+    // entered by a falling third.
+    const std::uint8_t walk[4] = {74, 76, 77, 76};
+    for (int beat = 0; beat < 4; ++beat) {
+      r.notes.push_back(
+          makeNote(barToTick(bar) + beat * kTicksPerBeat, kTicksPerBeat, walk[beat], 0));
+      r.provenance.push_back(composeProv(0));
+    }
+  }
+  r.tracks = Renderer{}.render(r.notes);
+  return r;
+}
+
+}  // namespace
+
+// The appoggiatura's primary site: a phrase-boundary strong-beat tone entered
+// by a falling third. The lean takes the upper neighbour for HALF the value,
+// then resolves to the main tone (two sub-notes, exact span coverage).
+TEST(OrnamentPassTest, AppoggiaturaFillsFallingThirdGapAtPhraseBoundary) {
+  bool found = false;
+  for (std::uint32_t seed = 1; seed <= 16 && !found; ++seed) {
+    ComposeResult r = fallingThirdBoundaryFixture(kTicksPerBeat);
+    OrnamentParams p = baseParams();
+    p.character = SubjectCharacter::Noble;  // density 1.
+    p.seed = seed;
+    applyOrnamentPass(r, p);
+
+    for (int bar : {3, 7, 11}) {
+      std::vector<const NoteEvent*> group;
+      for (const auto& n : r.notes) {
+        if (n.voice == 0 && n.source == BachNoteSource::Ornament &&
+            n.start_tick >= barToTick(bar) && n.start_tick < barToTick(bar) + kTicksPerBeat)
+          group.push_back(&n);
+      }
+      if (group.size() == 2) {
+        // Lean = upper neighbour (D over the C main tone), half the value.
+        EXPECT_EQ(group[0]->pitch, 74);
+        EXPECT_EQ(group[0]->duration, kTicksPerBeat / 2);
+        EXPECT_EQ(group[1]->pitch, 72);
+        EXPECT_EQ(group[1]->duration, kTicksPerBeat / 2);
+        found = true;
+      }
+    }
+  }
+  EXPECT_TRUE(found) << "no falling-third appoggiatura fired across the seed family";
+}
+
+// The Explication's dotted rule: on a dotted value the lean takes two thirds.
+TEST(OrnamentPassTest, DottedAppoggiaturaLeansTwoThirds) {
+  constexpr Tick kDottedHalf = kTicksPerBeat * 3;
+  bool found = false;
+  for (std::uint32_t seed = 1; seed <= 16 && !found; ++seed) {
+    ComposeResult r = fallingThirdBoundaryFixture(kDottedHalf);
+    OrnamentParams p = baseParams();
+    p.character = SubjectCharacter::Noble;
+    p.seed = seed;
+    applyOrnamentPass(r, p);
+
+    for (int bar : {3, 7, 11}) {
+      std::vector<const NoteEvent*> group;
+      for (const auto& n : r.notes) {
+        if (n.voice == 0 && n.source == BachNoteSource::Ornament &&
+            n.start_tick >= barToTick(bar) && n.start_tick < barToTick(bar) + kDottedHalf)
+          group.push_back(&n);
+      }
+      if (group.size() == 2 && group[0]->pitch == 74) {
+        EXPECT_EQ(group[0]->duration, kDottedHalf * 2 / 3) << "dotted lean must take two thirds";
+        EXPECT_EQ(group[1]->duration, kDottedHalf / 3);
+        EXPECT_EQ(group[1]->pitch, 72);
+        found = true;
+      }
+    }
+  }
+  EXPECT_TRUE(found) << "no dotted appoggiatura fired across the seed family";
+}
+
+// A turn decorates an isolated mid-phrase tone (longer than its predecessor):
+// upper - main - lower in 32nds, then the held main tone, covering the span.
+TEST(OrnamentPassTest, TurnAnimatesIsolatedMidPhraseLongNote) {
+  bool found = false;
+  for (std::uint32_t seed = 1; seed <= 16 && !found; ++seed) {
+    ComposeResult r;
+    const int bars = 16;
+    for (int bar = 0; bar < bars; ++bar) {
+      r.notes.push_back(makeNote(barToTick(bar), kTicksPerBar, 36, 1));
+      r.provenance.push_back(composeProv(1));
+    }
+    for (int bar = 0; bar < bars; ++bar) {
+      // Two eighths then an isolated half note mid-bar (beat 2): the half is
+      // longer than its eighth-note predecessor, off the downbeat, and away
+      // from phrase boundaries on even bars.
+      r.notes.push_back(makeNote(barToTick(bar), kTicksPerBeat / 2, 72, 0));
+      r.provenance.push_back(composeProv(0));
+      r.notes.push_back(makeNote(barToTick(bar) + kTicksPerBeat / 2, kTicksPerBeat / 2, 74, 0));
+      r.provenance.push_back(composeProv(0));
+      r.notes.push_back(makeNote(barToTick(bar) + kTicksPerBeat, kTicksPerBeat * 2, 76, 0));
+      r.provenance.push_back(composeProv(0));
+      r.notes.push_back(makeNote(barToTick(bar) + kTicksPerBeat * 3, kTicksPerBeat, 74, 0));
+      r.provenance.push_back(composeProv(0));
+    }
+    r.tracks = Renderer{}.render(r.notes);
+
+    OrnamentParams p = baseParams();
+    p.character = SubjectCharacter::Noble;  // density 1.
+    p.seed = seed;
+    applyOrnamentPass(r, p);
+
+    for (int bar = 0; bar < 13; ++bar) {
+      if (bar % 4 == 3)
+        continue;  // phrase boundaries excluded from the turn site.
+      std::vector<const NoteEvent*> group;
+      for (const auto& n : r.notes) {
+        if (n.voice == 0 && n.source == BachNoteSource::Ornament &&
+            n.start_tick >= barToTick(bar) + kTicksPerBeat &&
+            n.start_tick < barToTick(bar) + kTicksPerBeat * 3)
+          group.push_back(&n);
+      }
+      if (group.size() == 4) {
+        EXPECT_EQ(group[0]->pitch, 77) << "turn opens on the upper neighbour";
+        EXPECT_EQ(group[1]->pitch, 76);
+        EXPECT_EQ(group[2]->pitch, 74) << "turn dips to the lower neighbour";
+        EXPECT_EQ(group[3]->pitch, 76);
+        EXPECT_EQ(group[0]->duration, duration::kThirtySecondNote);
+        Tick covered = 0;
+        for (const auto* n : group)
+          covered += n->duration;
+        EXPECT_EQ(covered, kTicksPerBeat * 2) << "turn must cover the span exactly";
+        found = true;
+        break;
+      }
+    }
+  }
+  EXPECT_TRUE(found) << "no turn fired across the seed family";
+}
+
+// A slide fills the gap under a tone entered by a rising leap of a fourth or
+// more: two rising 32nds from the diatonic third below, then the held main.
+TEST(OrnamentPassTest, SlideFillsRisingLeapArrival) {
+  bool found = false;
+  for (std::uint32_t seed = 1; seed <= 16 && !found; ++seed) {
+    ComposeResult r;
+    const int bars = 16;
+    for (int bar = 0; bar < bars; ++bar) {
+      r.notes.push_back(makeNote(barToTick(bar), kTicksPerBar, 36, 1));
+      r.provenance.push_back(composeProv(1));
+    }
+    for (int bar = 0; bar < bars; ++bar) {
+      // Quarter C, then a rising fifth to a half-note G mid-bar, then back.
+      r.notes.push_back(makeNote(barToTick(bar), kTicksPerBeat, 72, 0));
+      r.provenance.push_back(composeProv(0));
+      r.notes.push_back(makeNote(barToTick(bar) + kTicksPerBeat, kTicksPerBeat * 2, 79, 0));
+      r.provenance.push_back(composeProv(0));
+      r.notes.push_back(makeNote(barToTick(bar) + kTicksPerBeat * 3, kTicksPerBeat, 76, 0));
+      r.provenance.push_back(composeProv(0));
+    }
+    r.tracks = Renderer{}.render(r.notes);
+
+    OrnamentParams p = baseParams();
+    p.character = SubjectCharacter::Noble;  // density 1.
+    p.seed = seed;
+    applyOrnamentPass(r, p);
+
+    for (int bar = 0; bar < 13; ++bar) {
+      std::vector<const NoteEvent*> group;
+      for (const auto& n : r.notes) {
+        if (n.voice == 0 && n.source == BachNoteSource::Ornament &&
+            n.start_tick >= barToTick(bar) + kTicksPerBeat &&
+            n.start_tick < barToTick(bar) + kTicksPerBeat * 3)
+          group.push_back(&n);
+      }
+      if (group.size() == 3) {
+        EXPECT_EQ(group[0]->pitch, 76) << "slide starts a diatonic third below";
+        EXPECT_EQ(group[1]->pitch, 77) << "slide steps up through the second below";
+        EXPECT_EQ(group[2]->pitch, 79) << "slide resolves into the arrival tone";
+        EXPECT_EQ(group[0]->duration, duration::kThirtySecondNote);
+        EXPECT_EQ(group[1]->duration, duration::kThirtySecondNote);
+        Tick covered = 0;
+        for (const auto* n : group)
+          covered += n->duration;
+        EXPECT_EQ(covered, kTicksPerBeat * 2) << "slide must cover the span exactly";
+        found = true;
+        break;
+      }
+    }
+  }
+  EXPECT_TRUE(found) << "no slide fired across the seed family";
+}
+
+// The new vocabulary is self-gated, never mandatory: across a seed family at
+// least one matching site must stay plain (the quantile gate was closed).
+TEST(OrnamentPassTest, NewVocabularySitesAreNotMandatory) {
+  bool found_plain_site = false;
+  for (std::uint32_t seed = 1; seed <= 8 && !found_plain_site; ++seed) {
+    ComposeResult r = fallingThirdBoundaryFixture(kTicksPerBeat);
+    OrnamentParams p = baseParams();
+    p.character = SubjectCharacter::Noble;
+    p.seed = seed;
+    applyOrnamentPass(r, p);
+    for (int bar : {3, 7, 11}) {
+      bool ornamented = false;
+      for (const auto& n : r.notes) {
+        if (n.voice == 0 && n.source == BachNoteSource::Ornament &&
+            n.start_tick >= barToTick(bar) && n.start_tick < barToTick(bar) + kTicksPerBeat)
+          ornamented = true;
+      }
+      if (!ornamented)
+        found_plain_site = true;
+    }
+  }
+  EXPECT_TRUE(found_plain_site) << "every appoggiatura site fired for every seed";
+}
+
 // --- Cadence trill at density 0 --------------------------------------------
 
 TEST(OrnamentPassTest, CadenceTrillPresentInLastTwoBarsAtDensityZero) {

@@ -162,6 +162,88 @@ Expansion buildTrill(const NoteEvent& base, int upper, int lower, Tick sub, Tril
   return exp;
 }
 
+// Build an appoggiatura expansion: the accented neighbour leans on the beat
+// for half the note's value (two thirds when the value is dotted -- the
+// Explication's dotted-note rule), then resolves into the main tone for the
+// remainder. The caller supplies the neighbour; the descending resolution
+// from the upper neighbour (accent fallend) is the default form.
+Expansion buildAppoggiatura(const NoteEvent& base, int neighbour) {
+  Expansion exp;
+  constexpr Tick kDottedEighth = duration::kEighthNote * 3 / 2;
+  const bool dotted = (base.duration % kDottedEighth) == 0;
+  const Tick lean = dotted ? base.duration * 2 / 3 : base.duration / 2;
+  if (lean == 0 || lean >= base.duration)
+    return exp;
+
+  NoteEvent first = base;
+  first.duration = lean;
+  first.pitch = static_cast<std::uint8_t>(neighbour);
+  first.source = BachNoteSource::Ornament;
+
+  NoteEvent second = base;
+  second.start_tick = base.start_tick + lean;
+  second.duration = base.duration - lean;
+  second.source = BachNoteSource::Ornament;
+
+  exp.notes = {first, second};
+  return exp;
+}
+
+// Build a turn expansion (gruppetto): upper - main - lower in 32nds, then the
+// main tone holds the remainder of the span. Total duration is preserved.
+Expansion buildTurn(const NoteEvent& base, int upper, int lower) {
+  Expansion exp;
+  const Tick sub = duration::kThirtySecondNote;
+  if (base.duration < 4 * sub)
+    return exp;  // the held tail must remain the longest tone.
+
+  Tick cursor = base.start_tick;
+  const auto push = [&](int pitch, Tick dur) {
+    NoteEvent note = base;
+    note.start_tick = cursor;
+    note.duration = dur;
+    note.pitch = static_cast<std::uint8_t>(pitch);
+    note.source = BachNoteSource::Ornament;
+    exp.notes.push_back(note);
+    cursor += dur;
+  };
+  push(upper, sub);
+  push(base.pitch, sub);
+  push(lower, sub);
+  push(base.pitch, base.duration - 3 * sub);
+  return exp;
+}
+
+// Build a slide expansion (Schleifer): two rising 32nds from the diatonic
+// third below (two steps below, then one step below), then the held main
+// tone -- the figure fills the gap a rising leap left open underneath the
+// arrival tone. Total duration is preserved.
+Expansion buildSlide(const NoteEvent& base, Mode mode) {
+  Expansion exp;
+  const Tick sub = duration::kThirtySecondNote;
+  if (base.duration < 4 * sub)
+    return exp;
+  const int below1 = lowerNeighbour(base.pitch, mode, /*cadence_context=*/false);
+  const int below2 = below1 >= 0 ? lowerNeighbour(below1, mode, /*cadence_context=*/false) : -1;
+  if (below2 < 0)
+    return exp;
+
+  Tick cursor = base.start_tick;
+  const auto push = [&](int pitch, Tick dur) {
+    NoteEvent note = base;
+    note.start_tick = cursor;
+    note.duration = dur;
+    note.pitch = static_cast<std::uint8_t>(pitch);
+    note.source = BachNoteSource::Ornament;
+    exp.notes.push_back(note);
+    cursor += dur;
+  };
+  push(below2, sub);
+  push(below1, sub);
+  push(base.pitch, base.duration - 2 * sub);
+  return exp;
+}
+
 // Build a mordent expansion: main (short) -> lower neighbour (short) -> main
 // (remainder). Sub-note durations sum exactly to base.duration. The short
 // tones never go below a 32nd (60 ticks): an eighth-note mordent is played
@@ -326,6 +408,41 @@ void applyOrnamentPass(ComposeResult& result, const OrnamentParams& params) {
     }
   }
 
+  // Per-note previous attack in the same voice (pitch and duration), resolved
+  // in onset order. The melodic approach selects the ornament site: a falling
+  // third leaves a gap the appoggiatura fills, a stepwise descent carries the
+  // port-de-voix repetition, a rising leap invites the slide underneath the
+  // arrival, and a tone longer than its predecessor stands isolated (turn).
+  std::vector<int> prev_pitch_in_voice(result.notes.size(), -1);
+  std::vector<Tick> prev_dur_in_voice(result.notes.size(), 0);
+  {
+    std::vector<std::size_t> order(result.notes.size());
+    for (std::size_t i = 0; i < order.size(); ++i)
+      order[i] = i;
+    std::stable_sort(order.begin(), order.end(), [&](std::size_t a, std::size_t b) {
+      return result.notes[a].start_tick < result.notes[b].start_tick;
+    });
+    std::array<int, 256> last_in_voice{};
+    last_in_voice.fill(-1);
+    for (const std::size_t k : order) {
+      const VoiceId v = result.notes[k].voice;
+      if (last_in_voice[v] >= 0) {
+        const std::size_t prev_idx = static_cast<std::size_t>(last_in_voice[v]);
+        const NoteEvent& prev = result.notes[prev_idx];
+        // An ornament sub-note is not a structural approach tone: leaving the
+        // context unset closes the approach sites behind expanded notes, which
+        // keeps a second application of the pass a strict no-op.
+        const bool prev_is_ornament = prev.source == BachNoteSource::Ornament ||
+                                      result.provenance[prev_idx].source == NoteSource::Ornament;
+        if (!prev_is_ornament) {
+          prev_pitch_in_voice[k] = static_cast<int>(prev.pitch);
+          prev_dur_in_voice[k] = prev.duration;
+        }
+      }
+      last_in_voice[v] = static_cast<int>(k);
+    }
+  }
+
   // Build replacement views WITHOUT mutating the live note list until the full
   // plan is assembled (build-then-swap).
   std::vector<NoteEvent> out_notes;
@@ -392,13 +509,51 @@ void applyOrnamentPass(ComposeResult& result, const OrnamentParams& params) {
         // gate below still applies (never mandatory).
         const bool is_phrase_boundary = (bar % 4 == 3) && !in_cadence_window;
 
-        // Decision priority. Cadence trills first (always, every density).
+        // Melodic approach context (same-voice previous attack).
+        const int prev_pitch = prev_pitch_in_voice[idx];
+        const Tick prev_dur = prev_dur_in_voice[idx];
+        const bool falling_third_gap =
+            prev_pitch >= 0 && (prev_pitch - static_cast<int>(note.pitch) == 3 ||
+                                prev_pitch - static_cast<int>(note.pitch) == 4);
+        const bool stepwise_descent = prev_pitch >= 0 && prev_pitch == upper;
+        const bool rising_leap = prev_pitch >= 0 && static_cast<int>(note.pitch) - prev_pitch >= 5;
+        const bool isolated_long = prev_pitch >= 0 && prev_dur > 0 && prev_dur < note.duration;
+
+        // Decision priority: cadential trill > appoggiatura > turn > slide >
+        // mordent. Cadence trills first (always, every density); the new
+        // vocabulary carries its own placement-hash quantile gates and only
+        // engages above density 0 (the sparse character keeps its designed
+        // boundary mordents).
         bool want_trill = false;
         bool want_mordent = false;
+        bool want_appoggiatura = false;
+        bool want_turn = false;
+        bool want_slide = false;
 
         if (in_cadence_window && is_strong_beat && note.duration >= kQuarter) {
           // Priority cadence trill: the strong beat in the last two bars.
           want_trill = true;
+        } else if (density >= 1 && is_phrase_boundary && is_strong_beat &&
+                   note.duration >= kQuarter && (falling_third_gap || stepwise_descent) &&
+                   ((roll >> 2) & 1ull) == 0ull) {
+          // Appoggiatura on phrase-boundary strong beats whose melodic
+          // approach matches: the primary site is the falling-third gap (the
+          // upper neighbour fills it and suspends), the secondary the
+          // stepwise descent (the lean repeats the previous tone, port de
+          // voix). Kept to phrase boundaries so the galant half-value rule
+          // never saturates the texture.
+          want_appoggiatura = true;
+        } else if (density >= 1 && !in_cadence_window && !is_phrase_boundary &&
+                   note.duration >= kQuarter && isolated_long && ((roll >> 3) & 3ull) == 0ull) {
+          // Turn on an isolated mid-phrase long tone (longer than its
+          // predecessor, so the gruppetto animates a note that stands out of
+          // the surrounding motion).
+          want_turn = true;
+        } else if (density >= 1 && !in_cadence_window && note.duration >= kQuarter && rising_leap &&
+                   ((roll >> 5) & 1ull) == 0ull) {
+          // Slide underneath a tone entered by a rising leap of a fourth or
+          // more: the two-note Schleifer fills the gap the leap left open.
+          want_slide = true;
         } else if (density >= 1 && is_phrase_boundary && is_strong_beat) {
           // Sub-cadence ornament on phrase-boundary strong beats: long notes
           // take a trill, quarters and eighths a mordent.
@@ -422,22 +577,30 @@ void applyOrnamentPass(ComposeResult& result, const OrnamentParams& params) {
             want_mordent = true;
         }
 
-        if (!want_trill && !want_mordent && density >= 2 && note.duration >= kHalf &&
-            (bar % 2 == 0)) {
+        if (!want_trill && !want_mordent && !want_appoggiatura && !want_turn && !want_slide &&
+            density >= 2 && note.duration >= kHalf && (bar % 2 == 0)) {
           // Inner trills on long notes every 2 bars.
           want_trill = true;
         }
 
         // A small deterministic gate so not literally every eligible note in a
         // dense passage is ornamented (keeps the texture musical). Cadence
-        // trills, the designed mid-piece boundary, and the density-0 boundary
-        // mordents (already one-per-8-bars sparse) bypass the gate.
+        // trills, the designed mid-piece boundary, the density-0 boundary
+        // mordents (already one-per-8-bars sparse), and the new vocabulary
+        // (each site carries its own quantile gate above) bypass the gate.
         const bool mandatory = in_cadence_window && is_strong_beat;
         const bool gate_open = mandatory || bar == mid_boundary_bar ||
-                               (density == 0 && want_mordent) || (roll & 1ull) == 0ull;
+                               (density == 0 && want_mordent) || want_appoggiatura || want_turn ||
+                               want_slide || (roll & 1ull) == 0ull;
 
         if (gate_open) {
-          if (want_mordent) {
+          if (want_appoggiatura) {
+            exp = buildAppoggiatura(note, upper);
+          } else if (want_turn) {
+            exp = buildTurn(note, upper, lower);
+          } else if (want_slide) {
+            exp = buildSlide(note, params.mode);
+          } else if (want_mordent) {
             exp = buildMordent(note, lower);
           } else if (want_trill) {
             // Long trills (>= half) open with the held upper appoggiatura

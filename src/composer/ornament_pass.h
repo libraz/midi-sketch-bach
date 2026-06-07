@@ -44,6 +44,21 @@ namespace bach::composer {
 //     pace at sixteenths -- a stately alternation, not a buzz.
 //   * A mordent (single main-lower-main) may decorate a quarter note on a bar
 //     downbeat (phrase start) instead of a trill.
+//   * Beyond trill and mordent the pass carries the Explication vocabulary,
+//     each placed by the same-voice melodic approach and gated by its own
+//     placement-hash quantile (density >= 1 only):
+//       - appoggiatura: the upper neighbour leans for half the note's value
+//         (two thirds when dotted), then resolves. Primary site = a tone
+//         entered by a falling third (the lean fills the gap and suspends);
+//         secondary = a stepwise descent (port de voix). Phrase-boundary
+//         strong beats only.
+//       - turn (gruppetto): upper-main-lower in 32nds, then the held main
+//         tone. Site = an isolated mid-phrase tone longer than its
+//         predecessor.
+//       - slide (Schleifer): two rising 32nds from the diatonic third below.
+//         Site = a tone entered by a rising leap of a fourth or more.
+//     Placement priority: cadential trill > appoggiatura > turn > slide >
+//     mordent.
 //   * The ornament subdivides ONLY the original note's [start, start+dur)
 //     span: total piece duration never changes, and no ornament tone leaves
 //     the original note's diatonic neighbourhood or crosses above the
