@@ -223,5 +223,176 @@ TEST(FigurationPaletteFigurationWave, FormsNoPerfectParallelAgainstRegistryVoice
   EXPECT_EQ(parallels, 0);
 }
 
+// --- kArpeggio ----------------------------------------------------------------
+
+TEST(FigurationPaletteArpeggio, AllNotesAreTriadTonesInsideBand) {
+  const std::vector<CycleBar> plan = majorCyclePlan();
+  constexpr int kBandLo = 60;
+  constexpr int kBandHi = 79;
+  for (int figure = 0; figure < 4; ++figure) {
+    for (int npb : {1, 2, 4}) {
+      std::vector<MaterialNote> notes;
+      appendArpeggioCycle(notes, 0, plan, kBandLo, kBandHi, figure, npb, detail::Mode::Major);
+      ASSERT_EQ(notes.size(), plan.size() * 3 * static_cast<std::size_t>(npb));
+      for (const MaterialNote& note : notes) {
+        const int bar = static_cast<int>(note.start_tick / kTicksPerBar34);
+        const CycleBar& cb = plan[static_cast<std::size_t>(bar)];
+        const detail::ChordSpec chord{cb.root_pc, cb.minor};
+        EXPECT_TRUE(isTriadTone(note.pitch, chord))
+            << "figure " << figure << " npb " << npb << " tick " << note.start_tick;
+        EXPECT_GE(static_cast<int>(note.pitch), kBandLo);
+        EXPECT_LE(static_cast<int>(note.pitch), kBandHi);
+      }
+    }
+  }
+}
+
+TEST(FigurationPaletteArpeggio, FigureContoursAreDistinct) {
+  const std::vector<CycleBar> plan = majorCyclePlan();
+  std::vector<std::vector<std::uint8_t>> first_beats;
+  for (int figure = 0; figure < 4; ++figure) {
+    std::vector<MaterialNote> notes;
+    appendArpeggioCycle(notes, 0, plan, 60, 79, figure, 4, detail::Mode::Major);
+    std::vector<std::uint8_t> head(4);
+    for (int i = 0; i < 4; ++i)
+      head[static_cast<std::size_t>(i)] = notes[static_cast<std::size_t>(i)].pitch;
+    for (const auto& seen : first_beats)
+      EXPECT_NE(seen, head);
+    first_beats.push_back(head);
+  }
+}
+
+// --- kFiguraCorta ---------------------------------------------------------------
+
+TEST(FigurationPaletteFiguraCorta, LongShortShortCellFillsEveryBeat) {
+  const std::vector<CycleBar> plan = majorCyclePlan();
+  std::vector<MaterialNote> notes;
+  appendFiguraCortaCycle(notes, 0, plan, /*register_shift=*/0, /*anchor_rotation=*/0,
+                         detail::Mode::Major);
+  ASSERT_EQ(notes.size(), plan.size() * 3 * 3);
+  constexpr Tick kEighth = kTicksPerBeat / 2;
+  constexpr Tick kSixteenth = kTicksPerBeat / 4;
+  for (std::size_t i = 0; i < notes.size(); i += 3) {
+    EXPECT_EQ(notes[i].duration, kEighth);
+    EXPECT_EQ(notes[i + 1].duration, kSixteenth);
+    EXPECT_EQ(notes[i + 2].duration, kSixteenth);
+    EXPECT_EQ(notes[i].start_tick % kTicksPerBeat, 0);
+    EXPECT_EQ(notes[i + 1].start_tick, notes[i].start_tick + kEighth);
+    EXPECT_EQ(notes[i + 2].start_tick, notes[i].start_tick + kEighth + kSixteenth);
+  }
+}
+
+TEST(FigurationPaletteFiguraCorta, BeatOnsetsAreChordToneAnchorsAndCellsConjunct) {
+  const std::vector<CycleBar> plan = majorCyclePlan();
+  std::vector<MaterialNote> notes;
+  appendFiguraCortaCycle(notes, 0, plan, 0, 1, detail::Mode::Major);
+  for (std::size_t i = 0; i < notes.size(); ++i) {
+    const MaterialNote& note = notes[i];
+    if (note.start_tick % kTicksPerBeat == 0) {
+      const int bar = static_cast<int>(note.start_tick / kTicksPerBar34);
+      EXPECT_TRUE(
+          isAnchorTone(note.pitch, plan[static_cast<std::size_t>(bar)], detail::Mode::Major))
+          << "beat onset at tick " << note.start_tick;
+    }
+    if (i > 0 && notes[i].start_tick / kTicksPerBeat == notes[i - 1].start_tick / kTicksPerBeat) {
+      EXPECT_LE(std::abs(static_cast<int>(notes[i].pitch) - static_cast<int>(notes[i - 1].pitch)),
+                2)
+          << "intra-cell leap at tick " << notes[i].start_tick;
+    }
+  }
+}
+
+// --- kGesture --------------------------------------------------------------------
+
+TEST(FigurationPaletteGesture, MordentOnsetThenDescendingRunThenRest) {
+  const detail::ChordSpec chord{0, false};  // C major.
+  constexpr int kBandLo = 48;
+  constexpr int kBandHi = 84;
+  std::vector<MaterialNote> dst;
+  appendGestureBar(dst, /*bar=*/0, chord, detail::Mode::Major, kBandLo, kBandHi);
+  ASSERT_GE(dst.size(), 3u);
+  ASSERT_LE(dst.size(), 8u);
+  // Mordent onset: upper diatonic neighbour, then the main (triad) tone.
+  EXPECT_EQ(static_cast<int>(dst[0].pitch), detail::scaleUp(dst[1].pitch, 1, detail::Mode::Major));
+  EXPECT_TRUE(isTriadTone(dst[1].pitch, chord));
+  // Descending run after the mordent.
+  for (std::size_t i = 2; i < dst.size(); ++i)
+    EXPECT_LT(static_cast<int>(dst[i].pitch), static_cast<int>(dst[i - 1].pitch));
+  // The rest of the bar is silent: emitted durations cover at most two beats.
+  Tick covered = 0;
+  for (const MaterialNote& note : dst) {
+    covered += note.duration;
+    EXPECT_GE(static_cast<int>(note.pitch), kBandLo);
+    EXPECT_LE(static_cast<int>(note.pitch), kBandHi);
+  }
+  EXPECT_LE(covered, 2 * kTicksPerBeat);
+  EXPECT_LE(dst.back().start_tick + dst.back().duration, static_cast<Tick>(2) * kTicksPerBeat);
+}
+
+TEST(FigurationPaletteGesture, RunStopsAtBandFloorInsteadOfRepeatingIt) {
+  const detail::ChordSpec chord{0, false};
+  // A floor right under the main tone leaves room for only a short run.
+  std::vector<MaterialNote> dst;
+  appendGestureBar(dst, 0, chord, detail::Mode::Major, /*band_lo=*/76, /*band_hi=*/84);
+  for (std::size_t i = 1; i < dst.size(); ++i)
+    EXPECT_NE(dst[i].pitch, dst[i - 1].pitch) << "repeated pitch at index " << i;
+  for (const MaterialNote& note : dst)
+    EXPECT_GE(static_cast<int>(note.pitch), 76);
+}
+
+// --- kChordBlock -------------------------------------------------------------------
+
+TEST(FigurationPaletteChordBlock, StackedTriadKeepsVoiceOrderForHalfAndWholeBlocks) {
+  const detail::ChordSpec chord{0, false};
+  for (Tick block_dur :
+       {static_cast<Tick>(2) * kTicksPerBeat, static_cast<Tick>(4) * kTicksPerBeat}) {
+    std::vector<std::vector<MaterialNote>> voices(3);
+    appendChordBlockBar(voices, /*bar=*/0, chord, detail::Mode::Major, /*top_hi=*/76, block_dur);
+    const std::size_t blocks = static_cast<std::size_t>(kTicksPerBar / block_dur);
+    for (const auto& voice : voices)
+      ASSERT_EQ(voice.size(), blocks);
+    for (std::size_t blk = 0; blk < blocks; ++blk) {
+      // Voice order: V0 > V1 > V2, all striking together with the block length.
+      EXPECT_GT(voices[0][blk].pitch, voices[1][blk].pitch);
+      EXPECT_GT(voices[1][blk].pitch, voices[2][blk].pitch);
+      for (const auto& voice : voices) {
+        EXPECT_TRUE(isTriadTone(voice[blk].pitch, chord));
+        EXPECT_EQ(voice[blk].duration, block_dur);
+        EXPECT_EQ(voice[blk].start_tick, static_cast<Tick>(blk) * block_dur);
+      }
+    }
+    EXPECT_LE(static_cast<int>(voices[0][0].pitch), 76);
+  }
+}
+
+// --- kPedalWalk --------------------------------------------------------------------
+
+TEST(FigurationPalettePedalWalk, QuartersAlternateRootAndFifthInsideBand) {
+  const detail::ChordSpec tonic{0, false};
+  const detail::ChordSpec subdominant{5, false};
+  constexpr int kBandLo = 28;
+  constexpr int kBandHi = 50;
+  std::vector<MaterialNote> dst;
+  int prev_pitch = -1;
+  appendPedalWalkBar(dst, 0, tonic, detail::Mode::Major, kBandLo, kBandHi, prev_pitch);
+  appendPedalWalkBar(dst, 1, subdominant, detail::Mode::Major, kBandLo, kBandHi, prev_pitch);
+  ASSERT_EQ(dst.size(), 8u);
+  for (std::size_t i = 0; i < dst.size(); ++i) {
+    const detail::ChordSpec& chord = (i < 4) ? tonic : subdominant;
+    const int pc = dst[i].pitch % 12;
+    const bool on_root = pc == chord.root_pc % 12;
+    const bool on_fifth = pc == (chord.root_pc + 7) % 12;
+    EXPECT_TRUE(on_root || on_fifth) << "pitch class " << pc << " at index " << i;
+    EXPECT_EQ(dst[i].duration, kTicksPerBeat);
+    EXPECT_GE(static_cast<int>(dst[i].pitch), kBandLo);
+    EXPECT_LE(static_cast<int>(dst[i].pitch), kBandHi);
+    if (i > 0) {
+      EXPECT_LE(std::abs(static_cast<int>(dst[i].pitch) - static_cast<int>(dst[i - 1].pitch)), 12)
+          << "walking leap at index " << i;
+    }
+  }
+  EXPECT_EQ(prev_pitch, static_cast<int>(dst.back().pitch));
+}
+
 }  // namespace
 }  // namespace bach::composer

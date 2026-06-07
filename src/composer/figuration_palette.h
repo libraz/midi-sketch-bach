@@ -29,9 +29,14 @@ namespace bach::composer {
 
 /// @brief The palette's figuration vocabulary.
 enum class PatternKind : std::uint8_t {
-  kSawtooth,    ///< Per-beat chord-tone anchors with stepwise fills toward the next anchor.
-  kScalarWave,  ///< Continuous stepwise wave folding at the band edges, downbeat re-anchored.
-  kFiguration,  ///< Registry-aware consonant, parallel-free scalar-wave figuration.
+  kSawtooth,     ///< Per-beat chord-tone anchors with stepwise fills toward the next anchor.
+  kScalarWave,   ///< Continuous stepwise wave folding at the band edges, downbeat re-anchored.
+  kFiguration,   ///< Registry-aware consonant, parallel-free scalar-wave figuration.
+  kArpeggio,     ///< Per-beat broken-chord figures over the bar's triad tones.
+  kFiguraCorta,  ///< Long-short-short per-beat figure on chord-tone anchors.
+  kGesture,      ///< Mordent onset + descending run, then silence for the rest of the bar.
+  kChordBlock,   ///< Multi-voice simultaneous triad blocks (half / whole notes).
+  kPedalWalk,    ///< Root-fifth walking line in quarters (pedal solo material).
 };
 
 // 3/4 bar length in ticks: 3 quarter beats. Mirrors HarmonicPlan::ticksPerBar()
@@ -236,6 +241,125 @@ void appendFigurationWaveBar(ThemeToneRegistry& registry, FigurationSection& sec
                              int voice, const detail::ChordSpec& chord, detail::Mode mode,
                              int notes_per_beat, int offset, int& prev_anchor, int band_lo,
                              int band_hi, VoiceId num_voices);
+
+/**
+ * @brief Append one ground cycle of broken-chord arpeggio figuration
+ *        (PatternKind::kArpeggio, 3/4 cycle form).
+ *
+ * Each bar realizes its triad as three stacked chord tones (bass / mid / top)
+ * octave-fit into the register band, then every beat traces one of four fixed
+ * figure contours over those tones (mid-bass-mid-top, mid-top-mid-bass,
+ * bass-mid-top-mid, top-mid-bass-mid). Every emitted note is a chord tone, so
+ * each beat onset is consonant with the held ground by construction.
+ *
+ * Variation differentiation (no RNG): `figure_index` selects the contour.
+ *
+ * @param notes Destination note vector (the variation's realized line).
+ * @param block_start Absolute start tick of the variation block.
+ * @param cycle_bar_plan Per-bar harmony + register data for the ground cycle.
+ * @param band_lo Register band floor (already lifted by any arc shift).
+ * @param band_hi Register band ceiling (already lifted by any arc shift).
+ * @param figure_index Selects the figure contour (taken modulo the table size).
+ * @param notes_per_beat Subdivision: 1 / 2 / 4 notes per beat (1 and 2 sample
+ *        the contour's first / first-and-third elements).
+ * @param mode Diatonic mode (Major / Minor) selecting the scale.
+ */
+void appendArpeggioCycle(std::vector<MaterialNote>& notes, Tick block_start,
+                         const std::vector<CycleBar>& cycle_bar_plan, int band_lo, int band_hi,
+                         int figure_index, int notes_per_beat, detail::Mode mode);
+
+/**
+ * @brief Append one ground cycle of figura corta figuration
+ *        (PatternKind::kFiguraCorta, 3/4 cycle form).
+ *
+ * Every beat carries the long-short-short figura corta cell (eighth + two
+ * sixteenths, filling exactly one beat). The long note opens on a chord-tone
+ * anchor resolved exactly like the sawtooth's anchor chain (nearest-octave
+ * fitting, gentle re-centering, hard octave fold), and the two shorts step
+ * diatonically toward the next beat's anchor, so the surface stays conjunct
+ * and every beat onset is consonant with the held ground.
+ *
+ * Variation differentiation (no RNG): `anchor_rotation` rotates which chord
+ * tone opens each bar's anchor group.
+ *
+ * @param notes Destination note vector (the variation's realized line).
+ * @param block_start Absolute start tick of the variation block.
+ * @param cycle_bar_plan Per-bar harmony + register data for the ground cycle.
+ * @param register_shift Semitone register lift from the arc (raises the band).
+ * @param anchor_rotation Cycle-driven rotation of the chord-tone anchor order.
+ * @param mode Diatonic mode (Major / Minor) selecting the scale.
+ */
+void appendFiguraCortaCycle(std::vector<MaterialNote>& notes, Tick block_start,
+                            const std::vector<CycleBar>& cycle_bar_plan, int register_shift,
+                            int anchor_rotation, detail::Mode mode);
+
+/**
+ * @brief Append one 4/4 bar opening gesture: a mordent onset followed by a
+ *        descending run, with the rest of the bar silent
+ *        (PatternKind::kGesture).
+ *
+ * The gesture is a written-out mordent (upper diatonic neighbour, then the
+ * main tone -- the highest triad tone whose upper neighbour still fits the
+ * band) followed by a descending diatonic sixteenth run from the main tone.
+ * The run stops at the band floor instead of repeating it, and the remainder
+ * of the bar is left silent (rhetorical rest), so the emitted durations cover
+ * at most the bar's first two beats.
+ *
+ * @param dst Note vector receiving the gesture's notes.
+ * @param bar Absolute bar index (4/4 bar grid).
+ * @param chord The bar's chord (supplies the main-tone triad).
+ * @param mode Diatonic mode selecting the scale walker.
+ * @param band_lo Register band floor.
+ * @param band_hi Register band ceiling.
+ */
+void appendGestureBar(std::vector<MaterialNote>& dst, int bar, const detail::ChordSpec& chord,
+                      detail::Mode mode, int band_lo, int band_hi);
+
+/**
+ * @brief Append one 4/4 bar of multi-voice simultaneous triad blocks
+ *        (PatternKind::kChordBlock).
+ *
+ * The bar's triad is realized as stacked chord tones below `top_hi` (top, then
+ * the next triad tone below, then the next), one per voice in descending
+ * order, so the per-tick voice order V0 >= V1 >= V2 holds by construction.
+ * Each voice strikes the same block rhythm: `block_dur` ticks per block
+ * (half / whole notes). Triads only -- diminished-seventh voicings are out of
+ * the palette's vocabulary.
+ *
+ * @param voice_notes One destination vector per voice (index = voice id);
+ *        the vector count selects how many triad tones are stacked (max 3).
+ * @param bar Absolute bar index (4/4 bar grid).
+ * @param chord The bar's chord (supplies the triad tones).
+ * @param mode Diatonic mode (reserved for scale-aware voicings).
+ * @param top_hi Ceiling for the top voice's chord tone.
+ * @param block_dur Block length in ticks (half or whole note).
+ */
+void appendChordBlockBar(std::vector<std::vector<MaterialNote>>& voice_notes, int bar,
+                         const detail::ChordSpec& chord, detail::Mode mode, int top_hi,
+                         Tick block_dur);
+
+/**
+ * @brief Append one 4/4 bar of root-fifth walking line in quarters
+ *        (PatternKind::kPedalWalk).
+ *
+ * Beats alternate the chord root and its fifth, each octave-fit nearest the
+ * previous emitted pitch (threaded across bars via `prev_pitch`) and clamped
+ * into the band, so the walk stays conjunct in contour (never more than a
+ * fifth between consecutive notes) while sounding only root / fifth tones --
+ * the ground-style walking idiom for pedal solo material.
+ *
+ * @param dst Note vector receiving the bar's notes.
+ * @param bar Absolute bar index (4/4 bar grid).
+ * @param chord The bar's chord (supplies root and fifth).
+ * @param mode Diatonic mode (reserved for scale-aware passing tones).
+ * @param band_lo Register band floor.
+ * @param band_hi Register band ceiling.
+ * @param prev_pitch Running pitch threaded across bars (< 0 on the first bar,
+ *        which then opens on the root nearest the band centre). Updated to the
+ *        bar's last emitted pitch on return.
+ */
+void appendPedalWalkBar(std::vector<MaterialNote>& dst, int bar, const detail::ChordSpec& chord,
+                        detail::Mode mode, int band_lo, int band_hi, int& prev_pitch);
 
 }  // namespace bach::composer
 

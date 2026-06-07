@@ -33,6 +33,76 @@ Tick barTick(int bar) {
   return static_cast<Tick>(bar) * kTicksPerBar;
 }
 
+/// @brief Resolve a ground cycle's per-beat chord-tone anchor-degree chain.
+///
+/// Each anchor takes the octave of its chord tone NEAREST the previous anchor,
+/// so consecutive beat onsets never leap more than a tritone (the minimal
+/// octave distance between two pitch classes is <= 6 semitones). At each bar's
+/// FIRST beat the fit reference is re-centered toward `center` -- but only when
+/// that does not move the anchor by more than a tritone from the running pitch
+/// -- so the line cannot drift an octave away over the cycle's descending chord
+/// roots, yet a re-center never itself introduces a leap.
+std::vector<int> resolveAnchorDegrees(const std::vector<CycleBar>& cycle_bar_plan, int center,
+                                      int anchor_rotation, detail::Mode mode) {
+  const int cycle_bars = static_cast<int>(cycle_bar_plan.size());
+  std::vector<int> anchor_deg;
+  anchor_deg.reserve(static_cast<std::size_t>(cycle_bars) * 3);
+  int running = center;
+  for (int bar = 0; bar < cycle_bars; ++bar) {
+    const std::vector<int> pcs =
+        barAnchorPitchClasses(cycle_bar_plan[static_cast<std::size_t>(bar)], mode);
+    for (int beat = 0; beat < 3; ++beat) {
+      const int anchor_pc =
+          pcs[static_cast<std::size_t>((anchor_rotation + beat) % static_cast<int>(pcs.size()))];
+      int fit = fitPitchClass(anchor_pc, running);
+      if (beat == 0) {
+        // Bar downbeat: prefer the octave nearer `center` when it is within a
+        // tritone of the running pitch (gentle re-centering, never a leap).
+        const int recentered = fitPitchClass(anchor_pc, center);
+        if (std::abs(recentered - running) <= 7)
+          fit = recentered;
+      }
+      // Hard register band: nearest-octave fitting can ratchet monotonically
+      // when consecutive chord tones keep resolving upward (or downward), and
+      // once the line drifts more than a tritone from `center` the gentle
+      // re-centering above can never engage again. Folding the anchor back by
+      // whole octaves keeps it a chord tone (consonance preserved) while
+      // pinning the tessitura to the variation band -- and keeps the realized
+      // pitch inside the MIDI range.
+      while (fit > center + 12)
+        fit -= 12;
+      while (fit < center - 12)
+        fit += 12;
+      anchor_deg.push_back(midiToDegree(fit, mode));
+      running = fit;
+    }
+  }
+  return anchor_deg;
+}
+
+/// @brief Realize a bar's triad as three stacked chord tones inside a band.
+///
+/// The bass is the lowest root-class pitch at or above `band_lo`; the third
+/// and fifth stack upward from it. Any tone that escapes `band_hi` folds down
+/// by whole octaves (it stays a chord tone, only the voicing inverts).
+void stackTriadInBand(const CycleBar& bar, int band_lo, int band_hi, int out_tones[3]) {
+  const int third_interval = bar.minor ? 3 : 4;
+  const int pcs[3] = {bar.root_pc % 12, (bar.root_pc + third_interval) % 12,
+                      (bar.root_pc + 7) % 12};
+  int cursor = band_lo;
+  for (int i = 0; i < 3; ++i) {
+    int tone = cursor;
+    while (((tone % 12) + 12) % 12 != pcs[i])
+      ++tone;
+    while (tone > band_hi)
+      tone -= 12;
+    if (tone < band_lo)
+      tone += 12;  // a band narrower than an octave cannot hold all three; keep in range.
+    out_tones[i] = tone;
+    cursor = std::max(cursor, tone);
+  }
+}
+
 }  // namespace
 
 int degreeToMidi(int degree, detail::Mode mode) {
@@ -75,53 +145,14 @@ std::vector<int> barAnchorPitchClasses(const CycleBar& bar, detail::Mode mode) {
 void appendSawtoothCycle(std::vector<MaterialNote>& notes, Tick block_start,
                          const std::vector<CycleBar>& cycle_bar_plan, int register_shift,
                          int anchor_rotation, int notes_per_beat, detail::Mode mode) {
-  const int cycle_bars = static_cast<int>(cycle_bar_plan.size());
-
   // Register center for the cycle, anchored on the first bar's low tone lifted
   // by the arc shift (the descending chord roots do NOT lower it, so the
   // figuration keeps a stable C4-C5 tessitura).
   const int center = cycle_bar_plan.front().low_tone + register_shift;
 
-  // --- Phase 1: resolve the full anchor-degree sequence -------------------
-  // Each anchor takes the octave of its chord tone NEAREST the previous anchor,
-  // so consecutive beat onsets never leap more than a tritone (the minimal
-  // octave distance between two pitch classes is <= 6 semitones). At each bar's
-  // FIRST beat the fit reference is re-centered toward `center` -- but only when
-  // that does not move the anchor by more than a tritone from the running pitch
-  // -- so the line cannot drift an octave away over the cycle's descending chord
-  // roots, yet a re-center never itself introduces a leap.
-  std::vector<int> anchor_deg;
-  anchor_deg.reserve(static_cast<std::size_t>(cycle_bars) * 3);
-  int running = center;
-  for (int bar = 0; bar < cycle_bars; ++bar) {
-    const std::vector<int> pcs =
-        barAnchorPitchClasses(cycle_bar_plan[static_cast<std::size_t>(bar)], mode);
-    for (int beat = 0; beat < 3; ++beat) {
-      const int anchor_pc =
-          pcs[static_cast<std::size_t>((anchor_rotation + beat) % static_cast<int>(pcs.size()))];
-      int fit = fitPitchClass(anchor_pc, running);
-      if (beat == 0) {
-        // Bar downbeat: prefer the octave nearer `center` when it is within a
-        // tritone of the running pitch (gentle re-centering, never a leap).
-        const int recentered = fitPitchClass(anchor_pc, center);
-        if (std::abs(recentered - running) <= 7)
-          fit = recentered;
-      }
-      // Hard register band: nearest-octave fitting can ratchet monotonically
-      // when consecutive chord tones keep resolving upward (or downward), and
-      // once the line drifts more than a tritone from `center` the gentle
-      // re-centering above can never engage again. Folding the anchor back by
-      // whole octaves keeps it a chord tone (consonance preserved) while
-      // pinning the tessitura to the variation band -- and keeps the realized
-      // pitch inside the MIDI range.
-      while (fit > center + 12)
-        fit -= 12;
-      while (fit < center - 12)
-        fit += 12;
-      anchor_deg.push_back(midiToDegree(fit, mode));
-      running = fit;
-    }
-  }
+  // --- Phase 1: resolve the full anchor-degree sequence (shared chain). ---
+  const std::vector<int> anchor_deg =
+      resolveAnchorDegrees(cycle_bar_plan, center, anchor_rotation, mode);
 
   // --- Phase 2: emit notes, filling each beat toward the next anchor ------
   const Tick step = kTicksPerBeat / static_cast<Tick>(notes_per_beat);
@@ -563,6 +594,175 @@ void appendFigurationWaveBar(ThemeToneRegistry& registry, FigurationSection& sec
     }
   }
   prev_anchor = last_pitch;
+}
+
+// The four arpeggio figure contours, as indices over the bar's stacked triad
+// tones {0 = bass, 1 = mid, 2 = top}. Mid-anchored contours open and close on
+// the middle tone so consecutive beats chain smoothly; the outer two contours
+// sweep the full triad in one direction.
+constexpr int kArpeggioFigures[4][4] = {
+    {1, 0, 1, 2},  // mid-bass-mid-top
+    {1, 2, 1, 0},  // mid-top-mid-bass
+    {0, 1, 2, 1},  // bass-mid-top-mid
+    {2, 1, 0, 1},  // top-mid-bass-mid
+};
+
+void appendArpeggioCycle(std::vector<MaterialNote>& notes, Tick block_start,
+                         const std::vector<CycleBar>& cycle_bar_plan, int band_lo, int band_hi,
+                         int figure_index, int notes_per_beat, detail::Mode mode) {
+  (void)mode;  // every emitted tone is a chord tone; no scale walk is needed.
+  const int* figure = kArpeggioFigures[((figure_index % 4) + 4) % 4];
+  const Tick step = kTicksPerBeat / static_cast<Tick>(notes_per_beat);
+  // Subdivision sampling: 4 -> the full contour, 2 -> elements 0 and 2,
+  // 1 -> element 0 (the contour's anchor tone).
+  const int stride = 4 / notes_per_beat;
+
+  const int cycle_bars = static_cast<int>(cycle_bar_plan.size());
+  for (int bar = 0; bar < cycle_bars; ++bar) {
+    int tones[3];
+    stackTriadInBand(cycle_bar_plan[static_cast<std::size_t>(bar)], band_lo, band_hi, tones);
+    for (int beat = 0; beat < 3; ++beat) {
+      const Tick beat_tick = block_start + static_cast<Tick>(bar) * kTicksPerBar34 +
+                             static_cast<Tick>(beat) * kTicksPerBeat;
+      for (int sub = 0; sub < notes_per_beat; ++sub) {
+        MaterialNote mnote;
+        mnote.start_tick = beat_tick + static_cast<Tick>(sub) * step;
+        mnote.duration = step;
+        mnote.pitch = static_cast<std::uint8_t>(tones[figure[sub * stride]]);
+        notes.push_back(mnote);
+      }
+    }
+  }
+}
+
+void appendFiguraCortaCycle(std::vector<MaterialNote>& notes, Tick block_start,
+                            const std::vector<CycleBar>& cycle_bar_plan, int register_shift,
+                            int anchor_rotation, detail::Mode mode) {
+  const int center = cycle_bar_plan.front().low_tone + register_shift;
+  const std::vector<int> anchor_deg =
+      resolveAnchorDegrees(cycle_bar_plan, center, anchor_rotation, mode);
+
+  // Long-short-short cell per beat: eighth + two sixteenths (one full beat).
+  constexpr Tick kCellDur[3] = {kEighth, kSixteenth, kSixteenth};
+  constexpr Tick kCellOffset[3] = {0, kEighth, kEighth + kSixteenth};
+
+  const int onset_count = static_cast<int>(anchor_deg.size());
+  for (int onset = 0; onset < onset_count; ++onset) {
+    const int from_deg = anchor_deg[static_cast<std::size_t>(onset)];
+    // The two shorts step toward the next onset's anchor (the last onset holds
+    // its own degree), bounded so the cell never overshoots it.
+    const int to_deg =
+        (onset + 1 < onset_count) ? anchor_deg[static_cast<std::size_t>(onset + 1)] : from_deg;
+    const int delta = to_deg - from_deg;
+    const int dir = (delta >= 0) ? 1 : -1;
+    const int span = std::abs(delta);
+
+    const int bar = onset / 3;
+    const int beat = onset % 3;
+    const Tick beat_tick = block_start + static_cast<Tick>(bar) * kTicksPerBar34 +
+                           static_cast<Tick>(beat) * kTicksPerBeat;
+    for (int sub = 0; sub < 3; ++sub) {
+      MaterialNote mnote;
+      mnote.start_tick = beat_tick + kCellOffset[sub];
+      mnote.duration = kCellDur[sub];
+      int advance = sub;
+      if (advance > span)
+        advance = span;  // do not overshoot the next onset.
+      mnote.pitch = static_cast<std::uint8_t>(degreeToMidi(from_deg + dir * advance, mode));
+      notes.push_back(mnote);
+    }
+  }
+}
+
+void appendGestureBar(std::vector<MaterialNote>& dst, int bar, const detail::ChordSpec& chord,
+                      detail::Mode mode, int band_lo, int band_hi) {
+  const int third = chord.minor ? 3 : 4;
+  const int triad_pc[3] = {chord.root_pc % 12, (chord.root_pc + third) % 12,
+                           (chord.root_pc + 7) % 12};
+  auto is_triad = [&](int midi) {
+    const int pcl = ((midi % 12) + 12) % 12;
+    return pcl == triad_pc[0] || pcl == triad_pc[1] || pcl == triad_pc[2];
+  };
+  // Main tone: the highest triad tone whose upper diatonic neighbour still
+  // fits the band (the mordent must not poke above the ceiling).
+  int main_tone = band_hi;
+  while (main_tone > band_lo &&
+         (!is_triad(main_tone) || detail::scaleUp(main_tone, 1, mode) > band_hi))
+    --main_tone;
+  const int upper = detail::scaleUp(main_tone, 1, mode);
+
+  // Mordent onset: upper neighbour, then the main tone (two sixteenths).
+  const Tick start = barTick(bar);
+  addNote(dst, start, kSixteenth, upper);
+  addNote(dst, start + kSixteenth, kSixteenth, main_tone);
+
+  // Descending diatonic run from the main tone, stopping at the band floor
+  // instead of repeating it; the rest of the bar stays silent.
+  int cursor = main_tone;
+  for (int idx = 2; idx < 8; ++idx) {
+    const int next = detail::scaleDown(cursor, 1, mode);
+    if (next < band_lo)
+      break;
+    cursor = next;
+    addNote(dst, start + static_cast<Tick>(idx) * kSixteenth, kSixteenth, cursor);
+  }
+}
+
+void appendChordBlockBar(std::vector<std::vector<MaterialNote>>& voice_notes, int bar,
+                         const detail::ChordSpec& chord, detail::Mode mode, int top_hi,
+                         Tick block_dur) {
+  (void)mode;  // triad-only voicing; no scale walk is needed.
+  const int third = chord.minor ? 3 : 4;
+  const int triad_pc[3] = {chord.root_pc % 12, (chord.root_pc + third) % 12,
+                           (chord.root_pc + 7) % 12};
+  auto is_triad = [&](int midi) {
+    const int pcl = ((midi % 12) + 12) % 12;
+    return pcl == triad_pc[0] || pcl == triad_pc[1] || pcl == triad_pc[2];
+  };
+  // Stack downward from the ceiling: V0 = highest triad tone <= top_hi, each
+  // later voice the next triad tone below, so V0 >= V1 >= V2 by construction.
+  const int num_voices = static_cast<int>(voice_notes.size());
+  int cursor = top_hi;
+  std::vector<int> tones;
+  tones.reserve(static_cast<std::size_t>(num_voices));
+  for (int voice = 0; voice < num_voices; ++voice) {
+    while (cursor > 0 && !is_triad(cursor))
+      --cursor;
+    tones.push_back(cursor);
+    --cursor;  // resume the scan strictly below the tone just taken.
+  }
+
+  const int blocks = static_cast<int>(kTicksPerBar / block_dur);
+  for (int voice = 0; voice < num_voices; ++voice) {
+    for (int blk = 0; blk < blocks; ++blk) {
+      addNote(voice_notes[static_cast<std::size_t>(voice)],
+              barTick(bar) + static_cast<Tick>(blk) * block_dur, block_dur,
+              tones[static_cast<std::size_t>(voice)]);
+    }
+  }
+}
+
+void appendPedalWalkBar(std::vector<MaterialNote>& dst, int bar, const detail::ChordSpec& chord,
+                        detail::Mode mode, int band_lo, int band_hi, int& prev_pitch) {
+  (void)mode;  // root / fifth only; no scale walk is needed.
+  const int root_pc = chord.root_pc % 12;
+  const int fifth_pc = (chord.root_pc + 7) % 12;
+  if (prev_pitch < 0) {
+    // First bar: open on the root nearest the band centre.
+    prev_pitch = fitPitchClass(root_pc, (band_lo + band_hi) / 2);
+  }
+  for (int beat = 0; beat < 4; ++beat) {
+    // Beats alternate root and fifth, each octave-fit nearest the previous
+    // pitch and folded back into the band (a fold keeps the pitch class).
+    const int pc = (beat % 2 == 0) ? root_pc : fifth_pc;
+    int pitch = fitPitchClass(pc, prev_pitch);
+    while (pitch > band_hi)
+      pitch -= 12;
+    while (pitch < band_lo)
+      pitch += 12;
+    addNote(dst, barTick(bar) + static_cast<Tick>(beat) * kTicksPerBeat, kQuarter, pitch);
+    prev_pitch = pitch;
+  }
 }
 
 }  // namespace bach::composer
