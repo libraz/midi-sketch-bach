@@ -166,8 +166,8 @@ TEST(TrioSonataTest, CarrierClipsNotesToSpanWindow) {
   EXPECT_EQ(cands[0].pitch, 72u);
 }
 
-// Inert when there are no trio voices declared (Phase 3-20 fixtures): a
-// TrioVoiceCarrier span produces no candidates.
+// Inert when there are no trio voices declared: a TrioVoiceCarrier span
+// produces no candidates.
 TEST(TrioSonataTest, CarrierInertWhenTrioVoicesEmpty) {
   Material material;  // no trio_voices.
   Span span;

@@ -247,8 +247,8 @@ TEST(PassacagliaTest, GroundImmutableFailsOnMutatedCycle) {
   EXPECT_TRUE(hasRuleKind(r, "passacaglia_ground_immutable", FailKind::StructuralFail));
 }
 
-// Inert when there is no passacaglia ground declared (Phase 3-19 fixtures): even
-// a note carrying the PassacagliaGroundReplayed bit cannot trip the rule.
+// Inert when there is no passacaglia ground declared: even a note carrying the
+// PassacagliaGroundReplayed bit cannot trip the rule.
 TEST(PassacagliaTest, GroundImmutableInertWhenGroundEmpty) {
   Material material;  // no passacaglia_ground.
   std::vector<NoteEvent> notes = {makeNote(0, kTicksPerBeat, 48, 1)};

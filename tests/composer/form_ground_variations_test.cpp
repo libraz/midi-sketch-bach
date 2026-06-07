@@ -26,6 +26,7 @@
 #include "composer/form_director.h"
 #include "composer/harmonic_plan.h"
 #include "composer/harness_fixture.h"
+#include "composer/minor_material.h"
 #include "composer/provenance.h"
 #include "core/basic_types.h"
 
@@ -176,6 +177,63 @@ TEST(GroundVariationChaconne, GroundRepeatsEveryPeriod) {
 
 TEST(GroundVariationPassacaglia, GroundRepeatsEveryPeriod) {
   expectGroundImmutable(FormType::Passacaglia, 8);
+}
+
+// --- 3b. Seed-selected ground variants ---------------------------------------
+
+// The ground table is a seed-selected design variant (seed % kGroundVariantCount,
+// fixed for the whole piece). Probe one seed per variant: seed 3 -> variant 0
+// (the historical table; seed 0 is reserved for CLI auto so the variant-0 probe
+// uses 3), seed 1 -> variant 1, seed 2 -> variant 2.
+void expectGroundFollowsSeedVariant(FormType form) {
+  const std::array<std::uint32_t, 3> probe_seed = {3u, 1u, 2u};
+  const std::size_t period = form == FormType::Passacaglia ? 8u : 4u;
+  for (bool minor : {false, true}) {
+    for (std::size_t variant = 0; variant < detail::kGroundVariantCount; ++variant) {
+      const HarnessFixture fx = build(form, probe_seed[variant], minor, 0);
+      const ComposeResult r = Composer{}.run(fx.material, fx.harmony, fx.voice_plan);
+      const std::vector<std::uint8_t> pitches = groundPitches(r, groundVoice(form));
+      ASSERT_GE(pitches.size(), period) << "minor " << minor << " variant " << variant;
+      for (std::size_t bar = 0; bar < period; ++bar) {
+        const std::uint8_t expected = form == FormType::Passacaglia
+                                          ? (minor ? detail::kPassacagliaGroundsMinor[variant][bar]
+                                                   : detail::kPassacagliaGroundsMajor[variant][bar])
+                                          : (minor ? detail::kChaconneGroundsMinor[variant][bar]
+                                                   : detail::kChaconneGroundsMajor[variant][bar]);
+        EXPECT_EQ(pitches[bar], expected) << "form " << static_cast<int>(form) << " minor " << minor
+                                          << " variant " << variant << " bar " << bar;
+      }
+    }
+  }
+}
+
+TEST(GroundVariationChaconne, GroundFollowsSeedVariant) {
+  expectGroundFollowsSeedVariant(FormType::Chaconne);
+}
+
+TEST(GroundVariationPassacaglia, GroundFollowsSeedVariant) {
+  expectGroundFollowsSeedVariant(FormType::Passacaglia);
+}
+
+// Seeds congruent mod kGroundVariantCount pick the same ground variant, so the
+// variant family wraps (seed 4 sounds the same ground as seed 1).
+void expectCongruentSeedsShareGround(FormType form) {
+  for (bool minor : {false, true}) {
+    const HarnessFixture fx_a = build(form, 1, minor, 0);
+    const HarnessFixture fx_b = build(form, 4, minor, 0);
+    const ComposeResult r_a = Composer{}.run(fx_a.material, fx_a.harmony, fx_a.voice_plan);
+    const ComposeResult r_b = Composer{}.run(fx_b.material, fx_b.harmony, fx_b.voice_plan);
+    EXPECT_EQ(groundPitches(r_a, groundVoice(form)), groundPitches(r_b, groundVoice(form)))
+        << "form " << static_cast<int>(form) << " minor " << minor;
+  }
+}
+
+TEST(GroundVariationChaconne, CongruentSeedsShareGround) {
+  expectCongruentSeedsShareGround(FormType::Chaconne);
+}
+
+TEST(GroundVariationPassacaglia, CongruentSeedsShareGround) {
+  expectCongruentSeedsShareGround(FormType::Passacaglia);
 }
 
 // --- 4. Bar math (1440 ticks) -----------------------------------------------

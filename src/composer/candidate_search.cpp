@@ -801,7 +801,7 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
     // fill [span.start_tick, span.end_tick); each note is source = Material,
     // score = 1.0 (baseline ChordTone/P7/P8 bits via emitMaterialNote) plus
     // GroundBassReplayed so the provenance records the ground shipped.
-    // The ground is immutable (CLAUDE.md): notes are replayed verbatim, only
+    // The ground is immutable: notes are replayed verbatim, only
     // time-shifted by whole cycles.
     const RuleIdMask ground_bits = (ruleBitMask(RuleBit::GroundBassReplayed));
     const Tick period = material.ground_bass_period;
@@ -914,7 +914,7 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
     // source = Material, score = 1.0 (baseline ChordTone/P7/P8 bits via
     // emitMaterialNote) plus CantusFirmusReplayed. When the embellished line is
     // replayed, every note additionally carries CFEmbellishmentApplied. The
-    // cantus firmus is immutable (CLAUDE.md): its bar-downbeat tones are checked
+    // cantus firmus is immutable: its bar-downbeat tones are checked
     // by the Validator's cantus_firmus_immutable rule, not re-derived here.
     const std::vector<MaterialNote>& source =
         material.cf_is_embellished ? material.cf_embellished : material.cantus_firmus;
@@ -938,7 +938,7 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
     // laid down repeatedly to fill [span.start_tick, span.end_tick); each note is
     // source = Material, score = 1.0 (baseline ChordTone/P7/P8 bits via
     // emitMaterialNote) plus PassacagliaGroundReplayed so the provenance records
-    // the ground shipped. The ground is immutable (CLAUDE.md): notes are
+    // the ground shipped. The ground is immutable: notes are
     // replayed verbatim, only time-shifted by whole cycles. Same shape as the
     // GroundCarrier branch with the renamed source vector / bit.
     const RuleIdMask ground_bits = (ruleBitMask(RuleBit::PassacagliaGroundReplayed));
@@ -1496,8 +1496,8 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
         // `unprepared_dissonance` rule requires |p - fixed_next| ≤ 2.
         // The intra-span leave-side rule below (prev_was_pt_local +
         // approach-side) does not see this because t_next is in a
-        // different span. Phase 4 V1 counterline bar 3 → V1
-        // AnswerCarrier bar 4 is the canonical case.
+        // different span. A V1 counterline note in bar 3 feeding into a
+        // V1 AnswerCarrier note in bar 4 is the canonical case.
         if (context.placed_notes != nullptr) {
           const std::uint8_t fixed_next =
               sameVoiceStartingAt(*context.placed_notes, span.voice, t_next);

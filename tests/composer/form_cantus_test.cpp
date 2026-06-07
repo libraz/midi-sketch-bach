@@ -29,6 +29,7 @@
 #include "composer/composer.h"
 #include "composer/form_builders.h"
 #include "composer/form_director.h"
+#include "composer/minor_material.h"
 #include "core/basic_types.h"
 
 namespace bach::composer {
@@ -448,6 +449,43 @@ TEST(FormCantusGoldberg, GroundTilesExactlyWithFourBarPeriod) {
               << "minor=" << minor << " seed=" << seed << " bar " << bar;
         }
       }
+    }
+  }
+}
+
+// The ground table is a seed-selected design variant (seed % kGroundVariantCount,
+// fixed for the whole piece). Probe one seed per variant: seed 3 -> variant 0
+// (the historical table; seed 0 is reserved for CLI auto so the variant-0 probe
+// uses 3), seed 1 -> variant 1, seed 2 -> variant 2.
+TEST(FormCantusGoldberg, GroundFollowsSeedVariant) {
+  const std::array<std::uint32_t, 3> probe_seed = {3u, 1u, 2u};
+  for (bool minor : {false, true}) {
+    for (std::size_t variant = 0; variant < detail::kGroundVariantCount; ++variant) {
+      const HarnessFixture fx = build(FormType::GoldbergVariations, minor, SubjectCharacter::Severe,
+                                      0, probe_seed[variant]);
+      ASSERT_EQ(fx.material.passacaglia_ground.size(), 4u);
+      const auto& expected =
+          minor ? detail::kGoldbergGroundsMinor[variant] : detail::kGoldbergGroundsMajor[variant];
+      for (std::size_t bar = 0; bar < 4; ++bar) {
+        EXPECT_EQ(fx.material.passacaglia_ground[bar].pitch, expected[bar])
+            << "minor " << minor << " variant " << variant << " bar " << bar;
+      }
+    }
+  }
+}
+
+// Seeds congruent mod kGroundVariantCount pick the same goldberg ground.
+TEST(FormCantusGoldberg, CongruentSeedsShareGround) {
+  for (bool minor : {false, true}) {
+    const HarnessFixture fx_a =
+        build(FormType::GoldbergVariations, minor, SubjectCharacter::Severe, 0, 1);
+    const HarnessFixture fx_b =
+        build(FormType::GoldbergVariations, minor, SubjectCharacter::Severe, 0, 4);
+    ASSERT_EQ(fx_a.material.passacaglia_ground.size(), fx_b.material.passacaglia_ground.size());
+    for (std::size_t bar = 0; bar < fx_a.material.passacaglia_ground.size(); ++bar) {
+      EXPECT_EQ(fx_a.material.passacaglia_ground[bar].pitch,
+                fx_b.material.passacaglia_ground[bar].pitch)
+          << "minor " << minor << " bar " << bar;
     }
   }
 }

@@ -9,7 +9,7 @@
 //   2. The Validator's cantus_firmus_immutable rule passes when every bar
 //      downbeat matches the skeleton tone, fires a StructuralFail when a replayed
 //      downbeat is mutated off the skeleton, and stays inert when no cantus
-//      firmus exists (Phase 3-18 fixtures).
+//      firmus exists.
 //   3. The Phase19 fixture runs through the full Composer cleanly for every seed
 //      family (seed % 4 selects the scalar-wave start offset), produces two
 //      voices, and stamps both Chorale-Prelude bits in provenance.
@@ -198,9 +198,8 @@ TEST(ChoralePreludeTest, CantusFirmusImmutableFailsWhenDownbeatMutated) {
   EXPECT_TRUE(hasRuleKind(r, "cantus_firmus_immutable", FailKind::StructuralFail));
 }
 
-// Inert when no cantus firmus exists (Phase 3-18 fixtures): a note carrying no
-// CantusFirmusReplayed bit cannot trip the rule, and the empty-skeleton guard
-// keeps the rule silent.
+// Inert when no cantus firmus exists: a note carrying no CantusFirmusReplayed
+// bit cannot trip the rule, and the empty-skeleton guard keeps the rule silent.
 TEST(ChoralePreludeTest, CantusFirmusImmutableInertWhenNoCantusFirmus) {
   std::vector<NoteEvent> notes = {makeNote(0, kTicksPerBar, 60, 0)};
   NoteProvenance p;

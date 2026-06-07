@@ -14,7 +14,8 @@ namespace bach::composer {
 // namespace so the engine has no link-time dependency on the legacy
 // harmony tree.
 //
-// P7 needs three primitives that Phase 2-6 didn't surface:
+// Three- and higher-voice textures need three primitives that the basic
+// two-voice path does not surface:
 //   * chord tone pitch classes for both triads and 7th chords,
 //   * the bass pitch class implied by a ChordEvent's inversion,
 //   * the diatonic leading-tone pitch class for a given key.

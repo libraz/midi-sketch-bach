@@ -163,8 +163,8 @@ struct HarnessPhaseSpec {
   std::uint8_t voices;        // 2 or 3
   std::uint8_t bars;          // total bars
   std::uint8_t subject_bars;  // V0 SubjectCarrier length
-  bool with_answer;           // Phase 4+: V1 AnswerCarrier
-  bool with_third_entry;      // Phase 6: V2 SubjectCarrier re-entry
+  bool with_answer;           // adds a V1 AnswerCarrier
+  bool with_third_entry;      // adds a V2 SubjectCarrier re-entry
   bool with_suspension;       // Phase4Sus: V1 suspension carrier injected
   bool with_episode;          // Phase6Episode: V0 Episode span at bars [bars-4, bars)
   bool with_tonal_answer;     // Phase6Tonal: AnswerCarrier reads from tonal_answer + V0 CS

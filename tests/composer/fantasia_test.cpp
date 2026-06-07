@@ -147,8 +147,8 @@ TEST(FantasiaTest, CarrierReplaysWindowMatchedSectionVerbatim) {
   }
 }
 
-// Inert when there are no fantasia sections declared (Phase 3-21 fixtures): a
-// FantasiaCarrier span produces no candidates.
+// Inert when there are no fantasia sections declared: a FantasiaCarrier span
+// produces no candidates.
 TEST(FantasiaTest, CarrierInertWhenSectionsEmpty) {
   Material material;  // no fantasia_sections.
   Span span;

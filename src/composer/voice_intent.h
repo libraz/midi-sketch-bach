@@ -50,27 +50,27 @@ enum class VoiceIntent : std::uint8_t {
   // Voice carrying the protected answer material (fugue comes). Same
   // verbatim-replay semantics as SubjectCarrier but the source pitch
   // sequence lives in `Material::answer` instead of `Material::subject`.
-  // Used by Phase 4 to place a real or tonal answer in the second voice
+  // Used to place a real or tonal answer in the second voice
   // of an exposition.
   AnswerCarrier = 6,
 
   // Voice carrying a SuspensionPattern (preparation / suspended dissonance /
-  // resolution triad). Source is `Material::suspension_patterns`. Phase 4
-  // adds this intent so the planner can pin strict-counterpoint dissonance
+  // resolution triad). Source is `Material::suspension_patterns`. This
+  // intent lets the planner pin strict-counterpoint dissonance
   // handling without re-deriving prep-sus-res via the candidate cascade.
   SuspensionCarrier = 7,
 
   // Episode span derived from Material::subject via a motif transform
   // (Original / Invert / Retrograde / Augment / Diminish). Source is
   // `Material::episodes`; CandidateSearch replays the derived note
-  // sequence verbatim. Phase 5 adds this intent so episodes are
-  // restricted to motif-operation outputs rather than free counterpoint.
+  // sequence verbatim. This intent restricts episodes to
+  // motif-operation outputs rather than free counterpoint.
   Episode = 8,
 
   // Voice carrying the fixed countersubject material during the answer
   // entry. Source is `Material::countersubject`; CandidateSearch
-  // replays verbatim. Phase 6 adds this intent so the original subject
-  // voice (post-subject statement) supplies an obbligato counterline
+  // replays verbatim. This intent lets the original subject
+  // voice (post-subject statement) supply an obbligato counterline
   // against the AnswerCarrier instead of a free SequentialCounterline.
   CountersubjectCarrier = 9,
 
@@ -78,8 +78,8 @@ enum class VoiceIntent : std::uint8_t {
   // by a fixed pattern (descending 5ths / descending step / ascending
   // step) over N successive steps. Source is
   // `Material::sequence_templates`; CandidateSearch replays the
-  // expanded note list verbatim. Phase 9 adds this intent so episodic
-  // continuations can be planned as deterministic sequences instead
+  // expanded note list verbatim. This intent lets episodic
+  // continuations be planned as deterministic sequences instead
   // of free counterpoint.
   FortspinnungSpan = 10,
 
@@ -181,7 +181,7 @@ enum class VoiceIntent : std::uint8_t {
   // `Material::cf_is_embellished` is set, otherwise `Material::cantus_firmus`;
   // CandidateSearch replays each note verbatim (score = 1.0) and stamps
   // CantusFirmusReplayed (plus CFEmbellishmentApplied on every note when the
-  // embellished line is replayed). The cantus firmus is immutable (CLAUDE.md):
+  // embellished line is replayed). The cantus firmus is immutable:
   // its bar-downbeat tones are checked by the Validator's cantus_firmus_immutable
   // rule, not re-derived here.
   CantusFirmusCarrier = 25,
@@ -194,7 +194,7 @@ enum class VoiceIntent : std::uint8_t {
   // cycle. CandidateSearch stamps PassacagliaGroundReplayed on the ground notes
   // and VariationApplied on every variation note (OR ClimaxPlaced when the
   // variation block is flagged is_climax — the dynamic / registral peak placed
-  // mid- and end-piece). The ground is immutable (CLAUDE.md): its cycle-folded
+  // mid- and end-piece). The ground is immutable: its cycle-folded
   // pitches are checked by the Validator's passacaglia_ground_immutable rule.
   PassacagliaGround = 26,
   PassacagliaVariation = 27,

@@ -47,9 +47,9 @@ struct VoiceCursor {
   bool prev_was_passing_tone = false;
 };
 
-// Seed a CandidateContext from already-committed notes. Phase 4 added
-// fugue exposition layouts where V1's AnswerCarrier (bars 4-7) is placed
-// in Pass 1 before V1's counterline (bars 0-3) is processed in Pass 2.
+// Seed a CandidateContext from already-committed notes. Fugue exposition
+// layouts can place V1's AnswerCarrier (bars 4-7) in Pass 1 before V1's
+// counterline (bars 0-3) is processed in Pass 2.
 // A per-voice scalar cursor would carry stale values across that jump,
 // so each span re-derives its previous-pitch chain by scanning the
 // in-progress notes list for the latest entries strictly before its
@@ -277,7 +277,7 @@ ComposeResult Composer::run(const Material& material, const HarmonicPlan& harmon
 
     const auto candidates = search.enumerate(span, harmonic_plan, material, ctx, &saturated_total);
 
-    // Phase 2 commit policy: take all candidates in order. Each is a
+    // Commit policy: take all candidates in order. Each is a
     // separate emitted note (search enumerates note positions inside a
     // span, not alternatives for one position).
     for (const auto& cand : candidates) {
@@ -315,7 +315,7 @@ ComposeResult Composer::run(const Material& material, const HarmonicPlan& harmon
   // Pass 2: Compose spans. seedCursor() re-derives the per-voice
   // previous-pitch chain from result.notes for every span so the cursor
   // stays correct even when a voice's Carrier span sits in the future
-  // (Phase 4: V1 counterline bars 0-3 follows V1 AnswerCarrier bars 4-7
+  // (V1 counterline bars 0-3 follows V1 AnswerCarrier bars 4-7
   // in placement order but precedes it in time).
   for (const auto& span : voice_plan.spans) {
     if (!isCarrierIntent(span.intent))

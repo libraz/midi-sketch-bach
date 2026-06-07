@@ -15,7 +15,8 @@
 //
 //   3. The 3/4 run is deterministic (same inputs -> byte-identical note list).
 //
-// All cases run C-internal (tonic_pc = 0) per CLAUDE.md.
+// All cases run C-internal (tonic_pc = 0); the composer works in C and
+// transposes only at MIDI output.
 
 #include <gtest/gtest.h>
 

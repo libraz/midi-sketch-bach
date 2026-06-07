@@ -10,6 +10,7 @@
 #include "composer/figuration.h"
 #include "composer/form_builders.h"
 #include "composer/material.h"
+#include "composer/minor_material.h"
 #include "composer/span.h"
 #include "composer/texture_helpers.h"
 #include "composer/voice_intent.h"
@@ -691,22 +692,18 @@ GoldbergVariationKind goldbergVariationKind(std::size_t variation_index) {
 
 namespace {
 
-// Major Goldberg ground: roots of I IV V vi (C2 F2 G2 A2). Minor Goldberg
-// ground: roots of i iv V i (C2 F2 G2 C2) -- a closed i-iv-V-i bass whose tones
-// are chord roots, so the variation downbeat anchoring stays consonant and the
-// ground tiles exactly (period 4 bars). Both keep the bass in the C2-region.
-constexpr std::array<std::uint8_t, 4> kGroundMajor = {36, 41, 43, 45};  // C2 F2 G2 A2.
-constexpr std::array<std::uint8_t, 4> kGroundMinor = {36, 41, 43, 36};  // C2 F2 G2 C2.
+// The Goldberg ground tables live in kGoldbergGroundsMajor /
+// kGoldbergGroundsMinor (seed-selected design variants, period 4 bars, all
+// tones C2-region chord roots so the variation downbeat anchoring stays
+// consonant and the ground tiles exactly).
 
-// Per-bar chord for the ground cycle, matching the ground tone as chord root.
-BarChord goldbergBarChord(int cycle_bar, Mode mode) {
-  if (mode == Mode::Major) {
-    static constexpr BarChord kMajor[4] = {{0, false}, {5, false}, {7, false}, {9, true}};
-    return kMajor[cycle_bar];
-  }
-  // i iv V i: C minor, F minor, G major (harmonic-minor dominant), C minor.
-  static constexpr BarChord kMinor[4] = {{0, true}, {5, true}, {7, false}, {0, true}};
-  return kMinor[cycle_bar];
+// Per-bar chord for the ground cycle: the chord root IS the ground tone's
+// pitch class, with the diatonic triad quality on that degree (in minor the V
+// is the harmonic-minor major dominant), so the harmony stays consonant with
+// the bass for every ground variant.
+BarChord goldbergBarChord(std::uint8_t ground_pitch, Mode mode) {
+  const std::uint8_t pc = static_cast<std::uint8_t>(ground_pitch % 12u);
+  return {pc, detail::diatonicTriadMinor(pc, mode == Mode::Minor)};
 }
 
 // Diatonic transpose a pitch UP by `degrees` scale steps (degrees may be 0 =
@@ -775,11 +772,12 @@ constexpr int kCanonFollowerCeiling = 71;  // B4: one semitone below the leader 
 //
 // Returns one MIDI pitch per cycle bar (size 4), all chord tones of the bar's
 // ground chord, in the leader register band.
-std::array<int, 4> designCanonLeader(int imitation_degrees, Mode mode) {
+std::array<int, 4> designCanonLeader(int imitation_degrees, Mode mode,
+                                     const std::array<std::uint8_t, 4>& ground) {
   // Three ascending chord tones per cycle bar, in the leader band.
   std::array<std::array<int, 3>, 4> tones{};
   for (int bar = 0; bar < 4; ++bar) {
-    const BarChord chord = goldbergBarChord(bar, mode);
+    const BarChord chord = goldbergBarChord(ground[static_cast<std::size_t>(bar)], mode);
     int cur = snapUpToChordTone(kCanonLeaderBase, chord.root_pc, chord.minor);
     tones[static_cast<std::size_t>(bar)][0] = cur;
     tones[static_cast<std::size_t>(bar)][1] = chordToneAbove(cur, chord.root_pc, chord.minor);
@@ -793,7 +791,8 @@ std::array<int, 4> designCanonLeader(int imitation_degrees, Mode mode) {
   };
   auto barCost = [&](int bar, int lead_pitch, int prev_pitch, bool has_prev) -> int {
     int cost = 0;
-    const int ground_pc = static_cast<int>(goldbergBarChord(bar, mode).root_pc);
+    const int ground_pc =
+        static_cast<int>(goldbergBarChord(ground[static_cast<std::size_t>(bar)], mode).root_pc);
     const int ground = ground_pc;  // pitch class is sufficient (ic is octave-invariant).
     if (isDiss(lead_pitch, ground))
       ++cost;  // (never triggers: a chord tone is consonant with its own root).
@@ -865,9 +864,10 @@ std::array<int, 4> designCanonLeader(int imitation_degrees, Mode mode) {
 // tones were chosen so the 1-bar-delayed transposed echo is consonant, every
 // sampled beat in the block stays consonant by construction.
 void buildCanonBlock(PassacagliaVariation& leader, std::vector<MaterialNote>& follower_notes,
-                     int block_start_bar, int imitation_degrees, Mode mode, int /*offset*/) {
+                     int block_start_bar, int imitation_degrees, Mode mode,
+                     const std::array<std::uint8_t, 4>& ground) {
   constexpr int kNotesPerBeat = 2;  // eighths: canons stay clear.
-  const std::array<int, 4> leader_tone = designCanonLeader(imitation_degrees, mode);
+  const std::array<int, 4> leader_tone = designCanonLeader(imitation_degrees, mode, ground);
   for (int local = 0; local < 4; ++local) {
     const int bar = block_start_bar + local;
     const int pitch = leader_tone[static_cast<std::size_t>(bar % 4)];
@@ -914,7 +914,9 @@ HarnessFixture buildGoldbergVariationsForm(const ResolvedRequest& req) {
   // aria. The ground is the LOWEST voice (V2); its tones are chord roots so
   // downbeat anchoring stays consonant; tiling exactly keeps
   // passacaglia_ground_immutable clean.
-  const auto& ground = (mode == Mode::Major) ? kGroundMajor : kGroundMinor;
+  const std::size_t ground_variant = detail::groundVariantIndex(req.seed);
+  const auto& ground = (mode == Mode::Major) ? detail::kGoldbergGroundsMajor[ground_variant]
+                                             : detail::kGoldbergGroundsMinor[ground_variant];
   for (int bar = 0; bar < kCycleBars; ++bar)
     out.material.passacaglia_ground.push_back(
         materialNote(barTick(bar), kTicksPerBar, ground[static_cast<std::size_t>(bar)]));
@@ -935,7 +937,8 @@ HarnessFixture buildGoldbergVariationsForm(const ResolvedRequest& req) {
   out.harmony.tonic_pc = 0;
   out.harmony.is_minor = (mode == Mode::Minor);
   for (int bar = 0; bar < bars; ++bar) {
-    const BarChord chord = goldbergBarChord(bar % kCycleBars, mode);
+    const BarChord chord =
+        goldbergBarChord(ground[static_cast<std::size_t>(bar % kCycleBars)], mode);
     ChordEvent ce;
     ce.start_tick = barTick(bar);
     ce.root_pc = chord.root_pc;
@@ -983,8 +986,9 @@ HarnessFixture buildGoldbergVariationsForm(const ResolvedRequest& req) {
       var.density_level = 0;
       for (int local = 0; local < kCycleBars; ++local) {
         const int bar = blk * kCycleBars + local;
-        appendAriaBar(var, bar, goldbergBarChord(bar % kCycleBars, mode), mode, kVarRegisterBase,
-                      offset);
+        appendAriaBar(var, bar,
+                      goldbergBarChord(ground[static_cast<std::size_t>(bar % kCycleBars)], mode),
+                      mode, kVarRegisterBase, offset);
       }
       out.material.passacaglia_variations.push_back(var);
       continue;
@@ -1009,7 +1013,7 @@ HarnessFixture buildGoldbergVariationsForm(const ResolvedRequest& req) {
         const int canon_number = static_cast<int>(variation_number / 3);
         const int imitation_degrees = canon_number - 1;  // 0 = unison canon.
         var.density_level = 1;
-        buildCanonBlock(var, canon_follower, blk * kCycleBars, imitation_degrees, mode, offset);
+        buildCanonBlock(var, canon_follower, blk * kCycleBars, imitation_degrees, mode, ground);
         canon_blocks.push_back(blk);
         break;
       }
@@ -1029,8 +1033,9 @@ HarnessFixture buildGoldbergVariationsForm(const ResolvedRequest& req) {
         const int register_base = kVarRegisterBase + static_cast<int>(point.register_shift);
         for (int local = 0; local < kCycleBars; ++local) {
           const int bar = blk * kCycleBars + local;
-          appendVariationBar(var, bar, goldbergBarChord(bar % kCycleBars, mode), mode,
-                             notes_per_beat, register_base, offset);
+          appendVariationBar(
+              var, bar, goldbergBarChord(ground[static_cast<std::size_t>(bar % kCycleBars)], mode),
+              mode, notes_per_beat, register_base, offset);
         }
         break;
       }

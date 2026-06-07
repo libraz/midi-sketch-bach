@@ -1289,8 +1289,8 @@ HarnessFixture buildPhase18Fixture(int seed) {
 //     whole-note structural tone per bar (material.cantus_firmus); the carrier
 //     replays an EMBELLISHED line (material.cf_embellished) whose every bar
 //     downbeat equals the skeleton tone, decorated with a few stepwise passing
-//     notes toward the next bar's tone. The cantus firmus is immutable
-//     (CLAUDE.md): the Validator's cantus_firmus_immutable rule checks the
+//     notes toward the next bar's tone. The cantus firmus is immutable:
+//     the Validator's cantus_firmus_immutable rule checks the
 //     bar-downbeat replayed tones against the skeleton.
 //   - V0 FigurationCarrier: a predominantly-stepwise C-major scalar wave (the
 //     same construction via phase17ScaleUp) riding ABOVE the cantus firmus.
@@ -3210,8 +3210,8 @@ HarnessFixture buildHarnessFixture(HarnessPhase phase, int seed) {
     }
   }
 
-  // V2 SubjectCarrier re-entry (Phase 6 only). Pattern -P8 so it sits
-  // below the existing two voices without crossing.
+  // V2 SubjectCarrier re-entry (only when spec.with_third_entry). Pattern -P8
+  // so it sits below the existing two voices without crossing.
   if (spec.with_third_entry) {
     const auto& src = kSubjectPatterns[subj_a];
     const int entry_bar = 2 * subject_bars;
@@ -3227,7 +3227,7 @@ HarnessFixture buildHarnessFixture(HarnessPhase phase, int seed) {
     }
   }
 
-  // V1 AnswerCarrier material (Phase 4+): real answer = subject -P4.
+  // V1 AnswerCarrier material (when spec.with_answer): real answer = subject -P4.
   if (spec.with_answer) {
     const auto& src = kSubjectPatterns[subj_a];
     for (int n = 0; n < 16; ++n) {

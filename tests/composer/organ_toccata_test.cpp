@@ -10,8 +10,7 @@
 //   2. The Validator's toccata_archetype_compatible rule fires when a
 //      ToccataSection pairs an antithetical (character, archetype) — Noble x
 //      Dramaticus (MusicalFail) — passes a compatible pair (Severe x
-//      Dramaticus), and stays inert when no toccata section exists (Phase 3-17
-//      fixtures).
+//      Dramaticus), and stays inert when no toccata section exists.
 //   3. The Phase18 fixture runs through the full Composer cleanly for one seed
 //      per archetype (seed % 4 selects the archetype, (seed / 4) % 4 the
 //      scalar-wave offset) and stamps both Toccata bits in provenance; the
@@ -176,7 +175,7 @@ TEST(OrganToccataTest, ToccataArchetypeCompatibleFailsOnNobleDramaticus) {
   EXPECT_TRUE(hasRuleKind(r, "toccata_archetype_compatible", FailKind::MusicalFail));
 }
 
-// Inert when no toccata section exists (Phase 3-17 fixtures declare none).
+// Inert when no toccata section exists.
 TEST(OrganToccataTest, ToccataArchetypeCompatibleInertWhenNoToccataSection) {
   const ValidationReport r = Validator{}.validate({}, {}, cMajorWhole(), Material{});
   EXPECT_FALSE(hasRule(r, "toccata_archetype_compatible"));

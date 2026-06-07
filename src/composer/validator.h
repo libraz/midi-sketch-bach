@@ -13,12 +13,12 @@ namespace bach::composer {
 
 // Composer validator.
 //
-// Phase 2 checks:
+// Counterpoint checks (always run):
 //   * Parallel perfect 5ths and 8ths between any pair of voices.
 //   * Strong-beat dissonance: a note on beat 1 of a bar whose pitch
 //     class is not part of the active chord triad.
 //
-// Phase 4 checks (when material.suspension_patterns is non-empty):
+// Suspension checks (when material.suspension_patterns is non-empty):
 //   * suspension_preparation: the preparation note is consonant against
 //     the bass voice and ties (same pitch) into the suspension note.
 //   * suspension_resolution_step_down: suspension → resolution moves by

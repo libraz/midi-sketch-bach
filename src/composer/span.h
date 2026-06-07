@@ -20,7 +20,7 @@ using SpanId = std::uint32_t;
 inline constexpr SpanId kInvalidSpanId = static_cast<SpanId>(-1);
 
 // Note-placement granularity inside a Span. Quarter (one note per beat)
-// is the default and matches the original 2-voice Phase 2 deliverable.
+// is the default and matches the basic 2-voice texture.
 // Eighth (two notes per beat) opts a span into continuous eighth-note
 // motion — useful for Bach-style countersubject lines whose duration
 // distribution differs sharply from steady quarters.

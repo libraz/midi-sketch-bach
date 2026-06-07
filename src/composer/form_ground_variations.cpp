@@ -103,6 +103,26 @@ struct CycleBar {
   std::uint8_t ground_pc;  // pitch class of the sustained ground note this bar.
 };
 
+// Build the per-bar cycle plan for a ground table: the chord root tracks the
+// ground pitch class bar by bar (quality = the diatonic triad quality on that
+// degree), and the variation start tone is the ground pitch lifted by octaves
+// into the C4-region band. This is the same root-tracks-bass mapping the
+// historical variant-0 plans were written with, generalised to any diatonic
+// ground table.
+std::vector<CycleBar> planFromGround(const std::uint8_t* ground, std::size_t bars,
+                                     bool minor_mode) {
+  std::vector<CycleBar> plan;
+  plan.reserve(bars);
+  for (std::size_t i = 0; i < bars; ++i) {
+    const std::uint8_t pc = static_cast<std::uint8_t>(ground[i] % 12u);
+    int low = static_cast<int>(ground[i]);
+    while (low < 50)
+      low += 12;  // lift into the C4-region variation band.
+    plan.push_back({pc, detail::diatonicTriadMinor(pc, minor_mode), low, pc});
+  }
+  return plan;
+}
+
 /**
  * @brief Octave-fit a pitch class to the MIDI pitch nearest a target center.
  * @param pitch_class Target pitch class (0..11).
@@ -167,7 +187,7 @@ std::vector<int> barAnchorPitchClasses(const CycleBar& bar, detail::Mode mode) {
  * @brief Build one variation cycle's V0 line: per-beat chord-tone anchoring
  *        with stepwise diatonic fills, threaded continuously to minimise leaps.
  *
- * Phase 1 resolves the full sequence of beat anchors (cycle_bars * 3 of them) as
+ * Pass 1 resolves the full sequence of beat anchors (cycle_bars * 3 of them) as
  * diatonic-degree indices. Each beat onset is a chord tone of its bar's chord,
  * octave-fit to the octave NEAREST the previous anchor and clamped into a FIXED
  * register band so the descending chord roots do not drag the line down an
@@ -177,7 +197,7 @@ std::vector<int> barAnchorPitchClasses(const CycleBar& bar, detail::Mode mode) {
  * audio scorer samples is consonant with the held bass (vertical-dissonance
  * ratio ~0).
  *
- * Phase 2 emits the notes: each beat opens on its anchor, then fills the
+ * Pass 2 emits the notes: each beat opens on its anchor, then fills the
  * sub-beats with stepwise diatonic motion toward the NEXT anchor in the
  * sequence (a true sawtooth), so the surface is conjunct and the jump into the
  * next onset is at most one diatonic step.
@@ -429,6 +449,7 @@ void appendCounterFiguration(std::vector<MaterialNote>& notes, ThemeToneRegistry
 
   int line_prev = -1;
   int cursor = (band_lo + band_hi) / 2;
+  int anchor_run = 0;  // consecutive beats holding the same anchor pitch.
   std::vector<int> theme_pitches;
   std::vector<ConcurrentMotion> motions;
 
@@ -445,9 +466,36 @@ void appendCounterFiguration(std::vector<MaterialNote>& notes, ThemeToneRegistry
       motions.clear();
       registry.concurrentThemePitches(beat_tick, /*voice=*/1, theme_pitches);
       registry.concurrentMotions(prev_tick, beat_tick, /*voice=*/1, /*num_voices=*/3, motions);
-      const int anchor =
-          consonantChordTone(chord, /*voice=*/1, band_lo, band_hi, cursor, theme_pitches, line_prev,
-                             motions, mode, /*downbeat=*/beat == 0);
+      int anchor = consonantChordTone(chord, /*voice=*/1, band_lo, band_hi, cursor, theme_pitches,
+                                      line_prev, motions, mode, /*downbeat=*/beat == 0);
+      // Adjacent bars whose chords share a tone near the band centre can pin
+      // the nearest-tone anchor chain to ONE pitch for many beats; at the
+      // quarter-note tier that surfaces as a stalled repeated-note line. When
+      // a fifth identical beat is imminent, force the nearest DIFFERENT triad
+      // tone in band instead (a chord tone, so it stays consonant against the
+      // ground and the V0 anchors above).
+      if (notes_per_beat == 1 && anchor == line_prev && anchor_run >= 4) {
+        const int third = chord.minor ? 3 : 4;
+        const int triad_pc[3] = {chord.root_pc % 12, (chord.root_pc + third) % 12,
+                                 (chord.root_pc + 7) % 12};
+        auto is_triad = [&](int midi) {
+          const int pcl = ((midi % 12) + 12) % 12;
+          return pcl == triad_pc[0] || pcl == triad_pc[1] || pcl == triad_pc[2];
+        };
+        for (int dist = 1; dist <= 12; ++dist) {
+          const int above = anchor + dist;
+          const int below = anchor - dist;
+          if (above <= band_hi && is_triad(above)) {
+            anchor = above;
+            break;
+          }
+          if (below >= band_lo && is_triad(below)) {
+            anchor = below;
+            break;
+          }
+        }
+      }
+      anchor_run = (anchor == line_prev) ? anchor_run + 1 : 1;
       // Stepwise fill toward the NEXT beat's eventual anchor is unknown here, so
       // fills oscillate around the anchor by single scale steps (conjunct, no
       // leaps); the anchor itself is the consonant beat onset.
@@ -850,47 +898,52 @@ HarnessFixture buildGroundVariationForm(const ResolvedRequest& req, int cycle_ba
 // ---------------------------------------------------------------------------
 // Chaconne: 3/4, 4-bar ground period (BWV1004 arch model).
 //
-// Ground (one dotted-half per bar):
-//   Minor -> C-minor descending tetrachord C3 Bb2 Ab2 G2 (48 46 44 43), the
-//            Phase16 chaconne ground rhythmically reworked to 3/4 (one note per
-//            bar instead of one whole-note per 4/4 bar).
-//   Major -> C-major descending line C3 B2 A2 G2 (48 47 45 43): the same
-//            descending-fourth C->G contour, diatonic to C major.
+// Ground (one dotted-half per bar): one of the seed-selected design variants
+// in kChaconneGroundsMinor / kChaconneGroundsMajor. Variant 0 is the historical
+// descending tetrachord (minor C3 Bb2 Ab2 G2 / major C3 B2 A2 G2); the other
+// variants are a root-leap line and an ascending tetrachord. The variant is
+// fixed for the whole piece, so the ground stays immutable within a piece.
 //
-// Harmony per cycle (one chord per bar): i / VII(or iv) / VI(or iv) / V in
-// minor (lament descent), I / V / vi / V in major. The variation start tones
-// trace the bar's bass an octave up (C4-region), so each bar's wave opens on a
-// chord-consonant tone.
+// Harmony per cycle (one chord per bar): the chord root tracks the ground
+// pitch class bar by bar. The variation start tones trace the bar's bass an
+// octave up (C4-region), so each bar's wave opens on a chord-consonant tone.
 // ---------------------------------------------------------------------------
 HarnessFixture buildChaconneForm(const ResolvedRequest& req) {
   const bool minor = req.mode == detail::Mode::Minor;
 
-  // Ground pitches (cycle-relative, one per bar). Descending-fourth C->G.
-  const std::vector<std::uint8_t> ground_pitch =
-      minor ? std::vector<std::uint8_t>{48, 46, 44, 43}   // C3 Bb2 Ab2 G2
-            : std::vector<std::uint8_t>{48, 47, 45, 43};  // C3 B2  A2  G2
+  // Ground pitches (cycle-relative, one per bar): a seed-selected design
+  // variant. Variant 0 is the historical descending-fourth C->G table.
+  const std::size_t variant = detail::groundVariantIndex(req.seed);
+  const auto& table =
+      minor ? detail::kChaconneGroundsMinor[variant] : detail::kChaconneGroundsMajor[variant];
+  const std::vector<std::uint8_t> ground_pitch(table.begin(), table.end());
 
   // Per-bar harmony + variation start tone for one 4-bar cycle.
-  //   Minor: i (C) - VII (Bb) - VI (Ab) - V (G).
-  //   Major: I (C) - V  (G)   - vi (A)  - V (G).
   // CycleBar fields: {chord root pc, minor?, low tone (C4 region), ground pc}.
   // The ground pc is the ground note's pitch class for that bar; the chord root
   // tracks it, so every chord-tone anchor is consonant with the held ground.
+  // Variant 0 keeps its historical literal plan (the major plan reads the bass
+  // B as a V6 chord, which the generic root-tracking mapping does not produce);
+  // the other variants derive the plan from the ground table.
   std::vector<CycleBar> plan;
-  if (minor) {
+  if (variant == 0 && minor) {
+    // Minor: i (C) - VII (Bb) - VI (Ab) - V (G).
     plan = {
         {0, true, 60, 0},     // i  : ground C, start C4.
         {10, false, 58, 10},  // VII: ground Bb, start Bb3.
         {8, false, 56, 8},    // VI : ground Ab, start Ab3.
         {7, false, 55, 7},    // V  : ground G,  start G3.
     };
-  } else {
+  } else if (variant == 0) {
+    // Major: I (C) - V (G) - vi (A) - V (G).
     plan = {
         {0, false, 60, 0},   // I : ground C, start C4.
         {7, false, 55, 11},  // V6: ground B (chord G), start G3.
         {9, true, 57, 9},    // vi: ground A, start A3.
         {7, false, 55, 7},   // V : ground G, start G3.
     };
+  } else {
+    plan = planFromGround(table.data(), table.size(), minor);
   }
 
   return buildGroundVariationForm(req, kChaconneCycleBars, ground_pitch, plan,
@@ -900,11 +953,13 @@ HarnessFixture buildChaconneForm(const ResolvedRequest& req) {
 // ---------------------------------------------------------------------------
 // Passacaglia: 3/4, 8-bar ground period (BWV582 model).
 //
-// Ground (one dotted-half per bar):
-//   Minor -> kGroundMinorDescent C3 Bb2 Ab2 G2 F2 Eb2 D2 C2 (48 46 44 43 41 39
-//            38 36), the BWV582-style descending lament line.
-//   Major -> diatonic C-major descent C3 B2 A2 G2 F2 E2 D2 C2 (48 47 45 43 41
-//            40 38 36): the same one-octave descent, diatonic to C major.
+// Ground (one dotted-half per bar): one of the seed-selected design variants
+// in kPassacagliaGroundsMinor / kPassacagliaGroundsMajor. Variant 0 is the
+// historical one-octave descent (minor = kGroundMinorDescent, the BWV582-style
+// lament line; major = the diatonic C-major equivalent); the other variants are
+// a leaping root-progression line and a lament with an upper-neighbour turn.
+// The variant is fixed for the whole piece, so the ground stays immutable
+// within a piece.
 //
 // Harmony per cycle (one chord per bar): the chord root tracks the ground pitch
 // class per bar (the simplest valid mapping consistent with the bass), with the
@@ -913,46 +968,23 @@ HarnessFixture buildChaconneForm(const ResolvedRequest& req) {
 HarnessFixture buildPassacagliaForm(const ResolvedRequest& req) {
   const bool minor = req.mode == detail::Mode::Minor;
 
-  const std::vector<std::uint8_t> ground_pitch =
-      minor
-          ? std::vector<std::uint8_t>(detail::kGroundMinorDescent.begin(),
-                                      detail::kGroundMinorDescent.end())  // 48 46 44 43 41 39 38 36
-          : std::vector<std::uint8_t>{48, 47, 45, 43, 41, 40, 38, 36};    // 48 47 45 43 41 40 38 36
+  // Ground pitches (cycle-relative, one per bar): a seed-selected design
+  // variant. Variant 0 is the historical descending lament line (minor variant
+  // 0 mirrors kGroundMinorDescent).
+  const std::size_t variant = detail::groundVariantIndex(req.seed);
+  const auto& table =
+      minor ? detail::kPassacagliaGroundsMinor[variant] : detail::kPassacagliaGroundsMajor[variant];
+  const std::vector<std::uint8_t> ground_pitch(table.begin(), table.end());
 
-  // Per-bar harmony + variation start tone for one 8-bar cycle. The chord root
-  // is the ground pitch class for that bar; the variation start tone is the
-  // ground pitch lifted two octaves into the C4-C5 region.
-  // CycleBar fields: {chord root pc, minor?, low tone (C4 region), ground pc}.
-  // The chord root equals the ground pitch class every bar, so every chord-tone
-  // anchor is consonant with the held ground.
-  std::vector<CycleBar> plan;
-  if (minor) {
-    // C-minor scale-degree triad qualities: i (C) VII (Bb) VI (Ab) V (G, major
-    // = harmonic-minor dominant) iv (F) III (Eb) ii0->ii (D, treated minor) i (C).
-    plan = {
-        {0, true, 60, 0},     // bar 0  i   : ground C,  start C4.
-        {10, false, 58, 10},  // bar 1  VII : ground Bb, start Bb3.
-        {8, false, 56, 8},    // bar 2  VI  : ground Ab, start Ab3.
-        {7, false, 55, 7},    // bar 3  V   : ground G,  start G3.
-        {5, true, 53, 5},     // bar 4  iv  : ground F,  start F3.
-        {3, false, 51, 3},    // bar 5  III : ground Eb, start Eb3.
-        {2, true, 50, 2},     // bar 6  ii  : ground D,  start D3.
-        {0, true, 60, 0},     // bar 7  i   : ground C,  start C4 (cadential return).
-    };
-  } else {
-    // C-major scale-degree triad qualities: I (C) vii0->VII(B treated major to
-    // stay consonant) vi (A) V (G) IV (F) iii (E) ii (D) I (C).
-    plan = {
-        {0, false, 60, 0},    // bar 0  I  : ground C, start C4.
-        {11, false, 59, 11},  // bar 1  (B): ground B, start B3.
-        {9, true, 57, 9},     // bar 2  vi : ground A, start A3.
-        {7, false, 55, 7},    // bar 3  V  : ground G, start G3.
-        {5, false, 53, 5},    // bar 4  IV : ground F, start F3.
-        {4, true, 52, 4},     // bar 5  iii: ground E, start E3.
-        {2, true, 50, 2},     // bar 6  ii : ground D, start D3.
-        {0, false, 60, 0},    // bar 7  I  : ground C, start C4 (cadential return).
-    };
-  }
+  // Per-bar harmony + variation start tone for one 8-bar cycle, derived from
+  // the ground table. The chord root equals the ground pitch class every bar
+  // (quality = the diatonic triad quality on that degree: in minor the V is the
+  // harmonic-minor major dominant and a bass B in major is treated as a major
+  // root to stay consonant), so every chord-tone anchor is consonant with the
+  // held ground; the variation start tone is the ground pitch lifted by octaves
+  // into the C4-C5 region. For variant 0 this reproduces the historical plan
+  // bar for bar.
+  const std::vector<CycleBar> plan = planFromGround(table.data(), table.size(), minor);
 
   return buildPassacagliaThreeVoice(req, kPassacagliaCycleBars, ground_pitch, plan);
 }

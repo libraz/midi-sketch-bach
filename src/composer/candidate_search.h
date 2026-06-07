@@ -33,7 +33,7 @@ struct CandidateContext {
   // Zero means unavailable.
   std::uint8_t pre_prev_pitch = 0;
 
-  // Per-voice nominal center. Phase 2 uses fixed centers; later phases
+  // Per-voice nominal center. Fixed centers by default; richer textures
   // derive from VoicePlan.
   std::uint8_t voice_center = 60;  // middle C
 
@@ -65,7 +65,7 @@ struct CandidateContext {
 
 // Strong-beat consonance + parallel-perfect avoidance.
 //
-// Phase 2 scope. No legacy collision_resolver coupling. Search rules:
+// No legacy collision_resolver coupling. Search rules:
 //   1. SubjectCarrier spans replay Material verbatim (one Candidate
 //      per MaterialNote, source = Material, score = 1.0).
 //   2. Compose spans enumerate diatonic pitches inside +-octave of the

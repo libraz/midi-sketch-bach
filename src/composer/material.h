@@ -216,7 +216,7 @@ struct CodaDecl {
 };
 
 // Solo String Arch (BWV1004 Chaconne). VariationRole is the
-// per-variation function over the repeating ground bass (CLAUDE.md taxonomy):
+// per-variation function over the repeating ground bass:
 //   Ground  = plain statement, no ornamental subdivision (must stay un-embellished).
 //   Respond = answers the ground with light activity.
 //   Propel  = drives forward with increased rhythmic density.
@@ -256,8 +256,8 @@ struct FigurationSection {
   std::vector<MaterialNote> notes;
 };
 
-// Organ Toccata. The four Bach toccata archetypes (CLAUDE.md / legacy
-// forms/toccata*): Dramaticus (BWV565 dramatic opening + free figuration),
+// Organ Toccata. The four Bach toccata archetypes:
+// Dramaticus (BWV565 dramatic opening + free figuration),
 // Perpetuus (BWV538 continuous sixteenths), Concertato (BWV564 forte/piano
 // contrast), Sectionalis (BWV540 clear section breaks).
 enum class ToccataArchetype : std::uint8_t {
@@ -281,8 +281,8 @@ struct ToccataSection {
   std::vector<MaterialNote> notes;
 };
 
-// Organ Passacaglia. An 8-bar immutable ground bass (CLAUDE.md "Ground
-// bass is immutable") repeated under variations of rising density; one or more
+// Organ Passacaglia. An 8-bar immutable ground bass
+// repeated under variations of rising density; one or more
 // variation blocks are flagged is_climax (the registral peak). Like the
 // chaconne arch but with an 8-bar period and a climax marker.
 struct PassacagliaVariation {
@@ -490,8 +490,8 @@ struct Material {
   // Solo String Flow. Populated only by the Phase15 BWV1007-style arpeggio
   // fixture. Replayed by an ArpeggioFlow span on a single voice.
   ArpeggioTemplate arpeggio_template;
-  // Solo String Arch. The ground bass is immutable (CLAUDE.md "Ground bass
-  // is immutable"): GroundCarrier replays it tiled every `ground_bass_period`
+  // Solo String Arch. The ground bass is immutable: GroundCarrier replays it
+  // tiled every `ground_bass_period`
   // ticks. `variations` feed VariationCarrier.
   std::vector<MaterialNote> ground_bass;
   Tick ground_bass_period = 0;
@@ -507,7 +507,7 @@ struct Material {
   // archetype) pair.
   std::vector<ToccataSection> toccata_sections;
   // Organ Chorale Prelude. The cantus firmus is a fixed chorale tune
-  // (one structural tone per bar) and is immutable (CLAUDE.md). A
+  // (one structural tone per bar) and is immutable. A
   // CantusFirmusCarrier span replays either the plain skeleton (`cantus_firmus`)
   // or an embellished line (`cf_embellished`) whose bar-downbeat tones still equal
   // the skeleton — the Validator's cantus_firmus_immutable rule checks exactly
@@ -519,8 +519,8 @@ struct Material {
   std::vector<MaterialNote> cf_embellished;  // ornamented CF (downbeats == skeleton).
   bool cf_is_embellished = false;
   std::uint8_t cf_placement = 0;  // documentary.
-  // Organ Passacaglia. The ground bass is immutable (CLAUDE.md "Ground bass
-  // is immutable"): PassacagliaGround replays it tiled every
+  // Organ Passacaglia. The ground bass is immutable: PassacagliaGround replays
+  // it tiled every
   // `passacaglia_ground_period` ticks; `passacaglia_variations`
   // feed PassacagliaVariation spans (one per ground cycle, rising density, the
   // last and optionally a mid cycle flagged is_climax).

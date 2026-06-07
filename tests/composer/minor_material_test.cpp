@@ -2,8 +2,11 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <array>
 #include <cstdint>
+#include <string>
+#include <vector>
 
 #include "composer/figuration.h"
 
@@ -125,6 +128,129 @@ TEST(MinorMaterialTest, GroundDescendingContourAndRegister) {
   for (std::size_t idx = 1; idx < kGroundMinorDescent.size(); ++idx) {
     EXPECT_FALSE(isAug2(kGroundMinorDescent[idx - 1], kGroundMinorDescent[idx])) << "step " << idx;
   }
+}
+
+// --- Seed-selectable ground variant tables ----------------------------------
+
+// C-major diatonic membership (the major ground tables stay strictly diatonic).
+constexpr bool inMajorScale(int pitch) {
+  const int pcl = ((pitch % 12) + 12) % 12;
+  return pcl == 0 || pcl == 2 || pcl == 4 || pcl == 5 || pcl == 7 || pcl == 9 || pcl == 11;
+}
+
+// C natural-minor diatonic membership (the minor ground tables avoid the
+// raised melodic/harmonic degrees entirely).
+constexpr bool inNaturalMinor(int pitch) {
+  const int pcl = ((pitch % 12) + 12) % 12;
+  return pcl == 0 || pcl == 2 || pcl == 3 || pcl == 5 || pcl == 7 || pcl == 8 || pcl == 10;
+}
+
+// One row per ground variant: a pointer/extent view so the 8-bar passacaglia
+// and 4-bar chaconne/goldberg tables share the same data-driven checks.
+struct GroundVariantCase {
+  const char* table;
+  std::size_t variant;
+  const std::uint8_t* pitches;
+  std::size_t bars;
+  bool minor_mode;
+};
+
+std::vector<GroundVariantCase> allGroundVariantCases() {
+  std::vector<GroundVariantCase> cases;
+  for (std::size_t v = 0; v < kGroundVariantCount; ++v) {
+    cases.push_back({"passacaglia_minor", v, kPassacagliaGroundsMinor[v].data(), 8, true});
+    cases.push_back({"passacaglia_major", v, kPassacagliaGroundsMajor[v].data(), 8, false});
+    cases.push_back({"chaconne_minor", v, kChaconneGroundsMinor[v].data(), 4, true});
+    cases.push_back({"chaconne_major", v, kChaconneGroundsMajor[v].data(), 4, false});
+    cases.push_back({"goldberg_minor", v, kGoldbergGroundsMinor[v].data(), 4, true});
+    cases.push_back({"goldberg_major", v, kGoldbergGroundsMajor[v].data(), 4, false});
+  }
+  return cases;
+}
+
+TEST(MinorMaterialTest, GroundVariantsDiatonicAndInBassRegister) {
+  for (const GroundVariantCase& c : allGroundVariantCases()) {
+    for (std::size_t i = 0; i < c.bars; ++i) {
+      const int pitch = c.pitches[i];
+      EXPECT_GE(pitch, 36) << c.table << " variant " << c.variant << " bar " << i;
+      EXPECT_LE(pitch, 48) << c.table << " variant " << c.variant << " bar " << i;
+      EXPECT_TRUE(c.minor_mode ? inNaturalMinor(pitch) : inMajorScale(pitch))
+          << c.table << " variant " << c.variant << " bar " << i << " pitch " << pitch;
+      if (i > 0) {
+        EXPECT_FALSE(isAug2(c.pitches[i - 1], c.pitches[i]))
+            << c.table << " variant " << c.variant << " step " << i;
+      }
+    }
+  }
+}
+
+TEST(MinorMaterialTest, NewGroundVariantsEndOnTonicOrDominant) {
+  // Variants 1 and 2 must close on degree 1 or 5 so the final bar resolves
+  // naturally into the next cycle's tonic head. Variant 0 is the historical
+  // table and keeps its original ending (goldberg major ends on vi).
+  for (const GroundVariantCase& c : allGroundVariantCases()) {
+    if (c.variant == 0)
+      continue;
+    const int last_pc = c.pitches[c.bars - 1] % 12;
+    EXPECT_TRUE(last_pc == 0 || last_pc == 7)
+        << c.table << " variant " << c.variant << " ends on pc " << last_pc;
+  }
+}
+
+TEST(MinorMaterialTest, GroundVariantZeroIsHistorical) {
+  // Variant 0 must stay byte-identical to the historical tables so seeds that
+  // are multiples of kGroundVariantCount reproduce the previous output.
+  for (std::size_t i = 0; i < 8; ++i)
+    EXPECT_EQ(kPassacagliaGroundsMinor[0][i], kGroundMinorDescent[i]) << "bar " << i;
+  EXPECT_EQ(kPassacagliaGroundsMajor[0],
+            (std::array<std::uint8_t, 8>{48, 47, 45, 43, 41, 40, 38, 36}));
+  EXPECT_EQ(kChaconneGroundsMinor[0], (std::array<std::uint8_t, 4>{48, 46, 44, 43}));
+  EXPECT_EQ(kChaconneGroundsMajor[0], (std::array<std::uint8_t, 4>{48, 47, 45, 43}));
+  EXPECT_EQ(kGoldbergGroundsMajor[0], (std::array<std::uint8_t, 4>{36, 41, 43, 45}));
+  EXPECT_EQ(kGoldbergGroundsMinor[0], (std::array<std::uint8_t, 4>{36, 41, 43, 36}));
+}
+
+TEST(MinorMaterialTest, GroundVariantsArePairwiseDistinct) {
+  // The three variants of every table must genuinely differ, so regeneration
+  // with a different seed family is audible in the ground line.
+  const auto cases = allGroundVariantCases();
+  for (std::size_t a = 0; a < cases.size(); ++a) {
+    for (std::size_t b = a + 1; b < cases.size(); ++b) {
+      const auto& lhs = cases[a];
+      const auto& rhs = cases[b];
+      if (std::string(lhs.table) != rhs.table)
+        continue;
+      EXPECT_FALSE(std::equal(lhs.pitches, lhs.pitches + lhs.bars, rhs.pitches))
+          << lhs.table << " variants " << lhs.variant << " and " << rhs.variant;
+    }
+  }
+}
+
+TEST(MinorMaterialTest, GroundVariantIndexCyclesBySeed) {
+  EXPECT_EQ(groundVariantIndex(1), 1u);
+  EXPECT_EQ(groundVariantIndex(2), 2u);
+  EXPECT_EQ(groundVariantIndex(3), 0u);  // variant-0 probe seed (seed 0 = CLI auto).
+  EXPECT_EQ(groundVariantIndex(4), 1u);  // wraps: same ground family as seed 1.
+  EXPECT_EQ(groundVariantIndex(6), 0u);
+}
+
+TEST(MinorMaterialTest, DiatonicTriadQuality) {
+  // Major mode: ii / iii / vi are minor, I / IV / V (and a B bass) major.
+  EXPECT_FALSE(diatonicTriadMinor(0, false));
+  EXPECT_TRUE(diatonicTriadMinor(2, false));
+  EXPECT_TRUE(diatonicTriadMinor(4, false));
+  EXPECT_FALSE(diatonicTriadMinor(5, false));
+  EXPECT_FALSE(diatonicTriadMinor(7, false));
+  EXPECT_TRUE(diatonicTriadMinor(9, false));
+  EXPECT_FALSE(diatonicTriadMinor(11, false));
+  // Minor mode: i / ii / iv minor; III / V (harmonic dominant) / VI / VII major.
+  EXPECT_TRUE(diatonicTriadMinor(0, true));
+  EXPECT_TRUE(diatonicTriadMinor(2, true));
+  EXPECT_FALSE(diatonicTriadMinor(3, true));
+  EXPECT_TRUE(diatonicTriadMinor(5, true));
+  EXPECT_FALSE(diatonicTriadMinor(7, true));
+  EXPECT_FALSE(diatonicTriadMinor(8, true));
+  EXPECT_FALSE(diatonicTriadMinor(10, true));
 }
 
 TEST(MinorMaterialTest, MinorScaleUpHarmonicContextRaisesSixSeven) {

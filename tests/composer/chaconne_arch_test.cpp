@@ -281,8 +281,8 @@ TEST(ChaconneArchTest, GroundBassImmutableFailsOnMutatedCycle) {
   EXPECT_TRUE(hasRuleKind(r, "ground_bass_immutable", FailKind::StructuralFail));
 }
 
-// Inert when there is no ground bass declared (Phase 3-15 fixtures): even a
-// note carrying the GroundBassReplayed bit cannot trip the rule.
+// Inert when there is no ground bass declared: even a note carrying the
+// GroundBassReplayed bit cannot trip the rule.
 TEST(ChaconneArchTest, GroundBassImmutableInertWhenGroundEmpty) {
   Material material;  // no ground_bass.
   std::vector<NoteEvent> notes = {makeNote(0, kTicksPerBeat, 48, 1)};
@@ -347,7 +347,7 @@ TEST(ChaconneArchTest, VariationOrnamentConstraintIgnoresNonGroundRoles) {
   EXPECT_FALSE(hasRule(r, "variation_role_ornament_constraint"));
 }
 
-// Inert when no variations are declared (Phase 3-15 fixtures).
+// Inert when no variations are declared.
 TEST(ChaconneArchTest, VariationOrnamentConstraintInertWhenVariationsEmpty) {
   Material material;  // no variations.
   const ValidationReport r = Validator{}.validate({}, {}, cMinorWhole(), material);

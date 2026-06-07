@@ -54,14 +54,14 @@ std::array<std::uint8_t, 3> triadFor(const ChordEvent& chord) {
   };
 }
 
-// P18 (Organ Toccata). Self-contained (character, archetype) compatibility
+// Organ Toccata. Self-contained (character, archetype) compatibility
 // predicate for the toccata_archetype_compatible rule. This does NOT reuse the
 // legacy isCharacterFormCompatible (which keys off the legacy FormType). The
 // only forbidden pair is Noble x Dramaticus: the Dramaticus archetype is the
 // prototypical dramatic toccata (BWV565-style free, virtuosic opening),
-// antithetical to the dignified Noble affect (CLAUDE.md "Noble x Toccata
-// forbidden"). The switch is exhaustive and extensible: add cases to forbid
-// further pairs.
+// antithetical to the dignified Noble affect (the Noble character must not
+// take a dramatic toccata). The switch is exhaustive and extensible: add cases
+// to forbid further pairs.
 bool isToccataPairCompatible(SubjectCharacter character, ToccataArchetype archetype) {
   if (character == SubjectCharacter::Noble && archetype == ToccataArchetype::Dramaticus)
     return false;
@@ -1640,7 +1640,7 @@ ValidationReport Validator::validate(const std::vector<NoteEvent>& notes,
   // voice_range_integrity: every note whose voice has a declared MIDI range
   //   (Material::texture_plan.voice_ranges) must lie inside [lo, hi]. A note
   //   outside its voice's range fires the rule. Skipped when no ranges are
-  //   declared (Phase 3-12 fixtures), so prior behavior is unchanged.
+  //   declared, so prior behavior is unchanged.
   // pedal_range_soft_penalty: the C1-D3 pedal compass (MIDI 24-50) is a soft
   //   target — notes inside it incur no penalty, notes just outside it incur
   //   a gradual penalty at scoring time (NOT a hard rejection, per the design
@@ -1799,7 +1799,7 @@ ValidationReport Validator::validate(const std::vector<NoteEvent>& notes,
   // ground_bass.size() and comparing each slot's pitch against the canonical
   // ground catches any altered, transposed, or reordered restatement. The rule
   // is inert when either the canonical ground or the stamped run is empty
-  // (Phase 3-15 fixtures carry no ground bass).
+  // (fixtures that declare no ground bass).
   {
     std::vector<std::size_t> ground_indices;
     for (std::size_t i = 0; i < notes.size(); ++i) {
@@ -1844,7 +1844,7 @@ ValidationReport Validator::validate(const std::vector<NoteEvent>& notes,
   // passacaglia_ground.size() and comparing each slot's pitch against the
   // canonical ground catches any altered, transposed, or reordered restatement.
   // The rule is inert when either the canonical ground or the stamped run is
-  // empty (Phase 3-19 fixtures carry no passacaglia ground).
+  // empty (fixtures that declare no passacaglia ground).
   {
     std::vector<std::size_t> ground_indices;
     for (std::size_t i = 0; i < notes.size(); ++i) {
@@ -1885,7 +1885,7 @@ ValidationReport Validator::validate(const std::vector<NoteEvent>& notes,
   // Ground-role VariationDecl is an illegal ornamental subdivision. Read from
   // the material decls directly (mirroring the other Material-decl rules); one
   // flagged note is enough to fail the span. Inert when material.variations is
-  // empty (Phase 3-15 fixtures declare no variations).
+  // empty (fixtures that declare no variations).
   for (const VariationDecl& var : material.variations) {
     if (var.role != VariationRole::Ground)
       continue;
@@ -1919,7 +1919,7 @@ ValidationReport Validator::validate(const std::vector<NoteEvent>& notes,
   // for the root/third/fifth and hasSeventh/seventhOffset for the seventh. If any
   // bar-downbeat figuration note's pitch class is not a chord tone, push ONE
   // MusicalFail. The rule is inert when no FigurationCommitted note exists
-  // (Phase 3-16 fixtures declare no figuration sections).
+  // (fixtures that declare no figuration sections).
   {
     bool figuration_inconsistent = false;
     for (std::size_t i = 0; i < notes.size() && !figuration_inconsistent; ++i) {
@@ -1956,7 +1956,7 @@ ValidationReport Validator::validate(const std::vector<NoteEvent>& notes,
   // is forbidden). For each ToccataSection in material.toccata_sections, the
   // (character, archetype) pair must be compatible. If any section is an
   // incompatible pair, push ONE MusicalFail. The rule is inert when
-  // material.toccata_sections is empty (Phase 3-17 fixtures declare none).
+  // material.toccata_sections is empty (fixtures that declare none).
   {
     bool toccata_incompatible = false;
     for (const auto& section : material.toccata_sections) {
@@ -1975,7 +1975,7 @@ ValidationReport Validator::validate(const std::vector<NoteEvent>& notes,
 
   // cantus_firmus_immutable: the cantus firmus skeleton (the fixed chorale tune,
   // material.cantus_firmus) is the structural backbone of the chorale prelude and
-  // is immutable (CLAUDE.md). A CantusFirmusCarrier may replay an embellished
+  // is immutable. A CantusFirmusCarrier may replay an embellished
   // line, but each bar's DOWNBEAT tone must still equal the skeleton tone for
   // that bar. Gather every note stamped CantusFirmusReplayed in onset order; for
   // each whose onset lands on a bar downbeat (start_tick % ticks_per_bar == 0),
@@ -1984,7 +1984,7 @@ ValidationReport Validator::validate(const std::vector<NoteEvent>& notes,
   // downbeat pitch differs from the skeleton pitch, push ONE StructuralFail.
   // Off-downbeat embellishment notes are unconstrained. The rule is inert when
   // material.cantus_firmus is empty or no CantusFirmusReplayed note exists
-  // (Phase 3-18 fixtures declare no cantus firmus).
+  // (fixtures that declare no cantus firmus).
   {
     std::vector<std::size_t> cf_indices;
     for (std::size_t i = 0; i < notes.size(); ++i) {
@@ -2022,8 +2022,8 @@ ValidationReport Validator::validate(const std::vector<NoteEvent>& notes,
   // defining technique is THREE independent voices (RH = Great, LH = Swell,
   // Pedal). This rule operates ONLY on notes carrying the TrioVoiceIndependent
   // bit; it groups them by voice and measures the pairwise voice independence of
-  // the (up to three) trio voices, soft-failing (MusicalFail, per the CLAUDE.md
-  // "voice independence >= 0.6" / soft-penalty convention) below 0.6.
+  // the (up to three) trio voices, soft-failing (MusicalFail, per the
+  // "voice independence >= 0.6" soft-penalty convention) below 0.6.
   //
   // Self-contained independence metric (does NOT call into src/analysis/):
   // Build the sorted set of all distinct onset ticks across both voices of a

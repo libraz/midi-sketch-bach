@@ -169,15 +169,15 @@ struct ModulationEvent {
 // as ChordEvent boundaries.
 struct HarmonicPlan {
   // Tonic pitch class of the piece. The composer engine runs C-internal
-  // per CLAUDE.md "C major internally"; transposition (if any) happens at
-  // MIDI output. tonic_pc therefore is usually 0 in Phase 2-3.
+  // (C major internally); transposition (if any) happens at
+  // MIDI output. tonic_pc therefore is usually 0.
   std::uint8_t tonic_pc = 0;
   bool is_minor = false;
   std::vector<ChordEvent> chords;
   std::vector<CadenceEvent> cadences;
   std::vector<CadentialSixFour> cadential_six_fours;
-  // P8: piece-wide modulation boundaries. Empty when the piece stays
-  // in the home key (Phase 2-7 behavior).
+  // Piece-wide modulation boundaries. Empty when the piece stays
+  // in the home key.
   std::vector<ModulationEvent> modulations;
 
   // Time signature carried alongside the harmony so every meter-sensitive

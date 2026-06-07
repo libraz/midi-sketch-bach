@@ -11,7 +11,7 @@
 //      bar-downbeat figuration note is not a chord tone (MusicalFail), stays
 //      silent when every downbeat is a chord tone, exempts a PedalPreparation
 //      note that sits off the chord, and stays inert when no figuration note
-//      exists (Phase 3-16 fixtures).
+//      exists.
 //   3. The Phase17 fixture runs through the full Composer cleanly for every
 //      seed family (seed % 4 selects the scalar-wave start offset) and stamps
 //      all three Prelude bits in provenance.
@@ -239,8 +239,8 @@ TEST(OrganPreludeTest, FigurationHarmonicConsistencyExemptsPedalPreparation) {
   EXPECT_FALSE(hasRule(r, "figuration_harmonic_consistency"));
 }
 
-// Inert when no figuration note exists (Phase 3-16 fixtures): a note carrying no
-// FigurationCommitted bit cannot trip the rule even if it is off the chord.
+// Inert when no figuration note exists: a note carrying no FigurationCommitted
+// bit cannot trip the rule even if it is off the chord.
 TEST(OrganPreludeTest, FigurationHarmonicConsistencyInertWhenNoFiguration) {
   std::vector<NoteEvent> notes = {makeNote(0, kTicksPerBeat, 69, 0)};  // A4 under I, no bit.
   NoteProvenance p;

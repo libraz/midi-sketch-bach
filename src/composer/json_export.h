@@ -17,8 +17,7 @@ namespace bach::composer {
 //   * generated.json  — fed to the external bach-mcp evaluator. Notes only.
 //                       No VoiceIntent, no satisfied_rules, no
 //                       candidate_score, no source, no span_id.
-//                       Schema fixed at bach-mcp/schema/ (when Phase 1a
-//                       lands the external repo).
+//                       Schema fixed at bach-mcp/schema/ in the external repo.
 //
 //   * provenance.json — local audit log. Every note gets its full
 //                       NoteProvenance record. Read by developer tools

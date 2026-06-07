@@ -65,6 +65,88 @@ inline constexpr std::array<std::array<ChordSpec, 4>, 4> kHarmonyPatternsMinor =
 // tone, so no aug-2nd appears (G=43 -> F=41, no Ab->B adjacency).
 inline constexpr std::array<std::uint8_t, 8> kGroundMinorDescent = {48, 46, 44, 43, 41, 39, 38, 36};
 
+// --- Seed-selectable ground variants for the ground-bass forms ---------------
+//
+// Each ground-bass form (passacaglia / chaconne / goldberg) owns a small set of
+// design-value ground tables per mode, indexed [variant][bar]. A piece picks
+// ONE variant from its seed (groundVariantIndex) and keeps it for the whole
+// piece, so within-piece ground immutability is untouched: the validator
+// compares the output against the material table and follows the selection
+// automatically. Variant 0 is the historical table for each form/mode, so
+// seeds that are multiples of the variant count reproduce the previous output.
+//
+// Design constraints honoured by every variant:
+//   - diatonic to C major / C natural minor (no chromatics, no aug-2nd),
+//   - bass register 36..48 (C2..C3),
+//   - variants 1 and 2 end on degree 1 or 5 so the final bar resolves
+//     naturally into the next cycle's tonic head.
+inline constexpr std::size_t kGroundVariantCount = 3;
+
+/// @brief Ground variant index for a seed (one fixed variant per piece).
+inline constexpr std::size_t groundVariantIndex(std::uint32_t seed) {
+  return static_cast<std::size_t>(seed % kGroundVariantCount);
+}
+
+/**
+ * @brief Diatonic triad quality (minor flag) for a chord built on `root_pc`.
+ *
+ * Major mode: ii (2), iii (4) and vi (9) are minor; I, IV, V are major and a
+ * bass B (11) is treated as a MAJOR root so the triad above it stays consonant.
+ * Minor mode (natural-minor degrees with the harmonic-minor dominant): i (0),
+ * ii (2) and iv (5) are minor; III, V, VI, VII are major.
+ *
+ * @param root_pc Chord root pitch class (0..11), a diatonic degree root.
+ * @param minor_mode True for C minor, false for C major.
+ * @return True when the diatonic triad on that root is minor.
+ */
+inline constexpr bool diatonicTriadMinor(int root_pc, bool minor_mode) {
+  if (minor_mode)
+    return root_pc == 0 || root_pc == 2 || root_pc == 5;
+  return root_pc == 2 || root_pc == 4 || root_pc == 9;
+}
+
+// Passacaglia grounds (8-bar period). 0 = stepwise lament descent (the
+// historical table; minor variant 0 mirrors kGroundMinorDescent), 1 = leaping
+// root-progression line (BWV582-style skips), 2 = lament descent with an
+// upper-neighbour turn before the cadence.
+inline constexpr std::array<std::array<std::uint8_t, 8>, 3> kPassacagliaGroundsMinor = {{
+    {48, 46, 44, 43, 41, 39, 38, 36},  // 1 b7 b6 5 4 b3 2 1
+    {36, 43, 44, 41, 39, 38, 43, 36},  // 1 5  b6 4 b3 2 5 1
+    {48, 46, 44, 43, 44, 41, 43, 36},  // 1 b7 b6 5 b6 4 5 1
+}};
+inline constexpr std::array<std::array<std::uint8_t, 8>, 3> kPassacagliaGroundsMajor = {{
+    {48, 47, 45, 43, 41, 40, 38, 36},  // 1 7 6 5 4 3 2 1
+    {36, 43, 45, 41, 40, 38, 43, 36},  // 1 5 6 4 3 2 5 1
+    {48, 47, 45, 43, 45, 41, 43, 36},  // 1 7 6 5 6 4 5 1
+}};
+
+// Chaconne grounds (4-bar period). 0 = descending tetrachord (historical),
+// 1 = root-leap line, 2 = ascending tetrachord.
+inline constexpr std::array<std::array<std::uint8_t, 4>, 3> kChaconneGroundsMinor = {{
+    {48, 46, 44, 43},  // 1 b7 b6 5
+    {36, 41, 39, 43},  // 1 4  b3 5
+    {36, 39, 41, 43},  // 1 b3 4  5
+}};
+inline constexpr std::array<std::array<std::uint8_t, 4>, 3> kChaconneGroundsMajor = {{
+    {48, 47, 45, 43},  // 1 7 6 5
+    {36, 41, 40, 43},  // 1 4 3 5
+    {36, 40, 41, 43},  // 1 3 4 5
+}};
+
+// Goldberg grounds (4-bar period, C2-region chord roots). 0 = historical;
+// 1 and 2 are alternative root progressions. Every tone stays a chord ROOT so
+// the variation downbeat anchoring above remains consonant by construction.
+inline constexpr std::array<std::array<std::uint8_t, 4>, 3> kGoldbergGroundsMajor = {{
+    {36, 41, 43, 45},  // I IV  V  vi
+    {36, 45, 41, 43},  // I vi  IV V
+    {36, 40, 41, 43},  // I iii IV V
+}};
+inline constexpr std::array<std::array<std::uint8_t, 4>, 3> kGoldbergGroundsMinor = {{
+    {36, 41, 43, 36},  // i iv  V  i
+    {36, 39, 41, 43},  // i III iv V
+    {36, 44, 41, 43},  // i VI  iv V
+}};
+
 /**
  * @brief Walk `steps` scale degrees upward from `midi` in a C-minor context.
  *

@@ -290,8 +290,8 @@ BachError parseRequest(const std::map<std::string, bach::JsonValue>& kv, ParsedR
 
 /// @brief Collect the voices carrying immutable ground / cantus-firmus material.
 ///
-/// Ground and cantus-firmus lines must never be ornamented (CLAUDE.md: "Ground
-/// bass is immutable"). The scan is intent-based, not per-form hardcoded: any
+/// Ground and cantus-firmus lines must never be ornamented because the ground
+/// bass is immutable. The scan is intent-based, not per-form hardcoded: any
 /// span whose VoiceIntent replays an immutable carrier (ground bass, passacaglia
 /// ground, or cantus firmus) marks its voice exempt.
 ///

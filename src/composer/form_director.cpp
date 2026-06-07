@@ -155,8 +155,8 @@ ArcPoint arcPoint(std::size_t cycle_index, std::size_t cycle_count) {
     point.register_shift = static_cast<std::int8_t>(after >= span ? 0 : shift);
   }
 
-  // The climax cycle is the peak tier by design (CLAUDE.md: climax = design
-  // value, output directly, no search).
+  // The climax cycle is the peak tier by design: climax values are output
+  // directly as design values, not searched.
   if (point.is_climax) {
     point.density_tier = 3;
     point.velocity_tier = 3;
