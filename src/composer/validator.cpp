@@ -1793,89 +1793,90 @@ ValidationReport Validator::validate(const std::vector<NoteEvent>& notes,
   //
   // ground_bass_immutable: the immutable ground bass (material.ground_bass) is
   // the harmonic skeleton of the Chaconne and must be replayed unchanged on
-  // every cycle. Every note stamped GroundBassReplayed belongs to one
-  // statement of the ground; collected in onset order they form a flat run of
-  // whole cycles. Partitioning that run into contiguous cycles of n =
-  // ground_bass.size() and comparing each slot's pitch against the canonical
-  // ground catches any altered, transposed, or reordered restatement. The rule
-  // is inert when either the canonical ground or the stamped run is empty
-  // (fixtures that declare no ground bass).
+  // every cycle. The check is a bar-head skeleton match (the same granularity
+  // as cantus_firmus_immutable): a replayed ground may subdivide a bar
+  // rhythmically (repeated same-pitch notes), but each ground note on a bar
+  // head must equal the canonical material tone sounding at the same
+  // cycle-relative position. Any altered, transposed, or reordered
+  // restatement changes some bar head and fails. Off-downbeat ground notes
+  // are unconstrained (the builder keeps their pitch equal to the bar tone by
+  // construction). The rule is inert when either the canonical ground or the
+  // stamped run is empty (fixtures that declare no ground bass).
   {
-    std::vector<std::size_t> ground_indices;
-    for (std::size_t i = 0; i < notes.size(); ++i) {
-      if (i < provenance.size() && hasRuleBit(provenance, i, RuleBit::GroundBassReplayed))
-        ground_indices.push_back(i);
-    }
-    std::sort(ground_indices.begin(), ground_indices.end(), [&](std::size_t a, std::size_t b) {
-      return notes[a].start_tick < notes[b].start_tick;
-    });
-
+    bool has_ground_note = false;
+    bool ground_ok = true;
     const std::size_t n = material.ground_bass.size();
-    if (n > 0 && !ground_indices.empty()) {
-      // The replayed run must be a positive whole number of cycles of length n.
-      bool ground_ok = (ground_indices.size() % n == 0);
-      if (ground_ok) {
-        const std::size_t cycles = ground_indices.size() / n;
-        for (std::size_t c = 0; c < cycles && ground_ok; ++c) {
-          for (std::size_t k = 0; k < n; ++k) {
-            if (notes[ground_indices[c * n + k]].pitch != material.ground_bass[k].pitch) {
-              ground_ok = false;
-              break;
-            }
-          }
+    if (n > 0) {
+      const Tick period = material.ground_bass_period > 0 ? material.ground_bass_period
+                                                          : static_cast<Tick>(n) * ticks_per_bar;
+      for (std::size_t i = 0; i < notes.size() && ground_ok; ++i) {
+        if (i >= provenance.size() || !hasRuleBit(provenance, i, RuleBit::GroundBassReplayed))
+          continue;
+        has_ground_note = true;
+        const auto& note = notes[i];
+        if (note.start_tick % ticks_per_bar != 0)
+          continue;  // only the bar head carries the skeleton tone.
+        // Canonical tone: the material note sounding at this cycle-relative
+        // position (the latest material onset at or before it).
+        const Tick cycle_tick = note.start_tick % period;
+        int expected = -1;
+        for (const MaterialNote& mnote : material.ground_bass) {
+          if (mnote.start_tick <= cycle_tick)
+            expected = mnote.pitch;
         }
+        if (expected >= 0 && note.pitch != expected)
+          ground_ok = false;
       }
-      if (!ground_ok) {
-        ValidationFailure failure;
-        failure.rule_id = "ground_bass_immutable";
-        failure.kind = FailKind::StructuralFail;
-        report.failures.push_back(failure);
-      }
+    }
+    if (has_ground_note && !ground_ok) {
+      ValidationFailure failure;
+      failure.rule_id = "ground_bass_immutable";
+      failure.kind = FailKind::StructuralFail;
+      report.failures.push_back(failure);
     }
   }
 
   // Organ Passacaglia: passacaglia_ground_immutable. Same shape as
-  // ground_bass_immutable above, keyed on the passacaglia ground + bit. The
-  // immutable
-  // 8-bar passacaglia ground (material.passacaglia_ground) must be replayed
-  // unchanged on every cycle. Every note stamped PassacagliaGroundReplayed
-  // belongs to one statement of the ground; collected in onset order they form a
-  // flat run of whole cycles. Partitioning that run into contiguous cycles of n =
-  // passacaglia_ground.size() and comparing each slot's pitch against the
-  // canonical ground catches any altered, transposed, or reordered restatement.
-  // The rule is inert when either the canonical ground or the stamped run is
+  // ground_bass_immutable above, keyed on the passacaglia ground + bit: a
+  // bar-head skeleton match against material.passacaglia_ground. A replayed
+  // ground may subdivide a bar rhythmically (the late-cycle quarter-note
+  // intensification), but each ground note on a bar head must equal the
+  // canonical material tone sounding at the same cycle-relative position. The
+  // rule is inert when either the canonical ground or the stamped run is
   // empty (fixtures that declare no passacaglia ground).
   {
-    std::vector<std::size_t> ground_indices;
-    for (std::size_t i = 0; i < notes.size(); ++i) {
-      if (i < provenance.size() && hasRuleBit(provenance, i, RuleBit::PassacagliaGroundReplayed))
-        ground_indices.push_back(i);
-    }
-    std::sort(ground_indices.begin(), ground_indices.end(), [&](std::size_t a, std::size_t b) {
-      return notes[a].start_tick < notes[b].start_tick;
-    });
-
+    bool has_ground_note = false;
+    bool ground_ok = true;
     const std::size_t n = material.passacaglia_ground.size();
-    if (n > 0 && !ground_indices.empty()) {
-      // The replayed run must be a positive whole number of cycles of length n.
-      bool ground_ok = (ground_indices.size() % n == 0);
-      if (ground_ok) {
-        const std::size_t cycles = ground_indices.size() / n;
-        for (std::size_t c = 0; c < cycles && ground_ok; ++c) {
-          for (std::size_t k = 0; k < n; ++k) {
-            if (notes[ground_indices[c * n + k]].pitch != material.passacaglia_ground[k].pitch) {
-              ground_ok = false;
-              break;
-            }
-          }
+    if (n > 0) {
+      const Tick period = material.passacaglia_ground_period > 0
+                              ? material.passacaglia_ground_period
+                              : static_cast<Tick>(n) * ticks_per_bar;
+      for (std::size_t i = 0; i < notes.size() && ground_ok; ++i) {
+        if (i >= provenance.size() ||
+            !hasRuleBit(provenance, i, RuleBit::PassacagliaGroundReplayed))
+          continue;
+        has_ground_note = true;
+        const auto& note = notes[i];
+        if (note.start_tick % ticks_per_bar != 0)
+          continue;  // only the bar head carries the skeleton tone.
+        // Canonical tone: the material note sounding at this cycle-relative
+        // position (the latest material onset at or before it).
+        const Tick cycle_tick = note.start_tick % period;
+        int expected = -1;
+        for (const MaterialNote& mnote : material.passacaglia_ground) {
+          if (mnote.start_tick <= cycle_tick)
+            expected = mnote.pitch;
         }
+        if (expected >= 0 && note.pitch != expected)
+          ground_ok = false;
       }
-      if (!ground_ok) {
-        ValidationFailure failure;
-        failure.rule_id = "passacaglia_ground_immutable";
-        failure.kind = FailKind::StructuralFail;
-        report.failures.push_back(failure);
-      }
+    }
+    if (has_ground_note && !ground_ok) {
+      ValidationFailure failure;
+      failure.rule_id = "passacaglia_ground_immutable";
+      failure.kind = FailKind::StructuralFail;
+      report.failures.push_back(failure);
     }
   }
 

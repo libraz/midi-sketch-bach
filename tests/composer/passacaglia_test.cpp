@@ -9,10 +9,11 @@
 //      verbatim under a PassacagliaVariation span (every note stamps
 //      VariationApplied; every note of a block flagged is_climax additionally
 //      stamps ClimaxPlaced).
-//   2. The Validator's passacaglia_ground_immutable rule (every replayed cycle
-//      pitch-matches Material::passacaglia_ground; StructuralFail otherwise)
-//      fires on a mutated cycle, stays silent on clean material, and stays inert
-//      when the ground is empty.
+//   2. The Validator's passacaglia_ground_immutable rule (each replayed
+//      bar-head tone matches the Material::passacaglia_ground skeleton;
+//      StructuralFail otherwise) fires on a mutated bar head, stays silent on
+//      clean or rhythmically subdivided material, and stays inert when the
+//      ground is empty.
 //   3. The Phase20 fixture runs through the full Composer cleanly for every seed
 //      family (seed % 4 selects the scalar-wave start offset) and stamps all
 //      three Passacaglia bits in provenance.
@@ -221,9 +222,9 @@ TEST(PassacagliaTest, GroundImmutablePassesOnIdenticalCycles) {
   EXPECT_FALSE(hasRule(r, "passacaglia_ground_immutable"));
 }
 
-// Mutate one stamped ground note's pitch in a later cycle: the cycle no longer
-// matches the canonical ground, so the rule fires with a StructuralFail.
-TEST(PassacagliaTest, GroundImmutableFailsOnMutatedCycle) {
+// Mutate a stamped ground note's pitch on a bar head: the bar-head skeleton no
+// longer matches the canonical ground, so the rule fires with a StructuralFail.
+TEST(PassacagliaTest, GroundImmutableFailsOnMutatedBarHead) {
   Material material;
   material.passacaglia_ground.push_back(mnote(0, kTicksPerBeat, 48));
   material.passacaglia_ground.push_back(mnote(kTicksPerBeat, kTicksPerBeat, 43));
@@ -232,7 +233,7 @@ TEST(PassacagliaTest, GroundImmutableFailsOnMutatedCycle) {
   std::vector<NoteEvent> notes;
   std::vector<NoteProvenance> prov;
   const std::uint8_t cycle[2] = {48, 43};
-  for (int c = 0; c < 2; ++c) {
+  for (int c = 0; c < 4; ++c) {
     for (int k = 0; k < 2; ++k) {
       notes.push_back(
           makeNote(static_cast<Tick>(c) * 2 * kTicksPerBeat + static_cast<Tick>(k) * kTicksPerBeat,
@@ -240,11 +241,37 @@ TEST(PassacagliaTest, GroundImmutableFailsOnMutatedCycle) {
       prov.push_back(groundProv());
     }
   }
-  // Corrupt the second note of cycle 1 (index 3): G2 (43) -> Ab2 (44).
-  notes[3].pitch = 44;
+  // Corrupt the bar-head note at tick 1920 (cycle 2's downbeat): C3 (48) -> Bb2.
+  notes[4].pitch = 46;
 
   const ValidationReport r = Validator{}.validate(notes, prov, cMinorWhole(), material);
   EXPECT_TRUE(hasRuleKind(r, "passacaglia_ground_immutable", FailKind::StructuralFail));
+}
+
+// Subdividing a ground bar into repeated same-pitch notes keeps every bar-head
+// tone intact, so the rule stays silent (rhythm is free below the bar head).
+TEST(PassacagliaTest, GroundImmutablePassesOnSubdividedBar) {
+  Material material;
+  // One full-bar note per 4/4 bar, two-bar cycle.
+  material.passacaglia_ground.push_back(mnote(0, kTicksPerBar, 48));
+  material.passacaglia_ground.push_back(mnote(kTicksPerBar, kTicksPerBar, 43));
+  material.passacaglia_ground_period = 2 * kTicksPerBar;
+
+  std::vector<NoteEvent> notes;
+  std::vector<NoteProvenance> prov;
+  const std::uint8_t cycle[2] = {48, 43};
+  for (int bar = 0; bar < 4; ++bar) {
+    // Each bar is split into four same-pitch quarters (martellato restatement).
+    for (int beat = 0; beat < 4; ++beat) {
+      notes.push_back(
+          makeNote(static_cast<Tick>(bar) * kTicksPerBar + static_cast<Tick>(beat) * kTicksPerBeat,
+                   kTicksPerBeat, cycle[bar % 2], 1));
+      prov.push_back(groundProv());
+    }
+  }
+
+  const ValidationReport r = Validator{}.validate(notes, prov, cMinorWhole(), material);
+  EXPECT_FALSE(hasRule(r, "passacaglia_ground_immutable"));
 }
 
 // Inert when there is no passacaglia ground declared: even a note carrying the

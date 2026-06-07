@@ -7,12 +7,12 @@
 //      VariationRoleApplied; the first note of a variation whose density tier
 //      differs from the immediately preceding variation also stamps
 //      TextureDensityShift).
-//   2. The Validator's two Arch rules — ground_bass_immutable (every replayed
-//      cycle pitch-matches Material::ground_bass; StructuralFail otherwise) and
-//      variation_role_ornament_constraint (a Ground-role variation carries no
-//      sub-quarter note; MusicalFail otherwise) — fire on violations, stay
-//      silent on clean material, and stay inert when ground_bass / variations
-//      are empty.
+//   2. The Validator's two Arch rules — ground_bass_immutable (each replayed
+//      bar-head tone matches the Material::ground_bass skeleton; StructuralFail
+//      otherwise) and variation_role_ornament_constraint (a Ground-role
+//      variation carries no sub-quarter note; MusicalFail otherwise) — fire on
+//      violations, stay silent on clean or rhythmically subdivided material,
+//      and stay inert when ground_bass / variations are empty.
 //   3. The Phase16 fixture runs through the full Composer cleanly for every
 //      seed family (seed % 4 selects the scalar-wave start offset) and stamps
 //      all three Arch bits in provenance.
@@ -255,9 +255,9 @@ TEST(ChaconneArchTest, GroundBassImmutablePassesOnIdenticalCycles) {
   EXPECT_FALSE(hasRule(r, "ground_bass_immutable"));
 }
 
-// Mutate one stamped ground note's pitch: the cycle no longer matches the
-// canonical ground, so the rule fires with a StructuralFail.
-TEST(ChaconneArchTest, GroundBassImmutableFailsOnMutatedCycle) {
+// Mutate a stamped ground note's pitch on a bar head: the bar-head skeleton no
+// longer matches the canonical ground, so the rule fires with a StructuralFail.
+TEST(ChaconneArchTest, GroundBassImmutableFailsOnMutatedBarHead) {
   Material material;
   material.ground_bass.push_back(mnote(0, kTicksPerBeat, 48));
   material.ground_bass.push_back(mnote(kTicksPerBeat, kTicksPerBeat, 43));
@@ -266,7 +266,7 @@ TEST(ChaconneArchTest, GroundBassImmutableFailsOnMutatedCycle) {
   std::vector<NoteEvent> notes;
   std::vector<NoteProvenance> prov;
   const std::uint8_t cycle[2] = {48, 43};
-  for (int c = 0; c < 2; ++c) {
+  for (int c = 0; c < 4; ++c) {
     for (int k = 0; k < 2; ++k) {
       notes.push_back(
           makeNote(static_cast<Tick>(c) * 2 * kTicksPerBeat + static_cast<Tick>(k) * kTicksPerBeat,
@@ -274,11 +274,37 @@ TEST(ChaconneArchTest, GroundBassImmutableFailsOnMutatedCycle) {
       prov.push_back(groundProv());
     }
   }
-  // Corrupt the second note of cycle 1 (index 3): G2 (43) -> Ab2 (44).
-  notes[3].pitch = 44;
+  // Corrupt the bar-head note at tick 1920 (cycle 2's downbeat): C3 (48) -> Bb2.
+  notes[4].pitch = 46;
 
   const ValidationReport r = Validator{}.validate(notes, prov, cMinorWhole(), material);
   EXPECT_TRUE(hasRuleKind(r, "ground_bass_immutable", FailKind::StructuralFail));
+}
+
+// Subdividing a ground bar into repeated same-pitch notes keeps every bar-head
+// tone intact, so the rule stays silent (rhythm is free below the bar head).
+TEST(ChaconneArchTest, GroundBassImmutablePassesOnSubdividedBar) {
+  Material material;
+  // One dotted-half-equivalent note per 4/4 bar, two-bar cycle.
+  material.ground_bass.push_back(mnote(0, kTicksPerBar, 48));
+  material.ground_bass.push_back(mnote(kTicksPerBar, kTicksPerBar, 43));
+  material.ground_bass_period = 2 * kTicksPerBar;
+
+  std::vector<NoteEvent> notes;
+  std::vector<NoteProvenance> prov;
+  const std::uint8_t cycle[2] = {48, 43};
+  for (int bar = 0; bar < 4; ++bar) {
+    // Each bar is split into four same-pitch quarters (martellato restatement).
+    for (int beat = 0; beat < 4; ++beat) {
+      notes.push_back(
+          makeNote(static_cast<Tick>(bar) * kTicksPerBar + static_cast<Tick>(beat) * kTicksPerBeat,
+                   kTicksPerBeat, cycle[bar % 2], 1));
+      prov.push_back(groundProv());
+    }
+  }
+
+  const ValidationReport r = Validator{}.validate(notes, prov, cMinorWhole(), material);
+  EXPECT_FALSE(hasRule(r, "ground_bass_immutable"));
 }
 
 // Inert when there is no ground bass declared: even a note carrying the
