@@ -40,6 +40,18 @@ class Validator {
                             const Material& material = Material{}) const;
 };
 
+/**
+ * @brief Compute the piece-level texture metrics over a note list.
+ *
+ * Used by the Validator while validating and by the ornament post-pass to
+ * refresh the embedded metrics after note expansion, so the metrics carried in
+ * the report always describe the note list actually emitted downstream.
+ *
+ * @param notes The notes to measure (any voice set; empty yields zero metrics).
+ * @return Aggregate and per-voice texture metrics for `notes`.
+ */
+TextureMetrics computeTextureMetrics(const std::vector<NoteEvent>& notes);
+
 }  // namespace bach::composer
 
 #endif  // BACH_COMPOSER_VALIDATOR_H

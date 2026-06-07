@@ -164,6 +164,8 @@ SubjectFeatures computeSubjectFeatures(const std::vector<MaterialNote>& subject)
   return features;
 }
 
+}  // namespace
+
 TextureMetrics computeTextureMetrics(const std::vector<NoteEvent>& notes) {
   TextureMetrics metrics;
   if (notes.empty()) {
@@ -291,8 +293,6 @@ TextureMetrics computeTextureMetrics(const std::vector<NoteEvent>& notes) {
       pair_count > 0 ? overlap_sum / static_cast<double>(pair_count) : 0.0;
   return metrics;
 }
-
-}  // namespace
 
 ValidationReport Validator::validate(const std::vector<NoteEvent>& notes,
                                      const std::vector<NoteProvenance>& provenance,

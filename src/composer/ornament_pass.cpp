@@ -7,6 +7,7 @@
 #include "composer/character_profile.h"
 #include "composer/minor_material.h"
 #include "composer/renderer.h"
+#include "composer/validator.h"
 
 namespace bach::composer {
 
@@ -17,6 +18,7 @@ using detail::Mode;
 
 constexpr Tick kQuarter = duration::kQuarterNote;  // 480
 constexpr Tick kHalf = duration::kHalfNote;        // 960
+constexpr Tick kEighth = duration::kEighthNote;    // 240
 constexpr int kMidiMin = 0;
 constexpr int kMidiMax = 127;
 
@@ -117,11 +119,13 @@ Expansion buildTrill(const NoteEvent& base, int upper, int lower, Tick sub) {
 }
 
 // Build a mordent expansion: main (short) -> lower neighbour (short) -> main
-// (remainder). Sub-note durations sum exactly to base.duration.
+// (remainder). Sub-note durations sum exactly to base.duration. The short
+// tones never go below a 32nd (60 ticks): an eighth-note mordent is played
+// 32nd-32nd-16th, not with 64th flickers.
 Expansion buildMordent(const NoteEvent& base, int lower) {
   Expansion exp;
   const Tick span_end = base.start_tick + base.duration;
-  const Tick short_dur = base.duration / 8;
+  const Tick short_dur = std::max(base.duration / 8, duration::kThirtySecondNote);
   if (short_dur == 0 || 2 * short_dur >= base.duration)
     return exp;  // too short to subdivide meaningfully.
 
@@ -231,6 +235,13 @@ void applyOrnamentPass(ComposeResult& result, const OrnamentParams& params) {
   // before the final cadence is where the priority cadence trill lands.
   const int cadence_window_start_bar = total_bars >= 2 ? total_bars - 2 : 0;
 
+  // The designed mid-piece sub-cadence: the 4-bar phrase boundary nearest the
+  // piece midpoint. Like the final cadence it bypasses the placement gate (a
+  // design value, not a probabilistic site), so every character -- including
+  // density 0 -- decorates at least one mid-piece phrase boundary whenever an
+  // eligible note sounds there.
+  const int mid_boundary_bar = total_bars >= 8 ? ((total_bars / 2) / 4) * 4 - 1 : -1;
+
   // 32nd-note trill pacing (legacy: fast notes >= quarter); mordent uses a
   // short fraction of the note (handled in buildMordent).
   const Tick trill_sub = duration::kThirtySecondNote;  // 60
@@ -250,7 +261,10 @@ void applyOrnamentPass(ComposeResult& result, const OrnamentParams& params) {
     const bool already_ornament =
         note.source == BachNoteSource::Ornament || prov.source == NoteSource::Ornament;
 
-    if (!already_ornament && note.duration >= kQuarter &&
+    // Eighth notes are admitted as mordent candidates at the phrase-boundary
+    // sites only (the per-rule conditions below re-narrow longer figures to
+    // quarter+); sixteenths and shorter are never ornamented.
+    if (!already_ornament && note.duration >= kEighth &&
         !isExempt(params.exempt_voices, note.voice)) {
       const int bar = static_cast<int>(note.start_tick / tpb);
       const Tick pos_in_bar = note.start_tick % tpb;
@@ -282,19 +296,41 @@ void applyOrnamentPass(ComposeResult& result, const OrnamentParams& params) {
       if (!is_bass && neighbours_ok && upper_clears_ceiling) {
         const std::uint64_t roll = placementHash(params.seed, bar, note.voice);
 
+        // Phrase boundaries: the last bar of each 4-bar phrase (outside the
+        // final cadence window) is a natural sub-cadence; ornaments cluster
+        // there so decoration spreads across the piece instead of bunching in
+        // the closing bars. These are candidates only -- the deterministic
+        // gate below still applies (never mandatory).
+        const bool is_phrase_boundary = (bar % 4 == 3) && !in_cadence_window;
+
         // Decision priority. Cadence trills first (always, every density).
         bool want_trill = false;
         bool want_mordent = false;
 
-        if (in_cadence_window && is_strong_beat) {
+        if (in_cadence_window && is_strong_beat && note.duration >= kQuarter) {
           // Priority cadence trill: the strong beat in the last two bars.
           want_trill = true;
-        } else if (density >= 1 && is_downbeat && (bar % 4 == 0)) {
-          // Downbeat mordent every 4 bars (quarter notes only).
+        } else if (density >= 1 && is_phrase_boundary && is_strong_beat) {
+          // Sub-cadence ornament on phrase-boundary strong beats: long notes
+          // take a trill, quarters and eighths a mordent.
+          if (note.duration >= kHalf)
+            want_trill = true;
+          else
+            want_mordent = true;
+        } else if (density == 0 && (bar % 8 == 7 || bar == mid_boundary_bar) &&
+                   !in_cadence_window && is_downbeat) {
+          // Sparse-character uplift: a density-0 character marks every other
+          // phrase boundary (and the designed mid-piece boundary) with a
+          // mordent, so the piece is not bare until the final cadence. These
+          // are design values (one mordent per 8 bars), not gated sites.
+          want_mordent = true;
+        } else if (density >= 1 && is_downbeat && (bar % 2 == 0) && note.duration >= kQuarter) {
+          // Downbeat mordent every 2 bars (quarters always; halves only below
+          // the inner-trill density so density 2 keeps its long-note trills).
           if (note.duration == kQuarter)
             want_mordent = true;
-          else
-            want_trill = false;  // not a mordent target; leave for inner-trill rule.
+          else if (note.duration == kHalf && density == 1)
+            want_mordent = true;
         }
 
         if (!want_trill && !want_mordent && density >= 2 && note.duration >= kHalf &&
@@ -305,9 +341,11 @@ void applyOrnamentPass(ComposeResult& result, const OrnamentParams& params) {
 
         // A small deterministic gate so not literally every eligible note in a
         // dense passage is ornamented (keeps the texture musical). Cadence
-        // trills bypass the gate (they are mandatory).
+        // trills, the designed mid-piece boundary, and the density-0 boundary
+        // mordents (already one-per-8-bars sparse) bypass the gate.
         const bool mandatory = in_cadence_window && is_strong_beat;
-        const bool gate_open = mandatory || (roll & 1ull) == 0ull;
+        const bool gate_open = mandatory || bar == mid_boundary_bar ||
+                               (density == 0 && want_mordent) || (roll & 1ull) == 0ull;
 
         if (gate_open) {
           if (want_mordent)
@@ -343,6 +381,14 @@ void applyOrnamentPass(ComposeResult& result, const OrnamentParams& params) {
   // mirror result.notes exactly (the Renderer groups by voice and clamps
   // same-voice overlap; it never moves pitch or onset).
   result.tracks = Renderer{}.render(result.notes);
+
+  // Refresh the embedded texture metrics so they describe the FINAL
+  // (ornamented) note list: downstream JSON consumers recompute metrics from
+  // the emitted notes and must see the same values.
+  if (!result.validation.texture_metrics.empty()) {
+    result.validation.texture_metrics.clear();
+    result.validation.texture_metrics.push_back(computeTextureMetrics(result.notes));
+  }
 }
 
 }  // namespace bach::composer

@@ -223,13 +223,22 @@ TEST(OrnamentPassTest, CadenceTrillPresentInLastTwoBarsAtDensityZero) {
   ASSERT_EQ(effectiveOrnamentDensity(p.character, p.instrument), 0u);
   applyOrnamentPass(r, p);
 
-  // Every ornament note must sit in the last two bars (bars 6, 7).
-  ASSERT_GT(ornamentNoteCount(r), 0u);
+  // The mandatory cadence trill must land in the last two bars (bars 6, 7),
+  // and the only other density-0 site is the designed mid-piece boundary
+  // (bar 3 in an 8-bar piece).
   const Tick cadence_start = barToTick(6);
+  bool cadence_ornament = false;
   for (const auto& n : r.notes) {
-    if (n.source == BachNoteSource::Ornament)
-      EXPECT_GE(n.start_tick, cadence_start) << "density-0 ornament outside cadence window";
+    if (n.source != BachNoteSource::Ornament)
+      continue;
+    if (n.start_tick >= cadence_start) {
+      cadence_ornament = true;
+      continue;
+    }
+    const int bar = static_cast<int>(n.start_tick / kTicksPerBar);
+    EXPECT_EQ(bar, 3) << "density-0 ornament outside cadence window and mid boundary";
   }
+  EXPECT_TRUE(cadence_ornament) << "mandatory cadence trill missing";
 }
 
 TEST(OrnamentPassTest, OrganOrnamentsDoNotExceedManualCompass) {
@@ -247,6 +256,150 @@ TEST(OrnamentPassTest, OrganOrnamentsDoNotExceedManualCompass) {
 
   for (const auto& note : r.notes) {
     EXPECT_LE(note.pitch, 84) << "organ ornament exceeded manual compass";
+  }
+}
+
+// --- Mid-piece distribution -------------------------------------------------
+
+// A density-0 character is no longer bare until the final cadence: every other
+// phrase boundary (bar % 8 == 7) outside the cadence window is a gated mordent
+// candidate, and the designed mid-piece boundary (the phrase boundary nearest
+// the midpoint -- bar 11 in a 24-bar piece) bypasses the gate entirely, so a
+// mid-piece ornament fires for EVERY seed; all mid-piece ornaments must sit on
+// such boundaries.
+TEST(OrnamentPassTest, SparseCharacterGetsPhraseBoundaryMordentsMidPiece) {
+  for (std::uint32_t seed = 1; seed <= 8; ++seed) {
+    ComposeResult r = twoVoiceFixture(24);  // cadence window = bars 22-23.
+    OrnamentParams p = baseParams();
+    p.character = SubjectCharacter::Severe;  // ornament_density 0.
+    p.seed = seed;
+    applyOrnamentPass(r, p);
+    bool mid_boundary_fired = false;
+    for (const auto& n : r.notes) {
+      if (n.source != BachNoteSource::Ornament)
+        continue;
+      const int bar = static_cast<int>(n.start_tick / kTicksPerBar);
+      if (bar >= 22)
+        continue;  // cadence trill, covered elsewhere.
+      EXPECT_TRUE(bar % 8 == 7 || bar == 11)
+          << "density-0 mid-piece ornament off the phrase boundary, bar " << bar;
+      if (bar == 11)
+        mid_boundary_fired = true;
+    }
+    EXPECT_TRUE(mid_boundary_fired)
+        << "seed " << seed << " missed the designed mid-piece boundary mordent";
+  }
+}
+
+// Sub-cadence phrase-boundary ornaments are gated, never mandatory: across a
+// small seed family there must be at least one phrase-boundary bar whose
+// strong-beat note stayed plain (the deterministic gate was closed).
+TEST(OrnamentPassTest, PhraseBoundaryOrnamentsAreNotMandatory) {
+  bool found_plain_boundary = false;
+  for (std::uint32_t seed = 1; seed <= 8 && !found_plain_boundary; ++seed) {
+    ComposeResult r = twoVoiceFixture(16);  // phrase boundaries: bars 3, 7, 11.
+    OrnamentParams p = baseParams();
+    p.character = SubjectCharacter::Noble;  // ornament_density 1.
+    p.seed = seed;
+    applyOrnamentPass(r, p);
+    for (int bar : {3, 7, 11}) {
+      bool ornamented = false;
+      for (const auto& n : r.notes) {
+        if (n.source != BachNoteSource::Ornament)
+          continue;
+        const int nbar = static_cast<int>(n.start_tick / kTicksPerBar);
+        if (nbar == bar)
+          ornamented = true;
+      }
+      if (!ornamented)
+        found_plain_boundary = true;
+    }
+  }
+  EXPECT_TRUE(found_plain_boundary) << "every phrase boundary was ornamented for every seed";
+}
+
+// Density 1 now admits downbeat mordents on HALF notes too (every 2 bars). The
+// mordent shape is main -> lower -> main (exactly three sub-notes covering the
+// original half-note span).
+TEST(OrnamentPassTest, DensityOneHalfNoteDownbeatMordent) {
+  bool found_half_mordent = false;
+  for (std::uint32_t seed = 1; seed <= 8 && !found_half_mordent; ++seed) {
+    // V0: two half notes per bar; V1 whole-note bass below.
+    ComposeResult r;
+    const int bars = 12;
+    for (int bar = 0; bar < bars; ++bar) {
+      r.notes.push_back(makeNote(barToTick(bar), kTicksPerBar, 36, 1));
+      r.provenance.push_back(composeProv(1));
+      r.notes.push_back(makeNote(barToTick(bar), kTicksPerBeat * 2, 72, 0));
+      r.provenance.push_back(composeProv(0));
+      r.notes.push_back(makeNote(barToTick(bar) + kTicksPerBeat * 2, kTicksPerBeat * 2, 74, 0));
+      r.provenance.push_back(composeProv(0));
+    }
+    r.tracks = Renderer{}.render(r.notes);
+
+    OrnamentParams p = baseParams();
+    p.character = SubjectCharacter::Noble;  // ornament_density 1.
+    p.seed = seed;
+    applyOrnamentPass(r, p);
+
+    // Look for a 3-note ornament group on an even-bar downbeat half note
+    // outside both the phrase boundaries (bar % 4 == 3) and the cadence
+    // window (bars 10-11).
+    for (int bar = 0; bar < 10; bar += 2) {
+      if (bar % 4 == 3)
+        continue;
+      std::vector<const NoteEvent*> group;
+      for (const auto& n : r.notes) {
+        if (n.source == BachNoteSource::Ornament && n.start_tick >= barToTick(bar) &&
+            n.start_tick < barToTick(bar) + kTicksPerBeat * 2)
+          group.push_back(&n);
+      }
+      if (group.size() == 3) {
+        // main -> lower neighbour -> main, covering the half note exactly.
+        EXPECT_EQ(group[0]->pitch, 72);
+        EXPECT_LT(group[1]->pitch, 72);
+        EXPECT_EQ(group[2]->pitch, 72);
+        Tick covered = 0;
+        for (const auto* n : group)
+          covered += n->duration;
+        EXPECT_EQ(covered, kTicksPerBeat * 2);
+        found_half_mordent = true;
+        break;
+      }
+    }
+  }
+  EXPECT_TRUE(found_half_mordent) << "no density-1 half-note downbeat mordent fired";
+}
+
+// Density 2 keeps its inner trills on long notes: a half-note downbeat on an
+// even bar still expands to a trill (>= 4 sub-notes), not a 3-note mordent.
+TEST(OrnamentPassTest, DensityTwoHalfNoteDownbeatKeepsInnerTrill) {
+  ComposeResult r;
+  const int bars = 12;
+  for (int bar = 0; bar < bars; ++bar) {
+    r.notes.push_back(makeNote(barToTick(bar), kTicksPerBar, 36, 1));
+    r.provenance.push_back(composeProv(1));
+    r.notes.push_back(makeNote(barToTick(bar), kTicksPerBeat * 2, 72, 0));
+    r.provenance.push_back(composeProv(0));
+    r.notes.push_back(makeNote(barToTick(bar) + kTicksPerBeat * 2, kTicksPerBeat * 2, 74, 0));
+    r.provenance.push_back(composeProv(0));
+  }
+  r.tracks = Renderer{}.render(r.notes);
+
+  OrnamentParams p = baseParams();  // Playful: ornament_density 2.
+  applyOrnamentPass(r, p);
+
+  for (int bar = 0; bar < 10; bar += 2) {
+    if (bar % 4 == 3)
+      continue;
+    std::size_t group_size = 0;
+    for (const auto& n : r.notes) {
+      if (n.source == BachNoteSource::Ornament && n.start_tick >= barToTick(bar) &&
+          n.start_tick < barToTick(bar) + kTicksPerBeat * 2)
+        ++group_size;
+    }
+    if (group_size > 0)
+      EXPECT_GE(group_size, 4u) << "density-2 half-note downbeat lost its trill, bar " << bar;
   }
 }
 

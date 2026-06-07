@@ -87,6 +87,9 @@ class FormThresholds:
         each be at least 0.5 (toccata's dramatic-but-not-thin requirement).
     @field min_final_quarter_avg_active When set, the final quarter of the
         piece (by tick span) must average at least this many active voices.
+    @field model_score_threshold Form-specific gate-3 model-score floor. None
+        falls back to the shared MODEL_SCORE_THRESHOLD (0.80); the sectional
+        fantasia uses its established 0.78 closure threshold.
     @field enforced When True, failures flip the exit code; otherwise the form
         is informational only.
     """
@@ -95,6 +98,7 @@ class FormThresholds:
     max_mono_ratio: float | None = None
     require_v1_v2_occupancy: bool = False
     min_final_quarter_avg_active: float | None = None
+    model_score_threshold: float | None = None
     enforced: bool = True
 
 
@@ -120,6 +124,7 @@ FORM_THRESHOLDS: dict[str, FormThresholds] = {
     "fantasia_and_fugue": FormThresholds(
         min_avg_active=2.3,
         max_mono_ratio=0.10,
+        model_score_threshold=0.78,
         enforced=True,
     ),
     "passacaglia": FormThresholds(
@@ -220,13 +225,17 @@ class GateCase:
 
         True when enforcement is off, when the case was not scored (absent
         scorer must not fabricate a failure), or when the recorded probability
-        is at or above MODEL_SCORE_THRESHOLD.
+        is at or above the form's model threshold (MODEL_SCORE_THRESHOLD
+        unless the form declares its own).
         """
         if not ENFORCE_MODEL_SCORE:
             return True
         if not self.model_scored:
             return True
-        return self.model_score >= MODEL_SCORE_THRESHOLD
+        threshold = self.thresholds.model_score_threshold
+        if threshold is None:
+            threshold = MODEL_SCORE_THRESHOLD
+        return self.model_score >= threshold
 
     @property
     def passes_parallel(self) -> bool:
