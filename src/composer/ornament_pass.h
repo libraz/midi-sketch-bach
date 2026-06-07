@@ -24,9 +24,19 @@ namespace bach::composer {
 // Musical contract (port of the legacy ornament rules, composer-adapted):
 //   * Candidate notes: duration >= a quarter note, not in `exempt_voices`,
 //     not the lowest-sounding voice at their onset (the bass stays clean),
+//     not the voice's final attack (the resolution tone always sounds plain),
 //     and the pitch must have a diatonic upper neighbour in `mode`.
-//   * A trill replaces the candidate's sustain with a main/upper alternation
-//     ending in a lower-neighbour Nachschlag pair before the final main tone.
+//   * A trill starts on the upper auxiliary (Baroque standard; at a cadence
+//     the upper tone is the 4-3 suspension over the dominant), alternates
+//     upper/main, and ends in a lower-neighbour Nachschlag pair before the
+//     final main tone.
+//   * Long trills (>= half note) open with a held upper-neighbour
+//     appoggiatura (appuy, max(span/4, eighth) capped at a half note) before
+//     the alternation; long CADENCE trills deterministically alternate
+//     between that appuy opening and the von-unten doppelt-cadence opening
+//     (a lower -> main two-note prefix), keyed by the placement hash.
+//   * Trill pacing follows tempo: 32nd-note alternation at bpm <= 100,
+//     16th-note alternation above.
 //   * A mordent (single main-lower-main) may decorate a quarter note on a bar
 //     downbeat (phrase start) instead of a trill.
 //   * The ornament subdivides ONLY the original note's [start, start+dur)
@@ -47,6 +57,7 @@ struct OrnamentParams {
   detail::Mode mode = detail::Mode::Major;                // scale for neighbour tones.
   std::uint32_t seed = 0;                                 // deterministic placement.
   Tick ticks_per_bar = kTicksPerBar;                      // meter (3/4 forms pass 1440).
+  std::uint16_t bpm = 72;                                 // trill pacing (32nds <= 100 < 16ths).
   std::vector<VoiceId> exempt_voices;                     // ground / CF carriers: never ornamented.
 };
 

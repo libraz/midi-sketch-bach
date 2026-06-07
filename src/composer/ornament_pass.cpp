@@ -1,11 +1,11 @@
 #include "composer/ornament_pass.h"
 
 #include <algorithm>
+#include <array>
 #include <cstdint>
 #include <vector>
 
 #include "composer/character_profile.h"
-#include "composer/minor_material.h"
 #include "composer/renderer.h"
 #include "composer/validator.h"
 
@@ -36,6 +36,12 @@ std::uint64_t placementHash(std::uint32_t seed, int bar, VoiceId voice) {
 
 // Diatonic upper neighbour of `pitch` in `mode`. Walks up by semitone until a
 // scale member is reached. Returns -1 when no in-range neighbour exists.
+//
+// Minor-mode auxiliaries need no melodic-minor raising here: the cadential
+// trill sites are the leading tone (B natural, upper auxiliary C = tonic, a
+// half step) and the supertonic (D, upper auxiliary Eb = the diatonic third, a
+// half-step trill that is the idiomatic minor-cadence figure). The natural
+// minor membrane already yields both.
 int upperNeighbour(int pitch, Mode mode) {
   for (int add = 1; add <= 2; ++add) {
     const int cand = pitch + add;
@@ -55,10 +61,20 @@ int upperNeighbour(int pitch, Mode mode) {
 // tone is a tonic-class pitch in minor mode. Returns -1 when no in-range
 // neighbour exists.
 int lowerNeighbour(int pitch, Mode mode, bool cadence_context) {
-  if (mode == Mode::Minor && cadence_context && ((pitch % 12) == 0)) {
-    // Leading tone B natural sits one semitone below the C tonic.
-    const int cand = pitch - 1;
-    return cand >= kMidiMin ? cand : -1;
+  if (mode == Mode::Minor && cadence_context) {
+    const int pc = pitch % 12;
+    if (pc == 0) {
+      // Leading tone B natural sits one semitone below the C tonic.
+      const int cand = pitch - 1;
+      return cand >= kMidiMin ? cand : -1;
+    }
+    if (pc == 11) {
+      // Below the raised leading tone the melodic-minor sixth degree (A
+      // natural) is wanted, not the natural-minor Bb which would put a
+      // chromatic Bb-B step inside the Nachschlag.
+      const int cand = pitch - 2;
+      return cand >= kMidiMin ? cand : -1;
+    }
   }
   for (int sub = 1; sub <= 2; ++sub) {
     const int cand = pitch - sub;
@@ -77,33 +93,61 @@ struct Expansion {
   std::vector<NoteEvent> notes;
 };
 
+// How a trill opens. Baroque trills start on the upper auxiliary; the long
+// (>= half note) forms additionally take one of the Explication's compound
+// openings before the alternation.
+enum class TrillOnset : std::uint8_t {
+  UpperStart,  // plain short trill: upper/main alternation from the upper tone.
+  Appuy,       // held upper appoggiatura (the 4-3 suspension over V), then alternation.
+  VonUnten,    // doppelt-cadence: two-note prefix from below (lower -> main), then alternation.
+};
+
 // Build a trill expansion over [base.start, base.start+base.duration). The
-// figure alternates main/upper (32nd/16th legacy pacing), then ends with a
-// lower-neighbour Nachschlag pair before the final main tone. The sub-note
+// alternation starts on the upper auxiliary (Baroque standard; at a cadence
+// the upper tone is the suspension over the dominant) and ends with a
+// lower-neighbour Nachschlag pair before the final main tone. Appuy opens with
+// a single held upper-neighbour note (max(span/4, eighth), capped at a half
+// note); VonUnten opens with a lower -> main two-note prefix. The sub-note
 // durations sum exactly to base.duration (the final tone absorbs the
 // remainder), so total time is preserved.
-Expansion buildTrill(const NoteEvent& base, int upper, int lower, Tick sub) {
+Expansion buildTrill(const NoteEvent& base, int upper, int lower, Tick sub, TrillOnset onset) {
   Expansion exp;
   const Tick span_end = base.start_tick + base.duration;
 
-  // Number of whole sub-notes that fit; reserve the last two slots for the
-  // Nachschlag (lower neighbour then main).
   std::vector<NoteEvent> figure;
   Tick cursor = base.start_tick;
-  while (cursor + sub <= span_end) {
+  const auto push = [&](int pitch, Tick dur) {
     NoteEvent note = base;
-    note.duration = sub;
     note.start_tick = cursor;
+    note.duration = dur;
+    note.pitch = static_cast<std::uint8_t>(pitch);
     note.source = BachNoteSource::Ornament;
     figure.push_back(note);
-    cursor += sub;
-  }
-  // Need at least a main + upper + Nachschlag-lower + main to be a trill.
-  if (figure.size() < 4)
-    return exp;  // caller keeps the original note.
+    cursor += dur;
+  };
 
-  for (std::size_t idx = 0; idx < figure.size(); ++idx)
-    figure[idx].pitch = static_cast<std::uint8_t>((idx % 2 == 0) ? base.pitch : upper);
+  // Opening prefix.
+  bool next_is_upper = true;  // the alternation proper starts on the upper tone.
+  if (onset == TrillOnset::Appuy) {
+    Tick appuy = std::max(base.duration / 4, kEighth);
+    if (appuy > kHalf)
+      appuy = kHalf;
+    push(upper, appuy);
+    next_is_upper = false;  // the held upper tone already sounded; continue on main.
+  } else if (onset == TrillOnset::VonUnten) {
+    push(lower, sub);
+    push(base.pitch, sub);
+  }
+  const std::size_t prefix = figure.size();
+
+  // Alternation slots; the last two are re-pitched into the Nachschlag below.
+  while (cursor + sub <= span_end) {
+    push(next_is_upper ? upper : base.pitch, sub);
+    next_is_upper = !next_is_upper;
+  }
+  // Need at least upper + main + Nachschlag-lower + main to be a trill.
+  if (figure.size() - prefix < 4)
+    return exp;  // caller keeps the original note.
 
   // Nachschlag: penultimate slot becomes the lower neighbour, last slot the
   // resolved main tone.
@@ -242,9 +286,18 @@ void applyOrnamentPass(ComposeResult& result, const OrnamentParams& params) {
   // eligible note sounds there.
   const int mid_boundary_bar = total_bars >= 8 ? ((total_bars / 2) / 4) * 4 - 1 : -1;
 
-  // 32nd-note trill pacing (legacy: fast notes >= quarter); mordent uses a
-  // short fraction of the note (handled in buildMordent).
-  const Tick trill_sub = duration::kThirtySecondNote;  // 60
+  // Trill pacing follows tempo: 32nds at a moderate tempo, 16ths above 100 bpm
+  // so the alternation never exceeds a playable rate. Mordents use a short
+  // fraction of the note (handled in buildMordent).
+  const Tick trill_sub = params.bpm <= 100 ? duration::kThirtySecondNote : duration::kSixteenthNote;
+
+  // Final-note protection: the last attack of every voice is the resolution
+  // tone and must sound plain, so it is never an ornament candidate.
+  std::array<Tick, 256> last_onset{};
+  for (const auto& note : result.notes) {
+    if (note.start_tick > last_onset[note.voice])
+      last_onset[note.voice] = note.start_tick;
+  }
 
   // Build replacement views WITHOUT mutating the live note list until the full
   // plan is assembled (build-then-swap).
@@ -265,7 +318,7 @@ void applyOrnamentPass(ComposeResult& result, const OrnamentParams& params) {
     // sites only (the per-rule conditions below re-narrow longer figures to
     // quarter+); sixteenths and shorter are never ornamented.
     if (!already_ornament && note.duration >= kEighth &&
-        !isExempt(params.exempt_voices, note.voice)) {
+        !isExempt(params.exempt_voices, note.voice) && note.start_tick != last_onset[note.voice]) {
       const int bar = static_cast<int>(note.start_tick / tpb);
       const Tick pos_in_bar = note.start_tick % tpb;
       const bool is_downbeat = pos_in_bar == 0;
@@ -348,10 +401,21 @@ void applyOrnamentPass(ComposeResult& result, const OrnamentParams& params) {
                                (density == 0 && want_mordent) || (roll & 1ull) == 0ull;
 
         if (gate_open) {
-          if (want_mordent)
+          if (want_mordent) {
             exp = buildMordent(note, lower);
-          else if (want_trill)
-            exp = buildTrill(note, upper, lower, trill_sub);
+          } else if (want_trill) {
+            // Long trills (>= half) open with the held upper appoggiatura
+            // (appuy); at the cadence the placement hash deterministically
+            // mixes in the von-unten doppelt-cadence opening so closing
+            // formulas are not all identical. Short trills alternate plain
+            // from the upper tone.
+            TrillOnset onset = TrillOnset::UpperStart;
+            if (note.duration >= kHalf) {
+              const bool von_unten = in_cadence_window && ((roll >> 1) & 1ull) != 0ull;
+              onset = von_unten ? TrillOnset::VonUnten : TrillOnset::Appuy;
+            }
+            exp = buildTrill(note, upper, lower, trill_sub, onset);
+          }
         }
       }
     }

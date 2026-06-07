@@ -173,44 +173,241 @@ TEST(OrnamentPassTest, TotalDurationPerVoicePreserved) {
   EXPECT_EQ(voiceCoverage(after.notes, 1), v1_before);
 }
 
-// --- Nachschlag shape ------------------------------------------------------
+// --- Trill shape: upper-note start + Nachschlag ------------------------------
 
-TEST(OrnamentPassTest, TrillEndsWithLowerNeighbourThenMain) {
+namespace {
+
+// Collect one voice's notes in list order (the pass keeps onset order per voice).
+std::vector<NoteEvent> voiceNotes(const ComposeResult& r, VoiceId voice) {
+  std::vector<NoteEvent> out;
+  for (const auto& n : r.notes)
+    if (n.voice == voice)
+      out.push_back(n);
+  return out;
+}
+
+// Locate the first contiguous ornament run of length >= min_len in `notes`.
+// Returns {begin, end} indices, or {0, 0} when none exists.
+std::pair<std::size_t, std::size_t> firstOrnamentRun(const std::vector<NoteEvent>& notes,
+                                                     std::size_t min_len) {
+  for (std::size_t i = 0; i < notes.size(); ++i) {
+    if (notes[i].source != BachNoteSource::Ornament)
+      continue;
+    std::size_t j = i;
+    while (j < notes.size() && notes[j].source == BachNoteSource::Ornament &&
+           (j == i || notes[j].start_tick == notes[j - 1].start_tick + notes[j - 1].duration))
+      ++j;
+    if (j - i >= min_len)
+      return {i, j};
+    i = j - 1;
+  }
+  return {0, 0};
+}
+
+}  // namespace
+
+TEST(OrnamentPassTest, TrillStartsOnUpperAndEndsWithLowerNeighbourThenMain) {
   ComposeResult r = twoVoiceFixture(8);
   applyOrnamentPass(r, baseParams());
 
-  // Find a run of consecutive Ornament notes in voice 0 forming one trill, and
-  // verify the tail is lower-neighbour -> main (penultimate < final pitch, and
-  // the final pitch equals an earlier main tone of the run).
   ASSERT_GT(ornamentNoteCount(r), 0u);
+  const std::vector<NoteEvent> v0 = voiceNotes(r, 0);
+  const auto [i, j] = firstOrnamentRun(v0, 4);
+  ASSERT_LT(i, j) << "no trill run found to validate the trill shape";
 
-  std::vector<NoteEvent> v0;
-  for (const auto& n : r.notes)
-    if (n.voice == 0)
-      v0.push_back(n);
+  const auto& first = v0[i];
+  const auto& penult = v0[j - 2];
+  const auto& last = v0[j - 1];
+  // The final tone is the main tone; the run opens on its upper auxiliary
+  // (a diatonic step above the main tone).
+  EXPECT_GT(first.pitch, last.pitch) << "trill must start on the upper auxiliary";
+  EXPECT_LE(first.pitch - last.pitch, 2) << "upper auxiliary must be a diatonic step";
+  EXPECT_LT(penult.pitch, last.pitch) << "Nachschlag lower neighbour before main";
+}
 
-  // Locate the first ornament run of length >= 4 (a trill, not a mordent).
-  bool checked = false;
-  for (std::size_t i = 0; i < v0.size(); ++i) {
-    if (v0[i].source != BachNoteSource::Ornament)
-      continue;
-    std::size_t j = i;
-    while (j < v0.size() && v0[j].source == BachNoteSource::Ornament &&
-           (j == i || v0[j].start_tick == v0[j - 1].start_tick + v0[j - 1].duration))
-      ++j;
-    const std::size_t len = j - i;
-    if (len >= 4) {
-      const auto& penult = v0[j - 2];
-      const auto& last = v0[j - 1];
-      EXPECT_LT(penult.pitch, last.pitch) << "Nachschlag lower neighbour before main";
-      // The final tone is the main tone (matches the run's first tone).
-      EXPECT_EQ(last.pitch, v0[i].pitch);
-      checked = true;
-      break;
+// --- Final-note protection ---------------------------------------------------
+
+// The last attack of every voice is the resolution tone: it must stay one
+// plain note at every density, even when it sits on the most tempting trill
+// site (a strong-beat long note inside the cadence window).
+TEST(OrnamentPassTest, FinalNotePerVoiceNeverOrnamented) {
+  for (auto character :
+       {SubjectCharacter::Severe, SubjectCharacter::Noble, SubjectCharacter::Playful}) {
+    ComposeResult r;
+    for (int bar = 0; bar < 8; ++bar) {
+      r.notes.push_back(makeNote(barToTick(bar), kTicksPerBar, 36, 1));
+      r.provenance.push_back(composeProv(1));
     }
-    i = j - 1;
+    const std::uint8_t scale[4] = {72, 74, 76, 77};
+    for (int bar = 0; bar < 7; ++bar) {
+      for (int beat = 0; beat < 4; ++beat) {
+        r.notes.push_back(
+            makeNote(barToTick(bar) + beat * kTicksPerBeat, kTicksPerBeat, scale[beat], 0));
+        r.provenance.push_back(composeProv(0));
+      }
+    }
+    // Final attack: a whole-note tonic on the last bar's downbeat.
+    r.notes.push_back(makeNote(barToTick(7), kTicksPerBar, 72, 0));
+    r.provenance.push_back(composeProv(0));
+    r.tracks = Renderer{}.render(r.notes);
+
+    OrnamentParams p = baseParams();
+    p.character = character;
+    applyOrnamentPass(r, p);
+
+    std::size_t final_attacks = 0;
+    for (const auto& n : r.notes) {
+      if (n.voice != 0 || n.start_tick < barToTick(7))
+        continue;
+      ++final_attacks;
+      EXPECT_NE(n.source, BachNoteSource::Ornament) << "final note was ornamented";
+      EXPECT_EQ(n.duration, kTicksPerBar) << "final note was subdivided";
+    }
+    EXPECT_EQ(final_attacks, 1u);
   }
-  EXPECT_TRUE(checked) << "no trill run found to validate Nachschlag shape";
+}
+
+// --- Long-trill openings: appuy / von-unten ----------------------------------
+
+// Build an 8-bar fixture whose penultimate bar opens with a half-note trill
+// site (strong beat inside the cadence window, not the voice's final attack).
+ComposeResult longCadenceNoteFixture() {
+  ComposeResult r;
+  for (int bar = 0; bar < 8; ++bar) {
+    r.notes.push_back(makeNote(barToTick(bar), kTicksPerBar, 36, 1));
+    r.provenance.push_back(composeProv(1));
+  }
+  const std::uint8_t scale[4] = {72, 74, 76, 77};
+  for (int bar = 0; bar < 6; ++bar) {
+    for (int beat = 0; beat < 4; ++beat) {
+      r.notes.push_back(
+          makeNote(barToTick(bar) + beat * kTicksPerBeat, kTicksPerBeat, scale[beat], 0));
+      r.provenance.push_back(composeProv(0));
+    }
+  }
+  // Bar 6 (cadence window): half-note trill site, then two quarters.
+  r.notes.push_back(makeNote(barToTick(6), kTicksPerBeat * 2, 74, 0));
+  r.provenance.push_back(composeProv(0));
+  r.notes.push_back(makeNote(barToTick(6) + kTicksPerBeat * 2, kTicksPerBeat, 74, 0));
+  r.provenance.push_back(composeProv(0));
+  r.notes.push_back(makeNote(barToTick(6) + kTicksPerBeat * 3, kTicksPerBeat, 71, 0));
+  r.provenance.push_back(composeProv(0));
+  // Bar 7: whole-note tonic (the protected final attack).
+  r.notes.push_back(makeNote(barToTick(7), kTicksPerBar, 72, 0));
+  r.provenance.push_back(composeProv(0));
+  r.tracks = Renderer{}.render(r.notes);
+  return r;
+}
+
+// A long cadence trill opens either with the held upper appoggiatura (appuy)
+// or with the von-unten doppelt-cadence prefix; across a seed family BOTH
+// openings must appear (the placement hash mixes them deterministically).
+TEST(OrnamentPassTest, LongCadenceTrillMixesAppuyAndVonUntenOpenings) {
+  bool saw_appuy = false;
+  bool saw_von_unten = false;
+  for (std::uint32_t seed = 1; seed <= 16; ++seed) {
+    ComposeResult r = longCadenceNoteFixture();
+    OrnamentParams p = baseParams();
+    p.seed = seed;
+    applyOrnamentPass(r, p);
+
+    // Collect the ornament run replacing the bar-6 half note (pitch 74).
+    std::vector<NoteEvent> run;
+    for (const auto& n : r.notes) {
+      if (n.voice == 0 && n.source == BachNoteSource::Ornament && n.start_tick >= barToTick(6) &&
+          n.start_tick < barToTick(6) + kTicksPerBeat * 2)
+        run.push_back(n);
+    }
+    ASSERT_GE(run.size(), 4u) << "mandatory long cadence trill missing, seed " << seed;
+    const auto& first = run.front();
+    if (first.pitch > 74) {
+      // Appuy: a HELD upper neighbour (longer than the alternation pacing).
+      EXPECT_GE(first.duration, duration::kEighthNote) << "appuy opening not held, seed " << seed;
+      saw_appuy = true;
+    } else {
+      // Von-unten: lower -> main two-note prefix at alternation pacing.
+      ASSERT_GE(run.size(), 6u);
+      EXPECT_LT(first.pitch, 74) << "seed " << seed;
+      EXPECT_EQ(run[1].pitch, 74) << "von-unten prefix must step lower -> main, seed " << seed;
+      saw_von_unten = true;
+    }
+    // Both openings share the Nachschlag tail: lower neighbour then main.
+    EXPECT_LT(run[run.size() - 2].pitch, 74);
+    EXPECT_EQ(run.back().pitch, 74);
+  }
+  EXPECT_TRUE(saw_appuy) << "appuy opening never selected across the seed family";
+  EXPECT_TRUE(saw_von_unten) << "von-unten opening never selected across the seed family";
+}
+
+// A long note outside the cadence window always opens with the appuy: a single
+// held upper-neighbour note of max(span/4, eighth) capped at a half note,
+// followed by the alternation. The 2-bar note sits on the designed mid-piece
+// boundary so the placement gate cannot suppress it.
+TEST(OrnamentPassTest, LongNoteOpensWithHeldUpperAppoggiatura) {
+  ComposeResult r;
+  const int bars = 12;  // mid boundary bar = 3.
+  for (int bar = 0; bar < bars; ++bar) {
+    r.notes.push_back(makeNote(barToTick(bar), kTicksPerBar, 36, 1));
+    r.provenance.push_back(composeProv(1));
+  }
+  for (int bar = 0; bar < bars; ++bar) {
+    if (bar == 3) {
+      // Two-bar held note (bars 3-4) on the mid-piece boundary downbeat.
+      r.notes.push_back(makeNote(barToTick(3), kTicksPerBar * 2, 76, 0));
+      r.provenance.push_back(composeProv(0));
+      continue;
+    }
+    if (bar == 4)
+      continue;  // covered by the held note.
+    r.notes.push_back(makeNote(barToTick(bar), kTicksPerBeat * 2, 72, 0));
+    r.provenance.push_back(composeProv(0));
+    r.notes.push_back(makeNote(barToTick(bar) + kTicksPerBeat * 2, kTicksPerBeat * 2, 74, 0));
+    r.provenance.push_back(composeProv(0));
+  }
+  r.tracks = Renderer{}.render(r.notes);
+
+  OrnamentParams p = baseParams();
+  p.character = SubjectCharacter::Noble;  // density 1: phrase-boundary trill on the long note.
+  applyOrnamentPass(r, p);
+
+  std::vector<NoteEvent> run;
+  for (const auto& n : r.notes) {
+    if (n.voice == 0 && n.source == BachNoteSource::Ornament && n.start_tick >= barToTick(3) &&
+        n.start_tick < barToTick(5))
+      run.push_back(n);
+  }
+  ASSERT_GE(run.size(), 4u) << "mid-boundary long-note trill missing";
+
+  // Appuy head: held upper neighbour, span/4 capped at a half note.
+  const auto& head = run.front();
+  EXPECT_EQ(head.pitch, 77) << "appuy must hold the upper neighbour";
+  EXPECT_EQ(head.duration, duration::kHalfNote) << "appuy length = max(span/4, eighth) cap half";
+  // The alternation resumes on the main tone and ends lower -> main.
+  EXPECT_EQ(run[1].pitch, 76);
+  EXPECT_LT(run[run.size() - 2].pitch, 76);
+  EXPECT_EQ(run.back().pitch, 76);
+}
+
+// --- Trill pacing follows tempo ----------------------------------------------
+
+TEST(OrnamentPassTest, TrillPacingFollowsBpm) {
+  for (const std::uint16_t bpm :
+       {static_cast<std::uint16_t>(72), static_cast<std::uint16_t>(120)}) {
+    ComposeResult r = twoVoiceFixture(8);
+    OrnamentParams p = baseParams();
+    p.bpm = bpm;
+    applyOrnamentPass(r, p);
+
+    const std::vector<NoteEvent> v0 = voiceNotes(r, 0);
+    const auto [i, j] = firstOrnamentRun(v0, 4);
+    ASSERT_LT(i, j) << "no trill run found at bpm " << bpm;
+
+    const Tick expected_sub = bpm <= 100 ? duration::kThirtySecondNote : duration::kSixteenthNote;
+    // Every alternation tone except the remainder-absorbing final one runs at
+    // the tempo-selected pacing.
+    for (std::size_t k = i; k + 1 < j; ++k)
+      EXPECT_EQ(v0[k].duration, expected_sub) << "bpm " << bpm << " slot " << (k - i);
+  }
 }
 
 // --- Cadence trill at density 0 --------------------------------------------
@@ -514,6 +711,61 @@ TEST(OrnamentPassTest, MinorModeNeighboursAvoidAugmentedSecond) {
       EXPECT_FALSE(aug2) << "augmented 2nd between ornament tones";
     }
   }
+}
+
+// A minor-cadence trill on the raised leading tone (B natural) must use the
+// melodic-minor membrane on BOTH sides: upper auxiliary = C (the tonic, a half
+// step up) and Nachschlag lower neighbour = A natural (not the natural-minor
+// Bb, which would put a chromatic Bb-B step inside the figure).
+TEST(OrnamentPassTest, MinorCadenceLeadingToneTrillUsesRaisedScaleMembrane) {
+  ComposeResult r;
+  for (int bar = 0; bar < 4; ++bar) {
+    r.notes.push_back(makeNote(barToTick(bar), kTicksPerBar, 36, 1));
+    r.provenance.push_back(composeProv(1));
+  }
+  // Bars 0-1: plain C-minor quarters; bar 2 (cadence window): half-note B
+  // natural (the raised leading tone) then two quarters; bar 3: the protected
+  // final tonic.
+  const std::uint8_t scale[4] = {72, 74, 75, 79};
+  for (int bar = 0; bar < 2; ++bar) {
+    for (int beat = 0; beat < 4; ++beat) {
+      r.notes.push_back(
+          makeNote(barToTick(bar) + beat * kTicksPerBeat, kTicksPerBeat, scale[beat], 0));
+      r.provenance.push_back(composeProv(0));
+    }
+  }
+  r.notes.push_back(makeNote(barToTick(2), kTicksPerBeat * 2, 71, 0));
+  r.provenance.push_back(composeProv(0));
+  r.notes.push_back(makeNote(barToTick(2) + kTicksPerBeat * 2, kTicksPerBeat, 74, 0));
+  r.provenance.push_back(composeProv(0));
+  r.notes.push_back(makeNote(barToTick(2) + kTicksPerBeat * 3, kTicksPerBeat, 71, 0));
+  r.provenance.push_back(composeProv(0));
+  r.notes.push_back(makeNote(barToTick(3), kTicksPerBar, 72, 0));
+  r.provenance.push_back(composeProv(0));
+  r.tracks = Renderer{}.render(r.notes);
+
+  OrnamentParams p = baseParams();
+  p.mode = detail::Mode::Minor;
+  applyOrnamentPass(r, p);
+
+  // Collect the mandatory cadence-trill run on the bar-2 half note.
+  std::vector<NoteEvent> run;
+  for (const auto& n : r.notes) {
+    if (n.voice == 0 && n.source == BachNoteSource::Ornament && n.start_tick >= barToTick(2) &&
+        n.start_tick < barToTick(2) + kTicksPerBeat * 2)
+      run.push_back(n);
+  }
+  ASSERT_GE(run.size(), 4u) << "leading-tone cadence trill missing";
+
+  bool has_upper_c = false;
+  for (const auto& n : run) {
+    EXPECT_NE(n.pitch, 70) << "natural-minor Bb leaked into the leading-tone trill";
+    if (n.pitch == 72)
+      has_upper_c = true;
+  }
+  EXPECT_TRUE(has_upper_c) << "upper auxiliary C missing from the leading-tone trill";
+  EXPECT_EQ(run[run.size() - 2].pitch, 69) << "Nachschlag must be the melodic-minor A natural";
+  EXPECT_EQ(run.back().pitch, 71);
 }
 
 // --- Full pipeline: re-run the Validator -----------------------------------

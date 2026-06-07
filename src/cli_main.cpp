@@ -594,6 +594,7 @@ int runDefaultMode(const CliOptions& opts) {
       opts.key.is_minor ? bach::composer::detail::Mode::Minor : bach::composer::detail::Mode::Major;
   ornament_params.seed = seed_resolved;
   ornament_params.ticks_per_bar = ticks_per_bar;
+  ornament_params.bpm = opts.bpm;
   ornament_params.exempt_voices = collectExemptVoices(fixture.voice_plan);
   bach::composer::applyOrnamentPass(result, ornament_params);
 

@@ -406,6 +406,7 @@ BachError bach_generate_from_json(BachHandle handle, const char* json, size_t le
       req.is_minor ? bach::composer::detail::Mode::Minor : bach::composer::detail::Mode::Major;
   orn.seed = req.seed;
   orn.ticks_per_bar = ticks_per_bar;
+  orn.bpm = req.bpm;
   orn.exempt_voices = exemptVoices(fixture);
   bach::composer::applyOrnamentPass(result, orn);
 
