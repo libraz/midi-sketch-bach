@@ -819,8 +819,15 @@ void appendFugueSection(FugueAssembly& asm_ctx, int first_bar, int bars,
       // be forced into parallels against the fast figuration and rest, thinning
       // the texture. The V1 figuration moves in eighths; the V2 bass walks in
       // quarter-note chord roots a register below it.
-      addFigurationSpan(asm_ctx, 1, ep_start, ep_start + ep_len - 1, plan, first_bar, mode, 2,
-                        fig_offset);
+      // Episode counterline vocabulary rotation: successive episodes alternate
+      // the V1 figuration's subdivision tier (eighths / sixteenths) and shift
+      // its register offset, so the development's counterlines vary audibly
+      // across episodes. The figure itself stays the registry-aware wave (its
+      // parallel- and harshness-avoidance is the proven mechanism); only the
+      // tier and the start register rotate. The V2 bass keeps its quarters.
+      const int v1_notes_per_beat = (cycle % 2 == 1) ? 4 : 2;
+      addFigurationSpan(asm_ctx, 1, ep_start, ep_start + ep_len - 1, plan, first_bar, mode,
+                        v1_notes_per_beat, (fig_offset + cycle) % 4);
       addFigurationSpan(asm_ctx, 2, ep_start, ep_start + ep_len - 1, plan, first_bar, mode, 1,
                         fig_offset);
     }

@@ -1018,4 +1018,33 @@ TEST(FormFugueTest, DevelopmentAvoidsParallelDissonanceChains) {
                         << " (window-aware anchor regressed?)";
 }
 
+// --- Episode counterline vocabulary rotation ---------------------------------
+
+// Successive development episodes alternate the V1 counterline's subdivision
+// tier (eighths / sixteenths), locked from the material: among the voice-1
+// figuration sections of a long fugue, both a uniform-eighth section and a
+// uniform-sixteenth section must exist.
+TEST(FormFugueTest, EpisodeCounterlinesAlternateSubdivisionTiers) {
+  for (std::uint32_t seed : {1u, 5u, 42u}) {
+    const HarnessFixture fx = buildFixture(FormType::Fugue, seed, /*is_minor=*/false, 64);
+    bool saw_eighths = false;
+    bool saw_sixteenths = false;
+    for (const auto& section : fx.material.figuration_sections) {
+      if (section.voice != 1 || section.notes.empty())
+        continue;
+      // The subdivision tier survives as the section's MINIMUM duration (the
+      // same-pitch coalescing pass only lengthens notes, never shortens them).
+      Tick min_dur = section.notes.front().duration;
+      for (const auto& n : section.notes)
+        min_dur = std::min(min_dur, n.duration);
+      if (min_dur == kTicksPerBeat / 2)
+        saw_eighths = true;
+      if (min_dur == kTicksPerBeat / 4)
+        saw_sixteenths = true;
+    }
+    EXPECT_TRUE(saw_eighths) << "seed " << seed;
+    EXPECT_TRUE(saw_sixteenths) << "seed " << seed;
+  }
+}
+
 }  // namespace bach::composer
