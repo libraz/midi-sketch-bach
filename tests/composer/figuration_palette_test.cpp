@@ -85,7 +85,55 @@ TEST(FigurationPaletteSawtooth, FillsStepTowardTheNextAnchorWithoutLeaps) {
   }
 }
 
+// --- barAnchorPitchClasses ----------------------------------------------------
+
+// Out-of-scale triad tones flatten to the scale tone a semitone below BEFORE
+// the ground-consonance filter. Minor ii (D-F-A): the A flattens to Ab, which
+// the filter rejects as a tritone over the D ground -- anchors are {D, F}.
+TEST(FigurationPaletteAnchors, MinorTwoChordFlattensRaisedFifthAndRejectsTritone) {
+  const CycleBar bar{2, true, 50, 2};  // ii over a D ground (C minor).
+  const std::vector<int> pcs = barAnchorPitchClasses(bar, detail::Mode::Minor);
+  EXPECT_EQ(pcs, (std::vector<int>{2, 5}));
+}
+
+// Major B-root bar (bass B treated as a major root, B-D#-F#): the D# flattens
+// to D (a consonant third over the B ground); the F# flattens to F, which the
+// filter rejects as a tritone -- anchors are {B, D}.
+TEST(FigurationPaletteAnchors, MajorBRootFlattensThirdAndRejectsTritoneFifth) {
+  const CycleBar bar{11, false, 59, 11};
+  const std::vector<int> pcs = barAnchorPitchClasses(bar, detail::Mode::Major);
+  EXPECT_EQ(pcs, (std::vector<int>{11, 2}));
+}
+
 // --- kScalarWave (3/4 cycle form) ---------------------------------------------
+
+// Every beat onset of the wave must be one of the bar's anchor pitch classes
+// (consonant with the held ground). The free-running wave once anchored only
+// bar downbeats, which left non-chord tones on the beats of entire sixteenth-
+// tier cycles -- audible as sustained dissonance over the ground.
+TEST(FigurationPaletteScalarWave, BeatOnsetsAreAnchorTones) {
+  const std::vector<CycleBar> minor_plan = {
+      {0, true, 60, 0},     // i  : ground C.
+      {10, false, 58, 10},  // VII: ground Bb.
+      {2, true, 50, 2},     // ii : ground D (anchors flatten the raised fifth).
+      {7, false, 55, 7},    // V  : ground G.
+  };
+  for (int notes_per_beat : {1, 2, 4}) {
+    std::vector<MaterialNote> notes;
+    appendScalarWaveCycle(notes, 0, minor_plan, /*band_lo=*/60, /*band_hi=*/79,
+                          /*phase_rotation=*/3, /*descending_start=*/false, notes_per_beat,
+                          detail::Mode::Minor);
+    for (const MaterialNote& note : notes) {
+      if (note.start_tick % kTicksPerBeat != 0)
+        continue;  // only beat onsets are anchor-guaranteed.
+      const int bar = static_cast<int>(note.start_tick / kTicksPerBar34);
+      EXPECT_TRUE(
+          isAnchorTone(note.pitch, minor_plan[static_cast<std::size_t>(bar)], detail::Mode::Minor))
+          << "npb " << notes_per_beat << " beat onset at tick " << note.start_tick << " pitch "
+          << static_cast<int>(note.pitch);
+    }
+  }
+}
 
 TEST(FigurationPaletteScalarWave, CycleStaysInBandAndConjunct) {
   const std::vector<CycleBar> plan = majorCyclePlan();
@@ -103,12 +151,12 @@ TEST(FigurationPaletteScalarWave, CycleStaysInBandAndConjunct) {
       EXPECT_LE(static_cast<int>(notes[i].pitch), kBandHi);
       if (i == 0)
         continue;
-      // Conjunct surface: one diatonic step (<= 2 semitones) per note. A bar
-      // downbeat may combine the wave advance with the chord-tone re-anchor
-      // step (two diatonic steps, <= 4 semitones), never a genuine leap.
-      const bool bar_head = notes[i].start_tick % kTicksPerBar34 == 0;
+      // Conjunct surface: one diatonic step (<= 2 semitones) per note. A beat
+      // onset may combine the wave advance with the chord-tone snap (up to
+      // three diatonic steps, <= 5 semitones), never a genuine leap.
+      const bool beat_head = notes[i].start_tick % kTicksPerBeat == 0;
       EXPECT_LE(std::abs(static_cast<int>(notes[i].pitch) - static_cast<int>(notes[i - 1].pitch)),
-                bar_head ? 4 : 2)
+                beat_head ? 5 : 2)
           << "leap at tick " << notes[i].start_tick;
     }
   }

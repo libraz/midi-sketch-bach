@@ -144,10 +144,11 @@ void appendSawtoothCycle(std::vector<MaterialNote>& notes, Tick block_start,
  * diatonic scale degree per emitted note and folds its direction at the band
  * edges. Single-step motion is the corpus's dominant melodic interval, so the
  * realized line's melodic-interval distribution matches the reference far
- * better (the dominant scorer feature). The bar downbeat is re-anchored to the
- * nearest chord tone of the bar's chord so beat-onset vertical consonance
- * against the held ground stays high, but the re-anchor is itself reached by a
- * single step (it never introduces a leap), so the surface remains conjunct.
+ * better (the dominant scorer feature). EVERY beat onset snaps the wave to the
+ * nearest chord tone of the bar's chord so each sampled beat onset stays
+ * consonant against the held ground; the snap moves at most two scale degrees
+ * (a third at worst, never a genuine leap), and the run between onsets keeps
+ * the conjunct scalar surface.
  *
  * Variation differentiation (no RNG): `phase_rotation` shifts the wave's start
  * degree and `descending_start` flips the opening direction, so consecutive

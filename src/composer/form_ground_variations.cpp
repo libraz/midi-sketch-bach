@@ -1,4 +1,3 @@
-#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <vector>
@@ -187,6 +186,34 @@ void appendCounterFiguration(std::vector<MaterialNote>& notes, ThemeToneRegistry
     detail::ChordSpec chord;
     chord.root_pc = plan.root_pc;
     chord.minor = plan.minor;
+    // Nearest DIFFERENT triad tone in band (prefer above): shared by the
+    // anti-stall escape and the off-beat oscillation below. Out-of-scale triad
+    // tones flatten to the scale tone a semitone below (matching the V0
+    // anchor policy in barAnchorPitchClasses) so the counter-line never sounds
+    // a chromatic tone against the natural-minor V0 figuration (a B against
+    // V0's Bb).
+    auto nearest_other_triad_tone = [&](int from) {
+      const int third = chord.minor ? 3 : 4;
+      int triad_pc[3] = {chord.root_pc % 12, (chord.root_pc + third) % 12,
+                         (chord.root_pc + 7) % 12};
+      for (int& pc : triad_pc) {
+        if (!detail::inScale(pc, mode))
+          pc = (pc + 11) % 12;
+      }
+      auto is_triad = [&](int midi) {
+        const int pcl = ((midi % 12) + 12) % 12;
+        return pcl == triad_pc[0] || pcl == triad_pc[1] || pcl == triad_pc[2];
+      };
+      for (int dist = 1; dist <= 12; ++dist) {
+        const int above = from + dist;
+        const int below = from - dist;
+        if (above <= band_hi && is_triad(above))
+          return above;
+        if (below >= band_lo && is_triad(below))
+          return below;
+      }
+      return from;
+    };
     for (int beat = 0; beat < 3; ++beat) {
       const Tick beat_tick = block_start + static_cast<Tick>(bar) * kTicksPerBar34 +
                              static_cast<Tick>(beat) * kTicksPerBeat;
@@ -203,40 +230,30 @@ void appendCounterFiguration(std::vector<MaterialNote>& notes, ThemeToneRegistry
       // a fifth identical beat is imminent, force the nearest DIFFERENT triad
       // tone in band instead (a chord tone, so it stays consonant against the
       // ground and the V0 anchors above).
-      if (notes_per_beat == 1 && anchor == line_prev && anchor_run >= 4) {
-        const int third = chord.minor ? 3 : 4;
-        const int triad_pc[3] = {chord.root_pc % 12, (chord.root_pc + third) % 12,
-                                 (chord.root_pc + 7) % 12};
-        auto is_triad = [&](int midi) {
-          const int pcl = ((midi % 12) + 12) % 12;
-          return pcl == triad_pc[0] || pcl == triad_pc[1] || pcl == triad_pc[2];
-        };
-        for (int dist = 1; dist <= 12; ++dist) {
-          const int above = anchor + dist;
-          const int below = anchor - dist;
-          if (above <= band_hi && is_triad(above)) {
-            anchor = above;
-            break;
-          }
-          if (below >= band_lo && is_triad(below)) {
-            anchor = below;
-            break;
-          }
+      if (notes_per_beat == 1 && anchor == line_prev && anchor_run >= 4)
+        anchor = nearest_other_triad_tone(anchor);
+      anchor_run = (anchor == line_prev) ? anchor_run + 1 : 1;
+      // Off-beat fills oscillate between the anchor and a consonant companion
+      // tone: prefer a stepwise diatonic neighbour that is consonant against
+      // the held ground (upper first -- the common figure), falling back to
+      // the nearest other triad tone (a broken third) when both neighbours
+      // clash. A blind diatonic upper-neighbour oscillation proved too harsh
+      // here: it hammered a sustained 9th/7th against the bar-long ground note
+      // under the running V0 figuration.
+      int osc = -1;
+      for (int cand : {detail::scaleUp(anchor, 1, mode), detail::scaleDown(anchor, 1, mode)}) {
+        if (cand >= band_lo && cand <= band_hi && isConsonantIc(cand - plan.ground_pc)) {
+          osc = cand;
+          break;
         }
       }
-      anchor_run = (anchor == line_prev) ? anchor_run + 1 : 1;
-      // Stepwise fill toward the NEXT beat's eventual anchor is unknown here, so
-      // fills oscillate around the anchor by single scale steps (conjunct, no
-      // leaps); the anchor itself is the consonant beat onset.
-      int anchor_deg = midiToDegree(anchor, mode);
+      if (osc < 0)
+        osc = nearest_other_triad_tone(anchor);
       for (int sub = 0; sub < notes_per_beat; ++sub) {
         MaterialNote mnote;
         mnote.start_tick = beat_tick + static_cast<Tick>(sub) * step;
         mnote.duration = step;
-        int deg = anchor_deg;
-        if (sub > 0)
-          deg = anchor_deg + ((sub % 2 == 1) ? 1 : 0);  // neighbour-tone oscillation.
-        const int pitch = degreeToMidi(deg, mode);
+        const int pitch = (sub % 2 == 1) ? osc : anchor;
         mnote.pitch = static_cast<std::uint8_t>(pitch);
         notes.push_back(mnote);
         registry.record(mnote.start_tick, /*voice=*/1, pitch, step);

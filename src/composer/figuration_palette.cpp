@@ -143,15 +143,26 @@ int fitPitchClass(int pitch_class, int center) {
 }
 
 std::vector<int> barAnchorPitchClasses(const CycleBar& bar, detail::Mode mode) {
-  const bool minor = mode == detail::Mode::Minor;
   const int third = bar.minor ? 3 : 4;
   std::vector<int> anchors;
   anchors.reserve(3);
   for (int interval : {0, third, 7}) {
-    const int pitch_class = (bar.root_pc + interval) % 12;
-    if (minor && pitch_class == 11)
-      continue;
+    int pitch_class = (bar.root_pc + interval) % 12;
+    // Flatten out-of-scale triad tones to the scale tone a semitone below
+    // (every chromatic pitch class sits one semitone above a scale member in
+    // both C major and C natural minor) BEFORE the consonance filter. The
+    // anchors feed degree-space chains (midiToDegree / degreeToMidi) that can
+    // only realize scale tones, so an unflattened tone would degrade there
+    // silently and SKIP the consonance check -- e.g. the A of a D-F-A triad
+    // realizing as Ab, a tritone over a D ground. Explicit flattening keeps
+    // the useful cases (a major-mode B-root triad's D# anchoring as D) and
+    // lets the filter reject the dissonant ones (that triad's F# -> F, a
+    // tritone over the B ground).
+    if (!detail::inScale(pitch_class, mode))
+      pitch_class = (pitch_class + 11) % 12;
     if (!isConsonantIc(pitch_class - bar.ground_pc))
+      continue;
+    if (std::find(anchors.begin(), anchors.end(), pitch_class) != anchors.end())
       continue;
     anchors.push_back(pitch_class);
   }
@@ -240,15 +251,20 @@ void appendScalarWaveCycle(std::vector<MaterialNote>& notes, Tick block_start,
       const Tick beat_tick = block_start + static_cast<Tick>(bar) * kTicksPerBar34 +
                              static_cast<Tick>(beat) * kTicksPerBeat;
       for (int sub = 0; sub < notes_per_beat; ++sub) {
-        // Bar downbeat (beat 0, sub 0): re-anchor to the nearest chord tone of
-        // this bar so the sampled beat onset stays consonant with the held
-        // ground -- but only by stepping the wave toward it, so the conjunct
-        // surface is preserved and no leap is introduced.
-        if (beat == 0 && sub == 0 && bar > 0) {
+        // EVERY beat onset (sub 0): snap the wave to the bar's nearest chord
+        // tone so each sampled beat onset is consonant with the held ground.
+        // The triad tones sit at most two scale degrees from any wave position,
+        // so the snap is a small turn (a third at worst), never a leap -- and
+        // the run between onsets keeps the conjunct scalar surface. A bar-head
+        // step-toward variant proved insufficient: at the sixteenth tier the
+        // free wave put non-chord tones on the beats of entire cycles.
+        if (sub == 0) {
           const std::vector<int> pcs = barAnchorPitchClasses(plan, mode);
           const int cur_midi = degreeToMidi(degree, mode);
           int best_midi = cur_midi;
           int best_dist = 128;
+          int best_fwd_midi = cur_midi;
+          int best_fwd_dist = 128;
           for (int pitch_class : pcs) {
             const int fit = fitPitchClass(pitch_class, cur_midi);
             for (int oct : {fit - 12, fit, fit + 12}) {
@@ -259,15 +275,18 @@ void appendScalarWaveCycle(std::vector<MaterialNote>& notes, Tick block_start,
                 best_dist = dist;
                 best_midi = oct;
               }
+              if ((oct - cur_midi) * dir >= 0 && dist < best_fwd_dist) {
+                best_fwd_dist = dist;
+                best_fwd_midi = oct;
+              }
             }
           }
-          // Step toward the chosen chord tone by a single scale degree (never a
-          // leap); if already there, hold the degree.
-          const int target_deg = midiToDegree(best_midi, mode);
-          if (target_deg > degree)
-            ++degree;
-          else if (target_deg < degree)
-            --degree;
+          // Prefer the chord tone AHEAD of the running direction when it is
+          // within a third, so the snap extends the run instead of turning it
+          // back (the nearest tone behind would add a turn + repeat figure and
+          // skew the melodic-interval surface away from the corpus's stepwise
+          // dominance); fall back to the nearest tone either side.
+          degree = midiToDegree((best_fwd_dist <= 4) ? best_fwd_midi : best_midi, mode);
         }
         MaterialNote mnote;
         mnote.start_tick = beat_tick + static_cast<Tick>(sub) * step;

@@ -30,6 +30,7 @@
 #include "composer/harness_fixture.h"
 #include "composer/minor_material.h"
 #include "composer/provenance.h"
+#include "composer/texture_helpers.h"
 #include "core/basic_types.h"
 
 namespace bach::composer {
@@ -428,6 +429,48 @@ TEST(GroundVariationChaconne, PicardyFinalChordOnEvenSeed) {
 
 TEST(GroundVariationPassacaglia, PicardyFinalChordOnEvenSeed) {
   expectPicardyFinalChord(FormType::Passacaglia);
+}
+
+// --- 9. Beat-onset vertical consonance --------------------------------------
+//
+// Every quarter-beat onset's sounding pitch set must be mutually consonant: no
+// m2/M2/tritone/m7/M7 interval class between any sounding pair. Passing tones
+// BETWEEN beat onsets may be dissonant (normal figuration); the sampled beat
+// grid is what the ear locks onto over the held ground, and an unanchored
+// variation line once put non-chord tones on the beats of entire late cycles
+// (audible as sustained dissonance from the climax onward).
+
+void expectBeatOnsetsConsonant(FormType form) {
+  for (const Case& c : casesFor(form)) {
+    const HarnessFixture fx = build(c.form, c.seed, c.is_minor, c.target_bars);
+    const ComposeResult r = Composer{}.run(fx.material, fx.harmony, fx.voice_plan);
+    Tick end = 0;
+    for (const auto& n : r.notes)
+      end = std::max(end, n.start_tick + n.duration);
+    for (Tick t = 0; t < end; t += kTicksPerBeat) {
+      std::vector<int> sounding;
+      for (const auto& n : r.notes) {
+        if (n.start_tick <= t && t < n.start_tick + n.duration)
+          sounding.push_back(static_cast<int>(n.pitch));
+      }
+      for (std::size_t i = 0; i < sounding.size(); ++i) {
+        for (std::size_t j = i + 1; j < sounding.size(); ++j) {
+          EXPECT_TRUE(isConsonantIc(sounding[i] - sounding[j]))
+              << "form " << static_cast<int>(form) << " seed " << c.seed << " minor " << c.is_minor
+              << " bars " << c.target_bars << " tick " << t << " pitches " << sounding[i] << "/"
+              << sounding[j];
+        }
+      }
+    }
+  }
+}
+
+TEST(GroundVariationChaconne, BeatOnsetsAreVerticallyConsonant) {
+  expectBeatOnsetsConsonant(FormType::Chaconne);
+}
+
+TEST(GroundVariationPassacaglia, BeatOnsetsAreVerticallyConsonant) {
+  expectBeatOnsetsConsonant(FormType::Passacaglia);
 }
 
 // The 3-voice passacaglia uplift must NOT bleed into the chaconne: the chaconne
