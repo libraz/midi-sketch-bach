@@ -175,6 +175,34 @@ TEST(FormLinearCello, IsStepwiseDominantWithNoRemoteLeaps) {
   }
 }
 
+// The cello's per-beat cell contour rotates per 4-bar cycle: consecutive
+// cycles trace distinct figures, locked via the cell's interval signature
+// (pitch deltas from the cell's first note). Every shape still opens on the
+// anchor, so the implicit-stream invariants (per-cell min/max constant within
+// the bar) keep holding -- asserted by the existing suite; here only the
+// rotation itself is locked.
+TEST(FormLinearCello, CellContourRotatesAcrossCycles) {
+  for (std::uint32_t seed : kSeeds) {
+    const ComposeResult r = build(FormType::CelloPrelude, seed, /*is_minor=*/false, 32, nullptr);
+    std::vector<NoteEvent> notes = r.notes;
+    std::sort(notes.begin(), notes.end(),
+              [](const NoteEvent& x, const NoteEvent& y) { return x.start_tick < y.start_tick; });
+    ASSERT_GE(notes.size(), 32u * 16u);
+    std::set<std::array<int, 3>> signatures;
+    for (int cycle = 0; cycle < 8; ++cycle) {
+      // First cell (four sixteenths) of the cycle's first bar.
+      const std::size_t base = static_cast<std::size_t>(cycle) * 4 * 16;
+      std::array<int, 3> sig{};
+      for (int idx = 1; idx < 4; ++idx)
+        sig[static_cast<std::size_t>(idx - 1)] =
+            static_cast<int>(notes[base + static_cast<std::size_t>(idx)].pitch) -
+            static_cast<int>(notes[base].pitch);
+      signatures.insert(sig);
+    }
+    EXPECT_GE(signatures.size(), 2u) << "seed " << seed << ": cell contour must rotate";
+  }
+}
+
 // --- TrioSonata -------------------------------------------------------------
 
 TEST(FormLinearTrio, ValidatesCleanAcrossMatrix) {

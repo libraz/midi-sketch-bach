@@ -260,19 +260,33 @@ HarnessFixture buildCelloPreludeForm(const ResolvedRequest& req) {
       }
     }
 
-    // Each of the bar's four per-beat cells is the SAME four-note figure
-    // [anchor, +1, +2, +1] (scale degrees). Because every cell is identical, the
-    // implicit bass stream (per-cell minimum) is the anchor in EVERY cell and the
-    // top stream (per-cell maximum) is anchor+2 in every cell -- both CONSTANT
-    // within the bar (the Phase15 invariant). The implicit streams therefore move
-    // ONLY at bar boundaries, where the voice-led chord-tone anchors keep their
-    // motion small and forbidden-leap-free. Any out-of-scale or augmented-second
+    // Each of the bar's four per-beat cells is the SAME four-note figure (scale
+    // degrees above the anchor). Because every cell is identical, the implicit
+    // bass stream (per-cell minimum) is the anchor in EVERY cell and the top
+    // stream (per-cell maximum) is anchor+reach in every cell -- both CONSTANT
+    // within the bar. The implicit streams therefore move ONLY at bar
+    // boundaries, where the voice-led chord-tone anchors keep their motion
+    // small and forbidden-leap-free. Any out-of-scale or augmented-second
     // adjacency inside the figure (e.g. the harmonic-minor Ab->B step) is an
-    // INTERIOR passing note, never a cell extreme, so it is never measured by the
-    // implicit-voice rule. Note-to-note the figure is wholly stepwise (anchor, +1,
-    // +2, +1, then the next cell's anchor a step below), so large_leap_ratio ~ 0.
-    const int cell_fig[4] = {walk(anchor, 0, harmonic), walk(anchor, 1, harmonic),
-                             walk(anchor, reach, harmonic), walk(anchor, 1, harmonic)};
+    // INTERIOR passing note, never a cell extreme, so it is never measured by
+    // the implicit-voice rule.
+    //
+    // The cell CONTOUR rotates per 4-bar cycle so consecutive cycles trace
+    // distinct figures (rising arc / fold-back / under-then-over). Every shape
+    // opens on the anchor (degree 0) and touches the same extreme (reach), so
+    // the implicit-stream invariants above hold for every shape, and every
+    // note-to-note move stays a step or a small (third/fourth) skip.
+    static constexpr int kCellShapes[3][4] = {
+        {0, 1, -1, 1},   // rising arc: anchor, +1, reach, +1 (-1 marks reach).
+        {0, -1, 1, -1},  // fold-back: anchor, reach, +1, reach.
+        {0, 1, 0, -1},   // under-then-over: anchor, +1, anchor, reach.
+    };
+    const int* shape = kCellShapes[(req.seed + cycle) % 3];
+    int cell_fig[4];
+    for (int idx = 0; idx < 4; ++idx) {
+      const int degree = shape[idx] < 0 ? reach : shape[idx];
+      cell_fig[idx] = walk(anchor, degree, harmonic);
+    }
     for (int slot = 0; slot < kNotesPerBar; ++slot) {
       MaterialNote mn;
       mn.start_tick = static_cast<Tick>(bar) * kTicksPerBar + static_cast<Tick>(slot) * kSix;
