@@ -1,8 +1,9 @@
-"""Unit tests for bachlib.ornament_report (pure histogram helpers).
+"""Unit tests for bachlib.ornament_report (pure histogram + classifier helpers).
 
 Synthetic generated/provenance pairs only -- no bach_cli invocation. Covers the
 index-parallel Ornament selection, the bar histogram / quarter segmentation,
-and the cadence-window count.
+the cadence-window count, and the run-shape classifier (trill / mordent / turn
+/ appoggiatura / slide, plus false-positive rejection).
 """
 
 from __future__ import annotations
@@ -80,6 +81,118 @@ class DistributionSummaryTest(unittest.TestCase):
         # total_bars is not divisible by 4.
         summary = ornament_report.distribution_summary([6], total_bars=7)
         self.assertEqual(summary["quarter_counts"], [0, 0, 0, 1])
+
+
+def _run_note(start: int, dur: int, pitch: int, voice: int = 0) -> dict:
+    return {"start_tick": start, "duration": dur, "pitch": pitch, "voice": voice, "velocity": 80}
+
+
+def _chain(specs: list[tuple[int, int]], start: int = 0, voice: int = 0) -> list[dict]:
+    """Build a contiguous run from (duration, pitch) pairs."""
+    notes = []
+    tick = start
+    for dur, pitch in specs:
+        notes.append(_run_note(tick, dur, pitch, voice))
+        tick += dur
+    return notes
+
+
+class ClassifyRunTest(unittest.TestCase):
+    def test_appoggiatura_descending_lean(self) -> None:
+        run = _chain([(240, 74), (240, 72)])
+        self.assertEqual(ornament_report.classify_run(run), "appoggiatura")
+
+    def test_rising_two_note_pair_is_not_appoggiatura(self) -> None:
+        run = _chain([(240, 72), (240, 74)])
+        self.assertEqual(ornament_report.classify_run(run), "unknown")
+
+    def test_mordent_main_lower_main(self) -> None:
+        run = _chain([(60, 72), (60, 71), (360, 72)])
+        self.assertEqual(ornament_report.classify_run(run), "mordent")
+
+    def test_slide_two_rising_graces(self) -> None:
+        run = _chain([(60, 76), (60, 77), (840, 79)])
+        self.assertEqual(ornament_report.classify_run(run), "slide")
+
+    def test_turn_upper_main_lower_main(self) -> None:
+        run = _chain([(60, 77), (60, 76), (60, 74), (780, 76)])
+        self.assertEqual(ornament_report.classify_run(run), "turn")
+
+    def test_trill_alternation_with_nachschlag(self) -> None:
+        run = _chain([(60, 74), (60, 72), (60, 74), (60, 72), (60, 71), (180, 72)])
+        self.assertEqual(ornament_report.classify_run(run), "trill")
+
+    def test_appuy_opening_classifies_as_trill(self) -> None:
+        # Held upper tone, then alternation: still one trill run.
+        run = _chain([(480, 74), (60, 72), (60, 74), (60, 72), (60, 71), (240, 72)])
+        self.assertEqual(ornament_report.classify_run(run), "trill")
+
+    def test_von_unten_opening_classifies_as_trill(self) -> None:
+        # Lower -> main prefix, then alternation.
+        run = _chain([(60, 71), (60, 72), (60, 74), (60, 72), (60, 71), (180, 72)])
+        self.assertEqual(ornament_report.classify_run(run), "trill")
+
+    def test_four_sixteenth_slots_are_trill_not_turn(self) -> None:
+        # A 4-slot trill paced at sixteenths shares the turn's contour but not
+        # its 32nd grace tones.
+        run = _chain([(120, 74), (120, 72), (120, 71), (120, 72)])
+        self.assertEqual(ornament_report.classify_run(run), "trill")
+
+
+class OrnamentRunsTest(unittest.TestCase):
+    def test_gap_splits_runs_and_voices_are_separate(self) -> None:
+        lean = _chain([(240, 74), (240, 72)], start=0, voice=0)
+        # Same voice, after a gap: a second run.
+        mordent = _chain([(60, 72), (60, 71), (360, 72)], start=1920, voice=0)
+        # Another voice at overlapping ticks: its own run.
+        other = _chain([(240, 67), (240, 65)], start=0, voice=1)
+        notes = lean + mordent + other
+        generated = {"notes": notes}
+        provenance = {"notes": [_prov(i, "Ornament") for i in range(len(notes))]}
+        runs = ornament_report.ornament_runs(generated, provenance)
+        self.assertEqual(len(runs), 3)
+        kinds = sorted(ornament_report.classify_run(run) for run in runs)
+        self.assertEqual(kinds, ["appoggiatura", "appoggiatura", "mordent"])
+
+
+class SegmentRunTest(unittest.TestCase):
+    def test_adjacent_figures_in_one_run_are_split(self) -> None:
+        # The pass gates per (bar, voice): two turns on adjacent quarters abut
+        # into ONE Ornament run and must parse as two figures.
+        turn_a = _chain([(60, 77), (60, 76), (60, 74), (300, 76)], start=0)
+        turn_b = _chain([(60, 79), (60, 77), (60, 76), (300, 77)], start=480)
+        figures = ornament_report.segment_run(turn_a + turn_b)
+        self.assertEqual([kind for kind, _ in figures], ["turn", "turn"])
+
+    def test_lean_abutting_turn_parses_both(self) -> None:
+        lean = _chain([(480, 74), (480, 72)], start=0)
+        turn = _chain([(60, 77), (60, 76), (60, 74), (780, 76)], start=960)
+        figures = ornament_report.segment_run(lean + turn)
+        self.assertEqual([kind for kind, _ in figures], ["appoggiatura", "turn"])
+
+    def test_mixed_run_classifies_compound(self) -> None:
+        lean = _chain([(480, 74), (480, 72)], start=0)
+        turn = _chain([(60, 77), (60, 76), (60, 74), (780, 76)], start=960)
+        self.assertEqual(ornament_report.classify_run(lean + turn), "compound")
+
+
+class KindSummaryTest(unittest.TestCase):
+    def test_counts_and_cadence_trill_flag(self) -> None:
+        # 8-bar piece (1920-tick bars): trill in bar 6 (cadence window) plus a
+        # mid-piece mordent.
+        trill = _chain([(60, 74), (60, 72), (60, 74), (60, 72), (60, 71), (180, 72)],
+                       start=6 * 1920, voice=0)
+        mordent = _chain([(60, 72), (60, 71), (360, 72)], start=2 * 1920, voice=0)
+        summary = ornament_report.kind_summary([trill, mordent], total_bars=8, ticks_per_bar=1920)
+        self.assertEqual(summary["kind_counts"], {"trill": 1, "mordent": 1})
+        self.assertTrue(summary["cadence_window_trill"])
+
+    def test_mid_piece_trill_does_not_set_cadence_flag(self) -> None:
+        trill = _chain([(60, 74), (60, 72), (60, 74), (60, 72), (60, 71), (180, 72)],
+                       start=2 * 1920, voice=0)
+        summary = ornament_report.kind_summary([trill], total_bars=8, ticks_per_bar=1920)
+        self.assertEqual(summary["kind_counts"], {"trill": 1})
+        self.assertFalse(summary["cadence_window_trill"])
 
 
 class TicksPerBarTest(unittest.TestCase):
