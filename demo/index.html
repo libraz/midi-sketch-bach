@@ -4,156 +4,10 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>midi-sketch-bach Demo</title>
-  <style>
-    * { box-sizing: border-box; }
-    body {
-      font-family: 'Georgia', 'Times New Roman', serif;
-      max-width: 900px; margin: 0 auto; padding: 20px;
-      background: #faf6f0; color: #3c2f1e;
-    }
-    h1 {
-      color: #4a3728; border-bottom: 2px solid #8b6914;
-      padding-bottom: 10px; font-weight: normal; letter-spacing: 1px;
-    }
-    .version { color: #8b7355; font-size: 0.85em; }
-    .section {
-      background: #fff; border-radius: 8px; padding: 20px;
-      margin-bottom: 20px; box-shadow: 0 2px 8px rgba(60,47,30,0.08);
-      border: 1px solid #e8ddd0;
-    }
-    .section h2 {
-      margin-top: 0; color: #4a3728; font-size: 1.15em;
-      font-weight: normal; letter-spacing: 0.5px;
-    }
-    .form-group { margin-bottom: 15px; }
-    label { display: block; margin-bottom: 5px; font-weight: 500; color: #5a4a3a; font-size: 0.95em; }
-    select, input[type="number"] {
-      width: 100%; padding: 10px; border: 1px solid #d4c8b8;
-      border-radius: 4px; font-size: 14px; font-family: inherit;
-      background: #fff;
-    }
-    select:focus, input:focus { outline: none; border-color: #8b6914; }
-    select:disabled, input:disabled { background: #f0ebe3; color: #8b7355; cursor: not-allowed; }
-    .row { display: flex; gap: 15px; flex-wrap: wrap; }
-    .row > .form-group { flex: 1; min-width: 120px; }
-    .checkbox-group { display: flex; align-items: center; gap: 8px; }
-    .checkbox-group input { width: auto; }
-    button {
-      padding: 12px 24px; border: none; border-radius: 4px;
-      font-size: 15px; cursor: pointer; transition: all 0.2s;
-      font-family: inherit;
-    }
-    .btn-generate { background: #8b6914; color: #fff; }
-    .btn-generate:hover { background: #705510; }
-    .btn-generate:disabled { background: #c4b99a; cursor: not-allowed; }
-    .btn-play { background: #5b7a3a; color: #fff; }
-    .btn-play:hover { background: #4a6530; }
-    .btn-play:disabled { background: #c4b99a; cursor: not-allowed; }
-    .btn-stop { background: #a04030; color: #fff; }
-    .btn-stop:hover { background: #8a3428; }
-    .btn-stop:disabled { background: #c4b99a; cursor: not-allowed; }
-    .btn-download { background: #3a5a7a; color: #fff; }
-    .btn-download:hover { background: #2e4a65; }
-    .btn-download:disabled { background: #c4b99a; cursor: not-allowed; }
-    .buttons { display: flex; gap: 10px; flex-wrap: wrap; }
-    .result {
-      background: #f5f0e8; padding: 15px; border-radius: 4px;
-      font-size: 13px; color: #4a3728; border: 1px solid #e0d6c8;
-    }
-    .result-grid {
-      display: grid; grid-template-columns: auto 1fr; gap: 4px 16px;
-    }
-    .result-grid dt {
-      color: #8b7355; font-size: 0.9em; text-align: right;
-      padding-top: 1px;
-    }
-    .result-grid dd {
-      margin: 0; font-family: 'Menlo', 'Consolas', monospace;
-      font-size: 13px;
-    }
-    .result-description {
-      margin-top: 10px; padding-top: 10px; border-top: 1px solid #e0d6c8;
-      font-family: 'Menlo', 'Consolas', monospace; font-size: 12px;
-      white-space: pre-wrap; color: #6b5a48;
-    }
-    .status { padding: 10px; border-radius: 4px; margin-bottom: 15px; font-size: 0.95em; }
-    .status.loading { background: #fef3cd; color: #856404; border: 1px solid #fde68a; }
-    .status.ready { background: #d4edda; color: #1a5928; border: 1px solid #b7dfc1; }
-    .status.error { background: #f8d7da; color: #721c24; border: 1px solid #f1b0b7; }
-    .hint { color: #8b7355; font-size: 0.85em; margin-top: 4px; }
-    .system-badge {
-      display: inline-block; padding: 2px 8px; border-radius: 3px;
-      font-size: 0.75em; font-weight: bold; letter-spacing: 0.5px; vertical-align: middle;
-    }
-    .badge-organ { background: #eee4d4; color: #6b5030; }
-    .badge-keyboard { background: #e4dde8; color: #4a3060; }
-    .badge-solo { background: #dde8d8; color: #3a5a30; }
-    .playback-info {
-      margin-top: 15px; padding: 12px 15px; background: #f5f0e8;
-      border-radius: 4px; border: 1px solid #e0d6c8;
-    }
-    .playback-top {
-      display: flex; align-items: center; gap: 15px; margin-bottom: 10px;
-    }
-    .progress-bar {
-      flex: 1; height: 6px; background: #d4c8b8;
-      border-radius: 3px; overflow: hidden; cursor: pointer;
-    }
-    .progress-bar-fill {
-      height: 100%; background: #8b6914; transition: width 0.05s linear;
-    }
-    .time-display {
-      font-family: 'Menlo', 'Consolas', monospace;
-      font-size: 13px; min-width: 100px; text-align: right; color: #5a4a3a;
-    }
-    .playback-detail {
-      display: flex; align-items: center; gap: 20px; flex-wrap: wrap;
-    }
-    .bar-display {
-      font-family: 'Menlo', 'Consolas', monospace; font-size: 14px; color: #4a3728;
-    }
-    .bar-display .bar-num { font-size: 1.3em; font-weight: bold; color: #8b6914; }
-    .beat-dots {
-      display: flex; gap: 6px; align-items: center;
-    }
-    .beat-dot {
-      width: 10px; height: 10px; border-radius: 50%;
-      background: #d4c8b8; transition: all 0.08s ease;
-    }
-    .beat-dot.active {
-      background: #8b6914; transform: scale(1.3);
-      box-shadow: 0 0 6px rgba(139,105,20,0.4);
-    }
-    .beat-dot.downbeat.active {
-      background: #705510; transform: scale(1.5);
-    }
-    .active-voices {
-      display: flex; gap: 4px; align-items: center;
-    }
-    .voice-indicator {
-      display: inline-block; padding: 2px 8px; border-radius: 3px;
-      font-size: 0.75em; font-family: 'Menlo', 'Consolas', monospace;
-      background: #e8ddd0; color: #8b7355; transition: all 0.15s ease;
-    }
-    .voice-indicator.sounding {
-      background: #8b6914; color: #fff;
-    }
-    .bpm-slider { width: 100%; accent-color: #8b6914; }
-    .bpm-value { text-align: center; font-weight: bold; font-size: 1.1em; color: #4a3728; margin-top: 4px; }
-    .track-list { margin-top: 10px; }
-    .track-item {
-      display: inline-block; padding: 3px 10px; margin: 3px 4px 3px 0;
-      border-radius: 3px; font-size: 0.85em;
-    }
-    .track-organ { background: #f0e8d8; color: #6b5030; border: 1px solid #ddd0b8; }
-    .track-keyboard { background: #ece8f0; color: #4a3060; border: 1px solid #d4c8dc; }
-    .track-solo { background: #e4eee0; color: #3a5a30; border: 1px solid #c8dac0; }
-    .separator {
-      padding: 6px 0; font-size: 0.8em; color: #8b7355;
-      border-bottom: 1px solid #e8ddd0; margin-bottom: 5px;
-    }
-    optgroup { font-style: normal; font-weight: 600; color: #4a3728; }
-  </style>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=Hanken+Grotesk:wght@400;500;600;700&family=Spline+Sans+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
 </head>
 <body>
   <div id="app" v-scope @vue:mounted="init()">
@@ -210,14 +64,9 @@
         </div>
         <div class="form-group">
           <label>Voices</label>
-          <select v-model.number="config.numVoices" :disabled="!ready || !isOrganForm">
-            <option value="2">2</option>
-            <option value="3">3</option>
-            <option value="4">4</option>
-            <option value="5">5</option>
-          </select>
-          <div v-if="isKeyboardForm" class="hint">Voices set per variation</div>
-          <div v-else-if="!isOrganForm" class="hint">Solo string: single voice</div>
+          <div class="readonly-field">{{ formVoices }}</div>
+          <div v-if="isKeyboardForm" class="hint">Set per variation by form</div>
+          <div v-else class="hint">Determined by form</div>
         </div>
         <div class="form-group">
           <label>Character</label>
@@ -352,6 +201,22 @@
       'goldberg_variations': '32-variation harpsichord suite over ground bass (BWV 988 style)',
     };
 
+    // Voice count is decided by the form, not by config (the C API accepts and
+    // ignores num_voices). These are the fixed counts each form emits; the
+    // Result panel always reports the actual generated track count as ground truth.
+    const FORM_VOICE_COUNT = {
+      'fugue': 3,
+      'prelude_and_fugue': 3,
+      'trio_sonata': 3,
+      'chorale_prelude': 3,
+      'toccata_and_fugue': 3,
+      'passacaglia': 3,
+      'fantasia_and_fugue': 3,
+      'goldberg_variations': 3,
+      'chaconne': 2,
+      'cello_prelude': 1,
+    };
+
     const ORGAN_FORM_NAMES = new Set([
       'fugue', 'prelude_and_fugue', 'trio_sonata', 'chorale_prelude',
       'toccata_and_fugue', 'passacaglia', 'fantasia_and_fugue',
@@ -423,7 +288,6 @@
         formId: 1,       // prelude_and_fugue
         keyId: 0,        // C
         isMinor: false,
-        numVoices: 3,
         characterId: 0,  // severe
         instrumentId: 0, // organ
         bpm: 100,
@@ -496,6 +360,10 @@
         const f = this.currentForm;
         return f ? (FORM_DESCRIPTIONS[f.name] || '') : '';
       },
+      get formVoices() {
+        const f = this.currentForm;
+        return f ? (FORM_VOICE_COUNT[f.name] ?? '–') : '–';
+      },
       get playbackProgress() {
         return this.totalDuration > 0 ? (this.playbackTime / this.totalDuration) * 100 : 0;
       },
@@ -547,10 +415,10 @@
             cfg.targetBars = this.config.targetBars;
           }
 
-          // Only include organ-specific options for organ forms
+          // Only include organ-specific options for organ forms.
+          // Voice count is decided by the form, so num_voices is not sent.
           if (this.isOrganForm) {
             this.ensureCompatibleCharacter();
-            cfg.numVoices = this.config.numVoices;
             cfg.character = this.config.characterId;
           }
 
@@ -582,7 +450,7 @@
             systemBadge,
             systemLabel,
             key: `${keyName} ${this.config.isMinor ? 'minor' : 'major'}`,
-            voices: this.config.numVoices,
+            voices: this.eventData.tracks.length,
             character: charName,
             instrument: instName,
             bpm: info.bpm,
@@ -793,9 +661,14 @@
           this.scales = bach.getScales();
 
           // Re-apply config defaults after options are populated
-          // (Petite Vue v-model doesn't sync selects when options arrive after mount)
+          // (Petite Vue v-model doesn't sync selects when options arrive after
+          // mount). The bogus -1 forces each bound select to re-bind to its
+          // model value once the options exist — instrumentId included, so the
+          // form-driven default instrument actually shows on first load.
           const defaults = { ...this.config };
-          Object.assign(this.config, { keyId: -1, formId: -1, characterId: -1, scaleId: -1 });
+          Object.assign(this.config, {
+            keyId: -1, formId: -1, characterId: -1, scaleId: -1, instrumentId: -1,
+          });
           Object.assign(this.config, defaults);
 
           // Set default instrument for default form
