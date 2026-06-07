@@ -6,6 +6,7 @@
 
 #include "composer/character_profile.h"
 #include "composer/figuration.h"
+#include "composer/figuration_palette.h"
 #include "composer/form_builders.h"
 #include "composer/material.h"
 #include "composer/minor_material.h"
@@ -195,120 +196,6 @@ void emitHarmony(HarnessFixture& out, const std::vector<ChordSpec>& plan, Mode m
     chord.quality = plan[bar].minor ? ChordQuality::Minor : ChordQuality::Major;
     out.harmony.chords.push_back(chord);
   }
-}
-
-/// @brief Append one bar of chord-tone-anchored scalar-wave notes to a vector.
-///
-/// The bar opens on a chord tone of `chord` (so a downbeat anchor is consonant),
-/// then runs a stepwise scalar wave (ascend then descend) confined to
-/// [base_midi, base_midi + span). Predominantly-stepwise running figuration
-/// (BWV565 / BWV538 toccata idiom) -- low melodic-interval cost. The seed
-/// `offset` shifts the start degree up the scale before the chord-tone snap.
-///
-/// @param dst Note vector receiving the bar's notes.
-/// @param bar Absolute bar index.
-/// @param chord The bar's chord (downbeat anchor is one of its tones).
-/// @param mode Diatonic mode selecting the scale walker.
-/// @param notes_per_beat Subdivision density (1 = quarter, 2 = eighth, 4 = 16th).
-/// @param base_midi Register floor for the wave.
-/// @param ceil_midi Register ceiling for the wave.
-/// @param offset Seed-derived start-degree offset above the anchor (used only
-///        for the first bar of a section, where `prev_pitch` is still < 0).
-/// @param prev_pitch Running pitch threaded across bars: the previous bar's last
-///        emitted pitch (< 0 on a section's first bar). The bar's downbeat anchor
-///        is the chord tone NEAREST this pitch so consecutive bars chain
-///        conjunctly instead of re-snapping to the band floor each bar (which
-///        produced the wide bar-boundary leaps that dominated the melodic-
-///        interval cost). Updated to the bar's last emitted pitch on return.
-void appendScalarBar(std::vector<MaterialNote>& dst, int bar, const ChordSpec& chord, Mode mode,
-                     int notes_per_beat, int base_midi, int ceil_midi, int offset,
-                     int& prev_pitch) {
-  const int third = chord.minor ? 3 : 4;
-  const int triad_pc[3] = {chord.root_pc % 12, (chord.root_pc + third) % 12,
-                           (chord.root_pc + 7) % 12};
-  auto is_triad = [&](int midi) {
-    const int pcl = ((midi % 12) + 12) % 12;
-    return pcl == triad_pc[0] || pcl == triad_pc[1] || pcl == triad_pc[2];
-  };
-  const int anchor_hi = ceil_midi - 6;  // leave headroom for the ascending wave.
-  int anchor;
-  if (prev_pitch < 0) {
-    // Section's first bar: snap from the band floor shifted by the seed offset.
-    anchor = base_midi;
-    while (!is_triad(anchor)) {
-      ++anchor;
-    }
-    anchor = scaleUp(anchor, offset, mode);
-    while (!is_triad(anchor)) {
-      anchor = scaleUp(anchor, 1, mode);
-    }
-    if (anchor > anchor_hi) {
-      anchor = base_midi;
-      while (!is_triad(anchor)) {
-        ++anchor;
-      }
-    }
-  } else {
-    // Chain conjunctly: pick the chord tone nearest the previous bar's last
-    // pitch (clamped into the wave's start window) so the bar boundary is a
-    // small step rather than a leap to the band floor.
-    const int target = std::clamp(prev_pitch, base_midi, anchor_hi);
-    int best = -1;
-    int best_dist = 1 << 30;
-    for (int cand = base_midi; cand <= anchor_hi; ++cand) {
-      if (!is_triad(cand)) {
-        continue;
-      }
-      const int dist = std::abs(cand - target);
-      if (dist < best_dist) {
-        best_dist = dist;
-        best = cand;
-      }
-    }
-    anchor = (best >= 0) ? best : base_midi;
-    while (!is_triad(anchor)) {
-      ++anchor;
-    }
-  }
-  const int notes = 4 * notes_per_beat;
-  std::vector<int> wave;
-  wave.reserve(static_cast<std::size_t>(notes) + 2);
-  // Walk up by scale steps; when the next step would cross the ceiling, fold the
-  // contour back down by scale steps instead of pinning to ceil_midi. Clamping
-  // to the ceiling stacked several identical peak pitches into a flat plateau
-  // (an interval-0 run the texture gate caps at 4 and the melodic-interval cost
-  // penalises); reflecting at the ceiling keeps the line conjunct and in-band.
-  int cursor = anchor;
-  int dir = 1;
-  wave.push_back(cursor);
-  for (int idx = 1; idx <= notes / 2; ++idx) {
-    int next = (dir > 0) ? scaleUp(cursor, 1, mode) : scaleDown(cursor, 1, mode);
-    if (next > ceil_midi) {
-      dir = -1;
-      next = scaleDown(cursor, 1, mode);
-    } else if (next < base_midi) {
-      dir = 1;
-      next = scaleUp(cursor, 1, mode);
-    }
-    cursor = std::clamp(next, base_midi, ceil_midi);
-    wave.push_back(cursor);
-  }
-  for (int idx = static_cast<int>(wave.size()) - 2; idx >= 0; --idx) {
-    wave.push_back(wave[static_cast<std::size_t>(idx)]);
-  }
-  const Tick step =
-      (notes_per_beat == 4) ? kSixteenth : ((notes_per_beat == 2) ? kEighth : kQuarter);
-  int last_pitch = anchor;
-  for (int beat = 0; beat < 4; ++beat) {
-    for (int sub = 0; sub < notes_per_beat; ++sub) {
-      const int slot = beat * notes_per_beat + sub;
-      const Tick tick =
-          barTick(bar) + static_cast<Tick>(beat) * kTicksPerBeat + static_cast<Tick>(sub) * step;
-      last_pitch = wave[static_cast<std::size_t>(slot) % wave.size()];
-      addNote(dst, tick, step, last_pitch);
-    }
-  }
-  prev_pitch = last_pitch;
 }
 
 // The fugue tail is a strict three-voice texture (V0 highest, V2 lowest).
@@ -1388,8 +1275,8 @@ HarnessFixture buildToccataAndFugueForm(const ResolvedRequest& req) {
       // so the wave still fits the V0 band.
       const int base = std::clamp(kBandLo[0] + std::max<int>(0, arc.register_shift), kBandLo[0],
                                   kBandHi[0] - 12);
-      appendScalarBar(section.notes, bar, plan[static_cast<std::size_t>(bar)], mode, notes_per_beat,
-                      base, kBandHi[0], fig_offset, prev_pitch);
+      appendScalarWaveBar(section.notes, bar, plan[static_cast<std::size_t>(bar)], mode,
+                          notes_per_beat, base, kBandHi[0], fig_offset, prev_pitch);
       // Only the first two flourish bars stay solo; every other bar (including
       // the rest of the flourish window) carries both accompaniment layers.
       const bool solo = is_flourish_window && bar < kDramaticusSoloBars;
@@ -1519,8 +1406,8 @@ HarnessFixture buildFantasiaAndFugueForm(const ResolvedRequest& req) {
     // register contrast section_contrast_required measures).
     int prev_pitch = -1;
     for (int bar = sec_start; bar <= sec_last; ++bar) {
-      appendScalarBar(section.notes, bar, plan[static_cast<std::size_t>(bar)], mode,
-                      sp.notes_per_beat, base, base + 14, fig_offset, prev_pitch);
+      appendScalarWaveBar(section.notes, bar, plan[static_cast<std::size_t>(bar)], mode,
+                          sp.notes_per_beat, base, base + 14, fig_offset, prev_pitch);
       FreeLayerPlan& lp = layout[static_cast<std::size_t>(bar)];
       lp.pedal = true;  // every style carries the pedal.
       if (sp.style == FantasiaStyle::Chordal) {

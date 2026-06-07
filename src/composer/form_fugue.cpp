@@ -6,6 +6,7 @@
 
 #include "composer/character_profile.h"
 #include "composer/figuration.h"
+#include "composer/figuration_palette.h"
 #include "composer/form_builders.h"
 #include "composer/material.h"
 #include "composer/minor_material.h"
@@ -52,7 +53,6 @@ using detail::subjectSlotFor;          // NOLINT(build/namespaces)
 using detail::usePicardy;              // NOLINT(build/namespaces)
 
 constexpr Tick kQuarter = kTicksPerBeat;
-constexpr Tick kSixteenth = kTicksPerBeat / 4;
 
 #include "composer/tables/entry_plan_stats.inc"
 
@@ -263,272 +263,6 @@ void pushSpan(FugueAssembly& asm_ctx, VoiceId voice, int first_bar, int last_bar
   asm_ctx.out->voice_plan.spans.push_back(span);
 }
 
-/// @brief Append one bar of theme-consonant scalar-wave chord-tone figuration.
-///
-/// Every beat opens on a chord tone of `chord` chosen to be consonant against
-/// the concurrent thematic statement (the scorer samples vertical intervals on
-/// the beat grid, so the on-beat note is what drives vertical_dissonance). The
-/// per-beat anchors form a stepwise chain: each anchor is the nearest consonant
-/// chord tone to the PREVIOUS anchor (threaded across bars via `prev_anchor`),
-/// gently biased back toward a band centre so the line neither drifts out of band
-/// nor leaps between register extremes. The notes between anchors walk by single
-/// scale steps so the whole line is conjunct (the corpus melodic-interval
-/// distribution is dominated by steps). The downbeat anchor is always a genuine
-/// chord tone so figuration_harmonic_consistency passes; band confinement keeps
-/// the voice ordering (V0 >= V1 >= V2) intact across the all-Material texture.
-///
-/// @param asm_ctx Assembly (read for the concurrent theme-tone registry).
-/// @param section Figuration section receiving the bar's notes.
-/// @param bar Absolute bar index of the figuration bar.
-/// @param voice Voice index (selects the band the wave is clamped into).
-/// @param chord The bar's chord (supplies the per-beat chord tones).
-/// @param mode Diatonic mode selecting the scale walker.
-/// @param notes_per_beat Subdivision density (1 / 2 / 4).
-/// @param offset Seed-derived start-register offset above the band floor.
-/// @param prev_anchor Running anchor threaded across bars; updated to the bar's
-///        last anchor so the next bar's first anchor chains stepwise from it.
-void appendFigurationBar(FugueAssembly& asm_ctx, FigurationSection& section, int bar, int voice,
-                         const ChordSpec& chord, Mode mode, int notes_per_beat, int offset,
-                         int& prev_anchor) {
-  // Register centre for the wave: a few scale degrees above the band floor,
-  // shifted by the seed offset, kept clear of the band ceiling so a stepwise
-  // fill never runs out of band. The per-beat anchor chain is gently pulled
-  // back toward this centre so the conjunct walk cannot drift out of band.
-  int center = scaleUp(kBandLo[voice], offset + 2, mode);
-  if (center > kBandHi[voice] - 4) {
-    center = scaleUp(kBandLo[voice], offset, mode);
-  }
-  if (prev_anchor <= 0) {
-    prev_anchor = center;
-  }
-  const Tick step =
-      (notes_per_beat == 4) ? kSixteenth : ((notes_per_beat == 2) ? kTicksPerBeat / 2 : kQuarter);
-  std::vector<int> theme_pitches;
-  // The line is a triangular scalar wave: it walks one scale step per note in a
-  // single direction, reverses when it reaches the top or bottom of a working
-  // band centred on `center`, and snaps each beat onset to the nearest consonant
-  // chord tone (so the on-beat verticals stay consonant and the bar downbeat is a
-  // genuine chord tone). Because the motion is one scale step per note, every
-  // consecutive interval is a step except the small (third-sized) snap to a chord
-  // tone at the beat onset -- the corpus melodic-interval mass is on steps.
-  const int wave_lo = std::max(kBandLo[voice], center - 5);
-  const int wave_hi = std::min(kBandHi[voice], center + 5);
-  // Walking cursor and direction, threaded across bars via prev_anchor's sign
-  // (positive magnitude is the pitch; an even/odd parity is not stored, so the
-  // direction restarts upward each bar -- the wave still reverses within a bar at
-  // the band edges, which is what keeps consecutive bars from a sawtooth jump).
-  int cursor = std::clamp(prev_anchor, wave_lo, wave_hi);
-  int dir = (cursor <= center) ? 1 : -1;
-  auto stepScale = [&](int from, int direction) {
-    return direction > 0 ? scaleUp(from, 1, mode) : scaleDown(from, 1, mode);
-  };
-  int last_pitch = cursor;
-  // This line's previous beat anchor, used to judge whether the next anchor
-  // moves in parallel with an earlier voice. Seeded from prev_anchor (the prior
-  // bar's last anchor) so the bar-boundary beat is also parallel-checked.
-  int line_prev_anchor = (prev_anchor > 0) ? prev_anchor : -1;
-  std::vector<ConcurrentMotion> motions;
-  std::vector<int> window_pitches;
-  for (int beat = 0; beat < 4; ++beat) {
-    const Tick beat_tick = barTick(bar) + static_cast<Tick>(beat) * kTicksPerBeat;
-    const Tick prev_beat_tick = beat_tick - kTicksPerBeat;
-    asm_ctx.theme_tones.concurrentThemePitches(beat_tick, static_cast<VoiceId>(voice),
-                                               theme_pitches);
-    asm_ctx.theme_tones.concurrentMotions(prev_beat_tick, beat_tick, static_cast<VoiceId>(voice),
-                                          kFugueVoices, motions);
-    // Pitches already-placed voices attack INSIDE this anchor's sustain window
-    // (after the onset). A quarter-note anchor under an earlier eighth-note
-    // line can be onset-consonant yet sustained against a dissonant mid-beat
-    // attack above it; consonantChordTone uses these as a tie-breaker.
-    window_pitches.clear();
-    for (Tick slot = beat_tick + kSixteenth; slot < beat_tick + step; slot += kSixteenth) {
-      for (VoiceId other = 0; other < kFugueVoices; ++other) {
-        if (other == static_cast<VoiceId>(voice)) {
-          continue;
-        }
-        const int sounding = asm_ctx.theme_tones.soundingPitchInVoice(other, slot);
-        if (sounding >= 0) {
-          window_pitches.push_back(sounding);
-        }
-      }
-    }
-    // Snap the beat onset to the nearest consonant, parallel-free anchor tone
-    // (a chord tone on the downbeat, any diatonic tone off the downbeat).
-    const int anchor =
-        consonantChordTone(chord, voice, kBandLo[voice], kBandHi[voice], cursor, theme_pitches,
-                           line_prev_anchor, motions, mode, beat == 0, window_pitches);
-    cursor = std::clamp(anchor, kBandLo[voice], kBandHi[voice]);
-    line_prev_anchor = cursor;
-    for (int sub = 0; sub < notes_per_beat; ++sub) {
-      const Tick tick =
-          barTick(bar) + static_cast<Tick>(beat) * kTicksPerBeat + static_cast<Tick>(sub) * step;
-      const Tick prev_tick = tick - step;
-      int pitch;
-      if (sub == 0) {
-        pitch = cursor;
-      } else {
-        const int from = cursor;
-        // Default the next wave note one scale step in the running direction,
-        // reversing at the working band edges so the line stays conjunct.
-        auto step_from = [&](int direction) {
-          int candidate = stepScale(from, direction);
-          if (candidate > wave_hi) {
-            candidate = stepScale(from, -1);
-          } else if (candidate < wave_lo) {
-            candidate = stepScale(from, 1);
-          }
-          return std::clamp(candidate, kBandLo[voice], kBandHi[voice]);
-        };
-        int next = step_from(dir);
-        // Parallel-aware wave: if this step lands a same-direction perfect 5th/8th
-        // against an earlier voice's concurrent motion, reverse direction (still a
-        // single scale step, so the line stays conjunct). Sampled at this sub-tick
-        // and the previous one so the inter-note motion is judged, not only beats.
-        asm_ctx.theme_tones.concurrentMotions(prev_tick, tick, static_cast<VoiceId>(voice),
-                                              kFugueVoices, motions);
-        auto wave_is_parallel = [&](int cand) {
-          for (const ConcurrentMotion& motion : motions) {
-            if (formsPerfectParallel(from, cand, motion.prev, motion.curr)) {
-              return true;
-            }
-          }
-          return false;
-        };
-        if (wave_is_parallel(next)) {
-          const int reversed = step_from(-dir);
-          if (!wave_is_parallel(reversed)) {
-            dir = -dir;
-            next = reversed;
-          } else {
-            // Both single steps land parallels (two diatonic stepwise lines in
-            // rhythmic lockstep do this systematically): try a third-skip in
-            // either direction before accepting the parallel, mirroring the
-            // harsh-clash fallback below.
-            for (const int skip_dir : {dir, -dir}) {
-              const int skip = (skip_dir > 0) ? scaleUp(from, 2, mode) : scaleDown(from, 2, mode);
-              if (skip < wave_lo || skip > wave_hi) {
-                continue;
-              }
-              if (!wave_is_parallel(skip)) {
-                next = skip;
-                break;
-              }
-            }
-          }
-        }
-        // Harshness-aware wave: a passing tone that lands a minor 2nd, tritone,
-        // or major 7th against a concurrently sounding earlier voice is the
-        // sharpest off-beat clash two independent wave lines can produce. Every
-        // sixteenth slot the candidate sounds through is scanned, so a slower
-        // line cannot sustain into a clash an already-placed faster line lands
-        // mid-duration. Reverse direction (still a single scale step) when the
-        // reversed step is both parallel-free and clash-free; milder seconds /
-        // sevenths are left alone so ordinary passing motion over a sustained
-        // tone survives.
-        auto wave_is_harsh = [&](int cand) {
-          for (VoiceId other = 0; other < kFugueVoices; ++other) {
-            if (other == static_cast<VoiceId>(voice)) {
-              continue;
-            }
-            for (Tick slot = tick; slot < tick + step; slot += kSixteenth) {
-              const int sounding = asm_ctx.theme_tones.soundingPitchInVoice(other, slot);
-              if (sounding < 0) {
-                continue;
-              }
-              const int ic = std::abs(cand - sounding) % 12;
-              if (ic == 1 || ic == 6 || ic == 11) {
-                return true;
-              }
-              // Parallel-dissonance chain: a 2nd/7th arrival is acceptable as an
-              // isolated passing tone, but not when the previous sub-beat against
-              // the same voice was already dissonant (consecutive 2nds/7ths/9ths
-              // read as a broken duet rather than passing motion).
-              if (ic == 2 || ic == 10) {
-                const int prev_sounding =
-                    asm_ctx.theme_tones.soundingPitchInVoice(other, prev_tick);
-                if (prev_sounding >= 0) {
-                  const int prev_ic = std::abs(from - prev_sounding) % 12;
-                  if (prev_ic == 1 || prev_ic == 2 || prev_ic == 6 || prev_ic == 10 ||
-                      prev_ic == 11) {
-                    return true;
-                  }
-                }
-              }
-            }
-          }
-          return false;
-        };
-        if (!wave_is_parallel(next) && wave_is_harsh(next)) {
-          const int reversed = step_from(-dir);
-          if (!wave_is_parallel(reversed) && !wave_is_harsh(reversed)) {
-            dir = -dir;
-            next = reversed;
-          } else {
-            // Both single steps clash (or the reversed step lands a parallel):
-            // try a third-skip in either direction before accepting the clash.
-            // A scale-third skip is the smallest non-step move and reads as an
-            // ordinary chord-tone skip inside figuration.
-            for (const int skip_dir : {dir, -dir}) {
-              const int skip = (skip_dir > 0) ? scaleUp(from, 2, mode) : scaleDown(from, 2, mode);
-              if (skip < wave_lo || skip > wave_hi) {
-                continue;
-              }
-              if (!wave_is_parallel(skip) && !wave_is_harsh(skip)) {
-                next = skip;
-                break;
-              }
-            }
-          }
-        }
-        // Keep the per-tick voice order V0 >= V1 >= V2: clamp the wave note below
-        // every concurrent lower-index voice and above every concurrent
-        // higher-index voice so a wide verbatim entry cannot be crossed.
-        int order_ceiling = kBandHi[voice];
-        int order_floor = kBandLo[voice];
-        for (const ConcurrentMotion& motion : motions) {
-          if (motion.curr < 0) {
-            continue;
-          }
-          if (motion.voice < voice) {
-            order_ceiling = std::min(order_ceiling, motion.curr);
-          } else if (motion.voice > voice) {
-            order_floor = std::max(order_floor, motion.curr);
-          }
-        }
-        if (order_floor <= order_ceiling) {
-          next = std::clamp(next, order_floor, order_ceiling);
-          // Clamping can pin the note to a window edge and repeat the previous
-          // pitch; if the window still has room, step to the nearest distinct
-          // diatonic tone inside it so the line never stalls into a long run.
-          if (next == from && order_floor < order_ceiling) {
-            int up = stepScale(from, 1);
-            int down = scaleDown(from, 1, mode);
-            if (up <= order_ceiling && up != from) {
-              next = up;
-            } else if (down >= order_floor && down != from) {
-              next = down;
-            }
-          }
-        }
-        // Commit the running direction the chosen step actually moved.
-        if (next > from) {
-          dir = 1;
-        } else if (next < from) {
-          dir = -1;
-        }
-        cursor = next;
-        pitch = cursor;
-      }
-      last_pitch = pitch;
-      addNote(section.notes, tick, step, pitch);
-      // Register this figuration note so a voice placed later in the same window
-      // can read what this line sounds and avoid a parallel against it.
-      asm_ctx.theme_tones.record(tick, static_cast<VoiceId>(voice), pitch, step);
-    }
-  }
-  prev_anchor = last_pitch;
-}
-
 void coalesceConsecutiveSamePitch(std::vector<MaterialNote>& notes) {
   if (notes.empty()) {
     return;
@@ -562,12 +296,12 @@ void addFigurationSpan(FugueAssembly& asm_ctx, VoiceId voice, int first_bar, int
   section.is_pedal_prep = is_pedal_prep;
   // Running anchor threaded across the section's bars so consecutive bar-edge
   // anchors chain stepwise (no leap at the bar boundary). Seeded by the first
-  // bar's centre inside appendFigurationBar (prev_anchor <= 0).
+  // bar's centre inside appendFigurationWaveBar (prev_anchor <= 0).
   int prev_anchor = 0;
   for (int bar = first_bar; bar <= last_bar; ++bar) {
-    appendFigurationBar(asm_ctx, section, bar, voice,
-                        chords[static_cast<std::size_t>(bar - plan_base)], mode, notes_per_beat,
-                        offset, prev_anchor);
+    appendFigurationWaveBar(asm_ctx.theme_tones, section, bar, voice,
+                            chords[static_cast<std::size_t>(bar - plan_base)], mode, notes_per_beat,
+                            offset, prev_anchor, kBandLo[voice], kBandHi[voice], kFugueVoices);
   }
   coalesceConsecutiveSamePitch(section.notes);
   asm_ctx.out->material.figuration_sections.push_back(section);

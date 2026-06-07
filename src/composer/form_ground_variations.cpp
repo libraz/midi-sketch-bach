@@ -6,6 +6,7 @@
 #include "composer/arc.h"
 #include "composer/character_profile.h"
 #include "composer/figuration.h"
+#include "composer/figuration_palette.h"
 #include "composer/form_builders.h"
 #include "composer/harness_fixture.h"
 #include "composer/material.h"
@@ -45,11 +46,6 @@ namespace bach::composer {
 // ---------------------------------------------------------------------------
 
 namespace {
-
-// 3/4 bar length in ticks: 3 quarter beats. The form-spec is always 3/4 for
-// both ground-variation forms; this mirrors HarmonicPlan::ticksPerBar() for a
-// 3/4 plan so the builder-side bar math and the validator-side bar math agree.
-constexpr Tick kTicksPerBar34 = 3 * kTicksPerBeat;  // 1440.
 
 // Cycle length (bars) per ground-variation form: chaconne = 4-bar ground,
 // passacaglia = 8-bar ground. Matches FormSpec::snap_bars for each form.
@@ -92,17 +88,6 @@ int densityTierFor(const ResolvedRequest& req, std::size_t cycle) {
   return tier;
 }
 
-// Per-bar harmonic data of one ground cycle: the chord root pitch class, the
-// chord quality (minor flag), the lowest variation tone for the V0 figuration,
-// and the sounding ground pitch class. The ground pitch class lets the V0
-// builder pick beat anchors that stay consonant with the held bass note.
-struct CycleBar {
-  std::uint8_t root_pc;
-  bool minor;
-  int low_tone;            // lowest variation tone (C4-C5 region) for this bar.
-  std::uint8_t ground_pc;  // pitch class of the sustained ground note this bar.
-};
-
 // Build the per-bar cycle plan for a ground table: the chord root tracks the
 // ground pitch class bar by bar (quality = the diatonic triad quality on that
 // degree), and the variation start tone is the ground pitch lifted by octaves
@@ -123,185 +108,6 @@ std::vector<CycleBar> planFromGround(const std::uint8_t* ground, std::size_t bar
   return plan;
 }
 
-/**
- * @brief Octave-fit a pitch class to the MIDI pitch nearest a target center.
- * @param pitch_class Target pitch class (0..11).
- * @param center Register center the result should sit closest to.
- * @return The MIDI pitch of `pitch_class` whose octave is nearest `center`.
- */
-int fitPitchClass(int pitch_class, int center) {
-  const int base = ((pitch_class % 12) + 12) % 12;
-  int candidate = center - ((center - base) % 12 + 12) % 12;  // <= center, same pc.
-  if (center - candidate > 6)
-    candidate += 12;  // round to the nearer octave.
-  return candidate;
-}
-
-// Diatonic-degree index space. degreeToMidi maps a degree index to its MIDI
-// pitch; midiToDegree inverts it for any pitch (snapping down to the nearest
-// scale member). C0 = MIDI 12 is degree 0 (well below the variation register,
-// so indices stay non-negative). Working in degree indices makes fills stepwise
-// by construction.
-constexpr int kDegreeBase = 12;
-int degreeToMidi(int degree, detail::Mode mode) {
-  return detail::scaleUp(kDegreeBase, degree, mode);
-}
-int midiToDegree(int midi, detail::Mode mode) {
-  int degree = 0;
-  while (degreeToMidi(degree + 1, mode) <= midi)
-    ++degree;
-  return degree;
-}
-
-/**
- * @brief Collect the chord-tone anchor pitch classes for one bar.
- *
- * The anchors are the bar's chord tones (root / third / fifth), each consonant
- * with the held ground (the chord root tracks the ground pitch class). In minor
- * the leading tone B natural (pc 11) is filtered out so V0 stays in natural
- * minor and no Ab->B augmented 2nd can arise.
- *
- * @param bar The bar's harmonic data.
- * @param mode Diatonic mode (selects the third quality filter behaviour).
- * @return Up to three consonant chord-tone pitch classes (always non-empty).
- */
-std::vector<int> barAnchorPitchClasses(const CycleBar& bar, detail::Mode mode) {
-  const bool minor = mode == detail::Mode::Minor;
-  const int third = bar.minor ? 3 : 4;
-  std::vector<int> anchors;
-  anchors.reserve(3);
-  for (int interval : {0, third, 7}) {
-    const int pitch_class = (bar.root_pc + interval) % 12;
-    if (minor && pitch_class == 11)
-      continue;
-    if (!isConsonantIc(pitch_class - bar.ground_pc))
-      continue;
-    anchors.push_back(pitch_class);
-  }
-  if (anchors.empty())
-    anchors.push_back(bar.root_pc % 12);  // defensive: root is always consonant.
-  return anchors;
-}
-
-/**
- * @brief Build one variation cycle's V0 line: per-beat chord-tone anchoring
- *        with stepwise diatonic fills, threaded continuously to minimise leaps.
- *
- * Pass 1 resolves the full sequence of beat anchors (cycle_bars * 3 of them) as
- * diatonic-degree indices. Each beat onset is a chord tone of its bar's chord,
- * octave-fit to the octave NEAREST the previous anchor and clamped into a FIXED
- * register band so the descending chord roots do not drag the line down an
- * octave -- successive onsets therefore never leap more than a tritone, and the
- * line stays in the C4-C5 region above the ground. Because every anchor is a
- * chord tone consonant with the sustained ground, every beat-onset note the
- * audio scorer samples is consonant with the held bass (vertical-dissonance
- * ratio ~0).
- *
- * Pass 2 emits the notes: each beat opens on its anchor, then fills the
- * sub-beats with stepwise diatonic motion toward the NEXT anchor in the
- * sequence (a true sawtooth), so the surface is conjunct and the jump into the
- * next onset is at most one diatonic step.
- *
- * Variation differentiation (no RNG): `anchor_rotation` rotates which chord tone
- * opens each bar's anchor group, so consecutive cycles trace different anchor
- * contours.
- *
- * @param notes Destination note vector (the variation's realized line).
- * @param block_start Absolute start tick of the variation block.
- * @param cycle_bar_plan Per-bar harmony + register data for the ground cycle.
- * @param register_shift Semitone register lift from the arc (raises the band).
- * @param anchor_rotation Cycle-driven rotation of the chord-tone anchor order.
- * @param notes_per_beat Subdivision: 1 / 2 / 4 notes per beat.
- * @param mode Diatonic mode (Major / Minor) selecting the scale.
- */
-void appendVariationCycle(std::vector<MaterialNote>& notes, Tick block_start,
-                          const std::vector<CycleBar>& cycle_bar_plan, int register_shift,
-                          int anchor_rotation, int notes_per_beat, detail::Mode mode) {
-  const int cycle_bars = static_cast<int>(cycle_bar_plan.size());
-
-  // Register center for the cycle, anchored on the first bar's low tone lifted
-  // by the arc shift (the descending chord roots do NOT lower it, so the
-  // figuration keeps a stable C4-C5 tessitura).
-  const int center = cycle_bar_plan.front().low_tone + register_shift;
-
-  // --- Phase 1: resolve the full anchor-degree sequence -------------------
-  // Each anchor takes the octave of its chord tone NEAREST the previous anchor,
-  // so consecutive beat onsets never leap more than a tritone (the minimal
-  // octave distance between two pitch classes is <= 6 semitones). At each bar's
-  // FIRST beat the fit reference is re-centered toward `center` -- but only when
-  // that does not move the anchor by more than a tritone from the running pitch
-  // -- so the line cannot drift an octave away over the cycle's descending chord
-  // roots, yet a re-center never itself introduces a leap.
-  std::vector<int> anchor_deg;
-  anchor_deg.reserve(static_cast<std::size_t>(cycle_bars) * 3);
-  int running = center;
-  for (int bar = 0; bar < cycle_bars; ++bar) {
-    const std::vector<int> pcs =
-        barAnchorPitchClasses(cycle_bar_plan[static_cast<std::size_t>(bar)], mode);
-    for (int beat = 0; beat < 3; ++beat) {
-      const int anchor_pc =
-          pcs[static_cast<std::size_t>((anchor_rotation + beat) % static_cast<int>(pcs.size()))];
-      int fit = fitPitchClass(anchor_pc, running);
-      if (beat == 0) {
-        // Bar downbeat: prefer the octave nearer `center` when it is within a
-        // tritone of the running pitch (gentle re-centering, never a leap).
-        const int recentered = fitPitchClass(anchor_pc, center);
-        if (std::abs(recentered - running) <= 7)
-          fit = recentered;
-      }
-      // Hard register band: nearest-octave fitting can ratchet monotonically
-      // when consecutive chord tones keep resolving upward (or downward), and
-      // once the line drifts more than a tritone from `center` the gentle
-      // re-centering above can never engage again. Folding the anchor back by
-      // whole octaves keeps it a chord tone (consonance preserved) while
-      // pinning the tessitura to the variation band -- and keeps the realized
-      // pitch inside the MIDI range.
-      while (fit > center + 12)
-        fit -= 12;
-      while (fit < center - 12)
-        fit += 12;
-      anchor_deg.push_back(midiToDegree(fit, mode));
-      running = fit;
-    }
-  }
-
-  // --- Phase 2: emit notes, filling each beat toward the next anchor ------
-  const Tick step = kTicksPerBeat / static_cast<Tick>(notes_per_beat);
-  const int onset_count = static_cast<int>(anchor_deg.size());
-  for (int onset = 0; onset < onset_count; ++onset) {
-    const int from_deg = anchor_deg[static_cast<std::size_t>(onset)];
-    // Fill toward the next onset's anchor (the last onset reuses its own anchor,
-    // i.e. a held final degree, since there is no successor in the block).
-    const int to_deg =
-        (onset + 1 < onset_count) ? anchor_deg[static_cast<std::size_t>(onset + 1)] : from_deg;
-    const int delta = to_deg - from_deg;
-    const int dir = (delta >= 0) ? 1 : -1;
-    const int span = std::abs(delta);
-
-    const int bar = onset / 3;
-    const int beat = onset % 3;
-    const Tick beat_tick = block_start + static_cast<Tick>(bar) * kTicksPerBar34 +
-                           static_cast<Tick>(beat) * kTicksPerBeat;
-    for (int sub = 0; sub < notes_per_beat; ++sub) {
-      MaterialNote mnote;
-      mnote.start_tick = beat_tick + static_cast<Tick>(sub) * step;
-      mnote.duration = step;
-      // sub == 0 is the sampled beat-onset anchor; later subs step one diatonic
-      // degree per sub toward the next anchor, bounded so the fill never
-      // overshoots it (so the next onset is at most one step away -- no leap).
-      int degree = from_deg;
-      if (sub > 0) {
-        int advance = sub;
-        if (advance > span)
-          advance = span;  // do not overshoot the next onset.
-        degree = from_deg + dir * advance;
-      }
-      mnote.pitch = static_cast<std::uint8_t>(degreeToMidi(degree, mode));
-      notes.push_back(mnote);
-    }
-  }
-}
-
 // ---------------------------------------------------------------------------
 // Passacaglia-only 3-voice machinery (BWV582 model). The chaconne path is left
 // byte-for-byte unchanged; everything below this banner is reached ONLY from the
@@ -319,106 +125,6 @@ constexpr int kPassV0BandHi = 79;  // G5.
 // fires (lower voice index sounds higher).
 constexpr int kPassV1BandLo = 48;  // C3.
 constexpr int kPassV1BandHi = 59;  // B3.
-
-/**
- * @brief Build one principal-variation cycle's V0 line as a continuous diatonic
- *        scalar wave (stepwise-dominant, no repeated pitches, no leaps).
- *
- * Unlike the shared per-beat chord-tone sawtooth (appendVariationCycle, kept for
- * the chaconne), this walks one diatonic scale degree per emitted note and folds
- * its direction at the band edges. Single-step motion is the corpus's dominant
- * melodic interval, so the realized line's melodic-interval distribution matches
- * the reference far better (the dominant scorer feature). The bar downbeat is
- * re-anchored to the nearest chord tone of the bar's chord so beat-onset
- * vertical consonance against the held ground stays high, but the re-anchor is
- * itself reached by a single step (it never introduces a leap), so the surface
- * remains conjunct.
- *
- * Variation differentiation (no RNG): `phase_rotation` shifts the wave's start
- * degree and `descending_start` flips the opening direction, so consecutive
- * cycles trace distinct contours without reintroducing leaps.
- *
- * @param notes Destination note vector (the variation's realized line).
- * @param block_start Absolute start tick of the variation block.
- * @param cycle_bar_plan Per-bar harmony + register data for the ground cycle.
- * @param register_shift Semitone register lift from the arc (raises the band).
- * @param phase_rotation Cycle-driven shift of the wave's start degree.
- * @param descending_start When true, the wave opens descending.
- * @param notes_per_beat Subdivision: 1 / 2 / 4 notes per beat.
- * @param mode Diatonic mode (Major / Minor) selecting the scale.
- */
-void appendScalarWaveCycle(std::vector<MaterialNote>& notes, Tick block_start,
-                           const std::vector<CycleBar>& cycle_bar_plan, int register_shift,
-                           int phase_rotation, bool descending_start, int notes_per_beat,
-                           detail::Mode mode) {
-  const int cycle_bars = static_cast<int>(cycle_bar_plan.size());
-  const int band_lo = kPassV0BandLo + register_shift;
-  const int band_hi = kPassV0BandHi + register_shift;
-  const int lo_deg = midiToDegree(band_lo, mode);
-  const int hi_deg = midiToDegree(band_hi, mode);
-
-  // Start degree: the bottom of the band lifted by the cycle's phase rotation,
-  // clamped into the band so a large rotation cannot escape it.
-  int degree = lo_deg + (phase_rotation % std::max(1, hi_deg - lo_deg));
-  if (degree > hi_deg)
-    degree = hi_deg;
-  int dir = descending_start ? -1 : 1;
-
-  const Tick step = kTicksPerBeat / static_cast<Tick>(notes_per_beat);
-  for (int bar = 0; bar < cycle_bars; ++bar) {
-    const CycleBar& plan = cycle_bar_plan[static_cast<std::size_t>(bar)];
-    for (int beat = 0; beat < 3; ++beat) {
-      const Tick beat_tick = block_start + static_cast<Tick>(bar) * kTicksPerBar34 +
-                             static_cast<Tick>(beat) * kTicksPerBeat;
-      for (int sub = 0; sub < notes_per_beat; ++sub) {
-        // Bar downbeat (beat 0, sub 0): re-anchor to the nearest chord tone of
-        // this bar so the sampled beat onset stays consonant with the held
-        // ground -- but only by stepping the wave toward it, so the conjunct
-        // surface is preserved and no leap is introduced.
-        if (beat == 0 && sub == 0 && bar > 0) {
-          const std::vector<int> pcs = barAnchorPitchClasses(plan, mode);
-          const int cur_midi = degreeToMidi(degree, mode);
-          int best_midi = cur_midi;
-          int best_dist = 128;
-          for (int pitch_class : pcs) {
-            const int fit = fitPitchClass(pitch_class, cur_midi);
-            for (int oct : {fit - 12, fit, fit + 12}) {
-              if (oct < band_lo || oct > band_hi)
-                continue;
-              const int dist = std::abs(oct - cur_midi);
-              if (dist < best_dist) {
-                best_dist = dist;
-                best_midi = oct;
-              }
-            }
-          }
-          // Step toward the chosen chord tone by a single scale degree (never a
-          // leap); if already there, hold the degree.
-          const int target_deg = midiToDegree(best_midi, mode);
-          if (target_deg > degree)
-            ++degree;
-          else if (target_deg < degree)
-            --degree;
-        }
-        MaterialNote mnote;
-        mnote.start_tick = beat_tick + static_cast<Tick>(sub) * step;
-        mnote.duration = step;
-        mnote.pitch = static_cast<std::uint8_t>(degreeToMidi(degree, mode));
-        notes.push_back(mnote);
-        // Advance one diatonic step, folding direction at the band edges so the
-        // line oscillates within the fixed register band.
-        degree += dir;
-        if (degree >= hi_deg) {
-          degree = hi_deg;
-          dir = -1;
-        } else if (degree <= lo_deg) {
-          degree = lo_deg;
-          dir = 1;
-        }
-      }
-    }
-  }
-}
 
 /**
  * @brief Build one cycle's V1 counter-figuration: a per-beat consonant,
@@ -656,8 +362,10 @@ HarnessFixture buildPassacagliaThreeVoice(const ResolvedRequest& req, int cycle_
       const int phase_rotation =
           static_cast<int>((req.seed + static_cast<std::uint32_t>(cycle)) % 5);
       const bool descending_start = ((req.seed + static_cast<std::uint32_t>(cycle)) % 2) == 1;
-      appendScalarWaveCycle(v0_notes, block_start, cycle_bar_plan, point.register_shift,
-                            phase_rotation, descending_start, notes_per_beat, mode);
+      appendScalarWaveCycle(v0_notes, block_start, cycle_bar_plan,
+                            kPassV0BandLo + point.register_shift,
+                            kPassV0BandHi + point.register_shift, phase_rotation, descending_start,
+                            notes_per_beat, mode);
 
       PassacagliaVariation var;
       var.voice = 0;
@@ -829,8 +537,8 @@ HarnessFixture buildGroundVariationForm(const ResolvedRequest& req, int cycle_ba
     const Tick block_end = block_start + period;
 
     std::vector<MaterialNote> notes;
-    appendVariationCycle(notes, block_start, cycle_bar_plan, point.register_shift, anchor_rotation,
-                         notes_per_beat, mode);
+    appendSawtoothCycle(notes, block_start, cycle_bar_plan, point.register_shift, anchor_rotation,
+                        notes_per_beat, mode);
 
     if (passacaglia) {
       PassacagliaVariation var;

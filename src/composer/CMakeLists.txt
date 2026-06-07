@@ -27,6 +27,7 @@ set(BACH_COMPOSER_SOURCES
   json_export.cpp
   ornament_pass.cpp
   figuration.cpp
+  figuration_palette.cpp
   harness_fixture.cpp
   form_director.cpp
   form_ground_variations.cpp
