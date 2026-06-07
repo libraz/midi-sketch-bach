@@ -47,6 +47,29 @@ namespace bach::composer {
 
 namespace {
 
+// Variation figuration palettes (design tables): the pattern idiom each
+// non-climax, non-ground variation cycle takes, rotated by (seed + cycle) so
+// consecutive cycles alternate idioms. Cycle 0 (the Ground-role establishing
+// statement) and the climax cycle are design values and bypass the rotation:
+// the chaconne climax is the densest sawtooth, the passacaglia climax the
+// densest scalar wave (each form's established peak texture).
+//
+// The chaconne palette carries no kArpeggio: broken-chord cycles raise the
+// melodic-interval cost (the dominant scorer feature) and the chaconne sits
+// close to the model threshold, so its rotation keeps to the stepwise idioms.
+// The passacaglia scores with ample headroom and keeps the arpeggio for
+// variety.
+constexpr PatternKind kChaconnePalette[3] = {PatternKind::kSawtooth, PatternKind::kScalarWave,
+                                             PatternKind::kFiguraCorta};
+constexpr PatternKind kPassacagliaPalette[4] = {PatternKind::kScalarWave, PatternKind::kSawtooth,
+                                                PatternKind::kArpeggio, PatternKind::kFiguraCorta};
+
+// Octave lift applied to the passacaglia V0 sawtooth / figura corta center so
+// their center +/- octave anchor band stays above the V1 counter-figuration
+// band (the scalar-wave band [60, 79] clears it by construction; the
+// center-based patterns start an octave lower without this lift).
+constexpr int kPassV0CenterLift = 12;
+
 // Cycle length (bars) per ground-variation form: chaconne = 4-bar ground,
 // passacaglia = 8-bar ground. Matches FormSpec::snap_bars for each form.
 constexpr int kChaconneCycleBars = 4;
@@ -362,10 +385,40 @@ HarnessFixture buildPassacagliaThreeVoice(const ResolvedRequest& req, int cycle_
       const int phase_rotation =
           static_cast<int>((req.seed + static_cast<std::uint32_t>(cycle)) % 5);
       const bool descending_start = ((req.seed + static_cast<std::uint32_t>(cycle)) % 2) == 1;
-      appendScalarWaveCycle(v0_notes, block_start, cycle_bar_plan,
-                            kPassV0BandLo + point.register_shift,
-                            kPassV0BandHi + point.register_shift, phase_rotation, descending_start,
-                            notes_per_beat, mode);
+      // Pattern selection: the establishing cycle and the climax are design
+      // values (quarters / densest scalar wave); other cycles rotate the
+      // passacaglia palette so consecutive variations alternate idioms.
+      const PatternKind pattern =
+          (establishing || is_climax)
+              ? PatternKind::kScalarWave
+              : kPassacagliaPalette[(req.seed + static_cast<std::uint32_t>(cycle)) % 4];
+      switch (pattern) {
+        case PatternKind::kSawtooth:
+          appendSawtoothCycle(v0_notes, block_start, cycle_bar_plan,
+                              point.register_shift + kPassV0CenterLift,
+                              static_cast<int>((req.seed + static_cast<std::uint32_t>(cycle)) % 4),
+                              notes_per_beat, mode);
+          break;
+        case PatternKind::kArpeggio:
+          appendArpeggioCycle(v0_notes, block_start, cycle_bar_plan,
+                              kPassV0BandLo + point.register_shift,
+                              kPassV0BandHi + point.register_shift,
+                              static_cast<int>((req.seed + static_cast<std::uint32_t>(cycle)) % 4),
+                              notes_per_beat, mode);
+          break;
+        case PatternKind::kFiguraCorta:
+          appendFiguraCortaCycle(
+              v0_notes, block_start, cycle_bar_plan, point.register_shift + kPassV0CenterLift,
+              static_cast<int>((req.seed + static_cast<std::uint32_t>(cycle)) % 4), mode);
+          break;
+        case PatternKind::kScalarWave:
+        default:
+          appendScalarWaveCycle(v0_notes, block_start, cycle_bar_plan,
+                                kPassV0BandLo + point.register_shift,
+                                kPassV0BandHi + point.register_shift, phase_rotation,
+                                descending_start, notes_per_beat, mode);
+          break;
+      }
 
       PassacagliaVariation var;
       var.voice = 0;
@@ -536,9 +589,44 @@ HarnessFixture buildGroundVariationForm(const ResolvedRequest& req, int cycle_ba
     const Tick block_start = static_cast<Tick>(cycle * cycle_bars) * kTicksPerBar34;
     const Tick block_end = block_start + period;
 
+    // Pattern selection: the Ground-role cycle and the climax are design values
+    // (quarters / densest sawtooth); other cycles rotate the chaconne palette so
+    // consecutive variations alternate figuration idioms.
+    const PatternKind pattern =
+        (ground_role || point.is_climax)
+            ? PatternKind::kSawtooth
+            : kChaconnePalette[(req.seed + static_cast<std::uint32_t>(cycle)) % 3];
+    // Register band for the band-confined patterns: the variation tessitura
+    // anchored on the first bar's start tone, an octave-and-a-fifth wide
+    // (matching the scalar-wave band proportions).
+    const int band_lo = cycle_bar_plan.front().low_tone + point.register_shift;
+    const int band_hi = band_lo + 19;
+
     std::vector<MaterialNote> notes;
-    appendSawtoothCycle(notes, block_start, cycle_bar_plan, point.register_shift, anchor_rotation,
-                        notes_per_beat, mode);
+    switch (pattern) {
+      case PatternKind::kScalarWave: {
+        const int phase_rotation =
+            static_cast<int>((req.seed + static_cast<std::uint32_t>(cycle)) % 5);
+        const bool descending_start = ((req.seed + static_cast<std::uint32_t>(cycle)) % 2) == 1;
+        appendScalarWaveCycle(notes, block_start, cycle_bar_plan, band_lo, band_hi, phase_rotation,
+                              descending_start, notes_per_beat, mode);
+        break;
+      }
+      case PatternKind::kArpeggio:
+        appendArpeggioCycle(notes, block_start, cycle_bar_plan, band_lo, band_hi,
+                            static_cast<int>((req.seed + static_cast<std::uint32_t>(cycle)) % 4),
+                            notes_per_beat, mode);
+        break;
+      case PatternKind::kFiguraCorta:
+        appendFiguraCortaCycle(notes, block_start, cycle_bar_plan, point.register_shift,
+                               anchor_rotation, mode);
+        break;
+      case PatternKind::kSawtooth:
+      default:
+        appendSawtoothCycle(notes, block_start, cycle_bar_plan, point.register_shift,
+                            anchor_rotation, notes_per_beat, mode);
+        break;
+    }
 
     if (passacaglia) {
       PassacagliaVariation var;

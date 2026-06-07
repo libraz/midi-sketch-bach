@@ -8,6 +8,7 @@
 #include "composer/arc.h"
 #include "composer/character_profile.h"
 #include "composer/figuration.h"
+#include "composer/figuration_palette.h"
 #include "composer/form_builders.h"
 #include "composer/material.h"
 #include "composer/minor_material.h"
@@ -697,6 +698,16 @@ namespace {
 // tones C2-region chord roots so the variation downbeat anchoring stays
 // consonant and the ground tiles exactly).
 
+// Goldberg figuration palette (design table): the pattern idiom each
+// non-climax figuration variation block takes, rotated by (seed +
+// variation_index) so consecutive variations alternate idioms. The climax
+// block and variation 30 are design values (the densest anchored scalar wave)
+// and bypass the rotation; aria and canon blocks have their own layouts.
+// No kArpeggio here: broken-chord blocks raise the melodic-interval cost (the
+// dominant scorer feature) and the goldberg sits close to the model
+// threshold, so its rotation keeps to the stepwise idioms.
+constexpr PatternKind kGoldbergPalette[2] = {PatternKind::kScalarWave, PatternKind::kFiguraCorta};
+
 // Per-bar chord for the ground cycle: the chord root IS the ground tone's
 // pitch class, with the diatonic triad quality on that degree (in minor the V
 // is the harmonic-minor major dominant), so the harmony stays consonant with
@@ -1020,6 +1031,7 @@ HarnessFixture buildGoldbergVariationsForm(const ResolvedRequest& req) {
       case GoldbergVariationKind::Figuration:
       default: {
         int notes_per_beat = notesPerBeatFor(point, profile.density_bias);
+        const bool design_peak = var.is_climax || variation_number == 30;
         if (var.is_climax)
           notes_per_beat = 4;  // the arc climax block is the densest by design.
         // The final variation of the full set (variation 30) is the design
@@ -1031,11 +1043,29 @@ HarnessFixture buildGoldbergVariationsForm(const ResolvedRequest& req) {
           notes_per_beat = 2;  // Noble keeps a moderate, dignified subdivision.
         var.density_level = notes_per_beat == 4 ? 2 : 1;
         const int register_base = kVarRegisterBase + static_cast<int>(point.register_shift);
+        // Pattern selection: the climax block and variation 30 are design
+        // values (the densest anchored scalar wave); other figuration blocks
+        // rotate the goldberg palette so consecutive variations alternate
+        // idioms (the BWV988 figuration-type rotation).
+        const PatternKind pattern = design_peak
+                                        ? PatternKind::kScalarWave
+                                        : kGoldbergPalette[(req.seed + variation_index) % 2];
         for (int local = 0; local < kCycleBars; ++local) {
           const int bar = blk * kCycleBars + local;
-          appendVariationBar(
-              var, bar, goldbergBarChord(ground[static_cast<std::size_t>(bar % kCycleBars)], mode),
-              mode, notes_per_beat, register_base, offset);
+          const BarChord chord =
+              goldbergBarChord(ground[static_cast<std::size_t>(bar % kCycleBars)], mode);
+          switch (pattern) {
+            case PatternKind::kFiguraCorta:
+              appendFiguraCortaBar(var.notes, bar,
+                                   snapUpToChordTone(detail::scaleUp(register_base, offset, mode),
+                                                     chord.root_pc, chord.minor),
+                                   detail::ChordSpec{chord.root_pc, chord.minor}, mode);
+              break;
+            case PatternKind::kScalarWave:
+            default:
+              appendVariationBar(var, bar, chord, mode, notes_per_beat, register_base, offset);
+              break;
+          }
         }
         break;
       }

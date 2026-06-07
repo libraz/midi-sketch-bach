@@ -608,5 +608,54 @@ TEST(FormCantusGoldberg, VariationKindDispatchFollowsBwv988Scheme) {
     EXPECT_EQ(goldbergVariationKind(idx), goldbergVariationKind(idx)) << "index " << idx;
 }
 
+TEST(FormCantusGoldberg, FigurationBlocksAlternatePatterns) {
+  // Non-climax figuration blocks rotate the goldberg pattern palette, so the
+  // set of figuration-block duration histograms is not uniform: the figura
+  // corta cell (eighth + two sixteenths per beat) is rhythmically distinct
+  // from the anchored scalar wave. The aria (block 0, half notes) and the
+  // canons (uniform eighths) keep their own layouts; the climax block stays
+  // the design peak (uniform sixteenths).
+  for (std::uint32_t seed : kSeeds) {
+    for (bool minor : {false, true}) {
+      const HarnessFixture fx =
+          build(FormType::GoldbergVariations, minor, SubjectCharacter::Severe, /*bars=*/128, seed);
+      const auto& vars = fx.material.passacaglia_variations;
+      ASSERT_GE(vars.size(), 6u);
+      // Aria layout unchanged: two half notes per bar.
+      for (const MaterialNote& n : vars[0].notes)
+        EXPECT_EQ(n.duration, 2 * kTicksPerBeat) << "aria must stay half notes";
+      // Collect non-aria, non-climax figuration blocks' histograms.
+      bool found_figura_corta = false;
+      bool found_uniform = false;
+      for (std::size_t blk = 1; blk < vars.size(); ++blk) {
+        const auto& var = vars[blk];
+        if (var.is_climax) {
+          EXPECT_TRUE(
+              std::all_of(var.notes.begin(), var.notes.end(),
+                          [](const MaterialNote& n) { return n.duration == kTicksPerBeat / 4; }))
+              << "seed " << seed << ": climax block must stay uniform sixteenths";
+          continue;
+        }
+        const std::size_t variation_number = blk;  // 1-based ordinal (aria = block 0).
+        if (variation_number % 3 == 0 && variation_number < 30)
+          continue;  // canon block: its own layout.
+        const bool mixed =
+            std::any_of(var.notes.begin(), var.notes.end(),
+                        [](const MaterialNote& n) { return n.duration == kTicksPerBeat / 2; }) &&
+            std::any_of(var.notes.begin(), var.notes.end(),
+                        [](const MaterialNote& n) { return n.duration == kTicksPerBeat / 4; });
+        if (mixed)
+          found_figura_corta = true;
+        else
+          found_uniform = true;
+      }
+      EXPECT_TRUE(found_figura_corta)
+          << "seed " << seed << " minor " << minor << ": no figura corta block in the rotation";
+      EXPECT_TRUE(found_uniform) << "seed " << seed << " minor " << minor
+                                 << ": no scalar-wave block in the rotation";
+    }
+  }
+}
+
 }  // namespace
 }  // namespace bach::composer

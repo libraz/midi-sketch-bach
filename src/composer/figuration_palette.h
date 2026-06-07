@@ -260,8 +260,9 @@ void appendFigurationWaveBar(ThemeToneRegistry& registry, FigurationSection& sec
  * @param band_lo Register band floor (already lifted by any arc shift).
  * @param band_hi Register band ceiling (already lifted by any arc shift).
  * @param figure_index Selects the figure contour (taken modulo the table size).
- * @param notes_per_beat Subdivision: 1 / 2 / 4 notes per beat (1 and 2 sample
- *        the contour's first / first-and-third elements).
+ * @param notes_per_beat Subdivision: 1 / 2 / 4 notes per beat (2 takes the
+ *        contour's opening pair per beat; 1 walks the contour one element per
+ *        beat, so consecutive notes never repeat one pitch).
  * @param mode Diatonic mode (Major / Minor) selecting the scale.
  */
 void appendArpeggioCycle(std::vector<MaterialNote>& notes, Tick block_start,
@@ -292,6 +293,47 @@ void appendArpeggioCycle(std::vector<MaterialNote>& notes, Tick block_start,
 void appendFiguraCortaCycle(std::vector<MaterialNote>& notes, Tick block_start,
                             const std::vector<CycleBar>& cycle_bar_plan, int register_shift,
                             int anchor_rotation, detail::Mode mode);
+
+/**
+ * @brief Append one 4/4 bar of broken-chord arpeggio figuration
+ *        (PatternKind::kArpeggio, 4/4 bar form).
+ *
+ * The bar's triad is realized as three stacked chord tones inside the band,
+ * and every beat traces one of the four fixed figure contours over those
+ * tones (see appendArpeggioCycle). Every emitted note is a chord tone, so each
+ * beat onset is consonant against any concurrent chord tone below it.
+ *
+ * @param notes Destination note vector.
+ * @param bar Absolute bar index (4/4 bar grid).
+ * @param chord The bar's chord (supplies the triad tones).
+ * @param mode Diatonic mode (reserved; chord tones need no scale walk).
+ * @param band_lo Register band floor.
+ * @param band_hi Register band ceiling.
+ * @param figure_index Selects the figure contour (taken modulo the table size).
+ * @param notes_per_beat Subdivision: 1 / 2 / 4 notes per beat.
+ */
+void appendArpeggioBar(std::vector<MaterialNote>& notes, int bar, const detail::ChordSpec& chord,
+                       detail::Mode mode, int band_lo, int band_hi, int figure_index,
+                       int notes_per_beat);
+
+/**
+ * @brief Append one 4/4 bar of figura corta figuration
+ *        (PatternKind::kFiguraCorta, 4/4 bar form).
+ *
+ * Every beat carries the long-short-short figura corta cell (eighth + two
+ * sixteenths). The four beat anchors trace the low-amplitude chord-tone wave
+ * (a0, a1, a2, a1 with a1/a2 the next chord tones above `start`), and the two
+ * shorts step diatonically toward the next beat's anchor, stopping short of it
+ * so the next onset is a fresh attack. Every beat onset is a chord tone.
+ *
+ * @param notes Destination note vector.
+ * @param bar Absolute bar index (4/4 bar grid).
+ * @param start The bar's opening anchor (already snapped to a chord tone).
+ * @param chord The bar's chord (supplies the anchor wave's triad tones).
+ * @param mode Diatonic mode selecting the scale walker for the shorts.
+ */
+void appendFiguraCortaBar(std::vector<MaterialNote>& notes, int bar, int start,
+                          const detail::ChordSpec& chord, detail::Mode mode);
 
 /**
  * @brief Append one 4/4 bar opening gesture: a mordent onset followed by a

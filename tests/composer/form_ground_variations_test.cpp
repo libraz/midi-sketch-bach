@@ -18,6 +18,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <vector>
@@ -508,6 +509,106 @@ TEST(GroundVariationPassacaglia, LongScheduleHasGroundSoloIntroAndRecedingCycle)
       ++receding;
   }
   EXPECT_EQ(receding, 1) << "exactly one middle cycle must rest V1 (receding terrace)";
+}
+
+// ---------------------------------------------------------------------------
+// Variation pattern rotation: non-climax variation cycles rotate through the
+// form's figuration palette, so consecutive cycles alternate idioms. Locked
+// from the material's per-cycle duration histograms:
+//   - cycle 0 stays the Ground-role / establishing statement (quarters only),
+//   - at least one adjacent non-special cycle pair differs in its duration
+//     histogram (the figura corta cell is rhythmically distinct),
+//   - the climax cycle stays the design peak (uniform sixteenths).
+// ---------------------------------------------------------------------------
+
+// Sorted duration multiset of one variation block's notes.
+std::vector<Tick> durationHistogram(const std::vector<MaterialNote>& notes) {
+  std::vector<Tick> durations;
+  durations.reserve(notes.size());
+  for (const MaterialNote& n : notes)
+    durations.push_back(n.duration);
+  std::sort(durations.begin(), durations.end());
+  return durations;
+}
+
+bool allDurationsAre(const std::vector<MaterialNote>& notes, Tick dur) {
+  for (const MaterialNote& n : notes) {
+    if (n.duration != dur)
+      return false;
+  }
+  return true;
+}
+
+TEST(GroundVariationChaconne, VariationCyclesAlternatePatterns) {
+  for (std::uint32_t seed : {1u, 2u, 3u, 7u}) {
+    for (bool minor : {false, true}) {
+      const HarnessFixture fx = build(FormType::Chaconne, seed, minor, /*bars=*/128);
+      const auto& vars = fx.material.variations;
+      ASSERT_GE(vars.size(), 4u);
+      // Cycle 0: Ground-role establishing statement, quarters only.
+      EXPECT_TRUE(allDurationsAre(vars[0].notes, kTicksPerBeat))
+          << "seed " << seed << ": cycle 0 must stay quarters";
+      EXPECT_EQ(vars[0].role, VariationRole::Ground);
+      // Adjacent non-special cycles: at least one pair differs in rhythm.
+      int differing_pairs = 0;
+      for (std::size_t cyc = 1; cyc + 1 < vars.size(); ++cyc) {
+        if (durationHistogram(vars[cyc].notes) != durationHistogram(vars[cyc + 1].notes))
+          ++differing_pairs;
+      }
+      EXPECT_GT(differing_pairs, 0)
+          << "seed " << seed << " minor " << minor << ": no rhythmic alternation across cycles";
+      // The design peak: at least one peak-tier cycle of uniform sixteenths
+      // (the climax cycle bypasses the rotation; the character density bias may
+      // shift the recorded tier, so the rhythm itself is what is locked).
+      bool found_peak = false;
+      for (const auto& var : vars) {
+        if (var.density_level >= 2 && allDurationsAre(var.notes, kTicksPerBeat / 4))
+          found_peak = true;
+      }
+      EXPECT_TRUE(found_peak) << "seed " << seed << ": climax must stay uniform sixteenths";
+    }
+  }
+}
+
+TEST(GroundVariationPassacaglia, VariationCyclesAlternatePatterns) {
+  for (std::uint32_t seed : {1u, 2u, 3u, 7u}) {
+    for (bool minor : {false, true}) {
+      const HarnessFixture fx = build(FormType::Passacaglia, seed, minor, /*bars=*/128);
+      const auto& vars = fx.material.passacaglia_variations;
+      ASSERT_GE(vars.size(), 4u);
+      int differing_pairs = 0;
+      for (std::size_t cyc = 0; cyc + 1 < vars.size(); ++cyc) {
+        if (durationHistogram(vars[cyc].notes) != durationHistogram(vars[cyc + 1].notes))
+          ++differing_pairs;
+      }
+      EXPECT_GT(differing_pairs, 0)
+          << "seed " << seed << " minor " << minor << ": no rhythmic alternation across cycles";
+      // The climax block stays the design peak: uniform sixteenths.
+      bool found_climax = false;
+      for (const auto& var : vars) {
+        if (var.is_climax) {
+          found_climax = true;
+          EXPECT_TRUE(allDurationsAre(var.notes, kTicksPerBeat / 4))
+              << "seed " << seed << ": climax must stay uniform sixteenths";
+        }
+      }
+      EXPECT_TRUE(found_climax);
+    }
+  }
+}
+
+TEST(GroundVariationPassacaglia, PatternedCyclesStayAboveCounterFigurationBand) {
+  // The center-anchored patterns (sawtooth / figura corta) are lifted an octave
+  // so V0 never dips into the V1 counter-figuration band (C3-B3 + shift); a dip
+  // would trip voice_crossing across the all-Material texture.
+  for (std::uint32_t seed : {1u, 2u, 3u, 7u, 9u}) {
+    const HarnessFixture fx = build(FormType::Passacaglia, seed, /*minor=*/true, /*bars=*/128);
+    for (const auto& var : fx.material.passacaglia_variations) {
+      for (const MaterialNote& n : var.notes)
+        EXPECT_GE(static_cast<int>(n.pitch), 60)
+            << "seed " << seed << ": V0 dipped below the scalar-wave band floor";
+    }
+  }
 }
 
 }  // namespace

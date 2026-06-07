@@ -80,15 +80,20 @@ std::vector<int> resolveAnchorDegrees(const std::vector<CycleBar>& cycle_bar_pla
   return anchor_deg;
 }
 
-/// @brief Realize a bar's triad as three stacked chord tones inside a band.
+/// @brief Realize a triad as three stacked chord tones inside a band.
 ///
 /// The bass is the lowest root-class pitch at or above `band_lo`; the third
 /// and fifth stack upward from it. Any tone that escapes `band_hi` folds down
-/// by whole octaves (it stays a chord tone, only the voicing inverts).
-void stackTriadInBand(const CycleBar& bar, int band_lo, int band_hi, int out_tones[3]) {
-  const int third_interval = bar.minor ? 3 : 4;
-  const int pcs[3] = {bar.root_pc % 12, (bar.root_pc + third_interval) % 12,
-                      (bar.root_pc + 7) % 12};
+/// by whole octaves (it stays a chord tone, only the voicing inverts). In
+/// minor the leading tone B natural (pc 11, the harmonic-minor dominant
+/// third) is lowered to the natural-minor third so the broken-chord line
+/// stays in natural minor and no Ab->B augmented 2nd can arise.
+void stackTriadInBand(std::uint8_t root_pc, bool minor, detail::Mode mode, int band_lo, int band_hi,
+                      int out_tones[3]) {
+  int third_interval = minor ? 3 : 4;
+  if (mode == detail::Mode::Minor && (root_pc + third_interval) % 12 == 11)
+    third_interval = 3;  // natural-minor third: keep the line off the leading tone.
+  const int pcs[3] = {root_pc % 12, (root_pc + third_interval) % 12, (root_pc + 7) % 12};
   int cursor = band_lo;
   for (int i = 0; i < 3; ++i) {
     int tone = cursor;
@@ -100,6 +105,19 @@ void stackTriadInBand(const CycleBar& bar, int band_lo, int band_hi, int out_ton
       tone += 12;  // a band narrower than an octave cannot hold all three; keep in range.
     out_tones[i] = tone;
     cursor = std::max(cursor, tone);
+  }
+}
+
+/// @brief Return the next tone of the chord's triad strictly above `from`.
+int chordToneAbove(int from, std::uint8_t root_pc, bool minor) {
+  const int third = minor ? 3 : 4;
+  const int triad_pc[3] = {root_pc % 12, (root_pc + third) % 12, (root_pc + 7) % 12};
+  int cur = from + 1;
+  while (true) {
+    const int pc = ((cur % 12) + 12) % 12;
+    if (pc == triad_pc[0] || pc == triad_pc[1] || pc == triad_pc[2])
+      return cur;
+    ++cur;
   }
 }
 
@@ -178,12 +196,21 @@ void appendSawtoothCycle(std::vector<MaterialNote>& notes, Tick block_start,
       // sub == 0 is the sampled beat-onset anchor; later subs step one diatonic
       // degree per sub toward the next anchor, bounded so the fill never
       // overshoots it (so the next onset is at most one step away -- no leap).
+      // When the next anchor repeats this one (span == 0, possible across a
+      // chord change that keeps the anchor pitch class), the fill oscillates to
+      // the diatonic neighbour toward the register center instead of holding --
+      // a held fill would chain the repeated anchors into a stalled run.
       int degree = from_deg;
       if (sub > 0) {
-        int advance = sub;
-        if (advance > span)
-          advance = span;  // do not overshoot the next onset.
-        degree = from_deg + dir * advance;
+        if (span == 0) {
+          const int osc = (degreeToMidi(from_deg, mode) >= center) ? -1 : 1;
+          degree = from_deg + ((sub % 2 == 1) ? osc : 0);
+        } else {
+          int advance = sub;
+          if (advance > span)
+            advance = span;  // do not overshoot the next onset.
+          degree = from_deg + dir * advance;
+        }
       }
       mnote.pitch = static_cast<std::uint8_t>(degreeToMidi(degree, mode));
       notes.push_back(mnote);
@@ -610,17 +637,14 @@ constexpr int kArpeggioFigures[4][4] = {
 void appendArpeggioCycle(std::vector<MaterialNote>& notes, Tick block_start,
                          const std::vector<CycleBar>& cycle_bar_plan, int band_lo, int band_hi,
                          int figure_index, int notes_per_beat, detail::Mode mode) {
-  (void)mode;  // every emitted tone is a chord tone; no scale walk is needed.
   const int* figure = kArpeggioFigures[((figure_index % 4) + 4) % 4];
   const Tick step = kTicksPerBeat / static_cast<Tick>(notes_per_beat);
-  // Subdivision sampling: 4 -> the full contour, 2 -> elements 0 and 2,
-  // 1 -> element 0 (the contour's anchor tone).
-  const int stride = 4 / notes_per_beat;
 
   const int cycle_bars = static_cast<int>(cycle_bar_plan.size());
   for (int bar = 0; bar < cycle_bars; ++bar) {
+    const CycleBar& plan_bar = cycle_bar_plan[static_cast<std::size_t>(bar)];
     int tones[3];
-    stackTriadInBand(cycle_bar_plan[static_cast<std::size_t>(bar)], band_lo, band_hi, tones);
+    stackTriadInBand(plan_bar.root_pc, plan_bar.minor, mode, band_lo, band_hi, tones);
     for (int beat = 0; beat < 3; ++beat) {
       const Tick beat_tick = block_start + static_cast<Tick>(bar) * kTicksPerBar34 +
                              static_cast<Tick>(beat) * kTicksPerBeat;
@@ -628,9 +652,65 @@ void appendArpeggioCycle(std::vector<MaterialNote>& notes, Tick block_start,
         MaterialNote mnote;
         mnote.start_tick = beat_tick + static_cast<Tick>(sub) * step;
         mnote.duration = step;
-        mnote.pitch = static_cast<std::uint8_t>(tones[figure[sub * stride]]);
+        // Subdivided beats take the contour's PREFIX (its opening tones
+        // alternate, so consecutive notes never repeat one pitch); the quarter
+        // tier walks the contour one element per BEAT for the same reason.
+        mnote.pitch = static_cast<std::uint8_t>(tones[figure[notes_per_beat == 1 ? beat : sub]]);
         notes.push_back(mnote);
       }
+    }
+  }
+}
+
+void appendArpeggioBar(std::vector<MaterialNote>& notes, int bar, const detail::ChordSpec& chord,
+                       detail::Mode mode, int band_lo, int band_hi, int figure_index,
+                       int notes_per_beat) {
+  const int* figure = kArpeggioFigures[((figure_index % 4) + 4) % 4];
+  const Tick step = kTicksPerBeat / static_cast<Tick>(notes_per_beat);
+  int tones[3];
+  stackTriadInBand(chord.root_pc, chord.minor, mode, band_lo, band_hi, tones);
+  for (int beat = 0; beat < 4; ++beat) {
+    const Tick beat_tick = barTick(bar) + static_cast<Tick>(beat) * kTicksPerBeat;
+    for (int sub = 0; sub < notes_per_beat; ++sub) {
+      // Subdivided beats take the contour's PREFIX (its opening tones
+      // alternate, so consecutive notes never repeat one pitch); the quarter
+      // tier walks the contour one element per BEAT for the same reason.
+      addNote(notes, beat_tick + static_cast<Tick>(sub) * step, step,
+              tones[figure[notes_per_beat == 1 ? beat : sub]]);
+    }
+  }
+}
+
+void appendFiguraCortaBar(std::vector<MaterialNote>& notes, int bar, int start,
+                          const detail::ChordSpec& chord, detail::Mode mode) {
+  // Four per-beat chord-tone anchors forming a low-amplitude wave (rise two
+  // chord tones, fall back one), so the bar boundary voice-leads smoothly.
+  int anchor[4];
+  anchor[0] = start;
+  anchor[1] = chordToneAbove(anchor[0], chord.root_pc, chord.minor);
+  anchor[2] = chordToneAbove(anchor[1], chord.root_pc, chord.minor);
+  anchor[3] = anchor[1];
+
+  // Long-short-short cell per beat: eighth + two sixteenths (one full beat).
+  constexpr Tick kCellDur[3] = {kEighth, kSixteenth, kSixteenth};
+  constexpr Tick kCellOffset[3] = {0, kEighth, kEighth + kSixteenth};
+
+  for (int beat = 0; beat < 4; ++beat) {
+    const int from = anchor[beat];
+    const int to = anchor[(beat + 1) % 4];
+    const int dir = (to >= from) ? 1 : -1;
+    int walked = from;
+    for (int sub = 0; sub < 3; ++sub) {
+      if (sub > 0) {
+        // Step diatonically toward the next beat's anchor, stopping short of it
+        // so the next onset is a fresh attack rather than an off-beat double.
+        const int next =
+            (dir > 0) ? detail::scaleUp(walked, 1, mode) : detail::scaleDown(walked, 1, mode);
+        if (!((dir > 0 && next >= to) || (dir < 0 && next <= to)))
+          walked = next;
+      }
+      addNote(notes, barTick(bar) + static_cast<Tick>(beat) * kTicksPerBeat + kCellOffset[sub],
+              kCellDur[sub], walked);
     }
   }
 }
@@ -665,10 +745,23 @@ void appendFiguraCortaCycle(std::vector<MaterialNote>& notes, Tick block_start,
       MaterialNote mnote;
       mnote.start_tick = beat_tick + kCellOffset[sub];
       mnote.duration = kCellDur[sub];
-      int advance = sub;
-      if (advance > span)
-        advance = span;  // do not overshoot the next onset.
-      mnote.pitch = static_cast<std::uint8_t>(degreeToMidi(from_deg + dir * advance, mode));
+      // When the next anchor repeats this one (span == 0, possible across a
+      // chord change that keeps the anchor pitch class), the shorts become a
+      // neighbour oscillation toward the register center instead of holds -- a
+      // held cell would chain the repeated anchors into a stalled run.
+      int degree = from_deg;
+      if (sub > 0) {
+        if (span == 0) {
+          const int osc = (degreeToMidi(from_deg, mode) >= center) ? -1 : 1;
+          degree = from_deg + ((sub % 2 == 1) ? osc : 0);
+        } else {
+          int advance = sub;
+          if (advance > span)
+            advance = span;  // do not overshoot the next onset.
+          degree = from_deg + dir * advance;
+        }
+      }
+      mnote.pitch = static_cast<std::uint8_t>(degreeToMidi(degree, mode));
       notes.push_back(mnote);
     }
   }
