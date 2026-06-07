@@ -17,6 +17,7 @@
 #include <algorithm>
 #include <array>
 #include <cstdint>
+#include <set>
 #include <vector>
 
 #include "composer/arc.h"
@@ -405,6 +406,60 @@ TEST(FormLinearTrio, VoicesAreStepwiseWithNoRemoteLeaps) {
         EXPECT_EQ(remote, 0) << "seed=" << seed << " minor=" << minor << " bars=" << bars;
       }
     }
+  }
+}
+
+// --- Trio vocabulary rotation -------------------------------------------------
+
+// The manual voices rotate their intra-beat figure vocabulary per 4-bar cycle
+// (arc / oscillation / figura corta), phase-shifted by one slot. Locked from
+// the material via the DENSE line's per-cycle signature: the figura corta
+// cycles carry mixed eighth+sixteenth bars, the uniform-sixteenth cycles split
+// into the rising arc (3 distinct pitches inside a beat) and the neighbour
+// oscillation (2 distinct pitches inside a beat) -- so the dense line must
+// show at least two distinct signatures across the piece.
+TEST(FormLinearTrio, DenseLineRotatesIntraBeatVocabulary) {
+  for (std::uint32_t seed : kSeeds) {
+    HarnessFixture fx;
+    build(FormType::TrioSonata, seed, /*is_minor=*/false, 32, &fx);
+    ASSERT_GE(fx.material.trio_voices.size(), 2u);
+    const int cycles = realizedBars(fx) / 4;
+    ASSERT_GE(cycles, 3);
+
+    // Signature of one cycle's dense line, read from its first bar:
+    //   'c' = figura corta (mixed durations), 'a' = sixteenth arc (3 distinct
+    //   pitches in the first beat), 'o' = sixteenth oscillation (2 distinct).
+    std::set<char> signatures;
+    for (int cycle = 0; cycle < cycles; ++cycle) {
+      // The dense sixteenth line alternates voices per cycle (V0 on even).
+      const TrioVoiceLine& dense =
+          fx.material.trio_voices[static_cast<std::size_t>(cycle % 2 == 0 ? 0 : 1)];
+      const Tick bar_start = static_cast<Tick>(cycle) * 4 * kTicksPerBar;
+      std::vector<const MaterialNote*> beat_notes;
+      bool mixed_durations = false;
+      Tick first_dur = 0;
+      for (const auto& n : dense.notes) {
+        if (n.start_tick < bar_start || n.start_tick >= bar_start + kTicksPerBar)
+          continue;
+        if (first_dur == 0)
+          first_dur = n.duration;
+        else if (n.duration != first_dur)
+          mixed_durations = true;
+        if (n.start_tick < bar_start + kTicksPerBeat)
+          beat_notes.push_back(&n);
+      }
+      ASSERT_FALSE(beat_notes.empty()) << "seed " << seed << " cycle " << cycle;
+      if (mixed_durations) {
+        signatures.insert('c');
+        continue;
+      }
+      std::set<std::uint8_t> distinct;
+      for (const MaterialNote* n : beat_notes)
+        distinct.insert(n->pitch);
+      signatures.insert(distinct.size() >= 3 ? 'a' : 'o');
+    }
+    EXPECT_GE(signatures.size(), 2u)
+        << "seed " << seed << ": the dense line must rotate its vocabulary";
   }
 }
 

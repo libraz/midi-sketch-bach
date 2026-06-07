@@ -343,8 +343,15 @@ HarnessFixture buildTrioSonataForm(const ResolvedRequest& req) {
   // `harmonic` selects the harmonic-minor ascending tetrachord on dominant bars
   // so the leading tone is reached without an augmented second; in major it is
   // ignored.
+  // `shape` rotates the intra-beat figure VOCABULARY per 4-bar cycle (the beat
+  // anchors themselves never change, so every contract -- per-beat chord-tone
+  // consonance, stepwise surface, banded registers -- holds for every shape):
+  //   0 = rising neighbour arc (anchor, +1, +2, +1),
+  //   1 = neighbour oscillation (anchor, +1, anchor, +1),
+  //   2 = figura corta cell (eighth anchor + two stepping sixteenths; only at
+  //       the sixteenth tier, lower tiers fall back to the arc).
   auto appendScalarBar = [&](std::vector<MaterialNote>& dst, int& prev_anchor, int band_lo,
-                             int band_hi, int bar, int notes_per_beat, bool dotted) {
+                             int band_hi, int bar, int notes_per_beat, bool dotted, int shape) {
     const BarChord& bc = chords[static_cast<std::size_t>(bar)];
     const int root_pc = bc.root_pc % 12;
     const int third = bc.minor ? 3 : 4;
@@ -427,18 +434,45 @@ HarnessFixture buildTrioSonataForm(const ResolvedRequest& req) {
       return;
     }
 
+    if (shape == 2 && notes_per_beat == 4) {
+      // Figura corta cell: eighth on the anchor, then two sixteenths stepping
+      // up and back (the same stepwise neighbour vocabulary in the
+      // long-short-short rhythm).
+      for (int beat = 0; beat < 4; ++beat) {
+        const int anchor = beat_anchor[beat];
+        const Tick base =
+            static_cast<Tick>(bar) * kTicksPerBar + static_cast<Tick>(beat) * kTicksPerBeat;
+        MaterialNote longn;
+        longn.start_tick = base;
+        longn.duration = kEighth;
+        longn.pitch = static_cast<std::uint8_t>(anchor);
+        dst.push_back(longn);
+        for (int sub = 0; sub < 2; ++sub) {
+          MaterialNote shortn;
+          shortn.start_tick = base + kEighth + static_cast<Tick>(sub) * kSixteenth;
+          shortn.duration = kSixteenth;
+          shortn.pitch = static_cast<std::uint8_t>(walk(anchor, sub == 0 ? 1 : 2));
+          dst.push_back(shortn);
+        }
+      }
+      return;
+    }
+
     const Tick step = (notes_per_beat == 4) ? kSixteenth : kEighth;
     for (int beat = 0; beat < 4; ++beat) {
       const int anchor = beat_anchor[beat];
       // Within the beat: the onset is the chord-tone anchor; the remaining
-      // subdivisions trace a small stepwise neighbour arc (anchor, +1, +2, +1)
-      // so they are passing tones that resolve back, never leaving by a leap.
+      // subdivisions trace the shape's stepwise neighbour figure (an arc or an
+      // oscillation), so they are passing tones that resolve back, never
+      // leaving by a leap.
       for (int sub = 0; sub < notes_per_beat; ++sub) {
         MaterialNote mn;
         mn.start_tick = static_cast<Tick>(bar) * kTicksPerBar +
                         static_cast<Tick>(beat) * kTicksPerBeat + static_cast<Tick>(sub) * step;
         mn.duration = step;
-        const int degree = (sub <= notes_per_beat / 2) ? sub : (notes_per_beat - sub);
+        const int degree = (shape == 1 && notes_per_beat == 4)
+                               ? (sub % 2)
+                               : ((sub <= notes_per_beat / 2) ? sub : (notes_per_beat - sub));
         mn.pitch = static_cast<std::uint8_t>(walk(anchor, degree));
         dst.push_back(mn);
       }
@@ -496,8 +530,20 @@ HarnessFixture buildTrioSonataForm(const ResolvedRequest& req) {
     // the rhythmic distinction between the voices are preserved.
     const bool v1_dotted = profile.prefer_dotted && v0_dense && tier <= 1;
 
-    appendScalarBar(v0.notes, v0_anchor, kV0BandLo, kV0BandHi, bar, v0_notes, /*dotted=*/false);
-    appendScalarBar(v1.notes, v1_anchor, kV1BandLo, kV1BandHi, bar, v1_notes, v1_dotted);
+    // Cycle-rotated intra-beat vocabulary, phase-shifted by one slot between
+    // the manual voices so they never trace the same figure within a cycle
+    // (distinct figuration strengthens the voice-independence trait). The
+    // climax cycle is a design value: its dense line keeps the uniform
+    // sixteenth arc (the figura corta cell carries fewer notes per beat and
+    // would flatten the density peak).
+    int v0_shape = static_cast<int>((req.seed + cycle) % 3);
+    int v1_shape = static_cast<int>((req.seed + cycle + 1) % 3);
+    if (arc.is_climax)
+      (v0_dense ? v0_shape : v1_shape) = 0;
+
+    appendScalarBar(v0.notes, v0_anchor, kV0BandLo, kV0BandHi, bar, v0_notes, /*dotted=*/false,
+                    v0_shape);
+    appendScalarBar(v1.notes, v1_anchor, kV1BandLo, kV1BandHi, bar, v1_notes, v1_dotted, v1_shape);
   }
   out.material.trio_voices.push_back(std::move(v0));
   out.material.trio_voices.push_back(std::move(v1));
