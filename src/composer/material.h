@@ -524,8 +524,15 @@ struct Material {
   // `passacaglia_ground_period` ticks; `passacaglia_variations`
   // feed PassacagliaVariation spans (one per ground cycle, rising density, the
   // last and optionally a mid cycle flagged is_climax).
+  //
+  // `passacaglia_ground_split_from`: design value for the late-cycle rhythmic
+  // intensification of the ground. From this absolute tick on, the replay
+  // subdivides each tiled ground note into repeated same-pitch quarters (the
+  // BWV582-style martellato restatement). 0 = never split. Pitches never
+  // change, so the bar-head skeleton stays immutable.
   std::vector<MaterialNote> passacaglia_ground;  // immutable 8-bar bass, cycle-relative ticks.
   Tick passacaglia_ground_period = 0;
+  Tick passacaglia_ground_split_from = 0;
   std::vector<PassacagliaVariation> passacaglia_variations;
   // Organ Trio Sonata. The (up to three) independent voice lines of a trio
   // sonata; each is replayed verbatim by a TrioVoiceCarrier span matched by

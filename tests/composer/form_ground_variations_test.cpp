@@ -9,7 +9,8 @@
 // bars {natural, 2x natural, 128}:
 //   1. buildFormFixture -> Composer::run validates Ok (no failures).
 //   2. Determinism: identical request -> byte-identical notes.
-//   3. Ground immutability: V1 notes repeat exactly every ground period.
+//   3. Ground immutability: the per-bar ground pitch skeleton repeats exactly
+//      every ground period (late cycles may subdivide a bar rhythmically).
 //   4. Bar math is 1440 ticks (last note end ~= bars * 1440).
 //   5. Climax block lands at the arc climax (~80%) and stamps ClimaxPlaced.
 //   6. Density rises toward the climax (V0 note count per cycle).
@@ -161,13 +162,28 @@ void expectGroundImmutable(FormType form, int cycle_bars) {
   for (const Case& c : casesFor(form)) {
     const HarnessFixture fx = build(c.form, c.seed, c.is_minor, c.target_bars);
     const ComposeResult r = Composer{}.run(fx.material, fx.harmony, fx.voice_plan);
-    const std::vector<std::uint8_t> ground = groundPitches(r, groundVoice(c.form));
+    // Bar-head pitch skeleton of the ground voice. A late cycle may restate a
+    // bar as repeated same-pitch quarters (rhythm-only intensification), so the
+    // invariant is the per-bar skeleton, with every ground note inside a bar
+    // matching its bar-head pitch.
+    const VoiceId gv = groundVoice(c.form);
+    std::vector<int> head(static_cast<std::size_t>(resolvedBars(c.form, c.target_bars)), -1);
+    for (const auto& n : r.notes) {
+      if (n.voice != gv)
+        continue;
+      const std::size_t bar = static_cast<std::size_t>(n.start_tick / kTicksPerBar34);
+      ASSERT_LT(bar, head.size());
+      if (n.start_tick % kTicksPerBar34 == 0)
+        head[bar] = n.pitch;
+      else
+        EXPECT_EQ(static_cast<int>(n.pitch), head[bar])
+            << "ground note inside bar " << bar << " differs from its bar-head pitch";
+    }
     const std::size_t period = static_cast<std::size_t>(cycle_bars);
-    ASSERT_GE(ground.size(), period);
-    EXPECT_EQ(ground.size() % period, 0u) << "ground note count must be a whole number of cycles";
-    for (std::size_t i = period; i < ground.size(); ++i) {
-      EXPECT_EQ(ground[i], ground[i % period])
-          << "ground note " << i << " differs from cycle-0 slot " << (i % period);
+    for (std::size_t bar = 0; bar < head.size(); ++bar) {
+      ASSERT_NE(head[bar], -1) << "bar " << bar << " has no ground bar-head note";
+      EXPECT_EQ(head[bar], head[bar % period])
+          << "ground bar " << bar << " differs from cycle-0 bar " << (bar % period);
     }
   }
 }
@@ -593,6 +609,52 @@ TEST(GroundVariationPassacaglia, VariationCyclesAlternatePatterns) {
         }
       }
       EXPECT_TRUE(found_climax);
+    }
+  }
+}
+
+TEST(GroundVariationPassacaglia, GroundIntensifiesRhythmicallyInLateCycles) {
+  // From the final third of the cycles on, the ground (V2) restates each bar as
+  // three same-pitch quarters instead of one dotted half; earlier cycles keep
+  // the long notes, and the bar-head pitch skeleton never changes.
+  for (std::uint32_t seed : {1u, 2u, 3u}) {
+    const HarnessFixture fx = build(FormType::Passacaglia, seed, /*minor=*/true, /*bars=*/48);
+    const ComposeResult r = Composer{}.run(fx.material, fx.harmony, fx.voice_plan);
+    EXPECT_EQ(r.validation.status, ValidationStatus::Ok);
+
+    const int cycles = 48 / 8;
+    const Tick period = 8 * kTicksPerBar34;
+    const Tick split_from = fx.material.passacaglia_ground_split_from;
+    ASSERT_GT(split_from, 0);
+    EXPECT_EQ(split_from, static_cast<Tick>(cycles - (cycles + 2) / 3) * period);
+
+    // Collect V2 (ground) notes per bar.
+    std::vector<std::vector<const NoteEvent*>> bars(48);
+    for (const auto& n : r.notes) {
+      if (n.voice != 2)
+        continue;
+      const std::size_t bar = static_cast<std::size_t>(n.start_tick / kTicksPerBar34);
+      if (bar < bars.size())
+        bars[bar].push_back(&n);
+    }
+    for (std::size_t bar = 0; bar < bars.size(); ++bar) {
+      ASSERT_FALSE(bars[bar].empty()) << "seed " << seed << " bar " << bar;
+      const Tick bar_tick = static_cast<Tick>(bar) * kTicksPerBar34;
+      const std::uint8_t skeleton = fx.material.passacaglia_ground[bar % 8].pitch;
+      if (bar_tick < split_from) {
+        // Early cycles: one dotted-half note per bar, untouched.
+        EXPECT_EQ(bars[bar].size(), 1u) << "seed " << seed << " bar " << bar;
+        EXPECT_EQ(bars[bar][0]->duration, kTicksPerBar34);
+      } else {
+        // Late cycles: three same-pitch quarters (martellato).
+        EXPECT_EQ(bars[bar].size(), 3u) << "seed " << seed << " bar " << bar;
+        for (const NoteEvent* n : bars[bar]) {
+          EXPECT_EQ(n->duration, kTicksPerBeat);
+          EXPECT_EQ(n->pitch, skeleton) << "pitch must never change";
+        }
+      }
+      EXPECT_EQ(bars[bar][0]->pitch, skeleton)
+          << "seed " << seed << " bar " << bar << ": bar-head skeleton altered";
     }
   }
 }

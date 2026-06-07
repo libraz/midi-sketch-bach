@@ -141,6 +141,42 @@ TEST(PassacagliaTest, GroundCarrierTilesGroundBassAcrossPeriods) {
   }
 }
 
+// Late-cycle rhythmic intensification: from passacaglia_ground_split_from on,
+// each tiled ground note longer than a beat is restated as repeated same-pitch
+// quarters; earlier cycles replay the long notes untouched. Every emitted note
+// still carries PassacagliaGroundReplayed and the original pitches.
+TEST(PassacagliaTest, GroundCarrierSplitsLateCyclesIntoQuarters) {
+  Material material;
+  const Tick period = 2 * kTicksPerBar;  // two full-bar notes per cycle.
+  material.passacaglia_ground.push_back(mnote(0, kTicksPerBar, 48));
+  material.passacaglia_ground.push_back(mnote(kTicksPerBar, kTicksPerBar, 43));
+  material.passacaglia_ground_period = period;
+  material.passacaglia_ground_split_from = period;  // split from cycle 1 on.
+
+  Span span;
+  span.id = 1;
+  span.start_tick = 0;
+  span.end_tick = 2 * period;  // exactly two cycles.
+  span.voice = 2;
+  span.intent = VoiceIntent::PassacagliaGround;
+
+  const auto cands = CandidateSearch{}.enumerate(span, cMinorWhole(), material, CandidateContext{});
+
+  // Cycle 0: two untouched full-bar notes. Cycle 1: each bar restated as four
+  // same-pitch quarters (1920 / 480).
+  ASSERT_EQ(cands.size(), 2u + 8u);
+  EXPECT_EQ(cands[0].duration, kTicksPerBar);
+  EXPECT_EQ(cands[0].pitch, 48u);
+  EXPECT_EQ(cands[1].duration, kTicksPerBar);
+  EXPECT_EQ(cands[1].pitch, 43u);
+  for (std::size_t i = 2; i < cands.size(); ++i) {
+    EXPECT_EQ(cands[i].duration, kTicksPerBeat) << "late-cycle note " << i << " must be a quarter";
+    EXPECT_EQ(cands[i].pitch, (i < 6) ? 48u : 43u) << "pitch must never change";
+    EXPECT_EQ(cands[i].start_tick, period + static_cast<Tick>(i - 2) * kTicksPerBeat);
+    EXPECT_NE(cands[i].satisfied_rules & bit(RuleBit::PassacagliaGroundReplayed), 0u);
+  }
+}
+
 // A non-climax variation: VariationApplied on every note, ClimaxPlaced on none.
 TEST(PassacagliaTest, VariationCarrierStampsVariationAppliedWithoutClimax) {
   Material material;

@@ -932,17 +932,21 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
   }
 
   if (span.intent == VoiceIntent::PassacagliaGround) {
-    // Organ Passacaglia ground carrier: period-tiled verbatim replay of the
-    // immutable 8-bar passacaglia ground bass (material.passacaglia_ground is one
+    // Organ Passacaglia ground carrier: period-tiled replay of the immutable
+    // 8-bar passacaglia ground bass (material.passacaglia_ground is one
     // cycle of length material.passacaglia_ground_period ticks). The cycle is
     // laid down repeatedly to fill [span.start_tick, span.end_tick); each note is
     // source = Material, score = 1.0 (baseline ChordTone/P7/P8 bits via
     // emitMaterialNote) plus PassacagliaGroundReplayed so the provenance records
-    // the ground shipped. The ground is immutable: notes are
-    // replayed verbatim, only time-shifted by whole cycles. Same shape as the
-    // GroundCarrier branch with the renamed source vector / bit.
+    // the ground shipped. The ground PITCHES are immutable: notes are replayed
+    // time-shifted by whole cycles, and from
+    // material.passacaglia_ground_split_from on each long note is restated as
+    // repeated same-pitch quarters (rhythm-only late-cycle intensification).
+    // Same shape as the GroundCarrier branch with the renamed source vector /
+    // bit.
     const RuleIdMask ground_bits = (ruleBitMask(RuleBit::PassacagliaGroundReplayed));
     const Tick period = material.passacaglia_ground_period;
+    const Tick split_from = material.passacaglia_ground_split_from;
     if (period > 0 && !material.passacaglia_ground.empty()) {
       for (Tick base = span.start_tick; base < span.end_tick; base += period) {
         for (const auto& mnote : material.passacaglia_ground) {
@@ -953,6 +957,19 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
             break;
           MaterialNote shifted = mnote;
           shifted.start_tick = t;
+          // Late-cycle rhythmic intensification (design value carried by the
+          // material): from `split_from` on, a tiled ground note longer than a
+          // beat is restated as repeated same-pitch quarters. Pitch and the
+          // bar-head onset are untouched, so the immutable skeleton holds.
+          if (split_from > 0 && t >= split_from && shifted.duration > kTicksPerBeat) {
+            for (Tick off = 0; off < shifted.duration; off += kTicksPerBeat) {
+              MaterialNote chunk = shifted;
+              chunk.start_tick = t + off;
+              chunk.duration = std::min(kTicksPerBeat, shifted.duration - off);
+              out.push_back(emitMaterialNote(chunk, harmonic_plan, ground_bits));
+            }
+            continue;
+          }
           out.push_back(emitMaterialNote(shifted, harmonic_plan, ground_bits));
         }
       }

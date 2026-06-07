@@ -338,6 +338,16 @@ HarnessFixture buildPassacagliaThreeVoice(const ResolvedRequest& req, int cycle_
   }
   out.material.passacaglia_ground_period = period;
 
+  // Late-cycle rhythmic intensification (design value): from the final third
+  // of the cycles on, the ground restates each bar as repeated same-pitch
+  // quarters (the BWV582-style martellato) instead of one dotted half. The
+  // pitches never change, so the bar-head skeleton stays immutable. At least
+  // one unsplit statement always opens the piece (cycles >= 2 guard).
+  if (cycles >= 2) {
+    const int split_cycle = cycles - (cycles + 2) / 3;
+    out.material.passacaglia_ground_split_from = static_cast<Tick>(split_cycle) * period;
+  }
+
   // --- HarmonicPlan: one chord per bar; the final bar resolves to the tonic. ---
   out.harmony.tonic_pc = 0;
   out.harmony.is_minor = minor;
