@@ -503,13 +503,19 @@ ValidationReport Validator::validate(const std::vector<NoteEvent>& notes,
         const std::size_t current_upper_index = noteIndexStartingAt(notes, voices[va], t);
         const bool current_is_cadence =
             hasRuleBit(provenance, current_lower_index, RuleBit::CadenceCellCommitted);
-        const bool current_is_material =
-            current_lower_index < provenance.size() &&
-            provenance[current_lower_index].source == NoteSource::Material;
-        const bool upper_is_material =
-            current_upper_index < provenance.size() &&
-            provenance[current_upper_index].source == NoteSource::Material;
-        // Suppress the parallel only when BOTH voices are Material: the
+        // Material and Ornament sources are both fixed inputs from the
+        // composer's point of view: Material is replayed verbatim, and
+        // Ornament sub-notes are post-pass decoration of a Material tone (the
+        // pass runs after validation; a re-run must not turn a suppressed
+        // Material parallel into a failure just because the tone now carries
+        // trill sub-notes).
+        auto is_fixed_source = [&](std::size_t idx) {
+          return idx < provenance.size() && (provenance[idx].source == NoteSource::Material ||
+                                             provenance[idx].source == NoteSource::Ornament);
+        };
+        const bool current_is_material = is_fixed_source(current_lower_index);
+        const bool upper_is_material = is_fixed_source(current_upper_index);
+        // Suppress the parallel only when BOTH voices are fixed sources: the
         // composer cannot edit fixed inputs (mirrors the P10 invertible and
         // vertical-dissonance both_material gates). When a Compose upper
         // voice runs parallels against a Material lower voice (or vice

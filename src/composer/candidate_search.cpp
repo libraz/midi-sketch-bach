@@ -960,8 +960,12 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
           // Late-cycle rhythmic intensification (design value carried by the
           // material): from `split_from` on, a tiled ground note longer than a
           // beat is restated as repeated same-pitch quarters. Pitch and the
-          // bar-head onset are untouched, so the immutable skeleton holds.
-          if (split_from > 0 && t >= split_from && shifted.duration > kTicksPerBeat) {
+          // bar-head onset are untouched, so the immutable skeleton holds. The
+          // piece's final ground note stays unsplit: the bass joins the held
+          // closing chord instead of hammering quarters through the cadence.
+          const bool is_final_note = t + shifted.duration >= span.end_tick;
+          if (split_from > 0 && t >= split_from && shifted.duration > kTicksPerBeat &&
+              !is_final_note) {
             for (Tick off = 0; off < shifted.duration; off += kTicksPerBeat) {
               MaterialNote chunk = shifted;
               chunk.start_tick = t + off;

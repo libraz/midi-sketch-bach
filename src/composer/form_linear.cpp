@@ -7,6 +7,7 @@
 #include "composer/figuration.h"
 #include "composer/form_builders.h"
 #include "composer/minor_material.h"
+#include "composer/texture_helpers.h"
 #include "core/basic_types.h"
 
 namespace bach::composer {
@@ -297,6 +298,22 @@ HarnessFixture buildCelloPreludeForm(const ResolvedRequest& req) {
     prev_anchor = anchor;  // voice-lead the next bar from this bar's anchor.
   }
 
+  // Cadential landing: the final two bars stop the sixteenth flow with a
+  // full-bar leading tone over the design-valued V bar (the long cadential
+  // trill -- the only ornament the solo line takes) resolving to a full-bar
+  // tonic. No approach run: the two held notes form only a dropped partial
+  // cell for the implicit-voice analysis, so the cell streams end on the last
+  // sixteenth bar's extremes without a seam leap. The tonic register
+  // voice-leads from the closing anchor so the landing does not leap.
+  {
+    int final_tonic = 48;  // tonic C nearest the line's closing register.
+    while (final_tonic + 12 - prev_anchor <= prev_anchor - final_tonic)
+      final_tonic += 12;
+    appendCompactCadentialLanding(out.material.arpeggio_template.notes,
+                                  static_cast<Tick>(bars - 2) * kTicksPerBar, 2 * kTicksPerBar,
+                                  final_tonic - 1, final_tonic);
+  }
+
   // VoicePlan: one ArpeggioFlow span covering the whole piece on voice 0.
   out.voice_plan.num_voices = 1;
   Span span;
@@ -559,6 +576,34 @@ HarnessFixture buildTrioSonataForm(const ResolvedRequest& req) {
                     v0_shape);
     appendScalarBar(v1.notes, v1_anchor, kV1BandLo, kV1BandHi, bar, v1_notes, v1_dotted, v1_shape);
   }
+
+  // Cadential landing on the top line: an eighth-note approach into a held
+  // half-note leading tone over the design-valued V bar (the cadential trill
+  // site), then a whole-note tonic. V0 owns the landing -- it is the highest
+  // voice, so the cadence trill reads as the soprano close.
+  constexpr int kV0Tonic = 72;  // C5: the tonic inside the V0 band.
+  appendCadentialLanding(v0.notes, static_cast<Tick>(bars - 2) * kTicksPerBar, kTicksPerBar,
+                         kV0Tonic - 1, kV0Tonic, mode, kV0BandLo);
+
+  // V1 joins the held final chord instead of running figuration through the
+  // final bar: one whole-note third of the closing tonic triad (E, or Eb in
+  // minor without the Picardy lift), filling the triad between the V0 tonic
+  // and the pedal root.
+  {
+    const bool picardy = (mode == Mode::Minor) && detail::usePicardy(req.seed);
+    const int third = (mode == Mode::Minor && !picardy) ? 63 : 64;  // Eb4 / E4.
+    const Tick final_bar_tick = static_cast<Tick>(bars - 1) * kTicksPerBar;
+    v1.notes.erase(
+        std::remove_if(v1.notes.begin(), v1.notes.end(),
+                       [&](const MaterialNote& note) { return note.start_tick >= final_bar_tick; }),
+        v1.notes.end());
+    MaterialNote held;
+    held.start_tick = final_bar_tick;
+    held.duration = kTicksPerBar;
+    held.pitch = static_cast<std::uint8_t>(third);
+    v1.notes.push_back(held);
+  }
+
   out.material.trio_voices.push_back(std::move(v0));
   out.material.trio_voices.push_back(std::move(v1));
 
@@ -586,6 +631,17 @@ HarnessFixture buildTrioSonataForm(const ResolvedRequest& req) {
     while (root_midi + 12 <= kPedalCeil &&
            std::abs((root_midi + 12) - prev_root) < std::abs(root_midi - prev_root))
       root_midi += 12;
+    if (bar == bars - 1) {
+      // Final bar: the pedal joins the held closing chord with a whole-note
+      // tonic root instead of the root/fifth quarters.
+      MaterialNote held;
+      held.start_tick = static_cast<Tick>(bar) * kTicksPerBar;
+      held.duration = kTicksPerBar;
+      held.pitch = static_cast<std::uint8_t>(root_midi);
+      v2.notes.push_back(held);
+      prev_root = root_midi;
+      continue;
+    }
     const int fifth_midi = root_midi - 5;  // a perfect fourth below the root (a fifth).
     for (int beat = 0; beat < 4; ++beat) {
       MaterialNote mn;

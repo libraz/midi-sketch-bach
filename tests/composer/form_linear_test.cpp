@@ -187,7 +187,8 @@ TEST(FormLinearCello, CellContourRotatesAcrossCycles) {
     std::vector<NoteEvent> notes = r.notes;
     std::sort(notes.begin(), notes.end(),
               [](const NoteEvent& x, const NoteEvent& y) { return x.start_tick < y.start_tick; });
-    ASSERT_GE(notes.size(), 32u * 16u);
+    // 30 sixteenth bars + the two held cadential-landing notes.
+    ASSERT_GE(notes.size(), 30u * 16u + 2u);
     std::set<std::array<int, 3>> signatures;
     for (int cycle = 0; cycle < 8; ++cycle) {
       // First cell (four sixteenths) of the cycle's first bar.
@@ -257,18 +258,25 @@ TEST(FormLinearTrio, ThreeDistinctVoicesAndPedalIsLowQuarters) {
             << "seed=" << seed << " minor=" << minor << " bars=" << bars;
 
         // Pedal voice (V2): every note is a quarter note (kTicksPerBeat) in the
-        // low register (<= G3 = 55).
+        // low register (<= G3 = 55), except the final bar where the pedal
+        // joins the held closing chord with one whole-note root.
+        const Tick final_bar_tick = static_cast<Tick>(realizedBars(fx) - 1) * kTicksPerBar;
         int pedal_notes = 0;
         for (const NoteEvent& note : r.notes) {
           if (note.voice != 2)
             continue;
           ++pedal_notes;
-          EXPECT_EQ(note.duration, static_cast<Tick>(kTicksPerBeat))
-              << "pedal not a quarter; seed=" << seed;
+          if (note.start_tick >= final_bar_tick) {
+            EXPECT_EQ(note.duration, static_cast<Tick>(kTicksPerBar))
+                << "pedal final note not held; seed=" << seed;
+          } else {
+            EXPECT_EQ(note.duration, static_cast<Tick>(kTicksPerBeat))
+                << "pedal not a quarter; seed=" << seed;
+          }
           EXPECT_LE(note.pitch, 55) << "pedal out of low register; seed=" << seed;
         }
-        // One quarter per beat => 4 * realizedBars pedal notes.
-        EXPECT_EQ(pedal_notes, 4 * realizedBars(fx))
+        // One quarter per beat, except the held final bar (one whole note).
+        EXPECT_EQ(pedal_notes, 4 * (realizedBars(fx) - 1) + 1)
             << "seed=" << seed << " minor=" << minor << " bars=" << bars;
       }
     }

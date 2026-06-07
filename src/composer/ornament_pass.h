@@ -23,9 +23,13 @@ namespace bach::composer {
 //
 // Musical contract (port of the legacy ornament rules, composer-adapted):
 //   * Candidate notes: duration >= a quarter note, not in `exempt_voices`,
-//     not the lowest-sounding voice at their onset (the bass stays clean),
+//     not the lowest-sounding voice at their onset (the bass stays clean;
+//     a single-voice piece has no bass, so the guard is multi-voice only),
 //     not the voice's final attack (the resolution tone always sounds plain),
 //     and the pitch must have a diatonic upper neighbour in `mode`.
+//   * Inside the cadence window (the last two bars) only the TOP sounding
+//     line is ornamented: simultaneous trills in two voices clash at the
+//     alternation level.
 //   * A trill starts on the upper auxiliary (Baroque standard; at a cadence
 //     the upper tone is the 4-3 suspension over the dominant), alternates
 //     upper/main, and ends in a lower-neighbour Nachschlag pair before the
@@ -36,7 +40,8 @@ namespace bach::composer {
 //     between that appuy opening and the von-unten doppelt-cadence opening
 //     (a lower -> main two-note prefix), keyed by the placement hash.
 //   * Trill pacing follows tempo: 32nd-note alternation at bpm <= 100,
-//     16th-note alternation above.
+//     16th-note alternation above. Long trills (longer than a quarter) always
+//     pace at sixteenths -- a stately alternation, not a buzz.
 //   * A mordent (single main-lower-main) may decorate a quarter note on a bar
 //     downbeat (phrase start) instead of a trill.
 //   * The ornament subdivides ONLY the original note's [start, start+dur)

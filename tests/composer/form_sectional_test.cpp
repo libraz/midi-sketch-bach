@@ -399,12 +399,16 @@ TEST(FormSectionalTest, FinalCadenceLandsOnTonic) {
         EXPECT_TRUE(has_final_cadence) << formName(form) << " missing final perfect cadence";
 
         // Picardy: the major third (E, pc 4) appears in the close when minor +
-        // even seed; the helper is the single source of truth.
+        // even seed; the V1 inner voice holds the closing third (the V0
+        // landing holds only the tonic), so the scan covers the figuration
+        // sections.
         if (minor && detail::usePicardy(seed)) {
           bool saw_major_third = false;
-          for (const auto& note : coda.notes) {
-            if (note.pitch % 12 == 4) {
-              saw_major_third = true;
+          for (const auto& section : fx.material.figuration_sections) {
+            for (const auto& note : section.notes) {
+              if (note.start_tick >= last_bar_tick && note.pitch % 12 == 4) {
+                saw_major_third = true;
+              }
             }
           }
           EXPECT_TRUE(saw_major_third)

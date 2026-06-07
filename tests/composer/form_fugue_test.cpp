@@ -624,13 +624,16 @@ TEST(FormFugueTest, CodaCadencesOnTonic) {
       }
       EXPECT_TRUE(has_final_cadence) << "missing final perfect cadence";
 
-      // Picardy raises the major third (E, pc 4) into the cadence when minor +
-      // even seed; the helper is the single source of truth.
+      // Picardy raises the major third (E, pc 4) into the close when minor +
+      // even seed; the V1 inner voice holds the closing third (the V0 landing
+      // holds only the tonic), so the scan covers the figuration sections.
       if (minor && detail::usePicardy(seed)) {
         bool saw_major_third = false;
-        for (const auto& note : coda.notes) {
-          if (note.pitch % 12 == 4) {
-            saw_major_third = true;
+        for (const auto& section : fx.material.figuration_sections) {
+          for (const auto& note : section.notes) {
+            if (note.start_tick >= last_bar_tick && note.pitch % 12 == 4) {
+              saw_major_third = true;
+            }
           }
         }
         EXPECT_TRUE(saw_major_third) << "seed " << seed << " minor: Picardy third absent";
@@ -866,16 +869,21 @@ TEST(FormFuguePreludeAndFugueTest, FigurationStaysDiatonic) {
   // class set and emitted chromatic runs (D#/C#/A#/G# in C major); this pins
   // the diatonic contract across seeds and modes. In minor the bar chords come
   // from kHarmonyPatternsMinor whose major dominant contributes the harmonic
-  // leading tone (pc 11), so that single chromatic degree is admitted.
+  // leading tone (pc 11), so that single chromatic degree is admitted; the
+  // held Picardy third (pc 4) in the final bar's inner voice is likewise a
+  // sanctioned chromatic colour.
   for (std::uint32_t seed : kSeeds) {
     for (bool minor : {false, true}) {
-      const HarnessFixture fx = buildFixture(FormType::PreludeAndFugue, seed, minor,
-                                             naturalBars(FormType::PreludeAndFugue));
+      const std::uint16_t bars = naturalBars(FormType::PreludeAndFugue);
+      const HarnessFixture fx = buildFixture(FormType::PreludeAndFugue, seed, minor, bars);
       const detail::Mode mode = minor ? detail::Mode::Minor : detail::Mode::Major;
+      const Tick last_bar_tick = static_cast<Tick>(bars - 1) * kBar;
       for (const auto& section : fx.material.figuration_sections) {
         for (const auto& note : section.notes) {
-          const bool diatonic =
-              detail::inScale(note.pitch, mode) || (minor && note.pitch % 12 == 11);
+          const bool picardy_third =
+              minor && note.pitch % 12 == 4 && note.start_tick >= last_bar_tick;
+          const bool diatonic = detail::inScale(note.pitch, mode) ||
+                                (minor && note.pitch % 12 == 11) || picardy_third;
           EXPECT_TRUE(diatonic) << "seed " << seed << (minor ? " minor" : " major")
                                 << " figuration note pitch " << note.pitch << " (pc "
                                 << note.pitch % 12 << ") at tick " << note.start_tick

@@ -207,6 +207,23 @@ int lowestSoundingPitch(const std::vector<NoteEvent>& notes, Tick tick) {
   return lowest;
 }
 
+// Highest pitch sounding at `tick` in any voice other than `voice`. Returns -1
+// when no other voice sounds. Used to keep the cadence ornament on the TOP
+// line only: two voices trilling the final cadence simultaneously clash at the
+// alternation level.
+int highestOtherSoundingPitch(const std::vector<NoteEvent>& notes, VoiceId voice, Tick tick) {
+  int highest = -1;
+  for (const auto& note : notes) {
+    if (note.voice == voice)
+      continue;
+    if (note.start_tick <= tick && tick < note.start_tick + note.duration) {
+      if (note.pitch > highest)
+        highest = note.pitch;
+    }
+  }
+  return highest;
+}
+
 // Lowest pitch among the higher-than-`ref_voice` voices that sound at `tick`.
 // Used as a ceiling: an ornament tone must not cross above the next-higher
 // voice's concurrent pitch. Returns 256 when no higher voice sounds.
@@ -299,6 +316,16 @@ void applyOrnamentPass(ComposeResult& result, const OrnamentParams& params) {
       last_onset[note.voice] = note.start_tick;
   }
 
+  // A single-voice piece (the solo cello line) has no bass to keep clean: the
+  // clean-bass guard below only applies when at least two voices sound.
+  bool multi_voice = false;
+  for (const auto& note : result.notes) {
+    if (note.voice != result.notes.front().voice) {
+      multi_voice = true;
+      break;
+    }
+  }
+
   // Build replacement views WITHOUT mutating the live note list until the full
   // plan is assembled (build-then-swap).
   std::vector<NoteEvent> out_notes;
@@ -330,9 +357,18 @@ void applyOrnamentPass(ComposeResult& result, const OrnamentParams& params) {
       const Tick half_bar = tpb / 2 > 0 ? tpb / 2 : kQuarter;
       const bool is_strong_beat = (pos_in_bar % half_bar) == 0;
 
-      // Clean-bass guard: never ornament the lowest-sounding voice.
+      // Clean-bass guard: never ornament the lowest-sounding voice. A
+      // single-voice piece has no bass to protect, so the guard is multi-voice
+      // only.
       const int lowest = lowestSoundingPitch(result.notes, note.start_tick);
-      const bool is_bass = note.pitch <= lowest;
+      const bool is_bass = multi_voice && note.pitch <= lowest;
+
+      // Cadence ornaments belong to the TOP sounding line only: simultaneous
+      // trills in two voices clash at the alternation level, so a note with a
+      // higher voice sounding above it takes no ornament inside the cadence
+      // window.
+      const bool is_top =
+          highestOtherSoundingPitch(result.notes, note.voice, note.start_tick) <= note.pitch;
 
       // Neighbour availability.
       const int upper = upperNeighbour(note.pitch, params.mode);
@@ -346,7 +382,7 @@ void applyOrnamentPass(ComposeResult& result, const OrnamentParams& params) {
           nextHigherVoiceCeiling(result.notes, note.voice, note.pitch, note.start_tick);
       const bool upper_clears_ceiling = upper >= 0 && upper < ceiling;
 
-      if (!is_bass && neighbours_ok && upper_clears_ceiling) {
+      if (!is_bass && neighbours_ok && upper_clears_ceiling && (is_top || !in_cadence_window)) {
         const std::uint64_t roll = placementHash(params.seed, bar, note.voice);
 
         // Phrase boundaries: the last bar of each 4-bar phrase (outside the
@@ -414,7 +450,13 @@ void applyOrnamentPass(ComposeResult& result, const OrnamentParams& params) {
               const bool von_unten = in_cadence_window && ((roll >> 1) & 1ull) != 0ull;
               onset = von_unten ? TrillOnset::VonUnten : TrillOnset::Appuy;
             }
-            exp = buildTrill(note, upper, lower, trill_sub, onset);
+            // Long trills (longer than a quarter) pace at sixteenths: a
+            // stately alternation suits the held cadential tone, where a
+            // run of 32nds would read as a buzz.
+            const Tick sub = note.duration > kQuarter
+                                 ? std::max(trill_sub, duration::kSixteenthNote)
+                                 : trill_sub;
+            exp = buildTrill(note, upper, lower, sub, onset);
           }
         }
       }

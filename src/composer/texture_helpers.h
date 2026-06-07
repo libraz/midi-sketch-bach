@@ -4,6 +4,7 @@
 #include <vector>
 
 #include "composer/figuration.h"
+#include "composer/material.h"
 #include "core/basic_types.h"
 
 namespace bach::composer {
@@ -184,6 +185,61 @@ int consonantChordTone(const detail::ChordSpec& chord, int voice, int band_lo, i
                        int target, const std::vector<int>& theme_pitches, int line_prev,
                        const std::vector<ConcurrentMotion>& motions, detail::Mode mode,
                        bool downbeat, const std::vector<int>& window_pitches = {});
+
+/// @brief Replace a line's closing two bars with the shared cadential landing.
+///
+/// The Baroque closing formula every form lands on: the figuration stops
+/// running, a long penultimate tone takes the cadential trill, and the final
+/// tone is held plain. Erases every note of `line` at or after the
+/// penultimate bar (`penult_bar_start`) and appends:
+///   * an eighth-note approach run over the first half of the penultimate bar
+///     (four eighths in 4/4, three in 3/4) that walks diatonically INTO the
+///     pre-final tone — ascending when the run fits the band (in minor the
+///     ascent into the leading tone raises the sixth degree, melodic-minor
+///     fashion), otherwise descending from above;
+///   * the held pre-final tone over the bar's second half (a half note in
+///     4/4, a dotted quarter in 3/4) — the trill site: it sits on the
+///     half-bar strong-beat grid inside the cadence window, so the ornament
+///     pass decorates it at every density;
+///   * a full-bar final tone — the held resolution (a voice's last attack is
+///     never ornamented).
+///
+/// @param line The voice's note list (modified in place).
+/// @param penult_bar_start Tick of the penultimate bar's downbeat.
+/// @param ticks_per_bar Bar length (1920 = 4/4, 1440 = 3/4).
+/// @param prefinal The held pre-final pitch (leading tone or supertonic —
+///        whichever the caller's penultimate harmony supports).
+/// @param final_pitch The held final pitch (the tonic in cadencing forms).
+/// @param mode Diatonic mode for the approach run.
+/// @param band_lo Approach register floor: a run that would dip below it
+///        flips to the descending shape.
+/// @param downbeat_chord When non-null, the approach's first (downbeat) tone
+///        is snapped to the nearest chord tone of this chord, satisfying the
+///        figuration downbeat chord-tone rule for FigurationCarrier lines.
+/// @param prefer_descending Force the descending approach shape (a run from
+///        above into the pre-final tone). Ground-variation forms use it when
+///        the penultimate bar's immutable ground tone clashes with the
+///        ascending run's downbeat.
+void appendCadentialLanding(std::vector<MaterialNote>& line, Tick penult_bar_start,
+                            Tick ticks_per_bar, int prefinal, int final_pitch, detail::Mode mode,
+                            int band_lo, const detail::ChordSpec* downbeat_chord = nullptr,
+                            bool prefer_descending = false);
+
+/// @brief Replace a line's final bar with the compact cadential landing.
+///
+/// The single-bar variant for forms whose penultimate-bar harmony cannot host
+/// a long pre-final tone (the chaconne: its immutable ground reaches the
+/// dominant only in the final bar). The final bar splits into a held
+/// pre-final tone on the first half (the trill site, on the half-bar
+/// strong-beat grid) and the held final tone on the second half.
+///
+/// @param line The voice's note list (modified in place).
+/// @param final_bar_start Tick of the final bar's downbeat.
+/// @param ticks_per_bar Bar length (1920 = 4/4, 1440 = 3/4).
+/// @param prefinal The held pre-final pitch (first half of the bar).
+/// @param final_pitch The held final pitch (second half of the bar).
+void appendCompactCadentialLanding(std::vector<MaterialNote>& line, Tick final_bar_start,
+                                   Tick ticks_per_bar, int prefinal, int final_pitch);
 
 }  // namespace bach::composer
 

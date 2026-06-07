@@ -258,7 +258,14 @@ void appendScalarWaveCycle(std::vector<MaterialNote>& notes, Tick block_start,
         // the run between onsets keeps the conjunct scalar surface. A bar-head
         // step-toward variant proved insufficient: at the sixteenth tier the
         // free wave put non-chord tones on the beats of entire cycles.
-        if (sub == 0) {
+        // A wave tone whose interval class against the ground is already
+        // consonant stays put: snapping it to a triad tone would trade a
+        // stepwise wave interval for a skip without improving the vertical
+        // surface (thirds and sixths over the ground are as clean as chord
+        // tones), and at low density tiers those forced skips dominate the
+        // melodic surface.
+        if (sub == 0 &&
+            !isConsonantIc(degreeToMidi(degree, mode) - static_cast<int>(plan.ground_pc))) {
           const std::vector<int> pcs = barAnchorPitchClasses(plan, mode);
           const int cur_midi = degreeToMidi(degree, mode);
           int best_midi = cur_midi;

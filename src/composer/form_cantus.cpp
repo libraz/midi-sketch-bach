@@ -525,6 +525,39 @@ HarnessFixture buildChoralePreludeForm(const ResolvedRequest& req) {
     }
   }
 
+  // Cadential landing on the figuration: the running line stops with an
+  // eighth-note approach into a held pre-final tone (the cadential trill
+  // site), then a whole-note tonic over the CF's closing tonic. The CF's
+  // penultimate-bar chord harmonizes whatever degree the tune walks there, so
+  // the pre-final tone is chosen for consonance: the step above the tonic (the
+  // 2nd-degree trill) when the penultimate chord supports it, else the leading
+  // tone, else the tonic itself (an anticipation). The approach downbeat snaps
+  // to a chord tone (the figuration downbeat rule reads the bar head).
+  {
+    constexpr int kFigTonic = 72;  // C5: the figuration's closing register.
+    const BarChord& penult = bar_chords[static_cast<std::size_t>(bars - 2)];
+    const detail::ChordSpec penult_spec{penult.root_pc, penult.minor};
+    const int third = penult.minor ? 3 : 4;
+    const int triad_pc[3] = {penult.root_pc % 12, (penult.root_pc + third) % 12,
+                             (penult.root_pc + 7) % 12};
+    auto consonant_with_penult = [&](int pitch) {
+      for (int tone : triad_pc) {
+        if (!isConsonantIc(pitch - tone))
+          return false;
+      }
+      return true;
+    };
+    int prefinal = kFigTonic;  // anticipation fallback.
+    const int step_above = detail::scaleUp(kFigTonic, 1, mode);
+    if (consonant_with_penult(step_above)) {
+      prefinal = step_above;
+    } else if (consonant_with_penult(kFigTonic - 1)) {
+      prefinal = kFigTonic - 1;  // raised leading tone (B natural in minor too).
+    }
+    appendCadentialLanding(fig.notes, barTick(bars - 2), kTicksPerBar, prefinal, kFigTonic, mode,
+                           /*band_lo=*/62, &penult_spec);
+  }
+
   // V0 figuration registry for the embellishment loop's run-break consonance
   // check. (V2 is selected AFTER this loop against a registry pre-loaded with
   // V0+V1, so the bass adapts to whatever the CF substitutes settle on.)
@@ -596,6 +629,16 @@ HarnessFixture buildChoralePreludeForm(const ResolvedRequest& req) {
     const int beat2 = nearestChordTone(tone + 1, chord);
     const int beat3 = nearestChordTone(tone, chord);
 
+    // The final bar holds the closing tonic as one whole note: the CF joins
+    // the held final chord instead of walking chord-tone quarters through the
+    // close (the bar-head skeleton tone is unchanged).
+    if (bar == bars - 1) {
+      out.material.cf_embellished.push_back(materialNote(base, kTicksPerBar, tone));
+      v1_run = (tone == v1_prev) ? v1_run + 1 : 1;
+      v1_prev = tone;
+      continue;
+    }
+
     // Downbeat skeleton tone, held as a half note (beats 0-1). The skeleton tone
     // is immutable, so it is never substituted; it still advances the run tracker
     // so a chain that continues through the bar head is counted.
@@ -653,6 +696,24 @@ HarnessFixture buildChoralePreludeForm(const ResolvedRequest& req) {
   std::vector<MaterialNote> bass_notes;
   bass_notes.reserve(static_cast<std::size_t>(bars) * 4);
   appendWalkingBass(bass_notes, bass_registry, bar_chords, mode);
+  // The bass joins the held final chord: its final bar collapses to one
+  // whole-note tonic root instead of walking quarters through the close.
+  {
+    const Tick final_bar_tick = barTick(bars - 1);
+    int final_root = -1;
+    for (const MaterialNote& note : bass_notes) {
+      if (note.start_tick == final_bar_tick)
+        final_root = static_cast<int>(note.pitch);
+    }
+    if (final_root >= 0) {
+      bass_notes.erase(std::remove_if(bass_notes.begin(), bass_notes.end(),
+                                      [&](const MaterialNote& note) {
+                                        return note.start_tick >= final_bar_tick;
+                                      }),
+                       bass_notes.end());
+      bass_notes.push_back(materialNote(final_bar_tick, kTicksPerBar, final_root));
+    }
+  }
   TrioVoiceLine bass_line;
   bass_line.voice = 2;
   bass_line.manual = 3;  // documentary (Pedal): V2 = lowest line.
@@ -1089,6 +1150,46 @@ HarnessFixture buildGoldbergVariationsForm(const ResolvedRequest& req) {
         break;
       }
     }
+    // Cadential landing on the piece's final variation block (the da-capo aria
+    // already closes in plain half notes, so it keeps its own layout). The
+    // tiled ground does not cadence -- its final bar may sit on V or vi -- so
+    // both landing tones are chosen for consonance: the final tone is the
+    // tonic when the final bar's chord contains it, else the chord root; the
+    // pre-final tone is its diatonic upper step when the penultimate chord
+    // supports it, else the step below, else an anticipation.
+    if (blk == num_blocks - 1 && !is_aria && !var.notes.empty()) {
+      const BarChord final_chord =
+          goldbergBarChord(ground[static_cast<std::size_t>((bars - 1) % kCycleBars)], mode);
+      const BarChord penult_chord =
+          goldbergBarChord(ground[static_cast<std::size_t>((bars - 2) % kCycleBars)], mode);
+      auto consonant_with = [&](int pitch, const BarChord& chord) {
+        const int third = chord.minor ? 3 : 4;
+        const int triad_pc[3] = {chord.root_pc % 12, (chord.root_pc + third) % 12,
+                                 (chord.root_pc + 7) % 12};
+        for (int tone : triad_pc) {
+          if (!isConsonantIc(pitch - tone))
+            return false;
+        }
+        return true;
+      };
+      int final_tone = kVarRegisterBase;  // C5 tonic by preference.
+      if (!consonant_with(final_tone, final_chord)) {
+        // Fall back to the final chord's root in the variation register.
+        final_tone = kVarRegisterBase + ((final_chord.root_pc - kVarRegisterBase) % 12 + 12) % 12;
+        if (final_tone > kVarRegisterBase + 6)
+          final_tone -= 12;
+      }
+      int prefinal = final_tone;  // anticipation fallback.
+      const int step_above = detail::scaleUp(final_tone, 1, mode);
+      if (consonant_with(step_above, penult_chord)) {
+        prefinal = step_above;
+      } else if (consonant_with(final_tone - 1, penult_chord)) {
+        prefinal = final_tone - 1;
+      }
+      appendCadentialLanding(var.notes, barTick(bars - 2), kTicksPerBar, prefinal, final_tone, mode,
+                             /*band_lo=*/62);
+    }
+
     out.material.passacaglia_variations.push_back(var);
   }
 

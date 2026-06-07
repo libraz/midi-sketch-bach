@@ -107,11 +107,14 @@ TEST(FigurationPaletteAnchors, MajorBRootFlattensThirdAndRejectsTritoneFifth) {
 
 // --- kScalarWave (3/4 cycle form) ---------------------------------------------
 
-// Every beat onset of the wave must be one of the bar's anchor pitch classes
-// (consonant with the held ground). The free-running wave once anchored only
-// bar downbeats, which left non-chord tones on the beats of entire sixteenth-
-// tier cycles -- audible as sustained dissonance over the ground.
-TEST(FigurationPaletteScalarWave, BeatOnsetsAreAnchorTones) {
+// Every beat onset of the wave must be consonant with the held ground: either
+// one of the bar's anchor pitch classes or a tone whose interval class over
+// the ground is consonant (thirds and sixths are as clean as chord tones).
+// The free-running wave once anchored only bar downbeats, which left
+// dissonant tones on the beats of entire sixteenth-tier cycles -- audible as
+// sustained dissonance over the ground. Snapping is reserved for genuinely
+// dissonant positions so low density tiers keep a stepwise surface.
+TEST(FigurationPaletteScalarWave, BeatOnsetsAreConsonantWithGround) {
   const std::vector<CycleBar> minor_plan = {
       {0, true, 60, 0},     // i  : ground C.
       {10, false, 58, 10},  // VII: ground Bb.
@@ -125,10 +128,10 @@ TEST(FigurationPaletteScalarWave, BeatOnsetsAreAnchorTones) {
                           detail::Mode::Minor);
     for (const MaterialNote& note : notes) {
       if (note.start_tick % kTicksPerBeat != 0)
-        continue;  // only beat onsets are anchor-guaranteed.
+        continue;  // only beat onsets are consonance-guaranteed.
       const int bar = static_cast<int>(note.start_tick / kTicksPerBar34);
-      EXPECT_TRUE(
-          isAnchorTone(note.pitch, minor_plan[static_cast<std::size_t>(bar)], detail::Mode::Minor))
+      const CycleBar& plan_bar = minor_plan[static_cast<std::size_t>(bar)];
+      EXPECT_TRUE(isConsonantIc(static_cast<int>(note.pitch) - plan_bar.ground_pc))
           << "npb " << notes_per_beat << " beat onset at tick " << note.start_tick << " pitch "
           << static_cast<int>(note.pitch);
     }

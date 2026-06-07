@@ -50,7 +50,6 @@ using detail::kSubjectsMinor;          // NOLINT(build/namespaces)
 using detail::Mode;                    // NOLINT(build/namespaces)
 using detail::scaleUp;                 // NOLINT(build/namespaces)
 using detail::subjectSlotFor;          // NOLINT(build/namespaces)
-using detail::usePicardy;              // NOLINT(build/namespaces)
 
 constexpr Tick kQuarter = kTicksPerBeat;
 
@@ -871,9 +870,15 @@ void appendFugueSection(FugueAssembly& asm_ctx, int first_bar, int bars,
   // inter-voice parallel checks against the Material subject and alto above it.
   addFigurationSpan(asm_ctx, 2, coda_start, coda_start + 1, plan, first_bar, mode, 1, fig_offset);
 
-  // V0 cadence figure (CodaCarrier, bars coda_start+2 .. coda_start+3). The
-  // penultimate-bar last beat is the leading tone B; the final downbeat is the
-  // tonic C; Picardy (minor + even seed) tints the approach with the major 3rd.
+  // V0 cadence figure (CodaCarrier, bars coda_start+2 .. coda_start+3): the
+  // shared cadential landing. An eighth-note approach run rises into a held
+  // half-note leading tone B over the bar's second half (the cadential trill
+  // site the ornament pass decorates), then the final bar holds the tonic C as
+  // a whole note (the plain resolution). The cadence_voice_leading rule reads
+  // the SOUNDING pitch at the approach beat (penultimate-bar beat 3) and the
+  // final downbeat: the held B spans that approach beat and the whole-note C
+  // covers the downbeat, so upper_prev = B resolves to upper_now = C exactly
+  // as the 8-quarter figure did.
   {
     CodaDecl coda;
     coda.voice = 0;
@@ -884,27 +889,8 @@ void appendFugueSection(FugueAssembly& asm_ctx, int first_bar, int bars,
     while (tonic % 12 != 0) {
       --tonic;
     }
-    const int leading = tonic - 1;  // B, the leading tone below the tonic.
-    const int third = tonic - 8;    // E (major 3rd) an octave down (in band).
-    const int fifth = tonic - 5;    // G a fourth below (in band).
-    // 8 quarters across 2 bars. The penultimate-bar beats (idx 0-3) approach the
-    // cadence: idx 3 is the leading tone B, and the final-bar downbeat (idx 4)
-    // is the tonic C, so upper_prev = B resolves to upper_now = C (the
-    // cadence_voice_leading rule reads exactly those two ticks).
-    std::array<int, 8> cadence = {fifth, third, fifth, leading, tonic, third, fifth, tonic};
-    if (mode == Mode::Minor && usePicardy(req.seed)) {
-      // Picardy: keep the major 3rd E in the closing tonic colour (idx 5).
-      cadence[5] = third;
-    } else if (mode == Mode::Minor) {
-      cadence[1] = tonic - 9;  // minor 3rd (Eb) an octave down in the band.
-      cadence[5] = tonic - 9;
-    }
-    for (int idx = 0; idx < 8; ++idx) {
-      const int bar = (coda_start + 2) + idx / 4;
-      const int beat = idx % 4;
-      addNote(coda.notes, barTick(bar) + static_cast<Tick>(beat) * kTicksPerBeat, kQuarter,
-              std::clamp(cadence[static_cast<std::size_t>(idx)], kBandLo[0], kBandHi[0]));
-    }
+    appendCadentialLanding(coda.notes, barTick(coda_start + 2), kTicksPerBar, tonic - 1, tonic,
+                           mode, kBandLo[0]);
     out.material.coda_extensions.push_back(coda);
     pushSpan(asm_ctx, 0, coda_start + 2, coda_start + 3, VoiceIntent::CodaCarrier);
   }
@@ -940,6 +926,35 @@ void appendFugueSection(FugueAssembly& asm_ctx, int first_bar, int bars,
     coalesceConsecutiveSamePitch(bass.notes);
     out.material.figuration_sections.push_back(bass);
     pushSpan(asm_ctx, 2, coda_start + 2, coda_start + 3, VoiceIntent::FigurationCarrier);
+  }
+
+  // V1 inner voice across the 2 cadence bars: held design tones filling the
+  // middle register so the close sounds a full triad instead of the bare
+  // V0+V2 octaves. The penultimate bar holds the dominant G (consonant with
+  // the G bass and with every beat of the V0 approach run); the final bar
+  // holds the third of the closing tonic triad -- E, or Eb in minor unless
+  // the seed elects the Picardy lift. is_pedal_prep exempts the held tones
+  // from the figuration downbeat chord-tone check (the per-bar plan is not
+  // pinned to V -> I here; the cadence voicing is a design value).
+  {
+    int inner_dominant = kBandLo[1];
+    while (inner_dominant % 12 != 7) {
+      ++inner_dominant;
+    }
+    const bool picardy_third = mode != Mode::Minor || detail::usePicardy(req.seed);
+    int inner_third = kBandLo[1];
+    while (inner_third % 12 != (picardy_third ? 4 : 3)) {
+      ++inner_third;
+    }
+    FigurationSection inner;
+    inner.voice = 1;
+    inner.start_tick = barTick(coda_start + 2);
+    inner.end_tick = barTick(coda_start + coda_bars);
+    inner.is_pedal_prep = true;
+    addNote(inner.notes, barTick(coda_start + 2), kTicksPerBar, inner_dominant);
+    addNote(inner.notes, barTick(coda_start + 3), kTicksPerBar, inner_third);
+    out.material.figuration_sections.push_back(inner);
+    pushSpan(asm_ctx, 1, coda_start + 2, coda_start + 3, VoiceIntent::FigurationCarrier);
   }
 
   // Final-cadence annotation: a perfect cadence on the final bar downbeat.

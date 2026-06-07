@@ -1061,31 +1061,17 @@ void appendFugueTail(SectionalAssembly& asm_ctx, int first_bar, int bars,
   {
     CodaDecl coda;
     coda.voice = 0;
-    // Indices 0-3 = first cadence bar; 4-7 = last cadence bar. The approach
-    // beat (idx 3) is B (leading tone) and the cadence downbeat (idx 4) is C
-    // (tonic), so the leading-tone resolution lands exactly at the cadence tick.
-    std::array<int, 8> mel{};
-    mel[0] = scaleUp(tonic0, 4, mode);  // a gentle descent toward the cadence.
-    mel[1] = scaleUp(tonic0, 3, mode);
-    mel[2] = scaleUp(tonic0, 2, mode);
-    mel[3] = tonic0 + 11;  // B: leading tone (approach beat).
-    mel[4] = tonic0 + 12;  // C: tonic (cadence downbeat = upper_now).
-    // The closing three beats outline the tonic triad (C->E->D->C) so every beat
-    // is a chord tone of I and stays consonant with the V2 tonic-root bass (the
-    // scorer samples each beat across voices). The E carries the Picardy colour
-    // in minor; it is harmonically benign in major. The line stays conjunct
-    // (M3 up, step down, step down) with no wide leap into the final tonic.
-    mel[5] = tonic0 + 16;  // E above (chord tone of I; the Picardy major third).
-    mel[6] = tonic0 + 14;  // D (passing; a P5 above the V2 bass G, consonant).
-    mel[7] = tonic0 + 12;  // settle on the tonic.
-    for (int idx = 0; idx < 8; ++idx) {
-      const int bar = cadence_start + idx / 4;
-      const int beat = idx % 4;
-      const Tick tick = barTick(bar) + static_cast<Tick>(beat) * kTicksPerBeat;
-      const int pitch = std::clamp(mel[static_cast<std::size_t>(idx)], kBandLo[0], kBandHi[0]);
-      addNote(coda.notes, tick, kQuarter, pitch);
-      registry.record(tick, /*voice=*/0, pitch, kQuarter);
-    }
+    // The shared cadential landing: an eighth-note approach run rises into a
+    // held half-note leading tone B over the penultimate bar's second half
+    // (the cadential trill site), then the final bar holds the tonic C as a
+    // whole note (the plain resolution). cadence_voice_leading reads the
+    // SOUNDING pitch at the approach beat and the cadence downbeat, so the
+    // held B still supplies upper_prev = B and the whole-note C upper_now = C.
+    const int upper_tonic = tonic0 + 12;
+    appendCadentialLanding(coda.notes, barTick(cadence_start), kTicksPerBar, upper_tonic - 1,
+                           upper_tonic, mode, kBandLo[0]);
+    for (const MaterialNote& note : coda.notes)
+      registry.record(note.start_tick, /*voice=*/0, static_cast<int>(note.pitch), note.duration);
     out.material.coda_extensions.push_back(coda);
     pushSpan(asm_ctx, 0, cadence_start, cadence_start + 1, VoiceIntent::CodaCarrier);
   }
@@ -1104,61 +1090,51 @@ void appendFugueTail(SectionalAssembly& asm_ctx, int first_bar, int bars,
     while (dominant2 % 12 != 7) {
       ++dominant2;  // dominant G inside the V2 band.
     }
-    std::array<int, 8> low{};
-    low[0] = tonic2;  // hold the tonic root.
-    low[1] = tonic2;
-    low[2] = dominant2;  // move to the dominant.
-    low[3] = dominant2;  // dominant on the approach beat (bass_prev = G).
-    low[4] = tonic2;     // tonic on the cadence downbeat (bass_now = C).
-    low[5] = tonic2;
-    low[6] = dominant2;
-    low[7] = tonic2;
-    for (int idx = 0; idx < 8; ++idx) {
-      const int bar = cadence_start + idx / 4;
-      const int beat = idx % 4;
-      const Tick tick = barTick(bar) + static_cast<Tick>(beat) * kTicksPerBeat;
-      const int pitch = std::clamp(low[static_cast<std::size_t>(idx)], kBandLo[2], kBandHi[2]);
+    // Penultimate bar: tonic pedal through the first half, dominant root on the
+    // second half (the approach beat samples bass_prev = G). Final bar: the
+    // tonic root held as a whole note (the bass joins the held final chord).
+    std::array<int, 4> low = {tonic2, tonic2, dominant2, dominant2};
+    for (int beat = 0; beat < 4; ++beat) {
+      const Tick tick = barTick(cadence_start) + static_cast<Tick>(beat) * kTicksPerBeat;
+      const int pitch = std::clamp(low[static_cast<std::size_t>(beat)], kBandLo[2], kBandHi[2]);
       addNote(bass.notes, tick, kQuarter, pitch);
       registry.record(tick, /*voice=*/2, pitch, kQuarter);
     }
+    const Tick final_tick = barTick(cadence_start + 1);
+    const int final_pitch = std::clamp(tonic2, kBandLo[2], kBandHi[2]);
+    addNote(bass.notes, final_tick, kTicksPerBar, final_pitch);
+    registry.record(final_tick, /*voice=*/2, final_pitch, kTicksPerBar);
     out.material.coda_extensions.push_back(bass);
     pushSpan(asm_ctx, 2, cadence_start, cadence_start + 1, VoiceIntent::CodaCarrier);
   }
 
-  // V1 inner voice across the 2 cadence bars: a held chord tone of each bar's
-  // chord (V then I) in the V1 band, consonant and parallel-free against the V0
-  // coda above and the V2 bass below (both already recorded). This fills the
+  // V1 inner voice across the 2 cadence bars: held design tones filling the
   // middle register so the final cadence sounds a full three voices instead of
-  // the thin V0+V2 close. The cadence chords are V then I (pinned below into the
-  // HarmonicPlan), so they are passed explicitly here rather than read from the
-  // un-pinned per-bar plan. is_pedal_prep exempts the held tone from the
-  // figuration downbeat chord-tone check.
+  // the thin V0+V2 close. The penultimate bar holds the dominant G (consonant
+  // with the dominant bass and with every beat of the V0 approach run); the
+  // final bar holds the third of the closing tonic triad -- E, or Eb in minor
+  // unless the seed elects the Picardy lift -- completing the closing triad.
+  // is_pedal_prep exempts the held tones from the figuration downbeat
+  // chord-tone check.
   {
-    const std::array<ChordSpec, 2> cadence_chords = {ChordSpec{7, false}, ChordSpec{0, false}};
+    int inner_dominant = kBandLo[1];
+    while (inner_dominant % 12 != 7) {
+      ++inner_dominant;
+    }
+    const bool picardy_third = mode != Mode::Minor || detail::usePicardy(req.seed);
+    int inner_third = kBandLo[1];
+    while (inner_third % 12 != (picardy_third ? 4 : 3)) {
+      ++inner_third;
+    }
     FigurationSection inner;
     inner.voice = 1;
     inner.start_tick = barTick(cadence_start);
     inner.end_tick = barTick(cadence_start + 2);
     inner.is_pedal_prep = true;
-    std::vector<int> theme_pitches;
-    std::vector<ConcurrentMotion> motions;
-    int line_prev = -1;
-    const int centre = (kBandLo[1] + kBandHi[1]) / 2;
-    for (int idx = 0; idx < 2; ++idx) {
-      const int bar = cadence_start + idx;
-      const Tick bar_start = barTick(bar);
-      registry.concurrentThemePitches(bar_start, /*voice=*/1, theme_pitches);
-      registry.concurrentMotions(bar_start - kTicksPerBar, bar_start, /*voice=*/1, kTailVoices,
-                                 motions);
-      const int pitch =
-          consonantChordTone(cadence_chords[static_cast<std::size_t>(idx)], /*voice=*/1, kBandLo[1],
-                             kBandHi[1], centre, theme_pitches, line_prev, motions, mode,
-                             /*downbeat=*/true);
-      addNote(inner.notes, bar_start, kTicksPerBar, pitch);
-      registry.record(bar_start, /*voice=*/1, pitch, kTicksPerBar);
-      line_prev = pitch;
-    }
-    coalesceConsecutiveSamePitch(inner.notes);
+    addNote(inner.notes, barTick(cadence_start), kTicksPerBar, inner_dominant);
+    registry.record(barTick(cadence_start), /*voice=*/1, inner_dominant, kTicksPerBar);
+    addNote(inner.notes, barTick(cadence_start + 1), kTicksPerBar, inner_third);
+    registry.record(barTick(cadence_start + 1), /*voice=*/1, inner_third, kTicksPerBar);
     out.material.figuration_sections.push_back(inner);
     pushSpan(asm_ctx, 1, cadence_start, cadence_start + 1, VoiceIntent::FigurationCarrier);
   }

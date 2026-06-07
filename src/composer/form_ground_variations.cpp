@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <vector>
@@ -53,15 +54,16 @@ namespace {
 // the chaconne climax is the densest sawtooth, the passacaglia climax the
 // densest scalar wave (each form's established peak texture).
 //
-// The chaconne palette carries no kArpeggio: broken-chord cycles raise the
-// melodic-interval cost (the dominant scorer feature) and the chaconne sits
-// close to the model threshold, so its rotation keeps to the stepwise idioms.
-// The passacaglia scores with ample headroom and keeps the arpeggio for
-// variety.
+// Neither palette carries kArpeggio: broken-chord cycles raise the
+// melodic-interval cost (the dominant scorer feature). The chaconne has
+// always sat close to the model threshold; the passacaglia's former headroom
+// is now spent on the held cadential landing (long closing tones carry fewer
+// of the stepwise events the corpus distribution rewards), so its rotation
+// likewise keeps to the stepwise idioms.
 constexpr PatternKind kChaconnePalette[3] = {PatternKind::kSawtooth, PatternKind::kScalarWave,
                                              PatternKind::kFiguraCorta};
 constexpr PatternKind kPassacagliaPalette[4] = {PatternKind::kScalarWave, PatternKind::kSawtooth,
-                                                PatternKind::kArpeggio, PatternKind::kFiguraCorta};
+                                                PatternKind::kFiguraCorta, PatternKind::kSawtooth};
 
 // Octave lift applied to the passacaglia V0 sawtooth / figura corta center so
 // their center +/- octave anchor band stays above the V1 counter-figuration
@@ -192,18 +194,18 @@ void appendCounterFiguration(std::vector<MaterialNote>& notes, ThemeToneRegistry
     // anchor policy in barAnchorPitchClasses) so the counter-line never sounds
     // a chromatic tone against the natural-minor V0 figuration (a B against
     // V0's Bb).
+    const int chord_third = chord.minor ? 3 : 4;
+    int triad_pc[3] = {chord.root_pc % 12, (chord.root_pc + chord_third) % 12,
+                       (chord.root_pc + 7) % 12};
+    for (int& pc : triad_pc) {
+      if (!detail::inScale(pc, mode))
+        pc = (pc + 11) % 12;
+    }
+    auto is_triad = [&](int midi) {
+      const int pcl = ((midi % 12) + 12) % 12;
+      return pcl == triad_pc[0] || pcl == triad_pc[1] || pcl == triad_pc[2];
+    };
     auto nearest_other_triad_tone = [&](int from) {
-      const int third = chord.minor ? 3 : 4;
-      int triad_pc[3] = {chord.root_pc % 12, (chord.root_pc + third) % 12,
-                         (chord.root_pc + 7) % 12};
-      for (int& pc : triad_pc) {
-        if (!detail::inScale(pc, mode))
-          pc = (pc + 11) % 12;
-      }
-      auto is_triad = [&](int midi) {
-        const int pcl = ((midi % 12) + 12) % 12;
-        return pcl == triad_pc[0] || pcl == triad_pc[1] || pcl == triad_pc[2];
-      };
       for (int dist = 1; dist <= 12; ++dist) {
         const int above = from + dist;
         const int below = from - dist;
@@ -394,6 +396,7 @@ HarnessFixture buildPassacagliaThreeVoice(const ResolvedRequest& req, int cycle_
   // V1 counter-figuration accumulates into a single TrioVoiceLine (voice 1),
   // gated per cycle by the schedule; V0 variation blocks accumulate per cycle.
   std::vector<MaterialNote> counter_notes;
+  int prev_v0_last = -1;  // previous variation's closing pitch (seam voice-leading).
 
   for (int cycle = 0; cycle < cycles; ++cycle) {
     const ArcPoint point = req.arc(static_cast<std::size_t>(cycle));
@@ -409,8 +412,6 @@ HarnessFixture buildPassacagliaThreeVoice(const ResolvedRequest& req, int cycle_
       const bool establishing = (cycle == 0);
       const int tier = establishing ? 0 : densityTierFor(req, static_cast<std::size_t>(cycle));
       const int notes_per_beat = establishing ? 1 : notesPerBeatForTier(tier);
-      const int phase_rotation =
-          static_cast<int>((req.seed + static_cast<std::uint32_t>(cycle)) % 5);
       const bool descending_start = ((req.seed + static_cast<std::uint32_t>(cycle)) % 2) == 1;
       // Pattern selection: the establishing cycle and the climax are design
       // values (quarters / densest scalar wave); other cycles rotate the
@@ -419,33 +420,71 @@ HarnessFixture buildPassacagliaThreeVoice(const ResolvedRequest& req, int cycle_
           (establishing || is_climax)
               ? PatternKind::kScalarWave
               : kPassacagliaPalette[(req.seed + static_cast<std::uint32_t>(cycle)) % 4];
-      switch (pattern) {
-        case PatternKind::kSawtooth:
-          appendSawtoothCycle(v0_notes, block_start, cycle_bar_plan,
-                              point.register_shift + kPassV0CenterLift,
-                              static_cast<int>((req.seed + static_cast<std::uint32_t>(cycle)) % 4),
-                              notes_per_beat, mode);
-          break;
-        case PatternKind::kArpeggio:
-          appendArpeggioCycle(v0_notes, block_start, cycle_bar_plan,
-                              kPassV0BandLo + point.register_shift,
-                              kPassV0BandHi + point.register_shift,
-                              static_cast<int>((req.seed + static_cast<std::uint32_t>(cycle)) % 4),
-                              notes_per_beat, mode);
-          break;
-        case PatternKind::kFiguraCorta:
-          appendFiguraCortaCycle(
-              v0_notes, block_start, cycle_bar_plan, point.register_shift + kPassV0CenterLift,
-              static_cast<int>((req.seed + static_cast<std::uint32_t>(cycle)) % 4), mode);
-          break;
-        case PatternKind::kScalarWave:
-        default:
-          appendScalarWaveCycle(v0_notes, block_start, cycle_bar_plan,
-                                kPassV0BandLo + point.register_shift,
-                                kPassV0BandHi + point.register_shift, phase_rotation,
-                                descending_start, notes_per_beat, mode);
-          break;
+      auto build_variant = [&](int rotation, std::vector<MaterialNote>& dst) {
+        switch (pattern) {
+          case PatternKind::kSawtooth:
+            appendSawtoothCycle(dst, block_start, cycle_bar_plan,
+                                point.register_shift + kPassV0CenterLift, rotation, notes_per_beat,
+                                mode);
+            break;
+          case PatternKind::kArpeggio:
+            appendArpeggioCycle(
+                dst, block_start, cycle_bar_plan, kPassV0BandLo + point.register_shift,
+                kPassV0BandHi + point.register_shift, rotation, notes_per_beat, mode);
+            break;
+          case PatternKind::kFiguraCorta:
+            appendFiguraCortaCycle(dst, block_start, cycle_bar_plan,
+                                   point.register_shift + kPassV0CenterLift, rotation, mode);
+            break;
+          case PatternKind::kScalarWave:
+          default:
+            appendScalarWaveCycle(dst, block_start, cycle_bar_plan,
+                                  kPassV0BandLo + point.register_shift,
+                                  kPassV0BandHi + point.register_shift, rotation, descending_start,
+                                  notes_per_beat, mode);
+            break;
+        }
+      };
+      const int rotation_domain = (pattern == PatternKind::kScalarWave) ? 5 : 4;
+      const int seed_rotation =
+          static_cast<int>((req.seed + static_cast<std::uint32_t>(cycle)) % rotation_domain);
+      build_variant(seed_rotation, v0_notes);
+      // Voice-lead the variation seam: when the rotation arithmetic opens the
+      // new cycle with a leap beyond a fifth from the previous variation's
+      // closing pitch, re-pick the rotation that lands nearest that pitch --
+      // but never trade the seam for a rougher interior (a variant adding
+      // internal leaps is rejected). Cycles whose seam already connects keep
+      // their rotated idiom untouched.
+      if (prev_v0_last >= 0 && !v0_notes.empty()) {
+        auto internal_leaps = [](const std::vector<MaterialNote>& line) {
+          int leaps = 0;
+          for (std::size_t i = 1; i < line.size(); ++i) {
+            if (std::abs(static_cast<int>(line[i].pitch) - static_cast<int>(line[i - 1].pitch)) > 7)
+              ++leaps;
+          }
+          return leaps;
+        };
+        const int default_seam = std::abs(static_cast<int>(v0_notes.front().pitch) - prev_v0_last);
+        if (default_seam > 7) {
+          const int default_leaps = internal_leaps(v0_notes);
+          int best_seam = default_seam;
+          for (int rot = 0; rot < rotation_domain; ++rot) {
+            if (rot == seed_rotation)
+              continue;
+            std::vector<MaterialNote> trial;
+            build_variant(rot, trial);
+            if (trial.empty())
+              continue;
+            const int seam = std::abs(static_cast<int>(trial.front().pitch) - prev_v0_last);
+            if (seam < best_seam && internal_leaps(trial) <= default_leaps) {
+              best_seam = seam;
+              v0_notes = std::move(trial);
+            }
+          }
+        }
       }
+      if (!v0_notes.empty())
+        prev_v0_last = static_cast<int>(v0_notes.back().pitch);
 
       PassacagliaVariation var;
       var.voice = 0;
@@ -474,6 +513,110 @@ HarnessFixture buildPassacagliaThreeVoice(const ResolvedRequest& req, int cycle_
       const int notes_per_beat = notesPerBeatForTier(v1_tier);
       appendCounterFiguration(counter_notes, registry, block_start, cycle_bar_plan,
                               point.register_shift, notes_per_beat, mode);
+    }
+  }
+
+  // --- Cadential landing over the final two bars. The ground is immutable, so
+  // the landing lives in the upper voices: V0 stops its figuration on a
+  // full-bar leading tone B (consonant over BOTH penultimate-bar ground
+  // designs -- a major third over the dominant G, a sixth over the lament's D
+  // -- and over the held V1 dominant) carrying the long cadential trill, then
+  // resolves up to a full-bar tonic over the final bar's tonic ground. The
+  // leading tone is realized in the octave nearest the figuration's closing
+  // register, clamped so the trill's upper neighbour stays inside the organ
+  // ornament compass and the close stays above the V1 hold. V1 joins the held
+  // close instead of running its counter-figuration through it. ---
+  int v0_prefinal = 83;  // V0's landing leading tone (read by the V1 hold below).
+  int v0_final = 84;     // V0's closing tonic (the V1 third must stay below it).
+  if (!out.material.passacaglia_variations.empty()) {
+    PassacagliaVariation& last_var = out.material.passacaglia_variations.back();
+    const Tick piece_end = static_cast<Tick>(total_bars) * kTicksPerBar34;
+    if (last_var.end_tick == piece_end && !last_var.notes.empty()) {
+      // The figuration keeps running through the penultimate bar's first half
+      // (its stepwise sixteenths are the form's own language), then lands.
+      const Tick landing_tick = piece_end - 2 * kTicksPerBar34 + kTicksPerBar34 / 2;
+      int near = static_cast<int>(last_var.notes.back().pitch);
+      for (const MaterialNote& note : last_var.notes) {
+        if (note.start_tick < landing_tick)
+          near = static_cast<int>(note.pitch);
+      }
+      // The trill degree is the leading tone B by preference (rising B -> C
+      // resolution); when the figuration's seam into B would be a tritone
+      // (the line stops on an F-class tone), the canonical supertonic trill
+      // D -> C takes over -- D is equally consonant over both penultimate
+      // ground designs (an octave over the lament's D, a fifth over the
+      // dominant G) and the seam becomes a third.
+      const bool tritone_seam = (near % 12) == 5;  // an F-class tone precedes B only by tritone.
+      const int degree_pc = tritone_seam ? 2 : 11;
+      const int up = near + ((degree_pc - (near % 12)) % 12 + 12) % 12;
+      int prefinal = (up - near <= near - (up - 12)) ? up : up - 12;
+      while (prefinal > 83)
+        prefinal -= 12;
+      while (prefinal < 67)
+        prefinal += 12;
+      v0_prefinal = prefinal;
+      const int final_tone = tritone_seam ? prefinal - 2 : prefinal + 1;
+      v0_final = final_tone;
+      last_var.notes.erase(
+          std::remove_if(last_var.notes.begin(), last_var.notes.end(),
+                         [&](const MaterialNote& note) { return note.start_tick >= landing_tick; }),
+          last_var.notes.end());
+      MaterialNote held;
+      held.start_tick = landing_tick;
+      held.duration = kTicksPerBar34 - kTicksPerBar34 / 2;
+      held.pitch = static_cast<std::uint8_t>(prefinal);
+      last_var.notes.push_back(held);
+      MaterialNote last;
+      last.start_tick = piece_end - kTicksPerBar34;
+      last.duration = kTicksPerBar34;
+      last.pitch = static_cast<std::uint8_t>(final_tone);
+      last_var.notes.push_back(last);
+    }
+  }
+  if (!counter_notes.empty()) {
+    const Tick landing_tick =
+        static_cast<Tick>(total_bars - 2) * kTicksPerBar34 + kTicksPerBar34 / 2;
+    bool sounds_landing = false;
+    for (const MaterialNote& note : counter_notes)
+      sounds_landing |= note.start_tick >= landing_tick;
+    if (sounds_landing) {
+      int prev = 60;
+      for (const MaterialNote& note : counter_notes) {
+        if (note.start_tick < landing_tick)
+          prev = static_cast<int>(note.pitch);
+      }
+      counter_notes.erase(
+          std::remove_if(counter_notes.begin(), counter_notes.end(),
+                         [&](const MaterialNote& note) { return note.start_tick >= landing_tick; }),
+          counter_notes.end());
+      // A dominant-triad arpeggio in eighths: every tone is consonant with
+      // both penultimate ground designs AND the trill degree above. The base
+      // is voice-led to the G nearest the counter-line's closing register;
+      // when the rising shape (G B D) would reach the V0 landing tone, the
+      // shape inverts to descend (G D B) instead of leaping the whole figure
+      // down an octave.
+      const int base = (std::abs(prev - 67) < std::abs(prev - 55)) ? 67 : 55;
+      const bool descend = base + 7 >= v0_prefinal;
+      static constexpr int kRising[3] = {0, 4, 7};     // G B D.
+      static constexpr int kFalling[3] = {0, -5, -8};  // G D B.
+      const int* offsets = descend ? kFalling : kRising;
+      for (int idx = 0; idx < 3; ++idx) {
+        MaterialNote step;
+        step.start_tick = landing_tick + static_cast<Tick>(idx) * (kTicksPerBar34 / 6);
+        step.duration = kTicksPerBar34 / 6;
+        step.pitch = static_cast<std::uint8_t>(base + offsets[idx]);
+        counter_notes.push_back(step);
+      }
+      MaterialNote held;
+      held.start_tick = static_cast<Tick>(total_bars - 1) * kTicksPerBar34;
+      held.duration = kTicksPerBar34;
+      // The closing third (E / Eb) arrives by step from the arpeggio's fifth,
+      // folded down by octaves so the inner voice stays below V0's tonic close.
+      int third = base + ((minor && !picardy) ? 8 : 9);
+      while (third >= v0_final)
+        third -= 12;
+      held.pitch = static_cast<std::uint8_t>(third);
+      counter_notes.push_back(held);
     }
   }
 
@@ -653,6 +796,28 @@ HarnessFixture buildGroundVariationForm(const ResolvedRequest& req, int cycle_ba
         appendSawtoothCycle(notes, block_start, cycle_bar_plan, point.register_shift,
                             anchor_rotation, notes_per_beat, mode);
         break;
+    }
+
+    // Compact cadential landing on the piece's final bar. Every chaconne /
+    // ground cycle ends on the dominant, so the dominant arrives only in the
+    // final bar (whose harmony is overridden to the tonic above): the bar
+    // splits into a held supertonic D over its first half (the cadential
+    // trill site, a fifth over the immutable dominant ground) resolving to a
+    // held tonic over the second half.
+    if (cycle == cycles - 1 && !notes.empty()) {
+      const int near = static_cast<int>(notes.back().pitch);
+      const int up = near + ((2 - (near % 12)) % 12 + 12) % 12;  // supertonic at/above.
+      int prefinal = (up - near <= near - (up - 12)) ? up : up - 12;
+      // Settle the close in the variation's home octave (D5 -> C5): below the
+      // organ ornament compass (the trill's upper neighbour must stay
+      // playable under the late-cycle register lift) and above the lower
+      // voices.
+      while (prefinal > 81)
+        prefinal -= 12;
+      while (prefinal < 67)
+        prefinal += 12;
+      appendCompactCadentialLanding(notes, static_cast<Tick>(total_bars - 1) * kTicksPerBar34,
+                                    kTicksPerBar34, prefinal, prefinal - 2);
     }
 
     if (passacaglia) {

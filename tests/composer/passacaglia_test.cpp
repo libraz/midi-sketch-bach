@@ -143,8 +143,10 @@ TEST(PassacagliaTest, GroundCarrierTilesGroundBassAcrossPeriods) {
 
 // Late-cycle rhythmic intensification: from passacaglia_ground_split_from on,
 // each tiled ground note longer than a beat is restated as repeated same-pitch
-// quarters; earlier cycles replay the long notes untouched. Every emitted note
-// still carries PassacagliaGroundReplayed and the original pitches.
+// quarters; earlier cycles replay the long notes untouched, and the piece's
+// FINAL ground note stays unsplit (the bass joins the held closing chord).
+// Every emitted note still carries PassacagliaGroundReplayed and the original
+// pitches.
 TEST(PassacagliaTest, GroundCarrierSplitsLateCyclesIntoQuarters) {
   Material material;
   const Tick period = 2 * kTicksPerBar;  // two full-bar notes per cycle.
@@ -162,19 +164,24 @@ TEST(PassacagliaTest, GroundCarrierSplitsLateCyclesIntoQuarters) {
 
   const auto cands = CandidateSearch{}.enumerate(span, cMinorWhole(), material, CandidateContext{});
 
-  // Cycle 0: two untouched full-bar notes. Cycle 1: each bar restated as four
-  // same-pitch quarters (1920 / 480).
-  ASSERT_EQ(cands.size(), 2u + 8u);
+  // Cycle 0: two untouched full-bar notes. Cycle 1: the first bar restated as
+  // four same-pitch quarters (1920 / 480); the second bar is the piece's final
+  // ground note and stays one unsplit full-bar note.
+  ASSERT_EQ(cands.size(), 2u + 4u + 1u);
   EXPECT_EQ(cands[0].duration, kTicksPerBar);
   EXPECT_EQ(cands[0].pitch, 48u);
   EXPECT_EQ(cands[1].duration, kTicksPerBar);
   EXPECT_EQ(cands[1].pitch, 43u);
-  for (std::size_t i = 2; i < cands.size(); ++i) {
+  for (std::size_t i = 2; i < 6; ++i) {
     EXPECT_EQ(cands[i].duration, kTicksPerBeat) << "late-cycle note " << i << " must be a quarter";
-    EXPECT_EQ(cands[i].pitch, (i < 6) ? 48u : 43u) << "pitch must never change";
+    EXPECT_EQ(cands[i].pitch, 48u) << "pitch must never change";
     EXPECT_EQ(cands[i].start_tick, period + static_cast<Tick>(i - 2) * kTicksPerBeat);
     EXPECT_NE(cands[i].satisfied_rules & bit(RuleBit::PassacagliaGroundReplayed), 0u);
   }
+  EXPECT_EQ(cands[6].duration, kTicksPerBar) << "final ground note must stay unsplit";
+  EXPECT_EQ(cands[6].pitch, 43u);
+  EXPECT_EQ(cands[6].start_tick, period + kTicksPerBar);
+  EXPECT_NE(cands[6].satisfied_rules & bit(RuleBit::PassacagliaGroundReplayed), 0u);
 }
 
 // A non-climax variation: VariationApplied on every note, ClimaxPlaced on none.

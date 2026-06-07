@@ -659,7 +659,8 @@ TEST(GroundVariationPassacaglia, VariationCyclesAlternatePatterns) {
 TEST(GroundVariationPassacaglia, GroundIntensifiesRhythmicallyInLateCycles) {
   // From the final third of the cycles on, the ground (V2) restates each bar as
   // three same-pitch quarters instead of one dotted half; earlier cycles keep
-  // the long notes, and the bar-head pitch skeleton never changes.
+  // the long notes, and the bar-head pitch skeleton never changes. The piece's
+  // final bar stays one unsplit dotted half (the bass joins the held close).
   for (std::uint32_t seed : {1u, 2u, 3u}) {
     const HarnessFixture fx = build(FormType::Passacaglia, seed, /*minor=*/true, /*bars=*/48);
     const ComposeResult r = Composer{}.run(fx.material, fx.harmony, fx.voice_plan);
@@ -684,8 +685,9 @@ TEST(GroundVariationPassacaglia, GroundIntensifiesRhythmicallyInLateCycles) {
       ASSERT_FALSE(bars[bar].empty()) << "seed " << seed << " bar " << bar;
       const Tick bar_tick = static_cast<Tick>(bar) * kTicksPerBar34;
       const std::uint8_t skeleton = fx.material.passacaglia_ground[bar % 8].pitch;
-      if (bar_tick < split_from) {
-        // Early cycles: one dotted-half note per bar, untouched.
+      if (bar_tick < split_from || bar + 1 == bars.size()) {
+        // Early cycles -- and the final bar, whose ground joins the held
+        // closing chord -- keep one dotted-half note per bar.
         EXPECT_EQ(bars[bar].size(), 1u) << "seed " << seed << " bar " << bar;
         EXPECT_EQ(bars[bar][0]->duration, kTicksPerBar34);
       } else {

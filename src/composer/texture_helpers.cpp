@@ -194,4 +194,104 @@ int consonantChordTone(const detail::ChordSpec& chord, int voice, int band_lo, i
   return fallback >= 0 ? fallback : std::clamp(target, band_lo, band_hi);
 }
 
+void appendCadentialLanding(std::vector<MaterialNote>& line, Tick penult_bar_start,
+                            Tick ticks_per_bar, int prefinal, int final_pitch, detail::Mode mode,
+                            int band_lo, const detail::ChordSpec* downbeat_chord,
+                            bool prefer_descending) {
+  // Drop everything from the penultimate bar on; the landing replaces it.
+  line.erase(
+      std::remove_if(line.begin(), line.end(),
+                     [&](const MaterialNote& note) { return note.start_tick >= penult_bar_start; }),
+      line.end());
+
+  const Tick eighth = duration::kEighthNote;
+  const Tick half_bar = ticks_per_bar / 2;
+  const int run_len = static_cast<int>(half_bar / eighth);  // 4 in 4/4, 3 in 3/4.
+
+  // Approach run INTO the pre-final tone. Ascending by preference: in minor an
+  // ascent into the raised leading tone takes the melodic-minor sixth degree
+  // (A natural), avoiding the augmented second the natural-minor walk would
+  // make. When the ascent would dip below the band floor (a narrow band whose
+  // tonic hugs the floor), the run flips to a descent from above instead.
+  std::vector<int> run(static_cast<std::size_t>(run_len));
+  if (mode == detail::Mode::Minor && ((prefinal % 12) == 11)) {
+    // Melodic-minor ascent into the leading tone: ... Eb F G A(natural) -> B.
+    static constexpr int kMelodicOffsets[4] = {-8, -6, -4, -2};
+    for (int idx = 0; idx < run_len; ++idx)
+      run[static_cast<std::size_t>(idx)] = prefinal + kMelodicOffsets[4 - run_len + idx];
+  } else {
+    for (int idx = 0; idx < run_len; ++idx)
+      run[static_cast<std::size_t>(idx)] = detail::scaleDown(prefinal, run_len - idx, mode);
+  }
+  if (prefer_descending || run.front() < band_lo) {
+    // Descending run from above: e.g. F E D C -> B.
+    for (int idx = 0; idx < run_len; ++idx)
+      run[static_cast<std::size_t>(idx)] = detail::scaleUp(prefinal, run_len - idx, mode);
+  }
+  if (downbeat_chord != nullptr) {
+    // Snap the downbeat eighth to the nearest chord tone (the figuration
+    // downbeat rule reads the bar-head onset).
+    const int third = downbeat_chord->minor ? 3 : 4;
+    const int triad_pc[3] = {downbeat_chord->root_pc % 12, (downbeat_chord->root_pc + third) % 12,
+                             (downbeat_chord->root_pc + 7) % 12};
+    auto is_triad = [&](int midi) {
+      const int pcl = ((midi % 12) + 12) % 12;
+      return pcl == triad_pc[0] || pcl == triad_pc[1] || pcl == triad_pc[2];
+    };
+    int snapped = run.front();
+    for (int delta = 0; delta <= 6; ++delta) {
+      if (is_triad(run.front() + delta)) {
+        snapped = run.front() + delta;
+        break;
+      }
+      if (is_triad(run.front() - delta)) {
+        snapped = run.front() - delta;
+        break;
+      }
+    }
+    run.front() = snapped;
+  }
+
+  for (int idx = 0; idx < run_len; ++idx) {
+    MaterialNote note;
+    note.start_tick = penult_bar_start + static_cast<Tick>(idx) * eighth;
+    note.duration = eighth;
+    note.pitch = static_cast<std::uint8_t>(std::clamp(run[static_cast<std::size_t>(idx)], 0, 127));
+    line.push_back(note);
+  }
+
+  // Held pre-final tone over the bar's second half (the trill site).
+  MaterialNote held;
+  held.start_tick = penult_bar_start + half_bar;
+  held.duration = ticks_per_bar - half_bar;
+  held.pitch = static_cast<std::uint8_t>(std::clamp(prefinal, 0, 127));
+  line.push_back(held);
+
+  // Full-bar final tone (the held resolution).
+  MaterialNote last;
+  last.start_tick = penult_bar_start + ticks_per_bar;
+  last.duration = ticks_per_bar;
+  last.pitch = static_cast<std::uint8_t>(std::clamp(final_pitch, 0, 127));
+  line.push_back(last);
+}
+
+void appendCompactCadentialLanding(std::vector<MaterialNote>& line, Tick final_bar_start,
+                                   Tick ticks_per_bar, int prefinal, int final_pitch) {
+  line.erase(
+      std::remove_if(line.begin(), line.end(),
+                     [&](const MaterialNote& note) { return note.start_tick >= final_bar_start; }),
+      line.end());
+  const Tick half_bar = ticks_per_bar / 2;
+  MaterialNote held;
+  held.start_tick = final_bar_start;
+  held.duration = half_bar;
+  held.pitch = static_cast<std::uint8_t>(std::clamp(prefinal, 0, 127));
+  line.push_back(held);
+  MaterialNote last;
+  last.start_tick = final_bar_start + half_bar;
+  last.duration = ticks_per_bar - half_bar;
+  last.pitch = static_cast<std::uint8_t>(std::clamp(final_pitch, 0, 127));
+  line.push_back(last);
+}
+
 }  // namespace bach::composer
