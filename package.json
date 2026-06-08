@@ -18,8 +18,6 @@
     "dist"
   ],
   "scripts": {
-    "preinstall": "npx only-allow yarn",
-    "postinstall": "simple-git-hooks",
     "prepare": "simple-git-hooks",
     "build": "yarn build:wasm && yarn build:js",
     "build:wasm": "emcmake cmake -B build-wasm -DBUILD_WASM=ON && cmake --build build-wasm",

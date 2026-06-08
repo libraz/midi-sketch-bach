@@ -13,7 +13,7 @@
 //      variation carries no sub-quarter note; MusicalFail otherwise) — fire on
 //      violations, stay silent on clean or rhythmically subdivided material,
 //      and stay inert when ground_bass / variations are empty.
-//   3. The Phase16 fixture runs through the full Composer cleanly for every
+//   3. The Chaconne fixture runs through the full Composer cleanly for every
 //      seed family (seed % 4 selects the scalar-wave start offset) and stamps
 //      all three Arch bits in provenance.
 
@@ -380,15 +380,15 @@ TEST(ChaconneArchTest, VariationOrnamentConstraintInertWhenVariationsEmpty) {
   EXPECT_FALSE(hasRule(r, "variation_role_ornament_constraint"));
 }
 
-// --- 3. Phase16 fixture integration ----------------------------------------
+// --- 3. Chaconne fixture integration ----------------------------------------
 
 // The BWV1004 chaconne fixture must run through the full Composer cleanly for
 // every seed family (seed % 4 selects the scalar-wave start offset): no
 // validator failure, two voices, and all three Arch bits present somewhere in
 // the provenance.
-TEST(ChaconneArchTest, Phase16FixtureValidatesCleanAndStampsAllArchBits) {
+TEST(ChaconneArchTest, ChaconneFixtureValidatesCleanAndStampsAllArchBits) {
   for (int seed : {0, 1, 2, 3, 4, 5}) {
-    const HarnessFixture fx = buildHarnessFixture(HarnessPhase::Phase16, seed);
+    const HarnessFixture fx = buildHarnessFixture(HarnessPhase::Chaconne, seed);
     const ComposeResult r = Composer{}.run(fx.material, fx.harmony, fx.voice_plan);
 
     EXPECT_TRUE(r.validation.failures.empty())

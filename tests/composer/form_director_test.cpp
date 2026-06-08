@@ -270,5 +270,58 @@ TEST(FormDirectorBuild, NullOutIsRejected) {
   EXPECT_EQ(buildFormFixture(req, nullptr), FormDirectorStatus::UnknownForm);
 }
 
+// --- 6. Free-counterpoint opt-in toggle ------------------------------------
+
+// Off (the default) leaves every span intent exactly as the form builder
+// emitted it: no span is reclassified, so the fixture is the byte-stable
+// carrier-assembly result.
+TEST(FormDirectorFreeCounterpoint, OffLeavesIntentsUntouched) {
+  ComposeRequest req;
+  req.form = FormType::Passacaglia;
+  req.seed = 1;
+  ASSERT_FALSE(req.enable_free_counterpoint);
+
+  HarnessFixture fixture;
+  ASSERT_EQ(buildFormFixture(req, &fixture), FormDirectorStatus::Ok);
+
+  std::size_t trio_carriers = 0;
+  for (const Span& span : fixture.voice_plan.spans) {
+    EXPECT_NE(span.intent, VoiceIntent::SequentialCounterline)
+        << "no span should be opened to the search when the toggle is off";
+    if (span.intent == VoiceIntent::TrioVoiceCarrier)
+      ++trio_carriers;
+  }
+  EXPECT_GT(trio_carriers, 0u) << "this form must carry an inner voice for the on-case to exercise";
+}
+
+// On reclassifies exactly the TrioVoiceCarrier inner voices to the scored
+// search intent; thematic carriers (ground, variation) keep their intent.
+TEST(FormDirectorFreeCounterpoint, OnReroutesInnerVoiceToSearch) {
+  ComposeRequest off_req;
+  off_req.form = FormType::Passacaglia;
+  off_req.seed = 1;
+  HarnessFixture off_fx;
+  ASSERT_EQ(buildFormFixture(off_req, &off_fx), FormDirectorStatus::Ok);
+
+  ComposeRequest on_req = off_req;
+  on_req.enable_free_counterpoint = true;
+  HarnessFixture on_fx;
+  ASSERT_EQ(buildFormFixture(on_req, &on_fx), FormDirectorStatus::Ok);
+
+  ASSERT_EQ(off_fx.voice_plan.spans.size(), on_fx.voice_plan.spans.size());
+  std::size_t rerouted = 0;
+  for (std::size_t i = 0; i < off_fx.voice_plan.spans.size(); ++i) {
+    const VoiceIntent before = off_fx.voice_plan.spans[i].intent;
+    const VoiceIntent after = on_fx.voice_plan.spans[i].intent;
+    if (before == VoiceIntent::TrioVoiceCarrier) {
+      EXPECT_EQ(after, VoiceIntent::SequentialCounterline);
+      ++rerouted;
+    } else {
+      EXPECT_EQ(after, before) << "only TrioVoiceCarrier spans may be reclassified";
+    }
+  }
+  EXPECT_GT(rerouted, 0u);
+}
+
 }  // namespace
 }  // namespace bach::composer

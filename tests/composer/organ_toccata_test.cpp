@@ -11,7 +11,7 @@
 //      ToccataSection pairs an antithetical (character, archetype) — Noble x
 //      Dramaticus (MusicalFail) — passes a compatible pair (Severe x
 //      Dramaticus), and stays inert when no toccata section exists.
-//   3. The Phase18 fixture runs through the full Composer cleanly for one seed
+//   3. The OrganToccata fixture runs through the full Composer cleanly for one seed
 //      per archetype (seed % 4 selects the archetype, (seed / 4) % 4 the
 //      scalar-wave offset) and stamps both Toccata bits in provenance; the
 //      SectionTransition count matches the archetype's section count.
@@ -181,15 +181,15 @@ TEST(OrganToccataTest, ToccataArchetypeCompatibleInertWhenNoToccataSection) {
   EXPECT_FALSE(hasRule(r, "toccata_archetype_compatible"));
 }
 
-// --- 3. Phase18 fixture integration -----------------------------------------
+// --- 3. OrganToccata fixture integration -----------------------------------------
 
 // The organ-toccata fixture must run through the full Composer cleanly for one
 // seed per archetype (seed 0-3): no validator failure, single voice, both
 // Toccata bits present, and the SectionTransition count equals the archetype's
 // section count.
-TEST(OrganToccataTest, Phase18FixtureValidatesCleanAndStampsToccataBits) {
+TEST(OrganToccataTest, OrganToccataFixtureValidatesCleanAndStampsToccataBits) {
   for (int seed : {0, 1, 2, 3}) {
-    const HarnessFixture fx = buildHarnessFixture(HarnessPhase::Phase18, seed);
+    const HarnessFixture fx = buildHarnessFixture(HarnessPhase::OrganToccata, seed);
     const ComposeResult r = Composer{}.run(fx.material, fx.harmony, fx.voice_plan);
 
     EXPECT_TRUE(r.validation.failures.empty())

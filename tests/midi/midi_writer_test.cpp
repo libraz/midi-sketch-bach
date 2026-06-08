@@ -464,6 +464,84 @@ TEST(MidiWriterTest, EmptyTimeSigFallsBackTo4_4) {
   EXPECT_TRUE(found) << "Expected default 4/4 time signature in MIDI output";
 }
 
+// ---------------------------------------------------------------------------
+// Regression: a late tempo change (closing ritardando) must not corrupt the
+// tick-0 time signature. Tempo and time signature share one meta timeline, so
+// writing them in two passes underflowed the time-signature delta.
+// ---------------------------------------------------------------------------
+
+// Decode the metadata MTrk and verify every meta-event delta is small (no
+// variable-length underflow to ~0x0FFFFFFF) and the 3/4 time signature is the
+// first timed event, regardless of later tempo changes.
+TEST(MidiWriterTest, LateTempoChangeDoesNotCorruptTimeSignatureDelta) {
+  MidiWriter writer;
+  Track track;
+  track.channel = 0;
+  track.program = 0;
+  NoteEvent note;
+  note.start_tick = 0;
+  note.duration = 480;
+  note.pitch = 60;
+  note.velocity = 80;
+  track.notes.push_back(note);
+
+  // Initial tempo at tick 0 plus a ritardando step late in the piece.
+  const Tick late_tick = kTicksPerBeat * 100;
+  std::vector<TempoEvent> tempos = {{0, 120}, {late_tick, 96}};
+  std::vector<TimeSignatureEvent> time_sigs = {{0, {3, 4}}};
+  writer.build({track}, tempos, time_sigs, Key::C);
+  auto bytes = writer.toBytes();
+
+  // Locate the metadata MTrk (the first MTrk chunk).
+  size_t mtrk = 0;
+  for (; mtrk + 4 < bytes.size(); ++mtrk) {
+    if (bytes[mtrk] == 'M' && bytes[mtrk + 1] == 'T' && bytes[mtrk + 2] == 'r' &&
+        bytes[mtrk + 3] == 'k') {
+      break;
+    }
+  }
+  ASSERT_LT(mtrk + 8, bytes.size()) << "Metadata MTrk chunk not found";
+  uint32_t track_len = readBE32(bytes.data(), mtrk + 4);
+  size_t pos = mtrk + 8;
+  const size_t track_end = pos + track_len;
+  ASSERT_LE(track_end, bytes.size());
+
+  // Walk the meta track, decoding each (delta, event) pair. No delta may be
+  // anywhere near the underflow sentinel, and the 3/4 time signature must be
+  // present with a delta of 0 (it is the tick-0 anchor).
+  bool saw_three_four = false;
+  while (pos < track_end) {
+    // Decode variable-length delta.
+    uint32_t delta = 0;
+    while (pos < track_end) {
+      uint8_t b = bytes[pos++];
+      delta = (delta << 7) | (b & 0x7F);
+      if (!(b & 0x80))
+        break;
+    }
+    EXPECT_LT(delta, kTicksPerBeat * 1000u)
+        << "Underflowed/garbage meta delta detected (" << delta << ")";
+    ASSERT_LT(pos, track_end);
+    uint8_t status = bytes[pos++];
+    ASSERT_EQ(status, 0xFFu) << "Metadata track must contain only meta events";
+    ASSERT_LT(pos, track_end);
+    uint8_t meta_type = bytes[pos++];
+    ASSERT_LT(pos, track_end);
+    uint8_t meta_len = bytes[pos++];
+    if (meta_type == 0x58) {  // Time signature
+      ASSERT_LE(pos + meta_len, track_end);
+      EXPECT_EQ(bytes[pos], 0x03) << "Expected 3/4 numerator";
+      EXPECT_EQ(bytes[pos + 1], 0x02) << "Expected denominator log2(4)=2";
+      EXPECT_EQ(delta, 0u) << "Time signature must anchor at tick 0";
+      saw_three_four = true;
+    }
+    pos += meta_len;
+    if (meta_type == 0x2F)
+      break;  // End of track
+  }
+  EXPECT_TRUE(saw_three_four) << "3/4 time signature must be present in the meta track";
+}
+
 TEST(MidiWriterTest, TimeSignature6_8DenominatorEncoding) {
   MidiWriter writer;
   Track track;

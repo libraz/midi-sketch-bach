@@ -65,6 +65,33 @@ class FugueTextureGateTest(unittest.TestCase):
         self.assertEqual(intervals, [10, 8])
         self.assertTrue(nonperiodic)
 
+    def test_model_scoring_unavailable_hard_fails_when_scorer_absent(self) -> None:
+        # Scoring requested+enforced, the sweep ran cases, but none was scored:
+        # the bach-mcp scorer is absent, so gate-3 must not silently pass.
+        summary = {"total": 20, "model_scored_cases": 0, "all_passed": True}
+        self.assertTrue(
+            fugue_texture_gate.model_scoring_unavailable(summary, no_model_score=False)
+        )
+
+    def test_model_scoring_unavailable_false_when_opted_out(self) -> None:
+        # --no-model-score is the explicit opt-out; absence is then expected.
+        summary = {"total": 20, "model_scored_cases": 0, "all_passed": True}
+        self.assertFalse(
+            fugue_texture_gate.model_scoring_unavailable(summary, no_model_score=True)
+        )
+
+    def test_model_scoring_unavailable_false_when_some_cases_scored(self) -> None:
+        summary = {"total": 20, "model_scored_cases": 20, "all_passed": True}
+        self.assertFalse(
+            fugue_texture_gate.model_scoring_unavailable(summary, no_model_score=False)
+        )
+
+    def test_model_scoring_unavailable_false_when_no_cases_ran(self) -> None:
+        summary = {"total": 0, "model_scored_cases": 0, "all_passed": True}
+        self.assertFalse(
+            fugue_texture_gate.model_scoring_unavailable(summary, no_model_score=False)
+        )
+
     def test_count_intent_spans_deduplicates_by_span_id(self) -> None:
         provenance = [
             {"span_id": 1, "voice_intent": "FortspinnungSpan"},

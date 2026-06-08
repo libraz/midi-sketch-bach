@@ -384,6 +384,103 @@ TEST(CandidateSearchTest, RejectsDissonantVerticalAtStrongBeat) {
       << "G4 (67) forms M2 against placed A4 (69); rule must reject it.";
 }
 
+// Strong-beat perfect-4th rejection in the upper voice pair must hold even
+// when the active chord is NOT degree-tagged and the compose span is a plain
+// SequentialCounterline (intent != HarmonicSupport) — the FugueSubject3v/FugueExposition3v
+// fixture shape. The Validator enforces fourth_only_on_weak_beat for every
+// strong-beat upper-pair regardless of chord tagging, so the pre-filter must
+// match it.
+//
+// Fixture (3 voices, untagged C-major chord): V0 = C5 (72), V2 = C3 (48,
+// bottom voice). The (V1, V2) pair is the excluded bottom-of-texture pair;
+// (V0, V1) is the checked upper pair. With center=66 the score-winner is
+// G4 (67), which forms a perfect 4th (72 - 67 = 5) with V0 on the downbeat.
+// The pre-filter must reject 67 and fall to E4 (64), a m6 (consonant) that
+// also clears voice-crossing (below V0, above V2).
+TEST(CandidateSearchTest, RejectsUpperPairFourthOnStrongBeatWithoutDegreeTagging) {
+  std::vector<NoteEvent> placed = {
+      makePlaced(0, kTicksPerBeat, 72, 0),  // V0 C5
+      makePlaced(0, kTicksPerBeat, 48, 2),  // V2 C3 (bottom voice)
+  };
+
+  CandidateContext ctx;
+  ctx.voice_center = 66;
+  ctx.prev_pitch = 0;
+  ctx.placed_notes = &placed;
+  ctx.num_voices = 3;
+
+  Material empty;
+  Span span = makeComposeSpan(0, kTicksPerBeat, 1);
+
+  CandidateSearch search;
+  const auto cands = search.enumerate(span, singleCMajor(), empty, ctx);
+  ASSERT_EQ(cands.size(), 1u);
+  EXPECT_NE(cands.front().pitch, 67u)
+      << "G4 (67) forms a perfect 4th against V0 C5 (72) in the upper pair on a "
+         "downbeat; the pre-filter must reject it even without degree tagging.";
+  EXPECT_EQ(cands.front().pitch, 64u)
+      << "expected E4 (64, m6) as the nearest admissible upper-pair tone, got "
+      << static_cast<int>(cands.front().pitch);
+}
+
+// The bottom-of-texture pair is excluded from the strong-beat 4th rule (it
+// inverts to a 5th but is not subject to invertible counterpoint). Here V0
+// (top) is placed an octave above; the compose voice is V2 (bottom) and the
+// pair under test is (V1, V2) — but V1 is absent, so the only pair is
+// (V0, V2), which is NOT adjacent-and-upper. A perfect 4th there must NOT be
+// rejected by this rule. center=67 pulls toward G4 (67); against V0 C5 (72)
+// that is a P4, and since the pair is not an upper adjacent pair the search
+// is free to keep it.
+TEST(CandidateSearchTest, BottomPairFourthOnStrongBeatIsAllowed) {
+  std::vector<NoteEvent> placed = {
+      makePlaced(0, kTicksPerBeat, 72, 0),  // V0 C5 (top)
+  };
+
+  CandidateContext ctx;
+  ctx.voice_center = 67;
+  ctx.prev_pitch = 0;
+  ctx.placed_notes = &placed;
+  ctx.num_voices = 2;
+
+  Material empty;
+  Span span = makeComposeSpan(0, kTicksPerBeat, 1);  // compose the bottom voice
+
+  CandidateSearch search;
+  const auto cands = search.enumerate(span, singleCMajor(), empty, ctx);
+  ASSERT_EQ(cands.size(), 1u);
+  EXPECT_EQ(cands.front().pitch, 67u)
+      << "a perfect 4th in the bottom-of-texture pair is not covered by the "
+         "upper-pair rule and must be admitted; got "
+      << static_cast<int>(cands.front().pitch);
+}
+
+// A perfect 4th in the upper pair on a WEAK beat is allowed (it only inverts
+// to a problematic 5th on a strong beat). Same geometry as the strong-beat
+// test but the compose tick is beat 2 (weak), so G4 (67) — the P4 against
+// V0 C5 (72) — must survive.
+TEST(CandidateSearchTest, UpperPairFourthOnWeakBeatIsAllowed) {
+  std::vector<NoteEvent> placed = {
+      makePlaced(kTicksPerBeat, kTicksPerBeat, 72, 0),  // V0 C5 on beat 2
+      makePlaced(kTicksPerBeat, kTicksPerBeat, 48, 2),  // V2 C3 on beat 2
+  };
+
+  CandidateContext ctx;
+  ctx.voice_center = 66;
+  ctx.prev_pitch = 0;
+  ctx.placed_notes = &placed;
+  ctx.num_voices = 3;
+
+  Material empty;
+  Span span = makeComposeSpan(kTicksPerBeat, 2 * kTicksPerBeat, 1);
+
+  CandidateSearch search;
+  const auto cands = search.enumerate(span, singleCMajor(), empty, ctx);
+  ASSERT_EQ(cands.size(), 1u);
+  EXPECT_EQ(cands.front().pitch, 67u)
+      << "G4 (67) is a weak-beat upper-pair 4th and must be admitted; got "
+      << static_cast<int>(cands.front().pitch);
+}
+
 // Without placed_notes the strong-beat consonance gate is skipped.
 TEST(CandidateSearchTest, NoPlacedNotesSkipsVerticalConsonance) {
   CandidateContext ctx;
@@ -543,6 +640,11 @@ TEST(CandidateSearchTest, VerticalRuleSeesAllPlacedVoicesUnsorted) {
   ctx.voice_center = 64;
   ctx.prev_pitch = 0;
   ctx.placed_notes = &placed;
+  // Three voices in play (V0, V1, V2); the compose voice V2 is the bottom of
+  // the texture, so its pair with V1 is the excluded bottom-of-texture pair
+  // and the C4-against-F4 perfect 4th below is not subject to the upper-pair
+  // strong-beat 4th rule.
+  ctx.num_voices = 3;
 
   Material empty;
   Span span = makeComposeSpan(0, kTicksPerBeat, 2);

@@ -1,7 +1,7 @@
 // Texture / instrument / expression integration tests.
 //
 // Exercises the Composer's texture-expression post-pass end to end via the
-// Phase13 harness fixture: every emitted note must carry the four
+// FugueTextured harness fixture: every emitted note must carry the four
 // texture-expression provenance bits, the Affekt velocity curve must produce a
 // non-flat
 // dynamic arch, and voice density must vary over time (the lowest voice
@@ -34,7 +34,7 @@ ComposeResult runPhase(HarnessPhase phase, int seed) {
 }  // namespace
 
 TEST(TextureExpressionTest, EveryNoteCarriesAllFourP13Bits) {
-  const ComposeResult r = runPhase(HarnessPhase::Phase13, /*seed=*/0);
+  const ComposeResult r = runPhase(HarnessPhase::FugueTextured, /*seed=*/0);
   ASSERT_FALSE(r.provenance.empty());
   for (const auto& p : r.provenance) {
     EXPECT_TRUE(hasBit(p, RuleBit::VoiceRangeKept));
@@ -45,7 +45,7 @@ TEST(TextureExpressionTest, EveryNoteCarriesAllFourP13Bits) {
 }
 
 TEST(TextureExpressionTest, AffektCurveProducesNonFlatVelocity) {
-  const ComposeResult r = runPhase(HarnessPhase::Phase13, /*seed=*/0);
+  const ComposeResult r = runPhase(HarnessPhase::FugueTextured, /*seed=*/0);
   ASSERT_FALSE(r.notes.empty());
   std::set<std::uint8_t> velocities;
   for (const auto& n : r.notes) {
@@ -59,7 +59,7 @@ TEST(TextureExpressionTest, AffektCurveProducesNonFlatVelocity) {
 }
 
 TEST(TextureExpressionTest, VoiceDensityVariesOverTime) {
-  const ComposeResult r = runPhase(HarnessPhase::Phase13, /*seed=*/0);
+  const ComposeResult r = runPhase(HarnessPhase::FugueTextured, /*seed=*/0);
   ASSERT_FALSE(r.notes.empty());
   // V2 (the third voice) enters only at bar 8, so the first bar sounds two
   // voices and a later bar sounds three: density genuinely varies.
@@ -78,10 +78,10 @@ TEST(TextureExpressionTest, VoiceDensityVariesOverTime) {
 }
 
 TEST(TextureExpressionTest, NoP13BitsWithoutTexturePlan) {
-  // Phase7 shares Phase13's exposition layout but declares no TexturePlan,
+  // FugueHarmonized shares FugueTextured's exposition layout but declares no TexturePlan,
   // so the post-pass is a no-op: none of the four texture-expression bits
   // appear, and the velocity stays at the renderer default.
-  const ComposeResult r = runPhase(HarnessPhase::Phase7, /*seed=*/0);
+  const ComposeResult r = runPhase(HarnessPhase::FugueHarmonized, /*seed=*/0);
   ASSERT_FALSE(r.provenance.empty());
   for (const auto& p : r.provenance) {
     EXPECT_FALSE(hasBit(p, RuleBit::VoiceRangeKept));
@@ -94,10 +94,10 @@ TEST(TextureExpressionTest, NoP13BitsWithoutTexturePlan) {
   }
 }
 
-TEST(TextureExpressionTest, ValidatorAcceptsPhase13Output) {
+TEST(TextureExpressionTest, ValidatorAcceptsFugueTexturedOutput) {
   // Generous declared ranges bound every candidate pitch, so
   // voice_range_integrity must not fire on a valid seed.
-  const ComposeResult r = runPhase(HarnessPhase::Phase13, /*seed=*/1);
+  const ComposeResult r = runPhase(HarnessPhase::FugueTextured, /*seed=*/1);
   for (const auto& f : r.validation.failures) {
     EXPECT_NE(f.rule_id, "voice_range_integrity");
     EXPECT_NE(f.rule_id, "pedal_range_soft_penalty");

@@ -14,7 +14,7 @@
 //   figure tiled 5x, stamping GroundBassReplayed).
 //
 // These tests cover the integration end:
-//   1. buildHarnessFixture(Phase23, seed) -> Composer::run validates Ok for every
+//   1. buildHarnessFixture(KeyboardSuite, seed) -> Composer::run validates Ok for every
 //      seed family (seed % 4 selects the scalar-wave start offset).
 //   2. The three reused RuleBits (FigurationCommitted=52, FantasiaSectionContrast
 //      =63, GroundBassReplayed=49) all appear across the provenance.
@@ -50,7 +50,7 @@ constexpr RuleIdMask bit(RuleBit b) {
 
 }  // namespace
 
-// --- Phase23 fixture integration -------------------------------------------
+// --- KeyboardSuite fixture integration -------------------------------------------
 
 // The keyboard-suite fixture must run through the full Composer cleanly for
 // every seed family (seed % 4 selects the scalar-wave start offset):
@@ -58,9 +58,9 @@ constexpr RuleIdMask bit(RuleBit b) {
 // movements present (96 FigurationCarrier + 104 FantasiaCarrier dance notes),
 // and the ground bass replaying 20 notes. The reused section_contrast_required
 // and ground_bass_immutable rules must stay silent.
-TEST(SuiteTest, Phase23FixtureValidatesCleanAndStampsReusedBits) {
+TEST(SuiteTest, KeyboardSuiteFixtureValidatesCleanAndStampsReusedBits) {
   for (int seed : {0, 1, 2, 3}) {
-    const HarnessFixture fx = buildHarnessFixture(HarnessPhase::Phase23, seed);
+    const HarnessFixture fx = buildHarnessFixture(HarnessPhase::KeyboardSuite, seed);
     const ComposeResult r = Composer{}.run(fx.material, fx.harmony, fx.voice_plan);
 
     EXPECT_TRUE(r.validation.failures.empty())
@@ -142,8 +142,8 @@ TEST(SuiteTest, Phase23FixtureValidatesCleanAndStampsReusedBits) {
 // The fixture declares exactly five V0 movement carriers (2 figuration + 3
 // fantasia) plus one V1 ground carrier, and the ground material tiles its 4-bar
 // period 5x to fill the 20-bar suite.
-TEST(SuiteTest, Phase23FixtureHasFiveMovementsAndTiledGround) {
-  const HarnessFixture fx = buildHarnessFixture(HarnessPhase::Phase23, 0);
+TEST(SuiteTest, KeyboardSuiteFixtureHasFiveMovementsAndTiledGround) {
+  const HarnessFixture fx = buildHarnessFixture(HarnessPhase::KeyboardSuite, 0);
 
   int figuration_sections = static_cast<int>(fx.material.figuration_sections.size());
   int fantasia_sections = static_cast<int>(fx.material.fantasia_sections.size());

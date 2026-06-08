@@ -33,18 +33,18 @@ from bachlib.common import (
     score_generated,
 )
 from bachlib.mirror import (
-    PHASE14_REQUIRED_BIT_COUNT,
-    PHASE15_REQUIRED_BITS,
-    PHASE16_REQUIRED_BITS,
-    PHASE17_REQUIRED_BITS,
-    PHASE18_REQUIRED_BITS,
-    PHASE19_REQUIRED_BITS,
-    PHASE20_REQUIRED_BITS,
-    PHASE21_REQUIRED_BITS,
-    PHASE22_REQUIRED_BITS,
-    PHASE23_REQUIRED_BITS,
-    PHASE24_REQUIRED_BITS,
-    PHASE25_REQUIRED_BITS,
+    FUGUE_COMPLETE_REQUIRED_BIT_COUNT,
+    CELLO_PRELUDE_REQUIRED_BITS,
+    CHACONNE_REQUIRED_BITS,
+    ORGAN_PRELUDE_REQUIRED_BITS,
+    ORGAN_TOCCATA_REQUIRED_BITS,
+    CHORALE_PRELUDE_REQUIRED_BITS,
+    PASSACAGLIA_REQUIRED_BITS,
+    TRIO_SONATA_REQUIRED_BITS,
+    FANTASIA_REQUIRED_BITS,
+    KEYBOARD_SUITE_REQUIRED_BITS,
+    PRELUDE_AND_FUGUE_REQUIRED_BITS,
+    GOLDBERG_VARIATIONS_REQUIRED_BITS,
 )
 from bachlib.phases import (
     PHASE_DEFAULTS,
@@ -110,10 +110,10 @@ def _check_required_bits(phase: str, required_rule_bit: list[tuple[str, int]]) -
     @param required_rule_bit Parsed (name, bit) pairs supplied on the CLI.
     @return An exit code (2) to abort with, or None when the guard passes.
     """
-    if phase == "Phase14" and len(required_rule_bit) < PHASE14_REQUIRED_BIT_COUNT:
+    if phase == "FugueComplete" and len(required_rule_bit) < FUGUE_COMPLETE_REQUIRED_BIT_COUNT:
         sys.stderr.write(
-            "Phase14 closure requires all "
-            f"{PHASE14_REQUIRED_BIT_COUNT} --required-rule-bit masks "
+            "FugueComplete closure requires all "
+            f"{FUGUE_COMPLETE_REQUIRED_BIT_COUNT} --required-rule-bit masks "
             f"(got {len(required_rule_bit)}); the 47-bit milestone gate "
             "must not be bypassed. See the RuleBit catalog in this script.\n"
         )
@@ -124,109 +124,109 @@ def _check_required_bits(phase: str, required_rule_bit: list[tuple[str, int]]) -
     def missing(bits: tuple[int, ...]) -> list[int]:
         return [b for b in bits if b not in supplied]
 
-    if phase == "Phase15":
-        miss = missing(PHASE15_REQUIRED_BITS)
+    if phase == "CelloPrelude":
+        miss = missing(CELLO_PRELUDE_REQUIRED_BITS)
         if miss:
             sys.stderr.write(
-                "Phase15 closure requires --required-rule-bit masks for both "
-                f"Flow bits {list(PHASE15_REQUIRED_BITS)} "
+                "CelloPrelude closure requires --required-rule-bit masks for both "
+                f"Flow bits {list(CELLO_PRELUDE_REQUIRED_BITS)} "
                 f"(ArpeggioFlowActive=47, ImplicitVoiceTracked=48); missing {miss}.\n"
             )
             return 2
-    if phase == "Phase16":
-        miss = missing(PHASE16_REQUIRED_BITS)
+    if phase == "Chaconne":
+        miss = missing(CHACONNE_REQUIRED_BITS)
         if miss:
             sys.stderr.write(
-                "Phase16 closure requires --required-rule-bit masks for all three "
-                f"Arch bits {list(PHASE16_REQUIRED_BITS)} "
+                "Chaconne closure requires --required-rule-bit masks for all three "
+                f"Arch bits {list(CHACONNE_REQUIRED_BITS)} "
                 "(GroundBassReplayed=49, VariationRoleApplied=50, "
                 f"TextureDensityShift=51); missing {miss}.\n"
             )
             return 2
-    if phase == "Phase17":
-        miss = missing(PHASE17_REQUIRED_BITS)
+    if phase == "OrganPrelude":
+        miss = missing(ORGAN_PRELUDE_REQUIRED_BITS)
         if miss:
             sys.stderr.write(
-                "Phase17 closure requires --required-rule-bit masks for all three "
-                f"Prelude bits {list(PHASE17_REQUIRED_BITS)} "
+                "OrganPrelude closure requires --required-rule-bit masks for all three "
+                f"Prelude bits {list(ORGAN_PRELUDE_REQUIRED_BITS)} "
                 "(FigurationCommitted=52, CadenzaApplied=53, "
                 f"PedalPreparation=54); missing {miss}.\n"
             )
             return 2
-    if phase == "Phase18":
-        miss = missing(PHASE18_REQUIRED_BITS)
+    if phase == "OrganToccata":
+        miss = missing(ORGAN_TOCCATA_REQUIRED_BITS)
         if miss:
             sys.stderr.write(
-                "Phase18 closure requires --required-rule-bit masks for both "
-                f"Toccata bits {list(PHASE18_REQUIRED_BITS)} "
+                "OrganToccata closure requires --required-rule-bit masks for both "
+                f"Toccata bits {list(ORGAN_TOCCATA_REQUIRED_BITS)} "
                 "(ToccataArchetypeApplied=55, SectionTransition=56); "
                 f"missing {miss}.\n"
             )
             return 2
-    if phase == "Phase19":
-        miss = missing(PHASE19_REQUIRED_BITS)
+    if phase == "ChoralePrelude":
+        miss = missing(CHORALE_PRELUDE_REQUIRED_BITS)
         if miss:
             sys.stderr.write(
-                "Phase19 closure requires --required-rule-bit masks for both "
-                f"Chorale-Prelude bits {list(PHASE19_REQUIRED_BITS)} "
+                "ChoralePrelude closure requires --required-rule-bit masks for both "
+                f"Chorale-Prelude bits {list(CHORALE_PRELUDE_REQUIRED_BITS)} "
                 "(CantusFirmusReplayed=57, CFEmbellishmentApplied=58); "
                 f"missing {miss}.\n"
             )
             return 2
-    if phase == "Phase20":
-        miss = missing(PHASE20_REQUIRED_BITS)
+    if phase == "Passacaglia":
+        miss = missing(PASSACAGLIA_REQUIRED_BITS)
         if miss:
             sys.stderr.write(
-                "Phase20 closure requires --required-rule-bit masks for all three "
-                f"Passacaglia bits {list(PHASE20_REQUIRED_BITS)} "
+                "Passacaglia closure requires --required-rule-bit masks for all three "
+                f"Passacaglia bits {list(PASSACAGLIA_REQUIRED_BITS)} "
                 "(PassacagliaGroundReplayed=59, VariationApplied=60, "
                 f"ClimaxPlaced=61); missing {miss}.\n"
             )
             return 2
-    if phase == "Phase21":
-        miss = missing(PHASE21_REQUIRED_BITS)
+    if phase == "TrioSonata":
+        miss = missing(TRIO_SONATA_REQUIRED_BITS)
         if miss:
             sys.stderr.write(
-                "Phase21 closure requires the --required-rule-bit mask for the "
-                f"Trio bit {list(PHASE21_REQUIRED_BITS)} "
+                "TrioSonata closure requires the --required-rule-bit mask for the "
+                f"Trio bit {list(TRIO_SONATA_REQUIRED_BITS)} "
                 f"(TrioVoiceIndependent=62); missing {miss}.\n"
             )
             return 2
-    if phase == "Phase22":
-        miss = missing(PHASE22_REQUIRED_BITS)
+    if phase == "Fantasia":
+        miss = missing(FANTASIA_REQUIRED_BITS)
         if miss:
             sys.stderr.write(
-                "Phase22 closure requires the --required-rule-bit mask for the "
-                f"Fantasia bit {list(PHASE22_REQUIRED_BITS)} "
+                "Fantasia closure requires the --required-rule-bit mask for the "
+                f"Fantasia bit {list(FANTASIA_REQUIRED_BITS)} "
                 f"(FantasiaSectionContrast=63); missing {miss}.\n"
             )
             return 2
-    if phase == "Phase23":
-        miss = missing(PHASE23_REQUIRED_BITS)
+    if phase == "KeyboardSuite":
+        miss = missing(KEYBOARD_SUITE_REQUIRED_BITS)
         if miss:
             sys.stderr.write(
-                "Phase23 closure requires --required-rule-bit masks for all three "
-                f"reused suite bits {list(PHASE23_REQUIRED_BITS)} "
+                "KeyboardSuite closure requires --required-rule-bit masks for all three "
+                f"reused suite bits {list(KEYBOARD_SUITE_REQUIRED_BITS)} "
                 "(FigurationCommitted=52, FantasiaSectionContrast=63, "
                 f"GroundBassReplayed=49); missing {miss}.\n"
             )
             return 2
-    if phase == "Phase24":
-        miss = missing(PHASE24_REQUIRED_BITS)
+    if phase == "PreludeAndFugue":
+        miss = missing(PRELUDE_AND_FUGUE_REQUIRED_BITS)
         if miss:
             sys.stderr.write(
-                "Phase24 closure requires --required-rule-bit masks for both "
-                f"reused prelude bits {list(PHASE24_REQUIRED_BITS)} "
+                "PreludeAndFugue closure requires --required-rule-bit masks for both "
+                f"reused prelude bits {list(PRELUDE_AND_FUGUE_REQUIRED_BITS)} "
                 "(FigurationCommitted=52, PedalPreparation=54); "
                 f"missing {miss}.\n"
             )
             return 2
-    if phase == "Phase25":
-        miss = missing(PHASE25_REQUIRED_BITS)
+    if phase == "GoldbergVariations":
+        miss = missing(GOLDBERG_VARIATIONS_REQUIRED_BITS)
         if miss:
             sys.stderr.write(
-                "Phase25 closure requires --required-rule-bit masks for all three "
-                f"reused Passacaglia bits {list(PHASE25_REQUIRED_BITS)} "
+                "GoldbergVariations closure requires --required-rule-bit masks for all three "
+                f"reused Passacaglia bits {list(GOLDBERG_VARIATIONS_REQUIRED_BITS)} "
                 "(PassacagliaGroundReplayed=59, VariationApplied=60, "
                 f"ClimaxPlaced=61); missing {miss}.\n"
             )
@@ -236,7 +236,7 @@ def _check_required_bits(phase: str, required_rule_bit: list[tuple[str, int]]) -
 
 def _add_arguments(parser: argparse.ArgumentParser) -> None:
     """Attach the closure-harness CLI arguments to `parser`."""
-    parser.add_argument("--phase", default="Phase6", help="Phase3/Phase35/Phase4/Phase5/Phase6")
+    parser.add_argument("--phase", default="FugueExposition3v", help="FugueSubject2v/FugueSubject2vShort/FugueAnswer2v/FugueSubject3v/FugueExposition3v")
     parser.add_argument("--seeds", type=int, default=20)
     parser.add_argument("--threshold", type=float)
     parser.add_argument("--min-pass", type=int)
@@ -327,7 +327,7 @@ def run(args: argparse.Namespace) -> int:
         """
         midi, generated, provenance = output_paths(work_dir, tag, seed)
         fixture = fixture_for_seed(seed)
-        # Phase18's offset = (seed // 4) % 4 cannot be recovered from the
+        # OrganToccata's offset = (seed // 4) % 4 cannot be recovered from the
         # harm_idx / subj_idx fields alone, so expose the raw seed for the
         # toccata structural predictor (harmless for every other phase).
         fixture["seed"] = seed
@@ -448,7 +448,7 @@ def run(args: argparse.Namespace) -> int:
         "model_pass": model_pass_count,
         "structural_ok": structural_ok_count,
         # structural_ok only validates the exposition entries (+ V0 stretto
-        # leader for Phase14); counterline / development / NCT / rhythm carriers
+        # leader for FugueComplete); counterline / development / NCT / rhythm carriers
         # are not modeled, so this scope is recorded explicitly.
         "structural_ok_scope": "exposition-entries-and-stretto-leader-only",
         # Number of seeds whose scorer crashed / returned non-JSON. Any

@@ -94,6 +94,7 @@ make demo   # http://localhost:8080/demo/
 | `--seed N` | Random seed (0 = random) | `0` |
 | `--json` | Output JSON event data | - |
 | `--generated-json` | Output generated.v1 + provenance.v1 JSON | - |
+| `--free-counterpoint` | Experimental: generate the inner voice via scored search (off by default) | - |
 | `-o FILE` | Output path | `output.mid` |
 
 ## Build

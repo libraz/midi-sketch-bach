@@ -12,7 +12,7 @@
 //      silent when every downbeat is a chord tone, exempts a PedalPreparation
 //      note that sits off the chord, and stays inert when no figuration note
 //      exists.
-//   3. The Phase17 fixture runs through the full Composer cleanly for every
+//   3. The OrganPrelude fixture runs through the full Composer cleanly for every
 //      seed family (seed % 4 selects the scalar-wave start offset) and stamps
 //      all three Prelude bits in provenance.
 
@@ -252,15 +252,15 @@ TEST(OrganPreludeTest, FigurationHarmonicConsistencyInertWhenNoFiguration) {
   EXPECT_FALSE(hasRule(r, "figuration_harmonic_consistency"));
 }
 
-// --- 3. Phase17 fixture integration ----------------------------------------
+// --- 3. OrganPrelude fixture integration ----------------------------------------
 
 // The BWV846 organ-prelude fixture must run through the full Composer cleanly
 // for every seed family (seed % 4 selects the scalar-wave start offset): no
 // validator failure, two voices, and all three Prelude bits present somewhere
 // in the provenance.
-TEST(OrganPreludeTest, Phase17FixtureValidatesCleanAndStampsAllPreludeBits) {
+TEST(OrganPreludeTest, OrganPreludeFixtureValidatesCleanAndStampsAllPreludeBits) {
   for (int seed : {0, 1, 2, 3, 4, 5}) {
-    const HarnessFixture fx = buildHarnessFixture(HarnessPhase::Phase17, seed);
+    const HarnessFixture fx = buildHarnessFixture(HarnessPhase::OrganPrelude, seed);
     const ComposeResult r = Composer{}.run(fx.material, fx.harmony, fx.voice_plan);
 
     EXPECT_TRUE(r.validation.failures.empty())

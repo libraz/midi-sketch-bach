@@ -22,7 +22,7 @@ int minorScaleUp(int midi, int steps, bool harmonic_context) {
   for (int step = 0; step < steps; ++step) {
     for (int add = 1; add <= 12; ++add) {
       const bool member =
-          harmonic_context ? melodicMinorAscInScale(cur + add) : phase16InScale(cur + add);
+          harmonic_context ? melodicMinorAscInScale(cur + add) : chaconneInScale(cur + add);
       if (member) {
         cur += add;
         break;

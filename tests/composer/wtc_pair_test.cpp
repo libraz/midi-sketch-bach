@@ -19,7 +19,7 @@
 //   intent + bar windows, not by a bit.
 //
 // These tests cover the integration end:
-//   1. buildHarnessFixture(Phase24, seed) -> Composer::run validates Ok for every
+//   1. buildHarnessFixture(PreludeAndFugue, seed) -> Composer::run validates Ok for every
 //      seed family (seed % 4 selects the prelude scalar offset; seed/4 % 5 the
 //      subject slot).
 //   2. The two reused prelude RuleBits (FigurationCommitted=52, PedalPreparation
@@ -57,16 +57,16 @@ constexpr Tick kBar = static_cast<Tick>(1920);
 
 }  // namespace
 
-// --- Phase24 fixture integration -------------------------------------------
+// --- PreludeAndFugue fixture integration -------------------------------------------
 
 // The WTC-pair fixture must run through the full Composer cleanly for every
 // seed family: no validator failure, three voices, both reused prelude
 // RuleBits stamped, and the fugue carriers present. PedalPreparation (54) must
 // fire ONLY on the pedal-prep section (bars 4-7), never on the plain figuration
 // or the fugue.
-TEST(WtcPairTest, Phase24FixtureValidatesCleanAndStampsReusedBits) {
+TEST(WtcPairTest, PreludeAndFugueFixtureValidatesCleanAndStampsReusedBits) {
   for (int seed : {0, 1, 2, 3}) {
-    const HarnessFixture fx = buildHarnessFixture(HarnessPhase::Phase24, seed);
+    const HarnessFixture fx = buildHarnessFixture(HarnessPhase::PreludeAndFugue, seed);
     const ComposeResult r = Composer{}.run(fx.material, fx.harmony, fx.voice_plan);
 
     EXPECT_TRUE(r.validation.failures.empty())
@@ -147,8 +147,8 @@ TEST(WtcPairTest, Phase24FixtureValidatesCleanAndStampsReusedBits) {
 // The fixture declares exactly three prelude FigurationCarrier spans (V0 x2 + V1)
 // and four fugue spans with the correct intents in the correct bar windows. The
 // fugue half is asserted structurally here (no identity bit).
-TEST(WtcPairTest, Phase24FixtureHasPreludeAndFugueSpans) {
-  const HarnessFixture fx = buildHarnessFixture(HarnessPhase::Phase24, 0);
+TEST(WtcPairTest, PreludeAndFugueFixtureHasPreludeAndFugueSpans) {
+  const HarnessFixture fx = buildHarnessFixture(HarnessPhase::PreludeAndFugue, 0);
 
   // Three prelude figuration sections: V0 bars 0-3, V0 bars 4-7, V1 bars 0-7.
   EXPECT_EQ(fx.material.figuration_sections.size(), 3u)
@@ -201,8 +201,8 @@ TEST(WtcPairTest, Phase24FixtureHasPreludeAndFugueSpans) {
 
 // The fugue material reuses the proven scalar subject content: the answer is the
 // subject transposed down a perfect fourth, and the re-entry down an octave.
-TEST(WtcPairTest, Phase24FugueUsesScalarSubjectTranspositions) {
-  const HarnessFixture fx = buildHarnessFixture(HarnessPhase::Phase24, 0);
+TEST(WtcPairTest, PreludeAndFugueFugueUsesScalarSubjectTranspositions) {
+  const HarnessFixture fx = buildHarnessFixture(HarnessPhase::PreludeAndFugue, 0);
 
   // Subject material holds the V0 subject (16) + V2 re-entry (16) + V0 leader (16)
   // = 48 notes; the answer material holds 16.

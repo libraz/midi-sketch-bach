@@ -18,19 +18,19 @@ namespace bach::composer {
 namespace {
 
 // Shared figuration catalogs and scale helpers. The catalogs
-// (kSubjectPatterns, kPhase14Subjects, kHarmonyPatterns, ChordSpec) and the
-// scale walkers (phase16/phase17 InScale/ScaleUp) plus pushCounterlineBar now
+// (kSubjectPatterns, kFugueCompleteSubjects, kHarmonyPatterns, ChordSpec) and the
+// scale walkers (chaconne/organPrelude InScale/ScaleUp) plus pushCounterlineBar now
 // live in composer/figuration.h so they can be reused without disturbing the
 // byte-identical fixture layouts below.
 using namespace bach::composer::detail;  // NOLINT(build/namespaces): bring the
                                          // shared figuration helpers into the
                                          // fixture builders unqualified.
 
-// Build the Phase14 fixture: a single self-contained 42-bar, 3-voice
+// Build the FugueComplete fixture: a single self-contained 42-bar, 3-voice
 // all-technique fugue (C major). Every contrapuntal device is exercised in one
 // continuous layout. The builder is deliberately self-contained (it does
 // NOT share the generic fugue assembly cascade) so the other layouts stay
-// byte-identical and Phase14's intricate, hand-tuned register layout cannot
+// byte-identical and FugueComplete's intricate, hand-tuned register layout cannot
 // regress them.
 //
 // Register invariant V0 >= V1 >= V2 holds at every shared tick. Each device
@@ -40,7 +40,7 @@ using namespace bach::composer::detail;  // NOLINT(build/namespaces): bring the
 // Seed derivation matches the generic path: subj_a = (seed/4)%5,
 // harm_a = seed%4, eighth = (seed%2)==1 (used only for the two Compose
 // counterline windows).
-HarnessFixture buildPhase14Fixture(int seed) {
+HarnessFixture buildFugueCompleteFixture(int seed) {
   HarnessFixture out;
 
   constexpr int kBars = 42;
@@ -66,7 +66,7 @@ HarnessFixture buildPhase14Fixture(int seed) {
     dst.push_back(mn);
   };
 
-  const auto& subj_pat = kPhase14Subjects[subj_a];
+  const auto& subj_pat = kFugueCompleteSubjects[subj_a];
 
   // --- Material: V0 subject (bars 0-3). ---
   for (int n = 0; n < 16; ++n) {
@@ -554,7 +554,7 @@ HarnessFixture buildPhase14Fixture(int seed) {
     out.material.rhythm_fragments.push_back(recur);
 
     // --- Texture / expression plan. Generous per-voice ranges that
-    // bound every Phase14 pitch; organ-manual routing for all 3 voices; a
+    // bound every FugueComplete pitch; organ-manual routing for all 3 voices; a
     // per-voice articulation span; an Affekt velocity curve. No pedal voice
     // (pedal_range_soft_penalty stays inert). ---
     TexturePlan& tp = out.material.texture_plan;
@@ -666,7 +666,7 @@ HarnessFixture buildPhase14Fixture(int seed) {
   return out;
 }
 
-// Build the Phase15 fixture: a single-voice BWV1007-style broken-chord
+// Build the CelloPrelude fixture: a single-voice BWV1007-style broken-chord
 // arpeggio over 8 bars in C major. The line projects two implicit voices the
 // Validator checks (per-cell min = bass stream, max = top stream):
 //
@@ -681,7 +681,7 @@ HarnessFixture buildPhase14Fixture(int seed) {
 // (bass / mid / top) re-ordered by a seed-selected figure, so the min/max
 // streams move only at bar boundaries — where the progression and top line
 // were chosen to satisfy both Flow rules for every seed.
-HarnessFixture buildPhase15Fixture(int seed) {
+HarnessFixture buildCelloPreludeFixture(int seed) {
   HarnessFixture out;
 
   constexpr int kBars = 8;
@@ -767,7 +767,7 @@ HarnessFixture buildPhase15Fixture(int seed) {
   return out;
 }
 
-// Build the Phase16 fixture: a BWV1004-style chaconne arch over 16 bars in C
+// Build the Chaconne fixture: a BWV1004-style chaconne arch over 16 bars in C
 // minor (internal; transposition happens only at MIDI output). The piece is a
 // repeating 4-bar ground bass with four variation blocks of rising texture
 // density layered above it:
@@ -788,12 +788,12 @@ HarnessFixture buildPhase15Fixture(int seed) {
 // cost), which the reference-corpus scorer rewards; all four seed offsets clear
 // the gate-3 threshold (model_prob ~0.88-0.90). The structural predictor in
 // scripts/bachlib/predictors.py mirrors this construction byte-for-byte
-// (mirror.py PHASE16_VAR_T0 + the C-minor scale walk), keeping structural_ok
+// (mirror.py CHACONNE_VAR_T0 + the C-minor scale walk), keeping structural_ok
 // deterministic per seed.
 //
 // @param seed Closure seed; selects the scalar-wave start offset (seed % 4).
-// @return The (Material, HarmonicPlan, VoicePlan) triple for Phase16.
-HarnessFixture buildPhase16Fixture(int seed) {
+// @return The (Material, HarmonicPlan, VoicePlan) triple for Chaconne.
+HarnessFixture buildChaconneFixture(int seed) {
   HarnessFixture out;
 
   constexpr int kBars = 16;
@@ -880,11 +880,11 @@ HarnessFixture buildPhase16Fixture(int seed) {
       // an ascending run of (m/2 + 1) scale degrees from the seed-offset start,
       // mirrored back down (dropping the duplicated peak), then tiled to m.
       const int m = 4 * spec.notes_per_beat;
-      const int start = phase16ScaleUp(kVarT0[bar], offset);
+      const int start = chaconneScaleUp(kVarT0[bar], offset);
       std::vector<int> wave;
       wave.reserve(static_cast<std::size_t>(m) + 2);
       for (int i = 0; i <= m / 2; ++i)
-        wave.push_back(phase16ScaleUp(start, i));
+        wave.push_back(chaconneScaleUp(start, i));
       for (int i = static_cast<int>(wave.size()) - 2; i >= 0; --i)
         wave.push_back(wave[static_cast<std::size_t>(i)]);
       for (int beat = 0; beat < 4; ++beat) {
@@ -929,7 +929,7 @@ HarnessFixture buildPhase16Fixture(int seed) {
   return out;
 }
 
-// Build the Phase17 fixture: a BWV846-style free-form organ prelude over 16
+// Build the OrganPrelude fixture: a BWV846-style free-form organ prelude over 16
 // bars in C major (internal; transposition happens only at MIDI output). The
 // prelude is sectional rather than fugal: a continuous stream of fast
 // broken-chord figuration on V0 outlines a diatonic progression, a freer
@@ -960,11 +960,11 @@ HarnessFixture buildPhase16Fixture(int seed) {
 // the root in the C4 octave shifted up `offset = seed % 4` scale degrees and
 // then snapped up to the nearest chord tone, so the downbeat stays anchored for
 // every seed. The structural predictor mirrors this scale walk exactly
-// (PHASE17_BAR_ROOT / PHASE17_BAR_MINOR + the C-major phase17 scale walk).
+// (ORGAN_PRELUDE_BAR_ROOT / ORGAN_PRELUDE_BAR_MINOR + the C-major organPrelude scale walk).
 //
 // @param seed Closure seed; selects the scalar-wave start-degree offset (seed % 4).
-// @return The (Material, HarmonicPlan, VoicePlan) triple for Phase17.
-HarnessFixture buildPhase17Fixture(int seed) {
+// @return The (Material, HarmonicPlan, VoicePlan) triple for OrganPrelude.
+HarnessFixture buildOrganPreludeFixture(int seed) {
   HarnessFixture out;
 
   constexpr int kBars = 16;
@@ -1003,21 +1003,21 @@ HarnessFixture buildPhase17Fixture(int seed) {
   // scorer rewards (a BWV846/toccata-style running figuration). The seed offset
   // shifts the start degree up the scale before snapping back to a chord tone,
   // varying the line per seed without disturbing the downbeat anchor. The Python
-  // structural predictor mirrors this construction (phase17 scale walk) exactly.
+  // structural predictor mirrors this construction (organPrelude scale walk) exactly.
   auto appendFigurationBar = [&](FigurationSection& section, int bar) {
     const int root_pc = kBarRoot[bar];
     const int third = kBarMinor[bar] ? 3 : 4;
     const int triad_pc[3] = {root_pc % 12, (root_pc + third) % 12, (root_pc + 7) % 12};
     // Start at the bar's root in the C4 octave, shift up `offset` scale degrees,
     // then snap up to the nearest chord tone so the downbeat is anchored.
-    int start = phase17ScaleUp(60 + root_pc, offset);
+    int start = organPreludeScaleUp(60 + root_pc, offset);
     while (start % 12 != triad_pc[0] && start % 12 != triad_pc[1] && start % 12 != triad_pc[2])
       ++start;
     constexpr int m = 16;
     std::vector<int> wave;
     wave.reserve(m + 2);
     for (int i = 0; i <= m / 2; ++i)
-      wave.push_back(phase17ScaleUp(start, i));
+      wave.push_back(organPreludeScaleUp(start, i));
     for (int i = static_cast<int>(wave.size()) - 2; i >= 0; --i)
       wave.push_back(wave[static_cast<std::size_t>(i)]);
     for (int n = 0; n < m; ++n) {
@@ -1124,7 +1124,7 @@ HarnessFixture buildPhase17Fixture(int seed) {
   return out;
 }
 
-// Build the Phase18 fixture: an organ toccata over 16 bars in C major (internal;
+// Build the OrganToccata fixture: an organ toccata over 16 bars in C major (internal;
 // transposition happens only at MIDI output). A toccata is a virtuosic, mostly
 // monophonic manual line, so the fixture is a SINGLE voice (V0) of continuous
 // fast scalar-wave figuration. The four Bach toccata archetypes differ only in
@@ -1153,18 +1153,18 @@ HarnessFixture buildPhase17Fixture(int seed) {
 // stay chord tones): a diatonic C-major I/IV/V/vi per-bar progression; each bar
 // opens on a chord tone and runs scalewise up the C-major scale and back down
 // (an ascending run of (16/2 + 1) = 9 scale degrees mirrored, dropping the peak
-// duplicate, tiled to 16 sixteenths) via the shared phase17ScaleUp helper. The
+// duplicate, tiled to 16 sixteenths) via the shared organPreludeScaleUp helper. The
 // bar's start pitch is the root in the C4 octave shifted up
 // `offset = (seed / 4) % 4` scale degrees and then snapped up to the nearest
 // chord tone, so both the archetype (seed % 4) and the figuration line
 // (offset = (seed / 4) % 4) vary independently across the 20 closure seeds. The
 // structural predictor mirrors this construction (I/IV/V/vi progression +
-// the C-major phase17 scale walk + archetype/offset scheme) exactly.
+// the C-major organPrelude scale walk + archetype/offset scheme) exactly.
 //
 // @param seed Closure seed; archetype = seed % 4, scalar-wave start-degree
 //             offset = (seed / 4) % 4.
-// @return The (Material, HarmonicPlan, VoicePlan) triple for Phase18.
-HarnessFixture buildPhase18Fixture(int seed) {
+// @return The (Material, HarmonicPlan, VoicePlan) triple for OrganToccata.
+HarnessFixture buildOrganToccataFixture(int seed) {
   HarnessFixture out;
 
   constexpr int kBars = 16;
@@ -1202,14 +1202,14 @@ HarnessFixture buildPhase18Fixture(int seed) {
     const int root_pc = kBarRoot[cyc];
     const int third = kBarMinor[cyc] ? 3 : 4;
     const int triad_pc[3] = {root_pc % 12, (root_pc + third) % 12, (root_pc + 7) % 12};
-    int start = phase17ScaleUp(60 + root_pc, offset);
+    int start = organPreludeScaleUp(60 + root_pc, offset);
     while (start % 12 != triad_pc[0] && start % 12 != triad_pc[1] && start % 12 != triad_pc[2])
       ++start;
     constexpr int m = 16;
     std::vector<int> wave;
     wave.reserve(m + 2);
     for (int i = 0; i <= m / 2; ++i)
-      wave.push_back(phase17ScaleUp(start, i));
+      wave.push_back(organPreludeScaleUp(start, i));
     for (int i = static_cast<int>(wave.size()) - 2; i >= 0; --i)
       wave.push_back(wave[static_cast<std::size_t>(i)]);
     for (int n = 0; n < m; ++n) {
@@ -1280,7 +1280,7 @@ HarnessFixture buildPhase18Fixture(int seed) {
   return out;
 }
 
-// Build the Phase19 fixture: a chorale-prelude-style organ piece over 16 bars in
+// Build the ChoralePrelude fixture: a chorale-prelude-style organ piece over 16 bars in
 // C major (internal; transposition happens only at MIDI output). A chorale
 // prelude states a fixed chorale tune (the cantus firmus) one structural tone per
 // bar against a faster contrapuntal voice. This fixture has two voices:
@@ -1293,7 +1293,7 @@ HarnessFixture buildPhase18Fixture(int seed) {
 //     the Validator's cantus_firmus_immutable rule checks the
 //     bar-downbeat replayed tones against the skeleton.
 //   - V0 FigurationCarrier: a predominantly-stepwise C-major scalar wave (the
-//     same construction via phase17ScaleUp) riding ABOVE the cantus firmus.
+//     same construction via organPreludeScaleUp) riding ABOVE the cantus firmus.
 //     This is the gate-3-clearing figuration (model_prob ~0.92 vs ~0.70 for a
 //     wide-leap arpeggiation).
 //
@@ -1315,15 +1315,15 @@ HarnessFixture buildPhase18Fixture(int seed) {
 //   chord I  V  C  F  C  V  I  V  I  V  C  F  V  V  V  I   (root pc / quality)
 // where the CF tone is the root/third/fifth of each bar's chord (see kBarRoot /
 // kBarMinor below). The V0 figuration is anchored to a chord tone at each bar
-// downbeat (phase17 scale walk), as in the organ-prelude figuration.
+// downbeat (organPrelude scale walk), as in the organ-prelude figuration.
 //
 // The structural predictor mirrors this construction byte-for-byte
-// (PHASE19_CF_SKELETON + the embellishment walk + PHASE19_BAR_ROOT/MINOR + the
-// C-major phase17 scale walk + offset = seed % 4).
+// (CHORALE_PRELUDE_CF_SKELETON + the embellishment walk + CHORALE_PRELUDE_BAR_ROOT/MINOR + the
+// C-major organPrelude scale walk + offset = seed % 4).
 //
 // @param seed Closure seed; selects the V0 scalar-wave start-degree offset (seed % 4).
-// @return The (Material, HarmonicPlan, VoicePlan) triple for Phase19.
-HarnessFixture buildPhase19Fixture(int seed) {
+// @return The (Material, HarmonicPlan, VoicePlan) triple for ChoralePrelude.
+HarnessFixture buildChoralePreludeFixture(int seed) {
   HarnessFixture out;
 
   constexpr int kBars = 16;
@@ -1375,9 +1375,9 @@ HarnessFixture buildPhase19Fixture(int seed) {
   // ALWAYS equals the skeleton, so cantus_firmus_immutable passes.
   auto stepToward = [](int from, int to) -> int {
     if (to > from)
-      return from + (phase17InScale(from + 1) ? 1 : 2);
+      return from + (organPreludeInScale(from + 1) ? 1 : 2);
     if (to < from)
-      return from - (phase17InScale(from - 1) ? 1 : 2);
+      return from - (organPreludeInScale(from - 1) ? 1 : 2);
     return from;
   };
   for (int bar = 0; bar < kBars; ++bar) {
@@ -1407,7 +1407,7 @@ HarnessFixture buildPhase19Fixture(int seed) {
   out.material.cf_is_embellished = true;
   out.material.cf_placement = 1;  // Tenor (documentary).
 
-  // V0 figuration: the same phase17ScaleUp scalar-wave construction. Each
+  // V0 figuration: the same organPreludeScaleUp scalar-wave construction. Each
   // bar opens on a chord tone, runs scalewise up the C-major scale and back down
   // (an ascending run of (16/2 + 1) = 9 degrees mirrored, tiled to 16
   // sixteenths). The start pitch is the bar's root in the C4 octave shifted up
@@ -1419,14 +1419,14 @@ HarnessFixture buildPhase19Fixture(int seed) {
     const int root_pc = kBarRoot[bar];
     const int third = kBarMinor[bar] ? 3 : 4;
     const int triad_pc[3] = {root_pc % 12, (root_pc + third) % 12, (root_pc + 7) % 12};
-    int start = phase17ScaleUp(60 + root_pc, offset);
+    int start = organPreludeScaleUp(60 + root_pc, offset);
     while (start % 12 != triad_pc[0] && start % 12 != triad_pc[1] && start % 12 != triad_pc[2])
       ++start;
     constexpr int m = 16;
     std::vector<int> wave;
     wave.reserve(m + 2);
     for (int i = 0; i <= m / 2; ++i)
-      wave.push_back(phase17ScaleUp(start, i));
+      wave.push_back(organPreludeScaleUp(start, i));
     for (int i = static_cast<int>(wave.size()) - 2; i >= 0; --i)
       wave.push_back(wave[static_cast<std::size_t>(i)]);
     for (int n = 0; n < m; ++n) {
@@ -1472,11 +1472,11 @@ HarnessFixture buildPhase19Fixture(int seed) {
   return out;
 }
 
-// Build the Phase20 fixture: a BWV582-style organ passacaglia over 24 bars in C
+// Build the Passacaglia fixture: a BWV582-style organ passacaglia over 24 bars in C
 // minor (internal; transposition happens only at MIDI output). The piece is an
 // immutable 8-bar ground bass repeated three times (3 cycles) with one
 // rising-density variation block layered above each cycle; the last cycle is the
-// registral / dynamic climax. Structurally this mirrors the Phase16
+// registral / dynamic climax. Structurally this mirrors the Chaconne
 // chaconne arch with an 8-bar period (not 4) and a climax marker (not a
 // per-variation VariationRole).
 //
@@ -1491,7 +1491,7 @@ HarnessFixture buildPhase19Fixture(int seed) {
 //
 // The ground stays byte-identical every cycle (passacaglia_ground_immutable).
 // Each variation bar is a stepwise scalar wave (ascending then descending)
-// through C natural minor, reusing phase16ScaleUp — C-minor scalar waves score
+// through C natural minor, reusing chaconneScaleUp — C-minor scalar waves score
 // 0.88-0.90, comfortably above this fixture's gate-3 threshold of
 // 0.80. The wave starts `offset = seed % 4` scale degrees above the bar's lowest
 // variation tone (kVarT0 below, in the C4-C5 region, well ABOVE the C2-C3
@@ -1511,8 +1511,8 @@ HarnessFixture buildPhase19Fixture(int seed) {
 // construction byte-for-byte, keeping structural_ok deterministic per seed.
 //
 // @param seed Closure seed; selects the scalar-wave start offset (seed % 4).
-// @return The (Material, HarmonicPlan, VoicePlan) triple for Phase20.
-HarnessFixture buildPhase20Fixture(int seed) {
+// @return The (Material, HarmonicPlan, VoicePlan) triple for Passacaglia.
+HarnessFixture buildPassacagliaFixture(int seed) {
   HarnessFixture out;
 
   constexpr int kCycleBars = 8;
@@ -1587,11 +1587,11 @@ HarnessFixture buildPhase20Fixture(int seed) {
       // an ascending run of (m/2 + 1) scale degrees from the seed-offset start,
       // mirrored back down (dropping the duplicated peak), then tiled to m.
       const int m = 4 * spec.notes_per_beat;
-      const int start = phase16ScaleUp(kVarT0[bar], offset);
+      const int start = chaconneScaleUp(kVarT0[bar], offset);
       std::vector<int> wave;
       wave.reserve(static_cast<std::size_t>(m) + 2);
       for (int i = 0; i <= m / 2; ++i)
-        wave.push_back(phase16ScaleUp(start, i));
+        wave.push_back(chaconneScaleUp(start, i));
       for (int i = static_cast<int>(wave.size()) - 2; i >= 0; --i)
         wave.push_back(wave[static_cast<std::size_t>(i)]);
       for (int beat = 0; beat < 4; ++beat) {
@@ -1638,7 +1638,7 @@ HarnessFixture buildPhase20Fixture(int seed) {
   return out;
 }
 
-// Build the Phase21 fixture: an organ trio sonata over 16 bars in C major
+// Build the TrioSonata fixture: an organ trio sonata over 16 bars in C major
 // (internal; transposition happens only at MIDI output). A trio sonata's
 // defining technique is THREE INDEPENDENT voices, idiomatically RH (Great), LH
 // (Swell), and Pedal. This fixture realizes all three as TrioVoiceCarrier
@@ -1647,7 +1647,7 @@ HarnessFixture buildPhase20Fixture(int seed) {
 //   - V0 (RH / Great, high register ~72-84): the busiest line, a continuous
 //     sixteenth-note (4 notes/beat) C-major scalar wave (the gate-3-clearing,
 //     predominantly-stepwise motion the reference-corpus scorer rewards via the
-//     shared phase17ScaleUp helper).
+//     shared organPreludeScaleUp helper).
 //   - V1 (LH / Swell, mid register ~60-71): an eighth-note (2 notes/beat) scalar
 //     wave, a fourth above its bar root, moving at half V0's density.
 //   - V2 (Pedal, low register ~40-55): a quarter-note (1 note/beat) line stepping
@@ -1675,8 +1675,8 @@ HarnessFixture buildPhase20Fixture(int seed) {
 // consonant-vertical design clears 0.80 with margin on every seed.
 //
 // @param seed Closure seed; selects the V0/V1 scalar-wave start offset (seed % 4).
-// @return The (Material, HarmonicPlan, VoicePlan) triple for Phase21.
-HarnessFixture buildPhase21Fixture(int seed) {
+// @return The (Material, HarmonicPlan, VoicePlan) triple for TrioSonata.
+HarnessFixture buildTrioSonataFixture(int seed) {
   HarnessFixture out;
 
   constexpr int kBars = 16;
@@ -1714,14 +1714,14 @@ HarnessFixture buildPhase21Fixture(int seed) {
     const int root_pc = kBarRoot[cyc];
     const int third = kBarMinor[cyc] ? 3 : 4;
     const int triad_pc[3] = {root_pc % 12, (root_pc + third) % 12, (root_pc + 7) % 12};
-    int start = phase17ScaleUp(base_midi, offset);
+    int start = organPreludeScaleUp(base_midi, offset);
     while (start % 12 != triad_pc[0] && start % 12 != triad_pc[1] && start % 12 != triad_pc[2])
       ++start;
     const int m = 4 * notes_per_beat;
     std::vector<int> wave;
     wave.reserve(static_cast<std::size_t>(m) + 2);
     for (int i = 0; i <= m / 2; ++i)
-      wave.push_back(phase17ScaleUp(start, i));
+      wave.push_back(organPreludeScaleUp(start, i));
     for (int i = static_cast<int>(wave.size()) - 2; i >= 0; --i)
       wave.push_back(wave[static_cast<std::size_t>(i)]);
     const Tick step = (notes_per_beat == 4) ? kSixteenth : kEighth;
@@ -1795,7 +1795,7 @@ HarnessFixture buildPhase21Fixture(int seed) {
   return out;
 }
 
-// Build the Phase22 fixture: an organ fantasia over 16 bars in C major (internal;
+// Build the Fantasia fixture: an organ fantasia over 16 bars in C major (internal;
 // transposition happens only at MIDI output). A fantasia is a FREE SECTIONAL,
 // multi-style form: a single voice organized into CONTRASTING sections. This
 // fixture realizes FOUR 4-bar sections, each a FantasiaCarrier Material line:
@@ -1823,7 +1823,7 @@ HarnessFixture buildPhase21Fixture(int seed) {
 // gate-3 (melodic_interval nll) design: contrast is achieved via density +
 // register + octave, NOT via wide leaps. Within EVERY section the melodic content
 // is a predominantly-stepwise C-major scalar wave (the gate-3-clearing
-// construction shared via phase17ScaleUp): each bar opens on a
+// construction shared via organPreludeScaleUp): each bar opens on a
 // chord tone and runs scalewise up the C-major scale and back down, tiled to the
 // section's notes-per-bar. So melodic_interval nll stays low across all four
 // sections. The per-bar roots follow a diatonic C-major I/IV/V/vi cycle; the seed
@@ -1835,8 +1835,8 @@ HarnessFixture buildPhase21Fixture(int seed) {
 // clears 0.78 with margin on every seed.
 //
 // @param seed Closure seed; selects the scalar-wave start-degree offset (seed % 4).
-// @return The (Material, HarmonicPlan, VoicePlan) triple for Phase22.
-HarnessFixture buildPhase22Fixture(int seed) {
+// @return The (Material, HarmonicPlan, VoicePlan) triple for Fantasia.
+HarnessFixture buildFantasiaFixture(int seed) {
   HarnessFixture out;
 
   constexpr int kBars = 16;
@@ -1873,14 +1873,14 @@ HarnessFixture buildPhase22Fixture(int seed) {
     const int root_pc = kBarRoot[cyc];
     const int third = kBarMinor[cyc] ? 3 : 4;
     const int triad_pc[3] = {root_pc % 12, (root_pc + third) % 12, (root_pc + 7) % 12};
-    int start = phase17ScaleUp(base_midi, offset);
+    int start = organPreludeScaleUp(base_midi, offset);
     while (start % 12 != triad_pc[0] && start % 12 != triad_pc[1] && start % 12 != triad_pc[2])
       ++start;
     const int m = 4 * notes_per_beat;
     std::vector<int> wave;
     wave.reserve(static_cast<std::size_t>(m) + 2);
     for (int i = 0; i <= m / 2; ++i)
-      wave.push_back(phase17ScaleUp(start, i));
+      wave.push_back(organPreludeScaleUp(start, i));
     for (int i = static_cast<int>(wave.size()) - 2; i >= 0; --i)
       wave.push_back(wave[static_cast<std::size_t>(i)]);
     const Tick step = (notes_per_beat == 4) ? kSixteenth : kEighth;
@@ -1905,12 +1905,12 @@ HarnessFixture buildPhase22Fixture(int seed) {
     const int root_pc = kBarRoot[cyc];
     const int third = kBarMinor[cyc] ? 3 : 4;
     const int triad_pc[3] = {root_pc % 12, (root_pc + third) % 12, (root_pc + 7) % 12};
-    int start = phase17ScaleUp(base_midi, offset);
+    int start = organPreludeScaleUp(base_midi, offset);
     while (start % 12 != triad_pc[0] && start % 12 != triad_pc[1] && start % 12 != triad_pc[2])
       ++start;
     // 4 quarter notes: a small stepwise scalar wave up-up-down.
-    const int wave[4] = {start, phase17ScaleUp(start, 1), phase17ScaleUp(start, 2),
-                         phase17ScaleUp(start, 1)};
+    const int wave[4] = {start, organPreludeScaleUp(start, 1), organPreludeScaleUp(start, 2),
+                         organPreludeScaleUp(start, 1)};
     for (int beat = 0; beat < 4; ++beat) {
       MaterialNote mn;
       mn.start_tick =
@@ -1929,10 +1929,10 @@ HarnessFixture buildPhase22Fixture(int seed) {
     const int root_pc = kBarRoot[cyc];
     const int third = kBarMinor[cyc] ? 3 : 4;
     const int triad_pc[3] = {root_pc % 12, (root_pc + third) % 12, (root_pc + 7) % 12};
-    int start = phase17ScaleUp(base_midi, offset);
+    int start = organPreludeScaleUp(base_midi, offset);
     while (start % 12 != triad_pc[0] && start % 12 != triad_pc[1] && start % 12 != triad_pc[2])
       ++start;
-    const int wave[2] = {start, phase17ScaleUp(start, 1)};
+    const int wave[2] = {start, organPreludeScaleUp(start, 1)};
     for (int half = 0; half < 2; ++half) {
       MaterialNote mn;
       mn.start_tick = static_cast<Tick>(bar) * kTicksPerBar + static_cast<Tick>(half) * kHalf;
@@ -2002,7 +2002,7 @@ HarnessFixture buildPhase22Fixture(int seed) {
   return out;
 }
 
-// Build the Phase23 fixture: a keyboard suite over 20 bars in C major
+// Build the KeyboardSuite fixture: a keyboard suite over 20 bars in C major
 // (internal; transposition happens only at MIDI output). The suite is an
 // assembly reusing existing carriers and bits, introducing no new VoiceIntent /
 // RuleBit / validator rule / Material type. It is a five-movement dance suite,
@@ -2055,12 +2055,12 @@ HarnessFixture buildPhase22Fixture(int seed) {
 //
 //   offset = seed % 4 shifts the scalar-wave start degree before the chord-tone
 //   snap, varying the lines per seed. The Python structural predictor mirrors
-//   this construction (I IV V vi cycle + C-major phase17 scale walk + the 4-bar
+//   this construction (I IV V vi cycle + C-major organPrelude scale walk + the 4-bar
 //   ground tiling + offset scheme) byte-for-byte.
 //
 // @param seed Closure seed; selects the scalar-wave start-degree offset (seed % 4).
-// @return The (Material, HarmonicPlan, VoicePlan) triple for Phase23.
-HarnessFixture buildPhase23Fixture(int seed) {
+// @return The (Material, HarmonicPlan, VoicePlan) triple for KeyboardSuite.
+HarnessFixture buildKeyboardSuiteFixture(int seed) {
   HarnessFixture out;
 
   constexpr int kBars = 20;
@@ -2108,13 +2108,13 @@ HarnessFixture buildPhase23Fixture(int seed) {
     const int root_pc = kBarRoot[cyc];
     const int third = kBarMinor[cyc] ? 3 : 4;
     const int triad_pc[3] = {root_pc % 12, (root_pc + third) % 12, (root_pc + 7) % 12};
-    int start = phase17ScaleUp(base_midi, offset);
+    int start = organPreludeScaleUp(base_midi, offset);
     while (start % 12 != triad_pc[0] && start % 12 != triad_pc[1] && start % 12 != triad_pc[2])
       ++start;
     std::vector<int> wave;
     wave.reserve(static_cast<std::size_t>(m) + 2);
     for (int idx = 0; idx <= m / 2; ++idx)
-      wave.push_back(phase17ScaleUp(start, idx));
+      wave.push_back(organPreludeScaleUp(start, idx));
     for (int idx = static_cast<int>(wave.size()) - 2; idx >= 0; --idx)
       wave.push_back(wave[static_cast<std::size_t>(idx)]);
     return wave;
@@ -2243,7 +2243,7 @@ HarnessFixture buildPhase23Fixture(int seed) {
   return out;
 }
 
-// Build the Phase24 fixture: a WTC-style Prelude+Fugue pair over 24 bars in C
+// Build the PreludeAndFugue fixture: a WTC-style Prelude+Fugue pair over 24 bars in C
 // major (internal; transposition happens only at MIDI output). It
 // pairs the two organ/keyboard idioms defined separately — the
 // free-figuration prelude and the scalar fugue exposition — into one
@@ -2257,33 +2257,34 @@ HarnessFixture buildPhase23Fixture(int seed) {
 //
 //   PRELUDE (bars 0-7):
 //     - V0 two FigurationCarrier sections (bars 0-3, bars 4-7): the same
-//       sixteenth scalar wave (phase17ScaleUp, 16 notes/bar, downbeat anchored
+//       sixteenth scalar wave (organPreludeScaleUp, 16 notes/bar, downbeat anchored
 //       to a chord tone), base C4 (60). Fires FigurationCommitted (52).
 //     - V1 one FigurationCarrier bass-support section (bars 0-7): eighths,
 //       base ~G3 (55), the same scalar-wave construction one register lower so
 //       every on-beat note is a chord tone. Fires FigurationCommitted (52).
 //     - The SECOND V0 prelude section (bars 4-7) is is_pedal_prep, so its notes
 //       carry PedalPreparation (54): the prelude->fugue link. (Replicates how
-//       buildPhase17Fixture flags its final figuration section is_pedal_prep to
+//       buildOrganPreludeFixture flags its final figuration section is_pedal_prep to
 //       emit bit 54.)
 //     - V2 is silent during the prelude (it enters at the fugue re-entry).
 //
 //   FUGUE (bars 8-23): a compact exposition built inline (NOT by calling
-//   buildPhase14Fixture) using the SAME proven scalar subject melodic content as
-//   the buildPhase14Fixture catalog (kPhase14Subjects), offset by 8 bars:
+//   buildFugueCompleteFixture) using the SAME proven scalar subject melodic content as
+//   the buildFugueCompleteFixture catalog (kFugueCompleteSubjects), offset by 8 bars:
 //     - V0 SubjectCarrier (bars 8-11): subject verbatim (subj_pat).
 //     - V1 AnswerCarrier (bars 12-15): real answer = subject - 5 semitones (-P4),
 //       the same transposition the generic exposition uses.
 //     - V2 SubjectCarrier re-entry (bars 16-19): subject - 12 semitones (-P8).
 //     - V0 SubjectCarrier stretto-leader restatement (bars 20-23): subject
 //       verbatim again (leader at bar 20).
-//   Subject content is the diatonic scalar kPhase14Subjects subject (predominantly stepwise),
+//   Subject content is the diatonic scalar kFugueCompleteSubjects subject (predominantly stepwise),
 //   so gate-3 stays high. Register at every shared tick: V0 (>=71) >= V1
 //   (answer, subject-5) and the re-entry V2 (subject-12) sound in disjoint bar
 //   windows, so no voice crossing occurs.
 //
 //   subj_a = (seed / 4) % 5 selects the subject slot (matching the generic and
-//   buildPhase14Fixture seed derivation); offset = seed % 4 selects the prelude scalar offset.
+//   buildFugueCompleteFixture seed derivation); offset = seed % 4 selects the prelude scalar
+//   offset.
 //
 //   gate-3 probe (bach-mcp scorer, threshold 0.80): seeds 0-3 all validate Ok
 //   and score >= 0.80 with vertical_dissonance_ratio = 0 -- seed0/1/2 = 0.9826,
@@ -2295,11 +2296,11 @@ HarnessFixture buildPhase23Fixture(int seed) {
 //   non-zero offsets, so the per-beat anchor is load-
 //   bearing here. The Python structural predictor mirrors this construction
 //   (I IV V vi cycle + the per-bar chord-tone anchor sawtooth + the
-//   kPhase14Subjects transposition scheme) byte-for-byte.
+//   kFugueCompleteSubjects transposition scheme) byte-for-byte.
 //
 // @param seed Closure seed; subject slot = (seed/4)%5, prelude offset = seed%4.
-// @return The (Material, HarmonicPlan, VoicePlan) triple for Phase24.
-HarnessFixture buildPhase24Fixture(int seed) {
+// @return The (Material, HarmonicPlan, VoicePlan) triple for PreludeAndFugue.
+HarnessFixture buildPreludeAndFugueFixture(int seed) {
   HarnessFixture out;
 
   constexpr int kBars = 24;
@@ -2326,7 +2327,7 @@ HarnessFixture buildPhase24Fixture(int seed) {
 
   const int offset = seed % 4;
   const int subj_a = (seed / 4) % 5;
-  const auto& subj_pat = kPhase14Subjects[subj_a];
+  const auto& subj_pat = kFugueCompleteSubjects[subj_a];
 
   auto bar_tick = [](int bar) { return static_cast<Tick>(bar) * kTicksPerBar; };
 
@@ -2336,7 +2337,7 @@ HarnessFixture buildPhase24Fixture(int seed) {
   // sounds two figuration voices simultaneously, so EVERY beat is anchored to a
   // chord tone: every beat begins on the SAME bar-level chord-tone anchor and
   // runs scalewise up the C-major scale for the rest of the beat (the proven
-  // phase17ScaleUp stepwise motion), so the bar is a 4-fold repeated up-run
+  // organPreludeScaleUp stepwise motion), so the bar is a 4-fold repeated up-run
   // sawtooth. Because V0 and V1 each begin every beat on a tone of the bar's
   // triad, the on-beat vertical interval is always a chord interval
   // (3rd/5th/6th/octave) -- consonant for all four seed offsets (vdr = 0) --
@@ -2357,7 +2358,7 @@ HarnessFixture buildPhase24Fixture(int seed) {
     // Per-bar chord-tone anchor: the bar's root in `base_midi`'s octave, shifted
     // up `offset` scale degrees, then snapped up to a chord tone. Every beat
     // restarts from this anchor.
-    int anchor = phase17ScaleUp(base_midi + root_pc, offset);
+    int anchor = organPreludeScaleUp(base_midi + root_pc, offset);
     while (!is_triad(anchor))
       ++anchor;
     const Tick step = (notes_per_beat == 4) ? kSixteenth : kEighth;
@@ -2367,7 +2368,7 @@ HarnessFixture buildPhase24Fixture(int seed) {
         mn.start_tick =
             bar_tick(bar) + static_cast<Tick>(beat) * kTicksPerBeat + static_cast<Tick>(sub) * step;
         mn.duration = step;
-        mn.pitch = static_cast<std::uint8_t>(phase17ScaleUp(anchor, sub));
+        mn.pitch = static_cast<std::uint8_t>(organPreludeScaleUp(anchor, sub));
         dst.push_back(mn);
       }
     }
@@ -2405,9 +2406,9 @@ HarnessFixture buildPhase24Fixture(int seed) {
     appendFigurationBar(bass.notes, bar, /*base_midi=*/55, /*notes_per_beat=*/2);
   out.material.figuration_sections.push_back(bass);
 
-  // --- FUGUE material (bars 8-23). Subject content is the kPhase14Subjects scalar
+  // --- FUGUE material (bars 8-23). Subject content is the kFugueCompleteSubjects scalar
   // subject (subj_pat); the answer / re-entry / stretto-leader reuse the same
-  // transpositions the generic exposition / buildPhase14Fixture use.
+  // transpositions the generic exposition / buildFugueCompleteFixture use.
   auto add_subject = [&](int first_bar, int semis) {
     for (int n = 0; n < 16; ++n) {
       MaterialNote mn;
@@ -2476,10 +2477,10 @@ HarnessFixture buildPhase24Fixture(int seed) {
   return out;
 }
 
-// Build the Phase25 fixture: a Goldberg-style immutable-bass-variation skeleton
+// Build the GoldbergVariations fixture: a Goldberg-style immutable-bass-variation skeleton
 // over 20 bars in C major (internal; transposition happens only at MIDI output).
 // A reduced realization of BWV988: an aria plus four variations over ONE
-// immutable ground, ending on a climactic variation. It reuses the Phase20
+// immutable ground, ending on a climactic variation. It reuses the Passacaglia
 // Passacaglia carriers verbatim, introducing no new VoiceIntent / RuleBit /
 // validator rule / material type:
 //
@@ -2495,9 +2496,9 @@ HarnessFixture buildPhase24Fixture(int seed) {
 //     1 / 2 / 2 / 3). Block 4 (Var4) is flagged is_climax (the registral peak).
 //
 // Each variation bar is a stepwise C-major scalar wave (ascending then
-// descending), reusing phase17ScaleUp -- C-major scalar waves score well above
+// descending), reusing organPreludeScaleUp -- C-major scalar waves score well above
 // this fixture's gate-3 threshold of 0.78. The wave
-// starts on the bar's chord tone (kVarT0 below, snapped up via phase17ScaleUp
+// starts on the bar's chord tone (kVarT0 below, snapped up via organPreludeScaleUp
 // from base_midi to the nearest chord tone), `offset = seed % 4` scale degrees
 // above it. V0 stays in the C5-region (~72-84) well ABOVE the C2-A2 ground, so
 // no voice crossing occurs.
@@ -2519,8 +2520,8 @@ HarnessFixture buildPhase24Fixture(int seed) {
 // per seed.
 //
 // @param seed Closure seed; selects the scalar-wave start offset (seed % 4).
-// @return The (Material, HarmonicPlan, VoicePlan) triple for Phase25.
-HarnessFixture buildPhase25Fixture(int seed) {
+// @return The (Material, HarmonicPlan, VoicePlan) triple for GoldbergVariations.
+HarnessFixture buildGoldbergVariationsFixture(int seed) {
   HarnessFixture out;
 
   constexpr int kCycleBars = 4;
@@ -2562,7 +2563,7 @@ HarnessFixture buildPhase25Fixture(int seed) {
 
   // Five variation blocks on V0, one per 4-bar movement window. base_midi is the
   // C5-region (~72) anchor; the scalar-wave start is snapped UP to the nearest
-  // chord tone of the bar via phase17ScaleUp, so V0 stays well above the ground.
+  // chord tone of the bar via organPreludeScaleUp, so V0 stays well above the ground.
   struct BlockSpec {
     int density_level;
     int notes_per_bar;  // m: 2 / 4 / 8 / 8 / 16.
@@ -2593,8 +2594,8 @@ HarnessFixture buildPhase25Fixture(int seed) {
       // Scalar-wave start: snap base_midi UP to the nearest chord tone of the
       // bar (root_pc relative to base_midi's octave), then `offset` degrees up.
       const int chord_start =
-          phase17ScaleUp(spec.base_midi + ((root_pc + 12 - (spec.base_midi % 12)) % 12), 0);
-      const int start = phase17ScaleUp(chord_start, offset);
+          organPreludeScaleUp(spec.base_midi + ((root_pc + 12 - (spec.base_midi % 12)) % 12), 0);
+      const int start = organPreludeScaleUp(chord_start, offset);
       const Tick bar_start = var.start_tick + static_cast<Tick>(bar) * kTicksPerBar;
 
       if (block == 0) {
@@ -2608,7 +2609,7 @@ HarnessFixture buildPhase25Fixture(int seed) {
         MaterialNote second;
         second.start_tick = bar_start + kHalf;
         second.duration = kHalf;
-        second.pitch = static_cast<std::uint8_t>(phase17ScaleUp(start, 1));
+        second.pitch = static_cast<std::uint8_t>(organPreludeScaleUp(start, 1));
         var.notes.push_back(second);
         continue;
       }
@@ -2623,7 +2624,7 @@ HarnessFixture buildPhase25Fixture(int seed) {
       std::vector<int> wave;
       wave.reserve(static_cast<std::size_t>(m) + 2);
       for (int idx = 0; idx <= m / 2; ++idx)
-        wave.push_back(phase17ScaleUp(start, idx));
+        wave.push_back(organPreludeScaleUp(start, idx));
       for (int idx = static_cast<int>(wave.size()) - 2; idx >= 0; --idx)
         wave.push_back(wave[static_cast<std::size_t>(idx)]);
       for (int beat = 0; beat < 4; ++beat) {
@@ -2675,83 +2676,83 @@ HarnessFixture buildPhase25Fixture(int seed) {
 
 HarnessPhaseSpec phaseSpec(HarnessPhase phase) {
   switch (phase) {
-    case HarnessPhase::Phase3:
+    case HarnessPhase::FugueSubject2v:
       return {phase, /*voices=*/2, /*bars=*/8, /*subject_bars=*/8,
               false, false,        false,      false,
               false, false,        false,      false,
               false, false,        false,      false,
               false};
-    case HarnessPhase::Phase35:
+    case HarnessPhase::FugueSubject2vShort:
       return {phase, /*voices=*/2, /*bars=*/4, /*subject_bars=*/4,
               false, false,        false,      false,
               false, false,        false,      false,
               false, false,        false,      false,
               false};
-    case HarnessPhase::Phase4:
+    case HarnessPhase::FugueAnswer2v:
       return {phase, /*voices=*/2, /*bars=*/8, /*subject_bars=*/4,
               true,  false,        false,      false,
               false, false,        false,      false,
               false, false,        false,      false,
               false};
-    case HarnessPhase::Phase5:
+    case HarnessPhase::FugueSubject3v:
       return {phase, /*voices=*/3, /*bars=*/12, /*subject_bars=*/12,
               false, false,        false,       false,
               false, false,        false,       false,
               false, false,        false,       false,
               false};
-    case HarnessPhase::Phase6:
+    case HarnessPhase::FugueExposition3v:
       return {phase, /*voices=*/3, /*bars=*/16, /*subject_bars=*/4,
               true,  true,         false,       false,
               false, false,        false,       false,
               false, false,        false,       false,
               false};
-    case HarnessPhase::Phase4Sus:
+    case HarnessPhase::FugueAnswerSuspension:
       return {phase, /*voices=*/2, /*bars=*/8, /*subject_bars=*/4,
               true,  false,        true,       false,
               false, false,        false,      false,
               false, false,        false,      false,
               false};
-    case HarnessPhase::Phase6Episode:
+    case HarnessPhase::FugueExpositionEpisode:
       return {phase, /*voices=*/3, /*bars=*/16, /*subject_bars=*/4,
               true,  true,         false,       true,
               false, false,        false,       false,
               false, false,        false,       false,
               false};
-    case HarnessPhase::Phase6Tonal:
+    case HarnessPhase::FugueExpositionTonalAnswer:
       return {phase, /*voices=*/3, /*bars=*/16, /*subject_bars=*/4,
               true,  true,         false,       false,
               true,  false,        false,       false,
               false, false,        false,       false,
               false};
-    case HarnessPhase::Phase7:
+    case HarnessPhase::FugueHarmonized:
       return {phase, /*voices=*/3, /*bars=*/16, /*subject_bars=*/4,
               true,  true,         false,       false,
               false, true,         false,       false,
               false, false,        false,       false,
               false};
-    case HarnessPhase::Phase8:
+    case HarnessPhase::FugueModulating:
       return {phase, /*voices=*/3, /*bars=*/16, /*subject_bars=*/4,
               true,  true,         false,       false,
               false, true,         true,        false,
               false, false,        false,       false,
               false};
-    case HarnessPhase::Phase9:
+    case HarnessPhase::FugueFortspinnung:
       return {phase, /*voices=*/3, /*bars=*/16, /*subject_bars=*/4,
               true,  true,         false,       false,
               false, true,         true,        true,
               true,  false,        false,       false,
               false};
-    case HarnessPhase::Phase10:
+    case HarnessPhase::FugueThirdEntry:
       return {phase, /*voices=*/3, /*bars=*/16, /*subject_bars=*/4,
               true,  true,         false,       false,
               false, true,         true,        false,
               false, false,        false,       false,
               false};
-    case HarnessPhase::Phase11:
+    case HarnessPhase::FugueDevelopment:
       // 28 bar / 3 voice. Material assembly reuses with_answer +
       // with_third_entry (subject 0-3, answer 4-7, V2 re-entry 8-11);
       // with_development drives the bars 12-27 carriers and its own
-      // voice plan. Degree tagging is on (as in Phase7) so the
+      // voice plan. Degree tagging is on (as in FugueHarmonized) so the
       // strong-4th candidate pre-filter — gated on chord.has_degree —
       // stays active for the exposition's Compose counterlines; without
       // it the composer would pick a strong-beat perfect 4th in the
@@ -2764,8 +2765,8 @@ HarnessPhaseSpec phaseSpec(HarnessPhase phase) {
               false, true,         false,       false,
               false, true,         false,       false,
               false};
-    case HarnessPhase::Phase12:
-      // 28 bar / 3 voice. Same exposition assembly as Phase11 (with_answer
+    case HarnessPhase::FugueRhythmic:
+      // 28 bar / 3 voice. Same exposition assembly as FugueDevelopment (with_answer
       // + with_third_entry + degree tagging for the strong-4th
       // pre-filter), but with_rhythm drives the bars 12-27 rhythm section
       // and its own voice plan instead of with_development.
@@ -2774,22 +2775,22 @@ HarnessPhaseSpec phaseSpec(HarnessPhase phase) {
               false, true,         false,       false,
               false, false,        true,        false,
               false};
-    case HarnessPhase::Phase13:
-      // 16 bar / 3 voice. Reuses the Phase7 exposition assembly (with_answer
+    case HarnessPhase::FugueTextured:
+      // 16 bar / 3 voice. Reuses the FugueHarmonized exposition assembly (with_answer
       // + with_third_entry + degree tagging for the strong-4th
       // pre-filter); with_texture attaches the texture/expression plan that
       // the Composer's post-pass consumes. Voice density already varies
       // because V2 enters only at bar 8 (2 voices bars 0-7, 3 voices bars
       // 8-15). Modulation stays off so the scored content matches the clean
-      // Phase7 exposition.
+      // FugueHarmonized exposition.
       return {phase, /*voices=*/3, /*bars=*/16, /*subject_bars=*/4,
               true,  true,         false,       false,
               false, true,         false,       false,
               false, false,        false,       true,
               false};
-    case HarnessPhase::Phase14:
+    case HarnessPhase::FugueComplete:
       // 42 bar / 3 voice. All thirteen device flags true. A dedicated
-      // self-contained builder (buildPhase14Fixture) constructs the whole
+      // self-contained builder (buildFugueCompleteFixture) constructs the whole
       // fixture when with_nct is set, so the other fugue layouts above stay
       // byte-identical (this spec's flags only gate the dispatch).
       return {phase, /*voices=*/3, /*bars=*/42, /*subject_bars=*/4,
@@ -2797,9 +2798,9 @@ HarnessPhaseSpec phaseSpec(HarnessPhase phase) {
               true,  true,         true,        true,
               true,  true,         true,        true,
               true};
-    case HarnessPhase::Phase15:
+    case HarnessPhase::CelloPrelude:
       // 8 bar / 1 voice. Solo String Flow. No subject/answer; the whole piece
-      // is a single ArpeggioFlow span built by buildPhase15Fixture. Every
+      // is a single ArpeggioFlow span built by buildCelloPreludeFixture. Every
       // device flag is false; with_arpeggio_flow (the trailing defaulted
       // field) is set true to route the dispatch.
       return {phase,      /*voices=*/1,
@@ -2811,11 +2812,11 @@ HarnessPhaseSpec phaseSpec(HarnessPhase phase) {
               false,      false,
               false,      false,
               false,      /*with_arpeggio_flow=*/true};
-    case HarnessPhase::Phase16:
+    case HarnessPhase::Chaconne:
       // 16 bar / 2 voice. Solo String Arch (BWV1004 Chaconne). No
       // subject/answer; an immutable ground bass (V1 GroundCarrier) underpins
       // four variation blocks (V0 VariationCarrier) built by
-      // buildPhase16Fixture. Every device flag is false; with_chaconne_arch
+      // buildChaconneFixture. Every device flag is false; with_chaconne_arch
       // (the second trailing defaulted field) is set true to route the
       // dispatch.
       return {phase,
@@ -2837,11 +2838,11 @@ HarnessPhaseSpec phaseSpec(HarnessPhase phase) {
               false,
               /*with_arpeggio_flow=*/false,
               /*with_chaconne_arch=*/true};
-    case HarnessPhase::Phase17:
+    case HarnessPhase::OrganPrelude:
       // 16 bar / 2 voice. Organ Prelude (free / sectional form). No
       // subject/answer; V0 carries three FigurationCarrier sections (the third
       // a cadenza) and V1 carries a bass-support section plus a final
-      // dominant-pedal-prep section, all built by buildPhase17Fixture. Every
+      // dominant-pedal-prep section, all built by buildOrganPreludeFixture. Every
       // device flag is false; with_organ_prelude (the trailing defaulted field)
       // is set true to route the dispatch.
       return {phase,
@@ -2864,10 +2865,10 @@ HarnessPhaseSpec phaseSpec(HarnessPhase phase) {
               /*with_arpeggio_flow=*/false,
               /*with_chaconne_arch=*/false,
               /*with_organ_prelude=*/true};
-    case HarnessPhase::Phase18:
+    case HarnessPhase::OrganToccata:
       // 16 bar / 1 voice. Organ Toccata (4 archetypes). No subject/answer; a
       // single V0 carries one-or-more ToccataCarrier sections of continuous
-      // C-major scalar-wave figuration, all built by buildPhase18Fixture. The
+      // C-major scalar-wave figuration, all built by buildOrganToccataFixture. The
       // archetype (= seed % 4) selects the section layout. Every device flag is
       // false; with_organ_toccata (the trailing defaulted field) is set true to
       // route the dispatch.
@@ -2892,12 +2893,12 @@ HarnessPhaseSpec phaseSpec(HarnessPhase phase) {
               /*with_chaconne_arch=*/false,
               /*with_organ_prelude=*/false,
               /*with_organ_toccata=*/true};
-    case HarnessPhase::Phase19:
+    case HarnessPhase::ChoralePrelude:
       // 16 bar / 2 voice. Organ Chorale Prelude (cantus firmus + counterpoint).
       // No subject/answer; V1 carries the fixed chorale tune as a
       // CantusFirmusCarrier (embellished, downbeats == immutable skeleton) and
       // V0 carries a predominantly-stepwise FigurationCarrier scalar wave riding
-      // above it, all built by buildPhase19Fixture. Every device flag is false;
+      // above it, all built by buildChoralePreludeFixture. Every device flag is false;
       // with_organ_chorale (the trailing defaulted field) is set true to route
       // the dispatch.
       return {phase,
@@ -2922,12 +2923,12 @@ HarnessPhaseSpec phaseSpec(HarnessPhase phase) {
               /*with_organ_prelude=*/false,
               /*with_organ_toccata=*/false,
               /*with_organ_chorale=*/true};
-    case HarnessPhase::Phase20:
+    case HarnessPhase::Passacaglia:
       // 24 bar / 2 voice. Organ Passacaglia (ground bass + variations + climax).
       // No subject/answer; V1 carries an immutable 8-bar ground bass repeated 3x
       // (PassacagliaGround) and V0 carries one PassacagliaVariation block per
       // cycle (rising density, the last cycle is_climax), all built by
-      // buildPhase20Fixture. Every device flag is false; with_organ_passacaglia
+      // buildPassacagliaFixture. Every device flag is false; with_organ_passacaglia
       // (the trailing defaulted field) is set true to route the dispatch.
       return {phase,
               /*voices=*/2,
@@ -2952,11 +2953,11 @@ HarnessPhaseSpec phaseSpec(HarnessPhase phase) {
               /*with_organ_toccata=*/false,
               /*with_organ_chorale=*/false,
               /*with_organ_passacaglia=*/true};
-    case HarnessPhase::Phase21:
+    case HarnessPhase::TrioSonata:
       // 16 bar / 3 voice. Organ Trio Sonata (three independent voices). No
       // subject/answer; V0/V1/V2 each carry a TrioVoiceCarrier scalar-wave line
       // of distinct density (sixteenths / eighths / quarters), built by
-      // buildPhase21Fixture. Every device flag is false; with_trio (the trailing
+      // buildTrioSonataFixture. Every device flag is false; with_trio (the trailing
       // defaulted field) is set true to route the dispatch.
       return {phase,
               /*voices=*/3,
@@ -2982,11 +2983,11 @@ HarnessPhaseSpec phaseSpec(HarnessPhase phase) {
               /*with_organ_chorale=*/false,
               /*with_organ_passacaglia=*/false,
               /*with_trio=*/true};
-    case HarnessPhase::Phase22:
+    case HarnessPhase::Fantasia:
       // 16 bar / 1 voice. Organ Fantasia (free sectional, multi-style). No
       // subject/answer; a single V0 carries four contrasting FantasiaCarrier
       // sections (Free / Fugal / Toccata / Chordal) of distinct density +
-      // register, built by buildPhase22Fixture. Every device flag is false;
+      // register, built by buildFantasiaFixture. Every device flag is false;
       // with_fantasia (the trailing defaulted field) is set true to route the
       // dispatch.
       return {phase,
@@ -3014,12 +3015,12 @@ HarnessPhaseSpec phaseSpec(HarnessPhase phase) {
               /*with_organ_passacaglia=*/false,
               /*with_trio=*/false,
               /*with_fantasia=*/true};
-    case HarnessPhase::Phase23:
+    case HarnessPhase::KeyboardSuite:
       // 20 bar / 2 voice. Keyboard suite (5 movements x 4 bars). No
       // subject/answer; V0 carries five movement spans (FigurationCarrier for the
       // Prelude + Courante, FantasiaCarrier for the Allemande / Sarabande / Gigue)
       // and V1 carries a GroundCarrier bass tiled 5x, all built by
-      // buildPhase23Fixture. Reuses existing carriers/bits, adding no new
+      // buildKeyboardSuiteFixture. Reuses existing carriers/bits, adding no new
       // VoiceIntent or RuleBit. Every device flag is false; with_suite (the
       // trailing defaulted field) is set true to route the dispatch.
       return {phase,
@@ -3048,11 +3049,11 @@ HarnessPhaseSpec phaseSpec(HarnessPhase phase) {
               /*with_trio=*/false,
               /*with_fantasia=*/false,
               /*with_suite=*/true};
-    case HarnessPhase::Phase24:
+    case HarnessPhase::PreludeAndFugue:
       // 24 bar / 3 voice. WTC Prelude+Fugue pair (8-bar prelude +
       // 16-bar fugue). No subject/answer via the generic cascade; the prelude's
       // FigurationCarrier sections (V0 + V1) and the fugue's inline exposition
-      // (SubjectCarrier / AnswerCarrier) are all built by buildPhase24Fixture.
+      // (SubjectCarrier / AnswerCarrier) are all built by buildPreludeAndFugueFixture.
       // Reuses existing carriers/bits, adding no new VoiceIntent or RuleBit.
       // Every device flag is false; with_wtc_pair (the trailing defaulted field)
       // is set true to route the dispatch.
@@ -3083,11 +3084,11 @@ HarnessPhaseSpec phaseSpec(HarnessPhase phase) {
               /*with_fantasia=*/false,
               /*with_suite=*/false,
               /*with_wtc_pair=*/true};
-    case HarnessPhase::Phase25:
+    case HarnessPhase::GoldbergVariations:
       // 20 bar / 2 voice. Goldberg-style immutable-bass-variation
       // skeleton (aria + 4 variations x 4 bars). No subject/answer; V0 carries
       // five PassacagliaVariation blocks and V1 carries a PassacagliaGround bass
-      // tiled 5x, all built by buildPhase25Fixture. Reuses the Phase20 Passacaglia
+      // tiled 5x, all built by buildGoldbergVariationsFixture. Reuses the Passacaglia Passacaglia
       // carriers/bits, adding no new VoiceIntent or RuleBit. Every device flag is
       // false; with_goldberg (the trailing defaulted field) is set true to route
       // the dispatch.
@@ -3128,59 +3129,59 @@ HarnessFixture buildHarnessFixture(HarnessPhase phase, int seed) {
   const HarnessPhaseSpec spec = phaseSpec(phase);
   HarnessFixture out;
 
-  // Phase14 has its own self-contained builder (anon namespace). Dispatching
+  // FugueComplete has its own self-contained builder (anon namespace). Dispatching
   // here keeps the entire generic fugue assembly below byte-identical.
   if (spec.with_nct) {
-    return buildPhase14Fixture(seed);
+    return buildFugueCompleteFixture(seed);
   }
-  // Phase15 (Solo String Flow) is likewise self-contained.
+  // CelloPrelude (Solo String Flow) is likewise self-contained.
   if (spec.with_arpeggio_flow) {
-    return buildPhase15Fixture(seed);
+    return buildCelloPreludeFixture(seed);
   }
-  // Phase16 (Solo String Arch / chaconne) is likewise self-contained.
+  // Chaconne (Solo String Arch / chaconne) is likewise self-contained.
   if (spec.with_chaconne_arch) {
-    return buildPhase16Fixture(seed);
+    return buildChaconneFixture(seed);
   }
-  // Phase17 (Organ Prelude / free sectional form) is likewise self-contained.
+  // OrganPrelude (Organ Prelude / free sectional form) is likewise self-contained.
   if (spec.with_organ_prelude) {
-    return buildPhase17Fixture(seed);
+    return buildOrganPreludeFixture(seed);
   }
-  // Phase18 (Organ Toccata / 4 archetypes) is likewise self-contained.
+  // OrganToccata (Organ Toccata / 4 archetypes) is likewise self-contained.
   if (spec.with_organ_toccata) {
-    return buildPhase18Fixture(seed);
+    return buildOrganToccataFixture(seed);
   }
-  // Phase19 (Organ Chorale Prelude / cantus firmus + counterpoint) is likewise
+  // ChoralePrelude (Organ Chorale Prelude / cantus firmus + counterpoint) is likewise
   // self-contained.
   if (spec.with_organ_chorale) {
-    return buildPhase19Fixture(seed);
+    return buildChoralePreludeFixture(seed);
   }
-  // Phase20 (Organ Passacaglia / ground bass + variations + climax) is likewise
+  // Passacaglia (Organ Passacaglia / ground bass + variations + climax) is likewise
   // self-contained.
   if (spec.with_organ_passacaglia) {
-    return buildPhase20Fixture(seed);
+    return buildPassacagliaFixture(seed);
   }
-  // Phase21 (Organ Trio Sonata / three independent voices) is likewise
+  // TrioSonata (Organ Trio Sonata / three independent voices) is likewise
   // self-contained.
   if (spec.with_trio) {
-    return buildPhase21Fixture(seed);
+    return buildTrioSonataFixture(seed);
   }
-  // Phase22 (Organ Fantasia / free sectional, multi-style) is likewise
+  // Fantasia (Organ Fantasia / free sectional, multi-style) is likewise
   // self-contained.
   if (spec.with_fantasia) {
-    return buildPhase22Fixture(seed);
+    return buildFantasiaFixture(seed);
   }
-  // Phase23 (keyboard suite / 5 movements) is likewise self-contained.
+  // KeyboardSuite (keyboard suite / 5 movements) is likewise self-contained.
   if (spec.with_suite) {
-    return buildPhase23Fixture(seed);
+    return buildKeyboardSuiteFixture(seed);
   }
-  // Phase24 (WTC Prelude+Fugue pair) is likewise self-contained.
+  // PreludeAndFugue (WTC Prelude+Fugue pair) is likewise self-contained.
   if (spec.with_wtc_pair) {
-    return buildPhase24Fixture(seed);
+    return buildPreludeAndFugueFixture(seed);
   }
-  // Phase25 (Goldberg-style immutable-bass-variation) is likewise
+  // GoldbergVariations (Goldberg-style immutable-bass-variation) is likewise
   // self-contained.
   if (spec.with_goldberg) {
-    return buildPhase25Fixture(seed);
+    return buildGoldbergVariationsFixture(seed);
   }
 
   const int num_blocks = spec.bars / 4;
@@ -3253,7 +3254,7 @@ HarnessFixture buildHarnessFixture(HarnessPhase phase, int seed) {
       c.root_pc = pattern[b].root_pc;
       c.quality = pattern[b].minor ? ChordQuality::Minor : ChordQuality::Major;
       if (spec.with_degree_tagging) {
-        // Phase7 enriches every ChordEvent with degree/inversion/function
+        // FugueHarmonized enriches every ChordEvent with degree/inversion/function
         // so the Validator's doubling/spacing rules fire and the
         // candidate provenance picks up ChordToneRoman / InversionLabel /
         // DoublingChecked / SpacingChecked bits. Mapping is fixed for the
@@ -3262,7 +3263,7 @@ HarnessFixture buildHarnessFixture(HarnessPhase phase, int seed) {
         //   (root=5, !minor) → IV (Subdominant)
         //   (root=7, !minor) → V (Dominant)
         //   (root=9, minor)  → vi (Predominant)
-        // All Phase7 chords are emitted in root position.
+        // All FugueHarmonized chords are emitted in root position.
         if (pattern[b].root_pc == 0) {
           c.degree = RomanNumeral::I;
           c.function = HarmonicFunction::T;
@@ -3283,13 +3284,13 @@ HarnessFixture buildHarnessFixture(HarnessPhase phase, int seed) {
     }
   }
 
-  // Phase8 modulation injection. Augments the Phase7 layout with:
+  // FugueModulating modulation injection. Augments the FugueHarmonized layout with:
   //   - a ModulationEvent at bar 8 (the boundary is the implicit
   //     I-of-C = IV-of-G pivot already at that tick),
   //   - a V/V → V secondary-dominant pair at bars 12-13,
   //   - a borrowed iv (parallel minor mixture) at bar 14,
   //   - a Picardy 3rd marker on the final I chord at bar 15.
-  // The pre-bar-12 chord vocabulary is untouched so existing Phase7
+  // The pre-bar-12 chord vocabulary is untouched so existing FugueHarmonized
   // counterpoint behavior carries forward; only the last 4 bars host
   // the chromatic idioms. Bars 12-15 sit entirely outside the V2
   // SubjectCarrier window (bars 8-11) so the chromatic chord tones
@@ -3358,7 +3359,7 @@ HarnessFixture buildHarnessFixture(HarnessPhase phase, int seed) {
     }
   }
 
-  // Texture / instrument / expression plan. Attached only for Phase13
+  // Texture / instrument / expression plan. Attached only for FugueTextured
   // (with_texture); the Composer post-pass reads it after candidate
   // placement to stamp the four texture bits and apply the velocity curve.
   if (spec.with_texture) {
@@ -3402,7 +3403,7 @@ HarnessFixture buildHarnessFixture(HarnessPhase phase, int seed) {
   out.voice_plan.spans.push_back(subject_span);
 
   if (spec.with_rhythm) {
-    // Phase12 fixed layout (28 bars). Exposition bars 0-11 mirror Phase11.
+    // FugueRhythmic fixed layout (28 bars). Exposition bars 0-11 mirror FugueDevelopment.
     // The rhythm section (bars 12-27) is entirely Material: one V0
     // RhythmCarrier per 4-bar phrase (each replays whichever rhythm
     // fragments fall in its window) plus a V2 rhythmic-motif recurrence at
@@ -3436,8 +3437,8 @@ HarnessFixture buildHarnessFixture(HarnessPhase phase, int seed) {
     pushSpan(2, 8, 11, VoiceIntent::SubjectCarrier);
     pushSpan(2, 16, 19, VoiceIntent::RhythmCarrier);
   } else if (spec.with_development) {
-    // Phase11 fixed layout (28 bars). The subject_span (V0 bars 0-3) is
-    // already pushed above. Exposition bars 0-11 mirror Phase8 (V0 subject
+    // FugueDevelopment fixed layout (28 bars). The subject_span (V0 bars 0-3) is
+    // already pushed above. Exposition bars 0-11 mirror FugueModulating (V0 subject
     // + free counterline, V1 free counterline + answer, V2 subject
     // re-entry). The development bars 12-27 is entirely Material: each
     // development carrier sits directly after that voice's previous
@@ -3479,17 +3480,17 @@ HarnessFixture buildHarnessFixture(HarnessPhase phase, int seed) {
     pushSpan(2, 12, 15, VoiceIntent::PedalCarrier);
     pushSpan(2, 22, 25, VoiceIntent::StrettoCarrier);
   } else if (spec.with_third_entry) {
-    // Phase6Episode replaces V0 counterline bars [bars - subject_bars, bars)
+    // FugueExpositionEpisode replaces V0 counterline bars [bars - subject_bars, bars)
     // with one Episode span (Original transform of the V0 subject, re-anchored
-    // at that bar). Phase6Tonal replaces V0 counterline bars [subject_bars,
+    // at that bar). FugueExpositionTonalAnswer replaces V0 counterline bars [subject_bars,
     // 2*subject_bars) with one CountersubjectCarrier span that runs against
-    // the V1 AnswerCarrier (tonal_answer). Phase9 replaces V0 counterline
+    // the V1 AnswerCarrier (tonal_answer). FugueFortspinnung replaces V0 counterline
     // bars [subject_bars, 2*subject_bars) (the V1 AnswerCarrier window) with
     // one FortspinnungSpan carrying a 2-step ascending sequence. Placing
     // the fortspinnung directly after V0 SubjectCarrier (Material→Material)
     // avoids the Compose→Material boundary issue where the composer cannot
     // see the carrier's first pitch in its lookahead, and keeps V0 still
-    // active against the AnswerCarrier in V1. Phase6 keeps all V0
+    // active against the AnswerCarrier in V1. FugueExposition3v keeps all V0
     // counterline bars contiguous.
     const int episode_first_bar = spec.with_episode ? (spec.bars - subject_bars) : -1;
     const int cs_first_bar = spec.with_tonal_answer ? subject_bars : -1;
@@ -3559,9 +3560,9 @@ HarnessFixture buildHarnessFixture(HarnessPhase phase, int seed) {
       pushCounterlineBar(out.voice_plan, next_id, 2, b, subdivision);
     }
   } else if (spec.with_answer) {
-    // Phase4Sus carves a 2-bar SuspensionCarrier span out of V0
+    // FugueAnswerSuspension carves a 2-bar SuspensionCarrier span out of V0
     // counterline bars [subject_bars, subject_bars + 2). The remaining
-    // V0 counterline bars run normally on either side. Phase4 (no
+    // V0 counterline bars run normally on either side. FugueAnswer2v (no
     // suspension) keeps all V0 counterline bars contiguous.
     const int sus_first_bar = spec.with_suspension ? subject_bars : -1;
     const int sus_last_bar = spec.with_suspension ? subject_bars + 1 : -1;
@@ -3618,7 +3619,7 @@ HarnessFixture buildHarnessFixture(HarnessPhase phase, int seed) {
   annotateCadenceCells(out.material, out.harmony);
 
   if (spec.with_tonal_answer) {
-    // Phase6Tonal: derive tonal_answer from the V0 subject (first 16 notes)
+    // FugueExpositionTonalAnswer: derive tonal_answer from the V0 subject (first 16 notes)
     // with a 4-note head mutation, anchor at bar `subject_bars`, and set
     // the dispatch flag so AnswerCarrier reads from tonal_answer instead
     // of `answer`. Bach's tonal-answer convention maps the subject's
@@ -3629,7 +3630,7 @@ HarnessFixture buildHarnessFixture(HarnessPhase phase, int seed) {
         subj_head, out.harmony.tonic_pc, static_cast<Tick>(subject_bars) * kTicksPerBar,
         /*head_length=*/4);
     out.material.use_tonal_answer = true;
-    // Phase6Tonal CS material: stationary G5 (pitch 79) for 16 quarter
+    // FugueExpositionTonalAnswer CS material: stationary G5 (pitch 79) for 16 quarter
     // notes so V0 has a sounding note at every beat of the answer
     // window. The Validator's vertical/parallel rules skip both-Material
     // pairs (V0 CS vs V1 tonal_answer are both Material), so a pedal
@@ -3647,7 +3648,7 @@ HarnessFixture buildHarnessFixture(HarnessPhase phase, int seed) {
   }
 
   if (spec.with_episode) {
-    // Phase6Episode injects one Episode fragment in V0 covering bars
+    // FugueExpositionEpisode injects one Episode fragment in V0 covering bars
     // [bars - subject_bars, bars). Transform = Original; source = the
     // first `subject_bars` of V0 SubjectCarrier material (indices
     // [0, 16)). Result re-anchors the subject pitches at the target
@@ -3692,7 +3693,7 @@ HarnessFixture buildHarnessFixture(HarnessPhase phase, int seed) {
   }
 
   if (spec.with_fortspinnung) {
-    // Phase9 SequenceTemplate. Seed = 8-note motif over 2 bars (bars
+    // FugueFortspinnung SequenceTemplate. Seed = 8-note motif over 2 bars (bars
     // 4-5) in V0. Pattern = AscendingStep (+2 semis per step).
     //
     // Pcs restricted to {0, 2, 7} (C, D, G) so the +2 transpose lands
@@ -3736,10 +3737,10 @@ HarnessFixture buildHarnessFixture(HarnessPhase phase, int seed) {
   }
 
   if (spec.with_imitation_entry) {
-    // Phase9 ImitationEntry. Subject (V0) enters at bar 0; real answer
+    // FugueFortspinnung ImitationEntry. Subject (V0) enters at bar 0; real answer
     // (V1) enters at bar `subject_bars` (= 4) with interval -5 semis
     // (real answer = P5 down = subject - 5). This matches the existing
-    // Phase4+ harness convention; the declaration is purely documentary
+    // FugueAnswer2v+ harness convention; the declaration is purely documentary
     // so the Validator's imitation_entry_match rule fires the
     // ImitationEntryMatched bit on the entry note of both fragments.
     ImitationEntry entry;
@@ -3751,7 +3752,7 @@ HarnessFixture buildHarnessFixture(HarnessPhase phase, int seed) {
   }
 
   if (spec.with_development) {
-    // Phase11 development material (bars 12-27). Every fragment is the
+    // FugueDevelopment development material (bars 12-27). Every fragment is the
     // seed's V0 subject pattern (kSubjectPatterns[subj_a]) under a fixed
     // pitch transform, so each device tracks the seed's exposition
     // subject. Anchored 4-bar (16 quarter-note) fragments; registers are
@@ -3864,7 +3865,7 @@ HarnessFixture buildHarnessFixture(HarnessPhase phase, int seed) {
   }
 
   if (spec.with_rhythm) {
-    // Phase12 rhythm material (bars 12-27). Seed-independent, C-major,
+    // FugueRhythmic rhythm material (bars 12-27). Seed-independent, C-major,
     // register-safe (V0 stays above the V2 recurrence at bars 16-19). The
     // phrase grid is a regular 4-bar period (downbeats every 4 bars), with
     // a quarter-note anacrusis leading into bar 16.

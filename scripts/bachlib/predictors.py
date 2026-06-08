@@ -17,45 +17,45 @@ from pathlib import Path
 from typing import Any
 
 from bachlib.mirror import (
-    PHASE14_SUBJECTS,
-    PHASE15_BARPLAN,
-    PHASE15_FIGURES,
-    PHASE16_BLOCK_NOTES_PER_BEAT,
-    PHASE16_GROUND,
-    PHASE16_VAR_T0,
-    PHASE17_BAR_MINOR,
-    PHASE17_BAR_ROOT,
-    PHASE18_BAR_ROOT,
-    PHASE19_BAR_ROOT,
-    PHASE19_CF_SKELETON,
-    PHASE20_BLOCK_NPB,
-    PHASE20_GROUND,
-    PHASE20_VAR_T0,
-    PHASE21_BAR_MINOR,
-    PHASE21_BAR_ROOT,
-    PHASE21_PEDAL_BASE,
-    PHASE21_V0_BASE,
-    PHASE21_V0_NPB,
-    PHASE21_V1_BASE,
-    PHASE21_V1_NPB,
-    PHASE22_BAR_MINOR,
-    PHASE22_BAR_ROOT,
-    PHASE22_SECTIONS,
-    PHASE23_BAR_MINOR,
-    PHASE23_BAR_ROOT,
-    PHASE23_GROUND,
-    PHASE23_MOVEMENTS,
-    PHASE24_BAR_MINOR,
-    PHASE24_BAR_ROOT,
-    PHASE24_FUGUE_ENTRIES,
-    PHASE24_PRELUDE_SECTIONS,
-    PHASE25_BAR_ROOT,
-    PHASE25_BLOCK_SPEC,
-    PHASE25_GROUND,
+    FUGUE_COMPLETE_SUBJECTS,
+    CELLO_PRELUDE_BARPLAN,
+    CELLO_PRELUDE_FIGURES,
+    CHACONNE_BLOCK_NOTES_PER_BEAT,
+    CHACONNE_GROUND,
+    CHACONNE_VAR_T0,
+    ORGAN_PRELUDE_BAR_MINOR,
+    ORGAN_PRELUDE_BAR_ROOT,
+    ORGAN_TOCCATA_BAR_ROOT,
+    CHORALE_PRELUDE_BAR_ROOT,
+    CHORALE_PRELUDE_CF_SKELETON,
+    PASSACAGLIA_BLOCK_NPB,
+    PASSACAGLIA_GROUND,
+    PASSACAGLIA_VAR_T0,
+    TRIO_SONATA_BAR_MINOR,
+    TRIO_SONATA_BAR_ROOT,
+    TRIO_SONATA_PEDAL_BASE,
+    TRIO_SONATA_V0_BASE,
+    TRIO_SONATA_V0_NPB,
+    TRIO_SONATA_V1_BASE,
+    TRIO_SONATA_V1_NPB,
+    FANTASIA_BAR_MINOR,
+    FANTASIA_BAR_ROOT,
+    FANTASIA_SECTIONS,
+    KEYBOARD_SUITE_BAR_MINOR,
+    KEYBOARD_SUITE_BAR_ROOT,
+    KEYBOARD_SUITE_GROUND,
+    KEYBOARD_SUITE_MOVEMENTS,
+    PRELUDE_AND_FUGUE_BAR_MINOR,
+    PRELUDE_AND_FUGUE_BAR_ROOT,
+    PRELUDE_AND_FUGUE_FUGUE_ENTRIES,
+    PRELUDE_AND_FUGUE_PRELUDE_SECTIONS,
+    GOLDBERG_VARIATIONS_BAR_ROOT,
+    GOLDBERG_VARIATIONS_BLOCK_SPEC,
+    GOLDBERG_VARIATIONS_GROUND,
     SUBJECT_PATTERNS,
-    phase16_scale_up,
-    phase17_scale_up,
-    phase19_cf_embellished,
+    chaconne_scale_up,
+    organPrelude_scale_up,
+    choralePrelude_cf_embellished,
 )
 from bachlib.phases import PHASE_LAYOUT
 
@@ -63,11 +63,11 @@ from bachlib.phases import PHASE_LAYOUT
 def expected_arpeggio_sequence(
     fixture: dict[str, Any],
 ) -> dict[tuple[int, str], list[tuple[int, int]]]:
-    """Predict the Phase15 ArpeggioFlow note stream for a seed fixture.
+    """Predict the CelloPrelude ArpeggioFlow note stream for a seed fixture.
 
-    Mirrors buildPhase15Fixture in src/composer/harness_fixture.cpp: 8 bars,
-    one chord per bar (PHASE15_BARPLAN), each beat arpeggiated as 4 sixteenths
-    re-ordered by the seed-selected figure (PHASE15_FIGURES[seed % 4]). The
+    Mirrors buildCelloPreludeFixture in src/composer/harness_fixture.cpp: 8 bars,
+    one chord per bar (CELLO_PRELUDE_BARPLAN), each beat arpeggiated as 4 sixteenths
+    re-ordered by the seed-selected figure (CELLO_PRELUDE_FIGURES[seed % 4]). The
     figure index is seed % 4, which equals fixture["harm_idx"].
 
     @param fixture fixture_for_seed() output for the seed under test.
@@ -76,10 +76,10 @@ def expected_arpeggio_sequence(
     ticks_per_bar = 1920
     ticks_per_beat = 480
     sixteenth = ticks_per_beat // 4
-    figure = PHASE15_FIGURES[fixture["harm_idx"] % 4]
+    figure = CELLO_PRELUDE_FIGURES[fixture["harm_idx"] % 4]
     seq: list[tuple[int, int]] = []
     for bar in range(8):
-        tones = PHASE15_BARPLAN[bar]  # (bass, mid, top)
+        tones = CELLO_PRELUDE_BARPLAN[bar]  # (bass, mid, top)
         for beat in range(4):
             for s in range(4):
                 tick = bar * ticks_per_bar + beat * ticks_per_beat + s * sixteenth
@@ -91,14 +91,14 @@ def expected_arpeggio_sequence(
 def expected_ground_sequence(
     fixture: dict[str, Any],
 ) -> dict[tuple[int, str], list[tuple[int, int]]]:
-    """Predict the Phase16 GroundCarrier + VariationCarrier note streams.
+    """Predict the Chaconne GroundCarrier + VariationCarrier note streams.
 
-    Mirrors buildPhase16Fixture in src/composer/harness_fixture.cpp: 16 bars =
-    4 cycles of a 4-bar immutable ground bass (PHASE16_GROUND, one whole-note
+    Mirrors buildChaconneFixture in src/composer/harness_fixture.cpp: 16 bars =
+    4 cycles of a 4-bar immutable ground bass (CHACONNE_GROUND, one whole-note
     per bar, V1) plus four variation blocks (V0) of rising density. Each
     variation bar is a stepwise scalar wave through C natural minor, starting
     `offset = seed % 4` scale degrees above the bar's lowest chord tone
-    (PHASE16_VAR_T0): an ascending run of (m/2 + 1) degrees mirrored back down
+    (CHACONNE_VAR_T0): an ascending run of (m/2 + 1) degrees mirrored back down
     (dropping the duplicated peak) and tiled to m = 4 * notes_per_beat notes.
     The offset is seed % 4, which equals fixture["harm_idx"].
 
@@ -115,7 +115,7 @@ def expected_ground_sequence(
     for cycle in range(4):
         for bar in range(cycle_bars):
             tick = (cycle * cycle_bars + bar) * ticks_per_bar
-            ground.append((tick, PHASE16_GROUND[bar]))
+            ground.append((tick, CHACONNE_GROUND[bar]))
     ground.sort()
 
     # VariationCarrier: four blocks, each 4 bars, density-tiered. Each bar is a
@@ -123,13 +123,13 @@ def expected_ground_sequence(
     offset = fixture["harm_idx"] % 4
     variation: list[tuple[int, int]] = []
     for block in range(4):
-        npb = PHASE16_BLOCK_NOTES_PER_BEAT[block]
+        npb = CHACONNE_BLOCK_NOTES_PER_BEAT[block]
         step = ticks_per_beat // npb
         block_base = block * cycle_bars * ticks_per_bar
         for bar in range(cycle_bars):
             m = 4 * npb
-            start = phase16_scale_up(PHASE16_VAR_T0[bar], offset)
-            wave = [phase16_scale_up(start, i) for i in range(m // 2 + 1)]
+            start = chaconne_scale_up(CHACONNE_VAR_T0[bar], offset)
+            wave = [chaconne_scale_up(start, i) for i in range(m // 2 + 1)]
             wave += wave[-2::-1]
             for beat in range(4):
                 for sub in range(npb):
@@ -144,10 +144,10 @@ def expected_ground_sequence(
 def expected_figuration_sequence(
     fixture: dict[str, Any],
 ) -> dict[tuple[int, str], list[tuple[int, int]]]:
-    """Predict the Phase17 FigurationCarrier note streams for a seed fixture.
+    """Predict the OrganPrelude FigurationCarrier note streams for a seed fixture.
 
-    Mirrors buildPhase17Fixture in src/composer/harness_fixture.cpp: 16 bars,
-    one triad per bar (PHASE17_BAR_ROOT / PHASE17_BAR_MINOR). V0 carries three
+    Mirrors buildOrganPreludeFixture in src/composer/harness_fixture.cpp: 16 bars,
+    one triad per bar (ORGAN_PRELUDE_BAR_ROOT / ORGAN_PRELUDE_BAR_MINOR). V0 carries three
     FigurationCarrier sections (bars 0-7, 8-11, 12-15-cadenza) of sixteenth-note
     scalar-wave figuration; all three are voice 0 so they merge into one
     (0, "FigurationCarrier") group. V1 carries a one-note-per-bar bass support
@@ -172,13 +172,13 @@ def expected_figuration_sequence(
     # sec2 12-15); every bar uses the identical scalar-wave construction.
     v0: list[tuple[int, int]] = []
     for bar in range(16):
-        root = PHASE17_BAR_ROOT[bar]
-        third = 3 if PHASE17_BAR_MINOR[bar] else 4
+        root = ORGAN_PRELUDE_BAR_ROOT[bar]
+        third = 3 if ORGAN_PRELUDE_BAR_MINOR[bar] else 4
         triad = {root % 12, (root + third) % 12, (root + 7) % 12}
-        start = phase17_scale_up(60 + root, offset)
+        start = organPrelude_scale_up(60 + root, offset)
         while start % 12 not in triad:
             start += 1
-        wave = [phase17_scale_up(start, i) for i in range(16 // 2 + 1)]
+        wave = [organPrelude_scale_up(start, i) for i in range(16 // 2 + 1)]
         wave += wave[-2::-1]
         for n in range(16):
             tick = bar * ticks_per_bar + n * sixteenth
@@ -190,7 +190,7 @@ def expected_figuration_sequence(
     v1: list[tuple[int, int]] = []
     for bar in range(14):
         tick = bar * ticks_per_bar
-        v1.append((tick, 36 + (PHASE17_BAR_ROOT[bar] % 12)))
+        v1.append((tick, 36 + (ORGAN_PRELUDE_BAR_ROOT[bar] % 12)))
     v1.append((14 * ticks_per_bar, 43))
     v1.sort()
 
@@ -200,11 +200,11 @@ def expected_figuration_sequence(
 def expected_toccata_sequence(
     fixture: dict[str, Any],
 ) -> dict[tuple[int, str], list[tuple[int, int]]]:
-    """Predict the Phase18 ToccataCarrier note stream for a seed fixture.
+    """Predict the OrganToccata ToccataCarrier note stream for a seed fixture.
 
-    Mirrors buildPhase18Fixture in src/composer/harness_fixture.cpp: 16 bars,
+    Mirrors buildOrganToccataFixture in src/composer/harness_fixture.cpp: 16 bars,
     one triad per bar from the diatonic C-major I IV V vi progression cycled
-    over 16 bars (bar b -> root = PHASE18_BAR_ROOT[b % 4]; minor = (b % 4 == 3)).
+    over 16 bars (bar b -> root = ORGAN_TOCCATA_BAR_ROOT[b % 4]; minor = (b % 4 == 3)).
     The single voice (V0) carries continuous sixteenth-note scalar-wave
     figuration. The archetype (seed % 4) only changes how the bars are grouped
     into ToccataCarrier sections; it does NOT change the pitches. Because all
@@ -212,10 +212,10 @@ def expected_toccata_sequence(
     (0, "ToccataCarrier") group of 256 contiguous notes, so the predictor needs
     only the scalar-wave offset = (seed // 4) % 4 (NOT the archetype).
 
-    Each bar opens on a chord tone: start = phase17_scale_up(60 + root, offset)
+    Each bar opens on a chord tone: start = organPrelude_scale_up(60 + root, offset)
     snapped up to the nearest triad pitch class, then an ascending run of
     (16/2 + 1) = 9 C-major scale degrees mirrored back down (dropping the peak
-    duplicate) and tiled to 16 sixteenths. Reuses the Phase17 C-major scale walk
+    duplicate) and tiled to 16 sixteenths. Reuses the OrganPrelude C-major scale walk
     verbatim (the toccata figuration is identical to the prelude figuration).
 
     @param fixture fixture_for_seed() output (with injected "seed") for the seed.
@@ -228,14 +228,14 @@ def expected_toccata_sequence(
     seq: list[tuple[int, int]] = []
     for bar in range(16):
         cyc = bar % 4
-        root = PHASE18_BAR_ROOT[cyc]
+        root = ORGAN_TOCCATA_BAR_ROOT[cyc]
         minor = cyc == 3
         third = 3 if minor else 4
         triad = {root % 12, (root + third) % 12, (root + 7) % 12}
-        start = phase17_scale_up(60 + root, offset)
+        start = organPrelude_scale_up(60 + root, offset)
         while start % 12 not in triad:
             start += 1
-        wave = [phase17_scale_up(start, i) for i in range(16 // 2 + 1)]
+        wave = [organPrelude_scale_up(start, i) for i in range(16 // 2 + 1)]
         wave += wave[-2::-1]
         for n in range(16):
             tick = bar * ticks_per_bar + n * sixteenth
@@ -247,15 +247,15 @@ def expected_toccata_sequence(
 def expected_chorale_sequence(
     fixture: dict[str, Any],
 ) -> dict[tuple[int, str], list[tuple[int, int]]]:
-    """Predict the Phase19 FigurationCarrier + CantusFirmusCarrier note streams.
+    """Predict the ChoralePrelude FigurationCarrier + CantusFirmusCarrier note streams.
 
-    Mirrors buildPhase19Fixture in src/composer/harness_fixture.cpp: 16 bars,
-    one major triad per bar (PHASE19_BAR_ROOT, all major). V1 carries the
-    embellished cantus firmus (PHASE19_CF_SKELETON via phase19_cf_embellished:
+    Mirrors buildChoralePreludeFixture in src/composer/harness_fixture.cpp: 16 bars,
+    one major triad per bar (CHORALE_PRELUDE_BAR_ROOT, all major). V1 carries the
+    embellished cantus firmus (CHORALE_PRELUDE_CF_SKELETON via choralePrelude_cf_embellished:
     each bar = skeleton tone half note on the downbeat + two stepwise quarter
-    passing tones toward the next bar's tone). V0 carries the exact Phase17
+    passing tones toward the next bar's tone). V0 carries the exact OrganPrelude
     scalar-wave figuration (16 sixteenths/bar, opening on a chord tone snapped
-    from phase17_scale_up(60 + root, offset), ascending 9 degrees mirrored and
+    from organPrelude_scale_up(60 + root, offset), ascending 9 degrees mirrored and
     tiled to 16). The offset is seed % 4, which equals fixture["harm_idx"].
 
     @param fixture fixture_for_seed() output for the seed under test.
@@ -267,15 +267,15 @@ def expected_chorale_sequence(
     offset = fixture["harm_idx"] % 4
 
     # V0 figuration: 16 sixteenths per bar, all 16 bars; identical scalar-wave
-    # construction to Phase17 (every Phase19 bar is major, so third = 4).
+    # construction to OrganPrelude (every ChoralePrelude bar is major, so third = 4).
     v0: list[tuple[int, int]] = []
     for bar in range(16):
-        root = PHASE19_BAR_ROOT[bar]
+        root = CHORALE_PRELUDE_BAR_ROOT[bar]
         triad = {root % 12, (root + 4) % 12, (root + 7) % 12}
-        start = phase17_scale_up(60 + root, offset)
+        start = organPrelude_scale_up(60 + root, offset)
         while start % 12 not in triad:
             start += 1
-        wave = [phase17_scale_up(start, i) for i in range(16 // 2 + 1)]
+        wave = [organPrelude_scale_up(start, i) for i in range(16 // 2 + 1)]
         wave += wave[-2::-1]
         for n in range(16):
             tick = bar * ticks_per_bar + n * sixteenth
@@ -283,7 +283,7 @@ def expected_chorale_sequence(
     v0.sort()
 
     # V1 cantus firmus: the embellished chorale tune (downbeats == skeleton).
-    v1 = phase19_cf_embellished()
+    v1 = choralePrelude_cf_embellished()
 
     return {(0, "FigurationCarrier"): v0, (1, "CantusFirmusCarrier"): v1}
 
@@ -291,14 +291,14 @@ def expected_chorale_sequence(
 def expected_passacaglia_sequence(
     fixture: dict[str, Any],
 ) -> dict[tuple[int, str], list[tuple[int, int]]]:
-    """Predict the Phase20 PassacagliaGround + PassacagliaVariation note streams.
+    """Predict the Passacaglia PassacagliaGround + PassacagliaVariation note streams.
 
-    Mirrors buildPhase20Fixture in src/composer/harness_fixture.cpp: 24 bars =
-    3 cycles of an immutable 8-bar ground bass (PHASE20_GROUND, one whole-note
+    Mirrors buildPassacagliaFixture in src/composer/harness_fixture.cpp: 24 bars =
+    3 cycles of an immutable 8-bar ground bass (PASSACAGLIA_GROUND, one whole-note
     per bar, V1) plus three variation blocks (V0), one per cycle, of rising
-    density (PHASE20_BLOCK_NPB = 2 / 4 / 4 notes-per-beat). Each variation bar
+    density (PASSACAGLIA_BLOCK_NPB = 2 / 4 / 4 notes-per-beat). Each variation bar
     is a stepwise scalar wave through C natural minor, starting ``offset =
-    seed % 4`` scale degrees above the bar's lowest chord tone (PHASE20_VAR_T0):
+    seed % 4`` scale degrees above the bar's lowest chord tone (PASSACAGLIA_VAR_T0):
     an ascending run of (m/2 + 1) degrees mirrored back down (dropping the
     duplicated peak) and tiled to m = 4 * notes_per_beat notes. The offset is
     seed % 4, which equals fixture["harm_idx"]. The is_climax flag on the last
@@ -319,7 +319,7 @@ def expected_passacaglia_sequence(
     for cycle in range(cycles):
         for bar in range(cycle_bars):
             tick = (cycle * cycle_bars + bar) * ticks_per_bar
-            ground.append((tick, PHASE20_GROUND[bar]))
+            ground.append((tick, PASSACAGLIA_GROUND[bar]))
     ground.sort()
 
     # PassacagliaVariation: one block per cycle, each 8 bars, density-tiered.
@@ -328,13 +328,13 @@ def expected_passacaglia_sequence(
     offset = fixture["harm_idx"] % 4
     variation: list[tuple[int, int]] = []
     for cycle in range(cycles):
-        npb = PHASE20_BLOCK_NPB[cycle]
+        npb = PASSACAGLIA_BLOCK_NPB[cycle]
         step = ticks_per_beat // npb
         block_base = cycle * cycle_bars * ticks_per_bar
         for bar in range(cycle_bars):
             m = 4 * npb
-            start = phase16_scale_up(PHASE20_VAR_T0[bar], offset)
-            wave = [phase16_scale_up(start, i) for i in range(m // 2 + 1)]
+            start = chaconne_scale_up(PASSACAGLIA_VAR_T0[bar], offset)
+            wave = [chaconne_scale_up(start, i) for i in range(m // 2 + 1)]
             wave += wave[-2::-1]
             for beat in range(4):
                 for sub in range(npb):
@@ -349,15 +349,15 @@ def expected_passacaglia_sequence(
 def expected_trio_sequence(
     fixture: dict[str, Any],
 ) -> dict[tuple[int, str], list[tuple[int, int]]]:
-    """Predict the Phase21 TrioVoiceCarrier note streams for a seed fixture.
+    """Predict the TrioSonata TrioVoiceCarrier note streams for a seed fixture.
 
-    Mirrors buildPhase21Fixture in src/composer/harness_fixture.cpp: 16 bars,
+    Mirrors buildTrioSonataFixture in src/composer/harness_fixture.cpp: 16 bars,
     one triad per bar from the diatonic C-major I IV V vi progression cycled
-    over 16 bars (bar b -> root = PHASE21_BAR_ROOT[b % 4]; minor = (b % 4 == 3)).
+    over 16 bars (bar b -> root = TRIO_SONATA_BAR_ROOT[b % 4]; minor = (b % 4 == 3)).
     Three independent TrioVoiceCarrier voices, each replayed verbatim:
 
       - V0 (RH / Great): 16 sixteenth-notes/bar (4 notes/beat -> m=16). The bar
-        opens on a chord tone: start = phase17_scale_up(72 + root_pc, offset)
+        opens on a chord tone: start = organPrelude_scale_up(72 + root_pc, offset)
         snapped UP to the nearest triad pitch class, then an ascending run of
         (m/2 + 1) C-major scale degrees mirrored back down (dropping the peak
         duplicate) and tiled to m. 256 notes total.
@@ -368,7 +368,7 @@ def expected_trio_sequence(
         (40 + root_pc + 7). 64 notes total.
 
     Total = 448 notes. The offset is seed % 4, which equals fixture["harm_idx"].
-    Reuses the Phase17 C-major scale walk verbatim for V0/V1 (the trio figuration
+    Reuses the OrganPrelude C-major scale walk verbatim for V0/V1 (the trio figuration
     is the same scalar-wave construction as the prelude / toccata figuration).
 
     @param fixture fixture_for_seed() output for the seed under test.
@@ -385,14 +385,14 @@ def expected_trio_sequence(
         step = ticks_per_beat // notes_per_beat
         for bar in range(16):
             cyc = bar % 4
-            root = PHASE21_BAR_ROOT[cyc]
-            third = 3 if PHASE21_BAR_MINOR[cyc] else 4
+            root = TRIO_SONATA_BAR_ROOT[cyc]
+            third = 3 if TRIO_SONATA_BAR_MINOR[cyc] else 4
             triad = {root % 12, (root + third) % 12, (root + 7) % 12}
-            start = phase17_scale_up(base_octave + root, offset)
+            start = organPrelude_scale_up(base_octave + root, offset)
             while start % 12 not in triad:
                 start += 1
             m = 4 * notes_per_beat
-            wave = [phase17_scale_up(start, i) for i in range(m // 2 + 1)]
+            wave = [organPrelude_scale_up(start, i) for i in range(m // 2 + 1)]
             wave += wave[-2::-1]
             for beat in range(4):
                 for sub in range(notes_per_beat):
@@ -403,14 +403,14 @@ def expected_trio_sequence(
         seq.sort()
         return seq
 
-    v0 = scalar_voice(PHASE21_V0_BASE, PHASE21_V0_NPB)
-    v1 = scalar_voice(PHASE21_V1_BASE, PHASE21_V1_NPB)
+    v0 = scalar_voice(TRIO_SONATA_V0_BASE, TRIO_SONATA_V0_NPB)
+    v1 = scalar_voice(TRIO_SONATA_V1_BASE, TRIO_SONATA_V1_NPB)
 
     # V2 pedal: root on strong beats (0, 2), perfect fifth on weak beats (1, 3).
     v2: list[tuple[int, int]] = []
     for bar in range(16):
-        root_pc = PHASE21_BAR_ROOT[bar % 4] % 12
-        root_midi = PHASE21_PEDAL_BASE + root_pc
+        root_pc = TRIO_SONATA_BAR_ROOT[bar % 4] % 12
+        root_midi = TRIO_SONATA_PEDAL_BASE + root_pc
         fifth_midi = root_midi + 7
         for beat in range(4):
             tick = bar * ticks_per_bar + beat * ticks_per_beat
@@ -427,16 +427,16 @@ def expected_trio_sequence(
 def expected_fantasia_sequence(
     fixture: dict[str, Any],
 ) -> dict[tuple[int, str], list[tuple[int, int]]]:
-    """Predict the Phase22 FantasiaCarrier note stream for a seed fixture.
+    """Predict the Fantasia FantasiaCarrier note stream for a seed fixture.
 
-    Mirrors buildPhase22Fixture in src/composer/harness_fixture.cpp: 16 bars,
+    Mirrors buildFantasiaFixture in src/composer/harness_fixture.cpp: 16 bars,
     one triad per bar from the diatonic C-major I IV V vi progression cycled
-    over 16 bars (bar b -> root = PHASE22_BAR_ROOT[b % 4]; minor = (b % 4 == 3)).
+    over 16 bars (bar b -> root = FANTASIA_BAR_ROOT[b % 4]; minor = (b % 4 == 3)).
     A single voice (V0) is organized into FOUR contiguous 4-bar FantasiaCarrier
-    sections (PHASE22_SECTIONS), each a contrasting texture density / register:
+    sections (FANTASIA_SECTIONS), each a contrasting texture density / register:
 
       - A bars 0-3   (Free,    base C3 48): 4 quarter notes/bar. The bar opens on
-        a chord tone (start = phase17_scale_up(base, offset) snapped UP to the
+        a chord tone (start = organPrelude_scale_up(base, offset) snapped UP to the
         nearest triad pitch class), then walks the C-major scale up-up-down:
         [start, +1, +2, +1] degrees. 16 notes.
       - B bars 4-7   (Fugal,   base C4 60): 8 eighth notes/bar, scalar wave
@@ -449,7 +449,7 @@ def expected_fantasia_sequence(
 
     All four sections are voice 0 / intent FantasiaCarrier, so they merge into
     ONE (0, "FantasiaCarrier") group of 120 contiguous notes. The offset is
-    seed % 4, which equals fixture["harm_idx"]. Reuses the Phase17 C-major scale
+    seed % 4, which equals fixture["harm_idx"]. Reuses the OrganPrelude C-major scale
     walk verbatim (the fantasia figuration is the same scalar-wave construction
     as the prelude / toccata / trio figuration).
 
@@ -465,29 +465,29 @@ def expected_fantasia_sequence(
 
     def chord_tone_start(bar: int, base_midi: int) -> int:
         cyc = bar % 4
-        root = PHASE22_BAR_ROOT[cyc]
-        third = 3 if PHASE22_BAR_MINOR[cyc] else 4
+        root = FANTASIA_BAR_ROOT[cyc]
+        third = 3 if FANTASIA_BAR_MINOR[cyc] else 4
         triad = {root % 12, (root + third) % 12, (root + 7) % 12}
-        start = phase17_scale_up(base_midi, offset)
+        start = organPrelude_scale_up(base_midi, offset)
         while start % 12 not in triad:
             start += 1
         return start
 
     seq: list[tuple[int, int]] = []
-    for first_bar, last_bar, _density, base_midi, kind in PHASE22_SECTIONS:
+    for first_bar, last_bar, _density, base_midi, kind in FANTASIA_SECTIONS:
         for bar in range(first_bar, last_bar + 1):
             start = chord_tone_start(bar, base_midi)
             bar_base = bar * ticks_per_bar
             if kind == 0:  # quarters: [start, +1, +2, +1].
-                wave = [start, phase17_scale_up(start, 1),
-                        phase17_scale_up(start, 2), phase17_scale_up(start, 1)]
+                wave = [start, organPrelude_scale_up(start, 1),
+                        organPrelude_scale_up(start, 2), organPrelude_scale_up(start, 1)]
                 for beat in range(4):
                     seq.append((bar_base + beat * ticks_per_beat, wave[beat]))
             elif kind in (1, 2):  # eighths / sixteenths: scalar wave.
                 npb = 2 if kind == 1 else 4
                 step = eighth if kind == 1 else sixteenth
                 m = 4 * npb
-                wave = [phase17_scale_up(start, i) for i in range(m // 2 + 1)]
+                wave = [organPrelude_scale_up(start, i) for i in range(m // 2 + 1)]
                 wave += wave[-2::-1]
                 for beat in range(4):
                     for sub in range(npb):
@@ -495,7 +495,7 @@ def expected_fantasia_sequence(
                         idx = beat * npb + sub
                         seq.append((tick, wave[idx % len(wave)]))
             elif kind == 3:  # half-notes: [start, +1].
-                wave = [start, phase17_scale_up(start, 1)]
+                wave = [start, organPrelude_scale_up(start, 1)]
                 for h in range(2):
                     seq.append((bar_base + h * half, wave[h]))
     seq.sort()
@@ -505,15 +505,15 @@ def expected_fantasia_sequence(
 def expected_suite_sequence(
     fixture: dict[str, Any],
 ) -> dict[tuple[int, str], list[tuple[int, int]]]:
-    """Predict the Phase23 keyboard-suite carrier note streams for a seed fixture.
+    """Predict the KeyboardSuite keyboard-suite carrier note streams for a seed fixture.
 
-    Mirrors buildPhase23Fixture in src/composer/harness_fixture.cpp: 20 bars,
+    Mirrors buildKeyboardSuiteFixture in src/composer/harness_fixture.cpp: 20 bars,
     one triad per bar from the diatonic C-major I IV V vi progression cycled over
-    20 bars (bar b -> root = PHASE23_BAR_ROOT[b % 4]; minor = (b % 4 == 3)). The
-    suite is a reuse-only assembly of the proven Phase16/Phase17/Phase22 carriers:
+    20 bars (bar b -> root = KEYBOARD_SUITE_BAR_ROOT[b % 4]; minor = (b % 4 == 3)). The
+    suite is a reuse-only assembly of the proven Chaconne/OrganPrelude/Fantasia carriers:
 
-      - V0 dance line: five contiguous 4-bar movements (PHASE23_MOVEMENTS). Each
-        bar opens on a chord tone (start = phase17_scale_up(base_midi, offset)
+      - V0 dance line: five contiguous 4-bar movements (KEYBOARD_SUITE_MOVEMENTS). Each
+        bar opens on a chord tone (start = organPrelude_scale_up(base_midi, offset)
         snapped UP to the nearest triad pitch class) and runs the canonical
         scalar wave (ascending (m/2 + 1) C-major scale degrees mirrored back down,
         dropping the duplicated peak, tiled to m notes/bar). Movements 1 & 4 are
@@ -528,12 +528,12 @@ def expected_suite_sequence(
           Gigue     (sixteenths, m=16, base 76): 64 notes -> Fantasia.
         => (0, "FigurationCarrier") = 64 + 32 = 96 notes,
            (0, "FantasiaCarrier")  = 32 + 8 + 64 = 104 notes.
-      - V1 ground bass: the immutable 4-bar ground (PHASE23_GROUND, one whole-note
+      - V1 ground bass: the immutable 4-bar ground (KEYBOARD_SUITE_GROUND, one whole-note
         per bar, cycle-relative ticks) period-tiled 5x over the 20 bars (5 clean
         cycles, 20 notes). One (1, "GroundCarrier") group.
 
     Total = 96 + 104 + 20 = 220 notes. The offset is seed % 4, which equals
-    fixture["harm_idx"]. Reuses the Phase17 C-major scale walk verbatim.
+    fixture["harm_idx"]. Reuses the OrganPrelude C-major scale walk verbatim.
 
     @param fixture fixture_for_seed() output for the seed under test.
     @return {(0, "FigurationCarrier"): [(start_tick, pitch)] (96 notes),
@@ -550,20 +550,20 @@ def expected_suite_sequence(
 
     def build_wave(bar: int, base_midi: int, m: int) -> list[int]:
         cyc = bar % cycle_bars
-        root_pc = PHASE23_BAR_ROOT[cyc]
-        third = 3 if PHASE23_BAR_MINOR[cyc] else 4
+        root_pc = KEYBOARD_SUITE_BAR_ROOT[cyc]
+        third = 3 if KEYBOARD_SUITE_BAR_MINOR[cyc] else 4
         triad = {root_pc % 12, (root_pc + third) % 12, (root_pc + 7) % 12}
-        start = phase17_scale_up(base_midi, offset)
+        start = organPrelude_scale_up(base_midi, offset)
         while start % 12 not in triad:
             start += 1
-        wave = [phase17_scale_up(start, i) for i in range(m // 2 + 1)]
+        wave = [organPrelude_scale_up(start, i) for i in range(m // 2 + 1)]
         wave += wave[-2::-1]
         return wave
 
     # V0 movements -> two merged carrier groups by carrier kind.
     figuration: list[tuple[int, int]] = []
     fantasia: list[tuple[int, int]] = []
-    for first_bar, last_bar, carrier, kind, base_midi in PHASE23_MOVEMENTS:
+    for first_bar, last_bar, carrier, kind, base_midi in KEYBOARD_SUITE_MOVEMENTS:
         dst = figuration if carrier == 0 else fantasia
         for bar in range(first_bar, last_bar + 1):
             bar_base = bar * ticks_per_bar
@@ -590,7 +590,7 @@ def expected_suite_sequence(
     for cycle in range(cycles):
         for bar in range(cycle_bars):
             tick = (cycle * cycle_bars + bar) * ticks_per_bar
-            ground.append((tick, PHASE23_GROUND[bar]))
+            ground.append((tick, KEYBOARD_SUITE_GROUND[bar]))
     ground.sort()
 
     return {
@@ -603,20 +603,20 @@ def expected_suite_sequence(
 def expected_wtc_pair_sequence(
     fixture: dict[str, Any],
 ) -> dict[tuple[int, str], list[tuple[int, int]]]:
-    """Predict the Phase24 WTC Prelude+Fugue pair carrier note streams.
+    """Predict the PreludeAndFugue WTC Prelude+Fugue pair carrier note streams.
 
-    Mirrors buildPhase24Fixture in src/composer/harness_fixture.cpp: a 24-bar /
+    Mirrors buildPreludeAndFugueFixture in src/composer/harness_fixture.cpp: a 24-bar /
     3-voice C-major movement (Prelude bars 0-7 + Fugue bars 8-23), one triad per
     bar from the diatonic I IV V vi progression cycled over 24 bars (bar b -> root
-    = PHASE24_BAR_ROOT[b % 4]; minor = (b % 4 == 3)). The Phase24 fixture is a
+    = PRELUDE_AND_FUGUE_BAR_ROOT[b % 4]; minor = (b % 4 == 3)). The PreludeAndFugue fixture is a
     reuse-only assembly:
 
-      PRELUDE (FigurationCarrier, PHASE24_PRELUDE_SECTIONS). Unlike the
-      single-voice Phase17 prelude (which anchors only the bar downbeat), the WTC pair
+      PRELUDE (FigurationCarrier, PRELUDE_AND_FUGUE_PRELUDE_SECTIONS). Unlike the
+      single-voice OrganPrelude prelude (which anchors only the bar downbeat), the WTC pair
       sounds two figuration voices simultaneously, so EVERY beat is anchored to a
-      chord tone: the per-bar anchor is start = phase17_scale_up(base_midi + root,
+      chord tone: the per-bar anchor is start = organPrelude_scale_up(base_midi + root,
       offset) snapped UP to the nearest triad pitch class, and EVERY beat restarts
-      from that same anchor, walking phase17_scale_up(anchor, sub) for the rest of
+      from that same anchor, walking organPrelude_scale_up(anchor, sub) for the rest of
       the beat (a 4-fold repeated up-run sawtooth). offset = seed % 4 ==
       fixture["harm_idx"].
         - V0 sec0 bars 0-3: 16 sixteenths/bar, base C4 (60) -> 64 notes.
@@ -626,9 +626,9 @@ def expected_wtc_pair_sequence(
       into ONE (0, "FigurationCarrier") group of 128 notes; the V1 bass is its own
       (1, "FigurationCarrier") group of 64 notes.
 
-      FUGUE (PHASE24_FUGUE_ENTRIES). 16 quarter-notes per entry: note n -> bar =
+      FUGUE (PRELUDE_AND_FUGUE_FUGUE_ENTRIES). 16 quarter-notes per entry: note n -> bar =
       first_bar + n // 4, beat = n % 4, pitch = subj_pat[n] + semis where subj_pat
-      = PHASE14_SUBJECTS[(seed // 4) % 5]. Real answer = subject - 5 (-P4),
+      = FUGUE_COMPLETE_SUBJECTS[(seed // 4) % 5]. Real answer = subject - 5 (-P4),
       re-entry = subject - 12 (-P8), stretto leader = subject verbatim.
         - V0 SubjectCarrier bars 8-11  (+0)  -> joins (0, "SubjectCarrier").
         - V1 AnswerCarrier  bars 12-15 (-5)  -> (1, "AnswerCarrier").
@@ -658,23 +658,23 @@ def expected_wtc_pair_sequence(
         dst: list[tuple[int, int]], bar: int, base_midi: int, notes_per_beat: int
     ) -> None:
         cyc = bar % cycle_bars
-        root_pc = PHASE24_BAR_ROOT[cyc]
-        third = 3 if PHASE24_BAR_MINOR[cyc] else 4
+        root_pc = PRELUDE_AND_FUGUE_BAR_ROOT[cyc]
+        third = 3 if PRELUDE_AND_FUGUE_BAR_MINOR[cyc] else 4
         triad = {root_pc % 12, (root_pc + third) % 12, (root_pc + 7) % 12}
         # Per-bar chord-tone anchor: root in base_midi's octave, +offset degrees,
         # snapped UP to a chord tone. EVERY beat restarts from this anchor.
-        anchor = phase17_scale_up(base_midi + root_pc, offset)
+        anchor = organPrelude_scale_up(base_midi + root_pc, offset)
         while anchor % 12 not in triad:
             anchor += 1
         step = sixteenth if notes_per_beat == 4 else eighth
         for beat in range(4):
             for sub in range(notes_per_beat):
                 tick = bar * ticks_per_bar + beat * ticks_per_beat + sub * step
-                dst.append((tick, phase17_scale_up(anchor, sub)))
+                dst.append((tick, organPrelude_scale_up(anchor, sub)))
 
     figuration_v0: list[tuple[int, int]] = []
     figuration_v1: list[tuple[int, int]] = []
-    for voice, first_bar, last_bar, base_midi, npb, _pedal in PHASE24_PRELUDE_SECTIONS:
+    for voice, first_bar, last_bar, base_midi, npb, _pedal in PRELUDE_AND_FUGUE_PRELUDE_SECTIONS:
         dst = figuration_v0 if voice == 0 else figuration_v1
         for bar in range(first_bar, last_bar + 1):
             append_figuration_bar(dst, bar, base_midi, npb)
@@ -683,9 +683,9 @@ def expected_wtc_pair_sequence(
 
     # Fugue entries: 16 quarter-notes each. The two V0 SubjectCarrier windows
     # merge into one group; group by (voice, intent).
-    subj_pat = PHASE14_SUBJECTS[(fixture["seed"] // 4) % 5]
+    subj_pat = FUGUE_COMPLETE_SUBJECTS[(fixture["seed"] // 4) % 5]
     groups: dict[tuple[int, str], list[tuple[int, int]]] = {}
-    for voice, first_bar, intent, semis in PHASE24_FUGUE_ENTRIES:
+    for voice, first_bar, intent, semis in PRELUDE_AND_FUGUE_FUGUE_ENTRIES:
         seq = groups.setdefault((voice, intent), [])
         for n in range(16):
             bar = first_bar + n // 4
@@ -706,24 +706,24 @@ def expected_wtc_pair_sequence(
 def expected_goldberg_sequence(
     fixture: dict[str, Any],
 ) -> dict[tuple[int, str], list[tuple[int, int]]]:
-    """Predict the Phase25 PassacagliaGround + PassacagliaVariation note streams.
+    """Predict the GoldbergVariations PassacagliaGround + PassacagliaVariation note streams.
 
-    Mirrors buildPhase25Fixture in src/composer/harness_fixture.cpp: 20 bars =
+    Mirrors buildGoldbergVariationsFixture in src/composer/harness_fixture.cpp: 20 bars =
     an Aria (bars 0-3) + four variations (bars 4-19), 2 voices, C major. V1
-    carries the immutable 4-bar Goldberg-style bass (PHASE25_GROUND, one
+    carries the immutable 4-bar Goldberg-style bass (GOLDBERG_VARIATIONS_GROUND, one
     whole-note per bar) tiled 5x (PassacagliaGround). V0 carries five 4-bar
-    blocks (PassacagliaVariation, PHASE25_BLOCK_SPEC): the Aria (block 0) plus
+    blocks (PassacagliaVariation, GOLDBERG_VARIATIONS_BLOCK_SPEC): the Aria (block 0) plus
     four rising-density variations. The is_climax flag on block 4 changes only
     the ClimaxPlaced bit (not pitch / tick), so it is not modeled here.
 
     Each variation bar starts from a chord-tone anchor:
       chord_start = 72 + ((root_pc - (72 % 12) + 12) % 12)  (= 72/77/79/81 for the
         I/IV/V/vi roots; all already C-major scale tones, so the C++
-        phase17ScaleUp(chord_start, 0) is a no-op);
-      start = phase17_scale_up(chord_start, offset).
+        organPreludeScaleUp(chord_start, 0) is a no-op);
+      start = organPrelude_scale_up(chord_start, offset).
     The two block kinds differ:
       - Aria (block 0, m=2): two half-notes/bar -> note0 = (bar_start, start),
-        note1 = (bar_start + 960, phase17_scale_up(start, 1)). This is NOT a
+        note1 = (bar_start + 960, organPrelude_scale_up(start, 1)). This is NOT a
         scalar wave (the special sarabande-like layout).
       - Blocks 1-4 (uniform): npb = m / 4 (1 / 2 / 2 / 4); step = 480 if npb==1
         else 240 if npb==2 else 120. Build the wave (ascending m/2+1 degrees
@@ -731,7 +731,7 @@ def expected_goldberg_sequence(
         sub 0..npb-1 -> pitch = wave[(beat*npb + sub) % len(wave)].
 
     Per-voice note counts: V0 = 8 + 16 + 32 + 32 + 64 = 152; V1 = 20. Total 172.
-    The offset is seed % 4, which equals fixture["harm_idx"]. Reuses the Phase17
+    The offset is seed % 4, which equals fixture["harm_idx"]. Reuses the OrganPrelude
     C-major scale walk verbatim.
 
     @param fixture fixture_for_seed() output for the seed under test.
@@ -752,31 +752,31 @@ def expected_goldberg_sequence(
     for cycle in range(cycles):
         for bar in range(cycle_bars):
             tick = (cycle * cycle_bars + bar) * ticks_per_bar
-            ground.append((tick, PHASE25_GROUND[bar]))
+            ground.append((tick, GOLDBERG_VARIATIONS_GROUND[bar]))
     ground.sort()
 
     # PassacagliaVariation: the Aria block + four rising-density variation blocks.
     variation: list[tuple[int, int]] = []
     for block in range(blocks):
-        _density, m, base_midi, _is_climax = PHASE25_BLOCK_SPEC[block]
+        _density, m, base_midi, _is_climax = GOLDBERG_VARIATIONS_BLOCK_SPEC[block]
         block_base = block * cycle_bars * ticks_per_bar
         for bar in range(cycle_bars):
-            root_pc = PHASE25_BAR_ROOT[bar]
+            root_pc = GOLDBERG_VARIATIONS_BAR_ROOT[bar]
             # Snap base_midi UP to the bar chord root in base_midi's octave, then
-            # `offset` C-major degrees up. (phase17_scale_up(chord_start, 0) is a
+            # `offset` C-major degrees up. (organPrelude_scale_up(chord_start, 0) is a
             # no-op since chord_start is already a scale tone.)
             chord_start = base_midi + ((root_pc - (base_midi % 12) + 12) % 12)
-            start = phase17_scale_up(chord_start, offset)
+            start = organPrelude_scale_up(chord_start, offset)
             bar_start = block_base + bar * ticks_per_bar
             if block == 0:
                 # Aria: half note (start) then half note (start + 1 degree).
                 variation.append((bar_start, start))
-                variation.append((bar_start + half, phase17_scale_up(start, 1)))
+                variation.append((bar_start + half, organPrelude_scale_up(start, 1)))
                 continue
             # Uniform-subdivision scalar wave.
             npb = m // 4
             step = 480 if npb == 1 else (240 if npb == 2 else 120)
-            wave = [phase17_scale_up(start, i) for i in range(m // 2 + 1)]
+            wave = [organPrelude_scale_up(start, i) for i in range(m // 2 + 1)]
             wave += wave[-2::-1]
             for beat in range(4):
                 for sub in range(npb):
@@ -797,7 +797,7 @@ def expected_carrier_sequences(
 
     NOTE (structural_ok scope): this predictor validates ONLY the
     exposition entries (V0 subject, V1 answer, V2 re-entry) plus the V0
-    stretto leader for Phase14. Counterline, development, NCT and rhythm
+    stretto leader for FugueComplete. Counterline, development, NCT and rhythm
     carriers (~90% of the notes in a full fugue) are NOT modeled here, so
     structural_ok is a necessary, not sufficient, structural guarantee.
 
@@ -805,44 +805,44 @@ def expected_carrier_sequences(
     re-entry assembly in src/composer/harness_fixture.cpp.
 
     This is fully layout-driven: there is no per-phase hard-coded carrier
-    table, so any phase registered in PHASE_LAYOUT (including Phase14) reuses
-    the generic exposition derivation below. Phase14 carries the standard
+    table, so any phase registered in PHASE_LAYOUT (including FugueComplete) reuses
+    the generic exposition derivation below. FugueComplete carries the standard
     three exposition entries (subject_bars=4, with_answer, with_third_entry)
     and intentionally omits the "development" branch, so no 42-bar-specific
     sequence is hand-coded here (which would be brittle); the structural check
-    therefore validates only the three exposition entries for Phase14.
+    therefore validates only the three exposition entries for FugueComplete.
 
-    Phase15 has no exposition; it dispatches to the verbatim-arpeggio predictor.
-    Phase16 has no exposition; it dispatches to the ground/variation predictor.
-    Phase17 has no exposition; it dispatches to the figuration predictor.
-    Phase18 has no exposition; it dispatches to the toccata predictor.
-    Phase19 has no exposition; it dispatches to the chorale predictor.
-    Phase20 has no exposition; it dispatches to the passacaglia predictor.
-    Phase21 has no exposition; it dispatches to the trio-sonata predictor.
-    Phase22 has no exposition; it dispatches to the fantasia predictor.
-    Phase23 has no exposition; it dispatches to the keyboard-suite predictor.
+    CelloPrelude has no exposition; it dispatches to the verbatim-arpeggio predictor.
+    Chaconne has no exposition; it dispatches to the ground/variation predictor.
+    OrganPrelude has no exposition; it dispatches to the figuration predictor.
+    OrganToccata has no exposition; it dispatches to the toccata predictor.
+    ChoralePrelude has no exposition; it dispatches to the chorale predictor.
+    Passacaglia has no exposition; it dispatches to the passacaglia predictor.
+    TrioSonata has no exposition; it dispatches to the trio-sonata predictor.
+    Fantasia has no exposition; it dispatches to the fantasia predictor.
+    KeyboardSuite has no exposition; it dispatches to the keyboard-suite predictor.
     """
-    if phase == "Phase24":
+    if phase == "PreludeAndFugue":
         return expected_wtc_pair_sequence(fixture)
-    if phase == "Phase25":
+    if phase == "GoldbergVariations":
         return expected_goldberg_sequence(fixture)
-    if phase == "Phase15":
+    if phase == "CelloPrelude":
         return expected_arpeggio_sequence(fixture)
-    if phase == "Phase16":
+    if phase == "Chaconne":
         return expected_ground_sequence(fixture)
-    if phase == "Phase17":
+    if phase == "OrganPrelude":
         return expected_figuration_sequence(fixture)
-    if phase == "Phase18":
+    if phase == "OrganToccata":
         return expected_toccata_sequence(fixture)
-    if phase == "Phase19":
+    if phase == "ChoralePrelude":
         return expected_chorale_sequence(fixture)
-    if phase == "Phase20":
+    if phase == "Passacaglia":
         return expected_passacaglia_sequence(fixture)
-    if phase == "Phase21":
+    if phase == "TrioSonata":
         return expected_trio_sequence(fixture)
-    if phase == "Phase22":
+    if phase == "Fantasia":
         return expected_fantasia_sequence(fixture)
-    if phase == "Phase23":
+    if phase == "KeyboardSuite":
         return expected_suite_sequence(fixture)
     layout = PHASE_LAYOUT[phase]
     subject_bars = layout["subject_bars"]
@@ -850,7 +850,7 @@ def expected_carrier_sequences(
     subj_a = fixture["subj_idx"]
     ticks_per_bar = 1920
     ticks_per_beat = 480
-    patterns = PHASE14_SUBJECTS if phase == "Phase14" else SUBJECT_PATTERNS
+    patterns = FUGUE_COMPLETE_SUBJECTS if phase == "FugueComplete" else SUBJECT_PATTERNS
     out: dict[tuple[int, str], list[tuple[int, int]]] = {}
 
     v0_seq: list[tuple[int, int]] = []
@@ -862,8 +862,8 @@ def expected_carrier_sequences(
     # A fugue may restate the subject verbatim in V0 as a stretto leader;
     # that span also carries intent SubjectCarrier, so it joins the
     # (0, SubjectCarrier) group in extract_carrier_sequences and the
-    # expected sequence must include it. Phase11 puts the leader at bar 20
-    # (via the "development" flag); Phase14 declares "stretto_leader_bar".
+    # expected sequence must include it. FugueDevelopment puts the leader at bar 20
+    # (via the "development" flag); FugueComplete declares "stretto_leader_bar".
     leader_base_bar = None
     if layout.get("development", False):
         leader_base_bar = 20
@@ -974,54 +974,54 @@ def structural_check(generated_json: Path, provenance_json: Path,
         return {"ok": False, "error": str(exc)}
 
     result: dict[str, Any] = {}
-    if phase == "Phase15":
+    if phase == "CelloPrelude":
         keys = [((0, "ArpeggioFlow"), "arpeggio_ok", "arpeggio_diff")]
-    elif phase == "Phase16":
+    elif phase == "Chaconne":
         keys = [
             ((1, "GroundCarrier"), "ground_ok", "ground_diff"),
             ((0, "VariationCarrier"), "variation_ok", "variation_diff"),
         ]
-    elif phase == "Phase17":
+    elif phase == "OrganPrelude":
         keys = [
             ((0, "FigurationCarrier"), "figuration_ok", "figuration_diff"),
             ((1, "FigurationCarrier"), "bass_ok", "bass_diff"),
         ]
-    elif phase == "Phase18":
+    elif phase == "OrganToccata":
         keys = [
             ((0, "ToccataCarrier"), "toccata_ok", "toccata_diff"),
         ]
-    elif phase == "Phase19":
+    elif phase == "ChoralePrelude":
         keys = [
             ((0, "FigurationCarrier"), "figuration_ok", "figuration_diff"),
             ((1, "CantusFirmusCarrier"), "cantus_firmus_ok", "cantus_firmus_diff"),
         ]
-    elif phase == "Phase20":
+    elif phase == "Passacaglia":
         keys = [
             ((1, "PassacagliaGround"), "ground_ok", "ground_diff"),
             ((0, "PassacagliaVariation"), "variation_ok", "variation_diff"),
         ]
-    elif phase == "Phase21":
+    elif phase == "TrioSonata":
         keys = [
             ((0, "TrioVoiceCarrier"), "rh_ok", "rh_diff"),
             ((1, "TrioVoiceCarrier"), "lh_ok", "lh_diff"),
             ((2, "TrioVoiceCarrier"), "pedal_ok", "pedal_diff"),
         ]
-    elif phase == "Phase22":
+    elif phase == "Fantasia":
         keys = [
             ((0, "FantasiaCarrier"), "fantasia_ok", "fantasia_diff"),
         ]
-    elif phase == "Phase23":
+    elif phase == "KeyboardSuite":
         keys = [
             ((0, "FigurationCarrier"), "figuration_ok", "figuration_diff"),
             ((0, "FantasiaCarrier"), "fantasia_ok", "fantasia_diff"),
             ((1, "GroundCarrier"), "ground_ok", "ground_diff"),
         ]
-    elif phase == "Phase25":
+    elif phase == "GoldbergVariations":
         keys = [
             ((1, "PassacagliaGround"), "ground_ok", "ground_diff"),
             ((0, "PassacagliaVariation"), "variation_ok", "variation_diff"),
         ]
-    elif phase == "Phase24":
+    elif phase == "PreludeAndFugue":
         keys = [
             ((0, "FigurationCarrier"), "figuration_ok", "figuration_diff"),
             ((1, "FigurationCarrier"), "bass_ok", "bass_diff"),

@@ -242,6 +242,22 @@ FormDirectorStatus buildFormFixture(const ComposeRequest& req, HarnessFixture* o
   fixture.harmony.ts_numerator = spec.ts_numerator;
   fixture.harmony.ts_denominator = spec.ts_denominator;
 
+  // Opt-in free-counterpoint activation. With the flag off this loop never
+  // runs and the fixture is the unchanged carrier-assembly result (byte-stable
+  // across every form). With it on, accompanimental inner-voice spans switch
+  // from verbatim carrier replay to the scored candidate search, so the
+  // Composer generates that voice per span. Restricted to TrioVoiceCarrier so
+  // thematic carriers (subject, answer, ground, cantus firmus) are never
+  // touched -- only the secondary voice that would otherwise replay a designed
+  // counter-line is opened to search.
+  if (req.enable_free_counterpoint) {
+    for (Span& span : fixture.voice_plan.spans) {
+      if (span.intent == VoiceIntent::TrioVoiceCarrier) {
+        span.intent = VoiceIntent::SequentialCounterline;
+      }
+    }
+  }
+
   *out = fixture;
   return FormDirectorStatus::Ok;
 }

@@ -216,14 +216,14 @@ TEST(ArpeggioFlowTest, ParallelPerfectSilentWhenFramedIntervalChanges) {
   EXPECT_FALSE(hasRule(r, "arpeggio_no_parallel_perfect"));
 }
 
-// --- 3. Phase15 fixture integration ---------------------------------------
+// --- 3. CelloPrelude fixture integration ---------------------------------------
 
 // The BWV1007 arpeggio fixture must run through the full Composer cleanly for
 // every seed family (seed%4 selects the figure ordering): no validator
 // failure, single voice, and both Flow bits stamped on every note.
-TEST(ArpeggioFlowTest, Phase15FixtureValidatesCleanAndStampsFlowBits) {
+TEST(ArpeggioFlowTest, CelloPreludeFixtureValidatesCleanAndStampsFlowBits) {
   for (int seed : {0, 1, 2, 3, 4, 5}) {
-    const HarnessFixture fx = buildHarnessFixture(HarnessPhase::Phase15, seed);
+    const HarnessFixture fx = buildHarnessFixture(HarnessPhase::CelloPrelude, seed);
     const ComposeResult r = Composer{}.run(fx.material, fx.harmony, fx.voice_plan);
 
     EXPECT_TRUE(r.validation.failures.empty())

@@ -13,7 +13,7 @@
 //      stays silent on three rhythmically distinct voices, stays inert with
 //      fewer than two trio voices, and fires on three rhythmically locked,
 //      parallel-moving voices.
-//   3. The Phase21 fixture runs through the full Composer cleanly for every seed
+//   3. The TrioSonata fixture runs through the full Composer cleanly for every seed
 //      family (seed % 4 selects the V0/V1 scalar-wave start offset): three
 //      voices at the 16 / 8 / 4 notes-per-bar densities, every trio note stamps
 //      TrioVoiceIndependent, and voice_independence_threshold does NOT soft-fail
@@ -257,16 +257,16 @@ TEST(TrioSonataTest, VoiceIndependenceFailsOnLockstepParallelMotion) {
   EXPECT_TRUE(hasRule(r, "voice_independence_threshold"));
 }
 
-// --- 3. Phase21 fixture integration ----------------------------------------
+// --- 3. TrioSonata fixture integration ----------------------------------------
 
 // The BWV525-529 trio-sonata fixture must run through the full Composer cleanly
 // for every seed family (seed % 4 selects the V0/V1 scalar-wave start offset):
 // no validator failure, three voices at the 16 / 8 / 4 notes-per-bar densities,
 // every trio note stamps TrioVoiceIndependent, and the
 // voice_independence_threshold rule does not soft-fail.
-TEST(TrioSonataTest, Phase21FixtureValidatesCleanAndStampsTrioBit) {
+TEST(TrioSonataTest, TrioSonataFixtureValidatesCleanAndStampsTrioBit) {
   for (int seed : {0, 1, 2, 3}) {
-    const HarnessFixture fx = buildHarnessFixture(HarnessPhase::Phase21, seed);
+    const HarnessFixture fx = buildHarnessFixture(HarnessPhase::TrioSonata, seed);
     const ComposeResult r = Composer{}.run(fx.material, fx.harmony, fx.voice_plan);
 
     EXPECT_TRUE(r.validation.failures.empty())

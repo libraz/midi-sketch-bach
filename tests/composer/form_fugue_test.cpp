@@ -175,7 +175,7 @@ TEST(FormFugueTest, SubjectMelodyMatchesCatalogSlot) {
           buildFixture(FormType::Fugue, seed, minor, naturalBars(FormType::Fugue));
       const std::uint8_t slot = detail::subjectSlotFor(SubjectCharacter::Severe, seed);
       const std::array<std::uint8_t, 16>& expected =
-          minor ? detail::kSubjectsMinor[slot] : detail::kPhase14Subjects[slot];
+          minor ? detail::kSubjectsMinor[slot] : detail::kFugueCompleteSubjects[slot];
 
       // The first 16 subject notes are the V0 exposition statement (bars 0-3).
       ASSERT_GE(fx.material.subject.size(), 16u);
@@ -198,7 +198,7 @@ TEST(FormFugueTest, SubjectRhythmProfileIsApplied) {
     const HarnessFixture fx =
         buildFixture(FormType::Fugue, seed, false, naturalBars(FormType::Fugue));
     const std::uint8_t slot = detail::subjectSlotFor(SubjectCharacter::Severe, seed);
-    const auto& expected = detail::kPhase14SubjectRhythms[slot];
+    const auto& expected = detail::kFugueCompleteSubjectRhythms[slot];
 
     ASSERT_GE(fx.material.subject.size(), expected.size());
     Tick cursor = 0;

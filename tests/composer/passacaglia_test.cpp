@@ -14,7 +14,7 @@
 //      StructuralFail otherwise) fires on a mutated bar head, stays silent on
 //      clean or rhythmically subdivided material, and stays inert when the
 //      ground is empty.
-//   3. The Phase20 fixture runs through the full Composer cleanly for every seed
+//   3. The Passacaglia fixture runs through the full Composer cleanly for every seed
 //      family (seed % 4 selects the scalar-wave start offset) and stamps all
 //      three Passacaglia bits in provenance.
 
@@ -327,16 +327,16 @@ TEST(PassacagliaTest, GroundImmutableInertWhenGroundEmpty) {
   EXPECT_FALSE(hasRule(r, "passacaglia_ground_immutable"));
 }
 
-// --- 3. Phase20 fixture integration ----------------------------------------
+// --- 3. Passacaglia fixture integration ----------------------------------------
 
 // The BWV582 passacaglia fixture must run through the full Composer cleanly for
 // every seed family (seed % 4 selects the scalar-wave start offset): no
 // validator failure, two voices, and all three Passacaglia bits present
 // somewhere in the provenance. ClimaxPlaced fires only on the last (climax)
 // variation block.
-TEST(PassacagliaTest, Phase20FixtureValidatesCleanAndStampsAllPassacagliaBits) {
+TEST(PassacagliaTest, PassacagliaFixtureValidatesCleanAndStampsAllPassacagliaBits) {
   for (int seed : {0, 1, 2, 3}) {
-    const HarnessFixture fx = buildHarnessFixture(HarnessPhase::Phase20, seed);
+    const HarnessFixture fx = buildHarnessFixture(HarnessPhase::Passacaglia, seed);
     const ComposeResult r = Composer{}.run(fx.material, fx.harmony, fx.voice_plan);
 
     EXPECT_TRUE(r.validation.failures.empty())

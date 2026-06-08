@@ -20,6 +20,7 @@
 #include "core/basic_types.h"
 #include "core/instrument_program.h"
 #include "core/rng_util.h"
+#include "core/version_info.h"
 #include "harmony/key.h"
 #include "midi/midi_writer.h"
 
@@ -47,7 +48,11 @@ struct CliOptions {
   // (scripts/bachlib/mirror.py + predictors.py, driven by
   // `python3 scripts/bach_tools.py closure`).
   bool composer_mode = false;
-  bach::composer::HarnessPhase composer_phase = bach::composer::HarnessPhase::Phase6;
+  bach::composer::HarnessPhase composer_phase = bach::composer::HarnessPhase::FugueExposition3v;
+  // Opt-in: route accompanimental inner-voice spans through the scored
+  // candidate search instead of replaying their designed counter-line. A
+  // measurement knob (off by default); see ComposeRequest::enable_free_counterpoint.
+  bool free_counterpoint = false;
 };
 
 /// @brief Case-insensitive ASCII string equality.
@@ -69,112 +74,125 @@ bool equalsIgnoreCase(const std::string& lhs, const char* rhs) {
   return true;
 }
 
-bach::composer::HarnessPhase parseComposerPhase(const char* val) {
-  if (std::strcmp(val, "Phase3") == 0 || std::strcmp(val, "phase3") == 0 ||
+/// @brief Parse a --composer-phase value into a HarnessPhase.
+/// @param val The raw flag value.
+/// @param recognized Set to true when @p val names a known phase, false
+///        otherwise (the return value is then an unused sentinel).
+/// @return The matching HarnessPhase, or HarnessPhase::FugueExposition3v when unrecognized.
+bach::composer::HarnessPhase parseComposerPhase(const char* val, bool& recognized) {
+  recognized = true;
+  if (std::strcmp(val, "FugueSubject2v") == 0 || std::strcmp(val, "fugueSubject2v") == 0 ||
       std::strcmp(val, "3") == 0) {
-    return bach::composer::HarnessPhase::Phase3;
+    return bach::composer::HarnessPhase::FugueSubject2v;
   }
-  if (std::strcmp(val, "Phase35") == 0 || std::strcmp(val, "phase35") == 0 ||
-      std::strcmp(val, "3.5") == 0) {
-    return bach::composer::HarnessPhase::Phase35;
+  if (std::strcmp(val, "FugueSubject2vShort") == 0 ||
+      std::strcmp(val, "fugueSubject2vShort") == 0 || std::strcmp(val, "3.5") == 0) {
+    return bach::composer::HarnessPhase::FugueSubject2vShort;
   }
-  if (std::strcmp(val, "Phase4") == 0 || std::strcmp(val, "phase4") == 0 ||
+  if (std::strcmp(val, "FugueAnswer2v") == 0 || std::strcmp(val, "fugueAnswer2v") == 0 ||
       std::strcmp(val, "4") == 0) {
-    return bach::composer::HarnessPhase::Phase4;
+    return bach::composer::HarnessPhase::FugueAnswer2v;
   }
-  if (std::strcmp(val, "Phase4Sus") == 0 || std::strcmp(val, "phase4sus") == 0 ||
-      std::strcmp(val, "4sus") == 0) {
-    return bach::composer::HarnessPhase::Phase4Sus;
+  if (std::strcmp(val, "FugueAnswerSuspension") == 0 ||
+      std::strcmp(val, "fugueAnswerSuspension") == 0 || std::strcmp(val, "4sus") == 0) {
+    return bach::composer::HarnessPhase::FugueAnswerSuspension;
   }
-  if (std::strcmp(val, "Phase5") == 0 || std::strcmp(val, "phase5") == 0 ||
+  if (std::strcmp(val, "FugueSubject3v") == 0 || std::strcmp(val, "fugueSubject3v") == 0 ||
       std::strcmp(val, "5") == 0) {
-    return bach::composer::HarnessPhase::Phase5;
+    return bach::composer::HarnessPhase::FugueSubject3v;
   }
-  if (std::strcmp(val, "Phase6Episode") == 0 || std::strcmp(val, "phase6episode") == 0 ||
-      std::strcmp(val, "6ep") == 0 || std::strcmp(val, "6episode") == 0) {
-    return bach::composer::HarnessPhase::Phase6Episode;
+  if (std::strcmp(val, "FugueExpositionEpisode") == 0 ||
+      std::strcmp(val, "fugueExpositionEpisode") == 0 || std::strcmp(val, "6ep") == 0 ||
+      std::strcmp(val, "6episode") == 0) {
+    return bach::composer::HarnessPhase::FugueExpositionEpisode;
   }
-  if (std::strcmp(val, "Phase6Tonal") == 0 || std::strcmp(val, "phase6tonal") == 0 ||
-      std::strcmp(val, "6tonal") == 0 || std::strcmp(val, "p6tonal") == 0) {
-    return bach::composer::HarnessPhase::Phase6Tonal;
+  if (std::strcmp(val, "FugueExposition3v") == 0 || std::strcmp(val, "fugueExposition3v") == 0 ||
+      std::strcmp(val, "6") == 0 || std::strcmp(val, "p6") == 0) {
+    return bach::composer::HarnessPhase::FugueExposition3v;
   }
-  if (std::strcmp(val, "Phase7") == 0 || std::strcmp(val, "phase7") == 0 ||
+  if (std::strcmp(val, "FugueExpositionTonalAnswer") == 0 ||
+      std::strcmp(val, "fugueExpositionTonalAnswer") == 0 || std::strcmp(val, "6tonal") == 0 ||
+      std::strcmp(val, "p6tonal") == 0) {
+    return bach::composer::HarnessPhase::FugueExpositionTonalAnswer;
+  }
+  if (std::strcmp(val, "FugueHarmonized") == 0 || std::strcmp(val, "fugueHarmonized") == 0 ||
       std::strcmp(val, "7") == 0 || std::strcmp(val, "p7") == 0) {
-    return bach::composer::HarnessPhase::Phase7;
+    return bach::composer::HarnessPhase::FugueHarmonized;
   }
-  if (std::strcmp(val, "Phase8") == 0 || std::strcmp(val, "phase8") == 0 ||
+  if (std::strcmp(val, "FugueModulating") == 0 || std::strcmp(val, "fugueModulating") == 0 ||
       std::strcmp(val, "8") == 0 || std::strcmp(val, "p8") == 0) {
-    return bach::composer::HarnessPhase::Phase8;
+    return bach::composer::HarnessPhase::FugueModulating;
   }
-  if (std::strcmp(val, "Phase9") == 0 || std::strcmp(val, "phase9") == 0 ||
+  if (std::strcmp(val, "FugueFortspinnung") == 0 || std::strcmp(val, "fugueFortspinnung") == 0 ||
       std::strcmp(val, "9") == 0 || std::strcmp(val, "p9") == 0) {
-    return bach::composer::HarnessPhase::Phase9;
+    return bach::composer::HarnessPhase::FugueFortspinnung;
   }
-  if (std::strcmp(val, "Phase10") == 0 || std::strcmp(val, "phase10") == 0 ||
+  if (std::strcmp(val, "FugueThirdEntry") == 0 || std::strcmp(val, "fugueThirdEntry") == 0 ||
       std::strcmp(val, "10") == 0 || std::strcmp(val, "p10") == 0) {
-    return bach::composer::HarnessPhase::Phase10;
+    return bach::composer::HarnessPhase::FugueThirdEntry;
   }
-  if (std::strcmp(val, "Phase11") == 0 || std::strcmp(val, "phase11") == 0 ||
+  if (std::strcmp(val, "FugueDevelopment") == 0 || std::strcmp(val, "fugueDevelopment") == 0 ||
       std::strcmp(val, "11") == 0 || std::strcmp(val, "p11") == 0) {
-    return bach::composer::HarnessPhase::Phase11;
+    return bach::composer::HarnessPhase::FugueDevelopment;
   }
-  if (std::strcmp(val, "Phase12") == 0 || std::strcmp(val, "phase12") == 0 ||
+  if (std::strcmp(val, "FugueRhythmic") == 0 || std::strcmp(val, "fugueRhythmic") == 0 ||
       std::strcmp(val, "12") == 0 || std::strcmp(val, "p12") == 0) {
-    return bach::composer::HarnessPhase::Phase12;
+    return bach::composer::HarnessPhase::FugueRhythmic;
   }
-  if (std::strcmp(val, "Phase13") == 0 || std::strcmp(val, "phase13") == 0 ||
+  if (std::strcmp(val, "FugueTextured") == 0 || std::strcmp(val, "fugueTextured") == 0 ||
       std::strcmp(val, "13") == 0 || std::strcmp(val, "p13") == 0) {
-    return bach::composer::HarnessPhase::Phase13;
+    return bach::composer::HarnessPhase::FugueTextured;
   }
-  if (std::strcmp(val, "Phase14") == 0 || std::strcmp(val, "phase14") == 0 ||
+  if (std::strcmp(val, "FugueComplete") == 0 || std::strcmp(val, "fugueComplete") == 0 ||
       std::strcmp(val, "14") == 0 || std::strcmp(val, "p14") == 0) {
-    return bach::composer::HarnessPhase::Phase14;
+    return bach::composer::HarnessPhase::FugueComplete;
   }
-  if (std::strcmp(val, "Phase15") == 0 || std::strcmp(val, "phase15") == 0 ||
+  if (std::strcmp(val, "CelloPrelude") == 0 || std::strcmp(val, "celloPrelude") == 0 ||
       std::strcmp(val, "15") == 0 || std::strcmp(val, "p15") == 0) {
-    return bach::composer::HarnessPhase::Phase15;
+    return bach::composer::HarnessPhase::CelloPrelude;
   }
-  if (std::strcmp(val, "Phase16") == 0 || std::strcmp(val, "phase16") == 0 ||
+  if (std::strcmp(val, "Chaconne") == 0 || std::strcmp(val, "chaconne") == 0 ||
       std::strcmp(val, "16") == 0 || std::strcmp(val, "p16") == 0) {
-    return bach::composer::HarnessPhase::Phase16;
+    return bach::composer::HarnessPhase::Chaconne;
   }
-  if (std::strcmp(val, "Phase17") == 0 || std::strcmp(val, "phase17") == 0 ||
+  if (std::strcmp(val, "OrganPrelude") == 0 || std::strcmp(val, "organPrelude") == 0 ||
       std::strcmp(val, "17") == 0 || std::strcmp(val, "p17") == 0) {
-    return bach::composer::HarnessPhase::Phase17;
+    return bach::composer::HarnessPhase::OrganPrelude;
   }
-  if (std::strcmp(val, "Phase18") == 0 || std::strcmp(val, "phase18") == 0 ||
+  if (std::strcmp(val, "OrganToccata") == 0 || std::strcmp(val, "organToccata") == 0 ||
       std::strcmp(val, "18") == 0 || std::strcmp(val, "p18") == 0) {
-    return bach::composer::HarnessPhase::Phase18;
+    return bach::composer::HarnessPhase::OrganToccata;
   }
-  if (std::strcmp(val, "Phase19") == 0 || std::strcmp(val, "phase19") == 0 ||
+  if (std::strcmp(val, "ChoralePrelude") == 0 || std::strcmp(val, "choralePrelude") == 0 ||
       std::strcmp(val, "19") == 0 || std::strcmp(val, "p19") == 0) {
-    return bach::composer::HarnessPhase::Phase19;
+    return bach::composer::HarnessPhase::ChoralePrelude;
   }
-  if (std::strcmp(val, "Phase20") == 0 || std::strcmp(val, "phase20") == 0 ||
+  if (std::strcmp(val, "Passacaglia") == 0 || std::strcmp(val, "passacaglia") == 0 ||
       std::strcmp(val, "20") == 0 || std::strcmp(val, "p20") == 0) {
-    return bach::composer::HarnessPhase::Phase20;
+    return bach::composer::HarnessPhase::Passacaglia;
   }
-  if (std::strcmp(val, "Phase21") == 0 || std::strcmp(val, "phase21") == 0 ||
+  if (std::strcmp(val, "TrioSonata") == 0 || std::strcmp(val, "trioSonata") == 0 ||
       std::strcmp(val, "21") == 0 || std::strcmp(val, "p21") == 0) {
-    return bach::composer::HarnessPhase::Phase21;
+    return bach::composer::HarnessPhase::TrioSonata;
   }
-  if (std::strcmp(val, "Phase22") == 0 || std::strcmp(val, "phase22") == 0 ||
+  if (std::strcmp(val, "Fantasia") == 0 || std::strcmp(val, "fantasia") == 0 ||
       std::strcmp(val, "22") == 0 || std::strcmp(val, "p22") == 0) {
-    return bach::composer::HarnessPhase::Phase22;
+    return bach::composer::HarnessPhase::Fantasia;
   }
-  if (std::strcmp(val, "Phase23") == 0 || std::strcmp(val, "phase23") == 0 ||
+  if (std::strcmp(val, "KeyboardSuite") == 0 || std::strcmp(val, "keyboardSuite") == 0 ||
       std::strcmp(val, "23") == 0 || std::strcmp(val, "p23") == 0) {
-    return bach::composer::HarnessPhase::Phase23;
+    return bach::composer::HarnessPhase::KeyboardSuite;
   }
-  if (std::strcmp(val, "Phase24") == 0 || std::strcmp(val, "phase24") == 0 ||
+  if (std::strcmp(val, "PreludeAndFugue") == 0 || std::strcmp(val, "preludeAndFugue") == 0 ||
       std::strcmp(val, "24") == 0 || std::strcmp(val, "p24") == 0) {
-    return bach::composer::HarnessPhase::Phase24;
+    return bach::composer::HarnessPhase::PreludeAndFugue;
   }
-  if (std::strcmp(val, "Phase25") == 0 || std::strcmp(val, "phase25") == 0 ||
+  if (std::strcmp(val, "GoldbergVariations") == 0 || std::strcmp(val, "goldbergVariations") == 0 ||
       std::strcmp(val, "25") == 0 || std::strcmp(val, "p25") == 0) {
-    return bach::composer::HarnessPhase::Phase25;
+    return bach::composer::HarnessPhase::GoldbergVariations;
   }
-  return bach::composer::HarnessPhase::Phase6;
+  recognized = false;
+  return bach::composer::HarnessPhase::FugueExposition3v;
 }
 
 /// @brief Print usage information to stdout.
@@ -192,11 +210,23 @@ void printUsage() {
   std::printf("                   Default: medium for fugue, short otherwise\n");
   std::printf("  --bars N         Target bar count (overrides --scale)\n");
   std::printf(
+      "  --free-counterpoint  Experimental: generate the inner accompaniment\n"
+      "                   voice via the scored candidate search instead of its\n"
+      "                   designed counter-line (off by default; lowers quality)\n");
+  std::printf(
       "  --composer-phase P  Run the closure harness layout with phase\n"
-      "                   {Phase3|Phase35|Phase4|Phase4Sus|Phase5|Phase6|Phase6Episode|\n"
-      "                    Phase6Tonal|Phase7|Phase8|Phase9|Phase10|Phase11|Phase12|\n"
-      "                    Phase13|Phase14|Phase15|Phase16|Phase17|Phase18|Phase19|\n"
-      "                    Phase20|Phase21|Phase22|Phase23|Phase24|Phase25}. Seed reused.\n");
+      "                   "
+      "{FugueSubject2v|FugueSubject2vShort|FugueAnswer2v|FugueAnswerSuspension|FugueSubject3v|"
+      "FugueExposition3v|FugueExpositionEpisode|\n"
+      "                    "
+      "FugueExpositionTonalAnswer|FugueHarmonized|FugueModulating|FugueFortspinnung|"
+      "FugueThirdEntry|FugueDevelopment|FugueRhythmic|\n"
+      "                    "
+      "FugueTextured|FugueComplete|CelloPrelude|Chaconne|OrganPrelude|OrganToccata|ChoralePrelude|"
+      "\n"
+      "                    "
+      "Passacaglia|TrioSonata|Fantasia|KeyboardSuite|PreludeAndFugue|GoldbergVariations}. Seed "
+      "reused.\n");
   std::printf("  --json           JSON output\n");
   std::printf("  --generated-json Emit generated.v1 + provenance.v1 JSON for scoring\n");
   std::printf("  -o FILE          Output file path\n");
@@ -298,9 +328,18 @@ bool parseArgs(int argc, char* argv[], CliOptions& opts, bool& ok) {
       opts.scale_specified = true;
     } else if (std::strcmp(argv[idx], "--bars") == 0 && idx + 1 < argc) {
       opts.target_bars = static_cast<uint16_t>(std::atoi(argv[++idx]));
+    } else if (std::strcmp(argv[idx], "--free-counterpoint") == 0) {
+      opts.free_counterpoint = true;
     } else if (std::strcmp(argv[idx], "--composer-phase") == 0 && idx + 1 < argc) {
+      bool recognized = false;
+      const char* phase_val = argv[++idx];
+      opts.composer_phase = parseComposerPhase(phase_val, recognized);
+      if (!recognized) {
+        std::fprintf(stderr, "Error: unknown --composer-phase value '%s'\n", phase_val);
+        ok = false;
+        return false;
+      }
       opts.composer_mode = true;
-      opts.composer_phase = parseComposerPhase(argv[++idx]);
     } else {
       // No recognized flag matched (unknown option, or a known flag missing its
       // required value). Reject rather than silently falling through to
@@ -315,60 +354,60 @@ bool parseArgs(int argc, char* argv[], CliOptions& opts, bool& ok) {
 
 const char* harnessPhaseToString(bach::composer::HarnessPhase p) {
   switch (p) {
-    case bach::composer::HarnessPhase::Phase3:
-      return "Phase3";
-    case bach::composer::HarnessPhase::Phase35:
-      return "Phase3.5";
-    case bach::composer::HarnessPhase::Phase4:
-      return "Phase4";
-    case bach::composer::HarnessPhase::Phase4Sus:
-      return "Phase4Sus";
-    case bach::composer::HarnessPhase::Phase5:
-      return "Phase5";
-    case bach::composer::HarnessPhase::Phase6:
-      return "Phase6";
-    case bach::composer::HarnessPhase::Phase6Episode:
-      return "Phase6Episode";
-    case bach::composer::HarnessPhase::Phase6Tonal:
-      return "Phase6Tonal";
-    case bach::composer::HarnessPhase::Phase7:
-      return "Phase7";
-    case bach::composer::HarnessPhase::Phase8:
-      return "Phase8";
-    case bach::composer::HarnessPhase::Phase9:
-      return "Phase9";
-    case bach::composer::HarnessPhase::Phase10:
-      return "Phase10";
-    case bach::composer::HarnessPhase::Phase11:
-      return "Phase11";
-    case bach::composer::HarnessPhase::Phase12:
-      return "Phase12";
-    case bach::composer::HarnessPhase::Phase13:
-      return "Phase13";
-    case bach::composer::HarnessPhase::Phase14:
-      return "Phase14";
-    case bach::composer::HarnessPhase::Phase15:
-      return "Phase15";
-    case bach::composer::HarnessPhase::Phase16:
-      return "Phase16";
-    case bach::composer::HarnessPhase::Phase17:
-      return "Phase17";
-    case bach::composer::HarnessPhase::Phase18:
-      return "Phase18";
-    case bach::composer::HarnessPhase::Phase19:
-      return "Phase19";
-    case bach::composer::HarnessPhase::Phase20:
-      return "Phase20";
-    case bach::composer::HarnessPhase::Phase21:
-      return "Phase21";
-    case bach::composer::HarnessPhase::Phase22:
-      return "Phase22";
-    case bach::composer::HarnessPhase::Phase23:
-      return "Phase23";
-    case bach::composer::HarnessPhase::Phase24:
-      return "Phase24";
-    case bach::composer::HarnessPhase::Phase25:
-      return "Phase25";
+    case bach::composer::HarnessPhase::FugueSubject2v:
+      return "FugueSubject2v";
+    case bach::composer::HarnessPhase::FugueSubject2vShort:
+      return "FugueSubject2v.5";
+    case bach::composer::HarnessPhase::FugueAnswer2v:
+      return "FugueAnswer2v";
+    case bach::composer::HarnessPhase::FugueAnswerSuspension:
+      return "FugueAnswerSuspension";
+    case bach::composer::HarnessPhase::FugueSubject3v:
+      return "FugueSubject3v";
+    case bach::composer::HarnessPhase::FugueExposition3v:
+      return "FugueExposition3v";
+    case bach::composer::HarnessPhase::FugueExpositionEpisode:
+      return "FugueExpositionEpisode";
+    case bach::composer::HarnessPhase::FugueExpositionTonalAnswer:
+      return "FugueExpositionTonalAnswer";
+    case bach::composer::HarnessPhase::FugueHarmonized:
+      return "FugueHarmonized";
+    case bach::composer::HarnessPhase::FugueModulating:
+      return "FugueModulating";
+    case bach::composer::HarnessPhase::FugueFortspinnung:
+      return "FugueFortspinnung";
+    case bach::composer::HarnessPhase::FugueThirdEntry:
+      return "FugueThirdEntry";
+    case bach::composer::HarnessPhase::FugueDevelopment:
+      return "FugueDevelopment";
+    case bach::composer::HarnessPhase::FugueRhythmic:
+      return "FugueRhythmic";
+    case bach::composer::HarnessPhase::FugueTextured:
+      return "FugueTextured";
+    case bach::composer::HarnessPhase::FugueComplete:
+      return "FugueComplete";
+    case bach::composer::HarnessPhase::CelloPrelude:
+      return "CelloPrelude";
+    case bach::composer::HarnessPhase::Chaconne:
+      return "Chaconne";
+    case bach::composer::HarnessPhase::OrganPrelude:
+      return "OrganPrelude";
+    case bach::composer::HarnessPhase::OrganToccata:
+      return "OrganToccata";
+    case bach::composer::HarnessPhase::ChoralePrelude:
+      return "ChoralePrelude";
+    case bach::composer::HarnessPhase::Passacaglia:
+      return "Passacaglia";
+    case bach::composer::HarnessPhase::TrioSonata:
+      return "TrioSonata";
+    case bach::composer::HarnessPhase::Fantasia:
+      return "Fantasia";
+    case bach::composer::HarnessPhase::KeyboardSuite:
+      return "KeyboardSuite";
+    case bach::composer::HarnessPhase::PreludeAndFugue:
+      return "PreludeAndFugue";
+    case bach::composer::HarnessPhase::GoldbergVariations:
+      return "GoldbergVariations";
   }
   return "Phase?";
 }
@@ -379,7 +418,7 @@ int runComposerMode(const CliOptions& opts) {
   // BPM / key transposition / file write are uniform.
   const auto layout = bach::composer::phaseSpec(opts.composer_phase);
   const char* phase_name = harnessPhaseToString(opts.composer_phase);
-  std::printf("bach_cli v0.2.0 (composer mode)\n");
+  std::printf("bach_cli v%s (composer mode)\n", BACH_VERSION);
   std::printf("Phase:      %s (%uv / %u bar)\n", phase_name, layout.voices, layout.bars);
   std::printf("Seed:       %u\n\n", opts.seed);
 
@@ -580,6 +619,7 @@ int runDefaultMode(const CliOptions& opts) {
   request.character = opts.character;
   request.target_bars = bars;
   request.seed = seed_resolved;
+  request.enable_free_counterpoint = opts.free_counterpoint;
 
   bach::composer::HarnessFixture fixture;
   const auto status = bach::composer::buildFormFixture(request, &fixture);
@@ -668,7 +708,7 @@ int runDefaultMode(const CliOptions& opts) {
   const uint16_t total_bars =
       ticks_per_bar > 0 ? static_cast<uint16_t>((total_ticks + ticks_per_bar - 1) / ticks_per_bar)
                         : 0;
-  std::printf("bach_cli v0.2.0\n");
+  std::printf("bach_cli v%s\n", BACH_VERSION);
   std::printf("Form:       %s\n", bach::formTypeToString(opts.form));
   std::printf("Key:        %s\n", bach::keySignatureToString(opts.key).c_str());
   std::printf("Voices:     %u\n", spec.num_voices);

@@ -1197,7 +1197,7 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
       // sounding the leading tone at this tick. This keeps the
       // Composer from picking a doubled leading tone that the
       // Validator's `doubling_no_leading_tone` rule would later
-      // reject. Without this, Phase7 carriers (whose pitches are
+      // reject. Without this, FugueHarmonized carriers (whose pitches are
       // fixed Material) can coincide with a Compose voice landing on
       // B, fail validation, and bounce the seed.
       if (chord.has_degree && context.placed_notes != nullptr) {
@@ -1279,12 +1279,12 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
       // pair excluded). Without this filter the Composer can land an
       // upper-pair 4th on a downbeat that the Validator then rejects,
       // failing the whole span. A 4th inverts to a 5th under octave
-      // inversion, so avoiding it preserves invertibility. Gated on
-      // chord.has_degree to match the P7 spacing pre-filter scoping
-      // (degree-tagged layouts carry a correct context.num_voices, which
-      // the bottom-of-texture exclusion relies on).
-      if (strong && (chord.has_degree || strict_harmonic_support) &&
-          context.placed_notes != nullptr) {
+      // inversion, so avoiding it preserves invertibility. The Validator
+      // enforces this rule unconditionally, so the pre-filter runs on every
+      // strong beat too — context.num_voices is always populated from the
+      // voice plan (not only for degree-tagged layouts), so the
+      // bottom-of-texture exclusion is reliable regardless of chord tagging.
+      if (strong && context.placed_notes != nullptr) {
         bool forms_upper_pair_fourth = false;
         for (const auto& placed : *context.placed_notes) {
           if (placed.voice == span.voice)
@@ -1333,7 +1333,7 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
       // — from the previous pitch to this candidate. Without this pre-filter
       // the search can pick a best-scoring triad tone that forms such a leap;
       // the Validator then rejects it after the fact and bounces the whole
-      // seed (observed once the Phase14 counterline was raised toward the high
+      // seed (observed once the FugueComplete counterline was raised toward the high
       // subject). Scoped exactly like the Validator: skipped under a cadence
       // cell (force_bass_cadence_pc) and when a secondary-dominant chord is
       // active at either endpoint (its non-diatonic chord tones are idiomatic).

@@ -152,7 +152,7 @@ inline constexpr std::array<std::array<std::uint8_t, 4>, 3> kGoldbergGroundsMino
  *
  * Harmonic-context-aware minor scale walker. When `harmonic_context` is false
  * the scale is C natural minor (degrees C D Eb F G Ab Bb), identical in spirit
- * to phase16ScaleUp (but a NEW function -- phase16ScaleUp stays byte-pinned).
+ * to chaconneScaleUp (but a NEW function -- chaconneScaleUp stays byte-pinned).
  *
  * When `harmonic_context` is true (an ascending line over a V chord that wants
  * the leading tone B natural) the scale switches to the MELODIC minor ascending

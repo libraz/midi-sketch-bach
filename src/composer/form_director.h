@@ -17,6 +17,14 @@ struct ComposeRequest {
   SubjectCharacter character = SubjectCharacter::Severe;
   std::uint16_t target_bars = 0;  // 0 = use the form's natural length
   std::uint32_t seed = 0;
+  // Opt-in: route accompanimental secondary-voice spans (TrioVoiceCarrier)
+  // through the scored free-counterpoint candidate search instead of replaying
+  // their designed material verbatim. Off by default so every form's output
+  // stays the deterministic carrier-assembly result; on, the inner voice is
+  // generated per-span by CandidateSearch (corpus-Gaussian + chord-tone
+  // scoring). A measurement knob, not a quality default -- the carrier path
+  // wins on score unless explicitly shown otherwise.
+  bool enable_free_counterpoint = false;
 };
 
 // Static per-form layout limits and meter. One immutable record per FormType,

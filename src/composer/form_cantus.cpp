@@ -24,7 +24,7 @@ namespace bach::composer {
 // Goldberg-style immutable-bass variation set.
 //
 // Both honour ResolvedRequest length / mode / character / arc. They reuse the
-// proven Phase19 (chorale) and Phase25 (goldberg) note language -- a CF whose
+// proven ChoralePrelude (chorale) and GoldbergVariations (goldberg) note language -- a CF whose
 // bar downbeats are an immutable skeleton plus a predominantly-stepwise scalar
 // wave above it, and an immutable tiled ground under rising-density scalar-wave
 // variations -- but generalise the layout to any snapped bar count, derive the
@@ -813,7 +813,7 @@ int dropIntoBand(int pitch, int ceiling) {
   return pitch;
 }
 
-// Append an aria bar (the m=2 two-half-notes SPECIAL layout from Phase25): a
+// Append an aria bar (the m=2 two-half-notes SPECIAL layout from GoldbergVariations): a
 // half note on the wave start, then a half note on the NEXT CHORD TONE up. Both
 // half notes are chord tones of the bar's triad, so each sampled beat (the bar's
 // two half-note onsets) is consonant against the ground tone below (itself a

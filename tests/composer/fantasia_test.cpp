@@ -14,7 +14,7 @@
 //      register) stays silent on the contrasting fixture, stays inert with
 //      fewer than two sections, and fires on two near-identical sections (same
 //      density AND same register).
-//   3. The Phase22 fixture runs through the full Composer cleanly for every seed
+//   3. The Fantasia fixture runs through the full Composer cleanly for every seed
 //      family (seed % 4 selects the scalar-wave start offset): one voice with
 //      four sections at the 4 / 8 / 16 / 2 notes-per-bar densities, every
 //      fantasia note stamps FantasiaSectionContrast, and
@@ -244,16 +244,16 @@ TEST(FantasiaTest, SectionContrastFailsOnNearIdenticalSections) {
   EXPECT_TRUE(hasRuleKind(r, "section_contrast_required", FailKind::MusicalFail));
 }
 
-// --- 3. Phase22 fixture integration ----------------------------------------
+// --- 3. Fantasia fixture integration ----------------------------------------
 
 // The free-sectional organ-fantasia fixture must run through the full Composer
 // cleanly for every seed family (seed % 4 selects the scalar-wave start offset):
 // no validator failure, one voice with four sections at the 4 / 8 / 16 / 2
 // notes-per-bar densities, every fantasia note stamps FantasiaSectionContrast,
 // and the section_contrast_required rule does NOT soft-fail.
-TEST(FantasiaTest, Phase22FixtureValidatesCleanAndStampsFantasiaBit) {
+TEST(FantasiaTest, FantasiaFixtureValidatesCleanAndStampsFantasiaBit) {
   for (int seed : {0, 1, 2, 3}) {
-    const HarnessFixture fx = buildHarnessFixture(HarnessPhase::Phase22, seed);
+    const HarnessFixture fx = buildHarnessFixture(HarnessPhase::Fantasia, seed);
     const ComposeResult r = Composer{}.run(fx.material, fx.harmony, fx.voice_plan);
 
     EXPECT_TRUE(r.validation.failures.empty())

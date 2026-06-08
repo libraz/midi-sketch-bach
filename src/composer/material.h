@@ -487,7 +487,7 @@ struct Material {
   // Texture / instrument / expression. Default-constructed it is a no-op
   // post-pass.
   TexturePlan texture_plan;
-  // Solo String Flow. Populated only by the Phase15 BWV1007-style arpeggio
+  // Solo String Flow. Populated only by the CelloPrelude BWV1007-style arpeggio
   // fixture. Replayed by an ArpeggioFlow span on a single voice.
   ArpeggioTemplate arpeggio_template;
   // Solo String Arch. The ground bass is immutable: GroundCarrier replays it
@@ -496,11 +496,11 @@ struct Material {
   std::vector<MaterialNote> ground_bass;
   Tick ground_bass_period = 0;
   std::vector<VariationDecl> variations;
-  // Organ Prelude (free sectional form). Populated only by the Phase17
+  // Organ Prelude (free sectional form). Populated only by the OrganPrelude
   // organ-prelude fixture. Each section is replayed verbatim by a
   // FigurationCarrier span whose window matches it.
   std::vector<FigurationSection> figuration_sections;
-  // Organ Toccata (4 archetypes). Populated only by the Phase18 organ-toccata
+  // Organ Toccata (4 archetypes). Populated only by the OrganToccata organ-toccata
   // fixture. Each section is replayed verbatim by a ToccataCarrier span whose
   // window matches it; the Validator's
   // toccata_archetype_compatible rule checks each section's (character,

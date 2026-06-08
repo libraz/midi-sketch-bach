@@ -10,7 +10,7 @@
 //      downbeat matches the skeleton tone, fires a StructuralFail when a replayed
 //      downbeat is mutated off the skeleton, and stays inert when no cantus
 //      firmus exists.
-//   3. The Phase19 fixture runs through the full Composer cleanly for every seed
+//   3. The ChoralePrelude fixture runs through the full Composer cleanly for every seed
 //      family (seed % 4 selects the scalar-wave start offset), produces two
 //      voices, and stamps both Chorale-Prelude bits in provenance.
 
@@ -211,15 +211,15 @@ TEST(ChoralePreludeTest, CantusFirmusImmutableInertWhenNoCantusFirmus) {
   EXPECT_FALSE(hasRule(r, "cantus_firmus_immutable"));
 }
 
-// --- 3. Phase19 fixture integration ----------------------------------------
+// --- 3. ChoralePrelude fixture integration ----------------------------------------
 
 // The organ chorale-prelude fixture must run through the full Composer cleanly
 // for every seed family (seed % 4 selects the scalar-wave start offset): no
 // validator failure, two voices, and both Chorale-Prelude bits present
 // somewhere in the provenance.
-TEST(ChoralePreludeTest, Phase19FixtureValidatesCleanAndStampsBothChoraleBits) {
+TEST(ChoralePreludeTest, ChoralePreludeFixtureValidatesCleanAndStampsBothChoraleBits) {
   for (int seed : {0, 1, 2, 3}) {
-    const HarnessFixture fx = buildHarnessFixture(HarnessPhase::Phase19, seed);
+    const HarnessFixture fx = buildHarnessFixture(HarnessPhase::ChoralePrelude, seed);
     const ComposeResult r = Composer{}.run(fx.material, fx.harmony, fx.voice_plan);
 
     EXPECT_TRUE(r.validation.failures.empty())

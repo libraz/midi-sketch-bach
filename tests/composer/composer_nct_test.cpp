@@ -1,12 +1,12 @@
 // NCT pipeline integration tests.
 //
-// Drives the Phase14 all-technique fugue fixture through the Composer and
+// Drives the FugueComplete all-technique fugue fixture through the Composer and
 // inspects the resulting provenance: every fugue-device RuleBit (bits 0..46)
 // must fire, the four NCT post-pass bits must land on notes inside the
 // authored bar-12..15
 // voice-2 window, and a valid seed must produce no validator failures. A
 // regression test confirms the NCT post-pass is a pure no-op on a phase
-// (Phase11) that authors no NCT figures.
+// (FugueDevelopment) that authors no NCT figures.
 //
 // The NctCarrier verbatim-replay property (figure pitches + onsets survive
 // the pipeline unchanged with NoteSource::Material) is also pinned here, in
@@ -92,14 +92,14 @@ RuleIdMask satisfiedUnion(const ComposeResult& r) {
 
 }  // namespace
 
-// The Phase14 layout exercises every fugue device in one fugue, so the
+// The FugueComplete layout exercises every fugue device in one fugue, so the
 // union of satisfied rule bits across all notes must cover bits 0..46.
-TEST(ComposerNctTest, AllFortySevenBitsFireForPhase14) {
-  const ComposeResult r = runPhase(HarnessPhase::Phase14, /*seed=*/0);
+TEST(ComposerNctTest, AllFortySevenBitsFireForFugueComplete) {
+  const ComposeResult r = runPhase(HarnessPhase::FugueComplete, /*seed=*/0);
   ASSERT_FALSE(r.provenance.empty());
   const RuleIdMask u = satisfiedUnion(r);
   for (int b = 0; b < 47; ++b) {
-    EXPECT_TRUE((u & (ruleBitMask(b))) != 0) << "rule bit " << b << " never fired in Phase14";
+    EXPECT_TRUE((u & (ruleBitMask(b))) != 0) << "rule bit " << b << " never fired in FugueComplete";
   }
 }
 
@@ -107,7 +107,7 @@ TEST(ComposerNctTest, AllFortySevenBitsFireForPhase14) {
 // must receive its detector bit, and every NCT-stamped note must sit in
 // voice 2 within ticks [12*bar, 16*bar).
 TEST(ComposerNctTest, NctBitsLandOnExpectedFigureNotes) {
-  const ComposeResult r = runPhase(HarnessPhase::Phase14, /*seed=*/0);
+  const ComposeResult r = runPhase(HarnessPhase::FugueComplete, /*seed=*/0);
   ASSERT_EQ(r.notes.size(), r.provenance.size());
 
   const Tick lo = 12 * kTicksPerBar;
@@ -140,16 +140,16 @@ TEST(ComposerNctTest, NctBitsLandOnExpectedFigureNotes) {
   EXPECT_GE(nota_cambiata, 1) << "no note carried NotaCambiataDetected";
 }
 
-// Seed 0 and seed 1 of Phase14 are clean: the Validator reports no failures.
-TEST(ComposerNctTest, Phase14HasNoValidatorFailuresSeed0) {
-  const ComposeResult r = runPhase(HarnessPhase::Phase14, /*seed=*/0);
+// Seed 0 and seed 1 of FugueComplete are clean: the Validator reports no failures.
+TEST(ComposerNctTest, FugueCompleteHasNoValidatorFailuresSeed0) {
+  const ComposeResult r = runPhase(HarnessPhase::FugueComplete, /*seed=*/0);
   EXPECT_TRUE(r.validation.failures.empty())
       << "seed 0 produced " << r.validation.failures.size() << " failure(s); first="
       << (r.validation.failures.empty() ? "" : r.validation.failures.front().rule_id);
 }
 
-TEST(ComposerNctTest, Phase14HasNoValidatorFailuresSeed1) {
-  const ComposeResult r = runPhase(HarnessPhase::Phase14, /*seed=*/1);
+TEST(ComposerNctTest, FugueCompleteHasNoValidatorFailuresSeed1) {
+  const ComposeResult r = runPhase(HarnessPhase::FugueComplete, /*seed=*/1);
   EXPECT_TRUE(r.validation.failures.empty())
       << "seed 1 produced " << r.validation.failures.size() << " failure(s); first="
       << (r.validation.failures.empty() ? "" : r.validation.failures.front().rule_id);
@@ -162,9 +162,9 @@ TEST(ComposerNctTest, Phase14HasNoValidatorFailuresSeed1) {
 // when the subject leapt up every candidate was rejected and whole bars went
 // silent. With the line anchored at A4 (69) no exposition counterline bar may
 // be empty. Sweep both the quarter (even) and eighth (odd) seed families.
-TEST(ComposerNctTest, Phase14ExpositionCounterlineHasNoSilentBars) {
+TEST(ComposerNctTest, FugueCompleteExpositionCounterlineHasNoSilentBars) {
   for (int seed : {0, 1, 2, 3, 5, 7}) {
-    const ComposeResult r = runPhase(HarnessPhase::Phase14, seed);
+    const ComposeResult r = runPhase(HarnessPhase::FugueComplete, seed);
     for (int bar : {0, 1, 2, 3, 8, 9, 10, 11}) {
       const Tick lo = static_cast<Tick>(bar) * kTicksPerBar;
       const Tick hi = lo + kTicksPerBar;
@@ -183,9 +183,9 @@ TEST(ComposerNctTest, Phase14ExpositionCounterlineHasNoSilentBars) {
 // diminished melodic failures in the counterline once it was raised toward the
 // high subject. The CandidateSearch melodic pre-filter (mirroring Validator
 // Rule P1) must now keep these seeds clean.
-TEST(ComposerNctTest, Phase14PreviouslySaturatedSeedsValidateClean) {
+TEST(ComposerNctTest, FugueCompletePreviouslySaturatedSeedsValidateClean) {
   for (int seed : {11, 16}) {
-    const ComposeResult r = runPhase(HarnessPhase::Phase14, seed);
+    const ComposeResult r = runPhase(HarnessPhase::FugueComplete, seed);
     EXPECT_TRUE(r.validation.failures.empty())
         << "seed " << seed << " produced " << r.validation.failures.size() << " failure(s); first="
         << (r.validation.failures.empty() ? "" : r.validation.failures.front().rule_id);
@@ -193,10 +193,10 @@ TEST(ComposerNctTest, Phase14PreviouslySaturatedSeedsValidateClean) {
 }
 
 // Regression: the NCT post-pass must be a pure no-op when no NCT figures
-// exist. Phase11 (development section, no nct_figures) must therefore carry
+// exist. FugueDevelopment (development section, no nct_figures) must therefore carry
 // none of the four NCT bits on any note.
-TEST(ComposerNctTest, Phase11ProvenanceHasNoNctBits) {
-  const ComposeResult r = runPhase(HarnessPhase::Phase11, /*seed=*/0);
+TEST(ComposerNctTest, FugueDevelopmentProvenanceHasNoNctBits) {
+  const ComposeResult r = runPhase(HarnessPhase::FugueDevelopment, /*seed=*/0);
   ASSERT_FALSE(r.provenance.empty());
   for (const auto& p : r.provenance) {
     EXPECT_FALSE(hasBit(p, RuleBit::CambiataDetected));
@@ -243,7 +243,7 @@ TEST(ComposerNctTest, NctCarrierWithSingleNoteDoesNotCrashOrStamp) {
 // the figure window and confirm the authored pitch sequence is present in
 // order.
 TEST(ComposerNctTest, NctCarrierReplaysFiguresVerbatim) {
-  const ComposeResult r = runPhase(HarnessPhase::Phase14, /*seed=*/0);
+  const ComposeResult r = runPhase(HarnessPhase::FugueComplete, /*seed=*/0);
   ASSERT_EQ(r.notes.size(), r.provenance.size());
 
   const Tick b12 = 12 * kTicksPerBar;

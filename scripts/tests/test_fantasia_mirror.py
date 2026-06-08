@@ -1,16 +1,16 @@
-"""Organ Fantasia Phase22 C++/Python drift guard.
+"""Organ Fantasia Fantasia C++/Python drift guard.
 
-The load-bearing guard: the bachlib.mirror PHASE22 mirror constants
-(PHASE22_BAR_ROOT, PHASE22_BAR_MINOR, the four-section kSpecs windows /
-densities / register bases) must match the C++ Phase22 fixture source (the
+The load-bearing guard: the bachlib.mirror FANTASIA mirror constants
+(FANTASIA_BAR_ROOT, FANTASIA_BAR_MINOR, the four-section kSpecs windows /
+densities / register bases) must match the C++ Fantasia fixture source (the
 kBarRoot[4] / kBarMinor[4] initialisers and the kSpecs[4] section table in
-buildPhase22Fixture, src/composer/harness_fixture.cpp), the validator's
+buildFantasiaFixture, src/composer/harness_fixture.cpp), the validator's
 section_contrast_required margins (2 notes/bar, 5 semitones) must match
 validator.cpp, and the FantasiaSectionContrast RuleBit number (63) must match
 provenance.h. A renamed constant or an altered progression / section table that
 the Python predictor still claims would make structural_ok diverge from the CLI
-output; this drift guard fails instead. The Phase22 figuration reuses the Phase17
-C-major scale walk, so the scalar-wave sanity asserts exercise phase17_scale_up
+output; this drift guard fails instead. The Fantasia figuration reuses the OrganPrelude
+C-major scale walk, so the scalar-wave sanity asserts exercise organPrelude_scale_up
 directly.
 """
 
@@ -33,61 +33,61 @@ VALIDATOR_CPP = REPO_ROOT / "src" / "composer" / "validator.cpp"
 PROVENANCE_H = REPO_ROOT / "src" / "composer" / "provenance.h"
 
 
-def _phase22_body() -> str:
-    """Return the source body following the buildPhase22Fixture declaration.
+def _fantasia_body() -> str:
+    """Return the source body following the buildFantasiaFixture declaration.
 
-    Earlier builders (Phase17..21) also declare kBarRoot / kBarMinor style
-    arrays; anchoring on the Phase22 builder body ensures only the Phase22
+    Earlier builders (OrganPrelude..21) also declare kBarRoot / kBarMinor style
+    arrays; anchoring on the Fantasia builder body ensures only the Fantasia
     arrays / kSpecs are captured.
     """
     src = FIXTURE_CPP.read_text(encoding="utf-8")
-    body = src.split("buildPhase22Fixture", 1)
+    body = src.split("buildFantasiaFixture", 1)
     if len(body) < 2:
-        raise AssertionError("could not locate buildPhase22Fixture in harness_fixture.cpp")
+        raise AssertionError("could not locate buildFantasiaFixture in harness_fixture.cpp")
     return body[1]
 
 
 def _parse_int_array(name: str) -> tuple[int, ...]:
-    """Parse a `<name>[N] = { ... }` integer initialiser from the Phase22 body."""
-    body = _phase22_body()
+    """Parse a `<name>[N] = { ... }` integer initialiser from the Fantasia body."""
+    body = _fantasia_body()
     match = re.search(rf"{name}\s*\[\s*\d*\s*\]\s*=\s*\{{([^{{}}]*?)\}}", body, re.S)
     if match is None:
-        raise AssertionError(f"could not locate {name}[...] in buildPhase22Fixture")
+        raise AssertionError(f"could not locate {name}[...] in buildFantasiaFixture")
     return tuple(int(tok) for tok in re.split(r"[,\s]+", match.group(1)) if tok)
 
 
 def _parse_bool_array(name: str) -> tuple[bool, ...]:
-    """Parse a `<name>[N] = { ... }` bool initialiser from the Phase22 body."""
-    body = _phase22_body()
+    """Parse a `<name>[N] = { ... }` bool initialiser from the Fantasia body."""
+    body = _fantasia_body()
     match = re.search(rf"{name}\s*\[\s*\d*\s*\]\s*=\s*\{{([^{{}}]*?)\}}", body, re.S)
     if match is None:
-        raise AssertionError(f"could not locate {name}[...] in buildPhase22Fixture")
+        raise AssertionError(f"could not locate {name}[...] in buildFantasiaFixture")
     return tuple(tok == "true" for tok in re.split(r"[,\s]+", match.group(1)) if tok)
 
 
-class Phase22CppDriftGuardTest(unittest.TestCase):
-    """The Python PHASE22 mirror constants must equal the C++ source."""
+class FantasiaCppDriftGuardTest(unittest.TestCase):
+    """The Python FANTASIA mirror constants must equal the C++ source."""
 
     def test_bar_root_matches_cpp(self) -> None:
         self.assertEqual(
             _parse_int_array("kBarRoot"),
-            rpc.PHASE22_BAR_ROOT,
-            "PHASE22_BAR_ROOT drifted from kBarRoot[4] in buildPhase22Fixture",
+            rpc.FANTASIA_BAR_ROOT,
+            "FANTASIA_BAR_ROOT drifted from kBarRoot[4] in buildFantasiaFixture",
         )
 
     def test_bar_minor_matches_cpp(self) -> None:
         self.assertEqual(
             _parse_bool_array("kBarMinor"),
-            rpc.PHASE22_BAR_MINOR,
-            "PHASE22_BAR_MINOR drifted from kBarMinor[4] in buildPhase22Fixture",
+            rpc.FANTASIA_BAR_MINOR,
+            "FANTASIA_BAR_MINOR drifted from kBarMinor[4] in buildFantasiaFixture",
         )
 
     def test_sections_match_cpp(self) -> None:
         """The kSpecs[4] section table (first/last bar, density, base, kind)."""
-        body = _phase22_body()
+        body = _fantasia_body()
         # Capture the kSpecs[4] = { ... } initialiser block.
         match = re.search(r"kSpecs\s*\[\s*\d*\s*\]\s*=\s*\{(.*?)\};", body, re.S)
-        self.assertIsNotNone(match, "could not locate kSpecs[4] in buildPhase22Fixture")
+        self.assertIsNotNone(match, "could not locate kSpecs[4] in buildFantasiaFixture")
         block = match.group(1)
         # Each row: {first, last, FantasiaStyle::X, density, base, kind}.
         rows = re.findall(
@@ -101,36 +101,36 @@ class Phase22CppDriftGuardTest(unittest.TestCase):
         )
         self.assertEqual(
             parsed,
-            rpc.PHASE22_SECTIONS,
-            "PHASE22_SECTIONS drifted from kSpecs[4] in buildPhase22Fixture",
+            rpc.FANTASIA_SECTIONS,
+            "FANTASIA_SECTIONS drifted from kSpecs[4] in buildFantasiaFixture",
         )
 
     def test_constants_shape(self) -> None:
-        self.assertEqual(len(rpc.PHASE22_BAR_ROOT), 4)
-        self.assertEqual(len(rpc.PHASE22_BAR_MINOR), 4)
-        self.assertEqual(len(rpc.PHASE22_SECTIONS), 4)
+        self.assertEqual(len(rpc.FANTASIA_BAR_ROOT), 4)
+        self.assertEqual(len(rpc.FANTASIA_BAR_MINOR), 4)
+        self.assertEqual(len(rpc.FANTASIA_SECTIONS), 4)
         # The four sections tile bars 0..15 contiguously.
         self.assertEqual(
-            tuple((f, l) for f, l, _d, _b, _k in rpc.PHASE22_SECTIONS),
+            tuple((f, l) for f, l, _d, _b, _k in rpc.FANTASIA_SECTIONS),
             ((0, 3), (4, 7), (8, 11), (12, 15)),
         )
         # Densities 4 / 8 / 16 / 2 as documented.
         self.assertEqual(
-            tuple(d for _f, _l, d, _b, _k in rpc.PHASE22_SECTIONS),
+            tuple(d for _f, _l, d, _b, _k in rpc.FANTASIA_SECTIONS),
             (4, 8, 16, 2),
         )
         # Register bases C3 / C4 / C5 / C4.
         self.assertEqual(
-            tuple(b for _f, _l, _d, b, _k in rpc.PHASE22_SECTIONS),
+            tuple(b for _f, _l, _d, b, _k in rpc.FANTASIA_SECTIONS),
             (48, 60, 72, 60),
         )
 
 
-class Phase22RequiredBitsTest(unittest.TestCase):
-    """The Phase22 required-bit set must track provenance.h RuleBit values."""
+class FantasiaRequiredBitsTest(unittest.TestCase):
+    """The Fantasia required-bit set must track provenance.h RuleBit values."""
 
     def test_required_bits_is_63(self) -> None:
-        self.assertEqual(rpc.PHASE22_REQUIRED_BITS, (63,))
+        self.assertEqual(rpc.FANTASIA_REQUIRED_BITS, (63,))
 
     def test_matches_provenance_enum(self) -> None:
         prov = PROVENANCE_H.read_text(encoding="utf-8")
@@ -139,7 +139,7 @@ class Phase22RequiredBitsTest(unittest.TestCase):
         self.assertEqual(int(names["FantasiaSectionContrast"]), 63)
 
 
-class Phase22ValidatorMarginsTest(unittest.TestCase):
+class FantasiaValidatorMarginsTest(unittest.TestCase):
     """The section_contrast_required margins must stay at 2 notes/bar, 5 st."""
 
     def test_margins_match_cpp(self) -> None:
@@ -148,30 +148,30 @@ class Phase22ValidatorMarginsTest(unittest.TestCase):
         self.assertGreaterEqual(len(parts), 2)
         body = parts[1]
         self.assertIn(
-            f"kMinDensityMargin = {rpc.PHASE22_MIN_DENSITY_MARGIN}",
+            f"kMinDensityMargin = {rpc.FANTASIA_MIN_DENSITY_MARGIN}",
             body,
             "section_contrast_required density margin drifted from 2 in validator.cpp",
         )
         self.assertIn(
-            f"kMinRegisterMargin = {rpc.PHASE22_MIN_REGISTER_MARGIN}",
+            f"kMinRegisterMargin = {rpc.FANTASIA_MIN_REGISTER_MARGIN}",
             body,
             "section_contrast_required register margin drifted from 5 in validator.cpp",
         )
 
 
-class Phase22ScaleWalkTest(unittest.TestCase):
-    """The Phase22 figuration reuses the Phase17 C-major scale walk."""
+class FantasiaScaleWalkTest(unittest.TestCase):
+    """The Fantasia figuration reuses the OrganPrelude C-major scale walk."""
 
     def test_whole_step_from_c5(self) -> None:
         # C5 (72) + 1 degree -> D5 (74): a whole step (C->D in C major).
-        self.assertEqual(rpc.phase17_scale_up(72, 1), 74)
+        self.assertEqual(rpc.organPrelude_scale_up(72, 1), 74)
 
     def test_two_degrees_from_c5_is_e5(self) -> None:
         # C5 (72) + 2 degrees -> E5 (76): C->D->E (C major third).
-        self.assertEqual(rpc.phase17_scale_up(72, 2), 76)
+        self.assertEqual(rpc.organPrelude_scale_up(72, 2), 76)
 
 
-class Phase22SequenceShapeTest(unittest.TestCase):
+class FantasiaSequenceShapeTest(unittest.TestCase):
     """The fantasia predictor emits 120 notes in range 48..88 for every seed."""
 
     def test_total_note_count(self) -> None:

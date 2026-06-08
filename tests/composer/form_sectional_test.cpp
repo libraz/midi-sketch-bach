@@ -208,7 +208,7 @@ TEST(FormSectionalTest, ExpositionEntryTranspositionsAreCorrect) {
       const HarnessFixture fx = buildFixture(form, 42, minor, 64);
       const std::uint8_t slot = detail::subjectSlotFor(SubjectCharacter::Severe, 42);
       const std::array<std::uint8_t, 16>& expected =
-          minor ? detail::kSubjectsMinor[slot] : detail::kPhase14Subjects[slot];
+          minor ? detail::kSubjectsMinor[slot] : detail::kFugueCompleteSubjects[slot];
 
       // The V0 subject (first 16 subject notes) is an octave transposition of the
       // catalog slot.
@@ -239,7 +239,7 @@ TEST(FormSectionalTest, SubjectMelodyMatchesCatalogSlot) {
         const HarnessFixture fx = buildFixture(form, seed, minor, 32);
         const std::uint8_t slot = detail::subjectSlotFor(SubjectCharacter::Severe, seed);
         const std::array<std::uint8_t, 16>& expected =
-            minor ? detail::kSubjectsMinor[slot] : detail::kPhase14Subjects[slot];
+            minor ? detail::kSubjectsMinor[slot] : detail::kFugueCompleteSubjects[slot];
 
         ASSERT_GE(fx.material.subject.size(), 16u);
         const int offset =
@@ -259,7 +259,7 @@ TEST(FormSectionalTest, SubjectRhythmProfileIsAppliedInFugueTail) {
   for (FormType form : kForms) {
     const HarnessFixture fx = buildFixture(form, 42, false, 64);
     const std::uint8_t slot = detail::subjectSlotFor(SubjectCharacter::Severe, 42);
-    const auto& expected = detail::kPhase14SubjectRhythms[slot];
+    const auto& expected = detail::kFugueCompleteSubjectRhythms[slot];
 
     ASSERT_GE(fx.material.subject.size(), expected.size());
     Tick cursor = fx.material.subject.front().start_tick;

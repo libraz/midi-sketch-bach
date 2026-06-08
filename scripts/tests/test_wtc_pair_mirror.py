@@ -1,16 +1,16 @@
-"""WTC Prelude+Fugue pair Phase24 C++/Python drift guard.
+"""WTC Prelude+Fugue pair PreludeAndFugue C++/Python drift guard.
 
-The load-bearing guard: the bachlib.mirror PHASE24 mirror constants
-(PHASE24_BAR_ROOT, PHASE24_BAR_MINOR, the PHASE24_PRELUDE_SECTIONS section table
+The load-bearing guard: the bachlib.mirror PRELUDE_AND_FUGUE mirror constants
+(PRELUDE_AND_FUGUE_BAR_ROOT, PRELUDE_AND_FUGUE_BAR_MINOR, the PRELUDE_AND_FUGUE_PRELUDE_SECTIONS section table
 -- including is_pedal_prep on the SECOND V0 section -- and the
-PHASE24_FUGUE_ENTRIES add_subject window / transposition scheme, leader bar 20)
-must match the C++ Phase24 fixture source (the kBarRoot[4] / kBarMinor[4]
+PRELUDE_AND_FUGUE_FUGUE_ENTRIES add_subject window / transposition scheme, leader bar 20)
+must match the C++ PreludeAndFugue fixture source (the kBarRoot[4] / kBarMinor[4]
 initialisers, the appendFigurationBar calls, and the add_subject / answer loops
-in buildPhase24Fixture, src/composer/harness_fixture.cpp), and the two reused
+in buildPreludeAndFugueFixture, src/composer/harness_fixture.cpp), and the two reused
 prelude RuleBit numbers (FigurationCommitted=52, PedalPreparation=54) must match
 provenance.h. A renamed constant or an altered progression / section / subject
 scheme that the Python predictor still claims would make structural_ok diverge
-from the CLI output; this drift guard fails instead. The Phase24 fixture is a
+from the CLI output; this drift guard fails instead. The PreludeAndFugue fixture is a
 reuse-only assembly (no new VoiceIntent / RuleBit / validator rule), so the bit
 guard asserts the two numbers stay pinned to their existing provenance.h values.
 The fugue carriers have NO identity bit, so the fugue half is asserted
@@ -36,58 +36,58 @@ FIXTURE_CPP = REPO_ROOT / "src" / "composer" / "harness_fixture.cpp"
 PROVENANCE_H = REPO_ROOT / "src" / "composer" / "provenance.h"
 
 
-def _phase24_body() -> str:
-    """Return the source body following the buildPhase24Fixture declaration.
+def _preludeAndFugue_body() -> str:
+    """Return the source body following the buildPreludeAndFugueFixture declaration.
 
-    Earlier builders (Phase17..23) also declare kBarRoot / kBarMinor style
-    arrays; anchoring on the Phase24 builder body ensures only the Phase24
+    Earlier builders (OrganPrelude..23) also declare kBarRoot / kBarMinor style
+    arrays; anchoring on the PreludeAndFugue builder body ensures only the PreludeAndFugue
     arrays / sections / subject loops are captured.
     """
     src = FIXTURE_CPP.read_text(encoding="utf-8")
-    body = src.split("buildPhase24Fixture", 1)
+    body = src.split("buildPreludeAndFugueFixture", 1)
     if len(body) < 2:
-        raise AssertionError("could not locate buildPhase24Fixture in harness_fixture.cpp")
+        raise AssertionError("could not locate buildPreludeAndFugueFixture in harness_fixture.cpp")
     # Stop at the next builder / phaseSpec so trailing functions are excluded.
     return body[1].split("}  // namespace", 1)[0]
 
 
 def _parse_int_array(name: str) -> tuple[int, ...]:
-    """Parse a `<name>[N] = { ... }` integer initialiser from the Phase24 body."""
-    body = _phase24_body()
+    """Parse a `<name>[N] = { ... }` integer initialiser from the PreludeAndFugue body."""
+    body = _preludeAndFugue_body()
     match = re.search(rf"{name}\s*\[[^\]]*\]\s*=\s*\{{([^{{}}]*?)\}}", body, re.S)
     if match is None:
-        raise AssertionError(f"could not locate {name}[...] in buildPhase24Fixture")
+        raise AssertionError(f"could not locate {name}[...] in buildPreludeAndFugueFixture")
     return tuple(int(tok) for tok in re.split(r"[,\s]+", match.group(1)) if tok)
 
 
 def _parse_bool_array(name: str) -> tuple[bool, ...]:
-    """Parse a `<name>[N] = { ... }` bool initialiser from the Phase24 body."""
-    body = _phase24_body()
+    """Parse a `<name>[N] = { ... }` bool initialiser from the PreludeAndFugue body."""
+    body = _preludeAndFugue_body()
     match = re.search(rf"{name}\s*\[[^\]]*\]\s*=\s*\{{([^{{}}]*?)\}}", body, re.S)
     if match is None:
-        raise AssertionError(f"could not locate {name}[...] in buildPhase24Fixture")
+        raise AssertionError(f"could not locate {name}[...] in buildPreludeAndFugueFixture")
     return tuple(tok == "true" for tok in re.split(r"[,\s]+", match.group(1)) if tok)
 
 
-class Phase24CppDriftGuardTest(unittest.TestCase):
-    """The Python PHASE24 mirror constants must equal the C++ source."""
+class PreludeAndFugueCppDriftGuardTest(unittest.TestCase):
+    """The Python PRELUDE_AND_FUGUE mirror constants must equal the C++ source."""
 
     def test_bar_root_matches_cpp(self) -> None:
         self.assertEqual(
             _parse_int_array("kBarRoot"),
-            rpc.PHASE24_BAR_ROOT,
-            "PHASE24_BAR_ROOT drifted from kBarRoot[4] in buildPhase24Fixture",
+            rpc.PRELUDE_AND_FUGUE_BAR_ROOT,
+            "PRELUDE_AND_FUGUE_BAR_ROOT drifted from kBarRoot[4] in buildPreludeAndFugueFixture",
         )
 
     def test_bar_minor_matches_cpp(self) -> None:
         self.assertEqual(
             _parse_bool_array("kBarMinor"),
-            rpc.PHASE24_BAR_MINOR,
-            "PHASE24_BAR_MINOR drifted from kBarMinor[4] in buildPhase24Fixture",
+            rpc.PRELUDE_AND_FUGUE_BAR_MINOR,
+            "PRELUDE_AND_FUGUE_BAR_MINOR drifted from kBarMinor[4] in buildPreludeAndFugueFixture",
         )
 
     def test_layout_bars_match_cpp(self) -> None:
-        body = _phase24_body()
+        body = _preludeAndFugue_body()
         self.assertIn("constexpr int kBars = 24;", body)
         self.assertIn("constexpr int kPreludeBars = 8;", body)
         self.assertIn("constexpr int kCycleBars = 4;", body)
@@ -95,7 +95,7 @@ class Phase24CppDriftGuardTest(unittest.TestCase):
     def test_prelude_sections_match_cpp(self) -> None:
         """The appendFigurationBar calls drive base_midi / notes_per_beat, and the
         section windows + is_pedal_prep flag drive the merge / bit-54 mask."""
-        body = _phase24_body()
+        body = _preludeAndFugue_body()
         # V0 sec0 bars 0-3, base 60, npb 4, NOT pedal-prep.
         self.assertRegex(
             body,
@@ -121,7 +121,7 @@ class Phase24CppDriftGuardTest(unittest.TestCase):
         )
         # Mirror table agrees with the parsed C++ section layout.
         self.assertEqual(
-            rpc.PHASE24_PRELUDE_SECTIONS,
+            rpc.PRELUDE_AND_FUGUE_PRELUDE_SECTIONS,
             (
                 (0, 0, 3, 60, 4, False),
                 (0, 4, 7, 60, 4, True),
@@ -131,7 +131,7 @@ class Phase24CppDriftGuardTest(unittest.TestCase):
 
     def test_fugue_entries_match_cpp(self) -> None:
         """add_subject windows / transpositions + the answer (-5) loop + leader."""
-        body = _phase24_body()
+        body = _preludeAndFugue_body()
         # V0 subject bars 8-11, +0.
         self.assertRegex(body, r"add_subject\(/\*first_bar=\*/8, /\*semis=\*/0\)")
         # V2 re-entry bars 16-19, -12.
@@ -146,7 +146,7 @@ class Phase24CppDriftGuardTest(unittest.TestCase):
         # subj_a / offset derivation.
         self.assertIn("const int offset = seed % 4;", body)
         self.assertIn("const int subj_a = (seed / 4) % 5;", body)
-        self.assertIn("kPhase14Subjects[subj_a]", body)
+        self.assertIn("kFugueCompleteSubjects[subj_a]", body)
         # Span intents.
         self.assertRegex(body, r"push_subj_span\(0, 8, 11, VoiceIntent::SubjectCarrier\)")
         self.assertRegex(body, r"push_subj_span\(1, 12, 15, VoiceIntent::AnswerCarrier\)")
@@ -154,7 +154,7 @@ class Phase24CppDriftGuardTest(unittest.TestCase):
         self.assertRegex(body, r"push_subj_span\(0, 20, 23, VoiceIntent::SubjectCarrier\)")
         # Mirror table agrees.
         self.assertEqual(
-            rpc.PHASE24_FUGUE_ENTRIES,
+            rpc.PRELUDE_AND_FUGUE_FUGUE_ENTRIES,
             (
                 (0, 8, "SubjectCarrier", 0),
                 (1, 12, "AnswerCarrier", -5),
@@ -163,21 +163,21 @@ class Phase24CppDriftGuardTest(unittest.TestCase):
             ),
         )
 
-    def test_subject_catalog_is_phase14(self) -> None:
-        # Phase24 reuses the kPhase14Subjects catalog; slot 0 sanity.
+    def test_subject_catalog_is_fugueComplete(self) -> None:
+        # PreludeAndFugue reuses the kFugueCompleteSubjects catalog; slot 0 sanity.
         self.assertEqual(
-            rpc.PHASE14_SUBJECTS[0],
+            rpc.FUGUE_COMPLETE_SUBJECTS[0],
             (72, 74, 76, 77, 79, 81, 79, 77, 76, 74, 76, 77, 79, 77, 71, 72),
         )
 
 
-class Phase24RequiredBitsTest(unittest.TestCase):
-    """The Phase24 required-bit set must track provenance.h RuleBit values."""
+class PreludeAndFugueRequiredBitsTest(unittest.TestCase):
+    """The PreludeAndFugue required-bit set must track provenance.h RuleBit values."""
 
     def test_required_bits_set(self) -> None:
         # Reuse-only assembly: FigurationCommitted (52) + PedalPreparation (54).
         # The fugue carriers have NO identity bit (asserted structurally).
-        self.assertEqual(rpc.PHASE24_REQUIRED_BITS, (52, 54))
+        self.assertEqual(rpc.PRELUDE_AND_FUGUE_REQUIRED_BITS, (52, 54))
 
     def test_matches_provenance_enum(self) -> None:
         prov = PROVENANCE_H.read_text(encoding="utf-8")
@@ -187,7 +187,7 @@ class Phase24RequiredBitsTest(unittest.TestCase):
         self.assertEqual(int(names["PedalPreparation"]), 54)
 
 
-class Phase24SequenceShapeTest(unittest.TestCase):
+class PreludeAndFugueSequenceShapeTest(unittest.TestCase):
     """The WTC-pair predictor emits 256 notes across five carrier groups."""
 
     def test_total_note_count(self) -> None:

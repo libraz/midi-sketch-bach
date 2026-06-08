@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import json
 import subprocess
+import sys
 import tempfile
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -754,6 +755,26 @@ def register(subparsers) -> None:
     parser.set_defaults(func=run)
 
 
+def model_scoring_unavailable(summary: dict[str, Any], no_model_score: bool) -> bool:
+    """Whether gate-3 model scoring was required but silently unavailable.
+
+    Returns True when scoring was requested (no ``--no-model-score``) and
+    enforced, the sweep ran at least one case, yet no case obtained a model
+    score -- i.e. the bach-mcp scorer was absent. In that state the gate must
+    fail rather than report a green, unscored sweep.
+
+    @param summary The summarize() result for the sweep.
+    @param no_model_score True when ``--no-model-score`` was passed.
+    @return True when the gate should hard-fail for a missing scorer.
+    """
+    return (
+        not no_model_score
+        and ENFORCE_MODEL_SCORE
+        and summary.get("total", 0) > 0
+        and summary.get("model_scored_cases", 0) == 0
+    )
+
+
 def run(args) -> int:
     """Execute the texture-gate sweep described by `args`."""
     index_js = None if args.no_model_score else args.index_js
@@ -774,7 +795,22 @@ def run(args) -> int:
         args.out.write_text(text, encoding="utf-8")
     else:
         print(text, end="")
-    return 0 if report["summary"]["all_passed"] else 1
+
+    summary = report["summary"]
+    # gate-3 (model probability) must not be silently skipped: if model scoring
+    # was requested and enforced but the scorer was unavailable for every case,
+    # fail the gate rather than green-light an unscored sweep. This mirrors the
+    # closure harness, which hard-fails on a missing scorer; passing
+    # --no-model-score is the explicit opt-out.
+    if model_scoring_unavailable(summary, args.no_model_score):
+        print(
+            f"texture-gate: gate-3 model scorer unavailable (index_js={args.index_js}); "
+            "no case was scored. Pass --no-model-score to skip gate-3 explicitly.",
+            file=sys.stderr,
+        )
+        return 2
+
+    return 0 if summary["all_passed"] else 1
 
 
 def main() -> int:

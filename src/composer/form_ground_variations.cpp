@@ -22,8 +22,8 @@ namespace bach::composer {
 // Ground-bass variation forms: chaconne (4-bar ground, 3/4) and passacaglia
 // (8-bar ground, 3/4).
 //
-// Both forms share one architecture (modelled on the proven Phase16 chaconne
-// and Phase20 passacaglia fixtures, reworked from 4/4 to 3/4 and generalised
+// Both forms share one architecture (modelled on the proven Chaconne chaconne
+// and Passacaglia passacaglia fixtures, reworked from 4/4 to 3/4 and generalised
 // over length / mode / character / arc):
 //
 //   - V1 = the immutable ground bass, one dotted-half note per bar, period-

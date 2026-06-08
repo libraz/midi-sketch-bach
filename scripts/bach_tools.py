@@ -6,7 +6,7 @@ Every validation, reporting, extraction, and audio tool lives in the
 ``python3 scripts/bach_tools.py --help`` is the complete catalog.
 
 Typical commands:
-    python3 scripts/bach_tools.py closure --phase Phase14 --seeds 20
+    python3 scripts/bach_tools.py closure --phase FugueComplete --seeds 20
     python3 scripts/bach_tools.py validate generated.json
     python3 scripts/bach_tools.py texture-gate --forms fugue
     python3 scripts/bach_tools.py coverage
@@ -29,6 +29,7 @@ from bachlib import (  # noqa: E402
     extract_melodic,
     extract_subject,
     extract_texture,
+    gen_mirror,
     ornament_report,
     review,
     schema,
@@ -48,6 +49,7 @@ _COMMAND_MODULES = (
     extract_entry_plan,
     extract_texture,
     extract_melodic,
+    gen_mirror,
     review,
 )
 

@@ -48,7 +48,7 @@ ChordEvent chordAt(Tick tick, std::uint8_t root_pc, ChordQuality quality) {
   return c;
 }
 
-// The exact bar-12..15 modulation context the Phase14 fixture authors the
+// The exact bar-12..15 modulation context the FugueComplete fixture authors the
 // four NCT figures against: V/V (D major) -> V (G major) -> borrowed iv
 // (F minor) -> Picardy I (C major), one chord per bar.
 HarmonicPlan modulationBars12To15() {
@@ -62,10 +62,10 @@ HarmonicPlan modulationBars12To15() {
   return plan;
 }
 
-// The 15 authored Phase14 NCT-figure notes (V2, bars 12-15) as one
+// The 15 authored FugueComplete NCT-figure notes (V2, bars 12-15) as one
 // time-ordered single-voice list — exactly what the Composer's NCT
 // post-pass sees for voice 2. Pitches mirror harness_fixture.cpp.
-std::vector<MaterialNote> authoredPhase14Figures() {
+std::vector<MaterialNote> authoredFugueCompleteFigures() {
   const Tick b12 = 12 * kTicksPerBar;
   const Tick b13 = 13 * kTicksPerBar;
   const Tick b14 = 14 * kTicksPerBar;
@@ -236,12 +236,12 @@ TEST(NctDetectorTest, EmptyHarmonicPlanReturnsNoHits) {
   EXPECT_TRUE(detectNotaCambiata(notes, empty_plan).empty());
 }
 
-// --- Authored Phase14 figures (the exact bar 12-15 V2 context). Each test
+// --- Authored FugueComplete figures (the exact bar 12-15 V2 context). Each test
 // drives the standalone detector with the real fixture notes + modulation
 // chords and asserts the figure is detected at the correct NCT note. ---
 
 TEST(NctDetectorTest, CambiataDetectedOnAuthoredG4) {
-  const auto notes = authoredPhase14Figures();
+  const auto notes = authoredFugueCompleteFigures();
   const auto hits = detectCambiata(notes, modulationBars12To15());
   ASSERT_GE(hits.size(), 1u);
   // The authored cambiata's NCT is G4 (67) at figure index 1.
@@ -257,7 +257,7 @@ TEST(NctDetectorTest, CambiataDetectedOnAuthoredG4) {
 }
 
 TEST(NctDetectorTest, NotaCambiataDetectedOnAuthoredC4) {
-  const auto notes = authoredPhase14Figures();
+  const auto notes = authoredFugueCompleteFigures();
   const auto hits = detectNotaCambiata(notes, modulationBars12To15());
   ASSERT_EQ(hits.size(), 1u);
   // The authored nota cambiata's NCT is C4 (60) — the first C4 in the list.
@@ -266,7 +266,7 @@ TEST(NctDetectorTest, NotaCambiataDetectedOnAuthoredC4) {
 }
 
 TEST(NctDetectorTest, EchappeeDetectedOnAuthoredD4) {
-  const auto notes = authoredPhase14Figures();
+  const auto notes = authoredFugueCompleteFigures();
   const auto hits = detectEchappee(notes, modulationBars12To15());
   ASSERT_EQ(hits.size(), 1u);
   // The authored echappee's NCT is the bar-14 D4 (62) — the second D4 in
@@ -276,7 +276,7 @@ TEST(NctDetectorTest, EchappeeDetectedOnAuthoredD4) {
 }
 
 TEST(NctDetectorTest, AnticipationDetectedOnAuthoredE4) {
-  const auto notes = authoredPhase14Figures();
+  const auto notes = authoredFugueCompleteFigures();
   const auto hits = detectAnticipation(notes, modulationBars12To15());
   ASSERT_EQ(hits.size(), 1u);
   // The authored anticipation's NCT is E4 (64) at bar 14 beat 3, whose

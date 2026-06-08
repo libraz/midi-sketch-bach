@@ -40,6 +40,12 @@ struct PostPassContext {
 using PostPass = void (*)(std::vector<NoteEvent>& notes, std::vector<NoteProvenance>& provenance,
                           const PostPassContext& ctx);
 
+// Placeholder onset velocity stamped at placement time. The texture/expression
+// post-pass (applyTextureExpression) overwrites this with the Affekt-driven
+// phrase-arch value whenever the Material carries a texture plan; fixtures
+// without one keep this organ-plausible default.
+constexpr std::uint8_t kDefaultVelocity = 80;
+
 struct VoiceCursor {
   std::uint8_t prev_pitch = 0;
   std::uint8_t pre_prev_pitch = 0;
@@ -286,7 +292,7 @@ ComposeResult Composer::run(const Material& material, const HarmonicPlan& harmon
       note.duration = cand.duration;
       note.pitch = cand.pitch;
       note.voice = span.voice;
-      note.velocity = 80;
+      note.velocity = kDefaultVelocity;
       result.notes.push_back(note);
 
       NoteProvenance prov;
@@ -362,11 +368,13 @@ ComposeResult Composer::run(const Material& material, const HarmonicPlan& harmon
 
   // Visibility surface for the no-fallback principle. A Compose position that
   // exhausted all candidates emitted no note (a rest) instead of a default
-  // pitch. Record the count so the hole is no longer invisible; resting is the
-  // correct response to "no consonant candidate" (better a rest than a wrong
-  // note), so this is NOT escalated to a validation failure. FailedSeed stays
-  // reserved for the future re-generation / back-jump loop (see validation.h).
-  // Callers that want exhaustion to be fatal can gate on this count explicitly.
+  // pitch. Carrier-only fixtures never reach this path, so the count is zero
+  // unless a span was opened to the candidate search (e.g. via the
+  // free-counterpoint opt-in, ComposeRequest::enable_free_counterpoint).
+  // Record the count so the hole is no longer invisible; resting is the correct
+  // response to "no consonant candidate" (better a rest than a wrong note), so
+  // this is NOT escalated to a validation failure. Callers that want exhaustion
+  // to be fatal can gate on this count explicitly.
   result.saturated_positions = saturated_total;
 
   Renderer renderer;

@@ -51,11 +51,11 @@ class NormalizePhaseTest(unittest.TestCase):
     """Alias coverage for normalize_phase, including the merged superset."""
 
     def test_canonical_passthrough(self) -> None:
-        self.assertEqual(closure_common.normalize_phase("Phase14"), "Phase14")
+        self.assertEqual(closure_common.normalize_phase("FugueComplete"), "FugueComplete")
 
     def test_case_insensitive(self) -> None:
-        self.assertEqual(closure_common.normalize_phase("PHASE14"), "Phase14")
-        self.assertEqual(closure_common.normalize_phase("PhAsE6"), "Phase6")
+        self.assertEqual(closure_common.normalize_phase("fuguecomplete"), "FugueComplete")
+        self.assertEqual(closure_common.normalize_phase("FUGUEEXPOSITION3V"), "FugueExposition3v")
 
     def test_unknown_passthrough(self) -> None:
         self.assertEqual(closure_common.normalize_phase("nonsense"), "nonsense")
@@ -63,28 +63,28 @@ class NormalizePhaseTest(unittest.TestCase):
     def test_listening_packet_aliases(self) -> None:
         # Keys that the listening-packet builder historically supported.
         for token, expected in [
-            ("3", "Phase3"),
-            ("p3", "Phase3"),
-            ("3.5", "Phase35"),
-            ("p35", "Phase35"),
-            ("4", "Phase4"),
-            ("5", "Phase5"),
-            ("6", "Phase6"),
-            ("14", "Phase14"),
-            ("p14", "Phase14"),
+            ("3", "FugueSubject2v"),
+            ("p3", "FugueSubject2v"),
+            ("3.5", "FugueSubject2vShort"),
+            ("p35", "FugueSubject2vShort"),
+            ("4", "FugueAnswer2v"),
+            ("5", "FugueSubject3v"),
+            ("6", "FugueExposition3v"),
+            ("14", "FugueComplete"),
+            ("p14", "FugueComplete"),
         ]:
             self.assertEqual(closure_common.normalize_phase(token), expected, token)
 
     def test_closure_only_aliases(self) -> None:
         # Keys that only the closure harness historically supported.
         for token, expected in [
-            ("4sus", "Phase4Sus"),
-            ("p4sus", "Phase4Sus"),
-            ("6ep", "Phase6Episode"),
-            ("6tonal", "Phase6Tonal"),
-            ("p7", "Phase7"),
-            ("p10", "Phase10"),
-            ("p13", "Phase13"),
+            ("4sus", "FugueAnswerSuspension"),
+            ("p4sus", "FugueAnswerSuspension"),
+            ("6ep", "FugueExpositionEpisode"),
+            ("6tonal", "FugueExpositionTonalAnswer"),
+            ("p7", "FugueHarmonized"),
+            ("p10", "FugueThirdEntry"),
+            ("p13", "FugueTextured"),
         ]:
             self.assertEqual(closure_common.normalize_phase(token), expected, token)
 

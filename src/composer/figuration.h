@@ -26,7 +26,7 @@ inline constexpr std::array<std::array<std::uint8_t, 16>, 5> kSubjectPatterns = 
     {76, 77, 79, 81, 79, 77, 76, 74, 72, 74, 76, 77, 79, 77, 71, 72},
 }};
 
-// Phase14-only subject catalog. The all-technique fugue permeates every bar
+// FugueComplete-only subject catalog. The all-technique fugue permeates every bar
 // with the subject (exposition, answer, V2 re-entry, middle entry, diminution,
 // stretto, episode), so a statistically weak subject drags the whole piece's
 // model_prob. Slots 0/1/4 keep the kSubjectPatterns melodies; slots 2/3 replace
@@ -36,9 +36,9 @@ inline constexpr std::array<std::array<std::uint8_t, 16>, 5> kSubjectPatterns = 
 // register envelope (71-81) and the mandatory B->C (71,72) leading-tone tail
 // so the cadence / leading-tone provenance bits still fire and the
 // answer(-5) / V2(-12) / stretto(-24) transposes stay voice-crossing-safe.
-// This catalog is referenced ONLY by buildPhase14Fixture, so the other fugue
+// This catalog is referenced ONLY by buildFugueCompleteFixture, so the other fugue
 // layouts stay byte-identical.
-inline constexpr std::array<std::array<std::uint8_t, 16>, 5> kPhase14Subjects = {{
+inline constexpr std::array<std::array<std::uint8_t, 16>, 5> kFugueCompleteSubjects = {{
     // 0: original arch (unchanged)
     {72, 74, 76, 77, 79, 81, 79, 77, 76, 74, 76, 77, 79, 77, 71, 72},
     // 1: gentle wave (replaces the original high 84-83-84 head, which scored
@@ -61,10 +61,10 @@ inline constexpr std::array<std::array<std::uint8_t, 16>, 5> kPhase14Subjects = 
 }};
 
 // Fugue subject rhythm profiles. Each row has the same 16 pitch positions as
-// kPhase14Subjects, but durations now define the 4-bar subject span. The rows
+// kFugueCompleteSubjects, but durations now define the 4-bar subject span. The rows
 // deliberately mix eighths, quarters, dotted quarters, halves, and one
 // sixteenth figure while summing to exactly four 4/4 bars.
-inline constexpr std::array<std::array<Tick, 16>, 5> kPhase14SubjectRhythms = {{
+inline constexpr std::array<std::array<Tick, 16>, 5> kFugueCompleteSubjectRhythms = {{
     {kTicksPerBeat, kTicksPerBeat / 2, kTicksPerBeat / 2, kTicksPerBeat, kTicksPerBeat,
      kTicksPerBeat / 2, kTicksPerBeat / 2, kTicksPerBeat, kTicksPerBeat, kTicksPerBeat,
      kTicksPerBeat / 2, kTicksPerBeat / 2, kTicksPerBeat, kTicksPerBeat, kTicksPerBeat,
@@ -111,19 +111,19 @@ inline constexpr std::array<std::array<ChordSpec, 4>, 4> kHarmonyPatterns = {{
 void pushCounterlineBar(VoicePlan& vp, SpanId& next_id, std::uint8_t voice, int bar,
                         Subdivision subdivision, std::uint8_t voice_center = 0);
 
-// C natural-minor scale membership (pitch class), used to build the Phase16
+// C natural-minor scale membership (pitch class), used to build the Chaconne
 // chaconne variations' stepwise figuration.
-constexpr bool phase16InScale(int pc) {
+constexpr bool chaconneInScale(int pc) {
   const int p = ((pc % 12) + 12) % 12;
   return p == 0 || p == 2 || p == 3 || p == 5 || p == 7 || p == 8 || p == 10;
 }
 
 // Walk `steps` scale degrees upward from `midi` within C natural minor.
-inline int phase16ScaleUp(int midi, int steps) {
+inline int chaconneScaleUp(int midi, int steps) {
   int cur = midi;
   for (int s = 0; s < steps; ++s) {
     for (int add = 1; add <= 12; ++add) {
-      if (phase16InScale(cur + add)) {
+      if (chaconneInScale(cur + add)) {
         cur += add;
         break;
       }
@@ -132,19 +132,19 @@ inline int phase16ScaleUp(int midi, int steps) {
   return cur;
 }
 
-// C major scale membership (pitch class), used to build the Phase17 organ-
+// C major scale membership (pitch class), used to build the OrganPrelude organ-
 // prelude figuration's stepwise runs.
-constexpr bool phase17InScale(int pc) {
+constexpr bool organPreludeInScale(int pc) {
   const int p = ((pc % 12) + 12) % 12;
   return p == 0 || p == 2 || p == 4 || p == 5 || p == 7 || p == 9 || p == 11;
 }
 
 // Walk `steps` scale degrees upward from `midi` within C major.
-inline int phase17ScaleUp(int midi, int steps) {
+inline int organPreludeScaleUp(int midi, int steps) {
   int cur = midi;
   for (int s = 0; s < steps; ++s) {
     for (int add = 1; add <= 12; ++add) {
-      if (phase17InScale(cur + add)) {
+      if (organPreludeInScale(cur + add)) {
         cur += add;
         break;
       }
@@ -165,7 +165,7 @@ enum class Mode : std::uint8_t { Major, Minor };
  * @return The MIDI pitch `steps` scale degrees above `midi`.
  */
 inline int scaleUp(int midi, int steps, Mode mode) {
-  return mode == Mode::Major ? phase17ScaleUp(midi, steps) : phase16ScaleUp(midi, steps);
+  return mode == Mode::Major ? organPreludeScaleUp(midi, steps) : chaconneScaleUp(midi, steps);
 }
 
 /**
@@ -176,7 +176,7 @@ inline int scaleUp(int midi, int steps, Mode mode) {
  * @return True if the pitch class belongs to the selected scale.
  */
 inline bool inScale(int midi, Mode mode) {
-  return mode == Mode::Major ? phase17InScale(midi) : phase16InScale(midi);
+  return mode == Mode::Major ? organPreludeInScale(midi) : chaconneInScale(midi);
 }
 
 /**

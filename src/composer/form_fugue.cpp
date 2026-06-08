@@ -41,22 +41,22 @@ namespace bach::composer {
 
 namespace {
 
-using detail::ChordSpec;               // NOLINT(build/namespaces)
-using detail::kHarmonyPatterns;        // NOLINT(build/namespaces)
-using detail::kHarmonyPatternsMinor;   // NOLINT(build/namespaces)
-using detail::kPhase14SubjectRhythms;  // NOLINT(build/namespaces)
-using detail::kPhase14Subjects;        // NOLINT(build/namespaces)
-using detail::kSubjectsMinor;          // NOLINT(build/namespaces)
-using detail::Mode;                    // NOLINT(build/namespaces)
-using detail::scaleUp;                 // NOLINT(build/namespaces)
-using detail::subjectSlotFor;          // NOLINT(build/namespaces)
+using detail::ChordSpec;                     // NOLINT(build/namespaces)
+using detail::kFugueCompleteSubjectRhythms;  // NOLINT(build/namespaces)
+using detail::kFugueCompleteSubjects;        // NOLINT(build/namespaces)
+using detail::kHarmonyPatterns;              // NOLINT(build/namespaces)
+using detail::kHarmonyPatternsMinor;         // NOLINT(build/namespaces)
+using detail::kSubjectsMinor;                // NOLINT(build/namespaces)
+using detail::Mode;                          // NOLINT(build/namespaces)
+using detail::scaleUp;                       // NOLINT(build/namespaces)
+using detail::subjectSlotFor;                // NOLINT(build/namespaces)
 
 constexpr Tick kQuarter = kTicksPerBeat;
 
 #include "composer/tables/entry_plan_stats.inc"
 
 // One subject statement is 16 catalog notes spanning 4 bars. Durations come
-// from kPhase14SubjectRhythms rather than being fixed quarters.
+// from kFugueCompleteSubjectRhythms rather than being fixed quarters.
 constexpr int kSubjectNotes = 16;
 constexpr int kSubjectBars = 4;
 
@@ -364,8 +364,8 @@ void appendFugueSection(FugueAssembly& asm_ctx, int first_bar, int bars,
   // Subject catalog slot (character + seed) -> the V0-band subject pattern.
   const std::uint8_t slot = subjectSlotFor(req.character, req.seed);
   const std::array<std::uint8_t, 16>& subj_pat =
-      (mode == Mode::Minor) ? kSubjectsMinor[slot] : kPhase14Subjects[slot];
-  const std::array<Tick, 16>& subj_rhythm = kPhase14SubjectRhythms[slot];
+      (mode == Mode::Minor) ? kSubjectsMinor[slot] : kFugueCompleteSubjects[slot];
+  const std::array<Tick, 16>& subj_rhythm = kFugueCompleteSubjectRhythms[slot];
 
   // --- Length partition. ---
   // Exposition: 12 bars normally, compressed to 8 for short fugues (N<=20).
@@ -607,7 +607,7 @@ void appendFugueSection(FugueAssembly& asm_ctx, int first_bar, int bars,
       //     line is octave-fit into the voice band. ---
       const int me_start = first_bar + window.entry_start;  // absolute.
       const int key_semis = kVoiceKeySemis[static_cast<std::size_t>(carry_voice)];
-      const std::array<std::uint8_t, 16>& me_pat = kPhase14Subjects[slot];
+      const std::array<std::uint8_t, 16>& me_pat = kFugueCompleteSubjects[slot];
       const int me_off = octaveOffsetForBand(me_pat, key_semis, carry_voice);
       const int me_total = key_semis + me_off;
       MiddleEntryDecl& decl = middle_decls[static_cast<std::size_t>(carry_voice)];

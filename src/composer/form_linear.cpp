@@ -17,8 +17,8 @@ namespace bach::composer {
 // sonata (three independent voices).
 //
 // Both builders are pure functions of (seed, indices): no RNG, deterministic
-// per (seed, mode, character, bars). They extend the proven Phase15 (cello)
-// and Phase21 (trio) layouts to an arbitrary snapped length (8..128 bars),
+// per (seed, mode, character, bars). They extend the proven CelloPrelude (cello)
+// and TrioSonata (trio) layouts to an arbitrary snapped length (8..128 bars),
 // shaping figure density / register / cadence from the ResolvedRequest arc.
 // ---------------------------------------------------------------------------
 
@@ -128,7 +128,7 @@ void writeHarmony(HarnessFixture& out, const std::vector<BarChord>& chords, Mode
 // the diatonic catalog, V -> I close). Figure: each bar is sixteen sixteenth
 // notes (group_size = 4 -> four implicit cells per bar) forming a COMPACT
 // scalar wave -- the line opens on a chord tone, runs scalewise up the diatonic
-// scale and folds back down, predominantly by step. This is the Phase15/16/17
+// scale and folds back down, predominantly by step. This is the CelloPrelude/16/17
 // note language (a stepwise-dominant running figuration touching chord tones)
 // rather than wide bass-fifth-third broken chords: the BWV1007 prelude keeps a
 // COMPACT voicing where the line moves mostly by step or small skip between
@@ -205,7 +205,7 @@ HarnessFixture buildCelloPreludeForm(const ResolvedRequest& req) {
   // augmented-second cell-to-cell leap (which a wide monotonic run's
   // fast-climbing cell minima would otherwise produce at the diatonic B-F
   // tritone boundary). The motion is still wholly stepwise note-to-note (the
-  // Phase15/16/17 compact note language), so the model scorer's
+  // CelloPrelude/16/17 compact note language), so the model scorer's
   // large_leap_ratio stays ~0.
 
   // Voice-led anchor: each bar opens on the chord tone NEAREST the previous

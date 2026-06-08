@@ -50,7 +50,7 @@ struct Span {
   // "use the global per-voice default" (Composer::kVoiceCenter); any non-zero
   // value overrides it for this span only. Used where a voice's default alto/
   // tenor center sits too far below a high subject for the P7 spacing
-  // pre-filter (gap <= octave) to admit any candidate — e.g. the Phase14
+  // pre-filter (gap <= octave) to admit any candidate — e.g. the FugueComplete
   // exposition counterline beneath a subject that climbs to G5/A5. Carrier
   // spans ignore this field (they replay Material verbatim).
   std::uint8_t voice_center = 0;

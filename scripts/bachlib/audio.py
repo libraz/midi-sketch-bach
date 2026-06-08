@@ -204,7 +204,7 @@ def _add_render_arguments(parser) -> None:
 
 def _add_listening_arguments(parser) -> None:
     """Register the ``listening`` command arguments on ``parser``."""
-    parser.add_argument("--phase", default="Phase6", help="Phase3/Phase35/Phase4/Phase5/Phase6")
+    parser.add_argument("--phase", default="FugueExposition3v", help="FugueSubject2v/FugueSubject2vShort/FugueAnswer2v/FugueSubject3v/FugueExposition3v")
     parser.add_argument("--top", type=int, default=5, help="number of seeds to render to WAV")
     parser.add_argument("--out", type=Path, default=REPO_ROOT / "build" / "listening_packet")
     parser.add_argument("--cli", type=Path, default=DEFAULT_CLI)

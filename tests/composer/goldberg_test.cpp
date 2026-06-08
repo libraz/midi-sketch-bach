@@ -7,10 +7,10 @@
 // (59/60/61). The full 30-variation canon engine (src/forms/goldberg/) is out of
 // scope here.
 //
-// These tests cover only the Phase25 fixture integration (the Passacaglia
+// These tests cover only the GoldbergVariations fixture integration (the Passacaglia
 // candidate search / validator unit behaviour is already covered by
 // passacaglia_test.cpp):
-//   1. The Phase25 fixture runs through the full Composer cleanly for every seed
+//   1. The GoldbergVariations fixture runs through the full Composer cleanly for every seed
 //      family (seed % 4 selects the scalar-wave start offset): no validator
 //      failure, two voices, 172 notes (V0 variation 152 + V1 ground 20).
 //   2. All three reused Passacaglia bits (PassacagliaGroundReplayed=59,
@@ -55,15 +55,15 @@ bool hasRule(const ValidationReport& r, const std::string& rule_id) {
 
 }  // namespace
 
-// --- 1 & 2. Phase25 fixture integration + all three reused bits -------------
+// --- 1 & 2. GoldbergVariations fixture integration + all three reused bits -------------
 
 // The Goldberg-style fixture must run through the full Composer cleanly for
 // every seed family (seed % 4 selects the scalar-wave start offset): no
 // validator failure, two voices, 172 notes, and all three reused Passacaglia
 // bits present somewhere in the provenance.
-TEST(GoldbergTest, Phase25FixtureValidatesCleanAndStampsAllReusedBits) {
+TEST(GoldbergTest, GoldbergVariationsFixtureValidatesCleanAndStampsAllReusedBits) {
   for (int seed : {0, 1, 2, 3}) {
-    const HarnessFixture fx = buildHarnessFixture(HarnessPhase::Phase25, seed);
+    const HarnessFixture fx = buildHarnessFixture(HarnessPhase::GoldbergVariations, seed);
     const ComposeResult r = Composer{}.run(fx.material, fx.harmony, fx.voice_plan);
 
     EXPECT_TRUE(r.validation.failures.empty())
@@ -109,7 +109,7 @@ TEST(GoldbergTest, Phase25FixtureValidatesCleanAndStampsAllReusedBits) {
 // fall in bars 16-19 (ticks 30720..38400) and NONE earlier. Conversely, the
 // climax block's notes must all carry ClimaxPlaced (it is the dynamic peak).
 TEST(GoldbergTest, ClimaxPlacedOnlyOnFinalVariationBlock) {
-  const HarnessFixture fx = buildHarnessFixture(HarnessPhase::Phase25, 0);
+  const HarnessFixture fx = buildHarnessFixture(HarnessPhase::GoldbergVariations, 0);
   const ComposeResult r = Composer{}.run(fx.material, fx.harmony, fx.voice_plan);
   ASSERT_EQ(r.notes.size(), r.provenance.size());
 
@@ -144,7 +144,7 @@ TEST(GoldbergTest, ClimaxPlacedOnlyOnFinalVariationBlock) {
 // fixture, and the V1 PassacagliaGround notes replay the canonical 4-bar
 // Goldberg bass (C2 F2 G2 A2) verbatim for all 5 cycles.
 TEST(GoldbergTest, GroundImmutableAcrossAllFiveCycles) {
-  const HarnessFixture fx = buildHarnessFixture(HarnessPhase::Phase25, 1);
+  const HarnessFixture fx = buildHarnessFixture(HarnessPhase::GoldbergVariations, 1);
   const ComposeResult r = Composer{}.run(fx.material, fx.harmony, fx.voice_plan);
   ASSERT_EQ(r.notes.size(), r.provenance.size());
 
@@ -176,7 +176,7 @@ TEST(GoldbergTest, GroundImmutableAcrossAllFiveCycles) {
 // (Aria + four variations) with the documented rising density tiers and only
 // block 4 flagged is_climax.
 TEST(GoldbergTest, FiveVariationBlocksWithRisingDensity) {
-  const HarnessFixture fx = buildHarnessFixture(HarnessPhase::Phase25, 2);
+  const HarnessFixture fx = buildHarnessFixture(HarnessPhase::GoldbergVariations, 2);
   const auto& blocks = fx.material.passacaglia_variations;
   ASSERT_EQ(blocks.size(), 5u);
 

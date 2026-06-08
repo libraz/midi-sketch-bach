@@ -28,14 +28,14 @@ namespace bach::composer {
 // proven phase fixture). They honour ResolvedRequest length, mode, character,
 // and the arc curve.
 //
-// Free section: the toccata generalizes Phase18's archetype machinery to the
-// available bars; the fantasia generalizes Phase22's contrasting-section cycle.
+// Free section: the toccata generalizes OrganToccata's archetype machinery to the
+// available bars; the fantasia generalizes Fantasia's contrasting-section cycle.
 // V0 carries the running figuration (toccata / fantasia archetype); a V2 pedal-
 // point layer sustains chord-root tones (whole / half notes, occasionally a
 // root<->fifth "walking pedal") beneath it, and a V1 punctuation layer strikes
 // short consonant chord tones at section heads. The fugue tail is a self-
 // contained 3-entry exposition + optional stretto + a 2-bar Picardy cadence,
-// built inline with the Phase24 idiom (it does NOT share the fugue family's
+// built inline with the PreludeAndFugue idiom (it does NOT share the fugue family's
 // assembly cascade, so the two systems stay independent).
 //
 // EVERY note is NoteSource::Material (verbatim carriers). The validator's
@@ -52,22 +52,22 @@ namespace bach::composer {
 
 namespace {
 
-using detail::ChordSpec;               // NOLINT(build/namespaces)
-using detail::kHarmonyPatterns;        // NOLINT(build/namespaces)
-using detail::kHarmonyPatternsMinor;   // NOLINT(build/namespaces)
-using detail::kPhase14SubjectRhythms;  // NOLINT(build/namespaces)
-using detail::kPhase14Subjects;        // NOLINT(build/namespaces)
-using detail::kSubjectsMinor;          // NOLINT(build/namespaces)
-using detail::Mode;                    // NOLINT(build/namespaces)
-using detail::scaleUp;                 // NOLINT(build/namespaces)
-using detail::subjectSlotFor;          // NOLINT(build/namespaces)
+using detail::ChordSpec;                     // NOLINT(build/namespaces)
+using detail::kFugueCompleteSubjectRhythms;  // NOLINT(build/namespaces)
+using detail::kFugueCompleteSubjects;        // NOLINT(build/namespaces)
+using detail::kHarmonyPatterns;              // NOLINT(build/namespaces)
+using detail::kHarmonyPatternsMinor;         // NOLINT(build/namespaces)
+using detail::kSubjectsMinor;                // NOLINT(build/namespaces)
+using detail::Mode;                          // NOLINT(build/namespaces)
+using detail::scaleUp;                       // NOLINT(build/namespaces)
+using detail::subjectSlotFor;                // NOLINT(build/namespaces)
 
 constexpr Tick kQuarter = kTicksPerBeat;
 constexpr Tick kEighth = kTicksPerBeat / 2;
 constexpr Tick kSixteenth = kTicksPerBeat / 4;
 
 // One subject statement is 16 catalog notes spanning 4 bars. Durations come
-// from kPhase14SubjectRhythms rather than being fixed quarters.
+// from kFugueCompleteSubjectRhythms rather than being fixed quarters.
 constexpr int kSubjectNotes = 16;
 constexpr int kSubjectBars = 4;
 
@@ -690,7 +690,7 @@ Split splitBars(int total) {
 
 // ---------------------------------------------------------------------------
 // appendFugueTail: a self-contained 3-voice fugue from `first_bar` spanning
-// `bars` bars (>= 8). Built inline with the Phase24 idiom (no shared fugue
+// `bars` bars (>= 8). Built inline with the PreludeAndFugue idiom (no shared fugue
 // assembly). Layout (relative to first_bar):
 //   exposition: V0 subject (0-3), V1 answer -P4 (4-7), V2 re-entry -P8 (8-11)
 //               when bars >= 12, else a compressed 2-entry exposition.
@@ -708,8 +708,8 @@ void appendFugueTail(SectionalAssembly& asm_ctx, int first_bar, int bars,
 
   const std::uint8_t slot = subjectSlotFor(req.character, req.seed);
   const std::array<std::uint8_t, 16>& subj_pat =
-      (mode == Mode::Minor) ? kSubjectsMinor[slot] : kPhase14Subjects[slot];
-  const std::array<Tick, 16>& subj_rhythm = kPhase14SubjectRhythms[slot];
+      (mode == Mode::Minor) ? kSubjectsMinor[slot] : kFugueCompleteSubjects[slot];
+  const std::array<Tick, 16>& subj_rhythm = kFugueCompleteSubjectRhythms[slot];
 
   // The cadence reserves the final 2 bars; nothing else extends into them.
   const int cadence_start = first_bar + bars - 2;  // first of the 2 cadence bars.
@@ -722,7 +722,7 @@ void appendFugueTail(SectionalAssembly& asm_ctx, int first_bar, int bars,
   // parallel-avoidance machinery, identical to the fugue family's wiring).
   ThemeToneRegistry& registry = asm_ctx.theme_tones;
 
-  // Entries are placed at 4-bar offsets (Phase24 idiom): V0 subject at the
+  // Entries are placed at 4-bar offsets (PreludeAndFugue idiom): V0 subject at the
   // boundary, V1 answer four bars later, V2 re-entry eight bars later. The full
   // three-entry exposition is used only when the re-entry (bars 8-11) fits
   // strictly before the reserved cadence bars; otherwise a compressed two-entry
@@ -1182,7 +1182,7 @@ HarnessFixture buildToccataAndFugueForm(const ResolvedRequest& req) {
   emitHarmony(out, plan, mode);
 
   // --- TOCCATA SECTION (bars 0 .. free_bars-1), V0 only. ---
-  // Generalize Phase18's archetype machinery to the available bars. The
+  // Generalize OrganToccata's archetype machinery to the available bars. The
   // archetype (= seed % 4) differs only in SECTION STRUCTURE, not pitch
   // language: every section is the same chord-tone-anchored scalar-wave
   // figuration (gate-3-clearing stepwise motion). Density per bar rises with the
@@ -1426,9 +1426,9 @@ HarnessFixture buildFantasiaAndFugueForm(const ResolvedRequest& req) {
   emitHarmony(out, plan, mode);
 
   // --- FANTASIA SECTION (bars 0 .. free_bars-1), V0 only. ---
-  // Generalize Phase22's contrasting-section cycle to free_bars: contiguous
+  // Generalize Fantasia's contrasting-section cycle to free_bars: contiguous
   // 4-bar sections cycling the styles {Free, Fugal, Toccata, Chordal} starting
-  // at a (seed % 4) rotation. Per-section density + register come from Phase22's
+  // at a (seed % 4) rotation. Per-section density + register come from Fantasia's
   // proven tiers (notes-per-bar 4 / 8 / 16 / 2; centers C3 / C4 / C5 / C4),
   // shifted up by the arc register shift. Contrast is achieved via distinct
   // density + register per section, not via wide leaps, so the melodic-interval
@@ -1442,7 +1442,7 @@ HarnessFixture buildFantasiaAndFugueForm(const ResolvedRequest& req) {
     int density_level;   // documentary notes-per-bar tier.
     int base_midi;       // register band floor.
   };
-  // Phase22 tiers with a COMPRESSED register spacing: the styles are kept at
+  // Fantasia tiers with a COMPRESSED register spacing: the styles are kept at
   // 6-semitone register steps (58 / 64 / 70 / 64) rather than the original
   // 12-semitone spacing. The narrower spacing roughly halves the melodic leap at
   // each section boundary (lowering the scorer's large-leap statistic).
