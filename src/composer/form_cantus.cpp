@@ -360,6 +360,18 @@ void appendWalkingBass(std::vector<MaterialNote>& out_notes, ThemeToneRegistry& 
     const BarChord& next_chord =
         bar_chords[static_cast<std::size_t>(bar + 1 < bars ? bar + 1 : bar)];
     const int next_root = fitPcToBand(next_chord.root_pc, cursor, kBassBandLo, kBassBandHi);
+    // Static harmony (next root == this bar's root in the band): the walk has
+    // no direction, and "hold the cursor + repeat nudge" collapsed into a
+    // two-tone root/third pendulum bar after bar, concentrating the
+    // interval-bigram surface on (4|-4). Aim the intermediate beats at a
+    // rotating walk contour above the bar root instead (2nd-3rd-5th ascending
+    // on even bars, 5th-3rd-2nd descending on odd); every target still passes
+    // through consonantChordTone below, so a contour tone that clashes with
+    // the sounding upper voices degrades to the nearest consonant chord tone
+    // exactly as before.
+    const int bar_root_fit = fitPcToBand(chord.root_pc, cursor, kBassBandLo, kBassBandHi);
+    const bool static_bar = (next_root == bar_root_fit);
+    static constexpr int kStaticWalkDegrees[2][3] = {{1, 2, 4}, {4, 2, 1}};
 
     for (int beat = 0; beat < 4; ++beat) {
       const Tick beat_tick = barTick(bar) + static_cast<Tick>(beat) * kTicksPerBeat;
@@ -380,9 +392,13 @@ void appendWalkingBass(std::vector<MaterialNote>& out_notes, ThemeToneRegistry& 
       } else {
         // Intermediate beat: step one diatonic degree from the cursor toward the
         // next bar's root (a passing tone), then pick the nearest consonant,
-        // parallel-free diatonic tone to that step target.
+        // parallel-free diatonic tone to that step target. A static bar aims
+        // at the rotating walk contour instead (see above).
         int step_target = cursor;
-        if (next_root > cursor)
+        if (static_bar) {
+          const int degree = kStaticWalkDegrees[bar % 2][beat - 1];
+          step_target = detail::scaleUp(bar_root_fit, degree, mode);
+        } else if (next_root > cursor)
           step_target = detail::inScale(cursor + 1, mode) ? cursor + 1 : cursor + 2;
         else if (next_root < cursor)
           step_target = detail::inScale(cursor - 1, mode) ? cursor - 1 : cursor - 2;
@@ -422,6 +438,52 @@ void appendWalkingBass(std::vector<MaterialNote>& out_notes, ThemeToneRegistry& 
         }
         if (alt >= 0)
           pitch = alt;
+      }
+
+      // Audible-grain parallel re-check: consonantChordTone (and the repeat
+      // nudge above) judge motion at quarter grain, but the upper figuration
+      // moves in eighths -- union-onset sampling pairs this beat with the
+      // eighth BEFORE it, a motion the quarter-grain check never sees. Re-judge
+      // the chosen tone at that grain and displace to the nearest diatonic
+      // tone that is consonant with the sounding uppers and parallel-free; the
+      // tone stands when no such alternative exists within a fifth.
+      if (beat != 0 && prev_pitch >= 0) {
+        motions.clear();
+        registry.concurrentMotions(beat_tick - kTicksPerBeat / 2, beat_tick, /*voice=*/2,
+                                   /*num_voices=*/3, motions);
+        auto bass_is_parallel = [&](int cand) {
+          for (const ConcurrentMotion& motion : motions) {
+            if (formsPerfectParallel(prev_pitch, cand, motion.prev, motion.curr))
+              return true;
+          }
+          return false;
+        };
+        if (bass_is_parallel(pitch)) {
+          auto admissible = [&](int cand) {
+            if (cand < kBassBandLo || cand > kBassBandHi || cand == pitch || cand == prev_pitch ||
+                !detail::inScale(cand, mode)) {
+              return false;
+            }
+            for (int upper : theme_pitches) {
+              if (!isConsonantPair(cand, upper))
+                return false;
+            }
+            return !bass_is_parallel(cand);
+          };
+          for (int dist = 1; dist <= 7; ++dist) {
+            bool placed = false;
+            for (const int sgn : {-1, 1}) {
+              const int cand = pitch + sgn * dist;
+              if (admissible(cand)) {
+                pitch = cand;
+                placed = true;
+                break;
+              }
+            }
+            if (placed)
+              break;
+          }
+        }
       }
 
       out_notes.push_back(materialNote(beat_tick, kQuarterDur, pitch));

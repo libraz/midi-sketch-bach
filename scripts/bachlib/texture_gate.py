@@ -170,7 +170,7 @@ FORM_THRESHOLDS: dict[str, FormThresholds] = {
     "chorale_prelude": FormThresholds(
         min_avg_active=2.5,
         max_mono_ratio=0.05,
-        model_score_v2_threshold=0.75,
+        model_score_v2_threshold=0.81,
         enforced=True,
     ),
     # The remaining forms previously fell through to the default (enforced,

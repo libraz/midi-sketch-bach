@@ -87,7 +87,7 @@ class FormThresholdsTableTest(unittest.TestCase):
             "toccata_and_fugue": 0.75,
             "fantasia_and_fugue": 0.77,
             "passacaglia": 0.83,
-            "chorale_prelude": 0.75,
+            "chorale_prelude": 0.81,
             "trio_sonata": 0.76,
             "cello_prelude": 0.83,
             "chaconne": 0.89,
