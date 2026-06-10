@@ -144,7 +144,7 @@ FORM_THRESHOLDS: dict[str, FormThresholds] = {
         min_avg_active=2.1,
         max_mono_ratio=0.25,
         require_v1_v2_occupancy=True,
-        model_score_v2_threshold=0.72,
+        model_score_v2_threshold=0.75,
         enforced=True,
     ),
     "fantasia_and_fugue": FormThresholds(

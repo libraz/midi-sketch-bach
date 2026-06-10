@@ -84,7 +84,7 @@ class FormThresholdsTableTest(unittest.TestCase):
         expected = {
             "fugue": 0.78,
             "prelude_and_fugue": 0.85,
-            "toccata_and_fugue": 0.72,
+            "toccata_and_fugue": 0.75,
             "fantasia_and_fugue": 0.77,
             "passacaglia": 0.83,
             "chorale_prelude": 0.75,

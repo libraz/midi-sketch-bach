@@ -1349,20 +1349,22 @@ HarnessFixture buildToccataAndFugueForm(const ResolvedRequest& req) {
         continue;
       }
       const ArcPoint arc = arcForBar(req, bar);
-      // Density tier from the arc (1 = eighth, >=2 = sixteenth). A Dramaticus
-      // opening flourish (its first window, starting at bar 0) stays at eighths
-      // for rhetorical breadth before the continuous figuration takes over; a
-      // Concertato forte window always runs sixteenths against its piano echo.
-      const int notes_per_beat =
-          is_flourish_window
-              ? 2
-              : ((archetype == ToccataArchetype::Concertato || arc.density_tier >= 2) ? 4 : 2);
+      // Sixteenth passagework is the toccata's baseline texture (the corpus
+      // duration mass sits on sixteenths, and the free section lives in the
+      // piece's early arc cycles where the density tier never rises on its
+      // own). The deliberate eighth spots remain: the Dramaticus opening
+      // flourish keeps rhetorical breadth before the continuous figuration
+      // takes over, and the Concertato piano echo bars (handled above) stay
+      // at eighths against the forte windows. The arc keeps shaping the
+      // register sweep below.
+      const int notes_per_beat = is_flourish_window ? 2 : 4;
       // Register sweep: the band floor rises with the arc register shift, clamped
       // so the wave still fits the V0 band.
       const int base = std::clamp(kBandLo[0] + std::max<int>(0, arc.register_shift), kBandLo[0],
                                   kBandHi[0] - 12);
       appendScalarWaveBar(section.notes, bar, plan[static_cast<std::size_t>(bar)], mode,
-                          notes_per_beat, base, kBandHi[0], fig_offset, prev_pitch);
+                          notes_per_beat, base, kBandHi[0], fig_offset, prev_pitch,
+                          /*rotate_figures=*/true);
       lp.pedal = true;
       lp.punctuate = true;
     }

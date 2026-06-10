@@ -325,7 +325,7 @@ void appendScalarWaveCycle(std::vector<MaterialNote>& notes, Tick block_start,
 
 void appendScalarWaveBar(std::vector<MaterialNote>& dst, int bar, const detail::ChordSpec& chord,
                          detail::Mode mode, int notes_per_beat, int base_midi, int ceil_midi,
-                         int offset, int& prev_pitch) {
+                         int offset, int& prev_pitch, bool rotate_figures) {
   const int third = chord.minor ? 3 : 4;
   const int triad_pc[3] = {chord.root_pc % 12, (chord.root_pc + third) % 12,
                            (chord.root_pc + 7) % 12};
@@ -398,6 +398,40 @@ void appendScalarWaveBar(std::vector<MaterialNote>& dst, int bar, const detail::
   }
   for (int idx = static_cast<int>(wave.size()) - 2; idx >= 0; --idx) {
     wave.push_back(wave[static_cast<std::size_t>(idx)]);
+  }
+  if (rotate_figures) {
+    // Bar-figure rotation over the precomputed wave (see the header note).
+    // Rotation is the point: any single figure applied to every bar
+    // over-concentrates the interval-bigram surface instead.
+    const int figure_mode = ((bar % 3) + 3) % 3;
+    if (figure_mode == 0) {
+      // Broken-third chain: displace odd wave indices one scale step along
+      // the local direction (c-d-e-f -> c-e-d-f), turning half the steps
+      // into thirds while the contour endpoints stay put.
+      for (std::size_t idx = 1; idx + 1 < wave.size(); idx += 2) {
+        const int local_dir = (wave[idx + 1] >= wave[idx - 1]) ? 1 : -1;
+        const int cand = (local_dir > 0) ? detail::scaleUp(wave[idx], 1, mode)
+                                         : detail::scaleDown(wave[idx], 1, mode);
+        if (cand >= base_midi && cand <= ceil_midi) {
+          wave[idx] = cand;
+        }
+      }
+    } else if (figure_mode == 1 && wave.size() > 4) {
+      // One dive: from the bar's midpoint the rest of the wave shifts a
+      // fourth or fifth (alternating across dive bars) toward the side with
+      // register room -- an entry leap here, recovered by the next bar's
+      // nearest-chord-tone anchor chain.
+      const std::size_t dive_start = wave.size() / 2;
+      const int degrees = ((bar / 3) % 2 == 0) ? 3 : 4;
+      const bool down_ok = detail::scaleDown(wave[dive_start], degrees, mode) >= base_midi;
+      for (std::size_t idx = dive_start; idx < wave.size(); ++idx) {
+        const int cand = down_ok ? detail::scaleDown(wave[idx], degrees, mode)
+                                 : detail::scaleUp(wave[idx], degrees, mode);
+        if (cand >= base_midi && cand <= ceil_midi) {
+          wave[idx] = cand;
+        }
+      }
+    }
   }
   const Tick step =
       (notes_per_beat == 4) ? kSixteenth : ((notes_per_beat == 2) ? kEighth : kQuarter);

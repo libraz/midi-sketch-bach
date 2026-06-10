@@ -194,10 +194,14 @@ void appendScalarWaveCycle(std::vector<MaterialNote>& notes, Tick block_start,
  *        conjunctly instead of re-snapping to the band floor each bar (which
  *        produced the wide bar-boundary leaps that dominated the melodic-
  *        interval cost). Updated to the bar's last emitted pitch on return.
+ * @param rotate_figures When true, the bar figure rotates by bar % 3 (broken-
+ *        third chain / one fourth-or-fifth dive / plain wave), restoring the
+ *        corpus's third-and-leap vocabulary to an otherwise purely stepwise
+ *        surface. Off by default so existing callers stay byte-identical.
  */
 void appendScalarWaveBar(std::vector<MaterialNote>& dst, int bar, const detail::ChordSpec& chord,
                          detail::Mode mode, int notes_per_beat, int base_midi, int ceil_midi,
-                         int offset, int& prev_pitch);
+                         int offset, int& prev_pitch, bool rotate_figures = false);
 
 /**
  * @brief Append one 4/4 bar of theme-consonant scalar-wave chord-tone
