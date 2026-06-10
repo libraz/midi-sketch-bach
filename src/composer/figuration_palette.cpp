@@ -204,23 +204,25 @@ void appendSawtoothCycle(std::vector<MaterialNote>& notes, Tick block_start,
       MaterialNote mnote;
       mnote.start_tick = beat_tick + static_cast<Tick>(sub) * step;
       mnote.duration = step;
-      // sub == 0 is the sampled beat-onset anchor; later subs step one diatonic
-      // degree per sub toward the next anchor, bounded so the fill never
-      // overshoots it (so the next onset is at most one step away -- no leap).
-      // When the next anchor repeats this one (span == 0, possible across a
-      // chord change that keeps the anchor pitch class), the fill oscillates to
-      // the diatonic neighbour toward the register center instead of holding --
-      // a held fill would chain the repeated anchors into a stalled run.
+      // sub == 0 is the sampled beat-onset anchor; later subs walk one diatonic
+      // degree per sub toward (and possibly past) the next anchor. The walk is
+      // NOT clamped at the anchor: a clamped fill parks on the next onset's
+      // pitch and re-attacks it, chaining repeated notes the reference corpus
+      // almost never writes (~3% of transitions). A fill that would land the
+      // LAST sub exactly on the next anchor bends one step beyond it instead
+      // (an echappee resolving onto the anchor by step). When the next anchor
+      // repeats this one (span == 0, possible across a chord change that keeps
+      // the anchor pitch class), the fill oscillates to the diatonic neighbour
+      // toward the register center instead of holding.
       int degree = from_deg;
       if (sub > 0) {
         if (span == 0) {
           const int osc = (degreeToMidi(from_deg, mode) >= center) ? -1 : 1;
           degree = from_deg + ((sub % 2 == 1) ? osc : 0);
         } else {
-          int advance = sub;
-          if (advance > span)
-            advance = span;  // do not overshoot the next onset.
-          degree = from_deg + dir * advance;
+          degree = from_deg + dir * sub;
+          if (sub == notes_per_beat - 1 && degree == to_deg)
+            degree = to_deg + dir;
         }
       }
       mnote.pitch = static_cast<std::uint8_t>(degreeToMidi(degree, mode));
@@ -243,6 +245,7 @@ void appendScalarWaveCycle(std::vector<MaterialNote>& notes, Tick block_start,
   if (degree > hi_deg)
     degree = hi_deg;
   int dir = descending_start ? -1 : 1;
+  int last_midi = -1;  // previous emitted pitch (the snap must not re-attack it).
 
   const Tick step = kTicksPerBeat / static_cast<Tick>(notes_per_beat);
   for (int bar = 0; bar < cycle_bars; ++bar) {
@@ -277,6 +280,10 @@ void appendScalarWaveCycle(std::vector<MaterialNote>& notes, Tick block_start,
             for (int oct : {fit - 12, fit, fit + 12}) {
               if (oct < band_lo || oct > band_hi)
                 continue;
+              // Never snap back onto the pitch just emitted: a backward snap
+              // re-attacks the previous note and reads as a stalled repeat.
+              if (oct == last_midi)
+                continue;
               const int dist = std::abs(oct - cur_midi);
               if (dist < best_dist) {
                 best_dist = dist;
@@ -300,6 +307,7 @@ void appendScalarWaveCycle(std::vector<MaterialNote>& notes, Tick block_start,
         mnote.duration = step;
         mnote.pitch = static_cast<std::uint8_t>(degreeToMidi(degree, mode));
         notes.push_back(mnote);
+        last_midi = static_cast<int>(mnote.pitch);
         // Advance one diatonic step, folding direction at the band edges so the
         // line oscillates within the fixed register band.
         degree += dir;
@@ -725,18 +733,32 @@ void appendFiguraCortaBar(std::vector<MaterialNote>& notes, int bar, int start,
     const int from = anchor[beat];
     const int to = anchor[(beat + 1) % 4];
     const int dir = (to >= from) ? 1 : -1;
-    int walked = from;
+    // The two shorts walk diatonically toward the next beat's anchor. A walk
+    // that would stall (repeat a pitch) or land ON the next anchor (an off-beat
+    // double of the following attack) is bent instead of held: the reference
+    // corpus repeats a pitch on only ~3% of transitions, so a held short reads
+    // as a stalled line, not an idiom.
+    int w1 = (dir > 0) ? detail::scaleUp(from, 1, mode) : detail::scaleDown(from, 1, mode);
+    int w2 = (dir > 0) ? detail::scaleUp(w1, 1, mode) : detail::scaleDown(w1, 1, mode);
+    if (to == from) {
+      // Held anchor: a turn figure (upper then lower neighbour) keeps all four
+      // boundary transitions stepwise and repeat-free.
+      w1 = detail::scaleUp(from, 1, mode);
+      w2 = detail::scaleDown(from, 1, mode);
+    } else if ((dir > 0 && w1 >= to) || (dir < 0 && w1 <= to)) {
+      // Adjacent anchors: a returning neighbour on the far side, so the cell
+      // closes on `from` and the next attack is a fresh step.
+      w1 = (dir > 0) ? detail::scaleDown(from, 1, mode) : detail::scaleUp(from, 1, mode);
+      w2 = from;
+    } else if ((dir > 0 && w2 >= to) || (dir < 0 && w2 <= to)) {
+      // Anchors a third apart: passing tone, then an echappee one step beyond
+      // the next anchor, resolving onto it by step at the next attack.
+      w2 = (dir > 0) ? detail::scaleUp(to, 1, mode) : detail::scaleDown(to, 1, mode);
+    }
+    const int cell[3] = {from, w1, w2};
     for (int sub = 0; sub < 3; ++sub) {
-      if (sub > 0) {
-        // Step diatonically toward the next beat's anchor, stopping short of it
-        // so the next onset is a fresh attack rather than an off-beat double.
-        const int next =
-            (dir > 0) ? detail::scaleUp(walked, 1, mode) : detail::scaleDown(walked, 1, mode);
-        if (!((dir > 0 && next >= to) || (dir < 0 && next <= to)))
-          walked = next;
-      }
       addNote(notes, barTick(bar) + static_cast<Tick>(beat) * kTicksPerBeat + kCellOffset[sub],
-              kCellDur[sub], walked);
+              kCellDur[sub], cell[sub]);
     }
   }
 }
@@ -755,39 +777,50 @@ void appendFiguraCortaCycle(std::vector<MaterialNote>& notes, Tick block_start,
   const int onset_count = static_cast<int>(anchor_deg.size());
   for (int onset = 0; onset < onset_count; ++onset) {
     const int from_deg = anchor_deg[static_cast<std::size_t>(onset)];
-    // The two shorts step toward the next onset's anchor (the last onset holds
-    // its own degree), bounded so the cell never overshoots it.
+    // The two shorts step toward the next onset's anchor. A short that would
+    // repeat a pitch (stalled walk) or land ON the next anchor (an off-beat
+    // double of the following attack) is bent into a neighbour or echappee
+    // instead: the reference corpus repeats a pitch on only ~3% of transitions.
     const int to_deg =
         (onset + 1 < onset_count) ? anchor_deg[static_cast<std::size_t>(onset + 1)] : from_deg;
     const int delta = to_deg - from_deg;
     const int dir = (delta >= 0) ? 1 : -1;
     const int span = std::abs(delta);
 
+    int w1_deg;
+    int w2_deg;
+    if (span == 0) {
+      // Held anchor: a turn figure toward the register center keeps every
+      // boundary transition stepwise and repeat-free.
+      const int osc = (degreeToMidi(from_deg, mode) >= center) ? -1 : 1;
+      w1_deg = from_deg + osc;
+      w2_deg = from_deg - osc;
+    } else if (span == 1) {
+      // Adjacent anchors: a returning neighbour on the far side, closing on
+      // `from` so the next attack is a fresh step.
+      w1_deg = from_deg - dir;
+      w2_deg = from_deg;
+    } else if (span == 2) {
+      // Anchors a third apart: passing tone, then an echappee one step beyond
+      // the next anchor, resolving onto it by step at the next attack.
+      w1_deg = from_deg + dir;
+      w2_deg = to_deg + dir;
+    } else {
+      // Wider gaps: plain stepwise walk; it never reaches the next anchor.
+      w1_deg = from_deg + dir;
+      w2_deg = from_deg + 2 * dir;
+    }
+
     const int bar = onset / 3;
     const int beat = onset % 3;
     const Tick beat_tick = block_start + static_cast<Tick>(bar) * kTicksPerBar34 +
                            static_cast<Tick>(beat) * kTicksPerBeat;
+    const int cell_deg[3] = {from_deg, w1_deg, w2_deg};
     for (int sub = 0; sub < 3; ++sub) {
       MaterialNote mnote;
       mnote.start_tick = beat_tick + kCellOffset[sub];
       mnote.duration = kCellDur[sub];
-      // When the next anchor repeats this one (span == 0, possible across a
-      // chord change that keeps the anchor pitch class), the shorts become a
-      // neighbour oscillation toward the register center instead of holds -- a
-      // held cell would chain the repeated anchors into a stalled run.
-      int degree = from_deg;
-      if (sub > 0) {
-        if (span == 0) {
-          const int osc = (degreeToMidi(from_deg, mode) >= center) ? -1 : 1;
-          degree = from_deg + ((sub % 2 == 1) ? osc : 0);
-        } else {
-          int advance = sub;
-          if (advance > span)
-            advance = span;  // do not overshoot the next onset.
-          degree = from_deg + dir * advance;
-        }
-      }
-      mnote.pitch = static_cast<std::uint8_t>(degreeToMidi(degree, mode));
+      mnote.pitch = static_cast<std::uint8_t>(degreeToMidi(cell_deg[sub], mode));
       notes.push_back(mnote);
     }
   }

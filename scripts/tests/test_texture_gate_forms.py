@@ -78,6 +78,45 @@ class FormThresholdsTableTest(unittest.TestCase):
     def test_unknown_form_defaults_to_enforced(self) -> None:
         self.assertTrue(texture_gate.thresholds_for("brand_new_form").enforced)
 
+    def test_every_form_declares_a_v2_model_floor(self) -> None:
+        # All ten shipped forms carry an explicit KL-model floor (20-seed
+        # sweep minima minus the seed-noise margin, regression ratchets).
+        expected = {
+            "fugue": 0.73,
+            "prelude_and_fugue": 0.81,
+            "toccata_and_fugue": 0.72,
+            "fantasia_and_fugue": 0.77,
+            "passacaglia": 0.83,
+            "chorale_prelude": 0.75,
+            "trio_sonata": 0.76,
+            "cello_prelude": 0.65,
+            "chaconne": 0.89,
+            "goldberg_variations": 0.82,
+        }
+        for form, floor in expected.items():
+            self.assertEqual(
+                texture_gate.thresholds_for(form).model_score_v2_threshold, floor, form
+            )
+
+    def test_unknown_form_falls_back_to_shared_v2_floor(self) -> None:
+        self.assertIsNone(
+            texture_gate.thresholds_for("brand_new_form").model_score_v2_threshold
+        )
+        case = texture_gate.GateCase(
+            form="brand_new_form",
+            seed=1,
+            generated=True,
+            num_voices=3,
+            max_active_voices=3,
+            avg_active_voices=2.4,
+            v2_silence_ratio=0.0,
+            max_repeated_run=1,
+            min_piece_voice_occupancy=0.6,
+            model_score=0.85,
+            model_score_v2=texture_gate.MODEL_SCORE_V2_THRESHOLD - 0.01,
+        )
+        self.assertFalse(case.passes_model_score_v2)
+
 
 class EnforcedVerdictTest(unittest.TestCase):
     def _failing_uplift_case(self, form: str) -> texture_gate.GateCase:
@@ -199,6 +238,17 @@ class PerAxisRoutingTest(unittest.TestCase):
         axes = self._case("fugue", mono_ratio=0.0, v2_silence_ratio=0.0).axis_results()
         self.assertIn("v2_silence_ratio", axes)
         self.assertNotIn("mono_ratio", axes)
+
+    def test_model_score_v2_axis_present_for_every_form(self) -> None:
+        for form in ("fugue", "passacaglia", "trio_sonata", "brand_new_form"):
+            self.assertIn("model_score_v2", self._case(form).axis_results(), form)
+
+    def test_model_score_v2_axis_routes_to_form_floor(self) -> None:
+        # chaconne floor 0.89: 0.88 fails there but passes the lower trio floor.
+        bad_chaconne = self._case("chaconne", model_score_v2=0.88)
+        ok_trio = self._case("trio_sonata", model_score_v2=0.88)
+        self.assertFalse(bad_chaconne.axis_results()["model_score_v2"])
+        self.assertTrue(ok_trio.axis_results()["model_score_v2"])
 
     def test_mono_ratio_axis_pass_and_fail(self) -> None:
         ok = self._case("chorale_prelude", mono_ratio=0.04)  # ceiling 0.05

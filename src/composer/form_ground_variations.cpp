@@ -179,7 +179,6 @@ void appendCounterFiguration(std::vector<MaterialNote>& notes, ThemeToneRegistry
 
   int line_prev = -1;
   int cursor = (band_lo + band_hi) / 2;
-  int anchor_run = 0;  // consecutive beats holding the same anchor pitch.
   std::vector<int> theme_pitches;
   std::vector<ConcurrentMotion> motions;
 
@@ -228,13 +227,38 @@ void appendCounterFiguration(std::vector<MaterialNote>& notes, ThemeToneRegistry
                                       line_prev, motions, mode, /*downbeat=*/beat == 0);
       // Adjacent bars whose chords share a tone near the band centre can pin
       // the nearest-tone anchor chain to ONE pitch for many beats; at the
-      // quarter-note tier that surfaces as a stalled repeated-note line. When
-      // a fifth identical beat is imminent, force the nearest DIFFERENT triad
-      // tone in band instead (a chord tone, so it stays consonant against the
-      // ground and the V0 anchors above).
-      if (notes_per_beat == 1 && anchor == line_prev && anchor_run >= 4)
-        anchor = nearest_other_triad_tone(anchor);
-      anchor_run = (anchor == line_prev) ? anchor_run + 1 : 1;
+      // quarter-note tier that surfaces as a stalled repeated-note line. Any
+      // repeated quarter anchor is displaced to the nearest DIFFERENT triad
+      // tone in band that is ALSO consonant against every concurrently
+      // sounding voice (a triad tone is always consonant with the ground, but
+      // the V0 wave may sit on a non-chord tone -- a 6th over the ground --
+      // that clashes with one triad member and not another): the reference
+      // corpus repeats a pitch on only ~3% of transitions, so even a pair
+      // reads as a stall. When no admissible different tone exists the repeat
+      // stands -- a repeated consonance beats a fresh clash.
+      if (notes_per_beat == 1 && anchor == line_prev) {
+        for (int dist = 1; dist <= 12; ++dist) {
+          bool placed = false;
+          for (int cand : {anchor + dist, anchor - dist}) {
+            if (cand < band_lo || cand > band_hi || !is_triad(cand))
+              continue;
+            bool consonant = true;
+            for (int upper : theme_pitches) {
+              if (!isConsonantIc(cand - upper)) {
+                consonant = false;
+                break;
+              }
+            }
+            if (consonant) {
+              anchor = cand;
+              placed = true;
+              break;
+            }
+          }
+          if (placed)
+            break;
+        }
+      }
       // Off-beat fills oscillate between the anchor and a consonant companion
       // tone: prefer a stepwise diatonic neighbour that is consonant against
       // the held ground (upper first -- the common figure), falling back to

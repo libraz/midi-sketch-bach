@@ -76,12 +76,17 @@ TEST(FigurationPaletteSawtooth, FillsStepTowardTheNextAnchorWithoutLeaps) {
   std::vector<MaterialNote> notes;
   appendSawtoothCycle(notes, 0, plan, 0, 0, /*notes_per_beat=*/4, detail::Mode::Major);
   // Within one beat the fill moves at most one diatonic degree per sub-note,
-  // i.e. at most 2 semitones between consecutive notes of the same beat.
+  // except the echappee bend on the final sub (two degrees, at most a third):
+  // a fill that would land exactly on the next anchor bends one step past it
+  // instead of re-attacking the anchor's pitch. Consecutive notes of the same
+  // beat therefore stay within 4 semitones and never repeat a pitch.
   for (std::size_t i = 1; i < notes.size(); ++i) {
     if (notes[i].start_tick / kTicksPerBeat != notes[i - 1].start_tick / kTicksPerBeat)
       continue;
-    EXPECT_LE(std::abs(static_cast<int>(notes[i].pitch) - static_cast<int>(notes[i - 1].pitch)), 2)
+    EXPECT_LE(std::abs(static_cast<int>(notes[i].pitch) - static_cast<int>(notes[i - 1].pitch)), 4)
         << "intra-beat fill leap at tick " << notes[i].start_tick;
+    EXPECT_NE(static_cast<int>(notes[i].pitch), static_cast<int>(notes[i - 1].pitch))
+        << "intra-beat repeated pitch at tick " << notes[i].start_tick;
   }
 }
 
@@ -346,9 +351,14 @@ TEST(FigurationPaletteFiguraCorta, BeatOnsetsAreChordToneAnchorsAndCellsConjunct
           << "beat onset at tick " << note.start_tick;
     }
     if (i > 0 && notes[i].start_tick / kTicksPerBeat == notes[i - 1].start_tick / kTicksPerBeat) {
+      // Cells stay within a third between consecutive notes: one diatonic step
+      // for plain walks, two degrees across a turn or echappee bend (the bends
+      // that keep a stalled walk from repeating a pitch).
       EXPECT_LE(std::abs(static_cast<int>(notes[i].pitch) - static_cast<int>(notes[i - 1].pitch)),
-                2)
+                4)
           << "intra-cell leap at tick " << notes[i].start_tick;
+      EXPECT_NE(static_cast<int>(notes[i].pitch), static_cast<int>(notes[i - 1].pitch))
+          << "intra-cell repeated pitch at tick " << notes[i].start_tick;
     }
   }
 }

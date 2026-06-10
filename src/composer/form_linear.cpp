@@ -374,15 +374,24 @@ HarnessFixture buildTrioSonataForm(const ResolvedRequest& req) {
   // `harmonic` selects the harmonic-minor ascending tetrachord on dominant bars
   // so the leading tone is reached without an augmented second; in major it is
   // ignored.
-  // `shape` rotates the intra-beat figure VOCABULARY per 4-bar cycle (the beat
-  // anchors themselves never change, so every contract -- per-beat chord-tone
-  // consonance, stepwise surface, banded registers -- holds for every shape):
+  // `shape` rotates the intra-beat figure VOCABULARY per bar (the beat anchors
+  // themselves never change, so every contract -- per-beat chord-tone
+  // consonance, conjunct off-beats, banded registers -- holds for every shape):
   //   0 = rising neighbour arc (anchor, +1, +2, +1),
-  //   1 = neighbour oscillation (anchor, +1, anchor, +1),
+  //   1 = falling neighbour arc (anchor, -1, -2, -1) when the anchor sits high
+  //       enough above the band floor, else the rising arc (a fixed oscillation
+  //       cell here proved fatal: bar-long anchor,+1,anchor,+1 trills dominate
+  //       the interval-bigram surface with a single repeated pair),
   //   2 = figura corta cell (eighth anchor + two stepping sixteenths; only at
   //       the sixteenth tier, lower tiers fall back to the arc).
+  // `zig_dir` sets the zigzag parity of the beat anchors: +1 moves to the
+  // chord tone ABOVE on odd beats (and below on even beats), -1 the reverse.
+  // Giving the two manual voices OPPOSITE parities makes their strong-beat
+  // motion contrary by construction, which keeps simultaneous perfect
+  // intervals from chaining into parallel fifths/octaves.
   auto appendScalarBar = [&](std::vector<MaterialNote>& dst, int& prev_anchor, int band_lo,
-                             int band_hi, int bar, int notes_per_beat, bool dotted, int shape) {
+                             int band_hi, int bar, int notes_per_beat, bool dotted, int shape,
+                             int zig_dir) {
     const BarChord& bc = chords[static_cast<std::size_t>(bar)];
     const int root_pc = bc.root_pc % 12;
     const int third = bc.minor ? 3 : 4;
@@ -390,8 +399,10 @@ HarnessFixture buildTrioSonataForm(const ResolvedRequest& req) {
     const bool harmonic = (mode == Mode::Minor) && (root_pc == 7);  // V wants the leading tone.
 
     auto walk = [&](int midi, int steps) {
-      if (steps < 0)
+      if (steps == 0)
         return midi;
+      if (steps < 0)
+        return detail::scaleDown(midi, -steps, mode);
       return (mode == Mode::Minor) ? detail::minorScaleUp(midi, steps, harmonic)
                                    : detail::scaleUp(midi, steps, Mode::Major);
     };
@@ -417,28 +428,46 @@ HarnessFixture buildTrioSonataForm(const ResolvedRequest& req) {
       return best;
     };
 
-    // Per-beat chord-tone anchors, voice-led ACROSS bars within the voice's band.
-    // Each beat lands on the chord tone NEAREST the previous beat's anchor (NOT a
-    // wide triad arpeggiation), and the bar's first beat is voice-led from the
-    // PREVIOUS bar's closing anchor (`prev_anchor`). To keep the line moving --
-    // not stuck repeating one chord tone -- alternate beats are nudged to the
-    // chord tone just ABOVE the previous anchor; every beat onset is still a
-    // genuine chord tone (so the strong-beat vertical sample is consonant) and
-    // consecutive anchors -- including at the bar boundary -- move by at most a
-    // third, so the line never leaps.
-    int beat_anchor[4];
-    int near = std::max(band_lo, std::min(band_hi, prev_anchor));
-    for (int beat = 0; beat < 4; ++beat) {
-      int anchor = nearestChordTone(near);
-      if (beat % 2 == 1) {
-        // Step to the next chord tone above (the line gently rises then settles),
-        // staying in band; this keeps successive onsets distinct without leaping.
-        const int up = nearestChordTone(anchor + 1);
-        if (up > anchor && up <= band_hi)
-          anchor = up;
+    // Find the chord tone STRICTLY beyond `from` in direction `dir` (+1 above,
+    // -1 below) inside the band; returns `from` when the band holds none. The
+    // nearest-tone helper above cannot serve here: the chord tone nearest
+    // (from + 1) is almost always `from` itself (triad tones sit >= 3 semitones
+    // apart), so a "nudge" built on it never moves and the anchor chain stalls
+    // into a repeated-note line.
+    auto chordToneBeyond = [&](int from, int dir) {
+      int best = from;
+      int best_dist = 1 << 20;
+      for (int tone = 0; tone < 3; ++tone) {
+        int low = band_lo + (((triad_pc[tone] - band_lo) % 12) + 12) % 12;
+        for (int v = low; v <= band_hi; v += 12) {
+          const int delta = (v - from) * dir;
+          if (delta > 0 && delta < best_dist) {
+            best_dist = delta;
+            best = v;
+          }
+        }
       }
+      return best;
+    };
+
+    // Per-beat chord-tone anchors, voice-led ACROSS bars within the voice's band.
+    // The bar's first beat lands on the chord tone NEAREST the previous bar's
+    // closing anchor (`prev_anchor`); later beats ZIGZAG through the triad
+    // (above, below, above), bouncing off the band edges. Every beat onset is a
+    // genuine chord tone (so the strong-beat vertical sample is consonant), no
+    // anchor repeats its predecessor (a stalled anchor chain reads as a
+    // repeated-note line), and the broken-chord motion supplies the third/fourth
+    // leaps the reference corpus writes between strong beats.
+    int beat_anchor[4];
+    const int near = std::max(band_lo, std::min(band_hi, prev_anchor));
+    beat_anchor[0] = nearestChordTone(near);
+    for (int beat = 1; beat < 4; ++beat) {
+      const int prev = beat_anchor[beat - 1];
+      const int dir = ((beat % 2 == 1) ? 1 : -1) * zig_dir;
+      int anchor = chordToneBeyond(prev, dir);
+      if (anchor == prev)  // band edge: bounce the other way.
+        anchor = chordToneBeyond(prev, -dir);
       beat_anchor[beat] = anchor;
-      near = anchor;
     }
     prev_anchor = beat_anchor[3];  // carry the closing anchor to the next bar.
 
@@ -493,18 +522,19 @@ HarnessFixture buildTrioSonataForm(const ResolvedRequest& req) {
     for (int beat = 0; beat < 4; ++beat) {
       const int anchor = beat_anchor[beat];
       // Within the beat: the onset is the chord-tone anchor; the remaining
-      // subdivisions trace the shape's stepwise neighbour figure (an arc or an
-      // oscillation), so they are passing tones that resolve back, never
-      // leaving by a leap.
+      // subdivisions trace the shape's stepwise neighbour arc (rising or
+      // falling), so they are passing tones that resolve back, never leaving
+      // by a leap. The falling arc keeps two scale steps of headroom above the
+      // band floor so the off-beats stay inside the voice's register slot
+      // (below it, the rising arc substitutes).
+      const bool falling = (shape == 1) && (anchor - 4 >= band_lo);
       for (int sub = 0; sub < notes_per_beat; ++sub) {
         MaterialNote mn;
         mn.start_tick = static_cast<Tick>(bar) * kTicksPerBar +
                         static_cast<Tick>(beat) * kTicksPerBeat + static_cast<Tick>(sub) * step;
         mn.duration = step;
-        const int degree = (shape == 1 && notes_per_beat == 4)
-                               ? (sub % 2)
-                               : ((sub <= notes_per_beat / 2) ? sub : (notes_per_beat - sub));
-        mn.pitch = static_cast<std::uint8_t>(walk(anchor, degree));
+        const int magnitude = (sub <= notes_per_beat / 2) ? sub : (notes_per_beat - sub);
+        mn.pitch = static_cast<std::uint8_t>(walk(anchor, falling ? -magnitude : magnitude));
         dst.push_back(mn);
       }
     }
@@ -561,20 +591,23 @@ HarnessFixture buildTrioSonataForm(const ResolvedRequest& req) {
     // the rhythmic distinction between the voices are preserved.
     const bool v1_dotted = profile.prefer_dotted && v0_dense && tier <= 1;
 
-    // Cycle-rotated intra-beat vocabulary, phase-shifted by one slot between
-    // the manual voices so they never trace the same figure within a cycle
-    // (distinct figuration strengthens the voice-independence trait). The
-    // climax cycle is a design value: its dense line keeps the uniform
-    // sixteenth arc (the figura corta cell carries fewer notes per beat and
-    // would flatten the density peak).
-    int v0_shape = static_cast<int>((req.seed + cycle) % 3);
-    int v1_shape = static_cast<int>((req.seed + cycle + 1) % 3);
+    // Bar-rotated intra-beat vocabulary, phase-shifted by one slot between
+    // the manual voices so they never trace the same figure within a bar
+    // (distinct figuration strengthens the voice-independence trait). Rotating
+    // per BAR rather than per cycle keeps any single figure from saturating
+    // the interval-bigram surface for sixteen beats in a row. The climax
+    // cycle is a design value: its dense line keeps the uniform sixteenth
+    // arc (the figura corta cell carries fewer notes per beat and would
+    // flatten the density peak).
+    int v0_shape = static_cast<int>((req.seed + static_cast<std::uint32_t>(bar)) % 3);
+    int v1_shape = static_cast<int>((req.seed + static_cast<std::uint32_t>(bar) + 1) % 3);
     if (arc.is_climax)
       (v0_dense ? v0_shape : v1_shape) = 0;
 
     appendScalarBar(v0.notes, v0_anchor, kV0BandLo, kV0BandHi, bar, v0_notes, /*dotted=*/false,
-                    v0_shape);
-    appendScalarBar(v1.notes, v1_anchor, kV1BandLo, kV1BandHi, bar, v1_notes, v1_dotted, v1_shape);
+                    v0_shape, /*zig_dir=*/1);
+    appendScalarBar(v1.notes, v1_anchor, kV1BandLo, kV1BandHi, bar, v1_notes, v1_dotted, v1_shape,
+                    /*zig_dir=*/-1);
   }
 
   // Cadential landing on the top line: an eighth-note approach into a held
@@ -643,14 +676,26 @@ HarnessFixture buildTrioSonataForm(const ResolvedRequest& req) {
       continue;
     }
     const int fifth_midi = root_midi - 5;  // a perfect fourth below the root (a fifth).
+    // Chord third in the pedal register, voiced nearest the root. Walking
+    // root - fifth - third - root removes the repeated inner fifth (a repeated
+    // bass pair every bar saturates the interval surface with unisons the
+    // reference corpus almost never writes) and widens the pedal's pitch-class
+    // palette; the third is a chord tone, so every sampled beat stays
+    // consonant against the chord-tone manual voices above.
+    const int third_pc = (root_pc + (chords[static_cast<std::size_t>(bar)].minor ? 3 : 4)) % 12;
+    int third_midi = kPedalFloor + (((third_pc - kPedalFloor) % 12) + 12) % 12;
+    while (third_midi + 12 <= kPedalCeil &&
+           std::abs((third_midi + 12) - root_midi) < std::abs(third_midi - root_midi))
+      third_midi += 12;
+    const int beat_pitch[4] = {root_midi, fifth_midi, third_midi, root_midi};
     for (int beat = 0; beat < 4; ++beat) {
       MaterialNote mn;
       mn.start_tick =
           static_cast<Tick>(bar) * kTicksPerBar + static_cast<Tick>(beat) * kTicksPerBeat;
       mn.duration = kTicksPerBeat;
-      // Root on the outer beats (1, 4), fifth on the inner beats (2, 3): the bar
-      // closes on the root for a small boundary step.
-      mn.pitch = static_cast<std::uint8_t>((beat == 0 || beat == 3) ? root_midi : fifth_midi);
+      // Root on the outer beats (1, 4): the bar closes on the root for a small
+      // boundary step into the next bar's root.
+      mn.pitch = static_cast<std::uint8_t>(beat_pitch[beat]);
       v2.notes.push_back(mn);
     }
     prev_root = root_midi;

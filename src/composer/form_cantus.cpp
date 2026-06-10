@@ -347,7 +347,6 @@ void appendWalkingBass(std::vector<MaterialNote>& out_notes, ThemeToneRegistry& 
   int cursor = (kBassBandLo + kBassBandHi) / 2;
   int line_prev = -1;
   int prev_pitch = -1;
-  int run_len = 0;
   std::vector<int> theme_pitches;
   std::vector<ConcurrentMotion> motions;
 
@@ -392,22 +391,38 @@ void appendWalkingBass(std::vector<MaterialNote>& out_notes, ThemeToneRegistry& 
                                    theme_pitches, line_prev, motions, mode, /*downbeat=*/false);
       }
 
-      // Run-aware nudge: a static harmony (repeated root) or a held passing tone
-      // can repeat the previous pitch. Cap any quarter-note run at three by
-      // displacing a fourth identical OFF-BEAT pitch to a consonant diatonic
-      // neighbour. Downbeats are exempt (the root statement is the bar's harmonic
-      // anchor and must not be displaced); the off-beat fills carry the variety.
-      const bool repeats = (pitch == prev_pitch);
-      if (repeats && beat != 0 && run_len >= 2) {
-        const int up =
-            (pitch + 2 <= kBassBandHi && detail::inScale(pitch + 2, mode)) ? pitch + 2 : -1;
-        const int down =
-            (pitch - 2 >= kBassBandLo && detail::inScale(pitch - 2, mode)) ? pitch - 2 : -1;
-        const int nudged = (up >= 0) ? up : down;
-        if (nudged >= 0)
-          pitch = nudged;
+      // Repeat nudge: a static harmony (repeated root) or a held passing tone
+      // can repeat the previous pitch. Any OFF-BEAT repeat is displaced (the
+      // reference corpus repeats a pitch on only ~3% of transitions, so even a
+      // pair reads as a stalled line): first to a diatonic step neighbour that
+      // is consonant against every concurrently sounding upper voice (keeping
+      // the walking surface stepwise), else to the chord tone above (an
+      // arpeggiated walk, consonant by construction). Downbeats are exempt
+      // (the root statement is the bar's harmonic anchor and must not be
+      // displaced); the off-beat fills carry the variety.
+      if (pitch == prev_pitch && beat != 0) {
+        auto consonant_with_all = [&](int cand) {
+          for (int upper : theme_pitches) {
+            if (!isConsonantPair(cand, upper))
+              return false;
+          }
+          return true;
+        };
+        int alt = -1;
+        for (int cand : {detail::scaleUp(pitch, 1, mode), detail::scaleDown(pitch, 1, mode)}) {
+          if (cand >= kBassBandLo && cand <= kBassBandHi && consonant_with_all(cand)) {
+            alt = cand;
+            break;
+          }
+        }
+        if (alt < 0) {
+          const int chord_tone = chordToneAbove(pitch, chord.root_pc, chord.minor);
+          if (chord_tone <= kBassBandHi)
+            alt = chord_tone;
+        }
+        if (alt >= 0)
+          pitch = alt;
       }
-      run_len = (pitch == prev_pitch) ? run_len + 1 : 0;
 
       out_notes.push_back(materialNote(beat_tick, kQuarterDur, pitch));
       registry.record(beat_tick, /*voice=*/2, pitch, kQuarterDur);
@@ -623,10 +638,13 @@ HarnessFixture buildChoralePreludeForm(const ResolvedRequest& req) {
     const int activity =
         static_cast<int>(point.density_tier) + static_cast<int>(profile.ornament_density);
 
-    // Beat 2 / beat 3 chord-tone targets: an upper-neighbour chord tone on beat 2,
-    // resolving back toward the skeleton tone on beat 3. Both are chord tones, so
-    // the sampled beats stay consonant; they bracket a small neighbour figure.
-    const int beat2 = nearestChordTone(tone + 1, chord);
+    // Beat 2 / beat 3 chord-tone targets: the chord tone STRICTLY ABOVE the
+    // skeleton tone on beat 2, resolving back to the skeleton tone on beat 3.
+    // Both are chord tones, so the sampled beats stay consonant; they bracket a
+    // real departure-and-return figure. (A nearest-tone pick for beat 2 ties
+    // back to the skeleton tone itself, which flattens the bar into a
+    // tone,tone,tone repeated-note figure.)
+    const int beat2 = chordToneAbove(tone, chord.root_pc, chord.minor);
     const int beat3 = nearestChordTone(tone, chord);
 
     // The final bar holds the closing tonic as one whole note: the CF joins
@@ -657,7 +675,16 @@ HarnessFixture buildChoralePreludeForm(const ResolvedRequest& req) {
       v1_run = (off2 == v1_prev) ? v1_run + 1 : 1;
       v1_prev = off2;
       const int b3 = breakRun(beat3, chord, base + kHalf + 2 * kEighth);
-      const int off3 = stepToward(b3, tone);
+      // The final passing eighth leads into the NEXT bar's skeleton tone; when
+      // the next bar repeats this bar's degree it becomes an upper-neighbour
+      // return instead (stepping "toward" the tone we already sit on would
+      // just repeat the pitch).
+      const int next_tone =
+          (bar + 1 < bars) ? static_cast<int>(skeleton[static_cast<std::size_t>(bar + 1)].pitch)
+                           : tone;
+      int off3 = stepToward(b3, next_tone);
+      if (off3 == b3)
+        off3 = detail::scaleUp(b3, 1, mode);
       out.material.cf_embellished.push_back(materialNote(base + kHalf + 2 * kEighth, kEighth, b3));
       out.material.cf_embellished.push_back(
           materialNote(base + kHalf + 3 * kEighth, kEighth, off3));
@@ -847,8 +874,11 @@ void appendVariationBar(PassacagliaVariation& var, int bar, const BarChord& chor
 // voice crossing) and above the C2 ground.
 constexpr int kCanonLeaderBase = 72;  // C5: aligned with the figuration band.
 // The follower is folded down so it never rises above this ceiling, keeping V1
-// strictly below the C5-region V0 leader.
-constexpr int kCanonFollowerCeiling = 71;  // B4: one semitone below the leader base.
+// strictly below the C5-region V0 leader AT EVERY TICK: the leader's lowest
+// off-beat is the lower neighbour of its C5 tone (B4 = 71), and the follower's
+// highest off-beat is the upper neighbour of its folded tone, so the ceiling
+// sits a third below B4 (G4 -> upper neighbour at most A4 = 69 < 71).
+constexpr int kCanonFollowerCeiling = 67;  // G4.
 
 // Choose the per-bar leader chord tone for a canon so that the canon stays
 // consonant by construction. The follower at bar b is the leader of bar b-1
@@ -957,29 +987,46 @@ std::array<int, 4> designCanonLeader(int imitation_degrees, Mode mode,
 void buildCanonBlock(PassacagliaVariation& leader, std::vector<MaterialNote>& follower_notes,
                      int block_start_bar, int imitation_degrees, Mode mode,
                      const std::array<std::uint8_t, 4>& ground) {
-  constexpr int kNotesPerBeat = 2;  // eighths: canons stay clear.
   const std::array<int, 4> leader_tone = designCanonLeader(imitation_degrees, mode, ground);
+  // Articulate one canon bar as eighth pairs: the DP-chosen chord tone on every
+  // BEAT ONSET (the sampled positions, so the consonance designed into the
+  // leader still holds), with each off-beat eighth bending to a diatonic
+  // neighbour. A bar that hammers its tone on all eight eighths reads as a
+  // stalled repeated-note line (the reference corpus repeats a pitch on only
+  // ~3% of transitions). The bend direction alternates with the bar's parity
+  // INSIDE the leader's line; because the follower restates the leader's
+  // previous bar (one-bar delay), the two voices always bend in OPPOSITE
+  // directions at any simultaneous off-beat -- contrary motion by
+  // construction, so the eighth-level motion can never form parallel perfect
+  // intervals (a same-direction figure at a perfect transposition interval
+  // turns the whole bar into parallel fifths/octaves).
+  auto emit_bar = [&](std::vector<MaterialNote>& dst, int bar, int tone, bool bend_up) {
+    const int neighbour =
+        bend_up ? detail::scaleUp(tone, 1, mode) : detail::scaleDown(tone, 1, mode);
+    for (int beat = 0; beat < 4; ++beat) {
+      const Tick beat_tick = barTick(bar) + static_cast<Tick>(beat) * kTicksPerBeat;
+      dst.push_back(materialNote(beat_tick, kEighth, tone));
+      dst.push_back(materialNote(beat_tick + kEighth, kEighth, neighbour));
+    }
+  };
   for (int local = 0; local < 4; ++local) {
     const int bar = block_start_bar + local;
-    const int pitch = leader_tone[static_cast<std::size_t>(bar % 4)];
-    for (int beat = 0; beat < 4; ++beat) {
-      for (int sub = 0; sub < kNotesPerBeat; ++sub) {
-        const Tick onset = barTick(bar) + static_cast<Tick>(beat) * kTicksPerBeat +
-                           static_cast<Tick>(sub) * kEighth;
-        leader.notes.push_back(materialNote(onset, kEighth, pitch));
-      }
-    }
+    emit_bar(leader.notes, bar, leader_tone[static_cast<std::size_t>(bar % 4)],
+             /*bend_up=*/(local % 2) == 0);
   }
-  // Follower: leader notes transposed up `imitation_degrees` degrees, folded into
-  // the V1 band, delayed one bar, truncated at the block end.
-  const Tick block_end = barTick(block_start_bar + 4);
-  for (const auto& lead : leader.notes) {
-    const Tick delayed = lead.start_tick + kTicksPerBar;
-    if (delayed >= block_end)
-      continue;  // truncate at the block boundary (drops the final leader bar).
-    const int transposed = transposeUp(static_cast<int>(lead.pitch), imitation_degrees, mode);
+  // Follower: the per-bar leader tone transposed up `imitation_degrees` degrees,
+  // folded into the V1 band ONCE PER BAR (folding per note would split a tone
+  // from its neighbour across the octave seam), delayed by one bar, truncated
+  // at the block end (so it sounds during bars 1..3 of the leader's window).
+  // The bend direction copies the SOURCE bar (a strict canon restates the
+  // leader's figure exactly), which is what makes it opposite to the leader's
+  // concurrent bar.
+  for (int local = 0; local < 3; ++local) {
+    const int src_bar = block_start_bar + local;
+    const int transposed =
+        transposeUp(leader_tone[static_cast<std::size_t>(src_bar % 4)], imitation_degrees, mode);
     const int folded = dropIntoBand(transposed, kCanonFollowerCeiling);
-    follower_notes.push_back(materialNote(delayed, lead.duration, folded));
+    emit_bar(follower_notes, src_bar + 1, folded, /*bend_up=*/(local % 2) == 0);
   }
 }
 

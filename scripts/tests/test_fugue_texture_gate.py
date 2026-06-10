@@ -240,6 +240,48 @@ class FugueTextureGateTest(unittest.TestCase):
         finally:
             fugue_texture_gate.ENFORCE_MODEL_SCORE = original
 
+    def test_model_score_v2_gates_against_form_floor(self) -> None:
+        # The KL-model axis is enforced per form; the fugue floor is 0.73
+        # (20-seed sweep minimum 0.7536 minus the seed-noise margin). A case
+        # below the floor fails the gate, an at-floor case passes.
+        base = dict(
+            form="fugue",
+            seed=0,
+            generated=True,
+            num_voices=3,
+            max_active_voices=3,
+            avg_active_voices=2.4,
+            v2_silence_ratio=0.0,
+            max_repeated_run=1,
+            min_piece_voice_occupancy=0.6,
+            model_score=0.85,
+        )
+        below = fugue_texture_gate.GateCase(**base, model_score_v2=0.72)
+        at = fugue_texture_gate.GateCase(**base, model_score_v2=0.73)
+        self.assertFalse(below.passes_model_score_v2)
+        self.assertFalse(below.passes_texture_gate)
+        self.assertTrue(at.passes_model_score_v2)
+        self.assertTrue(at.passes_texture_gate)
+
+    def test_unscored_v2_does_not_gate(self) -> None:
+        # model_score_v2 == -1.0 marks "not scored" (absent or pre-v2 scorer):
+        # the v2 axis must not fabricate a failure, mirroring model_score.
+        case = fugue_texture_gate.GateCase(
+            form="fugue",
+            seed=0,
+            generated=True,
+            num_voices=3,
+            max_active_voices=3,
+            avg_active_voices=2.4,
+            v2_silence_ratio=0.0,
+            max_repeated_run=1,
+            min_piece_voice_occupancy=0.6,
+            model_score=0.85,
+        )
+        self.assertFalse(case.model_scored_v2)
+        self.assertTrue(case.passes_model_score_v2)
+        self.assertTrue(case.passes_texture_gate)
+
     def test_summary_records_model_score_fields(self) -> None:
         scored = fugue_texture_gate.GateCase(
             form="fugue",

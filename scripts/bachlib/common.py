@@ -47,6 +47,21 @@ def model_probability(score: dict[str, Any]) -> float:
     return 0.0
 
 
+def model_probability_v2(score: dict[str, Any]) -> float:
+    """KL-divergence model probability (bach-mcp model_score_v2).
+
+    Informational for now: gates and closure thresholds stay anchored to the
+    v1 probability scale until they are re-anchored deliberately. Returns -1.0
+    when the scorer did not emit a v2 block (older bach-mcp build).
+    """
+    model = score.get("model_score_v2")
+    if isinstance(model, dict):
+        value = model.get("probability", -1.0)
+        if isinstance(value, (int, float)):
+            return float(value)
+    return -1.0
+
+
 def heuristic_score(score: dict[str, Any]) -> float:
     value = score.get("score", 0.0)
     return float(value) if isinstance(value, (int, float)) else 0.0

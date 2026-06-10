@@ -16,7 +16,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
-from bachlib.common import model_probability, score_generated
+from bachlib.common import model_probability, model_probability_v2, score_generated
 from bachlib.phases import normalize_phase  # noqa: F401  (kept import surface aligned)
 from bachlib.texture_metrics import compute_texture_metrics
 
@@ -30,14 +30,27 @@ DEFAULT_INDEX_JS = REPO_ROOT.parent / "bach-mcp" / "dist" / "index.js"
 # whole fugue sweep already clears it (see ENFORCE_MODEL_SCORE).
 MODEL_SCORE_THRESHOLD = 0.80
 
-# Whether a case's model_score participates in passes_texture_gate. The fugue
+# Whether a case's model scores participate in passes_texture_gate. The fugue
 # sweep (seeds 1-20 x {fugue, prelude_and_fugue}) was measured against the corpus
 # model: with the scalar-wave figuration / bass-support construction every case
 # clears MODEL_SCORE_THRESHOLD (bare fugue >= 0.82, prelude_and_fugue >= 0.85), so
 # the model score is enforced as part of passes_texture_gate. A case that was not
-# scored (absent scorer) still passes on the model-score axis so an unavailable
-# scorer cannot fabricate a failure (see passes_model_score).
+# scored (absent scorer) still passes on the model-score axes so an unavailable
+# scorer cannot fabricate a failure (see passes_model_score). The flag covers
+# both the v1 cross-entropy axis and the v2 KL axis.
 ENFORCE_MODEL_SCORE = True
+
+# Shared floor for the KL-divergence model probability (bach-mcp
+# model_score_v2). The v2 model measures per-component KL divergence against
+# the reference corpus with a probability scale anchored to the reference
+# works' own p95 distance envelope (a real solo-cello prelude scores ~0.84;
+# degenerate interval-spam output scores ~0.01), so unlike the v1
+# cross-entropy score it cannot be gamed by over-concentrating on common
+# intervals. 0.70 is a conservative fallback for forms without an explicit
+# floor; the per-form floors in FORM_THRESHOLDS are the measured 20-seed
+# sweep minima minus a ~0.02 seed-noise margin and act as regression
+# ratchets, not aspirational targets.
+MODEL_SCORE_V2_THRESHOLD = 0.70
 
 
 # Texture bands are calibrated against a corpus of 21 voice-separated Bach
@@ -91,6 +104,10 @@ class FormThresholds:
     @field model_score_threshold Form-specific gate-3 model-score floor. None
         falls back to the shared MODEL_SCORE_THRESHOLD (0.80); the sectional
         fantasia uses its established 0.78 closure threshold.
+    @field model_score_v2_threshold Form-specific floor on the KL-model
+        probability (model_score_v2). None falls back to the shared
+        MODEL_SCORE_V2_THRESHOLD; the explicit values are 20-seed sweep
+        minima minus a seed-noise margin (regression ratchets).
     @field enforced When True, failures flip the exit code; otherwise the form
         is informational only.
     """
@@ -100,6 +117,7 @@ class FormThresholds:
     require_v1_v2_occupancy: bool = False
     min_final_quarter_avg_active: float | None = None
     model_score_threshold: float | None = None
+    model_score_v2_threshold: float | None = None
     enforced: bool = True
 
 
@@ -112,32 +130,51 @@ FORM_THRESHOLDS: dict[str, FormThresholds] = {
     # Fugue forms keep the historical enforced floor (1.95) exactly; the
     # voice-count floor is not applied to them so their enforcement is
     # byte-identical to the original gate.
-    "fugue": FormThresholds(min_avg_active=MIN_AVG_ACTIVE_VOICES, enforced=True),
+    "fugue": FormThresholds(
+        min_avg_active=MIN_AVG_ACTIVE_VOICES,
+        model_score_v2_threshold=0.73,
+        enforced=True,
+    ),
     "prelude_and_fugue": FormThresholds(
-        min_avg_active=MIN_AVG_ACTIVE_VOICES, enforced=True
+        min_avg_active=MIN_AVG_ACTIVE_VOICES,
+        model_score_v2_threshold=0.81,
+        enforced=True,
     ),
     "toccata_and_fugue": FormThresholds(
         min_avg_active=2.1,
         max_mono_ratio=0.25,
         require_v1_v2_occupancy=True,
+        model_score_v2_threshold=0.72,
         enforced=True,
     ),
     "fantasia_and_fugue": FormThresholds(
         min_avg_active=2.3,
         max_mono_ratio=0.10,
         model_score_threshold=0.78,
+        model_score_v2_threshold=0.77,
         enforced=True,
     ),
     "passacaglia": FormThresholds(
         min_avg_active=2.2,
         max_mono_ratio=0.15,
         min_final_quarter_avg_active=2.5,
+        model_score_v2_threshold=0.83,
         enforced=True,
     ),
     "chorale_prelude": FormThresholds(
         min_avg_active=2.5,
         max_mono_ratio=0.05,
+        model_score_v2_threshold=0.75,
         enforced=True,
+    ),
+    # The remaining forms previously fell through to the default (enforced,
+    # fugue-style) entry; they are listed explicitly to carry their KL-model
+    # floors. All other fields keep the default-entry semantics.
+    "trio_sonata": FormThresholds(model_score_v2_threshold=0.76, enforced=True),
+    "cello_prelude": FormThresholds(model_score_v2_threshold=0.65, enforced=True),
+    "chaconne": FormThresholds(model_score_v2_threshold=0.89, enforced=True),
+    "goldberg_variations": FormThresholds(
+        model_score_v2_threshold=0.82, enforced=True
     ),
 }
 
@@ -188,6 +225,10 @@ class GateCase:
     # (the scorer was unavailable, e.g. bach-mcp / node missing); such cases do
     # not gate on the model score so an absent scorer cannot mask a texture fail.
     model_score: float = -1.0
+    # KL-divergence model probability (bach-mcp model_score_v2). Gated against
+    # the form's model_score_v2_threshold (MODEL_SCORE_V2_THRESHOLD fallback);
+    # -1.0 marks "not scored" and does not gate, mirroring model_score.
+    model_score_v2: float = -1.0
     error: str = ""
 
     @property
@@ -239,6 +280,28 @@ class GateCase:
         return self.model_score >= threshold
 
     @property
+    def model_scored_v2(self) -> bool:
+        return self.model_score_v2 >= 0.0
+
+    @property
+    def passes_model_score_v2(self) -> bool:
+        """Whether the KL-model probability satisfies the form's v2 floor.
+
+        Mirrors passes_model_score: True when enforcement is off or the case
+        was not v2-scored (an absent or pre-v2 scorer must not fabricate a
+        failure); otherwise the recorded v2 probability must reach the form's
+        floor (MODEL_SCORE_V2_THRESHOLD unless the form declares its own).
+        """
+        if not ENFORCE_MODEL_SCORE:
+            return True
+        if not self.model_scored_v2:
+            return True
+        threshold = self.thresholds.model_score_v2_threshold
+        if threshold is None:
+            threshold = MODEL_SCORE_V2_THRESHOLD
+        return self.model_score_v2 >= threshold
+
+    @property
     def passes_parallel(self) -> bool:
         """Whether the parallel perfect-5th/8th count is within the corpus ceiling."""
         return self.parallel_perfect_count <= MAX_PARALLEL_PERFECT_COUNT
@@ -262,6 +325,7 @@ class GateCase:
             ),
             "parallel_perfect": self.passes_parallel,
             "model_score": self.passes_model_score,
+            "model_score_v2": self.passes_model_score_v2,
         }
         # The v2 silence axis only applies to the 3-voice fugue gate; the
         # mono-ratio ceiling supersedes it for the uplift forms.
@@ -307,6 +371,8 @@ class GateCase:
         data["passes_parallel"] = self.passes_parallel
         data["model_scored"] = self.model_scored
         data["passes_model_score"] = self.passes_model_score
+        data["model_scored_v2"] = self.model_scored_v2
+        data["passes_model_score_v2"] = self.passes_model_score_v2
         data["verdict"] = (
             "enforced" if self.enforced else "informational"
         )
@@ -558,8 +624,8 @@ def evaluate_generated_json(form: str, seed: int, generated_json: Path) -> GateC
     )
 
 
-def model_score_for(index_js: Path | None, generated_json: Path) -> float:
-    """Score a generated.json with bach-mcp's corpus model ("gate-3").
+def model_score_for(index_js: Path | None, generated_json: Path) -> tuple[float, float]:
+    """Score a generated.json with bach-mcp's corpus models ("gate-3").
 
     Reuses bachlib.common.score_generated / model_probability so the gate and
     the closure harness obtain the model probability through the same path. A
@@ -568,15 +634,17 @@ def model_score_for(index_js: Path | None, generated_json: Path) -> float:
 
     @param index_js Path to bach-mcp/dist/index.js, or None to skip scoring.
     @param generated_json The generated.v1 JSON to score.
-    @return The corpus model probability, or -1.0 when scoring is unavailable.
+    @return (v1 probability, v2 KL-model probability); -1.0 when unavailable.
+        Both probabilities participate in pass/fail: v1 against the historical
+        gate-3 floor, v2 against the form's KL-model floor.
     """
     if index_js is None or not index_js.exists():
-        return -1.0
+        return -1.0, -1.0
     try:
         score = score_generated(index_js, generated_json)
     except (RuntimeError, OSError):
-        return -1.0
-    return model_probability(score)
+        return -1.0, -1.0
+    return model_probability(score), model_probability_v2(score)
 
 
 def run_case(
@@ -614,7 +682,7 @@ def run_case(
     if not generated_json.exists():
         return GateCase(form=form, seed=seed, generated=False, error="generated JSON missing")
     case = evaluate_generated_json(form, seed, generated_json)
-    case.model_score = model_score_for(index_js, generated_json)
+    case.model_score, case.model_score_v2 = model_score_for(index_js, generated_json)
     return case
 
 
@@ -681,6 +749,19 @@ def summarize_form(form: str, cases: list[GateCase]) -> dict[str, Any]:
         "min_model_score": min(scored, default=0.0),
         "max_model_score": max(scored, default=0.0),
         "model_scored_cases": len(scored),
+        "min_model_score_v2": min(
+            (case.model_score_v2 for case in generated if case.model_score_v2 >= 0.0),
+            default=0.0,
+        ),
+        "max_model_score_v2": max(
+            (case.model_score_v2 for case in generated if case.model_score_v2 >= 0.0),
+            default=0.0,
+        ),
+        "target_model_score_v2": (
+            thresholds.model_score_v2_threshold
+            if thresholds.model_score_v2_threshold is not None
+            else MODEL_SCORE_V2_THRESHOLD
+        ),
     }
 
 
@@ -706,6 +787,11 @@ def summarize(cases: list[GateCase]) -> dict[str, Any]:
         "model_score_threshold": MODEL_SCORE_THRESHOLD,
         "model_score_enforced": ENFORCE_MODEL_SCORE,
         "model_scored_cases": len(scored),
+        "min_model_score_v2": min(
+            (case.model_score_v2 for case in cases if case.model_scored_v2),
+            default=0.0,
+        ),
+        "model_scored_v2_cases": sum(1 for case in cases if case.model_scored_v2),
         "max_parallel_perfect_count": max(
             (case.parallel_perfect_count for case in cases if case.generated), default=0
         ),
