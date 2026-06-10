@@ -108,6 +108,11 @@ class FormThresholds:
         probability (model_score_v2). None falls back to the shared
         MODEL_SCORE_V2_THRESHOLD; the explicit values are 20-seed sweep
         minima minus a seed-noise margin (regression ratchets).
+    @field min_piece_voice_occupancy Form-specific floor on the weakest
+        voice's piece-relative occupancy. None falls back to the shared
+        MIN_PIECE_VOICE_OCCUPANCY (calibrated on continuous fugue textures);
+        a form whose inner voice is episodic by design (goldberg's canon
+        follower) pins its own design value instead.
     @field enforced When True, failures flip the exit code; otherwise the form
         is informational only.
     """
@@ -118,6 +123,7 @@ class FormThresholds:
     min_final_quarter_avg_active: float | None = None
     model_score_threshold: float | None = None
     model_score_v2_threshold: float | None = None
+    min_piece_voice_occupancy: float | None = None
     enforced: bool = True
 
 
@@ -171,10 +177,16 @@ FORM_THRESHOLDS: dict[str, FormThresholds] = {
     # fugue-style) entry; they are listed explicitly to carry their KL-model
     # floors. All other fields keep the default-entry semantics.
     "trio_sonata": FormThresholds(model_score_v2_threshold=0.76, enforced=True),
-    "cello_prelude": FormThresholds(model_score_v2_threshold=0.65, enforced=True),
+    "cello_prelude": FormThresholds(model_score_v2_threshold=0.83, enforced=True),
     "chaconne": FormThresholds(model_score_v2_threshold=0.89, enforced=True),
+    # Goldberg's middle voice is the canon follower only (the variation suite
+    # is two-voice with one three-voice canon block by design), so the
+    # fugue-calibrated occupancy floor does not apply; 0.10 pins the design
+    # value (0.15) with margin so the voice vanishing entirely still fails.
     "goldberg_variations": FormThresholds(
-        model_score_v2_threshold=0.82, enforced=True
+        model_score_v2_threshold=0.82,
+        min_piece_voice_occupancy=0.10,
+        enforced=True,
     ),
 }
 
@@ -315,22 +327,30 @@ class GateCase:
         floor, etc.) are omitted rather than reported as a pass.
         """
         thresholds = self.thresholds
+        occupancy_floor = (
+            thresholds.min_piece_voice_occupancy
+            if thresholds.min_piece_voice_occupancy is not None
+            else MIN_PIECE_VOICE_OCCUPANCY
+        )
         results: dict[str, bool] = {
             "generated": self.generated,
             "max_active_voices": self.max_active_voices == self.num_voices,
             "max_repeated_run": self.max_repeated_run <= 4,
             "avg_active_voices": self.avg_active_voices >= self.min_avg_active,
             "min_piece_voice_occupancy": (
-                self.min_piece_voice_occupancy >= MIN_PIECE_VOICE_OCCUPANCY
+                self.min_piece_voice_occupancy >= occupancy_floor
             ),
             "parallel_perfect": self.passes_parallel,
             "model_score": self.passes_model_score,
             "model_score_v2": self.passes_model_score_v2,
         }
-        # The v2 silence axis only applies to the 3-voice fugue gate; the
-        # mono-ratio ceiling supersedes it for the uplift forms.
+        # The v2 silence axis measures the THIRD voice starving and only
+        # applies to 3-voice textures (voice id 2 does not exist in a solo or
+        # two-voice form; the occupancy floor guards those voices instead).
+        # The mono-ratio ceiling supersedes it for the uplift forms.
         if thresholds.max_mono_ratio is None:
-            results["v2_silence_ratio"] = self.v2_silence_ratio <= 0.25
+            if self.num_voices >= 3:
+                results["v2_silence_ratio"] = self.v2_silence_ratio <= 0.25
         else:
             results["mono_ratio"] = self.mono_ratio <= thresholds.max_mono_ratio
         if thresholds.require_v1_v2_occupancy:

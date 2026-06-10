@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <array>
 #include <cstdint>
 #include <cstdlib>
 #include <vector>
@@ -7,6 +8,7 @@
 #include "composer/figuration.h"
 #include "composer/form_builders.h"
 #include "composer/minor_material.h"
+#include "composer/rule_helpers.h"
 #include "composer/texture_helpers.h"
 #include "core/basic_types.h"
 
@@ -213,6 +215,10 @@ HarnessFixture buildCelloPreludeForm(const ResolvedRequest& req) {
   // octave at the bar boundary (the failure mode of a fixed per-bar register).
   // Seeded in the cello's tenor range (~C3).
   int prev_anchor = 48;
+  // Implicit bass/top extremes of the previous bar's final cell (-1 before
+  // the first bar), used to vet each bar figure across the bar seam.
+  int prev_cell_lo = -1;
+  int prev_cell_hi = -1;
   for (int bar = 0; bar < bars; ++bar) {
     const std::size_t cycle = static_cast<std::size_t>(bar / 4);
     const ArcPoint arc = req.arc(std::min(cycle, req.cycle_count - 1));
@@ -261,40 +267,137 @@ HarnessFixture buildCelloPreludeForm(const ResolvedRequest& req) {
       }
     }
 
-    // Each of the bar's four per-beat cells is the SAME four-note figure (scale
-    // degrees above the anchor). Because every cell is identical, the implicit
-    // bass stream (per-cell minimum) is the anchor in EVERY cell and the top
-    // stream (per-cell maximum) is anchor+reach in every cell -- both CONSTANT
-    // within the bar. The implicit streams therefore move ONLY at bar
-    // boundaries, where the voice-led chord-tone anchors keep their motion
-    // small and forbidden-leap-free. Any out-of-scale or augmented-second
-    // adjacency inside the figure (e.g. the harmonic-minor Ab->B step) is an
-    // INTERIOR passing note, never a cell extreme, so it is never measured by
-    // the implicit-voice rule.
-    //
-    // The cell CONTOUR rotates per 4-bar cycle so consecutive cycles trace
-    // distinct figures (rising arc / fold-back / under-then-over). Every shape
-    // opens on the anchor (degree 0) and touches the same extreme (reach), so
-    // the implicit-stream invariants above hold for every shape, and every
-    // note-to-note move stays a step or a small (third/fourth) skip.
+    // The bar figure rotates per BAR among three textures the real solo-cello
+    // prelude mixes: the small oscillation cell, a scale-run triangle, and a
+    // pedal-point bariolage. A single oscillation cell looped all piece long
+    // concentrated the interval-bigram surface on a handful of pendulum
+    // bigrams (x|-x); the corpus bigram mass lives on step chains and varied
+    // figures, so the rotation is what restores it. Each candidate's implicit
+    // bass/top streams (per-cell min/max, including the boundary to the
+    // previous bar's last cell) are vetted against the same forbidden-leap
+    // and parallel-perfect predicates the validator applies; an unsafe figure
+    // falls through to the next, and the oscillation cell -- whose streams
+    // are constant within the bar by construction -- is the final fallback.
     static constexpr int kCellShapes[3][4] = {
         {0, 1, -1, 1},   // rising arc: anchor, +1, reach, +1 (-1 marks reach).
         {0, -1, 1, -1},  // fold-back: anchor, reach, +1, reach.
         {0, 1, 0, -1},   // under-then-over: anchor, +1, anchor, reach.
     };
-    const int* shape = kCellShapes[(req.seed + cycle) % 3];
-    int cell_fig[4];
-    for (int idx = 0; idx < 4; ++idx) {
-      const int degree = shape[idx] < 0 ? reach : shape[idx];
-      cell_fig[idx] = walk(anchor, degree, harmonic);
+    auto oscillation_bar = [&](std::array<int, 16>& p) {
+      const int* shape = kCellShapes[(req.seed + cycle) % 3];
+      int cell_fig[4];
+      for (int idx = 0; idx < 4; ++idx) {
+        const int degree = shape[idx] < 0 ? reach : shape[idx];
+        cell_fig[idx] = walk(anchor, degree, harmonic);
+      }
+      for (int slot = 0; slot < kNotesPerBar; ++slot) {
+        p[static_cast<std::size_t>(slot)] = cell_fig[slot % 4];
+      }
+    };
+    auto run_triangle_bar = [&](std::array<int, 16>& p) {
+      // Eight sixteenths climbing one scale step each, then folding back down
+      // the same tones: a full-bar scale-run arch (step-chain bigrams).
+      int w[8];
+      for (int idx = 0; idx < 8; ++idx) {
+        w[idx] = walk(anchor, idx, harmonic);
+      }
+      for (int idx = 0; idx < 8; ++idx) {
+        p[static_cast<std::size_t>(idx)] = w[idx];
+      }
+      for (int idx = 1; idx <= 6; ++idx) {
+        p[static_cast<std::size_t>(7 + idx)] = w[7 - idx];
+      }
+      p[14] = w[0];
+      p[15] = w[0];
+    };
+    auto pedal_bariolage_bar = [&](std::array<int, 16>& p) {
+      // BWV1007-style bariolage: the anchor as a constant pedal under an
+      // upper tone that walks down one scale degree per beat. The implicit
+      // bass stream is the pedal (constant); the top stream is stepwise.
+      for (int cell = 0; cell < 4; ++cell) {
+        const int top = walk(anchor, 6 - cell, harmonic);
+        const int under = walk(anchor, 5 - cell, harmonic);
+        p[static_cast<std::size_t>(cell * 4 + 0)] = anchor;
+        p[static_cast<std::size_t>(cell * 4 + 1)] = top;
+        p[static_cast<std::size_t>(cell * 4 + 2)] = under;
+        p[static_cast<std::size_t>(cell * 4 + 3)] = top;
+      }
+    };
+    // Vet a candidate bar exactly the way the validator will read it: per-cell
+    // min/max streams, adjacent-cell forbidden leaps (including the seam from
+    // the previous bar's last cell), implicit parallel perfects, and the
+    // cello's practical register ceiling.
+    auto cells_safe = [&](const std::array<int, 16>& p) {
+      int lo[4];
+      int hi[4];
+      for (int cell = 0; cell < 4; ++cell) {
+        lo[cell] = 127;
+        hi[cell] = 0;
+        for (int k = 0; k < 4; ++k) {
+          const int pitch = p[static_cast<std::size_t>(cell * 4 + k)];
+          lo[cell] = std::min(lo[cell], pitch);
+          hi[cell] = std::max(hi[cell], pitch);
+        }
+        if (lo[cell] < 36 || hi[cell] > 76) {
+          return false;
+        }
+      }
+      int pl = prev_cell_lo;
+      int ph = prev_cell_hi;
+      for (int cell = 0; cell < 4; ++cell) {
+        if (pl >= 0) {
+          if (rule_helpers::isForbiddenMelodicLeap(static_cast<std::uint8_t>(pl),
+                                                   static_cast<std::uint8_t>(lo[cell]),
+                                                   out.harmony) ||
+              rule_helpers::isForbiddenMelodicLeap(static_cast<std::uint8_t>(ph),
+                                                   static_cast<std::uint8_t>(hi[cell]),
+                                                   out.harmony)) {
+            return false;
+          }
+          const int prev_ic = std::abs(ph - pl) % 12;
+          const int cur_ic = std::abs(hi[cell] - lo[cell]) % 12;
+          if (prev_ic == cur_ic && (prev_ic == 0 || prev_ic == 7)) {
+            const int bass_motion = lo[cell] - pl;
+            const int top_motion = hi[cell] - ph;
+            if (bass_motion != 0 && top_motion != 0 && (bass_motion > 0) == (top_motion > 0)) {
+              return false;
+            }
+          }
+        }
+        pl = lo[cell];
+        ph = hi[cell];
+      }
+      return true;
+    };
+    std::array<int, 16> pitches{};
+    bool placed = false;
+    const int pref = (req.seed + bar) % 3;
+    for (int attempt = 0; attempt < 3 && !placed; ++attempt) {
+      switch ((pref + attempt) % 3) {
+        case 0:
+          oscillation_bar(pitches);
+          break;
+        case 1:
+          run_triangle_bar(pitches);
+          break;
+        default:
+          pedal_bariolage_bar(pitches);
+          break;
+      }
+      placed = cells_safe(pitches);
+    }
+    if (!placed) {
+      oscillation_bar(pitches);  // constant-stream fallback (prior behavior).
     }
     for (int slot = 0; slot < kNotesPerBar; ++slot) {
       MaterialNote mn;
       mn.start_tick = static_cast<Tick>(bar) * kTicksPerBar + static_cast<Tick>(slot) * kSix;
       mn.duration = kSix;
-      mn.pitch = static_cast<std::uint8_t>(cell_fig[slot % 4]);
+      mn.pitch = static_cast<std::uint8_t>(pitches[static_cast<std::size_t>(slot)]);
       out.material.arpeggio_template.notes.push_back(mn);
     }
+    prev_cell_lo = std::min({pitches[12], pitches[13], pitches[14], pitches[15]});
+    prev_cell_hi = std::max({pitches[12], pitches[13], pitches[14], pitches[15]});
     prev_anchor = anchor;  // voice-lead the next bar from this bar's anchor.
   }
 

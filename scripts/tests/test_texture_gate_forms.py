@@ -89,7 +89,7 @@ class FormThresholdsTableTest(unittest.TestCase):
             "passacaglia": 0.83,
             "chorale_prelude": 0.75,
             "trio_sonata": 0.76,
-            "cello_prelude": 0.65,
+            "cello_prelude": 0.83,
             "chaconne": 0.89,
             "goldberg_variations": 0.82,
         }
@@ -238,6 +238,33 @@ class PerAxisRoutingTest(unittest.TestCase):
         axes = self._case("fugue", mono_ratio=0.0, v2_silence_ratio=0.0).axis_results()
         self.assertIn("v2_silence_ratio", axes)
         self.assertNotIn("mono_ratio", axes)
+
+    def test_v2_silence_axis_omitted_below_three_voices(self) -> None:
+        # The axis measures the THIRD voice starving; a solo or two-voice form
+        # has no voice id 2, so the axis would fail on the dict default (1.0)
+        # rather than on anything the form actually played.
+        solo = self._case("cello_prelude", num_voices=1, max_active_voices=1,
+                          piece_voice_occupancy={0: 1.0}, v2_silence_ratio=1.0)
+        duo = self._case("chaconne", num_voices=2, max_active_voices=2,
+                         piece_voice_occupancy={0: 1.0, 1: 1.0}, v2_silence_ratio=1.0)
+        self.assertNotIn("v2_silence_ratio", solo.axis_results())
+        self.assertNotIn("v2_silence_ratio", duo.axis_results())
+        trio = self._case("fugue", v2_silence_ratio=0.0)
+        self.assertIn("v2_silence_ratio", trio.axis_results())
+
+    def test_goldberg_occupancy_floor_pins_design_value(self) -> None:
+        # Goldberg's middle voice is the canon follower only (design value
+        # 0.15); the form pins its own floor 0.10 while every other form keeps
+        # the fugue-calibrated 0.34.
+        ok = self._case("goldberg_variations", min_piece_voice_occupancy=0.15,
+                        v2_silence_ratio=0.0)
+        gone = self._case("goldberg_variations", min_piece_voice_occupancy=0.05,
+                          v2_silence_ratio=0.0)
+        self.assertTrue(ok.axis_results()["min_piece_voice_occupancy"])
+        self.assertFalse(gone.axis_results()["min_piece_voice_occupancy"])
+        fugue_starved = self._case("fugue", min_piece_voice_occupancy=0.2,
+                                   v2_silence_ratio=0.0)
+        self.assertFalse(fugue_starved.axis_results()["min_piece_voice_occupancy"])
 
     def test_model_score_v2_axis_present_for_every_form(self) -> None:
         for form in ("fugue", "passacaglia", "trio_sonata", "brand_new_form"):

@@ -141,11 +141,13 @@ TEST(FormLinearCello, FinalBarHarmonyIsTonic) {
   }
 }
 
-// The cello line is a compact, stepwise-dominant running figuration (the
-// BWV1007 note language): adjacent sixteenths move by a step or small skip, so
-// the fraction of large leaps (> a perfect fifth) is tiny and there are no
-// remote (> octave) leaps. This guards the catastrophic broken-chord regression
-// (constant 7-16 semitone root-fifth-third jumps) the wave layout replaced.
+// The cello line mixes running figuration with pedal-point bariolage (the
+// BWV1007 note language): most adjacent sixteenths move by a step or small
+// skip, the bariolage bars add deliberate pedal-to-top leaps, and there are
+// no remote (> octave) leaps. The real BWV1007/1 prelude's leap (> P5) share
+// is 0.162; the 0.20 ceiling keeps the line inside that envelope while still
+// guarding the catastrophic broken-chord regression (constant 7-16 semitone
+// root-fifth-third jumps on every note, leap share ~0.5+).
 TEST(FormLinearCello, IsStepwiseDominantWithNoRemoteLeaps) {
   for (std::uint32_t seed : kSeeds) {
     for (bool minor : kMinorFlags) {
@@ -168,7 +170,7 @@ TEST(FormLinearCello, IsStepwiseDominantWithNoRemoteLeaps) {
         const double leap_ratio =
             notes.size() > 1 ? static_cast<double>(leaps) / static_cast<double>(notes.size() - 1)
                              : 0.0;
-        EXPECT_LE(leap_ratio, 0.08) << "seed=" << seed << " minor=" << minor << " bars=" << bars;
+        EXPECT_LE(leap_ratio, 0.20) << "seed=" << seed << " minor=" << minor << " bars=" << bars;
         EXPECT_EQ(remote, 0) << "seed=" << seed << " minor=" << minor << " bars=" << bars;
       }
     }
