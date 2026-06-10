@@ -82,8 +82,8 @@ class FormThresholdsTableTest(unittest.TestCase):
         # All ten shipped forms carry an explicit KL-model floor (20-seed
         # sweep minima minus the seed-noise margin, regression ratchets).
         expected = {
-            "fugue": 0.73,
-            "prelude_and_fugue": 0.81,
+            "fugue": 0.78,
+            "prelude_and_fugue": 0.85,
             "toccata_and_fugue": 0.72,
             "fantasia_and_fugue": 0.77,
             "passacaglia": 0.83,

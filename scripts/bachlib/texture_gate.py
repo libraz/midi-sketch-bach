@@ -132,12 +132,12 @@ FORM_THRESHOLDS: dict[str, FormThresholds] = {
     # byte-identical to the original gate.
     "fugue": FormThresholds(
         min_avg_active=MIN_AVG_ACTIVE_VOICES,
-        model_score_v2_threshold=0.73,
+        model_score_v2_threshold=0.78,
         enforced=True,
     ),
     "prelude_and_fugue": FormThresholds(
         min_avg_active=MIN_AVG_ACTIVE_VOICES,
-        model_score_v2_threshold=0.81,
+        model_score_v2_threshold=0.85,
         enforced=True,
     ),
     "toccata_and_fugue": FormThresholds(

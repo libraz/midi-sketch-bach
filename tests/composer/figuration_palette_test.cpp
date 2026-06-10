@@ -279,6 +279,41 @@ TEST(FigurationPaletteFigurationWave, FormsNoPerfectParallelAgainstRegistryVoice
   EXPECT_EQ(parallels, 0);
 }
 
+TEST(FigurationPaletteFigurationWave, BarFigureRotationVariesIntervalVocabulary) {
+  // The wave rotates its bar figure by bar % 3: broken-third chain (0), one
+  // fourth/fifth dive (1), plain stepwise wave (2). With no other voice in the
+  // registry the vetting fallbacks never replace a figure note, so the bar
+  // interval vocabulary is the figure's own.
+  const detail::ChordSpec chord{0, false};
+  auto bar_intervals = [&](int bar) {
+    ThemeToneRegistry registry;
+    FigurationSection section;
+    int prev_anchor = 0;
+    appendFigurationWaveBar(registry, section, bar, /*voice=*/1, chord, detail::Mode::Major,
+                            /*notes_per_beat=*/2, /*offset=*/1, prev_anchor, 51, 66,
+                            /*num_voices=*/3);
+    std::vector<int> intervals;
+    for (std::size_t i = 1; i < section.notes.size(); ++i) {
+      intervals.push_back(std::abs(static_cast<int>(section.notes[i].pitch) -
+                                   static_cast<int>(section.notes[i - 1].pitch)));
+    }
+    return intervals;
+  };
+  // Broken-third bar: at least two third-sized (or larger) moves.
+  const std::vector<int> thirds = bar_intervals(0);
+  EXPECT_GE(std::count_if(thirds.begin(), thirds.end(), [](int iv) { return iv >= 3; }), 2)
+      << "broken-third bar lost its third vocabulary";
+  // Dive bar: at least one fourth-or-larger leap.
+  const std::vector<int> dive = bar_intervals(1);
+  EXPECT_GE(std::count_if(dive.begin(), dive.end(), [](int iv) { return iv >= 4; }), 1)
+      << "dive bar lost its leap";
+  // Plain bar: conjunct -- steps dominate (anchor snaps may reach a third).
+  const std::vector<int> plain = bar_intervals(2);
+  EXPECT_GE(std::count_if(plain.begin(), plain.end(), [](int iv) { return iv <= 2; }),
+            static_cast<long>(plain.size()) - 2)
+      << "plain wave bar is no longer conjunct";
+}
+
 // --- kArpeggio ----------------------------------------------------------------
 
 TEST(FigurationPaletteArpeggio, AllNotesAreTriadTonesInsideBand) {

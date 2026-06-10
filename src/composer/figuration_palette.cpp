@@ -447,10 +447,37 @@ void appendFigurationWaveBar(ThemeToneRegistry& registry, FigurationSection& sec
   // the band edges, which is what keeps consecutive bars from a sawtooth jump).
   int cursor = std::clamp(prev_anchor, wave_lo, wave_hi);
   int dir = (cursor <= center) ? 1 : -1;
+  // Per-bar figure rotation. A purely stepwise wave over-concentrates the
+  // melodic-interval surface on seconds (the corpus walks steps on only ~36%
+  // of transitions and skips or leaps on ~61%), so the bar figure rotates:
+  // a broken-third chain (c-e-d-f-e-g), one fourth/fifth dive per bar, and
+  // the plain wave. Rotation matters as much as the figures themselves --
+  // applying any single figure to every bar over-concentrates the interval
+  // BIGRAM surface instead.
+  const int figure_mode = ((bar % 3) + 3) % 3;
+  // Prevailing direction of the broken-third arc. Tracked separately from
+  // `dir` (which commits to whatever the vetted step actually did) so the
+  // chain keeps its net slope until it reflects at the working band edge.
+  int arc_dir = dir;
   auto stepScale = [&](int from, int direction) {
     return direction > 0 ? detail::scaleUp(from, 1, mode) : detail::scaleDown(from, 1, mode);
   };
+  // Walk `degrees` scale steps from `from_pitch` along `direction`, mirroring
+  // at the working band edges (like the single-step wave) and clamping to the
+  // voice band.
+  auto leapScale = [&](int from_pitch, int degrees, int direction) {
+    int candidate = direction > 0 ? detail::scaleUp(from_pitch, degrees, mode)
+                                  : detail::scaleDown(from_pitch, degrees, mode);
+    if (candidate > wave_hi || candidate < wave_lo) {
+      candidate = direction > 0 ? detail::scaleDown(from_pitch, degrees, mode)
+                                : detail::scaleUp(from_pitch, degrees, mode);
+    }
+    return std::clamp(candidate, band_lo, band_hi);
+  };
   int last_pitch = cursor;
+  // Last pitch this call actually emitted (-1 until the first note), used to
+  // re-judge the beat anchor at the audible sub-beat grain below.
+  int prev_emitted = -1;
   // This line's previous beat anchor, used to judge whether the next anchor
   // moves in parallel with an earlier voice. Seeded from prev_anchor (the prior
   // bar's last anchor) so the bar-boundary beat is also parallel-checked.
@@ -484,7 +511,60 @@ void appendFigurationWaveBar(ThemeToneRegistry& registry, FigurationSection& sec
     const int anchor =
         consonantChordTone(chord, voice, band_lo, band_hi, cursor, theme_pitches, line_prev_anchor,
                            motions, mode, beat == 0, window_pitches);
-    cursor = std::clamp(anchor, band_lo, band_hi);
+    int snapped = std::clamp(anchor, band_lo, band_hi);
+    // consonantChordTone judges parallels at beat grain (previous anchor to
+    // this anchor); the audible approach into the beat is from the last
+    // emitted sub-beat note, which is also the grain union-onset sampling
+    // hears. Re-check at that grain and displace to the nearest chord tone
+    // that is consonant with the sounding theme tones and parallel-free; the
+    // snap stands when no such tone exists within a fifth.
+    if (prev_emitted >= 0) {
+      registry.concurrentMotions(beat_tick - step, beat_tick, static_cast<VoiceId>(voice),
+                                 num_voices, motions);
+      auto anchor_is_parallel = [&](int cand) {
+        for (const ConcurrentMotion& motion : motions) {
+          if (formsPerfectParallel(prev_emitted, cand, motion.prev, motion.curr)) {
+            return true;
+          }
+        }
+        return false;
+      };
+      if (anchor_is_parallel(snapped)) {
+        const int third = chord.minor ? 3 : 4;
+        const int triad_pc[3] = {((chord.root_pc % 12) + 12) % 12, (chord.root_pc + third) % 12,
+                                 (chord.root_pc + 7) % 12};
+        auto admissible = [&](int cand) {
+          if (cand < band_lo || cand > band_hi || cand == snapped) {
+            return false;
+          }
+          const int pc = ((cand % 12) + 12) % 12;
+          if (pc != triad_pc[0] && pc != triad_pc[1] && pc != triad_pc[2]) {
+            return false;
+          }
+          for (const int sounding : theme_pitches) {
+            if (!isConsonantPair(cand, sounding)) {
+              return false;
+            }
+          }
+          return !anchor_is_parallel(cand);
+        };
+        for (int dist = 1; dist <= 7; ++dist) {
+          bool placed = false;
+          for (const int sgn : {-1, 1}) {
+            const int cand = snapped + sgn * dist;
+            if (admissible(cand)) {
+              snapped = cand;
+              placed = true;
+              break;
+            }
+          }
+          if (placed) {
+            break;
+          }
+        }
+      }
+    }
+    cursor = snapped;
     line_prev_anchor = cursor;
     for (int sub = 0; sub < notes_per_beat; ++sub) {
       const Tick tick =
@@ -506,7 +586,35 @@ void appendFigurationWaveBar(ThemeToneRegistry& registry, FigurationSection& sec
           }
           return std::clamp(candidate, band_lo, band_hi);
         };
-        int next = step_from(dir);
+        int next;
+        if (figure_mode == 0) {
+          // Broken-third chain: a scale-third along the arc on odd subs, a
+          // single step back on even subs -- net one step per pair, so the bar
+          // keeps the wave's slope while gaining third vocabulary.
+          if (sub % 2 == 1) {
+            next = leapScale(from, 2, arc_dir);
+            if ((next - from) * arc_dir < 0) {
+              arc_dir = -arc_dir;  // the third reflected at the band edge
+            }
+          } else {
+            next = leapScale(from, 1, -arc_dir);
+          }
+          if (next == from) {
+            next = step_from(dir);
+          }
+        } else if (figure_mode == 1 && beat == 2 && sub == 1) {
+          // One dive per bar: a fourth or fifth along the running direction
+          // (alternating across successive dive bars), filling the corpus's
+          // leap bins; the following steps and the next beat's consonant
+          // anchor snap recover the register.
+          const int dive_degrees = ((bar / 3) % 2 == 0) ? 3 : 4;
+          next = leapScale(from, dive_degrees, dir);
+          if (next == from) {
+            next = step_from(dir);
+          }
+        } else {
+          next = step_from(dir);
+        }
         // Parallel-aware wave: if this step lands a same-direction perfect 5th/8th
         // against an earlier voice's concurrent motion, reverse direction (still a
         // single scale step, so the line stays conjunct). Sampled at this sub-tick
@@ -648,6 +756,7 @@ void appendFigurationWaveBar(ThemeToneRegistry& registry, FigurationSection& sec
         pitch = cursor;
       }
       last_pitch = pitch;
+      prev_emitted = pitch;
       addNote(section.notes, tick, step, pitch);
       // Register this figuration note so a voice placed later in the same window
       // can read what this line sounds and avoid a parallel against it.

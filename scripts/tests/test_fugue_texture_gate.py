@@ -241,8 +241,8 @@ class FugueTextureGateTest(unittest.TestCase):
             fugue_texture_gate.ENFORCE_MODEL_SCORE = original
 
     def test_model_score_v2_gates_against_form_floor(self) -> None:
-        # The KL-model axis is enforced per form; the fugue floor is 0.73
-        # (20-seed sweep minimum 0.7536 minus the seed-noise margin). A case
+        # The KL-model axis is enforced per form; the fugue floor is 0.78
+        # (20-seed sweep minimum 0.809 minus the seed-noise margin). A case
         # below the floor fails the gate, an at-floor case passes.
         base = dict(
             form="fugue",
@@ -256,8 +256,8 @@ class FugueTextureGateTest(unittest.TestCase):
             min_piece_voice_occupancy=0.6,
             model_score=0.85,
         )
-        below = fugue_texture_gate.GateCase(**base, model_score_v2=0.72)
-        at = fugue_texture_gate.GateCase(**base, model_score_v2=0.73)
+        below = fugue_texture_gate.GateCase(**base, model_score_v2=0.77)
+        at = fugue_texture_gate.GateCase(**base, model_score_v2=0.78)
         self.assertFalse(below.passes_model_score_v2)
         self.assertFalse(below.passes_texture_gate)
         self.assertTrue(at.passes_model_score_v2)
