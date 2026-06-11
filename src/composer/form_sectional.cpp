@@ -260,13 +260,23 @@ void appendFigurationBar(ThemeToneRegistry& registry, FigurationSection& section
   const int wave_hi = std::min(kBandHi[voice], center + 5);
   int cursor = std::clamp(prev_anchor, wave_lo, wave_hi);
   int dir = (cursor <= center) ? 1 : -1;
+  // Wave stride for the current beat: 1 scale degree on most beats (stepwise
+  // passing motion), widened to 2 degrees (a broken-third chain) on every
+  // third beat. A wave that only ever steps stacks the whole line into the
+  // three step|step interval-bigram bins -- a concentration the reference
+  // corpus never reaches -- while the rotated third-chains supply the inside-
+  // beat skips the corpus writes. The stride changes nothing else: the
+  // parallel / harshness / voice-order machinery below vets every candidate
+  // the same way at either stride.
+  int wave_degrees = 1;
   auto stepScale = [&](int from, int direction) {
-    return direction > 0 ? scaleUp(from, 1, mode) : scaleDown(from, 1, mode);
+    return direction > 0 ? scaleUp(from, wave_degrees, mode) : scaleDown(from, wave_degrees, mode);
   };
   int last_pitch = cursor;
   int line_prev_anchor = (prev_anchor > 0) ? prev_anchor : -1;
   std::vector<ConcurrentMotion> motions;
   for (int beat = 0; beat < 4; ++beat) {
+    wave_degrees = ((bar + beat) % 3 == 1) ? 2 : 1;
     const Tick beat_tick = barTick(bar) + static_cast<Tick>(beat) * kTicksPerBeat;
     const Tick prev_beat_tick = beat_tick - kTicksPerBeat;
     registry.concurrentThemePitches(beat_tick, static_cast<VoiceId>(voice), theme_pitches);
@@ -810,6 +820,15 @@ void appendFugueTail(SectionalAssembly& asm_ctx, int first_bar, int bars,
   auto append_countersubject_from = [&](const std::vector<MaterialNote>& source, int voice,
                                         Tick start, Tick end) {
     const int center = (kBandLo[voice] + kBandHi[voice]) / 2;
+    // Pass 1: select one anchor per source note (consonant against the source,
+    // contrary-motion preferred, repeated-pitch capped -- the scoring is
+    // unchanged; pass 2 only decides the rhythm each anchor is realized with).
+    struct CsAnchor {
+      Tick tick;
+      Tick dur;
+      int pitch;
+    };
+    std::vector<CsAnchor> anchors;
     int prev_cs = -1;
     int prev_src = -1;
     int repeat_run = 1;  // consecutive equal counterline pitches so far.
@@ -853,10 +872,60 @@ void appendFugueTail(SectionalAssembly& asm_ctx, int first_bar, int bars,
       }
       const int pitch = (best >= 0) ? best : std::clamp(target, kBandLo[voice], kBandHi[voice]);
       repeat_run = (pitch == prev_cs) ? repeat_run + 1 : 1;
-      addNote(out.material.countersubject, note.start_tick, note.duration, pitch);
-      registry.record(note.start_tick, static_cast<VoiceId>(voice), pitch, note.duration);
+      anchors.push_back({note.start_tick, note.duration, pitch});
       prev_cs = pitch;
       prev_src = src;
+    }
+    // Pass 2: emit. A quarter-note anchor is realized with a complementary
+    // rhythm rotating per beat -- kept quarter / sixteenth run toward the next
+    // anchor / broken-chord arc -- so the counterline moves against the
+    // theme's longer values (the corpus duration profile is sixteenth-
+    // dominant) while the rotation keeps the bigram surface diverse (any
+    // single figure applied uniformly over-concentrates it). Interior tones
+    // move only while the theme voice holds its pitch, so each onset pair the
+    // ear (and the parallel detector) samples is oblique motion; the vetted
+    // anchors remain the only simultaneous-motion points.
+    for (std::size_t i = 0; i < anchors.size(); ++i) {
+      const CsAnchor& a = anchors[i];
+      const bool has_next = (i + 1 < anchors.size());
+      const int figure = static_cast<int>((a.tick / kTicksPerBeat) % 3);
+      if (a.dur != kTicksPerBeat || !has_next || figure == 0) {
+        addNote(out.material.countersubject, a.tick, a.dur, a.pitch);
+        registry.record(a.tick, static_cast<VoiceId>(voice), a.pitch, a.dur);
+        continue;
+      }
+      const Tick sixteenth = kTicksPerBeat / 4;
+      std::array<int, 4> figure_pitches{a.pitch, a.pitch, a.pitch, a.pitch};
+      if (figure == 1) {
+        // Sixteenth run toward the next anchor, folding back once the target
+        // is reached so the anchor arrives by step instead of being overshot.
+        const int run_target = anchors[i + 1].pitch;
+        int dir = (run_target > a.pitch) ? 1 : -1;
+        int cur = a.pitch;
+        for (int k = 1; k < 4; ++k) {
+          cur = (dir > 0) ? detail::scaleUp(cur, 1, mode) : detail::scaleDown(cur, 1, mode);
+          cur = std::clamp(cur, kBandLo[voice], kBandHi[voice]);
+          if ((dir > 0 && cur >= run_target) || (dir < 0 && cur <= run_target)) {
+            dir = -dir;
+          }
+          figure_pitches[static_cast<std::size_t>(k)] = cur;
+        }
+      } else {
+        // Broken-chord arc (anchor / 3rd / 5th / 3rd), arcing downward when
+        // the band top leaves no room above the anchor.
+        const int dir = (a.pitch + 7 <= kBandHi[voice]) ? 1 : -1;
+        const int third =
+            (dir > 0) ? detail::scaleUp(a.pitch, 2, mode) : detail::scaleDown(a.pitch, 2, mode);
+        const int fifth =
+            (dir > 0) ? detail::scaleUp(a.pitch, 4, mode) : detail::scaleDown(a.pitch, 4, mode);
+        figure_pitches = {a.pitch, third, fifth, third};
+      }
+      for (int k = 0; k < 4; ++k) {
+        const int p =
+            std::clamp(figure_pitches[static_cast<std::size_t>(k)], kBandLo[voice], kBandHi[voice]);
+        addNote(out.material.countersubject, a.tick + k * sixteenth, sixteenth, p);
+        registry.record(a.tick + k * sixteenth, static_cast<VoiceId>(voice), p, sixteenth);
+      }
     }
   };
   stamp_subject(first_bar + 0, v0_off, 0);
@@ -1019,9 +1088,10 @@ void appendFugueTail(SectionalAssembly& asm_ctx, int first_bar, int bars,
     out.material.stretto_entries.push_back(stretto);
     pushSpan(asm_ctx, 1, leader_bar + 1, leader_bar + 3, VoiceIntent::StrettoCarrier);
 
-    // V2 figuration under the stretto block (band-confined). The two thematic
-    // voices (V0 leader, V1 follower) already sound above it.
-    add_counterline(2, leader_bar, leader_bar + 3, 1);
+    // V2 figuration under the stretto block (band-confined, eighth motion so
+    // the bass keeps moving against the overlapped theme statements). The two
+    // thematic voices (V0 leader, V1 follower) already sound above it.
+    add_counterline(2, leader_bar, leader_bar + 3, 2);
 
     // Figuration fill before and after the stretto block: a V0 running line with
     // a V2 sustained chord-tone support beneath it, so every development bar that

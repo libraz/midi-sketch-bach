@@ -625,19 +625,42 @@ HarnessFixture buildTrioSonataForm(const ResolvedRequest& req) {
     for (int beat = 0; beat < 4; ++beat) {
       const int anchor = beat_anchor[beat];
       // Within the beat: the onset is the chord-tone anchor; the remaining
-      // subdivisions trace the shape's stepwise neighbour arc (rising or
-      // falling), so they are passing tones that resolve back, never leaving
-      // by a leap. The falling arc keeps two scale steps of headroom above the
-      // band floor so the off-beats stay inside the voice's register slot
-      // (below it, the rising arc substitutes).
-      const bool falling = (shape == 1) && (anchor - 4 >= band_lo);
+      // subdivisions trace an intra-beat cell that resolves back to the
+      // anchor's neighbourhood. The sixteenth tier rotates the cell PER BEAT
+      // among {rising step arc, broken-chord arc, falling step arc}: the step
+      // arcs alone concentrate the interval-bigram surface into the three
+      // step|step bins (a level the reference corpus never reaches), and the
+      // broken-chord arc supplies the third/fifth leaps the corpus writes
+      // inside beats. Each cell stays inside the voice's proven sounding
+      // envelope [band_lo, band_hi + a 2-degree neighbour]: the falling arc
+      // keeps two scale steps of headroom above the band floor, and the
+      // broken-chord arc points away from whichever band edge would let its
+      // fifth escape the envelope (when neither direction fits, the rising
+      // arc substitutes) -- so the strict V2 < V1 < V0 register order the
+      // voice-crossing rule samples at every onset is preserved.
+      const int sounding_hi = walk(band_hi, 2);
+      bool broken_fits = false;
+      int broken_dir = 1;
+      bool falling;
+      if (notes_per_beat == 4) {
+        const int cell = (bar + beat + shape) % 3;
+        if (cell == 1) {
+          broken_dir = (walk(anchor, 4) <= sounding_hi) ? 1 : -1;
+          broken_fits = (broken_dir > 0) || (walk(anchor, -4) >= band_lo);
+        }
+        falling = (cell == 2) && (anchor - 4 >= band_lo);
+      } else {
+        falling = (shape == 1) && (anchor - 4 >= band_lo);
+      }
       for (int sub = 0; sub < notes_per_beat; ++sub) {
         MaterialNote mn;
         mn.start_tick = static_cast<Tick>(bar) * kTicksPerBar +
                         static_cast<Tick>(beat) * kTicksPerBeat + static_cast<Tick>(sub) * step;
         mn.duration = step;
         const int magnitude = (sub <= notes_per_beat / 2) ? sub : (notes_per_beat - sub);
-        mn.pitch = static_cast<std::uint8_t>(walk(anchor, falling ? -magnitude : magnitude));
+        const int degrees =
+            broken_fits ? broken_dir * 2 * magnitude : (falling ? -magnitude : magnitude);
+        mn.pitch = static_cast<std::uint8_t>(walk(anchor, degrees));
         dst.push_back(mn);
       }
     }
@@ -790,7 +813,28 @@ HarnessFixture buildTrioSonataForm(const ResolvedRequest& req) {
     while (third_midi + 12 <= kPedalCeil &&
            std::abs((third_midi + 12) - root_midi) < std::abs(third_midi - root_midi))
       third_midi += 12;
-    const int beat_pitch[4] = {root_midi, fifth_midi, third_midi, root_midi};
+    // The two inner beats rotate their chord-tone order per bar (fifth-third /
+    // third-fifth / third-upper-fifth): a single fixed walking cell repeated
+    // every bar stamps the same two interval bigrams across the whole pedal
+    // line, a concentration the reference corpus never writes. The outer
+    // beats stay on the root, so the bar still closes a small step from the
+    // next bar's root and every beat remains a chord tone.
+    const int fifth_up = (root_midi + 7 <= kPedalCeil) ? root_midi + 7 : fifth_midi;
+    int inner_a = fifth_midi;
+    int inner_b = third_midi;
+    switch (bar % 3) {
+      case 1:
+        inner_a = third_midi;
+        inner_b = fifth_midi;
+        break;
+      case 2:
+        inner_a = third_midi;
+        inner_b = fifth_up;
+        break;
+      default:
+        break;
+    }
+    const int beat_pitch[4] = {root_midi, inner_a, inner_b, root_midi};
     for (int beat = 0; beat < 4; ++beat) {
       MaterialNote mn;
       mn.start_tick =

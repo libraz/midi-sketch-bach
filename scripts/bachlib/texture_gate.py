@@ -150,14 +150,14 @@ FORM_THRESHOLDS: dict[str, FormThresholds] = {
         min_avg_active=2.1,
         max_mono_ratio=0.25,
         require_v1_v2_occupancy=True,
-        model_score_v2_threshold=0.75,
+        model_score_v2_threshold=0.76,
         enforced=True,
     ),
     "fantasia_and_fugue": FormThresholds(
         min_avg_active=2.3,
         max_mono_ratio=0.10,
         model_score_threshold=0.78,
-        model_score_v2_threshold=0.77,
+        model_score_v2_threshold=0.82,
         enforced=True,
     ),
     "passacaglia": FormThresholds(
@@ -176,7 +176,7 @@ FORM_THRESHOLDS: dict[str, FormThresholds] = {
     # The remaining forms previously fell through to the default (enforced,
     # fugue-style) entry; they are listed explicitly to carry their KL-model
     # floors. All other fields keep the default-entry semantics.
-    "trio_sonata": FormThresholds(model_score_v2_threshold=0.76, enforced=True),
+    "trio_sonata": FormThresholds(model_score_v2_threshold=0.84, enforced=True),
     "cello_prelude": FormThresholds(model_score_v2_threshold=0.83, enforced=True),
     "chaconne": FormThresholds(model_score_v2_threshold=0.89, enforced=True),
     # Goldberg's middle voice is the canon follower only (the variation suite
