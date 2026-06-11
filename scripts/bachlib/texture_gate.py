@@ -674,6 +674,8 @@ def run_case(
     work_dir: Path,
     target_bars: int | None,
     index_js: Path | None = None,
+    key: str | None = None,
+    character: str | None = None,
 ) -> GateCase:
     midi_path = work_dir / f"{form}_{seed}.mid"
     cmd = [
@@ -688,6 +690,10 @@ def run_case(
     ]
     if target_bars is not None:
         cmd.extend(["--bars", str(target_bars)])
+    if key is not None:
+        cmd.extend(["--key", key])
+    if character is not None:
+        cmd.extend(["--character", character])
     completed = subprocess.run(
         cmd,
         cwd=REPO_ROOT,
@@ -837,6 +843,14 @@ def _add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--seeds", nargs="+", type=int, default=list(range(1, 21)))
     parser.add_argument("--target-bars", type=int)
     parser.add_argument(
+        "--key",
+        help="bach_cli --key override (e.g. a_minor); default keeps the CLI default key.",
+    )
+    parser.add_argument(
+        "--character",
+        help="bach_cli --character override (severe/playful/noble/restless).",
+    )
+    parser.add_argument(
         "--index-js",
         type=Path,
         default=DEFAULT_INDEX_JS,
@@ -891,7 +905,16 @@ def run(args) -> int:
         for form in args.forms:
             for seed in args.seeds:
                 cases.append(
-                    run_case(args.cli, form, seed, work_dir, args.target_bars, index_js)
+                    run_case(
+                        args.cli,
+                        form,
+                        seed,
+                        work_dir,
+                        args.target_bars,
+                        index_js,
+                        key=args.key,
+                        character=args.character,
+                    )
                 )
 
     report = {"summary": summarize(cases), "cases": [case.to_dict() for case in cases]}

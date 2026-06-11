@@ -450,6 +450,35 @@ void applyOrnamentPass(ComposeResult& result, const OrnamentParams& params) {
   out_notes.reserve(result.notes.size() * 2);
   out_prov.reserve(result.provenance.size() * 2);
 
+  // Ornament windows already committed in this pass: (voice, start, end, base
+  // pitch). Two voices alternating ornaments at the SAME time with their base
+  // tones a perfect interval apart chain parallel octaves/fifths at the
+  // alternation grain (each upper-neighbour strike moves both voices the same
+  // direction into the same interval class) -- the dense-ornament characters
+  // measured up to four such chains per piece. A candidate whose window
+  // overlaps an already-committed ornament in another voice at ic 0/7 stays a
+  // plain tone instead; any other interval keeps its ornament (the moving
+  // seconds/thirds are ordinary heterophony, not parallels).
+  struct OrnamentWindow {
+    VoiceId voice;
+    Tick start;
+    Tick end;
+    int base_pitch;
+  };
+  std::vector<OrnamentWindow> committed_ornaments;
+  auto clashes_committed_ornament = [&](const NoteEvent& cand) {
+    for (const OrnamentWindow& win : committed_ornaments) {
+      if (win.voice == cand.voice)
+        continue;
+      if (cand.start_tick >= win.end || win.start >= cand.start_tick + cand.duration)
+        continue;
+      const int ic = std::abs(static_cast<int>(cand.pitch) - win.base_pitch) % 12;
+      if (ic == 0 || ic == 7)
+        return true;
+    }
+    return false;
+  };
+
   for (std::size_t idx = 0; idx < result.notes.size(); ++idx) {
     const NoteEvent& note = result.notes[idx];
     const NoteProvenance& prov = result.provenance[idx];
@@ -710,11 +739,16 @@ void applyOrnamentPass(ComposeResult& result, const OrnamentParams& params) {
       }
     }
 
+    if (!exp.notes.empty() && clashes_committed_ornament(note))
+      exp.notes.clear();  // simultaneous ornament at a perfect interval: stay plain.
+
     if (exp.notes.empty()) {
       out_notes.push_back(note);
       out_prov.push_back(prov);
       continue;
     }
+    committed_ornaments.push_back({note.voice, note.start_tick, note.start_tick + note.duration,
+                                   static_cast<int>(note.pitch)});
 
     // Expand: each ornament sub-note inherits the original note's provenance
     // (span_id, voice_intent) but is re-sourced as Ornament so the post-pass

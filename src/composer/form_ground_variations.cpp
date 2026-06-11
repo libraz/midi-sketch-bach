@@ -11,6 +11,7 @@
 #include "composer/harness_fixture.h"
 #include "composer/material.h"
 #include "composer/minor_material.h"
+#include "composer/rule_helpers.h"
 #include "composer/span.h"
 #include "composer/texture_helpers.h"
 #include "composer/voice_intent.h"
@@ -328,7 +329,38 @@ void appendCounterFiguration(std::vector<MaterialNote>& notes, ThemeToneRegistry
         MaterialNote mnote;
         mnote.start_tick = beat_tick + static_cast<Tick>(sub) * step;
         mnote.duration = step;
-        const int pitch = (sub % 2 == 1) ? osc : anchor;
+        int pitch = (sub % 2 == 1) ? osc : anchor;
+        // The oscillation tones move concurrently with the V0 sixteenths, so
+        // they need the same audible-grain parallel re-check as the anchor:
+        // when the companion tone lands a parallel against a concurrently
+        // moving voice, swap to the mirror neighbour (or the nearest other
+        // triad tone) that stays consonant with the held ground.
+        if (sub % 2 == 1 && prev_emitted >= 0) {
+          motions.clear();
+          registry.concurrentMotions(mnote.start_tick - kTicksPerBeat / 4, mnote.start_tick,
+                                     /*voice=*/1, /*num_voices=*/3, motions);
+          auto osc_is_parallel = [&](int cand) {
+            for (const ConcurrentMotion& motion : motions) {
+              if (formsPerfectParallel(prev_emitted, cand, motion.prev, motion.curr)) {
+                return true;
+              }
+            }
+            return false;
+          };
+          if (osc_is_parallel(pitch)) {
+            for (int cand : {detail::scaleUp(anchor, 1, mode), detail::scaleDown(anchor, 1, mode),
+                             nearest_other_triad_tone(anchor)}) {
+              if (cand == pitch || cand < band_lo || cand > band_hi)
+                continue;
+              if (!isConsonantIc(cand - plan.ground_pc))
+                continue;
+              if (osc_is_parallel(cand))
+                continue;
+              pitch = cand;
+              break;
+            }
+          }
+        }
         mnote.pitch = static_cast<std::uint8_t>(pitch);
         notes.push_back(mnote);
         registry.record(mnote.start_tick, /*voice=*/1, pitch, step);
@@ -554,6 +586,65 @@ HarnessFixture buildPassacagliaThreeVoice(const ResolvedRequest& req, int cycle_
               best_seam = seam;
               v0_notes = std::move(trial);
             }
+          }
+        }
+      }
+      // Audible-grain parallel scrub against the immutable ground. The pattern
+      // emitters are pure design lines that never read the ground, so a
+      // variation whose bar-opening tones track the ground's stepwise motion
+      // chains parallel octaves/fifths against it (the dense-character sweeps
+      // measured four in a row). The ground moves only at bar heads, so only a
+      // bar-opening note can face a moving ground -- every interior onset is
+      // oblique against the held ground tone and needs no check. A parallel
+      // bar-opening tone is displaced to the nearest other chord tone of the
+      // bar that clears the parallel and keeps both surrounding melodic
+      // intervals inside a fifth.
+      for (std::size_t i = 1; i < v0_notes.size(); ++i) {
+        const Tick t = v0_notes[i].start_tick;
+        const int bar = static_cast<int>((t - block_start) / kTicksPerBar34);
+        if (bar <= 0 || bar >= cycle_bars || t != block_start + bar_tick(bar))
+          continue;
+        const Tick t_prev = v0_notes[i - 1].start_tick;
+        const int prev_bar = static_cast<int>((t_prev - block_start) / kTicksPerBar34);
+        if (prev_bar == bar)
+          continue;
+        const int g_prev = static_cast<int>(ground_pitch[static_cast<std::size_t>(prev_bar)]);
+        const int g_now = static_cast<int>(ground_pitch[static_cast<std::size_t>(bar)]);
+        const int prev_pitch = static_cast<int>(v0_notes[i - 1].pitch);
+        const int pitch = static_cast<int>(v0_notes[i].pitch);
+        if (!formsPerfectParallel(prev_pitch, pitch, g_prev, g_now))
+          continue;
+        const CycleBar& plan = cycle_bar_plan[static_cast<std::size_t>(bar)];
+        const int chord_third = plan.minor ? 3 : 4;
+        const int triad0 = plan.root_pc % 12;
+        const int triad1 = (plan.root_pc + chord_third) % 12;
+        const int triad2 = (plan.root_pc + 7) % 12;
+        const int next_pitch =
+            (i + 1 < v0_notes.size()) ? static_cast<int>(v0_notes[i + 1].pitch) : -1;
+        bool placed = false;
+        for (int dist = 1; dist <= 7 && !placed; ++dist) {
+          for (int cand : {pitch + dist, pitch - dist}) {
+            const int pc = ((cand % 12) + 12) % 12;
+            if (pc != triad0 && pc != triad1 && pc != triad2)
+              continue;
+            if (cand == prev_pitch || std::abs(cand - prev_pitch) > 7)
+              continue;
+            if (next_pitch >= 0 && std::abs(next_pitch - cand) > 7)
+              continue;
+            // The displaced tone must keep both melodic joins scale-legal (no
+            // augmented second into or out of the substitute in minor).
+            if (rule_helpers::isForbiddenMelodicLeap(static_cast<std::uint8_t>(prev_pitch),
+                                                     static_cast<std::uint8_t>(cand),
+                                                     out.harmony) ||
+                (next_pitch >= 0 && rule_helpers::isForbiddenMelodicLeap(
+                                        static_cast<std::uint8_t>(cand),
+                                        static_cast<std::uint8_t>(next_pitch), out.harmony)))
+              continue;
+            if (formsPerfectParallel(prev_pitch, cand, g_prev, g_now))
+              continue;
+            v0_notes[i].pitch = static_cast<std::uint8_t>(cand);
+            placed = true;
+            break;
           }
         }
       }

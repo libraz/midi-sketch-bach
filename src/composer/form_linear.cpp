@@ -494,12 +494,67 @@ HarnessFixture buildTrioSonataForm(const ResolvedRequest& req) {
   // intervals from chaining into parallel fifths/octaves.
   auto appendScalarBar = [&](std::vector<MaterialNote>& dst, int& prev_anchor, int band_lo,
                              int band_hi, int bar, int notes_per_beat, bool dotted, int shape,
-                             int zig_dir) {
+                             int zig_dir, const std::vector<MaterialNote>* guard_line,
+                             int& prev_emitted) {
     const BarChord& bc = chords[static_cast<std::size_t>(bar)];
     const int root_pc = bc.root_pc % 12;
     const int third = bc.minor ? 3 : 4;
     const int triad_pc[3] = {root_pc, (root_pc + third) % 12, (root_pc + 7) % 12};
     const bool harmonic = (mode == Mode::Minor) && (root_pc == 7);  // V wants the leading tone.
+
+    // Audible-grain parallel guard against the already-built other manual
+    // voice. The opposite zigzag parities make the BEAT anchors contrary by
+    // construction, but a band-edge bounce can re-align them, and the
+    // intra-beat cell tones were never covered: with the two voices' anchor
+    // centres an octave apart (C5 / C4), two same-direction cells chain
+    // parallel octaves at every shared sub-beat onset (the dense-character
+    // sweeps surfaced up to 19 per piece). Each candidate tone is re-judged
+    // against the guard line's sounding pitches at this voice's last emitted
+    // onset and now -- the exact pair the union-onset detector (and the ear)
+    // samples.
+    auto guard_sounding = [&](Tick t) -> int {
+      if (guard_line == nullptr)
+        return -1;
+      for (auto it = guard_line->rbegin(); it != guard_line->rend(); ++it) {
+        if (it->start_tick <= t && t < it->start_tick + it->duration)
+          return static_cast<int>(it->pitch);
+      }
+      return -1;
+    };
+    // The union-onset pair at our onset `tick` is (guard just before tick ->
+    // guard at tick): when the guard does not onset at `tick` the two samples
+    // are equal, its motion is zero, and oblique motion is always allowed.
+    auto forms_guard_parallel = [&](int cand, Tick tick) {
+      if (guard_line == nullptr || prev_emitted < 0)
+        return false;
+      const int other_curr = guard_sounding(tick);
+      const int other_prev = guard_sounding(tick - 1);
+      if (other_curr < 0 || other_prev < 0)
+        return false;
+      return formsPerfectParallel(prev_emitted, cand, other_prev, other_curr);
+    };
+    // Nearest in-band triad tone that does not land the parallel; the anchor
+    // itself when every alternative is also parallel (a rare double bind --
+    // one consonant parallel beats a non-chord strong beat).
+    auto guarded_anchor = [&](int anchor, Tick tick) {
+      if (!forms_guard_parallel(anchor, tick))
+        return anchor;
+      int best = anchor;
+      int best_dist = 1 << 20;
+      for (int tone = 0; tone < 3; ++tone) {
+        int low = band_lo + (((triad_pc[tone] - band_lo) % 12) + 12) % 12;
+        for (int v = low; v <= band_hi; v += 12) {
+          if (v == anchor || forms_guard_parallel(v, tick))
+            continue;
+          const int dist = std::abs(v - anchor);
+          if (dist < best_dist) {
+            best_dist = dist;
+            best = v;
+          }
+        }
+      }
+      return best;
+    };
 
     auto walk = [&](int midi, int steps) {
       if (steps == 0)
@@ -583,16 +638,20 @@ HarnessFixture buildTrioSonataForm(const ResolvedRequest& req) {
       for (int half = 0; half < 2; ++half) {
         const Tick base =
             static_cast<Tick>(bar) * kTicksPerBar + static_cast<Tick>(half) * 2 * kTicksPerBeat;
+        const int long_pitch = guarded_anchor(half_anchor[half], base);
         MaterialNote longn;
         longn.start_tick = base;
         longn.duration = dq;
-        longn.pitch = static_cast<std::uint8_t>(half_anchor[half]);
+        longn.pitch = static_cast<std::uint8_t>(long_pitch);
         dst.push_back(longn);
+        prev_emitted = long_pitch;
+        const int short_pitch = walk(long_pitch, 1);
         MaterialNote shortn;
         shortn.start_tick = base + dq;
         shortn.duration = kEighth;
-        shortn.pitch = static_cast<std::uint8_t>(walk(half_anchor[half], 1));
+        shortn.pitch = static_cast<std::uint8_t>(short_pitch);
         dst.push_back(shortn);
+        prev_emitted = short_pitch;
       }
       return;
     }
@@ -602,20 +661,29 @@ HarnessFixture buildTrioSonataForm(const ResolvedRequest& req) {
       // up and back (the same stepwise neighbour vocabulary in the
       // long-short-short rhythm).
       for (int beat = 0; beat < 4; ++beat) {
-        const int anchor = beat_anchor[beat];
         const Tick base =
             static_cast<Tick>(bar) * kTicksPerBar + static_cast<Tick>(beat) * kTicksPerBeat;
+        const int anchor = guarded_anchor(beat_anchor[beat], base);
         MaterialNote longn;
         longn.start_tick = base;
         longn.duration = kEighth;
         longn.pitch = static_cast<std::uint8_t>(anchor);
         dst.push_back(longn);
+        prev_emitted = anchor;
         for (int sub = 0; sub < 2; ++sub) {
+          const Tick tick = base + kEighth + static_cast<Tick>(sub) * kSixteenth;
+          int pitch = walk(anchor, sub == 0 ? 1 : 2);
+          if (forms_guard_parallel(pitch, tick)) {
+            const int alt = walk(anchor, sub == 0 ? -1 : -2);
+            if (alt >= band_lo && !forms_guard_parallel(alt, tick))
+              pitch = alt;
+          }
           MaterialNote shortn;
-          shortn.start_tick = base + kEighth + static_cast<Tick>(sub) * kSixteenth;
+          shortn.start_tick = tick;
           shortn.duration = kSixteenth;
-          shortn.pitch = static_cast<std::uint8_t>(walk(anchor, sub == 0 ? 1 : 2));
+          shortn.pitch = static_cast<std::uint8_t>(pitch);
           dst.push_back(shortn);
+          prev_emitted = pitch;
         }
       }
       return;
@@ -623,7 +691,9 @@ HarnessFixture buildTrioSonataForm(const ResolvedRequest& req) {
 
     const Tick step = (notes_per_beat == 4) ? kSixteenth : kEighth;
     for (int beat = 0; beat < 4; ++beat) {
-      const int anchor = beat_anchor[beat];
+      const Tick beat_base =
+          static_cast<Tick>(bar) * kTicksPerBar + static_cast<Tick>(beat) * kTicksPerBeat;
+      const int anchor = guarded_anchor(beat_anchor[beat], beat_base);
       // Within the beat: the onset is the chord-tone anchor; the remaining
       // subdivisions trace an intra-beat cell that resolves back to the
       // anchor's neighbourhood. The sixteenth tier rotates the cell PER BEAT
@@ -654,14 +724,25 @@ HarnessFixture buildTrioSonataForm(const ResolvedRequest& req) {
       }
       for (int sub = 0; sub < notes_per_beat; ++sub) {
         MaterialNote mn;
-        mn.start_tick = static_cast<Tick>(bar) * kTicksPerBar +
-                        static_cast<Tick>(beat) * kTicksPerBeat + static_cast<Tick>(sub) * step;
+        mn.start_tick = beat_base + static_cast<Tick>(sub) * step;
         mn.duration = step;
         const int magnitude = (sub <= notes_per_beat / 2) ? sub : (notes_per_beat - sub);
         const int degrees =
             broken_fits ? broken_dir * 2 * magnitude : (falling ? -magnitude : magnitude);
-        mn.pitch = static_cast<std::uint8_t>(walk(anchor, degrees));
+        int pitch = walk(anchor, degrees);
+        // Intra-beat cell tone landing a parallel against the guard voice:
+        // mirror the cell tone to the anchor's other side when that stays in
+        // the band and clears the parallel (the mirrored tone is the same
+        // neighbour vocabulary, so the cell still resolves to the anchor).
+        if (degrees != 0 && forms_guard_parallel(pitch, mn.start_tick)) {
+          const int alt = walk(anchor, -degrees);
+          if (alt >= band_lo && alt <= walk(band_hi, 2) &&
+              !forms_guard_parallel(alt, mn.start_tick))
+            pitch = alt;
+        }
+        mn.pitch = static_cast<std::uint8_t>(pitch);
         dst.push_back(mn);
+        prev_emitted = pitch;
       }
     }
   };
@@ -687,6 +768,8 @@ HarnessFixture buildTrioSonataForm(const ResolvedRequest& req) {
   constexpr int kV1BandHi = 64;  // E4 (anchor ceiling; a 2-degree neighbour stays < V0 floor).
   int v0_anchor = 72;            // ~C5.
   int v1_anchor = 60;            // ~C4.
+  int v0_prev_emitted = -1;
+  int v1_prev_emitted = -1;
 
   for (int bar = 0; bar < bars; ++bar) {
     const std::size_t cycle = static_cast<std::size_t>(bar / 4);
@@ -731,9 +814,11 @@ HarnessFixture buildTrioSonataForm(const ResolvedRequest& req) {
       (v0_dense ? v0_shape : v1_shape) = 0;
 
     appendScalarBar(v0.notes, v0_anchor, kV0BandLo, kV0BandHi, bar, v0_notes, /*dotted=*/false,
-                    v0_shape, /*zig_dir=*/1);
+                    v0_shape, /*zig_dir=*/1, /*guard_line=*/nullptr, v0_prev_emitted);
+    // V1 is built after V0 within the bar, so it guards each tone against the
+    // already-emitted V0 line (the audible-grain parallel pair).
     appendScalarBar(v1.notes, v1_anchor, kV1BandLo, kV1BandHi, bar, v1_notes, v1_dotted, v1_shape,
-                    /*zig_dir=*/-1);
+                    /*zig_dir=*/-1, /*guard_line=*/&v0.notes, v1_prev_emitted);
   }
 
   // Cadential landing on the top line: an eighth-note approach into a held

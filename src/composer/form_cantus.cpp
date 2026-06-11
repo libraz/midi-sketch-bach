@@ -247,30 +247,39 @@ void emitAnchoredBar(int bar, int start, const BarChord& chord, Mode mode, int n
   anchor[3] = anchor[1];  // descend back so the bar boundary voice-leads smoothly.
   const Tick step =
       notes_per_beat == 1 ? kQuarterDur : (notes_per_beat == 2 ? kEighth : kSixteenth);
+  auto step_dir = [&](int p, int d) {
+    return (d > 0) ? detail::scaleUp(p, 1, mode) : (detail::inScale(p - 1, mode) ? p - 1 : p - 2);
+  };
   for (int beat = 0; beat < 4; ++beat) {
     const int from = anchor[static_cast<std::size_t>(beat)];
     const int to = anchor[static_cast<std::size_t>((beat + 1) % 4)];
-    // Off-beat sub-positions step diatonically from this beat's anchor toward the
-    // next beat's anchor, never reaching (so the next beat's anchor is a fresh
-    // onset, not a repeat) -- a stepwise scalar fill between two chord tones a
-    // third/fourth apart.
+    // Off-beat sub-positions step diatonically from this beat's anchor toward
+    // the next beat's anchor and REFLECT one step short of it, so the next
+    // beat's anchor is a fresh onset and the fill never holds a pitch.
+    // (Holding -- the previous behaviour -- flattened every beat whose anchors
+    // sit a third apart into repeated sixteenths: up to eight identical
+    // pitches per bar at the dense tier, an interval-0 surface the reference
+    // corpus writes on only ~3% of transitions.) A window with no interior
+    // scale tone falls back to a neighbour oscillation away from the target,
+    // the double-neighbour approach figure.
+    const int lo = std::min(from, to);
+    const int hi = std::max(from, to);
+    auto out_of_window = [&](int p) { return p == to || p > hi || p < lo; };
+    int walked = from;
+    int dir = (to >= from) ? 1 : -1;
     for (int sub = 0; sub < notes_per_beat; ++sub) {
       int pitch = from;
       if (sub > 0) {
-        // Walk `sub` diatonic steps toward `to`, clamped just short of `to`.
-        const int span = (to >= from) ? 1 : -1;
-        int walked = from;
-        for (int stepIdx = 0; stepIdx < sub; ++stepIdx) {
-          const int nxt = (span > 0)
-                              ? detail::scaleUp(walked, 1, mode)
-                              : (detail::inScale(walked - 1, mode) ? walked - 1 : walked - 2);
-          // Stop short of `to`: if the next step would reach or pass the target,
-          // hold on the current passing tone (keeps it a chord-bounded passing
-          // motion and avoids doubling the next beat anchor on an off-beat).
-          if ((span > 0 && nxt >= to) || (span < 0 && nxt <= to))
-            break;
-          walked = nxt;
+        int nxt = step_dir(walked, dir);
+        if (out_of_window(nxt)) {
+          dir = -dir;
+          nxt = step_dir(walked, dir);
         }
+        if (out_of_window(nxt)) {
+          const int neighbour = (to >= from) ? step_dir(from, -1) : step_dir(from, 1);
+          nxt = (walked == from) ? neighbour : from;
+        }
+        walked = nxt;
         pitch = walked;
       }
       const Tick onset =
