@@ -56,7 +56,7 @@ void ThemeToneRegistry::concurrentMotions(Tick prev_tick, Tick tick, VoiceId voi
   }
 }
 
-bool formsPerfectParallel(int line_prev, int cand, int other_prev, int other_curr) {
+bool formsStrictPerfectParallel(int line_prev, int cand, int other_prev, int other_curr) {
   if (line_prev < 0 || other_prev < 0 || other_curr < 0) {
     return false;  // need both voices' two onsets to judge motion.
   }
@@ -75,8 +75,29 @@ bool formsPerfectParallel(int line_prev, int cand, int other_prev, int other_cur
     return false;  // arrival is not a perfect fifth/octave.
   }
   const int prev_ic = ((std::abs(line_prev - other_prev) % 12) + 12) % 12;
-  if (prev_ic == curr_ic) {
-    return true;  // same perfect interval at both onsets: parallel.
+  return prev_ic == curr_ic;  // same perfect interval at both onsets: parallel.
+}
+
+bool formsPerfectParallel(int line_prev, int cand, int other_prev, int other_curr) {
+  if (formsStrictPerfectParallel(line_prev, cand, other_prev, other_curr)) {
+    return true;
+  }
+  if (line_prev < 0 || other_prev < 0 || other_curr < 0) {
+    return false;  // need both voices' two onsets to judge motion.
+  }
+  const int line_motion = cand - line_prev;
+  const int other_motion = other_curr - other_prev;
+  if (line_motion == 0 || other_motion == 0) {
+    return false;  // oblique motion is always allowed.
+  }
+  const bool same_dir =
+      (line_motion > 0 && other_motion > 0) || (line_motion < 0 && other_motion < 0);
+  if (!same_dir) {
+    return false;  // contrary motion is always allowed.
+  }
+  const int curr_ic = ((std::abs(cand - other_curr) % 12) + 12) % 12;
+  if (curr_ic != 0 && curr_ic != 7) {
+    return false;  // arrival is not a perfect fifth/octave.
   }
   // Hidden perfect: same-direction arrival on a perfect from another interval,
   // judged forbidden when the upper of the two voices leaps (> 2 semitones).

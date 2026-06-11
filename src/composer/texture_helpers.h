@@ -67,6 +67,24 @@ constexpr bool isConsonantPair(int pitch_a, int pitch_b) {
 /// @return True when the motion forms a forbidden parallel/hidden perfect.
 bool formsPerfectParallel(int line_prev, int cand, int other_prev, int other_curr);
 
+/// @brief True only for a TRUE parallel perfect (IC 0/7 of the same class at
+///        both onsets under same-direction motion); the hidden-perfect
+///        extension of formsPerfectParallel is excluded.
+///
+/// The relaxed tier for guards facing a forced arrival: when an immutable tone
+/// (a CF skeleton note) meets a band-pinned tone (the bass root) on a perfect
+/// interval, every approach candidate is at least a hidden perfect, so a guard
+/// demanding full freedom keeps whatever it started with -- including a true
+/// parallel. Checking this predicate instead lets it displace off the true
+/// parallel and accept the unavoidable hidden.
+///
+/// @param line_prev The line-under-construction's previous pitch (-1 = none).
+/// @param cand The line-under-construction's candidate current pitch.
+/// @param other_prev The already-placed voice's previous pitch (-1 = silent).
+/// @param other_curr The already-placed voice's current pitch (-1 = silent).
+/// @return True when the motion forms a true parallel perfect.
+bool formsStrictPerfectParallel(int line_prev, int cand, int other_prev, int other_curr);
+
 /// @brief Motion of one already-placed voice across two consecutive onsets.
 struct ConcurrentMotion {
   VoiceId voice = 0;  // the already-placed voice this motion belongs to.

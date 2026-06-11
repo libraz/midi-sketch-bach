@@ -402,8 +402,10 @@ void appendScalarWaveBar(std::vector<MaterialNote>& dst, int bar, const detail::
   if (rotate_figures) {
     // Bar-figure rotation over the precomputed wave (see the header note).
     // Rotation is the point: any single figure applied to every bar
-    // over-concentrates the interval-bigram surface instead.
-    const int figure_mode = ((bar % 3) + 3) % 3;
+    // over-concentrates the interval-bigram surface instead. The seed offset
+    // phases the rotation so different seeds lay the figures over different
+    // bars of the same section plan.
+    const int figure_mode = (((bar + offset) % 4) + 4) % 4;
     if (figure_mode == 0) {
       // Broken-third chain: displace odd wave indices one scale step along
       // the local direction (c-d-e-f -> c-e-d-f), turning half the steps
@@ -422,7 +424,7 @@ void appendScalarWaveBar(std::vector<MaterialNote>& dst, int bar, const detail::
       // register room -- an entry leap here, recovered by the next bar's
       // nearest-chord-tone anchor chain.
       const std::size_t dive_start = wave.size() / 2;
-      const int degrees = ((bar / 3) % 2 == 0) ? 3 : 4;
+      const int degrees = (((bar + offset) / 4) % 2 == 0) ? 3 : 4;
       const bool down_ok = detail::scaleDown(wave[dive_start], degrees, mode) >= base_midi;
       for (std::size_t idx = dive_start; idx < wave.size(); ++idx) {
         const int cand = down_ok ? detail::scaleDown(wave[idx], degrees, mode)
@@ -431,6 +433,37 @@ void appendScalarWaveBar(std::vector<MaterialNote>& dst, int bar, const detail::
           wave[idx] = cand;
         }
       }
+    } else if (figure_mode == 3) {
+      // Arpeggio sweep: rebuild the wave stepping by triad tones instead of
+      // scale steps (reflecting at the band edges like the step wave). The
+      // chord-tone zigzag supplies the third/fourth interval bins no step
+      // figure reaches, and every tone is consonant with the chord by
+      // construction, so the sweep sits safely over a sustained pedal root.
+      auto triadStep = [&](int from, int direction) {
+        int cand = from + direction;
+        while (cand >= base_midi - 12 && cand <= ceil_midi + 12 && !is_triad(cand)) {
+          cand += direction;
+        }
+        return cand;
+      };
+      std::vector<int> arp;
+      arp.reserve(wave.size());
+      int arp_cursor = anchor;
+      int arp_dir = 1;
+      arp.push_back(arp_cursor);
+      while (arp.size() < wave.size()) {
+        int next = triadStep(arp_cursor, arp_dir);
+        if (next > ceil_midi || next < base_midi) {
+          arp_dir = -arp_dir;
+          next = triadStep(arp_cursor, arp_dir);
+        }
+        if (next > ceil_midi || next < base_midi) {
+          next = arp_cursor;  // band narrower than two triad tones (degenerate)
+        }
+        arp_cursor = next;
+        arp.push_back(arp_cursor);
+      }
+      wave = std::move(arp);
     }
   }
   const Tick step =
@@ -881,14 +914,33 @@ void appendArpeggioBar(std::vector<MaterialNote>& notes, int bar, const detail::
 }
 
 void appendFiguraCortaBar(std::vector<MaterialNote>& notes, int bar, int start,
-                          const detail::ChordSpec& chord, detail::Mode mode) {
-  // Four per-beat chord-tone anchors forming a low-amplitude wave (rise two
-  // chord tones, fall back one), so the bar boundary voice-leads smoothly.
+                          const detail::ChordSpec& chord, detail::Mode mode, int figure) {
+  // Chord-tone ladder above the start; the four per-beat anchors are
+  // contour-indexed picks from it (see the header note). Contour 0 is the
+  // legacy low-amplitude wave (rise two chord tones, fall back one), so the
+  // bar boundary voice-leads smoothly.
+  int ladder[4];
+  ladder[0] = start;
+  for (int idx = 1; idx < 4; ++idx) {
+    ladder[idx] = chordToneAbove(ladder[idx - 1], chord.root_pc, chord.minor);
+  }
+  // Every contour ends on ladder index 0 or 1: a bar ending high forces a
+  // wide descent into the next bar's downbeat, which lines up with the other
+  // voices' downbeat descents into same-direction perfect arrivals. And no
+  // contour revisits index 0 mid-bar: a held anchor turns into a neighbour
+  // figure that dips BELOW it, breaking the register floor the chorale's V1
+  // embellishment ceiling relies on.
+  static constexpr int kCortaContours[4][4] = {
+      {0, 1, 2, 1},  // low-amplitude wave (legacy default)
+      {0, 2, 2, 1},  // fifth swing with a held high turn, falling back
+      {0, 3, 2, 1},  // run up a wide first window, then fall by chord tones
+      {0, 2, 3, 1},  // peak arch
+  };
+  const int contour = ((figure % 4) + 4) % 4;
   int anchor[4];
-  anchor[0] = start;
-  anchor[1] = chordToneAbove(anchor[0], chord.root_pc, chord.minor);
-  anchor[2] = chordToneAbove(anchor[1], chord.root_pc, chord.minor);
-  anchor[3] = anchor[1];
+  for (int beat = 0; beat < 4; ++beat) {
+    anchor[beat] = ladder[kCortaContours[contour][beat]];
+  }
 
   // Long-short-short cell per beat: eighth + two sixteenths (one full beat).
   constexpr Tick kCellDur[3] = {kEighth, kSixteenth, kSixteenth};

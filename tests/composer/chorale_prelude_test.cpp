@@ -16,12 +16,15 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <cstdint>
+#include <cstdlib>
 #include <string>
 #include <vector>
 
 #include "composer/candidate_search.h"
 #include "composer/composer.h"
+#include "composer/form_director.h"
 #include "composer/harmonic_plan.h"
 #include "composer/harness_fixture.h"
 #include "composer/material.h"
@@ -248,6 +251,120 @@ TEST(ChoralePreludeTest, ChoralePreludeFixtureValidatesCleanAndStampsBothChorale
     EXPECT_TRUE(saw_replayed) << "seed " << seed << " missing CantusFirmusReplayed";
     EXPECT_TRUE(saw_embellished) << "seed " << seed << " missing CFEmbellishmentApplied";
   }
+}
+
+// --- 4. Long-form figure rotation regression ---------------------------------
+
+namespace {
+
+ComposeResult buildChorale(std::uint32_t seed, std::uint16_t bars) {
+  ComposeRequest req;
+  req.form = FormType::ChoralePrelude;
+  req.seed = seed;
+  req.target_bars = bars;
+  HarnessFixture fixture;
+  EXPECT_EQ(buildFormFixture(req, &fixture), FormDirectorStatus::Ok);
+  return Composer{}.run(fixture.material, fixture.harmony, fixture.voice_plan);
+}
+
+// Sounding pitch of `voice` at `tick` (-1 = silent): the most recently
+// attacked note covering the tick, mirroring the texture gate's sampler.
+int cpSoundingPitch(const std::vector<NoteEvent>& notes, int voice, Tick tick) {
+  int pitch = -1;
+  long long best_start = -1;
+  for (const auto& note : notes) {
+    if (static_cast<int>(note.voice) != voice) {
+      continue;
+    }
+    if (note.start_tick <= tick &&
+        tick<note.start_tick + note.duration&& static_cast<long long>(note.start_tick)>
+            best_start) {
+      best_start = static_cast<long long>(note.start_tick);
+      pitch = static_cast<int>(note.pitch);
+    }
+  }
+  return pitch;
+}
+
+// Count parallel perfect fifths/octaves across all voice pairs by union-onset
+// sampling, identical to the texture-gate's compute_parallel_counts.
+int cpCountParallelPerfects(const std::vector<NoteEvent>& notes) {
+  std::vector<int> voices;
+  std::vector<Tick> onsets;
+  for (const auto& note : notes) {
+    const int voice = static_cast<int>(note.voice);
+    if (std::find(voices.begin(), voices.end(), voice) == voices.end()) {
+      voices.push_back(voice);
+    }
+    if (std::find(onsets.begin(), onsets.end(), note.start_tick) == onsets.end()) {
+      onsets.push_back(note.start_tick);
+    }
+  }
+  std::sort(voices.begin(), voices.end());
+  std::sort(onsets.begin(), onsets.end());
+  int parallel = 0;
+  for (std::size_t lo = 0; lo < voices.size(); ++lo) {
+    for (std::size_t up = lo + 1; up < voices.size(); ++up) {
+      bool have_prev = false;
+      int prev_a = 0;
+      int prev_b = 0;
+      for (Tick tick : onsets) {
+        const int pitch_a = cpSoundingPitch(notes, voices[lo], tick);
+        const int pitch_b = cpSoundingPitch(notes, voices[up], tick);
+        if (pitch_a < 0 || pitch_b < 0) {
+          have_prev = false;
+          continue;
+        }
+        if (have_prev) {
+          const int delta_a = pitch_a - prev_a;
+          const int delta_b = pitch_b - prev_b;
+          const bool same_dir = (delta_a > 0 && delta_b > 0) || (delta_a < 0 && delta_b < 0);
+          const int curr_ic = std::abs(pitch_a - pitch_b) % 12;
+          if (delta_a != 0 && delta_b != 0 && same_dir && (curr_ic == 0 || curr_ic == 7) &&
+              std::abs(prev_a - prev_b) % 12 == curr_ic) {
+            ++parallel;
+          }
+        }
+        have_prev = true;
+        prev_a = pitch_a;
+        prev_b = pitch_b;
+      }
+    }
+  }
+  return parallel;
+}
+
+}  // namespace
+
+// A 64-bar chorale prelude keeps its union-onset parallel perfect count
+// bounded. The figuration anchor contours, the corta contours, and the CF
+// departure figures all rotate per bar; this pins the constraints that make
+// the rotation safe -- every contour ends the bar low (a high ending forces a
+// wide descent into the next downbeat aligned with the other voices' own
+// descents), and the bass approach guard displaces off a true parallel even
+// when a forced octave arrival makes every candidate a hidden at best.
+TEST(ChoralePreludeTest, LongFormParallelPerfectsStayBounded) {
+  for (std::uint32_t seed : {1u, 5u, 42u}) {
+    const ComposeResult r = buildChorale(seed, 64);
+    ASSERT_FALSE(r.notes.empty());
+    EXPECT_LE(cpCountParallelPerfects(r.notes), 6) << "seed " << seed;
+  }
+}
+
+// Seeds congruent mod 4 must not collapse to the same piece: every other seed
+// input in this builder (register offset, corta parity) is mod-4 or mod-2, so
+// the figure-rotation phase folds in seed/4 -- losing that fold made seeds 1
+// and 5 byte-identical at any length.
+TEST(ChoralePreludeTest, SeedsCongruentModFourDiverge) {
+  const ComposeResult a = buildChorale(1, 64);
+  const ComposeResult b = buildChorale(5, 64);
+  ASSERT_EQ(a.notes.empty(), false);
+  bool differs = a.notes.size() != b.notes.size();
+  for (std::size_t idx = 0; !differs && idx < a.notes.size(); ++idx) {
+    differs = a.notes[idx].pitch != b.notes[idx].pitch ||
+              a.notes[idx].start_tick != b.notes[idx].start_tick;
+  }
+  EXPECT_TRUE(differs) << "seeds 1 and 5 produced identical 64-bar chorale preludes";
 }
 
 }  // namespace bach::composer

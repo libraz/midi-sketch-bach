@@ -735,38 +735,53 @@ HarnessFixture buildTrioSonataForm(const ResolvedRequest& req) {
       // Within the beat: the onset is the chord-tone anchor; the remaining
       // subdivisions trace an intra-beat cell that resolves back to the
       // anchor's neighbourhood. The sixteenth tier rotates the cell PER BEAT
-      // among {rising step arc, broken-chord arc, falling step arc}: the step
-      // arcs alone concentrate the interval-bigram surface into the three
-      // step|step bins (a level the reference corpus never reaches), and the
-      // broken-chord arc supplies the third/fifth leaps the corpus writes
-      // inside beats. Each cell stays inside the voice's proven sounding
-      // envelope [band_lo, band_hi + a 2-degree neighbour]: the falling arc
-      // keeps two scale steps of headroom above the band floor, and the
-      // broken-chord arc points away from whichever band edge would let its
-      // fifth escape the envelope (when neither direction fits, the rising
-      // arc substitutes) -- so the strict V2 < V1 < V0 register order the
-      // voice-crossing rule samples at every onset is preserved.
+      // among {rising step arc, broken-chord arc, falling step arc, broken-
+      // third climb}: the step arcs alone concentrate the interval-bigram
+      // surface into the three step|step bins (a level the reference corpus
+      // never reaches), the broken-chord arc supplies the third/fifth leaps
+      // the corpus writes inside beats, and the broken-third climb supplies
+      // the third|step alternations between them. The rotation modulus
+      // matches the four beats of the bar, so every bar carries each cell
+      // exactly once (a 3-cell modulus made beats 0 and 3 sample the same
+      // cell in every bar, re-concentrating the surface at any length).
+      // Each cell stays inside the voice's proven sounding envelope
+      // [band_lo, band_hi + a 2-degree neighbour]: the falling arc keeps two
+      // scale steps of headroom above the band floor, and the broken-chord /
+      // broken-third cells point away from whichever band edge would let
+      // their widest tone escape the envelope (when neither direction fits,
+      // the rising arc substitutes) -- so the strict V2 < V1 < V0 register
+      // order the voice-crossing rule samples at every onset is preserved.
       const int sounding_hi = walk(band_hi, 2);
       bool broken_fits = false;
       int broken_dir = 1;
+      bool thirds_fits = false;
+      int thirds_dir = 1;
       bool falling;
       if (notes_per_beat == 4) {
-        const int cell = (bar + beat + shape) % 3;
+        const int cell = (bar + beat + shape) % 4;
         if (cell == 1) {
           broken_dir = (walk(anchor, 4) <= sounding_hi) ? 1 : -1;
           broken_fits = (broken_dir > 0) || (walk(anchor, -4) >= band_lo);
+        } else if (cell == 3) {
+          thirds_dir = (walk(anchor, 3) <= sounding_hi) ? 1 : -1;
+          thirds_fits = (thirds_dir > 0) || (walk(anchor, -3) >= band_lo);
         }
         falling = (cell == 2) && (anchor - 4 >= band_lo);
       } else {
         falling = (shape == 1) && (anchor - 4 >= band_lo);
       }
+      // Broken-third climb degrees per subdivision: anchor, third up, step
+      // back, third up again -- net a fourth, recovered by the next beat's
+      // chord-tone anchor.
+      static constexpr int kThirdsCell[4] = {0, 2, 1, 3};
       for (int sub = 0; sub < notes_per_beat; ++sub) {
         MaterialNote mn;
         mn.start_tick = beat_base + static_cast<Tick>(sub) * step;
         mn.duration = step;
         const int magnitude = (sub <= notes_per_beat / 2) ? sub : (notes_per_beat - sub);
-        const int degrees =
-            broken_fits ? broken_dir * 2 * magnitude : (falling ? -magnitude : magnitude);
+        const int degrees = thirds_fits ? thirds_dir * kThirdsCell[sub & 3]
+                                        : (broken_fits ? broken_dir * 2 * magnitude
+                                                       : (falling ? -magnitude : magnitude));
         int pitch = walk(anchor, degrees);
         // Intra-beat cell tone landing a parallel against the guard voice:
         // mirror the cell tone to the anchor's other side when that stays in

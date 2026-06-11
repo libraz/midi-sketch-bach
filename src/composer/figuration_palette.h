@@ -194,10 +194,12 @@ void appendScalarWaveCycle(std::vector<MaterialNote>& notes, Tick block_start,
  *        conjunctly instead of re-snapping to the band floor each bar (which
  *        produced the wide bar-boundary leaps that dominated the melodic-
  *        interval cost). Updated to the bar's last emitted pitch on return.
- * @param rotate_figures When true, the bar figure rotates by bar % 3 (broken-
- *        third chain / one fourth-or-fifth dive / plain wave), restoring the
- *        corpus's third-and-leap vocabulary to an otherwise purely stepwise
- *        surface. Off by default so existing callers stay byte-identical.
+ * @param rotate_figures When true, the bar figure rotates by (bar + offset) % 4
+ *        (broken-third chain / one fourth-or-fifth dive / plain wave / triad
+ *        arpeggio sweep), restoring the corpus's third-and-leap vocabulary to
+ *        an otherwise purely stepwise surface; mixing the seed offset into the
+ *        phase makes different seeds distribute the figures differently. Off by
+ *        default so existing callers stay byte-identical.
  */
 void appendScalarWaveBar(std::vector<MaterialNote>& dst, int bar, const detail::ChordSpec& chord,
                          detail::Mode mode, int notes_per_beat, int base_midi, int ceil_midi,
@@ -326,19 +328,23 @@ void appendArpeggioBar(std::vector<MaterialNote>& notes, int bar, const detail::
  *        (PatternKind::kFiguraCorta, 4/4 bar form).
  *
  * Every beat carries the long-short-short figura corta cell (eighth + two
- * sixteenths). The four beat anchors trace the low-amplitude chord-tone wave
- * (a0, a1, a2, a1 with a1/a2 the next chord tones above `start`), and the two
- * shorts step diatonically toward the next beat's anchor, stopping short of it
- * so the next onset is a fresh attack. Every beat onset is a chord tone.
+ * sixteenths). The four beat anchors are contour-indexed picks from the
+ * chord-tone ladder above `start` (`figure` 0 -- the default, byte-identical
+ * for existing callers -- is the low-amplitude wave a0, a1, a2, a1; the other
+ * contours widen or redirect the anchor windows so repeated corta bars do not
+ * stamp one bigram family), and the two shorts step diatonically toward the
+ * next beat's anchor, stopping short of it so the next onset is a fresh
+ * attack. Every beat onset is a chord tone.
  *
  * @param notes Destination note vector.
  * @param bar Absolute bar index (4/4 bar grid).
  * @param start The bar's opening anchor (already snapped to a chord tone).
  * @param chord The bar's chord (supplies the anchor wave's triad tones).
  * @param mode Diatonic mode selecting the scale walker for the shorts.
+ * @param figure Anchor-contour selector (mod 4; 0 = legacy wave).
  */
 void appendFiguraCortaBar(std::vector<MaterialNote>& notes, int bar, int start,
-                          const detail::ChordSpec& chord, detail::Mode mode);
+                          const detail::ChordSpec& chord, detail::Mode mode, int figure = 0);
 
 /**
  * @brief Append one 4/4 bar opening gesture: a mordent onset followed by a

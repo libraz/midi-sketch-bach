@@ -19,6 +19,7 @@
 #include <cstdint>
 #include <map>
 #include <set>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -532,6 +533,52 @@ TEST(FormLinearTrio, DenseLineRotatesIntraBeatVocabulary) {
     EXPECT_GE(signatures.size(), 2u)
         << "seed " << seed << ": the dense line must rotate its vocabulary";
   }
+}
+
+// The intra-beat cell rotation modulus matches the four beats of the bar
+// ((bar + beat + shape) % 4), so every sixteenth-tier bar carries each cell
+// once and beats 0 and 3 trace DIFFERENT cells. A 3-cell modulus aliases with
+// the bar grid -- (bar + 0 + shape) % 3 == (bar + 3 + shape) % 3 -- so beats
+// 0 and 3 sampled the same cell in every bar at any piece length,
+// re-concentrating the interval-bigram surface the rotation exists to spread.
+TEST(FormLinearTrio, UpperVoiceBeatCellsAvoidBarGridAliasing) {
+  const ComposeResult r = build(FormType::TrioSonata, 1, /*is_minor=*/false, 64, nullptr);
+  std::map<int, std::vector<NoteEvent>> bars;
+  for (const NoteEvent& note : r.notes) {
+    if (note.voice == 0)
+      bars[static_cast<int>(note.start_tick / kTicksPerBar)].push_back(note);
+  }
+  // Classify each intra-beat interval by sign and step-vs-skip so the cell
+  // shape is compared independent of the anchor's scale position.
+  auto cellShape = [](const std::vector<NoteEvent>& notes, int beat) {
+    std::string shape;
+    for (int k = 0; k < 3; ++k) {
+      const int delta = static_cast<int>(notes[static_cast<std::size_t>(beat * 4 + k + 1)].pitch) -
+                        static_cast<int>(notes[static_cast<std::size_t>(beat * 4 + k)].pitch);
+      if (delta == 0)
+        shape += '0';
+      else if (delta > 0)
+        shape += (delta <= 2) ? 'u' : 'U';
+      else
+        shape += (delta >= -2) ? 'd' : 'D';
+    }
+    return shape;
+  };
+  int sixteenth_bars = 0;
+  int differing = 0;
+  for (auto& [bar, notes] : bars) {
+    if (notes.size() != 16)
+      continue;  // only the sixteenth tier carries the four-cell rotation.
+    std::sort(notes.begin(), notes.end(),
+              [](const NoteEvent& x, const NoteEvent& y) { return x.start_tick < y.start_tick; });
+    ++sixteenth_bars;
+    if (cellShape(notes, 0) != cellShape(notes, 3))
+      ++differing;
+  }
+  ASSERT_GE(sixteenth_bars, 8);
+  EXPECT_GE(differing * 10, sixteenth_bars * 6)
+      << "beats 0 and 3 traced the same cell in " << (sixteenth_bars - differing) << "/"
+      << sixteenth_bars << " sixteenth-tier bars";
 }
 
 }  // namespace

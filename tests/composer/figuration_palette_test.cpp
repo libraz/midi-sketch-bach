@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cstdlib>
+#include <set>
 #include <vector>
 
 #include "composer/texture_helpers.h"
@@ -219,6 +220,40 @@ TEST(FigurationPaletteScalarWaveBar, OversizedOffsetFallsBackToBandFloorAnchor) 
   // A start offset that escapes the anchor window snaps back to the lowest
   // triad tone at or above the band floor.
   EXPECT_EQ(static_cast<int>(notes.front().pitch), 60);
+}
+
+// With rotate_figures the bar figure cycles through four shapes keyed by
+// (bar + offset) % 4: broken-third chain, one dive, plain wave, triad
+// arpeggio sweep. Pin the rotation breadth: one four-bar cycle produces at
+// least three distinct interval multisets, and exactly the arpeggio bar
+// consists of triad tones only (every step figure carries non-triad passing
+// tones). Losing a figure -- or the rotation itself -- re-concentrates the
+// long-form interval-bigram surface this rotation exists to spread.
+TEST(FigurationPaletteScalarWaveBar, RotationCyclesFourDistinctFigures) {
+  const detail::ChordSpec chord{0, false};
+  int prev_pitch = -1;
+  std::set<std::multiset<int>> signatures;
+  int all_triad_bars = 0;
+  for (int bar = 0; bar < 4; ++bar) {
+    std::vector<MaterialNote> notes;
+    appendScalarWaveBar(notes, bar, chord, detail::Mode::Major, /*notes_per_beat=*/4,
+                        /*base_midi=*/60, /*ceil_midi=*/84, /*offset=*/0, prev_pitch,
+                        /*rotate_figures=*/true);
+    ASSERT_EQ(notes.size(), 16u);
+    std::multiset<int> signature;
+    bool all_triad = true;
+    for (std::size_t idx = 0; idx < notes.size(); ++idx) {
+      if (idx > 0) {
+        signature.insert(static_cast<int>(notes[idx].pitch) -
+                         static_cast<int>(notes[idx - 1].pitch));
+      }
+      all_triad = all_triad && isTriadTone(static_cast<int>(notes[idx].pitch), chord);
+    }
+    all_triad_bars += all_triad ? 1 : 0;
+    signatures.insert(signature);
+  }
+  EXPECT_GE(signatures.size(), 3u) << "bar figures collapsed";
+  EXPECT_EQ(all_triad_bars, 1) << "expected exactly one arpeggio-sweep bar per cycle";
 }
 
 // --- kFiguration ----------------------------------------------------------------

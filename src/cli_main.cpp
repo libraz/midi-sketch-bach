@@ -648,6 +648,18 @@ int runDefaultMode(const CliOptions& opts) {
       std::fprintf(stderr, "  - %s (span %u)\n", f.rule_id.c_str(),
                    static_cast<unsigned>(f.span_id));
     }
+    // Still dump the scorer-facing JSON when requested: the failing notes are
+    // exactly what a diagnosis needs (the validation block records the
+    // failure), and exit 1 keeps the failure visible to batch callers.
+    if (opts.generated_json_output) {
+      const std::string generated_path = deriveSuffixedJsonPath(opts.output, ".generated.json");
+      std::ofstream generated_file(generated_path);
+      if (generated_file.is_open()) {
+        generated_file << bach::composer::emitGeneratedJson(result.notes, result.validation);
+        generated_file.close();
+        std::fprintf(stderr, "Generated JSON (failed run):%s\n", generated_path.c_str());
+      }
+    }
     return 1;
   }
 

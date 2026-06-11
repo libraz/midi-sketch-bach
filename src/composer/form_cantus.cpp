@@ -229,8 +229,13 @@ int chordToneAbove(int from, int root_pc, bool minor) {
 // chord tone is consonant against any other chord tone (the CF tone and the
 // ground tone are both chord tones of the bar chord), every sampled vertical
 // pair stays consonant; the off-beats remain stepwise so no melodic leap is
-// introduced. The four beat anchors trace a gentle chord-tone wave (a0 a1 a2 a1)
-// rooted on `start` (already snapped to a chord tone). `notes_per_beat` is 1
+// introduced. The four beat anchors are contour-indexed picks from the
+// chord-tone ladder above `start` (already snapped to a chord tone); contour 0
+// is the gentle low-amplitude wave (a0 a1 a2 a1) and the default, so callers
+// that pass no `figure` stay byte-identical. The other contours widen or
+// redirect the beat windows (a fifth-wide swing, an ascending sweep, a peak
+// arch), so the stepwise fill walks runs and descents instead of stamping the
+// same third-pendulum bigrams into every bar. `notes_per_beat` is 1
 // (quarters: beat anchors only), 2 (eighths), or 4 (sixteenths).
 //
 // Appends to `notes` via the supplied emit callback (start_tick, duration,
@@ -238,13 +243,33 @@ int chordToneAbove(int from, int root_pc, bool minor) {
 // PassacagliaVariation builders.
 template <typename Emit>
 void emitAnchoredBar(int bar, int start, const BarChord& chord, Mode mode, int notes_per_beat,
-                     const Emit& emit) {
-  // Four per-beat chord-tone anchors forming a low-amplitude wave.
+                     const Emit& emit, int figure = 0) {
+  // Chord-tone ladder above the start, then the contour's four per-beat picks.
+  int ladder[4];
+  ladder[0] = start;
+  for (int idx = 1; idx < 4; ++idx) {
+    ladder[idx] = chordToneAbove(ladder[idx - 1], chord.root_pc, chord.minor);
+  }
+  // Every contour ends on ladder index 0 or 1: a bar that ends high forces a
+  // wide descent into the next bar's downbeat anchor, which lines up with the
+  // other voices' own downbeat descents (the CF skeleton arrival, the bass
+  // root change) into systematic same-direction perfect arrivals.
+  // No contour revisits index 0 mid-bar: a degenerate window (from == to)
+  // falls back to a neighbour oscillation that dips BELOW the anchor, and a
+  // dip under the bar's lowest anchor breaks the register floor the V1
+  // embellishment ceiling relies on.
+  static constexpr int kContours[4][4] = {
+      {0, 1, 2, 1},  // low-amplitude wave (legacy default)
+      {0, 2, 2, 1},  // fifth swing with a high oscillation, falling back
+      {0, 3, 2, 1},  // run up a wide first window, then fall by chord tones
+      {0, 2, 3, 1},  // peak arch: rise to the upper octave region, fall back
+  };
+  const int contour = ((figure % 4) + 4) % 4;
   std::array<int, 4> anchor;
-  anchor[0] = start;
-  anchor[1] = chordToneAbove(anchor[0], chord.root_pc, chord.minor);
-  anchor[2] = chordToneAbove(anchor[1], chord.root_pc, chord.minor);
-  anchor[3] = anchor[1];  // descend back so the bar boundary voice-leads smoothly.
+  for (int beat = 0; beat < 4; ++beat) {
+    anchor[static_cast<std::size_t>(beat)] =
+        ladder[kContours[contour][static_cast<std::size_t>(beat)]];
+  }
   const Tick step =
       notes_per_beat == 1 ? kQuarterDur : (notes_per_beat == 2 ? kEighth : kSixteenth);
   auto step_dir = [&](int p, int d) {
@@ -265,11 +290,30 @@ void emitAnchoredBar(int bar, int start, const BarChord& chord, Mode mode, int n
     const int lo = std::min(from, to);
     const int hi = std::max(from, to);
     auto out_of_window = [&](int p) { return p == to || p > hi || p < lo; };
+    // Non-legacy figures alternate the fill of narrow (third-wide) DESCENDING
+    // windows: every other such beat opens away from the target -- a
+    // neighbour-return (e f e d into c) -- before walking toward it. A
+    // third-wide window filled toward the target always walks the same two
+    // interior pitches, so without the alternation the dense tier stamps one
+    // pendulum bigram pair into every such beat. Ascending windows keep the
+    // plain fill: their opening neighbour would dip BELOW the window (and
+    // below the bar's lowest anchor at the bar-opening beat), breaking the
+    // register floor the V1 embellishment ceiling relies on.
+    const bool neighbour_first = figure != 0 && notes_per_beat == 4 && to < from &&
+                                 ((bar + beat) & 1) != 0 && (hi - lo) <= 4;
     int walked = from;
     int dir = (to >= from) ? 1 : -1;
     for (int sub = 0; sub < notes_per_beat; ++sub) {
       int pitch = from;
       if (sub > 0) {
+        if (neighbour_first && sub <= 2) {
+          walked = (sub == 1) ? ((to >= from) ? step_dir(from, -1) : step_dir(from, 1)) : from;
+          pitch = walked;
+          emit(barTick(bar) + static_cast<Tick>(beat) * kTicksPerBeat +
+                   static_cast<Tick>(sub) * step,
+               step, pitch);
+          continue;
+        }
         int nxt = step_dir(walked, dir);
         if (out_of_window(nxt)) {
           dir = -dir;
@@ -296,12 +340,15 @@ void emitAnchoredBar(int bar, int start, const BarChord& chord, Mode mode, int n
 // pitch the wave starts from before snapping to a chord tone; `offset` shifts
 // the start up the scale per seed.
 void appendFigurationBar(FigurationSection& section, int bar, const BarChord& chord, Mode mode,
-                         int notes_per_beat, int register_base, int offset) {
+                         int notes_per_beat, int register_base, int offset, int figure = 0) {
   const int snapped =
       snapUpToChordTone(detail::scaleUp(register_base, offset, mode), chord.root_pc, chord.minor);
-  emitAnchoredBar(bar, snapped, chord, mode, notes_per_beat, [&](Tick start, Tick dur, int pitch) {
-    section.notes.push_back(materialNote(start, dur, pitch));
-  });
+  emitAnchoredBar(
+      bar, snapped, chord, mode, notes_per_beat,
+      [&](Tick start, Tick dur, int pitch) {
+        section.notes.push_back(materialNote(start, dur, pitch));
+      },
+      figure);
 }
 
 // ----- Chorale prelude walking-bass (Schubler BWV645 model) ----------------
@@ -319,6 +366,13 @@ void appendFigurationBar(FigurationSection& section, int bar, const BarChord& ch
 // V0 (C4+) > V1 (C3-region) > V2 (C2) holds at every tick.
 constexpr int kBassBandLo = 36;  // C2.
 constexpr int kBassBandHi = 47;  // B2.
+
+// Ceiling for every V1 (embellished CF) tone pick: the V0 figuration's
+// register floor is C4 (its downbeat anchor never sits below it, and the
+// fill never dips under the bar's lowest anchor), so a V1 tone above C4
+// would sit over V0's low fill tones -- a voice crossing. Equality is safe
+// (the crossing rule is strict).
+constexpr int kV1EmbellishCeiling = 60;  // C4.
 
 // Fit a pitch class to the MIDI pitch inside [lo, hi] nearest a center.
 int fitPcToBand(int pitch_class, int center, int lo, int hi) {
@@ -426,9 +480,13 @@ void appendWalkingBass(std::vector<MaterialNote>& out_notes, ThemeToneRegistry& 
       // (the root statement is the bar's harmonic anchor and must not be
       // displaced); the off-beat fills carry the variety.
       if (pitch == prev_pitch && beat != 0) {
+        // Consonant with every sounding upper voice AND strictly below them
+        // all -- the walking bass is the texture's floor, and a displacement
+        // that lands ON the cantus firmus tone (a consonant unison) is still
+        // a voice crossing.
         auto consonant_with_all = [&](int cand) {
           for (int upper : theme_pitches) {
-            if (!isConsonantPair(cand, upper))
+            if (!isConsonantPair(cand, upper) || cand >= upper)
               return false;
           }
           return true;
@@ -477,7 +535,10 @@ void appendWalkingBass(std::vector<MaterialNote>& out_notes, ThemeToneRegistry& 
               return false;
             }
             for (int upper : theme_pitches) {
-              if (!isConsonantPair(cand, upper))
+              // Consonant and strictly below every sounding upper voice: the
+              // bass is the texture's floor, and a consonant unison with the
+              // cantus firmus tone is still a voice crossing.
+              if (!isConsonantPair(cand, upper) || cand >= upper)
                 return false;
             }
             return !bass_is_parallel(cand);
@@ -509,44 +570,66 @@ void appendWalkingBass(std::vector<MaterialNote>& out_notes, ThemeToneRegistry& 
       if (beat == 3 && bar + 1 < bars && prev_pitch >= 0) {
         const Tick next_bar_tick = barTick(bar + 1);
         std::vector<ConcurrentMotion> fwd_motions;
-        auto forward_parallel = [&](int cand) {
+        auto forward_parallel = [&](int cand, bool strict_only) {
           const int landing_root = fitPcToBand(next_chord.root_pc, cand, kBassBandLo, kBassBandHi);
           fwd_motions.clear();
           registry.concurrentMotions(next_bar_tick - kSixteenth, next_bar_tick,
                                      /*voice=*/2, /*num_voices=*/3, fwd_motions);
           for (const ConcurrentMotion& motion : fwd_motions) {
-            if (formsPerfectParallel(cand, landing_root, motion.prev, motion.curr))
+            const bool hit =
+                strict_only
+                    ? formsStrictPerfectParallel(cand, landing_root, motion.prev, motion.curr)
+                    : formsPerfectParallel(cand, landing_root, motion.prev, motion.curr);
+            if (hit)
               return true;
           }
           return false;
         };
-        if (forward_parallel(pitch)) {
-          auto into_beat_parallel = [&](int cand) {
+        if (forward_parallel(pitch, /*strict_only=*/false)) {
+          auto into_beat_parallel = [&](int cand, bool strict_only) {
             for (const ConcurrentMotion& motion : motions) {
-              if (formsPerfectParallel(prev_pitch, cand, motion.prev, motion.curr))
+              const bool hit =
+                  strict_only
+                      ? formsStrictPerfectParallel(prev_pitch, cand, motion.prev, motion.curr)
+                      : formsPerfectParallel(prev_pitch, cand, motion.prev, motion.curr);
+              if (hit)
                 return true;
             }
             return false;
           };
-          auto admissible = [&](int cand) {
+          auto admissible = [&](int cand, bool strict_only) {
             if (cand < kBassBandLo || cand > kBassBandHi || cand == pitch ||
                 !detail::inScale(cand, mode)) {
               return false;
             }
             for (int upper : theme_pitches) {
-              if (!isConsonantPair(cand, upper))
+              // Consonant and strictly below every sounding upper voice: the
+              // bass is the texture's floor, and a consonant unison with the
+              // cantus firmus tone is still a voice crossing.
+              if (!isConsonantPair(cand, upper) || cand >= upper)
                 return false;
             }
-            return !into_beat_parallel(cand) && !forward_parallel(cand);
+            return !into_beat_parallel(cand, strict_only) && !forward_parallel(cand, strict_only);
           };
-          for (int dist = 1; dist <= 7; ++dist) {
-            bool placed = false;
-            for (const int sgn : {-1, 1}) {
-              const int cand = pitch + sgn * dist;
-              if (admissible(cand)) {
-                pitch = cand;
-                placed = true;
-                break;
+          // Two displacement tiers. The clean tier first: a tone whose own
+          // arrival and forward arrival are neither parallel nor hidden. When
+          // the arrival is forced onto a perfect (the immutable skeleton tone
+          // over the band-pinned root makes every same-direction approach at
+          // least hidden), no clean tone exists -- then both checks relax to
+          // TRUE parallels only, accepting an unavoidable hidden rather than
+          // keeping a true parallel.
+          bool placed = false;
+          for (const bool strict_only : {false, true}) {
+            if (strict_only && !forward_parallel(pitch, /*strict_only=*/true))
+              break;  // current tone is hidden at worst: nothing left to fix.
+            for (int dist = 1; dist <= 7 && !placed; ++dist) {
+              for (const int sgn : {-1, 1}) {
+                const int cand = pitch + sgn * dist;
+                if (admissible(cand, strict_only)) {
+                  pitch = cand;
+                  placed = true;
+                  break;
+                }
               }
             }
             if (placed)
@@ -662,12 +745,21 @@ HarnessFixture buildChoralePreludeForm(const ResolvedRequest& req) {
     const bool corta = !point.is_climax &&
                        ((((req.seed + static_cast<std::uint32_t>(bar / 4)) % 2) == 1) || mid_cycle);
     if (corta) {
+      const int corta_figure =
+          static_cast<int>((req.seed + req.seed / 4u + static_cast<std::uint32_t>(bar)) % 4u);
       appendFiguraCortaBar(fig.notes, bar,
                            snapUpToChordTone(detail::scaleUp(register_base, offset, mode),
                                              chord.root_pc, chord.minor),
-                           detail::ChordSpec{chord.root_pc, chord.minor}, mode);
+                           detail::ChordSpec{chord.root_pc, chord.minor}, mode, corta_figure);
     } else {
-      appendFigurationBar(fig, bar, chord, mode, notes_per_beat, register_base, offset);
+      // Anchor-contour rotation, phased by the seed so the same section plan
+      // lays the contours over different bars across seeds. The phase folds in
+      // seed/4 as well: every other seed input here is mod-4 (register offset,
+      // corta parity), so without it seeds congruent mod 4 produced identical
+      // chorale preludes.
+      const int figure =
+          static_cast<int>((req.seed + req.seed / 4u + static_cast<std::uint32_t>(bar)) % 4u);
+      appendFigurationBar(fig, bar, chord, mode, notes_per_beat, register_base, offset, figure);
     }
   }
 
@@ -739,7 +831,8 @@ HarnessFixture buildChoralePreludeForm(const ResolvedRequest& req) {
       const int up = detail::inScale(cand + 1, mode) ? cand + 1 : cand + 2;
       const int down = detail::inScale(cand - 1, mode) ? cand - 1 : cand - 2;
       for (int neighbour : {up, down}) {
-        if (neighbour == cand)
+        // Stay inside the V1 register window (see the departure picks).
+        if (neighbour == cand || neighbour <= kBassBandHi || neighbour > kV1EmbellishCeiling)
           continue;
         if (fig_now >= 0 && !isConsonantPair(neighbour, fig_now))
           continue;
@@ -749,9 +842,14 @@ HarnessFixture buildChoralePreludeForm(const ResolvedRequest& req) {
         break;
       }
       // Keep the substitute a real chord-bracketed neighbour: if neither neighbour
-      // is admissible, fall back to a chord tone above so the beat stays consonant.
-      if (chosen == cand)
-        chosen = chordToneAbove(cand, chord.root_pc, chord.minor);
+      // is admissible, fall back to a chord tone above so the beat stays consonant
+      // (unless that would breach the embellishment ceiling -- then the repeat
+      // stands rather than crossing into the V0 register).
+      if (chosen == cand) {
+        const int chord_tone = chordToneAbove(cand, chord.root_pc, chord.minor);
+        if (chord_tone <= kV1EmbellishCeiling)
+          chosen = chord_tone;
+      }
     }
     v1_run = (chosen == v1_prev) ? v1_run + 1 : 1;
     v1_prev = chosen;
@@ -791,7 +889,11 @@ HarnessFixture buildChoralePreludeForm(const ResolvedRequest& req) {
     for (int dist = 1; dist <= 7; ++dist) {
       for (const int sgn : {1, -1}) {
         const int alt = cand + sgn * dist;
-        if (alt == v1_prev || !is_chord_pc(alt))
+        // Stay clear of the walking-bass band below (the bass needs room to
+        // sit strictly under the CF line) and of the V0 figuration floor
+        // above (an alternative past the embellishment ceiling sits over
+        // V0's low fill tones).
+        if (alt <= kBassBandHi || alt > kV1EmbellishCeiling || alt == v1_prev || !is_chord_pc(alt))
           continue;
         if (!isConsonantPair(alt, fig_now) || parallel_with_fig(alt))
           continue;
@@ -812,14 +914,38 @@ HarnessFixture buildChoralePreludeForm(const ResolvedRequest& req) {
     const int activity =
         static_cast<int>(point.density_tier) + static_cast<int>(profile.ornament_density);
 
-    // Beat 2 / beat 3 chord-tone targets: the chord tone STRICTLY ABOVE the
-    // skeleton tone on beat 2, resolving back to the skeleton tone on beat 3.
-    // Both are chord tones, so the sampled beats stay consonant; they bracket a
-    // real departure-and-return figure. (A nearest-tone pick for beat 2 ties
-    // back to the skeleton tone itself, which flattens the bar into a
-    // tone,tone,tone repeated-note figure.)
-    const int beat2 = chordToneAbove(tone, chord.root_pc, chord.minor);
-    const int beat3 = nearestChordTone(tone, chord);
+    // Beat 2 / beat 3 chord-tone targets, rotating the departure figure per
+    // bar: the third-up-and-return (the chord tone strictly above the skeleton
+    // tone, resolving back), a fifth departure falling to the third, or a
+    // fifth departure returning home. All picks are chord tones, so the
+    // sampled beats stay consonant, and every variant ends the bar low (a bar
+    // ending high forces a wide descent into the next skeleton tone that
+    // lines up with the other voices' downbeat descents into same-direction
+    // perfect arrivals); a single figure repeated every bar stamped the
+    // third-pendulum interval bigram into a tenth of the line. (A
+    // nearest-tone pick for beat 2 ties back to the skeleton tone itself,
+    // which flattens the bar into a tone,tone,tone repeated-note figure.)
+    // Every pick is lifted clear of the walking-bass band: the embellishment
+    // orbits the CF in the C3 region, and a tone at or below B2 leaves the
+    // bass (whose own band tops out there) no room to sit strictly below.
+    auto liftAboveBassBand = [&](int t) {
+      while (t <= kBassBandHi)
+        t = chordToneAbove(t, chord.root_pc, chord.minor);
+      return t;
+    };
+    const int above1 = liftAboveBassBand(chordToneAbove(tone, chord.root_pc, chord.minor));
+    const int above2 = chordToneAbove(above1, chord.root_pc, chord.minor);
+    // The fifth departure must also respect the V1 embellishment ceiling
+    // (the V0 figuration's register floor): a climb past it would sit above
+    // V0's low fill tones -- a voice crossing. When the fifth has no room,
+    // the bar falls back to the third-up-and-return.
+    const bool fifth_fits = above2 <= kV1EmbellishCeiling;
+    const int departure =
+        fifth_fits
+            ? static_cast<int>((req.seed + req.seed / 4u + static_cast<std::uint32_t>(bar)) % 3u)
+            : 0;
+    const int beat2 = (departure == 0) ? above1 : above2;
+    const int beat3 = (departure == 1) ? above1 : liftAboveBassBand(nearestChordTone(tone, chord));
 
     // The final bar holds the closing tonic as one whole note: the CF joins
     // the held final chord instead of walking chord-tone quarters through the
