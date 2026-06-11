@@ -16,7 +16,12 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
-from bachlib.common import model_probability, model_probability_v2, score_generated
+from bachlib.common import (
+    model_probability,
+    model_probability_v2,
+    model_probability_v2_length_invariant,
+    score_generated,
+)
 from bachlib.phases import normalize_phase  # noqa: F401  (kept import surface aligned)
 from bachlib.texture_metrics import compute_texture_metrics
 
@@ -241,6 +246,9 @@ class GateCase:
     # the form's model_score_v2_threshold (MODEL_SCORE_V2_THRESHOLD fallback);
     # -1.0 marks "not scored" and does not gate, mirroring model_score.
     model_score_v2: float = -1.0
+    # Length-invariant v2 probability (excess over Bach-at-same-event-count).
+    # Informational only -- comparable across --bars settings, no gate floor.
+    model_score_v2_length_invariant: float = -1.0
     error: str = ""
 
     @property
@@ -644,7 +652,9 @@ def evaluate_generated_json(form: str, seed: int, generated_json: Path) -> GateC
     )
 
 
-def model_score_for(index_js: Path | None, generated_json: Path) -> tuple[float, float]:
+def model_score_for(
+    index_js: Path | None, generated_json: Path
+) -> tuple[float, float, float]:
     """Score a generated.json with bach-mcp's corpus models ("gate-3").
 
     Reuses bachlib.common.score_generated / model_probability so the gate and
@@ -654,17 +664,22 @@ def model_score_for(index_js: Path | None, generated_json: Path) -> tuple[float,
 
     @param index_js Path to bach-mcp/dist/index.js, or None to skip scoring.
     @param generated_json The generated.v1 JSON to score.
-    @return (v1 probability, v2 KL-model probability); -1.0 when unavailable.
-        Both probabilities participate in pass/fail: v1 against the historical
-        gate-3 floor, v2 against the form's KL-model floor.
+    @return (v1 probability, v2 KL-model probability, length-invariant v2
+        probability); -1.0 when unavailable. v1 gates against the historical
+        gate-3 floor and v2 against the form's KL-model floor; the
+        length-invariant value is informational only.
     """
     if index_js is None or not index_js.exists():
-        return -1.0, -1.0
+        return -1.0, -1.0, -1.0
     try:
         score = score_generated(index_js, generated_json)
     except (RuntimeError, OSError):
-        return -1.0, -1.0
-    return model_probability(score), model_probability_v2(score)
+        return -1.0, -1.0, -1.0
+    return (
+        model_probability(score),
+        model_probability_v2(score),
+        model_probability_v2_length_invariant(score),
+    )
 
 
 def run_case(
@@ -708,7 +723,9 @@ def run_case(
     if not generated_json.exists():
         return GateCase(form=form, seed=seed, generated=False, error="generated JSON missing")
     case = evaluate_generated_json(form, seed, generated_json)
-    case.model_score, case.model_score_v2 = model_score_for(index_js, generated_json)
+    case.model_score, case.model_score_v2, case.model_score_v2_length_invariant = (
+        model_score_for(index_js, generated_json)
+    )
     return case
 
 
@@ -788,6 +805,23 @@ def summarize_form(form: str, cases: list[GateCase]) -> dict[str, Any]:
             if thresholds.model_score_v2_threshold is not None
             else MODEL_SCORE_V2_THRESHOLD
         ),
+        # Informational: length-comparable v2 axis (no gate floor).
+        "min_model_score_v2_length_invariant": min(
+            (
+                case.model_score_v2_length_invariant
+                for case in generated
+                if case.model_score_v2_length_invariant >= 0.0
+            ),
+            default=0.0,
+        ),
+        "max_model_score_v2_length_invariant": max(
+            (
+                case.model_score_v2_length_invariant
+                for case in generated
+                if case.model_score_v2_length_invariant >= 0.0
+            ),
+            default=0.0,
+        ),
     }
 
 
@@ -818,6 +852,15 @@ def summarize(cases: list[GateCase]) -> dict[str, Any]:
             default=0.0,
         ),
         "model_scored_v2_cases": sum(1 for case in cases if case.model_scored_v2),
+        # Informational: length-comparable v2 axis (no gate floor).
+        "min_model_score_v2_length_invariant": min(
+            (
+                case.model_score_v2_length_invariant
+                for case in cases
+                if case.model_score_v2_length_invariant >= 0.0
+            ),
+            default=0.0,
+        ),
         "max_parallel_perfect_count": max(
             (case.parallel_perfect_count for case in cases if case.generated), default=0
         ),

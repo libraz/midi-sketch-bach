@@ -62,6 +62,24 @@ def model_probability_v2(score: dict[str, Any]) -> float:
     return -1.0
 
 
+def model_probability_v2_length_invariant(score: dict[str, Any]) -> float:
+    """Length-invariant KL-model probability (bach-mcp probability_length_invariant).
+
+    The v2 probability is not comparable across piece lengths: the scorer's
+    pseudo-count shrinkage suppresses the KL of short pieces toward zero. This
+    axis re-bases each component on what real Bach material scores at the same
+    event count, so 16-bar and 128-bar runs share one scale. Informational
+    only; no gate floor is anchored to it. Returns -1.0 when the scorer did
+    not emit the field (older bach-mcp build or pre-calibration model).
+    """
+    model = score.get("model_score_v2")
+    if isinstance(model, dict):
+        value = model.get("probability_length_invariant", -1.0)
+        if isinstance(value, (int, float)):
+            return float(value)
+    return -1.0
+
+
 def heuristic_score(score: dict[str, Any]) -> float:
     value = score.get("score", 0.0)
     return float(value) if isinstance(value, (int, float)) else 0.0

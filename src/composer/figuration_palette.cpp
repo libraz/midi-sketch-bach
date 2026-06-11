@@ -354,12 +354,19 @@ void appendScalarWaveBar(std::vector<MaterialNote>& dst, int bar, const detail::
   } else {
     // Chain conjunctly: pick the chord tone nearest the previous bar's last
     // pitch (clamped into the wave's start window) so the bar boundary is a
-    // small step rather than a leap to the band floor.
+    // small step rather than a leap to the band floor. In figure-rotation
+    // mode the exact previous pitch is excluded: when a bar ends on a chord
+    // tone the nearest candidate IS that pitch, and the resulting repeated
+    // pair at nearly every bar seam piles up interval-0 mass the corpus does
+    // not have (the non-rotating callers keep the legacy choice).
     const int target = std::clamp(prev_pitch, base_midi, anchor_hi);
     int best = -1;
     int best_dist = 1 << 30;
     for (int cand = base_midi; cand <= anchor_hi; ++cand) {
       if (!is_triad(cand)) {
+        continue;
+      }
+      if (rotate_figures && cand == prev_pitch) {
         continue;
       }
       const int dist = std::abs(cand - target);
@@ -432,6 +439,34 @@ void appendScalarWaveBar(std::vector<MaterialNote>& dst, int bar, const detail::
         if (cand >= base_midi && cand <= ceil_midi) {
           wave[idx] = cand;
         }
+      }
+    } else if (figure_mode == 2) {
+      // Leap-and-cascade: leap from the band floor up to the triad tone a
+      // sixth above, then fill back down by scale steps; re-leap when the
+      // cascade returns to the floor. The ascending-sixth bins are the
+      // corpus intervals no step wave or chord-tone sweep reaches, and the
+      // classical leap-then-contrary-fill shape keeps every leap resolved.
+      // The leap target is a chord tone, so the landing is consonant with a
+      // sustained pedal root by construction.
+      int floor_tone = base_midi;
+      while (floor_tone <= ceil_midi && !is_triad(floor_tone)) {
+        ++floor_tone;
+      }
+      int leap_to = floor_tone + 8;  // minor sixth; nudged up to the chord tone
+      while (leap_to <= ceil_midi && !is_triad(leap_to)) {
+        ++leap_to;
+      }
+      if (floor_tone <= ceil_midi && leap_to <= ceil_midi) {
+        std::vector<int> cascade;
+        cascade.reserve(wave.size());
+        int cur = std::clamp(anchor, floor_tone, leap_to);
+        cascade.push_back(cur);
+        while (cascade.size() < wave.size()) {
+          cur =
+              (cur <= floor_tone) ? leap_to : std::max(detail::scaleDown(cur, 1, mode), floor_tone);
+          cascade.push_back(cur);
+        }
+        wave = std::move(cascade);
       }
     } else if (figure_mode == 3) {
       // Arpeggio sweep: rebuild the wave stepping by triad tones instead of

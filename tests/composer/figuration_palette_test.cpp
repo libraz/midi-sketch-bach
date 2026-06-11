@@ -256,6 +256,60 @@ TEST(FigurationPaletteScalarWaveBar, RotationCyclesFourDistinctFigures) {
   EXPECT_EQ(all_triad_bars, 1) << "expected exactly one arpeggio-sweep bar per cycle";
 }
 
+TEST(FigurationPaletteScalarWaveBar, CascadeBarLeapsASixthAndFillsByContraryStep) {
+  // The (bar + offset) % 4 == 2 figure is the sixth-leap cascade: with
+  // offset 0, bar 2 must contain at least one ascending leap of a sixth or
+  // more, and every such leap must land on a chord tone and be followed by
+  // descending motion (the classical leap-then-contrary-fill resolution).
+  const detail::ChordSpec chord{0, false};
+  int prev_pitch = -1;
+  std::vector<MaterialNote> notes;
+  for (int bar = 0; bar <= 2; ++bar) {
+    notes.clear();
+    appendScalarWaveBar(notes, bar, chord, detail::Mode::Major, /*notes_per_beat=*/4,
+                        /*base_midi=*/60, /*ceil_midi=*/84, /*offset=*/0, prev_pitch,
+                        /*rotate_figures=*/true);
+  }
+  ASSERT_EQ(notes.size(), 16u);
+  int ascending_sixth_leaps = 0;
+  for (std::size_t idx = 1; idx < notes.size(); ++idx) {
+    const int interval =
+        static_cast<int>(notes[idx].pitch) - static_cast<int>(notes[idx - 1].pitch);
+    if (interval >= 8) {
+      ++ascending_sixth_leaps;
+      EXPECT_TRUE(isTriadTone(static_cast<int>(notes[idx].pitch), chord))
+          << "leap target at index " << idx << " is not a chord tone";
+      if (idx + 1 < notes.size()) {
+        EXPECT_LT(static_cast<int>(notes[idx + 1].pitch), static_cast<int>(notes[idx].pitch))
+            << "leap at index " << idx << " is not filled by contrary descent";
+      }
+    }
+  }
+  EXPECT_GE(ascending_sixth_leaps, 1) << "cascade bar emitted no ascending sixth leap";
+}
+
+TEST(FigurationPaletteScalarWaveBar, RotatingBarsNeverRepeatThePreviousPitchAtTheSeam) {
+  // The conjunct bar chain picks the chord tone nearest the previous bar's
+  // last pitch; in rotation mode that candidate must not BE the previous
+  // pitch, or nearly every bar seam stamps an interval-0 pair the corpus
+  // distribution does not have.
+  const detail::ChordSpec chord{0, false};
+  int prev_pitch = -1;
+  int last_pitch = -1;
+  for (int bar = 0; bar < 8; ++bar) {
+    std::vector<MaterialNote> notes;
+    appendScalarWaveBar(notes, bar, chord, detail::Mode::Major, /*notes_per_beat=*/4,
+                        /*base_midi=*/60, /*ceil_midi=*/84, /*offset=*/0, prev_pitch,
+                        /*rotate_figures=*/true);
+    ASSERT_FALSE(notes.empty());
+    if (last_pitch >= 0) {
+      EXPECT_NE(static_cast<int>(notes.front().pitch), last_pitch)
+          << "bar " << bar << " opens by repeating the previous bar's last pitch";
+    }
+    last_pitch = static_cast<int>(notes.back().pitch);
+  }
+}
+
 // --- kFiguration ----------------------------------------------------------------
 
 TEST(FigurationPaletteFigurationWave, DownbeatsAreChordTonesAndLineStaysInBand) {

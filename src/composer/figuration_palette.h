@@ -195,11 +195,11 @@ void appendScalarWaveCycle(std::vector<MaterialNote>& notes, Tick block_start,
  *        produced the wide bar-boundary leaps that dominated the melodic-
  *        interval cost). Updated to the bar's last emitted pitch on return.
  * @param rotate_figures When true, the bar figure rotates by (bar + offset) % 4
- *        (broken-third chain / one fourth-or-fifth dive / plain wave / triad
- *        arpeggio sweep), restoring the corpus's third-and-leap vocabulary to
- *        an otherwise purely stepwise surface; mixing the seed offset into the
- *        phase makes different seeds distribute the figures differently. Off by
- *        default so existing callers stay byte-identical.
+ *        (broken-third chain / one fourth-or-fifth dive / sixth-leap cascade /
+ *        triad arpeggio sweep), restoring the corpus's third-leap-and-sixth
+ *        vocabulary to an otherwise purely stepwise surface; mixing the seed
+ *        offset into the phase makes different seeds distribute the figures
+ *        differently. Off by default so existing callers stay byte-identical.
  */
 void appendScalarWaveBar(std::vector<MaterialNote>& dst, int bar, const detail::ChordSpec& chord,
                          detail::Mode mode, int notes_per_beat, int base_midi, int ceil_midi,
