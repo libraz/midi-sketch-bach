@@ -87,6 +87,11 @@ namespace bach::composer {
 //     other voice sounds at the onset: a solo pedal entry may take a downbeat
 //     mordent (the organ-toccata idiom); the bass under ensemble texture
 //     stays plain as before.
+//   * Climax uplift -- inside [climax_start_tick, climax_end_tick) the
+//     ornament density rises one tier (cap 2) and the generic placement gate
+//     opens more often, so decoration intensifies exactly where the macro
+//     energy arc peaks (the callers centre the window on the ~75% climax
+//     point). climax_end_tick == 0 disables the window.
 struct OrnamentParams {
   SubjectCharacter character = SubjectCharacter::Severe;  // density via CharacterProfile.
   InstrumentType instrument = InstrumentType::Organ;      // density scaling.
@@ -97,6 +102,8 @@ struct OrnamentParams {
   std::vector<VoiceId> exempt_voices;                     // ground carriers: never ornamented.
   std::vector<VoiceId> skeleton_exempt_voices;            // CF: bar heads immutable, body free.
   Tick aria_end_tick = 0;                                 // Goldberg aria uplift (0 = none).
+  Tick climax_start_tick = 0;                             // climax uplift window start.
+  Tick climax_end_tick = 0;                               // window end, exclusive (0 = none).
 };
 
 /**

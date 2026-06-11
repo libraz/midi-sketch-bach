@@ -115,6 +115,96 @@ TEST(ExpressionEventsTest, RegistrationDeterministic) {
 }
 
 // ---------------------------------------------------------------------------
+// buildPhraseDynamics
+// ---------------------------------------------------------------------------
+
+TEST(PhraseDynamicsTest, EmitsExpressionOnlyEvents) {
+  const auto events = buildPhraseDynamics(4, 4, kTicksPerBar, 16 * kTicksPerBar);
+  ASSERT_FALSE(events.empty());
+  for (const auto& evt : events) {
+    EXPECT_EQ(evt.controller, 11) << "phrase dynamics must touch CC#11 only";
+    EXPECT_LE(evt.value, 127);
+  }
+}
+
+TEST(PhraseDynamicsTest, MidPhraseSwellsAbovePhraseStart) {
+  const Tick total = 16 * kTicksPerBar;
+  const auto events = buildPhraseDynamics(4, 4, kTicksPerBar, total);
+  // Events alternate phrase-start / mid-phrase; each full phrase's swell sits
+  // above its own start value (the breath rises and falls with the phrasing).
+  ASSERT_GE(events.size(), 4u);
+  for (std::size_t idx = 0; idx + 1 < events.size(); idx += 2) {
+    const auto& start = events[idx];
+    const auto& mid = events[idx + 1];
+    if (mid.tick - start.tick != 2 * kTicksPerBar) {
+      break;  // truncated final phrase: no swell emitted.
+    }
+    EXPECT_GT(mid.value, start.value)
+        << "mid-phrase swell at tick " << mid.tick << " should exceed the phrase-start baseline";
+  }
+}
+
+TEST(PhraseDynamicsTest, BaselineFollowsMacroArcShape) {
+  const Tick total = 32 * kTicksPerBar;
+  const auto events = buildPhraseDynamics(8, 4, kTicksPerBar, total);
+  // The phrase-start baseline rises towards the ~75% climax point and settles
+  // after it, mirroring the registration plan's arc.
+  std::uint8_t opening = 0;
+  std::uint8_t near_climax = 0;
+  std::uint8_t closing = 0;
+  for (const auto& evt : events) {
+    if (evt.tick == 0)
+      opening = evt.value;
+    if (evt.tick == 24 * kTicksPerBar)
+      near_climax = evt.value;
+    if (evt.tick == 28 * kTicksPerBar)
+      closing = evt.value;
+  }
+  EXPECT_GT(near_climax, opening);
+  EXPECT_LT(closing, near_climax);
+}
+
+TEST(PhraseDynamicsTest, TicksSortedAndWithinPiece) {
+  const Tick total = 24 * kTicksPerBar;
+  const auto events = buildPhraseDynamics(6, 4, kTicksPerBar, total);
+  ASSERT_FALSE(events.empty());
+  Tick prev = 0;
+  for (const auto& evt : events) {
+    EXPECT_LT(evt.tick, total);
+    EXPECT_GE(evt.tick, prev);
+    prev = evt.tick;
+  }
+  EXPECT_EQ(events.front().tick, 0u);
+}
+
+TEST(PhraseDynamicsTest, ClampsPhraseLengthIntoRange) {
+  const Tick total = 16 * kTicksPerBar;
+  // phrase_bars 0 and 1 clamp to 2; 16 clamps to 8.
+  const auto clamped_low = buildPhraseDynamics(4, 0, kTicksPerBar, total);
+  ASSERT_GE(clamped_low.size(), 2u);
+  EXPECT_EQ(clamped_low[1].tick, kTicksPerBar);  // mid-point of a 2-bar phrase.
+  const auto clamped_high = buildPhraseDynamics(4, 16, kTicksPerBar, total);
+  ASSERT_GE(clamped_high.size(), 2u);
+  EXPECT_EQ(clamped_high[1].tick, 4 * kTicksPerBar);  // mid-point of an 8-bar phrase.
+}
+
+TEST(PhraseDynamicsTest, EmptyForDegenerateInput) {
+  EXPECT_TRUE(buildPhraseDynamics(4, 4, kTicksPerBar, 0).empty());
+  EXPECT_TRUE(buildPhraseDynamics(4, 4, 0, 16 * kTicksPerBar).empty());
+}
+
+TEST(PhraseDynamicsTest, Deterministic) {
+  const auto a = buildPhraseDynamics(5, 4, kTicksPerBar, 20 * kTicksPerBar);
+  const auto b = buildPhraseDynamics(5, 4, kTicksPerBar, 20 * kTicksPerBar);
+  ASSERT_EQ(a.size(), b.size());
+  for (std::size_t idx = 0; idx < a.size(); ++idx) {
+    EXPECT_EQ(a[idx].tick, b[idx].tick);
+    EXPECT_EQ(a[idx].controller, b[idx].controller);
+    EXPECT_EQ(a[idx].value, b[idx].value);
+  }
+}
+
+// ---------------------------------------------------------------------------
 // buildFinalRitardando
 // ---------------------------------------------------------------------------
 
@@ -136,9 +226,11 @@ TEST(ExpressionEventsTest, RitardandoMonotoneDecreasing) {
 TEST(ExpressionEventsTest, RitardandoValuesMatchDesign) {
   const std::uint16_t bpm = 100;
   const auto events = buildFinalRitardando(bpm, 16 * kTicksPerBar, kTicksPerBar);
-  ASSERT_EQ(events.size(), 2u);
-  EXPECT_EQ(events[0].bpm, 92);  // 92%
-  EXPECT_EQ(events[1].bpm, 85);  // 85%
+  ASSERT_EQ(events.size(), 4u);
+  EXPECT_EQ(events[0].bpm, 94);  // 94% entering the penultimate bar
+  EXPECT_EQ(events[1].bpm, 90);  // 90% at its mid-point
+  EXPECT_EQ(events[2].bpm, 85);  // 85% entering the final bar
+  EXPECT_EQ(events[3].bpm, 78);  // 78% allargando floor
 }
 
 TEST(ExpressionEventsTest, RitardandoLastEventBeforeTotalTicks) {
@@ -146,9 +238,19 @@ TEST(ExpressionEventsTest, RitardandoLastEventBeforeTotalTicks) {
   const auto events = buildFinalRitardando(120, total, kTicksPerBar);
   ASSERT_FALSE(events.empty());
   EXPECT_LT(events.back().tick, total);
-  // The two steps land in the final two bars.
+  // The steps span the final two bars on the half-bar grid.
   EXPECT_EQ(events.front().tick, total - 2 * kTicksPerBar);
-  EXPECT_EQ(events.back().tick, total - kTicksPerBar);
+  EXPECT_EQ(events.back().tick, total - kTicksPerBar / 2);
+}
+
+TEST(ExpressionEventsTest, RitardandoCollapsesEqualStepsAtLowBpm) {
+  // At a very low base tempo, integer rounding can make adjacent percentage
+  // steps equal; the stream must stay strictly decreasing.
+  const auto events = buildFinalRitardando(8, 16 * kTicksPerBar, kTicksPerBar);
+  ASSERT_FALSE(events.empty());
+  for (std::size_t idx = 1; idx < events.size(); ++idx) {
+    EXPECT_LT(events[idx].bpm, events[idx - 1].bpm);
+  }
 }
 
 TEST(ExpressionEventsTest, RitardandoShortPieceSingleStep) {

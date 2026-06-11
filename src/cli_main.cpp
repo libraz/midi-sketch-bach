@@ -665,6 +665,14 @@ int runDefaultMode(const CliOptions& opts) {
 
   const bach::Tick ticks_per_bar = fixture.harmony.ticksPerBar();
 
+  // Total length in ticks = the last note-off across the whole result. The
+  // ornament pass subdivides notes in place and never extends the piece, so
+  // the value computed here stays valid for the expression passes below.
+  bach::Tick total_ticks = 0;
+  for (const auto& note : result.notes) {
+    total_ticks = std::max(total_ticks, note.start_tick + note.duration);
+  }
+
   // Ornament post-pass. Ground voices are hard exempt so immutable material
   // stays un-decorated; cantus-firmus voices keep their bar-head skeleton but
   // may carry within-bar embellishment (character-gated inside the pass). The
@@ -683,16 +691,17 @@ int runDefaultMode(const CliOptions& opts) {
   if (opts.form == bach::FormType::GoldbergVariations) {
     ornament_params.aria_end_tick = 4 * ticks_per_bar;
   }
+  // Climax uplift: decoration intensifies in a two-bar window centred on the
+  // macro arc's ~75% climax point (the same design point the registration
+  // plan peaks at).
+  const bach::Tick climax_tick =
+      static_cast<bach::Tick>(static_cast<std::uint64_t>(total_ticks) * 3 / 4);
+  ornament_params.climax_start_tick = climax_tick > ticks_per_bar ? climax_tick - ticks_per_bar : 0;
+  ornament_params.climax_end_tick = climax_tick + ticks_per_bar;
   bach::composer::applyOrnamentPass(result, ornament_params);
 
   // Apply the instrument to every track (GM program + default names).
   bach::applyInstrument(result.tracks, instrument);
-
-  // Total length in ticks = the last note-off across the whole result.
-  bach::Tick total_ticks = 0;
-  for (const auto& note : result.notes) {
-    total_ticks = std::max(total_ticks, note.start_tick + note.duration);
-  }
 
   // Arc cycle count drives the registration plan's number of points.
   const auto& spec = bach::composer::formSpec(opts.form);
@@ -708,6 +717,17 @@ int runDefaultMode(const CliOptions& opts) {
         bach::composer::buildRegistrationPlan(bars, cycle_count, ticks_per_bar, total_ticks);
     for (auto& track : result.tracks) {
       track.cc_events.insert(track.cc_events.end(), plan.begin(), plan.end());
+    }
+  }
+
+  // Phrase-level expression arch (CC#11): every instrument that can shape
+  // dynamics continuously breathes with the phrasing; a harpsichord has no
+  // dynamic control, so it keeps the plain stream.
+  if (instrument != bach::InstrumentType::Harpsichord) {
+    const std::vector<bach::CcEvent> phrase =
+        bach::composer::buildPhraseDynamics(cycle_count, snap, ticks_per_bar, total_ticks);
+    for (auto& track : result.tracks) {
+      track.cc_events.insert(track.cc_events.end(), phrase.begin(), phrase.end());
     }
   }
 

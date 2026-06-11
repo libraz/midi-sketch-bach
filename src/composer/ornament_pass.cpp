@@ -642,6 +642,15 @@ void applyOrnamentPass(ComposeResult& result, const OrnamentParams& params) {
       if (neighbours_ok && upper_clears_ceiling && (is_top || !in_cadence_window)) {
         const std::uint64_t roll = placementHash(params.seed, bar, note.voice);
 
+        // Climax uplift window: decoration intensifies where the macro energy
+        // arc peaks. Inside the window the density reads one tier higher
+        // (cap 2) and the generic gate below opens more often.
+        const bool in_climax = params.climax_end_tick > params.climax_start_tick &&
+                               note.start_tick >= params.climax_start_tick &&
+                               note.start_tick < params.climax_end_tick;
+        const std::uint8_t local_density =
+            (in_climax && density < 2) ? static_cast<std::uint8_t>(density + 1) : density;
+
         // Phrase boundaries: the last bar of each 4-bar phrase (outside the
         // final cadence window) is a natural sub-cadence; ornaments cluster
         // there so decoration spreads across the piece instead of bunching in
@@ -716,7 +725,7 @@ void applyOrnamentPass(ComposeResult& result, const OrnamentParams& params) {
             want_appoggiatura = true;
           else
             want_turn = true;
-        } else if (density == 0) {
+        } else if (local_density == 0) {
           // Sparse uplift: a density-0 character marks every other phrase
           // boundary (and the designed mid-piece boundary) with its boundary
           // figure, so the piece is not bare until the final cadence. These
@@ -802,10 +811,13 @@ void applyOrnamentPass(ComposeResult& result, const OrnamentParams& params) {
         // trills, the designed mid-piece boundary, the density-0 boundary
         // figures (already one-per-8-bars sparse), and the approach-matched
         // figures (each carries its own quantile gate above) bypass the gate.
+        // Inside the climax window a second hash bit joins the gate, so it
+        // opens for ~3 in 4 sites instead of 1 in 2.
         const bool mandatory = in_cadence_window && is_strong_beat;
         const bool gate_open = mandatory || bar == mid_boundary_bar ||
-                               (density == 0 && (want_mordent || want_appoggiatura)) ||
-                               self_gated || (roll & 1ull) == 0ull;
+                               (local_density == 0 && (want_mordent || want_appoggiatura)) ||
+                               self_gated || (roll & 1ull) == 0ull ||
+                               (in_climax && ((roll >> 6) & 1ull) == 0ull);
 
         if (gate_open) {
           if (want_appoggiatura) {

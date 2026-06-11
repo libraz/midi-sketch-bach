@@ -416,6 +416,10 @@ BachError bach_generate_from_json(BachHandle handle, const char* json, size_t le
 
   const bach::Tick ticks_per_bar = fixture.harmony.ticksPerBar();
 
+  // The ornament pass subdivides notes in place and never extends the piece,
+  // so the total computed here stays valid for the expression passes below.
+  const uint32_t total_ticks = totalTicksOf(result.notes);
+
   // 6. Ornament post-pass. Ground voices are hard exempt; cantus-firmus
   // voices keep their bar-head skeleton but may carry within-bar
   // embellishment (character-gated inside the pass). The Goldberg opening
@@ -433,14 +437,18 @@ BachError bach_generate_from_json(BachHandle handle, const char* json, size_t le
   if (req.form == bach::FormType::GoldbergVariations) {
     orn.aria_end_tick = 4 * ticks_per_bar;
   }
+  // Climax uplift: decoration intensifies in a two-bar window centred on the
+  // macro arc's ~75% climax point (the registration plan's peak).
+  const bach::Tick climax_tick =
+      static_cast<bach::Tick>(static_cast<uint64_t>(total_ticks) * 3 / 4);
+  orn.climax_start_tick = climax_tick > ticks_per_bar ? climax_tick - ticks_per_bar : 0;
+  orn.climax_end_tick = climax_tick + ticks_per_bar;
   bach::composer::applyOrnamentPass(result, orn);
 
   // 7. Apply instrument program + default track names.
   bach::applyInstrument(result.tracks, req.instrument);
 
   // 8. Expression events.
-  const uint32_t total_ticks = totalTicksOf(result.notes);
-
   const bach::composer::FormSpec& spec = bach::composer::formSpec(req.form);
   const uint16_t snap = spec.snap_bars == 0 ? 1 : spec.snap_bars;
   std::size_t cycle_count = resolved_bars / snap;
@@ -453,6 +461,17 @@ BachError bach_generate_from_json(BachHandle handle, const char* json, size_t le
                                                     total_ticks);
     for (auto& track : result.tracks) {
       track.cc_events.insert(track.cc_events.end(), cc.begin(), cc.end());
+    }
+  }
+
+  // Phrase-level expression arch (CC#11): every instrument that can shape
+  // dynamics continuously breathes with the phrasing; a harpsichord has no
+  // dynamic control, so it keeps the plain stream.
+  if (req.instrument != bach::InstrumentType::Harpsichord) {
+    auto phrase =
+        bach::composer::buildPhraseDynamics(cycle_count, snap, ticks_per_bar, total_ticks);
+    for (auto& track : result.tracks) {
+      track.cc_events.insert(track.cc_events.end(), phrase.begin(), phrase.end());
     }
   }
 

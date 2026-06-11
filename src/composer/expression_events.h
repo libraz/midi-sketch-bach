@@ -54,14 +54,47 @@ std::vector<CcEvent> buildRegistrationPlan(std::uint16_t bars, std::size_t cycle
                                            Tick ticks_per_bar, std::uint32_t total_ticks);
 
 /**
+ * @brief Build a phrase-level expression arch as a stream of CC#11 events.
+ *
+ * Overlays a per-phrase "breath" on the macro energy arc: each phrase opens at
+ * the macro-arc value for its position and swells a small designed step above
+ * it at mid-phrase, so the dynamic line rises and falls with the phrasing
+ * instead of holding flat between the (at most four) registration points. The
+ * macro curve interpolates the same design values as buildRegistrationPlan
+ * (opening 75 -> develop 85 -> climax 95 at ~75% -> settle 88), with the same
+ * cycle_count tiers, so the two streams agree wherever they coincide.
+ *
+ * Only CC#11 (Expression) is emitted: the phrase breath is a performance
+ * inflection, not a registration change, so CC#7 (the registration level)
+ * stays with buildRegistrationPlan. Callers layer this onto every voice track
+ * for instruments that shape dynamics continuously (organ swell pedal, bowed
+ * strings, piano); a harpsichord has no dynamic control, so callers skip it.
+ *
+ * @param cycle_count Number of arc cycles in the piece (>= 1). Selects the
+ *        macro-curve tier exactly as in buildRegistrationPlan.
+ * @param phrase_bars Phrase length in bars (the form's natural period). Values
+ *        outside [2, 8] are clamped into that range.
+ * @param ticks_per_bar Ticks per bar for the piece's meter.
+ * @param total_ticks Total length of the piece in ticks.
+ * @return CC#11 events in non-decreasing tick order: one phrase-start event at
+ *         the macro value and one mid-phrase swell per phrase. Empty if
+ *         total_ticks or ticks_per_bar is 0.
+ * @note Pure function of its arguments: no RNG, identical output every call.
+ */
+std::vector<CcEvent> buildPhraseDynamics(std::size_t cycle_count, std::uint16_t phrase_bars,
+                                         Tick ticks_per_bar, std::uint32_t total_ticks);
+
+/**
  * @brief Build a final ritardando as a short stream of tempo events.
  *
- * Steps the tempo down across the final ~2 bars of the piece to shape a closing
- * ritardando. The starting tempo event (at tick 0) is the caller's
- * responsibility; this function returns only the deceleration steps that follow
- * it. Design values (seed-independent):
- *   - 92% of base BPM, entering the penultimate bar.
+ * Steps the tempo down across the final ~2 bars of the piece to shape a
+ * poco-a-poco closing ritardando. The starting tempo event (at tick 0) is the
+ * caller's responsibility; this function returns only the deceleration steps
+ * that follow it. Design values (seed-independent), on the half-bar grid:
+ *   - 94% of base BPM, entering the penultimate bar.
+ *   - 90% of base BPM, at the penultimate bar's mid-point.
  *   - 85% of base BPM, entering the final bar.
+ *   - 78% of base BPM, at the final bar's mid-point (the allargando floor).
  * For very short pieces (< 2 bars) a single 85% step is emitted near the end.
  *
  * @param bpm Base tempo in BPM (the tempo in force before the ritardando).

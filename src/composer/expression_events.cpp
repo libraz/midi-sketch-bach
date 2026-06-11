@@ -19,6 +19,9 @@ constexpr std::uint8_t kDevelopValue = 85;  ///< Develop: legacy episode/middle-
 constexpr std::uint8_t kClimaxValue = 95;   ///< Climax: legacy stretto hint.
 constexpr std::uint8_t kSettleValue = 88;   ///< Resolve: softened close below the climax peak.
 
+/// Mid-phrase swell above the macro-arc value (CC#11 steps, a gentle breath).
+constexpr int kPhraseSwell = 6;
+
 /// @brief Append a CC#7 + CC#11 pair at one registration point.
 /// @param events Destination event stream.
 /// @param tick Tick position for both controller changes.
@@ -26,6 +29,55 @@ constexpr std::uint8_t kSettleValue = 88;   ///< Resolve: softened close below t
 void addRegistrationPoint(std::vector<CcEvent>& events, Tick tick, std::uint8_t value) {
   events.push_back({tick, kCcMainVolume, value});
   events.push_back({tick, kCcExpression, value});
+}
+
+/// @brief Macro energy-arc value at a tick, by linear interpolation.
+///
+/// Traces the same design points as buildRegistrationPlan for the given
+/// cycle_count tier (opening at 0, develop at 1/2, climax at 3/4, settle at the
+/// end), so phrase-level events agree with the registration plan wherever the
+/// two streams coincide.
+/// @param cycle_count Arc cycle count (selects the tier, as in the plan).
+/// @param tick Query position.
+/// @param total_ticks Piece length (> 0).
+/// @return Interpolated controller value in [kOpeningValue, kClimaxValue].
+std::uint8_t macroArcValueAt(std::size_t cycle_count, Tick tick, std::uint32_t total_ticks) {
+  struct Point {
+    std::uint64_t tick;
+    std::uint8_t value;
+  };
+  const std::uint64_t total = total_ticks;
+  Point points[4];
+  std::size_t count = 0;
+  points[count++] = {0, kOpeningValue};
+  if (cycle_count >= 3) {
+    points[count++] = {total / 2, kDevelopValue};
+  }
+  if (cycle_count >= 2) {
+    points[count++] = {total * 3 / 4, kClimaxValue};
+  }
+  points[count++] = {total > 0 ? total - 1 : 0, kSettleValue};
+
+  const std::uint64_t t = tick;
+  if (t <= points[0].tick) {
+    return points[0].value;
+  }
+  for (std::size_t idx = 1; idx < count; ++idx) {
+    if (t <= points[idx].tick) {
+      const std::uint64_t lo = points[idx - 1].tick;
+      const std::uint64_t hi = points[idx].tick;
+      const int lo_v = points[idx - 1].value;
+      const int hi_v = points[idx].value;
+      if (hi == lo) {
+        return points[idx].value;
+      }
+      const int v = lo_v + static_cast<int>((static_cast<std::int64_t>(hi_v - lo_v) *
+                                             static_cast<std::int64_t>(t - lo)) /
+                                            static_cast<std::int64_t>(hi - lo));
+      return static_cast<std::uint8_t>(std::clamp(v, 0, 127));
+    }
+  }
+  return points[count - 1].value;
 }
 
 }  // namespace
@@ -74,6 +126,40 @@ std::vector<CcEvent> buildRegistrationPlan(std::uint16_t bars, std::size_t cycle
   return events;
 }
 
+std::vector<CcEvent> buildPhraseDynamics(std::size_t cycle_count, std::uint16_t phrase_bars,
+                                         Tick ticks_per_bar, std::uint32_t total_ticks) {
+  std::vector<CcEvent> events;
+  if (total_ticks == 0 || ticks_per_bar == 0) {
+    return events;
+  }
+
+  // Clamp the phrase period into the musically sensible range: below 2 bars
+  // the "breath" degenerates into per-bar pumping, above 8 it stops reading
+  // as phrasing at all.
+  const std::uint16_t period_bars = std::clamp<std::uint16_t>(phrase_bars, 2, 8);
+  const std::uint64_t phrase_ticks =
+      static_cast<std::uint64_t>(period_bars) * static_cast<std::uint64_t>(ticks_per_bar);
+
+  for (std::uint64_t start = 0; start < total_ticks; start += phrase_ticks) {
+    // Phrase start: return to the macro-arc baseline for this position.
+    const std::uint8_t base = macroArcValueAt(cycle_count, static_cast<Tick>(start), total_ticks);
+    events.push_back({static_cast<Tick>(start), kCcExpression, base});
+
+    // Mid-phrase swell: a small designed step above the baseline. Skipped when
+    // the mid-point falls past the end (a truncated final phrase keeps its
+    // settling baseline instead of swelling into the final cadence).
+    const std::uint64_t mid = start + phrase_ticks / 2;
+    if (mid < total_ticks) {
+      const int swelled =
+          macroArcValueAt(cycle_count, static_cast<Tick>(mid), total_ticks) + kPhraseSwell;
+      events.push_back({static_cast<Tick>(mid), kCcExpression,
+                        static_cast<std::uint8_t>(std::min(swelled, 127))});
+    }
+  }
+
+  return events;
+}
+
 std::vector<TempoEvent> buildFinalRitardando(std::uint16_t bpm, Tick total_ticks,
                                              Tick ticks_per_bar) {
   std::vector<TempoEvent> events;
@@ -81,33 +167,46 @@ std::vector<TempoEvent> buildFinalRitardando(std::uint16_t bpm, Tick total_ticks
     return events;
   }
 
-  // Design-value deceleration: 92% entering the penultimate bar, 85% entering
-  // the final bar. Round to whole BPM; clamp to >= 1 to stay valid.
+  // Design-value poco-a-poco deceleration on the half-bar grid: 94% entering
+  // the penultimate bar, 90% at its mid-point, 85% entering the final bar,
+  // 78% at the final mid-point (the allargando floor). Round to whole BPM;
+  // clamp to >= 1 to stay valid.
   const auto scale = [bpm](int num, int den) -> std::uint16_t {
     int v = (static_cast<int>(bpm) * num) / den;
     if (v < 1)
       v = 1;
     return static_cast<std::uint16_t>(v);
   };
-  const std::uint16_t bpm_92 = scale(92, 100);
-  const std::uint16_t bpm_85 = scale(85, 100);
 
   if (ticks_per_bar == 0 || total_ticks < 2 * ticks_per_bar) {
-    // Too short for a two-step ritardando: a single late step into 85%.
+    // Too short for a graded ritardando: a single late step into 85%.
     Tick step_tick = total_ticks > ticks_per_bar ? total_ticks - ticks_per_bar : total_ticks / 2;
     if (step_tick == 0) {
       step_tick = total_ticks / 2;
     }
-    events.push_back({step_tick, bpm_85});
+    events.push_back({step_tick, scale(85, 100)});
     return events;
   }
 
+  const Tick half_bar = ticks_per_bar / 2;
   const Tick penultimate_bar_tick = total_ticks - 2 * ticks_per_bar;
   const Tick final_bar_tick = total_ticks - ticks_per_bar;
-  events.push_back({penultimate_bar_tick, bpm_92});
-  events.push_back({final_bar_tick, bpm_85});
+  events.push_back({penultimate_bar_tick, scale(94, 100)});
+  events.push_back({penultimate_bar_tick + half_bar, scale(90, 100)});
+  events.push_back({final_bar_tick, scale(85, 100)});
+  events.push_back({final_bar_tick + half_bar, scale(78, 100)});
 
-  return events;
+  // Integer rounding at low BPM can collapse adjacent percentages to the same
+  // value; keep the stream strictly decreasing by dropping non-step events.
+  std::vector<TempoEvent> steps;
+  steps.reserve(events.size());
+  for (const auto& evt : events) {
+    if (steps.empty() || evt.bpm < steps.back().bpm) {
+      steps.push_back(evt);
+    }
+  }
+
+  return steps;
 }
 
 }  // namespace bach::composer

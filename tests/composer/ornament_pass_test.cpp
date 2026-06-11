@@ -1334,6 +1334,66 @@ TEST(OrnamentPassTest, CelloPreludeOrnamentsAreCadenceTrillOnly) {
   }
 }
 
+// --- Climax uplift window ---------------------------------------------------
+
+TEST(OrnamentPassTest, ClimaxWindowIntensifiesDecorationAcrossSeeds) {
+  // Inside the window a density-0 character gains its full boundary
+  // vocabulary and the generic gate opens more often, so summed over a seed
+  // sweep the windowed runs must place strictly more ornament notes.
+  std::size_t plain_total = 0;
+  std::size_t windowed_total = 0;
+  for (std::uint32_t seed = 1; seed <= 10; ++seed) {
+    OrnamentParams params = baseParams();
+    params.character = SubjectCharacter::Severe;  // ornament_density 0.
+    params.seed = seed;
+
+    ComposeResult plain = twoVoiceFixture(16);
+    applyOrnamentPass(plain, params);
+    plain_total += ornamentNoteCount(plain);
+
+    params.climax_start_tick = barToTick(8);
+    params.climax_end_tick = barToTick(12);
+    ComposeResult windowed = twoVoiceFixture(16);
+    applyOrnamentPass(windowed, params);
+    windowed_total += ornamentNoteCount(windowed);
+
+    // Every extra decoration must live inside the window: notes strictly
+    // before the window stay byte-identical between the two runs.
+    std::size_t plain_idx = 0;
+    std::size_t windowed_idx = 0;
+    while (plain_idx < plain.notes.size() && windowed_idx < windowed.notes.size() &&
+           plain.notes[plain_idx].start_tick < params.climax_start_tick &&
+           windowed.notes[windowed_idx].start_tick < params.climax_start_tick) {
+      EXPECT_EQ(plain.notes[plain_idx].start_tick, windowed.notes[windowed_idx].start_tick);
+      EXPECT_EQ(plain.notes[plain_idx].pitch, windowed.notes[windowed_idx].pitch);
+      EXPECT_EQ(plain.notes[plain_idx].duration, windowed.notes[windowed_idx].duration);
+      ++plain_idx;
+      ++windowed_idx;
+    }
+  }
+  EXPECT_GT(windowed_total, plain_total)
+      << "the climax window should add decoration over a 10-seed sweep";
+}
+
+TEST(OrnamentPassTest, ZeroClimaxWindowIsInert) {
+  // climax_end_tick == 0 (the default) must reproduce the pre-window output.
+  OrnamentParams params = baseParams();
+  ComposeResult a = twoVoiceFixture(12);
+  applyOrnamentPass(a, params);
+
+  params.climax_start_tick = 0;
+  params.climax_end_tick = 0;
+  ComposeResult b = twoVoiceFixture(12);
+  applyOrnamentPass(b, params);
+
+  ASSERT_EQ(a.notes.size(), b.notes.size());
+  for (std::size_t i = 0; i < a.notes.size(); ++i) {
+    EXPECT_EQ(a.notes[i].start_tick, b.notes[i].start_tick) << "note " << i;
+    EXPECT_EQ(a.notes[i].pitch, b.notes[i].pitch) << "note " << i;
+    EXPECT_EQ(a.notes[i].duration, b.notes[i].duration) << "note " << i;
+  }
+}
+
 // --- Untouched core pipeline (opt-in guarantee) ----------------------------
 
 TEST(OrnamentPassTest, ComposerRunUnaffectedWithoutPass) {
