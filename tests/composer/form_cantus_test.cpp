@@ -722,5 +722,64 @@ TEST(FormCantusGoldberg, FigurationBlocksAlternatePatterns) {
   }
 }
 
+// --- Registral continuity: keyboard compass + no cliff at the close ---------
+
+// Largest interval between consecutive attacks within one voice of `notes`.
+int maxConsecutiveLeap(const std::vector<NoteEvent>& notes) {
+  std::map<VoiceId, std::vector<const NoteEvent*>> by_voice;
+  for (const auto& n : notes)
+    by_voice[n.voice].push_back(&n);
+  int worst = 0;
+  for (auto& [voice, vn] : by_voice) {
+    std::sort(vn.begin(), vn.end(),
+              [](const NoteEvent* a, const NoteEvent* b) { return a->start_tick < b->start_tick; });
+    for (std::size_t i = 1; i < vn.size(); ++i) {
+      if (vn[i]->start_tick >= vn[i - 1]->start_tick + vn[i - 1]->duration) {
+        worst = std::max(worst, std::abs(static_cast<int>(vn[i]->pitch) - vn[i - 1]->pitch));
+      }
+    }
+  }
+  return worst;
+}
+
+// The goldberg principal line must stay at or under d''' (MIDI 86, the top of
+// the Bach keyboard) -- the arc's +12 climax lift compresses against the
+// instrument ceiling -- and never fall off a registral cliff: the climax
+// block's figuration hands over to the (context-octaved) cadential landing
+// within an octave-and-a-step. Both guards were real product-path defects:
+// the climax wave rode to C7 and then dropped up to 33 semitones into the
+// fixed-register close.
+TEST(FormCantusRegister, GoldbergStaysInCompassWithNoCadentialCliff) {
+  for (std::uint32_t seed : {1u, 2u, 3u, 5u, 8u, 13u}) {
+    const HarnessFixture fx =
+        build(FormType::GoldbergVariations, /*minor=*/false, SubjectCharacter::Severe, 0, seed);
+    const ComposeResult r = Composer{}.run(fx.material, fx.harmony, fx.voice_plan);
+    ASSERT_FALSE(r.notes.empty()) << "seed " << seed;
+    for (const auto& n : r.notes) {
+      if (n.voice == 0) {
+        EXPECT_LE(n.pitch, 86) << "seed " << seed << " V0 above the keyboard top at tick "
+                               << n.start_tick;
+      }
+    }
+    EXPECT_LE(maxConsecutiveLeap(r.notes), 14)
+        << "seed " << seed << ": registral cliff between consecutive attacks";
+  }
+}
+
+// The chorale figuration's close connects from the line it interrupts: the
+// context-octaved landing keeps every consecutive-attack interval within an
+// octave-and-a-step (the uncorrected close dropped a ninth-plus into the
+// fixed C5 formula on half the seeds).
+TEST(FormCantusRegister, ChoraleCadentialLandingConnectsFromFiguration) {
+  for (std::uint32_t seed : {1u, 2u, 5u, 6u, 9u, 10u}) {
+    const HarnessFixture fx =
+        build(FormType::ChoralePrelude, /*minor=*/false, SubjectCharacter::Severe, 0, seed);
+    const ComposeResult r = Composer{}.run(fx.material, fx.harmony, fx.voice_plan);
+    ASSERT_FALSE(r.notes.empty()) << "seed " << seed;
+    EXPECT_LE(maxConsecutiveLeap(r.notes), 14)
+        << "seed " << seed << ": registral cliff between consecutive attacks";
+  }
+}
+
 }  // namespace
 }  // namespace bach::composer

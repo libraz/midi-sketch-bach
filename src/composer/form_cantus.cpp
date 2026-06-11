@@ -793,7 +793,8 @@ HarnessFixture buildChoralePreludeForm(const ResolvedRequest& req) {
       prefinal = kFigTonic - 1;  // raised leading tone (B natural in minor too).
     }
     appendCadentialLanding(fig.notes, barTick(bars - 2), kTicksPerBar, prefinal, kFigTonic, mode,
-                           /*band_lo=*/62, &penult_spec);
+                           /*band_lo=*/62, &penult_spec, /*prefer_descending=*/false,
+                           /*lift_to_context=*/true);
   }
 
   // V0 figuration registry for the embellishment loop's run-break consonance
@@ -1158,12 +1159,38 @@ void appendAriaBar(PassacagliaVariation& var, int bar, const BarChord& chord, Mo
       materialNote(base + kHalf, kHalf, chordToneAbove(start, chord.root_pc, chord.minor)));
 }
 
+// Snapped goldberg figuration start with the keyboard ceiling applied. The
+// figure built on the start (the contour ladder, the figura corta cell) rises
+// up to a ninth above it, so a start above MIDI 77 would carry the line past
+// d''' (MIDI 86), the top of the Bach keyboard compass. Walk such starts down
+// to the highest chord tone at or under the cap -- the arc's climax register
+// lift compresses against the instrument ceiling, exactly as the real
+// keyboard writing does.
+int goldbergFigurationStart(int register_base, int offset, const BarChord& chord, Mode mode) {
+  int snapped =
+      snapUpToChordTone(detail::scaleUp(register_base, offset, mode), chord.root_pc, chord.minor);
+  constexpr int kFigStartCeiling = 77;
+  if (snapped > kFigStartCeiling) {
+    const int third = chord.minor ? 3 : 4;
+    const int triad_pc[3] = {chord.root_pc % 12, (chord.root_pc + third) % 12,
+                             (chord.root_pc + 7) % 12};
+    auto is_triad = [&](int midi) {
+      const int pcl = ((midi % 12) + 12) % 12;
+      return pcl == triad_pc[0] || pcl == triad_pc[1] || pcl == triad_pc[2];
+    };
+    int capped = kFigStartCeiling;
+    while (capped > 0 && !is_triad(capped))
+      --capped;
+    snapped = capped;
+  }
+  return snapped;
+}
+
 // Append a figuration variation bar: a downbeat-anchored scalar wave with
 // `notes_per_beat` subdivision (1 = quarters, 2 = eighths, 4 = sixteenths).
 void appendVariationBar(PassacagliaVariation& var, int bar, const BarChord& chord, Mode mode,
                         int notes_per_beat, int register_base, int offset) {
-  const int snapped =
-      snapUpToChordTone(detail::scaleUp(register_base, offset, mode), chord.root_pc, chord.minor);
+  const int snapped = goldbergFigurationStart(register_base, offset, chord, mode);
   emitAnchoredBar(bar, snapped, chord, mode, notes_per_beat, [&](Tick start, Tick dur, int pitch) {
     var.notes.push_back(materialNote(start, dur, pitch));
   });
@@ -1486,8 +1513,7 @@ HarnessFixture buildGoldbergVariationsForm(const ResolvedRequest& req) {
           switch (pattern) {
             case PatternKind::kFiguraCorta:
               appendFiguraCortaBar(var.notes, bar,
-                                   snapUpToChordTone(detail::scaleUp(register_base, offset, mode),
-                                                     chord.root_pc, chord.minor),
+                                   goldbergFigurationStart(register_base, offset, chord, mode),
                                    detail::ChordSpec{chord.root_pc, chord.minor}, mode);
               break;
             case PatternKind::kScalarWave:
@@ -1536,7 +1562,8 @@ HarnessFixture buildGoldbergVariationsForm(const ResolvedRequest& req) {
         prefinal = final_tone - 1;
       }
       appendCadentialLanding(var.notes, barTick(bars - 2), kTicksPerBar, prefinal, final_tone, mode,
-                             /*band_lo=*/62);
+                             /*band_lo=*/62, /*downbeat_chord=*/nullptr,
+                             /*prefer_descending=*/false, /*lift_to_context=*/true);
     }
 
     out.material.passacaglia_variations.push_back(var);

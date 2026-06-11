@@ -244,10 +244,18 @@ int consonantChordTone(const detail::ChordSpec& chord, int voice, int band_lo, i
 ///        above into the pre-final tone). Ground-variation forms use it when
 ///        the penultimate bar's immutable ground tone clashes with the
 ///        ascending run's downbeat.
+/// @param lift_to_context Re-octave the whole formula (+12) when the line it
+///        interrupts runs high: if the last figuration pitch before the
+///        landing sits more than a major sixth above the approach run's entry
+///        tone, the close would fall off a registral cliff at the seam, so
+///        the formula lifts an octave instead (pitch classes are preserved,
+///        so every consonance relation against the other voices is
+///        unchanged). The lift is skipped when it would carry the trill above
+///        d''' (MIDI 86), the top of the Bach keyboard compass.
 void appendCadentialLanding(std::vector<MaterialNote>& line, Tick penult_bar_start,
                             Tick ticks_per_bar, int prefinal, int final_pitch, detail::Mode mode,
                             int band_lo, const detail::ChordSpec* downbeat_chord = nullptr,
-                            bool prefer_descending = false);
+                            bool prefer_descending = false, bool lift_to_context = false);
 
 /// @brief Replace a line's final bar with the compact cadential landing.
 ///

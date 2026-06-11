@@ -252,16 +252,45 @@ int consonantChordTone(const detail::ChordSpec& chord, int voice, int band_lo, i
 void appendCadentialLanding(std::vector<MaterialNote>& line, Tick penult_bar_start,
                             Tick ticks_per_bar, int prefinal, int final_pitch, detail::Mode mode,
                             int band_lo, const detail::ChordSpec* downbeat_chord,
-                            bool prefer_descending) {
+                            bool prefer_descending, bool lift_to_context) {
+  const Tick eighth = duration::kEighthNote;
+  const Tick half_bar = ticks_per_bar / 2;
+  const int run_len = static_cast<int>(half_bar / eighth);  // 4 in 4/4, 3 in 3/4.
+
+  if (lift_to_context) {
+    // The formula's register is the caller's design value, but the line it
+    // interrupts may be running an octave higher (a climax block compressing
+    // against the keyboard ceiling). When the last figuration pitch before
+    // the landing sits more than a major sixth above the approach run's entry
+    // tone, re-octave the whole formula upward: pitch classes are preserved,
+    // so consonance against the other voices is unchanged, and the close
+    // connects from the line instead of falling off a registral cliff. The
+    // lift never carries the trill site past d''' (MIDI 86, the keyboard
+    // ceiling; +2 covers the trill's upper neighbour).
+    int last_pitch = -1;
+    Tick last_tick = 0;
+    for (const MaterialNote& note : line) {
+      if (note.start_tick < penult_bar_start && (last_pitch < 0 || note.start_tick >= last_tick)) {
+        last_tick = note.start_tick;
+        last_pitch = note.pitch;
+      }
+    }
+    if (last_pitch >= 0) {
+      const int run_entry = detail::scaleDown(prefinal, run_len, mode);
+      const int gap_plain = std::abs(last_pitch - run_entry);
+      const int gap_lifted = std::abs(last_pitch - (run_entry + 12));
+      if (gap_plain > 9 && gap_lifted < gap_plain && prefinal + 14 <= 86) {
+        prefinal += 12;
+        final_pitch += 12;
+      }
+    }
+  }
+
   // Drop everything from the penultimate bar on; the landing replaces it.
   line.erase(
       std::remove_if(line.begin(), line.end(),
                      [&](const MaterialNote& note) { return note.start_tick >= penult_bar_start; }),
       line.end());
-
-  const Tick eighth = duration::kEighthNote;
-  const Tick half_bar = ticks_per_bar / 2;
-  const int run_len = static_cast<int>(half_bar / eighth);  // 4 in 4/4, 3 in 3/4.
 
   // Approach run INTO the pre-final tone. Ascending by preference: in minor an
   // ascent into the raised leading tone takes the melodic-minor sixth degree
