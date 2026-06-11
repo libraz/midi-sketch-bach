@@ -426,31 +426,9 @@ int runComposerMode(const CliOptions& opts) {
       bach::composer::buildHarnessFixture(opts.composer_phase, static_cast<int>(opts.seed));
   const auto result = bach::composer::Composer{}.run(fx.material, fx.harmony, fx.voice_plan);
 
-  if (result.validation.status != bach::composer::ValidationStatus::Ok) {
-    std::fprintf(stderr, "Composer validation failed: %zu rule violations\n",
-                 result.validation.failures.size());
-    for (const auto& f : result.validation.failures) {
-      std::fprintf(stderr, "  - %s (span %u)\n", f.rule_id.c_str(),
-                   static_cast<unsigned>(f.span_id));
-    }
-    return 1;
-  }
-
-  std::printf("Generated: Composer %s exposition\n", phase_name);
-  std::printf("Notes:     %zu  Tracks: %zu\n", result.notes.size(), result.tracks.size());
-
-  std::vector<bach::TempoEvent> tempo_events;
-  tempo_events.push_back({0, opts.bpm});
-
-  bach::MidiWriter writer;
-  writer.build(result.tracks, tempo_events, opts.key.tonic);
-  if (!writer.writeToFile(opts.output)) {
-    std::fprintf(stderr, "Error: failed to write %s\n", opts.output.c_str());
-    return 1;
-  }
-  std::printf("Output:    %s\n", opts.output.c_str());
-
-  if (opts.json_output) {
+  // Writes generated + provenance JSON next to opts.output. Also used on
+  // validation failure so failing spans can be located from the note dump.
+  const auto dump_json = [&result, &opts]() {
     std::string json_path = opts.output;
     auto dot_pos = json_path.rfind('.');
     if (dot_pos != std::string::npos) {
@@ -484,6 +462,37 @@ int runComposerMode(const CliOptions& opts) {
     } else {
       std::fprintf(stderr, "Warning: failed to write %s\n", provenance_path.c_str());
     }
+  };
+
+  if (result.validation.status != bach::composer::ValidationStatus::Ok) {
+    std::fprintf(stderr, "Composer validation failed: %zu rule violations\n",
+                 result.validation.failures.size());
+    for (const auto& f : result.validation.failures) {
+      std::fprintf(stderr, "  - %s (span %u)\n", f.rule_id.c_str(),
+                   static_cast<unsigned>(f.span_id));
+    }
+    if (opts.json_output) {
+      dump_json();
+    }
+    return 1;
+  }
+
+  std::printf("Generated: Composer %s exposition\n", phase_name);
+  std::printf("Notes:     %zu  Tracks: %zu\n", result.notes.size(), result.tracks.size());
+
+  std::vector<bach::TempoEvent> tempo_events;
+  tempo_events.push_back({0, opts.bpm});
+
+  bach::MidiWriter writer;
+  writer.build(result.tracks, tempo_events, opts.key.tonic);
+  if (!writer.writeToFile(opts.output)) {
+    std::fprintf(stderr, "Error: failed to write %s\n", opts.output.c_str());
+    return 1;
+  }
+  std::printf("Output:    %s\n", opts.output.c_str());
+
+  if (opts.json_output) {
+    dump_json();
   }
   return 0;
 }

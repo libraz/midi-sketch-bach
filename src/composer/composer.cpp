@@ -318,14 +318,28 @@ ComposeResult Composer::run(const Material& material, const HarmonicPlan& harmon
     if (isCarrierIntent(span.intent))
       processSpan(span);
   }
-  // Pass 2: Compose spans. seedCursor() re-derives the per-voice
-  // previous-pitch chain from result.notes for every span so the cursor
-  // stays correct even when a voice's Carrier span sits in the future
-  // (V1 counterline bars 0-3 follows V1 AnswerCarrier bars 4-7
-  // in placement order but precedes it in time).
+  // Pass 2: Compose spans, in (start_tick, voice) order rather than
+  // VoicePlan storage order. Storage order groups spans by voice, so a
+  // late-voice span early in time would otherwise be searched after an
+  // early-voice span late in time — the searcher's parallel/hidden
+  // filters then see no other-voice pitch at the previous union tick
+  // (op_prev == 0) and skip, letting the Validator reject the seed
+  // after the fact. Time ordering guarantees every span is searched
+  // with all temporally-earlier notes already placed. seedCursor()
+  // re-derives the per-voice previous-pitch chain from result.notes
+  // for every span, so it is order-robust either way.
+  std::vector<const Span*> compose_spans;
   for (const auto& span : voice_plan.spans) {
     if (!isCarrierIntent(span.intent))
-      processSpan(span);
+      compose_spans.push_back(&span);
+  }
+  std::stable_sort(compose_spans.begin(), compose_spans.end(), [](const Span* a, const Span* b) {
+    if (a->start_tick != b->start_tick)
+      return a->start_tick < b->start_tick;
+    return a->voice < b->voice;
+  });
+  for (const Span* span : compose_spans) {
+    processSpan(*span);
   }
 
   // Sort notes by (start_tick, voice) for deterministic downstream order.

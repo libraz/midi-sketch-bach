@@ -1327,6 +1327,41 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
                                t)) {
         continue;
       }
+      // Cadence cells force the approach/cadence pitch classes in every
+      // voice (forced_cadence_pc above) and bypass the vertical filters for
+      // the forced notes themselves. A free candidate within the Validator's
+      // cross-relation adjacency window (one beat) of a cell tick is judged
+      // against pitches that may not be placed yet but are already known, so
+      // reject any candidate whose pc forms a cross relation with a pc the
+      // cell will force. Without this, a chromatic chord tone (e.g. the G#
+      // of V/vi) can land a beat from the forced cadence G and the Validator
+      // rejects the seed after the fact.
+      if (!force_cadence_pc) {
+        bool clashes_forced_cadence_pc = false;
+        for (const auto& cell : material.cadence_cells) {
+          const struct {
+            Tick tick;
+            std::uint8_t soprano_pc;
+            std::uint8_t bass_pc;
+          } points[2] = {{cell.approach_tick, cell.soprano_approach_pc, cell.bass_approach_pc},
+                         {cell.cadence_tick, cell.soprano_cadence_pc, cell.bass_cadence_pc}};
+          for (const auto& point : points) {
+            const Tick window_lo =
+                point.tick > kTicksPerBeat ? point.tick - kTicksPerBeat : Tick{0};
+            if (t < window_lo || t > point.tick + kTicksPerBeat)
+              continue;
+            if (rule_helpers::isCrossRelationPc(pc, point.soprano_pc) ||
+                rule_helpers::isCrossRelationPc(pc, point.bass_pc)) {
+              clashes_forced_cadence_pc = true;
+              break;
+            }
+          }
+          if (clashes_forced_cadence_pc)
+            break;
+        }
+        if (clashes_forced_cadence_pc)
+          continue;
+      }
 
       // Melodic rule (mirrors Validator Rule P1): reject a forbidden
       // melodic leap — tritone, augmented 2nd/4th, or diminished 5th/octave

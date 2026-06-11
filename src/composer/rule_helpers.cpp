@@ -342,12 +342,16 @@ bool createsParallelOctave(const std::vector<NoteEvent>& placed, VoiceId candida
       interval_prev = static_cast<int>(op_prev) - static_cast<int>(prev_pitch);
     }
     // Parallel OCTAVE only: both intervals reduce mod 12 to 0 (unison or
-    // octave or double octave...) and stay identical. Parallel fifths are
-    // handled by createsParallelPerfect and are intentionally excluded
-    // here so cadence cells can bypass them.
+    // octave or double octave...). Class equality is enough — the
+    // Validator's invertible_at_octave rule fails octave-class to
+    // octave-class motion even when the literal sizes differ (a double
+    // octave contracting to an octave is still a parallel octave), so the
+    // filter must match or candidates slip through to a validation fail.
+    // Parallel fifths are handled by createsParallelPerfect and are
+    // intentionally excluded here so cadence cells can bypass them.
     const bool is_oct_now = std::abs(interval_now) % 12 == 0 && interval_now != 0;
     const bool is_oct_prev = std::abs(interval_prev) % 12 == 0 && interval_prev != 0;
-    if (is_oct_now && is_oct_prev && interval_now == interval_prev) {
+    if (is_oct_now && is_oct_prev) {
       return true;
     }
   }
