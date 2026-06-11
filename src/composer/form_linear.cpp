@@ -866,7 +866,48 @@ HarnessFixture buildTrioSonataForm(const ResolvedRequest& req) {
   v2.manual = 3;                   // Pedal (low register).
   constexpr int kPedalFloor = 41;  // F2: roots live in [F2, F3), fifths a 4th below.
   constexpr int kPedalCeil = 53;   // F3.
-  int prev_root = 48;              // seed near C3.
+
+  // The manual voices are final when the pedal is laid down, so every pedal
+  // tone can be judged against their audible-grain motion (sampling one
+  // sixteenth back reproduces the union-onset pair for the sixteenth-note
+  // upper lines; coarser bars simply sustain across the sample point).
+  // Full scans (no sorted-order early exit): the cadential landing is appended
+  // after the bar loop, so the manual lines are not strictly onset-ordered.
+  const auto upper_sounding = [&](const std::vector<MaterialNote>& line, Tick t) -> int {
+    for (auto it = line.rbegin(); it != line.rend(); ++it) {
+      if (it->start_tick <= t && t < it->start_tick + it->duration)
+        return static_cast<int>(it->pitch);
+    }
+    return -1;
+  };
+  // The sparse manual line rests between onsets, and the parallel is heard
+  // note-to-note across the rest, so the "from" tone is the latest onset
+  // strictly before t rather than a tone required to sound at a fixed grain.
+  const auto upper_before = [&](const std::vector<MaterialNote>& line, Tick t) -> int {
+    int pitch = -1;
+    Tick best = 0;
+    for (const MaterialNote& note : line) {
+      if (note.start_tick < t && (pitch < 0 || note.start_tick >= best)) {
+        best = note.start_tick;
+        pitch = static_cast<int>(note.pitch);
+      }
+    }
+    return pitch;
+  };
+  // The manual lines were std::move'd into out.material.trio_voices above, so
+  // the guard reads them from their final home (v0.notes / v1.notes are empty
+  // husks at this point).
+  const auto pedal_parallel = [&](int from, int cand, Tick t) {
+    for (const TrioVoiceLine& manual : out.material.trio_voices) {
+      const int prev = upper_before(manual.notes, t);
+      const int curr = upper_sounding(manual.notes, t);
+      if (prev >= 0 && curr >= 0 && formsPerfectParallel(from, cand, prev, curr))
+        return true;
+    }
+    return false;
+  };
+
+  int prev_root = 48;  // seed near C3.
   for (int bar = 0; bar < bars; ++bar) {
     const int root_pc = chords[static_cast<std::size_t>(bar)].root_pc % 12;
     // Root in the pedal register nearest the previous bar's root, so successive
@@ -919,16 +960,60 @@ HarnessFixture buildTrioSonataForm(const ResolvedRequest& req) {
       default:
         break;
     }
-    const int beat_pitch[4] = {root_midi, inner_a, inner_b, root_midi};
+    int beat_pitch[4] = {root_midi, inner_a, inner_b, root_midi};
+    // Audible-grain parallel guard. The downbeat root is the harmonic anchor
+    // and is never displaced; a parallel INTO it is owned by the previous
+    // bar's closing beat (guarded on its own turn below, including the
+    // forward motion into this root). Beats 2-4 swap to another chord tone
+    // of the bar when their design tone would move in a perfect class with
+    // either manual voice; the design tone stands when no alternative clears.
+    int pedal_prev = v2.notes.empty() ? -1 : static_cast<int>(v2.notes.back().pitch);
     for (int beat = 0; beat < 4; ++beat) {
-      MaterialNote mn;
-      mn.start_tick =
+      const Tick t =
           static_cast<Tick>(bar) * kTicksPerBar + static_cast<Tick>(beat) * kTicksPerBeat;
+      int pitch = beat_pitch[beat];
+      // Next bar's root (the landing of the closing beat's boundary step),
+      // recomputed exactly: it depends on this bar's root only, which a
+      // displacement never changes.
+      int next_root = -1;
+      if (beat == 3 && bar + 1 < bars) {
+        const int next_pc = chords[static_cast<std::size_t>(bar + 1)].root_pc % 12;
+        next_root = kPedalFloor + (((next_pc - kPedalFloor) % 12) + 12) % 12;
+        while (next_root + 12 <= kPedalCeil &&
+               std::abs((next_root + 12) - root_midi) < std::abs(next_root - root_midi))
+          next_root += 12;
+      }
+      const bool into_par = beat != 0 && pedal_prev >= 0 && pedal_parallel(pedal_prev, pitch, t);
+      const bool fwd_par = next_root >= 0 && pedal_parallel(pitch, next_root, t + kTicksPerBeat);
+      if (into_par || fwd_par) {
+        auto admissible = [&](int cand) {
+          if (cand < kPedalFloor || cand > kPedalCeil || cand == pitch)
+            return false;
+          if (pedal_prev >= 0 && pedal_parallel(pedal_prev, cand, t))
+            return false;
+          // The closing beat also owns the boundary motion into the next
+          // bar's fixed root: do not trade an audible parallel here for one
+          // at the bar head.
+          if (next_root >= 0 && pedal_parallel(cand, next_root, t + kTicksPerBeat))
+            return false;
+          return true;
+        };
+        for (const int cand : {fifth_midi, third_midi, fifth_up, root_midi, root_midi - 12,
+                               fifth_midi + 12, third_midi + 12}) {
+          if (admissible(cand)) {
+            pitch = cand;
+            break;
+          }
+        }
+      }
+      MaterialNote mn;
+      mn.start_tick = t;
       mn.duration = kTicksPerBeat;
       // Root on the outer beats (1, 4): the bar closes on the root for a small
       // boundary step into the next bar's root.
-      mn.pitch = static_cast<std::uint8_t>(beat_pitch[beat]);
+      mn.pitch = static_cast<std::uint8_t>(pitch);
       v2.notes.push_back(mn);
+      pedal_prev = pitch;
     }
     prev_root = root_midi;
   }

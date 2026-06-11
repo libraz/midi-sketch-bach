@@ -1794,73 +1794,30 @@ ValidationReport Validator::validate(const std::vector<NoteEvent>& notes,
     }
   }
 
-  // Solo String Arch (BWV1004 Chaconne): ground-bass and variation-role
-  // structural rules.
-  //
-  // ground_bass_immutable: the immutable ground bass (material.ground_bass) is
-  // the harmonic skeleton of the Chaconne and must be replayed unchanged on
-  // every cycle. The check is a bar-head skeleton match (the same granularity
-  // as cantus_firmus_immutable): a replayed ground may subdivide a bar
-  // rhythmically (repeated same-pitch notes), but each ground note on a bar
-  // head must equal the canonical material tone sounding at the same
-  // cycle-relative position. Any altered, transposed, or reordered
-  // restatement changes some bar head and fails. Off-downbeat ground notes
-  // are unconstrained (the builder keeps their pitch equal to the bar tone by
-  // construction). The rule is inert when either the canonical ground or the
-  // stamped run is empty (fixtures that declare no ground bass).
-  {
-    bool has_ground_note = false;
-    bool ground_ok = true;
-    const std::size_t n = material.ground_bass.size();
-    if (n > 0) {
-      const Tick period = material.ground_bass_period > 0 ? material.ground_bass_period
-                                                          : static_cast<Tick>(n) * ticks_per_bar;
-      for (std::size_t i = 0; i < notes.size() && ground_ok; ++i) {
-        if (i >= provenance.size() || !hasRuleBit(provenance, i, RuleBit::GroundBassReplayed))
-          continue;
-        has_ground_note = true;
-        const auto& note = notes[i];
-        if (note.start_tick % ticks_per_bar != 0)
-          continue;  // only the bar head carries the skeleton tone.
-        // Canonical tone: the material note sounding at this cycle-relative
-        // position (the latest material onset at or before it).
-        const Tick cycle_tick = note.start_tick % period;
-        int expected = -1;
-        for (const MaterialNote& mnote : material.ground_bass) {
-          if (mnote.start_tick <= cycle_tick)
-            expected = mnote.pitch;
-        }
-        if (expected >= 0 && note.pitch != expected)
-          ground_ok = false;
-      }
-    }
-    if (has_ground_note && !ground_ok) {
-      ValidationFailure failure;
-      failure.rule_id = "ground_bass_immutable";
-      failure.kind = FailKind::StructuralFail;
-      report.failures.push_back(failure);
-    }
-  }
-
-  // Organ Passacaglia: passacaglia_ground_immutable. Same shape as
-  // ground_bass_immutable above, keyed on the passacaglia ground + bit: a
-  // bar-head skeleton match against material.passacaglia_ground. A replayed
-  // ground may subdivide a bar rhythmically (the late-cycle quarter-note
-  // intensification), but each ground note on a bar head must equal the
-  // canonical material tone sounding at the same cycle-relative position. The
+  // Immutable-ground skeleton rules. One shared check for both ground
+  // families: an immutable ground (Chaconne ground bass / Passacaglia
+  // ground) is the harmonic skeleton of its form and must be replayed
+  // unchanged on every cycle. The check is a bar-head skeleton match (the
+  // same granularity as cantus_firmus_immutable): a replayed ground may
+  // subdivide a bar rhythmically (repeated same-pitch notes, the late-cycle
+  // quarter-note intensification), but each ground note on a bar head must
+  // equal the canonical material tone sounding at the same cycle-relative
+  // position. Any altered, transposed, or reordered restatement changes some
+  // bar head and fails. Off-downbeat ground notes are unconstrained (the
+  // builders keep their pitch equal to the bar tone by construction). The
   // rule is inert when either the canonical ground or the stamped run is
-  // empty (fixtures that declare no passacaglia ground).
-  {
+  // empty (fixtures that declare no ground).
+  const auto checkImmutableGround = [&](const std::vector<MaterialNote>& ground,
+                                        Tick declared_period, RuleBit replay_bit,
+                                        const char* rule_id) {
     bool has_ground_note = false;
     bool ground_ok = true;
-    const std::size_t n = material.passacaglia_ground.size();
+    const std::size_t n = ground.size();
     if (n > 0) {
-      const Tick period = material.passacaglia_ground_period > 0
-                              ? material.passacaglia_ground_period
-                              : static_cast<Tick>(n) * ticks_per_bar;
+      const Tick period =
+          declared_period > 0 ? declared_period : static_cast<Tick>(n) * ticks_per_bar;
       for (std::size_t i = 0; i < notes.size() && ground_ok; ++i) {
-        if (i >= provenance.size() ||
-            !hasRuleBit(provenance, i, RuleBit::PassacagliaGroundReplayed))
+        if (i >= provenance.size() || !hasRuleBit(provenance, i, replay_bit))
           continue;
         has_ground_note = true;
         const auto& note = notes[i];
@@ -1870,7 +1827,7 @@ ValidationReport Validator::validate(const std::vector<NoteEvent>& notes,
         // position (the latest material onset at or before it).
         const Tick cycle_tick = note.start_tick % period;
         int expected = -1;
-        for (const MaterialNote& mnote : material.passacaglia_ground) {
+        for (const MaterialNote& mnote : ground) {
           if (mnote.start_tick <= cycle_tick)
             expected = mnote.pitch;
         }
@@ -1880,11 +1837,17 @@ ValidationReport Validator::validate(const std::vector<NoteEvent>& notes,
     }
     if (has_ground_note && !ground_ok) {
       ValidationFailure failure;
-      failure.rule_id = "passacaglia_ground_immutable";
+      failure.rule_id = rule_id;
       failure.kind = FailKind::StructuralFail;
       report.failures.push_back(failure);
     }
-  }
+  };
+  // Solo String Arch (BWV1004 Chaconne).
+  checkImmutableGround(material.ground_bass, material.ground_bass_period,
+                       RuleBit::GroundBassReplayed, "ground_bass_immutable");
+  // Organ Passacaglia.
+  checkImmutableGround(material.passacaglia_ground, material.passacaglia_ground_period,
+                       RuleBit::PassacagliaGroundReplayed, "passacaglia_ground_immutable");
 
   // variation_role_ornament_constraint: a Ground-role variation states the
   // ground bass plainly and must stay un-ornamented — no note may subdivide

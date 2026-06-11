@@ -451,14 +451,17 @@ void appendWalkingBass(std::vector<MaterialNote>& out_notes, ThemeToneRegistry& 
 
       // Audible-grain parallel re-check: consonantChordTone (and the repeat
       // nudge above) judge motion at quarter grain, but the upper figuration
-      // moves in eighths -- union-onset sampling pairs this beat with the
-      // eighth BEFORE it, a motion the quarter-grain check never sees. Re-judge
-      // the chosen tone at that grain and displace to the nearest diatonic
-      // tone that is consonant with the sounding uppers and parallel-free; the
-      // tone stands when no such alternative exists within a fifth.
+      // moves in eighths and sixteenths -- union-onset sampling pairs this
+      // beat with the LAST onset before it, a motion the quarter-grain check
+      // never sees. Sampling one sixteenth back reproduces that pair for any
+      // texture whose smallest value is a sixteenth (a coarser line simply
+      // sustains across the sample point). Re-judge the chosen tone at that
+      // grain and displace to the nearest diatonic tone that is consonant
+      // with the sounding uppers and parallel-free; the tone stands when no
+      // such alternative exists within a fifth.
       if (beat != 0 && prev_pitch >= 0) {
         motions.clear();
-        registry.concurrentMotions(beat_tick - kTicksPerBeat / 2, beat_tick, /*voice=*/2,
+        registry.concurrentMotions(beat_tick - kSixteenth, beat_tick, /*voice=*/2,
                                    /*num_voices=*/3, motions);
         auto bass_is_parallel = [&](int cand) {
           for (const ConcurrentMotion& motion : motions) {
@@ -478,6 +481,63 @@ void appendWalkingBass(std::vector<MaterialNote>& out_notes, ThemeToneRegistry& 
                 return false;
             }
             return !bass_is_parallel(cand);
+          };
+          for (int dist = 1; dist <= 7; ++dist) {
+            bool placed = false;
+            for (const int sgn : {-1, 1}) {
+              const int cand = pitch + sgn * dist;
+              if (admissible(cand)) {
+                pitch = cand;
+                placed = true;
+                break;
+              }
+            }
+            if (placed)
+              break;
+          }
+        }
+      }
+
+      // Forward parallel guard on the approach beat: the next bar's downbeat
+      // states the chord root without substitution (the harmonic anchor), so
+      // the only freedom in the (beat 3 -> next root) motion is the beat-3
+      // tone itself. The upper voices are final at this point, so a parallel
+      // perfect formed against their motion into the bar head is already
+      // knowable; re-aim the approach tone when it would lock one in. The
+      // root lands relative to the approach tone (band fit follows the
+      // cursor), so the candidate's own landing root is recomputed per try.
+      if (beat == 3 && bar + 1 < bars && prev_pitch >= 0) {
+        const Tick next_bar_tick = barTick(bar + 1);
+        std::vector<ConcurrentMotion> fwd_motions;
+        auto forward_parallel = [&](int cand) {
+          const int landing_root = fitPcToBand(next_chord.root_pc, cand, kBassBandLo, kBassBandHi);
+          fwd_motions.clear();
+          registry.concurrentMotions(next_bar_tick - kSixteenth, next_bar_tick,
+                                     /*voice=*/2, /*num_voices=*/3, fwd_motions);
+          for (const ConcurrentMotion& motion : fwd_motions) {
+            if (formsPerfectParallel(cand, landing_root, motion.prev, motion.curr))
+              return true;
+          }
+          return false;
+        };
+        if (forward_parallel(pitch)) {
+          auto into_beat_parallel = [&](int cand) {
+            for (const ConcurrentMotion& motion : motions) {
+              if (formsPerfectParallel(prev_pitch, cand, motion.prev, motion.curr))
+                return true;
+            }
+            return false;
+          };
+          auto admissible = [&](int cand) {
+            if (cand < kBassBandLo || cand > kBassBandHi || cand == pitch ||
+                !detail::inScale(cand, mode)) {
+              return false;
+            }
+            for (int upper : theme_pitches) {
+              if (!isConsonantPair(cand, upper))
+                return false;
+            }
+            return !into_beat_parallel(cand) && !forward_parallel(cand);
           };
           for (int dist = 1; dist <= 7; ++dist) {
             bool placed = false;
@@ -698,6 +758,49 @@ HarnessFixture buildChoralePreludeForm(const ResolvedRequest& req) {
     return chosen;
   };
 
+  // Parallel guard for the embellishment's chord-tone beats. The beat-2 /
+  // beat-3 tones are chosen from the bar chord alone, but the V0 figuration
+  // is already final, so a chord tone that moves with V0 into a perfect
+  // class is knowable at emission time. Re-judge the candidate against V0 at
+  // both grains the union-onset sampler can pair this beat with (the eighth
+  // before it when the figuration is dense, the quarter otherwise) and
+  // displace to the nearest tone of the bar chord that clears the parallel
+  // and stays consonant; the candidate stands when no alternative exists.
+  auto guardV1Parallel = [&](int cand, Tick onset, const BarChord& chord) -> int {
+    if (v1_prev < 0)
+      return cand;
+    const int fig_now = fig_registry.soundingPitchInVoice(/*voice=*/0, onset);
+    if (fig_now < 0)
+      return cand;
+    auto parallel_with_fig = [&](int p) {
+      for (const Tick grain : {kSixteenth, kEighth, kQuarterDur}) {
+        const int fig_prev = fig_registry.soundingPitchInVoice(/*voice=*/0, onset - grain);
+        if (fig_prev >= 0 && formsPerfectParallel(v1_prev, p, fig_prev, fig_now))
+          return true;
+      }
+      return false;
+    };
+    if (!parallel_with_fig(cand))
+      return cand;
+    const int third_pc = (chord.root_pc + (chord.minor ? 3 : 4)) % 12;
+    const int fifth_pc = (chord.root_pc + 7) % 12;
+    auto is_chord_pc = [&](int p) {
+      const int pc = ((p % 12) + 12) % 12;
+      return pc == chord.root_pc || pc == third_pc || pc == fifth_pc;
+    };
+    for (int dist = 1; dist <= 7; ++dist) {
+      for (const int sgn : {1, -1}) {
+        const int alt = cand + sgn * dist;
+        if (alt == v1_prev || !is_chord_pc(alt))
+          continue;
+        if (!isConsonantPair(alt, fig_now) || parallel_with_fig(alt))
+          continue;
+        return alt;
+      }
+    }
+    return cand;
+  };
+
   for (int bar = 0; bar < bars; ++bar) {
     const int tone = skeleton[static_cast<std::size_t>(bar)].pitch;
     const BarChord& chord = bar_chords[static_cast<std::size_t>(bar)];
@@ -738,14 +841,15 @@ HarnessFixture buildChoralePreludeForm(const ResolvedRequest& req) {
       // Dense: chord-tone beats with a stepwise passing eighth on each off-beat.
       // The stepwise off-beats already break repetition; the run-break guard on
       // the two chord-tone beats keeps a long static figure from chaining.
-      const int b2 = breakRun(beat2, chord, base + kHalf);
+      const int b2 = breakRun(guardV1Parallel(beat2, base + kHalf, chord), chord, base + kHalf);
       const int off2 = stepToward(b2, beat3);
       out.material.cf_embellished.push_back(materialNote(base + kHalf, kEighth, b2));
       out.material.cf_embellished.push_back(materialNote(base + kHalf + kEighth, kEighth, off2));
       // The passing eighth advances the run tracker so the next beat sees it.
       v1_run = (off2 == v1_prev) ? v1_run + 1 : 1;
       v1_prev = off2;
-      const int b3 = breakRun(beat3, chord, base + kHalf + 2 * kEighth);
+      const int b3 = breakRun(guardV1Parallel(beat3, base + kHalf + 2 * kEighth, chord), chord,
+                              base + kHalf + 2 * kEighth);
       // The final passing eighth leads into the NEXT bar's skeleton tone; when
       // the next bar repeats this bar's degree it becomes an upper-neighbour
       // return instead (stepping "toward" the tone we already sit on would
@@ -764,9 +868,10 @@ HarnessFixture buildChoralePreludeForm(const ResolvedRequest& req) {
     } else {
       // Plain: two quarter chord tones on beats 2 and 3, each run-break guarded so
       // a same-degree run never exceeds four identical pitches.
-      const int b2 = breakRun(beat2, chord, base + kHalf);
+      const int b2 = breakRun(guardV1Parallel(beat2, base + kHalf, chord), chord, base + kHalf);
       out.material.cf_embellished.push_back(materialNote(base + kHalf, kQuarterDur, b2));
-      const int b3 = breakRun(beat3, chord, base + kHalf + kQuarterDur);
+      const int b3 = breakRun(guardV1Parallel(beat3, base + kHalf + kQuarterDur, chord), chord,
+                              base + kHalf + kQuarterDur);
       out.material.cf_embellished.push_back(
           materialNote(base + kHalf + kQuarterDur, kQuarterDur, b3));
     }
