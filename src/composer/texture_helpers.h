@@ -144,12 +144,17 @@ class ThemeToneRegistry {
 /// beat anchor (`line_prev`). The downbeat anchor must always be a genuine chord
 /// tone (figuration_harmonic_consistency checks the bar downbeat), so on the
 /// downbeat this only ever returns chord tones. The selection is a strict
-/// deterministic priority: a consonant, parallel-free chord tone first; then a
-/// consonant one (parallel avoidance relaxed only when every chord tone is
-/// parallel-tied); then the least-dissonant chord tone. Parallels take priority
-/// over a marginally nearer anchor, which is what eliminates the same-direction
-/// perfect arrivals two independently anchored wave lines would otherwise
-/// produce over one harmony.
+/// deterministic priority: a consonant, parallel-free chord tone first; then
+/// (with `parallel_free_over_consonant`) a parallel-free tone with the mildest
+/// clash profile (sharp ic 1/6/11 clashes weighted double); then a consonant
+/// tone that forms a parallel; then the parallel-free clashing tone when the
+/// flag is off; then the least-dissonant tone. The flag encodes a per-form
+/// contract: fugue-family figuration prefers the parallel-free escape (the
+/// parallel fifth/octave is the cardinal prohibition, and earlier-placed
+/// verbatim or ornament lines can pin the vertical so that no consonant
+/// parallel-free tone exists -- a mild passing clash or an oblique repeat is
+/// the correct escape there), while ground-variation forms hold every beat
+/// onset mutually consonant over the held ground and keep consonance first.
 ///
 /// `target` is the previous beat's anchor, so consecutive anchors chain to the
 /// nearest admissible chord tone of each other -- the per-beat anchor chain
@@ -184,7 +189,8 @@ class ThemeToneRegistry {
 int consonantChordTone(const detail::ChordSpec& chord, int voice, int band_lo, int band_hi,
                        int target, const std::vector<int>& theme_pitches, int line_prev,
                        const std::vector<ConcurrentMotion>& motions, detail::Mode mode,
-                       bool downbeat, const std::vector<int>& window_pitches = {});
+                       bool downbeat, const std::vector<int>& window_pitches = {},
+                       bool parallel_free_over_consonant = false);
 
 /// @brief Replace a line's closing two bars with the shared cadential landing.
 ///

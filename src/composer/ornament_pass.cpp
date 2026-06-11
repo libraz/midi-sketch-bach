@@ -7,6 +7,7 @@
 
 #include "composer/character_profile.h"
 #include "composer/renderer.h"
+#include "composer/texture_helpers.h"
 #include "composer/validator.h"
 
 namespace bach::composer {
@@ -479,6 +480,105 @@ void applyOrnamentPass(ComposeResult& result, const OrnamentParams& params) {
     return false;
   };
 
+  // Voices present, for the motion-level parallel guard below.
+  std::array<bool, 16> voice_present{};
+  for (const NoteEvent& n : result.notes) {
+    if (n.voice < 16) {
+      voice_present[n.voice] = true;
+    }
+  }
+
+  // Sounding pitch of voice `v` at `tick` in the final picture: the notes
+  // already emitted this pass (including committed ornament sub-notes) plus
+  // the not-yet-processed tail of the original list. Latest onset wins,
+  // mirroring the union-onset sampling the validator uses.
+  auto sounding_in_voice = [&](VoiceId v, Tick tick, std::size_t tail_begin) -> int {
+    int best_pitch = -1;
+    Tick best_start = 0;  // valid only while best_pitch >= 0 (Tick is unsigned).
+    auto scan = [&](const NoteEvent& n) {
+      if (n.voice != v) {
+        return;
+      }
+      if (n.start_tick <= tick && tick < n.start_tick + n.duration &&
+          (best_pitch < 0 || n.start_tick >= best_start)) {
+        best_start = n.start_tick;
+        best_pitch = static_cast<int>(n.pitch);
+      }
+    };
+    for (const NoteEvent& n : out_notes) {
+      scan(n);
+    }
+    for (std::size_t j = tail_begin; j < result.notes.size(); ++j) {
+      scan(result.notes[j]);
+    }
+    return best_pitch;
+  };
+
+  // Motion-level parallel guard. The window check above only compares ornament
+  // BASE pitches, but an ornament run can track another voice's moving line --
+  // Material sixteenths, or another ornament's sub-notes -- in parallel
+  // fifths/octaves transition by transition (the bases can sit at any
+  // interval). Walk every transition the expansion would create: sub-note to
+  // sub-note, plus the entry/exit transitions where the expansion changes the
+  // arrival or departure tone. Suppress the ornament (stay plain) when any of
+  // them forms a parallel or hidden perfect against any other voice.
+  auto expansion_forms_parallel = [&](const Expansion& cand_exp, const NoteEvent& base,
+                                      std::size_t idx) {
+    struct Transition {
+      int from;
+      int to;
+      Tick at;
+    };
+    std::vector<Transition> transitions;
+    for (std::size_t s = 0; s + 1 < cand_exp.notes.size(); ++s) {
+      transitions.push_back({static_cast<int>(cand_exp.notes[s].pitch),
+                             static_cast<int>(cand_exp.notes[s + 1].pitch),
+                             cand_exp.notes[s + 1].start_tick});
+    }
+    if (!cand_exp.notes.empty() &&
+        cand_exp.notes.front().pitch != base.pitch) {  // changed arrival tone.
+      const int own_prev = sounding_in_voice(base.voice, base.start_tick - 1, idx + 1);
+      if (own_prev >= 0) {
+        transitions.push_back(
+            {own_prev, static_cast<int>(cand_exp.notes.front().pitch), base.start_tick});
+      }
+    }
+    if (!cand_exp.notes.empty() &&
+        cand_exp.notes.back().pitch != base.pitch) {  // changed departure tone.
+      const NoteEvent* next_own = nullptr;
+      for (std::size_t j = idx + 1; j < result.notes.size(); ++j) {
+        const NoteEvent& n = result.notes[j];
+        if (n.voice == base.voice && n.start_tick >= base.start_tick + base.duration &&
+            (next_own == nullptr || n.start_tick < next_own->start_tick)) {
+          next_own = &n;
+        }
+      }
+      if (next_own != nullptr) {
+        transitions.push_back({static_cast<int>(cand_exp.notes.back().pitch),
+                               static_cast<int>(next_own->pitch), next_own->start_tick});
+      }
+    }
+    for (const Transition& tr : transitions) {
+      if (tr.from == tr.to) {
+        continue;
+      }
+      for (VoiceId v = 0; v < static_cast<VoiceId>(voice_present.size()); ++v) {
+        if (!voice_present[v] || v == base.voice) {
+          continue;
+        }
+        const int other_curr = sounding_in_voice(v, tr.at, idx + 1);
+        if (other_curr < 0) {
+          continue;
+        }
+        const int other_prev = sounding_in_voice(v, tr.at - 1, idx + 1);
+        if (formsPerfectParallel(tr.from, tr.to, other_prev, other_curr)) {
+          return true;
+        }
+      }
+    }
+    return false;
+  };
+
   for (std::size_t idx = 0; idx < result.notes.size(); ++idx) {
     const NoteEvent& note = result.notes[idx];
     const NoteProvenance& prov = result.provenance[idx];
@@ -739,8 +839,9 @@ void applyOrnamentPass(ComposeResult& result, const OrnamentParams& params) {
       }
     }
 
-    if (!exp.notes.empty() && clashes_committed_ornament(note))
-      exp.notes.clear();  // simultaneous ornament at a perfect interval: stay plain.
+    if (!exp.notes.empty() &&
+        (clashes_committed_ornament(note) || expansion_forms_parallel(exp, note, idx)))
+      exp.notes.clear();  // would chain a parallel against another voice: stay plain.
 
     if (exp.notes.empty()) {
       out_notes.push_back(note);

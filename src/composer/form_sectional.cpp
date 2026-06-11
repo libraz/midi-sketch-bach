@@ -251,13 +251,22 @@ void appendFigurationBar(ThemeToneRegistry& registry, FigurationSection& section
     center = scaleUp(kBandLo[voice], offset, mode);
   }
   if (prev_anchor <= 0) {
-    prev_anchor = center;
+    // Section seam: seed the line's audible "previous pitch" from what this
+    // voice actually sounded just before the bar (a theme entry or an earlier
+    // figuration span), falling back to the register centre when the voice
+    // was silent. A synthetic centre here would let a seam arrival land an
+    // undetectable parallel against a voice moving across the same seam.
+    const int sounding =
+        registry.soundingPitchInVoice(static_cast<VoiceId>(voice), barTick(bar) - kSixteenth);
+    prev_anchor = (sounding >= 0) ? sounding : center;
   }
   const Tick step =
       (notes_per_beat == 4) ? kSixteenth : ((notes_per_beat == 2) ? kEighth : kQuarter);
   std::vector<int> theme_pitches;
-  const int wave_lo = std::max(kBandLo[voice], center - 5);
-  const int wave_hi = std::min(kBandHi[voice], center + 5);
+  // Mutable: the window stretches to contain a beat anchor snapped outside it
+  // (see the anchor commit below).
+  int wave_lo = std::max(kBandLo[voice], center - 5);
+  int wave_hi = std::min(kBandHi[voice], center + 5);
   int cursor = std::clamp(prev_anchor, wave_lo, wave_hi);
   int dir = (cursor <= center) ? 1 : -1;
   // Wave stride for the current beat: 1 scale degree on most beats (stepwise
@@ -273,24 +282,39 @@ void appendFigurationBar(ThemeToneRegistry& registry, FigurationSection& section
     return direction > 0 ? scaleUp(from, wave_degrees, mode) : scaleDown(from, wave_degrees, mode);
   };
   int last_pitch = cursor;
-  int line_prev_anchor = (prev_anchor > 0) ? prev_anchor : -1;
+  // The line's audibly-previous pitch: the last *emitted* note, not the last
+  // beat anchor. Faster lines move between anchors, and a parallel is heard
+  // from the note actually sounding immediately before the new onset. -1 until
+  // the line has emitted (or chained from) a real note, which disables the
+  // parallel check on a section-opening anchor.
+  int line_prev = (prev_anchor > 0) ? prev_anchor : -1;
   std::vector<ConcurrentMotion> motions;
   for (int beat = 0; beat < 4; ++beat) {
     wave_degrees = ((bar + beat) % 3 == 1) ? 2 : 1;
     const Tick beat_tick = barTick(bar) + static_cast<Tick>(beat) * kTicksPerBeat;
-    const Tick prev_beat_tick = beat_tick - kTicksPerBeat;
     registry.concurrentThemePitches(beat_tick, static_cast<VoiceId>(voice), theme_pitches);
-    registry.concurrentMotions(prev_beat_tick, beat_tick, static_cast<VoiceId>(voice), kTailVoices,
-                               motions);
+    // Sample the earlier voices' previous pitch one sixteenth before the onset:
+    // the finest subdivision any line uses. This reproduces the union-onset
+    // note pair the validator judges, regardless of this line's own stride --
+    // a beat-wide window would read a 16th-note voice four notes back and miss
+    // the audible motion into this onset.
+    registry.concurrentMotions(beat_tick - kSixteenth, beat_tick, static_cast<VoiceId>(voice),
+                               kTailVoices, motions);
     const int anchor =
         consonantChordTone(chord, voice, kBandLo[voice], kBandHi[voice], cursor, theme_pitches,
-                           line_prev_anchor, motions, mode, beat == 0);
+                           line_prev, motions, mode, beat == 0, /*window_pitches=*/{},
+                           /*parallel_free_over_consonant=*/true);
     cursor = std::clamp(anchor, kBandLo[voice], kBandHi[voice]);
-    line_prev_anchor = cursor;
+    // The consonance / parallel constraints can snap the anchor outside the
+    // working wave window. Stretch the window to contain it: with the cursor
+    // outside, every wave step would reflect onto the single pitch one step
+    // back toward the window -- no alternative candidates -- so the parallel
+    // veto would have nothing to displace to.
+    wave_lo = std::min(wave_lo, cursor);
+    wave_hi = std::max(wave_hi, cursor);
     for (int sub = 0; sub < notes_per_beat; ++sub) {
       const Tick tick =
           barTick(bar) + static_cast<Tick>(beat) * kTicksPerBeat + static_cast<Tick>(sub) * step;
-      const Tick prev_tick = tick - step;
       int pitch;
       if (sub == 0) {
         pitch = cursor;
@@ -306,8 +330,11 @@ void appendFigurationBar(ThemeToneRegistry& registry, FigurationSection& section
           return std::clamp(candidate, kBandLo[voice], kBandHi[voice]);
         };
         int next = step_from(dir);
-        registry.concurrentMotions(prev_tick, tick, static_cast<VoiceId>(voice), kTailVoices,
-                                   motions);
+        // Sixteenth-grain window for the same reason as the anchor above: an
+        // eighth/quarter-stride wave sampling its own stride back would miss
+        // the audible motion of an already-placed sixteenth line.
+        registry.concurrentMotions(tick - kSixteenth, tick, static_cast<VoiceId>(voice),
+                                   kTailVoices, motions);
         auto wave_is_parallel = [&](int cand) {
           for (const ConcurrentMotion& motion : motions) {
             if (formsPerfectParallel(from, cand, motion.prev, motion.curr)) {
@@ -405,6 +432,7 @@ void appendFigurationBar(ThemeToneRegistry& registry, FigurationSection& section
         pitch = cursor;
       }
       last_pitch = pitch;
+      line_prev = pitch;
       addNote(section.notes, tick, step, pitch);
       registry.record(tick, static_cast<VoiceId>(voice), pitch, step);
     }

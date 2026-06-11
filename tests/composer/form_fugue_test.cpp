@@ -38,6 +38,7 @@
 #include "composer/harness_fixture.h"
 #include "composer/material.h"
 #include "composer/minor_material.h"
+#include "composer/ornament_pass.h"
 #include "composer/voice_intent.h"
 #include "core/basic_types.h"
 
@@ -1052,6 +1053,100 @@ TEST(FormFugueTest, EpisodeCounterlinesAlternateSubdivisionTiers) {
     }
     EXPECT_TRUE(saw_eighths) << "seed " << seed;
     EXPECT_TRUE(saw_sixteenths) << "seed " << seed;
+  }
+}
+
+// --- Long-form parallel ceiling (full pipeline incl. ornament pass) ----------
+
+namespace {
+
+// Sounding pitch of `voice` at `tick` (latest onset wins), or -1 when silent.
+int pfSoundingPitch(const std::vector<NoteEvent>& notes, int voice, Tick tick) {
+  int pitch = -1;
+  long long best_start = -1;
+  for (const auto& note : notes) {
+    if (static_cast<int>(note.voice) != voice) {
+      continue;
+    }
+    if (note.start_tick <= tick &&
+        tick<note.start_tick + note.duration&& static_cast<long long>(note.start_tick)>
+            best_start) {
+      best_start = static_cast<long long>(note.start_tick);
+      pitch = static_cast<int>(note.pitch);
+    }
+  }
+  return pitch;
+}
+
+// Count parallel perfect fifths/octaves across all voice pairs by union-onset
+// sampling, identical to the texture-gate's compute_parallel_counts.
+int pfCountParallelPerfects(const std::vector<NoteEvent>& notes) {
+  std::vector<int> voices;
+  std::vector<Tick> onsets;
+  for (const auto& note : notes) {
+    const int voice = static_cast<int>(note.voice);
+    if (std::find(voices.begin(), voices.end(), voice) == voices.end()) {
+      voices.push_back(voice);
+    }
+    if (std::find(onsets.begin(), onsets.end(), note.start_tick) == onsets.end()) {
+      onsets.push_back(note.start_tick);
+    }
+  }
+  std::sort(voices.begin(), voices.end());
+  std::sort(onsets.begin(), onsets.end());
+  int parallel = 0;
+  for (std::size_t lo = 0; lo < voices.size(); ++lo) {
+    for (std::size_t up = lo + 1; up < voices.size(); ++up) {
+      bool have_prev = false;
+      int prev_a = 0;
+      int prev_b = 0;
+      for (Tick tick : onsets) {
+        const int pitch_a = pfSoundingPitch(notes, voices[lo], tick);
+        const int pitch_b = pfSoundingPitch(notes, voices[up], tick);
+        if (pitch_a < 0 || pitch_b < 0) {
+          have_prev = false;
+          continue;
+        }
+        if (have_prev) {
+          const int delta_a = pitch_a - prev_a;
+          const int delta_b = pitch_b - prev_b;
+          const bool same_dir = (delta_a > 0 && delta_b > 0) || (delta_a < 0 && delta_b < 0);
+          const int curr_ic = std::abs(pitch_a - pitch_b) % 12;
+          if (delta_a != 0 && delta_b != 0 && same_dir && (curr_ic == 0 || curr_ic == 7) &&
+              std::abs(prev_a - prev_b) % 12 == curr_ic) {
+            ++parallel;
+          }
+        }
+        have_prev = true;
+        prev_a = pitch_a;
+        prev_b = pitch_b;
+      }
+    }
+  }
+  return parallel;
+}
+
+}  // namespace
+
+// A 64-bar prelude-and-fugue keeps its union-onset parallel perfect count near
+// zero through the FULL production pipeline (Composer::run + ornament pass).
+// This pins four parallel-avoidance behaviours at once: the figuration wave's
+// sixteenth-grain motion sampling, the section-seam anchor seeding from the
+// registry, the parallel-free-over-consonance anchor tier, and the ornament
+// pass's motion-level suppression (an ornament run must not track another
+// voice into a parallel chain).
+TEST(FormFuguePreludeAndFugueTest, LongFormStaysParallelFreeThroughOrnamentPass) {
+  for (std::uint32_t seed : {1u, 2u, 3u, 4u, 5u}) {
+    const HarnessFixture fx = buildFixture(FormType::PreludeAndFugue, seed, /*is_minor=*/false, 64);
+    ComposeResult r = Composer{}.run(fx.material, fx.harmony, fx.voice_plan);
+    ASSERT_TRUE(r.validation.failures.empty()) << "seed " << seed;
+    OrnamentParams params;
+    params.character = SubjectCharacter::Severe;
+    params.mode = detail::Mode::Major;
+    params.seed = seed;
+    params.ticks_per_bar = fx.harmony.ticksPerBar();
+    applyOrnamentPass(r, params);
+    EXPECT_LE(pfCountParallelPerfects(r.notes), 2) << "seed " << seed;
   }
 }
 

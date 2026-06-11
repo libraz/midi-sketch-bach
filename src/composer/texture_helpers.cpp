@@ -87,7 +87,8 @@ bool formsPerfectParallel(int line_prev, int cand, int other_prev, int other_cur
 int consonantChordTone(const detail::ChordSpec& chord, int voice, int band_lo, int band_hi,
                        int target, const std::vector<int>& theme_pitches, int line_prev,
                        const std::vector<ConcurrentMotion>& motions, detail::Mode mode,
-                       bool downbeat, const std::vector<int>& window_pitches) {
+                       bool downbeat, const std::vector<int>& window_pitches,
+                       bool parallel_free_over_consonant) {
   const int third = chord.minor ? 3 : 4;
   const int triad_pc[3] = {chord.root_pc % 12, (chord.root_pc + third) % 12,
                            (chord.root_pc + 7) % 12};
@@ -123,14 +124,21 @@ int consonantChordTone(const detail::ChordSpec& chord, int voice, int band_lo, i
       order_floor = std::max(order_floor, motion.curr);  // stay above it.
     }
   }
-  // Three nested preferences. Within each tier, fewer mid-window clashes win
+  // Four nested preferences. Within each tier, fewer mid-window clashes win
   // first (a sustained anchor should not be struck against by a mid-beat
   // dissonance from an already-placed faster line), then "nearest target".
   // The tier key packs (window clashes, distance) so onset consonance still
   // dominates and an empty window reproduces the previous nearest-wins order.
+  // Parallel-freedom outranks consonance: when every consonant tone is
+  // parallel-tied (earlier-placed verbatim or ornament lines can pin the
+  // vertical that way), a mildly dissonant parallel-free tone -- including an
+  // oblique repeat of the previous pitch -- beats a parallel fifth/octave,
+  // the cardinal prohibition.
   int consonant_free = -1;  // consonant AND parallel-free (best).
   int consonant_free_key = 1 << 20;
-  int consonant_any = -1;  // consonant, parallel allowed (second).
+  int free_any = -1;  // parallel-free, mildest clash profile (second).
+  int free_any_key = 1 << 28;
+  int consonant_any = -1;  // consonant, parallel allowed (third).
   int consonant_any_key = 1 << 20;
   int fallback = -1;  // least dissonant (last resort).
   int fallback_score = 1 << 20;
@@ -146,17 +154,24 @@ int consonantChordTone(const detail::ChordSpec& chord, int voice, int band_lo, i
       continue;  // would cross a concurrent voice; never admissible.
     }
     int clashes = 0;
-    for (int theme : theme_pitches) {
-      if (!isConsonantIc(pitch - theme)) {
-        ++clashes;
+    int weighted_clashes = 0;  // sharp ic 1/6/11 clashes count double.
+    auto add_clash = [&](int sounding) {
+      if (isConsonantIc(pitch - sounding)) {
+        return;
       }
+      const int ic = std::abs(pitch - sounding) % 12;
+      ++clashes;
+      weighted_clashes += (ic == 1 || ic == 6 || ic == 11) ? 2 : 1;
+    };
+    for (int theme : theme_pitches) {
+      add_clash(theme);
     }
     // Also stay consonant against every earlier voice sounding at this onset
     // (not just the theme): an off-downbeat diatonic anchor would otherwise be
     // free to clash with another figuration voice on the beat grid.
     for (const ConcurrentMotion& motion : motions) {
-      if (motion.curr >= 0 && !isConsonantIc(pitch - motion.curr)) {
-        ++clashes;
+      if (motion.curr >= 0) {
+        add_clash(motion.curr);
       }
     }
     int window_clashes = 0;
@@ -178,6 +193,14 @@ int consonantChordTone(const detail::ChordSpec& chord, int voice, int band_lo, i
         consonant_free_key = key;
         consonant_free = pitch;
       }
+    } else if (!is_parallel(pitch)) {
+      // Weighted clashes dominate the packed (window clashes, distance) key so
+      // the mildest clash profile wins, nearest-target breaking ties.
+      const int free_key = weighted_clashes * (1 << 14) + key;
+      if (free_key < free_any_key) {
+        free_any_key = free_key;
+        free_any = pitch;
+      }
     }
     const int score = clashes * 1000 + key;
     if (score < fallback_score) {
@@ -188,8 +211,19 @@ int consonantChordTone(const detail::ChordSpec& chord, int voice, int band_lo, i
   if (consonant_free >= 0) {
     return consonant_free;
   }
+  // Tier order between "parallel-free but clashing" and "consonant but
+  // parallel" is a per-form contract: fugue-family figuration prefers the
+  // parallel-free escape (a parallel fifth/octave is the cardinal
+  // prohibition), while ground-variation forms hold every beat onset
+  // mutually consonant over the held ground and keep consonance first.
+  if (parallel_free_over_consonant && free_any >= 0) {
+    return free_any;
+  }
   if (consonant_any >= 0) {
     return consonant_any;
+  }
+  if (free_any >= 0) {
+    return free_any;
   }
   return fallback >= 0 ? fallback : std::clamp(target, band_lo, band_hi);
 }
