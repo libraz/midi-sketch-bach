@@ -25,6 +25,7 @@
 
 #include "composer/candidate_search.h"
 #include "composer/composer.h"
+#include "composer/form_director.h"
 #include "composer/harmonic_plan.h"
 #include "composer/harness_fixture.h"
 #include "composer/material.h"
@@ -360,6 +361,33 @@ TEST(PassacagliaTest, PassacagliaFixtureValidatesCleanAndStampsAllPassacagliaBit
     EXPECT_TRUE(saw_ground) << "seed " << seed << " missing PassacagliaGroundReplayed";
     EXPECT_TRUE(saw_variation) << "seed " << seed << " missing VariationApplied";
     EXPECT_TRUE(saw_climax) << "seed " << seed << " missing ClimaxPlaced";
+  }
+}
+
+// The product-path passacaglia must stay diatonic: the plan derivation maps a
+// leading-tone ground bar (B) to the dominant in first inversion, never to a
+// literal major triad on B whose D# / F# leak through the chord-tone anchor
+// paths that do not flatten out-of-scale tones. Seeds cover all three major
+// ground variants (two of which contain a B bar).
+TEST(PassacagliaTest, ProductPathStaysDiatonicAcrossGroundVariants) {
+  for (std::uint32_t seed : {1u, 2u, 3u, 5u, 6u, 8u}) {
+    ComposeRequest req;
+    req.form = FormType::Passacaglia;
+    req.seed = seed;
+    HarnessFixture fixture;
+    ASSERT_EQ(buildFormFixture(req, &fixture), FormDirectorStatus::Ok) << "seed " << seed;
+    const ComposeResult r = Composer{}.run(fixture.material, fixture.harmony, fixture.voice_plan);
+    ASSERT_FALSE(r.notes.empty()) << "seed " << seed;
+    for (const NoteEvent& note : r.notes) {
+      const int pc = note.pitch % 12;
+      const bool diatonic =
+          pc == 0 || pc == 2 || pc == 4 || pc == 5 || pc == 7 || pc == 9 || pc == 11;
+      EXPECT_TRUE(diatonic) << "seed " << seed << " tick " << note.start_tick << " voice "
+                            << static_cast<int>(note.voice) << " sounds chromatic pitch "
+                            << static_cast<int>(note.pitch);
+      if (!diatonic)
+        return;  // one detailed failure is enough; avoid thousands of lines.
+    }
   }
 }
 

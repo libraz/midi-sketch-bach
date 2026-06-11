@@ -128,7 +128,16 @@ std::vector<CycleBar> planFromGround(const std::uint8_t* ground, std::size_t bar
     int low = static_cast<int>(ground[i]);
     while (low < 50)
       low += 12;  // lift into the C4-region variation band.
-    plan.push_back({pc, detail::diatonicTriadMinor(pc, minor_mode), low, pc});
+    // A leading-tone bass (B) takes the dominant in first inversion (a G
+    // chord over the B bass), matching the historical chaconne plan row
+    // "{7, false, ...}, // V6: ground B (chord G)". The literal triad on B is
+    // diminished (its fifth is a tritone against the bass), and "major-ising"
+    // the root instead (B - D# - F#) injects two chromatic tones the scale
+    // does not contain -- the chord-tone anchor paths that do not flatten
+    // out-of-scale tones (consonantChordTone) then sound a D# against the
+    // held B ground.
+    const std::uint8_t root = (pc == 11) ? static_cast<std::uint8_t>(7) : pc;
+    plan.push_back({root, detail::diatonicTriadMinor(root, minor_mode), low, pc});
   }
   return plan;
 }
