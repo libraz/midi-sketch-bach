@@ -284,31 +284,62 @@ HarnessFixture buildCelloPreludeForm(const ResolvedRequest& req) {
         {0, 1, 0, -1},   // under-then-over: anchor, +1, anchor, reach.
     };
     auto oscillation_bar = [&](std::array<int, 16>& p) {
-      const int* shape = kCellShapes[(req.seed + cycle) % 3];
-      int cell_fig[4];
-      for (int idx = 0; idx < 4; ++idx) {
-        const int degree = shape[idx] < 0 ? reach : shape[idx];
-        cell_fig[idx] = walk(anchor, degree, harmonic);
-      }
-      for (int slot = 0; slot < kNotesPerBar; ++slot) {
-        p[static_cast<std::size_t>(slot)] = cell_fig[slot % 4];
+      // The shape rotates per CELL, not only per cycle: all three shapes share
+      // the same tone set {anchor, +1, reach}, so every cell's implicit
+      // min/max extremes are identical regardless of shape and the validator
+      // streams are unchanged -- but one shape looped four times per bar
+      // stamps the same three-four interval bigrams twelve times, which is
+      // exactly the pendulum concentration the corpus bigram surface (top
+      // entry only ~2.6%) never reaches.
+      for (int cell = 0; cell < 4; ++cell) {
+        const int* shape =
+            kCellShapes[(static_cast<int>(req.seed) + static_cast<int>(cycle) + cell) % 3];
+        for (int idx = 0; idx < 4; ++idx) {
+          const int degree = shape[idx] < 0 ? reach : shape[idx];
+          p[static_cast<std::size_t>(cell * 4 + idx)] = walk(anchor, degree, harmonic);
+        }
       }
     };
     auto run_triangle_bar = [&](std::array<int, 16>& p) {
-      // Eight sixteenths climbing one scale step each, then folding back down
-      // the same tones: a full-bar scale-run arch (step-chain bigrams).
-      int w[8];
+      // Two half-bar scale-run arches (climb four steps, fold back), the
+      // second shifted one scale degree above the first (order swapped on odd
+      // bars). The original full-bar arch climbed seven degrees, moving the
+      // implicit cell extremes four degrees between cells -- enough to trip
+      // the forbidden-leap vet on most anchors, so the figure was silently
+      // rejected on two thirds of its turns and the rotation collapsed back
+      // to the pendulum figures. Half-bar arches keep the extremes within two
+      // degrees (reliably safe) while still supplying the mixed ascending /
+      // descending step chains the corpus bigram mass lives on.
+      int arch_a[8];
+      int arch_b[8];
       for (int idx = 0; idx < 8; ++idx) {
-        w[idx] = walk(anchor, idx, harmonic);
+        const int degree = (idx < 5) ? idx : 8 - idx;  // 0 1 2 3 4 3 2 1
+        arch_a[idx] = walk(anchor, degree, harmonic);
+        arch_b[idx] = walk(anchor, degree + 1, harmonic);
       }
+      const bool swap_halves = ((bar + static_cast<int>(cycle)) & 1) != 0;
       for (int idx = 0; idx < 8; ++idx) {
-        p[static_cast<std::size_t>(idx)] = w[idx];
+        p[static_cast<std::size_t>(idx)] = swap_halves ? arch_b[idx] : arch_a[idx];
+        p[static_cast<std::size_t>(8 + idx)] = swap_halves ? arch_a[idx] : arch_b[idx];
       }
-      for (int idx = 1; idx <= 6; ++idx) {
-        p[static_cast<std::size_t>(7 + idx)] = w[7 - idx];
+    };
+    auto broken_thirds_bar = [&](std::array<int, 16>& p) {
+      // Broken-third chains (c-e-d-f): each cell plays degrees
+      // (s, s+2, s+1, s+3) with the cell start s drifting 0,1,2,1 across the
+      // bar. This is the corpus's third-skip vocabulary -- the (third, -step)
+      // / (step, -third) bigram families -- which the three stepwise figures
+      // above cannot produce; without it the line's interval mass sits almost
+      // entirely on seconds while the reference keeps the majority of its
+      // transitions on skips and leaps. Cell extremes are (s, s+3), so the
+      // implicit streams move at most one degree per cell seam.
+      static constexpr int kStarts[4] = {0, 1, 2, 1};
+      for (int cell = 0; cell < 4; ++cell) {
+        const int s = kStarts[cell];
+        const int degs[4] = {s, s + 2, s + 1, s + 3};
+        for (int idx = 0; idx < 4; ++idx) {
+          p[static_cast<std::size_t>(cell * 4 + idx)] = walk(anchor, degs[idx], harmonic);
+        }
       }
-      p[14] = w[0];
-      p[15] = w[0];
     };
     auto pedal_bariolage_bar = [&](std::array<int, 16>& p) {
       // BWV1007-style bariolage: the anchor as a constant pedal under an
@@ -371,14 +402,21 @@ HarnessFixture buildCelloPreludeForm(const ResolvedRequest& req) {
     };
     std::array<int, 16> pitches{};
     bool placed = false;
-    const int pref = (req.seed + bar) % 3;
-    for (int attempt = 0; attempt < 3 && !placed; ++attempt) {
-      switch ((pref + attempt) % 3) {
+    // The figure preference walks with bar AND cycle: a plain bar % 4 stride
+    // is 4-periodic and would hand every cycle's first bar (the 4-bar grid)
+    // the same figure, freezing the cycle-opening contour the rotation
+    // exists to vary.
+    const int pref = (static_cast<int>(req.seed) + bar + static_cast<int>(cycle)) % 4;
+    for (int attempt = 0; attempt < 4 && !placed; ++attempt) {
+      switch ((pref + attempt) % 4) {
         case 0:
           oscillation_bar(pitches);
           break;
         case 1:
           run_triangle_bar(pitches);
+          break;
+        case 2:
+          broken_thirds_bar(pitches);
           break;
         default:
           pedal_bariolage_bar(pitches);

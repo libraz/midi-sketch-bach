@@ -17,7 +17,9 @@
 #include <algorithm>
 #include <array>
 #include <cstdint>
+#include <map>
 #include <set>
+#include <utility>
 #include <vector>
 
 #include "composer/arc.h"
@@ -203,6 +205,37 @@ TEST(FormLinearCello, CellContourRotatesAcrossCycles) {
       signatures.insert(sig);
     }
     EXPECT_GE(signatures.size(), 2u) << "seed " << seed << ": cell contour must rotate";
+  }
+}
+
+// A long (64-bar) cello line keeps its melodic-interval BIGRAM surface spread:
+// the reference corpus's most common bigram carries only ~2.6% of the mass,
+// while a single figure looped bar after bar concentrates >12% on one pendulum
+// bigram. The four-figure rotation (oscillation with per-cell shapes, half-bar
+// run arches, broken-third chains, bariolage) holds the top bigram at or below
+// a tenth of all transitions.
+TEST(FormLinearCello, LongFormBigramSurfaceStaysSpread) {
+  for (std::uint32_t seed : {1u, 5u, 42u}) {
+    const ComposeResult r = build(FormType::CelloPrelude, seed, /*is_minor=*/false, 64, nullptr);
+    std::vector<NoteEvent> notes = r.notes;
+    std::sort(notes.begin(), notes.end(),
+              [](const NoteEvent& x, const NoteEvent& y) { return x.start_tick < y.start_tick; });
+    ASSERT_GE(notes.size(), 3u);
+    std::map<std::pair<int, int>, int> bigrams;
+    int total = 0;
+    for (std::size_t idx = 2; idx < notes.size(); ++idx) {
+      const int first =
+          static_cast<int>(notes[idx - 1].pitch) - static_cast<int>(notes[idx - 2].pitch);
+      const int second =
+          static_cast<int>(notes[idx].pitch) - static_cast<int>(notes[idx - 1].pitch);
+      ++bigrams[{first, second}];
+      ++total;
+    }
+    int top = 0;
+    for (const auto& [bigram, count] : bigrams)
+      top = std::max(top, count);
+    EXPECT_LE(static_cast<double>(top) / static_cast<double>(total), 0.10)
+        << "seed " << seed << ": top bigram " << top << "/" << total;
   }
 }
 
