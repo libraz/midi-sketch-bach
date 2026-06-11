@@ -178,6 +178,7 @@ void appendCounterFiguration(std::vector<MaterialNote>& notes, ThemeToneRegistry
   const Tick step = kTicksPerBeat / static_cast<Tick>(notes_per_beat);
 
   int line_prev = -1;
+  int prev_emitted = -1;  // last pitch actually pushed (anchor OR oscillation tone).
   int cursor = (band_lo + band_hi) / 2;
   std::vector<int> theme_pitches;
   std::vector<ConcurrentMotion> motions;
@@ -259,6 +260,54 @@ void appendCounterFiguration(std::vector<MaterialNote>& notes, ThemeToneRegistry
             break;
         }
       }
+      // Audible-grain parallel re-check. consonantChordTone judged the anchor's
+      // parallel motion at QUARTER grain (previous beat -> this beat), but the
+      // union-onset sampling the gate (and the ear) uses pairs this anchor with
+      // V1's last EMITTED note and the other voices' last sub-beat onset --
+      // V0 runs eighths/sixteenths here, so the audible approach interval is a
+      // sixteenth window, not a beat. The anti-stall displacement above is also
+      // unvetted for parallels. Re-judge the chosen tone from the last emitted
+      // pitch at sixteenth grain and displace to a scale tone that is in band,
+      // consonant with every concurrent theme tone, and parallel-free; keep the
+      // anchor when no such tone exists (a consonant parallel beats a clash).
+      if (prev_emitted >= 0) {
+        motions.clear();
+        registry.concurrentMotions(beat_tick - kTicksPerBeat / 4, beat_tick, /*voice=*/1,
+                                   /*num_voices=*/3, motions);
+        auto anchor_is_parallel = [&](int cand) {
+          for (const ConcurrentMotion& motion : motions) {
+            if (formsPerfectParallel(prev_emitted, cand, motion.prev, motion.curr)) {
+              return true;
+            }
+          }
+          return false;
+        };
+        if (anchor_is_parallel(anchor)) {
+          bool displaced = false;
+          for (int dist = 1; dist <= 7 && !displaced; ++dist) {
+            for (int dir : {1, -1}) {
+              const int cand = anchor + dir * dist;
+              if (cand < band_lo || cand > band_hi || cand == prev_emitted ||
+                  !detail::inScale(cand, mode)) {
+                continue;
+              }
+              bool consonant = true;
+              for (int upper : theme_pitches) {
+                if (!isConsonantIc(cand - upper)) {
+                  consonant = false;
+                  break;
+                }
+              }
+              if (!consonant || anchor_is_parallel(cand)) {
+                continue;
+              }
+              anchor = cand;
+              displaced = true;
+              break;
+            }
+          }
+        }
+      }
       // Off-beat fills oscillate between the anchor and a consonant companion
       // tone: prefer a stepwise diatonic neighbour that is consonant against
       // the held ground (upper first -- the common figure), falling back to
@@ -283,6 +332,7 @@ void appendCounterFiguration(std::vector<MaterialNote>& notes, ThemeToneRegistry
         mnote.pitch = static_cast<std::uint8_t>(pitch);
         notes.push_back(mnote);
         registry.record(mnote.start_tick, /*voice=*/1, pitch, step);
+        prev_emitted = pitch;
       }
       line_prev = anchor;
       cursor = anchor;
