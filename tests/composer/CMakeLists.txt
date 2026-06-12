@@ -44,6 +44,7 @@ set(BACH_COMPOSER_TEST_SOURCES
   form_cantus_test.cpp
   goldberg_canon_test.cpp
   minor_material_test.cpp
+  subject_catalog_test.cpp
   character_profile_test.cpp
   meter_test.cpp
   expression_events_test.cpp

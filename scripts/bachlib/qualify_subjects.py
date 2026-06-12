@@ -301,8 +301,11 @@ def render_catalog(
         f"// Command: {command}",
         "// Entries 0-4 of each mode mirror the shipped 5-subject catalogs",
         "// (kFugueCompleteSubjects / kSubjectsMinor) as backward-compatible",
-        "// anchors; the rest passed the full qualification gate (validation,",
-        "// texture-gate axes incl. per-form model floors, cadence rule bits).",
+        "// anchors; the rest passed the qualification gate: every fugue-family",
+        "// form x seed must validate and clear the texture-gate axes (per-form",
+        "// v2 / length-invariant model floors strict; the v1 cross-entropy floor",
+        "// allows a small tolerance against the shipped subjects' score at the",
+        "// same form x seed, since a corpus-shaped leap vocabulary pays v1).",
         "",
     ]
     for mode in ("major", "minor"):
