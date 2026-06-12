@@ -606,6 +606,12 @@ void appendFigurationWaveBar(ThemeToneRegistry& registry, FigurationSection& sec
   // Last pitch this call actually emitted (-1 until the first note), used to
   // re-judge the beat anchor at the audible sub-beat grain below.
   int prev_emitted = -1;
+  // Rolling window of the last four pitches emitted this bar. The wobble
+  // breaker below uses it to detect a line that degenerated into a two-pitch
+  // oscillation; a trailing window (rather than the whole bar) keeps the
+  // detection blind to a bar-initial tone carried over from the previous bar.
+  int recent_pitches[4] = {-1, -1, -1, -1};
+  int emitted_count = 0;
   // This line's previous beat anchor, used to judge whether the next anchor
   // moves in parallel with an earlier voice. Seeded from prev_anchor (the prior
   // bar's last anchor) so the bar-boundary beat is also parallel-checked.
@@ -684,6 +690,94 @@ void appendFigurationWaveBar(ThemeToneRegistry& registry, FigurationSection& sec
           for (const int sgn : {-1, 1}) {
             const int cand = snapped + sgn * dist;
             if (admissible(cand)) {
+              snapped = cand;
+              placed = true;
+              break;
+            }
+          }
+          if (placed) {
+            break;
+          }
+        }
+      }
+      // Wobble breaker: the theme-consonance, harshness, and parallel vetoes
+      // can shrink the working window's admissible set to two tones (typical
+      // against a sounding theme entry, where the scale degree above strikes a
+      // seventh and the neighbour below a second), locking the line into an
+      // a-b-a-b oscillation. When the last four emitted pitches sit on at
+      // most two values and the snapped anchor would stay on them, displace
+      // the anchor to a farther chord tone -- order-safe against concurrent
+      // voices, consonant with the sounding theme tones, clash-free in the
+      // sustain window, parallel-free -- so the bar states the chord in a new
+      // register instead of wobbling.
+      int bar_pitch_a = -1;
+      int bar_pitch_b = -1;
+      bool trailing_locked = emitted_count >= 4;
+      for (int i = 0; trailing_locked && i < 4; ++i) {
+        const int p = recent_pitches[i];
+        if (p == bar_pitch_a || p == bar_pitch_b) {
+          continue;
+        }
+        if (bar_pitch_a < 0) {
+          bar_pitch_a = p;
+        } else if (bar_pitch_b < 0) {
+          bar_pitch_b = p;
+        } else {
+          trailing_locked = false;
+        }
+      }
+      if (beat >= 2 && trailing_locked && (snapped == bar_pitch_a || snapped == bar_pitch_b)) {
+        int order_ceiling = band_hi;
+        int order_floor = band_lo;
+        for (const ConcurrentMotion& motion : motions) {
+          if (motion.curr < 0) {
+            continue;
+          }
+          if (motion.voice < voice) {
+            order_ceiling = std::min(order_ceiling, motion.curr);
+          } else if (motion.voice > voice) {
+            order_floor = std::max(order_floor, motion.curr);
+          }
+        }
+        const int third = chord.minor ? 3 : 4;
+        const int triad_pc[3] = {((chord.root_pc % 12) + 12) % 12, (chord.root_pc + third) % 12,
+                                 (chord.root_pc + 7) % 12};
+        auto escape_ok = [&](int cand) {
+          if (cand < band_lo || cand > band_hi || cand < order_floor || cand > order_ceiling) {
+            return false;
+          }
+          if (cand == bar_pitch_a || cand == bar_pitch_b) {
+            return false;
+          }
+          const int pc = ((cand % 12) + 12) % 12;
+          if (pc != triad_pc[0] && pc != triad_pc[1] && pc != triad_pc[2]) {
+            return false;
+          }
+          for (const int sounding : theme_pitches) {
+            if (!isConsonantPair(cand, sounding)) {
+              return false;
+            }
+          }
+          for (const int sounding : window_pitches) {
+            const int ic = std::abs(cand - sounding) % 12;
+            if (ic == 1 || ic == 6 || ic == 11) {
+              return false;
+            }
+          }
+          if (audible_from >= 0) {
+            for (const ConcurrentMotion& motion : motions) {
+              if (formsPerfectParallel(audible_from, cand, motion.prev, motion.curr)) {
+                return false;
+              }
+            }
+          }
+          return true;
+        };
+        for (int dist = 3; dist <= 12; ++dist) {
+          bool placed = false;
+          for (const int sgn : {1, -1}) {
+            const int cand = snapped + sgn * dist;
+            if (escape_ok(cand)) {
               snapped = cand;
               placed = true;
               break;
@@ -901,6 +995,8 @@ void appendFigurationWaveBar(ThemeToneRegistry& registry, FigurationSection& sec
       }
       last_pitch = pitch;
       prev_emitted = pitch;
+      recent_pitches[emitted_count % 4] = pitch;
+      ++emitted_count;
       addNote(section.notes, tick, step, pitch);
       // Register this figuration note so a voice placed later in the same window
       // can read what this line sounds and avoid a parallel against it.

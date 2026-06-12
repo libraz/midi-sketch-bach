@@ -832,6 +832,20 @@ void appendFugueSection(FugueAssembly& asm_ctx, int first_bar, int bars,
         out.material.pedal_points.push_back(pedal);
         pushSpan(asm_ctx, static_cast<VoiceId>(pedal_voice), me_start, me_start + 3,
                  VoiceIntent::PedalCarrier);
+        // The remaining voice carries figuration over the pedal. Without it the
+        // pedal cycle is a two-voice texture, and once the subject reaches its
+        // long-note tail the dominant-pedal bars -- the spot that should build
+        // toward the coda -- decay to one or two attacks per bar. The pedal is
+        // registered as a sounding tone first so the wave's consonance
+        // machinery hears it (in minor the diatonic Ab would otherwise sustain
+        // a minor ninth over the held G); the entry tones are already
+        // registered above, so the line is the standard pedal-preparation
+        // counterline.
+        asm_ctx.theme_tones.record(barTick(me_start), static_cast<VoiceId>(pedal_voice),
+                                   pedal_pitch, barTick(kSubjectBars));
+        const int free_voice = 3 - carry_voice - pedal_voice;
+        addFigurationSpan(asm_ctx, static_cast<VoiceId>(free_voice), me_start, me_start + 3, plan,
+                          first_bar, mode, density, fig_offset);
       } else {
         // Plain figuration accompaniment in the highest non-carrying voice.
         addFigurationSpan(asm_ctx, static_cast<VoiceId>(acc_voice), me_start, me_start + 3, plan,

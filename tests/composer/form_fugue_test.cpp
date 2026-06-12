@@ -27,6 +27,7 @@
 #include <array>
 #include <cmath>
 #include <cstdint>
+#include <map>
 #include <set>
 #include <vector>
 
@@ -672,6 +673,78 @@ TEST(FormFugueTest, MiddleEntryKeyPlanRotates) {
     }
   }
   EXPECT_GE(carrying_voices.size(), 2u) << "middle entry does not rotate carrying voice";
+}
+
+// The dominant-pedal cycle must stay a three-voice texture: held pedal,
+// subject statement, and a figuration counterline in the remaining voice.
+// Without the counterline the cycle is two voices, and once the subject
+// reaches its long-note tail the pedal bars decay to one or two attacks per
+// bar -- an audible collapse at the very spot that should build to the coda.
+TEST(FormFugueTest, PedalCycleKeepsThreeVoiceTexture) {
+  for (std::uint16_t bars : {static_cast<std::uint16_t>(84), static_cast<std::uint16_t>(128)}) {
+    for (std::uint32_t seed : {8u, 42u}) {
+      const HarnessFixture fx = buildFixture(FormType::Fugue, seed, false, bars);
+      ASSERT_FALSE(fx.material.pedal_points.empty())
+          << "seed " << seed << " bars " << bars << ": no dominant pedal declared";
+      const PedalPointDecl& pedal = fx.material.pedal_points.front();
+      const Tick window_lo = pedal.start_tick;
+      const Tick window_hi = pedal.start_tick + pedal.duration;
+      const ComposeResult r = Composer{}.run(fx.material, fx.harmony, fx.voice_plan);
+      std::array<int, 3> onsets = {0, 0, 0};
+      for (const auto& note : r.notes) {
+        if (note.start_tick >= window_lo && note.start_tick < window_hi && note.voice < 3) {
+          ++onsets[note.voice];
+        }
+      }
+      int free_voice_onsets = 0;
+      for (int v = 0; v < 3; ++v) {
+        EXPECT_GE(onsets[static_cast<std::size_t>(v)], 1)
+            << "seed " << seed << " bars " << bars << ": voice " << v
+            << " is silent through the pedal cycle";
+        if (v != static_cast<int>(pedal.voice)) {
+          free_voice_onsets = std::max(free_voice_onsets, onsets[static_cast<std::size_t>(v)]);
+        }
+      }
+      // The busier non-pedal voice must be a genuine counterline (the entry
+      // voice thins to long notes in the subject tail, so the floor sits on
+      // the figuration voice).
+      EXPECT_GE(free_voice_onsets, 6)
+          << "seed " << seed << " bars " << bars << ": pedal cycle has no counterline";
+    }
+  }
+}
+
+// A figuration bar must never collapse into a two-pitch oscillation: the
+// consonance / harshness / parallel vetoes against a sounding theme entry can
+// shrink the wave's admissible set to two tones, and the resulting a-b-a-b
+// wobble reads as a stuck mechanism rather than a line (the wave's wobble
+// breaker escapes to a farther chord tone instead).
+TEST(FormFugueTest, FigurationBarsNeverCollapseToTwoPitchOscillation) {
+  for (FormType form : {FormType::Fugue, FormType::PreludeAndFugue}) {
+    for (std::uint32_t seed : {1u, 8u, 12u, 42u, 99u}) {
+      for (std::uint16_t bars : {static_cast<std::uint16_t>(84), static_cast<std::uint16_t>(128)}) {
+        const HarnessFixture fx = buildFixture(form, seed, false, bars);
+        for (const auto& section : fx.material.figuration_sections) {
+          std::map<Tick, std::set<int>> bar_pitches;
+          std::map<Tick, int> bar_counts;
+          for (const auto& note : section.notes) {
+            const Tick bar = note.start_tick / kBar;
+            bar_pitches[bar].insert(static_cast<int>(note.pitch));
+            ++bar_counts[bar];
+          }
+          for (const auto& [bar, pitches] : bar_pitches) {
+            if (bar_counts[bar] < 5) {
+              continue;  // sparse bars (quarter waves, section edges) cannot wobble audibly.
+            }
+            EXPECT_GE(pitches.size(), 3u)
+                << "form " << static_cast<int>(form) << " seed " << seed << " bars " << bars
+                << ": figuration voice " << static_cast<int>(section.voice) << " bar " << bar + 1
+                << " oscillates on " << pitches.size() << " pitches";
+          }
+        }
+      }
+    }
+  }
 }
 
 // The vi middle entry is the relative NATURAL minor — a diatonic degree shift
