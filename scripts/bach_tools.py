@@ -33,6 +33,8 @@ from bachlib import (  # noqa: E402
     ornament_report,
     review,
     schema,
+    subject_stats,
+    subject_synth,
     texture_gate,
 )
 
@@ -46,6 +48,8 @@ _COMMAND_MODULES = (
     schema,
     ornament_report,
     extract_subject,
+    subject_stats,
+    subject_synth,
     extract_entry_plan,
     extract_texture,
     extract_melodic,

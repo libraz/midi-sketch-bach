@@ -28,6 +28,8 @@ that reads them also takes an explicit path flag.
 | `coverage` | Bach-technique coverage report; drift-guards `technique_catalog.json` evidence tokens against live C++ enums/rules. | `technique_catalog.json`, `src/composer/{provenance.h,voice_intent.h,validator.cpp}` | text/JSON to stdout (`--json`, `--out`) | humans / drift guard |
 | `validate` | generated.v1 schema validation (no external jsonschema dep). Exit 0 pass / 1 mismatch / 2 IO error. | generated.json, `../bach-mcp/schema/generated.v1.json` | exit code + messages | C++ `schema_validation_test` (via `validate_generated_json.py`) |
 | `extract-subject` | WTC I fugue-subject features from Algomus labels (external clone; not vendored). | `../algomus-data`, `../bach-mcp/data/reference` | `build/algomus_wtc_subject_features.json` | human analysis |
+| `extract-subject-stats` | Fugue-subject window statistics (2nd-order interval Markov, rhythm bigrams, contour archetypes, Ryden feature distributions) from Algomus labels + a monophonic-prefix heuristic over corpus fugue movements. | `../algomus-data`, `../bach-mcp/data/reference` | intermediate JSON (default `backup/subject_stats.json`, not vendored) | offline subject synthesis |
+| `synth-subjects` | Offline fugue-subject pool synthesis: deterministic seeded sampling from the subject-window statistics under the catalog hard constraints (16 positions, 71,72 tail, register envelope, interval whitelist, exact 4-bar rhythm), degeneracy guards, KL-shape ranking with a trigram-NLL floor, dedup against the shipped subjects. | `backup/subject_stats.json`, `src/composer/minor_material.h` (read-only) | intermediate JSON (default `backup/subject_pool.json`, not vendored) | subject qualification harness |
 | `extract-entry-plan` | Fugue entry-plan stats (entry intervals, episode lengths, stretto rate) from `.dez`/CSV annotations. | annotation files | `src/composer/tables/entry_plan_stats.inc` (checked in) + report to stdout | C++ `form_fugue.cpp` |
 | `extract-texture` | Texture bands from corpus fugues or generated.json files. | `--corpus` dir or generated.json | `src/composer/tables/texture_stats.inc` (checked in) + report to stdout | C++ tables |
 | `extract-melodic` | Corpus melodic probability tables (scale degree, interval Markov, Gaussian fit). | `../bach-mcp/data/reference` | `src/composer/tables/{scale_degree_0th,interval_markov,gaussian_fit}.inc` (checked in) | C++ `melodic_tables.h` |
@@ -47,6 +49,8 @@ that reads them also takes an explicit path flag.
 | `texture_metrics.py` / `texture_gate.py` / `completion.py` | Texture diagnostics shared lib + fugue gates + completion report |
 | `coverage.py`, `schema.py`, `audio.py`, `review.py` | coverage / generated.v1 validation / WAV + listening packet / segregation review |
 | `extract_subject.py`, `extract_entry_plan.py`, `extract_texture.py`, `extract_melodic.py` | corpus statistics extraction (`.inc` table generators) |
+| `subject_stats.py` | fugue-subject window statistics (interval trigram, rhythm bigrams, contour archetypes, Ryden distributions) for offline subject synthesis; outputs intermediate JSON only |
+| `subject_synth.py` | offline fugue-subject pool synthesizer (constrained Markov sampling, degeneracy guards, KL-shape ranking, dedup); outputs intermediate JSON only |
 
 Tests import these modules directly (`import bachlib as rpc` for the
 mirror/predictor surface).
