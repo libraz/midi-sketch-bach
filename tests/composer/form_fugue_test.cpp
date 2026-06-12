@@ -34,6 +34,7 @@
 #include "composer/character_profile.h"
 #include "composer/composer.h"
 #include "composer/figuration.h"
+#include "composer/figuration_palette.h"
 #include "composer/form_director.h"
 #include "composer/harmonic_plan.h"
 #include "composer/harness_fixture.h"
@@ -361,14 +362,16 @@ std::vector<MaterialNote> bassSupportNotes(const HarnessFixture& fx, VoiceId voi
 }
 }  // namespace
 
-// The V2 bass support under a middle entry is a verbatim Material scalar-wave
-// figuration (FigurationCarrier), placed after the V1 accompaniment so its span
-// index follows it. The whole piece must validate clean.
+// A plain middle entry is accompanied by the recurring countersubject in the
+// highest non-carrying voice (CountersubjectCarrier -- the designed
+// consonant/contrary line, not a reactive wave), and the V2 bass support
+// (FigurationCarrier) is placed after it so its span index follows. The whole
+// piece must validate clean.
 TEST(FormFugueTest, SelectedMiddleEntriesAddBassHarmonicSupportAfterAccompaniment) {
   const HarnessFixture fx = buildFixture(FormType::Fugue, 2, false, 84);
   const int middle_entry_bar = 12;
 
-  int figuration_index = -1;
+  int accompaniment_index = -1;
   int support_index = -1;
   for (std::size_t i = 0; i < fx.voice_plan.spans.size(); ++i) {
     const auto& span = fx.voice_plan.spans[i];
@@ -377,17 +380,17 @@ TEST(FormFugueTest, SelectedMiddleEntriesAddBassHarmonicSupportAfterAccompanimen
     if (start_bar != middle_entry_bar || end_bar != middle_entry_bar + 4) {
       continue;
     }
-    if (span.intent == VoiceIntent::FigurationCarrier && span.voice == 1) {
-      figuration_index = static_cast<int>(i);
+    if (span.intent == VoiceIntent::CountersubjectCarrier && span.voice == 1) {
+      accompaniment_index = static_cast<int>(i);
     }
     if (span.intent == VoiceIntent::FigurationCarrier && span.voice == 2) {
       support_index = static_cast<int>(i);
     }
   }
 
-  ASSERT_GE(figuration_index, 0);
+  ASSERT_GE(accompaniment_index, 0);
   ASSERT_GE(support_index, 0);
-  EXPECT_GT(support_index, figuration_index);
+  EXPECT_GT(support_index, accompaniment_index);
 
   const ComposeResult r = Composer{}.run(fx.material, fx.harmony, fx.voice_plan);
   EXPECT_TRUE(r.validation.failures.empty())
@@ -563,22 +566,52 @@ TEST(FormFugueTest, EntrySchedulerUsesDecileIntervalsForLongFugue) {
   })) << "entry scheduler remained fixed at 8 bars";
 }
 
-TEST(FormFugueTest, EpisodesUseAlternatingFortspinnungSequences) {
+// The episode Fortspinnung is a 2-bar model that FILLS its stride (no
+// one-motif-per-2-bars sputter) and is restated one diatonic step down per
+// stride, in lockstep with the per-bar descending-fifths chord chain (a chord
+// pair descends by a second every 2 bars). Consecutive strides of the same
+// episode therefore open a step lower than the previous one.
+TEST(FormFugueTest, EpisodesUseChainLockedFortspinnungSequences) {
   const HarnessFixture fx = buildFixture(FormType::Fugue, 42, false, 84);
   ASSERT_GE(fx.material.sequence_templates.size(), 2u);
 
-  bool saw_ascending = false;
-  bool saw_descending = false;
-  for (const auto& tmpl : fx.material.sequence_templates) {
+  // Episode windows: consecutive strides are compared only within ONE episode
+  // (adjacent windows can put two episodes back to back, and a new episode
+  // re-aims its seed at its own target station).
+  const auto same_episode = [&fx](Tick a, Tick b) {
+    for (const auto& span : fx.voice_plan.spans) {
+      if (span.intent == VoiceIntent::FortspinnungSpan && span.start_tick <= a &&
+          b < span.end_tick) {
+        return true;
+      }
+    }
+    return false;
+  };
+
+  const Tick stride = 2 * kBar;
+  for (std::size_t i = 0; i < fx.material.sequence_templates.size(); ++i) {
+    const auto& tmpl = fx.material.sequence_templates[i];
     EXPECT_EQ(tmpl.voice, 0);
-    EXPECT_EQ(tmpl.seed_pitches.size(), 4u);
-    EXPECT_EQ(tmpl.seed_durations.size(), 4u);
     EXPECT_GE(tmpl.num_steps, 1);
-    saw_ascending = saw_ascending || tmpl.pattern == SequencePattern::AscendingStep;
-    saw_descending = saw_descending || tmpl.pattern == SequencePattern::DescendingStep;
+    ASSERT_EQ(tmpl.seed_pitches.size(), tmpl.seed_durations.size());
+    Tick covered = 0;
+    for (const Tick dur : tmpl.seed_durations) {
+      covered += dur;
+    }
+    EXPECT_EQ(covered, stride) << "template " << i << " does not fill its 2-bar stride";
+    if (i > 0) {
+      const auto& prev = fx.material.sequence_templates[i - 1];
+      if (prev.target_start_tick + stride == tmpl.target_start_tick &&
+          same_episode(prev.target_start_tick, tmpl.target_start_tick)) {
+        const int drop = static_cast<int>(prev.seed_pitches.front()) -
+                         static_cast<int>(tmpl.seed_pitches.front());
+        EXPECT_GE(drop, 1) << "stride at tick " << tmpl.target_start_tick
+                           << " does not descend against the previous stride";
+        EXPECT_LE(drop, 4) << "stride at tick " << tmpl.target_start_tick
+                           << " leaps instead of stepping down";
+      }
+    }
   }
-  EXPECT_TRUE(saw_ascending);
-  EXPECT_TRUE(saw_descending);
 
   const ComposeResult r = Composer{}.run(fx.material, fx.harmony, fx.voice_plan);
   EXPECT_TRUE(r.validation.failures.empty())
@@ -714,12 +747,15 @@ TEST(FormFugueTest, PedalCycleKeepsThreeVoiceTexture) {
   }
 }
 
-// A figuration bar must never collapse into a two-pitch oscillation: the
-// consonance / harshness / parallel vetoes against a sounding theme entry can
-// shrink the wave's admissible set to two tones, and the resulting a-b-a-b
-// wobble reads as a stuck mechanism rather than a line (the wave's wobble
-// breaker escapes to a farther chord tone instead).
-TEST(FormFugueTest, FigurationBarsNeverCollapseToTwoPitchOscillation) {
+// A figuration line must never STAY collapsed into a two-pitch oscillation:
+// the consonance / harshness / parallel vetoes against a sounding theme entry
+// can shrink the wave's admissible set to two tones, and an a-b-a-b wobble
+// that persists across bars reads as a stuck mechanism rather than a line
+// (the wave's wobble breaker escapes to a farther chord tone instead). A
+// SINGLE such bar is admissible -- a one-bar written-out alternation over a
+// stable chord is an idiomatic trill figure -- so only two or more
+// consecutive collapsed bars fail.
+TEST(FormFugueTest, FigurationBarsNeverStayCollapsedOnTwoPitchOscillation) {
   for (FormType form : {FormType::Fugue, FormType::PreludeAndFugue}) {
     for (std::uint32_t seed : {1u, 8u, 12u, 42u, 99u}) {
       for (std::uint16_t bars : {static_cast<std::uint16_t>(84), static_cast<std::uint16_t>(128)}) {
@@ -732,14 +768,16 @@ TEST(FormFugueTest, FigurationBarsNeverCollapseToTwoPitchOscillation) {
             bar_pitches[bar].insert(static_cast<int>(note.pitch));
             ++bar_counts[bar];
           }
+          Tick prev_collapsed_bar = -2;
           for (const auto& [bar, pitches] : bar_pitches) {
-            if (bar_counts[bar] < 5) {
+            if (bar_counts[bar] < 5 || pitches.size() >= 3u) {
               continue;  // sparse bars (quarter waves, section edges) cannot wobble audibly.
             }
-            EXPECT_GE(pitches.size(), 3u)
+            EXPECT_NE(bar, prev_collapsed_bar + 1)
                 << "form " << static_cast<int>(form) << " seed " << seed << " bars " << bars
-                << ": figuration voice " << static_cast<int>(section.voice) << " bar " << bar + 1
-                << " oscillates on " << pitches.size() << " pitches";
+                << ": figuration voice " << static_cast<int>(section.voice) << " bars " << bar
+                << "-" << bar + 1 << " stay collapsed on a two-pitch oscillation";
+            prev_collapsed_bar = bar;
           }
         }
       }
@@ -1180,23 +1218,37 @@ TEST(FormFugueTest, DevelopmentAvoidsParallelDissonanceChains) {
 // tier (eighths / sixteenths), locked from the material: among the voice-1
 // figuration sections of a long fugue, both a uniform-eighth section and a
 // uniform-sixteenth section must exist.
+// The V1 episode counterlines alternate their subdivision tier across
+// episodes (eighths / sixteenths), keeping the development's counterlines
+// audibly varied and the piece's sixteenth-note duration mass intact under
+// the full-coverage V0 sequence.
 TEST(FormFugueTest, EpisodeCounterlinesAlternateSubdivisionTiers) {
   for (std::uint32_t seed : {1u, 5u, 42u}) {
     const HarnessFixture fx = buildFixture(FormType::Fugue, seed, /*is_minor=*/false, 64);
     bool saw_eighths = false;
     bool saw_sixteenths = false;
-    for (const auto& section : fx.material.figuration_sections) {
-      if (section.voice != 1 || section.notes.empty())
+    for (const auto& span : fx.voice_plan.spans) {
+      if (span.intent != VoiceIntent::FortspinnungSpan) {
         continue;
-      // The subdivision tier survives as the section's MINIMUM duration (the
-      // same-pitch coalescing pass only lengthens notes, never shortens them).
-      Tick min_dur = section.notes.front().duration;
-      for (const auto& n : section.notes)
-        min_dur = std::min(min_dur, n.duration);
-      if (min_dur == kTicksPerBeat / 2)
-        saw_eighths = true;
-      if (min_dur == kTicksPerBeat / 4)
-        saw_sixteenths = true;
+      }
+      for (const auto& section : fx.material.figuration_sections) {
+        if (section.voice != 1 || section.notes.empty() || section.start_tick != span.start_tick ||
+            section.end_tick != span.end_tick) {
+          continue;
+        }
+        // Coalescing only lengthens notes, so the subdivision tier survives
+        // as the section's MINIMUM duration.
+        Tick min_dur = section.notes.front().duration;
+        for (const auto& n : section.notes) {
+          min_dur = std::min(min_dur, n.duration);
+        }
+        if (min_dur == kTicksPerBeat / 2) {
+          saw_eighths = true;
+        }
+        if (min_dur == kTicksPerBeat / 4) {
+          saw_sixteenths = true;
+        }
+      }
     }
     EXPECT_TRUE(saw_eighths) << "seed " << seed;
     EXPECT_TRUE(saw_sixteenths) << "seed " << seed;
@@ -1294,6 +1346,132 @@ TEST(FormFuguePreludeAndFugueTest, LongFormStaysParallelFreeThroughOrnamentPass)
     params.ticks_per_bar = fx.harmony.ticksPerBar();
     applyOrnamentPass(r, params);
     EXPECT_LE(pfCountParallelPerfects(r.notes), 2) << "seed " << seed;
+  }
+}
+
+// --- 12. Wave reactive-layer budget -------------------------------------------
+// The figuration wave's reactive layers (parallel displacement, wobble
+// breaker, harsh/parallel step adjustment, order clamp) are escape hatches: a
+// layer that fires often means the DESIGN handed the wave a hostile context.
+// This pins the per-piece firing budget so design changes that starve the
+// wave are caught, and documents the baseline the cell-realization work
+// shrinks toward zero.
+TEST(FormFugueTest, WaveVetoLayersStayWithinDesignBudget) {
+  for (FormType form : {FormType::Fugue, FormType::PreludeAndFugue}) {
+    for (std::uint32_t seed : {1u, 8u, 12u, 42u, 99u}) {
+      waveVetoStats().reset();
+      const HarnessFixture fx = buildFixture(form, seed, /*is_minor=*/false, 128);
+      ASSERT_FALSE(fx.material.figuration_sections.empty());
+      const WaveVetoStats stats = waveVetoStats();
+      // Budgets are the measured per-piece maxima (128 bars) plus ~30%
+      // headroom. The anchor-displacement and order-clamp layers measure
+      // ZERO under the designed chord plans -- pinned tight so any design
+      // change that re-awakens them is flagged.
+      EXPECT_LE(stats.anchor_parallel_displaced, 2)
+          << "form " << static_cast<int>(form) << " seed " << seed;
+      EXPECT_LE(stats.order_clamp_changed, 2)
+          << "form " << static_cast<int>(form) << " seed " << seed;
+      EXPECT_LE(stats.wobble_breaker_fired, 30)
+          << "form " << static_cast<int>(form) << " seed " << seed;
+      EXPECT_LE(stats.step_parallel_adjusted, 55)
+          << "form " << static_cast<int>(form) << " seed " << seed;
+      EXPECT_LE(stats.step_harsh_adjusted, 175)
+          << "form " << static_cast<int>(form) << " seed " << seed;
+      EXPECT_LE(stats.window_expanded, 175)
+          << "form " << static_cast<int>(form) << " seed " << seed;
+    }
+  }
+  waveVetoStats().reset();
+}
+
+// --- 13. Tonal-plan regressions ----------------------------------------------
+// The fugue's per-bar chord plan is a piece-level tonal design: middle-entry
+// bars open on the entry's related-key chord (dominant prolongation in the
+// pedal cycle), and every episode bar is one link of a diatonic
+// descending-fifths chain built backward from the chord on the bar right
+// after the episode, so each episode drives into the next station.
+TEST(FormFugueTest, TonalPlanChainsEpisodesIntoStations) {
+  // Predecessor (a diatonic fifth above) of a chain chord root; mirrors the
+  // form's chain vocabulary (major folds the B-rooted diminished link out,
+  // minor walks the lament circle with the harmonic-minor dominant).
+  const auto fifth_above = [](int root, bool minor) {
+    if (minor) {
+      switch (root) {
+        case 0:
+          return 7;
+        case 7:
+          return 8;
+        case 8:
+          return 3;
+        case 3:
+          return 10;
+        case 10:
+          return 5;
+        case 5:
+          return 0;
+        default:
+          return 7;
+      }
+    }
+    switch (root) {
+      case 0:
+        return 7;
+      case 7:
+        return 2;
+      case 2:
+        return 9;
+      case 9:
+        return 4;
+      case 4:
+        return 5;
+      case 5:
+        return 0;
+      default:
+        return 7;
+    }
+  };
+  constexpr std::array<std::uint8_t, 3> voice_keys = {7, 9, 5};  // V0->V, V1->vi, V2->IV.
+
+  for (bool minor : {false, true}) {
+    for (std::uint32_t seed : {8u, 42u}) {
+      for (std::uint16_t bars : {static_cast<std::uint16_t>(84), static_cast<std::uint16_t>(128)}) {
+        const HarnessFixture fx = buildFixture(FormType::Fugue, seed, minor, bars);
+        const Tick pedal_window_lo =
+            fx.material.pedal_points.empty() ? 0 : fx.material.pedal_points.front().start_tick;
+
+        // The answer bars sit on the dominant.
+        EXPECT_EQ(chordRootAt(fx, 4 * kBar), 7)
+            << "seed " << seed << (minor ? " minor" : " major") << ": answer bars not dominant";
+
+        for (const auto& span : fx.voice_plan.spans) {
+          if (span.intent == VoiceIntent::MiddleEntryCarrier) {
+            const bool pedal_window =
+                !fx.material.pedal_points.empty() && span.start_tick == pedal_window_lo;
+            const int expected =
+                pedal_window
+                    ? 7
+                    : ((minor && span.voice != 2)
+                           ? 7  // minor V and vi entries take dominant-set support.
+                           : static_cast<int>(voice_keys[static_cast<std::size_t>(span.voice)]));
+            EXPECT_EQ(chordRootAt(fx, span.start_tick), expected)
+                << "seed " << seed << (minor ? " minor" : " major") << " bars " << bars
+                << ": entry at bar " << (span.start_tick / kBar)
+                << " does not open on its station chord";
+          }
+          if (span.intent == VoiceIntent::FortspinnungSpan) {
+            const int first_bar = static_cast<int>(span.start_tick / kBar);
+            const int last_bar = static_cast<int>(span.end_tick / kBar) - 1;
+            for (int bar = first_bar; bar <= last_bar; ++bar) {
+              const int next_root = chordRootAt(fx, static_cast<Tick>(bar + 1) * kBar);
+              const int expected = fifth_above(next_root, minor);
+              EXPECT_EQ(chordRootAt(fx, static_cast<Tick>(bar) * kBar), expected)
+                  << "seed " << seed << (minor ? " minor" : " major") << " bars " << bars
+                  << ": episode bar " << bar << " breaks the descending-fifths chain";
+            }
+          }
+        }
+      }
+    }
   }
 }
 

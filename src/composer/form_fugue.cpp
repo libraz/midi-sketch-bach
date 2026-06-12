@@ -10,7 +10,6 @@
 #include "composer/form_builders.h"
 #include "composer/material.h"
 #include "composer/minor_material.h"
-#include "composer/motif_ops.h"
 #include "composer/span.h"
 #include "composer/subject_catalog.h"
 #include "composer/texture_helpers.h"
@@ -398,6 +397,185 @@ std::vector<ChordSpec> buildChordPlan(int total_bars, Mode mode, int harm_idx) {
   return plan;
 }
 
+// --- Fugue tonal plan --------------------------------------------------------
+// The fugue's harmony is a piece-level tonal design rather than a rotating
+// 4-bar loop: every region states the function the form assigns to it.
+//   exposition    subject / third-entry bars affirm the home key; the answer
+//                 bars sit on the dominant (the real answer IS the dominant
+//                 statement).
+//   middle entry  the 4 entry bars state the entry's related key with one
+//                 neighbouring pre-dominant colour.
+//   episode       a diatonic descending-fifths chain constructed BACKWARD from
+//                 the next station's key, so every episode drives into the
+//                 following entry (or the coda's home return) instead of
+//                 circling a generic loop.
+//   pedal cycle   dominant prolongation under the held pedal.
+//   coda          home cadence (the final two bars stay pinned V -> I).
+// Every chord is spelled inside the working diatonic vocabulary (major: the
+// diatonic triads with the B-rooted diminished folded out of the chain; minor:
+// the harmonic-minor vocabulary kHarmonyPatternsMinor speaks -- i / III / iv /
+// V / VI / VII), so figuration anchored on these chords keeps the
+// figuration-stays-diatonic contract.
+
+/// @brief Diatonic triad quality for a chord root in the home key.
+ChordSpec diatonicChord(int root_pc, Mode mode) {
+  const bool minor_triad = (mode == Mode::Minor) ? (root_pc == 0 || root_pc == 5)
+                                                 : (root_pc == 2 || root_pc == 4 || root_pc == 9);
+  return ChordSpec{static_cast<std::uint8_t>(root_pc), minor_triad};
+}
+
+/// @brief Root of the diatonic chord a fifth above `root_pc` (its predecessor
+/// in a descending-fifths chain).
+///
+/// Major walks the closed cycle C<-G<-Dm<-Am<-Em<-F<-C (the B-rooted
+/// diminished link is folded into an F->Em step, which keeps every chain chord
+/// a representable diatonic triad); minor walks i<-V<-VI<-III<-VII<-iv<-i, the
+/// lament circle with the harmonic-minor dominant. Roots outside the cycle
+/// (the minor-mode vi station) enter through the dominant.
+int fifthAboveRoot(int root_pc, Mode mode) {
+  if (mode == Mode::Minor) {
+    switch (root_pc) {
+      case 0:
+        return 7;
+      case 7:
+        return 8;
+      case 8:
+        return 3;
+      case 3:
+        return 10;
+      case 10:
+        return 5;
+      case 5:
+        return 0;
+      default:
+        return 7;
+    }
+  }
+  switch (root_pc) {
+    case 0:
+      return 7;
+    case 7:
+      return 2;
+    case 2:
+      return 9;
+    case 9:
+      return 4;
+    case 4:
+      return 5;
+    case 5:
+      return 0;
+    default:
+      return 7;
+  }
+}
+
+/// @brief 4-bar harmonic progression for an entry window, keyed by the entry's
+/// related key (home / V / vi / IV), spelled in home-key diatonic chords.
+///
+/// Outer bars carry the entry key's tonic function; the inner bars add its
+/// subdominant/dominant colour from inside the home vocabulary, so the
+/// accompaniment states the entry's key without leaving the working scale.
+/// The minor-mode vi entry (a degree-shifted line whose pitch set is the home
+/// MAJOR scale) gets dominant-set support: V is the only minor-vocabulary
+/// triad fully inside that line's pitch world.
+std::array<ChordSpec, 4> entryProgression(std::uint8_t key_pc, Mode mode) {
+  if (mode == Mode::Minor) {
+    switch (key_pc) {
+      case 7:
+        return {{{7, false}, {0, true}, {8, false}, {7, false}}};
+      case 9:
+        return {{{7, false}, {0, true}, {7, false}, {7, false}}};
+      case 5:
+        return {{{5, true}, {0, true}, {10, false}, {5, true}}};
+      default:
+        return {{{0, true}, {5, true}, {7, false}, {0, true}}};
+    }
+  }
+  switch (key_pc) {
+    case 7:
+      return {{{7, false}, {0, false}, {9, true}, {7, false}}};
+    case 9:
+      return {{{9, true}, {2, true}, {4, true}, {9, true}}};
+    case 5:
+      return {{{5, false}, {0, false}, {2, true}, {5, false}}};
+    default:
+      return {{{0, false}, {5, false}, {7, false}, {0, false}}};
+  }
+}
+
+/// @brief Build the fugue's per-bar chord plan from its tonal stations.
+///
+/// `windows` / `pedal_cycle` are the already-computed development layout; bars
+/// are section-relative. Entry windows take their key's progression (the pedal
+/// cycle takes dominant prolongation instead), episode windows take the
+/// backward descending-fifths chain into the next station, and the coda takes
+/// the home progression. The caller pins the final V -> I afterwards.
+std::vector<ChordSpec> buildFugueTonalPlan(int bars, Mode mode, int exposition_bars, int coda_bars,
+                                           const std::vector<DevelopmentWindow>& windows,
+                                           int pedal_cycle) {
+  const bool minor = (mode == Mode::Minor);
+  std::vector<ChordSpec> plan(static_cast<std::size_t>(bars), ChordSpec{0, minor});
+  const auto home_prog = entryProgression(0, mode);
+  const auto dominant_prog = entryProgression(7, mode);
+  for (int bar = 0; bar < std::min(bars, exposition_bars); ++bar) {
+    const bool answer_bars = (bar >= 4 && bar < 8);
+    plan[static_cast<std::size_t>(bar)] = answer_bars
+                                              ? dominant_prog[static_cast<std::size_t>(bar - 4)]
+                                              : home_prog[static_cast<std::size_t>(bar % 4)];
+  }
+  const auto carry_voice_for = [&](int cycle) {
+    const int rotation_voice = cycle % 3;
+    return (cycle == pedal_cycle && rotation_voice == 1) ? 0 : rotation_voice;
+  };
+  // Pass 1: station chords (entries and the coda), so every episode's target
+  // bar is already filled when the chains are built.
+  for (int cycle = 0; cycle < static_cast<int>(windows.size()); ++cycle) {
+    const DevelopmentWindow& window = windows[static_cast<std::size_t>(cycle)];
+    if (!window.has_entry) {
+      continue;
+    }
+    const std::uint8_t key_pc = kVoiceKeyPc[static_cast<std::size_t>(carry_voice_for(cycle))];
+    // The pedal window prolongs the dominant by alternating V with the tonic
+    // 6/4 colour over the held pedal (the textbook dominant-pedal harmony).
+    // The alternation also keeps the counterline's admissible chord-tone set
+    // wide: a window of straight V chords starves the wave against the
+    // entry's subject tail (two-tone wobble).
+    const std::array<ChordSpec, 4> prog =
+        (cycle == pedal_cycle)
+            ? std::array<ChordSpec, 4>{{{7, false}, {0, minor}, {7, false}, {0, minor}}}
+            : entryProgression(key_pc, mode);
+    for (int k = 0; k < kSubjectBars && window.entry_start + k < bars; ++k) {
+      plan[static_cast<std::size_t>(window.entry_start + k)] = prog[static_cast<std::size_t>(k)];
+    }
+  }
+  for (int k = 0; k < coda_bars && k < 4; ++k) {
+    const int bar = bars - coda_bars + k;
+    if (bar >= 0 && bar < bars) {
+      plan[static_cast<std::size_t>(bar)] = home_prog[static_cast<std::size_t>(k)];
+    }
+  }
+  // Pass 2: episode chains, in reverse window order. Each chain is built
+  // backward from the root of the chord on the bar RIGHT AFTER the episode --
+  // the next entry's opening chord, the coda's home return, or (for an episode
+  // followed by a trailing episode-only window) that window's first chain
+  // chord, which the reverse order has already placed. Reading the actual next
+  // bar keeps consecutive episodes one unbroken chain.
+  for (int cycle = static_cast<int>(windows.size()) - 1; cycle >= 0; --cycle) {
+    const DevelopmentWindow& window = windows[static_cast<std::size_t>(cycle)];
+    const int after_end = window.episode_start + window.episode_len;
+    int root = (after_end < bars)
+                   ? static_cast<int>(plan[static_cast<std::size_t>(after_end)].root_pc)
+                   : 0;
+    for (int k = window.episode_len - 1; k >= 0; --k) {
+      root = fifthAboveRoot(root, mode);
+      if (window.episode_start + k < bars) {
+        plan[static_cast<std::size_t>(window.episode_start + k)] = diatonicChord(root, mode);
+      }
+    }
+  }
+  return plan;
+}
+
 /// @brief Emit the HarmonicPlan ChordEvents from a per-bar chord plan.
 void emitHarmony(HarnessFixture& out, const std::vector<ChordSpec>& plan, Mode mode, int base_bar) {
   out.harmony.tonic_pc = 0;
@@ -432,7 +610,6 @@ void appendFugueSection(FugueAssembly& asm_ctx, int first_bar, int bars,
                         const ResolvedRequest& req) {
   HarnessFixture& out = *asm_ctx.out;
   const Mode mode = req.mode;
-  const int harm_idx = static_cast<int>(req.seed % 4);
   const int fig_offset = static_cast<int>(req.seed % 4);
 
   // Qualified-catalog subject index (character class + seed) -> the V0-band
@@ -450,14 +627,6 @@ void appendFugueSection(FugueAssembly& asm_ctx, int first_bar, int bars,
   const int exposition_bars = short_form ? 8 : 12;
   constexpr int coda_bars = 4;
 
-  // Per-bar chord plan for the whole fugue (in absolute bars from first_bar).
-  // The final two bars are pinned to a V -> I authentic cadence so the explicit
-  // cadential bass (dominant then tonic) is harmonically consistent and the
-  // cadence_voice_leading rule reads a true V->I.
-  std::vector<ChordSpec> plan = buildChordPlan(bars, mode, harm_idx);
-  plan[static_cast<std::size_t>(bars - 2)] = ChordSpec{7, false};                // V (G major).
-  plan[static_cast<std::size_t>(bars - 1)] = ChordSpec{0, mode == Mode::Minor};  // I.
-  emitHarmony(out, plan, mode, first_bar);
   const int development_bars = bars - exposition_bars - coda_bars;
   const std::vector<DevelopmentWindow> development_windows =
       development_bars > 0
@@ -487,6 +656,17 @@ void appendFugueSection(FugueAssembly& asm_ctx, int first_bar, int bars,
                               : (variable_entry_schedule && !entry_cycles.empty()
                                      ? entry_cycles.back()
                                      : static_cast<int>(development_windows.size()) - 1);
+
+  // Per-bar chord plan for the whole fugue (section-relative bars), derived
+  // from the tonal stations the layout above fixes. The final two bars are
+  // pinned to a V -> I authentic cadence so the explicit cadential bass
+  // (dominant then tonic) is harmonically consistent and the
+  // cadence_voice_leading rule reads a true V->I.
+  std::vector<ChordSpec> plan =
+      buildFugueTonalPlan(bars, mode, exposition_bars, coda_bars, development_windows, pedal_cycle);
+  plan[static_cast<std::size_t>(bars - 2)] = ChordSpec{7, false};                // V (G major).
+  plan[static_cast<std::size_t>(bars - 1)] = ChordSpec{0, mode == Mode::Minor};  // I.
+  emitHarmony(out, plan, mode, first_bar);
 
   // === EXPOSITION ===========================================================
   // Each thematic statement carries the subject in ONE voice band; at most ONE
@@ -847,9 +1027,19 @@ void appendFugueSection(FugueAssembly& asm_ctx, int first_bar, int bars,
         addFigurationSpan(asm_ctx, static_cast<VoiceId>(free_voice), me_start, me_start + 3, plan,
                           first_bar, mode, density, fig_offset);
       } else {
-        // Plain figuration accompaniment in the highest non-carrying voice.
-        addFigurationSpan(asm_ctx, static_cast<VoiceId>(acc_voice), me_start, me_start + 3, plan,
-                          first_bar, mode, density, fig_offset);
+        // The recurring countersubject rides in the highest non-carrying
+        // voice -- the same designed consonant/contrary mechanism the
+        // exposition answer carries -- rather than a reactive figuration
+        // wave. The entry window is the most constraint-hostile context the
+        // wave faces (its vetoes starve against the verbatim entry line); a
+        // counterline derived FROM the entry is consonant and contrary by
+        // construction, and restating the countersubject at every middle
+        // entry returns a recurring identity the ear can track through the
+        // development.
+        append_countersubject_from(decl.notes, acc_voice, barTick(me_start),
+                                   barTick(me_start + kSubjectBars));
+        pushSpan(asm_ctx, static_cast<VoiceId>(acc_voice), me_start, me_start + 3,
+                 VoiceIntent::CountersubjectCarrier);
       }
       // When the middle entry is carried by V2, the figuration accompaniment
       // lands on V0 and the middle voice would otherwise rest. Fill V1 with
@@ -874,92 +1064,172 @@ void appendFugueSection(FugueAssembly& asm_ctx, int first_bar, int bars,
       }
     }
 
-    // --- Episode (4 bars): a Fortspinnung sequence derived from the subject
-    //     head, transposed per the character's motif operation, in V0 with one
-    //     band-confined accompaniment voice below. ---
+    // --- Episode: a full-coverage Fortspinnung sequence in V0, restated one
+    //     diatonic step DOWN per 2-bar stride in lockstep with the per-bar
+    //     descending-fifths chord chain (a chord pair descends by a second
+    //     every 2 bars, so the melodic sequence and the harmony move
+    //     together), aimed so the final stride lands around the next
+    //     station's chord in the V0 band. ---
     const int ep_start = first_bar + window.episode_start;
     const int ep_len = window.episode_len;
     if (ep_len > 0) {
-      const motif_ops::EpisodeMotifTransform transform =
-          motif_ops::characterToTransform(req.character);
-      Tick seed_dur = kTicksPerBeat / 2;  // eighths (Severe / Playful / Noble).
-      if (transform == motif_ops::EpisodeMotifTransform::Diminish) {
-        seed_dur = kTicksPerBeat / 4;  // Restless: diminished (sixteenths).
-      }
-      // Seed motif: the subject head (4 notes) rebuilt DIATONICALLY low in the
-      // V0 band. The head's semitone intervals are mapped to scale degrees and
-      // re-rooted on an in-scale base, because a real (semitone) transposition
-      // of the head plus a real +/-2-semitone step chain walked every episode
-      // out of the key (B-C#-D#-E, then C#-D#-F-F#, ...) -- a whole-tone smear
-      // that reads as the piece breaking down from the first episode onward.
-      // The base also shifts by one scale degree per cycle (mod 3) so the
-      // episodes vary in register instead of repeating one figure verbatim.
-      int seed_base = kBandLo[0] + 4;
-      while (!detail::inScale(seed_base, mode)) {
-        ++seed_base;
-      }
-      seed_base = scaleUp(seed_base, cycle % 3, mode);
-      // Semitone interval -> diatonic degree count (|rel| <= 12).
+      const auto degree_shift = [&](int base, int degrees) {
+        return degrees >= 0 ? scaleUp(base, degrees, mode) : scaleDown(base, -degrees, mode);
+      };
+      // Subject head rebuilt DIATONICALLY (semitone interval -> scale degrees,
+      // |rel| <= 12): a real semitone transposition chained per step would walk
+      // every episode out of the key (a whole-tone smear). The degrees are then
+      // FOLDED into the compact ambit [-2, +4]: the V0 band is ~10 diatonic
+      // degrees wide, and an unfolded octave-leaping head plus the stride
+      // descent would clamp into band-edge plateaus, so wide head intervals
+      // keep their pitch-class contour an octave closer.
       constexpr std::array<int, 13> kSemisToDegrees = {0, 1, 1, 2, 2, 3, 3, 4, 5, 5, 6, 6, 7};
-      std::array<int, 4> seed_pitch{};
+      std::array<int, 4> head_deg{};
       for (int note = 0; note < 4; ++note) {
         const int rel = static_cast<int>(subj_pat[static_cast<std::size_t>(note)]) -
                         static_cast<int>(subj_pat[0]);
         const int degrees = kSemisToDegrees[static_cast<std::size_t>(std::min(std::abs(rel), 12))];
-        const int diatonic =
-            (rel >= 0) ? scaleUp(seed_base, degrees, mode) : scaleDown(seed_base, degrees, mode);
-        seed_pitch[static_cast<std::size_t>(note)] = std::clamp(diatonic, kBandLo[0], kBandHi[0]);
+        int folded = (rel >= 0) ? degrees : -degrees;
+        while (folded > 3) {
+          folded -= 7;
+        }
+        while (folded < -3) {
+          folded += 7;
+        }
+        head_deg[static_cast<std::size_t>(note)] = folded;
       }
-      // One SequenceTemplate per step (num_steps = 1 each), every step's seed
-      // transposed by one scale DEGREE per step (direction alternates by
-      // cycle). Single-step templates keep the diatonic walk while the shared
-      // replay/validator machinery (which transposes multi-step templates by
-      // raw semitones) stays untouched -- the verbatim step-0 check in
-      // sequence_pattern_consistency still covers every emitted note.
-      const bool ascending = (cycle % 2 == 0);
-      const int steps = std::max(1, ep_len / 2);
-      // Keep the whole walk inside the V0 band: shift the seed away from the
-      // boundary the sequence moves toward, so the final step never clamps
-      // into a repeated-pitch plateau (a clamped descending walk otherwise
-      // flattens to the band floor, e.g. G-G-G-G).
+      // 2-bar Fortspinnung model: the head (the only leaps in the model --
+      // they ARE the motif) in eighths, a sixteenth Spielfigur descent to the
+      // model floor, a quarter-note arrival one step below it, and a rising
+      // eighth approach into a half-note close that hands over to the next
+      // stride one degree below this one. The spun continuation moves by
+      // single degrees or chained thirds (the melodic surfaces the scorer
+      // rewards), and the rhythm covers four duration classes (sixteenth /
+      // eighth / quarter / half) so the episode does not flatten the piece's
+      // duration and beat-position distributions. 16 slots fill the whole
+      // stride: beats 1-2 head, 3-4 Spielfigur, 5 arrival, 6 approach, 7-8
+      // close.
+      std::array<int, 16> model_deg{};
+      std::array<Tick, 16> model_dur{};
+      for (int i = 0; i < 4; ++i) {
+        model_deg[static_cast<std::size_t>(i)] = head_deg[static_cast<std::size_t>(i)];
+        model_dur[static_cast<std::size_t>(i)] = kTicksPerBeat / 2;
+      }
+      // Spielfigur (slots 4..11, sixteenths): stepwise walk from the head's
+      // last degree down to -4, zigzagging upward while there is slack so
+      // every move stays +-1.
       {
-        const int extreme = ascending ? *std::max_element(seed_pitch.begin(), seed_pitch.end())
-                                      : *std::min_element(seed_pitch.begin(), seed_pitch.end());
-        int walked = extreme;
-        for (int k = 0; k < steps - 1; ++k) {
-          walked = ascending ? scaleUp(walked, 1, mode) : scaleDown(walked, 1, mode);
-        }
-        while (ascending ? (walked > kBandHi[0]) : (walked < kBandLo[0])) {
-          for (int& p : seed_pitch) {
-            p = ascending ? scaleDown(p, 1, mode) : scaleUp(p, 1, mode);
+        int cur = head_deg[3];
+        bool up_next = true;
+        for (int slot = 4; slot < 12; ++slot) {
+          const int rem = 12 - slot;    // moves left, including this one.
+          const int dist = cur - (-4);  // descent still needed.
+          if (dist >= rem) {
+            --cur;
+          } else if (up_next && dist <= rem - 2) {
+            ++cur;
+            up_next = false;
+          } else {
+            --cur;
+            up_next = true;
           }
-          walked = ascending ? scaleDown(walked, 1, mode) : scaleUp(walked, 1, mode);
+          model_deg[static_cast<std::size_t>(slot)] = cur;
+          model_dur[static_cast<std::size_t>(slot)] = kTicksPerBeat / 4;
         }
+      }
+      // Slots 12..15: quarter arrival on the floor, eighth approach, half
+      // close. The -2 close steps up into the next stride's opening (which
+      // sits one degree below this stride's).
+      model_deg[12] = -5;
+      model_dur[12] = kTicksPerBeat;
+      model_deg[13] = -4;
+      model_dur[13] = kTicksPerBeat / 2;
+      model_deg[14] = -3;
+      model_dur[14] = kTicksPerBeat / 2;
+      model_deg[15] = -2;
+      model_dur[15] = 2 * kTicksPerBeat;
+      // One SequenceTemplate per stride (num_steps = 1 each; the verbatim
+      // step-0 check in sequence_pattern_consistency covers every emitted
+      // note). Strides descend one degree per 2 bars in lockstep with the
+      // chain; long sequences relaunch an octave up after every third stride
+      // -- the idiomatic register reset that keeps a long chain from sinking
+      // out of the band (the chain harmony is octave-invariant).
+      const int steps = std::max(1, (ep_len + 1) / 2);
+      constexpr int kRelaunchEvery = 3;
+      const auto stride_shift = [](int k) { return -k + 7 * (k / kRelaunchEvery); };
+      // Goal-tone seeding: aim the walk so every stride OPENS ON ITS OWN
+      // BAR'S CHAIN CHORD ROOT (stated mid-band in V0). The chain descends
+      // one degree per chord pair -- the same rate as the stride descent --
+      // so one offset aligns every stride at once: the opening sits on the
+      // first bar's root, the Spielfigur floor (-4) on the second bar's
+      // root, the arrival (-5) is its lower appoggiatura, and the half-note
+      // close (-2) is the second bar's chord THIRD, consonant by
+      // construction so the accompaniment wave keeps the full triad
+      // admissible under it. Relative to the chord AFTER the episode, the
+      // final stride's opening bar sits two fifths up (+1 degree) for a
+      // 2-bar final stride, one fifth up (-3 degrees octave-folded) for a
+      // clipped odd-length final stride.
+      const std::uint8_t target_root =
+          plan[static_cast<std::size_t>(window.episode_start + ep_len)].root_pc;
+      const int band_center = (kBandLo[0] + kBandHi[0]) / 2;
+      int target_pitch = kBandLo[0];
+      while (target_pitch % 12 != static_cast<int>(target_root)) {
+        ++target_pitch;
+      }
+      while (target_pitch < band_center - 6) {
+        target_pitch += 12;
+      }
+      while (!detail::inScale(target_pitch, mode)) {
+        ++target_pitch;
+      }
+      const int aim_offset = (ep_len % 2 == 0) ? 1 : -3;
+      int seed_base = degree_shift(target_pitch, aim_offset - stride_shift(steps - 1));
+      // Band fit over the whole walk, OCTAVE-quantized so the chord
+      // alignment above survives (an octave keeps every degree's pitch
+      // class). Only when no octave position fits does the single-degree
+      // nudge trade alignment for register; per-note clamping below stays as
+      // the last resort.
+      const int hi_deg = *std::max_element(model_deg.begin(), model_deg.end());
+      const int lo_deg = *std::min_element(model_deg.begin(), model_deg.end());
+      int min_shift = 0;
+      int max_shift = 0;
+      for (int k = 0; k < steps; ++k) {
+        min_shift = std::min(min_shift, stride_shift(k));
+        max_shift = std::max(max_shift, stride_shift(k));
+      }
+      while (degree_shift(seed_base, hi_deg + max_shift) > kBandHi[0]) {
+        seed_base -= 12;
+      }
+      while (degree_shift(seed_base, lo_deg + min_shift) < kBandLo[0]) {
+        seed_base += 12;
+      }
+      while (degree_shift(seed_base, hi_deg + max_shift) > kBandHi[0]) {
+        seed_base = scaleDown(seed_base, 1, mode);
       }
       const Tick stride = barTick(2);
       const Tick span_lo = barTick(ep_start);
       const Tick span_hi = barTick(ep_start + ep_len);
       for (int kstep = 0; kstep < steps; ++kstep) {
         SequenceTemplate tmpl;
-        tmpl.pattern = ascending ? SequencePattern::AscendingStep : SequencePattern::DescendingStep;
+        tmpl.pattern = SequencePattern::DescendingStep;
         tmpl.target_start_tick = barTick(ep_start) + static_cast<Tick>(kstep) * stride;
         tmpl.step_length_ticks = stride;
         tmpl.num_steps = 1;
         tmpl.voice = 0;
         Tick cursor = tmpl.target_start_tick;
-        for (int note = 0; note < 4; ++note) {
-          const int base = seed_pitch[static_cast<std::size_t>(note)];
-          const int pitch = ascending ? scaleUp(base, kstep, mode) : scaleDown(base, kstep, mode);
-          const int clamped = std::clamp(pitch, kBandLo[0], kBandHi[0]);
-          tmpl.seed_pitches.push_back(static_cast<std::uint8_t>(clamped));
-          tmpl.seed_durations.push_back(seed_dur);
+        for (int slot = 0; slot < static_cast<int>(model_deg.size()); ++slot) {
+          const int deg = model_deg[static_cast<std::size_t>(slot)] + stride_shift(kstep);
+          const int pitch = std::clamp(degree_shift(seed_base, deg), kBandLo[0], kBandHi[0]);
+          const Tick dur = model_dur[static_cast<std::size_t>(slot)];
+          tmpl.seed_pitches.push_back(static_cast<std::uint8_t>(pitch));
+          tmpl.seed_durations.push_back(dur);
           // Register the sounding tone (replicating the FortspinnungSpan
-          // replay, which window-clips) so the V1/V2 accompaniment built below
-          // avoids clashing with the V0 episode line.
+          // replay, which window-clips) so the V1/V2 accompaniment built
+          // below avoids clashing with the V0 episode line.
           if (cursor >= span_lo && cursor < span_hi) {
-            asm_ctx.theme_tones.record(cursor, 0, clamped, seed_dur);
+            asm_ctx.theme_tones.record(cursor, 0, pitch, dur);
           }
-          cursor += seed_dur;
+          cursor += dur;
         }
         out.material.sequence_templates.push_back(tmpl);
       }
@@ -973,14 +1243,11 @@ void appendFugueSection(FugueAssembly& asm_ctx, int first_bar, int bars,
       // the validator skips every inter-voice rule but voice_crossing, which the
       // disjoint per-voice bands already prevent; a free Compose bass here would
       // be forced into parallels against the fast figuration and rest, thinning
-      // the texture. The V1 figuration moves in eighths; the V2 bass walks in
+      // the texture. The V1 figuration alternates its subdivision tier
+      // (eighths / sixteenths) across episodes and rotates its register
+      // offset, so the development's counterlines vary audibly and the
+      // piece keeps its sixteenth-note duration mass; the V2 bass walks in
       // quarter-note chord roots a register below it.
-      // Episode counterline vocabulary rotation: successive episodes alternate
-      // the V1 figuration's subdivision tier (eighths / sixteenths) and shift
-      // its register offset, so the development's counterlines vary audibly
-      // across episodes. The figure itself stays the registry-aware wave (its
-      // parallel- and harshness-avoidance is the proven mechanism); only the
-      // tier and the start register rotate. The V2 bass keeps its quarters.
       const int v1_notes_per_beat = (cycle % 2 == 1) ? 4 : 2;
       addFigurationSpan(asm_ctx, 1, ep_start, ep_start + ep_len - 1, plan, first_bar, mode,
                         v1_notes_per_beat, (fig_offset + cycle) % 4);

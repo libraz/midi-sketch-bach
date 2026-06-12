@@ -516,6 +516,11 @@ void appendScalarWaveBar(std::vector<MaterialNote>& dst, int bar, const detail::
   prev_pitch = last_pitch;
 }
 
+WaveVetoStats& waveVetoStats() {
+  static WaveVetoStats stats;
+  return stats;
+}
+
 void appendFigurationWaveBar(ThemeToneRegistry& registry, FigurationSection& section, int bar,
                              int voice, const detail::ChordSpec& chord, detail::Mode mode,
                              int notes_per_beat, int offset, int& prev_anchor, int band_lo,
@@ -692,6 +697,7 @@ void appendFigurationWaveBar(ThemeToneRegistry& registry, FigurationSection& sec
             if (admissible(cand)) {
               snapped = cand;
               placed = true;
+              ++waveVetoStats().anchor_parallel_displaced;
               break;
             }
           }
@@ -784,6 +790,7 @@ void appendFigurationWaveBar(ThemeToneRegistry& registry, FigurationSection& sec
             }
           }
           if (placed) {
+            ++waveVetoStats().wobble_breaker_fired;
             break;
           }
         }
@@ -795,6 +802,9 @@ void appendFigurationWaveBar(ThemeToneRegistry& registry, FigurationSection& sec
     // outside, every wave step would reflect onto the single pitch one step
     // back toward the window -- no alternative candidates -- so the parallel
     // veto would have nothing to displace to.
+    if (cursor < wave_lo || cursor > wave_hi) {
+      ++waveVetoStats().window_expanded;
+    }
     wave_lo = std::min(wave_lo, cursor);
     wave_hi = std::max(wave_hi, cursor);
     line_prev_anchor = cursor;
@@ -864,6 +874,7 @@ void appendFigurationWaveBar(ThemeToneRegistry& registry, FigurationSection& sec
           return false;
         };
         if (wave_is_parallel(next)) {
+          ++waveVetoStats().step_parallel_adjusted;
           const int reversed = step_from(-dir);
           if (!wave_is_parallel(reversed)) {
             dir = -dir;
@@ -928,6 +939,7 @@ void appendFigurationWaveBar(ThemeToneRegistry& registry, FigurationSection& sec
           return false;
         };
         if (!wave_is_parallel(next) && wave_is_harsh(next)) {
+          ++waveVetoStats().step_harsh_adjusted;
           const int reversed = step_from(-dir);
           if (!wave_is_parallel(reversed) && !wave_is_harsh(reversed)) {
             dir = -dir;
@@ -969,8 +981,12 @@ void appendFigurationWaveBar(ThemeToneRegistry& registry, FigurationSection& sec
           // The window edges are other voices' actual pitches (possibly
           // chromatic theme tones), so a pinned note is folded back to a
           // diatonic tone inside the window when one exists.
+          const int unclamped = next;
           next = foldIntoScale(std::clamp(next, order_floor, order_ceiling),
                                std::max(order_floor, band_lo), std::min(order_ceiling, band_hi));
+          if (next != unclamped) {
+            ++waveVetoStats().order_clamp_changed;
+          }
           // Clamping can pin the note to a window edge and repeat the previous
           // pitch; if the window still has room, step to the nearest distinct
           // diatonic tone inside it so the line never stalls into a long run.
