@@ -12,6 +12,7 @@
 #include "composer/minor_material.h"
 #include "composer/motif_ops.h"
 #include "composer/span.h"
+#include "composer/subject_catalog.h"
 #include "composer/texture_helpers.h"
 #include "composer/tonal_answer.h"
 #include "composer/voice_intent.h"
@@ -41,22 +42,29 @@ namespace bach::composer {
 
 namespace {
 
-using detail::ChordSpec;                     // NOLINT(build/namespaces)
-using detail::kFugueCompleteSubjectRhythms;  // NOLINT(build/namespaces)
-using detail::kFugueCompleteSubjects;        // NOLINT(build/namespaces)
-using detail::kHarmonyPatterns;              // NOLINT(build/namespaces)
-using detail::kHarmonyPatternsMinor;         // NOLINT(build/namespaces)
-using detail::kSubjectsMinor;                // NOLINT(build/namespaces)
-using detail::Mode;                          // NOLINT(build/namespaces)
-using detail::scaleUp;                       // NOLINT(build/namespaces)
-using detail::subjectSlotFor;                // NOLINT(build/namespaces)
+using detail::ChordSpec;                    // NOLINT(build/namespaces)
+using detail::kHarmonyPatterns;             // NOLINT(build/namespaces)
+using detail::kHarmonyPatternsMinor;        // NOLINT(build/namespaces)
+using detail::Mode;                         // NOLINT(build/namespaces)
+using detail::scaleUp;                      // NOLINT(build/namespaces)
+using detail::subjectIndexFor;              // NOLINT(build/namespaces)
+using tables::kSubjectCatalogMajor;         // NOLINT(build/namespaces)
+using tables::kSubjectCatalogMajorRhythms;  // NOLINT(build/namespaces)
+using tables::kSubjectCatalogMinor;         // NOLINT(build/namespaces)
+using tables::kSubjectCatalogMinorRhythms;  // NOLINT(build/namespaces)
+
+// Minor-mode middle entries restate the major catalog row at the same index
+// (the related keys are major), so every minor index must also be a valid
+// major index.
+static_assert(kSubjectCatalogMinor.size() <= kSubjectCatalogMajor.size(),
+              "minor catalog indices must be valid in the major catalog");
 
 constexpr Tick kQuarter = kTicksPerBeat;
 
 #include "composer/tables/entry_plan_stats.inc"
 
 // One subject statement is 16 catalog notes spanning 4 bars. Durations come
-// from kFugueCompleteSubjectRhythms rather than being fixed quarters.
+// from the per-mode catalog rhythm rows rather than being fixed quarters.
 constexpr int kSubjectNotes = 16;
 constexpr int kSubjectBars = 4;
 
@@ -116,6 +124,67 @@ int octaveOffsetForBand(const std::array<std::uint8_t, 16>& subject, int base_se
   return offset;
 }
 
+/// @brief Whether a candidate stretto canon sustains a sharp dissonance.
+///
+/// Lays the leader and the delayed follower on a sixteenth grid and scans the
+/// overlap for interval class 1, 6 or 11 (the semitone/tritone family) held
+/// for a full quarter note or longer. Brief passing seconds are idiomatic in a
+/// stretto, but both lines are verbatim Material -- the validator skips every
+/// dissonance rule on Material x Material pairs -- so a beat-long m2/M7
+/// between the two theme statements would ship unflagged. The caller uses this
+/// to vet each (delay, interval) configuration before committing the canon.
+///
+/// @param leader_pat The leader's 16-note pattern (middle-entry material).
+/// @param leader_total Total semitone shift applied to the leader.
+/// @param follower_pat The follower's 16-note pattern (exposition subject).
+/// @param follower_total Total semitone shift applied to the follower.
+/// @param rhythm Shared per-note durations (one subject statement).
+/// @param delay_bars Follower entry delay in bars (1..kSubjectBars-1).
+/// @return True when the overlap sustains a sharp dissonance for >= a quarter.
+bool strettoSustainsDissonance(const std::array<std::uint8_t, 16>& leader_pat, int leader_total,
+                               const std::array<std::uint8_t, 16>& follower_pat, int follower_total,
+                               const std::array<Tick, 16>& rhythm, int delay_bars) {
+  constexpr Tick kSlotTick = kTicksPerBeat / 4;  // sixteenth grid.
+  const int total_slots = static_cast<int>(barTick(kSubjectBars) / kSlotTick);
+  std::vector<int> leader(static_cast<std::size_t>(total_slots), -1);
+  std::vector<int> follower(static_cast<std::size_t>(total_slots), -1);
+  auto lay = [&](std::vector<int>& line, const std::array<std::uint8_t, 16>& pat, int total,
+                 Tick start) {
+    Tick cursor = start;
+    for (int note = 0; note < kSubjectNotes; ++note) {
+      const Tick dur = rhythm[static_cast<std::size_t>(note)];
+      for (Tick t = cursor; t < cursor + dur; t += kSlotTick) {
+        const int slot = static_cast<int>(t / kSlotTick);
+        if (slot >= total_slots) {
+          return;  // the follower is truncated at the leader's end.
+        }
+        line[static_cast<std::size_t>(slot)] =
+            static_cast<int>(pat[static_cast<std::size_t>(note)]) + total;
+      }
+      cursor += dur;
+    }
+  };
+  lay(leader, leader_pat, leader_total, 0);
+  lay(follower, follower_pat, follower_total, barTick(delay_bars));
+  const int sustain_limit = static_cast<int>(kQuarter / kSlotTick);
+  int run = 0;
+  for (int slot = 0; slot < total_slots; ++slot) {
+    bool sharp = false;
+    if (leader[static_cast<std::size_t>(slot)] >= 0 &&
+        follower[static_cast<std::size_t>(slot)] >= 0) {
+      const int ic = std::abs(leader[static_cast<std::size_t>(slot)] -
+                              follower[static_cast<std::size_t>(slot)]) %
+                     12;
+      sharp = (ic == 1 || ic == 6 || ic == 11);
+    }
+    run = sharp ? run + 1 : 0;
+    if (run >= sustain_limit) {
+      return true;
+    }
+  }
+  return false;
+}
+
 bool shouldUseTonalAnswer(const std::array<std::uint8_t, 16>& subject, std::uint8_t tonic_pc) {
   const std::uint8_t tonic = static_cast<std::uint8_t>(tonic_pc % 12);
   const std::uint8_t dominant = static_cast<std::uint8_t>((tonic + 7) % 12);
@@ -135,12 +204,17 @@ bool shouldUseTonalAnswer(const std::array<std::uint8_t, 16>& subject, std::uint
 }
 
 // Middle-entry related-key plan, keyed by the CARRYING VOICE (which rotates
-// V0 / V1 / V2 by cycle index, so the plan rotates across the development). A
-// C-major subject transposed by one of these diatonic offsets maps onto the
-// scale of the related MAJOR key exactly (e.g. +7 maps C major -> G major), so
-// every transposed note's pitch class stays diatonic to that key -- which the
-// validator's middle_entry_in_related_key rule requires. The keys are V / vi /
-// IV (the rule's admissible related keys; the home tonic I is NOT admissible).
+// V0 / V1 / V2 by cycle index, so the plan rotates across the development).
+// The keys are V / vi / IV (the validator's admissible related keys; the home
+// tonic I is NOT admissible). V and IV entries are REAL transpositions: +7 /
+// +5 maps a C-major subject onto the G / F major scales exactly, so every
+// note's pitch class is diatonic to the declared major key. The vi entry is
+// NOT a real transposition -- +9 would realize vi as A MAJOR (C#/F#/G#),
+// bi-tonal against the home-key texture -- it is a diatonic degree shift (up
+// five home-scale degrees), stating the subject in the relative NATURAL minor
+// whose pitch-class set equals the home major scale; the validator checks vi
+// entries against that natural-minor set. kVoiceKeySemis therefore feeds the
+// real-transposition voices only (the vi realization is built per note).
 // Keying by voice keeps every middle entry on a given voice in ONE key, so a
 // single per-voice MiddleEntryDecl (the carrier dispatch matches by voice) holds
 // notes that are all diatonic to that voice's declared key.
@@ -361,11 +435,14 @@ void appendFugueSection(FugueAssembly& asm_ctx, int first_bar, int bars,
   const int harm_idx = static_cast<int>(req.seed % 4);
   const int fig_offset = static_cast<int>(req.seed % 4);
 
-  // Subject catalog slot (character + seed) -> the V0-band subject pattern.
-  const std::uint8_t slot = subjectSlotFor(req.character, req.seed);
+  // Qualified-catalog subject index (character class + seed) -> the V0-band
+  // subject pattern and its paired rhythm row.
+  const bool minor_mode = (mode == Mode::Minor);
+  const std::uint8_t slot = subjectIndexFor(req.character, minor_mode, req.seed);
   const std::array<std::uint8_t, 16>& subj_pat =
-      (mode == Mode::Minor) ? kSubjectsMinor[slot] : kFugueCompleteSubjects[slot];
-  const std::array<Tick, 16>& subj_rhythm = kFugueCompleteSubjectRhythms[slot];
+      minor_mode ? kSubjectCatalogMinor[slot] : kSubjectCatalogMajor[slot];
+  const std::array<Tick, 16>& subj_rhythm =
+      minor_mode ? kSubjectCatalogMinorRhythms[slot] : kSubjectCatalogMajorRhythms[slot];
 
   // --- Length partition. ---
   // Exposition: 12 bars normally, compressed to 8 for short fugues (N<=20).
@@ -592,7 +669,17 @@ void appendFugueSection(FugueAssembly& asm_ctx, int first_bar, int bars,
     const bool half_cycle = !window.has_entry;
     const ArcPoint arc = req.arc(
         static_cast<std::size_t>(std::min<int>(cycle, static_cast<int>(req.cycle_count) - 1)));
-    const int carry_voice = cycle % 3;
+    // Entries rotate through the voices, EXCEPT in the pedal cycle when the
+    // rotation would land on V1: the dominant pedal prepares the home-key
+    // return, and V1's relative-minor entry deflects away from that function
+    // at exactly the wrong moment (its F natural also leans on the held G).
+    // That cycle's entry is re-carried by V0 instead -- a dominant-key (G
+    // major) statement over the dominant pedal is the textbook pedal
+    // preparation, and V0's per-voice key declaration is unchanged. V2's IV
+    // key (F major) holds no sharp interval against G, so its rotation slot
+    // stays.
+    const int rotation_voice = cycle % 3;
+    const int carry_voice = (cycle == pedal_cycle && rotation_voice == 1) ? 0 : rotation_voice;
     // Accompaniment density rises with the arc; figuration accompanies the
     // highest non-carrying voice (one accompaniment voice per window).
     const int acc_voice = (carry_voice == 0) ? 1 : 0;
@@ -600,16 +687,28 @@ void appendFugueSection(FugueAssembly& asm_ctx, int first_bar, int bars,
 
     if (!half_cycle) {
       // --- Middle entry (4 bars): the subject restated in the carrying voice in
-      //     a related MAJOR key (V / vi / IV, keyed by the carrying voice so each
-      //     voice stays in one key). The MAJOR subject catalog is used for the
-      //     transposed material so every note's pitch class is diatonic to the
-      //     related major key (the rule checks against the major scale), then the
-      //     line is octave-fit into the voice band. ---
+      //     a related key (V / vi / IV, keyed by the carrying voice so each
+      //     voice stays in one key). V and IV are REAL transpositions of the
+      //     MAJOR subject catalog (+7 / +5 maps the C-major line onto the G /
+      //     F major scales exactly). The vi entry is a DIATONIC degree shift
+      //     instead -- up five C-major scale degrees, which states the subject
+      //     in the relative (natural) minor: a real +9 transposition would
+      //     realize vi as A MAJOR, whose C#/F#/G# turn the development
+      //     bi-tonal against the C-major figuration around it. The realized
+      //     line is then octave-fit into the voice band. ---
       const int me_start = first_bar + window.entry_start;  // absolute.
       const int key_semis = kVoiceKeySemis[static_cast<std::size_t>(carry_voice)];
-      const std::array<std::uint8_t, 16>& me_pat = kFugueCompleteSubjects[slot];
-      const int me_off = octaveOffsetForBand(me_pat, key_semis, carry_voice);
-      const int me_total = key_semis + me_off;
+      const std::array<std::uint8_t, 16>& me_pat = kSubjectCatalogMajor[slot];
+      std::array<std::uint8_t, 16> me_real;
+      for (int note = 0; note < kSubjectNotes; ++note) {
+        const int base = static_cast<int>(me_pat[static_cast<std::size_t>(note)]);
+        // The catalog line is C-major diatonic, so the degree walk stays on
+        // the home scale in both modes (minor pieces also restate the major
+        // catalog here; see the comment above).
+        me_real[static_cast<std::size_t>(note)] = static_cast<std::uint8_t>(
+            carry_voice == 1 ? detail::scaleUp(base, 5, Mode::Major) : base + key_semis);
+      }
+      const int me_off = octaveOffsetForBand(me_real, 0, carry_voice);
       MiddleEntryDecl& decl = middle_decls[static_cast<std::size_t>(carry_voice)];
       decl.voice = static_cast<VoiceId>(carry_voice);
       decl.related_key_pc = kVoiceKeyPc[static_cast<std::size_t>(carry_voice)];
@@ -618,8 +717,8 @@ void appendFugueSection(FugueAssembly& asm_ctx, int first_bar, int bars,
         MaterialNote mn;
         mn.start_tick = me_cursor;
         mn.duration = subj_rhythm[static_cast<std::size_t>(note)];
-        mn.pitch = static_cast<std::uint8_t>(std::clamp(
-            static_cast<int>(me_pat[static_cast<std::size_t>(note)]) + me_total, 0, 127));
+        mn.pitch = static_cast<std::uint8_t>(
+            std::clamp(static_cast<int>(me_real[static_cast<std::size_t>(note)]) + me_off, 0, 127));
         decl.notes.push_back(mn);
         asm_ctx.theme_tones.record(mn.start_tick, static_cast<VoiceId>(carry_voice),
                                    static_cast<int>(mn.pitch), mn.duration);
@@ -632,46 +731,90 @@ void appendFugueSection(FugueAssembly& asm_ctx, int first_bar, int bars,
           (carry_voice != 2 && cycle != pedal_cycle && (fig_offset != 1 || cycle >= 2));
 
       // Stretto in the climax cycle: a second subject statement in the
-      // accompaniment voice at a 1-bar delay, overlapping the leader. The
-      // follower restates the subject in the SAME related key as the leader
-      // (key_semis), octave-fit into the follower's band, so the overlap forms
-      // a single-key canon at the octave instead of clashing bi-tonally. The
+      // accompaniment voice, overlapping the leader. The follower restates the
+      // subject in the leader's key, octave-fit into the follower's band, so
+      // the overlap forms a single-key canon instead of clashing bi-tonally.
+      // The follower must stay a REAL transposition of the subject (the
+      // validator's stretto_overlap_valid relation is verbatim), so when the
+      // leader is the vi entry -- a diatonic degree shift whose pitch set is
+      // the home scale -- the only real transpositions inside that set are
+      // home-key statements: the vi cycle uses follower_semis = 0 and skips
+      // the fifth-up configs (their F# would strike a false relation against
+      // the leader's F natural). The canon's (delay, interval) configuration
+      // is vetted against strettoSustainsDissonance in preference order -- the
+      // 1-bar octave canon (densest overlap) first, then the 2-bar delay, then
+      // a fifth-up canon (the subject/answer pairing) at the same delays. The
+      // subject is not designed for self-canon at every offset, so the first
+      // configuration with no sustained sharp dissonance wins; when none
+      // qualifies the stretto is dropped and the window keeps the
+      // consonance-aware figuration accompaniment below instead. A committed
       // follower replaces the figuration accompaniment for this window.
       const bool climax = (cycle == climax_cycle);
+      bool stretto_placed = false;
       if (climax) {
         const int follower_voice = acc_voice;
-        const int follower_off = octaveOffsetForBand(subj_pat, key_semis, follower_voice);
-        // material.subject[i] == subj_pat[i] + v0_off (the V0 exposition
-        // statement), so the validated relation follower[i] == subject[i] +
-        // interval requires interval = key_semis + follower_off - v0_off. This
-        // keeps the validator's stretto_overlap_valid verbatim-transposition
-        // relation exact while the follower sits in the leader's related key.
-        const int stretto_interval = key_semis + follower_off - v0_off;
-        StrettoDecl stretto;
-        stretto.leader_voice = static_cast<VoiceId>(carry_voice);
-        stretto.follower_voice = static_cast<VoiceId>(follower_voice);
-        stretto.leader_entry_tick = barTick(me_start);
-        stretto.leader_length_ticks = barTick(kSubjectBars);
-        stretto.follower_entry_tick = barTick(me_start + 1);
-        stretto.interval_semis = stretto_interval;
-        Tick follower_cursor = barTick(me_start + 1);
-        const Tick follower_end = barTick(me_start + kSubjectBars);
-        for (int note = 0; note < kSubjectNotes && follower_cursor < follower_end; ++note) {
-          MaterialNote mn;
-          mn.start_tick = follower_cursor;
-          mn.duration =
-              std::min(subj_rhythm[static_cast<std::size_t>(note)], follower_end - follower_cursor);
-          mn.pitch = static_cast<std::uint8_t>(std::clamp(
-              static_cast<int>(subj_pat[static_cast<std::size_t>(note)]) + key_semis + follower_off,
-              0, 127));
-          stretto.follower_notes.push_back(mn);
-          asm_ctx.theme_tones.record(mn.start_tick, static_cast<VoiceId>(follower_voice),
-                                     static_cast<int>(mn.pitch), mn.duration);
-          follower_cursor += subj_rhythm[static_cast<std::size_t>(note)];
+        struct StrettoConfig {
+          int delay_bars;
+          int extra_semis;
+        };
+        constexpr std::array<StrettoConfig, 4> kStrettoConfigs = {{{1, 0}, {2, 0}, {1, 7}, {2, 7}}};
+        const int follower_key_semis = (carry_voice == 1) ? 0 : key_semis;
+        for (const StrettoConfig& config : kStrettoConfigs) {
+          if (carry_voice == 1 && config.extra_semis != 0) {
+            continue;  // no in-set fifth-up canon against the modal vi leader.
+          }
+          const int follower_semis = follower_key_semis + config.extra_semis;
+          const int follower_off = octaveOffsetForBand(subj_pat, follower_semis, follower_voice);
+          const int follower_total = follower_semis + follower_off;
+          if (strettoSustainsDissonance(me_real, me_off, subj_pat, follower_total, subj_rhythm,
+                                        config.delay_bars)) {
+            continue;
+          }
+          // material.subject[i] == subj_pat[i] + v0_off (the V0 exposition
+          // statement), so the validated relation follower[i] == subject[i] +
+          // interval requires interval = follower_total - v0_off. This keeps
+          // the validator's stretto_overlap_valid verbatim-transposition
+          // relation exact while the follower sits in its canon key.
+          const int stretto_interval = follower_total - v0_off;
+          StrettoDecl stretto;
+          stretto.leader_voice = static_cast<VoiceId>(carry_voice);
+          stretto.follower_voice = static_cast<VoiceId>(follower_voice);
+          stretto.leader_entry_tick = barTick(me_start);
+          stretto.leader_length_ticks = barTick(kSubjectBars);
+          stretto.follower_entry_tick = barTick(me_start + config.delay_bars);
+          stretto.interval_semis = stretto_interval;
+          Tick follower_cursor = barTick(me_start + config.delay_bars);
+          const Tick follower_end = barTick(me_start + kSubjectBars);
+          for (int note = 0; note < kSubjectNotes && follower_cursor < follower_end; ++note) {
+            MaterialNote mn;
+            mn.start_tick = follower_cursor;
+            mn.duration = std::min(subj_rhythm[static_cast<std::size_t>(note)],
+                                   follower_end - follower_cursor);
+            mn.pitch = static_cast<std::uint8_t>(std::clamp(
+                static_cast<int>(subj_pat[static_cast<std::size_t>(note)]) + follower_total, 0,
+                127));
+            stretto.follower_notes.push_back(mn);
+            asm_ctx.theme_tones.record(mn.start_tick, static_cast<VoiceId>(follower_voice),
+                                       static_cast<int>(mn.pitch), mn.duration);
+            follower_cursor += subj_rhythm[static_cast<std::size_t>(note)];
+          }
+          out.material.stretto_entries.push_back(stretto);
+          pushSpan(asm_ctx, static_cast<VoiceId>(follower_voice), me_start + config.delay_bars,
+                   me_start + 3, VoiceIntent::StrettoCarrier);
+          if (config.delay_bars > 1) {
+            // Keep the follower's voice sounding while it waits for the
+            // delayed entrance, so the climax window does not thin to two
+            // voices before the canon arrives.
+            addFigurationSpan(asm_ctx, static_cast<VoiceId>(follower_voice), me_start,
+                              me_start + config.delay_bars - 1, plan, first_bar, mode, density,
+                              fig_offset);
+          }
+          stretto_placed = true;
+          break;
         }
-        out.material.stretto_entries.push_back(stretto);
-        pushSpan(asm_ctx, static_cast<VoiceId>(follower_voice), me_start + 1, me_start + 3,
-                 VoiceIntent::StrettoCarrier);
+      }
+      if (stretto_placed) {
+        // Canon committed above; nothing else occupies the follower voice.
       } else if (cycle == pedal_cycle) {
         // Dominant pedal in the cycle before the coda (N >= 32): a single held
         // dominant in the lowest non-carrying voice (voice-filtered carrier).

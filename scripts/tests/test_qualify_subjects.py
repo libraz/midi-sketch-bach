@@ -284,6 +284,91 @@ class CatalogRenderTest(unittest.TestCase):
         # Minor side renders anchors even with no qualified picks.
         self.assertIn("16>, 5> kSubjectCatalogMinor", catalog)
 
+class CharacterClassTest(unittest.TestCase):
+    LEAN_ARCH = [60, 62, 64, 65, 67, 69, 71, 72, 72, 71, 69, 67, 65, 64, 62, 60]
+
+    @staticmethod
+    def flat_anchors() -> tuple[list[list[int]], list[list[int]]]:
+        return [[60 + i] * 16 for i in range(5)], [[480] * 16 for _ in range(5)]
+
+    def test_entry_features_reports_contour_leap_density(self) -> None:
+        rhythm = [240] * 8 + [480] * 8
+        feats = qualify.entry_features(self.LEAN_ARCH, rhythm)
+        self.assertEqual(feats["contour"], "arch")
+        self.assertEqual(feats["max_leap"], 2)
+        self.assertEqual(feats["short_notes"], 8)
+
+    def test_class_lists_union_anchors_with_feature_matches(self) -> None:
+        pitches, rhythms = self.flat_anchors()
+        # Lean directed entry (index 5): Severe and Noble material.
+        pitches.append(self.LEAN_ARCH)
+        rhythms.append([480] * 16)
+        # Dense entry (index 6): Playful and Restless material.
+        pitches.append(self.LEAN_ARCH)
+        rhythms.append([240] * 14 + [480, 480])
+        lists = qualify.character_class_lists(pitches, rhythms)
+        self.assertEqual(lists["Severe"], [0, 2, 5])
+        self.assertEqual(lists["Noble"], [0, 3, 5])
+        self.assertEqual(lists["Playful"], [1, 4, 6])
+        self.assertEqual(lists["Restless"], [2, 4, 6])
+
+    def test_unreachable_entry_raises(self) -> None:
+        pitches, rhythms = self.flat_anchors()
+        # A flat, leap-free, low-density entry matches no character class.
+        pitches.append([60] * 16)
+        rhythms.append([480] * 16)
+        with self.assertRaises(ValueError):
+            qualify.character_class_lists(pitches, rhythms)
+
+    def test_render_class_array_wraps_long_lists(self) -> None:
+        lines = qualify.render_class_array("kSubjectClassToy", list(range(20)))
+        self.assertIn("std::array<std::uint8_t, 20> kSubjectClassToy", lines[0])
+        self.assertEqual(len(lines), 3)
+        self.assertTrue(lines[1].endswith(","))
+        self.assertTrue(lines[2].endswith("};"))
+
+    def test_rendered_catalog_contains_class_arrays(self) -> None:
+        pool = {
+            "modes": {
+                "major": {"candidates": []},
+                "minor": {"candidates": []},
+            }
+        }
+        minor_header = SCRIPTS_DIR.parent / "src" / "composer" / "minor_material.h"
+        figuration = (
+            SCRIPTS_DIR.parent / "src" / "composer" / "figuration.h"
+        ).read_text(encoding="utf-8")
+        catalog = qualify.render_catalog(
+            {}, pool, figuration, minor_header, catalog_size=5, command="toy"
+        )
+        for character in ("Severe", "Playful", "Noble", "Restless"):
+            self.assertIn(f"kSubjectClass{character}Major", catalog)
+            self.assertIn(f"kSubjectClass{character}Minor", catalog)
+
+    def test_catalog_size_equal_to_anchors_renders_anchors_only(self) -> None:
+        # Legacy fallback: --catalog-size 5 retires every synthesized entry,
+        # even when qualified candidates exist in the pool.
+        pool = {
+            "modes": {
+                "major": {
+                    "candidates": [{"pitches": [62] * 16, "rhythm_ticks": [240] * 16}]
+                },
+                "minor": {"candidates": []},
+            }
+        }
+        qualified = {qualify.candidate_key("major", [62] * 16): {"qualified": True}}
+        minor_header = SCRIPTS_DIR.parent / "src" / "composer" / "minor_material.h"
+        figuration = (
+            SCRIPTS_DIR.parent / "src" / "composer" / "figuration.h"
+        ).read_text(encoding="utf-8")
+        catalog = qualify.render_catalog(
+            qualified, pool, figuration, minor_header, catalog_size=5, command="toy"
+        )
+        self.assertIn("16>, 5> kSubjectCatalogMajor = {{", catalog)
+        self.assertNotIn("{62, 62", catalog)
+        # Classes shrink to the legacy slot pairs.
+        self.assertIn("2> kSubjectClassSevereMajor = {\n    0, 2};", catalog)
+
     def test_candidate_key_stable(self) -> None:
         first = qualify.candidate_key("major", [60, 62])
         second = qualify.candidate_key("major", [60, 62])

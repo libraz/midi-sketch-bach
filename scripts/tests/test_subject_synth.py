@@ -230,5 +230,140 @@ class PipelineTest(unittest.TestCase):
         self.assertEqual(kls, sorted(kls))
 
 
+class SequenceSynthesisTest(unittest.TestCase):
+    """The sequence-structured (v2) pipeline: coherence by construction."""
+
+    def test_realize_sequence_body_is_strict_diatonic_sequence(self) -> None:
+        stats = toy_mode_stats()
+        spec = synth.MODE_SPECS["major"]
+        ladder = synth.scale_ladder(spec)
+        index_of = {pitch: idx for idx, pitch in enumerate(ladder)}
+        rng = random.Random(21)
+        realized = 0
+        for _ in range(400):
+            result = synth.realize_sequence_body(rng, spec, stats)
+            if result is None:
+                continue
+            realized += 1
+            body, length = result
+            self.assertEqual(len(body), 12)
+            self.assertIn(length, synth.MOTIF_LENGTHS)
+            indices = [index_of[pitch] for pitch in body]
+            # Strict sequence: every statement is the motif shifted by one
+            # constant ladder offset, so index deltas repeat with period L.
+            shifts = {indices[idx + length] - indices[idx] for idx in range(12 - length)}
+            self.assertEqual(len(shifts), 1, f"not a strict sequence: {body}")
+            self.assertIn(shifts.pop(), [shift for shift, _ in synth.SEQUENCE_SHIFTS])
+            # Body leaps stay within the hard cap (head leap excepted).
+            for idx, (prev, nxt) in enumerate(zip(body, body[1:])):
+                limit = 7 if idx == 0 else synth.MAX_BODY_LEAP_SEMITONES
+                self.assertLessEqual(abs(nxt - prev), limit, f"leap at {idx}: {body}")
+        self.assertGreater(realized, 0, "no body ever realized")
+
+    def test_realize_approach_is_stepwise_and_lands_near_tail(self) -> None:
+        stats = toy_mode_stats()
+        spec = synth.MODE_SPECS["major"]
+        rng = random.Random(23)
+        checked = 0
+        for _ in range(200):
+            result = synth.realize_sequence_body(rng, spec, stats)
+            if result is None:
+                continue
+            body, _ = result
+            approach = synth.realize_approach(rng, spec, body)
+            if approach is None:
+                continue
+            checked += 1
+            self.assertEqual(len(approach), synth.APPROACH_POSITIONS)
+            p13 = approach[-1]
+            self.assertTrue(synth.tail_approach_ok(spec, p13))
+            self.assertLessEqual(abs(synth.LEADING_TONE_TAIL[0] - p13), 4)
+            # Each approach move is a ladder step or small skip from the body.
+            ladder = synth.scale_ladder(spec)
+            index_of = {pitch: idx for idx, pitch in enumerate(ladder)}
+            walk = [index_of[body[-1]], index_of[approach[0]], index_of[approach[1]]]
+            for prev, nxt in zip(walk, walk[1:]):
+                self.assertLessEqual(abs(nxt - prev), 2)
+                self.assertNotEqual(nxt, prev)
+        self.assertGreater(checked, 0, "no approach ever realized")
+
+    def test_sequence_rhythm_repeats_cell_and_solves_budget_exactly(self) -> None:
+        stats = toy_mode_stats()
+        rng = random.Random(29)
+        for length in synth.MOTIF_LENGTHS:
+            for _ in range(50):
+                rhythm = synth.sequence_rhythm(rng, stats, length)
+                self.assertIsNotNone(rhythm)
+                self.assertEqual(len(rhythm), synth.SUBJECT_POSITIONS)
+                self.assertEqual(sum(rhythm), synth.SUBJECT_TICKS)
+                # Positions 0-11 are the motif cell repeated verbatim.
+                cell = rhythm[:length]
+                statements = 12 // length
+                self.assertEqual(rhythm[:12], cell * statements)
+                self.assertIn(rhythm[14], synth.LEADING_TONE_DURATIONS)
+
+    def test_coherence_metrics_orders_directed_lines_over_pendulums(self) -> None:
+        descending = [79, 77, 76, 74, 72, 71, 69, 67, 65, 64, 62, 60, 59, 57, 71, 72]
+        pendulum = [72, 74, 72, 74, 72, 74, 72, 74, 72, 74, 72, 74, 72, 74, 71, 72]
+        run_desc = synth.coherence_metrics(descending)["direction_run_mean"]
+        run_pend = synth.coherence_metrics(pendulum)["direction_run_mean"]
+        self.assertGreater(run_desc, run_pend)
+        self.assertGreaterEqual(run_desc, synth.MIN_DIRECTION_RUN_MEAN)
+        leapy = [60, 67, 60, 67, 60, 67, 60, 67, 60, 67, 60, 67, 60, 67, 71, 72]
+        self.assertEqual(synth.coherence_metrics(leapy)["body_leaps"], 13)
+        self.assertEqual(synth.coherence_metrics(descending)["body_leaps"], 0)
+
+    def synthesize(self, seed: int, keep: int = 8) -> dict:
+        stats = toy_mode_stats()
+        header = SCRIPTS_DIR.parent / "src" / "composer" / "minor_material.h"
+        return synth.synthesize_mode_sequence(
+            random.Random(seed),
+            "major",
+            stats,
+            pool_size=600,
+            keep=keep,
+            nll_margin=2.0,
+            dedup_distance=3,
+            minor_header=header,
+        )
+
+    def test_synthesize_mode_sequence_is_deterministic(self) -> None:
+        first = self.synthesize(42)
+        second = self.synthesize(42)
+        self.assertEqual(first, second)
+        self.assertEqual(first["style"], "sequence")
+        self.assertGreater(len(first["candidates"]), 0)
+
+    def test_synthesize_mode_sequence_candidates_are_coherent(self) -> None:
+        result = self.synthesize(9, keep=12)
+        spec = synth.MODE_SPECS["major"]
+        for candidate in result["candidates"]:
+            pitches = candidate["pitches"]
+            self.assertEqual(len(pitches), synth.SUBJECT_POSITIONS)
+            self.assertEqual(tuple(pitches[-2:]), synth.LEADING_TONE_TAIL)
+            for pitch in pitches[:-2]:
+                self.assertIn(pitch % 12, spec.pcs)
+            self.assertEqual(len(candidate["rhythm_ticks"]), synth.SUBJECT_POSITIONS)
+            self.assertEqual(sum(candidate["rhythm_ticks"]), synth.SUBJECT_TICKS)
+            coherence = candidate["coherence"]
+            self.assertGreaterEqual(
+                coherence["direction_run_mean"], synth.MIN_DIRECTION_RUN_MEAN
+            )
+
+    def test_synthesize_mode_sequence_ranks_by_coherence_first(self) -> None:
+        result = self.synthesize(9, keep=12)
+        keys = [
+            (
+                candidate["coherence"]["body_leaps"],
+                -candidate["coherence"]["direction_run_mean"],
+                candidate["trigram_nll"],
+            )
+            for candidate in result["candidates"]
+        ]
+        # Dedup may drop intermediate entries, but the kept order must still
+        # be non-decreasing in the (leaps, -run, nll) ranking key.
+        self.assertEqual(keys, sorted(keys))
+
+
 if __name__ == "__main__":
     unittest.main()

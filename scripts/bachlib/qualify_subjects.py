@@ -6,8 +6,8 @@ qualification gate is the real product path: every candidate is written into
 all five subject slots of a throwaway git worktree (so each seed picks the
 candidate regardless of character), ``bach_cli`` is rebuilt incrementally,
 and the fugue-family forms are generated and judged with the exact texture
-gate semantics (per-form thresholds, all default axes) plus the cadence /
-leading-tone provenance bits.
+gate semantics (per-form thresholds, all default axes; strict v2 floors with
+a bounded v1 tolerance against the shipped subjects' same-combo score).
 
 The worktree edit is local and temporary; the checked-in catalogs stay
 frozen. Results stream into a resumable JSONL so an interrupted batch
@@ -26,6 +26,7 @@ import subprocess
 from pathlib import Path
 
 from bachlib.common import REPO_ROOT
+from bachlib.subject_stats import classify_contour_archetype
 from bachlib.subject_synth import existing_subjects
 from bachlib import texture_gate
 
@@ -33,6 +34,41 @@ FUGUE_FORMS = ("fugue", "prelude_and_fugue", "toccata_and_fugue", "fantasia_and_
 # The internal pitch space is C-rooted for both modes (the minor catalog is
 # C minor), so minor candidates are exercised with an explicit c_minor key.
 MODE_KEYS = {"major": None, "minor": "c_minor"}
+
+# Character feature classes. Each character draws from the union of its two
+# legacy anchor slots (always reachable, preserving the shipped pairing) and
+# every synthesized entry whose contour / leap / rhythm-density features fit
+# the character's intent. ``short_notes`` counts body durations shorter than
+# a quarter note (positions 0-13), a proxy for rhythmic density.
+CHARACTER_CLASS_RULES = (
+    # Severe: lean, disciplined lines — directed contours, no wide leaps,
+    # moderate density.
+    (
+        "Severe",
+        (0, 2),
+        lambda f: f["contour"] in ("arch", "descent")
+        and f["max_leap"] <= 7
+        and f["short_notes"] <= 9,
+    ),
+    # Playful: bouncy shapes or dense figuration.
+    (
+        "Playful",
+        (1, 4),
+        lambda f: f["contour"] in ("wave", "inverted_arch") or f["short_notes"] >= 10,
+    ),
+    # Noble: dignified directed contours, moderate density (wide leaps allowed).
+    (
+        "Noble",
+        (0, 3),
+        lambda f: f["contour"] in ("arch", "descent") and f["short_notes"] <= 9,
+    ),
+    # Restless: agitated — wide leaps or dense figuration.
+    (
+        "Restless",
+        (2, 4),
+        lambda f: f["max_leap"] >= 8 or f["short_notes"] >= 10,
+    ),
+)
 
 SUBJECT_ARRAY = "kFugueCompleteSubjects"
 RHYTHM_ARRAY = "kFugueCompleteSubjectRhythms"
@@ -276,6 +312,57 @@ def append_result(path: Path, row: dict) -> None:
         handle.write(json.dumps(row, sort_keys=True) + "\n")
 
 
+def entry_features(pitches: list[int], rhythm_ticks: list[int]) -> dict:
+    """Compute the contour / leap / density features driving class membership."""
+    intervals = [b - a for a, b in zip(pitches, pitches[1:])]
+    return {
+        "contour": classify_contour_archetype(list(pitches)),
+        "max_leap": max(abs(delta) for delta in intervals),
+        "short_notes": sum(1 for ticks in rhythm_ticks[:14] if ticks < TICKS_PER_BEAT),
+    }
+
+
+def character_class_lists(
+    pitch_rows: list[list[int]], rhythm_rows: list[list[int]]
+) -> dict[str, list[int]]:
+    """Map each character to its catalog index list (legacy anchors + matches).
+
+    Every synthesized entry (index >= CATALOG_SLOTS) must be reachable by at
+    least one character; an unreachable entry would silently shrink the
+    effective catalog, so it is an error.
+
+    @param pitch_rows Full catalog pitch rows (anchors first).
+    @param rhythm_rows Full catalog rhythm rows, parallel to ``pitch_rows``.
+    @return Ordered map of character name -> sorted, unique index list.
+    """
+    features = [
+        entry_features(pitches, rhythm) for pitches, rhythm in zip(pitch_rows, rhythm_rows)
+    ]
+    lists: dict[str, list[int]] = {}
+    reachable: set[int] = set()
+    for name, anchor_slots, predicate in CHARACTER_CLASS_RULES:
+        members = set(anchor_slots)
+        for index in range(CATALOG_SLOTS, len(pitch_rows)):
+            if predicate(features[index]):
+                members.add(index)
+        lists[name] = sorted(members)
+        reachable.update(members)
+    unreachable = [i for i in range(len(pitch_rows)) if i not in reachable]
+    if unreachable:
+        raise ValueError(f"catalog entries unreachable by every character: {unreachable}")
+    return lists
+
+
+def render_class_array(name: str, indices: list[int]) -> list[str]:
+    """Render one character class index array, wrapped to the column limit."""
+    lines = [f"inline constexpr std::array<std::uint8_t, {len(indices)}> {name} = {{"]
+    for start in range(0, len(indices), 16):
+        chunk = ", ".join(str(value) for value in indices[start : start + 16])
+        tail = "," if start + 16 < len(indices) else "};"
+        lines.append(f"    {chunk}{tail}")
+    return lines
+
+
 def render_catalog(
     qualified: dict,
     pool: dict,
@@ -306,18 +393,24 @@ def render_catalog(
         "// v2 / length-invariant model floors strict; the v1 cross-entropy floor",
         "// allows a small tolerance against the shipped subjects' score at the",
         "// same form x seed, since a corpus-shaped leap vocabulary pays v1).",
+        "// The kSubjectClass* arrays map each SubjectCharacter to the catalog",
+        "// indices it may draw from: the character's two legacy slots plus every",
+        "// synthesized entry whose contour / leap / density features fit the",
+        "// character (Severe lean directed, Playful bouncy or dense, Noble",
+        "// dignified directed, Restless leapy or dense).",
         "",
     ]
     for mode in ("major", "minor"):
         anchors = existing_subjects(mode, minor_header)
+        target_picks = max(0, catalog_size - len(anchors))
         picks: list[dict] = []
         for candidate in pool["modes"][mode]["candidates"]:
+            if len(picks) >= target_picks:
+                break
             row = qualified.get(candidate_key(mode, candidate["pitches"]))
             if row is None or not row.get("qualified"):
                 continue
             picks.append(candidate)
-            if len(picks) >= catalog_size - len(anchors):
-                break
         suffix = "Major" if mode == "major" else "Minor"
         total = len(anchors) + len(picks)
         pitch_rows = [list(row) for row in anchors] + [c["pitches"] for c in picks]
@@ -338,6 +431,8 @@ def render_catalog(
             "    {" + ", ".join(str(v) for v in row) + "}," for row in rhythm_rows
         )
         lines.append("}};")
+        for character, indices in character_class_lists(pitch_rows, rhythm_rows).items():
+            lines.extend(render_class_array(f"kSubjectClass{character}{suffix}", indices))
         lines.append("")
     return "\n".join(lines)
 
@@ -346,13 +441,13 @@ def _add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--pool",
         type=Path,
-        default=REPO_ROOT / "backup" / "subject_pool.json",
+        default=REPO_ROOT / "build" / "subject_pool.json",
         help="subject_pool.v1 JSON produced by synth-subjects",
     )
     parser.add_argument(
         "--results",
         type=Path,
-        default=REPO_ROOT / "backup" / "subject_qualify.jsonl",
+        default=REPO_ROOT / "build" / "subject_qualify.jsonl",
         help="resumable per-candidate verdict log",
     )
     parser.add_argument(
@@ -373,7 +468,7 @@ def _add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--baseline-file",
         type=Path,
-        default=REPO_ROOT / "backup" / "subject_qualify_baseline.json",
+        default=REPO_ROOT / "build" / "subject_qualify_baseline.json",
         help="baseline verdicts; failures here are exempted for candidates",
     )
     parser.add_argument(

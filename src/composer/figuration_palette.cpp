@@ -574,6 +574,22 @@ void appendFigurationWaveBar(ThemeToneRegistry& registry, FigurationSection& sec
   auto stepScale = [&](int from, int direction) {
     return direction > 0 ? detail::scaleUp(from, 1, mode) : detail::scaleDown(from, 1, mode);
   };
+  // Fold a clamped candidate back into the diatonic set, stepping toward the
+  // roomier side of [lo, hi]. The voice-band edges themselves are chromatic
+  // pitches (V1 spans Eb3..F#4), so a bare clamp to an edge would emit a
+  // chromatic figuration tone; when the window has no diatonic member the
+  // original candidate is kept (a window that tight pins against another
+  // voice, where the unison-class tone is at least order-safe).
+  auto foldIntoScale = [&](int candidate, int lo, int hi) {
+    int folded = candidate;
+    while (!detail::inScale(folded, mode)) {
+      folded += (hi - folded >= folded - lo) ? 1 : -1;
+      if (folded < lo || folded > hi) {
+        return candidate;
+      }
+    }
+    return folded;
+  };
   // Walk `degrees` scale steps from `from_pitch` along `direction`, mirroring
   // at the working band edges (like the single-step wave) and clamping to the
   // voice band.
@@ -584,7 +600,7 @@ void appendFigurationWaveBar(ThemeToneRegistry& registry, FigurationSection& sec
       candidate = direction > 0 ? detail::scaleDown(from_pitch, degrees, mode)
                                 : detail::scaleUp(from_pitch, degrees, mode);
     }
-    return std::clamp(candidate, band_lo, band_hi);
+    return foldIntoScale(std::clamp(candidate, band_lo, band_hi), band_lo, band_hi);
   };
   int last_pitch = cursor;
   // Last pitch this call actually emitted (-1 until the first note), used to
@@ -706,7 +722,7 @@ void appendFigurationWaveBar(ThemeToneRegistry& registry, FigurationSection& sec
           } else if (candidate < wave_lo) {
             candidate = stepScale(from, 1);
           }
-          return std::clamp(candidate, band_lo, band_hi);
+          return foldIntoScale(std::clamp(candidate, band_lo, band_hi), band_lo, band_hi);
         };
         int next;
         if (figure_mode == 0) {
@@ -856,7 +872,11 @@ void appendFigurationWaveBar(ThemeToneRegistry& registry, FigurationSection& sec
           }
         }
         if (order_floor <= order_ceiling) {
-          next = std::clamp(next, order_floor, order_ceiling);
+          // The window edges are other voices' actual pitches (possibly
+          // chromatic theme tones), so a pinned note is folded back to a
+          // diatonic tone inside the window when one exists.
+          next = foldIntoScale(std::clamp(next, order_floor, order_ceiling),
+                               std::max(order_floor, band_lo), std::min(order_ceiling, band_hi));
           // Clamping can pin the note to a window edge and repeat the previous
           // pitch; if the window still has room, step to the nearest distinct
           // diatonic tone inside it so the line never stalls into a long run.

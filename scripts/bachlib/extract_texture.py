@@ -8,8 +8,8 @@ Two input modes are supported:
   ``form`` is ``"fugue"`` and ``track_type`` is ``"voice"`` are used; single
   track corpus files are skipped. Corpus notes carry ``onset``, ``duration``,
   ``pitch`` and ``velocity`` keys with the track index acting as the voice
-  index. Corpus files are external and are never redistributed; only derived
-  constants and the backup report are stored.
+  index. Corpus files are external and are never redistributed; only the derived
+  constants and the generated report are stored.
 * Positional ``inputs`` read generated.json note arrays via ``texture_metrics``
   and report the legacy generated-output summary. This path is retained for
   ad-hoc inspection only.

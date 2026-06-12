@@ -29,6 +29,7 @@
 #include <array>
 #include <cmath>
 #include <cstdint>
+#include <set>
 #include <vector>
 
 #include "composer/arc.h"
@@ -40,6 +41,7 @@
 #include "composer/harness_fixture.h"
 #include "composer/material.h"
 #include "composer/minor_material.h"
+#include "composer/subject_catalog.h"
 #include "composer/voice_intent.h"
 #include "core/basic_types.h"
 
@@ -206,9 +208,9 @@ TEST(FormSectionalTest, ExpositionEntryTranspositionsAreCorrect) {
   for (FormType form : kForms) {
     for (bool minor : {false, true}) {
       const HarnessFixture fx = buildFixture(form, 42, minor, 64);
-      const std::uint8_t slot = detail::subjectSlotFor(SubjectCharacter::Severe, 42);
+      const std::uint8_t slot = detail::subjectIndexFor(SubjectCharacter::Severe, minor, 42);
       const std::array<std::uint8_t, 16>& expected =
-          minor ? detail::kSubjectsMinor[slot] : detail::kFugueCompleteSubjects[slot];
+          minor ? tables::kSubjectCatalogMinor[slot] : tables::kSubjectCatalogMajor[slot];
 
       // The V0 subject (first 16 subject notes) is an octave transposition of the
       // catalog slot.
@@ -237,9 +239,9 @@ TEST(FormSectionalTest, SubjectMelodyMatchesCatalogSlot) {
     for (std::uint32_t seed : kSeeds) {
       for (bool minor : {false, true}) {
         const HarnessFixture fx = buildFixture(form, seed, minor, 32);
-        const std::uint8_t slot = detail::subjectSlotFor(SubjectCharacter::Severe, seed);
+        const std::uint8_t slot = detail::subjectIndexFor(SubjectCharacter::Severe, minor, seed);
         const std::array<std::uint8_t, 16>& expected =
-            minor ? detail::kSubjectsMinor[slot] : detail::kFugueCompleteSubjects[slot];
+            minor ? tables::kSubjectCatalogMinor[slot] : tables::kSubjectCatalogMajor[slot];
 
         ASSERT_GE(fx.material.subject.size(), 16u);
         const int offset =
@@ -258,8 +260,8 @@ TEST(FormSectionalTest, SubjectMelodyMatchesCatalogSlot) {
 TEST(FormSectionalTest, SubjectRhythmProfileIsAppliedInFugueTail) {
   for (FormType form : kForms) {
     const HarnessFixture fx = buildFixture(form, 42, false, 64);
-    const std::uint8_t slot = detail::subjectSlotFor(SubjectCharacter::Severe, 42);
-    const auto& expected = detail::kFugueCompleteSubjectRhythms[slot];
+    const std::uint8_t slot = detail::subjectIndexFor(SubjectCharacter::Severe, false, 42);
+    const auto& expected = tables::kSubjectCatalogMajorRhythms[slot];
 
     ASSERT_GE(fx.material.subject.size(), expected.size());
     Tick cursor = fx.material.subject.front().start_tick;
@@ -292,6 +294,39 @@ TEST(FormSectionalTest, DominantHeadSubjectUsesTonalAnswerInRealization) {
       }
     }
     EXPECT_TRUE(tonal_answer_bit) << formName(form);
+  }
+}
+
+// The fugue tail keeps a full three-voice texture through its development
+// fill (V0 running line + V1 quarter-anchor counterline + V2 sustained
+// support). Long fills previously rested V1 entirely, thinning the second
+// half of the piece to two voices between the exposition and the stretto.
+// Allowed thin bars in the second half: the stretto leader bar (the follower
+// enters at a 1-bar delay by design) plus one boundary bar of slack.
+TEST(FormSectionalTest, FugueTailDevelopmentKeepsThreeVoiceTexture) {
+  for (FormType form : kForms) {
+    for (std::uint32_t seed : {1u, 9u, 17u}) {
+      const std::uint16_t bars = 64;
+      const HarnessFixture fx = buildFixture(form, seed, false, bars);
+      const ComposeResult r = Composer{}.run(fx.material, fx.harmony, fx.voice_plan);
+
+      std::array<std::set<int>, 64> sounding{};
+      for (const auto& note : r.notes) {
+        const int first = static_cast<int>(note.start_tick / kBar);
+        const int last = static_cast<int>((note.start_tick + note.duration - 1) / kBar);
+        for (int bar = first; bar <= std::min(last, static_cast<int>(bars) - 1); ++bar) {
+          sounding[static_cast<std::size_t>(bar)].insert(static_cast<int>(note.voice));
+        }
+      }
+      int thin_bars = 0;
+      for (int bar = bars / 2; bar < bars; ++bar) {
+        if (sounding[static_cast<std::size_t>(bar)].size() < 3u) {
+          ++thin_bars;
+        }
+      }
+      EXPECT_LE(thin_bars, 2) << formName(form) << " seed " << seed
+                              << " second half rests a voice for " << thin_bars << " bars";
+    }
   }
 }
 

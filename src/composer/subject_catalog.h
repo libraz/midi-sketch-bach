@@ -8,7 +8,8 @@
 
 namespace bach::composer::tables {
 
-// Qualified fugue-subject catalog (pitches + per-subject rhythm rows).
+// Qualified fugue-subject catalog (pitches + per-subject rhythm rows) plus
+// the per-character kSubjectClass* index arrays consumed by subjectIndexFor.
 // Entries 0-4 of each mode mirror the shipped 5-subject catalogs
 // (kFugueCompleteSubjects / kSubjectsMinor) as backward-compatible anchors;
 // the remaining entries were synthesized offline from corpus subject-window

@@ -16,8 +16,8 @@ Two window sources over the sibling corpus checkouts:
    whole-shape statistics (contour archetypes, Ryden features).
 
 The output is an intermediate JSON consumed by the offline subject
-synthesizer. It is not vendored into the repository (default destination is
-the local backup/ directory) and nothing here feeds the C++ runtime.
+synthesizer. It is not vendored into the repository (the default destination is
+the gitignored build/ directory) and nothing here feeds the C++ runtime.
 """
 
 from __future__ import annotations
@@ -466,7 +466,7 @@ def _add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--output",
         type=Path,
-        default=REPO_ROOT / "backup" / "subject_stats.json",
+        default=REPO_ROOT / "build" / "subject_stats.json",
         help="intermediate JSON destination (kept out of the repository)",
     )
 

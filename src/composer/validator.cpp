@@ -1497,9 +1497,11 @@ ValidationReport Validator::validate(const std::vector<NoteEvent>& notes,
   //
   // middle_entry_in_related_key: every MiddleEntryDecl must declare a
   //   related key (V / vi / IV / ii of the home tonic) AND every note
-  //   pitch class must be diatonic to the major scale on that related
-  //   key — i.e. the entry genuinely sits in the declared key, not just
-  //   carries the label.
+  //   pitch class must be diatonic to that key's scale — the major scale
+  //   for V / IV / ii, the NATURAL minor scale for vi. vi as a MAJOR key
+  //   would import three sharps against the home texture (bi-tonal); the
+  //   relative natural minor shares the home major scale's pitch-class
+  //   set, so a genuine vi entry stays inside the home scale.
   // stretto_overlap_valid: the follower must enter strictly inside the
   //   leader's window (real time overlap) AND follower_notes[i].pitch
   //   must equal subject[i].pitch + interval_semis (the follower is the
@@ -1521,9 +1523,15 @@ ValidationReport Validator::validate(const std::vector<NoteEvent>& notes,
       if (key_pc == r)
         key_ok = true;
     }
+    // The vi key is validated as its NATURAL minor, whose pitch-class set is
+    // exactly the home major scale (relative keys) — checked via the home
+    // tonic's major scale since isDiatonicInKey's minor branch is harmonic.
+    const bool is_vi = key_pc == static_cast<std::uint8_t>((home_tonic_pc + 9) % 12);
+    const std::uint8_t scale_tonic_pc = is_vi ? home_tonic_pc : key_pc;
     bool notes_ok = true;
     for (const auto& n : entry.notes) {
-      if (!isDiatonicInKey(static_cast<std::uint8_t>(n.pitch % 12), key_pc, /*is_minor=*/false)) {
+      if (!isDiatonicInKey(static_cast<std::uint8_t>(n.pitch % 12), scale_tonic_pc,
+                           /*is_minor=*/false)) {
         notes_ok = false;
         break;
       }

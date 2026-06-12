@@ -14,7 +14,7 @@
 //     band, then V2 at the third-entry band).
 //   - the V0 subject melody equals the selected catalog slot.
 //   - a stretto is present in the climax cycle (two overlapping subject
-//     statements <= 1 bar apart).
+//     statements <= 2 bars apart, vetted for sustained dissonance).
 //   - the final bars cadence on the tonic (Picardy when minor + even seed).
 //   - the middle-entry related-key degrees follow the rotation table.
 //   - P&F: the prelude region has no subject statements, the fugue region
@@ -39,6 +39,7 @@
 #include "composer/material.h"
 #include "composer/minor_material.h"
 #include "composer/ornament_pass.h"
+#include "composer/subject_catalog.h"
 #include "composer/voice_intent.h"
 #include "core/basic_types.h"
 
@@ -174,9 +175,9 @@ TEST(FormFugueTest, SubjectMelodyMatchesCatalogSlot) {
     for (bool minor : {false, true}) {
       const HarnessFixture fx =
           buildFixture(FormType::Fugue, seed, minor, naturalBars(FormType::Fugue));
-      const std::uint8_t slot = detail::subjectSlotFor(SubjectCharacter::Severe, seed);
+      const std::uint8_t slot = detail::subjectIndexFor(SubjectCharacter::Severe, minor, seed);
       const std::array<std::uint8_t, 16>& expected =
-          minor ? detail::kSubjectsMinor[slot] : detail::kFugueCompleteSubjects[slot];
+          minor ? tables::kSubjectCatalogMinor[slot] : tables::kSubjectCatalogMajor[slot];
 
       // The first 16 subject notes are the V0 exposition statement (bars 0-3).
       ASSERT_GE(fx.material.subject.size(), 16u);
@@ -198,8 +199,8 @@ TEST(FormFugueTest, SubjectRhythmProfileIsApplied) {
   for (std::uint32_t seed : kSeeds) {
     const HarnessFixture fx =
         buildFixture(FormType::Fugue, seed, false, naturalBars(FormType::Fugue));
-    const std::uint8_t slot = detail::subjectSlotFor(SubjectCharacter::Severe, seed);
-    const auto& expected = detail::kFugueCompleteSubjectRhythms[slot];
+    const std::uint8_t slot = detail::subjectIndexFor(SubjectCharacter::Severe, false, seed);
+    const auto& expected = tables::kSubjectCatalogMajorRhythms[slot];
 
     ASSERT_GE(fx.material.subject.size(), expected.size());
     Tick cursor = 0;
@@ -520,12 +521,13 @@ TEST(FormFugueTest, StrettoPresentInClimaxCycle) {
   ASSERT_FALSE(fx.material.stretto_entries.empty()) << "no stretto declared";
 
   const StrettoDecl& stretto = fx.material.stretto_entries.front();
-  // The follower enters strictly inside the leader's window (genuine overlap)
-  // at a 1-bar delay.
+  // The follower enters strictly inside the leader's window (genuine overlap).
+  // The delay is 1 or 2 bars -- the builder vets each canon configuration for
+  // sustained dissonance and widens the delay when the 1-bar canon clashes.
   EXPECT_GT(stretto.follower_entry_tick, stretto.leader_entry_tick);
   EXPECT_LT(stretto.follower_entry_tick, stretto.leader_entry_tick + stretto.leader_length_ticks);
-  EXPECT_LE(stretto.follower_entry_tick - stretto.leader_entry_tick, kBar)
-      << "stretto delay exceeds one bar";
+  EXPECT_LE(stretto.follower_entry_tick - stretto.leader_entry_tick, 2 * kBar)
+      << "stretto delay exceeds two bars";
 
   // A StrettoCarrier span replays it.
   bool has_stretto_span = false;
@@ -670,6 +672,30 @@ TEST(FormFugueTest, MiddleEntryKeyPlanRotates) {
     }
   }
   EXPECT_GE(carrying_voices.size(), 2u) << "middle entry does not rotate carrying voice";
+}
+
+// The vi middle entry is the relative NATURAL minor — a diatonic degree shift
+// whose every pitch stays inside the home (C-major) scale. A real +9
+// transposition would state it in A MAJOR, whose C#/F#/G# read as a second key
+// against the home-key figuration around the entry.
+TEST(FormFugueTest, ViMiddleEntryStaysInsideHomeScale) {
+  const std::set<int> home_scale = {0, 2, 4, 5, 7, 9, 11};
+  for (std::uint32_t seed : {8u, 42u, 99u}) {
+    const HarnessFixture fx = buildFixture(FormType::Fugue, seed, false, 128);
+    bool saw_vi = false;
+    for (const auto& decl : fx.material.middle_entries) {
+      if (decl.related_key_pc != 9) {
+        continue;
+      }
+      saw_vi = true;
+      for (const auto& note : decl.notes) {
+        EXPECT_TRUE(home_scale.count(note.pitch % 12) > 0)
+            << "seed " << seed << ": vi middle-entry pitch " << static_cast<int>(note.pitch)
+            << " (pc " << static_cast<int>(note.pitch % 12) << ") leaves the home scale";
+      }
+    }
+    EXPECT_TRUE(saw_vi) << "seed " << seed << ": 128-bar fugue declared no vi middle entry";
+  }
 }
 
 // --- 7. P&F: prelude / fugue split, no prelude subjects, downbeat anchoring --
@@ -907,9 +933,9 @@ TEST(FormFuguePreludeAndFugueTest, FigurationStaysDiatonic) {
 
 // The climax-cycle stretto follower restates the subject transposed by exactly
 // interval_semis (the validated verbatim relation), and because the follower
-// now sits in the leader's related key the leader/follower form a single-key
-// octave canon: strong-beat (downbeat) overlaps are consonant apart from the
-// couple of passing seconds a 1-bar self-canon legitimately produces.
+// sits in the leader's canon key the leader/follower form a single-key canon:
+// strong-beat (downbeat) overlaps are consonant apart from the couple of
+// passing seconds a self-canon legitimately produces.
 TEST(FormFugueTest, StrettoFollowerSharesLeaderKey) {
   const HarnessFixture fx = buildFixture(FormType::Fugue, 42, false, 84);
   ASSERT_FALSE(fx.material.stretto_entries.empty()) << "no stretto declared";
@@ -925,9 +951,9 @@ TEST(FormFugueTest, StrettoFollowerSharesLeaderKey) {
   }
 
   // (b) On strong beats where leader and follower both sound, the vertical
-  //     interval class is consonant. The 1-bar self-canon legitimately yields a
-  //     couple of passing seconds, so allow at most two dissonant overlaps
-  //     (observed: 2 of 6 on this seed) rather than demanding 100%.
+  //     interval class is consonant. A self-canon legitimately yields a couple
+  //     of passing seconds, so allow at most two dissonant overlaps rather
+  //     than demanding 100%.
   const ComposeResult r = Composer{}.run(fx.material, fx.harmony, fx.voice_plan);
   const Tick overlap_end = stretto.leader_entry_tick + stretto.leader_length_ticks;
   int overlaps = 0;
@@ -951,6 +977,54 @@ TEST(FormFugueTest, StrettoFollowerSharesLeaderKey) {
                           << overlaps << " (follower not in the leader's key?)";
 }
 
+// The committed stretto canon never sustains a sharp dissonance (interval
+// class 1, 6 or 11) between leader and follower for a quarter note or longer:
+// the builder vets every (delay, interval) canon configuration on a sixteenth
+// grid and drops the stretto when none is clean. Both lines are verbatim
+// Material -- the validator skips every dissonance rule on Material x Material
+// pairs -- so this build-time vet is the only guard against a beat-long m2/M7
+// between the two theme statements (the audible "wrong note" in the climax).
+TEST(FormFugueTest, StrettoOverlapNeverSustainsSharpDissonance) {
+  constexpr std::array<SubjectCharacter, 4> kCharacters = {
+      SubjectCharacter::Severe, SubjectCharacter::Playful, SubjectCharacter::Noble,
+      SubjectCharacter::Restless};
+  const Tick sixteenth = kBar / 16;
+  const int sustain_limit = 4;  // four sixteenth slots = one quarter.
+  for (const SubjectCharacter character : kCharacters) {
+    for (const std::uint32_t seed : kSeeds) {
+      for (const bool minor : {false, true}) {
+        ComposeRequest req;
+        req.form = FormType::Fugue;
+        req.seed = seed;
+        req.is_minor = minor;
+        req.character = character;
+        req.target_bars = 84;
+        HarnessFixture fx;
+        buildFormFixture(req, &fx);
+        const ComposeResult r = Composer{}.run(fx.material, fx.harmony, fx.voice_plan);
+        for (const StrettoDecl& stretto : fx.material.stretto_entries) {
+          const Tick overlap_end = stretto.leader_entry_tick + stretto.leader_length_ticks;
+          int run = 0;
+          for (Tick tick = stretto.follower_entry_tick; tick < overlap_end; tick += sixteenth) {
+            const int leader = latestSoundingPitch(r.notes, stretto.leader_voice, tick);
+            const int follower = latestSoundingPitch(r.notes, stretto.follower_voice, tick);
+            bool sharp = false;
+            if (leader >= 0 && follower >= 0) {
+              const int ic = std::abs(leader - follower) % 12;
+              sharp = (ic == 1 || ic == 6 || ic == 11);
+            }
+            run = sharp ? run + 1 : 0;
+            ASSERT_LT(run, sustain_limit)
+                << "sustained sharp dissonance in the stretto overlap at tick " << tick << " (seed "
+                << seed << ", character " << static_cast<int>(character) << ", minor " << minor
+                << ")";
+          }
+        }
+      }
+    }
+  }
+}
+
 // The coda keeps a full three-voice texture under the final V0 subject head: a
 // V1 alto figuration sounds over the first two coda bars, and the V2 bass stays
 // consonant with V0 -- never the sustained minor-ninth / major-seventh (ic 1/11)
@@ -967,14 +1041,14 @@ TEST(FormFugueTest, CodaKeepsThreeVoiceTextureAndConsonantBass) {
   const Tick window_lo = static_cast<Tick>(coda_start_bar) * kBar;
   const Tick window_hi = static_cast<Tick>(coda_start_bar + 2) * kBar;
 
-  // (a) The new V1 alto emits at least four notes over the two coda-subject bars.
-  int v1_notes = 0;
-  for (const auto& note : r.notes) {
-    if (note.voice == 1 && note.start_tick >= window_lo && note.start_tick < window_hi) {
-      ++v1_notes;
-    }
+  // (a) The V1 alto sounds across the whole two coda-subject bars: some V1
+  //     pitch is sounding at every beat onset of the window. Consecutive
+  //     same-pitch figuration quarters coalesce into held notes, so sounding
+  //     coverage (not onset count) is the three-voice-texture invariant.
+  for (Tick tick = window_lo; tick < window_hi; tick += kTicksPerBeat) {
+    EXPECT_GE(latestSoundingPitch(r.notes, 1, tick), 0)
+        << "coda subject window lacks the V1 alto at tick " << tick;
   }
-  EXPECT_GE(v1_notes, 4) << "coda subject window lacks the V1 alto figuration";
 
   // (b) Every strong beat where V0 and V2 both sound is consonant, and in
   //     particular never the old sustained m9/M7 (interval class 1 or 11).

@@ -3,7 +3,7 @@
 
 Consumes the subject-window statistics extracted by ``extract-subject-stats``
 and produces a candidate-subject pool as an intermediate JSON (default under
-backup/, not vendored). All sampling is offline and deterministic
+the gitignored build/ directory, not vendored). All sampling is offline and deterministic
 (``random.Random(seed)``); nothing here runs at composition time — the
 runtime keeps its deterministic catalog lookup.
 
@@ -522,6 +522,301 @@ def synthesize_mode(
     }
 
 
+# --- Sequence-structured synthesis -----------------------------------------
+# The free Markov walk above produces locally plausible but globally aimless
+# lines: listeners read the shipped subjects' conviction from directed scale
+# runs, a leap-free body and motivic (transposed) repetition, none of which a
+# trigram chain guarantees. The sequence style builds those properties in by
+# construction: a short head motif (with its own rhythm cell) is restated as a
+# real sequence (transposed by a fixed scale-degree shift), then a short
+# stepwise approach lands the fixed leading-tone tail. Distribution fit (the
+# trigram NLL floor) only gates out the implausible; it is never the ranking.
+
+MOTIF_LENGTHS = (4, 3)  # statements fill 12 body positions: 4x3 or 3x4.
+MOTIF_STEP_CHOICES = ((1, 0.32), (-1, 0.34), (2, 0.18), (-2, 0.16))
+SEQUENCE_SHIFTS = ((-1, 0.5), (-2, 0.25), (1, 0.25))
+HEAD_LEAP_PROBABILITY = 0.25  # one characteristic leap, motif position 1 only.
+HEAD_LEAP_DEGREES = (3, 4)  # a fourth / fifth-ish ladder jump.
+MAX_BODY_LEAP_SEMITONES = 4  # within / between statements (head leap excepted).
+MIN_DIRECTION_RUN_MEAN = 1.8  # shipped subjects measure 2.6-3.3; pendulums ~1.4.
+APPROACH_POSITIONS = 2
+LEADING_TONE_DURATIONS = (480, 960, 240)
+
+
+def scale_ladder(spec: ModeSpec) -> list[int]:
+    """The mode's diatonic pitches across the register envelope, ascending."""
+    return [pitch for pitch in range(spec.low, spec.high + 1) if pitch % 12 in spec.pcs]
+
+
+def sample_motif_offsets(rng: random.Random, length: int) -> list[int]:
+    """Cumulative ladder-degree offsets of one motif statement (head at 0)."""
+    offsets = [0]
+    steps, weights = zip(*MOTIF_STEP_CHOICES)
+    while len(offsets) < length:
+        if len(offsets) == 1 and rng.random() < HEAD_LEAP_PROBABILITY:
+            step = rng.choice(HEAD_LEAP_DEGREES) * rng.choice((1, -1))
+        else:
+            step = rng.choices(steps, weights=weights)[0]
+        offsets.append(offsets[-1] + step)
+    return offsets
+
+
+def realize_sequence_body(
+    rng: random.Random, spec: ModeSpec, mode_stats: dict
+) -> tuple[list[int], int] | None:
+    """Realize 12 body pitches: a motif restated as a strict diatonic sequence.
+
+    @return (pitches, motif_length) or None when the realization dead-ends.
+    """
+    ladder = scale_ladder(spec)
+    index_of = {pitch: idx for idx, pitch in enumerate(ladder)}
+    start_pitch = sample_start_pitch(rng, spec, mode_stats)
+    if start_pitch not in index_of:
+        return None
+    length = rng.choice(MOTIF_LENGTHS)
+    statements = 12 // length
+    offsets = sample_motif_offsets(rng, length)
+    shifts, shift_weights = zip(*SEQUENCE_SHIFTS)
+    shift = rng.choices(shifts, weights=shift_weights)[0]
+
+    pitches: list[int] = []
+    base = index_of[start_pitch]
+    for statement in range(statements):
+        for position, offset in enumerate(offsets):
+            index = base + statement * shift + offset
+            if not 0 <= index < len(ladder):
+                return None
+            pitch = ladder[index]
+            if pitches:
+                magnitude = abs(pitch - pitches[-1])
+                head_leap = statement == 0 and position == 1
+                limit = 7 if head_leap else MAX_BODY_LEAP_SEMITONES
+                if magnitude > limit or (magnitude == 0 and position != 0):
+                    return None
+                if extends_oscillation(pitches, pitch):
+                    return None
+            pitches.append(pitch)
+    return pitches, length
+
+
+def realize_approach(rng: random.Random, spec: ModeSpec, body: list[int]) -> list[int] | None:
+    """Two stepwise diatonic positions from the body into the leading-tone tail."""
+    ladder = scale_ladder(spec)
+    index_of = {pitch: idx for idx, pitch in enumerate(ladder)}
+    last = index_of.get(body[-1])
+    if last is None:
+        return None
+    options: list[tuple[int, list[int]]] = []
+    for first_move in (-2, -1, 1, 2):
+        for second_move in (-2, -1, 1, 2):
+            first = last + first_move
+            second = first + second_move
+            if not (0 <= first < len(ladder) and 0 <= second < len(ladder)):
+                continue
+            p13 = ladder[second]
+            if not tail_approach_ok(spec, p13):
+                continue
+            if abs(LEADING_TONE_TAIL[0] - p13) > 4:
+                continue  # the tail arrives by step / small skip, never a leap.
+            approach = [ladder[first], p13]
+            if extends_oscillation(body, approach[0]):
+                continue
+            # Prefer a directed approach (both moves the same way).
+            rank = 0 if first_move * second_move > 0 else 1
+            options.append((rank, approach))
+    if not options:
+        return None
+    best_rank = min(rank for rank, _ in options)
+    return rng.choice([approach for rank, approach in options if rank == best_rank])
+
+
+def sample_motif_rhythm_cell(rng: random.Random, mode_stats: dict, length: int) -> list[int]:
+    """One motif-length duration-class cell chained from the S-1 rhythm bigram."""
+    initial = {k: float(v) for k, v in mode_stats["rhythm_initial"].items()}
+    bigram = {
+        key: {k: float(v) for k, v in row.items()}
+        for key, row in mode_stats["rhythm_bigram"].items()
+    }
+    cell: list[int] = []
+    previous: str | None = None
+    for _ in range(length):
+        source = bigram.get(previous, initial) if previous is not None else initial
+        names = list(DURATION_TICKS)
+        weights = [source.get(name, 0.0) + 0.05 for name in names]
+        choice = rng.choices(names, weights=weights)[0]
+        cell.append(DURATION_TICKS[choice])
+        previous = choice
+    return cell
+
+
+def sequence_rhythm(rng: random.Random, mode_stats: dict, length: int) -> list[int] | None:
+    """16 durations: the motif cell repeated per statement, tail solved exactly.
+
+    Positions 0-11 repeat the motif's rhythm cell (rhythm restates with the
+    pitch sequence -- the correlation listeners read as motivic identity);
+    positions 12-15 (approach x2, leading tone, final) are solved against the
+    exact four-bar budget.
+    """
+    statements = 12 // length
+    final_values, final_weights = zip(*FINAL_DURATIONS)
+    for _ in range(MAX_SAMPLE_ATTEMPTS):
+        cell = sample_motif_rhythm_cell(rng, mode_stats, length)
+        body = cell * statements
+        budget = SUBJECT_TICKS - sum(body)
+        choices: list[tuple[int, int, int, int]] = []
+        for final in final_values:
+            for leading in LEADING_TONE_DURATIONS:
+                remainder = budget - final - leading
+                for a1 in DURATION_TICKS.values():
+                    a2 = remainder - a1
+                    if a2 in DURATION_TICKS.values():
+                        choices.append((a1, a2, leading, final))
+        if choices:
+            weight_of = dict(FINAL_DURATIONS)
+            weights = [weight_of.get(choice[3], 0.1) for choice in choices]
+            a1, a2, leading, final = rng.choices(choices, weights=weights)[0]
+            return body + [a1, a2, leading, final]
+    return None
+
+
+def coherence_metrics(pitches: list[int]) -> dict:
+    """The perceptual-conviction proxies the shipped subjects score high on."""
+    body = pitches[:14]
+    intervals = intervals_of(body)
+    runs: list[int] = []
+    current = 1
+    for prev, nxt in zip(intervals, intervals[1:]):
+        if prev * nxt > 0:
+            current += 1
+        else:
+            runs.append(current)
+            current = 1
+    runs.append(current)
+    segments = Counter(
+        tuple(intervals[idx : idx + 4]) for idx in range(len(intervals) - 3)
+    )
+    return {
+        "direction_run_mean": sum(runs) / len(runs),
+        "body_leaps": sum(1 for value in intervals if abs(value) >= 5),
+        "max_segment_repeat": max(segments.values()) if segments else 0,
+    }
+
+
+def synthesize_mode_sequence(
+    rng: random.Random,
+    mode: str,
+    mode_stats: dict,
+    *,
+    pool_size: int,
+    keep: int,
+    nll_margin: float,
+    dedup_distance: int,
+    minor_header: Path,
+) -> dict:
+    """Sequence-structured pipeline: coherence is built in, NLL only gates."""
+    spec = MODE_SPECS[mode]
+    model = IntervalModel(mode_stats)
+    anchors = existing_subjects(mode, minor_header)
+    anchor_intervals = [intervals_of(row) for row in anchors]
+    anchor_nll = [model.sequence_nll(seq) for seq in anchor_intervals]
+    nll_floor = max(anchor_nll) + nll_margin
+
+    stage = Counter()
+    accepted: list[Candidate] = []
+    seen: set[tuple[int, ...]] = set()
+    for _ in range(pool_size):
+        stage["sampled"] += 1
+        realized = realize_sequence_body(rng, spec, mode_stats)
+        if realized is None:
+            stage["body_rejected"] += 1
+            continue
+        body, motif_length = realized
+        approach = realize_approach(rng, spec, body)
+        if approach is None:
+            stage["approach_rejected"] += 1
+            continue
+        pitches = body + approach + list(LEADING_TONE_TAIL)
+        key = tuple(pitches)
+        if key in seen:
+            stage["exact_duplicate"] += 1
+            continue
+        seen.add(key)
+        opening = abs(pitches[1] - pitches[0])
+        if not (opening in OPENING_INTERVALS):
+            stage["opening_rejected"] += 1
+            continue
+        intervals = intervals_of(pitches)
+        nll = model.sequence_nll(intervals)
+        if nll > nll_floor:
+            stage["nll_floor_cut"] += 1
+            continue
+        if coherence_metrics(pitches)["direction_run_mean"] < MIN_DIRECTION_RUN_MEAN:
+            stage["direction_rejected"] += 1
+            continue
+        rhythm = sequence_rhythm(rng, mode_stats, motif_length)
+        if rhythm is None or len(rhythm) != SUBJECT_POSITIONS or sum(rhythm) != SUBJECT_TICKS:
+            stage["rhythm_failed"] += 1
+            continue
+        accepted.append(
+            Candidate(
+                pitches=pitches,
+                rhythm_ticks=rhythm,
+                trigram_nll=nll,
+                shape_kl=model.shape_kl(intervals),
+                contour=classify_contour_archetype(pitches),
+                features=candidate_features(pitches),
+            )
+        )
+    stage["accepted"] = len(accepted)
+
+    # Coherence-first ranking: leap-free bodies with the longest directed runs
+    # come first; corpus NLL only breaks ties.
+    def rank(candidate: Candidate) -> tuple:
+        metrics = coherence_metrics(candidate.pitches)
+        return (
+            metrics["body_leaps"],
+            -metrics["direction_run_mean"],
+            candidate.trigram_nll,
+        )
+
+    accepted.sort(key=rank)
+    kept: list[Candidate] = []
+    kept_intervals: list[list[int]] = list(anchor_intervals)
+    for candidate in accepted:
+        if len(kept) >= keep:
+            break
+        intervals = intervals_of(candidate.pitches)
+        if any(
+            interval_edit_distance(intervals, other) < dedup_distance
+            for other in kept_intervals
+        ):
+            stage["dedup_removed"] += 1
+            continue
+        kept.append(candidate)
+        kept_intervals.append(intervals)
+    stage["kept"] = len(kept)
+
+    return {
+        "spec": {"low": spec.low, "high": spec.high, "tail": list(LEADING_TONE_TAIL)},
+        "anchor_nll": anchor_nll,
+        "nll_floor": nll_floor,
+        "style": "sequence",
+        "stage_counts": dict(stage),
+        "candidates": [
+            {
+                "pitches": candidate.pitches,
+                "rhythm_ticks": candidate.rhythm_ticks,
+                "trigram_nll": candidate.trigram_nll,
+                "shape_kl": candidate.shape_kl,
+                "contour": candidate.contour,
+                "features": candidate.features,
+                "coherence": coherence_metrics(candidate.pitches),
+            }
+            for candidate in kept
+        ],
+    }
+
+
 def write_pool(document: dict, output: Path) -> None:
     output.parent.mkdir(parents=True, exist_ok=True)
     with output.open("w", encoding="utf-8") as handle:
@@ -533,13 +828,13 @@ def _add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--stats",
         type=Path,
-        default=REPO_ROOT / "backup" / "subject_stats.json",
+        default=REPO_ROOT / "build" / "subject_stats.json",
         help="subject_stats.v1 JSON produced by extract-subject-stats",
     )
     parser.add_argument(
         "--output",
         type=Path,
-        default=REPO_ROOT / "backup" / "subject_pool.json",
+        default=REPO_ROOT / "build" / "subject_pool.json",
         help="candidate pool destination (kept out of the repository)",
     )
     parser.add_argument(
@@ -551,6 +846,13 @@ def _add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--pool-size", type=int, default=5000)
     parser.add_argument("--keep", type=int, default=200)
     parser.add_argument("--seed", type=int, default=1)
+    parser.add_argument(
+        "--style",
+        choices=("sequence", "markov"),
+        default="sequence",
+        help="sequence = motif restated as a diatonic sequence (coherence built "
+        "in, the default); markov = free trigram walk (the original sampler)",
+    )
     parser.add_argument(
         "--nll-margin",
         type=float,
@@ -584,9 +886,10 @@ def run(args) -> int:
         raise SystemExit(f"unexpected stats schema in {args.stats}")
 
     rng = random.Random(args.seed)
+    synthesize = synthesize_mode_sequence if args.style == "sequence" else synthesize_mode
     modes: dict = {}
     for mode in ("major", "minor"):
-        modes[mode] = synthesize_mode(
+        modes[mode] = synthesize(
             rng,
             mode,
             stats_doc["stats"][mode],
@@ -603,6 +906,7 @@ def run(args) -> int:
             "pool_size": args.pool_size,
             "keep": args.keep,
             "seed": args.seed,
+            "style": args.style,
             "nll_margin": args.nll_margin,
             "dedup_distance": args.dedup_distance,
             "stats": str(args.stats),

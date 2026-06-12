@@ -2,7 +2,7 @@
 """Extract fugue entry-plan statistics from external annotation files.
 
 Two input formats are accepted; raw annotations are not vendored here, only the
-derived constants and backup report are stored.
+derived constants and the generated report are stored.
 
 CSV format columns:
   piece,bar,voice,kind[,duration]

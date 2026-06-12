@@ -117,6 +117,70 @@ TEST(SubjectCatalog, MinorEntriesHoldSubjectInvariants) {
                           /*minor=*/true, /*body_low=*/70, /*body_high=*/82);
 }
 
+template <std::size_t N>
+void expectClassArrayValid(const std::array<std::uint8_t, N>& indices, std::size_t catalog_size,
+                           std::uint8_t anchor_a, std::uint8_t anchor_b) {
+  static_assert(N >= 2, "a class must hold at least its legacy slot pair");
+  std::set<int> seen;
+  for (std::size_t i = 0; i < N; ++i) {
+    EXPECT_LT(indices[i], catalog_size) << "position " << i;
+    if (i > 0) {
+      // Strictly ascending implies unique entries.
+      EXPECT_GT(indices[i], indices[i - 1]) << "position " << i;
+    }
+    seen.insert(indices[i]);
+  }
+  // The legacy two-slot pair stays reachable for the character.
+  EXPECT_TRUE(seen.count(anchor_a));
+  EXPECT_TRUE(seen.count(anchor_b));
+}
+
+TEST(SubjectCatalog, CharacterClassArraysAreValid) {
+  const std::size_t major = kSubjectCatalogMajor.size();
+  const std::size_t minor = kSubjectCatalogMinor.size();
+  expectClassArrayValid(tables::kSubjectClassSevereMajor, major, 0, 2);
+  expectClassArrayValid(tables::kSubjectClassPlayfulMajor, major, 1, 4);
+  expectClassArrayValid(tables::kSubjectClassNobleMajor, major, 0, 3);
+  expectClassArrayValid(tables::kSubjectClassRestlessMajor, major, 2, 4);
+  expectClassArrayValid(tables::kSubjectClassSevereMinor, minor, 0, 2);
+  expectClassArrayValid(tables::kSubjectClassPlayfulMinor, minor, 1, 4);
+  expectClassArrayValid(tables::kSubjectClassNobleMinor, minor, 0, 3);
+  expectClassArrayValid(tables::kSubjectClassRestlessMinor, minor, 2, 4);
+}
+
+TEST(SubjectCatalog, EveryCatalogEntryIsReachableBySomeCharacter) {
+  // An entry no character can reach would silently shrink the effective
+  // catalog (the generator rejects this at render time; pin it here too).
+  for (int mode = 0; mode < 2; ++mode) {
+    std::set<int> reachable;
+    if (mode == 0) {
+      for (std::uint8_t v : tables::kSubjectClassSevereMajor)
+        reachable.insert(v);
+      for (std::uint8_t v : tables::kSubjectClassPlayfulMajor)
+        reachable.insert(v);
+      for (std::uint8_t v : tables::kSubjectClassNobleMajor)
+        reachable.insert(v);
+      for (std::uint8_t v : tables::kSubjectClassRestlessMajor)
+        reachable.insert(v);
+    } else {
+      for (std::uint8_t v : tables::kSubjectClassSevereMinor)
+        reachable.insert(v);
+      for (std::uint8_t v : tables::kSubjectClassPlayfulMinor)
+        reachable.insert(v);
+      for (std::uint8_t v : tables::kSubjectClassNobleMinor)
+        reachable.insert(v);
+      for (std::uint8_t v : tables::kSubjectClassRestlessMinor)
+        reachable.insert(v);
+    }
+    const std::size_t size =
+        (mode == 0) ? kSubjectCatalogMajor.size() : kSubjectCatalogMinor.size();
+    for (std::size_t index = 0; index < size; ++index) {
+      EXPECT_TRUE(reachable.count(static_cast<int>(index)))
+          << (mode == 0 ? "major" : "minor") << " entry " << index;
+    }
+  }
+}
+
 TEST(SubjectCatalog, NoRepeatedNoteRunsBeyondTwo) {
   for (const auto& subject : kSubjectCatalogMajor) {
     for (int pos = 2; pos < 16; ++pos) {

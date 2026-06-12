@@ -579,6 +579,45 @@ void applyOrnamentPass(ComposeResult& result, const OrnamentParams& params) {
     return false;
   };
 
+  // Sustained-dissonance guard. An expansion may replace the arrival tone
+  // with a leaning neighbour held for half the note's value (appoggiatura,
+  // appuy trill opening). The base tone was validated against the texture,
+  // but the neighbour was not -- held against another voice's sustained tone
+  // it can sound a m2/M7/tritone for a beat or more, and the validator never
+  // re-checks ornament output. Suppress the ornament when any pitch-altered
+  // sub-note would hold a sharp interval class (1, 6 or 11) against any
+  // sounding voice for a quarter note or longer; shorter decoration tones
+  // (32nd/16th neighbours) pass untouched.
+  auto expansion_sustains_dissonance = [&](const Expansion& cand_exp, const NoteEvent& base,
+                                           std::size_t idx) {
+    constexpr Tick kSlot = duration::kSixteenthNote;
+    const int sustain_slots = static_cast<int>(kQuarter / kSlot);
+    for (const NoteEvent& sub : cand_exp.notes) {
+      if (sub.pitch == base.pitch || sub.duration < kQuarter) {
+        continue;  // unchanged tone, or too short to sustain a clash.
+      }
+      for (VoiceId v = 0; v < static_cast<VoiceId>(voice_present.size()); ++v) {
+        if (!voice_present[v] || v == base.voice) {
+          continue;
+        }
+        int run = 0;
+        for (Tick t = sub.start_tick; t < sub.start_tick + sub.duration; t += kSlot) {
+          const int other = sounding_in_voice(v, t, idx + 1);
+          bool sharp = false;
+          if (other >= 0) {
+            const int ic = std::abs(static_cast<int>(sub.pitch) - other) % 12;
+            sharp = (ic == 1 || ic == 6 || ic == 11);
+          }
+          run = sharp ? run + 1 : 0;
+          if (run >= sustain_slots) {
+            return true;
+          }
+        }
+      }
+    }
+    return false;
+  };
+
   for (std::size_t idx = 0; idx < result.notes.size(); ++idx) {
     const NoteEvent& note = result.notes[idx];
     const NoteProvenance& prov = result.provenance[idx];
@@ -852,8 +891,9 @@ void applyOrnamentPass(ComposeResult& result, const OrnamentParams& params) {
     }
 
     if (!exp.notes.empty() &&
-        (clashes_committed_ornament(note) || expansion_forms_parallel(exp, note, idx)))
-      exp.notes.clear();  // would chain a parallel against another voice: stay plain.
+        (clashes_committed_ornament(note) || expansion_forms_parallel(exp, note, idx) ||
+         expansion_sustains_dissonance(exp, note, idx)))
+      exp.notes.clear();  // would clash against another voice: stay plain.
 
     if (exp.notes.empty()) {
       out_notes.push_back(note);

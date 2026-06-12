@@ -11,6 +11,7 @@
 #include "composer/material.h"
 #include "composer/minor_material.h"
 #include "composer/span.h"
+#include "composer/subject_catalog.h"
 #include "composer/texture_helpers.h"
 #include "composer/tonal_answer.h"
 #include "composer/voice_intent.h"
@@ -52,22 +53,23 @@ namespace bach::composer {
 
 namespace {
 
-using detail::ChordSpec;                     // NOLINT(build/namespaces)
-using detail::kFugueCompleteSubjectRhythms;  // NOLINT(build/namespaces)
-using detail::kFugueCompleteSubjects;        // NOLINT(build/namespaces)
-using detail::kHarmonyPatterns;              // NOLINT(build/namespaces)
-using detail::kHarmonyPatternsMinor;         // NOLINT(build/namespaces)
-using detail::kSubjectsMinor;                // NOLINT(build/namespaces)
-using detail::Mode;                          // NOLINT(build/namespaces)
-using detail::scaleUp;                       // NOLINT(build/namespaces)
-using detail::subjectSlotFor;                // NOLINT(build/namespaces)
+using detail::ChordSpec;                    // NOLINT(build/namespaces)
+using detail::kHarmonyPatterns;             // NOLINT(build/namespaces)
+using detail::kHarmonyPatternsMinor;        // NOLINT(build/namespaces)
+using detail::Mode;                         // NOLINT(build/namespaces)
+using detail::scaleUp;                      // NOLINT(build/namespaces)
+using detail::subjectIndexFor;              // NOLINT(build/namespaces)
+using tables::kSubjectCatalogMajor;         // NOLINT(build/namespaces)
+using tables::kSubjectCatalogMajorRhythms;  // NOLINT(build/namespaces)
+using tables::kSubjectCatalogMinor;         // NOLINT(build/namespaces)
+using tables::kSubjectCatalogMinorRhythms;  // NOLINT(build/namespaces)
 
 constexpr Tick kQuarter = kTicksPerBeat;
 constexpr Tick kEighth = kTicksPerBeat / 2;
 constexpr Tick kSixteenth = kTicksPerBeat / 4;
 
 // One subject statement is 16 catalog notes spanning 4 bars. Durations come
-// from kFugueCompleteSubjectRhythms rather than being fixed quarters.
+// from the per-mode catalog rhythm rows rather than being fixed quarters.
 constexpr int kSubjectNotes = 16;
 constexpr int kSubjectBars = 4;
 
@@ -744,10 +746,12 @@ void appendFugueTail(SectionalAssembly& asm_ctx, int first_bar, int bars,
   const Mode mode = req.mode;
   const int fig_offset = static_cast<int>(req.seed % 4);
 
-  const std::uint8_t slot = subjectSlotFor(req.character, req.seed);
+  const bool minor_mode = (mode == Mode::Minor);
+  const std::uint8_t slot = subjectIndexFor(req.character, minor_mode, req.seed);
   const std::array<std::uint8_t, 16>& subj_pat =
-      (mode == Mode::Minor) ? kSubjectsMinor[slot] : kFugueCompleteSubjects[slot];
-  const std::array<Tick, 16>& subj_rhythm = kFugueCompleteSubjectRhythms[slot];
+      minor_mode ? kSubjectCatalogMinor[slot] : kSubjectCatalogMajor[slot];
+  const std::array<Tick, 16>& subj_rhythm =
+      minor_mode ? kSubjectCatalogMinorRhythms[slot] : kSubjectCatalogMajorRhythms[slot];
 
   // The cadence reserves the final 2 bars; nothing else extends into them.
   const int cadence_start = first_bar + bars - 2;  // first of the 2 cadence bars.
@@ -1121,23 +1125,30 @@ void appendFugueTail(SectionalAssembly& asm_ctx, int first_bar, int bars,
     // thematic voices (V0 leader, V1 follower) already sound above it.
     add_counterline(2, leader_bar, leader_bar + 3, 2);
 
-    // Figuration fill before and after the stretto block: a V0 running line with
-    // a V2 sustained chord-tone support beneath it, so every development bar that
-    // would otherwise rest both lower voices sounds at least two voices. The V0
-    // figuration is built first, then the V2 support reads it from the registry
-    // and picks a consonant, parallel-free tone below it.
+    // Figuration fill before and after the stretto block, keeping the full
+    // three-voice texture through the development: V0 and V1 eighth-note wave
+    // counterlines in their disjoint bands over a V2 sustained chord-tone
+    // support (a single-anchor-per-beat V1 degenerates into a two-pitch
+    // pendulum once same-pitch quarters coalesce; the eighth wave walks the
+    // scale between anchors like the stretto-window bass line). Lines are
+    // built top-down so each lower line reads everything already sounding
+    // above it from the registry and picks consonant, parallel-free tones
+    // (long fills previously rested V1 entirely, thinning the fugue to two
+    // voices between the exposition and the stretto).
     if (leader_bar > next_free_bar) {
       add_counterline(0, next_free_bar, leader_bar - 1, 2);
+      add_counterline(1, next_free_bar, leader_bar - 1, 2);
       add_sustained_support(2, next_free_bar, leader_bar - 1);
     }
     if (leader_bar + 4 < cadence_start) {
       add_counterline(0, leader_bar + 4, cadence_start - 1, 2);
+      add_counterline(1, leader_bar + 4, cadence_start - 1, 2);
       add_sustained_support(2, leader_bar + 4, cadence_start - 1);
     }
   } else if (cadence_start > next_free_bar) {
-    // Short tail: a V0 figuration fill up to the cadence with a V2 sustained
-    // chord-tone support beneath it so the fill is a >= 2-voice texture.
+    // Short tail: the same three-layer fill up to the cadence.
     add_counterline(0, next_free_bar, cadence_start - 1, 2);
+    add_counterline(1, next_free_bar, cadence_start - 1, 2);
     add_sustained_support(2, next_free_bar, cadence_start - 1);
   }
 
