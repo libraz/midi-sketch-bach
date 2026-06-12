@@ -238,12 +238,24 @@ int chordToneAbove(int from, int root_pc, bool minor) {
 // same third-pendulum bigrams into every bar. `notes_per_beat` is 1
 // (quarters: beat anchors only), 2 (eighths), or 4 (sixteenths).
 //
+// `leap_fill` (sixteenth tier only, default off so existing callers stay
+// byte-identical) replaces the OPENING beat's fill with a leap-and-fill cell:
+// an ascending-sixth leap from the downbeat anchor to the scale tone five
+// degrees up, then stepwise descent -- the classical leap-then-contrary-fill
+// shape supplying the ascending-sixth interval bins no stepwise window fill
+// reaches. The cell's peak (anchor + a sixth) stays strictly under ladder[3]
+// (anchor + an octave), a pitch the contours already reach, so it adds no new
+// register ceiling; and every cell tone sits ON or ABOVE the downbeat anchor
+// (the bar's lowest), so the register floor the V1 embellishment ceiling
+// relies on is preserved. The beat onset itself is untouched (still the
+// contour's chord-tone anchor).
+//
 // Appends to `notes` via the supplied emit callback (start_tick, duration,
 // pitch), so the same routine serves both the FigurationSection and the
 // PassacagliaVariation builders.
 template <typename Emit>
 void emitAnchoredBar(int bar, int start, const BarChord& chord, Mode mode, int notes_per_beat,
-                     const Emit& emit, int figure = 0) {
+                     const Emit& emit, int figure = 0, bool leap_fill = false) {
   // Chord-tone ladder above the start, then the contour's four per-beat picks.
   int ladder[4];
   ladder[0] = start;
@@ -278,6 +290,22 @@ void emitAnchoredBar(int bar, int start, const BarChord& chord, Mode mode, int n
   for (int beat = 0; beat < 4; ++beat) {
     const int from = anchor[static_cast<std::size_t>(beat)];
     const int to = anchor[static_cast<std::size_t>((beat + 1) % 4)];
+    if (leap_fill && notes_per_beat == 4 && beat == 0) {
+      // Leap-and-fill opening beat: anchor, sixth up, two steps back down.
+      // Every contour opens on ladder[0], so the peak never exceeds the
+      // ladder[3] tone the contours already reach, and no cell tone dips
+      // below the downbeat anchor.
+      int cur = from;
+      for (int sub = 0; sub < 4; ++sub) {
+        if (sub == 1) {
+          cur = detail::scaleUp(from, 5, mode);
+        } else if (sub > 1) {
+          cur = step_dir(cur, -1);
+        }
+        emit(barTick(bar) + static_cast<Tick>(sub) * step, step, cur);
+      }
+      continue;
+    }
     // Off-beat sub-positions step diatonically from this beat's anchor toward
     // the next beat's anchor and REFLECT one step short of it, so the next
     // beat's anchor is a fresh onset and the fill never holds a pitch.
@@ -340,7 +368,8 @@ void emitAnchoredBar(int bar, int start, const BarChord& chord, Mode mode, int n
 // pitch the wave starts from before snapping to a chord tone; `offset` shifts
 // the start up the scale per seed.
 void appendFigurationBar(FigurationSection& section, int bar, const BarChord& chord, Mode mode,
-                         int notes_per_beat, int register_base, int offset, int figure = 0) {
+                         int notes_per_beat, int register_base, int offset, int figure = 0,
+                         bool leap_fill = false) {
   const int snapped =
       snapUpToChordTone(detail::scaleUp(register_base, offset, mode), chord.root_pc, chord.minor);
   emitAnchoredBar(
@@ -348,7 +377,7 @@ void appendFigurationBar(FigurationSection& section, int bar, const BarChord& ch
       [&](Tick start, Tick dur, int pitch) {
         section.notes.push_back(materialNote(start, dur, pitch));
       },
-      figure);
+      figure, leap_fill);
 }
 
 // ----- Chorale prelude walking-bass (Schubler BWV645 model) ----------------
@@ -759,7 +788,12 @@ HarnessFixture buildChoralePreludeForm(const ResolvedRequest& req) {
       // chorale preludes.
       const int figure =
           static_cast<int>((req.seed + req.seed / 4u + static_cast<std::uint32_t>(bar)) % 4u);
-      appendFigurationBar(fig, bar, chord, mode, notes_per_beat, register_base, offset, figure);
+      // Sixteenth-tier bars open with the leap-and-fill cell (ascending-sixth
+      // leap, stepwise descent): the contour windows' stepwise fills alone
+      // leave the ascending-sixth interval bins -- a fixture of the chorale
+      // figuration idiom -- almost empty.
+      appendFigurationBar(fig, bar, chord, mode, notes_per_beat, register_base, offset, figure,
+                          /*leap_fill=*/notes_per_beat == 4);
     }
   }
 

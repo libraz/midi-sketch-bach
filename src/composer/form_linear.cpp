@@ -736,14 +736,18 @@ HarnessFixture buildTrioSonataForm(const ResolvedRequest& req) {
       // subdivisions trace an intra-beat cell that resolves back to the
       // anchor's neighbourhood. The sixteenth tier rotates the cell PER BEAT
       // among {rising step arc, broken-chord arc, falling step arc, broken-
-      // third climb}: the step arcs alone concentrate the interval-bigram
-      // surface into the three step|step bins (a level the reference corpus
-      // never reaches), the broken-chord arc supplies the third/fifth leaps
-      // the corpus writes inside beats, and the broken-third climb supplies
-      // the third|step alternations between them. The rotation modulus
-      // matches the four beats of the bar, so every bar carries each cell
-      // exactly once (a 3-cell modulus made beats 0 and 3 sample the same
-      // cell in every bar, re-concentrating the surface at any length).
+      // third climb, leap-and-fill}: the step arcs alone concentrate the
+      // interval-bigram surface into the three step|step bins (a level the
+      // reference corpus never reaches), the broken-chord arc supplies the
+      // third/fifth leaps the corpus writes inside beats, the broken-third
+      // climb supplies the third|step alternations between them, and the
+      // leap-and-fill cell (an ascending-sixth leap to the scale tone five
+      // degrees up, then stepwise descent) supplies the ascending-sixth bins
+      // -- the corpus interval mass no step or third cell reaches. A 5-cell
+      // modulus over the 4-beat bar keeps the four beats on four DISTINCT
+      // cells (consecutive residues) and rotates which cell sits out each
+      // bar, so no cell saturates the surface and beats 0 and 3 never alias
+      // (a 3-cell modulus made them sample the same cell in every bar).
       // Each cell stays inside the voice's proven sounding envelope
       // [band_lo, band_hi + a 2-degree neighbour]: the falling arc keeps two
       // scale steps of headroom above the band floor, and the broken-chord /
@@ -756,15 +760,22 @@ HarnessFixture buildTrioSonataForm(const ResolvedRequest& req) {
       int broken_dir = 1;
       bool thirds_fits = false;
       int thirds_dir = 1;
+      bool leap_fits = false;
       bool falling;
       if (notes_per_beat == 4) {
-        const int cell = (bar + beat + shape) % 4;
+        const int cell = (bar + beat + shape) % 5;
         if (cell == 1) {
           broken_dir = (walk(anchor, 4) <= sounding_hi) ? 1 : -1;
           broken_fits = (broken_dir > 0) || (walk(anchor, -4) >= band_lo);
         } else if (cell == 3) {
           thirds_dir = (walk(anchor, 3) <= sounding_hi) ? 1 : -1;
           thirds_fits = (thirds_dir > 0) || (walk(anchor, -3) >= band_lo);
+        } else if (cell == 4) {
+          // Ascending only: the leap's peak must stay inside the proven
+          // sounding envelope (a descending mirror would oversupply the
+          // descending-sixth bin, already at corpus level). When the peak
+          // does not fit, the rising arc substitutes.
+          leap_fits = walk(anchor, 5) <= sounding_hi;
         }
         falling = (cell == 2) && (anchor - 4 >= band_lo);
       } else {
@@ -774,14 +785,20 @@ HarnessFixture buildTrioSonataForm(const ResolvedRequest& req) {
       // back, third up again -- net a fourth, recovered by the next beat's
       // chord-tone anchor.
       static constexpr int kThirdsCell[4] = {0, 2, 1, 3};
+      // Leap-and-fill degrees: anchor, sixth up, then two steps back down --
+      // the classical leap-then-contrary-fill shape; the cell ends a fourth
+      // above the anchor, recovered by the next beat's chord-tone anchor.
+      static constexpr int kLeapCell[4] = {0, 5, 4, 3};
       for (int sub = 0; sub < notes_per_beat; ++sub) {
         MaterialNote mn;
         mn.start_tick = beat_base + static_cast<Tick>(sub) * step;
         mn.duration = step;
         const int magnitude = (sub <= notes_per_beat / 2) ? sub : (notes_per_beat - sub);
-        const int degrees = thirds_fits ? thirds_dir * kThirdsCell[sub & 3]
-                                        : (broken_fits ? broken_dir * 2 * magnitude
-                                                       : (falling ? -magnitude : magnitude));
+        const int degrees =
+            leap_fits ? kLeapCell[sub & 3]
+                      : (thirds_fits ? thirds_dir * kThirdsCell[sub & 3]
+                                     : (broken_fits ? broken_dir * 2 * magnitude
+                                                    : (falling ? -magnitude : magnitude)));
         int pitch = walk(anchor, degrees);
         // Intra-beat cell tone landing a parallel against the guard voice:
         // mirror the cell tone to the anchor's other side when that stays in

@@ -781,5 +781,39 @@ TEST(FormCantusRegister, ChoraleCadentialLandingConnectsFromFiguration) {
   }
 }
 
+// The chorale figuration's sixteenth-tier bars open with the leap-and-fill
+// cell (an ascending-sixth leap from the downbeat anchor, then stepwise
+// descent), so the V0 line writes ascending sixths -- the corpus interval
+// bins the stepwise window fills leave almost empty -- and every such leap
+// resolves by contrary (downward) motion. Noble keeps the figuration at the
+// sixteenth tier in every non-corta bar, so the cell is guaranteed present.
+TEST(FormCantusRegister, ChoraleFigurationWritesContraryResolvedAscendingSixths) {
+  for (std::uint32_t seed : {1u, 2u, 5u, 6u, 9u, 10u}) {
+    const HarnessFixture fx =
+        build(FormType::ChoralePrelude, /*minor=*/false, SubjectCharacter::Noble, 0, seed);
+    const ComposeResult r = Composer{}.run(fx.material, fx.harmony, fx.voice_plan);
+    ASSERT_FALSE(r.notes.empty()) << "seed " << seed;
+    std::vector<const NoteEvent*> v0;
+    for (const auto& n : r.notes) {
+      if (n.voice == 0)
+        v0.push_back(&n);
+    }
+    std::sort(v0.begin(), v0.end(),
+              [](const NoteEvent* a, const NoteEvent* b) { return a->start_tick < b->start_tick; });
+    int ascending_sixths = 0;
+    int unresolved = 0;
+    for (std::size_t idx = 1; idx + 1 < v0.size(); ++idx) {
+      const int leap = static_cast<int>(v0[idx]->pitch) - static_cast<int>(v0[idx - 1]->pitch);
+      if (leap != 8 && leap != 9)
+        continue;
+      ++ascending_sixths;
+      if (static_cast<int>(v0[idx + 1]->pitch) - static_cast<int>(v0[idx]->pitch) >= 0)
+        ++unresolved;
+    }
+    EXPECT_GT(ascending_sixths, 0) << "seed " << seed;
+    EXPECT_EQ(unresolved, 0) << "seed " << seed;
+  }
+}
+
 }  // namespace
 }  // namespace bach::composer

@@ -535,12 +535,13 @@ TEST(FormLinearTrio, DenseLineRotatesIntraBeatVocabulary) {
   }
 }
 
-// The intra-beat cell rotation modulus matches the four beats of the bar
-// ((bar + beat + shape) % 4), so every sixteenth-tier bar carries each cell
-// once and beats 0 and 3 trace DIFFERENT cells. A 3-cell modulus aliases with
-// the bar grid -- (bar + 0 + shape) % 3 == (bar + 3 + shape) % 3 -- so beats
-// 0 and 3 sampled the same cell in every bar at any piece length,
-// re-concentrating the interval-bigram surface the rotation exists to spread.
+// The intra-beat cell rotation ((bar + beat + shape) % 5) walks consecutive
+// residues across the four beats of a bar, so every sixteenth-tier bar
+// carries four DISTINCT cells and beats 0 and 3 never trace the same one.
+// A 3-cell modulus aliases with the bar grid -- (bar + 0 + shape) % 3 ==
+// (bar + 3 + shape) % 3 -- so beats 0 and 3 sampled the same cell in every
+// bar at any piece length, re-concentrating the interval-bigram surface the
+// rotation exists to spread.
 TEST(FormLinearTrio, UpperVoiceBeatCellsAvoidBarGridAliasing) {
   const ComposeResult r = build(FormType::TrioSonata, 1, /*is_minor=*/false, 64, nullptr);
   std::map<int, std::vector<NoteEvent>> bars;
@@ -579,6 +580,48 @@ TEST(FormLinearTrio, UpperVoiceBeatCellsAvoidBarGridAliasing) {
   EXPECT_GE(differing * 10, sixteenth_bars * 6)
       << "beats 0 and 3 traced the same cell in " << (sixteenth_bars - differing) << "/"
       << sixteenth_bars << " sixteenth-tier bars";
+}
+
+// The sixteenth-tier rotation includes the leap-and-fill cell (an
+// ascending-sixth leap from the beat anchor, then stepwise descent), so the
+// manual voices write ascending sixths -- the corpus interval bins no step or
+// third cell reaches. The cell's own leap always resolves by a contrary
+// step, so a 32-bar piece must carry several step-resolved sixths (the bin's
+// other occupants -- minor-sixth anchor-zigzag jumps between chord tones --
+// are broken-chord motion with no step-resolution contract, so the bin is
+// not exclusively cell-made, especially in minor).
+TEST(FormLinearTrio, ManualVoicesWriteStepResolvedAscendingSixths) {
+  for (std::uint32_t seed : kSeeds) {
+    for (bool minor : kMinorFlags) {
+      const ComposeResult r = build(FormType::TrioSonata, seed, minor, 32, nullptr);
+      std::array<std::vector<NoteEvent>, 3> by_voice;
+      for (const NoteEvent& note : r.notes) {
+        ASSERT_LT(note.voice, 3);
+        by_voice[note.voice].push_back(note);
+      }
+      int ascending_sixths = 0;
+      int step_resolved = 0;
+      for (auto& voice_notes : by_voice) {
+        std::sort(
+            voice_notes.begin(), voice_notes.end(),
+            [](const NoteEvent& x, const NoteEvent& y) { return x.start_tick < y.start_tick; });
+        for (std::size_t idx = 1; idx + 1 < voice_notes.size(); ++idx) {
+          const int leap = static_cast<int>(voice_notes[idx].pitch) -
+                           static_cast<int>(voice_notes[idx - 1].pitch);
+          if (leap != 8 && leap != 9)
+            continue;
+          ++ascending_sixths;
+          const int resolution = static_cast<int>(voice_notes[idx + 1].pitch) -
+                                 static_cast<int>(voice_notes[idx].pitch);
+          if (resolution < 0 && resolution >= -2)
+            ++step_resolved;
+        }
+      }
+      EXPECT_GT(ascending_sixths, 0) << "seed=" << seed << " minor=" << minor;
+      EXPECT_GE(step_resolved, 4) << "seed=" << seed << " minor=" << minor << " (resolved "
+                                  << step_resolved << "/" << ascending_sixths << ")";
+    }
+  }
 }
 
 }  // namespace
