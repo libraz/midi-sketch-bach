@@ -947,9 +947,11 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
     const RuleIdMask ground_bits = (ruleBitMask(RuleBit::PassacagliaGroundReplayed));
     const Tick period = material.passacaglia_ground_period;
     const Tick split_from = material.passacaglia_ground_split_from;
-    if (period > 0 && !material.passacaglia_ground.empty()) {
+    const auto& gnotes = material.passacaglia_ground;
+    if (period > 0 && !gnotes.empty()) {
       for (Tick base = span.start_tick; base < span.end_tick; base += period) {
-        for (const auto& mnote : material.passacaglia_ground) {
+        for (std::size_t idx = 0; idx < gnotes.size(); ++idx) {
+          const auto& mnote = gnotes[idx];
           const Tick t = base + mnote.start_tick;
           if (t < span.start_tick)
             continue;
@@ -964,8 +966,24 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
           // piece's final ground note stays unsplit: the bass joins the held
           // closing chord instead of hammering quarters through the cadence.
           const bool is_final_note = t + shifted.duration >= span.end_tick;
+          // The ground's last bar carries the same pitch as the next cycle's
+          // first bar (the BWV582-style tonic return), so hammering BOTH sides
+          // of a cycle seam chains six same-pitch quarters -- past the corpus
+          // repeated-note envelope (max run 4). When the successor in the
+          // tiled stream restates the same pitch and will itself be split, the
+          // current note stays a sustained long note (the phrase-end hold
+          // before the martellato relaunch); the run is then at most the
+          // successor bar's own quarters plus this single note.
+          const bool last_in_cycle = idx + 1 == gnotes.size();
+          const auto& next_note = last_in_cycle ? gnotes.front() : gnotes[idx + 1];
+          const Tick next_t = last_in_cycle ? base + period : base + gnotes[idx + 1].start_tick;
+          const bool next_would_split = split_from > 0 && next_t >= split_from &&
+                                        next_note.duration > kTicksPerBeat &&
+                                        next_t + next_note.duration < span.end_tick;
+          const bool sustain_into_restatement =
+              next_would_split && next_note.pitch == shifted.pitch;
           if (split_from > 0 && t >= split_from && shifted.duration > kTicksPerBeat &&
-              !is_final_note) {
+              !is_final_note && !sustain_into_restatement) {
             for (Tick off = 0; off < shifted.duration; off += kTicksPerBeat) {
               MaterialNote chunk = shifted;
               chunk.start_tick = t + off;

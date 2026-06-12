@@ -57,6 +57,16 @@ ENFORCE_MODEL_SCORE = True
 # ratchets, not aspirational targets.
 MODEL_SCORE_V2_THRESHOLD = 0.70
 
+# Shared fallback floor for the length-invariant v2 probability
+# (probability_length_invariant: the KL excess over the Bach prefix median at
+# the same event count, so the value is comparable across --target-bars
+# settings). The per-form floors in FORM_THRESHOLDS are regression ratchets
+# calibrated on the 64-bar 20-seed sweep minima minus a ~0.02 seed-noise
+# margin -- the weakest measured point of each form -- so they hold at every
+# length (the default-length minima sit well above them). Unlike the raw v1 /
+# v2 floors, this axis stays enforced under an explicit --target-bars.
+MODEL_SCORE_V2_LENGTH_INVARIANT_THRESHOLD = 0.70
+
 
 # Texture bands are calibrated against a corpus of 21 voice-separated Bach
 # fugues (duration-weighted boundary sweep). The corpus p25 for the average
@@ -113,6 +123,12 @@ class FormThresholds:
         probability (model_score_v2). None falls back to the shared
         MODEL_SCORE_V2_THRESHOLD; the explicit values are 20-seed sweep
         minima minus a seed-noise margin (regression ratchets).
+    @field model_score_v2_length_invariant_threshold Form-specific floor on
+        the length-invariant v2 probability. None falls back to the shared
+        MODEL_SCORE_V2_LENGTH_INVARIANT_THRESHOLD; the explicit values are
+        the 64-bar 20-seed sweep minima minus a seed-noise margin, the
+        weakest measured point per form, so the ratchet holds at every
+        --target-bars setting.
     @field min_piece_voice_occupancy Form-specific floor on the weakest
         voice's piece-relative occupancy. None falls back to the shared
         MIN_PIECE_VOICE_OCCUPANCY (calibrated on continuous fugue textures);
@@ -128,6 +144,7 @@ class FormThresholds:
     min_final_quarter_avg_active: float | None = None
     model_score_threshold: float | None = None
     model_score_v2_threshold: float | None = None
+    model_score_v2_length_invariant_threshold: float | None = None
     min_piece_voice_occupancy: float | None = None
     enforced: bool = True
 
@@ -144,11 +161,13 @@ FORM_THRESHOLDS: dict[str, FormThresholds] = {
     "fugue": FormThresholds(
         min_avg_active=MIN_AVG_ACTIVE_VOICES,
         model_score_v2_threshold=0.78,
+        model_score_v2_length_invariant_threshold=0.79,
         enforced=True,
     ),
     "prelude_and_fugue": FormThresholds(
         min_avg_active=MIN_AVG_ACTIVE_VOICES,
         model_score_v2_threshold=0.85,
+        model_score_v2_length_invariant_threshold=0.77,
         enforced=True,
     ),
     "toccata_and_fugue": FormThresholds(
@@ -156,6 +175,7 @@ FORM_THRESHOLDS: dict[str, FormThresholds] = {
         max_mono_ratio=0.25,
         require_v1_v2_occupancy=True,
         model_score_v2_threshold=0.76,
+        model_score_v2_length_invariant_threshold=0.75,
         enforced=True,
     ),
     "fantasia_and_fugue": FormThresholds(
@@ -163,6 +183,7 @@ FORM_THRESHOLDS: dict[str, FormThresholds] = {
         max_mono_ratio=0.10,
         model_score_threshold=0.78,
         model_score_v2_threshold=0.82,
+        model_score_v2_length_invariant_threshold=0.76,
         enforced=True,
     ),
     "passacaglia": FormThresholds(
@@ -170,26 +191,46 @@ FORM_THRESHOLDS: dict[str, FormThresholds] = {
         max_mono_ratio=0.15,
         min_final_quarter_avg_active=2.5,
         model_score_v2_threshold=0.84,
+        model_score_v2_length_invariant_threshold=0.77,
         enforced=True,
     ),
     "chorale_prelude": FormThresholds(
         min_avg_active=2.5,
         max_mono_ratio=0.05,
         model_score_v2_threshold=0.81,
+        model_score_v2_length_invariant_threshold=0.76,
         enforced=True,
     ),
     # The remaining forms previously fell through to the default (enforced,
     # fugue-style) entry; they are listed explicitly to carry their KL-model
     # floors. All other fields keep the default-entry semantics.
-    "trio_sonata": FormThresholds(model_score_v2_threshold=0.84, enforced=True),
-    "cello_prelude": FormThresholds(model_score_v2_threshold=0.83, enforced=True),
-    "chaconne": FormThresholds(model_score_v2_threshold=0.89, enforced=True),
+    "trio_sonata": FormThresholds(
+        model_score_v2_threshold=0.84,
+        model_score_v2_length_invariant_threshold=0.81,
+        enforced=True,
+    ),
+    # Cello and goldberg sit far below the shared invariant fallback at 64
+    # bars (the known long-form gaps: cello's all-sixteenth duration surface
+    # vs the full-corpus reference, goldberg's variation-suite texture); their
+    # explicit ratchets pin the measured floor so further regression fails
+    # while the gap itself stays an improvement target, not a gate target.
+    "cello_prelude": FormThresholds(
+        model_score_v2_threshold=0.83,
+        model_score_v2_length_invariant_threshold=0.58,
+        enforced=True,
+    ),
+    "chaconne": FormThresholds(
+        model_score_v2_threshold=0.89,
+        model_score_v2_length_invariant_threshold=0.75,
+        enforced=True,
+    ),
     # Goldberg's middle voice is the canon follower only (the variation suite
     # is two-voice with one three-voice canon block by design), so the
     # fugue-calibrated occupancy floor does not apply; 0.10 pins the design
     # value (0.15) with margin so the voice vanishing entirely still fails.
     "goldberg_variations": FormThresholds(
         model_score_v2_threshold=0.82,
+        model_score_v2_length_invariant_threshold=0.60,
         min_piece_voice_occupancy=0.10,
         enforced=True,
     ),
@@ -210,6 +251,13 @@ class GateCase:
     form: str
     seed: int
     generated: bool
+    # The --target-bars the case was generated with (None = the form's default
+    # snap length). Every per-form floor except the length-invariant model
+    # axis was calibrated on the default-length sweep, so under an explicit
+    # target_bars those floors are recorded but not enforced; the enforced set
+    # is then the length-independent corpus prohibitions (repeated-run,
+    # parallel ceiling, all-voices-sound) plus the length-invariant floor.
+    target_bars: int | None = None
     max_active_voices: int = 0
     avg_active_voices: float = 0.0
     mono_ratio: float = 0.0
@@ -247,7 +295,9 @@ class GateCase:
     # -1.0 marks "not scored" and does not gate, mirroring model_score.
     model_score_v2: float = -1.0
     # Length-invariant v2 probability (excess over Bach-at-same-event-count).
-    # Informational only -- comparable across --bars settings, no gate floor.
+    # Comparable across --target-bars settings; gated against the form's
+    # 64-bar-calibrated ratchet floor at every length (-1.0 = not scored,
+    # does not gate, mirroring the other model axes).
     model_score_v2_length_invariant: float = -1.0
     error: str = ""
 
@@ -322,6 +372,29 @@ class GateCase:
         return self.model_score_v2 >= threshold
 
     @property
+    def model_scored_v2_length_invariant(self) -> bool:
+        return self.model_score_v2_length_invariant >= 0.0
+
+    @property
+    def passes_model_score_v2_length_invariant(self) -> bool:
+        """Whether the length-invariant v2 probability reaches the form's floor.
+
+        Mirrors passes_model_score_v2 (enforcement off or an unscored case
+        passes); the floor is the form's 64-bar-calibrated ratchet
+        (MODEL_SCORE_V2_LENGTH_INVARIANT_THRESHOLD fallback). Because the
+        value is length-comparable by construction, the same floor gates the
+        default-length sweep and any explicit --target-bars run.
+        """
+        if not ENFORCE_MODEL_SCORE:
+            return True
+        if not self.model_scored_v2_length_invariant:
+            return True
+        threshold = self.thresholds.model_score_v2_length_invariant_threshold
+        if threshold is None:
+            threshold = MODEL_SCORE_V2_LENGTH_INVARIANT_THRESHOLD
+        return self.model_score_v2_length_invariant >= threshold
+
+    @property
     def passes_parallel(self) -> bool:
         """Whether the parallel perfect-5th/8th count is within the corpus ceiling."""
         return self.parallel_perfect_count <= MAX_PARALLEL_PERFECT_COUNT
@@ -333,6 +406,14 @@ class GateCase:
         report shows the full map for both enforced and informational forms.
         Axes that do not apply to a form (no mono ceiling, no final-quarter
         floor, etc.) are omitted rather than reported as a pass.
+
+        Under an explicit --target-bars the default-length-calibrated floors
+        (raw v1/v2 model floors, texture-shape targets) are omitted from the
+        map: their values were measured on the default snap lengths and a
+        longer piece shifts the form's structural proportions (e.g. the
+        toccata's free-section share), which is not a regression. The
+        length-independent corpus prohibitions and the length-invariant model
+        floor remain, so a --target-bars sweep still gates on real quality.
         """
         thresholds = self.thresholds
         occupancy_floor = (
@@ -344,14 +425,19 @@ class GateCase:
             "generated": self.generated,
             "max_active_voices": self.max_active_voices == self.num_voices,
             "max_repeated_run": self.max_repeated_run <= 4,
-            "avg_active_voices": self.avg_active_voices >= self.min_avg_active,
-            "min_piece_voice_occupancy": (
-                self.min_piece_voice_occupancy >= occupancy_floor
-            ),
             "parallel_perfect": self.passes_parallel,
-            "model_score": self.passes_model_score,
-            "model_score_v2": self.passes_model_score_v2,
+            "model_score_v2_length_invariant": (
+                self.passes_model_score_v2_length_invariant
+            ),
         }
+        if self.target_bars is not None:
+            return results
+        results["avg_active_voices"] = self.avg_active_voices >= self.min_avg_active
+        results["min_piece_voice_occupancy"] = (
+            self.min_piece_voice_occupancy >= occupancy_floor
+        )
+        results["model_score"] = self.passes_model_score
+        results["model_score_v2"] = self.passes_model_score_v2
         # The v2 silence axis measures the THIRD voice starving and only
         # applies to 3-voice textures (voice id 2 does not exist in a solo or
         # two-voice form; the occupancy floor guards those voices instead).
@@ -401,6 +487,10 @@ class GateCase:
         data["passes_model_score"] = self.passes_model_score
         data["model_scored_v2"] = self.model_scored_v2
         data["passes_model_score_v2"] = self.passes_model_score_v2
+        data["model_scored_v2_length_invariant"] = self.model_scored_v2_length_invariant
+        data["passes_model_score_v2_length_invariant"] = (
+            self.passes_model_score_v2_length_invariant
+        )
         data["verdict"] = (
             "enforced" if self.enforced else "informational"
         )
@@ -718,11 +808,24 @@ def run_case(
         text=True,
     )
     if completed.returncode != 0:
-        return GateCase(form=form, seed=seed, generated=False, error=completed.stderr.strip())
+        return GateCase(
+            form=form,
+            seed=seed,
+            generated=False,
+            target_bars=target_bars,
+            error=completed.stderr.strip(),
+        )
     generated_json = midi_path.with_suffix(".generated.json")
     if not generated_json.exists():
-        return GateCase(form=form, seed=seed, generated=False, error="generated JSON missing")
+        return GateCase(
+            form=form,
+            seed=seed,
+            generated=False,
+            target_bars=target_bars,
+            error="generated JSON missing",
+        )
     case = evaluate_generated_json(form, seed, generated_json)
+    case.target_bars = target_bars
     case.model_score, case.model_score_v2, case.model_score_v2_length_invariant = (
         model_score_for(index_js, generated_json)
     )
@@ -805,7 +908,8 @@ def summarize_form(form: str, cases: list[GateCase]) -> dict[str, Any]:
             if thresholds.model_score_v2_threshold is not None
             else MODEL_SCORE_V2_THRESHOLD
         ),
-        # Informational: length-comparable v2 axis (no gate floor).
+        # Length-comparable v2 axis, gated against the 64-bar-calibrated
+        # per-form ratchet at every --target-bars setting.
         "min_model_score_v2_length_invariant": min(
             (
                 case.model_score_v2_length_invariant
@@ -821,6 +925,11 @@ def summarize_form(form: str, cases: list[GateCase]) -> dict[str, Any]:
                 if case.model_score_v2_length_invariant >= 0.0
             ),
             default=0.0,
+        ),
+        "target_model_score_v2_length_invariant": (
+            thresholds.model_score_v2_length_invariant_threshold
+            if thresholds.model_score_v2_length_invariant_threshold is not None
+            else MODEL_SCORE_V2_LENGTH_INVARIANT_THRESHOLD
         ),
     }
 
@@ -852,7 +961,7 @@ def summarize(cases: list[GateCase]) -> dict[str, Any]:
             default=0.0,
         ),
         "model_scored_v2_cases": sum(1 for case in cases if case.model_scored_v2),
-        # Informational: length-comparable v2 axis (no gate floor).
+        # Length-comparable v2 axis (gated per form at every length).
         "min_model_score_v2_length_invariant": min(
             (
                 case.model_score_v2_length_invariant

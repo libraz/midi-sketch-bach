@@ -660,7 +660,10 @@ TEST(GroundVariationPassacaglia, GroundIntensifiesRhythmicallyInLateCycles) {
   // From the final third of the cycles on, the ground (V2) restates each bar as
   // three same-pitch quarters instead of one dotted half; earlier cycles keep
   // the long notes, and the bar-head pitch skeleton never changes. The piece's
-  // final bar stays one unsplit dotted half (the bass joins the held close).
+  // final bar stays one unsplit dotted half (the bass joins the held close),
+  // and so does a bar whose successor restates the same pitch and hammers
+  // (the cycle seam's tonic return) -- hammering both sides of the seam would
+  // chain six same-pitch quarters, past the corpus repeated-note envelope.
   for (std::uint32_t seed : {1u, 2u, 3u}) {
     const HarnessFixture fx = build(FormType::Passacaglia, seed, /*minor=*/true, /*bars=*/48);
     const ComposeResult r = Composer{}.run(fx.material, fx.harmony, fx.voice_plan);
@@ -685,9 +688,15 @@ TEST(GroundVariationPassacaglia, GroundIntensifiesRhythmicallyInLateCycles) {
       ASSERT_FALSE(bars[bar].empty()) << "seed " << seed << " bar " << bar;
       const Tick bar_tick = static_cast<Tick>(bar) * kTicksPerBar34;
       const std::uint8_t skeleton = fx.material.passacaglia_ground[bar % 8].pitch;
-      if (bar_tick < split_from || bar + 1 == bars.size()) {
-        // Early cycles -- and the final bar, whose ground joins the held
-        // closing chord -- keep one dotted-half note per bar.
+      const std::uint8_t next_skeleton = fx.material.passacaglia_ground[(bar + 1) % 8].pitch;
+      const bool successor_hammers =
+          bar + 2 < bars.size() &&  // the successor is not the unsplit final bar
+          static_cast<Tick>(bar + 1) * kTicksPerBar34 >= split_from;
+      const bool sustained_seam = successor_hammers && next_skeleton == skeleton;
+      if (bar_tick < split_from || bar + 1 == bars.size() || sustained_seam) {
+        // Early cycles -- the final bar, whose ground joins the held closing
+        // chord, and the same-pitch seam into a hammering successor -- keep
+        // one dotted-half note per bar.
         EXPECT_EQ(bars[bar].size(), 1u) << "seed " << seed << " bar " << bar;
         EXPECT_EQ(bars[bar][0]->duration, kTicksPerBar34);
       } else {
@@ -714,6 +723,32 @@ TEST(GroundVariationPassacaglia, PatternedCyclesStayAboveCounterFigurationBand) 
       for (const MaterialNote& n : var.notes)
         EXPECT_GE(static_cast<int>(n.pitch), 60)
             << "seed " << seed << ": V0 dipped below the scalar-wave band floor";
+    }
+  }
+}
+
+// The late-cycle martellato restates each ground bar as repeated same-pitch
+// quarters, and the ground's last bar carries the same pitch as the next
+// cycle's first bar (the BWV582-style tonic return). With two or more
+// adjacent split cycles the seam chained SIX same-pitch quarters -- past the
+// corpus repeated-note envelope (max run 4) -- so the seam-side note now
+// stays a sustained long note. The ground's same-pitch run must stay inside
+// the envelope at a length with several split cycles, for every seed-variant
+// ground and both modes.
+TEST(GroundVariationPassacaglia, GroundSplitSeamStaysInRepeatedRunEnvelope) {
+  for (std::uint32_t seed : {1u, 2u, 3u, 4u, 5u, 6u}) {
+    for (bool minor : {false, true}) {
+      const HarnessFixture fx = build(FormType::Passacaglia, seed, minor, 64);
+      const ComposeResult r = Composer{}.run(fx.material, fx.harmony, fx.voice_plan);
+      const std::vector<std::uint8_t> ground = groundPitches(r, groundVoice(FormType::Passacaglia));
+      ASSERT_FALSE(ground.empty()) << "seed " << seed << " minor " << minor;
+      int run = 1;
+      int worst = 1;
+      for (std::size_t i = 1; i < ground.size(); ++i) {
+        run = ground[i] == ground[i - 1] ? run + 1 : 1;
+        worst = std::max(worst, run);
+      }
+      EXPECT_LE(worst, 4) << "seed " << seed << " minor " << minor;
     }
   }
 }

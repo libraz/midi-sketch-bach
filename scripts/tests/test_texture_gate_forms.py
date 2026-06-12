@@ -408,5 +408,128 @@ class FormSummaryTest(unittest.TestCase):
         )
 
 
+class LengthInvariantFloorTest(unittest.TestCase):
+    """Length-invariant model floor + --target-bars axis routing."""
+
+    def _case(self, form: str, **overrides) -> texture_gate.GateCase:
+        base = dict(
+            form=form,
+            seed=1,
+            generated=True,
+            num_voices=3,
+            max_active_voices=3,
+            avg_active_voices=2.6,
+            mono_ratio=0.0,
+            v2_silence_ratio=0.0,
+            max_repeated_run=1,
+            min_piece_voice_occupancy=0.5,
+            piece_voice_occupancy={0: 0.9, 1: 0.6, 2: 0.6},
+            final_quarter_avg_active=2.8,
+            parallel_perfect_count=0,
+            model_score=0.85,
+            model_score_v2=0.95,
+            model_score_v2_length_invariant=0.95,
+        )
+        base.update(overrides)
+        return texture_gate.GateCase(**base)
+
+    def test_every_form_declares_an_invariant_floor(self) -> None:
+        # All ten shipped forms carry an explicit length-invariant ratchet
+        # (64-bar 20-seed sweep minima minus the seed-noise margin).
+        expected = {
+            "fugue": 0.79,
+            "prelude_and_fugue": 0.77,
+            "toccata_and_fugue": 0.75,
+            "fantasia_and_fugue": 0.76,
+            "passacaglia": 0.77,
+            "chorale_prelude": 0.76,
+            "trio_sonata": 0.81,
+            "cello_prelude": 0.58,
+            "chaconne": 0.75,
+            "goldberg_variations": 0.60,
+        }
+        for form, floor in expected.items():
+            self.assertEqual(
+                texture_gate.thresholds_for(
+                    form
+                ).model_score_v2_length_invariant_threshold,
+                floor,
+                form,
+            )
+
+    def test_unknown_form_falls_back_to_shared_invariant_floor(self) -> None:
+        self.assertIsNone(
+            texture_gate.thresholds_for(
+                "brand_new_form"
+            ).model_score_v2_length_invariant_threshold
+        )
+        case = self._case(
+            "brand_new_form",
+            model_score_v2_length_invariant=(
+                texture_gate.MODEL_SCORE_V2_LENGTH_INVARIANT_THRESHOLD - 0.01
+            ),
+        )
+        self.assertFalse(case.passes_model_score_v2_length_invariant)
+
+    def test_invariant_floor_routes_to_form_value(self) -> None:
+        below = self._case("chaconne", model_score_v2_length_invariant=0.74)
+        at_floor = self._case("chaconne", model_score_v2_length_invariant=0.75)
+        self.assertFalse(below.passes_model_score_v2_length_invariant)
+        self.assertTrue(at_floor.passes_model_score_v2_length_invariant)
+
+    def test_unscored_invariant_does_not_gate(self) -> None:
+        # An absent or pre-invariant scorer must not fabricate a failure.
+        case = self._case("chaconne", model_score_v2_length_invariant=-1.0)
+        self.assertTrue(case.passes_model_score_v2_length_invariant)
+        self.assertTrue(case.axis_results()["model_score_v2_length_invariant"])
+
+    def test_invariant_axis_enforced_at_default_length(self) -> None:
+        case = self._case("fugue", model_score_v2_length_invariant=0.70)
+        self.assertFalse(case.axis_results()["model_score_v2_length_invariant"])
+        self.assertFalse(case.passes_texture_gate)
+
+    def test_target_bars_keeps_only_length_independent_axes(self) -> None:
+        # Under an explicit --target-bars the default-length-calibrated floors
+        # (raw model floors, texture-shape targets) are recorded but not
+        # enforced; the corpus prohibitions and the invariant floor remain.
+        case = self._case("passacaglia", target_bars=64)
+        self.assertEqual(
+            set(case.axis_results()),
+            {
+                "generated",
+                "max_active_voices",
+                "max_repeated_run",
+                "parallel_perfect",
+                "model_score_v2_length_invariant",
+            },
+        )
+
+    def test_target_bars_ignores_raw_v2_floor_but_gates_invariant(self) -> None:
+        # chaconne at 64 bars: raw v2 sits below its default-length floor
+        # (0.89) by shrinkage, which is not a regression; the invariant value
+        # above its ratchet passes the gate. An invariant value below the
+        # ratchet still fails.
+        long_ok = self._case(
+            "chaconne",
+            target_bars=64,
+            model_score_v2=0.78,
+            model_score_v2_length_invariant=0.77,
+        )
+        self.assertTrue(long_ok.passes_texture_gate)
+        long_regressed = self._case(
+            "chaconne",
+            target_bars=64,
+            model_score_v2=0.78,
+            model_score_v2_length_invariant=0.74,
+        )
+        self.assertFalse(long_regressed.passes_texture_gate)
+
+    def test_target_bars_still_gates_corpus_prohibitions(self) -> None:
+        case = self._case("passacaglia", target_bars=64, max_repeated_run=6)
+        self.assertFalse(case.passes_texture_gate)
+        case = self._case("passacaglia", target_bars=64, parallel_perfect_count=13)
+        self.assertFalse(case.passes_texture_gate)
+
+
 if __name__ == "__main__":
     unittest.main()
