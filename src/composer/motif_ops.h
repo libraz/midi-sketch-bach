@@ -55,8 +55,9 @@ std::vector<MaterialNote> applyTransform(const std::vector<MaterialNote>& source
 // the same helper.
 std::vector<MaterialNote> reanchorMelody(const std::vector<MaterialNote>& notes, Tick start_tick);
 
-// Routing from SubjectCharacter to EpisodeMotifTransform. Matches plan
-// §5 P5: Severe=Original, Playful=Invert, Noble=Augment, Restless=Diminish.
+// Routing from SubjectCharacter to EpisodeMotifTransform: Severe keeps the
+// subject upright (Original), Playful inverts it, Noble augments it, and
+// Restless diminishes it.
 EpisodeMotifTransform characterToTransform(SubjectCharacter character);
 
 }  // namespace bach::composer::motif_ops

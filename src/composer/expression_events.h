@@ -46,12 +46,44 @@ namespace bach::composer {
  * @param ticks_per_bar Ticks per bar for the piece's meter.
  * @param total_ticks Total length of the piece in ticks; registration points
  *        are placed within (0, total_ticks).
+ * @param climax_tick The form's real energy-peak tick. When 0 (the default) the
+ *        peak point lands at the legacy ~75% position; when > 0 the peak is
+ *        placed at this tick instead, clamped to stay after the establish phase
+ *        and at least one bar before the piece end so the arc still rises to it
+ *        and settles after it.
  * @return CC events (CC#7 + CC#11 pairs) in non-decreasing tick order. Empty if
  *         total_ticks is 0.
  * @note Pure function of its arguments: no RNG, identical output every call.
  */
 std::vector<CcEvent> buildRegistrationPlan(std::uint16_t bars, std::size_t cycle_count,
-                                           Tick ticks_per_bar, std::uint32_t total_ticks);
+                                           Tick ticks_per_bar, std::uint32_t total_ticks,
+                                           Tick climax_tick = 0);
+
+/**
+ * @brief Build organ registration terraces (stop-change steps) as CC#7 events.
+ *
+ * Organ dynamics move in terraces, not crescendos: at each structural energy
+ * addition (a fugue voice entering, a passacaglia voice joining, a toccata
+ * section change) the registration steps up a stop instantaneously and holds.
+ * This function converts each form-declared step tick into ONE CC#7 (Main
+ * Volume) event -- a terrace, never a ramp. The levels are seed-independent
+ * design values that rise from a base and cap below the macro arc's climax peak
+ * (95), so the arc's climax stays the piece's dynamic summit:
+ *   - step 0: 78, then +4 per step, capped at 92.
+ *
+ * The returned events are channel-agnostic (controller + value only); the caller
+ * clones the stream onto every voice track exactly like buildRegistrationPlan.
+ *
+ * @param step_ticks Ticks at which the registration terraces up. Sorted and
+ *        deduplicated internally; ticks <= 0 or >= total_ticks are dropped.
+ * @param total_ticks Total length of the piece in ticks; steps at or past it are
+ *        out of range and ignored.
+ * @return CC#7 terrace events in non-decreasing tick order. Empty if step_ticks
+ *         is empty or total_ticks is 0.
+ * @note Pure function of its arguments: no RNG, identical output every call.
+ */
+std::vector<CcEvent> buildRegistrationTerraces(const std::vector<Tick>& step_ticks,
+                                               Tick total_ticks);
 
 /**
  * @brief Build a phrase-level expression arch as a stream of CC#11 events.

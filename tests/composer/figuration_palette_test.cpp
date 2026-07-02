@@ -256,6 +256,37 @@ TEST(FigurationPaletteScalarWaveBar, RotationCyclesFourDistinctFigures) {
   EXPECT_EQ(all_triad_bars, 1) << "expected exactly one arpeggio-sweep bar per cycle";
 }
 
+// Triplet mode subdivides every beat into six sixteenth-triplet notes of
+// exactly 80 ticks, keeping the downbeat chord-tone anchor and the stepwise
+// wave surface (the tightened drive into the fugue).
+TEST(FigurationPaletteScalarWaveBar, TripletModeEmits80TickNotesStillChordAnchored) {
+  const detail::ChordSpec chord{0, false};  // C major.
+  constexpr int kBase = 60;
+  constexpr int kCeil = 84;
+  std::vector<MaterialNote> notes;
+  int prev_pitch = -1;
+  appendScalarWaveBar(notes, /*bar=*/0, chord, detail::Mode::Major, /*notes_per_beat=*/4, kBase,
+                      kCeil, /*offset=*/0, prev_pitch, /*rotate_figures=*/false, /*triplet=*/true);
+  ASSERT_EQ(notes.size(), 24u);  // 6 triplets * 4 beats.
+  for (const MaterialNote& note : notes) {
+    EXPECT_EQ(note.duration, static_cast<Tick>(80));
+    EXPECT_GE(static_cast<int>(note.pitch), kBase);
+    EXPECT_LE(static_cast<int>(note.pitch), kCeil);
+  }
+  // The bar opens on a chord tone, and every note steps by at most one diatonic
+  // step (<= 2 semitones) from the previous one -- the conjunct wave surface.
+  EXPECT_TRUE(isTriadTone(notes.front().pitch, chord));
+  for (std::size_t i = 1; i < notes.size(); ++i) {
+    EXPECT_LE(std::abs(static_cast<int>(notes[i].pitch) - static_cast<int>(notes[i - 1].pitch)), 2)
+        << "leap in triplet wave at index " << i;
+  }
+  // Each beat onset lands on a whole-tick beat boundary.
+  for (int beat = 0; beat < 4; ++beat) {
+    EXPECT_EQ(notes[static_cast<std::size_t>(beat * 6)].start_tick,
+              static_cast<Tick>(beat) * kTicksPerBeat);
+  }
+}
+
 TEST(FigurationPaletteScalarWaveBar, CascadeBarLeapsASixthAndFillsByContraryStep) {
   // The (bar + offset) % 4 == 2 figure is the sixth-leap cascade: with
   // offset 0, bar 2 must contain at least one ascending leap of a sixth or
@@ -523,6 +554,44 @@ TEST(FigurationPaletteGesture, RunStopsAtBandFloorInsteadOfRepeatingIt) {
     EXPECT_NE(dst[i].pitch, dst[i - 1].pitch) << "repeated pitch at index " << i;
   for (const MaterialNote& note : dst)
     EXPECT_GE(static_cast<int>(note.pitch), 76);
+}
+
+// An octave drop lowers the whole gesture by exactly 12 per octave (the mordent
+// and the descending run alike), preserving its shape one octave down.
+TEST(FigurationPaletteGesture, OctaveDropLowersGestureByTwelve) {
+  const detail::ChordSpec chord{0, false};  // C major.
+  constexpr int kBandLo = 72;
+  constexpr int kBandHi = 88;
+  std::vector<MaterialNote> high;
+  std::vector<MaterialNote> low;
+  appendGestureBar(high, /*bar=*/0, chord, detail::Mode::Major, kBandLo, kBandHi,
+                   /*octave_drop=*/0);
+  appendGestureBar(low, /*bar=*/0, chord, detail::Mode::Major, kBandLo, kBandHi, /*octave_drop=*/1);
+  ASSERT_EQ(high.size(), low.size());
+  ASSERT_FALSE(high.empty());
+  for (std::size_t i = 0; i < high.size(); ++i) {
+    EXPECT_EQ(static_cast<int>(low[i].pitch), static_cast<int>(high[i].pitch) - 12)
+        << "note " << i << " not an octave lower";
+    EXPECT_EQ(low[i].start_tick, high[i].start_tick);
+  }
+}
+
+// A drop that would sink the main-tone anchor below band_lo is pulled back to
+// the lowest octave that still fits (here -24 clamps to -12).
+TEST(FigurationPaletteGesture, OctaveDropClampsToLowestOctaveThatFits) {
+  const detail::ChordSpec chord{0, false};
+  constexpr int kBandLo = 72;
+  constexpr int kBandHi = 88;
+  std::vector<MaterialNote> drop_one;
+  std::vector<MaterialNote> drop_two;
+  appendGestureBar(drop_one, 0, chord, detail::Mode::Major, kBandLo, kBandHi, /*octave_drop=*/1);
+  appendGestureBar(drop_two, 0, chord, detail::Mode::Major, kBandLo, kBandHi, /*octave_drop=*/2);
+  ASSERT_EQ(drop_one.size(), drop_two.size());
+  // The main-tone anchor (second note, after the mordent upper neighbour) stays
+  // at or above band_lo, so the -24 request collapses onto the -12 gesture.
+  for (std::size_t i = 0; i < drop_one.size(); ++i)
+    EXPECT_EQ(drop_two[i].pitch, drop_one[i].pitch);
+  EXPECT_GE(static_cast<int>(drop_two[1].pitch), kBandLo);
 }
 
 // --- kChordBlock -------------------------------------------------------------------

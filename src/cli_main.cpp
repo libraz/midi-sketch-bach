@@ -691,13 +691,22 @@ int runDefaultMode(const CliOptions& opts) {
   if (opts.form == bach::FormType::GoldbergVariations) {
     ornament_params.aria_end_tick = 4 * ticks_per_bar;
   }
-  // Climax uplift: decoration intensifies in a two-bar window centred on the
-  // macro arc's ~75% climax point (the same design point the registration
-  // plan peaks at).
-  const bach::Tick climax_tick =
-      static_cast<bach::Tick>(static_cast<std::uint64_t>(total_ticks) * 3 / 4);
-  ornament_params.climax_start_tick = climax_tick > ticks_per_bar ? climax_tick - ticks_per_bar : 0;
-  ornament_params.climax_end_tick = climax_tick + ticks_per_bar;
+  // Interior section cadences (fugue exposition end, toccata free-section
+  // end): every character marks these section closes with a short trill.
+  ornament_params.section_cadence_ticks = fixture.section_cadence_ticks;
+  // Climax uplift: prefer the form's resolved climax window (its real energy
+  // peak); otherwise fall back to a two-bar window centred on the macro arc's
+  // ~75% climax point (the same design point the registration plan peaks at).
+  if (fixture.climax_end_tick > fixture.climax_start_tick) {
+    ornament_params.climax_start_tick = fixture.climax_start_tick;
+    ornament_params.climax_end_tick = fixture.climax_end_tick;
+  } else {
+    const bach::Tick climax_tick =
+        static_cast<bach::Tick>(static_cast<std::uint64_t>(total_ticks) * 3 / 4);
+    ornament_params.climax_start_tick =
+        climax_tick > ticks_per_bar ? climax_tick - ticks_per_bar : 0;
+    ornament_params.climax_end_tick = climax_tick + ticks_per_bar;
+  }
   bach::composer::applyOrnamentPass(result, ornament_params);
 
   // Apply the instrument to every track (GM program + default names).
@@ -711,12 +720,20 @@ int runDefaultMode(const CliOptions& opts) {
     cycle_count = 1;
   }
 
-  // Organ registration: clone the arc-driven CC plan onto every voice channel.
+  // Organ registration: clone the arc-driven CC plan onto every voice channel,
+  // plus the form's terraced stop-change steps. The macro arc peaks on the
+  // form's real climax when it resolved one (mirroring the ornament climax
+  // window above); otherwise it falls back to the ~75% design point.
   if (instrument == bach::InstrumentType::Organ) {
-    const std::vector<bach::CcEvent> plan =
-        bach::composer::buildRegistrationPlan(bars, cycle_count, ticks_per_bar, total_ticks);
+    const bach::Tick registration_climax =
+        fixture.climax_end_tick > fixture.climax_start_tick ? fixture.climax_start_tick : 0;
+    const std::vector<bach::CcEvent> plan = bach::composer::buildRegistrationPlan(
+        bars, cycle_count, ticks_per_bar, total_ticks, registration_climax);
+    const std::vector<bach::CcEvent> terraces =
+        bach::composer::buildRegistrationTerraces(fixture.registration_step_ticks, total_ticks);
     for (auto& track : result.tracks) {
       track.cc_events.insert(track.cc_events.end(), plan.begin(), plan.end());
+      track.cc_events.insert(track.cc_events.end(), terraces.begin(), terraces.end());
     }
   }
 

@@ -325,7 +325,11 @@ void appendScalarWaveCycle(std::vector<MaterialNote>& notes, Tick block_start,
 
 void appendScalarWaveBar(std::vector<MaterialNote>& dst, int bar, const detail::ChordSpec& chord,
                          detail::Mode mode, int notes_per_beat, int base_midi, int ceil_midi,
-                         int offset, int& prev_pitch, bool rotate_figures) {
+                         int offset, int& prev_pitch, bool rotate_figures, bool triplet) {
+  // Triplet mode subdivides every beat into six sixteenth triplets (80 ticks
+  // each) instead of the `notes_per_beat` grid; the anchor + wave logic below is
+  // unchanged, only the subdivision count and step duration differ.
+  const int npb = triplet ? 6 : notes_per_beat;
   const int third = chord.minor ? 3 : 4;
   const int triad_pc[3] = {chord.root_pc % 12, (chord.root_pc + third) % 12,
                            (chord.root_pc + 7) % 12};
@@ -380,7 +384,7 @@ void appendScalarWaveBar(std::vector<MaterialNote>& dst, int bar, const detail::
       ++anchor;
     }
   }
-  const int notes = 4 * notes_per_beat;
+  const int notes = 4 * npb;
   std::vector<int> wave;
   wave.reserve(static_cast<std::size_t>(notes) + 2);
   // Walk up by scale steps; when the next step would cross the ceiling, fold the
@@ -501,12 +505,14 @@ void appendScalarWaveBar(std::vector<MaterialNote>& dst, int bar, const detail::
       wave = std::move(arp);
     }
   }
+  // Sixteenth triplets are exactly 80 ticks (kTicksPerBeat / 6, no rounding).
   const Tick step =
-      (notes_per_beat == 4) ? kSixteenth : ((notes_per_beat == 2) ? kEighth : kQuarter);
+      triplet ? (kTicksPerBeat / 6)
+              : ((notes_per_beat == 4) ? kSixteenth : ((notes_per_beat == 2) ? kEighth : kQuarter));
   int last_pitch = anchor;
   for (int beat = 0; beat < 4; ++beat) {
-    for (int sub = 0; sub < notes_per_beat; ++sub) {
-      const int slot = beat * notes_per_beat + sub;
+    for (int sub = 0; sub < npb; ++sub) {
+      const int slot = beat * npb + sub;
       const Tick tick =
           barTick(bar) + static_cast<Tick>(beat) * kTicksPerBeat + static_cast<Tick>(sub) * step;
       last_pitch = wave[static_cast<std::size_t>(slot) % wave.size()];
@@ -524,7 +530,7 @@ WaveVetoStats& waveVetoStats() {
 void appendFigurationWaveBar(ThemeToneRegistry& registry, FigurationSection& section, int bar,
                              int voice, const detail::ChordSpec& chord, detail::Mode mode,
                              int notes_per_beat, int offset, int& prev_anchor, int band_lo,
-                             int band_hi, VoiceId num_voices) {
+                             int band_hi, VoiceId num_voices, bool cadential_close) {
   // Register centre for the wave: a few scale degrees above the band floor,
   // shifted by the seed offset, kept clear of the band ceiling so a stepwise
   // fill never runs out of band. The per-beat anchor chain is gently pulled
@@ -808,6 +814,104 @@ void appendFigurationWaveBar(ThemeToneRegistry& registry, FigurationSection& sec
     wave_lo = std::min(wave_lo, cursor);
     wave_hi = std::max(wave_hi, cursor);
     line_prev_anchor = cursor;
+    if (cadential_close && beat == 2) {
+      // Cadential close: the bar's second half sounds as ONE held anchor tone
+      // (a half note on the mid-bar strong beat) instead of the running
+      // subdivision, so the ornament pass has the strong-beat quarter-or-longer
+      // top note the mandatory section-cadence trill needs. The tone is the
+      // wave's own vetted beat anchor, additionally checked for consonance
+      // against every theme tone sounding ANYWHERE inside the held half-bar
+      // window: a sustained anchor can be onset-consonant yet clash with a theme
+      // note that attacks mid-window.
+      const Tick held_dur = kTicksPerBar / 2;
+      const Tick held_end = barTick(bar) + kTicksPerBar;
+      // Theme tones sounding anywhere in the held window, sampled on the eighth
+      // grid (the finest stride a concurrent theme entry uses here).
+      std::vector<int> held_theme;
+      std::vector<int> slot_theme;
+      for (Tick slot = beat_tick; slot < held_end; slot += kEighth) {
+        registry.concurrentThemePitches(slot, static_cast<VoiceId>(voice), slot_theme);
+        for (const int tone : slot_theme) {
+          held_theme.push_back(tone);
+        }
+      }
+      // Harshness against the held window uses the wave's sustain-vet
+      // definition: a minor 2nd / tritone / major 7th (interval class 1 / 6 /
+      // 11) is rejected.
+      auto held_is_harsh = [&](int cand) {
+        for (const int tone : held_theme) {
+          const int ic = std::abs(cand - tone) % 12;
+          if (ic == 1 || ic == 6 || ic == 11) {
+            return true;
+          }
+        }
+        return false;
+      };
+      int held_pitch = -1;
+      if (!held_is_harsh(snapped)) {
+        held_pitch = snapped;
+      } else {
+        // The vetted onset anchor clashes with a mid-window theme attack:
+        // displace it to the nearest chord tone that is band-confined,
+        // order-safe against the concurrent voices, theme-consonant at the
+        // onset, parallel-free, and clean across the whole held window.
+        int order_ceiling = band_hi;
+        int order_floor = band_lo;
+        for (const ConcurrentMotion& motion : motions) {
+          if (motion.curr < 0) {
+            continue;
+          }
+          if (motion.voice < voice) {
+            order_ceiling = std::min(order_ceiling, motion.curr);
+          } else if (motion.voice > voice) {
+            order_floor = std::max(order_floor, motion.curr);
+          }
+        }
+        const int third = chord.minor ? 3 : 4;
+        const int triad_pc[3] = {((chord.root_pc % 12) + 12) % 12, (chord.root_pc + third) % 12,
+                                 (chord.root_pc + 7) % 12};
+        auto held_ok = [&](int cand) {
+          if (cand < band_lo || cand > band_hi || cand < order_floor || cand > order_ceiling) {
+            return false;
+          }
+          const int pc = ((cand % 12) + 12) % 12;
+          if (pc != triad_pc[0] && pc != triad_pc[1] && pc != triad_pc[2]) {
+            return false;
+          }
+          for (const int sounding : theme_pitches) {
+            if (!isConsonantPair(cand, sounding)) {
+              return false;
+            }
+          }
+          if (audible_from >= 0) {
+            for (const ConcurrentMotion& motion : motions) {
+              if (formsPerfectParallel(audible_from, cand, motion.prev, motion.curr)) {
+                return false;
+              }
+            }
+          }
+          return !held_is_harsh(cand);
+        };
+        for (int dist = 1; dist <= 7 && held_pitch < 0; ++dist) {
+          for (const int sgn : {-1, 1}) {
+            const int cand = snapped + sgn * dist;
+            if (held_ok(cand)) {
+              held_pitch = cand;
+              break;
+            }
+          }
+        }
+      }
+      if (held_pitch >= 0) {
+        addNote(section.notes, beat_tick, held_dur, held_pitch);
+        registry.record(beat_tick, static_cast<VoiceId>(voice), held_pitch, held_dur);
+        prev_anchor = held_pitch;
+        return;
+      }
+      // No clean held tone exists: fall through to the normal running wave for
+      // the second half (the trill site is simply absent for this seed;
+      // validation stays green).
+    }
     for (int sub = 0; sub < notes_per_beat; ++sub) {
       const Tick tick =
           barTick(bar) + static_cast<Tick>(beat) * kTicksPerBeat + static_cast<Tick>(sub) * step;
@@ -1211,7 +1315,7 @@ void appendFiguraCortaCycle(std::vector<MaterialNote>& notes, Tick block_start,
 }
 
 void appendGestureBar(std::vector<MaterialNote>& dst, int bar, const detail::ChordSpec& chord,
-                      detail::Mode mode, int band_lo, int band_hi) {
+                      detail::Mode mode, int band_lo, int band_hi, int octave_drop) {
   const int third = chord.minor ? 3 : 4;
   const int triad_pc[3] = {chord.root_pc % 12, (chord.root_pc + third) % 12,
                            (chord.root_pc + 7) % 12};
@@ -1227,20 +1331,29 @@ void appendGestureBar(std::vector<MaterialNote>& dst, int bar, const detail::Cho
     --main_tone;
   const int upper = detail::scaleUp(main_tone, 1, mode);
 
+  // Resolve the octave drop: each octave lowers the whole gesture by 12, but the
+  // drop is pulled back toward 0 in whole octaves until the main-tone anchor
+  // still sits at or above band_lo (the descending run tail may dip below).
+  int shift = std::max(0, octave_drop) * 12;
+  while (shift > 0 && main_tone - shift < band_lo)
+    shift -= 12;
+
   // Mordent onset: upper neighbour, then the main tone (two sixteenths).
   const Tick start = barTick(bar);
-  addNote(dst, start, kSixteenth, upper);
-  addNote(dst, start + kSixteenth, kSixteenth, main_tone);
+  addNote(dst, start, kSixteenth, upper - shift);
+  addNote(dst, start + kSixteenth, kSixteenth, main_tone - shift);
 
   // Descending diatonic run from the main tone, stopping at the band floor
-  // instead of repeating it; the rest of the bar stays silent.
+  // instead of repeating it; the rest of the bar stays silent. The floor test
+  // uses the un-shifted band so a dropped gesture keeps the same run length
+  // (its pitches are the base gesture transposed down by `shift`).
   int cursor = main_tone;
   for (int idx = 2; idx < 8; ++idx) {
     const int next = detail::scaleDown(cursor, 1, mode);
     if (next < band_lo)
       break;
     cursor = next;
-    addNote(dst, start + static_cast<Tick>(idx) * kSixteenth, kSixteenth, cursor);
+    addNote(dst, start + static_cast<Tick>(idx) * kSixteenth, kSixteenth, cursor - shift);
   }
 }
 

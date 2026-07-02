@@ -88,7 +88,7 @@ enum class ModulationType : std::uint8_t {
 
 // Single source of truth for cadence taxonomy: harmony::CadenceType.
 // Re-exported here so composer code keeps the bach::composer::CadenceType
-// spelling without maintaining a parallel enum (see plan §12 H1).
+// spelling without maintaining a parallel enum.
 using CadenceType = bach::CadenceType;
 
 // Chord with a start tick. The chord runs until the next ChordEvent or

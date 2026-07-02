@@ -465,6 +465,7 @@ struct FreeLayerPlan {
   bool pedal = false;
   bool punctuate = false;
   bool homophonic = false;
+  bool fermata = false;  // whole-note V0+V1+V2 homophonic strike (the metered breath).
 };
 
 // Register band for the free-section V1 punctuation and V2 pedal layers. These
@@ -577,7 +578,8 @@ void appendFreeSectionLayers(SectionalAssembly& asm_ctx, const std::vector<Mater
     return pitch;
   };
   for (int bar = 0; bar < free_bars; ++bar) {
-    if (!layout[static_cast<std::size_t>(bar)].pedal)
+    const FreeLayerPlan& pl = layout[static_cast<std::size_t>(bar)];
+    if (!pl.pedal && !pl.fermata)
       continue;
     if (pedal_first < 0)
       pedal_first = bar;
@@ -593,7 +595,15 @@ void appendFreeSectionLayers(SectionalAssembly& asm_ctx, const std::vector<Mater
     const int root = consonantChordTone(chord, /*voice=*/2, kFreeV2Lo, kFreeV2Hi, centre,
                                         theme_pitches, /*line_prev=*/-1, motions, mode,
                                         /*downbeat=*/true);
-    const bool homophonic = layout[static_cast<std::size_t>(bar)].homophonic;
+    if (pl.fermata) {
+      // Metered breath: one whole-note chord root in the V2 band, struck with
+      // the V0+V1 whole notes (a single homophonic strike, no re-articulation).
+      const int pitch = pedal_pitch(root, chord);
+      addNote(pedal_section.notes, bar_start, kTicksPerBar, pitch);
+      registry.record(bar_start, /*voice=*/2, pitch, kTicksPerBar);
+      continue;
+    }
+    const bool homophonic = pl.homophonic;
     const bool walking = !homophonic && (bar % 4) == walk_phase;
     if (homophonic) {
       // Declamatory chordal texture: a half-note strike re-articulated at the
@@ -644,7 +654,7 @@ void appendFreeSectionLayers(SectionalAssembly& asm_ctx, const std::vector<Mater
   int v1_prev = -1;
   for (int bar = 0; bar < free_bars; ++bar) {
     const FreeLayerPlan& want = layout[static_cast<std::size_t>(bar)];
-    if (!want.punctuate && !want.homophonic)
+    if (!want.punctuate && !want.homophonic && !want.fermata)
       continue;
     if (punct_first < 0)
       punct_first = bar;
@@ -658,12 +668,14 @@ void appendFreeSectionLayers(SectionalAssembly& asm_ctx, const std::vector<Mater
     const int pitch = consonantChordTone(chord, /*voice=*/1, kFreeV1Lo, kFreeV1Hi, centre,
                                          theme_pitches, v1_prev, motions, mode, /*downbeat=*/true);
     v1_prev = pitch;
-    // A homophonic bar always strikes a half note (sounding two beats) so the
-    // V1+V2 chord articulates together; a plain head punctuation uses the
-    // caller-supplied duration (longer to lift V1 occupancy, shorter for a
-    // lighter accompaniment). Either way the bar's tail is left to the V0
-    // figuration alone (a breathing, non-saturated accompaniment).
-    const Tick dur = want.homophonic ? kTicksPerBeat * 2 : v1_punct_dur;
+    // A fermata bar strikes one whole note (the metered breath), a homophonic
+    // bar a half note (sounding two beats so the V1+V2 chord articulates
+    // together), and a plain head punctuation uses the caller-supplied duration
+    // (longer to lift V1 occupancy, shorter for a lighter accompaniment).
+    // Either way the bar's tail is left to the V0 figuration alone (a breathing,
+    // non-saturated accompaniment).
+    const Tick dur =
+        want.fermata ? kTicksPerBar : (want.homophonic ? kTicksPerBeat * 2 : v1_punct_dur);
     addNote(punct_section.notes, bar_start, dur, pitch);
     registry.record(bar_start, /*voice=*/1, pitch, dur);
   }
@@ -695,6 +707,67 @@ void appendChordBlockBarAlternating(std::vector<MaterialNote>& dst, int bar, con
     prev_top = block[0].front().pitch;
   for (const auto& note : block[0])
     dst.push_back(note);
+}
+
+/// @brief Append one BWV565-style leading-tone diminished-seventh sweep bar (V0).
+///
+/// The leading-tone diminished seventh of the (minor) tonic -- the four pitch
+/// classes {leading_tone, +3, +6, +9} mod 12 (e.g. B-D-F-Ab in A minor) --
+/// rolled as a descend-then-ascend arpeggio over the bar. Walking between the
+/// four tones is chord-tone arithmetic (not scale-degree walking), so every
+/// emitted pitch is one of the four dim7 classes by construction. Octave
+/// placement is explicit and confined to the V0 band [band_lo, band_hi]: the
+/// roll therefore sounds above the concurrent V1 head punctuation and V2 pedal
+/// exactly like a running wave bar (voice_crossing is the only inter-voice rule
+/// that fires over this all-Material texture), and the dim7 rolls over the
+/// sustained pedal like the model piece.
+///
+/// @param dst V0 destination note vector.
+/// @param bar Absolute bar index (4/4 bar grid).
+/// @param tonic_pc Internal minor tonic pitch class; the dim7 is built on its
+///        leading tone (tonic_pc + 11).
+/// @param band_lo V0 register band floor.
+/// @param band_hi V0 register band ceiling.
+/// @param triplet When true, six sixteenth-triplet notes per beat (80 ticks
+///        each); otherwise four sixteenths per beat -- matching the neighbouring
+///        wave bars' subdivision (the toccata's drive tightens to triplets in
+///        the section's second half).
+void appendDim7SweepBar(std::vector<MaterialNote>& dst, int bar, int tonic_pc, int band_lo,
+                        int band_hi, bool triplet) {
+  const int leading = (((tonic_pc + 11) % 12) + 12) % 12;
+  auto is_dim7 = [&](int midi) {
+    const int rel = ((((midi % 12) + 12) % 12) - leading + 12) % 12;
+    return rel == 0 || rel == 3 || rel == 6 || rel == 9;
+  };
+  // Ascending ladder of dim7 tones inside the V0 band (the four classes recur
+  // every three semitones, so a >= 12-semitone band always holds at least four).
+  std::vector<int> ladder;
+  for (int midi = band_lo; midi <= band_hi; ++midi) {
+    if (is_dim7(midi))
+      ladder.push_back(midi);
+  }
+  if (ladder.empty())
+    ladder.push_back(std::clamp(band_lo + leading, band_lo, band_hi));  // defensive.
+  // Triangle roll: down from the band top through every dim7 tone, then back up
+  // to the top (the recurring BWV565 dim7 arpeggio flourish).
+  std::vector<int> roll;
+  roll.reserve(ladder.size() * 2);
+  for (int idx = static_cast<int>(ladder.size()) - 1; idx >= 0; --idx)
+    roll.push_back(ladder[static_cast<std::size_t>(idx)]);
+  for (std::size_t idx = 1; idx < ladder.size(); ++idx)
+    roll.push_back(ladder[idx]);
+
+  const int notes_per_beat = triplet ? 6 : 4;
+  const Tick step = triplet ? (kTicksPerBeat / 6) : kSixteenth;
+  std::size_t slot = 0;
+  for (int beat = 0; beat < 4; ++beat) {
+    for (int sub = 0; sub < notes_per_beat; ++sub) {
+      const Tick tick =
+          barTick(bar) + static_cast<Tick>(beat) * kTicksPerBeat + static_cast<Tick>(sub) * step;
+      addNote(dst, tick, step, roll[slot % roll.size()]);
+      ++slot;
+    }
+  }
 }
 
 /// @brief Resolve the active arc point for an absolute bar within the piece.
@@ -1285,6 +1358,17 @@ HarnessFixture buildToccataAndFugueForm(const ResolvedRequest& req) {
   const Split split = splitBars(total);
   const int free_bars = split.free_bars;
 
+  // Ornament metadata (fixture field only, never a note): the free toccata
+  // section closes at its final bar before the fugue enters, and the ornament
+  // pass marks that close with a section-cadence trill. The climax window is
+  // left unresolved here (callers fall back to their default arc point).
+  out.section_cadence_ticks.push_back(barTick(free_bars - 1));
+
+  // Registration terrace (fixture field only, never a note): the organ steps up
+  // a stop at the free->fugue boundary, the toccata's one structural energy
+  // addition. Organ dynamics move in terraces, not crescendos.
+  out.registration_step_ticks.push_back(barTick(free_bars));
+
   // One per-bar chord plan over the whole piece (free + fugue). The fugue tail
   // reads its slice (bars [free_bars, total)) by absolute bar index.
   const std::vector<ChordSpec> plan = buildChordPlan(total, mode, harm_idx);
@@ -1311,17 +1395,20 @@ HarnessFixture buildToccataAndFugueForm(const ResolvedRequest& req) {
     int last_bar;  // inclusive.
   };
   std::vector<BarWindow> windows;
+  // Second-window head bar for Dramaticus (also the fermata-breath bar); 0 for
+  // every other archetype (unused).
+  int dramaticus_flourish = 0;
   switch (archetype) {
     case ToccataArchetype::Dramaticus: {
       // Opening flourish ~1/4 of the section, snapped to a 4-bar grid and kept
       // in [4, free_bars - 4] so both windows are non-empty. The flourish window
-      // is the section's first 4-bar block; only its first two bars stay solo
-      // (the dramatic single-voice gesture), and the pedal / punctuation enter
-      // for the rest of the block (see kDramaticusSoloBars below). This keeps the
-      // solo rhetoric while holding the piece mono ratio inside the toccata
-      // ceiling.
+      // is the section's first 4-bar block; its first bars carry the octave
+      // cascade + doubled statement (single-voice gesture rhetoric), and the
+      // pedal / punctuation enter for the rest of the block. This keeps the solo
+      // rhetoric while holding the piece mono ratio inside the toccata ceiling.
       int flourish = ((free_bars / 4 + 3) / 4) * 4;
       flourish = std::clamp(flourish, 4, free_bars - 4);
+      dramaticus_flourish = flourish;
       windows.push_back({0, flourish - 1});
       windows.push_back({flourish, free_bars - 1});
       break;
@@ -1359,17 +1446,70 @@ HarnessFixture buildToccataAndFugueForm(const ResolvedRequest& req) {
   //                 terracing itself is the expression pass's concern).
   //   Sectionalis = a running first half, then a declamatory chordal second
   //                 half (per-bar chord blocks).
-  enum class FreeBarKind : std::uint8_t { kWave, kWavePiano, kGesture, kChordBlock, kPedalSolo };
+  enum class FreeBarKind : std::uint8_t {
+    kWave,
+    kWavePiano,
+    kGesture,
+    kUnisonGesture,
+    kChordBlock,
+    kFermataBlock,
+    kPedalSolo,
+    kDim7Sweep
+  };
   std::vector<FreeBarKind> bar_kinds(static_cast<std::size_t>(free_bars), FreeBarKind::kWave);
+  // The octave-cascade opening (bars 0-3) and the fermata breath fit only when
+  // the free section is long enough to keep them clear of the pedal-solo pair
+  // (free_bars - 5, free_bars - 4); the minimal 8-bar section keeps the older
+  // two-bar gesture opening instead.
+  const bool dramaticus_cascade = (archetype == ToccataArchetype::Dramaticus) && free_bars >= 12;
   switch (archetype) {
     case ToccataArchetype::Dramaticus: {
-      bar_kinds[0] = FreeBarKind::kGesture;
-      bar_kinds[1] = FreeBarKind::kGesture;
-      bar_kinds[2] = FreeBarKind::kChordBlock;
+      if (dramaticus_cascade) {
+        // BWV565 octave cascade: the opening gesture stated high (bar 0), an
+        // octave lower (bar 1), then doubled in V0+V1 at the low register
+        // (bar 2), answered by a declamatory chord block (bar 3).
+        bar_kinds[0] = FreeBarKind::kGesture;
+        bar_kinds[1] = FreeBarKind::kGesture;
+        bar_kinds[2] = FreeBarKind::kUnisonGesture;
+        bar_kinds[3] = FreeBarKind::kChordBlock;
+        // The written-out fermata between the opening rhetoric and the running
+        // figuration (the free-toccata breath, metered): a whole-bar homophonic
+        // chord at the second window's head, shifting its wave start one bar on.
+        bar_kinds[static_cast<std::size_t>(dramaticus_flourish)] = FreeBarKind::kFermataBlock;
+      } else {
+        bar_kinds[0] = FreeBarKind::kGesture;
+        bar_kinds[1] = FreeBarKind::kGesture;
+        bar_kinds[2] = FreeBarKind::kChordBlock;
+      }
       bar_kinds[static_cast<std::size_t>(free_bars - 1)] = FreeBarKind::kChordBlock;
       const int pedal_solo = free_bars - 5;  // two bars, ending before the close.
       bar_kinds[static_cast<std::size_t>(pedal_solo)] = FreeBarKind::kPedalSolo;
       bar_kinds[static_cast<std::size_t>(pedal_solo + 1)] = FreeBarKind::kPedalSolo;
+      // BWV565 leading-tone diminished-seventh sweep, minor-mode only: the dim7
+      // roll answers the fermata breath at the first wave bar after it, and
+      // drives into the close at the last wave bar before the closing chord
+      // block. Major-mode Dramaticus keeps the plan untouched (the major vii°7
+      // would need a pitch class outside the major scale). Only active in the
+      // cascade layout (free_bars >= 12), where the fermata and the two design
+      // spots exist.
+      if (dramaticus_cascade && mode == Mode::Minor) {
+        int first_sweep = dramaticus_flourish + 1;
+        while (first_sweep < free_bars &&
+               bar_kinds[static_cast<std::size_t>(first_sweep)] != FreeBarKind::kWave) {
+          ++first_sweep;
+        }
+        int last_sweep = free_bars - 1;
+        while (last_sweep >= 0 &&
+               bar_kinds[static_cast<std::size_t>(last_sweep)] != FreeBarKind::kWave) {
+          --last_sweep;
+        }
+        if (first_sweep < free_bars) {
+          bar_kinds[static_cast<std::size_t>(first_sweep)] = FreeBarKind::kDim7Sweep;
+        }
+        if (last_sweep >= 0 && last_sweep != first_sweep) {
+          bar_kinds[static_cast<std::size_t>(last_sweep)] = FreeBarKind::kDim7Sweep;
+        }
+      }
       break;
     }
     case ToccataArchetype::Perpetuus:
@@ -1406,6 +1546,10 @@ HarnessFixture buildToccataAndFugueForm(const ResolvedRequest& req) {
   // homophonic V1+V2 strike instead of the running layers.
   std::vector<FreeLayerPlan> layout(static_cast<std::size_t>(free_bars));
   std::vector<MaterialNote> v0_free_notes;
+  // V1 doubling of the unison-gesture bar (the low statement 12 below V0),
+  // emitted as a verbatim voice-1 ToccataSection after the window loop.
+  std::vector<MaterialNote> unison_v1_notes;
+  int unison_bar = -1;
   // Top tone of the previous V0 chord block, threaded across all block bars so
   // consecutive blocks alternate inversions (no stalled repeated pitch).
   int block_prev_top = -1;
@@ -1427,8 +1571,42 @@ HarnessFixture buildToccataAndFugueForm(const ResolvedRequest& req) {
       const FreeBarKind kind = bar_kinds[static_cast<std::size_t>(bar)];
       if (kind == FreeBarKind::kGesture) {
         // V0 solo opening gesture; the bar's tail is silent and no layer enters.
-        appendGestureBar(section.notes, bar, plan[static_cast<std::size_t>(bar)], mode, kBandLo[0],
-                         kBandHi[0]);
+        // In the octave cascade the gesture keeps the window's opening harmony
+        // so bar 1 is an exact octave-lower restatement of bar 0 (BWV565).
+        const int chord_bar = dramaticus_cascade ? win.first_bar : bar;
+        const int octave_drop = (dramaticus_cascade && bar == 1) ? 1 : 0;
+        appendGestureBar(section.notes, bar, plan[static_cast<std::size_t>(chord_bar)], mode,
+                         kBandLo[0], kBandHi[0], octave_drop);
+        prev_pitch = -1;
+        continue;
+      }
+      if (kind == FreeBarKind::kUnisonGesture) {
+        // Deliberate BWV565 unison rhetoric: the opening gesture stated low in
+        // V0 and doubled exactly 12 below in V1. Both lines are Material, so the
+        // validator's parallel-octave rules are skipped by design; the doubled
+        // V1 statement is emitted as a verbatim voice-1 ToccataSection below.
+        const std::size_t before = section.notes.size();
+        appendGestureBar(section.notes, bar, plan[static_cast<std::size_t>(win.first_bar)], mode,
+                         kBandLo[0], kBandHi[0], /*octave_drop=*/2);
+        for (std::size_t note_idx = before; note_idx < section.notes.size(); ++note_idx) {
+          MaterialNote doubled = section.notes[note_idx];
+          doubled.pitch = static_cast<std::uint8_t>(static_cast<int>(doubled.pitch) - 12);
+          unison_v1_notes.push_back(doubled);
+        }
+        unison_bar = bar;
+        prev_pitch = -1;
+        continue;
+      }
+      if (kind == FreeBarKind::kFermataBlock) {
+        // Metered breath: one whole-note homophonic triad in V0+V1+V2. V0 takes
+        // the low triad top here (low-register voicing above the V1 band); the
+        // V1 and V2 whole notes are struck by the free-section layers (lp.fermata).
+        std::vector<std::vector<MaterialNote>> block(1);
+        appendChordBlockBar(block, bar, plan[static_cast<std::size_t>(bar)], mode,
+                            /*top_hi=*/kBandLo[0] + 4, kTicksPerBar);
+        for (const auto& note : block[0])
+          section.notes.push_back(note);
+        lp.fermata = true;
         prev_pitch = -1;
         continue;
       }
@@ -1457,6 +1635,23 @@ HarnessFixture buildToccataAndFugueForm(const ResolvedRequest& req) {
         lp.punctuate = true;
         continue;
       }
+      if (kind == FreeBarKind::kDim7Sweep) {
+        // BWV565 leading-tone diminished-seventh roll (minor-mode Dramaticus).
+        // The roll subdivision matches the neighbouring wave bars: sixteenths,
+        // tightening to sixteenth triplets in the section's second half (the
+        // same drive condition the wave bars use below). The roll is confined to
+        // the V0 band so it sounds above the V1 punctuation and V2 pedal exactly
+        // like a wave bar; the accompaniment layers are identical to a wave bar's
+        // (V2 pedal + V1 head punctuation), so the dim7 rolls over the pedal like
+        // the model piece.
+        const bool tighten_sweep = bar >= free_bars / 2;
+        appendDim7SweepBar(section.notes, bar, static_cast<int>(out.harmony.tonic_pc), kBandLo[0],
+                           kBandHi[0], tighten_sweep);
+        lp.pedal = true;
+        lp.punctuate = true;
+        prev_pitch = -1;
+        continue;
+      }
       const ArcPoint arc = arcForBar(req, bar);
       // Sixteenth passagework is the toccata's baseline texture (the corpus
       // duration mass sits on sixteenths, and the free section lives in the
@@ -1471,9 +1666,15 @@ HarnessFixture buildToccataAndFugueForm(const ResolvedRequest& req) {
       // so the wave still fits the V0 band.
       const int base = std::clamp(kBandLo[0] + std::max<int>(0, arc.register_shift), kBandLo[0],
                                   kBandHi[0] - 12);
+      // The drive to the fugue tightens from sixteenths to triplet sixteenths:
+      // in the section's last half the Dramaticus and Perpetuus wave bars
+      // subdivide into sixteenth triplets.
+      const bool tighten =
+          (archetype == ToccataArchetype::Dramaticus || archetype == ToccataArchetype::Perpetuus) &&
+          bar >= free_bars / 2;
       appendScalarWaveBar(section.notes, bar, plan[static_cast<std::size_t>(bar)], mode,
                           notes_per_beat, base, kBandHi[0], fig_offset, prev_pitch,
-                          /*rotate_figures=*/true);
+                          /*rotate_figures=*/true, /*triplet=*/tighten);
       lp.pedal = true;
       lp.punctuate = true;
     }
@@ -1482,6 +1683,24 @@ HarnessFixture buildToccataAndFugueForm(const ResolvedRequest& req) {
     }
     out.material.toccata_sections.push_back(std::move(section));
     pushSpan(asm_ctx, 0, win.first_bar, win.last_bar, VoiceIntent::ToccataCarrier);
+  }
+
+  // --- Dramaticus unison doubling (V1 restates the low gesture 12 below V0). ---
+  // A dedicated one-bar voice-1 ToccataSection (matched by window) so the
+  // doubling replays verbatim without the FigurationCommitted downbeat check
+  // (the gesture opens on a non-chord neighbour, so a FigurationCarrier would
+  // trip figuration_harmonic_consistency).
+  if (!unison_v1_notes.empty()) {
+    ToccataSection unison_section;
+    unison_section.archetype = archetype;
+    unison_section.character = character;
+    unison_section.voice = 1;
+    unison_section.start_tick = barTick(unison_bar);
+    unison_section.end_tick = barTick(unison_bar + 1);
+    unison_section.is_section_head = false;
+    unison_section.notes = std::move(unison_v1_notes);
+    out.material.toccata_sections.push_back(std::move(unison_section));
+    pushSpan(asm_ctx, 1, unison_bar, unison_bar, VoiceIntent::ToccataCarrier);
   }
 
   // --- Dramaticus pedal solo (V2 walking pedal alone, root-fifth quarters). ---
@@ -1535,6 +1754,17 @@ HarnessFixture buildFantasiaAndFugueForm(const ResolvedRequest& req) {
 
   const std::vector<ChordSpec> plan = buildChordPlan(total, mode, harm_idx);
   emitHarmony(out, plan, mode);
+
+  // Ornament metadata (fixture field only, never a note): the free fantasia
+  // section closes at its final bar before the fugue enters, and the ornament
+  // pass marks that close with a section-cadence trill. The climax window is
+  // left unresolved here (callers fall back to their default arc point).
+  out.section_cadence_ticks.push_back(barTick(free_bars - 1));
+
+  // Registration terrace (fixture field only, never a note): the organ steps up
+  // a stop at the fantasia->fugue boundary, the fantasia's one structural energy
+  // addition. Organ dynamics move in terraces, not crescendos.
+  out.registration_step_ticks.push_back(barTick(free_bars));
 
   // --- FANTASIA SECTION (bars 0 .. free_bars-1), V0 only. ---
   // Generalize Fantasia's contrasting-section cycle to free_bars: contiguous

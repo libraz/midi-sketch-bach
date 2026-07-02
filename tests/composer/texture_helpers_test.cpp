@@ -2,6 +2,7 @@
 
 #include <gtest/gtest.h>
 
+#include <cstdlib>
 #include <vector>
 
 #include "composer/figuration.h"
@@ -275,6 +276,57 @@ TEST(TextureHelpersTest, ConsonantChordToneWindowAvoidsMidBeatClash) {
   EXPECT_TRUE(pc == 0 || pc == 4 || pc == 7) << "anchor " << anchor;
   EXPECT_NE(anchor, 67) << "window clash with G5 not avoided";
   EXPECT_TRUE(isConsonantPair(anchor, 65)) << "chosen anchor still clashes with the window pitch";
+}
+
+// A conjunct anchor within a fifth of the running target outranks a clash-free
+// chord tone a sixth or more away: the far candidate is demoted below every
+// near admissible candidate regardless of its mid-window clash count, so the
+// per-beat anchor chain stays conjunct instead of lurching a tenth away to
+// dodge a passing clash near the line.
+TEST(TextureHelpersTest, ConsonantChordToneDemotesFarClashFreeTone) {
+  detail::ChordSpec chord{0, false};  // C major triad, pitch classes {0,4,7}.
+  const std::vector<int> theme_pitches;
+  const std::vector<ConcurrentMotion> motions;
+  // Band [37,49] admits exactly E2=40, G2=43, C3=48 on the downbeat. Target 48
+  // makes E2 the sole far tone (dist 8 > a fifth); G2 (dist 5) and C3 (dist 0)
+  // are near. The window pitch C#3=49 is dissonant with G (tritone) and with C
+  // (m2) yet consonant with E (M6), so the FAR tone is the only clash-free
+  // candidate -- the pre-demotion ordering (window clashes * 128 + dist) would
+  // pick it (key 8) over the near clashing tones (keys 128 and 133).
+  EXPECT_FALSE(isConsonantPair(43, 49));  // G vs C# -> tritone clash.
+  EXPECT_FALSE(isConsonantPair(48, 49));  // C vs C# -> m2 clash.
+  EXPECT_TRUE(isConsonantPair(40, 49));   // E vs C# -> M6, clash-free.
+  const std::vector<int> window = {49};
+
+  const int anchor = consonantChordTone(chord, /*voice=*/2, /*band_lo=*/37, /*band_hi=*/49,
+                                        /*target=*/48, theme_pitches, /*line_prev=*/-1, motions,
+                                        detail::Mode::Major, /*downbeat=*/true, window);
+  // A near chord tone wins over the far clash-free E2 despite E2's cleaner
+  // window profile: the returned anchor stays within a fifth of the target.
+  const int pc = anchor % 12;
+  EXPECT_TRUE(pc == 0 || pc == 4 || pc == 7) << "anchor " << anchor;
+  EXPECT_LE(std::abs(anchor - 48), 7)
+      << "anchor " << anchor << " fled beyond a fifth of the target";
+}
+
+// The far-anchor demotion is a preference, never an admissibility override:
+// when the near chord tones are excluded by the voice-ordering window (a
+// concurrent lower-index voice sounding just above the far tone), the far tone
+// is still returned rather than crashing or clamping to the target.
+TEST(TextureHelpersTest, ConsonantChordToneKeepsFarToneWhenNearOnesCrossVoiceOrder) {
+  detail::ChordSpec chord{0, false};
+  const std::vector<int> theme_pitches;
+  // A lower-index voice (voice 1) sounds at F#2=42, so voice 2's anchor must
+  // stay at or below 42 to preserve the V1 >= V2 register order. G2=43 and
+  // C3=48 are now inadmissible, leaving only the far tone E2=40.
+  const std::vector<ConcurrentMotion> motions = {
+      ConcurrentMotion{/*voice=*/1, /*prev=*/42, /*curr=*/42}};
+  const std::vector<int> window = {49};
+
+  const int anchor = consonantChordTone(chord, /*voice=*/2, /*band_lo=*/37, /*band_hi=*/49,
+                                        /*target=*/48, theme_pitches, /*line_prev=*/-1, motions,
+                                        detail::Mode::Major, /*downbeat=*/true, window);
+  EXPECT_EQ(anchor, 40) << "far tone not returned when the near tones cross the voice order";
 }
 
 }  // namespace

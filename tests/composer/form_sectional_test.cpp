@@ -132,6 +132,37 @@ TEST(FormSectionalTest, BothFormsValidateAndAreDeterministic) {
   }
 }
 
+// --- Registration terrace (fixture metadata only, never a note) -------------
+
+TEST(FormSectionalTest, ToccataDeclaresOneRegistrationTerraceAtFugueBoundary) {
+  for (std::uint16_t bars : kBarLengths) {
+    const HarnessFixture fx = buildFixture(FormType::ToccataAndFugue, 5, false, bars);
+    ASSERT_EQ(fx.registration_step_ticks.size(), 1u) << "bars " << bars;
+    const Tick boundary = static_cast<Tick>(freeBarsFor(bars)) * kBar;
+    EXPECT_EQ(fx.registration_step_ticks.front(), boundary) << "bars " << bars;
+  }
+}
+
+TEST(FormSectionalTest, FantasiaDeclaresSectionCadenceAndRegistrationAtFreeBoundary) {
+  for (std::uint32_t seed : {3u, 42u}) {
+    for (std::uint16_t bars : kBarLengths) {
+      const HarnessFixture fx = buildFixture(FormType::FantasiaAndFugue, seed, false, bars);
+      const int free_bars = freeBarsFor(bars);
+      // The free fantasia section closes at its final bar before the fugue.
+      ASSERT_EQ(fx.section_cadence_ticks.size(), 1u) << "seed " << seed << " bars " << bars;
+      EXPECT_EQ(fx.section_cadence_ticks.front(), static_cast<Tick>(free_bars - 1) * kBar)
+          << "seed " << seed << " bars " << bars;
+      // The organ steps up a stop at the fantasia->fugue boundary.
+      ASSERT_EQ(fx.registration_step_ticks.size(), 1u) << "seed " << seed << " bars " << bars;
+      EXPECT_EQ(fx.registration_step_ticks.front(), static_cast<Tick>(free_bars) * kBar)
+          << "seed " << seed << " bars " << bars;
+      // The declared cadence sits strictly inside the piece, before the fugue.
+      EXPECT_GT(fx.section_cadence_ticks.front(), 0);
+      EXPECT_LT(fx.section_cadence_ticks.front(), fx.registration_step_ticks.front());
+    }
+  }
+}
+
 // --- 2. Free section is multi-voice (V0 lead + V2 pedal + V1 punctuation) and
 //        the fugue exposition still enters after the boundary ----------------
 
@@ -468,6 +499,133 @@ TEST(FormSectionalTest, ToccataArchetypeMatchesSeed) {
         // The director blocks Noble for this form; Severe is always compatible.
         EXPECT_EQ(section.character, SubjectCharacter::Severe);
       }
+    }
+  }
+}
+
+// --- 7b. Toccata Dramaticus BWV565 upgrades ---------------------------------
+
+namespace {
+
+// Composed notes in [bar, bar+1) for the given voice, sorted by (tick, pitch).
+std::vector<NoteEvent> barVoiceNotes(const std::vector<NoteEvent>& notes, int bar, VoiceId voice) {
+  const Tick lo = static_cast<Tick>(bar) * kBar;
+  const Tick hi = lo + kBar;
+  std::vector<NoteEvent> out;
+  for (const auto& note : notes) {
+    if (note.voice == voice && note.start_tick >= lo && note.start_tick < hi)
+      out.push_back(note);
+  }
+  std::sort(out.begin(), out.end(), [](const NoteEvent& a, const NoteEvent& b) {
+    if (a.start_tick != b.start_tick)
+      return a.start_tick < b.start_tick;
+    return a.pitch < b.pitch;
+  });
+  return out;
+}
+
+// A Dramaticus seed (seed % 4 == 0) whose free section is long enough (default
+// 32 bars -> 12 free bars) to carry the octave cascade + fermata breath.
+constexpr std::uint32_t kDramaticusSeed = 4;
+
+}  // namespace
+
+TEST(FormSectionalTest, ToccataDramaticusOctaveCascadeAndUnisonDoubling) {
+  const HarnessFixture fx = buildFixture(FormType::ToccataAndFugue, kDramaticusSeed, false, 32);
+  const ComposeResult r = Composer{}.run(fx.material, fx.harmony, fx.voice_plan);
+  ASSERT_TRUE(r.validation.failures.empty())
+      << "Dramaticus fails: "
+      << (r.validation.failures.empty() ? "" : r.validation.failures.front().rule_id);
+
+  const std::vector<NoteEvent> bar0 = barVoiceNotes(r.notes, 0, 0);
+  const std::vector<NoteEvent> bar1 = barVoiceNotes(r.notes, 1, 0);
+  ASSERT_FALSE(bar0.empty());
+  ASSERT_EQ(bar0.size(), bar1.size());
+  // bar 1 is the opening gesture stated exactly one octave lower than bar 0.
+  for (std::size_t i = 0; i < bar0.size(); ++i) {
+    EXPECT_EQ(static_cast<int>(bar1[i].pitch), static_cast<int>(bar0[i].pitch) - 12);
+    EXPECT_EQ(bar1[i].start_tick - kBar, bar0[i].start_tick);
+  }
+
+  // bar 2 is the unison-gesture bar: V0 and V1 both sound, V1 exactly 12 below
+  // V0 at equal ticks (the deliberate BWV565 octave doubling).
+  const std::vector<NoteEvent> bar2v0 = barVoiceNotes(r.notes, 2, 0);
+  const std::vector<NoteEvent> bar2v1 = barVoiceNotes(r.notes, 2, 1);
+  ASSERT_FALSE(bar2v0.empty());
+  ASSERT_EQ(bar2v0.size(), bar2v1.size());
+  for (std::size_t i = 0; i < bar2v0.size(); ++i) {
+    EXPECT_EQ(static_cast<int>(bar2v1[i].pitch), static_cast<int>(bar2v0[i].pitch) - 12);
+    EXPECT_EQ(bar2v1[i].start_tick, bar2v0[i].start_tick);
+  }
+
+  // bar 3 is the declamatory chord block: three voices sound (V0 block over the
+  // homophonic V1 + V2 strike).
+  std::set<VoiceId> bar3_voices;
+  for (const auto& note : r.notes) {
+    if (note.start_tick >= 3 * kBar && note.start_tick < 4 * kBar)
+      bar3_voices.insert(note.voice);
+  }
+  EXPECT_EQ(bar3_voices.size(), 3u) << "bar 3 is not a full-texture chord block";
+}
+
+TEST(FormSectionalTest, ToccataDramaticusFermataBreath) {
+  const HarnessFixture fx = buildFixture(FormType::ToccataAndFugue, kDramaticusSeed, false, 32);
+  const ComposeResult r = Composer{}.run(fx.material, fx.harmony, fx.voice_plan);
+  ASSERT_TRUE(r.validation.failures.empty());
+
+  // The fermata bar is the head of the second window: flourish snapped to the
+  // 4-bar grid, clamped into [4, free_bars - 4].
+  const int free_bars = freeBarsFor(32);
+  int flourish = ((free_bars / 4 + 3) / 4) * 4;
+  flourish = std::max(4, std::min(flourish, free_bars - 4));
+
+  // The fermata bar strikes a single whole note in each of V0, V1, V2.
+  for (VoiceId voice : {VoiceId{0}, VoiceId{1}, VoiceId{2}}) {
+    const std::vector<NoteEvent> notes = barVoiceNotes(r.notes, flourish, voice);
+    ASSERT_EQ(notes.size(), 1u) << "fermata voice " << static_cast<int>(voice)
+                                << " is not a single strike";
+    EXPECT_EQ(notes.front().duration, static_cast<Tick>(kTicksPerBar));
+    EXPECT_EQ(notes.front().start_tick, static_cast<Tick>(flourish) * kBar);
+  }
+}
+
+TEST(FormSectionalTest, ToccataTripletDriveInSecondHalf) {
+  // Dramaticus and Perpetuus tighten to sixteenth triplets (80-tick notes) in
+  // the section's last half. At least one V0 wave bar in [free_bars/2, ...)
+  // carries 80-tick durations, and its beat onsets are diatonic chord anchors.
+  for (std::uint32_t seed : {std::uint32_t{4}, std::uint32_t{5}}) {  // Dramaticus, Perpetuus.
+    const HarnessFixture fx = buildFixture(FormType::ToccataAndFugue, seed, false, 64);
+    const ComposeResult r = Composer{}.run(fx.material, fx.harmony, fx.voice_plan);
+    ASSERT_TRUE(r.validation.failures.empty())
+        << "seed " << seed << " fails: "
+        << (r.validation.failures.empty() ? "" : r.validation.failures.front().rule_id);
+    const int free_bars = freeBarsFor(64);
+    bool found_triplet = false;
+    for (int bar = free_bars / 2; bar < free_bars; ++bar) {
+      const std::vector<NoteEvent> notes = barVoiceNotes(r.notes, bar, 0);
+      const bool triplet =
+          !notes.empty() && std::all_of(notes.begin(), notes.end(), [](const NoteEvent& n) {
+            return n.duration == static_cast<Tick>(80);
+          });
+      if (triplet) {
+        found_triplet = true;
+        EXPECT_EQ(notes.size(), 24u) << "seed " << seed << " bar " << bar << " triplet count";
+      }
+    }
+    EXPECT_TRUE(found_triplet) << "seed " << seed << " has no triplet wave bar in the last half";
+  }
+}
+
+TEST(FormSectionalTest, ToccataAllArchetypesValidateAcrossSeeds) {
+  // Seeds 1..12 cover every archetype (seed % 4) in both modes; the Dramaticus
+  // upgrades and the triplet drive must never introduce a validation failure.
+  for (std::uint32_t seed = 1; seed <= 12; ++seed) {
+    for (bool minor : {false, true}) {
+      const HarnessFixture fx = buildFixture(FormType::ToccataAndFugue, seed, minor, 32);
+      const ComposeResult r = Composer{}.run(fx.material, fx.harmony, fx.voice_plan);
+      EXPECT_TRUE(r.validation.failures.empty())
+          << "toccata seed " << seed << (minor ? " minor" : " major") << " first failure="
+          << (r.validation.failures.empty() ? "" : r.validation.failures.front().rule_id);
     }
   }
 }
@@ -878,12 +1036,14 @@ TEST(FormSectionalTest, FantasiaChordalBlocksAndFreeGesture) {
 // --- Dramaticus material plan ------------------------------------------------
 
 // The Dramaticus toccata's free section carries the designed materials, locked
-// per bar from the composed output: bars 0-1 = the V0 solo opening gesture
-// (sixteenths, the bar tail silent, no other voice), bar 2 and the final free
-// bar = declamatory chord blocks (half-note strikes in all three voices), the
-// two bars before the closing block = the V2 walking-pedal solo (quarters, V0
-// and V1 silent), and every other free bar = the running figuration over the
-// pedal + punctuation layers.
+// per bar from the composed output. When the section is long enough (>= 12 free
+// bars) the BWV565 opening runs an octave cascade: bars 0-1 = the V0 solo
+// gesture (sixteenths, bar tail silent) stated high then an octave lower, bar 2
+// = the unison-gesture doubling (V0 + V1 sixteenths, V2 silent), bar 3 = the
+// declamatory chord block, and the second window opens with the whole-note
+// fermata breath. The minimal 8-bar section keeps the older two-bar gesture +
+// bar-2 chord block. In every case the final free bar is a chord block, the two
+// bars before it are the V2 walking-pedal solo, and the rest run the figuration.
 TEST(FormSectionalTest, DramaticusFreeSectionCarriesDesignedMaterials) {
   for (std::uint32_t seed : {4u, 8u, 12u}) {  // seed % 4 == 0 -> Dramaticus.
     for (std::uint16_t total : {16, 32, 64}) {
@@ -893,6 +1053,9 @@ TEST(FormSectionalTest, DramaticusFreeSectionCarriesDesignedMaterials) {
 
       const int free_bars = freeBarsFor(total);
       const int pedal_solo = free_bars - 5;
+      const bool cascade = free_bars >= 12;
+      int flourish = ((free_bars / 4 + 3) / 4) * 4;
+      flourish = std::max(4, std::min(flourish, free_bars - 4));
       // Per-bar, per-voice notes of the free section.
       std::vector<std::array<std::vector<const NoteEvent*>, 3>> bars(
           static_cast<std::size_t>(free_bars));
@@ -902,32 +1065,64 @@ TEST(FormSectionalTest, DramaticusFreeSectionCarriesDesignedMaterials) {
           bars[static_cast<std::size_t>(bar)][n.voice].push_back(&n);
       }
 
+      auto expect_solo_gesture = [&](const std::array<std::vector<const NoteEvent*>, 3>& by_voice,
+                                     int bar, const std::string& ctx) {
+        EXPECT_FALSE(by_voice[0].empty()) << ctx;
+        EXPECT_TRUE(by_voice[1].empty()) << ctx;
+        EXPECT_TRUE(by_voice[2].empty()) << ctx;
+        Tick last_end = 0;
+        for (const NoteEvent* n : by_voice[0]) {
+          EXPECT_EQ(n->duration, kTicksPerBeat / 4) << ctx;
+          last_end = std::max(last_end, n->start_tick + n->duration);
+        }
+        EXPECT_LE(last_end, static_cast<Tick>(bar) * kBar + 2 * kTicksPerBeat)
+            << ctx << ": gesture must leave the bar tail silent";
+      };
+      auto expect_chord_block = [&](const std::array<std::vector<const NoteEvent*>, 3>& by_voice,
+                                    int bar, const std::string& ctx) {
+        for (int voice = 0; voice < 3; ++voice) {
+          ASSERT_FALSE(by_voice[static_cast<std::size_t>(voice)].empty()) << ctx;
+          EXPECT_EQ(by_voice[static_cast<std::size_t>(voice)].front()->start_tick,
+                    static_cast<Tick>(bar) * kBar)
+              << ctx << " voice " << voice;
+          for (const NoteEvent* n : by_voice[static_cast<std::size_t>(voice)])
+            EXPECT_EQ(n->duration, 2 * kTicksPerBeat) << ctx << " voice " << voice;
+        }
+      };
+
       for (int bar = 0; bar < free_bars; ++bar) {
         const auto& by_voice = bars[static_cast<std::size_t>(bar)];
         const std::string ctx = "seed " + std::to_string(seed) + " total " + std::to_string(total) +
                                 " bar " + std::to_string(bar);
         if (bar <= 1) {
-          // Opening gesture: V0 solo sixteenths, the bar tail silent.
-          EXPECT_FALSE(by_voice[0].empty()) << ctx;
-          EXPECT_TRUE(by_voice[1].empty()) << ctx;
+          expect_solo_gesture(by_voice, bar, ctx);
+        } else if (cascade && bar == 2) {
+          // Unison-gesture doubling: V0 and V1 sixteenths, V1 exactly 12 below
+          // V0 at equal ticks, V2 silent, the bar tail left silent.
+          ASSERT_FALSE(by_voice[0].empty()) << ctx;
+          ASSERT_EQ(by_voice[0].size(), by_voice[1].size()) << ctx;
           EXPECT_TRUE(by_voice[2].empty()) << ctx;
-          Tick last_end = 0;
-          for (const NoteEvent* n : by_voice[0]) {
-            EXPECT_EQ(n->duration, kTicksPerBeat / 4) << ctx;
-            last_end = std::max(last_end, n->start_tick + n->duration);
+          for (std::size_t i = 0; i < by_voice[0].size(); ++i) {
+            EXPECT_EQ(by_voice[0][i]->duration, kTicksPerBeat / 4) << ctx;
+            EXPECT_EQ(static_cast<int>(by_voice[1][i]->pitch),
+                      static_cast<int>(by_voice[0][i]->pitch) - 12)
+                << ctx;
+            EXPECT_EQ(by_voice[1][i]->start_tick, by_voice[0][i]->start_tick) << ctx;
           }
-          EXPECT_LE(last_end, static_cast<Tick>(bar) * kBar + 2 * kTicksPerBeat)
-              << ctx << ": gesture must leave the bar tail silent";
-        } else if (bar == 2 || bar == free_bars - 1) {
-          // Declamatory chord block: half-note strikes in all three voices,
-          // articulated together at the bar head.
+        } else if (cascade && bar == 3) {
+          expect_chord_block(by_voice, bar, ctx);
+        } else if (!cascade && bar == 2) {
+          expect_chord_block(by_voice, bar, ctx);
+        } else if (bar == free_bars - 1) {
+          expect_chord_block(by_voice, bar, ctx);
+        } else if (cascade && bar == flourish) {
+          // Fermata breath: a single whole note struck in all three voices.
           for (int voice = 0; voice < 3; ++voice) {
-            ASSERT_FALSE(by_voice[static_cast<std::size_t>(voice)].empty()) << ctx;
-            EXPECT_EQ(by_voice[static_cast<std::size_t>(voice)].front()->start_tick,
-                      static_cast<Tick>(bar) * kBar)
+            ASSERT_EQ(by_voice[static_cast<std::size_t>(voice)].size(), 1u)
                 << ctx << " voice " << voice;
-            for (const NoteEvent* n : by_voice[static_cast<std::size_t>(voice)])
-              EXPECT_EQ(n->duration, 2 * kTicksPerBeat) << ctx << " voice " << voice;
+            EXPECT_EQ(by_voice[static_cast<std::size_t>(voice)].front()->duration,
+                      static_cast<Tick>(kTicksPerBar))
+                << ctx << " voice " << voice;
           }
         } else if (bar == pedal_solo || bar == pedal_solo + 1) {
           // Pedal solo: V2 walking quarters alone.
@@ -938,12 +1133,159 @@ TEST(FormSectionalTest, DramaticusFreeSectionCarriesDesignedMaterials) {
             EXPECT_EQ(n->duration, kTicksPerBeat) << ctx;
         } else {
           // Wave bar: running V0 figuration over both accompaniment layers.
+          // The last-half bars tighten to sixteenth triplets (80 ticks), still
+          // shorter than an eighth, so the density bound below holds either way.
           EXPECT_FALSE(by_voice[0].empty()) << ctx;
           EXPECT_FALSE(by_voice[1].empty()) << ctx;
           EXPECT_FALSE(by_voice[2].empty()) << ctx;
           for (const NoteEvent* n : by_voice[0])
             EXPECT_LE(n->duration, kTicksPerBeat / 2) << ctx << ": wave runs eighths/sixteenths";
         }
+      }
+    }
+  }
+}
+
+// --- Dramaticus minor-mode diminished-seventh sweep (BWV565) -----------------
+
+namespace {
+
+// The internal leading-tone diminished-seventh pitch classes of the C-minor
+// tonic used internally by every builder (transpose happens only at MIDI
+// output): leading tone B (11) plus its stacked minor thirds -> {2, 5, 8, 11}.
+// The set is symmetric under transposition by a minor third, so it is identical
+// for any minor tonic.
+const std::set<int> kDim7PitchClasses = {2, 5, 8, 11};
+
+// Mirror the builder's Dramaticus sweep placement: with the cascade layout
+// active (free_bars >= 12) the first sweep is the first wave bar after the
+// fermata breath (flourish + 1) and the second is the last wave bar before the
+// closing chord block (free_bars - 2). The two bars before that closing block
+// are the V2 pedal-solo pair.
+struct SweepBars {
+  int first_bar;
+  int last_bar;
+};
+SweepBars dramaticusSweepBars(int free_bars) {
+  int flourish = ((free_bars / 4 + 3) / 4) * 4;
+  flourish = std::clamp(flourish, 4, free_bars - 4);
+  return {flourish + 1, free_bars - 2};
+}
+
+}  // namespace
+
+// A minor-mode Dramaticus toccata (seed % 4 == 0) with the cascade layout
+// injects two BWV565 diminished-seventh sweep bars: they contain ONLY the four
+// leading-tone dim7 pitch classes, and each matches its neighbouring wave bar's
+// subdivision (sixteenths, tightening to sixteenth triplets in the section's
+// second half).
+TEST(FormSectionalTest, DramaticusMinorDim7SweepBars) {
+  for (std::uint32_t seed : {4u, 8u, 12u}) {
+    ASSERT_EQ(seed % 4u, 0u) << "seed " << seed << " is not a Dramaticus archetype";
+    for (std::uint16_t total : {std::uint16_t{32}, std::uint16_t{64}}) {
+      const HarnessFixture fx = buildFixture(FormType::ToccataAndFugue, seed, true, total);
+      const ComposeResult r = Composer{}.run(fx.material, fx.harmony, fx.voice_plan);
+      ASSERT_TRUE(r.validation.failures.empty())
+          << "seed " << seed << " total " << total << " first failure="
+          << (r.validation.failures.empty() ? "" : r.validation.failures.front().rule_id);
+
+      const int free_bars = freeBarsFor(total);
+      ASSERT_GE(free_bars, 12) << "total " << total << " must use the cascade layout";
+      const SweepBars sweep = dramaticusSweepBars(free_bars);
+
+      for (int bar : {sweep.first_bar, sweep.last_bar}) {
+        const std::vector<NoteEvent> notes = barVoiceNotes(r.notes, bar, 0);
+        ASSERT_FALSE(notes.empty())
+            << "seed " << seed << " total " << total << " sweep bar " << bar << " is empty";
+        // Only the four leading-tone dim7 pitch classes sound.
+        for (const NoteEvent& note : notes) {
+          EXPECT_TRUE(kDim7PitchClasses.count(note.pitch % 12) == 1)
+              << "seed " << seed << " total " << total << " sweep bar " << bar << " pitch "
+              << static_cast<int>(note.pitch) << " (pc " << (note.pitch % 12)
+              << ") is not a dim7 tone";
+        }
+        // Subdivision matches the neighbouring wave bars: sixteenths (120 ticks,
+        // 16 notes) before the drive half, sixteenth triplets (80 ticks, 24
+        // notes) at or after it.
+        const bool triplet = bar >= free_bars / 2;
+        const Tick expected_dur = triplet ? 80 : (kTicksPerBeat / 4);
+        const std::size_t expected_count = triplet ? 24u : 16u;
+        EXPECT_EQ(notes.size(), expected_count)
+            << "seed " << seed << " total " << total << " sweep bar " << bar << " note count";
+        for (const NoteEvent& note : notes) {
+          EXPECT_EQ(note.duration, expected_dur)
+              << "seed " << seed << " total " << total << " sweep bar " << bar << " subdivision";
+        }
+      }
+    }
+  }
+}
+
+// The major-mode Dramaticus plan is untouched: the two sweep-bar positions run
+// the ordinary scalar-wave figuration (the major vii dim7 would need a pitch
+// class outside the major scale), so each carries at least one non-dim7 tone.
+TEST(FormSectionalTest, DramaticusMajorHasNoDim7Sweep) {
+  for (std::uint32_t seed : {4u, 8u, 12u}) {
+    for (std::uint16_t total : {std::uint16_t{32}, std::uint16_t{64}}) {
+      const HarnessFixture fx = buildFixture(FormType::ToccataAndFugue, seed, false, total);
+      const ComposeResult r = Composer{}.run(fx.material, fx.harmony, fx.voice_plan);
+      ASSERT_TRUE(r.validation.failures.empty()) << "seed " << seed << " total " << total;
+
+      const int free_bars = freeBarsFor(total);
+      const SweepBars sweep = dramaticusSweepBars(free_bars);
+      for (int bar : {sweep.first_bar, sweep.last_bar}) {
+        const std::vector<NoteEvent> notes = barVoiceNotes(r.notes, bar, 0);
+        ASSERT_FALSE(notes.empty()) << "seed " << seed << " total " << total << " bar " << bar;
+        const bool all_dim7 = std::all_of(notes.begin(), notes.end(), [](const NoteEvent& note) {
+          return kDim7PitchClasses.count(note.pitch % 12) == 1;
+        });
+        EXPECT_FALSE(all_dim7)
+            << "seed " << seed << " total " << total << " major bar " << bar
+            << " unexpectedly consists solely of dim7 tones (plan should be unchanged)";
+      }
+    }
+  }
+}
+
+// A short Dramaticus form (free_bars < 12) uses no cascade layout, so it carries
+// no dim7 sweep bar and still validates in minor mode.
+TEST(FormSectionalTest, DramaticusShortFormHasNoDim7Sweep) {
+  for (std::uint32_t seed : {4u, 8u, 12u}) {
+    const std::uint16_t total = 16;  // free_bars == 8 (< 12): no cascade.
+    ASSERT_LT(freeBarsFor(total), 12);
+    const HarnessFixture fx = buildFixture(FormType::ToccataAndFugue, seed, true, total);
+    const ComposeResult r = Composer{}.run(fx.material, fx.harmony, fx.voice_plan);
+    ASSERT_TRUE(r.validation.failures.empty()) << "seed " << seed;
+
+    const int free_bars = freeBarsFor(total);
+    for (int bar = 0; bar < free_bars; ++bar) {
+      const std::vector<NoteEvent> notes = barVoiceNotes(r.notes, bar, 0);
+      // The sweep signature is a running V0 bar (>= 16 short notes) built solely
+      // from dim7 tones; a chord block's two/three triad tones are excluded by
+      // the count so a triad that happens to be a dim7 subset is not mistaken
+      // for a sweep.
+      const bool sweep_signature =
+          notes.size() >= 16 && std::all_of(notes.begin(), notes.end(), [](const NoteEvent& note) {
+            return kDim7PitchClasses.count(note.pitch % 12) == 1;
+          });
+      EXPECT_FALSE(sweep_signature)
+          << "seed " << seed << " short-form bar " << bar << " is a dim7 sweep (should not exist)";
+    }
+  }
+}
+
+// The minor sweep must never introduce a validation failure across the archetype
+// sweep in both modes (seeds 1..12 cover every seed % 4).
+TEST(FormSectionalTest, ToccataDim7SweepValidatesAcrossSeedsBothModes) {
+  for (std::uint32_t seed = 1; seed <= 12; ++seed) {
+    for (bool minor : {false, true}) {
+      for (std::uint16_t total : {std::uint16_t{32}, std::uint16_t{64}}) {
+        const HarnessFixture fx = buildFixture(FormType::ToccataAndFugue, seed, minor, total);
+        const ComposeResult r = Composer{}.run(fx.material, fx.harmony, fx.voice_plan);
+        EXPECT_TRUE(r.validation.failures.empty())
+            << "toccata seed " << seed << (minor ? " minor" : " major") << " total " << total
+            << " first failure="
+            << (r.validation.failures.empty() ? "" : r.validation.failures.front().rule_id);
       }
     }
   }

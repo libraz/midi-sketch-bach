@@ -114,6 +114,118 @@ TEST(ExpressionEventsTest, RegistrationDeterministic) {
   }
 }
 
+TEST(ExpressionEventsTest, RegistrationDefaultClimaxIsLegacyByteIdentical) {
+  const auto legacy = buildRegistrationPlan(24, 8, kTicksPerBar, 24 * kTicksPerBar);
+  const auto explicit_zero = buildRegistrationPlan(24, 8, kTicksPerBar, 24 * kTicksPerBar, 0);
+  ASSERT_EQ(legacy.size(), explicit_zero.size());
+  for (std::size_t idx = 0; idx < legacy.size(); ++idx) {
+    EXPECT_EQ(legacy[idx].tick, explicit_zero[idx].tick);
+    EXPECT_EQ(legacy[idx].controller, explicit_zero[idx].controller);
+    EXPECT_EQ(legacy[idx].value, explicit_zero[idx].value);
+  }
+  // Pin the exact 4-point arc (opening 75, develop 85 at 1/2, climax 95 at 3/4,
+  // settle 88 at end-1) so a future change to the peak placement cannot silently
+  // shift the legacy (climax_tick == 0) stream. Events at equal ticks stay in
+  // push order (CC#7 then CC#11), so indices 0/2/4/6 are the CC#7 points.
+  const Tick total = 24 * kTicksPerBar;
+  ASSERT_EQ(legacy.size(), 8u);
+  EXPECT_EQ(legacy[0].tick, 0u);
+  EXPECT_EQ(legacy[0].value, 75);
+  EXPECT_EQ(legacy[2].tick, total / 2);
+  EXPECT_EQ(legacy[2].value, 85);
+  EXPECT_EQ(legacy[4].tick, total * 3 / 4);
+  EXPECT_EQ(legacy[4].value, 95);
+  EXPECT_EQ(legacy[6].tick, total - 1);
+  EXPECT_EQ(legacy[6].value, 88);
+}
+
+TEST(ExpressionEventsTest, RegistrationPeakLandsAtClimaxTick) {
+  const Tick total = 32 * kTicksPerBar;
+  const Tick climax = 20 * kTicksPerBar;  // between develop (16 bars) and the last bar.
+  const auto events = buildRegistrationPlan(32, 8, kTicksPerBar, total, climax);
+  bool found = false;
+  for (const auto& evt : events) {
+    if (evt.controller == 7 && evt.value == 95) {  // the climax peak value.
+      EXPECT_EQ(evt.tick, climax);
+      found = true;
+    }
+  }
+  EXPECT_TRUE(found) << "no climax peak point emitted";
+}
+
+TEST(ExpressionEventsTest, RegistrationClimaxClampedBeforePieceEnd) {
+  const Tick total = 16 * kTicksPerBar;
+  // A climax past the end clamps to at most one bar before the end so the settle
+  // still follows it.
+  const auto events = buildRegistrationPlan(16, 8, kTicksPerBar, total, total + 5000);
+  for (const auto& evt : events) {
+    if (evt.controller == 7 && evt.value == 95) {
+      EXPECT_LE(evt.tick, total - kTicksPerBar);
+      EXPECT_LT(evt.tick, total - 1);
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// buildRegistrationTerraces
+// ---------------------------------------------------------------------------
+
+TEST(ExpressionEventsTest, TerracesEmptyForNoSteps) {
+  EXPECT_TRUE(buildRegistrationTerraces({}, 16 * kTicksPerBar).empty());
+  EXPECT_TRUE(buildRegistrationTerraces({kTicksPerBar}, 0).empty());
+}
+
+TEST(ExpressionEventsTest, TerracesLevelsAndTicks) {
+  const Tick total = 8 * kTicksPerBar;
+  const std::vector<Tick> steps = {kTicksPerBar, 2 * kTicksPerBar, 3 * kTicksPerBar};
+  const auto events = buildRegistrationTerraces(steps, total);
+  ASSERT_EQ(events.size(), 3u);
+  EXPECT_EQ(events[0].tick, kTicksPerBar);
+  EXPECT_EQ(events[0].controller, 7);  // CC#7 only (stop change, not expression).
+  EXPECT_EQ(events[0].value, 78);
+  EXPECT_EQ(events[1].value, 82);
+  EXPECT_EQ(events[2].value, 86);
+}
+
+TEST(ExpressionEventsTest, TerracesSortDedupAndDropOutOfRange) {
+  const Tick total = 8 * kTicksPerBar;
+  // Unsorted, with a duplicate, a zero tick, and two out-of-range ticks.
+  const std::vector<Tick> steps = {3 * kTicksPerBar,    kTicksPerBar, kTicksPerBar, 0, total,
+                                   total + kTicksPerBar};
+  const auto events = buildRegistrationTerraces(steps, total);
+  ASSERT_EQ(events.size(), 2u);  // only 1*bar and 3*bar survive, deduped + sorted.
+  EXPECT_EQ(events[0].tick, kTicksPerBar);
+  EXPECT_EQ(events[1].tick, 3 * kTicksPerBar);
+  EXPECT_LT(events[0].tick, events[1].tick);
+}
+
+TEST(ExpressionEventsTest, TerracesCapAt92) {
+  const Tick total = 32 * kTicksPerBar;
+  std::vector<Tick> steps;
+  for (int idx = 1; idx <= 8; ++idx) {
+    steps.push_back(static_cast<Tick>(idx) * kTicksPerBar);
+  }
+  const auto events = buildRegistrationTerraces(steps, total);
+  ASSERT_EQ(events.size(), 8u);
+  for (std::size_t idx = 1; idx < events.size(); ++idx) {
+    EXPECT_GE(events[idx].value, events[idx - 1].value) << "terraces are non-decreasing";
+    EXPECT_LE(events[idx].value, 92) << "terraces cap below the climax peak";
+  }
+  EXPECT_EQ(events.back().value, 92);
+}
+
+TEST(ExpressionEventsTest, TerracesDeterministic) {
+  const std::vector<Tick> steps = {kTicksPerBar, 4 * kTicksPerBar};
+  const auto a = buildRegistrationTerraces(steps, 16 * kTicksPerBar);
+  const auto b = buildRegistrationTerraces(steps, 16 * kTicksPerBar);
+  ASSERT_EQ(a.size(), b.size());
+  for (std::size_t idx = 0; idx < a.size(); ++idx) {
+    EXPECT_EQ(a[idx].tick, b[idx].tick);
+    EXPECT_EQ(a[idx].controller, b[idx].controller);
+    EXPECT_EQ(a[idx].value, b[idx].value);
+  }
+}
+
 // ---------------------------------------------------------------------------
 // buildPhraseDynamics
 // ---------------------------------------------------------------------------

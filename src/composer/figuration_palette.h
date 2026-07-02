@@ -200,10 +200,16 @@ void appendScalarWaveCycle(std::vector<MaterialNote>& notes, Tick block_start,
  *        vocabulary to an otherwise purely stepwise surface; mixing the seed
  *        offset into the phase makes different seeds distribute the figures
  *        differently. Off by default so existing callers stay byte-identical.
+ * @param triplet When true, the bar subdivides into sixteenth triplets (6 notes
+ *        per beat, 80 ticks each) instead of the `notes_per_beat` grid, running
+ *        the same chord-anchored stepwise wave over the denser subdivision (the
+ *        toccata's drive into the fugue tightens from sixteenths to triplet
+ *        sixteenths). Off by default so existing callers stay byte-identical.
  */
 void appendScalarWaveBar(std::vector<MaterialNote>& dst, int bar, const detail::ChordSpec& chord,
                          detail::Mode mode, int notes_per_beat, int base_midi, int ceil_midi,
-                         int offset, int& prev_pitch, bool rotate_figures = false);
+                         int offset, int& prev_pitch, bool rotate_figures = false,
+                         bool triplet = false);
 
 /**
  * @brief Append one 4/4 bar of theme-consonant scalar-wave chord-tone
@@ -243,11 +249,22 @@ void appendScalarWaveBar(std::vector<MaterialNote>& dst, int bar, const detail::
  * @param band_lo Register band floor for this voice.
  * @param band_hi Register band ceiling for this voice.
  * @param num_voices Total voice count scanned for concurrent motion.
+ * @param cadential_close When true the bar's first half is the running wave as
+ *        usual, but its second half (from tick position kTicksPerBar/2) sounds
+ *        as ONE held anchor tone (a half note on the mid-bar strong beat)
+ *        instead of the running subdivision. The held tone uses the same anchor
+ *        machinery the wave already uses (consonant chord tone, theme-consonant,
+ *        parallel-aware, order-clamped, band-confined) and is additionally
+ *        vetted for consonance against every theme tone the registry reports as
+ *        sounding anywhere inside the held half-bar window; when no candidate
+ *        passes, the normal running wave is emitted for the second half instead
+ *        (graceful degradation). This gives the ornament pass a strong-beat
+ *        quarter-or-longer top note to place a mandatory section-cadence trill on.
  */
 void appendFigurationWaveBar(ThemeToneRegistry& registry, FigurationSection& section, int bar,
                              int voice, const detail::ChordSpec& chord, detail::Mode mode,
                              int notes_per_beat, int offset, int& prev_anchor, int band_lo,
-                             int band_hi, VoiceId num_voices);
+                             int band_hi, VoiceId num_voices, bool cadential_close = false);
 
 /**
  * @brief Firing counters for appendFigurationWaveBar's reactive layers.
@@ -392,9 +409,15 @@ void appendFiguraCortaBar(std::vector<MaterialNote>& notes, int bar, int start,
  * @param mode Diatonic mode selecting the scale walker.
  * @param band_lo Register band floor.
  * @param band_hi Register band ceiling.
+ * @param octave_drop Number of octaves to lower the whole gesture (0 = the
+ *        default high statement, byte-identical for existing callers). The drop
+ *        is pulled back toward 0 in whole octaves until the main-tone anchor
+ *        still sits at or above `band_lo`, so a drop that would sink the anchor
+ *        below the voice band uses the lowest octave that fits (the descending
+ *        run tail may reach below `band_lo` -- the rhetorical low flourish).
  */
 void appendGestureBar(std::vector<MaterialNote>& dst, int bar, const detail::ChordSpec& chord,
-                      detail::Mode mode, int band_lo, int band_hi);
+                      detail::Mode mode, int band_lo, int band_hi, int octave_drop = 0);
 
 /**
  * @brief Append one 4/4 bar of multi-voice simultaneous triad blocks

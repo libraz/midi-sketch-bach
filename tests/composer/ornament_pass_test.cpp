@@ -633,23 +633,25 @@ TEST(OrnamentPassTest, SlideFillsRisingLeapArrival) {
 
 // The character x vocabulary design table, observed at phrase-boundary sites
 // across a seed family. Group sizes identify the figure: 2 = appoggiatura,
-// 3 = mordent (or slide -- distinguished by motion), 4+ = turn or trill.
+// 3 = mordent (or slide -- distinguished by motion), 4 = turn, 5+ = trill.
 //   Severe   : appoggiatura only (and only on its sparse 8-bar sites).
 //   Noble    : appoggiatura or turn -- never a mordent.
-//   Restless : mordent (quarters) -- never a lean.
+//   Restless : short trill on quarter-or-longer boundary tones (mordent only
+//              below a quarter) -- never a lean.
 //   Playful  : mordent on the unmatched quarter approach.
 TEST(OrnamentPassTest, CharacterVocabularyGrammarAtBoundaries) {
   struct Row {
     SubjectCharacter character;
-    bool allow2;  // appoggiatura
-    bool allow3;  // mordent
-    bool allow4;  // turn
+    bool allow2;       // appoggiatura
+    bool allow3;       // mordent
+    bool allow4;       // turn
+    bool allow_trill;  // 5+ sub-notes
   };
   const Row rows[] = {
-      {SubjectCharacter::Severe, true, false, false},
-      {SubjectCharacter::Noble, true, false, true},
-      {SubjectCharacter::Restless, false, true, false},
-      {SubjectCharacter::Playful, false, true, false},
+      {SubjectCharacter::Severe, true, false, false, false},
+      {SubjectCharacter::Noble, true, false, true, false},
+      {SubjectCharacter::Restless, false, true, false, true},
+      {SubjectCharacter::Playful, false, true, false, false},
   };
   for (const Row& row : rows) {
     for (std::uint32_t seed = 1; seed <= 8; ++seed) {
@@ -667,8 +669,8 @@ TEST(OrnamentPassTest, CharacterVocabularyGrammarAtBoundaries) {
         }
         if (group == 0)
           continue;  // gate closed (or off this character's sites).
-        const bool allowed =
-            (group == 2 && row.allow2) || (group == 3 && row.allow3) || (group == 4 && row.allow4);
+        const bool allowed = (group == 2 && row.allow2) || (group == 3 && row.allow3) ||
+                             (group == 4 && row.allow4) || (group >= 5 && row.allow_trill);
         EXPECT_TRUE(allowed) << "character " << static_cast<int>(row.character) << " seed " << seed
                              << " bar " << bar << " produced a foreign figure of " << group
                              << " sub-notes";
@@ -1392,6 +1394,135 @@ TEST(OrnamentPassTest, ZeroClimaxWindowIsInert) {
     EXPECT_EQ(a.notes[i].pitch, b.notes[i].pitch) << "note " << i;
     EXPECT_EQ(a.notes[i].duration, b.notes[i].duration) << "note " << i;
   }
+}
+
+// --- Interior section cadences -----------------------------------------------
+
+namespace {
+
+// Three-voice fixture: V0 top melody quarters, V1 middle quarters a register
+// below (intervals chosen imperfect against V0 so no parallel guard fires),
+// V2 a clean whole-note bass. Used to observe the top-line-only restriction
+// on section-cadence bars.
+ComposeResult threeVoiceFixture(int bars) {
+  ComposeResult r;
+  const std::uint8_t top[4] = {72, 74, 76, 77};
+  const std::uint8_t mid[4] = {57, 59, 60, 62};
+  for (int bar = 0; bar < bars; ++bar) {
+    r.notes.push_back(makeNote(barToTick(bar), kTicksPerBar, 36, 2));
+    r.provenance.push_back(composeProv(2));
+    for (int beat = 0; beat < 4; ++beat) {
+      r.notes.push_back(
+          makeNote(barToTick(bar) + beat * kTicksPerBeat, kTicksPerBeat, mid[beat], 1));
+      r.provenance.push_back(composeProv(1));
+      r.notes.push_back(
+          makeNote(barToTick(bar) + beat * kTicksPerBeat, kTicksPerBeat, top[beat], 0));
+      r.provenance.push_back(composeProv(0));
+    }
+  }
+  r.tracks = Renderer{}.render(r.notes);
+  return r;
+}
+
+}  // namespace
+
+// An interior section cadence is a mandatory trill site for EVERY character:
+// Severe (density 0, which otherwise never trills mid-piece) must place a
+// trill run on the declared bar, for every seed. In a 16-bar piece bar 3 is
+// neither the mid-piece boundary (bar 7) nor a density-0 8-bar site, so any
+// ornament there is the section-cadence trill.
+TEST(OrnamentPassTest, SectionCadenceTrillFiresForSevereMidPiece) {
+  for (std::uint32_t seed = 1; seed <= 8; ++seed) {
+    ComposeResult r = twoVoiceFixture(16);
+    OrnamentParams p = baseParams();
+    p.character = SubjectCharacter::Severe;  // ornament_density 0.
+    p.seed = seed;
+    p.section_cadence_ticks = {barToTick(3)};
+    applyOrnamentPass(r, p);
+
+    std::size_t bar3_subs = 0;
+    for (const auto& n : r.notes) {
+      if (n.voice == 0 && n.source == BachNoteSource::Ornament && n.start_tick >= barToTick(3) &&
+          n.start_tick < barToTick(4))
+        ++bar3_subs;
+    }
+    EXPECT_GE(bar3_subs, 4u) << "section-cadence trill missing for Severe, seed " << seed;
+  }
+}
+
+// Section-cadence bars are top-line-only, like the final cadence: the top
+// voice carries the mandatory trill while a lower melody voice on the same
+// bar stays plain for every seed.
+TEST(OrnamentPassTest, SectionCadenceSiteIsTopLineOnly) {
+  for (std::uint32_t seed = 1; seed <= 8; ++seed) {
+    ComposeResult r = threeVoiceFixture(16);
+    OrnamentParams p = baseParams();  // Playful: the densest grammar.
+    p.seed = seed;
+    p.section_cadence_ticks = {barToTick(3)};
+    applyOrnamentPass(r, p);
+
+    std::size_t top_subs = 0;
+    for (const auto& n : r.notes) {
+      if (n.source != BachNoteSource::Ornament || n.start_tick < barToTick(3) ||
+          n.start_tick >= barToTick(4))
+        continue;
+      if (n.voice == 0) {
+        ++top_subs;
+      } else {
+        ADD_FAILURE() << "lower voice " << static_cast<int>(n.voice)
+                      << " ornamented on the section-cadence bar, seed " << seed;
+      }
+    }
+    EXPECT_GE(top_subs, 4u) << "top-line section-cadence trill missing, seed " << seed;
+  }
+}
+
+// A section-cadence bar at or past the final cadence window is dropped: the
+// output equals the run without any declared section cadence (the final
+// window's own long cadential trill wins).
+TEST(OrnamentPassTest, SectionCadenceInsideFinalWindowIsInert) {
+  ComposeResult a = twoVoiceFixture(8);
+  OrnamentParams pa = baseParams();
+  applyOrnamentPass(a, pa);
+
+  ComposeResult b = twoVoiceFixture(8);
+  OrnamentParams pb = baseParams();
+  pb.section_cadence_ticks = {barToTick(6)};  // inside the final two bars.
+  applyOrnamentPass(b, pb);
+
+  ASSERT_EQ(a.notes.size(), b.notes.size());
+  for (std::size_t i = 0; i < a.notes.size(); ++i) {
+    EXPECT_EQ(a.notes[i].start_tick, b.notes[i].start_tick) << "note " << i;
+    EXPECT_EQ(a.notes[i].pitch, b.notes[i].pitch) << "note " << i;
+    EXPECT_EQ(a.notes[i].duration, b.notes[i].duration) << "note " << i;
+  }
+}
+
+// --- Restless quarter-note boundary trill ------------------------------------
+
+// The Restless boundary trill fires on quarter-note tones (not only half-or-
+// longer): across a seed family at least one phrase-boundary quarter expands
+// to a trill run (5+ sub-notes) instead of the 3-note mordent.
+TEST(OrnamentPassTest, RestlessQuarterBoundaryTrillFires) {
+  bool found_trill = false;
+  for (std::uint32_t seed = 1; seed <= 16 && !found_trill; ++seed) {
+    ComposeResult r = fallingThirdBoundaryFixture(kTicksPerBeat);
+    OrnamentParams p = baseParams();
+    p.character = SubjectCharacter::Restless;
+    p.seed = seed;
+    applyOrnamentPass(r, p);
+    for (int bar : {3, 7, 11}) {
+      std::size_t group = 0;
+      for (const auto& n : r.notes) {
+        if (n.voice == 0 && n.source == BachNoteSource::Ornament &&
+            n.start_tick >= barToTick(bar) && n.start_tick < barToTick(bar) + kTicksPerBeat)
+          ++group;
+      }
+      if (group >= 5)
+        found_trill = true;
+    }
+  }
+  EXPECT_TRUE(found_trill) << "no Restless quarter-note boundary trill fired across the seeds";
 }
 
 // --- Untouched core pipeline (opt-in guarantee) ----------------------------

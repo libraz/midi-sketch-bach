@@ -379,6 +379,22 @@ void applyOrnamentPass(ComposeResult& result, const OrnamentParams& params) {
   // before the final cadence is where the priority cadence trill lands.
   const int cadence_window_start_bar = total_bars >= 2 ? total_bars - 2 : 0;
 
+  // Interior section-cadence bars: each entry of section_cadence_ticks names
+  // the bar that closes an inner section (a fugue exposition, a toccata's
+  // free section). These bars behave like the final cadence -- a mandatory
+  // top-line-only strong-beat trill site -- at lower intensity (short trill).
+  // Bars at or past the final cadence window are dropped: the final window's
+  // long cadential trill wins.
+  std::vector<int> section_cadence_bars;
+  section_cadence_bars.reserve(params.section_cadence_ticks.size());
+  for (const Tick tick : params.section_cadence_ticks) {
+    const int bar = static_cast<int>(tick / tpb);
+    if (bar < cadence_window_start_bar) {
+      section_cadence_bars.push_back(bar);
+    }
+  }
+  std::sort(section_cadence_bars.begin(), section_cadence_bars.end());
+
   // The designed mid-piece sub-cadence: the 4-bar phrase boundary nearest the
   // piece midpoint. Like the final cadence it bypasses the placement gate (a
   // design value, not a probabilistic site), so every character -- including
@@ -643,6 +659,8 @@ void applyOrnamentPass(ComposeResult& result, const OrnamentParams& params) {
       const Tick pos_in_bar = note.start_tick % tpb;
       const bool is_downbeat = pos_in_bar == 0;
       const bool in_cadence_window = bar >= cadence_window_start_bar;
+      const bool in_section_cadence =
+          std::binary_search(section_cadence_bars.begin(), section_cadence_bars.end(), bar);
       // Strong beats fall on the half-bar grid (beat 1 and the mid-bar beat).
       // The penultimate strong beat before the final cadence is the priority
       // cadence-trill site; admitting every strong beat inside the last two
@@ -659,8 +677,9 @@ void applyOrnamentPass(ComposeResult& result, const OrnamentParams& params) {
       // Cadence ornaments belong to the TOP sounding line only: simultaneous
       // trills in two voices clash at the alternation level, so a note with a
       // higher voice sounding above it takes no ornament inside the cadence
-      // window. A note with NO other voice sounding is a solo entry -- the one
-      // context where the clean-bass guard lifts (pedal-solo mordent).
+      // window or an interior section-cadence bar. A note with NO other voice
+      // sounding is a solo entry -- the one context where the clean-bass guard
+      // lifts (pedal-solo mordent).
       const int highest_other =
           highestOtherSoundingPitch(result.notes, note.voice, note.start_tick);
       const bool is_top = highest_other <= static_cast<int>(note.pitch);
@@ -678,7 +697,8 @@ void applyOrnamentPass(ComposeResult& result, const OrnamentParams& params) {
           nextHigherVoiceCeiling(result.notes, note.voice, note.pitch, note.start_tick);
       const bool upper_clears_ceiling = upper >= 0 && upper < ceiling;
 
-      if (neighbours_ok && upper_clears_ceiling && (is_top || !in_cadence_window)) {
+      if (neighbours_ok && upper_clears_ceiling &&
+          (is_top || (!in_cadence_window && !in_section_cadence))) {
         const std::uint64_t roll = placementHash(params.seed, bar, note.voice);
 
         // Climax uplift window: decoration intensifies where the macro energy
@@ -709,18 +729,23 @@ void applyOrnamentPass(ComposeResult& result, const OrnamentParams& params) {
 
         // Character x vocabulary grammar (design table, Reduce Generation:
         // the figure each character places at each site class is a design
-        // value, not a search). The cadence row is shared and mandatory --
-        // every character closes with the long cadential trill.
+        // value, not a search). The cadence rows are shared and mandatory --
+        // every character closes with the long cadential trill, and every
+        // character marks an interior section-cadence bar with a short
+        // strong-beat trill.
         //   Severe   : boundary -> appoggiatura (the linear stile antico
-        //              suspends rather than strikes); interior -> nothing.
+        //              suspends rather than strikes); interior -> nothing
+        //              beyond the section-cadence trill.
         //   Noble    : boundary -> appoggiatura on a matched approach, turn
         //              otherwise; interior -> turn on half-or-longer tones.
-        //   Restless : boundary -> short trill (long tones) / mordent;
-        //              interior -> downbeat mordent (the percussive idiom).
+        //   Restless : boundary -> short trill (quarter-or-longer tones) /
+        //              mordent (shorter); interior -> downbeat mordent (the
+        //              percussive idiom).
         //   Playful  : boundary -> slide under a leap approach / turn (long
         //              tones) / mordent (quarters); interior -> inner trill
-        //              on long tones, slide under leap arrivals, downbeat
-        //              mordent on quarters.
+        //              on strong-beat quarter-or-longer tones every other
+        //              bar, slide under leap arrivals, downbeat mordent on
+        //              quarters.
         // Approach-matched figures (appoggiatura, slide, isolated turn) carry
         // their own placement-hash quantile gate; design-value figures run
         // through the generic gate below. Priority on a contested note:
@@ -755,6 +780,11 @@ void applyOrnamentPass(ComposeResult& result, const OrnamentParams& params) {
           }
         } else if (in_cadence_window && is_strong_beat && note.duration >= kQuarter) {
           // Priority cadence trill: the strong beat in the last two bars.
+          want_trill = true;
+        } else if (in_section_cadence && is_strong_beat && note.duration >= kQuarter) {
+          // Interior section cadence: every character marks the section close
+          // with a short trill, the same rhetoric as the final cadence at
+          // lower intensity.
           want_trill = true;
         } else if (note.start_tick < params.aria_end_tick && note.duration >= kHalf) {
           // Goldberg aria showcase: the opening aria decorates its long tones
@@ -808,8 +838,9 @@ void applyOrnamentPass(ComposeResult& result, const OrnamentParams& params) {
               break;
             case SubjectCharacter::Restless:
               if (is_phrase_boundary && is_strong_beat) {
-                // Long boundary tones take a short trill, the rest a mordent.
-                if (note.duration >= kHalf)
+                // Quarter-or-longer boundary tones take a short trill, the
+                // rest a mordent.
+                if (note.duration >= kQuarter)
                   want_trill = true;
                 else
                   want_mordent = true;
@@ -833,8 +864,9 @@ void applyOrnamentPass(ComposeResult& result, const OrnamentParams& params) {
                 // fourth or more: the Schleifer fills the gap the leap left.
                 want_slide = true;
                 self_gated = true;
-              } else if (note.duration >= kHalf && (bar % 2 == 0)) {
-                // Inner trills on long notes every 2 bars.
+              } else if (note.duration >= kQuarter && is_strong_beat && (bar % 2 == 0)) {
+                // Inner trills on strong-beat quarter-or-longer notes every
+                // 2 bars.
                 want_trill = true;
               } else if (is_downbeat && (bar % 2 == 0) && note.duration == kQuarter) {
                 // Downbeat quarter mordents keep the densest character at
@@ -847,12 +879,13 @@ void applyOrnamentPass(ComposeResult& result, const OrnamentParams& params) {
 
         // A small deterministic gate so not literally every eligible note in a
         // dense passage is ornamented (keeps the texture musical). Cadence
-        // trills, the designed mid-piece boundary, the density-0 boundary
-        // figures (already one-per-8-bars sparse), and the approach-matched
-        // figures (each carries its own quantile gate above) bypass the gate.
-        // Inside the climax window a second hash bit joins the gate, so it
-        // opens for ~3 in 4 sites instead of 1 in 2.
-        const bool mandatory = in_cadence_window && is_strong_beat;
+        // trills (final and interior section cadences alike), the designed
+        // mid-piece boundary, the density-0 boundary figures (already
+        // one-per-8-bars sparse), and the approach-matched figures (each
+        // carries its own quantile gate above) bypass the gate. Inside the
+        // climax window a second hash bit joins the gate, so it opens for
+        // ~3 in 4 sites instead of 1 in 2.
+        const bool mandatory = (in_cadence_window || in_section_cadence) && is_strong_beat;
         const bool gate_open = mandatory || bar == mid_boundary_bar ||
                                (local_density == 0 && (want_mordent || want_appoggiatura)) ||
                                self_gated || (roll & 1ull) == 0ull ||

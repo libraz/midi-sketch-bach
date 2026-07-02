@@ -30,6 +30,12 @@ namespace bach::composer {
 //   * Inside the cadence window (the last two bars) only the TOP sounding
 //     line is ornamented: simultaneous trills in two voices clash at the
 //     alternation level.
+//   * Interior section cadences (section_cadence_ticks) close an inner section
+//     -- a fugue exposition, a toccata's free section -- and behave like the
+//     final cadence: the bar's top sounding line takes a short strong-beat
+//     trill for EVERY character (bypassing the placement gate) while the lower
+//     voices stay plain. Bars at or past the final cadence window are dropped
+//     (the final window wins).
 //   * A trill starts on the upper auxiliary (Baroque standard; at a cadence
 //     the upper tone is the 4-3 suspension over the dominant), alternates
 //     upper/main, and ends in a lower-neighbour Nachschlag pair before the
@@ -48,16 +54,18 @@ namespace bach::composer {
 //     (upper-main-lower in 32nds, then the held main tone), and slide (two
 //     rising 32nds from the diatonic third below). Which figure decorates
 //     which site class is the character's design table:
-//       Severe   : boundary -> appoggiatura; interior -> nothing.
+//       Severe   : boundary -> appoggiatura; interior -> nothing (its only
+//                  interior trill is the section-cadence site above).
 //       Noble    : boundary -> appoggiatura on a matched approach (falling-
 //                  third gap / stepwise descent), turn otherwise; interior ->
-//                  turn on half-or-longer tones.
-//       Restless : boundary -> short trill (long tones) / mordent; interior
-//                  -> downbeat mordent.
+//                  turn on half-or-longer tones (no interior trill outside
+//                  the section-cadence site).
+//       Restless : boundary -> short trill (quarter-or-longer tones) /
+//                  mordent (shorter); interior -> downbeat mordent.
 //       Playful  : boundary -> slide under a rising-leap approach / turn
 //                  (long tones) / mordent (quarters); interior -> inner trill
-//                  on long tones, slide under leap arrivals, downbeat quarter
-//                  mordent.
+//                  on strong-beat quarter-or-longer tones every other bar,
+//                  slide under leap arrivals, downbeat quarter mordent.
 //     Approach-matched figures carry their own placement-hash quantile gate;
 //     design-value figures run through the generic deterministic gate.
 //     Placement priority on a contested note: cadential trill > appoggiatura
@@ -104,6 +112,7 @@ struct OrnamentParams {
   Tick aria_end_tick = 0;                                 // Goldberg aria uplift (0 = none).
   Tick climax_start_tick = 0;                             // climax uplift window start.
   Tick climax_end_tick = 0;                               // window end, exclusive (0 = none).
+  std::vector<Tick> section_cadence_ticks;  // interior section-cadence bar starts (0 = none).
 };
 
 /**

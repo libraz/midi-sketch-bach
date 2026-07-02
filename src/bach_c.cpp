@@ -437,12 +437,21 @@ BachError bach_generate_from_json(BachHandle handle, const char* json, size_t le
   if (req.form == bach::FormType::GoldbergVariations) {
     orn.aria_end_tick = 4 * ticks_per_bar;
   }
-  // Climax uplift: decoration intensifies in a two-bar window centred on the
-  // macro arc's ~75% climax point (the registration plan's peak).
-  const bach::Tick climax_tick =
-      static_cast<bach::Tick>(static_cast<uint64_t>(total_ticks) * 3 / 4);
-  orn.climax_start_tick = climax_tick > ticks_per_bar ? climax_tick - ticks_per_bar : 0;
-  orn.climax_end_tick = climax_tick + ticks_per_bar;
+  // Interior section cadences (fugue exposition end, toccata free-section
+  // end): every character marks these section closes with a short trill.
+  orn.section_cadence_ticks = fixture.section_cadence_ticks;
+  // Climax uplift: prefer the form's resolved climax window (its real energy
+  // peak); otherwise fall back to a two-bar window centred on the macro arc's
+  // ~75% climax point (the registration plan's peak).
+  if (fixture.climax_end_tick > fixture.climax_start_tick) {
+    orn.climax_start_tick = fixture.climax_start_tick;
+    orn.climax_end_tick = fixture.climax_end_tick;
+  } else {
+    const bach::Tick climax_tick =
+        static_cast<bach::Tick>(static_cast<uint64_t>(total_ticks) * 3 / 4);
+    orn.climax_start_tick = climax_tick > ticks_per_bar ? climax_tick - ticks_per_bar : 0;
+    orn.climax_end_tick = climax_tick + ticks_per_bar;
+  }
   bach::composer::applyOrnamentPass(result, orn);
 
   // 7. Apply instrument program + default track names.
@@ -457,10 +466,15 @@ BachError bach_generate_from_json(BachHandle handle, const char* json, size_t le
   }
 
   if (req.instrument == bach::InstrumentType::Organ) {
+    const bach::Tick registration_climax =
+        fixture.climax_end_tick > fixture.climax_start_tick ? fixture.climax_start_tick : 0;
     auto cc = bach::composer::buildRegistrationPlan(resolved_bars, cycle_count, ticks_per_bar,
-                                                    total_ticks);
+                                                    total_ticks, registration_climax);
+    auto terraces =
+        bach::composer::buildRegistrationTerraces(fixture.registration_step_ticks, total_ticks);
     for (auto& track : result.tracks) {
       track.cc_events.insert(track.cc_events.end(), cc.begin(), cc.end());
+      track.cc_events.insert(track.cc_events.end(), terraces.begin(), terraces.end());
     }
   }
 

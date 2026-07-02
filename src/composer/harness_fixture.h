@@ -2,10 +2,12 @@
 #define BACH_COMPOSER_HARNESS_FIXTURE_H
 
 #include <cstdint>
+#include <vector>
 
 #include "composer/harmonic_plan.h"
 #include "composer/material.h"
 #include "composer/voice_plan.h"
+#include "core/basic_types.h"
 
 namespace bach::composer {
 
@@ -244,6 +246,22 @@ struct HarnessFixture {
   // validator does not yet consume them (meter-awareness is separate work).
   std::uint8_t ts_numerator = 4;
   std::uint8_t ts_denominator = 4;
+  // Ornament/expression metadata resolved by the form builders. Defaulted so
+  // every fixture builder that only fills material/harmony/voice_plan stays
+  // byte-identical. section_cadence_ticks lists the bar-start ticks of
+  // interior section closes (a fugue exposition end, a toccata's free-section
+  // end); the climax window is the form's real energy-peak span in ticks.
+  // climax_end_tick == 0 means the form did not resolve one and callers fall
+  // back to their default arc point.
+  std::vector<Tick> section_cadence_ticks;
+  Tick climax_start_tick = 0;
+  Tick climax_end_tick = 0;
+  // Ticks where the organ registration steps up a terrace: structural energy
+  // additions (a fugue voice entering, a passacaglia voice joining, a toccata
+  // section change). Organ dynamics move in terraces, not crescendos, so the
+  // expression pass converts each tick into one registration step. Empty means
+  // the form declares no terrace points and callers keep the macro arc only.
+  std::vector<Tick> registration_step_ticks;
 };
 
 HarnessFixture buildHarnessFixture(HarnessPhase phase, int seed);

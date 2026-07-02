@@ -211,8 +211,15 @@ int consonantChordTone(const detail::ChordSpec& chord, int voice, int band_lo, i
     }
     const int dist = std::abs(pitch - target);
     // Distance stays below 128 (one MIDI band), so a 128 stride keeps the
-    // (window clashes, distance) order strictly lexicographic.
-    const int key = window_clashes * 128 + dist;
+    // (window clashes, distance) order strictly lexicographic. A candidate
+    // farther than a fifth from the running pitch is demoted below every
+    // near candidate regardless of its clash count: an anchor lurching a
+    // sixth or more is audibly worse than tolerating a mid-window passing
+    // clash near the line (the bass otherwise flees to a clash-free tone a
+    // tenth away whenever a faster upper line brushes the near candidates).
+    // Admissibility -- consonance, parallels, voice order -- is unaffected.
+    const int far_stride = (dist > 7) ? (1 << 12) : 0;
+    const int key = far_stride + window_clashes * 128 + dist;
     if (clashes == 0) {
       if (key < consonant_any_key) {
         consonant_any_key = key;
@@ -236,7 +243,10 @@ int consonantChordTone(const detail::ChordSpec& chord, int voice, int band_lo, i
         free_any = pitch;
       }
     }
-    const int score = clashes * 1000 + key;
+    // The clash stride must dominate the packed key even with the far-anchor
+    // demotion folded in (key < 1<<13), so the last resort still minimizes
+    // dissonance first and distance second.
+    const int score = clashes * (1 << 13) + key;
     if (score < fallback_score) {
       fallback_score = score;
       fallback = pitch;

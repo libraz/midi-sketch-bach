@@ -113,6 +113,77 @@ int densityTierFor(const ResolvedRequest& req, std::size_t cycle) {
   return tier;
 }
 
+// Multi-wave energy arch. The shared arc (form_director) draws a single climax
+// swell at ~80% of the piece with the density tier rising and then falling
+// monotonically. BWV582's arch instead reads as TWO waves: an intermediate
+// swell earlier in the span, then a terraced (stepped, not smoothly
+// crescendoed) buildup into the final arch. These constants and helper add that
+// second wave locally to the ground-variation builders without touching the
+// shared arc.
+
+// Below this cycle count the piece keeps the single-climax arc unchanged; only
+// longer grounds have room for a genuine second wave.
+constexpr int kMinCyclesForWave = 8;
+
+// The final buildup is held non-decreasing across this many trailing cycles.
+constexpr int kTerracedTailCycles = 3;
+
+/**
+ * @brief Cycle index of the intermediate swell (the earlier of the two waves).
+ * @param cycle_count Number of ground statements in the piece.
+ * @param climax_idx The arc's climax cycle index.
+ * @return The swell cycle, or @p cycle_count (an out-of-range sentinel) when the
+ *         piece is too short (< kMinCyclesForWave cycles) for a second wave.
+ * @note Placed at ~60% of the span, but never closer than two cycles below the
+ *       climax so the receding cycle just before the climax (the passacaglia
+ *       rests its counter-figuration there) stays a genuine dip.
+ */
+std::size_t midWaveCycle(std::size_t cycle_count, std::size_t climax_idx) {
+  if (static_cast<int>(cycle_count) < kMinCyclesForWave)
+    return cycle_count;
+  std::size_t idx = (cycle_count * 3) / 5;
+  if (climax_idx >= 2 && idx > climax_idx - 2)
+    idx = climax_idx - 2;
+  return idx;
+}
+
+/**
+ * @brief Shape one cycle's density tier into the two-wave energy arch.
+ * @param base_tier The arc-resolved, character-biased tier for this cycle.
+ * @param cycle The cycle index being resolved.
+ * @param cycle_count Number of ground statements in the piece.
+ * @param climax_idx The arc's climax cycle index.
+ * @param mid_wave_idx The intermediate-swell cycle (midWaveCycle result).
+ * @param climax_tier The resolved tier of the real climax cycle (a ceiling for
+ *        the intermediate swell -- the second wave stays below the final arch).
+ * @param prev_tier The resolved tier of the immediately preceding cycle, or a
+ *        negative value at the first cycle.
+ * @return The shaped tier, clamped to [0, 3].
+ * @note Intermediate swell: at @p mid_wave_idx the tier is raised one step (a
+ *       terraced peak, never above the climax cycle's tier). Terraced final
+ *       buildup: over the last kTerracedTailCycles cycles the tier is held
+ *       monotonically non-decreasing toward the close, so the arc steps up into
+ *       the final arch instead of receding. These are design values, not a
+ *       search; the climax cycle's forced tier is never lowered (prev_tier can
+ *       only raise a later cycle, never a climax whose tier already dominates).
+ */
+int shapeWaveTier(int base_tier, std::size_t cycle, std::size_t cycle_count, std::size_t climax_idx,
+                  std::size_t mid_wave_idx, int climax_tier, int prev_tier) {
+  int tier = base_tier;
+  if (cycle == mid_wave_idx && mid_wave_idx < cycle_count && cycle != climax_idx) {
+    ++tier;
+    if (tier > 3)
+      tier = 3;
+    if (tier > climax_tier)
+      tier = climax_tier;
+  }
+  if (static_cast<int>(cycle_count) >= kMinCyclesForWave &&
+      cycle + static_cast<std::size_t>(kTerracedTailCycles) >= cycle_count && prev_tier >= 0) {
+    tier = std::max(tier, prev_tier);
+  }
+  return tier;
+}
+
 // Build the per-bar cycle plan for a ground table: the chord root tracks the
 // ground pitch class bar by bar (quality = the diatonic triad quality on that
 // degree), and the variation start tone is the ground pitch lifted by octaves
@@ -508,6 +579,33 @@ HarnessFixture buildPassacagliaThreeVoice(const ResolvedRequest& req, int cycle_
   std::vector<bool> v1_present;
   resolveVoiceSchedule(static_cast<std::size_t>(cycles), climax_idx, v0_present, v1_present);
 
+  // Two-wave energy arch (intermediate swell + terraced final buildup): the
+  // swell cycle and the climax cycle's tier ceiling, resolved once for the loop.
+  const std::size_t mid_wave_idx = midWaveCycle(static_cast<std::size_t>(cycles), climax_idx);
+  const int climax_tier = cycles > 0 ? densityTierFor(req, climax_idx) : 0;
+  int prev_wave_tier = -1;
+
+  // Ornament metadata (fixture fields only, never a note): the climax cycle
+  // is the form's real energy peak (all three voices sound, densest wave), so
+  // the ornament pass intensifies decoration across exactly this ground cycle.
+  out.climax_start_tick = static_cast<Tick>(climax_idx) * period;
+  out.climax_end_tick = out.climax_start_tick + period;
+
+  // Registration terraces (fixture fields only, never a note): the organ steps
+  // up a stop at every cycle boundary where the terraced schedule ADDS a voice
+  // (a voice turning on from the prior cycle), plus one at the intermediate-swell
+  // (mid-wave) cycle. Organ dynamics move in terraces, not crescendos.
+  for (std::size_t cyc = 1; cyc < static_cast<std::size_t>(cycles); ++cyc) {
+    const bool v0_added = v0_present[cyc] && !v0_present[cyc - 1];
+    const bool v1_added = v1_present[cyc] && !v1_present[cyc - 1];
+    if (v0_added || v1_added) {
+      out.registration_step_ticks.push_back(static_cast<Tick>(cyc) * period);
+    }
+  }
+  if (mid_wave_idx < static_cast<std::size_t>(cycles)) {
+    out.registration_step_ticks.push_back(static_cast<Tick>(mid_wave_idx) * period);
+  }
+
   // V1 counter-figuration accumulates into a single TrioVoiceLine (voice 1),
   // gated per cycle by the schedule; V0 variation blocks accumulate per cycle.
   std::vector<MaterialNote> counter_notes;
@@ -519,13 +617,22 @@ HarnessFixture buildPassacagliaThreeVoice(const ResolvedRequest& req, int cycle_
     const Tick block_end = block_start + period;
     const bool is_climax = point.is_climax;
 
+    // Shape the cycle's density tier into the two-wave energy arch, resolved for
+    // every cycle so the terraced-tail carry sees each prior tier. Both the V0
+    // principal variation and the V1 counter-figuration swell from this tier.
+    const bool establishing = (cycle == 0);
+    const int base_tier = establishing ? 0 : densityTierFor(req, static_cast<std::size_t>(cycle));
+    const int cycle_tier =
+        shapeWaveTier(base_tier, static_cast<std::size_t>(cycle), static_cast<std::size_t>(cycles),
+                      climax_idx, mid_wave_idx, climax_tier, prev_wave_tier);
+    prev_wave_tier = cycle_tier;
+
     // V0 principal variation (when present this cycle). Cycle 0 (when it carries
     // V0) is a plain quarter-note establishing statement; later cycles ride the
     // arc density tier.
     std::vector<MaterialNote> v0_notes;
     if (v0_present[static_cast<std::size_t>(cycle)]) {
-      const bool establishing = (cycle == 0);
-      const int tier = establishing ? 0 : densityTierFor(req, static_cast<std::size_t>(cycle));
+      const int tier = cycle_tier;
       const int notes_per_beat = establishing ? 1 : notesPerBeatForTier(tier);
       const bool descending_start = ((req.seed + static_cast<std::uint32_t>(cycle)) % 2) == 1;
       // Pattern selection: the establishing cycle and the climax are design
@@ -682,8 +789,7 @@ HarnessFixture buildPassacagliaThreeVoice(const ResolvedRequest& req, int cycle_
         registry.record(block_start + bar_tick(bar), /*voice=*/2,
                         static_cast<int>(ground_pitch[gi]), kTicksPerBar34);
       }
-      const int tier = densityTierFor(req, static_cast<std::size_t>(cycle));
-      const int v1_tier = (tier > 0) ? tier - 1 : 0;
+      const int v1_tier = (cycle_tier > 0) ? cycle_tier - 1 : 0;
       const int notes_per_beat = notesPerBeatForTier(v1_tier);
       appendCounterFiguration(counter_notes, registry, block_start, cycle_bar_plan,
                               point.register_shift, notes_per_beat, mode);
@@ -876,6 +982,30 @@ HarnessFixture buildGroundVariationForm(const ResolvedRequest& req, int cycle_ba
 
   auto bar_tick = [](int bar) { return static_cast<Tick>(bar) * kTicksPerBar34; };
 
+  // Ornament metadata (fixture fields only, never a note): the climax cycle
+  // (~80% of the cycle span, matching arcPoint's design climax) is the form's
+  // real energy peak, so the ornament pass intensifies decoration across
+  // exactly this ground cycle.
+  std::size_t climax_idx = (static_cast<std::size_t>(cycles) * 4) / 5;
+  if (cycles > 0 && climax_idx > static_cast<std::size_t>(cycles) - 1)
+    climax_idx = static_cast<std::size_t>(cycles) - 1;
+  out.climax_start_tick = static_cast<Tick>(climax_idx) * period;
+  out.climax_end_tick = out.climax_start_tick + period;
+
+  // Two-wave energy arch (intermediate swell + terraced final buildup): the
+  // swell cycle and the climax cycle's tier ceiling, resolved once for the loop.
+  const std::size_t mid_wave_idx = midWaveCycle(static_cast<std::size_t>(cycles), climax_idx);
+  const int climax_tier = cycles > 0 ? densityTierFor(req, climax_idx) : 0;
+  int prev_wave_tier = -1;
+
+  // Registration terraces (fixture fields only, never a note): the chaconne's
+  // one structural energy addition the organ terraces is the intermediate-swell
+  // (mid-wave) cycle -- present only on long grounds; the climax is already the
+  // macro arc's peak. Organ dynamics move in terraces, not crescendos.
+  if (mid_wave_idx < static_cast<std::size_t>(cycles)) {
+    out.registration_step_ticks.push_back(static_cast<Tick>(mid_wave_idx) * period);
+  }
+
   // --- V1 ground bass: one dotted-half (full-bar) note per bar, cycle-relative
   // ticks. The replay branch period-tiles it across every cycle. ---
   std::vector<MaterialNote>& ground =
@@ -925,6 +1055,11 @@ HarnessFixture buildGroundVariationForm(const ResolvedRequest& req, int cycle_ba
     // Cycle 0 is the sparse Ground-role establishing statement (quarters).
     const bool ground_role = (cycle == 0);
     int tier = ground_role ? 0 : densityTierFor(req, static_cast<std::size_t>(cycle));
+    // Shape into the two-wave energy arch (intermediate swell + terraced
+    // final buildup); track the prior resolved tier for the terraced carry.
+    tier = shapeWaveTier(tier, static_cast<std::size_t>(cycle), static_cast<std::size_t>(cycles),
+                         climax_idx, mid_wave_idx, climax_tier, prev_wave_tier);
+    prev_wave_tier = tier;
     int notes_per_beat = ground_role ? 1 : notesPerBeatForTier(tier);
     // Anchor rotation: which chord tone opens each bar's anchor group rotates by
     // (seed + cycle), so consecutive cycles trace different anchor contours.

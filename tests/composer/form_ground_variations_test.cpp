@@ -131,6 +131,38 @@ TEST(GroundVariationPassacaglia, ValidatesOkAcrossSeedsModesLengths) {
   expectValidatesOk(FormType::Passacaglia);
 }
 
+// --- Registration terraces (fixture metadata only, never a note) ------------
+
+TEST(GroundVariationPassacaglia, LongFormDeclaresRegistrationTerraces) {
+  // A long passacaglia (128 bars = 16 cycles) terraces the organ on each voice
+  // addition plus the intermediate-swell cycle: at least two structural steps.
+  const HarnessFixture fx = build(FormType::Passacaglia, 3, false, 128);
+  EXPECT_GE(fx.registration_step_ticks.size(), 2u);
+  const Tick period = 8 * kTicksPerBar34;  // passacaglia ground period.
+  for (const Tick step : fx.registration_step_ticks) {
+    EXPECT_GT(step, 0u);
+    EXPECT_EQ(step % period, 0u) << "a terrace must fall on a ground-cycle boundary";
+  }
+  // The metadata does not change the composed note stream (validation covered
+  // by ValidatesOkAcrossSeedsModesLengths, which spans the 128-bar case).
+}
+
+TEST(GroundVariationChaconne, LongFormDeclaresOneMidWaveTerrace) {
+  // A long chaconne (32 bars = 8 cycles) terraces only at the intermediate-swell
+  // cycle; its climax is already the macro arc's peak.
+  const HarnessFixture fx = build(FormType::Chaconne, 3, false, 32);
+  ASSERT_EQ(fx.registration_step_ticks.size(), 1u);
+  const Tick period = 4 * kTicksPerBar34;  // chaconne ground period.
+  EXPECT_EQ(fx.registration_step_ticks.front() % period, 0u);
+}
+
+TEST(GroundVariationChaconne, ShortFormDeclaresNoTerrace) {
+  // A short chaconne (16 bars = 4 cycles, below the second-wave threshold) has
+  // no intermediate swell, so no terrace step.
+  const HarnessFixture fx = build(FormType::Chaconne, 3, false, 16);
+  EXPECT_TRUE(fx.registration_step_ticks.empty());
+}
+
 // --- 2. Determinism ---------------------------------------------------------
 
 void expectDeterministic(FormType form) {
@@ -751,6 +783,172 @@ TEST(GroundVariationPassacaglia, GroundSplitSeamStaysInRepeatedRunEnvelope) {
       EXPECT_LE(worst, 4) << "seed " << seed << " minor " << minor;
     }
   }
+}
+
+// ---------------------------------------------------------------------------
+// Multi-wave energy arch (chaconne + passacaglia).
+//
+// The shared arc draws one climax swell at ~80% with the density tier rising
+// then falling monotonically. The ground-variation builders add a SECOND wave
+// locally: an intermediate swell at ~60% of the span, then a terraced (stepped,
+// non-decreasing) buildup into the final arch. Both are design values, active
+// only for long grounds (>= 8 cycles); shorter pieces keep the single arc.
+// ---------------------------------------------------------------------------
+
+// Cycle bars per ground form (chaconne = 4-bar ground, passacaglia = 8-bar).
+int cycleBarsFor(FormType form) {
+  return form == FormType::Passacaglia ? 8 : 4;
+}
+
+// The builders' own index arithmetic, mirrored so the test targets the same
+// cycles the source shapes (climax at ~80%, swell at ~60% but >= 2 cycles below
+// the climax so the pre-climax receding cycle stays a dip).
+std::size_t climaxCycle(std::size_t cycles) {
+  std::size_t idx = (cycles * 4) / 5;
+  if (cycles > 0 && idx > cycles - 1)
+    idx = cycles - 1;
+  return idx;
+}
+std::size_t midWaveCycleForTest(std::size_t cycles, std::size_t climax_idx) {
+  std::size_t idx = (cycles * 3) / 5;
+  if (climax_idx >= 2 && idx > climax_idx - 2)
+    idx = climax_idx - 2;
+  return idx;
+}
+
+// Voice-0 (figuration) note count per ground cycle from the composed output.
+std::vector<std::size_t> voice0PerCycle(const ComposeResult& r, int cycle_bars,
+                                        std::size_t cycles) {
+  const Tick cycle_ticks = static_cast<Tick>(cycle_bars) * kTicksPerBar34;
+  std::vector<std::size_t> per_cycle(cycles, 0);
+  for (const auto& n : r.notes) {
+    if (n.voice != 0)
+      continue;
+    const std::size_t cyc = static_cast<std::size_t>(n.start_tick / cycle_ticks);
+    if (cyc < cycles)
+      ++per_cycle[cyc];
+  }
+  return per_cycle;
+}
+
+// The mid-wave cycle carries strictly more figuration notes than both of its
+// (non-climax) neighbours -- the audible intermediate swell. Measured on the
+// 128-bar cap, where the swell rides a tier-respecting pattern for every seed.
+void expectMidWaveSwell(FormType form) {
+  const int cycle_bars = cycleBarsFor(form);
+  const std::size_t cycles = 128u / static_cast<std::size_t>(cycle_bars);
+  const std::size_t climax_idx = climaxCycle(cycles);
+  const std::size_t mid = midWaveCycleForTest(cycles, climax_idx);
+  ASSERT_GE(cycles, 8u);
+  ASSERT_GT(mid, 0u);
+  ASSERT_LT(mid + 1, cycles);
+  ASSERT_NE(mid, climax_idx);
+  ASSERT_NE(mid + 1, climax_idx);
+  ASSERT_NE(mid - 1, climax_idx);
+  for (std::uint32_t seed : {1u, 2u, 3u, 4u, 5u}) {
+    for (bool minor : {false, true}) {
+      const HarnessFixture fx = build(form, seed, minor, 128);
+      const ComposeResult r = Composer{}.run(fx.material, fx.harmony, fx.voice_plan);
+      const std::vector<std::size_t> per_cycle = voice0PerCycle(r, cycle_bars, cycles);
+      EXPECT_GT(per_cycle[mid], per_cycle[mid - 1])
+          << "form " << static_cast<int>(form) << " seed " << seed << " minor " << minor
+          << ": mid-wave cycle " << mid << " not denser than the earlier neighbour";
+      EXPECT_GT(per_cycle[mid], per_cycle[mid + 1])
+          << "form " << static_cast<int>(form) << " seed " << seed << " minor " << minor
+          << ": mid-wave cycle " << mid << " not denser than the later neighbour";
+    }
+  }
+}
+
+TEST(GroundVariationChaconne, MidWaveSwellIsLocalPeak) {
+  expectMidWaveSwell(FormType::Chaconne);
+}
+
+TEST(GroundVariationPassacaglia, MidWaveSwellIsLocalPeak) {
+  expectMidWaveSwell(FormType::Passacaglia);
+}
+
+// Resolved density tier per ground cycle, read from the recorded variation
+// blocks (density_level). The tier -- not the raw note count -- is the density
+// the terraced clamp controls: the figura-corta cell carries a fixed
+// subdivision regardless of tier, and the cadential landing thins the final
+// bars, so both confound a raw note count. Cycles with no variation block (the
+// long-form ground-solo intro) are left at -1.
+std::vector<int> tierPerCycle(const HarnessFixture& fx, FormType form, int cycle_bars,
+                              std::size_t cycles) {
+  const Tick period = static_cast<Tick>(cycle_bars) * kTicksPerBar34;
+  std::vector<int> tiers(cycles, -1);
+  if (form == FormType::Passacaglia) {
+    for (const auto& var : fx.material.passacaglia_variations) {
+      const std::size_t cyc = static_cast<std::size_t>(var.start_tick / period);
+      if (cyc < cycles)
+        tiers[cyc] = var.density_level;
+    }
+  } else {
+    for (const auto& var : fx.material.variations) {
+      const std::size_t cyc = static_cast<std::size_t>(var.start_tick / period);
+      if (cyc < cycles)
+        tiers[cyc] = var.density_level;
+    }
+  }
+  return tiers;
+}
+
+// The final buildup terraces up: the resolved density tier is non-decreasing
+// across the last three ground cycles (the arc's resolve limb would otherwise
+// fall). Measured at a length where the climax sits inside that trailing window
+// (10 cycles: chaconne = 40 bars, passacaglia = 80 bars), so the clamp visibly
+// carries the peak tier forward instead of receding.
+void expectTerracedTail(FormType form) {
+  const int cycle_bars = cycleBarsFor(form);
+  const std::uint16_t bars = static_cast<std::uint16_t>(10 * cycle_bars);
+  const std::size_t cycles = 10u;
+  for (std::uint32_t seed : {1u, 2u, 3u, 4u, 5u, 6u}) {
+    for (bool minor : {false, true}) {
+      const HarnessFixture fx = build(form, seed, minor, bars);
+      const std::vector<int> tiers = tierPerCycle(fx, form, cycle_bars, cycles);
+      for (std::size_t cyc = cycles - 3; cyc + 1 < cycles; ++cyc) {
+        ASSERT_GE(tiers[cyc], 0) << "form " << static_cast<int>(form) << " cycle " << cyc;
+        ASSERT_GE(tiers[cyc + 1], 0) << "form " << static_cast<int>(form) << " cycle " << (cyc + 1);
+        EXPECT_GE(tiers[cyc + 1], tiers[cyc])
+            << "form " << static_cast<int>(form) << " seed " << seed << " minor " << minor
+            << ": density tier fell from cycle " << cyc << " (" << tiers[cyc] << ") to "
+            << (cyc + 1) << " (" << tiers[cyc + 1] << ")";
+      }
+    }
+  }
+}
+
+TEST(GroundVariationChaconne, FinalBuildupTerracesUp) {
+  expectTerracedTail(FormType::Chaconne);
+}
+
+TEST(GroundVariationPassacaglia, FinalBuildupTerracesUp) {
+  expectTerracedTail(FormType::Passacaglia);
+}
+
+// The two-wave shaping must not break validation: every long-form ground piece
+// across seeds 1..10, both modes, both forms, still composes clean.
+void expectMultiWaveValidatesOk(FormType form) {
+  for (std::uint32_t seed = 1; seed <= 10; ++seed) {
+    for (bool minor : {false, true}) {
+      const HarnessFixture fx = build(form, seed, minor, 128);
+      const ComposeResult r = Composer{}.run(fx.material, fx.harmony, fx.voice_plan);
+      EXPECT_TRUE(r.validation.failures.empty())
+          << "form " << static_cast<int>(form) << " seed " << seed << " minor " << minor
+          << " first failure="
+          << (r.validation.failures.empty() ? "" : r.validation.failures.front().rule_id);
+      EXPECT_EQ(r.validation.status, ValidationStatus::Ok);
+    }
+  }
+}
+
+TEST(GroundVariationChaconne, MultiWaveValidatesAcrossSeeds) {
+  expectMultiWaveValidatesOk(FormType::Chaconne);
+}
+
+TEST(GroundVariationPassacaglia, MultiWaveValidatesAcrossSeeds) {
+  expectMultiWaveValidatesOk(FormType::Passacaglia);
 }
 
 }  // namespace

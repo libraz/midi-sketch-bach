@@ -360,6 +360,69 @@ std::vector<MaterialNote> bassSupportNotes(const HarnessFixture& fx, VoiceId voi
   }
   return {};
 }
+
+// Sign (+1 / 0 / -1) of each consecutive melodic step in a pitch line.
+std::vector<int> stepSigns(const std::vector<int>& pitches) {
+  std::vector<int> signs;
+  for (std::size_t idx = 1; idx < pitches.size(); ++idx) {
+    const int diff = pitches[idx] - pitches[idx - 1];
+    signs.push_back(diff > 0 ? 1 : (diff < 0 ? -1 : 0));
+  }
+  return signs;
+}
+
+// Negate a step-sign sequence: the diatonic inversion flips every step's
+// direction while a repeated pitch (sign 0) stays a repeat.
+std::vector<int> negateSigns(const std::vector<int>& signs) {
+  std::vector<int> out;
+  out.reserve(signs.size());
+  for (int sign : signs) {
+    out.push_back(-sign);
+  }
+  return out;
+}
+
+// Middle entries always restate the MAJOR subject catalog row (even in minor
+// pieces the related keys are major), so its step signs are the upright
+// reference every carrier window must match unless it is the inverted cycle.
+std::vector<int> middleEntryCatalogSigns(std::uint32_t seed, bool minor) {
+  const std::uint8_t slot = detail::subjectIndexFor(SubjectCharacter::Severe, minor, seed);
+  const std::array<std::uint8_t, 16>& line = tables::kSubjectCatalogMajor[slot];
+  std::vector<int> pitches(line.begin(), line.end());
+  return stepSigns(pitches);
+}
+
+// Per-window step-sign sequences of the middle-entry carriers: each
+// MiddleEntryCarrier span is sliced from its carrying voice's decl (a single
+// decl per voice accumulates that voice's entries across cycles).
+std::vector<std::vector<int>> middleEntryWindowSigns(const HarnessFixture& fx) {
+  std::vector<std::vector<int>> windows;
+  for (const auto& span : fx.voice_plan.spans) {
+    if (span.intent != VoiceIntent::MiddleEntryCarrier) {
+      continue;
+    }
+    const MiddleEntryDecl* decl = nullptr;
+    for (const auto& candidate : fx.material.middle_entries) {
+      if (candidate.voice == span.voice) {
+        decl = &candidate;
+        break;
+      }
+    }
+    if (decl == nullptr) {
+      continue;
+    }
+    std::vector<int> pitches;
+    for (const auto& note : decl->notes) {
+      if (note.start_tick >= span.start_tick && note.start_tick < span.end_tick) {
+        pitches.push_back(static_cast<int>(note.pitch));
+      }
+    }
+    if (pitches.size() >= 2) {
+      windows.push_back(stepSigns(pitches));
+    }
+  }
+  return windows;
+}
 }  // namespace
 
 // A plain middle entry is accompanied by the recurring countersubject in the
@@ -638,6 +701,177 @@ TEST(FormFugueTest, StrettoOverlapRuleStaysSatisfied) {
   EXPECT_TRUE(emitted_stretto);
 }
 
+// --- 4b. Three-voice stretto pile-up at the climax --------------------------
+
+namespace {
+
+// A climax that piled a second follower into the third voice shows up as two
+// StrettoDecls sharing one leader entry tick with distinct follower voices and
+// distinct entry delays. Reports the shared leader tick via `out` and returns
+// true when such a window exists.
+bool threeVoiceStrettoLeaderTick(const HarnessFixture& fx, Tick* out) {
+  const auto& strettos = fx.material.stretto_entries;
+  for (std::size_t idx = 0; idx < strettos.size(); ++idx) {
+    for (std::size_t peer = idx + 1; peer < strettos.size(); ++peer) {
+      if (strettos[idx].leader_entry_tick != strettos[peer].leader_entry_tick) {
+        continue;
+      }
+      if (strettos[idx].follower_voice != strettos[peer].follower_voice &&
+          strettos[idx].follower_entry_tick != strettos[peer].follower_entry_tick) {
+        *out = strettos[idx].leader_entry_tick;
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+}  // namespace
+
+// The climax cycle can state the subject in ALL THREE voices: the middle-entry
+// leader plus two stretto followers, at staggered delays. At least one seed in
+// 1..40 must commit a second follower at both 64 and 96 bars (otherwise the
+// three-voice pile-up feature is dead), and every committing build must
+// validate with three overlapping subject statements sharing the leader window.
+TEST(FormFugueTest, ThreeVoiceStrettoPilesUpAtClimax) {
+  for (std::uint16_t bars : {static_cast<std::uint16_t>(64), static_cast<std::uint16_t>(96)}) {
+    bool committed = false;
+    for (std::uint32_t seed = 1; seed <= 40 && !committed; ++seed) {
+      for (bool minor : {false, true}) {
+        const HarnessFixture fx = buildFixture(FormType::Fugue, seed, minor, bars);
+        Tick leader_tick = 0;
+        if (!threeVoiceStrettoLeaderTick(fx, &leader_tick)) {
+          continue;
+        }
+        committed = true;
+
+        // The two followers share the leader window with distinct voices/delays.
+        std::set<VoiceId> follower_voices;
+        std::set<Tick> follower_ticks;
+        VoiceId leader_voice = 0;
+        Tick leader_len = 0;
+        int followers_here = 0;
+        for (const auto& stretto : fx.material.stretto_entries) {
+          if (stretto.leader_entry_tick != leader_tick) {
+            continue;
+          }
+          ++followers_here;
+          leader_voice = stretto.leader_voice;
+          leader_len = stretto.leader_length_ticks;
+          follower_voices.insert(stretto.follower_voice);
+          follower_ticks.insert(stretto.follower_entry_tick);
+          // Each follower enters strictly inside the leader window (overlap).
+          EXPECT_GT(stretto.follower_entry_tick, leader_tick);
+          EXPECT_LT(stretto.follower_entry_tick, leader_tick + stretto.leader_length_ticks);
+        }
+        EXPECT_EQ(followers_here, 2) << "seed " << seed << " bars " << bars;
+        EXPECT_EQ(follower_voices.size(), 2u) << "followers must occupy distinct voices";
+        EXPECT_EQ(follower_ticks.size(), 2u) << "followers must enter at distinct delays";
+        EXPECT_EQ(follower_voices.count(leader_voice), 0u) << "a follower doubled the leader voice";
+
+        // The leader is a genuine middle-entry subject statement in the window,
+        // so leader + two followers = three overlapping subject statements.
+        bool leader_statement = false;
+        for (const auto& decl : fx.material.middle_entries) {
+          if (decl.voice != leader_voice) {
+            continue;
+          }
+          for (const auto& note : decl.notes) {
+            if (note.start_tick >= leader_tick && note.start_tick < leader_tick + leader_len) {
+              leader_statement = true;
+            }
+          }
+        }
+        EXPECT_TRUE(leader_statement) << "no leader subject statement in the climax window";
+
+        const ComposeResult r = Composer{}.run(fx.material, fx.harmony, fx.voice_plan);
+        EXPECT_TRUE(r.validation.failures.empty())
+            << "seed " << seed << (minor ? " minor" : " major") << " bars " << bars
+            << " first failure="
+            << (r.validation.failures.empty() ? "" : r.validation.failures.front().rule_id);
+        break;
+      }
+    }
+    EXPECT_TRUE(committed) << "no seed in 1..40 committed a second stretto follower at " << bars
+                           << " bars; the three-voice pile-up feature is dead";
+  }
+}
+
+// A development with >= 4 entry cycles that passes the corpus-rate gate restates
+// a single-follower stretto in the last entry cycle before the coda -- a SECOND
+// stretto moment, distinct from the climax cycle. Seed 1 (seed % 23 = 1, under
+// the kStrettoRate threshold) at 64 bars has six entry cycles, so it carries the
+// climax stretto AND a pre-coda stretto at two distinct leader ticks.
+TEST(FormFugueTest, SecondStrettoMomentRestatesBeforeCoda) {
+  const HarnessFixture fx = buildFixture(FormType::Fugue, 1, false, 64);
+  ASSERT_GE(fx.material.stretto_entries.size(), 2u);
+
+  std::set<Tick> leader_ticks;
+  for (const auto& stretto : fx.material.stretto_entries) {
+    leader_ticks.insert(stretto.leader_entry_tick);
+    // Every follower still overlaps its own leader window.
+    EXPECT_GT(stretto.follower_entry_tick, stretto.leader_entry_tick);
+    EXPECT_LT(stretto.follower_entry_tick, stretto.leader_entry_tick + stretto.leader_length_ticks);
+  }
+  // Two distinct leader ticks = the climax cycle plus a separate pre-coda cycle
+  // (a three-voice pile-up shares ONE leader tick, so this is a second moment).
+  EXPECT_GE(leader_ticks.size(), 2u) << "no stretto restated outside the climax cycle";
+
+  const ComposeResult r = Composer{}.run(fx.material, fx.harmony, fx.voice_plan);
+  EXPECT_TRUE(r.validation.failures.empty())
+      << (r.validation.failures.empty() ? "" : r.validation.failures.front().rule_id);
+  EXPECT_FALSE(hasRule(r.validation, "stretto_overlap_valid"));
+}
+
+// The dominant pedal is proportional to development weight: any development with
+// >= 2 entry-carrying cycles admits it. A 30-bar fugue (below the former N >= 32
+// gate, so previously pedal-less) has two entry cycles, so a suitable seed now
+// declares a dominant pedal; a fugue with < 2 entry cycles (16 or 24 bars) still
+// declares none.
+TEST(FormFugueTest, PedalPointIsProportionalToEntryCycles) {
+  // 30 bars, seed 4 minor: two entry cycles, the climax stretto vacates its
+  // slot, and the dominant pedal lands on the last entry cycle before the coda.
+  const HarnessFixture with_pedal = buildFixture(FormType::Fugue, 4, true, 30);
+  EXPECT_FALSE(with_pedal.material.pedal_points.empty())
+      << "30-bar fugue with two entry cycles declared no dominant pedal";
+  const ComposeResult r_with =
+      Composer{}.run(with_pedal.material, with_pedal.harmony, with_pedal.voice_plan);
+  EXPECT_TRUE(r_with.validation.failures.empty())
+      << (r_with.validation.failures.empty() ? "" : r_with.validation.failures.front().rule_id);
+
+  // Fewer than two entry cycles: no pedal regardless of seed/mode.
+  for (std::uint16_t bars : {static_cast<std::uint16_t>(16), static_cast<std::uint16_t>(24)}) {
+    for (std::uint32_t seed = 1; seed <= 6; ++seed) {
+      for (bool minor : {false, true}) {
+        const HarnessFixture fx = buildFixture(FormType::Fugue, seed, minor, bars);
+        EXPECT_TRUE(fx.material.pedal_points.empty())
+            << "bars " << bars << " seed " << seed << (minor ? " minor" : " major")
+            << " declared a pedal with < 2 entry cycles";
+      }
+    }
+  }
+}
+
+// The stretto-density and pedal changes are all development-section, so the
+// whole fugue family stays valid across the seed / length / mode matrix.
+TEST(FormFugueTest, StrettoDensityAndPedalStayValidAcrossMatrix) {
+  for (FormType form : {FormType::Fugue, FormType::PreludeAndFugue}) {
+    for (std::uint32_t seed = 1; seed <= 10; ++seed) {
+      for (std::uint16_t bars : {static_cast<std::uint16_t>(24), static_cast<std::uint16_t>(64),
+                                 static_cast<std::uint16_t>(96)}) {
+        for (bool minor : {false, true}) {
+          const HarnessFixture fx = buildFixture(form, seed, minor, bars);
+          const ComposeResult r = Composer{}.run(fx.material, fx.harmony, fx.voice_plan);
+          EXPECT_TRUE(r.validation.failures.empty())
+              << "form " << static_cast<int>(form) << " seed " << seed
+              << (minor ? " minor" : " major") << " bars " << bars << " first failure="
+              << (r.validation.failures.empty() ? "" : r.validation.failures.front().rule_id);
+        }
+      }
+    }
+  }
+}
+
 // --- 5. Final bars cadence on the tonic; Picardy when minor + even seed -----
 
 TEST(FormFugueTest, CodaCadencesOnTonic) {
@@ -806,6 +1040,159 @@ TEST(FormFugueTest, ViMiddleEntryStaysInsideHomeScale) {
       }
     }
     EXPECT_TRUE(saw_vi) << "seed " << seed << ": 128-bar fugue declared no vi middle entry";
+  }
+}
+
+// A development long enough to spare a canonical restatement (>= 3 entry
+// cycles) states the subject inverted in exactly ONE middle entry -- the
+// melodic mirror in scale-degree space. A 64-bar fugue uses the uniform
+// 8-bar schedule (six entry cycles), so the inverted cycle is deterministic
+// across seeds and modes. Every other carrier window stays upright.
+TEST(FormFugueTest, OneMiddleEntryIsDiatonicInversion) {
+  for (std::uint32_t seed : kSeeds) {
+    for (bool minor : {false, true}) {
+      const HarnessFixture fx = buildFixture(FormType::Fugue, seed, minor, 64);
+      const std::vector<int> upright = middleEntryCatalogSigns(seed, minor);
+      const std::vector<int> inverted = negateSigns(upright);
+      const std::vector<std::vector<int>> windows = middleEntryWindowSigns(fx);
+      ASSERT_GE(windows.size(), 3u)
+          << "seed " << seed << (minor ? " minor" : " major")
+          << ": 64-bar fugue has too few middle-entry cycles to invert one";
+      int inverted_count = 0;
+      int upright_count = 0;
+      for (const std::vector<int>& signs : windows) {
+        if (signs == upright) {
+          ++upright_count;
+        } else if (signs == inverted) {
+          ++inverted_count;
+        } else {
+          ADD_FAILURE() << "seed " << seed << (minor ? " minor" : " major")
+                        << ": a middle-entry window is neither the upright subject "
+                           "nor its diatonic inversion";
+        }
+      }
+      EXPECT_EQ(inverted_count, 1) << "seed " << seed << (minor ? " minor" : " major")
+                                   << ": expected exactly one inverted middle entry";
+      EXPECT_EQ(upright_count, static_cast<int>(windows.size()) - 1)
+          << "seed " << seed << (minor ? " minor" : " major")
+          << ": non-inverted middle entries must stay upright";
+    }
+  }
+}
+
+// The inverted middle entry must not break validation: the diatonic mirror
+// stays inside the declared related key, so middle_entry_in_related_key and
+// every other rule stay clean for development-heavy fugues and prelude+fugue
+// pairs across a broad seed range.
+TEST(FormFugueTest, InvertedMiddleEntryValidatesAcrossSeeds) {
+  for (FormType form : {FormType::Fugue, FormType::PreludeAndFugue}) {
+    for (std::uint32_t seed = 1; seed <= 10; ++seed) {
+      for (bool minor : {false, true}) {
+        const HarnessFixture fx = buildFixture(form, seed, minor, 96);
+        const ComposeResult r = Composer{}.run(fx.material, fx.harmony, fx.voice_plan);
+        EXPECT_TRUE(r.validation.failures.empty())
+            << "form " << static_cast<int>(form) << " seed " << seed
+            << (minor ? " minor" : " major") << " first failure="
+            << (r.validation.failures.empty() ? "" : r.validation.failures.front().rule_id);
+        EXPECT_FALSE(hasRule(r.validation, "middle_entry_in_related_key"))
+            << "form " << static_cast<int>(form) << " seed " << seed
+            << ": inverted entry left the related key";
+      }
+    }
+  }
+}
+
+// --- 6b. Recurring countersubject identity + fallback safety ---------------
+
+namespace {
+
+// Scale-degree index of a home-scale (C major) diatonic pitch: seven degrees
+// per octave plus the pitch class's position in the scale. Both committed
+// restatements and reactive fallbacks are home-diatonic, so every
+// countersubject note maps to a degree.
+int majorDegreeIndex(int pitch) {
+  static const std::array<int, 12> kPosInScale = {0, -1, 1, -1, 2, 3, -1, 4, -1, 5, -1, 6};
+  const int pc = ((pitch % 12) + 12) % 12;
+  const int pos = kPosInScale[static_cast<std::size_t>(pc)];
+  if (pos < 0) {
+    return -1;
+  }
+  return 7 * (pitch / 12) + pos;
+}
+
+// Degree-space interval sequence between consecutive notes. Degree shifting the
+// canonical line by a constant number of degrees plus whole octaves preserves
+// this sequence, so a committed restatement matches the canonical exactly.
+std::vector<int> degreeIntervals(const std::vector<int>& pitches) {
+  std::vector<int> intervals;
+  for (std::size_t idx = 1; idx < pitches.size(); ++idx) {
+    intervals.push_back(majorDegreeIndex(pitches[idx]) - majorDegreeIndex(pitches[idx - 1]));
+  }
+  return intervals;
+}
+
+// Countersubject notes whose onset falls in [start, end).
+std::vector<int> countersubjectPitchesIn(const HarnessFixture& fx, Tick start, Tick end) {
+  std::vector<int> pitches;
+  for (const auto& note : fx.material.countersubject) {
+    if (note.start_tick >= start && note.start_tick < end) {
+      pitches.push_back(static_cast<int>(note.pitch));
+    }
+  }
+  return pitches;
+}
+
+}  // namespace
+
+// The fugue states ONE canonical countersubject (the exposition answer
+// counterline) and restates it against later entries by octave-invertible
+// degree shift into the entry key. Every committed middle-entry restatement
+// therefore reproduces the canonical line's degree-space interval sequence
+// exactly. At least one window must commit across the tested seeds -- if all
+// fall back, the recurring-identity feature is dead.
+TEST(FormFugueTest, RecurringCountersubjectRestatesCanonicalIdentity) {
+  int total_committed = 0;
+  int total_windows = 0;
+  for (std::uint32_t seed : {1u, 5u, 42u}) {
+    const HarnessFixture fx = buildFixture(FormType::Fugue, seed, false, 64);
+    // Canonical countersubject = the exposition answer counterline (V0, bars 4-8).
+    const std::vector<int> canonical_intervals =
+        degreeIntervals(countersubjectPitchesIn(fx, 4 * kBar, 8 * kBar));
+    ASSERT_FALSE(canonical_intervals.empty()) << "seed " << seed << ": no canonical countersubject";
+
+    for (const auto& span : fx.voice_plan.spans) {
+      if (span.intent != VoiceIntent::CountersubjectCarrier || span.start_tick < 12 * kBar) {
+        continue;  // only development (middle-entry) countersubject windows.
+      }
+      ++total_windows;
+      const std::vector<int> window_intervals =
+          degreeIntervals(countersubjectPitchesIn(fx, span.start_tick, span.end_tick));
+      if (window_intervals == canonical_intervals) {
+        ++total_committed;
+      }
+    }
+  }
+  EXPECT_GT(total_windows, 0) << "no middle-entry countersubject windows found";
+  EXPECT_GT(total_committed, 0)
+      << "recurring countersubject never committed across seeds {1,5,42}; the feature is dead";
+}
+
+// The reactive fallback keeps every combination valid: whenever a restatement
+// would combine dissonantly with the entry line the window falls back to a
+// consonant/contrary counterline, so validation stays Ok across a broad seed
+// range for both fugue forms in major and minor at development length.
+TEST(FormFugueTest, RecurringCountersubjectFallbackStaysValid) {
+  for (FormType form : {FormType::Fugue, FormType::PreludeAndFugue}) {
+    for (std::uint32_t seed = 1; seed <= 10; ++seed) {
+      for (bool minor : {false, true}) {
+        const HarnessFixture fx = buildFixture(form, seed, minor, 64);
+        const ComposeResult r = Composer{}.run(fx.material, fx.harmony, fx.voice_plan);
+        EXPECT_TRUE(r.validation.failures.empty())
+            << "form " << static_cast<int>(form) << " seed " << seed
+            << (minor ? " minor" : " major") << " first failure="
+            << (r.validation.failures.empty() ? "" : r.validation.failures.front().rule_id);
+      }
+    }
   }
 }
 
@@ -1212,6 +1599,98 @@ TEST(FormFugueTest, DevelopmentAvoidsParallelDissonanceChains) {
                         << " (window-aware anchor regressed?)";
 }
 
+// The canonical countersubject is derived against the ANSWER -- the subject a
+// fifth above the home statement -- so restating it against the home-pitch
+// third entry shifts it up three scale degrees (the diatonic equivalent of a
+// fifth) plus one whole-line octave fit, which preserves the vertical relations
+// already sounded in the answer window. Contract: over the third-entry window
+// [bar 8, bar 12) no countersubject note may sustain a minor second / major
+// seventh (interval class 1 or 11) against the third-entry subject for a
+// quarter note or longer -- true on every seed, whether the committed
+// restatement or the reactive fallback counterline is chosen. A degree-0
+// restatement (keeping the countersubject's absolute pitch) would instead flip
+// half those consonances into sustained sevenths.
+TEST(FormFugueTest, CountersubjectThirdEntryRestatementAvoidsSustainedSevenths) {
+  const Tick answer_lo = 4 * kBar;
+  const Tick answer_hi = 8 * kBar;
+  const Tick window_lo = 8 * kBar;
+  const Tick window_hi = 12 * kBar;
+  const auto windowNotes = [](const std::vector<MaterialNote>& src, Tick lo, Tick hi) {
+    std::vector<MaterialNote> out;
+    for (const auto& note : src) {
+      if (note.start_tick >= lo && note.start_tick < hi) {
+        out.push_back(note);
+      }
+    }
+    return out;
+  };
+
+  int committed_seeds = 0;
+  for (std::uint32_t seed = 1; seed <= 8; ++seed) {
+    const HarnessFixture fx = buildFixture(FormType::Fugue, seed, /*is_minor=*/false, 64);
+    const std::vector<MaterialNote> cs_window =
+        windowNotes(fx.material.countersubject, window_lo, window_hi);
+    const std::vector<MaterialNote> entry_window =
+        windowNotes(fx.material.subject, window_lo, window_hi);
+    ASSERT_FALSE(cs_window.empty())
+        << "seed " << seed << ": no countersubject note in the third-entry window";
+    ASSERT_FALSE(entry_window.empty())
+        << "seed " << seed << ": no third-entry subject note in the window";
+
+    // No countersubject/entry pair overlaps in time by a quarter note or more
+    // with an ic-1/ic-11 (minor second / major seventh) vertical.
+    for (const auto& cs : cs_window) {
+      const long long cs_start = static_cast<long long>(cs.start_tick);
+      const long long cs_end = cs_start + static_cast<long long>(cs.duration);
+      for (const auto& entry : entry_window) {
+        const long long entry_start = static_cast<long long>(entry.start_tick);
+        const long long entry_end = entry_start + static_cast<long long>(entry.duration);
+        const long long lo = std::max(cs_start, entry_start);
+        const long long hi = std::min(cs_end, entry_end);
+        if (hi <= lo) {
+          continue;  // no temporal overlap.
+        }
+        const int ic =
+            ((std::abs(static_cast<int>(cs.pitch) - static_cast<int>(entry.pitch)) % 12) + 12) % 12;
+        if (ic == 1 || ic == 11) {
+          EXPECT_LT(hi - lo, static_cast<long long>(kTicksPerBeat))
+              << "seed " << seed << ": countersubject pitch " << static_cast<int>(cs.pitch)
+              << " sustains ic " << ic << " against third-entry pitch "
+              << static_cast<int>(entry.pitch) << " for " << (hi - lo) << " ticks";
+        }
+      }
+    }
+
+    // Feature-alive guard: recognise the committed degree-3 restatement. The
+    // answer-window countersubject is the canonical line; the committed third
+    // entry restates it up three scale degrees plus one constant whole-line
+    // octave shift (the same k*12 for every note), preserving the note count and
+    // duration sequence.
+    const std::vector<MaterialNote> answer_cs =
+        windowNotes(fx.material.countersubject, answer_lo, answer_hi);
+    bool committed = !answer_cs.empty() && answer_cs.size() == cs_window.size();
+    if (committed) {
+      const int shift =
+          static_cast<int>(cs_window.front().pitch) -
+          detail::scaleUp(static_cast<int>(answer_cs.front().pitch), 3, detail::Mode::Major);
+      committed = (shift % 12 == 0);
+      for (std::size_t i = 0; committed && i < cs_window.size(); ++i) {
+        const int expected =
+            detail::scaleUp(static_cast<int>(answer_cs[i].pitch), 3, detail::Mode::Major) + shift;
+        if (cs_window[i].duration != answer_cs[i].duration ||
+            static_cast<int>(cs_window[i].pitch) != expected) {
+          committed = false;
+        }
+      }
+    }
+    if (committed) {
+      ++committed_seeds;
+    }
+  }
+  EXPECT_GE(committed_seeds, 4) << "the degree-3 countersubject restatement is dead: only "
+                                << committed_seeds << " of seeds 1..8 committed it";
+}
+
 // --- Episode counterline vocabulary rotation ---------------------------------
 
 // Successive development episodes alternate the V1 counterline's subdivision
@@ -1473,6 +1952,99 @@ TEST(FormFugueTest, TonalPlanChainsEpisodesIntoStations) {
       }
     }
   }
+}
+
+// --- Ornament/expression fixture metadata ----------------------------------
+
+// A value-initialised HarnessFixture carries no ornament metadata: the fields
+// are defaulted so fixture builders that only fill material/harmony/voice_plan
+// stay byte-identical.
+TEST(FormFugueTest, ValueInitialisedFixtureHasEmptyOrnamentMetadata) {
+  const HarnessFixture fx;
+  EXPECT_TRUE(fx.section_cadence_ticks.empty());
+  EXPECT_EQ(fx.climax_start_tick, 0u);
+  EXPECT_EQ(fx.climax_end_tick, 0u);
+}
+
+// The fugue builder resolves the exposition close as a section cadence and
+// the climax cycle as the climax window, both inside the piece span.
+TEST(FormFugueTest, FugueFixtureCarriesSectionCadenceAndClimaxWindow) {
+  for (std::uint32_t seed : kSeeds) {
+    const std::uint16_t bars = naturalBars(FormType::Fugue);
+    const HarnessFixture fx = buildFixture(FormType::Fugue, seed, /*is_minor=*/false, bars);
+    const Tick piece_end = static_cast<Tick>(bars) * kBar;
+
+    ASSERT_FALSE(fx.section_cadence_ticks.empty()) << "seed " << seed;
+    // The exposition of a natural-length fugue spans 12 bars; its final bar
+    // (bar 11) is the declared section cadence.
+    EXPECT_EQ(fx.section_cadence_ticks.front(), 11u * kBar) << "seed " << seed;
+
+    EXPECT_GT(fx.climax_end_tick, fx.climax_start_tick) << "seed " << seed;
+    EXPECT_LE(fx.climax_end_tick, piece_end) << "seed " << seed;
+    // The climax window sits past the exposition (inside the development).
+    EXPECT_GE(fx.climax_start_tick, 12u * kBar) << "seed " << seed;
+  }
+}
+
+// The prelude+fugue pair offsets the fugue's section cadence by the prelude
+// length: the declared bar lies inside the fugue half.
+TEST(FormFugueTest, PreludeAndFugueSectionCadenceSitsInFugueHalf) {
+  for (std::uint32_t seed : kSeeds) {
+    const std::uint16_t bars = naturalBars(FormType::PreludeAndFugue);
+    const HarnessFixture fx =
+        buildFixture(FormType::PreludeAndFugue, seed, /*is_minor=*/false, bars);
+    ASSERT_FALSE(fx.section_cadence_ticks.empty()) << "seed " << seed;
+    // The pair's prelude is at least 4 bars, so the fugue exposition's close
+    // lies strictly past the prelude opening and inside the piece.
+    EXPECT_GE(fx.section_cadence_ticks.front(), 4u * kBar) << "seed " << seed;
+    EXPECT_LT(fx.section_cadence_ticks.front(), static_cast<Tick>(bars) * kBar) << "seed " << seed;
+  }
+}
+
+// The exposition's section cadence lands on the V0 figuration span's final bar
+// (bars 8-11 of a full-form fugue). That bar's second half closes on a held
+// mid-bar anchor (a half note on the strong beat) so the ornament pass has a
+// strong-beat quarter-or-longer top note for the mandatory section-cadence
+// trill; a running eighth wave alone carries no such note. The held tone falls
+// back to the normal wave when no consonant candidate exists (graceful
+// degradation), so the assertion is a "feature is alive" guard: the held tone
+// must appear for at least half of the tested seeds.
+TEST(FormFugueTest, ExpositionFiguresCloseOnStrongBeatHalfNote) {
+  const std::uint16_t bars = naturalBars(FormType::Fugue);
+  // The plain fugue starts at bar 0, so the V0 exposition figuration span is
+  // [bar 8, bar 12) on voice 0 and the exposition's final bar is bar 11.
+  const Tick span_start = 8u * kBar;
+  const Tick span_end = 12u * kBar;
+  const Tick final_bar_start = 11u * kBar;
+  int held_seen = 0;
+  int seeds_tested = 0;
+  for (std::uint32_t seed = 1; seed <= 8; ++seed) {
+    const HarnessFixture fx = buildFixture(FormType::Fugue, seed, /*is_minor=*/false, bars);
+    const std::vector<MaterialNote> notes = bassSupportNotes(fx, /*voice=*/0, span_start, span_end);
+    ASSERT_FALSE(notes.empty()) << "seed " << seed << " has no V0 exposition figuration";
+    ++seeds_tested;
+    bool held = false;
+    bool has_final_bar_notes = false;
+    for (const auto& note : notes) {
+      if (note.start_tick < final_bar_start || note.start_tick >= span_end) {
+        continue;
+      }
+      has_final_bar_notes = true;
+      const Tick pos_in_bar = note.start_tick % kBar;
+      if (pos_in_bar == kBar / 2 && note.duration >= static_cast<Tick>(kTicksPerBeat)) {
+        held = true;
+      }
+    }
+    // Whether or not the held tone fired, the final bar must still be voiced
+    // (the graceful-degradation fallback re-emits the running wave).
+    EXPECT_TRUE(has_final_bar_notes) << "seed " << seed << " has an empty exposition final bar";
+    if (held) {
+      ++held_seen;
+    }
+  }
+  EXPECT_GE(held_seen, (seeds_tested + 1) / 2)
+      << "cadential-close half note is dead: only " << held_seen << " of " << seeds_tested
+      << " seeds produced a strong-beat held tone in the exposition final bar";
 }
 
 }  // namespace bach::composer

@@ -22,6 +22,13 @@ constexpr std::uint8_t kSettleValue = 88;   ///< Resolve: softened close below t
 /// Mid-phrase swell above the macro-arc value (CC#11 steps, a gentle breath).
 constexpr int kPhraseSwell = 6;
 
+/// Registration terrace design values (CC#7 stop-change steps). The base sits
+/// below the develop level and each step adds one stop, capped below the macro
+/// climax peak (kClimaxValue = 95) so the arc's climax stays the dynamic summit.
+constexpr int kTerraceBase = 78;  ///< Level of the first terrace step.
+constexpr int kTerraceStep = 4;   ///< Added per subsequent terrace step.
+constexpr int kTerraceCap = 92;   ///< Ceiling, below the climax peak.
+
 /// @brief Append a CC#7 + CC#11 pair at one registration point.
 /// @param events Destination event stream.
 /// @param tick Tick position for both controller changes.
@@ -83,9 +90,9 @@ std::uint8_t macroArcValueAt(std::size_t cycle_count, Tick tick, std::uint32_t t
 }  // namespace
 
 std::vector<CcEvent> buildRegistrationPlan(std::uint16_t bars, std::size_t cycle_count,
-                                           Tick ticks_per_bar, std::uint32_t total_ticks) {
-  (void)bars;           // Length is expressed via total_ticks; bars kept for caller clarity.
-  (void)ticks_per_bar;  // Reserved for future per-bar alignment; not needed for placement.
+                                           Tick ticks_per_bar, std::uint32_t total_ticks,
+                                           Tick climax_tick) {
+  (void)bars;  // Length is expressed via total_ticks; bars kept for caller clarity.
 
   std::vector<CcEvent> events;
   if (total_ticks == 0) {
@@ -93,11 +100,30 @@ std::vector<CcEvent> buildRegistrationPlan(std::uint16_t bars, std::size_t cycle
   }
 
   // Place points within the span. The opening sits at tick 0; later points are
-  // distributed so the climax lands at ~75% of the piece (the arc design value)
+  // distributed so the peak lands at ~75% of the piece (the arc design value)
   // and the settle near the very end.
-  const Tick climax_tick = static_cast<Tick>(static_cast<std::uint64_t>(total_ticks) * 3 / 4);
   const Tick develop_tick = static_cast<Tick>(static_cast<std::uint64_t>(total_ticks) * 1 / 2);
   const Tick settle_tick = total_ticks > 0 ? total_ticks - 1 : 0;
+  Tick peak_tick = static_cast<Tick>(static_cast<std::uint64_t>(total_ticks) * 3 / 4);
+
+  // Anchor the peak on the form's real climax when supplied. Clamp it to stay
+  // after the establish phase (the develop step on the 4-point arc, else the
+  // first quarter of the span) so the rise into it stays monotone, and at least
+  // one bar before the end so the settle still relaxes after it.
+  if (climax_tick > 0) {
+    const Tick establish_end = (cycle_count >= 3)
+                                   ? develop_tick
+                                   : static_cast<Tick>(static_cast<std::uint64_t>(total_ticks) / 4);
+    const Tick ceiling = (ticks_per_bar > 0 && total_ticks > ticks_per_bar)
+                             ? total_ticks - ticks_per_bar
+                             : settle_tick;
+    Tick lo = establish_end + 1;
+    Tick hi = ceiling;
+    if (hi < lo) {
+      hi = lo;
+    }
+    peak_tick = std::clamp<Tick>(climax_tick, lo, hi);
+  }
 
   events.reserve(8);  // At most 4 points x 2 controllers.
 
@@ -108,13 +134,13 @@ std::vector<CcEvent> buildRegistrationPlan(std::uint16_t bars, std::size_t cycle
   } else if (cycle_count == 2) {
     // Opening, climax peak, settle.
     addRegistrationPoint(events, 0, kOpeningValue);
-    addRegistrationPoint(events, climax_tick, kClimaxValue);
+    addRegistrationPoint(events, peak_tick, kClimaxValue);
     addRegistrationPoint(events, settle_tick, kSettleValue);
   } else {
     // Full 4-point arc: opening, develop step-up, climax peak, settle.
     addRegistrationPoint(events, 0, kOpeningValue);
     addRegistrationPoint(events, develop_tick, kDevelopValue);
-    addRegistrationPoint(events, climax_tick, kClimaxValue);
+    addRegistrationPoint(events, peak_tick, kClimaxValue);
     addRegistrationPoint(events, settle_tick, kSettleValue);
   }
 
@@ -123,6 +149,34 @@ std::vector<CcEvent> buildRegistrationPlan(std::uint16_t bars, std::size_t cycle
   std::stable_sort(events.begin(), events.end(),
                    [](const CcEvent& lhs, const CcEvent& rhs) { return lhs.tick < rhs.tick; });
 
+  return events;
+}
+
+std::vector<CcEvent> buildRegistrationTerraces(const std::vector<Tick>& step_ticks,
+                                               Tick total_ticks) {
+  std::vector<CcEvent> events;
+  if (step_ticks.empty() || total_ticks == 0) {
+    return events;
+  }
+
+  // Sort + deduplicate; drop ticks at the opening (0) or at/past the piece end.
+  std::vector<Tick> ticks;
+  ticks.reserve(step_ticks.size());
+  for (const Tick tick : step_ticks) {
+    if (tick == 0 || tick >= total_ticks) {
+      continue;
+    }
+    ticks.push_back(tick);
+  }
+  std::sort(ticks.begin(), ticks.end());
+  ticks.erase(std::unique(ticks.begin(), ticks.end()), ticks.end());
+
+  events.reserve(ticks.size());
+  for (std::size_t idx = 0; idx < ticks.size(); ++idx) {
+    const int level = std::min(kTerraceBase + static_cast<int>(idx) * kTerraceStep, kTerraceCap);
+    // One instantaneous CC#7 step: a stop change, not a ramp.
+    events.push_back({ticks[idx], kCcMainVolume, static_cast<std::uint8_t>(level)});
+  }
   return events;
 }
 
