@@ -3,7 +3,7 @@
  */
 
 import { getApi, getModule } from './internal';
-import type { BachConfig, BachInfo, EventData } from './types';
+import type { BachConfig, BachInfo, DiagnosticData, EventData } from './types';
 
 /** Serialize BachConfig to JSON string for the C API. */
 function configToJson(config: BachConfig): string {
@@ -121,6 +121,21 @@ export class BachGenerator {
     return JSON.parse(jsonStr) as EventData;
   }
 
+  /** Get diagnostic.v1 from the most recent composer validation failure. */
+  getDiagnostic(): DiagnosticData | null {
+    this.checkDestroyed();
+    const api = getApi();
+    const m = getModule();
+    const ptr = api.getDiagnostic(this.handle);
+    if (ptr === 0) {
+      return null;
+    }
+    const jsonPtr = m.HEAPU32[ptr >> 2];
+    const jsonStr = m.UTF8ToString(jsonPtr);
+    api.freeEvents(ptr);
+    return JSON.parse(jsonStr) as DiagnosticData;
+  }
+
   /**
    * Get generation info.
    * @returns BachInfo struct data
@@ -130,7 +145,7 @@ export class BachGenerator {
     const api = getApi();
     const m = getModule();
 
-    // bach_get_info returns pointer to static BachInfo
+    // bach_get_info returns a pointer to this generator's BachInfo snapshot.
     const ptr = api.getInfo(this.handle);
 
     // BachInfo layout (C struct with natural alignment):

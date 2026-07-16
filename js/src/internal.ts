@@ -28,6 +28,7 @@ export interface Api {
   getMidi: (handle: number) => number;
   freeMidi: (ptr: number) => void;
   getEvents: (handle: number) => number;
+  getDiagnostic: (handle: number) => number;
   freeEvents: (ptr: number) => void;
   getInfo: (handle: number) => number;
   // Form enumeration
@@ -128,6 +129,9 @@ export async function init(options?: { wasmPath?: string }): Promise<void> {
     getMidi: m.cwrap('bach_get_midi', 'number', ['number']) as (handle: number) => number,
     freeMidi: m.cwrap('bach_free_midi', null, ['number']) as (ptr: number) => void,
     getEvents: m.cwrap('bach_get_events', 'number', ['number']) as (handle: number) => number,
+    getDiagnostic: m.cwrap('bach_get_diagnostic', 'number', ['number']) as (
+      handle: number,
+    ) => number,
     freeEvents: m.cwrap('bach_free_events', null, ['number']) as (ptr: number) => void,
     getInfo: m.cwrap('bach_get_info', 'number', ['number']) as (handle: number) => number,
     // Form enumeration

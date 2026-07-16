@@ -29,4 +29,13 @@ export {
   getVersion,
 } from './presets';
 // Type definitions
-export type { BachConfig, BachInfo, EventData, NoteEvent, PresetInfo, TrackData } from './types';
+export type {
+  BachConfig,
+  BachInfo,
+  DiagnosticData,
+  DiagnosticFailure,
+  EventData,
+  NoteEvent,
+  PresetInfo,
+  TrackData,
+} from './types';
