@@ -14,6 +14,32 @@
 namespace bach {
 namespace {
 
+void appendBE16(std::vector<uint8_t>* bytes, uint16_t value) {
+  bytes->push_back(static_cast<uint8_t>((value >> 8) & 0xFF));
+  bytes->push_back(static_cast<uint8_t>(value & 0xFF));
+}
+
+void appendBE32(std::vector<uint8_t>* bytes, uint32_t value) {
+  bytes->push_back(static_cast<uint8_t>((value >> 24) & 0xFF));
+  bytes->push_back(static_cast<uint8_t>((value >> 16) & 0xFF));
+  bytes->push_back(static_cast<uint8_t>((value >> 8) & 0xFF));
+  bytes->push_back(static_cast<uint8_t>(value & 0xFF));
+}
+
+std::vector<uint8_t> makeType0Midi(const std::vector<uint8_t>& track_data,
+                                   const std::vector<uint8_t>& extended_header = {}) {
+  std::vector<uint8_t> bytes = {'M', 'T', 'h', 'd'};
+  appendBE32(&bytes, static_cast<uint32_t>(6 + extended_header.size()));
+  appendBE16(&bytes, 0);
+  appendBE16(&bytes, 1);
+  appendBE16(&bytes, 480);
+  bytes.insert(bytes.end(), extended_header.begin(), extended_header.end());
+  bytes.insert(bytes.end(), {'M', 'T', 'r', 'k'});
+  appendBE32(&bytes, static_cast<uint32_t>(track_data.size()));
+  bytes.insert(bytes.end(), track_data.begin(), track_data.end());
+  return bytes;
+}
+
 // ---------------------------------------------------------------------------
 // Reading from non-existent file
 // ---------------------------------------------------------------------------
@@ -113,6 +139,89 @@ TEST(MidiReaderTest, UnsupportedFormatReturnsError) {
   };
   EXPECT_FALSE(reader.read(header_only));
   EXPECT_FALSE(reader.getError().empty());
+}
+
+TEST(MidiReaderTest, ExtendedHeaderLengthMovesTrackStart) {
+  const std::vector<uint8_t> track = {0x00, 0xFF, 0x2F, 0x00};
+  const std::vector<uint8_t> extra_header = {0x12, 0x34, 0x56, 0x78};
+
+  MidiReader reader;
+  ASSERT_TRUE(reader.read(makeType0Midi(track, extra_header))) << reader.getError();
+  EXPECT_EQ(reader.getParsedMidi().tracks.size(), 1u);
+}
+
+TEST(MidiReaderTest, Type0PairsSamePitchByChannelAndSupportsOverlap) {
+  const std::vector<uint8_t> track = {
+      0x00, 0x90, 0x3C, 0x64,  // ch0 C4 on at 0
+      0x0A, 0x91, 0x3C, 0x50,  // ch1 C4 on at 10
+      0x0A, 0x90, 0x3C, 0x40,  // second ch0 C4 on at 20
+      0x0A, 0x80, 0x3C, 0x00,  // oldest ch0 off at 30
+      0x0A, 0x81, 0x3C, 0x00,  // ch1 off at 40
+      0x0A, 0x80, 0x3C, 0x00,  // second ch0 off at 50
+      0x00, 0xFF, 0x2F, 0x00,
+  };
+
+  MidiReader reader;
+  ASSERT_TRUE(reader.read(makeType0Midi(track))) << reader.getError();
+  const auto& notes = reader.getParsedMidi().tracks.at(0).notes;
+  ASSERT_EQ(notes.size(), 3u);
+  EXPECT_EQ(notes[0].start_tick, 0u);
+  EXPECT_EQ(notes[0].duration, 30u);
+  EXPECT_EQ(notes[0].voice, 0u);
+  EXPECT_EQ(notes[1].start_tick, 10u);
+  EXPECT_EQ(notes[1].duration, 30u);
+  EXPECT_EQ(notes[1].voice, 1u);
+  EXPECT_EQ(notes[2].start_tick, 20u);
+  EXPECT_EQ(notes[2].duration, 30u);
+  EXPECT_EQ(notes[2].voice, 0u);
+}
+
+TEST(MidiReaderTest, KeySignatureRoundTripsAllSupportedMajorAndMinorKeys) {
+  for (uint8_t tonic = 0; tonic < 12; ++tonic) {
+    for (bool is_minor : {false, true}) {
+      SCOPED_TRACE(static_cast<unsigned>(tonic));
+      SCOPED_TRACE(is_minor ? "minor" : "major");
+      const KeySignature expected{static_cast<Key>(tonic), is_minor};
+      MidiWriter writer;
+      ASSERT_EQ(writer.build({}, {{0, 120}}, expected), MidiWriterStatus::Ok);
+
+      MidiReader reader;
+      ASSERT_TRUE(reader.read(writer.toBytes())) << reader.getError();
+      EXPECT_TRUE(reader.getParsedMidi().has_key_signature);
+      EXPECT_EQ(reader.getParsedMidi().key_signature, expected);
+    }
+  }
+}
+
+TEST(MidiReaderTest, RejectsTruncatedAndStructurallyInvalidTrackEvents) {
+  const std::vector<std::vector<uint8_t>> invalid_tracks = {
+      {0x81},                                            // truncated delta VLQ
+      {0x00, 0x90, 0x3C},                                // truncated note
+      {0x00, 0xFF, 0x01, 0x02, 'x'},                     // meta payload exceeds track
+      {0x00, 0xF0, 0x02, 0x7D},                          // SysEx payload exceeds track
+      {0x00, 0x3C, 0x40},                                // running status without status
+      {0x00, 0xFF, 0x2F, 0x01, 0x00},                    // invalid EOT length
+      {0x00, 0xFF, 0x2F, 0x00, 0x00},                    // bytes after EOT
+      {0x00, 0x90, 0x3C, 0x40},                          // missing EOT and note-off
+      {0x00, 0x90, 0x3C, 0x40, 0x00, 0xFF, 0x2F, 0x00},  // unmatched note-on
+      {0x00, 0x80, 0x3C, 0x00, 0x00, 0xFF, 0x2F, 0x00},  // unmatched note-off
+      {0x00, 0xFF, 0x59, 0x02, 0x08, 0x00, 0x00, 0xFF, 0x2F, 0x00},  // bad sf
+      {0x00, 0xFF, 0x59, 0x02, 0x00, 0x02, 0x00, 0xFF, 0x2F, 0x00},  // bad mode
+  };
+
+  for (const auto& track : invalid_tracks) {
+    MidiReader reader;
+    EXPECT_FALSE(reader.read(makeType0Midi(track)));
+    EXPECT_FALSE(reader.getError().empty());
+    EXPECT_TRUE(reader.getParsedMidi().tracks.empty());
+  }
+}
+
+TEST(MidiReaderTest, RejectsInputAboveDocumentedLimit) {
+  std::vector<uint8_t> oversized(kMaxMidiInputBytes + 1, 0);
+  MidiReader reader;
+  EXPECT_FALSE(reader.read(oversized));
+  EXPECT_NE(reader.getError().find("16 MiB"), std::string::npos);
 }
 
 // ---------------------------------------------------------------------------

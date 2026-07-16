@@ -8,9 +8,16 @@
 #include <vector>
 
 #include "core/basic_types.h"
+#include "harmony/key.h"
 #include "midi/midi_stream.h"
 
 namespace bach {
+
+enum class MidiWriterStatus : std::uint8_t {
+  Ok = 0,
+  InvalidTempo = 1,
+  InvalidTimeSignature = 2,
+};
 
 /// @brief MIDI file writer that produces Standard MIDI File (SMF) Type 1 output.
 ///
@@ -26,8 +33,14 @@ class MidiWriter {
   ///        Must contain at least one event. First event should be at tick 0.
   /// @param key Output key for transposition (C = no transposition).
   /// @param metadata Optional JSON metadata string to embed as a text event.
-  void build(const std::vector<Track>& tracks, const std::vector<TempoEvent>& tempo_events,
-             Key key = Key::C, const std::string& metadata = "");
+  MidiWriterStatus build(const std::vector<Track>& tracks,
+                         const std::vector<TempoEvent>& tempo_events, Key key = Key::C,
+                         const std::string& metadata = "");
+
+  /// @brief Build with explicit tonic and mode for FF 59 key metadata.
+  MidiWriterStatus build(const std::vector<Track>& tracks,
+                         const std::vector<TempoEvent>& tempo_events,
+                         const KeySignature& key_signature, const std::string& metadata = "");
 
   /// @brief Build complete MIDI data from tracks with time signature support.
   /// @param tracks Vector of Track objects containing notes and events.
@@ -35,9 +48,16 @@ class MidiWriter {
   /// @param time_sig_events Time signature changes. Empty = default 4/4.
   /// @param key Output key for transposition.
   /// @param metadata Optional JSON metadata string.
-  void build(const std::vector<Track>& tracks, const std::vector<TempoEvent>& tempo_events,
-             const std::vector<TimeSignatureEvent>& time_sig_events, Key key = Key::C,
-             const std::string& metadata = "");
+  MidiWriterStatus build(const std::vector<Track>& tracks,
+                         const std::vector<TempoEvent>& tempo_events,
+                         const std::vector<TimeSignatureEvent>& time_sig_events, Key key = Key::C,
+                         const std::string& metadata = "");
+
+  /// @brief Build with time signatures and explicit tonic/mode key metadata.
+  MidiWriterStatus build(const std::vector<Track>& tracks,
+                         const std::vector<TempoEvent>& tempo_events,
+                         const std::vector<TimeSignatureEvent>& time_sig_events,
+                         const KeySignature& key_signature, const std::string& metadata = "");
 
   /// @brief Get the binary MIDI data after build().
   /// @return Byte vector containing complete SMF Type 1 data.
@@ -60,7 +80,7 @@ class MidiWriter {
   /// Write the metadata track (tempo map, time signature, BACH metadata text).
   void writeMetadataTrack(const std::vector<TempoEvent>& tempo_events,
                           const std::vector<TimeSignatureEvent>& time_sig_events,
-                          const std::string& metadata);
+                          const KeySignature& key_signature, const std::string& metadata);
 };
 
 }  // namespace bach

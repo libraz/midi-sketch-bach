@@ -37,23 +37,32 @@ void writeVariableLength(std::vector<uint8_t>& buf, uint32_t value) {
 /// @param data Pointer to the raw byte stream.
 /// @param offset Current read position; advanced past the VLQ bytes on return.
 /// @param max_size Upper bound of readable bytes.
-/// @return Decoded integer value.
-uint32_t readVariableLength(const uint8_t* data, size_t& offset, size_t max_size) {
-  uint32_t result = 0;
-  int bytes_read = 0;
-  constexpr int kMaxVlqBytes = 4;
+/// @param out Receives the decoded integer value.
+/// @return True when the VLQ terminates within four available bytes.
+bool readVariableLength(const uint8_t* data, size_t& offset, size_t max_size, uint32_t* out) {
+  if (!data || !out) {
+    return false;
+  }
 
-  while (offset < max_size && bytes_read < kMaxVlqBytes) {
+  const size_t initial_offset = offset;
+  uint32_t result = 0;
+  constexpr size_t kMaxVlqBytes = 4;
+
+  for (size_t bytes_read = 0; bytes_read < kMaxVlqBytes; ++bytes_read) {
+    if (offset >= max_size) {
+      offset = initial_offset;
+      return false;
+    }
     uint8_t byte = data[offset++];
-    ++bytes_read;
     result = (result << 7) | static_cast<uint32_t>(byte & 0x7F);
     if ((byte & 0x80) == 0) {
-      return result;
+      *out = result;
+      return true;
     }
   }
 
-  // Reached max bytes or end of data -- return what we have.
-  return result;
+  offset = initial_offset;
+  return false;
 }
 
 /// @brief Write a 16-bit value in big-endian order to buf.

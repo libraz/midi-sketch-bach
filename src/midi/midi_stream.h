@@ -21,8 +21,9 @@ void writeVariableLength(std::vector<uint8_t>& buf, uint32_t value);
 /// @param data Pointer to the raw byte stream.
 /// @param offset Current read position; advanced past the VLQ on return.
 /// @param max_size Total size of the data buffer (bounds check).
-/// @return Decoded unsigned value, or 0 if the read would exceed max_size.
-uint32_t readVariableLength(const uint8_t* data, size_t& offset, size_t max_size);
+/// @param out Receives the decoded unsigned value on success.
+/// @return True only when a complete, canonical one-to-four-byte VLQ was read.
+bool readVariableLength(const uint8_t* data, size_t& offset, size_t max_size, uint32_t* out);
 
 /// @brief Write a big-endian uint16 to a byte buffer.
 /// @param buf Destination buffer (2 bytes appended).

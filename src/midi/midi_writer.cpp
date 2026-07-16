@@ -36,21 +36,56 @@ uint8_t applyKeyTranspose(uint8_t pitch, Key key) {
   return static_cast<uint8_t>(result);
 }
 
+constexpr std::uint32_t kMaxMidiTempoUsec = 0x00FFFFFF;
+
+bool isValidTempo(std::uint16_t bpm) {
+  return bpm > 0 && kMicrosecondsPerMinute / bpm <= kMaxMidiTempoUsec;
+}
+
+bool isValidTimeSignature(const TimeSignature& time_signature) {
+  const std::uint8_t denominator = time_signature.denominator;
+  return time_signature.numerator > 0 && denominator > 0 && (denominator & (denominator - 1)) == 0;
+}
+
 }  // namespace
 
 MidiWriter::MidiWriter() = default;
 
-void MidiWriter::build(const std::vector<Track>& tracks,
-                       const std::vector<TempoEvent>& tempo_events, Key key,
-                       const std::string& metadata) {
-  build(tracks, tempo_events, {}, key, metadata);
+MidiWriterStatus MidiWriter::build(const std::vector<Track>& tracks,
+                                   const std::vector<TempoEvent>& tempo_events, Key key,
+                                   const std::string& metadata) {
+  return build(tracks, tempo_events, {}, KeySignature{key, false}, metadata);
 }
 
-void MidiWriter::build(const std::vector<Track>& tracks,
-                       const std::vector<TempoEvent>& tempo_events,
-                       const std::vector<TimeSignatureEvent>& time_sig_events, Key key,
-                       const std::string& metadata) {
+MidiWriterStatus MidiWriter::build(const std::vector<Track>& tracks,
+                                   const std::vector<TempoEvent>& tempo_events,
+                                   const KeySignature& key_signature, const std::string& metadata) {
+  return build(tracks, tempo_events, {}, key_signature, metadata);
+}
+
+MidiWriterStatus MidiWriter::build(const std::vector<Track>& tracks,
+                                   const std::vector<TempoEvent>& tempo_events,
+                                   const std::vector<TimeSignatureEvent>& time_sig_events, Key key,
+                                   const std::string& metadata) {
+  return build(tracks, tempo_events, time_sig_events, KeySignature{key, false}, metadata);
+}
+
+MidiWriterStatus MidiWriter::build(const std::vector<Track>& tracks,
+                                   const std::vector<TempoEvent>& tempo_events,
+                                   const std::vector<TimeSignatureEvent>& time_sig_events,
+                                   const KeySignature& key_signature, const std::string& metadata) {
   data_.clear();
+
+  for (const auto& tempo : tempo_events) {
+    if (!isValidTempo(tempo.bpm)) {
+      return MidiWriterStatus::InvalidTempo;
+    }
+  }
+  for (const auto& time_signature : time_sig_events) {
+    if (!isValidTimeSignature(time_signature.time_sig)) {
+      return MidiWriterStatus::InvalidTimeSignature;
+    }
+  }
 
   // Count non-empty tracks, plus one for the metadata track.
   uint16_t num_content_tracks = 0;
@@ -62,13 +97,14 @@ void MidiWriter::build(const std::vector<Track>& tracks,
   uint16_t total_tracks = num_content_tracks + 1;  // +1 for metadata track
 
   writeHeader(total_tracks, kTicksPerBeat);
-  writeMetadataTrack(tempo_events, time_sig_events, metadata);
+  writeMetadataTrack(tempo_events, time_sig_events, key_signature, metadata);
 
   for (const auto& track : tracks) {
     if (!track.notes.empty() || !track.events.empty()) {
-      writeTrack(track, key);
+      writeTrack(track, key_signature.tonic);
     }
   }
+  return MidiWriterStatus::Ok;
 }
 
 std::vector<uint8_t> MidiWriter::toBytes() const {
@@ -211,6 +247,7 @@ void MidiWriter::writeTrack(const Track& track, Key key) {
 
 void MidiWriter::writeMetadataTrack(const std::vector<TempoEvent>& tempo_events,
                                     const std::vector<TimeSignatureEvent>& time_sig_events,
+                                    const KeySignature& key_signature,
                                     const std::string& metadata) {
   std::vector<uint8_t> track_buf;
 
@@ -248,6 +285,13 @@ void MidiWriter::writeMetadataTrack(const std::vector<TempoEvent>& tempo_events,
     std::vector<uint8_t> payload;  // event bytes excluding the leading delta
   };
   std::vector<MetaEvent> meta_events;
+
+  // Key signature (FF 59 02): signed flats/sharps byte plus mode byte.
+  const int8_t accidentals = keySignatureAccidentals(key_signature);
+  meta_events.push_back({0,
+                         2,
+                         {0xFF, 0x59, 0x02, static_cast<uint8_t>(accidentals),
+                          static_cast<uint8_t>(key_signature.is_minor ? 1 : 0)}});
 
   // Tempo map (FF 51 03). Default to 120 BPM at tick 0 when none supplied.
   std::vector<TempoEvent> tempos = tempo_events;

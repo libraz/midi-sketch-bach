@@ -8,8 +8,12 @@
 #include <vector>
 
 #include "core/basic_types.h"
+#include "harmony/key.h"
 
 namespace bach {
+
+/// Maximum accepted SMF input size for both file and in-memory reads.
+constexpr size_t kMaxMidiInputBytes = 16 * 1024 * 1024;
 
 /// A single parsed MIDI track with its associated channel, program, and notes.
 struct ParsedTrack {
@@ -25,6 +29,8 @@ struct ParsedMidi {
   uint16_t num_tracks = 0;
   uint16_t division = 480;
   uint16_t bpm = 120;
+  KeySignature key_signature;
+  bool has_key_signature = false;
   std::vector<ParsedTrack> tracks;
   std::string metadata;  // BACH: metadata payload if present
 
@@ -69,7 +75,7 @@ class MidiReader {
   std::string error_;
 
   /// Parse the MThd header chunk.
-  bool parseHeader(const uint8_t* data, size_t size);
+  bool parseHeader(const uint8_t* data, size_t size, size_t* track_offset);
 
   /// Parse a single MTrk chunk starting at offset.
   bool parseTrack(const uint8_t* data, size_t size, size_t& offset);

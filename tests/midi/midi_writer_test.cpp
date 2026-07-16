@@ -382,6 +382,27 @@ TEST(MidiWriterTest, DifferentBpmProducesDifferentOutput) {
   EXPECT_NE(bytes_slow, bytes_fast) << "Different BPM values should produce different output";
 }
 
+TEST(MidiWriterTest, RejectsZeroTempoAndClearsPreviousData) {
+  MidiWriter writer;
+  ASSERT_EQ(writer.build({}, {{0, 120}}), MidiWriterStatus::Ok);
+  ASSERT_FALSE(writer.toBytes().empty());
+
+  EXPECT_EQ(writer.build({}, {{0, 0}}), MidiWriterStatus::InvalidTempo);
+  EXPECT_TRUE(writer.toBytes().empty());
+}
+
+TEST(MidiWriterTest, RejectsTempoThatCannotFitMidiMetaEvent) {
+  MidiWriter writer;
+  EXPECT_EQ(writer.build({}, {{0, 3}}), MidiWriterStatus::InvalidTempo);
+  EXPECT_TRUE(writer.toBytes().empty());
+}
+
+TEST(MidiWriterTest, AcceptsTempoRepresentationBoundaries) {
+  MidiWriter writer;
+  EXPECT_EQ(writer.build({}, {{0, 4}, {kTicksPerBeat, UINT16_MAX}}), MidiWriterStatus::Ok);
+  EXPECT_FALSE(writer.toBytes().empty());
+}
+
 // ---------------------------------------------------------------------------
 // Time signature support (Goldberg Variations infrastructure)
 // ---------------------------------------------------------------------------
@@ -569,6 +590,32 @@ TEST(MidiWriterTest, TimeSignature6_8DenominatorEncoding) {
     }
   }
   EXPECT_TRUE(found) << "Expected 6/8 time signature (denom=3) in MIDI output";
+}
+
+TEST(MidiWriterTest, RejectsZeroAndNonPowerOfTwoDenominators) {
+  MidiWriter writer;
+  for (std::uint8_t denominator : {std::uint8_t{0}, std::uint8_t{3}}) {
+    SCOPED_TRACE(static_cast<unsigned>(denominator));
+    EXPECT_EQ(writer.build({}, {{0, 120}}, {{0, {4, denominator}}}),
+              MidiWriterStatus::InvalidTimeSignature);
+    EXPECT_TRUE(writer.toBytes().empty());
+  }
+}
+
+TEST(MidiWriterTest, RejectsZeroTimeSignatureNumerator) {
+  MidiWriter writer;
+  EXPECT_EQ(writer.build({}, {{0, 120}}, {{0, {0, 4}}}), MidiWriterStatus::InvalidTimeSignature);
+  EXPECT_TRUE(writer.toBytes().empty());
+}
+
+TEST(MidiWriterTest, AcceptsSupportedPowerOfTwoDenominators) {
+  MidiWriter writer;
+  for (std::uint8_t denominator :
+       {std::uint8_t{1}, std::uint8_t{2}, std::uint8_t{4}, std::uint8_t{8}, std::uint8_t{16}}) {
+    SCOPED_TRACE(static_cast<unsigned>(denominator));
+    EXPECT_EQ(writer.build({}, {{0, 120}}, {{0, {4, denominator}}}), MidiWriterStatus::Ok);
+    EXPECT_FALSE(writer.toBytes().empty());
+  }
 }
 
 }  // namespace
