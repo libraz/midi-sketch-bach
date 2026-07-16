@@ -8,6 +8,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <map>
 #include <string>
 
@@ -21,11 +22,11 @@ struct JsonValue {
   double number_val = 0.0;
   bool bool_val = false;
 
-  /// @brief Get value as integer, with default.
-  int asInt(int default_val = 0) const;
+  /// @brief Convert a finite integral JSON number without truncation.
+  bool asInt64(std::int64_t* out) const;
 
-  /// @brief Get value as unsigned integer, with default.
-  uint32_t asUint(uint32_t default_val = 0) const;
+  /// @brief Convert a finite integral JSON number to uint32 without wrapping.
+  bool asUint32(std::uint32_t* out) const;
 
   /// @brief Get value as boolean, with default.
   bool asBool(bool default_val = false) const;
@@ -34,15 +35,29 @@ struct JsonValue {
   std::string asString(const std::string& default_val = "") const;
 };
 
+enum class JsonParseStatus : std::uint8_t {
+  Ok = 0,
+  InvalidArgument = 1,
+  TooLarge = 2,
+  SyntaxError = 3,
+  NumberOutOfRange = 4,
+  UnsupportedValue = 5,
+};
+
+constexpr std::size_t kMaxJsonConfigBytes = 64 * 1024;
+
 /// @brief Parse a flat JSON object into a key-value map.
 ///
 /// Only handles top-level keys with string, number, or boolean values.
-/// Ignores nested objects and arrays (skips them).
+/// Nested objects and arrays are rejected because config fields are flat.
 ///
 /// @param json Pointer to JSON string.
 /// @param length Length of JSON string.
-/// @return Map of key-value pairs. Empty map on parse error.
-std::map<std::string, JsonValue> parseJsonObject(const char* json, size_t length);
+/// @param out Receives the parsed map only on success; cleared on failure.
+/// @return Explicit parse status. Success requires a closing brace and full
+///         consumption except for trailing JSON whitespace.
+JsonParseStatus parseJsonObject(const char* json, std::size_t length,
+                                std::map<std::string, JsonValue>* out);
 
 }  // namespace bach
 
